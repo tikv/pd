@@ -128,6 +128,18 @@ func (h *regionsHandler) CheckRegionsReplicated(w http.ResponseWriter, r *http.R
 	h.rd.JSON(w, http.StatusOK, state)
 }
 
+func (h *regionsHandler) BalanceRegion(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	rawStartKey := vars["startKey"]
+	rawEndKey := vars["endKey"]
+	state, err := h.Handler.BalanceRegion(rawStartKey, rawEndKey)
+	if err != nil {
+		h.rd.JSON(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	h.rd.JSON(w, http.StatusOK, state)
+}
+
 type regionsHandler struct {
 	*server.Handler
 	svr *server.Server

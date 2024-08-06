@@ -1261,8 +1261,155 @@ func (h *Handler) SplitRegions(ctx context.Context, rawSplitKeys []any, retryLim
 	return s, nil
 }
 
+type StoreRegionSet struct {
+	ID          int64
+	Info 		StoreInfo
+	RegionIDSet map[int64]bool
+}
+
+type MigrationOp struct {
+	FromStore int64
+	ToStore   int64
+	Regions   map[int64]interface{}
+}
+
+func PickRegions(n int, fromStore *StoreRegionSet, toStore *StoreRegionSet) *MigrationOp {
+	o := MigrationOp{
+		FromStore: fromStore.ID,
+		ToStore:   toStore.ID,
+		Regions:   make(map[int64]interface{}),
+	}
+	for r, removed := range fromStore.RegionIDSet {
+		if n == 0 {
+			break
+		}
+		if removed {
+			continue
+		}
+		if _, exist := toStore.RegionIDSet[r]; !exist {
+			o.Regions[r] = nil
+			fromStore.RegionIDSet[r] = true
+		}
+		n--
+	}
+	return &o
+}
+
+func MigrationPlan(stores []*StoreRegionSet) ([]int, []int, []*MigrationOp) {
+	totalRegionCount := 0
+	for _, store := range stores {
+		totalRegionCount += len(store.RegionIDSet)
+	}
+	for _, store := range stores {
+		percentage := 100 * float64(len(store.RegionIDSet)) / float64(totalRegionCount)
+		log.Info("store region dist",
+			zap.Int64("store-id", store.ID),
+			zap.Int("num-region", len(store.RegionIDSet)),
+			zap.String("percentage", fmt.Sprintf("%.2f%%", percentage)))
+	}
+	avr := totalRegionCount / len(stores)
+	remainder := totalRegionCount % len(stores)
+	// sort TiFlash stores by region count in descending order
+	slices.SortStableFunc(stores, func(lhs, rhs *StoreRegionSet) int {
+		return -cmp.Compare(len(lhs.RegionIDSet), len(rhs.RegionIDSet))
+	})
+	expectedCount := []int{}
+	for i := 0; i < remainder; i++ {
+		expectedCount = append(expectedCount, avr+1)
+	}
+	for i := remainder; i < len(stores); i++ {
+		expectedCount = append(expectedCount, avr)
+	}
+	senders := []int{}
+	receivers := []int{}
+	sendersVolume := []int{}
+	receiversVolume := []int{}
+	for i, store := range stores {
+		if len(store.RegionIDSet) < expectedCount[i] {
+			receivers = append(receivers, i)
+			receiversVolume = append(receiversVolume, expectedCount[i]-len(store.RegionIDSet))
+		}
+		if len(store.RegionIDSet) > expectedCount[i] {
+			senders = append(senders, i)
+			sendersVolume = append(sendersVolume, len(store.RegionIDSet)-expectedCount[i])
+		}
+	}
+
+	ops := []*MigrationOp{}
+
+	for i, senderIndex := range senders {
+		fromStore := stores[senderIndex]
+		for {
+			if sendersVolume[i] <= 0 {
+				break
+			}
+			for j, receiverIndex := range receivers {
+				toStore := stores[receiverIndex]
+				if receiversVolume[j] > 0 {
+					n := sendersVolume[i]
+					if n > receiversVolume[j] {
+						n = receiversVolume[j]
+					}
+					receiversVolume[j] -= n
+					sendersVolume[i] -= n
+					ops = append(ops, PickRegions(n, fromStore, toStore))
+				}
+			}
+		}
+	}
+
+	return senders, receivers, ops
+}
+
 // CheckRegionsReplicated checks if regions are replicated.
-func (h *Handler) CheckRegionsReplicated(rawStartKey, rawEndKey string) (string, error) {
+func (h *Handler) CheckRegionsReplicated(rawStartKey, rawEndKey string, storeLabels []*metapb.StoreLabel) (string, error) {
+	startKey, err := hex.DecodeString(rawStartKey)
+	if err != nil {
+		return "", err
+	}
+	endKey, err := hex.DecodeString(rawEndKey)
+	if err != nil {
+		return "", err
+	}
+	c := h.GetCluster()
+	if c == nil {
+		return "", errs.ErrNotBootstrapped.GenWithStackByArgs()
+	}
+	co := h.GetCoordinator()
+	if co == nil {
+		return "", errs.ErrNotBootstrapped.GenWithStackByArgs()
+	}
+	regions := c.ScanRegions(startKey, endKey, -1)
+
+	stores := c.GetStores()
+	candidates := make([]*StoreRegionSet)
+	storeLabelMap := make(map[string]*metapb.StoreLabel)
+	for _, l := range storeLabels {
+		storeLabelMap[l.Key] = l
+	}
+	for _, s := range stores {
+		if len(s.GetLabels()) != len(storeLabelMap) {
+			continue
+		}
+		for _, l := s.GetLabels() {
+			if larg, ok := storeLabelMap[l.Key]; ok {
+				if larg.Value != l.Value {
+					continue
+				}
+			} else {
+				continue
+			}
+		}
+		candidates = append(candidates, s)
+	}
+
+
+
+	return state, nil
+}
+
+// CheckRegionsReplicated checks if regions are replicated.
+func (h *Handler) BalanceRegion(rawStartKey, rawEndKey string) (string, error) {
 	startKey, err := hex.DecodeString(rawStartKey)
 	if err != nil {
 		return "", err
