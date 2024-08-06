@@ -75,6 +75,11 @@ func (*RuleChecker) Name() string {
 	return types.RuleChecker.String()
 }
 
+// GetType returns RuleChecker's type.
+func (*RuleChecker) GetType() types.CheckerSchedulerType {
+	return types.RuleChecker
+}
+
 // Check checks if the region matches placement rules and returns Operator to
 // fix it.
 func (c *RuleChecker) Check(region *core.RegionInfo) *operator.Operator {

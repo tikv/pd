@@ -65,6 +65,7 @@ type taskID struct {
 	name string
 }
 
+// ConcurrentRunner is a task runner that limits the number of concurrent tasks.
 type ConcurrentRunner struct {
 	ctx                context.Context
 	cancel             context.CancelFunc

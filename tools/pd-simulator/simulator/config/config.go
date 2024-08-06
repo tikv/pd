@@ -98,7 +98,7 @@ func NewSimConfig(serverLogLevel string) *SimConfig {
 
 	cfg.AdvertiseClientUrls = cfg.ClientUrls
 	cfg.AdvertisePeerUrls = cfg.PeerUrls
-	cfg.DataDir, _ = os.MkdirTemp("/tmp", "test_pd")
+	cfg.DataDir, _ = os.MkdirTemp(os.TempDir(), "test_pd")
 	cfg.InitialCluster = fmt.Sprintf("pd=%s", cfg.PeerUrls)
 	cfg.Log.Level = serverLogLevel
 	return &SimConfig{ServerConfig: cfg}

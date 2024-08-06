@@ -181,9 +181,11 @@ func (suite *configTestSuite) checkConfig(cluster *pdTests.TestCluster) {
 	scheduleConfig.MaxMergeRegionKeys = scheduleConfig.GetMaxMergeRegionKeys()
 	re.Equal(scheduleConfig, &scheduleCfg)
 
-	re.Equal(20, int(svr.GetScheduleConfig().MaxMergeRegionSize))
+	// After https://github.com/tikv/tikv/issues/17309, the default value is enlarged from 20 to 54,
+	// to make it compatible with the default value of region size of tikv.
+	re.Equal(54, int(svr.GetScheduleConfig().MaxMergeRegionSize))
 	re.Equal(0, int(svr.GetScheduleConfig().MaxMergeRegionKeys))
-	re.Equal(20*10000, int(svr.GetScheduleConfig().GetMaxMergeRegionKeys()))
+	re.Equal(54*10000, int(svr.GetScheduleConfig().GetMaxMergeRegionKeys()))
 
 	// set max-merge-region-size to 40MB
 	args = []string{"-u", pdAddr, "config", "set", "max-merge-region-size", "40"}
@@ -357,7 +359,7 @@ func (suite *configTestSuite) checkConfigForwardControl(cluster *pdTests.TestClu
 	leaderServer := cluster.GetLeaderServer()
 	pdAddr := leaderServer.GetAddr()
 
-	f, _ := os.CreateTemp("/tmp", "pd_tests")
+	f, _ := os.CreateTemp(os.TempDir(), "pd_tests")
 	fname := f.Name()
 	f.Close()
 	defer os.RemoveAll(fname)
@@ -570,7 +572,7 @@ func (suite *configTestSuite) checkPlacementRules(cluster *pdTests.TestCluster) 
 	// test show
 	checkShowRuleKey(re, pdAddr, [][2]string{{placement.DefaultGroupID, placement.DefaultRuleID}})
 
-	f, _ := os.CreateTemp("/tmp", "pd_tests")
+	f, _ := os.CreateTemp(os.TempDir(), "pd_tests")
 	fname := f.Name()
 	f.Close()
 	defer os.RemoveAll(fname)
@@ -717,7 +719,7 @@ func (suite *configTestSuite) checkPlacementRuleBundle(cluster *pdTests.TestClus
 	re.NoError(json.Unmarshal(output, &bundle))
 	re.Equal(placement.GroupBundle{ID: placement.DefaultGroupID, Index: 0, Override: false, Rules: []*placement.Rule{{GroupID: placement.DefaultGroupID, ID: placement.DefaultRuleID, Role: placement.Voter, Count: 3}}}, bundle)
 
-	f, err := os.CreateTemp("/tmp", "pd_tests")
+	f, err := os.CreateTemp(os.TempDir(), "pd_tests")
 	re.NoError(err)
 	fname := f.Name()
 	f.Close()
