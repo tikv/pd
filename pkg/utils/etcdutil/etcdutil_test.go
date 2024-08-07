@@ -34,11 +34,11 @@ import (
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/testutil"
-	"go.etcd.io/etcd/clientv3"
-	"go.etcd.io/etcd/embed"
-	"go.etcd.io/etcd/etcdserver/etcdserverpb"
-	"go.etcd.io/etcd/mvcc/mvccpb"
-	"go.etcd.io/etcd/pkg/types"
+	"go.etcd.io/etcd/api/v3/etcdserverpb"
+	"go.etcd.io/etcd/api/v3/mvccpb"
+	etcdtypes "go.etcd.io/etcd/client/pkg/v3/types"
+	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.etcd.io/etcd/server/v3/embed"
 	"go.uber.org/goleak"
 )
 
@@ -65,7 +65,7 @@ func TestMemberHelpers(t *testing.T) {
 	checkMembers(re, client1, []*embed.Etcd{etcd1, etcd2})
 
 	// Test CheckClusterID
-	urlsMap, err := types.NewURLsMap(etcd2.Config().InitialCluster)
+	urlsMap, err := etcdtypes.NewURLsMap(etcd2.Config().InitialCluster)
 	re.NoError(err)
 	err = CheckClusterID(etcd1.Server.Cluster().ID(), urlsMap, &tls.Config{MinVersion: tls.VersionTLS12})
 	re.NoError(err)
@@ -303,7 +303,7 @@ func checkEtcdWithHangLeader(t *testing.T) error {
 	go proxyWithDiscard(ctx, re, cfg1.ListenClientUrls[0].String(), proxyAddr, &enableDiscard)
 
 	// Create an etcd client with etcd1 as endpoint.
-	urls, err := types.NewURLs([]string{proxyAddr})
+	urls, err := etcdtypes.NewURLs([]string{proxyAddr})
 	re.NoError(err)
 	client1, err := CreateEtcdClient(nil, urls)
 	re.NoError(err)

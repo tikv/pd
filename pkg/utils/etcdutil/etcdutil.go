@@ -33,11 +33,11 @@ import (
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
-	"go.etcd.io/etcd/clientv3"
-	"go.etcd.io/etcd/etcdserver"
-	"go.etcd.io/etcd/etcdserver/api/v3rpc/rpctypes"
-	"go.etcd.io/etcd/mvcc/mvccpb"
-	"go.etcd.io/etcd/pkg/types"
+	"go.etcd.io/etcd/api/v3/mvccpb"
+	"go.etcd.io/etcd/api/v3/v3rpc/rpctypes"
+	etcdtypes "go.etcd.io/etcd/client/pkg/v3/types"
+	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.etcd.io/etcd/server/v3/etcdserver"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 )
@@ -74,7 +74,7 @@ const (
 
 // CheckClusterID checks etcd cluster ID, returns an error if mismatch.
 // This function will never block even quorum is not satisfied.
-func CheckClusterID(localClusterID types.ID, um types.URLsMap, tlsConfig *tls.Config) error {
+func CheckClusterID(localClusterID etcdtypes.ID, um etcdtypes.URLsMap, tlsConfig *tls.Config) error {
 	if len(um) == 0 {
 		return nil
 	}
@@ -88,7 +88,7 @@ func CheckClusterID(localClusterID types.ID, um types.URLsMap, tlsConfig *tls.Co
 		trp := &http.Transport{
 			TLSClientConfig: tlsConfig,
 		}
-		remoteCluster, gerr := etcdserver.GetClusterFromRemotePeers(nil, []string{u}, trp, true)
+		remoteCluster, gerr := etcdserver.GetClusterFromRemotePeers(nil, []string{u}, trp)
 		trp.CloseIdleConnections()
 		if gerr != nil {
 			// Do not return error, because other members may be not ready.
