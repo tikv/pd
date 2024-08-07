@@ -46,6 +46,16 @@ func TestMain(m *testing.M) {
 	goleak.VerifyTestMain(m, testutil.LeakOptions...)
 }
 
+func TestAddMember(t *testing.T) {
+	re := require.New(t)
+	servers, client1, clean := NewTestEtcdCluster(t, 1)
+	defer clean()
+	etcd1, cfg1 := servers[0], servers[0].Config()
+	etcd2 := MustAddEtcdMember(t, &cfg1, client1)
+	defer etcd2.Close()
+	checkMembers(re, client1, []*embed.Etcd{etcd1, etcd2})
+}
+
 func TestMemberHelpers(t *testing.T) {
 	re := require.New(t)
 	servers, client1, clean := NewTestEtcdCluster(t, 1)
@@ -172,7 +182,6 @@ func TestEtcdClientSync(t *testing.T) {
 	servers, client1, clean := NewTestEtcdCluster(t, 1)
 	defer clean()
 	etcd1, cfg1 := servers[0], servers[0].Config()
-	defer etcd1.Close()
 
 	// Add a new member.
 	etcd2 := MustAddEtcdMember(t, &cfg1, client1)
@@ -771,7 +780,16 @@ func (suite *loopWatcherTestSuite) startEtcd(re *require.Assertions) {
 	suite.etcd = etcd1
 	<-etcd1.Server.ReadyNotify()
 	suite.cleans = append(suite.cleans, func() {
-		suite.etcd.Close()
+		if suite.etcd.Server != nil {
+			select {
+			case _, ok := <-suite.etcd.Err():
+				if !ok {
+					return
+				}
+			default:
+			}
+			suite.etcd.Close()
+		}
 	})
 }
 

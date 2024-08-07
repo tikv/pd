@@ -86,7 +86,14 @@ func NewTestEtcdCluster(t *testing.T, count int) (servers []*embed.Etcd, etcdCli
 	clean = func() {
 		etcdClient.Close()
 		for _, server := range servers {
-			if server != nil {
+			if server.Server != nil {
+				select {
+				case _, ok := <-server.Err():
+					if !ok {
+						return
+					}
+				default:
+				}
 				server.Close()
 			}
 		}
