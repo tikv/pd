@@ -302,8 +302,25 @@ func (s *tsoStream) processRequests(
 
 func (s *tsoStream) recvLoop(ctx context.Context) {
 	var finishWithErr error
+	var currentReq batchedRequests
+	var hasReq bool
 
 	defer func() {
+		if r := recover(); r != nil {
+			log.Fatal("tsoStream.recvLoop internal panic", zap.Stack("stacktrace"), zap.Any("panicMessage", r))
+		}
+
+		if finishWithErr == nil {
+			// The loop must exit with a non-nil error (including io.EOF and context.Canceled). This should be
+			// unreachable code.
+			log.Fatal("tsoStream.recvLoop exited without error info")
+		}
+
+		if hasReq {
+			// There's an unfinished request, cancel it, otherwise it will be blocked forever.
+			currentReq.callback(tsoRequestResult{}, currentReq.reqKeyspaceGroupID, s.serverURL, finishWithErr)
+		}
+
 		s.cancel()
 		for !s.state.CompareAndSwap(streamStateIdle, streamStateClosing) {
 			switch state := s.state.Load(); state {
@@ -318,13 +335,11 @@ func (s *tsoStream) recvLoop(ctx context.Context) {
 			}
 		}
 
-		// The loop must end with an error (including context.Canceled).
-		if finishWithErr == nil {
-			log.Fatal("tsoStream recvLoop ended without error", zap.String("stream", s.streamID))
-		}
 		log.Info("tsoStream.recvLoop ended", zap.String("stream", s.streamID), zap.Error(finishWithErr))
 
 		close(s.pendingRequests)
+
+		// Cancel remaining pending requests.
 		for req := range s.pendingRequests {
 			req.callback(tsoRequestResult{}, req.reqKeyspaceGroupID, s.serverURL, finishWithErr)
 		}
@@ -345,42 +360,54 @@ recvLoop:
 
 		res, err := s.stream.Recv()
 
-		// Load the corresponding batchedRequests
-		var req batchedRequests
+		// Try to load the corresponding `batchedRequests`. If `Recv` is successful, there must be a request pending
+		// in the queue.
 		select {
-		case req = <-s.pendingRequests:
+		case currentReq = <-s.pendingRequests:
+			hasReq = true
 		default:
-			finishWithErr = errors.New("tsoStream timing order broken")
-			break
+			hasReq = false
 		}
 
-		durationSeconds := time.Since(req.startTime).Seconds()
+		durationSeconds := time.Since(currentReq.startTime).Seconds()
 
 		if err != nil {
-			requestFailedDurationTSO.Observe(durationSeconds)
+			// If a request is pending and error occurs, observe the duration it has cost.
+			// Note that it's also possible that the stream is broken due to network without being requested. In this
+			// case, `Recv` may return an error while no request is pending.
+			if hasReq {
+				requestFailedDurationTSO.Observe(durationSeconds)
+			}
 			if err == io.EOF {
 				finishWithErr = errs.ErrClientTSOStreamClosed
 			} else {
 				finishWithErr = errors.WithStack(err)
 			}
-			break
+			break recvLoop
+		} else if !hasReq {
+			finishWithErr = errors.New("tsoStream timing order broken")
+			break recvLoop
 		}
 
 		latencySeconds := durationSeconds
 		requestDurationTSO.Observe(latencySeconds)
 		tsoBatchSize.Observe(float64(res.count))
 
-		if res.count != uint32(req.count) {
+		if res.count != uint32(currentReq.count) {
 			finishWithErr = errors.WithStack(errTSOLength)
-			break
+			break recvLoop
 		}
 
-		req.callback(res, req.reqKeyspaceGroupID, s.serverURL, nil)
+		currentReq.callback(res, currentReq.reqKeyspaceGroupID, s.serverURL, nil)
+		// After finishing the requests, unset these variables which will be checked in the defer block.
+		currentReq = batchedRequests{}
+		hasReq = false
+
 		s.ongoingRequestCountGauge.Set(float64(s.ongoingRequests.Add(-1)))
 	}
 }
 
-func (s *tsoStream) Close() {
-	s.cancel()
+// WaitForClosed blocks until the stream is closed and the inner loop exits.
+func (s *tsoStream) WaitForClosed() {
 	s.wg.Wait()
 }
