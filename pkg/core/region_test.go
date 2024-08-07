@@ -1166,6 +1166,7 @@ func TestScanRegion(t *testing.T) {
 	re.Len(scanNoError([]byte("a"), []byte("b"), 0), 1)
 	scanError([]byte("a"), []byte("c"), 0)
 	re.Len(scanNoError([]byte("a"), []byte("c"), 1), 1)
+	scanNoError([]byte("b"), []byte("c"), 0)
 
 	// region1 | region2
 	// [a, b)  | [b, c)
