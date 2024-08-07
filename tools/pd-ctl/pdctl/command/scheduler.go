@@ -641,6 +641,13 @@ func addStoreToSchedulerConfig(cmd *cobra.Command, schedulerName string, args []
 		cmd.Println(cmd.UsageString())
 		return
 	}
+
+	exist, err := checkSchedulerExist(cmd, schedulerName)
+	if !exist {
+		cmd.Printf("Failed! scheduler %s not found.\n", schedulerName)
+		return
+	}
+
 	storeID, err := strconv.ParseUint(args[0], 10, 64)
 	if err != nil {
 		cmd.Println(err)
@@ -768,8 +775,14 @@ func deleteStoreFromSchedulerConfig(cmd *cobra.Command, schedulerName string, ar
 		cmd.Println(cmd.Usage())
 		return
 	}
+	exist, err := checkSchedulerExist(cmd, schedulerName)
+	if !exist {
+		cmd.Printf("Failed! scheduler %s not found.\n", schedulerName)
+		return
+	}
+
 	path := path.Join(schedulerConfigPrefix, "/", schedulerName, "delete", args[0])
-	_, err := doRequest(cmd, path, http.MethodDelete, http.Header{})
+	_, err = doRequest(cmd, path, http.MethodDelete, http.Header{})
 	if err != nil {
 		cmd.Println(err)
 		return
