@@ -77,8 +77,8 @@ func (c *Coordinator) GetGRPCCase(name string) (*Config, error) {
 	return nil, errors.Errorf("case %v does not exist", name)
 }
 
-// GetETCDCase returns the etcd case config.
-func (c *Coordinator) GetETCDCase(name string) (*Config, error) {
+// GetEtcdCase returns the etcd case config.
+func (c *Coordinator) GetEtcdCase(name string) (*Config, error) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	if controller, ok := c.etcd[name]; ok {
@@ -109,8 +109,8 @@ func (c *Coordinator) GetAllGRPCCases() map[string]*Config {
 	return ret
 }
 
-// GetAllETCDCases returns the all etcd case configs.
-func (c *Coordinator) GetAllETCDCases() map[string]*Config {
+// GetAllEtcdCases returns the all etcd case configs.
+func (c *Coordinator) GetAllEtcdCases() map[string]*Config {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	ret := make(map[string]*Config)
@@ -164,11 +164,11 @@ func (c *Coordinator) SetGRPCCase(name string, cfg *Config) error {
 	return nil
 }
 
-// SetETCDCase sets the config for the specific case.
-func (c *Coordinator) SetETCDCase(name string, cfg *Config) error {
+// SetEtcdCase sets the config for the specific case.
+func (c *Coordinator) SetEtcdCase(name string, cfg *Config) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if fn, ok := ETCDCaseFnMap[name]; ok {
+	if fn, ok := EtcdCaseFnMap[name]; ok {
 		var controller *etcdController
 		if controller, ok = c.etcd[name]; !ok {
 			controller = newEtcdController(c.ctx, c.etcdClients, fn)
@@ -324,7 +324,7 @@ func (c *gRPCController) stop() {
 }
 
 type etcdController struct {
-	ETCDCase
+	EtcdCase
 	clients []*clientv3.Client
 	pctx    context.Context
 
@@ -334,11 +334,11 @@ type etcdController struct {
 	wg sync.WaitGroup
 }
 
-func newEtcdController(ctx context.Context, clis []*clientv3.Client, fn ETCDCreateFn) *etcdController {
+func newEtcdController(ctx context.Context, clis []*clientv3.Client, fn EtcdCreateFn) *etcdController {
 	c := &etcdController{
 		pctx:     ctx,
 		clients:  clis,
-		ETCDCase: fn(),
+		EtcdCase: fn(),
 	}
 	return c
 }

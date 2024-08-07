@@ -73,17 +73,3 @@ func TestJSONToUint64Slice(t *testing.T) {
 	re.False(ok)
 	re.Nil(res)
 }
-
-func TestBytesToString(t *testing.T) {
-	re := require.New(t)
-	str := "hello"
-	b := []byte(str)
-	re.Equal(str, BytesToString(b))
-}
-
-func TestStringToBytes(t *testing.T) {
-	re := require.New(t)
-	str := "hello"
-	b := StringToBytes(str)
-	re.Equal([]byte(str), b)
-}
