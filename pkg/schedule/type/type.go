@@ -123,8 +123,8 @@ var (
 		"label":                   LabelScheduler,
 	}
 
-	// SchedulerStr2Type is a map to convert the scheduler string to the CheckerSchedulerType.
-	SchedulerStr2Type = map[string]CheckerSchedulerType{
+	// StringToSchedulerType is a map to convert the scheduler string to the CheckerSchedulerType.
+	StringToSchedulerType = map[string]CheckerSchedulerType{
 		"balance-leader-scheduler":     BalanceLeaderScheduler,
 		"balance-region-scheduler":     BalanceRegionScheduler,
 		"balance-witness-scheduler":    BalanceWitnessScheduler,
