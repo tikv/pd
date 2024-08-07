@@ -55,19 +55,19 @@ function download_embed_asset {
     DOWNLOAD_URL="https://github.com/pingcap/tidb-dashboard/releases/download/v${DASHBOARD_RELEASE_VERSION}/embedded-assets-golang.zip"
     DOWNLOAD_FILE=${CACHE_DIR}/embedded-assets-golang.zip
     echo "  - Download ${DOWNLOAD_URL}"
-    # if ! curl -L "${DOWNLOAD_URL}" --fail --output "${DOWNLOAD_FILE}"; then
-    #   echo
-    #   echo -e "${RED}Error: Failed to download assets of TiDB Dashboard release version ${DASHBOARD_RELEASE_VERSION}.${NC}"
-    #   if [ "${DASHBOARD_RELEASE_VERSION}" == "nightly" ]; then
-    #     echo 'This project is using the nightly version of TiDB Dashboard, which does not have any release.'
-    #   else
-    #     echo 'This may be caused by using a non-release version of TiDB Dashboard, or the release is still in progress.'
-    #   fi
-    #   echo
-    #   echo -e "To compile PD without TiDB Dashboard:                       ${YELLOW}DASHBOARD=0 make${NC}"
-    #   echo -e "To compile PD by building TiDB Dashboard assets on-the-fly: ${YELLOW}DASHBOARD=COMPILE make${NC}  or  ${YELLOW}NO_MINIMIZE=1 DASHBOARD=COMPILE make${NC}"
-    #   exit 1
-    # fi
+    if ! curl -L "${DOWNLOAD_URL}" --fail --output "${DOWNLOAD_FILE}"; then
+      echo
+      echo -e "${RED}Error: Failed to download assets of TiDB Dashboard release version ${DASHBOARD_RELEASE_VERSION}.${NC}"
+      if [ "${DASHBOARD_RELEASE_VERSION}" == "nightly" ]; then
+        echo 'This project is using the nightly version of TiDB Dashboard, which does not have any release.'
+      else
+        echo 'This may be caused by using a non-release version of TiDB Dashboard, or the release is still in progress.'
+      fi
+      echo
+      echo -e "To compile PD without TiDB Dashboard:                       ${YELLOW}DASHBOARD=0 make${NC}"
+      echo -e "To compile PD by building TiDB Dashboard assets on-the-fly: ${YELLOW}DASHBOARD=COMPILE make${NC}  or  ${YELLOW}NO_MINIMIZE=1 DASHBOARD=COMPILE make${NC}"
+      exit 1
+    fi
 
     echo "  - Save archive to cache: ${CACHE_FILE}"
     mv "${DOWNLOAD_FILE}" "${CACHE_FILE}"
