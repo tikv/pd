@@ -64,7 +64,8 @@ require (
 	github.com/aws/smithy-go v1.13.5 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/bitly/go-simplejson v0.5.0 // indirect
-	github.com/breeswish/gin-jwt/v2 v2.6.4-jwt-patch // indirect
+	// github.com/breeswish/gin-jwt/v2 v2.6.4-jwt-patch // indirect
+	github.com/breeswish/gin-jwt/v2 v2.6.5-0.20211112114546-24b7fddb24dc // indirect
 	github.com/bytedance/sonic v1.9.1 // indirect
 	github.com/cenkalti/backoff/v4 v4.0.2 // indirect
 	github.com/cespare/xxhash/v2 v2.2.0 // indirect
