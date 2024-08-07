@@ -100,6 +100,8 @@ type Client interface {
 	/* Other interfaces */
 	GetMinResolvedTSByStoresIDs(context.Context, []uint64) (uint64, map[uint64]uint64, error)
 	GetPDVersion(context.Context) (string, error)
+	GetGCSafePoint(context.Context) (ListServiceGCSafepoint, error)
+	DeleteGCSafePoint(context.Context, string) (string, error)
 	/* Micro Service interfaces */
 	GetMicroServiceMembers(context.Context, string) ([]MicroServiceMember, error)
 	GetMicroServicePrimary(context.Context, string) (string, error)
@@ -1023,4 +1025,30 @@ func (c *client) GetKeyspaceMetaByName(ctx context.Context, keyspaceName string)
 		State:          keyspaceState,
 	}
 	return &keyspaceMetaPB, nil
+}
+
+func (c *client) GetGCSafePoint(ctx context.Context) (ListServiceGCSafepoint, error) {
+	var gcsafepoint ListServiceGCSafepoint
+	err := c.request(ctx, newRequestInfo().
+			WithName(GetGCSafePointName).
+			WithURI(safepoint).
+			WithMethod(http.MethodGet).
+			WithResp(&gcsafepoint))
+	if err != nil {
+		return gcsafepoint, err
+	}
+	return gcsafepoint, nil
+}
+
+func (c *client) DeleteGCSafePoint(ctx context.Context, service_id string) (string, error) {
+	var msg string
+	err := c.request(ctx, newRequestInfo().
+			WithName(DeleteGCSafePointName).
+			WithURI(safepoint+"/"+service_id).
+			WithMethod(http.MethodDelete).
+			WithResp(&msg))
+	if err != nil {
+		return msg, err
+	}
+	return msg, nil
 }

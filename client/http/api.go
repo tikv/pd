@@ -79,6 +79,7 @@ const (
 	Status              = "/pd/api/v1/status"
 	Version             = "/pd/api/v1/version"
 	operators           = "/pd/api/v1/operators"
+	safepoint			= "pd/api/v1/gc/safepoint"
 	// Micro Service
 	microServicePrefix = "/pd/api/v2/ms"
 	// Keyspace
