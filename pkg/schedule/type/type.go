@@ -73,11 +73,13 @@ const (
 	LabelScheduler CheckerSchedulerType = "label-scheduler"
 )
 
+// TODO: SchedulerTypeCompatibleMap and ConvertOldStr2Type should be removed after
+// fixing this issue(https://github.com/tikv/pd/issues/8474).
 var (
 	// SchedulerTypeCompatibleMap exists for compatibility.
 	//
-	//	It is used in the `PersistOptions` and `PersistConfig`. These two structs
-	//	are persisted in the storage, so we need to keep the compatibility.
+	//	It is used for `SchedulerConfig` in the `PersistOptions` and `PersistConfig`.
+	//	These two structs are persisted in the storage, so we need to keep the compatibility.
 	SchedulerTypeCompatibleMap = map[CheckerSchedulerType]string{
 		BalanceLeaderScheduler:         "balance-leader",
 		BalanceRegionScheduler:         "balance-region",
@@ -100,8 +102,7 @@ var (
 
 	// ConvertOldStr2Type exists for compatibility.
 	//
-	//	It is used in the `PersistOptions` and `PersistConfig`. These two structs
-	//	are persisted in the storage, so we need to keep the compatibility.
+	//	It is used to convert the old scheduler type to `CheckerSchedulerType`.
 	ConvertOldStr2Type = map[string]CheckerSchedulerType{
 		"balance-leader":          BalanceLeaderScheduler,
 		"balance-region":          BalanceRegionScheduler,
