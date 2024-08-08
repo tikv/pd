@@ -17,8 +17,8 @@ package checker
 import (
 	"bytes"
 	"context"
-	"sync"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/pingcap/failpoint"
@@ -48,7 +48,7 @@ const (
 	MinPatrolRegionScanLimit = 128
 	MaxPatrolScanRegionLimit = 8192
 	patrolRegionPartition    = 1024
-	patrolRegionChanLen = MaxPatrolScanRegionLimit
+	patrolRegionChanLen      = MaxPatrolScanRegionLimit
 )
 
 var (
@@ -56,7 +56,6 @@ var (
 	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
 	pendingProcessedRegionsGauge = regionListGauge.WithLabelValues("pending_processed_regions")
 	priorityListGauge            = regionListGauge.WithLabelValues("priority_list")
-	scanLimitGauge               = regionListGauge.WithLabelValues("scan_limit")
 )
 
 // Controller is used to manage all checkers.
@@ -85,7 +84,7 @@ type Controller struct {
 	// interval is the config interval of patrol regions.
 	// It's used to update the ticker, so we need to
 	// record it to avoid updating the ticker frequently.
-	interval time.Duration
+	interval    time.Duration
 	workerCount int
 	// patrolRegionScanLimit is the limit of regions to scan.
 	// It is calculated by the number of regions.

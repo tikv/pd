@@ -2921,7 +2921,7 @@ func TestPatrolRegionConcurrency(t *testing.T) {
 	for i := 0; i < 10; i++ {
 		suspectRegions = append(suspectRegions, uint64(i))
 	}
-	co.GetCheckerController().AddPendingProcessedRegions(suspectRegions...)
+	co.GetCheckerController().AddPendingProcessedRegions(false, suspectRegions...)
 	co.GetWaitGroup().Add(1)
 	co.PatrolRegions()
 	testutil.Eventually(re, func() bool {
