@@ -234,7 +234,7 @@ func (l *balanceLeaderScheduler) ReloadConfig() error {
 	return nil
 }
 
-// GetName implements the Scheduler interface.
+// IsScheduleAllowed implements the Scheduler interface.
 func (l *balanceLeaderScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) bool {
 	allowed := l.OpController.OperatorCount(operator.OpLeader) < cluster.GetSchedulerConfig().GetLeaderScheduleLimit()
 	if !allowed {

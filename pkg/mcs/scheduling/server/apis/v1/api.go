@@ -79,7 +79,7 @@ type server struct {
 	*scheserver.Server
 }
 
-// GetCluster returns the SchedulerCluster.
+// GetCluster returns the cluster.
 func (s *server) GetCluster() sche.SchedulerCluster {
 	return s.Server.GetCluster()
 }

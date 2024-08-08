@@ -73,7 +73,7 @@ func (checker *prepareChecker) check(c *core.BasicCluster, collectWaitTime ...ti
 	return true
 }
 
-// IsPrepared returns whether the store is prepared.
+// IsPrepared returns whether the coordinator is prepared.
 func (checker *prepareChecker) IsPrepared() bool {
 	checker.RLock()
 	defer checker.RUnlock()
