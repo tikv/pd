@@ -875,7 +875,7 @@ func (suite *httpClientTestSuite) TestGetSafePoint() {
 
 	re.Equal(uint64(1), l.GCSafePoint)
 	re.Equal(uint64(10), l.MinServiceGcSafepoint)
-	re.Equal(3, len(l.ServiceGCSafepoints))
+	re.Len(l.ServiceGCSafepoints, 3)
 
 	for i, val := range l.ServiceGCSafepoints {
 		if i == 0 {
@@ -885,7 +885,7 @@ func (suite *httpClientTestSuite) TestGetSafePoint() {
 
 		if i == 1 {
 			re.Equal("BBB", val.ServiceID)
-			re.Equal(val.SafePoint, uint64(20))
+			re.Equal(uint64(20), val.SafePoint)
 		}
 
 		if i == 2 {
@@ -910,5 +910,5 @@ func (suite *httpClientTestSuite) TestDeleteSafePoint() {
 	re.Equal("Delete service GC safepoint successfully.", msg3)
 
 	_, err4 := suite.client.DeleteGCSafePoint(suite.ctx, "gc_worker")
-	re.NotEqual(err4, nil)
+	re.Error(err4)
 }
