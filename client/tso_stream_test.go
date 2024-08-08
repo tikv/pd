@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/pingcap/errors"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/client/errs"
 )
@@ -46,7 +47,7 @@ func newMockTSOStreamImpl() *mockTSOStreamImpl {
 	}
 }
 
-func (s *mockTSOStreamImpl) Send(clusterID uint64, keyspaceID, keyspaceGroupID uint32, dcLocation string, count int64) error {
+func (s *mockTSOStreamImpl) Send(_clusterID uint64, _keyspaceID, _keyspaceGroupID uint32, _dcLocation string, _count int64) error {
 	s.requestCh <- struct{}{}
 	return nil
 }
@@ -96,19 +97,20 @@ func (s *mockTSOStreamImpl) stop() {
 }
 
 type callbackInvocation struct {
-	result    tsoRequestResult
-	streamURL string
-	err       error
+	result tsoRequestResult
+	err    error
 }
 
 type testTSOStreamSuite struct {
 	suite.Suite
+	re *require.Assertions
 
 	inner  *mockTSOStreamImpl
 	stream *tsoStream
 }
 
 func (s *testTSOStreamSuite) SetupTest() {
+	s.re = require.New(s.T())
 	s.inner = newMockTSOStreamImpl()
 	s.stream = newTSOStream("mock:///", s.inner)
 }
@@ -127,7 +129,7 @@ func TestTSOStreamTestSuite(t *testing.T) {
 func (s *testTSOStreamSuite) noResult(ch <-chan callbackInvocation) {
 	select {
 	case res := <-ch:
-		s.FailNowf("result received unexpectedly", "received result: %+v", res)
+		s.re.FailNowf("result received unexpectedly", "received result: %+v", res)
 	case <-time.After(time.Millisecond * 20):
 	}
 }
@@ -137,22 +139,21 @@ func (s *testTSOStreamSuite) getResult(ch <-chan callbackInvocation) callbackInv
 	case res := <-ch:
 		return res
 	case <-time.After(time.Second * 10000):
-		s.FailNow("result not ready in time")
+		s.re.FailNow("result not ready in time")
 		panic("result not ready in time")
 	}
 }
 
 func (s *testTSOStreamSuite) processRequestWithResultCh(count int64) (<-chan callbackInvocation, error) {
 	ch := make(chan callbackInvocation, 1)
-	err := s.stream.processRequests(1, 2, 3, globalDCLocation, count, time.Now(), func(result tsoRequestResult, reqKeyspaceGroupID uint32, streamURL string, err error) {
+	err := s.stream.processRequests(1, 2, 3, globalDCLocation, count, time.Now(), func(result tsoRequestResult, reqKeyspaceGroupID uint32, err error) {
 		if err == nil {
-			s.Equal(uint32(3), reqKeyspaceGroupID)
-			s.Equal(uint32(0), result.suffixBits)
+			s.re.Equal(uint32(3), reqKeyspaceGroupID)
+			s.re.Equal(uint32(0), result.suffixBits)
 		}
 		ch <- callbackInvocation{
-			result:    result,
-			streamURL: streamURL,
-			err:       err,
+			result: result,
+			err:    err,
 		}
 	})
 	if err != nil {
@@ -163,7 +164,7 @@ func (s *testTSOStreamSuite) processRequestWithResultCh(count int64) (<-chan cal
 
 func (s *testTSOStreamSuite) mustProcessRequestWithResultCh(count int64) <-chan callbackInvocation {
 	ch, err := s.processRequestWithResultCh(count)
-	s.NoError(err)
+	s.re.NoError(err)
 	return ch
 }
 
@@ -173,36 +174,34 @@ func (s *testTSOStreamSuite) TestTSOStreamBasic() {
 	s.inner.returnResult(10, 1, 1)
 	res := s.getResult(ch)
 
-	s.NoError(res.err)
-	s.Equal("mock:///", res.streamURL)
-	s.Equal(int64(10), res.result.physical)
-	s.Equal(int64(1), res.result.logical)
-	s.Equal(uint32(1), res.result.count)
+	s.re.NoError(res.err)
+	s.re.Equal(int64(10), res.result.physical)
+	s.re.Equal(int64(1), res.result.logical)
+	s.re.Equal(uint32(1), res.result.count)
 
 	ch = s.mustProcessRequestWithResultCh(2)
 	s.noResult(ch)
 	s.inner.returnResult(20, 3, 2)
 	res = s.getResult(ch)
 
-	s.NoError(res.err)
-	s.Equal("mock:///", res.streamURL)
-	s.Equal(int64(20), res.result.physical)
-	s.Equal(int64(3), res.result.logical)
-	s.Equal(uint32(2), res.result.count)
+	s.re.NoError(res.err)
+	s.re.Equal(int64(20), res.result.physical)
+	s.re.Equal(int64(3), res.result.logical)
+	s.re.Equal(uint32(2), res.result.count)
 
 	ch = s.mustProcessRequestWithResultCh(3)
 	s.noResult(ch)
 	s.inner.returnError(errors.New("mock rpc error"))
 	res = s.getResult(ch)
-	s.Error(res.err)
-	s.Equal("mock rpc error", res.err.Error())
+	s.re.Error(res.err)
+	s.re.Equal("mock rpc error", res.err.Error())
 
 	// After an error from the (simulated) RPC stream, the tsoStream should be in a broken status and can't accept
 	// new request anymore.
-	err := s.stream.processRequests(1, 2, 3, globalDCLocation, 1, time.Now(), func(result tsoRequestResult, reqKeyspaceGroupID uint32, streamURL string, err error) {
+	err := s.stream.processRequests(1, 2, 3, globalDCLocation, 1, time.Now(), func(_result tsoRequestResult, _reqKeyspaceGroupID uint32, _err error) {
 		panic("unreachable")
 	})
-	s.Error(err)
+	s.re.Error(err)
 }
 
 func (s *testTSOStreamSuite) testTSOStreamBrokenImpl(err error, pendingRequests int) {
@@ -223,16 +222,16 @@ func (s *testTSOStreamSuite) testTSOStreamBrokenImpl(err error, pendingRequests 
 	select {
 	case <-closedCh:
 	case <-time.After(time.Second):
-		s.FailNow("stream receiver loop didn't exit")
+		s.re.FailNow("stream receiver loop didn't exit")
 	}
 
 	for _, ch := range resultCh {
 		res := s.getResult(ch)
-		s.Error(res.err)
+		s.re.Error(res.err)
 		if err == io.EOF {
-			s.ErrorIs(res.err, errs.ErrClientTSOStreamClosed)
+			s.re.ErrorIs(res.err, errs.ErrClientTSOStreamClosed)
 		} else {
-			s.ErrorIs(res.err, err)
+			s.re.ErrorIs(res.err, err)
 		}
 	}
 }
@@ -271,10 +270,10 @@ func (s *testTSOStreamSuite) TestTSOStreamFIFO() {
 
 	for i, ch := range resultChs {
 		res := s.getResult(ch)
-		s.NoError(res.err)
-		s.Equal(int64((i+1)*10), res.result.physical)
-		s.Equal(int64(i), res.result.logical)
-		s.Equal(uint32(i+1), res.result.count)
+		s.re.NoError(res.err)
+		s.re.Equal(int64((i+1)*10), res.result.physical)
+		s.re.Equal(int64(i), res.result.logical)
+		s.re.Equal(uint32(i+1), res.result.count)
 	}
 }
 
@@ -315,20 +314,20 @@ func (s *testTSOStreamSuite) TestTSOStreamConcurrentRunning() {
 	for i := int64(1); i <= totalCount; i++ {
 		ch := <-resultChCh
 		res := s.getResult(ch)
-		s.NoError(res.err)
-		s.Equal(i*10, res.result.physical)
-		s.Equal(i%(1<<18), res.result.logical)
-		s.Equal(uint32(i), res.result.count)
+		s.re.NoError(res.err)
+		s.re.Equal(i*10, res.result.physical)
+		s.re.Equal(i%(1<<18), res.result.logical)
+		s.re.Equal(uint32(i), res.result.count)
 	}
 
 	// After handling all these requests, the stream is ended by an EOF error. The next request won't succeed.
 	// So, either the `processRequests` function returns an error or the callback is called with an error.
 	ch, err := s.processRequestWithResultCh(1)
 	if err != nil {
-		s.ErrorIs(err, errs.ErrClientTSOStreamClosed)
+		s.re.ErrorIs(err, errs.ErrClientTSOStreamClosed)
 	} else {
 		res := s.getResult(ch)
-		s.Error(res.err)
-		s.ErrorIs(res.err, errs.ErrClientTSOStreamClosed)
+		s.re.Error(res.err)
+		s.re.ErrorIs(res.err, errs.ErrClientTSOStreamClosed)
 	}
 }

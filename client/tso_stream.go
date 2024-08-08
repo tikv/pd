@@ -178,7 +178,7 @@ func (s tsoTSOStreamAdapter) Recv() (tsoRequestResult, error) {
 	}, nil
 }
 
-type onFinishedCallback func(result tsoRequestResult, reqKeyspaceGroupID uint32, streamURL string, err error)
+type onFinishedCallback func(result tsoRequestResult, reqKeyspaceGroupID uint32, err error)
 
 type batchedRequests struct {
 	startTime          time.Time
@@ -202,8 +202,6 @@ type tsoStream struct {
 	streamID string
 
 	pendingRequests chan batchedRequests
-
-	estimateLatencyMicros atomic.Uint64
 
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
@@ -265,7 +263,6 @@ func (s *tsoStream) processRequests(
 	switch prevState {
 	case streamStateIdle:
 		// Expected case
-		break
 	case streamStateClosing:
 		s.state.Store(prevState)
 		log.Info("tsoStream closed")
@@ -318,7 +315,7 @@ func (s *tsoStream) recvLoop(ctx context.Context) {
 
 		if hasReq {
 			// There's an unfinished request, cancel it, otherwise it will be blocked forever.
-			currentReq.callback(tsoRequestResult{}, currentReq.reqKeyspaceGroupID, s.serverURL, finishWithErr)
+			currentReq.callback(tsoRequestResult{}, currentReq.reqKeyspaceGroupID, finishWithErr)
 		}
 
 		s.cancel()
@@ -341,7 +338,7 @@ func (s *tsoStream) recvLoop(ctx context.Context) {
 
 		// Cancel remaining pending requests.
 		for req := range s.pendingRequests {
-			req.callback(tsoRequestResult{}, req.reqKeyspaceGroupID, s.serverURL, finishWithErr)
+			req.callback(tsoRequestResult{}, req.reqKeyspaceGroupID, finishWithErr)
 		}
 
 		s.wg.Done()
@@ -398,7 +395,7 @@ recvLoop:
 			break recvLoop
 		}
 
-		currentReq.callback(res, currentReq.reqKeyspaceGroupID, s.serverURL, nil)
+		currentReq.callback(res, currentReq.reqKeyspaceGroupID, nil)
 		// After finishing the requests, unset these variables which will be checked in the defer block.
 		currentReq = batchedRequests{}
 		hasReq = false

@@ -19,10 +19,7 @@ import (
 	"runtime/trace"
 	"time"
 
-	"github.com/pingcap/errors"
-	"github.com/pingcap/log"
 	"github.com/tikv/pd/client/tsoutil"
-	"go.uber.org/zap"
 )
 
 type tsoBatchController struct {
@@ -186,10 +183,11 @@ func (tbc *tsoBatchController) finishCollectedRequests(physical, firstLogical in
 	tbc.collectedRequestCount = 0
 }
 
-func (tbc *tsoBatchController) clear() {
-	log.Info("[pd] clear the tso batch controller",
-		zap.Int("max-batch-size", tbc.maxBatchSize), zap.Int("best-batch-size", tbc.bestBatchSize),
-		zap.Int("collected-request-count", tbc.collectedRequestCount))
-	tsoErr := errors.WithStack(errClosing)
-	tbc.finishCollectedRequests(0, 0, 0, tsoErr)
-}
+//
+//func (tbc *tsoBatchController) clear() {
+//	log.Info("[pd] clear the tso batch controller",
+//		zap.Int("max-batch-size", tbc.maxBatchSize), zap.Int("best-batch-size", tbc.bestBatchSize),
+//		zap.Int("collected-request-count", tbc.collectedRequestCount))
+//	tsoErr := errors.WithStack(errClosing)
+//	tbc.finishCollectedRequests(0, 0, 0, tsoErr)
+//}

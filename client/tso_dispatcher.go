@@ -197,7 +197,7 @@ func (td *tsoDispatcher) handleDispatcher(wg *sync.WaitGroup) {
 			cc.(*tsoConnectionContext).cancel()
 			return true
 		})
-		if batchController.collectedRequestCount != 0 {
+		if batchController != nil && batchController.collectedRequestCount != 0 {
 			log.Fatal("batched tso requests not cleared when exiting the tso dispatcher loop")
 		}
 		tsoErr := errors.WithStack(errClosing)
@@ -225,6 +225,7 @@ tsoBatchLoop:
 			return
 		default:
 		}
+		batchController = td.batchBufferPool.Get().(*tsoBatchController)
 		// Start to collect the TSO requests.
 		maxBatchWaitInterval := option.getMaxTSOBatchWaitInterval()
 		// Once the TSO requests are collected, must make sure they could be finished or revoked eventually,
@@ -454,7 +455,7 @@ func (td *tsoDispatcher) processRequests(
 		reqKeyspaceGroupID = svcDiscovery.GetKeyspaceGroupID()
 	)
 
-	cb := func(result tsoRequestResult, reqKeyspaceGroupID uint32, streamURL string, err error) {
+	cb := func(result tsoRequestResult, reqKeyspaceGroupID uint32, err error) {
 		defer td.batchBufferPool.Put(tbc)
 		if err != nil {
 			td.cancelCollectedRequests(tbc, err)
