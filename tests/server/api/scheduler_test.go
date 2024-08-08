@@ -29,6 +29,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	sc "github.com/tikv/pd/pkg/schedule/config"
+	types "github.com/tikv/pd/pkg/schedule/type"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	tu "github.com/tikv/pd/pkg/utils/testutil"
@@ -656,7 +657,10 @@ func (suite *scheduleTestSuite) checkDisable(cluster *tests.TestCluster) {
 	re.NoError(err)
 
 	originSchedulers := scheduleConfig.Schedulers
-	scheduleConfig.Schedulers = sc.SchedulerConfigs{sc.SchedulerConfig{Type: "shuffle-leader", Disable: true}}
+	scheduleConfig.Schedulers = sc.SchedulerConfigs{sc.SchedulerConfig{
+		Type:    types.SchedulerTypeCompatibleMap[types.ShuffleLeaderScheduler],
+		Disable: true,
+	}}
 	body, err = json.Marshal(scheduleConfig)
 	re.NoError(err)
 	err = tu.CheckPostJSON(tests.TestDialClient, u, body, tu.StatusOK(re))

@@ -188,8 +188,6 @@ func (h *Handler) GetAllRequestHistoryHotRegion(request *HistoryHotRegionsReques
 
 // AddScheduler adds a scheduler.
 func (h *Handler) AddScheduler(tp types.CheckerSchedulerType, args ...string) error {
-	// TODO: remove this map in subsequent PRs, because we need use new type in the `CreateScheduler`.
-	name := types.SchedulerTypeCompatibleMap[tp]
 	c, err := h.GetRaftCluster()
 	if err != nil {
 		return err
@@ -201,7 +199,7 @@ func (h *Handler) AddScheduler(tp types.CheckerSchedulerType, args ...string) er
 	} else {
 		removeSchedulerCb = c.GetCoordinator().GetSchedulersController().RemoveScheduler
 	}
-	s, err := schedulers.CreateScheduler(name, c.GetOperatorController(), h.s.storage, schedulers.ConfigSliceDecoder(name, args), removeSchedulerCb)
+	s, err := schedulers.CreateScheduler(tp, c.GetOperatorController(), h.s.storage, schedulers.ConfigSliceDecoder(tp, args), removeSchedulerCb)
 	if err != nil {
 		return err
 	}

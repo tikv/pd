@@ -39,8 +39,6 @@ import (
 const (
 	// GrantLeaderName is grant leader scheduler name.
 	GrantLeaderName = "grant-leader-scheduler"
-	// GrantLeaderType is grant leader scheduler type.
-	GrantLeaderType = "grant-leader"
 )
 
 type grantLeaderSchedulerConfig struct {
@@ -239,7 +237,7 @@ func (s *grantLeaderScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) (
 			continue
 		}
 
-		op, err := operator.CreateForceTransferLeaderOperator(GrantLeaderType, cluster, region, id, operator.OpLeader)
+		op, err := operator.CreateForceTransferLeaderOperator(s.GetName(), cluster, region, id, operator.OpLeader)
 		if err != nil {
 			log.Debug("fail to create grant leader operator", errs.ZapError(err))
 			continue

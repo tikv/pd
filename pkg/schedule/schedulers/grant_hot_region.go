@@ -44,8 +44,6 @@ import (
 const (
 	// GrantHotRegionName is grant hot region scheduler name.
 	GrantHotRegionName = "grant-hot-region-scheduler"
-	// GrantHotRegionType is grant hot region scheduler type.
-	GrantHotRegionType = "grant-hot-region"
 )
 
 type grantHotRegionSchedulerConfig struct {
@@ -337,9 +335,9 @@ func (s *grantHotRegionScheduler) transfer(cluster sche.SchedulerCluster, region
 	dstStore := &metapb.Peer{StoreId: destStoreIDs[i]}
 
 	if isLeader {
-		op, err = operator.CreateTransferLeaderOperator(GrantHotRegionType+"-leader", cluster, srcRegion, dstStore.StoreId, []uint64{}, operator.OpLeader)
+		op, err = operator.CreateTransferLeaderOperator(s.GetName()+"-leader", cluster, srcRegion, dstStore.StoreId, []uint64{}, operator.OpLeader)
 	} else {
-		op, err = operator.CreateMovePeerOperator(GrantHotRegionType+"-move", cluster, srcRegion, operator.OpRegion|operator.OpLeader, srcStore.GetID(), dstStore)
+		op, err = operator.CreateMovePeerOperator(s.GetName()+"-move", cluster, srcRegion, operator.OpRegion|operator.OpLeader, srcStore.GetID(), dstStore)
 	}
 	op.SetPriorityLevel(constant.High)
 	return

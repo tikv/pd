@@ -33,13 +33,13 @@ const RejectLeader = "reject-leader"
 var schedulerMap sync.Map
 
 // RegisterScheduler registers the scheduler type.
-func RegisterScheduler(typ string) {
+func RegisterScheduler(typ types.CheckerSchedulerType) {
 	schedulerMap.Store(typ, struct{}{})
 }
 
 // IsSchedulerRegistered checks if the named scheduler type is registered.
-func IsSchedulerRegistered(name string) bool {
-	_, ok := schedulerMap.Load(name)
+func IsSchedulerRegistered(typ types.CheckerSchedulerType) bool {
+	_, ok := schedulerMap.Load(typ)
 	return ok
 }
 

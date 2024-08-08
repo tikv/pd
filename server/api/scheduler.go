@@ -85,7 +85,7 @@ func (h *schedulerHandler) CreateScheduler(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	tp, ok := types.SchedulerStr2Type[name]
+	tp, ok := types.StringToSchedulerType[name]
 	if !ok {
 		h.r.JSON(w, http.StatusBadRequest, "unknown scheduler")
 		return

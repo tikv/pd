@@ -34,6 +34,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/scatter"
 	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/schedule/splitter"
+	types "github.com/tikv/pd/pkg/schedule/type"
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/statistics/utils"
 	"github.com/tikv/pd/pkg/utils/logutil"
@@ -187,7 +188,7 @@ func (c *Coordinator) driveSlowNodeScheduler() {
 				// If the cluster was set up with `raft-kv2` engine, this cluster should
 				// enable `evict-slow-trend` scheduler as default.
 				if c.GetCluster().GetStoreConfig().IsRaftKV2() {
-					typ := schedulers.EvictSlowTrendType
+					typ := types.EvictSlowTrendScheduler
 					args := []string{}
 
 					s, err := schedulers.CreateScheduler(typ, c.opController, c.cluster.GetStorage(), schedulers.ConfigSliceDecoder(typ, args), c.schedulers.RemoveScheduler)
@@ -275,7 +276,7 @@ func (c *Coordinator) InitSchedulers(needRun bool) {
 		typ := schedulers.FindSchedulerTypeByName(name)
 		var cfg sc.SchedulerConfig
 		for _, c := range scheduleCfg.Schedulers {
-			if c.Type == typ {
+			if c.Type == types.SchedulerTypeCompatibleMap[typ] {
 				cfg = c
 				break
 			}
@@ -288,7 +289,8 @@ func (c *Coordinator) InitSchedulers(needRun bool) {
 			log.Info("skip create scheduler with independent configuration", zap.String("scheduler-name", name), zap.String("scheduler-type", cfg.Type), zap.Strings("scheduler-args", cfg.Args))
 			continue
 		}
-		s, err := schedulers.CreateScheduler(cfg.Type, c.opController, c.cluster.GetStorage(), schedulers.ConfigJSONDecoder([]byte(data)), c.schedulers.RemoveScheduler)
+		s, err := schedulers.CreateScheduler(types.ConvertOldStrToType[cfg.Type], c.opController,
+			c.cluster.GetStorage(), schedulers.ConfigJSONDecoder([]byte(data)), c.schedulers.RemoveScheduler)
 		if err != nil {
 			log.Error("can not create scheduler with independent configuration", zap.String("scheduler-name", name), zap.Strings("scheduler-args", cfg.Args), errs.ZapError(err))
 			continue
@@ -296,12 +298,14 @@ func (c *Coordinator) InitSchedulers(needRun bool) {
 		if needRun {
 			log.Info("create scheduler with independent configuration", zap.String("scheduler-name", s.GetName()))
 			if err = c.schedulers.AddScheduler(s); err != nil {
-				log.Error("can not add scheduler with independent configuration", zap.String("scheduler-name", s.GetName()), zap.Strings("scheduler-args", cfg.Args), errs.ZapError(err))
+				log.Error("can not add scheduler with independent configuration",
+					zap.String("scheduler-name", s.GetName()), zap.Strings("scheduler-args", cfg.Args), errs.ZapError(err))
 			}
 		} else {
 			log.Info("create scheduler handler with independent configuration", zap.String("scheduler-name", s.GetName()))
 			if err = c.schedulers.AddSchedulerHandler(s); err != nil {
-				log.Error("can not add scheduler handler with independent configuration", zap.String("scheduler-name", s.GetName()), zap.Strings("scheduler-args", cfg.Args), errs.ZapError(err))
+				log.Error("can not add scheduler handler with independent configuration",
+					zap.String("scheduler-name", s.GetName()), zap.Strings("scheduler-args", cfg.Args), errs.ZapError(err))
 			}
 		}
 	}
@@ -316,16 +320,22 @@ func (c *Coordinator) InitSchedulers(needRun bool) {
 			continue
 		}
 
-		s, err := schedulers.CreateScheduler(schedulerCfg.Type, c.opController, c.cluster.GetStorage(), schedulers.ConfigSliceDecoder(schedulerCfg.Type, schedulerCfg.Args), c.schedulers.RemoveScheduler)
+		tp := types.ConvertOldStrToType[schedulerCfg.Type]
+		s, err := schedulers.CreateScheduler(tp, c.opController,
+			c.cluster.GetStorage(), schedulers.ConfigSliceDecoder(tp, schedulerCfg.Args), c.schedulers.RemoveScheduler)
 		if err != nil {
-			log.Error("can not create scheduler", zap.String("scheduler-type", schedulerCfg.Type), zap.Strings("scheduler-args", schedulerCfg.Args), errs.ZapError(err))
+			log.Error("can not create scheduler", zap.Stringer("type", tp), zap.String("scheduler-type", schedulerCfg.Type),
+				zap.Strings("scheduler-args", schedulerCfg.Args), errs.ZapError(err))
 			continue
 		}
 
 		if needRun {
-			log.Info("create scheduler", zap.String("scheduler-name", s.GetName()), zap.Strings("scheduler-args", schedulerCfg.Args))
-			if err = c.schedulers.AddScheduler(s, schedulerCfg.Args...); err != nil && !errors.ErrorEqual(err, errs.ErrSchedulerExisted.FastGenByArgs()) {
-				log.Error("can not add scheduler", zap.String("scheduler-name", s.GetName()), zap.Strings("scheduler-args", schedulerCfg.Args), errs.ZapError(err))
+			log.Info("create scheduler", zap.String("scheduler-name", s.GetName()),
+				zap.Strings("scheduler-args", schedulerCfg.Args))
+			if err = c.schedulers.AddScheduler(s, schedulerCfg.Args...); err != nil &&
+				!errors.ErrorEqual(err, errs.ErrSchedulerExisted.FastGenByArgs()) {
+				log.Error("can not add scheduler", zap.String("scheduler-name",
+					s.GetName()), zap.Strings("scheduler-args", schedulerCfg.Args), errs.ZapError(err))
 			} else {
 				// Only records the valid scheduler config.
 				scheduleCfg.Schedulers[k] = schedulerCfg
@@ -362,7 +372,7 @@ func (c *Coordinator) LoadPlugin(pluginPath string, ch chan string) {
 		log.Error("GetFunction SchedulerType error", errs.ZapError(err))
 		return
 	}
-	schedulerType := SchedulerType.(func() string)
+	schedulerType := SchedulerType.(func() types.CheckerSchedulerType)
 	// get func: SchedulerArgs from plugin
 	SchedulerArgs, err := c.pluginInterface.GetFunction(pluginPath, "SchedulerArgs")
 	if err != nil {
@@ -373,7 +383,7 @@ func (c *Coordinator) LoadPlugin(pluginPath string, ch chan string) {
 	// create and add user scheduler
 	s, err := schedulers.CreateScheduler(schedulerType(), c.opController, c.cluster.GetStorage(), schedulers.ConfigSliceDecoder(schedulerType(), schedulerArgs()), c.schedulers.RemoveScheduler)
 	if err != nil {
-		log.Error("can not create scheduler", zap.String("scheduler-type", schedulerType()), errs.ZapError(err))
+		log.Error("can not create scheduler", zap.Stringer("scheduler-type", schedulerType()), errs.ZapError(err))
 		return
 	}
 	log.Info("create scheduler", zap.String("scheduler-name", s.GetName()))

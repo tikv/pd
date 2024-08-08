@@ -40,8 +40,6 @@ import (
 const (
 	// EvictLeaderName is evict leader scheduler name.
 	EvictLeaderName = "evict-leader-scheduler"
-	// EvictLeaderType is evict leader scheduler type.
-	EvictLeaderType = "evict-leader"
 	// EvictLeaderBatchSize is the number of operators to transfer
 	// leaders by one scheduling
 	EvictLeaderBatchSize = 3

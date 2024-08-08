@@ -37,8 +37,6 @@ import (
 const (
 	// EvictSlowStoreName is evict leader scheduler name.
 	EvictSlowStoreName = "evict-slow-store-scheduler"
-	// EvictSlowStoreType is evict leader scheduler type.
-	EvictSlowStoreType = "evict-slow-store"
 
 	slowStoreEvictThreshold   = 100
 	slowStoreRecoverThreshold = 1

@@ -32,7 +32,7 @@ func TestHotWriteRegionScheduleWithRevertRegionsDimSecond(t *testing.T) {
 	re := require.New(t)
 	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
-	sche, err := CreateScheduler(utils.Write.String(), oc, storage.NewStorageWithMemoryBackend(), nil, nil)
+	sche, err := CreateScheduler(writeType, oc, storage.NewStorageWithMemoryBackend(), nil, nil)
 	re.NoError(err)
 	hb := sche.(*hotScheduler)
 	hb.types = []resourceType{writePeer}
@@ -93,7 +93,7 @@ func TestHotWriteRegionScheduleWithRevertRegionsDimFirst(t *testing.T) {
 	re := require.New(t)
 	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
-	sche, err := CreateScheduler(utils.Write.String(), oc, storage.NewStorageWithMemoryBackend(), nil, nil)
+	sche, err := CreateScheduler(writeType, oc, storage.NewStorageWithMemoryBackend(), nil, nil)
 	re.NoError(err)
 	hb := sche.(*hotScheduler)
 	hb.types = []resourceType{writePeer}
@@ -145,7 +145,7 @@ func TestHotWriteRegionScheduleWithRevertRegionsDimFirstOnly(t *testing.T) {
 	re := require.New(t)
 	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
-	sche, err := CreateScheduler(utils.Write.String(), oc, storage.NewStorageWithMemoryBackend(), nil, nil)
+	sche, err := CreateScheduler(writeType, oc, storage.NewStorageWithMemoryBackend(), nil, nil)
 	re.NoError(err)
 	hb := sche.(*hotScheduler)
 	hb.types = []resourceType{writePeer}
@@ -206,7 +206,7 @@ func TestHotReadRegionScheduleWithRevertRegionsDimSecond(t *testing.T) {
 	re := require.New(t)
 	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
-	sche, err := CreateScheduler(utils.Read.String(), oc, storage.NewStorageWithMemoryBackend(), nil, nil)
+	sche, err := CreateScheduler(readType, oc, storage.NewStorageWithMemoryBackend(), nil, nil)
 	re.NoError(err)
 	hb := sche.(*hotScheduler)
 	hb.conf.setDstToleranceRatio(0.0)
@@ -265,7 +265,7 @@ func TestSkipUniformStore(t *testing.T) {
 	re := require.New(t)
 	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
-	hb, err := CreateScheduler(utils.Read.String(), oc, storage.NewStorageWithMemoryBackend(), nil, nil)
+	hb, err := CreateScheduler(readType, oc, storage.NewStorageWithMemoryBackend(), nil, nil)
 	re.NoError(err)
 	hb.(*hotScheduler).conf.setSrcToleranceRatio(1)
 	hb.(*hotScheduler).conf.setDstToleranceRatio(1)
@@ -419,7 +419,7 @@ func checkHotReadRegionScheduleWithSmallHotRegion(re *require.Assertions, highLo
 	addOtherRegions func(*mockcluster.Cluster, *hotScheduler)) []*operator.Operator {
 	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
-	sche, err := CreateScheduler(utils.Read.String(), oc, storage.NewStorageWithMemoryBackend(), nil, nil)
+	sche, err := CreateScheduler(readType, oc, storage.NewStorageWithMemoryBackend(), nil, nil)
 	re.NoError(err)
 	hb := sche.(*hotScheduler)
 	hb.conf.setSrcToleranceRatio(1)

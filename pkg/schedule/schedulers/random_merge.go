@@ -32,8 +32,6 @@ import (
 const (
 	// RandomMergeName is random merge scheduler name.
 	RandomMergeName = "random-merge-scheduler"
-	// RandomMergeType is random merge scheduler type.
-	RandomMergeType = "random-merge"
 )
 
 type randomMergeSchedulerConfig struct {
@@ -103,7 +101,7 @@ func (s *randomMergeScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) (
 		return nil, nil
 	}
 
-	ops, err := operator.CreateMergeRegionOperator(RandomMergeType, cluster, region, target, operator.OpMerge)
+	ops, err := operator.CreateMergeRegionOperator(s.GetName(), cluster, region, target, operator.OpMerge)
 	if err != nil {
 		log.Debug("fail to create merge region operator", errs.ZapError(err))
 		return nil, nil
