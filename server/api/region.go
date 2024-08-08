@@ -25,6 +25,7 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/pingcap/errors"
+	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/keyspace"
@@ -121,6 +122,19 @@ func (h *regionsHandler) CheckRegionsReplicated(w http.ResponseWriter, r *http.R
 	rawStartKey := vars["startKey"]
 	rawEndKey := vars["endKey"]
 	state, err := h.Handler.CheckRegionsReplicated(rawStartKey, rawEndKey)
+	if err != nil {
+		h.rd.JSON(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	h.rd.JSON(w, http.StatusOK, state)
+}
+
+func (h *regionsHandler) BalanceRegion(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	rawStartKey := vars["startKey"]
+	rawEndKey := vars["endKey"]
+	storeLabels := make([]*metapb.StoreLabel, 0)
+	state, err := h.Handler.BalanceRegion(rawStartKey, rawEndKey, storeLabels)
 	if err != nil {
 		h.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
