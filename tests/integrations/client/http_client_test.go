@@ -873,25 +873,24 @@ func (suite *httpClientTestSuite) TestGetSafePoint() {
 	l, err := suite.client.GetGCSafePoint(suite.ctx)
 	re.NoError(err)
 
-	re.Equal(l.GCSafePoint, uint64(1))
-	re.Equal(l.MinServiceGcSafepoint, uint64(10))
-	re.Equal(len(l.ServiceGCSafepoints), 3)
+	re.Equal(uint64(1), l.GCSafePoint)
+	re.Equal(uint64(10), l.MinServiceGcSafepoint)
+	re.Equal(3, len(l.ServiceGCSafepoints))
 
 	for i, val := range l.ServiceGCSafepoints {
 		if i == 0 {
-			re.Equal(val.ServiceID, "AAA")
-			re.Equal(val.SafePoint, uint64(10))
+			re.Equal("AAA", val.ServiceID)
+			re.Equal(uint64(10), val.SafePoint)
 		}
 
 		if i == 1 {
-			re.Equal(val.ServiceID, "BBB")
+			re.Equal("BBB", val.ServiceID)
 			re.Equal(val.SafePoint, uint64(20))
 		}
 
 		if i == 2 {
-			re.Equal(val.ServiceID, "CCC")
-			re.Equal(val.SafePoint, uint64(30))
-
+			re.Equal("CCC", val.ServiceID)
+			re.Equal(uint64(30), val.SafePoint)
 		}
 	}
 }
@@ -900,16 +899,16 @@ func (suite *httpClientTestSuite) TestDeleteSafePoint() {
 	re := suite.Require()
 	msg1, err1 := suite.client.DeleteGCSafePoint(suite.ctx, "AAA")
 	re.NoError(err1)
-	re.Equal(msg1, "Delete service GC safepoint successfully.")
+	re.Equal("Delete service GC safepoint successfully.", msg1)
 
 	msg2, err2 := suite.client.DeleteGCSafePoint(suite.ctx, "BBB")
 	re.NoError(err2)
-	re.Equal(msg2, "Delete service GC safepoint successfully.")
+	re.Equal("Delete service GC safepoint successfully.", msg2)
 
 	msg3, err3 := suite.client.DeleteGCSafePoint(suite.ctx, "DDD")
 	re.NoError(err3)
-	re.Equal(msg3, "Delete service GC safepoint successfully.")
+	re.Equal("Delete service GC safepoint successfully.", msg3)
 
 	_, err4 := suite.client.DeleteGCSafePoint(suite.ctx, "gc_worker")
-	re.True(err4 != nil)
+	re.NotEqual(err4, nil)
 }
