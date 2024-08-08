@@ -50,6 +50,7 @@ import (
 )
 
 var (
+	// TestDialClient is a http client for test.
 	TestDialClient = &http.Client{
 		Transport: &http.Transport{
 			DisableKeepAlives: true,
@@ -286,11 +287,15 @@ func MustReportBuckets(re *require.Assertions, cluster *TestCluster, regionID ui
 	return buckets
 }
 
+// SchedulerMode is used for test purpose.
 type SchedulerMode int
 
 const (
+	// Both represents both PD mode and API mode.
 	Both SchedulerMode = iota
+	// PDMode represents PD mode.
 	PDMode
+	// APIMode represents API mode.
 	APIMode
 )
 

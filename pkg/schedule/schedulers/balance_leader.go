@@ -102,7 +102,7 @@ func (conf *balanceLeaderSchedulerConfig) validateLocked() bool {
 	return conf.Batch >= 1 && conf.Batch <= 10
 }
 
-func (conf *balanceLeaderSchedulerConfig) Clone() *balanceLeaderSchedulerConfig {
+func (conf *balanceLeaderSchedulerConfig) clone() *balanceLeaderSchedulerConfig {
 	conf.RLock()
 	defer conf.RUnlock()
 	ranges := make([]core.KeyRange, len(conf.Ranges))
@@ -159,7 +159,7 @@ func (handler *balanceLeaderHandler) updateConfig(w http.ResponseWriter, r *http
 }
 
 func (handler *balanceLeaderHandler) listConfig(w http.ResponseWriter, _ *http.Request) {
-	conf := handler.config.Clone()
+	conf := handler.config.clone()
 	handler.rd.JSON(w, http.StatusOK, conf)
 }
 
@@ -192,6 +192,7 @@ func newBalanceLeaderScheduler(opController *operator.Controller, conf *balanceL
 	return s
 }
 
+// ServeHTTP implements the http.Handler interface.
 func (l *balanceLeaderScheduler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	l.handler.ServeHTTP(w, r)
 }
@@ -206,12 +207,14 @@ func WithBalanceLeaderName(name string) BalanceLeaderCreateOption {
 	}
 }
 
+// EncodeConfig implements the Scheduler interface.
 func (l *balanceLeaderScheduler) EncodeConfig() ([]byte, error) {
 	l.conf.RLock()
 	defer l.conf.RUnlock()
 	return EncodeConfig(l.conf)
 }
 
+// ReloadConfig implements the Scheduler interface.
 func (l *balanceLeaderScheduler) ReloadConfig() error {
 	l.conf.Lock()
 	defer l.conf.Unlock()
@@ -231,6 +234,7 @@ func (l *balanceLeaderScheduler) ReloadConfig() error {
 	return nil
 }
 
+// GetName implements the Scheduler interface.
 func (l *balanceLeaderScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) bool {
 	allowed := l.OpController.OperatorCount(operator.OpLeader) < cluster.GetSchedulerConfig().GetLeaderScheduleLimit()
 	if !allowed {
@@ -331,6 +335,7 @@ func (cs *candidateStores) resortStoreWithPos(pos int) {
 	}
 }
 
+// Schedule implements the Scheduler interface.
 func (l *balanceLeaderScheduler) Schedule(cluster sche.SchedulerCluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
 	basePlan := plan.NewBalanceSchedulerPlan()
 	var collector *plan.Collector

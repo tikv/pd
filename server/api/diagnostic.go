@@ -36,7 +36,7 @@ func newDiagnosticHandler(svr *server.Server, rd *render.Render) *diagnosticHand
 	}
 }
 
-func (h *diagnosticHandler) GetDiagnosticResult(w http.ResponseWriter, r *http.Request) {
+func (h *diagnosticHandler) getDiagnosticResult(w http.ResponseWriter, r *http.Request) {
 	name := mux.Vars(r)["name"]
 	result, err := h.handler.GetDiagnosticResult(name)
 	if err != nil {

@@ -802,6 +802,7 @@ func (c *client) UpdateOption(option DynamicOption, value any) error {
 	return nil
 }
 
+// GetAllMembers gets the members Info from PD.
 func (c *client) GetAllMembers(ctx context.Context) ([]*pdpb.Member, error) {
 	start := time.Now()
 	defer func() { cmdDurationGetAllMembers.Observe(time.Since(start).Seconds()) }()

@@ -48,7 +48,7 @@ type shuffleHotRegionSchedulerConfig struct {
 	Limit   uint64 `json:"limit"`
 }
 
-func (conf *shuffleHotRegionSchedulerConfig) Clone() *shuffleHotRegionSchedulerConfig {
+func (conf *shuffleHotRegionSchedulerConfig) clone() *shuffleHotRegionSchedulerConfig {
 	conf.RLock()
 	defer conf.RUnlock()
 	return &shuffleHotRegionSchedulerConfig{
@@ -240,7 +240,7 @@ func (handler *shuffleHotRegionHandler) updateConfig(w http.ResponseWriter, r *h
 }
 
 func (handler *shuffleHotRegionHandler) listConfig(w http.ResponseWriter, _ *http.Request) {
-	conf := handler.config.Clone()
+	conf := handler.config.clone()
 	handler.rd.JSON(w, http.StatusOK, conf)
 }
 

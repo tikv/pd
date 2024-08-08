@@ -1024,7 +1024,7 @@ type bucketHeartbeatServer struct {
 	closed int32
 }
 
-func (b *bucketHeartbeatServer) Send(bucket *pdpb.ReportBucketsResponse) error {
+func (b *bucketHeartbeatServer) send(bucket *pdpb.ReportBucketsResponse) error {
 	if atomic.LoadInt32(&b.closed) == 1 {
 		return status.Errorf(codes.Canceled, "stream is closed")
 	}
@@ -1047,7 +1047,7 @@ func (b *bucketHeartbeatServer) Send(bucket *pdpb.ReportBucketsResponse) error {
 	}
 }
 
-func (b *bucketHeartbeatServer) Recv() (*pdpb.ReportBucketsRequest, error) {
+func (b *bucketHeartbeatServer) recv() (*pdpb.ReportBucketsRequest, error) {
 	if atomic.LoadInt32(&b.closed) == 1 {
 		return nil, io.EOF
 	}
@@ -1083,7 +1083,7 @@ func (s *GrpcServer) ReportBuckets(stream pdpb.PD_ReportBucketsServer) error {
 		}
 	}
 	for {
-		request, err := server.Recv()
+		request, err := server.recv()
 		failpoint.Inject("grpcClientClosed", func() {
 			err = status.Error(codes.Canceled, "grpc client closed")
 			request = nil
@@ -1132,7 +1132,7 @@ func (s *GrpcServer) ReportBuckets(stream pdpb.PD_ReportBucketsServer) error {
 			resp := &pdpb.ReportBucketsResponse{
 				Header: s.notBootstrappedHeader(),
 			}
-			err := server.Send(resp)
+			err := server.send(resp)
 			return errors.WithStack(err)
 		}
 		if err := s.validateRequest(request.GetHeader()); err != nil {

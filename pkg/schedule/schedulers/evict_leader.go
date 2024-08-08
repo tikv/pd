@@ -74,7 +74,7 @@ func (conf *evictLeaderSchedulerConfig) getBatch() int {
 	return conf.Batch
 }
 
-func (conf *evictLeaderSchedulerConfig) Clone() *evictLeaderSchedulerConfig {
+func (conf *evictLeaderSchedulerConfig) clone() *evictLeaderSchedulerConfig {
 	conf.RLock()
 	defer conf.RUnlock()
 	storeIDWithRanges := make(map[uint64][]core.KeyRange)
@@ -462,7 +462,7 @@ func (handler *evictLeaderHandler) updateConfig(w http.ResponseWriter, r *http.R
 }
 
 func (handler *evictLeaderHandler) listConfig(w http.ResponseWriter, _ *http.Request) {
-	conf := handler.config.Clone()
+	conf := handler.config.clone()
 	handler.rd.JSON(w, http.StatusOK, conf)
 }
 
