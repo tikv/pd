@@ -29,6 +29,11 @@ const (
 	tiflashTypeLabel          = "ap"
 	defaultTypeLabel          = "tp"
 	newResourceGroupNameLabel = "resource_group"
+
+	// Labels for the config.
+	ruPerSecLabel   = "ru_per_sec"
+	ruCapacityLabel = "ru_capacity"
+	priorityLabel   = "priority"
 )
 
 var (
@@ -123,7 +128,7 @@ var (
 			Subsystem: serverSubsystem,
 			Name:      "group_config",
 			Help:      "Config of the resource group.",
-		}, []string{newResourceGroupNameLabel, "type"})
+		}, []string{newResourceGroupNameLabel, typeLabel})
 )
 
 func init() {
