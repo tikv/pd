@@ -44,11 +44,11 @@ type ReplicaChecker struct {
 	PauseController
 	cluster                 sche.CheckerCluster
 	conf                    config.CheckerConfigProvider
-	pendingProcessedRegions cache.Cache
+	pendingProcessedRegions *cache.TTLUint64
 }
 
 // NewReplicaChecker creates a replica checker.
-func NewReplicaChecker(cluster sche.CheckerCluster, conf config.CheckerConfigProvider, pendingProcessedRegions cache.Cache) *ReplicaChecker {
+func NewReplicaChecker(cluster sche.CheckerCluster, conf config.CheckerConfigProvider, pendingProcessedRegions *cache.TTLUint64) *ReplicaChecker {
 	return &ReplicaChecker{
 		cluster:                 cluster,
 		conf:                    conf,
