@@ -15,9 +15,7 @@
 package command
 
 import (
-	"encoding/json"
 	"sort"
-
 	"github.com/spf13/cobra"
 )
 
@@ -52,12 +50,7 @@ func showSSPs(cmd *cobra.Command, _ []string) {
 	sort.Slice(safepoint.ServiceGCSafepoints, func(i, j int) bool {
 		return safepoint.ServiceGCSafepoints[i].SafePoint < safepoint.ServiceGCSafepoints[j].SafePoint
 	})
-	data, err := json.MarshalIndent(safepoint, "", "  ")
-	if err != nil {
-		cmd.Printf("Failed to marshal service GC safepoint: %s\n", err)
-		return
-	}
-	jsonPrint(cmd, string(data))
+	jsonPrint(cmd, safepoint)
 }
 
 func deleteSSP(cmd *cobra.Command, args []string) {

@@ -1029,24 +1029,24 @@ func (c *client) GetKeyspaceMetaByName(ctx context.Context, keyspaceName string)
 
 // GetGCSafePoint get the gc_safepoint
 func (c *client) GetGCSafePoint(ctx context.Context) (ListServiceGCSafepoint, error) {
-	var gcsafepoint ListServiceGCSafepoint
+	var gcSafePoint ListServiceGCSafepoint
 	err := c.request(ctx, newRequestInfo().
 			WithName(GetGCSafePointName).
 			WithURI(safepoint).
 			WithMethod(http.MethodGet).
-			WithResp(&gcsafepoint))
+			WithResp(&gcSafePoint))
 	if err != nil {
-		return gcsafepoint, err
+		return gcSafePoint, err
 	}
-	return gcsafepoint, nil
+	return gcSafePoint, nil
 }
 
-// DeleteGCSafePoint deletes a gc_safepoint
-func (c *client) DeleteGCSafePoint(ctx context.Context, service_id string) (string, error) {
+// DeleteGCSafePoint deletes a gc safepoint
+func (c *client) DeleteGCSafePoint(ctx context.Context, serviceId string) (string, error) {
 	var msg string
 	err := c.request(ctx, newRequestInfo().
 			WithName(DeleteGCSafePointName).
-			WithURI(safepoint+"/"+service_id).
+			WithURI(safepoint+"/"+serviceId).
 			WithMethod(http.MethodDelete).
 			WithResp(&msg))
 	if err != nil {
