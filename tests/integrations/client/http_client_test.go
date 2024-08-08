@@ -835,3 +835,11 @@ func (suite *httpClientTestSuite) TestRetryOnLeaderChange() {
 	cancel()
 	wg.Wait()
 }
+
+func (suite *httpClientTestSuite) TestGetSafePoint() {
+
+}
+
+func (suite *httpClientTestSuite) TestDeleteSafePoint() {
+
+}
