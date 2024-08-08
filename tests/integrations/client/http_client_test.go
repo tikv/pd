@@ -118,17 +118,17 @@ func (suite *httpClientTestSuite) SetupSuite() {
 			{
 				ServiceID: "AAA",
 				ExpiredAt: time.Now().Unix() + 10,
-				SafePoint: 10,
+				SafePoint: 1,
 			},
 			{
 				ServiceID: "BBB",
 				ExpiredAt: time.Now().Unix() + 10,
-				SafePoint: 20,
+				SafePoint: 2,
 			},
 			{
 				ServiceID: "CCC",
 				ExpiredAt: time.Now().Unix() + 10,
-				SafePoint: 30,
+				SafePoint: 3,
 			},
 		},
 		GCSafePoint:           1,
@@ -874,23 +874,23 @@ func (suite *httpClientTestSuite) TestGetSafePoint() {
 	re.NoError(err)
 
 	re.Equal(uint64(1), l.GCSafePoint)
-	re.Equal(uint64(10), l.MinServiceGcSafepoint)
+	re.Equal(uint64(1), l.MinServiceGcSafepoint)
 	re.Len(l.ServiceGCSafepoints, 3)
 
 	for i, val := range l.ServiceGCSafepoints {
 		if i == 0 {
 			re.Equal("AAA", val.ServiceID)
-			re.Equal(uint64(10), val.SafePoint)
+			re.Equal(uint64(1), val.SafePoint)
 		}
 
 		if i == 1 {
 			re.Equal("BBB", val.ServiceID)
-			re.Equal(uint64(20), val.SafePoint)
+			re.Equal(uint64(2), val.SafePoint)
 		}
 
 		if i == 2 {
 			re.Equal("CCC", val.ServiceID)
-			re.Equal(uint64(30), val.SafePoint)
+			re.Equal(uint64(3), val.SafePoint)
 		}
 	}
 }
