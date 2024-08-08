@@ -26,6 +26,7 @@ var LeakOptions = []goleak.Option{
 	goleak.IgnoreTopFunction("sync.runtime_notifyListWait"),
 	// TODO: remove the below options once we fixed the http connection leak problems
 	goleak.IgnoreTopFunction("internal/poll.runtime_pollWait"),
+	goleak.IgnoreTopFunction("net/http.(*persistConn).writeLoop"),
 	// natefinch/lumberjack#56, It's a goroutine leak bug. Another ignore option PR https://github.com/pingcap/tidb/pull/27405/
 	goleak.IgnoreTopFunction("gopkg.in/natefinch/lumberjack%2ev2.(*Logger).millRun"),
 }
