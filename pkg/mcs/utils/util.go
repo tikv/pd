@@ -107,7 +107,7 @@ type server interface {
 	GetGRPCServer() *grpc.Server
 	SetGRPCServer(*grpc.Server)
 	SetHTTPServer(*http.Server)
-	SetETCDClient(*clientv3.Client)
+	SetEtcdClient(*clientv3.Client)
 	SetHTTPClient(*http.Client)
 	IsSecure() bool
 	RegisterGRPCService(*grpc.Server)
@@ -183,7 +183,7 @@ func InitClient(s server) error {
 	if err != nil {
 		return err
 	}
-	s.SetETCDClient(etcdClient)
+	s.SetEtcdClient(etcdClient)
 	s.SetHTTPClient(etcdutil.CreateHTTPClient(tlsConfig))
 	return nil
 }

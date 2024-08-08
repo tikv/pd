@@ -52,14 +52,14 @@ type RuleChecker struct {
 	PauseController
 	cluster                 sche.CheckerCluster
 	ruleManager             *placement.RuleManager
-	pendingProcessedRegions cache.Cache
+	pendingProcessedRegions *cache.TTLUint64
 	pendingList             cache.Cache
 	switchWitnessCache      *cache.TTLUint64
 	record                  *recorder
 }
 
 // NewRuleChecker creates a checker instance.
-func NewRuleChecker(ctx context.Context, cluster sche.CheckerCluster, ruleManager *placement.RuleManager, pendingProcessedRegions cache.Cache) *RuleChecker {
+func NewRuleChecker(ctx context.Context, cluster sche.CheckerCluster, ruleManager *placement.RuleManager, pendingProcessedRegions *cache.TTLUint64) *RuleChecker {
 	return &RuleChecker{
 		cluster:                 cluster,
 		ruleManager:             ruleManager,
@@ -73,6 +73,11 @@ func NewRuleChecker(ctx context.Context, cluster sche.CheckerCluster, ruleManage
 // Name returns RuleChecker's name.
 func (*RuleChecker) Name() string {
 	return types.RuleChecker.String()
+}
+
+// GetType returns RuleChecker's type.
+func (*RuleChecker) GetType() types.CheckerSchedulerType {
+	return types.RuleChecker
 }
 
 // Check checks if the region matches placement rules and returns Operator to

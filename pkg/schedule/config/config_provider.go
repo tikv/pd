@@ -22,6 +22,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/core/storelimit"
+	types "github.com/tikv/pd/pkg/schedule/type"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 )
 
@@ -49,9 +50,9 @@ type SchedulerConfigProvider interface {
 	SetSchedulingAllowanceStatus(bool, string)
 	GetStoresLimit() map[uint64]StoreLimitConfig
 
-	IsSchedulerDisabled(string) bool
-	AddSchedulerCfg(string, []string)
-	RemoveSchedulerCfg(string)
+	IsSchedulerDisabled(types.CheckerSchedulerType) bool
+	AddSchedulerCfg(types.CheckerSchedulerType, []string)
+	RemoveSchedulerCfg(types.CheckerSchedulerType)
 	Persist(endpoint.ConfigStorage) error
 
 	GetRegionScheduleLimit() uint64

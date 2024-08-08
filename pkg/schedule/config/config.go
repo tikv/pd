@@ -27,10 +27,13 @@ import (
 
 const (
 	// DefaultMaxReplicas is the default number of replicas for each region.
-	DefaultMaxReplicas            = 3
-	defaultMaxSnapshotCount       = 64
-	defaultMaxPendingPeerCount    = 64
-	defaultMaxMergeRegionSize     = 20
+	DefaultMaxReplicas         = 3
+	defaultMaxSnapshotCount    = 64
+	defaultMaxPendingPeerCount = 64
+	// defaultMaxMergeRegionSize is the default maximum size of region when regions can be merged.
+	// After https://github.com/tikv/tikv/issues/17309, the default value is enlarged from 20 to 54,
+	// to make it compatible with the default value of region size of tikv.
+	defaultMaxMergeRegionSize     = 54
 	defaultLeaderScheduleLimit    = 4
 	defaultRegionScheduleLimit    = 2048
 	defaultWitnessScheduleLimit   = 4

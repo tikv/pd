@@ -261,7 +261,7 @@ func (t *regionTree) find(item *regionItem) *regionItem {
 		return false
 	})
 
-	if result == nil || !result.Contains(item.GetStartKey()) {
+	if result == nil || !result.contain(item.GetStartKey()) {
 		return nil
 	}
 
@@ -370,7 +370,7 @@ func (t *regionTree) RandomRegions(n int, ranges []KeyRange) []*RegionInfo {
 			// we need to check if the previous item contains the key.
 			if startIndex != 0 && startItem == nil {
 				region = t.tree.GetAt(startIndex - 1).RegionInfo
-				if region.Contains(startKey) {
+				if region.contain(startKey) {
 					startIndex--
 				}
 			}

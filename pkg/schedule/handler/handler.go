@@ -1124,7 +1124,7 @@ func (h *Handler) AccelerateRegionsScheduleInRange(rawStartKey, rawEndKey string
 		for _, region := range regions {
 			regionsIDList = append(regionsIDList, region.GetID())
 		}
-		co.GetCheckerController().AddPendingProcessedRegions(regionsIDList...)
+		co.GetCheckerController().AddPendingProcessedRegions(false, regionsIDList...)
 	}
 	return nil
 }
@@ -1151,7 +1151,7 @@ func (h *Handler) AccelerateRegionsScheduleInRanges(startKeys [][]byte, endKeys 
 		for _, region := range regions {
 			regionsIDList = append(regionsIDList, region.GetID())
 		}
-		co.GetCheckerController().AddPendingProcessedRegions(regionsIDList...)
+		co.GetCheckerController().AddPendingProcessedRegions(false, regionsIDList...)
 	}
 	return nil
 }

@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"context"
 	"sync"
+	"strconv"
 	"time"
 
 	"github.com/pingcap/failpoint"
@@ -37,15 +38,17 @@ import (
 )
 
 const (
+	suspectRegionLimit         = 1024
 	checkSuspectRangesInterval = 100 * time.Millisecond
 	// DefaultPendingRegionCacheSize is the default length of waiting list.
 	DefaultPendingRegionCacheSize = 100000
-	// For 1,024,000 regions, patrolScanRegionLimit is 1000, which is max(patrolScanRegionMinLimit, 1,024,000/patrolRegionPartition)
+	// For 1,024,000 regions, patrolRegionScanLimit is 1000, which is max(MinPatrolRegionScanLimit, 1,024,000/patrolRegionPartition)
+	// In order to avoid the patrolRegionScanLimit to be too big or too small, it will be limited to [128,8192].
 	// It takes about 10s to iterate 1,024,000 regions(with DefaultPatrolRegionInterval=10ms) where other steps are not considered.
-	patrolScanRegionMinLimit = 128
-	patrolRegionChanLen      = 1024
+	MinPatrolRegionScanLimit = 128
+	MaxPatrolScanRegionLimit = 8192
 	patrolRegionPartition    = 1024
-	suspectRegionLimit       = 1024
+	patrolRegionChanLen = MaxPatrolScanRegionLimit
 )
 
 var (
@@ -69,7 +72,7 @@ type Controller struct {
 	mergeChecker            *MergeChecker
 	jointStateChecker       *JointStateChecker
 	priorityInspector       *PriorityInspector
-	pendingProcessedRegions cache.Cache
+	pendingProcessedRegions *cache.TTLUint64
 	suspectKeyRanges        *cache.TTLString // suspect key-range regions that may need fix
 	patrolRegionContext     *PatrolRegionContext
 
@@ -82,14 +85,16 @@ type Controller struct {
 	// interval is the config interval of patrol regions.
 	// It's used to update the ticker, so we need to
 	// record it to avoid updating the ticker frequently.
-	interval    time.Duration
+	interval time.Duration
 	workerCount int
-	scanLimit   int
+	// patrolRegionScanLimit is the limit of regions to scan.
+	// It is calculated by the number of regions.
+	patrolRegionScanLimit int
 }
 
 // NewController create a new Controller.
 func NewController(ctx context.Context, cluster sche.CheckerCluster, conf config.CheckerConfigProvider, ruleManager *placement.RuleManager, labeler *labeler.RegionLabeler, opController *operator.Controller) *Controller {
-	pendingProcessedRegions := cache.NewDefaultCache(DefaultPendingRegionCacheSize)
+	pendingProcessedRegions := cache.NewIDTTL(ctx, time.Minute, 3*time.Minute)
 	return &Controller{
 		ctx:                     ctx,
 		cluster:                 cluster,
@@ -106,6 +111,7 @@ func NewController(ctx context.Context, cluster sche.CheckerCluster, conf config
 		suspectKeyRanges:        cache.NewStringTTL(ctx, time.Minute, 3*time.Minute),
 		patrolRegionContext:     &PatrolRegionContext{},
 		interval:                cluster.GetCheckerConfig().GetPatrolRegionInterval(),
+		patrolRegionScanLimit:   calculateScanLimit(cluster),
 	}
 }
 
@@ -151,13 +157,15 @@ func (c *Controller) PatrolRegions() {
 			}
 			// Updates the label level isolation statistics.
 			c.cluster.UpdateRegionsLabelLevelStats(regions)
-			// Update metrics and scan limit if a full scan is done.
+			// When the key is nil, it means that the scan is finished.
 			if len(key) == 0 {
+				// update the scan limit.
+				c.patrolRegionScanLimit = calculateScanLimit(c.cluster)
+				// update the metrics.
 				dur := time.Since(start)
 				patrolCheckRegionsGauge.Set(dur.Seconds())
 				c.setPatrolRegionsDuration(dur)
 				start = time.Now()
-				c.scanLimit = calculateScanLimit(c.cluster)
 			}
 			failpoint.Inject("breakPatrol", func() {
 				time.Sleep(100 * time.Millisecond) // ensure the regions are handled by the workers
@@ -211,7 +219,7 @@ func (c *Controller) setPatrolRegionsDuration(dur time.Duration) {
 }
 
 func (c *Controller) checkRegions(startKey []byte) (key []byte, regions []*core.RegionInfo) {
-	regions = c.cluster.ScanRegions(startKey, nil, c.scanLimit)
+	regions = c.cluster.ScanRegions(startKey, nil, c.patrolRegionScanLimit)
 	if len(regions) == 0 {
 		// Resets the scan key.
 		key = nil
@@ -292,7 +300,7 @@ func (c *Controller) CheckRegion(region *core.RegionInfo) []*operator.Operator {
 				if opController.OperatorCount(operator.OpReplica) < c.conf.GetReplicaScheduleLimit() {
 					return []*operator.Operator{op}
 				}
-				operator.OperatorLimitCounter.WithLabelValues(c.ruleChecker.Name(), operator.OpReplica.String()).Inc()
+				operator.IncOperatorLimitCounter(c.ruleChecker.GetType(), operator.OpReplica)
 				c.pendingProcessedRegions.Put(region.GetID(), nil)
 			}
 		}
@@ -304,7 +312,7 @@ func (c *Controller) CheckRegion(region *core.RegionInfo) []*operator.Operator {
 			if opController.OperatorCount(operator.OpReplica) < c.conf.GetReplicaScheduleLimit() {
 				return []*operator.Operator{op}
 			}
-			operator.OperatorLimitCounter.WithLabelValues(c.replicaChecker.Name(), operator.OpReplica.String()).Inc()
+			operator.IncOperatorLimitCounter(c.replicaChecker.GetType(), operator.OpReplica)
 			c.pendingProcessedRegions.Put(region.GetID(), nil)
 		}
 	}
@@ -321,7 +329,7 @@ func (c *Controller) CheckRegion(region *core.RegionInfo) []*operator.Operator {
 	if c.mergeChecker != nil {
 		allowed := opController.OperatorCount(operator.OpMerge) < c.conf.GetMergeScheduleLimit()
 		if !allowed {
-			operator.OperatorLimitCounter.WithLabelValues(c.mergeChecker.GetType(), operator.OpMerge.String()).Inc()
+			operator.IncOperatorLimitCounter(c.mergeChecker.GetType(), operator.OpMerge)
 		} else if ops := c.mergeChecker.Check(region); ops != nil {
 			// It makes sure that two operators can be added successfully altogether.
 			return ops
@@ -349,7 +357,7 @@ func (c *Controller) tryAddOperators(region *core.RegionInfo) {
 		c.opController.AddWaitingOperator(ops...)
 		c.RemovePendingProcessedRegion(id)
 	} else {
-		c.AddPendingProcessedRegions(id)
+		c.AddPendingProcessedRegions(true, id)
 	}
 }
 
@@ -365,16 +373,15 @@ func (c *Controller) GetRuleChecker() *RuleChecker {
 
 // GetPendingProcessedRegions returns the pending processed regions in the cache.
 func (c *Controller) GetPendingProcessedRegions() []uint64 {
-	pendingRegions := make([]uint64, 0)
-	for _, item := range c.pendingProcessedRegions.Elems() {
-		pendingRegions = append(pendingRegions, item.Key)
-	}
-	return pendingRegions
+	return c.pendingProcessedRegions.GetAllID()
 }
 
 // AddPendingProcessedRegions adds the pending processed region into the cache.
-func (c *Controller) AddPendingProcessedRegions(ids ...uint64) {
+func (c *Controller) AddPendingProcessedRegions(needCheckLen bool, ids ...uint64) {
 	for _, id := range ids {
+		if needCheckLen && c.pendingProcessedRegions.Len() > DefaultPendingRegionCacheSize {
+			return
+		}
 		c.pendingProcessedRegions.Put(id, nil)
 	}
 }
@@ -423,7 +430,7 @@ func (c *Controller) CheckSuspectRanges() {
 			if lastRegion.GetEndKey() != nil && bytes.Compare(lastRegion.GetEndKey(), keyRange[1]) < 0 {
 				c.AddSuspectKeyRange(lastRegion.GetEndKey(), keyRange[1])
 			}
-			c.AddPendingProcessedRegions(regionIDList...)
+			c.AddPendingProcessedRegions(false, regionIDList...)
 		}
 	}
 }
@@ -501,12 +508,6 @@ func (p *PatrolRegionContext) stop() {
 	p.wg.Wait()
 }
 
-func calculateScanLimit(cluster sche.CheckerCluster) int {
-	scanlimit := max(patrolScanRegionMinLimit, cluster.GetTotalRegionCount()/patrolRegionPartition)
-	scanLimitGauge.Set(float64(scanlimit))
-	return scanlimit
-}
-
 func (p *PatrolRegionContext) startPatrolRegionWorkers(c *Controller) {
 	for i := 0; i < c.workerCount; i++ {
 		p.wg.Add(1)
@@ -528,4 +529,20 @@ func (p *PatrolRegionContext) startPatrolRegionWorkers(c *Controller) {
 			}
 		}(i)
 	}
+}
+
+// GetPatrolRegionScanLimit returns the limit of regions to scan.
+// It only used for test.
+func (c *Controller) GetPatrolRegionScanLimit() int {
+	return c.patrolRegionScanLimit
+}
+
+func calculateScanLimit(cluster sche.CheckerCluster) int {
+	regionCount := cluster.GetTotalRegionCount()
+	failpoint.Inject("regionCount", func(val failpoint.Value) {
+		c, _ := strconv.ParseInt(val.(string), 10, 64)
+		regionCount = int(c)
+	})
+	scanlimit := max(MinPatrolRegionScanLimit, regionCount/patrolRegionPartition)
+	return min(scanlimit, MaxPatrolScanRegionLimit)
 }
