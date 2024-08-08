@@ -311,7 +311,7 @@ func (c *Controller) tryAddOperators(region *core.RegionInfo) {
 		c.opController.AddWaitingOperator(ops...)
 		c.RemovePendingProcessedRegion(id)
 	} else {
-		c.AddPendingProcessedRegions(id)
+		c.AddPendingProcessedRegions(true, id)
 	}
 }
 
@@ -331,9 +331,9 @@ func (c *Controller) GetPendingProcessedRegions() []uint64 {
 }
 
 // AddPendingProcessedRegions adds the pending processed region into the cache.
-func (c *Controller) AddPendingProcessedRegions(ids ...uint64) {
+func (c *Controller) AddPendingProcessedRegions(needCheckLen bool, ids ...uint64) {
 	for _, id := range ids {
-		if c.pendingProcessedRegions.Len() > DefaultPendingRegionCacheSize {
+		if needCheckLen && c.pendingProcessedRegions.Len() > DefaultPendingRegionCacheSize {
 			return
 		}
 		c.pendingProcessedRegions.Put(id, nil)
@@ -384,7 +384,7 @@ func (c *Controller) CheckSuspectRanges() {
 			if lastRegion.GetEndKey() != nil && bytes.Compare(lastRegion.GetEndKey(), keyRange[1]) < 0 {
 				c.AddSuspectKeyRange(lastRegion.GetEndKey(), keyRange[1])
 			}
-			c.AddPendingProcessedRegions(regionIDList...)
+			c.AddPendingProcessedRegions(false, regionIDList...)
 		}
 	}
 }
