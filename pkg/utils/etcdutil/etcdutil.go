@@ -120,7 +120,7 @@ func ListEtcdMembers(ctx context.Context, client *clientv3.Client) (*clientv3.Me
 		time.Sleep(time.Duration(d) * time.Second)
 	})
 	newCtx, cancel := context.WithTimeout(ctx, DefaultRequestTimeout)
-	// After the etcd server is upgraded to v3.5.0, the MemberList API will return the member list in a linearizable way by default.
+	// After the etcd server is upgraded to v3.5.x, the MemberList API will return the member list in a linearizable way by default.
 	// It is introduced by https://github.com/etcd-io/etcd/pull/11639
 	// If Linearizable is set to false, the member list will be returned with server's local data.
 	// If Linearizable is set to true, it is served with linearizable guarantee. If the server is disconnected from quorum, `MemberList` call will fail.
