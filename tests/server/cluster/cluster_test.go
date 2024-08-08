@@ -2058,11 +2058,12 @@ func TestFollowerExitSyncTime(t *testing.T) {
 	re.NoError(leaderServer.BootstrapCluster())
 
 	tempDir := t.TempDir()
-	rs, err := storage.NewRegionStorageWithLevelDBBackend(context.Background(), tempDir, nil)
+	rs, err := storage.NewRegionStorageWithLevelDBBackend(ctx, tempDir, nil)
 	re.NoError(err)
+	defer re.NoError(rs.Close())
 
 	server := mockserver.NewMockServer(
-		context.Background(),
+		ctx,
 		&pdpb.Member{MemberId: 1, Name: "test", ClientUrls: []string{tempurl.Alloc()}},
 		nil,
 		storage.NewCoreStorage(storage.NewStorageWithMemoryBackend(), rs),
