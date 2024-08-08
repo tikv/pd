@@ -20,15 +20,15 @@ import (
 	"crypto/rand"
 	"encoding/binary"
 	"io"
-	"unsafe"
 
 	"github.com/pingcap/kvproto/pkg/encryptionpb"
 	"github.com/tikv/pd/pkg/errs"
 )
 
 const (
-	ivLengthCTR = 16
-	ivLengthGCM = 12
+	ivLengthCTR  = 16
+	ivLengthGCM  = 12
+	keyIDBufSize = 8
 )
 
 // CheckEncryptionMethodSupported check whether the encryption method is currently supported.
@@ -106,7 +106,7 @@ func NewDataKey(
 	if err != nil {
 		return
 	}
-	keyIDBufSize := unsafe.Sizeof(uint64(0))
+
 	keyIDBuf := make([]byte, keyIDBufSize)
 	n, err := io.ReadFull(rand.Reader, keyIDBuf)
 	if err != nil {
@@ -114,7 +114,7 @@ func NewDataKey(
 			"fail to generate data key id")
 		return
 	}
-	if n != int(keyIDBufSize) {
+	if n != keyIDBufSize {
 		err = errs.ErrEncryptionNewDataKey.GenWithStack(
 			"no enough random bytes to generate data key id, bytes %d", n)
 		return

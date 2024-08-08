@@ -125,12 +125,12 @@ type RegionScatterer struct {
 	ordinaryEngine    engineContext
 	specialEngines    sync.Map
 	opController      *operator.Controller
-	addSuspectRegions func(regionIDs ...uint64)
+	addSuspectRegions func(bool, ...uint64)
 }
 
 // NewRegionScatterer creates a region scatterer.
 // RegionScatter is used for the `Lightning`, it will scatter the specified regions before import data.
-func NewRegionScatterer(ctx context.Context, cluster sche.SharedCluster, opController *operator.Controller, addSuspectRegions func(regionIDs ...uint64)) *RegionScatterer {
+func NewRegionScatterer(ctx context.Context, cluster sche.SharedCluster, opController *operator.Controller, addSuspectRegions func(bool, ...uint64)) *RegionScatterer {
 	return &RegionScatterer{
 		ctx:               ctx,
 		name:              regionScatterName,
@@ -275,7 +275,7 @@ func (r *RegionScatterer) scatterRegions(regions map[uint64]*core.RegionInfo, fa
 // in a group level instead of cluster level.
 func (r *RegionScatterer) Scatter(region *core.RegionInfo, group string, skipStoreLimit bool) (*operator.Operator, error) {
 	if !filter.IsRegionReplicated(r.cluster, region) {
-		r.addSuspectRegions(region.GetID())
+		r.addSuspectRegions(false, region.GetID())
 		scatterSkipNotReplicatedCounter.Inc()
 		log.Warn("region not replicated during scatter", zap.Uint64("region-id", region.GetID()))
 		return nil, errors.Errorf("region %d is not fully replicated", region.GetID())

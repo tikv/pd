@@ -715,7 +715,7 @@ func (c *client) GetRegionLabelRulesByIDs(ctx context.Context, ruleIDs []string)
 	var labelRules []*LabelRule
 	err = c.request(ctx, newRequestInfo().
 		WithName(getRegionLabelRulesByIDsName).
-		WithURI(RegionLabelRules).
+		WithURI(RegionLabelRulesByIDs).
 		WithMethod(http.MethodGet).
 		WithBody(idsJSON).
 		WithResp(&labelRules))

@@ -343,7 +343,7 @@ func (c *RaftCluster) Start(s Server) error {
 		log.Error("load external timestamp meets error", zap.Error(err))
 	}
 
-	if s.IsAPIServiceMode() {
+	if c.isAPIServiceMode {
 		// bootstrap keyspace group manager after starting other parts successfully.
 		// This order avoids a stuck goroutine in keyspaceGroupManager when it fails to create raftcluster.
 		err = c.keyspaceGroupManager.Bootstrap(c.ctx)
@@ -1307,6 +1307,9 @@ func (c *RaftCluster) checkStoreLabels(s *core.StoreInfo) error {
 	}
 	for _, label := range s.GetLabels() {
 		key := label.GetKey()
+		if key == core.EngineKey {
+			continue
+		}
 		if _, ok := keysSet[key]; !ok {
 			log.Warn("not found the key match with the store label",
 				zap.Stringer("store", s.GetMeta()),

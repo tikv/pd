@@ -117,18 +117,18 @@ func (c *baseCase) GetConfig() *Config {
 	return c.cfg.Clone()
 }
 
-// ETCDCase is the interface for all etcd api cases.
-type ETCDCase interface {
+// EtcdCase is the interface for all etcd api cases.
+type EtcdCase interface {
 	Case
 	Init(context.Context, *clientv3.Client) error
 	Unary(context.Context, *clientv3.Client) error
 }
 
-// ETCDCreateFn is function type to create ETCDCase.
-type ETCDCreateFn func() ETCDCase
+// EtcdCreateFn is function type to create EtcdCase.
+type EtcdCreateFn func() EtcdCase
 
-// ETCDCaseFnMap is the map for all ETCD case creation function.
-var ETCDCaseFnMap = map[string]ETCDCreateFn{
+// EtcdCaseFnMap is the map for all etcd case creation function.
+var EtcdCaseFnMap = map[string]EtcdCreateFn{
 	"Get":    newGetKV(),
 	"Put":    newPutKV(),
 	"Delete": newDeleteKV(),
@@ -440,8 +440,8 @@ type getKV struct {
 	*baseCase
 }
 
-func newGetKV() func() ETCDCase {
-	return func() ETCDCase {
+func newGetKV() func() EtcdCase {
+	return func() EtcdCase {
 		return &getKV{
 			baseCase: &baseCase{
 				name: "Get",
@@ -470,8 +470,8 @@ type putKV struct {
 	*baseCase
 }
 
-func newPutKV() func() ETCDCase {
-	return func() ETCDCase {
+func newPutKV() func() EtcdCase {
+	return func() EtcdCase {
 		return &putKV{
 			baseCase: &baseCase{
 				name: "Put",
@@ -492,8 +492,8 @@ type deleteKV struct {
 	*baseCase
 }
 
-func newDeleteKV() func() ETCDCase {
-	return func() ETCDCase {
+func newDeleteKV() func() EtcdCase {
+	return func() EtcdCase {
 		return &deleteKV{
 			baseCase: &baseCase{
 				name: "Put",
@@ -514,8 +514,8 @@ type txnKV struct {
 	*baseCase
 }
 
-func newTxnKV() func() ETCDCase {
-	return func() ETCDCase {
+func newTxnKV() func() EtcdCase {
+	return func() EtcdCase {
 		return &txnKV{
 			baseCase: &baseCase{
 				name: "Put",
