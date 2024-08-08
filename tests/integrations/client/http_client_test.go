@@ -113,44 +113,6 @@ func (suite *httpClientTestSuite) SetupSuite() {
 	suite.endpoints = endpoints
 	suite.cluster = cluster
 
-	list := &api.ListServiceGCSafepoint{
-		ServiceGCSafepoints: []*endpoint.ServiceSafePoint{
-			{
-				ServiceID: "AAA",
-				ExpiredAt: time.Now().Unix() + 10,
-				SafePoint: 1,
-			},
-			{
-				ServiceID: "BBB",
-				ExpiredAt: time.Now().Unix() + 10,
-				SafePoint: 2,
-			},
-			{
-				ServiceID: "CCC",
-				ExpiredAt: time.Now().Unix() + 10,
-				SafePoint: 3,
-			},
-		},
-		GCSafePoint:           1,
-		MinServiceGcSafepoint: 1,
-	}
-
-	storage := suite.cluster.GetLeaderServer().GetServer().GetStorage()
-	for _, ssp := range list.ServiceGCSafepoints {
-		err := storage.SaveServiceGCSafePoint(ssp)
-		re.NoError(err)
-	}
-	storage.SaveGCSafePoint(1)
-
-	// for _, s := range testServers {
-	// 	storage := s.GetServer().GetStorage()
-	// 	for _, ssp := range list.ServiceGCSafepoints {
-	// 		err := storage.SaveServiceGCSafePoint(ssp)
-	// 		re.NoError(err)
-	// 	}
-	// 	storage.SaveGCSafePoint(1)
-	// }
-
 	if suite.withServiceDiscovery {
 		// Run test with specific service discovery.
 		cli := setupCli(suite.ctx, re, suite.endpoints)
@@ -882,12 +844,50 @@ func (suite *httpClientTestSuite) TestGetSafePoint() {
 	ctx, cancel := context.WithCancel(suite.ctx)
 	defer cancel()
 
+	list := &api.ListServiceGCSafepoint{
+		ServiceGCSafepoints: []*endpoint.ServiceSafePoint{
+			{
+				ServiceID: "AAA",
+				ExpiredAt: time.Now().Unix() + 10,
+				SafePoint: 1,
+			},
+			{
+				ServiceID: "BBB",
+				ExpiredAt: time.Now().Unix() + 10,
+				SafePoint: 2,
+			},
+			{
+				ServiceID: "CCC",
+				ExpiredAt: time.Now().Unix() + 10,
+				SafePoint: 3,
+			},
+		},
+		GCSafePoint:           1,
+		MinServiceGcSafepoint: 1,
+	}
+
+	storage := suite.cluster.GetLeaderServer().GetServer().GetStorage()
+	for _, ssp := range list.ServiceGCSafepoints {
+		err := storage.SaveServiceGCSafePoint(ssp)
+		re.NoError(err)
+	}
+	storage.SaveGCSafePoint(1)
+
+	// for _, s := range testServers {
+	// 	storage := s.GetServer().GetStorage()
+	// 	for _, ssp := range list.ServiceGCSafepoints {
+	// 		err := storage.SaveServiceGCSafePoint(ssp)
+	// 		re.NoError(err)
+	// 	}
+	// 	storage.SaveGCSafePoint(1)
+	// }
+
 	l, err := client.GetGCSafePoint(ctx)
 	re.NoError(err)
 
-	// re.Equal(uint64(1), l.GCSafePoint)
-	// re.Equal(uint64(1), l.MinServiceGcSafepoint)
-	// re.Len(l.ServiceGCSafepoints, 3)
+	re.Equal(uint64(1), l.GCSafePoint)
+	re.Equal(uint64(1), l.MinServiceGcSafepoint)
+	re.Len(l.ServiceGCSafepoints, 3)
 
 	for i, val := range l.ServiceGCSafepoints {
 		if i == 0 {
@@ -905,13 +905,6 @@ func (suite *httpClientTestSuite) TestGetSafePoint() {
 			re.Equal(uint64(3), val.SafePoint)
 		}
 	}
-}
-
-func (suite *httpClientTestSuite) TestDeleteSafePoint() {
-	re := suite.Require()
-	client := suite.client
-	ctx, cancel := context.WithCancel(suite.ctx)
-	defer cancel()
 
 	msg1, err1 := client.DeleteGCSafePoint(ctx, "AAA")
 	re.NoError(err1)
@@ -928,3 +921,25 @@ func (suite *httpClientTestSuite) TestDeleteSafePoint() {
 	_, err4 := client.DeleteGCSafePoint(ctx, "gc_worker")
 	re.Error(err4)
 }
+
+// func (suite *httpClientTestSuite) TestDeleteSafePoint() {
+// 	re := suite.Require()
+// 	client := suite.client
+// 	ctx, cancel := context.WithCancel(suite.ctx)
+// 	defer cancel()
+
+// 	msg1, err1 := client.DeleteGCSafePoint(ctx, "AAA")
+// 	re.NoError(err1)
+// 	re.Equal("Delete service GC safepoint successfully.", msg1)
+
+// 	msg2, err2 := client.DeleteGCSafePoint(ctx, "BBB")
+// 	re.NoError(err2)
+// 	re.Equal("Delete service GC safepoint successfully.", msg2)
+
+// 	msg3, err3 := client.DeleteGCSafePoint(ctx, "DDD")
+// 	re.NoError(err3)
+// 	re.Equal("Delete service GC safepoint successfully.", msg3)
+
+// 	_, err4 := client.DeleteGCSafePoint(ctx, "gc_worker")
+// 	re.Error(err4)
+// }
