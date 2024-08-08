@@ -37,9 +37,11 @@ import (
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/placement"
+	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/versioninfo"
+	"github.com/tikv/pd/server/api"
 	"github.com/tikv/pd/tests"
 )
 
@@ -110,6 +112,36 @@ func (suite *httpClientTestSuite) SetupSuite() {
 	}
 	suite.endpoints = endpoints
 	suite.cluster = cluster
+
+	list := &api.ListServiceGCSafepoint{
+		ServiceGCSafepoints: []*endpoint.ServiceSafePoint{
+			{
+				ServiceID: "AAA",
+				ExpiredAt: time.Now().Unix() + 10,
+				SafePoint: 10,
+			},
+			{
+				ServiceID: "BBB",
+				ExpiredAt: time.Now().Unix() + 10,
+				SafePoint: 20,
+			},
+			{
+				ServiceID: "CCC",
+				ExpiredAt: time.Now().Unix() + 10,
+				SafePoint: 30,
+			},
+		},
+		GCSafePoint:           1,
+		MinServiceGcSafepoint: 1,
+	}
+	for _, s := range testServers {
+		storage := s.GetServer().GetStorage()
+		for _, ssp := range list.ServiceGCSafepoints {
+			err := storage.SaveServiceGCSafePoint(ssp)
+			re.NoError(err)
+		}
+		storage.SaveGCSafePoint(1)
+	}
 
 	if suite.withServiceDiscovery {
 		// Run test with specific service discovery.
@@ -837,9 +869,47 @@ func (suite *httpClientTestSuite) TestRetryOnLeaderChange() {
 }
 
 func (suite *httpClientTestSuite) TestGetSafePoint() {
+	re := suite.Require()
+	l, err := suite.client.GetGCSafePoint(suite.ctx)
+	re.NoError(err)
 
+	re.Equal(l.GCSafePoint, uint64(1))
+	re.Equal(l.MinServiceGcSafepoint, uint64(10))
+	re.Equal(len(l.ServiceGCSafepoints), 3)
+
+	for i, val := range l.ServiceGCSafepoints {
+		if i == 0 {
+			re.Equal(val.ServiceID, "AAA")
+			re.Equal(val.SafePoint, uint64(10))
+		}
+
+		if i == 1 {
+			re.Equal(val.ServiceID, "BBB")
+			re.Equal(val.SafePoint, uint64(20))
+		}
+
+		if i == 2 {
+			re.Equal(val.ServiceID, "CCC")
+			re.Equal(val.SafePoint, uint64(30))
+
+		}
+	}
 }
 
 func (suite *httpClientTestSuite) TestDeleteSafePoint() {
+	re := suite.Require()
+	msg1, err1 := suite.client.DeleteGCSafePoint(suite.ctx, "AAA")
+	re.NoError(err1)
+	re.Equal(msg1, "Delete service GC safepoint successfully.")
 
+	msg2, err2 := suite.client.DeleteGCSafePoint(suite.ctx, "BBB")
+	re.NoError(err2)
+	re.Equal(msg2, "Delete service GC safepoint successfully.")
+
+	msg3, err3 := suite.client.DeleteGCSafePoint(suite.ctx, "DDD")
+	re.NoError(err3)
+	re.Equal(msg3, "Delete service GC safepoint successfully.")
+
+	_, err4 := suite.client.DeleteGCSafePoint(suite.ctx, "gc_worker")
+	re.True(err4 != nil)
 }
