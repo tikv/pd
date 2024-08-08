@@ -1042,11 +1042,11 @@ func (c *client) GetGCSafePoint(ctx context.Context) (ListServiceGCSafepoint, er
 }
 
 // DeleteGCSafePoint deletes a gc safepoint
-func (c *client) DeleteGCSafePoint(ctx context.Context, serviceId string) (string, error) {
+func (c *client) DeleteGCSafePoint(ctx context.Context, serviceID string) (string, error) {
 	var msg string
 	err := c.request(ctx, newRequestInfo().
 		WithName(DeleteGCSafePointName).
-		WithURI(safepoint+"/"+serviceId).
+		WithURI(safepoint+"/"+serviceID).
 		WithMethod(http.MethodDelete).
 		WithResp(&msg))
 	if err != nil {
