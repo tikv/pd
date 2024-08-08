@@ -873,15 +873,6 @@ func (suite *httpClientTestSuite) TestGetSafePoint() {
 	}
 	storage.SaveGCSafePoint(1)
 
-	// for _, s := range testServers {
-	// 	storage := s.GetServer().GetStorage()
-	// 	for _, ssp := range list.ServiceGCSafepoints {
-	// 		err := storage.SaveServiceGCSafePoint(ssp)
-	// 		re.NoError(err)
-	// 	}
-	// 	storage.SaveGCSafePoint(1)
-	// }
-
 	l, err := client.GetGCSafePoint(ctx)
 	re.NoError(err)
 
@@ -921,25 +912,3 @@ func (suite *httpClientTestSuite) TestGetSafePoint() {
 	_, err4 := client.DeleteGCSafePoint(ctx, "gc_worker")
 	re.Error(err4)
 }
-
-// func (suite *httpClientTestSuite) TestDeleteSafePoint() {
-// 	re := suite.Require()
-// 	client := suite.client
-// 	ctx, cancel := context.WithCancel(suite.ctx)
-// 	defer cancel()
-
-// 	msg1, err1 := client.DeleteGCSafePoint(ctx, "AAA")
-// 	re.NoError(err1)
-// 	re.Equal("Delete service GC safepoint successfully.", msg1)
-
-// 	msg2, err2 := client.DeleteGCSafePoint(ctx, "BBB")
-// 	re.NoError(err2)
-// 	re.Equal("Delete service GC safepoint successfully.", msg2)
-
-// 	msg3, err3 := client.DeleteGCSafePoint(ctx, "DDD")
-// 	re.NoError(err3)
-// 	re.Equal("Delete service GC safepoint successfully.", msg3)
-
-// 	_, err4 := client.DeleteGCSafePoint(ctx, "gc_worker")
-// 	re.Error(err4)
-// }
