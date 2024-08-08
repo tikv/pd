@@ -73,7 +73,7 @@ const (
 	LabelScheduler CheckerSchedulerType = "label-scheduler"
 )
 
-// TODO: SchedulerTypeCompatibleMap and ConvertOldStr2Type should be removed after
+// TODO: SchedulerTypeCompatibleMap and ConvertOldStrToType should be removed after
 // fixing this issue(https://github.com/tikv/pd/issues/8474).
 var (
 	// SchedulerTypeCompatibleMap exists for compatibility.
@@ -100,10 +100,10 @@ var (
 		LabelScheduler:                 "label",
 	}
 
-	// ConvertOldStr2Type exists for compatibility.
+	// ConvertOldStrToType exists for compatibility.
 	//
 	//	It is used to convert the old scheduler type to `CheckerSchedulerType`.
-	ConvertOldStr2Type = map[string]CheckerSchedulerType{
+	ConvertOldStrToType = map[string]CheckerSchedulerType{
 		"balance-leader":          BalanceLeaderScheduler,
 		"balance-region":          BalanceRegionScheduler,
 		"balance-witness":         BalanceWitnessScheduler,
