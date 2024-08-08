@@ -95,8 +95,8 @@ func (bs *BaseServer) GetHTTPClient() *http.Client {
 	return bs.httpClient
 }
 
-// SetETCDClient sets the etcd client.
-func (bs *BaseServer) SetETCDClient(etcdClient *clientv3.Client) {
+// SetEtcdClient sets the etcd client.
+func (bs *BaseServer) SetEtcdClient(etcdClient *clientv3.Client) {
 	bs.etcdClient = etcdClient
 }
 

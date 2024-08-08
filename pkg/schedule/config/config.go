@@ -20,6 +20,7 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/pkg/core/storelimit"
+	types "github.com/tikv/pd/pkg/schedule/type"
 	"github.com/tikv/pd/pkg/utils/configutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
@@ -571,10 +572,10 @@ type SchedulerConfig struct {
 // If these schedulers are not in the persistent configuration, they
 // will be created automatically when reloading.
 var DefaultSchedulers = SchedulerConfigs{
-	{Type: "balance-region"},
-	{Type: "balance-leader"},
-	{Type: "hot-region"},
-	{Type: "evict-slow-store"},
+	{Type: types.SchedulerTypeCompatibleMap[types.BalanceRegionScheduler]},
+	{Type: types.SchedulerTypeCompatibleMap[types.BalanceLeaderScheduler]},
+	{Type: types.SchedulerTypeCompatibleMap[types.BalanceHotRegionScheduler]},
+	{Type: types.SchedulerTypeCompatibleMap[types.EvictSlowStoreScheduler]},
 }
 
 // IsDefaultScheduler checks whether the scheduler is enabled by default.
