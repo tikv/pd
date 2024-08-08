@@ -134,14 +134,22 @@ func (suite *httpClientTestSuite) SetupSuite() {
 		GCSafePoint:           1,
 		MinServiceGcSafepoint: 1,
 	}
-	for _, s := range testServers {
-		storage := s.GetServer().GetStorage()
-		for _, ssp := range list.ServiceGCSafepoints {
-			err := storage.SaveServiceGCSafePoint(ssp)
-			re.NoError(err)
-		}
-		storage.SaveGCSafePoint(1)
+
+	storage := suite.cluster.GetLeaderServer().GetServer().GetStorage()
+	for _, ssp := range list.ServiceGCSafepoints {
+		err := storage.SaveServiceGCSafePoint(ssp)
+		re.NoError(err)
 	}
+	storage.SaveGCSafePoint(1)
+
+	// for _, s := range testServers {
+	// 	storage := s.GetServer().GetStorage()
+	// 	for _, ssp := range list.ServiceGCSafepoints {
+	// 		err := storage.SaveServiceGCSafePoint(ssp)
+	// 		re.NoError(err)
+	// 	}
+	// 	storage.SaveGCSafePoint(1)
+	// }
 
 	if suite.withServiceDiscovery {
 		// Run test with specific service discovery.
@@ -870,7 +878,11 @@ func (suite *httpClientTestSuite) TestRetryOnLeaderChange() {
 
 func (suite *httpClientTestSuite) TestGetSafePoint() {
 	re := suite.Require()
-	l, err := suite.client.GetGCSafePoint(suite.ctx)
+	client := suite.client
+	ctx, cancel := context.WithCancel(suite.ctx)
+	defer cancel()
+
+	l, err := client.GetGCSafePoint(ctx)
 	re.NoError(err)
 
 	re.Equal(uint64(1), l.GCSafePoint)
@@ -897,18 +909,22 @@ func (suite *httpClientTestSuite) TestGetSafePoint() {
 
 func (suite *httpClientTestSuite) TestDeleteSafePoint() {
 	re := suite.Require()
-	msg1, err1 := suite.client.DeleteGCSafePoint(suite.ctx, "AAA")
+	client := suite.client
+	ctx, cancel := context.WithCancel(suite.ctx)
+	defer cancel()
+
+	msg1, err1 := client.DeleteGCSafePoint(ctx, "AAA")
 	re.NoError(err1)
 	re.Equal("Delete service GC safepoint successfully.", msg1)
 
-	msg2, err2 := suite.client.DeleteGCSafePoint(suite.ctx, "BBB")
+	msg2, err2 := client.DeleteGCSafePoint(ctx, "BBB")
 	re.NoError(err2)
 	re.Equal("Delete service GC safepoint successfully.", msg2)
 
-	msg3, err3 := suite.client.DeleteGCSafePoint(suite.ctx, "DDD")
+	msg3, err3 := client.DeleteGCSafePoint(ctx, "DDD")
 	re.NoError(err3)
 	re.Equal("Delete service GC safepoint successfully.", msg3)
 
-	_, err4 := suite.client.DeleteGCSafePoint(suite.ctx, "gc_worker")
+	_, err4 := client.DeleteGCSafePoint(ctx, "gc_worker")
 	re.Error(err4)
 }
