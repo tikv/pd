@@ -27,7 +27,6 @@ linters-settings:
     # To specify a set of rules to explicitly exclude.
     # Available rules: https://github.com/securego/gosec#available-rules
     excludes:
-      - G402
       - G404
   testifylint:
     enable:
