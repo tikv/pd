@@ -255,7 +255,6 @@ func showConfigCommandFunc(cmd *cobra.Command, _ []string) {
 
 var hideConfig = []string{
 	"schedulers-v2",
-	"schedulers-payload",
 	"store-limit",
 	"enable-remove-down-replica",
 	"enable-replace-offline-replica",

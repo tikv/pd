@@ -130,7 +130,6 @@ func (suite *configTestSuite) checkConfig(cluster *pdTests.TestCluster) {
 
 	// hidden config
 	scheduleConfig.Schedulers = nil
-	scheduleConfig.SchedulersPayload = nil
 	scheduleConfig.StoreLimit = nil
 	scheduleConfig.SchedulerMaxWaitingOperator = 0
 	scheduleConfig.EnableRemoveDownReplica = false

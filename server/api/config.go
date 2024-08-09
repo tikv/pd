@@ -343,7 +343,6 @@ func (h *confHandler) GetScheduleConfig(w http.ResponseWriter, r *http.Request) 
 			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		cfg.Schedule.SchedulersPayload = nil
 		h.rd.JSON(w, http.StatusOK, cfg.Schedule)
 		return
 	}
