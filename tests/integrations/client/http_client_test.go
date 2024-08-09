@@ -868,55 +868,51 @@ func (suite *httpClientTestSuite) TestRetryOnLeaderChange() {
 }
 
 func (suite *httpClientTestSuite) TestGetGCSafePoint() {
+	re := suite.Require()
+	client := suite.client
+	ctx, cancel := context.WithCancel(suite.ctx)
+	defer cancel()
 
+	l, err := client.GetGCSafePoint(ctx)
+	re.NoError(err)
+
+	re.Equal(uint64(1), l.GCSafePoint)
+	re.Equal(uint64(1), l.MinServiceGcSafepoint)
+	re.Len(l.ServiceGCSafepoints, 3)
+
+	list := &api.ListServiceGCSafepoint{
+		ServiceGCSafepoints: []*endpoint.ServiceSafePoint{
+			{
+				ServiceID: "AAA",
+				ExpiredAt: time.Now().Unix() + 10,
+				SafePoint: 1,
+			},
+			{
+				ServiceID: "BBB",
+				ExpiredAt: time.Now().Unix() + 10,
+				SafePoint: 2,
+			},
+			{
+				ServiceID: "CCC",
+				ExpiredAt: time.Now().Unix() + 10,
+				SafePoint: 3,
+			},
+		},
+		GCSafePoint:           1,
+		MinServiceGcSafepoint: 1,
+	}
+
+	for i, val := range l.ServiceGCSafepoints {
+		re.Equal(list.ServiceGCSafepoints[i].ServiceID, val.ServiceID)
+		re.Equal(list.ServiceGCSafepoints[i].SafePoint, val.SafePoint)
+	}
+
+	// for i := 0; i < 3; i++ {
+	// 	msg, err := client.DeleteGCSafePoint(ctx, list.ServiceGCSafepoints[i].ServiceID)
+	// 	re.NoError(err)
+	// 	re.Equal("Delete service GC safepoint successfully.", msg)
+	// }
+
+	_, err4 := client.DeleteGCSafePoint(ctx, "gc_worker")
+	re.Error(err4)
 }
-
-// func (suite *httpClientTestSuite) TestGetGCSafePoint() {
-// 	re := suite.Require()
-// 	client := suite.client
-// 	ctx, cancel := context.WithCancel(suite.ctx)
-// 	defer cancel()
-
-// 	l, err := client.GetGCSafePoint(ctx)
-// 	re.NoError(err)
-
-// 	re.Equal(uint64(1), l.GCSafePoint)
-// 	re.Equal(uint64(1), l.MinServiceGcSafepoint)
-// 	re.Len(l.ServiceGCSafepoints, 3)
-
-// 	list := &api.ListServiceGCSafepoint{
-// 		ServiceGCSafepoints: []*endpoint.ServiceSafePoint{
-// 			{
-// 				ServiceID: "AAA",
-// 				ExpiredAt: time.Now().Unix() + 10,
-// 				SafePoint: 1,
-// 			},
-// 			{
-// 				ServiceID: "BBB",
-// 				ExpiredAt: time.Now().Unix() + 10,
-// 				SafePoint: 2,
-// 			},
-// 			{
-// 				ServiceID: "CCC",
-// 				ExpiredAt: time.Now().Unix() + 10,
-// 				SafePoint: 3,
-// 			},
-// 		},
-// 		GCSafePoint:           1,
-// 		MinServiceGcSafepoint: 1,
-// 	}
-
-// 	for i, val := range l.ServiceGCSafepoints {
-// 		re.Equal(list.ServiceGCSafepoints[i].ServiceID, val.ServiceID)
-// 		re.Equal(list.ServiceGCSafepoints[i].SafePoint, val.SafePoint)
-// 	}
-
-// 	for i := 0; i < 3; i++ {
-// 		msg, err := client.DeleteGCSafePoint(ctx, list.ServiceGCSafepoints[i].ServiceID)
-// 		re.NoError(err)
-// 		re.Equal("Delete service GC safepoint successfully.", msg)
-// 	}
-
-// 	_, err4 := client.DeleteGCSafePoint(ctx, "gc_worker")
-// 	re.Error(err4)
-// }
