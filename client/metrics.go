@@ -39,13 +39,14 @@ func initAndRegisterMetrics(constLabels prometheus.Labels) {
 }
 
 var (
-	cmdDuration         *prometheus.HistogramVec
-	cmdFailedDuration   *prometheus.HistogramVec
-	requestDuration     *prometheus.HistogramVec
-	tsoBestBatchSize    prometheus.Histogram
-	tsoBatchSize        prometheus.Histogram
-	tsoBatchSendLatency prometheus.Histogram
-	requestForwarded    *prometheus.GaugeVec
+	cmdDuration              *prometheus.HistogramVec
+	cmdFailedDuration        *prometheus.HistogramVec
+	requestDuration          *prometheus.HistogramVec
+	tsoBestBatchSize         prometheus.Histogram
+	tsoBatchSize             prometheus.Histogram
+	tsoBatchSendLatency      prometheus.Histogram
+	requestForwarded         *prometheus.GaugeVec
+	ongoingRequestCountGauge *prometheus.GaugeVec
 )
 
 func initMetrics(constLabels prometheus.Labels) {
@@ -117,6 +118,15 @@ func initMetrics(constLabels prometheus.Labels) {
 			Help:        "The status to indicate if the request is forwarded",
 			ConstLabels: constLabels,
 		}, []string{"host", "delegate"})
+
+	ongoingRequestCountGauge = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace:   "pd_client",
+			Subsystem:   "request",
+			Name:        "ongoing_requests_count",
+			Help:        "Current count of ongoing batch tso requests",
+			ConstLabels: constLabels,
+		}, []string{"stream"})
 }
 
 var (
