@@ -867,6 +867,10 @@ func (suite *httpClientTestSuite) TestRetryOnLeaderChange() {
 	wg.Wait()
 }
 
+func (suite *httpClientTestSuite) TestGetGCSafePoint() {
+
+}
+
 // func (suite *httpClientTestSuite) TestGetGCSafePoint() {
 // 	re := suite.Require()
 // 	client := suite.client
