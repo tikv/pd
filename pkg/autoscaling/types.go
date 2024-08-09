@@ -21,7 +21,7 @@ import (
 	"strings"
 
 	"github.com/tikv/pd/pkg/utils/etcdutil"
-	"go.etcd.io/etcd/clientv3"
+	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
 // Strategy within a HTTP request provides rules and resources to help make decision for auto scaling.

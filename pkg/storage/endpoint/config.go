@@ -19,7 +19,7 @@ import (
 	"strings"
 
 	"github.com/tikv/pd/pkg/errs"
-	"go.etcd.io/etcd/clientv3"
+	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
 // ConfigStorage defines the storage operations on the config.

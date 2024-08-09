@@ -38,8 +38,8 @@ import (
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/versioninfo"
-	"go.etcd.io/etcd/clientv3"
-	"go.etcd.io/etcd/pkg/types"
+	etcdtypes "go.etcd.io/etcd/client/pkg/v3/types"
+	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/keepalive"
@@ -175,7 +175,7 @@ func InitClient(s server) error {
 	if err != nil {
 		return err
 	}
-	backendUrls, err := types.NewURLs(strings.Split(s.GetBackendEndpoints(), ","))
+	backendUrls, err := etcdtypes.NewURLs(strings.Split(s.GetBackendEndpoints(), ","))
 	if err != nil {
 		return err
 	}
