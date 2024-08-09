@@ -331,8 +331,8 @@ func (m *EmbeddedEtcdMember) GetEtcdLeader() uint64 {
 }
 
 // IsSameLeader checks whether a server is the leader itself.
-func (m *EmbeddedEtcdMember) IsSameLeader(leader *pdpb.Member) bool {
-	return leader.GetMemberId() == m.ID()
+func (m *EmbeddedEtcdMember) IsSameLeader(leader any) bool {
+	return leader.(*pdpb.Member).GetMemberId() == m.ID()
 }
 
 // InitMemberInfo initializes the member info.

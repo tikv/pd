@@ -26,9 +26,11 @@ import (
 	"github.com/pingcap/kvproto/pkg/tsopb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/mcs/discovery"
 	tsoserver "github.com/tikv/pd/pkg/mcs/tso/server"
 	"github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/pkg/tso"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/apiutil/multiservicesapi"
 	"github.com/tikv/pd/pkg/utils/logutil"
@@ -97,6 +99,7 @@ func NewService(srv *tsoserver.Service) *Service {
 	s.RegisterKeyspaceGroupRouter()
 	s.RegisterHealthRouter()
 	s.RegisterConfigRouter()
+	s.RegisterPrimaryRouter()
 	return s
 }
 
@@ -123,6 +126,12 @@ func (s *Service) RegisterHealthRouter() {
 func (s *Service) RegisterConfigRouter() {
 	router := s.root.Group("config")
 	router.GET("", getConfig)
+}
+
+// RegisterPrimaryRouter registers the router of the config handler.
+func (s *Service) RegisterPrimaryRouter() {
+	router := s.root.Group("primary")
+	router.POST("transfer", transferPrimary)
 }
 
 func changeLogLevel(c *gin.Context) {
@@ -264,4 +273,46 @@ func GetKeyspaceGroupMembers(c *gin.Context) {
 func getConfig(c *gin.Context) {
 	svr := c.MustGet(multiservicesapi.ServiceContextKey).(*tsoserver.Service)
 	c.IndentedJSON(http.StatusOK, svr.GetConfig())
+}
+
+// TransferPrimary transfers the primary member of the specified service.
+// @Tags     primary
+// @Summary  Transfer the primary member of the specified service.
+// @Produce  json
+// @Param    service     path    string  true  "service name"
+// @Param    new_primary body   string  false "new primary name"
+// @Param    keyspace_group_id body   string  false "keyspace group id"
+// @Success  200  string  string
+// @Router   /primary/transfer [post]
+func transferPrimary(c *gin.Context) {
+	svr := c.MustGet(multiservicesapi.ServiceContextKey).(*tsoserver.Service)
+	var input map[string]string
+	if err := c.BindJSON(&input); err != nil {
+		c.String(http.StatusBadRequest, err.Error())
+		return
+	}
+
+	newPrimary, keyspaceGroupID := "", utils.DefaultKeyspaceGroupID
+	if v, ok := input["new_primary"]; ok {
+		newPrimary = v
+	}
+
+	allocator, err := svr.GetTSOAllocatorManager(keyspaceGroupID)
+	if err != nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	globalAllocator, err := allocator.GetAllocator(tso.GlobalDCLocation)
+	if err != nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	if err := discovery.TransferPrimary(svr.GetClient(), globalAllocator.(*tso.GlobalTSOAllocator).GetExpectedPrimaryLease(),
+		utils.TSOServiceName, svr.GetAddr(), newPrimary, keyspaceGroupID); err != nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
+		return
+	}
+	c.IndentedJSON(http.StatusOK, "success")
 }
