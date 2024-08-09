@@ -279,6 +279,7 @@ type ScheduleConfig struct {
 	Schedulers SchedulerConfigs `toml:"schedulers" json:"schedulers-v2"` // json v2 is for the sake of compatible upgrade
 
 	// Only used to display
+	// Deprecated: not used anymore
 	SchedulersPayload map[string]any `toml:"schedulers-payload" json:"schedulers-payload"`
 
 	// Controls the time interval between write hot regions info into leveldb.
@@ -324,7 +325,6 @@ func (c *ScheduleConfig) Clone() *ScheduleConfig {
 	cfg := *c
 	cfg.StoreLimit = storeLimit
 	cfg.Schedulers = schedulers
-	cfg.SchedulersPayload = nil
 	return &cfg
 }
 

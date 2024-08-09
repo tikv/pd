@@ -63,7 +63,6 @@ import (
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/hbstream"
 	"github.com/tikv/pd/pkg/schedule/placement"
-	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
@@ -982,14 +981,6 @@ func (s *Server) GetConfig() *config.Config {
 	cfg.MicroService = *s.persistOptions.GetMicroServiceConfig().Clone()
 	cfg.LabelProperty = s.persistOptions.GetLabelPropertyConfig().Clone()
 	cfg.ClusterVersion = *s.persistOptions.GetClusterVersion()
-	if s.storage == nil {
-		return cfg
-	}
-	sches, configs, err := s.storage.LoadAllSchedulerConfigs()
-	if err != nil {
-		return cfg
-	}
-	cfg.Schedule.SchedulersPayload = schedulers.ToPayload(sches, configs)
 	return cfg
 }
 
@@ -1054,7 +1045,6 @@ func (s *Server) SetScheduleConfig(cfg sc.ScheduleConfig) error {
 		return err
 	}
 	old := s.persistOptions.GetScheduleConfig()
-	cfg.SchedulersPayload = nil
 	s.persistOptions.SetScheduleConfig(&cfg)
 	if err := s.persistOptions.Persist(s.storage); err != nil {
 		s.persistOptions.SetScheduleConfig(old)
