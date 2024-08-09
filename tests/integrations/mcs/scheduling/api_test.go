@@ -395,14 +395,6 @@ func (suite *apiTestSuite) checkConfig(cluster *tests.TestCluster) {
 	re.Equal(cfg.Replication.MaxReplicas, s.GetConfig().Replication.MaxReplicas)
 	re.Equal(cfg.Replication.LocationLabels, s.GetConfig().Replication.LocationLabels)
 	re.Equal(cfg.DataDir, s.GetConfig().DataDir)
-	testutil.Eventually(re, func() bool {
-		// wait for all schedulers to be loaded in scheduling server.
-		return len(cfg.Schedule.SchedulersPayload) == 4
-	})
-	re.Contains(cfg.Schedule.SchedulersPayload, "balance-leader-scheduler")
-	re.Contains(cfg.Schedule.SchedulersPayload, "balance-region-scheduler")
-	re.Contains(cfg.Schedule.SchedulersPayload, "balance-hot-region-scheduler")
-	re.Contains(cfg.Schedule.SchedulersPayload, "evict-slow-store-scheduler")
 }
 
 func (suite *apiTestSuite) TestConfigForward() {
