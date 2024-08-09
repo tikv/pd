@@ -24,7 +24,13 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/core/constant"
+	"github.com/tikv/pd/pkg/utils/testutil"
+	"go.uber.org/goleak"
 )
+
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+}
 
 func TestStoreLimit(t *testing.T) {
 	re := require.New(t)
