@@ -1746,7 +1746,7 @@ func (s *Server) campaignLeader() {
 			return
 		}
 		defer func() {
-			s.tsoAllocatorManager.ResetAllocatorGroup(tso.GlobalDCLocation)
+			s.tsoAllocatorManager.ResetAllocatorGroup(tso.GlobalDCLocation, false)
 			failpoint.Inject("updateAfterResetTSO", func() {
 				if err = allocator.UpdateTSO(); !errorspkg.Is(err, errs.ErrUpdateTimestamp) {
 					log.Panic("the tso update after reset should return ErrUpdateTimestamp as expected", zap.Error(err))

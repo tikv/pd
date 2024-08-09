@@ -43,8 +43,6 @@ import (
 const (
 	// BalanceWitnessName is balance witness scheduler name.
 	BalanceWitnessName = "balance-witness-scheduler"
-	// BalanceWitnessType is balance witness scheduler type.
-	BalanceWitnessType = "balance-witness"
 	// balanceWitnessBatchSize is the default number of operators to transfer witnesses by one scheduling.
 	// Default value is 4 which is subjected by scheduler-max-waiting-operator and witness-schedule-limit
 	// If you want to increase balance speed more, please increase above-mentioned param.
@@ -357,7 +355,7 @@ func (b *balanceWitnessScheduler) createOperator(solver *solver, collector *plan
 	}
 	solver.Step++
 	defer func() { solver.Step-- }()
-	op, err := operator.CreateMoveWitnessOperator(BalanceWitnessType, solver, solver.Region, solver.sourceStoreID(), solver.targetStoreID())
+	op, err := operator.CreateMoveWitnessOperator(b.GetName(), solver, solver.Region, solver.sourceStoreID(), solver.targetStoreID())
 	if err != nil {
 		log.Debug("fail to create balance witness operator", errs.ZapError(err))
 		return nil

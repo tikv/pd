@@ -38,8 +38,6 @@ import (
 const (
 	// ShuffleHotRegionName is shuffle hot region scheduler name.
 	ShuffleHotRegionName = "shuffle-hot-region-scheduler"
-	// ShuffleHotRegionType is shuffle hot region scheduler type.
-	ShuffleHotRegionType = "shuffle-hot-region"
 )
 
 type shuffleHotRegionSchedulerConfig struct {
