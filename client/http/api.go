@@ -219,5 +219,5 @@ func GetKeyspaceMetaByNameURL(keyspaceName string) string {
 
 // GetDeleteSafePointURI returns the URI for delete safepoint service
 func GetDeleteSafePointURI(serviceID string) string {
-	return safepoint + "/" + serviceID
+	return fmt.Sprintf("%s/%s", safepoint, serviceID)
 }

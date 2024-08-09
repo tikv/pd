@@ -23,9 +23,10 @@ import (
 // NewServiceGCSafepointCommand return a service gc safepoint subcommand of rootCmd
 func NewServiceGCSafepointCommand() *cobra.Command {
 	l := &cobra.Command{
-		Use:   "service-gc-safepoint",
-		Short: "show all service gc safepoint",
-		Run:   showSSPs,
+		Use:               "service-gc-safepoint",
+		Short:             "show all service gc safepoint",
+		PersistentPreRunE: requirePDClient,
+		Run:               showSSPs,
 	}
 	l.AddCommand(NewDeleteServiceGCSafepointCommand())
 	return l
@@ -34,10 +35,11 @@ func NewServiceGCSafepointCommand() *cobra.Command {
 // NewDeleteServiceGCSafepointCommand return a subcommand to delete service gc safepoint
 func NewDeleteServiceGCSafepointCommand() *cobra.Command {
 	l := &cobra.Command{
-		Use:    "delete <service ID>",
-		Short:  "delete a service gc safepoint",
-		Run:    deleteSSP,
-		Hidden: true,
+		Use:               "delete <service ID>",
+		Short:             "delete a service gc safepoint",
+		PersistentPreRunE: requirePDClient,
+		Run:               deleteSSP,
+		Hidden:            true,
 	}
 	return l
 }

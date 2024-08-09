@@ -844,6 +844,7 @@ func (suite *httpClientTestSuite) TestGetGCSafePoint() {
 	ctx, cancel := context.WithCancel(suite.ctx)
 	defer cancel()
 
+	// adding some safepoints to the server
 	list := &api.ListServiceGCSafepoint{
 		ServiceGCSafepoints: []*endpoint.ServiceSafePoint{
 			{
@@ -873,6 +874,7 @@ func (suite *httpClientTestSuite) TestGetGCSafePoint() {
 	}
 	storage.SaveGCSafePoint(1)
 
+	// get the safepoints and start testing
 	l, err := client.GetGCSafePoint(ctx)
 	re.NoError(err)
 
@@ -880,6 +882,7 @@ func (suite *httpClientTestSuite) TestGetGCSafePoint() {
 	re.Equal(uint64(1), l.MinServiceGcSafepoint)
 	re.Len(l.ServiceGCSafepoints, 3)
 
+	// TODO : add some sorting to preserve order
 	for i, val := range l.ServiceGCSafepoints {
 		re.Equal(list.ServiceGCSafepoints[i].ServiceID, val.ServiceID)
 		re.Equal(list.ServiceGCSafepoints[i].SafePoint, val.SafePoint)
