@@ -85,6 +85,8 @@ const (
 	deleteOperators                         = "DeleteOperators"
 	UpdateKeyspaceGCManagementTypeName      = "UpdateKeyspaceGCManagementType"
 	GetKeyspaceMetaByNameName               = "GetKeyspaceMetaByName"
+	GetGCSafePointName                      = "GetGCSafePoint"
+	DeleteGCSafePointName                   = "DeleteGCSafePoint"
 )
 
 type requestInfo struct {

@@ -37,9 +37,11 @@ import (
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/placement"
+	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/versioninfo"
+	"github.com/tikv/pd/server/api"
 	"github.com/tikv/pd/tests"
 )
 
@@ -834,4 +836,64 @@ func (suite *httpClientTestSuite) TestRetryOnLeaderChange() {
 	// Cancel the context to stop the goroutine.
 	cancel()
 	wg.Wait()
+}
+
+func (suite *httpClientTestSuite) TestGetGCSafePoint() {
+	re := suite.Require()
+	client := suite.client
+	ctx, cancel := context.WithCancel(suite.ctx)
+	defer cancel()
+
+	// adding some safepoints to the server
+	list := &api.ListServiceGCSafepoint{
+		ServiceGCSafepoints: []*endpoint.ServiceSafePoint{
+			{
+				ServiceID: "AAA",
+				ExpiredAt: time.Now().Unix() + 10,
+				SafePoint: 1,
+			},
+			{
+				ServiceID: "BBB",
+				ExpiredAt: time.Now().Unix() + 10,
+				SafePoint: 2,
+			},
+			{
+				ServiceID: "CCC",
+				ExpiredAt: time.Now().Unix() + 10,
+				SafePoint: 3,
+			},
+		},
+		GCSafePoint:           1,
+		MinServiceGcSafepoint: 1,
+	}
+
+	storage := suite.cluster.GetLeaderServer().GetServer().GetStorage()
+	for _, ssp := range list.ServiceGCSafepoints {
+		err := storage.SaveServiceGCSafePoint(ssp)
+		re.NoError(err)
+	}
+	storage.SaveGCSafePoint(1)
+
+	// get the safepoints and start testing
+	l, err := client.GetGCSafePoint(ctx)
+	re.NoError(err)
+
+	re.Equal(uint64(1), l.GCSafePoint)
+	re.Equal(uint64(1), l.MinServiceGcSafepoint)
+	re.Len(l.ServiceGCSafepoints, 3)
+
+	// TODO : add some sorting to preserve order
+	for i, val := range l.ServiceGCSafepoints {
+		re.Equal(list.ServiceGCSafepoints[i].ServiceID, val.ServiceID)
+		re.Equal(list.ServiceGCSafepoints[i].SafePoint, val.SafePoint)
+	}
+
+	for i := 0; i < 3; i++ {
+		msg, err := client.DeleteGCSafePoint(ctx, list.ServiceGCSafepoints[i].ServiceID)
+		re.NoError(err)
+		re.Equal("Delete service GC safepoint successfully.", msg)
+	}
+
+	_, err4 := client.DeleteGCSafePoint(ctx, "gc_worker")
+	re.Error(err4)
 }

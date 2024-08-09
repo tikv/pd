@@ -100,6 +100,8 @@ type Client interface {
 	/* Other interfaces */
 	GetMinResolvedTSByStoresIDs(context.Context, []uint64) (uint64, map[uint64]uint64, error)
 	GetPDVersion(context.Context) (string, error)
+	GetGCSafePoint(context.Context) (ListServiceGCSafepoint, error)
+	DeleteGCSafePoint(context.Context, string) (string, error)
 	/* Micro Service interfaces */
 	GetMicroServiceMembers(context.Context, string) ([]MicroServiceMember, error)
 	GetMicroServicePrimary(context.Context, string) (string, error)
@@ -1023,4 +1025,32 @@ func (c *client) GetKeyspaceMetaByName(ctx context.Context, keyspaceName string)
 		State:          keyspaceState,
 	}
 	return &keyspaceMetaPB, nil
+}
+
+// GetGCSafePoint gets the GC safe point list.
+func (c *client) GetGCSafePoint(ctx context.Context) (ListServiceGCSafepoint, error) {
+	var gcSafePoint ListServiceGCSafepoint
+	err := c.request(ctx, newRequestInfo().
+		WithName(GetGCSafePointName).
+		WithURI(safepoint).
+		WithMethod(http.MethodGet).
+		WithResp(&gcSafePoint))
+	if err != nil {
+		return gcSafePoint, err
+	}
+	return gcSafePoint, nil
+}
+
+// DeleteGCSafePoint deletes a GC safe point with the given service ID.
+func (c *client) DeleteGCSafePoint(ctx context.Context, serviceID string) (string, error) {
+	var msg string
+	err := c.request(ctx, newRequestInfo().
+		WithName(DeleteGCSafePointName).
+		WithURI(GetDeleteSafePointURI(serviceID)).
+		WithMethod(http.MethodDelete).
+		WithResp(&msg))
+	if err != nil {
+		return msg, err
+	}
+	return msg, nil
 }

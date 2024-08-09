@@ -79,6 +79,7 @@ const (
 	Status              = "/pd/api/v1/status"
 	Version             = "/pd/api/v1/version"
 	operators           = "/pd/api/v1/operators"
+	safepoint           = "/pd/api/v1/gc/safepoint"
 	// Micro Service
 	microServicePrefix = "/pd/api/v2/ms"
 	// Keyspace
@@ -214,4 +215,9 @@ func GetUpdateKeyspaceConfigURL(keyspaceName string) string {
 // GetKeyspaceMetaByNameURL returns the path of PD HTTP API to get keyspace meta by keyspace name.
 func GetKeyspaceMetaByNameURL(keyspaceName string) string {
 	return fmt.Sprintf(GetKeyspaceMetaByName, keyspaceName)
+}
+
+// GetDeleteSafePointURI returns the URI for delete safepoint service
+func GetDeleteSafePointURI(serviceID string) string {
+	return fmt.Sprintf("%s/%s", safepoint, serviceID)
 }
