@@ -15,8 +15,8 @@
 package config
 
 import (
+	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
-	"github.com/pkg/errors"
 	flag "github.com/spf13/pflag"
 	"github.com/tikv/pd/pkg/utils/configutil"
 	"github.com/tikv/pd/tools/pd-api-bench/cases"

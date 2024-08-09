@@ -23,7 +23,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
-	mcsutils "github.com/tikv/pd/pkg/mcs/utils"
+	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/ratelimit"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/statistics/buckets"
@@ -62,7 +62,7 @@ func (c *RaftCluster) HandleRegionHeartbeat(region *core.RegionInfo) error {
 	}
 	tracer.OnAllStageFinished()
 
-	if c.IsServiceIndependent(mcsutils.SchedulingServiceName) {
+	if c.IsServiceIndependent(constant.SchedulingServiceName) {
 		return nil
 	}
 	c.coordinator.GetOperatorController().Dispatch(region, operator.DispatchFromHeartBeat, c.coordinator.RecordOpStepWithTTL)
@@ -257,7 +257,7 @@ func (c *RaftCluster) HandleReportBuckets(b *metapb.Buckets) error {
 	if err := c.processReportBuckets(b); err != nil {
 		return err
 	}
-	if !c.IsServiceIndependent(mcsutils.SchedulingServiceName) {
+	if !c.IsServiceIndependent(constant.SchedulingServiceName) {
 		c.hotStat.CheckAsync(buckets.NewCheckPeerTask(b))
 	}
 	return nil

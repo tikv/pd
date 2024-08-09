@@ -16,7 +16,7 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	_ "github.com/tikv/pd/pkg/mcs/scheduling/server/apis/v1"
 	"github.com/tikv/pd/pkg/mcs/scheduling/server/config"
-	"github.com/tikv/pd/pkg/mcs/utils"
+	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/schedule/handler"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/placement"
@@ -110,7 +110,7 @@ func (suite *apiTestSuite) checkAPIForward(cluster *tests.TestCluster) {
 	var respSlice []string
 	var resp map[string]any
 	testutil.Eventually(re, func() bool {
-		return leader.GetRaftCluster().IsServiceIndependent(utils.SchedulingServiceName)
+		return leader.GetRaftCluster().IsServiceIndependent(constant.SchedulingServiceName)
 	})
 
 	// Test operators

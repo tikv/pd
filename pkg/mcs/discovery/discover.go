@@ -20,7 +20,7 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/mcs/utils"
+	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"go.etcd.io/etcd/clientv3"
@@ -47,8 +47,8 @@ func Discover(cli *clientv3.Client, clusterID, serviceName string) ([]string, er
 // GetMSMembers returns all the members of the specified service name.
 func GetMSMembers(serviceName string, client *clientv3.Client) ([]ServiceRegistryEntry, error) {
 	switch serviceName {
-	case utils.TSOServiceName, utils.SchedulingServiceName, utils.ResourceManagerServiceName:
-		clusterID, err := etcdutil.GetClusterID(client, utils.ClusterIDPath)
+	case constant.TSOServiceName, constant.SchedulingServiceName, constant.ResourceManagerServiceName:
+		clusterID, err := etcdutil.GetClusterID(client, constant.ClusterIDPath)
 		if err != nil {
 			return nil, err
 		}

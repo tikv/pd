@@ -24,7 +24,7 @@ import (
 
 	"github.com/pingcap/failpoint"
 	"github.com/stretchr/testify/require"
-	"github.com/tikv/pd/pkg/mcs/utils"
+	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server/apiv2/handlers"
@@ -51,22 +51,22 @@ func TestKeyspaceGroup(t *testing.T) {
 	cmd := ctl.GetRootCmd()
 
 	// Show keyspace group information.
-	defaultKeyspaceGroupID := fmt.Sprintf("%d", utils.DefaultKeyspaceGroupID)
+	defaultKeyspaceGroupID := fmt.Sprintf("%d", constant.DefaultKeyspaceGroupID)
 	args := []string{"-u", pdAddr, "keyspace-group"}
 	output, err := tests.ExecuteCommand(cmd, append(args, defaultKeyspaceGroupID)...)
 	re.NoError(err)
 	var keyspaceGroup endpoint.KeyspaceGroup
 	err = json.Unmarshal(output, &keyspaceGroup)
 	re.NoError(err)
-	re.Equal(utils.DefaultKeyspaceGroupID, keyspaceGroup.ID)
-	re.Contains(keyspaceGroup.Keyspaces, utils.DefaultKeyspaceID)
+	re.Equal(constant.DefaultKeyspaceGroupID, keyspaceGroup.ID)
+	re.Contains(keyspaceGroup.Keyspaces, constant.DefaultKeyspaceID)
 	// Split keyspace group.
 	handlersutil.MustCreateKeyspaceGroup(re, leaderServer, &handlers.CreateKeyspaceGroupParams{
 		KeyspaceGroups: []*endpoint.KeyspaceGroup{
 			{
 				ID:        1,
 				UserKind:  endpoint.Standard.String(),
-				Members:   make([]endpoint.KeyspaceGroupMember, utils.DefaultKeyspaceGroupReplicaCount),
+				Members:   make([]endpoint.KeyspaceGroupMember, constant.DefaultKeyspaceGroupReplicaCount),
 				Keyspaces: []uint32{111, 222, 333},
 			},
 		},
@@ -171,7 +171,7 @@ func TestExternalAllocNodeWhenStart(t *testing.T) {
 	re.NoError(leaderServer.BootstrapCluster())
 
 	// check keyspace group information.
-	defaultKeyspaceGroupID := fmt.Sprintf("%d", utils.DefaultKeyspaceGroupID)
+	defaultKeyspaceGroupID := fmt.Sprintf("%d", constant.DefaultKeyspaceGroupID)
 	args := []string{"-u", pdAddr, "keyspace-group"}
 	testutil.Eventually(re, func() bool {
 		output, err := tests.ExecuteCommand(cmd, append(args, defaultKeyspaceGroupID)...)
@@ -215,7 +215,7 @@ func TestSetNodeAndPriorityKeyspaceGroup(t *testing.T) {
 	re.NoError(leaderServer.BootstrapCluster())
 
 	// set-node keyspace group.
-	defaultKeyspaceGroupID := fmt.Sprintf("%d", utils.DefaultKeyspaceGroupID)
+	defaultKeyspaceGroupID := fmt.Sprintf("%d", constant.DefaultKeyspaceGroupID)
 	testutil.Eventually(re, func() bool {
 		args := []string{"-u", pdAddr, "keyspace-group", "set-node", defaultKeyspaceGroupID, tsoAddrs[0], tsoAddrs[1]}
 		output, err := tests.ExecuteCommand(cmd, args...)
@@ -244,7 +244,7 @@ func TestSetNodeAndPriorityKeyspaceGroup(t *testing.T) {
 		var keyspaceGroup endpoint.KeyspaceGroup
 		err = json.Unmarshal(output, &keyspaceGroup)
 		re.NoError(err)
-		re.Equal(utils.DefaultKeyspaceGroupID, keyspaceGroup.ID)
+		re.Equal(constant.DefaultKeyspaceGroupID, keyspaceGroup.ID)
 		re.Len(keyspaceGroup.Members, 2)
 		for _, member := range keyspaceGroup.Members {
 			re.Contains(tsoAddrs, member.Address)
@@ -527,7 +527,7 @@ func TestShowKeyspaceGroupPrimary(t *testing.T) {
 	tc.WaitLeader()
 	leaderServer := tc.GetLeaderServer()
 	re.NoError(leaderServer.BootstrapCluster())
-	defaultKeyspaceGroupID := fmt.Sprintf("%d", utils.DefaultKeyspaceGroupID)
+	defaultKeyspaceGroupID := fmt.Sprintf("%d", constant.DefaultKeyspaceGroupID)
 
 	// check keyspace group 0 information.
 	var keyspaceGroup endpoint.KeyspaceGroup
@@ -537,7 +537,7 @@ func TestShowKeyspaceGroupPrimary(t *testing.T) {
 		re.NoError(err)
 		err = json.Unmarshal(output, &keyspaceGroup)
 		re.NoError(err)
-		re.Equal(utils.DefaultKeyspaceGroupID, keyspaceGroup.ID)
+		re.Equal(constant.DefaultKeyspaceGroupID, keyspaceGroup.ID)
 		return len(keyspaceGroup.Members) == 2
 	})
 	for _, member := range keyspaceGroup.Members {

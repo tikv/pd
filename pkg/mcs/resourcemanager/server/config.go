@@ -26,7 +26,7 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
 	"github.com/spf13/pflag"
-	"github.com/tikv/pd/pkg/mcs/utils"
+	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/utils/configutil"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/metricutil"
@@ -242,7 +242,7 @@ func (c *Config) Adjust(meta *toml.MetaData) error {
 	configutil.AdjustString(&c.AdvertiseListenAddr, c.ListenAddr)
 
 	if !configMetaData.IsDefined("enable-grpc-gateway") {
-		c.EnableGRPCGateway = utils.DefaultEnableGRPCGateway
+		c.EnableGRPCGateway = constant.DefaultEnableGRPCGateway
 	}
 
 	c.adjustLog(configMetaData.Child("log"))
@@ -251,17 +251,17 @@ func (c *Config) Adjust(meta *toml.MetaData) error {
 	}
 
 	c.Controller.Adjust(configMetaData.Child("controller"))
-	configutil.AdjustInt64(&c.LeaderLease, utils.DefaultLeaderLease)
+	configutil.AdjustInt64(&c.LeaderLease, constant.DefaultLeaderLease)
 
 	return nil
 }
 
 func (c *Config) adjustLog(meta *configutil.ConfigMetaData) {
 	if !meta.IsDefined("disable-error-verbose") {
-		c.Log.DisableErrorVerbose = utils.DefaultDisableErrorVerbose
+		c.Log.DisableErrorVerbose = constant.DefaultDisableErrorVerbose
 	}
-	configutil.AdjustString(&c.Log.Format, utils.DefaultLogFormat)
-	configutil.AdjustString(&c.Log.Level, utils.DefaultLogLevel)
+	configutil.AdjustString(&c.Log.Format, constant.DefaultLogFormat)
+	configutil.AdjustString(&c.Log.Level, constant.DefaultLogLevel)
 }
 
 // GetName returns the Name

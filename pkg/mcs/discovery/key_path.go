@@ -18,7 +18,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/tikv/pd/pkg/mcs/utils"
+	"github.com/tikv/pd/pkg/mcs/utils/constant"
 )
 
 const (
@@ -27,12 +27,12 @@ const (
 
 // RegistryPath returns the full path to store microservice addresses.
 func RegistryPath(clusterID, serviceName, serviceAddr string) string {
-	return strings.Join([]string{utils.MicroserviceRootPath, clusterID, serviceName, registryKey, serviceAddr}, "/")
+	return strings.Join([]string{constant.MicroserviceRootPath, clusterID, serviceName, registryKey, serviceAddr}, "/")
 }
 
 // ServicePath returns the path to store microservice addresses.
 func ServicePath(clusterID, serviceName string) string {
-	return strings.Join([]string{utils.MicroserviceRootPath, clusterID, serviceName, registryKey, ""}, "/")
+	return strings.Join([]string{constant.MicroserviceRootPath, clusterID, serviceName, registryKey, ""}, "/")
 }
 
 // TSOPath returns the path to store TSO addresses.

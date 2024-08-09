@@ -34,7 +34,7 @@ import (
 	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/core/storelimit"
-	"github.com/tikv/pd/pkg/mcs/utils"
+	mcsconstant "github.com/tikv/pd/pkg/mcs/utils/constant"
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	types "github.com/tikv/pd/pkg/schedule/type"
 	"github.com/tikv/pd/pkg/slice"
@@ -144,7 +144,7 @@ func (c *Config) adjust(meta *toml.MetaData) error {
 	configutil.AdjustString(&c.AdvertiseListenAddr, c.ListenAddr)
 
 	if !configMetaData.IsDefined("enable-grpc-gateway") {
-		c.EnableGRPCGateway = utils.DefaultEnableGRPCGateway
+		c.EnableGRPCGateway = mcsconstant.DefaultEnableGRPCGateway
 	}
 
 	c.adjustLog(configMetaData.Child("log"))
@@ -152,7 +152,7 @@ func (c *Config) adjust(meta *toml.MetaData) error {
 		return err
 	}
 
-	configutil.AdjustInt64(&c.LeaderLease, utils.DefaultLeaderLease)
+	configutil.AdjustInt64(&c.LeaderLease, mcsconstant.DefaultLeaderLease)
 
 	if err := c.Schedule.Adjust(configMetaData.Child("schedule"), false); err != nil {
 		return err
@@ -162,10 +162,10 @@ func (c *Config) adjust(meta *toml.MetaData) error {
 
 func (c *Config) adjustLog(meta *configutil.ConfigMetaData) {
 	if !meta.IsDefined("disable-error-verbose") {
-		c.Log.DisableErrorVerbose = utils.DefaultDisableErrorVerbose
+		c.Log.DisableErrorVerbose = mcsconstant.DefaultDisableErrorVerbose
 	}
-	configutil.AdjustString(&c.Log.Format, utils.DefaultLogFormat)
-	configutil.AdjustString(&c.Log.Level, utils.DefaultLogLevel)
+	configutil.AdjustString(&c.Log.Format, mcsconstant.DefaultLogFormat)
+	configutil.AdjustString(&c.Log.Level, mcsconstant.DefaultLogLevel)
 }
 
 // GetName returns the Name

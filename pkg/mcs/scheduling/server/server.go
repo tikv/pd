@@ -20,9 +20,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"runtime"
-	"strconv"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -47,6 +45,7 @@ import (
 	"github.com/tikv/pd/pkg/mcs/scheduling/server/rule"
 	"github.com/tikv/pd/pkg/mcs/server"
 	"github.com/tikv/pd/pkg/mcs/utils"
+	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/schedule"
 	sc "github.com/tikv/pd/pkg/schedule/config"
@@ -123,6 +122,11 @@ func (s *Server) GetAddr() string {
 	return s.cfg.ListenAddr
 }
 
+// GetAdvertiseListenAddr returns the advertise address of the server.
+func (s *Server) GetAdvertiseListenAddr() string {
+	return s.cfg.AdvertiseListenAddr
+}
+
 // GetBackendEndpoints returns the backend endpoints.
 func (s *Server) GetBackendEndpoints() string {
 	return s.cfg.BackendEndpoints
@@ -140,20 +144,15 @@ func (s *Server) SetLogLevel(level string) error {
 }
 
 // Run runs the scheduling server.
-func (s *Server) Run() error {
-	skipWaitAPIServiceReady := false
-	failpoint.Inject("skipWaitAPIServiceReady", func() {
-		skipWaitAPIServiceReady = true
-	})
-	if !skipWaitAPIServiceReady {
-		if err := utils.WaitAPIServiceReady(s); err != nil {
-			return err
-		}
-	}
-
-	if err := utils.InitClient(s); err != nil {
+func (s *Server) Run() (err error) {
+	if err = utils.InitClient(s); err != nil {
 		return err
 	}
+
+	if s.clusterID, s.serviceID, s.serviceRegister, err = utils.Register(s, constant.SchedulingServiceName); err != nil {
+		return err
+	}
+
 	return s.startServer()
 }
 
@@ -290,7 +289,7 @@ func (s *Server) campaignLeader() {
 	member.ServiceMemberGauge.WithLabelValues(serviceName).Set(1)
 	log.Info("scheduling primary is ready to serve", zap.String("scheduling-primary-name", s.participant.Name()))
 
-	leaderTicker := time.NewTicker(utils.LeaderTickInterval)
+	leaderTicker := time.NewTicker(constant.LeaderTickInterval)
 	defer leaderTicker.Stop()
 
 	for {
@@ -408,37 +407,20 @@ func (s *Server) GetLeaderListenUrls() []string {
 }
 
 func (s *Server) startServer() (err error) {
-	if s.clusterID, err = utils.InitClusterID(s.Context(), s.GetClient()); err != nil {
-		return err
-	}
-	log.Info("init cluster id", zap.Uint64("cluster-id", s.clusterID))
 	// The independent Scheduling service still reuses PD version info since PD and Scheduling are just
 	// different service modes provided by the same pd-server binary
 	bs.ServerInfoGauge.WithLabelValues(versioninfo.PDReleaseVersion, versioninfo.PDGitHash).Set(float64(time.Now().Unix()))
 	bs.ServerMaxProcsGauge.Set(float64(runtime.GOMAXPROCS(0)))
-	execPath, err := os.Executable()
-	deployPath := filepath.Dir(execPath)
-	if err != nil {
-		deployPath = ""
-	}
-	s.serviceID = &discovery.ServiceRegistryEntry{
-		ServiceAddr:    s.cfg.AdvertiseListenAddr,
-		Version:        versioninfo.PDReleaseVersion,
-		GitHash:        versioninfo.PDGitHash,
-		DeployPath:     deployPath,
-		StartTimestamp: s.StartTimestamp(),
-		Name:           s.Name(),
-	}
 	uniqueName := s.cfg.GetAdvertiseListenAddr()
 	uniqueID := memberutil.GenerateUniqueID(uniqueName)
 	log.Info("joining primary election", zap.String("participant-name", uniqueName), zap.Uint64("participant-id", uniqueID))
-	s.participant = member.NewParticipant(s.GetClient(), utils.SchedulingServiceName)
+	s.participant = member.NewParticipant(s.GetClient(), constant.SchedulingServiceName)
 	p := &schedulingpb.Participant{
 		Name:       uniqueName,
 		Id:         uniqueID, // id is unique among all participants
 		ListenUrls: []string{s.cfg.GetAdvertiseListenAddr()},
 	}
-	s.participant.InitInfo(p, endpoint.SchedulingSvcRootPath(s.clusterID), utils.PrimaryKey, "primary election")
+	s.participant.InitInfo(p, endpoint.SchedulingSvcRootPath(s.clusterID), constant.PrimaryKey, "primary election")
 
 	s.service = &Service{Server: s}
 	s.AddServiceReadyCallback(s.startCluster)
@@ -461,17 +443,6 @@ func (s *Server) startServer() (err error) {
 		cb()
 	}
 
-	// Server has started.
-	serializedEntry, err := s.serviceID.Serialize()
-	if err != nil {
-		return err
-	}
-	s.serviceRegister = discovery.NewServiceRegister(s.Context(), s.GetClient(), strconv.FormatUint(s.clusterID, 10),
-		utils.SchedulingServiceName, s.cfg.GetAdvertiseListenAddr(), serializedEntry, discovery.DefaultLeaseInSeconds)
-	if err := s.serviceRegister.Register(); err != nil {
-		log.Error("failed to register the service", zap.String("service-name", utils.SchedulingServiceName), errs.ZapError(err))
-		return err
-	}
 	atomic.StoreInt64(&s.isRunning, 1)
 	return nil
 }
@@ -483,7 +454,7 @@ func (s *Server) startCluster(context.Context) error {
 	if err != nil {
 		return err
 	}
-	s.hbStreams = hbstream.NewHeartbeatStreams(s.Context(), s.clusterID, utils.SchedulingServiceName, s.basicCluster)
+	s.hbStreams = hbstream.NewHeartbeatStreams(s.Context(), s.clusterID, constant.SchedulingServiceName, s.basicCluster)
 	s.cluster, err = NewCluster(s.Context(), s.persistConfig, s.storage, s.basicCluster, s.hbStreams, s.clusterID, s.checkMembershipCh)
 	if err != nil {
 		return err

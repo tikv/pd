@@ -23,7 +23,7 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
-	mcsutils "github.com/tikv/pd/pkg/mcs/utils"
+	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 )
 
@@ -266,7 +266,7 @@ func mergeKeyspaceGroupCommandFunc(cmd *cobra.Command, args []string) {
 			return
 		}
 		targetGroupID = uint32(target)
-		if targetGroupID != mcsutils.DefaultKeyspaceGroupID {
+		if targetGroupID != constant.DefaultKeyspaceGroupID {
 			cmd.Println("Unable to merge all keyspace groups into a non-default keyspace group")
 			return
 		}

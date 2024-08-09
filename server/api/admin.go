@@ -25,7 +25,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/mcs/utils"
+	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/server"
 	"github.com/unrolled/render"
@@ -61,7 +61,7 @@ func (h *adminHandler) DeleteRegionCache(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	rc.RemoveRegionIfExist(regionID)
-	if h.svr.IsServiceIndependent(utils.SchedulingServiceName) {
+	if h.svr.IsServiceIndependent(constant.SchedulingServiceName) {
 		err = h.DeleteRegionCacheInSchedulingServer(regionID)
 	}
 	msg := "The region is removed from server cache."
@@ -101,7 +101,7 @@ func (h *adminHandler) DeleteRegionStorage(w http.ResponseWriter, r *http.Reques
 	}
 	// Remove region from cache.
 	rc.RemoveRegionIfExist(regionID)
-	if h.svr.IsServiceIndependent(utils.SchedulingServiceName) {
+	if h.svr.IsServiceIndependent(constant.SchedulingServiceName) {
 		err = h.DeleteRegionCacheInSchedulingServer(regionID)
 	}
 	msg := "The region is removed from server cache and region meta storage."
@@ -117,7 +117,7 @@ func (h *adminHandler) DeleteAllRegionCache(w http.ResponseWriter, r *http.Reque
 	var err error
 	rc := getCluster(r)
 	rc.ResetRegionCache()
-	if h.svr.IsServiceIndependent(utils.SchedulingServiceName) {
+	if h.svr.IsServiceIndependent(constant.SchedulingServiceName) {
 		err = h.DeleteRegionCacheInSchedulingServer()
 	}
 	msg := "All regions are removed from server cache."
@@ -216,7 +216,7 @@ func (h *adminHandler) RecoverAllocID(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *adminHandler) DeleteRegionCacheInSchedulingServer(id ...uint64) error {
-	addr, ok := h.svr.GetServicePrimaryAddr(h.svr.Context(), utils.SchedulingServiceName)
+	addr, ok := h.svr.GetServicePrimaryAddr(h.svr.Context(), constant.SchedulingServiceName)
 	if !ok {
 		return errs.ErrNotFoundSchedulingAddr.FastGenByArgs()
 	}
@@ -241,7 +241,7 @@ func (h *adminHandler) DeleteRegionCacheInSchedulingServer(id ...uint64) error {
 }
 
 func (h *adminHandler) buildMsg(msg string, err error) string {
-	if h.svr.IsServiceIndependent(utils.SchedulingServiceName) && err != nil {
+	if h.svr.IsServiceIndependent(constant.SchedulingServiceName) && err != nil {
 		return fmt.Sprintf("This operation was executed in API server but needs to be re-executed on scheduling server due to the following error: %s", err.Error())
 	}
 	return msg

@@ -20,7 +20,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/suite"
-	"github.com/tikv/pd/pkg/mcs/utils"
+	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/server/apiv2/handlers"
 	"github.com/tikv/pd/tests"
@@ -97,7 +97,7 @@ func (suite *keyspaceGroupTestSuite) TestCreateKeyspaceGroups() {
 	// invalid ID.
 	kgs = &handlers.CreateKeyspaceGroupParams{KeyspaceGroups: []*endpoint.KeyspaceGroup{
 		{
-			ID:       utils.MaxKeyspaceGroupCount + 1,
+			ID:       constant.MaxKeyspaceGroupCount + 1,
 			UserKind: endpoint.Standard.String(),
 		},
 	}}
@@ -138,7 +138,7 @@ func (suite *keyspaceGroupTestSuite) TestSplitKeyspaceGroup() {
 			ID:        uint32(1),
 			UserKind:  endpoint.Standard.String(),
 			Keyspaces: []uint32{111, 222, 333},
-			Members:   make([]endpoint.KeyspaceGroupMember, utils.DefaultKeyspaceGroupReplicaCount),
+			Members:   make([]endpoint.KeyspaceGroupMember, constant.DefaultKeyspaceGroupReplicaCount),
 		},
 	}}
 

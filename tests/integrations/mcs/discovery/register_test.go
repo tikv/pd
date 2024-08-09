@@ -23,7 +23,7 @@ import (
 	"github.com/stretchr/testify/suite"
 	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/mcs/discovery"
-	"github.com/tikv/pd/pkg/mcs/utils"
+	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/tests"
@@ -72,14 +72,9 @@ func (suite *serverRegisterTestSuite) TearDownSuite() {
 }
 
 func (suite *serverRegisterTestSuite) TestServerRegister() {
-	// test register, primary and unregister when start tso and resource-manager with only one server
 	for i := 0; i < 3; i++ {
-		suite.checkServerRegister(utils.TSOServiceName)
+		suite.checkServerRegister(constant.TSOServiceName)
 	}
-	// TODO: uncomment after resource-manager is ready
-	// for i := 0; i < 3; i++ {
-	// suite.checkServerRegister(utils.ResourceManagerServiceName)
-	// }
 }
 
 func (suite *serverRegisterTestSuite) checkServerRegister(serviceName string) {
@@ -113,9 +108,7 @@ func (suite *serverRegisterTestSuite) checkServerRegister(serviceName string) {
 }
 
 func (suite *serverRegisterTestSuite) TestServerPrimaryChange() {
-	suite.checkServerPrimaryChange(utils.TSOServiceName, 3)
-	// TODO: uncomment after resource-manager is ready
-	// suite.checkServerPrimaryChange(utils.ResourceManagerServiceName, 3)
+	suite.checkServerPrimaryChange(constant.TSOServiceName, 3)
 }
 
 func (suite *serverRegisterTestSuite) checkServerPrimaryChange(serviceName string, serverNum int) {
@@ -161,9 +154,9 @@ func (suite *serverRegisterTestSuite) checkServerPrimaryChange(serviceName strin
 func (suite *serverRegisterTestSuite) addServer(serviceName string) (bs.Server, func()) {
 	re := suite.Require()
 	switch serviceName {
-	case utils.TSOServiceName:
+	case constant.TSOServiceName:
 		return tests.StartSingleTSOTestServer(suite.ctx, re, suite.backendEndpoints, tempurl.Alloc())
-	case utils.ResourceManagerServiceName:
+	case constant.ResourceManagerServiceName:
 		return tests.StartSingleResourceManagerTestServer(suite.ctx, re, suite.backendEndpoints, tempurl.Alloc())
 	default:
 		return nil, nil
