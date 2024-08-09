@@ -15,8 +15,9 @@
 package command
 
 import (
-	"github.com/spf13/cobra"
 	"sort"
+
+	"github.com/spf13/cobra"
 )
 
 // NewServiceGCSafepointCommand return a service gc safepoint subcommand of rootCmd

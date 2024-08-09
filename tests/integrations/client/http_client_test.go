@@ -881,33 +881,15 @@ func (suite *httpClientTestSuite) TestGetSafePoint() {
 	re.Len(l.ServiceGCSafepoints, 3)
 
 	for i, val := range l.ServiceGCSafepoints {
-		if i == 0 {
-			re.Equal("AAA", val.ServiceID)
-			re.Equal(uint64(1), val.SafePoint)
-		}
-
-		if i == 1 {
-			re.Equal("BBB", val.ServiceID)
-			re.Equal(uint64(2), val.SafePoint)
-		}
-
-		if i == 2 {
-			re.Equal("CCC", val.ServiceID)
-			re.Equal(uint64(3), val.SafePoint)
-		}
+		re.Equal(list.ServiceGCSafepoints[i].ServiceID, val.ServiceID)
+		re.Equal(list.ServiceGCSafepoints[i].SafePoint, val.SafePoint)
 	}
 
-	msg1, err1 := client.DeleteGCSafePoint(ctx, "AAA")
-	re.NoError(err1)
-	re.Equal("Delete service GC safepoint successfully.", msg1)
-
-	msg2, err2 := client.DeleteGCSafePoint(ctx, "BBB")
-	re.NoError(err2)
-	re.Equal("Delete service GC safepoint successfully.", msg2)
-
-	msg3, err3 := client.DeleteGCSafePoint(ctx, "DDD")
-	re.NoError(err3)
-	re.Equal("Delete service GC safepoint successfully.", msg3)
+	for i := 0; i < 3; i++ {
+		msg, err := client.DeleteGCSafePoint(ctx, list.ServiceGCSafepoints[i].ServiceID)
+		re.NoError(err)
+		re.Equal("Delete service GC safepoint successfully.", msg)
+	}
 
 	_, err4 := client.DeleteGCSafePoint(ctx, "gc_worker")
 	re.Error(err4)
