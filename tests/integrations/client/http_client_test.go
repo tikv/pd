@@ -838,7 +838,7 @@ func (suite *httpClientTestSuite) TestRetryOnLeaderChange() {
 	wg.Wait()
 }
 
-func (suite *httpClientTestSuite) TestGetSafePoint() {
+func (suite *httpClientTestSuite) TestGetGCSafePoint() {
 	re := suite.Require()
 	client := suite.client
 	ctx, cancel := context.WithCancel(suite.ctx)
