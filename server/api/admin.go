@@ -61,11 +61,14 @@ func (h *adminHandler) DeleteRegionCache(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	rc.RemoveRegionIfExist(regionID)
-	if h.svr.IsServiceIndependent(utils.SchedulingServiceName) {
-		err = h.deleteRegionCacheInSchedulingServer(regionID)
-	}
 	msg := "The region is removed from server cache."
-	h.rd.JSON(w, http.StatusOK, h.buildMsg(msg, err))
+	if rc.IsServiceIndependent(utils.SchedulingServiceName) {
+		err = h.deleteRegionCacheInSchedulingServer(regionID)
+		if err != nil {
+			msg = fmt.Sprintf("This operation was executed in API server but needs to be re-executed on scheduling server due to the following error: %s", err.Error())
+		}
+	}
+	h.rd.JSON(w, http.StatusOK, msg)
 }
 
 // @Tags     admin
@@ -101,11 +104,15 @@ func (h *adminHandler) DeleteRegionStorage(w http.ResponseWriter, r *http.Reques
 	}
 	// Remove region from cache.
 	rc.RemoveRegionIfExist(regionID)
-	if h.svr.IsServiceIndependent(utils.SchedulingServiceName) {
-		err = h.deleteRegionCacheInSchedulingServer(regionID)
-	}
 	msg := "The region is removed from server cache and region meta storage."
-	h.rd.JSON(w, http.StatusOK, h.buildMsg(msg, err))
+	if rc.IsServiceIndependent(utils.SchedulingServiceName) {
+		err = h.deleteRegionCacheInSchedulingServer(regionID)
+		if err != nil {
+			msg = fmt.Sprintf("This operation was executed in API server but needs to be re-executed on scheduling server due to the following error: %s", err.Error())
+		}
+	}
+
+	h.rd.JSON(w, http.StatusOK, msg)
 }
 
 // @Tags     admin
@@ -117,11 +124,15 @@ func (h *adminHandler) DeleteAllRegionCache(w http.ResponseWriter, r *http.Reque
 	var err error
 	rc := getCluster(r)
 	rc.ResetRegionCache()
-	if h.svr.IsServiceIndependent(utils.SchedulingServiceName) {
-		err = h.deleteRegionCacheInSchedulingServer()
-	}
 	msg := "All regions are removed from server cache."
-	h.rd.JSON(w, http.StatusOK, h.buildMsg(msg, err))
+	if rc.IsServiceIndependent(utils.SchedulingServiceName) {
+		err = h.deleteRegionCacheInSchedulingServer()
+		if err != nil {
+			msg = fmt.Sprintf("This operation was executed in API server but needs to be re-executed on scheduling server due to the following error: %s", err.Error())
+		}
+	}
+
+	h.rd.JSON(w, http.StatusOK, msg)
 }
 
 // Intentionally no swagger mark as it is supposed to be only used in
@@ -238,11 +249,4 @@ func (h *adminHandler) deleteRegionCacheInSchedulingServer(id ...uint64) error {
 		return errs.ErrSchedulingServer.FastGenByArgs(resp.StatusCode)
 	}
 	return nil
-}
-
-func (h *adminHandler) buildMsg(msg string, err error) string {
-	if h.svr.IsServiceIndependent(utils.SchedulingServiceName) && err != nil {
-		return fmt.Sprintf("This operation was executed in API server but needs to be re-executed on scheduling server due to the following error: %s", err.Error())
-	}
-	return msg
 }
