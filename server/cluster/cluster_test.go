@@ -2838,6 +2838,7 @@ func TestCheckCache(t *testing.T) {
 		cfg.ReplicaScheduleLimit = 0
 	}, nil, nil, re)
 	defer cleanup()
+	oc := co.GetOperatorController()
 
 	re.NoError(tc.addRegionStore(1, 0))
 	re.NoError(tc.addRegionStore(2, 0))
@@ -2850,6 +2851,7 @@ func TestCheckCache(t *testing.T) {
 	// case 1: operator cannot be created due to replica-schedule-limit restriction
 	co.GetWaitGroup().Add(1)
 	co.PatrolRegions()
+	re.Empty(oc.GetOperators())
 	re.Len(co.GetCheckerController().GetPendingProcessedRegions(), 1)
 
 	// cancel the replica-schedule-limit restriction
@@ -2858,7 +2860,6 @@ func TestCheckCache(t *testing.T) {
 	tc.SetScheduleConfig(cfg)
 	co.GetWaitGroup().Add(1)
 	co.PatrolRegions()
-	oc := co.GetOperatorController()
 	re.Len(oc.GetOperators(), 1)
 	re.Empty(co.GetCheckerController().GetPendingProcessedRegions())
 
@@ -2880,6 +2881,67 @@ func TestCheckCache(t *testing.T) {
 	co.GetSchedulersController().Wait()
 	co.GetWaitGroup().Wait()
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/checker/breakPatrol"))
+}
+
+func TestPatrolRegionConcurrency(t *testing.T) {
+	re := require.New(t)
+
+	regionNum := 10000
+	mergeScheduleLimit := 15
+
+	tc, co, cleanup := prepare(func(cfg *sc.ScheduleConfig) {
+		cfg.PatrolRegionWorkerCount = 8
+		cfg.MergeScheduleLimit = uint64(mergeScheduleLimit)
+	}, nil, nil, re)
+	defer cleanup()
+	oc := co.GetOperatorController()
+
+	tc.opt.SetSplitMergeInterval(time.Duration(0))
+	for i := 1; i < 4; i++ {
+		if err := tc.addRegionStore(uint64(i), regionNum); err != nil {
+			return
+		}
+	}
+	for i := 0; i < regionNum; i++ {
+		if err := tc.addLeaderRegion(uint64(i), 1, 2, 3); err != nil {
+			return
+		}
+	}
+
+	// test patrol region concurrency
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/checker/breakPatrol", `return`))
+	co.GetWaitGroup().Add(1)
+	co.PatrolRegions()
+	testutil.Eventually(re, func() bool {
+		return len(oc.GetOperators()) >= mergeScheduleLimit
+	})
+	checkOperatorDuplicate(re, oc.GetOperators())
+
+	// test patrol region concurrency with suspect regions
+	suspectRegions := make([]uint64, 0)
+	for i := 0; i < 10; i++ {
+		suspectRegions = append(suspectRegions, uint64(i))
+	}
+	co.GetCheckerController().AddPendingProcessedRegions(false, suspectRegions...)
+	co.GetWaitGroup().Add(1)
+	co.PatrolRegions()
+	testutil.Eventually(re, func() bool {
+		return len(oc.GetOperators()) >= mergeScheduleLimit
+	})
+	checkOperatorDuplicate(re, oc.GetOperators())
+	co.GetSchedulersController().Wait()
+	co.GetWaitGroup().Wait()
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/checker/breakPatrol"))
+}
+
+func checkOperatorDuplicate(re *require.Assertions, ops []*operator.Operator) {
+	regionMap := make(map[uint64]struct{})
+	for _, op := range ops {
+		if _, ok := regionMap[op.RegionID()]; ok {
+			re.Fail("duplicate operator")
+		}
+		regionMap[op.RegionID()] = struct{}{}
+	}
 }
 
 func TestScanLimit(t *testing.T) {
