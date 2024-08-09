@@ -951,7 +951,7 @@ func (s *GrpcServer) StoreHeartbeat(ctx context.Context, request *pdpb.StoreHear
 
 		s.handleDamagedStore(request.GetStats())
 		storeHeartbeatHandleDuration.WithLabelValues(storeAddress, storeLabel).Observe(time.Since(start).Seconds())
-		if s.IsServiceIndependent(utils.SchedulingServiceName) {
+		if rc.IsServiceIndependent(utils.SchedulingServiceName) {
 			forwardCli, _ := s.updateSchedulingClient(ctx)
 			cli := forwardCli.getClient()
 			if cli != nil {
@@ -1307,7 +1307,7 @@ func (s *GrpcServer) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error
 		regionHeartbeatHandleDuration.WithLabelValues(storeAddress, storeLabel).Observe(time.Since(start).Seconds())
 		regionHeartbeatCounter.WithLabelValues(storeAddress, storeLabel, "report", "ok").Inc()
 
-		if s.IsServiceIndependent(utils.SchedulingServiceName) {
+		if rc.IsServiceIndependent(utils.SchedulingServiceName) {
 			if forwardErrCh != nil {
 				select {
 				case err, ok := <-forwardErrCh:
@@ -1786,7 +1786,13 @@ func (s *GrpcServer) AskBatchSplit(ctx context.Context, request *pdpb.AskBatchSp
 			}, nil
 		}
 	}
-	if s.IsServiceIndependent(utils.SchedulingServiceName) {
+
+	rc := s.GetRaftCluster()
+	if rc == nil {
+		return &pdpb.AskBatchSplitResponse{Header: s.notBootstrappedHeader()}, nil
+	}
+
+	if rc.IsServiceIndependent(utils.SchedulingServiceName) {
 		forwardCli, err := s.updateSchedulingClient(ctx)
 		if err != nil {
 			return &pdpb.AskBatchSplitResponse{
@@ -1819,11 +1825,6 @@ func (s *GrpcServer) AskBatchSplit(ctx context.Context, request *pdpb.AskBatchSp
 		return nil, err
 	} else if rsp != nil {
 		return rsp.(*pdpb.AskBatchSplitResponse), err
-	}
-
-	rc := s.GetRaftCluster()
-	if rc == nil {
-		return &pdpb.AskBatchSplitResponse{Header: s.notBootstrappedHeader()}, nil
 	}
 
 	if !versioninfo.IsFeatureSupported(rc.GetOpts().GetClusterVersion(), versioninfo.BatchSplit) {
@@ -2015,7 +2016,13 @@ func (s *GrpcServer) ScatterRegion(ctx context.Context, request *pdpb.ScatterReg
 			}, nil
 		}
 	}
-	if s.IsServiceIndependent(utils.SchedulingServiceName) {
+
+	rc := s.GetRaftCluster()
+	if rc == nil {
+		return &pdpb.ScatterRegionResponse{Header: s.notBootstrappedHeader()}, nil
+	}
+
+	if rc.IsServiceIndependent(utils.SchedulingServiceName) {
 		forwardCli, err := s.updateSchedulingClient(ctx)
 		if err != nil {
 			return &pdpb.ScatterRegionResponse{
@@ -2065,11 +2072,6 @@ func (s *GrpcServer) ScatterRegion(ctx context.Context, request *pdpb.ScatterReg
 		return nil, err
 	} else if rsp != nil {
 		return rsp.(*pdpb.ScatterRegionResponse), err
-	}
-
-	rc := s.GetRaftCluster()
-	if rc == nil {
-		return &pdpb.ScatterRegionResponse{Header: s.notBootstrappedHeader()}, nil
 	}
 
 	if len(request.GetRegionsId()) > 0 {
@@ -2292,7 +2294,13 @@ func (s *GrpcServer) GetOperator(ctx context.Context, request *pdpb.GetOperatorR
 			}, nil
 		}
 	}
-	if s.IsServiceIndependent(utils.SchedulingServiceName) {
+
+	rc := s.GetRaftCluster()
+	if rc == nil {
+		return &pdpb.GetOperatorResponse{Header: s.notBootstrappedHeader()}, nil
+	}
+
+	if rc.IsServiceIndependent(utils.SchedulingServiceName) {
 		forwardCli, err := s.updateSchedulingClient(ctx)
 		if err != nil {
 			return &pdpb.GetOperatorResponse{
@@ -2325,11 +2333,6 @@ func (s *GrpcServer) GetOperator(ctx context.Context, request *pdpb.GetOperatorR
 		return nil, err
 	} else if rsp != nil {
 		return rsp.(*pdpb.GetOperatorResponse), err
-	}
-
-	rc := s.GetRaftCluster()
-	if rc == nil {
-		return &pdpb.GetOperatorResponse{Header: s.notBootstrappedHeader()}, nil
 	}
 
 	opController := rc.GetOperatorController()
@@ -2611,7 +2614,13 @@ func (s *GrpcServer) SplitRegions(ctx context.Context, request *pdpb.SplitRegion
 			}, nil
 		}
 	}
-	if s.IsServiceIndependent(utils.SchedulingServiceName) {
+
+	rc := s.GetRaftCluster()
+	if rc == nil {
+		return &pdpb.SplitRegionsResponse{Header: s.notBootstrappedHeader()}, nil
+	}
+
+	if rc.IsServiceIndependent(utils.SchedulingServiceName) {
 		forwardCli, err := s.updateSchedulingClient(ctx)
 		if err != nil {
 			return &pdpb.SplitRegionsResponse{
@@ -2648,10 +2657,6 @@ func (s *GrpcServer) SplitRegions(ctx context.Context, request *pdpb.SplitRegion
 		return rsp.(*pdpb.SplitRegionsResponse), err
 	}
 
-	rc := s.GetRaftCluster()
-	if rc == nil {
-		return &pdpb.SplitRegionsResponse{Header: s.notBootstrappedHeader()}, nil
-	}
 	finishedPercentage, newRegionIDs := rc.GetRegionSplitter().SplitRegions(ctx, request.GetSplitKeys(), int(request.GetRetryLimit()))
 	return &pdpb.SplitRegionsResponse{
 		Header:             s.header(),
