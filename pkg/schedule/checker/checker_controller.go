@@ -44,6 +44,7 @@ const (
 	// In order to avoid the patrolRegionScanLimit to be too big or too small, it will be limited to [128,8192].
 	// It takes about 10s to iterate 1,024,000 regions(with DefaultPatrolRegionInterval=10ms) where other steps are not considered.
 	MinPatrolRegionScanLimit = 128
+	// MaxPatrolScanRegionLimit is the max limit of regions to scan for a batch.
 	MaxPatrolScanRegionLimit = 8192
 	patrolRegionPartition    = 1024
 )

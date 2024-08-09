@@ -163,6 +163,7 @@ func newSplitBucketScheduler(opController *operator.Controller, conf *splitBucke
 	return ret
 }
 
+// ReloadConfig implement Scheduler interface.
 func (s *splitBucketScheduler) ReloadConfig() error {
 	s.conf.Lock()
 	defer s.conf.Unlock()

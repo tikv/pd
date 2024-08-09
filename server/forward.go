@@ -332,7 +332,7 @@ func forwardReportBucketClientToServer(forwardStream pdpb.PD_ReportBucketsClient
 			errCh <- errors.WithStack(err)
 			return
 		}
-		if err := server.Send(resp); err != nil {
+		if err := server.send(resp); err != nil {
 			errCh <- errors.WithStack(err)
 			return
 		}

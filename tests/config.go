@@ -47,6 +47,7 @@ func newServerConfig(name string, cc *clusterConfig, join bool) *serverConfig {
 	}
 }
 
+// Generate generates a config for the server.
 func (c *serverConfig) Generate(opts ...ConfigOption) (*config.Config, error) {
 	arguments := []string{
 		"--name=" + c.Name,
@@ -57,9 +58,9 @@ func (c *serverConfig) Generate(opts ...ConfigOption) (*config.Config, error) {
 		"--advertise-peer-urls=" + c.AdvertisePeerURLs,
 	}
 	if c.Join {
-		arguments = append(arguments, "--join="+c.ClusterConfig.GetJoinAddr())
+		arguments = append(arguments, "--join="+c.ClusterConfig.getJoinAddr())
 	} else {
-		arguments = append(arguments, "--initial-cluster="+c.ClusterConfig.GetServerAddrs())
+		arguments = append(arguments, "--initial-cluster="+c.ClusterConfig.getServerAddrs())
 	}
 
 	flagSet := pflag.NewFlagSet("test", pflag.ContinueOnError)
@@ -110,7 +111,7 @@ func newClusterConfig(n int) *clusterConfig {
 	return &cc
 }
 
-func (c *clusterConfig) Join() *serverConfig {
+func (c *clusterConfig) join() *serverConfig {
 	sc := newServerConfig(c.nextServerName(), c, true)
 	c.JoinServers = append(c.JoinServers, sc)
 	return sc
@@ -120,7 +121,7 @@ func (c *clusterConfig) nextServerName() string {
 	return fmt.Sprintf("pd%d", len(c.InitialServers)+len(c.JoinServers)+1)
 }
 
-func (c *clusterConfig) GetServerAddrs() string {
+func (c *clusterConfig) getServerAddrs() string {
 	addrs := make([]string, 0, len(c.InitialServers))
 	for _, s := range c.InitialServers {
 		addrs = append(addrs, fmt.Sprintf("%s=%s", s.Name, s.PeerURLs))
@@ -128,14 +129,16 @@ func (c *clusterConfig) GetServerAddrs() string {
 	return strings.Join(addrs, ",")
 }
 
-func (c *clusterConfig) GetJoinAddr() string {
+func (c *clusterConfig) getJoinAddr() string {
 	return c.InitialServers[0].PeerURLs
 }
 
+// GetClientURL returns the client URL of the cluster.
 func (c *clusterConfig) GetClientURL() string {
 	return c.InitialServers[0].ClientURLs
 }
 
+// GetClientURLs returns all client URLs of the cluster.
 func (c *clusterConfig) GetClientURLs() []string {
 	urls := make([]string, 0, len(c.InitialServers))
 	for _, svr := range c.InitialServers {
