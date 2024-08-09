@@ -660,7 +660,7 @@ func (am *AllocatorManager) campaignAllocatorLeader(
 	// Start keepalive the Local TSO Allocator leadership and enable Local TSO service.
 	ctx, cancel := context.WithCancel(loopCtx)
 	defer cancel()
-	defer am.ResetAllocatorGroup(allocator.GetDCLocation())
+	defer am.ResetAllocatorGroup(allocator.GetDCLocation(), false)
 	// Maintain the Local TSO Allocator leader
 	go allocator.KeepAllocatorLeader(ctx)
 
@@ -785,7 +785,7 @@ func (am *AllocatorManager) updateAllocator(ag *allocatorGroup) {
 			zap.String("dc-location", ag.dcLocation),
 			zap.String("name", am.member.Name()),
 			errs.ZapError(err))
-		am.ResetAllocatorGroup(ag.dcLocation)
+		am.ResetAllocatorGroup(ag.dcLocation, false)
 		return
 	}
 }
@@ -1038,7 +1038,7 @@ func (am *AllocatorManager) PriorityChecker() {
 			log.Info("next leader key found, resign current leader",
 				logutil.CondUint32("keyspace-group-id", am.kgID, am.kgID > 0),
 				zap.Uint64("nextLeaderID", nextLeader))
-			am.ResetAllocatorGroup(allocatorGroup.dcLocation)
+			am.ResetAllocatorGroup(allocatorGroup.dcLocation, false)
 		}
 	}
 }
@@ -1132,13 +1132,13 @@ func (am *AllocatorManager) HandleRequest(ctx context.Context, dcLocation string
 
 // ResetAllocatorGroup will reset the allocator's leadership and TSO initialized in memory.
 // It usually should be called before re-triggering an Allocator leader campaign.
-func (am *AllocatorManager) ResetAllocatorGroup(dcLocation string) {
+func (am *AllocatorManager) ResetAllocatorGroup(dcLocation string, skipResetLeader bool) {
 	am.mu.Lock()
 	defer am.mu.Unlock()
 	if allocatorGroup, exist := am.mu.allocatorGroups[dcLocation]; exist {
 		allocatorGroup.allocator.Reset()
 		// Reset if it still has the leadership. Otherwise the data race may occur because of the re-campaigning.
-		if allocatorGroup.leadership.Check() {
+		if !skipResetLeader && allocatorGroup.leadership.Check() {
 			allocatorGroup.leadership.Reset()
 		}
 	}
