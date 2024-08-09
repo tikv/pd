@@ -28,7 +28,7 @@ type queryMetric struct {
 	s *server.Server
 }
 
-func newQueryMetric(s *server.Server) *queryMetric {
+func newqueryMetric(s *server.Server) *queryMetric {
 	return &queryMetric{s: s}
 }
 
