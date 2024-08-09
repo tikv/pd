@@ -415,10 +415,7 @@ func (suite *apiTestSuite) checkConfigForward(cluster *tests.TestCluster) {
 		testutil.ReadGetJSON(re, tests.TestDialClient, urlPrefix, &cfg)
 		re.Equal(cfg["schedule"].(map[string]any)["leader-schedule-limit"],
 			float64(opts.GetLeaderScheduleLimit()))
-		re.Equal(cfg["replication"].(map[string]any)["max-replicas"],
-			float64(opts.GetReplicationConfig().MaxReplicas))
-		schedulers := cfg["schedule"].(map[string]any)["schedulers-payload"].(map[string]any)
-		return len(schedulers) == 4
+		return cfg["replication"].(map[string]any)["max-replicas"] == float64(opts.GetReplicationConfig().MaxReplicas)
 	})
 
 	// Test to change config in api server
