@@ -1934,7 +1934,7 @@ func TestSelectLeader(t *testing.T) {
 			Id: 1,
 		}
 		leader := recoveryController.selectLeader(peersMap, region)
-		re.Equal(leader.Region().Id, c.leaderID, "case: %d", i)
+		re.Equal(leader.region().Id, c.leaderID, "case: %d", i)
 	}
 }
 

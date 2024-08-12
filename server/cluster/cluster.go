@@ -375,18 +375,18 @@ func (c *RaftCluster) checkServices() {
 		servers, err := discovery.Discover(c.etcdClient, strconv.FormatUint(c.clusterID, 10), mcsutils.SchedulingServiceName)
 		if c.opt.GetMicroServiceConfig().IsSchedulingFallbackEnabled() && (err != nil || len(servers) == 0) {
 			c.startSchedulingJobs(c, c.hbstreams)
-			c.independentServices.Delete(mcsutils.SchedulingServiceName)
+			c.UnsetServiceIndependent(mcsutils.SchedulingServiceName)
 		} else {
 			if c.stopSchedulingJobs() || c.coordinator == nil {
 				c.initCoordinator(c.ctx, c, c.hbstreams)
 			}
 			if !c.IsServiceIndependent(mcsutils.SchedulingServiceName) {
-				c.independentServices.Store(mcsutils.SchedulingServiceName, true)
+				c.SetServiceIndependent(mcsutils.SchedulingServiceName)
 			}
 		}
 	} else {
 		c.startSchedulingJobs(c, c.hbstreams)
-		c.independentServices.Delete(mcsutils.SchedulingServiceName)
+		c.UnsetServiceIndependent(mcsutils.SchedulingServiceName)
 	}
 }
 
@@ -2439,9 +2439,25 @@ func IsClientURL(addr string, etcdClient *clientv3.Client) bool {
 
 // IsServiceIndependent returns whether the service is independent.
 func (c *RaftCluster) IsServiceIndependent(name string) bool {
-	independent, exist := c.independentServices.Load(name)
-	if !exist {
+	if c == nil {
 		return false
 	}
-	return independent.(bool)
+	_, exist := c.independentServices.Load(name)
+	return exist
+}
+
+// SetServiceIndependent sets the service to be independent.
+func (c *RaftCluster) SetServiceIndependent(name string) {
+	if c == nil {
+		return
+	}
+	c.independentServices.Store(name, struct{}{})
+}
+
+// UnsetServiceIndependent unsets the service to be independent.
+func (c *RaftCluster) UnsetServiceIndependent(name string) {
+	if c == nil {
+		return
+	}
+	c.independentServices.Delete(name)
 }
