@@ -36,34 +36,7 @@ import (
 	"google.golang.org/grpc"
 )
 
-var (
-	certPath        = strings.Join([]string{".", "cert"}, string(filepath.Separator))
-	certExpiredPath = strings.Join([]string{".", "cert-expired"}, string(filepath.Separator))
-	certScript      = strings.Join([]string{".", "cert_opt.sh"}, string(filepath.Separator))
-	testTLSInfo     = transport.TLSInfo{
-		KeyFile:       strings.Join([]string{".", "cert", "pd-server-key.pem"}, string(filepath.Separator)),
-		CertFile:      strings.Join([]string{".", "cert", "pd-server.pem"}, string(filepath.Separator)),
-		TrustedCAFile: strings.Join([]string{".", "cert", "ca.pem"}, string(filepath.Separator)),
-	}
-
-	testClientTLSInfo = transport.TLSInfo{
-		KeyFile:       strings.Join([]string{".", "cert", "client-key.pem"}, string(filepath.Separator)),
-		CertFile:      strings.Join([]string{".", "cert", "client.pem"}, string(filepath.Separator)),
-		TrustedCAFile: strings.Join([]string{".", "cert", "ca.pem"}, string(filepath.Separator)),
-	}
-
-	testTiDBClientTLSInfo = transport.TLSInfo{
-		KeyFile:       "./cert/tidb-client-key.pem",
-		CertFile:      "./cert/tidb-client.pem",
-		TrustedCAFile: "./cert/ca.pem",
-	}
-
-	testTLSInfoExpired = transport.TLSInfo{
-		KeyFile:       strings.Join([]string{".", "cert-expired", "pd-server-key.pem"}, string(filepath.Separator)),
-		CertFile:      strings.Join([]string{".", "cert-expired", "pd-server.pem"}, string(filepath.Separator)),
-		TrustedCAFile: strings.Join([]string{".", "cert-expired", "ca.pem"}, string(filepath.Separator)),
-	}
-)
+var certScript = strings.Join([]string{".", "cert_opt.sh"}, string(filepath.Separator))
 
 // TestTLSReloadAtomicReplace ensures server reloads expired/valid certs
 // when all certs are atomically replaced by directory renaming.
@@ -71,11 +44,15 @@ var (
 func TestTLSReloadAtomicReplace(t *testing.T) {
 	re := require.New(t)
 
-	// generate certs
-	for _, path := range []string{certPath, certExpiredPath} {
-		cleanFunc := generateCerts(re, path)
-		defer cleanFunc()
-	}
+	certPath := strings.Join([]string{".", "cert"}, string(filepath.Separator))
+	certExpiredPath := strings.Join([]string{".", "cert-expired"}, string(filepath.Separator))
+	cleanFunc := generateCerts(re, certPath)
+	defer cleanFunc()
+	cleanFunc = generateCerts(re, certExpiredPath)
+	defer cleanFunc()
+	testTLSInfo := buildTLSInfo(certPath, "pd-server")
+	testTLSInfoExpired := buildTLSInfo(certExpiredPath, "pd-server")
+	testClientTLSInfo := buildTLSInfo(certPath, "client")
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -113,7 +90,15 @@ func TestTLSReloadAtomicReplace(t *testing.T) {
 		err = os.Rename(certsDirExp, certsDir)
 		re.NoError(err)
 	}
-	testTLSReload(ctx, re, cloneFunc, replaceFunc, revertFunc)
+	testTLSReload(ctx, re, testClientTLSInfo, cloneFunc, replaceFunc, revertFunc)
+}
+
+func buildTLSInfo(path, name string) transport.TLSInfo {
+	return transport.TLSInfo{
+		KeyFile:       strings.Join([]string{path, name + "-key.pem"}, string(filepath.Separator)),
+		CertFile:      strings.Join([]string{path, name + ".pem"}, string(filepath.Separator)),
+		TrustedCAFile: strings.Join([]string{path, "ca.pem"}, string(filepath.Separator)),
+	}
 }
 
 func generateCerts(re *require.Assertions, path string) func() {
@@ -133,6 +118,7 @@ func generateCerts(re *require.Assertions, path string) func() {
 func testTLSReload(
 	ctx context.Context,
 	re *require.Assertions,
+	testClientTLSInfo transport.TLSInfo,
 	cloneFunc func() transport.TLSInfo,
 	replaceFunc func(),
 	revertFunc func()) {
@@ -285,22 +271,22 @@ func copyFile(src, dst string) error {
 
 func TestMultiCN(t *testing.T) {
 	re := require.New(t)
+
+	certPath := strings.Join([]string{".", "cert-multi-cn"}, string(filepath.Separator))
 	cleanFunc := generateCerts(re, certPath)
 	defer cleanFunc()
+	testTLSInfo := buildTLSInfo(certPath, "pd-server")
+	testClientTLSInfo := buildTLSInfo(certPath, "client")
+	testTiDBClientTLSInfo := buildTLSInfo(certPath, "tidb-client")
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	tmpDir := t.TempDir()
-	os.RemoveAll(tmpDir)
 
-	certsDir := t.TempDir()
-	tlsInfo, terr := copyTLSFiles(testTLSInfo, certsDir)
-	re.NoError(terr)
 	clus, err := tests.NewTestCluster(ctx, 1, func(conf *config.Config, _ string) {
 		conf.Security.TLSConfig = grpcutil.TLSConfig{
-			KeyPath:        tlsInfo.KeyFile,
-			CertPath:       tlsInfo.CertFile,
-			CAPath:         tlsInfo.TrustedCAFile,
+			KeyPath:        testTLSInfo.KeyFile,
+			CertPath:       testTLSInfo.CertFile,
+			CAPath:         testTLSInfo.TrustedCAFile,
 			CertAllowedCNs: []string{"tidb", "pd-server"},
 		}
 		conf.AdvertiseClientUrls = strings.ReplaceAll(conf.AdvertiseClientUrls, "http", "https")
