@@ -34,11 +34,6 @@ import (
 	"go.uber.org/zap"
 )
 
-const (
-	// ShuffleHotRegionName is shuffle hot region scheduler name.
-	ShuffleHotRegionName = "shuffle-hot-region-scheduler"
-)
-
 type shuffleHotRegionSchedulerConfig struct {
 	syncutil.RWMutex
 	schedulerConfig

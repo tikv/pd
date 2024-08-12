@@ -28,8 +28,6 @@ import (
 )
 
 const (
-	// TransferWitnessLeaderName is transfer witness leader scheduler name.
-	TransferWitnessLeaderName = "transfer-witness-leader-scheduler"
 	// TransferWitnessLeaderBatchSize is the number of operators to to transfer
 	// leaders by one scheduling
 	transferWitnessLeaderBatchSize = 3

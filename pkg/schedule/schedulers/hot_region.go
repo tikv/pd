@@ -45,8 +45,6 @@ import (
 )
 
 const (
-	// HotRegionName is balance hot region scheduler name.
-	HotRegionName           = "balance-hot-region-scheduler"
 	splitHotReadBuckets     = "split-hot-read-region"
 	splitHotWriteBuckets    = "split-hot-write-region"
 	splitProgressiveRank    = 5
@@ -191,7 +189,6 @@ func (h *baseHotScheduler) randomType() resourceType {
 }
 
 type hotScheduler struct {
-	name string
 	*baseHotScheduler
 	syncutil.RWMutex
 	// config of hot scheduler
@@ -203,7 +200,6 @@ func newHotScheduler(opController *operator.Controller, conf *hotRegionScheduler
 	base := newBaseHotScheduler(opController,
 		conf.getHistorySampleDuration(), conf.getHistorySampleInterval())
 	ret := &hotScheduler{
-		name:             HotRegionName,
 		baseHotScheduler: base,
 		conf:             conf,
 	}

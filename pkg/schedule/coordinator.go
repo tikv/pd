@@ -182,7 +182,7 @@ func (c *Coordinator) driveSlowNodeScheduler() {
 		case <-ticker.C:
 			{
 				// If enabled, exit.
-				if exists, _ := c.schedulers.IsSchedulerExisted(schedulers.EvictSlowTrendName); exists {
+				if exists, _ := c.schedulers.IsSchedulerExisted(types.EvictSlowTrendScheduler.String()); exists {
 					return
 				}
 				// If the cluster was set up with `raft-kv2` engine, this cluster should

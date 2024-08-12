@@ -31,11 +31,6 @@ import (
 	"github.com/unrolled/render"
 )
 
-const (
-	// ScatterRangeName is scatter range scheduler name
-	ScatterRangeName = "scatter-range"
-)
-
 type scatterRangeSchedulerConfig struct {
 	syncutil.RWMutex
 	schedulerConfig

@@ -30,11 +30,6 @@ import (
 	"go.uber.org/zap"
 )
 
-const (
-	// BalanceRegionName is balance region scheduler name.
-	BalanceRegionName = "balance-region-scheduler"
-)
-
 type balanceRegionSchedulerConfig struct {
 	Ranges []core.KeyRange `json:"ranges"`
 	// TODO: When we prepare to use Ranges, we will need to implement the ReloadConfig function for this scheduler.

@@ -40,11 +40,6 @@ import (
 	"go.uber.org/zap"
 )
 
-const (
-	// GrantHotRegionName is grant hot region scheduler name.
-	GrantHotRegionName = "grant-hot-region-scheduler"
-)
-
 type grantHotRegionSchedulerConfig struct {
 	syncutil.RWMutex
 	schedulerConfig

@@ -29,11 +29,6 @@ import (
 	types "github.com/tikv/pd/pkg/schedule/type"
 )
 
-const (
-	// RandomMergeName is random merge scheduler name.
-	RandomMergeName = "random-merge-scheduler"
-)
-
 type randomMergeSchedulerConfig struct {
 	Ranges []core.KeyRange `json:"ranges"`
 	// TODO: When we prepare to use Ranges, we will need to implement the ReloadConfig function for this scheduler.

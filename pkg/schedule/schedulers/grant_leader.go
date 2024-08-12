@@ -35,11 +35,6 @@ import (
 	"go.uber.org/zap"
 )
 
-const (
-	// GrantLeaderName is grant leader scheduler name.
-	GrantLeaderName = "grant-leader-scheduler"
-)
-
 type grantLeaderSchedulerConfig struct {
 	syncutil.RWMutex
 	schedulerConfig
@@ -312,7 +307,7 @@ func (handler *grantLeaderHandler) deleteConfig(w http.ResponseWriter, r *http.R
 			return
 		}
 		if last {
-			if err := handler.config.removeSchedulerCb(GrantLeaderName); err != nil {
+			if err := handler.config.removeSchedulerCb(types.GrantLeaderScheduler.String()); err != nil {
 				if errors.ErrorEqual(err, errs.ErrSchedulerNotFound.FastGenByArgs()) {
 					handler.rd.JSON(w, http.StatusNotFound, err.Error())
 				} else {
