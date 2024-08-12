@@ -214,7 +214,6 @@ func (suite *memberTestSuite) TestTransferPrimary() {
 		resp.Body.Close()
 
 		testutil.Eventually(re, func() bool {
-			println("newPrimary", newPrimary, nodes[newPrimary].IsServing())
 			return nodes[newPrimary].IsServing()
 		}, testutil.WithWaitFor(5*time.Second), testutil.WithTickInterval(50*time.Millisecond))
 

@@ -31,6 +31,7 @@ import (
 	"github.com/tikv/pd/pkg/election"
 	"github.com/tikv/pd/pkg/errs"
 	mcsutils "github.com/tikv/pd/pkg/mcs/utils"
+	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/storage/endpoint"
@@ -641,7 +642,7 @@ func (gta *GlobalTSOAllocator) campaignLeader() {
 	// check expected primary and watch the primary.
 	exitPrimary := make(chan struct{})
 	lease, err := mcsutils.KeepExpectedPrimaryAlive(ctx, gta.member.Client(), exitPrimary,
-		gta.am.leaderLease, gta.member.GetLeaderPath(), gta.member.MemberValue(), mcsutils.TSOServiceName)
+		gta.am.leaderLease, gta.member.GetLeaderPath(), gta.member.MemberValue(), constant.TSOServiceName)
 	if err != nil {
 		log.Error("prepare tso primary watch error", errs.ZapError(err))
 		return
@@ -663,7 +664,7 @@ func (gta *GlobalTSOAllocator) campaignLeader() {
 		logutil.CondUint32("keyspace-group-id", gta.getGroupID(), gta.getGroupID() > 0),
 		zap.String("tso-primary-name", gta.member.Name()))
 
-	leaderTicker := time.NewTicker(mcsutils.LeaderTickInterval)
+	leaderTicker := time.NewTicker(constant.LeaderTickInterval)
 	defer leaderTicker.Stop()
 
 	for {

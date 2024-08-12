@@ -30,9 +30,9 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/mcs/discovery"
 	scheserver "github.com/tikv/pd/pkg/mcs/scheduling/server"
 	mcsutils "github.com/tikv/pd/pkg/mcs/utils"
+	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/response"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/handler"
@@ -1508,8 +1508,8 @@ func transferPrimary(c *gin.Context) {
 		newPrimary = v
 	}
 
-	if err := discovery.TransferPrimary(svr.GetClient(), svr.GetParticipant().GetExpectedPrimaryLease(),
-		mcsutils.SchedulingServiceName, svr.GetAddr(), newPrimary, 0); err != nil {
+	if err := mcsutils.TransferPrimary(svr.GetClient(), svr.GetParticipant().GetExpectedPrimaryLease(),
+		constant.SchedulingServiceName, svr.GetAddr(), newPrimary, 0); err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
 		return
 	}

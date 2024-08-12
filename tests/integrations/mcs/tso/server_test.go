@@ -34,7 +34,7 @@ import (
 	"github.com/tikv/pd/pkg/mcs/discovery"
 	tso "github.com/tikv/pd/pkg/mcs/tso/server"
 	tsoapi "github.com/tikv/pd/pkg/mcs/tso/server/apis/v1"
-	"github.com/tikv/pd/pkg/mcs/utils"
+	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/tempurl"
@@ -144,17 +144,15 @@ func (suite *tsoServerTestSuite) TestParticipantStartWithAdvertiseListenAddr() {
 		return s.IsServing()
 	}, testutil.WithWaitFor(5*time.Second), testutil.WithTickInterval(50*time.Millisecond))
 
-	member, err := s.GetMember(utils.DefaultKeyspaceID, utils.DefaultKeyspaceGroupID)
+	member, err := s.GetMember(constant.DefaultKeyspaceID, constant.DefaultKeyspaceGroupID)
 	re.NoError(err)
-	re.Equal(fmt.Sprintf("%s-%05d", cfg.AdvertiseListenAddr, utils.DefaultKeyspaceGroupID), member.Name())
+	re.Equal(fmt.Sprintf("%s-%05d", cfg.AdvertiseListenAddr, constant.DefaultKeyspaceGroupID), member.Name())
 }
 
 func TestTSOPath(t *testing.T) {
 	re := require.New(t)
 	checkTSOPath(re, true /*isAPIServiceMode*/)
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/mcs/tso/server/skipWaitAPIServiceReady", "return(true)"))
 	checkTSOPath(re, false /*isAPIServiceMode*/)
-	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/tso/server/skipWaitAPIServiceReady"))
 }
 
 func checkTSOPath(re *require.Assertions, isAPIServiceMode bool) {
@@ -212,57 +210,6 @@ func getEtcdTimestampKeyNum(re *require.Assertions, client *clientv3.Client) int
 	return count
 }
 
-func TestWaitAPIServiceReady(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	startCluster := func(isAPIServiceMode bool) (cluster *tests.TestCluster, backendEndpoints string) {
-		var err error
-		if isAPIServiceMode {
-			cluster, err = tests.NewTestAPICluster(ctx, 1)
-		} else {
-			cluster, err = tests.NewTestCluster(ctx, 1)
-		}
-		re.NoError(err)
-		err = cluster.RunInitialServers()
-		re.NoError(err)
-		leaderName := cluster.WaitLeader()
-		re.NotEmpty(leaderName)
-		pdLeader := cluster.GetServer(leaderName)
-		return cluster, pdLeader.GetAddr()
-	}
-
-	// tso server cannot be started because the pd server is not ready as api service.
-	cluster, backendEndpoints := startCluster(false /*isAPIServiceMode*/)
-	sctx, scancel := context.WithTimeout(ctx, time.Second*10)
-	defer scancel()
-	s, _, err := tests.StartSingleTSOTestServerWithoutCheck(sctx, re, backendEndpoints, tempurl.Alloc())
-	re.Error(err)
-	re.Nil(s)
-	cluster.Destroy()
-
-	// tso server can be started because the pd server is ready as api service.
-	cluster, backendEndpoints = startCluster(true /*isAPIServiceMode*/)
-	sctx, scancel = context.WithTimeout(ctx, time.Second*10)
-	defer scancel()
-	s, cleanup, err := tests.StartSingleTSOTestServerWithoutCheck(sctx, re, backendEndpoints, tempurl.Alloc())
-	re.NoError(err)
-	defer cluster.Destroy()
-	defer cleanup()
-
-	for i := 0; i < 12; i++ {
-		select {
-		case <-time.After(time.Second):
-		case <-sctx.Done():
-			return
-		}
-		if s != nil && s.IsServing() {
-			break
-		}
-	}
-}
-
 type APIServerForward struct {
 	re               *require.Assertions
 	ctx              context.Context
@@ -305,10 +252,10 @@ func (suite *APIServerForward) ShutDown() {
 
 	etcdClient := suite.pdLeader.GetEtcdClient()
 	clusterID := strconv.FormatUint(suite.pdLeader.GetClusterID(), 10)
-	endpoints, err := discovery.Discover(etcdClient, clusterID, utils.TSOServiceName)
+	endpoints, err := discovery.Discover(etcdClient, clusterID, constant.TSOServiceName)
 	re.NoError(err)
 	if len(endpoints) != 0 {
-		endpoints, err = discovery.Discover(etcdClient, clusterID, utils.TSOServiceName)
+		endpoints, err = discovery.Discover(etcdClient, clusterID, constant.TSOServiceName)
 		re.NoError(err)
 		re.Empty(endpoints)
 	}
@@ -341,15 +288,15 @@ func TestForwardTSOWhenPrimaryChanged(t *testing.T) {
 	tc.WaitForDefaultPrimaryServing(re)
 
 	// can use the tso-related interface with old primary
-	oldPrimary, exist := suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx, utils.TSOServiceName)
+	oldPrimary, exist := suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx, constant.TSOServiceName)
 	re.True(exist)
 	suite.checkAvailableTSO(re)
 
 	// can use the tso-related interface with new primary
 	tc.DestroyServer(oldPrimary)
-	time.Sleep(time.Duration(utils.DefaultLeaderLease) * time.Second) // wait for leader lease timeout
+	time.Sleep(time.Duration(constant.DefaultLeaderLease) * time.Second) // wait for leader lease timeout
 	tc.WaitForDefaultPrimaryServing(re)
-	primary, exist := suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx, utils.TSOServiceName)
+	primary, exist := suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx, constant.TSOServiceName)
 	re.True(exist)
 	re.NotEqual(oldPrimary, primary)
 	suite.checkAvailableTSO(re)
@@ -363,8 +310,8 @@ func TestForwardTSOWhenPrimaryChanged(t *testing.T) {
 		}
 	}
 	tc.WaitForDefaultPrimaryServing(re)
-	time.Sleep(time.Duration(utils.DefaultLeaderLease) * time.Second) // wait for leader lease timeout
-	primary, exist = suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx, utils.TSOServiceName)
+	time.Sleep(time.Duration(constant.DefaultLeaderLease) * time.Second) // wait for leader lease timeout
+	primary, exist = suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx, constant.TSOServiceName)
 	re.True(exist)
 	re.Equal(oldPrimary, primary)
 	suite.checkAvailableTSO(re)
@@ -381,7 +328,7 @@ func TestResignTSOPrimaryForward(t *testing.T) {
 	tc.WaitForDefaultPrimaryServing(re)
 
 	for j := 0; j < 10; j++ {
-		tc.ResignPrimary(utils.DefaultKeyspaceID, utils.DefaultKeyspaceGroupID)
+		tc.ResignPrimary(constant.DefaultKeyspaceID, constant.DefaultKeyspaceGroupID)
 		tc.WaitForDefaultPrimaryServing(re)
 		var err error
 		for i := 0; i < 3; i++ { // try 3 times
@@ -465,7 +412,7 @@ func (suite *APIServerForward) checkForwardTSOUnexpectedToFollower(checkTSO func
 
 	// get follower's address
 	servers := tc.GetServers()
-	oldPrimary := tc.GetPrimaryServer(utils.DefaultKeyspaceID, utils.DefaultKeyspaceGroupID).GetAddr()
+	oldPrimary := tc.GetPrimaryServer(constant.DefaultKeyspaceID, constant.DefaultKeyspaceGroupID).GetAddr()
 	var follower string
 	for addr := range servers {
 		if addr != oldPrimary {
@@ -476,8 +423,8 @@ func (suite *APIServerForward) checkForwardTSOUnexpectedToFollower(checkTSO func
 	re.NotEmpty(follower)
 
 	// write follower's address to cache to simulate cache is not updated.
-	suite.pdLeader.GetServer().SetServicePrimaryAddr(utils.TSOServiceName, follower)
-	errorAddr, ok := suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx, utils.TSOServiceName)
+	suite.pdLeader.GetServer().SetServicePrimaryAddr(constant.TSOServiceName, follower)
+	errorAddr, ok := suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx, constant.TSOServiceName)
 	re.True(ok)
 	re.Equal(follower, errorAddr)
 
@@ -486,7 +433,7 @@ func (suite *APIServerForward) checkForwardTSOUnexpectedToFollower(checkTSO func
 
 	// test tso request will success after cache is updated
 	suite.checkAvailableTSO(re)
-	newPrimary, exist2 := suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx, utils.TSOServiceName)
+	newPrimary, exist2 := suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx, constant.TSOServiceName)
 	re.True(exist2)
 	re.NotEqual(errorAddr, newPrimary)
 	re.Equal(oldPrimary, newPrimary)
@@ -569,7 +516,7 @@ func (suite *CommonTestSuite) SetupSuite() {
 	suite.tsoCluster, err = tests.NewTestTSOCluster(suite.ctx, 1, suite.backendEndpoints)
 	re.NoError(err)
 	suite.tsoCluster.WaitForDefaultPrimaryServing(re)
-	suite.tsoDefaultPrimaryServer = suite.tsoCluster.GetPrimaryServer(utils.DefaultKeyspaceID, utils.DefaultKeyspaceGroupID)
+	suite.tsoDefaultPrimaryServer = suite.tsoCluster.GetPrimaryServer(constant.DefaultKeyspaceID, constant.DefaultKeyspaceGroupID)
 }
 
 func (suite *CommonTestSuite) TearDownSuite() {
@@ -577,10 +524,10 @@ func (suite *CommonTestSuite) TearDownSuite() {
 	suite.tsoCluster.Destroy()
 	etcdClient := suite.pdLeader.GetEtcdClient()
 	clusterID := strconv.FormatUint(suite.pdLeader.GetClusterID(), 10)
-	endpoints, err := discovery.Discover(etcdClient, clusterID, utils.TSOServiceName)
+	endpoints, err := discovery.Discover(etcdClient, clusterID, constant.TSOServiceName)
 	re.NoError(err)
 	if len(endpoints) != 0 {
-		endpoints, err = discovery.Discover(etcdClient, clusterID, utils.TSOServiceName)
+		endpoints, err = discovery.Discover(etcdClient, clusterID, constant.TSOServiceName)
 		re.NoError(err)
 		re.Empty(endpoints)
 	}
@@ -610,7 +557,7 @@ func (suite *CommonTestSuite) TestBootstrapDefaultKeyspaceGroup() {
 			var kgs []*endpoint.KeyspaceGroup
 			re.NoError(json.Unmarshal(respString, &kgs))
 			re.Len(kgs, 1)
-			re.Equal(utils.DefaultKeyspaceGroupID, kgs[0].ID)
+			re.Equal(constant.DefaultKeyspaceGroupID, kgs[0].ID)
 			re.Equal(endpoint.Basic.String(), kgs[0].UserKind)
 			re.Empty(kgs[0].SplitState)
 			re.Empty(kgs[0].KeyspaceLookupTable)

@@ -28,7 +28,7 @@ import (
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/encryption"
 	"github.com/tikv/pd/pkg/errs"
-	mcsutils "github.com/tikv/pd/pkg/mcs/utils"
+	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/schedule"
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	sche "github.com/tikv/pd/pkg/schedule/core"
@@ -194,7 +194,7 @@ func (h *Handler) AddScheduler(tp types.CheckerSchedulerType, args ...string) er
 	}
 
 	var removeSchedulerCb func(string) error
-	if c.IsServiceIndependent(mcsutils.SchedulingServiceName) {
+	if c.IsServiceIndependent(constant.SchedulingServiceName) {
 		removeSchedulerCb = c.GetCoordinator().GetSchedulersController().RemoveSchedulerHandler
 	} else {
 		removeSchedulerCb = c.GetCoordinator().GetSchedulersController().RemoveScheduler
@@ -204,7 +204,7 @@ func (h *Handler) AddScheduler(tp types.CheckerSchedulerType, args ...string) er
 		return err
 	}
 	log.Info("create scheduler", zap.String("scheduler-name", s.GetName()), zap.Strings("scheduler-args", args))
-	if c.IsServiceIndependent(mcsutils.SchedulingServiceName) {
+	if c.IsServiceIndependent(constant.SchedulingServiceName) {
 		if err = c.AddSchedulerHandler(s, args...); err != nil {
 			log.Error("can not add scheduler handler", zap.String("scheduler-name", s.GetName()), zap.Strings("scheduler-args", args), errs.ZapError(err))
 			return err
@@ -231,7 +231,7 @@ func (h *Handler) RemoveScheduler(name string) error {
 	if err != nil {
 		return err
 	}
-	if c.IsServiceIndependent(mcsutils.SchedulingServiceName) {
+	if c.IsServiceIndependent(constant.SchedulingServiceName) {
 		if err = c.RemoveSchedulerHandler(name); err != nil {
 			log.Error("can not remove scheduler handler", zap.String("scheduler-name", name), errs.ZapError(err))
 		} else {

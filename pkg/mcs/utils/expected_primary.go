@@ -17,10 +17,16 @@ package utils
 import (
 	"context"
 	"fmt"
+	"math/rand"
+	"time"
 
+	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/election"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/mcs/discovery"
+	"github.com/tikv/pd/pkg/mcs/utils/constant"
+	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"go.etcd.io/etcd/clientv3"
@@ -50,8 +56,8 @@ func GetExpectedPrimaryFlag(client *clientv3.Client, primaryPath string) string 
 	return string(primary)
 }
 
-// MarkExpectedPrimaryFlag marks the expected primary flag when the primary is specified.
-func MarkExpectedPrimaryFlag(client *clientv3.Client, primaryPath string, leaderRaw string, leaseID clientv3.LeaseID) (int64, error) {
+// markExpectedPrimaryFlag marks the expected primary flag when the primary is specified.
+func markExpectedPrimaryFlag(client *clientv3.Client, primaryPath string, leaderRaw string, leaseID clientv3.LeaseID) (int64, error) {
 	path := ExpectedPrimaryPath(primaryPath)
 	log.Info("set expected primary flag", zap.String("primary-path", path), zap.String("leader-raw", leaderRaw))
 	// write a flag to indicate the expected primary.
@@ -80,7 +86,7 @@ func KeepExpectedPrimaryAlive(ctx context.Context, cli *clientv3.Client, exitPri
 		return nil, err
 	}
 
-	revision, err := MarkExpectedPrimaryFlag(cli, leaderPath, memberValue, lease.ID.Load().(clientv3.LeaseID))
+	revision, err := markExpectedPrimaryFlag(cli, leaderPath, memberValue, lease.ID.Load().(clientv3.LeaseID))
 	if err != nil {
 		log.Error("mark expected primary error", errs.ZapError(err))
 		return nil, err
@@ -111,4 +117,67 @@ func watchExpectedPrimary(ctx context.Context,
 	case exitPrimary <- struct{}{}:
 		return
 	}
+}
+
+// TransferPrimary transfers the primary of the specified service.
+// keyspaceGroupID is optional, only used for TSO service.
+func TransferPrimary(client *clientv3.Client, lease *election.Lease, serviceName,
+	oldPrimaryAddr, newPrimary string, keyspaceGroupID uint32) error {
+	if lease == nil {
+		return errors.New("current lease is nil, please check leadership")
+	}
+	log.Info("try to transfer primary", zap.String("service", serviceName), zap.String("from", oldPrimaryAddr), zap.String("to", newPrimary))
+	entries, err := discovery.GetMSMembers(serviceName, client)
+	if err != nil {
+		return err
+	}
+
+	// Do nothing when I am the only member of cluster.
+	if len(entries) == 1 {
+		return errors.Errorf("no valid secondary to transfer primary, the only member is %s", entries[0].Name)
+	}
+
+	var primaryIDs []string
+	for _, member := range entries {
+		// TODO: judged by `addr` and `name` now, should unify them to `name` in the future.
+		if (newPrimary == "" && member.ServiceAddr != oldPrimaryAddr) || (newPrimary != "" && member.Name == newPrimary) {
+			primaryIDs = append(primaryIDs, member.ServiceAddr)
+		}
+	}
+	if len(primaryIDs) == 0 {
+		return errors.Errorf("no valid secondary to transfer primary, from %s to %s", oldPrimaryAddr, newPrimary)
+	}
+
+	r := rand.New(rand.NewSource(time.Now().UnixNano()))
+	nextPrimaryID := r.Intn(len(primaryIDs))
+
+	clusterID, err := etcdutil.GetClusterID(client, constant.ClusterIDPath)
+	if err != nil {
+		return errors.Errorf("failed to get cluster ID: %v", err)
+	}
+
+	// update expected primary flag
+	grantResp, err := client.Grant(client.Ctx(), constant.DefaultLeaderLease)
+	if err != nil {
+		return errors.Errorf("failed to grant lease for expected primary, err: %v", err)
+	}
+
+	// revoke current primary's lease to ensure keepalive goroutine of primary exits.
+	if err := lease.Close(); err != nil {
+		return errors.Errorf("failed to revoke current primary's lease: %v", err)
+	}
+
+	var primaryPath string
+	switch serviceName {
+	case constant.SchedulingServiceName:
+		primaryPath = endpoint.SchedulingPrimaryPath(clusterID)
+	case constant.TSOServiceName:
+		tsoRootPath := endpoint.TSOSvcRootPath(clusterID)
+		primaryPath = endpoint.KeyspaceGroupPrimaryPath(tsoRootPath, keyspaceGroupID)
+	}
+	_, err = markExpectedPrimaryFlag(client, primaryPath, primaryIDs[nextPrimaryID], grantResp.ID)
+	if err != nil {
+		return errors.Errorf("failed to mark expected primary flag for %s, err: %v", serviceName, err)
+	}
+	return nil
 }

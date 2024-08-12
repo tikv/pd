@@ -25,7 +25,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/mcs/utils"
+	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/server"
 	"github.com/unrolled/render"
@@ -62,7 +62,7 @@ func (h *adminHandler) DeleteRegionCache(w http.ResponseWriter, r *http.Request)
 	}
 	rc.RemoveRegionIfExist(regionID)
 	msg := "The region is removed from server cache."
-	if rc.IsServiceIndependent(utils.SchedulingServiceName) {
+	if rc.IsServiceIndependent(constant.SchedulingServiceName) {
 		err = h.deleteRegionCacheInSchedulingServer(regionID)
 		if err != nil {
 			msg = buildMsg(err)
@@ -105,7 +105,7 @@ func (h *adminHandler) DeleteRegionStorage(w http.ResponseWriter, r *http.Reques
 	// Remove region from cache.
 	rc.RemoveRegionIfExist(regionID)
 	msg := "The region is removed from server cache and region meta storage."
-	if rc.IsServiceIndependent(utils.SchedulingServiceName) {
+	if rc.IsServiceIndependent(constant.SchedulingServiceName) {
 		err = h.deleteRegionCacheInSchedulingServer(regionID)
 		if err != nil {
 			msg = buildMsg(err)
@@ -125,7 +125,7 @@ func (h *adminHandler) DeleteAllRegionCache(w http.ResponseWriter, r *http.Reque
 	rc := getCluster(r)
 	rc.ResetRegionCache()
 	msg := "All regions are removed from server cache."
-	if rc.IsServiceIndependent(utils.SchedulingServiceName) {
+	if rc.IsServiceIndependent(constant.SchedulingServiceName) {
 		err = h.deleteRegionCacheInSchedulingServer()
 		if err != nil {
 			msg = buildMsg(err)
@@ -227,7 +227,7 @@ func (h *adminHandler) recoverAllocID(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *adminHandler) deleteRegionCacheInSchedulingServer(id ...uint64) error {
-	addr, ok := h.svr.GetServicePrimaryAddr(h.svr.Context(), utils.SchedulingServiceName)
+	addr, ok := h.svr.GetServicePrimaryAddr(h.svr.Context(), constant.SchedulingServiceName)
 	if !ok {
 		return errs.ErrNotFoundSchedulingAddr.FastGenByArgs()
 	}

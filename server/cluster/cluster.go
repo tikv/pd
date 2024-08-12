@@ -42,7 +42,7 @@ import (
 	"github.com/tikv/pd/pkg/id"
 	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/mcs/discovery"
-	mcsutils "github.com/tikv/pd/pkg/mcs/utils"
+	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/memory"
 	"github.com/tikv/pd/pkg/progress"
 	"github.com/tikv/pd/pkg/ratelimit"
@@ -327,7 +327,7 @@ func (c *RaftCluster) Start(s Server) error {
 		return err
 	}
 
-	if !c.IsServiceIndependent(mcsutils.SchedulingServiceName) {
+	if !c.IsServiceIndependent(constant.SchedulingServiceName) {
 		for _, store := range c.GetStores() {
 			storeID := store.GetID()
 			c.slowStat.ObserveSlowStoreStatus(storeID, store.IsSlow())
@@ -372,21 +372,21 @@ func (c *RaftCluster) Start(s Server) error {
 
 func (c *RaftCluster) checkServices() {
 	if c.isAPIServiceMode {
-		servers, err := discovery.Discover(c.etcdClient, strconv.FormatUint(c.clusterID, 10), mcsutils.SchedulingServiceName)
+		servers, err := discovery.Discover(c.etcdClient, strconv.FormatUint(c.clusterID, 10), constant.SchedulingServiceName)
 		if c.opt.GetMicroServiceConfig().IsSchedulingFallbackEnabled() && (err != nil || len(servers) == 0) {
 			c.startSchedulingJobs(c, c.hbstreams)
-			c.UnsetServiceIndependent(mcsutils.SchedulingServiceName)
+			c.UnsetServiceIndependent(constant.SchedulingServiceName)
 		} else {
 			if c.stopSchedulingJobs() || c.coordinator == nil {
 				c.initCoordinator(c.ctx, c, c.hbstreams)
 			}
-			if !c.IsServiceIndependent(mcsutils.SchedulingServiceName) {
-				c.SetServiceIndependent(mcsutils.SchedulingServiceName)
+			if !c.IsServiceIndependent(constant.SchedulingServiceName) {
+				c.SetServiceIndependent(constant.SchedulingServiceName)
 			}
 		}
 	} else {
 		c.startSchedulingJobs(c, c.hbstreams)
-		c.UnsetServiceIndependent(mcsutils.SchedulingServiceName)
+		c.UnsetServiceIndependent(constant.SchedulingServiceName)
 	}
 }
 
@@ -757,7 +757,7 @@ func (c *RaftCluster) Stop() {
 	}
 	c.running = false
 	c.cancel()
-	if !c.IsServiceIndependent(mcsutils.SchedulingServiceName) {
+	if !c.IsServiceIndependent(constant.SchedulingServiceName) {
 		c.stopSchedulingJobs()
 	}
 	c.heartbeatRunner.Stop()
@@ -889,7 +889,7 @@ func (c *RaftCluster) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest
 	nowTime := time.Now()
 	var newStore *core.StoreInfo
 	// If this cluster has slow stores, we should awaken hibernated regions in other stores.
-	if !c.IsServiceIndependent(mcsutils.SchedulingServiceName) {
+	if !c.IsServiceIndependent(constant.SchedulingServiceName) {
 		if needAwaken, slowStoreIDs := c.NeedAwakenAllRegionsInStore(storeID); needAwaken {
 			log.Info("forcely awaken hibernated regions", zap.Uint64("store-id", storeID), zap.Uint64s("slow-stores", slowStoreIDs))
 			newStore = store.Clone(core.SetStoreStats(stats), core.SetLastHeartbeatTS(nowTime), core.SetLastAwakenTime(nowTime), opt)
@@ -924,7 +924,7 @@ func (c *RaftCluster) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest
 		regions  map[uint64]*core.RegionInfo
 		interval uint64
 	)
-	if !c.IsServiceIndependent(mcsutils.SchedulingServiceName) {
+	if !c.IsServiceIndependent(constant.SchedulingServiceName) {
 		c.hotStat.Observe(storeID, newStore.GetStoreStats())
 		c.hotStat.FilterUnhealthyStore(c)
 		c.slowStat.ObserveSlowStoreStatus(storeID, newStore.IsSlow())
@@ -985,7 +985,7 @@ func (c *RaftCluster) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest
 		e := int64(dur)*2 - int64(stat.GetTotalDurationSec())
 		store.Feedback(float64(e))
 	}
-	if !c.IsServiceIndependent(mcsutils.SchedulingServiceName) {
+	if !c.IsServiceIndependent(constant.SchedulingServiceName) {
 		// Here we will compare the reported regions with the previous hot peers to decide if it is still hot.
 		collectUnReportedPeerTask := func(cache *statistics.HotPeerCache) {
 			stats := cache.CheckColdPeer(storeID, regions, interval)
@@ -1041,7 +1041,7 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 
 	region.Inherit(origin, c.GetStoreConfig().IsEnableRegionBucket())
 
-	if !c.IsServiceIndependent(mcsutils.SchedulingServiceName) {
+	if !c.IsServiceIndependent(constant.SchedulingServiceName) {
 		cluster.HandleStatsAsync(c, region)
 	}
 	tracer.OnAsyncHotStatsFinished()
@@ -1106,7 +1106,7 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 		)
 		tracer.OnUpdateSubTreeFinished()
 
-		if !c.IsServiceIndependent(mcsutils.SchedulingServiceName) {
+		if !c.IsServiceIndependent(constant.SchedulingServiceName) {
 			ctx.MiscRunner.RunTask(
 				regionID,
 				ratelimit.HandleOverlaps,
@@ -1449,7 +1449,7 @@ func (c *RaftCluster) BuryStore(storeID uint64, forceBury bool) error {
 		c.resetProgress(storeID, addr)
 		storeIDStr := strconv.FormatUint(storeID, 10)
 		statistics.ResetStoreStatistics(addr, storeIDStr)
-		if !c.IsServiceIndependent(mcsutils.SchedulingServiceName) {
+		if !c.IsServiceIndependent(constant.SchedulingServiceName) {
 			c.removeStoreStatistics(storeID)
 		}
 	}
@@ -1585,7 +1585,7 @@ func (c *RaftCluster) setStore(store *core.StoreInfo) error {
 		}
 	}
 	c.PutStore(store)
-	if !c.IsServiceIndependent(mcsutils.SchedulingServiceName) {
+	if !c.IsServiceIndependent(constant.SchedulingServiceName) {
 		c.updateStoreStatistics(store.GetID(), store.IsSlow())
 	}
 	return nil
@@ -1635,7 +1635,7 @@ func (c *RaftCluster) checkStores() {
 						zap.Int("region-count", c.GetTotalRegionCount()),
 						errs.ZapError(err))
 				}
-			} else if c.IsPrepared() || (c.IsServiceIndependent(mcsutils.SchedulingServiceName) && c.isStorePrepared()) {
+			} else if c.IsPrepared() || (c.IsServiceIndependent(constant.SchedulingServiceName) && c.isStorePrepared()) {
 				threshold := c.getThreshold(stores, store)
 				regionSize := float64(store.GetRegionSize())
 				log.Debug("store serving threshold", zap.Uint64("store-id", storeID), zap.Float64("threshold", threshold), zap.Float64("region-size", regionSize))

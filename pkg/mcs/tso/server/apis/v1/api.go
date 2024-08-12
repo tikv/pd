@@ -26,9 +26,9 @@ import (
 	"github.com/pingcap/kvproto/pkg/tsopb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/mcs/discovery"
 	tsoserver "github.com/tikv/pd/pkg/mcs/tso/server"
 	"github.com/tikv/pd/pkg/mcs/utils"
+	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/tso"
 	"github.com/tikv/pd/pkg/utils/apiutil"
@@ -220,7 +220,7 @@ func ResetTS(c *gin.Context) {
 // GetHealth returns the health status of the TSO service.
 func GetHealth(c *gin.Context) {
 	svr := c.MustGet(multiservicesapi.ServiceContextKey).(*tsoserver.Service)
-	am, err := svr.GetKeyspaceGroupManager().GetAllocatorManager(utils.DefaultKeyspaceGroupID)
+	am, err := svr.GetKeyspaceGroupManager().GetAllocatorManager(constant.DefaultKeyspaceGroupID)
 	if err != nil {
 		c.String(http.StatusInternalServerError, err.Error())
 		return
@@ -292,7 +292,7 @@ func transferPrimary(c *gin.Context) {
 		return
 	}
 
-	newPrimary, keyspaceGroupID := "", utils.DefaultKeyspaceGroupID
+	newPrimary, keyspaceGroupID := "", constant.DefaultKeyspaceGroupID
 	if v, ok := input["new_primary"]; ok {
 		newPrimary = v
 	}
@@ -309,8 +309,8 @@ func transferPrimary(c *gin.Context) {
 		return
 	}
 
-	if err := discovery.TransferPrimary(svr.GetClient(), globalAllocator.(*tso.GlobalTSOAllocator).GetExpectedPrimaryLease(),
-		utils.TSOServiceName, svr.GetAddr(), newPrimary, keyspaceGroupID); err != nil {
+	if err := utils.TransferPrimary(svr.GetClient(), globalAllocator.(*tso.GlobalTSOAllocator).GetExpectedPrimaryLease(),
+		constant.TSOServiceName, svr.GetAddr(), newPrimary, keyspaceGroupID); err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
 		return
 	}
