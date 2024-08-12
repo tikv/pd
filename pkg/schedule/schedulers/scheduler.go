@@ -34,9 +34,10 @@ import (
 
 // Scheduler is an interface to schedule resources.
 type Scheduler interface {
-	baseScheduler
 	http.Handler
-
+	GetName() string
+	// GetType should in accordance with the name passing to RegisterScheduler()
+	GetType() types.CheckerSchedulerType
 	EncodeConfig() ([]byte, error)
 	// ReloadConfig reloads the config from the storage.
 	ReloadConfig() error
@@ -46,12 +47,6 @@ type Scheduler interface {
 	CleanConfig(cluster sche.SchedulerCluster)
 	Schedule(cluster sche.SchedulerCluster, dryRun bool) ([]*operator.Operator, []plan.Plan)
 	IsScheduleAllowed(cluster sche.SchedulerCluster) bool
-}
-
-type baseScheduler interface {
-	GetName() string
-	// GetType should in accordance with the name passing to RegisterScheduler()
-	GetType() types.CheckerSchedulerType
 }
 
 // EncodeConfig encode the custom config for each scheduler.
