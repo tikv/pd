@@ -25,7 +25,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/id"
-	"github.com/tikv/pd/pkg/mcs/utils"
+	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/slice"
@@ -118,20 +118,20 @@ func NewKeyspaceManager(
 		cluster:           cluster,
 		config:            config,
 		kgm:               kgm,
-		nextPatrolStartID: utils.DefaultKeyspaceID,
+		nextPatrolStartID: constant.DefaultKeyspaceID,
 	}
 }
 
 // Bootstrap saves default keyspace info.
 func (manager *Manager) Bootstrap() error {
 	// Split Keyspace Region for default keyspace.
-	if err := manager.splitKeyspaceRegion(utils.DefaultKeyspaceID, false); err != nil {
+	if err := manager.splitKeyspaceRegion(constant.DefaultKeyspaceID, false); err != nil {
 		return err
 	}
 	now := time.Now().Unix()
 	defaultKeyspaceMeta := &keyspacepb.KeyspaceMeta{
-		Id:             utils.DefaultKeyspaceID,
-		Name:           utils.DefaultKeyspaceName,
+		Id:             constant.DefaultKeyspaceID,
+		Name:           constant.DefaultKeyspaceName,
 		State:          keyspacepb.KeyspaceState_ENABLED,
 		CreatedAt:      now,
 		StateChangedAt: now,
@@ -543,7 +543,7 @@ func (manager *Manager) UpdateKeyspaceConfig(name string, mutations []*Mutation)
 // It returns error if saving failed, operation not allowed, or if keyspace not exists.
 func (manager *Manager) UpdateKeyspaceState(name string, newState keyspacepb.KeyspaceState, now int64) (*keyspacepb.KeyspaceMeta, error) {
 	// Changing the state of default keyspace is not allowed.
-	if name == utils.DefaultKeyspaceName {
+	if name == constant.DefaultKeyspaceName {
 		log.Warn("[keyspace] failed to update keyspace config",
 			zap.Error(ErrModifyDefaultKeyspace),
 		)
@@ -595,7 +595,7 @@ func (manager *Manager) UpdateKeyspaceState(name string, newState keyspacepb.Key
 // It returns error if saving failed, operation not allowed, or if keyspace not exists.
 func (manager *Manager) UpdateKeyspaceStateByID(id uint32, newState keyspacepb.KeyspaceState, now int64) (*keyspacepb.KeyspaceMeta, error) {
 	// Changing the state of default keyspace is not allowed.
-	if id == utils.DefaultKeyspaceID {
+	if id == constant.DefaultKeyspaceID {
 		log.Warn("[keyspace] failed to update keyspace config",
 			zap.Error(ErrModifyDefaultKeyspace),
 		)
@@ -724,18 +724,18 @@ func (manager *Manager) PatrolKeyspaceAssignment(startKeyspaceID, endKeyspaceID 
 		var defaultKeyspaceGroup *endpoint.KeyspaceGroup
 		err = manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
 			var err error
-			defaultKeyspaceGroup, err = manager.kgm.store.LoadKeyspaceGroup(txn, utils.DefaultKeyspaceGroupID)
+			defaultKeyspaceGroup, err = manager.kgm.store.LoadKeyspaceGroup(txn, constant.DefaultKeyspaceGroupID)
 			if err != nil {
 				return err
 			}
 			if defaultKeyspaceGroup == nil {
-				return errors.Errorf("default keyspace group %d not found", utils.DefaultKeyspaceGroupID)
+				return errors.Errorf("default keyspace group %d not found", constant.DefaultKeyspaceGroupID)
 			}
 			if defaultKeyspaceGroup.IsSplitting() {
-				return ErrKeyspaceGroupInSplit(utils.DefaultKeyspaceGroupID)
+				return ErrKeyspaceGroupInSplit(constant.DefaultKeyspaceGroupID)
 			}
 			if defaultKeyspaceGroup.IsMerging() {
-				return ErrKeyspaceGroupInMerging(utils.DefaultKeyspaceGroupID)
+				return ErrKeyspaceGroupInMerging(constant.DefaultKeyspaceGroupID)
 			}
 			keyspaces, err := manager.store.LoadRangeKeyspace(txn, manager.nextPatrolStartID, etcdutil.MaxEtcdTxnOps)
 			if err != nil {
@@ -784,7 +784,7 @@ func (manager *Manager) PatrolKeyspaceAssignment(startKeyspaceID, endKeyspaceID 
 					// Only save the keyspace group meta if any keyspace is assigned to it.
 					assigned = true
 				}
-				ks.Config[TSOKeyspaceGroupIDKey] = strconv.FormatUint(uint64(utils.DefaultKeyspaceGroupID), 10)
+				ks.Config[TSOKeyspaceGroupIDKey] = strconv.FormatUint(uint64(constant.DefaultKeyspaceGroupID), 10)
 				err = manager.store.SaveKeyspaceMeta(txn, ks)
 				if err != nil {
 					log.Error("[keyspace] failed to save keyspace meta during patrol",
