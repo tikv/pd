@@ -440,7 +440,7 @@ func NewScheduleController(ctx context.Context, cluster sche.SchedulerCluster, o
 		nextInterval:       s.GetMinInterval(),
 		ctx:                ctx,
 		cancel:             cancel,
-		diagnosticRecorder: NewDiagnosticRecorder(s.GetName(), cluster.GetSchedulerConfig()),
+		diagnosticRecorder: NewDiagnosticRecorder(s.GetType(), cluster.GetSchedulerConfig()),
 	}
 }
 
