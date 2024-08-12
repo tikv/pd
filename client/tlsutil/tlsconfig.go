@@ -64,8 +64,8 @@ type TLSInfo struct {
 	// should be left nil. In that case, tls.X509KeyPair will be used.
 	parseFunc func([]byte, []byte) (tls.Certificate, error)
 
-	// AllowedCN is a CN which must be provided by a client.
-	AllowedCN string
+	// AllowedCNs is a list of CNs which must be provided by a client.
+	AllowedCNs []string
 }
 
 // ClientConfig generates a tls.Config object for use by an HTTP client.
@@ -121,12 +121,14 @@ func (info TLSInfo) baseConfig() (*tls.Config, error) {
 		cfg.CipherSuites = info.CipherSuites
 	}
 
-	if info.AllowedCN != "" {
+	if len(info.AllowedCNs) > 0 {
 		cfg.VerifyPeerCertificate = func(_ [][]byte, verifiedChains [][]*x509.Certificate) error {
 			for _, chains := range verifiedChains {
 				if len(chains) != 0 {
-					if info.AllowedCN == chains[0].Subject.CommonName {
-						return nil
+					for _, allowedCN := range info.AllowedCNs {
+						if allowedCN == chains[0].Subject.CommonName {
+							return nil
+						}
 					}
 				}
 			}
@@ -162,8 +164,8 @@ type TLSConfig struct {
 	CertPath string `toml:"cert-path" json:"cert-path"`
 	// KeyPath is the path of file that contains X509 key in PEM format.
 	KeyPath string `toml:"key-path" json:"key-path"`
-	// CertAllowedCN is a CN which must be provided by a client
-	CertAllowedCN []string `toml:"cert-allowed-cn" json:"cert-allowed-cn"`
+	// CertAllowedCNs is a CN which must be provided by a client
+	CertAllowedCNs []string `toml:"cert-allowed-cn" json:"cert-allowed-cn"`
 
 	SSLCABytes   []byte
 	SSLCertBytes []byte
@@ -194,16 +196,12 @@ func (s TLSConfig) ToTLSConfig() (*tls.Config, error) {
 	if len(s.CertPath) == 0 && len(s.KeyPath) == 0 {
 		return nil, nil
 	}
-	allowedCN, err := s.GetOneAllowedCN()
-	if err != nil {
-		return nil, err
-	}
 
 	tlsInfo := TLSInfo{
 		CertFile:      s.CertPath,
 		KeyFile:       s.KeyPath,
 		TrustedCAFile: s.CAPath,
-		AllowedCN:     allowedCN,
+		AllowedCNs:    s.CertAllowedCNs,
 	}
 
 	tlsConfig, err := tlsInfo.ClientConfig()
@@ -211,16 +209,4 @@ func (s TLSConfig) ToTLSConfig() (*tls.Config, error) {
 		return nil, errs.ErrEtcdTLSConfig.Wrap(err).GenWithStackByCause()
 	}
 	return tlsConfig, nil
-}
-
-// GetOneAllowedCN only gets the first one CN.
-func (s TLSConfig) GetOneAllowedCN() (string, error) {
-	switch len(s.CertAllowedCN) {
-	case 1:
-		return s.CertAllowedCN[0], nil
-	case 0:
-		return "", nil
-	default:
-		return "", errs.ErrSecurityConfig.FastGenByArgs("only supports one CN")
-	}
 }

@@ -52,6 +52,12 @@ var (
 		TrustedCAFile: strings.Join([]string{".", "cert", "ca.pem"}, string(filepath.Separator)),
 	}
 
+	testTiDBClientTLSInfo = transport.TLSInfo{
+		KeyFile:       "./cert/tidb-client-key.pem",
+		CertFile:      "./cert/tidb-client.pem",
+		TrustedCAFile: "./cert/ca.pem",
+	}
+
 	testTLSInfoExpired = transport.TLSInfo{
 		KeyFile:       strings.Join([]string{".", "cert-expired", "pd-server-key.pem"}, string(filepath.Separator)),
 		CertFile:      strings.Join([]string{".", "cert-expired", "pd-server.pem"}, string(filepath.Separator)),
@@ -63,27 +69,14 @@ var (
 // when all certs are atomically replaced by directory renaming.
 // And expects server to reject client requests, and vice versa.
 func TestTLSReloadAtomicReplace(t *testing.T) {
+	re := require.New(t)
+
 	// generate certs
 	for _, path := range []string{certPath, certExpiredPath} {
-		if err := os.Mkdir(path, 0755); err != nil {
-			t.Fatal(err)
-		}
-		if err := exec.Command(certScript, "generate", path).Run(); err != nil {
-			t.Fatal(err)
-		}
+		cleanFunc := generateCerts(re, path)
+		defer cleanFunc()
 	}
-	defer func() {
-		for _, path := range []string{certPath, certExpiredPath} {
-			if err := exec.Command(certScript, "cleanup", path).Run(); err != nil {
-				t.Fatal(err)
-			}
-			if err := os.RemoveAll(path); err != nil {
-				t.Fatal(err)
-			}
-		}
-	}()
 
-	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	tmpDir := t.TempDir()
@@ -121,6 +114,20 @@ func TestTLSReloadAtomicReplace(t *testing.T) {
 		re.NoError(err)
 	}
 	testTLSReload(ctx, re, cloneFunc, replaceFunc, revertFunc)
+}
+
+func generateCerts(re *require.Assertions, path string) func() {
+	err := os.Mkdir(path, 0755)
+	re.NoError(err)
+	err = exec.Command(certScript, "generate", path).Run()
+	re.NoError(err)
+
+	return func() {
+		err := exec.Command(certScript, "cleanup", path).Run()
+		re.NoError(err)
+		err = os.RemoveAll(path)
+		re.NoError(err)
+	}
 }
 
 func testTLSReload(
@@ -274,4 +281,65 @@ func copyFile(src, dst string) error {
 		return err
 	}
 	return w.Sync()
+}
+
+func TestMultiCN(t *testing.T) {
+	re := require.New(t)
+	cleanFunc := generateCerts(re, certPath)
+	defer cleanFunc()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	tmpDir := t.TempDir()
+	os.RemoveAll(tmpDir)
+
+	certsDir := t.TempDir()
+	tlsInfo, terr := copyTLSFiles(testTLSInfo, certsDir)
+	re.NoError(terr)
+	clus, err := tests.NewTestCluster(ctx, 1, func(conf *config.Config, _ string) {
+		conf.Security.TLSConfig = grpcutil.TLSConfig{
+			KeyPath:        tlsInfo.KeyFile,
+			CertPath:       tlsInfo.CertFile,
+			CAPath:         tlsInfo.TrustedCAFile,
+			CertAllowedCNs: []string{"tidb", "pd-server"},
+		}
+		conf.AdvertiseClientUrls = strings.ReplaceAll(conf.AdvertiseClientUrls, "http", "https")
+		conf.ClientUrls = strings.ReplaceAll(conf.ClientUrls, "http", "https")
+		conf.AdvertisePeerUrls = strings.ReplaceAll(conf.AdvertisePeerUrls, "http", "https")
+		conf.PeerUrls = strings.ReplaceAll(conf.PeerUrls, "http", "https")
+		conf.InitialCluster = strings.ReplaceAll(conf.InitialCluster, "http", "https")
+	})
+	re.NoError(err)
+	defer clus.Destroy()
+	err = clus.RunInitialServers()
+	re.NoError(err)
+	clus.WaitLeader()
+
+	testServers := clus.GetServers()
+	endpoints := make([]string, 0, len(testServers))
+	for _, s := range testServers {
+		endpoints = append(endpoints, s.GetConfig().AdvertiseClientUrls)
+	}
+
+	// cn TiDB is allowed
+	re.NoError(testAllowedCN(ctx, endpoints, testTiDBClientTLSInfo))
+
+	// cn client is not allowed
+	re.Error(testAllowedCN(ctx, endpoints, testClientTLSInfo))
+}
+
+func testAllowedCN(ctx context.Context, endpoints []string, tls transport.TLSInfo) error {
+	ctx1, cancel1 := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel1()
+	cli, err := pd.NewClientWithContext(ctx1, endpoints, pd.SecurityOption{
+		CAPath:   tls.TrustedCAFile,
+		CertPath: tls.CertFile,
+		KeyPath:  tls.KeyFile,
+	}, pd.WithGRPCDialOptions(grpc.WithBlock()))
+	if err != nil {
+		return err
+	}
+	defer cli.Close()
+	_, err = cli.GetAllMembers(ctx1)
+	return err
 }
