@@ -16,8 +16,6 @@ package schedulers
 
 import (
 	"context"
-	"encoding/json"
-	"strings"
 	"testing"
 	"time"
 
@@ -186,17 +184,8 @@ func (suite *evictSlowTrendTestSuite) TestEvictSlowTrend() {
 	re.Zero(es2.conf.evictedStore())
 
 	// check the value from storage.
-	sches, vs, err := es2.conf.storage.LoadAllSchedulerConfigs()
-	re.NoError(err)
-	valueStr := ""
-	for id, sche := range sches {
-		if strings.EqualFold(sche, EvictSlowTrendName) {
-			valueStr = vs[id]
-		}
-	}
-
 	var persistValue evictSlowTrendSchedulerConfig
-	err = json.Unmarshal([]byte(valueStr), &persistValue)
+	err := es2.conf.load(&persistValue)
 	re.NoError(err)
 	re.Equal(es2.conf.EvictedStores, persistValue.EvictedStores)
 	re.Zero(persistValue.evictedStore())
