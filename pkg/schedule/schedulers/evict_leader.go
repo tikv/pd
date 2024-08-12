@@ -20,7 +20,6 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/pingcap/errors"
-	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
@@ -185,11 +184,7 @@ func (conf *evictLeaderSchedulerConfig) update(id uint64, newRanges []core.KeyRa
 		conf.StoreIDWithRanges[id] = newRanges
 	}
 	conf.Batch = batch
-	var err error
-	failpoint.Inject("persistFail", func() {
-		err = errors.New("fail to persist")
-	})
-	err = conf.save(conf)
+	err := conf.save(conf)
 	if err != nil && id != 0 {
 		_, _ = conf.removeStoreLocked(id)
 	}

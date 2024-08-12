@@ -110,11 +110,7 @@ func (conf *evictSlowStoreSchedulerConfig) setStoreAndPersist(id uint64) error {
 	defer conf.Unlock()
 	conf.EvictedStores = []uint64{id}
 	conf.lastSlowStoreCaptureTS = time.Now()
-	return conf.persist()
-}
-
-func (conf *evictSlowStoreSchedulerConfig) persist() error {
-	return conf.schedulerConfig.save(conf)
+	return conf.save(conf)
 }
 
 func (conf *evictSlowStoreSchedulerConfig) clearAndPersist() (oldID uint64, err error) {
@@ -124,7 +120,7 @@ func (conf *evictSlowStoreSchedulerConfig) clearAndPersist() (oldID uint64, err 
 	if oldID > 0 {
 		conf.EvictedStores = []uint64{}
 		conf.lastSlowStoreCaptureTS = time.Time{}
-		err = conf.persist()
+		err = conf.save(conf)
 	}
 	return
 }
@@ -155,14 +151,16 @@ func (handler *evictSlowStoreHandler) updateConfig(w http.ResponseWriter, r *htt
 		handler.rd.JSON(w, http.StatusInternalServerError, errors.New("invalid argument for 'recovery-duration'").Error())
 		return
 	}
-	handler.config.Lock()
-	defer handler.config.Unlock()
-	prevRecoveryDurationGap := handler.config.RecoveryDurationGap
+
+	conf := handler.config
+	conf.Lock()
+	defer conf.Unlock()
+	prevRecoveryDurationGap := conf.RecoveryDurationGap
 	recoveryDurationGap := uint64(recoveryDurationGapFloat)
-	handler.config.RecoveryDurationGap = recoveryDurationGap
-	if err := handler.config.persist(); err != nil {
+	conf.RecoveryDurationGap = recoveryDurationGap
+	if err := conf.save(conf); err != nil {
 		handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
-		handler.config.RecoveryDurationGap = prevRecoveryDurationGap
+		conf.RecoveryDurationGap = prevRecoveryDurationGap
 		return
 	}
 	log.Info("evict-slow-store-scheduler update 'recovery-duration' - unit: s", zap.Uint64("prev", prevRecoveryDurationGap), zap.Uint64("cur", recoveryDurationGap))
