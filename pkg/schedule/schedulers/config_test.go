@@ -37,4 +37,10 @@ func TestSchedulerConfig(t *testing.T) {
 	newTc := &testConfig{}
 	require.NoError(t, cfg.load(newTc))
 	require.Equal(t, tc.Value, newTc.Value)
+
+	// config with another name cannot loaded the previous config
+	cfg2 := &baseSchedulerConfig{}
+	cfg2.init("test2", s)
+	// report error because the config is empty and cannot be decoded
+	require.Error(t, cfg2.load(newTc))
 }
