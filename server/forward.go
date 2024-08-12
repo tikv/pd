@@ -27,7 +27,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/tsopb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/mcs/utils"
+	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/tso"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
@@ -47,8 +47,8 @@ func forwardTSORequest(
 		Header: &tsopb.RequestHeader{
 			ClusterId:       request.GetHeader().GetClusterId(),
 			SenderId:        request.GetHeader().GetSenderId(),
-			KeyspaceId:      utils.DefaultKeyspaceID,
-			KeyspaceGroupId: utils.DefaultKeyspaceGroupID,
+			KeyspaceId:      constant.DefaultKeyspaceID,
+			KeyspaceGroupId: constant.DefaultKeyspaceGroupID,
 		},
 		Count:      request.GetCount(),
 		DcLocation: request.GetDcLocation(),
@@ -134,7 +134,7 @@ func (s *GrpcServer) forwardTSO(stream pdpb.PD_TsoServer) error {
 			return status.Errorf(codes.Unknown, err.Error())
 		}
 
-		forwardedHost, ok := s.GetServicePrimaryAddr(stream.Context(), utils.TSOServiceName)
+		forwardedHost, ok := s.GetServicePrimaryAddr(stream.Context(), constant.TSOServiceName)
 		if !ok || len(forwardedHost) == 0 {
 			tsoStreamErr = errors.WithStack(ErrNotFoundTSOAddr)
 			return tsoStreamErr
@@ -408,8 +408,8 @@ func (s *GrpcServer) getGlobalTSO(ctx context.Context) (pdpb.Timestamp, error) {
 	request := &tsopb.TsoRequest{
 		Header: &tsopb.RequestHeader{
 			ClusterId:       s.ClusterID(),
-			KeyspaceId:      utils.DefaultKeyspaceID,
-			KeyspaceGroupId: utils.DefaultKeyspaceGroupID,
+			KeyspaceId:      constant.DefaultKeyspaceID,
+			KeyspaceGroupId: constant.DefaultKeyspaceGroupID,
 		},
 		Count: 1,
 	}
@@ -439,7 +439,7 @@ func (s *GrpcServer) getGlobalTSO(ctx context.Context) (pdpb.Timestamp, error) {
 		if i > 0 {
 			time.Sleep(retryIntervalRequestTSOServer)
 		}
-		forwardedHost, ok = s.GetServicePrimaryAddr(ctx, utils.TSOServiceName)
+		forwardedHost, ok = s.GetServicePrimaryAddr(ctx, constant.TSOServiceName)
 		if !ok || forwardedHost == "" {
 			return pdpb.Timestamp{}, ErrNotFoundTSOAddr
 		}

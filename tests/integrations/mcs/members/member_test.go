@@ -21,7 +21,7 @@ import (
 	"github.com/stretchr/testify/suite"
 	pdClient "github.com/tikv/pd/client/http"
 	bs "github.com/tikv/pd/pkg/basicserver"
-	"github.com/tikv/pd/pkg/mcs/utils"
+	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/tests"
@@ -57,7 +57,7 @@ func (suite *memberTestSuite) SetupTest() {
 
 	// TSO
 	nodes := make(map[string]bs.Server)
-	for i := 0; i < utils.DefaultKeyspaceGroupReplicaCount; i++ {
+	for i := 0; i < constant.DefaultKeyspaceGroupReplicaCount; i++ {
 		s, cleanup := tests.StartSingleTSOTestServer(suite.ctx, re, suite.backendEndpoints, tempurl.Alloc())
 		nodes[s.GetAddr()] = s
 		suite.cleanupFunc = append(suite.cleanupFunc, func() {
@@ -96,7 +96,7 @@ func (suite *memberTestSuite) TestMembers() {
 	re := suite.Require()
 	members, err := suite.pdClient.GetMicroServiceMembers(suite.ctx, "tso")
 	re.NoError(err)
-	re.Len(members, utils.DefaultKeyspaceGroupReplicaCount)
+	re.Len(members, constant.DefaultKeyspaceGroupReplicaCount)
 
 	members, err = suite.pdClient.GetMicroServiceMembers(suite.ctx, "scheduling")
 	re.NoError(err)

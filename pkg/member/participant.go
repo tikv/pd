@@ -28,7 +28,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/election"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/mcs/utils"
+	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
@@ -377,11 +377,11 @@ func (m *Participant) SetCampaignChecker(checker leadershipCheckFunc) {
 // NewParticipantByService creates a new participant by service name.
 func NewParticipantByService(serviceName string) (p participant) {
 	switch serviceName {
-	case utils.TSOServiceName:
+	case constant.TSOServiceName:
 		p = &tsopb.Participant{}
-	case utils.SchedulingServiceName:
+	case constant.SchedulingServiceName:
 		p = &schedulingpb.Participant{}
-	case utils.ResourceManagerServiceName:
+	case constant.ResourceManagerServiceName:
 		p = &resource_manager.Participant{}
 	}
 	return p
