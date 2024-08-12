@@ -390,8 +390,7 @@ func (ls *Leadership) Watch(serverCtx context.Context, revision int64) {
 			}
 
 			for _, ev := range wresp.Events {
-				// ensure `{service}/primary/transfer` API will not meet this condition.
-				if ev.Type == mvccpb.DELETE && !ls.IsPrimary() {
+				if ev.Type == mvccpb.DELETE {
 					log.Info("current leadership is deleted",
 						zap.Int64("revision", wresp.Header.Revision), zap.String("leader-key", ls.leaderKey), zap.String("purpose", ls.purpose))
 					return
