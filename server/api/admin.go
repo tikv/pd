@@ -65,7 +65,7 @@ func (h *adminHandler) DeleteRegionCache(w http.ResponseWriter, r *http.Request)
 	if rc.IsServiceIndependent(utils.SchedulingServiceName) {
 		err = h.deleteRegionCacheInSchedulingServer(regionID)
 		if err != nil {
-			msg = fmt.Sprintf("This operation was executed in API server but needs to be re-executed on scheduling server due to the following error: %s", err.Error())
+			msg = buildMsg(err)
 		}
 	}
 	h.rd.JSON(w, http.StatusOK, msg)
@@ -108,7 +108,7 @@ func (h *adminHandler) DeleteRegionStorage(w http.ResponseWriter, r *http.Reques
 	if rc.IsServiceIndependent(utils.SchedulingServiceName) {
 		err = h.deleteRegionCacheInSchedulingServer(regionID)
 		if err != nil {
-			msg = fmt.Sprintf("This operation was executed in API server but needs to be re-executed on scheduling server due to the following error: %s", err.Error())
+			msg = buildMsg(err)
 		}
 	}
 
@@ -128,7 +128,7 @@ func (h *adminHandler) DeleteAllRegionCache(w http.ResponseWriter, r *http.Reque
 	if rc.IsServiceIndependent(utils.SchedulingServiceName) {
 		err = h.deleteRegionCacheInSchedulingServer()
 		if err != nil {
-			msg = fmt.Sprintf("This operation was executed in API server but needs to be re-executed on scheduling server due to the following error: %s", err.Error())
+			msg = buildMsg(err)
 		}
 	}
 
@@ -249,4 +249,8 @@ func (h *adminHandler) deleteRegionCacheInSchedulingServer(id ...uint64) error {
 		return errs.ErrSchedulingServer.FastGenByArgs(resp.StatusCode)
 	}
 	return nil
+}
+
+func buildMsg(err error) string {
+	return fmt.Sprintf("This operation was executed in API server but needs to be re-executed on scheduling server due to the following error: %s", err.Error())
 }
