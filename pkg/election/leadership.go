@@ -166,11 +166,7 @@ func (ls *Leadership) AddCampaignTimes() {
 func (ls *Leadership) Campaign(leaseTimeout int64, leaderData string, cmps ...clientv3.Cmp) error {
 	ls.leaderValue = leaderData
 	// Create a new lease to campaign
-	newLease := &Lease{
-		Purpose: ls.purpose,
-		client:  ls.client,
-		lease:   clientv3.NewLease(ls.client),
-	}
+	newLease := NewLease(ls.client, ls.purpose)
 	ls.SetLease(newLease)
 
 	failpoint.Inject("skipGrantLeader", func(val failpoint.Value) {

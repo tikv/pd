@@ -74,7 +74,7 @@ func MarkExpectedPrimaryFlag(client *clientv3.Client, primaryPath string, leader
 func KeepExpectedPrimaryAlive(ctx context.Context, cli *clientv3.Client, exitPrimary chan struct{},
 	leaseTimeout int64, leaderPath, memberValue, service string) (*election.Lease, error) {
 	log.Info("primary start to watch the expected primary", zap.String("service", service), zap.String("primary-value", memberValue))
-	service = fmt.Sprintf("%s-expected-primary", service)
+	service = fmt.Sprintf("%s expected primary", service)
 	lease := election.NewLease(cli, service)
 	if err := lease.Grant(leaseTimeout); err != nil {
 		return nil, err
