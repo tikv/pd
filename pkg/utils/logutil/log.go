@@ -23,7 +23,6 @@ import (
 
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/utils/typeutil"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )
@@ -223,7 +222,7 @@ func RedactBytes(arg []byte) []byte {
 		return []byte("?")
 	case RedactInfoLogMarker:
 		// Use unsafe conversion to avoid copy.
-		return typeutil.StringToBytes(redactInfo(typeutil.BytesToString(arg)))
+		return []byte(redactInfo(string(arg)))
 	default:
 	}
 	return arg

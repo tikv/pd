@@ -40,8 +40,6 @@ import (
 const (
 	// EvictLeaderName is evict leader scheduler name.
 	EvictLeaderName = "evict-leader-scheduler"
-	// EvictLeaderType is evict leader scheduler type.
-	EvictLeaderType = "evict-leader"
 	// EvictLeaderBatchSize is the number of operators to transfer
 	// leaders by one scheduling
 	EvictLeaderBatchSize = 3
@@ -74,7 +72,7 @@ func (conf *evictLeaderSchedulerConfig) getBatch() int {
 	return conf.Batch
 }
 
-func (conf *evictLeaderSchedulerConfig) Clone() *evictLeaderSchedulerConfig {
+func (conf *evictLeaderSchedulerConfig) clone() *evictLeaderSchedulerConfig {
 	conf.RLock()
 	defer conf.RUnlock()
 	storeIDWithRanges := make(map[uint64][]core.KeyRange)
@@ -462,7 +460,7 @@ func (handler *evictLeaderHandler) updateConfig(w http.ResponseWriter, r *http.R
 }
 
 func (handler *evictLeaderHandler) listConfig(w http.ResponseWriter, _ *http.Request) {
-	conf := handler.config.Clone()
+	conf := handler.config.clone()
 	handler.rd.JSON(w, http.StatusOK, conf)
 }
 

@@ -440,6 +440,10 @@ func (suite *httpClientTestSuite) TestRegionLabel() {
 	re.Equal(labelRule.ID, allLabelRules[1].ID)
 	re.Equal(labelRule.Labels, allLabelRules[1].Labels)
 	re.Equal(labelRule.RuleType, allLabelRules[1].RuleType)
+	labelRules, err = client.GetRegionLabelRulesByIDs(ctx, []string{"rule2"})
+	re.NoError(err)
+	re.Len(labelRules, 1)
+	re.Equal(labelRule, labelRules[0])
 	labelRules, err = client.GetRegionLabelRulesByIDs(ctx, []string{"keyspaces/0", "rule2"})
 	re.NoError(err)
 	sort.Slice(labelRules, func(i, j int) bool {

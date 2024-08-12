@@ -181,6 +181,9 @@ func (m *GroupManager) allocNodesToAllKeyspaceGroups(ctx context.Context) {
 			log.Info("the raftcluster is closed, stop to alloc nodes to all keyspace groups")
 			return
 		case <-ticker.C:
+			if m.GetNodesCount() == 0 {
+				continue
+			}
 		}
 		groups, err := m.store.LoadKeyspaceGroups(utils.DefaultKeyspaceGroupID, 0)
 		if err != nil {
@@ -208,6 +211,7 @@ func (m *GroupManager) allocNodesToAllKeyspaceGroups(ctx context.Context) {
 					log.Error("failed to alloc nodes for keyspace group", zap.Uint32("keyspace-group-id", group.ID), zap.Error(err))
 					continue
 				}
+				log.Info("alloc nodes for keyspace group", zap.Uint32("keyspace-group-id", group.ID), zap.Any("nodes", nodes))
 				group.Members = nodes
 			}
 		}

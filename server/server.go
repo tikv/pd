@@ -476,18 +476,16 @@ func (s *Server) startServer(ctx context.Context) error {
 	s.tsoDispatcher = tsoutil.NewTSODispatcher(tsoProxyHandleDuration, tsoProxyBatchSize)
 	s.tsoProtoFactory = &tsoutil.TSOProtoFactory{}
 	s.pdProtoFactory = &tsoutil.PDProtoFactory{}
-	if !s.IsAPIServiceMode() {
-		s.tsoAllocatorManager = tso.NewAllocatorManager(s.ctx, mcs.DefaultKeyspaceGroupID, s.member, s.rootPath, s.storage, s, false)
-		// When disabled the Local TSO, we should clean up the Local TSO Allocator's meta info written in etcd if it exists.
-		if !s.cfg.EnableLocalTSO {
-			if err = s.tsoAllocatorManager.CleanUpDCLocation(); err != nil {
-				return err
-			}
+	s.tsoAllocatorManager = tso.NewAllocatorManager(s.ctx, mcs.DefaultKeyspaceGroupID, s.member, s.rootPath, s.storage, s, false)
+	// When disabled the Local TSO, we should clean up the Local TSO Allocator's meta info written in etcd if it exists.
+	if !s.cfg.EnableLocalTSO {
+		if err = s.tsoAllocatorManager.CleanUpDCLocation(); err != nil {
+			return err
 		}
-		if zone, exist := s.cfg.Labels[config.ZoneLabel]; exist && zone != "" && s.cfg.EnableLocalTSO {
-			if err = s.tsoAllocatorManager.SetLocalTSOConfig(zone); err != nil {
-				return err
-			}
+	}
+	if zone, exist := s.cfg.Labels[config.ZoneLabel]; exist && zone != "" && s.cfg.EnableLocalTSO {
+		if err = s.tsoAllocatorManager.SetLocalTSOConfig(zone); err != nil {
+			return err
 		}
 	}
 
@@ -1467,15 +1465,6 @@ func (s *Server) GetRegions() []*core.RegionInfo {
 	return nil
 }
 
-// IsServiceIndependent returns if the service is enabled
-func (s *Server) IsServiceIndependent(name string) bool {
-	rc := s.GetRaftCluster()
-	if rc != nil {
-		return rc.IsServiceIndependent(name)
-	}
-	return false
-}
-
 // GetServiceLabels returns ApiAccessPaths by given service label
 // TODO: this function will be used for updating api rate limit config
 func (s *Server) GetServiceLabels(serviceLabel string) []apiutil.AccessPath {
@@ -1748,7 +1737,7 @@ func (s *Server) campaignLeader() {
 			return
 		}
 		defer func() {
-			s.tsoAllocatorManager.ResetAllocatorGroup(tso.GlobalDCLocation)
+			s.tsoAllocatorManager.ResetAllocatorGroup(tso.GlobalDCLocation, false)
 			failpoint.Inject("updateAfterResetTSO", func() {
 				if err = allocator.UpdateTSO(); !errorspkg.Is(err, errs.ErrUpdateTimestamp) {
 					log.Panic("the tso update after reset should return ErrUpdateTimestamp as expected", zap.Error(err))

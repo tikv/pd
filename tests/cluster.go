@@ -810,7 +810,7 @@ func (c *TestCluster) HandleReportBuckets(b *metapb.Buckets) error {
 
 // Join is used to add a new TestServer into the cluster.
 func (c *TestCluster) Join(ctx context.Context, opts ...ConfigOption) (*TestServer, error) {
-	conf, err := c.config.Join().Generate(opts...)
+	conf, err := c.config.join().Generate(opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -824,7 +824,7 @@ func (c *TestCluster) Join(ctx context.Context, opts ...ConfigOption) (*TestServ
 
 // JoinAPIServer is used to add a new TestAPIServer into the cluster.
 func (c *TestCluster) JoinAPIServer(ctx context.Context, opts ...ConfigOption) (*TestServer, error) {
-	conf, err := c.config.Join().Generate(opts...)
+	conf, err := c.config.join().Generate(opts...)
 	if err != nil {
 		return nil, err
 	}

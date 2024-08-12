@@ -598,22 +598,24 @@ func (suite *CommonTestSuite) TestAdvertiseAddr() {
 func (suite *CommonTestSuite) TestBootstrapDefaultKeyspaceGroup() {
 	re := suite.Require()
 
-	// check the default keyspace group
+	// check the default keyspace group and wait for alloc tso nodes for the default keyspace group
 	check := func() {
-		resp, err := tests.TestDialClient.Get(suite.pdLeader.GetServer().GetConfig().AdvertiseClientUrls + "/pd/api/v2/tso/keyspace-groups")
-		re.NoError(err)
-		defer resp.Body.Close()
-		re.Equal(http.StatusOK, resp.StatusCode)
-		respString, err := io.ReadAll(resp.Body)
-		re.NoError(err)
-		var kgs []*endpoint.KeyspaceGroup
-		re.NoError(json.Unmarshal(respString, &kgs))
-		re.Len(kgs, 1)
-		re.Equal(utils.DefaultKeyspaceGroupID, kgs[0].ID)
-		re.Equal(endpoint.Basic.String(), kgs[0].UserKind)
-		re.Empty(kgs[0].SplitState)
-		re.Empty(kgs[0].Members)
-		re.Empty(kgs[0].KeyspaceLookupTable)
+		testutil.Eventually(re, func() bool {
+			resp, err := tests.TestDialClient.Get(suite.pdLeader.GetServer().GetConfig().AdvertiseClientUrls + "/pd/api/v2/tso/keyspace-groups")
+			re.NoError(err)
+			defer resp.Body.Close()
+			re.Equal(http.StatusOK, resp.StatusCode)
+			respString, err := io.ReadAll(resp.Body)
+			re.NoError(err)
+			var kgs []*endpoint.KeyspaceGroup
+			re.NoError(json.Unmarshal(respString, &kgs))
+			re.Len(kgs, 1)
+			re.Equal(utils.DefaultKeyspaceGroupID, kgs[0].ID)
+			re.Equal(endpoint.Basic.String(), kgs[0].UserKind)
+			re.Empty(kgs[0].SplitState)
+			re.Empty(kgs[0].KeyspaceLookupTable)
+			return len(kgs[0].Members) == 1
+		})
 	}
 	check()
 

@@ -43,8 +43,6 @@ import (
 const (
 	// BalanceWitnessName is balance witness scheduler name.
 	BalanceWitnessName = "balance-witness-scheduler"
-	// BalanceWitnessType is balance witness scheduler type.
-	BalanceWitnessType = "balance-witness"
 	// balanceWitnessBatchSize is the default number of operators to transfer witnesses by one scheduling.
 	// Default value is 4 which is subjected by scheduler-max-waiting-operator and witness-schedule-limit
 	// If you want to increase balance speed more, please increase above-mentioned param.
@@ -61,7 +59,7 @@ type balanceWitnessSchedulerConfig struct {
 	Batch int `json:"batch"`
 }
 
-func (conf *balanceWitnessSchedulerConfig) Update(data []byte) (int, any) {
+func (conf *balanceWitnessSchedulerConfig) update(data []byte) (int, any) {
 	conf.Lock()
 	defer conf.Unlock()
 
@@ -99,7 +97,7 @@ func (conf *balanceWitnessSchedulerConfig) validateLocked() bool {
 	return conf.Batch >= 1 && conf.Batch <= 10
 }
 
-func (conf *balanceWitnessSchedulerConfig) Clone() *balanceWitnessSchedulerConfig {
+func (conf *balanceWitnessSchedulerConfig) clone() *balanceWitnessSchedulerConfig {
 	conf.RLock()
 	defer conf.RUnlock()
 	ranges := make([]core.KeyRange, len(conf.Ranges))
@@ -151,12 +149,12 @@ func newBalanceWitnessHandler(conf *balanceWitnessSchedulerConfig) http.Handler 
 func (handler *balanceWitnessHandler) updateConfig(w http.ResponseWriter, r *http.Request) {
 	data, _ := io.ReadAll(r.Body)
 	r.Body.Close()
-	httpCode, v := handler.config.Update(data)
+	httpCode, v := handler.config.update(data)
 	handler.rd.JSON(w, httpCode, v)
 }
 
 func (handler *balanceWitnessHandler) listConfig(w http.ResponseWriter, _ *http.Request) {
-	conf := handler.config.Clone()
+	conf := handler.config.clone()
 	handler.rd.JSON(w, http.StatusOK, conf)
 }
 
@@ -357,7 +355,7 @@ func (b *balanceWitnessScheduler) createOperator(solver *solver, collector *plan
 	}
 	solver.Step++
 	defer func() { solver.Step-- }()
-	op, err := operator.CreateMoveWitnessOperator(BalanceWitnessType, solver, solver.Region, solver.sourceStoreID(), solver.targetStoreID())
+	op, err := operator.CreateMoveWitnessOperator(b.GetName(), solver, solver.Region, solver.sourceStoreID(), solver.targetStoreID())
 	if err != nil {
 		log.Debug("fail to create balance witness operator", errs.ZapError(err))
 		return nil

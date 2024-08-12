@@ -38,8 +38,6 @@ import (
 const (
 	// EvictSlowTrendName is evict leader by slow trend scheduler name.
 	EvictSlowTrendName = "evict-slow-trend-scheduler"
-	// EvictSlowTrendType is evict leader by slow trend scheduler type.
-	EvictSlowTrendType = "evict-slow-trend"
 )
 
 const (
@@ -78,7 +76,7 @@ func initEvictSlowTrendSchedulerConfig(storage endpoint.ConfigStorage) *evictSlo
 	}
 }
 
-func (conf *evictSlowTrendSchedulerConfig) Clone() *evictSlowTrendSchedulerConfig {
+func (conf *evictSlowTrendSchedulerConfig) clone() *evictSlowTrendSchedulerConfig {
 	conf.RLock()
 	defer conf.RUnlock()
 	return &evictSlowTrendSchedulerConfig{
@@ -268,7 +266,7 @@ func (handler *evictSlowTrendHandler) updateConfig(w http.ResponseWriter, r *htt
 }
 
 func (handler *evictSlowTrendHandler) listConfig(w http.ResponseWriter, _ *http.Request) {
-	conf := handler.config.Clone()
+	conf := handler.config.clone()
 	handler.rd.JSON(w, http.StatusOK, conf)
 }
 
@@ -278,6 +276,7 @@ type evictSlowTrendScheduler struct {
 	handler http.Handler
 }
 
+// GetNextInterval implements the Scheduler interface.
 func (s *evictSlowTrendScheduler) GetNextInterval(time.Duration) time.Duration {
 	var growthType intervalGrowthType
 	// If it already found a slow node as candidate, the next interval should be shorter

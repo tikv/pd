@@ -635,7 +635,7 @@ func (gta *GlobalTSOAllocator) campaignLeader() {
 		return
 	}
 	defer func() {
-		gta.am.ResetAllocatorGroup(GlobalDCLocation)
+		gta.am.ResetAllocatorGroup(GlobalDCLocation, false)
 	}()
 
 	// check expected primary and watch the primary.

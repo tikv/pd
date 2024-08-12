@@ -85,7 +85,7 @@ func (h *schedulerHandler) CreateScheduler(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	tp, ok := types.SchedulerStr2Type[name]
+	tp, ok := types.StringToSchedulerType[name]
 	if !ok {
 		h.r.JSON(w, http.StatusBadRequest, "unknown scheduler")
 		return
@@ -259,7 +259,7 @@ func newSchedulerConfigHandler(svr *server.Server, rd *render.Render) *scheduler
 	}
 }
 
-func (h *schedulerConfigHandler) HandleSchedulerConfig(w http.ResponseWriter, r *http.Request) {
+func (h *schedulerConfigHandler) handleSchedulerConfig(w http.ResponseWriter, r *http.Request) {
 	handler := h.svr.GetHandler()
 	sh, err := handler.GetSchedulerConfigHandler()
 	if err == nil && sh != nil {

@@ -44,8 +44,6 @@ import (
 const (
 	// GrantHotRegionName is grant hot region scheduler name.
 	GrantHotRegionName = "grant-hot-region-scheduler"
-	// GrantHotRegionType is grant hot region scheduler type.
-	GrantHotRegionType = "grant-hot-region"
 )
 
 type grantHotRegionSchedulerConfig struct {
@@ -92,7 +90,7 @@ func (conf *grantHotRegionSchedulerConfig) clone() *grantHotRegionSchedulerConfi
 	}
 }
 
-func (conf *grantHotRegionSchedulerConfig) Persist() error {
+func (conf *grantHotRegionSchedulerConfig) persist() error {
 	conf.RLock()
 	defer conf.RUnlock()
 	data, err := EncodeConfig(conf)
@@ -217,7 +215,7 @@ func (handler *grantHotRegionHandler) updateConfig(w http.ResponseWriter, r *htt
 		return
 	}
 
-	if err = handler.config.Persist(); err != nil {
+	if err = handler.config.persist(); err != nil {
 		handler.config.setStoreLeaderID(0)
 		handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
@@ -241,6 +239,7 @@ func newGrantHotRegionHandler(config *grantHotRegionSchedulerConfig) http.Handle
 	return router
 }
 
+// Schedule implements the Scheduler interface.
 func (s *grantHotRegionScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) ([]*operator.Operator, []plan.Plan) {
 	grantHotRegionCounter.Inc()
 	typ := s.randomType()
@@ -337,9 +336,9 @@ func (s *grantHotRegionScheduler) transfer(cluster sche.SchedulerCluster, region
 	dstStore := &metapb.Peer{StoreId: destStoreIDs[i]}
 
 	if isLeader {
-		op, err = operator.CreateTransferLeaderOperator(GrantHotRegionType+"-leader", cluster, srcRegion, dstStore.StoreId, []uint64{}, operator.OpLeader)
+		op, err = operator.CreateTransferLeaderOperator(s.GetName()+"-leader", cluster, srcRegion, dstStore.StoreId, []uint64{}, operator.OpLeader)
 	} else {
-		op, err = operator.CreateMovePeerOperator(GrantHotRegionType+"-move", cluster, srcRegion, operator.OpRegion|operator.OpLeader, srcStore.GetID(), dstStore)
+		op, err = operator.CreateMovePeerOperator(s.GetName()+"-move", cluster, srcRegion, operator.OpRegion|operator.OpLeader, srcStore.GetID(), dstStore)
 	}
 	op.SetPriorityLevel(constant.High)
 	return

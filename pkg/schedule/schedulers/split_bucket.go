@@ -39,8 +39,6 @@ import (
 const (
 	// SplitBucketName is the split bucket name.
 	SplitBucketName = "split-bucket-scheduler"
-	// SplitBucketType is the spilt bucket type.
-	SplitBucketType = "split-bucket"
 	// defaultHotDegree is the default hot region threshold.
 	defaultHotDegree  = 3
 	defaultSplitLimit = 10
@@ -165,6 +163,7 @@ func newSplitBucketScheduler(opController *operator.Controller, conf *splitBucke
 	return ret
 }
 
+// ReloadConfig implement Scheduler interface.
 func (s *splitBucketScheduler) ReloadConfig() error {
 	s.conf.Lock()
 	defer s.conf.Unlock()
@@ -271,7 +270,7 @@ func (s *splitBucketScheduler) splitBucket(plan *splitBucketPlan) []*operator.Op
 		if bytes.Compare(region.GetEndKey(), splitBucket.EndKey) > 0 {
 			splitKey = append(splitKey, splitBucket.EndKey)
 		}
-		op, err := operator.CreateSplitRegionOperator(SplitBucketType, region, operator.OpSplit,
+		op, err := operator.CreateSplitRegionOperator(s.GetName(), region, operator.OpSplit,
 			pdpb.CheckPolicy_USEKEY, splitKey)
 		if err != nil {
 			splitBucketCreateOperatorFailCounter.Inc()
