@@ -569,7 +569,7 @@ func (gta *GlobalTSOAllocator) primaryElectionLoop() {
 		expectedPrimary := mcsutils.GetExpectedPrimaryFlag(gta.member.Client(), gta.member.GetLeaderPath())
 		// skip campaign the primary if the expected primary is not empty and not equal to the current memberValue.
 		// expected primary ONLY SET BY `{service}/primary/transfer` API.
-		if expectedPrimary != "" && !strings.Contains(gta.member.MemberValue(), expectedPrimary) {
+		if len(expectedPrimary) > 0 && !strings.Contains(gta.member.MemberValue(), expectedPrimary) {
 			log.Info("skip campaigning of tso primary and check later",
 				zap.String("server-name", gta.member.Name()),
 				zap.String("expected-primary-id", expectedPrimary),

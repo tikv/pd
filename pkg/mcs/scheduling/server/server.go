@@ -133,6 +133,7 @@ func (s *Server) GetBackendEndpoints() string {
 	return s.cfg.BackendEndpoints
 }
 
+// GetParticipant returns the participant.
 func (s *Server) GetParticipant() *member.Participant {
 	return s.participant
 }
@@ -251,7 +252,7 @@ func (s *Server) primaryElectionLoop() {
 		expectedPrimary := utils.GetExpectedPrimaryFlag(s.GetClient(), s.participant.GetLeaderPath())
 		// skip campaign the primary if the expected primary is not empty and not equal to the current memberValue.
 		// expected primary ONLY SET BY `{service}/primary/transfer` API.
-		if expectedPrimary != "" && !strings.Contains(s.participant.MemberValue(), expectedPrimary) {
+		if len(expectedPrimary) > 0 && !strings.Contains(s.participant.MemberValue(), expectedPrimary) {
 			log.Info("skip campaigning of scheduling primary and check later",
 				zap.String("server-name", s.Name()),
 				zap.String("expected-primary-id", expectedPrimary),

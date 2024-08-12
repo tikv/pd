@@ -33,15 +33,15 @@ import (
 	"go.uber.org/zap"
 )
 
-// ExpectedPrimaryFlag is the flag to indicate the expected primary.
+// expectedPrimaryFlag is the flag to indicate the expected primary.
 // 1. When the primary was campaigned successfully, it will set the `expected_primary` flag.
 // 2. Using `{service}/primary/transfer` API will revoke the previous lease and set a new `expected_primary` flag.
 // This flag used to help new primary to campaign successfully while other secondaries can skip the campaign.
-const ExpectedPrimaryFlag = "expected_primary"
+const expectedPrimaryFlag = "expected_primary"
 
 // ExpectedPrimaryPath formats the primary path with the expected primary flag.
 func ExpectedPrimaryPath(primaryPath string) string {
-	return fmt.Sprintf("%s/%s", primaryPath, ExpectedPrimaryFlag)
+	return fmt.Sprintf("%s/%s", primaryPath, expectedPrimaryFlag)
 }
 
 // GetExpectedPrimaryFlag gets the expected primary flag.
@@ -77,7 +77,7 @@ func markExpectedPrimaryFlag(client *clientv3.Client, primaryPath string, leader
 // - changed by `{service}/primary/transfer` API.
 // - leader lease expired.
 // ONLY primary called this function.
-func KeepExpectedPrimaryAlive(ctx context.Context, cli *clientv3.Client, exitPrimary chan struct{},
+func KeepExpectedPrimaryAlive(ctx context.Context, cli *clientv3.Client, exitPrimary chan<- struct{},
 	leaseTimeout int64, leaderPath, memberValue, service string) (*election.Lease, error) {
 	log.Info("primary start to watch the expected primary", zap.String("service", service), zap.String("primary-value", memberValue))
 	service = fmt.Sprintf("%s expected primary", service)
@@ -103,7 +103,7 @@ func KeepExpectedPrimaryAlive(ctx context.Context, cli *clientv3.Client, exitPri
 
 // watchExpectedPrimary watches `{service}/primary/transfer` API whether changed the expected primary.
 func watchExpectedPrimary(ctx context.Context,
-	expectedPrimary *election.Leadership, revision int64, exitPrimary chan struct{}) {
+	expectedPrimary *election.Leadership, revision int64, exitPrimary chan<- struct{}) {
 	expectedPrimary.SetPrimaryWatch(true)
 	// ONLY exited watch by the following conditions:
 	// - changed by `{service}/primary/transfer` API.

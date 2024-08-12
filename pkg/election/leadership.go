@@ -171,7 +171,7 @@ func (ls *Leadership) Campaign(leaseTimeout int64, leaderData string, cmps ...cl
 
 	failpoint.Inject("skipGrantLeader", func(val failpoint.Value) {
 		name, ok := val.(string)
-		if name == "" {
+		if len(name) == 0 {
 			// return directly when not set the name
 			failpoint.Return(errors.Errorf("failed to grant lease"))
 		}
