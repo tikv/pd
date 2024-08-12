@@ -58,6 +58,7 @@ var compatiblePrioritiesConfig = prioritiesConfig{
 // params about hot region.
 func initHotRegionScheduleConfig() *hotRegionSchedulerConfig {
 	cfg := &hotRegionSchedulerConfig{
+		schedulerConfig:        &baseSchedulerConfig{},
 		MinHotByteRate:         100,
 		MinHotKeyRate:          10,
 		MinHotQueryRate:        10,

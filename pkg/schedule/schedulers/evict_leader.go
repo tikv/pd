@@ -134,7 +134,7 @@ func (conf *evictLeaderSchedulerConfig) encodeConfig() ([]byte, error) {
 	return EncodeConfig(conf)
 }
 
-func (conf *evictLeaderSchedulerConfig) reloadConfig(name string) error {
+func (conf *evictLeaderSchedulerConfig) reloadConfig() error {
 	conf.Lock()
 	defer conf.Unlock()
 	newCfg := &evictLeaderSchedulerConfig{}
@@ -261,7 +261,7 @@ func (s *evictLeaderScheduler) EncodeConfig() ([]byte, error) {
 
 // ReloadConfig reloads the config from the storage.
 func (s *evictLeaderScheduler) ReloadConfig() error {
-	return s.conf.reloadConfig(s.GetName())
+	return s.conf.reloadConfig()
 }
 
 // PrepareConfig implements the Scheduler interface.

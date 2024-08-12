@@ -45,8 +45,9 @@ const (
 
 func initSplitBucketConfig() *splitBucketSchedulerConfig {
 	return &splitBucketSchedulerConfig{
-		Degree:     defaultHotDegree,
-		SplitLimit: defaultSplitLimit,
+		schedulerConfig: &baseSchedulerConfig{},
+		Degree:          defaultHotDegree,
+		SplitLimit:      defaultSplitLimit,
 	}
 }
 

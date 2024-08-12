@@ -55,6 +55,7 @@ type evictSlowStoreSchedulerConfig struct {
 
 func initEvictSlowStoreSchedulerConfig() *evictSlowStoreSchedulerConfig {
 	return &evictSlowStoreSchedulerConfig{
+		schedulerConfig:        &baseSchedulerConfig{},
 		lastSlowStoreCaptureTS: time.Time{},
 		RecoveryDurationGap:    defaultRecoveryDurationGap,
 		EvictedStores:          make([]uint64, 0),

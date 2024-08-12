@@ -68,6 +68,7 @@ type evictSlowTrendSchedulerConfig struct {
 
 func initEvictSlowTrendSchedulerConfig() *evictSlowTrendSchedulerConfig {
 	return &evictSlowTrendSchedulerConfig{
+		schedulerConfig:     &baseSchedulerConfig{},
 		evictCandidate:      slowCandidate{},
 		lastEvictCandidate:  slowCandidate{},
 		RecoveryDurationGap: defaultRecoveryDurationGap,

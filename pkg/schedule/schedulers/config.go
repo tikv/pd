@@ -23,8 +23,7 @@ import (
 type schedulerConfig interface {
 	save(any) error
 	load(any) error
-	setStorage(endpoint.ConfigStorage)
-	setName(string)
+	init(name string, storage endpoint.ConfigStorage)
 }
 
 type baseSchedulerConfig struct {
@@ -32,12 +31,9 @@ type baseSchedulerConfig struct {
 	storage endpoint.ConfigStorage
 }
 
-func (b *baseSchedulerConfig) setStorage(storage endpoint.ConfigStorage) {
-	b.storage = storage
-}
-
-func (b *baseSchedulerConfig) setName(name string) {
+func (b *baseSchedulerConfig) init(name string, storage endpoint.ConfigStorage) {
 	b.name = name
+	b.storage = storage
 }
 
 func (b *baseSchedulerConfig) save(v any) error {
@@ -56,8 +52,5 @@ func (b *baseSchedulerConfig) load(v any) error {
 	if err != nil {
 		return err
 	}
-	if err = DecodeConfig([]byte(data), v); err != nil {
-		return err
-	}
-	return nil
+	return DecodeConfig([]byte(data), v)
 }
