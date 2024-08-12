@@ -228,7 +228,7 @@ func (s *Service) RegisterConfigRouter() {
 	regions.GET("/:id/labels", getRegionLabels)
 }
 
-// RegisterPrimaryRouter registers the router of the config handler.
+// RegisterPrimaryRouter registers the router of the primary handler.
 func (s *Service) RegisterPrimaryRouter() {
 	router := s.root.Group("primary")
 	router.POST("transfer", transferPrimary)
@@ -1487,11 +1487,10 @@ func getRegionByID(c *gin.Context) {
 	c.Data(http.StatusOK, "application/json", b)
 }
 
-// TransferPrimary transfers the primary member.
+// TransferPrimary transfers the primary member to `new_primary`.
 // @Tags     primary
-// @Summary  Transfer the primary member of the specified service.
+// @Summary  Transfer the primary member to `new_primary`.
 // @Produce  json
-// @Param    service     path    string  true  "service name"
 // @Param    new_primary body   string  false "new primary name"
 // @Success  200  string  string
 // @Router   /primary/transfer [post]

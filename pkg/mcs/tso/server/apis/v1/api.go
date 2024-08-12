@@ -128,7 +128,7 @@ func (s *Service) RegisterConfigRouter() {
 	router.GET("", getConfig)
 }
 
-// RegisterPrimaryRouter registers the router of the config handler.
+// RegisterPrimaryRouter registers the router of the primary handler.
 func (s *Service) RegisterPrimaryRouter() {
 	router := s.root.Group("primary")
 	router.POST("transfer", transferPrimary)
@@ -275,13 +275,11 @@ func getConfig(c *gin.Context) {
 	c.IndentedJSON(http.StatusOK, svr.GetConfig())
 }
 
-// TransferPrimary transfers the primary member of the specified service.
+// TransferPrimary transfers the primary member to `new_primary`.
 // @Tags     primary
-// @Summary  Transfer the primary member of the specified service.
+// @Summary  Transfer the primary member to `new_primary`.
 // @Produce  json
-// @Param    service     path    string  true  "service name"
 // @Param    new_primary body   string  false "new primary name"
-// @Param    keyspace_group_id body   string  false "keyspace group id"
 // @Success  200  string  string
 // @Router   /primary/transfer [post]
 func transferPrimary(c *gin.Context) {
@@ -292,6 +290,7 @@ func transferPrimary(c *gin.Context) {
 		return
 	}
 
+	// We only support default keyspace group now.
 	newPrimary, keyspaceGroupID := "", constant.DefaultKeyspaceGroupID
 	if v, ok := input["new_primary"]; ok {
 		newPrimary = v

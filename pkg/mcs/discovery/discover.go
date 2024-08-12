@@ -15,6 +15,8 @@
 package discovery
 
 import (
+	"strconv"
+
 	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
@@ -23,7 +25,6 @@ import (
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
-	"strconv"
 )
 
 // Discover is used to get all the service instances of the specified service name.
