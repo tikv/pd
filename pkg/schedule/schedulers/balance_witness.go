@@ -40,8 +40,6 @@ import (
 )
 
 const (
-	// BalanceWitnessName is balance witness scheduler name.
-	BalanceWitnessName = "balance-witness-scheduler"
 	// balanceWitnessBatchSize is the default number of operators to transfer witnesses by one scheduling.
 	// Default value is 4 which is subjected by scheduler-max-waiting-operator and witness-schedule-limit
 	// If you want to increase balance speed more, please increase above-mentioned param.

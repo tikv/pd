@@ -35,11 +35,6 @@ import (
 )
 
 const (
-	// EvictSlowTrendName is evict leader by slow trend scheduler name.
-	EvictSlowTrendName = "evict-slow-trend-scheduler"
-)
-
-const (
 	alterEpsilon               = 1e-9
 	minReCheckDurationGap      = 120 // default gap for re-check the slow node, unit: s
 	defaultRecoveryDurationGap = 600 // default gap for recovery, unit: s.

@@ -40,8 +40,6 @@ import (
 )
 
 const (
-	// BalanceLeaderName is balance leader scheduler name.
-	BalanceLeaderName = "balance-leader-scheduler"
 	// BalanceLeaderBatchSize is the default number of operators to transfer leaders by one scheduling.
 	// Default value is 4 which is subjected by scheduler-max-waiting-operator and leader-schedule-limit
 	// If you want to increase balance speed more, please increase above-mentioned param.

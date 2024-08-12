@@ -34,9 +34,6 @@ import (
 )
 
 const (
-	// EvictSlowStoreName is evict leader scheduler name.
-	EvictSlowStoreName = "evict-slow-store-scheduler"
-
 	slowStoreEvictThreshold   = 100
 	slowStoreRecoverThreshold = 1
 )
