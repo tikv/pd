@@ -278,9 +278,6 @@ type ScheduleConfig struct {
 	// Schedulers support for loading customized schedulers
 	Schedulers SchedulerConfigs `toml:"schedulers" json:"schedulers-v2"` // json v2 is for the sake of compatible upgrade
 
-	// Deprecated: not used anymore
-	SchedulersPayload map[string]any `toml:"schedulers-payload" json:"schedulers-payload"`
-
 	// Controls the time interval between write hot regions info into leveldb.
 	HotRegionsWriteInterval typeutil.Duration `toml:"hot-regions-write-interval" json:"hot-regions-write-interval"`
 
