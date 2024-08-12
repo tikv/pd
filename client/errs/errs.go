@@ -38,6 +38,15 @@ func IsLeaderChange(err error) bool {
 		strings.Contains(errMsg, NotPrimaryErr)
 }
 
+// IsServiceModeChange will determine whether there is a service mode change.
+func IsServiceModeChange(err error) bool {
+	if err == nil {
+		return false
+	}
+	errMsg := err.Error()
+	return strings.Contains(errMsg, "not found tso address")
+}
+
 // ZapError is used to make the log output easier.
 func ZapError(err error, causeError ...error) zap.Field {
 	if err == nil {

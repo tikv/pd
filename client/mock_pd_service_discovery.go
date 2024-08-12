@@ -94,6 +94,9 @@ func (*mockPDServiceDiscovery) ScheduleCheckMemberChanged() {}
 // CheckMemberChanged implements the ServiceDiscovery interface.
 func (*mockPDServiceDiscovery) CheckMemberChanged() error { return nil }
 
+// CheckServiceModeChanged implements the ServiceDiscovery interface.
+func (*mockPDServiceDiscovery) CheckServiceModeChanged() error { return nil }
+
 // AddServingURLSwitchedCallback implements the ServiceDiscovery interface.
 func (*mockPDServiceDiscovery) AddServingURLSwitchedCallback(...func()) {}
 

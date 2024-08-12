@@ -349,6 +349,10 @@ func (c *tsoServiceDiscovery) CheckMemberChanged() error {
 	return nil
 }
 
+func (c *tsoServiceDiscovery) CheckServiceModeChanged() error {
+	return c.apiSvcDiscovery.CheckServiceModeChanged()
+}
+
 // AddServingURLSwitchedCallback adds callbacks which will be called when the primary in
 // a primary/secondary configured cluster is switched.
 func (*tsoServiceDiscovery) AddServingURLSwitchedCallback(...func()) {}
