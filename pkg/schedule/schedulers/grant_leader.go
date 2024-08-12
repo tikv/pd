@@ -49,7 +49,7 @@ type grantLeaderSchedulerConfig struct {
 	removeSchedulerCb func(name string) error
 }
 
-func (conf *grantLeaderSchedulerConfig) BuildWithArgs(args []string) error {
+func (conf *grantLeaderSchedulerConfig) buildWithArgs(args []string) error {
 	if len(args) != 1 {
 		return errs.ErrSchedulerConfig.FastGenByArgs("id")
 	}
@@ -285,7 +285,7 @@ func (handler *grantLeaderHandler) updateConfig(w http.ResponseWriter, r *http.R
 		args = append(args, handler.config.getRanges(id)...)
 	}
 
-	err := handler.config.BuildWithArgs(args)
+	err := handler.config.buildWithArgs(args)
 	if err != nil {
 		handler.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return

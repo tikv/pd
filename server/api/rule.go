@@ -57,7 +57,7 @@ func newRuleMiddleware(s *server.Server, rd *render.Render) ruleMiddleware {
 	}
 }
 
-func (m ruleMiddleware) Middleware(h http.Handler) http.Handler {
+func (m ruleMiddleware) middleware(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		manager, err := m.GetRuleManager()
 		if err == errs.ErrPlacementDisabled {

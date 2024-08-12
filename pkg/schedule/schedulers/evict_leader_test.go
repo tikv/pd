@@ -89,19 +89,19 @@ func TestConfigClone(t *testing.T) {
 	re := require.New(t)
 
 	emptyConf := &evictLeaderSchedulerConfig{StoreIDWithRanges: make(map[uint64][]core.KeyRange)}
-	con2 := emptyConf.Clone()
+	con2 := emptyConf.clone()
 	re.Empty(con2.getKeyRangesByID(1))
 
 	con2.StoreIDWithRanges[1], _ = getKeyRanges([]string{"a", "b", "c", "d"})
-	con3 := con2.Clone()
+	con3 := con2.clone()
 	re.Equal(len(con3.getRanges(1)), len(con2.getRanges(1)))
 
 	con3.StoreIDWithRanges[1][0].StartKey = []byte("aaa")
-	con4 := con3.Clone()
+	con4 := con3.clone()
 	re.True(bytes.Equal(con4.StoreIDWithRanges[1][0].StartKey, con3.StoreIDWithRanges[1][0].StartKey))
 
 	con4.Batch = 10
-	con5 := con4.Clone()
+	con5 := con4.clone()
 	re.Equal(con5.getBatch(), con4.getBatch())
 }
 
