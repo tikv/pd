@@ -65,7 +65,7 @@ func schedulersRegister() {
 			conf.Batch = BalanceLeaderBatchSize
 		}
 		sche := newBalanceLeaderScheduler(opController, conf)
-		conf.init(sche.GetName(), storage)
+		conf.init(sche.GetName(), storage, conf)
 		return sche, nil
 	})
 
@@ -123,7 +123,7 @@ func schedulersRegister() {
 			conf.Batch = balanceWitnessBatchSize
 		}
 		sche := newBalanceWitnessScheduler(opController, conf)
-		conf.init(sche.GetName(), storage)
+		conf.init(sche.GetName(), storage, conf)
 		return sche, nil
 	})
 
@@ -165,7 +165,7 @@ func schedulersRegister() {
 		conf.cluster = opController.GetCluster()
 		conf.removeSchedulerCb = removeSchedulerCb[0]
 		sche := newEvictLeaderScheduler(opController, conf)
-		conf.init(sche.GetName(), storage)
+		conf.init(sche.GetName(), storage, conf)
 		return sche, nil
 	})
 
@@ -184,7 +184,7 @@ func schedulersRegister() {
 		}
 		conf.cluster = opController.GetCluster()
 		sche := newEvictSlowStoreScheduler(opController, conf)
-		conf.init(sche.GetName(), storage)
+		conf.init(sche.GetName(), storage, conf)
 		return sche, nil
 	})
 
@@ -230,7 +230,7 @@ func schedulersRegister() {
 			return nil, err
 		}
 		sche := newGrantHotRegionScheduler(opController, conf)
-		conf.init(sche.GetName(), storage)
+		conf.init(sche.GetName(), storage, conf)
 		return sche, nil
 	})
 
@@ -259,7 +259,7 @@ func schedulersRegister() {
 			}
 		}
 		sche := newHotScheduler(opController, conf)
-		conf.init(sche.GetName(), storage)
+		conf.init(sche.GetName(), storage, conf)
 		return sche, nil
 	})
 
@@ -300,7 +300,7 @@ func schedulersRegister() {
 			return nil, err
 		}
 		sche := newGrantLeaderScheduler(opController, conf)
-		conf.init(sche.GetName(), storage)
+		conf.init(sche.GetName(), storage, conf)
 		return sche, nil
 	})
 
@@ -388,7 +388,7 @@ func schedulersRegister() {
 			return nil, errs.ErrSchedulerConfig.FastGenByArgs("range name")
 		}
 		sche := newScatterRangeScheduler(opController, conf)
-		conf.init(sche.GetName(), storage)
+		conf.init(sche.GetName(), storage, conf)
 		return sche, nil
 	})
 
@@ -421,7 +421,7 @@ func schedulersRegister() {
 			return nil, err
 		}
 		sche := newShuffleHotRegionScheduler(opController, conf)
-		conf.init(sche.GetName(), storage)
+		conf.init(sche.GetName(), storage, conf)
 		return sche, nil
 	})
 
@@ -476,7 +476,7 @@ func schedulersRegister() {
 			return nil, err
 		}
 		sche := newShuffleRegionScheduler(opController, conf)
-		conf.init(sche.GetName(), storage)
+		conf.init(sche.GetName(), storage, conf)
 		return sche, nil
 	})
 
@@ -494,7 +494,7 @@ func schedulersRegister() {
 			return nil, err
 		}
 		sche := newSplitBucketScheduler(opController, conf)
-		conf.init(sche.GetName(), storage)
+		conf.init(sche.GetName(), storage, conf)
 		return sche, nil
 	})
 
@@ -525,7 +525,7 @@ func schedulersRegister() {
 		}
 
 		sche := newEvictSlowTrendScheduler(opController, conf)
-		conf.init(sche.GetName(), storage)
+		conf.init(sche.GetName(), storage, conf)
 		return sche, nil
 	})
 }

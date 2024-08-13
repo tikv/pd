@@ -83,7 +83,7 @@ func (conf *grantLeaderSchedulerConfig) clone() *grantLeaderSchedulerConfig {
 func (conf *grantLeaderSchedulerConfig) persist() error {
 	conf.RLock()
 	defer conf.RUnlock()
-	return conf.save(conf)
+	return conf.save()
 }
 
 func (conf *grantLeaderSchedulerConfig) getRanges(id uint64) []string {

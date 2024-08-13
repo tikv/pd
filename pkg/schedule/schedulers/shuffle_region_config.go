@@ -99,7 +99,7 @@ func (conf *shuffleRegionSchedulerConfig) handleSetRoles(w http.ResponseWriter, 
 	defer conf.Unlock()
 	old := conf.Roles
 	conf.Roles = roles
-	if err := conf.save(conf); err != nil {
+	if err := conf.save(); err != nil {
 		conf.Roles = old // revert
 		rd.Text(w, http.StatusInternalServerError, err.Error())
 		return

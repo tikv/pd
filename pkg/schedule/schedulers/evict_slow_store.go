@@ -110,7 +110,7 @@ func (conf *evictSlowStoreSchedulerConfig) setStoreAndPersist(id uint64) error {
 	defer conf.Unlock()
 	conf.EvictedStores = []uint64{id}
 	conf.lastSlowStoreCaptureTS = time.Now()
-	return conf.save(conf)
+	return conf.save()
 }
 
 func (conf *evictSlowStoreSchedulerConfig) clearAndPersist() (oldID uint64, err error) {
@@ -120,7 +120,7 @@ func (conf *evictSlowStoreSchedulerConfig) clearAndPersist() (oldID uint64, err 
 	if oldID > 0 {
 		conf.EvictedStores = []uint64{}
 		conf.lastSlowStoreCaptureTS = time.Time{}
-		err = conf.save(conf)
+		err = conf.save()
 	}
 	return
 }
@@ -158,7 +158,7 @@ func (handler *evictSlowStoreHandler) updateConfig(w http.ResponseWriter, r *htt
 	prevRecoveryDurationGap := conf.RecoveryDurationGap
 	recoveryDurationGap := uint64(recoveryDurationGapFloat)
 	conf.RecoveryDurationGap = recoveryDurationGap
-	if err := conf.save(conf); err != nil {
+	if err := conf.save(); err != nil {
 		handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		conf.RecoveryDurationGap = prevRecoveryDurationGap
 		return

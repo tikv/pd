@@ -215,7 +215,7 @@ func (handler *shuffleHotRegionHandler) updateConfig(w http.ResponseWriter, r *h
 	defer conf.Unlock()
 	previous := conf.Limit
 	conf.Limit = uint64(limit)
-	err := conf.save(conf)
+	err := conf.save()
 	if err != nil {
 		handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		conf.Limit = previous

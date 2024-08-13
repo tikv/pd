@@ -112,7 +112,7 @@ func (h *splitBucketHandler) updateConfig(w http.ResponseWriter, r *http.Request
 	}
 	newc, _ := json.Marshal(h.conf)
 	if !bytes.Equal(oldc, newc) {
-		if err := h.conf.save(h.conf); err != nil {
+		if err := h.conf.save(); err != nil {
 			log.Warn("failed to save config", errs.ZapError(err))
 		}
 		rd.Text(w, http.StatusOK, "Config is updated.")

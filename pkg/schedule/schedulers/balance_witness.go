@@ -76,7 +76,7 @@ func (conf *balanceWitnessSchedulerConfig) update(data []byte) (int, any) {
 			}
 			return http.StatusBadRequest, "invalid batch size which should be an integer between 1 and 10"
 		}
-		if err := conf.save(conf); err != nil {
+		if err := conf.save(); err != nil {
 			log.Warn("failed to persist config", zap.Error(err))
 		}
 		log.Info("balance-witness-scheduler config is updated", zap.ByteString("old", oldc), zap.ByteString("new", newc))

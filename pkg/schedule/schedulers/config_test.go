@@ -23,24 +23,28 @@ import (
 
 func TestSchedulerConfig(t *testing.T) {
 	s := storage.NewStorageWithMemoryBackend()
-	cfg := &baseSchedulerConfig{}
-	cfg.init("test", s)
 
 	type testConfig struct {
+		schedulerConfig
 		Value string `json:"value"`
 	}
 
-	tc := &testConfig{
-		Value: "test",
+	cfg := &testConfig{
+		schedulerConfig: &baseSchedulerConfig{},
 	}
-	require.NoError(t, cfg.save(tc))
+	cfg.init("test", s, cfg)
+
+	cfg.Value = "test"
+	require.NoError(t, cfg.save())
 	newTc := &testConfig{}
 	require.NoError(t, cfg.load(newTc))
-	require.Equal(t, tc.Value, newTc.Value)
+	require.Equal(t, cfg.Value, newTc.Value)
 
 	// config with another name cannot loaded the previous config
-	cfg2 := &baseSchedulerConfig{}
-	cfg2.init("test2", s)
+	cfg2 := &testConfig{
+		schedulerConfig: &baseSchedulerConfig{},
+	}
+	cfg2.init("test2", s, cfg2)
 	// report error because the config is empty and cannot be decoded
 	require.Error(t, cfg2.load(newTc))
 }

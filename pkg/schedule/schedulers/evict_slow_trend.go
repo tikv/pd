@@ -194,7 +194,7 @@ func (conf *evictSlowTrendSchedulerConfig) setStoreAndPersist(id uint64) error {
 	conf.Lock()
 	defer conf.Unlock()
 	conf.EvictedStores = []uint64{id}
-	return conf.save(conf)
+	return conf.save()
 }
 
 func (conf *evictSlowTrendSchedulerConfig) clearAndPersist(cluster sche.SchedulerCluster) (oldID uint64, err error) {
@@ -211,7 +211,7 @@ func (conf *evictSlowTrendSchedulerConfig) clearAndPersist(cluster sche.Schedule
 	conf.Lock()
 	defer conf.Unlock()
 	conf.EvictedStores = []uint64{}
-	return oldID, conf.save(conf)
+	return oldID, conf.save()
 }
 
 type evictSlowTrendHandler struct {
@@ -246,7 +246,7 @@ func (handler *evictSlowTrendHandler) updateConfig(w http.ResponseWriter, r *htt
 	prevRecoveryDurationGap := conf.RecoveryDurationGap
 	recoveryDurationGap := uint64(recoveryDurationGapFloat)
 	conf.RecoveryDurationGap = recoveryDurationGap
-	if err := conf.save(conf); err != nil {
+	if err := conf.save(); err != nil {
 		handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		conf.RecoveryDurationGap = prevRecoveryDurationGap
 		return

@@ -21,23 +21,27 @@ import (
 )
 
 type schedulerConfig interface {
-	save(any) error
+	save() error
 	load(any) error
-	init(name string, storage endpoint.ConfigStorage)
+	init(name string, storage endpoint.ConfigStorage, data any)
 }
 
 type baseSchedulerConfig struct {
 	name    string
 	storage endpoint.ConfigStorage
+
+	// data is the config of the scheduler.
+	data any
 }
 
-func (b *baseSchedulerConfig) init(name string, storage endpoint.ConfigStorage) {
+func (b *baseSchedulerConfig) init(name string, storage endpoint.ConfigStorage, data any) {
 	b.name = name
 	b.storage = storage
+	b.data = data
 }
 
-func (b *baseSchedulerConfig) save(v any) error {
-	data, err := EncodeConfig(v)
+func (b *baseSchedulerConfig) save() error {
+	data, err := EncodeConfig(b.data)
 	failpoint.Inject("persistFail", func() {
 		err = errors.New("fail to persist")
 	})

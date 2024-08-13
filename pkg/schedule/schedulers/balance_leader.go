@@ -79,7 +79,7 @@ func (conf *balanceLeaderSchedulerConfig) update(data []byte) (int, any) {
 			}
 			return http.StatusBadRequest, "invalid batch size which should be an integer between 1 and 10"
 		}
-		if err := conf.save(conf); err != nil {
+		if err := conf.save(); err != nil {
 			log.Warn("failed to save balance-leader-scheduler config", errs.ZapError(err))
 		}
 		log.Info("balance-leader-scheduler config is updated", zap.ByteString("old", oldConfig), zap.ByteString("new", newConfig))

@@ -71,7 +71,7 @@ func (conf *scatterRangeSchedulerConfig) clone() *scatterRangeSchedulerConfig {
 func (conf *scatterRangeSchedulerConfig) persist() error {
 	conf.RLock()
 	defer conf.RUnlock()
-	return conf.save(conf)
+	return conf.save()
 }
 
 func (conf *scatterRangeSchedulerConfig) getRangeName() string {

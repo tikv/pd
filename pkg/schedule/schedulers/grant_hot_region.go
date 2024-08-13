@@ -93,7 +93,7 @@ func (conf *grantHotRegionSchedulerConfig) clone() *grantHotRegionSchedulerConfi
 func (conf *grantHotRegionSchedulerConfig) persist() error {
 	conf.RLock()
 	defer conf.RUnlock()
-	return conf.save(conf)
+	return conf.save()
 }
 
 func (conf *grantHotRegionSchedulerConfig) has(storeID uint64) bool {

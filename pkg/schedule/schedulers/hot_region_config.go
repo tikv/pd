@@ -456,7 +456,7 @@ func (conf *hotRegionSchedulerConfig) handleSetConfig(w http.ResponseWriter, r *
 	}
 	newc, _ := json.Marshal(conf)
 	if !bytes.Equal(oldc, newc) {
-		if err := conf.save(conf); err != nil {
+		if err := conf.save(); err != nil {
 			log.Warn("failed to persist config", zap.Error(err))
 		}
 		log.Info("hot-region-scheduler config is updated", zap.String("old", string(oldc)), zap.String("new", string(newc)))
