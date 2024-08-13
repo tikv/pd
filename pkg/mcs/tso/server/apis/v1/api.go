@@ -309,7 +309,7 @@ func transferPrimary(c *gin.Context) {
 	}
 
 	if err := utils.TransferPrimary(svr.GetClient(), globalAllocator.(*tso.GlobalTSOAllocator).GetExpectedPrimaryLease(),
-		constant.TSOServiceName, svr.GetAddr(), newPrimary, keyspaceGroupID); err != nil {
+		constant.TSOServiceName, svr.Name(), newPrimary, keyspaceGroupID); err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
 		return
 	}

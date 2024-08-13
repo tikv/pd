@@ -122,11 +122,11 @@ func watchExpectedPrimary(ctx context.Context,
 // TransferPrimary transfers the primary of the specified service.
 // keyspaceGroupID is optional, only used for TSO service.
 func TransferPrimary(client *clientv3.Client, lease *election.Lease, serviceName,
-	oldPrimaryAddr, newPrimary string, keyspaceGroupID uint32) error {
+	oldPrimary, newPrimary string, keyspaceGroupID uint32) error {
 	if lease == nil {
 		return errors.New("current lease is nil, please check leadership")
 	}
-	log.Info("try to transfer primary", zap.String("service", serviceName), zap.String("from", oldPrimaryAddr), zap.String("to", newPrimary))
+	log.Info("try to transfer primary", zap.String("service", serviceName), zap.String("from", oldPrimary), zap.String("to", newPrimary))
 	entries, err := discovery.GetMSMembers(serviceName, client)
 	if err != nil {
 		return err
@@ -139,13 +139,12 @@ func TransferPrimary(client *clientv3.Client, lease *election.Lease, serviceName
 
 	var primaryIDs []string
 	for _, member := range entries {
-		// TODO: judged by `addr` and `name` now, should unify them to `name` in the future.
-		if (newPrimary == "" && member.ServiceAddr != oldPrimaryAddr) || (newPrimary != "" && member.Name == newPrimary) {
+		if (newPrimary == "" && member.Name != oldPrimary) || (newPrimary != "" && member.Name == newPrimary) {
 			primaryIDs = append(primaryIDs, member.ServiceAddr)
 		}
 	}
 	if len(primaryIDs) == 0 {
-		return errors.Errorf("no valid secondary to transfer primary, from %s to %s", oldPrimaryAddr, newPrimary)
+		return errors.Errorf("no valid secondary to transfer primary, from %s to %s", oldPrimary, newPrimary)
 	}
 
 	r := rand.New(rand.NewSource(time.Now().UnixNano()))
