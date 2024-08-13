@@ -49,12 +49,14 @@ func NewTestServer(ctx context.Context, re *require.Assertions, cfg *config.Conf
 // GenerateConfig generates a new config with the given options.
 func GenerateConfig(c *config.Config) (*config.Config, error) {
 	arguments := []string{
+		"--name=" + c.Name,
 		"--listen-addr=" + c.ListenAddr,
 		"--advertise-listen-addr=" + c.AdvertiseListenAddr,
 		"--backend-endpoints=" + c.BackendEndpoints,
 	}
 
 	flagSet := pflag.NewFlagSet("test", pflag.ContinueOnError)
+	flagSet.StringP("name", "", "", "human-readable name for this scheduling member")
 	flagSet.BoolP("version", "V", false, "print version information and exit")
 	flagSet.StringP("config", "", "", "config file")
 	flagSet.StringP("backend-endpoints", "", "", "url for etcd client")

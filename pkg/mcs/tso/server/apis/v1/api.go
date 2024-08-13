@@ -30,6 +30,7 @@ import (
 	"github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/pkg/tso"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/apiutil/multiservicesapi"
 	"github.com/tikv/pd/pkg/utils/logutil"
@@ -98,6 +99,7 @@ func NewService(srv *tsoserver.Service) *Service {
 	s.RegisterKeyspaceGroupRouter()
 	s.RegisterHealthRouter()
 	s.RegisterConfigRouter()
+	s.RegisterPrimaryRouter()
 	return s
 }
 
@@ -124,6 +126,12 @@ func (s *Service) RegisterHealthRouter() {
 func (s *Service) RegisterConfigRouter() {
 	router := s.root.Group("config")
 	router.GET("", getConfig)
+}
+
+// RegisterPrimaryRouter registers the router of the primary handler.
+func (s *Service) RegisterPrimaryRouter() {
+	router := s.root.Group("primary")
+	router.POST("transfer", transferPrimary)
 }
 
 func changeLogLevel(c *gin.Context) {
@@ -265,4 +273,45 @@ func GetKeyspaceGroupMembers(c *gin.Context) {
 func getConfig(c *gin.Context) {
 	svr := c.MustGet(multiservicesapi.ServiceContextKey).(*tsoserver.Service)
 	c.IndentedJSON(http.StatusOK, svr.GetConfig())
+}
+
+// TransferPrimary transfers the primary member to `new_primary`.
+// @Tags     primary
+// @Summary  Transfer the primary member to `new_primary`.
+// @Produce  json
+// @Param    new_primary body   string  false "new primary name"
+// @Success  200  string  string
+// @Router   /primary/transfer [post]
+func transferPrimary(c *gin.Context) {
+	svr := c.MustGet(multiservicesapi.ServiceContextKey).(*tsoserver.Service)
+	var input map[string]string
+	if err := c.BindJSON(&input); err != nil {
+		c.String(http.StatusBadRequest, err.Error())
+		return
+	}
+
+	// We only support default keyspace group now.
+	newPrimary, keyspaceGroupID := "", constant.DefaultKeyspaceGroupID
+	if v, ok := input["new_primary"]; ok {
+		newPrimary = v
+	}
+
+	allocator, err := svr.GetTSOAllocatorManager(keyspaceGroupID)
+	if err != nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	globalAllocator, err := allocator.GetAllocator(tso.GlobalDCLocation)
+	if err != nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	if err := utils.TransferPrimary(svr.GetClient(), globalAllocator.(*tso.GlobalTSOAllocator).GetExpectedPrimaryLease(),
+		constant.TSOServiceName, svr.Name(), newPrimary, keyspaceGroupID); err != nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
+		return
+	}
+	c.IndentedJSON(http.StatusOK, "success")
 }

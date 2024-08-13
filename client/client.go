@@ -809,14 +809,13 @@ func (c *client) GetAllMembers(ctx context.Context) ([]*pdpb.Member, error) {
 	defer func() { cmdDurationGetAllMembers.Observe(time.Since(start).Seconds()) }()
 
 	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
+	defer cancel()
 	req := &pdpb.GetMembersRequest{Header: c.requestHeader()}
 	protoClient, ctx := c.getClientAndContext(ctx)
 	if protoClient == nil {
-		cancel()
 		return nil, errs.ErrClientGetProtoClient
 	}
 	resp, err := protoClient.GetMembers(ctx, req)
-	cancel()
 	if err = c.respForErr(cmdFailDurationGetAllMembers, start, err, resp.GetHeader()); err != nil {
 		return nil, err
 	}
@@ -934,17 +933,16 @@ func (c *client) GetMinTS(ctx context.Context) (physical int64, logical int64, e
 		return 0, 0, errs.ErrClientGetMinTSO.FastGenByArgs("undefined service mode")
 	}
 	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
+	defer cancel()
 	// Call GetMinTS API to get the minimal TS from the API leader.
 	protoClient, ctx := c.getClientAndContext(ctx)
 	if protoClient == nil {
-		cancel()
 		return 0, 0, errs.ErrClientGetProtoClient
 	}
 
 	resp, err := protoClient.GetMinTS(ctx, &pdpb.GetMinTSRequest{
 		Header: c.requestHeader(),
 	})
-	cancel()
 	if err != nil {
 		if strings.Contains(err.Error(), "Unimplemented") {
 			// If the method is not supported, we fallback to GetTS.
@@ -1297,17 +1295,16 @@ func (c *client) GetStore(ctx context.Context, storeID uint64) (*metapb.Store, e
 	defer func() { cmdDurationGetStore.Observe(time.Since(start).Seconds()) }()
 
 	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
+	defer cancel()
 	req := &pdpb.GetStoreRequest{
 		Header:  c.requestHeader(),
 		StoreId: storeID,
 	}
 	protoClient, ctx := c.getClientAndContext(ctx)
 	if protoClient == nil {
-		cancel()
 		return nil, errs.ErrClientGetProtoClient
 	}
 	resp, err := protoClient.GetStore(ctx, req)
-	cancel()
 
 	if err = c.respForErr(cmdFailedDurationGetStore, start, err, resp.GetHeader()); err != nil {
 		return nil, err
@@ -1342,17 +1339,16 @@ func (c *client) GetAllStores(ctx context.Context, opts ...GetStoreOption) ([]*m
 	defer func() { cmdDurationGetAllStores.Observe(time.Since(start).Seconds()) }()
 
 	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
+	defer cancel()
 	req := &pdpb.GetAllStoresRequest{
 		Header:                 c.requestHeader(),
 		ExcludeTombstoneStores: options.excludeTombstone,
 	}
 	protoClient, ctx := c.getClientAndContext(ctx)
 	if protoClient == nil {
-		cancel()
 		return nil, errs.ErrClientGetProtoClient
 	}
 	resp, err := protoClient.GetAllStores(ctx, req)
-	cancel()
 
 	if err = c.respForErr(cmdFailedDurationGetAllStores, start, err, resp.GetHeader()); err != nil {
 		return nil, err
@@ -1370,17 +1366,16 @@ func (c *client) UpdateGCSafePoint(ctx context.Context, safePoint uint64) (uint6
 	defer func() { cmdDurationUpdateGCSafePoint.Observe(time.Since(start).Seconds()) }()
 
 	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
+	defer cancel()
 	req := &pdpb.UpdateGCSafePointRequest{
 		Header:    c.requestHeader(),
 		SafePoint: safePoint,
 	}
 	protoClient, ctx := c.getClientAndContext(ctx)
 	if protoClient == nil {
-		cancel()
 		return 0, errs.ErrClientGetProtoClient
 	}
 	resp, err := protoClient.UpdateGCSafePoint(ctx, req)
-	cancel()
 
 	if err = c.respForErr(cmdFailedDurationUpdateGCSafePoint, start, err, resp.GetHeader()); err != nil {
 		return 0, err
@@ -1402,6 +1397,7 @@ func (c *client) UpdateServiceGCSafePoint(ctx context.Context, serviceID string,
 	defer func() { cmdDurationUpdateServiceGCSafePoint.Observe(time.Since(start).Seconds()) }()
 
 	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
+	defer cancel()
 	req := &pdpb.UpdateServiceGCSafePointRequest{
 		Header:    c.requestHeader(),
 		ServiceId: []byte(serviceID),
@@ -1410,11 +1406,9 @@ func (c *client) UpdateServiceGCSafePoint(ctx context.Context, serviceID string,
 	}
 	protoClient, ctx := c.getClientAndContext(ctx)
 	if protoClient == nil {
-		cancel()
 		return 0, errs.ErrClientGetProtoClient
 	}
 	resp, err := protoClient.UpdateServiceGCSafePoint(ctx, req)
-	cancel()
 
 	if err = c.respForErr(cmdFailedDurationUpdateServiceGCSafePoint, start, err, resp.GetHeader()); err != nil {
 		return 0, err
@@ -1436,6 +1430,7 @@ func (c *client) scatterRegionsWithGroup(ctx context.Context, regionID uint64, g
 	defer func() { cmdDurationScatterRegion.Observe(time.Since(start).Seconds()) }()
 
 	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
+	defer cancel()
 	req := &pdpb.ScatterRegionRequest{
 		Header:   c.requestHeader(),
 		RegionId: regionID,
@@ -1443,11 +1438,9 @@ func (c *client) scatterRegionsWithGroup(ctx context.Context, regionID uint64, g
 	}
 	protoClient, ctx := c.getClientAndContext(ctx)
 	if protoClient == nil {
-		cancel()
 		return errs.ErrClientGetProtoClient
 	}
 	resp, err := protoClient.ScatterRegion(ctx, req)
-	cancel()
 	if err != nil {
 		return err
 	}
@@ -1489,7 +1482,6 @@ func (c *client) SplitAndScatterRegions(ctx context.Context, splitKeys [][]byte,
 
 	protoClient, ctx := c.getClientAndContext(ctx)
 	if protoClient == nil {
-		cancel()
 		return nil, errs.ErrClientGetProtoClient
 	}
 	return protoClient.SplitAndScatterRegions(ctx, req)
@@ -1512,7 +1504,6 @@ func (c *client) GetOperator(ctx context.Context, regionID uint64) (*pdpb.GetOpe
 	}
 	protoClient, ctx := c.getClientAndContext(ctx)
 	if protoClient == nil {
-		cancel()
 		return nil, errs.ErrClientGetProtoClient
 	}
 	return protoClient.GetOperator(ctx, req)
@@ -1539,7 +1530,6 @@ func (c *client) SplitRegions(ctx context.Context, splitKeys [][]byte, opts ...R
 	}
 	protoClient, ctx := c.getClientAndContext(ctx)
 	if protoClient == nil {
-		cancel()
 		return nil, errs.ErrClientGetProtoClient
 	}
 	return protoClient.SplitRegions(ctx, req)
@@ -1559,6 +1549,7 @@ func (c *client) scatterRegionsWithOptions(ctx context.Context, regionsID []uint
 		opt(options)
 	}
 	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
+	defer cancel()
 	req := &pdpb.ScatterRegionRequest{
 		Header:         c.requestHeader(),
 		Group:          options.group,
@@ -1569,11 +1560,9 @@ func (c *client) scatterRegionsWithOptions(ctx context.Context, regionsID []uint
 
 	protoClient, ctx := c.getClientAndContext(ctx)
 	if protoClient == nil {
-		cancel()
 		return nil, errs.ErrClientGetProtoClient
 	}
 	resp, err := protoClient.ScatterRegion(ctx, req)
-	cancel()
 
 	if err != nil {
 		return nil, err
