@@ -39,14 +39,14 @@ import (
 // This flag used to help new primary to campaign successfully while other secondaries can skip the campaign.
 const expectedPrimaryFlag = "expected_primary"
 
-// ExpectedPrimaryPath formats the primary path with the expected primary flag.
-func ExpectedPrimaryPath(primaryPath string) string {
+// expectedPrimaryPath formats the primary path with the expected primary flag.
+func expectedPrimaryPath(primaryPath string) string {
 	return fmt.Sprintf("%s/%s", primaryPath, expectedPrimaryFlag)
 }
 
 // GetExpectedPrimaryFlag gets the expected primary flag.
 func GetExpectedPrimaryFlag(client *clientv3.Client, primaryPath string) string {
-	path := ExpectedPrimaryPath(primaryPath)
+	path := expectedPrimaryPath(primaryPath)
 	primary, err := etcdutil.GetValue(client, path)
 	if err != nil {
 		log.Error("get expected primary flag error", errs.ZapError(err), zap.String("primary-path", path))
@@ -58,11 +58,11 @@ func GetExpectedPrimaryFlag(client *clientv3.Client, primaryPath string) string 
 
 // markExpectedPrimaryFlag marks the expected primary flag when the primary is specified.
 func markExpectedPrimaryFlag(client *clientv3.Client, primaryPath string, leaderRaw string, leaseID clientv3.LeaseID) (int64, error) {
-	path := ExpectedPrimaryPath(primaryPath)
+	path := expectedPrimaryPath(primaryPath)
 	log.Info("set expected primary flag", zap.String("primary-path", path), zap.String("leader-raw", leaderRaw))
 	// write a flag to indicate the expected primary.
 	resp, err := kv.NewSlowLogTxn(client).
-		Then(clientv3.OpPut(ExpectedPrimaryPath(primaryPath), leaderRaw, clientv3.WithLease(leaseID))).
+		Then(clientv3.OpPut(expectedPrimaryPath(primaryPath), leaderRaw, clientv3.WithLease(leaseID))).
 		Commit()
 	if err != nil || !resp.Succeeded {
 		log.Error("mark expected primary error", errs.ZapError(err), zap.String("primary-path", path))
@@ -93,7 +93,7 @@ func KeepExpectedPrimaryAlive(ctx context.Context, cli *clientv3.Client, exitPri
 	}
 	// Keep alive the current expected primary leadership to indicate that the server is still alive.
 	// Watch the expected primary path to check whether the expected primary has changed by `{service}/primary/transfer` API.
-	expectedPrimary := election.NewLeadership(cli, ExpectedPrimaryPath(leaderPath), service)
+	expectedPrimary := election.NewLeadership(cli, expectedPrimaryPath(leaderPath), service)
 	expectedPrimary.SetLease(lease)
 	expectedPrimary.Keep(ctx)
 
