@@ -240,15 +240,14 @@ func (handler *evictSlowTrendHandler) updateConfig(w http.ResponseWriter, r *htt
 		handler.rd.JSON(w, http.StatusInternalServerError, errors.New("invalid argument for 'recovery-duration'").Error())
 		return
 	}
-	conf := handler.config
-	conf.Lock()
-	defer conf.Unlock()
-	prevRecoveryDurationGap := conf.RecoveryDurationGap
+	handler.config.Lock()
+	defer handler.config.Unlock()
+	prevRecoveryDurationGap := handler.config.RecoveryDurationGap
 	recoveryDurationGap := uint64(recoveryDurationGapFloat)
-	conf.RecoveryDurationGap = recoveryDurationGap
-	if err := conf.save(); err != nil {
+	handler.config.RecoveryDurationGap = recoveryDurationGap
+	if err := handler.config.save(); err != nil {
 		handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
-		conf.RecoveryDurationGap = prevRecoveryDurationGap
+		handler.config.RecoveryDurationGap = prevRecoveryDurationGap
 		return
 	}
 	log.Info("evict-slow-trend-scheduler update 'recovery-duration' - unit: s", zap.Uint64("prev", prevRecoveryDurationGap), zap.Uint64("cur", recoveryDurationGap))
