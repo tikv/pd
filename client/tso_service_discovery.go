@@ -349,8 +349,9 @@ func (c *tsoServiceDiscovery) CheckMemberChanged() error {
 	return nil
 }
 
-func (c *tsoServiceDiscovery) ScheduleServiceModeChanged() {
-	c.apiSvcDiscovery.ScheduleServiceModeChanged()
+// ScheduleCheckServiceModeChanged is used to trigger a check to see if there is any change in service mode.
+func (c *tsoServiceDiscovery) ScheduleCheckServiceModeChanged() {
+	c.apiSvcDiscovery.ScheduleCheckServiceModeChanged()
 }
 
 // AddServingURLSwitchedCallback adds callbacks which will be called when the primary in

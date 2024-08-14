@@ -109,8 +109,8 @@ type ServiceDiscovery interface {
 	// among the leader/followers in a quorum-based cluster or among the primary/secondaries in a
 	// primary/secondary configured cluster.
 	ScheduleCheckMemberChanged()
-	// ScheduleServiceModeChanged is used to trigger a check to see if the service mode is changed.
-	ScheduleServiceModeChanged()
+	// ScheduleCheckServiceModeChanged is used to trigger a check to see if the service mode is changed.
+	ScheduleCheckServiceModeChanged()
 	// CheckMemberChanged immediately check if there is any membership change among the leader/followers
 	// in a quorum-based cluster or among the primary/secondaries in a primary/secondary configured cluster.
 	CheckMemberChanged() error
@@ -784,7 +784,7 @@ func (c *pdServiceDiscovery) ScheduleCheckMemberChanged() {
 
 // ScheduleCheckMemberChanged is used to check if there is any membership
 // change among the leader and the followers.
-func (c *pdServiceDiscovery) ScheduleServiceModeChanged() {
+func (c *pdServiceDiscovery) ScheduleCheckServiceModeChanged() {
 	select {
 	case c.checkServiceModeCh <- struct{}{}:
 	default:
