@@ -27,6 +27,7 @@ import (
 	"github.com/stretchr/testify/suite"
 	pdClient "github.com/tikv/pd/client/http"
 	bs "github.com/tikv/pd/pkg/basicserver"
+	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/tests"
@@ -65,7 +66,7 @@ func (suite *memberTestSuite) SetupTest() {
 
 	// TSO
 	nodes := make(map[string]bs.Server)
-	for i := 0; i < 3; i++ {
+	for i := 0; i < constant.DefaultKeyspaceGroupReplicaCount; i++ {
 		s, cleanup := tests.StartSingleTSOTestServer(suite.ctx, re, suite.backendEndpoints, tempurl.Alloc())
 		nodes[s.GetAddr()] = s
 		suite.cleanupFunc = append(suite.cleanupFunc, func() {
@@ -106,7 +107,7 @@ func (suite *memberTestSuite) TestMembers() {
 	re := suite.Require()
 	members, err := suite.pdClient.GetMicroServiceMembers(suite.ctx, "tso")
 	re.NoError(err)
-	re.Len(members, 3)
+	re.Len(members, constant.DefaultKeyspaceGroupReplicaCount)
 
 	members, err = suite.pdClient.GetMicroServiceMembers(suite.ctx, "scheduling")
 	re.NoError(err)
@@ -124,7 +125,7 @@ func (suite *memberTestSuite) TestPrimary() {
 	re.NotEmpty(primary)
 }
 
-func (suite *memberTestSuite) TestCampaignPrimaryWhileServerClose() {
+func (suite *memberTestSuite) TestPrimaryWorkWhileOtherServerClose() {
 	re := suite.Require()
 	primary, err := suite.pdClient.GetMicroServicePrimary(suite.ctx, "tso")
 	re.NoError(err)
@@ -143,20 +144,18 @@ func (suite *memberTestSuite) TestCampaignPrimaryWhileServerClose() {
 		primary, err := suite.pdClient.GetMicroServicePrimary(suite.ctx, service)
 		re.NoError(err)
 
-		// Close old and new primary to mock campaign primary
+		// Close non-primary node.
 		for _, member := range nodes {
 			if member.GetAddr() != primary {
 				nodes[member.Name()].Close()
-				break
 			}
 		}
-		nodes[primary].Close()
 		tests.WaitForPrimaryServing(re, nodes)
 
-		// primary should be different with before
-		onlyPrimary, err := suite.pdClient.GetMicroServicePrimary(suite.ctx, service)
+		// primary should be same with before.
+		curPrimary, err := suite.pdClient.GetMicroServicePrimary(suite.ctx, service)
 		re.NoError(err)
-		re.NotEqual(primary, onlyPrimary)
+		re.Equal(primary, curPrimary)
 	}
 }
 
@@ -270,15 +269,13 @@ func (suite *memberTestSuite) TestCampaignPrimaryAfterTransfer() {
 		re.NoError(err)
 		re.NotEqual(primary, newPrimary)
 
-		// Close old and new primary to mock campaign primary
-		nodes[primary].Close()
+		// Close primary to push other nodes campaign primary
 		nodes[newPrimary].Close()
 		tests.WaitForPrimaryServing(re, nodes)
 		// Primary should be different with before
-		onlyPrimary, err := suite.pdClient.GetMicroServicePrimary(suite.ctx, service)
+		anotherPrimary, err := suite.pdClient.GetMicroServicePrimary(suite.ctx, service)
 		re.NoError(err)
-		re.NotEqual(primary, onlyPrimary)
-		re.NotEqual(newPrimary, onlyPrimary)
+		re.NotEqual(newPrimary, anotherPrimary)
 	}
 }
 
