@@ -73,7 +73,7 @@ var (
 	ErrNotStarted                       = status.Errorf(codes.Unavailable, "server not started")
 	ErrSendHeartbeatTimeout             = status.Errorf(codes.DeadlineExceeded, "send heartbeat timeout")
 	ErrNotFoundTSOAddr                  = status.Errorf(codes.NotFound, "not found tso address")
-	ErrNotFoundSchedulingAddr           = status.Errorf(codes.NotFgiound, "not found scheduling address")
+	ErrNotFoundSchedulingAddr           = status.Errorf(codes.NotFound, "not found scheduling address")
 	ErrNotFoundService                  = status.Errorf(codes.NotFound, "not found service")
 	ErrForwardTSOTimeout                = status.Errorf(codes.DeadlineExceeded, "forward tso request timeout")
 	ErrMaxCountTSOProxyRoutinesExceeded = status.Errorf(codes.ResourceExhausted, "max count of concurrent tso proxy routines exceeded")
