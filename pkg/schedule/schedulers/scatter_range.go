@@ -27,7 +27,6 @@ import (
 	"github.com/tikv/pd/pkg/schedule/plan"
 	types "github.com/tikv/pd/pkg/schedule/type"
 	"github.com/tikv/pd/pkg/utils/apiutil"
-	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/unrolled/render"
 )
 
@@ -37,7 +36,6 @@ const (
 )
 
 type scatterRangeSchedulerConfig struct {
-	syncutil.RWMutex
 	schedulerConfig
 
 	RangeName string `json:"range-name"`
@@ -108,7 +106,7 @@ type scatterRangeScheduler struct {
 
 // newScatterRangeScheduler creates a scheduler that balances the distribution of leaders and regions that in the specified key range.
 func newScatterRangeScheduler(opController *operator.Controller, config *scatterRangeSchedulerConfig) Scheduler {
-	base := NewBaseScheduler(opController, types.ScatterRangeScheduler)
+	base := NewBaseScheduler(opController, types.ScatterRangeScheduler, config)
 
 	handler := newScatterRangeHandler(config)
 	scheduler := &scatterRangeScheduler{

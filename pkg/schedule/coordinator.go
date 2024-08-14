@@ -285,14 +285,14 @@ func (c *Coordinator) InitSchedulers(needRun bool) {
 			log.Error("the scheduler type not found", zap.String("scheduler-name", name), errs.ZapError(errs.ErrSchedulerNotFound))
 			continue
 		}
-		if cfg.Disable {
-			log.Info("skip create scheduler with independent configuration", zap.String("scheduler-name", name), zap.String("scheduler-type", cfg.Type), zap.Strings("scheduler-args", cfg.Args))
-			continue
-		}
 		s, err := schedulers.CreateScheduler(types.ConvertOldStrToType[cfg.Type], c.opController,
 			c.cluster.GetStorage(), schedulers.ConfigJSONDecoder([]byte(data)), c.schedulers.RemoveScheduler)
 		if err != nil {
 			log.Error("can not create scheduler with independent configuration", zap.String("scheduler-name", name), zap.Strings("scheduler-args", cfg.Args), errs.ZapError(err))
+			continue
+		}
+		if s.IsDisable() {
+			log.Info("skip create scheduler with independent configuration", zap.String("scheduler-name", name), zap.String("scheduler-type", cfg.Type), zap.Strings("scheduler-args", cfg.Args))
 			continue
 		}
 		if needRun {
@@ -313,19 +313,19 @@ func (c *Coordinator) InitSchedulers(needRun bool) {
 	// The old way to create the scheduler.
 	k := 0
 	for _, schedulerCfg := range scheduleCfg.Schedulers {
-		if schedulerCfg.Disable {
-			scheduleCfg.Schedulers[k] = schedulerCfg
-			k++
-			log.Info("skip create scheduler", zap.String("scheduler-type", schedulerCfg.Type), zap.Strings("scheduler-args", schedulerCfg.Args))
-			continue
-		}
-
 		tp := types.ConvertOldStrToType[schedulerCfg.Type]
 		s, err := schedulers.CreateScheduler(tp, c.opController,
 			c.cluster.GetStorage(), schedulers.ConfigSliceDecoder(tp, schedulerCfg.Args), c.schedulers.RemoveScheduler)
 		if err != nil {
 			log.Error("can not create scheduler", zap.Stringer("type", tp), zap.String("scheduler-type", schedulerCfg.Type),
 				zap.Strings("scheduler-args", schedulerCfg.Args), errs.ZapError(err))
+			continue
+		}
+
+		if s.IsDisable() {
+			scheduleCfg.Schedulers[k] = schedulerCfg
+			k++
+			log.Info("skip create scheduler", zap.String("scheduler-type", schedulerCfg.Type), zap.Strings("scheduler-args", schedulerCfg.Args))
 			continue
 		}
 

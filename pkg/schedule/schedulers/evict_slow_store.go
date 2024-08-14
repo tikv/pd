@@ -28,7 +28,6 @@ import (
 	"github.com/tikv/pd/pkg/schedule/plan"
 	types "github.com/tikv/pd/pkg/schedule/type"
 	"github.com/tikv/pd/pkg/utils/apiutil"
-	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/unrolled/render"
 	"go.uber.org/zap"
 )
@@ -42,8 +41,7 @@ const (
 )
 
 type evictSlowStoreSchedulerConfig struct {
-	syncutil.RWMutex
-	schedulerConfig
+	defaultSchedulerConfig
 
 	cluster *core.BasicCluster
 	// Last timestamp of the chosen slow store for eviction.
@@ -55,7 +53,7 @@ type evictSlowStoreSchedulerConfig struct {
 
 func initEvictSlowStoreSchedulerConfig() *evictSlowStoreSchedulerConfig {
 	return &evictSlowStoreSchedulerConfig{
-		schedulerConfig:        &baseSchedulerConfig{},
+		defaultSchedulerConfig: newBaseDefaultSchedulerConfig(),
 		lastSlowStoreCaptureTS: time.Time{},
 		RecoveryDurationGap:    defaultRecoveryDurationGap,
 		EvictedStores:          make([]uint64, 0),
@@ -220,8 +218,9 @@ func (s *evictSlowStoreScheduler) PrepareConfig(cluster sche.SchedulerCluster) e
 }
 
 // CleanConfig implements the Scheduler interface.
-func (s *evictSlowStoreScheduler) CleanConfig(cluster sche.SchedulerCluster) {
+func (s *evictSlowStoreScheduler) CleanConfig(cluster sche.SchedulerCluster) error {
 	s.cleanupEvictLeader(cluster)
+	return s.BaseScheduler.CleanConfig(cluster)
 }
 
 func (s *evictSlowStoreScheduler) prepareEvictLeader(cluster sche.SchedulerCluster, storeID uint64) error {
@@ -313,11 +312,26 @@ func (s *evictSlowStoreScheduler) Schedule(cluster sche.SchedulerCluster, _ bool
 	return s.schedulerEvictLeader(cluster), nil
 }
 
+// IsDiable implements the Scheduler interface.
+func (s *evictSlowStoreScheduler) IsDisable() bool {
+	s.conf.Lock()
+	defer s.conf.Unlock()
+	return s.conf.isDisable()
+}
+
+// SetDisable implements the Scheduler interface.
+func (s *evictSlowStoreScheduler) SetDisable(disable bool) {
+	s.conf.Lock()
+	defer s.conf.Unlock()
+	s.conf.setDisable(disable)
+	s.conf.save()
+}
+
 // newEvictSlowStoreScheduler creates a scheduler that detects and evicts slow stores.
 func newEvictSlowStoreScheduler(opController *operator.Controller, conf *evictSlowStoreSchedulerConfig) Scheduler {
 	handler := newEvictSlowStoreHandler(conf)
 	return &evictSlowStoreScheduler{
-		BaseScheduler: NewBaseScheduler(opController, types.EvictSlowStoreScheduler),
+		BaseScheduler: NewBaseScheduler(opController, types.EvictSlowStoreScheduler, conf),
 		conf:          conf,
 		handler:       handler,
 	}

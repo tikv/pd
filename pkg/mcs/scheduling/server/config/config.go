@@ -647,18 +647,6 @@ func (o *PersistConfig) SetMaxReplicas(replicas int) {
 	o.SetReplicationConfig(v)
 }
 
-// IsSchedulerDisabled returns if the scheduler is disabled.
-func (o *PersistConfig) IsSchedulerDisabled(tp types.CheckerSchedulerType) bool {
-	oldType := types.SchedulerTypeCompatibleMap[tp]
-	schedulers := o.GetScheduleConfig().Schedulers
-	for _, s := range schedulers {
-		if oldType == s.Type {
-			return s.Disable
-		}
-	}
-	return false
-}
-
 // SetPlacementRulesCacheEnabled sets if the placement rules cache is enabled.
 func (o *PersistConfig) SetPlacementRulesCacheEnabled(enabled bool) {
 	v := o.GetReplicationConfig().Clone()

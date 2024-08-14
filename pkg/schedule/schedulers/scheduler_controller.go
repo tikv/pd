@@ -143,8 +143,10 @@ func (c *Controller) AddSchedulerHandler(scheduler Scheduler, args ...string) er
 	defer c.Unlock()
 
 	name := scheduler.GetName()
-	if _, ok := c.schedulerHandlers[name]; ok {
+	if _, ok := c.schedulerHandlers[name]; ok && !scheduler.IsDisable() {
 		return errs.ErrSchedulerExisted.FastGenByArgs()
+	} else if ok && scheduler.IsDisable() {
+		scheduler.SetDisable(false)
 	}
 
 	c.schedulerHandlers[name] = scheduler
@@ -176,11 +178,6 @@ func (c *Controller) RemoveSchedulerHandler(name string) error {
 		return err
 	}
 
-	if err := c.storage.RemoveSchedulerConfig(name); err != nil {
-		log.Error("can not remove the scheduler config", errs.ZapError(err))
-		return err
-	}
-
 	s.(Scheduler).CleanConfig(c.cluster)
 	delete(c.schedulerHandlers, name)
 
@@ -192,8 +189,10 @@ func (c *Controller) AddScheduler(scheduler Scheduler, args ...string) error {
 	c.Lock()
 	defer c.Unlock()
 
-	if _, ok := c.schedulers[scheduler.GetName()]; ok {
+	if s, ok := c.schedulers[scheduler.GetName()]; ok && !s.IsDisable() {
 		return errs.ErrSchedulerExisted.FastGenByArgs()
+	} else if ok && scheduler.IsDisable() {
+		scheduler.SetDisable(false)
 	}
 
 	s := NewScheduleController(c.ctx, c.cluster, c.opController, scheduler)
@@ -231,11 +230,7 @@ func (c *Controller) RemoveScheduler(name string) error {
 		return err
 	}
 
-	if err := c.storage.RemoveSchedulerConfig(name); err != nil {
-		log.Error("can not remove the scheduler config", errs.ZapError(err))
-		return err
-	}
-
+	s.CleanConfig(c.cluster)
 	s.Stop()
 	schedulerStatusGauge.DeleteLabelValues(name, "allow")
 	delete(c.schedulers, name)
@@ -321,7 +316,7 @@ func (c *Controller) IsSchedulerDisabled(name string) (bool, error) {
 	if !ok {
 		return false, errs.ErrSchedulerNotFound.FastGenByArgs()
 	}
-	return c.cluster.GetSchedulerConfig().IsSchedulerDisabled(s.Scheduler.GetType()), nil
+	return s.IsDisable(), nil
 }
 
 // IsSchedulerExisted returns whether a scheduler is existed.

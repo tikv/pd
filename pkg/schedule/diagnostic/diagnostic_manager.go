@@ -48,8 +48,8 @@ func (d *Manager) GetDiagnosticResult(name string) (*schedulers.DiagnosticResult
 		res := &schedulers.DiagnosticResult{Name: name, Timestamp: ts, Status: schedulers.Disabled}
 		return res, nil
 	}
-	isDisabled := d.config.IsSchedulerDisabled(scheduler.Scheduler.GetType())
-	if isDisabled {
+
+	if scheduler.Scheduler.IsDisable() {
 		ts := uint64(time.Now().Unix())
 		res := &schedulers.DiagnosticResult{Name: name, Timestamp: ts, Status: schedulers.Disabled}
 		return res, nil

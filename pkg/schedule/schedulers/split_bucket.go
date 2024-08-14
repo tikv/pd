@@ -31,7 +31,6 @@ import (
 	types "github.com/tikv/pd/pkg/schedule/type"
 	"github.com/tikv/pd/pkg/statistics/buckets"
 	"github.com/tikv/pd/pkg/utils/reflectutil"
-	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/unrolled/render"
 )
 
@@ -52,7 +51,6 @@ func initSplitBucketConfig() *splitBucketSchedulerConfig {
 }
 
 type splitBucketSchedulerConfig struct {
-	syncutil.RWMutex
 	schedulerConfig
 	Degree     int    `json:"degree"`
 	SplitLimit uint64 `json:"split-limit"`
@@ -145,7 +143,7 @@ func newSplitBucketHandler(conf *splitBucketSchedulerConfig) http.Handler {
 }
 
 func newSplitBucketScheduler(opController *operator.Controller, conf *splitBucketSchedulerConfig) *splitBucketScheduler {
-	base := NewBaseScheduler(opController, types.SplitBucketScheduler)
+	base := NewBaseScheduler(opController, types.SplitBucketScheduler, conf)
 	handler := newSplitBucketHandler(conf)
 	ret := &splitBucketScheduler{
 		BaseScheduler: base,

@@ -33,7 +33,6 @@ import (
 	"github.com/tikv/pd/pkg/schedule/plan"
 	types "github.com/tikv/pd/pkg/schedule/type"
 	"github.com/tikv/pd/pkg/utils/reflectutil"
-	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/unrolled/render"
 	"go.uber.org/zap"
@@ -54,8 +53,7 @@ const (
 )
 
 type balanceLeaderSchedulerConfig struct {
-	syncutil.RWMutex
-	schedulerConfig
+	defaultSchedulerConfig
 
 	Ranges []core.KeyRange `json:"ranges"`
 	// Batch is used to generate multiple operators by one scheduling
@@ -166,7 +164,7 @@ type balanceLeaderScheduler struct {
 // each store balanced.
 func newBalanceLeaderScheduler(opController *operator.Controller, conf *balanceLeaderSchedulerConfig, options ...BalanceLeaderCreateOption) Scheduler {
 	s := &balanceLeaderScheduler{
-		BaseScheduler: NewBaseScheduler(opController, types.BalanceLeaderScheduler),
+		BaseScheduler: NewBaseScheduler(opController, types.BalanceLeaderScheduler, conf),
 		retryQuota:    newRetryQuota(),
 		conf:          conf,
 		handler:       newBalanceLeaderHandler(conf),
@@ -542,4 +540,19 @@ func (l *balanceLeaderScheduler) createOperator(solver *solver, collector *plan.
 	op.SetAdditionalInfo("sourceScore", strconv.FormatFloat(solver.sourceScore, 'f', 2, 64))
 	op.SetAdditionalInfo("targetScore", strconv.FormatFloat(solver.targetScore, 'f', 2, 64))
 	return op
+}
+
+// IsDiable implements the Scheduler interface.
+func (l *balanceLeaderScheduler) IsDisable() bool {
+	l.conf.RLock()
+	defer l.conf.RUnlock()
+	return l.conf.isDisable()
+}
+
+// SetDiable implements the Scheduler interface.
+func (l *balanceLeaderScheduler) SetDisable(disable bool) {
+	l.conf.RLock()
+	defer l.conf.RUnlock()
+	l.conf.setDisable(disable)
+	l.conf.save()
 }

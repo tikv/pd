@@ -35,6 +35,8 @@ const (
 )
 
 type randomMergeSchedulerConfig struct {
+	schedulerConfig
+
 	Ranges []core.KeyRange `json:"ranges"`
 	// TODO: When we prepare to use Ranges, we will need to implement the ReloadConfig function for this scheduler.
 }
@@ -47,7 +49,7 @@ type randomMergeScheduler struct {
 // newRandomMergeScheduler creates an admin scheduler that randomly picks two adjacent regions
 // then merges them.
 func newRandomMergeScheduler(opController *operator.Controller, conf *randomMergeSchedulerConfig) Scheduler {
-	base := NewBaseScheduler(opController, types.RandomMergeScheduler)
+	base := NewBaseScheduler(opController, types.RandomMergeScheduler, conf)
 	return &randomMergeScheduler{
 		BaseScheduler: base,
 		conf:          conf,

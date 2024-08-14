@@ -29,7 +29,6 @@ import (
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/statistics/utils"
 	"github.com/tikv/pd/pkg/utils/reflectutil"
-	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/unrolled/render"
@@ -58,7 +57,7 @@ var compatiblePrioritiesConfig = prioritiesConfig{
 // params about hot region.
 func initHotRegionScheduleConfig() *hotRegionSchedulerConfig {
 	cfg := &hotRegionSchedulerConfig{
-		schedulerConfig:        &baseSchedulerConfig{},
+		defaultSchedulerConfig: newBaseDefaultSchedulerConfig(),
 		MinHotByteRate:         100,
 		MinHotKeyRate:          10,
 		MinHotQueryRate:        10,
@@ -113,8 +112,7 @@ func (conf *hotRegionSchedulerConfig) getValidConf() *hotRegionSchedulerConfig {
 }
 
 type hotRegionSchedulerConfig struct {
-	syncutil.RWMutex
-	schedulerConfig
+	defaultSchedulerConfig
 
 	lastQuerySupported bool
 

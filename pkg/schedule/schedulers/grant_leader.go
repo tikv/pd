@@ -30,7 +30,6 @@ import (
 	"github.com/tikv/pd/pkg/schedule/plan"
 	types "github.com/tikv/pd/pkg/schedule/type"
 	"github.com/tikv/pd/pkg/utils/apiutil"
-	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/unrolled/render"
 	"go.uber.org/zap"
 )
@@ -41,7 +40,6 @@ const (
 )
 
 type grantLeaderSchedulerConfig struct {
-	syncutil.RWMutex
 	schedulerConfig
 
 	StoreIDWithRanges map[uint64][]core.KeyRange `json:"store-id-ranges"`
@@ -149,7 +147,7 @@ type grantLeaderScheduler struct {
 // newGrantLeaderScheduler creates an admin scheduler that transfers all leaders
 // to a store.
 func newGrantLeaderScheduler(opController *operator.Controller, conf *grantLeaderSchedulerConfig) Scheduler {
-	base := NewBaseScheduler(opController, types.GrantLeaderScheduler)
+	base := NewBaseScheduler(opController, types.GrantLeaderScheduler, conf)
 	handler := newGrantLeaderHandler(conf)
 	return &grantLeaderScheduler{
 		BaseScheduler: base,
@@ -195,12 +193,14 @@ func (s *grantLeaderScheduler) PrepareConfig(cluster sche.SchedulerCluster) erro
 }
 
 // CleanConfig implements the Scheduler interface.
-func (s *grantLeaderScheduler) CleanConfig(cluster sche.SchedulerCluster) {
+func (s *grantLeaderScheduler) CleanConfig(cluster sche.SchedulerCluster) error {
 	s.conf.RLock()
-	defer s.conf.RUnlock()
 	for id := range s.conf.StoreIDWithRanges {
 		cluster.ResumeLeaderTransfer(id)
 	}
+	// BaseScheduler.CleanConfig will also lock the config, so we need to unlock it first.
+	s.conf.RUnlock()
+	return s.BaseScheduler.CleanConfig(cluster)
 }
 
 // IsScheduleAllowed implements the Scheduler interface.

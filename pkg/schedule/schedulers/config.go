@@ -18,18 +18,28 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/pkg/utils/syncutil"
 )
 
 type schedulerConfig interface {
+	syncutil.RWMutexInterface
+
+	init(name string, storage endpoint.ConfigStorage, data any)
 	save() error
 	load(any) error
-	init(name string, storage endpoint.ConfigStorage, data any)
+	clean() error
+	// setArgs([]string)
+	// getArgs() []string
 }
 
 type baseSchedulerConfig struct {
+	syncutil.RWMutex
+
 	name    string
 	storage endpoint.ConfigStorage
 
+	// Args is the input arguments of the scheduler.
+	// Args []string `json:"args"`
 	// data is the config of the scheduler.
 	data any
 }
@@ -57,4 +67,53 @@ func (b *baseSchedulerConfig) load(v any) error {
 		return err
 	}
 	return DecodeConfig([]byte(data), v)
+}
+
+func (b *baseSchedulerConfig) clean() error {
+	return b.storage.RemoveSchedulerConfig(b.name)
+}
+
+// func (b *baseSchedulerConfig) setArgs(args []string) {
+// 	b.Args = args
+// }
+
+// func (b *baseSchedulerConfig) getArgs() []string {
+// 	return b.Args
+// }
+
+type defaultSchedulerConfig interface {
+	schedulerConfig
+
+	isDisable() bool
+	setDisable(bool)
+}
+
+type baseDefaultSchedulerConfig struct {
+	schedulerConfig
+
+	Disabled bool `json:"disabled"`
+}
+
+func newBaseDefaultSchedulerConfig() *baseDefaultSchedulerConfig {
+	return &baseDefaultSchedulerConfig{
+		schedulerConfig: &baseSchedulerConfig{},
+	}
+}
+
+func (b *baseDefaultSchedulerConfig) isDisable() bool {
+	b.load(b)
+	return b.Disabled
+}
+
+func (b *baseDefaultSchedulerConfig) setDisable(disabled bool) {
+	b.Lock()
+	defer b.Unlock()
+	b.Disabled = disabled
+}
+
+func (b *baseDefaultSchedulerConfig) clean() error {
+	b.Lock()
+	defer b.Unlock()
+	b.Disabled = false
+	return b.save()
 }

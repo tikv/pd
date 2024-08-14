@@ -855,11 +855,7 @@ func (h *Handler) GetSchedulerByStatus(status string, needTS bool) (any, error) 
 	case "disabled":
 		disabledSchedulers := make([]string, 0, len(schedulers))
 		for _, scheduler := range schedulers {
-			disabled, err := sc.IsSchedulerDisabled(scheduler)
-			if err != nil {
-				return nil, err
-			}
-			if disabled {
+			if sc.GetScheduler(scheduler).IsDisable() {
 				disabledSchedulers = append(disabledSchedulers, scheduler)
 			}
 		}
@@ -870,11 +866,7 @@ func (h *Handler) GetSchedulerByStatus(status string, needTS bool) (any, error) 
 		// We should not return the disabled schedulers here.
 		enabledSchedulers := make([]string, 0, len(schedulers))
 		for _, scheduler := range schedulers {
-			disabled, err := sc.IsSchedulerDisabled(scheduler)
-			if err != nil {
-				return nil, err
-			}
-			if !disabled {
+			if !sc.GetScheduler(scheduler).IsDisable() {
 				enabledSchedulers = append(enabledSchedulers, scheduler)
 			}
 		}

@@ -29,7 +29,6 @@ import (
 	"github.com/tikv/pd/pkg/schedule/plan"
 	types "github.com/tikv/pd/pkg/schedule/type"
 	"github.com/tikv/pd/pkg/utils/apiutil"
-	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/unrolled/render"
 	"go.uber.org/zap"
 )
@@ -52,7 +51,6 @@ type slowCandidate struct {
 }
 
 type evictSlowTrendSchedulerConfig struct {
-	syncutil.RWMutex
 	schedulerConfig
 
 	cluster *core.BasicCluster
@@ -322,8 +320,9 @@ func (s *evictSlowTrendScheduler) PrepareConfig(cluster sche.SchedulerCluster) e
 }
 
 // CleanConfig implements the Scheduler interface.
-func (s *evictSlowTrendScheduler) CleanConfig(cluster sche.SchedulerCluster) {
+func (s *evictSlowTrendScheduler) CleanConfig(cluster sche.SchedulerCluster) error {
 	s.cleanupEvictLeader(cluster)
+	return s.BaseScheduler.CleanConfig(cluster)
 }
 
 func (s *evictSlowTrendScheduler) prepareEvictLeader(cluster sche.SchedulerCluster, storeID uint64) error {
@@ -440,7 +439,7 @@ func (s *evictSlowTrendScheduler) Schedule(cluster sche.SchedulerCluster, _ bool
 func newEvictSlowTrendScheduler(opController *operator.Controller, conf *evictSlowTrendSchedulerConfig) Scheduler {
 	handler := newEvictSlowTrendHandler(conf)
 	sche := &evictSlowTrendScheduler{
-		BaseScheduler: NewBaseScheduler(opController, types.EvictSlowTrendScheduler),
+		BaseScheduler: NewBaseScheduler(opController, types.EvictSlowTrendScheduler, conf),
 		conf:          conf,
 		handler:       handler,
 	}

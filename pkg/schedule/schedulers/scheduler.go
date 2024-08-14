@@ -44,9 +44,17 @@ type Scheduler interface {
 	GetMinInterval() time.Duration
 	GetNextInterval(interval time.Duration) time.Duration
 	PrepareConfig(cluster sche.SchedulerCluster) error
-	CleanConfig(cluster sche.SchedulerCluster)
+	CleanConfig(cluster sche.SchedulerCluster) error
 	Schedule(cluster sche.SchedulerCluster, dryRun bool) ([]*operator.Operator, []plan.Plan)
 	IsScheduleAllowed(cluster sche.SchedulerCluster) bool
+	// IsDiable returns if the scheduler is disabled, it only works for default schedulers.
+	// - BalanceRegionScheduler
+	// - BalanceLeaderScheduler
+	// - BalanceHotRegionScheduler
+	// - EvictSlowStoreScheduler
+	IsDisable() bool
+	// SetDisable sets the scheduler's disable, it only works for default schedulers.
+	SetDisable(bool)
 }
 
 // EncodeConfig encode the custom config for each scheduler.

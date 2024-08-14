@@ -36,6 +36,8 @@ const (
 )
 
 type balanceRegionSchedulerConfig struct {
+	defaultSchedulerConfig
+
 	Ranges []core.KeyRange `json:"ranges"`
 	// TODO: When we prepare to use Ranges, we will need to implement the ReloadConfig function for this scheduler.
 }
@@ -53,7 +55,7 @@ type balanceRegionScheduler struct {
 // each store balanced.
 func newBalanceRegionScheduler(opController *operator.Controller, conf *balanceRegionSchedulerConfig, opts ...BalanceRegionCreateOption) Scheduler {
 	scheduler := &balanceRegionScheduler{
-		BaseScheduler: NewBaseScheduler(opController, types.BalanceRegionScheduler),
+		BaseScheduler: NewBaseScheduler(opController, types.BalanceRegionScheduler, conf),
 		retryQuota:    newRetryQuota(),
 		name:          types.BalanceRegionScheduler.String(),
 		conf:          conf,
@@ -270,4 +272,19 @@ func (s *balanceRegionScheduler) transferPeer(solver *solver, collector *plan.Co
 		solver.Step--
 	}
 	return nil
+}
+
+// IsDiable implements the Scheduler interface.
+func (s *balanceRegionScheduler) IsDisable() bool {
+	s.conf.Lock()
+	defer s.conf.Unlock()
+	return s.conf.isDisable()
+}
+
+// SetDiable implements the Scheduler interface.
+func (s *balanceRegionScheduler) SetDisable(disable bool) {
+	s.conf.Lock()
+	defer s.conf.Unlock()
+	s.conf.setDisable(disable)
+	s.conf.save()
 }

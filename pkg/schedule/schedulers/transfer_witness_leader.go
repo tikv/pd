@@ -47,7 +47,7 @@ type transferWitnessLeaderScheduler struct {
 // newTransferWitnessLeaderScheduler creates an admin scheduler that transfers witness leader of a region.
 func newTransferWitnessLeaderScheduler(opController *operator.Controller) Scheduler {
 	return &transferWitnessLeaderScheduler{
-		BaseScheduler: NewBaseScheduler(opController, types.TransferWitnessLeaderScheduler),
+		BaseScheduler: NewBaseScheduler(opController, types.TransferWitnessLeaderScheduler, nil),
 		regions:       make(chan *core.RegionInfo, transferWitnessLeaderRecvMaxRegionSize),
 	}
 }

@@ -49,6 +49,7 @@ func schedulersRegister() {
 			}
 			conf.Ranges = ranges
 			conf.Batch = BalanceLeaderBatchSize
+			// conf.setArgs(args)
 			return nil
 		}
 	})
@@ -56,7 +57,7 @@ func schedulersRegister() {
 	RegisterScheduler(types.BalanceLeaderScheduler, func(opController *operator.Controller,
 		storage endpoint.ConfigStorage, decoder ConfigDecoder, _ ...func(string) error) (Scheduler, error) {
 		conf := &balanceLeaderSchedulerConfig{
-			schedulerConfig: &baseSchedulerConfig{},
+			defaultSchedulerConfig: newBaseDefaultSchedulerConfig(),
 		}
 		if err := decoder(conf); err != nil {
 			return nil, err
@@ -81,17 +82,22 @@ func schedulersRegister() {
 				return err
 			}
 			conf.Ranges = ranges
+			// conf.setArgs(args)
 			return nil
 		}
 	})
 
 	RegisterScheduler(types.BalanceRegionScheduler, func(opController *operator.Controller,
-		_ endpoint.ConfigStorage, decoder ConfigDecoder, _ ...func(string) error) (Scheduler, error) {
-		conf := &balanceRegionSchedulerConfig{}
+		storage endpoint.ConfigStorage, decoder ConfigDecoder, _ ...func(string) error) (Scheduler, error) {
+		conf := &balanceRegionSchedulerConfig{
+			defaultSchedulerConfig: newBaseDefaultSchedulerConfig(),
+		}
 		if err := decoder(conf); err != nil {
 			return nil, err
 		}
-		return newBalanceRegionScheduler(opController, conf), nil
+		sche := newBalanceRegionScheduler(opController, conf)
+		conf.init(sche.GetName(), storage, conf)
+		return sche, nil
 	})
 
 	// balance witness
@@ -107,6 +113,7 @@ func schedulersRegister() {
 			}
 			conf.Ranges = ranges
 			conf.Batch = balanceWitnessBatchSize
+			// conf.setArgs(args)
 			return nil
 		}
 	})
@@ -149,6 +156,7 @@ func schedulersRegister() {
 			}
 			conf.StoreIDWithRanges[id] = ranges
 			conf.Batch = EvictLeaderBatchSize
+			// conf.setArgs(args)
 			return nil
 		}
 	})
@@ -215,6 +223,7 @@ func schedulersRegister() {
 			if !conf.setStore(leaderID, storeIDs) {
 				return errs.ErrSchedulerConfig
 			}
+			// conf.setArgs(args)
 			return nil
 		}
 	})
@@ -284,6 +293,7 @@ func schedulersRegister() {
 				return err
 			}
 			conf.StoreIDWithRanges[id] = ranges
+			// conf.setArgs(args)
 			return nil
 		}
 	})
@@ -316,17 +326,22 @@ func schedulersRegister() {
 				return err
 			}
 			conf.Ranges = ranges
+			// conf.setArgs(args)
 			return nil
 		}
 	})
 
 	RegisterScheduler(types.LabelScheduler, func(opController *operator.Controller,
-		_ endpoint.ConfigStorage, decoder ConfigDecoder, _ ...func(string) error) (Scheduler, error) {
-		conf := &labelSchedulerConfig{}
+		storage endpoint.ConfigStorage, decoder ConfigDecoder, _ ...func(string) error) (Scheduler, error) {
+		conf := &labelSchedulerConfig{
+			schedulerConfig: &baseSchedulerConfig{},
+		}
 		if err := decoder(conf); err != nil {
 			return nil, err
 		}
-		return newLabelScheduler(opController, conf), nil
+		sche := newLabelScheduler(opController, conf)
+		conf.init(sche.GetName(), storage, conf)
+		return sche, nil
 	})
 
 	// random merge
@@ -341,17 +356,22 @@ func schedulersRegister() {
 				return err
 			}
 			conf.Ranges = ranges
+			// conf.setArgs(args)
 			return nil
 		}
 	})
 
 	RegisterScheduler(types.RandomMergeScheduler, func(opController *operator.Controller,
-		_ endpoint.ConfigStorage, decoder ConfigDecoder, _ ...func(string) error) (Scheduler, error) {
-		conf := &randomMergeSchedulerConfig{}
+		storage endpoint.ConfigStorage, decoder ConfigDecoder, _ ...func(string) error) (Scheduler, error) {
+		conf := &randomMergeSchedulerConfig{
+			schedulerConfig: &baseSchedulerConfig{},
+		}
 		if err := decoder(conf); err != nil {
 			return nil, err
 		}
-		return newRandomMergeScheduler(opController, conf), nil
+		sche := newRandomMergeScheduler(opController, conf)
+		conf.init(sche.GetName(), storage, conf)
+		return sche, nil
 	})
 
 	// scatter range
@@ -371,6 +391,7 @@ func schedulersRegister() {
 			conf.StartKey = args[0]
 			conf.EndKey = args[1]
 			conf.RangeName = args[2]
+			// conf.setArgs(args)
 			return nil
 		}
 	})
@@ -407,6 +428,7 @@ func schedulersRegister() {
 				}
 				conf.Limit = limit
 			}
+			// conf.setArgs(args)
 			return nil
 		}
 	})
@@ -437,17 +459,22 @@ func schedulersRegister() {
 				return err
 			}
 			conf.Ranges = ranges
+			// conf.setArgs(args)
 			return nil
 		}
 	})
 
 	RegisterScheduler(types.ShuffleLeaderScheduler, func(opController *operator.Controller,
-		_ endpoint.ConfigStorage, decoder ConfigDecoder, _ ...func(string) error) (Scheduler, error) {
-		conf := &shuffleLeaderSchedulerConfig{}
+		storage endpoint.ConfigStorage, decoder ConfigDecoder, _ ...func(string) error) (Scheduler, error) {
+		conf := &shuffleLeaderSchedulerConfig{
+			schedulerConfig: &baseSchedulerConfig{},
+		}
 		if err := decoder(conf); err != nil {
 			return nil, err
 		}
-		return newShuffleLeaderScheduler(opController, conf), nil
+		sche := newShuffleLeaderScheduler(opController, conf)
+		conf.init(sche.GetName(), storage, conf)
+		return sche, nil
 	})
 
 	// shuffle region
@@ -463,6 +490,7 @@ func schedulersRegister() {
 			}
 			conf.Ranges = ranges
 			conf.Roles = allRoles
+			// conf.setArgs(args)
 			return nil
 		}
 	})

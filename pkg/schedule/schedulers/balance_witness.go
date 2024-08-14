@@ -34,7 +34,6 @@ import (
 	"github.com/tikv/pd/pkg/schedule/plan"
 	types "github.com/tikv/pd/pkg/schedule/type"
 	"github.com/tikv/pd/pkg/utils/reflectutil"
-	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/unrolled/render"
 	"go.uber.org/zap"
 )
@@ -51,7 +50,6 @@ const (
 )
 
 type balanceWitnessSchedulerConfig struct {
-	syncutil.RWMutex
 	schedulerConfig
 
 	Ranges []core.KeyRange `json:"ranges"`
@@ -164,7 +162,7 @@ type balanceWitnessScheduler struct {
 // each store balanced.
 func newBalanceWitnessScheduler(opController *operator.Controller, conf *balanceWitnessSchedulerConfig, options ...BalanceWitnessCreateOption) Scheduler {
 	s := &balanceWitnessScheduler{
-		BaseScheduler: NewBaseScheduler(opController, types.BalanceWitnessScheduler),
+		BaseScheduler: NewBaseScheduler(opController, types.BalanceWitnessScheduler, conf),
 		retryQuota:    newRetryQuota(),
 		conf:          conf,
 		handler:       newBalanceWitnessHandler(conf),

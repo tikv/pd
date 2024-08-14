@@ -45,7 +45,7 @@ func newShuffleRegionScheduler(opController *operator.Controller, conf *shuffleR
 		&filter.StoreStateFilter{ActionScope: ShuffleRegionName, MoveRegion: true, OperatorLevel: constant.Low},
 		filter.NewSpecialUseFilter(ShuffleRegionName),
 	}
-	base := NewBaseScheduler(opController, types.ShuffleRegionScheduler)
+	base := NewBaseScheduler(opController, types.ShuffleRegionScheduler, conf)
 	return &shuffleRegionScheduler{
 		BaseScheduler: base,
 		conf:          conf,

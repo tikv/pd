@@ -50,7 +50,6 @@ type SchedulerConfigProvider interface {
 	SetSchedulingAllowanceStatus(bool, string)
 	GetStoresLimit() map[uint64]StoreLimitConfig
 
-	IsSchedulerDisabled(types.CheckerSchedulerType) bool
 	AddSchedulerCfg(types.CheckerSchedulerType, []string)
 	RemoveSchedulerCfg(types.CheckerSchedulerType)
 	Persist(endpoint.ConfigStorage) error

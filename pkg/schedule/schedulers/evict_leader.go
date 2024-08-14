@@ -30,7 +30,6 @@ import (
 	"github.com/tikv/pd/pkg/schedule/plan"
 	types "github.com/tikv/pd/pkg/schedule/type"
 	"github.com/tikv/pd/pkg/utils/apiutil"
-	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/unrolled/render"
 	"go.uber.org/zap"
 )
@@ -45,7 +44,6 @@ const (
 )
 
 type evictLeaderSchedulerConfig struct {
-	syncutil.RWMutex
 	schedulerConfig
 
 	StoreIDWithRanges map[uint64][]core.KeyRange `json:"store-id-ranges"`
@@ -233,7 +231,7 @@ type evictLeaderScheduler struct {
 func newEvictLeaderScheduler(opController *operator.Controller, conf *evictLeaderSchedulerConfig) Scheduler {
 	handler := newEvictLeaderHandler(conf)
 	return &evictLeaderScheduler{
-		BaseScheduler: NewBaseScheduler(opController, types.EvictLeaderScheduler),
+		BaseScheduler: NewBaseScheduler(opController, types.EvictLeaderScheduler, conf),
 		conf:          conf,
 		handler:       handler,
 	}
@@ -265,8 +263,9 @@ func (s *evictLeaderScheduler) PrepareConfig(cluster sche.SchedulerCluster) erro
 }
 
 // CleanConfig implements the Scheduler interface.
-func (s *evictLeaderScheduler) CleanConfig(cluster sche.SchedulerCluster) {
+func (s *evictLeaderScheduler) CleanConfig(cluster sche.SchedulerCluster) error {
 	s.conf.resumeLeaderTransfer(cluster)
+	return s.BaseScheduler.CleanConfig(cluster)
 }
 
 // IsScheduleAllowed implements the Scheduler interface.

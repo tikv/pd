@@ -669,18 +669,6 @@ func (o *PersistOptions) GetSchedulers() sc.SchedulerConfigs {
 	return o.GetScheduleConfig().Schedulers
 }
 
-// IsSchedulerDisabled returns if the scheduler is disabled.
-func (o *PersistOptions) IsSchedulerDisabled(tp types.CheckerSchedulerType) bool {
-	oldType := types.SchedulerTypeCompatibleMap[tp]
-	schedulers := o.GetScheduleConfig().Schedulers
-	for _, s := range schedulers {
-		if oldType == s.Type {
-			return s.Disable
-		}
-	}
-	return false
-}
-
 // GetHotRegionsWriteInterval gets interval for PD to store Hot Region information.
 func (o *PersistOptions) GetHotRegionsWriteInterval() time.Duration {
 	return o.GetScheduleConfig().HotRegionsWriteInterval.Duration
@@ -703,6 +691,7 @@ func (o *PersistOptions) AddSchedulerCfg(tp types.CheckerSchedulerType, args []s
 			return
 		}
 
+		// TODO: remove this after sc.SchedulerConfig deprecate
 		if reflect.DeepEqual(schedulerCfg, sc.SchedulerConfig{Type: oldType, Args: args, Disable: true}) {
 			schedulerCfg.Disable = false
 			v.Schedulers[i] = schedulerCfg
@@ -721,6 +710,7 @@ func (o *PersistOptions) RemoveSchedulerCfg(tp types.CheckerSchedulerType) {
 	for i, schedulerCfg := range v.Schedulers {
 		if oldType == schedulerCfg.Type {
 			if sc.IsDefaultScheduler(oldType) {
+				// TODO: remove this after sc.SchedulerConfig deprecate
 				schedulerCfg.Disable = true
 				v.Schedulers[i] = schedulerCfg
 			} else {
