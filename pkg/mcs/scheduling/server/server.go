@@ -21,6 +21,7 @@ import (
 	"os"
 	"os/signal"
 	"runtime"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -130,6 +131,11 @@ func (s *Server) GetAdvertiseListenAddr() string {
 // GetBackendEndpoints returns the backend endpoints.
 func (s *Server) GetBackendEndpoints() string {
 	return s.cfg.BackendEndpoints
+}
+
+// GetParticipant returns the participant.
+func (s *Server) GetParticipant() *member.Participant {
+	return s.participant
 }
 
 // SetLogLevel sets log level.
@@ -242,6 +248,20 @@ func (s *Server) primaryElectionLoop() {
 			log.Info("the scheduling primary has changed, try to re-campaign a primary")
 		}
 
+		// To make sure the expected primary(if existed) and new primary are on the same server.
+		expectedPrimary := utils.GetExpectedPrimaryFlag(s.GetClient(), s.participant.GetLeaderPath())
+		// skip campaign the primary if the expected primary is not empty and not equal to the current memberValue.
+		// expected primary ONLY SET BY `{service}/primary/transfer` API.
+		if len(expectedPrimary) > 0 && !strings.Contains(s.participant.MemberValue(), expectedPrimary) {
+			log.Info("skip campaigning of scheduling primary and check later",
+				zap.String("server-name", s.Name()),
+				zap.String("expected-primary-id", expectedPrimary),
+				zap.Uint64("member-id", s.participant.ID()),
+				zap.String("cur-member-value", s.participant.MemberValue()))
+			time.Sleep(200 * time.Millisecond)
+			continue
+		}
+
 		s.campaignLeader()
 	}
 }
@@ -285,7 +305,17 @@ func (s *Server) campaignLeader() {
 			cb()
 		}
 	}()
+	// check expected primary and watch the primary.
+	exitPrimary := make(chan struct{})
+	lease, err := utils.KeepExpectedPrimaryAlive(ctx, s.GetClient(), exitPrimary,
+		s.cfg.LeaderLease, s.participant.GetLeaderPath(), s.participant.MemberValue(), constant.SchedulingServiceName)
+	if err != nil {
+		log.Error("prepare scheduling primary watch error", errs.ZapError(err))
+		return
+	}
+	s.participant.SetExpectedPrimaryLease(lease)
 	s.participant.EnableLeader()
+
 	member.ServiceMemberGauge.WithLabelValues(serviceName).Set(1)
 	log.Info("scheduling primary is ready to serve", zap.String("scheduling-primary-name", s.participant.Name()))
 
@@ -302,6 +332,9 @@ func (s *Server) campaignLeader() {
 		case <-ctx.Done():
 			// Server is closed and it should return nil.
 			log.Info("server is closed")
+			return
+		case <-exitPrimary:
+			log.Info("no longer be primary because primary have been updated, the scheduling primary will step down")
 			return
 		}
 	}

@@ -67,6 +67,8 @@ type Participant struct {
 	campaignChecker atomic.Value // Store as leadershipCheckFunc
 	// lastLeaderUpdatedTime is the last time when the leader is updated.
 	lastLeaderUpdatedTime atomic.Value
+	// expectedPrimaryLease is the expected lease for the primary.
+	expectedPrimaryLease atomic.Value // stored as *election.Lease
 }
 
 // NewParticipant create a new Participant.
@@ -372,6 +374,20 @@ func (m *Participant) campaignCheck() bool {
 // SetCampaignChecker sets the pre-campaign checker.
 func (m *Participant) SetCampaignChecker(checker leadershipCheckFunc) {
 	m.campaignChecker.Store(checker)
+}
+
+// SetExpectedPrimaryLease sets the expected lease for the primary.
+func (m *Participant) SetExpectedPrimaryLease(lease *election.Lease) {
+	m.expectedPrimaryLease.Store(lease)
+}
+
+// GetExpectedPrimaryLease gets the expected lease for the primary.
+func (m *Participant) GetExpectedPrimaryLease() *election.Lease {
+	l := m.expectedPrimaryLease.Load()
+	if l == nil {
+		return nil
+	}
+	return l.(*election.Lease)
 }
 
 // NewParticipantByService creates a new participant by service name.
