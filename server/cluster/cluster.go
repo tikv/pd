@@ -1667,9 +1667,12 @@ func (c *RaftCluster) checkStores() {
 		if c.IsPrepared() {
 			c.updateProgress(id, store.GetAddress(), removingAction, float64(regionSize), float64(regionSize), false /* dec */)
 		}
-		regionCount := c.GetStoreRegionCount(id)
 		// If the store is empty, it can be buried.
-		if regionCount == 0 {
+		needBury := c.GetStoreRegionCount(id) == 0
+		failpoint.Inject("DoNotBuryStore", func(_ failpoint.Value) {
+			needBury = false
+		})
+		if needBury {
 			if err := c.BuryStore(id, false); err != nil {
 				log.Error("bury store failed",
 					zap.Stringer("store", offlineStore),
