@@ -58,7 +58,7 @@ var compatiblePrioritiesConfig = prioritiesConfig{
 // params about hot region.
 func initHotRegionScheduleConfig() *hotRegionSchedulerConfig {
 	cfg := &hotRegionSchedulerConfig{
-		schedulerConfig:        &baseSchedulerConfig{},
+		defaultSchedulerConfig: newBaseDefaultSchedulerConfig(),
 		MinHotByteRate:         100,
 		MinHotKeyRate:          10,
 		MinHotQueryRate:        10,
@@ -114,7 +114,7 @@ func (conf *hotRegionSchedulerConfig) getValidConf() *hotRegionSchedulerConfig {
 
 type hotRegionSchedulerConfig struct {
 	syncutil.RWMutex
-	schedulerConfig
+	defaultSchedulerConfig
 
 	lastQuerySupported bool
 

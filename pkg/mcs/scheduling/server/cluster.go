@@ -28,7 +28,6 @@ import (
 	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/schedule/splitter"
 	types "github.com/tikv/pd/pkg/schedule/type"
-	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/statistics/buckets"
 	"github.com/tikv/pd/pkg/statistics/utils"
@@ -62,6 +61,27 @@ type Cluster struct {
 	miscRunner ratelimit.Runner
 	// logRunner is used to process the log asynchronously.
 	logRunner ratelimit.Runner
+
+	schedulerNotifier schedulerNotifier
+}
+
+type schedulerNotifier struct {
+	addNotifier    chan string
+	removeNotifier chan string
+}
+
+func (s *schedulerNotifier) addScheduler(name string) {
+	select {
+	case s.addNotifier <- name:
+	default:
+	}
+}
+
+func (s *schedulerNotifier) removeScheduler(name string) {
+	select {
+	case s.removeNotifier <- name:
+	default:
+	}
 }
 
 const (
@@ -258,9 +278,10 @@ func (c *Cluster) SwitchAPIServerLeader(new pdpb.PDClient) bool {
 	return c.apiServerLeader.CompareAndSwap(old, new)
 }
 
-func trySend(notifier chan struct{}) {
+// trySend try to send all default schedulers.
+func trySend(notifier chan string) {
 	select {
-	case notifier <- struct{}{}:
+	case notifier <- "":
 	// If the channel is not empty, it means the check is triggered.
 	default:
 	}
@@ -271,86 +292,104 @@ func (c *Cluster) updateScheduler() {
 	defer logutil.LogPanic()
 	defer c.wg.Done()
 
+	var (
+		schedulerName  string
+		addNotifier    = make(chan string, 1)
+		removeNotifier = make(chan string, 1)
+	)
+	c.schedulerNotifier = schedulerNotifier{
+		addNotifier:    addNotifier,
+		removeNotifier: removeNotifier,
+	}
 	// Make sure the coordinator has initialized all the existing schedulers.
 	c.waitSchedulersInitialized()
-	// Establish a notifier to listen the schedulers updating.
-	notifier := make(chan struct{}, 1)
+
 	// Make sure the check will be triggered once later.
 	trySend(notifier)
-	c.persistConfig.SetSchedulersUpdatingNotifier(notifier)
+
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 
+loop:
 	for {
+		retryOnNotRunning := func() {
+			if !c.running.Load() {
+				select {
+				case <-c.ctx.Done():
+					log.Info("cluster is closing, stop listening the schedulers updating notifier")
+					return
+				case <-ticker.C:
+					// retry
+					trySend(notifier)
+					continue loop
+				}
+			}
+		}
 		select {
 		case <-c.ctx.Done():
 			log.Info("cluster is closing, stop listening the schedulers updating notifier")
 			return
-		case <-notifier:
+		case schedulerName = <-addNotifier:
+			retryOnNotRunning()
 			// This is triggered by the watcher when the schedulers are updated.
-		}
-
-		if !c.running.Load() {
-			select {
-			case <-c.ctx.Done():
-				log.Info("cluster is closing, stop listening the schedulers updating notifier")
-				return
-			case <-ticker.C:
-				// retry
-				trySend(notifier)
-				continue
-			}
+		case schedulerName = <-removeNotifier:
 		}
 
 		log.Info("schedulers updating notifier is triggered, try to update the scheduler")
-		var (
-			schedulersController   = c.coordinator.GetSchedulersController()
-			latestSchedulersConfig = c.persistConfig.GetScheduleConfig().Schedulers
-		)
-		// Create the newly added schedulers.
-		for _, scheduler := range latestSchedulersConfig {
-			schedulerType := types.ConvertOldStrToType[scheduler.Type]
-			s, err := schedulers.CreateScheduler(
-				schedulerType,
-				c.coordinator.GetOperatorController(),
-				c.storage,
-				schedulers.ConfigSliceDecoder(schedulerType, scheduler.Args),
-				schedulersController.RemoveScheduler,
-			)
-			if err != nil {
-				log.Error("failed to create scheduler",
-					zap.String("scheduler-type", scheduler.Type),
-					zap.Strings("scheduler-args", scheduler.Args),
-					errs.ZapError(err))
-				continue
-			}
-			name := s.GetName()
-			if existed, _ := schedulersController.IsSchedulerExisted(name); existed {
-				log.Info("scheduler has already existed, skip adding it",
-					zap.String("scheduler-name", name),
-					zap.Strings("scheduler-args", scheduler.Args))
-				continue
-			}
-			if err := schedulersController.AddScheduler(s, scheduler.Args...); err != nil {
-				log.Error("failed to add scheduler",
-					zap.String("scheduler-name", name),
-					zap.Strings("scheduler-args", scheduler.Args),
-					errs.ZapError(err))
-				continue
-			}
-			log.Info("add scheduler successfully",
-				zap.String("scheduler-name", name),
-				zap.Strings("scheduler-args", scheduler.Args))
+		type schedulerConfig struct {
+			Args    []string `json:"args"`
+			Disable bool     `json:"disable"`
 		}
+		var (
+			schedulersController = c.coordinator.GetSchedulersController()
+		)
+
+		// Create the newly added schedulers.
+		schedulerType := types.ConvertOldStrToType[schedulerName]
+		cfg, err := c.storage.LoadSchedulerConfig(schedulerName)
+		if err != nil {
+			log.Error("failed to load scheduler config",
+				zap.String("scheduler-name", schedulerName),
+				errs.ZapError(err))
+			continue
+		}
+
+		s, err := schedulers.CreateScheduler(
+			schedulerType,
+			c.coordinator.GetOperatorController(),
+			c.storage,
+			schedulers.ConfigJSONDecoder([]byte(cfg)),
+			schedulersController.RemoveScheduler,
+		)
+		if err != nil {
+			log.Error("failed to create scheduler",
+				zap.Stringer("scheduler-type", schedulerType),
+				zap.String("scheduler-cfg", cfg),
+				errs.ZapError(err))
+			continue
+		}
+		name := s.GetName()
+		if existed, _ := schedulersController.IsSchedulerExisted(name); existed {
+			log.Info("scheduler has already existed, skip adding it",
+				zap.String("scheduler-name", name),
+				zap.String("scheduler-cfg", cfg))
+			continue
+		}
+		if err := schedulersController.AddScheduler(s); err != nil {
+			log.Error("failed to add scheduler",
+				zap.String("scheduler-name", name),
+				zap.String("scheduler-cfg", cfg),
+				errs.ZapError(err))
+			continue
+		}
+		log.Info("add scheduler successfully",
+			zap.String("scheduler-name", name),
+			zap.String("scheduler-cfg", cfg))
+
 		// Remove the deleted schedulers.
 		for _, name := range schedulersController.GetSchedulerNames() {
 			scheduler := schedulersController.GetScheduler(name)
 			oldType := types.SchedulerTypeCompatibleMap[scheduler.GetType()]
-			if slice.AnyOf(latestSchedulersConfig, func(i int) bool {
-				return latestSchedulersConfig[i].Type == oldType
-			}) {
-				continue
-			}
 			if err := schedulersController.RemoveScheduler(name); err != nil {
 				log.Error("failed to remove scheduler",
 					zap.String("scheduler-name", name),

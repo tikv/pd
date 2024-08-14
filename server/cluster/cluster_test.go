@@ -334,7 +334,7 @@ func addEvictLeaderScheduler(cluster *RaftCluster, storeID uint64) (evictSchedul
 	if err != nil {
 		return
 	}
-	if err = cluster.AddScheduler(evictScheduler, args...); err != nil {
+	if err = cluster.AddScheduler(evictScheduler); err != nil {
 		return
 	} else if err = cluster.opt.Persist(cluster.GetStorage()); err != nil {
 		return

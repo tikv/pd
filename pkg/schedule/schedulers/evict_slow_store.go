@@ -43,7 +43,7 @@ const (
 
 type evictSlowStoreSchedulerConfig struct {
 	syncutil.RWMutex
-	schedulerConfig
+	defaultSchedulerConfig
 
 	cluster *core.BasicCluster
 	// Last timestamp of the chosen slow store for eviction.
@@ -55,7 +55,7 @@ type evictSlowStoreSchedulerConfig struct {
 
 func initEvictSlowStoreSchedulerConfig() *evictSlowStoreSchedulerConfig {
 	return &evictSlowStoreSchedulerConfig{
-		schedulerConfig:        &baseSchedulerConfig{},
+		defaultSchedulerConfig: newBaseDefaultSchedulerConfig(),
 		lastSlowStoreCaptureTS: time.Time{},
 		RecoveryDurationGap:    defaultRecoveryDurationGap,
 		EvictedStores:          make([]uint64, 0),
@@ -311,6 +311,21 @@ func (s *evictSlowStoreScheduler) Schedule(cluster sche.SchedulerCluster, _ bool
 		return nil, nil
 	}
 	return s.schedulerEvictLeader(cluster), nil
+}
+
+// IsDiable implements the Scheduler interface.
+func (s *evictSlowStoreScheduler) IsDisable() bool {
+	s.conf.Lock()
+	defer s.conf.Unlock()
+	return s.conf.isDisable()
+}
+
+// SetDisable implements the Scheduler interface.
+func (s *evictSlowStoreScheduler) SetDisable(disable bool) {
+	s.conf.Lock()
+	defer s.conf.Unlock()
+	s.conf.setDisable(disable)
+	s.conf.save()
 }
 
 // newEvictSlowStoreScheduler creates a scheduler that detects and evicts slow stores.

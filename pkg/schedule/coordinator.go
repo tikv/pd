@@ -20,13 +20,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/schedule/checker"
-	sc "github.com/tikv/pd/pkg/schedule/config"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/diagnostic"
 	"github.com/tikv/pd/pkg/schedule/hbstream"
@@ -194,7 +192,7 @@ func (c *Coordinator) driveSlowNodeScheduler() {
 					s, err := schedulers.CreateScheduler(typ, c.opController, c.cluster.GetStorage(), schedulers.ConfigSliceDecoder(typ, args), c.schedulers.RemoveScheduler)
 					if err != nil {
 						log.Warn("initializing evict-slow-trend scheduler failed", errs.ZapError(err))
-					} else if err = c.schedulers.AddScheduler(s, args...); err != nil {
+					} else if err = c.schedulers.AddScheduler(s); err != nil {
 						log.Error("can not add scheduler", zap.String("scheduler-name", s.GetName()), zap.Strings("scheduler-args", args), errs.ZapError(err))
 					}
 				}
@@ -269,96 +267,29 @@ func (c *Coordinator) InitSchedulers(needRun bool) {
 	if err != nil {
 		log.Fatal("cannot load schedulers' config", errs.ZapError(err))
 	}
-	scheduleCfg := c.cluster.GetSchedulerConfig().GetScheduleConfig().Clone()
-	// The new way to create scheduler with the independent configuration.
+
 	for i, name := range scheduleNames {
 		data := configs[i]
 		typ := schedulers.FindSchedulerTypeByName(name)
-		var cfg sc.SchedulerConfig
-		for _, c := range scheduleCfg.Schedulers {
-			if c.Type == types.SchedulerTypeCompatibleMap[typ] {
-				cfg = c
-				break
-			}
-		}
-		if len(cfg.Type) == 0 {
-			log.Error("the scheduler type not found", zap.String("scheduler-name", name), errs.ZapError(errs.ErrSchedulerNotFound))
-			continue
-		}
-		if cfg.Disable {
-			log.Info("skip create scheduler with independent configuration", zap.String("scheduler-name", name), zap.String("scheduler-type", cfg.Type), zap.Strings("scheduler-args", cfg.Args))
-			continue
-		}
-		s, err := schedulers.CreateScheduler(types.ConvertOldStrToType[cfg.Type], c.opController,
-			c.cluster.GetStorage(), schedulers.ConfigJSONDecoder([]byte(data)), c.schedulers.RemoveScheduler)
+
+		s, err := schedulers.CreateScheduler(typ, c.opController, c.cluster.GetStorage(),
+			schedulers.ConfigJSONDecoder([]byte(data)), c.schedulers.RemoveScheduler)
 		if err != nil {
-			log.Error("can not create scheduler with independent configuration", zap.String("scheduler-name", name), zap.Strings("scheduler-args", cfg.Args), errs.ZapError(err))
+			log.Error("can not create scheduler", zap.String("scheduler-name", name), errs.ZapError(err))
 			continue
 		}
 		if needRun {
-			log.Info("create scheduler with independent configuration", zap.String("scheduler-name", s.GetName()))
 			if err = c.schedulers.AddScheduler(s); err != nil {
-				log.Error("can not add scheduler with independent configuration",
-					zap.String("scheduler-name", s.GetName()), zap.Strings("scheduler-args", cfg.Args), errs.ZapError(err))
+				log.Error("can not add scheduler",
+					zap.String("scheduler-name", s.GetName()), errs.ZapError(err))
 			}
 		} else {
-			log.Info("create scheduler handler with independent configuration", zap.String("scheduler-name", s.GetName()))
 			if err = c.schedulers.AddSchedulerHandler(s); err != nil {
-				log.Error("can not add scheduler handler with independent configuration",
-					zap.String("scheduler-name", s.GetName()), zap.Strings("scheduler-args", cfg.Args), errs.ZapError(err))
+				log.Error("can not add scheduler handler",
+					zap.String("scheduler-name", s.GetName()), errs.ZapError(err))
 			}
 		}
 	}
-
-	// The old way to create the scheduler.
-	k := 0
-	for _, schedulerCfg := range scheduleCfg.Schedulers {
-		if schedulerCfg.Disable {
-			scheduleCfg.Schedulers[k] = schedulerCfg
-			k++
-			log.Info("skip create scheduler", zap.String("scheduler-type", schedulerCfg.Type), zap.Strings("scheduler-args", schedulerCfg.Args))
-			continue
-		}
-
-		tp := types.ConvertOldStrToType[schedulerCfg.Type]
-		s, err := schedulers.CreateScheduler(tp, c.opController,
-			c.cluster.GetStorage(), schedulers.ConfigSliceDecoder(tp, schedulerCfg.Args), c.schedulers.RemoveScheduler)
-		if err != nil {
-			log.Error("can not create scheduler", zap.Stringer("type", tp), zap.String("scheduler-type", schedulerCfg.Type),
-				zap.Strings("scheduler-args", schedulerCfg.Args), errs.ZapError(err))
-			continue
-		}
-
-		if needRun {
-			log.Info("create scheduler", zap.String("scheduler-name", s.GetName()),
-				zap.Strings("scheduler-args", schedulerCfg.Args))
-			if err = c.schedulers.AddScheduler(s, schedulerCfg.Args...); err != nil &&
-				!errors.ErrorEqual(err, errs.ErrSchedulerExisted.FastGenByArgs()) {
-				log.Error("can not add scheduler", zap.String("scheduler-name",
-					s.GetName()), zap.Strings("scheduler-args", schedulerCfg.Args), errs.ZapError(err))
-			} else {
-				// Only records the valid scheduler config.
-				scheduleCfg.Schedulers[k] = schedulerCfg
-				k++
-			}
-		} else {
-			log.Info("create scheduler handler", zap.String("scheduler-name", s.GetName()), zap.Strings("scheduler-args", schedulerCfg.Args))
-			if err = c.schedulers.AddSchedulerHandler(s, schedulerCfg.Args...); err != nil && !errors.ErrorEqual(err, errs.ErrSchedulerExisted.FastGenByArgs()) {
-				log.Error("can not add scheduler handler", zap.String("scheduler-name", s.GetName()), zap.Strings("scheduler-args", schedulerCfg.Args), errs.ZapError(err))
-			} else {
-				scheduleCfg.Schedulers[k] = schedulerCfg
-				k++
-			}
-		}
-	}
-
-	// Removes the invalid scheduler config and persist.
-	scheduleCfg.Schedulers = scheduleCfg.Schedulers[:k]
-	c.cluster.GetSchedulerConfig().SetScheduleConfig(scheduleCfg)
-	if err := c.cluster.GetSchedulerConfig().Persist(c.cluster.GetStorage()); err != nil {
-		log.Error("cannot persist schedule config", errs.ZapError(err))
-	}
-	log.Info("scheduler config is updated", zap.Reflect("scheduler-config", scheduleCfg.Schedulers))
 
 	c.markSchedulersInitialized()
 }

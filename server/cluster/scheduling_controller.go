@@ -376,10 +376,10 @@ func (sc *schedulingController) RemoveSchedulerHandler(name string) error {
 }
 
 // AddScheduler adds a scheduler.
-func (sc *schedulingController) AddScheduler(scheduler schedulers.Scheduler, args ...string) error {
+func (sc *schedulingController) AddScheduler(scheduler schedulers.Scheduler) error {
 	sc.mu.RLock()
 	defer sc.mu.RUnlock()
-	return sc.coordinator.GetSchedulersController().AddScheduler(scheduler, args...)
+	return sc.coordinator.GetSchedulersController().AddScheduler(scheduler)
 }
 
 // RemoveScheduler removes a scheduler.

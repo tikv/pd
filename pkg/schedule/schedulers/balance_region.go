@@ -27,6 +27,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
 	types "github.com/tikv/pd/pkg/schedule/type"
+	"github.com/tikv/pd/pkg/utils/syncutil"
 	"go.uber.org/zap"
 )
 
@@ -36,6 +37,9 @@ const (
 )
 
 type balanceRegionSchedulerConfig struct {
+	syncutil.RWMutex
+	defaultSchedulerConfig
+
 	Ranges []core.KeyRange `json:"ranges"`
 	// TODO: When we prepare to use Ranges, we will need to implement the ReloadConfig function for this scheduler.
 }
@@ -270,4 +274,19 @@ func (s *balanceRegionScheduler) transferPeer(solver *solver, collector *plan.Co
 		solver.Step--
 	}
 	return nil
+}
+
+// IsDiable implements the Scheduler interface.
+func (s *balanceRegionScheduler) IsDisable() bool {
+	s.conf.Lock()
+	defer s.conf.Unlock()
+	return s.conf.isDisable()
+}
+
+// SetDiable implements the Scheduler interface.
+func (s *balanceRegionScheduler) SetDisable(disable bool) {
+	s.conf.Lock()
+	defer s.conf.Unlock()
+	s.conf.setDisable(disable)
+	s.conf.save()
 }

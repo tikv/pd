@@ -18,7 +18,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"reflect"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -230,9 +229,6 @@ type PersistConfig struct {
 	schedule       atomic.Value
 	replication    atomic.Value
 	storeConfig    atomic.Value
-	// schedulersUpdatingNotifier is used to notify that the schedulers have been updated.
-	// Store as `chan<- struct{}`.
-	schedulersUpdatingNotifier atomic.Value
 }
 
 // NewPersistConfig creates a new PersistConfig instance.
@@ -246,27 +242,6 @@ func NewPersistConfig(cfg *Config, ttl *cache.TTLString) *PersistConfig {
 	o.storeConfig.Store(&sc.StoreConfig{})
 	o.ttl = ttl
 	return o
-}
-
-// SetSchedulersUpdatingNotifier sets the schedulers updating notifier.
-func (o *PersistConfig) SetSchedulersUpdatingNotifier(notifier chan<- struct{}) {
-	o.schedulersUpdatingNotifier.Store(notifier)
-}
-
-func (o *PersistConfig) getSchedulersUpdatingNotifier() chan<- struct{} {
-	v := o.schedulersUpdatingNotifier.Load()
-	if v == nil {
-		return nil
-	}
-	return v.(chan<- struct{})
-}
-
-func (o *PersistConfig) tryNotifySchedulersUpdating() {
-	notifier := o.getSchedulersUpdatingNotifier()
-	if notifier == nil {
-		return
-	}
-	notifier <- struct{}{}
 }
 
 // GetClusterVersion returns the cluster version.
@@ -286,25 +261,7 @@ func (o *PersistConfig) GetScheduleConfig() *sc.ScheduleConfig {
 
 // SetScheduleConfig sets the scheduling configuration dynamically.
 func (o *PersistConfig) SetScheduleConfig(cfg *sc.ScheduleConfig) {
-	old := o.GetScheduleConfig()
 	o.schedule.Store(cfg)
-	// The coordinator is not aware of the underlying scheduler config changes,
-	// we should notify it to update the schedulers proactively.
-	if !reflect.DeepEqual(old.Schedulers, cfg.Schedulers) {
-		o.tryNotifySchedulersUpdating()
-	}
-}
-
-// AdjustScheduleCfg adjusts the schedule config during the initialization.
-func AdjustScheduleCfg(scheduleCfg *sc.ScheduleConfig) {
-	// In case we add new default schedulers.
-	for _, ps := range sc.DefaultSchedulers {
-		if slice.NoneOf(scheduleCfg.Schedulers, func(i int) bool {
-			return scheduleCfg.Schedulers[i].Type == ps.Type
-		}) {
-			scheduleCfg.Schedulers = append(scheduleCfg.Schedulers, ps)
-		}
-	}
 }
 
 // GetReplicationConfig returns replication configurations.
@@ -645,18 +602,6 @@ func (o *PersistConfig) SetMaxReplicas(replicas int) {
 	v := o.GetReplicationConfig().Clone()
 	v.MaxReplicas = uint64(replicas)
 	o.SetReplicationConfig(v)
-}
-
-// IsSchedulerDisabled returns if the scheduler is disabled.
-func (o *PersistConfig) IsSchedulerDisabled(tp types.CheckerSchedulerType) bool {
-	oldType := types.SchedulerTypeCompatibleMap[tp]
-	schedulers := o.GetScheduleConfig().Schedulers
-	for _, s := range schedulers {
-		if oldType == s.Type {
-			return s.Disable
-		}
-	}
-	return false
 }
 
 // SetPlacementRulesCacheEnabled sets if the placement rules cache is enabled.

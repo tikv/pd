@@ -145,3 +145,9 @@ var (
 		"label-scheduler":                   LabelScheduler,
 	}
 )
+
+// SchedulerNameToType converts the scheduler name to the CheckerSchedulerType.
+func SchedulerNameToType(name string) CheckerSchedulerType {
+	// TODO: implement the special case for `scatter-range-scheduler`
+	return StringToSchedulerType[name]
+}

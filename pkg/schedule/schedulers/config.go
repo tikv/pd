@@ -21,15 +21,19 @@ import (
 )
 
 type schedulerConfig interface {
+	init(name string, storage endpoint.ConfigStorage, data any)
 	save() error
 	load(any) error
-	init(name string, storage endpoint.ConfigStorage, data any)
+	setArgs([]string)
+	getArgs() []string
 }
 
 type baseSchedulerConfig struct {
 	name    string
 	storage endpoint.ConfigStorage
 
+	// Args is the input arguments of the scheduler.
+	Args []string `json:"args"`
 	// data is the config of the scheduler.
 	data any
 }
@@ -57,4 +61,39 @@ func (b *baseSchedulerConfig) load(v any) error {
 		return err
 	}
 	return DecodeConfig([]byte(data), v)
+}
+
+func (b *baseSchedulerConfig) setArgs(args []string) {
+	b.Args = args
+}
+
+func (b *baseSchedulerConfig) getArgs() []string {
+	return b.Args
+}
+
+type defaultSchedulerConfig interface {
+	schedulerConfig
+
+	isDisable() bool
+	setDisable(bool)
+}
+
+type baseDefaultSchedulerConfig struct {
+	schedulerConfig
+
+	Disabled bool `json:"disabled"`
+}
+
+func newBaseDefaultSchedulerConfig() *baseDefaultSchedulerConfig {
+	return &baseDefaultSchedulerConfig{
+		schedulerConfig: &baseSchedulerConfig{},
+	}
+}
+
+func (b *baseDefaultSchedulerConfig) isDisable() bool {
+	return b.Disabled
+}
+
+func (b *baseDefaultSchedulerConfig) setDisable(disabled bool) {
+	b.Disabled = disabled
 }

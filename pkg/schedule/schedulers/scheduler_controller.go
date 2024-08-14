@@ -143,7 +143,7 @@ func (c *Controller) AddSchedulerHandler(scheduler Scheduler, args ...string) er
 	defer c.Unlock()
 
 	name := scheduler.GetName()
-	if _, ok := c.schedulerHandlers[name]; ok {
+	if _, ok := c.schedulerHandlers[name]; ok && !scheduler.IsDisable() {
 		return errs.ErrSchedulerExisted.FastGenByArgs()
 	}
 
@@ -152,7 +152,6 @@ func (c *Controller) AddSchedulerHandler(scheduler Scheduler, args ...string) er
 		log.Error("can not save HTTP scheduler config", zap.String("scheduler-name", scheduler.GetName()), errs.ZapError(err))
 		return err
 	}
-	c.cluster.GetSchedulerConfig().AddSchedulerCfg(scheduler.GetType(), args)
 	err := scheduler.PrepareConfig(c.cluster)
 	return err
 }
@@ -169,13 +168,6 @@ func (c *Controller) RemoveSchedulerHandler(name string) error {
 		return errs.ErrSchedulerNotFound.FastGenByArgs()
 	}
 
-	conf := c.cluster.GetSchedulerConfig()
-	conf.RemoveSchedulerCfg(s.(Scheduler).GetType())
-	if err := conf.Persist(c.storage); err != nil {
-		log.Error("the option can not persist scheduler config", errs.ZapError(err))
-		return err
-	}
-
 	if err := c.storage.RemoveSchedulerConfig(name); err != nil {
 		log.Error("can not remove the scheduler config", errs.ZapError(err))
 		return err
@@ -188,11 +180,11 @@ func (c *Controller) RemoveSchedulerHandler(name string) error {
 }
 
 // AddScheduler adds a scheduler.
-func (c *Controller) AddScheduler(scheduler Scheduler, args ...string) error {
+func (c *Controller) AddScheduler(scheduler Scheduler) error {
 	c.Lock()
 	defer c.Unlock()
 
-	if _, ok := c.schedulers[scheduler.GetName()]; ok {
+	if s, ok := c.schedulers[scheduler.GetName()]; ok && !s.IsDisable() {
 		return errs.ErrSchedulerExisted.FastGenByArgs()
 	}
 
@@ -208,7 +200,6 @@ func (c *Controller) AddScheduler(scheduler Scheduler, args ...string) error {
 		log.Error("can not save scheduler config", zap.String("scheduler-name", scheduler.GetName()), errs.ZapError(err))
 		return err
 	}
-	c.cluster.GetSchedulerConfig().AddSchedulerCfg(s.Scheduler.GetType(), args)
 	return nil
 }
 
@@ -222,13 +213,6 @@ func (c *Controller) RemoveScheduler(name string) error {
 	s, ok := c.schedulers[name]
 	if !ok {
 		return errs.ErrSchedulerNotFound.FastGenByArgs()
-	}
-
-	conf := c.cluster.GetSchedulerConfig()
-	conf.RemoveSchedulerCfg(s.Scheduler.GetType())
-	if err := conf.Persist(c.storage); err != nil {
-		log.Error("the option can not persist scheduler config", errs.ZapError(err))
-		return err
 	}
 
 	if err := c.storage.RemoveSchedulerConfig(name); err != nil {
@@ -321,7 +305,7 @@ func (c *Controller) IsSchedulerDisabled(name string) (bool, error) {
 	if !ok {
 		return false, errs.ErrSchedulerNotFound.FastGenByArgs()
 	}
-	return c.cluster.GetSchedulerConfig().IsSchedulerDisabled(s.Scheduler.GetType()), nil
+	return s.IsDisable(), nil
 }
 
 // IsSchedulerExisted returns whether a scheduler is existed.

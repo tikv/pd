@@ -211,7 +211,7 @@ func (h *Handler) AddScheduler(tp types.CheckerSchedulerType, args ...string) er
 		}
 		log.Info("add scheduler handler successfully", zap.String("scheduler-name", s.GetName()), zap.Strings("scheduler-args", args))
 	} else {
-		if err = c.AddScheduler(s, args...); err != nil {
+		if err = c.AddScheduler(s); err != nil {
 			log.Error("can not add scheduler", zap.String("scheduler-name", s.GetName()), zap.Strings("scheduler-args", args), errs.ZapError(err))
 			return err
 		}

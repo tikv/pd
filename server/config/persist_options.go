@@ -17,7 +17,6 @@ package config
 import (
 	"context"
 	"fmt"
-	"reflect"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -33,8 +32,6 @@ import (
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/core/storelimit"
 	sc "github.com/tikv/pd/pkg/schedule/config"
-	types "github.com/tikv/pd/pkg/schedule/type"
-	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
@@ -669,18 +666,6 @@ func (o *PersistOptions) GetSchedulers() sc.SchedulerConfigs {
 	return o.GetScheduleConfig().Schedulers
 }
 
-// IsSchedulerDisabled returns if the scheduler is disabled.
-func (o *PersistOptions) IsSchedulerDisabled(tp types.CheckerSchedulerType) bool {
-	oldType := types.SchedulerTypeCompatibleMap[tp]
-	schedulers := o.GetScheduleConfig().Schedulers
-	for _, s := range schedulers {
-		if oldType == s.Type {
-			return s.Disable
-		}
-	}
-	return false
-}
-
 // GetHotRegionsWriteInterval gets interval for PD to store Hot Region information.
 func (o *PersistOptions) GetHotRegionsWriteInterval() time.Duration {
 	return o.GetScheduleConfig().HotRegionsWriteInterval.Duration
@@ -689,47 +674,6 @@ func (o *PersistOptions) GetHotRegionsWriteInterval() time.Duration {
 // GetHotRegionsReservedDays gets days hot region information is kept.
 func (o *PersistOptions) GetHotRegionsReservedDays() uint64 {
 	return o.GetScheduleConfig().HotRegionsReservedDays
-}
-
-// AddSchedulerCfg adds the scheduler configurations.
-func (o *PersistOptions) AddSchedulerCfg(tp types.CheckerSchedulerType, args []string) {
-	oldType := types.SchedulerTypeCompatibleMap[tp]
-	v := o.GetScheduleConfig().Clone()
-	for i, schedulerCfg := range v.Schedulers {
-		// comparing args is to cover the case that there are schedulers in same type but not with same name
-		// such as two schedulers of type "evict-leader",
-		// one name is "evict-leader-scheduler-1" and the other is "evict-leader-scheduler-2"
-		if reflect.DeepEqual(schedulerCfg, sc.SchedulerConfig{Type: oldType, Args: args, Disable: false}) {
-			return
-		}
-
-		if reflect.DeepEqual(schedulerCfg, sc.SchedulerConfig{Type: oldType, Args: args, Disable: true}) {
-			schedulerCfg.Disable = false
-			v.Schedulers[i] = schedulerCfg
-			o.SetScheduleConfig(v)
-			return
-		}
-	}
-	v.Schedulers = append(v.Schedulers, sc.SchedulerConfig{Type: oldType, Args: args, Disable: false})
-	o.SetScheduleConfig(v)
-}
-
-// RemoveSchedulerCfg removes the scheduler configurations.
-func (o *PersistOptions) RemoveSchedulerCfg(tp types.CheckerSchedulerType) {
-	oldType := types.SchedulerTypeCompatibleMap[tp]
-	v := o.GetScheduleConfig().Clone()
-	for i, schedulerCfg := range v.Schedulers {
-		if oldType == schedulerCfg.Type {
-			if sc.IsDefaultScheduler(oldType) {
-				schedulerCfg.Disable = true
-				v.Schedulers[i] = schedulerCfg
-			} else {
-				v.Schedulers = append(v.Schedulers[:i], v.Schedulers[i+1:]...)
-			}
-			o.SetScheduleConfig(v)
-			return
-		}
-	}
 }
 
 // SetLabelProperty sets the label property.
@@ -807,10 +751,10 @@ func (o *PersistOptions) Reload(storage endpoint.ConfigStorage) error {
 	if err != nil {
 		return err
 	}
-	adjustScheduleCfg(&cfg.Schedule)
 	// Some fields may not be stored in the storage, we need to calculate them manually.
 	cfg.StoreConfig.Adjust()
 	cfg.PDServerCfg.MigrateDeprecatedFlags()
+	cfg.Schedule.MigrateDeprecatedFlags()
 	if isExist {
 		o.schedule.Store(&cfg.Schedule)
 		o.replication.Store(&cfg.Replication)
@@ -823,18 +767,6 @@ func (o *PersistOptions) Reload(storage endpoint.ConfigStorage) error {
 		o.SetClusterVersion(&cfg.ClusterVersion)
 	}
 	return nil
-}
-
-func adjustScheduleCfg(scheduleCfg *sc.ScheduleConfig) {
-	// In case we add new default schedulers.
-	for _, ps := range sc.DefaultSchedulers {
-		if slice.NoneOf(scheduleCfg.Schedulers, func(i int) bool {
-			return scheduleCfg.Schedulers[i].Type == ps.Type
-		}) {
-			scheduleCfg.Schedulers = append(scheduleCfg.Schedulers, ps)
-		}
-	}
-	scheduleCfg.MigrateDeprecatedFlags()
 }
 
 // CheckLabelProperty checks the label property.

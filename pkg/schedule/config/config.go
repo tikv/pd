@@ -412,8 +412,6 @@ func (c *ScheduleConfig) Adjust(meta *configutil.ConfigMetaData, reloading bool)
 		c.HaltScheduling = defaultHaltScheduling
 	}
 
-	adjustSchedulers(&c.Schedulers, DefaultSchedulers)
-
 	for k, b := range c.migrateConfigurationMap() {
 		v, err := parseDeprecatedFlag(meta, k, *b[0], *b[1])
 		if err != nil {
@@ -572,16 +570,6 @@ var DefaultSchedulers = SchedulerConfigs{
 	{Type: types.SchedulerTypeCompatibleMap[types.BalanceLeaderScheduler]},
 	{Type: types.SchedulerTypeCompatibleMap[types.BalanceHotRegionScheduler]},
 	{Type: types.SchedulerTypeCompatibleMap[types.EvictSlowStoreScheduler]},
-}
-
-// IsDefaultScheduler checks whether the scheduler is enabled by default.
-func IsDefaultScheduler(typ string) bool {
-	for _, c := range DefaultSchedulers {
-		if typ == c.Type {
-			return true
-		}
-	}
-	return false
 }
 
 // ReplicationConfig is the replication configuration.

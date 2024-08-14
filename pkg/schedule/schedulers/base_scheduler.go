@@ -114,3 +114,9 @@ func (s *BaseScheduler) GetName() string {
 func (s *BaseScheduler) GetType() types.CheckerSchedulerType {
 	return s.tp
 }
+
+// IsDiable implements the Scheduler interface.
+func (*BaseScheduler) IsDisable() bool { return false }
+
+// SetDisable implements the Scheduler interface.
+func (*BaseScheduler) SetDisable(bool) {}

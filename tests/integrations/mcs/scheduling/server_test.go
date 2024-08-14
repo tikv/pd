@@ -375,9 +375,7 @@ func (suite *serverTestSuite) TestSchedulerSync() {
 	checkDisabled := func(name string, shouldDisabled bool) {
 		re.NotNil(schedulersController.GetScheduler(name), name)
 		testutil.Eventually(re, func() bool {
-			disabled, err := schedulersController.IsSchedulerDisabled(name)
-			re.NoError(err, name)
-			return disabled == shouldDisabled
+			return schedulersController.GetScheduler(name).IsDisable() == shouldDisabled
 		})
 	}
 	for _, name := range defaultSchedulerNames {
