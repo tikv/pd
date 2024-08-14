@@ -16,8 +16,6 @@ package schedulers
 
 import (
 	"context"
-	"encoding/json"
-	"strings"
 	"testing"
 	"time"
 
@@ -72,9 +70,9 @@ func (suite *evictSlowTrendTestSuite) SetupTest() {
 
 	storage := storage.NewStorageWithMemoryBackend()
 	var err error
-	suite.es, err = CreateScheduler(EvictSlowTrendType, suite.oc, storage, ConfigSliceDecoder(EvictSlowTrendType, []string{}))
+	suite.es, err = CreateScheduler(types.EvictSlowTrendScheduler, suite.oc, storage, ConfigSliceDecoder(types.EvictSlowTrendScheduler, []string{}))
 	re.NoError(err)
-	suite.bs, err = CreateScheduler(BalanceLeaderType, suite.oc, storage, ConfigSliceDecoder(BalanceLeaderType, []string{}))
+	suite.bs, err = CreateScheduler(types.BalanceLeaderScheduler, suite.oc, storage, ConfigSliceDecoder(types.BalanceLeaderScheduler, []string{}))
 	re.NoError(err)
 }
 
@@ -186,17 +184,8 @@ func (suite *evictSlowTrendTestSuite) TestEvictSlowTrend() {
 	re.Zero(es2.conf.evictedStore())
 
 	// check the value from storage.
-	sches, vs, err := es2.conf.storage.LoadAllSchedulerConfigs()
-	re.NoError(err)
-	valueStr := ""
-	for id, sche := range sches {
-		if strings.EqualFold(sche, EvictSlowTrendName) {
-			valueStr = vs[id]
-		}
-	}
-
 	var persistValue evictSlowTrendSchedulerConfig
-	err = json.Unmarshal([]byte(valueStr), &persistValue)
+	err := es2.conf.load(&persistValue)
 	re.NoError(err)
 	re.Equal(es2.conf.EvictedStores, persistValue.EvictedStores)
 	re.Zero(persistValue.evictedStore())

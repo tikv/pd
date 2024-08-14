@@ -32,7 +32,6 @@ import (
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
 	types "github.com/tikv/pd/pkg/schedule/type"
-	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/reflectutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
@@ -43,8 +42,6 @@ import (
 const (
 	// BalanceLeaderName is balance leader scheduler name.
 	BalanceLeaderName = "balance-leader-scheduler"
-	// BalanceLeaderType is balance leader scheduler type.
-	BalanceLeaderType = "balance-leader"
 	// BalanceLeaderBatchSize is the default number of operators to transfer leaders by one scheduling.
 	// Default value is 4 which is subjected by scheduler-max-waiting-operator and leader-schedule-limit
 	// If you want to increase balance speed more, please increase above-mentioned param.
@@ -58,8 +55,9 @@ const (
 
 type balanceLeaderSchedulerConfig struct {
 	syncutil.RWMutex
-	storage endpoint.ConfigStorage
-	Ranges  []core.KeyRange `json:"ranges"`
+	schedulerConfig
+
+	Ranges []core.KeyRange `json:"ranges"`
 	// Batch is used to generate multiple operators by one scheduling
 	Batch int `json:"batch"`
 }
@@ -81,7 +79,7 @@ func (conf *balanceLeaderSchedulerConfig) update(data []byte) (int, any) {
 			}
 			return http.StatusBadRequest, "invalid batch size which should be an integer between 1 and 10"
 		}
-		if err := conf.persistLocked(); err != nil {
+		if err := conf.save(); err != nil {
 			log.Warn("failed to save balance-leader-scheduler config", errs.ZapError(err))
 		}
 		log.Info("balance-leader-scheduler config is updated", zap.ByteString("old", oldConfig), zap.ByteString("new", newConfig))
@@ -102,7 +100,7 @@ func (conf *balanceLeaderSchedulerConfig) validateLocked() bool {
 	return conf.Batch >= 1 && conf.Batch <= 10
 }
 
-func (conf *balanceLeaderSchedulerConfig) Clone() *balanceLeaderSchedulerConfig {
+func (conf *balanceLeaderSchedulerConfig) clone() *balanceLeaderSchedulerConfig {
 	conf.RLock()
 	defer conf.RUnlock()
 	ranges := make([]core.KeyRange, len(conf.Ranges))
@@ -111,14 +109,6 @@ func (conf *balanceLeaderSchedulerConfig) Clone() *balanceLeaderSchedulerConfig 
 		Ranges: ranges,
 		Batch:  conf.Batch,
 	}
-}
-
-func (conf *balanceLeaderSchedulerConfig) persistLocked() error {
-	data, err := EncodeConfig(conf)
-	if err != nil {
-		return err
-	}
-	return conf.storage.SaveSchedulerConfig(BalanceLeaderName, data)
 }
 
 func (conf *balanceLeaderSchedulerConfig) getBatch() int {
@@ -159,7 +149,7 @@ func (handler *balanceLeaderHandler) updateConfig(w http.ResponseWriter, r *http
 }
 
 func (handler *balanceLeaderHandler) listConfig(w http.ResponseWriter, _ *http.Request) {
-	conf := handler.config.Clone()
+	conf := handler.config.clone()
 	handler.rd.JSON(w, http.StatusOK, conf)
 }
 
@@ -192,6 +182,7 @@ func newBalanceLeaderScheduler(opController *operator.Controller, conf *balanceL
 	return s
 }
 
+// ServeHTTP implements the http.Handler interface.
 func (l *balanceLeaderScheduler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	l.handler.ServeHTTP(w, r)
 }
@@ -206,24 +197,20 @@ func WithBalanceLeaderName(name string) BalanceLeaderCreateOption {
 	}
 }
 
+// EncodeConfig implements the Scheduler interface.
 func (l *balanceLeaderScheduler) EncodeConfig() ([]byte, error) {
 	l.conf.RLock()
 	defer l.conf.RUnlock()
 	return EncodeConfig(l.conf)
 }
 
+// ReloadConfig implements the Scheduler interface.
 func (l *balanceLeaderScheduler) ReloadConfig() error {
 	l.conf.Lock()
 	defer l.conf.Unlock()
-	cfgData, err := l.conf.storage.LoadSchedulerConfig(l.GetName())
-	if err != nil {
-		return err
-	}
-	if len(cfgData) == 0 {
-		return nil
-	}
+
 	newCfg := &balanceLeaderSchedulerConfig{}
-	if err = DecodeConfig([]byte(cfgData), newCfg); err != nil {
+	if err := l.conf.load(newCfg); err != nil {
 		return err
 	}
 	l.conf.Ranges = newCfg.Ranges
@@ -231,6 +218,7 @@ func (l *balanceLeaderScheduler) ReloadConfig() error {
 	return nil
 }
 
+// IsScheduleAllowed implements the Scheduler interface.
 func (l *balanceLeaderScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) bool {
 	allowed := l.OpController.OperatorCount(operator.OpLeader) < cluster.GetSchedulerConfig().GetLeaderScheduleLimit()
 	if !allowed {
@@ -331,6 +319,7 @@ func (cs *candidateStores) resortStoreWithPos(pos int) {
 	}
 }
 
+// Schedule implements the Scheduler interface.
 func (l *balanceLeaderScheduler) Schedule(cluster sche.SchedulerCluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
 	basePlan := plan.NewBalanceSchedulerPlan()
 	var collector *plan.Collector
@@ -536,7 +525,7 @@ func (l *balanceLeaderScheduler) createOperator(solver *solver, collector *plan.
 	}
 	solver.Step++
 	defer func() { solver.Step-- }()
-	op, err := operator.CreateTransferLeaderOperator(BalanceLeaderType, solver, solver.Region, solver.targetStoreID(), []uint64{}, operator.OpLeader)
+	op, err := operator.CreateTransferLeaderOperator(l.GetName(), solver, solver.Region, solver.targetStoreID(), []uint64{}, operator.OpLeader)
 	if err != nil {
 		log.Debug("fail to create balance leader operator", errs.ZapError(err))
 		if collector != nil {

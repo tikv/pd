@@ -309,11 +309,12 @@ func (c *Cluster) updateScheduler() {
 		)
 		// Create the newly added schedulers.
 		for _, scheduler := range latestSchedulersConfig {
+			schedulerType := types.ConvertOldStrToType[scheduler.Type]
 			s, err := schedulers.CreateScheduler(
-				scheduler.Type,
+				schedulerType,
 				c.coordinator.GetOperatorController(),
 				c.storage,
-				schedulers.ConfigSliceDecoder(scheduler.Type, scheduler.Args),
+				schedulers.ConfigSliceDecoder(schedulerType, scheduler.Args),
 				schedulersController.RemoveScheduler,
 			)
 			if err != nil {

@@ -33,7 +33,6 @@ import (
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
 	types "github.com/tikv/pd/pkg/schedule/type"
-	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/reflectutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/unrolled/render"
@@ -43,8 +42,6 @@ import (
 const (
 	// BalanceWitnessName is balance witness scheduler name.
 	BalanceWitnessName = "balance-witness-scheduler"
-	// BalanceWitnessType is balance witness scheduler type.
-	BalanceWitnessType = "balance-witness"
 	// balanceWitnessBatchSize is the default number of operators to transfer witnesses by one scheduling.
 	// Default value is 4 which is subjected by scheduler-max-waiting-operator and witness-schedule-limit
 	// If you want to increase balance speed more, please increase above-mentioned param.
@@ -55,13 +52,14 @@ const (
 
 type balanceWitnessSchedulerConfig struct {
 	syncutil.RWMutex
-	storage endpoint.ConfigStorage
-	Ranges  []core.KeyRange `json:"ranges"`
+	schedulerConfig
+
+	Ranges []core.KeyRange `json:"ranges"`
 	// Batch is used to generate multiple operators by one scheduling
 	Batch int `json:"batch"`
 }
 
-func (conf *balanceWitnessSchedulerConfig) Update(data []byte) (int, any) {
+func (conf *balanceWitnessSchedulerConfig) update(data []byte) (int, any) {
 	conf.Lock()
 	defer conf.Unlock()
 
@@ -78,7 +76,7 @@ func (conf *balanceWitnessSchedulerConfig) Update(data []byte) (int, any) {
 			}
 			return http.StatusBadRequest, "invalid batch size which should be an integer between 1 and 10"
 		}
-		if err := conf.persistLocked(); err != nil {
+		if err := conf.save(); err != nil {
 			log.Warn("failed to persist config", zap.Error(err))
 		}
 		log.Info("balance-witness-scheduler config is updated", zap.ByteString("old", oldc), zap.ByteString("new", newc))
@@ -99,7 +97,7 @@ func (conf *balanceWitnessSchedulerConfig) validateLocked() bool {
 	return conf.Batch >= 1 && conf.Batch <= 10
 }
 
-func (conf *balanceWitnessSchedulerConfig) Clone() *balanceWitnessSchedulerConfig {
+func (conf *balanceWitnessSchedulerConfig) clone() *balanceWitnessSchedulerConfig {
 	conf.RLock()
 	defer conf.RUnlock()
 	ranges := make([]core.KeyRange, len(conf.Ranges))
@@ -108,14 +106,6 @@ func (conf *balanceWitnessSchedulerConfig) Clone() *balanceWitnessSchedulerConfi
 		Ranges: ranges,
 		Batch:  conf.Batch,
 	}
-}
-
-func (conf *balanceWitnessSchedulerConfig) persistLocked() error {
-	data, err := EncodeConfig(conf)
-	if err != nil {
-		return err
-	}
-	return conf.storage.SaveSchedulerConfig(BalanceWitnessName, data)
 }
 
 func (conf *balanceWitnessSchedulerConfig) getBatch() int {
@@ -151,12 +141,12 @@ func newBalanceWitnessHandler(conf *balanceWitnessSchedulerConfig) http.Handler 
 func (handler *balanceWitnessHandler) updateConfig(w http.ResponseWriter, r *http.Request) {
 	data, _ := io.ReadAll(r.Body)
 	r.Body.Close()
-	httpCode, v := handler.config.Update(data)
+	httpCode, v := handler.config.update(data)
 	handler.rd.JSON(w, httpCode, v)
 }
 
 func (handler *balanceWitnessHandler) listConfig(w http.ResponseWriter, _ *http.Request) {
-	conf := handler.config.Clone()
+	conf := handler.config.clone()
 	handler.rd.JSON(w, http.StatusOK, conf)
 }
 
@@ -217,15 +207,9 @@ func (b *balanceWitnessScheduler) EncodeConfig() ([]byte, error) {
 func (b *balanceWitnessScheduler) ReloadConfig() error {
 	b.conf.Lock()
 	defer b.conf.Unlock()
-	cfgData, err := b.conf.storage.LoadSchedulerConfig(b.GetName())
-	if err != nil {
-		return err
-	}
-	if len(cfgData) == 0 {
-		return nil
-	}
+
 	newCfg := &balanceWitnessSchedulerConfig{}
-	if err = DecodeConfig([]byte(cfgData), newCfg); err != nil {
+	if err := b.conf.load(newCfg); err != nil {
 		return err
 	}
 	b.conf.Ranges = newCfg.Ranges
@@ -357,7 +341,7 @@ func (b *balanceWitnessScheduler) createOperator(solver *solver, collector *plan
 	}
 	solver.Step++
 	defer func() { solver.Step-- }()
-	op, err := operator.CreateMoveWitnessOperator(BalanceWitnessType, solver, solver.Region, solver.sourceStoreID(), solver.targetStoreID())
+	op, err := operator.CreateMoveWitnessOperator(b.GetName(), solver, solver.Region, solver.sourceStoreID(), solver.targetStoreID())
 	if err != nil {
 		log.Debug("fail to create balance witness operator", errs.ZapError(err))
 		return nil

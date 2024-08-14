@@ -482,6 +482,7 @@ func newPDServiceDiscovery(
 	return pdsd
 }
 
+// Init initializes the PD service discovery.
 func (c *pdServiceDiscovery) Init() error {
 	if c.isInitialized {
 		return nil
