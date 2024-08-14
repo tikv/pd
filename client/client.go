@@ -714,9 +714,11 @@ func (c *client) setTSOClientLocked(mode pdpb.ServiceMode) {
 		return
 	}
 	// Replace the old TSO client.
-	c.tsoClient.close()
+	newTSOCli.setup()
+	// Replace the old TSO client.
+	oldTSOClient := c.tsoClient
 	c.tsoClient = newTSOCli
-	c.tsoClient.setup()
+	oldTSOClient.close()
 	// Replace the old TSO service discovery if needed.
 	oldTSOSvcDiscovery := c.tsoSvcDiscovery
 	// If newTSOSvcDiscovery is nil, that's expected, as it means we are switching to PD service mode and
