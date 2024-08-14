@@ -1370,9 +1370,9 @@ func (kgm *KeyspaceGroupManager) mergingChecker(ctx context.Context, mergeTarget
 			zap.Any("merge-list", mergeList))
 		// All the keyspace group primaries in the merge list are gone,
 		// calculate the newly merged TSO to make sure it is greater than the original ones.
-		var mergedTS time.Time
+		var ts, mergedTS time.Time
 		for _, id := range mergeList {
-			ts, err := kgm.tsoSvcStorage.LoadTimestamp(endpoint.KeyspaceGroupGlobalTSPath(id))
+			ts, err = kgm.tsoSvcStorage.LoadTimestamp(endpoint.KeyspaceGroupGlobalTSPath(id))
 			if err != nil {
 				log.Error("failed to load the keyspace group TSO",
 					zap.String("member", kgm.tsoServiceID.ServiceAddr),
