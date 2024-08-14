@@ -675,7 +675,7 @@ func (c *client) setServiceMode(newMode pdpb.ServiceMode) {
 	log.Info("[pd] changing service mode",
 		zap.String("old-mode", c.serviceMode.String()),
 		zap.String("new-mode", newMode.String()))
-	c.resetTSOClientLocked(newMode)
+	c.setTSOClientLocked(newMode)
 	oldMode := c.serviceMode
 	c.serviceMode = newMode
 	log.Info("[pd] service mode changed",
@@ -683,8 +683,8 @@ func (c *client) setServiceMode(newMode pdpb.ServiceMode) {
 		zap.String("new-mode", newMode.String()))
 }
 
-// Reset a new TSO client.
-func (c *client) resetTSOClientLocked(mode pdpb.ServiceMode) {
+// Set a new TSO client.
+func (c *client) setTSOClientLocked(mode pdpb.ServiceMode) {
 	// Re-create a new TSO client.
 	var (
 		newTSOCli          *tsoClient
@@ -713,11 +713,10 @@ func (c *client) resetTSOClientLocked(mode pdpb.ServiceMode) {
 		log.Warn("[pd] intend to switch to unknown service mode, just return")
 		return
 	}
-	newTSOCli.setup()
 	// Replace the old TSO client.
-	oldTSOClient := c.tsoClient
+	c.tsoClient.close()
 	c.tsoClient = newTSOCli
-	oldTSOClient.close()
+	c.tsoClient.setup()
 	// Replace the old TSO service discovery if needed.
 	oldTSOSvcDiscovery := c.tsoSvcDiscovery
 	// If newTSOSvcDiscovery is nil, that's expected, as it means we are switching to PD service mode and
@@ -736,11 +735,11 @@ func (c *client) getTSOClient() *tsoClient {
 	return c.tsoClient
 }
 
-// ResetTSOClient resets the TSO client, only for test.
-func (c *client) ResetTSOClient() {
+// SetTSOClient sets the TSO client, only for test.
+func (c *client) SetTSOClient() {
 	c.Lock()
 	defer c.Unlock()
-	c.resetTSOClientLocked(c.serviceMode)
+	c.setTSOClientLocked(c.serviceMode)
 }
 
 func (c *client) getServiceMode() pdpb.ServiceMode {

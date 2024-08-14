@@ -349,8 +349,8 @@ func (c *tsoServiceDiscovery) CheckMemberChanged() error {
 	return nil
 }
 
-func (c *tsoServiceDiscovery) CheckServiceModeChanged() error {
-	return c.apiSvcDiscovery.CheckServiceModeChanged()
+func (c *tsoServiceDiscovery) ScheduleServiceModeChanged() {
+	c.apiSvcDiscovery.ScheduleServiceModeChanged()
 }
 
 // AddServingURLSwitchedCallback adds callbacks which will be called when the primary in

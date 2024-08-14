@@ -17,11 +17,13 @@ package tso
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -577,4 +579,68 @@ func (suite *CommonTestSuite) TestBootstrapDefaultKeyspaceGroup() {
 	check()
 	suite.pdLeader.ResignLeader()
 	suite.pdLeader = suite.cluster.GetServer(suite.cluster.WaitLeader())
+}
+
+func TestTSOServiceSwitch(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster, err := tests.NewTestAPICluster(ctx, 1)
+	re.NoError(err)
+	defer cluster.Destroy()
+
+	err = cluster.RunInitialServers()
+	re.NoError(err)
+
+	leaderName := cluster.WaitLeader()
+	re.NotEmpty(leaderName)
+	pdLeader := cluster.GetServer(leaderName)
+	backendEndpoints := pdLeader.GetAddr()
+	re.NoError(pdLeader.BootstrapCluster())
+	pdClient, err := pd.NewClientWithContext(ctx, []string{backendEndpoints}, pd.SecurityOption{})
+	re.NoError(err)
+	defer pdClient.Close()
+	ch := make(chan struct{}, 1)
+	var needSuccess atomic.Bool
+	go func(ctx context.Context, ch chan struct{}) {
+		var lastPhysical, lastLogical int64
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+			physical, logical, err := pdClient.GetTS(context.Background())
+			t.Log(physical, logical, err)
+			if err == nil {
+				re.GreaterOrEqual(physical, lastPhysical)
+				if physical == lastPhysical {
+					re.Greater(logical, lastLogical)
+				}
+				lastPhysical = physical
+				lastLogical = logical
+				if needSuccess.Load() {
+					ch <- struct{}{}
+					needSuccess.Store(false)
+				}
+				continue
+			} else if errors.Is(err, context.Canceled) {
+				continue
+			} else if strings.Contains(err.Error(), "maximum number of retries exceeded") {
+				continue
+			}
+			// re.NoError(err)
+		}
+	}(ctx, ch)
+	needSuccess.Store(true)
+	<-ch
+
+	tsoCluster, err := tests.NewTestTSOCluster(ctx, 1, backendEndpoints)
+	re.NoError(err)
+	tsoCluster.WaitForDefaultPrimaryServing(re)
+	needSuccess.Store(true)
+	<-ch
+	tsoCluster.Destroy()
+	needSuccess.Store(true)
+	<-ch
 }

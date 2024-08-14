@@ -44,7 +44,9 @@ func IsServiceModeChange(err error) bool {
 		return false
 	}
 	errMsg := err.Error()
-	return strings.Contains(errMsg, "not found tso address")
+	return strings.Contains(errMsg, "not found tso address") ||
+		strings.Contains(errMsg, "maximum number of retries exceeded") ||
+		strings.Contains(errMsg, "server not started")
 }
 
 // ZapError is used to make the log output easier.

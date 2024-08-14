@@ -91,11 +91,11 @@ func (*mockPDServiceDiscovery) GetOrCreateGRPCConn(string) (*grpc.ClientConn, er
 // ScheduleCheckMemberChanged implements the ServiceDiscovery interface.
 func (*mockPDServiceDiscovery) ScheduleCheckMemberChanged() {}
 
+// ScheduleServiceModeChanged implements the ServiceDiscovery interface.
+func (*mockPDServiceDiscovery) ScheduleServiceModeChanged() {}
+
 // CheckMemberChanged implements the ServiceDiscovery interface.
 func (*mockPDServiceDiscovery) CheckMemberChanged() error { return nil }
-
-// CheckServiceModeChanged implements the ServiceDiscovery interface.
-func (*mockPDServiceDiscovery) CheckServiceModeChanged() error { return nil }
 
 // AddServingURLSwitchedCallback implements the ServiceDiscovery interface.
 func (*mockPDServiceDiscovery) AddServingURLSwitchedCallback(...func()) {}

@@ -467,7 +467,7 @@ func (suite *tsoClientTestSuite) TestGetTSWhileResettingTSOClient() {
 	// Reset the TSO clients while requesting TSO concurrently.
 	for i := 0; i < tsoRequestConcurrencyNumber; i++ {
 		for _, client := range suite.clients {
-			client.(interface{ ResetTSOClient() }).ResetTSOClient()
+			client.(interface{ SetTSOClient() }).SetTSOClient()
 		}
 	}
 	stopSignal.Store(true)

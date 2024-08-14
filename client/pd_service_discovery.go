@@ -109,11 +109,11 @@ type ServiceDiscovery interface {
 	// among the leader/followers in a quorum-based cluster or among the primary/secondaries in a
 	// primary/secondary configured cluster.
 	ScheduleCheckMemberChanged()
+	// ScheduleServiceModeChanged is used to trigger a check to see if the service mode is changed.
+	ScheduleServiceModeChanged()
 	// CheckMemberChanged immediately check if there is any membership change among the leader/followers
 	// in a quorum-based cluster or among the primary/secondaries in a primary/secondary configured cluster.
 	CheckMemberChanged() error
-	// CheckServiceModeChanged checks if the service mode has changed.
-	CheckServiceModeChanged() error
 	// AddServingURLSwitchedCallback adds callbacks which will be called when the leader
 	// in a quorum-based cluster or the primary in a primary/secondary configured cluster
 	// is switched.
@@ -435,7 +435,8 @@ type pdServiceDiscovery struct {
 	// leader is updated.
 	tsoGlobalAllocLeaderUpdatedCb tsoGlobalServURLUpdatedFunc
 
-	checkMembershipCh chan struct{}
+	checkMembershipCh  chan struct{}
+	checkServiceModeCh chan struct{}
 
 	wg        *sync.WaitGroup
 	ctx       context.Context
@@ -469,6 +470,7 @@ func newPDServiceDiscovery(
 ) *pdServiceDiscovery {
 	pdsd := &pdServiceDiscovery{
 		checkMembershipCh:   make(chan struct{}, 1),
+		checkServiceModeCh:  make(chan struct{}, 1),
 		ctx:                 ctx,
 		cancel:              cancel,
 		wg:                  wg,
@@ -584,6 +586,7 @@ func (c *pdServiceDiscovery) updateServiceModeLoop() {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+		case <-c.checkServiceModeCh:
 		}
 		if err := c.updateServiceMode(); err != nil {
 			log.Error("[pd] failed to update service mode",
@@ -779,15 +782,19 @@ func (c *pdServiceDiscovery) ScheduleCheckMemberChanged() {
 	}
 }
 
+// ScheduleCheckMemberChanged is used to check if there is any membership
+// change among the leader and the followers.
+func (c *pdServiceDiscovery) ScheduleServiceModeChanged() {
+	select {
+	case c.checkServiceModeCh <- struct{}{}:
+	default:
+	}
+}
+
 // CheckMemberChanged Immediately check if there is any membership change among the leader/followers in a
 // quorum-based cluster or among the primary/secondaries in a primary/secondary configured cluster.
 func (c *pdServiceDiscovery) CheckMemberChanged() error {
 	return c.updateMember()
-}
-
-// CheckServiceModeChanged checks if the service mode has changed.
-func (c *pdServiceDiscovery) CheckServiceModeChanged() error {
-	return c.updateServiceMode()
 }
 
 // AddServingURLSwitchedCallback adds callbacks which will be called
