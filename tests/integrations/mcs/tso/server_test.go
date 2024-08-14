@@ -17,13 +17,12 @@ package tso
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"strconv"
 	"strings"
-	"sync/atomic"
+	"sync"
 	"testing"
 	"time"
 
@@ -583,6 +582,8 @@ func (suite *CommonTestSuite) TestBootstrapDefaultKeyspaceGroup() {
 
 func TestTSOServiceSwitch(t *testing.T) {
 	re := require.New(t)
+	var wg sync.WaitGroup
+	defer wg.Wait()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	cluster, err := tests.NewTestAPICluster(ctx, 1)
@@ -600,9 +601,11 @@ func TestTSOServiceSwitch(t *testing.T) {
 	pdClient, err := pd.NewClientWithContext(ctx, []string{backendEndpoints}, pd.SecurityOption{})
 	re.NoError(err)
 	defer pdClient.Close()
-	ch := make(chan struct{}, 1)
-	var needSuccess atomic.Bool
-	go func(ctx context.Context, ch chan struct{}) {
+	ch := make(chan struct{})
+	ch1 := make(chan struct{})
+	wg.Add(1)
+	go func(ctx context.Context, wg *sync.WaitGroup, ch, ch1 chan struct{}) {
+		defer wg.Done()
 		var lastPhysical, lastLogical int64
 		for {
 			select {
@@ -611,7 +614,6 @@ func TestTSOServiceSwitch(t *testing.T) {
 			default:
 			}
 			physical, logical, err := pdClient.GetTS(context.Background())
-			t.Log(physical, logical, err)
 			if err == nil {
 				re.GreaterOrEqual(physical, lastPhysical)
 				if physical == lastPhysical {
@@ -619,28 +621,25 @@ func TestTSOServiceSwitch(t *testing.T) {
 				}
 				lastPhysical = physical
 				lastLogical = logical
-				if needSuccess.Load() {
+				select {
+				case <-ch1:
 					ch <- struct{}{}
-					needSuccess.Store(false)
+				default:
 				}
-				continue
-			} else if errors.Is(err, context.Canceled) {
-				continue
-			} else if strings.Contains(err.Error(), "maximum number of retries exceeded") {
-				continue
+			} else {
+				t.Log(err)
 			}
-			// re.NoError(err)
 		}
-	}(ctx, ch)
-	needSuccess.Store(true)
+	}(ctx, &wg, ch, ch1)
+	ch1 <- struct{}{}
 	<-ch
 
 	tsoCluster, err := tests.NewTestTSOCluster(ctx, 1, backendEndpoints)
 	re.NoError(err)
 	tsoCluster.WaitForDefaultPrimaryServing(re)
-	needSuccess.Store(true)
+	ch1 <- struct{}{}
 	<-ch
 	tsoCluster.Destroy()
-	needSuccess.Store(true)
+	ch1 <- struct{}{}
 	<-ch
 }
