@@ -32,7 +32,7 @@ type ServiceSafePoint struct {
 	SafePoint uint64 `json:"safe_point"`
 }
 
-// NOTE: This type is in sync with pd/server/spi/service_gc_safepoint.go
+// NOTE: This type is in sync with pd/server/api/service_gc_safepoint.go
 type ListServiceGCSafepoint struct {
 	ServiceGCSafepoints   []*ServiceSafePoint `json:"service_gc_safe_points"`
 	MinServiceGcSafepoint uint64              `json:"min_service_gc_safe_point,omitempty"`
