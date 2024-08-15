@@ -25,7 +25,7 @@ import (
 	pd "github.com/tikv/pd/client/http"
 	"github.com/tikv/pd/client/testutil"
 	"github.com/tikv/pd/pkg/schedule/labeler"
-	types "github.com/tikv/pd/pkg/schedule/type"
+	"github.com/tikv/pd/pkg/schedule/types"
 )
 
 // https://github.com/tikv/pd/issues/6988#issuecomment-1694924611
