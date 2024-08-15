@@ -23,25 +23,30 @@ import (
 	"github.com/tikv/pd/pkg/utils/syncutil"
 )
 
+type rwMutexInterface interface {
+	Lock()
+	RLock()
+	RUnlock()
+	Unlock()
+}
+
 type schedulerConfig interface {
-	syncutil.RWMutexInterface
+	rwMutexInterface
 
 	init(name string, storage endpoint.ConfigStorage, data any)
 	save() error
 	load(any) error
 	clean() error
-	// setArgs([]string)
-	// getArgs() []string
 }
 
+var _ schedulerConfig = &baseSchedulerConfig{}
+
 type baseSchedulerConfig struct {
-	syncutil.RWMutex
+	mu syncutil.RWMutex
 
 	name    string
 	storage endpoint.ConfigStorage
 
-	// Args is the input arguments of the scheduler.
-	// Args []string `json:"args"`
 	// data is the config of the scheduler.
 	data any
 }
@@ -75,13 +80,25 @@ func (b *baseSchedulerConfig) clean() error {
 	return b.storage.RemoveSchedulerConfig(b.name)
 }
 
-// func (b *baseSchedulerConfig) setArgs(args []string) {
-// 	b.Args = args
-// }
+// Lock implements the rwMutexInterface interface.
+func (b *baseSchedulerConfig) Lock() {
+	b.mu.Lock()
+}
 
-// func (b *baseSchedulerConfig) getArgs() []string {
-// 	return b.Args
-// }
+// RLock implements the rwMutexInterface interface.
+func (b *baseSchedulerConfig) RLock() {
+	b.mu.RLock()
+}
+
+// RUnlock implements the rwMutexInterface interface.
+func (b *baseSchedulerConfig) RUnlock() {
+	b.mu.RUnlock()
+}
+
+// Unlock implements the rwMutexInterface interface.
+func (b *baseSchedulerConfig) Unlock() {
+	b.mu.Unlock()
+}
 
 type defaultSchedulerConfig interface {
 	schedulerConfig

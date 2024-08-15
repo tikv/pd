@@ -34,13 +34,3 @@ type Mutex struct {
 type RWMutex struct {
 	sync.RWMutex
 }
-
-type RWMutexInterface interface {
-	Lock()
-	RLock()
-	RLocker() sync.Locker
-	RUnlock()
-	TryLock() bool
-	TryRLock() bool
-	Unlock()
-}
