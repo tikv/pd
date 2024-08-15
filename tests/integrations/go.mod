@@ -129,7 +129,7 @@ require (
 	github.com/phf/go-queue v0.0.0-20170504031614-9abe38d0371d // indirect
 	github.com/pingcap/errcode v0.3.0 // indirect
 	github.com/pingcap/sysutil v1.0.1-0.20230407040306-fb007c5aff21 // indirect
-	github.com/pingcap/tidb-dashboard v0.0.0-20240718034516-e6e78c7c120b // indirect
+	github.com/pingcap/tidb-dashboard v0.0.0-20240815045040-4d89bc193a0c // indirect
 	github.com/pingcap/tipb v0.0.0-20220718022156-3e2483c20a9e // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
@@ -204,5 +204,3 @@ require (
 	gorm.io/driver/sqlite v1.4.3 // indirect
 	sigs.k8s.io/yaml v1.4.0 // indirect
 )
-
-replace github.com/pingcap/tidb-dashboard => github.com/lhy1024/tidb-dashboard v0.0.0-20240807103050-305fb37579af
