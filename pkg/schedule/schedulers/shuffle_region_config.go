@@ -21,7 +21,6 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/slice"
-	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/unrolled/render"
@@ -37,7 +36,7 @@ var allRoles = []string{roleLeader, roleFollower, roleLearner}
 
 type shuffleRegionSchedulerConfig struct {
 	syncutil.RWMutex
-	storage endpoint.ConfigStorage
+	schedulerConfig
 
 	Ranges []core.KeyRange `json:"ranges"`
 	Roles  []string        `json:"roles"` // can include `leader`, `follower`, `learner`.
@@ -100,18 +99,10 @@ func (conf *shuffleRegionSchedulerConfig) handleSetRoles(w http.ResponseWriter, 
 	defer conf.Unlock()
 	old := conf.Roles
 	conf.Roles = roles
-	if err := conf.persist(); err != nil {
+	if err := conf.save(); err != nil {
 		conf.Roles = old // revert
 		rd.Text(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	rd.Text(w, http.StatusOK, "Config is updated.")
-}
-
-func (conf *shuffleRegionSchedulerConfig) persist() error {
-	data, err := EncodeConfig(conf)
-	if err != nil {
-		return err
-	}
-	return conf.storage.SaveSchedulerConfig(ShuffleRegionName, data)
 }

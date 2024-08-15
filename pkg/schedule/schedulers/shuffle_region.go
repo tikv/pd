@@ -30,8 +30,6 @@ import (
 const (
 	// ShuffleRegionName is shuffle region scheduler name.
 	ShuffleRegionName = "shuffle-region-scheduler"
-	// ShuffleRegionType is shuffle region scheduler type.
-	ShuffleRegionType = "shuffle-region"
 )
 
 type shuffleRegionScheduler struct {
@@ -69,15 +67,8 @@ func (s *shuffleRegionScheduler) EncodeConfig() ([]byte, error) {
 func (s *shuffleRegionScheduler) ReloadConfig() error {
 	s.conf.Lock()
 	defer s.conf.Unlock()
-	cfgData, err := s.conf.storage.LoadSchedulerConfig(s.GetName())
-	if err != nil {
-		return err
-	}
-	if len(cfgData) == 0 {
-		return nil
-	}
 	newCfg := &shuffleRegionSchedulerConfig{}
-	if err := DecodeConfig([]byte(cfgData), newCfg); err != nil {
+	if err := s.conf.load(newCfg); err != nil {
 		return err
 	}
 	s.conf.Roles = newCfg.Roles
@@ -109,7 +100,7 @@ func (s *shuffleRegionScheduler) Schedule(cluster sche.SchedulerCluster, _ bool)
 		return nil, nil
 	}
 
-	op, err := operator.CreateMovePeerOperator(ShuffleRegionType, cluster, region, operator.OpRegion, oldPeer.GetStoreId(), newPeer)
+	op, err := operator.CreateMovePeerOperator(s.GetName(), cluster, region, operator.OpRegion, oldPeer.GetStoreId(), newPeer)
 	if err != nil {
 		shuffleRegionCreateOperatorFailCounter.Inc()
 		return nil, nil

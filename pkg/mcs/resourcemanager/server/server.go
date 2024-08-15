@@ -20,7 +20,6 @@ import (
 	"os"
 	"os/signal"
 	"runtime"
-	"strconv"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -28,7 +27,6 @@ import (
 
 	grpcprometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
 	"github.com/pingcap/errors"
-	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/diagnosticspb"
 	"github.com/pingcap/kvproto/pkg/resource_manager"
 	"github.com/pingcap/log"
@@ -39,6 +37,7 @@ import (
 	"github.com/tikv/pd/pkg/mcs/discovery"
 	"github.com/tikv/pd/pkg/mcs/server"
 	"github.com/tikv/pd/pkg/mcs/utils"
+	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/apiutil"
@@ -77,6 +76,8 @@ type Server struct {
 	// primaryCallbacks will be called after the server becomes leader.
 	primaryCallbacks []func(context.Context) error
 
+	// for service registry
+	serviceID       *discovery.ServiceRegistryEntry
 	serviceRegister *discovery.ServiceRegister
 }
 
@@ -88,6 +89,11 @@ func (s *Server) Name() string {
 // GetAddr returns the server address.
 func (s *Server) GetAddr() string {
 	return s.cfg.ListenAddr
+}
+
+// GetAdvertiseListenAddr returns the advertise address of the server.
+func (s *Server) GetAdvertiseListenAddr() string {
+	return s.cfg.AdvertiseListenAddr
 }
 
 // SetLogLevel sets log level.
@@ -103,18 +109,14 @@ func (s *Server) SetLogLevel(level string) error {
 
 // Run runs the Resource Manager server.
 func (s *Server) Run() (err error) {
-	skipWaitAPIServiceReady := false
-	failpoint.Inject("skipWaitAPIServiceReady", func() {
-		skipWaitAPIServiceReady = true
-	})
-	if !skipWaitAPIServiceReady {
-		if err := utils.WaitAPIServiceReady(s); err != nil {
-			return err
-		}
-	}
-	if err := utils.InitClient(s); err != nil {
+	if err = utils.InitClient(s); err != nil {
 		return err
 	}
+
+	if s.clusterID, s.serviceID, s.serviceRegister, err = utils.Register(s, constant.ResourceManagerServiceName); err != nil {
+		return err
+	}
+
 	return s.startServer()
 }
 
@@ -189,7 +191,7 @@ func (s *Server) campaignLeader() {
 	member.ServiceMemberGauge.WithLabelValues(serviceName).Set(1)
 	log.Info("resource manager primary is ready to serve", zap.String("resource-manager-primary-name", s.participant.Name()))
 
-	leaderTicker := time.NewTicker(utils.LeaderTickInterval)
+	leaderTicker := time.NewTicker(constant.LeaderTickInterval)
 	defer leaderTicker.Stop()
 
 	for {
@@ -294,10 +296,6 @@ func (s *Server) GetLeaderListenUrls() []string {
 }
 
 func (s *Server) startServer() (err error) {
-	if s.clusterID, err = utils.InitClusterID(s.Context(), s.GetClient()); err != nil {
-		return err
-	}
-	log.Info("init cluster id", zap.Uint64("cluster-id", s.clusterID))
 	// The independent Resource Manager service still reuses PD version info since PD and Resource Manager are just
 	// different service modes provided by the same pd-server binary
 	bs.ServerInfoGauge.WithLabelValues(versioninfo.PDReleaseVersion, versioninfo.PDGitHash).Set(float64(time.Now().Unix()))
@@ -306,13 +304,13 @@ func (s *Server) startServer() (err error) {
 	uniqueName := s.cfg.GetAdvertiseListenAddr()
 	uniqueID := memberutil.GenerateUniqueID(uniqueName)
 	log.Info("joining primary election", zap.String("participant-name", uniqueName), zap.Uint64("participant-id", uniqueID))
-	s.participant = member.NewParticipant(s.GetClient(), utils.ResourceManagerServiceName)
+	s.participant = member.NewParticipant(s.GetClient(), constant.ResourceManagerServiceName)
 	p := &resource_manager.Participant{
 		Name:       uniqueName,
 		Id:         uniqueID, // id is unique among all participants
 		ListenUrls: []string{s.cfg.GetAdvertiseListenAddr()},
 	}
-	s.participant.InitInfo(p, endpoint.ResourceManagerSvcRootPath(s.clusterID), utils.PrimaryKey, "primary election")
+	s.participant.InitInfo(p, endpoint.ResourceManagerSvcRootPath(s.clusterID), constant.PrimaryKey, "primary election")
 
 	s.service = &Service{
 		ctx:     s.Context(),
@@ -338,18 +336,6 @@ func (s *Server) startServer() (err error) {
 	// We should make sure the calling sequence is right.
 	s.startServerLoop()
 
-	// Server has started.
-	entry := &discovery.ServiceRegistryEntry{ServiceAddr: s.cfg.AdvertiseListenAddr, Name: s.Name()}
-	serializedEntry, err := entry.Serialize()
-	if err != nil {
-		return err
-	}
-	s.serviceRegister = discovery.NewServiceRegister(s.Context(), s.GetClient(), strconv.FormatUint(s.clusterID, 10),
-		utils.ResourceManagerServiceName, s.cfg.AdvertiseListenAddr, serializedEntry, discovery.DefaultLeaseInSeconds)
-	if err := s.serviceRegister.Register(); err != nil {
-		log.Error("failed to register the service", zap.String("service-name", utils.ResourceManagerServiceName), errs.ZapError(err))
-		return err
-	}
 	atomic.StoreInt64(&s.isRunning, 1)
 	return nil
 }

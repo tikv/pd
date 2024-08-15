@@ -48,7 +48,7 @@ const (
 )
 
 func init() {
-	schedulers.RegisterSliceDecoderBuilder(EvictLeaderType, func(args []string) schedulers.ConfigDecoder {
+	schedulers.RegisterSliceDecoderBuilder(userEvictLeaderScheduler, func(args []string) schedulers.ConfigDecoder {
 		return func(v any) error {
 			if len(args) != 1 {
 				return errors.New("should specify the store-id")
@@ -71,7 +71,7 @@ func init() {
 		}
 	})
 
-	schedulers.RegisterScheduler(EvictLeaderType, func(opController *operator.Controller, storage endpoint.ConfigStorage, decoder schedulers.ConfigDecoder, _ ...func(string) error) (schedulers.Scheduler, error) {
+	schedulers.RegisterScheduler(userEvictLeaderScheduler, func(opController *operator.Controller, storage endpoint.ConfigStorage, decoder schedulers.ConfigDecoder, _ ...func(string) error) (schedulers.Scheduler, error) {
 		conf := &evictLeaderSchedulerConfig{StoreIDWitRanges: make(map[uint64][]core.KeyRange), storage: storage}
 		if err := decoder(conf); err != nil {
 			return nil, err
@@ -228,7 +228,7 @@ func (s *evictLeaderScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) (
 		if target == nil {
 			continue
 		}
-		op, err := operator.CreateTransferLeaderOperator(EvictLeaderType, cluster, region, target.GetID(), []uint64{}, operator.OpLeader)
+		op, err := operator.CreateTransferLeaderOperator(s.GetName(), cluster, region, target.GetID(), []uint64{}, operator.OpLeader)
 		if err != nil {
 			log.Debug("fail to create evict leader operator", errs.ZapError(err))
 			continue

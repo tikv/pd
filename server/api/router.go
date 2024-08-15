@@ -126,7 +126,7 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	apiRouter := rootRouter.PathPrefix(apiPrefix).Subrouter()
 
 	clusterRouter := apiRouter.NewRoute().Subrouter()
-	clusterRouter.Use(newClusterMiddleware(svr).Middleware)
+	clusterRouter.Use(newClusterMiddleware(svr).middleware)
 
 	escapeRouter := clusterRouter.NewRoute().Subrouter().UseEncodedPath()
 
@@ -149,11 +149,11 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	registerFunc(apiRouter, "/schedulers/{name}", schedulerHandler.PauseOrResumeScheduler, setMethods(http.MethodPost), setAuditBackend(localLog, prometheus))
 
 	diagnosticHandler := newDiagnosticHandler(svr, rd)
-	registerFunc(clusterRouter, "/schedulers/diagnostic/{name}", diagnosticHandler.GetDiagnosticResult, setMethods(http.MethodGet), setAuditBackend(prometheus))
+	registerFunc(clusterRouter, "/schedulers/diagnostic/{name}", diagnosticHandler.getDiagnosticResult, setMethods(http.MethodGet), setAuditBackend(prometheus))
 
 	schedulerConfigHandler := newSchedulerConfigHandler(svr, rd)
-	registerPrefix(apiRouter, "/scheduler-config", "HandleSchedulerConfig", schedulerConfigHandler.HandleSchedulerConfig, setMethods(http.MethodPost, http.MethodDelete, http.MethodPut, http.MethodPatch), setAuditBackend(localLog, prometheus))
-	registerPrefix(apiRouter, "/scheduler-config", "GetSchedulerConfig", schedulerConfigHandler.HandleSchedulerConfig, setMethods(http.MethodGet), setAuditBackend(prometheus))
+	registerPrefix(apiRouter, "/scheduler-config", "HandleSchedulerConfig", schedulerConfigHandler.handleSchedulerConfig, setMethods(http.MethodPost, http.MethodDelete, http.MethodPut, http.MethodPatch), setAuditBackend(localLog, prometheus))
+	registerPrefix(apiRouter, "/scheduler-config", "GetSchedulerConfig", schedulerConfigHandler.handleSchedulerConfig, setMethods(http.MethodGet), setAuditBackend(prometheus))
 
 	clusterHandler := newClusterHandler(svr, rd)
 	registerFunc(apiRouter, "/cluster", clusterHandler.GetCluster, setMethods(http.MethodGet), setAuditBackend(prometheus))
@@ -177,7 +177,7 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 
 	rulesHandler := newRulesHandler(svr, rd)
 	ruleRouter := clusterRouter.NewRoute().Subrouter()
-	ruleRouter.Use(newRuleMiddleware(svr, rd).Middleware)
+	ruleRouter.Use(newRuleMiddleware(svr, rd).middleware)
 	registerFunc(ruleRouter, "/config/rules", rulesHandler.GetAllRules, setMethods(http.MethodGet), setAuditBackend(prometheus))
 	registerFunc(ruleRouter, "/config/rules", rulesHandler.SetAllRules, setMethods(http.MethodPost), setAuditBackend(localLog, prometheus))
 	registerFunc(ruleRouter, "/config/rules/batch", rulesHandler.BatchRules, setMethods(http.MethodPost), setAuditBackend(localLog, prometheus))
@@ -310,10 +310,10 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	registerFunc(clusterRouter, "/admin/storage/region/{id}", adminHandler.DeleteRegionStorage, setMethods(http.MethodDelete), setAuditBackend(localLog, prometheus))
 	registerFunc(clusterRouter, "/admin/cache/regions", adminHandler.DeleteAllRegionCache, setMethods(http.MethodDelete), setAuditBackend(localLog, prometheus))
 	registerFunc(apiRouter, "/admin/persist-file/{file_name}", adminHandler.SavePersistFile, setMethods(http.MethodPost), setAuditBackend(localLog, prometheus))
-	registerFunc(apiRouter, "/admin/cluster/markers/snapshot-recovering", adminHandler.IsSnapshotRecovering, setMethods(http.MethodGet), setAuditBackend(localLog, prometheus))
-	registerFunc(apiRouter, "/admin/cluster/markers/snapshot-recovering", adminHandler.MarkSnapshotRecovering, setMethods(http.MethodPost), setAuditBackend(localLog, prometheus))
-	registerFunc(apiRouter, "/admin/cluster/markers/snapshot-recovering", adminHandler.UnmarkSnapshotRecovering, setMethods(http.MethodDelete), setAuditBackend(localLog, prometheus))
-	registerFunc(apiRouter, "/admin/base-alloc-id", adminHandler.RecoverAllocID, setMethods(http.MethodPost), setAuditBackend(localLog, prometheus))
+	registerFunc(apiRouter, "/admin/cluster/markers/snapshot-recovering", adminHandler.isSnapshotRecovering, setMethods(http.MethodGet), setAuditBackend(localLog, prometheus))
+	registerFunc(apiRouter, "/admin/cluster/markers/snapshot-recovering", adminHandler.markSnapshotRecovering, setMethods(http.MethodPost), setAuditBackend(localLog, prometheus))
+	registerFunc(apiRouter, "/admin/cluster/markers/snapshot-recovering", adminHandler.unmarkSnapshotRecovering, setMethods(http.MethodDelete), setAuditBackend(localLog, prometheus))
+	registerFunc(apiRouter, "/admin/base-alloc-id", adminHandler.recoverAllocID, setMethods(http.MethodPost), setAuditBackend(localLog, prometheus))
 
 	serviceMiddlewareHandler := newServiceMiddlewareHandler(svr, rd)
 	registerFunc(apiRouter, "/service-middleware/config", serviceMiddlewareHandler.GetServiceMiddlewareConfig, setMethods(http.MethodGet), setAuditBackend(prometheus))
@@ -327,16 +327,16 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	registerFunc(clusterRouter, "/replication_mode/status", replicationModeHandler.GetReplicationModeStatus, setAuditBackend(prometheus))
 
 	pluginHandler := newPluginHandler(handler, rd)
-	registerFunc(apiRouter, "/plugin", pluginHandler.LoadPlugin, setMethods(http.MethodPost), setAuditBackend(prometheus))
-	registerFunc(apiRouter, "/plugin", pluginHandler.UnloadPlugin, setMethods(http.MethodDelete), setAuditBackend(prometheus))
+	registerFunc(apiRouter, "/plugin", pluginHandler.loadPlugin, setMethods(http.MethodPost), setAuditBackend(prometheus))
+	registerFunc(apiRouter, "/plugin", pluginHandler.unloadPlugin, setMethods(http.MethodDelete), setAuditBackend(prometheus))
 
 	healthHandler := newHealthHandler(svr, rd)
 	registerFunc(apiRouter, "/health", healthHandler.GetHealthStatus, setMethods(http.MethodGet), setAuditBackend(prometheus))
 	registerFunc(apiRouter, "/ping", healthHandler.Ping, setMethods(http.MethodGet), setAuditBackend(prometheus))
 
 	// metric query use to query metric data, the protocol is compatible with prometheus.
-	registerFunc(apiRouter, "/metric/query", newQueryMetric(svr).QueryMetric, setMethods(http.MethodGet, http.MethodPost), setAuditBackend(prometheus))
-	registerFunc(apiRouter, "/metric/query_range", newQueryMetric(svr).QueryMetric, setMethods(http.MethodGet, http.MethodPost), setAuditBackend(prometheus))
+	registerFunc(apiRouter, "/metric/query", newqueryMetric(svr).queryMetric, setMethods(http.MethodGet, http.MethodPost), setAuditBackend(prometheus))
+	registerFunc(apiRouter, "/metric/query_range", newqueryMetric(svr).queryMetric, setMethods(http.MethodGet, http.MethodPost), setAuditBackend(prometheus))
 
 	pprofHandler := newPprofHandler(svr, rd)
 	// profile API

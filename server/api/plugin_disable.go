@@ -30,12 +30,12 @@ func newPluginHandler(*server.Handler, *render.Render) *pluginHandler {
 	return &pluginHandler{}
 }
 
-func (*pluginHandler) LoadPlugin(w http.ResponseWriter, _ *http.Request) {
+func (*pluginHandler) loadPlugin(w http.ResponseWriter, _ *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 	w.Write([]byte("load plugin is disabled, please `PLUGIN=1 $(MAKE) pd-server` first"))
 }
 
-func (*pluginHandler) UnloadPlugin(w http.ResponseWriter, _ *http.Request) {
+func (*pluginHandler) unloadPlugin(w http.ResponseWriter, _ *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 	w.Write([]byte("unload plugin is disabled, please `PLUGIN=1 $(MAKE) pd-server` first"))
 }
