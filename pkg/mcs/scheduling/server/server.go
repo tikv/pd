@@ -199,6 +199,11 @@ func (s *Server) updateAPIServerMemberLoop() {
 				cc, err := s.GetDelegateClient(ctx, s.GetTLSConfig(), ep.ClientURLs[0])
 				if err != nil {
 					log.Info("failed to get delegate client", errs.ZapError(err))
+					continue
+				}
+				if !s.IsServing() {
+					// double check
+					break
 				}
 				if s.cluster.SwitchAPIServerLeader(pdpb.NewPDClient(cc)) {
 					if status.Leader != curLeader {
