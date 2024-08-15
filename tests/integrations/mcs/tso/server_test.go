@@ -179,11 +179,8 @@ func checkTSOPath(re *require.Assertions, isAPIServiceMode bool) {
 	re.NoError(pdLeader.BootstrapCluster())
 	backendEndpoints := pdLeader.GetAddr()
 	client := pdLeader.GetEtcdClient()
-	if isAPIServiceMode {
-		re.Equal(0, getEtcdTimestampKeyNum(re, client))
-	} else {
-		re.Equal(1, getEtcdTimestampKeyNum(re, client))
-	}
+	// Although in API service mode, the PD will serve the TSO request unless the TSO server is registered.
+	re.Equal(1, getEtcdTimestampKeyNum(re, client))
 
 	_, cleanup := tests.StartSingleTSOTestServer(ctx, re, backendEndpoints, tempurl.Alloc())
 	defer cleanup()
@@ -270,13 +267,13 @@ func TestForwardTSORelated(t *testing.T) {
 	re := require.New(t)
 	suite := NewAPIServerForward(re)
 	defer suite.ShutDown()
-	// Unable to use the tso-related interface without tso server
-	suite.checkUnavailableTSO(re)
+	// PD will serve the TSO request before TSO server is registered.
+	suite.checkAvailableTSO(re, false)
 	tc, err := tests.NewTestTSOCluster(suite.ctx, 1, suite.backendEndpoints)
 	re.NoError(err)
 	defer tc.Destroy()
 	tc.WaitForDefaultPrimaryServing(re)
-	suite.checkAvailableTSO(re)
+	suite.checkAvailableTSO(re, true)
 }
 
 func TestForwardTSOWhenPrimaryChanged(t *testing.T) {
@@ -292,7 +289,7 @@ func TestForwardTSOWhenPrimaryChanged(t *testing.T) {
 	// can use the tso-related interface with old primary
 	oldPrimary, exist := suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx, constant.TSOServiceName)
 	re.True(exist)
-	suite.checkAvailableTSO(re)
+	suite.checkAvailableTSO(re, true)
 
 	// can use the tso-related interface with new primary
 	tc.DestroyServer(oldPrimary)
@@ -301,11 +298,11 @@ func TestForwardTSOWhenPrimaryChanged(t *testing.T) {
 	primary, exist := suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx, constant.TSOServiceName)
 	re.True(exist)
 	re.NotEqual(oldPrimary, primary)
-	suite.checkAvailableTSO(re)
+	suite.checkAvailableTSO(re, true)
 
 	// can use the tso-related interface with old primary again
 	tc.AddServer(oldPrimary)
-	suite.checkAvailableTSO(re)
+	suite.checkAvailableTSO(re, true)
 	for addr := range tc.GetServers() {
 		if addr != oldPrimary {
 			tc.DestroyServer(addr)
@@ -316,7 +313,7 @@ func TestForwardTSOWhenPrimaryChanged(t *testing.T) {
 	primary, exist = suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx, constant.TSOServiceName)
 	re.True(exist)
 	re.Equal(oldPrimary, primary)
-	suite.checkAvailableTSO(re)
+	suite.checkAvailableTSO(re, true)
 }
 
 func TestResignTSOPrimaryForward(t *testing.T) {
@@ -341,7 +338,7 @@ func TestResignTSOPrimaryForward(t *testing.T) {
 			time.Sleep(100 * time.Millisecond)
 		}
 		re.NoError(err)
-		suite.checkAvailableTSO(re)
+		suite.checkAvailableTSO(re, true)
 	}
 }
 
@@ -434,7 +431,7 @@ func (suite *APIServerForward) checkForwardTSOUnexpectedToFollower(checkTSO func
 	checkTSO()
 
 	// test tso request will success after cache is updated
-	suite.checkAvailableTSO(re)
+	suite.checkAvailableTSO(re, true)
 	newPrimary, exist2 := suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx, constant.TSOServiceName)
 	re.True(exist2)
 	re.NotEqual(errorAddr, newPrimary)
@@ -456,19 +453,10 @@ func (suite *APIServerForward) addRegions() {
 	}
 }
 
-func (suite *APIServerForward) checkUnavailableTSO(re *require.Assertions) {
-	_, _, err := suite.pdClient.GetTS(suite.ctx)
-	re.Error(err)
-	// try to update gc safe point
-	_, err = suite.pdClient.UpdateServiceGCSafePoint(suite.ctx, "a", 1000, 1)
-	re.Error(err)
-	// try to set external ts
-	err = suite.pdClient.SetExternalTimestamp(suite.ctx, 1000)
-	re.Error(err)
-}
-
-func (suite *APIServerForward) checkAvailableTSO(re *require.Assertions) {
-	mcs.WaitForTSOServiceAvailable(suite.ctx, re, suite.pdClient)
+func (suite *APIServerForward) checkAvailableTSO(re *require.Assertions, needWait bool) {
+	if needWait {
+		mcs.WaitForTSOServiceAvailable(suite.ctx, re, suite.pdClient)
+	}
 	// try to get ts
 	_, _, err := suite.pdClient.GetTS(suite.ctx)
 	re.NoError(err)

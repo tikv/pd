@@ -422,7 +422,7 @@ type pdServiceDiscovery struct {
 	clientConns sync.Map // Store as map[string]*grpc.ClientConn
 
 	// serviceModeUpdateCb will be called when the service mode gets updated
-	serviceModeUpdateCb func(pdpb.ServiceMode)
+	serviceModeUpdateCb func(pdpb.ServiceMode, bool)
 	// leaderSwitchedCbs will be called after the leader switched
 	leaderSwitchedCbs []func()
 	// membersChangedCbs will be called after there is any membership change in the
@@ -463,7 +463,7 @@ func NewDefaultPDServiceDiscovery(
 func newPDServiceDiscovery(
 	ctx context.Context, cancel context.CancelFunc,
 	wg *sync.WaitGroup,
-	serviceModeUpdateCb func(pdpb.ServiceMode),
+	serviceModeUpdateCb func(pdpb.ServiceMode, bool),
 	updateKeyspaceIDCb updateKeyspaceIDFunc,
 	keyspaceID uint32,
 	urls []string, tlsCfg *tls.Config, option *option,
@@ -571,10 +571,6 @@ func (c *pdServiceDiscovery) updateServiceModeLoop() {
 	failpoint.Inject("skipUpdateServiceMode", func() {
 		failpoint.Return()
 	})
-	failpoint.Inject("usePDServiceMode", func() {
-		c.serviceModeUpdateCb(pdpb.ServiceMode_PD_SVC_MODE)
-		failpoint.Return()
-	})
 
 	ctx, cancel := context.WithCancel(c.ctx)
 	defer cancel()
@@ -586,7 +582,15 @@ func (c *pdServiceDiscovery) updateServiceModeLoop() {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			failpoint.Inject("usePDServiceMode", func() {
+				c.serviceModeUpdateCb(pdpb.ServiceMode_PD_SVC_MODE, true)
+				failpoint.Return()
+			})
 		case <-c.checkServiceModeCh:
+			failpoint.Inject("usePDServiceMode", func() {
+				c.serviceModeUpdateCb(pdpb.ServiceMode_PD_SVC_MODE, false)
+				failpoint.Return()
+			})
 		}
 		if err := c.updateServiceMode(); err != nil {
 			log.Error("[pd] failed to update service mode",
@@ -884,7 +888,7 @@ func (c *pdServiceDiscovery) updateServiceMode() error {
 			// TODO: it's a hack way to solve the compatibility issue.
 			// we need to remove this after all maintained version supports the method.
 			if c.serviceModeUpdateCb != nil {
-				c.serviceModeUpdateCb(pdpb.ServiceMode_PD_SVC_MODE)
+				c.serviceModeUpdateCb(pdpb.ServiceMode_PD_SVC_MODE, true)
 			}
 			return nil
 		}
@@ -894,7 +898,7 @@ func (c *pdServiceDiscovery) updateServiceMode() error {
 		return errors.WithStack(errNoServiceModeReturned)
 	}
 	if c.serviceModeUpdateCb != nil {
-		c.serviceModeUpdateCb(clusterInfo.ServiceModes[0])
+		c.serviceModeUpdateCb(clusterInfo.ServiceModes[0], true)
 	}
 	return nil
 }
