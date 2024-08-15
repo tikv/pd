@@ -882,6 +882,7 @@ func (suite *httpClientTestSuite) TestGetGCSafePoint() {
 	re.Equal(uint64(1), l.MinServiceGcSafepoint)
 	re.Len(l.ServiceGCSafepoints, 3)
 
+	// sort the gc safepoints based on order of ServiceID
 	sort.Slice(l.ServiceGCSafepoints, func(i, j int) bool {
 		return l.ServiceGCSafepoints[i].ServiceID < l.ServiceGCSafepoints[j].ServiceID
 	})
@@ -891,6 +892,7 @@ func (suite *httpClientTestSuite) TestGetGCSafePoint() {
 		re.Equal(list.ServiceGCSafepoints[i].SafePoint, val.SafePoint)
 	}
 
+	// delete the safepoints
 	for i := 0; i < 3; i++ {
 		msg, err := client.DeleteGCSafePoint(ctx, list.ServiceGCSafepoints[i].ServiceID)
 		re.NoError(err)
@@ -899,4 +901,12 @@ func (suite *httpClientTestSuite) TestGetGCSafePoint() {
 
 	_, err4 := client.DeleteGCSafePoint(ctx, "gc_worker")
 	re.Error(err4)
+
+	// check that the safepoitns are indeed deleted
+	l, err = client.GetGCSafePoint(ctx)
+	re.NoError(err)
+
+	re.Equal(uint64(1), l.GCSafePoint)
+	re.Equal(uint64(0), l.MinServiceGcSafepoint)
+	re.Len(l.ServiceGCSafepoints, 0)
 }
