@@ -122,7 +122,7 @@ func watchExpectedPrimary(ctx context.Context,
 // TransferPrimary transfers the primary of the specified service.
 // keyspaceGroupID is optional, only used for TSO service.
 func TransferPrimary(client *clientv3.Client, lease *election.Lease, serviceName,
-	oldPrimary, newPrimary string, keyspaceGroupID uint32) error {
+	oldPrimary, newPrimary string, keyspaceGroupID uint32, tsoMembersMap map[string]bool) error {
 	if lease == nil {
 		return errors.New("current lease is nil, please check leadership")
 	}
@@ -139,6 +139,10 @@ func TransferPrimary(client *clientv3.Client, lease *election.Lease, serviceName
 
 	var primaryIDs []string
 	for _, member := range entries {
+		// only members of specific group are valid primary candidates for TSO service.
+		if tsoMembersMap != nil && !tsoMembersMap[member.ServiceAddr] {
+			continue
+		}
 		if (newPrimary == "" && member.Name != oldPrimary) || (newPrimary != "" && member.Name == newPrimary) {
 			primaryIDs = append(primaryIDs, member.ServiceAddr)
 		}

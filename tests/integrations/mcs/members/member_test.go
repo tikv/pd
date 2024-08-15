@@ -19,14 +19,18 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"testing"
 	"time"
 
 	"github.com/pingcap/failpoint"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	pdClient "github.com/tikv/pd/client/http"
 	bs "github.com/tikv/pd/pkg/basicserver"
+	tso "github.com/tikv/pd/pkg/mcs/tso/server"
+	"github.com/tikv/pd/pkg/mcs/tso/server/apis/v1"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/testutil"
@@ -42,6 +46,9 @@ type memberTestSuite struct {
 	backendEndpoints string
 	pdClient         pdClient.Client
 
+	// We only test `DefaultKeyspaceGroupID` here.
+	// tsoAvailMembers is used to check the tso members which in the DefaultKeyspaceGroupID.
+	tsoAvailMembers map[string]bool
 	tsoNodes        map[string]bs.Server
 	schedulingNodes map[string]bs.Server
 }
@@ -52,6 +59,7 @@ func TestMemberTestSuite(t *testing.T) {
 
 func (suite *memberTestSuite) SetupTest() {
 	re := suite.Require()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/acceleratedAllocNodes", `return(true)`))
 	ctx, cancel := context.WithCancel(context.Background())
 	suite.ctx = ctx
 	cluster, err := tests.NewTestAPICluster(suite.ctx, 1)
@@ -66,15 +74,24 @@ func (suite *memberTestSuite) SetupTest() {
 
 	// TSO
 	nodes := make(map[string]bs.Server)
-	for i := 0; i < constant.DefaultKeyspaceGroupReplicaCount; i++ {
+	// mock 3 tso nodes, which is more than the default replica count(DefaultKeyspaceGroupReplicaCount).
+	for i := 0; i < 3; i++ {
 		s, cleanup := tests.StartSingleTSOTestServer(suite.ctx, re, suite.backendEndpoints, tempurl.Alloc())
 		nodes[s.GetAddr()] = s
 		suite.cleanupFunc = append(suite.cleanupFunc, func() {
 			cleanup()
 		})
 	}
-	tests.WaitForPrimaryServing(re, nodes)
+	primary := tests.WaitForPrimaryServing(re, nodes)
+	members := mustGetKeyspaceGroupMembers(re, nodes[primary].(*tso.Server))
+	// Get the tso nodes
 	suite.tsoNodes = nodes
+	// We only test `DefaultKeyspaceGroupID` here.
+	// tsoAvailMembers is used to check the tso members which in the DefaultKeyspaceGroupID.
+	suite.tsoAvailMembers = make(map[string]bool)
+	for _, member := range members[constant.DefaultKeyspaceGroupID].Group.Members {
+		suite.tsoAvailMembers[member.Address] = true
+	}
 
 	// Scheduling
 	nodes = make(map[string]bs.Server)
@@ -101,13 +118,15 @@ func (suite *memberTestSuite) TearDownTest() {
 		suite.pdClient.Close()
 	}
 	suite.cluster.Destroy()
+	re := suite.Require()
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/acceleratedAllocNodes"))
 }
 
 func (suite *memberTestSuite) TestMembers() {
 	re := suite.Require()
 	members, err := suite.pdClient.GetMicroServiceMembers(suite.ctx, "tso")
 	re.NoError(err)
-	re.Len(members, constant.DefaultKeyspaceGroupReplicaCount)
+	re.Len(members, 3)
 
 	members, err = suite.pdClient.GetMicroServiceMembers(suite.ctx, "scheduling")
 	re.NoError(err)
@@ -199,6 +218,9 @@ func (suite *memberTestSuite) TestTransferPrimary() {
 		// Test transfer primary to a specific node
 		var newPrimary string
 		for _, member := range nodes {
+			if service == "tso" && !suite.tsoAvailMembers[member.GetAddr()] {
+				continue
+			}
 			if member.GetAddr() != primary {
 				newPrimary = member.Name()
 				break
@@ -250,6 +272,9 @@ func (suite *memberTestSuite) TestCampaignPrimaryAfterTransfer() {
 		// Test transfer primary to a specific node
 		var newPrimary string
 		for _, member := range nodes {
+			if service == "tso" && !suite.tsoAvailMembers[member.GetAddr()] {
+				continue
+			}
 			if member.GetAddr() != primary {
 				newPrimary = member.Name()
 				break
@@ -301,6 +326,9 @@ func (suite *memberTestSuite) TestTransferPrimaryWhileLeaseExpired() {
 		// Test transfer primary to a specific node
 		var newPrimary string
 		for _, member := range nodes {
+			if service == "tso" && !suite.tsoAvailMembers[member.GetAddr()] {
+				continue
+			}
 			if member.GetAddr() != primary {
 				newPrimary = member.Name()
 				break
@@ -353,6 +381,9 @@ func (suite *memberTestSuite) TestTransferPrimaryWhileLeaseExpiredAndServerDown(
 		// Test transfer primary to a specific node
 		var newPrimary string
 		for _, member := range nodes {
+			if service == "tso" && !suite.tsoAvailMembers[member.GetAddr()] {
+				continue
+			}
 			if member.GetAddr() != primary {
 				newPrimary = member.Name()
 				break
@@ -386,4 +417,18 @@ func (suite *memberTestSuite) TestTransferPrimaryWhileLeaseExpiredAndServerDown(
 		re.NoError(err)
 		re.NotEqual(newPrimary, onlyPrimary)
 	}
+}
+
+func mustGetKeyspaceGroupMembers(re *require.Assertions, server *tso.Server) map[uint32]*apis.KeyspaceGroupMember {
+	httpReq, err := http.NewRequest(http.MethodGet, server.GetAddr()+"/tso/api/v1/keyspace-groups/members", nil)
+	re.NoError(err)
+	httpResp, err := tests.TestDialClient.Do(httpReq)
+	re.NoError(err)
+	defer httpResp.Body.Close()
+	data, err := io.ReadAll(httpResp.Body)
+	re.NoError(err)
+	re.Equal(http.StatusOK, httpResp.StatusCode, string(data))
+	var resp map[uint32]*apis.KeyspaceGroupMember
+	re.NoError(json.Unmarshal(data, &resp))
+	return resp
 }
