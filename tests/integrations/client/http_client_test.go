@@ -908,5 +908,5 @@ func (suite *httpClientTestSuite) TestGetGCSafePoint() {
 
 	re.Equal(uint64(1), l.GCSafePoint)
 	re.Equal(uint64(0), l.MinServiceGcSafepoint)
-	re.Len(l.ServiceGCSafepoints, 0)
+	re.Empty(l.ServiceGCSafepoints)
 }
