@@ -320,11 +320,11 @@ func (s *evictSlowStoreScheduler) IsDisable() bool {
 }
 
 // SetDisable implements the Scheduler interface.
-func (s *evictSlowStoreScheduler) SetDisable(disable bool) {
+func (s *evictSlowStoreScheduler) SetDisable(disable bool) error {
 	s.conf.Lock()
 	defer s.conf.Unlock()
 	s.conf.setDisable(disable)
-	s.conf.save()
+	return s.conf.save()
 }
 
 // newEvictSlowStoreScheduler creates a scheduler that detects and evicts slow stores.

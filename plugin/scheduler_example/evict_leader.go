@@ -158,7 +158,7 @@ type evictLeaderScheduler struct {
 // newEvictLeaderScheduler creates an admin scheduler that transfers all leaders
 // out of a store.
 func newEvictLeaderScheduler(opController *operator.Controller, conf *evictLeaderSchedulerConfig) schedulers.Scheduler {
-	base := schedulers.NewBaseScheduler(opController, userEvictLeaderScheduler)
+	base := schedulers.NewBaseScheduler(opController, userEvictLeaderScheduler, nil)
 	handler := newEvictLeaderHandler(conf)
 	return &evictLeaderScheduler{
 		BaseScheduler: base,
@@ -193,12 +193,13 @@ func (s *evictLeaderScheduler) PrepareConfig(cluster sche.SchedulerCluster) erro
 }
 
 // CleanConfig is used to clean the scheduler config.
-func (s *evictLeaderScheduler) CleanConfig(cluster sche.SchedulerCluster) {
+func (s *evictLeaderScheduler) CleanConfig(cluster sche.SchedulerCluster) error {
 	s.conf.mu.RLock()
 	defer s.conf.mu.RUnlock()
 	for id := range s.conf.StoreIDWitRanges {
 		cluster.ResumeLeaderTransfer(id)
 	}
+	return nil
 }
 
 // IsScheduleAllowed checks if the scheduler is allowed to schedule.

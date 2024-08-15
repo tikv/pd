@@ -143,10 +143,16 @@ func (c *Controller) AddSchedulerHandler(scheduler Scheduler, args ...string) er
 	defer c.Unlock()
 
 	name := scheduler.GetName()
-	if _, ok := c.schedulerHandlers[name]; ok && !scheduler.IsDisable() {
-		return errs.ErrSchedulerExisted.FastGenByArgs()
-	} else if ok && scheduler.IsDisable() {
-		scheduler.SetDisable(false)
+	if _, ok := c.schedulerHandlers[name]; ok {
+		disable := scheduler.IsDisable()
+		if !disable {
+			return errs.ErrSchedulerExisted.FastGenByArgs()
+		}
+		if err := scheduler.SetDisable(false); err != nil {
+			log.Error("can not update scheduler status", zap.String("scheduler-name", name),
+				errs.ZapError(err))
+			return err
+		}
 	}
 
 	c.schedulerHandlers[name] = scheduler
@@ -178,10 +184,8 @@ func (c *Controller) RemoveSchedulerHandler(name string) error {
 		return err
 	}
 
-	s.(Scheduler).CleanConfig(c.cluster)
 	delete(c.schedulerHandlers, name)
-
-	return nil
+	return s.(Scheduler).CleanConfig(c.cluster)
 }
 
 // AddScheduler adds a scheduler.
@@ -189,10 +193,17 @@ func (c *Controller) AddScheduler(scheduler Scheduler, args ...string) error {
 	c.Lock()
 	defer c.Unlock()
 
-	if s, ok := c.schedulers[scheduler.GetName()]; ok && !s.IsDisable() {
-		return errs.ErrSchedulerExisted.FastGenByArgs()
-	} else if ok && scheduler.IsDisable() {
-		scheduler.SetDisable(false)
+	name := scheduler.GetName()
+	if s, ok := c.schedulers[name]; ok {
+		disable := s.IsDisable()
+		if !disable {
+			return errs.ErrSchedulerExisted.FastGenByArgs()
+		}
+		if err := scheduler.SetDisable(false); err != nil {
+			log.Error("can not update scheduler status", zap.String("scheduler-name", name),
+				errs.ZapError(err))
+			return err
+		}
 	}
 
 	s := NewScheduleController(c.ctx, c.cluster, c.opController, scheduler)
@@ -230,12 +241,10 @@ func (c *Controller) RemoveScheduler(name string) error {
 		return err
 	}
 
-	s.CleanConfig(c.cluster)
 	s.Stop()
 	schedulerStatusGauge.DeleteLabelValues(name, "allow")
 	delete(c.schedulers, name)
-
-	return nil
+	return s.CleanConfig(c.cluster)
 }
 
 // PauseOrResumeScheduler pauses or resumes a scheduler by name.
@@ -335,9 +344,14 @@ func (c *Controller) IsSchedulerExisted(name string) (bool, error) {
 }
 
 func (c *Controller) runScheduler(s *ScheduleController) {
-	defer logutil.LogPanic()
-	defer c.wg.Done()
-	defer s.Scheduler.CleanConfig(c.cluster)
+	defer func() {
+		logutil.LogPanic()
+		c.wg.Done()
+		if err := s.Scheduler.CleanConfig(c.cluster); err != nil {
+			log.Error("failed to clean scheduler config", zap.String("scheduler-name",
+				s.Scheduler.GetName()), errs.ZapError(err))
+		}
+	}()
 
 	ticker := time.NewTicker(s.GetInterval())
 	defer ticker.Stop()

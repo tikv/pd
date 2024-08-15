@@ -282,9 +282,9 @@ func (s *balanceRegionScheduler) IsDisable() bool {
 }
 
 // SetDiable implements the Scheduler interface.
-func (s *balanceRegionScheduler) SetDisable(disable bool) {
+func (s *balanceRegionScheduler) SetDisable(disable bool) error {
 	s.conf.Lock()
 	defer s.conf.Unlock()
 	s.conf.setDisable(disable)
-	s.conf.save()
+	return s.conf.save()
 }

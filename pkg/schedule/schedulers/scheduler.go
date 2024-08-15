@@ -54,7 +54,7 @@ type Scheduler interface {
 	// - EvictSlowStoreScheduler
 	IsDisable() bool
 	// SetDisable sets the scheduler's disable, it only works for default schedulers.
-	SetDisable(bool)
+	SetDisable(bool) error
 }
 
 // EncodeConfig encode the custom config for each scheduler.

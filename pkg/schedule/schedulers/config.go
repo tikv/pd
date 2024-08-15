@@ -17,6 +17,8 @@ package schedulers
 import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
+	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 )
@@ -101,7 +103,9 @@ func newBaseDefaultSchedulerConfig() *baseDefaultSchedulerConfig {
 }
 
 func (b *baseDefaultSchedulerConfig) isDisable() bool {
-	b.load(b)
+	if err := b.load(b); err != nil {
+		log.Warn("failed to load scheduler config, maybe the config never persist", errs.ZapError(err))
+	}
 	return b.Disabled
 }
 

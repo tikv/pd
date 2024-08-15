@@ -126,4 +126,4 @@ func (s *BaseScheduler) GetType() types.CheckerSchedulerType {
 func (*BaseScheduler) IsDisable() bool { return false }
 
 // SetDisable implements the Scheduler interface.
-func (*BaseScheduler) SetDisable(bool) {}
+func (*BaseScheduler) SetDisable(bool) error { return nil }

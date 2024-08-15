@@ -550,9 +550,9 @@ func (l *balanceLeaderScheduler) IsDisable() bool {
 }
 
 // SetDiable implements the Scheduler interface.
-func (l *balanceLeaderScheduler) SetDisable(disable bool) {
+func (l *balanceLeaderScheduler) SetDisable(disable bool) error {
 	l.conf.RLock()
 	defer l.conf.RUnlock()
 	l.conf.setDisable(disable)
-	l.conf.save()
+	return l.conf.save()
 }
