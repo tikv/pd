@@ -882,7 +882,10 @@ func (suite *httpClientTestSuite) TestGetGCSafePoint() {
 	re.Equal(uint64(1), l.MinServiceGcSafepoint)
 	re.Len(l.ServiceGCSafepoints, 3)
 
-	// TODO : add some sorting to preserve order
+	sort.Slice(l.ServiceGCSafepoints, func(i, j int) bool {
+		return l.ServiceGCSafepoints[i].ServiceID < l.ServiceGCSafepoints[j].ServiceID
+	})
+
 	for i, val := range l.ServiceGCSafepoints {
 		re.Equal(list.ServiceGCSafepoints[i].ServiceID, val.ServiceID)
 		re.Equal(list.ServiceGCSafepoints[i].SafePoint, val.SafePoint)
