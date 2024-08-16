@@ -371,7 +371,7 @@ func (l *balanceLeaderScheduler) Schedule(cluster sche.SchedulerCluster, dryRun 
 }
 
 // CleanConfig implements the Scheduler interface.
-func (l *balanceLeaderScheduler) CleanConfig(cluster sche.SchedulerCluster) error {
+func (l *balanceLeaderScheduler) CleanConfig(sche.SchedulerCluster) error {
 	return l.conf.clean()
 }
 

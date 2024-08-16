@@ -405,7 +405,7 @@ func (h *hotScheduler) balanceHotWriteLeaders(cluster sche.SchedulerCluster) []*
 }
 
 // CleanConfig implements the Scheduler interface.
-func (h *hotScheduler) CleanConfig(cluster sche.SchedulerCluster) error {
+func (h *hotScheduler) CleanConfig(sche.SchedulerCluster) error {
 	return h.conf.clean()
 }
 
