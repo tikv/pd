@@ -735,7 +735,6 @@ func (c *Config) GenEmbedEtcdConfig() (*embed.Config, error) {
 	if len(c.Security.CertAllowedCNs) > 1 {
 		cfg.ClientTLSInfo.AllowedCNs = c.Security.CertAllowedCNs
 	}
-	fmt.Println(" c.Security.CertAllowedCNs", c.Security.CertAllowedCNs)
 	cfg.PeerTLSInfo.ClientCertAuth = len(c.Security.CAPath) != 0
 	cfg.PeerTLSInfo.TrustedCAFile = c.Security.CAPath
 	cfg.PeerTLSInfo.CertFile = c.Security.CertPath
