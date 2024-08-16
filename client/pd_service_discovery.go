@@ -584,12 +584,12 @@ func (c *pdServiceDiscovery) updateServiceModeLoop() {
 		case <-ticker.C:
 			failpoint.Inject("usePDServiceMode", func() {
 				c.serviceModeUpdateCb(pdpb.ServiceMode_PD_SVC_MODE, true)
-				failpoint.Return()
+				failpoint.Continue()
 			})
 		case <-c.checkServiceModeCh:
 			failpoint.Inject("usePDServiceMode", func() {
 				c.serviceModeUpdateCb(pdpb.ServiceMode_PD_SVC_MODE, false)
-				failpoint.Return()
+				failpoint.Continue()
 			})
 		}
 		if err := c.updateServiceMode(); err != nil {

@@ -17,6 +17,7 @@ package cluster
 import (
 	"context"
 	"encoding/json"
+	errorspkg "errors"
 	"fmt"
 	"io"
 	"math"
@@ -447,6 +448,19 @@ func (c *RaftCluster) runServiceCheckJob() {
 	for {
 		select {
 		case <-c.ctx.Done():
+			if !c.IsServiceIndependent(constant.TSOServiceName) {
+				// leader exits, reset the allocator group
+				c.tsoAllocator.ResetAllocatorGroup(tso.GlobalDCLocation, true)
+			}
+			failpoint.Inject("updateAfterResetTSO", func() {
+				allocator, _ := c.tsoAllocator.GetAllocator(tso.GlobalDCLocation)
+				if err := allocator.UpdateTSO(); !errorspkg.Is(err, errs.ErrUpdateTimestamp) {
+					log.Panic("the tso update after reset should return ErrUpdateTimestamp as expected", zap.Error(err))
+				}
+				if allocator.IsInitialize() {
+					log.Panic("the allocator should be uninitialized after reset")
+				}
+			})
 			log.Info("service check job is stopped")
 			return
 		case <-schedulingTicker.C:

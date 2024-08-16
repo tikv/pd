@@ -17,7 +17,6 @@ package server
 import (
 	"bytes"
 	"context"
-	errorspkg "errors"
 	"fmt"
 	"math/rand"
 	"net/http"
@@ -1715,29 +1714,6 @@ func (s *Server) campaignLeader() {
 	s.member.KeepLeader(ctx)
 	log.Info(fmt.Sprintf("campaign %s leader ok", s.mode), zap.String("campaign-leader-name", s.Name()))
 
-	if !s.IsAPIServiceMode() {
-		allocator, err := s.tsoAllocatorManager.GetAllocator(tso.GlobalDCLocation)
-		if err != nil {
-			log.Error("failed to get the global TSO allocator", errs.ZapError(err))
-			return
-		}
-		log.Info("initializing the global TSO allocator")
-		if err := allocator.Initialize(0); err != nil {
-			log.Error("failed to initialize the global TSO allocator", errs.ZapError(err))
-			return
-		}
-		defer func() {
-			s.tsoAllocatorManager.ResetAllocatorGroup(tso.GlobalDCLocation, false)
-			failpoint.Inject("updateAfterResetTSO", func() {
-				if err = allocator.UpdateTSO(); !errorspkg.Is(err, errs.ErrUpdateTimestamp) {
-					log.Panic("the tso update after reset should return ErrUpdateTimestamp as expected", zap.Error(err))
-				}
-				if allocator.IsInitialize() {
-					log.Panic("the allocator should be uninitialized after reset")
-				}
-			})
-		}()
-	}
 	if err := s.reloadConfigFromKV(); err != nil {
 		log.Error("failed to reload configuration", errs.ZapError(err))
 		return
