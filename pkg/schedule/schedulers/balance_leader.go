@@ -549,8 +549,6 @@ func (l *balanceLeaderScheduler) createOperator(solver *solver, collector *plan.
 
 // IsDiable implements the Scheduler interface.
 func (l *balanceLeaderScheduler) IsDisable() bool {
-	l.conf.RLock()
-	defer l.conf.RUnlock()
 	return l.conf.isDisable()
 }
 

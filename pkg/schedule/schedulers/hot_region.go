@@ -290,8 +290,6 @@ func (h *hotScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) ([]*opera
 
 // IsDisable implements the Scheduler interface.
 func (h *hotScheduler) IsDisable() bool {
-	h.conf.Lock()
-	defer h.conf.Unlock()
 	return h.conf.isDisable()
 }
 

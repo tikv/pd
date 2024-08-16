@@ -314,8 +314,6 @@ func (s *evictSlowStoreScheduler) Schedule(cluster sche.SchedulerCluster, _ bool
 
 // IsDiable implements the Scheduler interface.
 func (s *evictSlowStoreScheduler) IsDisable() bool {
-	s.conf.Lock()
-	defer s.conf.Unlock()
 	return s.conf.isDisable()
 }
 

@@ -101,6 +101,6 @@ func (b *baseDefaultSchedulerConfig) setDisable(disabled bool) error {
 func (b *baseDefaultSchedulerConfig) clean() error {
 	b.Lock()
 	defer b.Unlock()
-	b.Disabled = false
+	b.Disabled = true
 	return b.save()
 }

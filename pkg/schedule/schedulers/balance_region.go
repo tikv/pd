@@ -281,8 +281,6 @@ func (s *balanceRegionScheduler) transferPeer(solver *solver, collector *plan.Co
 
 // IsDiable implements the Scheduler interface.
 func (s *balanceRegionScheduler) IsDisable() bool {
-	s.conf.Lock()
-	defer s.conf.Unlock()
 	return s.conf.isDisable()
 }
 
