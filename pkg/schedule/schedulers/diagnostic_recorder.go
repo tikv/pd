@@ -136,7 +136,7 @@ func (d *DiagnosticRecorder) GetLastResult() *DiagnosticResult {
 		}
 	}
 	return &DiagnosticResult{
-		Name:      string(d.schedulerType),
+		Name:      d.schedulerType.String(),
 		Status:    firstStatus,
 		Summary:   resStr,
 		Timestamp: uint64(time.Now().Unix()),
