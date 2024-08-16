@@ -57,27 +57,27 @@ var compatiblePrioritiesConfig = prioritiesConfig{
 // params about hot region.
 func initHotRegionScheduleConfig() *hotRegionSchedulerConfig {
 	cfg := &hotRegionSchedulerConfig{
-		defaultSchedulerConfig: newBaseDefaultSchedulerConfig(),
-		MinHotByteRate:         100,
-		MinHotKeyRate:          10,
-		MinHotQueryRate:        10,
-		MaxZombieRounds:        3,
-		MaxPeerNum:             1000,
-		ByteRateRankStepRatio:  0.05,
-		KeyRateRankStepRatio:   0.05,
-		QueryRateRankStepRatio: 0.05,
-		CountRankStepRatio:     0.01,
-		GreatDecRatio:          0.95,
-		MinorDecRatio:          0.99,
-		SrcToleranceRatio:      1.05, // Tolerate 5% difference
-		DstToleranceRatio:      1.05, // Tolerate 5% difference
-		StrictPickingStore:     true,
-		EnableForTiFlash:       true,
-		RankFormulaVersion:     "v2",
-		ForbidRWType:           "none",
-		SplitThresholds:        0.2,
-		HistorySampleDuration:  typeutil.NewDuration(statistics.DefaultHistorySampleDuration),
-		HistorySampleInterval:  typeutil.NewDuration(statistics.DefaultHistorySampleInterval),
+		baseDefaultSchedulerConfig: newBaseDefaultSchedulerConfig(),
+		MinHotByteRate:             100,
+		MinHotKeyRate:              10,
+		MinHotQueryRate:            10,
+		MaxZombieRounds:            3,
+		MaxPeerNum:                 1000,
+		ByteRateRankStepRatio:      0.05,
+		KeyRateRankStepRatio:       0.05,
+		QueryRateRankStepRatio:     0.05,
+		CountRankStepRatio:         0.01,
+		GreatDecRatio:              0.95,
+		MinorDecRatio:              0.99,
+		SrcToleranceRatio:          1.05, // Tolerate 5% difference
+		DstToleranceRatio:          1.05, // Tolerate 5% difference
+		StrictPickingStore:         true,
+		EnableForTiFlash:           true,
+		RankFormulaVersion:         "v2",
+		ForbidRWType:               "none",
+		SplitThresholds:            0.2,
+		HistorySampleDuration:      typeutil.NewDuration(statistics.DefaultHistorySampleDuration),
+		HistorySampleInterval:      typeutil.NewDuration(statistics.DefaultHistorySampleInterval),
 	}
 	cfg.applyPrioritiesConfig(defaultPrioritiesConfig)
 	return cfg
@@ -112,7 +112,7 @@ func (conf *hotRegionSchedulerConfig) getValidConf() *hotRegionSchedulerConfig {
 }
 
 type hotRegionSchedulerConfig struct {
-	defaultSchedulerConfig
+	baseDefaultSchedulerConfig
 
 	lastQuerySupported bool
 

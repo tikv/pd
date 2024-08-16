@@ -36,7 +36,7 @@ const (
 )
 
 type balanceRegionSchedulerConfig struct {
-	defaultSchedulerConfig
+	baseDefaultSchedulerConfig
 
 	Ranges []core.KeyRange `json:"ranges"`
 	// TODO: When we prepare to use Ranges, we will need to implement the ReloadConfig function for this scheduler.
@@ -84,6 +84,11 @@ func WithBalanceRegionName(name string) BalanceRegionCreateOption {
 // EncodeConfig implements the Scheduler interface.
 func (s *balanceRegionScheduler) EncodeConfig() ([]byte, error) {
 	return EncodeConfig(s.conf)
+}
+
+// CleanConfig implements the Scheduler interface.
+func (s *balanceRegionScheduler) CleanConfig(cluster sche.SchedulerCluster) error {
+	return s.conf.clean()
 }
 
 // IsScheduleAllowed implements the Scheduler interface.
@@ -283,8 +288,5 @@ func (s *balanceRegionScheduler) IsDisable() bool {
 
 // SetDiable implements the Scheduler interface.
 func (s *balanceRegionScheduler) SetDisable(disable bool) error {
-	s.conf.Lock()
-	defer s.conf.Unlock()
-	s.conf.setDisable(disable)
-	return s.conf.save()
+	return s.conf.setDisable(disable)
 }

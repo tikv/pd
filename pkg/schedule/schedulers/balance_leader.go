@@ -53,7 +53,7 @@ const (
 )
 
 type balanceLeaderSchedulerConfig struct {
-	defaultSchedulerConfig
+	baseDefaultSchedulerConfig
 
 	Ranges []core.KeyRange `json:"ranges"`
 	// Batch is used to generate multiple operators by one scheduling
@@ -370,6 +370,11 @@ func (l *balanceLeaderScheduler) Schedule(cluster sche.SchedulerCluster, dryRun 
 	return result, collector.GetPlans()
 }
 
+// CleanConfig implements the Scheduler interface.
+func (l *balanceLeaderScheduler) CleanConfig(cluster sche.SchedulerCluster) error {
+	return l.conf.clean()
+}
+
 func createTransferLeaderOperator(cs *candidateStores, dir string, l *balanceLeaderScheduler,
 	ssolver *solver, usedRegions map[uint64]struct{}, collector *plan.Collector) *operator.Operator {
 	store := cs.getStore()
@@ -551,8 +556,5 @@ func (l *balanceLeaderScheduler) IsDisable() bool {
 
 // SetDiable implements the Scheduler interface.
 func (l *balanceLeaderScheduler) SetDisable(disable bool) error {
-	l.conf.RLock()
-	defer l.conf.RUnlock()
-	l.conf.setDisable(disable)
-	return l.conf.save()
+	return l.conf.setDisable(disable)
 }

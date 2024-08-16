@@ -100,12 +100,12 @@ func (b *baseSchedulerConfig) Unlock() {
 	b.mu.Unlock()
 }
 
-type defaultSchedulerConfig interface {
-	schedulerConfig
+// type defaultSchedulerConfig interface {
+// 	schedulerConfig
 
-	isDisable() bool
-	setDisable(bool)
-}
+// 	isDisable() bool
+// 	setDisable(bool) error
+// }
 
 type baseDefaultSchedulerConfig struct {
 	schedulerConfig
@@ -113,8 +113,8 @@ type baseDefaultSchedulerConfig struct {
 	Disabled bool `json:"disabled"`
 }
 
-func newBaseDefaultSchedulerConfig() *baseDefaultSchedulerConfig {
-	return &baseDefaultSchedulerConfig{
+func newBaseDefaultSchedulerConfig() baseDefaultSchedulerConfig {
+	return baseDefaultSchedulerConfig{
 		schedulerConfig: &baseSchedulerConfig{},
 	}
 }
@@ -126,10 +126,11 @@ func (b *baseDefaultSchedulerConfig) isDisable() bool {
 	return b.Disabled
 }
 
-func (b *baseDefaultSchedulerConfig) setDisable(disabled bool) {
+func (b *baseDefaultSchedulerConfig) setDisable(disabled bool) error {
 	b.Lock()
 	defer b.Unlock()
 	b.Disabled = disabled
+	return b.save()
 }
 
 func (b *baseDefaultSchedulerConfig) clean() error {

@@ -57,7 +57,7 @@ func schedulersRegister() {
 	RegisterScheduler(types.BalanceLeaderScheduler, func(opController *operator.Controller,
 		storage endpoint.ConfigStorage, decoder ConfigDecoder, _ ...func(string) error) (Scheduler, error) {
 		conf := &balanceLeaderSchedulerConfig{
-			defaultSchedulerConfig: newBaseDefaultSchedulerConfig(),
+			baseDefaultSchedulerConfig: newBaseDefaultSchedulerConfig(),
 		}
 		if err := decoder(conf); err != nil {
 			return nil, err
@@ -90,7 +90,7 @@ func schedulersRegister() {
 	RegisterScheduler(types.BalanceRegionScheduler, func(opController *operator.Controller,
 		storage endpoint.ConfigStorage, decoder ConfigDecoder, _ ...func(string) error) (Scheduler, error) {
 		conf := &balanceRegionSchedulerConfig{
-			defaultSchedulerConfig: newBaseDefaultSchedulerConfig(),
+			baseDefaultSchedulerConfig: newBaseDefaultSchedulerConfig(),
 		}
 		if err := decoder(conf); err != nil {
 			return nil, err

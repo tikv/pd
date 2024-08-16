@@ -41,7 +41,7 @@ const (
 )
 
 type evictSlowStoreSchedulerConfig struct {
-	defaultSchedulerConfig
+	baseDefaultSchedulerConfig
 
 	cluster *core.BasicCluster
 	// Last timestamp of the chosen slow store for eviction.
@@ -53,10 +53,10 @@ type evictSlowStoreSchedulerConfig struct {
 
 func initEvictSlowStoreSchedulerConfig() *evictSlowStoreSchedulerConfig {
 	return &evictSlowStoreSchedulerConfig{
-		defaultSchedulerConfig: newBaseDefaultSchedulerConfig(),
-		lastSlowStoreCaptureTS: time.Time{},
-		RecoveryDurationGap:    defaultRecoveryDurationGap,
-		EvictedStores:          make([]uint64, 0),
+		baseDefaultSchedulerConfig: newBaseDefaultSchedulerConfig(),
+		lastSlowStoreCaptureTS:     time.Time{},
+		RecoveryDurationGap:        defaultRecoveryDurationGap,
+		EvictedStores:              make([]uint64, 0),
 	}
 }
 
@@ -220,7 +220,7 @@ func (s *evictSlowStoreScheduler) PrepareConfig(cluster sche.SchedulerCluster) e
 // CleanConfig implements the Scheduler interface.
 func (s *evictSlowStoreScheduler) CleanConfig(cluster sche.SchedulerCluster) error {
 	s.cleanupEvictLeader(cluster)
-	return s.BaseScheduler.CleanConfig(cluster)
+	return s.conf.clean()
 }
 
 func (s *evictSlowStoreScheduler) prepareEvictLeader(cluster sche.SchedulerCluster, storeID uint64) error {
@@ -321,10 +321,7 @@ func (s *evictSlowStoreScheduler) IsDisable() bool {
 
 // SetDisable implements the Scheduler interface.
 func (s *evictSlowStoreScheduler) SetDisable(disable bool) error {
-	s.conf.Lock()
-	defer s.conf.Unlock()
-	s.conf.setDisable(disable)
-	return s.conf.save()
+	return s.conf.setDisable(disable)
 }
 
 // newEvictSlowStoreScheduler creates a scheduler that detects and evicts slow stores.
