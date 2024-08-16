@@ -129,6 +129,13 @@ func (suite *middlewareTestSuite) SetupSuite() {
 	suite.cluster = cluster
 }
 
+func (suite *middlewareTestSuite) SetupTest() {
+	re := suite.Require()
+	re.NotEmpty(suite.cluster.WaitLeader())
+	leader := suite.cluster.GetLeaderServer()
+	re.NotNil(leader)
+}
+
 func (suite *middlewareTestSuite) TearDownSuite() {
 	re := suite.Require()
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/api/enableFailpointAPI"))
