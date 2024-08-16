@@ -48,7 +48,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/tools/pd-heartbeat-bench/config"
 	"github.com/tikv/pd/tools/pd-heartbeat-bench/metrics"
-	"go.etcd.io/etcd/pkg/report"
+	"go.etcd.io/etcd/pkg/v3/report"
 	"go.uber.org/zap"
 )
 

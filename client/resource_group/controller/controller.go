@@ -32,7 +32,6 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	pd "github.com/tikv/pd/client"
 	"github.com/tikv/pd/client/errs"
-	atomicutil "go.uber.org/atomic"
 	"go.uber.org/zap"
 	"golang.org/x/exp/slices"
 )
@@ -57,7 +56,7 @@ const (
 	lowToken       selectType = 1
 )
 
-var enableControllerTraceLog = atomicutil.NewBool(false)
+var enableControllerTraceLog atomic.Bool
 
 func logControllerTrace(msg string, fields ...zap.Field) {
 	if enableControllerTraceLog.Load() {
