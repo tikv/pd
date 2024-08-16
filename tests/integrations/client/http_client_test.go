@@ -899,8 +899,8 @@ func (suite *httpClientTestSuite) TestGetGCSafePoint() {
 		re.Equal("Delete service GC safepoint successfully.", msg)
 	}
 
-	_, err4 := client.DeleteGCSafePoint(ctx, "gc_worker")
-	re.Error(err4)
+	_, err = client.DeleteGCSafePoint(ctx, "gc_worker")
+	re.Error(err)
 
 	// check that the safepoitns are indeed deleted
 	l, err = client.GetGCSafePoint(ctx)

@@ -125,6 +125,6 @@ func TestSafepoint(t *testing.T) {
 	output, err = tests.ExecuteCommand(cmd, args...)
 	re.NoError(err)
 
-	// try again
+	// output should be an error message
 	re.Equal("Failed to delete service GC safepoint: request pd http api failed with status: '500 Internal Server Error', body: '\"cannot remove service safe point of gc_worker\"'\n", string(output))
 }
