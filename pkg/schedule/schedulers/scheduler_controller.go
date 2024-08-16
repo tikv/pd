@@ -148,14 +148,14 @@ func (c *Controller) AddSchedulerHandler(scheduler Scheduler, args ...string) er
 		if !disable {
 			return errs.ErrSchedulerExisted.FastGenByArgs()
 		}
-		if err := scheduler.SetDisable(false); err != nil {
-			log.Error("can not update scheduler status", zap.String("scheduler-name", name),
-				errs.ZapError(err))
-			return err
-		}
 	}
 
 	c.schedulerHandlers[name] = scheduler
+	if err := scheduler.SetDisable(false); err != nil {
+		log.Error("can not update scheduler status", zap.String("scheduler-name", name),
+			errs.ZapError(err))
+		return err
+	}
 	if err := SaveSchedulerConfig(c.storage, scheduler); err != nil {
 		log.Error("can not save HTTP scheduler config", zap.String("scheduler-name", scheduler.GetName()), errs.ZapError(err))
 		return err
@@ -199,11 +199,6 @@ func (c *Controller) AddScheduler(scheduler Scheduler, args ...string) error {
 		if !disable {
 			return errs.ErrSchedulerExisted.FastGenByArgs()
 		}
-		if err := scheduler.SetDisable(false); err != nil {
-			log.Error("can not update scheduler status", zap.String("scheduler-name", name),
-				errs.ZapError(err))
-			return err
-		}
 	}
 
 	s := NewScheduleController(c.ctx, c.cluster, c.opController, scheduler)
@@ -214,6 +209,11 @@ func (c *Controller) AddScheduler(scheduler Scheduler, args ...string) error {
 	c.wg.Add(1)
 	go c.runScheduler(s)
 	c.schedulers[s.Scheduler.GetName()] = s
+	if err := scheduler.SetDisable(false); err != nil {
+		log.Error("can not update scheduler status", zap.String("scheduler-name", name),
+			errs.ZapError(err))
+		return err
+	}
 	if err := SaveSchedulerConfig(c.storage, scheduler); err != nil {
 		log.Error("can not save scheduler config", zap.String("scheduler-name", scheduler.GetName()), errs.ZapError(err))
 		return err

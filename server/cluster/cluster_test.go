@@ -3174,8 +3174,13 @@ func TestPersistScheduler(t *testing.T) {
 	re.NoError(controller.RemoveScheduler(schedulers.BalanceRegionName))
 	re.NoError(controller.RemoveScheduler(schedulers.HotRegionName))
 	re.NoError(controller.RemoveScheduler(schedulers.EvictSlowStoreName))
-	// only remains 2 items with independent config.
+	// only remains 2 schedulers
 	re.Len(controller.GetSchedulerNames(), 2)
+	// but remains 4 configs with independent config.
+	// Note that the default scheduler with independent config will be added in the code.
+	sches, _, err = storage.LoadAllSchedulerConfigs()
+	re.NoError(err)
+	re.Len(sches, defaultCount+2)
 	re.NoError(co.GetCluster().GetSchedulerConfig().Persist(storage))
 	co.Stop()
 	co.GetSchedulersController().Wait()
@@ -3196,10 +3201,11 @@ func TestPersistScheduler(t *testing.T) {
 	}()
 	re.Len(newOpt.GetSchedulers(), defaultCount)
 	re.NoError(newOpt.Reload(storage))
-	// only remains 3 items with independent config.
+	// remains 4 items with independent config.
+	// Note that the default scheduler with independent config will be added in the code.
 	sches, _, err = storage.LoadAllSchedulerConfigs()
 	re.NoError(err)
-	re.Len(sches, 3)
+	re.Len(sches, defaultCount)
 
 	// option have 9 items because the default scheduler do not remove.
 	re.Len(newOpt.GetSchedulers(), defaultCount+3)
@@ -3288,10 +3294,11 @@ func TestRemoveScheduler(t *testing.T) {
 	re.NoError(controller.RemoveScheduler(schedulers.HotRegionName))
 	re.NoError(controller.RemoveScheduler(schedulers.GrantLeaderName))
 	re.NoError(controller.RemoveScheduler(schedulers.EvictSlowStoreName))
-	// all removed
+	// default scheduler won't be removed
 	sches, _, err = storage.LoadAllSchedulerConfigs()
 	re.NoError(err)
-	re.Empty(sches)
+	re.Len(sches, 4)
+	re.NotContains(sches, types.GrantLeaderScheduler.String())
 	re.Empty(controller.GetSchedulerNames())
 	re.NoError(co.GetCluster().GetSchedulerConfig().Persist(co.GetCluster().GetStorage()))
 	co.Stop()
