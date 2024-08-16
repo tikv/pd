@@ -29,6 +29,7 @@ import (
 	types "github.com/tikv/pd/pkg/schedule/type"
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/utils/apiutil"
+	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/unrolled/render"
 	"go.uber.org/zap"
 )
@@ -40,6 +41,7 @@ const (
 
 type shuffleHotRegionSchedulerConfig struct {
 	schedulerConfig
+	syncutil.RWMutex
 
 	Limit uint64 `json:"limit"`
 }

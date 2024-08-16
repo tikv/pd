@@ -29,6 +29,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/plan"
 	types "github.com/tikv/pd/pkg/schedule/type"
 	"github.com/tikv/pd/pkg/utils/apiutil"
+	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/unrolled/render"
 	"go.uber.org/zap"
 )
@@ -52,6 +53,7 @@ type slowCandidate struct {
 
 type evictSlowTrendSchedulerConfig struct {
 	schedulerConfig
+	syncutil.RWMutex
 
 	cluster *core.BasicCluster
 	// Candidate for eviction in current tick.

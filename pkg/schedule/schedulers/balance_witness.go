@@ -34,6 +34,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/plan"
 	types "github.com/tikv/pd/pkg/schedule/type"
 	"github.com/tikv/pd/pkg/utils/reflectutil"
+	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/unrolled/render"
 	"go.uber.org/zap"
 )
@@ -51,6 +52,7 @@ const (
 
 type balanceWitnessSchedulerConfig struct {
 	schedulerConfig
+	syncutil.RWMutex
 
 	Ranges []core.KeyRange `json:"ranges"`
 	// Batch is used to generate multiple operators by one scheduling

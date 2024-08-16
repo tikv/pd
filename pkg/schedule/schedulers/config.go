@@ -23,16 +23,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/syncutil"
 )
 
-type rwMutexInterface interface {
-	Lock()
-	RLock()
-	RUnlock()
-	Unlock()
-}
-
 type schedulerConfig interface {
-	rwMutexInterface
-
 	init(name string, storage endpoint.ConfigStorage, data any)
 	save() error
 	load(any) error
@@ -42,8 +33,6 @@ type schedulerConfig interface {
 var _ schedulerConfig = &baseSchedulerConfig{}
 
 type baseSchedulerConfig struct {
-	mu syncutil.RWMutex
-
 	name    string
 	storage endpoint.ConfigStorage
 
@@ -80,35 +69,9 @@ func (b *baseSchedulerConfig) clean() error {
 	return b.storage.RemoveSchedulerConfig(b.name)
 }
 
-// Lock implements the rwMutexInterface interface.
-func (b *baseSchedulerConfig) Lock() {
-	b.mu.Lock()
-}
-
-// RLock implements the rwMutexInterface interface.
-func (b *baseSchedulerConfig) RLock() {
-	b.mu.RLock()
-}
-
-// RUnlock implements the rwMutexInterface interface.
-func (b *baseSchedulerConfig) RUnlock() {
-	b.mu.RUnlock()
-}
-
-// Unlock implements the rwMutexInterface interface.
-func (b *baseSchedulerConfig) Unlock() {
-	b.mu.Unlock()
-}
-
-// type defaultSchedulerConfig interface {
-// 	schedulerConfig
-
-// 	isDisable() bool
-// 	setDisable(bool) error
-// }
-
 type baseDefaultSchedulerConfig struct {
 	schedulerConfig
+	syncutil.RWMutex
 
 	Disabled bool `json:"disabled"`
 }
@@ -120,6 +83,8 @@ func newBaseDefaultSchedulerConfig() baseDefaultSchedulerConfig {
 }
 
 func (b *baseDefaultSchedulerConfig) isDisable() bool {
+	b.Lock()
+	defer b.Unlock()
 	if err := b.load(b); err != nil {
 		log.Warn("failed to load scheduler config, maybe the config never persist", errs.ZapError(err))
 	}

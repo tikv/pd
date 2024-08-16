@@ -35,6 +35,7 @@ import (
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/statistics/utils"
 	"github.com/tikv/pd/pkg/utils/apiutil"
+	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/unrolled/render"
 	"go.uber.org/zap"
 )
@@ -45,6 +46,7 @@ const (
 )
 
 type grantHotRegionSchedulerConfig struct {
+	syncutil.RWMutex
 	schedulerConfig
 
 	cluster       *core.BasicCluster

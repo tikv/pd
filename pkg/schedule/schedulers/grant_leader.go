@@ -30,6 +30,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/plan"
 	types "github.com/tikv/pd/pkg/schedule/type"
 	"github.com/tikv/pd/pkg/utils/apiutil"
+	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/unrolled/render"
 	"go.uber.org/zap"
 )
@@ -40,6 +41,7 @@ const (
 )
 
 type grantLeaderSchedulerConfig struct {
+	syncutil.RWMutex
 	schedulerConfig
 
 	StoreIDWithRanges map[uint64][]core.KeyRange `json:"store-id-ranges"`
