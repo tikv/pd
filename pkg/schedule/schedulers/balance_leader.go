@@ -370,8 +370,8 @@ func (l *balanceLeaderScheduler) Schedule(cluster sche.SchedulerCluster, dryRun 
 	return result, collector.GetPlans()
 }
 
-// CleanConfig implements the Scheduler interface.
-func (l *balanceLeaderScheduler) CleanConfig(sche.SchedulerCluster) error {
+// Clean implements the Scheduler interface.
+func (l *balanceLeaderScheduler) Clean() error {
 	return l.conf.clean()
 }
 

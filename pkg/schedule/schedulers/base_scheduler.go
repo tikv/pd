@@ -105,9 +105,7 @@ func (*BaseScheduler) GetNextInterval(interval time.Duration) time.Duration {
 func (*BaseScheduler) PrepareConfig(sche.SchedulerCluster) error { return nil }
 
 // CleanConfig does some cleanup work about config.
-func (s *BaseScheduler) CleanConfig(sche.SchedulerCluster) error {
-	return s.conf.clean()
-}
+func (s *BaseScheduler) CleanConfig(sche.SchedulerCluster) {}
 
 // GetName returns the name of the scheduler
 func (s *BaseScheduler) GetName() string {
@@ -120,6 +118,11 @@ func (s *BaseScheduler) GetName() string {
 // GetType returns the type of the scheduler
 func (s *BaseScheduler) GetType() types.CheckerSchedulerType {
 	return s.tp
+}
+
+// Clean implements the Scheduler interface.
+func (s *BaseScheduler) Clean() error {
+	return s.conf.clean()
 }
 
 // IsDiable implements the Scheduler interface.

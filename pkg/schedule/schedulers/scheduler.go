@@ -44,7 +44,8 @@ type Scheduler interface {
 	GetMinInterval() time.Duration
 	GetNextInterval(interval time.Duration) time.Duration
 	PrepareConfig(cluster sche.SchedulerCluster) error
-	CleanConfig(cluster sche.SchedulerCluster) error
+	CleanConfig(cluster sche.SchedulerCluster)
+	Clean() error
 	Schedule(cluster sche.SchedulerCluster, dryRun bool) ([]*operator.Operator, []plan.Plan)
 	IsScheduleAllowed(cluster sche.SchedulerCluster) bool
 	// IsDiable returns if the scheduler is disabled, it only works for default schedulers.

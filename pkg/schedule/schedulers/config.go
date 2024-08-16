@@ -21,6 +21,7 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/syncutil"
+	"go.uber.org/zap"
 )
 
 type schedulerConfig interface {
@@ -54,6 +55,7 @@ func (b *baseSchedulerConfig) save() error {
 	if err != nil {
 		return err
 	}
+	log.Info("save scheduler config", zap.String("scheduler-name", b.name), zap.String("config", string(data)))
 	return b.storage.SaveSchedulerConfig(b.name, data)
 }
 
@@ -95,6 +97,7 @@ func (b *baseDefaultSchedulerConfig) setDisable(disabled bool) error {
 	b.Lock()
 	defer b.Unlock()
 	b.Disabled = disabled
+	log.Info("set scheduler disable", zap.Bool("disabled", disabled))
 	return b.save()
 }
 

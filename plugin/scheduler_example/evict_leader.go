@@ -193,13 +193,12 @@ func (s *evictLeaderScheduler) PrepareConfig(cluster sche.SchedulerCluster) erro
 }
 
 // CleanConfig is used to clean the scheduler config.
-func (s *evictLeaderScheduler) CleanConfig(cluster sche.SchedulerCluster) error {
+func (s *evictLeaderScheduler) CleanConfig(cluster sche.SchedulerCluster) {
 	s.conf.mu.RLock()
 	defer s.conf.mu.RUnlock()
 	for id := range s.conf.StoreIDWitRanges {
 		cluster.ResumeLeaderTransfer(id)
 	}
-	return nil
 }
 
 // IsScheduleAllowed checks if the scheduler is allowed to schedule.

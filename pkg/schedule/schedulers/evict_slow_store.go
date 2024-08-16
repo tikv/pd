@@ -218,8 +218,12 @@ func (s *evictSlowStoreScheduler) PrepareConfig(cluster sche.SchedulerCluster) e
 }
 
 // CleanConfig implements the Scheduler interface.
-func (s *evictSlowStoreScheduler) CleanConfig(cluster sche.SchedulerCluster) error {
+func (s *evictSlowStoreScheduler) CleanConfig(cluster sche.SchedulerCluster) {
 	s.cleanupEvictLeader(cluster)
+}
+
+// Clean implements the Scheduler interface.
+func (s *evictSlowStoreScheduler) Clean() error {
 	return s.conf.clean()
 }
 

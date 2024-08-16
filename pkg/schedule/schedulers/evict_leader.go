@@ -265,9 +265,8 @@ func (s *evictLeaderScheduler) PrepareConfig(cluster sche.SchedulerCluster) erro
 }
 
 // CleanConfig implements the Scheduler interface.
-func (s *evictLeaderScheduler) CleanConfig(cluster sche.SchedulerCluster) error {
+func (s *evictLeaderScheduler) CleanConfig(cluster sche.SchedulerCluster) {
 	s.conf.resumeLeaderTransfer(cluster)
-	return s.BaseScheduler.CleanConfig(cluster)
 }
 
 // IsScheduleAllowed implements the Scheduler interface.

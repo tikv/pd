@@ -185,7 +185,7 @@ func (c *Controller) RemoveSchedulerHandler(name string) error {
 	}
 
 	delete(c.schedulerHandlers, name)
-	return s.(Scheduler).CleanConfig(c.cluster)
+	return s.(Scheduler).Clean()
 }
 
 // AddScheduler adds a scheduler.
@@ -244,7 +244,7 @@ func (c *Controller) RemoveScheduler(name string) error {
 	s.Stop()
 	schedulerStatusGauge.DeleteLabelValues(name, "allow")
 	delete(c.schedulers, name)
-	return s.CleanConfig(c.cluster)
+	return s.Clean()
 }
 
 // PauseOrResumeScheduler pauses or resumes a scheduler by name.
@@ -347,10 +347,7 @@ func (c *Controller) runScheduler(s *ScheduleController) {
 	defer func() {
 		logutil.LogPanic()
 		c.wg.Done()
-		if err := s.Scheduler.CleanConfig(c.cluster); err != nil {
-			log.Error("failed to clean scheduler config", zap.String("scheduler-name",
-				s.Scheduler.GetName()), errs.ZapError(err))
-		}
+		s.Scheduler.CleanConfig(c.cluster)
 	}()
 
 	ticker := time.NewTicker(s.GetInterval())

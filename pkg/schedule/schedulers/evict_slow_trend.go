@@ -322,9 +322,8 @@ func (s *evictSlowTrendScheduler) PrepareConfig(cluster sche.SchedulerCluster) e
 }
 
 // CleanConfig implements the Scheduler interface.
-func (s *evictSlowTrendScheduler) CleanConfig(cluster sche.SchedulerCluster) error {
+func (s *evictSlowTrendScheduler) CleanConfig(cluster sche.SchedulerCluster) {
 	s.cleanupEvictLeader(cluster)
-	return s.BaseScheduler.CleanConfig(cluster)
 }
 
 func (s *evictSlowTrendScheduler) prepareEvictLeader(cluster sche.SchedulerCluster, storeID uint64) error {

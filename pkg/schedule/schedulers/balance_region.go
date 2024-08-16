@@ -86,8 +86,8 @@ func (s *balanceRegionScheduler) EncodeConfig() ([]byte, error) {
 	return EncodeConfig(s.conf)
 }
 
-// CleanConfig implements the Scheduler interface.
-func (s *balanceRegionScheduler) CleanConfig(sche.SchedulerCluster) error {
+// Clean implements the Scheduler interface.
+func (s *balanceRegionScheduler) Clean() error {
 	return s.conf.clean()
 }
 

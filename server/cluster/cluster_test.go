@@ -3176,7 +3176,7 @@ func TestPersistScheduler(t *testing.T) {
 	re.NoError(controller.RemoveScheduler(schedulers.EvictSlowStoreName))
 	// only remains 2 schedulers
 	re.Len(controller.GetSchedulerNames(), 2)
-	// but remains 4 configs with independent config.
+	// but remains 6 configs with independent config.
 	// Note that the default scheduler with independent config will be added in the code.
 	sches, _, err = storage.LoadAllSchedulerConfigs()
 	re.NoError(err)
@@ -3201,13 +3201,13 @@ func TestPersistScheduler(t *testing.T) {
 	}()
 	re.Len(newOpt.GetSchedulers(), defaultCount)
 	re.NoError(newOpt.Reload(storage))
-	// remains 4 items with independent config.
+	// remains 7 items with independent config.
 	// Note that the default scheduler with independent config will be added in the code.
 	sches, _, err = storage.LoadAllSchedulerConfigs()
 	re.NoError(err)
-	re.Len(sches, defaultCount)
+	re.Len(sches, defaultCount+3)
 
-	// option have 9 items because the default scheduler do not remove.
+	// option have 7 items because the default scheduler do not remove.
 	re.Len(newOpt.GetSchedulers(), defaultCount+3)
 	re.NoError(newOpt.Persist(storage))
 	tc.RaftCluster.SetScheduleConfig(newOpt.GetScheduleConfig())
