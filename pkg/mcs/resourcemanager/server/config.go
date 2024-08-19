@@ -127,8 +127,9 @@ func (rmc *ControllerConfig) Adjust(meta *configutil.ConfigMetaData) {
 	if !meta.IsDefined("ltb-token-rpc-max-delay") {
 		configutil.AdjustDuration(&rmc.LTBTokenRPCMaxDelay, defaultLTBTokenRPCMaxDelay)
 	}
-	failpoint.Inject("enableDegradedMode", func() {
+	failpoint.Inject("enableDegradedModeAndTraceLog", func() {
 		configutil.AdjustDuration(&rmc.DegradedModeWaitDuration, time.Second)
+		configutil.AdjustBool(&rmc.EnableControllerTraceLog, true)
 	})
 }
 
