@@ -29,7 +29,6 @@ import (
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
 	types "github.com/tikv/pd/pkg/schedule/type"
-	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/unrolled/render"
@@ -43,7 +42,8 @@ const (
 
 type grantLeaderSchedulerConfig struct {
 	syncutil.RWMutex
-	storage           endpoint.ConfigStorage
+	schedulerConfig
+
 	StoreIDWithRanges map[uint64][]core.KeyRange `json:"store-id-ranges"`
 	cluster           *core.BasicCluster
 	removeSchedulerCb func(name string) error
@@ -83,11 +83,7 @@ func (conf *grantLeaderSchedulerConfig) clone() *grantLeaderSchedulerConfig {
 func (conf *grantLeaderSchedulerConfig) persist() error {
 	conf.RLock()
 	defer conf.RUnlock()
-	data, err := EncodeConfig(conf)
-	if err != nil {
-		return err
-	}
-	return conf.storage.SaveSchedulerConfig(types.GrantLeaderScheduler.String(), data)
+	return conf.save()
 }
 
 func (conf *grantLeaderSchedulerConfig) getRanges(id uint64) []string {
@@ -176,15 +172,8 @@ func (s *grantLeaderScheduler) EncodeConfig() ([]byte, error) {
 func (s *grantLeaderScheduler) ReloadConfig() error {
 	s.conf.Lock()
 	defer s.conf.Unlock()
-	cfgData, err := s.conf.storage.LoadSchedulerConfig(s.GetName())
-	if err != nil {
-		return err
-	}
-	if len(cfgData) == 0 {
-		return nil
-	}
 	newCfg := &grantLeaderSchedulerConfig{}
-	if err = DecodeConfig([]byte(cfgData), newCfg); err != nil {
+	if err := s.conf.load(newCfg); err != nil {
 		return err
 	}
 	pauseAndResumeLeaderTransfer(s.conf.cluster, s.conf.StoreIDWithRanges, newCfg.StoreIDWithRanges)

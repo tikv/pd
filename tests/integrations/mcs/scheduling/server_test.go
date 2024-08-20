@@ -675,11 +675,14 @@ func (suite *multipleServerTestSuite) TestReElectLeader() {
 	newLeaderName := suite.cluster.WaitLeader()
 	re.NotEqual(originLeaderName, newLeaderName)
 
+	suite.pdLeader = suite.cluster.GetServer(newLeaderName)
 	suite.pdLeader.ResignLeader()
 	newLeaderName = suite.cluster.WaitLeader()
 	re.Equal(originLeaderName, newLeaderName)
 
+	suite.pdLeader = suite.cluster.GetServer(newLeaderName)
 	rc = suite.pdLeader.GetServer().GetRaftCluster()
+	re.NotNil(rc)
 	rc.IsPrepared()
 }
 

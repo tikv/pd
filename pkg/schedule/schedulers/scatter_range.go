@@ -26,7 +26,6 @@ import (
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
 	types "github.com/tikv/pd/pkg/schedule/type"
-	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/unrolled/render"
@@ -39,7 +38,8 @@ const (
 
 type scatterRangeSchedulerConfig struct {
 	syncutil.RWMutex
-	storage   endpoint.ConfigStorage
+	schedulerConfig
+
 	RangeName string `json:"range-name"`
 	StartKey  string `json:"start-key"`
 	EndKey    string `json:"end-key"`
@@ -69,14 +69,9 @@ func (conf *scatterRangeSchedulerConfig) clone() *scatterRangeSchedulerConfig {
 }
 
 func (conf *scatterRangeSchedulerConfig) persist() error {
-	name := conf.getSchedulerName()
 	conf.RLock()
 	defer conf.RUnlock()
-	data, err := EncodeConfig(conf)
-	if err != nil {
-		return err
-	}
-	return conf.storage.SaveSchedulerConfig(name, data)
+	return conf.save()
 }
 
 func (conf *scatterRangeSchedulerConfig) getRangeName() string {
@@ -153,15 +148,8 @@ func (l *scatterRangeScheduler) EncodeConfig() ([]byte, error) {
 func (l *scatterRangeScheduler) ReloadConfig() error {
 	l.config.Lock()
 	defer l.config.Unlock()
-	cfgData, err := l.config.storage.LoadSchedulerConfig(l.GetName())
-	if err != nil {
-		return err
-	}
-	if len(cfgData) == 0 {
-		return nil
-	}
 	newCfg := &scatterRangeSchedulerConfig{}
-	if err := DecodeConfig([]byte(cfgData), newCfg); err != nil {
+	if err := l.config.load(newCfg); err != nil {
 		return err
 	}
 	l.config.RangeName = newCfg.RangeName

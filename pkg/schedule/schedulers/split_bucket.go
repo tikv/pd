@@ -30,7 +30,6 @@ import (
 	"github.com/tikv/pd/pkg/schedule/plan"
 	types "github.com/tikv/pd/pkg/schedule/type"
 	"github.com/tikv/pd/pkg/statistics/buckets"
-	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/reflectutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/unrolled/render"
@@ -46,14 +45,15 @@ const (
 
 func initSplitBucketConfig() *splitBucketSchedulerConfig {
 	return &splitBucketSchedulerConfig{
-		Degree:     defaultHotDegree,
-		SplitLimit: defaultSplitLimit,
+		schedulerConfig: &baseSchedulerConfig{},
+		Degree:          defaultHotDegree,
+		SplitLimit:      defaultSplitLimit,
 	}
 }
 
 type splitBucketSchedulerConfig struct {
 	syncutil.RWMutex
-	storage    endpoint.ConfigStorage
+	schedulerConfig
 	Degree     int    `json:"degree"`
 	SplitLimit uint64 `json:"split-limit"`
 }
@@ -64,14 +64,6 @@ func (conf *splitBucketSchedulerConfig) clone() *splitBucketSchedulerConfig {
 	return &splitBucketSchedulerConfig{
 		Degree: conf.Degree,
 	}
-}
-
-func (conf *splitBucketSchedulerConfig) persistLocked() error {
-	data, err := EncodeConfig(conf)
-	if err != nil {
-		return err
-	}
-	return conf.storage.SaveSchedulerConfig(SplitBucketName, data)
 }
 
 func (conf *splitBucketSchedulerConfig) getDegree() int {
@@ -120,7 +112,7 @@ func (h *splitBucketHandler) updateConfig(w http.ResponseWriter, r *http.Request
 	}
 	newc, _ := json.Marshal(h.conf)
 	if !bytes.Equal(oldc, newc) {
-		if err := h.conf.persistLocked(); err != nil {
+		if err := h.conf.save(); err != nil {
 			log.Warn("failed to save config", errs.ZapError(err))
 		}
 		rd.Text(w, http.StatusOK, "Config is updated.")
@@ -167,15 +159,8 @@ func newSplitBucketScheduler(opController *operator.Controller, conf *splitBucke
 func (s *splitBucketScheduler) ReloadConfig() error {
 	s.conf.Lock()
 	defer s.conf.Unlock()
-	cfgData, err := s.conf.storage.LoadSchedulerConfig(s.GetName())
-	if err != nil {
-		return err
-	}
-	if len(cfgData) == 0 {
-		return nil
-	}
 	newCfg := &splitBucketSchedulerConfig{}
-	if err := DecodeConfig([]byte(cfgData), newCfg); err != nil {
+	if err := s.conf.load(newCfg); err != nil {
 		return err
 	}
 	s.conf.SplitLimit = newCfg.SplitLimit

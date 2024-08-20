@@ -28,7 +28,6 @@ import (
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
 	types "github.com/tikv/pd/pkg/schedule/type"
-	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/unrolled/render"
@@ -54,8 +53,9 @@ type slowCandidate struct {
 
 type evictSlowTrendSchedulerConfig struct {
 	syncutil.RWMutex
+	schedulerConfig
+
 	cluster *core.BasicCluster
-	storage endpoint.ConfigStorage
 	// Candidate for eviction in current tick.
 	evictCandidate slowCandidate
 	// Last chosen candidate for eviction.
@@ -66,9 +66,9 @@ type evictSlowTrendSchedulerConfig struct {
 	EvictedStores []uint64 `json:"evict-by-trend-stores"`
 }
 
-func initEvictSlowTrendSchedulerConfig(storage endpoint.ConfigStorage) *evictSlowTrendSchedulerConfig {
+func initEvictSlowTrendSchedulerConfig() *evictSlowTrendSchedulerConfig {
 	return &evictSlowTrendSchedulerConfig{
-		storage:             storage,
+		schedulerConfig:     &baseSchedulerConfig{},
 		evictCandidate:      slowCandidate{},
 		lastEvictCandidate:  slowCandidate{},
 		RecoveryDurationGap: defaultRecoveryDurationGap,
@@ -82,17 +82,6 @@ func (conf *evictSlowTrendSchedulerConfig) clone() *evictSlowTrendSchedulerConfi
 	return &evictSlowTrendSchedulerConfig{
 		RecoveryDurationGap: conf.RecoveryDurationGap,
 	}
-}
-
-func (conf *evictSlowTrendSchedulerConfig) persistLocked() error {
-	data, err := EncodeConfig(conf)
-	failpoint.Inject("persistFail", func() {
-		err = errors.New("fail to persist")
-	})
-	if err != nil {
-		return err
-	}
-	return conf.storage.SaveSchedulerConfig(types.EvictSlowTrendScheduler.String(), data)
 }
 
 func (conf *evictSlowTrendSchedulerConfig) getStores() []uint64 {
@@ -158,7 +147,7 @@ func (conf *evictSlowTrendSchedulerConfig) lastCandidateCapturedSecs() uint64 {
 	return DurationSinceAsSecs(conf.lastEvictCandidate.captureTS)
 }
 
-// readyForRecovery checks whether the last cpatured candidate is ready for recovery.
+// readyForRecovery checks whether the last captured candidate is ready for recovery.
 func (conf *evictSlowTrendSchedulerConfig) readyForRecovery() bool {
 	conf.RLock()
 	defer conf.RUnlock()
@@ -205,7 +194,7 @@ func (conf *evictSlowTrendSchedulerConfig) setStoreAndPersist(id uint64) error {
 	conf.Lock()
 	defer conf.Unlock()
 	conf.EvictedStores = []uint64{id}
-	return conf.persistLocked()
+	return conf.save()
 }
 
 func (conf *evictSlowTrendSchedulerConfig) clearAndPersist(cluster sche.SchedulerCluster) (oldID uint64, err error) {
@@ -222,7 +211,7 @@ func (conf *evictSlowTrendSchedulerConfig) clearAndPersist(cluster sche.Schedule
 	conf.Lock()
 	defer conf.Unlock()
 	conf.EvictedStores = []uint64{}
-	return oldID, conf.persistLocked()
+	return oldID, conf.save()
 }
 
 type evictSlowTrendHandler struct {
@@ -256,7 +245,7 @@ func (handler *evictSlowTrendHandler) updateConfig(w http.ResponseWriter, r *htt
 	prevRecoveryDurationGap := handler.config.RecoveryDurationGap
 	recoveryDurationGap := uint64(recoveryDurationGapFloat)
 	handler.config.RecoveryDurationGap = recoveryDurationGap
-	if err := handler.config.persistLocked(); err != nil {
+	if err := handler.config.save(); err != nil {
 		handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		handler.config.RecoveryDurationGap = prevRecoveryDurationGap
 		return
@@ -304,17 +293,11 @@ func (s *evictSlowTrendScheduler) EncodeConfig() ([]byte, error) {
 func (s *evictSlowTrendScheduler) ReloadConfig() error {
 	s.conf.Lock()
 	defer s.conf.Unlock()
-	cfgData, err := s.conf.storage.LoadSchedulerConfig(s.GetName())
-	if err != nil {
-		return err
-	}
-	if len(cfgData) == 0 {
-		return nil
-	}
 	newCfg := &evictSlowTrendSchedulerConfig{}
-	if err = DecodeConfig([]byte(cfgData), newCfg); err != nil {
+	if err := s.conf.load(newCfg); err != nil {
 		return err
 	}
+
 	old := make(map[uint64]struct{})
 	for _, id := range s.conf.EvictedStores {
 		old[id] = struct{}{}
@@ -456,11 +439,12 @@ func (s *evictSlowTrendScheduler) Schedule(cluster sche.SchedulerCluster, _ bool
 
 func newEvictSlowTrendScheduler(opController *operator.Controller, conf *evictSlowTrendSchedulerConfig) Scheduler {
 	handler := newEvictSlowTrendHandler(conf)
-	return &evictSlowTrendScheduler{
+	sche := &evictSlowTrendScheduler{
 		BaseScheduler: NewBaseScheduler(opController, types.EvictSlowTrendScheduler),
 		conf:          conf,
 		handler:       handler,
 	}
+	return sche
 }
 
 func chooseEvictCandidate(cluster sche.SchedulerCluster, lastEvictCandidate *slowCandidate) (slowStore *core.StoreInfo) {

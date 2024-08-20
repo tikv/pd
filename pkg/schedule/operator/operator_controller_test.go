@@ -523,7 +523,7 @@ func (suite *operatorControllerTestSuite) TestCheckOperatorLightly() {
 	re.Nil(r)
 	re.Equal(reason, RegionNotFound)
 
-	// check failed because of verions of region epoch changed
+	// check failed because of versions of region epoch changed
 	cluster.PutRegion(target)
 	source.GetMeta().RegionEpoch = &metapb.RegionEpoch{ConfVer: 0, Version: 1}
 	r, reason = controller.checkOperatorLightly(ops[0])

@@ -20,7 +20,6 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/pingcap/errors"
-	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
@@ -30,7 +29,6 @@ import (
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
 	types "github.com/tikv/pd/pkg/schedule/type"
-	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/unrolled/render"
@@ -48,7 +46,8 @@ const (
 
 type evictLeaderSchedulerConfig struct {
 	syncutil.RWMutex
-	storage           endpoint.ConfigStorage
+	schedulerConfig
+
 	StoreIDWithRanges map[uint64][]core.KeyRange `json:"store-id-ranges"`
 	// Batch is used to generate multiple operators by one scheduling
 	Batch             int `json:"batch"`
@@ -83,17 +82,6 @@ func (conf *evictLeaderSchedulerConfig) clone() *evictLeaderSchedulerConfig {
 		StoreIDWithRanges: storeIDWithRanges,
 		Batch:             conf.Batch,
 	}
-}
-
-func (conf *evictLeaderSchedulerConfig) persistLocked() error {
-	data, err := EncodeConfig(conf)
-	failpoint.Inject("persistFail", func() {
-		err = errors.New("fail to persist")
-	})
-	if err != nil {
-		return err
-	}
-	return conf.storage.SaveSchedulerConfig(types.EvictLeaderScheduler.String(), data)
 }
 
 func (conf *evictLeaderSchedulerConfig) getRanges(id uint64) []string {
@@ -145,18 +133,11 @@ func (conf *evictLeaderSchedulerConfig) encodeConfig() ([]byte, error) {
 	return EncodeConfig(conf)
 }
 
-func (conf *evictLeaderSchedulerConfig) reloadConfig(name string) error {
+func (conf *evictLeaderSchedulerConfig) reloadConfig() error {
 	conf.Lock()
 	defer conf.Unlock()
-	cfgData, err := conf.storage.LoadSchedulerConfig(name)
-	if err != nil {
-		return err
-	}
-	if len(cfgData) == 0 {
-		return nil
-	}
 	newCfg := &evictLeaderSchedulerConfig{}
-	if err = DecodeConfig([]byte(cfgData), newCfg); err != nil {
+	if err := conf.load(newCfg); err != nil {
 		return err
 	}
 	pauseAndResumeLeaderTransfer(conf.cluster, conf.StoreIDWithRanges, newCfg.StoreIDWithRanges)
@@ -203,7 +184,7 @@ func (conf *evictLeaderSchedulerConfig) update(id uint64, newRanges []core.KeyRa
 		conf.StoreIDWithRanges[id] = newRanges
 	}
 	conf.Batch = batch
-	err := conf.persistLocked()
+	err := conf.save()
 	if err != nil && id != 0 {
 		_, _ = conf.removeStoreLocked(id)
 	}
@@ -220,7 +201,7 @@ func (conf *evictLeaderSchedulerConfig) delete(id uint64) (any, error) {
 	}
 
 	keyRanges := conf.StoreIDWithRanges[id]
-	err = conf.persistLocked()
+	err = conf.save()
 	if err != nil {
 		conf.resetStoreLocked(id, keyRanges)
 		conf.Unlock()
@@ -275,7 +256,7 @@ func (s *evictLeaderScheduler) EncodeConfig() ([]byte, error) {
 
 // ReloadConfig reloads the config from the storage.
 func (s *evictLeaderScheduler) ReloadConfig() error {
-	return s.conf.reloadConfig(s.GetName())
+	return s.conf.reloadConfig()
 }
 
 // PrepareConfig implements the Scheduler interface.

@@ -32,7 +32,6 @@ import (
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
 	types "github.com/tikv/pd/pkg/schedule/type"
-	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/reflectutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
@@ -56,8 +55,9 @@ const (
 
 type balanceLeaderSchedulerConfig struct {
 	syncutil.RWMutex
-	storage endpoint.ConfigStorage
-	Ranges  []core.KeyRange `json:"ranges"`
+	schedulerConfig
+
+	Ranges []core.KeyRange `json:"ranges"`
 	// Batch is used to generate multiple operators by one scheduling
 	Batch int `json:"batch"`
 }
@@ -79,7 +79,7 @@ func (conf *balanceLeaderSchedulerConfig) update(data []byte) (int, any) {
 			}
 			return http.StatusBadRequest, "invalid batch size which should be an integer between 1 and 10"
 		}
-		if err := conf.persistLocked(); err != nil {
+		if err := conf.save(); err != nil {
 			log.Warn("failed to save balance-leader-scheduler config", errs.ZapError(err))
 		}
 		log.Info("balance-leader-scheduler config is updated", zap.ByteString("old", oldConfig), zap.ByteString("new", newConfig))
@@ -109,14 +109,6 @@ func (conf *balanceLeaderSchedulerConfig) clone() *balanceLeaderSchedulerConfig 
 		Ranges: ranges,
 		Batch:  conf.Batch,
 	}
-}
-
-func (conf *balanceLeaderSchedulerConfig) persistLocked() error {
-	data, err := EncodeConfig(conf)
-	if err != nil {
-		return err
-	}
-	return conf.storage.SaveSchedulerConfig(BalanceLeaderName, data)
 }
 
 func (conf *balanceLeaderSchedulerConfig) getBatch() int {
@@ -216,15 +208,9 @@ func (l *balanceLeaderScheduler) EncodeConfig() ([]byte, error) {
 func (l *balanceLeaderScheduler) ReloadConfig() error {
 	l.conf.Lock()
 	defer l.conf.Unlock()
-	cfgData, err := l.conf.storage.LoadSchedulerConfig(l.GetName())
-	if err != nil {
-		return err
-	}
-	if len(cfgData) == 0 {
-		return nil
-	}
+
 	newCfg := &balanceLeaderSchedulerConfig{}
-	if err = DecodeConfig([]byte(cfgData), newCfg); err != nil {
+	if err := l.conf.load(newCfg); err != nil {
 		return err
 	}
 	l.conf.Ranges = newCfg.Ranges

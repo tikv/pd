@@ -16,8 +16,6 @@ package schedulers
 
 import (
 	"context"
-	"encoding/json"
-	"strings"
 	"testing"
 
 	"github.com/pingcap/failpoint"
@@ -103,18 +101,10 @@ func (suite *evictSlowStoreTestSuite) TestEvictSlowStore() {
 	re.Zero(es2.conf.evictStore())
 
 	// check the value from storage.
-	sches, vs, err := es2.conf.storage.LoadAllSchedulerConfigs()
-	re.NoError(err)
-	valueStr := ""
-	for id, sche := range sches {
-		if strings.EqualFold(sche, EvictSlowStoreName) {
-			valueStr = vs[id]
-		}
-	}
-
 	var persistValue evictSlowStoreSchedulerConfig
-	err = json.Unmarshal([]byte(valueStr), &persistValue)
+	err := es2.conf.load(&persistValue)
 	re.NoError(err)
+
 	re.Equal(es2.conf.EvictedStores, persistValue.EvictedStores)
 	re.Zero(persistValue.evictStore())
 	re.True(persistValue.readyForRecovery())

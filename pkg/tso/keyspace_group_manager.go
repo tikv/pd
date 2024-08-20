@@ -45,8 +45,8 @@ import (
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
-	"go.etcd.io/etcd/clientv3"
-	"go.etcd.io/etcd/mvcc/mvccpb"
+	"go.etcd.io/etcd/api/v3/mvccpb"
+	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 )
 
@@ -1302,6 +1302,7 @@ func (kgm *KeyspaceGroupManager) mergingChecker(ctx context.Context, mergeTarget
 		mergeMap[id] = struct{}{}
 	}
 
+mergeLoop:
 	for {
 		select {
 		case <-ctx.Done():
@@ -1373,14 +1374,12 @@ func (kgm *KeyspaceGroupManager) mergingChecker(ctx context.Context, mergeTarget
 					zap.Uint32("merge-id", id),
 					zap.Time("ts", ts),
 					zap.Error(err))
-				break
+				// Retry from the beginning of the loop.
+				continue mergeLoop
 			}
 			if ts.After(mergedTS) {
 				mergedTS = ts
 			}
-		}
-		if err != nil {
-			continue
 		}
 		// Update the newly merged TSO if the merged TSO is not zero.
 		if mergedTS != typeutil.ZeroTime {

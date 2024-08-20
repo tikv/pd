@@ -33,11 +33,12 @@ import (
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
-	"go.etcd.io/etcd/clientv3"
-	"go.etcd.io/etcd/etcdserver"
-	"go.etcd.io/etcd/etcdserver/api/v3rpc/rpctypes"
-	"go.etcd.io/etcd/mvcc/mvccpb"
-	"go.etcd.io/etcd/pkg/types"
+	"go.etcd.io/etcd/api/v3/etcdserverpb"
+	"go.etcd.io/etcd/api/v3/mvccpb"
+	"go.etcd.io/etcd/api/v3/v3rpc/rpctypes"
+	etcdtypes "go.etcd.io/etcd/client/pkg/v3/types"
+	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.etcd.io/etcd/server/v3/etcdserver"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 )
@@ -74,7 +75,7 @@ const (
 
 // CheckClusterID checks etcd cluster ID, returns an error if mismatch.
 // This function will never block even quorum is not satisfied.
-func CheckClusterID(localClusterID types.ID, um types.URLsMap, tlsConfig *tls.Config) error {
+func CheckClusterID(localClusterID etcdtypes.ID, um etcdtypes.URLsMap, tlsConfig *tls.Config) error {
 	if len(um) == 0 {
 		return nil
 	}
@@ -88,7 +89,7 @@ func CheckClusterID(localClusterID types.ID, um types.URLsMap, tlsConfig *tls.Co
 		trp := &http.Transport{
 			TLSClientConfig: tlsConfig,
 		}
-		remoteCluster, gerr := etcdserver.GetClusterFromRemotePeers(nil, []string{u}, trp, true)
+		remoteCluster, gerr := etcdserver.GetClusterFromRemotePeers(nil, []string{u}, trp)
 		trp.CloseIdleConnections()
 		if gerr != nil {
 			// Do not return error, because other members may be not ready.
@@ -119,12 +120,17 @@ func ListEtcdMembers(ctx context.Context, client *clientv3.Client) (*clientv3.Me
 		time.Sleep(time.Duration(d) * time.Second)
 	})
 	newCtx, cancel := context.WithTimeout(ctx, DefaultRequestTimeout)
-	listResp, err := client.MemberList(newCtx)
+	// After the etcd server is upgraded to v3.5.x, the MemberList API will return the member list in a linearizable way by default.
+	// It is introduced by https://github.com/etcd-io/etcd/pull/11639
+	// If Linearizable is set to false, the member list will be returned with server's local data.
+	// If Linearizable is set to true, it is served with linearizable guarantee. If the server is disconnected from quorum, `MemberList` call will fail.
+	c := clientv3.RetryClusterClient(client)
+	resp, err := c.MemberList(newCtx, &etcdserverpb.MemberListRequest{Linearizable: false})
 	cancel()
 	if err != nil {
-		return listResp, errs.ErrEtcdMemberList.Wrap(err).GenWithStackByCause()
+		return (*clientv3.MemberListResponse)(resp), errs.ErrEtcdMemberList.Wrap(err).GenWithStackByCause()
 	}
-	return listResp, nil
+	return (*clientv3.MemberListResponse)(resp), nil
 }
 
 // RemoveEtcdMember removes a member by the given id.

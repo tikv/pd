@@ -222,15 +222,9 @@ func (h *hotScheduler) EncodeConfig() ([]byte, error) {
 func (h *hotScheduler) ReloadConfig() error {
 	h.conf.Lock()
 	defer h.conf.Unlock()
-	cfgData, err := h.conf.storage.LoadSchedulerConfig(h.GetName())
-	if err != nil {
-		return err
-	}
-	if len(cfgData) == 0 {
-		return nil
-	}
+
 	newCfg := &hotRegionSchedulerConfig{}
-	if err := DecodeConfig([]byte(cfgData), newCfg); err != nil {
+	if err := h.conf.load(newCfg); err != nil {
 		return err
 	}
 	h.conf.MinHotByteRate = newCfg.MinHotByteRate
