@@ -534,8 +534,11 @@ func schedulersRegister() {
 	})
 
 	RegisterScheduler(types.TransferWitnessLeaderScheduler, func(opController *operator.Controller,
-		_ endpoint.ConfigStorage, _ ConfigDecoder, _ ...func(string) error) (Scheduler, error) {
-		return newTransferWitnessLeaderScheduler(opController), nil
+		storage endpoint.ConfigStorage, _ ConfigDecoder, _ ...func(string) error) (Scheduler, error) {
+		conf := &baseSchedulerConfig{}
+		sche := newTransferWitnessLeaderScheduler(opController, conf)
+		conf.init(sche.GetName(), storage, conf)
+		return sche, nil
 	})
 
 	// evict slow store by trend

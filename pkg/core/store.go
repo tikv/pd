@@ -777,6 +777,7 @@ func (s *StoresInfo) ResetStores() {
 
 // PauseLeaderTransfer pauses a StoreInfo with storeID.
 func (s *StoresInfo) PauseLeaderTransfer(storeID uint64) error {
+	log.Info("pause leader transfer", zap.Uint64("store-id", storeID))
 	s.Lock()
 	defer s.Unlock()
 	store, ok := s.stores[storeID]

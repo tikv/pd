@@ -199,6 +199,7 @@ func (s *grantLeaderScheduler) CleanConfig(cluster sche.SchedulerCluster) {
 	s.conf.RLock()
 	defer s.conf.RUnlock()
 	for id := range s.conf.StoreIDWithRanges {
+		log.Info("resume leader transfer", zap.Uint64("store-id", id))
 		cluster.ResumeLeaderTransfer(id)
 	}
 }

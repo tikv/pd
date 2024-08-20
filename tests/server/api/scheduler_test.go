@@ -28,7 +28,6 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
-	sc "github.com/tikv/pd/pkg/schedule/config"
 	types "github.com/tikv/pd/pkg/schedule/type"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/utils/apiutil"
@@ -254,12 +253,14 @@ func (suite *scheduleTestSuite) checkAPI(cluster *tests.TestCluster) {
 					"strict-picking-store":       "true",
 					"history-sample-duration":    "5m0s",
 					"history-sample-interval":    "30s",
+					"disabled":                   false,
 				}
 				tu.Eventually(re, func() bool {
 					re.NoError(tu.ReadGetJSON(re, tests.TestDialClient, listURL, &resp))
 					re.Equal(len(expectMap), len(resp), "expect %v, got %v", expectMap, resp)
 					for key := range expectMap {
 						if !reflect.DeepEqual(resp[key], expectMap[key]) {
+							suite.T().Logf("key: %s, expect: %v, got: %v", key, expectMap[key], resp[key])
 							return false
 						}
 					}
@@ -531,6 +532,7 @@ func (suite *scheduleTestSuite) checkAPI(cluster *tests.TestCluster) {
 		},
 	}
 	for _, testCase := range testCases {
+		suite.T().Log(testCase.name)
 		input := make(map[string]any)
 		input["name"] = testCase.name
 		for _, a := range testCase.args {
@@ -550,6 +552,7 @@ func (suite *scheduleTestSuite) checkAPI(cluster *tests.TestCluster) {
 
 	// add schedulers.
 	for _, testCase := range testCases {
+		suite.T().Log(testCase.name)
 		input := make(map[string]any)
 		input["name"] = testCase.name
 		for _, a := range testCase.args {
@@ -644,40 +647,28 @@ func (suite *scheduleTestSuite) checkDisable(cluster *tests.TestCluster) {
 		tests.MustPutStore(re, cluster, store)
 	}
 
-	name := "shuffle-leader-scheduler"
-	input := make(map[string]any)
-	input["name"] = name
-	body, err := json.Marshal(input)
-	re.NoError(err)
-	addScheduler(re, urlPrefix, body)
+	name := types.BalanceLeaderScheduler.String()
+	suite.assertSchedulerExists(urlPrefix, name)
 
-	u := fmt.Sprintf("%s%s/api/v1/config/schedule", leaderAddr, apiPrefix)
-	var scheduleConfig sc.ScheduleConfig
-	err = tu.ReadGetJSON(re, tests.TestDialClient, u, &scheduleConfig)
+	updateURL := fmt.Sprintf("%s%s%s/%s/config", leaderAddr, apiPrefix, server.SchedulerConfigHandlerPath, name)
+	listURL := fmt.Sprintf("%s%s%s/%s/list", leaderAddr, apiPrefix, server.SchedulerConfigHandlerPath, name)
+	resp := make(map[string]any)
+	re.NoError(tu.ReadGetJSON(re, tests.TestDialClient, listURL, &resp))
+	resp["disabled"] = true
+	body, err := json.Marshal(resp)
 	re.NoError(err)
-
-	originSchedulers := scheduleConfig.Schedulers
-	scheduleConfig.Schedulers = sc.SchedulerConfigs{sc.SchedulerConfig{
-		Type:    types.SchedulerTypeCompatibleMap[types.ShuffleLeaderScheduler],
-		Disable: true,
-	}}
-	body, err = json.Marshal(scheduleConfig)
-	re.NoError(err)
-	err = tu.CheckPostJSON(tests.TestDialClient, u, body, tu.StatusOK(re))
-	re.NoError(err)
+	re.NoError(tu.CheckPostJSON(tests.TestDialClient, updateURL, body, tu.StatusOK(re)))
 
 	assertNoScheduler(re, urlPrefix, name)
 	suite.assertSchedulerExists(fmt.Sprintf("%s?status=disabled", urlPrefix), name)
 
 	// reset schedule config
-	scheduleConfig.Schedulers = originSchedulers
-	body, err = json.Marshal(scheduleConfig)
+	resp["disabled"] = false
+	body, err = json.Marshal(resp)
 	re.NoError(err)
-	err = tu.CheckPostJSON(tests.TestDialClient, u, body, tu.StatusOK(re))
+	err = tu.CheckPostJSON(tests.TestDialClient, updateURL, body, tu.StatusOK(re))
 	re.NoError(err)
-
-	deleteScheduler(re, urlPrefix, name)
-	assertNoScheduler(re, urlPrefix, name)
+	suite.assertSchedulerExists(urlPrefix, name)
 }
 
 func addScheduler(re *require.Assertions, urlPrefix string, body []byte) {
