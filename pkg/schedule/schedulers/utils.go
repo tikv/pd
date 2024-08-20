@@ -286,7 +286,7 @@ func sliceLoadCmp(cmps ...storeLoadCmp) storeLoadCmp {
 }
 
 // stLdRankCmp returns a cmp that compares the two loads with discretized data.
-// For example, if the rank function discretice data by step 10 , the load 11 and 19 will be considered equal.
+// For example, if the rank function discretize data by step 10 , the load 11 and 19 will be considered equal.
 func stLdRankCmp(dim func(ld *statistics.StoreLoad) float64, rank func(value float64) int64) storeLoadCmp {
 	return func(ld1, ld2 *statistics.StoreLoad) int {
 		return rankCmp(dim(ld1), dim(ld2), rank)
