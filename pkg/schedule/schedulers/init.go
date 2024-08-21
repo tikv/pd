@@ -49,7 +49,6 @@ func schedulersRegister() {
 			}
 			conf.Ranges = ranges
 			conf.Batch = BalanceLeaderBatchSize
-			// conf.setArgs(args)
 			return nil
 		}
 	})
@@ -82,7 +81,6 @@ func schedulersRegister() {
 				return err
 			}
 			conf.Ranges = ranges
-			// conf.setArgs(args)
 			return nil
 		}
 	})
@@ -113,7 +111,6 @@ func schedulersRegister() {
 			}
 			conf.Ranges = ranges
 			conf.Batch = balanceWitnessBatchSize
-			// conf.setArgs(args)
 			return nil
 		}
 	})
@@ -156,7 +153,6 @@ func schedulersRegister() {
 			}
 			conf.StoreIDWithRanges[id] = ranges
 			conf.Batch = EvictLeaderBatchSize
-			// conf.setArgs(args)
 			return nil
 		}
 	})
@@ -223,7 +219,6 @@ func schedulersRegister() {
 			if !conf.setStore(leaderID, storeIDs) {
 				return errs.ErrSchedulerConfig
 			}
-			// conf.setArgs(args)
 			return nil
 		}
 	})
@@ -293,7 +288,6 @@ func schedulersRegister() {
 				return err
 			}
 			conf.StoreIDWithRanges[id] = ranges
-			// conf.setArgs(args)
 			return nil
 		}
 	})
@@ -326,7 +320,6 @@ func schedulersRegister() {
 				return err
 			}
 			conf.Ranges = ranges
-			// conf.setArgs(args)
 			return nil
 		}
 	})
@@ -356,7 +349,6 @@ func schedulersRegister() {
 				return err
 			}
 			conf.Ranges = ranges
-			// conf.setArgs(args)
 			return nil
 		}
 	})
@@ -391,7 +383,6 @@ func schedulersRegister() {
 			conf.StartKey = args[0]
 			conf.EndKey = args[1]
 			conf.RangeName = args[2]
-			// conf.setArgs(args)
 			return nil
 		}
 	})
@@ -428,7 +419,6 @@ func schedulersRegister() {
 				}
 				conf.Limit = limit
 			}
-			// conf.setArgs(args)
 			return nil
 		}
 	})
@@ -459,7 +449,6 @@ func schedulersRegister() {
 				return err
 			}
 			conf.Ranges = ranges
-			// conf.setArgs(args)
 			return nil
 		}
 	})
@@ -490,7 +479,6 @@ func schedulersRegister() {
 			}
 			conf.Ranges = ranges
 			conf.Roles = allRoles
-			// conf.setArgs(args)
 			return nil
 		}
 	})

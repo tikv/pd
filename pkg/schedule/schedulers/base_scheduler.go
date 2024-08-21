@@ -105,7 +105,7 @@ func (*BaseScheduler) GetNextInterval(interval time.Duration) time.Duration {
 func (*BaseScheduler) PrepareConfig(sche.SchedulerCluster) error { return nil }
 
 // CleanConfig does some cleanup work about config.
-func (s *BaseScheduler) CleanConfig(sche.SchedulerCluster) {}
+func (*BaseScheduler) CleanConfig(sche.SchedulerCluster) {}
 
 // GetName returns the name of the scheduler
 func (s *BaseScheduler) GetName() string {
