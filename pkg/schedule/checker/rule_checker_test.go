@@ -62,7 +62,7 @@ func (suite *ruleCheckerTestSuite) SetupTest() {
 	suite.cluster.SetEnableWitness(true)
 	suite.cluster.SetEnableUseJointConsensus(false)
 	suite.ruleManager = suite.cluster.RuleManager
-	suite.rc = NewRuleChecker(suite.ctx, suite.cluster, suite.ruleManager, cache.NewDefaultCache(10))
+	suite.rc = NewRuleChecker(suite.ctx, suite.cluster, suite.ruleManager, cache.NewIDTTL(suite.ctx, time.Minute, 3*time.Minute))
 }
 
 func (suite *ruleCheckerTestSuite) TearDownTest() {
@@ -1955,7 +1955,7 @@ func (suite *ruleCheckerTestAdvancedSuite) SetupTest() {
 	suite.cluster.SetEnableWitness(true)
 	suite.cluster.SetEnableUseJointConsensus(true)
 	suite.ruleManager = suite.cluster.RuleManager
-	suite.rc = NewRuleChecker(suite.ctx, suite.cluster, suite.ruleManager, cache.NewDefaultCache(10))
+	suite.rc = NewRuleChecker(suite.ctx, suite.cluster, suite.ruleManager, cache.NewIDTTL(suite.ctx, time.Minute, 3*time.Minute))
 }
 
 func (suite *ruleCheckerTestAdvancedSuite) TearDownTest() {

@@ -26,8 +26,7 @@ import (
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
-	types "github.com/tikv/pd/pkg/schedule/type"
-	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/unrolled/render"
@@ -35,19 +34,15 @@ import (
 )
 
 const (
-	// EvictSlowStoreName is evict leader scheduler name.
-	EvictSlowStoreName = "evict-slow-store-scheduler"
-	// EvictSlowStoreType is evict leader scheduler type.
-	EvictSlowStoreType = "evict-slow-store"
-
 	slowStoreEvictThreshold   = 100
 	slowStoreRecoverThreshold = 1
 )
 
 type evictSlowStoreSchedulerConfig struct {
 	syncutil.RWMutex
+	schedulerConfig
+
 	cluster *core.BasicCluster
-	storage endpoint.ConfigStorage
 	// Last timestamp of the chosen slow store for eviction.
 	lastSlowStoreCaptureTS time.Time
 	// Duration gap for recovering the candidate, unit: s.
@@ -55,9 +50,9 @@ type evictSlowStoreSchedulerConfig struct {
 	EvictedStores       []uint64 `json:"evict-stores"`
 }
 
-func initEvictSlowStoreSchedulerConfig(storage endpoint.ConfigStorage) *evictSlowStoreSchedulerConfig {
+func initEvictSlowStoreSchedulerConfig() *evictSlowStoreSchedulerConfig {
 	return &evictSlowStoreSchedulerConfig{
-		storage:                storage,
+		schedulerConfig:        &baseSchedulerConfig{},
 		lastSlowStoreCaptureTS: time.Time{},
 		RecoveryDurationGap:    defaultRecoveryDurationGap,
 		EvictedStores:          make([]uint64, 0),
@@ -70,17 +65,6 @@ func (conf *evictSlowStoreSchedulerConfig) clone() *evictSlowStoreSchedulerConfi
 	return &evictSlowStoreSchedulerConfig{
 		RecoveryDurationGap: conf.RecoveryDurationGap,
 	}
-}
-
-func (conf *evictSlowStoreSchedulerConfig) persistLocked() error {
-	data, err := EncodeConfig(conf)
-	failpoint.Inject("persistFail", func() {
-		err = errors.New("fail to persist")
-	})
-	if err != nil {
-		return err
-	}
-	return conf.storage.SaveSchedulerConfig(types.EvictSlowStoreScheduler.String(), data)
 }
 
 func (conf *evictSlowStoreSchedulerConfig) getStores() []uint64 {
@@ -107,7 +91,7 @@ func (conf *evictSlowStoreSchedulerConfig) evictStore() uint64 {
 	return conf.getStores()[0]
 }
 
-// readyForRecovery checks whether the last cpatured candidate is ready for recovery.
+// readyForRecovery checks whether the last captured candidate is ready for recovery.
 func (conf *evictSlowStoreSchedulerConfig) readyForRecovery() bool {
 	conf.RLock()
 	defer conf.RUnlock()
@@ -123,7 +107,7 @@ func (conf *evictSlowStoreSchedulerConfig) setStoreAndPersist(id uint64) error {
 	defer conf.Unlock()
 	conf.EvictedStores = []uint64{id}
 	conf.lastSlowStoreCaptureTS = time.Now()
-	return conf.persistLocked()
+	return conf.save()
 }
 
 func (conf *evictSlowStoreSchedulerConfig) clearAndPersist() (oldID uint64, err error) {
@@ -133,7 +117,7 @@ func (conf *evictSlowStoreSchedulerConfig) clearAndPersist() (oldID uint64, err 
 	if oldID > 0 {
 		conf.EvictedStores = []uint64{}
 		conf.lastSlowStoreCaptureTS = time.Time{}
-		err = conf.persistLocked()
+		err = conf.save()
 	}
 	return
 }
@@ -164,12 +148,13 @@ func (handler *evictSlowStoreHandler) updateConfig(w http.ResponseWriter, r *htt
 		handler.rd.JSON(w, http.StatusInternalServerError, errors.New("invalid argument for 'recovery-duration'").Error())
 		return
 	}
+
 	handler.config.Lock()
 	defer handler.config.Unlock()
 	prevRecoveryDurationGap := handler.config.RecoveryDurationGap
 	recoveryDurationGap := uint64(recoveryDurationGapFloat)
 	handler.config.RecoveryDurationGap = recoveryDurationGap
-	if err := handler.config.persistLocked(); err != nil {
+	if err := handler.config.save(); err != nil {
 		handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		handler.config.RecoveryDurationGap = prevRecoveryDurationGap
 		return
@@ -203,15 +188,9 @@ func (s *evictSlowStoreScheduler) EncodeConfig() ([]byte, error) {
 func (s *evictSlowStoreScheduler) ReloadConfig() error {
 	s.conf.Lock()
 	defer s.conf.Unlock()
-	cfgData, err := s.conf.storage.LoadSchedulerConfig(s.GetName())
-	if err != nil {
-		return err
-	}
-	if len(cfgData) == 0 {
-		return nil
-	}
+
 	newCfg := &evictSlowStoreSchedulerConfig{}
-	if err = DecodeConfig([]byte(cfgData), newCfg); err != nil {
+	if err := s.conf.load(newCfg); err != nil {
 		return err
 	}
 	old := make(map[uint64]struct{})

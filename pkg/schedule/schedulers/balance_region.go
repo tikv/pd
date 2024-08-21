@@ -26,15 +26,8 @@ import (
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
-	types "github.com/tikv/pd/pkg/schedule/type"
+	"github.com/tikv/pd/pkg/schedule/types"
 	"go.uber.org/zap"
-)
-
-const (
-	// BalanceRegionName is balance region scheduler name.
-	BalanceRegionName = "balance-region-scheduler"
-	// BalanceRegionType is balance region scheduler type.
-	BalanceRegionType = "balance-region"
 )
 
 type balanceRegionSchedulerConfig struct {
@@ -245,7 +238,7 @@ func (s *balanceRegionScheduler) transferPeer(solver *solver, collector *plan.Co
 		oldPeer := solver.Region.GetStorePeer(sourceID)
 		newPeer := &metapb.Peer{StoreId: solver.Target.GetID(), Role: oldPeer.Role}
 		solver.Step++
-		op, err := operator.CreateMovePeerOperator(BalanceRegionType, solver, solver.Region, operator.OpRegion, oldPeer.GetStoreId(), newPeer)
+		op, err := operator.CreateMovePeerOperator(s.GetName(), solver, solver.Region, operator.OpRegion, oldPeer.GetStoreId(), newPeer)
 		if err != nil {
 			balanceRegionCreateOpFailCounter.Inc()
 			if collector != nil {

@@ -22,7 +22,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/core/storelimit"
-	types "github.com/tikv/pd/pkg/schedule/type"
+	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 )
 
@@ -33,13 +33,13 @@ const RejectLeader = "reject-leader"
 var schedulerMap sync.Map
 
 // RegisterScheduler registers the scheduler type.
-func RegisterScheduler(typ string) {
+func RegisterScheduler(typ types.CheckerSchedulerType) {
 	schedulerMap.Store(typ, struct{}{})
 }
 
 // IsSchedulerRegistered checks if the named scheduler type is registered.
-func IsSchedulerRegistered(name string) bool {
-	_, ok := schedulerMap.Load(name)
+func IsSchedulerRegistered(typ types.CheckerSchedulerType) bool {
+	_, ok := schedulerMap.Load(typ)
 	return ok
 }
 

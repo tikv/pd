@@ -29,7 +29,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/server/config"
-	"go.etcd.io/etcd/clientv3"
+	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 )
 
@@ -431,7 +431,7 @@ func findBestGroupToScaleOut(strategy *Strategy, groups []*Plan, component Compo
 		},
 	}
 
-	// TODO: we can provide different senerios by using options and remove this kind of special judgement.
+	// TODO: we can provide different scenarios by using options and remove this kind of special judgement.
 	if component == TiKV {
 		group.Labels[filter.SpecialUseKey] = filter.SpecialUseHotRegion
 	}

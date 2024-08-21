@@ -37,7 +37,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/mcs/utils"
+	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/tso"
@@ -47,7 +47,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/server/cluster"
-	"go.etcd.io/etcd/clientv3"
+	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/multierr"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -951,7 +951,7 @@ func (s *GrpcServer) StoreHeartbeat(ctx context.Context, request *pdpb.StoreHear
 
 		s.handleDamagedStore(request.GetStats())
 		storeHeartbeatHandleDuration.WithLabelValues(storeAddress, storeLabel).Observe(time.Since(start).Seconds())
-		if s.IsServiceIndependent(utils.SchedulingServiceName) {
+		if rc.IsServiceIndependent(constant.SchedulingServiceName) {
 			forwardCli, _ := s.updateSchedulingClient(ctx)
 			cli := forwardCli.getClient()
 			if cli != nil {
@@ -987,7 +987,7 @@ func (s *GrpcServer) StoreHeartbeat(ctx context.Context, request *pdpb.StoreHear
 // 2. forwardedHost is not empty and forwardedHost is equal to pre, return pre
 // 3. the rest of cases, update forwardedHost and return new client
 func (s *GrpcServer) updateSchedulingClient(ctx context.Context) (*schedulingClient, error) {
-	forwardedHost, _ := s.GetServicePrimaryAddr(ctx, utils.SchedulingServiceName)
+	forwardedHost, _ := s.GetServicePrimaryAddr(ctx, constant.SchedulingServiceName)
 	if forwardedHost == "" {
 		return nil, ErrNotFoundSchedulingAddr
 	}
@@ -1024,7 +1024,7 @@ type bucketHeartbeatServer struct {
 	closed int32
 }
 
-func (b *bucketHeartbeatServer) Send(bucket *pdpb.ReportBucketsResponse) error {
+func (b *bucketHeartbeatServer) send(bucket *pdpb.ReportBucketsResponse) error {
 	if atomic.LoadInt32(&b.closed) == 1 {
 		return status.Errorf(codes.Canceled, "stream is closed")
 	}
@@ -1047,7 +1047,7 @@ func (b *bucketHeartbeatServer) Send(bucket *pdpb.ReportBucketsResponse) error {
 	}
 }
 
-func (b *bucketHeartbeatServer) Recv() (*pdpb.ReportBucketsRequest, error) {
+func (b *bucketHeartbeatServer) recv() (*pdpb.ReportBucketsRequest, error) {
 	if atomic.LoadInt32(&b.closed) == 1 {
 		return nil, io.EOF
 	}
@@ -1083,7 +1083,7 @@ func (s *GrpcServer) ReportBuckets(stream pdpb.PD_ReportBucketsServer) error {
 		}
 	}
 	for {
-		request, err := server.Recv()
+		request, err := server.recv()
 		failpoint.Inject("grpcClientClosed", func() {
 			err = status.Error(codes.Canceled, "grpc client closed")
 			request = nil
@@ -1132,7 +1132,7 @@ func (s *GrpcServer) ReportBuckets(stream pdpb.PD_ReportBucketsServer) error {
 			resp := &pdpb.ReportBucketsResponse{
 				Header: s.notBootstrappedHeader(),
 			}
-			err := server.Send(resp)
+			err := server.send(resp)
 			return errors.WithStack(err)
 		}
 		if err := s.validateRequest(request.GetHeader()); err != nil {
@@ -1307,7 +1307,7 @@ func (s *GrpcServer) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error
 		regionHeartbeatHandleDuration.WithLabelValues(storeAddress, storeLabel).Observe(time.Since(start).Seconds())
 		regionHeartbeatCounter.WithLabelValues(storeAddress, storeLabel, "report", "ok").Inc()
 
-		if s.IsServiceIndependent(utils.SchedulingServiceName) {
+		if rc.IsServiceIndependent(constant.SchedulingServiceName) {
 			if forwardErrCh != nil {
 				select {
 				case err, ok := <-forwardErrCh:
@@ -1321,7 +1321,7 @@ func (s *GrpcServer) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error
 				default:
 				}
 			}
-			forwardedSchedulingHost, ok := s.GetServicePrimaryAddr(stream.Context(), utils.SchedulingServiceName)
+			forwardedSchedulingHost, ok := s.GetServicePrimaryAddr(stream.Context(), constant.SchedulingServiceName)
 			if !ok || len(forwardedSchedulingHost) == 0 {
 				log.Debug("failed to find scheduling service primary address")
 				if cancel != nil {
@@ -1756,10 +1756,7 @@ func (s *GrpcServer) AskSplit(ctx context.Context, request *pdpb.AskSplitRequest
 				"missing region for split"),
 		}, nil
 	}
-	req := &pdpb.AskSplitRequest{
-		Region: request.Region,
-	}
-	split, err := rc.HandleAskSplit(req)
+	split, err := rc.HandleAskSplit(request)
 	if err != nil {
 		return &pdpb.AskSplitResponse{
 			Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
@@ -1786,7 +1783,13 @@ func (s *GrpcServer) AskBatchSplit(ctx context.Context, request *pdpb.AskBatchSp
 			}, nil
 		}
 	}
-	if s.IsServiceIndependent(utils.SchedulingServiceName) {
+
+	rc := s.GetRaftCluster()
+	if rc == nil {
+		return &pdpb.AskBatchSplitResponse{Header: s.notBootstrappedHeader()}, nil
+	}
+
+	if rc.IsServiceIndependent(constant.SchedulingServiceName) {
 		forwardCli, err := s.updateSchedulingClient(ctx)
 		if err != nil {
 			return &pdpb.AskBatchSplitResponse{
@@ -1821,11 +1824,6 @@ func (s *GrpcServer) AskBatchSplit(ctx context.Context, request *pdpb.AskBatchSp
 		return rsp.(*pdpb.AskBatchSplitResponse), err
 	}
 
-	rc := s.GetRaftCluster()
-	if rc == nil {
-		return &pdpb.AskBatchSplitResponse{Header: s.notBootstrappedHeader()}, nil
-	}
-
 	if !versioninfo.IsFeatureSupported(rc.GetOpts().GetClusterVersion(), versioninfo.BatchSplit) {
 		return &pdpb.AskBatchSplitResponse{Header: s.incompatibleVersion("batch_split")}, nil
 	}
@@ -1835,11 +1833,7 @@ func (s *GrpcServer) AskBatchSplit(ctx context.Context, request *pdpb.AskBatchSp
 				"missing region for split"),
 		}, nil
 	}
-	req := &pdpb.AskBatchSplitRequest{
-		Region:     request.Region,
-		SplitCount: request.SplitCount,
-	}
-	split, err := rc.HandleAskBatchSplit(req)
+	split, err := rc.HandleAskBatchSplit(request)
 	if err != nil {
 		return &pdpb.AskBatchSplitResponse{
 			Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
@@ -2015,7 +2009,13 @@ func (s *GrpcServer) ScatterRegion(ctx context.Context, request *pdpb.ScatterReg
 			}, nil
 		}
 	}
-	if s.IsServiceIndependent(utils.SchedulingServiceName) {
+
+	rc := s.GetRaftCluster()
+	if rc == nil {
+		return &pdpb.ScatterRegionResponse{Header: s.notBootstrappedHeader()}, nil
+	}
+
+	if rc.IsServiceIndependent(constant.SchedulingServiceName) {
 		forwardCli, err := s.updateSchedulingClient(ctx)
 		if err != nil {
 			return &pdpb.ScatterRegionResponse{
@@ -2065,11 +2065,6 @@ func (s *GrpcServer) ScatterRegion(ctx context.Context, request *pdpb.ScatterReg
 		return nil, err
 	} else if rsp != nil {
 		return rsp.(*pdpb.ScatterRegionResponse), err
-	}
-
-	rc := s.GetRaftCluster()
-	if rc == nil {
-		return &pdpb.ScatterRegionResponse{Header: s.notBootstrappedHeader()}, nil
 	}
 
 	if len(request.GetRegionsId()) > 0 {
@@ -2292,7 +2287,13 @@ func (s *GrpcServer) GetOperator(ctx context.Context, request *pdpb.GetOperatorR
 			}, nil
 		}
 	}
-	if s.IsServiceIndependent(utils.SchedulingServiceName) {
+
+	rc := s.GetRaftCluster()
+	if rc == nil {
+		return &pdpb.GetOperatorResponse{Header: s.notBootstrappedHeader()}, nil
+	}
+
+	if rc.IsServiceIndependent(constant.SchedulingServiceName) {
 		forwardCli, err := s.updateSchedulingClient(ctx)
 		if err != nil {
 			return &pdpb.GetOperatorResponse{
@@ -2325,11 +2326,6 @@ func (s *GrpcServer) GetOperator(ctx context.Context, request *pdpb.GetOperatorR
 		return nil, err
 	} else if rsp != nil {
 		return rsp.(*pdpb.GetOperatorResponse), err
-	}
-
-	rc := s.GetRaftCluster()
-	if rc == nil {
-		return &pdpb.GetOperatorResponse{Header: s.notBootstrappedHeader()}, nil
 	}
 
 	opController := rc.GetOperatorController()
@@ -2611,7 +2607,13 @@ func (s *GrpcServer) SplitRegions(ctx context.Context, request *pdpb.SplitRegion
 			}, nil
 		}
 	}
-	if s.IsServiceIndependent(utils.SchedulingServiceName) {
+
+	rc := s.GetRaftCluster()
+	if rc == nil {
+		return &pdpb.SplitRegionsResponse{Header: s.notBootstrappedHeader()}, nil
+	}
+
+	if rc.IsServiceIndependent(constant.SchedulingServiceName) {
 		forwardCli, err := s.updateSchedulingClient(ctx)
 		if err != nil {
 			return &pdpb.SplitRegionsResponse{
@@ -2648,10 +2650,6 @@ func (s *GrpcServer) SplitRegions(ctx context.Context, request *pdpb.SplitRegion
 		return rsp.(*pdpb.SplitRegionsResponse), err
 	}
 
-	rc := s.GetRaftCluster()
-	if rc == nil {
-		return &pdpb.SplitRegionsResponse{Header: s.notBootstrappedHeader()}, nil
-	}
 	finishedPercentage, newRegionIDs := rc.GetRegionSplitter().SplitRegions(ctx, request.GetSplitKeys(), int(request.GetRetryLimit()))
 	return &pdpb.SplitRegionsResponse{
 		Header:             s.header(),

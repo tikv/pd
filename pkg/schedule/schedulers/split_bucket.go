@@ -28,19 +28,14 @@ import (
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
-	types "github.com/tikv/pd/pkg/schedule/type"
+	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/statistics/buckets"
-	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/reflectutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/unrolled/render"
 )
 
 const (
-	// SplitBucketName is the split bucket name.
-	SplitBucketName = "split-bucket-scheduler"
-	// SplitBucketType is the spilt bucket type.
-	SplitBucketType = "split-bucket"
 	// defaultHotDegree is the default hot region threshold.
 	defaultHotDegree  = 3
 	defaultSplitLimit = 10
@@ -48,14 +43,15 @@ const (
 
 func initSplitBucketConfig() *splitBucketSchedulerConfig {
 	return &splitBucketSchedulerConfig{
-		Degree:     defaultHotDegree,
-		SplitLimit: defaultSplitLimit,
+		schedulerConfig: &baseSchedulerConfig{},
+		Degree:          defaultHotDegree,
+		SplitLimit:      defaultSplitLimit,
 	}
 }
 
 type splitBucketSchedulerConfig struct {
 	syncutil.RWMutex
-	storage    endpoint.ConfigStorage
+	schedulerConfig
 	Degree     int    `json:"degree"`
 	SplitLimit uint64 `json:"split-limit"`
 }
@@ -66,14 +62,6 @@ func (conf *splitBucketSchedulerConfig) clone() *splitBucketSchedulerConfig {
 	return &splitBucketSchedulerConfig{
 		Degree: conf.Degree,
 	}
-}
-
-func (conf *splitBucketSchedulerConfig) persistLocked() error {
-	data, err := EncodeConfig(conf)
-	if err != nil {
-		return err
-	}
-	return conf.storage.SaveSchedulerConfig(SplitBucketName, data)
 }
 
 func (conf *splitBucketSchedulerConfig) getDegree() int {
@@ -122,7 +110,7 @@ func (h *splitBucketHandler) updateConfig(w http.ResponseWriter, r *http.Request
 	}
 	newc, _ := json.Marshal(h.conf)
 	if !bytes.Equal(oldc, newc) {
-		if err := h.conf.persistLocked(); err != nil {
+		if err := h.conf.save(); err != nil {
 			log.Warn("failed to save config", errs.ZapError(err))
 		}
 		rd.Text(w, http.StatusOK, "Config is updated.")
@@ -165,18 +153,12 @@ func newSplitBucketScheduler(opController *operator.Controller, conf *splitBucke
 	return ret
 }
 
+// ReloadConfig implement Scheduler interface.
 func (s *splitBucketScheduler) ReloadConfig() error {
 	s.conf.Lock()
 	defer s.conf.Unlock()
-	cfgData, err := s.conf.storage.LoadSchedulerConfig(s.GetName())
-	if err != nil {
-		return err
-	}
-	if len(cfgData) == 0 {
-		return nil
-	}
 	newCfg := &splitBucketSchedulerConfig{}
-	if err := DecodeConfig([]byte(cfgData), newCfg); err != nil {
+	if err := s.conf.load(newCfg); err != nil {
 		return err
 	}
 	s.conf.SplitLimit = newCfg.SplitLimit
@@ -271,7 +253,7 @@ func (s *splitBucketScheduler) splitBucket(plan *splitBucketPlan) []*operator.Op
 		if bytes.Compare(region.GetEndKey(), splitBucket.EndKey) > 0 {
 			splitKey = append(splitKey, splitBucket.EndKey)
 		}
-		op, err := operator.CreateSplitRegionOperator(SplitBucketType, region, operator.OpSplit,
+		op, err := operator.CreateSplitRegionOperator(s.GetName(), region, operator.OpSplit,
 			pdpb.CheckPolicy_USEKEY, splitKey)
 		if err != nil {
 			splitBucketCreateOperatorFailCounter.Inc()

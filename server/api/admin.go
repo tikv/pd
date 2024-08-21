@@ -25,7 +25,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/mcs/utils"
+	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/server"
 	"github.com/unrolled/render"
@@ -61,11 +61,14 @@ func (h *adminHandler) DeleteRegionCache(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	rc.RemoveRegionIfExist(regionID)
-	if h.svr.IsServiceIndependent(utils.SchedulingServiceName) {
-		err = h.DeleteRegionCacheInSchedulingServer(regionID)
-	}
 	msg := "The region is removed from server cache."
-	h.rd.JSON(w, http.StatusOK, h.buildMsg(msg, err))
+	if rc.IsServiceIndependent(constant.SchedulingServiceName) {
+		err = h.deleteRegionCacheInSchedulingServer(regionID)
+		if err != nil {
+			msg = buildMsg(err)
+		}
+	}
+	h.rd.JSON(w, http.StatusOK, msg)
 }
 
 // @Tags     admin
@@ -101,11 +104,15 @@ func (h *adminHandler) DeleteRegionStorage(w http.ResponseWriter, r *http.Reques
 	}
 	// Remove region from cache.
 	rc.RemoveRegionIfExist(regionID)
-	if h.svr.IsServiceIndependent(utils.SchedulingServiceName) {
-		err = h.DeleteRegionCacheInSchedulingServer(regionID)
-	}
 	msg := "The region is removed from server cache and region meta storage."
-	h.rd.JSON(w, http.StatusOK, h.buildMsg(msg, err))
+	if rc.IsServiceIndependent(constant.SchedulingServiceName) {
+		err = h.deleteRegionCacheInSchedulingServer(regionID)
+		if err != nil {
+			msg = buildMsg(err)
+		}
+	}
+
+	h.rd.JSON(w, http.StatusOK, msg)
 }
 
 // @Tags     admin
@@ -117,11 +124,15 @@ func (h *adminHandler) DeleteAllRegionCache(w http.ResponseWriter, r *http.Reque
 	var err error
 	rc := getCluster(r)
 	rc.ResetRegionCache()
-	if h.svr.IsServiceIndependent(utils.SchedulingServiceName) {
-		err = h.DeleteRegionCacheInSchedulingServer()
-	}
 	msg := "All regions are removed from server cache."
-	h.rd.JSON(w, http.StatusOK, h.buildMsg(msg, err))
+	if rc.IsServiceIndependent(constant.SchedulingServiceName) {
+		err = h.deleteRegionCacheInSchedulingServer()
+		if err != nil {
+			msg = buildMsg(err)
+		}
+	}
+
+	h.rd.JSON(w, http.StatusOK, msg)
 }
 
 // Intentionally no swagger mark as it is supposed to be only used in
@@ -148,7 +159,7 @@ func (h *adminHandler) SavePersistFile(w http.ResponseWriter, r *http.Request) {
 	h.rd.Text(w, http.StatusOK, "")
 }
 
-func (h *adminHandler) MarkSnapshotRecovering(w http.ResponseWriter, _ *http.Request) {
+func (h *adminHandler) markSnapshotRecovering(w http.ResponseWriter, _ *http.Request) {
 	if err := h.svr.MarkSnapshotRecovering(); err != nil {
 		h.rd.Text(w, http.StatusInternalServerError, err.Error())
 		return
@@ -156,7 +167,7 @@ func (h *adminHandler) MarkSnapshotRecovering(w http.ResponseWriter, _ *http.Req
 	h.rd.Text(w, http.StatusOK, "")
 }
 
-func (h *adminHandler) IsSnapshotRecovering(w http.ResponseWriter, r *http.Request) {
+func (h *adminHandler) isSnapshotRecovering(w http.ResponseWriter, r *http.Request) {
 	marked, err := h.svr.IsSnapshotRecovering(r.Context())
 	if err != nil {
 		h.rd.Text(w, http.StatusInternalServerError, err.Error())
@@ -168,7 +179,7 @@ func (h *adminHandler) IsSnapshotRecovering(w http.ResponseWriter, r *http.Reque
 	h.rd.JSON(w, http.StatusOK, &resStruct{Marked: marked})
 }
 
-func (h *adminHandler) UnmarkSnapshotRecovering(w http.ResponseWriter, r *http.Request) {
+func (h *adminHandler) unmarkSnapshotRecovering(w http.ResponseWriter, r *http.Request) {
 	if err := h.svr.UnmarkSnapshotRecovering(r.Context()); err != nil {
 		h.rd.Text(w, http.StatusInternalServerError, err.Error())
 		return
@@ -178,7 +189,7 @@ func (h *adminHandler) UnmarkSnapshotRecovering(w http.ResponseWriter, r *http.R
 
 // RecoverAllocID recover base alloc id
 // body should be in {"id": "123"} format
-func (h *adminHandler) RecoverAllocID(w http.ResponseWriter, r *http.Request) {
+func (h *adminHandler) recoverAllocID(w http.ResponseWriter, r *http.Request) {
 	var input map[string]any
 	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &input); err != nil {
 		return
@@ -215,8 +226,8 @@ func (h *adminHandler) RecoverAllocID(w http.ResponseWriter, r *http.Request) {
 	h.rd.Text(w, http.StatusOK, "")
 }
 
-func (h *adminHandler) DeleteRegionCacheInSchedulingServer(id ...uint64) error {
-	addr, ok := h.svr.GetServicePrimaryAddr(h.svr.Context(), utils.SchedulingServiceName)
+func (h *adminHandler) deleteRegionCacheInSchedulingServer(id ...uint64) error {
+	addr, ok := h.svr.GetServicePrimaryAddr(h.svr.Context(), constant.SchedulingServiceName)
 	if !ok {
 		return errs.ErrNotFoundSchedulingAddr.FastGenByArgs()
 	}
@@ -240,9 +251,6 @@ func (h *adminHandler) DeleteRegionCacheInSchedulingServer(id ...uint64) error {
 	return nil
 }
 
-func (h *adminHandler) buildMsg(msg string, err error) string {
-	if h.svr.IsServiceIndependent(utils.SchedulingServiceName) && err != nil {
-		return fmt.Sprintf("This operation was executed in API server but needs to be re-executed on scheduling server due to the following error: %s", err.Error())
-	}
-	return msg
+func buildMsg(err error) string {
+	return fmt.Sprintf("This operation was executed in API server but needs to be re-executed on scheduling server due to the following error: %s", err.Error())
 }

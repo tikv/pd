@@ -26,14 +26,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
-	types "github.com/tikv/pd/pkg/schedule/type"
-)
-
-const (
-	// RandomMergeName is random merge scheduler name.
-	RandomMergeName = "random-merge-scheduler"
-	// RandomMergeType is random merge scheduler type.
-	RandomMergeType = "random-merge"
+	"github.com/tikv/pd/pkg/schedule/types"
 )
 
 type randomMergeSchedulerConfig struct {
@@ -103,7 +96,7 @@ func (s *randomMergeScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) (
 		return nil, nil
 	}
 
-	ops, err := operator.CreateMergeRegionOperator(RandomMergeType, cluster, region, target, operator.OpMerge)
+	ops, err := operator.CreateMergeRegionOperator(s.GetName(), cluster, region, target, operator.OpMerge)
 	if err != nil {
 		log.Debug("fail to create merge region operator", errs.ZapError(err))
 		return nil, nil

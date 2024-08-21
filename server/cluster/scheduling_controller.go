@@ -33,6 +33,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/scatter"
 	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/schedule/splitter"
+	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/statistics/buckets"
 	"github.com/tikv/pd/pkg/statistics/utils"
@@ -404,10 +405,10 @@ func (sc *schedulingController) PauseOrResumeChecker(name string, t int64) error
 }
 
 // AddPendingProcessedRegions adds regions to suspect list.
-func (sc *schedulingController) AddPendingProcessedRegions(regionIDs ...uint64) {
+func (sc *schedulingController) AddPendingProcessedRegions(needCheckLen bool, regionIDs ...uint64) {
 	sc.mu.RLock()
 	defer sc.mu.RUnlock()
-	sc.coordinator.GetCheckerController().AddPendingProcessedRegions(regionIDs...)
+	sc.coordinator.GetCheckerController().AddPendingProcessedRegions(needCheckLen, regionIDs...)
 }
 
 // GetPendingProcessedRegions gets all suspect regions.
@@ -455,7 +456,7 @@ func (sc *schedulingController) getEvictLeaderStores() (evictStores []uint64) {
 	if sc.coordinator == nil {
 		return nil
 	}
-	handler, ok := sc.coordinator.GetSchedulersController().GetSchedulerHandlers()[schedulers.EvictLeaderName]
+	handler, ok := sc.coordinator.GetSchedulersController().GetSchedulerHandlers()[types.EvictLeaderScheduler.String()]
 	if !ok {
 		return
 	}
