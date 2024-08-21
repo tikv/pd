@@ -660,7 +660,7 @@ func (c *client) Close() {
 	}
 }
 
-func (c *client) setServiceMode(newMode pdpb.ServiceMode, force bool) {
+func (c *client) setServiceMode(newMode pdpb.ServiceMode, skipSameMode bool) {
 	c.Lock()
 	defer c.Unlock()
 
@@ -669,7 +669,7 @@ func (c *client) setServiceMode(newMode pdpb.ServiceMode, force bool) {
 		newMode = pdpb.ServiceMode_PD_SVC_MODE
 	}
 
-	if !force && newMode == c.serviceMode {
+	if skipSameMode && newMode == c.serviceMode {
 		return
 	}
 	log.Info("[pd] changing service mode",
