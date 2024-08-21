@@ -231,10 +231,10 @@ func (c *httpController) run() {
 						case <-ticker.C:
 							err := c.Do(c.ctx, hCli)
 							if err != nil {
-								log.Error("meet erorr when doing HTTP request", zap.String("case", c.Name()), zap.Error(err))
+								log.Error("meet error when doing HTTP request", zap.String("case", c.Name()), zap.Error(err))
 							}
 						case <-c.ctx.Done():
-							log.Info("Got signal to exit running HTTP case")
+							log.Info("got signal to exit running HTTP case")
 							return
 						}
 					}
@@ -300,10 +300,10 @@ func (c *gRPCController) run() {
 						case <-ticker.C:
 							err := c.Unary(c.ctx, cli)
 							if err != nil {
-								log.Error("meet erorr when doing gRPC request", zap.String("case", c.Name()), zap.Error(err))
+								log.Error("meet error when doing gRPC request", zap.String("case", c.Name()), zap.Error(err))
 							}
 						case <-c.ctx.Done():
-							log.Info("Got signal to exit running gRPC case")
+							log.Info("got signal to exit running gRPC case")
 							return
 						}
 					}
@@ -374,10 +374,10 @@ func (c *etcdController) run() {
 						case <-ticker.C:
 							err := c.Unary(c.ctx, cli)
 							if err != nil {
-								log.Error("meet erorr when doing etcd request", zap.String("case", c.Name()), zap.Error(err))
+								log.Error("meet error when doing etcd request", zap.String("case", c.Name()), zap.Error(err))
 							}
 						case <-c.ctx.Done():
-							log.Info("Got signal to exit running etcd case")
+							log.Info("got signal to exit running etcd case")
 							return
 						}
 					}

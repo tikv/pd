@@ -206,7 +206,7 @@
 
 [keyspace]
 ## pre-alloc is used to pre-allocate keyspaces during pd bootstrap.
-## Its value should be a list of strings, denotting the name of the keyspaces.
+## Its value should be a list of strings, denoting the name of the keyspaces.
 ## Example:
 ## pre-alloc = ["admin", "user1", "user2"]
 # pre-alloc = []
