@@ -1297,19 +1297,14 @@ func PickRegions(n int, fromStore *StoreRegionSet, toStore *StoreRegionSet) *Mig
 			// If toStore doesn't has this region, then create a move op.
 			o.Regions[r] = false
 			o.OriginalPeer = fromStore.OriginalPeer[r]
-			log.Info("!!!! Pick S", zap.Any("r", r), zap.Any("fr", fromStore), zap.Any("to", toStore), zap.Any("OriginalPeer", fromStore.OriginalPeer[r]))
 			fromStore.RegionIDSet[r] = true
 			n--
-		} else {
-			log.Info("!!!! Pick", zap.Any("r", r), zap.Any("fr", fromStore), zap.Any("to", toStore))
 		}
 	}
 	return &o
 }
 
 func MigrationPlan(stores []*StoreRegionSet) ([]int, []int, []*MigrationOp) {
-	log.Info("!!! MigrationPlan",
-		zap.Any("store-id", stores))
 	totalRegionCount := 0
 	for _, store := range stores {
 		totalRegionCount += len(store.RegionIDSet)
@@ -1335,7 +1330,6 @@ func MigrationPlan(stores []*StoreRegionSet) ([]int, []int, []*MigrationOp) {
 		expectedCount = append(expectedCount, avr)
 	}
 
-	log.Info("!!! expectedCount", zap.Any("expectedCount", expectedCount))
 	senders := []int{}
 	receivers := []int{}
 	sendersVolume := []int{}
@@ -1383,7 +1377,7 @@ type MigrationResult struct {
 }
 
 // BalanceRegion checks if regions are imbalanced and rebalance them.
-func (h *Handler) BalanceRegion(rawStartKey, rawEndKey string, storeLabels []*metapb.StoreLabel) (MigrationResult, error) {
+func (h *Handler) BalanceRegion(rawStartKey, rawEndKey string, requiredLabels []*metapb.StoreLabel) (MigrationResult, error) {
 	startKey, err := hex.DecodeString(rawStartKey)
 	if err != nil {
 		return MigrationResult{ErrorCode: 1, Ops: nil}, err
@@ -1413,12 +1407,11 @@ func (h *Handler) BalanceRegion(rawStartKey, rawEndKey string, storeLabels []*me
 		for _, l := range s.GetLabels() {
 			storeLabelMap[l.Key] = l
 		}
-		if len(storeLabels) != len(storeLabelMap) {
+		if len(requiredLabels) != len(storeLabelMap) {
 			continue
 		}
-		log.Info("!!!! store pass 1", zap.Any("s", s), zap.Any("l", s.GetLabels()), zap.Any("id", s.GetID()))
 		gotLabels := true
-		for _, larg := range storeLabels {
+		for _, larg := range requiredLabels {
 			if l, ok := storeLabelMap[larg.Key]; ok {
 				if larg.Value != l.Value {
 					gotLabels = false
@@ -1433,7 +1426,6 @@ func (h *Handler) BalanceRegion(rawStartKey, rawEndKey string, storeLabels []*me
 		if !gotLabels {
 			continue
 		}
-		log.Info("!!!! store pass 2", zap.Any("s", s))
 		candidate := &StoreRegionSet{
 			ID:           s.GetID(),
 			Info:         s,
@@ -1448,7 +1440,6 @@ func (h *Handler) BalanceRegion(rawStartKey, rawEndKey string, storeLabels []*me
 				}
 			}
 		}
-		log.Info("!!!! store pass 3", zap.Any("s", s))
 		candidates = append(candidates, candidate)
 	}
 

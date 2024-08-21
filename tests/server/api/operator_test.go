@@ -18,6 +18,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -655,28 +656,90 @@ func (suite *operatorTestSuite) checkRemoveOperators(cluster *tests.TestCluster)
 	re.NoError(err)
 }
 
-func (suite *operatorTestSuite) checkBalanceRegions(cluster *tests.TestCluster) {
-	re := suite.Require()
-	stores := []*metapb.Store{
-		{
-			Id:            1,
+type regionStoresPair struct {
+	RegionId uint64
+	StorePos []uint64
+}
+
+func buildBalanceRegionTestCases(storeIDs []uint64, regionDist []regionStoresPair) ([]*metapb.Store, []*core.RegionInfo) {
+	stores := []*metapb.Store{}
+	regions := []*core.RegionInfo{}
+	for _, i := range storeIDs {
+		stores = append(stores, &metapb.Store{
+			Id:            i,
 			State:         metapb.StoreState_Up,
 			NodeState:     metapb.NodeState_Serving,
 			LastHeartbeat: time.Now().UnixNano(),
-		},
-		{
-			Id:            2,
-			State:         metapb.StoreState_Up,
-			NodeState:     metapb.NodeState_Serving,
-			LastHeartbeat: time.Now().UnixNano(),
-		},
-		{
-			Id:            4,
-			State:         metapb.StoreState_Up,
-			NodeState:     metapb.NodeState_Serving,
-			LastHeartbeat: time.Now().UnixNano(),
-		},
+		})
 	}
+
+	var peerIdAllocator uint64
+	peerIdAllocator = 10000
+	for _, p := range regionDist {
+		regionId := p.RegionId
+		holdingStores := p.StorePos
+		var peers []*metapb.Peer
+		for _, storePos := range holdingStores {
+			s := stores[storePos]
+			peerIdAllocator += 1
+			peers = append(peers, &metapb.Peer{
+				StoreId: s.GetId(),
+				Id:      peerIdAllocator,
+			})
+		}
+		region := core.NewTestRegionInfo(regionId, stores[holdingStores[0]].GetId(), []byte(fmt.Sprintf("r%v", regionId)), []byte(fmt.Sprintf("r%v", regionId+1)), core.SetWrittenBytes(1000), core.SetReadBytes(1000), core.SetRegionConfVer(1), core.SetRegionVersion(1), core.SetPeers(peers))
+		regions = append(regions, region)
+	}
+
+	return stores, regions
+}
+
+func validateMigtationOut(ops []*handler.MigrationOp, storeIDs []uint64) []uint64 {
+	r := make(map[uint64]interface{})
+	for _, op := range ops {
+		for _, sid := range storeIDs {
+			if op.FromStore == sid {
+				for k, _ := range op.Regions {
+					r[k] = nil
+				}
+			}
+		}
+	}
+	rl := []uint64{}
+	for k, _ := range r {
+		rl = append(rl, k)
+	}
+	slices.Sort(rl)
+	return rl
+}
+
+func validateMigtationIn(ops []*handler.MigrationOp, storeIDs []uint64) []uint64 {
+	r := make(map[uint64]interface{})
+	for _, op := range ops {
+		for _, sid := range storeIDs {
+			if op.ToStore == sid {
+				for k, _ := range op.Regions {
+					r[k] = nil
+				}
+			}
+		}
+	}
+	rl := []uint64{}
+	for k, _ := range r {
+		rl = append(rl, k)
+	}
+	slices.Sort(rl)
+	return rl
+}
+
+func (suite *operatorTestSuite) checkBalanceRegions1(cluster *tests.TestCluster) {
+	re := suite.Require()
+
+	stores, regions := buildBalanceRegionTestCases([]uint64{1, 2, 4}, []regionStoresPair{
+		{10, []uint64{0}},
+		{20, []uint64{0}},
+		{30, []uint64{0}},
+	})
 
 	for _, store := range stores {
 		tests.MustPutStore(re, cluster, store)
@@ -684,12 +747,9 @@ func (suite *operatorTestSuite) checkBalanceRegions(cluster *tests.TestCluster) 
 
 	pauseAllCheckers(re, cluster)
 	result := handler.MigrationResult{}
-	r1 := core.NewTestRegionInfo(10, 1, []byte(""), []byte("b"), core.SetWrittenBytes(1000), core.SetReadBytes(1000), core.SetRegionConfVer(1), core.SetRegionVersion(1))
-	tests.MustPutRegionInfo(re, cluster, r1)
-	r2 := core.NewTestRegionInfo(20, 1, []byte("b"), []byte("c"), core.SetWrittenBytes(2000), core.SetReadBytes(0), core.SetRegionConfVer(2), core.SetRegionVersion(3))
-	tests.MustPutRegionInfo(re, cluster, r2)
-	r3 := core.NewTestRegionInfo(30, 1, []byte("c"), []byte(""), core.SetWrittenBytes(500), core.SetReadBytes(800), core.SetRegionConfVer(3), core.SetRegionVersion(2))
-	tests.MustPutRegionInfo(re, cluster, r3)
+	for _, r := range regions {
+		tests.MustPutRegionInfo(re, cluster, r)
+	}
 
 	urlPrefix := fmt.Sprintf("%s/pd/api/v1", cluster.GetLeaderServer().GetAddr())
 	e := tu.CheckPostJSON(tests.TestDialClient, fmt.Sprintf("%s/regions/balance", urlPrefix), []byte(``), tu.StatusOK(re), tu.ExtractJSON(re, &result))
@@ -697,12 +757,45 @@ func (suite *operatorTestSuite) checkBalanceRegions(cluster *tests.TestCluster) 
 	re.Equal(2, len(result.Ops))
 }
 
+func (suite *operatorTestSuite) checkBalanceRegions2(cluster *tests.TestCluster) {
+	re := suite.Require()
+
+	stores, regions := buildBalanceRegionTestCases([]uint64{1, 2, 4}, []regionStoresPair{
+		{10, []uint64{0, 1}},
+		{20, []uint64{0, 2}},
+		{30, []uint64{0, 1}},
+	})
+
+	for _, store := range stores {
+		tests.MustPutStore(re, cluster, store)
+	}
+
+	pauseAllCheckers(re, cluster)
+	result := handler.MigrationResult{}
+	for _, r := range regions {
+		tests.MustPutRegionInfo(re, cluster, r)
+	}
+
+	urlPrefix := fmt.Sprintf("%s/pd/api/v1", cluster.GetLeaderServer().GetAddr())
+	e := tu.CheckPostJSON(tests.TestDialClient, fmt.Sprintf("%s/regions/balance", urlPrefix), []byte(``), tu.StatusOK(re), tu.ExtractJSON(re, &result))
+	re.NoError(e)
+	re.Equal(1, len(result.Ops))
+	validateMigtationOut(result.Ops, []uint64{1})
+	validateMigtationIn(result.Ops, []uint64{4})
+}
+
 func (suite *operatorTestSuite) TestBalanceRegions() {
-	// use a new environment to avoid being affected by other tests
+	use a new environment to avoid being affected by other tests
 	env := tests.NewSchedulingTestEnvironment(suite.T(),
 		func(conf *config.Config, _ string) {
 			conf.Replication.MaxReplicas = 1
 		})
-	env.RunTestBasedOnMode(suite.checkBalanceRegions)
+	env.RunTestBasedOnMode(suite.checkBalanceRegions1)
 	env.Cleanup()
+	env2 := tests.NewSchedulingTestEnvironment(suite.T(),
+		func(conf *config.Config, _ string) {
+			conf.Replication.MaxReplicas = 1
+		})
+	env2.RunTestBasedOnMode(suite.checkBalanceRegions2)
+	env2.Cleanup()
 }
