@@ -1272,11 +1272,11 @@ type StoreRegionSet struct {
 }
 
 type MigrationOp struct {
-	FromStore    uint64
-	ToStore      uint64
-	ToStoreInfo  *core.StoreInfo
-	OriginalPeer *metapb.Peer
-	Regions      map[uint64]bool
+	FromStore    uint64          `json:"from_store"`
+	ToStore      uint64          `json:"to_store"`
+	ToStoreInfo  *core.StoreInfo `json:"to_store_info"`
+	OriginalPeer *metapb.Peer    `json:"original_peer"`
+	Regions      map[uint64]bool `json:"regions"`
 }
 
 func PickRegions(n int, fromStore *StoreRegionSet, toStore *StoreRegionSet) *MigrationOp {
@@ -1377,23 +1377,28 @@ func MigrationPlan(stores []*StoreRegionSet) ([]int, []int, []*MigrationOp) {
 	return senders, receivers, ops
 }
 
+type MigrationResult struct {
+	ErrorCode uint64         `json:"error_code"`
+	Ops       []*MigrationOp `json:"ops"`
+}
+
 // BalanceRegion checks if regions are imbalanced and rebalance them.
-func (h *Handler) BalanceRegion(rawStartKey, rawEndKey string, storeLabels []*metapb.StoreLabel) (string, error) {
+func (h *Handler) BalanceRegion(rawStartKey, rawEndKey string, storeLabels []*metapb.StoreLabel) (MigrationResult, error) {
 	startKey, err := hex.DecodeString(rawStartKey)
 	if err != nil {
-		return "", err
+		return MigrationResult{ErrorCode: 1, Ops: nil}, err
 	}
 	endKey, err := hex.DecodeString(rawEndKey)
 	if err != nil {
-		return "", err
+		return MigrationResult{ErrorCode: 1, Ops: nil}, err
 	}
 	c := h.GetCluster()
 	if c == nil {
-		return "", errs.ErrNotBootstrapped.GenWithStackByArgs()
+		return MigrationResult{ErrorCode: 1, Ops: nil}, errs.ErrNotBootstrapped.GenWithStackByArgs()
 	}
 	co := h.GetCoordinator()
 	if co == nil {
-		return "", errs.ErrNotBootstrapped.GenWithStackByArgs()
+		return MigrationResult{ErrorCode: 1, Ops: nil}, errs.ErrNotBootstrapped.GenWithStackByArgs()
 	}
 	regions := c.ScanRegions(startKey, endKey, -1)
 	regionIDMap := make(map[uint64]*core.RegionInfo)
@@ -1457,12 +1462,18 @@ func (h *Handler) BalanceRegion(rawStartKey, rawEndKey string, storeLabels []*me
 			log.Debug("Create balace region op", zap.Uint64("from", op.FromStore), zap.Uint64("to", op.ToStore), zap.Uint64("region_id", rid))
 			o, err := operator.CreateMovePeerOperator("balance-region", c, regionIDMap[rid], operator.OpReplica, op.FromStore, newPeer)
 			if err != nil {
-				return "", err
+				return MigrationResult{ErrorCode: 1, Ops: nil}, err
 			}
 			co.GetOperatorController().AddOperator(o)
 		}
 	}
-	return "", nil
+
+	result := MigrationResult{
+		ErrorCode: 0,
+		Ops:       ops,
+	}
+
+	return result, nil
 }
 
 // CheckRegionsReplicated checks if regions are replicated.

@@ -27,6 +27,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/schedule/handler"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	tu "github.com/tikv/pd/pkg/utils/testutil"
@@ -682,6 +683,7 @@ func (suite *operatorTestSuite) checkBalanceRegions(cluster *tests.TestCluster) 
 	}
 
 	pauseAllCheckers(re, cluster)
+	result := handler.MigrationResult{}
 	r1 := core.NewTestRegionInfo(10, 1, []byte(""), []byte("b"), core.SetWrittenBytes(1000), core.SetReadBytes(1000), core.SetRegionConfVer(1), core.SetRegionVersion(1))
 	tests.MustPutRegionInfo(re, cluster, r1)
 	r2 := core.NewTestRegionInfo(20, 1, []byte("b"), []byte("c"), core.SetWrittenBytes(2000), core.SetReadBytes(0), core.SetRegionConfVer(2), core.SetRegionVersion(3))
@@ -690,10 +692,9 @@ func (suite *operatorTestSuite) checkBalanceRegions(cluster *tests.TestCluster) 
 	tests.MustPutRegionInfo(re, cluster, r3)
 
 	urlPrefix := fmt.Sprintf("%s/pd/api/v1", cluster.GetLeaderServer().GetAddr())
-	// err := tu.CheckGetJSON(tests.TestDialClient, fmt.Sprintf("%s/stores", urlPrefix), []byte(``), tu.StringContain(re, "add peer: store [4]"))
-	// re.NoError(err)
-	e := tu.CheckPostJSON(tests.TestDialClient, fmt.Sprintf("%s/regions/balance", urlPrefix), []byte(``), tu.StatusOK(re))
+	e := tu.CheckPostJSON(tests.TestDialClient, fmt.Sprintf("%s/regions/balance", urlPrefix), []byte(``), tu.StatusOK(re), tu.ExtractJSON(re, &result))
 	re.NoError(e)
+	re.Equal(2, len(result.Ops))
 }
 
 func (suite *operatorTestSuite) TestBalanceRegions() {

@@ -134,12 +134,12 @@ func (h *regionsHandler) BalanceRegion(w http.ResponseWriter, r *http.Request) {
 	rawStartKey := vars["startKey"]
 	rawEndKey := vars["endKey"]
 	storeLabels := make([]*metapb.StoreLabel, 0)
-	state, err := h.Handler.BalanceRegion(rawStartKey, rawEndKey, storeLabels)
+	result, err := h.Handler.BalanceRegion(rawStartKey, rawEndKey, storeLabels)
 	if err != nil {
 		h.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	h.rd.JSON(w, http.StatusOK, state)
+	h.rd.JSON(w, http.StatusOK, result)
 }
 
 type regionsHandler struct {

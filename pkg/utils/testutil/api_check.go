@@ -19,8 +19,10 @@ import (
 	"io"
 	"net/http"
 
+	"github.com/pingcap/log"
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/utils/apiutil"
+	"go.uber.org/zap"
 )
 
 // Status is used to check whether http response code is equal given code.
@@ -45,6 +47,7 @@ func StatusNotOK(re *require.Assertions) func([]byte, int, http.Header) {
 // ExtractJSON is used to check whether given data can be extracted successfully.
 func ExtractJSON(re *require.Assertions, data any) func([]byte, int, http.Header) {
 	return func(resp []byte, _ int, _ http.Header) {
+		log.Info("!!!!! ffdfdfdfd", zap.Any("a", string(resp)))
 		re.NoError(json.Unmarshal(resp, data), "resp: "+string(resp))
 	}
 }
