@@ -46,7 +46,7 @@ func (s *serviceMiddlewareBuilder) createHandler(next func(http.ResponseWriter, 
 	return negroni.New(append(s.handlers, negroni.WrapFunc(next))...)
 }
 
-// requestInfoMiddleware is used to gather info from requsetInfo
+// requestInfoMiddleware is used to gather info from requestInfo
 type requestInfoMiddleware struct {
 	svr *server.Server
 }

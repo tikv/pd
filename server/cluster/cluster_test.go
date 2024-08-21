@@ -952,8 +952,8 @@ func TestRegionHeartbeat(t *testing.T) {
 		re.NoError(cluster.processRegionHeartbeat(ctx, overlapRegion))
 		tracer.OnAllStageFinished()
 		re.Condition(func() bool {
-			fileds := tracer.LogFields()
-			return slice.AllOf(fileds, func(i int) bool { return fileds[i].Integer > 0 })
+			fields := tracer.LogFields()
+			return slice.AllOf(fields, func(i int) bool { return fields[i].Integer > 0 })
 		}, "should have stats")
 		region = &metapb.Region{}
 		ok, err = storage.LoadRegion(regions[n-1].GetID(), region)

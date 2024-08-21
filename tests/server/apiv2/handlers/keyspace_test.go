@@ -109,7 +109,7 @@ func (suite *keyspaceTestSuite) TestUpdateKeyspaceState() {
 		success, disabledAgain := sendUpdateStateRequest(re, suite.server, created.Name, &handlers.UpdateStateParam{State: "disabled"})
 		re.True(success)
 		re.Equal(disabled, disabledAgain)
-		// Tombstoning a DISABLED keyspace should not be allowed.
+		// Tombstone a DISABLED keyspace should not be allowed.
 		success, _ = sendUpdateStateRequest(re, suite.server, created.Name, &handlers.UpdateStateParam{State: "tombstone"})
 		re.False(success)
 		// Archiving a DISABLED keyspace should be allowed.
@@ -119,7 +119,7 @@ func (suite *keyspaceTestSuite) TestUpdateKeyspaceState() {
 		// Enabling an ARCHIVED keyspace is not allowed.
 		success, _ = sendUpdateStateRequest(re, suite.server, created.Name, &handlers.UpdateStateParam{State: "enabled"})
 		re.False(success)
-		// Tombstoning an ARCHIVED keyspace is allowed.
+		// Tombstone an ARCHIVED keyspace is allowed.
 		success, tombstone := sendUpdateStateRequest(re, suite.server, created.Name, &handlers.UpdateStateParam{State: "tombstone"})
 		re.True(success)
 		re.Equal(keyspacepb.KeyspaceState_TOMBSTONE, tombstone.State)

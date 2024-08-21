@@ -110,7 +110,7 @@ var (
 			Namespace: "pd",
 			Subsystem: "scheduler",
 			Name:      "store_slow_trend_evicted_status",
-			Help:      "Store evited by slow trend status for schedule",
+			Help:      "Store evicted by slow trend status for schedule",
 		}, []string{"address", "store"})
 
 	storeSlowTrendActionStatusGauge = prometheus.NewGaugeVec(
