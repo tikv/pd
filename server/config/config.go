@@ -746,7 +746,6 @@ func (c *Config) GenEmbedEtcdConfig() (*embed.Config, error) {
 	cfg.ForceNewCluster = c.ForceNewCluster
 	cfg.ZapLoggerBuilder = embed.NewZapCoreLoggerBuilder(c.Logger, c.Logger.Core(), c.LogProps.Syncer)
 	cfg.EnableGRPCGateway = c.EnableGRPCGateway
-	cfg.EnableV2 = true
 	cfg.Logger = "zap"
 	var err error
 

@@ -265,7 +265,7 @@ func (c *RuleChecker) replaceUnexpectedRulePeer(region *core.RegionInfo, rf *pla
 		minCount := uint64(math.MaxUint64)
 		for _, p := range region.GetPeers() {
 			count := c.record.getOfflineLeaderCount(p.GetStoreId())
-			checkPeerhealth := func() bool {
+			checkPeerHealth := func() bool {
 				if p.GetId() == peer.GetId() {
 					return true
 				}
@@ -274,7 +274,7 @@ func (c *RuleChecker) replaceUnexpectedRulePeer(region *core.RegionInfo, rf *pla
 				}
 				return c.allowLeader(fit, p)
 			}
-			if minCount > count && checkPeerhealth() {
+			if minCount > count && checkPeerHealth() {
 				minCount = count
 				newLeader = p
 			}
