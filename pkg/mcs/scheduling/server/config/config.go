@@ -47,7 +47,7 @@ import (
 )
 
 const (
-	defaultName             = "Scheduling"
+	defaultName             = "scheduling"
 	defaultBackendEndpoints = "http://127.0.0.1:2379"
 	defaultListenAddr       = "http://127.0.0.1:3379"
 )
