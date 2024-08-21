@@ -55,6 +55,7 @@ import (
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/apiutil"
+	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/memberutil"
@@ -188,7 +189,7 @@ func (s *Server) updateAPIServerMemberLoop() {
 		if !s.IsServing() {
 			continue
 		}
-		members, err := s.GetClient().MemberList(ctx)
+		members, err := etcdutil.ListEtcdMembers(ctx, s.GetClient())
 		if err != nil {
 			log.Warn("failed to list members", errs.ZapError(err))
 			continue
