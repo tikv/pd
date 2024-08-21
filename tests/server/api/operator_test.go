@@ -653,3 +653,55 @@ func (suite *operatorTestSuite) checkRemoveOperators(cluster *tests.TestCluster)
 	err = tu.CheckGetJSON(tests.TestDialClient, url, nil, tu.StatusOK(re), tu.StringNotContain(re, "merge: region 10 to 20"), tu.StringNotContain(re, "add peer: store [4]"))
 	re.NoError(err)
 }
+
+func (suite *operatorTestSuite) checkBalanceRegions(cluster *tests.TestCluster) {
+	re := suite.Require()
+	stores := []*metapb.Store{
+		{
+			Id:            1,
+			State:         metapb.StoreState_Up,
+			NodeState:     metapb.NodeState_Serving,
+			LastHeartbeat: time.Now().UnixNano(),
+		},
+		{
+			Id:            2,
+			State:         metapb.StoreState_Up,
+			NodeState:     metapb.NodeState_Serving,
+			LastHeartbeat: time.Now().UnixNano(),
+		},
+		{
+			Id:            4,
+			State:         metapb.StoreState_Up,
+			NodeState:     metapb.NodeState_Serving,
+			LastHeartbeat: time.Now().UnixNano(),
+		},
+	}
+
+	for _, store := range stores {
+		tests.MustPutStore(re, cluster, store)
+	}
+
+	pauseAllCheckers(re, cluster)
+	r1 := core.NewTestRegionInfo(10, 1, []byte(""), []byte("b"), core.SetWrittenBytes(1000), core.SetReadBytes(1000), core.SetRegionConfVer(1), core.SetRegionVersion(1))
+	tests.MustPutRegionInfo(re, cluster, r1)
+	r2 := core.NewTestRegionInfo(20, 1, []byte("b"), []byte("c"), core.SetWrittenBytes(2000), core.SetReadBytes(0), core.SetRegionConfVer(2), core.SetRegionVersion(3))
+	tests.MustPutRegionInfo(re, cluster, r2)
+	r3 := core.NewTestRegionInfo(30, 1, []byte("c"), []byte(""), core.SetWrittenBytes(500), core.SetReadBytes(800), core.SetRegionConfVer(3), core.SetRegionVersion(2))
+	tests.MustPutRegionInfo(re, cluster, r3)
+
+	urlPrefix := fmt.Sprintf("%s/pd/api/v1", cluster.GetLeaderServer().GetAddr())
+	// err := tu.CheckGetJSON(tests.TestDialClient, fmt.Sprintf("%s/stores", urlPrefix), []byte(``), tu.StringContain(re, "add peer: store [4]"))
+	// re.NoError(err)
+	e := tu.CheckPostJSON(tests.TestDialClient, fmt.Sprintf("%s/regions/balance", urlPrefix), []byte(``), tu.StatusOK(re))
+	re.NoError(e)
+}
+
+func (suite *operatorTestSuite) TestBalanceRegions() {
+	// use a new environment to avoid being affected by other tests
+	env := tests.NewSchedulingTestEnvironment(suite.T(),
+		func(conf *config.Config, _ string) {
+			conf.Replication.MaxReplicas = 1
+		})
+	env.RunTestBasedOnMode(suite.checkBalanceRegions)
+	env.Cleanup()
+}

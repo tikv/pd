@@ -1276,7 +1276,7 @@ type MigrationOp struct {
 	ToStore      uint64
 	ToStoreInfo  *core.StoreInfo
 	OriginalPeer *metapb.Peer
-	Regions      map[uint64]interface{}
+	Regions      map[uint64]bool
 }
 
 func PickRegions(n int, fromStore *StoreRegionSet, toStore *StoreRegionSet) *MigrationOp {
@@ -1284,7 +1284,7 @@ func PickRegions(n int, fromStore *StoreRegionSet, toStore *StoreRegionSet) *Mig
 		FromStore:   fromStore.ID,
 		ToStore:     toStore.ID,
 		ToStoreInfo: toStore.Info,
-		Regions:     make(map[uint64]interface{}),
+		Regions:     make(map[uint64]bool),
 	}
 	for r, removed := range fromStore.RegionIDSet {
 		if n == 0 {
@@ -1294,23 +1294,29 @@ func PickRegions(n int, fromStore *StoreRegionSet, toStore *StoreRegionSet) *Mig
 			continue
 		}
 		if _, exist := toStore.RegionIDSet[r]; !exist {
-			o.Regions[r] = nil
+			// If toStore doesn't has this region, then create a move op.
+			o.Regions[r] = false
 			o.OriginalPeer = fromStore.OriginalPeer[r]
+			log.Info("!!!! Pick S", zap.Any("r", r), zap.Any("fr", fromStore), zap.Any("to", toStore), zap.Any("OriginalPeer", fromStore.OriginalPeer[r]))
 			fromStore.RegionIDSet[r] = true
+			n--
+		} else {
+			log.Info("!!!! Pick", zap.Any("r", r), zap.Any("fr", fromStore), zap.Any("to", toStore))
 		}
-		n--
 	}
 	return &o
 }
 
 func MigrationPlan(stores []*StoreRegionSet) ([]int, []int, []*MigrationOp) {
+	log.Info("!!! MigrationPlan",
+		zap.Any("store-id", stores))
 	totalRegionCount := 0
 	for _, store := range stores {
 		totalRegionCount += len(store.RegionIDSet)
 	}
 	for _, store := range stores {
 		percentage := 100 * float64(len(store.RegionIDSet)) / float64(totalRegionCount)
-		log.Info("store region dist",
+		log.Info("!!! store region dist",
 			zap.Uint64("store-id", store.ID),
 			zap.Int("num-region", len(store.RegionIDSet)),
 			zap.String("percentage", fmt.Sprintf("%.2f%%", percentage)))
@@ -1328,6 +1334,8 @@ func MigrationPlan(stores []*StoreRegionSet) ([]int, []int, []*MigrationOp) {
 	for i := remainder; i < len(stores); i++ {
 		expectedCount = append(expectedCount, avr)
 	}
+
+	log.Info("!!! expectedCount", zap.Any("expectedCount", expectedCount))
 	senders := []int{}
 	receivers := []int{}
 	sendersVolume := []int{}
@@ -1388,30 +1396,39 @@ func (h *Handler) BalanceRegion(rawStartKey, rawEndKey string, storeLabels []*me
 		return "", errs.ErrNotBootstrapped.GenWithStackByArgs()
 	}
 	regions := c.ScanRegions(startKey, endKey, -1)
-	regionIdMap := make(map[uint64]*core.RegionInfo)
+	regionIDMap := make(map[uint64]*core.RegionInfo)
 	for _, r := range regions {
-		regionIdMap[r.GetID()] = r
+		regionIDMap[r.GetID()] = r
 	}
 
 	stores := c.GetStores()
 	candidates := make([]*StoreRegionSet, 0)
-	storeLabelMap := make(map[string]*metapb.StoreLabel)
-	for _, l := range storeLabels {
-		storeLabelMap[l.Key] = l
-	}
 	for _, s := range stores {
-		if len(s.GetLabels()) != len(storeLabelMap) {
+		storeLabelMap := make(map[string]*metapb.StoreLabel)
+		for _, l := range s.GetLabels() {
+			storeLabelMap[l.Key] = l
+		}
+		if len(storeLabels) != len(storeLabelMap) {
 			continue
 		}
-		for _, l := range s.GetLabels() {
-			if larg, ok := storeLabelMap[l.Key]; ok {
+		log.Info("!!!! store pass 1", zap.Any("s", s), zap.Any("l", s.GetLabels()), zap.Any("id", s.GetID()))
+		gotLabels := true
+		for _, larg := range storeLabels {
+			if l, ok := storeLabelMap[larg.Key]; ok {
 				if larg.Value != l.Value {
-					continue
+					gotLabels = false
+					break
 				}
 			} else {
-				continue
+				gotLabels = false
+				break
 			}
 		}
+
+		if !gotLabels {
+			continue
+		}
+		log.Info("!!!! store pass 2", zap.Any("s", s))
 		candidate := &StoreRegionSet{
 			ID:           s.GetID(),
 			Info:         s,
@@ -1422,20 +1439,23 @@ func (h *Handler) BalanceRegion(rawStartKey, rawEndKey string, storeLabels []*me
 			for _, p := range r.GetPeers() {
 				if p.StoreId == s.GetID() {
 					candidate.RegionIDSet[r.GetID()] = false
+					candidate.OriginalPeer[r.GetID()] = p
 				}
 			}
 		}
-		if len(candidate.RegionIDSet) > 0 {
-			candidates = append(candidates, candidate)
-		}
+		log.Info("!!!! store pass 3", zap.Any("s", s))
+		candidates = append(candidates, candidate)
 	}
 
-	_, _, ops := MigrationPlan(candidates)
+	senders, receivers, ops := MigrationPlan(candidates)
+
+	log.Info("Migration plan details", zap.Any("senders", senders), zap.Any("receivers", receivers), zap.Any("ops", ops))
 
 	for _, op := range ops {
-		for rid, _ := range op.Regions {
+		for rid := range op.Regions {
 			newPeer := &metapb.Peer{StoreId: op.ToStore, Role: op.OriginalPeer.Role, IsWitness: op.OriginalPeer.IsWitness}
-			o, err := operator.CreateMovePeerOperator("balance-region", c, regionIdMap[rid], operator.OpReplica, op.FromStore, newPeer)
+			log.Debug("Create balace region op", zap.Uint64("from", op.FromStore), zap.Uint64("to", op.ToStore), zap.Uint64("region_id", rid))
+			o, err := operator.CreateMovePeerOperator("balance-region", c, regionIDMap[rid], operator.OpReplica, op.FromStore, newPeer)
 			if err != nil {
 				return "", err
 			}
