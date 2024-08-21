@@ -356,12 +356,16 @@ func TestResignAPIPrimaryForward(t *testing.T) {
 	defer func() {
 		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/member/skipCampaignLeaderCheck"))
 	}()
+	pdClient, err := pd.NewClientWithContext(context.Background(),
+		[]string{suite.backendEndpoints}, pd.SecurityOption{}, pd.WithMaxErrorRetry(1))
+	re.NoError(err)
+	defer pdClient.Close()
 
 	for j := 0; j < 10; j++ {
 		suite.pdLeader.ResignLeader()
 		suite.pdLeader = suite.cluster.GetServer(suite.cluster.WaitLeader())
 		suite.backendEndpoints = suite.pdLeader.GetAddr()
-		_, _, err = suite.pdClient.GetTS(suite.ctx)
+		_, _, err = pdClient.GetTS(suite.ctx)
 		re.NoError(err)
 	}
 }
