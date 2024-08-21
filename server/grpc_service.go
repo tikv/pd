@@ -550,7 +550,6 @@ func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
 		if err != nil {
 			return errors.WithStack(err)
 		}
-
 		forwardedHost := grpcutil.GetForwardedHost(stream.Context())
 		if !s.isLocalRequest(forwardedHost) {
 			clientConn, err := s.getDelegateClient(s.ctx, forwardedHost)

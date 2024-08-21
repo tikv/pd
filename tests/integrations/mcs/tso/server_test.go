@@ -356,6 +356,11 @@ func TestResignAPIPrimaryForward(t *testing.T) {
 	defer func() {
 		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/member/skipCampaignLeaderCheck"))
 	}()
+	testutil.Eventually(re, func() bool {
+		return suite.pdLeader.GetRaftCluster().IsServiceIndependent(constant.TSOServiceName)
+	})
+	// Use a client to create a new connection.
+	// The client in the suite is not updated, which will send requests to the pd instead of forwarding.
 	pdClient, err := pd.NewClientWithContext(context.Background(),
 		[]string{suite.backendEndpoints}, pd.SecurityOption{}, pd.WithMaxErrorRetry(1))
 	re.NoError(err)
