@@ -25,6 +25,7 @@ import (
 	pd "github.com/tikv/pd/client"
 )
 
+// ServiceSafePoint is the safepoint for a specific service
 // NOTE: This type is in sync with pd/pkg/storage/endpoint/gc_safe_point.go
 type ServiceSafePoint struct {
 	ServiceID string `json:"service_id"`
@@ -32,6 +33,7 @@ type ServiceSafePoint struct {
 	SafePoint uint64 `json:"safe_point"`
 }
 
+// ListServiceGCSafepoint is the response for list service GC safepoint.
 // NOTE: This type is in sync with pd/server/api/service_gc_safepoint.go
 type ListServiceGCSafepoint struct {
 	ServiceGCSafepoints   []*ServiceSafePoint `json:"service_gc_safe_points"`

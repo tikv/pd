@@ -1,4 +1,4 @@
-// Copyright 2019 TiKV Project Authors.
+// Copyright 2024 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -127,4 +127,12 @@ func TestSafepoint(t *testing.T) {
 
 	// output should be an error message
 	re.Equal("Failed to delete service GC safepoint: request pd http api failed with status: '500 Internal Server Error', body: '\"cannot remove service safe point of gc_worker\"'\n", string(output))
+
+	// try delete a non-exist safepoint, should return normally
+	args = []string{"-u", pdAddr, "service-gc-safepoint", "delete", "non_exist"}
+	output, err = tests.ExecuteCommand(cmd, args...)
+	re.NoError(err)
+	var msg string
+	re.NoError(json.Unmarshal(output, &msg))
+	re.Equal("Delete service GC safepoint successfully.", msg)
 }

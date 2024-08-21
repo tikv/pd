@@ -899,9 +899,6 @@ func (suite *httpClientTestSuite) TestGetGCSafePoint() {
 		re.Equal("Delete service GC safepoint successfully.", msg)
 	}
 
-	_, err = client.DeleteGCSafePoint(ctx, "gc_worker")
-	re.Error(err)
-
 	// check that the safepoitns are indeed deleted
 	l, err = client.GetGCSafePoint(ctx)
 	re.NoError(err)
@@ -909,4 +906,14 @@ func (suite *httpClientTestSuite) TestGetGCSafePoint() {
 	re.Equal(uint64(1), l.GCSafePoint)
 	re.Equal(uint64(0), l.MinServiceGcSafepoint)
 	re.Empty(l.ServiceGCSafepoints)
+
+	// try delete gc_worker, should get an error
+	_, err = client.DeleteGCSafePoint(ctx, "gc_worker")
+	re.Error(err)
+
+	// try delete some non-exist safepoints, should return normally
+	var msg string
+	msg, err = client.DeleteGCSafePoint(ctx, "non_exist")
+	re.NoError(err)
+	re.Equal("Delete service GC safepoint successfully.", msg)
 }
