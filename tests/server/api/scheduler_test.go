@@ -627,6 +627,15 @@ func (suite *scheduleTestSuite) checkAPI(cluster *tests.TestCluster) {
 		deleteScheduler(re, urlPrefix, createdName)
 		assertNoScheduler(re, urlPrefix, createdName)
 	}
+
+	for _, sche := range types.DefaultSchedulers {
+		input := make(map[string]any)
+		input["name"] = sche.String()
+		body, err := json.Marshal(input)
+		re.NoError(err)
+		addScheduler(re, urlPrefix, body)
+		suite.assertSchedulerExists(urlPrefix, sche.String())
+	}
 }
 
 func (suite *scheduleTestSuite) TestDisable() {
