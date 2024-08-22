@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/pingcap/errors"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
@@ -71,6 +72,7 @@ func TestHTTPClientTestSuiteWithServiceDiscovery(t *testing.T) {
 
 func (suite *httpClientTestSuite) SetupSuite() {
 	re := suite.Require()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/member/skipCampaignLeaderCheck", "return(true)"))
 	suite.ctx, suite.cancelFunc = context.WithCancel(context.Background())
 
 	cluster, err := tests.NewTestCluster(suite.ctx, 2)
@@ -125,6 +127,8 @@ func (suite *httpClientTestSuite) SetupSuite() {
 }
 
 func (suite *httpClientTestSuite) TearDownSuite() {
+	re := suite.Require()
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/member/skipCampaignLeaderCheck"))
 	suite.cancelFunc()
 	suite.client.Close()
 	suite.cluster.Destroy()
