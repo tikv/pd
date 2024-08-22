@@ -556,3 +556,8 @@ func (l *balanceLeaderScheduler) IsDisable() bool {
 func (l *balanceLeaderScheduler) SetDisable(disable bool) error {
 	return l.conf.setDisable(disable)
 }
+
+// IsDefault implements the Scheduler interface.
+func (l *balanceLeaderScheduler) IsDefault() bool {
+	return true
+}

@@ -161,8 +161,7 @@ func (c *Controller) AddSchedulerHandler(scheduler Scheduler, args ...string) er
 		return err
 	}
 	c.cluster.GetSchedulerConfig().AddSchedulerCfg(scheduler.GetType(), args)
-	// err := scheduler.PrepareConfig(c.cluster)
-	return nil
+	return scheduler.PrepareConfig(c.cluster)
 }
 
 // RemoveSchedulerHandler removes the HTTP handler for a scheduler.
@@ -173,7 +172,7 @@ func (c *Controller) RemoveSchedulerHandler(name string) error {
 		return errs.ErrNotBootstrapped.FastGenByArgs()
 	}
 	s, ok := c.schedulerHandlers[name]
-	if !ok {
+	if !ok || s.(Scheduler).IsDisable() {
 		return errs.ErrSchedulerNotFound.FastGenByArgs()
 	}
 
@@ -184,7 +183,11 @@ func (c *Controller) RemoveSchedulerHandler(name string) error {
 		return err
 	}
 
-	delete(c.schedulerHandlers, name)
+	if !s.(Scheduler).IsDefault() {
+		delete(c.schedulerHandlers, name)
+	}
+
+	s.(Scheduler).CleanConfig(c.cluster)
 	return s.(Scheduler).Clean()
 }
 
@@ -230,7 +233,7 @@ func (c *Controller) RemoveScheduler(name string) error {
 		return errs.ErrNotBootstrapped.FastGenByArgs()
 	}
 	s, ok := c.schedulers[name]
-	if !ok {
+	if !ok || s.IsDisable() {
 		return errs.ErrSchedulerNotFound.FastGenByArgs()
 	}
 
@@ -241,9 +244,13 @@ func (c *Controller) RemoveScheduler(name string) error {
 		return err
 	}
 
-	s.Stop()
+	if !s.IsDefault() {
+		// Need not stop default schedulers.
+		// They are disabled and will not be scheduled.
+		s.Stop()
+		delete(c.schedulers, name)
+	}
 	schedulerStatusGauge.DeleteLabelValues(name, "allow")
-	delete(c.schedulers, name)
 	return s.Clean()
 }
 
@@ -545,6 +552,9 @@ func (s *ScheduleController) AllowSchedule(diagnosable bool) bool {
 		if diagnosable {
 			s.diagnosticRecorder.SetResultFromStatus(Paused)
 		}
+		return false
+	}
+	if s.IsDisable() {
 		return false
 	}
 	return true

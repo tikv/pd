@@ -55,6 +55,7 @@ func newSchedulerHandler(svr *server.Server, r *render.Render) *schedulerHandler
 func (h *schedulerHandler) GetSchedulers(w http.ResponseWriter, r *http.Request) {
 	status := r.URL.Query().Get("status")
 	_, needTS := r.URL.Query()["timestamp"]
+	log.Info("get schedulers", zap.String("status", status), zap.Bool("needTS", needTS))
 	output, err := h.Handler.GetSchedulerByStatus(status, needTS)
 	if err != nil {
 		h.r.JSON(w, http.StatusInternalServerError, err.Error())

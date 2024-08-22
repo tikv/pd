@@ -288,3 +288,8 @@ func (s *balanceRegionScheduler) IsDisable() bool {
 func (s *balanceRegionScheduler) SetDisable(disable bool) error {
 	return s.conf.setDisable(disable)
 }
+
+// IsDefault implements the Scheduler interface.
+func (s *balanceRegionScheduler) IsDefault() bool {
+	return true
+}

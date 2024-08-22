@@ -130,3 +130,6 @@ func (*BaseScheduler) IsDisable() bool { return false }
 
 // SetDisable implements the Scheduler interface.
 func (*BaseScheduler) SetDisable(bool) error { return nil }
+
+// IsDefault returns if the scheduler is a default scheduler.
+func (*BaseScheduler) IsDefault() bool { return false }

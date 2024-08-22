@@ -24,17 +24,18 @@ import (
 
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/log"
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/core"
-	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/versioninfo"
 	pdTests "github.com/tikv/pd/tests"
 	ctl "github.com/tikv/pd/tools/pd-ctl/pdctl"
 	"github.com/tikv/pd/tools/pd-ctl/tests"
+	"go.uber.org/zap"
 )
 
 type schedulerTestSuite struct {
@@ -144,7 +145,6 @@ func (suite *schedulerTestSuite) checkScheduler(cluster *pdTests.TestCluster) {
 		})
 	}
 
-	leaderServer := cluster.GetLeaderServer()
 	for _, store := range stores {
 		pdTests.MustPutStore(re, cluster, store)
 	}
@@ -186,7 +186,9 @@ func (suite *schedulerTestSuite) checkScheduler(cluster *pdTests.TestCluster) {
 			}
 		}()
 		for _, store := range stores {
-			isStorePaused := !cluster.GetLeaderServer().GetRaftCluster().GetStore(store.GetId()).AllowLeaderTransfer()
+			t := cluster.GetLeaderServer().GetRaftCluster().GetStore(store.GetId())
+			log.Info("check store", zap.Uint64("store-id", store.GetId()), zap.String("status", status))
+			isStorePaused := !t.AllowLeaderTransfer()
 			if slice.AnyOf(changedStores, func(i int) bool {
 				return store.GetId() == changedStores[i]
 			}) {
@@ -204,6 +206,7 @@ func (suite *schedulerTestSuite) checkScheduler(cluster *pdTests.TestCluster) {
 
 	for idx := range schedulers {
 		checkStorePause([]uint64{}, schedulers[idx])
+		suite.T().Logf("test scheduler %s", schedulers[idx])
 		// scheduler add command
 		args = []string{"-u", pdAddr, "scheduler", "add", schedulers[idx], "2"}
 		expected = map[string]bool{
@@ -212,6 +215,7 @@ func (suite *schedulerTestSuite) checkScheduler(cluster *pdTests.TestCluster) {
 			schedulers[idx]:                true,
 			"evict-slow-store-scheduler":   true,
 		}
+		log.Info("add scheduler", zap.String("scheduler", schedulers[idx]))
 		checkSchedulerCommand(re, cmd, pdAddr, args, expected)
 
 		// scheduler config show command
@@ -327,15 +331,6 @@ func (suite *schedulerTestSuite) checkScheduler(cluster *pdTests.TestCluster) {
 	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "add", "balance-hot-region-scheduler"}, nil)
 	re.Contains(echo, "Success")
 
-	// test show scheduler with paused and disabled status.
-	checkSchedulerWithStatusCommand := func(status string, expected []string) {
-		testutil.Eventually(re, func() bool {
-			var schedulers []string
-			mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "show", "--status", status}, &schedulers)
-			return reflect.DeepEqual(expected, schedulers)
-		})
-	}
-
 	// test scatter range scheduler
 	for _, name := range []string{
 		"test", "test#", "?test",
@@ -358,6 +353,24 @@ func (suite *schedulerTestSuite) checkScheduler(cluster *pdTests.TestCluster) {
 		})
 	}
 
+	args = []string{"-u", pdAddr, "scheduler", "remove", "balance-region-scheduler"}
+	expected = map[string]bool{
+		"balance-leader-scheduler":     true,
+		"balance-hot-region-scheduler": true,
+		"evict-slow-store-scheduler":   true,
+	}
+	checkSchedulerCommand(re, cmd, pdAddr, args, expected)
+
+	// test show scheduler with paused and disabled status.
+	checkSchedulerWithStatusCommand := func(status string, expected []string) {
+		testutil.Eventually(re, func() bool {
+			var schedulers []string
+			mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "show", "--status", status}, &schedulers)
+			return reflect.DeepEqual(expected, schedulers)
+		})
+	}
+	checkSchedulerWithStatusCommand("disabled", []string{"balance-region-scheduler"})
+
 	mustUsage([]string{"-u", pdAddr, "scheduler", "pause", "balance-leader-scheduler"})
 	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "pause", "balance-leader-scheduler", "60"}, nil)
 	re.Contains(echo, "Success!")
@@ -374,21 +387,6 @@ func (suite *schedulerTestSuite) checkScheduler(cluster *pdTests.TestCluster) {
 	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "resume", "balance-leader-scheduler"}, nil)
 	re.Contains(echo, "Success!")
 	checkSchedulerWithStatusCommand("paused", []string{})
-
-	// set label scheduler to disabled manually.
-	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "add", "label-scheduler"}, nil)
-	re.Contains(echo, "Success!")
-	cfg := leaderServer.GetServer().GetScheduleConfig()
-	origin := cfg.Schedulers
-	cfg.Schedulers = sc.SchedulerConfigs{{Type: "label", Disable: true}}
-	err := leaderServer.GetServer().SetScheduleConfig(*cfg)
-	re.NoError(err)
-	checkSchedulerWithStatusCommand("disabled", []string{"label-scheduler"})
-	// reset Schedulers in ScheduleConfig
-	cfg.Schedulers = origin
-	err = leaderServer.GetServer().SetScheduleConfig(*cfg)
-	re.NoError(err)
-	checkSchedulerWithStatusCommand("disabled", []string{})
 }
 
 func (suite *schedulerTestSuite) TestSchedulerConfig() {
@@ -621,6 +619,7 @@ func (suite *schedulerTestSuite) checkHotRegionSchedulerConfig(cluster *pdTests.
 		"min-hot-key-rate":        float64(10),
 		"min-hot-query-rate":      float64(10),
 		"src-tolerance-ratio":     1.05,
+		"disabled":                false,
 		"dst-tolerance-ratio":     1.05,
 		"read-priorities":         []any{"byte", "key"},
 		"write-leader-priorities": []any{"key", "byte"},
@@ -834,6 +833,7 @@ func checkSchedulerCommand(re *require.Assertions, cmd *cobra.Command, pdAddr st
 	testutil.Eventually(re, func() bool {
 		var schedulers []string
 		mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "show"}, &schedulers)
+		log.Info("checkSchedulerCommand", zap.Any("schedulers", schedulers), zap.Any("expected", expected))
 		if len(schedulers) != len(expected) {
 			return false
 		}

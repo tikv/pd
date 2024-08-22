@@ -56,6 +56,8 @@ type Scheduler interface {
 	IsDisable() bool
 	// SetDisable sets the scheduler's disable, it only works for default schedulers.
 	SetDisable(bool) error
+	// IsDefault returns if the scheduler is a default scheduler.
+	IsDefault() bool
 }
 
 // EncodeConfig encode the custom config for each scheduler.

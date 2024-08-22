@@ -786,6 +786,7 @@ func (s *StoresInfo) PauseLeaderTransfer(storeID uint64) error {
 	if !store.AllowLeaderTransfer() {
 		return errs.ErrPauseLeaderTransfer.FastGenByArgs(storeID)
 	}
+	log.Info("pause leader transfer", zap.Uint64("store-id", storeID))
 	s.stores[storeID] = store.Clone(PauseLeaderTransfer())
 	return nil
 }
@@ -801,6 +802,7 @@ func (s *StoresInfo) ResumeLeaderTransfer(storeID uint64) {
 			zap.Uint64("store-id", storeID))
 		return
 	}
+	log.Info("resume leader transfer", zap.Uint64("store-id", storeID))
 	s.stores[storeID] = store.Clone(ResumeLeaderTransfer())
 }
 

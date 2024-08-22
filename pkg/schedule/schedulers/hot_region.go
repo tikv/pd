@@ -409,6 +409,11 @@ func (h *hotScheduler) Clean() error {
 	return h.conf.clean()
 }
 
+// IsDefault implements the Scheduler interface.
+func (h *hotScheduler) IsDefault() bool {
+	return true
+}
+
 type solution struct {
 	srcStore     *statistics.StoreLoadDetail
 	region       *core.RegionInfo // The region of the main balance effect. Relate mainPeerStat. srcStore -> dstStore

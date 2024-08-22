@@ -335,3 +335,8 @@ func newEvictSlowStoreScheduler(opController *operator.Controller, conf *evictSl
 		handler:       handler,
 	}
 }
+
+// IsDefault implements the Scheduler interface.
+func (s *evictSlowStoreScheduler) IsDefault() bool {
+	return true
+}
