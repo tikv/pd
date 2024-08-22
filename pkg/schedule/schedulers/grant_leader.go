@@ -28,16 +28,11 @@ import (
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
-	types "github.com/tikv/pd/pkg/schedule/type"
+	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/unrolled/render"
 	"go.uber.org/zap"
-)
-
-const (
-	// GrantLeaderName is grant leader scheduler name.
-	GrantLeaderName = "grant-leader-scheduler"
 )
 
 type grantLeaderSchedulerConfig struct {
@@ -312,7 +307,7 @@ func (handler *grantLeaderHandler) deleteConfig(w http.ResponseWriter, r *http.R
 			return
 		}
 		if last {
-			if err := handler.config.removeSchedulerCb(GrantLeaderName); err != nil {
+			if err := handler.config.removeSchedulerCb(types.GrantLeaderScheduler.String()); err != nil {
 				if errors.ErrorEqual(err, errs.ErrSchedulerNotFound.FastGenByArgs()) {
 					handler.rd.JSON(w, http.StatusNotFound, err.Error())
 				} else {

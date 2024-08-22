@@ -26,13 +26,8 @@ import (
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
-	types "github.com/tikv/pd/pkg/schedule/type"
+	"github.com/tikv/pd/pkg/schedule/types"
 	"go.uber.org/zap"
-)
-
-const (
-	// BalanceRegionName is balance region scheduler name.
-	BalanceRegionName = "balance-region-scheduler"
 )
 
 type balanceRegionSchedulerConfig struct {

@@ -1756,10 +1756,7 @@ func (s *GrpcServer) AskSplit(ctx context.Context, request *pdpb.AskSplitRequest
 				"missing region for split"),
 		}, nil
 	}
-	req := &pdpb.AskSplitRequest{
-		Region: request.Region,
-	}
-	split, err := rc.HandleAskSplit(req)
+	split, err := rc.HandleAskSplit(request)
 	if err != nil {
 		return &pdpb.AskSplitResponse{
 			Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
@@ -1836,11 +1833,7 @@ func (s *GrpcServer) AskBatchSplit(ctx context.Context, request *pdpb.AskBatchSp
 				"missing region for split"),
 		}, nil
 	}
-	req := &pdpb.AskBatchSplitRequest{
-		Region:     request.Region,
-		SplitCount: request.SplitCount,
-	}
-	split, err := rc.HandleAskBatchSplit(req)
+	split, err := rc.HandleAskBatchSplit(request)
 	if err != nil {
 		return &pdpb.AskBatchSplitResponse{
 			Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),

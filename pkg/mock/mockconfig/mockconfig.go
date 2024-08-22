@@ -16,7 +16,7 @@ package mockconfig
 
 import (
 	sc "github.com/tikv/pd/pkg/schedule/config"
-	types "github.com/tikv/pd/pkg/schedule/type"
+	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/server/config"
 )
 

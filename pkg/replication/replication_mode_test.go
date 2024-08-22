@@ -409,7 +409,7 @@ func TestReplicateState(t *testing.T) {
 	rep.tickReplicateStatus()
 	assertLastData(t, replicator.lastData[1], "sync", stateID, nil)
 
-	// repliate state to new member
+	// replicate state to new member
 	replicator.memberIDs = append(replicator.memberIDs, 2, 3)
 	rep.tickReplicateStatus()
 	assertLastData(t, replicator.lastData[2], "sync", stateID, nil)

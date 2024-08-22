@@ -35,7 +35,7 @@ import (
 )
 
 const (
-	defaultName             = "Resource Manager"
+	defaultName             = "resource manager"
 	defaultBackendEndpoints = "http://127.0.0.1:2379"
 	defaultListenAddr       = "http://127.0.0.1:3379"
 
@@ -127,8 +127,9 @@ func (rmc *ControllerConfig) Adjust(meta *configutil.ConfigMetaData) {
 	if !meta.IsDefined("ltb-token-rpc-max-delay") {
 		configutil.AdjustDuration(&rmc.LTBTokenRPCMaxDelay, defaultLTBTokenRPCMaxDelay)
 	}
-	failpoint.Inject("enableDegradedMode", func() {
+	failpoint.Inject("enableDegradedModeAndTraceLog", func() {
 		configutil.AdjustDuration(&rmc.DegradedModeWaitDuration, time.Second)
+		configutil.AdjustBool(&rmc.EnableControllerTraceLog, true)
 	})
 }
 

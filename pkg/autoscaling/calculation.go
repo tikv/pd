@@ -431,7 +431,7 @@ func findBestGroupToScaleOut(strategy *Strategy, groups []*Plan, component Compo
 		},
 	}
 
-	// TODO: we can provide different senerios by using options and remove this kind of special judgement.
+	// TODO: we can provide different scenarios by using options and remove this kind of special judgement.
 	if component == TiKV {
 		group.Labels[filter.SpecialUseKey] = filter.SpecialUseHotRegion
 	}

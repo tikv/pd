@@ -16,7 +16,7 @@ package schedulers
 
 import (
 	"github.com/prometheus/client_golang/prometheus"
-	types "github.com/tikv/pd/pkg/schedule/type"
+	"github.com/tikv/pd/pkg/schedule/types"
 )
 
 var (
@@ -110,7 +110,7 @@ var (
 			Namespace: "pd",
 			Subsystem: "scheduler",
 			Name:      "store_slow_trend_evicted_status",
-			Help:      "Store evited by slow trend status for schedule",
+			Help:      "Store evicted by slow trend status for schedule",
 		}, []string{"address", "store"})
 
 	storeSlowTrendActionStatusGauge = prometheus.NewGaugeVec(

@@ -26,12 +26,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
-	types "github.com/tikv/pd/pkg/schedule/type"
-)
-
-const (
-	// RandomMergeName is random merge scheduler name.
-	RandomMergeName = "random-merge-scheduler"
+	"github.com/tikv/pd/pkg/schedule/types"
 )
 
 type randomMergeSchedulerConfig struct {
