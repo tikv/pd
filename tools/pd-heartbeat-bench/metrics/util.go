@@ -32,12 +32,12 @@ import (
 
 var (
 	prometheusCli        api.Client
-	finalMetrics2Collect []Metric
+	finalMetrics2Collect []metric
 	avgRegionStats       report.Stats
 	avgStoreTime         float64
 	collectRound         = 1.0
 
-	metrics2Collect = []Metric{
+	metrics2Collect = []metric{
 		{promSQL: cpuMetric, name: "max cpu usage(%)", max: true},
 		{promSQL: memoryMetric, name: "max memory usage(G)", max: true},
 		{promSQL: goRoutineMetric, name: "max go routines", max: true},
@@ -69,7 +69,7 @@ var (
 	}
 )
 
-type Metric struct {
+type metric struct {
 	promSQL string
 	name    string
 	value   float64
@@ -77,9 +77,10 @@ type Metric struct {
 	max bool
 }
 
+// InitMetric2Collect initializes the metrics to collect
 func InitMetric2Collect(endpoint string) (withMetric bool) {
 	for _, name := range breakdownNames {
-		metrics2Collect = append(metrics2Collect, Metric{
+		metrics2Collect = append(metrics2Collect, metric{
 			promSQL: hbBreakdownMetricByName(name),
 			name:    name,
 		})
@@ -94,7 +95,7 @@ func InitMetric2Collect(endpoint string) (withMetric bool) {
 		log.Error("parse prometheus url error", zap.Error(err))
 		return false
 	}
-	prometheusCli, err = NewPrometheusClient(*cu)
+	prometheusCli, err = newPrometheusClient(*cu)
 	if err != nil {
 		log.Error("create prometheus client error", zap.Error(err))
 		return false
@@ -108,7 +109,7 @@ func InitMetric2Collect(endpoint string) (withMetric bool) {
 	return true
 }
 
-func NewPrometheusClient(prometheusURL url.URL) (api.Client, error) {
+func newPrometheusClient(prometheusURL url.URL) (api.Client, error) {
 	client, err := api.NewClient(api.Config{
 		Address: prometheusURL.String(),
 	})
@@ -122,6 +123,7 @@ func NewPrometheusClient(prometheusURL url.URL) (api.Client, error) {
 // WarmUpRound wait for the first round to warm up
 const WarmUpRound = 1
 
+// CollectMetrics collects the metrics
 func CollectMetrics(curRound int, wait time.Duration) {
 	if curRound < WarmUpRound {
 		return
@@ -183,7 +185,7 @@ func getMetric(cli api.Client, query string, ts time.Time) ([]float64, error) {
 	return value, nil
 }
 
-func formatMetrics(ms []Metric) string {
+func formatMetrics(ms []metric) string {
 	res := ""
 	for _, m := range ms {
 		res += "[" + m.name + "]" + " " + fmt.Sprintf("%.10f", m.value) + " "
@@ -191,6 +193,7 @@ func formatMetrics(ms []Metric) string {
 	return res
 }
 
+// CollectRegionAndStoreStats collects the region and store stats
 func CollectRegionAndStoreStats(regionStats *report.Stats, storeTime *float64) {
 	if regionStats != nil && storeTime != nil {
 		collect(*regionStats, *storeTime)
@@ -211,6 +214,7 @@ func collect(regionStats report.Stats, storeTime float64) {
 	avgStoreTime = average(avgStoreTime, storeTime)
 }
 
+// OutputConclusion outputs the final conclusion
 func OutputConclusion() {
 	logFields := RegionFields(avgRegionStats,
 		zap.Float64("avg store time", avgStoreTime),
@@ -219,6 +223,7 @@ func OutputConclusion() {
 	log.Info("final metrics collected", logFields...)
 }
 
+// RegionFields returns the fields for region stats
 func RegionFields(stats report.Stats, fields ...zap.Field) []zap.Field {
 	return append([]zap.Field{
 		zap.String("total", fmt.Sprintf("%.4fs", stats.Total.Seconds())),

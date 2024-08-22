@@ -40,13 +40,13 @@ import (
 // Client is a PD (Placement Driver) client.
 // It should not be used after calling Close().
 type Client interface {
-	AllocID(context.Context) (uint64, error)
+	allocID(context.Context) (uint64, error)
 	PutStore(context.Context, *metapb.Store) error
 	StoreHeartbeat(context.Context, *pdpb.StoreStats) error
 	RegionHeartbeat(context.Context, *core.RegionInfo) error
 
-	HeartbeatStreamLoop()
-	ChangeConn(*grpc.ClientConn) error
+	heartbeatStreamLoop()
+	changeConn(*grpc.ClientConn) error
 	Close()
 }
 
@@ -61,15 +61,17 @@ const (
 var (
 	// errFailInitClusterID is returned when failed to load clusterID from all supplied PD addresses.
 	errFailInitClusterID = errors.New("[pd] failed to get cluster id")
-	PDHTTPClient         pdHttp.Client
-	SD                   pd.ServiceDiscovery
-	ClusterID            atomic.Uint64
+	// PDHTTPClient is a client for PD HTTP API.
+	PDHTTPClient pdHttp.Client
+	// SD is a service discovery for PD.
+	SD        pd.ServiceDiscovery
+	clusterID atomic.Uint64
 )
 
 // requestHeader returns a header for fixed ClusterID.
 func requestHeader() *pdpb.RequestHeader {
 	return &pdpb.RequestHeader{
-		ClusterId: ClusterID.Load(),
+		ClusterId: clusterID.Load(),
 	}
 }
 
@@ -110,7 +112,7 @@ func createConn(url string) (*grpc.ClientConn, error) {
 	return cc, nil
 }
 
-func (c *client) ChangeConn(cc *grpc.ClientConn) error {
+func (c *client) changeConn(cc *grpc.ClientConn) error {
 	c.clientConn = cc
 	simutil.Logger.Info("change pd client with endpoints", zap.String("tag", c.tag), zap.String("pd-address", cc.Target()))
 	return nil
@@ -143,7 +145,7 @@ func (c *client) createHeartbeatStream() (pdpb.PD_RegionHeartbeatClient, context
 	return stream, ctx, cancel
 }
 
-func (c *client) HeartbeatStreamLoop() {
+func (c *client) heartbeatStreamLoop() {
 	c.wg.Add(1)
 	defer c.wg.Done()
 	for {
@@ -173,10 +175,10 @@ func (c *client) HeartbeatStreamLoop() {
 			if client := SD.GetServiceClient(); client != nil {
 				_, conn, err := getLeaderURL(ctx, client.GetClientConn())
 				if err != nil {
-					simutil.Logger.Error("[HeartbeatStreamLoop] failed to get leader URL", zap.Error(err))
+					simutil.Logger.Error("[heartbeatStreamLoop] failed to get leader URL", zap.Error(err))
 					continue
 				}
-				if err = c.ChangeConn(conn); err == nil {
+				if err = c.changeConn(conn); err == nil {
 					break
 				}
 			}
@@ -234,6 +236,7 @@ func (c *client) reportRegionHeartbeat(ctx context.Context, stream pdpb.PD_Regio
 	}
 }
 
+// Close closes the client.
 func (c *client) Close() {
 	if c.cancel == nil {
 		simutil.Logger.Info("pd client has been closed", zap.String("tag", c.tag))
@@ -248,7 +251,7 @@ func (c *client) Close() {
 	}
 }
 
-func (c *client) AllocID(ctx context.Context) (uint64, error) {
+func (c *client) allocID(ctx context.Context) (uint64, error) {
 	ctx, cancel := context.WithTimeout(ctx, pdTimeout)
 	resp, err := c.pdClient().AllocID(ctx, &pdpb.AllocIDRequest{
 		Header: requestHeader(),
@@ -263,6 +266,7 @@ func (c *client) AllocID(ctx context.Context) (uint64, error) {
 	return resp.GetId(), nil
 }
 
+// PutStore sends PutStore to PD.
 func (c *client) PutStore(ctx context.Context, store *metapb.Store) error {
 	ctx, cancel := context.WithTimeout(ctx, pdTimeout)
 	newStore := typeutil.DeepClone(store, core.StoreFactory)
@@ -281,6 +285,7 @@ func (c *client) PutStore(ctx context.Context, store *metapb.Store) error {
 	return nil
 }
 
+// StoreHeartbeat sends a StoreHeartbeat to PD.
 func (c *client) StoreHeartbeat(ctx context.Context, newStats *pdpb.StoreStats) error {
 	ctx, cancel := context.WithTimeout(ctx, pdTimeout)
 	resp, err := c.pdClient().StoreHeartbeat(ctx, &pdpb.StoreHeartbeatRequest{
@@ -298,17 +303,18 @@ func (c *client) StoreHeartbeat(ctx context.Context, newStats *pdpb.StoreStats) 
 	return nil
 }
 
+// RegionHeartbeat sends a RegionHeartbeat to PD.
 func (c *client) RegionHeartbeat(_ context.Context, region *core.RegionInfo) error {
 	c.reportRegionHeartbeatCh <- region
 	return nil
 }
 
-type RetryClient struct {
+type retryClient struct {
 	client     Client
 	retryCount int
 }
 
-func NewRetryClient(node *Node) *RetryClient {
+func newRetryClient(node *Node) *retryClient {
 	// Init PD client and putting it into node.
 	tag := fmt.Sprintf("store %d", node.Store.Id)
 	var (
@@ -331,8 +337,8 @@ func NewRetryClient(node *Node) *RetryClient {
 	}
 	node.client = client
 
-	// Init RetryClient
-	retryClient := &RetryClient{
+	// Init retryClient
+	retryClient := &retryClient{
 		client:     client,
 		retryCount: retryTimes,
 	}
@@ -342,12 +348,12 @@ func NewRetryClient(node *Node) *RetryClient {
 	})
 	// start heartbeat stream
 	node.receiveRegionHeartbeatCh = receiveRegionHeartbeatCh
-	go client.HeartbeatStreamLoop()
+	go client.heartbeatStreamLoop()
 
 	return retryClient
 }
 
-func (rc *RetryClient) requestWithRetry(f func() (any, error)) (any, error) {
+func (rc *retryClient) requestWithRetry(f func() (any, error)) (any, error) {
 	// execute the function directly
 	if res, err := f(); err == nil {
 		return res, nil
@@ -362,7 +368,7 @@ func (rc *RetryClient) requestWithRetry(f func() (any, error)) (any, error) {
 				simutil.Logger.Error("[retry] failed to get leader URL", zap.Error(err))
 				return nil, err
 			}
-			if err = rc.client.ChangeConn(conn); err != nil {
+			if err = rc.client.changeConn(conn); err != nil {
 				simutil.Logger.Error("failed to change connection", zap.Error(err))
 				return nil, err
 			}
@@ -381,8 +387,8 @@ func getLeaderURL(ctx context.Context, conn *grpc.ClientConn) (string, *grpc.Cli
 	if members.GetHeader().GetError() != nil {
 		return "", nil, errors.New(members.GetHeader().GetError().String())
 	}
-	ClusterID.Store(members.GetHeader().GetClusterId())
-	if ClusterID.Load() == 0 {
+	clusterID.Store(members.GetHeader().GetClusterId())
+	if clusterID.Load() == 0 {
 		return "", nil, errors.New("cluster id is 0")
 	}
 	if members.GetLeader() == nil {
@@ -393,9 +399,9 @@ func getLeaderURL(ctx context.Context, conn *grpc.ClientConn) (string, *grpc.Cli
 	return leaderURL, conn, err
 }
 
-func (rc *RetryClient) AllocID(ctx context.Context) (uint64, error) {
+func (rc *retryClient) allocID(ctx context.Context) (uint64, error) {
 	res, err := rc.requestWithRetry(func() (any, error) {
-		id, err := rc.client.AllocID(ctx)
+		id, err := rc.client.allocID(ctx)
 		return id, err
 	})
 	if err != nil {
@@ -404,7 +410,8 @@ func (rc *RetryClient) AllocID(ctx context.Context) (uint64, error) {
 	return res.(uint64), nil
 }
 
-func (rc *RetryClient) PutStore(ctx context.Context, store *metapb.Store) error {
+// PutStore sends PutStore to PD.
+func (rc *retryClient) PutStore(ctx context.Context, store *metapb.Store) error {
 	_, err := rc.requestWithRetry(func() (any, error) {
 		err := rc.client.PutStore(ctx, store)
 		return nil, err
@@ -412,7 +419,8 @@ func (rc *RetryClient) PutStore(ctx context.Context, store *metapb.Store) error 
 	return err
 }
 
-func (rc *RetryClient) StoreHeartbeat(ctx context.Context, newStats *pdpb.StoreStats) error {
+// StoreHeartbeat sends a StoreHeartbeat to PD.
+func (rc *retryClient) StoreHeartbeat(ctx context.Context, newStats *pdpb.StoreStats) error {
 	_, err := rc.requestWithRetry(func() (any, error) {
 		err := rc.client.StoreHeartbeat(ctx, newStats)
 		return nil, err
@@ -420,7 +428,8 @@ func (rc *RetryClient) StoreHeartbeat(ctx context.Context, newStats *pdpb.StoreS
 	return err
 }
 
-func (rc *RetryClient) RegionHeartbeat(ctx context.Context, region *core.RegionInfo) error {
+// RegionHeartbeat sends a RegionHeartbeat to PD.
+func (rc *retryClient) RegionHeartbeat(ctx context.Context, region *core.RegionInfo) error {
 	_, err := rc.requestWithRetry(func() (any, error) {
 		err := rc.client.RegionHeartbeat(ctx, region)
 		return nil, err
@@ -428,15 +437,16 @@ func (rc *RetryClient) RegionHeartbeat(ctx context.Context, region *core.RegionI
 	return err
 }
 
-func (*RetryClient) ChangeConn(_ *grpc.ClientConn) error {
+func (*retryClient) changeConn(_ *grpc.ClientConn) error {
 	panic("unImplement")
 }
 
-func (rc *RetryClient) HeartbeatStreamLoop() {
-	rc.client.HeartbeatStreamLoop()
+func (rc *retryClient) heartbeatStreamLoop() {
+	rc.client.heartbeatStreamLoop()
 }
 
-func (rc *RetryClient) Close() {
+// Close closes the client.
+func (rc *retryClient) Close() {
 	rc.client.Close()
 }
 
@@ -465,10 +475,10 @@ retry:
 			break retry
 		}
 	}
-	if ClusterID.Load() == 0 {
+	if clusterID.Load() == 0 {
 		return "", nil, errors.WithStack(errFailInitClusterID)
 	}
-	simutil.Logger.Info("get cluster id successfully", zap.Uint64("cluster-id", ClusterID.Load()))
+	simutil.Logger.Info("get cluster id successfully", zap.Uint64("cluster-id", clusterID.Load()))
 
 	// Check if the cluster is already bootstrapped.
 	ctx, cancel := context.WithTimeout(ctx, pdTimeout)
@@ -513,7 +523,6 @@ retry:
 }
 
 /* PDHTTPClient is a client for PD HTTP API, these are the functions that are used in the simulator */
-
 func PutPDConfig(config *sc.PDConfig) error {
 	if len(config.PlacementRules) > 0 {
 		ruleOps := make([]*pdHttp.RuleOp, 0)
@@ -541,8 +550,9 @@ func PutPDConfig(config *sc.PDConfig) error {
 	return nil
 }
 
+// ChooseToHaltPDSchedule is used to choose whether to halt the PD schedule
 func ChooseToHaltPDSchedule(halt bool) {
-	HaltSchedule.Store(halt)
+	haltSchedule.Store(halt)
 	PDHTTPClient.SetConfig(context.Background(), map[string]any{
 		"schedule.halt-scheduling": strconv.FormatBool(halt),
 	})

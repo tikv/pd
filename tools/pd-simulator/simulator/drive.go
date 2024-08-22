@@ -135,7 +135,7 @@ func (d *Driver) allocID() error {
 		return err
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), requestTimeout)
-	rootPath := path.Join("/pd", strconv.FormatUint(ClusterID.Load(), 10))
+	rootPath := path.Join("/pd", strconv.FormatUint(clusterID.Load(), 10))
 	allocIDPath := path.Join(rootPath, "alloc_id")
 	_, err = etcdClient.Put(ctx, allocIDPath, string(typeutil.Uint64ToBytes(maxID+1000)))
 	if err != nil {
@@ -171,7 +171,7 @@ func (d *Driver) updateNodesClient() error {
 	PDHTTPClient = pdHttp.NewClientWithServiceDiscovery("pd-simulator", SD)
 
 	for _, node := range d.conn.Nodes {
-		node.client = NewRetryClient(node)
+		node.client = newRetryClient(node)
 	}
 	return nil
 }
@@ -191,6 +191,7 @@ func (d *Driver) Tick() {
 	}()
 }
 
+// StepRegions steps regions.
 func (d *Driver) StepRegions(ctx context.Context) {
 	for {
 		select {
@@ -209,6 +210,7 @@ func (d *Driver) StepRegions(ctx context.Context) {
 	}
 }
 
+// StoresHeartbeat sends heartbeat to all stores.
 func (d *Driver) StoresHeartbeat(ctx context.Context) {
 	config := d.raftEngine.storeConfig
 	storeInterval := uint64(config.RaftStore.StoreHeartBeatInterval.Duration / config.SimTickInterval.Duration)
@@ -229,6 +231,7 @@ func (d *Driver) StoresHeartbeat(ctx context.Context) {
 	}
 }
 
+// RegionsHeartbeat sends heartbeat to all regions.
 func (d *Driver) RegionsHeartbeat(ctx context.Context) {
 	// ensure only wait for the first time heartbeat done
 	firstReport := true
@@ -281,9 +284,9 @@ func (d *Driver) RegionsHeartbeat(ctx context.Context) {
 					}
 				}
 
-				// Only set HaltSchedule to false when the leader count is 80% of the total region count.
+				// Only set haltSchedule to false when the leader count is 80% of the total region count.
 				// using firstReport to avoid the haltSchedule set to true manually.
-				if HaltSchedule.Load() && firstReport {
+				if haltSchedule.Load() && firstReport {
 					storeInterval := uint64(config.RaftStore.StoreHeartBeatInterval.Duration / config.SimTickInterval.Duration)
 					ticker := time.NewTicker(time.Duration(storeInterval))
 					for range ticker.C {
@@ -294,7 +297,7 @@ func (d *Driver) RegionsHeartbeat(ctx context.Context) {
 							leaderCount += store.Status.LeaderCount
 						}
 						// Add halt schedule check to avoid the situation that the leader count is always less than 80%.
-						if leaderCount > int64(float64(d.simConfig.TotalRegion)*0.8) || !HaltSchedule.Load() {
+						if leaderCount > int64(float64(d.simConfig.TotalRegion)*0.8) || !haltSchedule.Load() {
 							ChooseToHaltPDSchedule(false)
 							firstReport = false
 							ticker.Stop()
@@ -310,11 +313,11 @@ func (d *Driver) RegionsHeartbeat(ctx context.Context) {
 	}
 }
 
-var HaltSchedule atomic.Bool
+var haltSchedule atomic.Bool
 
 // Check checks if the simulation is completed.
 func (d *Driver) Check() bool {
-	if !HaltSchedule.Load() {
+	if !haltSchedule.Load() {
 		return false
 	}
 	var stats []info.StoreStats
