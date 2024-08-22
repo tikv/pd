@@ -133,8 +133,9 @@ func PrepareJoinCluster(cfg *config.Config) error {
 		return err
 	}
 
+	originMembers := listResp.Members
 	existed := false
-	for _, m := range listResp.Members {
+	for _, m := range originMembers {
 		if len(m.Name) == 0 {
 			log.Error("there is an abnormal joined member in the current member list",
 				zap.Uint64("id", m.ID),
@@ -174,8 +175,15 @@ func PrepareJoinCluster(cfg *config.Config) error {
 		listSucc bool
 	)
 
+	// If there is only one member in the cluster, the cluster maybe lost leader
+	// since quorum is not active after adding the new member.
+	linearizable := true
+	if len(originMembers) == 1 {
+		linearizable = false
+	}
+
 	for i := 0; i < listMemberRetryTimes; i++ {
-		listResp, err = etcdutil.ListEtcdMembers(client.Ctx(), client)
+		listResp, err = etcdutil.ListEtcdMembers(client.Ctx(), client, linearizable)
 		if err != nil {
 			return err
 		}

@@ -227,6 +227,7 @@ func checkEtcdClientHealth(re *require.Assertions, client *clientv3.Client) {
 
 func TestEtcdScaleInAndOut(t *testing.T) {
 	re := require.New(t)
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/utils/etcdutil/fastTick", "return(true)"))
 	// Start a etcd server.
 	servers, _, clean := NewTestEtcdCluster(t, 1)
 	defer clean()
@@ -249,6 +250,7 @@ func TestEtcdScaleInAndOut(t *testing.T) {
 	_, err = RemoveEtcdMember(client1, uint64(etcd1.Server.ID()))
 	re.NoError(err)
 	checkMembers(re, client2, []*embed.Etcd{etcd2})
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/utils/etcdutil/fastTick"))
 }
 
 func TestRandomKillEtcd(t *testing.T) {

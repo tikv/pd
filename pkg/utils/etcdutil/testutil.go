@@ -113,17 +113,17 @@ func MustAddEtcdMember(t *testing.T, cfg1 *embed.Config, client *clientv3.Client
 	peerURL := cfg2.ListenPeerUrls[0].String()
 	addResp, err := AddEtcdMember(client, []string{peerURL})
 	re.NoError(err)
+	// Start the new etcd member.
+	etcd2, err := embed.StartEtcd(cfg2)
+	re.NoError(err)
+	re.Equal(uint64(etcd2.Server.ID()), addResp.Member.ID)
+	<-etcd2.Server.ReadyNotify()
 	// Check the client can get the new member.
 	testutil.Eventually(re, func() bool {
 		members, err := ListEtcdMembers(client.Ctx(), client)
 		re.NoError(err)
 		return len(addResp.Members) == len(members.Members)
 	})
-	// Start the new etcd member.
-	etcd2, err := embed.StartEtcd(cfg2)
-	re.NoError(err)
-	re.Equal(uint64(etcd2.Server.ID()), addResp.Member.ID)
-	<-etcd2.Server.ReadyNotify()
 	return etcd2
 }
 
