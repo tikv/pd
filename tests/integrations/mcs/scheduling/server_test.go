@@ -106,6 +106,7 @@ func (suite *serverTestSuite) TestAllocIDAfterLeaderChange() {
 	pd2, err := suite.cluster.Join(suite.ctx)
 	re.NoError(err)
 	err = pd2.Run()
+	re.NotEmpty(suite.cluster.WaitLeader())
 	re.NoError(err)
 	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.backendEndpoints)
 	re.NoError(err)
