@@ -1062,7 +1062,7 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 				regionID,
 				ratelimit.ObserveRegionStatsAsync,
 				func(ctx context.Context) {
-					cluster.Collect(ctx, c, region, hasRegionStats)
+					cluster.Collect(ctx, c, region)
 				},
 			)
 		}
@@ -1119,17 +1119,19 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 	}
 
 	tracer.OnSaveCacheFinished()
-	// handle region stats
-	ctx.MiscRunner.RunTask(
-		regionID,
-		ratelimit.CollectRegionStatsAsync,
-		func(ctx context.Context) {
-			// TODO: Due to the accuracy requirements of the API "/regions/check/xxx",
-			// region stats needs to be collected in API mode.
-			// We need to think of a better way to reduce this part of the cost in the future.
-			cluster.Collect(ctx, c, region, hasRegionStats)
-		},
-	)
+	if hasRegionStats {
+		// handle region stats
+		ctx.MiscRunner.RunTask(
+			regionID,
+			ratelimit.CollectRegionStatsAsync,
+			func(ctx context.Context) {
+				// TODO: Due to the accuracy requirements of the API "/regions/check/xxx",
+				// region stats needs to be collected in API mode.
+				// We need to think of a better way to reduce this part of the cost in the future.
+				cluster.Collect(ctx, c, region)
+			},
+		)
+	}
 
 	tracer.OnCollectRegionStatsFinished()
 	if c.storage != nil {
