@@ -27,7 +27,7 @@ import (
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
-	types "github.com/tikv/pd/pkg/schedule/type"
+	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"go.uber.org/zap"
 )

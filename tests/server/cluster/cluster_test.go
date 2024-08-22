@@ -40,6 +40,7 @@ import (
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/schedulers"
+	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/syncer"
@@ -827,7 +828,7 @@ func TestSetScheduleOpt(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	// TODO: enable placementrules
+	// TODO: enable placementRules
 	tc, err := tests.NewTestCluster(ctx, 1, func(cfg *config.Config, _ string) { cfg.Replication.EnablePlacementRules = false })
 	defer tc.Destroy()
 	re.NoError(err)
@@ -1410,10 +1411,10 @@ func TestTransferLeaderForScheduler(t *testing.T) {
 	re.True(leaderServer.GetRaftCluster().IsPrepared())
 	schedsNum := len(rc.GetCoordinator().GetSchedulersController().GetSchedulerNames())
 	// Add evict leader scheduler
-	api.MustAddScheduler(re, leaderServer.GetAddr(), schedulers.EvictLeaderName, map[string]any{
+	api.MustAddScheduler(re, leaderServer.GetAddr(), types.EvictLeaderScheduler.String(), map[string]any{
 		"store_id": 1,
 	})
-	api.MustAddScheduler(re, leaderServer.GetAddr(), schedulers.EvictLeaderName, map[string]any{
+	api.MustAddScheduler(re, leaderServer.GetAddr(), types.EvictLeaderScheduler.String(), map[string]any{
 		"store_id": 2,
 	})
 	// Check scheduler updated.
@@ -1468,14 +1469,14 @@ func TestTransferLeaderForScheduler(t *testing.T) {
 func checkEvictLeaderSchedulerExist(re *require.Assertions, sc *schedulers.Controller, exist bool) {
 	testutil.Eventually(re, func() bool {
 		if !exist {
-			return sc.GetScheduler(schedulers.EvictLeaderName) == nil
+			return sc.GetScheduler(types.EvictLeaderScheduler.String()) == nil
 		}
-		return sc.GetScheduler(schedulers.EvictLeaderName) != nil
+		return sc.GetScheduler(types.EvictLeaderScheduler.String()) != nil
 	})
 }
 
 func checkEvictLeaderStoreIDs(re *require.Assertions, sc *schedulers.Controller, expected []uint64) {
-	handler, ok := sc.GetSchedulerHandlers()[schedulers.EvictLeaderName]
+	handler, ok := sc.GetSchedulerHandlers()[types.EvictLeaderScheduler.String()]
 	re.True(ok)
 	h, ok := handler.(interface {
 		EvictStoreIDs() []uint64

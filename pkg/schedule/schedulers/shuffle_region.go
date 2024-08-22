@@ -24,12 +24,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
-	types "github.com/tikv/pd/pkg/schedule/type"
-)
-
-const (
-	// ShuffleRegionName is shuffle region scheduler name.
-	ShuffleRegionName = "shuffle-region-scheduler"
+	"github.com/tikv/pd/pkg/schedule/types"
 )
 
 type shuffleRegionScheduler struct {
@@ -41,11 +36,11 @@ type shuffleRegionScheduler struct {
 // newShuffleRegionScheduler creates an admin scheduler that shuffles regions
 // between stores.
 func newShuffleRegionScheduler(opController *operator.Controller, conf *shuffleRegionSchedulerConfig) Scheduler {
-	filters := []filter.Filter{
-		&filter.StoreStateFilter{ActionScope: ShuffleRegionName, MoveRegion: true, OperatorLevel: constant.Low},
-		filter.NewSpecialUseFilter(ShuffleRegionName),
-	}
 	base := NewBaseScheduler(opController, types.ShuffleRegionScheduler)
+	filters := []filter.Filter{
+		&filter.StoreStateFilter{ActionScope: base.GetName(), MoveRegion: true, OperatorLevel: constant.Low},
+		filter.NewSpecialUseFilter(base.GetName()),
+	}
 	return &shuffleRegionScheduler{
 		BaseScheduler: base,
 		conf:          conf,

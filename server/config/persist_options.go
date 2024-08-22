@@ -33,7 +33,7 @@ import (
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/core/storelimit"
 	sc "github.com/tikv/pd/pkg/schedule/config"
-	types "github.com/tikv/pd/pkg/schedule/type"
+	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/etcdutil"

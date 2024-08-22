@@ -37,9 +37,11 @@ import (
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/placement"
+	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/versioninfo"
+	"github.com/tikv/pd/server/api"
 	"github.com/tikv/pd/tests"
 )
 
@@ -834,4 +836,84 @@ func (suite *httpClientTestSuite) TestRetryOnLeaderChange() {
 	// Cancel the context to stop the goroutine.
 	cancel()
 	wg.Wait()
+}
+
+func (suite *httpClientTestSuite) TestGetGCSafePoint() {
+	re := suite.Require()
+	client := suite.client
+	ctx, cancel := context.WithCancel(suite.ctx)
+	defer cancel()
+
+	// adding some safepoints to the server
+	list := &api.ListServiceGCSafepoint{
+		ServiceGCSafepoints: []*endpoint.ServiceSafePoint{
+			{
+				ServiceID: "AAA",
+				ExpiredAt: time.Now().Unix() + 10,
+				SafePoint: 1,
+			},
+			{
+				ServiceID: "BBB",
+				ExpiredAt: time.Now().Unix() + 10,
+				SafePoint: 2,
+			},
+			{
+				ServiceID: "CCC",
+				ExpiredAt: time.Now().Unix() + 10,
+				SafePoint: 3,
+			},
+		},
+		GCSafePoint:           1,
+		MinServiceGcSafepoint: 1,
+	}
+
+	storage := suite.cluster.GetLeaderServer().GetServer().GetStorage()
+	for _, ssp := range list.ServiceGCSafepoints {
+		err := storage.SaveServiceGCSafePoint(ssp)
+		re.NoError(err)
+	}
+	storage.SaveGCSafePoint(1)
+
+	// get the safepoints and start testing
+	l, err := client.GetGCSafePoint(ctx)
+	re.NoError(err)
+
+	re.Equal(uint64(1), l.GCSafePoint)
+	re.Equal(uint64(1), l.MinServiceGcSafepoint)
+	re.Len(l.ServiceGCSafepoints, 3)
+
+	// sort the gc safepoints based on order of ServiceID
+	sort.Slice(l.ServiceGCSafepoints, func(i, j int) bool {
+		return l.ServiceGCSafepoints[i].ServiceID < l.ServiceGCSafepoints[j].ServiceID
+	})
+
+	for i, val := range l.ServiceGCSafepoints {
+		re.Equal(list.ServiceGCSafepoints[i].ServiceID, val.ServiceID)
+		re.Equal(list.ServiceGCSafepoints[i].SafePoint, val.SafePoint)
+	}
+
+	// delete the safepoints
+	for i := 0; i < 3; i++ {
+		msg, err := client.DeleteGCSafePoint(ctx, list.ServiceGCSafepoints[i].ServiceID)
+		re.NoError(err)
+		re.Equal("Delete service GC safepoint successfully.", msg)
+	}
+
+	// check that the safepoitns are indeed deleted
+	l, err = client.GetGCSafePoint(ctx)
+	re.NoError(err)
+
+	re.Equal(uint64(1), l.GCSafePoint)
+	re.Equal(uint64(0), l.MinServiceGcSafepoint)
+	re.Empty(l.ServiceGCSafepoints)
+
+	// try delete gc_worker, should get an error
+	_, err = client.DeleteGCSafePoint(ctx, "gc_worker")
+	re.Error(err)
+
+	// try delete some non-exist safepoints, should return normally
+	var msg string
+	msg, err = client.DeleteGCSafePoint(ctx, "non_exist")
+	re.NoError(err)
+	re.Equal("Delete service GC safepoint successfully.", msg)
 }

@@ -27,7 +27,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/scatter"
 	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/schedule/splitter"
-	types "github.com/tikv/pd/pkg/schedule/type"
+	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/statistics/buckets"

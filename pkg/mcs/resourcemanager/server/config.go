@@ -35,7 +35,7 @@ import (
 )
 
 const (
-	defaultName             = "Resource Manager"
+	defaultName             = "resource manager"
 	defaultBackendEndpoints = "http://127.0.0.1:2379"
 	defaultListenAddr       = "http://127.0.0.1:3379"
 

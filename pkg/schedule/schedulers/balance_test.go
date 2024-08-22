@@ -31,7 +31,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
-	types "github.com/tikv/pd/pkg/schedule/type"
+	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/utils/operatorutil"
 	"github.com/tikv/pd/pkg/versioninfo"
