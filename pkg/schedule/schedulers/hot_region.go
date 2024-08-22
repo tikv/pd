@@ -406,7 +406,7 @@ func (h *hotScheduler) Clean() error {
 }
 
 // IsDefault implements the Scheduler interface.
-func (h *hotScheduler) IsDefault() bool {
+func (*hotScheduler) IsDefault() bool {
 	return true
 }
 
