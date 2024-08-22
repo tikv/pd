@@ -630,9 +630,9 @@ func (suite *apiTestSuite) checkStores(cluster *tests.TestCluster) {
 		},
 	}
 
-	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/DoNotBuryStore", `return(true)`))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/doNotBuryStore", `return(true)`))
 	defer func() {
-		re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/DoNotBuryStore"))
+		re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/doNotBuryStore"))
 	}()
 	for _, store := range stores {
 		tests.MustPutStore(re, cluster, store)

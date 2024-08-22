@@ -1669,7 +1669,7 @@ func (c *RaftCluster) checkStores() {
 		}
 		// If the store is empty, it can be buried.
 		needBury := c.GetStoreRegionCount(id) == 0
-		failpoint.Inject("DoNotBuryStore", func(_ failpoint.Value) {
+		failpoint.Inject("doNotBuryStore", func(_ failpoint.Value) {
 			needBury = false
 		})
 		if needBury {
