@@ -3079,7 +3079,6 @@ func TestAddScheduler(t *testing.T) {
 	re.NoError(controller.RemoveScheduler(types.BalanceRegionScheduler.String()))
 	re.NoError(controller.RemoveScheduler(types.BalanceHotRegionScheduler.String()))
 	re.NoError(controller.RemoveScheduler(types.EvictSlowStoreScheduler.String()))
-	re.Empty(controller.GetSchedulerNames())
 
 	stream := mockhbstream.NewHeartbeatStream()
 
@@ -3174,10 +3173,10 @@ func TestPersistScheduler(t *testing.T) {
 	re.NoError(controller.RemoveScheduler(types.BalanceRegionScheduler.String()))
 	re.NoError(controller.RemoveScheduler(types.BalanceHotRegionScheduler.String()))
 	re.NoError(controller.RemoveScheduler(types.EvictSlowStoreScheduler.String()))
-	// only remains 2 schedulers
-	re.Len(controller.GetSchedulerNames(), 2)
-	// but remains 6 configs with independent config.
-	// Note that the default scheduler with independent config will be added in the code.
+	// Remains 6 schedulers
+	re.Len(controller.GetSchedulerNames(), defaultCount+2)
+	// Remains 6 configs.
+	// Note that the default scheduler will be added in the code.
 	sches, _, err = storage.LoadAllSchedulerConfigs()
 	re.NoError(err)
 	re.Len(sches, defaultCount+2)
@@ -3297,9 +3296,9 @@ func TestRemoveScheduler(t *testing.T) {
 	// default scheduler won't be removed
 	sches, _, err = storage.LoadAllSchedulerConfigs()
 	re.NoError(err)
-	re.Len(sches, 4)
+	re.Len(sches, defaultCount)
 	re.NotContains(sches, types.GrantLeaderScheduler.String())
-	re.Empty(controller.GetSchedulerNames())
+	re.Len(controller.GetSchedulerNames(), defaultCount)
 	re.NoError(co.GetCluster().GetSchedulerConfig().Persist(co.GetCluster().GetStorage()))
 	co.Stop()
 	co.GetSchedulersController().Wait()
@@ -3312,7 +3311,7 @@ func TestRemoveScheduler(t *testing.T) {
 	tc.RaftCluster.SetScheduleConfig(newOpt.GetScheduleConfig())
 	co = schedule.NewCoordinator(ctx, tc.RaftCluster, hbStreams)
 	co.Run()
-	re.Empty(controller.GetSchedulerNames())
+	re.Len(controller.GetSchedulerNames(), defaultCount)
 	// the option remains default scheduler
 	re.Len(co.GetCluster().GetSchedulerConfig().(*config.PersistOptions).GetSchedulers(), defaultCount)
 	co.Stop()
