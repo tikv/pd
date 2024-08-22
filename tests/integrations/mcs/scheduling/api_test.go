@@ -629,13 +629,13 @@ func (suite *apiTestSuite) checkStores(cluster *tests.TestCluster) {
 			Version:   "2.0.0",
 		},
 	}
-	// prevent the offline store from changing to tombstone
-	tests.MustPutRegion(re, cluster, 3, 6, []byte("a"), []byte("b"))
+
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/doNotBuryStore", `return(true)`))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/doNotBuryStore"))
+	}()
 	for _, store := range stores {
 		tests.MustPutStore(re, cluster, store)
-		if store.GetId() == 6 {
-			cluster.GetLeaderServer().GetRaftCluster().GetBasicCluster().UpdateStoreStatus(6)
-		}
 	}
 	// Test /stores
 	apiServerAddr := cluster.GetLeaderServer().GetAddr()

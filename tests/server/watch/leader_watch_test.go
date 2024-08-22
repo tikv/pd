@@ -57,6 +57,7 @@ func TestWatcher(t *testing.T) {
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/delayWatcher", `pause`))
 	err = pd3.Run()
 	re.NoError(err)
+	re.NotEmpty(cluster.WaitLeader())
 	time.Sleep(200 * time.Millisecond)
 	re.Equal(pd1.GetConfig().Name, pd3.GetLeader().GetName())
 	err = pd1.Stop()
