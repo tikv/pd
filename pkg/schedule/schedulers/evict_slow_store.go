@@ -23,6 +23,7 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/errs"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
@@ -162,6 +163,9 @@ func (handler *evictSlowStoreHandler) updateConfig(w http.ResponseWriter, r *htt
 }
 
 func (handler *evictSlowStoreHandler) listConfig(w http.ResponseWriter, _ *http.Request) {
+	if handler.config.isDisable() {
+		handler.rd.JSON(w, http.StatusNotFound, errs.ErrSchedulerNotFound.Error())
+	}
 	conf := handler.config.clone()
 	handler.rd.JSON(w, http.StatusOK, conf)
 }

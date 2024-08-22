@@ -145,6 +145,9 @@ func (handler *balanceLeaderHandler) updateConfig(w http.ResponseWriter, r *http
 }
 
 func (handler *balanceLeaderHandler) listConfig(w http.ResponseWriter, _ *http.Request) {
+	if handler.config.isDisable() {
+		handler.rd.JSON(w, http.StatusNotFound, errs.ErrSchedulerNotFound.Error())
+	}
 	conf := handler.config.clone()
 	handler.rd.JSON(w, http.StatusOK, conf)
 }

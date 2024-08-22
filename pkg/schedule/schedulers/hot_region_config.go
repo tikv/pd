@@ -85,6 +85,9 @@ func initHotRegionScheduleConfig() *hotRegionSchedulerConfig {
 
 func (conf *hotRegionSchedulerConfig) getValidConf() *hotRegionSchedulerConfig {
 	return &hotRegionSchedulerConfig{
+		baseDefaultSchedulerConfig: baseDefaultSchedulerConfig{
+			Disabled: conf.Disabled,
+		},
 		MinHotByteRate:         conf.MinHotByteRate,
 		MinHotKeyRate:          conf.MinHotKeyRate,
 		MinHotQueryRate:        conf.MinHotQueryRate,
@@ -377,9 +380,13 @@ func (conf *hotRegionSchedulerConfig) ServeHTTP(w http.ResponseWriter, r *http.R
 }
 
 func (conf *hotRegionSchedulerConfig) handleGetConfig(w http.ResponseWriter, _ *http.Request) {
+	rd := render.New(render.Options{IndentJSON: true})
+
+	if conf.isDisable() {
+		rd.JSON(w, http.StatusNotFound, errs.ErrSchedulerNotFound.Error())
+	}
 	conf.RLock()
 	defer conf.RUnlock()
-	rd := render.New(render.Options{IndentJSON: true})
 	rd.JSON(w, http.StatusOK, conf.getValidConf())
 }
 
