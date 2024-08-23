@@ -37,6 +37,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/mcs/discovery"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
@@ -274,6 +275,11 @@ func (s *GrpcServer) GetClusterInfo(context.Context, *pdpb.GetClusterInfoRequest
 
 	var tsoServiceAddrs []string
 	svcModes := make([]pdpb.ServiceMode, 0)
+
+	servers, err := discovery.Discover(s.client, strconv.FormatUint(s.ClusterID(), 10), constant.TSOServiceName)
+	if err == nil && len(servers) != 0 {
+		s.GetRaftCluster().SetServiceIndependent(constant.TSOServiceName)
+	}
 	if s.IsAPIServiceMode() && s.GetRaftCluster().IsServiceIndependent(constant.TSOServiceName) {
 		svcModes = append(svcModes, pdpb.ServiceMode_API_SVC_MODE)
 		tsoServiceAddrs = s.keyspaceGroupManager.GetTSOServiceAddrs()
@@ -524,6 +530,7 @@ func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
 			return err
 		}
 	}
+
 	if s.IsAPIServiceMode() && s.GetRaftCluster().IsServiceIndependent(constant.TSOServiceName) {
 		return s.forwardTSO(stream)
 	}

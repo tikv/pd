@@ -410,6 +410,9 @@ func (c *RaftCluster) checkTSOService() {
 				// leader tso service exit, tso independent service provide tso
 				c.tsoAllocator.ResetAllocatorGroup(tso.GlobalDCLocation, true)
 			}
+			if !c.IsServiceIndependent(constant.TSOServiceName) {
+				log.Info("TSO server starts to provide timestamp")
+			}
 			c.SetServiceIndependent(constant.TSOServiceName)
 		} else {
 			if !allocator.IsInitialize() {
@@ -418,6 +421,9 @@ func (c *RaftCluster) checkTSOService() {
 					log.Error("failed to initialize the global TSO allocator", errs.ZapError(err))
 					return
 				}
+			}
+			if c.IsServiceIndependent(constant.TSOServiceName) {
+				log.Info("PD server starts to provide timestamp")
 			}
 			c.UnsetServiceIndependent(constant.TSOServiceName)
 		}
