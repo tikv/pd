@@ -143,7 +143,7 @@ func newSplitBucketHandler(conf *splitBucketSchedulerConfig) http.Handler {
 }
 
 func newSplitBucketScheduler(opController *operator.Controller, conf *splitBucketSchedulerConfig) *splitBucketScheduler {
-	base := NewBaseScheduler(opController, types.SplitBucketScheduler)
+	base := NewBaseScheduler(opController, types.SplitBucketScheduler, conf)
 	handler := newSplitBucketHandler(conf)
 	ret := &splitBucketScheduler{
 		BaseScheduler: base,

@@ -254,12 +254,14 @@ func (suite *scheduleTestSuite) checkAPI(cluster *tests.TestCluster) {
 					"strict-picking-store":       "true",
 					"history-sample-duration":    "5m0s",
 					"history-sample-interval":    "30s",
+					"disabled":                   false,
 				}
 				tu.Eventually(re, func() bool {
 					re.NoError(tu.ReadGetJSON(re, tests.TestDialClient, listURL, &resp))
 					re.Equal(len(expectMap), len(resp), "expect %v, got %v", expectMap, resp)
 					for key := range expectMap {
 						if !reflect.DeepEqual(resp[key], expectMap[key]) {
+							suite.T().Logf("key: %s, expect: %v, got: %v", key, expectMap[key], resp[key])
 							return false
 						}
 					}
@@ -623,6 +625,16 @@ func (suite *scheduleTestSuite) checkAPI(cluster *tests.TestCluster) {
 		}
 		deleteScheduler(re, urlPrefix, createdName)
 		assertNoScheduler(re, urlPrefix, createdName)
+	}
+
+	// revert remove
+	for _, sche := range types.DefaultSchedulers {
+		input := make(map[string]any)
+		input["name"] = sche.String()
+		body, err := json.Marshal(input)
+		re.NoError(err)
+		addScheduler(re, urlPrefix, body)
+		suite.assertSchedulerExists(urlPrefix, sche.String())
 	}
 }
 

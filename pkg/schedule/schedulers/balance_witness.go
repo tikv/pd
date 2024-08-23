@@ -162,7 +162,7 @@ type balanceWitnessScheduler struct {
 // each store balanced.
 func newBalanceWitnessScheduler(opController *operator.Controller, conf *balanceWitnessSchedulerConfig, options ...BalanceWitnessCreateOption) Scheduler {
 	s := &balanceWitnessScheduler{
-		BaseScheduler: NewBaseScheduler(opController, types.BalanceWitnessScheduler),
+		BaseScheduler: NewBaseScheduler(opController, types.BalanceWitnessScheduler, conf),
 		retryQuota:    newRetryQuota(),
 		conf:          conf,
 		handler:       newBalanceWitnessHandler(conf),

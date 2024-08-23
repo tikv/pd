@@ -149,13 +149,17 @@ func (c *Controller) AddSchedulerHandler(scheduler Scheduler, args ...string) er
 	}
 
 	c.schedulerHandlers[name] = scheduler
+	if err := scheduler.SetDisable(false); err != nil {
+		log.Error("can not update scheduler status", zap.String("scheduler-name", name),
+			errs.ZapError(err))
+		// No need to return here, we still use the scheduler config to control the `disable`.
+	}
 	if err := SaveSchedulerConfig(c.storage, scheduler); err != nil {
 		log.Error("can not save HTTP scheduler config", zap.String("scheduler-name", scheduler.GetName()), errs.ZapError(err))
 		return err
 	}
 	c.cluster.GetSchedulerConfig().AddSchedulerCfg(scheduler.GetType(), args)
-	err := scheduler.PrepareConfig(c.cluster)
-	return err
+	return scheduler.PrepareConfig(c.cluster)
 }
 
 // RemoveSchedulerHandler removes the HTTP handler for a scheduler.
@@ -177,6 +181,11 @@ func (c *Controller) RemoveSchedulerHandler(name string) error {
 		return err
 	}
 
+	// nolint:errcheck
+	// SetDisable will not work now, because the config is removed. We can't
+	// remove the config in the future, if we want to use `Disable` of independent
+	// config.
+	_ = s.(Scheduler).SetDisable(true)
 	if err := c.storage.RemoveSchedulerConfig(name); err != nil {
 		log.Error("can not remove the scheduler config", errs.ZapError(err))
 		return err
@@ -184,7 +193,6 @@ func (c *Controller) RemoveSchedulerHandler(name string) error {
 
 	s.(Scheduler).CleanConfig(c.cluster)
 	delete(c.schedulerHandlers, name)
-
 	return nil
 }
 
@@ -193,7 +201,8 @@ func (c *Controller) AddScheduler(scheduler Scheduler, args ...string) error {
 	c.Lock()
 	defer c.Unlock()
 
-	if _, ok := c.schedulers[scheduler.GetName()]; ok {
+	name := scheduler.GetName()
+	if _, ok := c.schedulers[name]; ok {
 		return errs.ErrSchedulerExisted.FastGenByArgs()
 	}
 
@@ -205,6 +214,11 @@ func (c *Controller) AddScheduler(scheduler Scheduler, args ...string) error {
 	c.wg.Add(1)
 	go c.runScheduler(s)
 	c.schedulers[s.Scheduler.GetName()] = s
+	if err := scheduler.SetDisable(false); err != nil {
+		log.Error("can not update scheduler status", zap.String("scheduler-name", name),
+			errs.ZapError(err))
+		return err
+	}
 	if err := SaveSchedulerConfig(c.storage, scheduler); err != nil {
 		log.Error("can not save scheduler config", zap.String("scheduler-name", scheduler.GetName()), errs.ZapError(err))
 		return err
@@ -232,6 +246,11 @@ func (c *Controller) RemoveScheduler(name string) error {
 		return err
 	}
 
+	// nolint:errcheck
+	// SetDisable will not work now, because the config is removed. We can't
+	// remove the config in the future, if we want to use `Disable` of independent
+	// config.
+	_ = s.SetDisable(true)
 	if err := c.storage.RemoveSchedulerConfig(name); err != nil {
 		log.Error("can not remove the scheduler config", errs.ZapError(err))
 		return err
@@ -240,7 +259,6 @@ func (c *Controller) RemoveScheduler(name string) error {
 	s.Stop()
 	schedulerStatusGauge.DeleteLabelValues(name, "allow")
 	delete(c.schedulers, name)
-
 	return nil
 }
 

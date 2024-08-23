@@ -144,4 +144,12 @@ var (
 		"transfer-witness-leader-scheduler": TransferWitnessLeaderScheduler,
 		"label-scheduler":                   LabelScheduler,
 	}
+
+	// DefaultSchedulers is the default scheduler types.
+	DefaultSchedulers = []CheckerSchedulerType{
+		BalanceLeaderScheduler,
+		BalanceRegionScheduler,
+		BalanceHotRegionScheduler,
+		EvictSlowStoreScheduler,
+	}
 )

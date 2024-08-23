@@ -435,7 +435,7 @@ func (s *evictSlowTrendScheduler) Schedule(cluster sche.SchedulerCluster, _ bool
 func newEvictSlowTrendScheduler(opController *operator.Controller, conf *evictSlowTrendSchedulerConfig) Scheduler {
 	handler := newEvictSlowTrendHandler(conf)
 	sche := &evictSlowTrendScheduler{
-		BaseScheduler: NewBaseScheduler(opController, types.EvictSlowTrendScheduler),
+		BaseScheduler: NewBaseScheduler(opController, types.EvictSlowTrendScheduler, conf),
 		conf:          conf,
 		handler:       handler,
 	}
