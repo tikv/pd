@@ -80,4 +80,5 @@ func TestDefaultSchedulerConfig(t *testing.T) {
 	cfg3 := &testConfig{}
 	require.NoError(t, cfg2.load(cfg3))
 	require.Equal(t, cfg.Value, cfg3.Value)
+	require.True(t, cfg3.Disabled)
 }
