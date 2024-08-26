@@ -1418,7 +1418,6 @@ func (s *Server) GetRaftCluster() *cluster.RaftCluster {
 }
 
 // DirectlyGetRaftCluster returns raft cluster directly.
-// Only used for test.
 func (s *Server) DirectlyGetRaftCluster() *cluster.RaftCluster {
 	return s.cluster
 }
