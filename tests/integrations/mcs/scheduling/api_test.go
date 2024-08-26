@@ -524,6 +524,7 @@ func (suite *apiTestSuite) checkFollowerForward(cluster *tests.TestCluster) {
 			res, err := cli.MemberList(context.Background())
 			return err == nil && len(res.Members) == 1
 		})
+		cluster.DeleteServer(follower.GetConfig().Name)
 		follower.Destroy()
 	}()
 	re.NoError(follower.Run())
