@@ -33,15 +33,15 @@ type WaitingOperator interface {
 
 // bucket is used to maintain the operators created by a specific scheduler.
 type bucket struct {
-	weight float64
 	ops    []*Operator
+	weight float64
 }
 
 // randBuckets is an implementation of waiting operators
 type randBuckets struct {
-	mu          syncutil.Mutex
-	totalWeight float64
 	buckets     []*bucket
+	totalWeight float64
+	mu          syncutil.Mutex
 }
 
 // newRandBuckets creates a random buckets.
@@ -131,8 +131,8 @@ func (b *randBuckets) GetOperator() []*Operator {
 
 // waitingOperatorStatus is used to limit the count of each kind of operators.
 type waitingOperatorStatus struct {
-	mu  syncutil.Mutex
 	ops map[string]uint64
+	mu  syncutil.Mutex
 }
 
 // newWaitingOperatorStatus creates a new waitingOperatorStatus.

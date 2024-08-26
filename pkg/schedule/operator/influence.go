@@ -51,12 +51,12 @@ func (m OpInfluence) GetStoreInfluence(id uint64) *StoreInfluence {
 
 // StoreInfluence records influences that pending operators will make.
 type StoreInfluence struct {
+	StepCost     map[storelimit.Type]int64
 	RegionSize   int64
 	RegionCount  int64
 	LeaderSize   int64
 	LeaderCount  int64
 	WitnessCount int64
-	StepCost     map[storelimit.Type]int64
 }
 
 func (s *StoreInfluence) add(other *StoreInfluence) {

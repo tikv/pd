@@ -32,12 +32,12 @@ import (
 
 // RegionLabeler is utility to label regions.
 type RegionLabeler struct {
-	storage endpoint.RuleStorage
-	syncutil.RWMutex
-	labelRules map[string]*LabelRule
-	rangeList  rangelist.List // sorted LabelRules of the type `KeyRange`
+	storage    endpoint.RuleStorage
 	ctx        context.Context
+	labelRules map[string]*LabelRule
 	minExpire  *time.Time
+	rangeList  rangelist.List
+	syncutil.RWMutex
 }
 
 // NewRegionLabeler creates a Labeler instance.

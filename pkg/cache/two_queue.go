@@ -36,12 +36,11 @@ const (
 // parameters.
 // TwoQueue implementation is based on https://github.com/hashicorp/golang-lru/blob/master/2q.go
 type TwoQueue struct {
+	recent     *LRU
+	frequent   *LRU
+	ghost      *LRU
 	size       int
 	recentSize int
-
-	recent   *LRU
-	frequent *LRU
-	ghost    *LRU
 }
 
 func newTwoQueue(size int) *TwoQueue {

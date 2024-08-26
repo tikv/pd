@@ -49,13 +49,13 @@ var (
 
 // RuleChecker fix/improve region by placement rules.
 type RuleChecker struct {
-	PauseController
 	cluster                 sche.CheckerCluster
+	pendingList             cache.Cache
 	ruleManager             *placement.RuleManager
 	pendingProcessedRegions *cache.TTLUint64
-	pendingList             cache.Cache
 	switchWitnessCache      *cache.TTLUint64
 	record                  *recorder
+	PauseController
 }
 
 // NewRuleChecker creates a checker instance.

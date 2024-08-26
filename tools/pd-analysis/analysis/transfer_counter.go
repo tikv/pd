@@ -29,22 +29,22 @@ import (
 
 // TransferCounter is to count transfer schedule for judging whether redundant
 type TransferCounter struct {
-	storeNum          int
-	scheduledStoreNum int
-	regionNum         int
-	IsValid           bool
-	IsReady           bool
-	Redundant         uint64
-	Necessary         uint64
 	regionMap         map[uint64]uint64
-	visited           []bool
+	unIndexMap        map[uint64]int
 	graphMap          map[uint64]map[uint64]uint64
+	visited           []bool
 	graphMat          [][]uint64
 	indexArray        []uint64
-	unIndexMap        map[uint64]int
-	mutex             syncutil.Mutex
 	loopResultPath    [][]int
 	loopResultCount   []uint64
+	Redundant         uint64
+	Necessary         uint64
+	storeNum          int
+	regionNum         int
+	scheduledStoreNum int
+	mutex             syncutil.Mutex
+	IsReady           bool
+	IsValid           bool
 }
 
 var once sync.Once

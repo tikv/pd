@@ -197,11 +197,11 @@ func (s *Service) AcquireTokenBuckets(stream rmpb.ResourceManager_AcquireTokenBu
 				return errors.New("background and tiflash cannot be true at the same time")
 			}
 			s.manager.consumptionDispatcher <- struct {
-				resourceGroupName string
 				*rmpb.Consumption
-				isBackground bool
-				isTiFlash    bool
-			}{resourceGroupName, req.GetConsumptionSinceLastRequest(), isBackground, isTiFlash}
+				resourceGroupName string
+				isBackground      bool
+				isTiFlash         bool
+			}{req.GetConsumptionSinceLastRequest(), resourceGroupName, isBackground, isTiFlash}
 			if isBackground {
 				continue
 			}

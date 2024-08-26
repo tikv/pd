@@ -19,6 +19,9 @@ linters:
     - goimports
     - depguard
 linters-settings:
+  govet:
+    enable:
+      - fieldalignment
   gocritic:
     # Which checks should be disabled; can't be combined with 'enabled-checks'; default is empty
     disabled-checks:

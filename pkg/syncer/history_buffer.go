@@ -38,14 +38,14 @@ var (
 )
 
 type historyBuffer struct {
-	syncutil.RWMutex
-	index      uint64
+	kv         kv.Base
 	records    []*core.RegionInfo
+	index      uint64
 	head       int
 	tail       int
 	size       int
-	kv         kv.Base
 	flushCount int
+	syncutil.RWMutex
 }
 
 func newHistoryBuffer(size int, kv kv.Base) *historyBuffer {

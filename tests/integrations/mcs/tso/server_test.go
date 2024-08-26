@@ -211,13 +211,13 @@ func getEtcdTimestampKeyNum(re *require.Assertions, client *clientv3.Client) int
 }
 
 type APIServerForward struct {
-	re               *require.Assertions
 	ctx              context.Context
+	pdClient         pd.Client
+	re               *require.Assertions
 	cancel           context.CancelFunc
 	cluster          *tests.TestCluster
 	pdLeader         *tests.TestServer
 	backendEndpoints string
-	pdClient         pd.Client
 }
 
 func NewAPIServerForward(re *require.Assertions) APIServerForward {

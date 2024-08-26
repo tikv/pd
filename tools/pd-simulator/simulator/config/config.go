@@ -57,20 +57,17 @@ const (
 
 // SimConfig is the simulator configuration.
 type SimConfig struct {
-	// Simulator
+	ServerConfig                *config.Config    `toml:"server"`
 	CaseName                    string            `toml:"case-name"`
+	StoreVersion                string            `toml:"store-version"`
+	RaftStore                   RaftStore         `toml:"raftstore"`
+	Coprocessor                 Coprocessor       `toml:"coprocessor"`
 	TotalStore                  int               `toml:"total-store"`
 	TotalRegion                 int               `toml:"total-region"`
-	EnableTransferRegionCounter bool              `toml:"enable-transfer-region-counter"`
 	SimTickInterval             typeutil.Duration `toml:"sim-tick-interval"`
 	HibernatePercent            int               `toml:"hibernate-percent"`
-	// store
-	StoreIOMBPerSecond int64       `toml:"store-io-per-second"`
-	StoreVersion       string      `toml:"store-version"`
-	RaftStore          RaftStore   `toml:"raftstore"`
-	Coprocessor        Coprocessor `toml:"coprocessor"`
-	// server
-	ServerConfig *config.Config `toml:"server"`
+	StoreIOMBPerSecond          int64             `toml:"store-io-per-second"`
+	EnableTransferRegionCounter bool              `toml:"enable-transfer-region-counter"`
 }
 
 // RaftStore the configuration for raft store.

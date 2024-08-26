@@ -28,9 +28,9 @@ const (
 
 // splitPoint represents key that exists in items.
 type splitPoint struct {
-	ty   splitPointType
-	key  []byte
 	data any
+	key  []byte
+	ty   splitPointType
 }
 
 // Builder is used to create key range list.

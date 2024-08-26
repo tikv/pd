@@ -22,8 +22,8 @@ const defaultHMASize = 10
 // There are at most `size` data points for calculating.
 // References: https://www.fidelity.com/learning-center/trading-investing/technical-analysis/technical-indicator-guide/hull-moving-average
 type HMA struct {
-	size uint64
 	wma  []*WMA
+	size uint64
 }
 
 // NewHMA returns a WMA.

@@ -30,30 +30,27 @@ const (
 
 // Config is the heartbeat-bench configuration.
 type Config struct {
-	flagSet    *flag.FlagSet
-	configFile string
-	PDAddr     string
-	StatusAddr string
-
-	Log      log.Config `toml:"log" json:"log"`
-	Logger   *zap.Logger
-	LogProps *log.ZapProperties
-
-	Security configutil.SecurityConfig `toml:"security" json:"security"`
-
-	InitEpochVer      uint64  `toml:"epoch-ver" json:"epoch-ver"`
-	StoreCount        int     `toml:"store-count" json:"store-count"`
-	HotStoreCount     int     `toml:"hot-store-count" json:"hot-store-count"`
-	RegionCount       int     `toml:"region-count" json:"region-count"`
-	Replica           int     `toml:"replica" json:"replica"`
-	LeaderUpdateRatio float64 `toml:"leader-update-ratio" json:"leader-update-ratio"`
-	EpochUpdateRatio  float64 `toml:"epoch-update-ratio" json:"epoch-update-ratio"`
-	SpaceUpdateRatio  float64 `toml:"space-update-ratio" json:"space-update-ratio"`
-	FlowUpdateRatio   float64 `toml:"flow-update-ratio" json:"flow-update-ratio"`
-	ReportRatio       float64 `toml:"report-ratio" json:"report-ratio"`
-	Sample            bool    `toml:"sample" json:"sample"`
-	Round             int     `toml:"round" json:"round"`
-	MetricsAddr       string  `toml:"metrics-addr" json:"metrics-addr"`
+	flagSet           *flag.FlagSet
+	Logger            *zap.Logger
+	LogProps          *log.ZapProperties
+	Log               log.Config `toml:"log" json:"log"`
+	configFile        string
+	PDAddr            string
+	StatusAddr        string
+	MetricsAddr       string                    `toml:"metrics-addr" json:"metrics-addr"`
+	Security          configutil.SecurityConfig `toml:"security" json:"security"`
+	HotStoreCount     int                       `toml:"hot-store-count" json:"hot-store-count"`
+	StoreCount        int                       `toml:"store-count" json:"store-count"`
+	RegionCount       int                       `toml:"region-count" json:"region-count"`
+	Replica           int                       `toml:"replica" json:"replica"`
+	LeaderUpdateRatio float64                   `toml:"leader-update-ratio" json:"leader-update-ratio"`
+	EpochUpdateRatio  float64                   `toml:"epoch-update-ratio" json:"epoch-update-ratio"`
+	SpaceUpdateRatio  float64                   `toml:"space-update-ratio" json:"space-update-ratio"`
+	FlowUpdateRatio   float64                   `toml:"flow-update-ratio" json:"flow-update-ratio"`
+	ReportRatio       float64                   `toml:"report-ratio" json:"report-ratio"`
+	Round             int                       `toml:"round" json:"round"`
+	InitEpochVer      uint64                    `toml:"epoch-ver" json:"epoch-ver"`
+	Sample            bool                      `toml:"sample" json:"sample"`
 }
 
 // NewConfig return a set of settings.

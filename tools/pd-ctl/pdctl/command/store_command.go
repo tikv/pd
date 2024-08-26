@@ -467,8 +467,8 @@ func getStoreID(cmd *cobra.Command, args []string, isCancel bool) (id int) {
 	storeInfo := struct {
 		Stores []struct {
 			Store struct {
-				ID      int               `json:"id"`
 				Address string            `json:"address"`
+				ID      int               `json:"id"`
 				State   metapb.StoreState `json:"state"`
 			} `json:"store"`
 		} `json:"stores"`

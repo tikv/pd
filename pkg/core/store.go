@@ -49,24 +49,24 @@ const (
 // StoreInfo contains information about a store.
 // NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
 type StoreInfo struct {
-	meta *metapb.Store
+	lastAwakenTime  time.Time
+	lastPersistTime time.Time
+	limiter         storelimit.StoreLimit
+	meta            *metapb.Store
 	*storeStats
-	pauseLeaderTransfer bool // not allow to be used as source or target of transfer leader
-	slowStoreEvicted    bool // this store has been evicted as a slow store, should not transfer leader to it
-	slowTrendEvicted    bool // this store has been evicted as a slow store by trend, should not transfer leader to it
-	leaderCount         int
+	witnessCount        int
 	regionCount         int
 	learnerCount        int
-	witnessCount        int
+	leaderCount         int
 	leaderSize          int64
 	regionSize          int64
 	pendingPeerCount    int
-	lastPersistTime     time.Time
 	leaderWeight        float64
 	regionWeight        float64
-	limiter             storelimit.StoreLimit
 	minResolvedTS       uint64
-	lastAwakenTime      time.Time
+	slowTrendEvicted    bool
+	slowStoreEvicted    bool
+	pauseLeaderTransfer bool
 }
 
 // NewStoreInfo creates StoreInfo with meta data.
@@ -640,8 +640,8 @@ func MergeLabels(origin []*metapb.StoreLabel, labels []*metapb.StoreLabel) []*me
 
 // StoresInfo contains information about all stores.
 type StoresInfo struct {
-	syncutil.RWMutex
 	stores map[uint64]*StoreInfo
+	syncutil.RWMutex
 }
 
 // NewStoresInfo create a StoresInfo with map of storeID to StoreInfo

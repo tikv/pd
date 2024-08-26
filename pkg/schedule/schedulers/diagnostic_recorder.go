@@ -54,10 +54,10 @@ var DiagnosableSummaryFunc = map[types.CheckerSchedulerType]plan.Summary{
 
 // DiagnosticRecorder is used to manage diagnostic for one scheduler.
 type DiagnosticRecorder struct {
-	schedulerType types.CheckerSchedulerType
 	config        sc.SchedulerConfigProvider
 	summaryFunc   plan.Summary
 	results       *cache.FIFO
+	schedulerType types.CheckerSchedulerType
 }
 
 // NewDiagnosticRecorder creates a new DiagnosticRecorder.
@@ -195,10 +195,9 @@ func (d *DiagnosticRecorder) analyze(ops []*operator.Operator, plans []plan.Plan
 
 // DiagnosticResult is used to save diagnostic result and is also used to output.
 type DiagnosticResult struct {
-	Name      string `json:"name"`
-	Status    string `json:"status"`
-	Summary   string `json:"summary"`
-	Timestamp uint64 `json:"timestamp"`
-
 	StoreStatus map[uint64]plan.Status `json:"-"`
+	Name        string                 `json:"name"`
+	Status      string                 `json:"status"`
+	Summary     string                 `json:"summary"`
+	Timestamp   uint64                 `json:"timestamp"`
 }

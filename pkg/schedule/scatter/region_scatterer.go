@@ -64,8 +64,8 @@ const (
 )
 
 type selectedStores struct {
+	groupDistribution *cache.TTLString
 	mu                syncutil.RWMutex
-	groupDistribution *cache.TTLString // value type: map[uint64]uint64, group -> StoreID -> count
 }
 
 func newSelectedStores(ctx context.Context) *selectedStores {
@@ -120,12 +120,12 @@ func (s *selectedStores) getDistributionByGroupLocked(group string) (map[uint64]
 // RegionScatterer scatters regions.
 type RegionScatterer struct {
 	ctx               context.Context
-	name              string
 	cluster           sche.SharedCluster
-	ordinaryEngine    engineContext
-	specialEngines    sync.Map
 	opController      *operator.Controller
 	addSuspectRegions func(bool, ...uint64)
+	specialEngines    sync.Map
+	name              string
+	ordinaryEngine    engineContext
 }
 
 // NewRegionScatterer creates a region scatterer.
@@ -146,9 +146,9 @@ func NewRegionScatterer(ctx context.Context, cluster sche.SharedCluster, opContr
 type filterFunc func() filter.Filter
 
 type engineContext struct {
-	filterFuncs    []filterFunc
 	selectedPeer   *selectedStores
 	selectedLeader *selectedStores
+	filterFuncs    []filterFunc
 }
 
 func newEngineContext(ctx context.Context, filterFuncs ...filterFunc) engineContext {

@@ -53,21 +53,15 @@ type respHandleFunc func(resp *http.Response, res any) error
 // It is wrapped by the `client` struct to make sure the inner implementation won't be exposed and could
 // be consistent during the copy.
 type clientInner struct {
-	ctx    context.Context
-	cancel context.CancelFunc
-
-	sd pd.ServiceDiscovery
-
-	// source is used to mark the source of the client creation,
-	// it will also be used in the caller ID of the inner client.
-	source  string
-	tlsConf *tls.Config
-	cli     *http.Client
-
+	ctx               context.Context
+	sd                pd.ServiceDiscovery
+	cancel            context.CancelFunc
+	tlsConf           *tls.Config
+	cli               *http.Client
 	requestCounter    *prometheus.CounterVec
 	executionDuration *prometheus.HistogramVec
-	// defaultSD indicates whether the client is created with the default service discovery.
-	defaultSD bool
+	source            string
+	defaultSD         bool
 }
 
 func newClientInner(ctx context.Context, cancel context.CancelFunc, source string) *clientInner {

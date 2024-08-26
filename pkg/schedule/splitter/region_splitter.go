@@ -226,10 +226,9 @@ func (h *splitRegionsHandler) ScanRegionsByKeyRange(groupKeys *regionGroupKeys, 
 }
 
 type regionGroupKeys struct {
-	// finished indicates all the split regions have been found in `region` according to the `keys`
-	finished bool
 	region   *core.RegionInfo
 	keys     [][]byte
+	finished bool
 }
 
 type splitKeyResults struct {

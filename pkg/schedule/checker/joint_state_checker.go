@@ -25,8 +25,8 @@ import (
 
 // JointStateChecker ensures region is in joint state will leave.
 type JointStateChecker struct {
-	PauseController
 	cluster sche.CheckerCluster
+	PauseController
 }
 
 // NewJointStateChecker creates a joint state checker.

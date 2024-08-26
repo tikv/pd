@@ -27,11 +27,9 @@ type schedulerConfig interface {
 }
 
 type baseSchedulerConfig struct {
-	name    string
 	storage endpoint.ConfigStorage
-
-	// data is the config of the scheduler.
-	data any
+	data    any
+	name    string
 }
 
 func (b *baseSchedulerConfig) init(name string, storage endpoint.ConfigStorage, data any) {

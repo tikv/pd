@@ -46,25 +46,19 @@ var r = rand.New(rand.NewSource(time.Now().UnixNano()))
 
 type tsoClientTestSuite struct {
 	suite.Suite
-	legacy bool
-
-	ctx    context.Context
-	cancel context.CancelFunc
-	// The PD cluster.
-	cluster *tests.TestCluster
-	// pdLeaderServer is the leader server of the PD cluster.
-	pdLeaderServer *tests.TestServer
-	// The TSO service in microservice mode.
-	tsoCluster *tests.TestTSOCluster
-
-	keyspaceGroups []struct {
-		keyspaceGroupID uint32
-		keyspaceIDs     []uint32
-	}
-
+	ctx              context.Context
+	cancel           context.CancelFunc
+	cluster          *tests.TestCluster
+	pdLeaderServer   *tests.TestServer
+	tsoCluster       *tests.TestTSOCluster
 	backendEndpoints string
-	keyspaceIDs      []uint32
-	clients          []pd.Client
+	keyspaceGroups   []struct {
+		keyspaceIDs     []uint32
+		keyspaceGroupID uint32
+	}
+	keyspaceIDs []uint32
+	clients     []pd.Client
+	legacy      bool
 }
 
 func (suite *tsoClientTestSuite) getBackendEndpoints() []string {
@@ -108,12 +102,12 @@ func (suite *tsoClientTestSuite) SetupSuite() {
 		re.NoError(err)
 
 		suite.keyspaceGroups = []struct {
-			keyspaceGroupID uint32
 			keyspaceIDs     []uint32
+			keyspaceGroupID uint32
 		}{
-			{0, []uint32{constant.DefaultKeyspaceID, 10}},
-			{1, []uint32{1, 11}},
-			{2, []uint32{2}},
+			{[]uint32{constant.DefaultKeyspaceID, 10}, 0},
+			{[]uint32{1, 11}, 1},
+			{[]uint32{2}, 2},
 		}
 
 		for _, keyspaceGroup := range suite.keyspaceGroups {

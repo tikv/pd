@@ -29,13 +29,13 @@ import (
 
 // RaftEngine records all raft information.
 type RaftEngine struct {
-	syncutil.RWMutex
 	regionsInfo     *core.RegionsInfo
 	conn            *Connection
 	regionChange    map[uint64][]uint64
+	storeConfig     *config.SimConfig
 	regionSplitSize int64
 	regionSplitKeys int64
-	storeConfig     *config.SimConfig
+	syncutil.RWMutex
 }
 
 // NewRaftEngine creates the initialized raft with the configuration.

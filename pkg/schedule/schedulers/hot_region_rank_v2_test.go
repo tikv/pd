@@ -54,8 +54,8 @@ func TestHotWriteRegionScheduleWithRevertRegionsDimSecond(t *testing.T) {
 	tc.UpdateStorageWrittenStats(4, 15*units.MiB*utils.StoreHeartBeatReportInterval, 15*units.MiB*utils.StoreHeartBeatReportInterval)
 	tc.UpdateStorageWrittenStats(5, 14*units.MiB*utils.StoreHeartBeatReportInterval, 10*units.MiB*utils.StoreHeartBeatReportInterval)
 	addRegionInfo(tc, utils.Write, []testRegionInfo{
-		{6, []uint64{3, 2, 4}, 2 * units.MiB, 3 * units.MiB, 0},
-		{7, []uint64{1, 4, 5}, 2 * units.MiB, 0.1 * units.MiB, 0},
+		{[]uint64{3, 2, 4}, 6, 2 * units.MiB, 3 * units.MiB, 0},
+		{[]uint64{1, 4, 5}, 7, 2 * units.MiB, 0.1 * units.MiB, 0},
 	})
 	// No operators can be generated when RankFormulaVersion == "v1".
 	ops, _ := hb.Schedule(tc, false)
@@ -79,7 +79,7 @@ func TestHotWriteRegionScheduleWithRevertRegionsDimSecond(t *testing.T) {
 	clearPendingInfluence(hb)
 	// When there is a better solution, there will only be one operator.
 	addRegionInfo(tc, utils.Write, []testRegionInfo{
-		{8, []uint64{3, 2, 4}, 0.5 * units.MiB, 3 * units.MiB, 0},
+		{[]uint64{3, 2, 4}, 8, 0.5 * units.MiB, 3 * units.MiB, 0},
 	})
 	ops, _ = hb.Schedule(tc, false)
 	re.Len(ops, 1)
@@ -115,8 +115,8 @@ func TestHotWriteRegionScheduleWithRevertRegionsDimFirst(t *testing.T) {
 	tc.UpdateStorageWrittenStats(4, 15*units.MiB*utils.StoreHeartBeatReportInterval, 15*units.MiB*utils.StoreHeartBeatReportInterval)
 	tc.UpdateStorageWrittenStats(5, 10*units.MiB*utils.StoreHeartBeatReportInterval, 16*units.MiB*utils.StoreHeartBeatReportInterval)
 	addRegionInfo(tc, utils.Write, []testRegionInfo{
-		{6, []uint64{3, 2, 4}, 3 * units.MiB, 1.8 * units.MiB, 0},
-		{7, []uint64{1, 4, 5}, 0.1 * units.MiB, 2 * units.MiB, 0},
+		{[]uint64{3, 2, 4}, 6, 3 * units.MiB, 1.8 * units.MiB, 0},
+		{[]uint64{1, 4, 5}, 7, 0.1 * units.MiB, 2 * units.MiB, 0},
 	})
 	// One operator can be generated when RankFormulaVersion == "v1".
 	ops, _ := hb.Schedule(tc, false)
@@ -167,8 +167,8 @@ func TestHotWriteRegionScheduleWithRevertRegionsDimFirstOnly(t *testing.T) {
 	tc.UpdateStorageWrittenStats(4, 15*units.MiB*utils.StoreHeartBeatReportInterval, 16*units.MiB*utils.StoreHeartBeatReportInterval)
 	tc.UpdateStorageWrittenStats(5, 10*units.MiB*utils.StoreHeartBeatReportInterval, 18*units.MiB*utils.StoreHeartBeatReportInterval)
 	addRegionInfo(tc, utils.Write, []testRegionInfo{
-		{6, []uint64{3, 2, 4}, 3 * units.MiB, 3 * units.MiB, 0},
-		{7, []uint64{1, 4, 5}, 0.1 * units.MiB, 0.1 * units.MiB, 0},
+		{[]uint64{3, 2, 4}, 6, 3 * units.MiB, 3 * units.MiB, 0},
+		{[]uint64{1, 4, 5}, 7, 0.1 * units.MiB, 0.1 * units.MiB, 0},
 	})
 	// One operator can be generated when RankFormulaVersion == "v1".
 	ops, _ := hb.Schedule(tc, false)
@@ -191,7 +191,7 @@ func TestHotWriteRegionScheduleWithRevertRegionsDimFirstOnly(t *testing.T) {
 	clearPendingInfluence(hb)
 	// Two operators can be generated when there is a better solution
 	addRegionInfo(tc, utils.Write, []testRegionInfo{
-		{8, []uint64{1, 4, 5}, 0.1 * units.MiB, 3 * units.MiB, 0},
+		{[]uint64{1, 4, 5}, 8, 0.1 * units.MiB, 3 * units.MiB, 0},
 	})
 	ops, _ = hb.Schedule(tc, false)
 	re.Len(ops, 2)
@@ -227,8 +227,8 @@ func TestHotReadRegionScheduleWithRevertRegionsDimSecond(t *testing.T) {
 	tc.UpdateStorageReadStats(4, 15*units.MiB*utils.StoreHeartBeatReportInterval, 15*units.MiB*utils.StoreHeartBeatReportInterval)
 	tc.UpdateStorageReadStats(5, 14*units.MiB*utils.StoreHeartBeatReportInterval, 10*units.MiB*utils.StoreHeartBeatReportInterval)
 	addRegionInfo(tc, utils.Read, []testRegionInfo{
-		{6, []uint64{2, 1, 5}, 2 * units.MiB, 3 * units.MiB, 0},
-		{7, []uint64{5, 4, 2}, 2 * units.MiB, 0.1 * units.MiB, 0},
+		{[]uint64{2, 1, 5}, 6, 2 * units.MiB, 3 * units.MiB, 0},
+		{[]uint64{5, 4, 2}, 7, 2 * units.MiB, 0.1 * units.MiB, 0},
 	})
 	// No operators can be generated when RankFormulaVersion == "v1".
 	ops, _ := hb.Schedule(tc, false)
@@ -252,7 +252,7 @@ func TestHotReadRegionScheduleWithRevertRegionsDimSecond(t *testing.T) {
 	clearPendingInfluence(hb)
 	// When there is a better solution, there will only be one operator.
 	addRegionInfo(tc, utils.Read, []testRegionInfo{
-		{8, []uint64{2, 1, 5}, 0.5 * units.MiB, 3 * units.MiB, 0},
+		{[]uint64{2, 1, 5}, 8, 0.5 * units.MiB, 3 * units.MiB, 0},
 	})
 	ops, _ = hb.Schedule(tc, false)
 	re.Len(ops, 1)
@@ -283,7 +283,7 @@ func TestSkipUniformStore(t *testing.T) {
 	tc.UpdateStorageReadStats(2, 9.15*units.MB*utils.StoreHeartBeatReportInterval, 9.15*units.MB*utils.StoreHeartBeatReportInterval)
 	tc.UpdateStorageReadStats(3, 10.0*units.MB*utils.StoreHeartBeatReportInterval, 10.0*units.MB*utils.StoreHeartBeatReportInterval)
 	addRegionInfo(tc, utils.Read, []testRegionInfo{
-		{1, []uint64{1, 2, 3}, 0.3 * units.MB, 0.3 * units.MB, 0},
+		{[]uint64{1, 2, 3}, 1, 0.3 * units.MB, 0.3 * units.MB, 0},
 	})
 	// when there is no uniform store filter, still schedule although the cluster is enough uniform
 	stddevThreshold = 0.0
@@ -302,8 +302,8 @@ func TestSkipUniformStore(t *testing.T) {
 	tc.UpdateStorageReadStats(2, 9.25*units.MB*utils.StoreHeartBeatReportInterval, 9.85*units.MB*utils.StoreHeartBeatReportInterval)
 	tc.UpdateStorageReadStats(3, 9.85*units.MB*utils.StoreHeartBeatReportInterval, 16.0*units.MB*utils.StoreHeartBeatReportInterval)
 	addRegionInfo(tc, utils.Read, []testRegionInfo{
-		{1, []uint64{1, 2, 3}, 0.3 * units.MB, 0.3 * units.MB, 0},
-		{2, []uint64{3, 2, 1}, 0.3 * units.MB, 2 * units.MB, 0},
+		{[]uint64{1, 2, 3}, 1, 0.3 * units.MB, 0.3 * units.MB, 0},
+		{[]uint64{3, 2, 1}, 2, 0.3 * units.MB, 2 * units.MB, 0},
 	})
 	// when there is no uniform store filter, still schedule although the first dim is enough uniform
 	stddevThreshold = 0.0
@@ -323,8 +323,8 @@ func TestSkipUniformStore(t *testing.T) {
 	tc.UpdateStorageReadStats(2, 9.85*units.MB*utils.StoreHeartBeatReportInterval, 9.45*units.MB*utils.StoreHeartBeatReportInterval)
 	tc.UpdateStorageReadStats(3, 16*units.MB*utils.StoreHeartBeatReportInterval, 9.85*units.MB*utils.StoreHeartBeatReportInterval)
 	addRegionInfo(tc, utils.Read, []testRegionInfo{
-		{1, []uint64{1, 2, 3}, 0.3 * units.MB, 0.3 * units.MB, 0},
-		{2, []uint64{3, 2, 1}, 2 * units.MB, 0.3 * units.MB, 0},
+		{[]uint64{1, 2, 3}, 1, 0.3 * units.MB, 0.3 * units.MB, 0},
+		{[]uint64{3, 2, 1}, 2, 2 * units.MB, 0.3 * units.MB, 0},
 	})
 	// when there is no uniform store filter, schedule the first dim, which is no uniform
 	stddevThreshold = 0.0
@@ -441,10 +441,10 @@ func checkHotReadRegionScheduleWithSmallHotRegion(re *require.Assertions, highLo
 	smallHotPeerByte := float64(lowLoad) * secondPriorityMinHotRatio * 0.9 * units.MiB // it's a small hot region than the secondPriorityMinHotRatio
 	regions := make([]testRegionInfo, 0)
 	for i := 10; i < 50; i++ {
-		regions = append(regions, testRegionInfo{uint64(i), []uint64{1, 2, 3}, smallHotPeerByte, 0, smallHotPeerQuery})
+		regions = append(regions, testRegionInfo{[]uint64{1, 2, 3}, uint64(i), smallHotPeerByte, 0, smallHotPeerQuery})
 		if i < 20 {
-			regions = append(regions, testRegionInfo{uint64(i), []uint64{2, 1, 3}, smallHotPeerByte, 0, smallHotPeerQuery})
-			regions = append(regions, testRegionInfo{uint64(i), []uint64{3, 1, 2}, smallHotPeerByte, 0, smallHotPeerQuery})
+			regions = append(regions, testRegionInfo{[]uint64{2, 1, 3}, uint64(i), smallHotPeerByte, 0, smallHotPeerQuery})
+			regions = append(regions, testRegionInfo{[]uint64{3, 1, 2}, uint64(i), smallHotPeerByte, 0, smallHotPeerQuery})
 		}
 	}
 	addRegionInfo(tc, utils.Read, regions)

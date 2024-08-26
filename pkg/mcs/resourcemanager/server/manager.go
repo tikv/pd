@@ -52,21 +52,18 @@ const (
 
 // Manager is the manager of resource group.
 type Manager struct {
-	syncutil.RWMutex
-	srv              bs.Server
-	controllerConfig *ControllerConfig
-	groups           map[string]*ResourceGroup
-	storage          endpoint.ResourceGroupStorage
-	// consumptionChan is used to send the consumption
-	// info to the background metrics flusher.
+	srv                   bs.Server
+	storage               endpoint.ResourceGroupStorage
+	controllerConfig      *ControllerConfig
+	groups                map[string]*ResourceGroup
 	consumptionDispatcher chan struct {
-		resourceGroupName string
 		*rmpb.Consumption
-		isBackground bool
-		isTiFlash    bool
+		resourceGroupName string
+		isBackground      bool
+		isTiFlash         bool
 	}
-	// record update time of each resource group
 	consumptionRecord map[consumptionRecordKey]time.Time
+	syncutil.RWMutex
 }
 
 type consumptionRecordKey struct {
@@ -87,10 +84,10 @@ func NewManager[T ConfigProvider](srv bs.Server) *Manager {
 		controllerConfig: srv.(T).GetControllerConfig(),
 		groups:           make(map[string]*ResourceGroup),
 		consumptionDispatcher: make(chan struct {
-			resourceGroupName string
 			*rmpb.Consumption
-			isBackground bool
-			isTiFlash    bool
+			resourceGroupName string
+			isBackground      bool
+			isTiFlash         bool
 		}, defaultConsumptionChanSize),
 		consumptionRecord: make(map[consumptionRecordKey]time.Time),
 	}
@@ -501,6 +498,8 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 }
 
 type maxPerSecCostTracker struct {
+	rruMaxMetrics prometheus.Gauge
+	wruMaxMetrics prometheus.Gauge
 	name          string
 	maxPerSecRRU  float64
 	maxPerSecWRU  float64
@@ -510,8 +509,6 @@ type maxPerSecCostTracker struct {
 	lastWRUSum    float64
 	flushPeriod   int
 	cnt           int
-	rruMaxMetrics prometheus.Gauge
-	wruMaxMetrics prometheus.Gauge
 }
 
 func newMaxPerSecCostTracker(name string, flushPeriod int) *maxPerSecCostTracker {

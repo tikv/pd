@@ -121,19 +121,12 @@ func (f *RegionFit) GetRegionStores() []*core.StoreInfo {
 
 // RuleFit is the result of fitting status of a Rule.
 type RuleFit struct {
-	Rule *Rule `json:"rule"`
-	// Peers of the Region that are divided to this Rule.
-	Peers []*metapb.Peer `json:"peers"`
-	// PeersWithDifferentRole is subset of `Peers`. It contains all Peers that have
-	// different Role from configuration (the Role can be migrated to target role
-	// by scheduling).
+	Rule                   *Rule          `json:"rule"`
+	Peers                  []*metapb.Peer `json:"peers"`
 	PeersWithDifferentRole []*metapb.Peer `json:"peers-different-role"`
-	// IsolationScore indicates at which level of labeling these Peers are
-	// isolated. A larger value is better.
-	IsolationScore float64 `json:"isolation-score"`
-	WitnessScore   int     `json:"witness-score"`
-	// stores is the stores that the peers are placed in.
-	stores []*core.StoreInfo
+	stores                 []*core.StoreInfo
+	IsolationScore         float64 `json:"isolation-score"`
+	WitnessScore           int     `json:"witness-score"`
 }
 
 // IsSatisfied returns if the rule is properly satisfied.

@@ -33,9 +33,9 @@ type TopNItem interface {
 
 // TopN maintains the N largest items of multiple dimensions.
 type TopN struct {
-	rw     syncutil.RWMutex
-	topns  []*singleTopN
 	ttlLst *ttlList
+	topns  []*singleTopN
+	rw     syncutil.RWMutex
 }
 
 // NewTopN returns a k-dimensional TopN with given TTL.
@@ -129,10 +129,10 @@ func (tn *TopN) maintain() {
 }
 
 type singleTopN struct {
-	k    int
-	n    int
 	topn *indexedHeap
 	rest *indexedHeap
+	k    int
+	n    int
 }
 
 func newSingleTopN(k, n int) *singleTopN {
@@ -210,10 +210,10 @@ func (stn *singleTopN) maintain() {
 
 // indexedHeap is a heap with index.
 type indexedHeap struct {
+	index map[uint64]int
+	items []TopNItem
 	k     int
 	rev   bool
-	items []TopNItem
-	index map[uint64]int
 }
 
 func newTopNHeap(k, hint int) *indexedHeap {
@@ -318,14 +318,14 @@ func (hp *indexedHeap) Remove(id uint64) TopNItem {
 }
 
 type ttlItem struct {
-	id     uint64
 	expire time.Time
+	id     uint64
 }
 
 type ttlList struct {
-	ttl   time.Duration
 	lst   *list.List
 	index map[uint64]*list.Element
+	ttl   time.Duration
 }
 
 func newTTLList(ttl time.Duration) *ttlList {

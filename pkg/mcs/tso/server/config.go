@@ -51,50 +51,23 @@ var _ tso.ServiceConfig = (*Config)(nil)
 
 // Config is the configuration for the TSO.
 type Config struct {
-	BackendEndpoints    string `toml:"backend-endpoints" json:"backend-endpoints"`
-	ListenAddr          string `toml:"listen-addr" json:"listen-addr"`
-	AdvertiseListenAddr string `toml:"advertise-listen-addr" json:"advertise-listen-addr"`
-
-	Name              string `toml:"name" json:"name"`
-	DataDir           string `toml:"data-dir" json:"data-dir"`
-	EnableGRPCGateway bool   `json:"enable-grpc-gateway"`
-
-	// LeaderLease defines the time within which a TSO primary/leader must update its TTL
-	// in etcd, otherwise etcd will expire the leader key and other servers can campaign
-	// the primary/leader again. Etcd only supports seconds TTL, so here is second too.
-	LeaderLease int64 `toml:"lease" json:"lease"`
-
-	// EnableLocalTSO is used to enable the Local TSO Allocator feature,
-	// which allows the PD server to generate Local TSO for certain DC-level transactions.
-	// To make this feature meaningful, user has to set the "zone" label for the PD server
-	// to indicate which DC this PD belongs to.
-	EnableLocalTSO bool `toml:"enable-local-tso" json:"enable-local-tso"`
-
-	// TSOSaveInterval is the interval to save timestamp.
-	TSOSaveInterval typeutil.Duration `toml:"tso-save-interval" json:"tso-save-interval"`
-
-	// The interval to update physical part of timestamp. Usually, this config should not be set.
-	// At most 1<<18 (262144) TSOs can be generated in the interval. The smaller the value, the
-	// more TSOs provided, and at the same time consuming more CPU time.
-	// This config is only valid in 1ms to 10s. If it's configured too long or too short, it will
-	// be automatically clamped to the range.
-	TSOUpdatePhysicalInterval typeutil.Duration `toml:"tso-update-physical-interval" json:"tso-update-physical-interval"`
-
-	// MaxResetTSGap is the max gap to reset the TSO.
-	MaxResetTSGap typeutil.Duration `toml:"max-gap-reset-ts" json:"max-gap-reset-ts"`
-
-	Metric metricutil.MetricConfig `toml:"metric" json:"metric"`
-
-	// WarningMsgs contains all warnings during parsing.
-	WarningMsgs []string
-
-	// Log related config.
-	Log log.Config `toml:"log" json:"log"`
-
-	Logger   *zap.Logger
-	LogProps *log.ZapProperties
-
-	Security configutil.SecurityConfig `toml:"security" json:"security"`
+	Logger                    *zap.Logger
+	LogProps                  *log.ZapProperties
+	Log                       log.Config              `toml:"log" json:"log"`
+	BackendEndpoints          string                  `toml:"backend-endpoints" json:"backend-endpoints"`
+	AdvertiseListenAddr       string                  `toml:"advertise-listen-addr" json:"advertise-listen-addr"`
+	Name                      string                  `toml:"name" json:"name"`
+	DataDir                   string                  `toml:"data-dir" json:"data-dir"`
+	ListenAddr                string                  `toml:"listen-addr" json:"listen-addr"`
+	Metric                    metricutil.MetricConfig `toml:"metric" json:"metric"`
+	WarningMsgs               []string
+	Security                  configutil.SecurityConfig `toml:"security" json:"security"`
+	MaxResetTSGap             typeutil.Duration         `toml:"max-gap-reset-ts" json:"max-gap-reset-ts"`
+	TSOUpdatePhysicalInterval typeutil.Duration         `toml:"tso-update-physical-interval" json:"tso-update-physical-interval"`
+	TSOSaveInterval           typeutil.Duration         `toml:"tso-save-interval" json:"tso-save-interval"`
+	LeaderLease               int64                     `toml:"lease" json:"lease"`
+	EnableLocalTSO            bool                      `toml:"enable-local-tso" json:"enable-local-tso"`
+	EnableGRPCGateway         bool                      `json:"enable-grpc-gateway"`
 }
 
 // NewConfig creates a new config.

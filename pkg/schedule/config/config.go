@@ -160,152 +160,57 @@ func adjustSchedulers(v *SchedulerConfigs, defValue SchedulerConfigs) {
 // ScheduleConfig is the schedule configuration.
 // NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
 type ScheduleConfig struct {
-	// If the snapshot count of one store is greater than this value,
-	// it will never be used as a source or target store.
-	MaxSnapshotCount    uint64 `toml:"max-snapshot-count" json:"max-snapshot-count"`
-	MaxPendingPeerCount uint64 `toml:"max-pending-peer-count" json:"max-pending-peer-count"`
-	// If both the size of region is smaller than MaxMergeRegionSize
-	// and the number of rows in region is smaller than MaxMergeRegionKeys,
-	// it will try to merge with adjacent regions.
-	MaxMergeRegionSize uint64 `toml:"max-merge-region-size" json:"max-merge-region-size"`
-	MaxMergeRegionKeys uint64 `toml:"max-merge-region-keys" json:"max-merge-region-keys"`
-	// SplitMergeInterval is the minimum interval time to permit merge after split.
-	SplitMergeInterval typeutil.Duration `toml:"split-merge-interval" json:"split-merge-interval"`
-	// SwitchWitnessInterval is the minimum interval that allows a peer to become a witness again after it is promoted to non-witness.
-	SwitchWitnessInterval typeutil.Duration `toml:"switch-witness-interval" json:"switch-witness-interval"`
-	// EnableOneWayMerge is the option to enable one way merge. This means a Region can only be merged into the next region of it.
-	EnableOneWayMerge bool `toml:"enable-one-way-merge" json:"enable-one-way-merge,string"`
-	// EnableCrossTableMerge is the option to enable cross table merge. This means two Regions can be merged with different table IDs.
-	// This option only works when key type is "table".
-	EnableCrossTableMerge bool `toml:"enable-cross-table-merge" json:"enable-cross-table-merge,string"`
-	// PatrolRegionInterval is the interval for scanning region during patrol.
-	PatrolRegionInterval typeutil.Duration `toml:"patrol-region-interval" json:"patrol-region-interval"`
-	// MaxStoreDownTime is the max duration after which
-	// a store will be considered to be down if it hasn't reported heartbeats.
-	MaxStoreDownTime typeutil.Duration `toml:"max-store-down-time" json:"max-store-down-time"`
-	// MaxStorePreparingTime is the max duration after which
-	// a store will be considered to be preparing.
-	MaxStorePreparingTime typeutil.Duration `toml:"max-store-preparing-time" json:"max-store-preparing-time"`
-	// LeaderScheduleLimit is the max coexist leader schedules.
-	LeaderScheduleLimit uint64 `toml:"leader-schedule-limit" json:"leader-schedule-limit"`
-	// LeaderSchedulePolicy is the option to balance leader, there are some policies supported: ["count", "size"], default: "count"
-	LeaderSchedulePolicy string `toml:"leader-schedule-policy" json:"leader-schedule-policy"`
-	// RegionScheduleLimit is the max coexist region schedules.
-	RegionScheduleLimit uint64 `toml:"region-schedule-limit" json:"region-schedule-limit"`
-	// WitnessScheduleLimit is the max coexist witness schedules.
-	WitnessScheduleLimit uint64 `toml:"witness-schedule-limit" json:"witness-schedule-limit"`
-	// ReplicaScheduleLimit is the max coexist replica schedules.
-	ReplicaScheduleLimit uint64 `toml:"replica-schedule-limit" json:"replica-schedule-limit"`
-	// MergeScheduleLimit is the max coexist merge schedules.
-	MergeScheduleLimit uint64 `toml:"merge-schedule-limit" json:"merge-schedule-limit"`
-	// HotRegionScheduleLimit is the max coexist hot region schedules.
-	HotRegionScheduleLimit uint64 `toml:"hot-region-schedule-limit" json:"hot-region-schedule-limit"`
-	// HotRegionCacheHitThreshold is the cache hits threshold of the hot region.
-	// If the number of times a region hits the hot cache is greater than this
-	// threshold, it is considered a hot region.
-	HotRegionCacheHitsThreshold uint64 `toml:"hot-region-cache-hits-threshold" json:"hot-region-cache-hits-threshold"`
-	// StoreBalanceRate is the maximum of balance rate for each store.
-	// WARN: StoreBalanceRate is deprecated.
-	StoreBalanceRate float64 `toml:"store-balance-rate" json:"store-balance-rate,omitempty"`
-	// StoreLimit is the limit of scheduling for stores.
-	StoreLimit map[uint64]StoreLimitConfig `toml:"store-limit" json:"store-limit"`
-	// TolerantSizeRatio is the ratio of buffer size for balance scheduler.
-	TolerantSizeRatio float64 `toml:"tolerant-size-ratio" json:"tolerant-size-ratio"`
-	//
-	//      high space stage         transition stage           low space stage
-	//   |--------------------|-----------------------------|-------------------------|
-	//   ^                    ^                             ^                         ^
-	//   0       HighSpaceRatio * capacity       LowSpaceRatio * capacity          capacity
-	//
-	// LowSpaceRatio is the lowest usage ratio of store which regraded as low space.
-	// When in low space, store region score increases to very large and varies inversely with available size.
-	LowSpaceRatio float64 `toml:"low-space-ratio" json:"low-space-ratio"`
-	// HighSpaceRatio is the highest usage ratio of store which regraded as high space.
-	// High space means there is a lot of spare capacity, and store region score varies directly with used size.
-	HighSpaceRatio float64 `toml:"high-space-ratio" json:"high-space-ratio"`
-	// RegionScoreFormulaVersion is used to control the formula used to calculate region score.
-	RegionScoreFormulaVersion string `toml:"region-score-formula-version" json:"region-score-formula-version"`
-	// SchedulerMaxWaitingOperator is the max coexist operators for each scheduler.
-	SchedulerMaxWaitingOperator uint64 `toml:"scheduler-max-waiting-operator" json:"scheduler-max-waiting-operator"`
-	// WARN: DisableLearner is deprecated.
-	// DisableLearner is the option to disable using AddLearnerNode instead of AddNode.
-	DisableLearner bool `toml:"disable-raft-learner" json:"disable-raft-learner,string,omitempty"`
-	// DisableRemoveDownReplica is the option to prevent replica checker from
-	// removing down replicas.
-	// WARN: DisableRemoveDownReplica is deprecated.
-	DisableRemoveDownReplica bool `toml:"disable-remove-down-replica" json:"disable-remove-down-replica,string,omitempty"`
-	// DisableReplaceOfflineReplica is the option to prevent replica checker from
-	// replacing offline replicas.
-	// WARN: DisableReplaceOfflineReplica is deprecated.
-	DisableReplaceOfflineReplica bool `toml:"disable-replace-offline-replica" json:"disable-replace-offline-replica,string,omitempty"`
-	// DisableMakeUpReplica is the option to prevent replica checker from making up
-	// replicas when replica count is less than expected.
-	// WARN: DisableMakeUpReplica is deprecated.
-	DisableMakeUpReplica bool `toml:"disable-make-up-replica" json:"disable-make-up-replica,string,omitempty"`
-	// DisableRemoveExtraReplica is the option to prevent replica checker from
-	// removing extra replicas.
-	// WARN: DisableRemoveExtraReplica is deprecated.
-	DisableRemoveExtraReplica bool `toml:"disable-remove-extra-replica" json:"disable-remove-extra-replica,string,omitempty"`
-	// DisableLocationReplacement is the option to prevent replica checker from
-	// moving replica to a better location.
-	// WARN: DisableLocationReplacement is deprecated.
-	DisableLocationReplacement bool `toml:"disable-location-replacement" json:"disable-location-replacement,string,omitempty"`
-
-	// EnableRemoveDownReplica is the option to enable replica checker to remove down replica.
-	EnableRemoveDownReplica bool `toml:"enable-remove-down-replica" json:"enable-remove-down-replica,string"`
-	// EnableReplaceOfflineReplica is the option to enable replica checker to replace offline replica.
-	EnableReplaceOfflineReplica bool `toml:"enable-replace-offline-replica" json:"enable-replace-offline-replica,string"`
-	// EnableMakeUpReplica is the option to enable replica checker to make up replica.
-	EnableMakeUpReplica bool `toml:"enable-make-up-replica" json:"enable-make-up-replica,string"`
-	// EnableRemoveExtraReplica is the option to enable replica checker to remove extra replica.
-	EnableRemoveExtraReplica bool `toml:"enable-remove-extra-replica" json:"enable-remove-extra-replica,string"`
-	// EnableLocationReplacement is the option to enable replica checker to move replica to a better location.
-	EnableLocationReplacement bool `toml:"enable-location-replacement" json:"enable-location-replacement,string"`
-	// EnableDebugMetrics is the option to enable debug metrics.
-	EnableDebugMetrics bool `toml:"enable-debug-metrics" json:"enable-debug-metrics,string"`
-	// EnableJointConsensus is the option to enable using joint consensus as an operator step.
-	EnableJointConsensus bool `toml:"enable-joint-consensus" json:"enable-joint-consensus,string"`
-	// EnableTiKVSplitRegion is the option to enable tikv split region.
-	// on ebs-based BR we need to disable it with TTL
-	EnableTiKVSplitRegion bool `toml:"enable-tikv-split-region" json:"enable-tikv-split-region,string"`
-
-	// EnableHeartbeatBreakdownMetrics is the option to enable heartbeat stats metrics.
-	EnableHeartbeatBreakdownMetrics bool `toml:"enable-heartbeat-breakdown-metrics" json:"enable-heartbeat-breakdown-metrics,string"`
-
-	// EnableHeartbeatConcurrentRunner is the option to enable heartbeat concurrent runner.
-	EnableHeartbeatConcurrentRunner bool `toml:"enable-heartbeat-concurrent-runner" json:"enable-heartbeat-concurrent-runner,string"`
-
-	// Schedulers support for loading customized schedulers
-	Schedulers SchedulerConfigs `toml:"schedulers" json:"schedulers-v2"` // json v2 is for the sake of compatible upgrade
-
-	// Controls the time interval between write hot regions info into leveldb.
-	HotRegionsWriteInterval typeutil.Duration `toml:"hot-regions-write-interval" json:"hot-regions-write-interval"`
-
-	// The day of hot regions data to be reserved. 0 means close.
-	HotRegionsReservedDays uint64 `toml:"hot-regions-reserved-days" json:"hot-regions-reserved-days"`
-
-	// MaxMovableHotPeerSize is the threshold of region size for balance hot region and split bucket scheduler.
-	// Hot region must be split before moved if it's region size is greater than MaxMovableHotPeerSize.
-	MaxMovableHotPeerSize int64 `toml:"max-movable-hot-peer-size" json:"max-movable-hot-peer-size,omitempty"`
-
-	// EnableDiagnostic is the option to enable using diagnostic
-	EnableDiagnostic bool `toml:"enable-diagnostic" json:"enable-diagnostic,string"`
-
-	// EnableWitness is the option to enable using witness
-	EnableWitness bool `toml:"enable-witness" json:"enable-witness,string"`
-
-	// SlowStoreEvictingAffectedStoreRatioThreshold is the affected ratio threshold when judging a store is slow
-	// A store's slowness must affect more than `store-count * SlowStoreEvictingAffectedStoreRatioThreshold` to trigger evicting.
-	SlowStoreEvictingAffectedStoreRatioThreshold float64 `toml:"slow-store-evicting-affected-store-ratio-threshold" json:"slow-store-evicting-affected-store-ratio-threshold,omitempty"`
-
-	// StoreLimitVersion is the version of store limit.
-	// v1: which is based on the region count by rate limit.
-	// v2: which is based on region size by window size.
-	StoreLimitVersion string `toml:"store-limit-version" json:"store-limit-version,omitempty"`
-
-	// HaltScheduling is the option to halt the scheduling. Once it's on, PD will halt the scheduling,
-	// and any other scheduling configs will be ignored.
-	HaltScheduling bool `toml:"halt-scheduling" json:"halt-scheduling,string,omitempty"`
+	StoreLimit                                   map[uint64]StoreLimitConfig `toml:"store-limit" json:"store-limit"`
+	LeaderSchedulePolicy                         string                      `toml:"leader-schedule-policy" json:"leader-schedule-policy"`
+	StoreLimitVersion                            string                      `toml:"store-limit-version" json:"store-limit-version,omitempty"`
+	RegionScoreFormulaVersion                    string                      `toml:"region-score-formula-version" json:"region-score-formula-version"`
+	Schedulers                                   SchedulerConfigs            `toml:"schedulers" json:"schedulers-v2"`
+	HighSpaceRatio                               float64                     `toml:"high-space-ratio" json:"high-space-ratio"`
+	MaxPendingPeerCount                          uint64                      `toml:"max-pending-peer-count" json:"max-pending-peer-count"`
+	SlowStoreEvictingAffectedStoreRatioThreshold float64                     `toml:"slow-store-evicting-affected-store-ratio-threshold" json:"slow-store-evicting-affected-store-ratio-threshold,omitempty"`
+	PatrolRegionInterval                         typeutil.Duration           `toml:"patrol-region-interval" json:"patrol-region-interval"`
+	MaxStoreDownTime                             typeutil.Duration           `toml:"max-store-down-time" json:"max-store-down-time"`
+	MaxStorePreparingTime                        typeutil.Duration           `toml:"max-store-preparing-time" json:"max-store-preparing-time"`
+	LeaderScheduleLimit                          uint64                      `toml:"leader-schedule-limit" json:"leader-schedule-limit"`
+	SwitchWitnessInterval                        typeutil.Duration           `toml:"switch-witness-interval" json:"switch-witness-interval"`
+	RegionScheduleLimit                          uint64                      `toml:"region-schedule-limit" json:"region-schedule-limit"`
+	WitnessScheduleLimit                         uint64                      `toml:"witness-schedule-limit" json:"witness-schedule-limit"`
+	ReplicaScheduleLimit                         uint64                      `toml:"replica-schedule-limit" json:"replica-schedule-limit"`
+	MergeScheduleLimit                           uint64                      `toml:"merge-schedule-limit" json:"merge-schedule-limit"`
+	HotRegionScheduleLimit                       uint64                      `toml:"hot-region-schedule-limit" json:"hot-region-schedule-limit"`
+	HotRegionCacheHitsThreshold                  uint64                      `toml:"hot-region-cache-hits-threshold" json:"hot-region-cache-hits-threshold"`
+	StoreBalanceRate                             float64                     `toml:"store-balance-rate" json:"store-balance-rate,omitempty"`
+	SplitMergeInterval                           typeutil.Duration           `toml:"split-merge-interval" json:"split-merge-interval"`
+	MaxMovableHotPeerSize                        int64                       `toml:"max-movable-hot-peer-size" json:"max-movable-hot-peer-size,omitempty"`
+	LowSpaceRatio                                float64                     `toml:"low-space-ratio" json:"low-space-ratio"`
+	MaxSnapshotCount                             uint64                      `toml:"max-snapshot-count" json:"max-snapshot-count"`
+	MaxMergeRegionKeys                           uint64                      `toml:"max-merge-region-keys" json:"max-merge-region-keys"`
+	SchedulerMaxWaitingOperator                  uint64                      `toml:"scheduler-max-waiting-operator" json:"scheduler-max-waiting-operator"`
+	HotRegionsReservedDays                       uint64                      `toml:"hot-regions-reserved-days" json:"hot-regions-reserved-days"`
+	HotRegionsWriteInterval                      typeutil.Duration           `toml:"hot-regions-write-interval" json:"hot-regions-write-interval"`
+	MaxMergeRegionSize                           uint64                      `toml:"max-merge-region-size" json:"max-merge-region-size"`
+	TolerantSizeRatio                            float64                     `toml:"tolerant-size-ratio" json:"tolerant-size-ratio"`
+	DisableLocationReplacement                   bool                        `toml:"disable-location-replacement" json:"disable-location-replacement,string,omitempty"`
+	EnableMakeUpReplica                          bool                        `toml:"enable-make-up-replica" json:"enable-make-up-replica,string"`
+	DisableRemoveExtraReplica                    bool                        `toml:"disable-remove-extra-replica" json:"disable-remove-extra-replica,string,omitempty"`
+	EnableOneWayMerge                            bool                        `toml:"enable-one-way-merge" json:"enable-one-way-merge,string"`
+	EnableDebugMetrics                           bool                        `toml:"enable-debug-metrics" json:"enable-debug-metrics,string"`
+	EnableRemoveExtraReplica                     bool                        `toml:"enable-remove-extra-replica" json:"enable-remove-extra-replica,string"`
+	EnableLocationReplacement                    bool                        `toml:"enable-location-replacement" json:"enable-location-replacement,string"`
+	EnableHeartbeatConcurrentRunner              bool                        `toml:"enable-heartbeat-concurrent-runner" json:"enable-heartbeat-concurrent-runner,string"`
+	EnableJointConsensus                         bool                        `toml:"enable-joint-consensus" json:"enable-joint-consensus,string"`
+	HaltScheduling                               bool                        `toml:"halt-scheduling" json:"halt-scheduling,string,omitempty"`
+	EnableRemoveDownReplica                      bool                        `toml:"enable-remove-down-replica" json:"enable-remove-down-replica,string"`
+	EnableHeartbeatBreakdownMetrics              bool                        `toml:"enable-heartbeat-breakdown-metrics" json:"enable-heartbeat-breakdown-metrics,string"`
+	EnableReplaceOfflineReplica                  bool                        `toml:"enable-replace-offline-replica" json:"enable-replace-offline-replica,string"`
+	DisableMakeUpReplica                         bool                        `toml:"disable-make-up-replica" json:"disable-make-up-replica,string,omitempty"`
+	DisableLearner                               bool                        `toml:"disable-raft-learner" json:"disable-raft-learner,string,omitempty"`
+	DisableRemoveDownReplica                     bool                        `toml:"disable-remove-down-replica" json:"disable-remove-down-replica,string,omitempty"`
+	EnableDiagnostic                             bool                        `toml:"enable-diagnostic" json:"enable-diagnostic,string"`
+	EnableWitness                                bool                        `toml:"enable-witness" json:"enable-witness,string"`
+	EnableCrossTableMerge                        bool                        `toml:"enable-cross-table-merge" json:"enable-cross-table-merge,string"`
+	DisableReplaceOfflineReplica                 bool                        `toml:"disable-replace-offline-replica" json:"disable-replace-offline-replica,string,omitempty"`
+	EnableTiKVSplitRegion                        bool                        `toml:"enable-tikv-split-region" json:"enable-tikv-split-region,string"`
 }
 
 // Clone returns a cloned scheduling configuration.
@@ -559,9 +464,9 @@ type SchedulerConfigs []SchedulerConfig
 // SchedulerConfig is customized scheduler configuration
 type SchedulerConfig struct {
 	Type        string   `toml:"type" json:"type"`
+	ArgsPayload string   `toml:"args-payload" json:"args-payload"`
 	Args        []string `toml:"args" json:"args"`
 	Disable     bool     `toml:"disable" json:"disable"`
-	ArgsPayload string   `toml:"args-payload" json:"args-payload"`
 }
 
 // DefaultSchedulers are the schedulers be created by default.
@@ -587,32 +492,12 @@ func IsDefaultScheduler(typ string) bool {
 // ReplicationConfig is the replication configuration.
 // NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
 type ReplicationConfig struct {
-	// MaxReplicas is the number of replicas for each region.
-	MaxReplicas uint64 `toml:"max-replicas" json:"max-replicas"`
-
-	// The label keys specified the location of a store.
-	// The placement priorities is implied by the order of label keys.
-	// For example, ["zone", "rack"] means that we should place replicas to
-	// different zones first, then to different racks if we don't have enough zones.
-	LocationLabels typeutil.StringSlice `toml:"location-labels" json:"location-labels"`
-	// StrictlyMatchLabel strictly checks if the label of TiKV is matched with LocationLabels.
-	StrictlyMatchLabel bool `toml:"strictly-match-label" json:"strictly-match-label,string"`
-
-	// When PlacementRules feature is enabled. MaxReplicas, LocationLabels and IsolationLabels are not used any more.
-	EnablePlacementRules bool `toml:"enable-placement-rules" json:"enable-placement-rules,string"`
-
-	// EnablePlacementRuleCache controls whether use cache during rule checker
-	EnablePlacementRulesCache bool `toml:"enable-placement-rules-cache" json:"enable-placement-rules-cache,string"`
-
-	// IsolationLevel is used to isolate replicas explicitly and forcibly if it's not empty.
-	// Its value must be empty or one of LocationLabels.
-	// Example:
-	// location-labels = ["zone", "rack", "host"]
-	// isolation-level = "zone"
-	// With configuration like above, PD ensure that all replicas be placed in different zones.
-	// Even if a zone is down, PD will not try to make up replicas in other zone
-	// because other zones already have replicas on it.
-	IsolationLevel string `toml:"isolation-level" json:"isolation-level"`
+	IsolationLevel            string               `toml:"isolation-level" json:"isolation-level"`
+	LocationLabels            typeutil.StringSlice `toml:"location-labels" json:"location-labels"`
+	MaxReplicas               uint64               `toml:"max-replicas" json:"max-replicas"`
+	StrictlyMatchLabel        bool                 `toml:"strictly-match-label" json:"strictly-match-label,string"`
+	EnablePlacementRules      bool                 `toml:"enable-placement-rules" json:"enable-placement-rules,string"`
+	EnablePlacementRulesCache bool                 `toml:"enable-placement-rules-cache" json:"enable-placement-rules-cache,string"`
 }
 
 // Clone makes a deep copy of the config.

@@ -35,10 +35,10 @@ type GCSafePointV2 struct {
 // ServiceSafePointV2 represents a service's safepoint under a specific keyspace.
 // Services can post service safe point to prevent gc safe point from incrementing.
 type ServiceSafePointV2 struct {
-	KeyspaceID uint32 `json:"keyspace_id"`
 	ServiceID  string `json:"service_id"`
 	ExpiredAt  int64  `json:"expired_at"`
 	SafePoint  uint64 `json:"safe_point"`
+	KeyspaceID uint32 `json:"keyspace_id"`
 }
 
 // SafePointV2Storage defines the storage operations on safe point v2.

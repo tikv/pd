@@ -43,14 +43,12 @@ const (
 )
 
 type evictLeaderSchedulerConfig struct {
-	syncutil.RWMutex
 	schedulerConfig
-
 	StoreIDWithRanges map[uint64][]core.KeyRange `json:"store-id-ranges"`
-	// Batch is used to generate multiple operators by one scheduling
-	Batch             int `json:"batch"`
 	cluster           *core.BasicCluster
 	removeSchedulerCb func(string) error
+	Batch             int `json:"batch"`
+	syncutil.RWMutex
 }
 
 func (conf *evictLeaderSchedulerConfig) getStores() []uint64 {

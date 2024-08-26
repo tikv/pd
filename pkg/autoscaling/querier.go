@@ -27,10 +27,10 @@ type Querier interface {
 
 // QueryOptions includes parameters for later metrics query
 type QueryOptions struct {
+	timestamp time.Time
+	addresses []string
 	component ComponentType
 	metric    MetricType
-	addresses []string
-	timestamp time.Time
 	duration  time.Duration
 }
 
@@ -40,10 +40,10 @@ type QueryOptions struct {
 // and returns metrics value for each instance in `instances`
 func NewQueryOptions(component ComponentType, metric MetricType, addresses []string, timestamp time.Time, duration time.Duration) *QueryOptions {
 	return &QueryOptions{
-		component,
-		metric,
-		addresses,
-		timestamp,
-		duration,
+		component: component,
+		metric:    metric,
+		addresses: addresses,
+		timestamp: timestamp,
+		duration:  duration,
 	}
 }

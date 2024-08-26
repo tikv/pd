@@ -36,16 +36,14 @@ var (
 
 // Manager is used to control dashboard.
 type Manager struct {
-	ctx    context.Context
-	cancel context.CancelFunc
-	wg     sync.WaitGroup
-
+	ctx        context.Context
+	cancel     context.CancelFunc
 	srv        *server.Server
 	service    *apiserver.Service
 	redirector *Redirector
-
-	isLeader bool
-	members  []*pdpb.Member
+	members    []*pdpb.Member
+	wg         sync.WaitGroup
+	isLeader   bool
 }
 
 // NewManager creates a new Manager.

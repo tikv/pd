@@ -35,9 +35,9 @@ type DimensionConfig struct {
 }
 
 type limiter struct {
-	mu          syncutil.RWMutex
 	concurrency *ConcurrencyLimiter
 	rate        *RateLimiter
+	mu          syncutil.RWMutex
 }
 
 func newLimiter() *limiter {

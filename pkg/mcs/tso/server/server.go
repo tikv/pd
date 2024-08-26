@@ -62,29 +62,19 @@ const serviceName = "TSO Service"
 
 // Server is the TSO server, and it implements bs.Server.
 type Server struct {
-	*server.BaseServer
+	serverLoopCtx context.Context
 	diagnosticspb.DiagnosticsServer
-
-	// Server state. 0 is not running, 1 is running.
-	isRunning int64
-
-	serverLoopCtx    context.Context
+	cfg              *Config
 	serverLoopCancel func()
-	serverLoopWg     sync.WaitGroup
-
-	cfg       *Config
-	clusterID uint64
-
+	*server.BaseServer
 	service              *Service
 	keyspaceGroupManager *tso.KeyspaceGroupManager
-
-	// tsoProtoFactory is the abstract factory for creating tso
-	// related data structures defined in the tso grpc protocol
-	tsoProtoFactory *tsoutil.TSOProtoFactory
-
-	// for service registry
-	serviceID       *discovery.ServiceRegistryEntry
-	serviceRegister *discovery.ServiceRegister
+	tsoProtoFactory      *tsoutil.TSOProtoFactory
+	serviceID            *discovery.ServiceRegistryEntry
+	serviceRegister      *discovery.ServiceRegister
+	serverLoopWg         sync.WaitGroup
+	isRunning            int64
+	clusterID            uint64
 }
 
 // Implement the following methods defined in bs.Server

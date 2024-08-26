@@ -87,12 +87,12 @@ type RegionInfoWithTS struct {
 
 // RegionStatistics is used to record the status of regions.
 type RegionStatistics struct {
-	syncutil.RWMutex
 	rip         RegionInfoProvider
 	conf        sc.CheckerConfigProvider
 	stats       map[RegionStatisticType]map[uint64]any
 	index       map[uint64]RegionStatisticType
 	ruleManager *placement.RuleManager
+	syncutil.RWMutex
 }
 
 // NewRegionStatistics creates a new RegionStatistics.
@@ -362,9 +362,9 @@ func ResetRegionStatsMetrics() {
 
 // LabelStatistics is the statistics of the level of labels.
 type LabelStatistics struct {
-	syncutil.RWMutex
 	regionLabelStats map[uint64]string
 	labelCounter     map[string]int
+	syncutil.RWMutex
 }
 
 // NewLabelStatistics creates a new LabelStatistics.

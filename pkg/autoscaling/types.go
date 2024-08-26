@@ -32,42 +32,39 @@ type Strategy struct {
 
 // Rule is a set of constraints for a kind of component.
 type Rule struct {
-	Component   string       `json:"component"`
 	CPURule     *CPURule     `json:"cpu_rule,omitempty"`
 	StorageRule *StorageRule `json:"storage_rule,omitempty"`
+	Component   string       `json:"component"`
 }
 
 // CPURule is the constraints about CPU.
 type CPURule struct {
+	ResourceTypes []string `json:"resource_types"`
 	MaxThreshold  float64  `json:"max_threshold"`
 	MinThreshold  float64  `json:"min_threshold"`
-	ResourceTypes []string `json:"resource_types"`
 }
 
 // StorageRule is the constraints about storage.
 type StorageRule struct {
-	MinThreshold  float64  `json:"min_threshold"`
 	ResourceTypes []string `json:"resource_types"`
+	MinThreshold  float64  `json:"min_threshold"`
 }
 
 // Resource represents a kind of resource set including CPU, memory, storage.
 type Resource struct {
-	ResourceType string `json:"resource_type"`
-	// The basic unit of CPU is milli-core.
-	CPU uint64 `json:"cpu"`
-	// The basic unit of memory is byte.
-	Memory uint64 `json:"memory"`
-	// The basic unit of storage is byte.
-	Storage uint64  `json:"storage"`
-	Count   *uint64 `json:"count,omitempty"`
+	Count        *uint64 `json:"count,omitempty"`
+	ResourceType string  `json:"resource_type"`
+	CPU          uint64  `json:"cpu"`
+	Memory       uint64  `json:"memory"`
+	Storage      uint64  `json:"storage"`
 }
 
 // Plan is the final result of auto scaling, which indicates how to scale in or scale out.
 type Plan struct {
-	Component    string            `json:"component"`
-	Count        uint64            `json:"count"`
-	ResourceType string            `json:"resource_type"`
 	Labels       map[string]string `json:"labels"`
+	Component    string            `json:"component"`
+	ResourceType string            `json:"resource_type"`
+	Count        uint64            `json:"count"`
 }
 
 // ComponentType distinguishes different kinds of components.
@@ -113,8 +110,8 @@ func (c MetricType) String() string {
 }
 
 type instance struct {
-	id      uint64
 	address string
+	id      uint64
 }
 
 // TiDBInfo record the detail tidb info

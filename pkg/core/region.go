@@ -58,32 +58,29 @@ func errRegionIsStale(region *metapb.Region, origin *metapb.Region) error {
 // the properties are Read-Only once created except buckets.
 // the `buckets` could be modified by the request `report buckets` with greater version.
 type RegionInfo struct {
+	interval          *pdpb.TimeInterval
+	leader            *metapb.Peer
+	buckets           unsafe.Pointer
+	queryStats        *pdpb.QueryStats
+	replicationStatus *replication_modepb.RegionReplicationStatus
 	meta              *metapb.Region
 	learners          []*metapb.Peer
 	witnesses         []*metapb.Peer
 	voters            []*metapb.Peer
-	leader            *metapb.Peer
 	downPeers         []*pdpb.PeerStats
 	pendingPeers      []*metapb.Peer
-	term              uint64
-	cpuUsage          uint64
-	writtenBytes      uint64
 	writtenKeys       uint64
-	readBytes         uint64
 	readKeys          uint64
 	approximateSize   int64
 	approximateKvSize int64
 	approximateKeys   int64
-	interval          *pdpb.TimeInterval
-	replicationStatus *replication_modepb.RegionReplicationStatus
-	queryStats        *pdpb.QueryStats
+	readBytes         uint64
+	writtenBytes      uint64
+	cpuUsage          uint64
 	flowRoundDivisor  uint64
-	// buckets is not thread unsafe, it should be accessed by the request `report buckets` with greater version.
-	buckets unsafe.Pointer
-	// source is used to indicate region's source, such as Storage/Sync/Heartbeat.
-	source RegionSource
-	// ref is used to indicate the reference count of the region in root-tree and sub-tree.
-	ref atomic.Int32
+	term              uint64
+	source            RegionSource
+	ref               atomic.Int32
 }
 
 // RegionSource is the source of region.
@@ -905,18 +902,17 @@ func (l *RWLockStats) RUnlock() {
 
 // RegionsInfo for export
 type RegionsInfo struct {
-	t            RWLockStats
 	tree         *regionTree
-	regions      map[uint64]*regionItem // regionID -> regionInfo
+	regions      map[uint64]*regionItem
+	subRegions   map[uint64]*regionItem
+	leaders      map[uint64]*regionTree
+	followers    map[uint64]*regionTree
+	learners     map[uint64]*regionTree
+	witnesses    map[uint64]*regionTree
+	pendingPeers map[uint64]*regionTree
+	overlapTree  *regionTree
+	t            RWLockStats
 	st           RWLockStats
-	subRegions   map[uint64]*regionItem // regionID -> regionInfo
-	leaders      map[uint64]*regionTree // storeID -> sub regionTree
-	followers    map[uint64]*regionTree // storeID -> sub regionTree
-	learners     map[uint64]*regionTree // storeID -> sub regionTree
-	witnesses    map[uint64]*regionTree // storeID -> sub regionTree
-	pendingPeers map[uint64]*regionTree // storeID -> sub regionTree
-	// This tree is used to check the overlaps among all the subtrees.
-	overlapTree *regionTree
 }
 
 // NewRegionsInfo creates RegionsInfo with tree, regions, leaders and followers

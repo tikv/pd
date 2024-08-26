@@ -167,9 +167,9 @@ func Target(conf config.SharedConfigProvider, store *core.StoreInfo, filters []F
 }
 
 type excludedFilter struct {
-	scope   string
 	sources map[uint64]struct{}
 	targets map[uint64]struct{}
+	scope   string
 }
 
 // NewExcludedFilter creates a Filter that filters all specified stores.
@@ -241,9 +241,9 @@ func (*storageThresholdFilter) Target(conf config.SharedConfigProvider, store *c
 // distinctScoreFilter ensures that distinct score will not decrease.
 type distinctScoreFilter struct {
 	scope     string
+	policy    string
 	labels    []string
 	stores    []*core.StoreInfo
-	policy    string
 	safeScore float64
 	srcStore  uint64
 }
@@ -616,11 +616,11 @@ func (f labelConstraintFilter) Target(_ config.SharedConfigProvider, store *core
 }
 
 type ruleFitFilter struct {
-	scope       string
 	cluster     *core.BasicCluster
 	ruleManager *placement.RuleManager
 	region      *core.RegionInfo
 	oldFit      *placement.RegionFit
+	scope       string
 	srcStore    uint64
 }
 
@@ -675,11 +675,11 @@ func (f *ruleFitFilter) getSourceStoreID() uint64 {
 }
 
 type ruleLeaderFitFilter struct {
-	scope            string
 	cluster          *core.BasicCluster
 	ruleManager      *placement.RuleManager
 	region           *core.RegionInfo
 	oldFit           *placement.RegionFit
+	scope            string
 	srcLeaderStoreID uint64
 	allowMoveLeader  bool
 }
@@ -735,11 +735,11 @@ func (f *ruleLeaderFitFilter) getSourceStoreID() uint64 {
 }
 
 type ruleWitnessFitFilter struct {
-	scope       string
 	cluster     *core.BasicCluster
 	ruleManager *placement.RuleManager
 	region      *core.RegionInfo
 	oldFit      *placement.RegionFit
+	scope       string
 	srcStore    uint64
 }
 

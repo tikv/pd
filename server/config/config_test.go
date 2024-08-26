@@ -81,8 +81,8 @@ func TestReloadUpgrade(t *testing.T) {
 
 	// Simulate an old configuration that only contains 2 fields.
 	type OldConfig struct {
-		Schedule    sc.ScheduleConfig    `toml:"schedule" json:"schedule"`
 		Replication sc.ReplicationConfig `toml:"replication" json:"replication"`
+		Schedule    sc.ScheduleConfig    `toml:"schedule" json:"schedule"`
 	}
 	old := &OldConfig{
 		Schedule:    *opt.GetScheduleConfig(),
@@ -306,53 +306,53 @@ func TestPDServerConfig(t *testing.T) {
 	re := require.New(t)
 	tests := []struct {
 		cfgData          string
-		hasErr           bool
 		dashboardAddress string
+		hasErr           bool
 	}{
 		{
-			`
+			cfgData: `
 [pd-server]
 dashboard-address = "http://127.0.0.1:2379"
 `,
-			false,
-			"http://127.0.0.1:2379",
+			hasErr:           false,
+			dashboardAddress: "http://127.0.0.1:2379",
 		},
 		{
-			`
+			cfgData: `
 [pd-server]
 dashboard-address = "auto"
 `,
-			false,
-			"auto",
+			hasErr:           false,
+			dashboardAddress: "auto",
 		},
 		{
-			`
+			cfgData: `
 [pd-server]
 dashboard-address = "none"
 `,
-			false,
-			"none",
+			hasErr:           false,
+			dashboardAddress: "none",
 		},
 		{
-			"",
-			false,
-			"auto",
+			cfgData:          "",
+			hasErr:           false,
+			dashboardAddress: "auto",
 		},
 		{
-			`
+			cfgData: `
 [pd-server]
 dashboard-address = "127.0.0.1:2379"
 `,
-			true,
-			"",
+			hasErr:           true,
+			dashboardAddress: "",
 		},
 		{
-			`
+			cfgData: `
 [pd-server]
 dashboard-address = "foo"
 `,
-			true,
-			"",
+			hasErr:           true,
+			dashboardAddress: "",
 		},
 	}
 

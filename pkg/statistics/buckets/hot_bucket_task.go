@@ -65,9 +65,9 @@ func (t *checkBucketsTask) runTask(cache *HotBucketCache) {
 }
 
 type collectBucketStatsTask struct {
-	minDegree int
+	ret       chan map[uint64][]*BucketStat
 	regionIDs []uint64
-	ret       chan map[uint64][]*BucketStat // RegionID ==>Buckets
+	minDegree int
 }
 
 // NewCollectBucketStatsTask creates task to collect bucket stats.

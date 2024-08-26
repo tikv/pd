@@ -389,8 +389,8 @@ func (h *Handler) HandleOperatorCreation(input map[string]any) (int, any, error)
 			errorMessage = err.Error()
 		}
 		s := struct {
-			ProcessedPercentage int    `json:"processed-percentage"`
 			Error               string `json:"error"`
+			ProcessedPercentage int    `json:"processed-percentage"`
 		}{
 			ProcessedPercentage: processedPercentage,
 			Error:               errorMessage,
@@ -805,9 +805,9 @@ func (h *Handler) GetSchedulerNames() ([]string, error) {
 }
 
 type schedulerPausedPeriod struct {
-	Name     string    `json:"name"`
 	PausedAt time.Time `json:"paused_at"`
 	ResumeAt time.Time `json:"resume_at"`
+	Name     string    `json:"name"`
 }
 
 // GetSchedulerByStatus returns all names of schedulers by status.
@@ -1229,8 +1229,8 @@ func (h *Handler) ScatterRegionsByID(ids []uint64, group string, retryLimit int)
 
 // SplitRegionsResponse is the response for split regions.
 type SplitRegionsResponse struct {
-	ProcessedPercentage int      `json:"processed-percentage"`
 	NewRegionsID        []uint64 `json:"regions-id"`
+	ProcessedPercentage int      `json:"processed-percentage"`
 }
 
 // SplitRegions splits regions by split keys.

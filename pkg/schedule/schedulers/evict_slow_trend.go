@@ -41,24 +41,19 @@ const (
 )
 
 type slowCandidate struct {
-	storeID   uint64
 	captureTS time.Time
 	recoverTS time.Time
+	storeID   uint64
 }
 
 type evictSlowTrendSchedulerConfig struct {
-	syncutil.RWMutex
-	schedulerConfig
-
-	cluster *core.BasicCluster
-	// Candidate for eviction in current tick.
-	evictCandidate slowCandidate
-	// Last chosen candidate for eviction.
+	evictCandidate     slowCandidate
 	lastEvictCandidate slowCandidate
-	// Duration gap for recovering the candidate, unit: s.
-	RecoveryDurationGap uint64 `json:"recovery-duration"`
-	// Only evict one store for now
-	EvictedStores []uint64 `json:"evict-by-trend-stores"`
+	schedulerConfig
+	cluster             *core.BasicCluster
+	EvictedStores       []uint64 `json:"evict-by-trend-stores"`
+	RecoveryDurationGap uint64   `json:"recovery-duration"`
+	syncutil.RWMutex
 }
 
 func initEvictSlowTrendSchedulerConfig() *evictSlowTrendSchedulerConfig {

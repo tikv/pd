@@ -226,17 +226,17 @@ func TestRegion(t *testing.T) {
 	}
 
 	var testRegionCases = []struct {
-		args   []string
 		expect *core.RegionInfo
+		args   []string
 	}{
 		// region <region_id> command
-		{[]string{"region", "1"}, leaderServer.GetRegionInfoByID(1)},
+		{leaderServer.GetRegionInfoByID(1), []string{"region", "1"}},
 		// region key --format=raw <key> command
-		{[]string{"region", "key", "--format=raw", "b"}, r2},
+		{r2, []string{"region", "key", "--format=raw", "b"}},
 		// region key --format=hex <key> command
-		{[]string{"region", "key", "--format=hex", "62"}, r2},
+		{r2, []string{"region", "key", "--format=hex", "62"}},
 		// issue #2351
-		{[]string{"region", "key", "--format=hex", "622f62"}, r2},
+		{r2, []string{"region", "key", "--format=hex", "622f62"}},
 	}
 
 	for _, testCase := range testRegionCases {

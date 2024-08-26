@@ -460,13 +460,13 @@ func (suite *keyspaceGroupTestSuite) TestKeyspaceGroupMerge() {
 func TestBuildSplitKeyspaces(t *testing.T) {
 	re := require.New(t)
 	testCases := []struct {
+		err             error
 		old             []uint32
 		new             []uint32
-		startKeyspaceID uint32
-		endKeyspaceID   uint32
 		expectedOld     []uint32
 		expectedNew     []uint32
-		err             error
+		startKeyspaceID uint32
+		endKeyspaceID   uint32
 	}{
 		{
 			old:         []uint32{1, 2, 3, 4, 5},

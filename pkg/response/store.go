@@ -51,12 +51,12 @@ type SlowTrend struct {
 
 // StoreStatus contains status about a store.
 type StoreStatus struct {
-	Capacity           typeutil.ByteSize  `json:"capacity"`
-	Available          typeutil.ByteSize  `json:"available"`
-	UsedSize           typeutil.ByteSize  `json:"used_size"`
-	LeaderCount        int                `json:"leader_count"`
-	LeaderWeight       float64            `json:"leader_weight"`
+	SlowTrend          *SlowTrend         `json:"slow_trend,omitempty"`
+	Uptime             *typeutil.Duration `json:"uptime,omitempty"`
+	LastHeartbeatTS    *time.Time         `json:"last_heartbeat_ts,omitempty"`
+	StartTS            *time.Time         `json:"start_ts,omitempty"`
 	LeaderScore        float64            `json:"leader_score"`
+	PendingPeerCount   int                `json:"pending_peer_count,omitempty"`
 	LeaderSize         int64              `json:"leader_size"`
 	RegionCount        int                `json:"region_count"`
 	RegionWeight       float64            `json:"region_weight"`
@@ -64,15 +64,15 @@ type StoreStatus struct {
 	RegionSize         int64              `json:"region_size"`
 	LearnerCount       int                `json:"learner_count,omitempty"`
 	WitnessCount       int                `json:"witness_count,omitempty"`
-	PendingPeerCount   int                `json:"pending_peer_count,omitempty"`
+	Capacity           typeutil.ByteSize  `json:"capacity"`
 	SlowScore          uint64             `json:"slow_score,omitempty"`
-	SlowTrend          *SlowTrend         `json:"slow_trend,omitempty"`
-	SendingSnapCount   uint32             `json:"sending_snap_count,omitempty"`
+	LeaderWeight       float64            `json:"leader_weight"`
+	Available          typeutil.ByteSize  `json:"available"`
+	UsedSize           typeutil.ByteSize  `json:"used_size"`
+	LeaderCount        int                `json:"leader_count"`
 	ReceivingSnapCount uint32             `json:"receiving_snap_count,omitempty"`
+	SendingSnapCount   uint32             `json:"sending_snap_count,omitempty"`
 	IsBusy             bool               `json:"is_busy,omitempty"`
-	StartTS            *time.Time         `json:"start_ts,omitempty"`
-	LastHeartbeatTS    *time.Time         `json:"last_heartbeat_ts,omitempty"`
-	Uptime             *typeutil.Duration `json:"uptime,omitempty"`
 }
 
 // StoreInfo contains information about a store.
@@ -147,6 +147,6 @@ func BuildStoreInfo(opt *sc.ScheduleConfig, store *core.StoreInfo) *StoreInfo {
 
 // StoresInfo records stores' info.
 type StoresInfo struct {
-	Count  int          `json:"count"`
 	Stores []*StoreInfo `json:"stores"`
+	Count  int          `json:"count"`
 }

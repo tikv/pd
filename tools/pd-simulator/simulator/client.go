@@ -76,15 +76,13 @@ func requestHeader() *pdpb.RequestHeader {
 }
 
 type client struct {
-	tag        string
-	clientConn *grpc.ClientConn
-
+	ctx                      context.Context
+	clientConn               *grpc.ClientConn
 	reportRegionHeartbeatCh  chan *core.RegionInfo
 	receiveRegionHeartbeatCh chan *pdpb.RegionHeartbeatResponse
-
-	wg     sync.WaitGroup
-	ctx    context.Context
-	cancel context.CancelFunc
+	cancel                   context.CancelFunc
+	tag                      string
+	wg                       sync.WaitGroup
 }
 
 // NewClient creates a PD client.

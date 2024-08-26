@@ -53,11 +53,11 @@ type keyspaceGroupManagerTestSuite struct {
 	suite.Suite
 	ctx              context.Context
 	cancel           context.CancelFunc
-	ClusterID        uint64
-	backendEndpoints string
 	etcdClient       *clientv3.Client
 	clean            func()
 	cfg              *TestServiceConfig
+	backendEndpoints string
+	ClusterID        uint64
 }
 
 func TestKeyspaceGroupManagerTestSuite(t *testing.T) {
@@ -663,8 +663,8 @@ func (suite *keyspaceGroupManagerTestSuite) TestHandleTSORequestWithWrongMembers
 }
 
 type etcdEvent struct {
-	eventType mvccpb.Event_EventType
 	ksg       *endpoint.KeyspaceGroup
+	eventType mvccpb.Event_EventType
 }
 
 func generateKeyspaceGroupPutEvent(

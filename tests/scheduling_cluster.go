@@ -28,11 +28,10 @@ import (
 
 // TestSchedulingCluster is a test cluster for scheduling.
 type TestSchedulingCluster struct {
-	ctx context.Context
-
-	backendEndpoints string
+	ctx              context.Context
 	servers          map[string]*scheduling.Server
 	cleanupFuncs     map[string]testutil.CleanupFunc
+	backendEndpoints string
 }
 
 // NewTestSchedulingCluster creates a new scheduling test cluster.

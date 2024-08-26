@@ -223,7 +223,10 @@ func (h *serviceMiddlewareHandler) SetRateLimitConfig(w http.ResponseWriter, r *
 		if err != nil {
 			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		} else {
-			result := rateLimitResult{concurrencyUpdatedFlag, qpsRateUpdatedFlag, h.svr.GetServiceMiddlewareConfig().RateLimitConfig.LimiterConfig}
+			result := rateLimitResult{
+				ConcurrencyUpdatedFlag: concurrencyUpdatedFlag,
+				QPSRateUpdatedFlag:     qpsRateUpdatedFlag,
+				LimiterConfig:          h.svr.GetServiceMiddlewareConfig().RateLimitConfig.LimiterConfig}
 			h.rd.JSON(w, http.StatusOK, result)
 		}
 	}
@@ -293,14 +296,18 @@ func (h *serviceMiddlewareHandler) SetGRPCRateLimitConfig(w http.ResponseWriter,
 		if err != nil {
 			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		} else {
-			result := rateLimitResult{concurrencyUpdatedFlag, qpsRateUpdatedFlag, h.svr.GetServiceMiddlewareConfig().GRPCRateLimitConfig.LimiterConfig}
+			result := rateLimitResult{
+				ConcurrencyUpdatedFlag: concurrencyUpdatedFlag,
+				QPSRateUpdatedFlag:     qpsRateUpdatedFlag,
+				LimiterConfig:          h.svr.GetServiceMiddlewareConfig().GRPCRateLimitConfig.LimiterConfig,
+			}
 			h.rd.JSON(w, http.StatusOK, result)
 		}
 	}
 }
 
 type rateLimitResult struct {
+	LimiterConfig          map[string]ratelimit.DimensionConfig `json:"limiter-config"`
 	ConcurrencyUpdatedFlag string                               `json:"concurrency"`
 	QPSRateUpdatedFlag     string                               `json:"qps"`
-	LimiterConfig          map[string]ratelimit.DimensionConfig `json:"limiter-config"`
 }

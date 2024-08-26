@@ -63,10 +63,9 @@ type OpStep interface {
 
 // TransferLeader is an OpStep that transfers a region's leader.
 type TransferLeader struct {
-	// Compatible with old TiKV's TransferLeader.
-	FromStore, ToStore uint64
-	// Multi-target transfer leader.
-	ToStores []uint64
+	ToStores  []uint64
+	FromStore uint64
+	ToStore   uint64
 }
 
 // ConfVerChanged returns the delta value for version increased by this step.
@@ -728,9 +727,10 @@ func (mr MergeRegion) GetCmd(*core.RegionInfo, bool) *hbstream.Operation {
 
 // SplitRegion is an OpStep that splits a region.
 type SplitRegion struct {
-	StartKey, EndKey []byte
-	Policy           pdpb.CheckPolicy
-	SplitKeys        [][]byte
+	StartKey  []byte
+	EndKey    []byte
+	SplitKeys [][]byte
+	Policy    pdpb.CheckPolicy
 }
 
 // ConfVerChanged returns the delta value for version increased by this step.

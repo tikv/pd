@@ -36,41 +36,26 @@ import (
 
 // Watcher is used to watch the PD API server for any configuration changes.
 type Watcher struct {
-	wg     sync.WaitGroup
-	ctx    context.Context
-	cancel context.CancelFunc
-
-	// configPath is the path of the configuration in etcd:
-	//  - Key: /pd/{cluster_id}/config
-	//  - Value: configuration JSON.
-	configPath string
-	// schedulerConfigPathPrefix is the path prefix of the scheduler configuration in etcd:
-	//  - Key: /pd/{cluster_id}/scheduler_config/{scheduler_name}
-	//  - Value: configuration JSON.
-	schedulerConfigPathPrefix string
-
-	ttlConfigPrefix string
-
+	storage                storage.Storage
+	ctx                    context.Context
+	schedulersController   atomic.Value
+	schedulerConfigWatcher *etcdutil.LoopWatcher
 	etcdClient             *clientv3.Client
 	configWatcher          *etcdutil.LoopWatcher
 	ttlConfigWatcher       *etcdutil.LoopWatcher
-	schedulerConfigWatcher *etcdutil.LoopWatcher
-
-	// Some data, like the global schedule config, should be loaded into `PersistConfig`.
 	*PersistConfig
-	// Some data, like the scheduler configs, should be loaded into the storage
-	// to make sure the coordinator could access them correctly.
-	storage storage.Storage
-	// schedulersController is used to trigger the scheduler's config reloading.
-	// Store as `*schedulers.Controller`.
-	schedulersController atomic.Value
+	cancel                    context.CancelFunc
+	schedulerConfigPathPrefix string
+	ttlConfigPrefix           string
+	configPath                string
+	wg                        sync.WaitGroup
 }
 
 type persistedConfig struct {
 	ClusterVersion semver.Version       `json:"cluster-version"`
-	Schedule       sc.ScheduleConfig    `json:"schedule"`
-	Replication    sc.ReplicationConfig `json:"replication"`
 	Store          sc.StoreConfig       `json:"store"`
+	Replication    sc.ReplicationConfig `json:"replication"`
+	Schedule       sc.ScheduleConfig    `json:"schedule"`
 }
 
 // NewWatcher creates a new watcher to watch the config meta change from PD API server.

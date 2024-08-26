@@ -74,23 +74,15 @@ type Allocator interface {
 
 // GlobalTSOAllocator is the global single point TSO allocator.
 type GlobalTSOAllocator struct {
-	ctx    context.Context
-	cancel context.CancelFunc
-	wg     sync.WaitGroup
-
-	// for global TSO synchronization
-	am *AllocatorManager
-	// for election use
-	member ElectionMember
-	// expectedPrimaryLease is used to store the expected primary lease.
-	expectedPrimaryLease atomic.Value // store as *election.LeaderLease
-	timestampOracle      *timestampOracle
-	// syncRTT is the RTT duration a SyncMaxTS RPC call will cost,
-	// which is used to estimate the MaxTS in a Global TSO generation
-	// to reduce the gRPC network IO latency.
-	syncRTT atomic.Value // store as int64 milliseconds
-	// pre-initialized metrics
+	ctx                   context.Context
+	member                ElectionMember
+	expectedPrimaryLease  atomic.Value
+	syncRTT               atomic.Value
 	tsoAllocatorRoleGauge prometheus.Gauge
+	cancel                context.CancelFunc
+	am                    *AllocatorManager
+	timestampOracle       *timestampOracle
+	wg                    sync.WaitGroup
 }
 
 // NewGlobalTSOAllocator creates a new global TSO allocator.

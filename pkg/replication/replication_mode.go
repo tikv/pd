@@ -68,27 +68,20 @@ const persistFileTimeout = time.Second * 3
 // ModeManager is used to control how raft logs are synchronized between
 // different tikv nodes.
 type ModeManager struct {
-	initTime time.Time
-
+	initTime             time.Time
+	cluster              sche.ClusterInformer
+	fileReplicater       FileReplicater
+	storage              endpoint.ReplicationStatusStorage
+	replicateState       sync.Map
+	drStoreStatus        sync.Map
+	drAutoSync           drAutoSyncStatus
+	drRecoverKey         []byte
+	config               config.ReplicationModeConfig
+	drRecoverCount       int
+	drSampleRecoverCount int
+	drSampleTotalRegion  int
+	drTotalRegion        int
 	syncutil.RWMutex
-	config         config.ReplicationModeConfig
-	storage        endpoint.ReplicationStatusStorage
-	cluster        sche.ClusterInformer
-	fileReplicater FileReplicater
-	replicateState sync.Map
-
-	drAutoSync drAutoSyncStatus
-	// intermediate states of the recovery process
-	// they are accessed without locks as they are only used by background job.
-	drRecoverKey   []byte // all regions that has startKey < drRecoverKey are successfully recovered
-	drRecoverCount int    // number of regions that has startKey < drRecoverKey
-	// When find a region that is not recovered, PD will not check all the
-	// remaining regions, but read a region to estimate the overall progress
-	drSampleRecoverCount int // number of regions that are recovered in sample
-	drSampleTotalRegion  int // number of regions in sample
-	drTotalRegion        int // number of all regions
-
-	drStoreStatus sync.Map
 }
 
 // NewReplicationModeManager creates the replicate mode manager.
@@ -169,10 +162,10 @@ type HTTPReplicationStatus struct {
 		LabelKey        string  `json:"label_key"`
 		State           string  `json:"state"`
 		StateID         uint64  `json:"state_id,omitempty"`
-		ACIDConsistent  bool    `json:"acid_consistent"`
 		TotalRegions    int     `json:"total_regions,omitempty"`
 		SyncedRegions   int     `json:"synced_regions,omitempty"`
 		RecoverProgress float32 `json:"recover_progress,omitempty"`
+		ACIDConsistent  bool    `json:"acid_consistent"`
 	} `json:"dr-auto-sync,omitempty"`
 }
 
@@ -210,14 +203,14 @@ const (
 )
 
 type drAutoSyncStatus struct {
-	State            string     `json:"state,omitempty"`
-	StateID          uint64     `json:"state_id,omitempty"`
 	AsyncStartTime   *time.Time `json:"async_start,omitempty"`
 	RecoverStartTime *time.Time `json:"recover_start,omitempty"`
+	State            string     `json:"state,omitempty"`
+	AvailableStores  []uint64   `json:"available_stores,omitempty"`
+	StateID          uint64     `json:"state_id,omitempty"`
 	TotalRegions     int        `json:"total_regions,omitempty"`
 	SyncedRegions    int        `json:"synced_regions,omitempty"`
 	RecoverProgress  float32    `json:"recover_progress,omitempty"`
-	AvailableStores  []uint64   `json:"available_stores,omitempty"`
 }
 
 func (m *ModeManager) loadDRAutoSync() error {

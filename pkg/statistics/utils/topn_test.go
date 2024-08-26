@@ -24,8 +24,8 @@ import (
 )
 
 type item struct {
-	id     uint64
 	values []float64
+	id     uint64
 }
 
 func (it *item) ID() uint64 {

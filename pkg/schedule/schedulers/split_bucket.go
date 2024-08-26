@@ -50,10 +50,10 @@ func initSplitBucketConfig() *splitBucketSchedulerConfig {
 }
 
 type splitBucketSchedulerConfig struct {
-	syncutil.RWMutex
 	schedulerConfig
 	Degree     int    `json:"degree"`
 	SplitLimit uint64 `json:"split-limit"`
+	syncutil.RWMutex
 }
 
 func (conf *splitBucketSchedulerConfig) clone() *splitBucketSchedulerConfig {

@@ -29,14 +29,12 @@ var emptyFunc = func() {}
 
 // Controller is a controller which holds multiple limiters to manage the request rate of different objects.
 type Controller struct {
-	limiters sync.Map
-	// the label which is in labelAllowList won't be limited, and only inited by hard code.
-	labelAllowList map[string]struct{}
-
 	ctx              context.Context
+	labelAllowList   map[string]struct{}
 	cancel           context.CancelFunc
-	apiType          string
 	concurrencyGauge *prometheus.GaugeVec
+	limiters         sync.Map
+	apiType          string
 }
 
 // NewController returns a global limiter which can be updated in the later.

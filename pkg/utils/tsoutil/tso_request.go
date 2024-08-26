@@ -44,10 +44,10 @@ type response interface {
 
 // TSOProtoRequest wraps the request and stream channel in the TSO grpc service
 type TSOProtoRequest struct {
-	forwardedHost string
+	stream        tsopb.TSO_TsoServer
 	clientConn    *grpc.ClientConn
 	request       *tsopb.TsoRequest
-	stream        tsopb.TSO_TsoServer
+	forwardedHost string
 }
 
 // NewTSOProtoRequest creates a TSOProtoRequest and returns as a Request
@@ -105,10 +105,10 @@ func (r *TSOProtoRequest) postProcess(countSum, physical, firstLogical int64, su
 
 // PDProtoRequest wraps the request and stream channel in the PD grpc service
 type PDProtoRequest struct {
-	forwardedHost string
+	stream        pdpb.PD_TsoServer
 	clientConn    *grpc.ClientConn
 	request       *pdpb.TsoRequest
-	stream        pdpb.PD_TsoServer
+	forwardedHost string
 }
 
 // NewPDProtoRequest creates a PDProtoRequest and returns as a Request

@@ -31,12 +31,11 @@ type ttlCacheItem struct {
 
 // ttlCache is a cache that assigns TTL (Time-To-Live) for each items.
 type ttlCache struct {
-	syncutil.RWMutex
-	ctx context.Context
-
+	ctx        context.Context
 	items      map[any]ttlCacheItem
 	ttl        time.Duration
 	gcInterval time.Duration
+	syncutil.RWMutex
 }
 
 // NewTTL returns a new TTL cache.

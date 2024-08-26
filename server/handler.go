@@ -125,14 +125,14 @@ func (h *Handler) GetHotRegionsReservedDays() uint64 {
 // HistoryHotRegionsRequest wrap request condition from tidb.
 // it is request from tidb
 type HistoryHotRegionsRequest struct {
-	StartTime      int64    `json:"start_time,omitempty"`
-	EndTime        int64    `json:"end_time,omitempty"`
 	RegionIDs      []uint64 `json:"region_ids,omitempty"`
 	StoreIDs       []uint64 `json:"store_ids,omitempty"`
 	PeerIDs        []uint64 `json:"peer_ids,omitempty"`
 	IsLearners     []bool   `json:"is_learners,omitempty"`
 	IsLeaders      []bool   `json:"is_leaders,omitempty"`
 	HotRegionTypes []string `json:"hot_region_type,omitempty"`
+	StartTime      int64    `json:"start_time,omitempty"`
+	EndTime        int64    `json:"end_time,omitempty"`
 }
 
 // GetAllRequestHistoryHotRegion gets all hot region info in HistoryHotRegion form.

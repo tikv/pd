@@ -42,22 +42,21 @@ const (
 
 // Node simulates a TiKV.
 type Node struct {
+	ctx        context.Context
+	client     Client
+	limiter    *ratelimit.RateLimiter
+	tasks      map[uint64]*Task
+	stats      *info.StoreStats
+	cancel     context.CancelFunc
+	raftEngine *RaftEngine
 	*metapb.Store
-	syncutil.RWMutex
-	stats             *info.StoreStats
-	tick              uint64
-	wg                sync.WaitGroup
-	tasks             map[uint64]*Task
-	ctx               context.Context
-	cancel            context.CancelFunc
-	raftEngine        *RaftEngine
-	limiter           *ratelimit.RateLimiter
-	statsMutex        syncutil.RWMutex
-	hasExtraUsedSpace bool
-	snapStats         []*pdpb.SnapshotStat
-	// PD client
-	client                   Client
 	receiveRegionHeartbeatCh <-chan *pdpb.RegionHeartbeatResponse
+	snapStats                []*pdpb.SnapshotStat
+	wg                       sync.WaitGroup
+	tick                     uint64
+	statsMutex               syncutil.RWMutex
+	syncutil.RWMutex
+	hasExtraUsedSpace bool
 }
 
 // NewNode returns a Node.

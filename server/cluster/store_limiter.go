@@ -22,11 +22,11 @@ import (
 
 // StoreLimiter adjust the store limit dynamically
 type StoreLimiter struct {
-	m       syncutil.RWMutex
 	opt     sc.ConfProvider
 	scene   map[storelimit.Type]*storelimit.Scene
 	state   *State
 	current LoadState
+	m       syncutil.RWMutex
 }
 
 // NewStoreLimiter builds a store limiter object using the operator controller

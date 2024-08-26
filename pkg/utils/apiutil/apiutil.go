@@ -406,8 +406,8 @@ const (
 type APIServiceGroup struct {
 	Name       string
 	Version    string
-	IsCore     bool
 	PathPrefix string
+	IsCore     bool
 }
 
 // Path returns the path of the service.
@@ -439,8 +439,8 @@ func RegisterUserDefinedHandlers(registerMap map[string]http.Handler, group *API
 }
 
 type customReverseProxies struct {
-	urls   []url.URL
 	client *http.Client
+	urls   []url.URL
 }
 
 // NewCustomReverseProxies returns the custom reverse proxies.

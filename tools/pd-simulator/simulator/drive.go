@@ -44,22 +44,21 @@ import (
 
 // Driver promotes the cluster status change.
 type Driver struct {
-	wg            sync.WaitGroup
-	pdAddr        string
-	statusAddress string
-	simCase       *cases.Case
-	eventRunner   *EventRunner
-	raftEngine    *RaftEngine
-	conn          *Connection
-	simConfig     *config.SimConfig
-	pdConfig      *config.PDConfig
-
-	tick struct {
-		count      int64
+	simCase     *cases.Case
+	eventRunner *EventRunner
+	raftEngine  *RaftEngine
+	conn        *Connection
+	simConfig   *config.SimConfig
+	pdConfig    *config.PDConfig
+	tick        struct {
 		region     chan int64
 		store      chan int64
 		stepRegion chan int64
+		count      int64
 	}
+	pdAddr        string
+	statusAddress string
+	wg            sync.WaitGroup
 }
 
 // NewDriver returns a driver.

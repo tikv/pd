@@ -60,8 +60,8 @@ func resetTime() {
 
 type request struct {
 	t   time.Time
-	n   float64
 	act time.Time
+	n   float64
 	ok  bool
 }
 
@@ -99,27 +99,27 @@ func checkTokens(re *require.Assertions, lim *Limiter, t time.Time, expected flo
 func TestSimpleReserve(t *testing.T) {
 	lim := NewLimiter(t0, 1, 0, 2, make(chan notifyMsg, 1))
 
-	runReserveMax(t, lim, request{t0, 3, t1, true})
-	runReserveMax(t, lim, request{t0, 3, t4, true})
-	runReserveMax(t, lim, request{t3, 2, t6, true})
+	runReserveMax(t, lim, request{t: t0, n: 3, act: t1, ok: true})
+	runReserveMax(t, lim, request{t: t0, n: 3, act: t4, ok: true})
+	runReserveMax(t, lim, request{t: t3, n: 2, act: t6, ok: true})
 
-	runReserve(t, lim, request{t3, 2, t7, false}, time.Second*4)
-	runReserve(t, lim, request{t5, 2000, t6, false}, time.Second*100)
+	runReserve(t, lim, request{t: t3, n: 2, act: t7, ok: false}, time.Second*4)
+	runReserve(t, lim, request{t: t5, n: 2000, act: t6, ok: false}, time.Second*100)
 
-	runReserve(t, lim, request{t3, 2, t8, true}, time.Second*8)
+	runReserve(t, lim, request{t: t3, n: 2, act: t8, ok: true}, time.Second*8)
 	// unlimited
 	args := tokenBucketReconfigureArgs{
 		NewBurst: -1,
 	}
 	lim.Reconfigure(t1, args)
-	runReserveMax(t, lim, request{t5, 2000, t5, true})
+	runReserveMax(t, lim, request{t: t5, n: 2000, act: t5, ok: true})
 }
 
 func TestReconfig(t *testing.T) {
 	re := require.New(t)
 	lim := NewLimiter(t0, 1, 0, 2, make(chan notifyMsg, 1))
 
-	runReserveMax(t, lim, request{t0, 4, t2, true})
+	runReserveMax(t, lim, request{t: t0, n: 4, act: t2, ok: true})
 	args := tokenBucketReconfigureArgs{
 		NewTokens: 6.,
 		NewRate:   2,
@@ -149,7 +149,7 @@ func TestNotify(t *testing.T) {
 		NotifyThreshold: 400,
 	}
 	lim.Reconfigure(t1, args)
-	runReserveMax(t, lim, request{t2, 1000, t2, true})
+	runReserveMax(t, lim, request{t: t2, n: 1000, act: t2, ok: true})
 	select {
 	case <-nc:
 	default:
@@ -166,7 +166,7 @@ func TestCancel(t *testing.T) {
 	lim1 := NewLimiter(t0, 1, 0, 10, nc)
 	lim2 := NewLimiter(t0, 1, 0, 0, nc)
 
-	r1 := runReserveMax(t, lim1, request{t0, 5, t0, true})
+	r1 := runReserveMax(t, lim1, request{t: t0, n: 5, act: t0, ok: true})
 	checkTokens(re, lim1, t0, 5)
 	r1.CancelAt(t1)
 	checkTokens(re, lim1, t1, 11)

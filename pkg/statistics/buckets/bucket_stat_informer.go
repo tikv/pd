@@ -40,13 +40,12 @@ type BucketStatInformer interface {
 
 // BucketStat is the record the bucket statistics.
 type BucketStat struct {
-	RegionID  uint64
 	StartKey  []byte
 	EndKey    []byte
+	Loads     []uint64
+	RegionID  uint64
 	HotDegree int
 	Interval  uint64
-	// the order should see utils.RegionStatKind
-	Loads []uint64
 }
 
 func (b *BucketStat) clone() *BucketStat {
@@ -69,10 +68,10 @@ func (b *BucketStat) String() string {
 
 // BucketTreeItem is the item of the bucket btree.
 type BucketTreeItem struct {
-	regionID uint64
 	startKey []byte
 	endKey   []byte
 	stats    []*BucketStat
+	regionID uint64
 	interval uint64
 	version  uint64
 	status   status

@@ -25,12 +25,11 @@ import (
 
 type balanceSchedulerPlanAnalyzeTestSuite struct {
 	suite.Suite
-
+	ctx     context.Context
+	check   func(map[uint64]Status, map[uint64]*Status) bool
+	cancel  context.CancelFunc
 	stores  []*core.StoreInfo
 	regions []*core.RegionInfo
-	check   func(map[uint64]Status, map[uint64]*Status) bool
-	ctx     context.Context
-	cancel  context.CancelFunc
 }
 
 func TestBalanceSchedulerPlanAnalyzerTestSuite(t *testing.T) {

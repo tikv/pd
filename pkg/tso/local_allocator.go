@@ -38,19 +38,12 @@ import (
 // which is only used to allocate TSO in one DC each.
 // One PD server may hold multiple Local TSO Allocators.
 type LocalTSOAllocator struct {
-	allocatorManager *AllocatorManager
-	// leadership is used to campaign the corresponding DC's Local TSO Allocator.
-	leadership      *election.Leadership
-	timestampOracle *timestampOracle
-	// for election use, notice that the leadership that member holds is
-	// the leadership for PD leader. Local TSO Allocator's leadership is for the
-	// election of Local TSO Allocator leader among several PD servers and
-	// Local TSO Allocator only use member's some etcd and pdpb.Member info.
-	// So it's not conflicted.
-	rootPath        string
-	allocatorLeader atomic.Value // stored as *pdpb.Member
-	// pre-initialized metrics
+	allocatorLeader       atomic.Value
 	tsoAllocatorRoleGauge prometheus.Gauge
+	allocatorManager      *AllocatorManager
+	leadership            *election.Leadership
+	timestampOracle       *timestampOracle
+	rootPath              string
 }
 
 // NewLocalTSOAllocator creates a new local TSO allocator.

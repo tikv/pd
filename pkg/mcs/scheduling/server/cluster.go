@@ -39,29 +39,25 @@ import (
 
 // Cluster is used to manage all information for scheduling purpose.
 type Cluster struct {
-	ctx    context.Context
-	cancel context.CancelFunc
-	wg     sync.WaitGroup
-	*core.BasicCluster
-	persistConfig     *config.PersistConfig
-	ruleManager       *placement.RuleManager
-	labelerManager    *labeler.RegionLabeler
-	regionStats       *statistics.RegionStatistics
-	labelStats        *statistics.LabelStatistics
-	hotStat           *statistics.HotStat
+	ctx               context.Context
+	logRunner         ratelimit.Runner
+	miscRunner        ratelimit.Runner
+	heartbeatRunner   ratelimit.Runner
+	apiServerLeader   atomic.Value
 	storage           storage.Storage
+	labelStats        *statistics.LabelStatistics
+	regionStats       *statistics.RegionStatistics
+	labelerManager    *labeler.RegionLabeler
+	hotStat           *statistics.HotStat
+	ruleManager       *placement.RuleManager
 	coordinator       *schedule.Coordinator
 	checkMembershipCh chan struct{}
-	apiServerLeader   atomic.Value
-	clusterID         uint64
-	running           atomic.Bool
-
-	// heartbeatRunner is used to process the subtree update task asynchronously.
-	heartbeatRunner ratelimit.Runner
-	// miscRunner is used to process the statistics and persistent tasks asynchronously.
-	miscRunner ratelimit.Runner
-	// logRunner is used to process the log asynchronously.
-	logRunner ratelimit.Runner
+	persistConfig     *config.PersistConfig
+	*core.BasicCluster
+	cancel    context.CancelFunc
+	wg        sync.WaitGroup
+	clusterID uint64
+	running   atomic.Bool
 }
 
 const (

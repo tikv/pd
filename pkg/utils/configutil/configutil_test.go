@@ -23,8 +23,8 @@ func TestPrintConfigCheckMsg(t *testing.T) {
 	// Define test cases
 	tests := []struct {
 		name        string
-		warningMsgs []string
 		want        string
+		warningMsgs []string
 	}{
 		{
 			name:        "no warnings",

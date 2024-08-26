@@ -43,18 +43,18 @@ import (
 
 // schedulingController is used to manage all schedulers and checkers.
 type schedulingController struct {
-	parentCtx context.Context
-	ctx       context.Context
-	cancel    context.CancelFunc
-	mu        syncutil.RWMutex
-	wg        sync.WaitGroup
-	*core.BasicCluster
 	opt         sc.ConfProvider
+	ctx         context.Context
+	parentCtx   context.Context
+	regionStats *statistics.RegionStatistics
+	*core.BasicCluster
 	coordinator *schedule.Coordinator
 	labelStats  *statistics.LabelStatistics
-	regionStats *statistics.RegionStatistics
+	cancel      context.CancelFunc
 	hotStat     *statistics.HotStat
 	slowStat    *statistics.SlowStat
+	wg          sync.WaitGroup
+	mu          syncutil.RWMutex
 	running     bool
 }
 

@@ -49,36 +49,35 @@ type Runner interface {
 
 // Task is a task to be run.
 type Task struct {
-	id          uint64
 	submittedAt time.Time
 	f           func(context.Context)
 	name        string
-	// retained indicates whether the task should be dropped if the task queue exceeds maxPendingDuration.
-	retained bool
+	id          uint64
+	retained    bool
 }
 
 // ErrMaxWaitingTasksExceeded is returned when the number of waiting tasks exceeds the maximum.
 var ErrMaxWaitingTasksExceeded = errors.New("max waiting tasks exceeded")
 
 type taskID struct {
-	id   uint64
 	name string
+	id   uint64
 }
 
 // ConcurrentRunner is a task runner that limits the number of concurrent tasks.
 type ConcurrentRunner struct {
 	ctx                context.Context
-	cancel             context.CancelFunc
-	name               string
-	limiter            *ConcurrencyLimiter
-	maxPendingDuration time.Duration
-	taskChan           chan *Task
-	pendingMu          sync.Mutex
-	wg                 sync.WaitGroup
-	pendingTaskCount   map[string]int
-	pendingTasks       []*Task
-	existTasks         map[taskID]*Task
 	maxWaitingDuration prometheus.Gauge
+	cancel             context.CancelFunc
+	limiter            *ConcurrencyLimiter
+	taskChan           chan *Task
+	pendingTaskCount   map[string]int
+	existTasks         map[taskID]*Task
+	name               string
+	pendingTasks       []*Task
+	wg                 sync.WaitGroup
+	maxPendingDuration time.Duration
+	pendingMu          sync.Mutex
 }
 
 // NewConcurrentRunner creates a new ConcurrentRunner.
@@ -203,7 +202,7 @@ func (cr *ConcurrentRunner) RunTask(id uint64, name string, f func(context.Conte
 	}()
 
 	pendingTaskNum := len(cr.pendingTasks)
-	tid := taskID{task.id, task.name}
+	tid := taskID{id: task.id, name: task.name}
 	if pendingTaskNum > 0 {
 		// Here we use a map to find the task with the same ID.
 		// Then replace the old task with the new one.

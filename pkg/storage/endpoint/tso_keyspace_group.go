@@ -105,19 +105,13 @@ type MergeState struct {
 
 // KeyspaceGroup is the keyspace group.
 type KeyspaceGroup struct {
-	ID       uint32 `json:"id"`
-	UserKind string `json:"user-kind"`
-	// SplitState is the current split state of the keyspace group.
-	SplitState *SplitState `json:"split-state,omitempty"`
-	// MergeState is the current merging state of the keyspace group.
-	MergeState *MergeState `json:"merge-state,omitempty"`
-	// Members are the election members which campaign for the primary of the keyspace group.
-	Members []KeyspaceGroupMember `json:"members"`
-	// Keyspaces are the keyspace IDs which belong to the keyspace group.
-	Keyspaces []uint32 `json:"keyspaces"`
-	// KeyspaceLookupTable is for fast lookup if a given keyspace belongs to this keyspace group.
-	// It's not persisted and will be built when loading from storage.
-	KeyspaceLookupTable map[uint32]struct{} `json:"-"`
+	SplitState          *SplitState           `json:"split-state,omitempty"`
+	MergeState          *MergeState           `json:"merge-state,omitempty"`
+	KeyspaceLookupTable map[uint32]struct{}   `json:"-"`
+	UserKind            string                `json:"user-kind"`
+	Members             []KeyspaceGroupMember `json:"members"`
+	Keyspaces           []uint32              `json:"keyspaces"`
+	ID                  uint32                `json:"id"`
 }
 
 // IsSplitting checks if the keyspace group is in split state.

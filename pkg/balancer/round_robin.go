@@ -22,10 +22,10 @@ import (
 
 // RoundRobin is a balancer that selects nodes in a round-robin fashion.
 type RoundRobin[T uint32 | string] struct {
-	syncutil.RWMutex
-	nodes  []T
 	exists map[T]struct{}
-	next   uint32
+	nodes  []T
+	syncutil.RWMutex
+	next uint32
 }
 
 // NewRoundRobin creates a balancer that selects nodes in a round-robin fashion.

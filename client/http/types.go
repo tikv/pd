@@ -45,8 +45,8 @@ type ListServiceGCSafepoint struct {
 // NOTE: This type sync with https://github.com/tikv/pd/blob/5eae459c01a797cbd0c416054c6f0cad16b8740a/server/cluster/cluster.go#L173
 type ClusterState struct {
 	RaftBootstrapTime time.Time `json:"raft_bootstrap_time,omitempty"`
-	IsInitialized     bool      `json:"is_initialized"`
 	ReplicationStatus string    `json:"replication_status"`
+	IsInitialized     bool      `json:"is_initialized"`
 }
 
 // State is the status of PD server.
@@ -69,20 +69,19 @@ var NewKeyRange = pd.NewKeyRange
 
 // RegionInfo stores the information of one region.
 type RegionInfo struct {
-	ID              int64            `json:"id"`
-	StartKey        string           `json:"start_key"`
-	EndKey          string           `json:"end_key"`
-	Epoch           RegionEpoch      `json:"epoch"`
-	Peers           []RegionPeer     `json:"peers"`
-	Leader          RegionPeer       `json:"leader"`
-	DownPeers       []RegionPeerStat `json:"down_peers"`
-	PendingPeers    []RegionPeer     `json:"pending_peers"`
-	WrittenBytes    uint64           `json:"written_bytes"`
-	ReadBytes       uint64           `json:"read_bytes"`
-	ApproximateSize int64            `json:"approximate_size"`
-	ApproximateKeys int64            `json:"approximate_keys"`
-
 	ReplicationStatus *ReplicationStatus `json:"replication_status,omitempty"`
+	StartKey          string             `json:"start_key"`
+	EndKey            string             `json:"end_key"`
+	PendingPeers      []RegionPeer       `json:"pending_peers"`
+	Peers             []RegionPeer       `json:"peers"`
+	DownPeers         []RegionPeerStat   `json:"down_peers"`
+	Leader            RegionPeer         `json:"leader"`
+	Epoch             RegionEpoch        `json:"epoch"`
+	WrittenBytes      uint64             `json:"written_bytes"`
+	ReadBytes         uint64             `json:"read_bytes"`
+	ApproximateSize   int64              `json:"approximate_size"`
+	ApproximateKeys   int64              `json:"approximate_keys"`
+	ID                int64              `json:"id"`
 }
 
 // GetStartKey gets the start key of the region.
@@ -118,8 +117,8 @@ type ReplicationStatus struct {
 
 // RegionsInfo stores the information of regions.
 type RegionsInfo struct {
-	Count   int64        `json:"count"`
 	Regions []RegionInfo `json:"regions"`
+	Count   int64        `json:"count"`
 }
 
 func newRegionsInfo(count int64) *RegionsInfo {
@@ -163,6 +162,7 @@ type StoreHotPeersStat map[uint64]*HotPeersStat
 
 // HotPeersStat records all hot regions statistics
 type HotPeersStat struct {
+	Stats          []HotPeerStatShow `json:"statistics"`
 	StoreByteRate  float64           `json:"store_bytes"`
 	StoreKeyRate   float64           `json:"store_keys"`
 	StoreQueryRate float64           `json:"store_query"`
@@ -170,34 +170,33 @@ type HotPeersStat struct {
 	TotalKeysRate  float64           `json:"total_flow_keys"`
 	TotalQueryRate float64           `json:"total_flow_query"`
 	Count          int               `json:"regions_count"`
-	Stats          []HotPeerStatShow `json:"statistics"`
 }
 
 // HotPeerStatShow records the hot region statistics for output
 type HotPeerStatShow struct {
-	StoreID        uint64    `json:"store_id"`
+	LastUpdateTime time.Time `json:"last_update_time,omitempty"`
 	Stores         []uint64  `json:"stores"`
-	IsLeader       bool      `json:"is_leader"`
-	IsLearner      bool      `json:"is_learner"`
+	StoreID        uint64    `json:"store_id"`
 	RegionID       uint64    `json:"region_id"`
 	HotDegree      int       `json:"hot_degree"`
 	ByteRate       float64   `json:"flow_bytes"`
 	KeyRate        float64   `json:"flow_keys"`
 	QueryRate      float64   `json:"flow_query"`
 	AntiCount      int       `json:"anti_count"`
-	LastUpdateTime time.Time `json:"last_update_time,omitempty"`
+	IsLeader       bool      `json:"is_leader"`
+	IsLearner      bool      `json:"is_learner"`
 }
 
 // HistoryHotRegionsRequest wrap the request conditions.
 type HistoryHotRegionsRequest struct {
-	StartTime      int64    `json:"start_time,omitempty"`
-	EndTime        int64    `json:"end_time,omitempty"`
 	RegionIDs      []uint64 `json:"region_ids,omitempty"`
 	StoreIDs       []uint64 `json:"store_ids,omitempty"`
 	PeerIDs        []uint64 `json:"peer_ids,omitempty"`
 	IsLearners     []bool   `json:"is_learners,omitempty"`
 	IsLeaders      []bool   `json:"is_leaders,omitempty"`
 	HotRegionTypes []string `json:"hot_region_type,omitempty"`
+	StartTime      int64    `json:"start_time,omitempty"`
+	EndTime        int64    `json:"end_time,omitempty"`
 }
 
 // HistoryHotRegions wraps historyHotRegion
@@ -208,30 +207,26 @@ type HistoryHotRegions struct {
 // HistoryHotRegion wraps hot region info
 // it is storage format of hot_region_storage
 type HistoryHotRegion struct {
-	UpdateTime    int64   `json:"update_time"`
-	RegionID      uint64  `json:"region_id"`
-	PeerID        uint64  `json:"peer_id"`
-	StoreID       uint64  `json:"store_id"`
-	IsLeader      bool    `json:"is_leader"`
-	IsLearner     bool    `json:"is_learner"`
-	HotRegionType string  `json:"hot_region_type"`
-	HotDegree     int64   `json:"hot_degree"`
-	FlowBytes     float64 `json:"flow_bytes"`
-	KeyRate       float64 `json:"key_rate"`
-	QueryRate     float64 `json:"query_rate"`
-	StartKey      string  `json:"start_key"`
-	EndKey        string  `json:"end_key"`
-	// Encryption metadata for start_key and end_key. encryption_meta.iv is IV for start_key.
-	// IV for end_key is calculated from (encryption_meta.iv + len(start_key)).
-	// The field is only used by PD and should be ignored otherwise.
-	// If encryption_meta is empty (i.e. nil), it means start_key and end_key are unencrypted.
 	EncryptionMeta *encryptionpb.EncryptionMeta `json:"encryption_meta,omitempty"`
+	HotRegionType  string                       `json:"hot_region_type"`
+	EndKey         string                       `json:"end_key"`
+	StartKey       string                       `json:"start_key"`
+	StoreID        uint64                       `json:"store_id"`
+	HotDegree      int64                        `json:"hot_degree"`
+	FlowBytes      float64                      `json:"flow_bytes"`
+	KeyRate        float64                      `json:"key_rate"`
+	QueryRate      float64                      `json:"query_rate"`
+	UpdateTime     int64                        `json:"update_time"`
+	PeerID         uint64                       `json:"peer_id"`
+	RegionID       uint64                       `json:"region_id"`
+	IsLearner      bool                         `json:"is_learner"`
+	IsLeader       bool                         `json:"is_leader"`
 }
 
 // StoresInfo represents the information of all TiKV/TiFlash stores.
 type StoresInfo struct {
-	Count  int         `json:"count"`
 	Stores []StoreInfo `json:"stores"`
+	Count  int         `json:"count"`
 }
 
 // StoreInfo represents the information of one TiKV/TiFlash store.
@@ -242,14 +237,14 @@ type StoreInfo struct {
 
 // MetaStore represents the meta information of one store.
 type MetaStore struct {
-	ID             int64        `json:"id"`
 	Address        string       `json:"address"`
-	State          int64        `json:"state"`
 	StateName      string       `json:"state_name"`
 	Version        string       `json:"version"`
-	Labels         []StoreLabel `json:"labels"`
 	StatusAddress  string       `json:"status_address"`
 	GitHash        string       `json:"git_hash"`
+	Labels         []StoreLabel `json:"labels"`
+	ID             int64        `json:"id"`
+	State          int64        `json:"state"`
 	StartTimestamp int64        `json:"start_timestamp"`
 }
 
@@ -261,29 +256,29 @@ type StoreLabel struct {
 
 // StoreStatus stores the detail information of one store.
 type StoreStatus struct {
+	LastHeartbeatTS time.Time `json:"last_heartbeat_ts"`
+	StartTS         time.Time `json:"start_ts"`
 	Capacity        string    `json:"capacity"`
 	Available       string    `json:"available"`
-	LeaderCount     int64     `json:"leader_count"`
-	LeaderWeight    float64   `json:"leader_weight"`
-	LeaderScore     float64   `json:"leader_score"`
-	LeaderSize      int64     `json:"leader_size"`
+	Uptime          string    `json:"uptime"`
 	RegionCount     int64     `json:"region_count"`
+	LeaderSize      int64     `json:"leader_size"`
 	RegionWeight    float64   `json:"region_weight"`
 	RegionScore     float64   `json:"region_score"`
 	RegionSize      int64     `json:"region_size"`
-	StartTS         time.Time `json:"start_ts"`
-	LastHeartbeatTS time.Time `json:"last_heartbeat_ts"`
-	Uptime          string    `json:"uptime"`
+	LeaderScore     float64   `json:"leader_score"`
+	LeaderWeight    float64   `json:"leader_weight"`
+	LeaderCount     int64     `json:"leader_count"`
 }
 
 // RegionStats stores the statistics of regions.
 type RegionStats struct {
+	StoreLeaderCount map[uint64]int `json:"store_leader_count"`
+	StorePeerCount   map[uint64]int `json:"store_peer_count"`
 	Count            int            `json:"count"`
 	EmptyCount       int            `json:"empty_count"`
 	StorageSize      int64          `json:"storage_size"`
 	StorageKeys      int64          `json:"storage_keys"`
-	StoreLeaderCount map[uint64]int `json:"store_leader_count"`
-	StorePeerCount   map[uint64]int `json:"store_peer_count"`
 }
 
 // PeerRoleType is the expected peer type of the placement rule.
@@ -328,22 +323,22 @@ const (
 // applying rules (apply means schedule regions to match selected rules), the
 // apply order is defined by the tuple [GroupIndex, GroupID, Index, ID].
 type Rule struct {
-	GroupID          string            `json:"group_id"`                    // mark the source that add the rule
-	ID               string            `json:"id"`                          // unique ID within a group
-	Index            int               `json:"index,omitempty"`             // rule apply order in a group, rule with less ID is applied first when indexes are equal
-	Override         bool              `json:"override,omitempty"`          // when it is true, all rules with less indexes are disabled
-	StartKey         []byte            `json:"-"`                           // range start key
-	StartKeyHex      string            `json:"start_key"`                   // hex format start key, for marshal/unmarshal
-	EndKey           []byte            `json:"-"`                           // range end key
-	EndKeyHex        string            `json:"end_key"`                     // hex format end key, for marshal/unmarshal
-	Role             PeerRoleType      `json:"role"`                        // expected role of the peers
-	IsWitness        bool              `json:"is_witness"`                  // when it is true, it means the role is also a witness
-	Count            int               `json:"count"`                       // expected count of the peers
-	LabelConstraints []LabelConstraint `json:"label_constraints,omitempty"` // used to select stores to place peers
-	LocationLabels   []string          `json:"location_labels,omitempty"`   // used to make peers isolated physically
-	IsolationLevel   string            `json:"isolation_level,omitempty"`   // used to isolate replicas explicitly and forcibly
-	Version          uint64            `json:"version,omitempty"`           // only set at runtime, add 1 each time rules updated, begin from 0.
-	CreateTimestamp  uint64            `json:"create_timestamp,omitempty"`  // only set at runtime, recorded rule create timestamp
+	EndKeyHex        string            `json:"end_key"`
+	ID               string            `json:"id"`
+	IsolationLevel   string            `json:"isolation_level,omitempty"`
+	Role             PeerRoleType      `json:"role"`
+	GroupID          string            `json:"group_id"`
+	StartKeyHex      string            `json:"start_key"`
+	StartKey         []byte            `json:"-"`
+	EndKey           []byte            `json:"-"`
+	LabelConstraints []LabelConstraint `json:"label_constraints,omitempty"`
+	LocationLabels   []string          `json:"location_labels,omitempty"`
+	Count            int               `json:"count"`
+	Index            int               `json:"index,omitempty"`
+	Version          uint64            `json:"version,omitempty"`
+	CreateTimestamp  uint64            `json:"create_timestamp,omitempty"`
+	Override         bool              `json:"override,omitempty"`
+	IsWitness        bool              `json:"is_witness"`
 }
 
 // String returns the string representation of this rule.
@@ -370,16 +365,16 @@ var (
 type rule struct {
 	GroupID          string            `json:"group_id"`
 	ID               string            `json:"id"`
-	Index            int               `json:"index,omitempty"`
-	Override         bool              `json:"override,omitempty"`
 	StartKeyHex      string            `json:"start_key"`
 	EndKeyHex        string            `json:"end_key"`
 	Role             PeerRoleType      `json:"role"`
-	IsWitness        bool              `json:"is_witness"`
-	Count            int               `json:"count"`
+	IsolationLevel   string            `json:"isolation_level,omitempty"`
 	LabelConstraints []LabelConstraint `json:"label_constraints,omitempty"`
 	LocationLabels   []string          `json:"location_labels,omitempty"`
-	IsolationLevel   string            `json:"isolation_level,omitempty"`
+	Index            int               `json:"index,omitempty"`
+	Count            int               `json:"count"`
+	Override         bool              `json:"override,omitempty"`
+	IsWitness        bool              `json:"is_witness"`
 }
 
 // MarshalJSON implements `json.Marshaler` interface to make sure we could set the correct start/end key.
@@ -473,17 +468,17 @@ var (
 type ruleOp struct {
 	GroupID          string            `json:"group_id"`
 	ID               string            `json:"id"`
-	Index            int               `json:"index,omitempty"`
-	Override         bool              `json:"override,omitempty"`
+	Action           RuleOpType        `json:"action"`
+	IsolationLevel   string            `json:"isolation_level,omitempty"`
 	StartKeyHex      string            `json:"start_key"`
 	EndKeyHex        string            `json:"end_key"`
 	Role             PeerRoleType      `json:"role"`
-	IsWitness        bool              `json:"is_witness"`
-	Count            int               `json:"count"`
 	LabelConstraints []LabelConstraint `json:"label_constraints,omitempty"`
 	LocationLabels   []string          `json:"location_labels,omitempty"`
-	IsolationLevel   string            `json:"isolation_level,omitempty"`
-	Action           RuleOpType        `json:"action"`
+	Count            int               `json:"count"`
+	Index            int               `json:"index,omitempty"`
+	IsWitness        bool              `json:"is_witness"`
+	Override         bool              `json:"override,omitempty"`
 	DeleteByIDPrefix bool              `json:"delete_by_id_prefix"`
 }
 
@@ -567,9 +562,9 @@ func (g *RuleGroup) String() string {
 // GroupBundle represents a rule group and all rules belong to the group.
 type GroupBundle struct {
 	ID       string  `json:"group_id"`
+	Rules    []*Rule `json:"rules"`
 	Index    int     `json:"group_index"`
 	Override bool    `json:"group_override"`
-	Rules    []*Rule `json:"rules"`
 }
 
 // RegionLabel is the label of a region.
@@ -582,11 +577,11 @@ type RegionLabel struct {
 
 // LabelRule is the rule to assign labels to a region.
 type LabelRule struct {
-	ID       string        `json:"id"`
-	Index    int           `json:"index"`
-	Labels   []RegionLabel `json:"labels"`
-	RuleType string        `json:"rule_type"`
 	Data     any           `json:"data"`
+	ID       string        `json:"id"`
+	RuleType string        `json:"rule_type"`
+	Labels   []RegionLabel `json:"labels"`
+	Index    int           `json:"index"`
 }
 
 // LabelRulePatch is the patch to update the label rules.
@@ -599,9 +594,9 @@ type LabelRulePatch struct {
 // type Members map[string][]*pdpb.Member
 type MembersInfo struct {
 	Header     *pdpb.ResponseHeader `json:"header,omitempty"`
-	Members    []*pdpb.Member       `json:"members,omitempty"`
 	Leader     *pdpb.Member         `json:"leader,omitempty"`
 	EtcdLeader *pdpb.Member         `json:"etcd_leader,omitempty"`
+	Members    []*pdpb.Member       `json:"members,omitempty"`
 }
 
 // MicroServiceMember is the member info of a micro service.
@@ -628,12 +623,12 @@ type KeyspaceGCManagementTypeConfig struct {
 
 // tempKeyspaceMeta is the keyspace meta struct that returned from the http interface.
 type tempKeyspaceMeta struct {
-	ID             uint32            `json:"id"`
+	Config         map[string]string `json:"config"`
 	Name           string            `json:"name"`
 	State          string            `json:"state"`
 	CreatedAt      int64             `json:"created_at"`
 	StateChangedAt int64             `json:"state_changed_at"`
-	Config         map[string]string `json:"config"`
+	ID             uint32            `json:"id"`
 }
 
 func stringToKeyspaceState(str string) (keyspacepb.KeyspaceState, error) {
@@ -655,7 +650,7 @@ func stringToKeyspaceState(str string) (keyspacepb.KeyspaceState, error) {
 // NOTE: This type is moved from `server/api/health.go`, maybe move them to the same place later.
 type Health struct {
 	Name       string   `json:"name"`
-	MemberID   uint64   `json:"member_id"`
 	ClientUrls []string `json:"client_urls"`
+	MemberID   uint64   `json:"member_id"`
 	Health     bool     `json:"health"`
 }

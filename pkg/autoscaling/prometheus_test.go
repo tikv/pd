@@ -325,8 +325,8 @@ func TestGetInstanceNameFromAddress(t *testing.T) {
 func TestGetDurationExpression(t *testing.T) {
 	re := require.New(t)
 	testCases := []struct {
-		duration           time.Duration
 		expectedExpression string
+		duration           time.Duration
 	}{
 		{
 			duration:           30 * time.Second,

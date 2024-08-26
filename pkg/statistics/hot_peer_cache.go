@@ -51,23 +51,22 @@ var ThresholdsUpdateInterval = 8 * time.Second
 var Denoising = true
 
 type thresholds struct {
+	metrics     [utils.DimLen + 1]prometheus.Gauge
 	updatedTime time.Time
 	rates       []float64
 	topNLen     int
-	metrics     [utils.DimLen + 1]prometheus.Gauge // 0 is for byte, 1 is for key, 2 is for query, 3 is for total length.
 }
 
 // HotPeerCache saves the hot peer's statistics.
 type HotPeerCache struct {
-	kind              utils.RWType
-	peersOfStore      map[uint64]*utils.TopN         // storeID -> hot peers
-	storesOfRegion    map[uint64]map[uint64]struct{} // regionID -> storeIDs
-	regionsOfStore    map[uint64]map[uint64]struct{} // storeID -> regionIDs
-	topNTTL           time.Duration
+	peersOfStore      map[uint64]*utils.TopN
+	storesOfRegion    map[uint64]map[uint64]struct{}
+	regionsOfStore    map[uint64]map[uint64]struct{}
 	taskQueue         *chanx.UnboundedChan[func(*HotPeerCache)]
-	thresholdsOfStore map[uint64]*thresholds                           // storeID -> thresholds
-	metrics           map[uint64][utils.ActionTypeLen]prometheus.Gauge // storeID -> metrics
-	// TODO: consider to remove store info when store is offline.
+	thresholdsOfStore map[uint64]*thresholds
+	metrics           map[uint64][utils.ActionTypeLen]prometheus.Gauge
+	kind              utils.RWType
+	topNTTL           time.Duration
 }
 
 // NewHotPeerCache creates a HotPeerCache

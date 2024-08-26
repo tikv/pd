@@ -74,29 +74,23 @@ func (gtb *GroupTokenBucket) setState(state *GroupTokenBucketState) {
 // TokenSlot is used to split a token bucket into multiple slots to
 // server different clients within the same resource group.
 type TokenSlot struct {
-	// settings is the token limit settings for the slot.
-	settings *rmpb.TokenLimitSettings
-	// requireTokensSum is the number of tokens required.
-	requireTokensSum float64
-	// tokenCapacity is the number of tokens in the slot.
+	lastReqTime       time.Time
+	settings          *rmpb.TokenLimitSettings
+	requireTokensSum  float64
 	tokenCapacity     float64
 	lastTokenCapacity float64
-	lastReqTime       time.Time
 }
 
 // GroupTokenBucketState is the running state of TokenBucket.
 type GroupTokenBucketState struct {
-	Tokens float64 `json:"tokens,omitempty"`
-	// ClientUniqueID -> TokenSlot
+	lastCheckExpireSlot        time.Time
 	tokenSlots                 map[uint64]*TokenSlot
+	LastUpdate                 *time.Time `json:"last_update,omitempty"`
+	Tokens                     float64    `json:"tokens,omitempty"`
 	clientConsumptionTokensSum float64
 	lastBurstTokens            float64
-
-	LastUpdate  *time.Time `json:"last_update,omitempty"`
-	Initialized bool       `json:"initialized"`
-	// settingChanged is used to avoid that the number of tokens returned is jitter because of changing fill rate.
-	settingChanged      bool
-	lastCheckExpireSlot time.Time
+	Initialized                bool `json:"initialized"`
+	settingChanged             bool
 }
 
 // Clone returns the copy of GroupTokenBucketState

@@ -227,15 +227,16 @@ func TestIndex(t *testing.T) {
 	}
 
 	type testCase struct {
-		start, end string
-		labels     map[string]string
+		labels map[string]string
+		start  string
+		end    string
 	}
 	testCases := []testCase{
-		{"", "1234", map[string]string{"k1": "v0"}},
-		{"1234", "5678", map[string]string{"k1": "v1"}},
-		{"ab12", "abcd", map[string]string{"k1": "v0", "k2": "v2"}},
-		{"abcd", "cd12", map[string]string{"k1": "v0", "k2": "v2"}},
-		{"cdef", "efef", map[string]string{"k1": "v0", "k2": "v3"}},
+		{map[string]string{"k1": "v0"}, "", "1234"},
+		{map[string]string{"k1": "v1"}, "1234", "5678"},
+		{map[string]string{"k1": "v0", "k2": "v2"}, "ab12", "abcd"},
+		{map[string]string{"k1": "v0", "k2": "v2"}, "abcd", "cd12"},
+		{map[string]string{"k1": "v0", "k2": "v3"}, "cdef", "efef"},
 	}
 	for _, testCase := range testCases {
 		start, _ := hex.DecodeString(testCase.start)
@@ -313,15 +314,16 @@ func TestKeyRange(t *testing.T) {
 	}
 
 	type testCase struct {
-		start, end string
-		labels     map[string]string
+		labels map[string]string
+		start  string
+		end    string
 	}
 	testCases := []testCase{
-		{"1234", "5678", map[string]string{"k1": "v1"}},
-		{"1234", "aaaa", map[string]string{}},
-		{"abcd", "abff", map[string]string{"k2": "v2", "k3": "v3"}},
-		{"cd12", "dddd", map[string]string{"k3": "v3"}},
-		{"ffee", "ffff", map[string]string{}},
+		{map[string]string{"k1": "v1"}, "1234", "5678"},
+		{map[string]string{}, "1234", "aaaa"},
+		{map[string]string{"k2": "v2", "k3": "v3"}, "abcd", "abff"},
+		{map[string]string{"k3": "v3"}, "cd12", "dddd"},
+		{map[string]string{}, "ffee", "ffff"},
 	}
 	for _, testCase := range testCases {
 		start, _ := hex.DecodeString(testCase.start)

@@ -89,8 +89,8 @@ type Case interface {
 }
 
 type baseCase struct {
-	name string
 	cfg  *Config
+	name string
 }
 
 func (c *baseCase) getName() string {

@@ -21,9 +21,9 @@ import "fmt"
 
 // Bucket contains multiple float64 points.
 type Bucket struct {
+	next   *Bucket
 	Points []float64
 	Count  int64
-	next   *Bucket
 }
 
 // Append appends the given value to the bucket.
@@ -51,9 +51,9 @@ func (b *Bucket) Next() *Bucket {
 
 // Iterator iterates the buckets within the window.
 type Iterator struct {
+	cur           *Bucket
 	count         int
 	iteratedCount int
-	cur           *Bucket
 }
 
 // Next returns true util all of the buckets has been iterated.

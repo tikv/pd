@@ -160,9 +160,9 @@ func TestStore(t *testing.T) {
 	labelTestCases := []struct {
 		args              []string
 		newArgs           []string
-		expectLabelLength int
 		expectKeys        []string
 		expectValues      []string
+		expectLabelLength int
 	}{
 		{ // add label
 			args:              []string{"-u", pdAddr, "store", "label", "1", "zone", "cn"},

@@ -109,26 +109,24 @@ func fromPeerStatsSlice(peers []*pdpb.PeerStats) []PDPeerStats {
 // NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
 // easyjson:json
 type RegionInfo struct {
-	ID          uint64              `json:"id"`
-	StartKey    string              `json:"start_key"`
-	EndKey      string              `json:"end_key"`
-	RegionEpoch *metapb.RegionEpoch `json:"epoch,omitempty"`
-	Peers       []MetaPeer          `json:"peers,omitempty"`
-
-	Leader            MetaPeer      `json:"leader,omitempty"`
-	DownPeers         []PDPeerStats `json:"down_peers,omitempty"`
-	PendingPeers      []MetaPeer    `json:"pending_peers,omitempty"`
-	CPUUsage          uint64        `json:"cpu_usage"`
-	WrittenBytes      uint64        `json:"written_bytes"`
-	ReadBytes         uint64        `json:"read_bytes"`
-	WrittenKeys       uint64        `json:"written_keys"`
-	ReadKeys          uint64        `json:"read_keys"`
-	ApproximateSize   int64         `json:"approximate_size"`
-	ApproximateKeys   int64         `json:"approximate_keys"`
-	ApproximateKvSize int64         `json:"approximate_kv_size"`
-	Buckets           []string      `json:"buckets,omitempty"`
-
-	ReplicationStatus *ReplicationStatus `json:"replication_status,omitempty"`
+	RegionEpoch       *metapb.RegionEpoch `json:"epoch,omitempty"`
+	ReplicationStatus *ReplicationStatus  `json:"replication_status,omitempty"`
+	StartKey          string              `json:"start_key"`
+	EndKey            string              `json:"end_key"`
+	Leader            MetaPeer            `json:"leader,omitempty"`
+	Buckets           []string            `json:"buckets,omitempty"`
+	Peers             []MetaPeer          `json:"peers,omitempty"`
+	DownPeers         []PDPeerStats       `json:"down_peers,omitempty"`
+	PendingPeers      []MetaPeer          `json:"pending_peers,omitempty"`
+	CPUUsage          uint64              `json:"cpu_usage"`
+	ReadBytes         uint64              `json:"read_bytes"`
+	WrittenKeys       uint64              `json:"written_keys"`
+	ReadKeys          uint64              `json:"read_keys"`
+	ApproximateSize   int64               `json:"approximate_size"`
+	ApproximateKeys   int64               `json:"approximate_keys"`
+	ApproximateKvSize int64               `json:"approximate_kv_size"`
+	WrittenBytes      uint64              `json:"written_bytes"`
+	ID                uint64              `json:"id"`
 }
 
 // ReplicationStatus represents the replication mode status of the region.
@@ -199,8 +197,8 @@ func (r *RegionInfo) Adjust() {
 
 // RegionsInfo contains some regions with the detailed region info.
 type RegionsInfo struct {
-	Count   int          `json:"count"`
 	Regions []RegionInfo `json:"regions"`
+	Count   int          `json:"count"`
 }
 
 // Adjust is only used in testing, in order to compare the data from json deserialization.

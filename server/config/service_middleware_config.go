@@ -24,9 +24,9 @@ const (
 
 // ServiceMiddlewareConfig is the configuration for PD Service middleware.
 type ServiceMiddlewareConfig struct {
-	AuditConfig         `json:"audit"`
 	RateLimitConfig     `json:"rate-limit"`
 	GRPCRateLimitConfig `json:"grpc-rate-limit"`
+	AuditConfig         `json:"audit"`
 }
 
 // NewServiceMiddlewareConfig returns a new service middleware config
@@ -70,10 +70,8 @@ func (c *AuditConfig) Clone() *AuditConfig {
 
 // RateLimitConfig is the configuration for rate limit
 type RateLimitConfig struct {
-	// EnableRateLimit controls the switch of the rate limit middleware
-	EnableRateLimit bool `json:"enable-rate-limit,string"`
-	// RateLimitConfig is the config of rate limit middleware
-	LimiterConfig map[string]ratelimit.DimensionConfig `json:"limiter-config"`
+	LimiterConfig   map[string]ratelimit.DimensionConfig `json:"limiter-config"`
+	EnableRateLimit bool                                 `json:"enable-rate-limit,string"`
 }
 
 // Clone returns a cloned rate limit config.
@@ -89,10 +87,8 @@ func (c *RateLimitConfig) Clone() *RateLimitConfig {
 
 // GRPCRateLimitConfig is the configuration for gRPC rate limit
 type GRPCRateLimitConfig struct {
-	// EnableRateLimit controls the switch of the rate limit middleware
-	EnableRateLimit bool `json:"enable-grpc-rate-limit,string"`
-	// RateLimitConfig is the config of rate limit middleware
-	LimiterConfig map[string]ratelimit.DimensionConfig `json:"grpc-limiter-config"`
+	LimiterConfig   map[string]ratelimit.DimensionConfig `json:"grpc-limiter-config"`
+	EnableRateLimit bool                                 `json:"enable-grpc-rate-limit,string"`
 }
 
 // Clone returns a cloned rate limit config.

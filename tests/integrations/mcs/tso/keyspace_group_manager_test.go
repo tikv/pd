@@ -175,12 +175,12 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestKeyspacesServedByNonDefaultKe
 
 	// Create keyspace groups.
 	params := []struct {
-		keyspaceGroupID uint32
 		keyspaceIDs     []uint32
+		keyspaceGroupID uint32
 	}{
-		{suite.allocID(), []uint32{0, 10}},
-		{suite.allocID(), []uint32{1, 11}},
-		{suite.allocID(), []uint32{2, 12}},
+		{[]uint32{0, 10}, suite.allocID()},
+		{[]uint32{1, 11}, suite.allocID()},
+		{[]uint32{2, 12}, suite.allocID()},
 	}
 
 	for _, param := range params {

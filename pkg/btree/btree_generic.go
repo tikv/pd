@@ -102,8 +102,8 @@ const (
 // FreeList, in particular when they're created with Clone.
 // Two Btrees using the same freelist are safe for concurrent write access.
 type FreeListG[T Item[T]] struct {
-	mu       syncutil.Mutex
 	freelist []*node[T]
+	mu       syncutil.Mutex
 }
 
 // NewFreeListG creates a new free list.
@@ -355,10 +355,10 @@ func (s *children[T]) truncate(index int) {
 //   - len(children) == 0, len(items) unconstrained
 //   - len(children) == len(items) + 1
 type node[T Item[T]] struct {
+	cow      *copyOnWriteContext[T]
 	items    items[T]
 	children children[T]
 	indices  indices
-	cow      *copyOnWriteContext[T]
 }
 
 func (n *node[T]) length() int {
@@ -790,10 +790,10 @@ func (n *node[T]) iterate(dir direction, start, stop *T, includeStart bool, hit 
 // Write operations are not safe for concurrent mutation by multiple
 // goroutines, but Read operations are.
 type BTreeG[T Item[T]] struct {
-	degree int
-	length int
 	root   *node[T]
 	cow    *copyOnWriteContext[T]
+	degree int
+	length int
 }
 
 // copyOnWriteContext pointers determine node ownership... a tree with a write

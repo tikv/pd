@@ -28,12 +28,12 @@ import (
 type changeAndResult struct {
 	opt               Option
 	checkOptionStatus func(string, Option)
+	checkStatusFunc   func(string)
 	totalRequest      int
 	success           int
 	fail              int
 	release           int
 	waitDuration      time.Duration
-	checkStatusFunc   func(string)
 }
 
 type labelCase struct {

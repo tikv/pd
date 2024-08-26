@@ -32,11 +32,11 @@ import (
 // RegionLabel is the label of a region.
 // NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
 type RegionLabel struct {
+	expire  *time.Time
 	Key     string `json:"key"`
 	Value   string `json:"value"`
 	TTL     string `json:"ttl,omitempty"`
 	StartAt string `json:"start_at,omitempty"`
-	expire  *time.Time
 }
 
 func (l *RegionLabel) String() string {
@@ -46,12 +46,12 @@ func (l *RegionLabel) String() string {
 // LabelRule is the rule to assign labels to a region.
 // NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
 type LabelRule struct {
-	ID        string        `json:"id"`
-	Index     int           `json:"index"`
-	Labels    []RegionLabel `json:"labels"`
-	RuleType  string        `json:"rule_type"`
-	Data      any           `json:"data"`
+	Data      any `json:"data"`
 	minExpire *time.Time
+	ID        string        `json:"id"`
+	RuleType  string        `json:"rule_type"`
+	Labels    []RegionLabel `json:"labels"`
+	Index     int           `json:"index"`
 }
 
 func (rule *LabelRule) String() string {
@@ -108,10 +108,10 @@ const (
 // KeyRangeRule contains the start key and end key of the LabelRule.
 // NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
 type KeyRangeRule struct {
-	StartKey    []byte `json:"-"`         // range start key
-	StartKeyHex string `json:"start_key"` // hex format start key, for marshal/unmarshal
-	EndKey      []byte `json:"-"`         // range end key
-	EndKeyHex   string `json:"end_key"`   // hex format end key, for marshal/unmarshal
+	StartKeyHex string `json:"start_key"`
+	EndKeyHex   string `json:"end_key"`
+	StartKey    []byte `json:"-"`
+	EndKey      []byte `json:"-"`
 }
 
 // LabelRulePatch is the patch to update the label rules.

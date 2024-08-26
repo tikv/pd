@@ -1226,8 +1226,8 @@ func (suite *ruleCheckerTestSuite) TestIssue3299() {
 	suite.cluster.AddLeaderRegionWithRange(1, "", "", 1, 2)
 
 	testCases := []struct {
-		constraints []placement.LabelConstraint
 		err         string
+		constraints []placement.LabelConstraint
 	}{
 		{
 			constraints: []placement.LabelConstraint{
@@ -1628,8 +1628,8 @@ func (suite *ruleCheckerTestSuite) TestRuleCache() {
 	re.Nil(suite.rc.Check(region))
 
 	testCases := []struct {
-		name        string
 		region      *core.RegionInfo
+		name        string
 		stillCached bool
 	}{
 		{
@@ -2041,16 +2041,16 @@ func (suite *ruleCheckerTestAdvancedSuite) TestReplaceAnExistingPeerCases() {
 
 	testCases := []struct {
 		region string
-		rules  []string
 		opStr  string
+		rules  []string
 	}{
-		{"111_leader,211,311", []string{"3/voter//", "3/learner/type=read/"}, "replace-rule-swap-fit-peer {mv peer: store [111] to"},
-		{"211,311_leader,151", []string{"3/voter//", "3/learner/type=read/"}, "add-rule-peer {add peer: store [111]}"},
-		{"111_learner,211,311_leader,151", []string{"3/voter//", "3/learner/type=read/"}, "replace-rule-swap-fit-peer {mv peer: store [211] to"},
-		{"111_learner,311_leader,151,351", []string{"3/voter//", "3/learner/type=read/"}, "add-rule-peer {add peer: store [211]}"},
-		{"111_learner,211_learner,311_leader,151,351", []string{"3/voter//", "3/learner/type=read/"}, "replace-rule-swap-fit-peer {mv peer: store [311] to"},
-		{"111_learner,211_learner,151_leader,252,351", []string{"3/voter//", "3/learner/type=read/"}, "add-rule-peer {add peer: store [311]}"},
-		{"111_learner,211_learner,311_learner,151_leader,252,351", []string{"3/voter//", "3/learner/type=read/"}, ""},
+		{"111_leader,211,311", "replace-rule-swap-fit-peer {mv peer: store [111] to", []string{"3/voter//", "3/learner/type=read/"}},
+		{"211,311_leader,151", "add-rule-peer {add peer: store [111]}", []string{"3/voter//", "3/learner/type=read/"}},
+		{"111_learner,211,311_leader,151", "replace-rule-swap-fit-peer {mv peer: store [211] to", []string{"3/voter//", "3/learner/type=read/"}},
+		{"111_learner,311_leader,151,351", "add-rule-peer {add peer: store [211]}", []string{"3/voter//", "3/learner/type=read/"}},
+		{"111_learner,211_learner,311_leader,151,351", "replace-rule-swap-fit-peer {mv peer: store [311] to", []string{"3/voter//", "3/learner/type=read/"}},
+		{"111_learner,211_learner,151_leader,252,351", "add-rule-peer {add peer: store [311]}", []string{"3/voter//", "3/learner/type=read/"}},
+		{"111_learner,211_learner,311_learner,151_leader,252,351", "", []string{"3/voter//", "3/learner/type=read/"}},
 	}
 	groupName := "a_test"
 	for _, cas := range testCases {

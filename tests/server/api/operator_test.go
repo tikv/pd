@@ -288,12 +288,12 @@ func (suite *operatorTestSuite) checkTransferRegionWithPlacementRule(cluster *te
 		return strings.Join(stepStrs, ", ")
 	}
 	testCases := []struct {
+		expectedError       error
 		name                string
-		placementRuleEnable bool
+		expectSteps         string
 		rules               []*placement.Rule
 		input               []byte
-		expectedError       error
-		expectSteps         string
+		placementRuleEnable bool
 	}{
 		{
 			name:                "placement rule disable without peer role",

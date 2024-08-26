@@ -411,11 +411,11 @@ type loopWatcherTestSuite struct {
 	suite.Suite
 	ctx    context.Context
 	cancel context.CancelFunc
-	wg     sync.WaitGroup
-	cleans []func()
 	etcd   *embed.Etcd
 	client *clientv3.Client
 	config *embed.Config
+	cleans []func()
+	wg     sync.WaitGroup
 }
 
 func TestLoopWatcherTestSuite(t *testing.T) {
@@ -502,8 +502,8 @@ func (suite *loopWatcherTestSuite) TestLoadWithLimitChange() {
 func (suite *loopWatcherTestSuite) TestCallBack() {
 	re := suite.Require()
 	cache := struct {
-		syncutil.RWMutex
 		data map[string]struct{}
+		syncutil.RWMutex
 	}{
 		data: make(map[string]struct{}),
 	}
@@ -637,8 +637,8 @@ func (suite *loopWatcherTestSuite) TestWatcherLoadLargeKey() {
 func (suite *loopWatcherTestSuite) TestWatcherBreak() {
 	re := suite.Require()
 	cache := struct {
-		syncutil.RWMutex
 		data string
+		syncutil.RWMutex
 	}{}
 	checkCache := func(expect string) {
 		testutil.Eventually(re, func() bool {

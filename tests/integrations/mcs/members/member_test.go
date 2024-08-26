@@ -40,17 +40,14 @@ import (
 type memberTestSuite struct {
 	suite.Suite
 	ctx              context.Context
-	cleanupFunc      []testutil.CleanupFunc
+	pdClient         pdClient.Client
 	cluster          *tests.TestCluster
 	server           *tests.TestServer
+	tsoNodes         map[string]bs.Server
+	schedulingNodes  map[string]bs.Server
 	backendEndpoints string
-	pdClient         pdClient.Client
-
-	// We only test `DefaultKeyspaceGroupID` here.
-	// tsoAvailMembers is used to check the tso members which in the DefaultKeyspaceGroupID.
-	tsoAvailMembers map[string]bool
-	tsoNodes        map[string]bs.Server
-	schedulingNodes map[string]bs.Server
+	tsoAvailMembers  map[string]bool
+	cleanupFunc      []testutil.CleanupFunc
 }
 
 func TestMemberTestSuite(t *testing.T) {

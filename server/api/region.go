@@ -832,8 +832,8 @@ func (h *regionsHandler) SplitRegions(w http.ResponseWriter, r *http.Request) {
 
 // RegionHeap implements heap.Interface, used for selecting top n regions.
 type RegionHeap struct {
-	regions []*core.RegionInfo
 	less    func(a, b *core.RegionInfo) bool
+	regions []*core.RegionInfo
 }
 
 func (h *RegionHeap) Len() int           { return len(h.regions) }

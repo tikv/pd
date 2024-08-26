@@ -47,8 +47,8 @@ func RegisterKeyspace(r *gin.RouterGroup) {
 // CreateKeyspaceParams represents parameters needed when creating a new keyspace.
 // NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
 type CreateKeyspaceParams struct {
-	Name   string            `json:"name"`
 	Config map[string]string `json:"config"`
+	Name   string            `json:"name"`
 }
 
 // CreateKeyspace creates keyspace according to given input.
@@ -196,10 +196,8 @@ func parseLoadAllQuery(c *gin.Context) (scanStart uint32, scanLimit int, err err
 // LoadAllKeyspacesResponse represents response given when loading all keyspaces.
 // NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
 type LoadAllKeyspacesResponse struct {
-	Keyspaces []*KeyspaceMeta `json:"keyspaces"`
-	// Token that can be used to read immediate next page.
-	// If it's empty, then end has been reached.
-	NextPageToken string `json:"next_page_token"`
+	NextPageToken string          `json:"next_page_token"`
+	Keyspaces     []*KeyspaceMeta `json:"keyspaces"`
 }
 
 // LoadAllKeyspaces loads range of keyspaces.
@@ -375,31 +373,31 @@ type KeyspaceMeta struct {
 // 1. Keyspace State are marshaled to their corresponding name for better readability.
 func (meta *KeyspaceMeta) MarshalJSON() ([]byte, error) {
 	return json.Marshal(&struct {
-		ID             uint32            `json:"id"`
+		Config         map[string]string `json:"config,omitempty"`
 		Name           string            `json:"name,omitempty"`
 		State          string            `json:"state,omitempty"`
 		CreatedAt      int64             `json:"created_at,omitempty"`
 		StateChangedAt int64             `json:"state_changed_at,omitempty"`
-		Config         map[string]string `json:"config,omitempty"`
+		ID             uint32            `json:"id"`
 	}{
-		meta.Id,
+		meta.Config,
 		meta.Name,
 		meta.State.String(),
 		meta.CreatedAt,
 		meta.StateChangedAt,
-		meta.Config,
+		meta.Id,
 	})
 }
 
 // UnmarshalJSON reverse KeyspaceMeta's the Custom JSON marshal.
 func (meta *KeyspaceMeta) UnmarshalJSON(data []byte) error {
 	aux := &struct {
-		ID             uint32            `json:"id"`
+		Config         map[string]string `json:"config,omitempty"`
 		Name           string            `json:"name,omitempty"`
 		State          string            `json:"state,omitempty"`
 		CreatedAt      int64             `json:"created_at,omitempty"`
 		StateChangedAt int64             `json:"state_changed_at,omitempty"`
-		Config         map[string]string `json:"config,omitempty"`
+		ID             uint32            `json:"id"`
 	}{}
 
 	if err := json.Unmarshal(data, aux); err != nil {

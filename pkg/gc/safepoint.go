@@ -29,10 +29,10 @@ var blockServiceSafepointErrmsg = "don't allow update service safe point v1."
 
 // SafePointManager is the manager for safePoint of GC and services.
 type SafePointManager struct {
-	gcLock        syncutil.Mutex
-	serviceGCLock syncutil.Mutex
 	store         endpoint.GCSafePointStorage
 	cfg           config.PDServerConfig
+	gcLock        syncutil.Mutex
+	serviceGCLock syncutil.Mutex
 }
 
 // NewSafePointManager creates a SafePointManager of GC and services.

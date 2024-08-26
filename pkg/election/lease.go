@@ -37,15 +37,12 @@ const (
 // Lease is used as the low-level mechanism for campaigning and renewing elected leadership.
 // The way to gain and maintain leadership is to update and keep the lease alive continuously.
 type Lease struct {
-	// purpose is used to show what this election for
-	Purpose string
-	// etcd client and lease
-	client *clientv3.Client
-	lease  clientv3.Lease
-	ID     atomic.Value // store as clientv3.LeaseID
-	// leaseTimeout and expireTime are used to control the lease's lifetime
-	leaseTimeout time.Duration
+	lease        clientv3.Lease
+	ID           atomic.Value
 	expireTime   atomic.Value
+	client       *clientv3.Client
+	Purpose      string
+	leaseTimeout time.Duration
 }
 
 // NewLease creates a new Lease instance.

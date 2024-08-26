@@ -183,15 +183,13 @@ func putStores(ctx context.Context, cfg *config.Config, cli pdpb.PDClient, store
 
 // Regions simulates all regions to heartbeat.
 type Regions struct {
-	regions       []*pdpb.RegionHeartbeatRequest
 	awakenRegions atomic.Value
-
-	updateRound int
-
-	updateLeader []int
-	updateEpoch  []int
-	updateSpace  []int
-	updateFlow   []int
+	regions       []*pdpb.RegionHeartbeatRequest
+	updateLeader  []int
+	updateEpoch   []int
+	updateSpace   []int
+	updateFlow    []int
+	updateRound   int
 }
 
 func (rs *Regions) init(cfg *config.Config) {

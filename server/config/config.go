@@ -47,127 +47,53 @@ import (
 // Config is the pd server configuration.
 // NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
 type Config struct {
-	ClientUrls          string `toml:"client-urls" json:"client-urls"`
-	PeerUrls            string `toml:"peer-urls" json:"peer-urls"`
-	AdvertiseClientUrls string `toml:"advertise-client-urls" json:"advertise-client-urls"`
-	AdvertisePeerUrls   string `toml:"advertise-peer-urls" json:"advertise-peer-urls"`
-
-	Name              string `toml:"name" json:"name"`
-	DataDir           string `toml:"data-dir" json:"data-dir"`
-	ForceNewCluster   bool   `json:"force-new-cluster"`
-	EnableGRPCGateway bool   `json:"enable-grpc-gateway"`
-
-	InitialCluster      string `toml:"initial-cluster" json:"initial-cluster"`
-	InitialClusterState string `toml:"initial-cluster-state" json:"initial-cluster-state"`
-	InitialClusterToken string `toml:"initial-cluster-token" json:"initial-cluster-token"`
-
-	// Join to an existing pd cluster, a string of endpoints.
-	Join string `toml:"join" json:"join"`
-
-	// LeaderLease time, if leader doesn't update its TTL
-	// in etcd after lease time, etcd will expire the leader key
-	// and other servers can campaign the leader again.
-	// Etcd only supports seconds TTL, so here is second too.
-	LeaderLease int64 `toml:"lease" json:"lease"`
-
-	// Log related config.
-	Log log.Config `toml:"log" json:"log"`
-
-	// Backward compatibility.
-	LogFileDeprecated  string `toml:"log-file" json:"log-file,omitempty"`
-	LogLevelDeprecated string `toml:"log-level" json:"log-level,omitempty"`
-
-	// MaxConcurrentTSOProxyStreamings is the maximum number of concurrent TSO proxy streaming process routines allowed.
-	// Exceeding this limit will result in an error being returned to the client when a new client starts a TSO streaming.
-	// Set this to 0 will disable TSO Proxy.
-	// Set this to the negative value to disable the limit.
-	MaxConcurrentTSOProxyStreamings int `toml:"max-concurrent-tso-proxy-streamings" json:"max-concurrent-tso-proxy-streamings"`
-	// TSOProxyRecvFromClientTimeout is the timeout for the TSO proxy to receive a tso request from a client via grpc TSO stream.
-	// After the timeout, the TSO proxy will close the grpc TSO stream.
-	TSOProxyRecvFromClientTimeout typeutil.Duration `toml:"tso-proxy-recv-from-client-timeout" json:"tso-proxy-recv-from-client-timeout"`
-
-	// TSOSaveInterval is the interval to save timestamp.
-	TSOSaveInterval typeutil.Duration `toml:"tso-save-interval" json:"tso-save-interval"`
-
-	// The interval to update physical part of timestamp. Usually, this config should not be set.
-	// At most 1<<18 (262144) TSOs can be generated in the interval. The smaller the value, the
-	// more TSOs provided, and at the same time consuming more CPU time.
-	// This config is only valid in 1ms to 10s. If it's configured too long or too short, it will
-	// be automatically clamped to the range.
-	TSOUpdatePhysicalInterval typeutil.Duration `toml:"tso-update-physical-interval" json:"tso-update-physical-interval"`
-
-	// EnableLocalTSO is used to enable the Local TSO Allocator feature,
-	// which allows the PD server to generate Local TSO for certain DC-level transactions.
-	// To make this feature meaningful, user has to set the "zone" label for the PD server
-	// to indicate which DC this PD belongs to.
-	EnableLocalTSO bool `toml:"enable-local-tso" json:"enable-local-tso"`
-
-	Metric metricutil.MetricConfig `toml:"metric" json:"metric"`
-
-	Schedule sc.ScheduleConfig `toml:"schedule" json:"schedule"`
-
-	Replication sc.ReplicationConfig `toml:"replication" json:"replication"`
-
-	PDServerCfg PDServerConfig `toml:"pd-server" json:"pd-server"`
-
-	ClusterVersion semver.Version `toml:"cluster-version" json:"cluster-version"`
-
-	// Labels indicates the labels set for **this** PD server. The labels describe some specific properties
-	// like `zone`/`rack`/`host`. Currently, labels won't affect the PD server except for some special
-	// label keys. Now we have following special keys:
-	// 1. 'zone' is a special key that indicates the DC location of this PD server. If it is set, the value for this
-	// will be used to determine which DC's Local TSO service this PD will provide with if EnableLocalTSO is true.
-	Labels map[string]string `toml:"labels" json:"labels"`
-
-	// QuotaBackendBytes Raise alarms when backend size exceeds the given quota. 0 means use the default quota.
-	// the default size is 2GB, the maximum is 8GB.
-	QuotaBackendBytes typeutil.ByteSize `toml:"quota-backend-bytes" json:"quota-backend-bytes"`
-	// AutoCompactionMode is either 'periodic' or 'revision'. The default value is 'periodic'.
-	AutoCompactionMode string `toml:"auto-compaction-mode" json:"auto-compaction-mode"`
-	// AutoCompactionRetention is either duration string with time unit
-	// (e.g. '5m' for 5-minute), or revision unit (e.g. '5000').
-	// If no time unit is provided and compaction mode is 'periodic',
-	// the unit defaults to hour. For example, '5' translates into 5-hour.
-	// The default retention is 1 hour.
-	// Before etcd v3.3.x, the type of retention is int. We add 'v2' suffix to make it backward compatible.
-	AutoCompactionRetention string `toml:"auto-compaction-retention" json:"auto-compaction-retention-v2"`
-
-	// TickInterval is the interval for etcd Raft tick.
-	TickInterval typeutil.Duration `toml:"tick-interval"`
-	// ElectionInterval is the interval for etcd Raft election.
-	ElectionInterval typeutil.Duration `toml:"election-interval"`
-	// Prevote is true to enable Raft Pre-Vote.
-	// If enabled, Raft runs an additional election phase
-	// to check whether it would get enough votes to win
-	// an election, thus minimizing disruptions.
-	PreVote bool `toml:"enable-prevote"`
-
-	MaxRequestBytes uint `toml:"max-request-bytes" json:"max-request-bytes"`
-
-	Security configutil.SecurityConfig `toml:"security" json:"security"`
-
-	LabelProperty LabelPropertyConfig `toml:"label-property" json:"label-property"`
-
-	// For all warnings during parsing.
-	WarningMsgs []string
-
-	DisableStrictReconfigCheck bool
-
-	HeartbeatStreamBindInterval typeutil.Duration
-	LeaderPriorityCheckInterval typeutil.Duration
-
-	Logger   *zap.Logger        `json:"-"`
-	LogProps *log.ZapProperties `json:"-"`
-
-	Dashboard DashboardConfig `toml:"dashboard" json:"dashboard"`
-
-	ReplicationMode ReplicationModeConfig `toml:"replication-mode" json:"replication-mode"`
-
-	Keyspace KeyspaceConfig `toml:"keyspace" json:"keyspace"`
-
-	MicroService MicroServiceConfig `toml:"micro-service" json:"micro-service"`
-
-	Controller rm.ControllerConfig `toml:"controller" json:"controller"`
+	Labels                          map[string]string       `toml:"labels" json:"labels"`
+	LogProps                        *log.ZapProperties      `json:"-"`
+	Logger                          *zap.Logger             `json:"-"`
+	LabelProperty                   LabelPropertyConfig     `toml:"label-property" json:"label-property"`
+	Log                             log.Config              `toml:"log" json:"log"`
+	ClusterVersion                  semver.Version          `toml:"cluster-version" json:"cluster-version"`
+	LogFileDeprecated               string                  `toml:"log-file" json:"log-file,omitempty"`
+	AutoCompactionRetention         string                  `toml:"auto-compaction-retention" json:"auto-compaction-retention-v2"`
+	InitialClusterToken             string                  `toml:"initial-cluster-token" json:"initial-cluster-token"`
+	LogLevelDeprecated              string                  `toml:"log-level" json:"log-level,omitempty"`
+	ClientUrls                      string                  `toml:"client-urls" json:"client-urls"`
+	Join                            string                  `toml:"join" json:"join"`
+	InitialCluster                  string                  `toml:"initial-cluster" json:"initial-cluster"`
+	DataDir                         string                  `toml:"data-dir" json:"data-dir"`
+	PeerUrls                        string                  `toml:"peer-urls" json:"peer-urls"`
+	InitialClusterState             string                  `toml:"initial-cluster-state" json:"initial-cluster-state"`
+	Name                            string                  `toml:"name" json:"name"`
+	AdvertiseClientUrls             string                  `toml:"advertise-client-urls" json:"advertise-client-urls"`
+	AutoCompactionMode              string                  `toml:"auto-compaction-mode" json:"auto-compaction-mode"`
+	AdvertisePeerUrls               string                  `toml:"advertise-peer-urls" json:"advertise-peer-urls"`
+	Dashboard                       DashboardConfig         `toml:"dashboard" json:"dashboard"`
+	Metric                          metricutil.MetricConfig `toml:"metric" json:"metric"`
+	WarningMsgs                     []string
+	Security                        configutil.SecurityConfig `toml:"security" json:"security"`
+	Replication                     sc.ReplicationConfig      `toml:"replication" json:"replication"`
+	Keyspace                        KeyspaceConfig            `toml:"keyspace" json:"keyspace"`
+	ReplicationMode                 ReplicationModeConfig     `toml:"replication-mode" json:"replication-mode"`
+	PDServerCfg                     PDServerConfig            `toml:"pd-server" json:"pd-server"`
+	Schedule                        sc.ScheduleConfig         `toml:"schedule" json:"schedule"`
+	Controller                      rm.ControllerConfig       `toml:"controller" json:"controller"`
+	LeaderLease                     int64                     `toml:"lease" json:"lease"`
+	LeaderPriorityCheckInterval     typeutil.Duration
+	TSOUpdatePhysicalInterval       typeutil.Duration `toml:"tso-update-physical-interval" json:"tso-update-physical-interval"`
+	MaxRequestBytes                 uint              `toml:"max-request-bytes" json:"max-request-bytes"`
+	MaxConcurrentTSOProxyStreamings int               `toml:"max-concurrent-tso-proxy-streamings" json:"max-concurrent-tso-proxy-streamings"`
+	TickInterval                    typeutil.Duration `toml:"tick-interval"`
+	TSOProxyRecvFromClientTimeout   typeutil.Duration `toml:"tso-proxy-recv-from-client-timeout" json:"tso-proxy-recv-from-client-timeout"`
+	QuotaBackendBytes               typeutil.ByteSize `toml:"quota-backend-bytes" json:"quota-backend-bytes"`
+	HeartbeatStreamBindInterval     typeutil.Duration
+	ElectionInterval                typeutil.Duration `toml:"election-interval"`
+	TSOSaveInterval                 typeutil.Duration `toml:"tso-save-interval" json:"tso-save-interval"`
+	ForceNewCluster                 bool              `json:"force-new-cluster"`
+	EnableGRPCGateway               bool              `json:"enable-grpc-gateway"`
+	DisableStrictReconfigCheck      bool
+	PreVote                         bool               `toml:"enable-prevote"`
+	MicroService                    MicroServiceConfig `toml:"micro-service" json:"micro-service"`
+	EnableLocalTSO                  bool               `toml:"enable-local-tso" json:"enable-local-tso"`
 }
 
 // NewConfig creates a new config.
@@ -501,37 +427,20 @@ func (c *Config) String() string {
 // PDServerConfig is the configuration for pd server.
 // NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
 type PDServerConfig struct {
-	// UseRegionStorage enables the independent region storage.
-	UseRegionStorage bool `toml:"use-region-storage" json:"use-region-storage,string"`
-	// MaxResetTSGap is the max gap to reset the TSO.
-	MaxResetTSGap typeutil.Duration `toml:"max-gap-reset-ts" json:"max-gap-reset-ts"`
-	// KeyType is option to specify the type of keys.
-	// There are some types supported: ["table", "raw", "txn"], default: "table"
-	KeyType string `toml:"key-type" json:"key-type"`
-	// RuntimeServices is the running extension services.
-	RuntimeServices typeutil.StringSlice `toml:"runtime-services" json:"runtime-services"`
-	// MetricStorage is the cluster metric storage.
-	// Currently, we use prometheus as metric storage, we may use PD/TiKV as metric storage later.
-	MetricStorage string `toml:"metric-storage" json:"metric-storage"`
-	// There are some values supported: "auto", "none", or a specific address, default: "auto"
-	DashboardAddress string `toml:"dashboard-address" json:"dashboard-address"`
-	// TraceRegionFlow the option to update flow information of regions.
-	// WARN: TraceRegionFlow is deprecated.
-	TraceRegionFlow bool `toml:"trace-region-flow" json:"trace-region-flow,string,omitempty"`
-	// FlowRoundByDigit used to discretization processing flow information.
-	FlowRoundByDigit int `toml:"flow-round-by-digit" json:"flow-round-by-digit"`
-	// MinResolvedTSPersistenceInterval is the interval to save the min resolved ts.
-	MinResolvedTSPersistenceInterval typeutil.Duration `toml:"min-resolved-ts-persistence-interval" json:"min-resolved-ts-persistence-interval"`
-	// ServerMemoryLimit indicates the memory limit of current process.
-	ServerMemoryLimit float64 `toml:"server-memory-limit" json:"server-memory-limit"`
-	// ServerMemoryLimitGCTrigger indicates the gc percentage of the ServerMemoryLimit.
-	ServerMemoryLimitGCTrigger float64 `toml:"server-memory-limit-gc-trigger" json:"server-memory-limit-gc-trigger"`
-	// EnableGOGCTuner is to enable GOGC tuner. it can tuner GOGC.
-	EnableGOGCTuner bool `toml:"enable-gogc-tuner" json:"enable-gogc-tuner,string"`
-	// GCTunerThreshold is the threshold of GC tuner.
-	GCTunerThreshold float64 `toml:"gc-tuner-threshold" json:"gc-tuner-threshold"`
-	// BlockSafePointV1 is used to control gc safe point v1 and service safe point v1 can not be updated.
-	BlockSafePointV1 bool `toml:"block-safe-point-v1" json:"block-safe-point-v1,string"`
+	MetricStorage                    string               `toml:"metric-storage" json:"metric-storage"`
+	DashboardAddress                 string               `toml:"dashboard-address" json:"dashboard-address"`
+	KeyType                          string               `toml:"key-type" json:"key-type"`
+	RuntimeServices                  typeutil.StringSlice `toml:"runtime-services" json:"runtime-services"`
+	ServerMemoryLimit                float64              `toml:"server-memory-limit" json:"server-memory-limit"`
+	MaxResetTSGap                    typeutil.Duration    `toml:"max-gap-reset-ts" json:"max-gap-reset-ts"`
+	FlowRoundByDigit                 int                  `toml:"flow-round-by-digit" json:"flow-round-by-digit"`
+	MinResolvedTSPersistenceInterval typeutil.Duration    `toml:"min-resolved-ts-persistence-interval" json:"min-resolved-ts-persistence-interval"`
+	ServerMemoryLimitGCTrigger       float64              `toml:"server-memory-limit-gc-trigger" json:"server-memory-limit-gc-trigger"`
+	GCTunerThreshold                 float64              `toml:"gc-tuner-threshold" json:"gc-tuner-threshold"`
+	TraceRegionFlow                  bool                 `toml:"trace-region-flow" json:"trace-region-flow,string,omitempty"`
+	UseRegionStorage                 bool                 `toml:"use-region-storage" json:"use-region-storage,string"`
+	EnableGOGCTuner                  bool                 `toml:"enable-gogc-tuner" json:"enable-gogc-tuner,string"`
+	BlockSafePointV1                 bool                 `toml:"block-safe-point-v1" json:"block-safe-point-v1,string"`
 }
 
 func (c *PDServerConfig) adjust(meta *configutil.ConfigMetaData) error {

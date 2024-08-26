@@ -33,13 +33,13 @@ const (
 
 // Monitor is used to monitor the cgroup.
 type Monitor struct {
-	started         bool
 	ctx             context.Context
 	cancel          context.CancelFunc
 	wg              sync.WaitGroup
 	cfgMaxProcs     int
 	lastMaxProcs    int
 	lastMemoryLimit uint64
+	started         bool
 }
 
 // StartMonitor uses to start the cgroup monitoring.

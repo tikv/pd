@@ -26,9 +26,9 @@ import (
 // Manager is the manager of resource group.
 type Manager struct {
 	srv       bs.Server
-	clusterID uint64
 	client    *clientv3.Client
 	storage   *endpoint.StorageEndpoint
+	clusterID uint64
 }
 
 // ClusterIDProvider is used to get cluster ID from the given `bs.server`

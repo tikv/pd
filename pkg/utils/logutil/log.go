@@ -41,14 +41,10 @@ type FileLogConfig struct {
 
 // LogConfig serializes log related config in toml/json.
 type LogConfig struct {
-	// Log level.
-	Level string `toml:"level" json:"level"`
-	// Log format. one of json, text, or console.
-	Format string `toml:"format" json:"format"`
-	// Disable automatic timestamps in output.
-	DisableTimestamp bool `toml:"disable-timestamp" json:"disable-timestamp"`
-	// File log config.
-	File FileLogConfig `toml:"file" json:"file"`
+	Level            string        `toml:"level" json:"level"`
+	Format           string        `toml:"format" json:"format"`
+	File             FileLogConfig `toml:"file" json:"file"`
+	DisableTimestamp bool          `toml:"disable-timestamp" json:"disable-timestamp"`
 }
 
 // StringToZapLogLevel translates log level string to log level.

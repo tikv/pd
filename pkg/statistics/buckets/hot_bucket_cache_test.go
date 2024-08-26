@@ -26,8 +26,8 @@ func TestPutItem(t *testing.T) {
 	re := require.New(t)
 	cache := NewBucketsCache(context.Background())
 	testdata := []struct {
-		regionID    uint64
 		keys        [][]byte
+		regionID    uint64
 		regionCount int
 		treeLen     int
 		version     uint64

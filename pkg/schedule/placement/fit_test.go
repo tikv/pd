@@ -168,30 +168,30 @@ func TestFitRegion(t *testing.T) {
 
 	testCases := []struct {
 		region   string
-		rules    []string
 		fitPeers string
+		rules    []string
 	}{
 		// test count
-		{"1111,1112,1113", []string{"1/voter//"}, "1111"},
-		{"1111,1112,1113", []string{"2/voter//"}, "1111,1112"},
-		{"1111,1112,1113", []string{"3/voter//"}, "1111,1112,1113"},
-		{"1111,1112,1113", []string{"5/voter//"}, "1111,1112,1113"},
+		{region: "1111,1112,1113", rules: []string{"1/voter//"}, fitPeers: "1111"},
+		{region: "1111,1112,1113", rules: []string{"2/voter//"}, fitPeers: "1111,1112"},
+		{region: "1111,1112,1113", rules: []string{"3/voter//"}, fitPeers: "1111,1112,1113"},
+		{region: "1111,1112,1113", rules: []string{"5/voter//"}, fitPeers: "1111,1112,1113"},
 		// best location
-		{"1111,1112,1113,2111,2222,3222,3333", []string{"3/voter//zone,rack,host"}, "1111,2111,3222"},
-		{"1111,1121,1211,2111,2211", []string{"3/voter//zone,rack,host"}, "1111,1211,2111"},
-		{"1111,1211,1311,1411,2111,2211,2311,3111", []string{"5/voter//zone,rack,host"}, "1111,1211,2111,2211,3111"},
+		{region: "1111,1112,1113,2111,2222,3222,3333", rules: []string{"3/voter//zone,rack,host"}, fitPeers: "1111,2111,3222"},
+		{region: "1111,1121,1211,2111,2211", rules: []string{"3/voter//zone,rack,host"}, fitPeers: "1111,1211,2111"},
+		{region: "1111,1211,1311,1411,2111,2211,2311,3111", rules: []string{"5/voter//zone,rack,host"}, fitPeers: "1111,1211,2111,2211,3111"},
 		// test role match
-		{"1111_learner,1112,1113", []string{"1/voter//"}, "1112"},
-		{"1111_learner,1112,1113", []string{"2/voter//"}, "1112,1113"},
-		{"1111_learner,1112,1113", []string{"3/voter//"}, "1111,1112,1113"},
-		{"1111,1112_learner,1121_learner,1122_learner,1131_learner,1132,1141,1142", []string{"3/follower//zone,rack,host"}, "1111,1132,1141"},
+		{region: "1111_learner,1112,1113", rules: []string{"1/voter//"}, fitPeers: "1112"},
+		{region: "1111_learner,1112,1113", rules: []string{"2/voter//"}, fitPeers: "1112,1113"},
+		{region: "1111_learner,1112,1113", rules: []string{"3/voter//"}, fitPeers: "1111,1112,1113"},
+		{region: "1111,1112_learner,1121_learner,1122_learner,1131_learner,1132,1141,1142", rules: []string{"3/follower//zone,rack,host"}, fitPeers: "1111,1132,1141"},
 		// test 2 rule
-		{"1111,1112,1113,1114", []string{"3/voter//", "1/voter/id=id1/"}, "1112,1113,1114/1111"},
-		{"1111,2211,3111,3112", []string{"3/voter//zone", "1/voter/rack=rack2/"}, "1111,2211,3111//3112"},
-		{"1111,2211,3111,3112", []string{"1/voter/rack=rack2/", "3/voter//zone"}, "2211/1111,3111,3112"},
-		{"1111_leader,2111,3111", []string{"3/voter//", "3/learner/disk=ssd/"}, "1111,2111,3111/"},
-		{"1111_leader,2111,3111,4111", []string{"3/voter//", "3/learner/disk=ssd/"}, "1111,2111,4111/3111"},
-		{"1111_leader,2111,3111,4111_learner", []string{"3/voter//", "3/learner/disk=ssd/"}, "1111,2111,3111//4111"},
+		{region: "1111,1112,1113,1114", rules: []string{"3/voter//", "1/voter/id=id1/"}, fitPeers: "1112,1113,1114/1111"},
+		{region: "1111,2211,3111,3112", rules: []string{"3/voter//zone", "1/voter/rack=rack2/"}, fitPeers: "1111,2211,3111//3112"},
+		{region: "1111,2211,3111,3112", rules: []string{"1/voter/rack=rack2/", "3/voter//zone"}, fitPeers: "2211/1111,3111,3112"},
+		{region: "1111_leader,2111,3111", rules: []string{"3/voter//", "3/learner/disk=ssd/"}, fitPeers: "1111,2111,3111/"},
+		{region: "1111_leader,2111,3111,4111", rules: []string{"3/voter//", "3/learner/disk=ssd/"}, fitPeers: "1111,2111,4111/3111"},
+		{region: "1111_leader,2111,3111,4111_learner", rules: []string{"3/voter//", "3/learner/disk=ssd/"}, fitPeers: "1111,2111,3111//4111"},
 	}
 
 	for _, testCase := range testCases {

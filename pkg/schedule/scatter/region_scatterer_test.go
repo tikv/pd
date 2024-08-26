@@ -288,8 +288,8 @@ func TestScatterCheck(t *testing.T) {
 		tc.AddRegionStore(i, 0)
 	}
 	testCases := []struct {
-		name        string
 		checkRegion *core.RegionInfo
+		name        string
 		needFix     bool
 	}{
 		{

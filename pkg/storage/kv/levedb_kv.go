@@ -81,11 +81,10 @@ func (kv *LevelDBKV) Remove(key string) error {
 // levelDBTxn implements kv.Txn.
 // It utilizes leveldb.Batch to batch user operations to an atomic execution unit.
 type levelDBTxn struct {
-	kv  *LevelDBKV
-	ctx context.Context
-	// mu protects batch.
-	mu    syncutil.Mutex
+	ctx   context.Context
+	kv    *LevelDBKV
 	batch *leveldb.Batch
+	mu    syncutil.Mutex
 }
 
 // RunInTxn runs user provided function f in a transaction.

@@ -24,12 +24,10 @@ type lockEntry struct {
 // LockGroup is a map of mutex that locks entries with different id separately.
 // It's used levitate lock contentions of using a global lock.
 type LockGroup struct {
-	groupLock           Mutex                 // protects group.
-	removeEntryOnUnlock bool                  // if remove entry from entries on Unlock().
-	entries             map[uint32]*lockEntry // map of locks with id as key.
-	// hashFn hashes id to map key, it's main purpose is to limit the total
-	// number of mutexes in the group, as using a mutex for every id is too memory heavy.
-	hashFn func(id uint32) uint32
+	entries             map[uint32]*lockEntry
+	hashFn              func(id uint32) uint32
+	groupLock           Mutex
+	removeEntryOnUnlock bool
 }
 
 // LockGroupOption configures the lock group.

@@ -37,9 +37,9 @@ type Event interface {
 
 // EventRunner includes all events.
 type EventRunner struct {
-	sync.RWMutex
-	events     []Event
 	raftEngine *RaftEngine
+	events     []Event
+	sync.RWMutex
 }
 
 // NewEventRunner creates an event runner.

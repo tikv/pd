@@ -43,16 +43,15 @@ const (
 )
 
 type solver struct {
-	*plan.BalanceSchedulerPlan
 	sche.SchedulerCluster
-	kind              constant.ScheduleKind
+	*plan.BalanceSchedulerPlan
 	opInfluence       operator.OpInfluence
+	fit               *placement.RegionFit
+	kind              constant.ScheduleKind
 	tolerantSizeRatio float64
 	tolerantSource    int64
-	fit               *placement.RegionFit
-
-	sourceScore float64
-	targetScore float64
+	sourceScore       float64
+	targetScore       float64
 }
 
 func newSolver(basePlan *plan.BalanceSchedulerPlan, kind constant.ScheduleKind, cluster sche.SchedulerCluster, opInfluence operator.OpInfluence) *solver {
@@ -236,8 +235,8 @@ func getKeyRanges(args []string) ([]core.KeyRange, error) {
 type pendingInfluence struct {
 	op                *operator.Operator
 	froms             []uint64
-	to                uint64
 	origin            statistics.Influence
+	to                uint64
 	maxZombieDuration time.Duration
 }
 
@@ -342,11 +341,10 @@ func diffCmp(ldCmp storeLoadCmp) storeLPCmp {
 }
 
 type retryQuota struct {
+	limits       map[uint64]int
 	initialLimit int
 	minLimit     int
 	attenuation  int
-
-	limits map[uint64]int
 }
 
 func newRetryQuota() *retryQuota {

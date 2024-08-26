@@ -18,6 +18,7 @@ import "time"
 
 // HotPeersStat records all hot regions statistics
 type HotPeersStat struct {
+	Stats          []HotPeerStatShow `json:"statistics"`
 	StoreByteRate  float64           `json:"store_bytes"`
 	StoreKeyRate   float64           `json:"store_keys"`
 	StoreQueryRate float64           `json:"store_query"`
@@ -25,20 +26,19 @@ type HotPeersStat struct {
 	TotalKeysRate  float64           `json:"total_flow_keys"`
 	TotalQueryRate float64           `json:"total_flow_query"`
 	Count          int               `json:"regions_count"`
-	Stats          []HotPeerStatShow `json:"statistics"`
 }
 
 // HotPeerStatShow records the hot region statistics for output
 type HotPeerStatShow struct {
-	StoreID        uint64    `json:"store_id"`
+	LastUpdateTime time.Time `json:"last_update_time,omitempty"`
 	Stores         []uint64  `json:"stores"`
-	IsLeader       bool      `json:"is_leader"`
-	IsLearner      bool      `json:"is_learner"`
+	StoreID        uint64    `json:"store_id"`
 	RegionID       uint64    `json:"region_id"`
 	HotDegree      int       `json:"hot_degree"`
 	ByteRate       float64   `json:"flow_bytes"`
 	KeyRate        float64   `json:"flow_keys"`
 	QueryRate      float64   `json:"flow_query"`
 	AntiCount      int       `json:"anti_count"`
-	LastUpdateTime time.Time `json:"last_update_time,omitempty"`
+	IsLeader       bool      `json:"is_leader"`
+	IsLearner      bool      `json:"is_learner"`
 }

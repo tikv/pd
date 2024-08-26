@@ -152,9 +152,8 @@ func StatusText(code StatusCode) string {
 
 // Status describes a plan's result.
 type Status struct {
-	StatusCode StatusCode
-	// TODO: Try to indicate the user to do some actions through this field.
 	DetailedReason string
+	StatusCode     StatusCode
 }
 
 // NewStatus create a new plan status.

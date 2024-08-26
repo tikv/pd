@@ -44,18 +44,14 @@ var (
 
 // Controller is used to manage all schedulers.
 type Controller struct {
-	syncutil.RWMutex
-	wg      sync.WaitGroup
-	ctx     context.Context
-	cluster sche.SchedulerCluster
-	storage endpoint.ConfigStorage
-	// schedulers are used to manage all schedulers, which will only be initialized
-	// and used in the PD leader service mode now.
-	schedulers map[string]*ScheduleController
-	// schedulerHandlers is used to manage the HTTP handlers of schedulers,
-	// which will only be initialized and used in the API service mode now.
+	ctx               context.Context
+	cluster           sche.SchedulerCluster
+	storage           endpoint.ConfigStorage
+	schedulers        map[string]*ScheduleController
 	schedulerHandlers map[string]http.Handler
 	opController      *operator.Controller
+	wg                sync.WaitGroup
+	syncutil.RWMutex
 }
 
 // NewController creates a scheduler controller.
@@ -422,13 +418,13 @@ func (c *Controller) GetAllSchedulerConfigs() ([]string, []string, error) {
 type ScheduleController struct {
 	Scheduler
 	cluster            sche.SchedulerCluster
-	opController       *operator.Controller
-	nextInterval       time.Duration
 	ctx                context.Context
+	opController       *operator.Controller
 	cancel             context.CancelFunc
+	diagnosticRecorder *DiagnosticRecorder
+	nextInterval       time.Duration
 	delayAt            int64
 	delayUntil         int64
-	diagnosticRecorder *DiagnosticRecorder
 }
 
 // NewScheduleController creates a new ScheduleController.

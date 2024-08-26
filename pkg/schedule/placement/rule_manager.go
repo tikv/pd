@@ -51,18 +51,16 @@ const (
 // RuleManager is responsible for the lifecycle of all placement Rules.
 // It is thread safe.
 type RuleManager struct {
-	ctx     context.Context
-	storage endpoint.RuleStorage
+	ctx              context.Context
+	storage          endpoint.RuleStorage
+	storeSetInformer core.StoreSetInformer
+	conf             config.SharedConfigProvider
+	ruleConfig       *ruleConfig
+	cache            *RegionRuleFitCacheManager
+	keyType          string
+	ruleList         ruleList
 	syncutil.RWMutex
 	initialized bool
-	ruleConfig  *ruleConfig
-	ruleList    ruleList
-
-	// used for rule validation
-	keyType          string
-	storeSetInformer core.StoreSetInformer
-	cache            *RegionRuleFitCacheManager
-	conf             config.SharedConfigProvider
 }
 
 // NewRuleManager creates a RuleManager instance.

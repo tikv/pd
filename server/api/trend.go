@@ -30,41 +30,40 @@ import (
 // Trend describes the cluster's schedule trend.
 // NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
 type Trend struct {
-	Stores  []trendStore  `json:"stores"`
 	History *trendHistory `json:"history"`
+	Stores  []trendStore  `json:"stores"`
 }
 
 // NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
 type trendStore struct {
-	ID              uint64             `json:"id"`
-	Address         string             `json:"address"`
-	StateName       string             `json:"state_name"`
-	Capacity        uint64             `json:"capacity"`
-	Available       uint64             `json:"available"`
-	RegionCount     int                `json:"region_count"`
-	LeaderCount     int                `json:"leader_count"`
-	StartTS         *time.Time         `json:"start_ts,omitempty"`
-	LastHeartbeatTS *time.Time         `json:"last_heartbeat_ts,omitempty"`
-	Uptime          *typeutil.Duration `json:"uptime,omitempty"`
-
-	HotWriteFlow        float64   `json:"hot_write_flow"`
-	HotWriteRegionFlows []float64 `json:"hot_write_region_flows"`
-	HotReadFlow         float64   `json:"hot_read_flow"`
-	HotReadRegionFlows  []float64 `json:"hot_read_region_flows"`
+	StartTS             *time.Time         `json:"start_ts,omitempty"`
+	Uptime              *typeutil.Duration `json:"uptime,omitempty"`
+	LastHeartbeatTS     *time.Time         `json:"last_heartbeat_ts,omitempty"`
+	Address             string             `json:"address"`
+	StateName           string             `json:"state_name"`
+	HotReadRegionFlows  []float64          `json:"hot_read_region_flows"`
+	HotWriteRegionFlows []float64          `json:"hot_write_region_flows"`
+	Capacity            uint64             `json:"capacity"`
+	LeaderCount         int                `json:"leader_count"`
+	RegionCount         int                `json:"region_count"`
+	HotWriteFlow        float64            `json:"hot_write_flow"`
+	Available           uint64             `json:"available"`
+	HotReadFlow         float64            `json:"hot_read_flow"`
+	ID                  uint64             `json:"id"`
 }
 
 // NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
 type trendHistory struct {
+	Entries   []trendHistoryEntry `json:"entries"`
 	StartTime int64               `json:"start"`
 	EndTime   int64               `json:"end"`
-	Entries   []trendHistoryEntry `json:"entries"`
 }
 
 // NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
 type trendHistoryEntry struct {
+	Kind  string `json:"kind"`
 	From  uint64 `json:"from"`
 	To    uint64 `json:"to"`
-	Kind  string `json:"kind"`
 	Count int    `json:"count"`
 }
 

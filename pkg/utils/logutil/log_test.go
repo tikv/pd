@@ -70,12 +70,12 @@ func TestRedactInfoLogType(t *testing.T) {
 	}
 	// JSON marshal.
 	jsonMarshalTestCases := []struct {
-		typ    RedactInfoLogType
 		expect string
+		typ    RedactInfoLogType
 	}{
-		{RedactInfoLogOFF, `false`},
-		{RedactInfoLogON, `true`},
-		{RedactInfoLogMarker, `"MARKER"`},
+		{typ: RedactInfoLogOFF, expect: `false`},
+		{typ: RedactInfoLogON, expect: `true`},
+		{typ: RedactInfoLogMarker, expect: `"MARKER"`},
 	}
 	for _, tc := range jsonMarshalTestCases {
 		b, err := json.Marshal(tc.typ)
@@ -119,10 +119,10 @@ func TestRedactInfoLogType(t *testing.T) {
 func TestRedactLog(t *testing.T) {
 	re := require.New(t)
 	testCases := []struct {
-		name              string
 		arg               any
-		redactInfoLogType RedactInfoLogType
 		expect            any
+		name              string
+		redactInfoLogType RedactInfoLogType
 	}{
 		{
 			name:              "string arg, enable redact",

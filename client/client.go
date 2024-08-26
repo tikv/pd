@@ -58,17 +58,17 @@ const (
 type Region struct {
 	Meta         *metapb.Region
 	Leader       *metapb.Peer
+	Buckets      *metapb.Buckets
 	DownPeers    []*metapb.Peer
 	PendingPeers []*metapb.Peer
-	Buckets      *metapb.Buckets
 }
 
 // GlobalConfigItem standard format of KV pair in GlobalConfig client
 type GlobalConfigItem struct {
-	EventType pdpb.EventType
 	Name      string
 	Value     string
 	PayLoad   []byte
+	EventType pdpb.EventType
 }
 
 // RPCClient is a PD (Placement Driver) RPC and related mcs client which can only call RPC.
@@ -308,12 +308,10 @@ var _ Client = (*client)(nil)
 
 // serviceModeKeeper is for service mode switching.
 type serviceModeKeeper struct {
-	// RMutex here is for the future usage that there might be multiple goroutines
-	// triggering service mode switching concurrently.
-	sync.RWMutex
-	serviceMode     pdpb.ServiceMode
-	tsoClient       *tsoClient
 	tsoSvcDiscovery ServiceDiscovery
+	tsoClient       *tsoClient
+	sync.RWMutex
+	serviceMode pdpb.ServiceMode
 }
 
 func (k *serviceModeKeeper) close() {
@@ -332,22 +330,17 @@ func (k *serviceModeKeeper) close() {
 }
 
 type client struct {
-	keyspaceID      uint32
-	svrUrls         []string
-	pdSvcDiscovery  *pdServiceDiscovery
-	tokenDispatcher *tokenDispatcher
-
-	// For service mode switching.
-	serviceModeKeeper
-
-	// For internal usage.
+	ctx                     context.Context
+	pdSvcDiscovery          *pdServiceDiscovery
+	tokenDispatcher         *tokenDispatcher
 	updateTokenConnectionCh chan struct{}
-
-	ctx    context.Context
-	cancel context.CancelFunc
-	wg     sync.WaitGroup
-	tlsCfg *tls.Config
-	option *option
+	cancel                  context.CancelFunc
+	tlsCfg                  *tls.Config
+	option                  *option
+	svrUrls                 []string
+	serviceModeKeeper
+	wg         sync.WaitGroup
+	keyspaceID uint32
 }
 
 // SecurityOption records options about tls
@@ -1668,9 +1661,9 @@ func (c *client) WatchGlobalConfig(ctx context.Context, configPath string, revis
 				// We need to keep the Value field for CDC compatibility.
 				// But if you not use `Names`, will only have `Payload` field.
 				if i.GetValue() == "" {
-					arr[j] = GlobalConfigItem{i.GetKind(), i.GetName(), string(i.GetPayload()), i.GetPayload()}
+					arr[j] = GlobalConfigItem{i.GetName(), string(i.GetPayload()), i.GetPayload(), i.GetKind()}
 				} else {
-					arr[j] = GlobalConfigItem{i.GetKind(), i.GetName(), i.GetValue(), i.GetPayload()}
+					arr[j] = GlobalConfigItem{i.GetName(), i.GetValue(), i.GetPayload(), i.GetKind()}
 				}
 			}
 			select {

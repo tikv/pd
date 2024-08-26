@@ -32,12 +32,11 @@ import (
 )
 
 type scatterRangeSchedulerConfig struct {
-	syncutil.RWMutex
 	schedulerConfig
-
 	RangeName string `json:"range-name"`
 	StartKey  string `json:"start-key"`
 	EndKey    string `json:"end-key"`
+	syncutil.RWMutex
 }
 
 func (conf *scatterRangeSchedulerConfig) buildWithArgs(args []string) error {

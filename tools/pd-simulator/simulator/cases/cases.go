@@ -25,21 +25,21 @@ import (
 
 // Store is used to simulate tikv.
 type Store struct {
-	ID                uint64
-	Status            metapb.StoreState
+	Version           string
 	Labels            []*metapb.StoreLabel
+	ID                uint64
 	Capacity          uint64
+	Status            metapb.StoreState
 	LeaderWeight      float32
 	RegionWeight      float32
-	Version           string
 	HasExtraUsedSpace bool
 }
 
 // Region is used to simulate a region.
 type Region struct {
-	ID     uint64
-	Peers  []*metapb.Peer
 	Leader *metapb.Peer
+	Peers  []*metapb.Peer
+	ID     uint64
 	Size   int64
 	Keys   int64
 }
@@ -49,16 +49,15 @@ type CheckerFunc func([]*metapb.Store, *core.RegionsInfo, []info.StoreStats) boo
 
 // Case represents a test suite for simulator.
 type Case struct {
+	Checker         CheckerFunc
 	Stores          []*Store
 	Regions         []Region
+	Events          []EventDescriptor
+	Rules           []*pdHttp.Rule
+	Labels          typeutil.StringSlice
 	RegionSplitSize int64
 	RegionSplitKeys int64
-	Events          []EventDescriptor
 	TableNumber     int
-
-	Checker CheckerFunc // To check the schedule is finished.
-	Rules   []*pdHttp.Rule
-	Labels  typeutil.StringSlice
 }
 
 // IDAllocator is used to alloc unique ID.

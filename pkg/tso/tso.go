@@ -53,32 +53,26 @@ const (
 
 // tsoObject is used to store the current TSO in memory with a RWMutex lock.
 type tsoObject struct {
-	syncutil.RWMutex
 	physical   time.Time
-	logical    int64
 	updateTime time.Time
+	logical    int64
+	syncutil.RWMutex
 }
 
 // timestampOracle is used to maintain the logic of TSO.
 type timestampOracle struct {
-	client          *clientv3.Client
-	keyspaceGroupID uint32
-	// When tsPath is empty, it means that it is a global timestampOracle.
-	tsPath  string
-	storage endpoint.TSOStorage
-	// TODO: remove saveInterval
+	storage                endpoint.TSOStorage
+	lastSavedTime          atomic.Value
+	client                 *clientv3.Client
+	maxResetTSGap          func() time.Duration
+	tsoMux                 *tsoObject
+	metrics                *tsoMetrics
+	tsPath                 string
+	dcLocation             string
 	saveInterval           time.Duration
 	updatePhysicalInterval time.Duration
-	maxResetTSGap          func() time.Duration
-	// tso info stored in the memory
-	tsoMux *tsoObject
-	// last timestamp window stored in etcd
-	lastSavedTime atomic.Value // stored as time.Time
-	suffix        int
-	dcLocation    string
-
-	// pre-initialized metrics
-	metrics *tsoMetrics
+	suffix                 int
+	keyspaceGroupID        uint32
 }
 
 func (t *timestampOracle) setTSOPhysical(next time.Time, force bool) {

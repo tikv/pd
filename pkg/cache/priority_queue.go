@@ -116,8 +116,8 @@ func (pq *PriorityQueue) Len() int {
 
 // Entry is a pair of region and its priority.
 type Entry struct {
-	Priority int
 	Value    PriorityQueueItem
+	Priority int
 }
 
 // Less returns true if the entry has smaller priority.

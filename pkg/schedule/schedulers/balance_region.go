@@ -38,10 +38,10 @@ type balanceRegionSchedulerConfig struct {
 type balanceRegionScheduler struct {
 	*BaseScheduler
 	*retryQuota
-	name          string
 	conf          *balanceRegionSchedulerConfig
-	filters       []filter.Filter
 	filterCounter *filter.Counter
+	name          string
+	filters       []filter.Filter
 }
 
 // newBalanceRegionScheduler creates a scheduler that tends to keep regions on

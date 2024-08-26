@@ -20,18 +20,15 @@ import (
 
 // Item is the cache entry.
 type Item struct {
-	Key   uint64
 	Value any
+	Key   uint64
 }
 
 // LRU is 'Least-Recently-Used' cache.
 type LRU struct {
-	// maxCount is the maximum number of items.
-	// 0 means no limit.
+	ll       *list.List
+	cache    map[uint64]*list.Element
 	maxCount int
-
-	ll    *list.List
-	cache map[uint64]*list.Element
 }
 
 // newLRU returns a new lru cache. And this LRU cache is not thread-safe

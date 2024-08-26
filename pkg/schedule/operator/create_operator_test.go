@@ -71,9 +71,9 @@ func (suite *createOperatorTestSuite) TestCreateSplitRegionOperator() {
 	type testCase struct {
 		startKey      []byte
 		endKey        []byte
-		originPeers   []*metapb.Peer // first is leader
-		policy        pdpb.CheckPolicy
+		originPeers   []*metapb.Peer
 		keys          [][]byte
+		policy        pdpb.CheckPolicy
 		expectedError bool
 	}
 	testCases := []testCase{
@@ -167,38 +167,39 @@ func (suite *createOperatorTestSuite) TestCreateSplitRegionOperator() {
 func (suite *createOperatorTestSuite) TestCreateMergeRegionOperator() {
 	re := suite.Require()
 	type testCase struct {
-		sourcePeers   []*metapb.Peer // first is leader
-		targetPeers   []*metapb.Peer // first is leader
+		sourcePeers   []*metapb.Peer
+		targetPeers   []*metapb.Peer
+		prepareSteps  []OpStep
 		kind          OpKind
 		expectedError bool
-		prepareSteps  []OpStep
 	}
+
 	testCases := []testCase{
 		{
-			[]*metapb.Peer{
+			sourcePeers: []*metapb.Peer{
 				{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
 				{Id: 2, StoreId: 2, Role: metapb.PeerRole_Voter},
 			},
-			[]*metapb.Peer{
+			targetPeers: []*metapb.Peer{
 				{Id: 3, StoreId: 1, Role: metapb.PeerRole_Voter},
 				{Id: 4, StoreId: 2, Role: metapb.PeerRole_Voter},
 			},
-			OpMerge,
-			false,
-			[]OpStep{},
+			kind:          OpMerge,
+			expectedError: false,
+			prepareSteps:  []OpStep{},
 		},
 		{
-			[]*metapb.Peer{
+			sourcePeers: []*metapb.Peer{
 				{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
 				{Id: 2, StoreId: 2, Role: metapb.PeerRole_Voter},
 			},
-			[]*metapb.Peer{
+			targetPeers: []*metapb.Peer{
 				{Id: 4, StoreId: 2, Role: metapb.PeerRole_Voter},
 				{Id: 3, StoreId: 3, Role: metapb.PeerRole_Voter},
 			},
-			OpMerge | OpLeader | OpRegion,
-			false,
-			[]OpStep{
+			kind:          OpMerge | OpLeader | OpRegion,
+			expectedError: false,
+			prepareSteps: []OpStep{
 				AddLearner{ToStore: 3},
 				TransferLeader{FromStore: 1, ToStore: 2},
 				ChangePeerV2Enter{
@@ -213,43 +214,43 @@ func (suite *createOperatorTestSuite) TestCreateMergeRegionOperator() {
 			},
 		},
 		{
-			[]*metapb.Peer{
+			sourcePeers: []*metapb.Peer{
 				{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
 				{Id: 2, StoreId: 2, Role: metapb.PeerRole_DemotingVoter},
 			},
-			[]*metapb.Peer{
+			targetPeers: []*metapb.Peer{
 				{Id: 3, StoreId: 1, Role: metapb.PeerRole_Voter},
 				{Id: 4, StoreId: 2, Role: metapb.PeerRole_Voter},
 			},
-			0,
-			true,
-			nil,
+			kind:          0,
+			expectedError: true,
+			prepareSteps:  nil,
 		},
 		{
-			[]*metapb.Peer{
+			sourcePeers: []*metapb.Peer{
 				{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
 				{Id: 2, StoreId: 2, Role: metapb.PeerRole_Voter},
 			},
-			[]*metapb.Peer{
+			targetPeers: []*metapb.Peer{
 				{Id: 3, StoreId: 1, Role: metapb.PeerRole_Voter},
 				{Id: 4, StoreId: 2, Role: metapb.PeerRole_IncomingVoter},
 			},
-			0,
-			true,
-			nil,
+			kind:          0,
+			expectedError: true,
+			prepareSteps:  nil,
 		},
 		{
-			[]*metapb.Peer{
+			sourcePeers: []*metapb.Peer{
 				{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
 				{Id: 2, StoreId: 2, Role: metapb.PeerRole_Voter, IsWitness: true},
 			},
-			[]*metapb.Peer{
+			targetPeers: []*metapb.Peer{
 				{Id: 4, StoreId: 1, Role: metapb.PeerRole_Voter},
 				{Id: 3, StoreId: 3, Role: metapb.PeerRole_Voter, IsWitness: true},
 			},
-			OpMerge | OpRegion,
-			false,
-			[]OpStep{
+			kind:          OpMerge | OpRegion,
+			expectedError: false,
+			prepareSteps: []OpStep{
 				AddLearner{ToStore: 3, IsWitness: true},
 				ChangePeerV2Enter{
 					PromoteLearners: []PromoteLearner{{ToStore: 3, IsWitness: true}},
@@ -263,19 +264,19 @@ func (suite *createOperatorTestSuite) TestCreateMergeRegionOperator() {
 			},
 		},
 		{
-			[]*metapb.Peer{
+			sourcePeers: []*metapb.Peer{
 				{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
 				{Id: 2, StoreId: 2, Role: metapb.PeerRole_Voter, IsWitness: true},
 				{Id: 3, StoreId: 3, Role: metapb.PeerRole_Voter},
 			},
-			[]*metapb.Peer{
+			targetPeers: []*metapb.Peer{
 				{Id: 4, StoreId: 1, Role: metapb.PeerRole_Voter},
 				{Id: 6, StoreId: 3, Role: metapb.PeerRole_Voter, IsWitness: true},
 				{Id: 5, StoreId: 2, Role: metapb.PeerRole_Voter},
 			},
-			OpMerge | OpRegion,
-			false,
-			[]OpStep{
+			kind:          OpMerge | OpRegion,
+			expectedError: false,
+			prepareSteps: []OpStep{
 				ChangePeerV2Enter{
 					DemoteVoters: []DemoteVoter{{ToStore: 2, PeerID: 2, IsWitness: true}},
 				},
@@ -446,10 +447,10 @@ func (suite *createOperatorTestSuite) TestCreateTransferLeaderOperator() {
 func (suite *createOperatorTestSuite) TestCreateLeaveJointStateOperator() {
 	re := suite.Require()
 	type testCase struct {
-		originPeers   []*metapb.Peer // first is leader
+		originPeers   []*metapb.Peer
 		offlineStores []uint64
+		steps         []OpStep
 		kind          OpKind
-		steps         []OpStep // empty means error
 	}
 	testCases := []testCase{
 		{
@@ -630,11 +631,11 @@ func (suite *createOperatorTestSuite) TestCreateLeaveJointStateOperator() {
 func (suite *createOperatorTestSuite) TestCreateMoveRegionOperator() {
 	re := suite.Require()
 	type testCase struct {
-		name            string
-		originPeers     []*metapb.Peer // first is leader
-		targetPeerRoles map[uint64]placement.PeerRoleType
-		steps           []OpStep
 		expectedError   error
+		targetPeerRoles map[uint64]placement.PeerRoleType
+		name            string
+		originPeers     []*metapb.Peer
+		steps           []OpStep
 	}
 	testCases := []testCase{
 		{
@@ -986,11 +987,11 @@ func (suite *createOperatorTestSuite) TestCreateMoveRegionOperator() {
 func (suite *createOperatorTestSuite) TestMoveRegionWithoutJointConsensus() {
 	re := suite.Require()
 	type testCase struct {
-		name            string
-		originPeers     []*metapb.Peer // first is leader
-		targetPeerRoles map[uint64]placement.PeerRoleType
-		steps           []OpStep
 		expectedError   error
+		targetPeerRoles map[uint64]placement.PeerRoleType
+		name            string
+		originPeers     []*metapb.Peer
+		steps           []OpStep
 	}
 	testCases := []testCase{
 		{
@@ -1202,31 +1203,32 @@ func TestCreateLeaveJointStateOperatorWithoutFitRules(t *testing.T) {
 func (suite *createOperatorTestSuite) TestCreateNonWitnessPeerOperator() {
 	re := suite.Require()
 	type testCase struct {
-		originPeers   []*metapb.Peer // first is leader
+		originPeers   []*metapb.Peer
+		prepareSteps  []OpStep
 		kind          OpKind
 		expectedError bool
-		prepareSteps  []OpStep
 	}
+
 	testCases := []testCase{
 		{
-			[]*metapb.Peer{
+			originPeers: []*metapb.Peer{
 				{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
 				{Id: 2, StoreId: 2, Role: metapb.PeerRole_Learner, IsWitness: true},
 			},
-			OpRegion | OpWitness,
-			false,
-			[]OpStep{
+			kind:          OpRegion | OpWitness,
+			expectedError: false,
+			prepareSteps: []OpStep{
 				BecomeNonWitness{StoreID: 2, PeerID: 2},
 			},
 		},
 		{
-			[]*metapb.Peer{
+			originPeers: []*metapb.Peer{
 				{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter},
 				{Id: 2, StoreId: 2, Role: metapb.PeerRole_Voter, IsWitness: true},
 			},
-			OpRegion | OpWitness,
-			false,
-			[]OpStep{
+			kind:          OpRegion | OpWitness,
+			expectedError: false,
+			prepareSteps: []OpStep{
 				ChangePeerV2Enter{
 					DemoteVoters: []DemoteVoter{{ToStore: 2, PeerID: 2, IsWitness: true}},
 				},

@@ -93,10 +93,10 @@ func SchedulerArgs() []string {
 }
 
 type evictLeaderSchedulerConfig struct {
-	mu               syncutil.RWMutex
 	storage          endpoint.ConfigStorage
 	StoreIDWitRanges map[uint64][]core.KeyRange `json:"store-id-ranges"`
 	cluster          *core.BasicCluster
+	mu               syncutil.RWMutex
 }
 
 // BuildWithArgs builds the config with the args.

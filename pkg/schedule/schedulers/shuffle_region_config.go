@@ -35,11 +35,10 @@ const (
 var allRoles = []string{roleLeader, roleFollower, roleLearner}
 
 type shuffleRegionSchedulerConfig struct {
-	syncutil.RWMutex
 	schedulerConfig
-
 	Ranges []core.KeyRange `json:"ranges"`
-	Roles  []string        `json:"roles"` // can include `leader`, `follower`, `learner`.
+	Roles  []string        `json:"roles"`
+	syncutil.RWMutex
 }
 
 func (conf *shuffleRegionSchedulerConfig) encodeConfig() ([]byte, error) {

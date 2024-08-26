@@ -123,8 +123,8 @@ func (suite *regionTestSuite) checkSplitRegions(cluster *tests.TestCluster) {
 		hex.EncodeToString([]byte("ddd")))
 	checkOpt := func(res []byte, _ int, _ http.Header) {
 		s := &struct {
-			ProcessedPercentage int      `json:"processed-percentage"`
 			NewRegionsID        []uint64 `json:"regions-id"`
+			ProcessedPercentage int      `json:"processed-percentage"`
 		}{}
 		err := json.Unmarshal(res, s)
 		re.NoError(err)

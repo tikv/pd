@@ -24,12 +24,12 @@ import (
 func TestString(t *testing.T) {
 	re := require.New(t)
 	testcases := []struct {
-		filterType int
 		expected   string
+		filterType int
 	}{
-		{int(storeStateTombstone), "store-state-tombstone-filter"},
-		{int(filtersLen - 1), "store-state-slow-trend-filter"},
-		{int(filtersLen), "unknown"},
+		{filterType: int(storeStateTombstone), expected: "store-state-tombstone-filter"},
+		{filterType: int(filtersLen - 1), expected: "store-state-slow-trend-filter"},
+		{filterType: int(filtersLen), expected: "unknown"},
 	}
 
 	for _, data := range testcases {

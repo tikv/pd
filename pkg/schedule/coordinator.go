@@ -57,16 +57,10 @@ const (
 
 // Coordinator is used to manage all schedulers and checkers to decide if the region needs to be scheduled.
 type Coordinator struct {
-	syncutil.RWMutex
-
-	wg     sync.WaitGroup
-	ctx    context.Context
-	cancel context.CancelFunc
-
-	schedulersInitialized bool
-
+	ctx               context.Context
 	cluster           sche.ClusterInformer
 	prepareChecker    *prepareChecker
+	cancel            context.CancelFunc
 	checkers          *checker.Controller
 	regionScatterer   *scatter.RegionScatterer
 	regionSplitter    *splitter.RegionSplitter
@@ -75,6 +69,9 @@ type Coordinator struct {
 	hbStreams         *hbstream.HeartbeatStreams
 	pluginInterface   *PluginInterface
 	diagnosticManager *diagnostic.Manager
+	wg                sync.WaitGroup
+	syncutil.RWMutex
+	schedulersInitialized bool
 }
 
 // NewCoordinator creates a new Coordinator.

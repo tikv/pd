@@ -179,9 +179,9 @@ type operator interface {
 // Task running in node.
 type Task struct {
 	operator
+	epoch      *metapb.RegionEpoch
 	desc       string
 	regionID   uint64
-	epoch      *metapb.RegionEpoch
 	isFinished bool
 }
 
@@ -257,8 +257,8 @@ func (m *mergeRegion) tick(engine *RaftEngine, region *core.RegionInfo) (newRegi
 }
 
 type transferLeader struct {
-	fromPeerStoreID uint64
 	toPeers         []*metapb.Peer
+	fromPeerStoreID uint64
 }
 
 func (t *transferLeader) tick(_ *RaftEngine, region *core.RegionInfo) (newRegion *core.RegionInfo, isFinished bool) {
@@ -388,10 +388,10 @@ func (*changePeerV2Leave) tick(_ *RaftEngine, region *core.RegionInfo) (newRegio
 
 type addPeer struct {
 	peer          *metapb.Peer
-	size          int64
-	keys          int64
 	sendingStat   *snapshotStat
 	receivingStat *snapshotStat
+	size          int64
+	keys          int64
 }
 
 func (a *addPeer) tick(engine *RaftEngine, region *core.RegionInfo) (newRegion *core.RegionInfo, isFinished bool) {
@@ -493,11 +493,11 @@ func removeDownPeers(region *core.RegionInfo, removePeer *metapb.Peer) core.Regi
 }
 
 type snapshotStat struct {
+	start         time.Time
+	generateStart time.Time
 	action        snapAction
 	remainSize    int64
 	status        snapStatus
-	start         time.Time
-	generateStart time.Time
 }
 
 func newSnapshotState(size int64, action snapAction) *snapshotStat {

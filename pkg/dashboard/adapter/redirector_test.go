@@ -26,14 +26,11 @@ import (
 
 type redirectorTestSuite struct {
 	suite.Suite
-
-	tempText   string
-	tempServer *httptest.Server
-
-	testName   string
-	redirector *Redirector
-
+	tempServer           *httptest.Server
+	redirector           *Redirector
 	noRedirectHTTPClient *http.Client
+	tempText             string
+	testName             string
 }
 
 func TestRedirectorTestSuite(t *testing.T) {

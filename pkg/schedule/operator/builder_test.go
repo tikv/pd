@@ -176,74 +176,74 @@ func (suite *operatorBuilderTestSuite) TestBuild() {
 	re := suite.Require()
 	type testCase struct {
 		name              string
-		useJointConsensus bool
-		originPeers       []*metapb.Peer // first is leader
-		targetPeers       []*metapb.Peer // first is leader
+		originPeers       []*metapb.Peer
+		targetPeers       []*metapb.Peer
+		steps             []OpStep
 		kind              OpKind
-		steps             []OpStep // empty means error
+		useJointConsensus bool
 	}
 	testCases := []testCase{
 		{
-			"(disable JointConsensus) empty step",
-			false,
-			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}},
-			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}},
-			0,
-			[]OpStep{},
+			name:              "(disable JointConsensus) empty step",
+			originPeers:       []*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}},
+			targetPeers:       []*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}},
+			steps:             []OpStep{},
+			kind:              0,
+			useJointConsensus: false,
 		},
 		{
-			"(enable JointConsensus) empty step",
-			true,
-			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}},
-			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}},
-			0,
-			[]OpStep{},
+			name:              "(enable JointConsensus) empty step",
+			useJointConsensus: true,
+			originPeers:       []*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}},
+			targetPeers:       []*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}},
+			kind:              0,
+			steps:             []OpStep{},
 		},
 		{
-			"(disable JointConsensus) no valid leader",
-			false,
-			[]*metapb.Peer{{Id: 1, StoreId: 1}},
-			[]*metapb.Peer{{Id: 10, StoreId: 10}},
-			0,
-			[]OpStep{},
+			name:              "(disable JointConsensus) no valid leader",
+			useJointConsensus: false,
+			originPeers:       []*metapb.Peer{{Id: 1, StoreId: 1}},
+			targetPeers:       []*metapb.Peer{{Id: 10, StoreId: 10}},
+			kind:              0,
+			steps:             []OpStep{},
 		},
 		{
-			"(enable JointConsensus) no valid leader",
-			true,
-			[]*metapb.Peer{{Id: 1, StoreId: 1}},
-			[]*metapb.Peer{{Id: 10, StoreId: 10}},
-			0,
-			[]OpStep{},
+			name:              "(enable JointConsensus) no valid leader",
+			useJointConsensus: true,
+			originPeers:       []*metapb.Peer{{Id: 1, StoreId: 1}},
+			targetPeers:       []*metapb.Peer{{Id: 10, StoreId: 10}},
+			kind:              0,
+			steps:             []OpStep{},
 		},
 		{
-			"(disable JointConsensus) promote 1 learner and transfer leader",
-			false,
-			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2, Role: metapb.PeerRole_Learner}},
-			[]*metapb.Peer{{Id: 2, StoreId: 2}, {Id: 1, StoreId: 1}},
-			OpLeader,
-			[]OpStep{
+			name:              "(disable JointConsensus) promote 1 learner and transfer leader",
+			useJointConsensus: false,
+			originPeers:       []*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2, Role: metapb.PeerRole_Learner}},
+			targetPeers:       []*metapb.Peer{{Id: 2, StoreId: 2}, {Id: 1, StoreId: 1}},
+			kind:              OpLeader,
+			steps: []OpStep{
 				PromoteLearner{ToStore: 2},
 				TransferLeader{FromStore: 1, ToStore: 2},
 			},
 		},
 		{
-			"(enable JointConsensus) promote 1 learner and transfer leader",
-			true,
-			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2, Role: metapb.PeerRole_Learner}},
-			[]*metapb.Peer{{Id: 2, StoreId: 2}, {Id: 1, StoreId: 1}},
-			OpLeader,
-			[]OpStep{
+			name:              "(enable JointConsensus) promote 1 learner and transfer leader",
+			useJointConsensus: true,
+			originPeers:       []*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2, Role: metapb.PeerRole_Learner}},
+			targetPeers:       []*metapb.Peer{{Id: 2, StoreId: 2}, {Id: 1, StoreId: 1}},
+			kind:              OpLeader,
+			steps: []OpStep{
 				PromoteLearner{ToStore: 2},
 				TransferLeader{FromStore: 1, ToStore: 2},
 			},
 		},
 		{
-			"(disable JointConsensus) prefer replace",
-			false,
-			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}, {Id: 3, StoreId: 3, Role: metapb.PeerRole_Learner}},
-			[]*metapb.Peer{{StoreId: 4}, {StoreId: 5, Role: metapb.PeerRole_Learner}},
-			OpLeader | OpRegion,
-			[]OpStep{
+			name:              "(disable JointConsensus) prefer replace",
+			useJointConsensus: false,
+			originPeers:       []*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}, {Id: 3, StoreId: 3, Role: metapb.PeerRole_Learner}},
+			targetPeers:       []*metapb.Peer{{StoreId: 4}, {StoreId: 5, Role: metapb.PeerRole_Learner}},
+			kind:              OpLeader | OpRegion,
+			steps: []OpStep{
 				AddLearner{ToStore: 4},
 				PromoteLearner{ToStore: 4},
 				RemovePeer{FromStore: 2},
@@ -254,12 +254,12 @@ func (suite *operatorBuilderTestSuite) TestBuild() {
 			},
 		},
 		{
-			"(enable JointConsensus) transfer leader in joint state",
-			true,
-			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}, {Id: 3, StoreId: 3, Role: metapb.PeerRole_Learner}},
-			[]*metapb.Peer{{StoreId: 4}, {StoreId: 5, Role: metapb.PeerRole_Learner}},
-			OpLeader | OpRegion,
-			[]OpStep{
+			name:              "(enable JointConsensus) transfer leader in joint state",
+			useJointConsensus: true,
+			originPeers:       []*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}, {Id: 3, StoreId: 3, Role: metapb.PeerRole_Learner}},
+			targetPeers:       []*metapb.Peer{{StoreId: 4}, {StoreId: 5, Role: metapb.PeerRole_Learner}},
+			kind:              OpLeader | OpRegion,
+			steps: []OpStep{
 				AddLearner{ToStore: 4},
 				AddLearner{ToStore: 5},
 				ChangePeerV2Enter{
@@ -277,12 +277,12 @@ func (suite *operatorBuilderTestSuite) TestBuild() {
 			},
 		},
 		{
-			"(disable JointConsensus) transfer leader before remove leader",
-			false,
-			[]*metapb.Peer{{Id: 1, StoreId: 1}},
-			[]*metapb.Peer{{StoreId: 2}},
-			OpLeader | OpRegion,
-			[]OpStep{
+			name:              "(disable JointConsensus) transfer leader before remove leader",
+			useJointConsensus: false,
+			originPeers:       []*metapb.Peer{{Id: 1, StoreId: 1}},
+			targetPeers:       []*metapb.Peer{{StoreId: 2}},
+			kind:              OpLeader | OpRegion,
+			steps: []OpStep{
 				AddLearner{ToStore: 2},
 				PromoteLearner{ToStore: 2},
 				TransferLeader{FromStore: 1, ToStore: 2},
@@ -290,12 +290,12 @@ func (suite *operatorBuilderTestSuite) TestBuild() {
 			},
 		},
 		{
-			"(enable JointConsensus) transfer leader in joint state",
-			true,
-			[]*metapb.Peer{{Id: 1, StoreId: 1}},
-			[]*metapb.Peer{{StoreId: 2}},
-			OpLeader | OpRegion,
-			[]OpStep{
+			name:              "(enable JointConsensus) transfer leader in joint state",
+			useJointConsensus: true,
+			originPeers:       []*metapb.Peer{{Id: 1, StoreId: 1}},
+			targetPeers:       []*metapb.Peer{{StoreId: 2}},
+			kind:              OpLeader | OpRegion,
+			steps: []OpStep{
 				AddLearner{ToStore: 2},
 				ChangePeerV2Enter{
 					PromoteLearners: []PromoteLearner{{ToStore: 2}},
@@ -310,23 +310,23 @@ func (suite *operatorBuilderTestSuite) TestBuild() {
 			},
 		},
 		{
-			"(disable JointConsensus) replace voter with learner",
-			false,
-			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}},
-			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2, Role: metapb.PeerRole_Learner}},
-			OpRegion,
-			[]OpStep{
+			name:              "(disable JointConsensus) replace voter with learner",
+			useJointConsensus: false,
+			originPeers:       []*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}},
+			targetPeers:       []*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2, Role: metapb.PeerRole_Learner}},
+			kind:              OpRegion,
+			steps: []OpStep{
 				RemovePeer{FromStore: 2},
 				AddLearner{ToStore: 2},
 			},
 		},
 		{
-			"(enable JointConsensus) demote 1 peer directly",
-			true,
-			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}},
-			[]*metapb.Peer{{StoreId: 1}, {StoreId: 2, Role: metapb.PeerRole_Learner}},
-			0, // Note that there is no OpRegion here
-			[]OpStep{
+			name:              "(enable JointConsensus) demote 1 peer directly",
+			useJointConsensus: true,
+			originPeers:       []*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}},
+			targetPeers:       []*metapb.Peer{{StoreId: 1}, {StoreId: 2, Role: metapb.PeerRole_Learner}},
+			kind:              0, // Note that there is no OpRegion here
+			steps: []OpStep{
 				ChangePeerV2Enter{
 					PromoteLearners: []PromoteLearner{},
 					DemoteVoters:    []DemoteVoter{{ToStore: 2}},
@@ -334,14 +334,12 @@ func (suite *operatorBuilderTestSuite) TestBuild() {
 			},
 		},
 		{
-			"(disable JointConsensus) prefer replace with nearest peer",
-			false,
-			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 6, StoreId: 6}, {Id: 8, StoreId: 8}},
-			//             z1,h1                z1,h2                 z2,h1
-			[]*metapb.Peer{{StoreId: 9}, {StoreId: 7}, {StoreId: 10}},
-			//             z2,h2         z1,h1         z3,h1
-			OpLeader | OpRegion,
-			[]OpStep{
+			name:              "(disable JointConsensus) prefer replace with nearest peer",
+			useJointConsensus: false,
+			originPeers:       []*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 6, StoreId: 6}, {Id: 8, StoreId: 8}},
+			targetPeers:       []*metapb.Peer{{StoreId: 9}, {StoreId: 7}, {StoreId: 10}},
+			kind:              OpLeader | OpRegion,
+			steps: []OpStep{
 				// 6->7
 				AddLearner{ToStore: 7},
 				PromoteLearner{ToStore: 7},
@@ -360,12 +358,12 @@ func (suite *operatorBuilderTestSuite) TestBuild() {
 			},
 		},
 		{
-			"(disable JointConsensus) promote learner + demote voter + add learner",
-			false,
-			[]*metapb.Peer{{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter}, {Id: 2, StoreId: 2, Role: metapb.PeerRole_Learner}},
-			[]*metapb.Peer{{Id: 2, StoreId: 2, Role: metapb.PeerRole_Voter}, {Id: 1, StoreId: 1, Role: metapb.PeerRole_Learner}, {Id: 3, StoreId: 3, Role: metapb.PeerRole_Learner}},
-			OpLeader | OpRegion,
-			[]OpStep{
+			name:              "(disable JointConsensus) promote learner + demote voter + add learner",
+			useJointConsensus: false,
+			originPeers:       []*metapb.Peer{{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter}, {Id: 2, StoreId: 2, Role: metapb.PeerRole_Learner}},
+			targetPeers:       []*metapb.Peer{{Id: 2, StoreId: 2, Role: metapb.PeerRole_Voter}, {Id: 1, StoreId: 1, Role: metapb.PeerRole_Learner}, {Id: 3, StoreId: 3, Role: metapb.PeerRole_Learner}},
+			kind:              OpLeader | OpRegion,
+			steps: []OpStep{
 				AddLearner{ToStore: 3},
 				PromoteLearner{ToStore: 2},
 				TransferLeader{FromStore: 1, ToStore: 2},
@@ -374,12 +372,12 @@ func (suite *operatorBuilderTestSuite) TestBuild() {
 			},
 		},
 		{
-			"(disable JointConsensus) add learner + promote learner + remove voter",
-			false,
-			[]*metapb.Peer{{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter}, {Id: 2, StoreId: 2, Role: metapb.PeerRole_Learner}},
-			[]*metapb.Peer{{Id: 2, StoreId: 2, Role: metapb.PeerRole_Voter}, {Id: 3, StoreId: 3, Role: metapb.PeerRole_Learner}},
-			OpLeader | OpRegion,
-			[]OpStep{
+			name:              "(disable JointConsensus) add learner + promote learner + remove voter",
+			useJointConsensus: false,
+			originPeers:       []*metapb.Peer{{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter}, {Id: 2, StoreId: 2, Role: metapb.PeerRole_Learner}},
+			targetPeers:       []*metapb.Peer{{Id: 2, StoreId: 2, Role: metapb.PeerRole_Voter}, {Id: 3, StoreId: 3, Role: metapb.PeerRole_Learner}},
+			kind:              OpLeader | OpRegion,
+			steps: []OpStep{
 				AddLearner{ToStore: 3},
 				PromoteLearner{ToStore: 2},
 				TransferLeader{FromStore: 1, ToStore: 2},
@@ -387,12 +385,12 @@ func (suite *operatorBuilderTestSuite) TestBuild() {
 			},
 		},
 		{
-			"(disable JointConsensus) add voter + demote voter + remove learner",
-			false,
-			[]*metapb.Peer{{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter}, {Id: 2, StoreId: 2, Role: metapb.PeerRole_Learner}},
-			[]*metapb.Peer{{Id: 3, StoreId: 3, Role: metapb.PeerRole_Voter}, {Id: 1, StoreId: 1, Role: metapb.PeerRole_Learner}},
-			OpLeader | OpRegion,
-			[]OpStep{
+			name:              "(disable JointConsensus) add voter + demote voter + remove learner",
+			useJointConsensus: false,
+			originPeers:       []*metapb.Peer{{Id: 1, StoreId: 1, Role: metapb.PeerRole_Voter}, {Id: 2, StoreId: 2, Role: metapb.PeerRole_Learner}},
+			targetPeers:       []*metapb.Peer{{Id: 3, StoreId: 3, Role: metapb.PeerRole_Voter}, {Id: 1, StoreId: 1, Role: metapb.PeerRole_Learner}},
+			kind:              OpLeader | OpRegion,
+			steps: []OpStep{
 				AddLearner{ToStore: 3},
 				PromoteLearner{ToStore: 3},
 				TransferLeader{FromStore: 1, ToStore: 3},
@@ -402,12 +400,12 @@ func (suite *operatorBuilderTestSuite) TestBuild() {
 			},
 		},
 		{
-			"(enable JointConsensus) transfer leader before entering joint state",
-			true,
-			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}, {Id: 3, StoreId: 3, Role: metapb.PeerRole_Learner}},
-			[]*metapb.Peer{{Id: 2, StoreId: 2}, {Id: 3, StoreId: 3}},
-			OpLeader | OpRegion,
-			[]OpStep{
+			name:              "(enable JointConsensus) transfer leader before entering joint state",
+			useJointConsensus: true,
+			originPeers:       []*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}, {Id: 3, StoreId: 3, Role: metapb.PeerRole_Learner}},
+			targetPeers:       []*metapb.Peer{{Id: 2, StoreId: 2}, {Id: 3, StoreId: 3}},
+			kind:              OpLeader | OpRegion,
+			steps: []OpStep{
 				TransferLeader{FromStore: 1, ToStore: 2},
 				ChangePeerV2Enter{
 					PromoteLearners: []PromoteLearner{{ToStore: 3}},
@@ -421,12 +419,12 @@ func (suite *operatorBuilderTestSuite) TestBuild() {
 			},
 		},
 		{
-			"(enable JointConsensus) transfer leader after leaving joint state",
-			true,
-			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}, {Id: 3, StoreId: 3, Role: metapb.PeerRole_Learner}},
-			[]*metapb.Peer{{Id: 3, StoreId: 3}, {Id: 1, StoreId: 1}},
-			OpLeader | OpRegion,
-			[]OpStep{
+			name:              "(enable JointConsensus) transfer leader after leaving joint state",
+			useJointConsensus: true,
+			originPeers:       []*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}, {Id: 3, StoreId: 3, Role: metapb.PeerRole_Learner}},
+			targetPeers:       []*metapb.Peer{{Id: 3, StoreId: 3}, {Id: 1, StoreId: 1}},
+			kind:              OpLeader | OpRegion,
+			steps: []OpStep{
 				ChangePeerV2Enter{
 					PromoteLearners: []PromoteLearner{{ToStore: 3}},
 					DemoteVoters:    []DemoteVoter{{ToStore: 2}},
@@ -440,54 +438,54 @@ func (suite *operatorBuilderTestSuite) TestBuild() {
 			},
 		},
 		{
-			"(enable JointConsensus) add 1 peer(learner) should always build steps without joint consensus state",
-			true,
-			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}},
-			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}, {Id: 3, StoreId: 3, Role: metapb.PeerRole_Learner}},
-			OpRegion,
-			[]OpStep{
+			name:              "(enable JointConsensus) add 1 peer(learner) should always build steps without joint consensus state",
+			useJointConsensus: true,
+			originPeers:       []*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}},
+			targetPeers:       []*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}, {Id: 3, StoreId: 3, Role: metapb.PeerRole_Learner}},
+			kind:              OpRegion,
+			steps: []OpStep{
 				AddLearner{ToStore: 3},
 			},
 		},
 		{
-			"(enable JointConsensus) remove 1 peer(learner) should always build steps without joint consensus state",
-			true,
-			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2, Role: metapb.PeerRole_Learner}, {Id: 3, StoreId: 3}},
-			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 3, StoreId: 3}},
-			OpRegion,
-			[]OpStep{
+			name:              "(enable JointConsensus) remove 1 peer(learner) should always build steps without joint consensus state",
+			useJointConsensus: true,
+			originPeers:       []*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2, Role: metapb.PeerRole_Learner}, {Id: 3, StoreId: 3}},
+			targetPeers:       []*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 3, StoreId: 3}},
+			kind:              OpRegion,
+			steps: []OpStep{
 				RemovePeer{FromStore: 2},
 			},
 		},
 		{
-			"(enable JointConsensus) add 1+ learners should not enter joint consensus state",
-			true,
-			[]*metapb.Peer{{Id: 1, StoreId: 1}},
-			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2, Role: metapb.PeerRole_Learner}, {Id: 3, StoreId: 3, Role: metapb.PeerRole_Learner}},
-			OpRegion,
-			[]OpStep{
+			name:              "(enable JointConsensus) add 1+ learners should not enter joint consensus state",
+			useJointConsensus: true,
+			originPeers:       []*metapb.Peer{{Id: 1, StoreId: 1}},
+			targetPeers:       []*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2, Role: metapb.PeerRole_Learner}, {Id: 3, StoreId: 3, Role: metapb.PeerRole_Learner}},
+			kind:              OpRegion,
+			steps: []OpStep{
 				AddLearner{ToStore: 2},
 				AddLearner{ToStore: 3},
 			},
 		},
 		{
-			"(enable JointConsensus) remove 1+ learners should not enter joint consensus state",
-			true,
-			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2, Role: metapb.PeerRole_Learner}, {Id: 3, StoreId: 3, Role: metapb.PeerRole_Learner}},
-			[]*metapb.Peer{{Id: 1, StoreId: 1}},
-			OpRegion,
-			[]OpStep{
+			name:              "(enable JointConsensus) remove 1+ learners should not enter joint consensus state",
+			useJointConsensus: true,
+			originPeers:       []*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2, Role: metapb.PeerRole_Learner}, {Id: 3, StoreId: 3, Role: metapb.PeerRole_Learner}},
+			targetPeers:       []*metapb.Peer{{Id: 1, StoreId: 1}},
+			kind:              OpRegion,
+			steps: []OpStep{
 				RemovePeer{FromStore: 2},
 				RemovePeer{FromStore: 3},
 			},
 		},
 		{
-			"(enable JointConsensus) demote 1 voter should enter JointConsensus, and TiKV will handle the leave step",
-			true,
-			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}, {Id: 3, StoreId: 3}},
-			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}, {Id: 3, StoreId: 3, Role: metapb.PeerRole_Learner}},
-			0,
-			[]OpStep{
+			name:              "(enable JointConsensus) demote 1 voter should enter JointConsensus, and TiKV will handle the leave step",
+			useJointConsensus: true,
+			originPeers:       []*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}, {Id: 3, StoreId: 3}},
+			targetPeers:       []*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}, {Id: 3, StoreId: 3, Role: metapb.PeerRole_Learner}},
+			kind:              0,
+			steps: []OpStep{
 				ChangePeerV2Enter{
 					PromoteLearners: []PromoteLearner{},
 					DemoteVoters:    []DemoteVoter{{ToStore: 3}},
@@ -495,23 +493,22 @@ func (suite *operatorBuilderTestSuite) TestBuild() {
 			},
 		},
 		{
-			"(enable JointConsensus) add 1 learner should goto to buildStepsWithoutJointConsensus",
-			true,
-			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}},
-			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}, {Id: 3, StoreId: 3, Role: metapb.PeerRole_Learner}},
-			OpRegion,
-			[]OpStep{
+			name:              "(enable JointConsensus) add 1 learner should goto to buildStepsWithoutJointConsensus",
+			useJointConsensus: true,
+			originPeers:       []*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}},
+			targetPeers:       []*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}, {Id: 3, StoreId: 3, Role: metapb.PeerRole_Learner}},
+			kind:              OpRegion,
+			steps: []OpStep{
 				AddLearner{ToStore: 3},
 			},
 		},
 		{
-			// issue: https://github.com/tikv/pd/issues/4411
-			"(enable JointConsensus) remove 1 voter from 2 voter replicas raft group",
-			true,
-			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}},
-			[]*metapb.Peer{{Id: 1, StoreId: 1}},
-			OpRegion,
-			[]OpStep{
+			name:              "(enable JointConsensus) remove 1 voter from 2 voter replicas raft group",
+			useJointConsensus: true,
+			originPeers:       []*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}},
+			targetPeers:       []*metapb.Peer{{Id: 1, StoreId: 1}},
+			kind:              OpRegion,
+			steps: []OpStep{
 				ChangePeerV2Enter{
 					PromoteLearners: []PromoteLearner{},
 					DemoteVoters:    []DemoteVoter{{ToStore: 2}},
@@ -521,12 +518,12 @@ func (suite *operatorBuilderTestSuite) TestBuild() {
 		},
 		{
 			// issue: https://github.com/tikv/pd/issues/4411
-			"(enable JointConsensus) remove 1 voter from 2 voter replicas raft group, with transfer leader",
-			true,
-			[]*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}},
-			[]*metapb.Peer{{Id: 2, StoreId: 2}},
-			OpLeader | OpRegion,
-			[]OpStep{
+			name:              "(enable JointConsensus) remove 1 voter from 2 voter replicas raft group, with transfer leader",
+			useJointConsensus: true,
+			originPeers:       []*metapb.Peer{{Id: 1, StoreId: 1}, {Id: 2, StoreId: 2}},
+			targetPeers:       []*metapb.Peer{{Id: 2, StoreId: 2}},
+			kind:              OpLeader | OpRegion,
+			steps: []OpStep{
 				TransferLeader{FromStore: 1, ToStore: 2},
 				ChangePeerV2Enter{
 					PromoteLearners: []PromoteLearner{},

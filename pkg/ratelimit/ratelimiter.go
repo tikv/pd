@@ -26,8 +26,8 @@ import (
 // It implements `Available` function which is not included in `golang.org/x/time/rate`.
 // Note: AvailableN will increase the wait time of WaitN.
 type RateLimiter struct {
-	mu      syncutil.Mutex
 	limiter *rate.Limiter
+	mu      syncutil.Mutex
 }
 
 // NewRateLimiter returns a new Limiter that allows events up to rate r (it means limiter refill r token per second)

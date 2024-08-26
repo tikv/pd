@@ -39,9 +39,9 @@ const (
 // 6. any store label is changed
 // 7. any store state is changed
 type RegionRuleFitCacheManager struct {
-	mu           syncutil.RWMutex
 	regionCaches map[uint64]*regionRuleFitCache
 	storeCaches  map[uint64]*storeCache
+	mu           syncutil.RWMutex
 }
 
 // NewRegionRuleFitCacheManager returns RegionRuleFitCacheManager
@@ -96,10 +96,10 @@ func (manager *RegionRuleFitCacheManager) SetCache(region *core.RegionInfo, fit 
 
 // regionRuleFitCache stores regions RegionFit result and involving variables
 type regionRuleFitCache struct {
-	region       regionCache
+	bestFit      *RegionFit
 	regionStores []*storeCache
 	rules        []ruleCache
-	bestFit      *RegionFit
+	region       regionCache
 	hitCount     uint32
 }
 
@@ -175,8 +175,8 @@ func toRuleCacheList(rules []*Rule) (c []ruleCache) {
 }
 
 type storeCache struct {
-	storeID uint64
 	labels  map[string]string
+	storeID uint64
 	state   metapb.StoreState
 }
 

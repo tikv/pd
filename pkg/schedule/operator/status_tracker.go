@@ -26,9 +26,9 @@ type statusTimes [firstEndStatus + 1]time.Time
 
 // OpStatusTracker represents the status of an operator.
 type OpStatusTracker struct {
+	reachTimes statusTimes
 	rw         syncutil.RWMutex
-	current    OpStatus    // Current status
-	reachTimes statusTimes // Time when reach the current status
+	current    OpStatus
 }
 
 // NewOpStatusTracker creates an OpStatus.
@@ -138,8 +138,8 @@ func (trk *OpStatusTracker) String() string {
 }
 
 type opAdditionalInfo struct {
-	syncutil.RWMutex
 	value map[string]string
+	syncutil.RWMutex
 }
 
 // SetAdditionalInfo sets additional info with key and value.

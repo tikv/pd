@@ -473,9 +473,9 @@ func (suite *storeTestSuite) TestDownState() {
 
 func (suite *storeTestSuite) TestGetAllLimit() {
 	testCases := []struct {
+		expectedStores map[uint64]struct{}
 		name           string
 		url            string
-		expectedStores map[uint64]struct{}
 	}{
 		{
 			name: "includeTombstone",

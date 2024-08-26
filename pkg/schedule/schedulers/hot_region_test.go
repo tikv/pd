@@ -242,7 +242,7 @@ func TestSplitIfRegionTooHot(t *testing.T) {
 	tc.UpdateStorageReadBytes(3, 1*units.MiB*utils.StoreHeartBeatReportInterval)
 	// Region 1, 2 and 3 are hot regions.
 	addRegionInfo(tc, utils.Read, []testRegionInfo{
-		{1, []uint64{1, 2, 3}, 4 * units.MiB, 0, 0},
+		{[]uint64{1, 2, 3}, 1, 4 * units.MiB, 0, 0},
 	})
 	tc.SetRegionBucketEnabled(true)
 	ops, _ := hb.Schedule(tc, false)
@@ -260,7 +260,7 @@ func TestSplitIfRegionTooHot(t *testing.T) {
 	tc.UpdateStorageWrittenBytes(3, 1*units.MiB*utils.StoreHeartBeatReportInterval)
 	// Region 1, 2 and 3 are hot regions.
 	addRegionInfo(tc, utils.Write, []testRegionInfo{
-		{1, []uint64{1, 2, 3}, 4 * units.MiB, 0, 0},
+		{[]uint64{1, 2, 3}, 1, 4 * units.MiB, 0, 0},
 	})
 	hb, _ = CreateScheduler(writeType, oc, storage.NewStorageWithMemoryBackend(), nil)
 	hb.(*hotScheduler).types = []resourceType{writePeer}
@@ -429,9 +429,9 @@ func checkHotWriteRegionPlacement(re *require.Assertions, enablePlacementRules b
 
 	// Region 1, 2 and 3 are hot regions.
 	addRegionInfo(tc, utils.Write, []testRegionInfo{
-		{1, []uint64{1, 3, 5}, 512 * units.KiB, 0, 0},
-		{2, []uint64{1, 4, 6}, 512 * units.KiB, 0, 0},
-		{3, []uint64{1, 3, 6}, 512 * units.KiB, 0, 0},
+		{[]uint64{1, 3, 5}, 1, 512 * units.KiB, 0, 0},
+		{[]uint64{1, 4, 6}, 2, 512 * units.KiB, 0, 0},
+		{[]uint64{1, 3, 6}, 3, 512 * units.KiB, 0, 0},
 	})
 	ops, _ := hb.Schedule(tc, false)
 	re.NotEmpty(ops)
@@ -495,9 +495,9 @@ func checkHotWriteRegionScheduleByteRateOnly(re *require.Assertions, enablePlace
 	// |     3     |       1      |        2       |       4        |      512KB    |
 	// Region 1, 2 and 3 are hot regions.
 	addRegionInfo(tc, utils.Write, []testRegionInfo{
-		{1, []uint64{1, 2, 3}, 512 * units.KiB, 0, 0},
-		{2, []uint64{1, 3, 4}, 512 * units.KiB, 0, 0},
-		{3, []uint64{1, 2, 4}, 512 * units.KiB, 0, 0},
+		{[]uint64{1, 2, 3}, 1, 512 * units.KiB, 0, 0},
+		{[]uint64{1, 3, 4}, 2, 512 * units.KiB, 0, 0},
+		{[]uint64{1, 2, 4}, 3, 512 * units.KiB, 0, 0},
 	})
 	ops, _ := hb.Schedule(tc, false)
 	re.NotEmpty(ops)
@@ -575,11 +575,11 @@ func checkHotWriteRegionScheduleByteRateOnly(re *require.Assertions, enablePlace
 	// |     4     |       5      |        6       |       4        |      512KB    |
 	// |     5     |       3      |        4       |       5        |      512KB    |
 	addRegionInfo(tc, utils.Write, []testRegionInfo{
-		{1, []uint64{1, 2, 3}, 512 * units.KiB, 0, 0},
-		{2, []uint64{1, 2, 3}, 512 * units.KiB, 0, 0},
-		{3, []uint64{6, 1, 4}, 512 * units.KiB, 0, 0},
-		{4, []uint64{5, 6, 4}, 512 * units.KiB, 0, 0},
-		{5, []uint64{3, 4, 5}, 512 * units.KiB, 0, 0},
+		{[]uint64{1, 2, 3}, 1, 512 * units.KiB, 0, 0},
+		{[]uint64{1, 2, 3}, 2, 512 * units.KiB, 0, 0},
+		{[]uint64{6, 1, 4}, 3, 512 * units.KiB, 0, 0},
+		{[]uint64{5, 6, 4}, 4, 512 * units.KiB, 0, 0},
+		{[]uint64{3, 4, 5}, 5, 512 * units.KiB, 0, 0},
 	})
 
 	// 6 possible operator.
@@ -690,10 +690,10 @@ func TestHotWriteRegionScheduleByteRateOnlyWithTiFlash(t *testing.T) {
 	// |     4     |       2      |                |                |      10       |      100 B    |
 	// Region 1, 2 and 3 are hot regions.
 	testRegions := []testRegionInfo{
-		{1, []uint64{1, 2, 3, 8}, 512 * units.KiB, 5 * units.KiB, 3000},
-		{2, []uint64{1, 3, 4, 8}, 512 * units.KiB, 5 * units.KiB, 3000},
-		{3, []uint64{1, 2, 4, 9}, 512 * units.KiB, 5 * units.KiB, 3000},
-		{4, []uint64{2, 10}, 100, 1, 1},
+		{[]uint64{1, 2, 3, 8}, 1, 512 * units.KiB, 5 * units.KiB, 3000},
+		{[]uint64{1, 3, 4, 8}, 2, 512 * units.KiB, 5 * units.KiB, 3000},
+		{[]uint64{1, 2, 4, 9}, 3, 512 * units.KiB, 5 * units.KiB, 3000},
+		{[]uint64{2, 10}, 4, 100, 1, 1},
 	}
 	addRegionInfo(tc, utils.Write, testRegions)
 	regionBytesSum := 0.0
@@ -866,9 +866,9 @@ func TestHotWriteRegionScheduleWithQuery(t *testing.T) {
 	tc.UpdateStorageWriteQuery(3, 9000*utils.StoreHeartBeatReportInterval)
 
 	addRegionInfo(tc, utils.Write, []testRegionInfo{
-		{1, []uint64{1, 2, 3}, 500, 0, 500},
-		{2, []uint64{1, 2, 3}, 500, 0, 500},
-		{3, []uint64{2, 1, 3}, 500, 0, 500},
+		{[]uint64{1, 2, 3}, 1, 500, 0, 500},
+		{[]uint64{1, 2, 3}, 2, 500, 0, 500},
+		{[]uint64{2, 1, 3}, 3, 500, 0, 500},
 	})
 	for i := 0; i < 100; i++ {
 		clearPendingInfluence(hb.(*hotScheduler))
@@ -908,9 +908,9 @@ func TestHotWriteRegionScheduleWithKeyRate(t *testing.T) {
 	tc.UpdateStorageWrittenStats(5, 8.9*units.MiB*utils.StoreHeartBeatReportInterval, 9.2*units.MiB*utils.StoreHeartBeatReportInterval)
 
 	addRegionInfo(tc, utils.Write, []testRegionInfo{
-		{1, []uint64{2, 1, 3}, 0.5 * units.MiB, 0.5 * units.MiB, 0},
-		{2, []uint64{2, 1, 3}, 0.5 * units.MiB, 0.5 * units.MiB, 0},
-		{3, []uint64{2, 4, 3}, 0.05 * units.MiB, 0.1 * units.MiB, 0},
+		{[]uint64{2, 1, 3}, 1, 0.5 * units.MiB, 0.5 * units.MiB, 0},
+		{[]uint64{2, 1, 3}, 2, 0.5 * units.MiB, 0.5 * units.MiB, 0},
+		{[]uint64{2, 4, 3}, 3, 0.05 * units.MiB, 0.1 * units.MiB, 0},
 	})
 
 	for i := 0; i < 100; i++ {
@@ -959,9 +959,9 @@ func TestHotWriteRegionScheduleUnhealthyStore(t *testing.T) {
 	tc.UpdateStorageWrittenStats(3, 9.5*units.MiB*utils.StoreHeartBeatReportInterval, 9.5*units.MiB*utils.StoreHeartBeatReportInterval)
 	tc.UpdateStorageWrittenStats(4, 0*units.MiB*utils.StoreHeartBeatReportInterval, 0*units.MiB*utils.StoreHeartBeatReportInterval)
 	addRegionInfo(tc, utils.Write, []testRegionInfo{
-		{1, []uint64{1, 2, 3}, 0.5 * units.MiB, 0.5 * units.MiB, 0},
-		{2, []uint64{2, 1, 3}, 0.5 * units.MiB, 0.5 * units.MiB, 0},
-		{3, []uint64{3, 2, 1}, 0.5 * units.MiB, 0.5 * units.MiB, 0},
+		{[]uint64{1, 2, 3}, 1, 0.5 * units.MiB, 0.5 * units.MiB, 0},
+		{[]uint64{2, 1, 3}, 2, 0.5 * units.MiB, 0.5 * units.MiB, 0},
+		{[]uint64{3, 2, 1}, 3, 0.5 * units.MiB, 0.5 * units.MiB, 0},
 	})
 
 	intervals := []time.Duration{
@@ -1006,9 +1006,9 @@ func TestHotWriteRegionScheduleCheckHot(t *testing.T) {
 	tc.UpdateStorageWrittenStats(4, 9.5*units.MiB*utils.StoreHeartBeatReportInterval, 10*units.MiB*utils.StoreHeartBeatReportInterval)
 
 	addRegionInfo(tc, utils.Write, []testRegionInfo{
-		{1, []uint64{1, 2, 3}, 90, 0.5 * units.MiB, 0},              // no hot
-		{1, []uint64{2, 1, 3}, 90, 0.5 * units.MiB, 0},              // no hot
-		{2, []uint64{3, 2, 1}, 0.5 * units.MiB, 0.5 * units.MiB, 0}, // byteDecRatio is greater than greatDecRatio
+		{[]uint64{1, 2, 3}, 1, 90, 0.5 * units.MiB, 0},              // no hot
+		{[]uint64{2, 1, 3}, 1, 90, 0.5 * units.MiB, 0},              // no hot
+		{[]uint64{3, 2, 1}, 2, 0.5 * units.MiB, 0.5 * units.MiB, 0}, // byteDecRatio is greater than greatDecRatio
 	})
 
 	ops, _ := hb.Schedule(tc, false)
@@ -1043,13 +1043,13 @@ func TestHotWriteRegionScheduleWithLeader(t *testing.T) {
 	// store3 has 2 peer as leader
 	// If transfer leader from store2 to store1 or store3, it will keep on looping, which introduces a lot of unnecessary scheduling
 	addRegionInfo(tc, utils.Write, []testRegionInfo{
-		{1, []uint64{1, 2, 3}, 0.5 * units.MiB, 1 * units.MiB, 0},
-		{2, []uint64{1, 2, 3}, 0.5 * units.MiB, 1 * units.MiB, 0},
-		{3, []uint64{2, 1, 3}, 0.5 * units.MiB, 1 * units.MiB, 0},
-		{4, []uint64{2, 1, 3}, 0.5 * units.MiB, 1 * units.MiB, 0},
-		{5, []uint64{2, 1, 3}, 0.5 * units.MiB, 1 * units.MiB, 0},
-		{6, []uint64{3, 1, 2}, 0.5 * units.MiB, 1 * units.MiB, 0},
-		{7, []uint64{3, 1, 2}, 0.5 * units.MiB, 1 * units.MiB, 0},
+		{[]uint64{1, 2, 3}, 1, 0.5 * units.MiB, 1 * units.MiB, 0},
+		{[]uint64{1, 2, 3}, 2, 0.5 * units.MiB, 1 * units.MiB, 0},
+		{[]uint64{2, 1, 3}, 3, 0.5 * units.MiB, 1 * units.MiB, 0},
+		{[]uint64{2, 1, 3}, 4, 0.5 * units.MiB, 1 * units.MiB, 0},
+		{[]uint64{2, 1, 3}, 5, 0.5 * units.MiB, 1 * units.MiB, 0},
+		{[]uint64{3, 1, 2}, 6, 0.5 * units.MiB, 1 * units.MiB, 0},
+		{[]uint64{3, 1, 2}, 7, 0.5 * units.MiB, 1 * units.MiB, 0},
 	})
 
 	for i := 0; i < 100; i++ {
@@ -1059,7 +1059,7 @@ func TestHotWriteRegionScheduleWithLeader(t *testing.T) {
 	}
 
 	addRegionInfo(tc, utils.Write, []testRegionInfo{
-		{8, []uint64{2, 1, 3}, 0.5 * units.MiB, 1 * units.MiB, 0},
+		{[]uint64{2, 1, 3}, 8, 0.5 * units.MiB, 1 * units.MiB, 0},
 	})
 
 	// store1 has 2 peer as leader
@@ -1109,22 +1109,22 @@ func checkHotWriteRegionScheduleWithPendingInfluence(re *require.Assertions, dim
 	if dim == 0 { // byte rate
 		hb.(*hotScheduler).conf.WriteLeaderPriorities = []string{utils.KeyPriority, utils.BytePriority}
 		addRegionInfo(tc, utils.Write, []testRegionInfo{
-			{1, []uint64{1, 2, 3}, 512 * units.KiB, 0, 0},
-			{2, []uint64{1, 2, 3}, 512 * units.KiB, 0, 0},
-			{3, []uint64{1, 2, 3}, 512 * units.KiB, 0, 0},
-			{4, []uint64{1, 2, 3}, 512 * units.KiB, 0, 0},
-			{5, []uint64{1, 2, 3}, 512 * units.KiB, 0, 0},
-			{6, []uint64{1, 2, 3}, 512 * units.KiB, 0, 0},
+			{peers: []uint64{1, 2, 3}, id: 1, byteRate: 512 * units.KiB, keyRate: 0, queryRate: 0},
+			{peers: []uint64{1, 2, 3}, id: 2, byteRate: 512 * units.KiB, keyRate: 0, queryRate: 0},
+			{peers: []uint64{1, 2, 3}, id: 3, byteRate: 512 * units.KiB, keyRate: 0, queryRate: 0},
+			{peers: []uint64{1, 2, 3}, id: 4, byteRate: 512 * units.KiB, keyRate: 0, queryRate: 0},
+			{peers: []uint64{1, 2, 3}, id: 5, byteRate: 512 * units.KiB, keyRate: 0, queryRate: 0},
+			{peers: []uint64{1, 2, 3}, id: 6, byteRate: 512 * units.KiB, keyRate: 0, queryRate: 0},
 		})
 	} else if dim == 1 { // key rate
 		hb.(*hotScheduler).conf.WriteLeaderPriorities = []string{utils.BytePriority, utils.KeyPriority}
 		addRegionInfo(tc, utils.Write, []testRegionInfo{
-			{1, []uint64{1, 2, 3}, 0, 512 * units.KiB, 0},
-			{2, []uint64{1, 2, 3}, 0, 512 * units.KiB, 0},
-			{3, []uint64{1, 2, 3}, 0, 512 * units.KiB, 0},
-			{4, []uint64{1, 2, 3}, 0, 512 * units.KiB, 0},
-			{5, []uint64{1, 2, 3}, 0, 512 * units.KiB, 0},
-			{6, []uint64{1, 2, 3}, 0, 512 * units.KiB, 0},
+			{peers: []uint64{1, 2, 3}, id: 1, byteRate: 0, keyRate: 512 * units.KiB, queryRate: 0},
+			{peers: []uint64{1, 2, 3}, id: 2, byteRate: 0, keyRate: 512 * units.KiB, queryRate: 0},
+			{peers: []uint64{1, 2, 3}, id: 3, byteRate: 0, keyRate: 512 * units.KiB, queryRate: 0},
+			{peers: []uint64{1, 2, 3}, id: 4, byteRate: 0, keyRate: 512 * units.KiB, queryRate: 0},
+			{peers: []uint64{1, 2, 3}, id: 5, byteRate: 0, keyRate: 512 * units.KiB, queryRate: 0},
+			{peers: []uint64{1, 2, 3}, id: 6, byteRate: 0, keyRate: 512 * units.KiB, queryRate: 0},
 		})
 	}
 
@@ -1223,13 +1223,13 @@ func TestHotWriteRegionScheduleWithRuleEnabled(t *testing.T) {
 	tc.UpdateStorageWrittenKeys(3, 10*units.MiB*utils.StoreHeartBeatReportInterval)
 
 	addRegionInfo(tc, utils.Write, []testRegionInfo{
-		{1, []uint64{1, 2, 3}, 0.5 * units.MiB, 1 * units.MiB, 0},
-		{2, []uint64{1, 2, 3}, 0.5 * units.MiB, 1 * units.MiB, 0},
-		{3, []uint64{2, 1, 3}, 0.5 * units.MiB, 1 * units.MiB, 0},
-		{4, []uint64{2, 1, 3}, 0.5 * units.MiB, 1 * units.MiB, 0},
-		{5, []uint64{2, 1, 3}, 0.5 * units.MiB, 1 * units.MiB, 0},
-		{6, []uint64{2, 1, 3}, 0.5 * units.MiB, 1 * units.MiB, 0},
-		{7, []uint64{2, 1, 3}, 0.5 * units.MiB, 1 * units.MiB, 0},
+		{peers: []uint64{1, 2, 3}, id: 1, byteRate: 0.5 * units.MiB, keyRate: 1 * units.MiB, queryRate: 0},
+		{peers: []uint64{1, 2, 3}, id: 2, byteRate: 0.5 * units.MiB, keyRate: 1 * units.MiB, queryRate: 0},
+		{peers: []uint64{2, 1, 3}, id: 3, byteRate: 0.5 * units.MiB, keyRate: 1 * units.MiB, queryRate: 0},
+		{peers: []uint64{2, 1, 3}, id: 4, byteRate: 0.5 * units.MiB, keyRate: 1 * units.MiB, queryRate: 0},
+		{peers: []uint64{2, 1, 3}, id: 5, byteRate: 0.5 * units.MiB, keyRate: 1 * units.MiB, queryRate: 0},
+		{peers: []uint64{2, 1, 3}, id: 6, byteRate: 0.5 * units.MiB, keyRate: 1 * units.MiB, queryRate: 0},
+		{peers: []uint64{2, 1, 3}, id: 7, byteRate: 0.5 * units.MiB, keyRate: 1 * units.MiB, queryRate: 0},
 	})
 
 	for i := 0; i < 100; i++ {
@@ -1284,10 +1284,10 @@ func TestHotReadRegionScheduleByteRateOnly(t *testing.T) {
 	// |     11    |       1      |        2       |       3        |          7KB       |
 	// Region 1, 2 and 3 are hot regions.
 	addRegionInfo(tc, utils.Read, []testRegionInfo{
-		{1, []uint64{1, 2, 3}, 512 * units.KiB, 0, 0},
-		{2, []uint64{2, 1, 3}, 511 * units.KiB, 0, 0},
-		{3, []uint64{1, 2, 3}, 510 * units.KiB, 0, 0},
-		{11, []uint64{1, 2, 3}, 7 * units.KiB, 0, 0},
+		{[]uint64{1, 2, 3}, 1, 512 * units.KiB, 0, 0},
+		{[]uint64{2, 1, 3}, 2, 511 * units.KiB, 0, 0},
+		{[]uint64{1, 2, 3}, 3, 510 * units.KiB, 0, 0},
+		{[]uint64{1, 2, 3}, 11, 7 * units.KiB, 0, 0},
 	})
 
 	testutil.Eventually(re, func() bool {
@@ -1342,8 +1342,8 @@ func TestHotReadRegionScheduleByteRateOnly(t *testing.T) {
 	// |     5     |       4      |        2       |       5        |        508KB       |
 	// |     11    |       1      |        2       |       3        |          7KB       |
 	addRegionInfo(tc, utils.Read, []testRegionInfo{
-		{4, []uint64{1, 2, 3}, 509 * units.KiB, 0, 0},
-		{5, []uint64{4, 2, 5}, 508 * units.KiB, 0, 0},
+		{[]uint64{1, 2, 3}, 4, 509 * units.KiB, 0, 0},
+		{[]uint64{4, 2, 5}, 5, 508 * units.KiB, 0, 0},
 	})
 
 	// We will move leader peer of region 1 from 1 to 5
@@ -1388,8 +1388,8 @@ func TestHotReadRegionScheduleWithQuery(t *testing.T) {
 	tc.UpdateStorageReadQuery(3, 9000*utils.StoreHeartBeatReportInterval)
 
 	addRegionInfo(tc, utils.Read, []testRegionInfo{
-		{1, []uint64{1, 2, 3}, 0, 0, 500},
-		{2, []uint64{2, 1, 3}, 0, 0, 500},
+		{[]uint64{1, 2, 3}, 1, 0, 0, 500},
+		{[]uint64{2, 1, 3}, 2, 0, 0, 500},
 	})
 
 	for i := 0; i < 100; i++ {
@@ -1426,9 +1426,9 @@ func TestHotReadRegionScheduleWithKeyRate(t *testing.T) {
 	tc.UpdateStorageReadStats(5, 8.9*units.MiB*utils.StoreHeartBeatReportInterval, 9.2*units.MiB*utils.StoreHeartBeatReportInterval)
 
 	addRegionInfo(tc, utils.Read, []testRegionInfo{
-		{1, []uint64{1, 2, 4}, 0.5 * units.MiB, 0.5 * units.MiB, 0},
-		{2, []uint64{1, 2, 4}, 0.5 * units.MiB, 0.5 * units.MiB, 0},
-		{3, []uint64{3, 4, 5}, 0.05 * units.MiB, 0.1 * units.MiB, 0},
+		{[]uint64{1, 2, 4}, 1, 0.5 * units.MiB, 0.5 * units.MiB, 0},
+		{[]uint64{1, 2, 4}, 2, 0.5 * units.MiB, 0.5 * units.MiB, 0},
+		{[]uint64{3, 4, 5}, 3, 0.05 * units.MiB, 0.1 * units.MiB, 0},
 	})
 
 	for i := 0; i < 100; i++ {
@@ -1493,25 +1493,25 @@ func checkHotReadRegionScheduleWithPendingInfluence(re *require.Assertions, dim 
 
 	if dim == 0 { // byte rate
 		addRegionInfo(tc, utils.Read, []testRegionInfo{
-			{1, []uint64{1, 2, 3}, 512 * units.KiB, 0, 0},
-			{2, []uint64{1, 2, 3}, 512 * units.KiB, 0, 0},
-			{3, []uint64{1, 2, 3}, 512 * units.KiB, 0, 0},
-			{4, []uint64{1, 2, 3}, 512 * units.KiB, 0, 0},
-			{5, []uint64{2, 1, 3}, 512 * units.KiB, 0, 0},
-			{6, []uint64{2, 1, 3}, 512 * units.KiB, 0, 0},
-			{7, []uint64{3, 2, 1}, 512 * units.KiB, 0, 0},
-			{8, []uint64{3, 2, 1}, 512 * units.KiB, 0, 0},
+			{peers: []uint64{1, 2, 3}, id: 1, byteRate: 512 * units.KiB, keyRate: 0, queryRate: 0},
+			{peers: []uint64{1, 2, 3}, id: 2, byteRate: 512 * units.KiB, keyRate: 0, queryRate: 0},
+			{peers: []uint64{1, 2, 3}, id: 3, byteRate: 512 * units.KiB, keyRate: 0, queryRate: 0},
+			{peers: []uint64{1, 2, 3}, id: 4, byteRate: 512 * units.KiB, keyRate: 0, queryRate: 0},
+			{peers: []uint64{2, 1, 3}, id: 5, byteRate: 512 * units.KiB, keyRate: 0, queryRate: 0},
+			{peers: []uint64{2, 1, 3}, id: 6, byteRate: 512 * units.KiB, keyRate: 0, queryRate: 0},
+			{peers: []uint64{3, 2, 1}, id: 7, byteRate: 512 * units.KiB, keyRate: 0, queryRate: 0},
+			{peers: []uint64{3, 2, 1}, id: 8, byteRate: 512 * units.KiB, keyRate: 0, queryRate: 0},
 		})
 	} else if dim == 1 { // key rate
 		addRegionInfo(tc, utils.Read, []testRegionInfo{
-			{1, []uint64{1, 2, 3}, 0, 512 * units.KiB, 0},
-			{2, []uint64{1, 2, 3}, 0, 512 * units.KiB, 0},
-			{3, []uint64{1, 2, 3}, 0, 512 * units.KiB, 0},
-			{4, []uint64{1, 2, 3}, 0, 512 * units.KiB, 0},
-			{5, []uint64{2, 1, 3}, 0, 512 * units.KiB, 0},
-			{6, []uint64{2, 1, 3}, 0, 512 * units.KiB, 0},
-			{7, []uint64{3, 2, 1}, 0, 512 * units.KiB, 0},
-			{8, []uint64{3, 2, 1}, 0, 512 * units.KiB, 0},
+			{peers: []uint64{1, 2, 3}, id: 1, byteRate: 0, keyRate: 512 * units.KiB, queryRate: 0},
+			{peers: []uint64{1, 2, 3}, id: 2, byteRate: 0, keyRate: 512 * units.KiB, queryRate: 0},
+			{peers: []uint64{1, 2, 3}, id: 3, byteRate: 0, keyRate: 512 * units.KiB, queryRate: 0},
+			{peers: []uint64{1, 2, 3}, id: 4, byteRate: 0, keyRate: 512 * units.KiB, queryRate: 0},
+			{peers: []uint64{2, 1, 3}, id: 5, byteRate: 0, keyRate: 512 * units.KiB, queryRate: 0},
+			{peers: []uint64{2, 1, 3}, id: 6, byteRate: 0, keyRate: 512 * units.KiB, queryRate: 0},
+			{peers: []uint64{3, 2, 1}, id: 7, byteRate: 0, keyRate: 512 * units.KiB, queryRate: 0},
+			{peers: []uint64{3, 2, 1}, id: 8, byteRate: 0, keyRate: 512 * units.KiB, queryRate: 0},
 		})
 	}
 
@@ -1597,7 +1597,7 @@ func TestHotReadWithEvictLeaderScheduler(t *testing.T) {
 	tc.UpdateStorageReadStats(3, 10.05*units.MB*utils.StoreHeartBeatReportInterval, 10.05*units.MB*utils.StoreHeartBeatReportInterval)
 	tc.UpdateStorageReadStats(4, 0.0*units.MB*utils.StoreHeartBeatReportInterval, 0.0*units.MB*utils.StoreHeartBeatReportInterval)
 	addRegionInfo(tc, utils.Read, []testRegionInfo{
-		{1, []uint64{1, 5, 6}, 0.05 * units.MB, 0.05 * units.MB, 0},
+		{[]uint64{1, 5, 6}, 1, 0.05 * units.MB, 0.05 * units.MB, 0},
 	})
 	ops, _ := hb.Schedule(tc, false)
 	re.Len(ops, 1)
@@ -1617,11 +1617,11 @@ func TestHotCacheUpdateCache(t *testing.T) {
 
 	// For read flow
 	addRegionInfo(tc, utils.Read, []testRegionInfo{
-		{1, []uint64{1, 2, 3}, 512 * units.KiB, 0, 0},
-		{2, []uint64{2, 1, 3}, 512 * units.KiB, 0, 0},
-		{3, []uint64{1, 2, 3}, 20 * units.KiB, 0, 0},
+		{peers: []uint64{1, 2, 3}, id: 1, byteRate: 512 * units.KiB, keyRate: 0, queryRate: 0},
+		{peers: []uint64{2, 1, 3}, id: 2, byteRate: 512 * units.KiB, keyRate: 0, queryRate: 0},
+		{peers: []uint64{1, 2, 3}, id: 3, byteRate: 20 * units.KiB, keyRate: 0, queryRate: 0},
 		// lower than hot read flow rate, but higher than write flow rate
-		{11, []uint64{1, 2, 3}, 7 * units.KiB, 0, 0},
+		{peers: []uint64{1, 2, 3}, id: 11, byteRate: 7 * units.KiB, keyRate: 0, queryRate: 0},
 	})
 	stats := tc.RegionStats(utils.Read, 0)
 	re.Len(stats[1], 3)
@@ -1629,8 +1629,8 @@ func TestHotCacheUpdateCache(t *testing.T) {
 	re.Len(stats[3], 3)
 
 	addRegionInfo(tc, utils.Read, []testRegionInfo{
-		{3, []uint64{2, 1, 3}, 20 * units.KiB, 0, 0},
-		{11, []uint64{1, 2, 3}, 7 * units.KiB, 0, 0},
+		{peers: []uint64{2, 1, 3}, id: 3, byteRate: 20 * units.KiB, keyRate: 0, queryRate: 0},
+		{peers: []uint64{1, 2, 3}, id: 11, byteRate: 7 * units.KiB, keyRate: 0, queryRate: 0},
 	})
 	stats = tc.RegionStats(utils.Read, 0)
 	re.Len(stats[1], 3)
@@ -1638,9 +1638,9 @@ func TestHotCacheUpdateCache(t *testing.T) {
 	re.Len(stats[3], 3)
 
 	addRegionInfo(tc, utils.Write, []testRegionInfo{
-		{4, []uint64{1, 2, 3}, 512 * units.KiB, 0, 0},
-		{5, []uint64{1, 2, 3}, 20 * units.KiB, 0, 0},
-		{6, []uint64{1, 2, 3}, 0.8 * units.KiB, 0, 0},
+		{peers: []uint64{1, 2, 3}, id: 4, byteRate: 512 * units.KiB, keyRate: 0, queryRate: 0},
+		{peers: []uint64{1, 2, 3}, id: 5, byteRate: 20 * units.KiB, keyRate: 0, queryRate: 0},
+		{peers: []uint64{1, 2, 3}, id: 6, byteRate: 0.8 * units.KiB, keyRate: 0, queryRate: 0},
 	})
 	stats = tc.RegionStats(utils.Write, 0)
 	re.Len(stats[1], 2)
@@ -1648,7 +1648,7 @@ func TestHotCacheUpdateCache(t *testing.T) {
 	re.Len(stats[3], 2)
 
 	addRegionInfo(tc, utils.Write, []testRegionInfo{
-		{5, []uint64{1, 2, 5}, 20 * units.KiB, 0, 0},
+		{peers: []uint64{1, 2, 5}, id: 5, byteRate: 20 * units.KiB, keyRate: 0, queryRate: 0},
 	})
 	stats = tc.RegionStats(utils.Write, 0)
 
@@ -1659,11 +1659,11 @@ func TestHotCacheUpdateCache(t *testing.T) {
 
 	// For leader read flow
 	addRegionLeaderReadInfo(tc, []testRegionInfo{
-		{21, []uint64{4, 5, 6}, 512 * units.KiB, 0, 0},
-		{22, []uint64{5, 4, 6}, 512 * units.KiB, 0, 0},
-		{23, []uint64{4, 5, 6}, 20 * units.KiB, 0, 0},
+		{peers: []uint64{4, 5, 6}, id: 21, byteRate: 512 * units.KiB, keyRate: 0, queryRate: 0},
+		{peers: []uint64{5, 4, 6}, id: 22, byteRate: 512 * units.KiB, keyRate: 0, queryRate: 0},
+		{peers: []uint64{4, 5, 6}, id: 23, byteRate: 20 * units.KiB, keyRate: 0, queryRate: 0},
 		// lower than hot read flow rate, but higher than write flow rate
-		{31, []uint64{4, 5, 6}, 7 * units.KiB, 0, 0},
+		{peers: []uint64{4, 5, 6}, id: 31, byteRate: 7 * units.KiB, keyRate: 0, queryRate: 0},
 	})
 	stats = tc.RegionStats(utils.Read, 0)
 	re.Len(stats[4], 2)
@@ -1681,14 +1681,14 @@ func TestHotCacheKeyThresholds(t *testing.T) {
 		cancel, _, tc, _ := prepareSchedulersTest()
 		defer cancel()
 		addRegionInfo(tc, utils.Read, []testRegionInfo{
-			{1, []uint64{1, 2, 3}, 0, 1, 0},
-			{2, []uint64{1, 2, 3}, 0, 1 * units.KiB, 0},
+			{[]uint64{1, 2, 3}, 1, 0, 1, 0},
+			{[]uint64{1, 2, 3}, 2, 0, 1 * units.KiB, 0},
 		})
 		stats := tc.RegionStats(utils.Read, 0)
 		re.Len(stats[1], 1)
 		addRegionInfo(tc, utils.Write, []testRegionInfo{
-			{3, []uint64{4, 5, 6}, 0, 1, 0},
-			{4, []uint64{4, 5, 6}, 0, 1 * units.KiB, 0},
+			{[]uint64{4, 5, 6}, 3, 0, 1, 0},
+			{[]uint64{4, 5, 6}, 4, 0, 1 * units.KiB, 0},
 		})
 		stats = tc.RegionStats(utils.Write, 0)
 		re.Len(stats[4], 1)
@@ -1770,10 +1770,10 @@ func TestHotCacheByteAndKey(t *testing.T) {
 		re.Len(stats[1], 500)
 
 		addRegionInfo(tc, utils.Read, []testRegionInfo{
-			{10001, []uint64{1, 2, 3}, 10 * units.KiB, 10 * units.KiB, 0},
-			{10002, []uint64{1, 2, 3}, 500 * units.KiB, 10 * units.KiB, 0},
-			{10003, []uint64{1, 2, 3}, 10 * units.KiB, 500 * units.KiB, 0},
-			{10004, []uint64{1, 2, 3}, 500 * units.KiB, 500 * units.KiB, 0},
+			{[]uint64{1, 2, 3}, 10001, 10 * units.KiB, 10 * units.KiB, 0},
+			{[]uint64{1, 2, 3}, 10002, 500 * units.KiB, 10 * units.KiB, 0},
+			{[]uint64{1, 2, 3}, 10003, 10 * units.KiB, 500 * units.KiB, 0},
+			{[]uint64{1, 2, 3}, 10004, 500 * units.KiB, 500 * units.KiB, 0},
 		})
 		stats = tc.RegionStats(utils.Read, 0)
 		re.Len(stats[1], 503)
@@ -1785,10 +1785,10 @@ func TestHotCacheByteAndKey(t *testing.T) {
 		re.Len(stats[2], 500)
 		re.Len(stats[3], 500)
 		addRegionInfo(tc, utils.Write, []testRegionInfo{
-			{10001, []uint64{1, 2, 3}, 10 * units.KiB, 10 * units.KiB, 0},
-			{10002, []uint64{1, 2, 3}, 500 * units.KiB, 10 * units.KiB, 0},
-			{10003, []uint64{1, 2, 3}, 10 * units.KiB, 500 * units.KiB, 0},
-			{10004, []uint64{1, 2, 3}, 500 * units.KiB, 500 * units.KiB, 0},
+			{[]uint64{1, 2, 3}, 10001, 10 * units.KiB, 10 * units.KiB, 0},
+			{[]uint64{1, 2, 3}, 10002, 500 * units.KiB, 10 * units.KiB, 0},
+			{[]uint64{1, 2, 3}, 10003, 10 * units.KiB, 500 * units.KiB, 0},
+			{[]uint64{1, 2, 3}, 10004, 500 * units.KiB, 500 * units.KiB, 0},
 		})
 		stats = tc.RegionStats(utils.Write, 0)
 		re.Len(stats[1], 503)
@@ -1798,9 +1798,8 @@ func TestHotCacheByteAndKey(t *testing.T) {
 }
 
 type testRegionInfo struct {
-	id uint64
-	// the storeID list for the peers, the leader is stored in the first store
 	peers     []uint64
+	id        uint64
 	byteRate  float64
 	keyRate   float64
 	queryRate float64
@@ -2059,10 +2058,10 @@ func TestInfluenceByRWType(t *testing.T) {
 	tc.UpdateStorageWrittenStats(3, 2*units.MiB*utils.StoreHeartBeatReportInterval, 2*units.MiB*utils.StoreHeartBeatReportInterval)
 	tc.UpdateStorageWrittenStats(4, 1*units.MiB*utils.StoreHeartBeatReportInterval, 1*units.MiB*utils.StoreHeartBeatReportInterval)
 	addRegionInfo(tc, utils.Write, []testRegionInfo{
-		{1, []uint64{2, 1, 3}, 0.5 * units.MiB, 0.5 * units.MiB, 0},
+		{[]uint64{2, 1, 3}, 1, 0.5 * units.MiB, 0.5 * units.MiB, 0},
 	})
 	addRegionInfo(tc, utils.Read, []testRegionInfo{
-		{1, []uint64{2, 1, 3}, 0.5 * units.MiB, 0.5 * units.MiB, 0},
+		{[]uint64{2, 1, 3}, 1, 0.5 * units.MiB, 0.5 * units.MiB, 0},
 	})
 	// must move peer from 1 to 4
 	ops, _ := hb.Schedule(tc, false)
@@ -2083,7 +2082,7 @@ func TestInfluenceByRWType(t *testing.T) {
 	// consider pending amp, there are nine regions or more.
 	for i := 2; i < 13; i++ {
 		addRegionInfo(tc, utils.Write, []testRegionInfo{
-			{uint64(i), []uint64{1, 2, 3}, 0.7 * units.MiB, 0.7 * units.MiB, 0},
+			{[]uint64{1, 2, 3}, uint64(i), 0.7 * units.MiB, 0.7 * units.MiB, 0},
 		})
 	}
 
@@ -2186,8 +2185,8 @@ func TestHotScheduleWithPriority(t *testing.T) {
 	tc.UpdateStorageWrittenStats(5, 1*units.MiB*utils.StoreHeartBeatReportInterval, 1*units.MiB*utils.StoreHeartBeatReportInterval)
 
 	addRegionInfo(tc, utils.Write, []testRegionInfo{
-		{1, []uint64{1, 2, 3}, 2 * units.MiB, 1 * units.MiB, 0},
-		{6, []uint64{4, 2, 3}, 1 * units.MiB, 2 * units.MiB, 0},
+		{[]uint64{1, 2, 3}, 1, 2 * units.MiB, 1 * units.MiB, 0},
+		{[]uint64{4, 2, 3}, 6, 1 * units.MiB, 2 * units.MiB, 0},
 	})
 	hb.(*hotScheduler).conf.WritePeerPriorities = []string{utils.BytePriority, utils.KeyPriority}
 	ops, _ := hb.Schedule(tc, false)
@@ -2209,7 +2208,7 @@ func TestHotScheduleWithPriority(t *testing.T) {
 	tc.UpdateStorageReadStats(2, 1*units.MiB*utils.StoreHeartBeatReportInterval, 7*units.MiB*utils.StoreHeartBeatReportInterval)
 	tc.UpdateStorageReadStats(3, 7*units.MiB*utils.StoreHeartBeatReportInterval, 1*units.MiB*utils.StoreHeartBeatReportInterval)
 	addRegionInfo(tc, utils.Read, []testRegionInfo{
-		{1, []uint64{1, 2, 3}, 2 * units.MiB, 2 * units.MiB, 0},
+		{[]uint64{1, 2, 3}, 1, 2 * units.MiB, 2 * units.MiB, 0},
 	})
 	hb.(*hotScheduler).conf.setHistorySampleDuration(0)
 	hb.(*hotScheduler).conf.ReadPriorities = []string{utils.BytePriority, utils.KeyPriority}
@@ -2287,7 +2286,7 @@ func TestHotScheduleWithStddev(t *testing.T) {
 	tc.UpdateStorageWrittenStats(4, 5*units.MiB*utils.StoreHeartBeatReportInterval, 5*units.MiB*utils.StoreHeartBeatReportInterval)
 	tc.UpdateStorageWrittenStats(5, 4.8*units.MiB*utils.StoreHeartBeatReportInterval, 4.8*units.MiB*utils.StoreHeartBeatReportInterval)
 	addRegionInfo(tc, utils.Write, []testRegionInfo{
-		{6, []uint64{3, 4, 2}, 0.1 * units.MiB, 0.1 * units.MiB, 0},
+		{[]uint64{3, 4, 2}, 6, 0.1 * units.MiB, 0.1 * units.MiB, 0},
 	})
 	hb.(*hotScheduler).conf.WritePeerPriorities = []string{utils.BytePriority, utils.KeyPriority}
 	stddevThreshold = 0.1
@@ -2306,7 +2305,7 @@ func TestHotScheduleWithStddev(t *testing.T) {
 	tc.UpdateStorageWrittenStats(4, 5*units.MiB*utils.StoreHeartBeatReportInterval, 5*units.MiB*utils.StoreHeartBeatReportInterval)
 	tc.UpdateStorageWrittenStats(5, 4.8*units.MiB*utils.StoreHeartBeatReportInterval, 5*units.MiB*utils.StoreHeartBeatReportInterval)
 	addRegionInfo(tc, utils.Write, []testRegionInfo{
-		{6, []uint64{3, 4, 2}, 0.1 * units.MiB, 0.1 * units.MiB, 0},
+		{[]uint64{3, 4, 2}, 6, 0.1 * units.MiB, 0.1 * units.MiB, 0},
 	})
 	hb.(*hotScheduler).conf.WritePeerPriorities = []string{utils.BytePriority, utils.KeyPriority}
 	stddevThreshold = 0.1
@@ -2340,11 +2339,11 @@ func TestHotWriteLeaderScheduleWithPriority(t *testing.T) {
 	tc.UpdateStorageWrittenStats(3, 1*units.MiB*utils.StoreHeartBeatReportInterval, 10*units.MiB*utils.StoreHeartBeatReportInterval)
 
 	addRegionInfo(tc, utils.Write, []testRegionInfo{
-		{1, []uint64{1, 2, 3}, 10 * units.MiB, 10 * units.MiB, 0},
-		{2, []uint64{1, 2, 3}, 10 * units.MiB, 10 * units.MiB, 0},
-		{3, []uint64{1, 2, 3}, 10 * units.MiB, 10 * units.MiB, 0},
-		{4, []uint64{2, 1, 3}, 10 * units.MiB, 0 * units.MiB, 0},
-		{5, []uint64{3, 2, 1}, 0 * units.MiB, 10 * units.MiB, 0},
+		{peers: []uint64{1, 2, 3}, id: 1, byteRate: 10 * units.MiB, keyRate: 10 * units.MiB, queryRate: 0},
+		{peers: []uint64{1, 2, 3}, id: 2, byteRate: 10 * units.MiB, keyRate: 10 * units.MiB, queryRate: 0},
+		{peers: []uint64{1, 2, 3}, id: 3, byteRate: 10 * units.MiB, keyRate: 10 * units.MiB, queryRate: 0},
+		{peers: []uint64{2, 1, 3}, id: 4, byteRate: 10 * units.MiB, keyRate: 0 * units.MiB, queryRate: 0},
+		{peers: []uint64{3, 2, 1}, id: 5, byteRate: 0 * units.MiB, keyRate: 10 * units.MiB, queryRate: 0},
 	})
 	hb.(*hotScheduler).conf.WriteLeaderPriorities = []string{utils.KeyPriority, utils.BytePriority}
 	ops, _ := hb.Schedule(tc, false)
@@ -2651,14 +2650,14 @@ func TestExpect(t *testing.T) {
 	hb, err := CreateScheduler(types.BalanceHotRegionScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.BalanceHotRegionScheduler, nil))
 	re.NoError(err)
 	testCases := []struct {
+		load           *statistics.StoreLoad
+		expect         *statistics.StoreLoad
 		rankVersion    string
+		toleranceRatio float64
+		rs             resourceType
 		strict         bool
 		isSrc          bool
 		allow          bool
-		toleranceRatio float64
-		rs             resourceType
-		load           *statistics.StoreLoad
-		expect         *statistics.StoreLoad
 	}{
 		// test src, it will be allowed when loads are higher than expect
 		{

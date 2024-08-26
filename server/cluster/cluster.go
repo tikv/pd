@@ -136,51 +136,39 @@ type Server interface {
 // store 1 -> /1/raft/s/1, value is metapb.Store
 // region 1 -> /1/raft/r/1, value is metapb.Region
 type RaftCluster struct {
-	syncutil.RWMutex
-	wg sync.WaitGroup
-
-	serverCtx context.Context
-	ctx       context.Context
-	cancel    context.CancelFunc
-
-	*core.BasicCluster // cached cluster info
-
-	etcdClient *clientv3.Client
-	httpClient *http.Client
-
-	running          bool
-	isAPIServiceMode bool
-	meta             *metapb.Cluster
-	storage          storage.Storage
-	minResolvedTS    uint64
-	externalTS       uint64
-
-	// Keep the previous store limit settings when removing a store.
-	prevStoreLimit map[uint64]map[storelimit.Type]float64
-
-	// This below fields are all read-only, we cannot update itself after the raft cluster starts.
-	clusterID uint64
-	id        id.Allocator
-	opt       *config.PersistOptions
-	limiter   *StoreLimiter
+	storage         storage.Storage
+	logRunner       ratelimit.Runner
+	serverCtx       context.Context
+	ctx             context.Context
+	miscRunner      ratelimit.Runner
+	heartbeatRunner ratelimit.Runner
+	id              id.Allocator
+	progressManager *progress.Manager
+	ruleManager     *placement.RuleManager
+	cancel          context.CancelFunc
+	meta            *metapb.Cluster
+	httpClient      *http.Client
+	*core.BasicCluster
+	hbstreams            *hbstream.HeartbeatStreams
+	prevStoreLimit       map[uint64]map[storelimit.Type]float64
+	keyspaceGroupManager *keyspace.GroupManager
+	etcdClient           *clientv3.Client
+	opt                  *config.PersistOptions
+	limiter              *StoreLimiter
 	*schedulingController
-	ruleManager              *placement.RuleManager
+	changedRegions           chan *core.RegionInfo
 	regionLabeler            *labeler.RegionLabeler
 	replicationMode          *replication.ModeManager
 	unsafeRecoveryController *unsaferecovery.Controller
-	progressManager          *progress.Manager
 	regionSyncer             *syncer.RegionSyncer
-	changedRegions           chan *core.RegionInfo
-	keyspaceGroupManager     *keyspace.GroupManager
 	independentServices      sync.Map
-	hbstreams                *hbstream.HeartbeatStreams
-
-	// heartbeatRunner is used to process the subtree update task asynchronously.
-	heartbeatRunner ratelimit.Runner
-	// miscRunner is used to process the statistics and persistent tasks asynchronously.
-	miscRunner ratelimit.Runner
-	// logRunner is used to process the log asynchronously.
-	logRunner ratelimit.Runner
+	wg                       sync.WaitGroup
+	clusterID                uint64
+	externalTS               uint64
+	minResolvedTS            uint64
+	syncutil.RWMutex
+	running          bool
+	isAPIServiceMode bool
 }
 
 // Status saves some state information.
@@ -189,8 +177,8 @@ type RaftCluster struct {
 // - Need to sync with client/http/types.go#ClusterStatus
 type Status struct {
 	RaftBootstrapTime time.Time `json:"raft_bootstrap_time,omitempty"`
-	IsInitialized     bool      `json:"is_initialized"`
 	ReplicationStatus string    `json:"replication_status"`
+	IsInitialized     bool      `json:"is_initialized"`
 }
 
 // NewRaftCluster create a new cluster.

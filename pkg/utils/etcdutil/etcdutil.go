@@ -386,46 +386,25 @@ const (
 
 // LoopWatcher loads data from etcd and sets a watcher for it.
 type LoopWatcher struct {
-	ctx    context.Context
-	wg     *sync.WaitGroup
-	name   string
-	client *clientv3.Client
-
-	// key is the etcd key to watch.
-	key string
-	// isWithPrefix indicates whether the watcher is with prefix.
-	isWithPrefix bool
-
-	// forceLoadCh is used to force loading data from etcd.
-	forceLoadCh chan struct{}
-	// isLoadedCh is used to notify that the data has been loaded from etcd first time.
-	isLoadedCh chan error
-
-	// putFn is used to handle the put event.
-	putFn func(*mvccpb.KeyValue) error
-	// deleteFn is used to handle the delete event.
-	deleteFn func(*mvccpb.KeyValue) error
-	// postEventsFn is used to call after handling all events.
-	postEventsFn func([]*clientv3.Event) error
-	// preEventsFn is used to call before handling all events.
-	preEventsFn func([]*clientv3.Event) error
-
-	// forceLoadMu is used to ensure two force loads have minimal interval.
-	forceLoadMu syncutil.RWMutex
-	// lastTimeForceLoad is used to record the last time force loading data from etcd.
-	lastTimeForceLoad time.Time
-
-	// loadRetryTimes is used to set the retry times for loading data from etcd.
-	loadRetryTimes int
-	// loadBatchSize is used to set the batch size for loading data from etcd.
-	loadBatchSize int64
-	// watchChangeRetryInterval is used to set the retry interval for watching etcd change.
+	lastTimeForceLoad        time.Time
+	ctx                      context.Context
+	preEventsFn              func([]*clientv3.Event) error
+	wg                       *sync.WaitGroup
+	updateClientCh           chan *clientv3.Client
+	client                   *clientv3.Client
+	forceLoadCh              chan struct{}
+	isLoadedCh               chan error
+	putFn                    func(*mvccpb.KeyValue) error
+	deleteFn                 func(*mvccpb.KeyValue) error
+	postEventsFn             func([]*clientv3.Event) error
+	key                      string
+	name                     string
+	loadRetryTimes           int
+	loadBatchSize            int64
 	watchChangeRetryInterval time.Duration
-	// updateClientCh is used to update the etcd client.
-	// It's only used for testing.
-	updateClientCh chan *clientv3.Client
-	// watchChTimeoutDuration is the timeout duration for a watchChan.
-	watchChTimeoutDuration time.Duration
+	watchChTimeoutDuration   time.Duration
+	forceLoadMu              syncutil.RWMutex
+	isWithPrefix             bool
 }
 
 // NewLoopWatcher creates a new LoopWatcher.

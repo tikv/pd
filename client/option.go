@@ -50,19 +50,15 @@ const (
 // option is the configurable option for the PD client.
 // It provides the ability to change some PD client's options online from the outside.
 type option struct {
-	// Static options.
-	gRPCDialOptions   []grpc.DialOption
-	timeout           time.Duration
-	maxRetryTimes     int
-	enableForwarding  bool
-	useTSOServerProxy bool
-	metricsLabels     prometheus.Labels
-	initMetrics       bool
-
-	// Dynamic options.
-	dynamicOptions [dynamicOptionCount]atomic.Value
-
+	dynamicOptions           [dynamicOptionCount]atomic.Value
+	metricsLabels            prometheus.Labels
 	enableTSOFollowerProxyCh chan struct{}
+	gRPCDialOptions          []grpc.DialOption
+	timeout                  time.Duration
+	maxRetryTimes            int
+	enableForwarding         bool
+	useTSOServerProxy        bool
+	initMetrics              bool
 }
 
 // newOption creates a new PD client option with the default values set.

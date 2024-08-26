@@ -31,17 +31,14 @@ var base = int64(time.Second) / int64(time.Microsecond)
 
 // Coordinator managers the operation of the gRPC and HTTP case.
 type Coordinator struct {
-	ctx context.Context
-
+	ctx         context.Context
+	http        map[string]*httpController
+	grpc        map[string]*gRPCController
+	etcd        map[string]*etcdController
 	httpClients []pdHttp.Client
 	gRPCClients []pd.Client
 	etcdClients []*clientv3.Client
-
-	http map[string]*httpController
-	grpc map[string]*gRPCController
-	etcd map[string]*etcdController
-
-	mu sync.RWMutex
+	mu          sync.RWMutex
 }
 
 // NewCoordinator returns a new coordinator.
@@ -188,12 +185,11 @@ func (c *Coordinator) SetEtcdCase(name string, cfg *Config) error {
 
 type httpController struct {
 	HTTPCase
-	clients []pdHttp.Client
 	pctx    context.Context
-
-	ctx    context.Context
-	cancel context.CancelFunc
-	wg     sync.WaitGroup
+	ctx     context.Context
+	cancel  context.CancelFunc
+	clients []pdHttp.Client
+	wg      sync.WaitGroup
 }
 
 func newHTTPController(ctx context.Context, clis []pdHttp.Client, fn HTTPCreateFn) *httpController {
@@ -256,13 +252,11 @@ func (c *httpController) stop() {
 
 type gRPCController struct {
 	GRPCCase
-	clients []pd.Client
 	pctx    context.Context
-
-	ctx    context.Context
-	cancel context.CancelFunc
-
-	wg sync.WaitGroup
+	ctx     context.Context
+	cancel  context.CancelFunc
+	clients []pd.Client
+	wg      sync.WaitGroup
 }
 
 func newGRPCController(ctx context.Context, clis []pd.Client, fn GRPCCreateFn) *gRPCController {
@@ -325,13 +319,11 @@ func (c *gRPCController) stop() {
 
 type etcdController struct {
 	EtcdCase
-	clients []*clientv3.Client
 	pctx    context.Context
-
-	ctx    context.Context
-	cancel context.CancelFunc
-
-	wg sync.WaitGroup
+	ctx     context.Context
+	cancel  context.CancelFunc
+	clients []*clientv3.Client
+	wg      sync.WaitGroup
 }
 
 func newEtcdController(ctx context.Context, clis []*clientv3.Client, fn EtcdCreateFn) *etcdController {

@@ -25,13 +25,13 @@ import (
 )
 
 type serverConfig struct {
+	ClusterConfig       *clusterConfig
 	Name                string
 	DataDir             string
 	ClientURLs          string
 	AdvertiseClientURLs string
 	PeerURLs            string
 	AdvertisePeerURLs   string
-	ClusterConfig       *clusterConfig
 	Join                bool
 }
 

@@ -51,8 +51,8 @@ type tsoStreamBuilder interface {
 }
 
 type pdTSOStreamBuilder struct {
-	serverURL string
 	client    pdpb.PDClient
+	serverURL string
 }
 
 func (b *pdTSOStreamBuilder) build(ctx context.Context, cancel context.CancelFunc, timeout time.Duration) (*tsoStream, error) {
@@ -68,8 +68,8 @@ func (b *pdTSOStreamBuilder) build(ctx context.Context, cancel context.CancelFun
 }
 
 type tsoTSOStreamBuilder struct {
-	serverURL string
 	client    tsopb.TSOClient
+	serverURL string
 }
 
 func (b *tsoTSOStreamBuilder) build(
@@ -177,11 +177,8 @@ func (s tsoTSOStreamAdapter) Recv() (tsoRequestResult, error) {
 }
 
 type tsoStream struct {
+	stream    grpcTSOStreamAdapter
 	serverURL string
-	// The internal gRPC stream.
-	//   - `pdpb.PD_TsoClient` for a leader/follower in the PD cluster.
-	//   - `tsopb.TSO_TsoClient` for a primary/secondary in the TSO cluster.
-	stream grpcTSOStreamAdapter
 }
 
 func (s *tsoStream) getServerURL() string {

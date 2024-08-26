@@ -127,116 +127,64 @@ var (
 
 // Server is the pd server. It implements bs.Server
 type Server struct {
+	ctx context.Context
 	diagnosticspb.DiagnosticsServer
-
-	// Server state. 0 is not running, 1 is running.
-	isRunning int64
-
-	// Server start timestamp
-	startTimestamp int64
-
-	// Configs and initial fields.
-	cfg                             *config.Config
-	serviceMiddlewareCfg            *config.ServiceMiddlewareConfig
-	etcdCfg                         *embed.Config
-	serviceMiddlewarePersistOptions *config.ServiceMiddlewarePersistOptions
-	persistOptions                  *config.PersistOptions
+	storage                         storage.Storage
+	idAllocator                     id.Allocator
+	serverLoopCtx                   context.Context
+	basicCluster                    *core.BasicCluster
+	serviceLabels                   map[string][]apiutil.AccessPath
+	hbStreams                       *hbstream.HeartbeatStreams
 	handler                         *Handler
-
-	ctx              context.Context
-	serverLoopCtx    context.Context
-	serverLoopCancel func()
-	serverLoopWg     sync.WaitGroup
-
-	// for PD leader election.
-	member *member.EmbeddedEtcdMember
-	// etcd client
-	client *clientv3.Client
-	// electionClient is used for leader election.
-	electionClient *clientv3.Client
-	// http client
-	httpClient *http.Client
-	// PD cluster ID.
-	clusterID atomic.Uint64
-	rootPath  string
-
-	// Server services.
-	// for id allocator, we can use one allocator for
-	// store, region and peer, because we just need
-	// a unique ID.
-	idAllocator id.Allocator
-	// for encryption
-	encryptionKeyManager *encryption.Manager
-	// for storage operation.
-	storage storage.Storage
-	// safepoint manager
-	gcSafePointManager *gc.SafePointManager
-	// keyspace manager
-	keyspaceManager *keyspace.Manager
-	// safe point V2 manager
-	safePointV2Manager *gc.SafePointV2Manager
-	// keyspace group manager
-	keyspaceGroupManager *keyspace.GroupManager
-	// for basicCluster operation.
-	basicCluster *core.BasicCluster
-	// for tso.
-	tsoAllocatorManager *tso.AllocatorManager
-	// for raft cluster
-	cluster *cluster.RaftCluster
-	// For async region heartbeat.
-	hbStreams *hbstream.HeartbeatStreams
-	// Zap logger
-	lg       *zap.Logger
-	logProps *log.ZapProperties
-
-	// Callback functions for different stages
-	// startCallbacks will be called after the server is started.
-	startCallbacks []func()
-	// leaderCallbacks will be called after the server becomes leader.
-	leaderCallbacks []func(context.Context) error
-	// closeCallbacks will be called before the server is closed.
-	closeCallbacks []func()
-
-	// hot region history info storage
-	hotRegionStorage *storage.HotRegionStorage
-	// Store as map[string]*grpc.ClientConn
-	clientConns sync.Map
-
-	tsoClientPool struct {
-		syncutil.RWMutex
+	lg                              *zap.Logger
+	serviceMiddlewareCfg            *config.ServiceMiddlewareConfig
+	serverLoopCancel                func()
+	schedulingPrimaryWatcher        *etcdutil.LoopWatcher
+	member                          *member.EmbeddedEtcdMember
+	client                          *clientv3.Client
+	electionClient                  *clientv3.Client
+	httpClient                      *http.Client
+	tsoPrimaryWatcher               *etcdutil.LoopWatcher
+	registry                        *registry.ServiceRegistry
+	cfg                             *config.Config
+	logProps                        *log.ZapProperties
+	serviceAuditBackendLabels       map[string]*audit.BackendLabels
+	gcSafePointManager              *gc.SafePointManager
+	keyspaceManager                 *keyspace.Manager
+	safePointV2Manager              *gc.SafePointV2Manager
+	keyspaceGroupManager            *keyspace.GroupManager
+	grpcServer                      *grpc.Server
+	tsoAllocatorManager             *tso.AllocatorManager
+	cluster                         *cluster.RaftCluster
+	persistOptions                  *config.PersistOptions
+	etcdCfg                         *embed.Config
+	encryptionKeyManager            *encryption.Manager
+	grpcServiceLabels               map[string]struct{}
+	grpcServiceRateLimiter          *ratelimit.Controller
+	apiServiceLabelMap              map[apiutil.AccessPath]string
+	hotRegionStorage                *storage.HotRegionStorage
+	serviceMiddlewarePersistOptions *config.ServiceMiddlewarePersistOptions
+	serviceRateLimiter              *ratelimit.Controller
+	tsoDispatcher                   *tsoutil.TSODispatcher
+	tsoProtoFactory                 *tsoutil.TSOProtoFactory
+	pdProtoFactory                  *tsoutil.PDProtoFactory
+	clientConns                     sync.Map
+	servicePrimaryMap               sync.Map
+	rootPath                        string
+	mode                            string
+	leaderCallbacks                 []func(context.Context) error
+	auditBackends                   []audit.Backend
+	startCallbacks                  []func()
+	closeCallbacks                  []func()
+	tsoClientPool                   struct {
 		clients map[string]tsopb.TSO_TsoClient
+		syncutil.RWMutex
 	}
-
-	// tsoDispatcher is used to dispatch different TSO requests to
-	// the corresponding forwarding TSO channel.
-	tsoDispatcher *tsoutil.TSODispatcher
-	// tsoProtoFactory is the abstract factory for creating tso
-	// related data structures defined in the TSO grpc service
-	tsoProtoFactory *tsoutil.TSOProtoFactory
-	// pdProtoFactory is the abstract factory for creating tso
-	// related data structures defined in the PD grpc service
-	pdProtoFactory *tsoutil.PDProtoFactory
-
-	serviceRateLimiter *ratelimit.Controller
-	serviceLabels      map[string][]apiutil.AccessPath
-	apiServiceLabelMap map[apiutil.AccessPath]string
-
-	grpcServiceRateLimiter *ratelimit.Controller
-	grpcServiceLabels      map[string]struct{}
-	grpcServer             *grpc.Server
-
-	serviceAuditBackendLabels map[string]*audit.BackendLabels
-
-	auditBackends []audit.Backend
-
-	registry                 *registry.ServiceRegistry
-	mode                     string
-	servicePrimaryMap        sync.Map /* Store as map[string]string */
-	tsoPrimaryWatcher        *etcdutil.LoopWatcher
-	schedulingPrimaryWatcher *etcdutil.LoopWatcher
-
-	// Cgroup Monitor
-	cgMonitor cgroup.Monitor
+	cgMonitor      cgroup.Monitor
+	serverLoopWg   sync.WaitGroup
+	isRunning      int64
+	startTimestamp int64
+	clusterID      atomic.Uint64
 }
 
 // HandlerBuilder builds a server HTTP handler.
@@ -264,8 +212,8 @@ func CreateServer(ctx context.Context, cfg *config.Config, services []string, le
 		DiagnosticsServer:               sysutil.NewDiagnosticsServer(cfg.Log.File.Filename),
 		mode:                            mode,
 		tsoClientPool: struct {
-			syncutil.RWMutex
 			clients map[string]tsopb.TSO_TsoClient
+			syncutil.RWMutex
 		}{
 			clients: make(map[string]tsopb.TSO_TsoClient),
 		},

@@ -33,42 +33,21 @@ import (
 
 // Watcher is used to watch the PD API server for any Placement Rule changes.
 type Watcher struct {
-	ctx    context.Context
-	cancel context.CancelFunc
-	wg     sync.WaitGroup
-
-	// ruleCommonPathPrefix:
-	//  - Key: /pd/{cluster_id}/rule
-	//  - Value: placement.Rule or placement.RuleGroup
-	ruleCommonPathPrefix string
-	// rulesPathPrefix:
-	//   - Key: /pd/{cluster_id}/rules/{group_id}-{rule_id}
-	//   - Value: placement.Rule
-	rulesPathPrefix string
-	// ruleGroupPathPrefix:
-	//   - Key: /pd/{cluster_id}/rule_group/{group_id}
-	//   - Value: placement.RuleGroup
-	ruleGroupPathPrefix string
-	// regionLabelPathPrefix:
-	//   - Key: /pd/{cluster_id}/region_label/{rule_id}
-	//  - Value: labeler.LabelRule
+	ctx                   context.Context
+	ruleStorage           endpoint.RuleStorage
+	ruleManager           *placement.RuleManager
+	cancel                context.CancelFunc
+	patch                 *placement.RuleConfigPatch
+	labelWatcher          *etcdutil.LoopWatcher
+	ruleWatcher           *etcdutil.LoopWatcher
+	regionLabeler         *labeler.RegionLabeler
+	etcdClient            *clientv3.Client
+	checkerController     *checker.Controller
+	ruleCommonPathPrefix  string
 	regionLabelPathPrefix string
-
-	etcdClient  *clientv3.Client
-	ruleStorage endpoint.RuleStorage
-
-	// checkerController is used to add the suspect key ranges to the checker when the rule changed.
-	checkerController *checker.Controller
-	// ruleManager is used to manage the placement rules.
-	ruleManager *placement.RuleManager
-	// regionLabeler is used to manage the region label rules.
-	regionLabeler *labeler.RegionLabeler
-
-	ruleWatcher  *etcdutil.LoopWatcher
-	labelWatcher *etcdutil.LoopWatcher
-
-	// patch is used to cache the placement rule changes.
-	patch *placement.RuleConfigPatch
+	ruleGroupPathPrefix   string
+	rulesPathPrefix       string
+	wg                    sync.WaitGroup
 }
 
 // NewWatcher creates a new watcher to watch the Placement Rule change from PD API server.

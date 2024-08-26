@@ -51,11 +51,11 @@ var gcInterval = time.Minute
 
 // MergeChecker ensures region to merge with adjacent region when size is small
 type MergeChecker struct {
-	PauseController
+	startTime  time.Time
 	cluster    sche.CheckerCluster
 	conf       config.CheckerConfigProvider
 	splitCache *cache.TTLUint64
-	startTime  time.Time // it's used to judge whether server recently start.
+	PauseController
 }
 
 // NewMergeChecker creates a merge checker.

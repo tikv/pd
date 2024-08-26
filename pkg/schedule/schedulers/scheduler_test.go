@@ -433,8 +433,8 @@ func TestBalanceLeaderWithConflictRule(t *testing.T) {
 	// Region1:    L    F    F
 	tc.UpdateLeaderCount(1, 16)
 	testCases := []struct {
-		name     string
 		rule     *placement.Rule
+		name     string
 		schedule bool
 	}{
 		{

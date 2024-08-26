@@ -49,9 +49,9 @@ func (c *client) metaStorageClient() meta_storagepb.MetaStorageClient {
 type Op struct {
 	rangeEnd         []byte
 	revision         int64
-	prevKv           bool
 	lease            int64
 	limit            int64
+	prevKv           bool
 	isOptsWithPrefix bool
 }
 

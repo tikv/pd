@@ -65,32 +65,20 @@ const (
 
 // Config is the configuration for the resource manager.
 type Config struct {
-	BackendEndpoints    string `toml:"backend-endpoints" json:"backend-endpoints"`
-	ListenAddr          string `toml:"listen-addr" json:"listen-addr"`
-	AdvertiseListenAddr string `toml:"advertise-listen-addr" json:"advertise-listen-addr"`
-	Name                string `toml:"name" json:"name"`
-	DataDir             string `toml:"data-dir" json:"data-dir"` // TODO: remove this after refactoring
-	EnableGRPCGateway   bool   `json:"enable-grpc-gateway"`      // TODO: use it
-
-	Metric metricutil.MetricConfig `toml:"metric" json:"metric"`
-
-	// Log related config.
-	Log      log.Config `toml:"log" json:"log"`
-	Logger   *zap.Logger
-	LogProps *log.ZapProperties
-
-	Security configutil.SecurityConfig `toml:"security" json:"security"`
-
-	// WarningMsgs contains all warnings during parsing.
-	WarningMsgs []string
-
-	// LeaderLease defines the time within which a Resource Manager primary/leader must
-	// update its TTL in etcd, otherwise etcd will expire the leader key and other servers
-	// can campaign the primary/leader again. Etcd only supports seconds TTL, so here is
-	// second too.
-	LeaderLease int64 `toml:"lease" json:"lease"`
-
-	Controller ControllerConfig `toml:"controller" json:"controller"`
+	LogProps            *log.ZapProperties
+	Logger              *zap.Logger
+	Log                 log.Config              `toml:"log" json:"log"`
+	Name                string                  `toml:"name" json:"name"`
+	DataDir             string                  `toml:"data-dir" json:"data-dir"`
+	BackendEndpoints    string                  `toml:"backend-endpoints" json:"backend-endpoints"`
+	AdvertiseListenAddr string                  `toml:"advertise-listen-addr" json:"advertise-listen-addr"`
+	ListenAddr          string                  `toml:"listen-addr" json:"listen-addr"`
+	Metric              metricutil.MetricConfig `toml:"metric" json:"metric"`
+	WarningMsgs         []string
+	Security            configutil.SecurityConfig `toml:"security" json:"security"`
+	Controller          ControllerConfig          `toml:"controller" json:"controller"`
+	LeaderLease         int64                     `toml:"lease" json:"lease"`
+	EnableGRPCGateway   bool                      `json:"enable-grpc-gateway"`
 }
 
 // ControllerConfig is the configuration of the resource manager controller which includes some option for client needed.

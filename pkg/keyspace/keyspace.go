@@ -86,13 +86,9 @@ type Manager struct {
 
 // CreateKeyspaceRequest represents necessary arguments to create a keyspace.
 type CreateKeyspaceRequest struct {
-	// Name of the keyspace to be created.
-	// Using an existing name will result in error.
-	Name   string
-	Config map[string]string
-	// CreateTime is the timestamp used to record creation time.
+	Config     map[string]string
+	Name       string
 	CreateTime int64
-	// IsPreAlloc indicates whether the keyspace is pre-allocated when the cluster starts.
 	IsPreAlloc bool
 }
 
@@ -435,9 +431,9 @@ func (manager *Manager) LoadKeyspaceByID(spaceID uint32) (*keyspacepb.KeyspaceMe
 
 // Mutation represents a single operation to be applied on keyspace config.
 type Mutation struct {
-	Op    OpType
 	Key   string
 	Value string
+	Op    OpType
 }
 
 // OpType defines the type of keyspace config operation.

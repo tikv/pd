@@ -918,9 +918,9 @@ func (c *client) GetMinResolvedTSByStoresIDs(ctx context.Context, storeIDs []uin
 		uri = fmt.Sprintf("%s?scope=%s", uri, strings.Join(storeIDStrs, ","))
 	}
 	resp := struct {
+		StoresMinResolvedTS map[uint64]uint64 `json:"stores_min_resolved_ts"`
 		MinResolvedTS       uint64            `json:"min_resolved_ts"`
 		IsRealTime          bool              `json:"is_real_time,omitempty"`
-		StoresMinResolvedTS map[uint64]uint64 `json:"stores_min_resolved_ts"`
 	}{}
 	err := c.request(ctx, newRequestInfo().
 		WithName(getMinResolvedTSByStoresIDsName).

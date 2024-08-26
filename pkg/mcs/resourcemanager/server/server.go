@@ -56,29 +56,19 @@ const serviceName = "Resource Manager"
 
 // Server is the resource manager server, and it implements bs.Server.
 type Server struct {
-	*server.BaseServer
+	serverLoopCtx context.Context
 	diagnosticspb.DiagnosticsServer
-	// Server state. 0 is not running, 1 is running.
-	isRunning int64
-
-	serverLoopCtx    context.Context
+	cfg              *Config
 	serverLoopCancel func()
-	serverLoopWg     sync.WaitGroup
-
-	cfg       *Config
-	clusterID uint64
-
-	// for the primary election of resource manager
-	participant *member.Participant
-
-	service *Service
-
-	// primaryCallbacks will be called after the server becomes leader.
+	*server.BaseServer
+	participant      *member.Participant
+	service          *Service
+	serviceID        *discovery.ServiceRegistryEntry
+	serviceRegister  *discovery.ServiceRegister
 	primaryCallbacks []func(context.Context) error
-
-	// for service registry
-	serviceID       *discovery.ServiceRegistryEntry
-	serviceRegister *discovery.ServiceRegister
+	serverLoopWg     sync.WaitGroup
+	isRunning        int64
+	clusterID        uint64
 }
 
 // Name returns the unique name for this server in the resource manager cluster.

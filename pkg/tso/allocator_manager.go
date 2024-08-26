@@ -64,18 +64,11 @@ var (
 type AllocatorGroupFilter func(ag *allocatorGroup) bool
 
 type allocatorGroup struct {
-	dcLocation string
-	// ctx is built with cancel from a parent context when set up which can be different
-	// in order to receive Done() signal correctly.
-	// cancel would be call when allocatorGroup is deleted to stop background loop.
-	ctx    context.Context
-	cancel context.CancelFunc
-	// For the Global TSO Allocator, leadership is a PD leader's
-	// leadership, and for the Local TSO Allocator, leadership
-	// is a DC-level certificate to allow an allocator to generate
-	// TSO for local transactions in its DC.
-	leadership *election.Leadership
+	ctx        context.Context
 	allocator  Allocator
+	cancel     context.CancelFunc
+	leadership *election.Leadership
+	dcLocation string
 }
 
 // DCLocationInfo is used to record some dc-location related info,
@@ -151,47 +144,30 @@ type ElectionMember interface {
 // It is in charge of maintaining TSO allocators' leadership, checking election
 // priority, and forwarding TSO allocation requests to correct TSO Allocators.
 type AllocatorManager struct {
-	mu struct {
+	ctx                context.Context
+	storage            endpoint.TSOStorage
+	member             ElectionMember
+	cancel             context.CancelFunc
+	maxResetTSGap      func() time.Duration
+	securityConfig     *grpcutil.TLSConfig
+	rootPath           string
+	localAllocatorConn struct {
+		clientConns map[string]*grpc.ClientConn
 		syncutil.RWMutex
-		// There are two kinds of TSO Allocators:
-		//   1. Global TSO Allocator, as a global single point to allocate
-		//      TSO for global transactions, such as cross-region cases.
-		//   2. Local TSO Allocator, servers for DC-level transactions.
-		// dc-location/global (string) -> TSO Allocator
+	}
+	mu struct {
 		allocatorGroups    map[string]*allocatorGroup
 		clusterDCLocations map[string]*DCLocationInfo
-		// The max suffix sign we have so far, it will be used to calculate
-		// the number of suffix bits we need in the TSO logical part.
+		syncutil.RWMutex
 		maxSuffix int32
 	}
-	// for the synchronization purpose of the allocator update checks
-	wg sync.WaitGroup
-	// for the synchronization purpose of the service loops
-	svcLoopWG sync.WaitGroup
-
-	ctx    context.Context
-	cancel context.CancelFunc
-	// kgID is the keyspace group ID
-	kgID uint32
-	// member is for election use
-	member ElectionMember
-	// TSO config
-	rootPath               string
-	storage                endpoint.TSOStorage
-	enableLocalTSO         bool
+	svcLoopWG              sync.WaitGroup
+	wg                     sync.WaitGroup
 	saveInterval           time.Duration
 	updatePhysicalInterval time.Duration
-	// leaderLease defines the time within which a TSO primary/leader must update its TTL
-	// in etcd, otherwise etcd will expire the leader key and other servers can campaign
-	// the primary/leader again. Etcd only supports seconds TTL, so here is second too.
-	leaderLease    int64
-	maxResetTSGap  func() time.Duration
-	securityConfig *grpcutil.TLSConfig
-	// for gRPC use
-	localAllocatorConn struct {
-		syncutil.RWMutex
-		clientConns map[string]*grpc.ClientConn
-	}
+	leaderLease            int64
+	kgID                   uint32
+	enableLocalTSO         bool
 }
 
 // NewAllocatorManager creates a new TSO Allocator Manager.

@@ -22,14 +22,12 @@ import (
 
 // ConcurrencyLimiter is a limiter that limits the number of concurrent tasks.
 type ConcurrencyLimiter struct {
-	mu      syncutil.Mutex
-	current uint64
-	waiting uint64
-	limit   uint64
-
-	// statistic
-	maxLimit uint64
 	queue    chan *TaskToken
+	current  uint64
+	waiting  uint64
+	limit    uint64
+	maxLimit uint64
+	mu       syncutil.Mutex
 }
 
 // NewConcurrencyLimiter creates a new ConcurrencyLimiter.

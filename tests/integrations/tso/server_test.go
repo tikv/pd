@@ -33,22 +33,16 @@ import (
 
 type tsoServerTestSuite struct {
 	suite.Suite
-	legacy bool
-
-	ctx    context.Context
-	cancel context.CancelFunc
-
-	// The PD cluster.
-	cluster *tests.TestCluster
-	// pdLeaderServer is the leader server of the PD cluster.
-	pdLeaderServer *tests.TestServer
-	// tsoServer is the TSO service provider.
+	ctx              context.Context
+	pdClient         pdpb.PDClient
+	tsoClient        tsopb.TSOClient
+	cancel           context.CancelFunc
+	cluster          *tests.TestCluster
+	pdLeaderServer   *tests.TestServer
 	tsoServer        *tso.Server
 	tsoServerCleanup func()
 	tsoClientConn    *grpc.ClientConn
-
-	pdClient  pdpb.PDClient
-	tsoClient tsopb.TSOClient
+	legacy           bool
 }
 
 func TestLegacyTSOServer(t *testing.T) {

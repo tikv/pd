@@ -35,10 +35,9 @@ import (
 )
 
 type shuffleHotRegionSchedulerConfig struct {
-	syncutil.RWMutex
 	schedulerConfig
-
 	Limit uint64 `json:"limit"`
+	syncutil.RWMutex
 }
 
 func (conf *shuffleHotRegionSchedulerConfig) clone() *shuffleHotRegionSchedulerConfig {

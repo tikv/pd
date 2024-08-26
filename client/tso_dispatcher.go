@@ -55,12 +55,12 @@ func newTSDeadline(
 }
 
 type tsoInfo struct {
-	tsoServer           string
-	reqKeyspaceGroupID  uint32
-	respKeyspaceGroupID uint32
 	respReceivedAt      time.Time
+	tsoServer           string
 	physical            int64
 	logical             int64
+	reqKeyspaceGroupID  uint32
+	respKeyspaceGroupID uint32
 }
 
 type tsoServiceProvider interface {
@@ -70,18 +70,15 @@ type tsoServiceProvider interface {
 }
 
 type tsoDispatcher struct {
-	ctx    context.Context
-	cancel context.CancelFunc
-	dc     string
-
-	provider tsoServiceProvider
-	// URL -> *connectionContext
-	connectionCtxs  *sync.Map
-	batchController *tsoBatchController
-	tsDeadlineCh    chan *deadline
-	lastTSOInfo     *tsoInfo
-
+	ctx                    context.Context
+	provider               tsoServiceProvider
+	cancel                 context.CancelFunc
+	connectionCtxs         *sync.Map
+	batchController        *tsoBatchController
+	tsDeadlineCh           chan *deadline
+	lastTSOInfo            *tsoInfo
 	updateConnectionCtxsCh chan struct{}
+	dc                     string
 }
 
 func newTSODispatcher(

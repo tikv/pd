@@ -31,11 +31,11 @@ import (
 )
 
 type MockPackHotRegionInfo struct {
-	isLeader         bool
 	historyHotReads  []HistoryHotRegion
 	historyHotWrites []HistoryHotRegion
 	reservedDays     uint64
 	pullInterval     time.Duration
+	isLeader         bool
 }
 
 // GetHistoryHotRegions get hot region info in HistoryHotRegion form.

@@ -113,49 +113,32 @@ func (conf *hotRegionSchedulerConfig) getValidConf() *hotRegionSchedulerConfig {
 }
 
 type hotRegionSchedulerConfig struct {
-	syncutil.RWMutex
 	schedulerConfig
-
+	ForbidRWType           string            `json:"forbid-rw-type,omitempty"`
+	RankFormulaVersion     string            `json:"rank-formula-version"`
+	WriteLeaderPriorities  []string          `json:"write-leader-priorities"`
+	ReadPriorities         []string          `json:"read-priorities"`
+	WritePeerPriorities    []string          `json:"write-peer-priorities"`
+	MaxZombieRounds        int               `json:"max-zombie-rounds"`
+	DstToleranceRatio      float64           `json:"dst-tolerance-ratio"`
+	ByteRateRankStepRatio  float64           `json:"byte-rate-rank-step-ratio"`
+	KeyRateRankStepRatio   float64           `json:"key-rate-rank-step-ratio"`
+	QueryRateRankStepRatio float64           `json:"query-rate-rank-step-ratio"`
+	CountRankStepRatio     float64           `json:"count-rank-step-ratio"`
+	GreatDecRatio          float64           `json:"great-dec-ratio"`
+	MinorDecRatio          float64           `json:"minor-dec-ratio"`
+	SrcToleranceRatio      float64           `json:"src-tolerance-ratio"`
+	MaxPeerNum             int               `json:"max-peer-number"`
+	HistorySampleInterval  typeutil.Duration `json:"history-sample-interval"`
+	MinHotQueryRate        float64           `json:"min-hot-query-rate"`
+	MinHotKeyRate          float64           `json:"min-hot-key-rate"`
+	HistorySampleDuration  typeutil.Duration `json:"history-sample-duration"`
+	SplitThresholds        float64           `json:"split-thresholds"`
+	MinHotByteRate         float64           `json:"min-hot-byte-rate"`
+	syncutil.RWMutex
 	lastQuerySupported bool
-
-	MinHotByteRate  float64 `json:"min-hot-byte-rate"`
-	MinHotKeyRate   float64 `json:"min-hot-key-rate"`
-	MinHotQueryRate float64 `json:"min-hot-query-rate"`
-	MaxZombieRounds int     `json:"max-zombie-rounds"`
-	MaxPeerNum      int     `json:"max-peer-number"`
-
-	// rank step ratio decide the step when calculate rank
-	// step = max current * rank step ratio
-	ByteRateRankStepRatio  float64 `json:"byte-rate-rank-step-ratio"`
-	KeyRateRankStepRatio   float64 `json:"key-rate-rank-step-ratio"`
-	QueryRateRankStepRatio float64 `json:"query-rate-rank-step-ratio"`
-	CountRankStepRatio     float64 `json:"count-rank-step-ratio"`
-	GreatDecRatio          float64 `json:"great-dec-ratio"`
-	MinorDecRatio          float64 `json:"minor-dec-ratio"` // only for v1
-
-	// If SrcToleranceRatio and DstToleranceRatio are zero,
-	// it means hot region scheduler will not consider about expectation and variance.
-	SrcToleranceRatio float64 `json:"src-tolerance-ratio"`
-	DstToleranceRatio float64 `json:"dst-tolerance-ratio"`
-
-	// For first priority of write leader, it is better to consider key rate or query rather than byte
-	WriteLeaderPriorities []string `json:"write-leader-priorities"`
-	WritePeerPriorities   []string `json:"write-peer-priorities"`
-	ReadPriorities        []string `json:"read-priorities"`
-
-	StrictPickingStore bool `json:"strict-picking-store,string"` // only for v1
-
-	// Separately control whether to start hotspot scheduling for TiFlash
-	EnableForTiFlash bool `json:"enable-for-tiflash,string"`
-	// Version used by `calcProgressiveRank1 and betterThan1. The v2 version code is in hot_region_v2.go.
-	RankFormulaVersion string `json:"rank-formula-version"`
-	// forbid read or write scheduler, only for test
-	ForbidRWType string `json:"forbid-rw-type,omitempty"`
-	// SplitThresholds is the threshold to split hot region if the first priority flow of on hot region exceeds it.
-	SplitThresholds float64 `json:"split-thresholds"`
-
-	HistorySampleDuration typeutil.Duration `json:"history-sample-duration"`
-	HistorySampleInterval typeutil.Duration `json:"history-sample-interval"`
+	EnableForTiFlash   bool `json:"enable-for-tiflash,string"`
+	StrictPickingStore bool `json:"strict-picking-store,string"`
 }
 
 func (conf *hotRegionSchedulerConfig) encodeConfig() ([]byte, error) {

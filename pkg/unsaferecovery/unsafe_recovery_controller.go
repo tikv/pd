@@ -115,30 +115,22 @@ type cluster interface {
 
 // Controller is used to control the unsafe recovery process.
 type Controller struct {
-	syncutil.RWMutex
-
-	cluster cluster
-	stage   stage
-	// the round of recovery, which is an increasing number to identify the reports of each round
-	step         uint64
-	failedStores map[uint64]struct{}
-	timeout      time.Time
-	autoDetect   bool
-
-	// collected reports from store, if not reported yet, it would be nil
-	storeReports      map[uint64]*pdpb.StoreReport
-	numStoresReported int
-
-	storePlanExpires   map[uint64]time.Time
-	storeRecoveryPlans map[uint64]*pdpb.RecoveryPlan
-
-	// accumulated output for the whole recovery process
-	output []StageOutput
-	// exposed to the outside for testing
+	timeout             time.Time
+	cluster             cluster
+	err                 error
 	AffectedTableIDs    map[int64]struct{}
+	failedStores        map[uint64]struct{}
+	storeReports        map[uint64]*pdpb.StoreReport
+	storePlanExpires    map[uint64]time.Time
+	storeRecoveryPlans  map[uint64]*pdpb.RecoveryPlan
 	affectedMetaRegions map[uint64]struct{}
 	newlyCreatedRegions map[uint64]struct{}
-	err                 error
+	output              []StageOutput
+	step                uint64
+	numStoresReported   int
+	stage               stage
+	syncutil.RWMutex
+	autoDetect bool
 }
 
 // StageOutput is the information for one stage of the recovery process.

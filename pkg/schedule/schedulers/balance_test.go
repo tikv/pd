@@ -183,34 +183,66 @@ func TestTolerantRatio(t *testing.T) {
 	region := tc.GetRegion(1).Clone(core.SetApproximateSize(regionSize))
 
 	tbl := []struct {
-		ratio                  float64
-		kind                   constant.ScheduleKind
 		expectTolerantResource func(constant.ScheduleKind) int64
+		kind                   constant.ScheduleKind
+		ratio                  float64
 	}{
-		{0, constant.ScheduleKind{Resource: constant.LeaderKind, Policy: constant.ByCount}, func(constant.ScheduleKind) int64 {
-			return int64(leaderTolerantSizeRatio)
-		}},
-		{0, constant.ScheduleKind{Resource: constant.LeaderKind, Policy: constant.BySize}, func(k constant.ScheduleKind) int64 {
-			return int64(adjustTolerantRatio(tc, k) * float64(regionSize))
-		}},
-		{0, constant.ScheduleKind{Resource: constant.RegionKind, Policy: constant.ByCount}, func(k constant.ScheduleKind) int64 {
-			return int64(adjustTolerantRatio(tc, k) * float64(regionSize))
-		}},
-		{0, constant.ScheduleKind{Resource: constant.RegionKind, Policy: constant.BySize}, func(k constant.ScheduleKind) int64 {
-			return int64(adjustTolerantRatio(tc, k) * float64(regionSize))
-		}},
-		{10, constant.ScheduleKind{Resource: constant.LeaderKind, Policy: constant.ByCount}, func(constant.ScheduleKind) int64 {
-			return int64(tc.GetScheduleConfig().TolerantSizeRatio)
-		}},
-		{10, constant.ScheduleKind{Resource: constant.LeaderKind, Policy: constant.BySize}, func(k constant.ScheduleKind) int64 {
-			return int64(adjustTolerantRatio(tc, k) * float64(regionSize))
-		}},
-		{10, constant.ScheduleKind{Resource: constant.RegionKind, Policy: constant.ByCount}, func(k constant.ScheduleKind) int64 {
-			return int64(adjustTolerantRatio(tc, k) * float64(regionSize))
-		}},
-		{10, constant.ScheduleKind{Resource: constant.RegionKind, Policy: constant.BySize}, func(k constant.ScheduleKind) int64 {
-			return int64(adjustTolerantRatio(tc, k) * float64(regionSize))
-		}},
+		{
+			ratio: 0,
+			kind:  constant.ScheduleKind{Resource: constant.LeaderKind, Policy: constant.ByCount},
+			expectTolerantResource: func(constant.ScheduleKind) int64 {
+				return int64(leaderTolerantSizeRatio)
+			},
+		},
+		{
+			ratio: 0,
+			kind:  constant.ScheduleKind{Resource: constant.LeaderKind, Policy: constant.BySize},
+			expectTolerantResource: func(k constant.ScheduleKind) int64 {
+				return int64(adjustTolerantRatio(tc, k) * float64(regionSize))
+			},
+		},
+		{
+			ratio: 0,
+			kind:  constant.ScheduleKind{Resource: constant.RegionKind, Policy: constant.ByCount},
+			expectTolerantResource: func(k constant.ScheduleKind) int64 {
+				return int64(adjustTolerantRatio(tc, k) * float64(regionSize))
+			},
+		},
+		{
+			ratio: 0,
+			kind:  constant.ScheduleKind{Resource: constant.RegionKind, Policy: constant.BySize},
+			expectTolerantResource: func(k constant.ScheduleKind) int64 {
+				return int64(adjustTolerantRatio(tc, k) * float64(regionSize))
+			},
+		},
+		{
+			ratio: 10,
+			kind:  constant.ScheduleKind{Resource: constant.LeaderKind, Policy: constant.ByCount},
+			expectTolerantResource: func(constant.ScheduleKind) int64 {
+				return int64(tc.GetScheduleConfig().TolerantSizeRatio)
+			},
+		},
+		{
+			ratio: 10,
+			kind:  constant.ScheduleKind{Resource: constant.LeaderKind, Policy: constant.BySize},
+			expectTolerantResource: func(k constant.ScheduleKind) int64 {
+				return int64(adjustTolerantRatio(tc, k) * float64(regionSize))
+			},
+		},
+		{
+			ratio: 10,
+			kind:  constant.ScheduleKind{Resource: constant.RegionKind, Policy: constant.ByCount},
+			expectTolerantResource: func(k constant.ScheduleKind) int64 {
+				return int64(adjustTolerantRatio(tc, k) * float64(regionSize))
+			},
+		},
+		{
+			ratio: 10,
+			kind:  constant.ScheduleKind{Resource: constant.RegionKind, Policy: constant.BySize},
+			expectTolerantResource: func(k constant.ScheduleKind) int64 {
+				return int64(adjustTolerantRatio(tc, k) * float64(regionSize))
+			},
+		},
 	}
 	for _, t := range tbl {
 		tc.SetTolerantSizeRatio(t.ratio)

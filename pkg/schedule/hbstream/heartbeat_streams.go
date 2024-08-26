@@ -55,22 +55,22 @@ const (
 )
 
 type streamUpdate struct {
-	storeID uint64
 	stream  HeartbeatStream
+	storeID uint64
 }
 
 // HeartbeatStreams is the bridge of communication with TIKV instance.
 type HeartbeatStreams struct {
-	wg             sync.WaitGroup
 	hbStreamCtx    context.Context
+	storeInformer  core.StoreSetInformer
 	hbStreamCancel context.CancelFunc
-	clusterID      uint64
 	streams        map[uint64]HeartbeatStream
 	msgCh          chan core.RegionHeartbeatResponse
 	streamCh       chan streamUpdate
-	storeInformer  core.StoreSetInformer
 	typ            string
-	needRun        bool // For test only.
+	wg             sync.WaitGroup
+	clusterID      uint64
+	needRun        bool
 }
 
 // NewHeartbeatStreams creates a new HeartbeatStreams which enable background running by default.

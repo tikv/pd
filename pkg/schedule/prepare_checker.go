@@ -24,8 +24,8 @@ import (
 )
 
 type prepareChecker struct {
+	start time.Time
 	syncutil.RWMutex
-	start    time.Time
 	prepared bool
 }
 

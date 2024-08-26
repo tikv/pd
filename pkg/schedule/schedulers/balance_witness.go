@@ -49,12 +49,10 @@ const (
 )
 
 type balanceWitnessSchedulerConfig struct {
-	syncutil.RWMutex
 	schedulerConfig
-
 	Ranges []core.KeyRange `json:"ranges"`
-	// Batch is used to generate multiple operators by one scheduling
-	Batch int `json:"batch"`
+	Batch  int             `json:"batch"`
+	syncutil.RWMutex
 }
 
 func (conf *balanceWitnessSchedulerConfig) update(data []byte) (int, any) {
@@ -149,13 +147,13 @@ func (handler *balanceWitnessHandler) listConfig(w http.ResponseWriter, _ *http.
 }
 
 type balanceWitnessScheduler struct {
+	handler http.Handler
 	*BaseScheduler
 	*retryQuota
 	conf          *balanceWitnessSchedulerConfig
-	handler       http.Handler
-	filters       []filter.Filter
 	counter       *prometheus.CounterVec
 	filterCounter *filter.Counter
+	filters       []filter.Filter
 }
 
 // newBalanceWitnessScheduler creates a scheduler that tends to keep witnesses on

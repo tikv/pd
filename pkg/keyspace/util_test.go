@@ -68,8 +68,8 @@ func TestValidateName(t *testing.T) {
 func TestMakeLabelRule(t *testing.T) {
 	re := require.New(t)
 	testCases := []struct {
-		id                uint32
 		expectedLabelRule *labeler.LabelRule
+		id                uint32
 	}{
 		{
 			id: 0,

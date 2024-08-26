@@ -69,10 +69,10 @@ var (
 
 // TestServer is only for test.
 type TestServer struct {
-	syncutil.RWMutex
 	server     *server.Server
 	grpcServer *server.GrpcServer
-	state      int32
+	syncutil.RWMutex
+	state int32
 }
 
 var zapLogOnce sync.Once
@@ -451,14 +451,13 @@ func (s *TestServer) GetServicePrimaryAddr(ctx context.Context, serviceName stri
 
 // TestCluster is only for test.
 type TestCluster struct {
-	config  *clusterConfig
-	servers map[string]*TestServer
-	// tsPool is used to check the TSO uniqueness among the test cluster
-	tsPool struct {
-		syncutil.Mutex
-		pool map[uint64]struct{}
-	}
+	config            *clusterConfig
+	servers           map[string]*TestServer
 	schedulingCluster *TestSchedulingCluster
+	tsPool            struct {
+		pool map[uint64]struct{}
+		syncutil.Mutex
+	}
 }
 
 // ConfigOption is used to define customize settings in test.
@@ -501,8 +500,8 @@ func createTestCluster(ctx context.Context, initialServerCount int, isAPIService
 		config:  config,
 		servers: servers,
 		tsPool: struct {
-			syncutil.Mutex
 			pool map[uint64]struct{}
+			syncutil.Mutex
 		}{
 			pool: make(map[uint64]struct{}),
 		},
@@ -522,8 +521,8 @@ func restartTestCluster(
 		config:  cluster.config,
 		servers: make(map[string]*TestServer, len(cluster.servers)),
 		tsPool: struct {
-			syncutil.Mutex
 			pool map[uint64]struct{}
+			syncutil.Mutex
 		}{
 			pool: make(map[uint64]struct{}),
 		},

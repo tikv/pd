@@ -115,23 +115,23 @@ func TestRuleFitFilter(t *testing.T) {
 	}}, &metapb.Peer{StoreId: 1, Id: 1})
 
 	testCases := []struct {
+		labels      map[string]string
 		storeID     uint64
 		regionCount int
-		labels      map[string]string
 		sourceRes   plan.StatusCode
 		targetRes   plan.StatusCode
 	}{
-		{1, 1, map[string]string{"zone": "z1"}, plan.StatusOK, plan.StatusOK},
-		{2, 1, map[string]string{"zone": "z1"}, plan.StatusOK, plan.StatusOK},
+		{map[string]string{"zone": "z1"}, 1, 1, plan.StatusOK, plan.StatusOK},
+		{map[string]string{"zone": "z1"}, 2, 1, plan.StatusOK, plan.StatusOK},
 		// store 3 and store 1 is the peers of this region, so it will allow transferring leader to store 3.
-		{3, 1, map[string]string{"zone": "z2"}, plan.StatusOK, plan.StatusOK},
+		{map[string]string{"zone": "z2"}, 3, 1, plan.StatusOK, plan.StatusOK},
 		// the labels of store 4 and store 3 are same, so the isolation score will decrease.
-		{4, 1, map[string]string{"zone": "z2"}, plan.StatusOK, plan.StatusStoreNotMatchRule},
+		{map[string]string{"zone": "z2"}, 4, 1, plan.StatusOK, plan.StatusStoreNotMatchRule},
 		// store 5 and store 1 is the peers of this region, so it will allow transferring leader to store 3.
-		{5, 1, map[string]string{"zone": "z3"}, plan.StatusOK, plan.StatusOK},
-		{6, 1, map[string]string{"zone": "z4"}, plan.StatusOK, plan.StatusOK},
+		{map[string]string{"zone": "z3"}, 5, 1, plan.StatusOK, plan.StatusOK},
+		{map[string]string{"zone": "z4"}, 6, 1, plan.StatusOK, plan.StatusOK},
 		// store 7 and store 1 is the peers of this region, but it's a witness, so it won't allow transferring leader to store 7.
-		{7, 1, map[string]string{"zone": "z2"}, plan.StatusOK, plan.StatusStoreNotMatchRule},
+		{map[string]string{"zone": "z2"}, 7, 1, plan.StatusOK, plan.StatusStoreNotMatchRule},
 	}
 	// Init cluster
 	for _, testCase := range testCases {
@@ -197,16 +197,16 @@ func TestRuleFitFilterWithPlacementRule(t *testing.T) {
 	})
 	re.NoError(err)
 	stores := []struct {
+		labels      map[string]string
 		storeID     uint64
 		regionCount int
-		labels      map[string]string
 	}{
-		{1, 1, map[string]string{"dc": "dc1", "zone": "z1", "host": "h1"}},
-		{2, 1, map[string]string{"dc": "dc1", "zone": "z2", "host": "h2"}},
-		{3, 1, map[string]string{"dc": "dc1", "zone": "z3", "host": "h3"}},
-		{4, 1, map[string]string{"dc": "dc1", "zone": "z4", "host": "h4"}},
-		{5, 1, map[string]string{"dc": "dc2", "zone": "z5", "host": "h5"}},
-		{6, 1, map[string]string{"dc": "dc2", "zone": "z6", "host": "h6"}},
+		{map[string]string{"dc": "dc1", "zone": "z1", "host": "h1"}, 1, 1},
+		{map[string]string{"dc": "dc1", "zone": "z2", "host": "h2"}, 2, 1},
+		{map[string]string{"dc": "dc1", "zone": "z3", "host": "h3"}, 3, 1},
+		{map[string]string{"dc": "dc1", "zone": "z4", "host": "h4"}, 4, 1},
+		{map[string]string{"dc": "dc2", "zone": "z5", "host": "h5"}, 5, 1},
+		{map[string]string{"dc": "dc2", "zone": "z6", "host": "h6"}, 6, 1},
 	}
 	// Init cluster
 	for _, store := range stores {
@@ -299,9 +299,9 @@ func TestStoreStateFilterReason(t *testing.T) {
 	store := core.NewStoreInfoWithLabel(1, map[string]string{})
 
 	type testCase struct {
-		filterIdx    int
 		sourceReason string
 		targetReason string
+		filterIdx    int
 	}
 
 	check := func(store *core.StoreInfo, testCases []testCase) {
@@ -316,17 +316,17 @@ func TestStoreStateFilterReason(t *testing.T) {
 	// No reason caught
 	store = store.Clone(core.SetLastHeartbeatTS(time.Now()))
 	testCases := []testCase{
-		{2, "store-state-ok-filter", "store-state-ok-filter"},
+		{filterIdx: 2, sourceReason: "store-state-ok-filter", targetReason: "store-state-ok-filter"},
 	}
 	check(store, testCases)
 
 	// Disconnected
 	store = store.Clone(core.SetLastHeartbeatTS(time.Now().Add(-5 * time.Minute)))
 	testCases = []testCase{
-		{0, "store-state-disconnect-filter", "store-state-disconnect-filter"},
-		{1, "store-state-ok-filter", "store-state-ok-filter"},
-		{2, "store-state-disconnect-filter", "store-state-disconnect-filter"},
-		{3, "store-state-ok-filter", "store-state-ok-filter"},
+		{filterIdx: 0, sourceReason: "store-state-disconnect-filter", targetReason: "store-state-disconnect-filter"},
+		{filterIdx: 1, sourceReason: "store-state-ok-filter", targetReason: "store-state-ok-filter"},
+		{filterIdx: 2, sourceReason: "store-state-disconnect-filter", targetReason: "store-state-disconnect-filter"},
+		{filterIdx: 3, sourceReason: "store-state-ok-filter", targetReason: "store-state-ok-filter"},
 	}
 	check(store, testCases)
 
@@ -334,10 +334,10 @@ func TestStoreStateFilterReason(t *testing.T) {
 	store = store.Clone(core.SetLastHeartbeatTS(time.Now())).
 		Clone(core.SetStoreStats(&pdpb.StoreStats{IsBusy: true}))
 	testCases = []testCase{
-		{0, "store-state-ok-filter", "store-state-ok-filter"},
-		{1, "store-state-busy-filter", "store-state-busy-filter"},
-		{2, "store-state-busy-filter", "store-state-busy-filter"},
-		{3, "store-state-ok-filter", "store-state-ok-filter"},
+		{filterIdx: 0, sourceReason: "store-state-ok-filter", targetReason: "store-state-ok-filter"},
+		{filterIdx: 1, sourceReason: "store-state-busy-filter", targetReason: "store-state-busy-filter"},
+		{filterIdx: 2, sourceReason: "store-state-busy-filter", targetReason: "store-state-busy-filter"},
+		{filterIdx: 3, sourceReason: "store-state-ok-filter", targetReason: "store-state-ok-filter"},
 	}
 	check(store, testCases)
 }
@@ -351,17 +351,17 @@ func TestIsolationFilter(t *testing.T) {
 	testCluster := mockcluster.NewCluster(ctx, opt)
 	testCluster.SetLocationLabels([]string{"zone", "rack", "host"})
 	allStores := []struct {
+		labels      map[string]string
 		storeID     uint64
 		regionCount int
-		labels      map[string]string
 	}{
-		{1, 1, map[string]string{"zone": "z1", "rack": "r1", "host": "h1"}},
-		{2, 1, map[string]string{"zone": "z1", "rack": "r1", "host": "h1"}},
-		{3, 1, map[string]string{"zone": "z1", "rack": "r1", "host": "h2"}},
-		{4, 1, map[string]string{"zone": "z1", "rack": "r2", "host": "h1"}},
-		{5, 1, map[string]string{"zone": "z1", "rack": "r3", "host": "h1"}},
-		{6, 1, map[string]string{"zone": "z2", "rack": "r1", "host": "h1"}},
-		{7, 1, map[string]string{"zone": "z3", "rack": "r3", "host": "h1"}},
+		{map[string]string{"zone": "z1", "rack": "r1", "host": "h1"}, 1, 1},
+		{map[string]string{"zone": "z1", "rack": "r1", "host": "h1"}, 2, 1},
+		{map[string]string{"zone": "z1", "rack": "r1", "host": "h2"}, 3, 1},
+		{map[string]string{"zone": "z1", "rack": "r2", "host": "h1"}, 4, 1},
+		{map[string]string{"zone": "z1", "rack": "r3", "host": "h1"}, 5, 1},
+		{map[string]string{"zone": "z2", "rack": "r1", "host": "h1"}, 6, 1},
+		{map[string]string{"zone": "z3", "rack": "r3", "host": "h1"}, 7, 1},
 	}
 	for _, store := range allStores {
 		testCluster.AddLabelsStore(store.storeID, store.regionCount, store.labels)

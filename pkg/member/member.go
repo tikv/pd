@@ -49,20 +49,15 @@ const (
 
 // EmbeddedEtcdMember is used for the election related logic. It implements Member interface.
 type EmbeddedEtcdMember struct {
-	leadership *election.Leadership
-	leader     atomic.Value // stored as *pdpb.Member
-	// etcd and cluster information.
-	etcd     *embed.Etcd
-	client   *clientv3.Client
-	id       uint64       // etcd server id.
-	member   *pdpb.Member // current PD's info.
-	rootPath string
-	// memberValue is the serialized string of `member`. It will be saved in
-	// etcd leader key when the PD node is successfully elected as the PD leader
-	// of the cluster. Every write will use it to check PD leadership.
-	memberValue string
-	// lastLeaderUpdatedTime is the last time when the leader is updated.
+	leader                atomic.Value
 	lastLeaderUpdatedTime atomic.Value
+	leadership            *election.Leadership
+	etcd                  *embed.Etcd
+	client                *clientv3.Client
+	member                *pdpb.Member
+	rootPath              string
+	memberValue           string
+	id                    uint64
 }
 
 // NewMember create a new Member.

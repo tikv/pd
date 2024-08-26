@@ -33,18 +33,14 @@ import (
 
 // Watcher is used to watch the PD API server for any meta changes.
 type Watcher struct {
-	wg        sync.WaitGroup
-	ctx       context.Context
-	cancel    context.CancelFunc
-	clusterID uint64
-	// storePathPrefix is the path of the store in etcd:
-	//  - Key: /pd/{cluster_id}/raft/s/
-	//  - Value: meta store proto.
+	ctx             context.Context
+	cancel          context.CancelFunc
+	etcdClient      *clientv3.Client
+	basicCluster    *core.BasicCluster
+	storeWatcher    *etcdutil.LoopWatcher
 	storePathPrefix string
-
-	etcdClient   *clientv3.Client
-	basicCluster *core.BasicCluster
-	storeWatcher *etcdutil.LoopWatcher
+	wg              sync.WaitGroup
+	clusterID       uint64
 }
 
 // NewWatcher creates a new watcher to watch the meta change from PD API server.

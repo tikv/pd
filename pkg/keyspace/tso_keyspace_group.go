@@ -56,28 +56,17 @@ const (
 
 // GroupManager is the manager of keyspace group related data.
 type GroupManager struct {
-	ctx       context.Context
-	cancel    context.CancelFunc
-	wg        sync.WaitGroup
-	client    *clientv3.Client
-	clusterID uint64
-
-	syncutil.RWMutex
-	// groups is the cache of keyspace group related information.
-	// user kind -> keyspace group
-	groups map[endpoint.UserKind]*indexedHeap
-
-	// store is the storage for keyspace group related information.
-	store endpoint.KeyspaceGroupStorage
-
-	// nodeBalancer is the balancer for tso nodes.
-	// TODO: add user kind with different balancer when we ensure where the correspondence between tso node and user kind will be found
-	nodesBalancer balancer.Balancer[string]
-	// serviceRegistryMap stores the mapping from the service registry key to the service address.
-	// Note: it is only used in tsoNodesWatcher.
+	ctx                context.Context
+	store              endpoint.KeyspaceGroupStorage
+	nodesBalancer      balancer.Balancer[string]
+	cancel             context.CancelFunc
+	client             *clientv3.Client
+	groups             map[endpoint.UserKind]*indexedHeap
 	serviceRegistryMap map[string]string
-	// tsoNodesWatcher is the watcher for the registered tso servers.
-	tsoNodesWatcher *etcdutil.LoopWatcher
+	tsoNodesWatcher    *etcdutil.LoopWatcher
+	wg                 sync.WaitGroup
+	clusterID          uint64
+	syncutil.RWMutex
 }
 
 // NewKeyspaceGroupManager creates a Manager of keyspace group related data.

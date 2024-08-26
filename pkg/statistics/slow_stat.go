@@ -32,8 +32,8 @@ func NewSlowStat() *SlowStat {
 
 // SlowStoresStats is a cached statistics for the slow store.
 type SlowStoresStats struct {
-	syncutil.RWMutex
 	slowStores map[uint64]struct{}
+	syncutil.RWMutex
 }
 
 // NewSlowStoresStats creates a new slowStoresStats cache.

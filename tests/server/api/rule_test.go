@@ -110,11 +110,11 @@ func (suite *ruleTestSuite) checkSet(cluster *tests.TestCluster) {
 	re.NoError(err)
 
 	testCases := []struct {
+		popKeyRange map[string]struct{}
 		name        string
+		response    string
 		rawData     []byte
 		success     bool
-		response    string
-		popKeyRange map[string]struct{}
 	}{
 		{
 			name:     "Set a new rule success",
@@ -212,8 +212,8 @@ func (suite *ruleTestSuite) checkGet(cluster *tests.TestCluster) {
 	testCases := []struct {
 		name  string
 		rule  placement.Rule
-		found bool
 		code  int
+		found bool
 	}{
 		{
 			name:  "found",
@@ -306,11 +306,11 @@ func (suite *ruleTestSuite) checkSetAll(cluster *tests.TestCluster) {
 
 	testCases := []struct {
 		name          string
-		rawData       []byte
-		success       bool
 		response      string
-		isDefaultRule bool
+		rawData       []byte
 		count         int
+		success       bool
+		isDefaultRule bool
 	}{
 		{
 			name:          "Set rules successfully, with oldRules full of nil",
@@ -584,10 +584,10 @@ func (suite *ruleTestSuite) checkDelete(cluster *tests.TestCluster) {
 	re.NoError(err)
 
 	testCases := []struct {
+		popKeyRange map[string]struct{}
 		name        string
 		groupID     string
 		id          string
-		popKeyRange map[string]struct{}
 	}{
 		{
 			name:    "delete existed rule",
@@ -694,9 +694,9 @@ func (suite *ruleTestSuite) checkBatch(cluster *tests.TestCluster) {
 
 	testCases := []struct {
 		name     string
+		response string
 		rawData  []byte
 		success  bool
-		response string
 	}{
 		{
 			name:     "Batch adds successfully",

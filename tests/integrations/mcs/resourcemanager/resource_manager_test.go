@@ -815,16 +815,20 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 	re := suite.Require()
 	cli := suite.client
 	testCasesSet1 := []struct {
+		modifySettings func(*rmpb.ResourceGroup)
 		name           string
+		expectMarshal  string
 		mode           rmpb.GroupMode
 		isNewGroup     bool
 		modifySuccess  bool
-		expectMarshal  string
-		modifySettings func(*rmpb.ResourceGroup)
 	}{
-		{"CRUD_test1", rmpb.GroupMode_RUMode, true, true,
-			`{"name":"CRUD_test1","mode":1,"r_u_settings":{"r_u":{"settings":{"fill_rate":10000},"state":{"initialized":false}}},"priority":0}`,
-			func(gs *rmpb.ResourceGroup) {
+		{
+			name:          "CRUD_test1",
+			mode:          rmpb.GroupMode_RUMode,
+			isNewGroup:    true,
+			modifySuccess: true,
+			expectMarshal: `{"name":"CRUD_test1","mode":1,"r_u_settings":{"r_u":{"settings":{"fill_rate":10000},"state":{"initialized":false}}},"priority":0}`,
+			modifySettings: func(gs *rmpb.ResourceGroup) {
 				gs.RUSettings = &rmpb.GroupRequestUnitSettings{
 					RU: &rmpb.TokenBucket{
 						Settings: &rmpb.TokenLimitSettings{
@@ -834,10 +838,13 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 				}
 			},
 		},
-
-		{"CRUD_test2", rmpb.GroupMode_RUMode, true, true,
-			`{"name":"CRUD_test2","mode":1,"r_u_settings":{"r_u":{"settings":{"fill_rate":20000},"state":{"initialized":false}}},"priority":0,"runaway_settings":{"rule":{"exec_elapsed_time_ms":10000},"action":2},"background_settings":{"job_types":["test"]}}`,
-			func(gs *rmpb.ResourceGroup) {
+		{
+			name:          "CRUD_test2",
+			mode:          rmpb.GroupMode_RUMode,
+			isNewGroup:    true,
+			modifySuccess: true,
+			expectMarshal: `{"name":"CRUD_test2","mode":1,"r_u_settings":{"r_u":{"settings":{"fill_rate":20000},"state":{"initialized":false}}},"priority":0,"runaway_settings":{"rule":{"exec_elapsed_time_ms":10000},"action":2},"background_settings":{"job_types":["test"]}}`,
+			modifySettings: func(gs *rmpb.ResourceGroup) {
 				gs.RUSettings = &rmpb.GroupRequestUnitSettings{
 					RU: &rmpb.TokenBucket{
 						Settings: &rmpb.TokenLimitSettings{
@@ -856,9 +863,13 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 				}
 			},
 		},
-		{"CRUD_test2", rmpb.GroupMode_RUMode, false, true,
-			`{"name":"CRUD_test2","mode":1,"r_u_settings":{"r_u":{"settings":{"fill_rate":30000,"burst_limit":-1},"state":{"initialized":false}}},"priority":0,"runaway_settings":{"rule":{"exec_elapsed_time_ms":1000},"action":3,"watch":{"lasting_duration_ms":100000,"type":2}},"background_settings":{"job_types":["br","lightning"]}}`,
-			func(gs *rmpb.ResourceGroup) {
+		{
+			name:          "CRUD_test2",
+			mode:          rmpb.GroupMode_RUMode,
+			isNewGroup:    false,
+			modifySuccess: true,
+			expectMarshal: `{"name":"CRUD_test2","mode":1,"r_u_settings":{"r_u":{"settings":{"fill_rate":30000,"burst_limit":-1},"state":{"initialized":false}}},"priority":0,"runaway_settings":{"rule":{"exec_elapsed_time_ms":1000},"action":3,"watch":{"lasting_duration_ms":100000,"type":2}},"background_settings":{"job_types":["br","lightning"]}}`,
+			modifySettings: func(gs *rmpb.ResourceGroup) {
 				gs.RUSettings = &rmpb.GroupRequestUnitSettings{
 					RU: &rmpb.TokenBucket{
 						Settings: &rmpb.TokenLimitSettings{
@@ -882,9 +893,13 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 				}
 			},
 		},
-		{"default", rmpb.GroupMode_RUMode, false, true,
-			`{"name":"default","mode":1,"r_u_settings":{"r_u":{"settings":{"fill_rate":10000,"burst_limit":-1},"state":{"initialized":false}}},"priority":0,"background_settings":{"job_types":["br"]}}`,
-			func(gs *rmpb.ResourceGroup) {
+		{
+			name:          "default",
+			mode:          rmpb.GroupMode_RUMode,
+			isNewGroup:    false,
+			modifySuccess: true,
+			expectMarshal: `{"name":"default","mode":1,"r_u_settings":{"r_u":{"settings":{"fill_rate":10000,"burst_limit":-1},"state":{"initialized":false}}},"priority":0,"background_settings":{"job_types":["br"]}}`,
+			modifySettings: func(gs *rmpb.ResourceGroup) {
 				gs.RUSettings = &rmpb.GroupRequestUnitSettings{
 					RU: &rmpb.TokenBucket{
 						Settings: &rmpb.TokenLimitSettings{
@@ -1497,9 +1512,9 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupControllerConfigCh
 	re.EqualValues(expectRUCfg, c1.GetConfig())
 
 	testCases := []struct {
-		configJSON string
 		value      any
 		expected   func(ruConfig *controller.RUConfig)
+		configJSON string
 	}{
 		{
 			configJSON: fmt.Sprintf(`{"degraded-mode-wait-duration": "%v"}`, waitDuration),

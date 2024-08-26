@@ -35,9 +35,9 @@ import (
 
 type memberTestSuite struct {
 	suite.Suite
+	clean   testutil.CleanupFunc
 	cfgs    []*config.Config
 	servers []*server.Server
-	clean   testutil.CleanupFunc
 }
 
 func TestMemberTestSuite(t *testing.T) {

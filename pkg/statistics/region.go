@@ -20,17 +20,17 @@ import (
 
 // RegionStats records a list of regions' statistics and distribution status.
 type RegionStats struct {
-	Count            int              `json:"count"`
-	EmptyCount       int              `json:"empty_count"`
-	StorageSize      int64            `json:"storage_size"`
-	UserStorageSize  int64            `json:"user_storage_size"`
-	StorageKeys      int64            `json:"storage_keys"`
 	StoreLeaderCount map[uint64]int   `json:"store_leader_count"`
 	StorePeerCount   map[uint64]int   `json:"store_peer_count"`
 	StoreLeaderSize  map[uint64]int64 `json:"store_leader_size"`
 	StoreLeaderKeys  map[uint64]int64 `json:"store_leader_keys"`
 	StorePeerSize    map[uint64]int64 `json:"store_peer_size"`
 	StorePeerKeys    map[uint64]int64 `json:"store_peer_keys"`
+	Count            int              `json:"count"`
+	EmptyCount       int              `json:"empty_count"`
+	StorageSize      int64            `json:"storage_size"`
+	UserStorageSize  int64            `json:"user_storage_size"`
+	StorageKeys      int64            `json:"storage_keys"`
 }
 
 // GetRegionStats sums regions' statistics.

@@ -45,27 +45,15 @@ import (
 
 // TLSInfo stores tls configuration to connect to etcd.
 type TLSInfo struct {
+	parseFunc          func([]byte, []byte) (tls.Certificate, error)
 	CertFile           string
 	KeyFile            string
 	TrustedCAFile      string
+	ServerName         string
+	AllowedCN          string
+	CipherSuites       []uint16
 	InsecureSkipVerify bool
-
-	// ServerName ensures the cert matches the given host in case of discovery / virtual hosting
-	ServerName string
-
-	// CipherSuites is a list of supported cipher suites.
-	// If empty, Go auto-populates it by default.
-	// Note that cipher suites are prioritized in the given order.
-	CipherSuites []uint16
-
-	selfCert bool
-
-	// parseFunc exists to simplify testing. Typically, parseFunc
-	// should be left nil. In that case, tls.X509KeyPair will be used.
-	parseFunc func([]byte, []byte) (tls.Certificate, error)
-
-	// AllowedCN is a CN which must be provided by a client.
-	AllowedCN string
+	selfCert           bool
 }
 
 // ClientConfig generates a tls.Config object for use by an HTTP client.

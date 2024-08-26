@@ -36,12 +36,11 @@ import (
 )
 
 type grantLeaderSchedulerConfig struct {
-	syncutil.RWMutex
 	schedulerConfig
-
 	StoreIDWithRanges map[uint64][]core.KeyRange `json:"store-id-ranges"`
 	cluster           *core.BasicCluster
 	removeSchedulerCb func(name string) error
+	syncutil.RWMutex
 }
 
 func (conf *grantLeaderSchedulerConfig) buildWithArgs(args []string) error {

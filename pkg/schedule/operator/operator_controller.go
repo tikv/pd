@@ -53,8 +53,8 @@ var (
 )
 
 type opCounter struct {
-	syncutil.RWMutex
 	count map[OpKind]uint64
+	syncutil.RWMutex
 }
 
 func (c *opCounter) inc(kind OpKind) {
@@ -79,24 +79,17 @@ func (c *opCounter) getCountByKind(kind OpKind) uint64 {
 
 // Controller is used to limit the speed of scheduling.
 type Controller struct {
-	operators sync.Map
-	ctx       context.Context
-	config    config.SharedConfigProvider
-	cluster   *core.BasicCluster
-	hbStreams *hbstream.HeartbeatStreams
-
-	// fast path, TTLUint64 is safe for concurrent.
-	fastOperators *cache.TTLUint64
-
-	// opNotifierQueue is a priority queue to notify the operator to be checked.
-	// safe for concurrent.
+	ctx             context.Context
+	config          config.SharedConfigProvider
+	wop             WaitingOperator
+	cluster         *core.BasicCluster
+	hbStreams       *hbstream.HeartbeatStreams
+	fastOperators   *cache.TTLUint64
 	opNotifierQueue *concurrentHeapOpQueue
-
-	// states
-	records   *records // safe for concurrent
-	wop       WaitingOperator
-	wopStatus *waitingOperatorStatus
-	counts    *opCounter
+	records         *records
+	wopStatus       *waitingOperatorStatus
+	counts          *opCounter
+	operators       sync.Map
 }
 
 // NewController creates a Controller.
@@ -897,9 +890,9 @@ func (oc *Controller) SetOperator(op *Operator) {
 
 // OpWithStatus records the operator and its status.
 type OpWithStatus struct {
-	*Operator
-	Status     pdpb.OperatorStatus
 	FinishTime time.Time
+	*Operator
+	Status pdpb.OperatorStatus
 }
 
 // NewOpWithStatus creates an OpWithStatus from an operator.

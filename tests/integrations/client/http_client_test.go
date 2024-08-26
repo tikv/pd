@@ -48,14 +48,12 @@ import (
 
 type httpClientTestSuite struct {
 	suite.Suite
-	// 1. Using `NewClient` will create a `DefaultPDServiceDiscovery` internal.
-	// 2. Using `NewClientWithServiceDiscovery` will need a `PDServiceDiscovery` to be passed in.
-	withServiceDiscovery bool
 	ctx                  context.Context
+	client               pd.Client
 	cancelFunc           context.CancelFunc
 	cluster              *tests.TestCluster
 	endpoints            []string
-	client               pd.Client
+	withServiceDiscovery bool
 }
 
 func TestHTTPClientTestSuite(t *testing.T) {

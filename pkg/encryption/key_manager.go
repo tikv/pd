@@ -53,29 +53,17 @@ type KeyManager interface {
 // Manager maintains the list to encryption keys. It handles encryption key generation and
 // rotation, persisting and loading encryption keys.
 type Manager struct {
-	// Backing storage for key dictionary.
-	etcdClient *clientv3.Client
-	// Encryption method used to encrypt data
-	method encryptionpb.EncryptionMethod
-	// Time interval between data key rotation.
-	dataKeyRotationPeriod time.Duration
-	// Metadata defines the master key to use.
+	helper        keyManagerHelper
+	keys          atomic.Value
+	etcdClient    *clientv3.Client
 	masterKeyMeta *encryptionpb.MasterKey
-	// Helper methods. Tests can mock the helper to inject dependencies.
-	helper keyManagerHelper
-	// Mutex for updating keys. Used for both of LoadKeys() and rotateKeyIfNeeded().
-	mu struct {
-		syncutil.Mutex
-		// PD leadership of the current PD node. Only the PD leader will rotate data keys,
-		// or change current encryption method.
-		// Guarded by mu.
-		leadership *election.Leadership
-		// Revision of keys loaded from etcd. Guarded by mu.
+	mu            struct {
+		leadership   *election.Leadership
 		keysRevision int64
+		syncutil.Mutex
 	}
-	// List of all encryption keys and current encryption key id,
-	// with type *encryptionpb.KeyDictionary. The content is read-only.
-	keys atomic.Value
+	dataKeyRotationPeriod time.Duration
+	method                encryptionpb.EncryptionMethod
 }
 
 // saveKeys saves encryption keys in etcd. Fail if given leadership is not current.

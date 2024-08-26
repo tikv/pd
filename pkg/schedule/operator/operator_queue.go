@@ -59,8 +59,8 @@ func (opn *operatorQueue) Pop() any {
 }
 
 type concurrentHeapOpQueue struct {
-	sync.Mutex
 	heap operatorQueue
+	sync.Mutex
 }
 
 func newConcurrentHeapOpQueue() *concurrentHeapOpQueue {

@@ -45,8 +45,8 @@ func NewPriorityInspector(cluster sche.CheckerCluster, conf config.CheckerConfig
 
 // RegionPriorityEntry records region priority info.
 type RegionPriorityEntry struct {
-	Attempt  int
 	Last     time.Time
+	Attempt  int
 	regionID uint64
 }
 

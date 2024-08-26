@@ -65,11 +65,11 @@ func TestGetScaledTiKVGroups(t *testing.T) {
 	})
 
 	testCases := []struct {
-		name             string
 		informer         core.StoreSetInformer
+		errorChecker     func(err error, msgAndArgs ...any)
+		name             string
 		healthyInstances []instance
 		expectedPlan     []*Plan
-		errorChecker     func(err error, msgAndArgs ...any)
 	}{
 		{
 			name:     "no scaled tikv group",

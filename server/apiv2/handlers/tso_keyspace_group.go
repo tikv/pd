@@ -138,8 +138,8 @@ func GetKeyspaceGroups(c *gin.Context) {
 
 // GetKeyspaceGroupPrimaryResponse defines the response for getting primary node of keyspace group.
 type GetKeyspaceGroupPrimaryResponse struct {
-	ID      uint32 `json:"id"`
 	Primary string `json:"primary"`
+	ID      uint32 `json:"id"`
 }
 
 // GetKeyspaceGroupByID gets keyspace group by ID.
@@ -203,11 +203,10 @@ func DeleteKeyspaceGroupByID(c *gin.Context) {
 
 // SplitKeyspaceGroupByIDParams defines the params for splitting a keyspace group.
 type SplitKeyspaceGroupByIDParams struct {
-	NewID     uint32   `json:"new-id"`
-	Keyspaces []uint32 `json:"keyspaces"`
-	// StartKeyspaceID and EndKeyspaceID are used to indicate the range of keyspaces to be split.
-	StartKeyspaceID uint32 `json:"start-keyspace-id"`
-	EndKeyspaceID   uint32 `json:"end-keyspace-id"`
+	Keyspaces       []uint32 `json:"keyspaces"`
+	NewID           uint32   `json:"new-id"`
+	StartKeyspaceID uint32   `json:"start-keyspace-id"`
+	EndKeyspaceID   uint32   `json:"end-keyspace-id"`
 }
 
 var patrolKeyspaceAssignmentState struct {

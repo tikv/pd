@@ -168,9 +168,9 @@ func (suite *statsTestSuite) TestRegionStats() {
 	}
 
 	testdata := []struct {
+		expect   *statistics.RegionStats
 		startKey string
 		endKey   string
-		expect   *statistics.RegionStats
 	}{
 		{
 			startKey: "",

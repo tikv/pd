@@ -67,8 +67,8 @@ func (suite *logTestSuite) TestLog() {
 	re := suite.Require()
 	cmd := ctl.GetRootCmd()
 	var testCases = []struct {
-		cmd    []string
 		expect string
+		cmd    []string
 	}{
 		// log [fatal|error|warn|info|debug]
 		{
@@ -104,9 +104,9 @@ func (suite *logTestSuite) TestInstanceLog() {
 	re := suite.Require()
 	cmd := ctl.GetRootCmd()
 	var testCases = []struct {
-		cmd      []string
 		instance string
 		expect   string
+		cmd      []string
 	}{
 		// log [fatal|error|warn|info|debug] [address]
 		{

@@ -41,16 +41,16 @@ const (
 // levelDBBackend is a storage backend that stores data in LevelDB,
 // which is mainly used to store the PD Region meta information.
 type levelDBBackend struct {
+	flushTime time.Time
+	ctx       context.Context
 	*endpoint.StorageEndpoint
 	ekm       *encryption.Manager
-	mu        syncutil.RWMutex
 	batch     map[string][]byte
+	cancel    context.CancelFunc
 	batchSize int
 	cacheSize int
 	flushRate time.Duration
-	flushTime time.Time
-	ctx       context.Context
-	cancel    context.CancelFunc
+	mu        syncutil.RWMutex
 }
 
 // newLevelDBBackend is used to create a new LevelDB backend.

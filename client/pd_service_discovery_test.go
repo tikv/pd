@@ -42,11 +42,11 @@ import (
 
 type testGRPCServer struct {
 	pb.UnimplementedGreeterServer
-	isLeader     bool
-	leaderAddr   string
 	leaderConn   *grpc.ClientConn
+	leaderAddr   string
 	handleCount  atomic.Int32
 	forwardCount atomic.Int32
+	isLeader     bool
 }
 
 // SayHello implements helloworld.GreeterServer

@@ -37,8 +37,8 @@ const (
 
 // StoresStats is a cache hold hot regions.
 type StoresStats struct {
-	syncutil.RWMutex
 	rollingStoresStats map[uint64]*RollingStoreStats
+	syncutil.RWMutex
 }
 
 // NewStoresStats creates a new hot spot cache.
@@ -134,9 +134,9 @@ func UpdateStoreHeartbeatMetrics(store *core.StoreInfo) {
 
 // RollingStoreStats are multiple sets of recent historical records with specified windows size.
 type RollingStoreStats struct {
-	syncutil.RWMutex
 	timeMedians []*movingaverage.TimeMedian
 	movingAvgs  []movingaverage.MovingAvg
+	syncutil.RWMutex
 }
 
 // NewRollingStoreStats creates a RollingStoreStats.

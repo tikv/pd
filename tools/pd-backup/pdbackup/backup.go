@@ -40,10 +40,10 @@ const (
 
 // BackupInfo is the backup infos.
 type BackupInfo struct {
+	Config            *config.Config `json:"config"`
 	ClusterID         uint64         `json:"clusterID"`
 	AllocIDMax        uint64         `json:"allocIDMax"`
 	AllocTimestampMax uint64         `json:"allocTimestampMax"`
-	Config            *config.Config `json:"config"`
 }
 
 // GetBackupInfo return the BackupInfo

@@ -72,10 +72,10 @@ func TestGetIPPortFromHTTPRequest(t *testing.T) {
 	re := require.New(t)
 
 	testCases := []struct {
+		err  error
 		r    *http.Request
 		ip   string
 		port string
-		err  error
 	}{
 		// IPv4 "X-Forwarded-For" with port
 		{

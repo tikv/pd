@@ -159,14 +159,14 @@ func (suite *scheduleTestSuite) checkAPI(cluster *tests.TestCluster) {
 	}
 
 	type arg struct {
-		opt   string
 		value any
+		opt   string
 	}
 	testCases := []struct {
+		extraTestFunc func(name string)
 		name          string
 		createdName   string
 		args          []arg
-		extraTestFunc func(name string)
 	}{
 		{
 			name:        "balance-leader-scheduler",
@@ -416,7 +416,7 @@ func (suite *scheduleTestSuite) checkAPI(cluster *tests.TestCluster) {
 		{
 			name:        "grant-leader-scheduler",
 			createdName: "grant-leader-scheduler",
-			args:        []arg{{"store_id", 1}},
+			args:        []arg{{opt: "store_id", value: 1}},
 			extraTestFunc: func(name string) {
 				resp := make(map[string]any)
 				listURL := fmt.Sprintf("%s%s%s/%s/list", leaderAddr, apiPrefix, server.SchedulerConfigHandlerPath, name)
@@ -484,7 +484,7 @@ func (suite *scheduleTestSuite) checkAPI(cluster *tests.TestCluster) {
 		{
 			name:        "evict-leader-scheduler",
 			createdName: "evict-leader-scheduler",
-			args:        []arg{{"store_id", 3}},
+			args:        []arg{{opt: "store_id", value: 3}},
 			// Test the scheduler config handler.
 			extraTestFunc: func(name string) {
 				resp := make(map[string]any)

@@ -161,11 +161,11 @@ func (s *CPUEntries) CPU() float64 {
 
 // StatEntries saves the StatEntries for each store in the cluster
 type StatEntries struct {
-	m     syncutil.RWMutex
 	stats map[uint64]*CPUEntries
-	size  int   // size of entries to keep for each store
-	total int64 // total of StatEntry appended
+	size  int
+	total int64
 	ttl   time.Duration
+	m     syncutil.RWMutex
 }
 
 // NewStatEntries returns a statistics object for the cluster

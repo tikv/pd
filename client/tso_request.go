@@ -35,16 +35,14 @@ var (
 )
 
 type tsoRequest struct {
+	start      time.Time
 	requestCtx context.Context
 	clientCtx  context.Context
 	done       chan error
+	pool       *sync.Pool
+	dcLocation string
 	physical   int64
 	logical    int64
-	dcLocation string
-
-	// Runtime fields.
-	start time.Time
-	pool  *sync.Pool
 }
 
 // tryDone tries to send the result to the channel, it will not block.

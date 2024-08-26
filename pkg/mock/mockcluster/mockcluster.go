@@ -49,16 +49,16 @@ const (
 // Cluster is used to mock a cluster for test purpose.
 type Cluster struct {
 	ctx context.Context
+	storage.Storage
 	*core.BasicCluster
 	*mockid.IDAllocator
 	*placement.RuleManager
 	*labeler.RegionLabeler
 	*statistics.HotStat
 	*config.PersistOptions
-	ID                      uint64
 	pendingProcessedRegions map[uint64]struct{}
 	*buckets.HotBucketCache
-	storage.Storage
+	ID uint64
 }
 
 // NewCluster creates a new Cluster

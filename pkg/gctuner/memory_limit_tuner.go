@@ -34,9 +34,9 @@ var GlobalMemoryLimitTuner = &memoryLimitTuner{}
 // Go runtime trigger GC when hit memory limit which managed via runtime/debug.SetMemoryLimit.
 // So we can change memory limit dynamically to avoid frequent GC when memory usage is greater than the limit.
 type memoryLimitTuner struct {
+	percentage                   atomic.Value
 	finalizer                    *finalizer
 	isTuning                     atomic.Bool
-	percentage                   atomic.Value
 	waitingReset                 atomic.Bool
 	nextGCTriggeredByMemoryLimit atomic.Bool
 }

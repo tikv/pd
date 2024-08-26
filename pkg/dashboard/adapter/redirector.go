@@ -31,16 +31,12 @@ const (
 
 // Redirector is used to redirect when the dashboard is started in another PD.
 type Redirector struct {
-	mu syncutil.RWMutex
-
-	name      string
 	tlsConfig *tls.Config
-
-	address string
-	proxy   *httputil.ReverseProxy
-	// The status of the dashboard in the cluster.
-	// It is not equal to `apiserver.Service.status`.
-	status *utils.ServiceStatus
+	proxy     *httputil.ReverseProxy
+	status    *utils.ServiceStatus
+	name      string
+	address   string
+	mu        syncutil.RWMutex
 }
 
 // NewRedirector creates a new Redirector.

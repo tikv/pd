@@ -41,10 +41,10 @@ const (
 // Unhealthy replica management, mainly used for disaster recovery of TiKV.
 // Location management, mainly used for cross data center deployment.
 type ReplicaChecker struct {
-	PauseController
 	cluster                 sche.CheckerCluster
 	conf                    config.CheckerConfigProvider
 	pendingProcessedRegions *cache.TTLUint64
+	PauseController
 }
 
 // NewReplicaChecker creates a replica checker.

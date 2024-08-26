@@ -77,11 +77,11 @@ type redirector struct {
 }
 
 type microserviceRedirectRule struct {
+	filter            func(*http.Request) bool
 	matchPath         string
 	targetPath        string
 	targetServiceName string
 	matchMethods      []string
-	filter            func(*http.Request) bool
 }
 
 // NewRedirector redirects request to the leader if needs to be handled in the leader.

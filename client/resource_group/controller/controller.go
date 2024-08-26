@@ -134,36 +134,24 @@ var _ ResourceGroupKVInterceptor = (*ResourceGroupsController)(nil)
 
 // ResourceGroupsController implements ResourceGroupKVInterceptor.
 type ResourceGroupsController struct {
-	clientUniqueID   uint64
-	provider         ResourceGroupProvider
-	groupsController sync.Map
-	ruConfig         *RUConfig
-
-	loopCtx    context.Context
-	loopCancel func()
-
-	calculators []ResourceCalculator
-
-	// When a signal is received, it means the number of available token is low.
-	lowTokenNotifyChan chan notifyMsg
-	// When a token bucket response received from server, it will be sent to the channel.
-	tokenResponseChan chan []*rmpb.TokenBucketResponse
-	// When the token bucket of a resource group is updated, it will be sent to the channel.
+	loopCtx               context.Context
+	provider              ResourceGroupProvider
 	tokenBucketUpdateChan chan *groupCostController
+	ruConfig              *RUConfig
+	loopCancel            func()
+	lowTokenNotifyChan    chan notifyMsg
+	tokenResponseChan     chan []*rmpb.TokenBucketResponse
 	responseDeadlineCh    <-chan time.Time
-
-	run struct {
+	safeRuConfig          atomic.Pointer[RUConfig]
+	groupsController      sync.Map
+	calculators           []ResourceCalculator
+	opts                  []ResourceControlCreateOption
+	run                   struct {
 		responseDeadline *time.Timer
+		currentRequests  []*rmpb.TokenBucketRequest
 		inDegradedMode   bool
-		// currentRequests is used to record the request and resource group.
-		// Currently, we don't do multiple `AcquireTokenBuckets`` at the same time, so there are no concurrency problems with `currentRequests`.
-		currentRequests []*rmpb.TokenBucketRequest
 	}
-
-	opts []ResourceControlCreateOption
-
-	// a cache for ru config and make concurrency safe.
-	safeRuConfig atomic.Pointer[RUConfig]
+	clientUniqueID uint64
 }
 
 // NewResourceGroupController returns a new ResourceGroupsController which impls ResourceGroupKVInterceptor
@@ -715,70 +703,37 @@ func (c *ResourceGroupsController) GetResourceGroup(resourceGroupName string) (*
 }
 
 type groupCostController struct {
-	// invariant attributes
-	name    string
-	mode    rmpb.GroupMode
-	mainCfg *RUConfig
-	// meta info
-	meta     *rmpb.ResourceGroup
-	metaLock sync.RWMutex
-
-	// following fields are used for token limiter.
-	calculators    []ResourceCalculator
-	handleRespFunc func(*rmpb.TokenBucketResponse)
-
-	// metrics
-	metrics *groupMetricsCollection
-	mu      struct {
-		sync.Mutex
+	burstable             *atomic.Bool
+	tokenBucketUpdateChan chan<- *groupCostController
+	mainCfg               *RUConfig
+	meta                  *rmpb.ResourceGroup
+	lowRUNotifyChan       chan<- notifyMsg
+	isThrottled           *atomic.Bool
+	handleRespFunc        func(*rmpb.TokenBucketResponse)
+	metrics               *groupMetricsCollection
+	mu                    struct {
 		consumption   *rmpb.Consumption
 		storeCounter  map[uint64]*rmpb.Consumption
 		globalCounter *rmpb.Consumption
+		sync.Mutex
 	}
-
-	// fast path to make once token limit with un-limit burst.
-	burstable *atomic.Bool
-	// is throttled
-	isThrottled *atomic.Bool
-
-	lowRUNotifyChan       chan<- notifyMsg
-	tokenBucketUpdateChan chan<- *groupCostController
-
-	// run contains the state that is updated by the main loop.
-	run struct {
-		now             time.Time
-		lastRequestTime time.Time
-
-		// requestInProgress is set true when sending token bucket request.
-		// And it is set false when receiving token bucket response.
-		// This triggers a retry attempt on the next tick.
-		requestInProgress bool
-
-		// targetPeriod stores the value of the TargetPeriodSetting setting at the
-		// last update.
-		targetPeriod time.Duration
-
-		// consumptions stores the last value of mu.consumption.
-		// requestUnitConsumptions []*rmpb.RequestUnitItem
-		// resourceConsumptions    []*rmpb.ResourceItem
-		consumption *rmpb.Consumption
-
-		// lastRequestUnitConsumptions []*rmpb.RequestUnitItem
-		// lastResourceConsumptions    []*rmpb.ResourceItem
-		lastRequestConsumption *rmpb.Consumption
-
-		// initialRequestCompleted is set to true when the first token bucket
-		// request completes successfully.
+	name string
+	run  struct {
+		now                     time.Time
+		lastRequestTime         time.Time
+		consumption             *rmpb.Consumption
+		lastRequestConsumption  *rmpb.Consumption
+		resourceTokens          map[rmpb.RawResourceType]*tokenCounter
+		requestUnitTokens       map[rmpb.RequestUnitType]*tokenCounter
+		targetPeriod            time.Duration
+		requestInProgress       bool
 		initialRequestCompleted bool
-
-		resourceTokens    map[rmpb.RawResourceType]*tokenCounter
-		requestUnitTokens map[rmpb.RequestUnitType]*tokenCounter
 	}
-
-	// tombstone is set to true when the resource group is deleted.
-	tombstone atomic.Bool
-	// inactive is set to true when the resource group has not been updated for a long time.
-	inactive bool
+	calculators []ResourceCalculator
+	metaLock    sync.RWMutex
+	mode        rmpb.GroupMode
+	tombstone   atomic.Bool
+	inactive    bool
 }
 
 type groupMetricsCollection struct {
@@ -810,29 +765,20 @@ func initMetrics(oldName, name string) *groupMetricsCollection {
 }
 
 type tokenCounter struct {
+	avgLastTime        time.Time
+	lastDeadline       time.Time
 	getTokenBucketFunc func() *rmpb.TokenBucket
-
-	// avgRUPerSec is an exponentially-weighted moving average of the RU
-	// consumption per second; used to estimate the RU requirements for the next
-	// request.
-	avgRUPerSec float64
-	// lastSecRU is the consumption.RU value when avgRUPerSec was last updated.
-	avgRUPerSecLastRU float64
-	avgLastTime       time.Time
-
-	notify struct {
-		mu                         sync.Mutex
+	limiter            *Limiter
+	notify             struct {
 		setupNotificationCh        <-chan time.Time
-		setupNotificationThreshold float64
 		setupNotificationTimer     *time.Timer
+		setupNotificationThreshold float64
+		mu                         sync.Mutex
 	}
-
-	lastDeadline time.Time
-	lastRate     float64
-
-	limiter *Limiter
-
-	inDegradedMode bool
+	avgRUPerSec       float64
+	avgRUPerSecLastRU float64
+	lastRate          float64
+	inDegradedMode    bool
 }
 
 func newGroupCostController(

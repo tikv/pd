@@ -94,8 +94,8 @@ func toHotPeerStatShow(p *HotPeerStat) HotPeerStatShow {
 // StoreSummaryInfo records the summary information of store.
 type StoreSummaryInfo struct {
 	*core.StoreInfo
-	isTiFlash  bool
 	PendingSum *Influence
+	isTiFlash  bool
 }
 
 // Influence records operator influence.
@@ -148,8 +148,8 @@ func (s *StoreSummaryInfo) SetEngineAsTiFlash() {
 // StoreLoad records the current load.
 type StoreLoad struct {
 	Loads        []float64
-	Count        float64
 	HistoryLoads [][]float64
+	Count        float64
 }
 
 // ToLoadPred returns the current load and future predictive load.

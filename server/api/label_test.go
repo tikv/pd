@@ -221,8 +221,8 @@ func (suite *strictlyLabelsStoreTestSuite) TestStoreMatch() {
 	re := suite.Require()
 	testCases := []struct {
 		store       *metapb.Store
-		valid       bool
 		expectError string
+		valid       bool
 	}{
 		{
 			store: &metapb.Store{

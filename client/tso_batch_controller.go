@@ -26,15 +26,12 @@ import (
 )
 
 type tsoBatchController struct {
-	maxBatchSize int
-	// bestBatchSize is a dynamic size that changed based on the current batch effect.
-	bestBatchSize int
-
+	batchStartTime        time.Time
 	tsoRequestCh          chan *tsoRequest
 	collectedRequests     []*tsoRequest
+	maxBatchSize          int
+	bestBatchSize         int
 	collectedRequestCount int
-
-	batchStartTime time.Time
 }
 
 func newTSOBatchController(tsoRequestCh chan *tsoRequest, maxBatchSize int) *tsoBatchController {

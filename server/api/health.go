@@ -31,8 +31,8 @@ type healthHandler struct {
 // NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
 type Health struct {
 	Name       string   `json:"name"`
-	MemberID   uint64   `json:"member_id"`
 	ClientUrls []string `json:"client_urls"`
+	MemberID   uint64   `json:"member_id"`
 	Health     bool     `json:"health"`
 }
 

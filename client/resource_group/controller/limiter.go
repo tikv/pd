@@ -68,24 +68,17 @@ func Every(interval time.Duration) Limit {
 //   - If b < 0, that means the limiter is unlimited capacity and r is ignored, can be seen as r == Inf (burst within an unlimited capacity).
 //   - If b > 0, that means the limiter is limited capacity.
 type Limiter struct {
-	mu     sync.Mutex
-	limit  Limit
-	tokens float64
-	burst  int64
-	// last is the last time the limiter's tokens field was updated
-	last                time.Time
-	notifyThreshold     float64
-	lowTokensNotifyChan chan<- notifyMsg
-	// To prevent too many chan sent, the notifyThreshold is set to 0 after notify.
-	// So the notifyThreshold cannot show whether the limiter is in the low token state,
-	// isLowProcess is used to check it.
-	isLowProcess bool
-	// remainingNotifyTimes is used to limit notify when the speed limit is already set.
-	remainingNotifyTimes int
+	last                 time.Time
+	lowTokensNotifyChan  chan<- notifyMsg
+	metrics              *limiterMetricsCollection
 	name                 string
-
-	// metrics
-	metrics *limiterMetricsCollection
+	limit                Limit
+	tokens               float64
+	burst                int64
+	notifyThreshold      float64
+	remainingNotifyTimes int
+	mu                   sync.Mutex
+	isLowProcess         bool
 }
 
 // notifyMsg is a message to notify the low token state.
@@ -141,15 +134,14 @@ func NewLimiterWithCfg(name string, now time.Time, cfg tokenBucketReconfigureArg
 // A Reservation holds information about events that are permitted by a Limiter to happen after a delay.
 // A Reservation may be canceled, which may enable the Limiter to permit additional events.
 type Reservation struct {
-	ok               bool
+	timeToAct        time.Time
+	err              error
 	lim              *Limiter
 	tokens           float64
-	timeToAct        time.Time
 	needWaitDuration time.Duration
-	// This is the Limit at reservation time, it can change later.
-	limit           Limit
-	remainingTokens float64
-	err             error
+	limit            Limit
+	remainingTokens  float64
+	ok               bool
 }
 
 // OK returns whether the limiter can provide the requested number of tokens

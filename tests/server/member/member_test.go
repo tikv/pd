@@ -75,8 +75,8 @@ func TestMemberDelete(t *testing.T) {
 
 	var tables = []struct {
 		path    string
-		status  int
 		members []*config.Config
+		status  int
 	}{
 		{path: "name/foobar", status: http.StatusNotFound},
 		{path: "name/" + members[0].GetConfig().Name, members: []*config.Config{leader.GetConfig(), members[1].GetConfig()}},

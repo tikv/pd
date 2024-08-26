@@ -33,21 +33,21 @@ const (
 
 type storeStatistics struct {
 	opt             config.ConfProvider
-	Up              int
-	Disconnect      int
-	Unhealthy       int
-	Down            int
+	LabelCounter    map[string][]uint64
 	Offline         int
+	RegionCount     int
+	Down            int
+	Disconnect      int
 	Tombstone       int
 	LowSpace        int
 	Slow            int
 	StorageSize     uint64
 	StorageCapacity uint64
-	RegionCount     int
+	Unhealthy       int
 	LeaderCount     int
 	LearnerCount    int
 	WitnessCount    int
-	LabelCounter    map[string][]uint64
+	Up              int
 	Preparing       int
 	Serving         int
 	Removing        int

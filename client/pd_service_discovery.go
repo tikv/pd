@@ -148,12 +148,11 @@ var (
 )
 
 type pdServiceClient struct {
-	url       string
-	conn      *grpc.ClientConn
-	isLeader  bool
-	leaderURL string
-
+	conn           *grpc.ClientConn
+	url            string
+	leaderURL      string
 	networkFailure atomic.Bool
+	isLeader       bool
 }
 
 // NOTE: In the current implementation, the URL passed in is bound to have a scheme,
@@ -261,10 +260,9 @@ func regionAPIErrorFn(pdErr *pdpb.Error) bool {
 // It extends the pdServiceClient and adds additional fields for managing availability
 type pdServiceAPIClient struct {
 	ServiceClient
-	fn errFn
-
-	unavailable      atomic.Bool
 	unavailableUntil atomic.Value
+	fn               errFn
+	unavailable      atomic.Bool
 }
 
 func newPDServiceAPIClient(client ServiceClient, f errFn) ServiceClient {
@@ -317,10 +315,10 @@ type pdServiceBalancerNode struct {
 // pdServiceBalancer is a load balancer for PD service clients.
 // It is used to balance the request to all servers and manage the connections to multiple PD service nodes.
 type pdServiceBalancer struct {
-	mu        sync.Mutex
 	now       *pdServiceBalancerNode
-	totalNode int
 	errFn     errFn
+	totalNode int
+	mu        sync.Mutex
 }
 
 func newPDServiceBalancer(fn errFn) *pdServiceBalancer {
@@ -402,49 +400,29 @@ var (
 
 // pdServiceDiscovery is the service discovery client of PD/API service which is quorum based
 type pdServiceDiscovery struct {
-	isInitialized bool
-
-	urls atomic.Value // Store as []string
-	// PD leader
-	leader atomic.Value // Store as pdServiceClient
-	// PD follower
-	followers sync.Map // Store as map[string]pdServiceClient
-	// PD leader and PD followers
-	all               atomic.Value // Store as []pdServiceClient
-	apiCandidateNodes [apiKindCount]*pdServiceBalancer
-	// PD follower URLs. Only for tso.
-	followerURLs atomic.Value // Store as []string
-
-	clusterID uint64
-	// url -> a gRPC connection
-	clientConns sync.Map // Store as map[string]*grpc.ClientConn
-
-	// serviceModeUpdateCb will be called when the service mode gets updated
-	serviceModeUpdateCb func(pdpb.ServiceMode)
-	// leaderSwitchedCbs will be called after the leader switched
-	leaderSwitchedCbs []func()
-	// membersChangedCbs will be called after there is any membership change in the
-	// leader and followers
-	membersChangedCbs []func()
-	// tsoLocalAllocLeadersUpdatedCb will be called when the local tso allocator
-	// leader list is updated. The input is a map {DC Location -> Leader URL}
+	followerURLs                  atomic.Value
+	urls                          atomic.Value
+	leader                        atomic.Value
+	ctx                           context.Context
+	all                           atomic.Value
+	apiCandidateNodes             [apiKindCount]*pdServiceBalancer
+	wg                            *sync.WaitGroup
+	cancel                        context.CancelFunc
+	serviceModeUpdateCb           func(pdpb.ServiceMode)
+	option                        *option
+	tlsCfg                        *tls.Config
 	tsoLocalAllocLeadersUpdatedCb tsoLocalServURLsUpdatedFunc
-	// tsoGlobalAllocLeaderUpdatedCb will be called when the global tso allocator
-	// leader is updated.
 	tsoGlobalAllocLeaderUpdatedCb tsoGlobalServURLUpdatedFunc
-
-	checkMembershipCh chan struct{}
-
-	wg        *sync.WaitGroup
-	ctx       context.Context
-	cancel    context.CancelFunc
-	closeOnce sync.Once
-
-	updateKeyspaceIDCb updateKeyspaceIDFunc
-	keyspaceID         uint32
-	tlsCfg             *tls.Config
-	// Client option.
-	option *option
+	checkMembershipCh             chan struct{}
+	updateKeyspaceIDCb            updateKeyspaceIDFunc
+	clientConns                   sync.Map
+	followers                     sync.Map
+	membersChangedCbs             []func()
+	leaderSwitchedCbs             []func()
+	clusterID                     uint64
+	closeOnce                     sync.Once
+	keyspaceID                    uint32
+	isInitialized                 bool
 }
 
 // NewDefaultPDServiceDiscovery returns a new default PD service discovery-based client.

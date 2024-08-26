@@ -192,10 +192,10 @@ func (*noopHeartbeatProcessTracer) Release() {}
 type regionHeartbeatProcessTracer struct {
 	startTime             time.Time
 	lastCheckTime         time.Time
+	saveCacheStats        saveCacheStats
 	preCheckDuration      time.Duration
 	asyncHotStatsDuration time.Duration
 	regionGuideDuration   time.Duration
-	saveCacheStats        saveCacheStats
 	OtherDuration         time.Duration
 }
 

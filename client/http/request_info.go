@@ -90,15 +90,15 @@ const (
 )
 
 type requestInfo struct {
+	res         any
+	respHandler respHandleFunc
+	bo          *retry.Backoffer
 	callerID    string
 	name        string
 	uri         string
 	method      string
-	body        []byte
-	res         any
-	respHandler respHandleFunc
-	bo          *retry.Backoffer
 	targetURL   string
+	body        []byte
 }
 
 // newRequestInfo creates a new request info.

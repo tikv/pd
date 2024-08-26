@@ -24,8 +24,8 @@ import (
 )
 
 type memoryKV struct {
-	syncutil.RWMutex
 	tree *btree.BTreeG[memoryKVItem]
+	syncutil.RWMutex
 }
 
 // NewMemoryKV returns an in-memory kvBase for testing.
@@ -99,18 +99,17 @@ func (kv *memoryKV) Remove(key string) error {
 
 // memTxn implements kv.Txn.
 type memTxn struct {
-	kv  *memoryKV
 	ctx context.Context
-	// mu protects ops.
-	mu  syncutil.Mutex
+	kv  *memoryKV
 	ops []*op
+	mu  syncutil.Mutex
 }
 
 // op represents an Operation that memKV can execute.
 type op struct {
-	t   opType
 	key string
 	val string
+	t   opType
 }
 
 type opType int

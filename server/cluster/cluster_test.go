@@ -3589,8 +3589,8 @@ func TestDownStoreLimit(t *testing.T) {
 // FIXME: remove after move into schedulers package
 type mockLimitScheduler struct {
 	schedulers.Scheduler
-	limit   uint64
 	counter *operator.Controller
+	limit   uint64
 	kind    operator.OpKind
 }
 

@@ -40,23 +40,15 @@ func withMinLogInterval(interval time.Duration) Option {
 
 // Backoffer is a backoff policy for retrying operations.
 type Backoffer struct {
-	// base defines the initial time interval to wait before each retry.
-	base time.Duration
-	// max defines the max time interval to wait before each retry.
-	max time.Duration
-	// total defines the max total time duration cost in retrying. If it's 0, it means infinite retry until success.
-	total time.Duration
-	// retryableChecker is used to check if the error is retryable.
-	// If it's not set, it will always retry unconditionally no matter what the error is.
 	retryableChecker func(err error) bool
-	// logInterval defines the log interval for retrying.
-	logInterval time.Duration
-	// nextLogTime is used to record the next log time.
-	nextLogTime time.Duration
-
-	attempt      int
-	next         time.Duration
-	currentTotal time.Duration
+	base             time.Duration
+	max              time.Duration
+	total            time.Duration
+	logInterval      time.Duration
+	nextLogTime      time.Duration
+	attempt          int
+	next             time.Duration
+	currentTotal     time.Duration
 }
 
 // Exec is a helper function to exec backoff.

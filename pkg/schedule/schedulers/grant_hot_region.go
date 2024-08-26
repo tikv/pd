@@ -41,12 +41,11 @@ import (
 )
 
 type grantHotRegionSchedulerConfig struct {
-	syncutil.RWMutex
 	schedulerConfig
-
 	cluster       *core.BasicCluster
 	StoreIDs      []uint64 `json:"store-id"`
 	StoreLeaderID uint64   `json:"store-leader-id"`
+	syncutil.RWMutex
 }
 
 func (conf *grantHotRegionSchedulerConfig) setStore(leaderID uint64, peers []uint64) bool {

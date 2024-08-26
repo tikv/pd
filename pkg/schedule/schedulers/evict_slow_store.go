@@ -39,15 +39,12 @@ const (
 )
 
 type evictSlowStoreSchedulerConfig struct {
-	syncutil.RWMutex
-	schedulerConfig
-
-	cluster *core.BasicCluster
-	// Last timestamp of the chosen slow store for eviction.
 	lastSlowStoreCaptureTS time.Time
-	// Duration gap for recovering the candidate, unit: s.
-	RecoveryDurationGap uint64   `json:"recovery-duration"`
+	schedulerConfig
+	cluster             *core.BasicCluster
 	EvictedStores       []uint64 `json:"evict-stores"`
+	RecoveryDurationGap uint64   `json:"recovery-duration"`
+	syncutil.RWMutex
 }
 
 func initEvictSlowStoreSchedulerConfig() *evictSlowStoreSchedulerConfig {

@@ -54,23 +54,23 @@ func (s PeerRoleType) MetaPeerRole() metapb.PeerRole {
 //
 // NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
 type Rule struct {
-	GroupID          string            `json:"group_id"`                    // mark the source that add the rule
-	ID               string            `json:"id"`                          // unique ID within a group
-	Index            int               `json:"index,omitempty"`             // rule apply order in a group, rule with less ID is applied first when indexes are equal
-	Override         bool              `json:"override,omitempty"`          // when it is true, all rules with less indexes are disabled
-	StartKey         []byte            `json:"-"`                           // range start key
-	StartKeyHex      string            `json:"start_key"`                   // hex format start key, for marshal/unmarshal
-	EndKey           []byte            `json:"-"`                           // range end key
-	EndKeyHex        string            `json:"end_key"`                     // hex format end key, for marshal/unmarshal
-	Role             PeerRoleType      `json:"role"`                        // expected role of the peers
-	IsWitness        bool              `json:"is_witness"`                  // when it is true, it means the role is also a witness
-	Count            int               `json:"count"`                       // expected count of the peers
-	LabelConstraints []LabelConstraint `json:"label_constraints,omitempty"` // used to select stores to place peers
-	LocationLabels   []string          `json:"location_labels,omitempty"`   // used to make peers isolated physically
-	IsolationLevel   string            `json:"isolation_level,omitempty"`   // used to isolate replicas explicitly and forcibly
-	Version          uint64            `json:"version,omitempty"`           // only set at runtime, add 1 each time rules updated, begin from 0.
-	CreateTimestamp  uint64            `json:"create_timestamp,omitempty"`  // only set at runtime, recorded rule create timestamp
-	group            *RuleGroup        // only set at runtime, no need to {,un}marshal or persist.
+	group            *RuleGroup
+	EndKeyHex        string            `json:"end_key"`
+	ID               string            `json:"id"`
+	IsolationLevel   string            `json:"isolation_level,omitempty"`
+	GroupID          string            `json:"group_id"`
+	StartKeyHex      string            `json:"start_key"`
+	Role             PeerRoleType      `json:"role"`
+	StartKey         []byte            `json:"-"`
+	EndKey           []byte            `json:"-"`
+	LabelConstraints []LabelConstraint `json:"label_constraints,omitempty"`
+	LocationLabels   []string          `json:"location_labels,omitempty"`
+	Count            int               `json:"count"`
+	Version          uint64            `json:"version,omitempty"`
+	CreateTimestamp  uint64            `json:"create_timestamp,omitempty"`
+	Index            int               `json:"index,omitempty"`
+	IsWitness        bool              `json:"is_witness"`
+	Override         bool              `json:"override,omitempty"`
 }
 
 // NewRuleFromJSON creates a rule from the JSON data.
@@ -211,9 +211,9 @@ func prepareRulesForApply(rules []*Rule) []*Rule {
 // NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
 type GroupBundle struct {
 	ID       string  `json:"group_id"`
+	Rules    []*Rule `json:"rules"`
 	Index    int     `json:"group_index"`
 	Override bool    `json:"group_override"`
-	Rules    []*Rule `json:"rules"`
 }
 
 func (g GroupBundle) String() string {

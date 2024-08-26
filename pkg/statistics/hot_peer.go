@@ -27,10 +27,10 @@ import (
 )
 
 type dimStat struct {
-	syncutil.RWMutex
-	rolling         *movingaverage.TimeMedian // it's used to statistic hot degree and average speed.
-	lastIntervalSum int                       // lastIntervalSum and lastDelta are used to calculate the average speed of the last interval.
+	rolling         *movingaverage.TimeMedian
+	lastIntervalSum int
 	lastDelta       float64
+	syncutil.RWMutex
 }
 
 func newDimStat(reportInterval time.Duration) *dimStat {
@@ -91,30 +91,18 @@ func (d *dimStat) clone() *dimStat {
 
 // HotPeerStat records each hot peer's statistics
 type HotPeerStat struct {
-	StoreID  uint64 `json:"store_id"`
-	RegionID uint64 `json:"region_id"`
-	// HotDegree records the times for the region considered as hot spot during each report.
-	HotDegree int `json:"hot_degree"`
-	// AntiCount used to eliminate some noise when remove region in cache.
-	AntiCount int `json:"anti_count"`
-	// Loads contains only Kind-related statistics and is DimLen in length.
-	Loads []float64 `json:"loads"`
-	// rolling statistics contains denoising data, it's DimLen in length.
-	rollingLoads []*dimStat
-	// stores contains the all peer's storeID in this region.
-	stores []uint64
-	// actionType is the action type of the region, add, update or remove.
-	actionType utils.ActionType
-	// isLeader is true means that the region has a leader on this store.
-	isLeader bool
-	// lastTransferLeaderTime is used to cool down frequent transfer leader.
 	lastTransferLeaderTime time.Time
-	// If the peer didn't been send by store heartbeat when it is already stored as hot peer stat,
-	// we will handle it as cold peer and mark the inCold flag
-	inCold bool
-	// If the item in storeA is just inherited from storeB,
-	// then other store, such as storeC, will be forbidden to inherit from storeA until the item in storeA is hot.
-	allowInherited bool
+	Loads                  []float64 `json:"loads"`
+	rollingLoads           []*dimStat
+	stores                 []uint64
+	StoreID                uint64 `json:"store_id"`
+	RegionID               uint64 `json:"region_id"`
+	HotDegree              int    `json:"hot_degree"`
+	AntiCount              int    `json:"anti_count"`
+	actionType             utils.ActionType
+	isLeader               bool
+	inCold                 bool
+	allowInherited         bool
 }
 
 // ID returns region ID. Implementing TopNItem.

@@ -52,12 +52,10 @@ const (
 )
 
 type balanceLeaderSchedulerConfig struct {
-	syncutil.RWMutex
 	schedulerConfig
-
 	Ranges []core.KeyRange `json:"ranges"`
-	// Batch is used to generate multiple operators by one scheduling
-	Batch int `json:"batch"`
+	Batch  int             `json:"batch"`
+	syncutil.RWMutex
 }
 
 func (conf *balanceLeaderSchedulerConfig) update(data []byte) (int, any) {
@@ -152,12 +150,12 @@ func (handler *balanceLeaderHandler) listConfig(w http.ResponseWriter, _ *http.R
 }
 
 type balanceLeaderScheduler struct {
+	handler http.Handler
 	*BaseScheduler
 	*retryQuota
 	conf          *balanceLeaderSchedulerConfig
-	handler       http.Handler
-	filters       []filter.Filter
 	filterCounter *filter.Counter
+	filters       []filter.Filter
 }
 
 // newBalanceLeaderScheduler creates a scheduler that tends to keep leaders on
@@ -227,8 +225,8 @@ func (l *balanceLeaderScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster
 
 // candidateStores for balance_leader, order by `getStore` `asc`
 type candidateStores struct {
-	stores   []*core.StoreInfo
 	getScore func(*core.StoreInfo) float64
+	stores   []*core.StoreInfo
 	index    int
 	asc      bool
 }

@@ -33,9 +33,9 @@ var _ StoreLimit = &SlidingWindows{}
 
 // SlidingWindows is a multi sliding windows
 type SlidingWindows struct {
-	mu      syncutil.RWMutex
 	windows []*window
 	lastSum float64
+	mu      syncutil.RWMutex
 }
 
 // NewSlidingWindows is the construct of SlidingWindows.

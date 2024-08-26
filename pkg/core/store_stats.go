@@ -22,11 +22,9 @@ import (
 )
 
 type storeStats struct {
-	mu       syncutil.RWMutex
-	rawStats *pdpb.StoreStats
-
-	// avgAvailable is used to make available smooth, aka no sudden changes.
+	rawStats     *pdpb.StoreStats
 	avgAvailable *movingaverage.HMA
+	mu           syncutil.RWMutex
 }
 
 func newStoreStats() *storeStats {

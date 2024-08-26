@@ -90,9 +90,10 @@ func testRange(re *require.Assertions, kv Base) {
 	sort.Strings(sortedKeys)
 
 	testCases := []struct {
-		start, end string
-		limit      int
-		expect     []string
+		start  string
+		end    string
+		expect []string
+		limit  int
 	}{
 		{start: "", end: "z", limit: 100, expect: sortedKeys},
 		{start: "", end: "z", limit: 3, expect: sortedKeys[:3]},

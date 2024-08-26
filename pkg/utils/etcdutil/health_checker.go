@@ -46,21 +46,13 @@ type healthyClient struct {
 // healthChecker is used to check the health of etcd endpoints. Inside the checker,
 // we will maintain a map from each available etcd endpoint to its healthyClient.
 type healthChecker struct {
-	source         string
-	tickerInterval time.Duration
-	tlsConfig      *tls.Config
-
-	// Store as endpoint(string) -> *healthyClient
-	healthyClients sync.Map
-	// evictedEps records the endpoints which are evicted from the last health patrol,
-	// the value is the count the endpoint being picked continuously after evicted.
-	// Store as endpoint(string) -> pickedCount(int)
-	evictedEps sync.Map
-	// client is the etcd client the health checker is guarding, it will be set with
-	// the checked healthy endpoints dynamically and periodically.
-	client *clientv3.Client
-
 	endpointCountState prometheus.Gauge
+	tlsConfig          *tls.Config
+	client             *clientv3.Client
+	healthyClients     sync.Map
+	evictedEps         sync.Map
+	source             string
+	tickerInterval     time.Duration
 }
 
 // initHealthChecker initializes the health checker for etcd client.

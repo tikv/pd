@@ -75,43 +75,29 @@ const (
 
 // Server is the scheduling server, and it implements bs.Server.
 type Server struct {
-	*server.BaseServer
+	serverLoopCtx context.Context
 	diagnosticspb.DiagnosticsServer
-
-	// Server state. 0 is not running, 1 is running.
-	isRunning int64
-
-	serverLoopCtx    context.Context
-	serverLoopCancel func()
-	serverLoopWg     sync.WaitGroup
-
-	cfg           *config.Config
-	clusterID     uint64
-	persistConfig *config.PersistConfig
-	basicCluster  *core.BasicCluster
-
-	// for the primary election of scheduling
-	participant *member.Participant
-
+	serviceID         *discovery.ServiceRegistryEntry
+	hbStreams         *hbstream.HeartbeatStreams
+	serverLoopCancel  func()
+	metaWatcher       *meta.Watcher
+	cfg               *config.Config
+	ruleWatcher       *rule.Watcher
+	persistConfig     *config.PersistConfig
+	basicCluster      *core.BasicCluster
+	participant       *member.Participant
 	service           *Service
 	checkMembershipCh chan struct{}
-
-	// primaryCallbacks will be called after the server becomes leader.
-	primaryCallbacks     []func(context.Context) error
+	configWatcher     *config.Watcher
+	storage           *endpoint.StorageEndpoint
+	*server.BaseServer
+	serviceRegister      *discovery.ServiceRegister
+	cluster              *Cluster
 	primaryExitCallbacks []func()
-
-	// for service registry
-	serviceID       *discovery.ServiceRegistryEntry
-	serviceRegister *discovery.ServiceRegister
-
-	cluster   *Cluster
-	hbStreams *hbstream.HeartbeatStreams
-	storage   *endpoint.StorageEndpoint
-
-	// for watching the PD API server meta info updates that are related to the scheduling.
-	configWatcher *config.Watcher
-	ruleWatcher   *rule.Watcher
-	metaWatcher   *meta.Watcher
+	primaryCallbacks     []func(context.Context) error
+	serverLoopWg         sync.WaitGroup
+	isRunning            int64
+	clusterID            uint64
 }
 
 // Name returns the unique name for this server in the scheduling cluster.

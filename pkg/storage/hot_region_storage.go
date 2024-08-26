@@ -45,17 +45,16 @@ import (
 // and save/delete data beyond the `remainingDays`.
 // Close() must be called after the use.
 type HotRegionStorage struct {
-	*kv.LevelDBKV
-	ekm                    *encryption.Manager
-	hotRegionLoopWg        sync.WaitGroup
-	batchHotInfo           map[string]*HistoryHotRegion
 	hotRegionInfoCtx       context.Context
-	hotRegionInfoCancel    context.CancelFunc
 	hotRegionStorageHelper HotRegionStorageHelper
-
-	curReservedDays uint64
-	curInterval     time.Duration
-	mu              syncutil.RWMutex
+	*kv.LevelDBKV
+	ekm                 *encryption.Manager
+	batchHotInfo        map[string]*HistoryHotRegion
+	hotRegionInfoCancel context.CancelFunc
+	hotRegionLoopWg     sync.WaitGroup
+	curReservedDays     uint64
+	curInterval         time.Duration
+	mu                  syncutil.RWMutex
 }
 
 // HistoryHotRegions wraps historyHotRegion
@@ -69,24 +68,20 @@ type HistoryHotRegions struct {
 // HistoryHotRegion wraps hot region info
 // it is storage format of hot_region_storage
 type HistoryHotRegion struct {
-	UpdateTime    int64   `json:"update_time"`
-	RegionID      uint64  `json:"region_id"`
-	PeerID        uint64  `json:"peer_id"`
-	StoreID       uint64  `json:"store_id"`
-	IsLeader      bool    `json:"is_leader"`
-	IsLearner     bool    `json:"is_learner"`
-	HotRegionType string  `json:"hot_region_type"`
-	HotDegree     int64   `json:"hot_degree"`
-	FlowBytes     float64 `json:"flow_bytes"`
-	KeyRate       float64 `json:"key_rate"`
-	QueryRate     float64 `json:"query_rate"`
-	StartKey      string  `json:"start_key"`
-	EndKey        string  `json:"end_key"`
-	// Encryption metadata for start_key and end_key. encryption_meta.iv is IV for start_key.
-	// IV for end_key is calculated from (encryption_meta.iv + len(start_key)).
-	// The field is only used by PD and should be ignored otherwise.
-	// If encryption_meta is empty (i.e. nil), it means start_key and end_key are unencrypted.
 	EncryptionMeta *encryptionpb.EncryptionMeta `json:"encryption_meta,omitempty"`
+	HotRegionType  string                       `json:"hot_region_type"`
+	EndKey         string                       `json:"end_key"`
+	StartKey       string                       `json:"start_key"`
+	StoreID        uint64                       `json:"store_id"`
+	HotDegree      int64                        `json:"hot_degree"`
+	FlowBytes      float64                      `json:"flow_bytes"`
+	KeyRate        float64                      `json:"key_rate"`
+	QueryRate      float64                      `json:"query_rate"`
+	UpdateTime     int64                        `json:"update_time"`
+	PeerID         uint64                       `json:"peer_id"`
+	RegionID       uint64                       `json:"region_id"`
+	IsLearner      bool                         `json:"is_learner"`
+	IsLeader       bool                         `json:"is_leader"`
 }
 
 // HotRegionStorageHelper help hot region storage get hot region info.
@@ -351,8 +346,8 @@ func (h *HotRegionStorage) delete(reservedDays int) error {
 
 // HotRegionStorageIterator iterates over a historyHotRegion.
 type HotRegionStorageIterator struct {
-	iters                []iterator.Iterator
 	encryptionKeyManager *encryption.Manager
+	iters                []iterator.Iterator
 }
 
 // Next moves the iterator to the next key/value pair.

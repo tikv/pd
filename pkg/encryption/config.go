@@ -38,12 +38,9 @@ const (
 
 // Config define the encryption config structure.
 type Config struct {
-	// Encryption method to use for PD data.
-	DataEncryptionMethod string `toml:"data-encryption-method" json:"data-encryption-method"`
-	// Specifies how often PD rotates data encryption key.
+	MasterKey             MasterKeyConfig   `toml:"master-key" json:"master-key"`
+	DataEncryptionMethod  string            `toml:"data-encryption-method" json:"data-encryption-method"`
 	DataKeyRotationPeriod typeutil.Duration `toml:"data-key-rotation-period" json:"data-key-rotation-period"`
-	// Specifies master key if encryption is enabled.
-	MasterKey MasterKeyConfig `toml:"master-key" json:"master-key"`
 }
 
 // Adjust validates the config and sets default values.

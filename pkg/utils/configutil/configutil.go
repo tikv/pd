@@ -78,13 +78,9 @@ func (m *ConfigMetaData) CheckUndecoded() error {
 
 // SecurityConfig indicates the security configuration
 type SecurityConfig struct {
+	Encryption encryption.Config `toml:"encryption" json:"encryption"`
 	grpcutil.TLSConfig
-	// RedactInfoLog indicates that whether to enable the log redaction. It can be the following values:
-	//   - false: disable redact log.
-	//   - true: enable redact log, which will replace the sensitive information with "?".
-	//   - "MARKER": enable redact log, which will use single guillemets ‹› to enclose the sensitive information.
 	RedactInfoLog logutil.RedactInfoLogType `toml:"redact-info-log" json:"redact-info-log"`
-	Encryption    encryption.Config         `toml:"encryption" json:"encryption"`
 }
 
 // PrintConfigCheckMsg prints the message about configuration checks.

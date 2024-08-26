@@ -56,14 +56,11 @@ var _ tsoAllocatorEventSource = (*tsoServiceDiscovery)(nil)
 // keyspaceGroupSvcDiscovery is used for discovering the serving endpoints of the keyspace
 // group to which the keyspace belongs
 type keyspaceGroupSvcDiscovery struct {
-	sync.RWMutex
-	group *tsopb.KeyspaceGroup
-	// primaryURL is the primary serving URL
-	primaryURL string
-	// secondaryURLs are TSO secondary serving URL
+	group         *tsopb.KeyspaceGroup
+	primaryURL    string
 	secondaryURLs []string
-	// urls are the primary/secondary serving URL
-	urls []string
+	urls          []string
+	sync.RWMutex
 }
 
 func (k *keyspaceGroupSvcDiscovery) update(
@@ -95,12 +92,10 @@ func (k *keyspaceGroupSvcDiscovery) update(
 // TODO: dynamically update the TSO server URLs in the case of TSO server failover
 // and scale-out/in.
 type tsoServerDiscovery struct {
-	sync.RWMutex
-	urls []string
-	// used for round-robin load balancing
-	selectIdx int
-	// failureCount counts the consecutive failures for communicating with the tso servers
+	urls         []string
+	selectIdx    int
 	failureCount int
+	sync.RWMutex
 }
 
 func (t *tsoServerDiscovery) countFailure() bool {
@@ -119,40 +114,23 @@ func (t *tsoServerDiscovery) resetFailure() {
 // tsoServiceDiscovery is the service discovery client of the independent TSO service
 
 type tsoServiceDiscovery struct {
-	metacli         MetaStorageClient
+	ctx             context.Context
 	apiSvcDiscovery ServiceDiscovery
-	clusterID       uint64
-	keyspaceID      atomic.Uint32
-
-	// defaultDiscoveryKey is the etcd path used for discovering the serving endpoints of
-	// the default keyspace group
-	defaultDiscoveryKey string
-	// tsoServersDiscovery is for discovering the serving endpoints of the TSO servers
+	metacli         MetaStorageClient
+	cancel          context.CancelFunc
+	tlsCfg          *tls.Config
 	*tsoServerDiscovery
-
-	// keyspaceGroupSD is for discovering the serving endpoints of the keyspace group
-	keyspaceGroupSD *keyspaceGroupSvcDiscovery
-
-	// URL -> a gRPC connection
-	clientConns sync.Map // Store as map[string]*grpc.ClientConn
-
-	// localAllocPrimariesUpdatedCb will be called when the local tso allocator primary list is updated.
-	// The input is a map {DC Location -> Leader URL}
-	localAllocPrimariesUpdatedCb tsoLocalServURLsUpdatedFunc
-	// globalAllocPrimariesUpdatedCb will be called when the local tso allocator primary list is updated.
+	keyspaceGroupSD               *keyspaceGroupSvcDiscovery
+	option                        *option
+	localAllocPrimariesUpdatedCb  tsoLocalServURLsUpdatedFunc
 	globalAllocPrimariesUpdatedCb tsoGlobalServURLUpdatedFunc
-
-	checkMembershipCh chan struct{}
-
-	ctx                  context.Context
-	cancel               context.CancelFunc
-	wg                   sync.WaitGroup
-	printFallbackLogOnce sync.Once
-
-	tlsCfg *tls.Config
-
-	// Client option.
-	option *option
+	checkMembershipCh             chan struct{}
+	clientConns                   sync.Map
+	defaultDiscoveryKey           string
+	wg                            sync.WaitGroup
+	clusterID                     uint64
+	printFallbackLogOnce          sync.Once
+	keyspaceID                    atomic.Uint32
 }
 
 // newTSOServiceDiscovery returns a new client-side service discovery for the independent TSO service.

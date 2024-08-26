@@ -30,11 +30,10 @@ import (
 
 // TestTSOCluster is a test cluster for TSO.
 type TestTSOCluster struct {
-	ctx context.Context
-
-	backendEndpoints string
+	ctx              context.Context
 	servers          map[string]*tso.Server
 	cleanupFuncs     map[string]testutil.CleanupFunc
+	backendEndpoints string
 }
 
 // NewTestTSOCluster creates a new TSO test cluster.

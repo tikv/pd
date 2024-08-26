@@ -551,8 +551,8 @@ func listPackages() ([]string, error) {
 }
 
 type numa struct {
-	Fail    bool
 	results []testResult
+	Fail    bool
 }
 
 func (n *numa) worker(wg *sync.WaitGroup, ch chan task) {
@@ -569,9 +569,9 @@ func (n *numa) worker(wg *sync.WaitGroup, ch chan task) {
 }
 
 type testResult struct {
-	JUnitTestCase
-	d   time.Duration
 	err error
+	JUnitTestCase
+	d time.Duration
 }
 
 func (n *numa) runTestCase(pkg string, fn string) testResult {
@@ -950,22 +950,22 @@ type JUnitTestSuites struct {
 // testcases.
 type JUnitTestSuite struct {
 	XMLName    xml.Name        `xml:"testsuite"`
-	Tests      int             `xml:"tests,attr"`
-	Failures   int             `xml:"failures,attr"`
 	Time       string          `xml:"time,attr"`
 	Name       string          `xml:"name,attr"`
 	Properties []JUnitProperty `xml:"properties>property,omitempty"`
 	TestCases  []JUnitTestCase
+	Tests      int `xml:"tests,attr"`
+	Failures   int `xml:"failures,attr"`
 }
 
 // JUnitTestCase is a single test case with its result.
 type JUnitTestCase struct {
+	SkipMessage *JUnitSkipMessage `xml:"skipped,omitempty"`
+	Failure     *JUnitFailure     `xml:"failure,omitempty"`
 	XMLName     xml.Name          `xml:"testcase"`
 	ClassName   string            `xml:"classname,attr"`
 	Name        string            `xml:"name,attr"`
 	Time        string            `xml:"time,attr"`
-	SkipMessage *JUnitSkipMessage `xml:"skipped,omitempty"`
-	Failure     *JUnitFailure     `xml:"failure,omitempty"`
 }
 
 // JUnitSkipMessage contains the reason why a testcase was skipped.

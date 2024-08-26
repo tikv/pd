@@ -32,21 +32,16 @@ import (
 
 // BaseServer is a basic server that provides some common functionality.
 type BaseServer struct {
-	ctx context.Context
-	// etcd client
-	etcdClient *clientv3.Client
-	// http client
-	httpClient *http.Client
-	grpcServer *grpc.Server
-	httpServer *http.Server
-	// Store as map[string]*grpc.ClientConn
-	clientConns sync.Map
-	secure      bool
-	muxListener net.Listener
-	// Callback functions for different stages
-	// startCallbacks will be called after the server is started.
+	ctx            context.Context
+	muxListener    net.Listener
+	etcdClient     *clientv3.Client
+	httpClient     *http.Client
+	grpcServer     *grpc.Server
+	httpServer     *http.Server
+	clientConns    sync.Map
 	startCallbacks []func()
 	startTimestamp int64
+	secure         bool
 }
 
 // NewBaseServer creates a new BaseServer.

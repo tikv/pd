@@ -40,11 +40,11 @@ func isError(err error, re string) bool {
 
 func TestCgroupsGetMemoryUsage(t *testing.T) {
 	for _, tc := range []struct {
-		name   string
 		paths  map[string]string
+		name   string
 		errMsg string
-		value  uint64
 		warn   string
+		value  uint64
 	}{
 		{
 			errMsg: "failed to read memory cgroup from cgroups file:",
@@ -122,11 +122,11 @@ func TestCgroupsGetMemoryUsage(t *testing.T) {
 
 func TestCgroupsGetMemoryInactiveFileUsage(t *testing.T) {
 	for _, tc := range []struct {
-		name   string
 		paths  map[string]string
+		name   string
 		errMsg string
-		value  uint64
 		warn   string
+		value  uint64
 	}{
 		{
 			errMsg: "failed to read memory cgroup from cgroups file:",
@@ -211,11 +211,11 @@ func TestCgroupsGetMemoryInactiveFileUsage(t *testing.T) {
 
 func TestCgroupsGetMemoryLimit(t *testing.T) {
 	for _, tc := range []struct {
-		name   string
 		paths  map[string]string
+		name   string
 		errMsg string
-		limit  uint64
 		warn   string
+		limit  uint64
 	}{
 		{
 

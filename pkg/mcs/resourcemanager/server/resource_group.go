@@ -30,16 +30,14 @@ import (
 
 // ResourceGroup is the definition of a resource group, for REST API.
 type ResourceGroup struct {
+	RUSettings    *RequestUnitSettings     `json:"r_u_settings,omitempty"`
+	Runaway       *rmpb.RunawaySettings    `json:"runaway_settings,omitempty"`
+	Background    *rmpb.BackgroundSettings `json:"background_settings,omitempty"`
+	RUConsumption *rmpb.Consumption        `json:"ru_consumption,omitempty"`
+	Name          string                   `json:"name"`
 	syncutil.RWMutex
-	Name string         `json:"name"`
-	Mode rmpb.GroupMode `json:"mode"`
-	// RU settings
-	RUSettings *RequestUnitSettings     `json:"r_u_settings,omitempty"`
-	Priority   uint32                   `json:"priority"`
-	Runaway    *rmpb.RunawaySettings    `json:"runaway_settings,omitempty"`
-	Background *rmpb.BackgroundSettings `json:"background_settings,omitempty"`
-	// total ru consumption
-	RUConsumption *rmpb.Consumption `json:"ru_consumption,omitempty"`
+	Mode     rmpb.GroupMode `json:"mode"`
+	Priority uint32         `json:"priority"`
 }
 
 // RequestUnitSettings is the definition of the RU settings.

@@ -62,28 +62,13 @@ const (
 )
 
 type state struct {
-	syncutil.RWMutex
-	// ams stores the allocator managers of the keyspace groups. Each keyspace group is
-	// assigned with an allocator manager managing its global/local tso allocators.
-	// Use a fixed size array to maximize the efficiency of concurrent access to
-	// different keyspace groups for tso service.
-	ams [constant.MaxKeyspaceGroupCountInUse]*AllocatorManager
-	// kgs stores the keyspace groups' membership/distribution meta.
-	kgs [constant.MaxKeyspaceGroupCountInUse]*endpoint.KeyspaceGroup
-	// keyspaceLookupTable is a map from keyspace to the keyspace group to which it belongs.
+	ams                 [constant.MaxKeyspaceGroupCountInUse]*AllocatorManager
+	kgs                 [constant.MaxKeyspaceGroupCountInUse]*endpoint.KeyspaceGroup
 	keyspaceLookupTable map[uint32]uint32
-	// splittingGroups is the cache of splitting keyspace group related information.
-	// The key is the keyspace group ID, and the value is the time when the keyspace group
-	// is created as the split target. Once the split is finished, the keyspace group will
-	// be removed from this map.
-	splittingGroups map[uint32]time.Time
-	// deletedGroups is the cache of deleted keyspace group related information.
-	// Being merged will cause the group to be added to this map and finally be deleted after the merge.
-	deletedGroups map[uint32]struct{}
-	// requestedGroups is the cache of requested keyspace group related information.
-	// Once a group receives its first TSO request and pass the certain check, it will be added to this map.
-	// Being merged will cause the group to be removed from this map eventually if the merge is successful.
-	requestedGroups map[uint32]struct{}
+	splittingGroups     map[uint32]time.Time
+	deletedGroups       map[uint32]struct{}
+	requestedGroups     map[uint32]struct{}
+	syncutil.RWMutex
 }
 
 func (s *state) initialize() {
@@ -310,85 +295,31 @@ func (s *state) getNextPrimaryToReset(
 // The replicas campaign for the leaders which provide the tso service for the corresponding
 // keyspace groups.
 type KeyspaceGroupManager struct {
-	// state is the in-memory state of the keyspace groups
-	state
-
-	ctx    context.Context
-	cancel context.CancelFunc
-	wg     sync.WaitGroup
-
-	// tsoServiceID is the service ID of the TSO service, registered in the service discovery
-	tsoServiceID *discovery.ServiceRegistryEntry
-	etcdClient   *clientv3.Client
-	httpClient   *http.Client
-	// electionNamePrefix is the name prefix to generate the unique name of a participant,
-	// which participate in the election of its keyspace group's primary, in the format of
-	// "electionNamePrefix:keyspace-group-id"
-	electionNamePrefix string
-	// tsoServiceKey is the path for storing the registered tso servers.
-	// Key: /ms/{cluster_id}/tso/registry/{tsoServerAddress}
-	// Value: discover.ServiceRegistryEntry
-	tsoServiceKey string
-	// legacySvcRootPath defines the legacy root path for all etcd paths which derives from
-	// the PD/API service. It's in the format of "/pd/{cluster_id}".
-	// The main paths for different usages include:
-	// 1. The path, used by the default keyspace group, for LoadTimestamp/SaveTimestamp in the
-	//    storage endpoint.
-	//    Key: /pd/{cluster_id}/timestamp
-	//    Value: ts(time.Time)
-	//    Key: /pd/{cluster_id}/lta/{dc-location}/timestamp
-	//    Value: ts(time.Time)
-	// 2. The path for storing keyspace group membership/distribution metadata.
-	//    Key: /pd/{cluster_id}/tso/keyspace_groups/membership/{group}
-	//    Value: endpoint.KeyspaceGroup
-	// Note: The {group} is 5 digits integer with leading zeros.
-	legacySvcRootPath string
-	// tsoSvcRootPath defines the root path for all etcd paths used in the tso microservices.
-	// It is in the format of "/ms/<cluster-id>/tso".
-	// The main paths for different usages include:
-	// 1. The path for keyspace group primary election.
-	//    default keyspace group: "/ms/{cluster_id}/tso/00000/primary".
-	//    non-default keyspace group: "/ms/{cluster_id}/tso/keyspace_groups/election/{group}/primary".
-	// 2. The path for LoadTimestamp/SaveTimestamp in the storage endpoint for all the non-default
-	//    keyspace groups.
-	//    Key: /ms/{cluster_id}/tso/{group}/gta/timestamp
-	//    Value: ts(time.Time)
-	//    Key: /ms/{cluster_id}/tso/{group}/lta/{dc-location}/timestamp
-	//    Value: ts(time.Time)
-	// Note: The {group} is 5 digits integer with leading zeros.
-	tsoSvcRootPath string
-	// legacySvcStorage is storage with legacySvcRootPath.
-	legacySvcStorage *endpoint.StorageEndpoint
-	// tsoSvcStorage is storage with tsoSvcRootPath.
-	tsoSvcStorage *endpoint.StorageEndpoint
-	// cfg is the TSO config
-	cfg ServiceConfig
-
-	loadKeyspaceGroupsBatchSize int64
-	loadFromEtcdMaxRetryTimes   int
-
-	// compiledKGMembershipIDRegexp is the compiled regular expression for matching keyspace group id
-	// in the keyspace group membership path.
+	cfg                          ServiceConfig
+	ctx                          context.Context
 	compiledKGMembershipIDRegexp *regexp.Regexp
-	// groupUpdateRetryList is the list of keyspace groups which failed to update and need to retry.
-	groupUpdateRetryList map[uint32]*endpoint.KeyspaceGroup
-	groupWatcher         *etcdutil.LoopWatcher
-
-	// mergeCheckerCancelMap is the cancel function map for the merge checker of each keyspace group.
-	mergeCheckerCancelMap sync.Map // GroupID -> context.CancelFunc
-
+	tsoServiceID                 *discovery.ServiceRegistryEntry
+	cancel                       context.CancelFunc
+	etcdClient                   *clientv3.Client
+	httpClient                   *http.Client
+	metrics                      *keyspaceGroupMetrics
+	tsoNodesWatcher              *etcdutil.LoopWatcher
+	legacySvcStorage             *endpoint.StorageEndpoint
+	groupUpdateRetryList         map[uint32]*endpoint.KeyspaceGroup
+	groupWatcher                 *etcdutil.LoopWatcher
+	serviceRegistryMap           map[string]string
+	tsoSvcStorage                *endpoint.StorageEndpoint
+	tsoNodes                     sync.Map
+	mergeCheckerCancelMap        sync.Map
+	tsoSvcRootPath               string
+	legacySvcRootPath            string
+	tsoServiceKey                string
+	electionNamePrefix           string
+	state
+	wg                           sync.WaitGroup
 	primaryPriorityCheckInterval time.Duration
-
-	// tsoNodes is the registered tso servers.
-	tsoNodes sync.Map // store as map[string]struct{}
-	// serviceRegistryMap stores the mapping from the service registry key to the service address.
-	// Note: it is only used in tsoNodesWatcher.
-	serviceRegistryMap map[string]string
-	// tsoNodesWatcher is the watcher for the registered tso servers.
-	tsoNodesWatcher *etcdutil.LoopWatcher
-
-	// pre-initialized metrics
-	metrics *keyspaceGroupMetrics
+	loadFromEtcdMaxRetryTimes    int
+	loadKeyspaceGroupsBatchSize  int64
 }
 
 // NewKeyspaceGroupManager creates a new Keyspace Group Manager.

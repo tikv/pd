@@ -69,23 +69,14 @@ var (
 )
 
 type baseHotScheduler struct {
-	*BaseScheduler
-	// stLoadInfos contain store statistics information by resource type.
-	// stLoadInfos is temporary states but exported to API or metrics.
-	// Every time `Schedule()` will recalculate it.
-	stLoadInfos [resourceTypeLen]map[uint64]*statistics.StoreLoadDetail
-	// stHistoryLoads stores the history `stLoadInfos`
-	// Every time `Schedule()` will rolling update it.
-	stHistoryLoads *statistics.StoreHistoryLoads
-	// regionPendings stores regionID -> pendingInfluence,
-	// this records regionID which have pending Operator by operation type. During filterHotPeers, the hot peers won't
-	// be selected if its owner region is tracked in this attribute.
-	regionPendings map[uint64]*pendingInfluence
-	// types is the resource types that the scheduler considers.
-	types           []resourceType
-	r               *rand.Rand
+	stLoadInfos     [resourceTypeLen]map[uint64]*statistics.StoreLoadDetail
 	updateReadTime  time.Time
 	updateWriteTime time.Time
+	*BaseScheduler
+	stHistoryLoads *statistics.StoreHistoryLoads
+	regionPendings map[uint64]*pendingInfluence
+	r              *rand.Rand
+	types          []resourceType
 }
 
 func newBaseHotScheduler(opController *operator.Controller, sampleDuration time.Duration, sampleInterval time.Duration) *baseHotScheduler {
@@ -190,10 +181,9 @@ func (h *baseHotScheduler) randomType() resourceType {
 
 type hotScheduler struct {
 	*baseHotScheduler
+	conf *hotRegionSchedulerConfig
 	syncutil.RWMutex
-	// config of hot scheduler
-	conf                *hotRegionSchedulerConfig
-	searchRevertRegions [resourceTypeLen]bool // Whether to search revert regions.
+	searchRevertRegions [resourceTypeLen]bool
 }
 
 func newHotScheduler(opController *operator.Controller, conf *hotRegionSchedulerConfig) *hotScheduler {
@@ -460,35 +450,26 @@ type rank interface {
 
 type balanceSolver struct {
 	sche.SchedulerCluster
+	rank
+	minDst           *statistics.StoreLoad
 	sche             *hotScheduler
 	stLoadDetail     map[uint64]*statistics.StoreLoadDetail
-	filteredHotPeers map[uint64][]*statistics.HotPeerStat // storeID -> hotPeers(filtered)
-	nthHotPeer       map[uint64][]*statistics.HotPeerStat // storeID -> [dimLen]hotPeers
+	filteredHotPeers map[uint64][]*statistics.HotPeerStat
+	nthHotPeer       map[uint64][]*statistics.HotPeerStat
+	rankStep         *statistics.StoreLoad
+	cur              *solution
+	best             *solution
+	maxSrc           *statistics.StoreLoad
+	ops              []*operator.Operator
 	rwTy             utils.RWType
-	opTy             opType
 	resourceTy       resourceType
-
-	cur *solution
-
-	best *solution
-	ops  []*operator.Operator
-
-	// maxSrc and minDst are used to calculate the rank.
-	maxSrc   *statistics.StoreLoad
-	minDst   *statistics.StoreLoad
-	rankStep *statistics.StoreLoad
-
-	// firstPriority and secondPriority indicate priority of hot schedule
-	// they may be byte(0), key(1), query(2), and always less than dimLen
-	firstPriority  int
-	secondPriority int
-
-	greatDecRatio float64
-	minorDecRatio float64
-	maxPeerNum    int
-	minHotDegree  int
-
-	rank
+	firstPriority    int
+	secondPriority   int
+	greatDecRatio    float64
+	minorDecRatio    float64
+	maxPeerNum       int
+	minHotDegree     int
+	opTy             opType
 }
 
 func (bs *balanceSolver) init() {

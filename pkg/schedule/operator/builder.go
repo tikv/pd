@@ -39,44 +39,38 @@ import (
 // The generated Operator will choose the most appropriate execution order
 // according to various constraints.
 type Builder struct {
-	// basic info
+	err error
 	sche.SharedCluster
-	desc            string
-	regionID        uint64
-	regionEpoch     *metapb.RegionEpoch
-	rules           []*placement.Rule
-	expectedRoles   map[uint64]placement.PeerRoleType
-	approximateSize int64
-
-	// operation record
-	originPeers          peersMap
-	unhealthyPeers       peersMap
-	originLeaderStoreID  uint64
-	targetPeers          peersMap
-	targetLeaderStoreID  uint64
-	targetLeaderStoreIDs []uint64 // This field is only used during multi-target evict leader, and will not be filtered during `Build`.
-	err                  error
-
-	// skip check flags
-	skipOriginJointStateCheck bool
+	toPromote                 peersMap
+	currentPeers              peersMap
+	peerAddStep               map[uint64]int
+	expectedRoles             map[uint64]placement.PeerRoleType
+	toPromoteNonWitness       peersMap
+	originPeers               peersMap
+	unhealthyPeers            peersMap
+	toNonWitness              peersMap
+	targetPeers               peersMap
+	toWitness                 peersMap
+	toDemote                  peersMap
+	regionEpoch               *metapb.RegionEpoch
+	toRemove                  peersMap
+	toAdd                     peersMap
+	desc                      string
+	targetLeaderStoreIDs      []uint64
+	steps                     []OpStep
+	rules                     []*placement.Rule
+	stepPlanPreferFuncs       []func(stepPlan) int
+	targetLeaderStoreID       uint64
+	regionID                  uint64
+	currentLeaderStoreID      uint64
+	originLeaderStoreID       uint64
+	approximateSize           int64
 	skipPlacementRulesCheck   bool
-
-	// build flags
-	useJointConsensus bool
-	removeLightPeer   bool
-	addLightPeer      bool
-	forceTargetLeader bool
-
-	// intermediate states
-	currentPeers                                 peersMap
-	currentLeaderStoreID                         uint64
-	toAdd, toRemove, toPromote, toDemote         peersMap
-	toWitness, toNonWitness, toPromoteNonWitness peersMap
-	steps                                        []OpStep       // generated steps.
-	peerAddStep                                  map[uint64]int // record at which step a peer is created.
-
-	// comparison function
-	stepPlanPreferFuncs []func(stepPlan) int // for buildStepsWithoutJointConsensus
+	skipOriginJointStateCheck bool
+	forceTargetLeader         bool
+	addLightPeer              bool
+	removeLightPeer           bool
+	useJointConsensus         bool
 }
 
 // BuilderOption is used to create operator builder.
@@ -943,8 +937,6 @@ func (b *Builder) allowLeader(peer *metapb.Peer, ignoreClusterLimit bool) bool {
 // 10. switch a witness learner to non-witness learner
 // Plan 1-5 (replace plans) do not change voter/learner count, so they have higher priority.
 type stepPlan struct {
-	leaderBeforeAdd    uint64 // leader before adding peer.
-	leaderBeforeRemove uint64 // leader before removing peer.
 	add                *metapb.Peer
 	remove             *metapb.Peer
 	promote            *metapb.Peer
@@ -952,6 +944,8 @@ type stepPlan struct {
 	nonWitness         *metapb.Peer
 	promoteNonWitness  *metapb.Peer
 	witness            *metapb.Peer
+	leaderBeforeAdd    uint64
+	leaderBeforeRemove uint64
 }
 
 func (p stepPlan) String() string {

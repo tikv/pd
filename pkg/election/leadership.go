@@ -56,24 +56,16 @@ func GetLeader(c *clientv3.Client, leaderPath string) (*pdpb.Member, int64, erro
 
 // Leadership is used to manage the leadership campaigning.
 type Leadership struct {
-	// purpose is used to show what this election for
-	purpose string
-	// The lease which is used to get this leadership
-	lease  atomic.Value // stored as *lease
-	client *clientv3.Client
-	// leaderKey and leaderValue are key-value pair in etcd
-	leaderKey   string
-	leaderValue string
-
+	lease                   atomic.Value
 	keepAliveCtx            context.Context
+	client                  *clientv3.Client
 	keepAliveCancelFunc     context.CancelFunc
+	purpose                 string
+	leaderKey               string
+	leaderValue             string
+	campaignTimes           []time.Time
 	keepAliveCancelFuncLock syncutil.Mutex
-	// campaignTimes is used to record the campaign times of the leader within `campaignTimesRecordTimeout`.
-	// It is ordered by time to prevent the leader from campaigning too frequently.
-	campaignTimes []time.Time
-	// primaryWatch is for the primary watch only,
-	// which is used to reuse `Watch` interface in `Leadership`.
-	primaryWatch atomic.Bool
+	primaryWatch            atomic.Bool
 }
 
 // NewLeadership creates a new Leadership.

@@ -213,9 +213,8 @@ func MakeLabelRule(id uint32) *labeler.LabelRule {
 
 // indexedHeap is a heap with index.
 type indexedHeap struct {
-	items []*endpoint.KeyspaceGroup
-	// keyspace group id -> position in items
 	index map[uint32]int
+	items []*endpoint.KeyspaceGroup
 }
 
 func newIndexedHeap(hint int) *indexedHeap {

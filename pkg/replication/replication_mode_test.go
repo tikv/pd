@@ -129,9 +129,9 @@ func TestStatus(t *testing.T) {
 }
 
 type mockFileReplicator struct {
-	memberIDs []uint64
 	lastData  map[uint64]string
 	errors    map[uint64]error
+	memberIDs []uint64
 }
 
 func (rep *mockFileReplicator) GetMembers() ([]*pdpb.Member, error) {
@@ -161,8 +161,8 @@ func newMockReplicator(ids []uint64) *mockFileReplicator {
 func assertLastData(t *testing.T, data string, state string, stateID uint64, availableStores []uint64) {
 	type status struct {
 		State           string   `json:"state"`
-		StateID         uint64   `json:"state_id"`
 		AvailableStores []uint64 `json:"available_stores"`
+		StateID         uint64   `json:"state_id"`
 	}
 	var s status
 	err := json.Unmarshal([]byte(data), &s)

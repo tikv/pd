@@ -44,17 +44,16 @@ const defaultAllocStep = uint64(1000)
 
 // allocatorImpl is used to allocate ID.
 type allocatorImpl struct {
-	mu   syncutil.RWMutex
-	base uint64
-	end  uint64
-
 	client    *clientv3.Client
+	metrics   *metrics
 	rootPath  string
 	allocPath string
 	label     string
 	member    string
+	base      uint64
+	end       uint64
 	step      uint64
-	metrics   *metrics
+	mu        syncutil.RWMutex
 }
 
 // metrics is a collection of idAllocator's metrics.

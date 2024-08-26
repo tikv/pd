@@ -54,35 +54,22 @@ const (
 
 // Config is the configuration for the scheduling.
 type Config struct {
-	BackendEndpoints    string `toml:"backend-endpoints" json:"backend-endpoints"`
-	ListenAddr          string `toml:"listen-addr" json:"listen-addr"`
-	AdvertiseListenAddr string `toml:"advertise-listen-addr" json:"advertise-listen-addr"`
-	Name                string `toml:"name" json:"name"`
-	DataDir             string `toml:"data-dir" json:"data-dir"` // TODO: remove this after refactoring
-	EnableGRPCGateway   bool   `json:"enable-grpc-gateway"`      // TODO: use it
-
-	Metric metricutil.MetricConfig `toml:"metric" json:"metric"`
-
-	// Log related config.
-	Log      log.Config         `toml:"log" json:"log"`
-	Logger   *zap.Logger        `json:"-"`
-	LogProps *log.ZapProperties `json:"-"`
-
-	Security configutil.SecurityConfig `toml:"security" json:"security"`
-
-	// WarningMsgs contains all warnings during parsing.
-	WarningMsgs []string
-
-	// LeaderLease defines the time within which a Scheduling primary/leader must
-	// update its TTL in etcd, otherwise etcd will expire the leader key and other servers
-	// can campaign the primary/leader again. Etcd only supports seconds TTL, so here is
-	// second too.
-	LeaderLease int64 `toml:"lease" json:"lease"`
-
-	ClusterVersion semver.Version `toml:"cluster-version" json:"cluster-version"`
-
-	Schedule    sc.ScheduleConfig    `toml:"schedule" json:"schedule"`
-	Replication sc.ReplicationConfig `toml:"replication" json:"replication"`
+	LogProps            *log.ZapProperties      `json:"-"`
+	Logger              *zap.Logger             `json:"-"`
+	Log                 log.Config              `toml:"log" json:"log"`
+	ClusterVersion      semver.Version          `toml:"cluster-version" json:"cluster-version"`
+	Name                string                  `toml:"name" json:"name"`
+	DataDir             string                  `toml:"data-dir" json:"data-dir"`
+	BackendEndpoints    string                  `toml:"backend-endpoints" json:"backend-endpoints"`
+	AdvertiseListenAddr string                  `toml:"advertise-listen-addr" json:"advertise-listen-addr"`
+	ListenAddr          string                  `toml:"listen-addr" json:"listen-addr"`
+	Metric              metricutil.MetricConfig `toml:"metric" json:"metric"`
+	WarningMsgs         []string
+	Security            configutil.SecurityConfig `toml:"security" json:"security"`
+	Replication         sc.ReplicationConfig      `toml:"replication" json:"replication"`
+	Schedule            sc.ScheduleConfig         `toml:"schedule" json:"schedule"`
+	LeaderLease         int64                     `toml:"lease" json:"lease"`
+	EnableGRPCGateway   bool                      `json:"enable-grpc-gateway"`
 }
 
 // NewConfig creates a new config.

@@ -22,13 +22,9 @@ import (
 
 // FIFO is 'First-In-First-Out' cache.
 type FIFO struct {
-	syncutil.RWMutex
-
-	// maxCount is the maximum number of items.
-	// 0 means no limit.
+	ll       *list.List
 	maxCount int
-
-	ll *list.List
+	syncutil.RWMutex
 }
 
 // NewFIFO returns a new FIFO cache.

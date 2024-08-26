@@ -50,25 +50,17 @@ type participant interface {
 // EmbeddedEtcdMember, Participant relies on etcd for election, but it's decoupled
 // from the embedded etcd. It implements Member interface.
 type Participant struct {
-	leadership *election.Leadership
-	// stored as member type
-	leader      atomic.Value
-	client      *clientv3.Client
-	rootPath    string
-	leaderPath  string
-	member      participant
-	serviceName string
-	// memberValue is the serialized string of `member`. It will be saved in the
-	// leader key when this participant is successfully elected as the leader of
-	// the group. Every write will use it to check the leadership.
-	memberValue string
-	// campaignChecker is used to check whether the additional constraints for a
-	// campaign are satisfied. If it returns false, the campaign will fail.
-	campaignChecker atomic.Value // Store as leadershipCheckFunc
-	// lastLeaderUpdatedTime is the last time when the leader is updated.
+	leader                atomic.Value
+	member                participant
+	campaignChecker       atomic.Value
 	lastLeaderUpdatedTime atomic.Value
-	// expectedPrimaryLease is the expected lease for the primary.
-	expectedPrimaryLease atomic.Value // stored as *election.Lease
+	expectedPrimaryLease  atomic.Value
+	leadership            *election.Leadership
+	client                *clientv3.Client
+	rootPath              string
+	leaderPath            string
+	serviceName           string
+	memberValue           string
 }
 
 // NewParticipant create a new Participant.

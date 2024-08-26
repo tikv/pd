@@ -29,11 +29,10 @@ import (
 
 // TestDB is a test database
 type TestDB struct {
-	inner   *gorm.DB
-	require *require.Assertions
-
-	isUnderlyingMocked bool
 	mock               sqlmock.Sqlmock
+	inner              *gorm.DB
+	require            *require.Assertions
+	isUnderlyingMocked bool
 }
 
 // OpenTestDB opens a test database

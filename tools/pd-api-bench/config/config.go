@@ -25,26 +25,20 @@ import (
 
 // Config is the heartbeat-bench configuration.
 type Config struct {
+	HTTP       map[string]cases.Config `toml:"http" json:"http"`
+	Etcd       map[string]cases.Config `toml:"etcd" json:"etcd"`
+	GRPC       map[string]cases.Config `toml:"grpc" json:"grpc"`
 	flagSet    *flag.FlagSet
+	Logger     *zap.Logger
+	LogProps   *log.ZapProperties
+	Log        log.Config `toml:"log" json:"log"`
+	StatusAddr string     `toml:"status" json:"status"`
+	CaPath     string     `toml:"ca-path" json:"ca-path"`
+	CertPath   string     `toml:"cert-path" json:"cert-path"`
+	KeyPath    string     `toml:"key-path" json:"key-path"`
+	PDAddr     string     `toml:"pd" json:"pd"`
 	configFile string
-	PDAddr     string `toml:"pd" json:"pd"`
-	StatusAddr string `toml:"status" json:"status"`
-
-	Log      log.Config `toml:"log" json:"log"`
-	Logger   *zap.Logger
-	LogProps *log.ZapProperties
-
-	Client int64 `toml:"client" json:"client"`
-
-	// tls
-	CaPath   string `toml:"ca-path" json:"ca-path"`
-	CertPath string `toml:"cert-path" json:"cert-path"`
-	KeyPath  string `toml:"key-path" json:"key-path"`
-
-	// only for init
-	HTTP map[string]cases.Config `toml:"http" json:"http"`
-	GRPC map[string]cases.Config `toml:"grpc" json:"grpc"`
-	Etcd map[string]cases.Config `toml:"etcd" json:"etcd"`
+	Client     int64 `toml:"client" json:"client"`
 }
 
 // NewConfig return a set of settings.
