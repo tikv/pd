@@ -16,6 +16,7 @@ package schedulers
 
 import (
 	"context"
+	"slices"
 	"testing"
 
 	"github.com/docker/go-units"
@@ -503,5 +504,54 @@ func TestBalanceLeaderWithConflictRule(t *testing.T) {
 		} else {
 			re.Empty(ops)
 		}
+	}
+}
+
+func testDecoder(v any) error {
+	conf, ok := v.(*scatterRangeSchedulerConfig)
+	if ok {
+		conf.RangeName = "test"
+	}
+	return nil
+}
+
+func TestIsDefault(t *testing.T) {
+	re := require.New(t)
+	cancel, _, _, oc := prepareSchedulersTest()
+	defer cancel()
+
+	for schedulerType := range types.SchedulerTypeCompatibleMap {
+		bs, err := CreateScheduler(schedulerType, oc,
+			storage.NewStorageWithMemoryBackend(),
+			testDecoder,
+			func(string) error { return nil })
+		re.NoError(err)
+		if slices.Contains(types.DefaultSchedulers, schedulerType) {
+			re.True(bs.IsDefault())
+		} else {
+			re.False(bs.IsDefault())
+		}
+	}
+}
+
+func TestDisabled(t *testing.T) {
+	re := require.New(t)
+	cancel, _, _, oc := prepareSchedulersTest()
+	defer cancel()
+
+	s := storage.NewStorageWithMemoryBackend()
+	for _, schedulerType := range types.DefaultSchedulers {
+		bs, err := CreateScheduler(schedulerType, oc, s, testDecoder,
+			func(string) error { return nil })
+		re.NoError(err)
+		re.False(bs.IsDisable())
+		re.NoError(bs.SetDisable(true))
+		re.True(bs.IsDisable())
+
+		// test ms scheduling server, another server
+		scheduling, err := CreateScheduler(schedulerType, oc, s, testDecoder,
+			func(string) error { return nil })
+		re.NoError(err)
+		re.True(scheduling.IsDisable())
 	}
 }
