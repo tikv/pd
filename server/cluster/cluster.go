@@ -325,6 +325,7 @@ func (c *RaftCluster) Start(s Server) error {
 		return err
 	}
 	if cluster == nil {
+		log.Warn("cluster is not bootstrapped")
 		return nil
 	}
 
@@ -2507,25 +2508,16 @@ func IsClientURL(addr string, etcdClient *clientv3.Client) bool {
 
 // IsServiceIndependent returns whether the service is independent.
 func (c *RaftCluster) IsServiceIndependent(name string) bool {
-	if c == nil {
-		return false
-	}
 	_, exist := c.independentServices.Load(name)
 	return exist
 }
 
 // SetServiceIndependent sets the service to be independent.
 func (c *RaftCluster) SetServiceIndependent(name string) {
-	if c == nil {
-		return
-	}
 	c.independentServices.Store(name, struct{}{})
 }
 
 // UnsetServiceIndependent unsets the service to be independent.
 func (c *RaftCluster) UnsetServiceIndependent(name string) {
-	if c == nil {
-		return
-	}
 	c.independentServices.Delete(name)
 }

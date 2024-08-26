@@ -2123,3 +2123,7 @@ func (s *Server) GetMaxResetTSGap() time.Duration {
 func (s *Server) SetClient(client *clientv3.Client) {
 	s.client = client
 }
+
+func (s *Server) forwardToTSOService() bool {
+	return s.IsAPIServiceMode() && !s.IsClosed() && s.cluster.IsServiceIndependent(constant.TSOServiceName)
+}
