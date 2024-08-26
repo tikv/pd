@@ -15,9 +15,8 @@
 package api
 
 import (
-	"bytes"
+	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"math/rand"
 	"net/http"
@@ -31,6 +30,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
+	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
 type memberTestSuite struct {
@@ -124,11 +124,10 @@ func (suite *memberTestSuite) TestChangeLeaderPeerUrls() {
 
 	var got pdpb.Member
 	re.NoError(json.Unmarshal(buf, &got))
-	id := got.GetMemberId()
 	peerUrls := got.GetPeerUrls()
 
 	newPeerUrls := []string{"http://127.0.0.1:1111"}
-	suite.changeLeaderPeerUrls(leader, id, newPeerUrls)
+	suite.changeLeaderPeerUrls(leader, newPeerUrls)
 	addr = suite.cfgs[rand.Intn(len(suite.cfgs))].ClientUrls + apiPrefix + "/api/v1/members"
 	resp, err = testDialClient.Get(addr)
 	re.NoError(err)
@@ -141,21 +140,19 @@ func (suite *memberTestSuite) TestChangeLeaderPeerUrls() {
 	re.Equal(newPeerUrls, got1["etcd_leader"].GetPeerUrls())
 
 	// reset
-	suite.changeLeaderPeerUrls(leader, id, peerUrls)
+	suite.changeLeaderPeerUrls(leader, peerUrls)
 }
 
-func (suite *memberTestSuite) changeLeaderPeerUrls(leader *pdpb.Member, id uint64, urls []string) {
+func (suite *memberTestSuite) changeLeaderPeerUrls(leader *pdpb.Member, urls []string) {
 	re := suite.Require()
-	data := map[string][]string{"peerURLs": urls}
-	postData, err := json.Marshal(data)
+
+	cli, err := clientv3.New(clientv3.Config{
+		Endpoints: leader.GetClientUrls(),
+	})
 	re.NoError(err)
-	req, err := http.NewRequest(http.MethodPut, fmt.Sprintf("%s/v2/members/%s", leader.GetClientUrls()[0], fmt.Sprintf("%x", id)), bytes.NewBuffer(postData))
+	_, err = cli.MemberUpdate(context.Background(), leader.GetMemberId(), urls)
 	re.NoError(err)
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := testDialClient.Do(req)
-	re.NoError(err)
-	re.Equal(204, resp.StatusCode)
-	resp.Body.Close()
+	cli.Close()
 }
 
 func (suite *memberTestSuite) TestResignMyself() {

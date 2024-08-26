@@ -32,7 +32,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/netutil"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
-	"go.etcd.io/etcd/pkg/transport"
+	"go.etcd.io/etcd/client/pkg/v3/transport"
 	"google.golang.org/grpc"
 )
 

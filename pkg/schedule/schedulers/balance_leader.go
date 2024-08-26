@@ -31,7 +31,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
-	types "github.com/tikv/pd/pkg/schedule/type"
+	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/utils/reflectutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
@@ -40,8 +40,6 @@ import (
 )
 
 const (
-	// BalanceLeaderName is balance leader scheduler name.
-	BalanceLeaderName = "balance-leader-scheduler"
 	// BalanceLeaderBatchSize is the default number of operators to transfer leaders by one scheduling.
 	// Default value is 4 which is subjected by scheduler-max-waiting-operator and leader-schedule-limit
 	// If you want to increase balance speed more, please increase above-mentioned param.

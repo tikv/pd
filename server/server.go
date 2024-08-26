@@ -80,10 +80,10 @@ import (
 	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/server/config"
-	"go.etcd.io/etcd/clientv3"
-	"go.etcd.io/etcd/embed"
-	"go.etcd.io/etcd/mvcc/mvccpb"
-	"go.etcd.io/etcd/pkg/types"
+	"go.etcd.io/etcd/api/v3/mvccpb"
+	etcdtypes "go.etcd.io/etcd/client/pkg/v3/types"
+	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.etcd.io/etcd/server/v3/embed"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 )
@@ -331,7 +331,7 @@ func (s *Server) startEtcd(ctx context.Context) error {
 	}
 
 	// Check cluster ID
-	urlMap, err := types.NewURLsMap(s.cfg.InitialCluster)
+	urlMap, err := etcdtypes.NewURLsMap(s.cfg.InitialCluster)
 	if err != nil {
 		return errs.ErrEtcdURLMap.Wrap(err).GenWithStackByCause()
 	}
@@ -1667,8 +1667,8 @@ func (s *Server) leaderLoop() {
 					log.Info("the pd leader is lost for a long time, try to re-campaign a pd leader with resign etcd leader",
 						zap.Duration("timeout", randomTimeout),
 						zap.Time("last-updated", lastUpdated),
-						zap.String("current-leader-member-id", types.ID(etcdLeader).String()),
-						zap.String("transferee-member-id", types.ID(s.member.ID()).String()),
+						zap.String("current-leader-member-id", etcdtypes.ID(etcdLeader).String()),
+						zap.String("transferee-member-id", etcdtypes.ID(s.member.ID()).String()),
 					)
 					if err := s.member.MoveEtcdLeader(s.ctx, etcdLeader, s.member.ID()); err != nil {
 						log.Error("failed to move etcd leader", errs.ZapError(err))

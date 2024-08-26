@@ -29,7 +29,7 @@ import (
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
-	types "github.com/tikv/pd/pkg/schedule/type"
+	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/statistics/buckets"
 	"github.com/tikv/pd/pkg/statistics/utils"
@@ -61,14 +61,12 @@ func init() {
 
 func newHotReadScheduler(opController *operator.Controller, conf *hotRegionSchedulerConfig) *hotScheduler {
 	ret := newHotScheduler(opController, conf)
-	ret.name = ""
 	ret.types = []resourceType{readLeader, readPeer}
 	return ret
 }
 
 func newHotWriteScheduler(opController *operator.Controller, conf *hotRegionSchedulerConfig) *hotScheduler {
 	ret := newHotScheduler(opController, conf)
-	ret.name = ""
 	ret.types = []resourceType{writeLeader, writePeer}
 	return ret
 }
@@ -2465,7 +2463,7 @@ func TestCompatibilityConfig(t *testing.T) {
 		"dst-tolerance-ratio":       1.05,
 	})
 	re.NoError(err)
-	err = storage.SaveSchedulerConfig(HotRegionName, data)
+	err = storage.SaveSchedulerConfig(types.BalanceHotRegionScheduler.String(), data)
 	re.NoError(err)
 	hb, err = CreateScheduler(types.BalanceHotRegionScheduler, oc, storage, ConfigJSONDecoder(data))
 	re.NoError(err)
@@ -2481,7 +2479,7 @@ func TestCompatibilityConfig(t *testing.T) {
 	cfg.WriteLeaderPriorities = []string{"query", "key"}
 	data, err = EncodeConfig(cfg)
 	re.NoError(err)
-	err = storage.SaveSchedulerConfig(HotRegionName, data)
+	err = storage.SaveSchedulerConfig(types.BalanceHotRegionScheduler.String(), data)
 	re.NoError(err)
 	hb, err = CreateScheduler(types.BalanceHotRegionScheduler, oc, storage, ConfigJSONDecoder(data))
 	re.NoError(err)

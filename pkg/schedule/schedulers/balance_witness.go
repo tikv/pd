@@ -32,7 +32,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
-	types "github.com/tikv/pd/pkg/schedule/type"
+	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/utils/reflectutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/unrolled/render"
@@ -40,8 +40,6 @@ import (
 )
 
 const (
-	// BalanceWitnessName is balance witness scheduler name.
-	BalanceWitnessName = "balance-witness-scheduler"
 	// balanceWitnessBatchSize is the default number of operators to transfer witnesses by one scheduling.
 	// Default value is 4 which is subjected by scheduler-max-waiting-operator and witness-schedule-limit
 	// If you want to increase balance speed more, please increase above-mentioned param.

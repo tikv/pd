@@ -30,18 +30,18 @@ type Plan interface {
 	SetStatus(*Status)
 }
 
-// Summary is used to analyse plan simply.
+// Summary is used to analyze plan simply.
 // It will return the status of store.
 type Summary func([]Plan) (map[uint64]Status, bool, error)
 
-// Collector is a plan collector
+// Collector is a plan collector.
 type Collector struct {
 	basePlan           Plan
 	unschedulablePlans []Plan
 	schedulablePlans   []Plan
 }
 
-// NewCollector returns a new Collector
+// NewCollector returns a new Collector.
 func NewCollector(plan Plan) *Collector {
 	return &Collector{
 		basePlan:           plan,
@@ -50,7 +50,7 @@ func NewCollector(plan Plan) *Collector {
 	}
 }
 
-// Collect is used to collect a new Plan and save it into PlanCollector
+// Collect is used to collect a new Plan and save it into PlanCollector.
 func (c *Collector) Collect(opts ...Option) {
 	if c == nil {
 		return
@@ -63,7 +63,7 @@ func (c *Collector) Collect(opts ...Option) {
 	}
 }
 
-// GetPlans returns all plans and the first part plans are schedulable
+// GetPlans returns all plans and the first part plans are schedulable.
 func (c *Collector) GetPlans() []Plan {
 	if c == nil {
 		return nil
@@ -71,24 +71,24 @@ func (c *Collector) GetPlans() []Plan {
 	return append(c.schedulablePlans, c.unschedulablePlans...)
 }
 
-// Option is to do some action for plan
+// Option is to do some action for plan.
 type Option func(plan Plan)
 
-// SetStatus is used to set status for plan
+// SetStatus is used to set status for plan.
 func SetStatus(status *Status) Option {
 	return func(plan Plan) {
 		plan.SetStatus(status)
 	}
 }
 
-// SetResource is used to generate Resource for plan
+// SetResource is used to generate Resource for plan.
 func SetResource(resource any) Option {
 	return func(plan Plan) {
 		plan.SetResource(resource)
 	}
 }
 
-// SetResourceWithStep is used to generate Resource for plan
+// SetResourceWithStep is used to generate Resource for plan.
 func SetResourceWithStep(resource any, step int) Option {
 	return func(plan Plan) {
 		plan.SetResourceWithStep(resource, step)

@@ -34,7 +34,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/scatter"
 	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/schedule/splitter"
-	types "github.com/tikv/pd/pkg/schedule/type"
+	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/statistics/utils"
 	"github.com/tikv/pd/pkg/utils/logutil"
@@ -182,7 +182,7 @@ func (c *Coordinator) driveSlowNodeScheduler() {
 		case <-ticker.C:
 			{
 				// If enabled, exit.
-				if exists, _ := c.schedulers.IsSchedulerExisted(schedulers.EvictSlowTrendName); exists {
+				if exists, _ := c.schedulers.IsSchedulerExisted(types.EvictSlowTrendScheduler.String()); exists {
 					return
 				}
 				// If the cluster was set up with `raft-kv2` engine, this cluster should

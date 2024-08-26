@@ -28,7 +28,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
-	types "github.com/tikv/pd/pkg/schedule/type"
+	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/unrolled/render"
@@ -36,8 +36,6 @@ import (
 )
 
 const (
-	// EvictLeaderName is evict leader scheduler name.
-	EvictLeaderName = "evict-leader-scheduler"
 	// EvictLeaderBatchSize is the number of operators to transfer
 	// leaders by one scheduling
 	EvictLeaderBatchSize = 3
@@ -212,7 +210,7 @@ func (conf *evictLeaderSchedulerConfig) delete(id uint64) (any, error) {
 		return resp, nil
 	}
 	conf.Unlock()
-	if err := conf.removeSchedulerCb(EvictLeaderName); err != nil {
+	if err := conf.removeSchedulerCb(types.EvictLeaderScheduler.String()); err != nil {
 		if !errors.ErrorEqual(err, errs.ErrSchedulerNotFound.FastGenByArgs()) {
 			conf.resetStore(id, keyRanges)
 		}

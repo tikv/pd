@@ -34,16 +34,26 @@ import (
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/testutil"
-	"go.etcd.io/etcd/clientv3"
-	"go.etcd.io/etcd/embed"
-	"go.etcd.io/etcd/etcdserver/etcdserverpb"
-	"go.etcd.io/etcd/mvcc/mvccpb"
-	"go.etcd.io/etcd/pkg/types"
+	"go.etcd.io/etcd/api/v3/etcdserverpb"
+	"go.etcd.io/etcd/api/v3/mvccpb"
+	etcdtypes "go.etcd.io/etcd/client/pkg/v3/types"
+	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.etcd.io/etcd/server/v3/embed"
 	"go.uber.org/goleak"
 )
 
 func TestMain(m *testing.M) {
 	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+}
+
+func TestAddMember(t *testing.T) {
+	re := require.New(t)
+	servers, client1, clean := NewTestEtcdCluster(t, 1)
+	defer clean()
+	etcd1, cfg1 := servers[0], servers[0].Config()
+	etcd2 := MustAddEtcdMember(t, &cfg1, client1)
+	defer etcd2.Close()
+	checkMembers(re, client1, []*embed.Etcd{etcd1, etcd2})
 }
 
 func TestMemberHelpers(t *testing.T) {
@@ -65,7 +75,7 @@ func TestMemberHelpers(t *testing.T) {
 	checkMembers(re, client1, []*embed.Etcd{etcd1, etcd2})
 
 	// Test CheckClusterID
-	urlsMap, err := types.NewURLsMap(etcd2.Config().InitialCluster)
+	urlsMap, err := etcdtypes.NewURLsMap(etcd2.Config().InitialCluster)
 	re.NoError(err)
 	err = CheckClusterID(etcd1.Server.Cluster().ID(), urlsMap, &tls.Config{MinVersion: tls.VersionTLS12})
 	re.NoError(err)
@@ -172,7 +182,6 @@ func TestEtcdClientSync(t *testing.T) {
 	servers, client1, clean := NewTestEtcdCluster(t, 1)
 	defer clean()
 	etcd1, cfg1 := servers[0], servers[0].Config()
-	defer etcd1.Close()
 
 	// Add a new member.
 	etcd2 := MustAddEtcdMember(t, &cfg1, client1)
@@ -303,7 +312,7 @@ func checkEtcdWithHangLeader(t *testing.T) error {
 	go proxyWithDiscard(ctx, re, cfg1.ListenClientUrls[0].String(), proxyAddr, &enableDiscard)
 
 	// Create an etcd client with etcd1 as endpoint.
-	urls, err := types.NewURLs([]string{proxyAddr})
+	urls, err := etcdtypes.NewURLs([]string{proxyAddr})
 	re.NoError(err)
 	client1, err := CreateEtcdClient(nil, urls)
 	re.NoError(err)
@@ -771,7 +780,16 @@ func (suite *loopWatcherTestSuite) startEtcd(re *require.Assertions) {
 	suite.etcd = etcd1
 	<-etcd1.Server.ReadyNotify()
 	suite.cleans = append(suite.cleans, func() {
-		suite.etcd.Close()
+		if suite.etcd.Server != nil {
+			select {
+			case _, ok := <-suite.etcd.Err():
+				if !ok {
+					return
+				}
+			default:
+			}
+			suite.etcd.Close()
+		}
 	})
 }
 

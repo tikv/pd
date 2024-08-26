@@ -38,6 +38,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/schedule/scatter"
 	"github.com/tikv/pd/pkg/schedule/schedulers"
+	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/statistics/buckets"
 	"github.com/tikv/pd/pkg/statistics/utils"
@@ -884,7 +885,8 @@ func (h *Handler) GetSchedulerByStatus(status string, needTS bool) (any, error) 
 
 // GetDiagnosticResult returns the diagnostic results of the specified scheduler.
 func (h *Handler) GetDiagnosticResult(name string) (*schedulers.DiagnosticResult, error) {
-	if _, ok := schedulers.DiagnosableSummaryFunc[name]; !ok {
+	tp := types.StringToSchedulerType[name]
+	if _, ok := schedulers.DiagnosableSummaryFunc[tp]; !ok {
 		return nil, errs.ErrSchedulerUndiagnosable.FastGenByArgs(name)
 	}
 	co := h.GetCoordinator()

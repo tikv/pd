@@ -65,7 +65,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/server/config"
-	"go.etcd.io/etcd/clientv3"
+	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 )
 
@@ -1062,7 +1062,7 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 				regionID,
 				ratelimit.ObserveRegionStatsAsync,
 				func(ctx context.Context) {
-					cluster.Collect(ctx, c, region, hasRegionStats)
+					cluster.Collect(ctx, c, region)
 				},
 			)
 		}
@@ -1119,17 +1119,19 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 	}
 
 	tracer.OnSaveCacheFinished()
-	// handle region stats
-	ctx.MiscRunner.RunTask(
-		regionID,
-		ratelimit.CollectRegionStatsAsync,
-		func(ctx context.Context) {
-			// TODO: Due to the accuracy requirements of the API "/regions/check/xxx",
-			// region stats needs to be collected in API mode.
-			// We need to think of a better way to reduce this part of the cost in the future.
-			cluster.Collect(ctx, c, region, hasRegionStats)
-		},
-	)
+	if hasRegionStats {
+		// handle region stats
+		ctx.MiscRunner.RunTask(
+			regionID,
+			ratelimit.CollectRegionStatsAsync,
+			func(ctx context.Context) {
+				// TODO: Due to the accuracy requirements of the API "/regions/check/xxx",
+				// region stats needs to be collected in API mode.
+				// We need to think of a better way to reduce this part of the cost in the future.
+				cluster.Collect(ctx, c, region)
+			},
+		)
+	}
 
 	tracer.OnCollectRegionStatsFinished()
 	if c.storage != nil {
@@ -1667,9 +1669,12 @@ func (c *RaftCluster) checkStores() {
 		if c.IsPrepared() {
 			c.updateProgress(id, store.GetAddress(), removingAction, float64(regionSize), float64(regionSize), false /* dec */)
 		}
-		regionCount := c.GetStoreRegionCount(id)
 		// If the store is empty, it can be buried.
-		if regionCount == 0 {
+		needBury := c.GetStoreRegionCount(id) == 0
+		failpoint.Inject("doNotBuryStore", func(_ failpoint.Value) {
+			needBury = false
+		})
+		if needBury {
 			if err := c.BuryStore(id, false); err != nil {
 				log.Error("bury store failed",
 					zap.Stringer("store", offlineStore),
