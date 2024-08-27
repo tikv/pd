@@ -24,7 +24,6 @@ import (
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/server/config"
@@ -490,9 +489,8 @@ func (suite *operatorTestSuite) TestRecord() {
 	suite.Greater(ob.duration.Seconds(), time.Second.Seconds())
 }
 
-func TestOperatorCheckConcurrently(t *testing.T) {
-	re := require.New(t)
-	region := newTestRegion(1, 1, [2]uint64{1, 1}, [2]uint64{2, 2})
+func (suite *operatorTestSuite) TestOperatorCheckConcurrently() {
+	region := suite.newTestRegion(1, 1, [2]uint64{1, 1}, [2]uint64{2, 2})
 	// addPeer1, transferLeader1, removePeer3
 	steps := []OpStep{
 		AddPeer{ToStore: 1, PeerID: 1},
@@ -500,43 +498,16 @@ func TestOperatorCheckConcurrently(t *testing.T) {
 		RemovePeer{FromStore: 3},
 	}
 	op := NewTestOperator(1, &metapb.RegionEpoch{}, OpAdmin|OpLeader|OpRegion, steps...)
-	re.Equal(core.Urgent, op.GetPriorityLevel())
-	checkSteps(re, op, steps)
+	suite.Equal(core.Urgent, op.GetPriorityLevel())
+	suite.checkSteps(op, steps)
 	op.Start()
 	var wg sync.WaitGroup
 	for i := 0; i < 10; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			re.Nil(op.Check(region))
+			suite.Nil(op.Check(region))
 		}()
 	}
 	wg.Wait()
-}
-
-func newTestRegion(regionID uint64, leaderPeer uint64, peers ...[2]uint64) *core.RegionInfo {
-	var (
-		region metapb.Region
-		leader *metapb.Peer
-	)
-	region.Id = regionID
-	for i := range peers {
-		peer := &metapb.Peer{
-			Id:      peers[i][1],
-			StoreId: peers[i][0],
-		}
-		region.Peers = append(region.Peers, peer)
-		if peer.GetId() == leaderPeer {
-			leader = peer
-		}
-	}
-	regionInfo := core.NewRegionInfo(&region, leader, core.SetApproximateSize(50), core.SetApproximateKeys(50))
-	return regionInfo
-}
-
-func checkSteps(re *require.Assertions, op *Operator, steps []OpStep) {
-	re.Len(steps, op.Len())
-	for i := range steps {
-		re.Equal(steps[i], op.Step(i))
-	}
 }
