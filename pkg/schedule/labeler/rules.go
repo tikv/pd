@@ -17,6 +17,7 @@ package labeler
 import (
 	"bytes"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"reflect"
 	"strings"
@@ -53,8 +54,6 @@ type LabelRule struct {
 	minExpire *time.Time
 }
 
-<<<<<<< HEAD
-=======
 func (rule *LabelRule) String() string {
 	var b strings.Builder
 	b.WriteString(fmt.Sprintf("id: %s, index: %d, type: %s", rule.ID, rule.Index, rule.RuleType))
@@ -96,7 +95,6 @@ func NewLabelRuleFromJSON(data []byte) (*LabelRule, error) {
 	return lr, nil
 }
 
->>>>>>> 2d8e03f33 (*: fix redact log (#8415))
 const (
 	// KeyRange is the rule type that specifies a list of key ranges.
 	KeyRange = "key-range"
