@@ -518,9 +518,9 @@ func (suite *apiTestSuite) checkFollowerForward(cluster *tests.TestCluster) {
 		cli := leader.GetEtcdClient()
 		testutil.Eventually(re, func() bool {
 			_, err = cli.MemberRemove(context.Background(), follower.GetServer().GetMember().ID())
-			if err != nil {
-				return false
-			}
+			return err == nil
+		})
+		testutil.Eventually(re, func() bool {
 			res, err := cli.MemberList(context.Background())
 			return err == nil && len(res.Members) == 1
 		})
