@@ -37,7 +37,6 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/mcs/discovery"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
@@ -276,10 +275,6 @@ func (s *GrpcServer) GetClusterInfo(context.Context, *pdpb.GetClusterInfoRequest
 	var tsoServiceAddrs []string
 	svcModes := make([]pdpb.ServiceMode, 0)
 
-	servers, err := discovery.Discover(s.client, strconv.FormatUint(s.ClusterID(), 10), constant.TSOServiceName)
-	if err == nil && len(servers) != 0 {
-		s.cluster.SetServiceIndependent(constant.TSOServiceName)
-	}
 	if s.forwardToTSOService() {
 		svcModes = append(svcModes, pdpb.ServiceMode_API_SVC_MODE)
 		tsoServiceAddrs = s.keyspaceGroupManager.GetTSOServiceAddrs()

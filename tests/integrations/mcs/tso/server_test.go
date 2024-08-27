@@ -579,6 +579,7 @@ func (suite *CommonTestSuite) TestBootstrapDefaultKeyspaceGroup() {
 
 func TestTSOServiceSwitch(t *testing.T) {
 	re := require.New(t)
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/fastUpdateServiceMode", `return(true)`))
 	var wg sync.WaitGroup
 	defer wg.Wait()
 	ctx, cancel := context.WithCancel(context.Background())
@@ -630,7 +631,6 @@ func TestTSOServiceSwitch(t *testing.T) {
 	}(ctx, &wg, ch, ch1)
 	ch1 <- struct{}{}
 	<-ch
-
 	tsoCluster, err := tests.NewTestTSOCluster(ctx, 1, backendEndpoints)
 	re.NoError(err)
 	tsoCluster.WaitForDefaultPrimaryServing(re)
@@ -639,4 +639,5 @@ func TestTSOServiceSwitch(t *testing.T) {
 	tsoCluster.Destroy()
 	ch1 <- struct{}{}
 	<-ch
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/fastUpdateServiceMode"))
 }

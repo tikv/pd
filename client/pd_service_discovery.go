@@ -575,6 +575,10 @@ func (c *pdServiceDiscovery) updateServiceModeLoop() {
 	ctx, cancel := context.WithCancel(c.ctx)
 	defer cancel()
 	ticker := time.NewTicker(serviceModeUpdateInterval)
+	failpoint.Inject("fastUpdateServiceMode", func() {
+		ticker.Stop()
+		ticker = time.NewTicker(10 * time.Millisecond)
+	})
 	defer ticker.Stop()
 
 	for {

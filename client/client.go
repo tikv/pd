@@ -663,7 +663,6 @@ func (c *client) Close() {
 func (c *client) setServiceMode(newMode pdpb.ServiceMode, skipSameMode bool) {
 	c.Lock()
 	defer c.Unlock()
-
 	if c.option.useTSOServerProxy {
 		// If we are using TSO server proxy, we always use PD_SVC_MODE.
 		newMode = pdpb.ServiceMode_PD_SVC_MODE
