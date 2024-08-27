@@ -22,15 +22,10 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/suite"
-<<<<<<< HEAD
 	tu "github.com/tikv/pd/pkg/testutil"
-=======
-	"github.com/tikv/pd/pkg/core"
-	"github.com/tikv/pd/pkg/response"
-	tu "github.com/tikv/pd/pkg/utils/testutil"
->>>>>>> c8ad186c3 (server: skip the engine key when match store label (#8486))
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
+	"github.com/tikv/pd/server/core"
 )
 
 type labelsStoreTestSuite struct {
@@ -318,7 +313,7 @@ func (suite *strictlyLabelsStoreTestSuite) TestStoreMatch() {
 			},
 		})
 		if testCase.store.Address == "tiflash1" {
-			re.Contains(resp.GetHeader().GetError().String(), testCase.expectError)
+			suite.Contains(resp.GetHeader().GetError().String(), testCase.expectError)
 			continue
 		}
 		if testCase.valid {
