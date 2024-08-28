@@ -25,6 +25,7 @@ import (
 	tu "github.com/tikv/pd/pkg/testutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
+	"github.com/tikv/pd/server/core"
 )
 
 type labelsStoreTestSuite struct {
@@ -274,6 +275,30 @@ func (suite *strictlyLabelsStoreTestSuite) TestStoreMatch() {
 			valid:       false,
 			expectError: "key matching the label was not found",
 		},
+		{
+			store: &metapb.Store{
+				Id:      3,
+				Address: "tiflash1",
+				State:   metapb.StoreState_Up,
+				Labels: []*metapb.StoreLabel{
+					{
+						Key:   "zone",
+						Value: "us-west-1",
+					},
+					{
+						Key:   "disk",
+						Value: "ssd",
+					},
+					{
+						Key:   core.EngineKey,
+						Value: core.EngineTiFlash,
+					},
+				},
+				Version: "3.0.0",
+			},
+			valid:       true,
+			expectError: "placement rules is disabled",
+		},
 	}
 
 	for _, testCase := range testCases {
@@ -281,12 +306,16 @@ func (suite *strictlyLabelsStoreTestSuite) TestStoreMatch() {
 			Header: &pdpb.RequestHeader{ClusterId: suite.svr.ClusterID()},
 			Store: &metapb.Store{
 				Id:      testCase.store.Id,
-				Address: fmt.Sprintf("tikv%d", testCase.store.Id),
+				Address: testCase.store.Address,
 				State:   testCase.store.State,
 				Labels:  testCase.store.Labels,
 				Version: testCase.store.Version,
 			},
 		})
+		if testCase.store.Address == "tiflash1" {
+			suite.Contains(resp.GetHeader().GetError().String(), testCase.expectError)
+			continue
+		}
 		if testCase.valid {
 			suite.NoError(err)
 			suite.Nil(resp.GetHeader().GetError())
@@ -306,7 +335,7 @@ func (suite *strictlyLabelsStoreTestSuite) TestStoreMatch() {
 			Header: &pdpb.RequestHeader{ClusterId: suite.svr.ClusterID()},
 			Store: &metapb.Store{
 				Id:      testCase.store.Id,
-				Address: fmt.Sprintf("tikv%d", testCase.store.Id),
+				Address: testCase.store.Address,
 				State:   testCase.store.State,
 				Labels:  testCase.store.Labels,
 				Version: testCase.store.Version,
