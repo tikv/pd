@@ -40,6 +40,11 @@ func main() {
 		syscall.SIGQUIT)
 
 	go func() {
+		defer func() {
+			if command.PDCli != nil {
+				command.PDCli.Close()
+			}
+		}()
 		sig := <-sc
 		fmt.Printf("\nGot signal [%v] to exit.\n", sig)
 		switch sig {
@@ -47,9 +52,6 @@ func main() {
 			os.Exit(0)
 		default:
 			os.Exit(1)
-		}
-		if command.PDCli != nil {
-			command.PDCli.Close()
 		}
 	}()
 

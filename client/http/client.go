@@ -29,6 +29,7 @@ import (
 	pd "github.com/tikv/pd/client"
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/retry"
+	"github.com/tikv/pd/pkg/utils/apiutil"
 	"go.uber.org/zap"
 )
 
@@ -390,6 +391,13 @@ type HeaderOption func(header http.Header)
 func WithAllowFollowerHandle() HeaderOption {
 	return func(header http.Header) {
 		header.Set(pdAllowFollowerHandleKey, "true")
+	}
+}
+
+// WithForbiddenForwardToMicroServiceHeader sets the header field to indicate that forwarding the request to a microservice is explicitly disallowed.
+func WithForbiddenForwardToMicroServiceHeader() HeaderOption {
+	return func(header http.Header) {
+		header.Set(apiutil.XForbiddenForwardToMicroServiceHeader, "true")
 	}
 }
 

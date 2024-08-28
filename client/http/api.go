@@ -43,21 +43,25 @@ const (
 	transferLeader            = "/pd/api/v1/leader/transfer"
 	health                    = "/pd/api/v1/health"
 	// Config
-	Config          = "/pd/api/v1/config"
-	ClusterVersion  = "/pd/api/v1/config/cluster-version"
-	ScheduleConfig  = "/pd/api/v1/config/schedule"
-	ReplicateConfig = "/pd/api/v1/config/replicate"
+	Config                = "/pd/api/v1/config"
+	ClusterVersion        = "/pd/api/v1/config/cluster-version"
+	ScheduleConfig        = "/pd/api/v1/config/schedule"
+	ReplicateConfig       = "/pd/api/v1/config/replicate"
+	LabelPropertyConfig   = "/pd/api/v1/config/label-property"
+	ReplicationModeConfig = "/pd/api/v1/config/replication-mode"
+	PDServerConfig        = "/pd/api/v1/config/pd-server"
 	// Rule
-	PlacementRule         = "/pd/api/v1/config/rule"
-	PlacementRules        = "/pd/api/v1/config/rules"
-	PlacementRulesInBatch = "/pd/api/v1/config/rules/batch"
-	placementRulesByGroup = "/pd/api/v1/config/rules/group"
-	PlacementRuleBundle   = "/pd/api/v1/config/placement-rule"
-	placementRuleGroup    = "/pd/api/v1/config/rule_group"
-	placementRuleGroups   = "/pd/api/v1/config/rule_groups"
-	RegionLabelRule       = "/pd/api/v1/config/region-label/rule"
-	RegionLabelRules      = "/pd/api/v1/config/region-label/rules"
-	RegionLabelRulesByIDs = "/pd/api/v1/config/region-label/rules/ids"
+	PlacementRule          = "/pd/api/v1/config/rule"
+	PlacementRules         = "/pd/api/v1/config/rules"
+	PlacementRulesInBatch  = "/pd/api/v1/config/rules/batch"
+	placementRulesByGroup  = "/pd/api/v1/config/rules/group"
+	placementRulesByRegion = "/pd/api/v1/config/rules/region"
+	PlacementRuleBundle    = "/pd/api/v1/config/placement-rule"
+	placementRuleGroup     = "/pd/api/v1/config/rule_group"
+	placementRuleGroups    = "/pd/api/v1/config/rule_groups"
+	RegionLabelRule        = "/pd/api/v1/config/region-label/rule"
+	RegionLabelRules       = "/pd/api/v1/config/region-label/rules"
+	RegionLabelRulesByIDs  = "/pd/api/v1/config/region-label/rules/ids"
 	// Scheduler
 	Schedulers            = "/pd/api/v1/schedulers"
 	scatterRangeScheduler = "/pd/api/v1/schedulers/scatter-range-"
@@ -162,6 +166,14 @@ func PlacementRuleByGroupAndID(group, id string) string {
 	return fmt.Sprintf("%s/%s/%s", PlacementRule, group, id)
 }
 
+// PlacementRulesByRegion returns the path of PD HTTP API to get placement rules by region.
+func PlacementRulesByRegion(region string, detail bool) string {
+	if detail {
+		return fmt.Sprintf("%s/%s/detail", placementRulesByRegion, region)
+	}
+	return fmt.Sprintf("%s/%s", placementRulesByRegion, region)
+}
+
 // PlacementRuleBundleByGroup returns the path of PD HTTP API to get placement rule bundle by group.
 func PlacementRuleBundleByGroup(group string) string {
 	return fmt.Sprintf("%s/%s", PlacementRuleBundle, group)
@@ -170,6 +182,14 @@ func PlacementRuleBundleByGroup(group string) string {
 // PlacementRuleBundleWithPartialParameter returns the path of PD HTTP API to get placement rule bundle with partial parameter.
 func PlacementRuleBundleWithPartialParameter(partial bool) string {
 	return fmt.Sprintf("%s?partial=%t", PlacementRuleBundle, partial)
+}
+
+// PlacementRuleBundleByGroupWithRegexpParameter returns the path of PD HTTP API to get placement rule bundle with regexp parameter.
+func PlacementRuleBundleByGroupWithRegexpParameter(group string, regexp bool) string {
+	if regexp {
+		return fmt.Sprintf("%s/%s?regexp", PlacementRuleBundle, group)
+	}
+	return fmt.Sprintf("%s/%s", PlacementRuleBundle, group)
 }
 
 // PlacementRuleGroupByID returns the path of PD HTTP API to get placement rule group by ID.

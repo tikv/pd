@@ -21,6 +21,7 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/encryptionpb"
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
+	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	pd "github.com/tikv/pd/client"
 )
@@ -342,8 +343,6 @@ type Rule struct {
 	LabelConstraints []LabelConstraint `json:"label_constraints,omitempty"` // used to select stores to place peers
 	LocationLabels   []string          `json:"location_labels,omitempty"`   // used to make peers isolated physically
 	IsolationLevel   string            `json:"isolation_level,omitempty"`   // used to isolate replicas explicitly and forcibly
-	Version          uint64            `json:"version,omitempty"`           // only set at runtime, add 1 each time rules updated, begin from 0.
-	CreateTimestamp  uint64            `json:"create_timestamp,omitempty"`  // only set at runtime, recorded rule create timestamp
 }
 
 // String returns the string representation of this rule.
@@ -439,6 +438,29 @@ func (r *Rule) UnmarshalJSON(bytes []byte) error {
 	}
 	*r = newRule
 	return nil
+}
+
+// RegionFit is the result of fitting a region's peers to rule list.
+// All peers are divided into corresponding rules according to the matching
+// rules, and the remaining Peers are placed in the OrphanPeers list.
+type RegionFit struct {
+	RuleFits    []*RuleFit     `json:"rule-fits"`
+	OrphanPeers []*metapb.Peer `json:"orphan-peers"`
+}
+
+// RuleFit is the result of fitting status of a Rule.
+type RuleFit struct {
+	Rule *Rule `json:"rule"`
+	// Peers of the Region that are divided to this Rule.
+	Peers []*metapb.Peer `json:"peers"`
+	// PeersWithDifferentRole is subset of `Peers`. It contains all Peers that have
+	// different Role from configuration (the Role can be migrated to target role
+	// by scheduling).
+	PeersWithDifferentRole []*metapb.Peer `json:"peers-different-role"`
+	// IsolationScore indicates at which level of labeling these Peers are
+	// isolated. A larger value is better.
+	IsolationScore float64 `json:"isolation-score"`
+	WitnessScore   int     `json:"witness-score"`
 }
 
 // RuleOpType indicates the operation type
