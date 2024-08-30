@@ -207,7 +207,8 @@ type tsoStream struct {
 	wg     sync.WaitGroup
 
 	// For syncing between sender and receiver to guarantee all requests are finished when closing.
-	state atomic.Int32
+	state          atomic.Int32
+	stoppedWithErr error
 
 	ongoingRequestCountGauge prometheus.Gauge
 	ongoingRequests          atomic.Int32
@@ -265,8 +266,12 @@ func (s *tsoStream) processRequests(
 		// Expected case
 	case streamStateClosing:
 		s.state.Store(prevState)
-		log.Info("tsoStream closed")
-		return errs.ErrClientTSOStreamClosed
+		err := s.stoppedWithErr
+		log.Info("sending to closed tsoStream", zap.Error(err))
+		if err == nil {
+			err = errors.WithStack(errs.ErrClientTSOStreamClosed)
+		}
+		return err
 	case streamStateSending:
 		log.Fatal("unexpected concurrent sending on tsoStream", zap.String("stream", s.streamID))
 	default:
@@ -288,7 +293,7 @@ func (s *tsoStream) processRequests(
 
 	if err := s.stream.Send(clusterID, keyspaceID, keyspaceGroupID, dcLocation, count); err != nil {
 		if err == io.EOF {
-			return errs.ErrClientTSOStreamClosed
+			return errors.WithStack(errs.ErrClientTSOStreamClosed)
 		}
 		return errors.WithStack(err)
 	}
@@ -318,6 +323,7 @@ func (s *tsoStream) recvLoop(ctx context.Context) {
 			currentReq.callback(tsoRequestResult{}, currentReq.reqKeyspaceGroupID, finishWithErr)
 		}
 
+		s.stoppedWithErr = errors.WithStack(finishWithErr)
 		s.cancel()
 		for !s.state.CompareAndSwap(streamStateIdle, streamStateClosing) {
 			switch state := s.state.Load(); state {
@@ -338,7 +344,7 @@ func (s *tsoStream) recvLoop(ctx context.Context) {
 
 		// Cancel remaining pending requests.
 		for req := range s.pendingRequests {
-			req.callback(tsoRequestResult{}, req.reqKeyspaceGroupID, finishWithErr)
+			req.callback(tsoRequestResult{}, req.reqKeyspaceGroupID, errors.WithStack(finishWithErr))
 		}
 
 		s.wg.Done()
@@ -376,7 +382,7 @@ recvLoop:
 				requestFailedDurationTSO.Observe(durationSeconds)
 			}
 			if err == io.EOF {
-				finishWithErr = errs.ErrClientTSOStreamClosed
+				finishWithErr = errors.WithStack(errs.ErrClientTSOStreamClosed)
 			} else {
 				finishWithErr = errors.WithStack(err)
 			}
