@@ -712,7 +712,6 @@ func (c *client) setTSOClientLocked(mode pdpb.ServiceMode) {
 		log.Warn("[pd] intend to switch to unknown service mode, just return")
 		return
 	}
-	// Replace the old TSO client.
 	newTSOCli.setup()
 	// Replace the old TSO client.
 	oldTSOClient := c.tsoClient

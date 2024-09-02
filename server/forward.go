@@ -402,71 +402,71 @@ func (s *GrpcServer) isLocalRequest(host string) bool {
 }
 
 func (s *GrpcServer) getGlobalTSO(ctx context.Context) (pdpb.Timestamp, error) {
-	if s.forwardToTSOService() {
-		request := &tsopb.TsoRequest{
-			Header: &tsopb.RequestHeader{
-				ClusterId:       s.ClusterID(),
-				KeyspaceId:      constant.DefaultKeyspaceID,
-				KeyspaceGroupId: constant.DefaultKeyspaceGroupID,
-			},
-			Count: 1,
-		}
-		var (
-			forwardedHost string
-			forwardStream tsopb.TSO_TsoClient
-			ts            *tsopb.TsoResponse
-			err           error
-			ok            bool
-		)
-		handleStreamError := func(err error) (needRetry bool) {
-			if strings.Contains(err.Error(), errs.NotLeaderErr) {
-				s.tsoPrimaryWatcher.ForceLoad()
-				log.Warn("force to load tso primary address due to error", zap.Error(err), zap.String("tso-addr", forwardedHost))
-				return true
-			}
-			if grpcutil.NeedRebuildConnection(err) {
-				s.tsoClientPool.Lock()
-				delete(s.tsoClientPool.clients, forwardedHost)
-				s.tsoClientPool.Unlock()
-				log.Warn("client connection removed due to error", zap.Error(err), zap.String("tso-addr", forwardedHost))
-				return true
-			}
-			return false
-		}
-		for i := 0; i < maxRetryTimesRequestTSOServer; i++ {
-			if i > 0 {
-				time.Sleep(retryIntervalRequestTSOServer)
-			}
-			forwardedHost, ok = s.GetServicePrimaryAddr(ctx, constant.TSOServiceName)
-			if !ok || forwardedHost == "" {
-				return pdpb.Timestamp{}, ErrNotFoundTSOAddr
-			}
-			forwardStream, err = s.getTSOForwardStream(forwardedHost)
-			if err != nil {
-				return pdpb.Timestamp{}, err
-			}
-			err = forwardStream.Send(request)
-			if err != nil {
-				if needRetry := handleStreamError(err); needRetry {
-					continue
-				}
-				log.Error("send request to tso primary server failed", zap.Error(err), zap.String("tso-addr", forwardedHost))
-				return pdpb.Timestamp{}, err
-			}
-			ts, err = forwardStream.Recv()
-			if err != nil {
-				if needRetry := handleStreamError(err); needRetry {
-					continue
-				}
-				log.Error("receive response from tso primary server failed", zap.Error(err), zap.String("tso-addr", forwardedHost))
-				return pdpb.Timestamp{}, err
-			}
-			return *ts.GetTimestamp(), nil
-		}
-		log.Error("get global tso from tso primary server failed after retry", zap.Error(err), zap.String("tso-addr", forwardedHost))
-		return pdpb.Timestamp{}, err
+	if !s.forwardToTSOService() {
+		return s.tsoAllocatorManager.HandleRequest(ctx, tso.GlobalDCLocation, 1)
 	}
-	return s.tsoAllocatorManager.HandleRequest(ctx, tso.GlobalDCLocation, 1)
+	request := &tsopb.TsoRequest{
+		Header: &tsopb.RequestHeader{
+			ClusterId:       s.ClusterID(),
+			KeyspaceId:      constant.DefaultKeyspaceID,
+			KeyspaceGroupId: constant.DefaultKeyspaceGroupID,
+		},
+		Count: 1,
+	}
+	var (
+		forwardedHost string
+		forwardStream tsopb.TSO_TsoClient
+		ts            *tsopb.TsoResponse
+		err           error
+		ok            bool
+	)
+	handleStreamError := func(err error) (needRetry bool) {
+		if strings.Contains(err.Error(), errs.NotLeaderErr) {
+			s.tsoPrimaryWatcher.ForceLoad()
+			log.Warn("force to load tso primary address due to error", zap.Error(err), zap.String("tso-addr", forwardedHost))
+			return true
+		}
+		if grpcutil.NeedRebuildConnection(err) {
+			s.tsoClientPool.Lock()
+			delete(s.tsoClientPool.clients, forwardedHost)
+			s.tsoClientPool.Unlock()
+			log.Warn("client connection removed due to error", zap.Error(err), zap.String("tso-addr", forwardedHost))
+			return true
+		}
+		return false
+	}
+	for i := 0; i < maxRetryTimesRequestTSOServer; i++ {
+		if i > 0 {
+			time.Sleep(retryIntervalRequestTSOServer)
+		}
+		forwardedHost, ok = s.GetServicePrimaryAddr(ctx, constant.TSOServiceName)
+		if !ok || forwardedHost == "" {
+			return pdpb.Timestamp{}, ErrNotFoundTSOAddr
+		}
+		forwardStream, err = s.getTSOForwardStream(forwardedHost)
+		if err != nil {
+			return pdpb.Timestamp{}, err
+		}
+		err = forwardStream.Send(request)
+		if err != nil {
+			if needRetry := handleStreamError(err); needRetry {
+				continue
+			}
+			log.Error("send request to tso primary server failed", zap.Error(err), zap.String("tso-addr", forwardedHost))
+			return pdpb.Timestamp{}, err
+		}
+		ts, err = forwardStream.Recv()
+		if err != nil {
+			if needRetry := handleStreamError(err); needRetry {
+				continue
+			}
+			log.Error("receive response from tso primary server failed", zap.Error(err), zap.String("tso-addr", forwardedHost))
+			return pdpb.Timestamp{}, err
+		}
+		return *ts.GetTimestamp(), nil
+	}
+	log.Error("get global tso from tso primary server failed after retry", zap.Error(err), zap.String("tso-addr", forwardedHost))
+	return pdpb.Timestamp{}, err
 }
 
 func (s *GrpcServer) getTSOForwardStream(forwardedHost string) (tsopb.TSO_TsoClient, error) {
