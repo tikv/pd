@@ -23,6 +23,14 @@ var (
 )
 
 var (
+	metadataGauge = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "pd",
+			Subsystem: "cluster",
+			Name:      "metadata",
+			Help:      "Record critical metadata.",
+		}, []string{"type"})
+
 	etcdStateGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: "pd",
@@ -44,4 +52,5 @@ var (
 func init() {
 	prometheus.MustRegister(etcdStateGauge)
 	prometheus.MustRegister(etcdEndpointLatency)
+	prometheus.MustRegister(metadataGauge)
 }

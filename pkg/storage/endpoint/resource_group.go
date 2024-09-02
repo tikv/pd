@@ -64,10 +64,10 @@ func (se *StorageEndpoint) LoadResourceGroupStates(f func(k, v string)) error {
 
 // SaveControllerConfig stores the resource controller config to storage.
 func (se *StorageEndpoint) SaveControllerConfig(config any) error {
-	return se.saveJSON(controllerConfigPath, config)
+	return se.saveJSON(resourceGroupControllerConfigPath, config)
 }
 
 // LoadControllerConfig loads the resource controller config from storage.
 func (se *StorageEndpoint) LoadControllerConfig() (string, error) {
-	return se.Load(controllerConfigPath)
+	return se.Load(resourceGroupControllerConfigPath)
 }

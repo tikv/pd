@@ -26,6 +26,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/global"
 	"github.com/tikv/pd/pkg/ratelimit"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
@@ -67,7 +68,7 @@ func (s *RegionSyncer) syncRegion(ctx context.Context, conn *grpc.ClientConn) (C
 		return nil, err
 	}
 	err = syncStream.Send(&pdpb.SyncRegionRequest{
-		Header:     &pdpb.RequestHeader{ClusterId: s.server.ClusterID()},
+		Header:     &pdpb.RequestHeader{ClusterId: global.ClusterID()},
 		Member:     s.server.GetMemberInfo(),
 		StartIndex: s.history.getNextIndex(),
 	})

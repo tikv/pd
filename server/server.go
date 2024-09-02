@@ -49,6 +49,7 @@ import (
 	"github.com/tikv/pd/pkg/encryption"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/gc"
+	"github.com/tikv/pd/pkg/global"
 	"github.com/tikv/pd/pkg/id"
 	"github.com/tikv/pd/pkg/keyspace"
 	ms_server "github.com/tikv/pd/pkg/mcs/metastorage/server"
@@ -97,8 +98,6 @@ const (
 	// idAllocPath for idAllocator to save persistent window's end.
 	idAllocPath  = "alloc_id"
 	idAllocLabel = "idalloc"
-
-	recoveringMarkPath = "cluster/markers/snapshot-recovering"
 
 	// PDMode represents that server is in PD mode.
 	PDMode = "PD"
@@ -156,9 +155,6 @@ type Server struct {
 	electionClient *clientv3.Client
 	// http client
 	httpClient *http.Client
-	// PD cluster ID.
-	clusterID atomic.Uint64
-	rootPath  string
 
 	// Server services.
 	// for id allocator, we can use one allocator for
@@ -428,19 +424,13 @@ func (s *Server) AddStartCallback(callbacks ...func()) {
 }
 
 func (s *Server) startServer(ctx context.Context) error {
-	clusterID, err := etcdutil.InitClusterID(s.client, pdClusterIDPath)
+	err := etcdutil.InitClusterID(s.client, pdClusterIDPath)
 	if err != nil {
 		log.Error("failed to init cluster id", errs.ZapError(err))
 		return err
 	}
-	s.clusterID.Store(clusterID)
-	log.Info("init cluster id", zap.Uint64("cluster-id", clusterID))
-	// It may lose accuracy if use float64 to store uint64. So we store the cluster id in label.
-	metadataGauge.WithLabelValues(fmt.Sprintf("cluster%d", clusterID)).Set(0)
-	bs.ServerInfoGauge.WithLabelValues(versioninfo.PDReleaseVersion, versioninfo.PDGitHash).Set(float64(time.Now().Unix()))
 
-	s.rootPath = endpoint.PDRootPath(clusterID)
-	s.member.InitMemberInfo(s.cfg.AdvertiseClientUrls, s.cfg.AdvertisePeerUrls, s.Name(), s.rootPath)
+	s.member.InitMemberInfo(s.cfg.AdvertiseClientUrls, s.cfg.AdvertisePeerUrls, s.Name())
 	if err := s.member.SetMemberDeployPath(s.member.ID()); err != nil {
 		return err
 	}
@@ -452,7 +442,6 @@ func (s *Server) startServer(ctx context.Context) error {
 	}
 	s.idAllocator = id.NewAllocator(&id.AllocatorParams{
 		Client:    s.client,
-		RootPath:  s.rootPath,
 		AllocPath: idAllocPath,
 		Label:     idAllocLabel,
 		Member:    s.member.MemberValue(),
@@ -462,7 +451,7 @@ func (s *Server) startServer(ctx context.Context) error {
 		return err
 	}
 	// Initialize an etcd storage as the default storage.
-	defaultStorage := storage.NewStorageWithEtcdBackend(s.client, s.rootPath)
+	defaultStorage := storage.NewStorageWithEtcdBackend(s.client)
 	// Initialize a specialized LevelDB storage to store the region-related meta info independently.
 	regionStorage, err := storage.NewRegionStorageWithLevelDBBackend(
 		ctx,
@@ -475,7 +464,7 @@ func (s *Server) startServer(ctx context.Context) error {
 	s.tsoDispatcher = tsoutil.NewTSODispatcher(tsoProxyHandleDuration, tsoProxyBatchSize)
 	s.tsoProtoFactory = &tsoutil.TSOProtoFactory{}
 	s.pdProtoFactory = &tsoutil.PDProtoFactory{}
-	s.tsoAllocatorManager = tso.NewAllocatorManager(s.ctx, constant.DefaultKeyspaceGroupID, s.member, s.rootPath, s.storage, s, false)
+	s.tsoAllocatorManager = tso.NewAllocatorManager(s.ctx, constant.DefaultKeyspaceGroupID, s.member, s.storage, s, false)
 	// When disabled the Local TSO, we should clean up the Local TSO Allocator's meta info written in etcd if it exists.
 	if !s.cfg.EnableLocalTSO {
 		if err = s.tsoAllocatorManager.CleanUpDCLocation(); err != nil {
@@ -490,21 +479,20 @@ func (s *Server) startServer(ctx context.Context) error {
 
 	s.gcSafePointManager = gc.NewSafePointManager(s.storage, s.cfg.PDServerCfg)
 	s.basicCluster = core.NewBasicCluster()
-	s.cluster = cluster.NewRaftCluster(ctx, clusterID, s.GetBasicCluster(), s.GetStorage(), syncer.NewRegionSyncer(s), s.client, s.httpClient)
+	s.cluster = cluster.NewRaftCluster(ctx, s.GetBasicCluster(), s.GetStorage(), syncer.NewRegionSyncer(s), s.client, s.httpClient)
 	keyspaceIDAllocator := id.NewAllocator(&id.AllocatorParams{
 		Client:    s.client,
-		RootPath:  s.rootPath,
 		AllocPath: endpoint.KeyspaceIDAlloc(),
 		Label:     keyspace.AllocLabel,
 		Member:    s.member.MemberValue(),
 		Step:      keyspace.AllocStep,
 	})
 	if s.IsAPIServiceMode() {
-		s.keyspaceGroupManager = keyspace.NewKeyspaceGroupManager(s.ctx, s.storage, s.client, clusterID)
+		s.keyspaceGroupManager = keyspace.NewKeyspaceGroupManager(s.ctx, s.storage, s.client)
 	}
 	s.keyspaceManager = keyspace.NewKeyspaceManager(s.ctx, s.storage, s.cluster, keyspaceIDAllocator, &s.cfg.Keyspace, s.keyspaceGroupManager)
 	s.safePointV2Manager = gc.NewSafePointManagerV2(s.ctx, s.storage, s.storage, s.storage)
-	s.hbStreams = hbstream.NewHeartbeatStreams(ctx, clusterID, "", s.cluster)
+	s.hbStreams = hbstream.NewHeartbeatStreams(ctx, "", s.cluster)
 	// initial hot_region_storage in here.
 
 	s.hotRegionStorage, err = storage.NewHotRegionsStorage(
@@ -729,28 +717,22 @@ func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.BootstrapRe
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}
-	clusterRootPath := endpoint.ClusterRootPath(s.rootPath)
+	clusterRootPath := endpoint.ClusterRootPath()
 
 	var ops []clientv3.Op
 	ops = append(ops, clientv3.OpPut(clusterRootPath, string(clusterValue)))
 
-	// Set bootstrap time
-	// Because we will write the cluster meta into etcd directly,
-	// so we need to handle the root key path manually here.
-	bootstrapKey := endpoint.AppendToRootPath(s.rootPath, endpoint.ClusterBootstrapTimeKey())
 	nano := time.Now().UnixNano()
-
 	timeData := typeutil.Uint64ToBytes(uint64(nano))
-	ops = append(ops, clientv3.OpPut(bootstrapKey, string(timeData)))
+	ops = append(ops, clientv3.OpPut(endpoint.ClusterBootstrapTimeKey(), string(timeData)))
 
 	// Set store meta
 	storeMeta := req.GetStore()
-	storePath := endpoint.AppendToRootPath(s.rootPath, endpoint.StorePath(storeMeta.GetId()))
 	storeValue, err := storeMeta.Marshal()
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}
-	ops = append(ops, clientv3.OpPut(storePath, string(storeValue)))
+	ops = append(ops, clientv3.OpPut(endpoint.StorePath(storeMeta.GetId()), string(storeValue)))
 
 	regionValue, err := req.GetRegion().Marshal()
 	if err != nil {
@@ -758,8 +740,7 @@ func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.BootstrapRe
 	}
 
 	// Set region meta with region id.
-	regionPath := endpoint.AppendToRootPath(s.rootPath, endpoint.RegionPath(req.GetRegion().GetId()))
-	ops = append(ops, clientv3.OpPut(regionPath, string(regionValue)))
+	ops = append(ops, clientv3.OpPut(endpoint.RegionPath(req.GetRegion().GetId()), string(regionValue)))
 
 	// TODO: we must figure out a better way to handle bootstrap failed, maybe intervene manually.
 	bootstrapCmp := clientv3.Compare(clientv3.CreateRevision(clusterRootPath), "=", 0)
@@ -940,7 +921,7 @@ func (s *Server) Name() string {
 
 // ClusterID returns the cluster ID of this server.
 func (s *Server) ClusterID() uint64 {
-	return s.clusterID.Load()
+	return global.ClusterID()
 }
 
 // StartTimestamp returns the start timestamp of this server
@@ -1962,7 +1943,7 @@ func (s *Server) IsTTLConfigExist(key string) bool {
 // and is deleted after BR EBS restore is done.
 func (s *Server) MarkSnapshotRecovering() error {
 	log.Info("mark snapshot recovering")
-	markPath := endpoint.AppendToRootPath(s.rootPath, recoveringMarkPath)
+	markPath := endpoint.RecoveringMarkPath()
 	// the value doesn't matter, set to a static string
 	_, err := kv.NewSlowLogTxn(s.client).
 		If(clientv3.Compare(clientv3.CreateRevision(markPath), "=", 0)).
@@ -1974,8 +1955,7 @@ func (s *Server) MarkSnapshotRecovering() error {
 
 // IsSnapshotRecovering check whether recovering-mark marked
 func (s *Server) IsSnapshotRecovering(ctx context.Context) (bool, error) {
-	markPath := endpoint.AppendToRootPath(s.rootPath, recoveringMarkPath)
-	resp, err := s.client.Get(ctx, markPath)
+	resp, err := s.client.Get(ctx, endpoint.RecoveringMarkPath())
 	if err != nil {
 		return false, err
 	}
@@ -1985,8 +1965,7 @@ func (s *Server) IsSnapshotRecovering(ctx context.Context) (bool, error) {
 // UnmarkSnapshotRecovering unmark recovering mark
 func (s *Server) UnmarkSnapshotRecovering(ctx context.Context) error {
 	log.Info("unmark snapshot recovering")
-	markPath := endpoint.AppendToRootPath(s.rootPath, recoveringMarkPath)
-	_, err := s.client.Delete(ctx, markPath)
+	_, err := s.client.Delete(ctx, endpoint.RecoveringMarkPath())
 	// if other client already unmarked, return success too
 	return err
 }
@@ -2019,15 +1998,14 @@ func (s *Server) SetServicePrimaryAddr(serviceName, addr string) {
 
 func (s *Server) initTSOPrimaryWatcher() {
 	serviceName := constant.TSOServiceName
-	tsoRootPath := endpoint.TSOSvcRootPath(s.ClusterID())
-	tsoServicePrimaryKey := endpoint.KeyspaceGroupPrimaryPath(tsoRootPath, constant.DefaultKeyspaceGroupID)
+	tsoServicePrimaryKey := endpoint.KeyspaceGroupPrimaryPath(constant.DefaultKeyspaceGroupID)
 	s.tsoPrimaryWatcher = s.initServicePrimaryWatcher(serviceName, tsoServicePrimaryKey)
 	s.tsoPrimaryWatcher.StartWatchLoop()
 }
 
 func (s *Server) initSchedulingPrimaryWatcher() {
 	serviceName := constant.SchedulingServiceName
-	primaryKey := endpoint.SchedulingPrimaryPath(s.ClusterID())
+	primaryKey := endpoint.SchedulingPrimaryPath()
 	s.schedulingPrimaryWatcher = s.initServicePrimaryWatcher(serviceName, primaryKey)
 	s.schedulingPrimaryWatcher.StartWatchLoop()
 }

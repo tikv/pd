@@ -24,6 +24,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/global"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
@@ -77,11 +78,11 @@ type Leadership struct {
 }
 
 // NewLeadership creates a new Leadership.
-func NewLeadership(client *clientv3.Client, leaderKey, purpose string) *Leadership {
+func NewLeadership(client *clientv3.Client, purpose string) *Leadership {
 	leadership := &Leadership{
 		purpose:       purpose,
 		client:        client,
-		leaderKey:     leaderKey,
+		leaderKey:     global.GetLeaderPath(),
 		campaignTimes: make([]time.Time, 0, defaultCampaignTimesSlot),
 	}
 	return leadership

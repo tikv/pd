@@ -28,7 +28,9 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/election"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/global"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
+	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
@@ -54,8 +56,6 @@ type Participant struct {
 	// stored as member type
 	leader      atomic.Value
 	client      *clientv3.Client
-	rootPath    string
-	leaderPath  string
 	member      participant
 	serviceName string
 	// memberValue is the serialized string of `member`. It will be saved in the
@@ -79,8 +79,8 @@ func NewParticipant(client *clientv3.Client, serviceName string) *Participant {
 	}
 }
 
-// InitInfo initializes the member info. The leader key is path.Join(rootPath, leaderName)
-func (m *Participant) InitInfo(p participant, rootPath string, leaderName string, purpose string) {
+// InitInfo initializes the member info.
+func (m *Participant) InitInfo(p participant, purpose string) {
 	data, err := p.Marshal()
 	if err != nil {
 		// can't fail, so panic here.
@@ -88,11 +88,10 @@ func (m *Participant) InitInfo(p participant, rootPath string, leaderName string
 	}
 	m.member = p
 	m.memberValue = string(data)
-	m.rootPath = rootPath
-	m.leaderPath = path.Join(rootPath, leaderName)
-	m.leadership = election.NewLeadership(m.client, m.GetLeaderPath(), purpose)
+	m.leadership = election.NewLeadership(m.client, purpose)
 	m.lastLeaderUpdatedTime.Store(time.Now())
-	log.Info("participant joining election", zap.String("participant-info", p.String()), zap.String("leader-path", m.leaderPath))
+	log.Info("participant joining election", zap.String("participant-info", p.String()),
+		zap.String("leader-path", endpoint.SchedulingPrimaryPath()))
 }
 
 // ID returns the unique ID for this participant in the election group
@@ -168,11 +167,6 @@ func (m *Participant) EnableLeader() {
 	m.setLeader(m.member)
 }
 
-// GetLeaderPath returns the path of the leader.
-func (m *Participant) GetLeaderPath() string {
-	return m.leaderPath
-}
-
 // GetLastLeaderUpdatedTime returns the last time when the leader is updated.
 func (m *Participant) GetLastLeaderUpdatedTime() time.Time {
 	lastLeaderUpdatedTime := m.lastLeaderUpdatedTime.Load()
@@ -210,7 +204,7 @@ func (*Participant) PreCheckLeader() error {
 // getPersistentLeader gets the corresponding leader from etcd by given leaderPath (as the key).
 func (m *Participant) getPersistentLeader() (participant, int64, error) {
 	leader := NewParticipantByService(m.serviceName)
-	ok, rev, err := etcdutil.GetProtoMsgWithModRev(m.client, m.GetLeaderPath(), leader)
+	ok, rev, err := etcdutil.GetProtoMsgWithModRev(m.client, endpoint.SchedulingPrimaryPath(), leader)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -292,7 +286,7 @@ func (m *Participant) getLeaderPriorityPath(id uint64) string {
 
 // GetDCLocationPathPrefix returns the dc-location path prefix of the cluster.
 func (m *Participant) GetDCLocationPathPrefix() string {
-	return path.Join(m.rootPath, dcLocationConfigEtcdPrefix)
+	return fmt.Sprintf(dcLocationConfigEtcdPrefixFormat, global.ClusterID())
 }
 
 // GetDCLocationPath returns the dc-location path of a member with the given member ID.

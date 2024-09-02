@@ -48,14 +48,6 @@ var (
 			Buckets:   prometheus.ExponentialBuckets(0.0005, 2, 13),
 		}, []string{"address", "store"})
 
-	metadataGauge = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Namespace: "pd",
-			Subsystem: "cluster",
-			Name:      "metadata",
-			Help:      "Record critical metadata.",
-		}, []string{"type"})
-
 	etcdStateGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: "pd",
@@ -166,7 +158,6 @@ func init() {
 	prometheus.MustRegister(timeJumpBackCounter)
 	prometheus.MustRegister(regionHeartbeatCounter)
 	prometheus.MustRegister(regionHeartbeatLatency)
-	prometheus.MustRegister(metadataGauge)
 	prometheus.MustRegister(etcdStateGauge)
 	prometheus.MustRegister(tsoProxyHandleDuration)
 	prometheus.MustRegister(tsoProxyBatchSize)

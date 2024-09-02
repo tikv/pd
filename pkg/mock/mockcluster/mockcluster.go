@@ -55,7 +55,6 @@ type Cluster struct {
 	*labeler.RegionLabeler
 	*statistics.HotStat
 	*config.PersistOptions
-	ID                      uint64
 	pendingProcessedRegions map[uint64]struct{}
 	*buckets.HotBucketCache
 	storage.Storage

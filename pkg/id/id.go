@@ -15,17 +15,24 @@
 package id
 
 import (
-	"path"
+	"fmt"
 
 	"github.com/pingcap/log"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/global"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
+)
+
+const (
+	leaderPathFormat = "/pd/%d/leader"
+	// /pd/{cluster_id}/{allocator_path}
+	allocIDPathFormat = "/pd/%d/%s"
 )
 
 // Allocator is the allocator to generate unique ID.
@@ -49,7 +56,6 @@ type allocatorImpl struct {
 	end  uint64
 
 	client    *clientv3.Client
-	rootPath  string
 	allocPath string
 	label     string
 	member    string
@@ -76,7 +82,6 @@ type AllocatorParams struct {
 func NewAllocator(params *AllocatorParams) Allocator {
 	allocator := &allocatorImpl{
 		client:    params.Client,
-		rootPath:  params.RootPath,
 		allocPath: params.AllocPath,
 		label:     params.Label,
 		member:    params.Member,
@@ -129,7 +134,7 @@ func (alloc *allocatorImpl) Rebase() error {
 func (alloc *allocatorImpl) rebaseLocked(checkCurrEnd bool) error {
 	key := alloc.getAllocIDPath()
 
-	leaderPath := path.Join(alloc.rootPath, "leader")
+	leaderPath := fmt.Sprintf(leaderPathFormat, global.ClusterID())
 	var (
 		cmps = []clientv3.Cmp{clientv3.Compare(clientv3.Value(leaderPath), "=", alloc.member)}
 		end  uint64
@@ -178,5 +183,5 @@ func (alloc *allocatorImpl) rebaseLocked(checkCurrEnd bool) error {
 }
 
 func (alloc *allocatorImpl) getAllocIDPath() string {
-	return path.Join(alloc.rootPath, alloc.allocPath)
+	return fmt.Sprintf(allocIDPathFormat, global.ClusterID(), alloc.allocPath)
 }

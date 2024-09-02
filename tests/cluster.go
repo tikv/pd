@@ -31,6 +31,7 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/dashboard"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/global"
 	"github.com/tikv/pd/pkg/id"
 	"github.com/tikv/pd/pkg/keyspace"
 	scheduling "github.com/tikv/pd/pkg/mcs/scheduling/server"
@@ -223,7 +224,7 @@ func (s *TestServer) GetServer() *server.Server {
 func (s *TestServer) GetClusterID() uint64 {
 	s.RLock()
 	defer s.RUnlock()
-	return s.server.ClusterID()
+	return global.ClusterID()
 }
 
 // GetLeader returns current leader of PD cluster.
@@ -307,7 +308,7 @@ func (s *TestServer) IsAllocatorLeader(dcLocation string) bool {
 func (s *TestServer) GetEtcdLeader() (string, error) {
 	s.RLock()
 	defer s.RUnlock()
-	req := &pdpb.GetMembersRequest{Header: &pdpb.RequestHeader{ClusterId: s.server.ClusterID()}}
+	req := &pdpb.GetMembersRequest{Header: &pdpb.RequestHeader{ClusterId: global.ClusterID()}}
 	members, _ := s.grpcServer.GetMembers(context.TODO(), req)
 	if members.Header.GetError() != nil {
 		return "", errors.WithStack(errors.New(members.Header.GetError().String()))
@@ -319,7 +320,7 @@ func (s *TestServer) GetEtcdLeader() (string, error) {
 func (s *TestServer) GetEtcdLeaderID() (uint64, error) {
 	s.RLock()
 	defer s.RUnlock()
-	req := &pdpb.GetMembersRequest{Header: &pdpb.RequestHeader{ClusterId: s.server.ClusterID()}}
+	req := &pdpb.GetMembersRequest{Header: &pdpb.RequestHeader{ClusterId: global.ClusterID()}}
 	members, err := s.grpcServer.GetMembers(context.TODO(), req)
 	if err != nil {
 		return 0, errors.WithStack(err)

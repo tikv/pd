@@ -21,6 +21,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/tikv/pd/pkg/global"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 )
 
@@ -66,11 +67,79 @@ const (
 
 	// we use uint64 to represent ID, the max length of uint64 is 20.
 	keyLen = 20
+
+	// /pd/{cluster_id}
+	rootPathFormat = "/pd/%d"
+
+	configPathFormat                = "/pd/%d/config"
+	customSchedulerConfigPathFormat = "/pd/%d/scheduler_config"
+
+	clusterRootPathFormat         = "/pd/%d/raft"
+	clusterBootstrapTimeKeyFormat = "/pd/%d/raft/status/raft_bootstrap_time"
+
+	recoveringMarkPath = "/pd/%d/cluster/markers/snapshot-recovering"
+
+	// raft/s/{store_id}
+	storePathFormat       = "/pd/%d/raft/s/%020d"
+	storePathPrefixFormat = "/pd/%d/raft/s"
+
+	regionPathFormat = "/pd/%d/raft/r/%d"
+
+	// schedule/store_weight/{store_id}/leader
+	storeLeaderWeightPathFormat = "schedule/store_weight/%020d/leader"
+	// schedule/store_weight/{store_id}/region
+	storeRegionWeightPathFormat = "schedule/store_weight/%020d/region"
+
+	// replication_mode/{mode}
+	replicationModePathFormat = "replication_mode/%s"
+	// region_label/{rule_key}
+	regionLabelPathFormat = "region_label/%s"
+	// rules/{rule_key}
+	ruleKeyPathFormat = "rules/%s"
+	// rule_group/{group_id}
+	ruleGroupIDPathFormat   = "rule_group/%s"
+	rulesPathFormat         = "/pd/%d/rules"
+	rulesCommonPathFormat   = "/pd/%d/rule"
+	ruleGroupPathFormat     = "/pd/%d/rule_group"
+	regionLabelPrefixFormat = "/pd/%d/region_label"
+
+	// resource_group/states/{group_name}
+	resourceGroupStatePathFormat = "resource_group/states/%s"
+	// resource_group/settings/{group_name}
+	resourceGroupSettingPathFormat    = "resource_group/settings/%s"
+	resourceGroupControllerConfigPath = "resource_group/controller"
+
+	gcSafePointPathPrefixFormat        = "/pd/%d/gc/safe_point"
+	gcSafePointServicePrefixPathFormat = "/pd/%d/gc/safe_point/service/"
+	gcSafePointServicePathFormat       = "/pd/%d/gc/safe_point/service/%s"
+	minResolvedTSPathFormat            = "/pd/%d/raft/min_resolved_ts"
+	externalTimestampPathFormat        = "/pd/%d/raft/external_timestamp"
+	gcSafePointV2PathFormat            = "/pd/%d/keyspaces/gc_safe_point/%08d"
+	gcSafePointV2PrefixFormat          = "/pd/%d/keyspaces/gc_safe_point"
+	serviceSafePointV2PathFormat       = "/pd/%d/keyspaces/service_safe_point/%08d/%s"
+	serviceSafePointV2PrefixFormat     = "/pd/%d/keyspaces/service_safe_point/%08d/"
+	keyspaceMetaPrefixFormat           = "/pd/%d/keyspaces/meta/"
+	keyspaceMetaPathFormat             = "/pd/%d/keyspaces/meta/%08d"
+	keyspaceIDPathFormat               = "/pd/%d/keyspaces/id/%s"
+
+	tsoSvcRootPathFormat        = "/ms/%d/tso"
+	schedulingSvcRootPathFormat = "/ms/%d/scheduling"
+	resourceManagerSvcRootPath  = "/ms/%d/resource_manager"
+	schedulingPrimaryPathFormat = "/ms/%d/scheduling/primary"
+
+	defaultKeyspaceGroupsElectionPath      = "/ms/%d/tso/00000"
+	keyspaceGroupsElectionKeyFormat        = "/ms/%d/tso/keyspace_groups/election/%05d"
+	defaultKeyspaceGroupPrimaryFormat      = "/ms/%d/tso/00000/primary"
+	keyspaceGroupPrimaryFormat             = "/ms/%d/tso/keyspace_groups/election/%05d/primary"
+	defaultKeyspaceGroupGlobalTSPathFormat = "/pd/%d/timestamp"
+	keyspaceGroupGlobalTSPathFormat        = "/ms/%d/tso/%05d/gta/timestamp"
+
+	compiledNonDefaultIDRegexpFormat = `^/ms/%d/tso/keyspace_groups/election/(\d{5})/primary$`
 )
 
 // PDRootPath returns the PD root path.
-func PDRootPath(clusterID uint64) string {
-	return path.Join(pdRootPath, strconv.FormatUint(clusterID, 10))
+func PDRootPath() string {
+	return fmt.Sprintf(rootPathFormat, global.ClusterID())
 }
 
 // AppendToRootPath appends the given key to the rootPath.
@@ -78,44 +147,48 @@ func AppendToRootPath(rootPath string, key string) string {
 	return path.Join(rootPath, key)
 }
 
+func RecoveringMarkPath() string {
+	return fmt.Sprintf(recoveringMarkPath, global.ClusterID())
+}
+
 // ClusterRootPath appends the `clusterPath` to the rootPath.
-func ClusterRootPath(rootPath string) string {
-	return AppendToRootPath(rootPath, clusterPath)
+func ClusterRootPath() string {
+	return fmt.Sprintf(clusterRootPathFormat, global.ClusterID())
 }
 
 // ClusterBootstrapTimeKey returns the path to save the cluster bootstrap timestamp.
 func ClusterBootstrapTimeKey() string {
-	return path.Join(clusterPath, "status", "raft_bootstrap_time")
+	return fmt.Sprintf(clusterBootstrapTimeKeyFormat, global.ClusterID())
 }
 
 // ConfigPath returns the path to save the PD config.
-func ConfigPath(clusterID uint64) string {
-	return path.Join(PDRootPath(clusterID), configPath)
+func ConfigPath() string {
+	return fmt.Sprintf(configPathFormat, global.ClusterID())
 }
 
 // SchedulerConfigPathPrefix returns the path prefix to save the scheduler config.
-func SchedulerConfigPathPrefix(clusterID uint64) string {
-	return path.Join(PDRootPath(clusterID), customSchedulerConfigPath)
+func SchedulerConfigPathPrefix() string {
+	return fmt.Sprintf(customSchedulerConfigPathFormat, global.ClusterID())
 }
 
 // RulesPathPrefix returns the path prefix to save the placement rules.
-func RulesPathPrefix(clusterID uint64) string {
-	return path.Join(PDRootPath(clusterID), rulesPath)
+func RulesPathPrefix() string {
+	return fmt.Sprintf(rulesPathFormat, global.ClusterID())
 }
 
 // RuleCommonPathPrefix returns the path prefix to save the placement rule common config.
-func RuleCommonPathPrefix(clusterID uint64) string {
-	return path.Join(PDRootPath(clusterID), ruleCommonPath)
+func RuleCommonPathPrefix() string {
+	return fmt.Sprintf(rulesCommonPathFormat, global.ClusterID())
 }
 
 // RuleGroupPathPrefix returns the path prefix to save the placement rule groups.
-func RuleGroupPathPrefix(clusterID uint64) string {
-	return path.Join(PDRootPath(clusterID), ruleGroupPath)
+func RuleGroupPathPrefix() string {
+	return fmt.Sprintf(ruleGroupPathFormat, global.ClusterID())
 }
 
 // RegionLabelPathPrefix returns the path prefix to save the region label.
-func RegionLabelPathPrefix(clusterID uint64) string {
-	return path.Join(PDRootPath(clusterID), regionLabelPath)
+func RegionLabelPathPrefix() string {
+	return fmt.Sprintf(regionLabelPrefixFormat, global.ClusterID())
 }
 
 func schedulerConfigPath(schedulerName string) string {
@@ -124,155 +197,127 @@ func schedulerConfigPath(schedulerName string) string {
 
 // StorePath returns the store meta info key path with the given store ID.
 func StorePath(storeID uint64) string {
-	return path.Join(clusterPath, "s", fmt.Sprintf("%020d", storeID))
+	return fmt.Sprintf(storePathFormat, storeID)
 }
 
 // StorePathPrefix returns the store meta info key path prefix.
-func StorePathPrefix(clusterID uint64) string {
-	return path.Join(PDRootPath(clusterID), clusterPath, "s") + "/"
+func StorePathPrefix() string {
+	return fmt.Sprintf(storePathPrefixFormat, global.ClusterID())
 }
 
 // ExtractStoreIDFromPath extracts the store ID from the given path.
-func ExtractStoreIDFromPath(clusterID uint64, path string) (uint64, error) {
-	idStr := strings.TrimLeft(strings.TrimPrefix(path, StorePathPrefix(clusterID)), "0")
+func ExtractStoreIDFromPath(path string) (uint64, error) {
+	idStr := strings.TrimLeft(strings.TrimPrefix(path, StorePathPrefix()), "0")
 	return strconv.ParseUint(idStr, 10, 64)
 }
 
 func storeLeaderWeightPath(storeID uint64) string {
-	return path.Join(schedulePath, "store_weight", fmt.Sprintf("%020d", storeID), "leader")
+	return fmt.Sprintf(storeLeaderWeightPathFormat, storeID)
 }
 
 func storeRegionWeightPath(storeID uint64) string {
-	return path.Join(schedulePath, "store_weight", fmt.Sprintf("%020d", storeID), "region")
+	return fmt.Sprintf(storeRegionWeightPathFormat, storeID)
 }
 
 // RegionPath returns the region meta info key path with the given region ID.
 func RegionPath(regionID uint64) string {
-	var buf strings.Builder
-	buf.Grow(len(regionPathPrefix) + 1 + keyLen) // Preallocate memory
-
-	buf.WriteString(regionPathPrefix)
-	buf.WriteString("/")
-	s := strconv.FormatUint(regionID, 10)
-	b := make([]byte, keyLen)
-	copy(b, s)
-	if len(s) < keyLen {
-		diff := keyLen - len(s)
-		copy(b[diff:], s)
-		for i := 0; i < diff; i++ {
-			b[i] = '0'
-		}
-	} else if len(s) > keyLen {
-		copy(b, s[len(s)-keyLen:])
-	}
-	buf.Write(b)
-
-	return buf.String()
+	return fmt.Sprintf(regionPathFormat, global.ClusterID(), regionID)
 }
 
 func resourceGroupSettingKeyPath(groupName string) string {
-	return path.Join(resourceGroupSettingsPath, groupName)
+	return fmt.Sprintf(resourceGroupSettingPathFormat, groupName)
 }
 
 func resourceGroupStateKeyPath(groupName string) string {
-	return path.Join(resourceGroupStatesPath, groupName)
+	return fmt.Sprintf(resourceGroupStatePathFormat, groupName)
 }
 
 func ruleKeyPath(ruleKey string) string {
-	return path.Join(rulesPath, ruleKey)
+	return fmt.Sprintf(ruleKeyPathFormat, ruleKey)
 }
 
 func ruleGroupIDPath(groupID string) string {
-	return path.Join(ruleGroupPath, groupID)
+	return fmt.Sprintf(ruleGroupIDPathFormat, groupID)
 }
 
 func regionLabelKeyPath(ruleKey string) string {
-	return path.Join(regionLabelPath, ruleKey)
+	return fmt.Sprintf(regionLabelPathFormat, ruleKey)
 }
 
 func replicationModePath(mode string) string {
-	return path.Join(replicationPath, mode)
+	return fmt.Sprintf(replicationModePathFormat, mode)
 }
 
 func gcSafePointPath() string {
-	return path.Join(gcPath, "safe_point")
+	return fmt.Sprintf(gcSafePointPathPrefixFormat, global.ClusterID())
 }
 
 // GCSafePointServicePrefixPath returns the GC safe point service key path prefix.
 func GCSafePointServicePrefixPath() string {
-	return path.Join(gcSafePointPath(), "service") + "/"
+	return fmt.Sprintf(gcSafePointServicePrefixPathFormat, global.ClusterID())
 }
 
 func gcSafePointServicePath(serviceID string) string {
-	return path.Join(gcSafePointPath(), "service", serviceID)
+	return fmt.Sprintf(gcSafePointServicePathFormat, global.ClusterID(), serviceID)
 }
 
 // MinResolvedTSPath returns the min resolved ts path.
 func MinResolvedTSPath() string {
-	return path.Join(clusterPath, minResolvedTS)
+	return fmt.Sprintf(minResolvedTSPathFormat, global.ClusterID())
 }
 
 // ExternalTimestampPath returns the external timestamp path.
 func ExternalTimestampPath() string {
-	return path.Join(clusterPath, externalTimeStamp)
+	return fmt.Sprintf(externalTimestampPathFormat, global.ClusterID())
 }
 
 // GCSafePointV2Path is the storage path of gc safe point v2.
 // Path: keyspaces/gc_safe_point/{keyspaceID}
 func GCSafePointV2Path(keyspaceID uint32) string {
-	return buildPath(false, keyspacePrefix, gcSafePointInfix, EncodeKeyspaceID(keyspaceID))
+	return fmt.Sprintf(gcSafePointV2PathFormat, global.ClusterID(), keyspaceID)
 }
 
 // GCSafePointV2Prefix is the path prefix to all gc safe point v2.
 // Prefix: keyspaces/gc_safe_point/
 func GCSafePointV2Prefix() string {
-	return buildPath(true, keyspacePrefix, gcSafePointInfix)
+	return fmt.Sprintf(gcSafePointV2PrefixFormat, global.ClusterID())
 }
 
 // ServiceSafePointV2Path is the storage path of service safe point v2.
 // Path: keyspaces/service_safe_point/{spaceID}/{serviceID}
 func ServiceSafePointV2Path(keyspaceID uint32, serviceID string) string {
-	return buildPath(false, keyspacePrefix, serviceSafePointInfix, EncodeKeyspaceID(keyspaceID), serviceID)
+	return fmt.Sprintf(serviceSafePointV2PathFormat, global.ClusterID(), keyspaceID, serviceID)
 }
 
 // ServiceSafePointV2Prefix is the path prefix of all service safe point that belongs to a specific keyspace.
 // Can be used to retrieve keyspace's service safe point at once.
 // Path: keyspaces/service_safe_point/{spaceID}/
 func ServiceSafePointV2Prefix(keyspaceID uint32) string {
-	return buildPath(true, keyspacePrefix, serviceSafePointInfix, EncodeKeyspaceID(keyspaceID))
+	return fmt.Sprintf(serviceSafePointV2PrefixFormat, global.ClusterID(), keyspaceID)
 }
 
 // KeyspaceMetaPrefix returns the prefix of keyspaces' metadata.
 // Prefix: keyspaces/meta/
 func KeyspaceMetaPrefix() string {
-	return path.Join(keyspacePrefix, keyspaceMetaInfix) + "/"
+	return fmt.Sprintf(keyspaceMetaPrefixFormat, global.ClusterID())
 }
 
 // KeyspaceMetaPath returns the path to the given keyspace's metadata.
 // Path: keyspaces/meta/{space_id}
 func KeyspaceMetaPath(spaceID uint32) string {
-	idStr := EncodeKeyspaceID(spaceID)
-	return path.Join(KeyspaceMetaPrefix(), idStr)
+	return fmt.Sprintf(keyspaceMetaPathFormat, global.ClusterID(), spaceID)
 }
 
 // KeyspaceIDPath returns the path to keyspace id from the given name.
 // Path: keyspaces/id/{name}
 func KeyspaceIDPath(name string) string {
-	return path.Join(keyspacePrefix, keyspaceIDInfix, name)
+	return fmt.Sprintf(keyspaceIDPathFormat, global.ClusterID(), name)
 }
 
 // KeyspaceIDAlloc returns the path of the keyspace id's persistent window boundary.
 // Path: keyspaces/alloc_id
 func KeyspaceIDAlloc() string {
 	return path.Join(keyspacePrefix, keyspaceAllocID)
-}
-
-// EncodeKeyspaceID from uint32 to string.
-// It adds extra padding to make encoded ID ordered.
-// Encoded ID can be decoded directly with strconv.ParseUint.
-// Width of the padded keyspaceID is 8 (decimal representation of uint24max is 16777215).
-func EncodeKeyspaceID(spaceID uint32) string {
-	return fmt.Sprintf("%08d", spaceID)
 }
 
 // KeyspaceGroupIDPrefix returns the prefix of keyspace group id.
@@ -295,62 +340,57 @@ func GetCompiledKeyspaceGroupIDRegexp() *regexp.Regexp {
 
 // ResourceManagerSvcRootPath returns the root path of resource manager service.
 // Path: /ms/{cluster_id}/resource_manager
-func ResourceManagerSvcRootPath(clusterID uint64) string {
-	return svcRootPath(clusterID, constant.ResourceManagerServiceName)
+func ResourceManagerSvcRootPath() string {
+	return fmt.Sprintf(resourceManagerSvcRootPath, global.ClusterID())
 }
 
 // SchedulingSvcRootPath returns the root path of scheduling service.
 // Path: /ms/{cluster_id}/scheduling
-func SchedulingSvcRootPath(clusterID uint64) string {
-	return svcRootPath(clusterID, constant.SchedulingServiceName)
+func SchedulingSvcRootPath() string {
+	return fmt.Sprintf(schedulingSvcRootPathFormat, global.ClusterID())
 }
 
 // TSOSvcRootPath returns the root path of tso service.
 // Path: /ms/{cluster_id}/tso
-func TSOSvcRootPath(clusterID uint64) string {
-	return svcRootPath(clusterID, constant.TSOServiceName)
-}
-
-func svcRootPath(clusterID uint64, svcName string) string {
-	c := strconv.FormatUint(clusterID, 10)
-	return path.Join(constant.MicroserviceRootPath, c, svcName)
+func TSOSvcRootPath() string {
+	return fmt.Sprintf(tsoSvcRootPathFormat, global.ClusterID())
 }
 
 // LegacyRootPath returns the root path of legacy pd service.
 // Path: /pd/{cluster_id}
-func LegacyRootPath(clusterID uint64) string {
-	return path.Join(pdRootPath, strconv.FormatUint(clusterID, 10))
+func LegacyRootPath() string {
+	return fmt.Sprintf(rootPathFormat, global.ClusterID())
 }
 
 // KeyspaceGroupPrimaryPath returns the path of keyspace group primary.
 // default keyspace group: "/ms/{cluster_id}/tso/00000/primary".
 // non-default keyspace group: "/ms/{cluster_id}/tso/keyspace_groups/election/{group}/primary".
-func KeyspaceGroupPrimaryPath(rootPath string, keyspaceGroupID uint32) string {
-	electionPath := KeyspaceGroupsElectionPath(rootPath, keyspaceGroupID)
-	return path.Join(electionPath, constant.PrimaryKey)
+func KeyspaceGroupPrimaryPath(keyspaceGroupID uint32) string {
+	if keyspaceGroupID == constant.DefaultKeyspaceGroupID {
+		return fmt.Sprintf(defaultKeyspaceGroupPrimaryFormat, global.ClusterID())
+	}
+	return fmt.Sprintf(keyspaceGroupPrimaryFormat, global.ClusterID(), keyspaceGroupID)
 }
 
 // SchedulingPrimaryPath returns the path of scheduling primary.
 // Path: /ms/{cluster_id}/scheduling/primary
-func SchedulingPrimaryPath(clusterID uint64) string {
-	return path.Join(SchedulingSvcRootPath(clusterID), constant.PrimaryKey)
+func SchedulingPrimaryPath() string {
+	return fmt.Sprintf(schedulingPrimaryPathFormat, global.ClusterID())
 }
 
 // KeyspaceGroupsElectionPath returns the path of keyspace groups election.
 // default keyspace group: "/ms/{cluster_id}/tso/00000".
 // non-default keyspace group: "/ms/{cluster_id}/tso/keyspace_groups/election/{group}".
-func KeyspaceGroupsElectionPath(rootPath string, keyspaceGroupID uint32) string {
+func KeyspaceGroupsElectionPath(keyspaceGroupID uint32) string {
 	if keyspaceGroupID == constant.DefaultKeyspaceGroupID {
-		return path.Join(rootPath, "00000")
+		return fmt.Sprintf(defaultKeyspaceGroupsElectionPath, global.ClusterID())
 	}
-	return path.Join(rootPath, constant.KeyspaceGroupsKey, keyspaceGroupsElectionKey, fmt.Sprintf("%05d", keyspaceGroupID))
+	return fmt.Sprintf(keyspaceGroupsElectionKeyFormat, global.ClusterID(), keyspaceGroupID)
 }
 
 // GetCompiledNonDefaultIDRegexp returns the compiled regular expression for matching non-default keyspace group id.
-func GetCompiledNonDefaultIDRegexp(clusterID uint64) *regexp.Regexp {
-	rootPath := TSOSvcRootPath(clusterID)
-	pattern := strings.Join([]string{rootPath, constant.KeyspaceGroupsKey, keyspaceGroupsElectionKey, `(\d{5})`, constant.PrimaryKey + `$`}, "/")
-	return regexp.MustCompile(pattern)
+func GetCompiledNonDefaultIDRegexp() *regexp.Regexp {
+	return regexp.MustCompile(fmt.Sprintf(compiledNonDefaultIDRegexpFormat, global.ClusterID()))
 }
 
 // encodeKeyspaceGroupID from uint32 to string.
@@ -406,11 +446,9 @@ func TimestampPath(tsPath string) string {
 //     /pd/{cluster_id}/timestamp
 //  2. for the non-default keyspace groups:
 //     /ms/{cluster_id}/tso/{group}/gta/timestamp
-func FullTimestampPath(clusterID uint64, groupID uint32) string {
-	rootPath := TSOSvcRootPath(clusterID)
-	tsPath := TimestampPath(KeyspaceGroupGlobalTSPath(groupID))
+func FullTimestampPath(groupID uint32) string {
 	if groupID == constant.DefaultKeyspaceGroupID {
-		rootPath = LegacyRootPath(clusterID)
+		return fmt.Sprintf(defaultKeyspaceGroupGlobalTSPathFormat, global.ClusterID())
 	}
-	return path.Join(rootPath, tsPath)
+	return fmt.Sprintf(keyspaceGroupGlobalTSPathFormat, global.ClusterID(), groupID)
 }

@@ -133,8 +133,6 @@ type ElectionMember interface {
 	GetLeaderListenUrls() []string
 	// GetLeaderID returns current leader's member ID.
 	GetLeaderID() uint64
-	// GetLeaderPath returns the path of the leader.
-	GetLeaderPath() string
 	// GetLeadership returns the leadership of the election member.
 	GetLeadership() *election.Leadership
 	// GetLastLeaderUpdatedTime returns the last time when the leader is updated.
@@ -176,7 +174,6 @@ type AllocatorManager struct {
 	// member is for election use
 	member ElectionMember
 	// TSO config
-	rootPath               string
 	storage                endpoint.TSOStorage
 	enableLocalTSO         bool
 	saveInterval           time.Duration
@@ -199,7 +196,6 @@ func NewAllocatorManager(
 	ctx context.Context,
 	keyspaceGroupID uint32,
 	member ElectionMember,
-	rootPath string,
 	storage endpoint.TSOStorage,
 	cfg Config,
 	startGlobalLeaderLoop bool,
@@ -210,7 +206,6 @@ func NewAllocatorManager(
 		cancel:                 cancel,
 		kgID:                   keyspaceGroupID,
 		member:                 member,
-		rootPath:               rootPath,
 		storage:                storage,
 		enableLocalTSO:         cfg.IsLocalTSOEnabled(),
 		saveInterval:           cfg.GetTSOSaveInterval(),

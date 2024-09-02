@@ -16,12 +16,12 @@ package kv
 
 import (
 	"context"
-	"path"
 	"sort"
 	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"github.com/tikv/pd/pkg/global"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	clientv3 "go.etcd.io/etcd/client/v3"
 )
@@ -30,13 +30,14 @@ func TestEtcd(t *testing.T) {
 	re := require.New(t)
 	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1)
 	defer clean()
-	rootPath := path.Join("/pd", strconv.FormatUint(100, 10))
+	global.SetClusterID(100)
 
-	kv := NewEtcdKVBase(client, rootPath)
+	kv := NewEtcdKVBase(client)
 	testReadWrite(re, kv)
 	testRange(re, kv)
 	testSaveMultiple(re, kv, 20)
 	testLoadConflict(re, kv)
+	global.SetClusterID(0)
 }
 
 func TestLevelDB(t *testing.T) {

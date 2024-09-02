@@ -17,6 +17,7 @@ package etcdutil
 import (
 	"context"
 	"crypto/tls"
+	"fmt"
 	"math/rand"
 	"net/http"
 	"net/url"
@@ -28,11 +29,14 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
+	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/global"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
+	"github.com/tikv/pd/pkg/versioninfo"
 	"go.etcd.io/etcd/api/v3/etcdserverpb"
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	"go.etcd.io/etcd/api/v3/v3rpc/rpctypes"
@@ -303,17 +307,29 @@ func CreateHTTPClient(tlsConfig *tls.Config) *http.Client {
 // This function assumes the cluster ID has already existed and always use a
 // cheaper read to retrieve it; if it doesn't exist, invoke the more expensive
 // operation InitOrGetClusterID().
-func InitClusterID(c *clientv3.Client, key string) (clusterID uint64, err error) {
+func InitClusterID(c *clientv3.Client, key string) error {
+	var clusterID uint64
 	// Get any cluster key to parse the cluster ID.
 	resp, err := EtcdKVGet(c, key)
 	if err != nil {
-		return 0, err
+		return err
 	}
 	// If no key exist, generate a random cluster ID.
 	if len(resp.Kvs) == 0 {
-		return InitOrGetClusterID(c, key)
+		clusterID, err = InitOrGetClusterID(c, key)
+	} else {
+		clusterID, err = typeutil.BytesToUint64(resp.Kvs[0].Value)
 	}
-	return typeutil.BytesToUint64(resp.Kvs[0].Value)
+	if err != nil {
+		return err
+	}
+	global.SetClusterID(clusterID)
+	log.Info("init cluster id", zap.Uint64("cluster-id", clusterID))
+	// It may lose accuracy if use float64 to store uint64. So we store the cluster id in label.
+	metadataGauge.WithLabelValues(fmt.Sprintf("cluster%d", clusterID)).Set(0)
+	bs.ServerInfoGauge.WithLabelValues(versioninfo.PDReleaseVersion, versioninfo.PDGitHash).Set(float64(time.Now().Unix()))
+
+	return nil
 }
 
 // GetClusterID gets the cluster ID for the given key.

@@ -363,8 +363,8 @@ func (s *Server) startServer() (err error) {
 
 	// Initialize the TSO service.
 	s.serverLoopCtx, s.serverLoopCancel = context.WithCancel(s.Context())
-	legacySvcRootPath := endpoint.LegacyRootPath(s.clusterID)
-	tsoSvcRootPath := endpoint.TSOSvcRootPath(s.clusterID)
+	legacySvcRootPath := endpoint.LegacyRootPath()
+	tsoSvcRootPath := endpoint.TSOSvcRootPath()
 	s.keyspaceGroupManager = tso.NewKeyspaceGroupManager(
 		s.serverLoopCtx, s.serviceID, s.GetClient(), s.GetHTTPClient(), s.cfg.AdvertiseListenAddr,
 		s.clusterID, legacySvcRootPath, tsoSvcRootPath, s.cfg)

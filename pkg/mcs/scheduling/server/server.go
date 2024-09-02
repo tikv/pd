@@ -40,6 +40,7 @@ import (
 	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/global"
 	"github.com/tikv/pd/pkg/mcs/discovery"
 	"github.com/tikv/pd/pkg/mcs/scheduling/server/config"
 	"github.com/tikv/pd/pkg/mcs/scheduling/server/meta"
@@ -255,7 +256,7 @@ func (s *Server) primaryElectionLoop() {
 		}
 
 		// To make sure the expected primary(if existed) and new primary are on the same server.
-		expectedPrimary := utils.GetExpectedPrimaryFlag(s.GetClient(), s.participant.GetLeaderPath())
+		expectedPrimary := utils.GetExpectedPrimaryFlag(s.GetClient(), global.GetLeaderPath())
 		// skip campaign the primary if the expected primary is not empty and not equal to the current memberValue.
 		// expected primary ONLY SET BY `{service}/primary/transfer` API.
 		if len(expectedPrimary) > 0 && !strings.Contains(s.participant.MemberValue(), expectedPrimary) {
@@ -314,7 +315,7 @@ func (s *Server) campaignLeader() {
 	// check expected primary and watch the primary.
 	exitPrimary := make(chan struct{})
 	lease, err := utils.KeepExpectedPrimaryAlive(ctx, s.GetClient(), exitPrimary,
-		s.cfg.LeaderLease, s.participant.GetLeaderPath(), s.participant.MemberValue(), constant.SchedulingServiceName)
+		s.cfg.LeaderLease, global.GetLeaderPath(), s.participant.MemberValue(), constant.SchedulingServiceName)
 	if err != nil {
 		log.Error("prepare scheduling primary watch error", errs.ZapError(err))
 		return
@@ -459,7 +460,7 @@ func (s *Server) startServer() (err error) {
 		Id:         uniqueID, // id is unique among all participants
 		ListenUrls: []string{s.cfg.GetAdvertiseListenAddr()},
 	}
-	s.participant.InitInfo(p, endpoint.SchedulingSvcRootPath(s.clusterID), constant.PrimaryKey, "primary election")
+	s.participant.InitInfo(p, endpoint.SchedulingSvcRootPath(), constant.PrimaryKey, "primary election")
 
 	s.service = &Service{Server: s}
 	s.AddServiceReadyCallback(s.startCluster)
@@ -519,7 +520,7 @@ func (s *Server) startMetaConfWatcher() (err error) {
 	if err != nil {
 		return err
 	}
-	s.configWatcher, err = config.NewWatcher(s.Context(), s.GetClient(), s.clusterID, s.persistConfig, s.storage)
+	s.configWatcher, err = config.NewWatcher(s.Context(), s.GetClient(), s.persistConfig, s.storage)
 	if err != nil {
 		return err
 	}

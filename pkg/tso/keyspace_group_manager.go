@@ -427,9 +427,9 @@ func NewKeyspaceGroupManager(
 		metrics:                      newKeyspaceGroupMetrics(),
 	}
 	kgm.legacySvcStorage = endpoint.NewStorageEndpoint(
-		kv.NewEtcdKVBase(kgm.etcdClient, kgm.legacySvcRootPath), nil)
+		kv.NewEtcdKVBase(kgm.etcdClient), nil)
 	kgm.tsoSvcStorage = endpoint.NewStorageEndpoint(
-		kv.NewEtcdKVBase(kgm.etcdClient, kgm.tsoSvcRootPath), nil)
+		kv.NewEtcdKVBase(kgm.etcdClient), nil)
 	kgm.compiledKGMembershipIDRegexp = endpoint.GetCompiledKeyspaceGroupIDRegexp()
 	kgm.state.initialize()
 	return kgm
