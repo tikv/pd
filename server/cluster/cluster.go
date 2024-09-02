@@ -396,8 +396,7 @@ func (c *RaftCluster) runServiceCheckJob() {
 
 	ticker := time.NewTicker(serviceCheckInterval)
 	failpoint.Inject("highFrequencyClusterJobs", func() {
-		ticker.Stop()
-		ticker = time.NewTicker(time.Millisecond)
+		ticker.Reset(time.Millisecond)
 	})
 	defer ticker.Stop()
 
@@ -675,8 +674,7 @@ func (c *RaftCluster) runMetricsCollectionJob() {
 
 	ticker := time.NewTicker(metricsCollectionJobInterval)
 	failpoint.Inject("highFrequencyClusterJobs", func() {
-		ticker.Stop()
-		ticker = time.NewTicker(time.Millisecond)
+		ticker.Reset(time.Millisecond)
 	})
 	defer ticker.Stop()
 
@@ -699,8 +697,7 @@ func (c *RaftCluster) runNodeStateCheckJob() {
 
 	ticker := time.NewTicker(nodeStateCheckJobInterval)
 	failpoint.Inject("highFrequencyClusterJobs", func() {
-		ticker.Stop()
-		ticker = time.NewTicker(2 * time.Second)
+		ticker.Reset(2 * time.Second)
 	})
 	defer ticker.Stop()
 
