@@ -178,8 +178,7 @@ func (s *Server) updateAPIServerMemberLoop() {
 	defer cancel()
 	ticker := time.NewTicker(memberUpdateInterval)
 	failpoint.Inject("fastUpdateMember", func() {
-		ticker.Stop()
-		ticker = time.NewTicker(100 * time.Millisecond)
+		ticker.Reset(100 * time.Millisecond)
 	})
 	defer ticker.Stop()
 	var curLeader uint64

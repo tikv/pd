@@ -715,8 +715,7 @@ func (am *AllocatorManager) AllocatorDaemon(ctx context.Context) {
 	}
 	tsTicker := time.NewTicker(am.updatePhysicalInterval)
 	failpoint.Inject("fastUpdatePhysicalInterval", func() {
-		tsTicker.Stop()
-		tsTicker = time.NewTicker(time.Millisecond)
+		tsTicker.Reset(time.Millisecond)
 	})
 	defer tsTicker.Stop()
 	checkerTicker := time.NewTicker(PriorityCheck)

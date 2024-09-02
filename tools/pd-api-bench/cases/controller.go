@@ -224,7 +224,7 @@ func (c *httpController) run() {
 			for i := int64(0); i < burst; i++ {
 				go func() {
 					defer c.wg.Done()
-					var ticker = time.NewTicker(tt)
+					ticker := time.NewTicker(tt)
 					defer ticker.Stop()
 					for {
 						select {
@@ -293,7 +293,7 @@ func (c *gRPCController) run() {
 			for i := int64(0); i < burst; i++ {
 				go func() {
 					defer c.wg.Done()
-					var ticker = time.NewTicker(tt)
+					ticker := time.NewTicker(tt)
 					defer ticker.Stop()
 					for {
 						select {
@@ -367,7 +367,7 @@ func (c *etcdController) run() {
 			for i := int64(0); i < burst; i++ {
 				go func() {
 					defer c.wg.Done()
-					var ticker = time.NewTicker(tt)
+					ticker := time.NewTicker(tt)
 					defer ticker.Stop()
 					for {
 						select {
