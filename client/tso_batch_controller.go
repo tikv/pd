@@ -182,12 +182,3 @@ func (tbc *tsoBatchController) finishCollectedRequests(physical, firstLogical in
 	// Prevent the finished requests from being processed again.
 	tbc.collectedRequestCount = 0
 }
-
-//
-//func (tbc *tsoBatchController) clear() {
-//	log.Info("[pd] clear the tso batch controller",
-//		zap.Int("max-batch-size", tbc.maxBatchSize), zap.Int("best-batch-size", tbc.bestBatchSize),
-//		zap.Int("collected-request-count", tbc.collectedRequestCount))
-//	tsoErr := errors.WithStack(errClosing)
-//	tbc.finishCollectedRequests(0, 0, 0, tsoErr)
-//}

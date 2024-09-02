@@ -410,6 +410,7 @@ recvLoop:
 	}
 }
 
+// GetRecvError returns the error (if any) that has been encountered when receiving response asynchronously.
 func (s *tsoStream) GetRecvError() error {
 	perr := s.stoppedWithErr.Load()
 	if perr == nil {

@@ -454,6 +454,10 @@ func chooseStream(connectionCtxs *sync.Map) (connectionCtx *tsoConnectionContext
 	return connectionCtx
 }
 
+// processRequests sends the RPC request for the batch. It's guaranteed that after calling this function, requests
+// in the batch must be eventually finished (done or canceled), either synchronously or asynchronously.
+// `close(done)` will be called at the same time when finishing the requests.
+// If this function returns a non-nil error, the requests will always be canceled synchronously.
 func (td *tsoDispatcher) processRequests(
 	stream *tsoStream, dcLocation string, tbc *tsoBatchController, done chan struct{},
 ) error {
