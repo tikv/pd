@@ -225,7 +225,12 @@ tsoBatchLoop:
 			return
 		default:
 		}
-		batchController = td.batchBufferPool.Get().(*tsoBatchController)
+
+		// In case error happens, the loop may continue without resetting `batchController` for retrying.
+		if batchController == nil {
+			batchController = td.batchBufferPool.Get().(*tsoBatchController)
+		}
+
 		// Start to collect the TSO requests.
 		maxBatchWaitInterval := option.getMaxTSOBatchWaitInterval()
 		// Once the TSO requests are collected, must make sure they could be finished or revoked eventually,
@@ -309,8 +314,7 @@ tsoBatchLoop:
 		case td.tsDeadlineCh <- dl:
 		}
 		// processRequests guarantees that the collected requests could be finished properly.
-		err = td.processRequests(stream, dc, batchController)
-		close(done)
+		err = td.processRequests(stream, dc, batchController, done)
 		// If error happens during tso stream handling, reset stream and run the next trial.
 		if err == nil {
 			// If the request is started successfully, the `batchController` will be put back to the pool when the
@@ -425,8 +429,9 @@ func chooseStream(connectionCtxs *sync.Map) (connectionCtx *tsoConnectionContext
 }
 
 func (td *tsoDispatcher) processRequests(
-	stream *tsoStream, dcLocation string, tbc *tsoBatchController,
+	stream *tsoStream, dcLocation string, tbc *tsoBatchController, done chan struct{},
 ) error {
+	// `done` must be guaranteed to be eventually called.
 	var (
 		requests     = tbc.getCollectedRequests()
 		traceRegions = make([]*trace.Region, 0, len(requests))
@@ -456,6 +461,8 @@ func (td *tsoDispatcher) processRequests(
 	)
 
 	cb := func(result tsoRequestResult, reqKeyspaceGroupID uint32, err error) {
+		close(done)
+
 		defer td.batchBufferPool.Put(tbc)
 		if err != nil {
 			td.cancelCollectedRequests(tbc, err)
@@ -480,6 +487,8 @@ func (td *tsoDispatcher) processRequests(
 		clusterID, keyspaceID, reqKeyspaceGroupID,
 		dcLocation, count, tbc.extraBatchingStartTime, cb)
 	if err != nil {
+		close(done)
+
 		td.cancelCollectedRequests(tbc, err)
 		return err
 	}
