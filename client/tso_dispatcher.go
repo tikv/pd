@@ -198,7 +198,7 @@ func (td *tsoDispatcher) handleDispatcher(wg *sync.WaitGroup) {
 			return true
 		})
 		if batchController != nil && batchController.collectedRequestCount != 0 {
-			log.Fatal("batched tso requests not cleared when exiting the tso dispatcher loop")
+			log.Fatal("batched tso requests not cleared when exiting the tso dispatcher loop", zap.Any("panic", recover()))
 		}
 		tsoErr := errors.WithStack(errClosing)
 		td.revokePendingRequests(tsoErr)
@@ -301,8 +301,20 @@ tsoBatchLoop:
 				stream = nil
 				continue
 			default:
-				break streamChoosingLoop
 			}
+
+			// Check if any error has occurred on this stream when receiving asynchronously.
+			if err = stream.GetRecvError(); err != nil {
+				exit := !td.handleProcessRequestError(ctx, bo, streamURL, cancel, err)
+				stream = nil
+				if exit {
+					td.cancelCollectedRequests(batchController, errors.WithStack(ctx.Err()))
+					return
+				}
+				continue
+			}
+
+			break streamChoosingLoop
 		}
 		done := make(chan struct{})
 		dl := newTSDeadline(option.timeout, done, cancel)
@@ -324,38 +336,52 @@ tsoBatchLoop:
 			// reused in the next loop safely.
 			batchController = nil
 		} else {
-			select {
-			case <-ctx.Done():
-				return
-			default:
-			}
-			svcDiscovery.ScheduleCheckMemberChanged()
-			log.Error("[tso] getTS error after processing requests",
-				zap.String("dc-location", dc),
-				zap.String("stream-url", streamURL),
-				zap.Error(errs.ErrClientGetTSO.FastGenByArgs(err.Error())))
-			// Set `stream` to nil and remove this stream from the `connectionCtxs` due to error.
-			connectionCtxs.Delete(streamURL)
-			cancel()
+			exit := !td.handleProcessRequestError(ctx, bo, streamURL, cancel, err)
 			stream = nil
-			// Because ScheduleCheckMemberChanged is asynchronous, if the leader changes, we better call `updateMember` ASAP.
-			if errs.IsLeaderChange(err) {
-				if err := bo.Exec(ctx, svcDiscovery.CheckMemberChanged); err != nil {
-					select {
-					case <-ctx.Done():
-						return
-					default:
-					}
-				}
-				// Because the TSO Follower Proxy could be configured online,
-				// If we change it from on -> off, background updateConnectionCtxs
-				// will cancel the current stream, then the EOF error caused by cancel()
-				// should not trigger the updateConnectionCtxs here.
-				// So we should only call it when the leader changes.
-				provider.updateConnectionCtxs(ctx, dc, connectionCtxs)
+			if exit {
+				return
 			}
 		}
 	}
+}
+
+// handleProcessRequestError handles errors occurs when trying to process a TSO RPC request for the dispatcher loop.
+// Returns true if the dispatcher loop is ok to continue. Otherwise, the dispatcher loop should be exited.
+func (td *tsoDispatcher) handleProcessRequestError(ctx context.Context, bo *retry.Backoffer, streamURL string, streamCancelFunc context.CancelFunc, err error) bool {
+	select {
+	case <-ctx.Done():
+		return false
+	default:
+	}
+
+	svcDiscovery := td.provider.getServiceDiscovery()
+
+	svcDiscovery.ScheduleCheckMemberChanged()
+	log.Error("[tso] getTS error after processing requests",
+		zap.String("dc-location", td.dc),
+		zap.String("stream-url", streamURL),
+		zap.Error(errs.ErrClientGetTSO.FastGenByArgs(err.Error())))
+	// Set `stream` to nil and remove this stream from the `connectionCtxs` due to error.
+	td.connectionCtxs.Delete(streamURL)
+	streamCancelFunc()
+	// Because ScheduleCheckMemberChanged is asynchronous, if the leader changes, we better call `updateMember` ASAP.
+	if errs.IsLeaderChange(err) {
+		if err := bo.Exec(ctx, svcDiscovery.CheckMemberChanged); err != nil {
+			select {
+			case <-ctx.Done():
+				return false
+			default:
+			}
+		}
+		// Because the TSO Follower Proxy could be configured online,
+		// If we change it from on -> off, background updateConnectionCtxs
+		// will cancel the current stream, then the EOF error caused by cancel()
+		// should not trigger the updateConnectionCtxs here.
+		// So we should only call it when the leader changes.
+		td.provider.updateConnectionCtxs(ctx, td.dc, td.connectionCtxs)
+	}
+
+	return true
 }
 
 // updateConnectionCtxs updates the `connectionCtxs` for the specified DC location regularly.

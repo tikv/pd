@@ -208,7 +208,7 @@ type tsoStream struct {
 
 	// For syncing between sender and receiver to guarantee all requests are finished when closing.
 	state          atomic.Int32
-	stoppedWithErr error
+	stoppedWithErr atomic.Pointer[error]
 
 	ongoingRequestCountGauge prometheus.Gauge
 	ongoingRequests          atomic.Int32
@@ -266,7 +266,7 @@ func (s *tsoStream) processRequests(
 		// Expected case
 	case streamStateClosing:
 		s.state.Store(prevState)
-		err := s.stoppedWithErr
+		err := s.GetRecvError()
 		log.Info("sending to closed tsoStream", zap.Error(err))
 		if err == nil {
 			err = errors.WithStack(errs.ErrClientTSOStreamClosed)
@@ -323,7 +323,7 @@ func (s *tsoStream) recvLoop(ctx context.Context) {
 			currentReq.callback(tsoRequestResult{}, currentReq.reqKeyspaceGroupID, finishWithErr)
 		}
 
-		s.stoppedWithErr = errors.WithStack(finishWithErr)
+		s.stoppedWithErr.Store(&finishWithErr)
 		s.cancel()
 		for !s.state.CompareAndSwap(streamStateIdle, streamStateClosing) {
 			switch state := s.state.Load(); state {
@@ -408,6 +408,14 @@ recvLoop:
 
 		s.ongoingRequestCountGauge.Set(float64(s.ongoingRequests.Add(-1)))
 	}
+}
+
+func (s *tsoStream) GetRecvError() error {
+	perr := s.stoppedWithErr.Load()
+	if perr == nil {
+		return nil
+	}
+	return *perr
 }
 
 // WaitForClosed blocks until the stream is closed and the inner loop exits.
