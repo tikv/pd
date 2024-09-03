@@ -29,13 +29,11 @@ import (
 	"github.com/docker/go-units"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/response"
 	"github.com/tikv/pd/pkg/utils/apiutil"
-	"github.com/tikv/pd/pkg/utils/testutil"
 	tu "github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server"
 )
@@ -128,12 +126,12 @@ func (suite *regionTestSuite) TestRegionCheck() {
 
 	url = fmt.Sprintf("%s/regions/check/%s", suite.urlPrefix, "down-peer")
 	r2 := &response.RegionsInfo{}
-	testutil.Eventually(re, func() bool {
+	tu.Eventually(re, func() bool {
 		if err := tu.ReadGetJSON(re, testDialClient, url, r2); err != nil {
 			return false
 		}
 		r2.Adjust()
-		return assert.Equal(suite.T(), &response.RegionsInfo{Count: 1, Regions: []response.RegionInfo{*response.NewAPIRegionInfo(r)}}, r2)
+		return suite.Equal(&response.RegionsInfo{Count: 1, Regions: []response.RegionInfo{*response.NewAPIRegionInfo(r)}}, r2)
 	})
 
 	url = fmt.Sprintf("%s/regions/check/%s", suite.urlPrefix, "pending-peer")
@@ -152,36 +150,36 @@ func (suite *regionTestSuite) TestRegionCheck() {
 	mustRegionHeartbeat(re, suite.svr, r)
 	url = fmt.Sprintf("%s/regions/check/%s", suite.urlPrefix, "empty-region")
 	r5 := &response.RegionsInfo{}
-	testutil.Eventually(re, func() bool {
+	tu.Eventually(re, func() bool {
 		if err := tu.ReadGetJSON(re, testDialClient, url, r5); err != nil {
 			return false
 		}
 		r5.Adjust()
-		return assert.Equal(suite.T(), &response.RegionsInfo{Count: 1, Regions: []response.RegionInfo{*response.NewAPIRegionInfo(r)}}, r5)
+		return suite.Equal(&response.RegionsInfo{Count: 1, Regions: []response.RegionInfo{*response.NewAPIRegionInfo(r)}}, r5)
 	})
 
 	r = r.Clone(core.SetApproximateSize(1))
 	mustRegionHeartbeat(re, suite.svr, r)
 	url = fmt.Sprintf("%s/regions/check/%s", suite.urlPrefix, "hist-size")
 	r6 := make([]*histItem, 1)
-	testutil.Eventually(re, func() bool {
+	tu.Eventually(re, func() bool {
 		if err := tu.ReadGetJSON(re, testDialClient, url, &r6); err != nil {
 			return false
 		}
 		histSizes := []*histItem{{Start: 1, End: 1, Count: 1}}
-		return assert.Equal(suite.T(), histSizes, r6)
+		return suite.Equal(histSizes, r6)
 	})
 
 	r = r.Clone(core.SetApproximateKeys(1000))
 	mustRegionHeartbeat(re, suite.svr, r)
 	url = fmt.Sprintf("%s/regions/check/%s", suite.urlPrefix, "hist-keys")
 	r7 := make([]*histItem, 1)
-	testutil.Eventually(re, func() bool {
+	tu.Eventually(re, func() bool {
 		if err := tu.ReadGetJSON(re, testDialClient, url, &r7); err != nil {
 			return false
 		}
 		histKeys := []*histItem{{Start: 1000, End: 1999, Count: 1}}
-		return assert.Equal(suite.T(), histKeys, r7)
+		return suite.Equal(histKeys, r7)
 	})
 
 	// ref https://github.com/tikv/pd/issues/3558, we should change size to pass `NeedUpdate` for observing.
@@ -190,12 +188,12 @@ func (suite *regionTestSuite) TestRegionCheck() {
 	mustRegionHeartbeat(re, suite.svr, r)
 	url = fmt.Sprintf("%s/regions/check/%s", suite.urlPrefix, "offline-peer")
 	r8 := &response.RegionsInfo{}
-	testutil.Eventually(re, func() bool {
+	tu.Eventually(re, func() bool {
 		if err := tu.ReadGetJSON(re, testDialClient, url, r8); err != nil {
 			return false
 		}
 		r4.Adjust()
-		return assert.Equal(suite.T(), r.GetID(), r8.Regions[0].ID) && r8.Count == 1
+		return suite.Equal(r.GetID(), r8.Regions[0].ID) && r8.Count == 1
 	})
 }
 
