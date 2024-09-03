@@ -64,8 +64,8 @@ type TLSInfo struct {
 	// should be left nil. In that case, tls.X509KeyPair will be used.
 	parseFunc func([]byte, []byte) (tls.Certificate, error)
 
-	// AllowedCNs is a list of CNs which must be provided by a client.
-	AllowedCNs []string
+	// allowedCNs is a list of CNs which must be provided by a client.
+	allowedCNs []string
 }
 
 // ClientConfig generates a tls.Config object for use by an HTTP client.
@@ -121,11 +121,11 @@ func (info TLSInfo) baseConfig() (*tls.Config, error) {
 		cfg.CipherSuites = info.CipherSuites
 	}
 
-	if len(info.AllowedCNs) > 0 {
+	if len(info.allowedCNs) > 0 {
 		cfg.VerifyPeerCertificate = func(_ [][]byte, verifiedChains [][]*x509.Certificate) error {
 			for _, chains := range verifiedChains {
 				if len(chains) != 0 {
-					for _, allowedCN := range info.AllowedCNs {
+					for _, allowedCN := range info.allowedCNs {
 						if allowedCN == chains[0].Subject.CommonName {
 							return nil
 						}
@@ -201,7 +201,7 @@ func (s TLSConfig) ToTLSConfig() (*tls.Config, error) {
 		CertFile:      s.CertPath,
 		KeyFile:       s.KeyPath,
 		TrustedCAFile: s.CAPath,
-		AllowedCNs:    s.CertAllowedCNs,
+		allowedCNs:    s.CertAllowedCNs,
 	}
 
 	tlsConfig, err := tlsInfo.ClientConfig()
