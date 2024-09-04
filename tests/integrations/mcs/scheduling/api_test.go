@@ -513,6 +513,20 @@ func (suite *apiTestSuite) checkFollowerForward(cluster *tests.TestCluster) {
 	defer cancel()
 	follower, err := cluster.JoinAPIServer(ctx)
 	re.NoError(err)
+	defer func() {
+		leader := cluster.GetLeaderServer()
+		cli := leader.GetEtcdClient()
+		testutil.Eventually(re, func() bool {
+			_, err = cli.MemberRemove(context.Background(), follower.GetServer().GetMember().ID())
+			return err == nil
+		})
+		testutil.Eventually(re, func() bool {
+			res, err := cli.MemberList(context.Background())
+			return err == nil && len(res.Members) == 1
+		})
+		cluster.DeleteServer(follower.GetConfig().Name)
+		follower.Destroy()
+	}()
 	re.NoError(follower.Run())
 	re.NotEmpty(cluster.WaitLeader())
 
@@ -629,13 +643,13 @@ func (suite *apiTestSuite) checkStores(cluster *tests.TestCluster) {
 			Version:   "2.0.0",
 		},
 	}
-	// prevent the offline store from changing to tombstone
-	tests.MustPutRegion(re, cluster, 3, 6, []byte("a"), []byte("b"))
+
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/doNotBuryStore", `return(true)`))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/doNotBuryStore"))
+	}()
 	for _, store := range stores {
 		tests.MustPutStore(re, cluster, store)
-		if store.GetId() == 6 {
-			cluster.GetLeaderServer().GetRaftCluster().GetBasicCluster().UpdateStoreStatus(6)
-		}
 	}
 	// Test /stores
 	apiServerAddr := cluster.GetLeaderServer().GetAddr()

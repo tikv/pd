@@ -33,6 +33,7 @@ import (
 )
 
 const (
+	// PDControlCallerID is used to set the caller ID for PD client
 	PDControlCallerID = "pd-ctl"
 	clusterPrefix     = "pd/api/v1/cluster"
 )

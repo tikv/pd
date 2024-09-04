@@ -167,7 +167,7 @@ func putStores(ctx context.Context, cfg *config.Config, cli pdpb.PDClient, store
 			log.Fatal("failed to put store", zap.Uint64("store-id", i), zap.String("err", resp.GetHeader().GetError().String()))
 		}
 		go func(ctx context.Context, storeID uint64) {
-			var heartbeatTicker = time.NewTicker(10 * time.Second)
+			heartbeatTicker := time.NewTicker(10 * time.Second)
 			defer heartbeatTicker.Stop()
 			for {
 				select {
@@ -526,9 +526,9 @@ func main() {
 	header := &pdpb.RequestHeader{
 		ClusterId: clusterID,
 	}
-	var heartbeatTicker = time.NewTicker(regionReportInterval * time.Second)
+	heartbeatTicker := time.NewTicker(regionReportInterval * time.Second)
 	defer heartbeatTicker.Stop()
-	var resolvedTSTicker = time.NewTicker(time.Second)
+	resolvedTSTicker := time.NewTicker(time.Second)
 	defer resolvedTSTicker.Stop()
 	withMetric := metrics.InitMetric2Collect(cfg.MetricsAddr)
 	for {

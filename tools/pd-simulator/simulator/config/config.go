@@ -130,6 +130,8 @@ func (sc *SimConfig) Adjust(meta *toml.MetaData) error {
 
 	return sc.ServerConfig.Adjust(meta, false)
 }
+
+// Speed returns the tick speed of the simulator.
 func (sc *SimConfig) Speed() uint64 {
 	return uint64(time.Second / sc.SimTickInterval.Duration)
 }

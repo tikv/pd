@@ -53,7 +53,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/schedule/schedulers"
-	types "github.com/tikv/pd/pkg/schedule/type"
+	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/statistics/utils"
@@ -366,7 +366,7 @@ func TestSetOfflineStoreWithEvictLeader(t *testing.T) {
 	err = cluster.RemoveStore(3, false)
 	re.Error(err)
 	re.Contains(err.Error(), string(errs.ErrNoStoreForRegionLeader.RFCCode()))
-	re.NoError(cluster.RemoveScheduler(schedulers.EvictLeaderName))
+	re.NoError(cluster.RemoveScheduler(types.EvictLeaderScheduler.String()))
 	re.NoError(cluster.RemoveStore(3, false))
 }
 
@@ -952,8 +952,8 @@ func TestRegionHeartbeat(t *testing.T) {
 		re.NoError(cluster.processRegionHeartbeat(ctx, overlapRegion))
 		tracer.OnAllStageFinished()
 		re.Condition(func() bool {
-			fileds := tracer.LogFields()
-			return slice.AllOf(fileds, func(i int) bool { return fileds[i].Integer > 0 })
+			fields := tracer.LogFields()
+			return slice.AllOf(fields, func(i int) bool { return fields[i].Integer > 0 })
 		}, "should have stats")
 		region = &metapb.Region{}
 		ok, err = storage.LoadRegion(regions[n-1].GetID(), region)
@@ -2453,10 +2453,10 @@ func TestDispatch(t *testing.T) {
 	waitOperator(re, co, 1)
 	controller := co.GetSchedulersController()
 	operatorutil.CheckTransferPeer(re, co.GetOperatorController().GetOperator(1), operator.OpKind(0), 4, 1)
-	re.NoError(controller.RemoveScheduler(schedulers.BalanceRegionName))
+	re.NoError(controller.RemoveScheduler(types.BalanceRegionScheduler.String()))
 	waitOperator(re, co, 2)
 	operatorutil.CheckTransferLeader(re, co.GetOperatorController().GetOperator(2), operator.OpKind(0), 4, 2)
-	re.NoError(controller.RemoveScheduler(schedulers.BalanceLeaderName))
+	re.NoError(controller.RemoveScheduler(types.BalanceLeaderScheduler.String()))
 
 	stream := mockhbstream.NewHeartbeatStream()
 
@@ -3075,10 +3075,10 @@ func TestAddScheduler(t *testing.T) {
 	defer cleanup()
 	controller := co.GetSchedulersController()
 	re.Len(controller.GetSchedulerNames(), len(sc.DefaultSchedulers))
-	re.NoError(controller.RemoveScheduler(schedulers.BalanceLeaderName))
-	re.NoError(controller.RemoveScheduler(schedulers.BalanceRegionName))
-	re.NoError(controller.RemoveScheduler(schedulers.HotRegionName))
-	re.NoError(controller.RemoveScheduler(schedulers.EvictSlowStoreName))
+	re.NoError(controller.RemoveScheduler(types.BalanceLeaderScheduler.String()))
+	re.NoError(controller.RemoveScheduler(types.BalanceRegionScheduler.String()))
+	re.NoError(controller.RemoveScheduler(types.BalanceHotRegionScheduler.String()))
+	re.NoError(controller.RemoveScheduler(types.EvictSlowStoreScheduler.String()))
 	re.Empty(controller.GetSchedulerNames())
 
 	stream := mockhbstream.NewHeartbeatStream()
@@ -3170,10 +3170,10 @@ func TestPersistScheduler(t *testing.T) {
 	re.Len(sches, defaultCount+2)
 
 	// remove all default schedulers
-	re.NoError(controller.RemoveScheduler(schedulers.BalanceLeaderName))
-	re.NoError(controller.RemoveScheduler(schedulers.BalanceRegionName))
-	re.NoError(controller.RemoveScheduler(schedulers.HotRegionName))
-	re.NoError(controller.RemoveScheduler(schedulers.EvictSlowStoreName))
+	re.NoError(controller.RemoveScheduler(types.BalanceLeaderScheduler.String()))
+	re.NoError(controller.RemoveScheduler(types.BalanceRegionScheduler.String()))
+	re.NoError(controller.RemoveScheduler(types.BalanceHotRegionScheduler.String()))
+	re.NoError(controller.RemoveScheduler(types.EvictSlowStoreScheduler.String()))
 	// only remains 2 items with independent config.
 	re.Len(controller.GetSchedulerNames(), 2)
 	re.NoError(co.GetCluster().GetSchedulerConfig().Persist(storage))
@@ -3233,7 +3233,7 @@ func TestPersistScheduler(t *testing.T) {
 	// the scheduler option should contain 9 items
 	// the `hot scheduler` are disabled
 	re.Len(co.GetCluster().GetSchedulerConfig().(*config.PersistOptions).GetSchedulers(), defaultCount+3)
-	re.NoError(controller.RemoveScheduler(schedulers.GrantLeaderName))
+	re.NoError(controller.RemoveScheduler(types.GrantLeaderScheduler.String()))
 	// the scheduler that is not enable by default will be completely deleted
 	re.Len(co.GetCluster().GetSchedulerConfig().(*config.PersistOptions).GetSchedulers(), defaultCount+2)
 	re.Len(controller.GetSchedulerNames(), 4)
@@ -3250,7 +3250,7 @@ func TestPersistScheduler(t *testing.T) {
 	co.Run()
 	controller = co.GetSchedulersController()
 	re.Len(controller.GetSchedulerNames(), 4)
-	re.NoError(controller.RemoveScheduler(schedulers.EvictLeaderName))
+	re.NoError(controller.RemoveScheduler(types.EvictLeaderScheduler.String()))
 	re.Len(controller.GetSchedulerNames(), 3)
 }
 
@@ -3283,11 +3283,11 @@ func TestRemoveScheduler(t *testing.T) {
 	re.Len(sches, defaultCount+1)
 
 	// remove all schedulers
-	re.NoError(controller.RemoveScheduler(schedulers.BalanceLeaderName))
-	re.NoError(controller.RemoveScheduler(schedulers.BalanceRegionName))
-	re.NoError(controller.RemoveScheduler(schedulers.HotRegionName))
-	re.NoError(controller.RemoveScheduler(schedulers.GrantLeaderName))
-	re.NoError(controller.RemoveScheduler(schedulers.EvictSlowStoreName))
+	re.NoError(controller.RemoveScheduler(types.BalanceLeaderScheduler.String()))
+	re.NoError(controller.RemoveScheduler(types.BalanceRegionScheduler.String()))
+	re.NoError(controller.RemoveScheduler(types.BalanceHotRegionScheduler.String()))
+	re.NoError(controller.RemoveScheduler(types.GrantLeaderScheduler.String()))
+	re.NoError(controller.RemoveScheduler(types.EvictSlowStoreScheduler.String()))
 	// all removed
 	sches, _, err = storage.LoadAllSchedulerConfigs()
 	re.NoError(err)
@@ -3360,15 +3360,15 @@ func TestPauseScheduler(t *testing.T) {
 	controller := co.GetSchedulersController()
 	_, err := controller.IsSchedulerAllowed("test")
 	re.Error(err)
-	controller.PauseOrResumeScheduler(schedulers.BalanceLeaderName, 60)
-	paused, _ := controller.IsSchedulerPaused(schedulers.BalanceLeaderName)
+	controller.PauseOrResumeScheduler(types.BalanceLeaderScheduler.String(), 60)
+	paused, _ := controller.IsSchedulerPaused(types.BalanceLeaderScheduler.String())
 	re.True(paused)
-	pausedAt, err := controller.GetPausedSchedulerDelayAt(schedulers.BalanceLeaderName)
+	pausedAt, err := controller.GetPausedSchedulerDelayAt(types.BalanceLeaderScheduler.String())
 	re.NoError(err)
-	resumeAt, err := controller.GetPausedSchedulerDelayUntil(schedulers.BalanceLeaderName)
+	resumeAt, err := controller.GetPausedSchedulerDelayUntil(types.BalanceLeaderScheduler.String())
 	re.NoError(err)
 	re.Equal(int64(60), resumeAt-pausedAt)
-	allowed, _ := controller.IsSchedulerAllowed(schedulers.BalanceLeaderName)
+	allowed, _ := controller.IsSchedulerAllowed(types.BalanceLeaderScheduler.String())
 	re.False(allowed)
 }
 

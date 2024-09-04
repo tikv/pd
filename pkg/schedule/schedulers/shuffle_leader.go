@@ -23,12 +23,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
-	types "github.com/tikv/pd/pkg/schedule/type"
-)
-
-const (
-	// ShuffleLeaderName is shuffle leader scheduler name.
-	ShuffleLeaderName = "shuffle-leader-scheduler"
+	"github.com/tikv/pd/pkg/schedule/types"
 )
 
 type shuffleLeaderSchedulerConfig struct {

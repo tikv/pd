@@ -162,8 +162,7 @@ func (m *GroupManager) allocNodesToAllKeyspaceGroups(ctx context.Context) {
 	defer m.wg.Done()
 	ticker := time.NewTicker(allocNodesToKeyspaceGroupsInterval)
 	failpoint.Inject("acceleratedAllocNodes", func() {
-		ticker.Stop()
-		ticker = time.NewTicker(time.Millisecond * 100)
+		ticker.Reset(time.Millisecond * 100)
 	})
 	defer ticker.Stop()
 	log.Info("start to alloc nodes to all keyspace groups")

@@ -176,7 +176,7 @@ func showStats(ctx context.Context, durCh chan time.Duration) {
 		case <-ticker.C:
 			// runtime.GC()
 			if *verbose {
-				fmt.Println(s.Counter())
+				fmt.Println(s.counter())
 			}
 			total.merge(s)
 			s = newStats()
@@ -184,8 +184,8 @@ func showStats(ctx context.Context, durCh chan time.Duration) {
 			s.update(d)
 		case <-statCtx.Done():
 			fmt.Println("\nTotal:")
-			fmt.Println(total.Counter())
-			fmt.Println(total.Percentage())
+			fmt.Println(total.counter())
+			fmt.Println(total.percentage())
 			// Calculate the percentiles by using the tDigest algorithm.
 			fmt.Printf("P0.5: %.4fms, P0.8: %.4fms, P0.9: %.4fms, P0.99: %.4fms\n\n", latencyTDigest.Quantile(0.5), latencyTDigest.Quantile(0.8), latencyTDigest.Quantile(0.9), latencyTDigest.Quantile(0.99))
 			if *verbose {
@@ -329,7 +329,7 @@ func (s *stats) merge(other *stats) {
 	s.oneThousandCnt += other.oneThousandCnt
 }
 
-func (s *stats) Counter() string {
+func (s *stats) counter() string {
 	return fmt.Sprintf(
 		"count: %d, max: %.4fms, min: %.4fms, avg: %.4fms\n<1ms: %d, >1ms: %d, >2ms: %d, >5ms: %d, >10ms: %d, >30ms: %d, >50ms: %d, >100ms: %d, >200ms: %d, >400ms: %d, >800ms: %d, >1s: %d",
 		s.count, float64(s.maxDur.Nanoseconds())/float64(time.Millisecond), float64(s.minDur.Nanoseconds())/float64(time.Millisecond), float64(s.totalDur.Nanoseconds())/float64(s.count)/float64(time.Millisecond),
@@ -337,7 +337,7 @@ func (s *stats) Counter() string {
 		s.eightHundredCnt, s.oneThousandCnt)
 }
 
-func (s *stats) Percentage() string {
+func (s *stats) percentage() string {
 	return fmt.Sprintf(
 		"count: %d, <1ms: %2.2f%%, >1ms: %2.2f%%, >2ms: %2.2f%%, >5ms: %2.2f%%, >10ms: %2.2f%%, >30ms: %2.2f%%, >50ms: %2.2f%%, >100ms: %2.2f%%, >200ms: %2.2f%%, >400ms: %2.2f%%, >800ms: %2.2f%%, >1s: %2.2f%%", s.count,
 		s.calculate(s.submilliCnt), s.calculate(s.milliCnt), s.calculate(s.twoMilliCnt), s.calculate(s.fiveMilliCnt), s.calculate(s.tenMSCnt), s.calculate(s.thirtyCnt), s.calculate(s.fiftyCnt),

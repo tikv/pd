@@ -24,8 +24,7 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/schedule/schedulers"
-	types "github.com/tikv/pd/pkg/schedule/type"
+	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/server"
 	"github.com/unrolled/render"
@@ -177,11 +176,11 @@ func (h *schedulerHandler) CreateScheduler(w http.ResponseWriter, r *http.Reques
 func (h *schedulerHandler) DeleteScheduler(w http.ResponseWriter, r *http.Request) {
 	name := mux.Vars(r)["name"]
 	switch {
-	case strings.HasPrefix(name, schedulers.EvictLeaderName) && name != schedulers.EvictLeaderName:
-		h.redirectSchedulerDelete(w, name, schedulers.EvictLeaderName)
+	case strings.HasPrefix(name, types.EvictLeaderScheduler.String()) && name != types.EvictLeaderScheduler.String():
+		h.redirectSchedulerDelete(w, name, types.EvictLeaderScheduler.String())
 		return
-	case strings.HasPrefix(name, schedulers.GrantLeaderName) && name != schedulers.GrantLeaderName:
-		h.redirectSchedulerDelete(w, name, schedulers.GrantLeaderName)
+	case strings.HasPrefix(name, types.GrantLeaderScheduler.String()) && name != types.GrantLeaderScheduler.String():
+		h.redirectSchedulerDelete(w, name, types.GrantLeaderScheduler.String())
 		return
 	default:
 		if err := h.RemoveScheduler(name); err != nil {

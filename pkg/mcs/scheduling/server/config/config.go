@@ -36,7 +36,7 @@ import (
 	"github.com/tikv/pd/pkg/core/storelimit"
 	mcsconstant "github.com/tikv/pd/pkg/mcs/utils/constant"
 	sc "github.com/tikv/pd/pkg/schedule/config"
-	types "github.com/tikv/pd/pkg/schedule/type"
+	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/configutil"
@@ -47,7 +47,7 @@ import (
 )
 
 const (
-	defaultName             = "Scheduling"
+	defaultName             = "scheduling"
 	defaultBackendEndpoints = "http://127.0.0.1:2379"
 	defaultListenAddr       = "http://127.0.0.1:3379"
 )

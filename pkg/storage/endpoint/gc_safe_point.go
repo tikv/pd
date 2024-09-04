@@ -28,6 +28,7 @@ import (
 
 // ServiceSafePoint is the safepoint for a specific service
 // NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
+// This type is in sync with `client/http/types.go`.
 type ServiceSafePoint struct {
 	ServiceID string `json:"service_id"`
 	ExpiredAt int64  `json:"expired_at"`

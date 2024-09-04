@@ -85,7 +85,7 @@ func TestGCSafePointUpdateCurrently(t *testing.T) {
 func TestServiceGCSafePointUpdate(t *testing.T) {
 	re := require.New(t)
 	manager := NewSafePointManager(newGCStorage(), config.PDServerConfig{})
-	gcworkerServiceID := "gc_worker"
+	gcWorkerServiceID := "gc_worker"
 	cdcServiceID := "cdc"
 	brServiceID := "br"
 	cdcServiceSafePoint := uint64(10)
@@ -101,7 +101,7 @@ func TestServiceGCSafePointUpdate(t *testing.T) {
 		re.NoError(err)
 		re.True(updated)
 		// the service will init the service safepoint to 0(<10 for cdc) for gc_worker.
-		re.Equal(gcworkerServiceID, min.ServiceID)
+		re.Equal(gcWorkerServiceID, min.ServiceID)
 	}()
 
 	// update the safepoint for br to 15 should success
@@ -111,24 +111,24 @@ func TestServiceGCSafePointUpdate(t *testing.T) {
 		re.NoError(err)
 		re.True(updated)
 		// the service will init the service safepoint to 0(<10 for cdc) for gc_worker.
-		re.Equal(gcworkerServiceID, min.ServiceID)
+		re.Equal(gcWorkerServiceID, min.ServiceID)
 	}()
 
-	// update safepoint to 8 for gc_woker should be success
+	// update safepoint to 8 for gc_worker should be success
 	go func() {
 		defer wg.Done()
 		// update with valid ttl for gc_worker should be success.
-		min, updated, _ := manager.UpdateServiceGCSafePoint(gcworkerServiceID, gcWorkerSafePoint, math.MaxInt64, time.Now())
+		min, updated, _ := manager.UpdateServiceGCSafePoint(gcWorkerServiceID, gcWorkerSafePoint, math.MaxInt64, time.Now())
 		re.True(updated)
 		// the current min safepoint should be 8 for gc_worker(cdc 10)
 		re.Equal(gcWorkerSafePoint, min.SafePoint)
-		re.Equal(gcworkerServiceID, min.ServiceID)
+		re.Equal(gcWorkerServiceID, min.ServiceID)
 	}()
 
 	go func() {
 		defer wg.Done()
 		// update safepoint of gc_worker's service with ttl not infinity should be failed.
-		_, updated, err := manager.UpdateServiceGCSafePoint(gcworkerServiceID, 10000, 10, time.Now())
+		_, updated, err := manager.UpdateServiceGCSafePoint(gcWorkerServiceID, 10000, 10, time.Now())
 		re.Error(err)
 		re.False(updated)
 	}()
@@ -145,7 +145,7 @@ func TestServiceGCSafePointUpdate(t *testing.T) {
 	wg.Wait()
 	// update safepoint to 15(>10 for cdc) for gc_worker
 	gcWorkerSafePoint = uint64(15)
-	min, updated, err := manager.UpdateServiceGCSafePoint(gcworkerServiceID, gcWorkerSafePoint, math.MaxInt64, time.Now())
+	min, updated, err := manager.UpdateServiceGCSafePoint(gcWorkerServiceID, gcWorkerSafePoint, math.MaxInt64, time.Now())
 	re.NoError(err)
 	re.True(updated)
 	re.Equal(cdcServiceID, min.ServiceID)
