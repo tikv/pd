@@ -92,8 +92,8 @@ import (
 const (
 	serverMetricsInterval = time.Minute
 	// pdRootPath for all pd servers.
-	pdRootPath      = "/pd"
-	pdAPIPrefix     = "/pd/"
+	pdRootPath  = "/pd"
+	pdAPIPrefix = "/pd/"
 	// idAllocPath for idAllocator to save persistent window's end.
 	idAllocPath  = "alloc_id"
 	idAllocLabel = "idalloc"
@@ -156,9 +156,7 @@ type Server struct {
 	electionClient *clientv3.Client
 	// http client
 	httpClient *http.Client
-	// PD cluster ID.
-	clusterID atomic.Uint64
-	rootPath  string
+	rootPath   string
 
 	// Server services.
 	// for id allocator, we can use one allocator for
@@ -301,7 +299,7 @@ func CreateServer(ctx context.Context, cfg *config.Config, services []string, le
 	failpoint.Inject("useGlobalRegistry", func() {
 		s.registry = registry.ServerServiceRegistry
 	})
-	s.registry.RegisterService("MetaStorage", ms_server.NewService[*Server])
+	s.registry.RegisterService("MetaStorage", ms_server.NewService)
 	s.registry.RegisterService("ResourceManager", rm_server.NewService[*Server])
 	// Register the micro services REST path.
 	s.registry.InstallAllRESTHandler(s, etcdCfg.UserHandlers)
@@ -433,8 +431,6 @@ func (s *Server) startServer(ctx context.Context) error {
 		log.Error("failed to init cluster id", errs.ZapError(err))
 		return err
 	}
-	s.clusterID.Store(clusterID)
-	log.Info("init cluster id", zap.Uint64("cluster-id", clusterID))
 	// It may lose accuracy if use float64 to store uint64. So we store the cluster id in label.
 	metadataGauge.WithLabelValues(fmt.Sprintf("cluster%d", clusterID)).Set(0)
 	bs.ServerInfoGauge.WithLabelValues(versioninfo.PDReleaseVersion, versioninfo.PDGitHash).Set(float64(time.Now().Unix()))
@@ -709,13 +705,13 @@ func (s *Server) collectEtcdStateMetrics() {
 }
 
 func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.BootstrapResponse, error) {
-	clusterID := s.ClusterID()
+	clusterID := global.ClusterID()
 
 	log.Info("try to bootstrap raft cluster",
 		zap.Uint64("cluster-id", clusterID),
 		zap.String("request", fmt.Sprintf("%v", req)))
 
-	if err := checkBootstrapRequest(clusterID, req); err != nil {
+	if err := checkBootstrapRequest(req); err != nil {
 		return nil, err
 	}
 
@@ -936,11 +932,6 @@ func (s *Server) GetKeyspaceGroupManager() *keyspace.GroupManager {
 // Name returns the unique etcd Name for this server in etcd cluster.
 func (s *Server) Name() string {
 	return s.cfg.Name
-}
-
-// ClusterID returns the cluster ID of this server.
-func (s *Server) ClusterID() uint64 {
-	return s.clusterID.Load()
 }
 
 // StartTimestamp returns the start timestamp of this server
@@ -1427,7 +1418,7 @@ func (s *Server) DirectlyGetRaftCluster() *cluster.RaftCluster {
 // GetCluster gets cluster.
 func (s *Server) GetCluster() *metapb.Cluster {
 	return &metapb.Cluster{
-		Id:           s.ClusterID(),
+		Id:           global.ClusterID(),
 		MaxPeerCount: uint32(s.persistOptions.GetMaxReplicas()),
 	}
 }
@@ -2019,7 +2010,7 @@ func (s *Server) SetServicePrimaryAddr(serviceName, addr string) {
 
 func (s *Server) initTSOPrimaryWatcher() {
 	serviceName := constant.TSOServiceName
-	tsoRootPath := endpoint.TSOSvcRootPath(s.ClusterID())
+	tsoRootPath := endpoint.TSOSvcRootPath(global.ClusterID())
 	tsoServicePrimaryKey := endpoint.KeyspaceGroupPrimaryPath(tsoRootPath, constant.DefaultKeyspaceGroupID)
 	s.tsoPrimaryWatcher = s.initServicePrimaryWatcher(serviceName, tsoServicePrimaryKey)
 	s.tsoPrimaryWatcher.StartWatchLoop()
@@ -2027,7 +2018,7 @@ func (s *Server) initTSOPrimaryWatcher() {
 
 func (s *Server) initSchedulingPrimaryWatcher() {
 	serviceName := constant.SchedulingServiceName
-	primaryKey := endpoint.SchedulingPrimaryPath(s.ClusterID())
+	primaryKey := endpoint.SchedulingPrimaryPath(global.ClusterID())
 	s.schedulingPrimaryWatcher = s.initServicePrimaryWatcher(serviceName, primaryKey)
 	s.schedulingPrimaryWatcher.StartWatchLoop()
 }

@@ -23,6 +23,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/global"
 	"github.com/tikv/pd/pkg/response"
 	tu "github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server"
@@ -306,7 +307,7 @@ func (suite *strictlyLabelsStoreTestSuite) TestStoreMatch() {
 
 	for _, testCase := range testCases {
 		resp, err := suite.grpcSvr.PutStore(context.Background(), &pdpb.PutStoreRequest{
-			Header: &pdpb.RequestHeader{ClusterId: suite.svr.ClusterID()},
+			Header: &pdpb.RequestHeader{ClusterId: global.ClusterID()},
 			Store: &metapb.Store{
 				Id:      testCase.store.Id,
 				Address: testCase.store.Address,
@@ -335,7 +336,7 @@ func (suite *strictlyLabelsStoreTestSuite) TestStoreMatch() {
 		tu.StatusOK(re)))
 	for _, testCase := range testCases {
 		resp, err := suite.grpcSvr.PutStore(context.Background(), &pdpb.PutStoreRequest{
-			Header: &pdpb.RequestHeader{ClusterId: suite.svr.ClusterID()},
+			Header: &pdpb.RequestHeader{ClusterId: global.ClusterID()},
 			Store: &metapb.Store{
 				Id:      testCase.store.Id,
 				Address: testCase.store.Address,

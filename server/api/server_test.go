@@ -29,6 +29,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/global"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/assertutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
@@ -128,7 +129,7 @@ func mustNewCluster(re *require.Assertions, num int, opts ...func(cfg *config.Co
 func mustBootstrapCluster(re *require.Assertions, s *server.Server) {
 	grpcPDClient := testutil.MustNewGrpcClient(re, s.GetAddr())
 	req := &pdpb.BootstrapRequest{
-		Header: testutil.NewRequestHeader(s.ClusterID()),
+		Header: testutil.NewRequestHeader(global.ClusterID()),
 		Store:  store,
 		Region: region,
 	}
@@ -158,7 +159,7 @@ func mustPutRegion(re *require.Assertions, svr *server.Server, regionID, storeID
 func mustPutStore(re *require.Assertions, svr *server.Server, id uint64, state metapb.StoreState, nodeState metapb.NodeState, labels []*metapb.StoreLabel) {
 	s := &server.GrpcServer{Server: svr}
 	_, err := s.PutStore(context.Background(), &pdpb.PutStoreRequest{
-		Header: &pdpb.RequestHeader{ClusterId: svr.ClusterID()},
+		Header: &pdpb.RequestHeader{ClusterId: global.ClusterID()},
 		Store: &metapb.Store{
 			Id:        id,
 			Address:   fmt.Sprintf("tikv%d", id),
@@ -171,7 +172,7 @@ func mustPutStore(re *require.Assertions, svr *server.Server, id uint64, state m
 	re.NoError(err)
 	if state == metapb.StoreState_Up {
 		_, err = s.StoreHeartbeat(context.Background(), &pdpb.StoreHeartbeatRequest{
-			Header: &pdpb.RequestHeader{ClusterId: svr.ClusterID()},
+			Header: &pdpb.RequestHeader{ClusterId: global.ClusterID()},
 			Stats:  &pdpb.StoreStats{StoreId: id},
 		})
 		re.NoError(err)

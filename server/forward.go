@@ -27,6 +27,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/tsopb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/global"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/tso"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
@@ -407,7 +408,7 @@ func (s *GrpcServer) getGlobalTSO(ctx context.Context) (pdpb.Timestamp, error) {
 	}
 	request := &tsopb.TsoRequest{
 		Header: &tsopb.RequestHeader{
-			ClusterId:       s.ClusterID(),
+			ClusterId:       global.ClusterID(),
 			KeyspaceId:      constant.DefaultKeyspaceID,
 			KeyspaceGroupId: constant.DefaultKeyspaceGroupID,
 		},

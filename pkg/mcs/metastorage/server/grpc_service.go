@@ -22,6 +22,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/meta_storagepb"
 	"github.com/pingcap/log"
 	bs "github.com/tikv/pd/pkg/basicserver"
+	"github.com/tikv/pd/pkg/global"
 	"github.com/tikv/pd/pkg/mcs/registry"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -58,10 +59,10 @@ type Service struct {
 }
 
 // NewService creates a new meta storage service.
-func NewService[T ClusterIDProvider](svr bs.Server) registry.RegistrableService {
+func NewService(svr bs.Server) registry.RegistrableService {
 	return &Service{
 		ctx:     svr.Context(),
-		manager: NewManager[T](svr),
+		manager: NewManager(svr),
 	}
 }
 
@@ -146,7 +147,7 @@ func (s *Service) Watch(req *meta_storagepb.WatchRequest, server meta_storagepb.
 			}
 			if len(events) > 0 {
 				if err := server.Send(&meta_storagepb.WatchResponse{
-					Header: &meta_storagepb.ResponseHeader{ClusterId: s.manager.ClusterID(), Revision: res.Header.GetRevision()},
+					Header: &meta_storagepb.ResponseHeader{ClusterId: global.ClusterID(), Revision: res.Header.GetRevision()},
 					Events: events, CompactRevision: res.CompactRevision}); err != nil {
 					return err
 				}
@@ -183,7 +184,7 @@ func (s *Service) Get(ctx context.Context, req *meta_storagepb.GetRequest) (*met
 		return &meta_storagepb.GetResponse{Header: s.wrapErrorAndRevision(revision, meta_storagepb.ErrorType_UNKNOWN, err.Error())}, nil
 	}
 	resp := &meta_storagepb.GetResponse{
-		Header: &meta_storagepb.ResponseHeader{ClusterId: s.manager.ClusterID(), Revision: revision},
+		Header: &meta_storagepb.ResponseHeader{ClusterId: global.ClusterID(), Revision: revision},
 		Count:  res.Count,
 		More:   res.More,
 	}
@@ -223,7 +224,7 @@ func (s *Service) Put(ctx context.Context, req *meta_storagepb.PutRequest) (*met
 	}
 
 	resp := &meta_storagepb.PutResponse{
-		Header: &meta_storagepb.ResponseHeader{ClusterId: s.manager.ClusterID(), Revision: revision},
+		Header: &meta_storagepb.ResponseHeader{ClusterId: global.ClusterID(), Revision: revision},
 	}
 	if res.PrevKv != nil {
 		resp.PrevKv = &meta_storagepb.KeyValue{Key: res.PrevKv.Key, Value: res.PrevKv.Value}
@@ -255,7 +256,7 @@ func (s *Service) Delete(ctx context.Context, req *meta_storagepb.DeleteRequest)
 	}
 
 	resp := &meta_storagepb.DeleteResponse{
-		Header: &meta_storagepb.ResponseHeader{ClusterId: s.manager.ClusterID(), Revision: revision},
+		Header: &meta_storagepb.ResponseHeader{ClusterId: global.ClusterID(), Revision: revision},
 	}
 	resp.PrevKvs = make([]*meta_storagepb.KeyValue, len(res.PrevKvs))
 	for i, kv := range res.PrevKvs {
@@ -273,7 +274,7 @@ func (s *Service) wrapErrorAndRevision(revision int64, errorType meta_storagepb.
 
 func (s *Service) errorHeader(revision int64, err *meta_storagepb.Error) *meta_storagepb.ResponseHeader {
 	return &meta_storagepb.ResponseHeader{
-		ClusterId: s.manager.ClusterID(),
+		ClusterId: global.ClusterID(),
 		Revision:  revision,
 		Error:     err,
 	}

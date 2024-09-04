@@ -36,6 +36,7 @@ import (
 	"github.com/stretchr/testify/require"
 	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/global"
 	rm "github.com/tikv/pd/pkg/mcs/resourcemanager/server"
 	scheduling "github.com/tikv/pd/pkg/mcs/scheduling/server"
 	sc "github.com/tikv/pd/pkg/mcs/scheduling/server/config"
@@ -218,7 +219,7 @@ func MustPutStore(re *require.Assertions, cluster *TestCluster, store *metapb.St
 	svr := cluster.GetLeaderServer().GetServer()
 	grpcServer := &server.GrpcServer{Server: svr}
 	_, err := grpcServer.PutStore(context.Background(), &pdpb.PutStoreRequest{
-		Header: &pdpb.RequestHeader{ClusterId: svr.ClusterID()},
+		Header: &pdpb.RequestHeader{ClusterId: global.ClusterID()},
 		Store:  store,
 	})
 	re.NoError(err)

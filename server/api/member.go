@@ -25,6 +25,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/global"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
@@ -61,7 +62,7 @@ func (h *memberHandler) GetMembers(w http.ResponseWriter, _ *http.Request) {
 }
 
 func getMembers(svr *server.Server) (*pdpb.GetMembersResponse, error) {
-	req := &pdpb.GetMembersRequest{Header: &pdpb.RequestHeader{ClusterId: svr.ClusterID()}}
+	req := &pdpb.GetMembersRequest{Header: &pdpb.RequestHeader{ClusterId: global.ClusterID()}}
 	grpcServer := &server.GrpcServer{Server: svr}
 	members, err := grpcServer.GetMembers(context.Background(), req)
 	if err != nil {

@@ -29,6 +29,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/global"
 	"github.com/tikv/pd/pkg/ratelimit"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/storage/kv"
@@ -61,7 +62,6 @@ type ServerStream interface {
 // Server is the abstraction of the syncer storage server.
 type Server interface {
 	LoopContext() context.Context
-	ClusterID() uint64
 	GetMemberInfo() *pdpb.Member
 	GetLeader() *pdpb.Member
 	GetStorage() storage.Storage
@@ -153,7 +153,7 @@ func (s *RegionSyncer) RunServer(ctx context.Context, regionNotifier <-chan *cor
 				s.history.record(region)
 			}
 			regions := &pdpb.SyncRegionResponse{
-				Header:        &pdpb.ResponseHeader{ClusterId: s.server.ClusterID()},
+				Header:        &pdpb.ResponseHeader{ClusterId: global.ClusterID()},
 				Regions:       requests,
 				StartIndex:    startIndex,
 				RegionStats:   stats,
@@ -163,7 +163,7 @@ func (s *RegionSyncer) RunServer(ctx context.Context, regionNotifier <-chan *cor
 			s.broadcast(regions)
 		case <-ticker.C:
 			alive := &pdpb.SyncRegionResponse{
-				Header:     &pdpb.ResponseHeader{ClusterId: s.server.ClusterID()},
+				Header:     &pdpb.ResponseHeader{ClusterId: global.ClusterID()},
 				StartIndex: s.history.getNextIndex(),
 			}
 			s.broadcast(alive)
@@ -205,8 +205,8 @@ func (s *RegionSyncer) Sync(ctx context.Context, stream pdpb.PD_SyncRegionsServe
 			return errors.WithStack(err)
 		}
 		clusterID := request.GetHeader().GetClusterId()
-		if clusterID != s.server.ClusterID() {
-			return status.Errorf(codes.FailedPrecondition, "mismatch cluster id, need %d but got %d", s.server.ClusterID(), clusterID)
+		if clusterID != global.ClusterID() {
+			return status.Errorf(codes.FailedPrecondition, "mismatch cluster id, need %d but got %d", global.ClusterID(), clusterID)
 		}
 		log.Info("establish sync region stream",
 			zap.String("requested-server", request.GetMember().GetName()),
@@ -230,7 +230,7 @@ func (s *RegionSyncer) syncHistoryRegion(ctx context.Context, request *pdpb.Sync
 				zap.String("requested-server", name), zap.String("server", s.server.Name()), zap.Uint64("last-index", startIndex))
 			// still send a response to follower to show the history region sync.
 			resp := &pdpb.SyncRegionResponse{
-				Header:        &pdpb.ResponseHeader{ClusterId: s.server.ClusterID()},
+				Header:        &pdpb.ResponseHeader{ClusterId: global.ClusterID()},
 				Regions:       nil,
 				StartIndex:    startIndex,
 				RegionStats:   nil,
@@ -275,7 +275,7 @@ func (s *RegionSyncer) syncHistoryRegion(ctx context.Context, request *pdpb.Sync
 					continue
 				}
 				resp := &pdpb.SyncRegionResponse{
-					Header:        &pdpb.ResponseHeader{ClusterId: s.server.ClusterID()},
+					Header:        &pdpb.ResponseHeader{ClusterId: global.ClusterID()},
 					Regions:       metas,
 					StartIndex:    uint64(lastIndex),
 					RegionStats:   stats,
@@ -327,7 +327,7 @@ func (s *RegionSyncer) syncHistoryRegion(ctx context.Context, request *pdpb.Sync
 		}
 	}
 	resp := &pdpb.SyncRegionResponse{
-		Header:        &pdpb.ResponseHeader{ClusterId: s.server.ClusterID()},
+		Header:        &pdpb.ResponseHeader{ClusterId: global.ClusterID()},
 		Regions:       regions,
 		StartIndex:    startIndex,
 		RegionStats:   stats,

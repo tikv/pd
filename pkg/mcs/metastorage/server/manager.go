@@ -17,6 +17,7 @@ package server
 import (
 	"github.com/pingcap/log"
 	bs "github.com/tikv/pd/pkg/basicserver"
+	"github.com/tikv/pd/pkg/global"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -31,13 +32,8 @@ type Manager struct {
 	storage   *endpoint.StorageEndpoint
 }
 
-// ClusterIDProvider is used to get cluster ID from the given `bs.server`
-type ClusterIDProvider interface {
-	ClusterID() uint64
-}
-
 // NewManager returns a new Manager.
-func NewManager[T ClusterIDProvider](srv bs.Server) *Manager {
+func NewManager(srv bs.Server) *Manager {
 	m := &Manager{}
 	// The first initialization after the server is started.
 	srv.AddStartCallback(func() {
@@ -48,7 +44,7 @@ func NewManager[T ClusterIDProvider](srv bs.Server) *Manager {
 		)
 		m.client = srv.GetClient()
 		m.srv = srv
-		m.clusterID = srv.(T).ClusterID()
+		m.clusterID = global.ClusterID()
 	})
 	return m
 }
@@ -56,9 +52,4 @@ func NewManager[T ClusterIDProvider](srv bs.Server) *Manager {
 // GetClient returns the client of etcd.
 func (m *Manager) GetClient() *clientv3.Client {
 	return m.client
-}
-
-// ClusterID returns the cluster ID.
-func (m *Manager) ClusterID() uint64 {
-	return m.clusterID
 }
