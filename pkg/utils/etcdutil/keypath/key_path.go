@@ -25,17 +25,24 @@ import (
 )
 
 const (
-	pdRootPath                = "/pd"
-	ClusterPath               = "raft"
-	Config                    = "config"
-	ServiceMiddlewarePath     = "service_middleware"
-	schedulePath              = "schedule"
-	gcPath                    = "gc"
-	ruleCommonPath            = "rule"
-	RulesPath                 = "rules"
-	RuleGroupPath             = "rule_group"
-	RegionLabelPath           = "region_label"
-	replicationPath           = "replication_mode"
+	pdRootPath = "/pd"
+	// ClusterPath is the path to save the cluster meta information.
+	ClusterPath = "raft"
+	// Config is the path to save the PD config.
+	Config = "config"
+	// ServiceMiddlewarePath is the path to save the service middleware config.
+	ServiceMiddlewarePath = "service_middleware"
+	schedulePath          = "schedule"
+	gcPath                = "gc"
+	ruleCommonPath        = "rule"
+	// RulesPath is the path to save the placement rules.
+	RulesPath = "rules"
+	// RuleGroupPath is the path to save the placement rule groups.
+	RuleGroupPath = "rule_group"
+	// RegionLabelPath is the path to save the region label.
+	RegionLabelPath = "region_label"
+	replicationPath = "replication_mode"
+	// CustomSchedulerConfigPath is the path to save the scheduler config.
 	CustomSchedulerConfigPath = "scheduler_config"
 	// GCWorkerServiceSafePointID is the service id of GC worker.
 	GCWorkerServiceSafePointID = "gc_worker"
@@ -51,9 +58,12 @@ const (
 	serviceSafePointInfix      = "service_safe_point"
 	regionPathPrefix           = "raft/r"
 	// resource group storage endpoint has prefix `resource_group`
+	// ResourceGroupSettingsPath is the path to save the resource group settings.
 	ResourceGroupSettingsPath = "settings"
-	ResourceGroupStatesPath   = "states"
-	ControllerConfigPath      = "controller"
+	// ResourceGroupStatesPath is the path to save the resource group states.
+	ResourceGroupStatesPath = "states"
+	// ControllerConfigPath is the path to save the controller config.
+	ControllerConfigPath = "controller"
 	// tso storage endpoint has prefix `tso`
 	tsoServiceKey                = constant.TSOServiceName
 	globalTSOAllocatorEtcdPrefix = "gta"
@@ -118,6 +128,7 @@ func RegionLabelPathPrefix(clusterID uint64) string {
 	return path.Join(PDRootPath(clusterID), RegionLabelPath)
 }
 
+// SchedulerConfigPath returns the path to save the scheduler config.
 func SchedulerConfigPath(schedulerName string) string {
 	return path.Join(CustomSchedulerConfigPath, schedulerName)
 }
@@ -138,10 +149,12 @@ func ExtractStoreIDFromPath(clusterID uint64, path string) (uint64, error) {
 	return strconv.ParseUint(idStr, 10, 64)
 }
 
+// StoreLeaderWeightPath returns the store leader weight key path with the given store ID.
 func StoreLeaderWeightPath(storeID uint64) string {
 	return path.Join(schedulePath, "store_weight", fmt.Sprintf("%020d", storeID), "leader")
 }
 
+// StoreRegionWeightPath returns the store region weight key path with the given store ID.
 func StoreRegionWeightPath(storeID uint64) string {
 	return path.Join(schedulePath, "store_weight", fmt.Sprintf("%020d", storeID), "region")
 }
@@ -170,30 +183,37 @@ func RegionPath(regionID uint64) string {
 	return buf.String()
 }
 
+// ResourceGroupSettingKeyPath returns the path to save the resource group settings.
 func ResourceGroupSettingKeyPath(groupName string) string {
 	return path.Join(ResourceGroupSettingsPath, groupName)
 }
 
+// ResourceGroupStateKeyPath returns the path to save the resource group states.
 func ResourceGroupStateKeyPath(groupName string) string {
 	return path.Join(ResourceGroupStatesPath, groupName)
 }
 
+// RuleKeyPath returns the path to save the placement rule with the given rule key.
 func RuleKeyPath(ruleKey string) string {
 	return path.Join(RulesPath, ruleKey)
 }
 
+// RuleGroupIDPath returns the path to save the placement rule group with the given group ID.
 func RuleGroupIDPath(groupID string) string {
 	return path.Join(RuleGroupPath, groupID)
 }
 
+// RegionLabelKeyPath returns the path to save the region label with the given rule key.
 func RegionLabelKeyPath(ruleKey string) string {
 	return path.Join(RegionLabelPath, ruleKey)
 }
 
+// ReplicationModePath returns the path to save the replication mode with the given mode.
 func ReplicationModePath(mode string) string {
 	return path.Join(replicationPath, mode)
 }
 
+// GCSafePointPath returns the GC safe point key path.
 func GCSafePointPath() string {
 	return path.Join(gcPath, "safe_point")
 }
@@ -203,6 +223,7 @@ func GCSafePointServicePrefixPath() string {
 	return path.Join(GCSafePointPath(), "service") + "/"
 }
 
+// GCSafePointServicePath returns the GC safe point service key path with the given service ID.
 func GCSafePointServicePath(serviceID string) string {
 	return path.Join(GCSafePointPath(), "service", serviceID)
 }
