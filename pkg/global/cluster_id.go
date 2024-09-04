@@ -46,6 +46,11 @@ func setClusterID(id uint64) {
 	clusterID.Store(id)
 }
 
+// ResetClusterID resets the cluster ID to 0. It's only used in tests.
+func ResetClusterID() {
+	clusterID.Store(uint64(0))
+}
+
 // InitClusterID creates a cluster ID if it hasn't existed.
 // This function assumes the cluster ID has already existed and always use a
 // cheaper read to retrieve it; if it doesn't exist, invoke the more expensive

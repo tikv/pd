@@ -39,6 +39,7 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/gc"
 	"github.com/tikv/pd/pkg/gctuner"
+	"github.com/tikv/pd/pkg/global"
 	"github.com/tikv/pd/pkg/id"
 	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/mcs/discovery"
@@ -159,10 +160,9 @@ type RaftCluster struct {
 	prevStoreLimit map[uint64]map[storelimit.Type]float64
 
 	// This below fields are all read-only, we cannot update itself after the raft cluster starts.
-	clusterID uint64
-	id        id.Allocator
-	opt       *config.PersistOptions
-	limiter   *StoreLimiter
+	id      id.Allocator
+	opt     *config.PersistOptions
+	limiter *StoreLimiter
 	*schedulingController
 	ruleManager              *placement.RuleManager
 	regionLabeler            *labeler.RegionLabeler
@@ -194,11 +194,10 @@ type Status struct {
 }
 
 // NewRaftCluster create a new cluster.
-func NewRaftCluster(ctx context.Context, clusterID uint64, basicCluster *core.BasicCluster, storage storage.Storage, regionSyncer *syncer.RegionSyncer, etcdClient *clientv3.Client,
+func NewRaftCluster(ctx context.Context, basicCluster *core.BasicCluster, storage storage.Storage, regionSyncer *syncer.RegionSyncer, etcdClient *clientv3.Client,
 	httpClient *http.Client) *RaftCluster {
 	return &RaftCluster{
 		serverCtx:       ctx,
-		clusterID:       clusterID,
 		regionSyncer:    regionSyncer,
 		httpClient:      httpClient,
 		etcdClient:      etcdClient,
@@ -372,7 +371,7 @@ func (c *RaftCluster) Start(s Server) error {
 
 func (c *RaftCluster) checkServices() {
 	if c.isAPIServiceMode {
-		servers, err := discovery.Discover(c.etcdClient, strconv.FormatUint(c.clusterID, 10), constant.SchedulingServiceName)
+		servers, err := discovery.Discover(c.etcdClient, strconv.FormatUint(global.ClusterID(), 10), constant.SchedulingServiceName)
 		if c.opt.GetMicroServiceConfig().IsSchedulingFallbackEnabled() && (err != nil || len(servers) == 0) {
 			c.startSchedulingJobs(c, c.hbstreams)
 			c.UnsetServiceIndependent(constant.SchedulingServiceName)
@@ -2034,8 +2033,8 @@ func (c *RaftCluster) GetMetaCluster() *metapb.Cluster {
 func (c *RaftCluster) PutMetaCluster(meta *metapb.Cluster) error {
 	c.Lock()
 	defer c.Unlock()
-	if meta.GetId() != c.clusterID {
-		return errors.Errorf("invalid cluster %v, mismatch cluster id %d", meta, c.clusterID)
+	if meta.GetId() != global.ClusterID() {
+		return errors.Errorf("invalid cluster %v, mismatch cluster id %d", meta, global.ClusterID())
 	}
 	return c.putMetaLocked(typeutil.DeepClone(meta, core.ClusterFactory))
 }

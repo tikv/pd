@@ -33,6 +33,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/global"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
@@ -752,7 +753,7 @@ func TestRemovingProgress(t *testing.T) {
 	re.NotEmpty(cluster.WaitLeader())
 	leader := cluster.GetLeaderServer()
 	grpcPDClient := testutil.MustNewGrpcClient(re, leader.GetAddr())
-	clusterID := leader.GetClusterID()
+	clusterID := global.ClusterID()
 	req := &pdpb.BootstrapRequest{
 		Header: testutil.NewRequestHeader(clusterID),
 		Store:  &metapb.Store{Id: 1, Address: "127.0.0.1:0"},
@@ -906,7 +907,7 @@ func TestSendApiWhenRestartRaftCluster(t *testing.T) {
 	leader := cluster.GetLeaderServer()
 
 	grpcPDClient := testutil.MustNewGrpcClient(re, leader.GetAddr())
-	clusterID := leader.GetClusterID()
+	clusterID := global.ClusterID()
 	req := &pdpb.BootstrapRequest{
 		Header: testutil.NewRequestHeader(clusterID),
 		Store:  &metapb.Store{Id: 1, Address: "127.0.0.1:0"},
@@ -948,7 +949,7 @@ func TestPreparingProgress(t *testing.T) {
 	re.NotEmpty(cluster.WaitLeader())
 	leader := cluster.GetLeaderServer()
 	grpcPDClient := testutil.MustNewGrpcClient(re, leader.GetAddr())
-	clusterID := leader.GetClusterID()
+	clusterID := global.ClusterID()
 	req := &pdpb.BootstrapRequest{
 		Header: testutil.NewRequestHeader(clusterID),
 		Store:  &metapb.Store{Id: 1, Address: "127.0.0.1:0"},

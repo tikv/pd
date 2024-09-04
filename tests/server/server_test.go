@@ -19,6 +19,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"github.com/tikv/pd/pkg/global"
 	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server/config"
@@ -82,29 +83,23 @@ func TestClusterID(t *testing.T) {
 	err = cluster.RunInitialServers()
 	re.NoError(err)
 
-	clusterID := cluster.GetServer("pd1").GetClusterID()
-	for _, s := range cluster.GetServers() {
-		re.Equal(clusterID, s.GetClusterID())
-	}
+	clusterID := global.ClusterID()
+	global.ResetClusterID()
 
 	// Restart all PDs.
-	err = cluster.StopAll()
-	re.NoError(err)
-	err = cluster.RunInitialServers()
-	re.NoError(err)
+	re.NoError(cluster.StopAll())
+	re.NoError(cluster.RunInitialServers())
 
-	// All PDs should have the same cluster ID as before.
-	for _, s := range cluster.GetServers() {
-		re.Equal(clusterID, s.GetClusterID())
-	}
+	// PD should have the same cluster ID as before.
+	re.Equal(clusterID, global.ClusterID())
+	global.ResetClusterID()
 
 	cluster2, err := tests.NewTestCluster(ctx, 3, func(conf *config.Config, _ string) { conf.InitialClusterToken = "foobar" })
 	defer cluster2.Destroy()
 	re.NoError(err)
 	err = cluster2.RunInitialServers()
 	re.NoError(err)
-	clusterID2 := cluster2.GetServer("pd1").GetClusterID()
-	re.NotEqual(clusterID, clusterID2)
+	re.NotEqual(clusterID, global.ClusterID())
 }
 
 func TestLeader(t *testing.T) {
