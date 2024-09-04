@@ -32,6 +32,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/soheilhy/cmux"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/global"
 	"github.com/tikv/pd/pkg/mcs/discovery"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/utils/apiutil"
@@ -53,7 +54,7 @@ func InitClusterID(ctx context.Context, client *clientv3.Client) (id uint64, err
 	defer ticker.Stop()
 	retryTimes := 0
 	for {
-		if clusterID, err := etcdutil.GetClusterID(client, constant.ClusterIDPath); err == nil && clusterID != 0 {
+		if clusterID, err := global.GetClusterIDFromEtcd(client); err == nil && clusterID != 0 {
 			return clusterID, nil
 		}
 		select {

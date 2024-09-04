@@ -66,6 +66,9 @@ const (
 
 	// we use uint64 to represent ID, the max length of uint64 is 20.
 	keyLen = 20
+
+	// ClusterIDPath is the path to store cluster id
+	ClusterIDPath = "/pd/cluster_id"
 )
 
 // PDRootPath returns the PD root path.

@@ -24,6 +24,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/election"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/global"
 	"github.com/tikv/pd/pkg/mcs/discovery"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/storage/endpoint"
@@ -154,7 +155,7 @@ func TransferPrimary(client *clientv3.Client, lease *election.Lease, serviceName
 	r := rand.New(rand.NewSource(time.Now().UnixNano()))
 	nextPrimaryID := r.Intn(len(primaryIDs))
 
-	clusterID, err := etcdutil.GetClusterID(client, constant.ClusterIDPath)
+	clusterID, err := global.GetClusterIDFromEtcd(client)
 	if err != nil {
 		return errors.Errorf("failed to get cluster ID: %v", err)
 	}
