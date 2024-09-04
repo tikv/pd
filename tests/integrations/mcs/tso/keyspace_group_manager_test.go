@@ -37,6 +37,7 @@ import (
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	tsopkg "github.com/tikv/pd/pkg/tso"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
+	"github.com/tikv/pd/pkg/utils/etcdutil/keypath"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/server/apiv2/handlers"
@@ -218,7 +219,7 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestKeyspacesServedByNonDefaultKe
 						// for primary election.
 						clusterID := suite.pdLeaderServer.GetClusterID()
 						rootPath := endpoint.TSOSvcRootPath(clusterID)
-						primaryPath := endpoint.KeyspaceGroupPrimaryPath(rootPath, param.keyspaceGroupID)
+						primaryPath := keypath.KeyspaceGroupPrimaryPath(rootPath, param.keyspaceGroupID)
 						timestampPath := endpoint.FullTimestampPath(clusterID, param.keyspaceGroupID)
 						re.Equal(timestampPath, am.GetTimestampPath(tsopkg.GlobalDCLocation))
 						re.Equal(primaryPath, am.GetMember().GetLeaderPath())

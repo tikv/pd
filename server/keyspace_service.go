@@ -23,8 +23,8 @@ import (
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/tikv/pd/pkg/keyspace"
-	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
+	"github.com/tikv/pd/pkg/utils/etcdutil/keypath"
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	clientv3 "go.etcd.io/etcd/client/v3"
 )
@@ -74,7 +74,7 @@ func (s *KeyspaceServer) WatchKeyspaces(request *keyspacepb.WatchKeyspacesReques
 	}
 	ctx, cancel := context.WithCancel(s.Context())
 	defer cancel()
-	startKey := path.Join(s.rootPath, endpoint.KeyspaceMetaPrefix()) + "/"
+	startKey := path.Join(s.rootPath, keypath.KeyspaceMetaPrefix()) + "/"
 
 	keyspaces := make([]*keyspacepb.KeyspaceMeta, 0)
 	putFn := func(kv *mvccpb.KeyValue) error {

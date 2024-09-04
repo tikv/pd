@@ -26,7 +26,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/tikv/pd/pkg/election"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/pkg/utils/etcdutil/keypath"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
@@ -72,7 +72,7 @@ func newLocalTimestampOracle(am *AllocatorManager, leadership *election.Leadersh
 	oracle := &timestampOracle{
 		client:                 leadership.GetClient(),
 		keyspaceGroupID:        am.kgID,
-		tsPath:                 endpoint.KeyspaceGroupLocalTSPath(localTSOAllocatorEtcdPrefix, am.kgID, dcLocation),
+		tsPath:                 keypath.KeyspaceGroupLocalTSPath(localTSOAllocatorEtcdPrefix, am.kgID, dcLocation),
 		storage:                am.storage,
 		saveInterval:           am.saveInterval,
 		updatePhysicalInterval: am.updatePhysicalInterval,

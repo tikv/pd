@@ -18,6 +18,7 @@ import (
 	"strconv"
 
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/utils/etcdutil/keypath"
 )
 
 // ExternalTimestamp is the external timestamp.
@@ -36,7 +37,7 @@ var _ ExternalTSStorage = (*StorageEndpoint)(nil)
 
 // LoadExternalTS loads the external timestamp from storage.
 func (se *StorageEndpoint) LoadExternalTS() (uint64, error) {
-	value, err := se.Load(ExternalTimestampPath())
+	value, err := se.Load(keypath.ExternalTimestampPath())
 	if err != nil || value == "" {
 		return 0, err
 	}
@@ -50,5 +51,5 @@ func (se *StorageEndpoint) LoadExternalTS() (uint64, error) {
 // SaveExternalTS saves the external timestamp.
 func (se *StorageEndpoint) SaveExternalTS(timestamp uint64) error {
 	value := strconv.FormatUint(timestamp, 16)
-	return se.Save(ExternalTimestampPath(), value)
+	return se.Save(keypath.ExternalTimestampPath(), value)
 }

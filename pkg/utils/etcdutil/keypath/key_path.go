@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package endpoint
+package keypath
 
 import (
 	"fmt"
@@ -26,17 +26,17 @@ import (
 
 const (
 	pdRootPath                = "/pd"
-	clusterPath               = "raft"
-	configPath                = "config"
-	serviceMiddlewarePath     = "service_middleware"
+	ClusterPath               = "raft"
+	Config                    = "config"
+	ServiceMiddlewarePath     = "service_middleware"
 	schedulePath              = "schedule"
 	gcPath                    = "gc"
 	ruleCommonPath            = "rule"
-	rulesPath                 = "rules"
-	ruleGroupPath             = "rule_group"
-	regionLabelPath           = "region_label"
+	RulesPath                 = "rules"
+	RuleGroupPath             = "rule_group"
+	RegionLabelPath           = "region_label"
 	replicationPath           = "replication_mode"
-	customSchedulerConfigPath = "scheduler_config"
+	CustomSchedulerConfigPath = "scheduler_config"
 	// GCWorkerServiceSafePointID is the service id of GC worker.
 	GCWorkerServiceSafePointID = "gc_worker"
 	minResolvedTS              = "min_resolved_ts"
@@ -51,9 +51,9 @@ const (
 	serviceSafePointInfix      = "service_safe_point"
 	regionPathPrefix           = "raft/r"
 	// resource group storage endpoint has prefix `resource_group`
-	resourceGroupSettingsPath = "settings"
-	resourceGroupStatesPath   = "states"
-	controllerConfigPath      = "controller"
+	ResourceGroupSettingsPath = "settings"
+	ResourceGroupStatesPath   = "states"
+	ControllerConfigPath      = "controller"
 	// tso storage endpoint has prefix `tso`
 	tsoServiceKey                = constant.TSOServiceName
 	globalTSOAllocatorEtcdPrefix = "gta"
@@ -78,29 +78,29 @@ func AppendToRootPath(rootPath string, key string) string {
 	return path.Join(rootPath, key)
 }
 
-// ClusterRootPath appends the `clusterPath` to the rootPath.
+// ClusterRootPath appends the `ClusterPath` to the rootPath.
 func ClusterRootPath(rootPath string) string {
-	return AppendToRootPath(rootPath, clusterPath)
+	return AppendToRootPath(rootPath, ClusterPath)
 }
 
 // ClusterBootstrapTimeKey returns the path to save the cluster bootstrap timestamp.
 func ClusterBootstrapTimeKey() string {
-	return path.Join(clusterPath, "status", "raft_bootstrap_time")
+	return path.Join(ClusterPath, "status", "raft_bootstrap_time")
 }
 
 // ConfigPath returns the path to save the PD config.
 func ConfigPath(clusterID uint64) string {
-	return path.Join(PDRootPath(clusterID), configPath)
+	return path.Join(PDRootPath(clusterID), Config)
 }
 
 // SchedulerConfigPathPrefix returns the path prefix to save the scheduler config.
 func SchedulerConfigPathPrefix(clusterID uint64) string {
-	return path.Join(PDRootPath(clusterID), customSchedulerConfigPath)
+	return path.Join(PDRootPath(clusterID), CustomSchedulerConfigPath)
 }
 
 // RulesPathPrefix returns the path prefix to save the placement rules.
 func RulesPathPrefix(clusterID uint64) string {
-	return path.Join(PDRootPath(clusterID), rulesPath)
+	return path.Join(PDRootPath(clusterID), RulesPath)
 }
 
 // RuleCommonPathPrefix returns the path prefix to save the placement rule common config.
@@ -110,26 +110,26 @@ func RuleCommonPathPrefix(clusterID uint64) string {
 
 // RuleGroupPathPrefix returns the path prefix to save the placement rule groups.
 func RuleGroupPathPrefix(clusterID uint64) string {
-	return path.Join(PDRootPath(clusterID), ruleGroupPath)
+	return path.Join(PDRootPath(clusterID), RuleGroupPath)
 }
 
 // RegionLabelPathPrefix returns the path prefix to save the region label.
 func RegionLabelPathPrefix(clusterID uint64) string {
-	return path.Join(PDRootPath(clusterID), regionLabelPath)
+	return path.Join(PDRootPath(clusterID), RegionLabelPath)
 }
 
-func schedulerConfigPath(schedulerName string) string {
-	return path.Join(customSchedulerConfigPath, schedulerName)
+func SchedulerConfigPath(schedulerName string) string {
+	return path.Join(CustomSchedulerConfigPath, schedulerName)
 }
 
 // StorePath returns the store meta info key path with the given store ID.
 func StorePath(storeID uint64) string {
-	return path.Join(clusterPath, "s", fmt.Sprintf("%020d", storeID))
+	return path.Join(ClusterPath, "s", fmt.Sprintf("%020d", storeID))
 }
 
 // StorePathPrefix returns the store meta info key path prefix.
 func StorePathPrefix(clusterID uint64) string {
-	return path.Join(PDRootPath(clusterID), clusterPath, "s") + "/"
+	return path.Join(PDRootPath(clusterID), ClusterPath, "s") + "/"
 }
 
 // ExtractStoreIDFromPath extracts the store ID from the given path.
@@ -138,11 +138,11 @@ func ExtractStoreIDFromPath(clusterID uint64, path string) (uint64, error) {
 	return strconv.ParseUint(idStr, 10, 64)
 }
 
-func storeLeaderWeightPath(storeID uint64) string {
+func StoreLeaderWeightPath(storeID uint64) string {
 	return path.Join(schedulePath, "store_weight", fmt.Sprintf("%020d", storeID), "leader")
 }
 
-func storeRegionWeightPath(storeID uint64) string {
+func StoreRegionWeightPath(storeID uint64) string {
 	return path.Join(schedulePath, "store_weight", fmt.Sprintf("%020d", storeID), "region")
 }
 
@@ -170,51 +170,51 @@ func RegionPath(regionID uint64) string {
 	return buf.String()
 }
 
-func resourceGroupSettingKeyPath(groupName string) string {
-	return path.Join(resourceGroupSettingsPath, groupName)
+func ResourceGroupSettingKeyPath(groupName string) string {
+	return path.Join(ResourceGroupSettingsPath, groupName)
 }
 
-func resourceGroupStateKeyPath(groupName string) string {
-	return path.Join(resourceGroupStatesPath, groupName)
+func ResourceGroupStateKeyPath(groupName string) string {
+	return path.Join(ResourceGroupStatesPath, groupName)
 }
 
-func ruleKeyPath(ruleKey string) string {
-	return path.Join(rulesPath, ruleKey)
+func RuleKeyPath(ruleKey string) string {
+	return path.Join(RulesPath, ruleKey)
 }
 
-func ruleGroupIDPath(groupID string) string {
-	return path.Join(ruleGroupPath, groupID)
+func RuleGroupIDPath(groupID string) string {
+	return path.Join(RuleGroupPath, groupID)
 }
 
-func regionLabelKeyPath(ruleKey string) string {
-	return path.Join(regionLabelPath, ruleKey)
+func RegionLabelKeyPath(ruleKey string) string {
+	return path.Join(RegionLabelPath, ruleKey)
 }
 
-func replicationModePath(mode string) string {
+func ReplicationModePath(mode string) string {
 	return path.Join(replicationPath, mode)
 }
 
-func gcSafePointPath() string {
+func GCSafePointPath() string {
 	return path.Join(gcPath, "safe_point")
 }
 
 // GCSafePointServicePrefixPath returns the GC safe point service key path prefix.
 func GCSafePointServicePrefixPath() string {
-	return path.Join(gcSafePointPath(), "service") + "/"
+	return path.Join(GCSafePointPath(), "service") + "/"
 }
 
-func gcSafePointServicePath(serviceID string) string {
-	return path.Join(gcSafePointPath(), "service", serviceID)
+func GCSafePointServicePath(serviceID string) string {
+	return path.Join(GCSafePointPath(), "service", serviceID)
 }
 
 // MinResolvedTSPath returns the min resolved ts path.
 func MinResolvedTSPath() string {
-	return path.Join(clusterPath, minResolvedTS)
+	return path.Join(ClusterPath, minResolvedTS)
 }
 
 // ExternalTimestampPath returns the external timestamp path.
 func ExternalTimestampPath() string {
-	return path.Join(clusterPath, externalTimeStamp)
+	return path.Join(ClusterPath, externalTimeStamp)
 }
 
 // GCSafePointV2Path is the storage path of gc safe point v2.

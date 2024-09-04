@@ -22,6 +22,7 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/utils/etcdutil/keypath"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 )
@@ -58,7 +59,7 @@ var _ SafePointV2Storage = (*StorageEndpoint)(nil)
 
 // LoadGCSafePointV2 loads gc safe point for the given keyspace.
 func (se *StorageEndpoint) LoadGCSafePointV2(keyspaceID uint32) (*GCSafePointV2, error) {
-	key := GCSafePointV2Path(keyspaceID)
+	key := keypath.GCSafePointV2Path(keyspaceID)
 	value, err := se.Load(key)
 	if err != nil {
 		return nil, err
@@ -79,12 +80,12 @@ func (se *StorageEndpoint) LoadGCSafePointV2(keyspaceID uint32) (*GCSafePointV2,
 
 // SaveGCSafePointV2 saves gc safe point for the given keyspace.
 func (se *StorageEndpoint) SaveGCSafePointV2(gcSafePoint *GCSafePointV2) error {
-	return se.saveJSON(GCSafePointV2Path(gcSafePoint.KeyspaceID), gcSafePoint)
+	return se.saveJSON(keypath.GCSafePointV2Path(gcSafePoint.KeyspaceID), gcSafePoint)
 }
 
 // LoadAllGCSafePoints returns gc safe point for all keyspaces
 func (se *StorageEndpoint) LoadAllGCSafePoints() ([]*GCSafePointV2, error) {
-	prefix := GCSafePointV2Prefix()
+	prefix := keypath.GCSafePointV2Prefix()
 	prefixEnd := clientv3.GetPrefixRangeEnd(prefix)
 	_, values, err := se.LoadRange(prefix, prefixEnd, 0)
 	if err != nil {
@@ -105,7 +106,7 @@ func (se *StorageEndpoint) LoadAllGCSafePoints() ([]*GCSafePointV2, error) {
 // If no service safe point exist for the given key space or all the service safe points just expired, return nil.
 // This also attempt to remove expired service safe point.
 func (se *StorageEndpoint) LoadMinServiceSafePointV2(keyspaceID uint32, now time.Time) (*ServiceSafePointV2, error) {
-	prefix := ServiceSafePointV2Prefix(keyspaceID)
+	prefix := keypath.ServiceSafePointV2Prefix(keyspaceID)
 	prefixEnd := clientv3.GetPrefixRangeEnd(prefix)
 	keys, values, err := se.LoadRange(prefix, prefixEnd, 0)
 	if err != nil {
@@ -122,7 +123,7 @@ func (se *StorageEndpoint) LoadMinServiceSafePointV2(keyspaceID uint32, now time
 		if err = json.Unmarshal([]byte(values[i]), serviceSafePoint); err != nil {
 			return nil, err
 		}
-		if serviceSafePoint.ServiceID == GCWorkerServiceSafePointID {
+		if serviceSafePoint.ServiceID == keypath.GCWorkerServiceSafePointID {
 			hasGCWorker = true
 			// If gc_worker's expire time is incorrectly set, fix it.
 			if serviceSafePoint.ExpiredAt != math.MaxInt64 {
@@ -158,7 +159,7 @@ func (se *StorageEndpoint) LoadMinServiceSafePointV2(keyspaceID uint32, now time
 
 // LoadServiceSafePointV2 returns ServiceSafePointV2 for given keyspaceID and serviceID.
 func (se *StorageEndpoint) LoadServiceSafePointV2(keyspaceID uint32, serviceID string) (*ServiceSafePointV2, error) {
-	key := ServiceSafePointV2Path(keyspaceID, serviceID)
+	key := keypath.ServiceSafePointV2Path(keyspaceID, serviceID)
 	value, err := se.Load(key)
 	if err != nil {
 		return nil, err
@@ -177,7 +178,7 @@ func (se *StorageEndpoint) LoadServiceSafePointV2(keyspaceID uint32, serviceID s
 func (se *StorageEndpoint) initServiceSafePointV2ForGCWorker(keyspaceID uint32, initialValue uint64) (*ServiceSafePointV2, error) {
 	ssp := &ServiceSafePointV2{
 		KeyspaceID: keyspaceID,
-		ServiceID:  GCWorkerServiceSafePointID,
+		ServiceID:  keypath.GCWorkerServiceSafePointID,
 		SafePoint:  initialValue,
 		ExpiredAt:  math.MaxInt64,
 	}
@@ -193,19 +194,19 @@ func (se *StorageEndpoint) SaveServiceSafePointV2(serviceSafePoint *ServiceSafeP
 		return errors.New("service id of service safepoint cannot be empty")
 	}
 
-	if serviceSafePoint.ServiceID == GCWorkerServiceSafePointID && serviceSafePoint.ExpiredAt != math.MaxInt64 {
+	if serviceSafePoint.ServiceID == keypath.GCWorkerServiceSafePointID && serviceSafePoint.ExpiredAt != math.MaxInt64 {
 		return errors.New("TTL of gc_worker's service safe point must be infinity")
 	}
 
-	key := ServiceSafePointV2Path(serviceSafePoint.KeyspaceID, serviceSafePoint.ServiceID)
+	key := keypath.ServiceSafePointV2Path(serviceSafePoint.KeyspaceID, serviceSafePoint.ServiceID)
 	return se.saveJSON(key, serviceSafePoint)
 }
 
 // RemoveServiceSafePointV2 removes a service safe point.
 func (se *StorageEndpoint) RemoveServiceSafePointV2(keyspaceID uint32, serviceID string) error {
-	if serviceID == GCWorkerServiceSafePointID {
+	if serviceID == keypath.GCWorkerServiceSafePointID {
 		return errors.New("cannot remove service safe point of gc_worker")
 	}
-	key := ServiceSafePointV2Path(keyspaceID, serviceID)
+	key := keypath.ServiceSafePointV2Path(keyspaceID, serviceID)
 	return se.Remove(key)
 }

@@ -27,6 +27,7 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
+	"github.com/tikv/pd/pkg/utils/etcdutil/keypath"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
@@ -148,7 +149,7 @@ func (s *GrpcServer) WatchGCSafePointV2(request *pdpb.WatchGCSafePointV2Request,
 	// - If required revision < CompactRevision, we need to reload all configs to avoid losing data.
 	// - If required revision >= CompactRevision, just keep watching.
 	// Use WithPrevKV() to get the previous key-value pair when get Delete Event.
-	watchChan := s.client.Watch(ctx, path.Join(s.rootPath, endpoint.GCSafePointV2Prefix()), clientv3.WithRev(revision), clientv3.WithPrefix())
+	watchChan := s.client.Watch(ctx, path.Join(s.rootPath, keypath.GCSafePointV2Prefix()), clientv3.WithRev(revision), clientv3.WithPrefix())
 	for {
 		select {
 		case <-ctx.Done():
@@ -203,7 +204,7 @@ func (s *GrpcServer) GetAllGCSafePointV2(ctx context.Context, request *pdpb.GetA
 		return rsp.(*pdpb.GetAllGCSafePointV2Response), err
 	}
 
-	startkey := endpoint.GCSafePointV2Prefix()
+	startkey := keypath.GCSafePointV2Prefix()
 	endkey := clientv3.GetPrefixRangeEnd(startkey)
 	_, values, revision, err := s.loadRangeFromEtcd(startkey, endkey)
 

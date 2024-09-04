@@ -39,8 +39,8 @@ import (
 	"github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/member"
-	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/apiutil"
+	"github.com/tikv/pd/pkg/utils/etcdutil/keypath"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/memberutil"
@@ -310,7 +310,7 @@ func (s *Server) startServer() (err error) {
 		Id:         uniqueID, // id is unique among all participants
 		ListenUrls: []string{s.cfg.GetAdvertiseListenAddr()},
 	}
-	s.participant.InitInfo(p, endpoint.ResourceManagerSvcRootPath(s.clusterID), constant.PrimaryKey, "primary election")
+	s.participant.InitInfo(p, keypath.ResourceManagerSvcRootPath(s.clusterID), constant.PrimaryKey, "primary election")
 
 	s.service = &Service{
 		ctx:     s.Context(),

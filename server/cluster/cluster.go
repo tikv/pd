@@ -55,10 +55,10 @@ import (
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/statistics/utils"
 	"github.com/tikv/pd/pkg/storage"
-	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/syncer"
 	"github.com/tikv/pd/pkg/unsaferecovery"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
+	"github.com/tikv/pd/pkg/utils/etcdutil/keypath"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/netutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
@@ -265,7 +265,7 @@ func (c *RaftCluster) isInitialized() bool {
 // value of time.Time when there is error or the cluster is not bootstrapped yet.
 func (c *RaftCluster) loadBootstrapTime() (time.Time, error) {
 	var t time.Time
-	data, err := c.storage.Load(endpoint.ClusterBootstrapTimeKey())
+	data, err := c.storage.Load(keypath.ClusterBootstrapTimeKey())
 	if err != nil {
 		return t, err
 	}

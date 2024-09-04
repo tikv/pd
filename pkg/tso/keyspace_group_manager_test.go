@@ -35,6 +35,7 @@ import (
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
+	"github.com/tikv/pd/pkg/utils/etcdutil/keypath"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/testutil"
@@ -112,7 +113,7 @@ func (suite *keyspaceGroupManagerTestSuite) TestDeletedGroupCleanup() {
 	suite.applyEtcdEvents(re, rootPath, []*etcdEvent{generateKeyspaceGroupPutEvent(1, []uint32{1}, []string{svcAddr})})
 	// Check if the TSO key is created.
 	testutil.Eventually(re, func() bool {
-		ts, err := mgr.tsoSvcStorage.LoadTimestamp(endpoint.KeyspaceGroupGlobalTSPath(1))
+		ts, err := mgr.tsoSvcStorage.LoadTimestamp(keypath.KeyspaceGroupGlobalTSPath(1))
 		re.NoError(err)
 		return ts != typeutil.ZeroTime
 	})
@@ -120,7 +121,7 @@ func (suite *keyspaceGroupManagerTestSuite) TestDeletedGroupCleanup() {
 	suite.applyEtcdEvents(re, rootPath, []*etcdEvent{generateKeyspaceGroupDeleteEvent(1)})
 	// Check if the TSO key is deleted.
 	testutil.Eventually(re, func() bool {
-		ts, err := mgr.tsoSvcStorage.LoadTimestamp(endpoint.KeyspaceGroupGlobalTSPath(1))
+		ts, err := mgr.tsoSvcStorage.LoadTimestamp(keypath.KeyspaceGroupGlobalTSPath(1))
 		re.NoError(err)
 		return ts == typeutil.ZeroTime
 	})
@@ -139,7 +140,7 @@ func (suite *keyspaceGroupManagerTestSuite) TestDeletedGroupCleanup() {
 	re.NotContains(mgr.deletedGroups, constant.DefaultKeyspaceGroupID)
 	mgr.RUnlock()
 	// Default keyspace group TSO key should NOT be deleted.
-	ts, err := mgr.legacySvcStorage.LoadTimestamp(endpoint.KeyspaceGroupGlobalTSPath(constant.DefaultKeyspaceGroupID))
+	ts, err := mgr.legacySvcStorage.LoadTimestamp(keypath.KeyspaceGroupGlobalTSPath(constant.DefaultKeyspaceGroupID))
 	re.NoError(err)
 	re.NotEmpty(ts)
 
@@ -816,7 +817,7 @@ func putKeyspaceGroupToEtcd(
 	ctx context.Context, etcdClient *clientv3.Client,
 	rootPath string, group *endpoint.KeyspaceGroup,
 ) error {
-	key := strings.Join([]string{rootPath, endpoint.KeyspaceGroupIDPath(group.ID)}, "/")
+	key := strings.Join([]string{rootPath, keypath.KeyspaceGroupIDPath(group.ID)}, "/")
 	value, err := json.Marshal(group)
 	if err != nil {
 		return err
@@ -834,7 +835,7 @@ func deleteKeyspaceGroupInEtcd(
 	ctx context.Context, etcdClient *clientv3.Client,
 	rootPath string, id uint32,
 ) error {
-	key := strings.Join([]string{rootPath, endpoint.KeyspaceGroupIDPath(id)}, "/")
+	key := strings.Join([]string{rootPath, keypath.KeyspaceGroupIDPath(id)}, "/")
 
 	if _, err := etcdClient.Delete(ctx, key); err != nil {
 		return err
@@ -863,7 +864,7 @@ func addKeyspaceGroupAssignment(
 		Keyspaces: keyspaces,
 	}
 
-	key := strings.Join([]string{rootPath, endpoint.KeyspaceGroupIDPath(groupID)}, "/")
+	key := strings.Join([]string{rootPath, keypath.KeyspaceGroupIDPath(groupID)}, "/")
 	value, err := json.Marshal(group)
 	if err != nil {
 		return err
