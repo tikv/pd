@@ -292,10 +292,14 @@ func (s *tsoStream) processRequests(
 	s.state.Store(prevState)
 
 	if err := s.stream.Send(clusterID, keyspaceID, keyspaceGroupID, dcLocation, count); err != nil {
-		if err == io.EOF {
-			return errors.WithStack(errs.ErrClientTSOStreamClosed)
-		}
-		return errors.WithStack(err)
+		// As the request is already put into `pendingRequests`, the request should finally be canceled by the recvLoop.
+		// So skip returning error here to avoid
+		//if err == io.EOF {
+		//	return errors.WithStack(errs.ErrClientTSOStreamClosed)
+		//}
+		//return errors.WithStack(err)
+		log.Warn("failed to send RPC request through tsoStream", zap.String("stream", s.streamID), zap.Error(err))
+		return nil
 	}
 	tsoBatchSendLatency.Observe(time.Since(batchStartTime).Seconds())
 	s.ongoingRequestCountGauge.Set(float64(s.ongoingRequests.Add(1)))
