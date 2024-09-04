@@ -176,16 +176,17 @@ func TestLeaderPriority(t *testing.T) {
 	// Bind a lower priority to current leader.
 	post(t, re, addr+"/pd/api/v1/members/name/"+leader, `{"leader-priority": -1}`)
 
-	oldLeader := leader
+	// Wait etcd leader change.
+	waitEtcdLeaderChange(re, server, leader)
 	// PD leader should sync with etcd leader again.
 	testutil.Eventually(re, func() bool {
-		// Wait etcd leader change.
-		newLeader := waitEtcdLeaderChange(re, server, oldLeader)
-		if cluster.GetLeader() == newLeader {
+		etcdLeader, err := server.GetEtcdLeader()
+		if err != nil {
+			return false
+		}
+		if cluster.GetLeader() == etcdLeader {
 			return true
 		}
-		// prevent the etcd leader from changing again before pd is elected as leader
-		oldLeader = newLeader
 		return false
 	})
 }
