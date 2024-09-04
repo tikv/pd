@@ -2584,7 +2584,7 @@ func prepare(setCfg func(*sc.ScheduleConfig), setTc func(*testCluster), run func
 		setCfg(cfg)
 	}
 	tc := newTestCluster(ctx, opt)
-	hbStreams := hbstream.NewTestHeartbeatStreams(ctx, tc.meta.GetId(), tc, true /* need to run */)
+	hbStreams := hbstream.NewTestHeartbeatStreams(ctx, tc, true /* need to run */)
 	if setTc != nil {
 		setTc(tc)
 	}

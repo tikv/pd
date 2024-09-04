@@ -496,11 +496,11 @@ func (s *Server) startServer(ctx context.Context) error {
 		Step:      keyspace.AllocStep,
 	})
 	if s.IsAPIServiceMode() {
-		s.keyspaceGroupManager = keyspace.NewKeyspaceGroupManager(s.ctx, s.storage, s.client, clusterID)
+		s.keyspaceGroupManager = keyspace.NewKeyspaceGroupManager(s.ctx, s.storage, s.client)
 	}
 	s.keyspaceManager = keyspace.NewKeyspaceManager(s.ctx, s.storage, s.cluster, keyspaceIDAllocator, &s.cfg.Keyspace, s.keyspaceGroupManager)
 	s.safePointV2Manager = gc.NewSafePointManagerV2(s.ctx, s.storage, s.storage, s.storage)
-	s.hbStreams = hbstream.NewHeartbeatStreams(ctx, clusterID, "", s.cluster)
+	s.hbStreams = hbstream.NewHeartbeatStreams(ctx, "", s.cluster)
 	// initial hot_region_storage in here.
 
 	s.hotRegionStorage, err = storage.NewHotRegionsStorage(

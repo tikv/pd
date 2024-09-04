@@ -492,7 +492,7 @@ func (s *Server) startCluster(context.Context) error {
 	if err != nil {
 		return err
 	}
-	s.hbStreams = hbstream.NewHeartbeatStreams(s.Context(), s.clusterID, constant.SchedulingServiceName, s.basicCluster)
+	s.hbStreams = hbstream.NewHeartbeatStreams(s.Context(), constant.SchedulingServiceName, s.basicCluster)
 	s.cluster, err = NewCluster(s.Context(), s.persistConfig, s.storage, s.basicCluster, s.hbStreams, s.clusterID, s.checkMembershipCh)
 	if err != nil {
 		return err
