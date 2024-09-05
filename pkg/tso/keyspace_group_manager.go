@@ -33,6 +33,7 @@ import (
 	"github.com/tikv/pd/pkg/election"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/discovery"
+	"github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/slice"
@@ -647,11 +648,28 @@ func (kgm *KeyspaceGroupManager) primaryPriorityCheckLoop() {
 					select {
 					case <-ctx.Done():
 					default:
-						member.ResetLeader()
-						log.Info("reset primary",
+						allocator, err := kgm.GetAllocatorManager(kg.ID)
+						if err != nil {
+							continue
+						}
+						globalAllocator, err := allocator.GetAllocator(GlobalDCLocation)
+						if err != nil {
+							continue
+						}
+						// only members of specific group are valid primary candidates.
+						group := kgm.GetKeyspaceGroups()[kg.ID]
+						memberMap := make(map[string]bool, len(group.Members))
+						for _, m := range group.Members {
+							memberMap[m.Address] = true
+						}
+						log.Info("tso priority checker moves primary",
 							zap.String("local-address", kgm.tsoServiceID.ServiceAddr),
 							zap.Uint32("keyspace-group-id", kg.ID),
 							zap.Int("local-priority", localPriority))
+						if err := utils.TransferPrimary(kgm.etcdClient, globalAllocator.(*GlobalTSOAllocator).GetExpectedPrimaryLease(),
+							constant.TSOServiceName, kgm.GetServiceConfig().GetName(), "", kg.ID, memberMap); err != nil {
+							continue
+						}
 					}
 				} else {
 					log.Warn("no need to reset primary as the replicas with higher priority are offline",
