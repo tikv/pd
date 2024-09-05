@@ -1045,6 +1045,7 @@ func (suite *keyspaceGroupManagerTestSuite) TestPrimaryPriorityChange() {
 	var err error
 	defaultPriority := constant.DefaultKeyspaceGroupReplicaPriority
 	clusterID, err := etcdutil.InitOrGetClusterID(suite.etcdClient, "/pd/cluster_id")
+	re.NoError(err)
 	clusterIDStr := strconv.FormatUint(clusterID, 10)
 	rootPath := path.Join("/pd", clusterIDStr)
 	cfg1 := suite.createConfig()
