@@ -1376,39 +1376,12 @@ type MigrationResult struct {
 	Ops       []*MigrationOp `json:"ops"`
 }
 
-// BalanceRegion checks if regions are imbalanced and rebalance them.
-func (h *Handler) BalanceRegion(rawStartKey, rawEndKey string, requiredLabels []*metapb.StoreLabel) (MigrationResult, error) {
-	startKey, err := hex.DecodeString(rawStartKey)
-	if err != nil {
-		return MigrationResult{ErrorCode: 1, Ops: nil}, err
-	}
-	endKey, err := hex.DecodeString(rawEndKey)
-	if err != nil {
-		return MigrationResult{ErrorCode: 1, Ops: nil}, err
-	}
-	c := h.GetCluster()
-	if c == nil {
-		return MigrationResult{ErrorCode: 1, Ops: nil}, errs.ErrNotBootstrapped.GenWithStackByArgs()
-	}
-	co := h.GetCoordinator()
-	if co == nil {
-		return MigrationResult{ErrorCode: 1, Ops: nil}, errs.ErrNotBootstrapped.GenWithStackByArgs()
-	}
-	regions := c.ScanRegions(startKey, endKey, -1)
-	regionIDMap := make(map[uint64]*core.RegionInfo)
-	for _, r := range regions {
-		regionIDMap[r.GetID()] = r
-	}
-
-	stores := c.GetStores()
+func ComputeCandidateStores(requiredLabels []*metapb.StoreLabel, stores []*core.StoreInfo, regions []*core.RegionInfo) []*StoreRegionSet {
 	candidates := make([]*StoreRegionSet, 0)
 	for _, s := range stores {
 		storeLabelMap := make(map[string]*metapb.StoreLabel)
 		for _, l := range s.GetLabels() {
 			storeLabelMap[l.Key] = l
-		}
-		if len(requiredLabels) != len(storeLabelMap) {
-			continue
 		}
 		gotLabels := true
 		for _, larg := range requiredLabels {
@@ -1442,6 +1415,35 @@ func (h *Handler) BalanceRegion(rawStartKey, rawEndKey string, requiredLabels []
 		}
 		candidates = append(candidates, candidate)
 	}
+	return candidates
+}
+
+// RedistibuteRegions checks if regions are imbalanced and rebalance them.
+func (h *Handler) RedistibuteRegions(rawStartKey, rawEndKey string, requiredLabels []*metapb.StoreLabel) (MigrationResult, error) {
+	startKey, err := hex.DecodeString(rawStartKey)
+	if err != nil {
+		return MigrationResult{ErrorCode: 1, Ops: nil}, err
+	}
+	endKey, err := hex.DecodeString(rawEndKey)
+	if err != nil {
+		return MigrationResult{ErrorCode: 1, Ops: nil}, err
+	}
+	c := h.GetCluster()
+	if c == nil {
+		return MigrationResult{ErrorCode: 1, Ops: nil}, errs.ErrNotBootstrapped.GenWithStackByArgs()
+	}
+	co := h.GetCoordinator()
+	if co == nil {
+		return MigrationResult{ErrorCode: 1, Ops: nil}, errs.ErrNotBootstrapped.GenWithStackByArgs()
+	}
+	regions := c.ScanRegions(startKey, endKey, -1)
+	regionIDMap := make(map[uint64]*core.RegionInfo)
+	for _, r := range regions {
+		regionIDMap[r.GetID()] = r
+	}
+
+	stores := c.GetStores()
+	candidates := ComputeCandidateStores(requiredLabels, stores, regions)
 
 	senders, receivers, ops := MigrationPlan(candidates)
 

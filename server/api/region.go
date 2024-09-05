@@ -129,12 +129,12 @@ func (h *regionsHandler) CheckRegionsReplicated(w http.ResponseWriter, r *http.R
 	h.rd.JSON(w, http.StatusOK, state)
 }
 
-func (h *regionsHandler) BalanceRegion(w http.ResponseWriter, r *http.Request) {
+func (h *regionsHandler) RedistibuteRegions(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	rawStartKey := vars["startKey"]
 	rawEndKey := vars["endKey"]
 	storeLabels := make([]*metapb.StoreLabel, 0)
-	result, err := h.Handler.BalanceRegion(rawStartKey, rawEndKey, storeLabels)
+	result, err := h.Handler.RedistibuteRegions(rawStartKey, rawEndKey, storeLabels)
 	if err != nil {
 		h.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
