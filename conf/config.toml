@@ -201,7 +201,14 @@
 ## When enabled, usage data will be sent to PingCAP for improving user experience.
 # enable-telemetry = false
 
+<<<<<<< HEAD
 [keyspaces]
+=======
+## When enabled, configuring a custom prometheus address through Dashboard will not be allowed.
+# disable-custom-prom-addr = false
+
+[keyspace]
+>>>>>>> a4ae781d0 (chore(dashboard): update TiDB Dashboard to v8.4.0-6a0d342d [master] (#8581))
 ## pre-alloc is used to pre-allocate keyspaces during pd bootstrap.
 ## Its value should be a list of strings, denotting the name of the keyspaces.
 ## Example:
