@@ -607,7 +607,7 @@ func (kgm *KeyspaceGroupManager) primaryPriorityCheckLoop() {
 	defer kgm.wg.Done()
 
 	failpoint.Inject("fastPrimaryPriorityCheck", func() {
-		kgm.primaryPriorityCheckInterval = 200 * time.Millisecond
+		kgm.primaryPriorityCheckInterval = 1 * time.Second
 	})
 
 	ticker := time.NewTicker(kgm.primaryPriorityCheckInterval)
@@ -635,11 +635,11 @@ func (kgm *KeyspaceGroupManager) primaryPriorityCheckLoop() {
 				}
 				// If there is a alive member with higher priority, reset the leader.
 				resetLeader := false
-				for _, member := range kg.Members {
-					if member.Priority <= localPriority {
+				for _, m := range kg.Members {
+					if m.Priority <= localPriority {
 						continue
 					}
-					if _, ok := aliveTSONodes[typeutil.TrimScheme(member.Address)]; ok {
+					if _, ok := aliveTSONodes[typeutil.TrimScheme(m.Address)]; ok {
 						resetLeader = true
 						break
 					}
@@ -650,10 +650,12 @@ func (kgm *KeyspaceGroupManager) primaryPriorityCheckLoop() {
 					default:
 						allocator, err := kgm.GetAllocatorManager(kg.ID)
 						if err != nil {
+							log.Error("failed to get allocator manager", zap.Error(err))
 							continue
 						}
 						globalAllocator, err := allocator.GetAllocator(GlobalDCLocation)
 						if err != nil {
+							log.Error("failed to get global allocator", zap.Error(err))
 							continue
 						}
 						// only members of specific group are valid primary candidates.
@@ -668,6 +670,7 @@ func (kgm *KeyspaceGroupManager) primaryPriorityCheckLoop() {
 							zap.Int("local-priority", localPriority))
 						if err := utils.TransferPrimary(kgm.etcdClient, globalAllocator.(*GlobalTSOAllocator).GetExpectedPrimaryLease(),
 							constant.TSOServiceName, kgm.GetServiceConfig().GetName(), "", kg.ID, memberMap); err != nil {
+							log.Error("failed to transfer primary", zap.Error(err))
 							continue
 						}
 					}
