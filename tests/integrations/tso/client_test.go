@@ -31,7 +31,7 @@ import (
 	pd "github.com/tikv/pd/client"
 	"github.com/tikv/pd/client/testutil"
 	bs "github.com/tikv/pd/pkg/basicserver"
-	mcsutils "github.com/tikv/pd/pkg/mcs/utils"
+	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/tempurl"
@@ -103,17 +103,7 @@ func (suite *tsoClientTestSuite) SetupSuite() {
 	suite.backendEndpoints = suite.pdLeaderServer.GetAddr()
 	suite.keyspaceIDs = make([]uint32, 0)
 
-	if suite.legacy {
-		client, err := pd.NewClientWithContext(suite.ctx, suite.getBackendEndpoints(), pd.SecurityOption{}, pd.WithForwardingOption(true))
-		re.NoError(err)
-		innerClient, ok := client.(interface{ GetServiceDiscovery() pd.ServiceDiscovery })
-		re.True(ok)
-		re.Equal(mcsutils.NullKeyspaceID, innerClient.GetServiceDiscovery().GetKeyspaceID())
-		re.Equal(mcsutils.DefaultKeyspaceGroupID, innerClient.GetServiceDiscovery().GetKeyspaceGroupID())
-		mcs.WaitForTSOServiceAvailable(suite.ctx, re, client)
-		suite.clients = make([]pd.Client, 0)
-		suite.clients = append(suite.clients, client)
-	} else {
+	if !suite.legacy {
 		suite.tsoCluster, err = tests.NewTestTSOCluster(suite.ctx, 3, suite.backendEndpoints)
 		re.NoError(err)
 
@@ -121,7 +111,7 @@ func (suite *tsoClientTestSuite) SetupSuite() {
 			keyspaceGroupID uint32
 			keyspaceIDs     []uint32
 		}{
-			{0, []uint32{mcsutils.DefaultKeyspaceID, 10}},
+			{0, []uint32{constant.DefaultKeyspaceID, 10}},
 			{1, []uint32{1, 11}},
 			{2, []uint32{2}},
 		}
@@ -148,7 +138,23 @@ func (suite *tsoClientTestSuite) SetupSuite() {
 				},
 			})
 		}
+	}
+}
 
+// Create independent clients to prevent interfering with other tests.
+func (suite *tsoClientTestSuite) SetupTest() {
+	re := suite.Require()
+	if suite.legacy {
+		client, err := pd.NewClientWithContext(suite.ctx, suite.getBackendEndpoints(), pd.SecurityOption{}, pd.WithForwardingOption(true))
+		re.NoError(err)
+		innerClient, ok := client.(interface{ GetServiceDiscovery() pd.ServiceDiscovery })
+		re.True(ok)
+		re.Equal(constant.NullKeyspaceID, innerClient.GetServiceDiscovery().GetKeyspaceID())
+		re.Equal(constant.DefaultKeyspaceGroupID, innerClient.GetServiceDiscovery().GetKeyspaceGroupID())
+		mcs.WaitForTSOServiceAvailable(suite.ctx, re, client)
+		suite.clients = make([]pd.Client, 0)
+		suite.clients = append(suite.clients, client)
+	} else {
 		suite.waitForAllKeyspaceGroupsInServing(re)
 	}
 }
@@ -183,15 +189,18 @@ func (suite *tsoClientTestSuite) waitForAllKeyspaceGroupsInServing(re *require.A
 	re.Equal(len(suite.keyspaceIDs), len(suite.clients))
 }
 
+func (suite *tsoClientTestSuite) TearDownTest() {
+	for _, client := range suite.clients {
+		client.Close()
+	}
+}
+
 func (suite *tsoClientTestSuite) TearDownSuite() {
 	suite.cancel()
 	if !suite.legacy {
 		suite.tsoCluster.Destroy()
 	}
 	suite.cluster.Destroy()
-	for _, client := range suite.clients {
-		client.Close()
-	}
 }
 
 func (suite *tsoClientTestSuite) TestGetTS() {
@@ -387,7 +396,7 @@ func (suite *tsoClientTestSuite) TestRandomResignLeader() {
 			for _, keyspaceID := range keyspaceIDs {
 				go func(keyspaceID uint32) {
 					defer wg.Done()
-					err := suite.tsoCluster.ResignPrimary(keyspaceID, mcsutils.DefaultKeyspaceGroupID)
+					err := suite.tsoCluster.ResignPrimary(keyspaceID, constant.DefaultKeyspaceGroupID)
 					re.NoError(err)
 					suite.tsoCluster.WaitForPrimaryServing(re, keyspaceID, 0)
 				}(keyspaceID)
@@ -432,21 +441,13 @@ func (suite *tsoClientTestSuite) TestGetTSWhileResettingTSOClient() {
 	re := suite.Require()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/delayDispatchTSORequest", "return(true)"))
 	var (
-		clients    []pd.Client
 		stopSignal atomic.Bool
 		wg         sync.WaitGroup
 	)
-	// Create independent clients to prevent interfering with other tests.
-	if suite.legacy {
-		client, err := pd.NewClientWithContext(suite.ctx, suite.getBackendEndpoints(), pd.SecurityOption{}, pd.WithForwardingOption(true))
-		re.NoError(err)
-		clients = []pd.Client{client}
-	} else {
-		clients = mcs.WaitForMultiKeyspacesTSOAvailable(suite.ctx, re, suite.keyspaceIDs, suite.getBackendEndpoints())
-	}
-	wg.Add(tsoRequestConcurrencyNumber * len(clients))
+
+	wg.Add(tsoRequestConcurrencyNumber * len(suite.clients))
 	for i := 0; i < tsoRequestConcurrencyNumber; i++ {
-		for _, client := range clients {
+		for _, client := range suite.clients {
 			go func(client pd.Client) {
 				defer wg.Done()
 				var lastTS uint64
@@ -465,7 +466,7 @@ func (suite *tsoClientTestSuite) TestGetTSWhileResettingTSOClient() {
 	}
 	// Reset the TSO clients while requesting TSO concurrently.
 	for i := 0; i < tsoRequestConcurrencyNumber; i++ {
-		for _, client := range clients {
+		for _, client := range suite.clients {
 			client.(interface{ ResetTSOClient() }).ResetTSOClient()
 		}
 	}
@@ -480,11 +481,9 @@ func TestMixedTSODeployment(t *testing.T) {
 
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/fastUpdatePhysicalInterval", "return(true)"))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/skipUpdateServiceMode", "return(true)"))
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/mcs/tso/server/skipWaitAPIServiceReady", "return(true)"))
 	defer func() {
 		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/tso/fastUpdatePhysicalInterval"))
 		re.NoError(failpoint.Disable("github.com/tikv/pd/client/skipUpdateServiceMode"))
-		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/tso/server/skipWaitAPIServiceReady"))
 	}()
 
 	ctx, cancel := context.WithCancel(context.Background())

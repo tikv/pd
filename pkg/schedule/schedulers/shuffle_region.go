@@ -24,14 +24,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
-	types "github.com/tikv/pd/pkg/schedule/type"
-)
-
-const (
-	// ShuffleRegionName is shuffle region scheduler name.
-	ShuffleRegionName = "shuffle-region-scheduler"
-	// ShuffleRegionType is shuffle region scheduler type.
-	ShuffleRegionType = "shuffle-region"
+	"github.com/tikv/pd/pkg/schedule/types"
 )
 
 type shuffleRegionScheduler struct {
@@ -43,11 +36,11 @@ type shuffleRegionScheduler struct {
 // newShuffleRegionScheduler creates an admin scheduler that shuffles regions
 // between stores.
 func newShuffleRegionScheduler(opController *operator.Controller, conf *shuffleRegionSchedulerConfig) Scheduler {
-	filters := []filter.Filter{
-		&filter.StoreStateFilter{ActionScope: ShuffleRegionName, MoveRegion: true, OperatorLevel: constant.Low},
-		filter.NewSpecialUseFilter(ShuffleRegionName),
-	}
 	base := NewBaseScheduler(opController, types.ShuffleRegionScheduler)
+	filters := []filter.Filter{
+		&filter.StoreStateFilter{ActionScope: base.GetName(), MoveRegion: true, OperatorLevel: constant.Low},
+		filter.NewSpecialUseFilter(base.GetName()),
+	}
 	return &shuffleRegionScheduler{
 		BaseScheduler: base,
 		conf:          conf,
@@ -69,15 +62,8 @@ func (s *shuffleRegionScheduler) EncodeConfig() ([]byte, error) {
 func (s *shuffleRegionScheduler) ReloadConfig() error {
 	s.conf.Lock()
 	defer s.conf.Unlock()
-	cfgData, err := s.conf.storage.LoadSchedulerConfig(s.GetName())
-	if err != nil {
-		return err
-	}
-	if len(cfgData) == 0 {
-		return nil
-	}
 	newCfg := &shuffleRegionSchedulerConfig{}
-	if err := DecodeConfig([]byte(cfgData), newCfg); err != nil {
+	if err := s.conf.load(newCfg); err != nil {
 		return err
 	}
 	s.conf.Roles = newCfg.Roles
@@ -109,7 +95,7 @@ func (s *shuffleRegionScheduler) Schedule(cluster sche.SchedulerCluster, _ bool)
 		return nil, nil
 	}
 
-	op, err := operator.CreateMovePeerOperator(ShuffleRegionType, cluster, region, operator.OpRegion, oldPeer.GetStoreId(), newPeer)
+	op, err := operator.CreateMovePeerOperator(s.GetName(), cluster, region, operator.OpRegion, oldPeer.GetStoreId(), newPeer)
 	if err != nil {
 		shuffleRegionCreateOperatorFailCounter.Inc()
 		return nil, nil

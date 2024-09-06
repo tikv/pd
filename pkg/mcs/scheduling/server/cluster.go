@@ -27,7 +27,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/scatter"
 	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/schedule/splitter"
-	types "github.com/tikv/pd/pkg/schedule/type"
+	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/statistics/buckets"
@@ -309,11 +309,12 @@ func (c *Cluster) updateScheduler() {
 		)
 		// Create the newly added schedulers.
 		for _, scheduler := range latestSchedulersConfig {
+			schedulerType := types.ConvertOldStrToType[scheduler.Type]
 			s, err := schedulers.CreateScheduler(
-				scheduler.Type,
+				schedulerType,
 				c.coordinator.GetOperatorController(),
 				c.storage,
-				schedulers.ConfigSliceDecoder(scheduler.Type, scheduler.Args),
+				schedulers.ConfigSliceDecoder(schedulerType, scheduler.Args),
 				schedulersController.RemoveScheduler,
 			)
 			if err != nil {
@@ -630,7 +631,7 @@ func (c *Cluster) processRegionHeartbeat(ctx *core.MetaProcessContext, region *c
 				regionID,
 				ratelimit.ObserveRegionStatsAsync,
 				func(ctx context.Context) {
-					cluster.Collect(ctx, c, region, hasRegionStats)
+					cluster.Collect(ctx, c, region)
 				},
 			)
 		}
@@ -678,14 +679,17 @@ func (c *Cluster) processRegionHeartbeat(ctx *core.MetaProcessContext, region *c
 		)
 	}
 	tracer.OnSaveCacheFinished()
-	// handle region stats
-	ctx.TaskRunner.RunTask(
-		regionID,
-		ratelimit.CollectRegionStatsAsync,
-		func(ctx context.Context) {
-			cluster.Collect(ctx, c, region, hasRegionStats)
-		},
-	)
+	if hasRegionStats {
+		// handle region stats
+		ctx.TaskRunner.RunTask(
+			regionID,
+			ratelimit.CollectRegionStatsAsync,
+			func(ctx context.Context) {
+				cluster.Collect(ctx, c, region)
+			},
+		)
+	}
+
 	tracer.OnCollectRegionStatsFinished()
 	return nil
 }

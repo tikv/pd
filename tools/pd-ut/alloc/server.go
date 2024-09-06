@@ -28,8 +28,9 @@ import (
 	"go.uber.org/zap"
 )
 
-var statusAddress = flag.String("status-addr", "0.0.0.0:20180", "status address")
+var statusAddress = flag.String("status-addr", "0.0.0.0:0", "status address")
 
+// RunHTTPServer runs a HTTP server to provide alloc address.
 func RunHTTPServer() *http.Server {
 	err := os.Setenv(tempurl.AllocURLFromUT, fmt.Sprintf("http://%s/alloc", *statusAddress))
 	if err != nil {

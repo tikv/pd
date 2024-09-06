@@ -104,6 +104,7 @@ func getPrefix(key []byte) []byte {
 	return []byte{0}
 }
 
+// Put implements the MetaStorageClient interface.
 func (c *client) Put(ctx context.Context, key, value []byte, opts ...OpOption) (*meta_storagepb.PutResponse, error) {
 	options := &Op{}
 	for _, opt := range opts {
@@ -139,6 +140,7 @@ func (c *client) Put(ctx context.Context, key, value []byte, opts ...OpOption) (
 	return resp, nil
 }
 
+// Get implements the MetaStorageClient interface.
 func (c *client) Get(ctx context.Context, key []byte, opts ...OpOption) (*meta_storagepb.GetResponse, error) {
 	options := &Op{}
 	for _, opt := range opts {
@@ -177,6 +179,7 @@ func (c *client) Get(ctx context.Context, key []byte, opts ...OpOption) (*meta_s
 	return resp, nil
 }
 
+// Watch implements the MetaStorageClient interface.
 func (c *client) Watch(ctx context.Context, key []byte, opts ...OpOption) (chan []*meta_storagepb.Event, error) {
 	eventCh := make(chan []*meta_storagepb.Event, 100)
 	options := &Op{}

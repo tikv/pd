@@ -30,27 +30,20 @@ import (
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
-	types "github.com/tikv/pd/pkg/schedule/type"
+	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/statistics/utils"
-	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/unrolled/render"
 	"go.uber.org/zap"
 )
 
-const (
-	// GrantHotRegionName is grant hot region scheduler name.
-	GrantHotRegionName = "grant-hot-region-scheduler"
-	// GrantHotRegionType is grant hot region scheduler type.
-	GrantHotRegionType = "grant-hot-region"
-)
-
 type grantHotRegionSchedulerConfig struct {
 	syncutil.RWMutex
-	storage       endpoint.ConfigStorage
+	schedulerConfig
+
 	cluster       *core.BasicCluster
 	StoreIDs      []uint64 `json:"store-id"`
 	StoreLeaderID uint64   `json:"store-leader-id"`
@@ -92,14 +85,10 @@ func (conf *grantHotRegionSchedulerConfig) clone() *grantHotRegionSchedulerConfi
 	}
 }
 
-func (conf *grantHotRegionSchedulerConfig) Persist() error {
+func (conf *grantHotRegionSchedulerConfig) persist() error {
 	conf.RLock()
 	defer conf.RUnlock()
-	data, err := EncodeConfig(conf)
-	if err != nil {
-		return err
-	}
-	return conf.storage.SaveSchedulerConfig(types.GrantHotRegionScheduler.String(), data)
+	return conf.save()
 }
 
 func (conf *grantHotRegionSchedulerConfig) has(storeID uint64) bool {
@@ -148,15 +137,8 @@ func (s *grantHotRegionScheduler) EncodeConfig() ([]byte, error) {
 func (s *grantHotRegionScheduler) ReloadConfig() error {
 	s.conf.Lock()
 	defer s.conf.Unlock()
-	cfgData, err := s.conf.storage.LoadSchedulerConfig(s.GetName())
-	if err != nil {
-		return err
-	}
-	if len(cfgData) == 0 {
-		return nil
-	}
 	newCfg := &grantHotRegionSchedulerConfig{}
-	if err := DecodeConfig([]byte(cfgData), newCfg); err != nil {
+	if err := s.conf.load(newCfg); err != nil {
 		return err
 	}
 	s.conf.StoreIDs = newCfg.StoreIDs
@@ -217,7 +199,7 @@ func (handler *grantHotRegionHandler) updateConfig(w http.ResponseWriter, r *htt
 		return
 	}
 
-	if err = handler.config.Persist(); err != nil {
+	if err = handler.config.persist(); err != nil {
 		handler.config.setStoreLeaderID(0)
 		handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
@@ -241,6 +223,7 @@ func newGrantHotRegionHandler(config *grantHotRegionSchedulerConfig) http.Handle
 	return router
 }
 
+// Schedule implements the Scheduler interface.
 func (s *grantHotRegionScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) ([]*operator.Operator, []plan.Plan) {
 	grantHotRegionCounter.Inc()
 	typ := s.randomType()
@@ -337,9 +320,9 @@ func (s *grantHotRegionScheduler) transfer(cluster sche.SchedulerCluster, region
 	dstStore := &metapb.Peer{StoreId: destStoreIDs[i]}
 
 	if isLeader {
-		op, err = operator.CreateTransferLeaderOperator(GrantHotRegionType+"-leader", cluster, srcRegion, dstStore.StoreId, []uint64{}, operator.OpLeader)
+		op, err = operator.CreateTransferLeaderOperator(s.GetName()+"-leader", cluster, srcRegion, dstStore.StoreId, []uint64{}, operator.OpLeader)
 	} else {
-		op, err = operator.CreateMovePeerOperator(GrantHotRegionType+"-move", cluster, srcRegion, operator.OpRegion|operator.OpLeader, srcStore.GetID(), dstStore)
+		op, err = operator.CreateMovePeerOperator(s.GetName()+"-move", cluster, srcRegion, operator.OpRegion|operator.OpLeader, srcStore.GetID(), dstStore)
 	}
 	op.SetPriorityLevel(constant.High)
 	return

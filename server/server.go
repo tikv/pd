@@ -56,14 +56,13 @@ import (
 	rm_server "github.com/tikv/pd/pkg/mcs/resourcemanager/server"
 	_ "github.com/tikv/pd/pkg/mcs/resourcemanager/server/apis/v1" // init API group
 	_ "github.com/tikv/pd/pkg/mcs/tso/server/apis/v1"             // init tso API group
-	mcs "github.com/tikv/pd/pkg/mcs/utils"
+	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/ratelimit"
 	"github.com/tikv/pd/pkg/replication"
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/hbstream"
 	"github.com/tikv/pd/pkg/schedule/placement"
-	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
@@ -81,10 +80,10 @@ import (
 	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/server/config"
-	"go.etcd.io/etcd/clientv3"
-	"go.etcd.io/etcd/embed"
-	"go.etcd.io/etcd/mvcc/mvccpb"
-	"go.etcd.io/etcd/pkg/types"
+	"go.etcd.io/etcd/api/v3/mvccpb"
+	etcdtypes "go.etcd.io/etcd/client/pkg/v3/types"
+	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.etcd.io/etcd/server/v3/embed"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 )
@@ -332,7 +331,7 @@ func (s *Server) startEtcd(ctx context.Context) error {
 	}
 
 	// Check cluster ID
-	urlMap, err := types.NewURLsMap(s.cfg.InitialCluster)
+	urlMap, err := etcdtypes.NewURLsMap(s.cfg.InitialCluster)
 	if err != nil {
 		return errs.ErrEtcdURLMap.Wrap(err).GenWithStackByCause()
 	}
@@ -476,7 +475,7 @@ func (s *Server) startServer(ctx context.Context) error {
 	s.tsoDispatcher = tsoutil.NewTSODispatcher(tsoProxyHandleDuration, tsoProxyBatchSize)
 	s.tsoProtoFactory = &tsoutil.TSOProtoFactory{}
 	s.pdProtoFactory = &tsoutil.PDProtoFactory{}
-	s.tsoAllocatorManager = tso.NewAllocatorManager(s.ctx, mcs.DefaultKeyspaceGroupID, s.member, s.rootPath, s.storage, s, false)
+	s.tsoAllocatorManager = tso.NewAllocatorManager(s.ctx, constant.DefaultKeyspaceGroupID, s.member, s.rootPath, s.storage, s, false)
 	// When disabled the Local TSO, we should clean up the Local TSO Allocator's meta info written in etcd if it exists.
 	if !s.cfg.EnableLocalTSO {
 		if err = s.tsoAllocatorManager.CleanUpDCLocation(); err != nil {
@@ -982,14 +981,6 @@ func (s *Server) GetConfig() *config.Config {
 	cfg.MicroService = *s.persistOptions.GetMicroServiceConfig().Clone()
 	cfg.LabelProperty = s.persistOptions.GetLabelPropertyConfig().Clone()
 	cfg.ClusterVersion = *s.persistOptions.GetClusterVersion()
-	if s.storage == nil {
-		return cfg
-	}
-	sches, configs, err := s.storage.LoadAllSchedulerConfigs()
-	if err != nil {
-		return cfg
-	}
-	cfg.Schedule.SchedulersPayload = schedulers.ToPayload(sches, configs)
 	return cfg
 }
 
@@ -1054,7 +1045,6 @@ func (s *Server) SetScheduleConfig(cfg sc.ScheduleConfig) error {
 		return err
 	}
 	old := s.persistOptions.GetScheduleConfig()
-	cfg.SchedulersPayload = nil
 	s.persistOptions.SetScheduleConfig(&cfg)
 	if err := s.persistOptions.Persist(s.storage); err != nil {
 		s.persistOptions.SetScheduleConfig(old)
@@ -1465,15 +1455,6 @@ func (s *Server) GetRegions() []*core.RegionInfo {
 	return nil
 }
 
-// IsServiceIndependent returns if the service is enabled
-func (s *Server) IsServiceIndependent(name string) bool {
-	rc := s.GetRaftCluster()
-	if rc != nil {
-		return rc.IsServiceIndependent(name)
-	}
-	return false
-}
-
 // GetServiceLabels returns ApiAccessPaths by given service label
 // TODO: this function will be used for updating api rate limit config
 func (s *Server) GetServiceLabels(serviceLabel string) []apiutil.AccessPath {
@@ -1686,8 +1667,8 @@ func (s *Server) leaderLoop() {
 					log.Info("the pd leader is lost for a long time, try to re-campaign a pd leader with resign etcd leader",
 						zap.Duration("timeout", randomTimeout),
 						zap.Time("last-updated", lastUpdated),
-						zap.String("current-leader-member-id", types.ID(etcdLeader).String()),
-						zap.String("transferee-member-id", types.ID(s.member.ID()).String()),
+						zap.String("current-leader-member-id", etcdtypes.ID(etcdLeader).String()),
+						zap.String("transferee-member-id", etcdtypes.ID(s.member.ID()).String()),
 					)
 					if err := s.member.MoveEtcdLeader(s.ctx, etcdLeader, s.member.ID()); err != nil {
 						log.Error("failed to move etcd leader", errs.ZapError(err))
@@ -1746,7 +1727,7 @@ func (s *Server) campaignLeader() {
 			return
 		}
 		defer func() {
-			s.tsoAllocatorManager.ResetAllocatorGroup(tso.GlobalDCLocation)
+			s.tsoAllocatorManager.ResetAllocatorGroup(tso.GlobalDCLocation, false)
 			failpoint.Inject("updateAfterResetTSO", func() {
 				if err = allocator.UpdateTSO(); !errorspkg.Is(err, errs.ErrUpdateTimestamp) {
 					log.Panic("the tso update after reset should return ErrUpdateTimestamp as expected", zap.Error(err))
@@ -1808,7 +1789,7 @@ func (s *Server) campaignLeader() {
 	CheckPDVersionWithClusterVersion(s.persistOptions)
 	log.Info(fmt.Sprintf("%s leader is ready to serve", s.mode), zap.String("leader-name", s.Name()))
 
-	leaderTicker := time.NewTicker(mcs.LeaderTickInterval)
+	leaderTicker := time.NewTicker(constant.LeaderTickInterval)
 	defer leaderTicker.Stop()
 
 	for {
@@ -2037,15 +2018,15 @@ func (s *Server) SetServicePrimaryAddr(serviceName, addr string) {
 }
 
 func (s *Server) initTSOPrimaryWatcher() {
-	serviceName := mcs.TSOServiceName
+	serviceName := constant.TSOServiceName
 	tsoRootPath := endpoint.TSOSvcRootPath(s.ClusterID())
-	tsoServicePrimaryKey := endpoint.KeyspaceGroupPrimaryPath(tsoRootPath, mcs.DefaultKeyspaceGroupID)
+	tsoServicePrimaryKey := endpoint.KeyspaceGroupPrimaryPath(tsoRootPath, constant.DefaultKeyspaceGroupID)
 	s.tsoPrimaryWatcher = s.initServicePrimaryWatcher(serviceName, tsoServicePrimaryKey)
 	s.tsoPrimaryWatcher.StartWatchLoop()
 }
 
 func (s *Server) initSchedulingPrimaryWatcher() {
-	serviceName := mcs.SchedulingServiceName
+	serviceName := constant.SchedulingServiceName
 	primaryKey := endpoint.SchedulingPrimaryPath(s.ClusterID())
 	s.schedulingPrimaryWatcher = s.initServicePrimaryWatcher(serviceName, primaryKey)
 	s.schedulingPrimaryWatcher.StartWatchLoop()

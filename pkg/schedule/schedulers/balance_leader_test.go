@@ -30,7 +30,7 @@ func TestBalanceLeaderSchedulerConfigClone(t *testing.T) {
 		Ranges: keyRanges1,
 		Batch:  10,
 	}
-	conf2 := conf.Clone()
+	conf2 := conf.clone()
 	re.Equal(conf.Batch, conf2.Batch)
 	re.Equal(conf.Ranges, conf2.Ranges)
 

@@ -28,30 +28,23 @@ import (
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
-	types "github.com/tikv/pd/pkg/schedule/type"
-	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/unrolled/render"
 	"go.uber.org/zap"
 )
 
-const (
-	// GrantLeaderName is grant leader scheduler name.
-	GrantLeaderName = "grant-leader-scheduler"
-	// GrantLeaderType is grant leader scheduler type.
-	GrantLeaderType = "grant-leader"
-)
-
 type grantLeaderSchedulerConfig struct {
 	syncutil.RWMutex
-	storage           endpoint.ConfigStorage
+	schedulerConfig
+
 	StoreIDWithRanges map[uint64][]core.KeyRange `json:"store-id-ranges"`
 	cluster           *core.BasicCluster
 	removeSchedulerCb func(name string) error
 }
 
-func (conf *grantLeaderSchedulerConfig) BuildWithArgs(args []string) error {
+func (conf *grantLeaderSchedulerConfig) buildWithArgs(args []string) error {
 	if len(args) != 1 {
 		return errs.ErrSchedulerConfig.FastGenByArgs("id")
 	}
@@ -85,11 +78,7 @@ func (conf *grantLeaderSchedulerConfig) clone() *grantLeaderSchedulerConfig {
 func (conf *grantLeaderSchedulerConfig) persist() error {
 	conf.RLock()
 	defer conf.RUnlock()
-	data, err := EncodeConfig(conf)
-	if err != nil {
-		return err
-	}
-	return conf.storage.SaveSchedulerConfig(types.GrantLeaderScheduler.String(), data)
+	return conf.save()
 }
 
 func (conf *grantLeaderSchedulerConfig) getRanges(id uint64) []string {
@@ -178,15 +167,8 @@ func (s *grantLeaderScheduler) EncodeConfig() ([]byte, error) {
 func (s *grantLeaderScheduler) ReloadConfig() error {
 	s.conf.Lock()
 	defer s.conf.Unlock()
-	cfgData, err := s.conf.storage.LoadSchedulerConfig(s.GetName())
-	if err != nil {
-		return err
-	}
-	if len(cfgData) == 0 {
-		return nil
-	}
 	newCfg := &grantLeaderSchedulerConfig{}
-	if err = DecodeConfig([]byte(cfgData), newCfg); err != nil {
+	if err := s.conf.load(newCfg); err != nil {
 		return err
 	}
 	pauseAndResumeLeaderTransfer(s.conf.cluster, s.conf.StoreIDWithRanges, newCfg.StoreIDWithRanges)
@@ -239,7 +221,7 @@ func (s *grantLeaderScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) (
 			continue
 		}
 
-		op, err := operator.CreateForceTransferLeaderOperator(GrantLeaderType, cluster, region, id, operator.OpLeader)
+		op, err := operator.CreateForceTransferLeaderOperator(s.GetName(), cluster, region, id, operator.OpLeader)
 		if err != nil {
 			log.Debug("fail to create grant leader operator", errs.ZapError(err))
 			continue
@@ -287,7 +269,7 @@ func (handler *grantLeaderHandler) updateConfig(w http.ResponseWriter, r *http.R
 		args = append(args, handler.config.getRanges(id)...)
 	}
 
-	err := handler.config.BuildWithArgs(args)
+	err := handler.config.buildWithArgs(args)
 	if err != nil {
 		handler.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
@@ -325,7 +307,7 @@ func (handler *grantLeaderHandler) deleteConfig(w http.ResponseWriter, r *http.R
 			return
 		}
 		if last {
-			if err := handler.config.removeSchedulerCb(GrantLeaderName); err != nil {
+			if err := handler.config.removeSchedulerCb(types.GrantLeaderScheduler.String()); err != nil {
 				if errors.ErrorEqual(err, errs.ErrSchedulerNotFound.FastGenByArgs()) {
 					handler.rd.JSON(w, http.StatusNotFound, err.Error())
 				} else {

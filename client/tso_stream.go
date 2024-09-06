@@ -116,6 +116,7 @@ type pdTSOStreamAdapter struct {
 	stream pdpb.PD_TsoClient
 }
 
+// Send implements the grpcTSOStreamAdapter interface.
 func (s pdTSOStreamAdapter) Send(clusterID uint64, _, _ uint32, dcLocation string, count int64) error {
 	req := &pdpb.TsoRequest{
 		Header: &pdpb.RequestHeader{
@@ -127,6 +128,7 @@ func (s pdTSOStreamAdapter) Send(clusterID uint64, _, _ uint32, dcLocation strin
 	return s.stream.Send(req)
 }
 
+// Recv implements the grpcTSOStreamAdapter interface.
 func (s pdTSOStreamAdapter) Recv() (tsoRequestResult, error) {
 	resp, err := s.stream.Recv()
 	if err != nil {
@@ -145,6 +147,7 @@ type tsoTSOStreamAdapter struct {
 	stream tsopb.TSO_TsoClient
 }
 
+// Send implements the grpcTSOStreamAdapter interface.
 func (s tsoTSOStreamAdapter) Send(clusterID uint64, keyspaceID, keyspaceGroupID uint32, dcLocation string, count int64) error {
 	req := &tsopb.TsoRequest{
 		Header: &tsopb.RequestHeader{
@@ -158,6 +161,7 @@ func (s tsoTSOStreamAdapter) Send(clusterID uint64, keyspaceID, keyspaceGroupID 
 	return s.stream.Send(req)
 }
 
+// Recv implements the grpcTSOStreamAdapter interface.
 func (s tsoTSOStreamAdapter) Recv() (tsoRequestResult, error) {
 	resp, err := s.stream.Recv()
 	if err != nil {

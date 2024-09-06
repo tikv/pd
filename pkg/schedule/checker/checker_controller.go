@@ -44,6 +44,7 @@ const (
 	// In order to avoid the patrolRegionScanLimit to be too big or too small, it will be limited to [128,8192].
 	// It takes about 10s to iterate 1,024,000 regions(with DefaultPatrolRegionInterval=10ms) where other steps are not considered.
 	MinPatrolRegionScanLimit = 128
+	// MaxPatrolScanRegionLimit is the max limit of regions to scan for a batch.
 	MaxPatrolScanRegionLimit = 8192
 	patrolRegionPartition    = 1024
 )
@@ -68,7 +69,7 @@ type Controller struct {
 	mergeChecker            *MergeChecker
 	jointStateChecker       *JointStateChecker
 	priorityInspector       *PriorityInspector
-	pendingProcessedRegions cache.Cache
+	pendingProcessedRegions *cache.TTLUint64
 	suspectKeyRanges        *cache.TTLString // suspect key-range regions that may need fix
 
 	// duration is the duration of the last patrol round.
@@ -88,7 +89,7 @@ type Controller struct {
 
 // NewController create a new Controller.
 func NewController(ctx context.Context, cluster sche.CheckerCluster, conf config.CheckerConfigProvider, ruleManager *placement.RuleManager, labeler *labeler.RegionLabeler, opController *operator.Controller) *Controller {
-	pendingProcessedRegions := cache.NewDefaultCache(DefaultPendingRegionCacheSize)
+	pendingProcessedRegions := cache.NewIDTTL(ctx, time.Minute, 3*time.Minute)
 	return &Controller{
 		ctx:                     ctx,
 		cluster:                 cluster,
@@ -311,7 +312,7 @@ func (c *Controller) tryAddOperators(region *core.RegionInfo) {
 		c.opController.AddWaitingOperator(ops...)
 		c.RemovePendingProcessedRegion(id)
 	} else {
-		c.AddPendingProcessedRegions(id)
+		c.AddPendingProcessedRegions(true, id)
 	}
 }
 
@@ -327,16 +328,15 @@ func (c *Controller) GetRuleChecker() *RuleChecker {
 
 // GetPendingProcessedRegions returns the pending processed regions in the cache.
 func (c *Controller) GetPendingProcessedRegions() []uint64 {
-	pendingRegions := make([]uint64, 0)
-	for _, item := range c.pendingProcessedRegions.Elems() {
-		pendingRegions = append(pendingRegions, item.Key)
-	}
-	return pendingRegions
+	return c.pendingProcessedRegions.GetAllID()
 }
 
 // AddPendingProcessedRegions adds the pending processed region into the cache.
-func (c *Controller) AddPendingProcessedRegions(ids ...uint64) {
+func (c *Controller) AddPendingProcessedRegions(needCheckLen bool, ids ...uint64) {
 	for _, id := range ids {
+		if needCheckLen && c.pendingProcessedRegions.Len() > DefaultPendingRegionCacheSize {
+			return
+		}
 		c.pendingProcessedRegions.Put(id, nil)
 	}
 }
@@ -385,7 +385,7 @@ func (c *Controller) CheckSuspectRanges() {
 			if lastRegion.GetEndKey() != nil && bytes.Compare(lastRegion.GetEndKey(), keyRange[1]) < 0 {
 				c.AddSuspectKeyRange(lastRegion.GetEndKey(), keyRange[1])
 			}
-			c.AddPendingProcessedRegions(regionIDList...)
+			c.AddPendingProcessedRegions(false, regionIDList...)
 		}
 	}
 }

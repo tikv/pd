@@ -27,7 +27,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/mcs/utils"
+	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"go.uber.org/zap"
 )
@@ -114,7 +114,7 @@ func (s *HeartbeatStreams) run() {
 
 	var keepAlive core.RegionHeartbeatResponse
 	switch s.typ {
-	case utils.SchedulingServiceName:
+	case constant.SchedulingServiceName:
 		keepAlive = &schedulingpb.RegionHeartbeatResponse{Header: &schedulingpb.ResponseHeader{ClusterId: s.clusterID}}
 	default:
 		keepAlive = &pdpb.RegionHeartbeatResponse{Header: &pdpb.ResponseHeader{ClusterId: s.clusterID}}
@@ -204,7 +204,7 @@ func (s *HeartbeatStreams) SendMsg(region *core.RegionInfo, op *Operation) {
 	// TODO: use generic
 	var resp core.RegionHeartbeatResponse
 	switch s.typ {
-	case utils.SchedulingServiceName:
+	case constant.SchedulingServiceName:
 		resp = &schedulingpb.RegionHeartbeatResponse{
 			Header:          &schedulingpb.ResponseHeader{ClusterId: s.clusterID},
 			RegionId:        region.GetID(),
