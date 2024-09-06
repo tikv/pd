@@ -30,8 +30,6 @@ require (
 	moul.io/zapgorm2 v1.1.0
 )
 
-require github.com/chenzhuoyu/iasm v0.9.1 // indirect
-
 require (
 	github.com/BurntSushi/toml v0.3.1 // indirect
 	github.com/KyleBanks/depth v1.2.1 // indirect
@@ -62,6 +60,7 @@ require (
 	github.com/cenkalti/backoff/v4 v4.0.2 // indirect
 	github.com/cespare/xxhash/v2 v2.2.0 // indirect
 	github.com/chenzhuoyu/base64x v0.0.0-20230717121745-296ad89f973d // indirect
+	github.com/chenzhuoyu/iasm v0.9.1 // indirect
 	github.com/cloudfoundry/gosigar v1.3.6 // indirect
 	github.com/coreos/go-semver v0.3.1 // indirect
 	github.com/coreos/go-systemd v0.0.0-20191104093116-d3cd4ed1dbcf // indirect
