@@ -56,9 +56,7 @@ func (tbc *tsoBatchController) fetchPendingRequests(ctx context.Context, tsoRequ
 			if tokenAcquired {
 				tokenCh <- struct{}{}
 			}
-			if tbc.collectedRequestCount > 0 {
-				tbc.finishCollectedRequests(0, 0, 0, errRet)
-			}
+			tbc.finishCollectedRequests(0, 0, 0, invalidStreamID, errRet)
 		}
 	}()
 
@@ -170,12 +168,13 @@ func (tbc *tsoBatchController) adjustBestBatchSize() {
 	}
 }
 
-func (tbc *tsoBatchController) finishCollectedRequests(physical, firstLogical int64, suffixBits uint32, err error) {
+func (tbc *tsoBatchController) finishCollectedRequests(physical, firstLogical int64, suffixBits uint32, streamID string, err error) {
 	for i := 0; i < tbc.collectedRequestCount; i++ {
 		tsoReq := tbc.collectedRequests[i]
 		// Retrieve the request context before the request is done to trace without race.
 		requestCtx := tsoReq.requestCtx
 		tsoReq.physical, tsoReq.logical = physical, tsoutil.AddLogical(firstLogical, int64(i), suffixBits)
+		tsoReq.streamID = streamID
 		tsoReq.tryDone(err)
 		trace.StartRegion(requestCtx, "pdclient.tsoReqDequeue").End()
 	}

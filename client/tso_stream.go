@@ -222,6 +222,8 @@ const (
 
 var streamIDAlloc atomic.Int32
 
+const invalidStreamID = "<invalid>"
+
 // TODO: Pass a context?
 func newTSOStream(serverURL string, stream grpcTSOStreamAdapter) *tsoStream {
 	streamID := fmt.Sprintf("%s-%d", serverURL, streamIDAlloc.Add(1))

@@ -104,7 +104,9 @@ func newTSODispatcher(
 		tsoRequestCh = make(chan *tsoRequest, 1)
 	})
 
-	tokenCh := make(chan struct{}, 64)
+	// A large-enough capacity to hold maximum concurrent RPC requests. In our design, the concurrency is at most 16.
+	const tokenChCapacity = 64
+	tokenCh := make(chan struct{}, tokenChCapacity)
 
 	td := &tsoDispatcher{
 		ctx:            dispatcherCtx,
@@ -276,7 +278,7 @@ tsoBatchLoop:
 				select {
 				case <-ctx.Done():
 					// Finish the collected requests if the context is canceled.
-					td.cancelCollectedRequests(batchController, errors.WithStack(ctx.Err()))
+					td.cancelCollectedRequests(batchController, invalidStreamID, errors.WithStack(ctx.Err()))
 					timer.Stop()
 					return
 				case <-streamLoopTimer.C:
@@ -284,7 +286,7 @@ tsoBatchLoop:
 					log.Error("[tso] create tso stream error", zap.String("dc-location", dc), errs.ZapError(err))
 					svcDiscovery.ScheduleCheckMemberChanged()
 					// Finish the collected requests if the stream is failed to be created.
-					td.cancelCollectedRequests(batchController, errors.WithStack(err))
+					td.cancelCollectedRequests(batchController, invalidStreamID, errors.WithStack(err))
 					timer.Stop()
 					continue tsoBatchLoop
 				case <-timer.C:
@@ -308,7 +310,7 @@ tsoBatchLoop:
 				exit := !td.handleProcessRequestError(ctx, bo, streamURL, cancel, err)
 				stream = nil
 				if exit {
-					td.cancelCollectedRequests(batchController, errors.WithStack(ctx.Err()))
+					td.cancelCollectedRequests(batchController, invalidStreamID, errors.WithStack(ctx.Err()))
 					return
 				}
 				continue
@@ -321,7 +323,7 @@ tsoBatchLoop:
 		select {
 		case <-ctx.Done():
 			// Finish the collected requests if the context is canceled.
-			td.cancelCollectedRequests(batchController, errors.WithStack(ctx.Err()))
+			td.cancelCollectedRequests(batchController, invalidStreamID, errors.WithStack(ctx.Err()))
 			return
 		case td.tsDeadlineCh <- dl:
 		}
@@ -495,7 +497,7 @@ func (td *tsoDispatcher) processRequests(
 
 		defer td.batchBufferPool.Put(tbc)
 		if err != nil {
-			td.cancelCollectedRequests(tbc, err)
+			td.cancelCollectedRequests(tbc, stream.streamID, err)
 			return
 		}
 
@@ -510,7 +512,7 @@ func (td *tsoDispatcher) processRequests(
 		// `logical` is the largest ts's logical part here, we need to do the subtracting before we finish each TSO request.
 		firstLogical := tsoutil.AddLogical(result.logical, -int64(result.count)+1, result.suffixBits)
 		td.compareAndSwapTS(curTSOInfo, firstLogical)
-		td.doneCollectedRequests(tbc, result.physical, firstLogical, result.suffixBits)
+		td.doneCollectedRequests(tbc, result.physical, firstLogical, result.suffixBits, stream.streamID)
 	}
 
 	err := stream.processRequests(
@@ -519,20 +521,20 @@ func (td *tsoDispatcher) processRequests(
 	if err != nil {
 		close(done)
 
-		td.cancelCollectedRequests(tbc, err)
+		td.cancelCollectedRequests(tbc, stream.streamID, err)
 		return err
 	}
 	return nil
 }
 
-func (td *tsoDispatcher) cancelCollectedRequests(tbc *tsoBatchController, err error) {
+func (td *tsoDispatcher) cancelCollectedRequests(tbc *tsoBatchController, streamID string, err error) {
 	td.tokenCh <- struct{}{}
-	tbc.finishCollectedRequests(0, 0, 0, err)
+	tbc.finishCollectedRequests(0, 0, 0, streamID, err)
 }
 
-func (td *tsoDispatcher) doneCollectedRequests(tbc *tsoBatchController, physical int64, firstLogical int64, suffixBits uint32) {
+func (td *tsoDispatcher) doneCollectedRequests(tbc *tsoBatchController, physical int64, firstLogical int64, suffixBits uint32, streamID string) {
 	td.tokenCh <- struct{}{}
-	tbc.finishCollectedRequests(physical, firstLogical, suffixBits, nil)
+	tbc.finishCollectedRequests(physical, firstLogical, suffixBits, streamID, nil)
 }
 
 func (td *tsoDispatcher) compareAndSwapTS(
