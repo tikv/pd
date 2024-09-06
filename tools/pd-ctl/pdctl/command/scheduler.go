@@ -647,7 +647,7 @@ func addStoreToSchedulerConfig(cmd *cobra.Command, schedulerName string, args []
 		return
 	}
 	if !exist {
-		cmd.Printf("Failed! scheduler %s not found.\n", schedulerName)
+		cmd.Printf("Unable to update config: scheduler %s does not exist.\n", schedulerName)
 		return
 	}
 
@@ -783,7 +783,7 @@ func deleteStoreFromSchedulerConfig(cmd *cobra.Command, schedulerName string, ar
 		return
 	}
 	if !exist {
-		cmd.Printf("Failed! scheduler %s not found.\n", schedulerName)
+		cmd.Printf("Unable to update config: scheduler %s does not exist.\n", schedulerName)
 		return
 	}
 
