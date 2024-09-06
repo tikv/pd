@@ -15,6 +15,9 @@ linters:
     - gofmt
     - revive
     - errcheck
+    - exportloopref
+    - goimports
+    - depguard
 linters-settings:
   gocritic:
     # Which checks should be disabled; can't be combined with 'enabled-checks'; default is empty
@@ -205,6 +208,14 @@ linters-settings:
       - (net/http.ResponseWriter).Write
       - github.com/pingcap/log.Sync
       - (github.com/tikv/pd/pkg/ratelimit.Runner).RunTask
+  depguard:
+    rules:
+      denied-deps:
+        deny:
+          - pkg: go.uber.org/atomic
+            desc: "Use 'sync/atomic' instead of 'go.uber.org/atomic'"
+          - pkg: github.com/pkg/errors
+            desc: "Use 'github.com/pingcap/errors' instead of 'github.com/pkg/errors'"
 issues:
   exclude-rules:
     - path: (_test\.go|pkg/mock/.*\.go|tests/.*\.go)
@@ -214,3 +225,5 @@ issues:
     - path: (pd-analysis|pd-api-bench|pd-backup|pd-ctl|pd-heartbeat-bench|pd-recover|pd-simulator|pd-tso-bench|pd-ut|regions-dump|stores-dump)
       linters:
         - errcheck
+  include:
+    - EXC0012

@@ -29,8 +29,8 @@ import (
 	"github.com/gin-contrib/gzip"
 	"github.com/gin-contrib/pprof"
 	"github.com/gin-gonic/gin"
+	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
-	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
 	flag "github.com/spf13/pflag"
 	pd "github.com/tikv/pd/client"
@@ -40,7 +40,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/tools/pd-api-bench/cases"
 	"github.com/tikv/pd/tools/pd-api-bench/config"
-	"go.etcd.io/etcd/clientv3"
+	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/keepalive"
@@ -292,14 +292,14 @@ func runHTTPServer(cfg *config.Config, co *cases.Coordinator) {
 		}
 		for name, cfg := range input {
 			cfg := cfg
-			co.SetETCDCase(name, &cfg)
+			co.SetEtcdCase(name, &cfg)
 		}
 		c.String(http.StatusOK, "")
 	})
 	engine.POST("config/etcd/:name", func(c *gin.Context) {
 		name := c.Param("name")
 		cfg := getCfg(c)
-		co.SetETCDCase(name, cfg)
+		co.SetEtcdCase(name, cfg)
 		c.String(http.StatusOK, "")
 	})
 
@@ -330,12 +330,12 @@ func runHTTPServer(cfg *config.Config, co *cases.Coordinator) {
 		c.IndentedJSON(http.StatusOK, cfg)
 	})
 	engine.GET("config/etcd/all", func(c *gin.Context) {
-		all := co.GetAllETCDCases()
+		all := co.GetAllEtcdCases()
 		c.IndentedJSON(http.StatusOK, all)
 	})
 	engine.GET("config/etcd/:name", func(c *gin.Context) {
 		name := c.Param("name")
-		cfg, err := co.GetETCDCase(name)
+		cfg, err := co.GetEtcdCase(name)
 		if err != nil {
 			c.String(http.StatusBadRequest, err.Error())
 			return

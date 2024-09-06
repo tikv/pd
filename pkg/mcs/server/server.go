@@ -24,9 +24,9 @@ import (
 	"time"
 
 	"github.com/pingcap/log"
-	"github.com/tikv/pd/pkg/mcs/utils"
+	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
-	"go.etcd.io/etcd/clientv3"
+	clientv3 "go.etcd.io/etcd/client/v3"
 	"google.golang.org/grpc"
 )
 
@@ -95,9 +95,14 @@ func (bs *BaseServer) GetHTTPClient() *http.Client {
 	return bs.httpClient
 }
 
-// SetETCDClient sets the etcd client.
-func (bs *BaseServer) SetETCDClient(etcdClient *clientv3.Client) {
+// SetEtcdClient sets the etcd client.
+func (bs *BaseServer) SetEtcdClient(etcdClient *clientv3.Client) {
 	bs.etcdClient = etcdClient
+}
+
+// GetEtcdClient returns the etcd client.
+func (bs *BaseServer) GetEtcdClient() *clientv3.Client {
+	return bs.etcdClient
 }
 
 // SetHTTPClient sets the http client.
@@ -147,9 +152,9 @@ func (bs *BaseServer) InitListener(tlsCfg *grpcutil.TLSConfig, listenAddr string
 	}
 	if tlsConfig != nil {
 		bs.secure = true
-		bs.muxListener, err = tls.Listen(utils.TCPNetworkStr, listenURL.Host, tlsConfig)
+		bs.muxListener, err = tls.Listen(constant.TCPNetworkStr, listenURL.Host, tlsConfig)
 	} else {
-		bs.muxListener, err = net.Listen(utils.TCPNetworkStr, listenURL.Host)
+		bs.muxListener, err = net.Listen(constant.TCPNetworkStr, listenURL.Host)
 	}
 	return err
 }

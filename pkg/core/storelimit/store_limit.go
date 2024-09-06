@@ -178,6 +178,7 @@ func (l *limit) Take(count int64) bool {
 	return l.limiter.AllowN(int(count))
 }
 
+// GetRatePerSec returns the rate per second.
 func (l *limit) GetRatePerSec() float64 {
 	l.ratePerSecMutex.RLock()
 	defer l.ratePerSecMutex.RUnlock()

@@ -23,6 +23,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -46,7 +47,8 @@ import (
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/tools/pd-heartbeat-bench/config"
-	"go.etcd.io/etcd/pkg/report"
+	"github.com/tikv/pd/tools/pd-heartbeat-bench/metrics"
+	"go.etcd.io/etcd/pkg/v3/report"
 	"go.uber.org/zap"
 )
 
@@ -165,7 +167,7 @@ func putStores(ctx context.Context, cfg *config.Config, cli pdpb.PDClient, store
 			log.Fatal("failed to put store", zap.Uint64("store-id", i), zap.String("err", resp.GetHeader().GetError().String()))
 		}
 		go func(ctx context.Context, storeID uint64) {
-			var heartbeatTicker = time.NewTicker(10 * time.Second)
+			heartbeatTicker := time.NewTicker(10 * time.Second)
 			defer heartbeatTicker.Stop()
 			for {
 				select {
@@ -524,10 +526,11 @@ func main() {
 	header := &pdpb.RequestHeader{
 		ClusterId: clusterID,
 	}
-	var heartbeatTicker = time.NewTicker(regionReportInterval * time.Second)
+	heartbeatTicker := time.NewTicker(regionReportInterval * time.Second)
 	defer heartbeatTicker.Stop()
-	var resolvedTSTicker = time.NewTicker(time.Second)
+	resolvedTSTicker := time.NewTicker(time.Second)
 	defer resolvedTSTicker.Stop()
+	withMetric := metrics.InitMetric2Collect(cfg.MetricsAddr)
 	for {
 		select {
 		case <-heartbeatTicker.C:
@@ -544,21 +547,19 @@ func main() {
 				wg.Add(1)
 				go regions.handleRegionHeartbeat(wg, streams[id], id, rep)
 			}
+			if withMetric {
+				metrics.CollectMetrics(regions.updateRound, time.Second)
+			}
 			wg.Wait()
 
 			since := time.Since(startTime).Seconds()
 			close(rep.Results())
 			regions.result(cfg.RegionCount, since)
 			stats := <-r
-			log.Info("region heartbeat stats", zap.String("total", fmt.Sprintf("%.4fs", stats.Total.Seconds())),
-				zap.String("slowest", fmt.Sprintf("%.4fs", stats.Slowest)),
-				zap.String("fastest", fmt.Sprintf("%.4fs", stats.Fastest)),
-				zap.String("average", fmt.Sprintf("%.4fs", stats.Average)),
-				zap.String("stddev", fmt.Sprintf("%.4fs", stats.Stddev)),
-				zap.String("rps", fmt.Sprintf("%.4f", stats.RPS)),
-				zap.Uint64("max-epoch-version", maxVersion),
-			)
+			log.Info("region heartbeat stats",
+				metrics.RegionFields(stats, zap.Uint64("max-epoch-version", maxVersion))...)
 			log.Info("store heartbeat stats", zap.String("max", fmt.Sprintf("%.4fs", since)))
+			metrics.CollectRegionAndStoreStats(&stats, &since)
 			regions.update(cfg, options)
 			go stores.update(regions) // update stores in background, unusually region heartbeat is slower than store update.
 		case <-resolvedTSTicker.C:
@@ -594,6 +595,7 @@ func main() {
 }
 
 func exit(code int) {
+	metrics.OutputConclusion()
 	os.Exit(code)
 }
 
@@ -689,6 +691,21 @@ func runHTTPServer(cfg *config.Config, options *config.Options) {
 
 		c.IndentedJSON(http.StatusOK, output)
 	})
+	engine.GET("metrics-collect", func(c *gin.Context) {
+		second := c.Query("second")
+		if second == "" {
+			c.String(http.StatusBadRequest, "missing second")
+			return
+		}
+		secondInt, err := strconv.Atoi(second)
+		if err != nil {
+			c.String(http.StatusBadRequest, "invalid second")
+			return
+		}
+		metrics.CollectMetrics(metrics.WarmUpRound, time.Duration(secondInt)*time.Second)
+		c.IndentedJSON(http.StatusOK, "Successfully collect metrics")
+	})
+
 	engine.Run(cfg.StatusAddr)
 }
 

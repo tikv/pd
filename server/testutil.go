@@ -33,7 +33,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/server/config"
-	"go.etcd.io/etcd/embed"
+	"go.etcd.io/etcd/server/v3/embed"
 )
 
 // NewTestServer creates a pd server for testing.
@@ -78,7 +78,7 @@ func NewTestSingleConfig(c *assertutil.Checker) *config.Config {
 
 	cfg.AdvertiseClientUrls = cfg.ClientUrls
 	cfg.AdvertisePeerUrls = cfg.PeerUrls
-	cfg.DataDir, _ = os.MkdirTemp("/tmp", "test_pd")
+	cfg.DataDir, _ = os.MkdirTemp(os.TempDir(), "test_pd")
 	cfg.InitialCluster = fmt.Sprintf("pd=%s", cfg.PeerUrls)
 	cfg.DisableStrictReconfigCheck = true
 	cfg.TickInterval = typeutil.NewDuration(100 * time.Millisecond)

@@ -25,7 +25,7 @@ import (
 	"math/rand"
 	"os"
 	"os/exec"
-	"path"
+	"path/filepath"
 	"regexp"
 	"runtime"
 	"strconv"
@@ -92,8 +92,8 @@ go tool cover --func=xxx`
 }
 
 var (
-	modulePath           = "github.com/tikv/pd"
-	integrationsTestPath = "tests/integrations"
+	modulePath           = filepath.Join("github.com", "tikv", "pd")
+	integrationsTestPath = filepath.Join("tests", "integrations")
 )
 
 var (
@@ -171,8 +171,8 @@ func main() {
 		case "it":
 			// run integration tests
 			if len(os.Args) >= 3 {
-				modulePath = path.Join(modulePath, integrationsTestPath)
-				workDir = path.Join(workDir, integrationsTestPath)
+				modulePath = filepath.Join(modulePath, integrationsTestPath)
+				workDir = filepath.Join(workDir, integrationsTestPath)
 				switch os.Args[2] {
 				case "run":
 					isSucceed = cmdRun(os.Args[3:]...)
@@ -414,7 +414,7 @@ func runExistingTestCases(pkgs []string) (tasks []task, err error) {
 	wg := &sync.WaitGroup{}
 	tasksChannel := make(chan []task, len(pkgs))
 	for _, pkg := range pkgs {
-		_, ok := existPkgs[fmt.Sprintf("%s/%s", modulePath, pkg)]
+		_, ok := existPkgs[filepath.Join(modulePath, pkg)]
 		if !ok {
 			fmt.Println("no test case in ", pkg)
 			continue
@@ -528,7 +528,8 @@ func filterTestCases(tasks []task, arg1 string) ([]task, error) {
 }
 
 func listPackages() ([]string, error) {
-	cmd := exec.Command("go", "list", "./...")
+	listPath := strings.Join([]string{".", "..."}, string(filepath.Separator))
+	cmd := exec.Command("go", "list", listPath)
 	cmd.Dir = workDir
 	ss, err := cmdToLines(cmd)
 	if err != nil {
@@ -576,7 +577,7 @@ type testResult struct {
 func (n *numa) runTestCase(pkg string, fn string) testResult {
 	res := testResult{
 		JUnitTestCase: JUnitTestCase{
-			ClassName: path.Join(modulePath, pkg),
+			ClassName: filepath.Join(modulePath, pkg),
 			Name:      fn,
 		},
 	}
@@ -586,7 +587,7 @@ func (n *numa) runTestCase(pkg string, fn string) testResult {
 	var start time.Time
 	for i := 0; i < 3; i++ {
 		cmd := n.testCommand(pkg, fn)
-		cmd.Dir = path.Join(workDir, pkg)
+		cmd.Dir = filepath.Join(workDir, pkg)
 		// Combine the test case output, so the run result for failed cases can be displayed.
 		cmd.Stdout = &buf
 		cmd.Stderr = &buf
@@ -675,10 +676,10 @@ func (*numa) testCommand(pkg string, fn string) *exec.Cmd {
 	args := make([]string, 0, 10)
 	// let the test run in the verbose mode.
 	args = append(args, "-test.v")
-	exe := "./" + testFileName(pkg)
+	exe := strings.Join([]string{".", testFileName(pkg)}, string(filepath.Separator))
 	if coverProfile != "" {
-		fileName := strings.ReplaceAll(pkg, "/", "_") + "." + fn
-		tmpFile := path.Join(coverFileTempDir, fileName)
+		fileName := strings.ReplaceAll(pkg, string(filepath.Separator), "_") + "." + fn
+		tmpFile := filepath.Join(coverFileTempDir, fileName)
 		args = append(args, "-test.coverprofile", tmpFile)
 	}
 	if strings.Contains(fn, "Suite") {
@@ -720,12 +721,12 @@ func generateBuildCache() error {
 	fmt.Println("generate build cache")
 	// cd cmd/pd-server && go test -tags=tso_function_test,deadlock -exec-=true -vet=off -toolexec=go-compile-without-link
 	cmd := exec.Command("go", "test", "-exec=true", "-vet", "off", "--tags=tso_function_test,deadlock")
-	goCompileWithoutLink := fmt.Sprintf("-toolexec=%s/tools/pd-ut/go-compile-without-link.sh", workDir)
-	cmd.Dir = fmt.Sprintf("%s/cmd/pd-server", workDir)
+	goCompileWithoutLink := fmt.Sprintf("-toolexec=%s", filepath.Join(workDir, "tools", "pd-ut", "go-compile-without-link.sh"))
+	cmd.Dir = filepath.Join(workDir, "cmd", "pd-server")
 	if strings.Contains(workDir, integrationsTestPath) {
-		cmd.Dir = fmt.Sprintf("%s/cmd/pd-server", workDir[:strings.LastIndex(workDir, integrationsTestPath)])
-		goCompileWithoutLink = fmt.Sprintf("-toolexec=%s/tools/pd-ut/go-compile-without-link.sh",
-			workDir[:strings.LastIndex(workDir, integrationsTestPath)])
+		cmd.Dir = filepath.Join(workDir[:strings.LastIndex(workDir, integrationsTestPath)], "cmd", "pd-server")
+		goCompileWithoutLink = fmt.Sprintf("-toolexec=%s", filepath.Join(workDir[:strings.LastIndex(workDir, integrationsTestPath)],
+			"tools", "pd-ut", "go-compile-without-link.sh"))
 	}
 	cmd.Args = append(cmd.Args, goCompileWithoutLink)
 	cmd.Stdout = os.Stdout
@@ -746,24 +747,24 @@ func buildTestBinaryMulti(pkgs []string) ([]byte, error) {
 
 	// go test --exec=xprog --tags=tso_function_test,deadlock -vet=off --count=0 $(pkgs)
 	// workPath just like `/pd/tests/integrations`
-	xprogPath := path.Join(workDir, "bin/xprog")
+	xprogPath := filepath.Join(workDir, "bin", "xprog")
 	if strings.Contains(workDir, integrationsTestPath) {
-		xprogPath = path.Join(workDir[:strings.LastIndex(workDir, integrationsTestPath)], "bin/xprog")
+		xprogPath = filepath.Join(workDir[:strings.LastIndex(workDir, integrationsTestPath)], "bin", "xprog")
 	}
 	packages := make([]string, 0, len(pkgs))
 	for _, pkg := range pkgs {
-		packages = append(packages, path.Join(modulePath, pkg))
+		packages = append(packages, filepath.Join(modulePath, pkg))
 	}
 
 	// We use 2 * parallel for `go build` to make it faster.
 	p := strconv.Itoa(parallel * 2)
 	cmd := exec.Command("go", "test", "-p", p, "--exec", xprogPath, "-vet", "off", "--tags=tso_function_test,deadlock")
 	if coverProfile != "" {
-		coverpkg := "./..."
+		coverPkg := strings.Join([]string{".", "..."}, string(filepath.Separator))
 		if strings.Contains(workDir, integrationsTestPath) {
-			coverpkg = "../../..."
+			coverPkg = filepath.Join("..", "..", "...")
 		}
-		cmd.Args = append(cmd.Args, "-cover", fmt.Sprintf("-coverpkg=%s", coverpkg))
+		cmd.Args = append(cmd.Args, "-cover", fmt.Sprintf("-coverpkg=%s", coverPkg))
 	}
 	cmd.Args = append(cmd.Args, packages...)
 	if race {
@@ -794,12 +795,13 @@ func buildTestBinary(pkg string) error {
 	//nolint:gosec
 	cmd := exec.Command("go", "test", "-c", "-vet", "off", "--tags=tso_function_test,deadlock", "-o", testFileName(pkg), "-v")
 	if coverProfile != "" {
-		cmd.Args = append(cmd.Args, "-cover", "-coverpkg=./...")
+		coverPkg := strings.Join([]string{".", "..."}, string(filepath.Separator))
+		cmd.Args = append(cmd.Args, "-cover", fmt.Sprintf("-coverpkg=%s", coverPkg))
 	}
 	if race {
 		cmd.Args = append(cmd.Args, "-race")
 	}
-	cmd.Dir = path.Join(workDir, pkg)
+	cmd.Dir = filepath.Join(workDir, pkg)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
@@ -820,20 +822,19 @@ func testBinaryExist(pkg string) (bool, error) {
 }
 
 func testFileName(pkg string) string {
-	_, file := path.Split(pkg)
+	_, file := filepath.Split(pkg)
 	return file + ".test.bin"
 }
 
 func testFileFullPath(pkg string) string {
-	return path.Join(workDir, pkg, testFileName(pkg))
+	return filepath.Join(workDir, pkg, testFileName(pkg))
 }
 
 func listNewTestCases(pkg string) []string {
-	exe := "./" + testFileName(pkg)
-
+	exe := strings.Join([]string{".", testFileName(pkg)}, string(filepath.Separator))
 	// core.test -test.list Test
 	cmd := exec.Command(exe, "-test.list", "Test")
-	cmd.Dir = path.Join(workDir, pkg)
+	cmd.Dir = filepath.Join(workDir, pkg)
 	var buf bytes.Buffer
 	cmd.Stdout = &buf
 	err := cmd.Run()

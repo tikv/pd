@@ -255,11 +255,6 @@ func (r *RaftEngine) ResetRegionChange(storeID uint64, regionID uint64) {
 	}
 }
 
-// TraverseRegions executes a function on all regions, and function need to be self-locked.
-func (r *RaftEngine) TraverseRegions(lockedFunc func(*core.RegionInfo)) {
-	r.regionsInfo.TraverseRegions(lockedFunc)
-}
-
 // GetRegions gets all RegionInfo from regionMap
 func (r *RaftEngine) GetRegions() []*core.RegionInfo {
 	r.RLock()
@@ -299,6 +294,6 @@ func (r *RaftEngine) allocID(storeID uint64) (uint64, error) {
 	if !ok {
 		return 0, errors.Errorf("node %d not found", storeID)
 	}
-	id, err := node.client.AllocID(context.Background())
+	id, err := node.client.allocID(context.Background())
 	return id, errors.WithStack(err)
 }

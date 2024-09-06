@@ -15,6 +15,7 @@
 package server
 
 import (
+	"fmt"
 	"math"
 	"testing"
 	"time"
@@ -122,4 +123,67 @@ func TestGroupTokenBucketRequest(t *testing.T) {
 	tb, trickle = gtb.request(time2, 20000, uint64(time.Second)*10/uint64(time.Millisecond), clientUniqueID)
 	re.LessOrEqual(math.Abs(tb.Tokens-20000), 1e-7)
 	re.Equal(int64(time.Second)*10/int64(time.Millisecond), trickle)
+}
+
+func TestGroupTokenBucketRequestLoop(t *testing.T) {
+	re := require.New(t)
+	tbSetting := &rmpb.TokenBucket{
+		Tokens: 50000,
+		Settings: &rmpb.TokenLimitSettings{
+			FillRate:   2000,
+			BurstLimit: 200000,
+		},
+	}
+
+	gtb := NewGroupTokenBucket(tbSetting)
+	clientUniqueID := uint64(0)
+	initialTime := time.Now()
+
+	// Initialize the token bucket
+	gtb.init(initialTime, clientUniqueID)
+	gtb.Tokens = 50000
+
+	const timeIncrement = 5 * time.Second
+	const targetPeriod = 5 * time.Second
+	const defaultTrickleMs = int64(targetPeriod) / int64(time.Millisecond)
+
+	// Define the test cases in a table
+	testCases := []struct {
+		requestTokens                 float64
+		assignedTokens                float64
+		globalBucketTokensAfterAssign float64
+		expectedTrickleMs             int64
+	}{
+		/* requestTokens, assignedTokens, globalBucketTokensAfterAssign, TrickleMs  */
+		{50000, 50000, 0, 0},
+		{50000, 30000, -20000, defaultTrickleMs},
+		{30000, 15000, -25000, defaultTrickleMs},
+		{15000, 12500, -27500, defaultTrickleMs},
+		{12500, 11250, -28750, defaultTrickleMs},
+		{11250, 10625, -29375, defaultTrickleMs},
+		// RU_PER_SEC is close to 2000, RU_PER_SEC =  assignedTokens / TrickleMs / 1000.
+		{10625, 10312.5, -29687.5, defaultTrickleMs},
+		{10312.5, 10156.25, -29843.75, defaultTrickleMs},
+		{10156.25, 10078.125, -29921.875, defaultTrickleMs},
+		{10078.125, 10039.0625, -29960.9375, defaultTrickleMs},
+		{10039.0625, 10019.53125, -29980.46875, defaultTrickleMs},
+		{10019.53125, 10009.765625, -29990.234375, defaultTrickleMs},
+		{10009.765625, 10004.8828125, -29995.1171875, defaultTrickleMs},
+		{10004.8828125, 10002.44140625, -29997.55859375, defaultTrickleMs},
+		{10002.44140625, 10001.220703125, -29998.779296875, defaultTrickleMs},
+		{10001.220703125, 10000.6103515625, -29999.3896484375, defaultTrickleMs},
+		{10000.6103515625, 10000.30517578125, -29999.69482421875, defaultTrickleMs},
+		{10000.30517578125, 10000.152587890625, -29999.847412109375, defaultTrickleMs},
+		{10000.152587890625, 10000.0762939453125, -29999.9237060546875, defaultTrickleMs},
+		{10000.0762939453125, 10000.038146972656, -29999.961853027343, defaultTrickleMs},
+	}
+
+	currentTime := initialTime
+	for i, tc := range testCases {
+		tb, trickle := gtb.request(currentTime, tc.requestTokens, uint64(targetPeriod)/uint64(time.Millisecond), clientUniqueID)
+		re.Equal(tc.globalBucketTokensAfterAssign, gtb.GetTokenBucket().Tokens, fmt.Sprintf("Test case %d failed: expected bucket tokens %f, got %f", i, tc.globalBucketTokensAfterAssign, gtb.GetTokenBucket().Tokens))
+		re.LessOrEqual(math.Abs(tb.Tokens-tc.assignedTokens), 1e-7, fmt.Sprintf("Test case %d failed: expected tokens %f, got %f", i, tc.assignedTokens, tb.Tokens))
+		re.Equal(tc.expectedTrickleMs, trickle, fmt.Sprintf("Test case %d failed: expected trickle %d, got %d", i, tc.expectedTrickleMs, trickle))
+		currentTime = currentTime.Add(timeIncrement)
+	}
 }

@@ -25,8 +25,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
-	"go.etcd.io/etcd/clientv3"
-	"go.etcd.io/etcd/embed"
+	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.etcd.io/etcd/server/v3/embed"
 )
 
 const defaultLeaseTimeout = 1
@@ -100,9 +100,9 @@ func TestLeadership(t *testing.T) {
 	leadership2.Keep(ctx)
 
 	// Check the lease.
-	lease1 := leadership1.getLease()
+	lease1 := leadership1.GetLease()
 	re.NotNil(lease1)
-	lease2 := leadership2.getLease()
+	lease2 := leadership2.GetLease()
 	re.NotNil(lease2)
 
 	re.True(lease1.IsExpired())

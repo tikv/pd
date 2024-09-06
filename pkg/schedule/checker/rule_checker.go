@@ -31,7 +31,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
-	types "github.com/tikv/pd/pkg/schedule/type"
+	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/versioninfo"
 	"go.uber.org/zap"
 )
@@ -50,29 +50,34 @@ var (
 // RuleChecker fix/improve region by placement rules.
 type RuleChecker struct {
 	PauseController
-	cluster            sche.CheckerCluster
-	ruleManager        *placement.RuleManager
-	regionWaitingList  cache.Cache
-	pendingList        cache.Cache
-	switchWitnessCache *cache.TTLUint64
-	record             *recorder
+	cluster                 sche.CheckerCluster
+	ruleManager             *placement.RuleManager
+	pendingProcessedRegions *cache.TTLUint64
+	pendingList             cache.Cache
+	switchWitnessCache      *cache.TTLUint64
+	record                  *recorder
 }
 
 // NewRuleChecker creates a checker instance.
-func NewRuleChecker(ctx context.Context, cluster sche.CheckerCluster, ruleManager *placement.RuleManager, regionWaitingList cache.Cache) *RuleChecker {
+func NewRuleChecker(ctx context.Context, cluster sche.CheckerCluster, ruleManager *placement.RuleManager, pendingProcessedRegions *cache.TTLUint64) *RuleChecker {
 	return &RuleChecker{
-		cluster:            cluster,
-		ruleManager:        ruleManager,
-		regionWaitingList:  regionWaitingList,
-		pendingList:        cache.NewDefaultCache(maxPendingListLen),
-		switchWitnessCache: cache.NewIDTTL(ctx, time.Minute, cluster.GetCheckerConfig().GetSwitchWitnessInterval()),
-		record:             newRecord(),
+		cluster:                 cluster,
+		ruleManager:             ruleManager,
+		pendingProcessedRegions: pendingProcessedRegions,
+		pendingList:             cache.NewDefaultCache(maxPendingListLen),
+		switchWitnessCache:      cache.NewIDTTL(ctx, time.Minute, cluster.GetCheckerConfig().GetSwitchWitnessInterval()),
+		record:                  newRecord(),
 	}
 }
 
 // Name returns RuleChecker's name.
 func (*RuleChecker) Name() string {
 	return types.RuleChecker.String()
+}
+
+// GetType returns RuleChecker's type.
+func (*RuleChecker) GetType() types.CheckerSchedulerType {
+	return types.RuleChecker
 }
 
 // Check checks if the region matches placement rules and returns Operator to
@@ -260,7 +265,7 @@ func (c *RuleChecker) replaceUnexpectedRulePeer(region *core.RegionInfo, rf *pla
 		minCount := uint64(math.MaxUint64)
 		for _, p := range region.GetPeers() {
 			count := c.record.getOfflineLeaderCount(p.GetStoreId())
-			checkPeerhealth := func() bool {
+			checkPeerHealth := func() bool {
 				if p.GetId() == peer.GetId() {
 					return true
 				}
@@ -269,7 +274,7 @@ func (c *RuleChecker) replaceUnexpectedRulePeer(region *core.RegionInfo, rf *pla
 				}
 				return c.allowLeader(fit, p)
 			}
-			if minCount > count && checkPeerhealth() {
+			if minCount > count && checkPeerHealth() {
 				minCount = count
 				newLeader = p
 			}
@@ -637,7 +642,7 @@ func (c *RuleChecker) getRuleFitStores(rf *placement.RuleFit) []*core.StoreInfo 
 
 func (c *RuleChecker) handleFilterState(region *core.RegionInfo, filterByTempState bool) {
 	if filterByTempState {
-		c.regionWaitingList.Put(region.GetID(), nil)
+		c.pendingProcessedRegions.Put(region.GetID(), nil)
 		c.pendingList.Remove(region.GetID())
 	} else {
 		c.pendingList.Put(region.GetID(), nil)

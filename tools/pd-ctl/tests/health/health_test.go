@@ -31,7 +31,7 @@ import (
 	pdTests "github.com/tikv/pd/tests"
 	ctl "github.com/tikv/pd/tools/pd-ctl/pdctl"
 	"github.com/tikv/pd/tools/pd-ctl/tests"
-	"go.etcd.io/etcd/pkg/transport"
+	"go.etcd.io/etcd/client/pkg/v3/transport"
 )
 
 func TestHealth(t *testing.T) {
@@ -80,8 +80,8 @@ func TestHealthTLS(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	certPath := "../cert"
-	certScript := "../cert_opt.sh"
+	certPath := filepath.Join("..", "cert")
+	certScript := filepath.Join("..", "cert_opt.sh")
 	// generate certs
 	if err := os.Mkdir(certPath, 0755); err != nil {
 		t.Fatal(err)
@@ -143,9 +143,9 @@ func TestHealthTLS(t *testing.T) {
 	pdAddr := tc.GetConfig().GetClientURL()
 	pdAddr = strings.ReplaceAll(pdAddr, "http", "https")
 	args := []string{"-u", pdAddr, "health",
-		"--cacert=../cert/ca.pem",
-		"--cert=../cert/client.pem",
-		"--key=../cert/client-key.pem"}
+		"--cacert=" + filepath.Join("..", "cert", "ca.pem"),
+		"--cert=" + filepath.Join("..", "cert", "client.pem"),
+		"--key=" + filepath.Join("..", "cert", "client-key.pem")}
 	output, err := tests.ExecuteCommand(cmd, args...)
 	re.NoError(err)
 	h := make([]api.Health, len(healths))

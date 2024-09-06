@@ -30,24 +30,24 @@ func TestRetryQuota(t *testing.T) {
 	store2 := core.NewStoreInfo(&metapb.Store{Id: 2})
 	keepStores := []*core.StoreInfo{store1}
 
-	// test GetLimit
-	re.Equal(10, q.GetLimit(store1))
+	// test getLimit
+	re.Equal(10, q.getLimit(store1))
 
-	// test Attenuate
+	// test attenuate
 	for _, expected := range []int{5, 2, 1, 1, 1} {
-		q.Attenuate(store1)
-		re.Equal(expected, q.GetLimit(store1))
+		q.attenuate(store1)
+		re.Equal(expected, q.getLimit(store1))
 	}
 
 	// test GC
-	re.Equal(10, q.GetLimit(store2))
-	q.Attenuate(store2)
-	re.Equal(5, q.GetLimit(store2))
-	q.GC(keepStores)
-	re.Equal(1, q.GetLimit(store1))
-	re.Equal(10, q.GetLimit(store2))
+	re.Equal(10, q.getLimit(store2))
+	q.attenuate(store2)
+	re.Equal(5, q.getLimit(store2))
+	q.gc(keepStores)
+	re.Equal(1, q.getLimit(store1))
+	re.Equal(10, q.getLimit(store2))
 
-	// test ResetLimit
-	q.ResetLimit(store1)
-	re.Equal(10, q.GetLimit(store1))
+	// test resetLimit
+	q.resetLimit(store1)
+	re.Equal(10, q.getLimit(store1))
 }

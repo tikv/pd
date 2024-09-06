@@ -23,7 +23,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
-	mcsutils "github.com/tikv/pd/pkg/mcs/utils"
+	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/ratelimit"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/statistics/buckets"
@@ -62,7 +62,7 @@ func (c *RaftCluster) HandleRegionHeartbeat(region *core.RegionInfo) error {
 	}
 	tracer.OnAllStageFinished()
 
-	if c.IsServiceIndependent(mcsutils.SchedulingServiceName) {
+	if c.IsServiceIndependent(constant.SchedulingServiceName) {
 		return nil
 	}
 	c.coordinator.GetOperatorController().Dispatch(region, operator.DispatchFromHeartBeat, c.coordinator.RecordOpStepWithTTL)
@@ -165,7 +165,7 @@ func (c *RaftCluster) HandleAskBatchSplit(request *pdpb.AskBatchSplitRequest) (*
 	// If region splits during the scheduling process, regions with abnormal
 	// status may be left, and these regions need to be checked with higher
 	// priority.
-	c.AddPendingProcessedRegions(recordRegions...)
+	c.AddPendingProcessedRegions(false, recordRegions...)
 
 	resp := &pdpb.AskBatchSplitResponse{Ids: splitIDs}
 
@@ -238,7 +238,7 @@ func (*RaftCluster) HandleBatchReportSplit(request *pdpb.ReportBatchSplitRequest
 	err := checkSplitRegions(regions)
 	if err != nil {
 		log.Warn("report batch split region is invalid",
-			zap.Stringer("region-meta", hrm),
+			logutil.ZapRedactStringer("region-meta", hrm),
 			errs.ZapError(err))
 		return nil, err
 	}
@@ -247,7 +247,7 @@ func (*RaftCluster) HandleBatchReportSplit(request *pdpb.ReportBatchSplitRequest
 	hrm = core.RegionsToHexMeta(regions[:last])
 	log.Info("region batch split, generate new regions",
 		zap.Uint64("region-id", originRegion.GetId()),
-		zap.Stringer("origin", hrm),
+		logutil.ZapRedactStringer("origin", hrm),
 		zap.Int("total", last))
 	return &pdpb.ReportBatchSplitResponse{}, nil
 }
@@ -257,7 +257,7 @@ func (c *RaftCluster) HandleReportBuckets(b *metapb.Buckets) error {
 	if err := c.processReportBuckets(b); err != nil {
 		return err
 	}
-	if !c.IsServiceIndependent(mcsutils.SchedulingServiceName) {
+	if !c.IsServiceIndependent(constant.SchedulingServiceName) {
 		c.hotStat.CheckAsync(buckets.NewCheckPeerTask(b))
 	}
 	return nil

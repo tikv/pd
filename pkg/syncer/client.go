@@ -69,7 +69,7 @@ func (s *RegionSyncer) syncRegion(ctx context.Context, conn *grpc.ClientConn) (C
 	err = syncStream.Send(&pdpb.SyncRegionRequest{
 		Header:     &pdpb.RequestHeader{ClusterId: s.server.ClusterID()},
 		Member:     s.server.GetMemberInfo(),
-		StartIndex: s.history.GetNextIndex(),
+		StartIndex: s.history.getNextIndex(),
 	})
 	if err != nil {
 		return nil, err
@@ -154,7 +154,7 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 				time.Sleep(time.Second)
 				continue
 			}
-			log.Info("server starts to synchronize with leader", zap.String("server", s.server.Name()), zap.String("leader", s.server.GetLeader().GetName()), zap.Uint64("request-index", s.history.GetNextIndex()))
+			log.Info("server starts to synchronize with leader", zap.String("server", s.server.Name()), zap.String("leader", s.server.GetLeader().GetName()), zap.Uint64("request-index", s.history.getNextIndex()))
 			for {
 				resp, err := stream.Recv()
 				if err != nil {
@@ -166,14 +166,14 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 					time.Sleep(time.Second)
 					break
 				}
-				if s.history.GetNextIndex() != resp.GetStartIndex() {
+				if s.history.getNextIndex() != resp.GetStartIndex() {
 					log.Warn("server sync index not match the leader",
 						zap.String("server", s.server.Name()),
-						zap.Uint64("own", s.history.GetNextIndex()),
+						zap.Uint64("own", s.history.getNextIndex()),
 						zap.Uint64("leader", resp.GetStartIndex()),
 						zap.Int("records-length", len(resp.GetRegions())))
 					// reset index
-					s.history.ResetWithIndex(resp.GetStartIndex())
+					s.history.resetWithIndex(resp.GetStartIndex())
 				}
 				stats := resp.GetRegionStats()
 				regions := resp.GetRegions()
@@ -224,7 +224,7 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 						err = regionStorage.SaveRegion(r)
 					}
 					if err == nil {
-						s.history.Record(region)
+						s.history.record(region)
 					}
 					for _, old := range overlaps {
 						_ = regionStorage.DeleteRegion(old.GetMeta())

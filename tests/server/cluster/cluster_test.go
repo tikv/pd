@@ -18,7 +18,9 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -38,6 +40,7 @@ import (
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/schedulers"
+	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/syncer"
@@ -184,6 +187,10 @@ func TestDamagedRegion(t *testing.T) {
 
 func TestRegionStatistics(t *testing.T) {
 	re := require.New(t)
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/member/skipCampaignLeaderCheck", "return(true)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/member/skipCampaignLeaderCheck"))
+	}()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	tc, err := tests.NewTestCluster(ctx, 3)
@@ -238,7 +245,7 @@ func TestRegionStatistics(t *testing.T) {
 	re.Len(regions, 1)
 
 	leaderServer.ResignLeader()
-	re.NotEqual(tc.WaitLeader(), leaderName)
+	re.NotEqual(leaderName, tc.WaitLeader())
 	leaderServer = tc.GetLeaderServer()
 	leaderName = leaderServer.GetServer().Name()
 	rc = leaderServer.GetRaftCluster()
@@ -255,11 +262,11 @@ func TestRegionStatistics(t *testing.T) {
 	re.False(r.LoadedFromStorage() && r.LoadedFromSync())
 
 	leaderServer.ResignLeader()
-	re.NotEqual(tc.WaitLeader(), leaderName)
+	re.NotEqual(leaderName, tc.WaitLeader())
 	leaderServer = tc.GetLeaderServer()
 	leaderName = leaderServer.GetServer().Name()
 	leaderServer.ResignLeader()
-	re.NotEqual(tc.WaitLeader(), leaderName)
+	re.NotEqual(leaderName, tc.WaitLeader())
 	rc = tc.GetLeaderServer().GetRaftCluster()
 	r = rc.GetRegion(region.Id)
 	re.NotNil(r)
@@ -821,7 +828,7 @@ func TestSetScheduleOpt(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	// TODO: enable placementrules
+	// TODO: enable placementRules
 	tc, err := tests.NewTestCluster(ctx, 1, func(cfg *config.Config, _ string) { cfg.Replication.EnablePlacementRules = false })
 	defer tc.Destroy()
 	re.NoError(err)
@@ -1404,10 +1411,10 @@ func TestTransferLeaderForScheduler(t *testing.T) {
 	re.True(leaderServer.GetRaftCluster().IsPrepared())
 	schedsNum := len(rc.GetCoordinator().GetSchedulersController().GetSchedulerNames())
 	// Add evict leader scheduler
-	api.MustAddScheduler(re, leaderServer.GetAddr(), schedulers.EvictLeaderName, map[string]any{
+	api.MustAddScheduler(re, leaderServer.GetAddr(), types.EvictLeaderScheduler.String(), map[string]any{
 		"store_id": 1,
 	})
-	api.MustAddScheduler(re, leaderServer.GetAddr(), schedulers.EvictLeaderName, map[string]any{
+	api.MustAddScheduler(re, leaderServer.GetAddr(), types.EvictLeaderScheduler.String(), map[string]any{
 		"store_id": 2,
 	})
 	// Check scheduler updated.
@@ -1462,14 +1469,14 @@ func TestTransferLeaderForScheduler(t *testing.T) {
 func checkEvictLeaderSchedulerExist(re *require.Assertions, sc *schedulers.Controller, exist bool) {
 	testutil.Eventually(re, func() bool {
 		if !exist {
-			return sc.GetScheduler(schedulers.EvictLeaderName) == nil
+			return sc.GetScheduler(types.EvictLeaderScheduler.String()) == nil
 		}
-		return sc.GetScheduler(schedulers.EvictLeaderName) != nil
+		return sc.GetScheduler(types.EvictLeaderScheduler.String()) != nil
 	})
 }
 
 func checkEvictLeaderStoreIDs(re *require.Assertions, sc *schedulers.Controller, expected []uint64) {
-	handler, ok := sc.GetSchedulerHandlers()[schedulers.EvictLeaderName]
+	handler, ok := sc.GetSchedulerHandlers()[types.EvictLeaderScheduler.String()]
 	re.True(ok)
 	h, ok := handler.(interface {
 		EvictStoreIDs() []uint64
@@ -1643,6 +1650,10 @@ func TestMinResolvedTS(t *testing.T) {
 // See https://github.com/tikv/pd/issues/4941
 func TestTransferLeaderBack(t *testing.T) {
 	re := require.New(t)
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/member/skipCampaignLeaderCheck", "return(true)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/member/skipCampaignLeaderCheck"))
+	}()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	tc, err := tests.NewTestCluster(ctx, 2)
@@ -1810,4 +1821,56 @@ func TestExternalTimestamp(t *testing.T) {
 		re.Equal(1, tsoutil.CompareTimestampUint64(unexpectedTS, currentGlobalTS))
 		re.Equal(ts, resp4.GetTimestamp())
 	}
+}
+
+func TestPatrolRegionConfigChange(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	tc, err := tests.NewTestCluster(ctx, 1)
+	defer tc.Destroy()
+	re.NoError(err)
+	err = tc.RunInitialServers()
+	re.NoError(err)
+	tc.WaitLeader()
+	leaderServer := tc.GetLeaderServer()
+	re.NoError(leaderServer.BootstrapCluster())
+	for i := 1; i <= 3; i++ {
+		store := &metapb.Store{
+			Id:            uint64(i),
+			State:         metapb.StoreState_Up,
+			NodeState:     metapb.NodeState_Serving,
+			LastHeartbeat: time.Now().UnixNano(),
+		}
+		tests.MustPutStore(re, tc, store)
+	}
+	for i := 1; i <= 200; i++ {
+		startKey := []byte(fmt.Sprintf("%d", i*2-1))
+		endKey := []byte(fmt.Sprintf("%d", i*2))
+		tests.MustPutRegion(re, tc, uint64(i), uint64(i%3+1), startKey, endKey)
+	}
+	fname := testutil.InitTempFileLogger("debug")
+	defer os.RemoveAll(fname)
+	checkLog(re, fname, "coordinator starts patrol regions")
+
+	// test change patrol region interval
+	schedule := leaderServer.GetConfig().Schedule
+	schedule.PatrolRegionInterval = typeutil.NewDuration(99 * time.Millisecond)
+	leaderServer.GetServer().SetScheduleConfig(schedule)
+	checkLog(re, fname, "starts patrol regions with new interval")
+
+	// test change schedule halt
+	schedule = leaderServer.GetConfig().Schedule
+	schedule.HaltScheduling = true
+	leaderServer.GetServer().SetScheduleConfig(schedule)
+	checkLog(re, fname, "skip patrol regions due to scheduling is halted")
+}
+
+func checkLog(re *require.Assertions, fname, expect string) {
+	testutil.Eventually(re, func() bool {
+		b, _ := os.ReadFile(fname)
+		l := string(b)
+		return strings.Contains(l, expect)
+	})
+	os.Truncate(fname, 0)
 }

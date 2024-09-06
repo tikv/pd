@@ -42,7 +42,7 @@ import (
 	"github.com/tikv/pd/pkg/id"
 	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/mcs/discovery"
-	mcsutils "github.com/tikv/pd/pkg/mcs/utils"
+	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/memory"
 	"github.com/tikv/pd/pkg/progress"
 	"github.com/tikv/pd/pkg/ratelimit"
@@ -65,7 +65,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/server/config"
-	"go.etcd.io/etcd/clientv3"
+	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 )
 
@@ -327,7 +327,7 @@ func (c *RaftCluster) Start(s Server) error {
 		return err
 	}
 
-	if !c.IsServiceIndependent(mcsutils.SchedulingServiceName) {
+	if !c.IsServiceIndependent(constant.SchedulingServiceName) {
 		for _, store := range c.GetStores() {
 			storeID := store.GetID()
 			c.slowStat.ObserveSlowStoreStatus(storeID, store.IsSlow())
@@ -343,7 +343,7 @@ func (c *RaftCluster) Start(s Server) error {
 		log.Error("load external timestamp meets error", zap.Error(err))
 	}
 
-	if s.IsAPIServiceMode() {
+	if c.isAPIServiceMode {
 		// bootstrap keyspace group manager after starting other parts successfully.
 		// This order avoids a stuck goroutine in keyspaceGroupManager when it fails to create raftcluster.
 		err = c.keyspaceGroupManager.Bootstrap(c.ctx)
@@ -364,29 +364,29 @@ func (c *RaftCluster) Start(s Server) error {
 	go c.startGCTuner()
 
 	c.running = true
-	c.heartbeatRunner.Start()
-	c.miscRunner.Start()
-	c.logRunner.Start()
+	c.heartbeatRunner.Start(c.ctx)
+	c.miscRunner.Start(c.ctx)
+	c.logRunner.Start(c.ctx)
 	return nil
 }
 
 func (c *RaftCluster) checkServices() {
 	if c.isAPIServiceMode {
-		servers, err := discovery.Discover(c.etcdClient, strconv.FormatUint(c.clusterID, 10), mcsutils.SchedulingServiceName)
+		servers, err := discovery.Discover(c.etcdClient, strconv.FormatUint(c.clusterID, 10), constant.SchedulingServiceName)
 		if c.opt.GetMicroServiceConfig().IsSchedulingFallbackEnabled() && (err != nil || len(servers) == 0) {
 			c.startSchedulingJobs(c, c.hbstreams)
-			c.independentServices.Delete(mcsutils.SchedulingServiceName)
+			c.UnsetServiceIndependent(constant.SchedulingServiceName)
 		} else {
 			if c.stopSchedulingJobs() || c.coordinator == nil {
 				c.initCoordinator(c.ctx, c, c.hbstreams)
 			}
-			if !c.IsServiceIndependent(mcsutils.SchedulingServiceName) {
-				c.independentServices.Store(mcsutils.SchedulingServiceName, true)
+			if !c.IsServiceIndependent(constant.SchedulingServiceName) {
+				c.SetServiceIndependent(constant.SchedulingServiceName)
 			}
 		}
 	} else {
 		c.startSchedulingJobs(c, c.hbstreams)
-		c.independentServices.Delete(mcsutils.SchedulingServiceName)
+		c.UnsetServiceIndependent(constant.SchedulingServiceName)
 	}
 }
 
@@ -396,8 +396,7 @@ func (c *RaftCluster) runServiceCheckJob() {
 
 	ticker := time.NewTicker(serviceCheckInterval)
 	failpoint.Inject("highFrequencyClusterJobs", func() {
-		ticker.Stop()
-		ticker = time.NewTicker(time.Millisecond)
+		ticker.Reset(time.Millisecond)
 	})
 	defer ticker.Stop()
 
@@ -675,8 +674,7 @@ func (c *RaftCluster) runMetricsCollectionJob() {
 
 	ticker := time.NewTicker(metricsCollectionJobInterval)
 	failpoint.Inject("highFrequencyClusterJobs", func() {
-		ticker.Stop()
-		ticker = time.NewTicker(time.Millisecond)
+		ticker.Reset(time.Millisecond)
 	})
 	defer ticker.Stop()
 
@@ -699,8 +697,7 @@ func (c *RaftCluster) runNodeStateCheckJob() {
 
 	ticker := time.NewTicker(nodeStateCheckJobInterval)
 	failpoint.Inject("highFrequencyClusterJobs", func() {
-		ticker.Stop()
-		ticker = time.NewTicker(2 * time.Second)
+		ticker.Reset(2 * time.Second)
 	})
 	defer ticker.Stop()
 
@@ -757,7 +754,7 @@ func (c *RaftCluster) Stop() {
 	}
 	c.running = false
 	c.cancel()
-	if !c.IsServiceIndependent(mcsutils.SchedulingServiceName) {
+	if !c.IsServiceIndependent(constant.SchedulingServiceName) {
 		c.stopSchedulingJobs()
 	}
 	c.heartbeatRunner.Stop()
@@ -889,7 +886,7 @@ func (c *RaftCluster) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest
 	nowTime := time.Now()
 	var newStore *core.StoreInfo
 	// If this cluster has slow stores, we should awaken hibernated regions in other stores.
-	if !c.IsServiceIndependent(mcsutils.SchedulingServiceName) {
+	if !c.IsServiceIndependent(constant.SchedulingServiceName) {
 		if needAwaken, slowStoreIDs := c.NeedAwakenAllRegionsInStore(storeID); needAwaken {
 			log.Info("forcely awaken hibernated regions", zap.Uint64("store-id", storeID), zap.Uint64s("slow-stores", slowStoreIDs))
 			newStore = store.Clone(core.SetStoreStats(stats), core.SetLastHeartbeatTS(nowTime), core.SetLastAwakenTime(nowTime), opt)
@@ -924,7 +921,7 @@ func (c *RaftCluster) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest
 		regions  map[uint64]*core.RegionInfo
 		interval uint64
 	)
-	if !c.IsServiceIndependent(mcsutils.SchedulingServiceName) {
+	if !c.IsServiceIndependent(constant.SchedulingServiceName) {
 		c.hotStat.Observe(storeID, newStore.GetStoreStats())
 		c.hotStat.FilterUnhealthyStore(c)
 		c.slowStat.ObserveSlowStoreStatus(storeID, newStore.IsSlow())
@@ -985,7 +982,7 @@ func (c *RaftCluster) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest
 		e := int64(dur)*2 - int64(stat.GetTotalDurationSec())
 		store.Feedback(float64(e))
 	}
-	if !c.IsServiceIndependent(mcsutils.SchedulingServiceName) {
+	if !c.IsServiceIndependent(constant.SchedulingServiceName) {
 		// Here we will compare the reported regions with the previous hot peers to decide if it is still hot.
 		collectUnReportedPeerTask := func(cache *statistics.HotPeerCache) {
 			stats := cache.CheckColdPeer(storeID, regions, interval)
@@ -1041,7 +1038,7 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 
 	region.Inherit(origin, c.GetStoreConfig().IsEnableRegionBucket())
 
-	if !c.IsServiceIndependent(mcsutils.SchedulingServiceName) {
+	if !c.IsServiceIndependent(constant.SchedulingServiceName) {
 		cluster.HandleStatsAsync(c, region)
 	}
 	tracer.OnAsyncHotStatsFinished()
@@ -1061,10 +1058,8 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 			ctx.MiscRunner.RunTask(
 				regionID,
 				ratelimit.ObserveRegionStatsAsync,
-				func() {
-					if c.regionStats.RegionStatsNeedUpdate(region) {
-						cluster.Collect(c, region, hasRegionStats)
-					}
+				func(ctx context.Context) {
+					cluster.Collect(ctx, c, region)
 				},
 			)
 		}
@@ -1073,7 +1068,7 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 			ctx.TaskRunner.RunTask(
 				regionID,
 				ratelimit.UpdateSubTree,
-				func() {
+				func(context.Context) {
 					c.CheckAndPutSubTree(region)
 				},
 				ratelimit.WithRetained(true),
@@ -1101,19 +1096,19 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 		ctx.TaskRunner.RunTask(
 			regionID,
 			ratelimit.UpdateSubTree,
-			func() {
+			func(context.Context) {
 				c.CheckAndPutSubTree(region)
 			},
 			ratelimit.WithRetained(retained),
 		)
 		tracer.OnUpdateSubTreeFinished()
 
-		if !c.IsServiceIndependent(mcsutils.SchedulingServiceName) {
+		if !c.IsServiceIndependent(constant.SchedulingServiceName) {
 			ctx.MiscRunner.RunTask(
 				regionID,
 				ratelimit.HandleOverlaps,
-				func() {
-					cluster.HandleOverlaps(c, overlaps)
+				func(ctx context.Context) {
+					cluster.HandleOverlaps(ctx, c, overlaps)
 				},
 			)
 		}
@@ -1121,17 +1116,19 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 	}
 
 	tracer.OnSaveCacheFinished()
-	// handle region stats
-	ctx.MiscRunner.RunTask(
-		regionID,
-		ratelimit.CollectRegionStatsAsync,
-		func() {
-			// TODO: Due to the accuracy requirements of the API "/regions/check/xxx",
-			// region stats needs to be collected in API mode.
-			// We need to think of a better way to reduce this part of the cost in the future.
-			cluster.Collect(c, region, hasRegionStats)
-		},
-	)
+	if hasRegionStats {
+		// handle region stats
+		ctx.MiscRunner.RunTask(
+			regionID,
+			ratelimit.CollectRegionStatsAsync,
+			func(ctx context.Context) {
+				// TODO: Due to the accuracy requirements of the API "/regions/check/xxx",
+				// region stats needs to be collected in API mode.
+				// We need to think of a better way to reduce this part of the cost in the future.
+				cluster.Collect(ctx, c, region)
+			},
+		)
+	}
 
 	tracer.OnCollectRegionStatsFinished()
 	if c.storage != nil {
@@ -1139,7 +1136,7 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 			ctx.MiscRunner.RunTask(
 				regionID,
 				ratelimit.SaveRegionToKV,
-				func() {
+				func(context.Context) {
 					// If there are concurrent heartbeats from the same region, the last write will win even if
 					// writes to storage in the critical area. So don't use mutex to protect it.
 					// Not successfully saved to storage is not fatal, it only leads to longer warm-up
@@ -1309,6 +1306,9 @@ func (c *RaftCluster) checkStoreLabels(s *core.StoreInfo) error {
 	}
 	for _, label := range s.GetLabels() {
 		key := label.GetKey()
+		if key == core.EngineKey {
+			continue
+		}
 		if _, ok := keysSet[key]; !ok {
 			log.Warn("not found the key match with the store label",
 				zap.Stringer("store", s.GetMeta()),
@@ -1448,7 +1448,7 @@ func (c *RaftCluster) BuryStore(storeID uint64, forceBury bool) error {
 		c.resetProgress(storeID, addr)
 		storeIDStr := strconv.FormatUint(storeID, 10)
 		statistics.ResetStoreStatistics(addr, storeIDStr)
-		if !c.IsServiceIndependent(mcsutils.SchedulingServiceName) {
+		if !c.IsServiceIndependent(constant.SchedulingServiceName) {
 			c.removeStoreStatistics(storeID)
 		}
 	}
@@ -1584,7 +1584,7 @@ func (c *RaftCluster) setStore(store *core.StoreInfo) error {
 		}
 	}
 	c.PutStore(store)
-	if !c.IsServiceIndependent(mcsutils.SchedulingServiceName) {
+	if !c.IsServiceIndependent(constant.SchedulingServiceName) {
 		c.updateStoreStatistics(store.GetID(), store.IsSlow())
 	}
 	return nil
@@ -1634,7 +1634,7 @@ func (c *RaftCluster) checkStores() {
 						zap.Int("region-count", c.GetTotalRegionCount()),
 						errs.ZapError(err))
 				}
-			} else if c.IsPrepared() || (c.IsServiceIndependent(mcsutils.SchedulingServiceName) && c.isStorePrepared()) {
+			} else if c.IsPrepared() || (c.IsServiceIndependent(constant.SchedulingServiceName) && c.isStorePrepared()) {
 				threshold := c.getThreshold(stores, store)
 				regionSize := float64(store.GetRegionSize())
 				log.Debug("store serving threshold", zap.Uint64("store-id", storeID), zap.Float64("threshold", threshold), zap.Float64("region-size", regionSize))
@@ -1666,9 +1666,12 @@ func (c *RaftCluster) checkStores() {
 		if c.IsPrepared() {
 			c.updateProgress(id, store.GetAddress(), removingAction, float64(regionSize), float64(regionSize), false /* dec */)
 		}
-		regionCount := c.GetStoreRegionCount(id)
 		// If the store is empty, it can be buried.
-		if regionCount == 0 {
+		needBury := c.GetStoreRegionCount(id) == 0
+		failpoint.Inject("doNotBuryStore", func(_ failpoint.Value) {
+			needBury = false
+		})
+		if needBury {
 			if err := c.BuryStore(id, false); err != nil {
 				log.Error("bury store failed",
 					zap.Stringer("store", offlineStore),
@@ -2438,9 +2441,25 @@ func IsClientURL(addr string, etcdClient *clientv3.Client) bool {
 
 // IsServiceIndependent returns whether the service is independent.
 func (c *RaftCluster) IsServiceIndependent(name string) bool {
-	independent, exist := c.independentServices.Load(name)
-	if !exist {
+	if c == nil {
 		return false
 	}
-	return independent.(bool)
+	_, exist := c.independentServices.Load(name)
+	return exist
+}
+
+// SetServiceIndependent sets the service to be independent.
+func (c *RaftCluster) SetServiceIndependent(name string) {
+	if c == nil {
+		return
+	}
+	c.independentServices.Store(name, struct{}{})
+}
+
+// UnsetServiceIndependent unsets the service to be independent.
+func (c *RaftCluster) UnsetServiceIndependent(name string) {
+	if c == nil {
+		return
+	}
+	c.independentServices.Delete(name)
 }
