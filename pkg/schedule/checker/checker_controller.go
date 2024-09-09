@@ -367,6 +367,9 @@ func (c *Controller) CheckSuspectRanges() {
 		case <-c.ctx.Done():
 			return
 		case <-ticker.C:
+			failpoint.Inject("skipCheckSuspectRanges", func() {
+				failpoint.Continue()
+			})
 			keyRange, success := c.PopOneSuspectKeyRange()
 			if !success {
 				continue
