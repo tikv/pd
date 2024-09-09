@@ -607,7 +607,7 @@ func (kgm *KeyspaceGroupManager) primaryPriorityCheckLoop() {
 	defer kgm.wg.Done()
 
 	failpoint.Inject("fastPrimaryPriorityCheck", func() {
-		kgm.primaryPriorityCheckInterval = 1 * time.Second
+		kgm.primaryPriorityCheckInterval = 200 * time.Millisecond
 	})
 
 	ticker := time.NewTicker(kgm.primaryPriorityCheckInterval)
