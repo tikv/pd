@@ -58,33 +58,35 @@ var compatiblePrioritiesConfig = prioritiesConfig{
 func initHotRegionScheduleConfig() *hotRegionSchedulerConfig {
 	cfg := &hotRegionSchedulerConfig{
 		baseDefaultSchedulerConfig: newBaseDefaultSchedulerConfig(),
-		MinHotByteRate:             100,
-		MinHotKeyRate:              10,
-		MinHotQueryRate:            10,
-		MaxZombieRounds:            3,
-		MaxPeerNum:                 1000,
-		ByteRateRankStepRatio:      0.05,
-		KeyRateRankStepRatio:       0.05,
-		QueryRateRankStepRatio:     0.05,
-		CountRankStepRatio:         0.01,
-		GreatDecRatio:              0.95,
-		MinorDecRatio:              0.99,
-		SrcToleranceRatio:          1.05, // Tolerate 5% difference
-		DstToleranceRatio:          1.05, // Tolerate 5% difference
-		StrictPickingStore:         true,
-		EnableForTiFlash:           true,
-		RankFormulaVersion:         "v2",
-		ForbidRWType:               "none",
-		SplitThresholds:            0.2,
-		HistorySampleDuration:      typeutil.NewDuration(statistics.DefaultHistorySampleDuration),
-		HistorySampleInterval:      typeutil.NewDuration(statistics.DefaultHistorySampleInterval),
+		hotRegionSchedulerParam: hotRegionSchedulerParam{
+			MinHotByteRate:         100,
+			MinHotKeyRate:          10,
+			MinHotQueryRate:        10,
+			MaxZombieRounds:        3,
+			MaxPeerNum:             1000,
+			ByteRateRankStepRatio:  0.05,
+			KeyRateRankStepRatio:   0.05,
+			QueryRateRankStepRatio: 0.05,
+			CountRankStepRatio:     0.01,
+			GreatDecRatio:          0.95,
+			MinorDecRatio:          0.99,
+			SrcToleranceRatio:      1.05, // Tolerate 5% difference
+			DstToleranceRatio:      1.05, // Tolerate 5% difference
+			StrictPickingStore:     true,
+			EnableForTiFlash:       true,
+			RankFormulaVersion:     "v2",
+			ForbidRWType:           "none",
+			SplitThresholds:        0.2,
+			HistorySampleDuration:  typeutil.NewDuration(statistics.DefaultHistorySampleDuration),
+			HistorySampleInterval:  typeutil.NewDuration(statistics.DefaultHistorySampleInterval),
+		},
 	}
 	cfg.applyPrioritiesConfig(defaultPrioritiesConfig)
 	return cfg
 }
 
-func (conf *hotRegionSchedulerConfig) getValidConf() *hotRegionSchedulerConfig {
-	return &hotRegionSchedulerConfig{
+func (conf *hotRegionSchedulerConfig) getValidConf() *hotRegionSchedulerParam {
+	return &hotRegionSchedulerParam{
 		MinHotByteRate:         conf.MinHotByteRate,
 		MinHotKeyRate:          conf.MinHotKeyRate,
 		MinHotQueryRate:        conf.MinHotQueryRate,
@@ -111,11 +113,7 @@ func (conf *hotRegionSchedulerConfig) getValidConf() *hotRegionSchedulerConfig {
 	}
 }
 
-type hotRegionSchedulerConfig struct {
-	baseDefaultSchedulerConfig
-
-	lastQuerySupported bool
-
+type hotRegionSchedulerParam struct {
 	MinHotByteRate  float64 `json:"min-hot-byte-rate"`
 	MinHotKeyRate   float64 `json:"min-hot-key-rate"`
 	MinHotQueryRate float64 `json:"min-hot-query-rate"`
@@ -154,6 +152,13 @@ type hotRegionSchedulerConfig struct {
 
 	HistorySampleDuration typeutil.Duration `json:"history-sample-duration"`
 	HistorySampleInterval typeutil.Duration `json:"history-sample-interval"`
+}
+
+type hotRegionSchedulerConfig struct {
+	baseDefaultSchedulerConfig
+	hotRegionSchedulerParam
+
+	lastQuerySupported bool
 }
 
 func (conf *hotRegionSchedulerConfig) encodeConfig() ([]byte, error) {
@@ -400,7 +405,7 @@ func isPriorityValid(priorities []string) (map[string]bool, error) {
 	return priorityMap, nil
 }
 
-func (conf *hotRegionSchedulerConfig) validateLocked() error {
+func (conf *hotRegionSchedulerParam) validateLocked() error {
 	if _, err := isPriorityValid(conf.ReadPriorities); err != nil {
 		return err
 	}
@@ -431,7 +436,9 @@ func (conf *hotRegionSchedulerConfig) handleSetConfig(w http.ResponseWriter, r *
 	conf.Lock()
 	defer conf.Unlock()
 	rd := render.New(render.Options{IndentJSON: true})
-	oldc, _ := json.Marshal(conf)
+
+	param := &conf.hotRegionSchedulerParam
+	oldc, _ := json.Marshal(param)
 	data, err := io.ReadAll(r.Body)
 	r.Body.Close()
 	if err != nil {
@@ -439,21 +446,22 @@ func (conf *hotRegionSchedulerConfig) handleSetConfig(w http.ResponseWriter, r *
 		return
 	}
 
-	if err := json.Unmarshal(data, conf); err != nil {
+	if err := json.Unmarshal(data, param); err != nil {
 		rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if err := conf.validateLocked(); err != nil {
+	if err := param.validateLocked(); err != nil {
 		// revert to old version
-		if err2 := json.Unmarshal(oldc, conf); err2 != nil {
+		if err2 := json.Unmarshal(oldc, param); err2 != nil {
 			rd.JSON(w, http.StatusInternalServerError, err2.Error())
 		} else {
 			rd.JSON(w, http.StatusBadRequest, err.Error())
 		}
 		return
 	}
-	newc, _ := json.Marshal(conf)
+	newc, _ := json.Marshal(param)
 	if !bytes.Equal(oldc, newc) {
+		conf.hotRegionSchedulerParam = *param
 		if err := conf.save(); err != nil {
 			log.Warn("failed to persist config", zap.Error(err))
 		}
@@ -467,7 +475,7 @@ func (conf *hotRegionSchedulerConfig) handleSetConfig(w http.ResponseWriter, r *
 		rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	ok := reflectutil.FindSameFieldByJSON(conf, m)
+	ok := reflectutil.FindSameFieldByJSON(param, m)
 	if ok {
 		rd.Text(w, http.StatusOK, "Config is the same with origin, so do nothing.")
 		return

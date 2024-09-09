@@ -621,7 +621,6 @@ func (suite *schedulerTestSuite) checkHotRegionSchedulerConfig(cluster *pdTests.
 		"min-hot-key-rate":        float64(10),
 		"min-hot-query-rate":      float64(10),
 		"src-tolerance-ratio":     1.05,
-		"disabled":                false,
 		"dst-tolerance-ratio":     1.05,
 		"read-priorities":         []any{"byte", "key"},
 		"write-leader-priorities": []any{"key", "byte"},

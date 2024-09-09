@@ -50,31 +50,36 @@ const (
 	transferOut = "transfer-out"
 )
 
-type balanceLeaderSchedulerConfig struct {
-	baseDefaultSchedulerConfig
-
+type balanceLeaderSchedulerParam struct {
 	Ranges []core.KeyRange `json:"ranges"`
 	// Batch is used to generate multiple operators by one scheduling
 	Batch int `json:"batch"`
+}
+
+type balanceLeaderSchedulerConfig struct {
+	baseDefaultSchedulerConfig
+	balanceLeaderSchedulerParam
 }
 
 func (conf *balanceLeaderSchedulerConfig) update(data []byte) (int, any) {
 	conf.Lock()
 	defer conf.Unlock()
 
-	oldConfig, _ := json.Marshal(conf)
+	param := &conf.balanceLeaderSchedulerParam
+	oldConfig, _ := json.Marshal(param)
 
-	if err := json.Unmarshal(data, conf); err != nil {
+	if err := json.Unmarshal(data, param); err != nil {
 		return http.StatusInternalServerError, err.Error()
 	}
-	newConfig, _ := json.Marshal(conf)
+	newConfig, _ := json.Marshal(param)
 	if !bytes.Equal(oldConfig, newConfig) {
 		if !conf.validateLocked() {
-			if err := json.Unmarshal(oldConfig, conf); err != nil {
+			if err := json.Unmarshal(oldConfig, param); err != nil {
 				return http.StatusInternalServerError, err.Error()
 			}
 			return http.StatusBadRequest, "invalid batch size which should be an integer between 1 and 10"
 		}
+		conf.balanceLeaderSchedulerParam = *param
 		if err := conf.save(); err != nil {
 			log.Warn("failed to save balance-leader-scheduler config", errs.ZapError(err))
 		}
@@ -85,23 +90,23 @@ func (conf *balanceLeaderSchedulerConfig) update(data []byte) (int, any) {
 	if err := json.Unmarshal(data, &m); err != nil {
 		return http.StatusInternalServerError, err.Error()
 	}
-	ok := reflectutil.FindSameFieldByJSON(conf, m)
+	ok := reflectutil.FindSameFieldByJSON(param, m)
 	if ok {
 		return http.StatusOK, "Config is the same with origin, so do nothing."
 	}
 	return http.StatusBadRequest, "Config item is not found."
 }
 
-func (conf *balanceLeaderSchedulerConfig) validateLocked() bool {
+func (conf *balanceLeaderSchedulerParam) validateLocked() bool {
 	return conf.Batch >= 1 && conf.Batch <= 10
 }
 
-func (conf *balanceLeaderSchedulerConfig) clone() *balanceLeaderSchedulerConfig {
+func (conf *balanceLeaderSchedulerConfig) clone() *balanceLeaderSchedulerParam {
 	conf.RLock()
 	defer conf.RUnlock()
 	ranges := make([]core.KeyRange, len(conf.Ranges))
 	copy(ranges, conf.Ranges)
-	return &balanceLeaderSchedulerConfig{
+	return &balanceLeaderSchedulerParam{
 		Ranges: ranges,
 		Batch:  conf.Batch,
 	}
