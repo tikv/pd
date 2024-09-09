@@ -112,7 +112,7 @@ type testTSOStreamSuite struct {
 func (s *testTSOStreamSuite) SetupTest() {
 	s.re = require.New(s.T())
 	s.inner = newMockTSOStreamImpl()
-	s.stream = newTSOStream("mock:///", s.inner)
+	s.stream = newTSOStream(context.Background(), "mock:///", s.inner)
 }
 
 func (s *testTSOStreamSuite) TearDownTest() {

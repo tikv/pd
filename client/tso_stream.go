@@ -68,7 +68,7 @@ func (b *pdTSOStreamBuilder) build(ctx context.Context, cancel context.CancelFun
 	stream, err := b.client.Tso(ctx)
 	done <- struct{}{}
 	if err == nil {
-		return newTSOStream(b.serverURL, pdTSOStreamAdapter{stream}), nil
+		return newTSOStream(ctx, b.serverURL, pdTSOStreamAdapter{stream}), nil
 	}
 	return nil, err
 }
@@ -87,7 +87,7 @@ func (b *tsoTSOStreamBuilder) build(
 	stream, err := b.client.Tso(ctx)
 	done <- struct{}{}
 	if err == nil {
-		return newTSOStream(b.serverURL, tsoTSOStreamAdapter{stream}), nil
+		return newTSOStream(ctx, b.serverURL, tsoTSOStreamAdapter{stream}), nil
 	}
 	return nil, err
 }
@@ -224,10 +224,11 @@ var streamIDAlloc atomic.Int32
 
 const invalidStreamID = "<invalid>"
 
-// TODO: Pass a context?
-func newTSOStream(serverURL string, stream grpcTSOStreamAdapter) *tsoStream {
+func newTSOStream(ctx context.Context, serverURL string, stream grpcTSOStreamAdapter) *tsoStream {
 	streamID := fmt.Sprintf("%s-%d", serverURL, streamIDAlloc.Add(1))
-	ctx, cancel := context.WithCancel(context.Background())
+	// To make error handling in `tsoDispatcher` work, the internal `cancel` and external `cancel` is better to be
+	// distinguished.
+	ctx, cancel := context.WithCancel(ctx)
 	s := &tsoStream{
 		serverURL: serverURL,
 		stream:    stream,
