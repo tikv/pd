@@ -142,7 +142,7 @@ func (s *backupTestSuite) TestGetBackupInfo() {
 	}
 	re.Equal(expected, actual)
 
-	tmpFile, err := os.CreateTemp(os.TempDir(), "pd_backup_info_test.json")
+	tmpFile, err := os.CreateTemp("", "pd_tests")
 	re.NoError(err)
 	defer os.RemoveAll(tmpFile.Name())
 

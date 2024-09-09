@@ -771,7 +771,7 @@ func buildTestBinaryMulti(pkgs []string) ([]byte, error) {
 		cmd.Args = append(cmd.Args, "-race")
 	}
 	cmd.Dir = workDir
-	outputFile, err := os.CreateTemp("", "test_pd_ut*.out")
+	outputFile, err := os.CreateTemp("", "pd_tests")
 	if err != nil {
 		return nil, err
 	}
