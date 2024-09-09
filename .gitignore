@@ -25,8 +25,5 @@ coverage.xml
 coverage
 *.txt
 go.work*
-<<<<<<< HEAD
-=======
 embedded_assets_handler.go
 *.log
->>>>>>> 26e90e9ff (scheduler: skip evict-leader-scheduler when setting schedule deny label (#8303))

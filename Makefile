@@ -250,18 +250,7 @@ test-tso-consistency: install-tools
 	CGO_ENABLED=1 go test -race -tags without_dashboard,tso_consistency_test,deadlock $(TSO_INTEGRATION_TEST_PKGS) || { $(FAILPOINT_DISABLE); exit 1; }
 	@$(FAILPOINT_DISABLE)
 
-<<<<<<< HEAD
 .PHONY: test basic-test test-with-cover test-tso-function test-tso-consistency
-=======
-REAL_CLUSTER_TEST_PATH := $(ROOT_PATH)/tests/integrations/realcluster
-
-test-real-cluster:
-	@ rm -rf ~/.tiup/data/pd_real_cluster_test
-	# testing with the real cluster...
-	cd $(REAL_CLUSTER_TEST_PATH) && $(MAKE) check
-
-.PHONY: test basic-test test-with-cover test-tso test-tso-function test-tso-consistency test-real-cluster
->>>>>>> 26e90e9ff (scheduler: skip evict-leader-scheduler when setting schedule deny label (#8303))
 
 #### Daily CI coverage analyze  ####
 
