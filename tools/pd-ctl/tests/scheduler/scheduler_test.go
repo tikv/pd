@@ -655,6 +655,8 @@ func (suite *schedulerTestSuite) checkHotRegionSchedulerConfig(cluster *pdTests.
 	re.Contains(echo, "Success!")
 	expected1["src-tolerance-ratio"] = 1.02
 	checkHotSchedulerConfig(expected1)
+	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "set", "disabled", "true"}, nil)
+	re.Contains(echo, "Failed!")
 
 	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "set", "read-priorities", "byte,key"}, nil)
 	re.Contains(echo, "Success!")
