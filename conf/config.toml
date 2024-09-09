@@ -200,6 +200,3 @@
 
 ## When enabled, usage data will be sent to PingCAP for improving user experience.
 # enable-telemetry = false
-
-## When enabled, configuring a custom prometheus address through Dashboard will not be allowed.
-# disable-custom-prom-addr = false
