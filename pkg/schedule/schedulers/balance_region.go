@@ -268,18 +268,3 @@ func (s *balanceRegionScheduler) transferPeer(solver *solver, collector *plan.Co
 	}
 	return nil
 }
-
-// IsDiable implements the Scheduler interface.
-func (s *balanceRegionScheduler) IsDisable() bool {
-	return s.conf.isDisable()
-}
-
-// SetDiable implements the Scheduler interface.
-func (s *balanceRegionScheduler) SetDisable(disable bool) error {
-	return s.conf.setDisable(disable)
-}
-
-// IsDefault implements the Scheduler interface.
-func (*balanceRegionScheduler) IsDefault() bool {
-	return true
-}

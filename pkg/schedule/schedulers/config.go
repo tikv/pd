@@ -65,6 +65,13 @@ func (b *baseSchedulerConfig) load(v any) error {
 	return DecodeConfig([]byte(data), v)
 }
 
+type defaultSchedulerConfig interface {
+	schedulerConfig
+
+	isDisable() bool
+	setDisable(disabled bool) error
+}
+
 type baseDefaultSchedulerConfig struct {
 	schedulerConfig
 	syncutil.RWMutex

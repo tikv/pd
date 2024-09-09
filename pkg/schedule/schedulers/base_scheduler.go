@@ -120,11 +120,26 @@ func (s *BaseScheduler) GetType() types.CheckerSchedulerType {
 	return s.tp
 }
 
-// IsDiable implements the Scheduler interface.
-func (*BaseScheduler) IsDisable() bool { return false }
+// IsDisable implements the Scheduler interface.
+func (s *BaseScheduler) IsDisable() bool {
+	if conf, ok := s.conf.(defaultSchedulerConfig); ok {
+		return conf.isDisable()
+	}
+	return false
+}
 
 // SetDisable implements the Scheduler interface.
-func (*BaseScheduler) SetDisable(bool) error { return nil }
+func (s *BaseScheduler) SetDisable(disable bool) error {
+	if conf, ok := s.conf.(defaultSchedulerConfig); ok {
+		return conf.setDisable(disable)
+	}
+	return nil
+}
 
 // IsDefault returns if the scheduler is a default scheduler.
-func (*BaseScheduler) IsDefault() bool { return false }
+func (s *BaseScheduler) IsDefault() bool {
+	if _, ok := s.conf.(defaultSchedulerConfig); ok {
+		return true
+	}
+	return false
+}

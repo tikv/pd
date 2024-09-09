@@ -284,16 +284,6 @@ func (h *hotScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) ([]*opera
 	return h.dispatch(typ, cluster), nil
 }
 
-// IsDisable implements the Scheduler interface.
-func (h *hotScheduler) IsDisable() bool {
-	return h.conf.isDisable()
-}
-
-// SetDisable implements the Scheduler interface.
-func (h *hotScheduler) SetDisable(disable bool) error {
-	return h.conf.setDisable(disable)
-}
-
 func (h *hotScheduler) dispatch(typ resourceType, cluster sche.SchedulerCluster) []*operator.Operator {
 	h.Lock()
 	defer h.Unlock()
@@ -398,11 +388,6 @@ func (h *hotScheduler) balanceHotWriteLeaders(cluster sche.SchedulerCluster) []*
 
 	hotSchedulerSkipCounter.Inc()
 	return nil
-}
-
-// IsDefault implements the Scheduler interface.
-func (*hotScheduler) IsDefault() bool {
-	return true
 }
 
 type solution struct {

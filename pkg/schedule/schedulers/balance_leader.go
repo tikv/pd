@@ -539,18 +539,3 @@ func (l *balanceLeaderScheduler) createOperator(solver *solver, collector *plan.
 	op.SetAdditionalInfo("targetScore", strconv.FormatFloat(solver.targetScore, 'f', 2, 64))
 	return op
 }
-
-// IsDiable implements the Scheduler interface.
-func (l *balanceLeaderScheduler) IsDisable() bool {
-	return l.conf.isDisable()
-}
-
-// SetDiable implements the Scheduler interface.
-func (l *balanceLeaderScheduler) SetDisable(disable bool) error {
-	return l.conf.setDisable(disable)
-}
-
-// IsDefault implements the Scheduler interface.
-func (*balanceLeaderScheduler) IsDefault() bool {
-	return true
-}

@@ -308,16 +308,6 @@ func (s *evictSlowStoreScheduler) Schedule(cluster sche.SchedulerCluster, _ bool
 	return s.schedulerEvictLeader(cluster), nil
 }
 
-// IsDiable implements the Scheduler interface.
-func (s *evictSlowStoreScheduler) IsDisable() bool {
-	return s.conf.isDisable()
-}
-
-// SetDisable implements the Scheduler interface.
-func (s *evictSlowStoreScheduler) SetDisable(disable bool) error {
-	return s.conf.setDisable(disable)
-}
-
 // newEvictSlowStoreScheduler creates a scheduler that detects and evicts slow stores.
 func newEvictSlowStoreScheduler(opController *operator.Controller, conf *evictSlowStoreSchedulerConfig) Scheduler {
 	handler := newEvictSlowStoreHandler(conf)
@@ -326,9 +316,4 @@ func newEvictSlowStoreScheduler(opController *operator.Controller, conf *evictSl
 		conf:          conf,
 		handler:       handler,
 	}
-}
-
-// IsDefault implements the Scheduler interface.
-func (*evictSlowStoreScheduler) IsDefault() bool {
-	return true
 }
