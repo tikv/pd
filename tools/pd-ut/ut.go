@@ -119,7 +119,7 @@ func main() {
 
 	if coverProfile != "" {
 		var err error
-		coverFileTempDir, err = os.MkdirTemp(os.TempDir(), "cov")
+		coverFileTempDir, err = os.MkdirTemp("", "cov")
 		if err != nil {
 			fmt.Println("create temp dir fail", coverFileTempDir)
 			os.Exit(1)

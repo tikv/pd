@@ -292,7 +292,7 @@ func TestCheckClusterID(t *testing.T) {
 	defer cancel()
 	cfgs := NewTestMultiConfig(assertutil.CheckerWithNilAssert(re), 2)
 	for _, cfg := range cfgs {
-		cfg.DataDir, _ = os.MkdirTemp(os.TempDir(), "pd_tests")
+		cfg.DataDir, _ = os.MkdirTemp("", "pd_tests")
 		// Clean up before testing.
 		testutil.CleanServer(cfg.DataDir)
 	}
