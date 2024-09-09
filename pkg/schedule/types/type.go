@@ -146,6 +146,11 @@ var (
 	}
 
 	// DefaultSchedulers is the default scheduler types.
+	// If you want to add a new scheduler, please
+	//   1. add it to the list
+	//   2. change the `schedulerConfig` interface to the `baseDefaultSchedulerConfig`
+	// 		structure in related `xxxxSchedulerConfig`
+	//   3. remove `syncutil.RWMutex` from related `xxxxSchedulerConfig`
 	DefaultSchedulers = []CheckerSchedulerType{
 		BalanceLeaderScheduler,
 		BalanceRegionScheduler,

@@ -65,6 +65,8 @@ func (b *baseSchedulerConfig) load(v any) error {
 	return DecodeConfig([]byte(data), v)
 }
 
+// defaultSchedulerConfig is the interface to represent the default scheduler
+// config. It is used in the BaseScheduler.
 type defaultSchedulerConfig interface {
 	schedulerConfig
 
