@@ -90,7 +90,7 @@ func (conf *scatterRangeSchedulerConfig) getEndKey() []byte {
 func (conf *scatterRangeSchedulerConfig) getSchedulerName() string {
 	conf.RLock()
 	defer conf.RUnlock()
-	return fmt.Sprintf("scatter-range-%s", conf.RangeName)
+	return fmt.Sprintf("%s-%s", types.ScatterRangeScheduler, conf.RangeName)
 }
 
 type scatterRangeScheduler struct {

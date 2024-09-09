@@ -347,9 +347,9 @@ func (suite *schedulerTestSuite) checkScheduler(cluster *pdTests.TestCluster) {
 		"test", "test#", "?test",
 		/* TODO: to handle case like "tes&t", we need to modify the server's JSON render to unescape the HTML characters */
 	} {
-		echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "add", "scatter-range", "--format=raw", "a", "b", name}, nil)
+		echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "add", "scatter-range-scheduler", "--format=raw", "a", "b", name}, nil)
 		re.Contains(echo, "Success!")
-		schedulerName := fmt.Sprintf("scatter-range-%s", name)
+		schedulerName := fmt.Sprintf("scatter-range-scheduler-%s", name)
 		// test show scheduler
 		testutil.Eventually(re, func() bool {
 			echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "show"}, nil)

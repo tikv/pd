@@ -149,6 +149,7 @@ func NewAddSchedulerCommand() *cobra.Command {
 	c.AddCommand(NewShuffleRegionSchedulerCommand())
 	c.AddCommand(NewShuffleHotRegionSchedulerCommand())
 	c.AddCommand(NewScatterRangeSchedulerCommand())
+	c.AddCommand(NewScatterRangeSchedulerCommandV2())
 	c.AddCommand(NewBalanceLeaderSchedulerCommand())
 	c.AddCommand(NewBalanceRegionSchedulerCommand())
 	c.AddCommand(NewBalanceHotRegionSchedulerCommand())
@@ -423,6 +424,17 @@ func addSchedulerCommandFunc(cmd *cobra.Command, args []string) {
 func NewScatterRangeSchedulerCommand() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "scatter-range [--format=raw|encode|hex] <start_key> <end_key> <range_name>",
+		Short: "scatter-range will be deprecated in the future, please use scatter-range-scheduler instead",
+		Run:   addSchedulerForScatterRangeCommandFunc,
+	}
+	c.Flags().String("format", "hex", "the key format")
+	return c
+}
+
+// NewScatterRangeSchedulerCommandV2 returns a command to add a scatter-range-scheduler.
+func NewScatterRangeSchedulerCommandV2() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "scatter-range-scheduler [--format=raw|encode|hex] <start_key> <end_key> <range_name>",
 		Short: "add a scheduler to scatter range",
 		Run:   addSchedulerForScatterRangeCommandFunc,
 	}

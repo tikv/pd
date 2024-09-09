@@ -59,8 +59,7 @@ const (
 	RegionLabelRules      = "/pd/api/v1/config/region-label/rules"
 	RegionLabelRulesByIDs = "/pd/api/v1/config/region-label/rules/ids"
 	// Scheduler
-	Schedulers            = "/pd/api/v1/schedulers"
-	scatterRangeScheduler = "/pd/api/v1/schedulers/scatter-range-"
+	Schedulers = "/pd/api/v1/schedulers"
 	// Admin
 	ResetTS                = "/pd/api/v1/admin/reset-ts"
 	BaseAllocID            = "/pd/api/v1/admin/base-alloc-id"
@@ -180,11 +179,6 @@ func PlacementRuleGroupByID(id string) string {
 // SchedulerByName returns the scheduler API with the given scheduler name.
 func SchedulerByName(name string) string {
 	return fmt.Sprintf("%s/%s", Schedulers, name)
-}
-
-// ScatterRangeSchedulerWithName returns the scatter range scheduler API with name parameter.
-func ScatterRangeSchedulerWithName(name string) string {
-	return fmt.Sprintf("%s%s", scatterRangeScheduler, name)
 }
 
 // PProfProfileAPIWithInterval returns the pprof profile API with interval parameter.
