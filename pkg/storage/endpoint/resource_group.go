@@ -16,7 +16,7 @@ package endpoint
 
 import (
 	"github.com/gogo/protobuf/proto"
-	"github.com/tikv/pd/pkg/utils/etcdutil/keypath"
+	"github.com/tikv/pd/pkg/utils/keypath"
 )
 
 // ResourceGroupStorage defines the storage operations on the resource group.

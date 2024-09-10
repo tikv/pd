@@ -18,7 +18,7 @@ import (
 	"context"
 
 	"github.com/tikv/pd/pkg/storage/kv"
-	"github.com/tikv/pd/pkg/utils/etcdutil/keypath"
+	"github.com/tikv/pd/pkg/utils/keypath"
 )
 
 // RuleStorage defines the storage operations on the rule.

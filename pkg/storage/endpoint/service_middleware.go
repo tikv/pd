@@ -18,7 +18,7 @@ import (
 	"encoding/json"
 
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/utils/etcdutil/keypath"
+	"github.com/tikv/pd/pkg/utils/keypath"
 )
 
 // ServiceMiddlewareStorage defines the storage operations on the service middleware.

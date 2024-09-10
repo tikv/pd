@@ -18,7 +18,7 @@ import (
 	"strconv"
 
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/utils/etcdutil/keypath"
+	"github.com/tikv/pd/pkg/utils/keypath"
 )
 
 // ExternalTimestamp is the external timestamp.
