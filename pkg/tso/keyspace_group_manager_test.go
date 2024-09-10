@@ -1045,9 +1045,9 @@ func (suite *keyspaceGroupManagerTestSuite) TestPrimaryPriorityChange() {
 
 	var err error
 	defaultPriority := constant.DefaultKeyspaceGroupReplicaPriority
-	clusterID := rand.Uint64()
+	clusterID, err := etcdutil.InitOrGetClusterID(suite.etcdClient, "/pd/cluster_id")
+	re.NoError(err)
 	clusterIDStr := strconv.FormatUint(clusterID, 10)
-
 	rootPath := path.Join("/pd", clusterIDStr)
 	cfg1 := suite.createConfig()
 	cfg2 := suite.createConfig()
@@ -1055,6 +1055,7 @@ func (suite *keyspaceGroupManagerTestSuite) TestPrimaryPriorityChange() {
 	svcAddr2 := cfg2.GetAdvertiseListenAddr()
 
 	// Register TSO server 1
+	cfg1.Name = "tso1"
 	err = suite.registerTSOServer(re, clusterIDStr, svcAddr1, cfg1)
 	re.NoError(err)
 	defer func() {
@@ -1103,6 +1104,7 @@ func (suite *keyspaceGroupManagerTestSuite) TestPrimaryPriorityChange() {
 	checkTSO(ctx, re, &wg, mgr1, ids)
 
 	// Create the Second TSO server.
+	cfg2.Name = "tso2"
 	err = suite.registerTSOServer(re, clusterIDStr, svcAddr2, cfg2)
 	re.NoError(err)
 	mgr2 := suite.newKeyspaceGroupManager(1, clusterID, cfg2)
@@ -1151,8 +1153,7 @@ func (suite *keyspaceGroupManagerTestSuite) TestPrimaryPriorityChange() {
 func (suite *keyspaceGroupManagerTestSuite) registerTSOServer(
 	re *require.Assertions, clusterID, svcAddr string, cfg *TestServiceConfig,
 ) error {
-	// Register TSO server 1
-	serviceID := &discovery.ServiceRegistryEntry{ServiceAddr: cfg.GetAdvertiseListenAddr()}
+	serviceID := &discovery.ServiceRegistryEntry{ServiceAddr: cfg.GetAdvertiseListenAddr(), Name: cfg.Name}
 	serializedEntry, err := serviceID.Serialize()
 	re.NoError(err)
 	serviceKey := discovery.RegistryPath(clusterID, constant.TSOServiceName, svcAddr)

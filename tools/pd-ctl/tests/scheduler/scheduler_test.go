@@ -204,6 +204,12 @@ func (suite *schedulerTestSuite) checkScheduler(cluster *pdTests.TestCluster) {
 
 	for idx := range schedulers {
 		checkStorePause([]uint64{}, schedulers[idx])
+
+		// will fail because the scheduler is not existed
+		args = []string{"-u", pdAddr, "scheduler", "config", schedulers[idx], "add-store", "3"}
+		output := mustExec(re, cmd, args, nil)
+		re.Contains(output, fmt.Sprintf("Unable to update config: scheduler %s does not exist.", schedulers[idx]))
+
 		// scheduler add command
 		args = []string{"-u", pdAddr, "scheduler", "add", schedulers[idx], "2"}
 		expected = map[string]bool{
@@ -315,7 +321,7 @@ func (suite *schedulerTestSuite) checkScheduler(cluster *pdTests.TestCluster) {
 	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "remove", "evict-leader-scheduler-2"}, nil)
 	re.Contains(echo, "Success!")
 	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "remove", "evict-leader-scheduler-1"}, nil)
-	re.Contains(echo, "404")
+	re.Contains(echo, "Unable to update config: scheduler evict-leader-scheduler does not exist.")
 	testutil.Eventually(re, func() bool { // wait for removed scheduler to be synced to scheduling server.
 		echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "evict-leader-scheduler"}, nil)
 		return strings.Contains(echo, "[404] scheduler not found")
