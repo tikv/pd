@@ -320,12 +320,12 @@ func (suite *schedulerTestSuite) checkScheduler(cluster *pdTests.TestCluster) {
 	re.Contains(echo, "Success!")
 	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "remove", "evict-leader-scheduler-2"}, nil)
 	re.Contains(echo, "Success!")
-	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "remove", "evict-leader-scheduler-1"}, nil)
-	re.Contains(echo, "Unable to update config: scheduler evict-leader-scheduler does not exist.")
 	testutil.Eventually(re, func() bool { // wait for removed scheduler to be synced to scheduling server.
 		echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "evict-leader-scheduler"}, nil)
 		return strings.Contains(echo, "[404] scheduler not found")
 	})
+	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "remove", "evict-leader-scheduler-1"}, nil)
+	re.Contains(echo, "Unable to update config: scheduler evict-leader-scheduler does not exist.")
 
 	// test remove and add
 	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "remove", "balance-hot-region-scheduler"}, nil)
