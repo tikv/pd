@@ -63,6 +63,8 @@ import (
 var (
 	// DefaultMinResolvedTSPersistenceInterval is the default value of min resolved ts persistence interval.
 	DefaultMinResolvedTSPersistenceInterval = 10 * time.Second
+
+	denySchedulersByLabelerCounter = schedule.LabelerEventCounter.WithLabelValues("schedulers", "deny")
 )
 
 // regionLabelGCInterval is the interval to run region-label's GC work.
@@ -1128,6 +1130,9 @@ func (c *RaftCluster) checkStoreLabels(s *core.StoreInfo) error {
 	}
 	for _, label := range s.GetLabels() {
 		key := label.GetKey()
+		if key == core.EngineKey {
+			continue
+		}
 		if _, ok := keysSet[key]; !ok {
 			log.Warn("not found the key match with the store label",
 				zap.Stringer("store", s.GetMeta()),
@@ -1451,8 +1456,8 @@ func (c *RaftCluster) checkStores() {
 				}
 			} else if c.IsPrepared() {
 				threshold := c.getThreshold(stores, store)
-				log.Debug("store serving threshold", zap.Uint64("store-id", storeID), zap.Float64("threshold", threshold))
 				regionSize := float64(store.GetRegionSize())
+				log.Debug("store serving threshold", zap.Uint64("store-id", storeID), zap.Float64("threshold", threshold), zap.Float64("region-size", regionSize))
 				if regionSize >= threshold {
 					if err := c.ReadyToServe(storeID); err != nil {
 						log.Error("change store to serving failed",
