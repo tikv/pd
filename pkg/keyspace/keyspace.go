@@ -28,6 +28,7 @@ import (
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
+	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"go.uber.org/zap"
 )
@@ -262,7 +263,7 @@ func (manager *Manager) splitKeyspaceRegion(id uint32) error {
 		}
 		log.Info("[keyspace] added region label for keyspace",
 			zap.Uint32("keyspaceID", id),
-			zap.Any("LabelRule", keyspaceRule),
+			logutil.ZapRedactString("label-rule", keyspaceRule.String()),
 		)
 		return nil
 	}
