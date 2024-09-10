@@ -1508,7 +1508,7 @@ func transferPrimary(c *gin.Context) {
 	}
 
 	if err := mcsutils.TransferPrimary(svr.GetClient(), svr.GetParticipant().GetExpectedPrimaryLease(),
-		constant.SchedulingServiceName, svr.Name(), newPrimary, 0); err != nil {
+		constant.SchedulingServiceName, svr.Name(), newPrimary, 0, nil); err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
 		return
 	}

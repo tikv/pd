@@ -985,13 +985,7 @@ func (suite *ruleTestSuite) checkLeaderAndVoter(cluster *tests.TestCluster) {
 				tu.StatusOK(re), tu.ExtractJSON(re, &respBundle))
 			re.NoError(err)
 			re.Len(respBundle, 1)
-			if bundle[0].Rules[0].Role == placement.Leader {
-				return respBundle[0].Rules[0].Role == placement.Leader
-			}
-			if bundle[0].Rules[0].Role == placement.Voter {
-				return respBundle[0].Rules[0].Role == placement.Voter
-			}
-			return false
+			return compareBundle(respBundle[0], bundle[0])
 		})
 	}
 }

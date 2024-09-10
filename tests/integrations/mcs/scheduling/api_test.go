@@ -513,6 +513,20 @@ func (suite *apiTestSuite) checkFollowerForward(cluster *tests.TestCluster) {
 	defer cancel()
 	follower, err := cluster.JoinAPIServer(ctx)
 	re.NoError(err)
+	defer func() {
+		leader := cluster.GetLeaderServer()
+		cli := leader.GetEtcdClient()
+		testutil.Eventually(re, func() bool {
+			_, err = cli.MemberRemove(context.Background(), follower.GetServer().GetMember().ID())
+			return err == nil
+		})
+		testutil.Eventually(re, func() bool {
+			res, err := cli.MemberList(context.Background())
+			return err == nil && len(res.Members) == 1
+		})
+		cluster.DeleteServer(follower.GetConfig().Name)
+		follower.Destroy()
+	}()
 	re.NoError(follower.Run())
 	re.NotEmpty(cluster.WaitLeader())
 
