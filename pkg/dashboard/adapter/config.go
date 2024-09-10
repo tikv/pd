@@ -15,9 +15,16 @@
 package adapter
 
 import (
+	"os"
+	"strings"
+
 	"github.com/pingcap/tidb-dashboard/pkg/config"
 
 	"github.com/tikv/pd/server"
+)
+
+const (
+	envTidbDashboardDisableCustomPromAddr = "TIDB_DASHBOARD_DISABLE_CUSTOM_PROM_ADDR"
 )
 
 // GenDashboardConfig generates a configuration for Dashboard Server.
@@ -46,6 +53,12 @@ func GenDashboardConfig(srv *server.Server) (*config.Config, error) {
 	}
 
 	dashboardCfg.NormalizePublicPathPrefix()
+
+	// Allow setting DisableCustomPromAddr via environment variable.
+	disableCustomPromAddr := strings.ToLower(os.Getenv(envTidbDashboardDisableCustomPromAddr))
+	if disableCustomPromAddr == "true" || disableCustomPromAddr == "1" {
+		dashboardCfg.DisableCustomPromAddr = true
+	}
 
 	return dashboardCfg, nil
 }
