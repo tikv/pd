@@ -26,9 +26,9 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/discovery"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
-	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
+	"github.com/tikv/pd/pkg/utils/keypath"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 )
@@ -173,10 +173,10 @@ func TransferPrimary(client *clientv3.Client, lease *election.Lease, serviceName
 	var primaryPath string
 	switch serviceName {
 	case constant.SchedulingServiceName:
-		primaryPath = endpoint.SchedulingPrimaryPath(clusterID)
+		primaryPath = keypath.SchedulingPrimaryPath(clusterID)
 	case constant.TSOServiceName:
-		tsoRootPath := endpoint.TSOSvcRootPath(clusterID)
-		primaryPath = endpoint.KeyspaceGroupPrimaryPath(tsoRootPath, keyspaceGroupID)
+		tsoRootPath := keypath.TSOSvcRootPath(clusterID)
+		primaryPath = keypath.KeyspaceGroupPrimaryPath(tsoRootPath, keyspaceGroupID)
 	}
 	_, err = markExpectedPrimaryFlag(client, primaryPath, primaryIDs[nextPrimaryID], grantResp.ID)
 	if err != nil {

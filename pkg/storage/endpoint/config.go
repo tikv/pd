@@ -19,6 +19,7 @@ import (
 	"strings"
 
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/utils/keypath"
 	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
@@ -36,9 +37,9 @@ type ConfigStorage interface {
 
 var _ ConfigStorage = (*StorageEndpoint)(nil)
 
-// LoadConfig loads config from configPath then unmarshal it to cfg.
+// LoadConfig loads config from keypath.Config then unmarshal it to cfg.
 func (se *StorageEndpoint) LoadConfig(cfg any) (bool, error) {
-	value, err := se.Load(configPath)
+	value, err := se.Load(keypath.Config)
 	if err != nil || value == "" {
 		return false, err
 	}
@@ -49,14 +50,14 @@ func (se *StorageEndpoint) LoadConfig(cfg any) (bool, error) {
 	return true, nil
 }
 
-// SaveConfig stores marshallable cfg to the configPath.
+// SaveConfig stores marshallable cfg to the keypath.Config.
 func (se *StorageEndpoint) SaveConfig(cfg any) error {
-	return se.saveJSON(configPath, cfg)
+	return se.saveJSON(keypath.Config, cfg)
 }
 
 // LoadAllSchedulerConfigs loads all schedulers' config.
 func (se *StorageEndpoint) LoadAllSchedulerConfigs() ([]string, []string, error) {
-	prefix := customSchedulerConfigPath + "/"
+	prefix := keypath.CustomSchedulerConfigPath + "/"
 	keys, values, err := se.LoadRange(prefix, clientv3.GetPrefixRangeEnd(prefix), MinKVRangeLimit)
 	for i, key := range keys {
 		keys[i] = strings.TrimPrefix(key, prefix)
@@ -66,15 +67,15 @@ func (se *StorageEndpoint) LoadAllSchedulerConfigs() ([]string, []string, error)
 
 // LoadSchedulerConfig loads the config of the given scheduler.
 func (se *StorageEndpoint) LoadSchedulerConfig(schedulerName string) (string, error) {
-	return se.Load(schedulerConfigPath(schedulerName))
+	return se.Load(keypath.SchedulerConfigPath(schedulerName))
 }
 
 // SaveSchedulerConfig saves the config of the given scheduler.
 func (se *StorageEndpoint) SaveSchedulerConfig(schedulerName string, data []byte) error {
-	return se.Save(schedulerConfigPath(schedulerName), string(data))
+	return se.Save(keypath.SchedulerConfigPath(schedulerName), string(data))
 }
 
 // RemoveSchedulerConfig removes the config of the given scheduler.
 func (se *StorageEndpoint) RemoveSchedulerConfig(schedulerName string) error {
-	return se.Remove(schedulerConfigPath(schedulerName))
+	return se.Remove(keypath.SchedulerConfigPath(schedulerName))
 }
