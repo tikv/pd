@@ -60,7 +60,7 @@ const (
 	RegionLabelRulesByIDs = "/pd/api/v1/config/region-label/rules/ids"
 	// Scheduler
 	Schedulers            = "/pd/api/v1/schedulers"
-	scatterRangeScheduler = "/pd/api/v1/schedulers/scatter-range-"
+	scatterRangeScheduler = "/pd/api/v1/schedulers/scatter-range-scheduler-"
 	// Admin
 	ResetTS                = "/pd/api/v1/admin/reset-ts"
 	BaseAllocID            = "/pd/api/v1/admin/base-alloc-id"
