@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -528,4 +529,27 @@ func (suite *operatorTestSuite) TestRecord() {
 	ob := operator.Record(now)
 	suite.Equal(now, ob.FinishTime)
 	suite.Greater(ob.duration.Seconds(), time.Second.Seconds())
+}
+
+func (suite *operatorTestSuite) TestOperatorCheckConcurrently() {
+	region := suite.newTestRegion(1, 1, [2]uint64{1, 1}, [2]uint64{2, 2})
+	// addPeer1, transferLeader1, removePeer3
+	steps := []OpStep{
+		AddPeer{ToStore: 1, PeerID: 1},
+		TransferLeader{FromStore: 3, ToStore: 1},
+		RemovePeer{FromStore: 3},
+	}
+	op := NewTestOperator(1, &metapb.RegionEpoch{}, OpAdmin|OpLeader|OpRegion, steps...)
+	suite.Equal(constant.Urgent, op.GetPriorityLevel())
+	suite.checkSteps(op, steps)
+	op.Start()
+	var wg sync.WaitGroup
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			suite.Nil(op.Check(region))
+		}()
+	}
+	wg.Wait()
 }
