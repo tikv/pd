@@ -220,6 +220,11 @@ func (s *TestServer) GetServer() *server.Server {
 	return s.server
 }
 
+// GetClusterID returns the cluster ID.
+func (*TestServer) GetClusterID() uint64 {
+	return keypath.ClusterID()
+}
+
 // GetLeader returns current leader of PD cluster.
 func (s *TestServer) GetLeader() *pdpb.Member {
 	s.RLock()

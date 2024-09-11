@@ -75,7 +75,6 @@ func (suite *metaTestSuite) TestStoreWatch() {
 	_, err := meta.NewWatcher(
 		suite.ctx,
 		suite.pdLeaderServer.GetEtcdClient(),
-		suite.cluster.GetCluster().GetId(),
 		cluster,
 	)
 	re.NoError(err)

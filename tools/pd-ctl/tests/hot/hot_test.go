@@ -31,7 +31,6 @@ import (
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/statistics/utils"
 	"github.com/tikv/pd/pkg/storage"
-	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/server"
@@ -276,7 +275,7 @@ func (suite *hotTestSuite) checkHotWithStoreID(cluster *pdTests.TestCluster) {
 	for _, store := range stores {
 		resp1, err := s.StoreHeartbeat(
 			context.Background(), &pdpb.StoreHeartbeatRequest{
-				Header: &pdpb.RequestHeader{ClusterId: keypath.ClusterID()},
+				Header: &pdpb.RequestHeader{ClusterId: leaderServer.GetClusterID()},
 				Stats: &pdpb.StoreStats{
 					StoreId:   store.Id,
 					Capacity:  1000 * units.MiB,
@@ -347,7 +346,7 @@ func (suite *hotTestSuite) checkHotWithoutHotPeer(cluster *pdTests.TestCluster) 
 		for i := 0; i < 5; i++ {
 			resp1, err := s.StoreHeartbeat(
 				context.Background(), &pdpb.StoreHeartbeatRequest{
-					Header: &pdpb.RequestHeader{ClusterId: keypath.ClusterID()},
+					Header: &pdpb.RequestHeader{ClusterId: leaderServer.GetClusterID()},
 					Stats: &pdpb.StoreStats{
 						StoreId:      store.Id,
 						BytesRead:    uint64(load * utils.StoreHeartBeatReportInterval),
