@@ -23,9 +23,10 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/global"
 	"github.com/tikv/pd/pkg/statistics"
-	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
+	"github.com/tikv/pd/pkg/utils/keypath"
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
@@ -56,7 +57,7 @@ func NewWatcher(
 	w := &Watcher{
 		ctx:             ctx,
 		cancel:          cancel,
-		storePathPrefix: endpoint.StorePathPrefix(),
+		storePathPrefix: keypath.StorePathPrefix(global.ClusterID()),
 		etcdClient:      etcdClient,
 		basicCluster:    basicCluster,
 	}
@@ -92,7 +93,7 @@ func (w *Watcher) initializeStoreWatcher() error {
 	}
 	deleteFn := func(kv *mvccpb.KeyValue) error {
 		key := string(kv.Key)
-		storeID, err := endpoint.ExtractStoreIDFromPath(key)
+		storeID, err := keypath.ExtractStoreIDFromPath(global.ClusterID(), key)
 		if err != nil {
 			return err
 		}

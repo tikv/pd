@@ -726,23 +726,20 @@ func (c *Config) GenEmbedEtcdConfig() (*embed.Config, error) {
 	cfg.QuotaBackendBytes = int64(c.QuotaBackendBytes)
 	cfg.MaxRequestBytes = c.MaxRequestBytes
 
-	allowedCN, serr := c.Security.GetOneAllowedCN()
-	if serr != nil {
-		return nil, serr
-	}
 	cfg.ClientTLSInfo.ClientCertAuth = len(c.Security.CAPath) != 0
 	cfg.ClientTLSInfo.TrustedCAFile = c.Security.CAPath
 	cfg.ClientTLSInfo.CertFile = c.Security.CertPath
 	cfg.ClientTLSInfo.KeyFile = c.Security.KeyPath
-	// Client no need to set the CN. (cfg.ClientTLSInfo.AllowedCN = allowedCN)
+	// Keep compatibility with https://github.com/tikv/pd/pull/2305
+	// Only check client cert when there are multiple CNs.
+	if len(c.Security.CertAllowedCNs) > 1 {
+		cfg.ClientTLSInfo.AllowedCNs = c.Security.CertAllowedCNs
+	}
 	cfg.PeerTLSInfo.ClientCertAuth = len(c.Security.CAPath) != 0
 	cfg.PeerTLSInfo.TrustedCAFile = c.Security.CAPath
 	cfg.PeerTLSInfo.CertFile = c.Security.CertPath
 	cfg.PeerTLSInfo.KeyFile = c.Security.KeyPath
-	// TODO: After https://github.com/etcd-io/etcd/pull/18015, AllowedCN is Deprecated.
-	// It will be replaced by AllowedCNs in the future to support multi cn.
-	// nolint:staticcheck
-	cfg.PeerTLSInfo.AllowedCN = allowedCN
+	cfg.PeerTLSInfo.AllowedCNs = c.Security.CertAllowedCNs
 	cfg.ForceNewCluster = c.ForceNewCluster
 	cfg.ZapLoggerBuilder = embed.NewZapCoreLoggerBuilder(c.Logger, c.Logger.Core(), c.LogProps.Syncer)
 	cfg.EnableGRPCGateway = c.EnableGRPCGateway
@@ -774,13 +771,14 @@ func (c *Config) GenEmbedEtcdConfig() (*embed.Config, error) {
 
 // DashboardConfig is the configuration for tidb-dashboard.
 type DashboardConfig struct {
-	TiDBCAPath         string `toml:"tidb-cacert-path" json:"tidb-cacert-path"`
-	TiDBCertPath       string `toml:"tidb-cert-path" json:"tidb-cert-path"`
-	TiDBKeyPath        string `toml:"tidb-key-path" json:"tidb-key-path"`
-	PublicPathPrefix   string `toml:"public-path-prefix" json:"public-path-prefix"`
-	InternalProxy      bool   `toml:"internal-proxy" json:"internal-proxy"`
-	EnableTelemetry    bool   `toml:"enable-telemetry" json:"enable-telemetry"`
-	EnableExperimental bool   `toml:"enable-experimental" json:"enable-experimental"`
+	TiDBCAPath            string `toml:"tidb-cacert-path" json:"tidb-cacert-path"`
+	TiDBCertPath          string `toml:"tidb-cert-path" json:"tidb-cert-path"`
+	TiDBKeyPath           string `toml:"tidb-key-path" json:"tidb-key-path"`
+	PublicPathPrefix      string `toml:"public-path-prefix" json:"public-path-prefix"`
+	InternalProxy         bool   `toml:"internal-proxy" json:"internal-proxy"`
+	EnableTelemetry       bool   `toml:"enable-telemetry" json:"enable-telemetry"`
+	EnableExperimental    bool   `toml:"enable-experimental" json:"enable-experimental"`
+	DisableCustomPromAddr bool   `toml:"disable-custom-prom-addr" json:"disable-custom-prom-addr"`
 }
 
 // ToTiDBTLSConfig generates tls config for connecting to TiDB, used by tidb-dashboard.

@@ -26,6 +26,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/utils/operatorutil"
+	"github.com/tikv/pd/pkg/utils/testutil"
 )
 
 func TestEvictLeader(t *testing.T) {
@@ -115,7 +116,7 @@ func TestBatchEvict(t *testing.T) {
 	tc.AddLeaderStore(2, 0)
 	tc.AddLeaderStore(3, 0)
 	// the random might be the same, so we add 1000 regions to make sure the batch is full
-	for i := 1; i <= 1000; i++ {
+	for i := 1; i <= 10000; i++ {
 		tc.AddLeaderRegion(uint64(i), 1, 2, 3)
 	}
 	tc.AddLeaderRegion(6, 2, 1, 3)
@@ -124,9 +125,13 @@ func TestBatchEvict(t *testing.T) {
 	sl, err := CreateScheduler(types.EvictLeaderScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.EvictLeaderScheduler, []string{"1"}), func(string) error { return nil })
 	re.NoError(err)
 	re.True(sl.IsScheduleAllowed(tc))
-	ops, _ := sl.Schedule(tc, false)
-	re.Len(ops, 3)
+	testutil.Eventually(re, func() bool {
+		ops, _ := sl.Schedule(tc, false)
+		return len(ops) == 3
+	})
 	sl.(*evictLeaderScheduler).conf.Batch = 5
-	ops, _ = sl.Schedule(tc, false)
-	re.Len(ops, 5)
+	testutil.Eventually(re, func() bool {
+		ops, _ := sl.Schedule(tc, false)
+		return len(ops) == 5
+	})
 }

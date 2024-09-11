@@ -34,6 +34,8 @@ Run all cases:
 
 Run a specific case with an internal PD:
 
+You can check case name in `tools/pd-simulator/simulator/cases/cases.go`.
+
 ```shell
 ./pd-simulator -case="casename"
 ```
