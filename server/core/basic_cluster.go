@@ -26,6 +26,8 @@ import (
 	"go.uber.org/zap"
 )
 
+var scanRegionLimit = 1000
+
 // BasicCluster provides basic data member and interface for a tikv cluster.
 type BasicCluster struct {
 	Stores struct {
@@ -384,9 +386,32 @@ func (bc *BasicCluster) GetOverlaps(region *RegionInfo) []*RegionInfo {
 
 // GetRegionSizeByRange scans regions intersecting [start key, end key), returns the total region size of this range.
 func (bc *BasicCluster) GetRegionSizeByRange(startKey, endKey []byte) int64 {
-	bc.Regions.mu.RLock()
-	defer bc.Regions.mu.RUnlock()
-	return bc.Regions.GetRegionSizeByRange(startKey, endKey)
+	var size int64
+	for {
+		bc.Regions.mu.RLock()
+		var cnt int
+		bc.Regions.tree.scanRange(startKey, func(region *RegionInfo) bool {
+			if len(endKey) > 0 && bytes.Compare(region.GetStartKey(), endKey) >= 0 {
+				return false
+			}
+			if cnt >= scanRegionLimit {
+				return false
+			}
+			cnt++
+			startKey = region.GetEndKey()
+			size += region.GetApproximateSize()
+			return true
+		})
+		bc.Regions.mu.RUnlock()
+		if cnt == 0 {
+			break
+		}
+		if len(startKey) == 0 {
+			break
+		}
+	}
+
+	return size
 }
 
 func (bc *BasicCluster) getWriteRate(

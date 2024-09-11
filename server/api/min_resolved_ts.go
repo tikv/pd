@@ -48,7 +48,7 @@ type minResolvedTS struct {
 // @Failure  500  {string}  string  "PD server failed to proceed the request."
 // @Router   /min-resolved-ts [get]
 func (h *minResolvedTSHandler) GetMinResolvedTS(w http.ResponseWriter, r *http.Request) {
-	c := h.svr.GetRaftCluster()
+	c := getCluster(r)
 	value := c.GetMinResolvedTS()
 	persistInterval := c.GetOpts().GetPDServerConfig().MinResolvedTSPersistenceInterval
 	h.rd.JSON(w, http.StatusOK, minResolvedTS{
