@@ -22,7 +22,7 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/require"
-	"github.com/tikv/pd/pkg/global"
+	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/tests"
@@ -94,7 +94,7 @@ func TestCommand(t *testing.T) {
 	re.NotEmpty(cluster.WaitLeader())
 
 	leaderServer := cluster.GetLeaderServer()
-	req := &pdpb.AllocIDRequest{Header: testutil.NewRequestHeader(global.ClusterID())}
+	req := &pdpb.AllocIDRequest{Header: testutil.NewRequestHeader(keypath.ClusterID())}
 
 	grpcPDClient := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
 	var last uint64

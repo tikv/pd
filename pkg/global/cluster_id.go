@@ -17,39 +17,16 @@ package global
 import (
 	"context"
 	"math/rand"
-	"sync/atomic"
 	"time"
 
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
+	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 )
-
-// clusterID is the unique ID for the cluster.
-var clusterID atomic.Value
-
-// ClusterID returns the cluster ID.
-func ClusterID() uint64 {
-	id := clusterID.Load()
-	if id == nil {
-		return 0
-	}
-	return id.(uint64)
-}
-
-// setClusterID sets the cluster ID.
-func setClusterID(id uint64) {
-	clusterID.Store(id)
-}
-
-// ResetClusterID resets the cluster ID to 0. It's only used in tests.
-func ResetClusterID() {
-	clusterID.Store(uint64(0))
-}
 
 // InitClusterID creates a cluster ID if it hasn't existed.
 // This function assumes the cluster ID has already existed and always use a
@@ -70,18 +47,18 @@ func InitClusterID(c *clientv3.Client) (uint64, error) {
 	if err != nil {
 		return 0, err
 	}
-	setClusterID(clusterID)
+	keypath.SetClusterID(clusterID)
 	log.Info("init cluster id", zap.Uint64("cluster-id", clusterID))
 	return clusterID, nil
 }
 
 // GetClusterIDFromEtcd gets the cluster ID from etcd if local cache is not set.
 func GetClusterIDFromEtcd(c *clientv3.Client) (clusterID uint64, err error) {
-	if id := ClusterID(); id != 0 {
+	if id := keypath.ClusterID(); id != 0 {
 		return id, nil
 	}
 	// Get any cluster key to parse the cluster ID.
-	resp, err := etcdutil.EtcdKVGet(c, endpoint.ClusterIDPath)
+	resp, err := etcdutil.EtcdKVGet(c, keypath.ClusterIDPath)
 	if err != nil {
 		return 0, err
 	}
@@ -93,7 +70,7 @@ func GetClusterIDFromEtcd(c *clientv3.Client) (clusterID uint64, err error) {
 	if err != nil {
 		return 0, err
 	}
-	setClusterID(id)
+	keypath.SetClusterID(id)
 	return id, nil
 }
 
@@ -109,7 +86,7 @@ func initOrGetClusterID(c *clientv3.Client) (uint64, error) {
 		ts        = uint64(time.Now().Unix())
 		clusterID = (ts << 32) + uint64(r.Uint32())
 		value     = typeutil.Uint64ToBytes(clusterID)
-		key       = endpoint.ClusterIDPath
+		key       = keypath.ClusterIDPath
 	)
 
 	// Multiple servers may try to init the cluster ID at the same time.

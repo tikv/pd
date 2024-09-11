@@ -25,7 +25,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/global"
+	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/tests"
 )
@@ -44,7 +44,7 @@ func TestValidRequestRegion(t *testing.T) {
 	re.NotEmpty(cluster.WaitLeader())
 	leaderServer := cluster.GetLeaderServer()
 	grpcPDClient := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
-	clusterID := global.ClusterID()
+	clusterID := keypath.ClusterID()
 	bootstrapCluster(re, clusterID, grpcPDClient)
 	rc := leaderServer.GetRaftCluster()
 
@@ -88,7 +88,7 @@ func TestAskSplit(t *testing.T) {
 	re.NotEmpty(cluster.WaitLeader())
 	leaderServer := cluster.GetLeaderServer()
 	grpcPDClient := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
-	clusterID := global.ClusterID()
+	clusterID := keypath.ClusterID()
 	bootstrapCluster(re, clusterID, grpcPDClient)
 	rc := leaderServer.GetRaftCluster()
 	opt := rc.GetOpts()
@@ -145,7 +145,7 @@ func TestPendingProcessedRegions(t *testing.T) {
 	re.NotEmpty(cluster.WaitLeader())
 	leaderServer := cluster.GetLeaderServer()
 	grpcPDClient := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
-	clusterID := global.ClusterID()
+	clusterID := keypath.ClusterID()
 	bootstrapCluster(re, clusterID, grpcPDClient)
 	rc := leaderServer.GetRaftCluster()
 	opt := rc.GetOpts()

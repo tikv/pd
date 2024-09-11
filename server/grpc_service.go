@@ -37,12 +37,12 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/global"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/tso"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
+	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
@@ -427,7 +427,7 @@ func (s *GrpcServer) getMinTSFromSingleServer(
 	resp, err := tsopb.NewTSOClient(cc).GetMinTS(
 		cctx, &tsopb.GetMinTSRequest{
 			Header: &tsopb.RequestHeader{
-				ClusterId: global.ClusterID(),
+				ClusterId: keypath.ClusterID(),
 			},
 			DcLocation: dcLocation,
 		})
@@ -575,7 +575,7 @@ func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
 		if s.IsClosed() {
 			return status.Errorf(codes.Unknown, "server not started")
 		}
-		if clusterID := global.ClusterID(); request.GetHeader().GetClusterId() != clusterID {
+		if clusterID := keypath.ClusterID(); request.GetHeader().GetClusterId() != clusterID {
 			return status.Errorf(codes.FailedPrecondition,
 				"mismatch cluster id, need %d but got %d", clusterID, request.GetHeader().GetClusterId())
 		}
@@ -2370,14 +2370,14 @@ func (s *GrpcServer) validateRoleInRequest(ctx context.Context, header *pdpb.Req
 		}
 		*allowFollower = true
 	}
-	if clusterID := global.ClusterID(); header.GetClusterId() != clusterID {
+	if clusterID := keypath.ClusterID(); header.GetClusterId() != clusterID {
 		return status.Errorf(codes.FailedPrecondition, "mismatch cluster id, need %d but got %d", clusterID, header.GetClusterId())
 	}
 	return nil
 }
 
 func (s *GrpcServer) header() *pdpb.ResponseHeader {
-	clusterID := global.ClusterID()
+	clusterID := keypath.ClusterID()
 	if clusterID == 0 {
 		return s.wrapErrorToHeader(pdpb.ErrorType_NOT_BOOTSTRAPPED, "cluster id is not ready")
 	}
@@ -2393,7 +2393,7 @@ func (s *GrpcServer) wrapErrorToHeader(errorType pdpb.ErrorType, message string)
 
 func (s *GrpcServer) errorHeader(err *pdpb.Error) *pdpb.ResponseHeader {
 	return &pdpb.ResponseHeader{
-		ClusterId: global.ClusterID(),
+		ClusterId: keypath.ClusterID(),
 		Error:     err,
 	}
 }

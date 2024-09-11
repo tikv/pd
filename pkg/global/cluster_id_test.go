@@ -19,6 +19,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
+	"github.com/tikv/pd/pkg/utils/keypath"
 )
 
 func TestInitClusterID(t *testing.T) {
@@ -29,12 +30,12 @@ func TestInitClusterID(t *testing.T) {
 	id, err := GetClusterIDFromEtcd(client)
 	re.NoError(err)
 	re.Equal(uint64(0), id)
-	re.Equal(uint64(0), ClusterID())
+	re.Equal(uint64(0), keypath.ClusterID())
 
 	clusterID, err := InitClusterID(client)
 	re.NoError(err)
 	re.NotZero(clusterID)
-	re.Equal(clusterID, ClusterID())
+	re.Equal(clusterID, keypath.ClusterID())
 
 	clusterID1, err := InitClusterID(client)
 	re.NoError(err)
@@ -43,5 +44,5 @@ func TestInitClusterID(t *testing.T) {
 	id, err = GetClusterIDFromEtcd(client)
 	re.NoError(err)
 	re.Equal(clusterID, id)
-	re.Equal(clusterID, ClusterID())
+	re.Equal(clusterID, keypath.ClusterID())
 }

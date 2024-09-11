@@ -19,7 +19,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"github.com/tikv/pd/pkg/global"
+	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server/config"
@@ -83,23 +83,23 @@ func TestClusterID(t *testing.T) {
 	err = cluster.RunInitialServers()
 	re.NoError(err)
 
-	clusterID := global.ClusterID()
-	global.ResetClusterID()
+	clusterID := keypath.ClusterID()
+	keypath.ResetClusterID()
 
 	// Restart all PDs.
 	re.NoError(cluster.StopAll())
 	re.NoError(cluster.RunInitialServers())
 
 	// PD should have the same cluster ID as before.
-	re.Equal(clusterID, global.ClusterID())
-	global.ResetClusterID()
+	re.Equal(clusterID, keypath.ClusterID())
+	keypath.ResetClusterID()
 
 	cluster2, err := tests.NewTestCluster(ctx, 3, func(conf *config.Config, _ string) { conf.InitialClusterToken = "foobar" })
 	defer cluster2.Destroy()
 	re.NoError(err)
 	err = cluster2.RunInitialServers()
 	re.NoError(err)
-	re.NotEqual(clusterID, global.ClusterID())
+	re.NotEqual(clusterID, keypath.ClusterID())
 }
 
 func TestLeader(t *testing.T) {

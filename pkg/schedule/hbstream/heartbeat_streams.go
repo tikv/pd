@@ -27,8 +27,8 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/global"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
+	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"go.uber.org/zap"
 )
@@ -90,7 +90,7 @@ func newHbStreams(ctx context.Context, typ string, storeInformer core.StoreSetIn
 	hs := &HeartbeatStreams{
 		hbStreamCtx:    hbStreamCtx,
 		hbStreamCancel: hbStreamCancel,
-		clusterID:      global.ClusterID(),
+		clusterID:      keypath.ClusterID(),
 		streams:        make(map[uint64]HeartbeatStream),
 		msgCh:          make(chan core.RegionHeartbeatResponse, heartbeatChanCapacity),
 		streamCh:       make(chan streamUpdate, 1),

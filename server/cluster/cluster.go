@@ -39,7 +39,6 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/gc"
 	"github.com/tikv/pd/pkg/gctuner"
-	"github.com/tikv/pd/pkg/global"
 	"github.com/tikv/pd/pkg/id"
 	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/mcs/discovery"
@@ -371,7 +370,7 @@ func (c *RaftCluster) Start(s Server) error {
 
 func (c *RaftCluster) checkServices() {
 	if c.isAPIServiceMode {
-		servers, err := discovery.Discover(c.etcdClient, strconv.FormatUint(global.ClusterID(), 10), constant.SchedulingServiceName)
+		servers, err := discovery.Discover(c.etcdClient, strconv.FormatUint(keypath.ClusterID(), 10), constant.SchedulingServiceName)
 		if c.opt.GetMicroServiceConfig().IsSchedulingFallbackEnabled() && (err != nil || len(servers) == 0) {
 			c.startSchedulingJobs(c, c.hbstreams)
 			c.UnsetServiceIndependent(constant.SchedulingServiceName)
@@ -2033,8 +2032,8 @@ func (c *RaftCluster) GetMetaCluster() *metapb.Cluster {
 func (c *RaftCluster) PutMetaCluster(meta *metapb.Cluster) error {
 	c.Lock()
 	defer c.Unlock()
-	if meta.GetId() != global.ClusterID() {
-		return errors.Errorf("invalid cluster %v, mismatch cluster id %d", meta, global.ClusterID())
+	if meta.GetId() != keypath.ClusterID() {
+		return errors.Errorf("invalid cluster %v, mismatch cluster id %d", meta, keypath.ClusterID())
 	}
 	return c.putMetaLocked(typeutil.DeepClone(meta, core.ClusterFactory))
 }

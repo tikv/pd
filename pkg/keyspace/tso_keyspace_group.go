@@ -28,7 +28,6 @@ import (
 	"github.com/pingcap/kvproto/pkg/tsopb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/balancer"
-	"github.com/tikv/pd/pkg/global"
 	"github.com/tikv/pd/pkg/mcs/discovery"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/slice"
@@ -217,7 +216,7 @@ func (m *GroupManager) allocNodesToAllKeyspaceGroups(ctx context.Context) {
 }
 
 func (m *GroupManager) initTSONodesWatcher(client *clientv3.Client) {
-	tsoServiceKey := discovery.TSOPath(global.ClusterID())
+	tsoServiceKey := discovery.TSOPath(keypath.ClusterID())
 
 	putFn := func(kv *mvccpb.KeyValue) error {
 		s := &discovery.ServiceRegistryEntry{}
@@ -1152,7 +1151,7 @@ func (m *GroupManager) GetKeyspaceGroupPrimaryByID(id uint32) (string, error) {
 		return "", ErrKeyspaceGroupNotExists(id)
 	}
 
-	rootPath := keypath.TSOSvcRootPath(global.ClusterID())
+	rootPath := keypath.TSOSvcRootPath(keypath.ClusterID())
 	primaryPath := keypath.KeyspaceGroupPrimaryPath(rootPath, id)
 	leader := &tsopb.Participant{}
 	ok, _, err := etcdutil.GetProtoMsgWithModRev(m.client, primaryPath, leader)

@@ -23,7 +23,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/require"
-	"github.com/tikv/pd/pkg/global"
+	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/tests"
 )
@@ -43,7 +43,7 @@ func TestStoreRegister(t *testing.T) {
 	re.NoError(leaderServer.BootstrapCluster())
 
 	putStoreRequest := &pdpb.PutStoreRequest{
-		Header: &pdpb.RequestHeader{ClusterId: global.ClusterID()},
+		Header: &pdpb.RequestHeader{ClusterId: keypath.ClusterID()},
 		Store: &metapb.Store{
 			Id:      1,
 			Address: "mock-1",
@@ -71,7 +71,7 @@ func TestStoreRegister(t *testing.T) {
 
 	// putNewStore with old version
 	putStoreRequest = &pdpb.PutStoreRequest{
-		Header: &pdpb.RequestHeader{ClusterId: global.ClusterID()},
+		Header: &pdpb.RequestHeader{ClusterId: keypath.ClusterID()},
 		Store: &metapb.Store{
 			Id:      4,
 			Address: "mock-4",
@@ -98,7 +98,7 @@ func TestRollingUpgrade(t *testing.T) {
 
 	stores := []*pdpb.PutStoreRequest{
 		{
-			Header: &pdpb.RequestHeader{ClusterId: global.ClusterID()},
+			Header: &pdpb.RequestHeader{ClusterId: keypath.ClusterID()},
 			Store: &metapb.Store{
 				Id:      1,
 				Address: "mock-1",
@@ -106,7 +106,7 @@ func TestRollingUpgrade(t *testing.T) {
 			},
 		},
 		{
-			Header: &pdpb.RequestHeader{ClusterId: global.ClusterID()},
+			Header: &pdpb.RequestHeader{ClusterId: keypath.ClusterID()},
 			Store: &metapb.Store{
 				Id:      4,
 				Address: "mock-4",
@@ -114,7 +114,7 @@ func TestRollingUpgrade(t *testing.T) {
 			},
 		},
 		{
-			Header: &pdpb.RequestHeader{ClusterId: global.ClusterID()},
+			Header: &pdpb.RequestHeader{ClusterId: keypath.ClusterID()},
 			Store: &metapb.Store{
 				Id:      6,
 				Address: "mock-6",
@@ -122,7 +122,7 @@ func TestRollingUpgrade(t *testing.T) {
 			},
 		},
 		{
-			Header: &pdpb.RequestHeader{ClusterId: global.ClusterID()},
+			Header: &pdpb.RequestHeader{ClusterId: keypath.ClusterID()},
 			Store: &metapb.Store{
 				Id:      7,
 				Address: "mock-7",
