@@ -514,7 +514,7 @@ func (s *Server) stopCluster() {
 }
 
 func (s *Server) startMetaConfWatcher() (err error) {
-	s.metaWatcher, err = meta.NewWatcher(s.Context(), s.GetClient(), s.clusterID, s.basicCluster)
+	s.metaWatcher, err = meta.NewWatcher(s.Context(), s.GetClient(), s.basicCluster)
 	if err != nil {
 		return err
 	}
