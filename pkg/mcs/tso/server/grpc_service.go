@@ -27,6 +27,7 @@ import (
 	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/mcs/registry"
 	"github.com/tikv/pd/pkg/utils/apiutil"
+	"github.com/tikv/pd/pkg/utils/keypath"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -103,10 +104,10 @@ func (s *Service) Tso(stream tsopb.TSO_TsoServer) error {
 		}
 		header := request.GetHeader()
 		clusterID := header.GetClusterId()
-		if clusterID != s.clusterID {
+		if clusterID != keypath.ClusterID() {
 			return status.Errorf(
 				codes.FailedPrecondition, "mismatch cluster id, need %d but got %d",
-				s.clusterID, clusterID)
+				keypath.ClusterID(), clusterID)
 		}
 		keyspaceID := header.GetKeyspaceId()
 		keyspaceGroupID := header.GetKeyspaceGroupId()
@@ -220,18 +221,18 @@ func (s *Service) validRequest(header *tsopb.RequestHeader) (tsopb.ErrorType, er
 	if s.IsClosed() || s.keyspaceGroupManager == nil {
 		return tsopb.ErrorType_NOT_BOOTSTRAPPED, ErrNotStarted
 	}
-	if header == nil || header.GetClusterId() != s.clusterID {
+	if header == nil || header.GetClusterId() != keypath.ClusterID() {
 		return tsopb.ErrorType_CLUSTER_MISMATCHED, ErrClusterMismatched
 	}
 	return tsopb.ErrorType_OK, nil
 }
 
 func (s *Service) header(keyspaceGroupBelongTo uint32) *tsopb.ResponseHeader {
-	if s.clusterID == 0 {
+	if keypath.ClusterID() == 0 {
 		return s.wrapErrorToHeader(
 			tsopb.ErrorType_NOT_BOOTSTRAPPED, "cluster id is not ready", keyspaceGroupBelongTo)
 	}
-	return &tsopb.ResponseHeader{ClusterId: s.clusterID, KeyspaceGroupId: keyspaceGroupBelongTo}
+	return &tsopb.ResponseHeader{ClusterId: keypath.ClusterID(), KeyspaceGroupId: keyspaceGroupBelongTo}
 }
 
 func (s *Service) wrapErrorToHeader(
@@ -242,7 +243,7 @@ func (s *Service) wrapErrorToHeader(
 
 func (s *Service) errorHeader(err *tsopb.Error, keyspaceGroupBelongTo uint32) *tsopb.ResponseHeader {
 	return &tsopb.ResponseHeader{
-		ClusterId:       s.clusterID,
+		ClusterId:       keypath.ClusterID(),
 		Error:           err,
 		KeyspaceGroupId: keyspaceGroupBelongTo,
 	}

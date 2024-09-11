@@ -56,7 +56,7 @@ func NewWatcher(
 	w := &Watcher{
 		ctx:             ctx,
 		cancel:          cancel,
-		storePathPrefix: keypath.StorePathPrefix(keypath.ClusterID()),
+		storePathPrefix: keypath.StorePathPrefix(),
 		etcdClient:      etcdClient,
 		basicCluster:    basicCluster,
 	}
@@ -92,7 +92,7 @@ func (w *Watcher) initializeStoreWatcher() error {
 	}
 	deleteFn := func(kv *mvccpb.KeyValue) error {
 		key := string(kv.Key)
-		storeID, err := keypath.ExtractStoreIDFromPath(keypath.ClusterID(), key)
+		storeID, err := keypath.ExtractStoreIDFromPath(key)
 		if err != nil {
 			return err
 		}

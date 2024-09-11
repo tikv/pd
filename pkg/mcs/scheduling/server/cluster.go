@@ -33,6 +33,7 @@ import (
 	"github.com/tikv/pd/pkg/statistics/buckets"
 	"github.com/tikv/pd/pkg/statistics/utils"
 	"github.com/tikv/pd/pkg/storage"
+	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"go.uber.org/zap"
 )
@@ -53,7 +54,6 @@ type Cluster struct {
 	coordinator       *schedule.Coordinator
 	checkMembershipCh chan struct{}
 	apiServerLeader   atomic.Value
-	clusterID         uint64
 	running           atomic.Bool
 
 	// heartbeatRunner is used to process the subtree update task asynchronously.
@@ -78,7 +78,14 @@ const (
 var syncRunner = ratelimit.NewSyncRunner()
 
 // NewCluster creates a new cluster.
-func NewCluster(parentCtx context.Context, persistConfig *config.PersistConfig, storage storage.Storage, basicCluster *core.BasicCluster, hbStreams *hbstream.HeartbeatStreams, clusterID uint64, checkMembershipCh chan struct{}) (*Cluster, error) {
+func NewCluster(
+	parentCtx context.Context,
+	persistConfig *config.PersistConfig,
+	storage storage.Storage,
+	basicCluster *core.BasicCluster,
+	hbStreams *hbstream.HeartbeatStreams,
+	checkMembershipCh chan struct{},
+) (*Cluster, error) {
 	ctx, cancel := context.WithCancel(parentCtx)
 	labelerManager, err := labeler.NewRegionLabeler(ctx, storage, regionLabelGCInterval)
 	if err != nil {
@@ -97,7 +104,6 @@ func NewCluster(parentCtx context.Context, persistConfig *config.PersistConfig, 
 		labelStats:        statistics.NewLabelStatistics(),
 		regionStats:       statistics.NewRegionStatistics(basicCluster, persistConfig, ruleManager),
 		storage:           storage,
-		clusterID:         clusterID,
 		checkMembershipCh: checkMembershipCh,
 
 		heartbeatRunner: ratelimit.NewConcurrentRunner(heartbeatTaskRunner, ratelimit.NewConcurrencyLimiter(uint64(runtime.NumCPU()*2)), time.Minute),
@@ -228,7 +234,7 @@ func (c *Cluster) AllocID() (uint64, error) {
 	}
 	ctx, cancel := context.WithTimeout(c.ctx, requestTimeout)
 	defer cancel()
-	resp, err := client.AllocID(ctx, &pdpb.AllocIDRequest{Header: &pdpb.RequestHeader{ClusterId: c.clusterID}})
+	resp, err := client.AllocID(ctx, &pdpb.AllocIDRequest{Header: &pdpb.RequestHeader{ClusterId: keypath.ClusterID()}})
 	if err != nil {
 		c.triggerMembershipCheck()
 		return 0, err

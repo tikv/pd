@@ -35,7 +35,7 @@ func TestRegister(t *testing.T) {
 	etcd, cfg := servers[0], servers[0].Config()
 
 	// Test register with http prefix.
-	sr := NewServiceRegister(context.Background(), client, "12345", "test_service", "http://127.0.0.1:1", "http://127.0.0.1:1", 10)
+	sr := NewServiceRegister(context.Background(), client, "test_service", "http://127.0.0.1:1", "http://127.0.0.1:1", 10)
 	err := sr.Register()
 	re.NoError(err)
 	re.Equal("/ms/12345/test_service/registry/http://127.0.0.1:1", sr.key)
@@ -51,14 +51,14 @@ func TestRegister(t *testing.T) {
 	re.Empty(resp.Kvs)
 
 	// Test the case that ctx is canceled.
-	sr = NewServiceRegister(context.Background(), client, "12345", "test_service", "127.0.0.1:2", "127.0.0.1:2", 1)
+	sr = NewServiceRegister(context.Background(), client, "test_service", "127.0.0.1:2", "127.0.0.1:2", 1)
 	err = sr.Register()
 	re.NoError(err)
 	sr.cancel()
 	re.Empty(getKeyAfterLeaseExpired(re, client, sr.key))
 
 	// Test the case that keepalive is failed when the etcd is restarted.
-	sr = NewServiceRegister(context.Background(), client, "12345", "test_service", "127.0.0.1:2", "127.0.0.1:2", 1)
+	sr = NewServiceRegister(context.Background(), client, "test_service", "127.0.0.1:2", "127.0.0.1:2", 1)
 	err = sr.Register()
 	re.NoError(err)
 	fname := testutil.InitTempFileLogger("info")

@@ -156,6 +156,7 @@ func (suite *keyspaceGroupManagerTestSuite) TestNewKeyspaceGroupManager() {
 	tsoServiceID := &discovery.ServiceRegistryEntry{ServiceAddr: suite.cfg.AdvertiseListenAddr}
 	clusterID := rand.Uint64()
 	clusterIDStr := strconv.FormatUint(clusterID, 10)
+	keypath.SetClusterID(clusterID)
 
 	legacySvcRootPath := path.Join("/pd", clusterIDStr)
 	tsoSvcRootPath := path.Join(constant.MicroserviceRootPath, clusterIDStr, "tso")
@@ -163,7 +164,7 @@ func (suite *keyspaceGroupManagerTestSuite) TestNewKeyspaceGroupManager() {
 
 	kgm := NewKeyspaceGroupManager(
 		suite.ctx, tsoServiceID, suite.etcdClient, nil, electionNamePrefix,
-		clusterID, legacySvcRootPath, tsoSvcRootPath, suite.cfg)
+		legacySvcRootPath, tsoSvcRootPath, suite.cfg)
 	defer kgm.Close()
 	err := kgm.Initialize()
 	re.NoError(err)
@@ -806,7 +807,7 @@ func (suite *keyspaceGroupManagerTestSuite) newKeyspaceGroupManager(
 
 	kgm := NewKeyspaceGroupManager(
 		suite.ctx, tsoServiceID, suite.etcdClient, nil, electionNamePrefix,
-		clusterID, legacySvcRootPath, tsoSvcRootPath, cfg)
+		legacySvcRootPath, tsoSvcRootPath, cfg)
 	if loadKeyspaceGroupsBatchSize != 0 {
 		kgm.loadKeyspaceGroupsBatchSize = loadKeyspaceGroupsBatchSize
 	}
@@ -1157,14 +1158,14 @@ func (suite *keyspaceGroupManagerTestSuite) registerTSOServer(
 	serviceID := &discovery.ServiceRegistryEntry{ServiceAddr: cfg.GetAdvertiseListenAddr(), Name: cfg.Name}
 	serializedEntry, err := serviceID.Serialize()
 	re.NoError(err)
-	serviceKey := discovery.RegistryPath(clusterID, constant.TSOServiceName, svcAddr)
+	serviceKey := keypath.RegistryPath(constant.TSOServiceName, svcAddr)
 	_, err = suite.etcdClient.Put(suite.ctx, serviceKey, serializedEntry)
 	return err
 }
 
 // Deregister TSO server.
 func (suite *keyspaceGroupManagerTestSuite) deregisterTSOServer(clusterID, svcAddr string) error {
-	serviceKey := discovery.RegistryPath(clusterID, constant.TSOServiceName, svcAddr)
+	serviceKey := keypath.RegistryPath(constant.TSOServiceName, svcAddr)
 	if _, err := suite.etcdClient.Delete(suite.ctx, serviceKey); err != nil {
 		return err
 	}

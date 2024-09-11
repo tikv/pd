@@ -30,6 +30,7 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/registry"
 	"github.com/tikv/pd/pkg/utils/apiutil"
+	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/versioninfo"
 	"go.uber.org/zap"
@@ -188,7 +189,7 @@ func (s *Service) StoreHeartbeat(_ context.Context, request *schedulingpb.StoreH
 	if err := c.HandleStoreHeartbeat(request); err != nil {
 		log.Error("handle store heartbeat failed", zap.Error(err))
 	}
-	return &schedulingpb.StoreHeartbeatResponse{Header: &schedulingpb.ResponseHeader{ClusterId: s.clusterID}}, nil
+	return &schedulingpb.StoreHeartbeatResponse{Header: &schedulingpb.ResponseHeader{ClusterId: keypath.ClusterID()}}, nil
 }
 
 // SplitRegions split regions by the given split keys
@@ -345,7 +346,7 @@ func (s *Service) RegisterRESTHandler(userDefineHandlers map[string]http.Handler
 
 func (s *Service) errorHeader(err *schedulingpb.Error) *schedulingpb.ResponseHeader {
 	return &schedulingpb.ResponseHeader{
-		ClusterId: s.clusterID,
+		ClusterId: keypath.ClusterID(),
 		Error:     err,
 	}
 }
@@ -358,10 +359,10 @@ func (s *Service) notBootstrappedHeader() *schedulingpb.ResponseHeader {
 }
 
 func (s *Service) header() *schedulingpb.ResponseHeader {
-	if s.clusterID == 0 {
+	if keypath.ClusterID() == 0 {
 		return s.wrapErrorToHeader(schedulingpb.ErrorType_NOT_BOOTSTRAPPED, "cluster id is not ready")
 	}
-	return &schedulingpb.ResponseHeader{ClusterId: s.clusterID}
+	return &schedulingpb.ResponseHeader{ClusterId: keypath.ClusterID()}
 }
 
 func (s *Service) wrapErrorToHeader(

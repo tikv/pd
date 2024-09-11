@@ -216,7 +216,7 @@ func (m *GroupManager) allocNodesToAllKeyspaceGroups(ctx context.Context) {
 }
 
 func (m *GroupManager) initTSONodesWatcher(client *clientv3.Client) {
-	tsoServiceKey := discovery.TSOPath(keypath.ClusterID())
+	tsoServiceKey := keypath.TSOPath()
 
 	putFn := func(kv *mvccpb.KeyValue) error {
 		s := &discovery.ServiceRegistryEntry{}
@@ -1151,7 +1151,7 @@ func (m *GroupManager) GetKeyspaceGroupPrimaryByID(id uint32) (string, error) {
 		return "", ErrKeyspaceGroupNotExists(id)
 	}
 
-	rootPath := keypath.TSOSvcRootPath(keypath.ClusterID())
+	rootPath := keypath.TSOSvcRootPath()
 	primaryPath := keypath.KeyspaceGroupPrimaryPath(rootPath, id)
 	leader := &tsopb.Participant{}
 	ok, _, err := etcdutil.GetProtoMsgWithModRev(m.client, primaryPath, leader)

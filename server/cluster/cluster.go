@@ -370,7 +370,7 @@ func (c *RaftCluster) Start(s Server) error {
 
 func (c *RaftCluster) checkServices() {
 	if c.isAPIServiceMode {
-		servers, err := discovery.Discover(c.etcdClient, strconv.FormatUint(keypath.ClusterID(), 10), constant.SchedulingServiceName)
+		servers, err := discovery.Discover(c.etcdClient, constant.SchedulingServiceName)
 		if c.opt.GetMicroServiceConfig().IsSchedulingFallbackEnabled() && (err != nil || len(servers) == 0) {
 			c.startSchedulingJobs(c, c.hbstreams)
 			c.UnsetServiceIndependent(constant.SchedulingServiceName)

@@ -87,7 +87,6 @@ type Server struct {
 	serverLoopWg     sync.WaitGroup
 
 	cfg           *config.Config
-	clusterID     uint64
 	persistConfig *config.PersistConfig
 	basicCluster  *core.BasicCluster
 
@@ -157,7 +156,7 @@ func (s *Server) Run() (err error) {
 		return err
 	}
 
-	if s.clusterID, s.serviceID, s.serviceRegister, err = utils.Register(s, constant.SchedulingServiceName); err != nil {
+	if s.serviceID, s.serviceRegister, err = utils.Register(s, constant.SchedulingServiceName); err != nil {
 		return err
 	}
 
@@ -459,7 +458,7 @@ func (s *Server) startServer() (err error) {
 		Id:         uniqueID, // id is unique among all participants
 		ListenUrls: []string{s.cfg.GetAdvertiseListenAddr()},
 	}
-	s.participant.InitInfo(p, keypath.SchedulingSvcRootPath(s.clusterID), constant.PrimaryKey, "primary election")
+	s.participant.InitInfo(p, keypath.SchedulingSvcRootPath(), constant.PrimaryKey, "primary election")
 
 	s.service = &Service{Server: s}
 	s.AddServiceReadyCallback(s.startCluster)
@@ -494,7 +493,7 @@ func (s *Server) startCluster(context.Context) error {
 		return err
 	}
 	s.hbStreams = hbstream.NewHeartbeatStreams(s.Context(), constant.SchedulingServiceName, s.basicCluster)
-	s.cluster, err = NewCluster(s.Context(), s.persistConfig, s.storage, s.basicCluster, s.hbStreams, s.clusterID, s.checkMembershipCh)
+	s.cluster, err = NewCluster(s.Context(), s.persistConfig, s.storage, s.basicCluster, s.hbStreams, s.checkMembershipCh)
 	if err != nil {
 		return err
 	}
@@ -519,7 +518,7 @@ func (s *Server) startMetaConfWatcher() (err error) {
 	if err != nil {
 		return err
 	}
-	s.configWatcher, err = config.NewWatcher(s.Context(), s.GetClient(), s.clusterID, s.persistConfig, s.storage)
+	s.configWatcher, err = config.NewWatcher(s.Context(), s.GetClient(), s.persistConfig, s.storage)
 	if err != nil {
 		return err
 	}
@@ -527,7 +526,7 @@ func (s *Server) startMetaConfWatcher() (err error) {
 }
 
 func (s *Server) startRuleWatcher() (err error) {
-	s.ruleWatcher, err = rule.NewWatcher(s.Context(), s.GetClient(), s.clusterID, s.storage,
+	s.ruleWatcher, err = rule.NewWatcher(s.Context(), s.GetClient(), s.storage,
 		s.cluster.GetCoordinator().GetCheckerController(), s.cluster.GetRuleManager(), s.cluster.GetRegionLabeler())
 	return err
 }

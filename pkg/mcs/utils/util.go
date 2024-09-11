@@ -20,7 +20,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -280,13 +279,13 @@ func StopGRPCServer(s server) {
 }
 
 // Register registers the service.
-func Register(s server, serviceName string) (uint64, *discovery.ServiceRegistryEntry, *discovery.ServiceRegister, error) {
+func Register(s server, serviceName string) (*discovery.ServiceRegistryEntry, *discovery.ServiceRegister, error) {
 	var (
 		clusterID uint64
 		err       error
 	)
 	if clusterID, err = InitClusterID(s.Context(), s.GetEtcdClient()); err != nil {
-		return 0, nil, nil, err
+		return nil, nil, err
 	}
 	log.Info("init cluster id", zap.Uint64("cluster-id", clusterID))
 	execPath, err := os.Executable()
@@ -304,15 +303,16 @@ func Register(s server, serviceName string) (uint64, *discovery.ServiceRegistryE
 	}
 	serializedEntry, err := serviceID.Serialize()
 	if err != nil {
-		return 0, nil, nil, err
+		return nil, nil, err
 	}
-	serviceRegister := discovery.NewServiceRegister(s.Context(), s.GetEtcdClient(), strconv.FormatUint(clusterID, 10),
-		serviceName, s.GetAdvertiseListenAddr(), serializedEntry, discovery.DefaultLeaseInSeconds)
+	serviceRegister := discovery.NewServiceRegister(s.Context(), s.GetEtcdClient(),
+		serviceName, s.GetAdvertiseListenAddr(), serializedEntry,
+		discovery.DefaultLeaseInSeconds)
 	if err := serviceRegister.Register(); err != nil {
 		log.Error("failed to register the service", zap.String("service-name", serviceName), errs.ZapError(err))
-		return 0, nil, nil, err
+		return nil, nil, err
 	}
-	return clusterID, serviceID, serviceRegister, nil
+	return serviceID, serviceRegister, nil
 }
 
 // Exit exits the program with the given code.
