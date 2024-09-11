@@ -34,7 +34,7 @@ require (
 	github.com/pingcap/errcode v0.3.0
 	github.com/pingcap/errors v0.11.5-0.20211224045212-9687c2b0f87c
 	github.com/pingcap/failpoint v0.0.0-20210918120811-547c13e3eb00
-	github.com/pingcap/kvproto v0.0.0-20240716095229-5f7ffec83ea7
+	github.com/pingcap/kvproto v0.0.0-20240910154453-b242104f8d31
 	github.com/pingcap/log v1.1.1-0.20221110025148-ca232912c9f3
 	github.com/pingcap/sysutil v1.0.1-0.20230407040306-fb007c5aff21
 	github.com/pingcap/tidb-dashboard v0.0.0-20240815045040-4d89bc193a0c
@@ -215,5 +215,3 @@ require (
 	moul.io/zapgorm2 v1.1.0 // indirect
 	sigs.k8s.io/yaml v1.4.0 // indirect
 )
-
-replace github.com/pingcap/kvproto => github.com/glorv/kvproto v0.0.0-20240904072144-b86ce313a2f6
