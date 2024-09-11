@@ -31,7 +31,6 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
-	"github.com/tikv/pd/pkg/global"
 	"github.com/tikv/pd/pkg/mcs/discovery"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/storage/endpoint"
@@ -1047,7 +1046,7 @@ func (suite *keyspaceGroupManagerTestSuite) TestPrimaryPriorityChange() {
 
 	var err error
 	defaultPriority := constant.DefaultKeyspaceGroupReplicaPriority
-	clusterID, err := global.InitClusterID(suite.etcdClient)
+	clusterID, err := endpoint.InitClusterID(suite.etcdClient)
 	re.NoError(err)
 	clusterIDStr := strconv.FormatUint(clusterID, 10)
 	rootPath := path.Join("/pd", clusterIDStr)
