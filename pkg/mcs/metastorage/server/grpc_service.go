@@ -116,11 +116,11 @@ func (s *Service) Watch(req *meta_storagepb.WatchRequest, server meta_storagepb.
 			if res.Err() != nil {
 				var resp meta_storagepb.WatchResponse
 				if startRevision < res.CompactRevision {
-					resp.Header = s.wrapErrorAndRevision(res.Header.GetRevision(), meta_storagepb.ErrorType_DATA_COMPACTED,
+					resp.Header = wrapErrorAndRevision(res.Header.GetRevision(), meta_storagepb.ErrorType_DATA_COMPACTED,
 						fmt.Sprintf("required watch revision: %d is smaller than current compact/min revision %d.", startRevision, res.CompactRevision))
 					resp.CompactRevision = res.CompactRevision
 				} else {
-					resp.Header = s.wrapErrorAndRevision(res.Header.GetRevision(), meta_storagepb.ErrorType_UNKNOWN,
+					resp.Header = wrapErrorAndRevision(res.Header.GetRevision(), meta_storagepb.ErrorType_UNKNOWN,
 						fmt.Sprintf("watch channel meet other error %s.", res.Err().Error()))
 				}
 				if err := server.Send(&resp); err != nil {
@@ -181,7 +181,7 @@ func (s *Service) Get(ctx context.Context, req *meta_storagepb.GetRequest) (*met
 		revision = res.Header.GetRevision()
 	}
 	if err != nil {
-		return &meta_storagepb.GetResponse{Header: s.wrapErrorAndRevision(revision, meta_storagepb.ErrorType_UNKNOWN, err.Error())}, nil
+		return &meta_storagepb.GetResponse{Header: wrapErrorAndRevision(revision, meta_storagepb.ErrorType_UNKNOWN, err.Error())}, nil
 	}
 	resp := &meta_storagepb.GetResponse{
 		Header: &meta_storagepb.ResponseHeader{ClusterId: keypath.ClusterID(), Revision: revision},
@@ -220,7 +220,7 @@ func (s *Service) Put(ctx context.Context, req *meta_storagepb.PutRequest) (*met
 		revision = res.Header.GetRevision()
 	}
 	if err != nil {
-		return &meta_storagepb.PutResponse{Header: s.wrapErrorAndRevision(revision, meta_storagepb.ErrorType_UNKNOWN, err.Error())}, nil
+		return &meta_storagepb.PutResponse{Header: wrapErrorAndRevision(revision, meta_storagepb.ErrorType_UNKNOWN, err.Error())}, nil
 	}
 
 	resp := &meta_storagepb.PutResponse{
@@ -252,7 +252,7 @@ func (s *Service) Delete(ctx context.Context, req *meta_storagepb.DeleteRequest)
 		revision = res.Header.GetRevision()
 	}
 	if err != nil {
-		return &meta_storagepb.DeleteResponse{Header: s.wrapErrorAndRevision(revision, meta_storagepb.ErrorType_UNKNOWN, err.Error())}, nil
+		return &meta_storagepb.DeleteResponse{Header: wrapErrorAndRevision(revision, meta_storagepb.ErrorType_UNKNOWN, err.Error())}, nil
 	}
 
 	resp := &meta_storagepb.DeleteResponse{
@@ -265,14 +265,14 @@ func (s *Service) Delete(ctx context.Context, req *meta_storagepb.DeleteRequest)
 	return resp, nil
 }
 
-func (s *Service) wrapErrorAndRevision(revision int64, errorType meta_storagepb.ErrorType, message string) *meta_storagepb.ResponseHeader {
-	return s.errorHeader(revision, &meta_storagepb.Error{
+func wrapErrorAndRevision(revision int64, errorType meta_storagepb.ErrorType, message string) *meta_storagepb.ResponseHeader {
+	return errorHeader(revision, &meta_storagepb.Error{
 		Type:    errorType,
 		Message: message,
 	})
 }
 
-func (s *Service) errorHeader(revision int64, err *meta_storagepb.Error) *meta_storagepb.ResponseHeader {
+func errorHeader(revision int64, err *meta_storagepb.Error) *meta_storagepb.ResponseHeader {
 	return &meta_storagepb.ResponseHeader{
 		ClusterId: keypath.ClusterID(),
 		Revision:  revision,

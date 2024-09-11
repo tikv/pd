@@ -142,12 +142,12 @@ func StorePath(storeID uint64) string {
 }
 
 // StorePathPrefix returns the store meta info key path prefix.
-func StorePathPrefix( ) string {
+func StorePathPrefix() string {
 	return path.Join(PDRootPath(), ClusterPath, "s") + "/"
 }
 
 // ExtractStoreIDFromPath extracts the store ID from the given path.
-func ExtractStoreIDFromPath( path string) (uint64, error) {
+func ExtractStoreIDFromPath(path string) (uint64, error) {
 	idStr := strings.TrimLeft(strings.TrimPrefix(path, StorePathPrefix()), "0")
 	return strconv.ParseUint(idStr, 10, 64)
 }
@@ -371,7 +371,7 @@ func KeyspaceGroupsElectionPath(rootPath string, keyspaceGroupID uint32) string 
 }
 
 // GetCompiledNonDefaultIDRegexp returns the compiled regular expression for matching non-default keyspace group id.
-func GetCompiledNonDefaultIDRegexp(clusterID uint64) *regexp.Regexp {
+func GetCompiledNonDefaultIDRegexp() *regexp.Regexp {
 	rootPath := TSOSvcRootPath()
 	pattern := strings.Join([]string{rootPath, constant.KeyspaceGroupsKey, keyspaceGroupsElectionKey, `(\d{5})`, constant.PrimaryKey + `$`}, "/")
 	return regexp.MustCompile(pattern)

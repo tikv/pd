@@ -74,7 +74,7 @@ func TestExtractKeyspaceGroupIDFromKeyspaceGroupMembershipPath(t *testing.T) {
 func TestExtractKeyspaceGroupIDFromKeyspaceGroupPrimaryPath(t *testing.T) {
 	re := require.New(t)
 
-	compiledRegexp := keypath.GetCompiledNonDefaultIDRegexp(uint64(111))
+	compiledRegexp := keypath.GetCompiledNonDefaultIDRegexp()
 
 	rightCases := []struct {
 		path string

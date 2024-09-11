@@ -269,7 +269,7 @@ func (s *GrpcServer) GetClusterInfo(context.Context, *pdpb.GetClusterInfoRequest
 	// at startup and needs to get the cluster ID with the first request (i.e. GetMembers).
 	if s.IsClosed() {
 		return &pdpb.GetClusterInfoResponse{
-			Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, errs.ErrServerNotStarted.FastGenByArgs().Error()),
+			Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, errs.ErrServerNotStarted.FastGenByArgs().Error()),
 		}, nil
 	}
 
@@ -283,7 +283,7 @@ func (s *GrpcServer) GetClusterInfo(context.Context, *pdpb.GetClusterInfoRequest
 	}
 
 	return &pdpb.GetClusterInfoResponse{
-		Header:       s.header(),
+		Header:       wrapHeader(),
 		ServiceModes: svcModes,
 		TsoUrls:      tsoServiceAddrs,
 	}, nil
@@ -302,7 +302,7 @@ func (s *GrpcServer) GetMinTS(
 			defer done()
 		} else {
 			return &pdpb.GetMinTSResponse{
-				Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
+				Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
 			}, nil
 		}
 	}
@@ -331,13 +331,13 @@ func (s *GrpcServer) GetMinTS(
 	}
 	if err != nil {
 		return &pdpb.GetMinTSResponse{
-			Header:    s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
+			Header:    wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
 			Timestamp: minTS,
 		}, nil
 	}
 
 	return &pdpb.GetMinTSResponse{
-		Header:    s.header(),
+		Header:    wrapHeader(),
 		Timestamp: minTS,
 	}, nil
 }
@@ -459,7 +459,7 @@ func (s *GrpcServer) GetMembers(context.Context, *pdpb.GetMembersRequest) (*pdpb
 			defer done()
 		} else {
 			return &pdpb.GetMembersResponse{
-				Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
+				Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
 			}, nil
 		}
 	}
@@ -467,13 +467,13 @@ func (s *GrpcServer) GetMembers(context.Context, *pdpb.GetMembersRequest) (*pdpb
 	// at startup and needs to get the cluster ID with the first request (i.e. GetMembers).
 	if s.IsClosed() {
 		return &pdpb.GetMembersResponse{
-			Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, errs.ErrServerNotStarted.FastGenByArgs().Error()),
+			Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, errs.ErrServerNotStarted.FastGenByArgs().Error()),
 		}, nil
 	}
 	members, err := cluster.GetMembers(s.GetClient())
 	if err != nil {
 		return &pdpb.GetMembersResponse{
-			Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
+			Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
 		}, nil
 	}
 
@@ -493,7 +493,7 @@ func (s *GrpcServer) GetMembers(context.Context, *pdpb.GetMembersRequest) (*pdpb
 	}
 	if err != nil {
 		return &pdpb.GetMembersResponse{
-			Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
+			Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
 		}, nil
 	}
 
@@ -506,7 +506,7 @@ func (s *GrpcServer) GetMembers(context.Context, *pdpb.GetMembersRequest) (*pdpb
 	}
 
 	return &pdpb.GetMembersResponse{
-		Header:              s.header(),
+		Header:              wrapHeader(),
 		Members:             members,
 		Leader:              pdLeader,
 		EtcdLeader:          etcdLeader,
@@ -588,7 +588,7 @@ func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
 			return status.Errorf(codes.Unknown, err.Error())
 		}
 		response := &pdpb.TsoResponse{
-			Header:    s.header(),
+			Header:    wrapHeader(),
 			Timestamp: &ts,
 			Count:     count,
 		}
@@ -607,7 +607,7 @@ func (s *GrpcServer) Bootstrap(ctx context.Context, request *pdpb.BootstrapReque
 			defer done()
 		} else {
 			return &pdpb.BootstrapResponse{
-				Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
+				Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
 			}, nil
 		}
 	}
@@ -627,18 +627,18 @@ func (s *GrpcServer) Bootstrap(ctx context.Context, request *pdpb.BootstrapReque
 			Message: "cluster is already bootstrapped",
 		}
 		return &pdpb.BootstrapResponse{
-			Header: s.errorHeader(err),
+			Header: errorHeader(err),
 		}, nil
 	}
 
 	res, err := s.bootstrapCluster(request)
 	if err != nil {
 		return &pdpb.BootstrapResponse{
-			Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
+			Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
 		}, nil
 	}
 
-	res.Header = s.header()
+	res.Header = wrapHeader()
 	return res, nil
 }
 
@@ -651,7 +651,7 @@ func (s *GrpcServer) IsBootstrapped(ctx context.Context, request *pdpb.IsBootstr
 			defer done()
 		} else {
 			return &pdpb.IsBootstrappedResponse{
-				Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
+				Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
 			}, nil
 		}
 	}
@@ -666,7 +666,7 @@ func (s *GrpcServer) IsBootstrapped(ctx context.Context, request *pdpb.IsBootstr
 
 	rc := s.GetRaftCluster()
 	return &pdpb.IsBootstrappedResponse{
-		Header:       s.header(),
+		Header:       wrapHeader(),
 		Bootstrapped: rc != nil,
 	}, nil
 }
@@ -680,7 +680,7 @@ func (s *GrpcServer) AllocID(ctx context.Context, request *pdpb.AllocIDRequest) 
 			defer done()
 		} else {
 			return &pdpb.AllocIDResponse{
-				Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
+				Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
 			}, nil
 		}
 	}
@@ -697,12 +697,12 @@ func (s *GrpcServer) AllocID(ctx context.Context, request *pdpb.AllocIDRequest) 
 	id, err := s.idAllocator.Alloc()
 	if err != nil {
 		return &pdpb.AllocIDResponse{
-			Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
+			Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
 		}, nil
 	}
 
 	return &pdpb.AllocIDResponse{
-		Header: s.header(),
+		Header: wrapHeader(),
 		Id:     id,
 	}, nil
 }
@@ -716,7 +716,7 @@ func (s *GrpcServer) IsSnapshotRecovering(ctx context.Context, _ *pdpb.IsSnapsho
 			defer done()
 		} else {
 			return &pdpb.IsSnapshotRecoveringResponse{
-				Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
+				Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
 			}, nil
 		}
 	}
@@ -724,11 +724,11 @@ func (s *GrpcServer) IsSnapshotRecovering(ctx context.Context, _ *pdpb.IsSnapsho
 	marked, err := s.Server.IsSnapshotRecovering(ctx)
 	if err != nil {
 		return &pdpb.IsSnapshotRecoveringResponse{
-			Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
+			Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
 		}, nil
 	}
 	return &pdpb.IsSnapshotRecoveringResponse{
-		Header: s.header(),
+		Header: wrapHeader(),
 		Marked: marked,
 	}, nil
 }
@@ -742,7 +742,7 @@ func (s *GrpcServer) GetStore(ctx context.Context, request *pdpb.GetStoreRequest
 			defer done()
 		} else {
 			return &pdpb.GetStoreResponse{
-				Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
+				Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
 			}, nil
 		}
 	}
@@ -756,19 +756,19 @@ func (s *GrpcServer) GetStore(ctx context.Context, request *pdpb.GetStoreRequest
 	}
 	rc := s.GetRaftCluster()
 	if rc == nil {
-		return &pdpb.GetStoreResponse{Header: s.notBootstrappedHeader()}, nil
+		return &pdpb.GetStoreResponse{Header: notBootstrappedHeader()}, nil
 	}
 
 	storeID := request.GetStoreId()
 	store := rc.GetStore(storeID)
 	if store == nil {
 		return &pdpb.GetStoreResponse{
-			Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN,
+			Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN,
 				fmt.Sprintf("invalid store ID %d, not found", storeID)),
 		}, nil
 	}
 	return &pdpb.GetStoreResponse{
-		Header: s.header(),
+		Header: wrapHeader(),
 		Store:  store.GetMeta(),
 		Stats:  store.GetStoreStats(),
 	}, nil
@@ -798,7 +798,7 @@ func (s *GrpcServer) PutStore(ctx context.Context, request *pdpb.PutStoreRequest
 			defer done()
 		} else {
 			return &pdpb.PutStoreResponse{
-				Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
+				Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
 			}, nil
 		}
 	}
@@ -813,27 +813,27 @@ func (s *GrpcServer) PutStore(ctx context.Context, request *pdpb.PutStoreRequest
 
 	rc := s.GetRaftCluster()
 	if rc == nil {
-		return &pdpb.PutStoreResponse{Header: s.notBootstrappedHeader()}, nil
+		return &pdpb.PutStoreResponse{Header: notBootstrappedHeader()}, nil
 	}
 
 	store := request.GetStore()
 	if pberr := checkStore(rc, store.GetId()); pberr != nil {
 		return &pdpb.PutStoreResponse{
-			Header: s.errorHeader(pberr),
+			Header: errorHeader(pberr),
 		}, nil
 	}
 
 	// NOTE: can be removed when placement rules feature is enabled by default.
 	if !s.GetConfig().Replication.EnablePlacementRules && core.IsStoreContainLabel(store, core.EngineKey, core.EngineTiFlash) {
 		return &pdpb.PutStoreResponse{
-			Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN,
+			Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN,
 				"placement rules is disabled"),
 		}, nil
 	}
 
 	if err := rc.PutMetaStore(store); err != nil {
 		return &pdpb.PutStoreResponse{
-			Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
+			Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
 		}, nil
 	}
 
@@ -841,7 +841,7 @@ func (s *GrpcServer) PutStore(ctx context.Context, request *pdpb.PutStoreRequest
 	CheckPDVersionWithClusterVersion(s.persistOptions)
 
 	return &pdpb.PutStoreResponse{
-		Header:            s.header(),
+		Header:            wrapHeader(),
 		ReplicationStatus: rc.GetReplicationMode().GetReplicationStatus(),
 	}, nil
 }
@@ -855,7 +855,7 @@ func (s *GrpcServer) GetAllStores(ctx context.Context, request *pdpb.GetAllStore
 			defer done()
 		} else {
 			return &pdpb.GetAllStoresResponse{
-				Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
+				Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
 			}, nil
 		}
 	}
@@ -870,7 +870,7 @@ func (s *GrpcServer) GetAllStores(ctx context.Context, request *pdpb.GetAllStore
 
 	rc := s.GetRaftCluster()
 	if rc == nil {
-		return &pdpb.GetAllStoresResponse{Header: s.notBootstrappedHeader()}, nil
+		return &pdpb.GetAllStoresResponse{Header: notBootstrappedHeader()}, nil
 	}
 
 	// Don't return tombstone stores.
@@ -886,7 +886,7 @@ func (s *GrpcServer) GetAllStores(ctx context.Context, request *pdpb.GetAllStore
 	}
 
 	return &pdpb.GetAllStoresResponse{
-		Header: s.header(),
+		Header: wrapHeader(),
 		Stores: stores,
 	}, nil
 }
@@ -900,7 +900,7 @@ func (s *GrpcServer) StoreHeartbeat(ctx context.Context, request *pdpb.StoreHear
 			defer done()
 		} else {
 			return &pdpb.StoreHeartbeatResponse{
-				Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, errs.ErrRateLimitExceeded.FastGenByArgs().Error()),
+				Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, errs.ErrRateLimitExceeded.FastGenByArgs().Error()),
 			}, nil
 		}
 	}
@@ -918,24 +918,24 @@ func (s *GrpcServer) StoreHeartbeat(ctx context.Context, request *pdpb.StoreHear
 	}
 	rc := s.GetRaftCluster()
 	if rc == nil {
-		return &pdpb.StoreHeartbeatResponse{Header: s.notBootstrappedHeader()}, nil
+		return &pdpb.StoreHeartbeatResponse{Header: notBootstrappedHeader()}, nil
 	}
 
 	if pberr := checkStore(rc, request.GetStats().GetStoreId()); pberr != nil {
 		return &pdpb.StoreHeartbeatResponse{
-			Header: s.errorHeader(pberr),
+			Header: errorHeader(pberr),
 		}, nil
 	}
 	storeID := request.GetStats().GetStoreId()
 	store := rc.GetStore(storeID)
 	if store == nil {
 		return &pdpb.StoreHeartbeatResponse{
-			Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN,
+			Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN,
 				fmt.Sprintf("store %v not found", storeID)),
 		}, nil
 	}
 
-	resp := &pdpb.StoreHeartbeatResponse{Header: s.header()}
+	resp := &pdpb.StoreHeartbeatResponse{Header: wrapHeader()}
 	// Bypass stats handling if the store report for unsafe recover is not empty.
 	if request.GetStoreReport() == nil {
 		storeAddress := store.GetAddress()
@@ -945,7 +945,7 @@ func (s *GrpcServer) StoreHeartbeat(ctx context.Context, request *pdpb.StoreHear
 		err := rc.HandleStoreHeartbeat(request, resp)
 		if err != nil {
 			return &pdpb.StoreHeartbeatResponse{
-				Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN,
+				Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN,
 					err.Error()),
 			}, nil
 		}
@@ -1131,7 +1131,7 @@ func (s *GrpcServer) ReportBuckets(stream pdpb.PD_ReportBucketsServer) error {
 		rc := s.GetRaftCluster()
 		if rc == nil {
 			resp := &pdpb.ReportBucketsResponse{
-				Header: s.notBootstrappedHeader(),
+				Header: notBootstrappedHeader(),
 			}
 			err := server.send(resp)
 			return errors.WithStack(err)
@@ -1244,7 +1244,7 @@ func (s *GrpcServer) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error
 		rc := s.GetRaftCluster()
 		if rc == nil {
 			resp := &pdpb.RegionHeartbeatResponse{
-				Header: s.notBootstrappedHeader(),
+				Header: notBootstrappedHeader(),
 			}
 			err := server.Send(resp)
 			return errors.WithStack(err)
@@ -1402,7 +1402,7 @@ func (s *GrpcServer) GetRegion(ctx context.Context, request *pdpb.GetRegionReque
 			defer done()
 		} else {
 			return &pdpb.GetRegionResponse{
-				Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
+				Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
 			}, nil
 		}
 	}
@@ -1420,22 +1420,22 @@ func (s *GrpcServer) GetRegion(ctx context.Context, request *pdpb.GetRegionReque
 	if *followerHandle {
 		rc = s.cluster
 		if !rc.GetRegionSyncer().IsRunning() {
-			return &pdpb.GetRegionResponse{Header: s.regionNotFound()}, nil
+			return &pdpb.GetRegionResponse{Header: regionNotFound()}, nil
 		}
 		region = rc.GetRegionByKey(request.GetRegionKey())
 		if region == nil {
 			log.Warn("follower get region nil", zap.String("key", string(request.GetRegionKey())))
-			return &pdpb.GetRegionResponse{Header: s.regionNotFound()}, nil
+			return &pdpb.GetRegionResponse{Header: regionNotFound()}, nil
 		}
 	} else {
 		rc = s.GetRaftCluster()
 		if rc == nil {
-			return &pdpb.GetRegionResponse{Header: s.notBootstrappedHeader()}, nil
+			return &pdpb.GetRegionResponse{Header: notBootstrappedHeader()}, nil
 		}
 		region = rc.GetRegionByKey(request.GetRegionKey())
 		if region == nil {
 			log.Warn("leader get region nil", zap.String("key", string(request.GetRegionKey())))
-			return &pdpb.GetRegionResponse{Header: s.header()}, nil
+			return &pdpb.GetRegionResponse{Header: wrapHeader()}, nil
 		}
 	}
 
@@ -1445,7 +1445,7 @@ func (s *GrpcServer) GetRegion(ctx context.Context, request *pdpb.GetRegionReque
 		buckets = region.GetBuckets()
 	}
 	return &pdpb.GetRegionResponse{
-		Header:       s.header(),
+		Header:       wrapHeader(),
 		Region:       region.GetMeta(),
 		Leader:       region.GetLeader(),
 		DownPeers:    region.GetDownPeers(),
@@ -1463,7 +1463,7 @@ func (s *GrpcServer) GetPrevRegion(ctx context.Context, request *pdpb.GetRegionR
 			defer done()
 		} else {
 			return &pdpb.GetRegionResponse{
-				Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
+				Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
 			}, nil
 		}
 	}
@@ -1482,21 +1482,21 @@ func (s *GrpcServer) GetPrevRegion(ctx context.Context, request *pdpb.GetRegionR
 		// no need to check running status
 		rc = s.cluster
 		if !rc.GetRegionSyncer().IsRunning() {
-			return &pdpb.GetRegionResponse{Header: s.regionNotFound()}, nil
+			return &pdpb.GetRegionResponse{Header: regionNotFound()}, nil
 		}
 	} else {
 		rc = s.GetRaftCluster()
 		if rc == nil {
-			return &pdpb.GetRegionResponse{Header: s.notBootstrappedHeader()}, nil
+			return &pdpb.GetRegionResponse{Header: notBootstrappedHeader()}, nil
 		}
 	}
 
 	region := rc.GetPrevRegionByKey(request.GetRegionKey())
 	if region == nil {
 		if *followerHandle {
-			return &pdpb.GetRegionResponse{Header: s.regionNotFound()}, nil
+			return &pdpb.GetRegionResponse{Header: regionNotFound()}, nil
 		}
-		return &pdpb.GetRegionResponse{Header: s.header()}, nil
+		return &pdpb.GetRegionResponse{Header: wrapHeader()}, nil
 	}
 	var buckets *metapb.Buckets
 	// FIXME: If the bucket is disabled dynamically, the bucket information is returned unexpectedly
@@ -1504,7 +1504,7 @@ func (s *GrpcServer) GetPrevRegion(ctx context.Context, request *pdpb.GetRegionR
 		buckets = region.GetBuckets()
 	}
 	return &pdpb.GetRegionResponse{
-		Header:       s.header(),
+		Header:       wrapHeader(),
 		Region:       region.GetMeta(),
 		Leader:       region.GetLeader(),
 		DownPeers:    region.GetDownPeers(),
@@ -1522,7 +1522,7 @@ func (s *GrpcServer) GetRegionByID(ctx context.Context, request *pdpb.GetRegionB
 			defer done()
 		} else {
 			return &pdpb.GetRegionResponse{
-				Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
+				Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
 			}, nil
 		}
 	}
@@ -1540,12 +1540,12 @@ func (s *GrpcServer) GetRegionByID(ctx context.Context, request *pdpb.GetRegionB
 	if *followerHandle {
 		rc = s.cluster
 		if !rc.GetRegionSyncer().IsRunning() {
-			return &pdpb.GetRegionResponse{Header: s.regionNotFound()}, nil
+			return &pdpb.GetRegionResponse{Header: regionNotFound()}, nil
 		}
 	} else {
 		rc = s.GetRaftCluster()
 		if rc == nil {
-			return &pdpb.GetRegionResponse{Header: s.regionNotFound()}, nil
+			return &pdpb.GetRegionResponse{Header: regionNotFound()}, nil
 		}
 	}
 	region := rc.GetRegion(request.GetRegionId())
@@ -1556,16 +1556,16 @@ func (s *GrpcServer) GetRegionByID(ctx context.Context, request *pdpb.GetRegionB
 	})
 	if region == nil {
 		if *followerHandle {
-			return &pdpb.GetRegionResponse{Header: s.regionNotFound()}, nil
+			return &pdpb.GetRegionResponse{Header: regionNotFound()}, nil
 		}
-		return &pdpb.GetRegionResponse{Header: s.header()}, nil
+		return &pdpb.GetRegionResponse{Header: wrapHeader()}, nil
 	}
 	var buckets *metapb.Buckets
 	if !*followerHandle && rc.GetStoreConfig().IsEnableRegionBucket() && request.GetNeedBuckets() {
 		buckets = region.GetBuckets()
 	}
 	return &pdpb.GetRegionResponse{
-		Header:       s.header(),
+		Header:       wrapHeader(),
 		Region:       region.GetMeta(),
 		Leader:       region.GetLeader(),
 		DownPeers:    region.GetDownPeers(),
@@ -1584,7 +1584,7 @@ func (s *GrpcServer) ScanRegions(ctx context.Context, request *pdpb.ScanRegionsR
 			defer done()
 		} else {
 			return &pdpb.ScanRegionsResponse{
-				Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
+				Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
 			}, nil
 		}
 	}
@@ -1602,19 +1602,19 @@ func (s *GrpcServer) ScanRegions(ctx context.Context, request *pdpb.ScanRegionsR
 	if *followerHandle {
 		rc = s.cluster
 		if !rc.GetRegionSyncer().IsRunning() {
-			return &pdpb.ScanRegionsResponse{Header: s.regionNotFound()}, nil
+			return &pdpb.ScanRegionsResponse{Header: regionNotFound()}, nil
 		}
 	} else {
 		rc = s.GetRaftCluster()
 		if rc == nil {
-			return &pdpb.ScanRegionsResponse{Header: s.notBootstrappedHeader()}, nil
+			return &pdpb.ScanRegionsResponse{Header: notBootstrappedHeader()}, nil
 		}
 	}
 	regions := rc.ScanRegions(request.GetStartKey(), request.GetEndKey(), int(request.GetLimit()))
 	if *followerHandle && len(regions) == 0 {
-		return &pdpb.ScanRegionsResponse{Header: s.regionNotFound()}, nil
+		return &pdpb.ScanRegionsResponse{Header: regionNotFound()}, nil
 	}
-	resp := &pdpb.ScanRegionsResponse{Header: s.header()}
+	resp := &pdpb.ScanRegionsResponse{Header: wrapHeader()}
 	for _, r := range regions {
 		leader := r.GetLeader()
 		if leader == nil {
@@ -1642,7 +1642,7 @@ func (s *GrpcServer) BatchScanRegions(ctx context.Context, request *pdpb.BatchSc
 			defer done()
 		} else {
 			return &pdpb.BatchScanRegionsResponse{
-				Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
+				Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
 			}, nil
 		}
 	}
@@ -1660,12 +1660,12 @@ func (s *GrpcServer) BatchScanRegions(ctx context.Context, request *pdpb.BatchSc
 	if *followerHandle {
 		rc = s.cluster
 		if !rc.GetRegionSyncer().IsRunning() {
-			return &pdpb.BatchScanRegionsResponse{Header: s.regionNotFound()}, nil
+			return &pdpb.BatchScanRegionsResponse{Header: regionNotFound()}, nil
 		}
 	} else {
 		rc = s.GetRaftCluster()
 		if rc == nil {
-			return &pdpb.BatchScanRegionsResponse{Header: s.notBootstrappedHeader()}, nil
+			return &pdpb.BatchScanRegionsResponse{Header: notBootstrappedHeader()}, nil
 		}
 	}
 	needBucket := request.GetNeedBuckets() && !*followerHandle && rc.GetStoreConfig().IsEnableRegionBucket()
@@ -1676,11 +1676,11 @@ func (s *GrpcServer) BatchScanRegions(ctx context.Context, request *pdpb.BatchSc
 	for i, reqRange := range reqRanges {
 		if i > 0 {
 			if bytes.Compare(reqRange.StartKey, reqRanges[i-1].EndKey) < 0 {
-				return &pdpb.BatchScanRegionsResponse{Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, "invalid key range, ranges overlapped")}, nil
+				return &pdpb.BatchScanRegionsResponse{Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, "invalid key range, ranges overlapped")}, nil
 			}
 		}
 		if len(reqRange.EndKey) > 0 && bytes.Compare(reqRange.StartKey, reqRange.EndKey) > 0 {
-			return &pdpb.BatchScanRegionsResponse{Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, "invalid key range, start key > end key")}, nil
+			return &pdpb.BatchScanRegionsResponse{Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, "invalid key range, start key > end key")}, nil
 		}
 		keyRanges.Append(reqRange.StartKey, reqRange.EndKey)
 	}
@@ -1693,11 +1693,11 @@ func (s *GrpcServer) BatchScanRegions(ctx context.Context, request *pdpb.BatchSc
 	if err != nil {
 		if errs.ErrRegionNotAdjacent.Equal(multierr.Errors(err)[0]) {
 			return &pdpb.BatchScanRegionsResponse{
-				Header: s.wrapErrorToHeader(pdpb.ErrorType_REGIONS_NOT_CONTAIN_ALL_KEY_RANGE, err.Error()),
+				Header: wrapErrorToHeader(pdpb.ErrorType_REGIONS_NOT_CONTAIN_ALL_KEY_RANGE, err.Error()),
 			}, nil
 		}
 		return &pdpb.BatchScanRegionsResponse{
-			Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
+			Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
 		}, nil
 	}
 	regions := make([]*pdpb.Region, 0, len(res))
@@ -1719,9 +1719,9 @@ func (s *GrpcServer) BatchScanRegions(ctx context.Context, request *pdpb.BatchSc
 		})
 	}
 	if *followerHandle && len(regions) == 0 {
-		return &pdpb.BatchScanRegionsResponse{Header: s.regionNotFound()}, nil
+		return &pdpb.BatchScanRegionsResponse{Header: regionNotFound()}, nil
 	}
-	resp := &pdpb.BatchScanRegionsResponse{Header: s.header(), Regions: regions}
+	resp := &pdpb.BatchScanRegionsResponse{Header: wrapHeader(), Regions: regions}
 	return resp, nil
 }
 
@@ -1734,7 +1734,7 @@ func (s *GrpcServer) AskSplit(ctx context.Context, request *pdpb.AskSplitRequest
 			defer done()
 		} else {
 			return &pdpb.AskSplitResponse{
-				Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
+				Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
 			}, nil
 		}
 	}
@@ -1749,23 +1749,23 @@ func (s *GrpcServer) AskSplit(ctx context.Context, request *pdpb.AskSplitRequest
 
 	rc := s.GetRaftCluster()
 	if rc == nil {
-		return &pdpb.AskSplitResponse{Header: s.notBootstrappedHeader()}, nil
+		return &pdpb.AskSplitResponse{Header: notBootstrappedHeader()}, nil
 	}
 	if request.GetRegion() == nil {
 		return &pdpb.AskSplitResponse{
-			Header: s.wrapErrorToHeader(pdpb.ErrorType_REGION_NOT_FOUND,
+			Header: wrapErrorToHeader(pdpb.ErrorType_REGION_NOT_FOUND,
 				"missing region for split"),
 		}, nil
 	}
 	split, err := rc.HandleAskSplit(request)
 	if err != nil {
 		return &pdpb.AskSplitResponse{
-			Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
+			Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
 		}, nil
 	}
 
 	return &pdpb.AskSplitResponse{
-		Header:      s.header(),
+		Header:      wrapHeader(),
 		NewRegionId: split.NewRegionId,
 		NewPeerIds:  split.NewPeerIds,
 	}, nil
@@ -1780,21 +1780,21 @@ func (s *GrpcServer) AskBatchSplit(ctx context.Context, request *pdpb.AskBatchSp
 			defer done()
 		} else {
 			return &pdpb.AskBatchSplitResponse{
-				Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
+				Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
 			}, nil
 		}
 	}
 
 	rc := s.GetRaftCluster()
 	if rc == nil {
-		return &pdpb.AskBatchSplitResponse{Header: s.notBootstrappedHeader()}, nil
+		return &pdpb.AskBatchSplitResponse{Header: notBootstrappedHeader()}, nil
 	}
 
 	if rc.IsServiceIndependent(constant.SchedulingServiceName) {
 		forwardCli, err := s.updateSchedulingClient(ctx)
 		if err != nil {
 			return &pdpb.AskBatchSplitResponse{
-				Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
+				Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
 			}, nil
 		}
 		cli := forwardCli.getClient()
@@ -1830,19 +1830,19 @@ func (s *GrpcServer) AskBatchSplit(ctx context.Context, request *pdpb.AskBatchSp
 	}
 	if request.GetRegion() == nil {
 		return &pdpb.AskBatchSplitResponse{
-			Header: s.wrapErrorToHeader(pdpb.ErrorType_REGION_NOT_FOUND,
+			Header: wrapErrorToHeader(pdpb.ErrorType_REGION_NOT_FOUND,
 				"missing region for split"),
 		}, nil
 	}
 	split, err := rc.HandleAskBatchSplit(request)
 	if err != nil {
 		return &pdpb.AskBatchSplitResponse{
-			Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
+			Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
 		}, nil
 	}
 
 	return &pdpb.AskBatchSplitResponse{
-		Header: s.header(),
+		Header: wrapHeader(),
 		Ids:    split.Ids,
 	}, nil
 }
@@ -1856,7 +1856,7 @@ func (s *GrpcServer) ReportSplit(ctx context.Context, request *pdpb.ReportSplitR
 			defer done()
 		} else {
 			return &pdpb.ReportSplitResponse{
-				Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
+				Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
 			}, nil
 		}
 	}
@@ -1871,17 +1871,17 @@ func (s *GrpcServer) ReportSplit(ctx context.Context, request *pdpb.ReportSplitR
 
 	rc := s.GetRaftCluster()
 	if rc == nil {
-		return &pdpb.ReportSplitResponse{Header: s.notBootstrappedHeader()}, nil
+		return &pdpb.ReportSplitResponse{Header: notBootstrappedHeader()}, nil
 	}
 	_, err := rc.HandleReportSplit(request)
 	if err != nil {
 		return &pdpb.ReportSplitResponse{
-			Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
+			Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
 		}, nil
 	}
 
 	return &pdpb.ReportSplitResponse{
-		Header: s.header(),
+		Header: wrapHeader(),
 	}, nil
 }
 
@@ -1894,7 +1894,7 @@ func (s *GrpcServer) ReportBatchSplit(ctx context.Context, request *pdpb.ReportB
 			defer done()
 		} else {
 			return &pdpb.ReportBatchSplitResponse{
-				Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
+				Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
 			}, nil
 		}
 	}
@@ -1909,18 +1909,18 @@ func (s *GrpcServer) ReportBatchSplit(ctx context.Context, request *pdpb.ReportB
 
 	rc := s.GetRaftCluster()
 	if rc == nil {
-		return &pdpb.ReportBatchSplitResponse{Header: s.notBootstrappedHeader()}, nil
+		return &pdpb.ReportBatchSplitResponse{Header: notBootstrappedHeader()}, nil
 	}
 	_, err := rc.HandleBatchReportSplit(request)
 	if err != nil {
 		return &pdpb.ReportBatchSplitResponse{
-			Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN,
+			Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN,
 				err.Error()),
 		}, nil
 	}
 
 	return &pdpb.ReportBatchSplitResponse{
-		Header: s.header(),
+		Header: wrapHeader(),
 	}, nil
 }
 
@@ -1933,7 +1933,7 @@ func (s *GrpcServer) GetClusterConfig(ctx context.Context, request *pdpb.GetClus
 			defer done()
 		} else {
 			return &pdpb.GetClusterConfigResponse{
-				Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
+				Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
 			}, nil
 		}
 	}
@@ -1948,10 +1948,10 @@ func (s *GrpcServer) GetClusterConfig(ctx context.Context, request *pdpb.GetClus
 
 	rc := s.GetRaftCluster()
 	if rc == nil {
-		return &pdpb.GetClusterConfigResponse{Header: s.notBootstrappedHeader()}, nil
+		return &pdpb.GetClusterConfigResponse{Header: notBootstrappedHeader()}, nil
 	}
 	return &pdpb.GetClusterConfigResponse{
-		Header:  s.header(),
+		Header:  wrapHeader(),
 		Cluster: rc.GetMetaCluster(),
 	}, nil
 }
@@ -1965,7 +1965,7 @@ func (s *GrpcServer) PutClusterConfig(ctx context.Context, request *pdpb.PutClus
 			defer done()
 		} else {
 			return &pdpb.PutClusterConfigResponse{
-				Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
+				Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
 			}, nil
 		}
 	}
@@ -1980,12 +1980,12 @@ func (s *GrpcServer) PutClusterConfig(ctx context.Context, request *pdpb.PutClus
 
 	rc := s.GetRaftCluster()
 	if rc == nil {
-		return &pdpb.PutClusterConfigResponse{Header: s.notBootstrappedHeader()}, nil
+		return &pdpb.PutClusterConfigResponse{Header: notBootstrappedHeader()}, nil
 	}
 	conf := request.GetCluster()
 	if err := rc.PutMetaCluster(conf); err != nil {
 		return &pdpb.PutClusterConfigResponse{
-			Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN,
+			Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN,
 				err.Error()),
 		}, nil
 	}
@@ -1993,7 +1993,7 @@ func (s *GrpcServer) PutClusterConfig(ctx context.Context, request *pdpb.PutClus
 	log.Info("put cluster config ok", zap.Reflect("config", conf))
 
 	return &pdpb.PutClusterConfigResponse{
-		Header: s.header(),
+		Header: wrapHeader(),
 	}, nil
 }
 
@@ -2006,21 +2006,21 @@ func (s *GrpcServer) ScatterRegion(ctx context.Context, request *pdpb.ScatterReg
 			defer done()
 		} else {
 			return &pdpb.ScatterRegionResponse{
-				Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
+				Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
 			}, nil
 		}
 	}
 
 	rc := s.GetRaftCluster()
 	if rc == nil {
-		return &pdpb.ScatterRegionResponse{Header: s.notBootstrappedHeader()}, nil
+		return &pdpb.ScatterRegionResponse{Header: notBootstrappedHeader()}, nil
 	}
 
 	if rc.IsServiceIndependent(constant.SchedulingServiceName) {
 		forwardCli, err := s.updateSchedulingClient(ctx)
 		if err != nil {
 			return &pdpb.ScatterRegionResponse{
-				Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
+				Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
 			}, nil
 		}
 		cli := forwardCli.getClient()
@@ -2035,7 +2035,7 @@ func (s *GrpcServer) ScatterRegion(ctx context.Context, request *pdpb.ScatterReg
 			}
 			if len(regionsID) == 0 {
 				return &pdpb.ScatterRegionResponse{
-					Header: s.invalidValue("regions id is required"),
+					Header: invalidValue("regions id is required"),
 				}, nil
 			}
 			req := &schedulingpb.ScatterRegionsRequest{
@@ -2074,7 +2074,7 @@ func (s *GrpcServer) ScatterRegion(ctx context.Context, request *pdpb.ScatterReg
 			return nil, err
 		}
 		return &pdpb.ScatterRegionResponse{
-			Header:             s.header(),
+			Header:             wrapHeader(),
 			FinishedPercentage: uint64(percentage),
 		}, nil
 	}
@@ -2084,7 +2084,7 @@ func (s *GrpcServer) ScatterRegion(ctx context.Context, request *pdpb.ScatterReg
 	if region == nil {
 		if request.GetRegion() == nil {
 			return &pdpb.ScatterRegionResponse{
-				Header: s.wrapErrorToHeader(pdpb.ErrorType_REGION_NOT_FOUND,
+				Header: wrapErrorToHeader(pdpb.ErrorType_REGION_NOT_FOUND,
 					"region %d not found"),
 			}, nil
 		}
@@ -2099,14 +2099,14 @@ func (s *GrpcServer) ScatterRegion(ctx context.Context, request *pdpb.ScatterReg
 	if op != nil {
 		if !rc.GetOperatorController().AddOperator(op) {
 			return &pdpb.ScatterRegionResponse{
-				Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN,
+				Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN,
 					"operator canceled because cannot add an operator to the execute queue"),
 			}, nil
 		}
 	}
 
 	return &pdpb.ScatterRegionResponse{
-		Header:             s.header(),
+		Header:             wrapHeader(),
 		FinishedPercentage: 100,
 	}, nil
 }
@@ -2120,7 +2120,7 @@ func (s *GrpcServer) GetGCSafePoint(ctx context.Context, request *pdpb.GetGCSafe
 			defer done()
 		} else {
 			return &pdpb.GetGCSafePointResponse{
-				Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
+				Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
 			}, nil
 		}
 	}
@@ -2135,7 +2135,7 @@ func (s *GrpcServer) GetGCSafePoint(ctx context.Context, request *pdpb.GetGCSafe
 
 	rc := s.GetRaftCluster()
 	if rc == nil {
-		return &pdpb.GetGCSafePointResponse{Header: s.notBootstrappedHeader()}, nil
+		return &pdpb.GetGCSafePointResponse{Header: notBootstrappedHeader()}, nil
 	}
 
 	safePoint, err := s.gcSafePointManager.LoadGCSafePoint()
@@ -2144,7 +2144,7 @@ func (s *GrpcServer) GetGCSafePoint(ctx context.Context, request *pdpb.GetGCSafe
 	}
 
 	return &pdpb.GetGCSafePointResponse{
-		Header:    s.header(),
+		Header:    wrapHeader(),
 		SafePoint: safePoint,
 	}, nil
 }
@@ -2179,7 +2179,7 @@ func (s *GrpcServer) UpdateGCSafePoint(ctx context.Context, request *pdpb.Update
 			defer done()
 		} else {
 			return &pdpb.UpdateGCSafePointResponse{
-				Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
+				Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
 			}, nil
 		}
 	}
@@ -2194,7 +2194,7 @@ func (s *GrpcServer) UpdateGCSafePoint(ctx context.Context, request *pdpb.Update
 
 	rc := s.GetRaftCluster()
 	if rc == nil {
-		return &pdpb.UpdateGCSafePointResponse{Header: s.notBootstrappedHeader()}, nil
+		return &pdpb.UpdateGCSafePointResponse{Header: notBootstrappedHeader()}, nil
 	}
 
 	newSafePoint := request.GetSafePoint()
@@ -2214,7 +2214,7 @@ func (s *GrpcServer) UpdateGCSafePoint(ctx context.Context, request *pdpb.Update
 	}
 
 	return &pdpb.UpdateGCSafePointResponse{
-		Header:       s.header(),
+		Header:       wrapHeader(),
 		NewSafePoint: newSafePoint,
 	}, nil
 }
@@ -2228,7 +2228,7 @@ func (s *GrpcServer) UpdateServiceGCSafePoint(ctx context.Context, request *pdpb
 			defer done()
 		} else {
 			return &pdpb.UpdateServiceGCSafePointResponse{
-				Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
+				Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
 			}, nil
 		}
 	}
@@ -2243,7 +2243,7 @@ func (s *GrpcServer) UpdateServiceGCSafePoint(ctx context.Context, request *pdpb
 
 	rc := s.GetRaftCluster()
 	if rc == nil {
-		return &pdpb.UpdateServiceGCSafePointResponse{Header: s.notBootstrappedHeader()}, nil
+		return &pdpb.UpdateServiceGCSafePointResponse{Header: notBootstrappedHeader()}, nil
 	}
 	var storage endpoint.GCSafePointStorage = s.storage
 	if request.TTL <= 0 {
@@ -2268,7 +2268,7 @@ func (s *GrpcServer) UpdateServiceGCSafePoint(ctx context.Context, request *pdpb
 			zap.Uint64("safepoint", request.GetSafePoint()))
 	}
 	return &pdpb.UpdateServiceGCSafePointResponse{
-		Header:       s.header(),
+		Header:       wrapHeader(),
 		ServiceId:    []byte(min.ServiceID),
 		TTL:          min.ExpiredAt - now.Unix(),
 		MinSafePoint: min.SafePoint,
@@ -2284,21 +2284,21 @@ func (s *GrpcServer) GetOperator(ctx context.Context, request *pdpb.GetOperatorR
 			defer done()
 		} else {
 			return &pdpb.GetOperatorResponse{
-				Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
+				Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
 			}, nil
 		}
 	}
 
 	rc := s.GetRaftCluster()
 	if rc == nil {
-		return &pdpb.GetOperatorResponse{Header: s.notBootstrappedHeader()}, nil
+		return &pdpb.GetOperatorResponse{Header: notBootstrappedHeader()}, nil
 	}
 
 	if rc.IsServiceIndependent(constant.SchedulingServiceName) {
 		forwardCli, err := s.updateSchedulingClient(ctx)
 		if err != nil {
 			return &pdpb.GetOperatorResponse{
-				Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
+				Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
 			}, nil
 		}
 		cli := forwardCli.getClient()
@@ -2333,7 +2333,7 @@ func (s *GrpcServer) GetOperator(ctx context.Context, request *pdpb.GetOperatorR
 	requestID := request.GetRegionId()
 	r := opController.GetOperatorStatus(requestID)
 	if r == nil {
-		header := s.errorHeader(&pdpb.Error{
+		header := errorHeader(&pdpb.Error{
 			Type:    pdpb.ErrorType_REGION_NOT_FOUND,
 			Message: "Not Found",
 		})
@@ -2341,7 +2341,7 @@ func (s *GrpcServer) GetOperator(ctx context.Context, request *pdpb.GetOperatorR
 	}
 
 	return &pdpb.GetOperatorResponse{
-		Header:   s.header(),
+		Header:   wrapHeader(),
 		RegionId: requestID,
 		Desc:     []byte(r.Desc()),
 		Kind:     []byte(r.Kind().String()),
@@ -2376,30 +2376,30 @@ func (s *GrpcServer) validateRoleInRequest(ctx context.Context, header *pdpb.Req
 	return nil
 }
 
-func (s *GrpcServer) header() *pdpb.ResponseHeader {
+func wrapHeader() *pdpb.ResponseHeader {
 	clusterID := keypath.ClusterID()
 	if clusterID == 0 {
-		return s.wrapErrorToHeader(pdpb.ErrorType_NOT_BOOTSTRAPPED, "cluster id is not ready")
+		return wrapErrorToHeader(pdpb.ErrorType_NOT_BOOTSTRAPPED, "cluster id is not ready")
 	}
 	return &pdpb.ResponseHeader{ClusterId: clusterID}
 }
 
-func (s *GrpcServer) wrapErrorToHeader(errorType pdpb.ErrorType, message string) *pdpb.ResponseHeader {
-	return s.errorHeader(&pdpb.Error{
+func wrapErrorToHeader(errorType pdpb.ErrorType, message string) *pdpb.ResponseHeader {
+	return errorHeader(&pdpb.Error{
 		Type:    errorType,
 		Message: message,
 	})
 }
 
-func (s *GrpcServer) errorHeader(err *pdpb.Error) *pdpb.ResponseHeader {
+func errorHeader(err *pdpb.Error) *pdpb.ResponseHeader {
 	return &pdpb.ResponseHeader{
 		ClusterId: keypath.ClusterID(),
 		Error:     err,
 	}
 }
 
-func (s *GrpcServer) notBootstrappedHeader() *pdpb.ResponseHeader {
-	return s.errorHeader(&pdpb.Error{
+func notBootstrappedHeader() *pdpb.ResponseHeader {
+	return errorHeader(&pdpb.Error{
 		Type:    pdpb.ErrorType_NOT_BOOTSTRAPPED,
 		Message: "cluster is not bootstrapped",
 	})
@@ -2407,21 +2407,21 @@ func (s *GrpcServer) notBootstrappedHeader() *pdpb.ResponseHeader {
 
 func (s *GrpcServer) incompatibleVersion(tag string) *pdpb.ResponseHeader {
 	msg := fmt.Sprintf("%s incompatible with current cluster version %s", tag, s.persistOptions.GetClusterVersion())
-	return s.errorHeader(&pdpb.Error{
+	return errorHeader(&pdpb.Error{
 		Type:    pdpb.ErrorType_INCOMPATIBLE_VERSION,
 		Message: msg,
 	})
 }
 
-func (s *GrpcServer) invalidValue(msg string) *pdpb.ResponseHeader {
-	return s.errorHeader(&pdpb.Error{
+func invalidValue(msg string) *pdpb.ResponseHeader {
+	return errorHeader(&pdpb.Error{
 		Type:    pdpb.ErrorType_INVALID_VALUE,
 		Message: msg,
 	})
 }
 
-func (s *GrpcServer) regionNotFound() *pdpb.ResponseHeader {
-	return s.errorHeader(&pdpb.Error{
+func regionNotFound() *pdpb.ResponseHeader {
+	return errorHeader(&pdpb.Error{
 		Type:    pdpb.ErrorType_REGION_NOT_FOUND,
 		Message: "region not found",
 	})
@@ -2499,7 +2499,7 @@ func (s *GrpcServer) SyncMaxTS(_ context.Context, request *pdpb.SyncMaxTSRequest
 			defer done()
 		} else {
 			return &pdpb.SyncMaxTSResponse{
-				Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
+				Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
 			}, nil
 		}
 	}
@@ -2507,7 +2507,7 @@ func (s *GrpcServer) SyncMaxTS(_ context.Context, request *pdpb.SyncMaxTSRequest
 	// There is no dc-location found in this server, return err.
 	if tsoAllocatorManager.GetClusterDCLocationsNumber() == 0 {
 		return &pdpb.SyncMaxTSResponse{
-			Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN,
+			Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN,
 				"empty cluster dc-location found, checker may not work properly"),
 		}, nil
 	}
@@ -2515,7 +2515,7 @@ func (s *GrpcServer) SyncMaxTS(_ context.Context, request *pdpb.SyncMaxTSRequest
 	allocatorLeaders, err := tsoAllocatorManager.GetHoldingLocalAllocatorLeaders()
 	if err != nil {
 		return &pdpb.SyncMaxTSResponse{
-			Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
+			Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
 		}, nil
 	}
 	if !request.GetSkipCheck() {
@@ -2530,7 +2530,7 @@ func (s *GrpcServer) SyncMaxTS(_ context.Context, request *pdpb.SyncMaxTSRequest
 			currentLocalTSO, err := allocator.GetCurrentTSO()
 			if err != nil {
 				return &pdpb.SyncMaxTSResponse{
-					Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
+					Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
 				}, nil
 			}
 			if tsoutil.CompareTimestamp(currentLocalTSO, maxLocalTS) > 0 {
@@ -2549,13 +2549,13 @@ func (s *GrpcServer) SyncMaxTS(_ context.Context, request *pdpb.SyncMaxTSRequest
 
 		if maxLocalTS == nil {
 			return &pdpb.SyncMaxTSResponse{
-				Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN,
+				Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN,
 					"local tso allocator leaders have changed during the sync, should retry"),
 			}, nil
 		}
 		if request.GetMaxTs() == nil {
 			return &pdpb.SyncMaxTSResponse{
-				Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN,
+				Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN,
 					"empty maxTS in the request, should retry"),
 			}, nil
 		}
@@ -2571,7 +2571,7 @@ func (s *GrpcServer) SyncMaxTS(_ context.Context, request *pdpb.SyncMaxTSRequest
 				maxLocalTS.Logical += 1
 			}
 			return &pdpb.SyncMaxTSResponse{
-				Header:     s.header(),
+				Header:     wrapHeader(),
 				MaxLocalTs: maxLocalTS,
 				SyncedDcs:  syncedDCs,
 			}, nil
@@ -2584,13 +2584,13 @@ func (s *GrpcServer) SyncMaxTS(_ context.Context, request *pdpb.SyncMaxTSRequest
 		}
 		if err := allocator.WriteTSO(request.GetMaxTs()); err != nil {
 			return &pdpb.SyncMaxTSResponse{
-				Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
+				Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
 			}, nil
 		}
 		syncedDCs = append(syncedDCs, allocator.GetDCLocation())
 	}
 	return &pdpb.SyncMaxTSResponse{
-		Header:    s.header(),
+		Header:    wrapHeader(),
 		SyncedDcs: syncedDCs,
 	}, nil
 }
@@ -2604,21 +2604,21 @@ func (s *GrpcServer) SplitRegions(ctx context.Context, request *pdpb.SplitRegion
 			defer done()
 		} else {
 			return &pdpb.SplitRegionsResponse{
-				Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
+				Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
 			}, nil
 		}
 	}
 
 	rc := s.GetRaftCluster()
 	if rc == nil {
-		return &pdpb.SplitRegionsResponse{Header: s.notBootstrappedHeader()}, nil
+		return &pdpb.SplitRegionsResponse{Header: notBootstrappedHeader()}, nil
 	}
 
 	if rc.IsServiceIndependent(constant.SchedulingServiceName) {
 		forwardCli, err := s.updateSchedulingClient(ctx)
 		if err != nil {
 			return &pdpb.SplitRegionsResponse{
-				Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
+				Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
 			}, nil
 		}
 		cli := forwardCli.getClient()
@@ -2653,7 +2653,7 @@ func (s *GrpcServer) SplitRegions(ctx context.Context, request *pdpb.SplitRegion
 
 	finishedPercentage, newRegionIDs := rc.GetRegionSplitter().SplitRegions(ctx, request.GetSplitKeys(), int(request.GetRetryLimit()))
 	return &pdpb.SplitRegionsResponse{
-		Header:             s.header(),
+		Header:             wrapHeader(),
 		RegionsId:          newRegionIDs,
 		FinishedPercentage: uint64(finishedPercentage),
 	}, nil
@@ -2670,7 +2670,7 @@ func (s *GrpcServer) SplitAndScatterRegions(ctx context.Context, request *pdpb.S
 			defer done()
 		} else {
 			return &pdpb.SplitAndScatterRegionsResponse{
-				Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
+				Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
 			}, nil
 		}
 	}
@@ -2684,7 +2684,7 @@ func (s *GrpcServer) SplitAndScatterRegions(ctx context.Context, request *pdpb.S
 	}
 	rc := s.GetRaftCluster()
 	if rc == nil {
-		return &pdpb.SplitAndScatterRegionsResponse{Header: s.notBootstrappedHeader()}, nil
+		return &pdpb.SplitAndScatterRegionsResponse{Header: notBootstrappedHeader()}, nil
 	}
 	splitFinishedPercentage, newRegionIDs := rc.GetRegionSplitter().SplitRegions(ctx, request.GetSplitKeys(), int(request.GetRetryLimit()))
 	scatterFinishedPercentage, err := scatterRegions(rc, newRegionIDs, request.GetGroup(), int(request.GetRetryLimit()), false)
@@ -2692,7 +2692,7 @@ func (s *GrpcServer) SplitAndScatterRegions(ctx context.Context, request *pdpb.S
 		return nil, err
 	}
 	return &pdpb.SplitAndScatterRegionsResponse{
-		Header:                    s.header(),
+		Header:                    wrapHeader(),
 		RegionsId:                 newRegionIDs,
 		SplitFinishedPercentage:   uint64(splitFinishedPercentage),
 		ScatterFinishedPercentage: uint64(scatterFinishedPercentage),
@@ -2736,7 +2736,7 @@ func (s *GrpcServer) GetDCLocationInfo(ctx context.Context, request *pdpb.GetDCL
 			defer done()
 		} else {
 			return &pdpb.GetDCLocationInfoResponse{
-				Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
+				Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
 			}, nil
 		}
 	}
@@ -2745,12 +2745,12 @@ func (s *GrpcServer) GetDCLocationInfo(ctx context.Context, request *pdpb.GetDCL
 	if !ok {
 		am.ClusterDCLocationChecker()
 		return &pdpb.GetDCLocationInfoResponse{
-			Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN,
+			Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN,
 				fmt.Sprintf("dc-location %s is not found", request.GetDcLocation())),
 		}, nil
 	}
 	resp := &pdpb.GetDCLocationInfoResponse{
-		Header: s.header(),
+		Header: wrapHeader(),
 		Suffix: info.Suffix,
 	}
 	// Because the number of suffix bits is changing dynamically according to the dc-location number,
@@ -2763,7 +2763,7 @@ func (s *GrpcServer) GetDCLocationInfo(ctx context.Context, request *pdpb.GetDCL
 	// Please take a look at https://github.com/tikv/pd/issues/3260 for more details.
 	if resp.MaxTs, err = am.GetMaxLocalTSO(ctx); err != nil {
 		return &pdpb.GetDCLocationInfoResponse{
-			Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
+			Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
 		}, nil
 	}
 	return resp, nil
@@ -2925,10 +2925,10 @@ func (s *GrpcServer) WatchGlobalConfig(req *pdpb.WatchGlobalConfigRequest, serve
 			if res.Err() != nil {
 				var resp pdpb.WatchGlobalConfigResponse
 				if revision < res.CompactRevision {
-					resp.Header = s.wrapErrorToHeader(pdpb.ErrorType_DATA_COMPACTED,
+					resp.Header = wrapErrorToHeader(pdpb.ErrorType_DATA_COMPACTED,
 						fmt.Sprintf("required watch revision: %d is smaller than current compact/min revision %d.", revision, res.CompactRevision))
 				} else {
-					resp.Header = s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN,
+					resp.Header = wrapErrorToHeader(pdpb.ErrorType_UNKNOWN,
 						fmt.Sprintf("watch channel meet other error %s.", res.Err().Error()))
 				}
 				if err := server.Send(&resp); err != nil {
@@ -2998,7 +2998,7 @@ func (s *GrpcServer) ReportMinResolvedTS(ctx context.Context, request *pdpb.Repo
 			defer done()
 		} else {
 			return &pdpb.ReportMinResolvedTsResponse{
-				Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
+				Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
 			}, nil
 		}
 	}
@@ -3013,7 +3013,7 @@ func (s *GrpcServer) ReportMinResolvedTS(ctx context.Context, request *pdpb.Repo
 
 	rc := s.GetRaftCluster()
 	if rc == nil {
-		return &pdpb.ReportMinResolvedTsResponse{Header: s.notBootstrappedHeader()}, nil
+		return &pdpb.ReportMinResolvedTsResponse{Header: notBootstrappedHeader()}, nil
 	}
 
 	storeID := request.GetStoreId()
@@ -3025,7 +3025,7 @@ func (s *GrpcServer) ReportMinResolvedTS(ctx context.Context, request *pdpb.Repo
 		zap.Uint64("store", storeID),
 		zap.Uint64("min resolved-ts", minResolvedTS))
 	return &pdpb.ReportMinResolvedTsResponse{
-		Header: s.header(),
+		Header: wrapHeader(),
 	}, nil
 }
 
@@ -3038,7 +3038,7 @@ func (s *GrpcServer) SetExternalTimestamp(ctx context.Context, request *pdpb.Set
 			defer done()
 		} else {
 			return &pdpb.SetExternalTimestampResponse{
-				Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
+				Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
 			}, nil
 		}
 	}
@@ -3060,10 +3060,10 @@ func (s *GrpcServer) SetExternalTimestamp(ctx context.Context, request *pdpb.Set
 	log.Debug("try to set external timestamp",
 		zap.Uint64("external-ts", externalTS), zap.Uint64("global-ts", globalTS))
 	if err := s.SetExternalTS(externalTS, globalTS); err != nil {
-		return &pdpb.SetExternalTimestampResponse{Header: s.invalidValue(err.Error())}, nil
+		return &pdpb.SetExternalTimestampResponse{Header: invalidValue(err.Error())}, nil
 	}
 	return &pdpb.SetExternalTimestampResponse{
-		Header: s.header(),
+		Header: wrapHeader(),
 	}, nil
 }
 
@@ -3076,7 +3076,7 @@ func (s *GrpcServer) GetExternalTimestamp(ctx context.Context, request *pdpb.Get
 			defer done()
 		} else {
 			return &pdpb.GetExternalTimestampResponse{
-				Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
+				Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
 			}, nil
 		}
 	}
@@ -3091,7 +3091,7 @@ func (s *GrpcServer) GetExternalTimestamp(ctx context.Context, request *pdpb.Get
 
 	timestamp := s.GetExternalTS()
 	return &pdpb.GetExternalTimestampResponse{
-		Header:    s.header(),
+		Header:    wrapHeader(),
 		Timestamp: timestamp,
 	}, nil
 }
