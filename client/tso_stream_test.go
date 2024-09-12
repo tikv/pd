@@ -123,11 +123,9 @@ func (s *mockTSOStreamImpl) Recv() (tsoRequestResult, error) {
 			}
 			s.errorState = res.err
 			return tsoRequestResult{}, s.errorState
-		} else {
+		} else if s.autoGenerateResult {
 			// Do not allow manually assigning result.
-			if s.autoGenerateResult {
-				panic("trying manually specifying result for mockTSOStreamImpl when it's auto-generating mode")
-			}
+			panic("trying manually specifying result for mockTSOStreamImpl when it's auto-generating mode")
 		}
 	} else if s.autoGenerateResult {
 		res = s.autoGenResult(req.count)
@@ -141,7 +139,8 @@ func (s *mockTSOStreamImpl) Recv() (tsoRequestResult, error) {
 			s.errorState = s.ctx.Err()
 			return tsoRequestResult{}, s.errorState
 		case req = <-s.requestCh:
-			hasReq = true
+			// Skip the assignment to make linter happy.
+			// hasReq = true
 		}
 	} else if !hasRes {
 		select {
@@ -149,7 +148,8 @@ func (s *mockTSOStreamImpl) Recv() (tsoRequestResult, error) {
 			s.errorState = s.ctx.Err()
 			return tsoRequestResult{}, s.errorState
 		case res = <-s.resultCh:
-			hasRes = true
+			// Skip the assignment to make linter happy.
+			// hasRes = true
 		}
 	}
 
@@ -182,6 +182,7 @@ func (s *mockTSOStreamImpl) autoGenResult(count int64) resultMsg {
 	}
 }
 
+// nolint:unused
 func (s *mockTSOStreamImpl) returnResult(physical int64, logical int64, count uint32) {
 	s.resultCh <- resultMsg{
 		r: tsoRequestResult{
@@ -194,12 +195,14 @@ func (s *mockTSOStreamImpl) returnResult(physical int64, logical int64, count ui
 	}
 }
 
+// nolint:unused
 func (s *mockTSOStreamImpl) returnError(err error) {
 	s.resultCh <- resultMsg{
 		err: err,
 	}
 }
 
+// nolint:unused
 func (s *mockTSOStreamImpl) breakStream(err error) {
 	s.resultCh <- resultMsg{
 		err:         err,
