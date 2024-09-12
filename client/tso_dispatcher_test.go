@@ -49,10 +49,7 @@ func (m *mockTSOServiceProvider) updateConnectionCtxs(ctx context.Context, _dc s
 		return true
 	}
 	ctx, cancel := context.WithCancel(ctx)
-	stream := &tsoStream{
-		serverURL: mockStreamURL,
-		stream:    newMockTSOStreamImpl(ctx, true),
-	}
+	stream := newTSOStream(ctx, mockStreamURL, newMockTSOStreamImpl(ctx, true))
 	connectionCtxs.LoadOrStore(mockStreamURL, &tsoConnectionContext{ctx, cancel, mockStreamURL, stream})
 	return true
 }
