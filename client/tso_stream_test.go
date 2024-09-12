@@ -413,17 +413,28 @@ func (s *testTSOStreamSuite) TestTSOStreamConcurrentRunning() {
 
 func BenchmarkTSOStreamSendRecv(b *testing.B) {
 	streamInner := newMockTSOStreamImpl(context.Background(), true)
-	stream := tsoStream{
-		serverURL: mockStreamURL,
-		stream:    streamInner,
-	}
-	defer streamInner.stop()
+	stream := newTSOStream(context.Background(), mockStreamURL, streamInner)
+	defer func() {
+		streamInner.stop()
+		stream.WaitForClosed()
+	}()
 
 	now := time.Now()
+	resCh := make(chan tsoRequestResult, 1)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, _, _, _, _ = stream.processRequests(1, 1, 1, globalDCLocation, 1, now)
+		err := stream.processRequests(1, 1, 1, globalDCLocation, 1, now, func(result tsoRequestResult, reqKeyspaceGroupID uint32, err error) {
+			select {
+			case resCh <- result:
+			default:
+				panic("channel not cleared in the last iteration")
+			}
+		})
+		if err != nil {
+			panic(err)
+		}
+		<-resCh
 	}
 	b.StopTimer()
 }
