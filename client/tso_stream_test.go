@@ -74,7 +74,7 @@ func (s *mockTSOStreamImpl) Send(clusterID uint64, _keyspaceID, keyspaceGroupID 
 	return nil
 }
 
-func (s *mockTSOStreamImpl) Recv() (ret tsoRequestResult, retErr error) {
+func (s *mockTSOStreamImpl) Recv() (tsoRequestResult, error) {
 	// This stream have ever receive an error, it returns the error forever.
 	if s.errorState != nil {
 		return tsoRequestResult{}, s.errorState
@@ -87,58 +87,96 @@ func (s *mockTSOStreamImpl) Recv() (ret tsoRequestResult, retErr error) {
 	default:
 	}
 
-	var res resultMsg
-	needGenRes := false
-	if s.autoGenerateResult {
-		select {
-		case res = <-s.resultCh:
-		default:
-			needGenRes = true
-		}
-	} else {
-		select {
-		case res = <-s.resultCh:
-		case <-s.ctx.Done():
-			s.errorState = s.ctx.Err()
-			return tsoRequestResult{}, s.errorState
-		}
-	}
+	var (
+		res    resultMsg
+		hasRes bool
+		req    requestMsg
+		hasReq bool
+	)
 
-	if !res.breakStream {
-		var req requestMsg
+	// Try to match a pair of request and result from each channel and allowing breaking the stream at any time.
+	select {
+	case <-s.ctx.Done():
+		s.errorState = s.ctx.Err()
+		return tsoRequestResult{}, s.errorState
+	case req = <-s.requestCh:
+		hasReq = true
+		select {
+		case res = <-s.resultCh:
+			hasRes = true
+		default:
+		}
+	case res = <-s.resultCh:
+		hasRes = true
 		select {
 		case req = <-s.requestCh:
+			hasReq = true
+		default:
+		}
+	}
+	// Either req or res should be ready at this time.
+
+	if hasRes {
+		if res.breakStream {
+			s.errorState = s.ctx.Err()
+			return tsoRequestResult{}, s.errorState
+		} else {
+			// Do not allow manually assigning result.
+			if s.autoGenerateResult {
+				panic("trying manually specifying result for mockTSOStreamImpl when it's auto-generating mode")
+			}
+		}
+	} else if s.autoGenerateResult {
+		res = s.autoGenResult(req.count)
+		hasRes = true
+	}
+
+	if !hasReq {
+		// If req is not ready, the res must be ready. So it's certain that it don't need to be canceled by breakStream.
+		select {
 		case <-s.ctx.Done():
 			s.errorState = s.ctx.Err()
 			return tsoRequestResult{}, s.errorState
+		case req = <-s.requestCh:
+			hasReq = true
 		}
-		if needGenRes {
-
-			physical := s.resGenPhysical
-			logical := s.resGenLogical + req.count
-			if logical >= (1 << 18) {
-				physical += logical >> 18
-				logical &= (1 << 18) - 1
-			}
-
-			s.resGenPhysical = physical
-			s.resGenLogical = logical
-
-			res = resultMsg{
-				r: tsoRequestResult{
-					physical:            s.resGenPhysical,
-					logical:             s.resGenLogical,
-					count:               uint32(req.count),
-					suffixBits:          0,
-					respKeyspaceGroupID: 0,
-				},
-			}
+	} else if !hasRes {
+		select {
+		case <-s.ctx.Done():
+			s.errorState = s.ctx.Err()
+			return tsoRequestResult{}, s.errorState
+		case res = <-s.resultCh:
+			hasRes = true
 		}
 	}
+
+	// Both res and req should be ready here.
 	if res.err != nil {
 		s.errorState = res.err
 	}
 	return res.r, res.err
+}
+
+func (s *mockTSOStreamImpl) autoGenResult(count int64) resultMsg {
+	physical := s.resGenPhysical
+	logical := s.resGenLogical + count
+	if logical >= (1 << 18) {
+		physical += logical >> 18
+		logical &= (1 << 18) - 1
+	}
+
+	s.resGenPhysical = physical
+	s.resGenLogical = logical
+
+	return resultMsg{
+		r: tsoRequestResult{
+			physical:            s.resGenPhysical,
+			logical:             s.resGenLogical,
+			count:               uint32(count),
+			suffixBits:          0,
+			respKeyspaceGroupID: 0,
+		},
+	}
 }
 
 func (s *mockTSOStreamImpl) returnResult(physical int64, logical int64, count uint32) {
