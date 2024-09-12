@@ -21,9 +21,11 @@ import (
 	"time"
 
 	"github.com/pingcap/errors"
+	"github.com/pingcap/log"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/client/errs"
+	"go.uber.org/zap/zapcore"
 )
 
 const mockStreamURL = "mock:///"
@@ -453,6 +455,8 @@ func (s *testTSOStreamSuite) TestTSOStreamConcurrentRunning() {
 }
 
 func BenchmarkTSOStreamSendRecv(b *testing.B) {
+	log.SetLevel(zapcore.FatalLevel)
+
 	streamInner := newMockTSOStreamImpl(context.Background(), true)
 	stream := newTSOStream(context.Background(), mockStreamURL, streamInner)
 	defer func() {
