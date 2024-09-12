@@ -21,6 +21,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
+const pingPrefix = "pd/api/v1/ping"
+
 // NewPingCommand return a ping subcommand of rootCmd
 func NewPingCommand() *cobra.Command {
 	m := &cobra.Command{
@@ -31,7 +33,7 @@ func NewPingCommand() *cobra.Command {
 	return m
 }
 
-func showPingCommandFunc(cmd *cobra.Command, args []string) {
+func showPingCommandFunc(cmd *cobra.Command, _ []string) {
 	start := time.Now()
 	_, err := doRequest(cmd, pingPrefix, http.MethodGet, http.Header{})
 	if err != nil {

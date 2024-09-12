@@ -17,34 +17,20 @@ package schedulers
 import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/schedule"
 	"github.com/tikv/pd/pkg/schedule/config"
+	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
+	"github.com/tikv/pd/pkg/schedule/types"
 	"go.uber.org/zap"
 )
 
-const (
-	// LabelName is label scheduler name.
-	LabelName = "label-scheduler"
-	// LabelType is label scheduler type.
-	LabelType = "label"
-)
-
-var (
-	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
-	labelCounter            = schedulerCounter.WithLabelValues(LabelName, "schedule")
-	labelNewOperatorCounter = schedulerCounter.WithLabelValues(LabelName, "new-operator")
-	labelNoTargetCounter    = schedulerCounter.WithLabelValues(LabelName, "no-target")
-	labelSkipCounter        = schedulerCounter.WithLabelValues(LabelName, "skip")
-	labelNoRegionCounter    = schedulerCounter.WithLabelValues(LabelName, "no-region")
-)
-
 type labelSchedulerConfig struct {
-	Name   string          `json:"name"`
 	Ranges []core.KeyRange `json:"ranges"`
+	// TODO: When we prepare to use Ranges, we will need to implement the ReloadConfig function for this scheduler.
 }
 
 type labelScheduler struct {
@@ -55,39 +41,34 @@ type labelScheduler struct {
 // LabelScheduler is mainly based on the store's label information for scheduling.
 // Now only used for reject leader schedule, that will move the leader out of
 // the store with the specific label.
-func newLabelScheduler(opController *schedule.OperatorController, conf *labelSchedulerConfig) schedule.Scheduler {
+func newLabelScheduler(opController *operator.Controller, conf *labelSchedulerConfig) Scheduler {
 	return &labelScheduler{
-		BaseScheduler: NewBaseScheduler(opController),
+		BaseScheduler: NewBaseScheduler(opController, types.LabelScheduler),
 		conf:          conf,
 	}
 }
 
-func (s *labelScheduler) GetName() string {
-	return s.conf.Name
-}
-
-func (s *labelScheduler) GetType() string {
-	return LabelType
-}
-
+// EncodeConfig implements the Scheduler interface.
 func (s *labelScheduler) EncodeConfig() ([]byte, error) {
-	return schedule.EncodeConfig(s.conf)
+	return EncodeConfig(s.conf)
 }
 
-func (s *labelScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool {
-	allowed := s.OpController.OperatorCount(operator.OpLeader) < cluster.GetOpts().GetLeaderScheduleLimit()
+// IsScheduleAllowed implements the Scheduler interface.
+func (s *labelScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) bool {
+	allowed := s.OpController.OperatorCount(operator.OpLeader) < cluster.GetSchedulerConfig().GetLeaderScheduleLimit()
 	if !allowed {
-		operator.OperatorLimitCounter.WithLabelValues(s.GetType(), operator.OpLeader.String()).Inc()
+		operator.IncOperatorLimitCounter(s.GetType(), operator.OpLeader)
 	}
 	return allowed
 }
 
-func (s *labelScheduler) Schedule(cluster schedule.Cluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
+// Schedule implements the Scheduler interface.
+func (s *labelScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) ([]*operator.Operator, []plan.Plan) {
 	labelCounter.Inc()
 	stores := cluster.GetStores()
 	rejectLeaderStores := make(map[uint64]struct{})
 	for _, s := range stores {
-		if cluster.GetOpts().CheckLabelProperty(config.RejectLeader, s.GetLabels()) {
+		if cluster.GetSchedulerConfig().CheckLabelProperty(config.RejectLeader, s.GetLabels()) {
 			rejectLeaderStores[s.GetID()] = struct{}{}
 		}
 	}
@@ -109,7 +90,7 @@ func (s *labelScheduler) Schedule(cluster schedule.Cluster, dryRun bool) ([]*ope
 			f := filter.NewExcludedFilter(s.GetName(), nil, excludeStores)
 
 			target := filter.NewCandidates(cluster.GetFollowerStores(region)).
-				FilterTarget(cluster.GetOpts(), nil, nil, &filter.StoreStateFilter{ActionScope: LabelName, TransferLeader: true}, f).
+				FilterTarget(cluster.GetSchedulerConfig(), nil, nil, &filter.StoreStateFilter{ActionScope: s.GetName(), TransferLeader: true, OperatorLevel: constant.Medium}, f).
 				RandomPick()
 			if target == nil {
 				log.Debug("label scheduler no target found for region", zap.Uint64("region-id", region.GetID()))
@@ -117,7 +98,7 @@ func (s *labelScheduler) Schedule(cluster schedule.Cluster, dryRun bool) ([]*ope
 				continue
 			}
 
-			op, err := operator.CreateTransferLeaderOperator("label-reject-leader", cluster, region, id, target.GetID(), []uint64{}, operator.OpLeader)
+			op, err := operator.CreateTransferLeaderOperator("label-reject-leader", cluster, region, target.GetID(), []uint64{}, operator.OpLeader)
 			if err != nil {
 				log.Debug("fail to create transfer label reject leader operator", errs.ZapError(err))
 				return nil, nil

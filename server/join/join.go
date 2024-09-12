@@ -17,7 +17,7 @@ package join
 import (
 	"fmt"
 	"os"
-	"path"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -27,8 +27,8 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/server/config"
-	"go.etcd.io/etcd/clientv3"
-	"go.etcd.io/etcd/embed"
+	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.etcd.io/etcd/server/v3/embed"
 	"go.uber.org/zap"
 )
 
@@ -90,7 +90,7 @@ func PrepareJoinCluster(cfg *config.Config) error {
 		return errors.New("join self is forbidden")
 	}
 
-	filePath := path.Join(cfg.DataDir, "join")
+	filePath := filepath.Join(cfg.DataDir, "join")
 	// Read the persist join config
 	if _, err := os.Stat(filePath); !os.IsNotExist(err) {
 		s, err := os.ReadFile(filePath)
@@ -104,7 +104,7 @@ func PrepareJoinCluster(cfg *config.Config) error {
 
 	initialCluster := ""
 	// Cases with data directory.
-	if isDataExist(path.Join(cfg.DataDir, "member")) {
+	if isDataExist(filepath.Join(cfg.DataDir, "member")) {
 		cfg.InitialCluster = initialCluster
 		cfg.InitialClusterState = embed.ClusterStateFlagExisting
 		return nil
@@ -128,7 +128,7 @@ func PrepareJoinCluster(cfg *config.Config) error {
 	}
 	defer client.Close()
 
-	listResp, err := etcdutil.ListEtcdMembers(client)
+	listResp, err := etcdutil.ListEtcdMembers(client.Ctx(), client)
 	if err != nil {
 		return err
 	}
@@ -136,7 +136,11 @@ func PrepareJoinCluster(cfg *config.Config) error {
 	existed := false
 	for _, m := range listResp.Members {
 		if len(m.Name) == 0 {
-			return errors.New("there is a member that has not joined successfully")
+			log.Error("there is an abnormal joined member in the current member list",
+				zap.Uint64("id", m.ID),
+				zap.Strings("peer-urls", m.PeerURLs),
+				zap.Strings("client-urls", m.ClientURLs))
+			return errors.Errorf("there is a member %d that has not joined successfully", m.ID)
 		}
 		if m.Name == cfg.Name {
 			existed = true
@@ -150,7 +154,7 @@ func PrepareJoinCluster(cfg *config.Config) error {
 
 	var addResp *clientv3.MemberAddResponse
 
-	failpoint.Inject("add-member-failed", func() {
+	failpoint.Inject("addMemberFailed", func() {
 		listMemberRetryTimes = 2
 		failpoint.Goto("LabelSkipAddMember")
 	})
@@ -171,7 +175,7 @@ func PrepareJoinCluster(cfg *config.Config) error {
 	)
 
 	for i := 0; i < listMemberRetryTimes; i++ {
-		listResp, err = etcdutil.ListEtcdMembers(client)
+		listResp, err = etcdutil.ListEtcdMembers(client.Ctx(), client)
 		if err != nil {
 			return err
 		}
@@ -184,7 +188,11 @@ func PrepareJoinCluster(cfg *config.Config) error {
 				listSucc = true
 			}
 			if len(n) == 0 {
-				return errors.New("there is a member that has not joined successfully")
+				log.Error("there is an abnormal joined member in the current member list",
+					zap.Uint64("id", memb.ID),
+					zap.Strings("peer-urls", memb.PeerURLs),
+					zap.Strings("client-urls", memb.ClientURLs))
+				return errors.Errorf("there is a member %d that has not joined successfully", memb.ID)
 			}
 			for _, m := range memb.PeerURLs {
 				pds = append(pds, fmt.Sprintf("%s=%s", n, m))

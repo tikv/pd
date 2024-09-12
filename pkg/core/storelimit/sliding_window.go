@@ -22,36 +22,65 @@ import (
 const (
 	// minSnapSize is the min value to check the windows has enough size.
 	minSnapSize = 10
+	// defaultWindowSize is the default window size.
+	defaultWindowSize = 100
+
+	defaultProportion = 20
+	defaultIntegral   = 10
 )
+
+var _ StoreLimit = &SlidingWindows{}
 
 // SlidingWindows is a multi sliding windows
 type SlidingWindows struct {
 	mu      syncutil.RWMutex
 	windows []*window
+	lastSum float64
 }
 
 // NewSlidingWindows is the construct of SlidingWindows.
-func NewSlidingWindows(cap float64) *SlidingWindows {
-	if cap < 0 {
-		cap = minSnapSize
-	}
+func NewSlidingWindows() *SlidingWindows {
 	windows := make([]*window, constant.PriorityLevelLen)
 	for i := 0; i < int(constant.PriorityLevelLen); i++ {
-		windows[i] = newWindow(int64(cap) >> i)
+		windows[i] = newWindow(int64(defaultWindowSize) >> i)
 	}
 	return &SlidingWindows{
 		windows: windows,
 	}
 }
 
-// Reset resets the capacity of the sliding windows.
-// It doesn't clear all the used, only set the capacity.
-func (s *SlidingWindows) Reset(cap float64, typ Type) {
+// Version returns v2
+func (*SlidingWindows) Version() string {
+	return VersionV2
+}
+
+// Feedback is used to update the capacity of the sliding windows.
+func (s *SlidingWindows) Feedback(e float64) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	// If the limiter is available, we don't need to update the capacity.
+	if s.windows[constant.Low].available() {
+		return
+	}
+	s.lastSum += e
+	// There are two constants to control the proportion of the sum and the current error.
+	// The sum of the error is used to ensure the capacity is more stable even if the error is zero.
+	// In the final scene, the sum of the error should be stable and the current error should be zero.
+	cap := defaultProportion*e + defaultIntegral*s.lastSum
+	// The capacity should be at least the default window size.
+	if cap < defaultWindowSize {
+		cap = defaultWindowSize
+	}
+	s.set(cap, SendSnapshot)
+}
+
+// Reset does nothing because the capacity depends on the feedback.
+func (*SlidingWindows) Reset(_ float64, _ Type) {}
+
+func (s *SlidingWindows) set(cap float64, typ Type) {
 	if typ != SendSnapshot {
 		return
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	if cap < 0 {
 		cap = minSnapSize
 	}
@@ -60,13 +89,20 @@ func (s *SlidingWindows) Reset(cap float64, typ Type) {
 	}
 }
 
-// GetUsed returns the used size in the sliding windows.
-func (s *SlidingWindows) GetUsed() int64 {
+// GetCap returns the capacity of the sliding windows.
+func (s *SlidingWindows) GetCap() int64 {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	used := int64(0)
-	for _, v := range s.windows {
-		used += v.getUsed()
+	return s.windows[0].capacity
+}
+
+// GetUsed returns the used size in the sliding windows.
+func (s *SlidingWindows) GetUsed() []int64 {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	used := make([]int64, len(s.windows))
+	for i, v := range s.windows {
+		used[i] = v.getUsed()
 	}
 	return used
 }
@@ -107,7 +143,10 @@ func (s *SlidingWindows) Take(token int64, typ Type, level constant.PriorityLeve
 // Ack indicates that some executing operator has been finished.
 // The order of refilling windows is from high to low.
 // It will refill the highest window first.
-func (s *SlidingWindows) Ack(token int64) {
+func (s *SlidingWindows) Ack(token int64, typ Type) {
+	if typ != SendSnapshot {
+		return
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for i := constant.PriorityLevelLen - 1; i >= 0; i-- {

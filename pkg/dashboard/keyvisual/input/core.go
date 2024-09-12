@@ -94,7 +94,7 @@ func clusterScan(rc *core.BasicCluster) RegionsInfo {
 	regions := make([]*core.RegionInfo, 0, limit)
 
 	for {
-		rs := rc.ScanRange(startKey, endKey, limit)
+		rs := rc.ScanRegions(startKey, endKey, limit)
 		length := len(rs)
 		if length == 0 {
 			break

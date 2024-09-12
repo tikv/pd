@@ -22,7 +22,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/mock/mockconfig"
-	"github.com/tikv/pd/pkg/schedule"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/schedule/plan"
@@ -42,12 +41,12 @@ var (
 // newBenchCluster store region count is same with storeID and
 // the tolerate define storeCount that store can elect candidate but not should balance
 // so the case  bench the worst scene
-func newBenchCluster(ruleEnable, labelEnable bool, tombstoneEnable bool) (context.CancelFunc, *mockcluster.Cluster, *schedule.OperatorController) {
+func newBenchCluster(ruleEnable, labelEnable bool, tombstoneEnable bool) (context.CancelFunc, *mockcluster.Cluster, *operator.Controller) {
 	Register()
 	ctx, cancel := context.WithCancel(context.Background())
 	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
-	oc := schedule.NewOperatorController(ctx, tc, nil)
+	oc := operator.NewController(ctx, tc.GetBasicCluster(), tc.GetSharedConfig(), nil)
 	opt.GetScheduleConfig().TolerantSizeRatio = float64(storeCount)
 	opt.SetPlacementRuleEnabled(ruleEnable)
 
@@ -91,12 +90,12 @@ func newBenchCluster(ruleEnable, labelEnable bool, tombstoneEnable bool) (contex
 	return cancel, tc, oc
 }
 
-func newBenchBigCluster(storeNumInOneRack, regionNum int) (context.CancelFunc, *mockcluster.Cluster, *schedule.OperatorController) {
+func newBenchBigCluster(storeNumInOneRack, regionNum int) (context.CancelFunc, *mockcluster.Cluster, *operator.Controller) {
 	Register()
 	ctx, cancel := context.WithCancel(context.Background())
 	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
-	oc := schedule.NewOperatorController(ctx, tc, nil)
+	oc := operator.NewController(ctx, tc.GetBasicCluster(), tc.GetSharedConfig(), nil)
 	opt.GetScheduleConfig().TolerantSizeRatio = float64(storeCount)
 	opt.SetPlacementRuleEnabled(true)
 
@@ -156,7 +155,7 @@ func BenchmarkPlacementRule(b *testing.B) {
 	re := assert.New(b)
 	cancel, tc, oc := newBenchCluster(true, true, false)
 	defer cancel()
-	sc := newBalanceRegionScheduler(oc, &balanceRegionSchedulerConfig{}, []BalanceRegionCreateOption{WithBalanceRegionName(BalanceRegionType)}...)
+	sc := newBalanceRegionScheduler(oc, &balanceRegionSchedulerConfig{})
 	b.ResetTimer()
 	var ops []*operator.Operator
 	var plans []plan.Plan
@@ -164,7 +163,7 @@ func BenchmarkPlacementRule(b *testing.B) {
 		ops, plans = sc.Schedule(tc, false)
 	}
 	b.StopTimer()
-	re.Len(plans, 0)
+	re.Empty(plans)
 	re.Len(ops, 1)
 	re.Contains(ops[0].String(), "to [191]")
 }
@@ -172,7 +171,7 @@ func BenchmarkPlacementRule(b *testing.B) {
 func BenchmarkLabel(b *testing.B) {
 	cancel, tc, oc := newBenchCluster(false, true, false)
 	defer cancel()
-	sc := newBalanceRegionScheduler(oc, &balanceRegionSchedulerConfig{}, []BalanceRegionCreateOption{WithBalanceRegionName(BalanceRegionType)}...)
+	sc := newBalanceRegionScheduler(oc, &balanceRegionSchedulerConfig{})
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		sc.Schedule(tc, false)
@@ -182,7 +181,7 @@ func BenchmarkLabel(b *testing.B) {
 func BenchmarkNoLabel(b *testing.B) {
 	cancel, tc, oc := newBenchCluster(false, false, false)
 	defer cancel()
-	sc := newBalanceRegionScheduler(oc, &balanceRegionSchedulerConfig{}, []BalanceRegionCreateOption{WithBalanceRegionName(BalanceRegionType)}...)
+	sc := newBalanceRegionScheduler(oc, &balanceRegionSchedulerConfig{})
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		sc.Schedule(tc, false)
@@ -192,7 +191,7 @@ func BenchmarkNoLabel(b *testing.B) {
 func BenchmarkDiagnosticNoLabel1(b *testing.B) {
 	cancel, tc, oc := newBenchCluster(false, false, false)
 	defer cancel()
-	sc := newBalanceRegionScheduler(oc, &balanceRegionSchedulerConfig{}, []BalanceRegionCreateOption{WithBalanceRegionName(BalanceRegionType)}...)
+	sc := newBalanceRegionScheduler(oc, &balanceRegionSchedulerConfig{})
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		sc.Schedule(tc, true)
@@ -202,7 +201,7 @@ func BenchmarkDiagnosticNoLabel1(b *testing.B) {
 func BenchmarkDiagnosticNoLabel2(b *testing.B) {
 	cancel, tc, oc := newBenchBigCluster(100, 100)
 	defer cancel()
-	sc := newBalanceRegionScheduler(oc, &balanceRegionSchedulerConfig{}, []BalanceRegionCreateOption{WithBalanceRegionName(BalanceRegionType)}...)
+	sc := newBalanceRegionScheduler(oc, &balanceRegionSchedulerConfig{})
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		sc.Schedule(tc, true)
@@ -212,7 +211,7 @@ func BenchmarkDiagnosticNoLabel2(b *testing.B) {
 func BenchmarkNoLabel2(b *testing.B) {
 	cancel, tc, oc := newBenchBigCluster(100, 100)
 	defer cancel()
-	sc := newBalanceRegionScheduler(oc, &balanceRegionSchedulerConfig{}, []BalanceRegionCreateOption{WithBalanceRegionName(BalanceRegionType)}...)
+	sc := newBalanceRegionScheduler(oc, &balanceRegionSchedulerConfig{})
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		sc.Schedule(tc, false)
@@ -222,7 +221,7 @@ func BenchmarkNoLabel2(b *testing.B) {
 func BenchmarkTombStore(b *testing.B) {
 	cancel, tc, oc := newBenchCluster(false, false, true)
 	defer cancel()
-	sc := newBalanceRegionScheduler(oc, &balanceRegionSchedulerConfig{}, []BalanceRegionCreateOption{WithBalanceRegionName(BalanceRegionType)}...)
+	sc := newBalanceRegionScheduler(oc, &balanceRegionSchedulerConfig{})
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		sc.Schedule(tc, false)

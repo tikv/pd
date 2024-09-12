@@ -22,6 +22,8 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/suite"
+	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/response"
 	tu "github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
@@ -135,12 +137,14 @@ func (suite *labelsStoreTestSuite) TearDownSuite() {
 }
 
 func (suite *labelsStoreTestSuite) TestLabelsGet() {
+	re := suite.Require()
 	url := fmt.Sprintf("%s/labels", suite.urlPrefix)
 	labels := make([]*metapb.StoreLabel, 0, len(suite.stores))
-	suite.NoError(tu.ReadGetJSON(suite.Require(), testDialClient, url, &labels))
+	re.NoError(tu.ReadGetJSON(re, testDialClient, url, &labels))
 }
 
 func (suite *labelsStoreTestSuite) TestStoresLabelFilter() {
+	re := suite.Require()
 	var testCases = []struct {
 		name, value string
 		want        []*metapb.Store
@@ -174,16 +178,15 @@ func (suite *labelsStoreTestSuite) TestStoresLabelFilter() {
 			want:  []*metapb.Store{},
 		},
 	}
-	re := suite.Require()
 	for _, testCase := range testCases {
 		url := fmt.Sprintf("%s/labels/stores?name=%s&value=%s", suite.urlPrefix, testCase.name, testCase.value)
-		info := new(StoresInfo)
+		info := new(response.StoresInfo)
 		err := tu.ReadGetJSON(re, testDialClient, url, info)
-		suite.NoError(err)
+		re.NoError(err)
 		checkStoresInfo(re, info.Stores, testCase.want)
 	}
 	_, err := newStoresLabelFilter("test", ".[test")
-	suite.Error(err)
+	re.Error(err)
 }
 
 type strictlyLabelsStoreTestSuite struct {
@@ -215,6 +218,7 @@ func (suite *strictlyLabelsStoreTestSuite) SetupSuite() {
 }
 
 func (suite *strictlyLabelsStoreTestSuite) TestStoreMatch() {
+	re := suite.Require()
 	testCases := []struct {
 		store       *metapb.Store
 		valid       bool
@@ -274,6 +278,30 @@ func (suite *strictlyLabelsStoreTestSuite) TestStoreMatch() {
 			valid:       false,
 			expectError: "key matching the label was not found",
 		},
+		{
+			store: &metapb.Store{
+				Id:      3,
+				Address: "tiflash1",
+				State:   metapb.StoreState_Up,
+				Labels: []*metapb.StoreLabel{
+					{
+						Key:   "zone",
+						Value: "us-west-1",
+					},
+					{
+						Key:   "disk",
+						Value: "ssd",
+					},
+					{
+						Key:   core.EngineKey,
+						Value: core.EngineTiFlash,
+					},
+				},
+				Version: "3.0.0",
+			},
+			valid:       true,
+			expectError: "placement rules is disabled",
+		},
 	}
 
 	for _, testCase := range testCases {
@@ -281,42 +309,46 @@ func (suite *strictlyLabelsStoreTestSuite) TestStoreMatch() {
 			Header: &pdpb.RequestHeader{ClusterId: suite.svr.ClusterID()},
 			Store: &metapb.Store{
 				Id:      testCase.store.Id,
-				Address: fmt.Sprintf("tikv%d", testCase.store.Id),
+				Address: testCase.store.Address,
 				State:   testCase.store.State,
 				Labels:  testCase.store.Labels,
 				Version: testCase.store.Version,
 			},
 		})
+		if testCase.store.Address == "tiflash1" {
+			re.Contains(resp.GetHeader().GetError().String(), testCase.expectError)
+			continue
+		}
 		if testCase.valid {
-			suite.NoError(err)
-			suite.Nil(resp.GetHeader().GetError())
+			re.NoError(err)
+			re.Nil(resp.GetHeader().GetError())
 		} else {
-			suite.Contains(resp.GetHeader().GetError().String(), testCase.expectError)
+			re.Contains(resp.GetHeader().GetError().String(), testCase.expectError)
 		}
 	}
 
 	// enable placement rules. Report no error any more.
-	suite.NoError(tu.CheckPostJSON(
+	re.NoError(tu.CheckPostJSON(
 		testDialClient,
 		fmt.Sprintf("%s/config", suite.urlPrefix),
 		[]byte(`{"enable-placement-rules":"true"}`),
-		tu.StatusOK(suite.Require())))
+		tu.StatusOK(re)))
 	for _, testCase := range testCases {
 		resp, err := suite.grpcSvr.PutStore(context.Background(), &pdpb.PutStoreRequest{
 			Header: &pdpb.RequestHeader{ClusterId: suite.svr.ClusterID()},
 			Store: &metapb.Store{
 				Id:      testCase.store.Id,
-				Address: fmt.Sprintf("tikv%d", testCase.store.Id),
+				Address: testCase.store.Address,
 				State:   testCase.store.State,
 				Labels:  testCase.store.Labels,
 				Version: testCase.store.Version,
 			},
 		})
 		if testCase.valid {
-			suite.NoError(err)
-			suite.Nil(resp.GetHeader().GetError())
+			re.NoError(err)
+			re.Nil(resp.GetHeader().GetError())
 		} else {
-			suite.Contains(resp.GetHeader().GetError().String(), testCase.expectError)
+			re.Contains(resp.GetHeader().GetError().String(), testCase.expectError)
 		}
 	}
 }

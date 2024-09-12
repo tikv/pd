@@ -44,7 +44,7 @@ func FindJSONFullTagByChildTag(t reflect.Type, tag string) string {
 }
 
 // FindSameFieldByJSON is used to check whether there is same field between `m` and `v`
-func FindSameFieldByJSON(v interface{}, m map[string]interface{}) bool {
+func FindSameFieldByJSON(v any, m map[string]any) bool {
 	t := reflect.TypeOf(v).Elem()
 	for i := 0; i < t.NumField(); i++ {
 		jsonTag := t.Field(i).Tag.Get("json")

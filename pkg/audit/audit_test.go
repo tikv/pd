@@ -24,15 +24,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pingcap/log"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/utils/requestutil"
+	"github.com/tikv/pd/pkg/utils/testutil"
 )
 
 func TestLabelMatcher(t *testing.T) {
-	t.Parallel()
 	re := require.New(t)
 	matcher := &LabelMatcher{"testSuccess"}
 	labels1 := &BackendLabels{Labels: []string{"testFail", "testSuccess"}}
@@ -42,7 +41,6 @@ func TestLabelMatcher(t *testing.T) {
 }
 
 func TestPrometheusHistogramBackend(t *testing.T) {
-	t.Parallel()
 	re := require.New(t)
 	serviceAuditHistogramTest := prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
@@ -51,7 +49,7 @@ func TestPrometheusHistogramBackend(t *testing.T) {
 			Name:      "audit_handling_seconds_test",
 			Help:      "PD server service handling audit",
 			Buckets:   prometheus.DefBuckets,
-		}, []string{"service", "method", "component", "ip"})
+		}, []string{"service", "method", "caller_id", "ip"})
 
 	prometheus.MustRegister(serviceAuditHistogramTest)
 
@@ -59,10 +57,10 @@ func TestPrometheusHistogramBackend(t *testing.T) {
 	defer ts.Close()
 
 	backend := NewPrometheusHistogramBackend(serviceAuditHistogramTest, true)
-	req, _ := http.NewRequest(http.MethodGet, "http://127.0.0.1:2379/test?test=test", nil)
+	req, _ := http.NewRequest(http.MethodGet, "http://127.0.0.1:2379/test?test=test", http.NoBody)
 	info := requestutil.GetRequestInfo(req)
 	info.ServiceLabel = "test"
-	info.Component = "user1"
+	info.CallerID = "user1"
 	info.IP = "localhost"
 	req = req.WithContext(requestutil.WithRequestInfo(req.Context(), info))
 	re.False(backend.ProcessHTTPRequest(req))
@@ -73,28 +71,27 @@ func TestPrometheusHistogramBackend(t *testing.T) {
 	re.True(backend.ProcessHTTPRequest(req))
 	re.True(backend.ProcessHTTPRequest(req))
 
-	info.Component = "user2"
+	info.CallerID = "user2"
 	req = req.WithContext(requestutil.WithRequestInfo(req.Context(), info))
 	re.True(backend.ProcessHTTPRequest(req))
 
 	// For test, sleep time needs longer than the push interval
 	time.Sleep(time.Second)
-	req, _ = http.NewRequest(http.MethodGet, ts.URL, nil)
+	req, _ = http.NewRequest(http.MethodGet, ts.URL, http.NoBody)
 	resp, err := http.DefaultClient.Do(req)
 	re.NoError(err)
 	defer resp.Body.Close()
 	content, _ := io.ReadAll(resp.Body)
 	output := string(content)
-	re.Contains(output, "pd_service_audit_handling_seconds_test_count{component=\"user1\",ip=\"localhost\",method=\"HTTP\",service=\"test\"} 2")
-	re.Contains(output, "pd_service_audit_handling_seconds_test_count{component=\"user2\",ip=\"localhost\",method=\"HTTP\",service=\"test\"} 1")
+	re.Contains(output, "pd_service_audit_handling_seconds_test_count{caller_id=\"user1\",ip=\"localhost\",method=\"HTTP\",service=\"test\"} 2")
+	re.Contains(output, "pd_service_audit_handling_seconds_test_count{caller_id=\"user2\",ip=\"localhost\",method=\"HTTP\",service=\"test\"} 1")
 }
 
 func TestLocalLogBackendUsingFile(t *testing.T) {
-	t.Parallel()
 	re := require.New(t)
 	backend := NewLocalLogBackend(true)
-	fname := initLog()
-	defer os.Remove(fname)
+	fname := testutil.InitTempFileLogger("info")
+	defer os.RemoveAll(fname)
 	req, _ := http.NewRequest(http.MethodGet, "http://127.0.0.1:2379/test?test=test", strings.NewReader("testBody"))
 	re.False(backend.ProcessHTTPRequest(req))
 	info := requestutil.GetRequestInfo(req)
@@ -103,7 +100,7 @@ func TestLocalLogBackendUsingFile(t *testing.T) {
 	b, _ := os.ReadFile(fname)
 	output := strings.SplitN(string(b), "]", 4)
 	re.Equal(
-		fmt.Sprintf(" [\"audit log\"] [service-info=\"{ServiceLabel:, Method:HTTP/1.1/GET:/test, Component:anonymous, IP:, "+
+		fmt.Sprintf(" [\"audit log\"] [service-info=\"{ServiceLabel:, Method:HTTP/1.1/GET:/test, CallerID:anonymous, IP:, Port:, "+
 			"StartTime:%s, URLParam:{\\\"test\\\":[\\\"test\\\"]}, BodyParam:testBody}\"]\n",
 			time.Unix(info.StartTimeStamp, 0).String()),
 		output[3],
@@ -125,8 +122,8 @@ func BenchmarkLocalLogAuditUsingTerminal(b *testing.B) {
 func BenchmarkLocalLogAuditUsingFile(b *testing.B) {
 	b.StopTimer()
 	backend := NewLocalLogBackend(true)
-	fname := initLog()
-	defer os.Remove(fname)
+	fname := testutil.InitTempFileLogger("info")
+	defer os.RemoveAll(fname)
 	req, _ := http.NewRequest(http.MethodGet, "http://127.0.0.1:2379/test?test=test", strings.NewReader("testBody"))
 	b.StartTimer()
 	for i := 0; i < b.N; i++ {
@@ -134,16 +131,4 @@ func BenchmarkLocalLogAuditUsingFile(b *testing.B) {
 		req = req.WithContext(requestutil.WithRequestInfo(req.Context(), info))
 		backend.ProcessHTTPRequest(req)
 	}
-}
-
-func initLog() string {
-	cfg := &log.Config{}
-	f, _ := os.CreateTemp("/tmp", "pd_tests")
-	fname := f.Name()
-	f.Close()
-	cfg.File.Filename = fname
-	cfg.Level = "info"
-	lg, p, _ := log.InitLogger(cfg)
-	log.ReplaceGlobals(lg, p)
-	return fname
 }

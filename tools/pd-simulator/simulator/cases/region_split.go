@@ -18,37 +18,50 @@ import (
 	"github.com/docker/go-units"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/pkg/core"
+	sc "github.com/tikv/pd/tools/pd-simulator/simulator/config"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/info"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/simutil"
-	"go.uber.org/zap"
 )
 
-func newRegionSplit() *Case {
+func newRegionSplit(config *sc.SimConfig) *Case {
 	var simCase Case
-	// Initialize the cluster
-	storeNum := getStoreNum()
-	for i := 1; i <= storeNum; i++ {
+	totalStore := config.TotalStore
+	allStores := make(map[uint64]struct{}, totalStore)
+
+	for i := 0; i < totalStore; i++ {
+		storeID := simutil.IDAllocator.NextID()
 		simCase.Stores = append(simCase.Stores, &Store{
-			ID:     uint64(i),
+			ID:     storeID,
 			Status: metapb.StoreState_Up,
 		})
+		allStores[storeID] = struct{}{}
 	}
-	peers := []*metapb.Peer{
-		{Id: 4, StoreId: 1},
+	replica := int(config.ServerConfig.Replication.MaxReplicas)
+	peers := make([]*metapb.Peer, 0, replica)
+	for j := 0; j < replica; j++ {
+		peers = append(peers, &metapb.Peer{
+			Id:      simutil.IDAllocator.NextID(),
+			StoreId: uint64((j)%(totalStore-1) + 1),
+		})
 	}
-	simCase.Regions = append(simCase.Regions, Region{
-		ID:     5,
-		Peers:  peers,
-		Leader: peers[0],
-		Size:   1 * units.MiB,
-		Keys:   10000,
-	})
+	regionID := simutil.IDAllocator.NextID()
+	simCase.Regions = []Region{
+		{
+			ID:     regionID,
+			Peers:  peers,
+			Leader: peers[0],
+			Size:   1 * units.MiB,
+			Keys:   10000,
+		},
+	}
+	// update total region
+	config.TotalRegion = 1
 
 	simCase.RegionSplitSize = 128 * units.MiB
 	simCase.RegionSplitKeys = 10000
 	// Events description
 	e := &WriteFlowOnSpotDescriptor{}
-	e.Step = func(tick int64) map[string]int64 {
+	e.Step = func(int64) map[string]int64 {
 		return map[string]int64{
 			"foobar": 8 * units.MiB,
 		}
@@ -56,16 +69,14 @@ func newRegionSplit() *Case {
 	simCase.Events = []EventDescriptor{e}
 
 	// Checker description
-	simCase.Checker = func(regions *core.RegionsInfo, stats []info.StoreStats) bool {
-		res := true
-		regionCounts := make([]int, 0, storeNum)
-		for i := 1; i <= storeNum; i++ {
-			regionCount := regions.GetStoreRegionCount(uint64(i))
-			regionCounts = append(regionCounts, regionCount)
-			res = res && regionCount > 5
+	simCase.Checker = func(_ []*metapb.Store, regions *core.RegionsInfo, _ []info.StoreStats) bool {
+		for storeID := range allStores {
+			peerCount := regions.GetStoreRegionCount(storeID)
+			if peerCount < 5 {
+				return false
+			}
 		}
-		simutil.Logger.Info("current counts", zap.Ints("region", regionCounts))
-		return res
+		return true
 	}
 	return &simCase
 }

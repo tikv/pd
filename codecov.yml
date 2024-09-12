@@ -10,3 +10,17 @@ coverage:
         # basic
         target: auto
         threshold: 3%
+
+comment:
+  layout: "header, diff, flags"
+  behavior: default
+  require_changes: false
+
+flag_management:
+  default_rules: # the rules that will be followed for any flag added, generally
+    carryforward: true
+    statuses:
+      - type: project
+        target: 74% # increase it if you want to enforce higher coverage for project, current setting as 74% is for do not let the error be reported and lose the meaning of warning.
+      - type: patch
+        target: 74% # increase it if you want to enforce higher coverage for project, current setting as 74% is for do not let the error be reported and lose the meaning of warning.

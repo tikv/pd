@@ -27,14 +27,15 @@ import (
 	"time"
 
 	"github.com/pingcap/errors"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/election"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
-	"go.etcd.io/etcd/clientv3"
-	"go.etcd.io/etcd/embed"
+	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.etcd.io/etcd/server/v3/embed"
 	"go.uber.org/zap"
 )
 
@@ -42,6 +43,8 @@ const (
 	// The timeout to wait transfer etcd leader to complete.
 	moveLeaderTimeout          = 5 * time.Second
 	dcLocationConfigEtcdPrefix = "dc-location"
+	// If the campaign times is more than this value in `campaignTimesRecordTimeout`, the PD will resign and campaign again.
+	campaignLeaderFrequencyTimes = 3
 )
 
 // EmbeddedEtcdMember is used for the election related logic. It implements Member interface.
@@ -54,10 +57,12 @@ type EmbeddedEtcdMember struct {
 	id       uint64       // etcd server id.
 	member   *pdpb.Member // current PD's info.
 	rootPath string
-	// memberValue is the serialized string of `member`. It will be save in
+	// memberValue is the serialized string of `member`. It will be saved in
 	// etcd leader key when the PD node is successfully elected as the PD leader
 	// of the cluster. Every write will use it to check PD leadership.
 	memberValue string
+	// lastLeaderUpdatedTime is the last time when the leader is updated.
+	lastLeaderUpdatedTime atomic.Value
 }
 
 // NewMember create a new Member.
@@ -80,7 +85,7 @@ func (m *EmbeddedEtcdMember) Name() string {
 }
 
 // GetMember returns the member.
-func (m *EmbeddedEtcdMember) GetMember() interface{} {
+func (m *EmbeddedEtcdMember) GetMember() any {
 	return m.member
 }
 
@@ -140,11 +145,13 @@ func (m *EmbeddedEtcdMember) GetLeader() *pdpb.Member {
 // setLeader sets the member's PD leader.
 func (m *EmbeddedEtcdMember) setLeader(member *pdpb.Member) {
 	m.leader.Store(member)
+	m.lastLeaderUpdatedTime.Store(time.Now())
 }
 
 // unsetLeader unsets the member's PD leader.
 func (m *EmbeddedEtcdMember) unsetLeader() {
 	m.leader.Store(&pdpb.Member{})
+	m.lastLeaderUpdatedTime.Store(time.Now())
 }
 
 // EnableLeader sets the member itself to a PD leader.
@@ -162,9 +169,32 @@ func (m *EmbeddedEtcdMember) GetLeadership() *election.Leadership {
 	return m.leadership
 }
 
+// GetLastLeaderUpdatedTime returns the last time when the leader is updated.
+func (m *EmbeddedEtcdMember) GetLastLeaderUpdatedTime() time.Time {
+	lastLeaderUpdatedTime := m.lastLeaderUpdatedTime.Load()
+	if lastLeaderUpdatedTime == nil {
+		return time.Time{}
+	}
+	return lastLeaderUpdatedTime.(time.Time)
+}
+
 // CampaignLeader is used to campaign a PD member's leadership
 // and make it become a PD leader.
-func (m *EmbeddedEtcdMember) CampaignLeader(leaseTimeout int64) error {
+// leader should be changed when campaign leader frequently.
+func (m *EmbeddedEtcdMember) CampaignLeader(ctx context.Context, leaseTimeout int64) error {
+	m.leadership.AddCampaignTimes()
+	failpoint.Inject("skipCampaignLeaderCheck", func() {
+		failpoint.Return(m.leadership.Campaign(leaseTimeout, m.MemberValue()))
+	})
+
+	if m.leadership.GetCampaignTimesNum() > campaignLeaderFrequencyTimes {
+		if err := m.ResignEtcdLeader(ctx, m.Name(), ""); err != nil {
+			return err
+		}
+		m.leadership.ResetCampaignTimes()
+		return errs.ErrLeaderFrequentlyChange.FastGenByArgs(m.Name(), m.GetLeaderPath())
+	}
+
 	return m.leadership.Campaign(leaseTimeout, m.MemberValue())
 }
 
@@ -173,8 +203,8 @@ func (m *EmbeddedEtcdMember) KeepLeader(ctx context.Context) {
 	m.leadership.Keep(ctx)
 }
 
-// PrecheckLeader does some pre-check before checking whether or not it's the leader.
-func (m *EmbeddedEtcdMember) PrecheckLeader() error {
+// PreCheckLeader does some pre-check before checking whether it's the leader.
+func (m *EmbeddedEtcdMember) PreCheckLeader() error {
 	if m.GetEtcdLeader() == 0 {
 		return errs.ErrEtcdLeaderNotFound
 	}
@@ -195,42 +225,51 @@ func (m *EmbeddedEtcdMember) getPersistentLeader() (*pdpb.Member, int64, error) 
 	return leader, rev, nil
 }
 
-// CheckLeader checks returns true if it is needed to check later.
-func (m *EmbeddedEtcdMember) CheckLeader() (*pdpb.Member, int64, bool) {
-	if err := m.PrecheckLeader(); err != nil {
+// CheckLeader checks if someone else is taking the leadership. If yes, returns the leader;
+// otherwise returns a bool which indicates if it is needed to check later.
+func (m *EmbeddedEtcdMember) CheckLeader() (ElectionLeader, bool) {
+	if err := m.PreCheckLeader(); err != nil {
 		log.Error("failed to pass pre-check, check pd leader later", errs.ZapError(err))
 		time.Sleep(200 * time.Millisecond)
-		return nil, 0, true
+		return nil, true
 	}
 
-	leader, rev, err := m.getPersistentLeader()
+	leader, revision, err := m.getPersistentLeader()
 	if err != nil {
 		log.Error("getting pd leader meets error", errs.ZapError(err))
 		time.Sleep(200 * time.Millisecond)
-		return nil, 0, true
+		return nil, true
 	}
-	if leader != nil {
-		if m.IsSameLeader(leader) {
-			// oh, we are already a PD leader, which indicates we may meet something wrong
-			// in previous CampaignLeader. We should delete the leadership and campaign again.
-			log.Warn("the pd leader has not changed, delete and campaign again", zap.Stringer("old-pd-leader", leader))
-			// Delete the leader itself and let others start a new election again.
-			if err = m.leadership.DeleteLeaderKey(); err != nil {
-				log.Error("deleting pd leader key meets error", errs.ZapError(err))
-				time.Sleep(200 * time.Millisecond)
-				return nil, 0, true
-			}
-			// Return nil and false to make sure the campaign will start immediately.
-			return nil, 0, false
+	if leader == nil {
+		// no leader yet
+		return nil, false
+	}
+
+	if m.IsSameLeader(leader) {
+		// oh, we are already a PD leader, which indicates we may meet something wrong
+		// in previous CampaignLeader. We should delete the leadership and campaign again.
+		log.Warn("the pd leader has not changed, delete and campaign again", zap.Stringer("old-pd-leader", leader))
+		// Delete the leader itself and let others start a new election again.
+		if err = m.leadership.DeleteLeaderKey(); err != nil {
+			log.Error("deleting pd leader key meets error", errs.ZapError(err))
+			time.Sleep(200 * time.Millisecond)
+			return nil, true
 		}
+		// Return nil and false to make sure the campaign will start immediately.
+		return nil, false
 	}
-	return leader, rev, false
+
+	return &EmbeddedEtcdLeader{
+		wrapper:  m,
+		member:   leader,
+		revision: revision,
+	}, false
 }
 
 // WatchLeader is used to watch the changes of the leader.
-func (m *EmbeddedEtcdMember) WatchLeader(serverCtx context.Context, leader *pdpb.Member, revision int64) {
+func (m *EmbeddedEtcdMember) WatchLeader(ctx context.Context, leader *pdpb.Member, revision int64) {
 	m.setLeader(leader)
-	m.leadership.Watch(serverCtx, revision)
+	m.leadership.Watch(ctx, revision)
 	m.unsetLeader()
 }
 
@@ -286,8 +325,8 @@ func (m *EmbeddedEtcdMember) GetEtcdLeader() uint64 {
 }
 
 // IsSameLeader checks whether a server is the leader itself.
-func (m *EmbeddedEtcdMember) IsSameLeader(leader *pdpb.Member) bool {
-	return leader.GetMemberId() == m.ID()
+func (m *EmbeddedEtcdMember) IsSameLeader(leader any) bool {
+	return leader.(*pdpb.Member).GetMemberId() == m.ID()
 }
 
 // InitMemberInfo initializes the member info.
@@ -308,6 +347,7 @@ func (m *EmbeddedEtcdMember) InitMemberInfo(advertiseClientUrls, advertisePeerUr
 	m.memberValue = string(data)
 	m.rootPath = rootPath
 	m.leadership = election.NewLeadership(m.client, m.GetLeaderPath(), "leader election")
+	log.Info("member joining election", zap.Stringer("member-info", m.member), zap.String("root-path", m.rootPath))
 }
 
 // ResignEtcdLeader resigns current PD's etcd leadership. If nextLeader is empty, all
@@ -316,7 +356,7 @@ func (m *EmbeddedEtcdMember) ResignEtcdLeader(ctx context.Context, from string, 
 	log.Info("try to resign etcd leader to next pd-server", zap.String("from", from), zap.String("to", nextEtcdLeader))
 	// Determine next etcd leader candidates.
 	var etcdLeaderIDs []uint64
-	res, err := etcdutil.ListEtcdMembers(m.client)
+	res, err := etcdutil.ListEtcdMembers(ctx, m.client)
 	if err != nil {
 		return err
 	}

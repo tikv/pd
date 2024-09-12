@@ -25,25 +25,22 @@ import (
 	"strings"
 	"time"
 
+	"github.com/BurntSushi/toml"
+	"github.com/coreos/go-semver/semver"
 	"github.com/docker/go-units"
+	"github.com/pingcap/errors"
+	"github.com/pingcap/log"
 	"github.com/spf13/pflag"
-	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/errs"
-	rm "github.com/tikv/pd/pkg/mcs/resource_manager/server"
+	rm "github.com/tikv/pd/pkg/mcs/resourcemanager/server"
+	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/utils/configutil"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/metricutil"
-	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/pkg/versioninfo"
-
-	"github.com/BurntSushi/toml"
-	"github.com/coreos/go-semver/semver"
-	"github.com/pingcap/errors"
-	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pingcap/log"
-	"go.etcd.io/etcd/embed"
-	"go.etcd.io/etcd/pkg/transport"
+	"go.etcd.io/etcd/client/pkg/v3/transport"
+	"go.etcd.io/etcd/server/v3/embed"
 	"go.uber.org/zap"
 )
 
@@ -80,6 +77,15 @@ type Config struct {
 	LogFileDeprecated  string `toml:"log-file" json:"log-file,omitempty"`
 	LogLevelDeprecated string `toml:"log-level" json:"log-level,omitempty"`
 
+	// MaxConcurrentTSOProxyStreamings is the maximum number of concurrent TSO proxy streaming process routines allowed.
+	// Exceeding this limit will result in an error being returned to the client when a new client starts a TSO streaming.
+	// Set this to 0 will disable TSO Proxy.
+	// Set this to the negative value to disable the limit.
+	MaxConcurrentTSOProxyStreamings int `toml:"max-concurrent-tso-proxy-streamings" json:"max-concurrent-tso-proxy-streamings"`
+	// TSOProxyRecvFromClientTimeout is the timeout for the TSO proxy to receive a tso request from a client via grpc TSO stream.
+	// After the timeout, the TSO proxy will close the grpc TSO stream.
+	TSOProxyRecvFromClientTimeout typeutil.Duration `toml:"tso-proxy-recv-from-client-timeout" json:"tso-proxy-recv-from-client-timeout"`
+
 	// TSOSaveInterval is the interval to save timestamp.
 	TSOSaveInterval typeutil.Duration `toml:"tso-save-interval" json:"tso-save-interval"`
 
@@ -98,9 +104,9 @@ type Config struct {
 
 	Metric metricutil.MetricConfig `toml:"metric" json:"metric"`
 
-	Schedule ScheduleConfig `toml:"schedule" json:"schedule"`
+	Schedule sc.ScheduleConfig `toml:"schedule" json:"schedule"`
 
-	Replication ReplicationConfig `toml:"replication" json:"replication"`
+	Replication sc.ReplicationConfig `toml:"replication" json:"replication"`
 
 	PDServerCfg PDServerConfig `toml:"pd-server" json:"pd-server"`
 
@@ -159,6 +165,8 @@ type Config struct {
 
 	Keyspace KeyspaceConfig `toml:"keyspace" json:"keyspace"`
 
+	MicroService MicroServiceConfig `toml:"micro-service" json:"micro-service"`
+
 	Controller rm.ControllerConfig `toml:"controller" json:"controller"`
 }
 
@@ -199,7 +207,6 @@ const (
 	defaultLeaderPriorityCheckInterval = time.Minute
 
 	defaultUseRegionStorage  = true
-	defaultTraceRegionFlow   = true
 	defaultFlowRoundByDigit  = 3 // KB
 	maxTraceFlowRoundByDigit = 5 // 0.1 MB
 	defaultMaxResetTSGap     = 24 * time.Hour
@@ -208,15 +215,17 @@ const (
 	// DefaultMinResolvedTSPersistenceInterval is the default value of min resolved ts persistent interval.
 	DefaultMinResolvedTSPersistenceInterval = time.Second
 
-	defaultStrictlyMatchLabel   = false
-	defaultEnablePlacementRules = true
-	defaultEnableGRPCGateway    = true
-	defaultDisableErrorVerbose  = true
-	defaultEnableWitness        = false
+	defaultEnableGRPCGateway   = true
+	defaultDisableErrorVerbose = true
+	defaultEnableWitness       = false
+	defaultHaltScheduling      = false
 
 	defaultDashboardAddress = "auto"
 
 	defaultDRWaitStoreTimeout = time.Minute
+
+	defaultMaxConcurrentTSOProxyStreamings = 5000
+	defaultTSOProxyRecvFromClientTimeout   = 1 * time.Hour
 
 	defaultTSOSaveInterval = time.Duration(defaultLeaderLease) * time.Second
 	// defaultTSOUpdatePhysicalInterval is the default value of the config `TSOUpdatePhysicalInterval`.
@@ -225,8 +234,7 @@ const (
 	minTSOUpdatePhysicalInterval     = 1 * time.Millisecond
 
 	defaultLogFormat = "text"
-
-	defaultMaxMovableHotPeerSize = int64(512)
+	defaultLogLevel  = "info"
 
 	defaultServerMemoryLimit          = 0
 	minServerMemoryLimit              = 0
@@ -238,6 +246,13 @@ const (
 	defaultGCTunerThreshold           = 0.6
 	minGCTunerThreshold               = 0
 	maxGCTunerThreshold               = 0.9
+
+	defaultWaitRegionSplitTimeout   = 30 * time.Second
+	defaultCheckRegionSplitInterval = 50 * time.Millisecond
+	minCheckRegionSplitInterval     = 1 * time.Millisecond
+	maxCheckRegionSplitInterval     = 100 * time.Millisecond
+
+	defaultEnableSchedulingFallback = true
 )
 
 // Special keys for Labels
@@ -249,11 +264,6 @@ const (
 var (
 	defaultEnableTelemetry = false
 	defaultRuntimeServices = []string{}
-	defaultLocationLabels  = []string{}
-	// DefaultStoreLimit is the default store limit of add peer and remove peer.
-	DefaultStoreLimit = StoreLimit{AddPeer: 15, RemovePeer: 15}
-	// DefaultTiFlashStoreLimit is the default TiFlash store limit of add peer and remove peer.
-	DefaultTiFlashStoreLimit = StoreLimit{AddPeer: 30, RemovePeer: 30}
 )
 
 func init() {
@@ -263,50 +273,6 @@ func init() {
 func initByLDFlags(edition string) {
 	if edition != versioninfo.CommunityEdition {
 		defaultEnableTelemetry = false
-	}
-}
-
-// StoreLimit is the default limit of adding peer and removing peer when putting stores.
-type StoreLimit struct {
-	mu syncutil.RWMutex
-	// AddPeer is the default rate of adding peers for store limit (per minute).
-	AddPeer float64
-	// RemovePeer is the default rate of removing peers for store limit (per minute).
-	RemovePeer float64
-}
-
-// SetDefaultStoreLimit sets the default store limit for a given type.
-func (sl *StoreLimit) SetDefaultStoreLimit(typ storelimit.Type, ratePerMin float64) {
-	sl.mu.Lock()
-	defer sl.mu.Unlock()
-	switch typ {
-	case storelimit.AddPeer:
-		sl.AddPeer = ratePerMin
-	case storelimit.RemovePeer:
-		sl.RemovePeer = ratePerMin
-	}
-}
-
-// GetDefaultStoreLimit gets the default store limit for a given type.
-func (sl *StoreLimit) GetDefaultStoreLimit(typ storelimit.Type) float64 {
-	sl.mu.RLock()
-	defer sl.mu.RUnlock()
-	switch typ {
-	case storelimit.AddPeer:
-		return sl.AddPeer
-	case storelimit.RemovePeer:
-		return sl.RemovePeer
-	default:
-		panic("invalid type")
-	}
-}
-
-func adjustSchedulers(v *SchedulerConfigs, defValue SchedulerConfigs) {
-	if len(*v) == 0 {
-		// Make a copy to avoid changing DefaultSchedulers unexpectedly.
-		// When reloading from storage, the config is passed to json.Unmarshal.
-		// Without clone, the DefaultSchedulers could be overwritten.
-		*v = append(defValue[:0:0], defValue...)
 	}
 }
 
@@ -345,21 +311,21 @@ func (c *Config) Parse(flagSet *pflag.FlagSet) error {
 	}
 
 	// ignore the error check here
-	configutil.AdjustCommandlineString(flagSet, &c.Log.Level, "log-level")
-	configutil.AdjustCommandlineString(flagSet, &c.Log.File.Filename, "log-file")
-	configutil.AdjustCommandlineString(flagSet, &c.Name, "name")
-	configutil.AdjustCommandlineString(flagSet, &c.DataDir, "data-dir")
-	configutil.AdjustCommandlineString(flagSet, &c.ClientUrls, "client-urls")
-	configutil.AdjustCommandlineString(flagSet, &c.AdvertiseClientUrls, "advertise-client-urls")
-	configutil.AdjustCommandlineString(flagSet, &c.PeerUrls, "peer-urls")
-	configutil.AdjustCommandlineString(flagSet, &c.AdvertisePeerUrls, "advertise-peer-urls")
-	configutil.AdjustCommandlineString(flagSet, &c.InitialCluster, "initial-cluster")
-	configutil.AdjustCommandlineString(flagSet, &c.Join, "join")
-	configutil.AdjustCommandlineString(flagSet, &c.Metric.PushAddress, "metrics-addr")
-	configutil.AdjustCommandlineString(flagSet, &c.Security.CAPath, "cacert")
-	configutil.AdjustCommandlineString(flagSet, &c.Security.CertPath, "cert")
-	configutil.AdjustCommandlineString(flagSet, &c.Security.KeyPath, "key")
-	configutil.AdjustCommandlineBool(flagSet, &c.ForceNewCluster, "force-new-cluster")
+	configutil.AdjustCommandLineString(flagSet, &c.Log.Level, "log-level")
+	configutil.AdjustCommandLineString(flagSet, &c.Log.File.Filename, "log-file")
+	configutil.AdjustCommandLineString(flagSet, &c.Name, "name")
+	configutil.AdjustCommandLineString(flagSet, &c.DataDir, "data-dir")
+	configutil.AdjustCommandLineString(flagSet, &c.ClientUrls, "client-urls")
+	configutil.AdjustCommandLineString(flagSet, &c.AdvertiseClientUrls, "advertise-client-urls")
+	configutil.AdjustCommandLineString(flagSet, &c.PeerUrls, "peer-urls")
+	configutil.AdjustCommandLineString(flagSet, &c.AdvertisePeerUrls, "advertise-peer-urls")
+	configutil.AdjustCommandLineString(flagSet, &c.InitialCluster, "initial-cluster")
+	configutil.AdjustCommandLineString(flagSet, &c.Join, "join")
+	configutil.AdjustCommandLineString(flagSet, &c.Metric.PushAddress, "metrics-addr")
+	configutil.AdjustCommandLineString(flagSet, &c.Security.CAPath, "cacert")
+	configutil.AdjustCommandLineString(flagSet, &c.Security.CertPath, "cert")
+	configutil.AdjustCommandLineString(flagSet, &c.Security.KeyPath, "key")
+	configutil.AdjustCommandLineBool(flagSet, &c.ForceNewCluster, "force-new-cluster")
 
 	return c.Adjust(meta, false)
 }
@@ -436,10 +402,11 @@ func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
 		}
 	}
 
+	configutil.AdjustInt(&c.MaxConcurrentTSOProxyStreamings, defaultMaxConcurrentTSOProxyStreamings)
+	configutil.AdjustDuration(&c.TSOProxyRecvFromClientTimeout, defaultTSOProxyRecvFromClientTimeout)
+
 	configutil.AdjustInt64(&c.LeaderLease, defaultLeaderLease)
-
 	configutil.AdjustDuration(&c.TSOSaveInterval, defaultTSOSaveInterval)
-
 	configutil.AdjustDuration(&c.TSOUpdatePhysicalInterval, defaultTSOUpdatePhysicalInterval)
 
 	if c.TSOUpdatePhysicalInterval.Duration > maxTSOUpdatePhysicalInterval {
@@ -469,10 +436,10 @@ func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
 
 	configutil.AdjustString(&c.Metric.PushJob, c.Name)
 
-	if err := c.Schedule.adjust(configMetaData.Child("schedule"), reloading); err != nil {
+	if err := c.Schedule.Adjust(configMetaData.Child("schedule"), reloading); err != nil {
 		return err
 	}
-	if err := c.Replication.adjust(configMetaData.Child("replication")); err != nil {
+	if err := c.Replication.Adjust(configMetaData.Child("replication")); err != nil {
 		return err
 	}
 
@@ -496,10 +463,12 @@ func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
 
 	c.ReplicationMode.adjust(configMetaData.Child("replication-mode"))
 
-	c.Security.Encryption.Adjust()
+	c.Keyspace.adjust(configMetaData.Child("keyspace"))
 
-	if len(c.Log.Format) == 0 {
-		c.Log.Format = defaultLogFormat
+	c.MicroService.adjust(configMetaData.Child("micro-service"))
+
+	if err := c.Security.Encryption.Adjust(); err != nil {
+		return err
 	}
 
 	c.Controller.Adjust(configMetaData.Child("controller"))
@@ -511,6 +480,8 @@ func (c *Config) adjustLog(meta *configutil.ConfigMetaData) {
 	if !meta.IsDefined("disable-error-verbose") {
 		c.Log.DisableErrorVerbose = defaultDisableErrorVerbose
 	}
+	configutil.AdjustString(&c.Log.Format, defaultLogFormat)
+	configutil.AdjustString(&c.Log.Level, defaultLogLevel)
 }
 
 // Clone returns a cloned configuration.
@@ -527,522 +498,6 @@ func (c *Config) String() string {
 	return string(data)
 }
 
-// ScheduleConfig is the schedule configuration.
-// NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
-type ScheduleConfig struct {
-	// If the snapshot count of one store is greater than this value,
-	// it will never be used as a source or target store.
-	MaxSnapshotCount    uint64 `toml:"max-snapshot-count" json:"max-snapshot-count"`
-	MaxPendingPeerCount uint64 `toml:"max-pending-peer-count" json:"max-pending-peer-count"`
-	// If both the size of region is smaller than MaxMergeRegionSize
-	// and the number of rows in region is smaller than MaxMergeRegionKeys,
-	// it will try to merge with adjacent regions.
-	MaxMergeRegionSize uint64 `toml:"max-merge-region-size" json:"max-merge-region-size"`
-	MaxMergeRegionKeys uint64 `toml:"max-merge-region-keys" json:"max-merge-region-keys"`
-	// SplitMergeInterval is the minimum interval time to permit merge after split.
-	SplitMergeInterval typeutil.Duration `toml:"split-merge-interval" json:"split-merge-interval"`
-	// SwitchWitnessInterval is the minimum interval that allows a peer to become a witness again after it is promoted to non-witness.
-	SwitchWitnessInterval typeutil.Duration `toml:"switch-witness-interval" json:"swtich-witness-interval"`
-	// EnableOneWayMerge is the option to enable one way merge. This means a Region can only be merged into the next region of it.
-	EnableOneWayMerge bool `toml:"enable-one-way-merge" json:"enable-one-way-merge,string"`
-	// EnableCrossTableMerge is the option to enable cross table merge. This means two Regions can be merged with different table IDs.
-	// This option only works when key type is "table".
-	EnableCrossTableMerge bool `toml:"enable-cross-table-merge" json:"enable-cross-table-merge,string"`
-	// PatrolRegionInterval is the interval for scanning region during patrol.
-	PatrolRegionInterval typeutil.Duration `toml:"patrol-region-interval" json:"patrol-region-interval"`
-	// MaxStoreDownTime is the max duration after which
-	// a store will be considered to be down if it hasn't reported heartbeats.
-	MaxStoreDownTime typeutil.Duration `toml:"max-store-down-time" json:"max-store-down-time"`
-	// MaxStorePreparingTime is the max duration after which
-	// a store will be considered to be preparing.
-	MaxStorePreparingTime typeutil.Duration `toml:"max-store-preparing-time" json:"max-store-preparing-time"`
-	// LeaderScheduleLimit is the max coexist leader schedules.
-	LeaderScheduleLimit uint64 `toml:"leader-schedule-limit" json:"leader-schedule-limit"`
-	// LeaderSchedulePolicy is the option to balance leader, there are some policies supported: ["count", "size"], default: "count"
-	LeaderSchedulePolicy string `toml:"leader-schedule-policy" json:"leader-schedule-policy"`
-	// RegionScheduleLimit is the max coexist region schedules.
-	RegionScheduleLimit uint64 `toml:"region-schedule-limit" json:"region-schedule-limit"`
-	// WitnessScheduleLimit is the max coexist witness schedules.
-	WitnessScheduleLimit uint64 `toml:"witness-schedule-limit" json:"witness-schedule-limit"`
-	// ReplicaScheduleLimit is the max coexist replica schedules.
-	ReplicaScheduleLimit uint64 `toml:"replica-schedule-limit" json:"replica-schedule-limit"`
-	// MergeScheduleLimit is the max coexist merge schedules.
-	MergeScheduleLimit uint64 `toml:"merge-schedule-limit" json:"merge-schedule-limit"`
-	// HotRegionScheduleLimit is the max coexist hot region schedules.
-	HotRegionScheduleLimit uint64 `toml:"hot-region-schedule-limit" json:"hot-region-schedule-limit"`
-	// HotRegionCacheHitThreshold is the cache hits threshold of the hot region.
-	// If the number of times a region hits the hot cache is greater than this
-	// threshold, it is considered a hot region.
-	HotRegionCacheHitsThreshold uint64 `toml:"hot-region-cache-hits-threshold" json:"hot-region-cache-hits-threshold"`
-	// StoreBalanceRate is the maximum of balance rate for each store.
-	// WARN: StoreBalanceRate is deprecated.
-	StoreBalanceRate float64 `toml:"store-balance-rate" json:"store-balance-rate,omitempty"`
-	// StoreLimit is the limit of scheduling for stores.
-	StoreLimit map[uint64]StoreLimitConfig `toml:"store-limit" json:"store-limit"`
-	// TolerantSizeRatio is the ratio of buffer size for balance scheduler.
-	TolerantSizeRatio float64 `toml:"tolerant-size-ratio" json:"tolerant-size-ratio"`
-	//
-	//      high space stage         transition stage           low space stage
-	//   |--------------------|-----------------------------|-------------------------|
-	//   ^                    ^                             ^                         ^
-	//   0       HighSpaceRatio * capacity       LowSpaceRatio * capacity          capacity
-	//
-	// LowSpaceRatio is the lowest usage ratio of store which regraded as low space.
-	// When in low space, store region score increases to very large and varies inversely with available size.
-	LowSpaceRatio float64 `toml:"low-space-ratio" json:"low-space-ratio"`
-	// HighSpaceRatio is the highest usage ratio of store which regraded as high space.
-	// High space means there is a lot of spare capacity, and store region score varies directly with used size.
-	HighSpaceRatio float64 `toml:"high-space-ratio" json:"high-space-ratio"`
-	// RegionScoreFormulaVersion is used to control the formula used to calculate region score.
-	RegionScoreFormulaVersion string `toml:"region-score-formula-version" json:"region-score-formula-version"`
-	// SchedulerMaxWaitingOperator is the max coexist operators for each scheduler.
-	SchedulerMaxWaitingOperator uint64 `toml:"scheduler-max-waiting-operator" json:"scheduler-max-waiting-operator"`
-	// WARN: DisableLearner is deprecated.
-	// DisableLearner is the option to disable using AddLearnerNode instead of AddNode.
-	DisableLearner bool `toml:"disable-raft-learner" json:"disable-raft-learner,string,omitempty"`
-	// DisableRemoveDownReplica is the option to prevent replica checker from
-	// removing down replicas.
-	// WARN: DisableRemoveDownReplica is deprecated.
-	DisableRemoveDownReplica bool `toml:"disable-remove-down-replica" json:"disable-remove-down-replica,string,omitempty"`
-	// DisableReplaceOfflineReplica is the option to prevent replica checker from
-	// replacing offline replicas.
-	// WARN: DisableReplaceOfflineReplica is deprecated.
-	DisableReplaceOfflineReplica bool `toml:"disable-replace-offline-replica" json:"disable-replace-offline-replica,string,omitempty"`
-	// DisableMakeUpReplica is the option to prevent replica checker from making up
-	// replicas when replica count is less than expected.
-	// WARN: DisableMakeUpReplica is deprecated.
-	DisableMakeUpReplica bool `toml:"disable-make-up-replica" json:"disable-make-up-replica,string,omitempty"`
-	// DisableRemoveExtraReplica is the option to prevent replica checker from
-	// removing extra replicas.
-	// WARN: DisableRemoveExtraReplica is deprecated.
-	DisableRemoveExtraReplica bool `toml:"disable-remove-extra-replica" json:"disable-remove-extra-replica,string,omitempty"`
-	// DisableLocationReplacement is the option to prevent replica checker from
-	// moving replica to a better location.
-	// WARN: DisableLocationReplacement is deprecated.
-	DisableLocationReplacement bool `toml:"disable-location-replacement" json:"disable-location-replacement,string,omitempty"`
-
-	// EnableRemoveDownReplica is the option to enable replica checker to remove down replica.
-	EnableRemoveDownReplica bool `toml:"enable-remove-down-replica" json:"enable-remove-down-replica,string"`
-	// EnableReplaceOfflineReplica is the option to enable replica checker to replace offline replica.
-	EnableReplaceOfflineReplica bool `toml:"enable-replace-offline-replica" json:"enable-replace-offline-replica,string"`
-	// EnableMakeUpReplica is the option to enable replica checker to make up replica.
-	EnableMakeUpReplica bool `toml:"enable-make-up-replica" json:"enable-make-up-replica,string"`
-	// EnableRemoveExtraReplica is the option to enable replica checker to remove extra replica.
-	EnableRemoveExtraReplica bool `toml:"enable-remove-extra-replica" json:"enable-remove-extra-replica,string"`
-	// EnableLocationReplacement is the option to enable replica checker to move replica to a better location.
-	EnableLocationReplacement bool `toml:"enable-location-replacement" json:"enable-location-replacement,string"`
-	// EnableDebugMetrics is the option to enable debug metrics.
-	EnableDebugMetrics bool `toml:"enable-debug-metrics" json:"enable-debug-metrics,string"`
-	// EnableJointConsensus is the option to enable using joint consensus as a operator step.
-	EnableJointConsensus bool `toml:"enable-joint-consensus" json:"enable-joint-consensus,string"`
-	// EnableTiKVSplitRegion is the option to enable tikv split region.
-	// on ebs-based BR we need to disable it with TTL
-	EnableTiKVSplitRegion bool `toml:"enable-tikv-split-region" json:"enable-tikv-split-region,string"`
-
-	// Schedulers support for loading customized schedulers
-	Schedulers SchedulerConfigs `toml:"schedulers" json:"schedulers-v2"` // json v2 is for the sake of compatible upgrade
-
-	// Only used to display
-	SchedulersPayload map[string]interface{} `toml:"schedulers-payload" json:"schedulers-payload"`
-
-	// StoreLimitMode can be auto or manual, when set to auto,
-	// PD tries to change the store limit values according to
-	// the load state of the cluster dynamically. User can
-	// overwrite the auto-tuned value by pd-ctl, when the value
-	// is overwritten, the value is fixed until it is deleted.
-	// Default: manual
-	StoreLimitMode string `toml:"store-limit-mode" json:"store-limit-mode"`
-
-	// Controls the time interval between write hot regions info into leveldb.
-	HotRegionsWriteInterval typeutil.Duration `toml:"hot-regions-write-interval" json:"hot-regions-write-interval"`
-
-	// The day of hot regions data to be reserved. 0 means close.
-	HotRegionsReservedDays uint64 `toml:"hot-regions-reserved-days" json:"hot-regions-reserved-days"`
-
-	// MaxMovableHotPeerSize is the threshold of region size for balance hot region and split bucket scheduler.
-	// Hot region must be split before moved if it's region size is greater than MaxMovableHotPeerSize.
-	MaxMovableHotPeerSize int64 `toml:"max-movable-hot-peer-size" json:"max-movable-hot-peer-size,omitempty"`
-
-	// EnableDiagnostic is the the option to enable using diagnostic
-	EnableDiagnostic bool `toml:"enable-diagnostic" json:"enable-diagnostic,string"`
-
-	// EnableWitness is the option to enable using witness
-	EnableWitness bool `toml:"enable-witness" json:"enable-witness,string"`
-
-	// SlowStoreEvictingAffectedStoreRatioThreshold is the affected ratio threshold when judging a store is slow
-	// A store's slowness must affected more than `store-count * SlowStoreEvictingAffectedStoreRatioThreshold` to trigger evicting.
-	SlowStoreEvictingAffectedStoreRatioThreshold float64 `toml:"slow-store-evicting-affected-store-ratio-threshold" json:"slow-store-evicting-affected-store-ratio-threshold,omitempty"`
-}
-
-// Clone returns a cloned scheduling configuration.
-func (c *ScheduleConfig) Clone() *ScheduleConfig {
-	schedulers := append(c.Schedulers[:0:0], c.Schedulers...)
-	var storeLimit map[uint64]StoreLimitConfig
-	if c.StoreLimit != nil {
-		storeLimit = make(map[uint64]StoreLimitConfig, len(c.StoreLimit))
-		for k, v := range c.StoreLimit {
-			storeLimit[k] = v
-		}
-	}
-	cfg := *c
-	cfg.StoreLimit = storeLimit
-	cfg.Schedulers = schedulers
-	cfg.SchedulersPayload = nil
-	return &cfg
-}
-
-const (
-	defaultMaxReplicas               = 3
-	defaultMaxSnapshotCount          = 64
-	defaultMaxPendingPeerCount       = 64
-	defaultMaxMergeRegionSize        = 20
-	defaultSplitMergeInterval        = time.Hour
-	defaultSwitchWitnessInterval     = time.Hour
-	defaultEnableDiagnostic          = false
-	defaultPatrolRegionInterval      = 10 * time.Millisecond
-	defaultMaxStoreDownTime          = 30 * time.Minute
-	defaultLeaderScheduleLimit       = 4
-	defaultRegionScheduleLimit       = 2048
-	defaultWitnessScheduleLimit      = 4
-	defaultReplicaScheduleLimit      = 64
-	defaultMergeScheduleLimit        = 8
-	defaultHotRegionScheduleLimit    = 4
-	defaultTolerantSizeRatio         = 0
-	defaultLowSpaceRatio             = 0.8
-	defaultHighSpaceRatio            = 0.7
-	defaultRegionScoreFormulaVersion = "v2"
-	// defaultHotRegionCacheHitsThreshold is the low hit number threshold of the
-	// hot region.
-	defaultHotRegionCacheHitsThreshold = 3
-	defaultSchedulerMaxWaitingOperator = 5
-	defaultLeaderSchedulePolicy        = "count"
-	defaultStoreLimitMode              = "manual"
-	defaultEnableJointConsensus        = true
-	defaultEnableTiKVSplitRegion       = true
-	defaultEnableCrossTableMerge       = true
-	defaultHotRegionsWriteInterval     = 10 * time.Minute
-	defaultHotRegionsReservedDays      = 7
-	// It means we skip the preparing stage after the 48 hours no matter if the store has finished preparing stage.
-	defaultMaxStorePreparingTime = 48 * time.Hour
-	// When a slow store affected more than 30% of total stores, it will trigger evicting.
-	defaultSlowStoreEvictingAffectedStoreRatioThreshold = 0.3
-)
-
-func (c *ScheduleConfig) adjust(meta *configutil.ConfigMetaData, reloading bool) error {
-	if !meta.IsDefined("max-snapshot-count") {
-		configutil.AdjustUint64(&c.MaxSnapshotCount, defaultMaxSnapshotCount)
-	}
-	if !meta.IsDefined("max-pending-peer-count") {
-		configutil.AdjustUint64(&c.MaxPendingPeerCount, defaultMaxPendingPeerCount)
-	}
-	if !meta.IsDefined("max-merge-region-size") {
-		configutil.AdjustUint64(&c.MaxMergeRegionSize, defaultMaxMergeRegionSize)
-	}
-	configutil.AdjustDuration(&c.SplitMergeInterval, defaultSplitMergeInterval)
-	configutil.AdjustDuration(&c.SwitchWitnessInterval, defaultSwitchWitnessInterval)
-	configutil.AdjustDuration(&c.PatrolRegionInterval, defaultPatrolRegionInterval)
-	configutil.AdjustDuration(&c.MaxStoreDownTime, defaultMaxStoreDownTime)
-	configutil.AdjustDuration(&c.HotRegionsWriteInterval, defaultHotRegionsWriteInterval)
-	configutil.AdjustDuration(&c.MaxStorePreparingTime, defaultMaxStorePreparingTime)
-	if !meta.IsDefined("leader-schedule-limit") {
-		configutil.AdjustUint64(&c.LeaderScheduleLimit, defaultLeaderScheduleLimit)
-	}
-	if !meta.IsDefined("region-schedule-limit") {
-		configutil.AdjustUint64(&c.RegionScheduleLimit, defaultRegionScheduleLimit)
-	}
-	if !meta.IsDefined("witness-schedule-limit") {
-		configutil.AdjustUint64(&c.WitnessScheduleLimit, defaultWitnessScheduleLimit)
-	}
-	if !meta.IsDefined("replica-schedule-limit") {
-		configutil.AdjustUint64(&c.ReplicaScheduleLimit, defaultReplicaScheduleLimit)
-	}
-	if !meta.IsDefined("merge-schedule-limit") {
-		configutil.AdjustUint64(&c.MergeScheduleLimit, defaultMergeScheduleLimit)
-	}
-	if !meta.IsDefined("hot-region-schedule-limit") {
-		configutil.AdjustUint64(&c.HotRegionScheduleLimit, defaultHotRegionScheduleLimit)
-	}
-	if !meta.IsDefined("hot-region-cache-hits-threshold") {
-		configutil.AdjustUint64(&c.HotRegionCacheHitsThreshold, defaultHotRegionCacheHitsThreshold)
-	}
-	if !meta.IsDefined("tolerant-size-ratio") {
-		configutil.AdjustFloat64(&c.TolerantSizeRatio, defaultTolerantSizeRatio)
-	}
-	if !meta.IsDefined("scheduler-max-waiting-operator") {
-		configutil.AdjustUint64(&c.SchedulerMaxWaitingOperator, defaultSchedulerMaxWaitingOperator)
-	}
-	if !meta.IsDefined("leader-schedule-policy") {
-		configutil.AdjustString(&c.LeaderSchedulePolicy, defaultLeaderSchedulePolicy)
-	}
-	if !meta.IsDefined("store-limit-mode") {
-		configutil.AdjustString(&c.StoreLimitMode, defaultStoreLimitMode)
-	}
-	if !meta.IsDefined("enable-joint-consensus") {
-		c.EnableJointConsensus = defaultEnableJointConsensus
-	}
-	if !meta.IsDefined("enable-tikv-split-region") {
-		c.EnableTiKVSplitRegion = defaultEnableTiKVSplitRegion
-	}
-	if !meta.IsDefined("enable-cross-table-merge") {
-		c.EnableCrossTableMerge = defaultEnableCrossTableMerge
-	}
-	configutil.AdjustFloat64(&c.LowSpaceRatio, defaultLowSpaceRatio)
-	configutil.AdjustFloat64(&c.HighSpaceRatio, defaultHighSpaceRatio)
-	if !meta.IsDefined("enable-diagnostic") {
-		c.EnableDiagnostic = defaultEnableDiagnostic
-	}
-
-	if !meta.IsDefined("enable-witness") {
-		c.EnableWitness = defaultEnableWitness
-	}
-
-	// new cluster:v2, old cluster:v1
-	if !meta.IsDefined("region-score-formula-version") && !reloading {
-		configutil.AdjustString(&c.RegionScoreFormulaVersion, defaultRegionScoreFormulaVersion)
-	}
-
-	adjustSchedulers(&c.Schedulers, DefaultSchedulers)
-
-	for k, b := range c.migrateConfigurationMap() {
-		v, err := c.parseDeprecatedFlag(meta, k, *b[0], *b[1])
-		if err != nil {
-			return err
-		}
-		*b[0], *b[1] = false, v // reset old flag false to make it ignored when marshal to JSON
-	}
-
-	if c.StoreBalanceRate != 0 {
-		DefaultStoreLimit = StoreLimit{AddPeer: c.StoreBalanceRate, RemovePeer: c.StoreBalanceRate}
-		c.StoreBalanceRate = 0
-	}
-
-	if c.StoreLimit == nil {
-		c.StoreLimit = make(map[uint64]StoreLimitConfig)
-	}
-
-	if !meta.IsDefined("hot-regions-reserved-days") {
-		configutil.AdjustUint64(&c.HotRegionsReservedDays, defaultHotRegionsReservedDays)
-	}
-
-	if !meta.IsDefined("SlowStoreEvictingAffectedStoreRatioThreshold") {
-		configutil.AdjustFloat64(&c.SlowStoreEvictingAffectedStoreRatioThreshold, defaultSlowStoreEvictingAffectedStoreRatioThreshold)
-	}
-	return c.Validate()
-}
-
-func (c *ScheduleConfig) migrateConfigurationMap() map[string][2]*bool {
-	return map[string][2]*bool{
-		"remove-down-replica":     {&c.DisableRemoveDownReplica, &c.EnableRemoveDownReplica},
-		"replace-offline-replica": {&c.DisableReplaceOfflineReplica, &c.EnableReplaceOfflineReplica},
-		"make-up-replica":         {&c.DisableMakeUpReplica, &c.EnableMakeUpReplica},
-		"remove-extra-replica":    {&c.DisableRemoveExtraReplica, &c.EnableRemoveExtraReplica},
-		"location-replacement":    {&c.DisableLocationReplacement, &c.EnableLocationReplacement},
-	}
-}
-
-// GetMaxMergeRegionKeys returns the max merge keys.
-// it should keep consistent with tikv: https://github.com/tikv/tikv/pull/12484
-func (c *ScheduleConfig) GetMaxMergeRegionKeys() uint64 {
-	if keys := c.MaxMergeRegionKeys; keys != 0 {
-		return keys
-	}
-	return c.MaxMergeRegionSize * 10000
-}
-
-func (c *ScheduleConfig) parseDeprecatedFlag(meta *configutil.ConfigMetaData, name string, old, new bool) (bool, error) {
-	oldName, newName := "disable-"+name, "enable-"+name
-	defineOld, defineNew := meta.IsDefined(oldName), meta.IsDefined(newName)
-	switch {
-	case defineNew && defineOld:
-		if new == old {
-			return false, errors.Errorf("config item %s and %s(deprecated) are conflict", newName, oldName)
-		}
-		return new, nil
-	case defineNew && !defineOld:
-		return new, nil
-	case !defineNew && defineOld:
-		return !old, nil // use !disable-*
-	case !defineNew && !defineOld:
-		return true, nil // use default value true
-	}
-	return false, nil // unreachable.
-}
-
-// MigrateDeprecatedFlags updates new flags according to deprecated flags.
-func (c *ScheduleConfig) MigrateDeprecatedFlags() {
-	c.DisableLearner = false
-	if c.StoreBalanceRate != 0 {
-		DefaultStoreLimit = StoreLimit{AddPeer: c.StoreBalanceRate, RemovePeer: c.StoreBalanceRate}
-		c.StoreBalanceRate = 0
-	}
-	for _, b := range c.migrateConfigurationMap() {
-		// If old=false (previously disabled), set both old and new to false.
-		if *b[0] {
-			*b[0], *b[1] = false, false
-		}
-	}
-}
-
-// Validate is used to validate if some scheduling configurations are right.
-func (c *ScheduleConfig) Validate() error {
-	if c.TolerantSizeRatio < 0 {
-		return errors.New("tolerant-size-ratio should be non-negative")
-	}
-	if c.LowSpaceRatio < 0 || c.LowSpaceRatio > 1 {
-		return errors.New("low-space-ratio should between 0 and 1")
-	}
-	if c.HighSpaceRatio < 0 || c.HighSpaceRatio > 1 {
-		return errors.New("high-space-ratio should between 0 and 1")
-	}
-	if c.LowSpaceRatio <= c.HighSpaceRatio {
-		return errors.New("low-space-ratio should be larger than high-space-ratio")
-	}
-	if c.LeaderSchedulePolicy != "count" && c.LeaderSchedulePolicy != "size" {
-		return errors.Errorf("leader-schedule-policy %v is invalid", c.LeaderSchedulePolicy)
-	}
-	if c.SlowStoreEvictingAffectedStoreRatioThreshold == 0 {
-		return errors.Errorf("slow-store-evicting-affected-store-ratio-threshold is not set")
-	}
-	return nil
-}
-
-// Deprecated is used to find if there is an option has been deprecated.
-func (c *ScheduleConfig) Deprecated() error {
-	if c.DisableLearner {
-		return errors.New("disable-raft-learner has already been deprecated")
-	}
-	if c.DisableRemoveDownReplica {
-		return errors.New("disable-remove-down-replica has already been deprecated")
-	}
-	if c.DisableReplaceOfflineReplica {
-		return errors.New("disable-replace-offline-replica has already been deprecated")
-	}
-	if c.DisableMakeUpReplica {
-		return errors.New("disable-make-up-replica has already been deprecated")
-	}
-	if c.DisableRemoveExtraReplica {
-		return errors.New("disable-remove-extra-replica has already been deprecated")
-	}
-	if c.DisableLocationReplacement {
-		return errors.New("disable-location-replacement has already been deprecated")
-	}
-	if c.StoreBalanceRate != 0 {
-		return errors.New("store-balance-rate has already been deprecated")
-	}
-	return nil
-}
-
-// StoreLimitConfig is a config about scheduling rate limit of different types for a store.
-type StoreLimitConfig struct {
-	AddPeer    float64 `toml:"add-peer" json:"add-peer"`
-	RemovePeer float64 `toml:"remove-peer" json:"remove-peer"`
-}
-
-// SchedulerConfigs is a slice of customized scheduler configuration.
-type SchedulerConfigs []SchedulerConfig
-
-// SchedulerConfig is customized scheduler configuration
-type SchedulerConfig struct {
-	Type        string   `toml:"type" json:"type"`
-	Args        []string `toml:"args" json:"args"`
-	Disable     bool     `toml:"disable" json:"disable"`
-	ArgsPayload string   `toml:"args-payload" json:"args-payload"`
-}
-
-// DefaultSchedulers are the schedulers be created by default.
-// If these schedulers are not in the persistent configuration, they
-// will be created automatically when reloading.
-var DefaultSchedulers = SchedulerConfigs{
-	{Type: "balance-region"},
-	{Type: "balance-leader"},
-	{Type: "balance-witness"},
-	{Type: "hot-region"},
-	{Type: "split-bucket"},
-	{Type: "transfer-witness-leader"},
-}
-
-// IsDefaultScheduler checks whether the scheduler is enable by default.
-func IsDefaultScheduler(typ string) bool {
-	for _, c := range DefaultSchedulers {
-		if typ == c.Type {
-			return true
-		}
-	}
-	return false
-}
-
-// ReplicationConfig is the replication configuration.
-// NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
-type ReplicationConfig struct {
-	// MaxReplicas is the number of replicas for each region.
-	MaxReplicas uint64 `toml:"max-replicas" json:"max-replicas"`
-
-	// The label keys specified the location of a store.
-	// The placement priorities is implied by the order of label keys.
-	// For example, ["zone", "rack"] means that we should place replicas to
-	// different zones first, then to different racks if we don't have enough zones.
-	LocationLabels typeutil.StringSlice `toml:"location-labels" json:"location-labels"`
-	// StrictlyMatchLabel strictly checks if the label of TiKV is matched with LocationLabels.
-	StrictlyMatchLabel bool `toml:"strictly-match-label" json:"strictly-match-label,string"`
-
-	// When PlacementRules feature is enabled. MaxReplicas, LocationLabels and IsolationLabels are not used any more.
-	EnablePlacementRules bool `toml:"enable-placement-rules" json:"enable-placement-rules,string"`
-
-	// EnablePlacementRuleCache controls whether use cache during rule checker
-	EnablePlacementRulesCache bool `toml:"enable-placement-rules-cache" json:"enable-placement-rules-cache,string"`
-
-	// IsolationLevel is used to isolate replicas explicitly and forcibly if it's not empty.
-	// Its value must be empty or one of LocationLabels.
-	// Example:
-	// location-labels = ["zone", "rack", "host"]
-	// isolation-level = "zone"
-	// With configuration like above, PD ensure that all replicas be placed in different zones.
-	// Even if a zone is down, PD will not try to make up replicas in other zone
-	// because other zones already have replicas on it.
-	IsolationLevel string `toml:"isolation-level" json:"isolation-level"`
-}
-
-// Clone makes a deep copy of the config.
-func (c *ReplicationConfig) Clone() *ReplicationConfig {
-	locationLabels := append(c.LocationLabels[:0:0], c.LocationLabels...)
-	cfg := *c
-	cfg.LocationLabels = locationLabels
-	return &cfg
-}
-
-// Validate is used to validate if some replication configurations are right.
-func (c *ReplicationConfig) Validate() error {
-	foundIsolationLevel := false
-	for _, label := range c.LocationLabels {
-		err := ValidateLabels([]*metapb.StoreLabel{{Key: label}})
-		if err != nil {
-			return err
-		}
-		// IsolationLevel should be empty or one of LocationLabels
-		if !foundIsolationLevel && label == c.IsolationLevel {
-			foundIsolationLevel = true
-		}
-	}
-	if c.IsolationLevel != "" && !foundIsolationLevel {
-		return errors.New("isolation-level must be one of location-labels or empty")
-	}
-	return nil
-}
-
-func (c *ReplicationConfig) adjust(meta *configutil.ConfigMetaData) error {
-	configutil.AdjustUint64(&c.MaxReplicas, defaultMaxReplicas)
-	if !meta.IsDefined("enable-placement-rules") {
-		c.EnablePlacementRules = defaultEnablePlacementRules
-	}
-	if !meta.IsDefined("strictly-match-label") {
-		c.StrictlyMatchLabel = defaultStrictlyMatchLabel
-	}
-	if !meta.IsDefined("location-labels") {
-		c.LocationLabels = defaultLocationLabels
-	}
-	return c.Validate()
-}
-
 // PDServerConfig is the configuration for pd server.
 // NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
 type PDServerConfig struct {
@@ -1053,10 +508,10 @@ type PDServerConfig struct {
 	// KeyType is option to specify the type of keys.
 	// There are some types supported: ["table", "raw", "txn"], default: "table"
 	KeyType string `toml:"key-type" json:"key-type"`
-	// RuntimeServices is the running the running extension services.
+	// RuntimeServices is the running extension services.
 	RuntimeServices typeutil.StringSlice `toml:"runtime-services" json:"runtime-services"`
 	// MetricStorage is the cluster metric storage.
-	// Currently we use prometheus as metric storage, we may use PD/TiKV as metric storage later.
+	// Currently, we use prometheus as metric storage, we may use PD/TiKV as metric storage later.
 	MetricStorage string `toml:"metric-storage" json:"metric-storage"`
 	// There are some values supported: "auto", "none", or a specific address, default: "auto"
 	DashboardAddress string `toml:"dashboard-address" json:"dashboard-address"`
@@ -1071,10 +526,12 @@ type PDServerConfig struct {
 	ServerMemoryLimit float64 `toml:"server-memory-limit" json:"server-memory-limit"`
 	// ServerMemoryLimitGCTrigger indicates the gc percentage of the ServerMemoryLimit.
 	ServerMemoryLimitGCTrigger float64 `toml:"server-memory-limit-gc-trigger" json:"server-memory-limit-gc-trigger"`
-	// EnableGOGCTuner is to enable GOGC tuner. it can tuner GOGC
+	// EnableGOGCTuner is to enable GOGC tuner. it can tuner GOGC.
 	EnableGOGCTuner bool `toml:"enable-gogc-tuner" json:"enable-gogc-tuner,string"`
 	// GCTunerThreshold is the threshold of GC tuner.
 	GCTunerThreshold float64 `toml:"gc-tuner-threshold" json:"gc-tuner-threshold"`
+	// BlockSafePointV1 is used to control gc safe point v1 and service safe point v1 can not be updated.
+	BlockSafePointV1 bool `toml:"block-safe-point-v1" json:"block-safe-point-v1,string"`
 }
 
 func (c *PDServerConfig) adjust(meta *configutil.ConfigMetaData) error {
@@ -1090,9 +547,6 @@ func (c *PDServerConfig) adjust(meta *configutil.ConfigMetaData) error {
 	}
 	if !meta.IsDefined("dashboard-address") {
 		c.DashboardAddress = defaultDashboardAddress
-	}
-	if !meta.IsDefined("trace-region-flow") {
-		c.TraceRegionFlow = defaultTraceRegionFlow
 	}
 	if !meta.IsDefined("flow-round-by-digit") {
 		configutil.AdjustInt(&c.FlowRoundByDigit, defaultFlowRoundByDigit)
@@ -1127,7 +581,9 @@ func (c *PDServerConfig) adjust(meta *configutil.ConfigMetaData) error {
 	} else if c.GCTunerThreshold > maxGCTunerThreshold {
 		c.GCTunerThreshold = maxGCTunerThreshold
 	}
-	c.migrateConfigurationFromFile(meta)
+	if err := c.migrateConfigurationFromFile(meta); err != nil {
+		return err
+	}
 	return c.Validate()
 }
 
@@ -1215,9 +671,25 @@ func (c LabelPropertyConfig) Clone() LabelPropertyConfig {
 	return m
 }
 
+// GetLeaderLease returns the leader lease.
+func (c *Config) GetLeaderLease() int64 {
+	return c.LeaderLease
+}
+
 // IsLocalTSOEnabled returns if the local TSO is enabled.
 func (c *Config) IsLocalTSOEnabled() bool {
 	return c.EnableLocalTSO
+}
+
+// GetMaxConcurrentTSOProxyStreamings returns the max concurrent TSO proxy streamings.
+// If the value is negative, there is no limit.
+func (c *Config) GetMaxConcurrentTSOProxyStreamings() int {
+	return c.MaxConcurrentTSOProxyStreamings
+}
+
+// GetTSOProxyRecvFromClientTimeout returns timeout value for TSO proxy receiving from the client.
+func (c *Config) GetTSOProxyRecvFromClientTimeout() time.Duration {
+	return c.TSOProxyRecvFromClientTimeout.Duration
 }
 
 // GetTSOUpdatePhysicalInterval returns TSO update physical interval.
@@ -1254,43 +726,42 @@ func (c *Config) GenEmbedEtcdConfig() (*embed.Config, error) {
 	cfg.QuotaBackendBytes = int64(c.QuotaBackendBytes)
 	cfg.MaxRequestBytes = c.MaxRequestBytes
 
-	allowedCN, serr := c.Security.GetOneAllowedCN()
-	if serr != nil {
-		return nil, serr
-	}
 	cfg.ClientTLSInfo.ClientCertAuth = len(c.Security.CAPath) != 0
 	cfg.ClientTLSInfo.TrustedCAFile = c.Security.CAPath
 	cfg.ClientTLSInfo.CertFile = c.Security.CertPath
 	cfg.ClientTLSInfo.KeyFile = c.Security.KeyPath
-	// Client no need to set the CN. (cfg.ClientTLSInfo.AllowedCN = allowedCN)
+	// Keep compatibility with https://github.com/tikv/pd/pull/2305
+	// Only check client cert when there are multiple CNs.
+	if len(c.Security.CertAllowedCNs) > 1 {
+		cfg.ClientTLSInfo.AllowedCNs = c.Security.CertAllowedCNs
+	}
 	cfg.PeerTLSInfo.ClientCertAuth = len(c.Security.CAPath) != 0
 	cfg.PeerTLSInfo.TrustedCAFile = c.Security.CAPath
 	cfg.PeerTLSInfo.CertFile = c.Security.CertPath
 	cfg.PeerTLSInfo.KeyFile = c.Security.KeyPath
-	cfg.PeerTLSInfo.AllowedCN = allowedCN
+	cfg.PeerTLSInfo.AllowedCNs = c.Security.CertAllowedCNs
 	cfg.ForceNewCluster = c.ForceNewCluster
 	cfg.ZapLoggerBuilder = embed.NewZapCoreLoggerBuilder(c.Logger, c.Logger.Core(), c.LogProps.Syncer)
 	cfg.EnableGRPCGateway = c.EnableGRPCGateway
-	cfg.EnableV2 = true
 	cfg.Logger = "zap"
 	var err error
 
-	cfg.LPUrls, err = parseUrls(c.PeerUrls)
+	cfg.ListenPeerUrls, err = parseUrls(c.PeerUrls)
 	if err != nil {
 		return nil, err
 	}
 
-	cfg.APUrls, err = parseUrls(c.AdvertisePeerUrls)
+	cfg.AdvertisePeerUrls, err = parseUrls(c.AdvertisePeerUrls)
 	if err != nil {
 		return nil, err
 	}
 
-	cfg.LCUrls, err = parseUrls(c.ClientUrls)
+	cfg.ListenClientUrls, err = parseUrls(c.ClientUrls)
 	if err != nil {
 		return nil, err
 	}
 
-	cfg.ACUrls, err = parseUrls(c.AdvertiseClientUrls)
+	cfg.AdvertiseClientUrls, err = parseUrls(c.AdvertiseClientUrls)
 	if err != nil {
 		return nil, err
 	}
@@ -1300,13 +771,14 @@ func (c *Config) GenEmbedEtcdConfig() (*embed.Config, error) {
 
 // DashboardConfig is the configuration for tidb-dashboard.
 type DashboardConfig struct {
-	TiDBCAPath         string `toml:"tidb-cacert-path" json:"tidb-cacert-path"`
-	TiDBCertPath       string `toml:"tidb-cert-path" json:"tidb-cert-path"`
-	TiDBKeyPath        string `toml:"tidb-key-path" json:"tidb-key-path"`
-	PublicPathPrefix   string `toml:"public-path-prefix" json:"public-path-prefix"`
-	InternalProxy      bool   `toml:"internal-proxy" json:"internal-proxy"`
-	EnableTelemetry    bool   `toml:"enable-telemetry" json:"enable-telemetry"`
-	EnableExperimental bool   `toml:"enable-experimental" json:"enable-experimental"`
+	TiDBCAPath            string `toml:"tidb-cacert-path" json:"tidb-cacert-path"`
+	TiDBCertPath          string `toml:"tidb-cert-path" json:"tidb-cert-path"`
+	TiDBKeyPath           string `toml:"tidb-key-path" json:"tidb-key-path"`
+	PublicPathPrefix      string `toml:"public-path-prefix" json:"public-path-prefix"`
+	InternalProxy         bool   `toml:"internal-proxy" json:"internal-proxy"`
+	EnableTelemetry       bool   `toml:"enable-telemetry" json:"enable-telemetry"`
+	EnableExperimental    bool   `toml:"enable-experimental" json:"enable-experimental"`
+	DisableCustomPromAddr bool   `toml:"disable-custom-prom-addr" json:"disable-custom-prom-addr"`
 }
 
 // ToTiDBTLSConfig generates tls config for connecting to TiDB, used by tidb-dashboard.
@@ -1364,13 +836,14 @@ func NormalizeReplicationMode(m string) string {
 
 // DRAutoSyncReplicationConfig is the configuration for auto sync mode between 2 data centers.
 type DRAutoSyncReplicationConfig struct {
-	LabelKey         string            `toml:"label-key" json:"label-key"`
-	Primary          string            `toml:"primary" json:"primary"`
-	DR               string            `toml:"dr" json:"dr"`
-	PrimaryReplicas  int               `toml:"primary-replicas" json:"primary-replicas"`
-	DRReplicas       int               `toml:"dr-replicas" json:"dr-replicas"`
-	WaitStoreTimeout typeutil.Duration `toml:"wait-store-timeout" json:"wait-store-timeout"`
-	PauseRegionSplit bool              `toml:"pause-region-split" json:"pause-region-split,string"`
+	LabelKey           string            `toml:"label-key" json:"label-key"`
+	Primary            string            `toml:"primary" json:"primary"`
+	DR                 string            `toml:"dr" json:"dr"`
+	PrimaryReplicas    int               `toml:"primary-replicas" json:"primary-replicas"`
+	DRReplicas         int               `toml:"dr-replicas" json:"dr-replicas"`
+	WaitStoreTimeout   typeutil.Duration `toml:"wait-store-timeout" json:"wait-store-timeout"`
+	WaitRecoverTimeout typeutil.Duration `toml:"wait-recover-timeout" json:"wait-recover-timeout"`
+	PauseRegionSplit   bool              `toml:"pause-region-split" json:"pause-region-split,string"`
 }
 
 func (c *DRAutoSyncReplicationConfig) adjust(meta *configutil.ConfigMetaData) {
@@ -1379,8 +852,88 @@ func (c *DRAutoSyncReplicationConfig) adjust(meta *configutil.ConfigMetaData) {
 	}
 }
 
+// MicroServiceConfig is the configuration for micro service.
+type MicroServiceConfig struct {
+	EnableSchedulingFallback bool `toml:"enable-scheduling-fallback" json:"enable-scheduling-fallback,string"`
+}
+
+func (c *MicroServiceConfig) adjust(meta *configutil.ConfigMetaData) {
+	if !meta.IsDefined("enable-scheduling-fallback") {
+		c.EnableSchedulingFallback = defaultEnableSchedulingFallback
+	}
+}
+
+// Clone returns a copy of micro service config.
+func (c *MicroServiceConfig) Clone() *MicroServiceConfig {
+	cfg := *c
+	return &cfg
+}
+
+// IsSchedulingFallbackEnabled returns whether to enable scheduling service fallback to api service.
+func (c *MicroServiceConfig) IsSchedulingFallbackEnabled() bool {
+	return c.EnableSchedulingFallback
+}
+
 // KeyspaceConfig is the configuration for keyspace management.
 type KeyspaceConfig struct {
 	// PreAlloc contains the keyspace to be allocated during keyspace manager initialization.
 	PreAlloc []string `toml:"pre-alloc" json:"pre-alloc"`
+	// WaitRegionSplit indicates whether to wait for the region split to complete
+	WaitRegionSplit bool `toml:"wait-region-split" json:"wait-region-split"`
+	// WaitRegionSplitTimeout indicates the max duration to wait region split.
+	WaitRegionSplitTimeout typeutil.Duration `toml:"wait-region-split-timeout" json:"wait-region-split-timeout"`
+	// CheckRegionSplitInterval indicates the interval to check whether the region split is complete
+	CheckRegionSplitInterval typeutil.Duration `toml:"check-region-split-interval" json:"check-region-split-interval"`
+}
+
+// Validate checks if keyspace config falls within acceptable range.
+func (c *KeyspaceConfig) Validate() error {
+	if c.CheckRegionSplitInterval.Duration > maxCheckRegionSplitInterval || c.CheckRegionSplitInterval.Duration < minCheckRegionSplitInterval {
+		return errors.New(fmt.Sprintf("[keyspace] check-region-split-interval should between %v and %v",
+			minCheckRegionSplitInterval, maxCheckRegionSplitInterval))
+	}
+	if c.CheckRegionSplitInterval.Duration >= c.WaitRegionSplitTimeout.Duration {
+		return errors.New("[keyspace] check-region-split-interval should be less than wait-region-split-timeout")
+	}
+	return nil
+}
+
+func (c *KeyspaceConfig) adjust(meta *configutil.ConfigMetaData) {
+	if !meta.IsDefined("wait-region-split") {
+		c.WaitRegionSplit = true
+	}
+	if !meta.IsDefined("wait-region-split-timeout") {
+		c.WaitRegionSplitTimeout = typeutil.NewDuration(defaultWaitRegionSplitTimeout)
+	}
+	if !meta.IsDefined("check-region-split-interval") {
+		c.CheckRegionSplitInterval = typeutil.NewDuration(defaultCheckRegionSplitInterval)
+	}
+}
+
+// Clone makes a deep copy of the keyspace config.
+func (c *KeyspaceConfig) Clone() *KeyspaceConfig {
+	preAlloc := append(c.PreAlloc[:0:0], c.PreAlloc...)
+	cfg := *c
+	cfg.PreAlloc = preAlloc
+	return &cfg
+}
+
+// GetPreAlloc returns the keyspace to be allocated during keyspace manager initialization.
+func (c *KeyspaceConfig) GetPreAlloc() []string {
+	return c.PreAlloc
+}
+
+// ToWaitRegionSplit returns whether to wait for the region split to complete.
+func (c *KeyspaceConfig) ToWaitRegionSplit() bool {
+	return c.WaitRegionSplit
+}
+
+// GetWaitRegionSplitTimeout returns the max duration to wait region split.
+func (c *KeyspaceConfig) GetWaitRegionSplitTimeout() time.Duration {
+	return c.WaitRegionSplitTimeout.Duration
+}
+
+// GetCheckRegionSplitInterval returns the interval to check whether the region split is complete.
+func (c *KeyspaceConfig) GetCheckRegionSplitInterval() time.Duration {
+	return c.CheckRegionSplitInterval.Duration
 }

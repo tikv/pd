@@ -23,6 +23,8 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/core/constant"
+	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/mock/mockconfig"
 	"github.com/tikv/pd/pkg/schedule/placement"
@@ -91,7 +93,7 @@ func TestLabelConstraintsFilter(t *testing.T) {
 	}
 	for _, testCase := range testCases {
 		filter := NewLabelConstraintFilter("", []placement.LabelConstraint{{Key: testCase.key, Op: placement.LabelConstraintOp(testCase.op), Values: testCase.values}})
-		re.Equal(testCase.res, filter.Source(testCluster.GetOpts(), store).StatusCode)
+		re.Equal(testCase.res, filter.Source(testCluster.GetSharedConfig(), store).StatusCode)
 	}
 }
 
@@ -137,15 +139,100 @@ func TestRuleFitFilter(t *testing.T) {
 	}
 	for _, testCase := range testCases {
 		filter := newRuleFitFilter("", testCluster.GetBasicCluster(), testCluster.GetRuleManager(), region, nil, 1)
-		re.Equal(testCase.sourceRes, filter.Source(testCluster.GetOpts(), testCluster.GetStore(testCase.storeID)).StatusCode)
-		re.Equal(testCase.targetRes, filter.Target(testCluster.GetOpts(), testCluster.GetStore(testCase.storeID)).StatusCode)
+		re.Equal(testCase.sourceRes, filter.Source(testCluster.GetSharedConfig(), testCluster.GetStore(testCase.storeID)).StatusCode)
+		re.Equal(testCase.targetRes, filter.Target(testCluster.GetSharedConfig(), testCluster.GetStore(testCase.storeID)).StatusCode)
 		leaderFilter := newRuleLeaderFitFilter("", testCluster.GetBasicCluster(), testCluster.GetRuleManager(), region, 1, true)
-		re.Equal(testCase.targetRes, leaderFilter.Target(testCluster.GetOpts(), testCluster.GetStore(testCase.storeID)).StatusCode)
+		re.Equal(testCase.targetRes, leaderFilter.Target(testCluster.GetSharedConfig(), testCluster.GetStore(testCase.storeID)).StatusCode)
 	}
 
 	// store-6 is not exist in the peers, so it will not allow transferring leader to store 6.
 	leaderFilter := newRuleLeaderFitFilter("", testCluster.GetBasicCluster(), testCluster.GetRuleManager(), region, 1, false)
-	re.False(leaderFilter.Target(testCluster.GetOpts(), testCluster.GetStore(6)).IsOK())
+	re.False(leaderFilter.Target(testCluster.GetSharedConfig(), testCluster.GetStore(6)).IsOK())
+}
+
+func TestRuleFitFilterWithPlacementRule(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	opt := mockconfig.NewTestOptions()
+	testCluster := mockcluster.NewCluster(ctx, opt)
+	testCluster.SetEnablePlacementRules(true)
+	ruleManager := testCluster.RuleManager
+	ruleManager.DeleteRule(placement.DefaultGroupID, placement.DefaultRuleID)
+	err := ruleManager.SetRules([]*placement.Rule{
+		{
+			GroupID: "test",
+			ID:      "r1",
+			Index:   100,
+			Role:    placement.Leader,
+			Count:   1,
+			LabelConstraints: []placement.LabelConstraint{
+				{Key: "dc", Op: "in", Values: []string{"dc1"}},
+			},
+			LocationLabels: []string{"dc", "zone", "host"},
+		},
+		{
+			GroupID: "test",
+			ID:      "r2",
+			Index:   100,
+			Role:    placement.Voter,
+			Count:   2,
+			LabelConstraints: []placement.LabelConstraint{
+				{Key: "dc", Op: "in", Values: []string{"dc1"}},
+			},
+			LocationLabels: []string{"dc", "zone", "host"},
+		},
+		{
+			GroupID: "test",
+			ID:      "r3",
+			Index:   100,
+			Role:    placement.Voter,
+			Count:   2,
+			LabelConstraints: []placement.LabelConstraint{
+				{Key: "dc", Op: "in", Values: []string{"dc2"}},
+			},
+			LocationLabels: []string{"dc", "zone", "host"},
+		},
+	})
+	re.NoError(err)
+	stores := []struct {
+		storeID     uint64
+		regionCount int
+		labels      map[string]string
+	}{
+		{1, 1, map[string]string{"dc": "dc1", "zone": "z1", "host": "h1"}},
+		{2, 1, map[string]string{"dc": "dc1", "zone": "z2", "host": "h2"}},
+		{3, 1, map[string]string{"dc": "dc1", "zone": "z3", "host": "h3"}},
+		{4, 1, map[string]string{"dc": "dc1", "zone": "z4", "host": "h4"}},
+		{5, 1, map[string]string{"dc": "dc2", "zone": "z5", "host": "h5"}},
+		{6, 1, map[string]string{"dc": "dc2", "zone": "z6", "host": "h6"}},
+	}
+	// Init cluster
+	for _, store := range stores {
+		testCluster.AddLabelsStore(store.storeID, store.regionCount, store.labels)
+	}
+	region := core.NewRegionInfo(&metapb.Region{Peers: []*metapb.Peer{
+		{StoreId: 1, Id: 1},
+		{StoreId: 2, Id: 2},
+		{StoreId: 3, Id: 3},
+		{StoreId: 5, Id: 4},
+		{StoreId: 6, Id: 5},
+	}}, &metapb.Peer{StoreId: 1, Id: 1})
+	leaderFilter := newRuleLeaderFitFilter("", testCluster.GetBasicCluster(), testCluster.GetRuleManager(), region, 1, true)
+	re.Equal(plan.StatusText(plan.StatusStoreNotMatchRule), leaderFilter.Target(testCluster.GetSharedConfig(), testCluster.GetStore(6)).String())
+}
+
+func TestSendStateFilter(t *testing.T) {
+	re := require.New(t)
+	store := core.NewStoreInfoWithLabel(1, map[string]string{}).Clone(core.SetStoreLimit(storelimit.NewSlidingWindows()))
+	region := core.NewTestRegionInfo(1, 1, []byte(""), []byte(""))
+	snapshotFilter := NewSnapshotSendFilter([]*core.StoreInfo{store}, constant.Medium)
+	re.NotNil(SelectOneRegion([]*core.RegionInfo{region}, nil, snapshotFilter))
+	re.True(store.GetStoreLimit().Take(1000, storelimit.SendSnapshot, constant.Medium))
+	re.True(store.GetStoreLimit().Take(1000, storelimit.SendSnapshot, constant.Medium))
+	snapshotFilter = NewSnapshotSendFilter([]*core.StoreInfo{store}, constant.Medium)
+	re.Nil(SelectOneRegion([]*core.RegionInfo{region}, nil, snapshotFilter))
 }
 
 func TestStoreStateFilter(t *testing.T) {
@@ -226,7 +313,7 @@ func TestStoreStateFilterReason(t *testing.T) {
 		}
 	}
 
-	// No reason catched
+	// No reason caught
 	store = store.Clone(core.SetLastHeartbeatTS(time.Now()))
 	testCases := []testCase{
 		{2, "store-state-ok-filter", "store-state-ok-filter"},
@@ -320,8 +407,8 @@ func TestIsolationFilter(t *testing.T) {
 	for _, testCase := range testCases {
 		filter := NewIsolationFilter("", testCase.isolationLevel, testCluster.GetLocationLabels(), testCluster.GetRegionStores(testCase.region))
 		for idx, store := range allStores {
-			re.Equal(testCase.sourceRes[idx], filter.Source(testCluster.GetOpts(), testCluster.GetStore(store.storeID)).StatusCode)
-			re.Equal(testCase.targetRes[idx], filter.Target(testCluster.GetOpts(), testCluster.GetStore(store.storeID)).StatusCode)
+			re.Equal(testCase.sourceRes[idx], filter.Source(testCluster.GetSharedConfig(), testCluster.GetStore(store.storeID)).StatusCode)
+			re.Equal(testCase.targetRes[idx], filter.Target(testCluster.GetSharedConfig(), testCluster.GetStore(store.storeID)).StatusCode)
 		}
 	}
 }
@@ -348,10 +435,10 @@ func TestPlacementGuard(t *testing.T) {
 	store := testCluster.GetStore(1)
 
 	re.IsType(NewLocationSafeguard("", []string{"zone"}, testCluster.GetRegionStores(region), store),
-		NewPlacementSafeguard("", testCluster.GetOpts(), testCluster.GetBasicCluster(), testCluster.GetRuleManager(), region, store, nil))
+		NewPlacementSafeguard("", testCluster.GetSharedConfig(), testCluster.GetBasicCluster(), testCluster.GetRuleManager(), region, store, nil))
 	testCluster.SetEnablePlacementRules(true)
 	re.IsType(newRuleFitFilter("", testCluster.GetBasicCluster(), testCluster.GetRuleManager(), region, nil, 1),
-		NewPlacementSafeguard("", testCluster.GetOpts(), testCluster.GetBasicCluster(), testCluster.GetRuleManager(), region, store, nil))
+		NewPlacementSafeguard("", testCluster.GetSharedConfig(), testCluster.GetBasicCluster(), testCluster.GetRuleManager(), region, store, nil))
 }
 
 func TestSpecialUseFilter(t *testing.T) {
@@ -379,8 +466,8 @@ func TestSpecialUseFilter(t *testing.T) {
 		store := core.NewStoreInfoWithLabel(1, testCase.label)
 		store = store.Clone(core.SetStoreStats(&pdpb.StoreStats{StoreId: 1, Capacity: 100 * units.GiB, Available: 100 * units.GiB}))
 		filter := NewSpecialUseFilter("", testCase.allowUse...)
-		re.Equal(testCase.sourceRes, filter.Source(testCluster.GetOpts(), store).StatusCode)
-		re.Equal(testCase.targetRes, filter.Target(testCluster.GetOpts(), store).StatusCode)
+		re.Equal(testCase.sourceRes, filter.Source(testCluster.GetSharedConfig(), store).StatusCode)
+		re.Equal(testCase.targetRes, filter.Target(testCluster.GetSharedConfig(), store).StatusCode)
 	}
 }
 

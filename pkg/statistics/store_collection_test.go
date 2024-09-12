@@ -15,13 +15,18 @@
 package statistics
 
 import (
+	"strconv"
 	"testing"
 	"time"
 
+	"github.com/docker/go-units"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/mock/mockconfig"
+	"github.com/tikv/pd/pkg/statistics/utils"
 )
 
 func TestStoreStatistics(t *testing.T) {
@@ -50,13 +55,20 @@ func TestStoreStatistics(t *testing.T) {
 		stores = append(stores, s)
 	}
 
-	store3 := stores[3].Clone(core.OfflineStore(false))
+	store3 := stores[3].Clone(core.SetStoreState(metapb.StoreState_Offline, false))
 	stores[3] = store3
 	store4 := stores[4].Clone(core.SetLastHeartbeatTS(stores[4].GetLastHeartbeatTS().Add(-time.Hour)))
 	stores[4] = store4
-	storeStats := NewStoreStatisticsMap(opt, nil)
+	store5 := stores[5].Clone(core.SetStoreStats(&pdpb.StoreStats{
+		Capacity:  512 * units.MiB,
+		Available: 100 * units.MiB,
+		UsedSize:  0,
+	}))
+	stores[5] = store5
+	storeStats := NewStoreStatisticsMap(opt)
 	for _, store := range stores {
-		storeStats.Observe(store, storesStats)
+		storeStats.Observe(store)
+		ObserveHotStat(store, storesStats)
 	}
 	stats := storeStats.stats
 
@@ -72,11 +84,76 @@ func TestStoreStatistics(t *testing.T) {
 	re.Equal(0, stats.Unhealthy)
 	re.Equal(0, stats.Disconnect)
 	re.Equal(1, stats.Tombstone)
-	re.Equal(8, stats.LowSpace)
-	re.Equal(2, stats.LabelCounter["zone:z1"])
-	re.Equal(2, stats.LabelCounter["zone:z2"])
-	re.Equal(2, stats.LabelCounter["zone:z3"])
-	re.Equal(4, stats.LabelCounter["host:h1"])
-	re.Equal(4, stats.LabelCounter["host:h2"])
-	re.Equal(2, stats.LabelCounter["zone:unknown"])
+	re.Equal(1, stats.LowSpace)
+	re.Len(stats.LabelCounter["zone:z1"], 2)
+	re.Equal([]uint64{1, 2}, stats.LabelCounter["zone:z1"])
+	re.Len(stats.LabelCounter["zone:z2"], 2)
+	re.Len(stats.LabelCounter["zone:z3"], 2)
+	re.Len(stats.LabelCounter["host:h1"], 4)
+	re.Equal([]uint64{1, 3, 5, 7}, stats.LabelCounter["host:h1"])
+	re.Len(stats.LabelCounter["host:h2"], 4)
+	re.Len(stats.LabelCounter["zone:unknown"], 2)
+}
+
+func TestSummaryStoreInfos(t *testing.T) {
+	re := require.New(t)
+	rw := utils.Read
+	kind := constant.LeaderKind
+	collector := newTikvCollector()
+	storeHistoryLoad := NewStoreHistoryLoads(utils.DimLen, DefaultHistorySampleDuration, DefaultHistorySampleInterval)
+	storeInfos := make(map[uint64]*StoreSummaryInfo)
+	storeLoads := make(map[uint64][]float64)
+	for _, storeID := range []int{1, 3} {
+		storeInfos[uint64(storeID)] = &StoreSummaryInfo{
+			isTiFlash: false,
+			StoreInfo: core.NewStoreInfo(&metapb.Store{Id: uint64(storeID), Address: "mock://tikv" + strconv.Itoa(storeID)}, core.SetLastHeartbeatTS(time.Now())),
+		}
+		storeLoads[uint64(storeID)] = []float64{1, 2, 0, 0, 5}
+		for i, v := range storeLoads[uint64(storeID)] {
+			storeLoads[uint64(storeID)][i] = v * float64(storeID)
+		}
+	}
+
+	// case 1: put one element into history load
+	details := summaryStoresLoadByEngine(storeInfos, storeLoads, storeHistoryLoad, nil, rw, kind, collector)
+	re.Len(details, 2)
+	re.Empty(details[0].LoadPred.Current.HistoryLoads)
+	re.Empty(details[1].LoadPred.Current.HistoryLoads)
+	expectHistoryLoads := []float64{1, 2, 5}
+	for _, storeID := range []uint64{1, 3} {
+		loads := storeHistoryLoad.Get(storeID, rw, kind)
+		for i := 0; i < len(loads); i++ {
+			for j := 0; j < len(loads[0]); j++ {
+				if loads[i][j] != 0 {
+					re.Equal(loads[i][j]/float64(storeID), expectHistoryLoads[i])
+				}
+			}
+		}
+	}
+
+	// case 2: put many elements into history load
+	storeHistoryLoad.sampleDuration = 0
+	for i := 1; i < 10; i++ {
+		details = summaryStoresLoadByEngine(storeInfos, storeLoads, storeHistoryLoad, nil, rw, kind, collector)
+		expect := []float64{2, 4, 10}
+		for _, detail := range details {
+			loads := detail.LoadPred.Current.HistoryLoads
+			storeID := detail.GetID()
+			for i := 0; i < len(loads); i++ {
+				for j := 0; j < len(loads[0]); j++ {
+					if loads[i][j] != 0 {
+						re.Equal(loads[i][j]/float64(storeID), expectHistoryLoads[i])
+					}
+				}
+			}
+
+			for i, loads := range detail.LoadPred.Expect.HistoryLoads {
+				for _, load := range loads {
+					if load != 0 {
+						re.Equal(load, expect[i])
+					}
+				}
+			}
+		}
+	}
 }

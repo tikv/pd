@@ -31,7 +31,7 @@ const (
 	// Followings are end status, i.e. no next status.
 	SUCCESS  // Finished successfully
 	CANCELED // Canceled due to some reason
-	REPLACED // Replaced by an higher priority operator
+	REPLACED // Replaced by a higher priority operator
 	EXPIRED  // Didn't start to run for too long
 	TIMEOUT  // Running for too long
 	// Status list end

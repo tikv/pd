@@ -31,11 +31,15 @@ func GenDashboardConfig(srv *server.Server) (*config.Config, error) {
 
 	dashboardCfg := config.Default()
 	dashboardCfg.DataDir = cfg.DataDir
-	dashboardCfg.PDEndPoint = etcdCfg.ACUrls[0].String()
+	dashboardCfg.PDEndPoint = etcdCfg.AdvertiseClientUrls[0].String()
 	dashboardCfg.PublicPathPrefix = cfg.Dashboard.PublicPathPrefix
 	dashboardCfg.EnableTelemetry = cfg.Dashboard.EnableTelemetry
 	dashboardCfg.EnableExperimental = cfg.Dashboard.EnableExperimental
+	dashboardCfg.DisableCustomPromAddr = cfg.Dashboard.DisableCustomPromAddr
 	if dashboardCfg.ClusterTLSConfig, err = cfg.Security.ToTLSConfig(); err != nil {
+		return nil, err
+	}
+	if dashboardCfg.ClusterTLSInfo, err = cfg.Security.ToTLSInfo(); err != nil {
 		return nil, err
 	}
 	if dashboardCfg.TiDBTLSConfig, err = cfg.Dashboard.ToTiDBTLSConfig(); err != nil {

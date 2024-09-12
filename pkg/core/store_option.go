@@ -74,33 +74,26 @@ func SetStoreDeployPath(deployPath string) StoreCreateOption {
 	}
 }
 
-// OfflineStore offline a store
-func OfflineStore(physicallyDestroyed bool) StoreCreateOption {
+// SetStoreState sets the state for the store.
+func SetStoreState(state metapb.StoreState, physicallyDestroyed ...bool) StoreCreateOption {
 	return func(store *StoreInfo) {
 		meta := typeutil.DeepClone(store.meta, StoreFactory)
-		meta.State = metapb.StoreState_Offline
-		meta.NodeState = metapb.NodeState_Removing
-		meta.PhysicallyDestroyed = physicallyDestroyed
-		store.meta = meta
-	}
-}
-
-// UpStore up a store
-func UpStore() StoreCreateOption {
-	return func(store *StoreInfo) {
-		meta := typeutil.DeepClone(store.meta, StoreFactory)
-		meta.State = metapb.StoreState_Up
-		meta.NodeState = metapb.NodeState_Serving
-		store.meta = meta
-	}
-}
-
-// TombstoneStore set a store to tombstone.
-func TombstoneStore() StoreCreateOption {
-	return func(store *StoreInfo) {
-		meta := typeutil.DeepClone(store.meta, StoreFactory)
-		meta.State = metapb.StoreState_Tombstone
-		meta.NodeState = metapb.NodeState_Removed
+		switch state {
+		case metapb.StoreState_Up:
+			meta.State = metapb.StoreState_Up
+			meta.NodeState = metapb.NodeState_Serving
+		case metapb.StoreState_Offline:
+			if len(physicallyDestroyed) != 0 {
+				meta.State = metapb.StoreState_Offline
+				meta.NodeState = metapb.NodeState_Removing
+				meta.PhysicallyDestroyed = physicallyDestroyed[0]
+			} else {
+				panic("physicallyDestroyed should be set when set store state to offline")
+			}
+		case metapb.StoreState_Tombstone:
+			meta.State = metapb.StoreState_Tombstone
+			meta.NodeState = metapb.NodeState_Removed
+		}
 		store.meta = meta
 	}
 }
@@ -162,6 +155,13 @@ func SetLeaderCount(leaderCount int) StoreCreateOption {
 func SetRegionCount(regionCount int) StoreCreateOption {
 	return func(store *StoreInfo) {
 		store.regionCount = regionCount
+	}
+}
+
+// SetLearnerCount sets the learner count for the store.
+func SetLearnerCount(learnerCount int) StoreCreateOption {
+	return func(store *StoreInfo) {
+		store.learnerCount = learnerCount
 	}
 }
 
@@ -259,9 +259,38 @@ func ResetStoreLimit(limitType storelimit.Type, ratePerSec ...float64) StoreCrea
 	}
 }
 
+// SetStoreLimit set the store for a store, it may switch the store limit mode.
+func SetStoreLimit(limit storelimit.StoreLimit) StoreCreateOption {
+	return func(store *StoreInfo) {
+		store.mu.Lock()
+		defer store.mu.Unlock()
+		store.limiter = limit
+	}
+}
+
 // SetLastAwakenTime sets last awaken time for the store.
 func SetLastAwakenTime(lastAwaken time.Time) StoreCreateOption {
 	return func(store *StoreInfo) {
 		store.lastAwakenTime = lastAwaken
+	}
+}
+
+// SetStoreMeta sets the meta for the store.
+// NOTICE: LastHeartbeat is not persisted each time, so it is not set by this function. Please use SetLastHeartbeatTS instead.
+func SetStoreMeta(newMeta *metapb.Store) StoreCreateOption {
+	return func(store *StoreInfo) {
+		meta := typeutil.DeepClone(store.meta, StoreFactory)
+		meta.Version = newMeta.GetVersion()
+		meta.GitHash = newMeta.GetGitHash()
+		meta.Address = newMeta.GetAddress()
+		meta.StatusAddress = newMeta.GetStatusAddress()
+		meta.PeerAddress = newMeta.GetPeerAddress()
+		meta.StartTimestamp = newMeta.GetStartTimestamp()
+		meta.DeployPath = newMeta.GetDeployPath()
+		meta.State = newMeta.GetState()
+		meta.Labels = newMeta.GetLabels()
+		meta.NodeState = newMeta.GetNodeState()
+		meta.PhysicallyDestroyed = newMeta.GetPhysicallyDestroyed()
+		store.meta = meta
 	}
 }

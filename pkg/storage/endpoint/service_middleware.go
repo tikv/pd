@@ -18,19 +18,20 @@ import (
 	"encoding/json"
 
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/utils/keypath"
 )
 
 // ServiceMiddlewareStorage defines the storage operations on the service middleware.
 type ServiceMiddlewareStorage interface {
-	LoadServiceMiddlewareConfig(cfg interface{}) (bool, error)
-	SaveServiceMiddlewareConfig(cfg interface{}) error
+	LoadServiceMiddlewareConfig(cfg any) (bool, error)
+	SaveServiceMiddlewareConfig(cfg any) error
 }
 
 var _ ServiceMiddlewareStorage = (*StorageEndpoint)(nil)
 
-// LoadServiceMiddlewareConfig loads service middleware config from serviceMiddlewarePath then unmarshal it to cfg.
-func (se *StorageEndpoint) LoadServiceMiddlewareConfig(cfg interface{}) (bool, error) {
-	value, err := se.Load(serviceMiddlewarePath)
+// LoadServiceMiddlewareConfig loads service middleware config from keypath.KeyspaceGroupLocalTSPath then unmarshal it to cfg.
+func (se *StorageEndpoint) LoadServiceMiddlewareConfig(cfg any) (bool, error) {
+	value, err := se.Load(keypath.ServiceMiddlewarePath)
 	if err != nil || value == "" {
 		return false, err
 	}
@@ -41,11 +42,7 @@ func (se *StorageEndpoint) LoadServiceMiddlewareConfig(cfg interface{}) (bool, e
 	return true, nil
 }
 
-// SaveServiceMiddlewareConfig stores marshallable cfg to the serviceMiddlewarePath.
-func (se *StorageEndpoint) SaveServiceMiddlewareConfig(cfg interface{}) error {
-	value, err := json.Marshal(cfg)
-	if err != nil {
-		return errs.ErrJSONMarshal.Wrap(err).GenWithStackByCause()
-	}
-	return se.Save(serviceMiddlewarePath, string(value))
+// SaveServiceMiddlewareConfig stores marshallable cfg to the keypath.KeyspaceGroupLocalTSPath.
+func (se *StorageEndpoint) SaveServiceMiddlewareConfig(cfg any) error {
+	return se.saveJSON(keypath.ServiceMiddlewarePath, cfg)
 }

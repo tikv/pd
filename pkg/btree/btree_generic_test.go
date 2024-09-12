@@ -36,6 +36,8 @@ import (
 	"sort"
 	"sync"
 	"testing"
+
+	"github.com/tikv/pd/pkg/utils/syncutil"
 )
 
 // perm returns a random permutation of n Int items in the range [0, n).
@@ -80,7 +82,7 @@ func allrev[T Item[T]](t *BTreeG[T]) (out []T) {
 	return
 }
 
-func assertEq(t *testing.T, desc string, got, need interface{}) {
+func assertEq(t *testing.T, desc string, got, need any) {
 	if !reflect.DeepEqual(need, got) {
 		t.Fatalf("%s failed: need %T %v, but got %T %v", desc, need, need, got, got)
 	}
@@ -473,7 +475,7 @@ func BenchmarkSeek(b *testing.B) {
 	b.StartTimer()
 
 	for i := 0; i < b.N; i++ {
-		tr.AscendGreaterOrEqual(Int(i%size), func(i Int) bool { return false })
+		tr.AscendGreaterOrEqual(Int(i%size), func(_ Int) bool { return false })
 	}
 }
 
@@ -752,7 +754,7 @@ func BenchmarkDescendLessOrEqual(b *testing.B) {
 
 const cloneTestSize = 10000
 
-func cloneTestG[T Item[T]](t *testing.T, b *BTreeG[T], start int, p []T, wg *sync.WaitGroup, trees *[]*BTreeG[T], lock *sync.Mutex) {
+func cloneTestG[T Item[T]](t *testing.T, b *BTreeG[T], start int, p []T, wg *sync.WaitGroup, trees *[]*BTreeG[T], lock *syncutil.Mutex) {
 	t.Logf("Starting new clone at %v", start)
 	lock.Lock()
 	*trees = append(*trees, b)
@@ -773,7 +775,7 @@ func TestCloneConcurrentOperationsG(t *testing.T) {
 	p := perm(cloneTestSize)
 	var wg sync.WaitGroup
 	wg.Add(1)
-	go cloneTestG(t, b, 0, p, &wg, &trees, &sync.Mutex{})
+	go cloneTestG(t, b, 0, p, &wg, &trees, &syncutil.Mutex{})
 	wg.Wait()
 	want := rang(cloneTestSize)
 	t.Logf("Starting equality checks on %d trees", len(trees))

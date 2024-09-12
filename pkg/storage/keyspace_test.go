@@ -21,8 +21,8 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/stretchr/testify/require"
-	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
+	"github.com/tikv/pd/pkg/utils/keypath"
 )
 
 func TestSaveLoadKeyspace(t *testing.T) {
@@ -72,9 +72,8 @@ func TestSaveLoadKeyspace(t *testing.T) {
 func TestLoadRangeKeyspaces(t *testing.T) {
 	re := require.New(t)
 	storage := NewStorageWithMemoryBackend()
-
-	// Store test keyspace meta.
 	keyspaces := makeTestKeyspaces()
+	// Store test keyspace meta.
 	err := storage.RunInTxn(context.TODO(), func(txn kv.Txn) error {
 		for _, keyspace := range keyspaces {
 			re.NoError(storage.SaveKeyspaceMeta(txn, keyspace))
@@ -82,21 +81,26 @@ func TestLoadRangeKeyspaces(t *testing.T) {
 		return nil
 	})
 	re.NoError(err)
+	// Test load range keyspaces.
+	err = storage.RunInTxn(context.TODO(), func(txn kv.Txn) error {
+		// Load all keyspaces.
+		loadedKeyspaces, err := storage.LoadRangeKeyspace(txn, keyspaces[0].GetId(), 0)
+		re.NoError(err)
+		re.ElementsMatch(keyspaces, loadedKeyspaces)
 
-	// Load all keyspaces.
-	loadedKeyspaces, err := storage.LoadRangeKeyspace(keyspaces[0].GetId(), 0)
-	re.NoError(err)
-	re.ElementsMatch(keyspaces, loadedKeyspaces)
+		// Load keyspaces with id >= second test keyspace's id.
+		loadedKeyspaces2, err := storage.LoadRangeKeyspace(txn, keyspaces[1].GetId(), 0)
+		re.NoError(err)
+		re.ElementsMatch(keyspaces[1:], loadedKeyspaces2)
 
-	// Load keyspaces with id >= second test keyspace's id.
-	loadedKeyspaces2, err := storage.LoadRangeKeyspace(keyspaces[1].GetId(), 0)
-	re.NoError(err)
-	re.ElementsMatch(keyspaces[1:], loadedKeyspaces2)
+		// Load keyspace with the smallest id.
+		loadedKeyspace3, err := storage.LoadRangeKeyspace(txn, 1, 1)
+		re.NoError(err)
+		re.ElementsMatch(keyspaces[:1], loadedKeyspace3)
 
-	// Load keyspace with the smallest id.
-	loadedKeyspace3, err := storage.LoadRangeKeyspace(1, 1)
+		return nil
+	})
 	re.NoError(err)
-	re.ElementsMatch(keyspaces[:1], loadedKeyspace3)
 }
 
 func makeTestKeyspaces() []*keyspacepb.KeyspaceMeta {
@@ -141,9 +145,9 @@ func makeTestKeyspaces() []*keyspacepb.KeyspaceMeta {
 // TestEncodeSpaceID test spaceID encoding.
 func TestEncodeSpaceID(t *testing.T) {
 	re := require.New(t)
-	re.Equal("keyspaces/meta/00000000", endpoint.KeyspaceMetaPath(0))
-	re.Equal("keyspaces/meta/16777215", endpoint.KeyspaceMetaPath(1<<24-1))
-	re.Equal("keyspaces/meta/00000100", endpoint.KeyspaceMetaPath(100))
-	re.Equal("keyspaces/meta/00000011", endpoint.KeyspaceMetaPath(11))
-	re.Equal("keyspaces/meta/00000010", endpoint.KeyspaceMetaPath(10))
+	re.Equal("keyspaces/meta/00000000", keypath.KeyspaceMetaPath(0))
+	re.Equal("keyspaces/meta/16777215", keypath.KeyspaceMetaPath(1<<24-1))
+	re.Equal("keyspaces/meta/00000100", keypath.KeyspaceMetaPath(100))
+	re.Equal("keyspaces/meta/00000011", keypath.KeyspaceMetaPath(11))
+	re.Equal("keyspaces/meta/00000010", keypath.KeyspaceMetaPath(10))
 }

@@ -41,14 +41,6 @@ var (
 			Help:      "Status of the regions.",
 		}, []string{"type"})
 
-	offlineRegionStatusGauge = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Namespace: "pd",
-			Subsystem: "regions",
-			Name:      "offline_status",
-			Help:      "Status of the offline regions.",
-		}, []string{"type"})
-
 	clusterStatusGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: "pd",
@@ -63,7 +55,7 @@ var (
 			Subsystem: "cluster",
 			Name:      "placement_status",
 			Help:      "Status of the cluster placement.",
-		}, []string{"type", "name"})
+		}, []string{"type", "name", "store"})
 
 	configStatusGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
@@ -190,7 +182,6 @@ func init() {
 	prometheus.MustRegister(hotCacheStatusGauge)
 	prometheus.MustRegister(storeStatusGauge)
 	prometheus.MustRegister(regionStatusGauge)
-	prometheus.MustRegister(offlineRegionStatusGauge)
 	prometheus.MustRegister(clusterStatusGauge)
 	prometheus.MustRegister(placementStatusGauge)
 	prometheus.MustRegister(configStatusGauge)

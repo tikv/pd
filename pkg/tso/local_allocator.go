@@ -17,17 +17,20 @@ package tso
 import (
 	"context"
 	"fmt"
-	"path"
+	"runtime/trace"
 	"sync/atomic"
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/tikv/pd/pkg/election"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/utils/keypath"
+	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
-	"go.etcd.io/etcd/clientv3"
+	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 )
 
@@ -42,10 +45,12 @@ type LocalTSOAllocator struct {
 	// for election use, notice that the leadership that member holds is
 	// the leadership for PD leader. Local TSO Allocator's leadership is for the
 	// election of Local TSO Allocator leader among several PD servers and
-	// Local TSO Allocator only use member's some etcd and pbpd.Member info.
+	// Local TSO Allocator only use member's some etcd and pdpb.Member info.
 	// So it's not conflicted.
 	rootPath        string
 	allocatorLeader atomic.Value // stored as *pdpb.Member
+	// pre-initialized metrics
+	tsoAllocatorRoleGauge prometheus.Gauge
 }
 
 // NewLocalTSOAllocator creates a new local TSO allocator.
@@ -55,21 +60,36 @@ func NewLocalTSOAllocator(
 	dcLocation string,
 ) Allocator {
 	return &LocalTSOAllocator{
-		allocatorManager: am,
-		leadership:       leadership,
-		timestampOracle: &timestampOracle{
-			client:                 leadership.GetClient(),
-			rootPath:               am.rootPath,
-			ltsPath:                path.Join(localTSOAllocatorEtcdPrefix, dcLocation),
-			storage:                am.storage,
-			saveInterval:           am.saveInterval,
-			updatePhysicalInterval: am.updatePhysicalInterval,
-			maxResetTSGap:          am.maxResetTSGap,
-			dcLocation:             dcLocation,
-			tsoMux:                 &tsoObject{},
-		},
-		rootPath: leadership.GetLeaderKey(),
+		allocatorManager:      am,
+		leadership:            leadership,
+		timestampOracle:       newLocalTimestampOracle(am, leadership, dcLocation),
+		rootPath:              leadership.GetLeaderKey(),
+		tsoAllocatorRoleGauge: tsoAllocatorRole.WithLabelValues(am.getGroupIDStr(), dcLocation),
 	}
+}
+
+func newLocalTimestampOracle(am *AllocatorManager, leadership *election.Leadership, dcLocation string) *timestampOracle {
+	oracle := &timestampOracle{
+		client:                 leadership.GetClient(),
+		keyspaceGroupID:        am.kgID,
+		tsPath:                 keypath.KeyspaceGroupLocalTSPath(localTSOAllocatorEtcdPrefix, am.kgID, dcLocation),
+		storage:                am.storage,
+		saveInterval:           am.saveInterval,
+		updatePhysicalInterval: am.updatePhysicalInterval,
+		maxResetTSGap:          am.maxResetTSGap,
+		dcLocation:             dcLocation,
+		tsoMux:                 &tsoObject{},
+		metrics:                newTSOMetrics(am.getGroupIDStr(), dcLocation),
+	}
+	return oracle
+}
+
+// GetTimestampPath returns the timestamp path in etcd.
+func (lta *LocalTSOAllocator) GetTimestampPath() string {
+	if lta == nil || lta.timestampOracle == nil {
+		return ""
+	}
+	return lta.timestampOracle.GetTimestampPath()
 }
 
 // GetDCLocation returns the local allocator's dc-location.
@@ -79,9 +99,9 @@ func (lta *LocalTSOAllocator) GetDCLocation() string {
 
 // Initialize will initialize the created local TSO allocator.
 func (lta *LocalTSOAllocator) Initialize(suffix int) error {
-	tsoAllocatorRole.WithLabelValues(lta.timestampOracle.dcLocation).Set(1)
+	lta.tsoAllocatorRoleGauge.Set(1)
 	lta.timestampOracle.suffix = suffix
-	return lta.timestampOracle.SyncTimestamp(lta.leadership)
+	return lta.timestampOracle.SyncTimestamp()
 }
 
 // IsInitialize is used to indicates whether this allocator is initialized.
@@ -92,7 +112,7 @@ func (lta *LocalTSOAllocator) IsInitialize() bool {
 // UpdateTSO is used to update the TSO in memory and the time window in etcd
 // for all local TSO allocators this PD server hold.
 func (lta *LocalTSOAllocator) UpdateTSO() error {
-	return lta.timestampOracle.UpdateTimestamp(lta.leadership)
+	return lta.timestampOracle.UpdateTimestamp()
 }
 
 // SetTSO sets the physical part with given TSO.
@@ -102,22 +122,24 @@ func (lta *LocalTSOAllocator) SetTSO(tso uint64, ignoreSmaller, skipUpperBoundCh
 
 // GenerateTSO is used to generate a given number of TSOs.
 // Make sure you have initialized the TSO allocator before calling.
-func (lta *LocalTSOAllocator) GenerateTSO(count uint32) (pdpb.Timestamp, error) {
+func (lta *LocalTSOAllocator) GenerateTSO(ctx context.Context, count uint32) (pdpb.Timestamp, error) {
+	defer trace.StartRegion(ctx, "LocalTSOAllocator.GenerateTSO").End()
 	if !lta.leadership.Check() {
-		tsoCounter.WithLabelValues("not_leader", lta.timestampOracle.dcLocation).Inc()
-		return pdpb.Timestamp{}, errs.ErrGenerateTimestamp.FastGenByArgs(fmt.Sprintf("requested pd %s of %s allocator", errs.NotLeaderErr, lta.timestampOracle.dcLocation))
+		lta.getMetrics().notLeaderEvent.Inc()
+		return pdpb.Timestamp{}, errs.ErrGenerateTimestamp.FastGenByArgs(
+			fmt.Sprintf("requested pd %s of %s allocator", errs.NotLeaderErr, lta.timestampOracle.dcLocation))
 	}
-	return lta.timestampOracle.getTS(lta.leadership, count, lta.allocatorManager.GetSuffixBits())
+	return lta.timestampOracle.getTS(ctx, lta.leadership, count, lta.allocatorManager.GetSuffixBits())
 }
 
 // Reset is used to reset the TSO allocator.
 func (lta *LocalTSOAllocator) Reset() {
-	tsoAllocatorRole.WithLabelValues(lta.timestampOracle.dcLocation).Set(0)
+	lta.tsoAllocatorRoleGauge.Set(0)
 	lta.timestampOracle.ResetTimestamp()
 }
 
 // setAllocatorLeader sets the current Local TSO Allocator leader.
-func (lta *LocalTSOAllocator) setAllocatorLeader(member interface{}) {
+func (lta *LocalTSOAllocator) setAllocatorLeader(member any) {
 	lta.allocatorLeader.Store(member)
 }
 
@@ -136,7 +158,7 @@ func (lta *LocalTSOAllocator) GetAllocatorLeader() *pdpb.Member {
 }
 
 // GetMember returns the Local TSO Allocator's member value.
-func (lta *LocalTSOAllocator) GetMember() Member {
+func (lta *LocalTSOAllocator) GetMember() ElectionMember {
 	return lta.allocatorManager.member
 }
 
@@ -159,7 +181,7 @@ func (lta *LocalTSOAllocator) WriteTSO(maxTS *pdpb.Timestamp) error {
 	if tsoutil.CompareTimestamp(currentTSO, maxTS) >= 0 {
 		return nil
 	}
-	return lta.timestampOracle.resetUserTimestamp(lta.leadership, tsoutil.GenerateTS(maxTS), true)
+	return lta.timestampOracle.resetUserTimestamp(context.Background(), lta.leadership, tsoutil.GenerateTS(maxTS), true)
 }
 
 // EnableAllocatorLeader sets the Local TSO Allocator itself to a leader.
@@ -174,6 +196,7 @@ func (lta *LocalTSOAllocator) CampaignAllocatorLeader(leaseTimeout int64, cmps .
 
 // KeepAllocatorLeader is used to keep the PD leader's leadership.
 func (lta *LocalTSOAllocator) KeepAllocatorLeader(ctx context.Context) {
+	defer logutil.LogPanic()
 	lta.leadership.Keep(ctx)
 }
 
@@ -190,7 +213,7 @@ func (lta *LocalTSOAllocator) isSameAllocatorLeader(leader *pdpb.Member) bool {
 
 // CheckAllocatorLeader checks who is the current Local TSO Allocator leader, and returns true if it is needed to check later.
 func (lta *LocalTSOAllocator) CheckAllocatorLeader() (*pdpb.Member, int64, bool) {
-	if err := lta.allocatorManager.member.PrecheckLeader(); err != nil {
+	if err := lta.allocatorManager.member.PreCheckLeader(); err != nil {
 		log.Error("no etcd leader, check local tso allocator leader later",
 			zap.String("dc-location", lta.timestampOracle.dcLocation), errs.ZapError(err))
 		time.Sleep(200 * time.Millisecond)
@@ -235,4 +258,8 @@ func (lta *LocalTSOAllocator) WatchAllocatorLeader(serverCtx context.Context, al
 	go lta.allocatorManager.ClusterDCLocationChecker()
 	lta.leadership.Watch(serverCtx, revision)
 	lta.unsetAllocatorLeader()
+}
+
+func (lta *LocalTSOAllocator) getMetrics() *tsoMetrics {
+	return lta.timestampOracle.metrics
 }

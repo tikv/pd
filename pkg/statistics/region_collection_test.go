@@ -15,6 +15,7 @@
 package statistics
 
 import (
+	"context"
 	"testing"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -29,8 +30,8 @@ import (
 func TestRegionStatistics(t *testing.T) {
 	re := require.New(t)
 	store := storage.NewStorageWithMemoryBackend()
-	manager := placement.NewRuleManager(store, nil, nil)
-	err := manager.Initialize(3, []string{"zone", "rack", "host"})
+	manager := placement.NewRuleManager(context.Background(), store, nil, nil)
+	err := manager.Initialize(3, []string{"zone", "rack", "host"}, "")
 	re.NoError(err)
 	opt := mockconfig.NewTestOptions()
 	opt.SetPlacementRuleEnabled(false)
@@ -59,20 +60,19 @@ func TestRegionStatistics(t *testing.T) {
 		{Peer: peers[1], DownSeconds: 3608},
 	}
 
-	store3 := stores[3].Clone(core.OfflineStore(false))
+	store3 := stores[3].Clone(core.SetStoreState(metapb.StoreState_Offline, false))
 	stores[3] = store3
 	r1 := &metapb.Region{Id: 1, Peers: peers, StartKey: []byte("aa"), EndKey: []byte("bb")}
 	r2 := &metapb.Region{Id: 2, Peers: peers[0:2], StartKey: []byte("cc"), EndKey: []byte("dd")}
 	region1 := core.NewRegionInfo(r1, peers[0])
 	region2 := core.NewRegionInfo(r2, peers[0])
-	regionStats := NewRegionStatistics(opt, manager, nil)
+	regionStats := NewRegionStatistics(nil, opt, manager)
 	regionStats.Observe(region1, stores)
 	re.Len(regionStats.stats[ExtraPeer], 1)
 	re.Len(regionStats.stats[LearnerPeer], 1)
 	re.Len(regionStats.stats[EmptyRegion], 1)
 	re.Len(regionStats.stats[UndersizedRegion], 1)
-	re.Len(regionStats.offlineStats[ExtraPeer], 1)
-	re.Len(regionStats.offlineStats[LearnerPeer], 1)
+	re.Len(regionStats.stats[OfflinePeer], 1)
 
 	region1 = region1.Clone(
 		core.WithDownPeers(downPeers),
@@ -88,12 +88,7 @@ func TestRegionStatistics(t *testing.T) {
 	re.Empty(regionStats.stats[EmptyRegion])
 	re.Len(regionStats.stats[OversizedRegion], 1)
 	re.Empty(regionStats.stats[UndersizedRegion])
-	re.Len(regionStats.offlineStats[ExtraPeer], 1)
-	re.Empty(regionStats.offlineStats[MissPeer])
-	re.Len(regionStats.offlineStats[DownPeer], 1)
-	re.Len(regionStats.offlineStats[PendingPeer], 1)
-	re.Len(regionStats.offlineStats[LearnerPeer], 1)
-	re.Len(regionStats.offlineStats[OfflinePeer], 1)
+	re.Len(regionStats.stats[OfflinePeer], 1)
 
 	region2 = region2.Clone(core.WithDownPeers(downPeers[0:1]))
 	regionStats.Observe(region2, stores[0:2])
@@ -104,12 +99,7 @@ func TestRegionStatistics(t *testing.T) {
 	re.Len(regionStats.stats[LearnerPeer], 1)
 	re.Len(regionStats.stats[OversizedRegion], 1)
 	re.Len(regionStats.stats[UndersizedRegion], 1)
-	re.Len(regionStats.offlineStats[ExtraPeer], 1)
-	re.Empty(regionStats.offlineStats[MissPeer])
-	re.Len(regionStats.offlineStats[DownPeer], 1)
-	re.Len(regionStats.offlineStats[PendingPeer], 1)
-	re.Len(regionStats.offlineStats[LearnerPeer], 1)
-	re.Len(regionStats.offlineStats[OfflinePeer], 1)
+	re.Len(regionStats.stats[OfflinePeer], 1)
 
 	region1 = region1.Clone(core.WithRemoveStorePeer(7))
 	regionStats.Observe(region1, stores[0:3])
@@ -118,14 +108,9 @@ func TestRegionStatistics(t *testing.T) {
 	re.Len(regionStats.stats[DownPeer], 2)
 	re.Len(regionStats.stats[PendingPeer], 1)
 	re.Empty(regionStats.stats[LearnerPeer])
-	re.Empty(regionStats.offlineStats[ExtraPeer])
-	re.Empty(regionStats.offlineStats[MissPeer])
-	re.Empty(regionStats.offlineStats[DownPeer])
-	re.Empty(regionStats.offlineStats[PendingPeer])
-	re.Empty(regionStats.offlineStats[LearnerPeer])
-	re.Empty(regionStats.offlineStats[OfflinePeer])
+	re.Empty(regionStats.stats[OfflinePeer])
 
-	store3 = stores[3].Clone(core.UpStore())
+	store3 = stores[3].Clone(core.SetStoreState(metapb.StoreState_Up))
 	stores[3] = store3
 	regionStats.Observe(region1, stores)
 	re.Empty(regionStats.stats[OfflinePeer])
@@ -134,8 +119,8 @@ func TestRegionStatistics(t *testing.T) {
 func TestRegionStatisticsWithPlacementRule(t *testing.T) {
 	re := require.New(t)
 	store := storage.NewStorageWithMemoryBackend()
-	manager := placement.NewRuleManager(store, nil, nil)
-	err := manager.Initialize(3, []string{"zone", "rack", "host"})
+	manager := placement.NewRuleManager(context.Background(), store, nil, nil)
+	err := manager.Initialize(3, []string{"zone", "rack", "host"}, "")
 	re.NoError(err)
 	opt := mockconfig.NewTestOptions()
 	opt.SetPlacementRuleEnabled(true)
@@ -166,7 +151,7 @@ func TestRegionStatisticsWithPlacementRule(t *testing.T) {
 	region3 := core.NewRegionInfo(r3, peers[0])
 	region4 := core.NewRegionInfo(r4, peers[0])
 	region5 := core.NewRegionInfo(r5, peers[4])
-	regionStats := NewRegionStatistics(opt, manager, nil)
+	regionStats := NewRegionStatistics(nil, opt, manager)
 	// r2 didn't match the rules
 	regionStats.Observe(region2, stores)
 	re.Len(regionStats.stats[MissPeer], 1)
@@ -282,5 +267,45 @@ func TestRegionLabelIsolationLevel(t *testing.T) {
 	}
 	for i, res := range counter {
 		re.Equal(res, labelLevelStats.labelCounter[i])
+	}
+}
+
+func BenchmarkObserve(b *testing.B) {
+	// Setup
+	store := storage.NewStorageWithMemoryBackend()
+	manager := placement.NewRuleManager(context.Background(), store, nil, nil)
+	manager.Initialize(3, []string{"zone", "rack", "host"}, "")
+	opt := mockconfig.NewTestOptions()
+	opt.SetPlacementRuleEnabled(false)
+	peers := []*metapb.Peer{
+		{Id: 4, StoreId: 1},
+		{Id: 5, StoreId: 2},
+		{Id: 6, StoreId: 3},
+	}
+
+	metaStores := []*metapb.Store{
+		{Id: 1, Address: "mock://tikv-1"},
+		{Id: 2, Address: "mock://tikv-2"},
+		{Id: 3, Address: "mock://tikv-3"},
+	}
+
+	stores := make([]*core.StoreInfo, 0, len(metaStores))
+	for _, m := range metaStores {
+		s := core.NewStoreInfo(m)
+		stores = append(stores, s)
+	}
+
+	regionNum := uint64(1000000)
+	regions := make([]*core.RegionInfo, 0, regionNum)
+	for i := uint64(1); i <= regionNum; i++ {
+		r := &metapb.Region{Id: i, Peers: peers, StartKey: []byte{byte(i)}, EndKey: []byte{byte(i + 1)}}
+		regions = append(regions, core.NewRegionInfo(r, peers[0]))
+	}
+	regionStats := NewRegionStatistics(nil, opt, manager)
+
+	b.ResetTimer()
+	// Run the Observe function b.N times
+	for i := 0; i < b.N; i++ {
+		regionStats.Observe(regions[i%int(regionNum)], stores)
 	}
 }

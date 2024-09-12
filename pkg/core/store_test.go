@@ -62,7 +62,7 @@ func TestDistinctScore(t *testing.T) {
 	re.Equal(float64(0), DistinctScore(labels, stores, store))
 }
 
-func TestCloneStore(t *testing.T) {
+func TestCloneStore(_ *testing.T) {
 	meta := &metapb.Store{Id: 1, Address: "mock://tikv-1", Labels: []*metapb.StoreLabel{{Key: "zone", Value: "z1"}, {Key: "host", Value: "h1"}}}
 	store := NewStoreInfo(meta)
 	start := time.Now()
@@ -84,7 +84,7 @@ func TestCloneStore(t *testing.T) {
 				break
 			}
 			store.Clone(
-				UpStore(),
+				SetStoreState(metapb.StoreState_Up),
 				SetLastHeartbeatTS(time.Now()),
 			)
 		}
@@ -141,6 +141,8 @@ func TestLowSpaceRatio(t *testing.T) {
 	re.True(store.IsLowSpace(0.8))
 	store.rawStats.Available = store.rawStats.Capacity >> 2
 	re.False(store.IsLowSpace(0.8))
+	store.rawStats.Capacity = 0
+	re.False(store.IsLowSpace(0.8))
 }
 
 func TestLowSpaceScoreV2(t *testing.T) {
@@ -172,7 +174,7 @@ func TestLowSpaceScoreV2(t *testing.T) {
 		bigger: newStoreInfoWithAvailable(1, 10*units.GiB, 100*units.GiB, 1.5),
 		small:  newStoreInfoWithAvailable(2, 10*units.GiB, 100*units.GiB, 1.4),
 	}, {
-		// store1 and store2 has same capacity and regionSize（40g)
+		// store1 and store2 has same capacity and regionSize (40g)
 		// but store1 has less available space size
 		bigger: newStoreInfoWithAvailable(1, 60*units.GiB, 100*units.GiB, 1),
 		small:  newStoreInfoWithAvailable(2, 80*units.GiB, 100*units.GiB, 2),

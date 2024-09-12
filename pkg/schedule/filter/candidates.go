@@ -37,13 +37,13 @@ func NewCandidates(stores []*core.StoreInfo) *StoreCandidates {
 }
 
 // FilterSource keeps stores that can pass all source filters.
-func (c *StoreCandidates) FilterSource(conf config.Config, collector *plan.Collector, counter *Counter, filters ...Filter) *StoreCandidates {
+func (c *StoreCandidates) FilterSource(conf config.SharedConfigProvider, collector *plan.Collector, counter *Counter, filters ...Filter) *StoreCandidates {
 	c.Stores = SelectSourceStores(c.Stores, filters, conf, collector, counter)
 	return c
 }
 
 // FilterTarget keeps stores that can pass all target filters.
-func (c *StoreCandidates) FilterTarget(conf config.Config, collector *plan.Collector, counter *Counter, filters ...Filter) *StoreCandidates {
+func (c *StoreCandidates) FilterTarget(conf config.SharedConfigProvider, collector *plan.Collector, counter *Counter, filters ...Filter) *StoreCandidates {
 	c.Stores = SelectTargetStores(c.Stores, filters, conf, collector, counter)
 	return c
 }

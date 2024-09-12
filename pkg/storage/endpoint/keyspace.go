@@ -22,7 +22,8 @@ import (
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/storage/kv"
-	"go.etcd.io/etcd/clientv3"
+	"github.com/tikv/pd/pkg/utils/keypath"
+	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
 const (
@@ -41,15 +42,15 @@ type KeyspaceStorage interface {
 	SaveKeyspaceID(txn kv.Txn, id uint32, name string) error
 	LoadKeyspaceID(txn kv.Txn, name string) (bool, uint32, error)
 	// LoadRangeKeyspace loads no more than limit keyspaces starting at startID.
-	LoadRangeKeyspace(startID uint32, limit int) ([]*keyspacepb.KeyspaceMeta, error)
+	LoadRangeKeyspace(txn kv.Txn, startID uint32, limit int) ([]*keyspacepb.KeyspaceMeta, error)
 	RunInTxn(ctx context.Context, f func(txn kv.Txn) error) error
 }
 
 var _ KeyspaceStorage = (*StorageEndpoint)(nil)
 
 // SaveKeyspaceMeta adds a save keyspace meta operation to target transaction.
-func (se *StorageEndpoint) SaveKeyspaceMeta(txn kv.Txn, meta *keyspacepb.KeyspaceMeta) error {
-	metaPath := KeyspaceMetaPath(meta.GetId())
+func (*StorageEndpoint) SaveKeyspaceMeta(txn kv.Txn, meta *keyspacepb.KeyspaceMeta) error {
+	metaPath := keypath.KeyspaceMetaPath(meta.GetId())
 	metaVal, err := proto.Marshal(meta)
 	if err != nil {
 		return errs.ErrProtoMarshal.Wrap(err).GenWithStackByCause()
@@ -59,8 +60,8 @@ func (se *StorageEndpoint) SaveKeyspaceMeta(txn kv.Txn, meta *keyspacepb.Keyspac
 
 // LoadKeyspaceMeta load and return keyspace meta specified by id.
 // If keyspace does not exist or error occurs, returned meta will be nil.
-func (se *StorageEndpoint) LoadKeyspaceMeta(txn kv.Txn, id uint32) (*keyspacepb.KeyspaceMeta, error) {
-	metaPath := KeyspaceMetaPath(id)
+func (*StorageEndpoint) LoadKeyspaceMeta(txn kv.Txn, id uint32) (*keyspacepb.KeyspaceMeta, error) {
+	metaPath := keypath.KeyspaceMetaPath(id)
 	metaVal, err := txn.Load(metaPath)
 	if err != nil || metaVal == "" {
 		return nil, err
@@ -74,8 +75,8 @@ func (se *StorageEndpoint) LoadKeyspaceMeta(txn kv.Txn, id uint32) (*keyspacepb.
 }
 
 // SaveKeyspaceID saves keyspace ID to the path specified by keyspace name.
-func (se *StorageEndpoint) SaveKeyspaceID(txn kv.Txn, id uint32, name string) error {
-	idPath := KeyspaceIDPath(name)
+func (*StorageEndpoint) SaveKeyspaceID(txn kv.Txn, id uint32, name string) error {
+	idPath := keypath.KeyspaceIDPath(name)
 	idVal := strconv.FormatUint(uint64(id), SpaceIDBase)
 	return txn.Save(idPath, idVal)
 }
@@ -83,8 +84,8 @@ func (se *StorageEndpoint) SaveKeyspaceID(txn kv.Txn, id uint32, name string) er
 // LoadKeyspaceID loads keyspace ID from the path specified by keyspace name.
 // An additional boolean is returned to indicate whether target id exists,
 // it returns false if target id not found, or if error occurred.
-func (se *StorageEndpoint) LoadKeyspaceID(txn kv.Txn, name string) (bool, uint32, error) {
-	idPath := KeyspaceIDPath(name)
+func (*StorageEndpoint) LoadKeyspaceID(txn kv.Txn, name string) (bool, uint32, error) {
+	idPath := keypath.KeyspaceIDPath(name)
 	idVal, err := txn.Load(idPath)
 	// Failed to load the keyspaceID if loading operation errored, or if keyspace does not exist.
 	if err != nil || idVal == "" {
@@ -97,17 +98,12 @@ func (se *StorageEndpoint) LoadKeyspaceID(txn kv.Txn, name string) (bool, uint32
 	return true, uint32(id64), nil
 }
 
-// RunInTxn runs the given function in a transaction.
-func (se *StorageEndpoint) RunInTxn(ctx context.Context, f func(txn kv.Txn) error) error {
-	return se.Base.RunInTxn(ctx, f)
-}
-
 // LoadRangeKeyspace loads keyspaces starting at startID.
 // limit specifies the limit of loaded keyspaces.
-func (se *StorageEndpoint) LoadRangeKeyspace(startID uint32, limit int) ([]*keyspacepb.KeyspaceMeta, error) {
-	startKey := KeyspaceMetaPath(startID)
-	endKey := clientv3.GetPrefixRangeEnd(KeyspaceMetaPrefix())
-	keys, values, err := se.LoadRange(startKey, endKey, limit)
+func (*StorageEndpoint) LoadRangeKeyspace(txn kv.Txn, startID uint32, limit int) ([]*keyspacepb.KeyspaceMeta, error) {
+	startKey := keypath.KeyspaceMetaPath(startID)
+	endKey := clientv3.GetPrefixRangeEnd(keypath.KeyspaceMetaPrefix())
+	keys, values, err := txn.LoadRange(startKey, endKey, limit)
 	if err != nil {
 		return nil, err
 	}

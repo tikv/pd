@@ -46,7 +46,7 @@ const (
 `
 )
 
-// NewOperatorCommand returns a operator command.
+// NewOperatorCommand returns an operator command.
 func NewOperatorCommand() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "operator",
@@ -158,7 +158,7 @@ func transferLeaderCommandFunc(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	input := make(map[string]interface{})
+	input := make(map[string]any)
 	input["name"] = cmd.Name()
 	input["region_id"] = ids[0]
 	input["to_store_id"] = ids[1]
@@ -192,7 +192,7 @@ func transferRegionCommandFunc(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	input := make(map[string]interface{})
+	input := make(map[string]any)
 	input["name"] = cmd.Name()
 	input["region_id"] = ids[0]
 	input["to_store_ids"] = ids[1:]
@@ -224,7 +224,7 @@ func transferPeerCommandFunc(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	input := make(map[string]interface{})
+	input := make(map[string]any)
 	input["name"] = cmd.Name()
 	input["region_id"] = ids[0]
 	input["from_store_id"] = ids[1]
@@ -254,7 +254,7 @@ func addPeerCommandFunc(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	input := make(map[string]interface{})
+	input := make(map[string]any)
 	input["name"] = cmd.Name()
 	input["region_id"] = ids[0]
 	input["store_id"] = ids[1]
@@ -283,7 +283,7 @@ func addLearnerCommandFunc(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	input := make(map[string]interface{})
+	input := make(map[string]any)
 	input["name"] = cmd.Name()
 	input["region_id"] = ids[0]
 	input["store_id"] = ids[1]
@@ -312,7 +312,7 @@ func mergeRegionCommandFunc(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	input := make(map[string]interface{})
+	input := make(map[string]any)
 	input["name"] = cmd.Name()
 	input["source_region_id"] = ids[0]
 	input["target_region_id"] = ids[1]
@@ -341,7 +341,7 @@ func removePeerCommandFunc(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	input := make(map[string]interface{})
+	input := make(map[string]any)
 	input["name"] = cmd.Name()
 	input["region_id"] = ids[0]
 	input["store_id"] = ids[1]
@@ -351,16 +351,17 @@ func removePeerCommandFunc(cmd *cobra.Command, args []string) {
 // NewSplitRegionCommand returns a command to split a region.
 func NewSplitRegionCommand() *cobra.Command {
 	c := &cobra.Command{
-		Use:   "split-region <region_id> [--policy=scan|approximate]",
+		Use:   "split-region <region_id> [--policy=scan|approximate|usekey] [--keys]",
 		Short: "split a region",
 		Run:   splitRegionCommandFunc,
 	}
 	c.Flags().String("policy", "scan", "the policy to get region split key")
+	c.Flags().String("keys", "", "the split key, hex encoded")
 	return c
 }
 
 func splitRegionCommandFunc(cmd *cobra.Command, args []string) {
-	if len(args) != 1 {
+	if len(args) < 1 {
 		cmd.Println(cmd.UsageString())
 		return
 	}
@@ -373,17 +374,20 @@ func splitRegionCommandFunc(cmd *cobra.Command, args []string) {
 
 	policy := cmd.Flags().Lookup("policy").Value.String()
 	switch policy {
-	case "scan", "approximate":
-		break
+	case "scan", "approximate", "usekey":
 	default:
 		cmd.Println("Error: unknown policy")
 		return
 	}
 
-	input := make(map[string]interface{})
+	input := make(map[string]any)
 	input["name"] = cmd.Name()
 	input["region_id"] = ids[0]
 	input["policy"] = policy
+	keys := cmd.Flags().Lookup("keys").Value.String()
+	if len(keys) > 0 {
+		input["keys"] = []string{keys}
+	}
 	postJSON(cmd, operatorsPrefix, input)
 }
 
@@ -410,7 +414,7 @@ func scatterRegionCommandFunc(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	input := make(map[string]interface{})
+	input := make(map[string]any)
 	input["name"] = cmd.Name()
 	input["region_id"] = ids[0]
 	postJSON(cmd, operatorsPrefix, input)

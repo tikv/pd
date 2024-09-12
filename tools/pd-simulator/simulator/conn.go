@@ -17,23 +17,22 @@ package simulator
 import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/cases"
+	"github.com/tikv/pd/tools/pd-simulator/simulator/config"
 )
 
 // Connection records the information of connection among nodes.
 type Connection struct {
-	pdAddr string
-	Nodes  map[uint64]*Node
+	Nodes map[uint64]*Node
 }
 
 // NewConnection creates nodes according to the configuration and returns the connection among nodes.
-func NewConnection(simCase *cases.Case, pdAddr string, storeConfig *SimConfig) (*Connection, error) {
+func NewConnection(simCase *cases.Case, storeConfig *config.SimConfig) (*Connection, error) {
 	conn := &Connection{
-		pdAddr: pdAddr,
-		Nodes:  make(map[uint64]*Node),
+		Nodes: make(map[uint64]*Node),
 	}
 
 	for _, store := range simCase.Stores {
-		node, err := NewNode(store, pdAddr, storeConfig)
+		node, err := NewNode(store, storeConfig)
 		if err != nil {
 			return nil, err
 		}
@@ -50,4 +49,14 @@ func (c *Connection) nodeHealth(storeID uint64) bool {
 	}
 
 	return n.GetNodeState() == metapb.NodeState_Preparing || n.GetNodeState() == metapb.NodeState_Serving
+}
+
+func (c *Connection) getNodes() []*Node {
+	var nodes []*Node
+	for _, n := range c.Nodes {
+		if n.GetNodeState() != metapb.NodeState_Removed {
+			nodes = append(nodes, n)
+		}
+	}
+	return nodes
 }

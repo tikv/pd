@@ -32,6 +32,13 @@ func NewOpInfluence() *OpInfluence {
 	}
 }
 
+// Add adds another influence.
+func (m *OpInfluence) Add(other *OpInfluence) {
+	for id, v := range other.StoresInfluence {
+		m.GetStoreInfluence(id).add(v)
+	}
+}
+
 // GetStoreInfluence get storeInfluence of specific store.
 func (m OpInfluence) GetStoreInfluence(id uint64) *StoreInfluence {
 	storeInfluence, ok := m.StoresInfluence[id]
@@ -52,8 +59,19 @@ type StoreInfluence struct {
 	StepCost     map[storelimit.Type]int64
 }
 
+func (s *StoreInfluence) add(other *StoreInfluence) {
+	s.RegionCount += other.RegionCount
+	s.RegionSize += other.RegionSize
+	s.LeaderSize += other.LeaderSize
+	s.LeaderCount += other.LeaderCount
+	s.WitnessCount += other.WitnessCount
+	for _, v := range storelimit.TypeNameValue {
+		s.AddStepCost(v, other.GetStepCost(v))
+	}
+}
+
 // ResourceProperty returns delta size of leader/region by influence.
-func (s StoreInfluence) ResourceProperty(kind constant.ScheduleKind) int64 {
+func (s *StoreInfluence) ResourceProperty(kind constant.ScheduleKind) int64 {
 	switch kind.Resource {
 	case constant.LeaderKind:
 		switch kind.Policy {
@@ -74,7 +92,7 @@ func (s StoreInfluence) ResourceProperty(kind constant.ScheduleKind) int64 {
 }
 
 // GetStepCost returns the specific type step cost
-func (s StoreInfluence) GetStepCost(limitType storelimit.Type) int64 {
+func (s *StoreInfluence) GetStepCost(limitType storelimit.Type) int64 {
 	if s.StepCost == nil {
 		return 0
 	}

@@ -23,11 +23,13 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
-	"go.etcd.io/etcd/clientv3"
+	"github.com/tikv/pd/pkg/utils/keypath"
+	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
 // ServiceSafePoint is the safepoint for a specific service
 // NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
+// This type is in sync with `client/http/types.go`.
 type ServiceSafePoint struct {
 	ServiceID string `json:"service_id"`
 	ExpiredAt int64  `json:"expired_at"`
@@ -48,7 +50,7 @@ var _ GCSafePointStorage = (*StorageEndpoint)(nil)
 
 // LoadGCSafePoint loads current GC safe point from storage.
 func (se *StorageEndpoint) LoadGCSafePoint() (uint64, error) {
-	value, err := se.Load(gcSafePointPath())
+	value, err := se.Load(keypath.GCSafePointPath())
 	if err != nil || value == "" {
 		return 0, err
 	}
@@ -62,12 +64,12 @@ func (se *StorageEndpoint) LoadGCSafePoint() (uint64, error) {
 // SaveGCSafePoint saves new GC safe point to storage.
 func (se *StorageEndpoint) SaveGCSafePoint(safePoint uint64) error {
 	value := strconv.FormatUint(safePoint, 16)
-	return se.Save(gcSafePointPath(), value)
+	return se.Save(keypath.GCSafePointPath(), value)
 }
 
 // LoadMinServiceGCSafePoint returns the minimum safepoint across all services
 func (se *StorageEndpoint) LoadMinServiceGCSafePoint(now time.Time) (*ServiceSafePoint, error) {
-	prefix := GCSafePointServicePrefixPath()
+	prefix := keypath.GCSafePointServicePrefixPath()
 	prefixEnd := clientv3.GetPrefixRangeEnd(prefix)
 	keys, values, err := se.LoadRange(prefix, prefixEnd, 0)
 	if err != nil {
@@ -87,7 +89,7 @@ func (se *StorageEndpoint) LoadMinServiceGCSafePoint(now time.Time) (*ServiceSaf
 		if err := json.Unmarshal([]byte(values[i]), ssp); err != nil {
 			return nil, err
 		}
-		if ssp.ServiceID == gcWorkerServiceSafePointID {
+		if ssp.ServiceID == keypath.GCWorkerServiceSafePointID {
 			hasGCWorker = true
 			// If gc_worker's expire time is incorrectly set, fix it.
 			if ssp.ExpiredAt != math.MaxInt64 {
@@ -100,7 +102,9 @@ func (se *StorageEndpoint) LoadMinServiceGCSafePoint(now time.Time) (*ServiceSaf
 		}
 
 		if ssp.ExpiredAt < now.Unix() {
-			se.Remove(key)
+			if err := se.Remove(key); err != nil {
+				log.Error("failed to remove expired service safepoint", errs.ZapError(err))
+			}
 			continue
 		}
 		if ssp.SafePoint < min.SafePoint {
@@ -125,7 +129,7 @@ func (se *StorageEndpoint) LoadMinServiceGCSafePoint(now time.Time) (*ServiceSaf
 
 func (se *StorageEndpoint) initServiceGCSafePointForGCWorker(initialValue uint64) (*ServiceSafePoint, error) {
 	ssp := &ServiceSafePoint{
-		ServiceID: gcWorkerServiceSafePointID,
+		ServiceID: keypath.GCWorkerServiceSafePointID,
 		SafePoint: initialValue,
 		ExpiredAt: math.MaxInt64,
 	}
@@ -137,7 +141,7 @@ func (se *StorageEndpoint) initServiceGCSafePointForGCWorker(initialValue uint64
 
 // LoadAllServiceGCSafePoints returns all services GC safepoints
 func (se *StorageEndpoint) LoadAllServiceGCSafePoints() ([]*ServiceSafePoint, error) {
-	prefix := GCSafePointServicePrefixPath()
+	prefix := keypath.GCSafePointServicePrefixPath()
 	prefixEnd := clientv3.GetPrefixRangeEnd(prefix)
 	keys, values, err := se.LoadRange(prefix, prefixEnd, 0)
 	if err != nil {
@@ -165,24 +169,18 @@ func (se *StorageEndpoint) SaveServiceGCSafePoint(ssp *ServiceSafePoint) error {
 		return errors.New("service id of service safepoint cannot be empty")
 	}
 
-	if ssp.ServiceID == gcWorkerServiceSafePointID && ssp.ExpiredAt != math.MaxInt64 {
+	if ssp.ServiceID == keypath.GCWorkerServiceSafePointID && ssp.ExpiredAt != math.MaxInt64 {
 		return errors.New("TTL of gc_worker's service safe point must be infinity")
 	}
 
-	key := gcSafePointServicePath(ssp.ServiceID)
-	value, err := json.Marshal(ssp)
-	if err != nil {
-		return err
-	}
-
-	return se.Save(key, string(value))
+	return se.saveJSON(keypath.GCSafePointServicePath(ssp.ServiceID), ssp)
 }
 
 // RemoveServiceGCSafePoint removes a GC safepoint for the service
 func (se *StorageEndpoint) RemoveServiceGCSafePoint(serviceID string) error {
-	if serviceID == gcWorkerServiceSafePointID {
+	if serviceID == keypath.GCWorkerServiceSafePointID {
 		return errors.New("cannot remove service safe point of gc_worker")
 	}
-	key := gcSafePointServicePath(serviceID)
+	key := keypath.GCSafePointServicePath(serviceID)
 	return se.Remove(key)
 }

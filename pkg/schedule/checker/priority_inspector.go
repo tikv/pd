@@ -19,23 +19,23 @@ import (
 
 	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/pkg/core"
-	"github.com/tikv/pd/pkg/schedule"
 	"github.com/tikv/pd/pkg/schedule/config"
+	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/placement"
 )
 
-// the default value of priority queue size
+// defaultPriorityQueueSize is the default value of priority queue size.
 const defaultPriorityQueueSize = 1280
 
-// PriorityInspector ensures high priority region should run first
+// PriorityInspector ensures high priority region should run first.
 type PriorityInspector struct {
-	cluster schedule.Cluster
-	conf    config.Config
+	cluster sche.CheckerCluster
+	conf    config.CheckerConfigProvider
 	queue   *cache.PriorityQueue
 }
 
 // NewPriorityInspector creates a priority inspector.
-func NewPriorityInspector(cluster schedule.Cluster, conf config.Config) *PriorityInspector {
+func NewPriorityInspector(cluster sche.CheckerCluster, conf config.CheckerConfigProvider) *PriorityInspector {
 	return &PriorityInspector{
 		cluster: cluster,
 		conf:    conf,
@@ -43,19 +43,19 @@ func NewPriorityInspector(cluster schedule.Cluster, conf config.Config) *Priorit
 	}
 }
 
-// RegionPriorityEntry records region priority info
+// RegionPriorityEntry records region priority info.
 type RegionPriorityEntry struct {
 	Attempt  int
 	Last     time.Time
 	regionID uint64
 }
 
-// ID implement PriorityQueueItem interface
+// ID implements PriorityQueueItem interface.
 func (r RegionPriorityEntry) ID() uint64 {
 	return r.regionID
 }
 
-// NewRegionEntry construct of region priority entry
+// NewRegionEntry constructs a region priority entry.
 func NewRegionEntry(regionID uint64) *RegionPriorityEntry {
 	return &RegionPriorityEntry{regionID: regionID, Last: time.Now(), Attempt: 1}
 }
@@ -73,7 +73,7 @@ func (p *PriorityInspector) Inspect(region *core.RegionInfo) (fit *placement.Reg
 	return
 }
 
-// inspectRegionInPlacementRule inspects region in placement rule mode
+// inspectRegionInPlacementRule inspects region in placement rule mode.
 func (p *PriorityInspector) inspectRegionInPlacementRule(region *core.RegionInfo) (makeupCount int, fit *placement.RegionFit) {
 	fit = p.cluster.GetRuleManager().FitRegion(p.cluster, region)
 	if len(fit.RuleFits) == 0 {
@@ -90,29 +90,31 @@ func (p *PriorityInspector) inspectRegionInPlacementRule(region *core.RegionInfo
 	return
 }
 
-// inspectReplicas inspects region in replica mode
+// inspectReplicas inspects region in replica mode.
 func (p *PriorityInspector) inspectRegionInReplica(region *core.RegionInfo) (makeupCount int) {
 	return p.conf.GetMaxReplicas() - len(region.GetPeers())
 }
 
-// addOrRemoveRegion add or remove region from queue
-// it will remove if region's priority equal 0
-// it's Attempt will increase if region's priority equal last
+// addOrRemoveRegion add or remove region from queue.
+// It will remove if region's priority equal 0.
+// It's Attempt will increase if region's priority equal last.
 func (p *PriorityInspector) addOrRemoveRegion(priority int, regionID uint64) {
 	if priority < 0 {
 		if entry := p.queue.Get(regionID); entry != nil && entry.Priority == priority {
 			e := entry.Value.(*RegionPriorityEntry)
 			e.Attempt++
 			e.Last = time.Now()
+			p.queue.Put(priority, e)
+		} else {
+			entry := NewRegionEntry(regionID)
+			p.queue.Put(priority, entry)
 		}
-		entry := NewRegionEntry(regionID)
-		p.queue.Put(priority, entry)
 	} else {
 		p.queue.Remove(regionID)
 	}
 }
 
-// GetPriorityRegions returns all regions in priority queue that needs rerun
+// GetPriorityRegions returns all regions in priority queue that needs rerun.
 func (p *PriorityInspector) GetPriorityRegions() (ids []uint64) {
 	entries := p.queue.Elems()
 	for _, e := range entries {
@@ -126,7 +128,13 @@ func (p *PriorityInspector) GetPriorityRegions() (ids []uint64) {
 	return
 }
 
-// RemovePriorityRegion removes priority region from priority queue
+// RemovePriorityRegion removes priority region from priority queue.
 func (p *PriorityInspector) RemovePriorityRegion(regionID uint64) {
 	p.queue.Remove(regionID)
+}
+
+// getQueueLen returns the length of priority queue.
+// it's only used for test.
+func (p *PriorityInspector) getQueueLen() int {
+	return p.queue.Len()
 }

@@ -25,12 +25,13 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/schedule"
 	"github.com/tikv/pd/pkg/schedule/config"
+	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
+	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/utils/logutil"
 )
 
@@ -42,49 +43,24 @@ const (
 // When a region has label `merge_option=deny`, skip merging the region.
 // If label value is `allow` or other value, it will be treated as `allow`.
 const (
-	mergeCheckerName     = "merge_checker"
 	mergeOptionLabel     = "merge_option"
 	mergeOptionValueDeny = "deny"
 )
 
-var (
-	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
-	mergeCheckerCounter                     = checkerCounter.WithLabelValues(mergeCheckerName, "check")
-	mergeCheckerPausedCounter               = checkerCounter.WithLabelValues(mergeCheckerName, "paused")
-	mergeCheckerRecentlySplitCounter        = checkerCounter.WithLabelValues(mergeCheckerName, "recently-split")
-	mergeCheckerRecentlyStartCounter        = checkerCounter.WithLabelValues(mergeCheckerName, "recently-start")
-	mergeCheckerSkipUninitRegionCounter     = checkerCounter.WithLabelValues(mergeCheckerName, "skip-uninit-region")
-	mergeCheckerNoNeedCounter               = checkerCounter.WithLabelValues(mergeCheckerName, "no-need")
-	mergeCheckerSpecialPeerCounter          = checkerCounter.WithLabelValues(mergeCheckerName, "special-peer")
-	mergeCheckerAbnormalReplicaCounter      = checkerCounter.WithLabelValues(mergeCheckerName, "abnormal-replica")
-	mergeCheckerHotRegionCounter            = checkerCounter.WithLabelValues(mergeCheckerName, "hot-region")
-	mergeCheckerNoTargetCounter             = checkerCounter.WithLabelValues(mergeCheckerName, "no-target")
-	mergeCheckerTargetTooLargeCounter       = checkerCounter.WithLabelValues(mergeCheckerName, "target-too-large")
-	mergeCheckerSplitSizeAfterMergeCounter  = checkerCounter.WithLabelValues(mergeCheckerName, "split-size-after-merge")
-	mergeCheckerSplitKeysAfterMergeCounter  = checkerCounter.WithLabelValues(mergeCheckerName, "split-keys-after-merge")
-	mergeCheckerNewOpCounter                = checkerCounter.WithLabelValues(mergeCheckerName, "new-operator")
-	mergeCheckerLargerSourceCounter         = checkerCounter.WithLabelValues(mergeCheckerName, "larger-source")
-	mergeCheckerAdjNotExistCounter          = checkerCounter.WithLabelValues(mergeCheckerName, "adj-not-exist")
-	mergeCheckerAdjRecentlySplitCounter     = checkerCounter.WithLabelValues(mergeCheckerName, "adj-recently-split")
-	mergeCheckerAdjRegionHotCounter         = checkerCounter.WithLabelValues(mergeCheckerName, "adj-region-hot")
-	mergeCheckerAdjDisallowMergeCounter     = checkerCounter.WithLabelValues(mergeCheckerName, "adj-disallow-merge")
-	mergeCheckerAdjAbnormalPeerStoreCounter = checkerCounter.WithLabelValues(mergeCheckerName, "adj-abnormal-peerstore")
-	mergeCheckerAdjSpecialPeerCounter       = checkerCounter.WithLabelValues(mergeCheckerName, "adj-special-peer")
-	mergeCheckerAdjAbnormalReplicaCounter   = checkerCounter.WithLabelValues(mergeCheckerName, "adj-abnormal-replica")
-)
+var gcInterval = time.Minute
 
 // MergeChecker ensures region to merge with adjacent region when size is small
 type MergeChecker struct {
 	PauseController
-	cluster    schedule.Cluster
-	conf       config.Config
+	cluster    sche.CheckerCluster
+	conf       config.CheckerConfigProvider
 	splitCache *cache.TTLUint64
 	startTime  time.Time // it's used to judge whether server recently start.
 }
 
 // NewMergeChecker creates a merge checker.
-func NewMergeChecker(ctx context.Context, cluster schedule.Cluster, conf config.Config) *MergeChecker {
-	splitCache := cache.NewIDTTL(ctx, time.Minute, conf.GetSplitMergeInterval())
+func NewMergeChecker(ctx context.Context, cluster sche.CheckerCluster, conf config.CheckerConfigProvider) *MergeChecker {
+	splitCache := cache.NewIDTTL(ctx, gcInterval, conf.GetSplitMergeInterval())
 	return &MergeChecker{
 		cluster:    cluster,
 		conf:       conf,
@@ -94,8 +70,8 @@ func NewMergeChecker(ctx context.Context, cluster schedule.Cluster, conf config.
 }
 
 // GetType return MergeChecker's type
-func (m *MergeChecker) GetType() string {
-	return "merge-checker"
+func (*MergeChecker) GetType() types.CheckerSchedulerType {
+	return types.MergeChecker
 }
 
 // RecordRegionSplit put the recently split region into cache. MergeChecker
@@ -115,13 +91,16 @@ func (m *MergeChecker) Check(region *core.RegionInfo) []*operator.Operator {
 		return nil
 	}
 
+	// update the split cache.
+	// It must be called before the following merge checker logic.
+	m.splitCache.UpdateTTL(m.conf.GetSplitMergeInterval())
+
 	expireTime := m.startTime.Add(m.conf.GetSplitMergeInterval())
 	if time.Now().Before(expireTime) {
 		mergeCheckerRecentlyStartCounter.Inc()
 		return nil
 	}
 
-	m.splitCache.UpdateTTL(m.conf.GetSplitMergeInterval())
 	if m.splitCache.Exists(region.GetID()) {
 		mergeCheckerRecentlySplitCounter.Inc()
 		return nil
@@ -129,7 +108,7 @@ func (m *MergeChecker) Check(region *core.RegionInfo) []*operator.Operator {
 
 	// when pd just started, it will load region meta from region storage,
 	if region.GetLeader() == nil {
-		mergeCheckerSkipUninitRegionCounter.Inc()
+		mergeCheckerNoLeaderCounter.Inc()
 		return nil
 	}
 
@@ -141,7 +120,7 @@ func (m *MergeChecker) Check(region *core.RegionInfo) []*operator.Operator {
 
 	// skip region has down peers or pending peers
 	if !filter.IsRegionHealthy(region) {
-		mergeCheckerSpecialPeerCounter.Inc()
+		mergeCheckerUnhealthyRegionCounter.Inc()
 		return nil
 	}
 
@@ -250,7 +229,7 @@ func (m *MergeChecker) checkTarget(region, adjacent *core.RegionInfo) bool {
 }
 
 // AllowMerge returns true if two regions can be merged according to the key type.
-func AllowMerge(cluster schedule.Cluster, region, adjacent *core.RegionInfo) bool {
+func AllowMerge(cluster sche.SharedCluster, region, adjacent *core.RegionInfo) bool {
 	var start, end []byte
 	if bytes.Equal(region.GetEndKey(), adjacent.GetStartKey()) && len(region.GetEndKey()) != 0 {
 		start, end = region.GetStartKey(), adjacent.GetEndKey()
@@ -266,7 +245,7 @@ func AllowMerge(cluster schedule.Cluster, region, adjacent *core.RegionInfo) boo
 	// We can consider using dependency injection techniques to optimize in
 	// the future.
 
-	if cluster.GetOpts().IsPlacementRulesEnabled() {
+	if cluster.GetSharedConfig().IsPlacementRulesEnabled() {
 		cl, ok := cluster.(interface{ GetRuleManager() *placement.RuleManager })
 		if !ok || len(cl.GetRuleManager().GetSplitKeys(start, end)) > 0 {
 			return false
@@ -283,10 +262,10 @@ func AllowMerge(cluster schedule.Cluster, region, adjacent *core.RegionInfo) boo
 		}
 	}
 
-	policy := cluster.GetOpts().GetKeyType()
+	policy := cluster.GetSharedConfig().GetKeyType()
 	switch policy {
 	case constant.Table:
-		if cluster.GetOpts().IsCrossTableMergeEnabled() {
+		if cluster.GetSharedConfig().IsCrossTableMergeEnabled() {
 			return true
 		}
 		return isTableIDSame(region, adjacent)
@@ -306,7 +285,7 @@ func isTableIDSame(region, adjacent *core.RegionInfo) bool {
 // Check whether there is a peer of the adjacent region on an offline store,
 // while the source region has no peer on it. This is to prevent from bringing
 // any other peer into an offline store to slow down the offline process.
-func checkPeerStore(cluster schedule.Cluster, region, adjacent *core.RegionInfo) bool {
+func checkPeerStore(cluster sche.SharedCluster, region, adjacent *core.RegionInfo) bool {
 	regionStoreIDs := region.GetStoreIDs()
 	for _, peer := range adjacent.GetPeers() {
 		storeID := peer.GetStoreId()

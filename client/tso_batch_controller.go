@@ -16,7 +16,13 @@ package pd
 
 import (
 	"context"
+	"runtime/trace"
 	"time"
+
+	"github.com/pingcap/errors"
+	"github.com/pingcap/log"
+	"github.com/tikv/pd/client/tsoutil"
+	"go.uber.org/zap"
 )
 
 type tsoBatchController struct {
@@ -44,16 +50,16 @@ func newTSOBatchController(tsoRequestCh chan *tsoRequest, maxBatchSize int) *tso
 // fetchPendingRequests will start a new round of the batch collecting from the channel.
 // It returns true if everything goes well, otherwise false which means we should stop the service.
 func (tbc *tsoBatchController) fetchPendingRequests(ctx context.Context, maxBatchWaitInterval time.Duration) error {
-	var firstTSORequest *tsoRequest
+	var firstRequest *tsoRequest
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
-	case firstTSORequest = <-tbc.tsoRequestCh:
+	case firstRequest = <-tbc.tsoRequestCh:
 	}
 	// Start to batch when the first TSO request arrives.
 	tbc.batchStartTime = time.Now()
 	tbc.collectedRequestCount = 0
-	tbc.pushRequest(firstTSORequest)
+	tbc.pushRequest(firstRequest)
 
 	// This loop is for trying best to collect more requests, so we use `tbc.maxBatchSize` here.
 fetchPendingRequestsLoop:
@@ -130,9 +136,31 @@ func (tbc *tsoBatchController) adjustBestBatchSize() {
 	}
 }
 
-func (tbc *tsoBatchController) revokePendingTSORequest(err error) {
+func (tbc *tsoBatchController) finishCollectedRequests(physical, firstLogical int64, suffixBits uint32, err error) {
+	for i := 0; i < tbc.collectedRequestCount; i++ {
+		tsoReq := tbc.collectedRequests[i]
+		// Retrieve the request context before the request is done to trace without race.
+		requestCtx := tsoReq.requestCtx
+		tsoReq.physical, tsoReq.logical = physical, tsoutil.AddLogical(firstLogical, int64(i), suffixBits)
+		tsoReq.tryDone(err)
+		trace.StartRegion(requestCtx, "pdclient.tsoReqDequeue").End()
+	}
+	// Prevent the finished requests from being processed again.
+	tbc.collectedRequestCount = 0
+}
+
+func (tbc *tsoBatchController) revokePendingRequests(err error) {
 	for i := 0; i < len(tbc.tsoRequestCh); i++ {
 		req := <-tbc.tsoRequestCh
-		req.done <- err
+		req.tryDone(err)
 	}
+}
+
+func (tbc *tsoBatchController) clear() {
+	log.Info("[pd] clear the tso batch controller",
+		zap.Int("max-batch-size", tbc.maxBatchSize), zap.Int("best-batch-size", tbc.bestBatchSize),
+		zap.Int("collected-request-count", tbc.collectedRequestCount), zap.Int("pending-request-count", len(tbc.tsoRequestCh)))
+	tsoErr := errors.WithStack(errClosing)
+	tbc.finishCollectedRequests(0, 0, 0, tsoErr)
+	tbc.revokePendingRequests(tsoErr)
 }

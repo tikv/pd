@@ -24,13 +24,15 @@ import "time"
 type TestRequestInfo struct {
 	isWrite    bool
 	writeBytes uint64
+	storeID    uint64
 }
 
 // NewTestRequestInfo creates a new TestRequestInfo.
-func NewTestRequestInfo(isWrite bool, writeBytes uint64) *TestRequestInfo {
+func NewTestRequestInfo(isWrite bool, writeBytes uint64, storeID uint64) *TestRequestInfo {
 	return &TestRequestInfo{
 		isWrite:    isWrite,
 		writeBytes: writeBytes,
+		storeID:    storeID,
 	}
 }
 
@@ -44,6 +46,16 @@ func (tri *TestRequestInfo) WriteBytes() uint64 {
 	return tri.writeBytes
 }
 
+// StoreID implements the RequestInfo interface.
+func (tri *TestRequestInfo) StoreID() uint64 {
+	return tri.storeID
+}
+
+// ReplicaNumber implements the RequestInfo interface.
+func (*TestRequestInfo) ReplicaNumber() int64 {
+	return 1
+}
+
 // TestResponseInfo is used to test the response info interface.
 type TestResponseInfo struct {
 	readBytes uint64
@@ -51,6 +63,7 @@ type TestResponseInfo struct {
 	succeed   bool
 }
 
+// NewTestResponseInfo creates a new TestResponseInfo.
 func NewTestResponseInfo(readBytes uint64, kvCPU time.Duration, succeed bool) *TestResponseInfo {
 	return &TestResponseInfo{
 		readBytes: readBytes,

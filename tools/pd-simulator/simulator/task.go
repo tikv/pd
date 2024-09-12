@@ -261,7 +261,7 @@ type transferLeader struct {
 	toPeers         []*metapb.Peer
 }
 
-func (t *transferLeader) tick(engine *RaftEngine, region *core.RegionInfo) (newRegion *core.RegionInfo, isFinished bool) {
+func (t *transferLeader) tick(_ *RaftEngine, region *core.RegionInfo) (newRegion *core.RegionInfo, isFinished bool) {
 	isFinished = true
 	toPeer := t.toPeers[0] // TODO: Support selection logic
 	if peer := region.GetPeer(toPeer.GetId()); peer == nil || peer.GetRole() != toPeer.GetRole() || core.IsLearner(peer) {
@@ -313,7 +313,7 @@ type promoteLearner struct {
 	peer *metapb.Peer
 }
 
-func (pl *promoteLearner) tick(engine *RaftEngine, region *core.RegionInfo) (newRegion *core.RegionInfo, isFinished bool) {
+func (pl *promoteLearner) tick(_ *RaftEngine, region *core.RegionInfo) (newRegion *core.RegionInfo, isFinished bool) {
 	isFinished = true
 	peer := region.GetPeer(pl.peer.GetId())
 	opts := checkAndCreateChangePeerOption(region, peer, metapb.PeerRole_Learner, metapb.PeerRole_Voter)
@@ -327,7 +327,7 @@ type demoteVoter struct {
 	peer *metapb.Peer
 }
 
-func (dv *demoteVoter) tick(engine *RaftEngine, region *core.RegionInfo) (newRegion *core.RegionInfo, isFinished bool) {
+func (dv *demoteVoter) tick(_ *RaftEngine, region *core.RegionInfo) (newRegion *core.RegionInfo, isFinished bool) {
 	isFinished = true
 	peer := region.GetPeer(dv.peer.GetId())
 	opts := checkAndCreateChangePeerOption(region, peer, metapb.PeerRole_Voter, metapb.PeerRole_Learner)
@@ -342,7 +342,7 @@ type changePeerV2Enter struct {
 	demoteVoters    []*metapb.Peer
 }
 
-func (ce *changePeerV2Enter) tick(engine *RaftEngine, region *core.RegionInfo) (newRegion *core.RegionInfo, isFinished bool) {
+func (ce *changePeerV2Enter) tick(_ *RaftEngine, region *core.RegionInfo) (newRegion *core.RegionInfo, isFinished bool) {
 	isFinished = true
 	var opts []core.RegionCreateOption
 	for _, pl := range ce.promoteLearners {
@@ -367,7 +367,7 @@ func (ce *changePeerV2Enter) tick(engine *RaftEngine, region *core.RegionInfo) (
 
 type changePeerV2Leave struct{}
 
-func (cl *changePeerV2Leave) tick(engine *RaftEngine, region *core.RegionInfo) (newRegion *core.RegionInfo, isFinished bool) {
+func (*changePeerV2Leave) tick(_ *RaftEngine, region *core.RegionInfo) (newRegion *core.RegionInfo, isFinished bool) {
 	isFinished = true
 	var opts []core.RegionCreateOption
 	for _, peer := range region.GetPeers() {
@@ -415,13 +415,14 @@ func (a *addPeer) tick(engine *RaftEngine, region *core.RegionInfo) (newRegion *
 		pendingPeers := append(region.GetPendingPeers(), a.peer)
 		return region.Clone(core.WithAddPeer(a.peer), core.WithIncConfVer(), core.WithPendingPeers(pendingPeers)), false
 	}
+	speed := engine.storeConfig.Speed()
 	// Step 2: Process Snapshot
-	if !processSnapshot(sendNode, a.sendingStat) {
+	if !processSnapshot(sendNode, a.sendingStat, speed) {
 		return nil, false
 	}
 	sendStoreID := fmt.Sprintf("store-%d", sendNode.Id)
 	snapshotCounter.WithLabelValues(sendStoreID, "send").Inc()
-	if !processSnapshot(recvNode, a.receivingStat) {
+	if !processSnapshot(recvNode, a.receivingStat, speed) {
 		return nil, false
 	}
 	recvStoreID := fmt.Sprintf("store-%d", recvNode.Id)
@@ -492,10 +493,11 @@ func removeDownPeers(region *core.RegionInfo, removePeer *metapb.Peer) core.Regi
 }
 
 type snapshotStat struct {
-	action     snapAction
-	remainSize int64
-	status     snapStatus
-	start      time.Time
+	action        snapAction
+	remainSize    int64
+	status        snapStatus
+	start         time.Time
+	generateStart time.Time
 }
 
 func newSnapshotState(size int64, action snapAction) *snapshotStat {
@@ -510,24 +512,30 @@ func newSnapshotState(size int64, action snapAction) *snapshotStat {
 	}
 }
 
-func processSnapshot(n *Node, stat *snapshotStat) bool {
+func processSnapshot(n *Node, stat *snapshotStat, speed uint64) bool {
 	if stat.status == finished {
 		return true
 	}
 	if stat.status == pending {
-		if stat.action == generate && n.stats.SendingSnapCount > maxSnapGeneratorPoolSize {
+		n.statsMutex.RLock()
+		sendSnapshot, receiveSnapshot := n.stats.SendingSnapCount, n.stats.ReceivingSnapCount
+		n.statsMutex.RUnlock()
+		if stat.action == generate && sendSnapshot > maxSnapGeneratorPoolSize {
 			return false
 		}
-		if stat.action == receive && n.stats.ReceivingSnapCount > maxSnapReceivePoolSize {
+		if stat.action == receive && receiveSnapshot > maxSnapReceivePoolSize {
 			return false
 		}
 		stat.status = running
+		stat.generateStart = time.Now()
+		n.statsMutex.Lock()
 		// If the statement is true, it will start to send or Receive the snapshot.
 		if stat.action == generate {
 			n.stats.SendingSnapCount++
 		} else {
 			n.stats.ReceivingSnapCount++
 		}
+		n.statsMutex.Unlock()
 	}
 
 	// store should Generate/Receive snapshot by chunk size.
@@ -542,11 +550,16 @@ func processSnapshot(n *Node, stat *snapshotStat) bool {
 	}
 	if stat.status == running {
 		stat.status = finished
+		totalSec := uint64(time.Since(stat.start).Seconds()) * speed
+		generateSec := uint64(time.Since(stat.generateStart).Seconds()) * speed
+		n.registerSnapStats(generateSec, 0, totalSec)
+		n.statsMutex.Lock()
 		if stat.action == generate {
 			n.stats.SendingSnapCount--
 		} else {
 			n.stats.ReceivingSnapCount--
 		}
+		n.statsMutex.Unlock()
 	}
 	return true
 }

@@ -16,6 +16,7 @@ package command
 
 import (
 	"bytes"
+	"crypto/tls"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -24,21 +25,20 @@ import (
 	"strings"
 
 	"github.com/pingcap/errors"
+	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/spf13/cobra"
+	pd "github.com/tikv/pd/client/http"
 	"github.com/tikv/pd/pkg/utils/apiutil"
-	"go.etcd.io/etcd/pkg/transport"
+	"go.etcd.io/etcd/client/pkg/v3/transport"
 )
 
-var (
-	pdControllerComponentName = "pdctl"
-	dialClient                = &http.Client{
-		Transport: apiutil.NewComponentSignatureRoundTripper(http.DefaultTransport, pdControllerComponentName),
-	}
-	pingPrefix = "pd/api/v1/ping"
+const (
+	// PDControlCallerID is used to set the caller ID for PD client
+	PDControlCallerID = "pd-ctl"
+	clusterPrefix     = "pd/api/v1/cluster"
 )
 
-// InitHTTPSClient creates https client with ca file
-func InitHTTPSClient(caPath, certPath, keyPath string) error {
+func initTLSConfig(caPath, certPath, keyPath string) (*tls.Config, error) {
 	tlsInfo := transport.TLSInfo{
 		CertFile:      certPath,
 		KeyFile:       keyPath,
@@ -46,14 +46,100 @@ func InitHTTPSClient(caPath, certPath, keyPath string) error {
 	}
 	tlsConfig, err := tlsInfo.ClientConfig()
 	if err != nil {
-		return errors.WithStack(err)
+		return nil, errors.WithStack(err)
+	}
+	return tlsConfig, nil
+}
+
+// PDCli is a pd HTTP client
+var PDCli pd.Client
+
+func requirePDClient(cmd *cobra.Command, _ []string) error {
+	var (
+		tlsConfig *tls.Config
+		err       error
+	)
+	tlsConfig, err = parseTLSConfig(cmd)
+	if err != nil {
+		return err
 	}
 
+	return initNewPDClient(cmd, pd.WithTLSConfig(tlsConfig))
+}
+
+// shouldInitPDClient checks whether we should create a new PD client according to the cluster information.
+func shouldInitPDClient(cmd *cobra.Command) (bool, error) {
+	// Get the cluster information the current command assigned to.
+	newClusterInfoJSON, err := doRequest(cmd, clusterPrefix, http.MethodGet, http.Header{})
+	if err != nil {
+		return false, err
+	}
+	newClusterInfo := &metapb.Cluster{}
+	err = json.Unmarshal([]byte(newClusterInfoJSON), newClusterInfo)
+	if err != nil {
+		return false, err
+	}
+	// If the PD client is nil and we get the cluster information successfully,
+	// we should initialize the PD client directly.
+	if PDCli == nil {
+		return true, nil
+	}
+	// Get current cluster information that the PD client connects to.
+	currentClusterInfo, err := PDCli.GetCluster(cmd.Context())
+	if err != nil {
+		return true, nil
+	}
+	// Compare the cluster ID to determine whether we should re-initialize the PD client.
+	return currentClusterInfo.GetId() == 0 || newClusterInfo.GetId() != currentClusterInfo.GetId(), nil
+}
+
+func initNewPDClient(cmd *cobra.Command, opts ...pd.ClientOption) error {
+	if should, err := shouldInitPDClient(cmd); !should || err != nil {
+		return err
+	}
+	if PDCli != nil {
+		PDCli.Close()
+	}
+	PDCli = pd.NewClient(PDControlCallerID, getEndpoints(cmd), opts...).WithCallerID(PDControlCallerID)
+	return nil
+}
+
+// TODO: replace dialClient with the PD HTTP client completely.
+var dialClient = &http.Client{
+	Transport: apiutil.NewCallerIDRoundTripper(http.DefaultTransport, PDControlCallerID),
+}
+
+func parseTLSConfig(cmd *cobra.Command) (*tls.Config, error) {
+	caPath, err := cmd.Flags().GetString("cacert")
+	if err != nil || len(caPath) == 0 {
+		return nil, err
+	}
+	certPath, err := cmd.Flags().GetString("cert")
+	if err != nil {
+		return nil, err
+	}
+	keyPath, err := cmd.Flags().GetString("key")
+	if err != nil {
+		return nil, err
+	}
+	tlsConfig, err := initTLSConfig(caPath, certPath, keyPath)
+	if err != nil {
+		return nil, err
+	}
+
+	return tlsConfig, nil
+}
+
+// RequireHTTPSClient creates a HTTPS client if the related flags are set
+func RequireHTTPSClient(cmd *cobra.Command, _ []string) error {
+	tlsConfig, err := parseTLSConfig(cmd)
+	if err != nil || tlsConfig == nil {
+		return err
+	}
 	dialClient = &http.Client{
-		Transport: apiutil.NewComponentSignatureRoundTripper(
-			&http.Transport{TLSClientConfig: tlsConfig}, pdControllerComponentName),
+		Transport: apiutil.NewCallerIDRoundTripper(
+			&http.Transport{TLSClientConfig: tlsConfig}, PDControlCallerID),
 	}
-
 	return nil
 }
 
@@ -119,6 +205,11 @@ func dial(req *http.Request) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	if req.Header.Get(apiutil.XForbiddenForwardToMicroServiceHeader) == "true" {
+		if resp.Header.Get(apiutil.XForwardedToMicroServiceHeader) == "true" {
+			return string(content), errors.Errorf("the request is forwarded to micro service unexpectedly")
+		}
+	}
 	return string(content), nil
 }
 
@@ -165,7 +256,7 @@ func getEndpoints(cmd *cobra.Command) []string {
 	return strings.Split(addrs, ",")
 }
 
-func postJSON(cmd *cobra.Command, prefix string, input map[string]interface{}) {
+func requestJSON(cmd *cobra.Command, method, prefix string, input map[string]any) {
 	data, err := json.Marshal(input)
 	if err != nil {
 		cmd.Println(err)
@@ -173,29 +264,50 @@ func postJSON(cmd *cobra.Command, prefix string, input map[string]interface{}) {
 	}
 
 	endpoints := getEndpoints(cmd)
+	var msg []byte
 	err = tryURLs(cmd, endpoints, func(endpoint string) error {
-		var msg []byte
-		var r *http.Response
+		var req *http.Request
+		var resp *http.Response
 		url := endpoint + "/" + prefix
-		r, err = dialClient.Post(url, "application/json", bytes.NewBuffer(data))
-		if err != nil {
-			return err
-		}
-		defer r.Body.Close()
-		if r.StatusCode != http.StatusOK {
-			msg, err = io.ReadAll(r.Body)
+		switch method {
+		case http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete, http.MethodGet:
+			req, err = http.NewRequest(method, url, bytes.NewBuffer(data))
 			if err != nil {
 				return err
 			}
-			return errors.Errorf("[%d] %s", r.StatusCode, msg)
+			req.Header.Set("Content-Type", "application/json")
+			resp, err = dialClient.Do(req)
+		default:
+			err := errors.Errorf("method %s not supported", method)
+			return err
+		}
+		if err != nil {
+			return err
+		}
+		defer resp.Body.Close()
+		msg, err = io.ReadAll(resp.Body)
+		if err != nil {
+			return err
+		}
+		if resp.StatusCode != http.StatusOK {
+			return errors.Errorf("[%d] %s", resp.StatusCode, msg)
 		}
 		return nil
 	})
 	if err != nil {
-		cmd.Printf("Failed! %s", err)
+		cmd.Printf("Failed! %s\n", strings.TrimSpace(err.Error()))
 		return
 	}
-	cmd.Println("Success!")
+	msg = bytes.Trim(bytes.TrimSpace(msg), "\"")
+	cmd.Printf("Success! %s\n", string(msg))
+}
+
+func postJSON(cmd *cobra.Command, prefix string, input map[string]any) {
+	requestJSON(cmd, http.MethodPost, prefix, input)
+}
+
+func patchJSON(cmd *cobra.Command, prefix string, input map[string]any) {
+	requestJSON(cmd, http.MethodPatch, prefix, input)
 }
 
 // do send a request to server. Default is Get.
@@ -242,4 +354,14 @@ func checkURL(endpoint string) (string, error) {
 	}
 
 	return u.String(), nil
+}
+
+func jsonPrint(cmd *cobra.Command, val any) {
+	jsonBytes, err := json.MarshalIndent(val, "", "  ")
+	if err != nil {
+		cmd.Printf("Failed to marshal the data to json: %s\n", err)
+		return
+	}
+
+	cmd.Println(string(jsonBytes))
 }

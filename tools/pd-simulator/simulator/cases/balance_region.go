@@ -17,73 +17,74 @@ package cases
 import (
 	"time"
 
-	"github.com/docker/go-units"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/pkg/core"
+	sc "github.com/tikv/pd/tools/pd-simulator/simulator/config"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/info"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/simutil"
-	"go.uber.org/zap"
 )
 
-func newRedundantBalanceRegion() *Case {
+func newRedundantBalanceRegion(config *sc.SimConfig) *Case {
 	var simCase Case
 
-	storeNum := simutil.CaseConfigure.StoreNum
-	regionNum := simutil.CaseConfigure.RegionNum
-	if storeNum == 0 || regionNum == 0 {
-		storeNum, regionNum = 6, 4000
-	}
+	totalStore := config.TotalStore
+	totalRegion := config.TotalRegion
+	replica := int(config.ServerConfig.Replication.MaxReplicas)
+	allStores := make(map[uint64]struct{}, totalStore)
 
-	for i := 0; i < storeNum; i++ {
+	for i := 0; i < totalStore; i++ {
 		s := &Store{
-			ID:     IDAllocator.nextID(),
+			ID:     simutil.IDAllocator.NextID(),
 			Status: metapb.StoreState_Up,
 		}
 		if i%2 == 1 {
 			s.HasExtraUsedSpace = true
 		}
 		simCase.Stores = append(simCase.Stores, s)
+		allStores[s.ID] = struct{}{}
 	}
 
-	for i := 0; i < regionNum; i++ {
-		peers := []*metapb.Peer{
-			{Id: IDAllocator.nextID(), StoreId: uint64(i%storeNum + 1)},
-			{Id: IDAllocator.nextID(), StoreId: uint64((i+1)%storeNum + 1)},
-			{Id: IDAllocator.nextID(), StoreId: uint64((i+2)%storeNum + 1)},
+	for i := 0; i < totalRegion; i++ {
+		peers := make([]*metapb.Peer, 0, replica)
+		for j := 0; j < replica; j++ {
+			peers = append(peers, &metapb.Peer{
+				Id:      simutil.IDAllocator.NextID(),
+				StoreId: uint64((i+j)%totalStore + 1),
+			})
 		}
 		simCase.Regions = append(simCase.Regions, Region{
-			ID:     IDAllocator.nextID(),
+			ID:     simutil.IDAllocator.NextID(),
 			Peers:  peers,
 			Leader: peers[0],
-			Size:   96 * units.MiB,
-			Keys:   960000,
 		})
 	}
 
-	storesLastUpdateTime := make([]int64, storeNum+1)
-	storeLastAvailable := make([]uint64, storeNum+1)
-	simCase.Checker = func(regions *core.RegionsInfo, stats []info.StoreStats) bool {
-		res := true
-		curTime := time.Now().Unix()
-		storesAvailable := make([]uint64, 0, storeNum+1)
-		for i := 1; i <= storeNum; i++ {
-			available := stats[i].GetAvailable()
-			storesAvailable = append(storesAvailable, available)
-			if curTime-storesLastUpdateTime[i] > 60 {
-				if storeLastAvailable[i] != available {
-					res = false
-				}
-				if stats[i].ToCompactionSize != 0 {
-					res = false
-				}
-				storesLastUpdateTime[i] = curTime
-				storeLastAvailable[i] = available
-			} else {
-				res = false
+	storesLastUpdateTime := make(map[uint64]int64, totalStore)
+	storeLastAvailable := make(map[uint64]uint64, totalStore)
+	simCase.Checker = func(stores []*metapb.Store, _ *core.RegionsInfo, stats []info.StoreStats) bool {
+		for _, store := range stores {
+			if store.NodeState == metapb.NodeState_Removed {
+				delete(allStores, store.GetId())
 			}
 		}
-		simutil.Logger.Info("current counts", zap.Uint64s("storesAvailable", storesAvailable))
-		return res
+
+		curTime := time.Now().Unix()
+		for storeID := range allStores {
+			available := stats[storeID].GetAvailable()
+			if curTime-storesLastUpdateTime[storeID] > 60 {
+				if storeLastAvailable[storeID] != available {
+					return false
+				}
+				if stats[storeID].ToCompactionSize != 0 {
+					return false
+				}
+				storesLastUpdateTime[storeID] = curTime
+				storeLastAvailable[storeID] = available
+			} else {
+				return false
+			}
+		}
+		return true
 	}
 	return &simCase
 }

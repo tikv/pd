@@ -110,9 +110,9 @@ func TestGroupProperties(t *testing.T) {
 func TestBuildRuleList(t *testing.T) {
 	re := require.New(t)
 	defaultRule := &Rule{
-		GroupID:  "pd",
-		ID:       "default",
-		Role:     "voter",
+		GroupID:  DefaultGroupID,
+		ID:       DefaultRuleID,
+		Role:     Voter,
 		StartKey: []byte{},
 		EndKey:   []byte{},
 		Count:    3,
@@ -122,13 +122,13 @@ func TestBuildRuleList(t *testing.T) {
 	byteEnd, err := hex.DecodeString("a2")
 	re.NoError(err)
 	ruleMeta := &Rule{
-		GroupID:  "pd",
+		GroupID:  DefaultGroupID,
 		ID:       "meta",
 		Index:    1,
 		Override: true,
 		StartKey: byteStart,
 		EndKey:   byteEnd,
-		Role:     "voter",
+		Role:     Voter,
 		Count:    5,
 	}
 
@@ -140,7 +140,7 @@ func TestBuildRuleList(t *testing.T) {
 		{
 			name: "default rule",
 			rules: map[[2]string]*Rule{
-				{"pd", "default"}: defaultRule,
+				{DefaultGroupID, DefaultRuleID}: defaultRule,
 			},
 			expect: ruleList{
 				ranges: []rangeRules{
@@ -155,8 +155,8 @@ func TestBuildRuleList(t *testing.T) {
 		{
 			name: "metadata case",
 			rules: map[[2]string]*Rule{
-				{"pd", "default"}: defaultRule,
-				{"pd", "meta"}:    ruleMeta,
+				{DefaultGroupID, DefaultRuleID}: defaultRule,
+				{DefaultGroupID, "meta"}:        ruleMeta,
 			},
 			expect: ruleList{ranges: []rangeRules{
 				{
@@ -185,4 +185,31 @@ func TestBuildRuleList(t *testing.T) {
 		re.NoError(err)
 		re.Equal(testCase.expect.ranges, result.ranges)
 	}
+}
+
+// startKey and endKey are json:"-" which means cannot be Unmarshal from json
+// We need to take care of `Clone` method.
+func TestRuleKeyClone(t *testing.T) {
+	re := require.New(t)
+	r := &Rule{
+		StartKey: []byte{1, 2, 3},
+		EndKey:   []byte{4, 5, 6},
+	}
+
+	clone := r.Clone()
+	// Modify the original rule
+	r.StartKey[0] = 9
+	r.EndKey[0] = 9
+
+	// The clone should not be affected
+	re.Equal([]byte{1, 2, 3}, clone.StartKey)
+	re.Equal([]byte{4, 5, 6}, clone.EndKey)
+
+	// Modify the clone
+	clone.StartKey[0] = 8
+	clone.EndKey[0] = 8
+
+	// The original rule should not be affected
+	re.Equal([]byte{9, 2, 3}, r.StartKey)
+	re.Equal([]byte{9, 5, 6}, r.EndKey)
 }

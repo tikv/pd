@@ -17,20 +17,10 @@ package cluster
 import (
 	"testing"
 
-	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/mock/mockconfig"
 )
-
-func TestCollect(t *testing.T) {
-	re := require.New(t)
-
-	limiter := NewStoreLimiter(mockconfig.NewTestOptions())
-
-	limiter.Collect(&pdpb.StoreStats{})
-	re.Equal(int64(1), limiter.state.cst.total)
-}
 
 func TestStoreLimitScene(t *testing.T) {
 	re := require.New(t)

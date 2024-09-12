@@ -148,69 +148,71 @@ func (h *pprofHandler) PProfZip(w http.ResponseWriter, r *http.Request) {
 // @Tags     debug
 // @Summary  debug profile of PD servers.
 // @Router   /debug/pprof/profile [get]
-func (h *pprofHandler) PProfProfile(w http.ResponseWriter, r *http.Request) {
+func (*pprofHandler) PProfProfile(w http.ResponseWriter, r *http.Request) {
 	pp.Profile(w, r)
 }
 
 // @Tags     debug
 // @Summary  debug trace of PD servers.
 // @Router   /debug/pprof/trace [get]
-func (h *pprofHandler) PProfTrace(w http.ResponseWriter, r *http.Request) {
+func (*pprofHandler) PProfTrace(w http.ResponseWriter, r *http.Request) {
 	pp.Trace(w, r)
 }
 
 // @Tags     debug
 // @Summary  debug symbol of PD servers.
 // @Router   /debug/pprof/symbol [get]
-func (h *pprofHandler) PProfSymbol(w http.ResponseWriter, r *http.Request) {
+func (*pprofHandler) PProfSymbol(w http.ResponseWriter, r *http.Request) {
 	pp.Symbol(w, r)
 }
 
 // @Tags     debug
 // @Summary  debug heap of PD servers.
 // @Router   /debug/pprof/heap [get]
-func (h *pprofHandler) PProfHeap(w http.ResponseWriter, r *http.Request) {
+func (*pprofHandler) PProfHeap(w http.ResponseWriter, r *http.Request) {
 	pp.Handler("heap").ServeHTTP(w, r)
 }
 
 // @Tags     debug
 // @Summary  debug mutex of PD servers.
 // @Router   /debug/pprof/mutex [get]
-func (h *pprofHandler) PProfMutex(w http.ResponseWriter, r *http.Request) {
+func (*pprofHandler) PProfMutex(w http.ResponseWriter, r *http.Request) {
 	pp.Handler("mutex").ServeHTTP(w, r)
 }
 
 // @Tags     debug
 // @Summary  debug allocs of PD servers.
 // @Router   /debug/pprof/allocs [get]
-func (h *pprofHandler) PProfAllocs(w http.ResponseWriter, r *http.Request) {
+func (*pprofHandler) PProfAllocs(w http.ResponseWriter, r *http.Request) {
 	pp.Handler("allocs").ServeHTTP(w, r)
 }
 
 // @Tags     debug
 // @Summary  debug block of PD servers.
 // @Router   /debug/pprof/block [get]
-func (h *pprofHandler) PProfBlock(w http.ResponseWriter, r *http.Request) {
+func (*pprofHandler) PProfBlock(w http.ResponseWriter, r *http.Request) {
 	pp.Handler("block").ServeHTTP(w, r)
 }
 
 // @Tags     debug
 // @Summary  debug goroutine of PD servers.
 // @Router   /debug/pprof/goroutine [get]
-func (h *pprofHandler) PProfGoroutine(w http.ResponseWriter, r *http.Request) {
+func (*pprofHandler) PProfGoroutine(w http.ResponseWriter, r *http.Request) {
 	pp.Handler("goroutine").ServeHTTP(w, r)
 }
 
 // @Tags     debug
 // @Summary  debug threadcreate of PD servers.
 // @Router   /debug/pprof/threadcreate [get]
-func (h *pprofHandler) PProfThreadcreate(w http.ResponseWriter, r *http.Request) {
+func (*pprofHandler) PProfThreadcreate(w http.ResponseWriter, r *http.Request) {
 	pp.Handler("threadcreate").ServeHTTP(w, r)
 }
 
 func sleepWithCtx(ctx context.Context, d time.Duration) {
+	timer := time.NewTimer(d)
+	defer timer.Stop()
 	select {
-	case <-time.After(d):
+	case <-timer.C:
 	case <-ctx.Done():
 	}
 }

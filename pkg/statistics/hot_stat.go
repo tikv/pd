@@ -16,18 +16,22 @@ package statistics
 
 import (
 	"context"
+
+	"github.com/tikv/pd/pkg/statistics/buckets"
 )
 
 // HotStat contains cluster's hotspot statistics.
 type HotStat struct {
 	*HotCache
 	*StoresStats
+	*buckets.HotBucketCache
 }
 
 // NewHotStat creates the container to hold cluster's hotspot statistics.
 func NewHotStat(ctx context.Context) *HotStat {
 	return &HotStat{
-		HotCache:    NewHotCache(ctx),
-		StoresStats: NewStoresStats(),
+		HotCache:       NewHotCache(ctx),
+		StoresStats:    NewStoresStats(),
+		HotBucketCache: buckets.NewBucketsCache(ctx),
 	}
 }

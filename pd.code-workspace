@@ -9,20 +9,12 @@
 			"path": "client"
 		},
 		{
-			"name": "pd-client-tests",
-			"path": "tests/client"
+			"name": "pd-integration-tests",
+			"path": "tests/integrations"
 		},
 		{
-			"name": "mcs-tests",
-			"path": "tests/mcs"
-		},
-		{
-			"name": "tso-tests",
-			"path": "tests/tso"
-		},
-		{
-			"name": "pd-tso-bench",
-			"path": "tools/pd-tso-bench"
+			"name": "pd-tools",
+			"path": "tools"
 		}
 	],
 	"settings": {}

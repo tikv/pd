@@ -16,7 +16,6 @@ package cluster_test
 
 import (
 	"context"
-	"errors"
 	"sort"
 	"testing"
 	"time"
@@ -41,8 +40,8 @@ func TestValidRequestRegion(t *testing.T) {
 	err = cluster.RunInitialServers()
 	re.NoError(err)
 
-	cluster.WaitLeader()
-	leaderServer := cluster.GetServer(cluster.GetLeader())
+	re.NotEmpty(cluster.WaitLeader())
+	leaderServer := cluster.GetLeaderServer()
 	grpcPDClient := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
 	clusterID := leaderServer.GetClusterID()
 	bootstrapCluster(re, clusterID, grpcPDClient)
@@ -64,13 +63,13 @@ func TestValidRequestRegion(t *testing.T) {
 	err = rc.HandleRegionHeartbeat(r1)
 	re.NoError(err)
 	r2 := &metapb.Region{Id: 2, StartKey: []byte("a"), EndKey: []byte("b")}
-	re.Error(rc.ValidRequestRegion(r2))
+	re.Error(rc.ValidRegion(r2))
 	r3 := &metapb.Region{Id: 1, StartKey: []byte(""), EndKey: []byte("a"), RegionEpoch: &metapb.RegionEpoch{ConfVer: 1, Version: 2}}
-	re.Error(rc.ValidRequestRegion(r3))
+	re.Error(rc.ValidRegion(r3))
 	r4 := &metapb.Region{Id: 1, StartKey: []byte(""), EndKey: []byte("a"), RegionEpoch: &metapb.RegionEpoch{ConfVer: 2, Version: 1}}
-	re.Error(rc.ValidRequestRegion(r4))
+	re.Error(rc.ValidRegion(r4))
 	r5 := &metapb.Region{Id: 1, StartKey: []byte(""), EndKey: []byte("a"), RegionEpoch: &metapb.RegionEpoch{ConfVer: 2, Version: 2}}
-	re.NoError(rc.ValidRequestRegion(r5))
+	re.NoError(rc.ValidRegion(r5))
 	rc.Stop()
 }
 
@@ -85,8 +84,8 @@ func TestAskSplit(t *testing.T) {
 	err = cluster.RunInitialServers()
 	re.NoError(err)
 
-	cluster.WaitLeader()
-	leaderServer := cluster.GetServer(cluster.GetLeader())
+	re.NotEmpty(cluster.WaitLeader())
+	leaderServer := cluster.GetLeaderServer()
 	grpcPDClient := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
 	clusterID := leaderServer.GetClusterID()
 	bootstrapCluster(re, clusterID, grpcPDClient)
@@ -110,12 +109,12 @@ func TestAskSplit(t *testing.T) {
 		SplitCount: 10,
 	}
 
-	re.NoError(leaderServer.GetServer().SaveTTLConfig(map[string]interface{}{"schedule.enable-tikv-split-region": 0}, time.Minute))
+	re.NoError(leaderServer.GetServer().SaveTTLConfig(map[string]any{"schedule.enable-tikv-split-region": 0}, time.Minute))
 	_, err = rc.HandleAskSplit(req)
-	re.True(errors.Is(err, errs.ErrSchedulerTiKVSplitDisabled))
+	re.ErrorIs(err, errs.ErrSchedulerTiKVSplitDisabled)
 	_, err = rc.HandleAskBatchSplit(req1)
-	re.True(errors.Is(err, errs.ErrSchedulerTiKVSplitDisabled))
-	re.NoError(leaderServer.GetServer().SaveTTLConfig(map[string]interface{}{"schedule.enable-tikv-split-region": 0}, 0))
+	re.ErrorIs(err, errs.ErrSchedulerTiKVSplitDisabled)
+	re.NoError(leaderServer.GetServer().SaveTTLConfig(map[string]any{"schedule.enable-tikv-split-region": 0}, 0))
 	// wait ttl config takes effect
 	time.Sleep(time.Second)
 
@@ -131,7 +130,7 @@ func TestAskSplit(t *testing.T) {
 	re.NoError(err)
 }
 
-func TestSuspectRegions(t *testing.T) {
+func TestPendingProcessedRegions(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -142,8 +141,8 @@ func TestSuspectRegions(t *testing.T) {
 	err = cluster.RunInitialServers()
 	re.NoError(err)
 
-	cluster.WaitLeader()
-	leaderServer := cluster.GetServer(cluster.GetLeader())
+	re.NotEmpty(cluster.WaitLeader())
+	leaderServer := cluster.GetLeaderServer()
 	grpcPDClient := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
 	clusterID := leaderServer.GetClusterID()
 	bootstrapCluster(re, clusterID, grpcPDClient)
@@ -163,7 +162,7 @@ func TestSuspectRegions(t *testing.T) {
 	re.NoError(err)
 	ids := []uint64{regions[0].GetMeta().GetId(), res.Ids[0].NewRegionId, res.Ids[1].NewRegionId}
 	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
-	suspects := rc.GetSuspectRegions()
-	sort.Slice(suspects, func(i, j int) bool { return suspects[i] < suspects[j] })
-	re.Equal(ids, suspects)
+	pendingProcessedRegions := rc.GetPendingProcessedRegions()
+	sort.Slice(pendingProcessedRegions, func(i, j int) bool { return pendingProcessedRegions[i] < pendingProcessedRegions[j] })
+	re.Equal(ids, pendingProcessedRegions)
 }

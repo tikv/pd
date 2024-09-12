@@ -27,6 +27,21 @@ const (
 	PriorityLevelLen
 )
 
+func (p PriorityLevel) String() string {
+	switch p {
+	case Low:
+		return "low"
+	case Medium:
+		return "medium"
+	case High:
+		return "high"
+	case Urgent:
+		return "urgent"
+	default:
+		return "unknown"
+	}
+}
+
 // ScheduleKind distinguishes resources and schedule policy.
 type ScheduleKind struct {
 	Resource ResourceKind
@@ -51,6 +66,9 @@ const (
 	RegionKind
 	// WitnessKind indicates the witness kind resource
 	WitnessKind
+
+	// ResourceKindLen represents the ResourceKind count
+	ResourceKindLen
 )
 
 func (k ResourceKind) String() string {

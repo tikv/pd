@@ -18,11 +18,11 @@ import (
 	"os"
 	"time"
 
-	"github.com/elastic/gosigar"
-	"github.com/pingcap/log"
+	sigar "github.com/cloudfoundry/gosigar"
 	"go.uber.org/zap"
 
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
+	"github.com/pingcap/log"
 )
 
 // RequestUnit is the basic unit of the resource request management, which has two types:
@@ -35,6 +35,8 @@ type RequestUnit float64
 type RequestInfo interface {
 	IsWrite() bool
 	WriteBytes() uint64
+	ReplicaNumber() int64
+	StoreID() uint64
 }
 
 // ResponseInfo is the interface of the response information provider. A response should be
@@ -63,18 +65,17 @@ type ResourceCalculator interface {
 
 // KVCalculator is used to calculate the KV-side consumption.
 type KVCalculator struct {
-	*Config
+	*RUConfig
 }
 
 var _ ResourceCalculator = (*KVCalculator)(nil)
 
-func newKVCalculator(cfg *Config) *KVCalculator {
-	return &KVCalculator{Config: cfg}
+func newKVCalculator(cfg *RUConfig) *KVCalculator {
+	return &KVCalculator{RUConfig: cfg}
 }
 
 // Trickle ...
-func (kc *KVCalculator) Trickle(*rmpb.Consumption) {
-}
+func (*KVCalculator) Trickle(*rmpb.Consumption) {}
 
 // BeforeKVRequest ...
 func (kc *KVCalculator) BeforeKVRequest(consumption *rmpb.Consumption, req RequestInfo) {
@@ -86,14 +87,19 @@ func (kc *KVCalculator) BeforeKVRequest(consumption *rmpb.Consumption, req Reque
 		consumption.KvReadRpcCount += 1
 		// Read bytes could not be known before the request is executed,
 		// so we only add the base cost here.
-		consumption.RRU += float64(kc.ReadBaseCost)
+		consumption.RRU += float64(kc.ReadBaseCost) + float64(kc.ReadPerBatchBaseCost)*defaultAvgBatchProportion
 	}
 }
 
 func (kc *KVCalculator) calculateWriteCost(consumption *rmpb.Consumption, req RequestInfo) {
 	writeBytes := float64(req.WriteBytes())
 	consumption.WriteBytes += writeBytes
-	consumption.WRU += float64(kc.WriteBaseCost) + float64(kc.WriteBytesCost)*writeBytes
+	// write request cost need consider the replicas, due to write data will be replicate to all replicas.
+	replicaNums := float64(req.ReplicaNumber())
+	if replicaNums == 0 {
+		replicaNums = 1
+	}
+	consumption.WRU += (float64(kc.WriteBaseCost) + float64(kc.WritePerBatchBaseCost)*defaultAvgBatchProportion + float64(kc.WriteBytesCost)*writeBytes) * replicaNums
 }
 
 // AfterKVRequest ...
@@ -111,18 +117,27 @@ func (kc *KVCalculator) AfterKVRequest(consumption *rmpb.Consumption, req Reques
 }
 
 func (kc *KVCalculator) calculateReadCost(consumption *rmpb.Consumption, res ResponseInfo) {
+	if consumption == nil {
+		return
+	}
 	readBytes := float64(res.ReadBytes())
 	consumption.ReadBytes += readBytes
 	consumption.RRU += float64(kc.ReadBytesCost) * readBytes
 }
 
 func (kc *KVCalculator) calculateCPUCost(consumption *rmpb.Consumption, res ResponseInfo) {
+	if consumption == nil {
+		return
+	}
 	kvCPUMs := float64(res.KVCPU().Nanoseconds()) / 1000000.0
 	consumption.TotalCpuTimeMs += kvCPUMs
 	consumption.RRU += float64(kc.CPUMsCost) * kvCPUMs
 }
 
 func (kc *KVCalculator) payBackWriteCost(consumption *rmpb.Consumption, req RequestInfo) {
+	if consumption == nil {
+		return
+	}
 	writeBytes := float64(req.WriteBytes())
 	consumption.WriteBytes -= writeBytes
 	consumption.WRU -= float64(kc.WriteBaseCost) + float64(kc.WriteBytesCost)*writeBytes
@@ -130,69 +145,87 @@ func (kc *KVCalculator) payBackWriteCost(consumption *rmpb.Consumption, req Requ
 
 // SQLCalculator is used to calculate the SQL-side consumption.
 type SQLCalculator struct {
-	*Config
+	*RUConfig
 }
 
 var _ ResourceCalculator = (*SQLCalculator)(nil)
 
-func newSQLCalculator(cfg *Config) *SQLCalculator {
-	return &SQLCalculator{Config: cfg}
+func newSQLCalculator(cfg *RUConfig) *SQLCalculator {
+	return &SQLCalculator{RUConfig: cfg}
 }
 
 // Trickle update sql layer CPU consumption.
 func (dsc *SQLCalculator) Trickle(consumption *rmpb.Consumption) {
+	if consumption == nil {
+		return
+	}
 	delta := getSQLProcessCPUTime(dsc.isSingleGroupByKeyspace) - consumption.SqlLayerCpuTimeMs
 	consumption.TotalCpuTimeMs += delta
 	consumption.SqlLayerCpuTimeMs += delta
 }
 
 // BeforeKVRequest ...
-func (dsc *SQLCalculator) BeforeKVRequest(consumption *rmpb.Consumption, req RequestInfo) {
+func (*SQLCalculator) BeforeKVRequest(*rmpb.Consumption, RequestInfo) {
 }
 
 // AfterKVRequest ...
-func (dsc *SQLCalculator) AfterKVRequest(consumption *rmpb.Consumption, req RequestInfo, res ResponseInfo) {
+func (*SQLCalculator) AfterKVRequest(*rmpb.Consumption, RequestInfo, ResponseInfo) {
 }
 
 func getRUValueFromConsumption(custom *rmpb.Consumption, typ rmpb.RequestUnitType) float64 {
-	if typ == 0 {
+	if custom == nil {
+		return 0
+	}
+	if typ == rmpb.RequestUnitType_RU {
 		return custom.RRU + custom.WRU
 	}
 	return 0
 }
 
 func getRUTokenBucketSetting(group *rmpb.ResourceGroup, typ rmpb.RequestUnitType) *rmpb.TokenBucket {
-	if typ == 0 {
+	if group == nil {
+		return nil
+	}
+	if typ == rmpb.RequestUnitType_RU {
 		return group.RUSettings.RU
 	}
 	return nil
 }
 
 func getRawResourceValueFromConsumption(custom *rmpb.Consumption, typ rmpb.RawResourceType) float64 {
+	if custom == nil {
+		return 0
+	}
 	switch typ {
-	case 0:
+	case rmpb.RawResourceType_CPU:
 		return custom.TotalCpuTimeMs
-	case 1:
+	case rmpb.RawResourceType_IOReadFlow:
 		return custom.ReadBytes
-	case 2:
+	case rmpb.RawResourceType_IOWriteFlow:
 		return custom.WriteBytes
 	}
 	return 0
 }
 
 func getRawResourceTokenBucketSetting(group *rmpb.ResourceGroup, typ rmpb.RawResourceType) *rmpb.TokenBucket {
+	if group == nil {
+		return nil
+	}
 	switch typ {
-	case 0:
+	case rmpb.RawResourceType_CPU:
 		return group.RawResourceSettings.Cpu
-	case 1:
+	case rmpb.RawResourceType_IOReadFlow:
 		return group.RawResourceSettings.IoRead
-	case 2:
+	case rmpb.RawResourceType_IOWriteFlow:
 		return group.RawResourceSettings.IoWrite
 	}
 	return nil
 }
 
 func add(custom1 *rmpb.Consumption, custom2 *rmpb.Consumption) {
+	if custom1 == nil || custom2 == nil {
+		return
+	}
 	custom1.RRU += custom2.RRU
 	custom1.WRU += custom2.WRU
 	custom1.ReadBytes += custom2.ReadBytes
@@ -203,7 +236,47 @@ func add(custom1 *rmpb.Consumption, custom2 *rmpb.Consumption) {
 	custom1.KvWriteRpcCount += custom2.KvWriteRpcCount
 }
 
+func updateDeltaConsumption(last *rmpb.Consumption, now *rmpb.Consumption) *rmpb.Consumption {
+	delta := &rmpb.Consumption{}
+	if now.RRU >= last.RRU {
+		delta.RRU = now.RRU - last.RRU
+		last.RRU = now.RRU
+	}
+	if now.WRU >= last.WRU {
+		delta.WRU = now.WRU - last.WRU
+		last.WRU = now.WRU
+	}
+	if now.ReadBytes >= last.ReadBytes {
+		delta.ReadBytes = now.ReadBytes - last.ReadBytes
+		last.ReadBytes = now.ReadBytes
+	}
+	if now.WriteBytes >= last.WriteBytes {
+		delta.WriteBytes = now.WriteBytes - last.WriteBytes
+		last.WriteBytes = now.WriteBytes
+	}
+	if now.TotalCpuTimeMs >= last.TotalCpuTimeMs {
+		delta.TotalCpuTimeMs = now.TotalCpuTimeMs - last.TotalCpuTimeMs
+		last.TotalCpuTimeMs = now.TotalCpuTimeMs
+	}
+	if now.SqlLayerCpuTimeMs >= last.SqlLayerCpuTimeMs {
+		delta.SqlLayerCpuTimeMs = now.SqlLayerCpuTimeMs - last.SqlLayerCpuTimeMs
+		last.SqlLayerCpuTimeMs = now.SqlLayerCpuTimeMs
+	}
+	if now.KvReadRpcCount >= last.KvReadRpcCount {
+		delta.KvReadRpcCount = now.KvReadRpcCount - last.KvReadRpcCount
+		last.KvReadRpcCount = now.KvReadRpcCount
+	}
+	if now.KvWriteRpcCount >= last.KvWriteRpcCount {
+		delta.KvWriteRpcCount = now.KvWriteRpcCount - last.KvWriteRpcCount
+		last.KvWriteRpcCount = now.KvWriteRpcCount
+	}
+	return delta
+}
+
 func sub(custom1 *rmpb.Consumption, custom2 *rmpb.Consumption) {
+	if custom1 == nil || custom2 == nil {
+		return
+	}
 	custom1.RRU -= custom2.RRU
 	custom1.WRU -= custom2.WRU
 	custom1.ReadBytes -= custom2.ReadBytes
@@ -228,7 +301,7 @@ func getSQLProcessCPUTime(isSingleGroupByKeyspace bool) float64 {
 
 func getSysProcessCPUTime() float64 {
 	pid := os.Getpid()
-	cpuTime := gosigar.ProcTime{}
+	cpuTime := sigar.ProcTime{}
 	if err := cpuTime.Get(pid); err != nil {
 		log.Error("getCPUTime get pid failed", zap.Error(err))
 	}

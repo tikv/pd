@@ -24,7 +24,7 @@ import (
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/syncutil"
-	"go.etcd.io/etcd/clientv3"
+	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
 // Storage is the interface for the backend storage of the PD.
@@ -40,10 +40,11 @@ type Storage interface {
 	endpoint.GCSafePointStorage
 	endpoint.MinResolvedTSStorage
 	endpoint.ExternalTSStorage
-	endpoint.KeyspaceGCSafePointStorage
+	endpoint.SafePointV2Storage
 	endpoint.KeyspaceStorage
 	endpoint.ResourceGroupStorage
 	endpoint.TSOStorage
+	endpoint.KeyspaceGroupStorage
 }
 
 // NewStorageWithMemoryBackend creates a new storage with memory backend.
@@ -56,13 +57,18 @@ func NewStorageWithEtcdBackend(client *clientv3.Client, rootPath string) Storage
 	return newEtcdBackend(client, rootPath)
 }
 
-// NewStorageWithLevelDBBackend creates a new storage with LevelDB backend.
-func NewStorageWithLevelDBBackend(
+// NewRegionStorageWithLevelDBBackend will create a specialized storage to
+// store region meta information based on a LevelDB backend.
+func NewRegionStorageWithLevelDBBackend(
 	ctx context.Context,
 	filePath string,
 	ekm *encryption.Manager,
-) (Storage, error) {
-	return newLevelDBBackend(ctx, filePath, ekm)
+) (*RegionStorage, error) {
+	levelDBBackend, err := newLevelDBBackend(ctx, filePath, ekm)
+	if err != nil {
+		return nil, err
+	}
+	return newRegionStorage(levelDBBackend), nil
 }
 
 // TODO: support other KV storage backends like BadgerDB in the future.
@@ -87,15 +93,14 @@ func NewCoreStorage(defaultStorage Storage, regionStorage endpoint.RegionStorage
 	}
 }
 
-// TryGetLocalRegionStorage gets the local region storage. Returns nil if not present.
-func TryGetLocalRegionStorage(s Storage) endpoint.RegionStorage {
+// RetrieveRegionStorage retrieve the region storage from the given storage.
+// If it's a `coreStorage`, it will return the regionStorage inside, otherwise it will return the original storage.
+func RetrieveRegionStorage(s Storage) endpoint.RegionStorage {
 	switch ps := s.(type) {
 	case *coreStorage:
 		return ps.regionStorage
-	case *levelDBBackend, *memoryStorage:
-		return ps
 	default:
-		return nil
+		return ps
 	}
 }
 

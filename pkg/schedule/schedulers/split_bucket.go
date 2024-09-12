@@ -23,68 +23,57 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/tikv/pd/pkg/core"
-	"github.com/tikv/pd/pkg/schedule"
+	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/errs"
+	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
+	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/statistics/buckets"
-	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/pkg/utils/reflectutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/unrolled/render"
 )
 
 const (
-	// SplitBucketName is the split bucket name.
-	SplitBucketName = "split-bucket-scheduler"
-	// SplitBucketType is the spilt bucket type.
-	SplitBucketType = "split-bucket"
 	// defaultHotDegree is the default hot region threshold.
 	defaultHotDegree  = 3
 	defaultSplitLimit = 10
 )
 
-var (
-	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
-	splitBucketDisableCounter            = schedulerCounter.WithLabelValues(SplitBucketName, "bucket-disable")
-	splitBuckerSplitLimitCounter         = schedulerCounter.WithLabelValues(SplitBucketName, "split-limit")
-	splitBucketScheduleCounter           = schedulerCounter.WithLabelValues(SplitBucketName, "schedule")
-	splitBucketNoRegionCounter           = schedulerCounter.WithLabelValues(SplitBucketName, "no-region")
-	splitBucketRegionTooSmallCounter     = schedulerCounter.WithLabelValues(SplitBucketName, "region-too-small")
-	splitBucketOperatorExistCounter      = schedulerCounter.WithLabelValues(SplitBucketName, "operator-exist")
-	splitBucketKeyRangeNotMatchCounter   = schedulerCounter.WithLabelValues(SplitBucketName, "key-range-not-match")
-	splitBucketNoSplitKeysCounter        = schedulerCounter.WithLabelValues(SplitBucketName, "no-split-keys")
-	splitBucketCreateOpeartorFailCounter = schedulerCounter.WithLabelValues(SplitBucketName, "create-operator-fail")
-	splitBucketNewOperatorCounter        = schedulerCounter.WithLabelValues(SplitBucketName, "new-operator")
-)
-
 func initSplitBucketConfig() *splitBucketSchedulerConfig {
 	return &splitBucketSchedulerConfig{
-		Degree:     defaultHotDegree,
-		SplitLimit: defaultSplitLimit,
+		schedulerConfig: &baseSchedulerConfig{},
+		Degree:          defaultHotDegree,
+		SplitLimit:      defaultSplitLimit,
 	}
 }
 
 type splitBucketSchedulerConfig struct {
-	mu         syncutil.RWMutex
-	storage    endpoint.ConfigStorage
+	syncutil.RWMutex
+	schedulerConfig
 	Degree     int    `json:"degree"`
 	SplitLimit uint64 `json:"split-limit"`
 }
 
-func (conf *splitBucketSchedulerConfig) Clone() *splitBucketSchedulerConfig {
-	conf.mu.RLock()
-	defer conf.mu.RUnlock()
+func (conf *splitBucketSchedulerConfig) clone() *splitBucketSchedulerConfig {
+	conf.RLock()
+	defer conf.RUnlock()
 	return &splitBucketSchedulerConfig{
 		Degree: conf.Degree,
 	}
 }
 
-func (conf *splitBucketSchedulerConfig) persistLocked() error {
-	data, err := schedule.EncodeConfig(conf)
-	if err != nil {
-		return err
-	}
-	return conf.storage.SaveScheduleConfig(SplitBucketName, data)
+func (conf *splitBucketSchedulerConfig) getDegree() int {
+	conf.RLock()
+	defer conf.RUnlock()
+	return conf.Degree
+}
+
+func (conf *splitBucketSchedulerConfig) getSplitLimit() uint64 {
+	conf.RLock()
+	defer conf.RUnlock()
+	return conf.SplitLimit
 }
 
 type splitBucketScheduler struct {
@@ -98,14 +87,14 @@ type splitBucketHandler struct {
 	rd   *render.Render
 }
 
-func (h *splitBucketHandler) ListConfig(w http.ResponseWriter, _ *http.Request) {
-	conf := h.conf.Clone()
-	_ = h.rd.JSON(w, http.StatusOK, conf)
+func (h *splitBucketHandler) listConfig(w http.ResponseWriter, _ *http.Request) {
+	conf := h.conf.clone()
+	h.rd.JSON(w, http.StatusOK, conf)
 }
 
-func (h *splitBucketHandler) UpdateConfig(w http.ResponseWriter, r *http.Request) {
-	h.conf.mu.Lock()
-	defer h.conf.mu.Unlock()
+func (h *splitBucketHandler) updateConfig(w http.ResponseWriter, r *http.Request) {
+	h.conf.Lock()
+	defer h.conf.Unlock()
 	rd := render.New(render.Options{IndentJSON: true})
 	oldc, _ := json.Marshal(h.conf)
 	data, err := io.ReadAll(r.Body)
@@ -121,11 +110,25 @@ func (h *splitBucketHandler) UpdateConfig(w http.ResponseWriter, r *http.Request
 	}
 	newc, _ := json.Marshal(h.conf)
 	if !bytes.Equal(oldc, newc) {
-		h.conf.persistLocked()
-		rd.Text(w, http.StatusOK, "success")
+		if err := h.conf.save(); err != nil {
+			log.Warn("failed to save config", errs.ZapError(err))
+		}
+		rd.Text(w, http.StatusOK, "Config is updated.")
+		return
 	}
 
-	rd.Text(w, http.StatusBadRequest, "config item not found")
+	m := make(map[string]any)
+	if err := json.Unmarshal(data, &m); err != nil {
+		rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	ok := reflectutil.FindSameFieldByJSON(h.conf, m)
+	if ok {
+		rd.Text(w, http.StatusOK, "Config is the same with origin, so do nothing.")
+		return
+	}
+
+	rd.Text(w, http.StatusBadRequest, "Config item is not found.")
 }
 
 func newSplitBucketHandler(conf *splitBucketSchedulerConfig) http.Handler {
@@ -134,13 +137,13 @@ func newSplitBucketHandler(conf *splitBucketSchedulerConfig) http.Handler {
 		rd:   render.New(render.Options{IndentJSON: true}),
 	}
 	router := mux.NewRouter()
-	router.HandleFunc("/list", h.ListConfig).Methods(http.MethodGet)
-	router.HandleFunc("/config", h.UpdateConfig).Methods(http.MethodPost)
+	router.HandleFunc("/list", h.listConfig).Methods(http.MethodGet)
+	router.HandleFunc("/config", h.updateConfig).Methods(http.MethodPost)
 	return router
 }
 
-func newSplitBucketScheduler(opController *schedule.OperatorController, conf *splitBucketSchedulerConfig) *splitBucketScheduler {
-	base := NewBaseScheduler(opController)
+func newSplitBucketScheduler(opController *operator.Controller, conf *splitBucketSchedulerConfig) *splitBucketScheduler {
+	base := NewBaseScheduler(opController, types.SplitBucketScheduler)
 	handler := newSplitBucketHandler(conf)
 	ret := &splitBucketScheduler{
 		BaseScheduler: base,
@@ -150,14 +153,17 @@ func newSplitBucketScheduler(opController *schedule.OperatorController, conf *sp
 	return ret
 }
 
-// GetName returns the name of the split bucket scheduler.
-func (s *splitBucketScheduler) GetName() string {
-	return SplitBucketName
-}
-
-// GetType returns the type of the split bucket scheduler.
-func (s *splitBucketScheduler) GetType() string {
-	return SplitBucketType
+// ReloadConfig implement Scheduler interface.
+func (s *splitBucketScheduler) ReloadConfig() error {
+	s.conf.Lock()
+	defer s.conf.Unlock()
+	newCfg := &splitBucketSchedulerConfig{}
+	if err := s.conf.load(newCfg); err != nil {
+		return err
+	}
+	s.conf.SplitLimit = newCfg.SplitLimit
+	s.conf.Degree = newCfg.Degree
+	return nil
 }
 
 // ServerHTTP implement Http server.
@@ -166,35 +172,35 @@ func (s *splitBucketScheduler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 }
 
 // IsScheduleAllowed return true if the sum of executing opSplit operator is less  .
-func (s *splitBucketScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool {
+func (s *splitBucketScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) bool {
 	if !cluster.GetStoreConfig().IsEnableRegionBucket() {
 		splitBucketDisableCounter.Inc()
 		return false
 	}
-	allowed := s.BaseScheduler.OpController.OperatorCount(operator.OpSplit) < s.conf.SplitLimit
+	allowed := s.BaseScheduler.OpController.OperatorCount(operator.OpSplit) < s.conf.getSplitLimit()
 	if !allowed {
 		splitBuckerSplitLimitCounter.Inc()
-		operator.OperatorLimitCounter.WithLabelValues(s.GetType(), operator.OpSplit.String()).Inc()
+		operator.IncOperatorLimitCounter(s.GetType(), operator.OpSplit)
 	}
 	return allowed
 }
 
 type splitBucketPlan struct {
 	hotBuckets         map[uint64][]*buckets.BucketStat
-	cluster            schedule.Cluster
+	cluster            sche.SchedulerCluster
 	conf               *splitBucketSchedulerConfig
 	hotRegionSplitSize int64
 }
 
 // Schedule return operators if some bucket is too hot.
-func (s *splitBucketScheduler) Schedule(cluster schedule.Cluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
+func (s *splitBucketScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) ([]*operator.Operator, []plan.Plan) {
 	splitBucketScheduleCounter.Inc()
-	conf := s.conf.Clone()
+	conf := s.conf.clone()
 	plan := &splitBucketPlan{
 		conf:               conf,
 		cluster:            cluster,
-		hotBuckets:         cluster.BucketsStats(conf.Degree),
-		hotRegionSplitSize: cluster.GetOpts().GetMaxMovableHotPeerSize(),
+		hotBuckets:         cluster.BucketsStats(conf.getDegree()),
+		hotRegionSplitSize: cluster.GetSchedulerConfig().GetMaxMovableHotPeerSize(),
 	}
 	return s.splitBucket(plan), nil
 }
@@ -237,6 +243,9 @@ func (s *splitBucketScheduler) splitBucket(plan *splitBucketPlan) []*operator.Op
 	}
 	if splitBucket != nil {
 		region := plan.cluster.GetRegion(splitBucket.RegionID)
+		if region == nil {
+			return nil
+		}
 		splitKey := make([][]byte, 0)
 		if bytes.Compare(region.GetStartKey(), splitBucket.StartKey) < 0 {
 			splitKey = append(splitKey, splitBucket.StartKey)
@@ -244,16 +253,14 @@ func (s *splitBucketScheduler) splitBucket(plan *splitBucketPlan) []*operator.Op
 		if bytes.Compare(region.GetEndKey(), splitBucket.EndKey) > 0 {
 			splitKey = append(splitKey, splitBucket.EndKey)
 		}
-		op, err := operator.CreateSplitRegionOperator(SplitBucketType, plan.cluster.GetRegion(splitBucket.RegionID), operator.OpSplit,
+		op, err := operator.CreateSplitRegionOperator(s.GetName(), region, operator.OpSplit,
 			pdpb.CheckPolicy_USEKEY, splitKey)
 		if err != nil {
-			splitBucketCreateOpeartorFailCounter.Inc()
+			splitBucketCreateOperatorFailCounter.Inc()
 			return nil
 		}
 		splitBucketNewOperatorCounter.Inc()
-		op.AdditionalInfos["region-start-key"] = core.HexRegionKeyStr(region.GetStartKey())
-		op.AdditionalInfos["region-end-key"] = core.HexRegionKeyStr(region.GetEndKey())
-		op.AdditionalInfos["hot-degree"] = strconv.FormatInt(int64(splitBucket.HotDegree), 10)
+		op.SetAdditionalInfo("hot-degree", strconv.FormatInt(int64(splitBucket.HotDegree), 10))
 		return []*operator.Operator{op}
 	}
 	return nil

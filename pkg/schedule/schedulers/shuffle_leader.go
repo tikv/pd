@@ -19,30 +19,16 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/schedule"
+	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
-)
-
-const (
-	// ShuffleLeaderName is shuffle leader scheduler name.
-	ShuffleLeaderName = "shuffle-leader-scheduler"
-	// ShuffleLeaderType is shuffle leader scheduler type.
-	ShuffleLeaderType = "shuffle-leader"
-)
-
-var (
-	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
-	shuffleLeaderCounter              = schedulerCounter.WithLabelValues(ShuffleLeaderName, "schedule")
-	shuffleLeaderNewOperatorCounter   = schedulerCounter.WithLabelValues(ShuffleLeaderName, "new-operator")
-	shuffleLeaderNoTargetStoreCounter = schedulerCounter.WithLabelValues(ShuffleLeaderName, "no-target-store")
-	shuffleLeaderNoFollowerCounter    = schedulerCounter.WithLabelValues(ShuffleLeaderName, "no-follower")
+	"github.com/tikv/pd/pkg/schedule/types"
 )
 
 type shuffleLeaderSchedulerConfig struct {
-	Name   string          `json:"name"`
 	Ranges []core.KeyRange `json:"ranges"`
+	// TODO: When we prepare to use Ranges, we will need to implement the ReloadConfig function for this scheduler.
 }
 
 type shuffleLeaderScheduler struct {
@@ -53,12 +39,12 @@ type shuffleLeaderScheduler struct {
 
 // newShuffleLeaderScheduler creates an admin scheduler that shuffles leaders
 // between stores.
-func newShuffleLeaderScheduler(opController *schedule.OperatorController, conf *shuffleLeaderSchedulerConfig) schedule.Scheduler {
+func newShuffleLeaderScheduler(opController *operator.Controller, conf *shuffleLeaderSchedulerConfig) Scheduler {
+	base := NewBaseScheduler(opController, types.ShuffleLeaderScheduler)
 	filters := []filter.Filter{
-		&filter.StoreStateFilter{ActionScope: conf.Name, TransferLeader: true},
-		filter.NewSpecialUseFilter(conf.Name),
+		&filter.StoreStateFilter{ActionScope: base.GetName(), TransferLeader: true, OperatorLevel: constant.Low},
+		filter.NewSpecialUseFilter(base.GetName()),
 	}
-	base := NewBaseScheduler(opController)
 	return &shuffleLeaderScheduler{
 		BaseScheduler: base,
 		conf:          conf,
@@ -66,33 +52,28 @@ func newShuffleLeaderScheduler(opController *schedule.OperatorController, conf *
 	}
 }
 
-func (s *shuffleLeaderScheduler) GetName() string {
-	return s.conf.Name
-}
-
-func (s *shuffleLeaderScheduler) GetType() string {
-	return ShuffleLeaderType
-}
-
+// EncodeConfig implements the Scheduler interface.
 func (s *shuffleLeaderScheduler) EncodeConfig() ([]byte, error) {
-	return schedule.EncodeConfig(s.conf)
+	return EncodeConfig(s.conf)
 }
 
-func (s *shuffleLeaderScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool {
-	allowed := s.OpController.OperatorCount(operator.OpLeader) < cluster.GetOpts().GetLeaderScheduleLimit()
+// IsScheduleAllowed implements the Scheduler interface.
+func (s *shuffleLeaderScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) bool {
+	allowed := s.OpController.OperatorCount(operator.OpLeader) < cluster.GetSchedulerConfig().GetLeaderScheduleLimit()
 	if !allowed {
-		operator.OperatorLimitCounter.WithLabelValues(s.GetType(), operator.OpLeader.String()).Inc()
+		operator.IncOperatorLimitCounter(s.GetType(), operator.OpLeader)
 	}
 	return allowed
 }
 
-func (s *shuffleLeaderScheduler) Schedule(cluster schedule.Cluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
+// Schedule implements the Scheduler interface.
+func (s *shuffleLeaderScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) ([]*operator.Operator, []plan.Plan) {
 	// We shuffle leaders between stores by:
 	// 1. random select a valid store.
 	// 2. transfer a leader to the store.
 	shuffleLeaderCounter.Inc()
 	targetStore := filter.NewCandidates(cluster.GetStores()).
-		FilterTarget(cluster.GetOpts(), nil, nil, s.filters...).
+		FilterTarget(cluster.GetSchedulerConfig(), nil, nil, s.filters...).
 		RandomPick()
 	if targetStore == nil {
 		shuffleLeaderNoTargetStoreCounter.Inc()
@@ -105,7 +86,7 @@ func (s *shuffleLeaderScheduler) Schedule(cluster schedule.Cluster, dryRun bool)
 		shuffleLeaderNoFollowerCounter.Inc()
 		return nil, nil
 	}
-	op, err := operator.CreateTransferLeaderOperator(ShuffleLeaderType, cluster, region, region.GetLeader().GetId(), targetStore.GetID(), []uint64{}, operator.OpAdmin)
+	op, err := operator.CreateTransferLeaderOperator(s.GetName(), cluster, region, targetStore.GetID(), []uint64{}, operator.OpAdmin)
 	if err != nil {
 		log.Debug("fail to create shuffle leader operator", errs.ZapError(err))
 		return nil, nil

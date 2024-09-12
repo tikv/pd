@@ -16,18 +16,21 @@ package pd
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
+	"reflect"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/errors"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/tsopb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/grpcutil"
-	"github.com/tikv/pd/client/tlsutil"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 )
@@ -35,44 +38,118 @@ import (
 const (
 	msServiceRootPath = "/ms"
 	tsoServiceName    = "tso"
-	// tspSvcDiscoveryFormat defines the key prefix for keyspace group primary election.
+	// tsoSvcDiscoveryFormat defines the key prefix for keyspace group primary election.
 	// The entire key is in the format of "/ms/<cluster-id>/tso/<group-id>/primary".
 	// The <group-id> is 5 digits integer with leading zeros.
-	tspSvcDiscoveryFormat = msServiceRootPath + "/%d/" + tsoServiceName + "/%05d/primary"
+	tsoSvcDiscoveryFormat = msServiceRootPath + "/%d/" + tsoServiceName + "/%05d/primary"
+	// initRetryInterval is the rpc retry interval during the initialization phase.
+	initRetryInterval = time.Second
+	// tsoQueryRetryMaxTimes is the max retry times for querying TSO.
+	tsoQueryRetryMaxTimes = 10
+	// tsoQueryRetryInterval is the retry interval for querying TSO.
+	tsoQueryRetryInterval = 500 * time.Millisecond
 )
 
 var _ ServiceDiscovery = (*tsoServiceDiscovery)(nil)
 var _ tsoAllocatorEventSource = (*tsoServiceDiscovery)(nil)
 
-// tsoServiceDiscovery is the service discovery client of the independent TSO service
-type tsoServiceDiscovery struct {
-	clusterID  uint64
-	keyspaceID uint32
-	urls       atomic.Value // Store as []string
-	// primary key is the etcd path used for discoverying the serving endpoint of this keyspace
-	primaryKey string
-	// TSO Primary URL
-	primary atomic.Value // Store as string
-	// TSO Secondary URLs
-	secondaries atomic.Value // Store as []string
-	metacli     MetaStorageClient
+// keyspaceGroupSvcDiscovery is used for discovering the serving endpoints of the keyspace
+// group to which the keyspace belongs
+type keyspaceGroupSvcDiscovery struct {
+	sync.RWMutex
+	group *tsopb.KeyspaceGroup
+	// primaryURL is the primary serving URL
+	primaryURL string
+	// secondaryURLs are TSO secondary serving URL
+	secondaryURLs []string
+	// urls are the primary/secondary serving URL
+	urls []string
+}
 
-	// addr -> a gRPC connection
+func (k *keyspaceGroupSvcDiscovery) update(
+	keyspaceGroup *tsopb.KeyspaceGroup,
+	newPrimaryURL string,
+	secondaryURLs, urls []string,
+) (oldPrimaryURL string, primarySwitched, secondaryChanged bool) {
+	k.Lock()
+	defer k.Unlock()
+
+	// If the new primary URL is empty, we don't switch the primary URL.
+	oldPrimaryURL = k.primaryURL
+	if len(newPrimaryURL) > 0 {
+		primarySwitched = !strings.EqualFold(oldPrimaryURL, newPrimaryURL)
+		k.primaryURL = newPrimaryURL
+	}
+
+	if !reflect.DeepEqual(k.secondaryURLs, secondaryURLs) {
+		k.secondaryURLs = secondaryURLs
+		secondaryChanged = true
+	}
+
+	k.group = keyspaceGroup
+	k.urls = urls
+	return
+}
+
+// tsoServerDiscovery is for discovering the serving endpoints of the TSO servers
+// TODO: dynamically update the TSO server URLs in the case of TSO server failover
+// and scale-out/in.
+type tsoServerDiscovery struct {
+	sync.RWMutex
+	urls []string
+	// used for round-robin load balancing
+	selectIdx int
+	// failureCount counts the consecutive failures for communicating with the tso servers
+	failureCount int
+}
+
+func (t *tsoServerDiscovery) countFailure() bool {
+	t.Lock()
+	defer t.Unlock()
+	t.failureCount++
+	return t.failureCount >= len(t.urls)
+}
+
+func (t *tsoServerDiscovery) resetFailure() {
+	t.Lock()
+	defer t.Unlock()
+	t.failureCount = 0
+}
+
+// tsoServiceDiscovery is the service discovery client of the independent TSO service
+
+type tsoServiceDiscovery struct {
+	metacli         MetaStorageClient
+	apiSvcDiscovery ServiceDiscovery
+	clusterID       uint64
+	keyspaceID      atomic.Uint32
+
+	// defaultDiscoveryKey is the etcd path used for discovering the serving endpoints of
+	// the default keyspace group
+	defaultDiscoveryKey string
+	// tsoServersDiscovery is for discovering the serving endpoints of the TSO servers
+	*tsoServerDiscovery
+
+	// keyspaceGroupSD is for discovering the serving endpoints of the keyspace group
+	keyspaceGroupSD *keyspaceGroupSvcDiscovery
+
+	// URL -> a gRPC connection
 	clientConns sync.Map // Store as map[string]*grpc.ClientConn
 
 	// localAllocPrimariesUpdatedCb will be called when the local tso allocator primary list is updated.
-	// The input is a map {DC Localtion -> Leader Addr}
-	localAllocPrimariesUpdatedCb tsoLocalServAddrsUpdatedFunc
+	// The input is a map {DC Location -> Leader URL}
+	localAllocPrimariesUpdatedCb tsoLocalServURLsUpdatedFunc
 	// globalAllocPrimariesUpdatedCb will be called when the local tso allocator primary list is updated.
-	globalAllocPrimariesUpdatedCb tsoGlobalServAddrUpdatedFunc
+	globalAllocPrimariesUpdatedCb tsoGlobalServURLUpdatedFunc
 
 	checkMembershipCh chan struct{}
 
-	ctx    context.Context
-	cancel context.CancelFunc
-	wg     sync.WaitGroup
+	ctx                  context.Context
+	cancel               context.CancelFunc
+	wg                   sync.WaitGroup
+	printFallbackLogOnce sync.Once
 
-	tlsCfg *tlsutil.TLSConfig
+	tlsCfg *tls.Config
 
 	// Client option.
 	option *option
@@ -80,31 +157,46 @@ type tsoServiceDiscovery struct {
 
 // newTSOServiceDiscovery returns a new client-side service discovery for the independent TSO service.
 func newTSOServiceDiscovery(
-	ctx context.Context, metacli MetaStorageClient,
-	clusterID uint64, keyspaceID uint32, urls []string, tlsCfg *tlsutil.TLSConfig, option *option,
+	ctx context.Context, metacli MetaStorageClient, apiSvcDiscovery ServiceDiscovery,
+	clusterID uint64, keyspaceID uint32, tlsCfg *tls.Config, option *option,
 ) ServiceDiscovery {
 	ctx, cancel := context.WithCancel(ctx)
 	c := &tsoServiceDiscovery{
 		ctx:               ctx,
 		cancel:            cancel,
 		metacli:           metacli,
-		keyspaceID:        keyspaceID,
+		apiSvcDiscovery:   apiSvcDiscovery,
 		clusterID:         clusterID,
-		primaryKey:        fmt.Sprintf(tspSvcDiscoveryFormat, clusterID, keyspaceID),
 		tlsCfg:            tlsCfg,
 		option:            option,
 		checkMembershipCh: make(chan struct{}, 1),
 	}
-	c.urls.Store(urls)
+	c.keyspaceID.Store(keyspaceID)
+	c.keyspaceGroupSD = &keyspaceGroupSvcDiscovery{
+		primaryURL:    "",
+		secondaryURLs: make([]string, 0),
+		urls:          make([]string, 0),
+	}
+	c.tsoServerDiscovery = &tsoServerDiscovery{urls: make([]string, 0)}
+	// Start with the default keyspace group. The actual keyspace group, to which the keyspace belongs,
+	// will be discovered later.
+	c.defaultDiscoveryKey = fmt.Sprintf(tsoSvcDiscoveryFormat, clusterID, defaultKeySpaceGroupID)
 
-	log.Info("created tso service discovery", zap.String("discovery-key", c.primaryKey))
+	log.Info("created tso service discovery",
+		zap.Uint64("cluster-id", clusterID),
+		zap.Uint32("keyspace-id", keyspaceID),
+		zap.String("default-discovery-key", c.defaultDiscoveryKey))
 
 	return c
 }
 
 // Init initialize the concrete client underlying
 func (c *tsoServiceDiscovery) Init() error {
-	if err := c.initRetry(c.updateMember); err != nil {
+	log.Info("initializing tso service discovery",
+		zap.Int("max-retry-times", c.option.maxRetryTimes),
+		zap.Duration("retry-interval", initRetryInterval))
+	if err := c.retry(c.option.maxRetryTimes, initRetryInterval, c.updateMember); err != nil {
+		log.Error("failed to update member. initialization failed.", zap.Error(err))
 		c.cancel()
 		return err
 	}
@@ -113,16 +205,20 @@ func (c *tsoServiceDiscovery) Init() error {
 	return nil
 }
 
-func (c *tsoServiceDiscovery) initRetry(f func() error) error {
+func (c *tsoServiceDiscovery) retry(
+	maxRetryTimes int, retryInterval time.Duration, f func() error,
+) error {
 	var err error
-	for i := 0; i < c.option.maxRetryTimes; i++ {
+	ticker := time.NewTicker(retryInterval)
+	defer ticker.Stop()
+	for i := 0; i < maxRetryTimes; i++ {
 		if err = f(); err == nil {
 			return nil
 		}
 		select {
 		case <-c.ctx.Done():
 			return err
-		case <-time.After(time.Second):
+		case <-ticker.C:
 		}
 	}
 	return errors.WithStack(err)
@@ -135,7 +231,7 @@ func (c *tsoServiceDiscovery) Close() {
 	c.cancel()
 	c.wg.Wait()
 
-	c.clientConns.Range(func(key, cc interface{}) bool {
+	c.clientConns.Range(func(key, cc any) bool {
 		if err := cc.(*grpc.ClientConn).Close(); err != nil {
 			log.Error("[tso] failed to close gRPC clientConn", errs.ZapError(errs.ErrCloseGRPCConn, err))
 		}
@@ -151,16 +247,21 @@ func (c *tsoServiceDiscovery) startCheckMemberLoop() {
 
 	ctx, cancel := context.WithCancel(c.ctx)
 	defer cancel()
+	ticker := time.NewTicker(memberUpdateInterval)
+	defer ticker.Stop()
 
 	for {
 		select {
 		case <-c.checkMembershipCh:
-		case <-time.After(memberUpdateInterval):
+		case <-ticker.C:
 		case <-ctx.Done():
 			log.Info("[tso] exit check member loop")
 			return
 		}
-		if err := c.updateMember(); err != nil {
+		// Make sure tsoQueryRetryMaxTimes * tsoQueryRetryInterval is far less than memberUpdateInterval,
+		// so that we can speed up the process of tso service discovery when failover happens on the
+		// tso service side and also ensures it won't call updateMember too frequently during normal time.
+		if err := c.retry(tsoQueryRetryMaxTimes, tsoQueryRetryInterval, c.updateMember); err != nil {
 			log.Error("[tso] failed to update member", errs.ZapError(err))
 		}
 	}
@@ -171,45 +272,63 @@ func (c *tsoServiceDiscovery) GetClusterID() uint64 {
 	return c.clusterID
 }
 
-// GetURLs returns the URLs of the servers.
-// For testing use. It should only be called when the client is closed.
-func (c *tsoServiceDiscovery) GetURLs() []string {
-	return c.urls.Load().([]string)
+// GetKeyspaceID returns the ID of the keyspace
+func (c *tsoServiceDiscovery) GetKeyspaceID() uint32 {
+	return c.keyspaceID.Load()
 }
 
-// GetServingAddr returns the grpc client connection of the serving endpoint
+// GetKeyspaceGroupID returns the ID of the keyspace group. If the keyspace group is unknown,
+// it returns the default keyspace group ID.
+func (c *tsoServiceDiscovery) GetKeyspaceGroupID() uint32 {
+	c.keyspaceGroupSD.RLock()
+	defer c.keyspaceGroupSD.RUnlock()
+	if c.keyspaceGroupSD.group == nil {
+		return defaultKeySpaceGroupID
+	}
+	return c.keyspaceGroupSD.group.Id
+}
+
+// GetServiceURLs returns the URLs of the tso primary/secondary URL of this keyspace group.
+// For testing use. It should only be called when the client is closed.
+func (c *tsoServiceDiscovery) GetServiceURLs() []string {
+	c.keyspaceGroupSD.RLock()
+	defer c.keyspaceGroupSD.RUnlock()
+	return c.keyspaceGroupSD.urls
+}
+
+// GetServingURL returns the grpc client connection of the serving endpoint
 // which is the primary in a primary/secondary configured cluster.
 func (c *tsoServiceDiscovery) GetServingEndpointClientConn() *grpc.ClientConn {
-	if cc, ok := c.clientConns.Load(c.getPrimaryAddr()); ok {
+	if cc, ok := c.clientConns.Load(c.getPrimaryURL()); ok {
 		return cc.(*grpc.ClientConn)
 	}
 	return nil
 }
 
-// GetClientConns returns the mapping {addr -> a gRPC connectio}
+// GetClientConns returns the mapping {URL -> a gRPC connection}
 func (c *tsoServiceDiscovery) GetClientConns() *sync.Map {
 	return &c.clientConns
 }
 
-// GetServingAddr returns the serving endpoint which is the primary in a
+// GetServingURL returns the serving endpoint which is the primary in a
 // primary/secondary configured cluster.
-func (c *tsoServiceDiscovery) GetServingAddr() string {
-	return c.getPrimaryAddr()
+func (c *tsoServiceDiscovery) GetServingURL() string {
+	return c.getPrimaryURL()
 }
 
-// GetBackupAddrs gets the addresses of the current reachable and healthy
-// backup service endpoints randomly. Backup service endpoints are secondaries in
+// GetBackupURLs gets the URLs of the current reachable and healthy
+// backup service endpoints. Backup service endpoints are secondaries in
 // a primary/secondary configured cluster.
-func (c *tsoServiceDiscovery) GetBackupAddrs() []string {
-	return c.getSecondaryAddrs()
+func (c *tsoServiceDiscovery) GetBackupURLs() []string {
+	return c.getSecondaryURLs()
 }
 
-// GetOrCreateGRPCConn returns the corresponding grpc client connection of the given addr.
-func (c *tsoServiceDiscovery) GetOrCreateGRPCConn(addr string) (*grpc.ClientConn, error) {
-	return grpcutil.GetOrCreateGRPCConn(c.ctx, &c.clientConns, addr, c.tlsCfg, c.option.gRPCDialOptions...)
+// GetOrCreateGRPCConn returns the corresponding grpc client connection of the given URL.
+func (c *tsoServiceDiscovery) GetOrCreateGRPCConn(url string) (*grpc.ClientConn, error) {
+	return grpcutil.GetOrCreateGRPCConn(c.ctx, &c.clientConns, url, c.tlsCfg, c.option.gRPCDialOptions...)
 }
 
-// ScheduleCheckMemberChanged is used to trigger a check to see if there is any change in ervice endpoints.
+// ScheduleCheckMemberChanged is used to trigger a check to see if there is any change in service endpoints.
 func (c *tsoServiceDiscovery) ScheduleCheckMemberChanged() {
 	select {
 	case c.checkMembershipCh <- struct{}{}:
@@ -217,103 +336,305 @@ func (c *tsoServiceDiscovery) ScheduleCheckMemberChanged() {
 	}
 }
 
-// Immediately check if there is any membership change among the primary/secondaries in
+// CheckMemberChanged Immediately check if there is any membership change among the primary/secondaries in
 // a primary/secondary configured cluster.
 func (c *tsoServiceDiscovery) CheckMemberChanged() error {
-	return c.updateMember()
+	if err := c.apiSvcDiscovery.CheckMemberChanged(); err != nil {
+		log.Warn("[tso] failed to check member changed", errs.ZapError(err))
+	}
+	if err := c.retry(tsoQueryRetryMaxTimes, tsoQueryRetryInterval, c.updateMember); err != nil {
+		log.Error("[tso] failed to update member", errs.ZapError(err))
+		return err
+	}
+	return nil
 }
 
-// AddServingAddrSwitchedCallback adds callbacks which will be called when the primary in
+// AddServingURLSwitchedCallback adds callbacks which will be called when the primary in
 // a primary/secondary configured cluster is switched.
-func (c *tsoServiceDiscovery) AddServingAddrSwitchedCallback(callbacks ...func()) {
-}
+func (*tsoServiceDiscovery) AddServingURLSwitchedCallback(...func()) {}
 
-// AddServiceAddrsSwitchedCallback adds callbacks which will be called when any primary/secondary
+// AddServiceURLsSwitchedCallback adds callbacks which will be called when any primary/secondary
 // in a primary/secondary configured cluster is changed.
-func (c *tsoServiceDiscovery) AddServiceAddrsSwitchedCallback(callbacks ...func()) {
-}
+func (*tsoServiceDiscovery) AddServiceURLsSwitchedCallback(...func()) {}
 
-// SetTSOLocalServAddrsUpdatedCallback adds a callback which will be called when the local tso
+// SetTSOLocalServURLsUpdatedCallback adds a callback which will be called when the local tso
 // allocator leader list is updated.
-func (c *tsoServiceDiscovery) SetTSOLocalServAddrsUpdatedCallback(callback tsoLocalServAddrsUpdatedFunc) {
+func (c *tsoServiceDiscovery) SetTSOLocalServURLsUpdatedCallback(callback tsoLocalServURLsUpdatedFunc) {
 	c.localAllocPrimariesUpdatedCb = callback
 }
 
-// SetTSOGlobalServAddrUpdatedCallback adds a callback which will be called when the global tso
+// SetTSOGlobalServURLUpdatedCallback adds a callback which will be called when the global tso
 // allocator leader is updated.
-func (c *tsoServiceDiscovery) SetTSOGlobalServAddrUpdatedCallback(callback tsoGlobalServAddrUpdatedFunc) {
-	addr := c.getPrimaryAddr()
-	if len(addr) > 0 {
-		callback(addr)
+func (c *tsoServiceDiscovery) SetTSOGlobalServURLUpdatedCallback(callback tsoGlobalServURLUpdatedFunc) {
+	url := c.getPrimaryURL()
+	if len(url) > 0 {
+		if err := callback(url); err != nil {
+			log.Error("[tso] failed to call back when tso global service url update", zap.String("url", url), errs.ZapError(err))
+		}
 	}
 	c.globalAllocPrimariesUpdatedCb = callback
 }
 
-// getPrimaryAddr returns the primary address.
-func (c *tsoServiceDiscovery) getPrimaryAddr() string {
-	primaryAddr := c.primary.Load()
-	if primaryAddr == nil {
-		return ""
-	}
-	return primaryAddr.(string)
+// GetServiceClient implements ServiceDiscovery
+func (c *tsoServiceDiscovery) GetServiceClient() ServiceClient {
+	return c.apiSvcDiscovery.GetServiceClient()
 }
 
-// getSecondaryAddrs returns the secondary addresses.
-func (c *tsoServiceDiscovery) getSecondaryAddrs() []string {
-	secondaryAddrs := c.secondaries.Load()
-	if secondaryAddrs == nil {
-		return []string{}
-	}
-	return secondaryAddrs.([]string)
+// GetAllServiceClients implements ServiceDiscovery
+func (c *tsoServiceDiscovery) GetAllServiceClients() []ServiceClient {
+	return c.apiSvcDiscovery.GetAllServiceClients()
 }
 
-func (c *tsoServiceDiscovery) switchPrimary(addrs []string) error {
-	// FIXME: How to safely compare primary urls? For now, only allows one client url.
-	addr := addrs[0]
-	oldPrimary := c.getPrimaryAddr()
-	if addr == oldPrimary {
-		return nil
-	}
+// getPrimaryURL returns the primary URL.
+func (c *tsoServiceDiscovery) getPrimaryURL() string {
+	c.keyspaceGroupSD.RLock()
+	defer c.keyspaceGroupSD.RUnlock()
+	return c.keyspaceGroupSD.primaryURL
+}
 
-	if _, err := c.GetOrCreateGRPCConn(addr); err != nil {
-		log.Warn("[tso] failed to connect primary", zap.String("primary", addr), errs.ZapError(err))
-		return err
-	}
-	// Set PD primary and Global TSO Allocator (which is also the PD primary)
-	c.primary.Store(addr)
+// getSecondaryURLs returns the secondary URLs.
+func (c *tsoServiceDiscovery) getSecondaryURLs() []string {
+	c.keyspaceGroupSD.RLock()
+	defer c.keyspaceGroupSD.RUnlock()
+	return c.keyspaceGroupSD.secondaryURLs
+}
+
+func (c *tsoServiceDiscovery) afterPrimarySwitched(oldPrimary, newPrimary string) error {
 	// Run callbacks
 	if c.globalAllocPrimariesUpdatedCb != nil {
-		if err := c.globalAllocPrimariesUpdatedCb(addr); err != nil {
+		if err := c.globalAllocPrimariesUpdatedCb(newPrimary); err != nil {
 			return err
 		}
 	}
-	log.Info("[tso] switch primary", zap.String("new-primary", addr), zap.String("old-primary", oldPrimary))
+	log.Info("[tso] switch primary",
+		zap.String("new-primary", newPrimary),
+		zap.String("old-primary", oldPrimary))
 	return nil
 }
 
 func (c *tsoServiceDiscovery) updateMember() error {
-	resp, err := c.metacli.Get(c.ctx, []byte(c.primaryKey))
+	// The keyspace membership or the primary serving URL of the keyspace group, to which this
+	// keyspace belongs, might have been changed. We need to query tso servers to get the latest info.
+	tsoServerURL, err := c.getTSOServer(c.apiSvcDiscovery)
 	if err != nil {
-		log.Error("[tso] failed to get the keyspace serving endpoint", zap.String("primary-key", c.primaryKey), errs.ZapError(err))
+		log.Error("[tso] failed to get tso server", errs.ZapError(err))
 		return err
 	}
 
+	keyspaceID := c.GetKeyspaceID()
+	var keyspaceGroup *tsopb.KeyspaceGroup
+	if len(tsoServerURL) > 0 {
+		keyspaceGroup, err = c.findGroupByKeyspaceID(keyspaceID, tsoServerURL, updateMemberTimeout)
+		if err != nil {
+			if c.tsoServerDiscovery.countFailure() {
+				log.Error("[tso] failed to find the keyspace group",
+					zap.Uint32("keyspace-id-in-request", keyspaceID),
+					zap.String("tso-server-url", tsoServerURL),
+					errs.ZapError(err))
+			}
+			return err
+		}
+		c.tsoServerDiscovery.resetFailure()
+	} else {
+		// There is no error but no tso server URL found, which means
+		// the server side hasn't been upgraded to the version that
+		// processes and returns GetClusterInfoResponse.TsoUrls. In this case,
+		// we fall back to the old way of discovering the tso primary URL
+		// from etcd directly.
+		c.printFallbackLogOnce.Do(func() {
+			log.Warn("[tso] no tso server URL found,"+
+				" fallback to the legacy path to discover from etcd directly",
+				zap.Uint32("keyspace-id-in-request", keyspaceID),
+				zap.String("tso-server-url", tsoServerURL),
+				zap.String("discovery-key", c.defaultDiscoveryKey))
+		})
+		urls, err := c.discoverWithLegacyPath()
+		if err != nil {
+			return err
+		}
+		if len(urls) == 0 {
+			return errors.New("no tso server url found")
+		}
+		members := make([]*tsopb.KeyspaceGroupMember, 0, len(urls))
+		for _, url := range urls {
+			members = append(members, &tsopb.KeyspaceGroupMember{Address: url})
+		}
+		members[0].IsPrimary = true
+		keyspaceGroup = &tsopb.KeyspaceGroup{
+			Id:      defaultKeySpaceGroupID,
+			Members: members,
+		}
+	}
+
+	oldGroupID := c.GetKeyspaceGroupID()
+	if oldGroupID != keyspaceGroup.Id {
+		log.Info("[tso] the keyspace group changed",
+			zap.Uint32("keyspace-id", keyspaceID),
+			zap.Uint32("new-keyspace-group-id", keyspaceGroup.Id),
+			zap.Uint32("old-keyspace-group-id", oldGroupID))
+	}
+
+	// Initialize the serving URL from the returned keyspace group info.
+	primaryURL := ""
+	secondaryURLs := make([]string, 0)
+	urls := make([]string, 0, len(keyspaceGroup.Members))
+	for _, m := range keyspaceGroup.Members {
+		urls = append(urls, m.Address)
+		if m.IsPrimary {
+			primaryURL = m.Address
+		} else {
+			secondaryURLs = append(secondaryURLs, m.Address)
+		}
+	}
+
+	// If the primary URL is not empty, we need to create a grpc connection to it, and do it
+	// out of the critical section of the keyspace group service discovery.
+	if len(primaryURL) > 0 {
+		if primarySwitched := !strings.EqualFold(primaryURL, c.getPrimaryURL()); primarySwitched {
+			if _, err := c.GetOrCreateGRPCConn(primaryURL); err != nil {
+				log.Warn("[tso] failed to connect the next primary",
+					zap.Uint32("keyspace-id-in-request", keyspaceID),
+					zap.String("tso-server-url", tsoServerURL),
+					zap.String("next-primary", primaryURL), errs.ZapError(err))
+				return err
+			}
+		}
+	}
+
+	oldPrimary, primarySwitched, _ :=
+		c.keyspaceGroupSD.update(keyspaceGroup, primaryURL, secondaryURLs, urls)
+	if primarySwitched {
+		log.Info("[tso] updated keyspace group service discovery info",
+			zap.Uint32("keyspace-id-in-request", keyspaceID),
+			zap.String("tso-server-url", tsoServerURL),
+			zap.String("keyspace-group-service", keyspaceGroup.String()))
+		if err := c.afterPrimarySwitched(oldPrimary, primaryURL); err != nil {
+			return err
+		}
+	}
+
+	// Even if the primary URL is empty, we still updated other returned info above, including the
+	// keyspace group info and the secondary url.
+	if len(primaryURL) == 0 {
+		return errors.New("no primary URL found")
+	}
+
+	return nil
+}
+
+// Query the keyspace group info from the tso server by the keyspace ID. The server side will return
+// the info of the keyspace group to which this keyspace belongs.
+func (c *tsoServiceDiscovery) findGroupByKeyspaceID(
+	keyspaceID uint32, tsoSrvURL string, timeout time.Duration,
+) (*tsopb.KeyspaceGroup, error) {
+	failpoint.Inject("unexpectedCallOfFindGroupByKeyspaceID", func(val failpoint.Value) {
+		keyspaceToCheck, ok := val.(int)
+		if ok && keyspaceID == uint32(keyspaceToCheck) {
+			panic("findGroupByKeyspaceID is called unexpectedly")
+		}
+	})
+	ctx, cancel := context.WithTimeout(c.ctx, timeout)
+	defer cancel()
+
+	cc, err := c.GetOrCreateGRPCConn(tsoSrvURL)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := tsopb.NewTSOClient(cc).FindGroupByKeyspaceID(
+		ctx, &tsopb.FindGroupByKeyspaceIDRequest{
+			Header: &tsopb.RequestHeader{
+				ClusterId:       c.clusterID,
+				KeyspaceId:      keyspaceID,
+				KeyspaceGroupId: defaultKeySpaceGroupID,
+			},
+			KeyspaceId: keyspaceID,
+		})
+	if err != nil {
+		attachErr := errors.Errorf("error:%s target:%s status:%s",
+			err, cc.Target(), cc.GetState().String())
+		return nil, errs.ErrClientFindGroupByKeyspaceID.Wrap(attachErr).GenWithStackByCause()
+	}
+	if resp.GetHeader().GetError() != nil {
+		attachErr := errors.Errorf("error:%s target:%s status:%s",
+			resp.GetHeader().GetError().String(), cc.Target(), cc.GetState().String())
+		return nil, errs.ErrClientFindGroupByKeyspaceID.Wrap(attachErr).GenWithStackByCause()
+	}
+	if resp.KeyspaceGroup == nil {
+		attachErr := errors.Errorf("error:%s target:%s status:%s",
+			"no keyspace group found", cc.Target(), cc.GetState().String())
+		return nil, errs.ErrClientFindGroupByKeyspaceID.Wrap(attachErr).GenWithStackByCause()
+	}
+
+	return resp.KeyspaceGroup, nil
+}
+
+func (c *tsoServiceDiscovery) getTSOServer(sd ServiceDiscovery) (string, error) {
+	c.Lock()
+	defer c.Unlock()
+
+	var (
+		urls []string
+		err  error
+	)
+	t := c.tsoServerDiscovery
+	if len(t.urls) == 0 || t.failureCount == len(t.urls) {
+		urls, err = sd.(*pdServiceDiscovery).discoverMicroservice(tsoService)
+		if err != nil {
+			return "", err
+		}
+		failpoint.Inject("serverReturnsNoTSOAddrs", func() {
+			log.Info("[failpoint] injected error: server returns no tso URLs")
+			urls = nil
+		})
+		if len(urls) == 0 {
+			// There is no error but no tso server url found, which means
+			// the server side hasn't been upgraded to the version that
+			// processes and returns GetClusterInfoResponse.TsoUrls. Return here
+			// and handle the fallback logic outside of this function.
+			return "", nil
+		}
+
+		log.Info("update tso server URLs", zap.Strings("urls", urls))
+
+		t.urls = urls
+		t.selectIdx = 0
+		t.failureCount = 0
+	}
+
+	// Pick a TSO server in a round-robin way.
+	tsoServerURL := t.urls[t.selectIdx]
+	t.selectIdx++
+	t.selectIdx %= len(t.urls)
+
+	return tsoServerURL, nil
+}
+
+func (c *tsoServiceDiscovery) discoverWithLegacyPath() ([]string, error) {
+	resp, err := c.metacli.Get(c.ctx, []byte(c.defaultDiscoveryKey))
+	if err != nil {
+		log.Error("[tso] failed to get the keyspace serving endpoint",
+			zap.String("discovery-key", c.defaultDiscoveryKey), errs.ZapError(err))
+		return nil, err
+	}
 	if resp == nil || len(resp.Kvs) == 0 {
-		log.Error("[tso] didn't find the keyspace serving endpoint", zap.String("primary-key", c.primaryKey))
-		return errs.ErrClientGetServingEndpoint
+		log.Error("[tso] didn't find the keyspace serving endpoint",
+			zap.String("primary-key", c.defaultDiscoveryKey))
+		return nil, errs.ErrClientGetServingEndpoint
 	} else if resp.Count > 1 {
-		return errs.ErrClientGetMultiResponse.FastGenByArgs(resp.Kvs)
+		return nil, errs.ErrClientGetMultiResponse.FastGenByArgs(resp.Kvs)
 	}
 
 	value := resp.Kvs[0].Value
 	primary := &tsopb.Participant{}
 	if err := proto.Unmarshal(value, primary); err != nil {
-		return errs.ErrClientProtoUnmarshal.Wrap(err).GenWithStackByCause()
+		return nil, errs.ErrClientProtoUnmarshal.Wrap(err).GenWithStackByCause()
 	}
 	listenUrls := primary.GetListenUrls()
 	if len(listenUrls) == 0 {
-		log.Error("[tso] the keyspace serving endpoint list is empty", zap.String("primary-key", c.primaryKey))
-		return errs.ErrClientGetServingEndpoint
+		log.Error("[tso] the keyspace serving endpoint list is empty",
+			zap.String("discovery-key", c.defaultDiscoveryKey))
+		return nil, errs.ErrClientGetServingEndpoint
 	}
-	return c.switchPrimary(listenUrls)
+	return listenUrls, nil
 }

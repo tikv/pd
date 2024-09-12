@@ -31,6 +31,9 @@ import (
 	"github.com/unrolled/render"
 )
 
+// enableFailPointAPI enable fail point API handler.
+var enableFailPointAPI bool
+
 // createRouteOption is used to register service for mux.Route
 type createRouteOption func(route *mux.Route)
 
@@ -68,7 +71,7 @@ func createIndentRender() *render.Render {
 	})
 }
 
-func getFunctionName(f interface{}) string {
+func getFunctionName(f any) string {
 	strs := strings.Split(runtime.FuncForPC(reflect.ValueOf(f).Pointer()).Name(), ".")
 	return strings.Split(strs[len(strs)-1], "-")[0]
 }
@@ -85,10 +88,10 @@ func getFunctionName(f interface{}) string {
 // @BasePath       /pd/api/v1
 func createRouter(prefix string, svr *server.Server) *mux.Router {
 	serviceMiddle := newServiceMiddlewareBuilder(svr)
-	registerPrefix := func(router *mux.Router, prefixPath string,
+	registerPrefix := func(router *mux.Router, prefixPath, name string,
 		handleFunc func(http.ResponseWriter, *http.Request), opts ...createRouteOption) {
 		routeCreateFunc(router.PathPrefix(prefixPath), serviceMiddle.createHandler(handleFunc),
-			getFunctionName(handleFunc), opts...)
+			name, opts...)
 	}
 	registerFunc := func(router *mux.Router, path string,
 		handleFunc func(http.ResponseWriter, *http.Request), opts ...createRouteOption) {
@@ -123,13 +126,14 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	apiRouter := rootRouter.PathPrefix(apiPrefix).Subrouter()
 
 	clusterRouter := apiRouter.NewRoute().Subrouter()
-	clusterRouter.Use(newClusterMiddleware(svr).Middleware)
+	clusterRouter.Use(newClusterMiddleware(svr).middleware)
 
 	escapeRouter := clusterRouter.NewRoute().Subrouter().UseEncodedPath()
 
 	operatorHandler := newOperatorHandler(handler, rd)
 	registerFunc(apiRouter, "/operators", operatorHandler.GetOperators, setMethods(http.MethodGet), setAuditBackend(prometheus))
 	registerFunc(apiRouter, "/operators", operatorHandler.CreateOperator, setMethods(http.MethodPost), setAuditBackend(localLog, prometheus))
+	registerFunc(apiRouter, "/operators", operatorHandler.DeleteOperators, setMethods(http.MethodDelete), setAuditBackend(localLog, prometheus))
 	registerFunc(apiRouter, "/operators/records", operatorHandler.GetOperatorRecords, setMethods(http.MethodGet), setAuditBackend(prometheus))
 	registerFunc(apiRouter, "/operators/{region_id}", operatorHandler.GetOperatorsByRegion, setMethods(http.MethodGet), setAuditBackend(prometheus))
 	registerFunc(apiRouter, "/operators/{region_id}", operatorHandler.DeleteOperatorByRegion, setMethods(http.MethodDelete), setAuditBackend(localLog, prometheus))
@@ -145,10 +149,11 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	registerFunc(apiRouter, "/schedulers/{name}", schedulerHandler.PauseOrResumeScheduler, setMethods(http.MethodPost), setAuditBackend(localLog, prometheus))
 
 	diagnosticHandler := newDiagnosticHandler(svr, rd)
-	registerFunc(clusterRouter, "/schedulers/diagnostic/{name}", diagnosticHandler.GetDiagnosticResult, setMethods(http.MethodGet), setAuditBackend(prometheus))
+	registerFunc(clusterRouter, "/schedulers/diagnostic/{name}", diagnosticHandler.getDiagnosticResult, setMethods(http.MethodGet), setAuditBackend(prometheus))
 
 	schedulerConfigHandler := newSchedulerConfigHandler(svr, rd)
-	registerPrefix(apiRouter, "/scheduler-config", schedulerConfigHandler.GetSchedulerConfig, setAuditBackend(prometheus))
+	registerPrefix(apiRouter, "/scheduler-config", "HandleSchedulerConfig", schedulerConfigHandler.handleSchedulerConfig, setMethods(http.MethodPost, http.MethodDelete, http.MethodPut, http.MethodPatch), setAuditBackend(localLog, prometheus))
+	registerPrefix(apiRouter, "/scheduler-config", "GetSchedulerConfig", schedulerConfigHandler.handleSchedulerConfig, setMethods(http.MethodGet), setAuditBackend(prometheus))
 
 	clusterHandler := newClusterHandler(svr, rd)
 	registerFunc(apiRouter, "/cluster", clusterHandler.GetCluster, setMethods(http.MethodGet), setAuditBackend(prometheus))
@@ -171,29 +176,31 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	registerFunc(apiRouter, "/config/replication-mode", confHandler.SetReplicationModeConfig, setMethods(http.MethodPost), setAuditBackend(localLog, prometheus))
 
 	rulesHandler := newRulesHandler(svr, rd)
-	registerFunc(clusterRouter, "/config/rules", rulesHandler.GetAllRules, setMethods(http.MethodGet), setAuditBackend(prometheus))
-	registerFunc(clusterRouter, "/config/rules", rulesHandler.SetAllRules, setMethods(http.MethodPost), setAuditBackend(localLog, prometheus))
-	registerFunc(clusterRouter, "/config/rules/batch", rulesHandler.BatchRules, setMethods(http.MethodPost), setAuditBackend(localLog, prometheus))
-	registerFunc(clusterRouter, "/config/rules/group/{group}", rulesHandler.GetRuleByGroup, setMethods(http.MethodGet), setAuditBackend(prometheus))
-	registerFunc(clusterRouter, "/config/rules/region/{region}", rulesHandler.GetRulesByRegion, setMethods(http.MethodGet), setAuditBackend(prometheus))
-	registerFunc(clusterRouter, "/config/rules/region/{region}/detail", rulesHandler.CheckRegionPlacementRule, setMethods(http.MethodGet), setAuditBackend(prometheus))
-	registerFunc(clusterRouter, "/config/rules/key/{key}", rulesHandler.GetRulesByKey, setMethods(http.MethodGet), setAuditBackend(prometheus))
-	registerFunc(clusterRouter, "/config/rule/{group}/{id}", rulesHandler.GetRuleByGroupAndID, setMethods(http.MethodGet), setAuditBackend(prometheus))
-	registerFunc(clusterRouter, "/config/rule", rulesHandler.SetRule, setMethods(http.MethodPost), setAuditBackend(localLog, prometheus))
-	registerFunc(clusterRouter, "/config/rule/{group}/{id}", rulesHandler.DeleteRuleByGroup, setMethods(http.MethodDelete), setAuditBackend(localLog, prometheus))
+	ruleRouter := clusterRouter.NewRoute().Subrouter()
+	ruleRouter.Use(newRuleMiddleware(svr, rd).middleware)
+	registerFunc(ruleRouter, "/config/rules", rulesHandler.GetAllRules, setMethods(http.MethodGet), setAuditBackend(prometheus))
+	registerFunc(ruleRouter, "/config/rules", rulesHandler.SetAllRules, setMethods(http.MethodPost), setAuditBackend(localLog, prometheus))
+	registerFunc(ruleRouter, "/config/rules/batch", rulesHandler.BatchRules, setMethods(http.MethodPost), setAuditBackend(localLog, prometheus))
+	registerFunc(ruleRouter, "/config/rules/group/{group}", rulesHandler.GetRuleByGroup, setMethods(http.MethodGet), setAuditBackend(prometheus))
+	registerFunc(ruleRouter, "/config/rules/region/{region}", rulesHandler.GetRulesByRegion, setMethods(http.MethodGet), setAuditBackend(prometheus))
+	registerFunc(ruleRouter, "/config/rules/region/{region}/detail", rulesHandler.CheckRegionPlacementRule, setMethods(http.MethodGet), setAuditBackend(prometheus))
+	registerFunc(ruleRouter, "/config/rules/key/{key}", rulesHandler.GetRulesByKey, setMethods(http.MethodGet), setAuditBackend(prometheus))
+	registerFunc(ruleRouter, "/config/rule/{group}/{id}", rulesHandler.GetRuleByGroupAndID, setMethods(http.MethodGet), setAuditBackend(prometheus))
+	registerFunc(ruleRouter, "/config/rule", rulesHandler.SetRule, setMethods(http.MethodPost), setAuditBackend(localLog, prometheus))
+	registerFunc(ruleRouter, "/config/rule/{group}/{id}", rulesHandler.DeleteRuleByGroup, setMethods(http.MethodDelete), setAuditBackend(localLog, prometheus))
 
-	registerFunc(clusterRouter, "/config/rule_group/{id}", rulesHandler.GetGroupConfig, setMethods(http.MethodGet), setAuditBackend(prometheus))
-	registerFunc(clusterRouter, "/config/rule_group", rulesHandler.SetGroupConfig, setMethods(http.MethodPost), setAuditBackend(localLog, prometheus))
-	registerFunc(clusterRouter, "/config/rule_group/{id}", rulesHandler.DeleteGroupConfig, setMethods(http.MethodDelete), setAuditBackend(localLog, prometheus))
-	registerFunc(clusterRouter, "/config/rule_groups", rulesHandler.GetAllGroupConfigs, setMethods(http.MethodGet), setAuditBackend(prometheus))
+	registerFunc(ruleRouter, "/config/rule_group/{id}", rulesHandler.GetGroupConfig, setMethods(http.MethodGet), setAuditBackend(prometheus))
+	registerFunc(ruleRouter, "/config/rule_group", rulesHandler.SetGroupConfig, setMethods(http.MethodPost), setAuditBackend(localLog, prometheus))
+	registerFunc(ruleRouter, "/config/rule_group/{id}", rulesHandler.DeleteGroupConfig, setMethods(http.MethodDelete), setAuditBackend(localLog, prometheus))
+	registerFunc(ruleRouter, "/config/rule_groups", rulesHandler.GetAllGroupConfigs, setMethods(http.MethodGet), setAuditBackend(prometheus))
 
-	registerFunc(clusterRouter, "/config/placement-rule", rulesHandler.GetPlacementRules, setMethods(http.MethodGet), setAuditBackend(prometheus))
-	registerFunc(clusterRouter, "/config/placement-rule", rulesHandler.SetPlacementRules, setMethods(http.MethodPost), setAuditBackend(localLog, prometheus))
+	registerFunc(ruleRouter, "/config/placement-rule", rulesHandler.GetPlacementRules, setMethods(http.MethodGet), setAuditBackend(prometheus))
+	registerFunc(ruleRouter, "/config/placement-rule", rulesHandler.SetPlacementRules, setMethods(http.MethodPost), setAuditBackend(localLog, prometheus))
 	// {group} can be a regular expression, we should enable path encode to
 	// support special characters.
-	registerFunc(clusterRouter, "/config/placement-rule/{group}", rulesHandler.GetPlacementRuleByGroup, setMethods(http.MethodGet), setAuditBackend(prometheus))
-	registerFunc(clusterRouter, "/config/placement-rule/{group}", rulesHandler.SetPlacementRuleByGroup, setMethods(http.MethodPost), setAuditBackend(localLog, prometheus))
-	registerFunc(escapeRouter, "/config/placement-rule/{group}", rulesHandler.DeletePlacementRuleByGroup, setMethods(http.MethodDelete), setAuditBackend(localLog, prometheus))
+	registerFunc(ruleRouter, "/config/placement-rule/{group}", rulesHandler.GetPlacementRuleByGroup, setMethods(http.MethodGet), setAuditBackend(prometheus))
+	registerFunc(ruleRouter, "/config/placement-rule/{group}", rulesHandler.SetPlacementRuleByGroup, setMethods(http.MethodPost), setAuditBackend(localLog, prometheus))
+	registerFunc(ruleRouter, "/config/placement-rule/{group}", rulesHandler.DeletePlacementRuleByGroup, setMethods(http.MethodDelete), setAuditBackend(localLog, prometheus))
 
 	regionLabelHandler := newRegionLabelHandler(svr, rd)
 	registerFunc(clusterRouter, "/config/region-label/rules", regionLabelHandler.GetAllRegionLabelRules, setMethods(http.MethodGet), setAuditBackend(prometheus))
@@ -216,13 +223,14 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	registerFunc(clusterRouter, "/store/{id}/limit", storeHandler.SetStoreLimit, setMethods(http.MethodPost), setAuditBackend(localLog, prometheus))
 
 	storesHandler := newStoresHandler(handler, rd)
-	registerFunc(clusterRouter, "/stores", storesHandler.GetStores, setMethods(http.MethodGet), setAuditBackend(prometheus))
+	registerFunc(clusterRouter, "/stores", storesHandler.GetAllStores, setMethods(http.MethodGet), setAuditBackend(prometheus))
 	registerFunc(clusterRouter, "/stores/remove-tombstone", storesHandler.RemoveTombStone, setMethods(http.MethodDelete), setAuditBackend(localLog, prometheus))
 	registerFunc(clusterRouter, "/stores/limit", storesHandler.GetAllStoresLimit, setMethods(http.MethodGet), setAuditBackend(prometheus))
 	registerFunc(clusterRouter, "/stores/limit", storesHandler.SetAllStoresLimit, setMethods(http.MethodPost), setAuditBackend(localLog, prometheus))
 	registerFunc(clusterRouter, "/stores/limit/scene", storesHandler.SetStoreLimitScene, setMethods(http.MethodPost), setAuditBackend(localLog, prometheus))
 	registerFunc(clusterRouter, "/stores/limit/scene", storesHandler.GetStoreLimitScene, setMethods(http.MethodGet), setAuditBackend(prometheus))
 	registerFunc(clusterRouter, "/stores/progress", storesHandler.GetStoresProgress, setMethods(http.MethodGet), setAuditBackend(prometheus))
+	registerFunc(clusterRouter, "/stores/check", storesHandler.GetStoresByState, setMethods(http.MethodGet), setAuditBackend(prometheus))
 
 	labelsHandler := newLabelsHandler(svr, rd)
 	registerFunc(clusterRouter, "/labels", labelsHandler.GetLabels, setMethods(http.MethodGet), setAuditBackend(prometheus))
@@ -233,6 +241,7 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	registerFunc(apiRouter, "/hotspot/regions/read", hotStatusHandler.GetHotReadRegions, setMethods(http.MethodGet), setAuditBackend(prometheus))
 	registerFunc(apiRouter, "/hotspot/regions/history", hotStatusHandler.GetHistoryHotRegions, setMethods(http.MethodGet), setAuditBackend(prometheus))
 	registerFunc(apiRouter, "/hotspot/stores", hotStatusHandler.GetHotStores, setMethods(http.MethodGet), setAuditBackend(prometheus))
+	registerFunc(apiRouter, "/hotspot/buckets", hotStatusHandler.GetHotBuckets, setMethods(http.MethodGet), setAuditBackend(prometheus))
 
 	regionHandler := newRegionHandler(svr, rd)
 	registerFunc(clusterRouter, "/region/id/{id}", regionHandler.GetRegionByID, setMethods(http.MethodGet), setAuditBackend(prometheus))
@@ -240,14 +249,17 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 
 	srd := createStreamingRender()
 	regionsAllHandler := newRegionsHandler(svr, srd)
-	registerFunc(clusterRouter, "/regions", regionsAllHandler.GetRegions, setMethods(http.MethodGet), setAuditBackend(prometheus))
+	registerFunc(clusterRouter, "/regions", regionsAllHandler.GetRegions, setMethods(http.MethodGet), setAuditBackend(localLog, prometheus))
 
 	regionsHandler := newRegionsHandler(svr, rd)
 	registerFunc(clusterRouter, "/regions/key", regionsHandler.ScanRegions, setMethods(http.MethodGet), setAuditBackend(prometheus))
 	registerFunc(clusterRouter, "/regions/count", regionsHandler.GetRegionCount, setMethods(http.MethodGet), setAuditBackend(prometheus))
 	registerFunc(clusterRouter, "/regions/store/{id}", regionsHandler.GetStoreRegions, setMethods(http.MethodGet), setAuditBackend(prometheus))
+	registerFunc(clusterRouter, "/regions/keyspace/id/{id}", regionsHandler.GetKeyspaceRegions, setMethods(http.MethodGet), setAuditBackend(prometheus))
 	registerFunc(clusterRouter, "/regions/writeflow", regionsHandler.GetTopWriteFlowRegions, setMethods(http.MethodGet), setAuditBackend(prometheus))
+	registerFunc(clusterRouter, "/regions/writequery", regionsHandler.GetTopWriteQueryRegions, setMethods(http.MethodGet), setAuditBackend(prometheus))
 	registerFunc(clusterRouter, "/regions/readflow", regionsHandler.GetTopReadFlowRegions, setMethods(http.MethodGet), setAuditBackend(prometheus))
+	registerFunc(clusterRouter, "/regions/readquery", regionsHandler.GetTopReadQueryRegions, setMethods(http.MethodGet), setAuditBackend(prometheus))
 	registerFunc(clusterRouter, "/regions/confver", regionsHandler.GetTopConfVerRegions, setMethods(http.MethodGet), setAuditBackend(prometheus))
 	registerFunc(clusterRouter, "/regions/version", regionsHandler.GetTopVersionRegions, setMethods(http.MethodGet), setAuditBackend(prometheus))
 	registerFunc(clusterRouter, "/regions/size", regionsHandler.GetTopSizeRegions, setMethods(http.MethodGet), setAuditBackend(prometheus))
@@ -267,6 +279,7 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	registerFunc(clusterRouter, "/regions/check/hist-keys", regionsHandler.GetKeysHistogram, setMethods(http.MethodGet), setAuditBackend(prometheus))
 	registerFunc(clusterRouter, "/regions/sibling/{id}", regionsHandler.GetRegionSiblings, setMethods(http.MethodGet), setAuditBackend(prometheus))
 	registerFunc(clusterRouter, "/regions/accelerate-schedule", regionsHandler.AccelerateRegionsScheduleInRange, setMethods(http.MethodPost), setAuditBackend(localLog, prometheus))
+	registerFunc(clusterRouter, "/regions/accelerate-schedule/batch", regionsHandler.AccelerateRegionsScheduleInRanges, setMethods(http.MethodPost), setAuditBackend(localLog, prometheus))
 	registerFunc(clusterRouter, "/regions/scatter", regionsHandler.ScatterRegions, setMethods(http.MethodPost), setAuditBackend(localLog, prometheus))
 	registerFunc(clusterRouter, "/regions/split", regionsHandler.SplitRegions, setMethods(http.MethodPost), setAuditBackend(localLog, prometheus))
 	registerFunc(clusterRouter, "/regions/range-holes", regionsHandler.GetRangeHoles, setMethods(http.MethodGet), setAuditBackend(prometheus))
@@ -294,18 +307,19 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 
 	adminHandler := newAdminHandler(svr, rd)
 	registerFunc(clusterRouter, "/admin/cache/region/{id}", adminHandler.DeleteRegionCache, setMethods(http.MethodDelete), setAuditBackend(localLog, prometheus))
+	registerFunc(clusterRouter, "/admin/storage/region/{id}", adminHandler.DeleteRegionStorage, setMethods(http.MethodDelete), setAuditBackend(localLog, prometheus))
 	registerFunc(clusterRouter, "/admin/cache/regions", adminHandler.DeleteAllRegionCache, setMethods(http.MethodDelete), setAuditBackend(localLog, prometheus))
 	registerFunc(apiRouter, "/admin/persist-file/{file_name}", adminHandler.SavePersistFile, setMethods(http.MethodPost), setAuditBackend(localLog, prometheus))
-	registerFunc(apiRouter, "/admin/persist-file/{file_name}", adminHandler.SavePersistFile, setMethods(http.MethodPost), setAuditBackend(localLog, prometheus))
-	registerFunc(apiRouter, "/admin/cluster/markers/snapshot-recovering", adminHandler.IsSnapshotRecovering, setMethods(http.MethodGet), setAuditBackend(localLog, prometheus))
-	registerFunc(apiRouter, "/admin/cluster/markers/snapshot-recovering", adminHandler.MarkSnapshotRecovering, setMethods(http.MethodPost), setAuditBackend(localLog, prometheus))
-	registerFunc(apiRouter, "/admin/cluster/markers/snapshot-recovering", adminHandler.UnmarkSnapshotRecovering, setMethods(http.MethodDelete), setAuditBackend(localLog, prometheus))
-	registerFunc(apiRouter, "/admin/base-alloc-id", adminHandler.RecoverAllocID, setMethods(http.MethodPost), setAuditBackend(localLog, prometheus))
+	registerFunc(apiRouter, "/admin/cluster/markers/snapshot-recovering", adminHandler.isSnapshotRecovering, setMethods(http.MethodGet), setAuditBackend(localLog, prometheus))
+	registerFunc(apiRouter, "/admin/cluster/markers/snapshot-recovering", adminHandler.markSnapshotRecovering, setMethods(http.MethodPost), setAuditBackend(localLog, prometheus))
+	registerFunc(apiRouter, "/admin/cluster/markers/snapshot-recovering", adminHandler.unmarkSnapshotRecovering, setMethods(http.MethodDelete), setAuditBackend(localLog, prometheus))
+	registerFunc(apiRouter, "/admin/base-alloc-id", adminHandler.recoverAllocID, setMethods(http.MethodPost), setAuditBackend(localLog, prometheus))
 
 	serviceMiddlewareHandler := newServiceMiddlewareHandler(svr, rd)
 	registerFunc(apiRouter, "/service-middleware/config", serviceMiddlewareHandler.GetServiceMiddlewareConfig, setMethods(http.MethodGet), setAuditBackend(prometheus))
 	registerFunc(apiRouter, "/service-middleware/config", serviceMiddlewareHandler.SetServiceMiddlewareConfig, setMethods(http.MethodPost), setAuditBackend(localLog, prometheus))
-	registerFunc(apiRouter, "/service-middleware/config/rate-limit", serviceMiddlewareHandler.SetRatelimitConfig, setMethods(http.MethodPost), setAuditBackend(localLog, prometheus), setRateLimitAllowList())
+	registerFunc(apiRouter, "/service-middleware/config/rate-limit", serviceMiddlewareHandler.SetRateLimitConfig, setMethods(http.MethodPost), setAuditBackend(localLog, prometheus), setRateLimitAllowList())
+	registerFunc(apiRouter, "/service-middleware/config/grpc-rate-limit", serviceMiddlewareHandler.SetGRPCRateLimitConfig, setMethods(http.MethodPost), setAuditBackend(localLog, prometheus), setRateLimitAllowList())
 
 	logHandler := newLogHandler(svr, rd)
 	registerFunc(apiRouter, "/admin/log", logHandler.SetLogLevel, setMethods(http.MethodPost), setAuditBackend(localLog, prometheus))
@@ -313,29 +327,29 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	registerFunc(clusterRouter, "/replication_mode/status", replicationModeHandler.GetReplicationModeStatus, setAuditBackend(prometheus))
 
 	pluginHandler := newPluginHandler(handler, rd)
-	registerFunc(apiRouter, "/plugin", pluginHandler.LoadPlugin, setMethods(http.MethodPost), setAuditBackend(prometheus))
-	registerFunc(apiRouter, "/plugin", pluginHandler.UnloadPlugin, setMethods(http.MethodDelete), setAuditBackend(prometheus))
+	registerFunc(apiRouter, "/plugin", pluginHandler.loadPlugin, setMethods(http.MethodPost), setAuditBackend(prometheus))
+	registerFunc(apiRouter, "/plugin", pluginHandler.unloadPlugin, setMethods(http.MethodDelete), setAuditBackend(prometheus))
 
 	healthHandler := newHealthHandler(svr, rd)
 	registerFunc(apiRouter, "/health", healthHandler.GetHealthStatus, setMethods(http.MethodGet), setAuditBackend(prometheus))
 	registerFunc(apiRouter, "/ping", healthHandler.Ping, setMethods(http.MethodGet), setAuditBackend(prometheus))
 
 	// metric query use to query metric data, the protocol is compatible with prometheus.
-	registerFunc(apiRouter, "/metric/query", newQueryMetric(svr).QueryMetric, setMethods(http.MethodGet, http.MethodPost), setAuditBackend(prometheus))
-	registerFunc(apiRouter, "/metric/query_range", newQueryMetric(svr).QueryMetric, setMethods(http.MethodGet, http.MethodPost), setAuditBackend(prometheus))
+	registerFunc(apiRouter, "/metric/query", newqueryMetric(svr).queryMetric, setMethods(http.MethodGet, http.MethodPost), setAuditBackend(prometheus))
+	registerFunc(apiRouter, "/metric/query_range", newqueryMetric(svr).queryMetric, setMethods(http.MethodGet, http.MethodPost), setAuditBackend(prometheus))
 
 	pprofHandler := newPprofHandler(svr, rd)
 	// profile API
-	registerFunc(apiRouter, "/debug/pprof/profile", pprof.Profile)
-	registerFunc(apiRouter, "/debug/pprof/trace", pprof.Trace)
-	registerFunc(apiRouter, "/debug/pprof/symbol", pprof.Symbol)
-	registerFunc(apiRouter, "/debug/pprof/heap", pprofHandler.PProfHeap)
-	registerFunc(apiRouter, "/debug/pprof/mutex", pprofHandler.PProfMutex)
-	registerFunc(apiRouter, "/debug/pprof/allocs", pprofHandler.PProfAllocs)
-	registerFunc(apiRouter, "/debug/pprof/block", pprofHandler.PProfBlock)
-	registerFunc(apiRouter, "/debug/pprof/goroutine", pprofHandler.PProfGoroutine)
-	registerFunc(apiRouter, "/debug/pprof/threadcreate", pprofHandler.PProfThreadcreate)
-	registerFunc(apiRouter, "/debug/pprof/zip", pprofHandler.PProfZip)
+	registerFunc(apiRouter, "/debug/pprof/profile", pprof.Profile, setAuditBackend(localLog))
+	registerFunc(apiRouter, "/debug/pprof/trace", pprof.Trace, setAuditBackend(localLog))
+	registerFunc(apiRouter, "/debug/pprof/symbol", pprof.Symbol, setAuditBackend(localLog))
+	registerFunc(apiRouter, "/debug/pprof/heap", pprofHandler.PProfHeap, setAuditBackend(localLog))
+	registerFunc(apiRouter, "/debug/pprof/mutex", pprofHandler.PProfMutex, setAuditBackend(localLog))
+	registerFunc(apiRouter, "/debug/pprof/allocs", pprofHandler.PProfAllocs, setAuditBackend(localLog))
+	registerFunc(apiRouter, "/debug/pprof/block", pprofHandler.PProfBlock, setAuditBackend(localLog))
+	registerFunc(apiRouter, "/debug/pprof/goroutine", pprofHandler.PProfGoroutine, setAuditBackend(localLog))
+	registerFunc(apiRouter, "/debug/pprof/threadcreate", pprofHandler.PProfThreadcreate, setAuditBackend(localLog))
+	registerFunc(apiRouter, "/debug/pprof/zip", pprofHandler.PProfZip, setAuditBackend(localLog))
 
 	// service GC safepoint API
 	serviceGCSafepointHandler := newServiceGCSafepointHandler(svr, rd)
@@ -345,6 +359,7 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	// min resolved ts API
 	minResolvedTSHandler := newMinResolvedTSHandler(svr, rd)
 	registerFunc(clusterRouter, "/min-resolved-ts", minResolvedTSHandler.GetMinResolvedTS, setMethods(http.MethodGet), setAuditBackend(prometheus))
+	registerFunc(clusterRouter, "/min-resolved-ts/{store_id}", minResolvedTSHandler.GetStoreMinResolvedTS, setMethods(http.MethodGet), setAuditBackend(prometheus))
 
 	// unsafe admin operation API
 	unsafeOperationHandler := newUnsafeOperationHandler(svr, rd)
@@ -361,21 +376,19 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	registerFunc(apiRouter, "/admin/reset-ts", tsoAdminHandler.ResetTS, setMethods(http.MethodPost), setAuditBackend(localLog, prometheus))
 
 	// API to set or unset failpoints
-	failpoint.Inject("enableFailpointAPI", func() {
-		// this function will be named to "func2". It may be used in test
-		registerPrefix(apiRouter, "/fail", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	if enableFailPointAPI {
+		registerPrefix(apiRouter, "/fail", "FailPoint", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// The HTTP handler of failpoint requires the full path to be the failpoint path.
 			r.URL.Path = strings.TrimPrefix(r.URL.Path, prefix+apiPrefix+"/fail")
 			new(failpoint.HttpHandler).ServeHTTP(w, r)
-		}), setAuditBackend("test"))
-	})
-
+		}), setAuditBackend(localLog))
+	}
 	// Deprecated: use /pd/api/v1/health instead.
 	rootRouter.HandleFunc("/health", healthHandler.GetHealthStatus).Methods(http.MethodGet)
 	// Deprecated: use /pd/api/v1/ping instead.
-	rootRouter.HandleFunc("/ping", func(w http.ResponseWriter, r *http.Request) {}).Methods(http.MethodGet)
+	rootRouter.HandleFunc("/ping", func(http.ResponseWriter, *http.Request) {}).Methods(http.MethodGet)
 
-	rootRouter.Walk(func(route *mux.Route, router *mux.Router, ancestors []*mux.Route) error {
+	_ = rootRouter.Walk(func(route *mux.Route, _ *mux.Router, _ []*mux.Route) error {
 		serviceLabel := route.GetName()
 		methods, _ := route.GetMethods()
 		path, _ := route.GetPathTemplate()

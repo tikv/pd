@@ -17,43 +17,8 @@ package config
 import (
 	"testing"
 
-	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/require"
 )
-
-func TestValidateLabels(t *testing.T) {
-	re := require.New(t)
-	tests := []struct {
-		label  string
-		hasErr bool
-	}{
-		{"z1", false},
-		{"z-1", false},
-		{"h1;", true},
-		{"z_1", false},
-		{"z_1&", true},
-		{"cn", false},
-		{"Zo^ne", true},
-		{"z_", true},
-		{"hos&t-15", true},
-		{"_test1", true},
-		{"-test1", true},
-		{"127.0.0.1", false},
-		{"www.pingcap.com", false},
-		{"h_127.0.0.1", false},
-		{"a", false},
-		{"a/b", false},
-		{"ab/", true},
-		{"/ab", true},
-		{"$abc", false},
-		{"$", true},
-		{"a$b", true},
-		{"$$", true},
-	}
-	for _, test := range tests {
-		re.Equal(test.hasErr, ValidateLabels([]*metapb.StoreLabel{{Key: test.label}}) != nil)
-	}
-}
 
 func TestValidateURLWithScheme(t *testing.T) {
 	re := require.New(t)

@@ -7,6 +7,7 @@ on:
       - release-5.*
       - release-6.*
       - release-7.*
+      - release-8.*
   pull_request:
     branches:
       - master
@@ -14,6 +15,7 @@ on:
       - release-5.*
       - release-6.*
       - release-7.*
+      - release-8.*
 concurrency:
   group: ${{ github.ref }}-${{ github.workflow }}
   cancel-in-progress: true
@@ -23,54 +25,70 @@ jobs:
     strategy:
       fail-fast: true
       matrix:
-        worker_id: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+        include:
+          - worker_id: 1
+            name: 'Unit Test(1)'
+          - worker_id: 2
+            name: 'Unit Test(2)'
+          - worker_id: 3
+            name: 'Unit Test(3)'
+          - worker_id: 4
+            name: 'Tests(1)'
+          - worker_id: 5
+            name: 'Tests(2)'
+          - worker_id: 6
+            name: 'Tools Test'
+          - worker_id: 7
+            name: 'Client Integration Test'
+          - worker_id: 8
+            name: 'TSO Integration Test'
+          - worker_id: 9
+            name: 'MicroService Integration(!TSO)'
+          - worker_id: 10
+            name: 'MicroService Integration(TSO)'
     outputs:
       job-total: 10
     steps:
-      - uses: actions/setup-go@v3
-        with:
-          go-version: "1.20.1"
       - name: Checkout code
-        uses: actions/checkout@v3
-      - name: Restore cache
-        uses: actions/cache@v3
+        uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
         with:
-          path: |
-            ~/go/pkg/mod
-            ~/.cache/go-build
-            **/.tools
-            **/.dashboard_download_cache
-          key: ${{ runner.os }}-go-${{ matrix.worker_id }}-${{ hashFiles('**/go.sum') }}
-      - name: Make Test
+          go-version: '1.21'
+      - name: ${{ matrix.name }}
         env:
           WORKER_ID: ${{ matrix.worker_id }}
-          WORKER_COUNT: 10
         run: |
-          [ $WORKER_ID -ne $WORKER_COUNT ] && make ci-test-job JOB_COUNT=$(($WORKER_COUNT-1)) JOB_INDEX=$WORKER_ID
-          [ $WORKER_ID -eq $WORKER_COUNT ] && make ci-test-job-submod
+          make ci-test-job JOB_INDEX=$WORKER_ID
           mv covprofile covprofile_$WORKER_ID
-          sed -i "/failpoint_binding/d" covprofile_$WORKER_ID
+          if [ -f junitfile ]; then
+            cat junitfile
+          fi
       - name: Upload coverage result ${{ matrix.worker_id }}
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v4
         with:
-          name: cover-reports
+          name: cover-reports-${{ matrix.worker_id }}
           path: covprofile_${{ matrix.worker_id }}
   report-coverage:
     needs: chunks
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
       - name: Download chunk report
-        uses: actions/download-artifact@v2
+        uses: actions/download-artifact@v4
         with:
-          name: cover-reports
+          pattern: cover-reports-*
+          merge-multiple: true
       - name: Merge
         env:
           TOTAL_JOBS: ${{needs.chunks.outputs.job-total}}
-        run: for i in $(seq 1 $TOTAL_JOBS); do cat covprofile_$i >> covprofile; done
+        run: |
+          for i in $(seq 1 $TOTAL_JOBS); do cat covprofile_$i >> covprofile; done
+          sed -i "/failpoint_binding/d" covprofile
+          # only keep the first line(`mode: aomic`) of the coverage profile
+          sed -i '2,${/mode: atomic/d;}' covprofile
       - name: Send coverage
-        uses: codecov/codecov-action@v1
+        uses: codecov/codecov-action@v4
         with:
           token: ${{ secrets.CODECOV }}
           file: ./covprofile

@@ -27,10 +27,10 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/codec"
+	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/server/config"
-	"github.com/tikv/pd/server/keyspace"
 	"github.com/tikv/pd/tests"
 )
 
@@ -50,18 +50,19 @@ func TestKeyspaceTestSuite(t *testing.T) {
 }
 
 func (suite *keyspaceTestSuite) SetupTest() {
+	re := suite.Require()
 	ctx, cancel := context.WithCancel(context.Background())
 	suite.cancel = cancel
-	cluster, err := tests.NewTestCluster(ctx, 3, func(conf *config.Config, serverName string) {
+	cluster, err := tests.NewTestCluster(ctx, 3, func(conf *config.Config, _ string) {
 		conf.Keyspace.PreAlloc = preAllocKeyspace
 	})
 	suite.cluster = cluster
-	suite.NoError(err)
-	suite.NoError(cluster.RunInitialServers())
-	suite.NotEmpty(cluster.WaitLeader())
-	suite.server = cluster.GetServer(cluster.GetLeader())
+	re.NoError(err)
+	re.NoError(cluster.RunInitialServers())
+	re.NotEmpty(cluster.WaitLeader())
+	suite.server = cluster.GetLeaderServer()
 	suite.manager = suite.server.GetKeyspaceManager()
-	suite.NoError(suite.server.BootstrapCluster())
+	re.NoError(suite.server.BootstrapCluster())
 }
 
 func (suite *keyspaceTestSuite) TearDownTest() {
@@ -81,8 +82,9 @@ func (suite *keyspaceTestSuite) TestRegionLabeler() {
 	var err error
 	for i := 0; i < count; i++ {
 		keyspaces[i], err = manager.CreateKeyspace(&keyspace.CreateKeyspaceRequest{
-			Name: fmt.Sprintf("test_keyspace%d", i),
-			Now:  now,
+			Name:       fmt.Sprintf("test_keyspace_%d", i),
+			CreateTime: now,
+			IsPreAlloc: true, // skip wait region split
 		})
 		re.NoError(err)
 	}
@@ -99,7 +101,7 @@ func checkLabelRule(re *require.Assertions, id uint32, regionLabeler *labeler.Re
 
 	rangeRule, ok := loadedLabel.Data.([]*labeler.KeyRangeRule)
 	re.True(ok)
-	re.Equal(2, len(rangeRule))
+	re.Len(rangeRule, 2)
 
 	keyspaceIDBytes := make([]byte, 4)
 	nextKeyspaceIDBytes := make([]byte, 4)

@@ -27,8 +27,12 @@ import (
 	"path"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 
+	"github.com/gin-gonic/gin"
 	"github.com/gorilla/mux"
+	"github.com/joho/godotenv"
 	"github.com/pingcap/errcode"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
@@ -38,22 +42,44 @@ import (
 	"go.uber.org/zap"
 )
 
-var (
-	// componentSignatureKey is used for http request header key
-	// to identify component signature
-	componentSignatureKey = "component"
-	// componentAnonymousValue identifies anonymous request source
-	componentAnonymousValue = "anonymous"
-)
-
 const (
-	// ErrRedirectFailed is the error message for redirect failed.
-	ErrRedirectFailed = "redirect failed"
-	// ErrRedirectToNotLeader is the error message for redirect to not leader.
-	ErrRedirectToNotLeader = "redirect to not leader"
+	// componentSignatureKey is used for http request header key to identify component signature.
+	// Deprecated: please use `XCallerIDHeader` below to obtain a more granular source identification.
+	// This is kept for backward compatibility.
+	componentSignatureKey = "component"
+	// anonymousValue identifies anonymous request source
+	anonymousValue = "anonymous"
+
+	// PDRedirectorHeader is used to mark which PD redirected this request.
+	PDRedirectorHeader = "PD-Redirector"
+	// PDAllowFollowerHandleHeader is used to mark whether this request is allowed to be handled by the follower PD.
+	PDAllowFollowerHandleHeader = "PD-Allow-follower-handle" // #nosec G101
+	// XForwardedForHeader is used to mark the client IP.
+	XForwardedForHeader = "X-Forwarded-For"
+	// XForwardedPortHeader is used to mark the client port.
+	XForwardedPortHeader = "X-Forwarded-Port"
+	// XRealIPHeader is used to mark the real client IP.
+	XRealIPHeader = "X-Real-Ip"
+	// XCallerIDHeader is used to mark the caller ID.
+	XCallerIDHeader = "X-Caller-ID"
+	// XForbiddenForwardToMicroServiceHeader is used to indicate that forwarding the request to a microservice is explicitly disallowed.
+	XForbiddenForwardToMicroServiceHeader = "X-Forbidden-Forward-To-MicroService"
+	// XForwardedToMicroServiceHeader is used to signal that the request has already been forwarded to a microservice.
+	XForwardedToMicroServiceHeader = "X-Forwarded-To-MicroService"
 
 	chunkSize = 4096
 )
+
+var once sync.Once
+
+func init() {
+	once.Do(func() {
+		// See https://github.com/pingcap/tidb-dashboard/blob/f8ecb64e3d63f4ed91c3dca7a04362418ade01d8/pkg/apiserver/apiserver.go#L84
+		// These global modification will be effective only for the first invoke.
+		_ = godotenv.Load()
+		gin.SetMode(gin.ReleaseMode)
+	})
+}
 
 // DeferClose captures the error returned from closing (if an error occurs).
 // This is designed to be used in a defer statement.
@@ -101,54 +127,68 @@ func ErrorResp(rd *render.Render, w http.ResponseWriter, err error) {
 	}
 }
 
-// GetIPAddrFromHTTPRequest returns http client IP from context.
+// GetIPPortFromHTTPRequest returns http client host IP and port from context.
 // Because `X-Forwarded-For ` header has been written into RFC 7239(Forwarded HTTP Extension),
-// so `X-Forwarded-For` has the higher priority than `X-Real-IP`.
+// so `X-Forwarded-For` has the higher priority than `X-Real-Ip`.
 // And both of them have the higher priority than `RemoteAddr`
-func GetIPAddrFromHTTPRequest(r *http.Request) string {
-	ips := strings.Split(r.Header.Get("X-Forwarded-For"), ",")
-	if len(strings.Trim(ips[0], " ")) > 0 {
-		return ips[0]
+func GetIPPortFromHTTPRequest(r *http.Request) (ip, port string) {
+	forwardedIPs := strings.Split(r.Header.Get(XForwardedForHeader), ",")
+	if forwardedIP := strings.Trim(forwardedIPs[0], " "); len(forwardedIP) > 0 {
+		ip = forwardedIP
+		// Try to get the port from "X-Forwarded-Port" header.
+		forwardedPorts := strings.Split(r.Header.Get(XForwardedPortHeader), ",")
+		if forwardedPort := strings.Trim(forwardedPorts[0], " "); len(forwardedPort) > 0 {
+			port = forwardedPort
+		}
+	} else if realIP := r.Header.Get(XRealIPHeader); len(realIP) > 0 {
+		ip = realIP
+	} else {
+		ip = r.RemoteAddr
 	}
-
-	ip := r.Header.Get("X-Real-Ip")
-	if ip != "" {
-		return ip
-	}
-
-	ip, _, err := net.SplitHostPort(r.RemoteAddr)
+	splitIP, splitPort, err := net.SplitHostPort(ip)
 	if err != nil {
-		return ""
+		// Ensure we could get an IP address at least.
+		return ip, port
 	}
-	return ip
+	return splitIP, splitPort
 }
 
-// GetComponentNameOnHTTP returns component name from Request Header
-func GetComponentNameOnHTTP(r *http.Request) string {
+// getComponentNameOnHTTP returns component name from the request header.
+func getComponentNameOnHTTP(r *http.Request) string {
 	componentName := r.Header.Get(componentSignatureKey)
 	if len(componentName) == 0 {
-		componentName = componentAnonymousValue
+		componentName = anonymousValue
 	}
 	return componentName
 }
 
-// ComponentSignatureRoundTripper is used to add component signature in HTTP header
-type ComponentSignatureRoundTripper struct {
-	proxied   http.RoundTripper
-	component string
+// GetCallerIDOnHTTP returns caller ID from the request header.
+func GetCallerIDOnHTTP(r *http.Request) string {
+	callerID := r.Header.Get(XCallerIDHeader)
+	if len(callerID) == 0 {
+		// Fall back to get the component name to keep backward compatibility.
+		callerID = getComponentNameOnHTTP(r)
+	}
+	return callerID
 }
 
-// NewComponentSignatureRoundTripper returns a new ComponentSignatureRoundTripper.
-func NewComponentSignatureRoundTripper(roundTripper http.RoundTripper, componentName string) *ComponentSignatureRoundTripper {
-	return &ComponentSignatureRoundTripper{
-		proxied:   roundTripper,
-		component: componentName,
+// CallerIDRoundTripper is used to add caller ID in the HTTP header.
+type CallerIDRoundTripper struct {
+	proxied  http.RoundTripper
+	callerID string
+}
+
+// NewCallerIDRoundTripper returns a new `CallerIDRoundTripper`.
+func NewCallerIDRoundTripper(roundTripper http.RoundTripper, callerID string) *CallerIDRoundTripper {
+	return &CallerIDRoundTripper{
+		proxied:  roundTripper,
+		callerID: callerID,
 	}
 }
 
 // RoundTrip is used to implement RoundTripper
-func (rt *ComponentSignatureRoundTripper) RoundTrip(req *http.Request) (resp *http.Response, err error) {
-	req.Header.Add(componentSignatureKey, rt.component)
+func (rt *CallerIDRoundTripper) RoundTrip(req *http.Request) (resp *http.Response, err error) {
+	req.Header.Add(XCallerIDHeader, rt.callerID)
 	// Send the request, get the response and the error
 	resp, err = rt.proxied.RoundTrip(req)
 	return
@@ -209,17 +249,12 @@ func PostJSONIgnoreResp(client *http.Client, url string, data []byte) error {
 }
 
 // DoDelete is used to send delete request and return http response code.
-func DoDelete(client *http.Client, url string) (int, error) {
-	req, err := http.NewRequest(http.MethodDelete, url, nil)
+func DoDelete(client *http.Client, url string) (*http.Response, error) {
+	req, err := http.NewRequest(http.MethodDelete, url, http.NoBody)
 	if err != nil {
-		return http.StatusBadRequest, err
+		return nil, err
 	}
-	res, err := client.Do(req)
-	if err != nil {
-		return 0, err
-	}
-	defer res.Body.Close()
-	return res.StatusCode, nil
+	return client.Do(req)
 }
 
 func checkResponse(resp *http.Response, err error) error {
@@ -259,7 +294,7 @@ func ParseUint64VarsField(vars map[string]string, varName string) (uint64, *Fiel
 }
 
 // CollectEscapeStringOption is used to collect string using escaping from input map for given option
-func CollectEscapeStringOption(option string, input map[string]interface{}, collectors ...func(v string)) error {
+func CollectEscapeStringOption(option string, input map[string]any, collectors ...func(v string)) error {
 	if v, ok := input[option].(string); ok {
 		value, err := url.QueryUnescape(v)
 		if err != nil {
@@ -274,7 +309,7 @@ func CollectEscapeStringOption(option string, input map[string]interface{}, coll
 }
 
 // CollectStringOption is used to collect string using from input map for given option
-func CollectStringOption(option string, input map[string]interface{}, collectors ...func(v string)) error {
+func CollectStringOption(option string, input map[string]any, collectors ...func(v string)) error {
 	if v, ok := input[option].(string); ok {
 		for _, c := range collectors {
 			c(v)
@@ -285,7 +320,7 @@ func CollectStringOption(option string, input map[string]interface{}, collectors
 }
 
 // ParseKey is used to parse interface into []byte and string
-func ParseKey(name string, input map[string]interface{}) ([]byte, string, error) {
+func ParseKey(name string, input map[string]any) ([]byte, string, error) {
 	k, ok := input[name]
 	if !ok {
 		return nil, "", fmt.Errorf("missing %s", name)
@@ -301,9 +336,33 @@ func ParseKey(name string, input map[string]interface{}) ([]byte, string, error)
 	return returned, rawKey, nil
 }
 
+// ParseHexKeys decodes hexadecimal src into DecodedLen(len(src)) bytes if the format is "hex".
+//
+// ParseHexKeys expects that each key contains only
+// hexadecimal characters and each key has even length.
+// If existing one key is malformed, ParseHexKeys returns
+// the original bytes.
+func ParseHexKeys(format string, keys [][]byte) (decodedBytes [][]byte, err error) {
+	if format != "hex" {
+		return keys, nil
+	}
+
+	for _, key := range keys {
+		// We can use the source slice itself as the destination
+		// because the decode loop increments by one and then the 'seen' byte is not used anymore.
+		// Reference to hex.DecodeString()
+		n, err := hex.Decode(key, key)
+		if err != nil {
+			return keys, err
+		}
+		decodedBytes = append(decodedBytes, key[:n])
+	}
+	return decodedBytes, nil
+}
+
 // ReadJSON reads a JSON data from r and then closes it.
 // An error due to invalid json will be returned as a JSONError
-func ReadJSON(r io.ReadCloser, data interface{}) error {
+func ReadJSON(r io.ReadCloser, data any) error {
 	var err error
 	defer DeferClose(r, &err)
 	b, err := io.ReadAll(r)
@@ -321,7 +380,7 @@ func ReadJSON(r io.ReadCloser, data interface{}) error {
 
 // ReadJSONRespondError writes json into data.
 // On error respond with a 400 Bad Request
-func ReadJSONRespondError(rd *render.Render, w http.ResponseWriter, body io.ReadCloser, data interface{}) error {
+func ReadJSONRespondError(rd *render.Render, w http.ResponseWriter, body io.ReadCloser, data any) error {
 	err := ReadJSON(body, data)
 	if err == nil {
 		return nil
@@ -406,22 +465,30 @@ func (p *customReverseProxies) ServeHTTP(w http.ResponseWriter, r *http.Request)
 			log.Error("request failed", errs.ZapError(errs.ErrSendRequest, err))
 			continue
 		}
-		defer resp.Body.Close()
 		var reader io.ReadCloser
 		switch resp.Header.Get("Content-Encoding") {
 		case "gzip":
 			reader, err = gzip.NewReader(resp.Body)
 			if err != nil {
 				log.Error("failed to parse response with gzip compress", zap.Error(err))
+				resp.Body.Close()
 				continue
 			}
-			defer reader.Close()
 		default:
 			reader = resp.Body
 		}
 
+		// We need to copy the response headers before we write the header.
+		// Otherwise, we cannot set the header after w.WriteHeader() is called.
+		// And we need to write the header before we copy the response body.
+		// Otherwise, we cannot set the status code after w.Write() is called.
+		// In other words, we must perform the following steps strictly in order:
+		// 1. Set the response headers.
+		// 2. Write the response header.
+		// 3. Write the response body.
 		copyHeader(w.Header(), resp.Header)
 		w.WriteHeader(resp.StatusCode)
+
 		for {
 			if _, err = io.CopyN(w, reader, chunkSize); err != nil {
 				if err == io.EOF {
@@ -430,6 +497,8 @@ func (p *customReverseProxies) ServeHTTP(w http.ResponseWriter, r *http.Request)
 				break
 			}
 		}
+		resp.Body.Close()
+		reader.Close()
 		if err != nil {
 			log.Error("write failed", errs.ZapError(errs.ErrWriteHTTPBody, err), zap.String("target-address", url.String()))
 			// try next url.
@@ -437,11 +506,17 @@ func (p *customReverseProxies) ServeHTTP(w http.ResponseWriter, r *http.Request)
 		}
 		return
 	}
-	http.Error(w, ErrRedirectFailed, http.StatusInternalServerError)
+	http.Error(w, errs.ErrRedirect.FastGenByArgs().Error(), http.StatusInternalServerError)
 }
 
+// copyHeader duplicates the HTTP headers from the source `src` to the destination `dst`.
+// It skips the "Content-Encoding" and "Content-Length" headers because they should be set by `http.ResponseWriter`.
+// These headers may be modified after a redirect when gzip compression is enabled.
 func copyHeader(dst, src http.Header) {
 	for k, vv := range src {
+		if k == "Content-Encoding" || k == "Content-Length" {
+			continue
+		}
 		values := dst[k]
 		for _, v := range vv {
 			if !slice.Contains(values, v) {
@@ -449,4 +524,17 @@ func copyHeader(dst, src http.Header) {
 			}
 		}
 	}
+}
+
+// ParseTime parses a time string with the format "1694580288"
+// If the string is empty, it returns a zero time.
+func ParseTime(t string) (time.Time, error) {
+	if len(t) == 0 {
+		return time.Time{}, nil
+	}
+	i, err := strconv.ParseInt(t, 10, 64)
+	if err != nil {
+		return time.Time{}, err
+	}
+	return time.Unix(i, 0), nil
 }

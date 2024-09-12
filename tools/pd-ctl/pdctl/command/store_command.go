@@ -25,7 +25,7 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/spf13/cobra"
-	"github.com/tikv/pd/server/api"
+	"github.com/tikv/pd/pkg/response"
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
 )
@@ -143,7 +143,7 @@ func NewStoreLimitCommand() *cobra.Command {
 // NewStoreCheckCommand return a check subcommand of storeCmd
 func NewStoreCheckCommand() *cobra.Command {
 	d := &cobra.Command{
-		Use:   "check [up|offline|tombstone]",
+		Use:   "check [up|offline|tombstone|disconnected|down]",
 		Short: "Check all the stores with specified status",
 		Run:   storeCheckCommandFunc,
 	}
@@ -275,12 +275,12 @@ func storeLimitSceneCommandFunc(cmd *cobra.Command, args []string) {
 		if len(args) == 3 {
 			prefix = path.Join(prefix, fmt.Sprintf("?type=%s", args[2]))
 		}
-		postJSON(cmd, prefix, map[string]interface{}{scene: rate})
+		postJSON(cmd, prefix, map[string]any{scene: rate})
 	}
 }
 
 func convertToStoreInfo(content string) string {
-	store := &api.StoreInfo{}
+	store := &response.StoreInfo{}
 	err := json.Unmarshal([]byte(content), store)
 	if err != nil {
 		return content
@@ -296,7 +296,7 @@ func convertToStoreInfo(content string) string {
 }
 
 func convertToStoresInfo(content string) string {
-	stores := &api.StoresInfo{}
+	stores := &response.StoresInfo{}
 	err := json.Unmarshal([]byte(content), stores)
 	if err != nil {
 		return content
@@ -531,7 +531,7 @@ func labelStoreCommandFunc(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	labels := make(map[string]interface{})
+	labels := make(map[string]any)
 	// useEqual is used to compatible the old way
 	// TODO: remove old way
 	useEqual := true
@@ -565,7 +565,6 @@ func labelStoreCommandFunc(cmd *cobra.Command, args []string) {
 	} else if rewrite, _ := cmd.Flags().GetBool("rewrite"); rewrite {
 		prefix += "?force=true"
 	}
-	cmd.Println(prefix)
 	postJSON(cmd, prefix, labels)
 }
 
@@ -585,7 +584,7 @@ func setStoreWeightCommandFunc(cmd *cobra.Command, args []string) {
 		return
 	}
 	prefix := fmt.Sprintf(path.Join(storePrefix, "weight"), args[0])
-	postJSON(cmd, prefix, map[string]interface{}{
+	postJSON(cmd, prefix, map[string]any{
 		"leader": leader,
 		"region": region,
 	})
@@ -621,7 +620,7 @@ func storeLimitCommandFunc(cmd *cobra.Command, args []string) {
 		} else {
 			prefix = fmt.Sprintf(path.Join(storePrefix, "limit"), args[0])
 		}
-		postInput := map[string]interface{}{
+		postInput := map[string]any{
 			"rate": rate,
 		}
 		if argsCount == 3 {
@@ -632,7 +631,7 @@ func storeLimitCommandFunc(cmd *cobra.Command, args []string) {
 		if args[0] != "all" {
 			cmd.Println("Labels are an option of set all stores limit.")
 		} else {
-			postInput := map[string]interface{}{}
+			postInput := map[string]any{}
 			prefix := storesLimitPrefix
 			ratePos := argsCount - 1
 			if argsCount%2 == 1 {
@@ -649,7 +648,7 @@ func storeLimitCommandFunc(cmd *cobra.Command, args []string) {
 				return
 			}
 			postInput["rate"] = rate
-			labels := make(map[string]interface{})
+			labels := make(map[string]any)
 			for i := 1; i < ratePos; i += 2 {
 				labels[args[i]] = args[i+1]
 			}
@@ -667,13 +666,7 @@ func storeCheckCommandFunc(cmd *cobra.Command, args []string) {
 
 	caser := cases.Title(language.Und)
 	state := caser.String(strings.ToLower(args[0]))
-	stateValue, ok := metapb.StoreState_value[state]
-	if !ok {
-		cmd.Println("Unknown state: " + state)
-		return
-	}
-
-	prefix := fmt.Sprintf("%s?state=%d", storesPrefix, stateValue)
+	prefix := fmt.Sprintf("%s/check?state=%s", storesPrefix, state)
 	r, err := doRequest(cmd, prefix, http.MethodGet, http.Header{})
 	if err != nil {
 		cmd.Printf("Failed to get store: %s\n", err)
@@ -682,7 +675,7 @@ func storeCheckCommandFunc(cmd *cobra.Command, args []string) {
 	cmd.Println(r)
 }
 
-func showStoresCommandFunc(cmd *cobra.Command, args []string) {
+func showStoresCommandFunc(cmd *cobra.Command, _ []string) {
 	prefix := storesPrefix
 	r, err := doRequest(cmd, prefix, http.MethodGet, http.Header{})
 	if err != nil {
@@ -714,6 +707,10 @@ func showAllStoresLimitCommandFunc(cmd *cobra.Command, args []string) {
 }
 
 func removeTombStoneCommandFunc(cmd *cobra.Command, args []string) {
+	if len(args) != 0 {
+		cmd.Usage()
+		return
+	}
 	prefix := path.Join(storesPrefix, "remove-tombstone")
 	_, err := doRequest(cmd, prefix, http.MethodDelete, http.Header{})
 	if err != nil {
@@ -735,7 +732,7 @@ func setAllLimitCommandFunc(cmd *cobra.Command, args []string) {
 		return
 	}
 	prefix := storesLimitPrefix
-	input := map[string]interface{}{
+	input := map[string]any{
 		"rate": rate,
 	}
 	if len(args) == 2 {

@@ -15,43 +15,18 @@
 package server
 
 import (
-	"context"
-	"os"
 	"strings"
 
 	"github.com/pingcap/kvproto/pkg/tsopb"
-	"github.com/pingcap/log"
 	"github.com/spf13/pflag"
 	"github.com/stretchr/testify/require"
-	"github.com/tikv/pd/pkg/utils/logutil"
-	"github.com/tikv/pd/pkg/utils/testutil"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 )
-
-// NewTSOTestServer creates a tso server for testing.
-func NewTSOTestServer(ctx context.Context, re *require.Assertions, cfg *Config) (*Server, testutil.CleanupFunc, error) {
-	// New zap logger
-	err := logutil.SetupLogger(cfg.Log, &cfg.Logger, &cfg.LogProps, cfg.Security.RedactInfoLog)
-	re.NoError(err)
-	log.ReplaceGlobals(cfg.Logger, cfg.LogProps)
-	// Flushing any buffered log entries
-	defer log.Sync()
-
-	s := CreateServer(ctx, cfg)
-	if err = s.Run(); err != nil {
-		return nil, nil, err
-	}
-
-	cleanup := func() {
-		s.Close()
-		os.RemoveAll(cfg.DataDir)
-	}
-	return s, cleanup, nil
-}
 
 // MustNewGrpcClient must create a new TSO grpc client.
 func MustNewGrpcClient(re *require.Assertions, addr string) (*grpc.ClientConn, tsopb.TSOClient) {
-	conn, err := grpc.Dial(strings.TrimPrefix(addr, "http://"), grpc.WithInsecure())
+	conn, err := grpc.Dial(strings.TrimPrefix(addr, "http://"), grpc.WithTransportCredentials(insecure.NewCredentials()))
 	re.NoError(err)
 	return conn, tsopb.NewTSOClient(conn)
 }
@@ -59,12 +34,14 @@ func MustNewGrpcClient(re *require.Assertions, addr string) (*grpc.ClientConn, t
 // GenerateConfig generates a new config with the given options.
 func GenerateConfig(c *Config) (*Config, error) {
 	arguments := []string{
+		"--name=" + c.Name,
 		"--listen-addr=" + c.ListenAddr,
 		"--advertise-listen-addr=" + c.AdvertiseListenAddr,
 		"--backend-endpoints=" + c.BackendEndpoints,
 	}
 
 	flagSet := pflag.NewFlagSet("test", pflag.ContinueOnError)
+	flagSet.StringP("name", "", "", "human-readable name for this tso member")
 	flagSet.BoolP("version", "V", false, "print version information and exit")
 	flagSet.StringP("config", "", "", "config file")
 	flagSet.StringP("backend-endpoints", "", "", "url for etcd client")

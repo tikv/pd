@@ -18,38 +18,39 @@ import (
 	"context"
 	"time"
 
-	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/failpoint"
-	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
 	"github.com/syndtr/goleveldb/leveldb"
 	"github.com/tikv/pd/pkg/encryption"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
+	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 )
 
 const (
-	// DefaultFlushRegionRate is the ttl to sync the regions to region storage.
-	defaultFlushRegionRate = 3 * time.Second
-	// DefaultBatchSize is the batch size to save the regions to region storage.
+	// defaultFlushRate is the default interval to flush the data into the local storage.
+	defaultFlushRate = 3 * time.Second
+	// defaultBatchSize is the default batch size to save the data to the local storage.
 	defaultBatchSize = 100
+	// defaultDirtyFlushTick
+	defaultDirtyFlushTick = time.Second
 )
 
 // levelDBBackend is a storage backend that stores data in LevelDB,
-// which is mainly used by the PD region storage.
+// which is mainly used to store the PD Region meta information.
 type levelDBBackend struct {
 	*endpoint.StorageEndpoint
-	ekm                 *encryption.Manager
-	mu                  syncutil.RWMutex
-	batchRegions        map[string]*metapb.Region
-	batchSize           int
-	cacheSize           int
-	flushRate           time.Duration
-	flushTime           time.Time
-	regionStorageCtx    context.Context
-	regionStorageCancel context.CancelFunc
+	ekm       *encryption.Manager
+	mu        syncutil.RWMutex
+	batch     map[string][]byte
+	batchSize int
+	cacheSize int
+	flushRate time.Duration
+	flushTime time.Time
+	ctx       context.Context
+	cancel    context.CancelFunc
 }
 
 // newLevelDBBackend is used to create a new LevelDB backend.
@@ -62,36 +63,34 @@ func newLevelDBBackend(
 	if err != nil {
 		return nil, err
 	}
-	regionStorageCtx, regionStorageCancel := context.WithCancel(ctx)
 	lb := &levelDBBackend{
-		StorageEndpoint:     endpoint.NewStorageEndpoint(levelDB, ekm),
-		ekm:                 ekm,
-		batchSize:           defaultBatchSize,
-		flushRate:           defaultFlushRegionRate,
-		batchRegions:        make(map[string]*metapb.Region, defaultBatchSize),
-		flushTime:           time.Now().Add(defaultFlushRegionRate),
-		regionStorageCtx:    regionStorageCtx,
-		regionStorageCancel: regionStorageCancel,
+		StorageEndpoint: endpoint.NewStorageEndpoint(levelDB, ekm),
+		ekm:             ekm,
+		batchSize:       defaultBatchSize,
+		flushRate:       defaultFlushRate,
+		batch:           make(map[string][]byte, defaultBatchSize),
+		flushTime:       time.Now().Add(defaultFlushRate),
 	}
+	lb.ctx, lb.cancel = context.WithCancel(ctx)
 	go lb.backgroundFlush()
 	return lb, nil
 }
 
-var dirtyFlushTick = time.Second
-
 func (lb *levelDBBackend) backgroundFlush() {
+	defer logutil.LogPanic()
+
 	var (
 		isFlush bool
 		err     error
 	)
-	ticker := time.NewTicker(dirtyFlushTick)
+	ticker := time.NewTicker(defaultDirtyFlushTick)
 	defer ticker.Stop()
 	for {
 		select {
 		case <-ticker.C:
 			lb.mu.RLock()
 			isFlush = lb.flushTime.Before(time.Now())
-			failpoint.Inject("regionStorageFastFlush", func() {
+			failpoint.Inject("levelDBStorageFastFlush", func() {
 				isFlush = true
 			})
 			lb.mu.RUnlock()
@@ -99,42 +98,32 @@ func (lb *levelDBBackend) backgroundFlush() {
 				continue
 			}
 			if err = lb.Flush(); err != nil {
-				log.Error("flush regions meet error", errs.ZapError(err))
+				log.Error("flush data meet error", errs.ZapError(err))
 			}
-		case <-lb.regionStorageCtx.Done():
+		case <-lb.ctx.Done():
 			return
 		}
 	}
 }
 
-func (lb *levelDBBackend) SaveRegion(region *metapb.Region) error {
-	region, err := encryption.EncryptRegion(region, lb.ekm)
-	if err != nil {
-		return err
-	}
+// SaveIntoBatch saves the key-value pair into the batch cache, and it will
+// only be saved to the underlying storage when the `Flush` method is
+// called or the cache is full.
+func (lb *levelDBBackend) SaveIntoBatch(key string, value []byte) error {
 	lb.mu.Lock()
 	defer lb.mu.Unlock()
 	if lb.cacheSize < lb.batchSize-1 {
-		lb.batchRegions[endpoint.RegionPath(region.GetId())] = region
+		lb.batch[key] = value
 		lb.cacheSize++
 
 		lb.flushTime = time.Now().Add(lb.flushRate)
 		return nil
 	}
-	lb.batchRegions[endpoint.RegionPath(region.GetId())] = region
-	err = lb.flushLocked()
-
-	if err != nil {
-		return err
-	}
-	return nil
+	lb.batch[key] = value
+	return lb.flushLocked()
 }
 
-func (lb *levelDBBackend) DeleteRegion(region *metapb.Region) error {
-	return lb.Remove(endpoint.RegionPath(region.GetId()))
-}
-
-// Flush saves the cache region to the underlying storage.
+// Flush saves the batch cache to the underlying storage.
 func (lb *levelDBBackend) Flush() error {
 	lb.mu.Lock()
 	defer lb.mu.Unlock()
@@ -142,38 +131,32 @@ func (lb *levelDBBackend) Flush() error {
 }
 
 func (lb *levelDBBackend) flushLocked() error {
-	if err := lb.saveRegions(lb.batchRegions); err != nil {
+	if err := lb.saveBatchLocked(); err != nil {
 		return err
 	}
 	lb.cacheSize = 0
-	lb.batchRegions = make(map[string]*metapb.Region, lb.batchSize)
+	lb.batch = make(map[string][]byte, lb.batchSize)
 	return nil
 }
 
-func (lb *levelDBBackend) saveRegions(regions map[string]*metapb.Region) error {
+func (lb *levelDBBackend) saveBatchLocked() error {
 	batch := new(leveldb.Batch)
-
-	for key, r := range regions {
-		value, err := proto.Marshal(r)
-		if err != nil {
-			return errs.ErrProtoMarshal.Wrap(err).GenWithStackByCause()
-		}
+	for key, value := range lb.batch {
 		batch.Put([]byte(key), value)
 	}
-
 	if err := lb.Base.(*kv.LevelDBKV).Write(batch, nil); err != nil {
 		return errs.ErrLevelDBWrite.Wrap(err).GenWithStackByCause()
 	}
 	return nil
 }
 
-// Close closes the LevelDB kv. It will call Flush() once before closing.
+// Close will gracefully close the LevelDB backend and flush the data to the underlying storage before closing.
 func (lb *levelDBBackend) Close() error {
 	err := lb.Flush()
 	if err != nil {
-		log.Error("meet error before close the region storage", errs.ZapError(err))
+		log.Error("meet error before closing the leveldb storage", errs.ZapError(err))
 	}
-	lb.regionStorageCancel()
+	lb.cancel()
 	err = lb.Base.(*kv.LevelDBKV).Close()
 	if err != nil {
 		return errs.ErrLevelDBClose.Wrap(err).GenWithStackByArgs()

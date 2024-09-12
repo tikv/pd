@@ -27,7 +27,7 @@ func ZapError(err error, causeError ...error) zap.Field {
 	}
 	if e, ok := err.(*errors.Error); ok {
 		if len(causeError) >= 1 {
-			err = e.Wrap(causeError[0]).FastGenWithCause()
+			err = e.Wrap(causeError[0])
 		} else {
 			err = e.FastGenByArgs()
 		}

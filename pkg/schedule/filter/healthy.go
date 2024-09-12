@@ -16,8 +16,7 @@ package filter
 
 import (
 	"github.com/tikv/pd/pkg/core"
-	"github.com/tikv/pd/pkg/schedule/config"
-	"github.com/tikv/pd/pkg/schedule/placement"
+	sche "github.com/tikv/pd/pkg/schedule/core"
 )
 
 // IsRegionHealthy checks if a region is healthy for scheduling. It requires the
@@ -43,30 +42,17 @@ func hasDownPeers(region *core.RegionInfo) bool {
 // IsRegionReplicated checks if a region is fully replicated. When placement
 // rules is enabled, its peers should fit corresponding rules. When placement
 // rules is disabled, it should have enough replicas and no any learner peer.
-func IsRegionReplicated(cluster regionHealthCluster, region *core.RegionInfo) bool {
-	if cluster.GetOpts().IsPlacementRulesEnabled() {
+func IsRegionReplicated(cluster sche.SharedCluster, region *core.RegionInfo) bool {
+	if cluster.GetSharedConfig().IsPlacementRulesEnabled() {
 		return isRegionPlacementRuleSatisfied(cluster, region)
 	}
 	return isRegionReplicasSatisfied(cluster, region)
 }
 
-func isRegionPlacementRuleSatisfied(cluster regionHealthCluster, region *core.RegionInfo) bool {
+func isRegionPlacementRuleSatisfied(cluster sche.SharedCluster, region *core.RegionInfo) bool {
 	return cluster.GetRuleManager().FitRegion(cluster, region).IsSatisfied()
 }
 
-func isRegionReplicasSatisfied(cluster regionHealthCluster, region *core.RegionInfo) bool {
-	return len(region.GetLearners()) == 0 && len(region.GetPeers()) == cluster.GetOpts().GetMaxReplicas()
-}
-
-// ReplicatedRegion returns a function that checks if a region is fully replicated.
-func ReplicatedRegion(cluster regionHealthCluster) func(*core.RegionInfo) bool {
-	return func(region *core.RegionInfo) bool { return IsRegionReplicated(cluster, region) }
-}
-
-// cluster provides an overview of a cluster's regions distribution.
-type regionHealthCluster interface {
-	core.StoreSetInformer
-	core.RegionSetInformer
-	GetOpts() config.Config
-	GetRuleManager() *placement.RuleManager
+func isRegionReplicasSatisfied(cluster sche.SharedCluster, region *core.RegionInfo) bool {
+	return len(region.GetLearners()) == 0 && len(region.GetPeers()) == cluster.GetSharedConfig().GetMaxReplicas()
 }

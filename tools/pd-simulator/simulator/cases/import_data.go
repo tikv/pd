@@ -17,7 +17,6 @@ package cases
 import (
 	"bytes"
 	"fmt"
-	"math/rand"
 	"os"
 
 	"github.com/docker/go-units"
@@ -26,27 +25,35 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/codec"
 	"github.com/tikv/pd/pkg/core"
+	sc "github.com/tikv/pd/tools/pd-simulator/simulator/config"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/info"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/simutil"
 	"go.uber.org/zap"
 )
 
-func newImportData() *Case {
+func newImportData(config *sc.SimConfig) *Case {
 	var simCase Case
+	totalStore := config.TotalStore
+	totalRegion := config.TotalRegion
+	replica := int(config.ServerConfig.Replication.MaxReplicas)
+	allStores := make(map[uint64]struct{}, totalStore)
 	// Initialize the cluster
-	for i := 1; i <= 10; i++ {
+	for i := 0; i < totalStore; i++ {
+		id := simutil.IDAllocator.NextID()
 		simCase.Stores = append(simCase.Stores, &Store{
-			ID:     IDAllocator.nextID(),
+			ID:     id,
 			Status: metapb.StoreState_Up,
 		})
+		allStores[id] = struct{}{}
 	}
 
-	for i := 0; i < getRegionNum(); i++ {
-		storeIDs := rand.Perm(10)
-		peers := []*metapb.Peer{
-			{Id: IDAllocator.nextID(), StoreId: uint64(storeIDs[0] + 1)},
-			{Id: IDAllocator.nextID(), StoreId: uint64(storeIDs[1] + 1)},
-			{Id: IDAllocator.nextID(), StoreId: uint64(storeIDs[2] + 1)},
+	for i := 0; i < totalRegion; i++ {
+		peers := make([]*metapb.Peer, 0, replica)
+		for j := 0; j < replica; j++ {
+			peers = append(peers, &metapb.Peer{
+				Id:      IDAllocator.nextID(),
+				StoreId: uint64((i+j)%totalStore + 1),
+			})
 		}
 		simCase.Regions = append(simCase.Regions, Region{
 			ID:     IDAllocator.nextID(),
@@ -65,7 +72,7 @@ func newImportData() *Case {
 	table12 := string(codec.EncodeBytes(codec.GenerateTableKey(12)))
 	table13 := string(codec.EncodeBytes(codec.GenerateTableKey(13)))
 	e.Step = func(tick int64) map[string]int64 {
-		if tick > int64(getRegionNum())/10 {
+		if tick > int64(totalRegion)/10 {
 			return nil
 		}
 		return map[string]int64{
@@ -78,13 +85,19 @@ func newImportData() *Case {
 	checkCount := uint64(0)
 	var newRegionCount [][3]int
 	var allRegionCount [][3]int
-	simCase.Checker = func(regions *core.RegionsInfo, stats []info.StoreStats) bool {
+	simCase.Checker = func(stores []*metapb.Store, regions *core.RegionsInfo, _ []info.StoreStats) bool {
+		for _, store := range stores {
+			if store.NodeState == metapb.NodeState_Removed {
+				delete(allStores, store.GetId())
+			}
+		}
+
 		leaderDist := make(map[uint64]int)
 		peerDist := make(map[uint64]int)
 		leaderTotal := 0
 		peerTotal := 0
 		res := make([]*core.RegionInfo, 0, 100)
-		regions.ScanRangeWithIterator([]byte(table12), func(region *core.RegionInfo) bool {
+		regions.ScanRegionWithIterator([]byte(table12), func(region *core.RegionInfo) bool {
 			if bytes.Compare(region.GetEndKey(), []byte(table13)) < 0 {
 				res = append(res, regions.GetRegion(region.GetID()))
 				return true
@@ -110,18 +123,18 @@ func newImportData() *Case {
 				tableLeaderLog = fmt.Sprintf("%s [store %d]:%.2f%%", tableLeaderLog, storeID, float64(leaderCount)/float64(leaderTotal)*100)
 			}
 		}
-		for storeID := 1; storeID <= 10; storeID++ {
-			if peerCount, ok := peerDist[uint64(storeID)]; ok {
-				newRegionCount = append(newRegionCount, [3]int{storeID, int(checkCount), peerCount})
+		for storeID := range allStores {
+			if peerCount, ok := peerDist[storeID]; ok {
+				newRegionCount = append(newRegionCount, [3]int{int(storeID), int(checkCount), peerCount})
 				tablePeerLog = fmt.Sprintf("%s [store %d]:%.2f%%", tablePeerLog, storeID, float64(peerCount)/float64(peerTotal)*100)
 			}
 		}
-		regionTotal := regions.GetRegionCount()
+		regionTotal := regions.GetTotalRegionCount()
 		totalLeaderLog := fmt.Sprintf("%d leader:", regionTotal)
 		totalPeerLog := fmt.Sprintf("%d peer:", regionTotal*3)
 		isEnd := false
 		var regionProps []float64
-		for storeID := uint64(1); storeID <= 10; storeID++ {
+		for storeID := range allStores {
 			totalLeaderLog = fmt.Sprintf("%s [store %d]:%.2f%%", totalLeaderLog, storeID, float64(regions.GetStoreLeaderCount(storeID))/float64(regionTotal)*100)
 			regionProp := float64(regions.GetStoreRegionCount(storeID)) / float64(regionTotal*3) * 100
 			regionProps = append(regionProps, regionProp)
@@ -141,14 +154,14 @@ func newImportData() *Case {
 		if dev > 0.02 {
 			simutil.Logger.Warn("Not balanced, change scheduler or store limit", zap.Float64("dev score", dev))
 		}
-		if checkCount > uint64(getRegionNum())/5 {
+		if checkCount > uint64(totalRegion)/5 {
 			isEnd = true
-		} else if checkCount > uint64(getRegionNum())/10 {
+		} else if checkCount > uint64(totalRegion)/10 {
 			isEnd = dev < 0.01
 		}
 		if isEnd {
-			renderPlot("new_region.html", newRegionCount, int(checkCount), 0, getRegionNum()/10)
-			renderPlot("all_region.html", allRegionCount, int(checkCount), 28*getRegionNum()/100, getRegionNum()/3)
+			renderPlot("new_region.html", newRegionCount, int(checkCount), 0, totalRegion/10)
+			renderPlot("all_region.html", allRegionCount, int(checkCount), 28*totalRegion/100, totalRegion/3)
 		}
 		return isEnd
 	}

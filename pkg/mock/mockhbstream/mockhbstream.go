@@ -25,18 +25,18 @@ import (
 
 // HeartbeatStream is used to mock HeartbeatStream for test use.
 type HeartbeatStream struct {
-	ch chan *pdpb.RegionHeartbeatResponse
+	ch chan core.RegionHeartbeatResponse
 }
 
 // NewHeartbeatStream creates a new HeartbeatStream.
 func NewHeartbeatStream() HeartbeatStream {
 	return HeartbeatStream{
-		ch: make(chan *pdpb.RegionHeartbeatResponse),
+		ch: make(chan core.RegionHeartbeatResponse),
 	}
 }
 
 // Send mocks method.
-func (s HeartbeatStream) Send(m *pdpb.RegionHeartbeatResponse) error {
+func (s HeartbeatStream) Send(m core.RegionHeartbeatResponse) error {
 	select {
 	case <-time.After(time.Second):
 		return errors.New("timeout")
@@ -46,13 +46,13 @@ func (s HeartbeatStream) Send(m *pdpb.RegionHeartbeatResponse) error {
 }
 
 // SendMsg is used to send the message.
-func (s HeartbeatStream) SendMsg(region *core.RegionInfo, msg *pdpb.RegionHeartbeatResponse) {}
+func (HeartbeatStream) SendMsg(*core.RegionInfo, *pdpb.RegionHeartbeatResponse) {}
 
 // BindStream mock method.
-func (s HeartbeatStream) BindStream(storeID uint64, stream hbstream.HeartbeatStream) {}
+func (HeartbeatStream) BindStream(uint64, hbstream.HeartbeatStream) {}
 
 // Recv mocks method.
-func (s HeartbeatStream) Recv() *pdpb.RegionHeartbeatResponse {
+func (s HeartbeatStream) Recv() core.RegionHeartbeatResponse {
 	select {
 	case <-time.After(time.Millisecond * 10):
 		return nil

@@ -99,8 +99,8 @@ func TestRegionRuleFitCache(t *testing.T) {
 			region: mockRegion(3, 0),
 			rules: []*Rule{
 				{
-					GroupID:        "pd",
-					ID:             "default",
+					GroupID:        DefaultGroupID,
+					ID:             DefaultRuleID,
 					Role:           Voter,
 					Count:          4,
 					Version:        1,
@@ -114,8 +114,8 @@ func TestRegionRuleFitCache(t *testing.T) {
 			region: mockRegion(3, 0),
 			rules: []*Rule{
 				{
-					GroupID:         "pd",
-					ID:              "default",
+					GroupID:         DefaultGroupID,
+					ID:              DefaultRuleID,
 					Role:            Voter,
 					Count:           3,
 					CreateTimestamp: 1,
@@ -141,7 +141,7 @@ func TestRegionRuleFitCache(t *testing.T) {
 			region: mockRegion(3, 0),
 			rules: []*Rule{
 				{
-					GroupID:        "pd",
+					GroupID:        DefaultGroupID,
 					ID:             "default-2",
 					Role:           Voter,
 					Count:          3,
@@ -155,7 +155,7 @@ func TestRegionRuleFitCache(t *testing.T) {
 			region: nil,
 			rules: []*Rule{
 				{
-					GroupID:        "pd",
+					GroupID:        DefaultGroupID,
 					ID:             "default-2",
 					Role:           Voter,
 					Count:          3,
@@ -226,7 +226,7 @@ func (manager *RegionRuleFitCacheManager) mockRegionRuleFitCache(region *core.Re
 	}
 }
 
-// nolint
+// nolint:unparam
 func mockStores(num int) []*core.StoreInfo {
 	stores := make([]*core.StoreInfo, 0, num)
 	now := time.Now()
@@ -237,7 +237,6 @@ func mockStores(num int) []*core.StoreInfo {
 	return stores
 }
 
-// nolint
 func mockStoresNoHeartbeat(num int) []*core.StoreInfo {
 	stores := make([]*core.StoreInfo, 0, num)
 	for i := 1; i <= num; i++ {

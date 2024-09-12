@@ -53,10 +53,10 @@ type HotBucketCache struct {
 	ctx             context.Context
 }
 
-// GetHotBucketStats returns the hot stats of the regions that great than degree.
-func (h *HotBucketCache) GetHotBucketStats(degree int) map[uint64][]*BucketStat {
+// GetHotBucketStats returns the hot stats of the regionIDs that great than degree.
+func (h *HotBucketCache) GetHotBucketStats(degree int, regionIDs []uint64) map[uint64][]*BucketStat {
 	rst := make(map[uint64][]*BucketStat)
-	for _, item := range h.bucketsOfRegion {
+	appendItems := func(item *BucketTreeItem) {
 		stats := make([]*BucketStat, 0)
 		for _, b := range item.stats {
 			if b.HotDegree >= degree {
@@ -67,6 +67,18 @@ func (h *HotBucketCache) GetHotBucketStats(degree int) map[uint64][]*BucketStat 
 			rst[item.regionID] = stats
 		}
 	}
+	if len(regionIDs) == 0 {
+		for _, item := range h.bucketsOfRegion {
+			appendItems(item)
+		}
+	} else {
+		for _, region := range regionIDs {
+			if item, ok := h.bucketsOfRegion[region]; ok {
+				appendItems(item)
+			}
+		}
+	}
+
 	return rst
 }
 
@@ -149,7 +161,18 @@ func (h *HotBucketCache) CheckAsync(task flowBucketsItemTask) bool {
 	}
 }
 
+// BucketsStats returns hot region's buckets stats.
+func (h *HotBucketCache) BucketsStats(degree int, regionIDs ...uint64) map[uint64][]*BucketStat {
+	task := NewCollectBucketStatsTask(degree, regionIDs...)
+	if !h.CheckAsync(task) {
+		return nil
+	}
+	return task.WaitRet(h.ctx)
+}
+
 func (h *HotBucketCache) schedule() {
+	defer logutil.LogPanic()
+
 	for {
 		select {
 		case <-h.ctx.Done():

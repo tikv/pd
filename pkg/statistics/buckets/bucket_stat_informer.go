@@ -21,21 +21,21 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/rangetree"
 	"github.com/tikv/pd/pkg/slice"
-	"github.com/tikv/pd/pkg/statistics"
+	"github.com/tikv/pd/pkg/statistics/utils"
 	"github.com/tikv/pd/pkg/utils/keyutil"
 )
 
-var minHotThresholds [statistics.RegionStatCount]uint64
+var minHotThresholds [utils.RegionStatCount]uint64
 
 func init() {
 	for i := range minHotThresholds {
-		minHotThresholds[i] = uint64(statistics.MinHotThresholds[i])
+		minHotThresholds[i] = uint64(utils.MinHotThresholds[i])
 	}
 }
 
 // BucketStatInformer is used to get the bucket statistics.
 type BucketStatInformer interface {
-	BucketsStats(degree int) map[uint64][]*BucketStat
+	BucketsStats(degree int, regions ...uint64) map[uint64][]*BucketStat
 }
 
 // BucketStat is the record the bucket statistics.
@@ -45,7 +45,7 @@ type BucketStat struct {
 	EndKey    []byte
 	HotDegree int
 	Interval  uint64
-	// the order should see statistics.RegionStatKind
+	// the order should see utils.RegionStatKind
 	Loads []uint64
 }
 
@@ -190,11 +190,13 @@ func (b *BucketTreeItem) calculateHotDegree() {
 		// TODO: qps should be considered, tikv will report this in next sprint
 		// the order: read [bytes keys qps] and write[bytes keys qps]
 		readLoads := stat.Loads[:2]
-		readHot := slice.AllOf(readLoads, func(i int) bool {
+		// keep same with the hot region hot degree
+		// https://github.com/tikv/pd/blob/6f6f545a6716840f7e2c7f4d8ed9b49f613a5cd8/pkg/statistics/hot_peer_cache.go#L220-L222
+		readHot := slice.AnyOf(readLoads, func(i int) bool {
 			return readLoads[i] > minHotThresholds[i]
 		})
 		writeLoads := stat.Loads[3:5]
-		writeHot := slice.AllOf(writeLoads, func(i int) bool {
+		writeHot := slice.AnyOf(writeLoads, func(i int) bool {
 			return writeLoads[i] > minHotThresholds[3+i]
 		})
 		hot := readHot || writeHot

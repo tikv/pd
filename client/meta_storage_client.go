@@ -20,11 +20,11 @@ import (
 
 	"github.com/opentracing/opentracing-go"
 	"github.com/pingcap/errors"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/meta_storagepb"
-	"github.com/pingcap/log"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/grpcutil"
-	"go.uber.org/zap"
 )
 
 // MetaStorageClient is the interface for meta storage client.
@@ -104,14 +104,15 @@ func getPrefix(key []byte) []byte {
 	return []byte{0}
 }
 
+// Put implements the MetaStorageClient interface.
 func (c *client) Put(ctx context.Context, key, value []byte, opts ...OpOption) (*meta_storagepb.PutResponse, error) {
 	options := &Op{}
 	for _, opt := range opts {
 		opt(options)
 	}
 
-	if span := opentracing.SpanFromContext(ctx); span != nil {
-		span = opentracing.StartSpan("pdclient.Put", opentracing.ChildOf(span.Context()))
+	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
+		span = span.Tracer().StartSpan("pdclient.Put", opentracing.ChildOf(span.Context()))
 		defer span.Finish()
 	}
 	start := time.Now()
@@ -124,8 +125,13 @@ func (c *client) Put(ctx context.Context, key, value []byte, opts ...OpOption) (
 		Lease:  options.lease,
 		PrevKv: options.prevKv,
 	}
-	ctx = grpcutil.BuildForwardContext(ctx, c.GetLeaderAddr())
-	resp, err := c.metaStorageClient().Put(ctx, req)
+	ctx = grpcutil.BuildForwardContext(ctx, c.GetLeaderURL())
+	cli := c.metaStorageClient()
+	if cli == nil {
+		cancel()
+		return nil, errs.ErrClientGetMetaStorageClient
+	}
+	resp, err := cli.Put(ctx, req)
 	cancel()
 
 	if err = c.respForMetaStorageErr(cmdFailedDurationPut, start, err, resp.GetHeader()); err != nil {
@@ -134,6 +140,7 @@ func (c *client) Put(ctx context.Context, key, value []byte, opts ...OpOption) (
 	return resp, nil
 }
 
+// Get implements the MetaStorageClient interface.
 func (c *client) Get(ctx context.Context, key []byte, opts ...OpOption) (*meta_storagepb.GetResponse, error) {
 	options := &Op{}
 	for _, opt := range opts {
@@ -143,8 +150,8 @@ func (c *client) Get(ctx context.Context, key []byte, opts ...OpOption) (*meta_s
 		options.rangeEnd = getPrefix(key)
 	}
 
-	if span := opentracing.SpanFromContext(ctx); span != nil {
-		span = opentracing.StartSpan("pdclient.Get", opentracing.ChildOf(span.Context()))
+	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
+		span = span.Tracer().StartSpan("pdclient.Get", opentracing.ChildOf(span.Context()))
 		defer span.Finish()
 	}
 	start := time.Now()
@@ -157,8 +164,13 @@ func (c *client) Get(ctx context.Context, key []byte, opts ...OpOption) (*meta_s
 		Limit:    options.limit,
 		Revision: options.revision,
 	}
-	ctx = grpcutil.BuildForwardContext(ctx, c.GetLeaderAddr())
-	resp, err := c.metaStorageClient().Get(ctx, req)
+	ctx = grpcutil.BuildForwardContext(ctx, c.GetLeaderURL())
+	cli := c.metaStorageClient()
+	if cli == nil {
+		cancel()
+		return nil, errs.ErrClientGetMetaStorageClient
+	}
+	resp, err := cli.Get(ctx, req)
 	cancel()
 
 	if err = c.respForMetaStorageErr(cmdFailedDurationGet, start, err, resp.GetHeader()); err != nil {
@@ -167,6 +179,7 @@ func (c *client) Get(ctx context.Context, key []byte, opts ...OpOption) (*meta_s
 	return resp, nil
 }
 
+// Watch implements the MetaStorageClient interface.
 func (c *client) Watch(ctx context.Context, key []byte, opts ...OpOption) (chan []*meta_storagepb.Event, error) {
 	eventCh := make(chan []*meta_storagepb.Event, 100)
 	options := &Op{}
@@ -177,7 +190,11 @@ func (c *client) Watch(ctx context.Context, key []byte, opts ...OpOption) (chan 
 		options.rangeEnd = getPrefix(key)
 	}
 
-	res, err := c.metaStorageClient().Watch(ctx, &meta_storagepb.WatchRequest{
+	cli := c.metaStorageClient()
+	if cli == nil {
+		return nil, errs.ErrClientGetMetaStorageClient
+	}
+	res, err := cli.Watch(ctx, &meta_storagepb.WatchRequest{
 		Key:           key,
 		RangeEnd:      options.rangeEnd,
 		StartRevision: options.revision,
@@ -190,13 +207,12 @@ func (c *client) Watch(ctx context.Context, key []byte, opts ...OpOption) (chan 
 	go func() {
 		defer func() {
 			close(eventCh)
-			if r := recover(); r != nil {
-				log.Error("[pd] panic in client `Watch`", zap.Any("error", r))
-				return
-			}
 		}()
 		for {
 			resp, err := res.Recv()
+			failpoint.Inject("watchStreamError", func() {
+				err = errors.Errorf("fake error")
+			})
 			if err != nil {
 				return
 			}

@@ -19,8 +19,13 @@ docs/swagger/*
 *.before
 covprofile
 coverage.tmp
+junitfile
 package.list
 report.xml
 coverage.xml
 coverage
 *.txt
+go.work*
+embedded_assets_handler.go
+*.log
+*.bin

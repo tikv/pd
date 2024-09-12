@@ -22,9 +22,11 @@ import (
 	"github.com/gogo/protobuf/proto"
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/tikv/pd/pkg/storage/endpoint"
-	"github.com/tikv/pd/server/keyspace"
-	"go.etcd.io/etcd/clientv3"
+	"github.com/tikv/pd/pkg/keyspace"
+	"github.com/tikv/pd/pkg/utils/etcdutil"
+	"github.com/tikv/pd/pkg/utils/keypath"
+	"go.etcd.io/etcd/api/v3/mvccpb"
+	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
 // KeyspaceServer wraps GrpcServer to provide keyspace service.
@@ -52,10 +54,6 @@ func (s *KeyspaceServer) LoadKeyspace(_ context.Context, request *keyspacepb.Loa
 	if err := s.validateRequest(request.GetHeader()); err != nil {
 		return nil, err
 	}
-	rc := s.GetRaftCluster()
-	if rc == nil {
-		return &keyspacepb.LoadKeyspaceResponse{Header: s.notBootstrappedHeader()}, nil
-	}
 
 	manager := s.GetKeyspaceManager()
 	meta, err := manager.LoadKeyspace(request.GetName())
@@ -74,58 +72,60 @@ func (s *KeyspaceServer) WatchKeyspaces(request *keyspacepb.WatchKeyspacesReques
 	if err := s.validateRequest(request.GetHeader()); err != nil {
 		return err
 	}
-	rc := s.GetRaftCluster()
-	if rc == nil {
-		return stream.Send(&keyspacepb.WatchKeyspacesResponse{Header: s.notBootstrappedHeader()})
-	}
-
 	ctx, cancel := context.WithCancel(s.Context())
 	defer cancel()
+	startKey := path.Join(s.rootPath, keypath.KeyspaceMetaPrefix()) + "/"
 
-	err := s.sendAllKeyspaceMeta(ctx, stream)
-	if err != nil {
-		return err
-	}
-	watchChan := s.client.Watch(ctx, path.Join(s.rootPath, endpoint.KeyspaceMetaPrefix()), clientv3.WithPrefix())
-	for {
-		select {
-		case <-ctx.Done():
-			return nil
-		case res := <-watchChan:
-			keyspaces := make([]*keyspacepb.KeyspaceMeta, 0, len(res.Events))
-			for _, event := range res.Events {
-				if event.Type != clientv3.EventTypePut {
-					continue
-				}
-				meta := &keyspacepb.KeyspaceMeta{}
-				if err = proto.Unmarshal(event.Kv.Value, meta); err != nil {
-					return err
-				}
-				keyspaces = append(keyspaces, meta)
-			}
-			if len(keyspaces) > 0 {
-				if err = stream.Send(&keyspacepb.WatchKeyspacesResponse{Header: s.header(), Keyspaces: keyspaces}); err != nil {
-					return err
-				}
-			}
-		}
-	}
-}
-
-func (s *KeyspaceServer) sendAllKeyspaceMeta(ctx context.Context, stream keyspacepb.Keyspace_WatchKeyspacesServer) error {
-	getResp, err := s.client.Get(ctx, path.Join(s.rootPath, endpoint.KeyspaceMetaPrefix()), clientv3.WithPrefix())
-	if err != nil {
-		return err
-	}
-	metas := make([]*keyspacepb.KeyspaceMeta, getResp.Count)
-	for i, kv := range getResp.Kvs {
+	keyspaces := make([]*keyspacepb.KeyspaceMeta, 0)
+	putFn := func(kv *mvccpb.KeyValue) error {
 		meta := &keyspacepb.KeyspaceMeta{}
-		if err = proto.Unmarshal(kv.Value, meta); err != nil {
+		if err := proto.Unmarshal(kv.Value, meta); err != nil {
+			defer cancel() // cancel context to stop watcher
 			return err
 		}
-		metas[i] = meta
+		keyspaces = append(keyspaces, meta)
+		return nil
 	}
-	return stream.Send(&keyspacepb.WatchKeyspacesResponse{Header: s.header(), Keyspaces: metas})
+	deleteFn := func(*mvccpb.KeyValue) error {
+		return nil
+	}
+	postEventsFn := func([]*clientv3.Event) error {
+		if len(keyspaces) == 0 {
+			return nil
+		}
+		defer func() {
+			keyspaces = keyspaces[:0]
+		}()
+		err := stream.Send(&keyspacepb.WatchKeyspacesResponse{
+			Header:    s.header(),
+			Keyspaces: keyspaces})
+		if err != nil {
+			defer cancel() // cancel context to stop watcher
+			return err
+		}
+		return nil
+	}
+
+	watcher := etcdutil.NewLoopWatcher(
+		ctx,
+		&s.serverLoopWg,
+		s.client,
+		"keyspace-server-watcher",
+		startKey,
+		func([]*clientv3.Event) error { return nil },
+		putFn,
+		deleteFn,
+		postEventsFn,
+		true, /* withPrefix */
+	)
+	watcher.StartWatchLoop()
+	if err := watcher.WaitLoad(); err != nil {
+		cancel() // cancel context to stop watcher
+		return err
+	}
+
+	<-ctx.Done() // wait for context done
+	return nil
 }
 
 // UpdateKeyspaceState updates the state of keyspace specified in the request.
@@ -133,10 +133,7 @@ func (s *KeyspaceServer) UpdateKeyspaceState(_ context.Context, request *keyspac
 	if err := s.validateRequest(request.GetHeader()); err != nil {
 		return nil, err
 	}
-	rc := s.GetRaftCluster()
-	if rc == nil {
-		return &keyspacepb.UpdateKeyspaceStateResponse{Header: s.notBootstrappedHeader()}, nil
-	}
+
 	manager := s.GetKeyspaceManager()
 	meta, err := manager.UpdateKeyspaceStateByID(request.GetId(), request.GetState(), time.Now().Unix())
 	if err != nil {
@@ -145,5 +142,23 @@ func (s *KeyspaceServer) UpdateKeyspaceState(_ context.Context, request *keyspac
 	return &keyspacepb.UpdateKeyspaceStateResponse{
 		Header:   s.header(),
 		Keyspace: meta,
+	}, nil
+}
+
+// GetAllKeyspaces get all keyspace's metadata.
+func (s *KeyspaceServer) GetAllKeyspaces(_ context.Context, request *keyspacepb.GetAllKeyspacesRequest) (*keyspacepb.GetAllKeyspacesResponse, error) {
+	if err := s.validateRequest(request.GetHeader()); err != nil {
+		return nil, err
+	}
+
+	manager := s.GetKeyspaceManager()
+	keyspaces, err := manager.LoadRangeKeyspace(request.StartId, int(request.Limit))
+	if err != nil {
+		return &keyspacepb.GetAllKeyspacesResponse{Header: s.getErrorHeader(err)}, nil
+	}
+
+	return &keyspacepb.GetAllKeyspacesResponse{
+		Header:    s.header(),
+		Keyspaces: keyspaces,
 	}, nil
 }

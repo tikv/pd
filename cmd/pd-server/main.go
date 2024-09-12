@@ -18,6 +18,7 @@ import (
 	"context"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	grpcprometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
@@ -26,8 +27,10 @@ import (
 	"github.com/tikv/pd/pkg/autoscaling"
 	"github.com/tikv/pd/pkg/dashboard"
 	"github.com/tikv/pd/pkg/errs"
-	resource_manager "github.com/tikv/pd/pkg/mcs/resource_manager/server"
+	resource_manager "github.com/tikv/pd/pkg/mcs/resourcemanager/server"
+	scheduling "github.com/tikv/pd/pkg/mcs/scheduling/server"
 	tso "github.com/tikv/pd/pkg/mcs/tso/server"
+	"github.com/tikv/pd/pkg/memory"
 	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/swaggerserver"
 	"github.com/tikv/pd/pkg/utils/configutil"
@@ -40,6 +43,18 @@ import (
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/join"
 	"go.uber.org/zap"
+
+	// register microservice API
+	_ "github.com/tikv/pd/pkg/mcs/resourcemanager/server/install"
+	_ "github.com/tikv/pd/pkg/mcs/scheduling/server/install"
+	_ "github.com/tikv/pd/pkg/mcs/tso/server/install"
+)
+
+const (
+	apiMode        = "api"
+	tsoMode        = "tso"
+	rmMode         = "resource-manager"
+	serviceModeEnv = "PD_SERVICE_MODE"
 )
 
 func main() {
@@ -67,6 +82,7 @@ func NewServiceCommand() *cobra.Command {
 	}
 	cmd.AddCommand(NewTSOServiceCommand())
 	cmd.AddCommand(NewResourceManagerServiceCommand())
+	cmd.AddCommand(NewSchedulingServiceCommand())
 	cmd.AddCommand(NewAPIServiceCommand())
 	return cmd
 }
@@ -74,10 +90,11 @@ func NewServiceCommand() *cobra.Command {
 // NewTSOServiceCommand returns the tso service command.
 func NewTSOServiceCommand() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "tso",
+		Use:   tsoMode,
 		Short: "Run the TSO service",
 		Run:   tso.CreateServerWrapper,
 	}
+	cmd.Flags().StringP("name", "", "", "human-readable name for this tso member")
 	cmd.Flags().BoolP("version", "V", false, "print version information and exit")
 	cmd.Flags().StringP("config", "", "", "config file")
 	cmd.Flags().StringP("backend-endpoints", "", "", "url for etcd client")
@@ -86,16 +103,40 @@ func NewTSOServiceCommand() *cobra.Command {
 	cmd.Flags().StringP("cacert", "", "", "path of file that contains list of trusted TLS CAs")
 	cmd.Flags().StringP("cert", "", "", "path of file that contains X509 certificate in PEM format")
 	cmd.Flags().StringP("key", "", "", "path of file that contains X509 key in PEM format")
+	cmd.Flags().StringP("log-level", "L", "", "log level: debug, info, warn, error, fatal (default 'info')")
+	cmd.Flags().StringP("log-file", "", "", "log file path")
+	return cmd
+}
+
+// NewSchedulingServiceCommand returns the scheduling service command.
+func NewSchedulingServiceCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "scheduling",
+		Short: "Run the scheduling service",
+		Run:   scheduling.CreateServerWrapper,
+	}
+	cmd.Flags().StringP("name", "", "", "human-readable name for this scheduling member")
+	cmd.Flags().BoolP("version", "V", false, "print version information and exit")
+	cmd.Flags().StringP("config", "", "", "config file")
+	cmd.Flags().StringP("backend-endpoints", "", "", "url for etcd client")
+	cmd.Flags().StringP("listen-addr", "", "", "listen address for tso service")
+	cmd.Flags().StringP("advertise-listen-addr", "", "", "advertise urls for listen address (default '${listen-addr}')")
+	cmd.Flags().StringP("cacert", "", "", "path of file that contains list of trusted TLS CAs")
+	cmd.Flags().StringP("cert", "", "", "path of file that contains X509 certificate in PEM format")
+	cmd.Flags().StringP("key", "", "", "path of file that contains X509 key in PEM format")
+	cmd.Flags().StringP("log-level", "L", "", "log level: debug, info, warn, error, fatal (default 'info')")
+	cmd.Flags().StringP("log-file", "", "", "log file path")
 	return cmd
 }
 
 // NewResourceManagerServiceCommand returns the resource manager service command.
 func NewResourceManagerServiceCommand() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "resource-manager",
+		Use:   rmMode,
 		Short: "Run the resource manager service",
 		Run:   resource_manager.CreateServerWrapper,
 	}
+	cmd.Flags().StringP("name", "", "", "human-readable name for this resource manager member")
 	cmd.Flags().BoolP("version", "V", false, "print version information and exit")
 	cmd.Flags().StringP("config", "", "", "config file")
 	cmd.Flags().StringP("backend-endpoints", "", "", "url for etcd client")
@@ -104,13 +145,15 @@ func NewResourceManagerServiceCommand() *cobra.Command {
 	cmd.Flags().StringP("cacert", "", "", "path of file that contains list of trusted TLS CAs")
 	cmd.Flags().StringP("cert", "", "", "path of file that contains X509 certificate in PEM format")
 	cmd.Flags().StringP("key", "", "", "path of file that contains X509 key in PEM format")
+	cmd.Flags().StringP("log-level", "L", "", "log level: debug, info, warn, error, fatal (default 'info')")
+	cmd.Flags().StringP("log-file", "", "", "log file path")
 	return cmd
 }
 
 // NewAPIServiceCommand returns the API service command.
 func NewAPIServiceCommand() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "api",
+		Use:   apiMode,
 		Short: "Run the API service",
 		Run:   createAPIServerWrapper,
 	}
@@ -131,7 +174,7 @@ func addFlags(cmd *cobra.Command) {
 	cmd.Flags().StringP("initial-cluster", "", "", "initial cluster configuration for bootstrapping, e,g. pd=http://127.0.0.1:2380")
 	cmd.Flags().StringP("join", "", "", "join to an existing cluster (usage: cluster's '${advertise-client-urls}'")
 	cmd.Flags().StringP("metrics-addr", "", "", "prometheus pushgateway address, leaves it empty will disable prometheus push")
-	cmd.Flags().StringP("log-level", "L", "info", "log level: debug, info, warn, error, fatal (default 'info')")
+	cmd.Flags().StringP("log-level", "L", "", "log level: debug, info, warn, error, fatal (default 'info')")
 	cmd.Flags().StringP("log-file", "", "", "log file path")
 	cmd.Flags().StringP("cacert", "", "", "path of file that contains list of trusted TLS CAs")
 	cmd.Flags().StringP("cert", "", "", "path of file that contains X509 certificate in PEM format")
@@ -144,15 +187,24 @@ func createAPIServerWrapper(cmd *cobra.Command, args []string) {
 }
 
 func createServerWrapper(cmd *cobra.Command, args []string) {
-	start(cmd, args)
+	mode := os.Getenv(serviceModeEnv)
+	if len(mode) != 0 && strings.ToLower(mode) == apiMode {
+		start(cmd, args, apiMode)
+	} else {
+		start(cmd, args)
+	}
 }
 
 func start(cmd *cobra.Command, args []string, services ...string) {
 	schedulers.Register()
 	cfg := config.NewConfig()
 	flagSet := cmd.Flags()
-	flagSet.Parse(args)
-	err := cfg.Parse(flagSet)
+	err := flagSet.Parse(args)
+	if err != nil {
+		cmd.Println(err)
+		return
+	}
+	err = cfg.Parse(flagSet)
 	defer logutil.LogPanic()
 
 	if err != nil {
@@ -176,6 +228,8 @@ func start(cmd *cobra.Command, args []string, services ...string) {
 		exit(0)
 	}
 
+	// Check the PD version first before running.
+	server.CheckAndGetPDVersion()
 	// New zap logger
 	err = logutil.SetupLogger(cfg.Log, &cfg.Logger, &cfg.LogProps, cfg.Security.RedactInfoLog)
 	if err == nil {
@@ -185,7 +239,7 @@ func start(cmd *cobra.Command, args []string, services ...string) {
 	}
 	// Flushing any buffered log entries
 	defer log.Sync()
-
+	memory.InitMemoryHook()
 	if len(services) != 0 {
 		versioninfo.Log(server.APIServiceMode)
 	} else {
@@ -208,7 +262,10 @@ func start(cmd *cobra.Command, args []string, services ...string) {
 
 	// Creates server.
 	ctx, cancel := context.WithCancel(context.Background())
-	serviceBuilders := []server.HandlerBuilder{api.NewHandler, apiv2.NewV2Handler, swaggerserver.NewHandler, autoscaling.NewHandler}
+	serviceBuilders := []server.HandlerBuilder{api.NewHandler, apiv2.NewV2Handler, autoscaling.NewHandler}
+	if swaggerserver.Enabled() {
+		serviceBuilders = append(serviceBuilders, swaggerserver.NewHandler)
+	}
 	serviceBuilders = append(serviceBuilders, dashboard.GetServiceBuilders()...)
 	svr, err := server.CreateServer(ctx, cfg, services, serviceBuilders...)
 	if err != nil {

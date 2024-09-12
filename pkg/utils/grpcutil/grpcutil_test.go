@@ -1,12 +1,21 @@
 package grpcutil
 
 import (
+	"context"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"testing"
 
 	"github.com/pingcap/errors"
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/errs"
+	"google.golang.org/grpc/metadata"
+)
+
+var (
+	certPath   = filepath.Join("..", "..", "..", "tests", "integrations", "client") + string(filepath.Separator)
+	certScript = filepath.Join("..", "..", "..", "tests", "integrations", "client", "cert_opt.sh")
 )
 
 func loadTLSContent(re *require.Assertions, caPath, certPath, keyPath string) (caData, certData, keyData []byte) {
@@ -21,12 +30,20 @@ func loadTLSContent(re *require.Assertions, caPath, certPath, keyPath string) (c
 }
 
 func TestToTLSConfig(t *testing.T) {
-	t.Parallel()
+	if err := exec.Command(certScript, "generate", certPath).Run(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := exec.Command(certScript, "cleanup", certPath).Run(); err != nil {
+			t.Fatal(err)
+		}
+	}()
+
 	re := require.New(t)
 	tlsConfig := TLSConfig{
-		KeyPath:  "../../../tests/client/cert/pd-server-key.pem",
-		CertPath: "../../../tests/client/cert/pd-server.pem",
-		CAPath:   "../../../tests/client/cert/ca.pem",
+		KeyPath:  filepath.Join(certPath, "pd-server-key.pem"),
+		CertPath: filepath.Join(certPath, "pd-server.pem"),
+		CAPath:   filepath.Join(certPath, "ca.pem"),
 	}
 	// test without bytes
 	_, err := tlsConfig.ToTLSConfig()
@@ -50,4 +67,15 @@ func TestToTLSConfig(t *testing.T) {
 	tlsConfig.SSLCABytes = []byte("invalid ca")
 	_, err = tlsConfig.ToTLSConfig()
 	re.True(errors.ErrorEqual(err, errs.ErrCryptoAppendCertsFromPEM))
+}
+
+func BenchmarkGetForwardedHost(b *testing.B) {
+	// Without forwarded host key
+	md := metadata.Pairs("test", "example.com")
+	ctx := metadata.NewIncomingContext(context.Background(), md)
+
+	// Run the GetForwardedHost function b.N times
+	for i := 0; i < b.N; i++ {
+		GetForwardedHost(ctx)
+	}
 }
