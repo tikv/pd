@@ -118,7 +118,10 @@ func (s *mockTSOStreamImpl) Recv() (tsoRequestResult, error) {
 
 	if hasRes {
 		if res.breakStream {
-			s.errorState = s.ctx.Err()
+			if res.err == nil {
+				panic("breaking mockTSOStreamImpl without error")
+			}
+			s.errorState = res.err
 			return tsoRequestResult{}, s.errorState
 		} else {
 			// Do not allow manually assigning result.
