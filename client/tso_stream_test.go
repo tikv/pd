@@ -469,7 +469,10 @@ func BenchmarkTSOStreamSendRecv(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		err := stream.processRequests(1, 1, 1, globalDCLocation, 1, now, func(result tsoRequestResult, reqKeyspaceGroupID uint32, err error) {
+		err := stream.processRequests(1, 1, 1, globalDCLocation, 1, now, func(result tsoRequestResult, _ uint32, err error) {
+			if err != nil {
+				panic(err)
+			}
 			select {
 			case resCh <- result:
 			default:
