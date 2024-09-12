@@ -610,6 +610,8 @@ func (suite *apiTestSuite) TestStores() {
 
 func (suite *apiTestSuite) checkStores(cluster *tests.TestCluster) {
 	re := suite.Require()
+	// prevent the offline store from changing to tombstone
+	tests.MustPutRegion(re, cluster, 3, 6, []byte("a"), []byte("b"))
 	stores := []*metapb.Store{
 		{
 			// metapb.StoreState_Up == 0

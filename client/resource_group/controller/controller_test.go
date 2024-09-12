@@ -31,7 +31,13 @@ import (
 	"github.com/stretchr/testify/require"
 	pd "github.com/tikv/pd/client"
 	"github.com/tikv/pd/client/errs"
+	"github.com/tikv/pd/client/testutil"
+	"go.uber.org/goleak"
 )
+
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+}
 
 func createTestGroupCostController(re *require.Assertions) *groupCostController {
 	group := &rmpb.ResourceGroup{
