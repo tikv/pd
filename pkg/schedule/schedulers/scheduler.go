@@ -172,5 +172,12 @@ func FindSchedulerTypeByName(name string) types.CheckerSchedulerType {
 			}
 		}
 	}
+	// This is for compatibility. Because the string of ScatterRangeScheduler is
+	// "scatter-range" before. If user adds a ScatterRangeScheduler(which is
+	// "scatter-range" yet) and then upgrades the cluster(its ScatterRangeScheduler
+	// is "scatter-range-scheduler"), we need these codes to keep the compatibility.
+	if len(typ) == 0 && strings.Contains(name, "scatter-range") {
+		return types.ScatterRangeScheduler
+	}
 	return typ
 }
