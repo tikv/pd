@@ -30,6 +30,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/pkg/utils/keypath"
 	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
@@ -37,8 +38,8 @@ func TestBasic(t *testing.T) {
 	re := require.New(t)
 	storage := NewStorageWithMemoryBackend()
 
-	re.Equal("raft/s/00000000000000000123", endpoint.StorePath(123))
-	re.Equal("raft/r/00000000000000000123", endpoint.RegionPath(123))
+	re.Equal("raft/s/00000000000000000123", keypath.StorePath(123))
+	re.Equal("raft/r/00000000000000000123", keypath.RegionPath(123))
 
 	meta := &metapb.Cluster{Id: 123}
 	ok, err := storage.LoadMeta(meta)
@@ -157,7 +158,7 @@ func TestSaveServiceGCSafePoint(t *testing.T) {
 		re.NoError(storage.SaveServiceGCSafePoint(ssp))
 	}
 
-	prefix := endpoint.GCSafePointServicePrefixPath()
+	prefix := keypath.GCSafePointServicePrefixPath()
 	prefixEnd := clientv3.GetPrefixRangeEnd(prefix)
 	keys, values, err := storage.LoadRange(prefix, prefixEnd, len(serviceSafePoints))
 	re.NoError(err)

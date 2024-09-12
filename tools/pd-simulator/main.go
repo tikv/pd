@@ -68,7 +68,8 @@ func main() {
 	var err error
 	if *configFile != "" {
 		if meta, err = toml.DecodeFile(*configFile, simConfig); err != nil {
-			simutil.Logger.Fatal("failed to decode file ", zap.Error(err))
+			simutil.Logger.Fatal("failed to decode config file, please check the path of the config file",
+				zap.Error(err), zap.String("config-file", *configFile))
 		}
 	}
 	if err = simConfig.Adjust(&meta); err != nil {
