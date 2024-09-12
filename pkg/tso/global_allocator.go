@@ -34,7 +34,7 @@ import (
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/slice"
-	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
@@ -121,7 +121,7 @@ func newGlobalTimestampOracle(am *AllocatorManager) *timestampOracle {
 	oracle := &timestampOracle{
 		client:                 am.member.GetLeadership().GetClient(),
 		keyspaceGroupID:        am.kgID,
-		tsPath:                 endpoint.KeyspaceGroupGlobalTSPath(am.kgID),
+		tsPath:                 keypath.KeyspaceGroupGlobalTSPath(am.kgID),
 		storage:                am.storage,
 		saveInterval:           am.saveInterval,
 		updatePhysicalInterval: am.updatePhysicalInterval,

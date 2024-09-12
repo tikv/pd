@@ -24,6 +24,7 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
+	"github.com/tikv/pd/pkg/utils/keypath"
 )
 
 // RegionStorage is a storage for the PD region meta information based on LevelDB,
@@ -60,12 +61,12 @@ func (s *RegionStorage) SaveRegion(region *metapb.Region) error {
 	if err != nil {
 		return errs.ErrProtoMarshal.Wrap(err).GenWithStackByCause()
 	}
-	return s.backend.SaveIntoBatch(endpoint.RegionPath(region.GetId()), value)
+	return s.backend.SaveIntoBatch(keypath.RegionPath(region.GetId()), value)
 }
 
 // DeleteRegion implements the `endpoint.RegionStorage` interface.
 func (s *RegionStorage) DeleteRegion(region *metapb.Region) error {
-	return s.backend.Remove((endpoint.RegionPath(region.GetId())))
+	return s.backend.Remove((keypath.RegionPath(region.GetId())))
 }
 
 // Flush implements the `endpoint.RegionStorage` interface.
