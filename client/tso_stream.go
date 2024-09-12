@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"math"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -210,6 +211,8 @@ type tsoStream struct {
 	state          atomic.Int32
 	stoppedWithErr atomic.Pointer[error]
 
+	estimatedLatencyMicros atomic.Uint64
+
 	ongoingRequestCountGauge prometheus.Gauge
 	ongoingRequests          atomic.Int32
 }
@@ -359,6 +362,24 @@ func (s *tsoStream) recvLoop(ctx context.Context) {
 		s.ongoingRequestCountGauge.Set(0)
 	}()
 
+	// For calculating the estimated RPC latency.
+	const (
+		filterCutoffFreq                float64 = 1.0
+		filterNewSampleWeightUpperbound         = 0.2
+	)
+	// The filter applies on logarithm of the latency of each TSO RPC in microseconds.
+	filter := newRCFilter(filterCutoffFreq, filterNewSampleWeightUpperbound)
+
+	updateEstimatedLatency := func(sampleTime time.Time, latency time.Duration) {
+		if latency < 0 {
+			// Unreachable
+			return
+		}
+		currentSample := math.Log(float64(latency.Microseconds()))
+		filteredValue := filter.update(sampleTime, currentSample)
+		s.estimatedLatencyMicros.Store(uint64(math.Exp(filteredValue)))
+	}
+
 recvLoop:
 	for {
 		select {
@@ -379,14 +400,15 @@ recvLoop:
 			hasReq = false
 		}
 
-		durationSeconds := time.Since(currentReq.startTime).Seconds()
+		latency := time.Since(currentReq.startTime)
+		latencySeconds := latency.Seconds()
 
 		if err != nil {
 			// If a request is pending and error occurs, observe the duration it has cost.
 			// Note that it's also possible that the stream is broken due to network without being requested. In this
 			// case, `Recv` may return an error while no request is pending.
 			if hasReq {
-				requestFailedDurationTSO.Observe(durationSeconds)
+				requestFailedDurationTSO.Observe(latencySeconds)
 			}
 			if err == io.EOF {
 				finishWithErr = errors.WithStack(errs.ErrClientTSOStreamClosed)
@@ -399,9 +421,9 @@ recvLoop:
 			break recvLoop
 		}
 
-		latencySeconds := durationSeconds
 		requestDurationTSO.Observe(latencySeconds)
 		tsoBatchSize.Observe(float64(res.count))
+		updateEstimatedLatency(currentReq.startTime, latency)
 
 		if res.count != uint32(currentReq.count) {
 			finishWithErr = errors.WithStack(errTSOLength)
@@ -417,6 +439,17 @@ recvLoop:
 	}
 }
 
+// EstimatedRPCLatency returns an estimation of the duration of each TSO RPC. If the stream has never handled any RPC,
+// this function returns 0.
+func (s *tsoStream) EstimatedRPCLatency() time.Duration {
+	latencyUs := s.estimatedLatencyMicros.Load()
+	// Limit it at least 100us
+	if latencyUs < 100 {
+		latencyUs = 100
+	}
+	return time.Microsecond * time.Duration(latencyUs)
+}
+
 // GetRecvError returns the error (if any) that has been encountered when receiving response asynchronously.
 func (s *tsoStream) GetRecvError() error {
 	perr := s.stoppedWithErr.Load()
@@ -429,4 +462,39 @@ func (s *tsoStream) GetRecvError() error {
 // WaitForClosed blocks until the stream is closed and the inner loop exits.
 func (s *tsoStream) WaitForClosed() {
 	s.wg.Wait()
+}
+
+type rcFilter struct {
+	rc                        float64
+	newSampleWeightUpperBound float64
+	value                     float64
+	lastSampleTime            time.Time
+	firstSampleArrived        bool
+}
+
+func newRCFilter(cutoff float64, newSampleWeightUpperBound float64) rcFilter {
+	rc := 1.0 / (2.0 * math.Pi * cutoff)
+	return rcFilter{
+		rc:                        rc,
+		newSampleWeightUpperBound: newSampleWeightUpperBound,
+	}
+}
+
+func (f *rcFilter) update(sampleTime time.Time, newSample float64) float64 {
+	// Handle the first sample
+	if !f.firstSampleArrived {
+		f.firstSampleArrived = true
+		f.lastSampleTime = sampleTime
+		f.value = newSample
+		return newSample
+	}
+
+	// Delta time
+	dt := sampleTime.Sub(f.lastSampleTime).Seconds()
+	// Current sample represented and calculated in log(microseconds)
+	alpha := math.Min(dt/(f.rc+dt), f.newSampleWeightUpperBound)
+	f.value = (1-alpha)*f.value + alpha*newSample
+
+	f.lastSampleTime = sampleTime
+	return f.value
 }
