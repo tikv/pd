@@ -39,11 +39,11 @@ func (m *mockTSOServiceProvider) getOption() *option {
 	return m.option
 }
 
-func (m *mockTSOServiceProvider) getServiceDiscovery() ServiceDiscovery {
+func (*mockTSOServiceProvider) getServiceDiscovery() ServiceDiscovery {
 	return NewMockPDServiceDiscovery([]string{mockStreamURL}, nil)
 }
 
-func (m *mockTSOServiceProvider) updateConnectionCtxs(ctx context.Context, _dc string, connectionCtxs *sync.Map) bool {
+func (*mockTSOServiceProvider) updateConnectionCtxs(ctx context.Context, _dc string, connectionCtxs *sync.Map) bool {
 	_, ok := connectionCtxs.Load(mockStreamURL)
 	if ok {
 		return true
