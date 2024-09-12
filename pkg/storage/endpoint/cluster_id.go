@@ -21,6 +21,7 @@ import (
 
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/typeutil"
@@ -31,9 +32,9 @@ import (
 // InitClusterID creates a cluster ID if it hasn't existed.
 // This function assumes the cluster ID has already existed and always use a
 // cheaper read to retrieve it; if it doesn't exist, invoke the more expensive
-// operation InitOrGetClusterID().
+// operation initOrGetClusterID().
 func InitClusterID(c *clientv3.Client) (uint64, error) {
-	clusterID, err := GetClusterIDFromEtcd(c)
+	clusterID, err := getClusterIDFromEtcd(c)
 	if err != nil {
 		return 0, err
 	}
@@ -52,8 +53,8 @@ func InitClusterID(c *clientv3.Client) (uint64, error) {
 	return clusterID, nil
 }
 
-// GetClusterIDFromEtcd gets the cluster ID from etcd if local cache is not set.
-func GetClusterIDFromEtcd(c *clientv3.Client) (clusterID uint64, err error) {
+// getClusterIDFromEtcd gets the cluster ID from etcd if local cache is not set.
+func getClusterIDFromEtcd(c *clientv3.Client) (clusterID uint64, err error) {
 	if id := keypath.ClusterID(); id != 0 {
 		return id, nil
 	}
@@ -117,4 +118,29 @@ func initOrGetClusterID(c *clientv3.Client) (uint64, error) {
 	}
 
 	return typeutil.BytesToUint64(response.Kvs[0].Value)
+}
+
+// InitClusterIDForMs initializes the cluster ID for microservice.
+func InitClusterIDForMs(ctx context.Context, client *clientv3.Client) (err error) {
+	ticker := time.NewTicker(constant.RetryInterval)
+	defer ticker.Stop()
+	retryTimes := 0
+	for {
+		// Microservice should not generate cluster ID by itself.
+		if clusterID, err := getClusterIDFromEtcd(client); err == nil && clusterID != 0 {
+			keypath.SetClusterID(clusterID)
+			log.Info("init cluster id", zap.Uint64("cluster-id", clusterID))
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return err
+		case <-ticker.C:
+			retryTimes++
+			if retryTimes/500 > 0 {
+				log.Warn("etcd is not ready, retrying", errs.ZapError(err))
+				retryTimes /= 500
+			}
+		}
+	}
 }

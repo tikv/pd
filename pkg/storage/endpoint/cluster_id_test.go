@@ -27,7 +27,7 @@ func TestInitClusterID(t *testing.T) {
 	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1)
 	defer clean()
 
-	id, err := GetClusterIDFromEtcd(client)
+	id, err := getClusterIDFromEtcd(client)
 	re.NoError(err)
 	re.Equal(uint64(0), id)
 	re.Equal(uint64(0), keypath.ClusterID())
@@ -41,7 +41,7 @@ func TestInitClusterID(t *testing.T) {
 	re.NoError(err)
 	re.Equal(clusterID, clusterID1)
 
-	id, err = GetClusterIDFromEtcd(client)
+	id, err = getClusterIDFromEtcd(client)
 	re.NoError(err)
 	re.Equal(clusterID, id)
 	re.Equal(clusterID, keypath.ClusterID())

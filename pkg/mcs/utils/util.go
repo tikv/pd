@@ -47,28 +47,6 @@ import (
 	"google.golang.org/grpc/keepalive"
 )
 
-// InitClusterID initializes the cluster ID.
-func InitClusterID(ctx context.Context, client *clientv3.Client) (id uint64, err error) {
-	ticker := time.NewTicker(constant.RetryInterval)
-	defer ticker.Stop()
-	retryTimes := 0
-	for {
-		if clusterID, err := endpoint.GetClusterIDFromEtcd(client); err == nil && clusterID != 0 {
-			return clusterID, nil
-		}
-		select {
-		case <-ctx.Done():
-			return 0, err
-		case <-ticker.C:
-			retryTimes++
-			if retryTimes/500 > 0 {
-				log.Warn("etcd is not ready, retrying", errs.ZapError(err))
-				retryTimes /= 500
-			}
-		}
-	}
-}
-
 // PromHandler is a handler to get prometheus metrics.
 func PromHandler() gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -280,14 +258,9 @@ func StopGRPCServer(s server) {
 
 // Register registers the service.
 func Register(s server, serviceName string) (*discovery.ServiceRegistryEntry, *discovery.ServiceRegister, error) {
-	var (
-		clusterID uint64
-		err       error
-	)
-	if clusterID, err = InitClusterID(s.Context(), s.GetEtcdClient()); err != nil {
+	if err := endpoint.InitClusterIDForMs(s.Context(), s.GetEtcdClient()); err != nil {
 		return nil, nil, err
 	}
-	log.Info("init cluster id", zap.Uint64("cluster-id", clusterID))
 	execPath, err := os.Executable()
 	deployPath := filepath.Dir(execPath)
 	if err != nil {
