@@ -331,9 +331,12 @@ tsoBatchLoop:
 		err = td.processRequests(stream, dc, batchController, done)
 		// If error happens during tso stream handling, reset stream and run the next trial.
 		if err == nil {
-			// If the request is started successfully, the `batchController` will be put back to the pool when the
-			// request is finished (either successful or not). In this case, set the `batchController` to nil so that
-			// another one will be fetched from the pool.
+			// A nil error returned by `processRequests` indicates that the request batch is started successfully.
+			// In this case, the `batchController` will be put back to the pool when the request is finished
+			// asynchronously (either successful or not). This infers that the current `batchController` object will
+			// be asynchronously accessed after the `processRequests` call. As a result, we need to use another
+			// `batchController` for collecting the next batch. Do to this, we set the `batchController` to nil so that
+			// another one will be fetched from the pool at the beginning of the batching loop.
 			// Otherwise, the `batchController` won't be processed in other goroutines concurrently, and it can be
 			// reused in the next loop safely.
 			batchController = nil
@@ -493,6 +496,8 @@ func (td *tsoDispatcher) processRequests(
 	)
 
 	cb := func(result tsoRequestResult, reqKeyspaceGroupID uint32, err error) {
+		// As golang doesn't allow double-closing a channel, here is implicitly a check that the callback
+		// is never called twice or called while it's also being cancelled elsewhere.
 		close(done)
 
 		defer td.batchBufferPool.Put(tbc)

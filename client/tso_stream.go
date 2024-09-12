@@ -270,7 +270,7 @@ func (s *tsoStream) processRequests(
 	case streamStateClosing:
 		s.state.Store(prevState)
 		err := s.GetRecvError()
-		log.Info("sending to closed tsoStream", zap.Error(err))
+		log.Info("sending to closed tsoStream", zap.String("stream", s.streamID), zap.Error(err))
 		if err == nil {
 			err = errors.WithStack(errs.ErrClientTSOStreamClosed)
 		}
@@ -322,7 +322,7 @@ func (s *tsoStream) recvLoop(ctx context.Context) {
 		if finishWithErr == nil {
 			// The loop must exit with a non-nil error (including io.EOF and context.Canceled). This should be
 			// unreachable code.
-			log.Fatal("tsoStream.recvLoop exited without error info")
+			log.Fatal("tsoStream.recvLoop exited without error info", zap.String("stream", s.streamID))
 		}
 
 		if hasReq {

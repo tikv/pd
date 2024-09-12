@@ -189,7 +189,6 @@ func (s *mockTSOStreamImpl) autoGenResult(count int64) resultMsg {
 	}
 }
 
-// nolint:unused
 func (s *mockTSOStreamImpl) returnResult(physical int64, logical int64, count uint32) {
 	s.resultCh <- resultMsg{
 		r: tsoRequestResult{
@@ -202,14 +201,12 @@ func (s *mockTSOStreamImpl) returnResult(physical int64, logical int64, count ui
 	}
 }
 
-// nolint:unused
 func (s *mockTSOStreamImpl) returnError(err error) {
 	s.resultCh <- resultMsg{
 		err: err,
 	}
 }
 
-// nolint:unused
 func (s *mockTSOStreamImpl) breakStream(err error) {
 	s.resultCh <- resultMsg{
 		err:         err,
