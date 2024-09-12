@@ -38,7 +38,7 @@ func TestRegister(t *testing.T) {
 	sr := NewServiceRegister(context.Background(), client, "test_service", "http://127.0.0.1:1", "http://127.0.0.1:1", 10)
 	err := sr.Register()
 	re.NoError(err)
-	re.Equal("/ms/12345/test_service/registry/http://127.0.0.1:1", sr.key)
+	re.Equal("/ms/0/test_service/registry/http://127.0.0.1:1", sr.key)
 	resp, err := client.Get(context.Background(), sr.key)
 	re.NoError(err)
 	re.Equal("http://127.0.0.1:1", string(resp.Kvs[0].Value))
