@@ -17,6 +17,7 @@ package api
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	. "github.com/pingcap/check"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -24,6 +25,7 @@ import (
 	tu "github.com/tikv/pd/pkg/testutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
+	"github.com/tikv/pd/server/core"
 )
 
 var _ = Suite(&testLabelsStoreSuite{})
@@ -264,6 +266,30 @@ func (s *testStrictlyLabelsStoreSuite) TestStoreMatch(c *C) {
 			valid:       false,
 			expectError: "key matching the label was not found",
 		},
+		{
+			store: &metapb.Store{
+				Id:      3,
+				Address: "tiflash1",
+				State:   metapb.StoreState_Up,
+				Labels: []*metapb.StoreLabel{
+					{
+						Key:   "zone",
+						Value: "us-west-1",
+					},
+					{
+						Key:   "disk",
+						Value: "ssd",
+					},
+					{
+						Key:   core.EngineKey,
+						Value: core.EngineTiFlash,
+					},
+				},
+				Version: "3.0.0",
+			},
+			valid:       true,
+			expectError: "placement rules is disabled",
+		},
 	}
 
 	for _, t := range cases {
@@ -271,12 +297,16 @@ func (s *testStrictlyLabelsStoreSuite) TestStoreMatch(c *C) {
 			Header: &pdpb.RequestHeader{ClusterId: s.svr.ClusterID()},
 			Store: &metapb.Store{
 				Id:      t.store.Id,
-				Address: fmt.Sprintf("tikv%d", t.store.Id),
+				Address: t.store.Address,
 				State:   t.store.State,
 				Labels:  t.store.Labels,
 				Version: t.store.Version,
 			},
 		})
+		if t.store.Address == "tiflash1" {
+			c.Assert(strings.Contains(resp.GetHeader().GetError().String(), t.expectError), IsTrue)
+			continue
+		}
 		if t.valid {
 			c.Assert(err, IsNil)
 		} else {
@@ -291,12 +321,13 @@ func (s *testStrictlyLabelsStoreSuite) TestStoreMatch(c *C) {
 			Header: &pdpb.RequestHeader{ClusterId: s.svr.ClusterID()},
 			Store: &metapb.Store{
 				Id:      t.store.Id,
-				Address: fmt.Sprintf("tikv%d", t.store.Id),
+				Address: t.store.Address,
 				State:   t.store.State,
 				Labels:  t.store.Labels,
 				Version: t.store.Version,
 			},
 		})
+
 		if t.valid {
 			c.Assert(err, IsNil)
 		} else {

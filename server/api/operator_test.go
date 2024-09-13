@@ -364,7 +364,9 @@ func (s *testTransferRegionOperatorSuite) TestTransferRegionWithPlacementRule(c 
 		if tc.placementRuleEnable {
 			err := s.svr.GetRaftCluster().GetRuleManager().Initialize(
 				s.svr.GetRaftCluster().GetOpts().GetMaxReplicas(),
-				s.svr.GetRaftCluster().GetOpts().GetLocationLabels())
+				s.svr.GetRaftCluster().GetOpts().GetLocationLabels(),
+				s.svr.GetRaftCluster().GetOpts().GetIsolationLevel(),
+			)
 			c.Assert(err, IsNil)
 		}
 		if len(tc.rules) > 0 {

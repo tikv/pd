@@ -17,6 +17,7 @@ package typeutil
 import (
 	"encoding/json"
 
+	"github.com/docker/go-units"
 	. "github.com/pingcap/check"
 )
 
@@ -41,23 +42,31 @@ func (s *testSizeSuite) TestJSON(c *C) {
 }
 
 func (s *testSizeSuite) TestParseMbFromText(c *C) {
+	const defaultValue = 2
+
 	testdata := []struct {
 		body []string
 		size uint64
 	}{{
 		body: []string{"10Mib", "10MiB", "10M", "10MB"},
-		size: uint64(10),
+		size: 10,
 	}, {
 		body: []string{"10GiB", "10Gib", "10G", "10GB"},
-		size: uint64(10 * 1024),
+		size: 10 * units.GiB / units.MiB,
+	}, {
+		body: []string{"1024KiB", "1048576"},
+		size: 1,
+	}, {
+		body: []string{"100KiB", "1023KiB", "1048575", "0"},
+		size: 0,
 	}, {
 		body: []string{"10yiB", "10aib"},
-		size: uint64(1),
+		size: defaultValue,
 	}}
 
 	for _, t := range testdata {
 		for _, b := range t.body {
-			c.Assert(int(ParseMBFromText(b, 1)), Equals, int(t.size))
+			c.Assert(ParseMBFromText(b, defaultValue), Equals, t.size)
 		}
 	}
 }
