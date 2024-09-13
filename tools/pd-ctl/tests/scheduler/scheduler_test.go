@@ -488,12 +488,32 @@ func (suite *schedulerTestSuite) checkSchedulerConfig(cluster *pdTests.TestClust
 	})
 
 	// test grant hot region scheduler config
-	checkSchedulerCommand(re, cmd, pdAddr, []string{"-u", pdAddr, "scheduler", "add", "grant-hot-region-scheduler", "1", "1,2,3"}, map[string]bool{
+	// case 1: add grant-hot-region-scheduler when balance-hot-region-scheduler is running
+	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "add", "grant-hot-region-scheduler", "1", "1,2,3"}, nil)
+	re.Contains(echo, "balance-hot-region-scheduler is running, please remove it first")
+
+	// case 2: add grant-hot-region-scheduler when balance-hot-region-scheduler is paused
+	checkSchedulerCommand(re, cmd, pdAddr, []string{"-u", pdAddr, "scheduler", "pause", "balance-hot-region-scheduler", "60"}, map[string]bool{
 		"balance-region-scheduler":     true,
 		"balance-leader-scheduler":     true,
 		"balance-hot-region-scheduler": true,
-		"grant-hot-region-scheduler":   true,
 	})
+	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "add", "grant-hot-region-scheduler", "1", "1,2,3"}, nil)
+	re.Contains(echo, "balance-hot-region-scheduler is running, please remove it first")
+
+	// case 3: add grant-hot-region-scheduler when balance-hot-region-scheduler is disabled
+	checkSchedulerCommand(re, cmd, pdAddr, []string{"-u", pdAddr, "scheduler", "remove", "balance-hot-region-scheduler"}, map[string]bool{
+		"balance-region-scheduler": true,
+		"balance-leader-scheduler": true,
+	})
+
+	checkSchedulerCommand(re, cmd, pdAddr, []string{"-u", pdAddr, "scheduler", "add", "grant-hot-region-scheduler", "1", "1,2,3"}, map[string]bool{
+		"balance-region-scheduler":   true,
+		"balance-leader-scheduler":   true,
+		"grant-hot-region-scheduler": true,
+	})
+
+	// case 4: test grant-hot-region-scheduler config
 	var conf3 map[string]any
 	expected3 := map[string]any{
 		"store-id":        []any{float64(1), float64(2), float64(3)},
@@ -509,7 +529,17 @@ func (suite *schedulerTestSuite) checkSchedulerConfig(cluster *pdTests.TestClust
 		mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "grant-hot-region-scheduler"}, &conf3)
 		return reflect.DeepEqual(expected3, conf3)
 	})
+
+	// case 5: remove grant-hot-region-scheduler
+	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "add", "balance-hot-region-scheduler"}, nil)
+	re.Contains(echo, "grant-hot-region-scheduler is running, please remove it first")
+
 	checkSchedulerCommand(re, cmd, pdAddr, []string{"-u", pdAddr, "scheduler", "remove", "grant-hot-region-scheduler"}, map[string]bool{
+		"balance-region-scheduler": true,
+		"balance-leader-scheduler": true,
+	})
+
+	checkSchedulerCommand(re, cmd, pdAddr, []string{"-u", pdAddr, "scheduler", "add", "balance-hot-region-scheduler"}, map[string]bool{
 		"balance-region-scheduler":     true,
 		"balance-leader-scheduler":     true,
 		"balance-hot-region-scheduler": true,

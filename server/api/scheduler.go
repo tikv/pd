@@ -15,6 +15,9 @@
 package api
 
 import (
+	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -24,7 +27,9 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/schedule/types"
+	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/server"
 	"github.com/unrolled/render"
@@ -143,6 +148,15 @@ func (h *schedulerHandler) CreateScheduler(w http.ResponseWriter, r *http.Reques
 		}
 		collector(strconv.FormatUint(limit, 10))
 	case types.GrantHotRegionScheduler:
+		schedulers, err := h.getSchedulers()
+		if err != nil {
+			h.r.JSON(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if slice.Contains(schedulers, types.BalanceHotRegionScheduler.String()) {
+			h.r.JSON(w, http.StatusBadRequest, "balance-hot-region-scheduler is running, please remove it first")
+			return
+		}
 		leaderID, ok := input["store-leader-id"].(string)
 		if !ok {
 			h.r.JSON(w, http.StatusBadRequest, "missing leader id")
@@ -155,6 +169,16 @@ func (h *schedulerHandler) CreateScheduler(w http.ResponseWriter, r *http.Reques
 		}
 		collector(leaderID)
 		collector(peerIDs)
+	case types.BalanceHotRegionScheduler:
+		schedulers, err := h.getSchedulers()
+		if err != nil {
+			h.r.JSON(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if slice.Contains(schedulers, types.GrantHotRegionScheduler.String()) {
+			h.r.JSON(w, http.StatusBadRequest, "grant-hot-region-scheduler is running, please remove it first")
+			return
+		}
 	}
 
 	if err := h.AddScheduler(tp, args...); err != nil {
@@ -244,6 +268,48 @@ func (h *schedulerHandler) PauseOrResumeScheduler(w http.ResponseWriter, r *http
 		return
 	}
 	h.r.JSON(w, http.StatusOK, "Pause or resume the scheduler successfully.")
+}
+
+func (h *schedulerHandler) getSchedulers() ([]string, error) {
+	rc, err := h.GetRaftCluster()
+	if err != nil {
+		return nil, err
+	}
+	if !rc.IsServiceIndependent(constant.SchedulingServiceName) {
+		schedulers, err := h.GetSchedulerByStatus("", false)
+		if err != nil {
+			return nil, err
+		}
+		return schedulers.([]string), nil
+	}
+
+	addr, ok := h.svr.GetServicePrimaryAddr(h.svr.Context(), constant.SchedulingServiceName)
+	if !ok {
+		return nil, errs.ErrNotFoundSchedulingAddr.FastGenByArgs()
+	}
+	url := fmt.Sprintf("%s/scheduling/api/v1/schedulers", addr)
+	req, err := http.NewRequest(http.MethodGet, url, http.NoBody)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := h.svr.GetHTTPClient().Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, errs.ErrSchedulingServer.FastGenByArgs(resp.StatusCode)
+	}
+	bs, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	var schedulers []string
+	err = json.Unmarshal(bs, &schedulers)
+	if err != nil {
+		return nil, err
+	}
+	return schedulers, nil
 }
 
 type schedulerConfigHandler struct {
