@@ -148,7 +148,7 @@ func (h *schedulerHandler) CreateScheduler(w http.ResponseWriter, r *http.Reques
 		}
 		collector(strconv.FormatUint(limit, 10))
 	case types.GrantHotRegionScheduler:
-		schedulers, err := h.getSchedulers()
+		schedulers, err := h.getSchedulersOnDifferentMode()
 		if err != nil {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
@@ -170,7 +170,7 @@ func (h *schedulerHandler) CreateScheduler(w http.ResponseWriter, r *http.Reques
 		collector(leaderID)
 		collector(peerIDs)
 	case types.BalanceHotRegionScheduler:
-		schedulers, err := h.getSchedulers()
+		schedulers, err := h.getSchedulersOnDifferentMode()
 		if err != nil {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
@@ -270,7 +270,7 @@ func (h *schedulerHandler) PauseOrResumeScheduler(w http.ResponseWriter, r *http
 	h.r.JSON(w, http.StatusOK, "Pause or resume the scheduler successfully.")
 }
 
-func (h *schedulerHandler) getSchedulers() ([]string, error) {
+func (h *schedulerHandler) getSchedulersOnDifferentMode() ([]string, error) {
 	rc, err := h.GetRaftCluster()
 	if err != nil {
 		return nil, err
