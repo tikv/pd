@@ -148,4 +148,8 @@ func (t *testTiKVConfigSuite) TestMergeCheck(c *C) {
 			c.Assert(config.CheckRegionKeys(v.keys, v.mergeKeys), NotNil)
 		}
 	}
+	// Test CheckRegionSize when the region split size is 0.
+	config.RegionSplitSize = "100KiB"
+	c.Assert(config.GetRegionSplitSize(), Equals, uint64(0))
+	c.Assert(config.CheckRegionSize(defaultRegionMaxSize, 50), IsNil)
 }
