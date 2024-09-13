@@ -703,8 +703,9 @@ func (s *testCoordinatorSuite) TestPersistScheduler(c *C) {
 	// whether the schedulers added or removed in dynamic way are recorded in opt
 	_, newOpt, err := newTestScheduleConfig()
 	c.Assert(err, IsNil)
-	_, err = schedule.CreateScheduler(schedulers.ShuffleRegionType, oc, storage, schedule.ConfigJSONDecoder([]byte("null")))
+	shuffle, err := schedule.CreateScheduler(schedulers.ShuffleRegionType, oc, storage, schedule.ConfigJSONDecoder([]byte("null")))
 	c.Assert(err, IsNil)
+	c.Assert(co.addScheduler(shuffle), IsNil)
 	// suppose we add a new default enable scheduler
 	config.DefaultSchedulers = append(config.DefaultSchedulers, config.SchedulerConfig{Type: "shuffle-region"})
 	defer func() {

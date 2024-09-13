@@ -17,6 +17,10 @@ package cluster_test
 import (
 	"context"
 	"fmt"
+	"github.com/tikv/pd/server/id"
+	"github.com/tikv/pd/server/schedulers"
+	"github.com/tikv/pd/tests/server/api"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -1181,4 +1185,139 @@ func (s *clusterTestSuite) TestTransferLeaderBack(c *C) {
 	// check store count
 	c.Assert(rc.GetMetaCluster(), DeepEquals, meta)
 	c.Assert(rc.GetStoreCount(), Equals, 3)
+}
+
+func (s *clusterTestSuite) TestTransferLeaderForScheduler(c *C) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	c.Assert(failpoint.Enable("github.com/tikv/pd/server/cluster/changeCoordinatorTicker", `return(true)`), IsNil)
+	tc, err := tests.NewTestCluster(ctx, 2)
+	defer tc.Destroy()
+	c.Assert(err, IsNil)
+	err = tc.RunInitialServers()
+	c.Assert(err, IsNil)
+	tc.WaitLeader()
+	// start
+	leaderServer := tc.GetServer(tc.GetLeader())
+	c.Assert(leaderServer.BootstrapCluster(), IsNil)
+	rc := leaderServer.GetServer().GetRaftCluster()
+	c.Assert(rc, NotNil)
+
+	storesNum := 2
+	grpcPDClient := testutil.MustNewGrpcClient(c, leaderServer.GetAddr())
+	for i := 1; i <= storesNum; i++ {
+		store := &metapb.Store{
+			Id:      uint64(i),
+			Address: "127.0.0.1:" + strconv.Itoa(i),
+		}
+		resp, err := putStore(grpcPDClient, leaderServer.GetClusterID(), store)
+		c.Assert(err, IsNil)
+		c.Assert(resp.GetHeader().GetError().GetType(), Equals, pdpb.ErrorType_OK)
+	}
+	// region heartbeat
+	id := leaderServer.GetAllocator()
+	putRegionWithLeader(c, rc, id, 1)
+
+	time.Sleep(time.Second)
+	c.Assert(leaderServer.GetRaftCluster().IsPrepared(), IsTrue)
+
+	// Add evict leader scheduler
+	api.MustAddScheduler(c, leaderServer.GetAddr(), schedulers.EvictLeaderName, map[string]interface{}{
+		"store_id": 1,
+	})
+	api.MustAddScheduler(c, leaderServer.GetAddr(), schedulers.EvictLeaderName, map[string]interface{}{
+		"store_id": 2,
+	})
+	// Check scheduler updated.
+	c.Assert(len(rc.GetSchedulers()), Equals, 5)
+	checkEvictLeaderSchedulerExist(c, rc, true)
+	checkEvictLeaderStoreIDs(c, rc, []uint64{1, 2})
+
+	// transfer PD leader to another PD
+	tc.ResignLeader()
+	rc.Stop()
+	tc.WaitLeader()
+	leaderServer = tc.GetServer(tc.GetLeader())
+	rc1 := leaderServer.GetServer().GetRaftCluster()
+	rc1.Start(leaderServer.GetServer())
+	c.Assert(err, IsNil)
+	c.Assert(rc1, NotNil)
+	// region heartbeat
+	id = leaderServer.GetAllocator()
+	putRegionWithLeader(c, rc1, id, 1)
+	time.Sleep(time.Second)
+	c.Assert(leaderServer.GetRaftCluster().IsPrepared(), IsTrue)
+	// Check scheduler updated.
+	c.Assert(len(rc.GetSchedulers()), Equals, 5)
+	checkEvictLeaderSchedulerExist(c, rc, true)
+	checkEvictLeaderStoreIDs(c, rc, []uint64{1, 2})
+
+	// transfer PD leader back to the previous PD
+	tc.ResignLeader()
+	rc1.Stop()
+	tc.WaitLeader()
+	leaderServer = tc.GetServer(tc.GetLeader())
+	rc = leaderServer.GetServer().GetRaftCluster()
+	rc.Start(leaderServer.GetServer())
+	c.Assert(rc, NotNil)
+	// region heartbeat
+	id = leaderServer.GetAllocator()
+	putRegionWithLeader(c, rc, id, 1)
+	time.Sleep(time.Second)
+	c.Assert(leaderServer.GetRaftCluster().IsPrepared(), IsTrue)
+	// Check scheduler updated
+	c.Assert(len(rc.GetSchedulers()), Equals, 5)
+	checkEvictLeaderSchedulerExist(c, rc, true)
+	checkEvictLeaderStoreIDs(c, rc, []uint64{1, 2})
+
+	c.Assert(failpoint.Disable("github.com/tikv/pd/server/cluster/changeCoordinatorTicker"), IsNil)
+}
+
+func checkEvictLeaderSchedulerExist(c *C, rc *cluster.RaftCluster, exist bool) {
+	isExistScheduler := func(rc *cluster.RaftCluster, name string) bool {
+		s := rc.GetSchedulers()
+		for _, scheduler := range s {
+			if scheduler == name {
+				return true
+			}
+		}
+		return false
+	}
+
+	testutil.WaitUntil(c, func(c *C) bool {
+		return isExistScheduler(rc, schedulers.EvictLeaderName) == exist
+	})
+}
+
+func checkEvictLeaderStoreIDs(c *C, rc *cluster.RaftCluster, expected []uint64) {
+	handler, ok := rc.GetSchedulerHandlers()[schedulers.EvictLeaderName]
+	c.Assert(ok, IsTrue)
+	h, ok := handler.(interface {
+		EvictStoreIDs() []uint64
+	})
+	c.Assert(ok, IsTrue)
+	var evictStoreIDs []uint64
+	testutil.WaitUntil(c, func(c *C) bool {
+		evictStoreIDs = h.EvictStoreIDs()
+		return len(evictStoreIDs) == len(expected)
+	})
+}
+
+func putRegionWithLeader(c *C, rc *cluster.RaftCluster, id id.Allocator, storeID uint64) {
+	for i := 0; i < 3; i++ {
+		regionID, err := id.Alloc()
+		c.Assert(err, IsNil)
+		peerID, err := id.Alloc()
+		c.Assert(err, IsNil)
+		region := &metapb.Region{
+			Id:       regionID,
+			Peers:    []*metapb.Peer{{Id: peerID, StoreId: storeID}},
+			StartKey: []byte{byte(i)},
+			EndKey:   []byte{byte(i + 1)},
+		}
+		rc.HandleRegionHeartbeat(core.NewRegionInfo(region, region.Peers[0]))
+	}
+
+	time.Sleep(50 * time.Millisecond)
+	c.Assert(rc.GetStore(storeID).GetLeaderCount(), Equals, 3)
 }
