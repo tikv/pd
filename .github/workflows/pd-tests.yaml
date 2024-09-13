@@ -51,7 +51,7 @@ jobs:
           mv covprofile covprofile_$WORKER_ID
           sed -i "/failpoint_binding/d" covprofile_$WORKER_ID
       - name: Upload coverage result ${{ matrix.worker_id }}
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v4
         with:
           name: cover-reports
           path: covprofile_${{ matrix.worker_id }}
@@ -62,7 +62,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v3
       - name: Download chunk report
-        uses: actions/download-artifact@v2
+        uses: actions/download-artifact@v4
         with:
           name: cover-reports
       - name: Merge
