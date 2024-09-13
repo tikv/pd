@@ -1,0 +1,27 @@
+# See the OWNERS docs at https://go.k8s.io/owners
+approvers:
+  - AndreMouche
+  - binshi-bing
+  - bufferflies
+  - CabinfeverB
+  - Connor1996
+  - disksing
+  - huachaohuang
+  - HunDunDM
+  - HuSharp
+  - JmPotato
+  - lhy1024
+  - nolouch
+  - overvenus
+  - qiuyesuifeng
+  - rleungx
+  - siddontang
+  - Yisaer
+  - zhouqiang-cl
+reviewers:
+  - BusyJay
+  - howardlau1999
+  - Luffbee
+  - okJiang
+  - shafreeck
+  - xhebox
