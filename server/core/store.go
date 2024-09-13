@@ -522,16 +522,10 @@ func DistinctScore(labels []string, stores []*StoreInfo, other *StoreInfo) float
 	return score
 }
 
-<<<<<<< HEAD:server/core/store.go
-// MergeLabels merges the passed in labels with origins, overriding duplicated
-// ones.
-func (s *StoreInfo) MergeLabels(labels []*metapb.StoreLabel) []*metapb.StoreLabel {
-	storeLabels := s.GetLabels()
-L:
-=======
 // MergeLabels merges the passed in labels with origins, overriding duplicated ones.
 // Note: To prevent potential data races, it is advisable to refrain from directly modifying the 'origin' variable.
-func MergeLabels(origin []*metapb.StoreLabel, labels []*metapb.StoreLabel) []*metapb.StoreLabel {
+func (s *StoreInfo) MergeLabels(labels []*metapb.StoreLabel) []*metapb.StoreLabel {
+	origin := s.GetLabels()
 	results := make([]*metapb.StoreLabel, 0, len(origin))
 	for _, label := range origin {
 		results = append(results, &metapb.StoreLabel{
@@ -540,7 +534,6 @@ func MergeLabels(origin []*metapb.StoreLabel, labels []*metapb.StoreLabel) []*me
 		})
 	}
 
->>>>>>> 1772ad02e (core: fix datarace in MergeLabels (#7537)):pkg/core/store.go
 	for _, newLabel := range labels {
 		found := false
 		for _, label := range results {
