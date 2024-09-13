@@ -567,9 +567,9 @@ func (mc *Cluster) UpdateStoreLeaderWeight(storeID uint64, weight float64) {
 func (mc *Cluster) SetStoreEvictLeader(storeID uint64, enableEvictLeader bool) {
 	store := mc.GetStore(storeID)
 	if enableEvictLeader {
-		mc.PutStore(store.Clone(core.PauseLeaderTransfer()))
+		mc.PutStore(store.Clone(core.PauseLeaderTransferIn()))
 	} else {
-		mc.PutStore(store.Clone(core.ResumeLeaderTransfer()))
+		mc.PutStore(store.Clone(core.ResumeLeaderTransferIn()))
 	}
 }
 

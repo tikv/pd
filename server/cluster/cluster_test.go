@@ -1815,15 +1815,15 @@ func TestStores(t *testing.T) {
 	for i, store := range stores {
 		id := store.GetID()
 		re.Nil(cache.GetStore(id))
-		re.Error(cache.PauseLeaderTransfer(id))
+		re.Error(cache.PauseLeaderTransferIn(id))
 		cache.PutStore(store)
 		re.Equal(store, cache.GetStore(id))
 		re.Equal(i+1, cache.GetStoreCount())
-		re.NoError(cache.PauseLeaderTransfer(id))
-		re.False(cache.GetStore(id).AllowLeaderTransfer())
-		re.Error(cache.PauseLeaderTransfer(id))
-		cache.ResumeLeaderTransfer(id)
-		re.True(cache.GetStore(id).AllowLeaderTransfer())
+		re.NoError(cache.PauseLeaderTransferIn(id))
+		re.False(cache.GetStore(id).AllowLeaderTransferIn())
+		re.Error(cache.PauseLeaderTransferIn(id))
+		cache.ResumeLeaderTransferIn(id)
+		re.True(cache.GetStore(id).AllowLeaderTransferIn())
 	}
 	re.Equal(int(n), cache.GetStoreCount())
 

@@ -201,7 +201,7 @@ func (s *evictSlowStoreScheduler) ReloadConfig() error {
 	for _, id := range newCfg.EvictedStores {
 		new[id] = struct{}{}
 	}
-	pauseAndResumeLeaderTransfer(s.conf.cluster, old, new)
+	pauseAndResumeLeaderTransferIn(s.conf.cluster, old, new)
 	s.conf.RecoveryDurationGap = newCfg.RecoveryDurationGap
 	s.conf.EvictedStores = newCfg.EvictedStores
 	return nil

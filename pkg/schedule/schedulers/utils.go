@@ -391,20 +391,38 @@ func (q *retryQuota) gc(keepStores []*core.StoreInfo) {
 	}
 }
 
-// pauseAndResumeLeaderTransfer checks the old and new store IDs, and pause or resume the leader transfer.
-func pauseAndResumeLeaderTransfer[T any](cluster *core.BasicCluster, old, new map[uint64]T) {
+// pauseAndResumeLeaderTransferIn checks the old and new store IDs, and pause or resume the leader transfer in.
+func pauseAndResumeLeaderTransferIn[T any](cluster *core.BasicCluster, old, new map[uint64]T) {
 	for id := range old {
 		if _, ok := new[id]; ok {
 			continue
 		}
-		cluster.ResumeLeaderTransfer(id)
+		cluster.ResumeLeaderTransferIn(id)
 	}
 	for id := range new {
 		if _, ok := old[id]; ok {
 			continue
 		}
-		if err := cluster.PauseLeaderTransfer(id); err != nil {
-			log.Error("pause leader transfer failed", zap.Uint64("store-id", id), errs.ZapError(err))
+		if err := cluster.PauseLeaderTransferIn(id); err != nil {
+			log.Error("pause leader transfer in failed", zap.Uint64("store-id", id), errs.ZapError(err))
+		}
+	}
+}
+
+// pauseAndResumeLeaderTransferOut checks the old and new store IDs, and pause or resume the leader transfer out.
+func pauseAndResumeLeaderTransferOut[T any](cluster *core.BasicCluster, old, new map[uint64]T) {
+	for id := range old {
+		if _, ok := new[id]; ok {
+			continue
+		}
+		cluster.ResumeLeaderTransferOut(id)
+	}
+	for id := range new {
+		if _, ok := old[id]; ok {
+			continue
+		}
+		if err := cluster.PauseLeaderTransferOut(id); err != nil {
+			log.Error("pause leader transfer out failed", zap.Uint64("store-id", id), errs.ZapError(err))
 		}
 	}
 }

@@ -98,19 +98,31 @@ func SetStoreState(state metapb.StoreState, physicallyDestroyed ...bool) StoreCr
 	}
 }
 
-// PauseLeaderTransfer prevents the store from been selected as source or
-// target store of TransferLeader.
-func PauseLeaderTransfer() StoreCreateOption {
+// PauseLeaderTransferIn prevents the store from been selected as target store of TransferLeader.
+func PauseLeaderTransferIn() StoreCreateOption {
 	return func(store *StoreInfo) {
-		store.pauseLeaderTransfer = true
+		store.pauseLeaderTransferIn = true
 	}
 }
 
-// ResumeLeaderTransfer cleans a store's pause state. The store can be selected
-// as source or target of TransferLeader again.
-func ResumeLeaderTransfer() StoreCreateOption {
+// ResumeLeaderTransferIn cleans a store's pause state. The store can be selected as target of TransferLeader again.
+func ResumeLeaderTransferIn() StoreCreateOption {
 	return func(store *StoreInfo) {
-		store.pauseLeaderTransfer = false
+		store.pauseLeaderTransferIn = false
+	}
+}
+
+// PauseLeaderTransferOut prevents the store from been selected as source store of TransferLeader.
+func PauseLeaderTransferOut() StoreCreateOption {
+	return func(store *StoreInfo) {
+		store.pauseLeaderTransferOut = true
+	}
+}
+
+// ResumeLeaderTransferOut cleans a store's pause state. The store can be selected as source of TransferLeader again.
+func ResumeLeaderTransferOut() StoreCreateOption {
+	return func(store *StoreInfo) {
+		store.pauseLeaderTransferOut = false
 	}
 }
 

@@ -46,7 +46,7 @@ func (tikvCollector) filter(info *StoreSummaryInfo, kind constant.ResourceKind) 
 	}
 	switch kind {
 	case constant.LeaderKind:
-		return info.AllowLeaderTransfer()
+		return info.AllowLeaderTransferIn() || info.AllowLeaderTransferOut()
 	case constant.RegionKind:
 		return true
 	}

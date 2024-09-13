@@ -51,22 +51,23 @@ const (
 type StoreInfo struct {
 	meta *metapb.Store
 	*storeStats
-	pauseLeaderTransfer bool // not allow to be used as source or target of transfer leader
-	slowStoreEvicted    bool // this store has been evicted as a slow store, should not transfer leader to it
-	slowTrendEvicted    bool // this store has been evicted as a slow store by trend, should not transfer leader to it
-	leaderCount         int
-	regionCount         int
-	learnerCount        int
-	witnessCount        int
-	leaderSize          int64
-	regionSize          int64
-	pendingPeerCount    int
-	lastPersistTime     time.Time
-	leaderWeight        float64
-	regionWeight        float64
-	limiter             storelimit.StoreLimit
-	minResolvedTS       uint64
-	lastAwakenTime      time.Time
+	pauseLeaderTransferIn  bool // not allow to be used as target of transfer leader
+	pauseLeaderTransferOut bool // not allow to be used as source of transfer leader
+	slowStoreEvicted       bool // this store has been evicted as a slow store, should not transfer leader to it
+	slowTrendEvicted       bool // this store has been evicted as a slow store by trend, should not transfer leader to it
+	leaderCount            int
+	regionCount            int
+	learnerCount           int
+	witnessCount           int
+	leaderSize             int64
+	regionSize             int64
+	pendingPeerCount       int
+	lastPersistTime        time.Time
+	leaderWeight           float64
+	regionWeight           float64
+	limiter                storelimit.StoreLimit
+	minResolvedTS          uint64
+	lastAwakenTime         time.Time
 }
 
 // NewStoreInfo creates StoreInfo with meta data.
@@ -138,10 +139,16 @@ func (s *StoreInfo) ShallowClone(opts ...StoreCreateOption) *StoreInfo {
 	return &store
 }
 
-// AllowLeaderTransfer returns if the store is allowed to be selected
-// as source or target of transfer leader.
-func (s *StoreInfo) AllowLeaderTransfer() bool {
-	return !s.pauseLeaderTransfer
+// AllowLeaderTransferIn returns if the store is allowed to be selected
+// as target of transfer leader.
+func (s *StoreInfo) AllowLeaderTransferIn() bool {
+	return !s.pauseLeaderTransferIn
+}
+
+// AllowLeaderTransferOut returns if the store is allowed to be selected
+// as source of transfer leader.
+func (s *StoreInfo) AllowLeaderTransferOut() bool {
+	return !s.pauseLeaderTransferOut
 }
 
 // EvictedAsSlowStore returns if the store should be evicted as a slow store.
@@ -775,24 +782,25 @@ func (s *StoresInfo) ResetStores() {
 	s.stores = make(map[uint64]*StoreInfo)
 }
 
-// PauseLeaderTransfer pauses a StoreInfo with storeID.
-func (s *StoresInfo) PauseLeaderTransfer(storeID uint64) error {
+// PauseLeaderTransferIn pauses a StoreInfo with storeID. The store can not be selected
+// as target of TransferLeader again.
+func (s *StoresInfo) PauseLeaderTransferIn(storeID uint64) error {
 	s.Lock()
 	defer s.Unlock()
 	store, ok := s.stores[storeID]
 	if !ok {
 		return errs.ErrStoreNotFound.FastGenByArgs(storeID)
 	}
-	if !store.AllowLeaderTransfer() {
-		return errs.ErrPauseLeaderTransfer.FastGenByArgs(storeID)
+	if !store.AllowLeaderTransferIn() {
+		return errs.ErrPauseLeaderTransferIn.FastGenByArgs(storeID)
 	}
-	s.stores[storeID] = store.Clone(PauseLeaderTransfer())
+	s.stores[storeID] = store.Clone(PauseLeaderTransferIn())
 	return nil
 }
 
-// ResumeLeaderTransfer cleans a store's pause state. The store can be selected
-// as source or target of TransferLeader again.
-func (s *StoresInfo) ResumeLeaderTransfer(storeID uint64) {
+// ResumeLeaderTransferIn cleans a store's pause state. The store can be selected
+// as target of TransferLeader again.
+func (s *StoresInfo) ResumeLeaderTransferIn(storeID uint64) {
 	s.Lock()
 	defer s.Unlock()
 	store, ok := s.stores[storeID]
@@ -801,7 +809,37 @@ func (s *StoresInfo) ResumeLeaderTransfer(storeID uint64) {
 			zap.Uint64("store-id", storeID))
 		return
 	}
-	s.stores[storeID] = store.Clone(ResumeLeaderTransfer())
+	s.stores[storeID] = store.Clone(ResumeLeaderTransferIn())
+}
+
+// PauseLeaderTransferOut pauses a StoreInfo with storeID. The store can not be selected
+// as source of TransferLeader again.
+func (s *StoresInfo) PauseLeaderTransferOut(storeID uint64) error {
+	s.Lock()
+	defer s.Unlock()
+	store, ok := s.stores[storeID]
+	if !ok {
+		return errs.ErrStoreNotFound.FastGenByArgs(storeID)
+	}
+	if !store.AllowLeaderTransferOut() {
+		return errs.ErrPauseLeaderTransferOut.FastGenByArgs(storeID)
+	}
+	s.stores[storeID] = store.Clone(PauseLeaderTransferOut())
+	return nil
+}
+
+// ResumeLeaderTransferOut cleans a store's pause state. The store can be selected
+// as source of TransferLeader again.
+func (s *StoresInfo) ResumeLeaderTransferOut(storeID uint64) {
+	s.Lock()
+	defer s.Unlock()
+	store, ok := s.stores[storeID]
+	if !ok {
+		log.Warn("try to clean a store's pause state, but it is not found. It may be cleanup",
+			zap.Uint64("store-id", storeID))
+		return
+	}
+	s.stores[storeID] = store.Clone(ResumeLeaderTransferOut())
 }
 
 // SlowStoreEvicted marks a store as a slow store and prevents transferring

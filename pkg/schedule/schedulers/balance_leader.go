@@ -490,8 +490,17 @@ func (l *balanceLeaderScheduler) transferLeaderIn(solver *solver, collector *pla
 		balanceLeaderNoLeaderRegionCounter.Inc()
 		return nil
 	}
-	finalFilters := l.filters
+	// Check if the source store is available as a source.
 	conf := solver.GetSchedulerConfig()
+	if filter.NewCandidates([]*core.StoreInfo{solver.Source}).
+		FilterSource(conf, nil, l.filterCounter, l.filters...).Len() == 0 {
+		log.Debug("store cannot be used as source", zap.String("scheduler", l.GetName()), zap.Uint64("store-id", solver.Source.GetID()))
+		balanceLeaderNoSourceStoreCounter.Inc()
+		return nil
+	}
+
+	// Check if the target store is available as a target.
+	finalFilters := l.filters
 	if leaderFilter := filter.NewPlacementLeaderSafeguard(l.GetName(), conf, solver.GetBasicCluster(), solver.GetRuleManager(), solver.Region, solver.Source, false /*allowMoveLeader*/); leaderFilter != nil {
 		finalFilters = append(l.filters, leaderFilter)
 	}

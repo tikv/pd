@@ -185,7 +185,7 @@ func (s *evictLeaderScheduler) PrepareConfig(cluster sche.SchedulerCluster) erro
 	defer s.conf.mu.RUnlock()
 	var res error
 	for id := range s.conf.StoreIDWitRanges {
-		if err := cluster.PauseLeaderTransfer(id); err != nil {
+		if err := cluster.PauseLeaderTransferIn(id); err != nil {
 			res = err
 		}
 	}
@@ -197,7 +197,7 @@ func (s *evictLeaderScheduler) CleanConfig(cluster sche.SchedulerCluster) {
 	s.conf.mu.RLock()
 	defer s.conf.mu.RUnlock()
 	for id := range s.conf.StoreIDWitRanges {
-		cluster.ResumeLeaderTransfer(id)
+		cluster.ResumeLeaderTransferIn(id)
 	}
 }
 
@@ -258,7 +258,7 @@ func (handler *evictLeaderHandler) updateConfig(w http.ResponseWriter, r *http.R
 	if ok {
 		id = (uint64)(idFloat)
 		if _, exists = handler.config.StoreIDWitRanges[id]; !exists {
-			if err := handler.config.cluster.PauseLeaderTransfer(id); err != nil {
+			if err := handler.config.cluster.PauseLeaderTransferIn(id); err != nil {
 				handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
 				return
 			}
@@ -307,7 +307,7 @@ func (handler *evictLeaderHandler) deleteConfig(w http.ResponseWriter, r *http.R
 		return
 	}
 	delete(handler.config.StoreIDWitRanges, id)
-	handler.config.cluster.ResumeLeaderTransfer(id)
+	handler.config.cluster.ResumeLeaderTransferIn(id)
 
 	handler.config.mu.Unlock()
 	if err := handler.config.Persist(); err != nil {

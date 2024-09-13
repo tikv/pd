@@ -99,7 +99,7 @@ func (conf *grantLeaderSchedulerConfig) removeStore(id uint64) (succ bool, last 
 	succ, last = false, false
 	if exists {
 		delete(conf.StoreIDWithRanges, id)
-		conf.cluster.ResumeLeaderTransfer(id)
+		conf.cluster.ResumeLeaderTransferOut(id)
 		succ = true
 		last = len(conf.StoreIDWithRanges) == 0
 	}
@@ -109,7 +109,7 @@ func (conf *grantLeaderSchedulerConfig) removeStore(id uint64) (succ bool, last 
 func (conf *grantLeaderSchedulerConfig) resetStore(id uint64, keyRange []core.KeyRange) {
 	conf.Lock()
 	defer conf.Unlock()
-	if err := conf.cluster.PauseLeaderTransfer(id); err != nil {
+	if err := conf.cluster.PauseLeaderTransferOut(id); err != nil {
 		log.Error("pause leader transfer failed", zap.Uint64("store-id", id), errs.ZapError(err))
 	}
 	conf.StoreIDWithRanges[id] = keyRange
@@ -171,7 +171,7 @@ func (s *grantLeaderScheduler) ReloadConfig() error {
 	if err := s.conf.load(newCfg); err != nil {
 		return err
 	}
-	pauseAndResumeLeaderTransfer(s.conf.cluster, s.conf.StoreIDWithRanges, newCfg.StoreIDWithRanges)
+	pauseAndResumeLeaderTransferOut(s.conf.cluster, s.conf.StoreIDWithRanges, newCfg.StoreIDWithRanges)
 	s.conf.StoreIDWithRanges = newCfg.StoreIDWithRanges
 	return nil
 }
@@ -182,7 +182,7 @@ func (s *grantLeaderScheduler) PrepareConfig(cluster sche.SchedulerCluster) erro
 	defer s.conf.RUnlock()
 	var res error
 	for id := range s.conf.StoreIDWithRanges {
-		if err := cluster.PauseLeaderTransfer(id); err != nil {
+		if err := cluster.PauseLeaderTransferOut(id); err != nil {
 			res = err
 		}
 	}
@@ -194,7 +194,7 @@ func (s *grantLeaderScheduler) CleanConfig(cluster sche.SchedulerCluster) {
 	s.conf.RLock()
 	defer s.conf.RUnlock()
 	for id := range s.conf.StoreIDWithRanges {
-		cluster.ResumeLeaderTransfer(id)
+		cluster.ResumeLeaderTransferOut(id)
 	}
 }
 
@@ -252,7 +252,7 @@ func (handler *grantLeaderHandler) updateConfig(w http.ResponseWriter, r *http.R
 		id = (uint64)(idFloat)
 		handler.config.RLock()
 		if _, exists = handler.config.StoreIDWithRanges[id]; !exists {
-			if err := handler.config.cluster.PauseLeaderTransfer(id); err != nil {
+			if err := handler.config.cluster.PauseLeaderTransferOut(id); err != nil {
 				handler.config.RUnlock()
 				handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
 				return
