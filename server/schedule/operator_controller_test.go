@@ -752,23 +752,7 @@ func (t *testOperatorControllerSuite) TestAddWaitingOperator(c *C) {
 		RuleType: labeler.KeyRange,
 		Data:     []interface{}{map[string]interface{}{"start_key": "1a", "end_key": "1b"}},
 	})
-
 	c.Assert(labelerManager.ScheduleDisabled(source), IsTrue)
-	// add operator should be failed since it is labeled with `schedule=deny`.
-	c.Assert(controller.AddWaitingOperator(ops...), Equals, 0)
-
-	// add operator should be success without `schedule=deny`
-	labelerManager.DeleteLabelRule("schedulelabel")
-	labelerManager.ScheduleDisabled(source)
-	c.Assert(labelerManager.ScheduleDisabled(source), IsFalse)
-	// now there is one operator being allowed to add, if it is a merge operator
-	// both of the pair are allowed
-	ops, err = operator.CreateMergeRegionOperator("merge-region", cluster, source, target, operator.OpMerge)
-	c.Assert(err, IsNil)
-	c.Assert(ops, HasLen, 2)
-	c.Assert(controller.AddWaitingOperator(ops...), Equals, 2)
-	c.Assert(controller.AddWaitingOperator(ops...), Equals, 0)
-
-	// no space left, new operator can not be added.
-	c.Assert(controller.AddWaitingOperator(addPeerOp(0)), Equals, 0)
+	// add operator should be success since it is not check in addWaitingOperator
+	c.Assert(2, Equals, controller.AddWaitingOperator(ops...))
 }

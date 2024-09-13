@@ -1191,19 +1191,6 @@ func (r *RegionsInfo) ScanRangeWithIterator(startKey []byte, iterator func(regio
 	r.tree.scanRange(startKey, iterator)
 }
 
-// GetRegionSizeByRange scans regions intersecting [start key, end key), returns the total region size of this range.
-func (r *RegionsInfo) GetRegionSizeByRange(startKey, endKey []byte) int64 {
-	var size int64
-	r.tree.scanRange(startKey, func(region *RegionInfo) bool {
-		if len(endKey) > 0 && bytes.Compare(region.GetStartKey(), endKey) >= 0 {
-			return false
-		}
-		size += region.GetApproximateSize()
-		return true
-	})
-	return size
-}
-
 // GetAdjacentRegions returns region's info that is adjacent with specific region
 func (r *RegionsInfo) GetAdjacentRegions(region *RegionInfo) (*RegionInfo, *RegionInfo) {
 	p, n := r.tree.getAdjacentRegions(region)
