@@ -1229,7 +1229,7 @@ func (s *clusterTestSuite) TestTransferLeaderForScheduler(c *C) {
 		"store_id": 2,
 	})
 	// Check scheduler updated.
-	c.Assert(len(rc.GetSchedulers()), Equals, 5)
+	c.Assert(len(rc.GetSchedulers()), Equals, 4)
 	checkEvictLeaderSchedulerExist(c, rc, true)
 	checkEvictLeaderStoreIDs(c, rc, []uint64{1, 2})
 
@@ -1248,7 +1248,7 @@ func (s *clusterTestSuite) TestTransferLeaderForScheduler(c *C) {
 	time.Sleep(time.Second)
 	c.Assert(leaderServer.GetRaftCluster().IsPrepared(), IsTrue)
 	// Check scheduler updated.
-	c.Assert(len(rc.GetSchedulers()), Equals, 5)
+	c.Assert(len(rc.GetSchedulers()), Equals, 4)
 	checkEvictLeaderSchedulerExist(c, rc, true)
 	checkEvictLeaderStoreIDs(c, rc, []uint64{1, 2})
 
@@ -1266,7 +1266,7 @@ func (s *clusterTestSuite) TestTransferLeaderForScheduler(c *C) {
 	time.Sleep(time.Second)
 	c.Assert(leaderServer.GetRaftCluster().IsPrepared(), IsTrue)
 	// Check scheduler updated
-	c.Assert(len(rc.GetSchedulers()), Equals, 5)
+	c.Assert(len(rc.GetSchedulers()), Equals, 4)
 	checkEvictLeaderSchedulerExist(c, rc, true)
 	checkEvictLeaderStoreIDs(c, rc, []uint64{1, 2})
 
