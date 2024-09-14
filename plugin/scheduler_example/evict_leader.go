@@ -308,7 +308,7 @@ func (handler *evictLeaderHandler) deleteConfig(w http.ResponseWriter, r *http.R
 
 	handler.config.mu.Lock()
 	defer handler.config.mu.Unlock()
-	_, exists := handler.config.StoreIDWitRanges[id]
+	ranges, exists := handler.config.StoreIDWitRanges[id]
 	if !exists {
 		handler.rd.JSON(w, http.StatusInternalServerError, errors.New("the config does not exist"))
 		return
@@ -317,6 +317,8 @@ func (handler *evictLeaderHandler) deleteConfig(w http.ResponseWriter, r *http.R
 	handler.config.cluster.ResumeLeaderTransfer(id)
 
 	if err := handler.config.Persist(); err != nil {
+		handler.config.StoreIDWitRanges[id] = ranges
+		handler.config.cluster.PauseLeaderTransfer(id)
 		handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
