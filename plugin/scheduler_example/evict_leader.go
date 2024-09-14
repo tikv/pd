@@ -275,11 +275,18 @@ func (handler *evictLeaderHandler) updateConfig(w http.ResponseWriter, r *http.R
 
 	err := handler.config.BuildWithArgs(args)
 	if err != nil {
+		handler.config.mu.Lock()
+		handler.config.cluster.ResumeLeaderTransfer(id)
+		handler.config.mu.Unlock()
 		handler.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	err = handler.config.Persist()
 	if err != nil {
+		handler.config.mu.Lock()
+		delete(handler.config.StoreIDWitRanges, id)
+		handler.config.cluster.ResumeLeaderTransfer(id)
+		handler.config.mu.Unlock()
 		handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -309,14 +316,10 @@ func (handler *evictLeaderHandler) deleteConfig(w http.ResponseWriter, r *http.R
 	delete(handler.config.StoreIDWitRanges, id)
 	handler.config.cluster.ResumeLeaderTransfer(id)
 
-	handler.config.mu.Unlock()
 	if err := handler.config.Persist(); err != nil {
-		handler.config.mu.Lock()
 		handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	handler.config.mu.Lock()
-
 	var resp any
 	if len(handler.config.StoreIDWitRanges) == 0 {
 		resp = noStoreInSchedulerInfo
