@@ -408,6 +408,7 @@ func (handler *evictLeaderHandler) updateConfig(w http.ResponseWriter, r *http.R
 	batchFloat, ok := input["batch"].(float64)
 	if ok {
 		if batchFloat < 1 || batchFloat > 10 {
+			handler.config.delete(id)
 			handler.rd.JSON(w, http.StatusBadRequest, "batch is invalid, it should be in [1, 10]")
 			return
 		}
@@ -417,6 +418,7 @@ func (handler *evictLeaderHandler) updateConfig(w http.ResponseWriter, r *http.R
 	ranges, ok := (input["ranges"]).([]string)
 	if ok {
 		if !inputHasStoreID {
+			handler.config.delete(id)
 			handler.rd.JSON(w, http.StatusInternalServerError, errs.ErrSchedulerConfig.FastGenByArgs("id"))
 			return
 		}
@@ -426,6 +428,7 @@ func (handler *evictLeaderHandler) updateConfig(w http.ResponseWriter, r *http.R
 
 	newRanges, err = getKeyRanges(ranges)
 	if err != nil {
+		handler.config.delete(id)
 		handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
