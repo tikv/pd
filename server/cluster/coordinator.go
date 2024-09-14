@@ -639,6 +639,10 @@ func (c *coordinator) addScheduler(scheduler schedule.Scheduler, args ...string)
 	c.wg.Add(1)
 	go c.runScheduler(s)
 	c.schedulers[s.GetName()] = s
+	if err := schedule.SaveSchedulerConfig(c.cluster.storage, scheduler); err != nil {
+		log.Error("can not save scheduler config", zap.String("scheduler-name", scheduler.GetName()), errs.ZapError(err))
+		return err
+	}
 	c.cluster.opt.AddSchedulerCfg(s.GetType(), args)
 	return nil
 }
