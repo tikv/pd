@@ -318,7 +318,7 @@ func (handler *evictLeaderHandler) deleteConfig(w http.ResponseWriter, r *http.R
 
 	if err := handler.config.Persist(); err != nil {
 		handler.config.StoreIDWitRanges[id] = ranges
-		handler.config.cluster.PauseLeaderTransfer(id)
+		_ = handler.config.cluster.PauseLeaderTransfer(id)
 		handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}

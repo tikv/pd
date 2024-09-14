@@ -106,7 +106,8 @@ func (conf *evictLeaderSchedulerConfig) removeStoreLocked(id uint64) (bool, erro
 func (conf *evictLeaderSchedulerConfig) removeStore(id uint64) {
 	conf.Lock()
 	defer conf.Unlock()
-	conf.removeStoreLocked(id)
+	// if the store is not existed, no need to resume leader transfer
+	_, _ = conf.removeStoreLocked(id)
 }
 
 func (conf *evictLeaderSchedulerConfig) resetStoreLocked(id uint64, keyRange []core.KeyRange) {
