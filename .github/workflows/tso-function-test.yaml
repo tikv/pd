@@ -17,10 +17,10 @@ jobs:
   tso-function-test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/setup-go@v3
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
         with:
           go-version: "1.19"
-      - name: Checkout code
-        uses: actions/checkout@v3
       - name: Make TSO Function Test
         run: make test-tso-function
