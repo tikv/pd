@@ -64,7 +64,18 @@ func (tbc *tsoBatchController) fetchPendingRequests(ctx context.Context, tsoRequ
 	// Wait until BOTH the first request and the token have arrived.
 	// TODO: `tbc.collectedRequestCount` should never be non-empty here. Consider do assertion here.
 	tbc.collectedRequestCount = 0
-	for tbc.collectedRequestCount < tbc.maxBatchSize {
+	for {
+		// If the batch size reaches the maxBatchSize limit but the token haven't arrived yet, don't receive more
+		// requests, and return when token is ready.
+		if tbc.collectedRequestCount >= tbc.maxBatchSize && !tokenAcquired {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-tokenCh:
+				return nil
+			}
+		}
+
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
