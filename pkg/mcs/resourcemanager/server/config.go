@@ -26,7 +26,7 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
 	"github.com/spf13/pflag"
-	"github.com/tikv/pd/pkg/mcs/utils"
+	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/utils/configutil"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/metricutil"
@@ -35,7 +35,7 @@ import (
 )
 
 const (
-	defaultName             = "Resource Manager"
+	defaultName             = "resource manager"
 	defaultBackendEndpoints = "http://127.0.0.1:2379"
 	defaultListenAddr       = "http://127.0.0.1:3379"
 
@@ -127,8 +127,9 @@ func (rmc *ControllerConfig) Adjust(meta *configutil.ConfigMetaData) {
 	if !meta.IsDefined("ltb-token-rpc-max-delay") {
 		configutil.AdjustDuration(&rmc.LTBTokenRPCMaxDelay, defaultLTBTokenRPCMaxDelay)
 	}
-	failpoint.Inject("enableDegradedMode", func() {
+	failpoint.Inject("enableDegradedModeAndTraceLog", func() {
 		configutil.AdjustDuration(&rmc.DegradedModeWaitDuration, time.Second)
+		configutil.AdjustBool(&rmc.EnableControllerTraceLog, true)
 	})
 }
 
@@ -202,6 +203,7 @@ func (c *Config) Parse(flagSet *pflag.FlagSet) error {
 	}
 
 	// Ignore the error check here
+	configutil.AdjustCommandLineString(flagSet, &c.Name, "name")
 	configutil.AdjustCommandLineString(flagSet, &c.Log.Level, "log-level")
 	configutil.AdjustCommandLineString(flagSet, &c.Log.File.Filename, "log-file")
 	configutil.AdjustCommandLineString(flagSet, &c.Metric.PushAddress, "metrics-addr")
@@ -241,7 +243,7 @@ func (c *Config) Adjust(meta *toml.MetaData) error {
 	configutil.AdjustString(&c.AdvertiseListenAddr, c.ListenAddr)
 
 	if !configMetaData.IsDefined("enable-grpc-gateway") {
-		c.EnableGRPCGateway = utils.DefaultEnableGRPCGateway
+		c.EnableGRPCGateway = constant.DefaultEnableGRPCGateway
 	}
 
 	c.adjustLog(configMetaData.Child("log"))
@@ -250,17 +252,17 @@ func (c *Config) Adjust(meta *toml.MetaData) error {
 	}
 
 	c.Controller.Adjust(configMetaData.Child("controller"))
-	configutil.AdjustInt64(&c.LeaderLease, utils.DefaultLeaderLease)
+	configutil.AdjustInt64(&c.LeaderLease, constant.DefaultLeaderLease)
 
 	return nil
 }
 
 func (c *Config) adjustLog(meta *configutil.ConfigMetaData) {
 	if !meta.IsDefined("disable-error-verbose") {
-		c.Log.DisableErrorVerbose = utils.DefaultDisableErrorVerbose
+		c.Log.DisableErrorVerbose = constant.DefaultDisableErrorVerbose
 	}
-	configutil.AdjustString(&c.Log.Format, utils.DefaultLogFormat)
-	configutil.AdjustString(&c.Log.Level, utils.DefaultLogLevel)
+	configutil.AdjustString(&c.Log.Format, constant.DefaultLogFormat)
+	configutil.AdjustString(&c.Log.Level, constant.DefaultLogLevel)
 }
 
 // GetName returns the Name

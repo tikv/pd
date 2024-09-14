@@ -58,11 +58,11 @@ func NewSplitRegionsHandler(cluster sche.ClusterInformer, oc *operator.Controlle
 type RegionSplitter struct {
 	cluster           sche.ClusterInformer
 	handler           SplitRegionsHandler
-	addSuspectRegions func(ids ...uint64)
+	addSuspectRegions func(bool, ...uint64)
 }
 
 // NewRegionSplitter return a region splitter
-func NewRegionSplitter(cluster sche.ClusterInformer, handler SplitRegionsHandler, addSuspectRegions func(ids ...uint64)) *RegionSplitter {
+func NewRegionSplitter(cluster sche.ClusterInformer, handler SplitRegionsHandler, addSuspectRegions func(bool, ...uint64)) *RegionSplitter {
 	return &RegionSplitter{
 		cluster:           cluster,
 		handler:           handler,
@@ -173,7 +173,7 @@ func (r *RegionSplitter) groupKeysByRegion(keys [][]byte) map[uint64]*regionGrou
 
 func (r *RegionSplitter) checkRegionValid(region *core.RegionInfo) bool {
 	if !filter.IsRegionReplicated(r.cluster, region) {
-		r.addSuspectRegions(region.GetID())
+		r.addSuspectRegions(false, region.GetID())
 		return false
 	}
 	if region.GetLeader() == nil {
@@ -187,6 +187,7 @@ type splitRegionsHandler struct {
 	oc      *operator.Controller
 }
 
+// SplitRegionByKeys split region by keys.
 func (h *splitRegionsHandler) SplitRegionByKeys(region *core.RegionInfo, splitKeys [][]byte) error {
 	op, err := operator.CreateSplitRegionOperator("region-splitter", region, 0, pdpb.CheckPolicy_USEKEY, splitKeys)
 	if err != nil {
@@ -200,6 +201,7 @@ func (h *splitRegionsHandler) SplitRegionByKeys(region *core.RegionInfo, splitKe
 	return nil
 }
 
+// ScanRegionsByKeyRange scans regions by key range.
 func (h *splitRegionsHandler) ScanRegionsByKeyRange(groupKeys *regionGroupKeys, results *splitKeyResults) {
 	splitKeys := groupKeys.keys
 	startKey, endKey := groupKeys.region.GetStartKey(), groupKeys.region.GetEndKey()

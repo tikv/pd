@@ -18,6 +18,7 @@ import (
 	"context"
 
 	"github.com/tikv/pd/pkg/storage/kv"
+	"github.com/tikv/pd/pkg/utils/keypath"
 )
 
 // RuleStorage defines the storage operations on the rule.
@@ -45,50 +46,50 @@ var _ RuleStorage = (*StorageEndpoint)(nil)
 
 // SaveRule stores a rule cfg to the rulesPath.
 func (*StorageEndpoint) SaveRule(txn kv.Txn, ruleKey string, rule any) error {
-	return saveJSONInTxn(txn, ruleKeyPath(ruleKey), rule)
+	return saveJSONInTxn(txn, keypath.RuleKeyPath(ruleKey), rule)
 }
 
 // DeleteRule removes a rule from storage.
 func (*StorageEndpoint) DeleteRule(txn kv.Txn, ruleKey string) error {
-	return txn.Remove(ruleKeyPath(ruleKey))
+	return txn.Remove(keypath.RuleKeyPath(ruleKey))
 }
 
 // LoadRuleGroups loads all rule groups from storage.
 func (se *StorageEndpoint) LoadRuleGroups(f func(k, v string)) error {
-	return se.loadRangeByPrefix(ruleGroupPath+"/", f)
+	return se.loadRangeByPrefix(keypath.RuleGroupPath+"/", f)
 }
 
 // SaveRuleGroup stores a rule group config to storage.
 func (*StorageEndpoint) SaveRuleGroup(txn kv.Txn, groupID string, group any) error {
-	return saveJSONInTxn(txn, ruleGroupIDPath(groupID), group)
+	return saveJSONInTxn(txn, keypath.RuleGroupIDPath(groupID), group)
 }
 
 // DeleteRuleGroup removes a rule group from storage.
 func (*StorageEndpoint) DeleteRuleGroup(txn kv.Txn, groupID string) error {
-	return txn.Remove(ruleGroupIDPath(groupID))
+	return txn.Remove(keypath.RuleGroupIDPath(groupID))
 }
 
 // LoadRegionRules loads region rules from storage.
 func (se *StorageEndpoint) LoadRegionRules(f func(k, v string)) error {
-	return se.loadRangeByPrefix(regionLabelPath+"/", f)
+	return se.loadRangeByPrefix(keypath.RegionLabelPath+"/", f)
 }
 
 // SaveRegionRule saves a region rule to the storage.
 func (*StorageEndpoint) SaveRegionRule(txn kv.Txn, ruleKey string, rule any) error {
-	return saveJSONInTxn(txn, regionLabelKeyPath(ruleKey), rule)
+	return saveJSONInTxn(txn, keypath.RegionLabelKeyPath(ruleKey), rule)
 }
 
 // DeleteRegionRule removes a region rule from storage.
 func (*StorageEndpoint) DeleteRegionRule(txn kv.Txn, ruleKey string) error {
-	return txn.Remove(regionLabelKeyPath(ruleKey))
+	return txn.Remove(keypath.RegionLabelKeyPath(ruleKey))
 }
 
 // LoadRule load a placement rule from storage.
 func (se *StorageEndpoint) LoadRule(ruleKey string) (string, error) {
-	return se.Load(ruleKeyPath(ruleKey))
+	return se.Load(keypath.RuleKeyPath(ruleKey))
 }
 
 // LoadRules loads placement rules from storage.
 func (se *StorageEndpoint) LoadRules(f func(k, v string)) error {
-	return se.loadRangeByPrefix(rulesPath+"/", f)
+	return se.loadRangeByPrefix(keypath.RulesPath+"/", f)
 }

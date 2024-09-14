@@ -74,22 +74,20 @@ func HandleOverlaps(ctx context.Context, c Cluster, overlaps []*core.RegionInfo)
 }
 
 // Collect collects the cluster information.
-func Collect(ctx context.Context, c Cluster, region *core.RegionInfo, hasRegionStats bool) {
-	if hasRegionStats {
-		// get region again from root tree. make sure the observed region is the latest.
-		bc := c.GetBasicCluster()
-		if bc == nil {
-			return
-		}
-		region = bc.GetRegion(region.GetID())
-		if region == nil {
-			return
-		}
-		select {
-		case <-ctx.Done():
-			return
-		default:
-		}
-		c.GetRegionStats().Observe(region, c.GetBasicCluster().GetRegionStores(region))
+func Collect(ctx context.Context, c Cluster, region *core.RegionInfo) {
+	// get region again from root tree. make sure the observed region is the latest.
+	bc := c.GetBasicCluster()
+	if bc == nil {
+		return
 	}
+	region = bc.GetRegion(region.GetID())
+	if region == nil {
+		return
+	}
+	select {
+	case <-ctx.Done():
+		return
+	default:
+	}
+	c.GetRegionStats().Observe(region, c.GetBasicCluster().GetRegionStores(region))
 }

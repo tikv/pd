@@ -22,7 +22,8 @@ import (
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/storage/kv"
-	"go.etcd.io/etcd/clientv3"
+	"github.com/tikv/pd/pkg/utils/keypath"
+	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
 const (
@@ -49,7 +50,7 @@ var _ KeyspaceStorage = (*StorageEndpoint)(nil)
 
 // SaveKeyspaceMeta adds a save keyspace meta operation to target transaction.
 func (*StorageEndpoint) SaveKeyspaceMeta(txn kv.Txn, meta *keyspacepb.KeyspaceMeta) error {
-	metaPath := KeyspaceMetaPath(meta.GetId())
+	metaPath := keypath.KeyspaceMetaPath(meta.GetId())
 	metaVal, err := proto.Marshal(meta)
 	if err != nil {
 		return errs.ErrProtoMarshal.Wrap(err).GenWithStackByCause()
@@ -60,7 +61,7 @@ func (*StorageEndpoint) SaveKeyspaceMeta(txn kv.Txn, meta *keyspacepb.KeyspaceMe
 // LoadKeyspaceMeta load and return keyspace meta specified by id.
 // If keyspace does not exist or error occurs, returned meta will be nil.
 func (*StorageEndpoint) LoadKeyspaceMeta(txn kv.Txn, id uint32) (*keyspacepb.KeyspaceMeta, error) {
-	metaPath := KeyspaceMetaPath(id)
+	metaPath := keypath.KeyspaceMetaPath(id)
 	metaVal, err := txn.Load(metaPath)
 	if err != nil || metaVal == "" {
 		return nil, err
@@ -75,7 +76,7 @@ func (*StorageEndpoint) LoadKeyspaceMeta(txn kv.Txn, id uint32) (*keyspacepb.Key
 
 // SaveKeyspaceID saves keyspace ID to the path specified by keyspace name.
 func (*StorageEndpoint) SaveKeyspaceID(txn kv.Txn, id uint32, name string) error {
-	idPath := KeyspaceIDPath(name)
+	idPath := keypath.KeyspaceIDPath(name)
 	idVal := strconv.FormatUint(uint64(id), SpaceIDBase)
 	return txn.Save(idPath, idVal)
 }
@@ -84,7 +85,7 @@ func (*StorageEndpoint) SaveKeyspaceID(txn kv.Txn, id uint32, name string) error
 // An additional boolean is returned to indicate whether target id exists,
 // it returns false if target id not found, or if error occurred.
 func (*StorageEndpoint) LoadKeyspaceID(txn kv.Txn, name string) (bool, uint32, error) {
-	idPath := KeyspaceIDPath(name)
+	idPath := keypath.KeyspaceIDPath(name)
 	idVal, err := txn.Load(idPath)
 	// Failed to load the keyspaceID if loading operation errored, or if keyspace does not exist.
 	if err != nil || idVal == "" {
@@ -100,8 +101,8 @@ func (*StorageEndpoint) LoadKeyspaceID(txn kv.Txn, name string) (bool, uint32, e
 // LoadRangeKeyspace loads keyspaces starting at startID.
 // limit specifies the limit of loaded keyspaces.
 func (*StorageEndpoint) LoadRangeKeyspace(txn kv.Txn, startID uint32, limit int) ([]*keyspacepb.KeyspaceMeta, error) {
-	startKey := KeyspaceMetaPath(startID)
-	endKey := clientv3.GetPrefixRangeEnd(KeyspaceMetaPrefix())
+	startKey := keypath.KeyspaceMetaPath(startID)
+	endKey := clientv3.GetPrefixRangeEnd(keypath.KeyspaceMetaPrefix())
 	keys, values, err := txn.LoadRange(startKey, endKey, limit)
 	if err != nil {
 		return nil, err

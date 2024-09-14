@@ -315,9 +315,7 @@ CLEAN_UT_BINARY := find . -name '*.test.bin'| xargs rm -f
 
 clean-test:
 	# Cleaning test tmp...
-	rm -rf /tmp/test_pd*
-	rm -rf /tmp/pd-tests*
-	rm -rf /tmp/test_etcd*
+	rm -rf /tmp/pd_tests*
 	rm -f $(REAL_CLUSTER_TEST_PATH)/playground.log
 	go clean -testcache
 	@$(CLEAN_UT_BINARY)

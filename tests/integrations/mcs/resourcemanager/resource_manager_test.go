@@ -28,6 +28,7 @@ import (
 
 	"github.com/pingcap/failpoint"
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
+	"github.com/pingcap/log"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	pd "github.com/tikv/pd/client"
@@ -37,6 +38,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/tests"
 	"go.uber.org/goleak"
+	"go.uber.org/zap"
 
 	// Register Service
 	_ "github.com/tikv/pd/pkg/mcs/registry"
@@ -64,7 +66,7 @@ func (suite *resourceManagerClientTestSuite) SetupSuite() {
 	var err error
 	re := suite.Require()
 
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/mcs/resourcemanager/server/enableDegradedMode", `return(true)`))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/mcs/resourcemanager/server/enableDegradedModeAndTraceLog", `return(true)`))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/member/skipCampaignLeaderCheck", "return(true)"))
 
 	suite.ctx, suite.clean = context.WithCancel(context.Background())
@@ -151,7 +153,7 @@ func (suite *resourceManagerClientTestSuite) TearDownSuite() {
 	suite.client.Close()
 	suite.cluster.Destroy()
 	suite.clean()
-	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/resourcemanager/server/enableDegradedMode"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/resourcemanager/server/enableDegradedModeAndTraceLog"))
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/member/skipCampaignLeaderCheck"))
 }
 
@@ -410,11 +412,9 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupController() {
 	testCases := []struct {
 		resourceGroupName string
 		tcs               []tokenConsumptionPerSecond
-		len               int
 	}{
 		{
 			resourceGroupName: rg.Name,
-			len:               8,
 			tcs: []tokenConsumptionPerSecond{
 				{rruTokensAtATime: 50, wruTokensAtATime: 20, times: 100, waitDuration: 0},
 				{rruTokensAtATime: 50, wruTokensAtATime: 100, times: 100, waitDuration: 0},
@@ -434,7 +434,7 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupController() {
 		v := false
 		<-tricker.C
 		for _, cas := range testCases {
-			if i >= cas.len {
+			if i >= len(cas.tcs) {
 				continue
 			}
 			v = true
@@ -452,8 +452,9 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupController() {
 				sum += time.Since(startTime)
 				rgsController.OnResponse(cas.resourceGroupName, rreq, rres)
 				rgsController.OnResponse(cas.resourceGroupName, wreq, wres)
-				time.Sleep(1000 * time.Microsecond)
+				time.Sleep(time.Millisecond)
 			}
+			log.Info("finished test case", zap.Int("index", i), zap.Duration("sum", sum), zap.Duration("waitDuration", cas.tcs[i].waitDuration))
 			re.LessOrEqual(sum, buffDuration+cas.tcs[i].waitDuration)
 		}
 		i++
@@ -1479,12 +1480,12 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupControllerConfigCh
 	readBaseCost := 1.5
 	defaultCfg := controller.DefaultConfig()
 	expectCfg := server.ControllerConfig{
-		// failpoint enableDegradedMode will setup and set it be 1s.
+		// failpoint enableDegradedModeAndTraceLog will set it be 1s and enable trace log.
 		DegradedModeWaitDuration: typeutil.NewDuration(time.Second),
+		EnableControllerTraceLog: true,
 		LTBMaxWaitDuration:       typeutil.Duration(defaultCfg.LTBMaxWaitDuration),
 		LTBTokenRPCMaxDelay:      typeutil.Duration(defaultCfg.LTBTokenRPCMaxDelay),
 		RequestUnit:              server.RequestUnitConfig(defaultCfg.RequestUnit),
-		EnableControllerTraceLog: defaultCfg.EnableControllerTraceLog,
 	}
 	expectRUCfg := controller.GenerateRUConfig(defaultCfg)
 	expectRUCfg.DegradedModeWaitDuration = time.Second

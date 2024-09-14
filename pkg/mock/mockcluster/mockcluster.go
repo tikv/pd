@@ -845,7 +845,7 @@ func (mc *Cluster) SetStoreLabel(storeID uint64, labels map[string]string) {
 }
 
 // AddPendingProcessedRegions mock method
-func (mc *Cluster) AddPendingProcessedRegions(ids ...uint64) {
+func (mc *Cluster) AddPendingProcessedRegions(_ bool, ids ...uint64) {
 	for _, id := range ids {
 		mc.pendingProcessedRegions[id] = struct{}{}
 	}

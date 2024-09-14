@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-CUR_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
+CUR_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
 BASE_DIR="$(dirname "$CUR_DIR")"
 DASHBOARD_VERSION_FILE="$BASE_DIR/scripts/dashboard-version"
 # old version
@@ -23,9 +23,9 @@ if [ "$#" -ge 1 ]; then
   # so that we don't need to modify the embed-dashboard-ui.sh logic
   TO_FILE_VERSION=${DASHBOARD_VERSION#v}
 
-  echo "# This file is updated by running scripts/update-dashboard.sh" > $DASHBOARD_VERSION_FILE
-  echo "# Don't edit it manullay" >> $DASHBOARD_VERSION_FILE
-  echo $TO_FILE_VERSION >> $DASHBOARD_VERSION_FILE
+  echo "# This file is updated by running scripts/update-dashboard.sh" >$DASHBOARD_VERSION_FILE
+  echo "# Don't edit it manually" >>$DASHBOARD_VERSION_FILE
+  echo $TO_FILE_VERSION >>$DASHBOARD_VERSION_FILE
 fi
 
 echo "+ Update dashboard version to $DASHBOARD_VERSION"

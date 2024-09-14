@@ -73,13 +73,14 @@ func (checker *prepareChecker) check(c *core.BasicCluster, collectWaitTime ...ti
 	return true
 }
 
+// IsPrepared returns whether the coordinator is prepared.
 func (checker *prepareChecker) IsPrepared() bool {
 	checker.RLock()
 	defer checker.RUnlock()
 	return checker.prepared
 }
 
-// for test purpose
+// SetPrepared is for test purpose
 func (checker *prepareChecker) SetPrepared() {
 	checker.Lock()
 	defer checker.Unlock()

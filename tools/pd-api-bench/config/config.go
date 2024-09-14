@@ -15,8 +15,8 @@
 package config
 
 import (
+	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
-	"github.com/pkg/errors"
 	flag "github.com/spf13/pflag"
 	"github.com/tikv/pd/pkg/utils/configutil"
 	"github.com/tikv/pd/tools/pd-api-bench/cases"
@@ -44,7 +44,7 @@ type Config struct {
 	// only for init
 	HTTP map[string]cases.Config `toml:"http" json:"http"`
 	GRPC map[string]cases.Config `toml:"grpc" json:"grpc"`
-	ETCD map[string]cases.Config `toml:"etcd" json:"etcd"`
+	Etcd map[string]cases.Config `toml:"etcd" json:"etcd"`
 }
 
 // NewConfig return a set of settings.
@@ -109,9 +109,9 @@ func (c *Config) InitCoordinator(co *cases.Coordinator) {
 			log.Error("create gRPC case failed", zap.Error(err))
 		}
 	}
-	for name, cfg := range c.ETCD {
+	for name, cfg := range c.Etcd {
 		cfg := cfg
-		err := co.SetETCDCase(name, &cfg)
+		err := co.SetEtcdCase(name, &cfg)
 		if err != nil {
 			log.Error("create etcd case failed", zap.Error(err))
 		}

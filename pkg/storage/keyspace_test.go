@@ -21,8 +21,8 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/stretchr/testify/require"
-	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
+	"github.com/tikv/pd/pkg/utils/keypath"
 )
 
 func TestSaveLoadKeyspace(t *testing.T) {
@@ -145,9 +145,9 @@ func makeTestKeyspaces() []*keyspacepb.KeyspaceMeta {
 // TestEncodeSpaceID test spaceID encoding.
 func TestEncodeSpaceID(t *testing.T) {
 	re := require.New(t)
-	re.Equal("keyspaces/meta/00000000", endpoint.KeyspaceMetaPath(0))
-	re.Equal("keyspaces/meta/16777215", endpoint.KeyspaceMetaPath(1<<24-1))
-	re.Equal("keyspaces/meta/00000100", endpoint.KeyspaceMetaPath(100))
-	re.Equal("keyspaces/meta/00000011", endpoint.KeyspaceMetaPath(11))
-	re.Equal("keyspaces/meta/00000010", endpoint.KeyspaceMetaPath(10))
+	re.Equal("keyspaces/meta/00000000", keypath.KeyspaceMetaPath(0))
+	re.Equal("keyspaces/meta/16777215", keypath.KeyspaceMetaPath(1<<24-1))
+	re.Equal("keyspaces/meta/00000100", keypath.KeyspaceMetaPath(100))
+	re.Equal("keyspaces/meta/00000011", keypath.KeyspaceMetaPath(11))
+	re.Equal("keyspaces/meta/00000010", keypath.KeyspaceMetaPath(10))
 }

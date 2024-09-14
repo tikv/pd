@@ -76,34 +76,44 @@ func NewRollingCounter(opts RollingCounterOpts) RollingCounter {
 	}
 }
 
+// Add adds the given value to the counter.
 func (r *rollingCounter) Add(val int64) {
 	r.policy.Add(float64(val))
 }
 
+// Reduce applies the reduction function to all buckets within the window.
 func (r *rollingCounter) Reduce(f func(Iterator) float64) float64 {
 	return r.policy.Reduce(f)
 }
 
+// Avg computes average value within the window.
 func (r *rollingCounter) Avg() float64 {
 	return r.policy.Reduce(Avg)
 }
 
+// Min finds the min value within the window.
 func (r *rollingCounter) Min() float64 {
 	return r.policy.Reduce(Min)
 }
 
+// Max finds the max value within the window.
 func (r *rollingCounter) Max() float64 {
 	return r.policy.Reduce(Max)
 }
 
+// Sum computes sum value within the window.
 func (r *rollingCounter) Sum() float64 {
 	return r.policy.Reduce(Sum)
 }
 
+// Value gets the current value.
 func (r *rollingCounter) Value() int64 {
 	return int64(r.Sum())
 }
 
+// Timespan returns passed bucket number since lastAppendTime,
+// if it is one bucket duration earlier than the last recorded
+// time, it will return the size.
 func (r *rollingCounter) Timespan() int {
 	r.policy.mu.RLock()
 	defer r.policy.mu.RUnlock()

@@ -40,7 +40,7 @@ import (
 	scheduling "github.com/tikv/pd/pkg/mcs/scheduling/server"
 	sc "github.com/tikv/pd/pkg/mcs/scheduling/server/config"
 	tso "github.com/tikv/pd/pkg/mcs/tso/server"
-	"github.com/tikv/pd/pkg/mcs/utils"
+	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/mock/mockid"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
@@ -50,6 +50,7 @@ import (
 )
 
 var (
+	// TestDialClient is a http client for test.
 	TestDialClient = &http.Client{
 		Transport: &http.Transport{
 			DisableKeepAlives: true,
@@ -110,6 +111,7 @@ func StartSingleResourceManagerTestServer(ctx context.Context, re *require.Asser
 	cfg := rm.NewConfig()
 	cfg.BackendEndpoints = backendEndpoints
 	cfg.ListenAddr = listenAddrs
+	cfg.Name = cfg.ListenAddr
 	cfg, err := rm.GenerateConfig(cfg)
 	re.NoError(err)
 
@@ -127,6 +129,7 @@ func StartSingleTSOTestServerWithoutCheck(ctx context.Context, re *require.Asser
 	cfg := tso.NewConfig()
 	cfg.BackendEndpoints = backendEndpoints
 	cfg.ListenAddr = listenAddrs
+	cfg.Name = cfg.ListenAddr
 	cfg, err := tso.GenerateConfig(cfg)
 	re.NoError(err)
 	// Setup the logger.
@@ -164,6 +167,7 @@ func StartSingleSchedulingTestServer(ctx context.Context, re *require.Assertions
 	cfg := sc.NewConfig()
 	cfg.BackendEndpoints = backendEndpoints
 	cfg.ListenAddr = listenAddrs
+	cfg.Name = cfg.ListenAddr
 	cfg, err := scheduling.GenerateConfig(cfg)
 	re.NoError(err)
 
@@ -283,11 +287,15 @@ func MustReportBuckets(re *require.Assertions, cluster *TestCluster, regionID ui
 	return buckets
 }
 
+// SchedulerMode is used for test purpose.
 type SchedulerMode int
 
 const (
+	// Both represents both PD mode and API mode.
 	Both SchedulerMode = iota
+	// PDMode represents PD mode.
 	PDMode
+	// APIMode represents API mode.
 	APIMode
 )
 
@@ -414,7 +422,7 @@ func (s *SchedulingTestEnvironment) startCluster(m SchedulerMode) {
 		cluster.SetSchedulingCluster(tc)
 		time.Sleep(200 * time.Millisecond) // wait for scheduling cluster to update member
 		testutil.Eventually(re, func() bool {
-			return cluster.GetLeaderServer().GetServer().GetRaftCluster().IsServiceIndependent(utils.SchedulingServiceName)
+			return cluster.GetLeaderServer().GetServer().GetRaftCluster().IsServiceIndependent(constant.SchedulingServiceName)
 		})
 		s.clusters[APIMode] = cluster
 	}

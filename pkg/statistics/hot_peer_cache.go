@@ -102,6 +102,7 @@ func (f *HotPeerCache) RegionStats(minHotDegree int) map[uint64][]*HotPeerStat {
 	return res
 }
 
+// UpdateStat updates the stat cache.
 func (f *HotPeerCache) UpdateStat(item *HotPeerStat) {
 	switch item.actionType {
 	case utils.Remove:
@@ -439,7 +440,7 @@ func (f *HotPeerCache) updateHotPeerStat(region *core.RegionInfo, newItem, oldIt
 
 	if source == utils.Inherit {
 		for _, dim := range oldItem.rollingLoads {
-			newItem.rollingLoads = append(newItem.rollingLoads, dim.Clone())
+			newItem.rollingLoads = append(newItem.rollingLoads, dim.clone())
 		}
 		newItem.allowInherited = false
 	} else {
@@ -462,7 +463,7 @@ func (f *HotPeerCache) updateHotPeerStat(region *core.RegionInfo, newItem, oldIt
 	}
 
 	for i, k := range regionStats {
-		newItem.rollingLoads[i].Add(deltaLoads[k], interval)
+		newItem.rollingLoads[i].add(deltaLoads[k], interval)
 	}
 
 	isFull := newItem.rollingLoads[0].isFull(f.interval()) // The intervals of dims are the same, so it is only necessary to determine whether any of them
@@ -505,7 +506,7 @@ func (f *HotPeerCache) updateNewHotPeerStat(newItem *HotPeerStat, deltaLoads []f
 	newItem.rollingLoads = make([]*dimStat, len(regionStats))
 	for i, k := range regionStats {
 		ds := newDimStat(f.interval())
-		ds.Add(deltaLoads[k], interval)
+		ds.add(deltaLoads[k], interval)
 		if ds.isFull(f.interval()) {
 			ds.clearLastAverage()
 		}

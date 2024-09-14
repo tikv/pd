@@ -63,6 +63,14 @@ var (
 			Help:      "Counter of failed request.",
 		}, []string{resourceGroupNameLabel, newResourceGroupNameLabel, errType})
 
+	groupRunningKVRequestCounter = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: namespace,
+			Subsystem: requestSubsystem,
+			Name:      "running_kv_request",
+			Help:      "Counter of running kv request.",
+		}, []string{newResourceGroupNameLabel})
+
 	requestRetryCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: namespace,
@@ -95,6 +103,14 @@ var (
 			Name:      "low_token_notified",
 			Help:      "Counter of low token request.",
 		}, []string{newResourceGroupNameLabel})
+	tokenConsumedHistogram = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: namespace,
+			Subsystem: tokenRequestSubsystem,
+			Name:      "consume",
+			Buckets:   []float64{.5, 1, 2, 5, 10, 15, 20, 40, 64, 128, 256, 512, 1024, 2048}, // 0 ~ 2048
+			Help:      "Bucketed histogram of token consume.",
+		}, []string{newResourceGroupNameLabel})
 )
 
 var (
@@ -108,8 +124,10 @@ func init() {
 	prometheus.MustRegister(successfulRequestDuration)
 	prometheus.MustRegister(failedRequestCounter)
 	prometheus.MustRegister(failedLimitReserveDuration)
+	prometheus.MustRegister(groupRunningKVRequestCounter)
 	prometheus.MustRegister(requestRetryCounter)
 	prometheus.MustRegister(tokenRequestDuration)
 	prometheus.MustRegister(resourceGroupTokenRequestCounter)
 	prometheus.MustRegister(lowTokenRequestNotifyCounter)
+	prometheus.MustRegister(tokenConsumedHistogram)
 }
