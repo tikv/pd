@@ -59,7 +59,8 @@ const (
 	// configured to run a global gc worker to calculate a global gc safe point.
 	// If `gc_management_type` is `keyspace_level_gc` it means the current keyspace can calculate gc safe point by its own.
 	GCManagementType = "gc_management_type"
-	KeyspaceLevelGC  = "keyspace_level_gc"
+	// KeyspaceLevelGC is a type of gc_management_type used to indicate that this keyspace independently advances its own gc safe point.
+	KeyspaceLevelGC = "keyspace_level_gc"
 )
 
 // Config is the interface for keyspace config.

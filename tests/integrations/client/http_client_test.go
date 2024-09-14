@@ -795,7 +795,7 @@ func (suite *httpClientTestSuite) TestUpdateKeyspaceGCManagementType() {
 			GCManagementType: keyspace.KeyspaceLevelGC,
 		},
 	}
-	err = client.UpdateKeyspaceGCManagementType(env.ctx, keyspaceName, &keyspaceSafePointVersionConfig)
+	err = client.UpdateKeyspaceGCManagementType(suite.ctx, keyspaceName, &keyspaceSafePointVersionConfig)
 	re.Error(err)
 }
 
