@@ -796,6 +796,12 @@ func (c *client) UpdateOption(option DynamicOption, value any) error {
 			return errors.New("[pd] invalid value type for EnableFollowerHandle option, it should be bool")
 		}
 		c.option.setEnableFollowerHandle(enable)
+	case TSOClientRPCConcurrency:
+		value, ok := value.(int)
+		if !ok {
+			return errors.New("[pd] invalid value type for TSOClientRPCConcurrency option, it should be int")
+		}
+		c.option.setTSOClientRPCConcurrency(value)
 	default:
 		return errors.New("[pd] unsupported client option")
 	}

@@ -69,6 +69,8 @@ type tsoServiceProvider interface {
 	updateConnectionCtxs(ctx context.Context, dc string, connectionCtxs *sync.Map) bool
 }
 
+const dispatcherCheckRPCConcurrencyInterval = time.Second * 5
+
 type tsoDispatcher struct {
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -87,7 +89,10 @@ type tsoDispatcher struct {
 	// A token must be acquired here before sending an RPC request, and the token must be put back after finishing the
 	// RPC. This is used like a semaphore, but we don't use semaphore directly here as it cannot be selected with
 	// other channels.
-	tokenCh chan struct{}
+	tokenCh                  chan struct{}
+	lastCheckConcurrencyTime time.Time
+	tokenCount               int
+	rpcConcurrency           int
 
 	updateConnectionCtxsCh chan struct{}
 }
@@ -219,6 +224,12 @@ func (td *tsoDispatcher) handleDispatcher(wg *sync.WaitGroup) {
 	// Loop through each batch of TSO requests and send them for processing.
 	streamLoopTimer := time.NewTimer(option.timeout)
 	defer streamLoopTimer.Stop()
+
+	// Create a not-started-timer to be used for collecting batches for concurrent RPC.
+	batchingTimer := time.NewTimer(0)
+	<-batchingTimer.C
+	defer batchingTimer.Stop()
+
 	bo := retry.InitialBackoffer(updateMemberBackOffBaseTime, updateMemberTimeout, updateMemberBackOffBaseTime)
 tsoBatchLoop:
 	for {
@@ -233,8 +244,18 @@ tsoBatchLoop:
 			batchController = td.batchBufferPool.Get().(*tsoBatchController)
 		}
 
-		// Start to collect the TSO requests.
 		maxBatchWaitInterval := option.getMaxTSOBatchWaitInterval()
+
+		currentBatchStartTime := time.Now()
+		// Update concurrency settings if needed.
+		if err = td.checkTSORPCConcurrency(ctx, maxBatchWaitInterval, currentBatchStartTime); err != nil {
+			// checkTSORPCConcurrency can only fail due to `ctx` being invalidated.
+			log.Info("[tso] stop checking tso rpc concurrency configurations due to context canceled",
+				zap.String("dc-location", dc), zap.Error(err))
+			return
+		}
+
+		// Start to collect the TSO requests.
 		// Once the TSO requests are collected, must make sure they could be finished or revoked eventually,
 		// otherwise the upper caller may get blocked on waiting for the results.
 		if err = batchController.fetchPendingRequests(ctx, td.tsoRequestCh, td.tokenCh, maxBatchWaitInterval); err != nil {
@@ -318,6 +339,39 @@ tsoBatchLoop:
 
 			break streamChoosingLoop
 		}
+
+		// If concurrent RPC is enabled, the time for collecting each request batch is expected to be
+		// estimatedRPCDuration / concurrency. Note the time mentioned here is counted from starting trying to collect
+		// the batch, instead of the time when the first request arrives.
+		// Here, if the elapsed time since starting collecting this batch didn't reach the expected batch time, then
+		// continue collecting.
+		if td.isConcurrentRPCEnabled() {
+			estimatedLatency := stream.EstimatedRPCLatency()
+			estimateTSOLatencyGauge.WithLabelValues(streamURL).Set(estimatedLatency.Seconds())
+
+			totalBatchTime := estimatedLatency / time.Duration(td.rpcConcurrency)
+			waitTimerStart := time.Now()
+			remainingBatchTime := totalBatchTime - waitTimerStart.Sub(currentBatchStartTime)
+			if remainingBatchTime > 0 {
+				if !batchingTimer.Stop() {
+					select {
+					case <-batchingTimer.C:
+					default:
+					}
+				}
+				batchingTimer.Reset(remainingBatchTime)
+
+				err = batchController.fetchRequestsWithTimer(ctx, td.tsoRequestCh, batchingTimer)
+				if err != nil {
+					// There should not be
+					log.Info("[tso] stop fetching the pending tso requests due to context canceled",
+						zap.String("dc-location", dc), zap.Error(err))
+					td.cancelCollectedRequests(batchController, invalidStreamID, errors.WithStack(ctx.Err()))
+					return
+				}
+			}
+		}
+
 		done := make(chan struct{})
 		dl := newTSDeadline(option.timeout, done, cancel)
 		select {
@@ -579,4 +633,75 @@ func (td *tsoDispatcher) compareAndSwapTS(
 		}
 	}
 	td.lastTSOInfo = curTSOInfo
+}
+
+// checkTSORPCConcurrency checks configurations about TSO RPC concurrency, and adjust the token count if needed.
+// Some other options (EnableTSOFollowerProxy and MaxTSOBatchWaitInterval) may affect the availability of concurrent
+// RPC requests. As the dispatcher loop loads MaxTSOBatchWaitInterval in each single circle, pass it directly to this
+// function. Other configurations will be loaded within this function when needed.
+//
+// Behavior of the function:
+//   - As concurrent TSO RPC requests is an optimization aiming on the opposite purpose to that of EnableTSOFollowerProxy
+//     and MaxTSOBatchWaitInterval, so once either EnableTSOFollowerProxy and MaxTSOBatchWaitInterval is enabled, the
+//     concurrency will always be set to 1 no matter how the user configured it.
+//   - Normally, this function takes effect in a limited frequency controlled by dispatcherCheckRPCConcurrencyInterval.
+//     However, if the RPC concurrency is set to more than 1, and MaxTSOBatchWaitInterval is changed from disabled into
+//     enabled (0 -> positive), this function takes effect immediately to disable concurrent RPC requests.
+//   - After this function takes effect, the final decision of concurrency and token count will be set to
+//     td.rpcConcurrency and td.tokenCount; and tokens available in td.tokenCh will also be adjusted.
+func (td *tsoDispatcher) checkTSORPCConcurrency(ctx context.Context, maxBatchWaitInterval time.Duration, now time.Time) error {
+	// If we currently enabled concurrent TSO RPC requests, but `maxBatchWaitInterval` is a positive value, it must
+	// because that MaxTSOBatchWaitInterval is just enabled. In this case, disable concurrent TSO RPC requests
+	// immediately, because MaxTSOBatchWaitInterval and concurrent RPC requests has opposite purpose.
+	immediatelyUpdate := td.rpcConcurrency > 1 && maxBatchWaitInterval > 0
+
+	if !immediatelyUpdate && now.Sub(td.lastCheckConcurrencyTime) < dispatcherCheckRPCConcurrencyInterval {
+		return nil
+	}
+	td.lastCheckConcurrencyTime = now
+
+	newConcurrency := td.provider.getOption().getTSOClientRPCConcurrency()
+	if maxBatchWaitInterval > 0 || td.provider.getOption().getEnableTSOFollowerProxy() {
+		newConcurrency = 1
+	}
+
+	if newConcurrency == td.rpcConcurrency {
+		return nil
+	}
+
+	log.Info("[tso] switching tso rpc concurrency", zap.Int("old", td.rpcConcurrency), zap.Int("new", newConcurrency))
+	td.rpcConcurrency = newConcurrency
+
+	// Find a proper token count.
+	// When the concurrency is set to 1, there's only 1 token, which means only 1 RPC request can run at the same
+	// time.
+	// When the concurrency is set to more than 1, the time interval between sending two batches of requests is
+	// controlled by an estimation of an average RPC duration. But as the duration of an RPC may jitter in the network,
+	// and an RPC request may finish earlier or later. So we allow there to be the actual number of concurrent ongoing
+	// request to be fluctuating. So in this case, the token count will be set to 2 times the expected concurrency.
+	newTokenCount := newConcurrency
+	if newConcurrency > 1 {
+		newTokenCount = newConcurrency * 2
+	}
+
+	if newTokenCount > td.tokenCount {
+		for td.tokenCount < newTokenCount {
+			td.tokenCh <- struct{}{}
+			td.tokenCount++
+		}
+	} else if newTokenCount < td.tokenCount {
+		for td.tokenCount > newTokenCount {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-td.tokenCh:
+			}
+			td.tokenCount--
+		}
+	}
+	return nil
+}
+
+func (td *tsoDispatcher) isConcurrentRPCEnabled() bool {
+	return td.rpcConcurrency > 1
 }

@@ -29,6 +29,7 @@ const (
 	defaultMaxTSOBatchWaitInterval time.Duration = 0
 	defaultEnableTSOFollowerProxy                = false
 	defaultEnableFollowerHandle                  = false
+	defaultTSOClientRPCConcurrency               = 1
 )
 
 // DynamicOption is used to distinguish the dynamic option type.
@@ -43,6 +44,8 @@ const (
 	EnableTSOFollowerProxy
 	// EnableFollowerHandle is the follower handle option.
 	EnableFollowerHandle
+	// TSOClientRPCConcurrency controls the amount of ongoing TSO RPC requests at the same time in a single TSO client.
+	TSOClientRPCConcurrency
 
 	dynamicOptionCount
 )
@@ -77,6 +80,7 @@ func newOption() *option {
 	co.dynamicOptions[MaxTSOBatchWaitInterval].Store(defaultMaxTSOBatchWaitInterval)
 	co.dynamicOptions[EnableTSOFollowerProxy].Store(defaultEnableTSOFollowerProxy)
 	co.dynamicOptions[EnableFollowerHandle].Store(defaultEnableFollowerHandle)
+	co.dynamicOptions[TSOClientRPCConcurrency].Store(defaultTSOClientRPCConcurrency)
 	return co
 }
 
@@ -126,4 +130,15 @@ func (o *option) setEnableTSOFollowerProxy(enable bool) {
 // getEnableTSOFollowerProxy gets the TSO Follower Proxy option.
 func (o *option) getEnableTSOFollowerProxy() bool {
 	return o.dynamicOptions[EnableTSOFollowerProxy].Load().(bool)
+}
+
+func (o *option) setTSOClientRPCConcurrency(value int) {
+	old := o.getTSOClientRPCConcurrency()
+	if value != old {
+		o.dynamicOptions[TSOClientRPCConcurrency].Store(value)
+	}
+}
+
+func (o *option) getTSOClientRPCConcurrency() int {
+	return o.dynamicOptions[TSOClientRPCConcurrency].Load().(int)
 }

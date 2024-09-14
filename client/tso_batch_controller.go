@@ -47,6 +47,7 @@ func newTSOBatchController(maxBatchSize int) *tsoBatchController {
 // It returns nil error if everything goes well, otherwise a non-nil error which means we should stop the service.
 // It's guaranteed that if this function failed after collecting some requests, then these requests will be cancelled
 // when the function returns, so the caller don't need to clear them manually.
+// If maxBatchWaitInterval is not enabled,
 func (tbc *tsoBatchController) fetchPendingRequests(ctx context.Context, tsoRequestCh <-chan *tsoRequest, tokenCh chan struct{}, maxBatchWaitInterval time.Duration) (errRet error) {
 	var tokenAcquired bool
 	defer func() {
@@ -63,7 +64,7 @@ func (tbc *tsoBatchController) fetchPendingRequests(ctx context.Context, tsoRequ
 	// Wait until BOTH the first request and the token have arrived.
 	// TODO: `tbc.collectedRequestCount` should never be non-empty here. Consider do assertion here.
 	tbc.collectedRequestCount = 0
-	for {
+	for tbc.collectedRequestCount < tbc.maxBatchSize {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
@@ -143,6 +144,37 @@ fetchPendingRequestsLoop:
 			return nil
 		}
 	}
+	return nil
+}
+
+// fetchRequestsWithTimer tries to fetch requests until the given timer ticks. The caller must set the timer properly
+// before calling this function.
+func (tbc *tsoBatchController) fetchRequestsWithTimer(ctx context.Context, tsoRequestCh <-chan *tsoRequest, timer *time.Timer) error {
+batchingLoop:
+	for tbc.collectedRequestCount < tbc.maxBatchSize {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case req := <-tsoRequestCh:
+			tbc.pushRequest(req)
+		case <-timer.C:
+			break batchingLoop
+		}
+	}
+
+	// Try to collect more requests in non-blocking way.
+nonWaitingBatchLoop:
+	for tbc.collectedRequestCount < tbc.maxBatchSize {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case req := <-tsoRequestCh:
+			tbc.pushRequest(req)
+		default:
+			break nonWaitingBatchLoop
+		}
+	}
+
 	return nil
 }
 
