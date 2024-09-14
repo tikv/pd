@@ -814,6 +814,7 @@ func (suite *schedulerTestSuite) checkSchedulerDiagnostic(cluster *pdTests.TestC
 }
 
 func (suite *schedulerTestSuite) TestEvictLeaderScheduler() {
+	// FIXME: API mode may have the problem
 	suite.env.RunTestInPDMode(suite.checkEvictLeaderScheduler)
 }
 
@@ -864,7 +865,6 @@ func (suite *schedulerTestSuite) checkEvictLeaderScheduler(cluster *pdTests.Test
 	output, err = tests.ExecuteCommand(cmd, []string{"-u", pdAddr, "scheduler", "remove", "evict-leader-scheduler-1"}...)
 	re.NoError(err)
 	re.Contains(string(output), "Success!")
-
 }
 
 func mustExec(re *require.Assertions, cmd *cobra.Command, args []string, v any) string {
