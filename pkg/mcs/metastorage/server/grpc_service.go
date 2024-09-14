@@ -71,9 +71,9 @@ func (s *Service) RegisterGRPCService(g *grpc.Server) {
 }
 
 // RegisterRESTHandler registers the service to REST server.
-func (s *Service) RegisterRESTHandler(userDefineHandlers map[string]http.Handler) error {
-	handler, group := SetUpRestHandler(s)
-	return apiutil.RegisterUserDefinedHandlers(userDefineHandlers, &group, handler)
+func (*Service) RegisterRESTHandler(_ map[string]http.Handler) error {
+	// restful API is not implemented yet.
+	return nil
 }
 
 func (s *Service) checkServing() error {

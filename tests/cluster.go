@@ -611,6 +611,11 @@ func (c *TestCluster) StopAll() error {
 	return nil
 }
 
+// DeleteServer is used to delete a server.
+func (c *TestCluster) DeleteServer(name string) {
+	delete(c.servers, name)
+}
+
 // GetServer returns a server with a given name.
 func (c *TestCluster) GetServer(name string) *TestServer {
 	return c.servers[name]
