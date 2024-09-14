@@ -25,8 +25,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
-	"go.etcd.io/etcd/clientv3"
-	"go.etcd.io/etcd/embed"
+	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.etcd.io/etcd/server/v3/embed"
 )
 
 const defaultLeaseTimeout = 1
@@ -100,9 +100,9 @@ func TestLeadership(t *testing.T) {
 	leadership2.Keep(ctx)
 
 	// Check the lease.
-	lease1 := leadership1.getLease()
+	lease1 := leadership1.GetLease()
 	re.NotNil(lease1)
-	lease2 := leadership2.getLease()
+	lease2 := leadership2.GetLease()
 	re.NotNil(lease2)
 
 	re.True(lease1.IsExpired())
@@ -261,4 +261,37 @@ func TestRequestProgress(t *testing.T) {
 	}
 	checkWatcherRequestProgress(false)
 	checkWatcherRequestProgress(true)
+}
+
+func TestCampaignTimes(t *testing.T) {
+	re := require.New(t)
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1)
+	defer clean()
+	leadership := NewLeadership(client, "test_leader", "test_leader")
+
+	// all the campaign times are within the timeout.
+	campaignTimesRecordTimeout = 10 * time.Second
+	defer func() {
+		campaignTimesRecordTimeout = 5 * time.Minute
+	}()
+	for i := 0; i < 3; i++ {
+		leadership.AddCampaignTimes()
+		time.Sleep(100 * time.Millisecond)
+	}
+	re.Equal(3, leadership.GetCampaignTimesNum())
+
+	// only the last 2 records are valid.
+	campaignTimesRecordTimeout = 200 * time.Millisecond
+	for i := 0; i < 3; i++ {
+		leadership.AddCampaignTimes()
+		time.Sleep(100 * time.Millisecond)
+	}
+	re.Equal(2, leadership.GetCampaignTimesNum())
+
+	time.Sleep(200 * time.Millisecond)
+	// need to wait for the next addCampaignTimes to update the campaign time.
+	re.Equal(2, leadership.GetCampaignTimesNum())
+	// check campaign leader frequency.
+	leadership.AddCampaignTimes()
+	re.Equal(1, leadership.GetCampaignTimesNum())
 }

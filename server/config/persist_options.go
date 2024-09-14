@@ -33,11 +33,12 @@ import (
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/core/storelimit"
 	sc "github.com/tikv/pd/pkg/schedule/config"
+	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
-	"go.etcd.io/etcd/clientv3"
+	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 )
 
@@ -669,10 +670,11 @@ func (o *PersistOptions) GetSchedulers() sc.SchedulerConfigs {
 }
 
 // IsSchedulerDisabled returns if the scheduler is disabled.
-func (o *PersistOptions) IsSchedulerDisabled(t string) bool {
+func (o *PersistOptions) IsSchedulerDisabled(tp types.CheckerSchedulerType) bool {
+	oldType := types.SchedulerTypeCompatibleMap[tp]
 	schedulers := o.GetScheduleConfig().Schedulers
 	for _, s := range schedulers {
-		if t == s.Type {
+		if oldType == s.Type {
 			return s.Disable
 		}
 	}
@@ -690,33 +692,35 @@ func (o *PersistOptions) GetHotRegionsReservedDays() uint64 {
 }
 
 // AddSchedulerCfg adds the scheduler configurations.
-func (o *PersistOptions) AddSchedulerCfg(tp string, args []string) {
+func (o *PersistOptions) AddSchedulerCfg(tp types.CheckerSchedulerType, args []string) {
+	oldType := types.SchedulerTypeCompatibleMap[tp]
 	v := o.GetScheduleConfig().Clone()
 	for i, schedulerCfg := range v.Schedulers {
 		// comparing args is to cover the case that there are schedulers in same type but not with same name
 		// such as two schedulers of type "evict-leader",
 		// one name is "evict-leader-scheduler-1" and the other is "evict-leader-scheduler-2"
-		if reflect.DeepEqual(schedulerCfg, sc.SchedulerConfig{Type: tp, Args: args, Disable: false}) {
+		if reflect.DeepEqual(schedulerCfg, sc.SchedulerConfig{Type: oldType, Args: args, Disable: false}) {
 			return
 		}
 
-		if reflect.DeepEqual(schedulerCfg, sc.SchedulerConfig{Type: tp, Args: args, Disable: true}) {
+		if reflect.DeepEqual(schedulerCfg, sc.SchedulerConfig{Type: oldType, Args: args, Disable: true}) {
 			schedulerCfg.Disable = false
 			v.Schedulers[i] = schedulerCfg
 			o.SetScheduleConfig(v)
 			return
 		}
 	}
-	v.Schedulers = append(v.Schedulers, sc.SchedulerConfig{Type: tp, Args: args, Disable: false})
+	v.Schedulers = append(v.Schedulers, sc.SchedulerConfig{Type: oldType, Args: args, Disable: false})
 	o.SetScheduleConfig(v)
 }
 
 // RemoveSchedulerCfg removes the scheduler configurations.
-func (o *PersistOptions) RemoveSchedulerCfg(tp string) {
+func (o *PersistOptions) RemoveSchedulerCfg(tp types.CheckerSchedulerType) {
+	oldType := types.SchedulerTypeCompatibleMap[tp]
 	v := o.GetScheduleConfig().Clone()
 	for i, schedulerCfg := range v.Schedulers {
-		if tp == schedulerCfg.Type {
-			if sc.IsDefaultScheduler(tp) {
+		if oldType == schedulerCfg.Type {
+			if sc.IsDefaultScheduler(oldType) {
 				schedulerCfg.Disable = true
 				v.Schedulers[i] = schedulerCfg
 			} else {
@@ -795,7 +799,9 @@ func (o *PersistOptions) Persist(storage endpoint.ConfigStorage) error {
 func (o *PersistOptions) Reload(storage endpoint.ConfigStorage) error {
 	cfg := &persistedConfig{Config: &Config{}}
 	// Pass nil to initialize cfg to default values (all items undefined)
-	cfg.Adjust(nil, true)
+	if err := cfg.Adjust(nil, true); err != nil {
+		return err
+	}
 
 	isExist, err := storage.LoadConfig(cfg)
 	if err != nil {
@@ -987,11 +993,8 @@ func (o *PersistOptions) SetAllStoresLimitTTL(ctx context.Context, client *clien
 
 var haltSchedulingStatus = schedulingAllowanceStatusGauge.WithLabelValues("halt-scheduling")
 
-// SetHaltScheduling set HaltScheduling.
-func (o *PersistOptions) SetHaltScheduling(halt bool, source string) {
-	v := o.GetScheduleConfig().Clone()
-	v.HaltScheduling = halt
-	o.SetScheduleConfig(v)
+// SetSchedulingAllowanceStatus sets the scheduling allowance status to help distinguish the source of the halt.
+func (*PersistOptions) SetSchedulingAllowanceStatus(halt bool, source string) {
 	if halt {
 		haltSchedulingStatus.Set(1)
 		schedulingAllowanceStatusGauge.WithLabelValues(source).Set(1)
@@ -999,6 +1002,14 @@ func (o *PersistOptions) SetHaltScheduling(halt bool, source string) {
 		haltSchedulingStatus.Set(0)
 		schedulingAllowanceStatusGauge.WithLabelValues(source).Set(0)
 	}
+}
+
+// SetHaltScheduling set HaltScheduling.
+func (o *PersistOptions) SetHaltScheduling(halt bool, source string) {
+	v := o.GetScheduleConfig().Clone()
+	v.HaltScheduling = halt
+	o.SetScheduleConfig(v)
+	o.SetSchedulingAllowanceStatus(halt, source)
 }
 
 // IsSchedulingHalted returns if PD scheduling is halted.

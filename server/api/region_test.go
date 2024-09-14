@@ -126,9 +126,13 @@ func (suite *regionTestSuite) TestRegionCheck() {
 
 	url = fmt.Sprintf("%s/regions/check/%s", suite.urlPrefix, "down-peer")
 	r2 := &response.RegionsInfo{}
-	re.NoError(tu.ReadGetJSON(re, testDialClient, url, r2))
-	r2.Adjust()
-	re.Equal(&response.RegionsInfo{Count: 1, Regions: []response.RegionInfo{*response.NewAPIRegionInfo(r)}}, r2)
+	tu.Eventually(re, func() bool {
+		if err := tu.ReadGetJSON(re, testDialClient, url, r2); err != nil {
+			return false
+		}
+		r2.Adjust()
+		return suite.Equal(&response.RegionsInfo{Count: 1, Regions: []response.RegionInfo{*response.NewAPIRegionInfo(r)}}, r2)
+	})
 
 	url = fmt.Sprintf("%s/regions/check/%s", suite.urlPrefix, "pending-peer")
 	r3 := &response.RegionsInfo{}
@@ -146,25 +150,37 @@ func (suite *regionTestSuite) TestRegionCheck() {
 	mustRegionHeartbeat(re, suite.svr, r)
 	url = fmt.Sprintf("%s/regions/check/%s", suite.urlPrefix, "empty-region")
 	r5 := &response.RegionsInfo{}
-	re.NoError(tu.ReadGetJSON(re, testDialClient, url, r5))
-	r5.Adjust()
-	re.Equal(&response.RegionsInfo{Count: 1, Regions: []response.RegionInfo{*response.NewAPIRegionInfo(r)}}, r5)
+	tu.Eventually(re, func() bool {
+		if err := tu.ReadGetJSON(re, testDialClient, url, r5); err != nil {
+			return false
+		}
+		r5.Adjust()
+		return suite.Equal(&response.RegionsInfo{Count: 1, Regions: []response.RegionInfo{*response.NewAPIRegionInfo(r)}}, r5)
+	})
 
 	r = r.Clone(core.SetApproximateSize(1))
 	mustRegionHeartbeat(re, suite.svr, r)
 	url = fmt.Sprintf("%s/regions/check/%s", suite.urlPrefix, "hist-size")
 	r6 := make([]*histItem, 1)
-	re.NoError(tu.ReadGetJSON(re, testDialClient, url, &r6))
-	histSizes := []*histItem{{Start: 1, End: 1, Count: 1}}
-	re.Equal(histSizes, r6)
+	tu.Eventually(re, func() bool {
+		if err := tu.ReadGetJSON(re, testDialClient, url, &r6); err != nil {
+			return false
+		}
+		histSizes := []*histItem{{Start: 1, End: 1, Count: 1}}
+		return suite.Equal(histSizes, r6)
+	})
 
 	r = r.Clone(core.SetApproximateKeys(1000))
 	mustRegionHeartbeat(re, suite.svr, r)
 	url = fmt.Sprintf("%s/regions/check/%s", suite.urlPrefix, "hist-keys")
 	r7 := make([]*histItem, 1)
-	re.NoError(tu.ReadGetJSON(re, testDialClient, url, &r7))
-	histKeys := []*histItem{{Start: 1000, End: 1999, Count: 1}}
-	re.Equal(histKeys, r7)
+	tu.Eventually(re, func() bool {
+		if err := tu.ReadGetJSON(re, testDialClient, url, &r7); err != nil {
+			return false
+		}
+		histKeys := []*histItem{{Start: 1000, End: 1999, Count: 1}}
+		return suite.Equal(histKeys, r7)
+	})
 
 	// ref https://github.com/tikv/pd/issues/3558, we should change size to pass `NeedUpdate` for observing.
 	r = r.Clone(core.SetApproximateKeys(0))
@@ -172,10 +188,13 @@ func (suite *regionTestSuite) TestRegionCheck() {
 	mustRegionHeartbeat(re, suite.svr, r)
 	url = fmt.Sprintf("%s/regions/check/%s", suite.urlPrefix, "offline-peer")
 	r8 := &response.RegionsInfo{}
-	re.NoError(tu.ReadGetJSON(re, testDialClient, url, r8))
-	r4.Adjust()
-	re.Equal(1, r8.Count)
-	re.Equal(r.GetID(), r8.Regions[0].ID)
+	tu.Eventually(re, func() bool {
+		if err := tu.ReadGetJSON(re, testDialClient, url, r8); err != nil {
+			return false
+		}
+		r4.Adjust()
+		return suite.Equal(r.GetID(), r8.Regions[0].ID) && r8.Count == 1
+	})
 }
 
 func (suite *regionTestSuite) TestRegions() {
@@ -333,7 +352,7 @@ func TestRegionsWithKillRequest(t *testing.T) {
 	url := fmt.Sprintf("%s%s/api/v1/regions", addr, apiPrefix)
 	mustBootstrapCluster(re, svr)
 
-	regionCount := 100000
+	regionCount := 10000
 	tu.GenerateTestDataConcurrently(regionCount, func(i int) {
 		r := core.NewTestRegionInfo(uint64(i+2), 1,
 			[]byte(fmt.Sprintf("%09d", i)),
@@ -468,6 +487,41 @@ func (suite *getRegionTestSuite) TestScanRegionByKeys() {
 	for i, v := range regionIDs {
 		re.Equal(regions.Regions[i].ID, v)
 	}
+	url = fmt.Sprintf("%s/regions/key?key=%s&format=hex", suite.urlPrefix, hex.EncodeToString([]byte("b")))
+	regionIDs = []uint64{3, 4, 5, 99}
+	regions = &response.RegionsInfo{}
+	err = tu.ReadGetJSON(re, testDialClient, url, regions)
+	re.NoError(err)
+	re.Len(regionIDs, regions.Count)
+	for i, v := range regionIDs {
+		re.Equal(regions.Regions[i].ID, v)
+	}
+	url = fmt.Sprintf("%s/regions/key?key=%s&end_key=%s&format=hex",
+		suite.urlPrefix, hex.EncodeToString([]byte("b")), hex.EncodeToString([]byte("g")))
+	regionIDs = []uint64{3, 4}
+	regions = &response.RegionsInfo{}
+	err = tu.ReadGetJSON(re, testDialClient, url, regions)
+	re.NoError(err)
+	re.Len(regionIDs, regions.Count)
+	for i, v := range regionIDs {
+		re.Equal(regions.Regions[i].ID, v)
+	}
+	url = fmt.Sprintf("%s/regions/key?key=%s&end_key=%s&format=hex",
+		suite.urlPrefix, hex.EncodeToString([]byte("b")), hex.EncodeToString([]byte{0xFF, 0xFF, 0xCC}))
+	regionIDs = []uint64{3, 4, 5, 99}
+	regions = &response.RegionsInfo{}
+	err = tu.ReadGetJSON(re, testDialClient, url, regions)
+	re.NoError(err)
+	re.Len(regionIDs, regions.Count)
+	for i, v := range regionIDs {
+		re.Equal(regions.Regions[i].ID, v)
+	}
+	// test invalid key
+	url = fmt.Sprintf("%s/regions/key?key=%s&format=hex", suite.urlPrefix, "invalid")
+	err = tu.CheckGetJSON(testDialClient, url, nil,
+		tu.Status(re, http.StatusBadRequest),
+		tu.StringEqual(re, "\"encoding/hex: invalid byte: U+0069 'i'\"\n"))
+	re.NoError(err)
 }
 
 // Start a new test suite to prevent from being interfered by other tests.

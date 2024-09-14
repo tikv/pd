@@ -26,7 +26,7 @@ import (
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
-	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/unrolled/render"
@@ -34,22 +34,15 @@ import (
 )
 
 const (
-	// EvictSlowStoreName is evict leader scheduler name.
-	EvictSlowStoreName = "evict-slow-store-scheduler"
-	// EvictSlowStoreType is evict leader scheduler type.
-	EvictSlowStoreType = "evict-slow-store"
-
 	slowStoreEvictThreshold   = 100
 	slowStoreRecoverThreshold = 1
 )
 
-// WithLabelValues is a heavy operation, define variable to avoid call it every time.
-var evictSlowStoreCounter = schedulerCounter.WithLabelValues(EvictSlowStoreName, "schedule")
-
 type evictSlowStoreSchedulerConfig struct {
 	syncutil.RWMutex
+	schedulerConfig
+
 	cluster *core.BasicCluster
-	storage endpoint.ConfigStorage
 	// Last timestamp of the chosen slow store for eviction.
 	lastSlowStoreCaptureTS time.Time
 	// Duration gap for recovering the candidate, unit: s.
@@ -57,33 +50,21 @@ type evictSlowStoreSchedulerConfig struct {
 	EvictedStores       []uint64 `json:"evict-stores"`
 }
 
-func initEvictSlowStoreSchedulerConfig(storage endpoint.ConfigStorage) *evictSlowStoreSchedulerConfig {
+func initEvictSlowStoreSchedulerConfig() *evictSlowStoreSchedulerConfig {
 	return &evictSlowStoreSchedulerConfig{
-		storage:                storage,
+		schedulerConfig:        &baseSchedulerConfig{},
 		lastSlowStoreCaptureTS: time.Time{},
 		RecoveryDurationGap:    defaultRecoveryDurationGap,
 		EvictedStores:          make([]uint64, 0),
 	}
 }
 
-func (conf *evictSlowStoreSchedulerConfig) Clone() *evictSlowStoreSchedulerConfig {
+func (conf *evictSlowStoreSchedulerConfig) clone() *evictSlowStoreSchedulerConfig {
 	conf.RLock()
 	defer conf.RUnlock()
 	return &evictSlowStoreSchedulerConfig{
 		RecoveryDurationGap: conf.RecoveryDurationGap,
 	}
-}
-
-func (conf *evictSlowStoreSchedulerConfig) persistLocked() error {
-	name := EvictSlowStoreName
-	data, err := EncodeConfig(conf)
-	failpoint.Inject("persistFail", func() {
-		err = errors.New("fail to persist")
-	})
-	if err != nil {
-		return err
-	}
-	return conf.storage.SaveSchedulerConfig(name, data)
 }
 
 func (conf *evictSlowStoreSchedulerConfig) getStores() []uint64 {
@@ -99,6 +80,10 @@ func (conf *evictSlowStoreSchedulerConfig) getKeyRangesByID(id uint64) []core.Ke
 	return []core.KeyRange{core.NewKeyRange("", "")}
 }
 
+func (*evictSlowStoreSchedulerConfig) getBatch() int {
+	return EvictLeaderBatchSize
+}
+
 func (conf *evictSlowStoreSchedulerConfig) evictStore() uint64 {
 	if len(conf.getStores()) == 0 {
 		return 0
@@ -106,7 +91,7 @@ func (conf *evictSlowStoreSchedulerConfig) evictStore() uint64 {
 	return conf.getStores()[0]
 }
 
-// readyForRecovery checks whether the last cpatured candidate is ready for recovery.
+// readyForRecovery checks whether the last captured candidate is ready for recovery.
 func (conf *evictSlowStoreSchedulerConfig) readyForRecovery() bool {
 	conf.RLock()
 	defer conf.RUnlock()
@@ -122,7 +107,7 @@ func (conf *evictSlowStoreSchedulerConfig) setStoreAndPersist(id uint64) error {
 	defer conf.Unlock()
 	conf.EvictedStores = []uint64{id}
 	conf.lastSlowStoreCaptureTS = time.Now()
-	return conf.persistLocked()
+	return conf.save()
 }
 
 func (conf *evictSlowStoreSchedulerConfig) clearAndPersist() (oldID uint64, err error) {
@@ -132,7 +117,7 @@ func (conf *evictSlowStoreSchedulerConfig) clearAndPersist() (oldID uint64, err 
 	if oldID > 0 {
 		conf.EvictedStores = []uint64{}
 		conf.lastSlowStoreCaptureTS = time.Time{}
-		err = conf.persistLocked()
+		err = conf.save()
 	}
 	return
 }
@@ -148,12 +133,12 @@ func newEvictSlowStoreHandler(config *evictSlowStoreSchedulerConfig) http.Handle
 		rd:     render.New(render.Options{IndentJSON: true}),
 	}
 	router := mux.NewRouter()
-	router.HandleFunc("/config", h.UpdateConfig).Methods(http.MethodPost)
-	router.HandleFunc("/list", h.ListConfig).Methods(http.MethodGet)
+	router.HandleFunc("/config", h.updateConfig).Methods(http.MethodPost)
+	router.HandleFunc("/list", h.listConfig).Methods(http.MethodGet)
 	return router
 }
 
-func (handler *evictSlowStoreHandler) UpdateConfig(w http.ResponseWriter, r *http.Request) {
+func (handler *evictSlowStoreHandler) updateConfig(w http.ResponseWriter, r *http.Request) {
 	var input map[string]any
 	if err := apiutil.ReadJSONRespondError(handler.rd, w, r.Body, &input); err != nil {
 		return
@@ -163,12 +148,13 @@ func (handler *evictSlowStoreHandler) UpdateConfig(w http.ResponseWriter, r *htt
 		handler.rd.JSON(w, http.StatusInternalServerError, errors.New("invalid argument for 'recovery-duration'").Error())
 		return
 	}
+
 	handler.config.Lock()
 	defer handler.config.Unlock()
 	prevRecoveryDurationGap := handler.config.RecoveryDurationGap
 	recoveryDurationGap := uint64(recoveryDurationGapFloat)
 	handler.config.RecoveryDurationGap = recoveryDurationGap
-	if err := handler.config.persistLocked(); err != nil {
+	if err := handler.config.save(); err != nil {
 		handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		handler.config.RecoveryDurationGap = prevRecoveryDurationGap
 		return
@@ -177,8 +163,8 @@ func (handler *evictSlowStoreHandler) UpdateConfig(w http.ResponseWriter, r *htt
 	handler.rd.JSON(w, http.StatusOK, "Config updated.")
 }
 
-func (handler *evictSlowStoreHandler) ListConfig(w http.ResponseWriter, _ *http.Request) {
-	conf := handler.config.Clone()
+func (handler *evictSlowStoreHandler) listConfig(w http.ResponseWriter, _ *http.Request) {
+	conf := handler.config.clone()
 	handler.rd.JSON(w, http.StatusOK, conf)
 }
 
@@ -188,34 +174,23 @@ type evictSlowStoreScheduler struct {
 	handler http.Handler
 }
 
+// ServeHTTP implements the http.Handler interface.
 func (s *evictSlowStoreScheduler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.handler.ServeHTTP(w, r)
 }
 
-func (*evictSlowStoreScheduler) GetName() string {
-	return EvictSlowStoreName
-}
-
-func (*evictSlowStoreScheduler) GetType() string {
-	return EvictSlowStoreType
-}
-
+// EncodeConfig implements the Scheduler interface.
 func (s *evictSlowStoreScheduler) EncodeConfig() ([]byte, error) {
 	return EncodeConfig(s.conf)
 }
 
+// ReloadConfig implements the Scheduler interface.
 func (s *evictSlowStoreScheduler) ReloadConfig() error {
 	s.conf.Lock()
 	defer s.conf.Unlock()
-	cfgData, err := s.conf.storage.LoadSchedulerConfig(s.GetName())
-	if err != nil {
-		return err
-	}
-	if len(cfgData) == 0 {
-		return nil
-	}
+
 	newCfg := &evictSlowStoreSchedulerConfig{}
-	if err = DecodeConfig([]byte(cfgData), newCfg); err != nil {
+	if err := s.conf.load(newCfg); err != nil {
 		return err
 	}
 	old := make(map[uint64]struct{})
@@ -232,6 +207,7 @@ func (s *evictSlowStoreScheduler) ReloadConfig() error {
 	return nil
 }
 
+// PrepareConfig implements the Scheduler interface.
 func (s *evictSlowStoreScheduler) PrepareConfig(cluster sche.SchedulerCluster) error {
 	evictStore := s.conf.evictStore()
 	if evictStore != 0 {
@@ -240,6 +216,7 @@ func (s *evictSlowStoreScheduler) PrepareConfig(cluster sche.SchedulerCluster) e
 	return nil
 }
 
+// CleanConfig implements the Scheduler interface.
 func (s *evictSlowStoreScheduler) CleanConfig(cluster sche.SchedulerCluster) {
 	s.cleanupEvictLeader(cluster)
 }
@@ -266,23 +243,24 @@ func (s *evictSlowStoreScheduler) cleanupEvictLeader(cluster sche.SchedulerClust
 }
 
 func (s *evictSlowStoreScheduler) schedulerEvictLeader(cluster sche.SchedulerCluster) []*operator.Operator {
-	return scheduleEvictLeaderBatch(s.GetName(), s.GetType(), cluster, s.conf, EvictLeaderBatchSize)
+	return scheduleEvictLeaderBatch(s.GetName(), cluster, s.conf)
 }
 
+// IsScheduleAllowed implements the Scheduler interface.
 func (s *evictSlowStoreScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) bool {
 	if s.conf.evictStore() != 0 {
 		allowed := s.OpController.OperatorCount(operator.OpLeader) < cluster.GetSchedulerConfig().GetLeaderScheduleLimit()
 		if !allowed {
-			operator.OperatorLimitCounter.WithLabelValues(s.GetType(), operator.OpLeader.String()).Inc()
+			operator.IncOperatorLimitCounter(s.GetType(), operator.OpLeader)
 		}
 		return allowed
 	}
 	return true
 }
 
+// Schedule implements the Scheduler interface.
 func (s *evictSlowStoreScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) ([]*operator.Operator, []plan.Plan) {
 	evictSlowStoreCounter.Inc()
-	var ops []*operator.Operator
 
 	if s.conf.evictStore() != 0 {
 		store := cluster.GetStore(s.conf.evictStore())
@@ -298,7 +276,7 @@ func (s *evictSlowStoreScheduler) Schedule(cluster sche.SchedulerCluster, _ bool
 			return s.schedulerEvictLeader(cluster), nil
 		}
 		s.cleanupEvictLeader(cluster)
-		return ops, nil
+		return nil, nil
 	}
 
 	var slowStore *core.StoreInfo
@@ -311,14 +289,14 @@ func (s *evictSlowStoreScheduler) Schedule(cluster sche.SchedulerCluster, _ bool
 		if (store.IsPreparing() || store.IsServing()) && store.IsSlow() {
 			// Do nothing if there is more than one slow store.
 			if slowStore != nil {
-				return ops, nil
+				return nil, nil
 			}
 			slowStore = store
 		}
 	}
 
 	if slowStore == nil || slowStore.GetSlowScore() < slowStoreEvictThreshold {
-		return ops, nil
+		return nil, nil
 	}
 
 	// If there is only one slow store, evict leaders from that store.
@@ -327,7 +305,7 @@ func (s *evictSlowStoreScheduler) Schedule(cluster sche.SchedulerCluster, _ bool
 	err := s.prepareEvictLeader(cluster, slowStore.GetID())
 	if err != nil {
 		log.Info("prepare for evicting leader failed", zap.Error(err), zap.Uint64("store-id", slowStore.GetID()))
-		return ops, nil
+		return nil, nil
 	}
 	return s.schedulerEvictLeader(cluster), nil
 }
@@ -336,7 +314,7 @@ func (s *evictSlowStoreScheduler) Schedule(cluster sche.SchedulerCluster, _ bool
 func newEvictSlowStoreScheduler(opController *operator.Controller, conf *evictSlowStoreSchedulerConfig) Scheduler {
 	handler := newEvictSlowStoreHandler(conf)
 	return &evictSlowStoreScheduler{
-		BaseScheduler: NewBaseScheduler(opController),
+		BaseScheduler: NewBaseScheduler(opController, types.EvictSlowStoreScheduler),
 		conf:          conf,
 		handler:       handler,
 	}

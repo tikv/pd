@@ -17,8 +17,12 @@ package tests
 import (
 	"context"
 	"fmt"
+	"math/rand"
+	"net"
+	"net/http"
 	"os"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -36,7 +40,7 @@ import (
 	scheduling "github.com/tikv/pd/pkg/mcs/scheduling/server"
 	sc "github.com/tikv/pd/pkg/mcs/scheduling/server/config"
 	tso "github.com/tikv/pd/pkg/mcs/tso/server"
-	"github.com/tikv/pd/pkg/mcs/utils"
+	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/mock/mockid"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
@@ -45,13 +49,53 @@ import (
 	"go.uber.org/zap"
 )
 
+var (
+	// TestDialClient is a http client for test.
+	TestDialClient = &http.Client{
+		Transport: &http.Transport{
+			DisableKeepAlives: true,
+		},
+	}
+
+	testPortMutex sync.Mutex
+	testPortMap   = make(map[string]struct{})
+)
+
+// SetRangePort sets the range of ports for test.
+func SetRangePort(start, end int) {
+	portRange := []int{start, end}
+	dialContext := func(ctx context.Context, network, addr string) (net.Conn, error) {
+		dialer := &net.Dialer{}
+		randomPort := strconv.Itoa(rand.Intn(portRange[1]-portRange[0]) + portRange[0])
+		testPortMutex.Lock()
+		for i := 0; i < 10; i++ {
+			if _, ok := testPortMap[randomPort]; !ok {
+				break
+			}
+			randomPort = strconv.Itoa(rand.Intn(portRange[1]-portRange[0]) + portRange[0])
+		}
+		testPortMutex.Unlock()
+		localAddr, err := net.ResolveTCPAddr(network, "0.0.0.0:"+randomPort)
+		if err != nil {
+			return nil, err
+		}
+		dialer.LocalAddr = localAddr
+		return dialer.DialContext(ctx, network, addr)
+	}
+
+	TestDialClient.Transport = &http.Transport{
+		DisableKeepAlives: true,
+		DialContext:       dialContext,
+	}
+}
+
 var once sync.Once
 
 // InitLogger initializes the logger for test.
-func InitLogger(logConfig log.Config, logger *zap.Logger, logProps *log.ZapProperties, isRedactInfoLogEnabled bool) (err error) {
+func InitLogger(logConfig log.Config, logger *zap.Logger, logProps *log.ZapProperties, redactInfoLog logutil.RedactInfoLogType) (err error) {
 	once.Do(func() {
 		// Setup the logger.
-		err = logutil.SetupLogger(logConfig, &logger, &logProps, isRedactInfoLogEnabled)
+		err = logutil.SetupLogger(logConfig, &logger, &logProps, redactInfoLog)
 		if err != nil {
 			return
 		}
@@ -67,6 +111,7 @@ func StartSingleResourceManagerTestServer(ctx context.Context, re *require.Asser
 	cfg := rm.NewConfig()
 	cfg.BackendEndpoints = backendEndpoints
 	cfg.ListenAddr = listenAddrs
+	cfg.Name = cfg.ListenAddr
 	cfg, err := rm.GenerateConfig(cfg)
 	re.NoError(err)
 
@@ -84,6 +129,7 @@ func StartSingleTSOTestServerWithoutCheck(ctx context.Context, re *require.Asser
 	cfg := tso.NewConfig()
 	cfg.BackendEndpoints = backendEndpoints
 	cfg.ListenAddr = listenAddrs
+	cfg.Name = cfg.ListenAddr
 	cfg, err := tso.GenerateConfig(cfg)
 	re.NoError(err)
 	// Setup the logger.
@@ -121,6 +167,7 @@ func StartSingleSchedulingTestServer(ctx context.Context, re *require.Assertions
 	cfg := sc.NewConfig()
 	cfg.BackendEndpoints = backendEndpoints
 	cfg.ListenAddr = listenAddrs
+	cfg.Name = cfg.ListenAddr
 	cfg, err := scheduling.GenerateConfig(cfg)
 	re.NoError(err)
 
@@ -157,7 +204,7 @@ func WaitForPrimaryServing(re *require.Assertions, serverMap map[string]bs.Serve
 			}
 		}
 		return false
-	}, testutil.WithWaitFor(5*time.Second), testutil.WithTickInterval(50*time.Millisecond))
+	}, testutil.WithWaitFor(10*time.Second), testutil.WithTickInterval(50*time.Millisecond))
 
 	return primary
 }
@@ -240,19 +287,25 @@ func MustReportBuckets(re *require.Assertions, cluster *TestCluster, regionID ui
 	return buckets
 }
 
-type mode int
+// SchedulerMode is used for test purpose.
+type SchedulerMode int
 
 const (
-	pdMode mode = iota
-	apiMode
+	// Both represents both PD mode and API mode.
+	Both SchedulerMode = iota
+	// PDMode represents PD mode.
+	PDMode
+	// APIMode represents API mode.
+	APIMode
 )
 
 // SchedulingTestEnvironment is used for test purpose.
 type SchedulingTestEnvironment struct {
 	t        *testing.T
 	opts     []ConfigOption
-	clusters map[mode]*TestCluster
+	clusters map[SchedulerMode]*TestCluster
 	cancels  []context.CancelFunc
+	RunMode  SchedulerMode
 }
 
 // NewSchedulingTestEnvironment is to create a new SchedulingTestEnvironment.
@@ -260,30 +313,38 @@ func NewSchedulingTestEnvironment(t *testing.T, opts ...ConfigOption) *Schedulin
 	return &SchedulingTestEnvironment{
 		t:        t,
 		opts:     opts,
-		clusters: make(map[mode]*TestCluster),
+		clusters: make(map[SchedulerMode]*TestCluster),
 		cancels:  make([]context.CancelFunc, 0),
 	}
 }
 
-// RunTestInTwoModes is to run test in two modes.
-func (s *SchedulingTestEnvironment) RunTestInTwoModes(test func(*TestCluster)) {
-	s.RunTestInPDMode(test)
-	s.RunTestInAPIMode(test)
+// RunTestBasedOnMode runs test based on mode.
+// If mode not set, it will run test in both PD mode and API mode.
+func (s *SchedulingTestEnvironment) RunTestBasedOnMode(test func(*TestCluster)) {
+	switch s.RunMode {
+	case PDMode:
+		s.RunTestInPDMode(test)
+	case APIMode:
+		s.RunTestInAPIMode(test)
+	default:
+		s.RunTestInPDMode(test)
+		s.RunTestInAPIMode(test)
+	}
 }
 
 // RunTestInPDMode is to run test in pd mode.
 func (s *SchedulingTestEnvironment) RunTestInPDMode(test func(*TestCluster)) {
 	s.t.Logf("start test %s in pd mode", getTestName())
-	if _, ok := s.clusters[pdMode]; !ok {
-		s.startCluster(pdMode)
+	if _, ok := s.clusters[PDMode]; !ok {
+		s.startCluster(PDMode)
 	}
-	test(s.clusters[pdMode])
+	test(s.clusters[PDMode])
 }
 
 func getTestName() string {
 	pc, _, _, _ := runtime.Caller(2)
 	caller := runtime.FuncForPC(pc)
-	if caller == nil || strings.Contains(caller.Name(), "RunTestInTwoModes") {
+	if caller == nil || strings.Contains(caller.Name(), "RunTestBasedOnMode") {
 		pc, _, _, _ = runtime.Caller(3)
 		caller = runtime.FuncForPC(pc)
 	}
@@ -304,18 +365,18 @@ func (s *SchedulingTestEnvironment) RunTestInAPIMode(test func(*TestCluster)) {
 		re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs"))
 	}()
 	s.t.Logf("start test %s in api mode", getTestName())
-	if _, ok := s.clusters[apiMode]; !ok {
-		s.startCluster(apiMode)
+	if _, ok := s.clusters[APIMode]; !ok {
+		s.startCluster(APIMode)
 	}
-	test(s.clusters[apiMode])
+	test(s.clusters[APIMode])
 }
 
 // RunFuncInTwoModes is to run func in two modes.
 func (s *SchedulingTestEnvironment) RunFuncInTwoModes(f func(*TestCluster)) {
-	if c, ok := s.clusters[pdMode]; ok {
+	if c, ok := s.clusters[PDMode]; ok {
 		f(c)
 	}
-	if c, ok := s.clusters[apiMode]; ok {
+	if c, ok := s.clusters[APIMode]; ok {
 		f(c)
 	}
 }
@@ -330,12 +391,12 @@ func (s *SchedulingTestEnvironment) Cleanup() {
 	}
 }
 
-func (s *SchedulingTestEnvironment) startCluster(m mode) {
+func (s *SchedulingTestEnvironment) startCluster(m SchedulerMode) {
 	re := require.New(s.t)
 	ctx, cancel := context.WithCancel(context.Background())
 	s.cancels = append(s.cancels, cancel)
 	switch m {
-	case pdMode:
+	case PDMode:
 		cluster, err := NewTestCluster(ctx, 1, s.opts...)
 		re.NoError(err)
 		err = cluster.RunInitialServers()
@@ -343,8 +404,8 @@ func (s *SchedulingTestEnvironment) startCluster(m mode) {
 		re.NotEmpty(cluster.WaitLeader())
 		leaderServer := cluster.GetServer(cluster.GetLeader())
 		re.NoError(leaderServer.BootstrapCluster())
-		s.clusters[pdMode] = cluster
-	case apiMode:
+		s.clusters[PDMode] = cluster
+	case APIMode:
 		cluster, err := NewTestAPICluster(ctx, 1, s.opts...)
 		re.NoError(err)
 		err = cluster.RunInitialServers()
@@ -361,9 +422,9 @@ func (s *SchedulingTestEnvironment) startCluster(m mode) {
 		cluster.SetSchedulingCluster(tc)
 		time.Sleep(200 * time.Millisecond) // wait for scheduling cluster to update member
 		testutil.Eventually(re, func() bool {
-			return cluster.GetLeaderServer().GetServer().GetRaftCluster().IsServiceIndependent(utils.SchedulingServiceName)
+			return cluster.GetLeaderServer().GetServer().GetRaftCluster().IsServiceIndependent(constant.SchedulingServiceName)
 		})
-		s.clusters[apiMode] = cluster
+		s.clusters[APIMode] = cluster
 	}
 }
 
@@ -394,6 +455,11 @@ func InitRegions(regionLen int) []*core.RegionInfo {
 				{Id: allocator.alloc(), StoreId: uint64(2)},
 				{Id: allocator.alloc(), StoreId: uint64(3)},
 			},
+		}
+		if i == 0 {
+			r.StartKey = []byte{}
+		} else if i == regionLen-1 {
+			r.EndKey = []byte{}
 		}
 		region := core.NewRegionInfo(r, r.Peers[0], core.SetSource(core.Heartbeat))
 		// Here is used to simulate the upgrade process.

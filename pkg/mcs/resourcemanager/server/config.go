@@ -26,7 +26,7 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
 	"github.com/spf13/pflag"
-	"github.com/tikv/pd/pkg/mcs/utils"
+	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/utils/configutil"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/metricutil"
@@ -35,7 +35,7 @@ import (
 )
 
 const (
-	defaultName             = "Resource Manager"
+	defaultName             = "resource manager"
 	defaultBackendEndpoints = "http://127.0.0.1:2379"
 	defaultListenAddr       = "http://127.0.0.1:3379"
 
@@ -59,6 +59,8 @@ const (
 	defaultDegradedModeWaitDuration = time.Second * 0
 	// defaultMaxWaitDuration is the max duration to wait for the token before throwing error.
 	defaultMaxWaitDuration = 30 * time.Second
+	// defaultLTBTokenRPCMaxDelay is the upper bound of backoff delay for local token bucket RPC.
+	defaultLTBTokenRPCMaxDelay = 1 * time.Second
 )
 
 // Config is the configuration for the resource manager.
@@ -99,6 +101,9 @@ type ControllerConfig struct {
 	// LTBMaxWaitDuration is the max wait time duration for local token bucket.
 	LTBMaxWaitDuration typeutil.Duration `toml:"ltb-max-wait-duration" json:"ltb-max-wait-duration"`
 
+	// LTBTokenRPCMaxDelay is the upper bound of backoff delay for local token bucket RPC.
+	LTBTokenRPCMaxDelay typeutil.Duration `toml:"ltb-token-rpc-max-delay" json:"ltb-token-rpc-max-delay"`
+
 	// RequestUnit is the configuration determines the coefficients of the RRU and WRU cost.
 	// This configuration should be modified carefully.
 	RequestUnit RequestUnitConfig `toml:"request-unit" json:"request-unit"`
@@ -119,8 +124,12 @@ func (rmc *ControllerConfig) Adjust(meta *configutil.ConfigMetaData) {
 	if !meta.IsDefined("ltb-max-wait-duration") {
 		configutil.AdjustDuration(&rmc.LTBMaxWaitDuration, defaultMaxWaitDuration)
 	}
-	failpoint.Inject("enableDegradedMode", func() {
+	if !meta.IsDefined("ltb-token-rpc-max-delay") {
+		configutil.AdjustDuration(&rmc.LTBTokenRPCMaxDelay, defaultLTBTokenRPCMaxDelay)
+	}
+	failpoint.Inject("enableDegradedModeAndTraceLog", func() {
 		configutil.AdjustDuration(&rmc.DegradedModeWaitDuration, time.Second)
+		configutil.AdjustBool(&rmc.EnableControllerTraceLog, true)
 	})
 }
 
@@ -194,6 +203,7 @@ func (c *Config) Parse(flagSet *pflag.FlagSet) error {
 	}
 
 	// Ignore the error check here
+	configutil.AdjustCommandLineString(flagSet, &c.Name, "name")
 	configutil.AdjustCommandLineString(flagSet, &c.Log.Level, "log-level")
 	configutil.AdjustCommandLineString(flagSet, &c.Log.File.Filename, "log-file")
 	configutil.AdjustCommandLineString(flagSet, &c.Metric.PushAddress, "metrics-addr")
@@ -233,26 +243,26 @@ func (c *Config) Adjust(meta *toml.MetaData) error {
 	configutil.AdjustString(&c.AdvertiseListenAddr, c.ListenAddr)
 
 	if !configMetaData.IsDefined("enable-grpc-gateway") {
-		c.EnableGRPCGateway = utils.DefaultEnableGRPCGateway
+		c.EnableGRPCGateway = constant.DefaultEnableGRPCGateway
 	}
 
 	c.adjustLog(configMetaData.Child("log"))
-	c.Security.Encryption.Adjust()
-
-	if len(c.Log.Format) == 0 {
-		c.Log.Format = utils.DefaultLogFormat
+	if err := c.Security.Encryption.Adjust(); err != nil {
+		return err
 	}
 
 	c.Controller.Adjust(configMetaData.Child("controller"))
-	configutil.AdjustInt64(&c.LeaderLease, utils.DefaultLeaderLease)
+	configutil.AdjustInt64(&c.LeaderLease, constant.DefaultLeaderLease)
 
 	return nil
 }
 
 func (c *Config) adjustLog(meta *configutil.ConfigMetaData) {
 	if !meta.IsDefined("disable-error-verbose") {
-		c.Log.DisableErrorVerbose = utils.DefaultDisableErrorVerbose
+		c.Log.DisableErrorVerbose = constant.DefaultDisableErrorVerbose
 	}
+	configutil.AdjustString(&c.Log.Format, constant.DefaultLogFormat)
+	configutil.AdjustString(&c.Log.Level, constant.DefaultLogLevel)
 }
 
 // GetName returns the Name

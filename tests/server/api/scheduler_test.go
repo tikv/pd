@@ -29,6 +29,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	sc "github.com/tikv/pd/pkg/schedule/config"
+	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	tu "github.com/tikv/pd/pkg/utils/testutil"
@@ -40,11 +41,20 @@ const apiPrefix = "/pd"
 
 type scheduleTestSuite struct {
 	suite.Suite
-	env *tests.SchedulingTestEnvironment
+	env     *tests.SchedulingTestEnvironment
+	runMode tests.SchedulerMode
 }
 
-func TestScheduleTestSuite(t *testing.T) {
-	suite.Run(t, new(scheduleTestSuite))
+func TestPDSchedulingTestSuite(t *testing.T) {
+	suite.Run(t, &scheduleTestSuite{
+		runMode: tests.PDMode,
+	})
+}
+
+func TestAPISchedulingTestSuite(t *testing.T) {
+	suite.Run(t, &scheduleTestSuite{
+		runMode: tests.APIMode,
+	})
 }
 
 func (suite *scheduleTestSuite) SetupSuite() {
@@ -52,6 +62,7 @@ func (suite *scheduleTestSuite) SetupSuite() {
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/changeCoordinatorTicker", `return(true)`))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/skipStoreConfigSync", `return(true)`))
 	suite.env = tests.NewSchedulingTestEnvironment(suite.T())
+	suite.env.RunMode = suite.runMode
 }
 
 func (suite *scheduleTestSuite) TearDownSuite() {
@@ -62,7 +73,7 @@ func (suite *scheduleTestSuite) TearDownSuite() {
 }
 
 func (suite *scheduleTestSuite) TestOriginAPI() {
-	suite.env.RunTestInTwoModes(suite.checkOriginAPI)
+	suite.env.RunTestBasedOnMode(suite.checkOriginAPI)
 }
 
 func (suite *scheduleTestSuite) checkOriginAPI(cluster *tests.TestCluster) {
@@ -84,12 +95,12 @@ func (suite *scheduleTestSuite) checkOriginAPI(cluster *tests.TestCluster) {
 	input["store_id"] = 1
 	body, err := json.Marshal(input)
 	re.NoError(err)
-	re.NoError(tu.CheckPostJSON(testDialClient, urlPrefix, body, tu.StatusOK(re)))
+	re.NoError(tu.CheckPostJSON(tests.TestDialClient, urlPrefix, body, tu.StatusOK(re)))
 
 	suite.assertSchedulerExists(urlPrefix, "evict-leader-scheduler")
 	resp := make(map[string]any)
 	listURL := fmt.Sprintf("%s%s%s/%s/list", leaderAddr, apiPrefix, server.SchedulerConfigHandlerPath, "evict-leader-scheduler")
-	re.NoError(tu.ReadGetJSON(re, testDialClient, listURL, &resp))
+	re.NoError(tu.ReadGetJSON(re, tests.TestDialClient, listURL, &resp))
 	re.Len(resp["store-id-ranges"], 1)
 	input1 := make(map[string]any)
 	input1["name"] = "evict-leader-scheduler"
@@ -97,40 +108,40 @@ func (suite *scheduleTestSuite) checkOriginAPI(cluster *tests.TestCluster) {
 	body, err = json.Marshal(input1)
 	re.NoError(err)
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/schedulers/persistFail", "return(true)"))
-	re.NoError(tu.CheckPostJSON(testDialClient, urlPrefix, body, tu.StatusNotOK(re)))
+	re.NoError(tu.CheckPostJSON(tests.TestDialClient, urlPrefix, body, tu.StatusNotOK(re)))
 	suite.assertSchedulerExists(urlPrefix, "evict-leader-scheduler")
 	resp = make(map[string]any)
-	re.NoError(tu.ReadGetJSON(re, testDialClient, listURL, &resp))
+	re.NoError(tu.ReadGetJSON(re, tests.TestDialClient, listURL, &resp))
 	re.Len(resp["store-id-ranges"], 1)
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/schedulers/persistFail"))
-	re.NoError(tu.CheckPostJSON(testDialClient, urlPrefix, body, tu.StatusOK(re)))
+	re.NoError(tu.CheckPostJSON(tests.TestDialClient, urlPrefix, body, tu.StatusOK(re)))
 	suite.assertSchedulerExists(urlPrefix, "evict-leader-scheduler")
 	resp = make(map[string]any)
-	re.NoError(tu.ReadGetJSON(re, testDialClient, listURL, &resp))
+	re.NoError(tu.ReadGetJSON(re, tests.TestDialClient, listURL, &resp))
 	re.Len(resp["store-id-ranges"], 2)
 	deleteURL := fmt.Sprintf("%s/%s", urlPrefix, "evict-leader-scheduler-1")
-	err = tu.CheckDelete(testDialClient, deleteURL, tu.StatusOK(re))
+	err = tu.CheckDelete(tests.TestDialClient, deleteURL, tu.StatusOK(re))
 	re.NoError(err)
 	suite.assertSchedulerExists(urlPrefix, "evict-leader-scheduler")
 	resp1 := make(map[string]any)
-	re.NoError(tu.ReadGetJSON(re, testDialClient, listURL, &resp1))
+	re.NoError(tu.ReadGetJSON(re, tests.TestDialClient, listURL, &resp1))
 	re.Len(resp1["store-id-ranges"], 1)
 	deleteURL = fmt.Sprintf("%s/%s", urlPrefix, "evict-leader-scheduler-2")
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/config/persistFail", "return(true)"))
-	err = tu.CheckDelete(testDialClient, deleteURL, tu.Status(re, http.StatusInternalServerError))
+	err = tu.CheckDelete(tests.TestDialClient, deleteURL, tu.Status(re, http.StatusInternalServerError))
 	re.NoError(err)
 	suite.assertSchedulerExists(urlPrefix, "evict-leader-scheduler")
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/config/persistFail"))
-	err = tu.CheckDelete(testDialClient, deleteURL, tu.StatusOK(re))
+	err = tu.CheckDelete(tests.TestDialClient, deleteURL, tu.StatusOK(re))
 	re.NoError(err)
 	assertNoScheduler(re, urlPrefix, "evict-leader-scheduler")
-	re.NoError(tu.CheckGetJSON(testDialClient, listURL, nil, tu.Status(re, http.StatusNotFound)))
-	err = tu.CheckDelete(testDialClient, deleteURL, tu.Status(re, http.StatusNotFound))
+	re.NoError(tu.CheckGetJSON(tests.TestDialClient, listURL, nil, tu.Status(re, http.StatusNotFound)))
+	err = tu.CheckDelete(tests.TestDialClient, deleteURL, tu.Status(re, http.StatusNotFound))
 	re.NoError(err)
 }
 
 func (suite *scheduleTestSuite) TestAPI() {
-	suite.env.RunTestInTwoModes(suite.checkAPI)
+	suite.env.RunTestBasedOnMode(suite.checkAPI)
 }
 
 func (suite *scheduleTestSuite) checkAPI(cluster *tests.TestCluster) {
@@ -164,7 +175,7 @@ func (suite *scheduleTestSuite) checkAPI(cluster *tests.TestCluster) {
 				listURL := fmt.Sprintf("%s%s%s/%s/list", leaderAddr, apiPrefix, server.SchedulerConfigHandlerPath, name)
 				resp := make(map[string]any)
 				tu.Eventually(re, func() bool {
-					re.NoError(tu.ReadGetJSON(re, testDialClient, listURL, &resp))
+					re.NoError(tu.ReadGetJSON(re, tests.TestDialClient, listURL, &resp))
 					return resp["batch"] == 4.0
 				})
 				dataMap := make(map[string]any)
@@ -172,15 +183,15 @@ func (suite *scheduleTestSuite) checkAPI(cluster *tests.TestCluster) {
 				updateURL := fmt.Sprintf("%s%s%s/%s/config", leaderAddr, apiPrefix, server.SchedulerConfigHandlerPath, name)
 				body, err := json.Marshal(dataMap)
 				re.NoError(err)
-				re.NoError(tu.CheckPostJSON(testDialClient, updateURL, body, tu.StatusOK(re)))
+				re.NoError(tu.CheckPostJSON(tests.TestDialClient, updateURL, body, tu.StatusOK(re)))
 				resp = make(map[string]any)
 				tu.Eventually(re, func() bool { // wait for scheduling server to be synced.
-					re.NoError(tu.ReadGetJSON(re, testDialClient, listURL, &resp))
+					re.NoError(tu.ReadGetJSON(re, tests.TestDialClient, listURL, &resp))
 					return resp["batch"] == 3.0
 				})
 
 				// update again
-				err = tu.CheckPostJSON(testDialClient, updateURL, body,
+				err = tu.CheckPostJSON(tests.TestDialClient, updateURL, body,
 					tu.StatusOK(re),
 					tu.StringEqual(re, "\"Config is the same with origin, so do nothing.\"\n"))
 				re.NoError(err)
@@ -189,17 +200,17 @@ func (suite *scheduleTestSuite) checkAPI(cluster *tests.TestCluster) {
 				dataMap["batch"] = 100
 				body, err = json.Marshal(dataMap)
 				re.NoError(err)
-				err = tu.CheckPostJSON(testDialClient, updateURL, body,
+				err = tu.CheckPostJSON(tests.TestDialClient, updateURL, body,
 					tu.Status(re, http.StatusBadRequest),
 					tu.StringEqual(re, "\"invalid batch size which should be an integer between 1 and 10\"\n"))
 				re.NoError(err)
 				resp = make(map[string]any)
 				tu.Eventually(re, func() bool {
-					re.NoError(tu.ReadGetJSON(re, testDialClient, listURL, &resp))
+					re.NoError(tu.ReadGetJSON(re, tests.TestDialClient, listURL, &resp))
 					return resp["batch"] == 3.0
 				})
 				// empty body
-				err = tu.CheckPostJSON(testDialClient, updateURL, nil,
+				err = tu.CheckPostJSON(tests.TestDialClient, updateURL, nil,
 					tu.Status(re, http.StatusInternalServerError),
 					tu.StringEqual(re, "\"unexpected end of JSON input\"\n"))
 				re.NoError(err)
@@ -208,7 +219,7 @@ func (suite *scheduleTestSuite) checkAPI(cluster *tests.TestCluster) {
 				dataMap["error"] = 3
 				body, err = json.Marshal(dataMap)
 				re.NoError(err)
-				err = tu.CheckPostJSON(testDialClient, updateURL, body,
+				err = tu.CheckPostJSON(tests.TestDialClient, updateURL, body,
 					tu.Status(re, http.StatusBadRequest),
 					tu.StringEqual(re, "\"Config item is not found.\"\n"))
 				re.NoError(err)
@@ -245,7 +256,7 @@ func (suite *scheduleTestSuite) checkAPI(cluster *tests.TestCluster) {
 					"history-sample-interval":    "30s",
 				}
 				tu.Eventually(re, func() bool {
-					re.NoError(tu.ReadGetJSON(re, testDialClient, listURL, &resp))
+					re.NoError(tu.ReadGetJSON(re, tests.TestDialClient, listURL, &resp))
 					re.Equal(len(expectMap), len(resp), "expect %v, got %v", expectMap, resp)
 					for key := range expectMap {
 						if !reflect.DeepEqual(resp[key], expectMap[key]) {
@@ -260,10 +271,10 @@ func (suite *scheduleTestSuite) checkAPI(cluster *tests.TestCluster) {
 				updateURL := fmt.Sprintf("%s%s%s/%s/config", leaderAddr, apiPrefix, server.SchedulerConfigHandlerPath, name)
 				body, err := json.Marshal(dataMap)
 				re.NoError(err)
-				re.NoError(tu.CheckPostJSON(testDialClient, updateURL, body, tu.StatusOK(re)))
+				re.NoError(tu.CheckPostJSON(tests.TestDialClient, updateURL, body, tu.StatusOK(re)))
 				resp = make(map[string]any)
 				tu.Eventually(re, func() bool {
-					re.NoError(tu.ReadGetJSON(re, testDialClient, listURL, &resp))
+					re.NoError(tu.ReadGetJSON(re, tests.TestDialClient, listURL, &resp))
 					for key := range expectMap {
 						if !reflect.DeepEqual(resp[key], expectMap[key]) {
 							return false
@@ -273,7 +284,7 @@ func (suite *scheduleTestSuite) checkAPI(cluster *tests.TestCluster) {
 				})
 
 				// update again
-				err = tu.CheckPostJSON(testDialClient, updateURL, body,
+				err = tu.CheckPostJSON(tests.TestDialClient, updateURL, body,
 					tu.StatusOK(re),
 					tu.StringEqual(re, "Config is the same with origin, so do nothing."))
 				re.NoError(err)
@@ -282,7 +293,7 @@ func (suite *scheduleTestSuite) checkAPI(cluster *tests.TestCluster) {
 				dataMap["error"] = 3
 				body, err = json.Marshal(dataMap)
 				re.NoError(err)
-				err = tu.CheckPostJSON(testDialClient, updateURL, body,
+				err = tu.CheckPostJSON(tests.TestDialClient, updateURL, body,
 					tu.Status(re, http.StatusBadRequest),
 					tu.StringEqual(re, "Config item is not found."))
 				re.NoError(err)
@@ -295,7 +306,7 @@ func (suite *scheduleTestSuite) checkAPI(cluster *tests.TestCluster) {
 				listURL := fmt.Sprintf("%s%s%s/%s/list", leaderAddr, apiPrefix, server.SchedulerConfigHandlerPath, name)
 				resp := make(map[string]any)
 				tu.Eventually(re, func() bool {
-					re.NoError(tu.ReadGetJSON(re, testDialClient, listURL, &resp))
+					re.NoError(tu.ReadGetJSON(re, tests.TestDialClient, listURL, &resp))
 					return resp["degree"] == 3.0 && resp["split-limit"] == 0.0
 				})
 				dataMap := make(map[string]any)
@@ -303,19 +314,19 @@ func (suite *scheduleTestSuite) checkAPI(cluster *tests.TestCluster) {
 				updateURL := fmt.Sprintf("%s%s%s/%s/config", leaderAddr, apiPrefix, server.SchedulerConfigHandlerPath, name)
 				body, err := json.Marshal(dataMap)
 				re.NoError(err)
-				re.NoError(tu.CheckPostJSON(testDialClient, updateURL, body, tu.StatusOK(re)))
+				re.NoError(tu.CheckPostJSON(tests.TestDialClient, updateURL, body, tu.StatusOK(re)))
 				resp = make(map[string]any)
 				tu.Eventually(re, func() bool {
-					re.NoError(tu.ReadGetJSON(re, testDialClient, listURL, &resp))
+					re.NoError(tu.ReadGetJSON(re, tests.TestDialClient, listURL, &resp))
 					return resp["degree"] == 4.0
 				})
 				// update again
-				err = tu.CheckPostJSON(testDialClient, updateURL, body,
+				err = tu.CheckPostJSON(tests.TestDialClient, updateURL, body,
 					tu.StatusOK(re),
 					tu.StringEqual(re, "Config is the same with origin, so do nothing."))
 				re.NoError(err)
 				// empty body
-				err = tu.CheckPostJSON(testDialClient, updateURL, nil,
+				err = tu.CheckPostJSON(tests.TestDialClient, updateURL, nil,
 					tu.Status(re, http.StatusInternalServerError),
 					tu.StringEqual(re, "\"unexpected end of JSON input\"\n"))
 				re.NoError(err)
@@ -324,7 +335,7 @@ func (suite *scheduleTestSuite) checkAPI(cluster *tests.TestCluster) {
 				dataMap["error"] = 3
 				body, err = json.Marshal(dataMap)
 				re.NoError(err)
-				err = tu.CheckPostJSON(testDialClient, updateURL, body,
+				err = tu.CheckPostJSON(tests.TestDialClient, updateURL, body,
 					tu.Status(re, http.StatusBadRequest),
 					tu.StringEqual(re, "Config item is not found."))
 				re.NoError(err)
@@ -353,7 +364,7 @@ func (suite *scheduleTestSuite) checkAPI(cluster *tests.TestCluster) {
 				resp := make(map[string]any)
 				listURL := fmt.Sprintf("%s%s%s/%s/list", leaderAddr, apiPrefix, server.SchedulerConfigHandlerPath, name)
 				tu.Eventually(re, func() bool {
-					re.NoError(tu.ReadGetJSON(re, testDialClient, listURL, &resp))
+					re.NoError(tu.ReadGetJSON(re, tests.TestDialClient, listURL, &resp))
 					return resp["batch"] == 4.0
 				})
 				dataMap := make(map[string]any)
@@ -361,14 +372,14 @@ func (suite *scheduleTestSuite) checkAPI(cluster *tests.TestCluster) {
 				updateURL := fmt.Sprintf("%s%s%s/%s/config", leaderAddr, apiPrefix, server.SchedulerConfigHandlerPath, name)
 				body, err := json.Marshal(dataMap)
 				re.NoError(err)
-				re.NoError(tu.CheckPostJSON(testDialClient, updateURL, body, tu.StatusOK(re)))
+				re.NoError(tu.CheckPostJSON(tests.TestDialClient, updateURL, body, tu.StatusOK(re)))
 				resp = make(map[string]any)
 				tu.Eventually(re, func() bool {
-					re.NoError(tu.ReadGetJSON(re, testDialClient, listURL, &resp))
+					re.NoError(tu.ReadGetJSON(re, tests.TestDialClient, listURL, &resp))
 					return resp["batch"] == 3.0
 				})
 				// update again
-				err = tu.CheckPostJSON(testDialClient, updateURL, body,
+				err = tu.CheckPostJSON(tests.TestDialClient, updateURL, body,
 					tu.StatusOK(re),
 					tu.StringEqual(re, "\"Config is the same with origin, so do nothing.\"\n"))
 				re.NoError(err)
@@ -377,17 +388,17 @@ func (suite *scheduleTestSuite) checkAPI(cluster *tests.TestCluster) {
 				dataMap["batch"] = 100
 				body, err = json.Marshal(dataMap)
 				re.NoError(err)
-				err = tu.CheckPostJSON(testDialClient, updateURL, body,
+				err = tu.CheckPostJSON(tests.TestDialClient, updateURL, body,
 					tu.Status(re, http.StatusBadRequest),
 					tu.StringEqual(re, "\"invalid batch size which should be an integer between 1 and 10\"\n"))
 				re.NoError(err)
 				resp = make(map[string]any)
 				tu.Eventually(re, func() bool {
-					re.NoError(tu.ReadGetJSON(re, testDialClient, listURL, &resp))
+					re.NoError(tu.ReadGetJSON(re, tests.TestDialClient, listURL, &resp))
 					return resp["batch"] == 3.0
 				})
 				// empty body
-				err = tu.CheckPostJSON(testDialClient, updateURL, nil,
+				err = tu.CheckPostJSON(tests.TestDialClient, updateURL, nil,
 					tu.Status(re, http.StatusInternalServerError),
 					tu.StringEqual(re, "\"unexpected end of JSON input\"\n"))
 				re.NoError(err)
@@ -396,7 +407,7 @@ func (suite *scheduleTestSuite) checkAPI(cluster *tests.TestCluster) {
 				dataMap["error"] = 3
 				body, err = json.Marshal(dataMap)
 				re.NoError(err)
-				err = tu.CheckPostJSON(testDialClient, updateURL, body,
+				err = tu.CheckPostJSON(tests.TestDialClient, updateURL, body,
 					tu.Status(re, http.StatusBadRequest),
 					tu.StringEqual(re, "\"Config item is not found.\"\n"))
 				re.NoError(err)
@@ -412,7 +423,7 @@ func (suite *scheduleTestSuite) checkAPI(cluster *tests.TestCluster) {
 				expectedMap := make(map[string]any)
 				expectedMap["1"] = []any{map[string]any{"end-key": "", "start-key": ""}}
 				tu.Eventually(re, func() bool {
-					re.NoError(tu.ReadGetJSON(re, testDialClient, listURL, &resp))
+					re.NoError(tu.ReadGetJSON(re, tests.TestDialClient, listURL, &resp))
 					return reflect.DeepEqual(expectedMap, resp["store-id-ranges"])
 				})
 
@@ -423,25 +434,25 @@ func (suite *scheduleTestSuite) checkAPI(cluster *tests.TestCluster) {
 				updateURL := fmt.Sprintf("%s%s%s/%s/config", leaderAddr, apiPrefix, server.SchedulerConfigHandlerPath, name)
 				body, err := json.Marshal(input)
 				re.NoError(err)
-				re.NoError(tu.CheckPostJSON(testDialClient, updateURL, body, tu.StatusOK(re)))
+				re.NoError(tu.CheckPostJSON(tests.TestDialClient, updateURL, body, tu.StatusOK(re)))
 				expectedMap["2"] = []any{map[string]any{"end-key": "", "start-key": ""}}
 				resp = make(map[string]any)
 				tu.Eventually(re, func() bool {
-					re.NoError(tu.ReadGetJSON(re, testDialClient, listURL, &resp))
+					re.NoError(tu.ReadGetJSON(re, tests.TestDialClient, listURL, &resp))
 					return reflect.DeepEqual(expectedMap, resp["store-id-ranges"])
 				})
 
 				// using /pd/v1/schedule-config/grant-leader-scheduler/config to delete exists store from grant-leader-scheduler
 				deleteURL := fmt.Sprintf("%s%s%s/%s/delete/%s", leaderAddr, apiPrefix, server.SchedulerConfigHandlerPath, name, "2")
-				err = tu.CheckDelete(testDialClient, deleteURL, tu.StatusOK(re))
+				err = tu.CheckDelete(tests.TestDialClient, deleteURL, tu.StatusOK(re))
 				re.NoError(err)
 				delete(expectedMap, "2")
 				resp = make(map[string]any)
 				tu.Eventually(re, func() bool {
-					re.NoError(tu.ReadGetJSON(re, testDialClient, listURL, &resp))
+					re.NoError(tu.ReadGetJSON(re, tests.TestDialClient, listURL, &resp))
 					return reflect.DeepEqual(expectedMap, resp["store-id-ranges"])
 				})
-				err = tu.CheckDelete(testDialClient, deleteURL, tu.Status(re, http.StatusNotFound))
+				err = tu.CheckDelete(tests.TestDialClient, deleteURL, tu.Status(re, http.StatusNotFound))
 				re.NoError(err)
 			},
 		},
@@ -454,7 +465,7 @@ func (suite *scheduleTestSuite) checkAPI(cluster *tests.TestCluster) {
 				resp := make(map[string]any)
 				listURL := fmt.Sprintf("%s%s%s/%s/list", leaderAddr, apiPrefix, server.SchedulerConfigHandlerPath, name)
 				tu.Eventually(re, func() bool {
-					re.NoError(tu.ReadGetJSON(re, testDialClient, listURL, &resp))
+					re.NoError(tu.ReadGetJSON(re, tests.TestDialClient, listURL, &resp))
 					return resp["start-key"] == "" && resp["end-key"] == "" && resp["range-name"] == "test"
 				})
 				resp["start-key"] = "a_00"
@@ -462,10 +473,10 @@ func (suite *scheduleTestSuite) checkAPI(cluster *tests.TestCluster) {
 				updateURL := fmt.Sprintf("%s%s%s/%s/config", leaderAddr, apiPrefix, server.SchedulerConfigHandlerPath, name)
 				body, err := json.Marshal(resp)
 				re.NoError(err)
-				re.NoError(tu.CheckPostJSON(testDialClient, updateURL, body, tu.StatusOK(re)))
+				re.NoError(tu.CheckPostJSON(tests.TestDialClient, updateURL, body, tu.StatusOK(re)))
 				resp = make(map[string]any)
 				tu.Eventually(re, func() bool {
-					re.NoError(tu.ReadGetJSON(re, testDialClient, listURL, &resp))
+					re.NoError(tu.ReadGetJSON(re, tests.TestDialClient, listURL, &resp))
 					return resp["start-key"] == "a_00" && resp["end-key"] == "a_99" && resp["range-name"] == "test"
 				})
 			},
@@ -481,7 +492,7 @@ func (suite *scheduleTestSuite) checkAPI(cluster *tests.TestCluster) {
 				expectedMap := make(map[string]any)
 				expectedMap["3"] = []any{map[string]any{"end-key": "", "start-key": ""}}
 				tu.Eventually(re, func() bool {
-					re.NoError(tu.ReadGetJSON(re, testDialClient, listURL, &resp))
+					re.NoError(tu.ReadGetJSON(re, tests.TestDialClient, listURL, &resp))
 					return reflect.DeepEqual(expectedMap, resp["store-id-ranges"])
 				})
 
@@ -492,25 +503,25 @@ func (suite *scheduleTestSuite) checkAPI(cluster *tests.TestCluster) {
 				updateURL := fmt.Sprintf("%s%s%s/%s/config", leaderAddr, apiPrefix, server.SchedulerConfigHandlerPath, name)
 				body, err := json.Marshal(input)
 				re.NoError(err)
-				re.NoError(tu.CheckPostJSON(testDialClient, updateURL, body, tu.StatusOK(re)))
+				re.NoError(tu.CheckPostJSON(tests.TestDialClient, updateURL, body, tu.StatusOK(re)))
 				expectedMap["4"] = []any{map[string]any{"end-key": "", "start-key": ""}}
 				resp = make(map[string]any)
 				tu.Eventually(re, func() bool {
-					re.NoError(tu.ReadGetJSON(re, testDialClient, listURL, &resp))
+					re.NoError(tu.ReadGetJSON(re, tests.TestDialClient, listURL, &resp))
 					return reflect.DeepEqual(expectedMap, resp["store-id-ranges"])
 				})
 
 				// using /pd/v1/schedule-config/evict-leader-scheduler/config to delete exist store from evict-leader-scheduler
 				deleteURL := fmt.Sprintf("%s%s%s/%s/delete/%s", leaderAddr, apiPrefix, server.SchedulerConfigHandlerPath, name, "4")
-				err = tu.CheckDelete(testDialClient, deleteURL, tu.StatusOK(re))
+				err = tu.CheckDelete(tests.TestDialClient, deleteURL, tu.StatusOK(re))
 				re.NoError(err)
 				delete(expectedMap, "4")
 				resp = make(map[string]any)
 				tu.Eventually(re, func() bool {
-					re.NoError(tu.ReadGetJSON(re, testDialClient, listURL, &resp))
+					re.NoError(tu.ReadGetJSON(re, tests.TestDialClient, listURL, &resp))
 					return reflect.DeepEqual(expectedMap, resp["store-id-ranges"])
 				})
-				err = tu.CheckDelete(testDialClient, deleteURL, tu.Status(re, http.StatusNotFound))
+				err = tu.CheckDelete(tests.TestDialClient, deleteURL, tu.Status(re, http.StatusNotFound))
 				re.NoError(err)
 			},
 		},
@@ -558,7 +569,7 @@ func (suite *scheduleTestSuite) checkAPI(cluster *tests.TestCluster) {
 	input["delay"] = 30
 	pauseArgs, err := json.Marshal(input)
 	re.NoError(err)
-	err = tu.CheckPostJSON(testDialClient, urlPrefix+"/all", pauseArgs, tu.StatusOK(re))
+	err = tu.CheckPostJSON(tests.TestDialClient, urlPrefix+"/all", pauseArgs, tu.StatusOK(re))
 	re.NoError(err)
 
 	for _, testCase := range testCases {
@@ -572,7 +583,7 @@ func (suite *scheduleTestSuite) checkAPI(cluster *tests.TestCluster) {
 	input["delay"] = 1
 	pauseArgs, err = json.Marshal(input)
 	re.NoError(err)
-	err = tu.CheckPostJSON(testDialClient, urlPrefix+"/all", pauseArgs, tu.StatusOK(re))
+	err = tu.CheckPostJSON(tests.TestDialClient, urlPrefix+"/all", pauseArgs, tu.StatusOK(re))
 	re.NoError(err)
 	time.Sleep(time.Second)
 	for _, testCase := range testCases {
@@ -588,12 +599,12 @@ func (suite *scheduleTestSuite) checkAPI(cluster *tests.TestCluster) {
 	input["delay"] = 30
 	pauseArgs, err = json.Marshal(input)
 	re.NoError(err)
-	err = tu.CheckPostJSON(testDialClient, urlPrefix+"/all", pauseArgs, tu.StatusOK(re))
+	err = tu.CheckPostJSON(tests.TestDialClient, urlPrefix+"/all", pauseArgs, tu.StatusOK(re))
 	re.NoError(err)
 	input["delay"] = 0
 	pauseArgs, err = json.Marshal(input)
 	re.NoError(err)
-	err = tu.CheckPostJSON(testDialClient, urlPrefix+"/all", pauseArgs, tu.StatusOK(re))
+	err = tu.CheckPostJSON(tests.TestDialClient, urlPrefix+"/all", pauseArgs, tu.StatusOK(re))
 	re.NoError(err)
 	for _, testCase := range testCases {
 		createdName := testCase.createdName
@@ -616,7 +627,7 @@ func (suite *scheduleTestSuite) checkAPI(cluster *tests.TestCluster) {
 }
 
 func (suite *scheduleTestSuite) TestDisable() {
-	suite.env.RunTestInTwoModes(suite.checkDisable)
+	suite.env.RunTestBasedOnMode(suite.checkDisable)
 }
 
 func (suite *scheduleTestSuite) checkDisable(cluster *tests.TestCluster) {
@@ -642,14 +653,17 @@ func (suite *scheduleTestSuite) checkDisable(cluster *tests.TestCluster) {
 
 	u := fmt.Sprintf("%s%s/api/v1/config/schedule", leaderAddr, apiPrefix)
 	var scheduleConfig sc.ScheduleConfig
-	err = tu.ReadGetJSON(re, testDialClient, u, &scheduleConfig)
+	err = tu.ReadGetJSON(re, tests.TestDialClient, u, &scheduleConfig)
 	re.NoError(err)
 
 	originSchedulers := scheduleConfig.Schedulers
-	scheduleConfig.Schedulers = sc.SchedulerConfigs{sc.SchedulerConfig{Type: "shuffle-leader", Disable: true}}
+	scheduleConfig.Schedulers = sc.SchedulerConfigs{sc.SchedulerConfig{
+		Type:    types.SchedulerTypeCompatibleMap[types.ShuffleLeaderScheduler],
+		Disable: true,
+	}}
 	body, err = json.Marshal(scheduleConfig)
 	re.NoError(err)
-	err = tu.CheckPostJSON(testDialClient, u, body, tu.StatusOK(re))
+	err = tu.CheckPostJSON(tests.TestDialClient, u, body, tu.StatusOK(re))
 	re.NoError(err)
 
 	assertNoScheduler(re, urlPrefix, name)
@@ -659,7 +673,7 @@ func (suite *scheduleTestSuite) checkDisable(cluster *tests.TestCluster) {
 	scheduleConfig.Schedulers = originSchedulers
 	body, err = json.Marshal(scheduleConfig)
 	re.NoError(err)
-	err = tu.CheckPostJSON(testDialClient, u, body, tu.StatusOK(re))
+	err = tu.CheckPostJSON(tests.TestDialClient, u, body, tu.StatusOK(re))
 	re.NoError(err)
 
 	deleteScheduler(re, urlPrefix, name)
@@ -667,13 +681,13 @@ func (suite *scheduleTestSuite) checkDisable(cluster *tests.TestCluster) {
 }
 
 func addScheduler(re *require.Assertions, urlPrefix string, body []byte) {
-	err := tu.CheckPostJSON(testDialClient, urlPrefix, body, tu.StatusOK(re))
+	err := tu.CheckPostJSON(tests.TestDialClient, urlPrefix, body, tu.StatusOK(re))
 	re.NoError(err)
 }
 
 func deleteScheduler(re *require.Assertions, urlPrefix string, createdName string) {
 	deleteURL := fmt.Sprintf("%s/%s", urlPrefix, createdName)
-	err := tu.CheckDelete(testDialClient, deleteURL, tu.StatusOK(re))
+	err := tu.CheckDelete(tests.TestDialClient, deleteURL, tu.StatusOK(re))
 	re.NoError(err)
 }
 
@@ -682,9 +696,9 @@ func (suite *scheduleTestSuite) testPauseOrResume(re *require.Assertions, urlPre
 		createdName = name
 	}
 	var schedulers []string
-	tu.ReadGetJSON(re, testDialClient, urlPrefix, &schedulers)
+	tu.ReadGetJSON(re, tests.TestDialClient, urlPrefix, &schedulers)
 	if !slice.Contains(schedulers, createdName) {
-		err := tu.CheckPostJSON(testDialClient, urlPrefix, body, tu.StatusOK(re))
+		err := tu.CheckPostJSON(tests.TestDialClient, urlPrefix, body, tu.StatusOK(re))
 		re.NoError(err)
 	}
 	suite.assertSchedulerExists(urlPrefix, createdName) // wait for scheduler to be synced.
@@ -694,14 +708,14 @@ func (suite *scheduleTestSuite) testPauseOrResume(re *require.Assertions, urlPre
 	input["delay"] = 30
 	pauseArgs, err := json.Marshal(input)
 	re.NoError(err)
-	err = tu.CheckPostJSON(testDialClient, urlPrefix+"/"+createdName, pauseArgs, tu.StatusOK(re))
+	err = tu.CheckPostJSON(tests.TestDialClient, urlPrefix+"/"+createdName, pauseArgs, tu.StatusOK(re))
 	re.NoError(err)
 	isPaused := isSchedulerPaused(re, urlPrefix, createdName)
 	re.True(isPaused)
 	input["delay"] = 1
 	pauseArgs, err = json.Marshal(input)
 	re.NoError(err)
-	err = tu.CheckPostJSON(testDialClient, urlPrefix+"/"+createdName, pauseArgs, tu.StatusOK(re))
+	err = tu.CheckPostJSON(tests.TestDialClient, urlPrefix+"/"+createdName, pauseArgs, tu.StatusOK(re))
 	re.NoError(err)
 	time.Sleep(time.Second * 2)
 	isPaused = isSchedulerPaused(re, urlPrefix, createdName)
@@ -712,19 +726,19 @@ func (suite *scheduleTestSuite) testPauseOrResume(re *require.Assertions, urlPre
 	input["delay"] = 30
 	pauseArgs, err = json.Marshal(input)
 	re.NoError(err)
-	err = tu.CheckPostJSON(testDialClient, urlPrefix+"/"+createdName, pauseArgs, tu.StatusOK(re))
+	err = tu.CheckPostJSON(tests.TestDialClient, urlPrefix+"/"+createdName, pauseArgs, tu.StatusOK(re))
 	re.NoError(err)
 	input["delay"] = 0
 	pauseArgs, err = json.Marshal(input)
 	re.NoError(err)
-	err = tu.CheckPostJSON(testDialClient, urlPrefix+"/"+createdName, pauseArgs, tu.StatusOK(re))
+	err = tu.CheckPostJSON(tests.TestDialClient, urlPrefix+"/"+createdName, pauseArgs, tu.StatusOK(re))
 	re.NoError(err)
 	isPaused = isSchedulerPaused(re, urlPrefix, createdName)
 	re.False(isPaused)
 }
 
 func (suite *scheduleTestSuite) TestEmptySchedulers() {
-	suite.env.RunTestInTwoModes(suite.checkEmptySchedulers)
+	suite.env.RunTestBasedOnMode(suite.checkEmptySchedulers)
 }
 
 func (suite *scheduleTestSuite) checkEmptySchedulers(cluster *tests.TestCluster) {
@@ -742,7 +756,7 @@ func (suite *scheduleTestSuite) checkEmptySchedulers(cluster *tests.TestCluster)
 	}
 	for _, query := range []string{"", "?status=paused", "?status=disabled"} {
 		schedulers := make([]string, 0)
-		re.NoError(tu.ReadGetJSON(re, testDialClient, urlPrefix+query, &schedulers))
+		re.NoError(tu.ReadGetJSON(re, tests.TestDialClient, urlPrefix+query, &schedulers))
 		for _, scheduler := range schedulers {
 			if strings.Contains(query, "disable") {
 				input := make(map[string]any)
@@ -755,7 +769,7 @@ func (suite *scheduleTestSuite) checkEmptySchedulers(cluster *tests.TestCluster)
 			}
 		}
 		tu.Eventually(re, func() bool {
-			resp, err := apiutil.GetJSON(testDialClient, urlPrefix+query, nil)
+			resp, err := apiutil.GetJSON(tests.TestDialClient, urlPrefix+query, nil)
 			re.NoError(err)
 			defer resp.Body.Close()
 			re.Equal(http.StatusOK, resp.StatusCode)
@@ -770,7 +784,7 @@ func (suite *scheduleTestSuite) assertSchedulerExists(urlPrefix string, schedule
 	var schedulers []string
 	re := suite.Require()
 	tu.Eventually(re, func() bool {
-		err := tu.ReadGetJSON(re, testDialClient, urlPrefix, &schedulers,
+		err := tu.ReadGetJSON(re, tests.TestDialClient, urlPrefix, &schedulers,
 			tu.StatusOK(re))
 		re.NoError(err)
 		return slice.Contains(schedulers, scheduler)
@@ -780,7 +794,7 @@ func (suite *scheduleTestSuite) assertSchedulerExists(urlPrefix string, schedule
 func assertNoScheduler(re *require.Assertions, urlPrefix string, scheduler string) {
 	var schedulers []string
 	tu.Eventually(re, func() bool {
-		err := tu.ReadGetJSON(re, testDialClient, urlPrefix, &schedulers,
+		err := tu.ReadGetJSON(re, tests.TestDialClient, urlPrefix, &schedulers,
 			tu.StatusOK(re))
 		re.NoError(err)
 		return !slice.Contains(schedulers, scheduler)
@@ -789,7 +803,7 @@ func assertNoScheduler(re *require.Assertions, urlPrefix string, scheduler strin
 
 func isSchedulerPaused(re *require.Assertions, urlPrefix, name string) bool {
 	var schedulers []string
-	err := tu.ReadGetJSON(re, testDialClient, fmt.Sprintf("%s?status=paused", urlPrefix), &schedulers,
+	err := tu.ReadGetJSON(re, tests.TestDialClient, fmt.Sprintf("%s?status=paused", urlPrefix), &schedulers,
 		tu.StatusOK(re))
 	re.NoError(err)
 	for _, scheduler := range schedulers {

@@ -15,22 +15,17 @@
 package schedulers
 
 import (
-	"context"
 	"fmt"
-	"math/rand"
-	"sort"
 	"testing"
 
-	"github.com/docker/go-units"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/require"
-	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
-	"github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
+	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/utils/operatorutil"
 	"github.com/tikv/pd/pkg/versioninfo"
@@ -223,532 +218,6 @@ func TestTolerantRatio(t *testing.T) {
 	}
 }
 
-type balanceLeaderSchedulerTestSuite struct {
-	suite.Suite
-	cancel context.CancelFunc
-	tc     *mockcluster.Cluster
-	lb     Scheduler
-	oc     *operator.Controller
-	conf   config.SchedulerConfigProvider
-}
-
-func TestBalanceLeaderSchedulerTestSuite(t *testing.T) {
-	suite.Run(t, new(balanceLeaderSchedulerTestSuite))
-}
-
-func (suite *balanceLeaderSchedulerTestSuite) SetupTest() {
-	re := suite.Require()
-	suite.cancel, suite.conf, suite.tc, suite.oc = prepareSchedulersTest()
-	lb, err := CreateScheduler(BalanceLeaderType, suite.oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(BalanceLeaderType, []string{"", ""}))
-	re.NoError(err)
-	suite.lb = lb
-}
-
-func (suite *balanceLeaderSchedulerTestSuite) TearDownTest() {
-	suite.cancel()
-}
-
-func (suite *balanceLeaderSchedulerTestSuite) schedule() []*operator.Operator {
-	ops, _ := suite.lb.Schedule(suite.tc, false)
-	return ops
-}
-
-func (suite *balanceLeaderSchedulerTestSuite) dryRun() []plan.Plan {
-	_, plans := suite.lb.Schedule(suite.tc, true)
-	return plans
-}
-
-func (suite *balanceLeaderSchedulerTestSuite) TestBalanceLimit() {
-	re := suite.Require()
-	suite.tc.SetTolerantSizeRatio(2.5)
-	// Stores:     1    2    3    4
-	// Leaders:    1    0    0    0
-	// Region1:    L    F    F    F
-	suite.tc.AddLeaderStore(1, 1)
-	suite.tc.AddLeaderStore(2, 0)
-	suite.tc.AddLeaderStore(3, 0)
-	suite.tc.AddLeaderStore(4, 0)
-	suite.tc.AddLeaderRegion(1, 1, 2, 3, 4)
-	re.Empty(suite.schedule())
-
-	// Stores:     1    2    3    4
-	// Leaders:    16   0    0    0
-	// Region1:    L    F    F    F
-	suite.tc.UpdateLeaderCount(1, 16)
-	re.NotEmpty(suite.schedule())
-
-	// Stores:     1    2    3    4
-	// Leaders:    7    8    9   10
-	// Region1:    F    F    F    L
-	suite.tc.UpdateLeaderCount(1, 7)
-	suite.tc.UpdateLeaderCount(2, 8)
-	suite.tc.UpdateLeaderCount(3, 9)
-	suite.tc.UpdateLeaderCount(4, 10)
-	suite.tc.AddLeaderRegion(1, 4, 1, 2, 3)
-	re.Empty(suite.schedule())
-	plans := suite.dryRun()
-	re.NotEmpty(plans)
-	re.Equal(3, plans[0].GetStep())
-	re.Equal(plan.StatusStoreScoreDisallowed, int(plans[0].GetStatus().StatusCode))
-
-	// Stores:     1    2    3    4
-	// Leaders:    7    8    9   16
-	// Region1:    F    F    F    L
-	suite.tc.UpdateLeaderCount(4, 16)
-	re.NotEmpty(suite.schedule())
-}
-
-func (suite *balanceLeaderSchedulerTestSuite) TestBalanceLeaderSchedulePolicy() {
-	re := suite.Require()
-	// Stores:          1       2       3       4
-	// Leader Count:    10      10      10      10
-	// Leader Size :    10000   100    	100    	100
-	// Region1:         L       F       F       F
-	suite.tc.AddLeaderStore(1, 10, 10000*units.MiB)
-	suite.tc.AddLeaderStore(2, 10, 100*units.MiB)
-	suite.tc.AddLeaderStore(3, 10, 100*units.MiB)
-	suite.tc.AddLeaderStore(4, 10, 100*units.MiB)
-	suite.tc.AddLeaderRegion(1, 1, 2, 3, 4)
-	re.Equal(constant.ByCount.String(), suite.tc.GetScheduleConfig().LeaderSchedulePolicy) // default by count
-	re.Empty(suite.schedule())
-	plans := suite.dryRun()
-	re.NotEmpty(plans)
-	re.Equal(3, plans[0].GetStep())
-	re.Equal(plan.StatusStoreScoreDisallowed, int(plans[0].GetStatus().StatusCode))
-
-	suite.tc.SetLeaderSchedulePolicy(constant.BySize.String())
-	re.NotEmpty(suite.schedule())
-}
-
-func (suite *balanceLeaderSchedulerTestSuite) TestBalanceLeaderTolerantRatio() {
-	re := suite.Require()
-	suite.tc.SetTolerantSizeRatio(2.5)
-	// test schedule leader by count, with tolerantSizeRatio=2.5
-	// Stores:          1       2       3       4
-	// Leader Count:    14->15  10      10      10
-	// Leader Size :    100     100     100     100
-	// Region1:         L       F       F       F
-	suite.tc.AddLeaderStore(1, 14, 100)
-	suite.tc.AddLeaderStore(2, 10, 100)
-	suite.tc.AddLeaderStore(3, 10, 100)
-	suite.tc.AddLeaderStore(4, 10, 100)
-	suite.tc.AddLeaderRegion(1, 1, 2, 3, 4)
-	re.Equal(constant.ByCount.String(), suite.tc.GetScheduleConfig().LeaderSchedulePolicy) // default by count
-	re.Empty(suite.schedule())
-	re.Equal(14, suite.tc.GetStore(1).GetLeaderCount())
-	suite.tc.AddLeaderStore(1, 15, 100)
-	re.Equal(15, suite.tc.GetStore(1).GetLeaderCount())
-	re.NotEmpty(suite.schedule())
-	suite.tc.SetTolerantSizeRatio(6) // (15-10)<6
-	re.Empty(suite.schedule())
-}
-
-func (suite *balanceLeaderSchedulerTestSuite) TestScheduleWithOpInfluence() {
-	re := suite.Require()
-	suite.tc.SetTolerantSizeRatio(2.5)
-	// Stores:     1    2    3    4
-	// Leaders:    7    8    9   14
-	// Region1:    F    F    F    L
-	suite.tc.AddLeaderStore(1, 7)
-	suite.tc.AddLeaderStore(2, 8)
-	suite.tc.AddLeaderStore(3, 9)
-	suite.tc.AddLeaderStore(4, 14)
-	suite.tc.AddLeaderRegion(1, 4, 1, 2, 3)
-	op := suite.schedule()[0]
-	re.NotNil(op)
-	suite.oc.SetOperator(op)
-	// After considering the scheduled operator, leaders of store1 and store4 are 8
-	// and 13 respectively. As the `TolerantSizeRatio` is 2.5, `shouldBalance`
-	// returns false when leader difference is not greater than 5.
-	re.Equal(constant.ByCount.String(), suite.tc.GetScheduleConfig().LeaderSchedulePolicy) // default by count
-	re.NotEmpty(suite.schedule())
-	suite.tc.SetLeaderSchedulePolicy(constant.BySize.String())
-	re.Empty(suite.schedule())
-
-	// Stores:     1    2    3    4
-	// Leaders:    8    8    9   13
-	// Region1:    F    F    F    L
-	suite.tc.UpdateLeaderCount(1, 8)
-	suite.tc.UpdateLeaderCount(2, 8)
-	suite.tc.UpdateLeaderCount(3, 9)
-	suite.tc.UpdateLeaderCount(4, 13)
-	suite.tc.AddLeaderRegion(1, 4, 1, 2, 3)
-	re.Empty(suite.schedule())
-}
-
-func (suite *balanceLeaderSchedulerTestSuite) TestTransferLeaderOut() {
-	re := suite.Require()
-	// Stores:     1    2    3    4
-	// Leaders:    7    8    9   12
-	suite.tc.AddLeaderStore(1, 7)
-	suite.tc.AddLeaderStore(2, 8)
-	suite.tc.AddLeaderStore(3, 9)
-	suite.tc.AddLeaderStore(4, 12)
-	suite.tc.SetTolerantSizeRatio(0.1)
-	for i := uint64(1); i <= 7; i++ {
-		suite.tc.AddLeaderRegion(i, 4, 1, 2, 3)
-	}
-
-	// balance leader: 4->1, 4->1, 4->2
-	regions := make(map[uint64]struct{})
-	targets := map[uint64]uint64{
-		1: 2,
-		2: 1,
-	}
-	for i := 0; i < 20; i++ {
-		if len(suite.schedule()) == 0 {
-			continue
-		}
-		if op := suite.schedule()[0]; op != nil {
-			if _, ok := regions[op.RegionID()]; !ok {
-				suite.oc.SetOperator(op)
-				regions[op.RegionID()] = struct{}{}
-				tr := op.Step(0).(operator.TransferLeader)
-				re.Equal(uint64(4), tr.FromStore)
-				targets[tr.ToStore]--
-			}
-		}
-	}
-	re.Len(regions, 3)
-	for _, count := range targets {
-		re.Zero(count)
-	}
-}
-
-func (suite *balanceLeaderSchedulerTestSuite) TestBalanceFilter() {
-	re := suite.Require()
-	// Stores:     1    2    3    4
-	// Leaders:    1    2    3   16
-	// Region1:    F    F    F    L
-	suite.tc.AddLeaderStore(1, 1)
-	suite.tc.AddLeaderStore(2, 2)
-	suite.tc.AddLeaderStore(3, 3)
-	suite.tc.AddLeaderStore(4, 16)
-	suite.tc.AddLeaderRegion(1, 4, 1, 2, 3)
-
-	operatorutil.CheckTransferLeader(re, suite.schedule()[0], operator.OpKind(0), 4, 1)
-	// Test stateFilter.
-	// if store 4 is offline, we should consider it
-	// because it still provides services
-	suite.tc.SetStoreOffline(4)
-	operatorutil.CheckTransferLeader(re, suite.schedule()[0], operator.OpKind(0), 4, 1)
-	// If store 1 is down, it will be filtered,
-	// store 2 becomes the store with least leaders.
-	suite.tc.SetStoreDown(1)
-	operatorutil.CheckTransferLeader(re, suite.schedule()[0], operator.OpKind(0), 4, 2)
-	plans := suite.dryRun()
-	re.NotEmpty(plans)
-	re.Equal(0, plans[0].GetStep())
-	re.Equal(plan.StatusStoreDown, int(plans[0].GetStatus().StatusCode))
-	re.Equal(uint64(1), plans[0].GetResource(0))
-
-	// Test healthFilter.
-	// If store 2 is busy, it will be filtered,
-	// store 3 becomes the store with least leaders.
-	suite.tc.SetStoreBusy(2, true)
-	operatorutil.CheckTransferLeader(re, suite.schedule()[0], operator.OpKind(0), 4, 3)
-
-	// Test disconnectFilter.
-	// If store 3 is disconnected, no operator can be created.
-	suite.tc.SetStoreDisconnect(3)
-	re.Empty(suite.schedule())
-}
-
-func (suite *balanceLeaderSchedulerTestSuite) TestLeaderWeight() {
-	re := suite.Require()
-	// Stores:     1       2       3       4
-	// Leaders:    10      10      10      10
-	// Weight:     0.5     0.9     1       2
-	// Region1:    L       F       F       F
-	suite.tc.SetTolerantSizeRatio(2.5)
-	for i := uint64(1); i <= 4; i++ {
-		suite.tc.AddLeaderStore(i, 10)
-	}
-	suite.tc.UpdateStoreLeaderWeight(1, 0.5)
-	suite.tc.UpdateStoreLeaderWeight(2, 0.9)
-	suite.tc.UpdateStoreLeaderWeight(3, 1)
-	suite.tc.UpdateStoreLeaderWeight(4, 2)
-	suite.tc.AddLeaderRegion(1, 1, 2, 3, 4)
-	operatorutil.CheckTransferLeader(re, suite.schedule()[0], operator.OpKind(0), 1, 4)
-	suite.tc.UpdateLeaderCount(4, 30)
-	operatorutil.CheckTransferLeader(re, suite.schedule()[0], operator.OpKind(0), 1, 3)
-}
-
-func (suite *balanceLeaderSchedulerTestSuite) TestBalancePolicy() {
-	re := suite.Require()
-	// Stores:       1    2     3    4
-	// LeaderCount: 20   66     6   20
-	// LeaderSize:  66   20    20    6
-	suite.tc.AddLeaderStore(1, 20, 600*units.MiB)
-	suite.tc.AddLeaderStore(2, 66, 200*units.MiB)
-	suite.tc.AddLeaderStore(3, 6, 20*units.MiB)
-	suite.tc.AddLeaderStore(4, 20, 1*units.MiB)
-	suite.tc.AddLeaderRegion(1, 2, 1, 3, 4)
-	suite.tc.AddLeaderRegion(2, 1, 2, 3, 4)
-	suite.tc.SetLeaderSchedulePolicy("count")
-	operatorutil.CheckTransferLeader(re, suite.schedule()[0], operator.OpKind(0), 2, 3)
-	suite.tc.SetLeaderSchedulePolicy("size")
-	operatorutil.CheckTransferLeader(re, suite.schedule()[0], operator.OpKind(0), 1, 4)
-}
-
-func (suite *balanceLeaderSchedulerTestSuite) TestBalanceSelector() {
-	re := suite.Require()
-	// Stores:     1    2    3    4
-	// Leaders:    1    2    3   16
-	// Region1:    -    F    F    L
-	// Region2:    F    F    L    -
-	suite.tc.AddLeaderStore(1, 1)
-	suite.tc.AddLeaderStore(2, 2)
-	suite.tc.AddLeaderStore(3, 3)
-	suite.tc.AddLeaderStore(4, 16)
-	suite.tc.AddLeaderRegion(1, 4, 2, 3)
-	suite.tc.AddLeaderRegion(2, 3, 1, 2)
-	// store4 has max leader score, store1 has min leader score.
-	// The scheduler try to move a leader out of 16 first.
-	operatorutil.CheckTransferLeader(re, suite.schedule()[0], operator.OpKind(0), 4, 2)
-
-	// Stores:     1    2    3    4
-	// Leaders:    1    14   15   16
-	// Region1:    -    F    F    L
-	// Region2:    F    F    L    -
-	suite.tc.UpdateLeaderCount(2, 14)
-	suite.tc.UpdateLeaderCount(3, 15)
-	// Cannot move leader out of store4, move a leader into store1.
-	operatorutil.CheckTransferLeader(re, suite.schedule()[0], operator.OpKind(0), 3, 1)
-
-	// Stores:     1    2    3    4
-	// Leaders:    1    2    15   16
-	// Region1:    -    F    L    F
-	// Region2:    L    F    F    -
-	suite.tc.AddLeaderStore(2, 2)
-	suite.tc.AddLeaderRegion(1, 3, 2, 4)
-	suite.tc.AddLeaderRegion(2, 1, 2, 3)
-	// No leader in store16, no follower in store1. Now source and target are store3 and store2.
-	operatorutil.CheckTransferLeader(re, suite.schedule()[0], operator.OpKind(0), 3, 2)
-
-	// Stores:     1    2    3    4
-	// Leaders:    9    10   10   11
-	// Region1:    -    F    F    L
-	// Region2:    L    F    F    -
-	for i := uint64(1); i <= 4; i++ {
-		suite.tc.AddLeaderStore(i, 10)
-	}
-	suite.tc.AddLeaderRegion(1, 4, 2, 3)
-	suite.tc.AddLeaderRegion(2, 1, 2, 3)
-	// The cluster is balanced.
-	re.Empty(suite.schedule())
-
-	// store3's leader drops:
-	// Stores:     1    2    3    4
-	// Leaders:    11   13   0    16
-	// Region1:    -    F    F    L
-	// Region2:    L    F    F    -
-	suite.tc.AddLeaderStore(1, 11)
-	suite.tc.AddLeaderStore(2, 13)
-	suite.tc.AddLeaderStore(3, 0)
-	suite.tc.AddLeaderStore(4, 16)
-	operatorutil.CheckTransferLeader(re, suite.schedule()[0], operator.OpKind(0), 4, 3)
-}
-
-type balanceLeaderRangeSchedulerTestSuite struct {
-	suite.Suite
-	cancel context.CancelFunc
-	tc     *mockcluster.Cluster
-	oc     *operator.Controller
-}
-
-func TestBalanceLeaderRangeSchedulerTestSuite(t *testing.T) {
-	suite.Run(t, new(balanceLeaderRangeSchedulerTestSuite))
-}
-
-func (suite *balanceLeaderRangeSchedulerTestSuite) SetupTest() {
-	suite.cancel, _, suite.tc, suite.oc = prepareSchedulersTest()
-}
-
-func (suite *balanceLeaderRangeSchedulerTestSuite) TearDownTest() {
-	suite.cancel()
-}
-
-func (suite *balanceLeaderRangeSchedulerTestSuite) TestSingleRangeBalance() {
-	re := suite.Require()
-	// Stores:     1       2       3       4
-	// Leaders:    10      10      10      10
-	// Weight:     0.5     0.9     1       2
-	// Region1:    L       F       F       F
-	for i := uint64(1); i <= 4; i++ {
-		suite.tc.AddLeaderStore(i, 10)
-	}
-	suite.tc.UpdateStoreLeaderWeight(1, 0.5)
-	suite.tc.UpdateStoreLeaderWeight(2, 0.9)
-	suite.tc.UpdateStoreLeaderWeight(3, 1)
-	suite.tc.UpdateStoreLeaderWeight(4, 2)
-	suite.tc.AddLeaderRegionWithRange(1, "a", "g", 1, 2, 3, 4)
-	lb, err := CreateScheduler(BalanceLeaderType, suite.oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(BalanceLeaderType, []string{"", ""}))
-	re.NoError(err)
-	ops, _ := lb.Schedule(suite.tc, false)
-	re.NotEmpty(ops)
-	re.Len(ops, 1)
-	re.Len(ops[0].Counters, 1)
-	re.Len(ops[0].FinishedCounters, 1)
-	lb, err = CreateScheduler(BalanceLeaderType, suite.oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(BalanceLeaderType, []string{"h", "n"}))
-	re.NoError(err)
-	ops, _ = lb.Schedule(suite.tc, false)
-	re.Empty(ops)
-	lb, err = CreateScheduler(BalanceLeaderType, suite.oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(BalanceLeaderType, []string{"b", "f"}))
-	re.NoError(err)
-	ops, _ = lb.Schedule(suite.tc, false)
-	re.Empty(ops)
-	lb, err = CreateScheduler(BalanceLeaderType, suite.oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(BalanceLeaderType, []string{"", "a"}))
-	re.NoError(err)
-	ops, _ = lb.Schedule(suite.tc, false)
-	re.Empty(ops)
-	lb, err = CreateScheduler(BalanceLeaderType, suite.oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(BalanceLeaderType, []string{"g", ""}))
-	re.NoError(err)
-	ops, _ = lb.Schedule(suite.tc, false)
-	re.Empty(ops)
-	lb, err = CreateScheduler(BalanceLeaderType, suite.oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(BalanceLeaderType, []string{"", "f"}))
-	re.NoError(err)
-	ops, _ = lb.Schedule(suite.tc, false)
-	re.Empty(ops)
-	lb, err = CreateScheduler(BalanceLeaderType, suite.oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(BalanceLeaderType, []string{"b", ""}))
-	re.NoError(err)
-	ops, _ = lb.Schedule(suite.tc, false)
-	re.Empty(ops)
-}
-
-func (suite *balanceLeaderRangeSchedulerTestSuite) TestMultiRangeBalance() {
-	re := suite.Require()
-	// Stores:     1       2       3       4
-	// Leaders:    10      10      10      10
-	// Weight:     0.5     0.9     1       2
-	// Region1:    L       F       F       F
-	for i := uint64(1); i <= 4; i++ {
-		suite.tc.AddLeaderStore(i, 10)
-	}
-	suite.tc.UpdateStoreLeaderWeight(1, 0.5)
-	suite.tc.UpdateStoreLeaderWeight(2, 0.9)
-	suite.tc.UpdateStoreLeaderWeight(3, 1)
-	suite.tc.UpdateStoreLeaderWeight(4, 2)
-	suite.tc.AddLeaderRegionWithRange(1, "a", "g", 1, 2, 3, 4)
-	lb, err := CreateScheduler(BalanceLeaderType, suite.oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(BalanceLeaderType, []string{"", "g", "o", "t"}))
-	re.NoError(err)
-	ops, _ := lb.Schedule(suite.tc, false)
-	re.Equal(uint64(1), ops[0].RegionID())
-	r := suite.tc.GetRegion(1)
-	suite.tc.RemoveRegion(r)
-	suite.tc.RemoveRegionFromSubTree(r)
-	suite.tc.AddLeaderRegionWithRange(2, "p", "r", 1, 2, 3, 4)
-	re.NoError(err)
-	ops, _ = lb.Schedule(suite.tc, false)
-	re.Equal(uint64(2), ops[0].RegionID())
-	r = suite.tc.GetRegion(2)
-	suite.tc.RemoveRegion(r)
-	suite.tc.RemoveRegionFromSubTree(r)
-
-	suite.tc.AddLeaderRegionWithRange(3, "u", "w", 1, 2, 3, 4)
-	re.NoError(err)
-	ops, _ = lb.Schedule(suite.tc, false)
-	re.Empty(ops)
-	r = suite.tc.GetRegion(3)
-	suite.tc.RemoveRegion(r)
-	suite.tc.RemoveRegionFromSubTree(r)
-	suite.tc.AddLeaderRegionWithRange(4, "", "", 1, 2, 3, 4)
-	re.NoError(err)
-	ops, _ = lb.Schedule(suite.tc, false)
-	re.Empty(ops)
-}
-
-func (suite *balanceLeaderRangeSchedulerTestSuite) TestBatchBalance() {
-	re := suite.Require()
-	suite.tc.AddLeaderStore(1, 100)
-	suite.tc.AddLeaderStore(2, 0)
-	suite.tc.AddLeaderStore(3, 0)
-	suite.tc.AddLeaderStore(4, 100)
-	suite.tc.AddLeaderStore(5, 100)
-	suite.tc.AddLeaderStore(6, 0)
-
-	suite.tc.AddLeaderRegionWithRange(uint64(102), "102a", "102z", 1, 2, 3)
-	suite.tc.AddLeaderRegionWithRange(uint64(103), "103a", "103z", 4, 5, 6)
-	lb, err := CreateScheduler(BalanceLeaderType, suite.oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(BalanceLeaderType, []string{"", ""}))
-	re.NoError(err)
-	ops, _ := lb.Schedule(suite.tc, false)
-	re.Len(ops, 2)
-	for i := 1; i <= 50; i++ {
-		suite.tc.AddLeaderRegionWithRange(uint64(i), fmt.Sprintf("%da", i), fmt.Sprintf("%dz", i), 1, 2, 3)
-	}
-	for i := 51; i <= 100; i++ {
-		suite.tc.AddLeaderRegionWithRange(uint64(i), fmt.Sprintf("%da", i), fmt.Sprintf("%dz", i), 4, 5, 6)
-	}
-	suite.tc.AddLeaderRegionWithRange(uint64(101), "101a", "101z", 5, 4, 3)
-	ops, _ = lb.Schedule(suite.tc, false)
-	re.Len(ops, 4)
-	regions := make(map[uint64]struct{})
-	for _, op := range ops {
-		regions[op.RegionID()] = struct{}{}
-	}
-	re.Len(regions, 4)
-}
-
-func (suite *balanceLeaderRangeSchedulerTestSuite) TestReSortStores() {
-	re := suite.Require()
-	suite.tc.AddLeaderStore(1, 104)
-	suite.tc.AddLeaderStore(2, 0)
-	suite.tc.AddLeaderStore(3, 0)
-	suite.tc.AddLeaderStore(4, 100)
-	suite.tc.AddLeaderStore(5, 100)
-	suite.tc.AddLeaderStore(6, 0)
-	stores := suite.tc.Stores.GetStores()
-	sort.Slice(stores, func(i, j int) bool {
-		return stores[i].GetID() < stores[j].GetID()
-	})
-
-	deltaMap := make(map[uint64]int64)
-	getScore := func(store *core.StoreInfo) float64 {
-		return store.LeaderScore(0, deltaMap[store.GetID()])
-	}
-	candidateStores := make([]*core.StoreInfo, 0)
-	// order by score desc.
-	cs := newCandidateStores(append(candidateStores, stores...), false, getScore)
-	// in candidate,the order stores:1(104),5(100),4(100),6,3,2
-	// store 4 should in pos 2
-	re.Equal(2, cs.binarySearch(stores[3]))
-
-	// store 1 should in pos 0
-	store1 := stores[0]
-	re.Zero(cs.binarySearch(store1))
-	deltaMap[store1.GetID()] = -1 // store 1
-	cs.resortStoreWithPos(0)
-	// store 1 should still in pos 0.
-	re.Equal(uint64(1), cs.stores[0].GetID())
-	curIndex := cs.binarySearch(store1)
-	re.Zero(curIndex)
-	deltaMap[1] = -4
-	// store 1 update the scores to 104-4=100
-	// the order stores should be:5(100),4(100),1(100),6,3,2
-	cs.resortStoreWithPos(curIndex)
-	re.Equal(uint64(1), cs.stores[2].GetID())
-	re.Equal(2, cs.binarySearch(store1))
-	// the top store is : 5(100)
-	topStore := cs.stores[0]
-	topStorePos := cs.binarySearch(topStore)
-	deltaMap[topStore.GetID()] = -1
-	cs.resortStoreWithPos(topStorePos)
-
-	// after recorder, the order stores should be: 4(100),1(100),5(99),6,3,2
-	re.Equal(uint64(1), cs.stores[1].GetID())
-	re.Equal(1, cs.binarySearch(store1))
-	re.Equal(topStore.GetID(), cs.stores[2].GetID())
-	re.Equal(2, cs.binarySearch(topStore))
-
-	bottomStore := cs.stores[5]
-	deltaMap[bottomStore.GetID()] = 4
-	cs.resortStoreWithPos(5)
-
-	// the order stores should be: 4(100),1(100),5(99),2(5),6,3
-	re.Equal(bottomStore.GetID(), cs.stores[3].GetID())
-	re.Equal(3, cs.binarySearch(bottomStore))
-}
-
 func TestBalanceRegionSchedule1(t *testing.T) {
 	re := require.New(t)
 	checkBalanceRegionSchedule1(re, false /* disable placement rules */)
@@ -761,7 +230,7 @@ func checkBalanceRegionSchedule1(re *require.Assertions, enablePlacementRules bo
 	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 	tc.SetEnablePlacementRules(enablePlacementRules)
 	tc.SetMaxReplicasWithLabel(enablePlacementRules, 1)
-	sb, err := CreateScheduler(BalanceRegionType, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(BalanceRegionType, []string{"", ""}))
+	sb, err := CreateScheduler(types.BalanceRegionScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.BalanceRegionScheduler, []string{"", ""}))
 	re.NoError(err)
 	// Add stores 1,2,3,4.
 	tc.AddRegionStore(1, 6)
@@ -816,7 +285,7 @@ func checkReplica3(re *require.Assertions, enablePlacementRules bool) {
 	tc.SetEnablePlacementRules(enablePlacementRules)
 	tc.SetMaxReplicasWithLabel(enablePlacementRules, 3)
 
-	sb, err := CreateScheduler(BalanceRegionType, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(BalanceRegionType, []string{"", ""}))
+	sb, err := CreateScheduler(types.BalanceRegionScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.BalanceRegionScheduler, []string{"", ""}))
 	re.NoError(err)
 	// Store 1 has the largest region score, so the balance scheduler tries to replace peer in store 1.
 	tc.AddLabelsStore(1, 16, map[string]string{"zone": "z1", "rack": "r1", "host": "h1"})
@@ -890,7 +359,7 @@ func checkReplica5(re *require.Assertions, enablePlacementRules bool) {
 	tc.SetEnablePlacementRules(enablePlacementRules)
 	tc.SetMaxReplicasWithLabel(enablePlacementRules, 5)
 
-	sb, err := CreateScheduler(BalanceRegionType, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(BalanceRegionType, []string{"", ""}))
+	sb, err := CreateScheduler(types.BalanceRegionScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.BalanceRegionScheduler, []string{"", ""}))
 	re.NoError(err)
 	tc.AddLabelsStore(1, 4, map[string]string{"zone": "z1", "rack": "r1", "host": "h1"})
 	tc.AddLabelsStore(2, 5, map[string]string{"zone": "z2", "rack": "r1", "host": "h1"})
@@ -991,7 +460,7 @@ func checkBalanceRegionSchedule2(re *require.Assertions, enablePlacementRules bo
 		core.SetApproximateKeys(200),
 	)
 
-	sb, err := CreateScheduler(BalanceRegionType, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(BalanceRegionType, []string{"", ""}))
+	sb, err := CreateScheduler(types.BalanceRegionScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.BalanceRegionScheduler, []string{"", ""}))
 	re.NoError(err)
 
 	tc.AddRegionStore(1, 11)
@@ -1047,7 +516,7 @@ func checkBalanceRegionStoreWeight(re *require.Assertions, enablePlacementRules 
 	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 	tc.SetEnablePlacementRules(enablePlacementRules)
 	tc.SetMaxReplicasWithLabel(enablePlacementRules, 1)
-	sb, err := CreateScheduler(BalanceRegionType, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(BalanceRegionType, []string{"", ""}))
+	sb, err := CreateScheduler(types.BalanceRegionScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.BalanceRegionScheduler, []string{"", ""}))
 	re.NoError(err)
 
 	tc.AddRegionStore(1, 10)
@@ -1082,7 +551,7 @@ func checkBalanceRegionOpInfluence(re *require.Assertions, enablePlacementRules 
 	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 	tc.SetEnablePlacementRules(enablePlacementRules)
 	tc.SetMaxReplicasWithLabel(enablePlacementRules, 1)
-	sb, err := CreateScheduler(BalanceRegionType, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(BalanceRegionType, []string{"", ""}))
+	sb, err := CreateScheduler(types.BalanceRegionScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.BalanceRegionScheduler, []string{"", ""}))
 	re.NoError(err)
 	// Add stores 1,2,3,4.
 	tc.AddRegionStoreWithLeader(1, 2)
@@ -1118,7 +587,7 @@ func checkReplacePendingRegion(re *require.Assertions, enablePlacementRules bool
 	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 	tc.SetEnablePlacementRules(enablePlacementRules)
 	tc.SetMaxReplicasWithLabel(enablePlacementRules, 3)
-	sb, err := CreateScheduler(BalanceRegionType, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(BalanceRegionType, []string{"", ""}))
+	sb, err := CreateScheduler(types.BalanceRegionScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.BalanceRegionScheduler, []string{"", ""}))
 	re.NoError(err)
 	// Store 1 has the largest region score, so the balance scheduler try to replace peer in store 1.
 	tc.AddLabelsStore(1, 16, map[string]string{"zone": "z1", "rack": "r1", "host": "h1"})
@@ -1148,7 +617,7 @@ func TestBalanceRegionShouldNotBalance(t *testing.T) {
 	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
 	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
-	sb, err := CreateScheduler(BalanceRegionType, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(BalanceRegionType, []string{"", ""}))
+	sb, err := CreateScheduler(types.BalanceRegionScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.BalanceRegionScheduler, []string{"", ""}))
 	re.NoError(err)
 	region := tc.MockRegionInfo(1, 0, []uint64{2, 3, 4}, nil, nil)
 	tc.PutRegion(region)
@@ -1161,7 +630,7 @@ func TestBalanceRegionEmptyRegion(t *testing.T) {
 	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
 	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
-	sb, err := CreateScheduler(BalanceRegionType, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(BalanceRegionType, []string{"", ""}))
+	sb, err := CreateScheduler(types.BalanceRegionScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.BalanceRegionScheduler, []string{"", ""}))
 	re.NoError(err)
 	tc.AddRegionStore(1, 10)
 	tc.AddRegionStore(2, 9)
@@ -1193,201 +662,11 @@ func TestBalanceRegionEmptyRegion(t *testing.T) {
 	re.Empty(operators)
 }
 
-func TestRandomMergeSchedule(t *testing.T) {
-	re := require.New(t)
-	checkRandomMergeSchedule(re, false /* disable placement rules */)
-	checkRandomMergeSchedule(re, true /* enable placement rules */)
-}
-
-func checkRandomMergeSchedule(re *require.Assertions, enablePlacementRules bool) {
-	cancel, _, tc, oc := prepareSchedulersTest(true /* need to run stream*/)
-	defer cancel()
-	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
-	tc.SetEnablePlacementRules(enablePlacementRules)
-	tc.SetMaxReplicasWithLabel(enablePlacementRules, 3)
-	tc.SetMergeScheduleLimit(1)
-
-	mb, err := CreateScheduler(RandomMergeType, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(RandomMergeType, []string{"", ""}))
-	re.NoError(err)
-
-	tc.AddRegionStore(1, 4)
-	tc.AddLeaderRegion(1, 1)
-	tc.AddLeaderRegion(2, 1)
-	tc.AddLeaderRegion(3, 1)
-	tc.AddLeaderRegion(4, 1)
-
-	re.True(mb.IsScheduleAllowed(tc))
-	ops, _ := mb.Schedule(tc, false)
-	re.Empty(ops) // regions are not fully replicated
-
-	tc.SetMaxReplicasWithLabel(enablePlacementRules, 1)
-	ops, _ = mb.Schedule(tc, false)
-	re.Len(ops, 2)
-	re.NotZero(ops[0].Kind() & operator.OpMerge)
-	re.NotZero(ops[1].Kind() & operator.OpMerge)
-
-	oc.AddWaitingOperator(ops...)
-	re.False(mb.IsScheduleAllowed(tc))
-}
-
-func TestScatterRangeBalance(t *testing.T) {
-	re := require.New(t)
-	checkScatterRangeBalance(re, false /* disable placement rules */)
-	checkScatterRangeBalance(re, true /* enable placement rules */)
-}
-
-func checkScatterRangeBalance(re *require.Assertions, enablePlacementRules bool) {
-	cancel, _, tc, oc := prepareSchedulersTest()
-	defer cancel()
-	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
-	tc.SetEnablePlacementRules(enablePlacementRules)
-	tc.SetMaxReplicasWithLabel(enablePlacementRules, 3)
-	// range cluster use a special tolerant ratio, cluster opt take no impact
-	tc.SetTolerantSizeRatio(10000)
-	// Add stores 1,2,3,4,5.
-	tc.AddRegionStore(1, 0)
-	tc.AddRegionStore(2, 0)
-	tc.AddRegionStore(3, 0)
-	tc.AddRegionStore(4, 0)
-	tc.AddRegionStore(5, 0)
-	var (
-		id      uint64
-		regions []*metapb.Region
-	)
-	for i := 0; i < 50; i++ {
-		peers := []*metapb.Peer{
-			{Id: id + 1, StoreId: 1},
-			{Id: id + 2, StoreId: 2},
-			{Id: id + 3, StoreId: 3},
-		}
-		regions = append(regions, &metapb.Region{
-			Id:       id + 4,
-			Peers:    peers,
-			StartKey: []byte(fmt.Sprintf("s_%02d", i)),
-			EndKey:   []byte(fmt.Sprintf("s_%02d", i+1)),
-		})
-		id += 4
-	}
-	// empty region case
-	regions[49].EndKey = []byte("")
-	for _, meta := range regions {
-		leader := rand.Intn(4) % 3
-		regionInfo := core.NewRegionInfo(
-			meta,
-			meta.Peers[leader],
-			core.SetApproximateKeys(1),
-			core.SetApproximateSize(1),
-		)
-		origin, overlaps, rangeChanged := tc.SetRegion(regionInfo)
-		tc.UpdateSubTree(regionInfo, origin, overlaps, rangeChanged)
-	}
-	for i := 0; i < 100; i++ {
-		_, err := tc.AllocPeer(1)
-		re.NoError(err)
-	}
-	for i := 1; i <= 5; i++ {
-		tc.UpdateStoreStatus(uint64(i))
-	}
-
-	hb, err := CreateScheduler(ScatterRangeType, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(ScatterRangeType, []string{"s_00", "s_50", "t"}))
-	re.NoError(err)
-
-	scheduleAndApplyOperator(tc, hb, 100)
-	for i := 1; i <= 5; i++ {
-		leaderCount := tc.GetStoreLeaderCount(uint64(i))
-		re.LessOrEqual(leaderCount, 12)
-		regionCount = tc.GetStoreRegionCount(uint64(i))
-		re.LessOrEqual(regionCount, 32)
-	}
-}
-
-func TestBalanceLeaderLimit(t *testing.T) {
-	re := require.New(t)
-	checkBalanceLeaderLimit(re, false /* disable placement rules */)
-	checkBalanceLeaderLimit(re, true /* enable placement rules */)
-}
-
-func checkBalanceLeaderLimit(re *require.Assertions, enablePlacementRules bool) {
-	cancel, _, tc, oc := prepareSchedulersTest()
-	defer cancel()
-	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
-	tc.SetEnablePlacementRules(enablePlacementRules)
-	tc.SetMaxReplicasWithLabel(enablePlacementRules, 3)
-	tc.SetTolerantSizeRatio(2.5)
-	// Add stores 1,2,3,4,5.
-	tc.AddRegionStore(1, 0)
-	tc.AddRegionStore(2, 0)
-	tc.AddRegionStore(3, 0)
-	tc.AddRegionStore(4, 0)
-	tc.AddRegionStore(5, 0)
-	var (
-		id      uint64
-		regions []*metapb.Region
-	)
-	for i := 0; i < 50; i++ {
-		peers := []*metapb.Peer{
-			{Id: id + 1, StoreId: 1},
-			{Id: id + 2, StoreId: 2},
-			{Id: id + 3, StoreId: 3},
-		}
-		regions = append(regions, &metapb.Region{
-			Id:       id + 4,
-			Peers:    peers,
-			StartKey: []byte(fmt.Sprintf("s_%02d", i)),
-			EndKey:   []byte(fmt.Sprintf("s_%02d", i+1)),
-		})
-		id += 4
-	}
-
-	regions[49].EndKey = []byte("")
-	for _, meta := range regions {
-		leader := rand.Intn(4) % 3
-		regionInfo := core.NewRegionInfo(
-			meta,
-			meta.Peers[leader],
-			core.SetApproximateKeys(96),
-			core.SetApproximateSize(96),
-		)
-
-		origin, overlaps, rangeChanged := tc.SetRegion(regionInfo)
-		tc.UpdateSubTree(regionInfo, origin, overlaps, rangeChanged)
-	}
-
-	for i := 0; i < 100; i++ {
-		_, err := tc.AllocPeer(1)
-		re.NoError(err)
-	}
-	for i := 1; i <= 5; i++ {
-		tc.UpdateStoreStatus(uint64(i))
-	}
-
-	// test not allow schedule leader
-	tc.SetLeaderScheduleLimit(0)
-	hb, err := CreateScheduler(ScatterRangeType, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(ScatterRangeType, []string{"s_00", "s_50", "t"}))
-	re.NoError(err)
-
-	scheduleAndApplyOperator(tc, hb, 100)
-	maxLeaderCount := 0
-	minLeaderCount := 99
-	for i := 1; i <= 5; i++ {
-		leaderCount := tc.GetStoreLeaderCount(uint64(i))
-		if leaderCount < minLeaderCount {
-			minLeaderCount = leaderCount
-		}
-		if leaderCount > maxLeaderCount {
-			maxLeaderCount = leaderCount
-		}
-		regionCount = tc.GetStoreRegionCount(uint64(i))
-		re.LessOrEqual(regionCount, 32)
-	}
-	re.Greater(maxLeaderCount-minLeaderCount, 10)
-}
-
 func TestConcurrencyUpdateConfig(t *testing.T) {
 	re := require.New(t)
 	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
-	hb, err := CreateScheduler(ScatterRangeType, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(ScatterRangeType, []string{"s_00", "s_50", "t"}))
+	hb, err := CreateScheduler(types.ScatterRangeScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.ScatterRangeScheduler, []string{"s_00", "s_50", "t"}))
 	sche := hb.(*scatterRangeScheduler)
 	re.NoError(err)
 	ch := make(chan struct{})
@@ -1399,8 +678,8 @@ func TestConcurrencyUpdateConfig(t *testing.T) {
 				return
 			default:
 			}
-			sche.config.BuildWithArgs(args)
-			re.NoError(sche.config.Persist())
+			sche.config.buildWithArgs(args)
+			re.NoError(sche.config.persist())
 		}
 	}()
 	for i := 0; i < 1000; i++ {
@@ -1460,7 +739,7 @@ func TestBalanceWhenRegionNotHeartbeat(t *testing.T) {
 		tc.UpdateStoreStatus(uint64(i))
 	}
 
-	hb, err := CreateScheduler(ScatterRangeType, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(ScatterRangeType, []string{"s_00", "s_09", "t"}))
+	hb, err := CreateScheduler(types.ScatterRangeScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.ScatterRangeScheduler, []string{"s_00", "s_09", "t"}))
 	re.NoError(err)
 
 	scheduleAndApplyOperator(tc, hb, 100)

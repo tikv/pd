@@ -20,7 +20,9 @@ import (
 
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/storage/kv"
-	"go.etcd.io/etcd/clientv3"
+	"github.com/tikv/pd/pkg/utils/keypath"
+	"github.com/tikv/pd/pkg/utils/typeutil"
+	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
 // UserKind represents the user kind.
@@ -78,6 +80,14 @@ func IsUserKindValid(kind string) bool {
 type KeyspaceGroupMember struct {
 	Address  string `json:"address"`
 	Priority int    `json:"priority"`
+}
+
+// IsAddressEquivalent compares the address with the given address.
+// It compares the address without the scheme.
+// Otherwise, it will not work when we update the scheme from http to https.
+// Issue: https://github.com/tikv/pd/issues/8284
+func (m *KeyspaceGroupMember) IsAddressEquivalent(addr string) bool {
+	return typeutil.EqualBaseURLs(m.Address, addr)
 }
 
 // SplitState defines the split state of a keyspace group.
@@ -164,7 +174,7 @@ var _ KeyspaceGroupStorage = (*StorageEndpoint)(nil)
 
 // LoadKeyspaceGroup loads the keyspace group by ID.
 func (*StorageEndpoint) LoadKeyspaceGroup(txn kv.Txn, id uint32) (*KeyspaceGroup, error) {
-	value, err := txn.Load(KeyspaceGroupIDPath(id))
+	value, err := txn.Load(keypath.KeyspaceGroupIDPath(id))
 	if err != nil || value == "" {
 		return nil, err
 	}
@@ -177,19 +187,19 @@ func (*StorageEndpoint) LoadKeyspaceGroup(txn kv.Txn, id uint32) (*KeyspaceGroup
 
 // SaveKeyspaceGroup saves the keyspace group.
 func (*StorageEndpoint) SaveKeyspaceGroup(txn kv.Txn, kg *KeyspaceGroup) error {
-	return saveJSONInTxn(txn, KeyspaceGroupIDPath(kg.ID), kg)
+	return saveJSONInTxn(txn, keypath.KeyspaceGroupIDPath(kg.ID), kg)
 }
 
 // DeleteKeyspaceGroup deletes the keyspace group.
 func (*StorageEndpoint) DeleteKeyspaceGroup(txn kv.Txn, id uint32) error {
-	return txn.Remove(KeyspaceGroupIDPath(id))
+	return txn.Remove(keypath.KeyspaceGroupIDPath(id))
 }
 
 // LoadKeyspaceGroups loads keyspace groups from the start ID with limit.
 // If limit is 0, it will load all keyspace groups from the start ID.
 func (se *StorageEndpoint) LoadKeyspaceGroups(startID uint32, limit int) ([]*KeyspaceGroup, error) {
-	prefix := KeyspaceGroupIDPath(startID)
-	prefixEnd := clientv3.GetPrefixRangeEnd(KeyspaceGroupIDPrefix())
+	prefix := keypath.KeyspaceGroupIDPath(startID)
+	prefixEnd := clientv3.GetPrefixRangeEnd(keypath.KeyspaceGroupIDPrefix())
 	keys, values, err := se.LoadRange(prefix, prefixEnd, limit)
 	if err != nil {
 		return nil, err

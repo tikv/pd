@@ -170,8 +170,8 @@ func CreateSplitRegionOperator(desc string, region *core.RegionInfo, kind OpKind
 		brief += fmt.Sprintf(" and keys %v", hexKeys)
 	}
 	op := NewOperator(desc, brief, region.GetID(), region.GetRegionEpoch(), kind|OpSplit, region.GetApproximateSize(), step)
-	op.AdditionalInfos["region-start-key"] = core.HexRegionKeyStr(logutil.RedactBytes(region.GetStartKey()))
-	op.AdditionalInfos["region-end-key"] = core.HexRegionKeyStr(logutil.RedactBytes(region.GetEndKey()))
+	op.SetAdditionalInfo("region-start-key", core.HexRegionKeyStr(logutil.RedactBytes(region.GetStartKey())))
+	op.SetAdditionalInfo("region-end-key", core.HexRegionKeyStr(logutil.RedactBytes(region.GetEndKey())))
 	return op, nil
 }
 
@@ -285,9 +285,9 @@ func CreateLeaveJointStateOperator(desc string, ci sche.SharedCluster, origin *c
 	for _, o := range b.originPeers {
 		switch o.GetRole() {
 		case metapb.PeerRole_IncomingVoter:
-			b.toPromote.Set(o)
+			b.toPromote.set(o)
 		case metapb.PeerRole_DemotingVoter:
-			b.toDemote.Set(o)
+			b.toDemote.set(o)
 		}
 	}
 
@@ -298,7 +298,7 @@ func CreateLeaveJointStateOperator(desc string, ci sche.SharedCluster, origin *c
 		b.targetLeaderStoreID = b.originLeaderStoreID
 	}
 
-	b.currentPeers, b.currentLeaderStoreID = b.originPeers.Copy(), b.originLeaderStoreID
+	b.currentPeers, b.currentLeaderStoreID = b.originPeers.copy(), b.originLeaderStoreID
 	b.peerAddStep = make(map[uint64]int)
 	brief := b.brief()
 

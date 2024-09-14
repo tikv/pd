@@ -25,6 +25,7 @@ import (
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/client/grpcutil"
+	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/tests"
@@ -43,11 +44,13 @@ func TestResourceManagerServer(t *testing.T) {
 	re.NoError(err)
 
 	leaderName := cluster.WaitLeader()
+	re.NotEmpty(leaderName)
 	leader := cluster.GetServer(leaderName)
 
 	s, cleanup := tests.StartSingleResourceManagerTestServer(ctx, re, leader.GetAddr(), tempurl.Alloc())
 	addr := s.GetAddr()
 	defer cleanup()
+	tests.WaitForPrimaryServing(re, map[string]bs.Server{addr: s})
 
 	// Test registered GRPC Service
 	cc, err := grpcutil.GetClientConn(ctx, addr, nil)
@@ -63,7 +66,7 @@ func TestResourceManagerServer(t *testing.T) {
 	// Test registered REST HTTP Handler
 	url := addr + "/resource-manager/api/v1/config"
 	{
-		resp, err := http.Get(url + "/groups")
+		resp, err := tests.TestDialClient.Get(url + "/groups")
 		re.NoError(err)
 		defer resp.Body.Close()
 		re.Equal(http.StatusOK, resp.StatusCode)
@@ -78,13 +81,13 @@ func TestResourceManagerServer(t *testing.T) {
 		}
 		createJSON, err := json.Marshal(group)
 		re.NoError(err)
-		resp, err := http.Post(url+"/group", "application/json", strings.NewReader(string(createJSON)))
+		resp, err := tests.TestDialClient.Post(url+"/group", "application/json", strings.NewReader(string(createJSON)))
 		re.NoError(err)
 		defer resp.Body.Close()
 		re.Equal(http.StatusOK, resp.StatusCode)
 	}
 	{
-		resp, err := http.Get(url + "/group/pingcap")
+		resp, err := tests.TestDialClient.Get(url + "/group/pingcap")
 		re.NoError(err)
 		defer resp.Body.Close()
 		re.Equal(http.StatusOK, resp.StatusCode)
@@ -95,7 +98,7 @@ func TestResourceManagerServer(t *testing.T) {
 
 	// Test metrics handler
 	{
-		resp, err := http.Get(addr + "/metrics")
+		resp, err := tests.TestDialClient.Get(addr + "/metrics")
 		re.NoError(err)
 		defer resp.Body.Close()
 		re.Equal(http.StatusOK, resp.StatusCode)
@@ -106,7 +109,7 @@ func TestResourceManagerServer(t *testing.T) {
 
 	// Test status handler
 	{
-		resp, err := http.Get(addr + "/status")
+		resp, err := tests.TestDialClient.Get(addr + "/status")
 		re.NoError(err)
 		defer resp.Body.Close()
 		re.Equal(http.StatusOK, resp.StatusCode)

@@ -94,6 +94,7 @@ func NewTSOServiceCommand() *cobra.Command {
 		Short: "Run the TSO service",
 		Run:   tso.CreateServerWrapper,
 	}
+	cmd.Flags().StringP("name", "", "", "human-readable name for this tso member")
 	cmd.Flags().BoolP("version", "V", false, "print version information and exit")
 	cmd.Flags().StringP("config", "", "", "config file")
 	cmd.Flags().StringP("backend-endpoints", "", "", "url for etcd client")
@@ -102,7 +103,7 @@ func NewTSOServiceCommand() *cobra.Command {
 	cmd.Flags().StringP("cacert", "", "", "path of file that contains list of trusted TLS CAs")
 	cmd.Flags().StringP("cert", "", "", "path of file that contains X509 certificate in PEM format")
 	cmd.Flags().StringP("key", "", "", "path of file that contains X509 key in PEM format")
-	cmd.Flags().StringP("log-level", "L", "info", "log level: debug, info, warn, error, fatal (default 'info')")
+	cmd.Flags().StringP("log-level", "L", "", "log level: debug, info, warn, error, fatal (default 'info')")
 	cmd.Flags().StringP("log-file", "", "", "log file path")
 	return cmd
 }
@@ -114,6 +115,7 @@ func NewSchedulingServiceCommand() *cobra.Command {
 		Short: "Run the scheduling service",
 		Run:   scheduling.CreateServerWrapper,
 	}
+	cmd.Flags().StringP("name", "", "", "human-readable name for this scheduling member")
 	cmd.Flags().BoolP("version", "V", false, "print version information and exit")
 	cmd.Flags().StringP("config", "", "", "config file")
 	cmd.Flags().StringP("backend-endpoints", "", "", "url for etcd client")
@@ -122,7 +124,7 @@ func NewSchedulingServiceCommand() *cobra.Command {
 	cmd.Flags().StringP("cacert", "", "", "path of file that contains list of trusted TLS CAs")
 	cmd.Flags().StringP("cert", "", "", "path of file that contains X509 certificate in PEM format")
 	cmd.Flags().StringP("key", "", "", "path of file that contains X509 key in PEM format")
-	cmd.Flags().StringP("log-level", "L", "info", "log level: debug, info, warn, error, fatal (default 'info')")
+	cmd.Flags().StringP("log-level", "L", "", "log level: debug, info, warn, error, fatal (default 'info')")
 	cmd.Flags().StringP("log-file", "", "", "log file path")
 	return cmd
 }
@@ -134,6 +136,7 @@ func NewResourceManagerServiceCommand() *cobra.Command {
 		Short: "Run the resource manager service",
 		Run:   resource_manager.CreateServerWrapper,
 	}
+	cmd.Flags().StringP("name", "", "", "human-readable name for this resource manager member")
 	cmd.Flags().BoolP("version", "V", false, "print version information and exit")
 	cmd.Flags().StringP("config", "", "", "config file")
 	cmd.Flags().StringP("backend-endpoints", "", "", "url for etcd client")
@@ -142,7 +145,7 @@ func NewResourceManagerServiceCommand() *cobra.Command {
 	cmd.Flags().StringP("cacert", "", "", "path of file that contains list of trusted TLS CAs")
 	cmd.Flags().StringP("cert", "", "", "path of file that contains X509 certificate in PEM format")
 	cmd.Flags().StringP("key", "", "", "path of file that contains X509 key in PEM format")
-	cmd.Flags().StringP("log-level", "L", "info", "log level: debug, info, warn, error, fatal (default 'info')")
+	cmd.Flags().StringP("log-level", "L", "", "log level: debug, info, warn, error, fatal (default 'info')")
 	cmd.Flags().StringP("log-file", "", "", "log file path")
 	return cmd
 }
@@ -171,7 +174,7 @@ func addFlags(cmd *cobra.Command) {
 	cmd.Flags().StringP("initial-cluster", "", "", "initial cluster configuration for bootstrapping, e,g. pd=http://127.0.0.1:2380")
 	cmd.Flags().StringP("join", "", "", "join to an existing cluster (usage: cluster's '${advertise-client-urls}'")
 	cmd.Flags().StringP("metrics-addr", "", "", "prometheus pushgateway address, leaves it empty will disable prometheus push")
-	cmd.Flags().StringP("log-level", "L", "info", "log level: debug, info, warn, error, fatal (default 'info')")
+	cmd.Flags().StringP("log-level", "L", "", "log level: debug, info, warn, error, fatal (default 'info')")
 	cmd.Flags().StringP("log-file", "", "", "log file path")
 	cmd.Flags().StringP("cacert", "", "", "path of file that contains list of trusted TLS CAs")
 	cmd.Flags().StringP("cert", "", "", "path of file that contains X509 certificate in PEM format")
@@ -196,8 +199,12 @@ func start(cmd *cobra.Command, args []string, services ...string) {
 	schedulers.Register()
 	cfg := config.NewConfig()
 	flagSet := cmd.Flags()
-	flagSet.Parse(args)
-	err := cfg.Parse(flagSet)
+	err := flagSet.Parse(args)
+	if err != nil {
+		cmd.Println(err)
+		return
+	}
+	err = cfg.Parse(flagSet)
 	defer logutil.LogPanic()
 
 	if err != nil {

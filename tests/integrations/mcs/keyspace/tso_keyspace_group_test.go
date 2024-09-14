@@ -28,7 +28,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	bs "github.com/tikv/pd/pkg/basicserver"
-	"github.com/tikv/pd/pkg/mcs/utils"
+	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/testutil"
@@ -47,7 +47,6 @@ type keyspaceGroupTestSuite struct {
 	cluster          *tests.TestCluster
 	server           *tests.TestServer
 	backendEndpoints string
-	dialClient       *http.Client
 }
 
 func TestKeyspaceGroupTestSuite(t *testing.T) {
@@ -67,11 +66,6 @@ func (suite *keyspaceGroupTestSuite) SetupTest() {
 	suite.server = cluster.GetLeaderServer()
 	re.NoError(suite.server.BootstrapCluster())
 	suite.backendEndpoints = suite.server.GetAddr()
-	suite.dialClient = &http.Client{
-		Transport: &http.Transport{
-			DisableKeepAlives: true,
-		},
-	}
 	suite.cleanupFunc = func() {
 		cancel()
 	}
@@ -81,7 +75,6 @@ func (suite *keyspaceGroupTestSuite) TearDownTest() {
 	re := suite.Require()
 	suite.cleanupFunc()
 	suite.cluster.Destroy()
-	suite.dialClient.CloseIdleConnections()
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/acceleratedAllocNodes"))
 }
 
@@ -95,7 +88,7 @@ func (suite *keyspaceGroupTestSuite) TestAllocNodesUpdate() {
 			cleanup()
 		}
 	}()
-	for i := 0; i < utils.DefaultKeyspaceGroupReplicaCount+1; i++ {
+	for i := 0; i < constant.DefaultKeyspaceGroupReplicaCount+1; i++ {
 		s, cleanup := tests.StartSingleTSOTestServer(suite.ctx, re, suite.backendEndpoints, tempurl.Alloc())
 		cleanups = append(cleanups, cleanup)
 		nodes[s.GetAddr()] = s
@@ -115,11 +108,11 @@ func (suite *keyspaceGroupTestSuite) TestAllocNodesUpdate() {
 	// alloc nodes for the keyspace group.
 	id := 1
 	params := &handlers.AllocNodesForKeyspaceGroupParams{
-		Replica: utils.DefaultKeyspaceGroupReplicaCount,
+		Replica: constant.DefaultKeyspaceGroupReplicaCount,
 	}
 	got, code := suite.tryAllocNodesForKeyspaceGroup(re, id, params)
 	re.Equal(http.StatusOK, code)
-	re.Len(got, utils.DefaultKeyspaceGroupReplicaCount)
+	re.Len(got, constant.DefaultKeyspaceGroupReplicaCount)
 	oldMembers := make(map[string]struct{})
 	for _, member := range got {
 		re.Contains(nodes, member.Address)
@@ -127,7 +120,7 @@ func (suite *keyspaceGroupTestSuite) TestAllocNodesUpdate() {
 	}
 
 	// alloc node update to 3.
-	params.Replica = utils.DefaultKeyspaceGroupReplicaCount + 1
+	params.Replica = constant.DefaultKeyspaceGroupReplicaCount + 1
 	got, code = suite.tryAllocNodesForKeyspaceGroup(re, id, params)
 	re.Equal(http.StatusOK, code)
 	re.Len(got, params.Replica)
@@ -151,7 +144,7 @@ func (suite *keyspaceGroupTestSuite) TestAllocReplica() {
 			cleanup()
 		}
 	}()
-	for i := 0; i < utils.DefaultKeyspaceGroupReplicaCount; i++ {
+	for i := 0; i < constant.DefaultKeyspaceGroupReplicaCount; i++ {
 		s, cleanup := tests.StartSingleTSOTestServer(suite.ctx, re, suite.backendEndpoints, tempurl.Alloc())
 		cleanups = append(cleanups, cleanup)
 		nodes[s.GetAddr()] = s
@@ -167,14 +160,14 @@ func (suite *keyspaceGroupTestSuite) TestAllocReplica() {
 
 	// replica is less than default replica.
 	params = &handlers.AllocNodesForKeyspaceGroupParams{
-		Replica: utils.DefaultKeyspaceGroupReplicaCount - 1,
+		Replica: constant.DefaultKeyspaceGroupReplicaCount - 1,
 	}
 	_, code = suite.tryAllocNodesForKeyspaceGroup(re, id, params)
 	re.Equal(http.StatusBadRequest, code)
 
 	// there is no any keyspace group.
 	params = &handlers.AllocNodesForKeyspaceGroupParams{
-		Replica: utils.DefaultKeyspaceGroupReplicaCount,
+		Replica: constant.DefaultKeyspaceGroupReplicaCount,
 	}
 	_, code = suite.tryAllocNodesForKeyspaceGroup(re, id, params)
 	re.Equal(http.StatusBadRequest, code)
@@ -189,7 +182,7 @@ func (suite *keyspaceGroupTestSuite) TestAllocReplica() {
 	code = suite.tryCreateKeyspaceGroup(re, kgs)
 	re.Equal(http.StatusOK, code)
 	params = &handlers.AllocNodesForKeyspaceGroupParams{
-		Replica: utils.DefaultKeyspaceGroupReplicaCount,
+		Replica: constant.DefaultKeyspaceGroupReplicaCount,
 	}
 	got, code = suite.tryAllocNodesForKeyspaceGroup(re, id, params)
 	re.Equal(http.StatusOK, code)
@@ -199,7 +192,7 @@ func (suite *keyspaceGroupTestSuite) TestAllocReplica() {
 
 	// the keyspace group is exist, but the replica is more than the num of nodes.
 	params = &handlers.AllocNodesForKeyspaceGroupParams{
-		Replica: utils.DefaultKeyspaceGroupReplicaCount + 1,
+		Replica: constant.DefaultKeyspaceGroupReplicaCount + 1,
 	}
 	_, code = suite.tryAllocNodesForKeyspaceGroup(re, id, params)
 	re.Equal(http.StatusBadRequest, code)
@@ -210,7 +203,7 @@ func (suite *keyspaceGroupTestSuite) TestAllocReplica() {
 	nodes[s2.GetAddr()] = s2
 	tests.WaitForPrimaryServing(re, nodes)
 	params = &handlers.AllocNodesForKeyspaceGroupParams{
-		Replica: utils.DefaultKeyspaceGroupReplicaCount + 1,
+		Replica: constant.DefaultKeyspaceGroupReplicaCount + 1,
 	}
 	got, code = suite.tryAllocNodesForKeyspaceGroup(re, id, params)
 	re.Equal(http.StatusOK, code)
@@ -220,14 +213,14 @@ func (suite *keyspaceGroupTestSuite) TestAllocReplica() {
 
 	// the keyspace group is exist, the new replica is equal to the old replica.
 	params = &handlers.AllocNodesForKeyspaceGroupParams{
-		Replica: utils.DefaultKeyspaceGroupReplicaCount + 1,
+		Replica: constant.DefaultKeyspaceGroupReplicaCount + 1,
 	}
 	_, code = suite.tryAllocNodesForKeyspaceGroup(re, id, params)
 	re.Equal(http.StatusBadRequest, code)
 
 	// the keyspace group is exist, the new replica is less than the old replica.
 	params = &handlers.AllocNodesForKeyspaceGroupParams{
-		Replica: utils.DefaultKeyspaceGroupReplicaCount,
+		Replica: constant.DefaultKeyspaceGroupReplicaCount,
 	}
 	_, code = suite.tryAllocNodesForKeyspaceGroup(re, id, params)
 	re.Equal(http.StatusBadRequest, code)
@@ -235,7 +228,7 @@ func (suite *keyspaceGroupTestSuite) TestAllocReplica() {
 	// the keyspace group is not exist.
 	id = 2
 	params = &handlers.AllocNodesForKeyspaceGroupParams{
-		Replica: utils.DefaultKeyspaceGroupReplicaCount,
+		Replica: constant.DefaultKeyspaceGroupReplicaCount,
 	}
 	_, code = suite.tryAllocNodesForKeyspaceGroup(re, id, params)
 	re.Equal(http.StatusBadRequest, code)
@@ -251,7 +244,7 @@ func (suite *keyspaceGroupTestSuite) TestSetNodes() {
 			cleanup()
 		}
 	}()
-	for i := 0; i < utils.DefaultKeyspaceGroupReplicaCount; i++ {
+	for i := 0; i < constant.DefaultKeyspaceGroupReplicaCount; i++ {
 		s, cleanup := tests.StartSingleTSOTestServer(suite.ctx, re, suite.backendEndpoints, tempurl.Alloc())
 		cleanups = append(cleanups, cleanup)
 		nodes[s.GetAddr()] = s
@@ -298,7 +291,7 @@ func (suite *keyspaceGroupTestSuite) TestSetNodes() {
 		Nodes: []string{nodesList[0]},
 	}
 	_, code = suite.trySetNodesForKeyspaceGroup(re, id, params)
-	re.Equal(http.StatusBadRequest, code)
+	re.Equal(http.StatusOK, code)
 
 	// the keyspace group is not exist.
 	id = 2
@@ -318,7 +311,7 @@ func (suite *keyspaceGroupTestSuite) TestDefaultKeyspaceGroup() {
 			cleanup()
 		}
 	}()
-	for i := 0; i < utils.DefaultKeyspaceGroupReplicaCount; i++ {
+	for i := 0; i < constant.DefaultKeyspaceGroupReplicaCount; i++ {
 		s, cleanup := tests.StartSingleTSOTestServer(suite.ctx, re, suite.backendEndpoints, tempurl.Alloc())
 		cleanups = append(cleanups, cleanup)
 		nodes[s.GetAddr()] = s
@@ -329,17 +322,113 @@ func (suite *keyspaceGroupTestSuite) TestDefaultKeyspaceGroup() {
 	var kg *endpoint.KeyspaceGroup
 	var code int
 	testutil.Eventually(re, func() bool {
-		kg, code = suite.tryGetKeyspaceGroup(re, utils.DefaultKeyspaceGroupID)
+		kg, code = suite.tryGetKeyspaceGroup(re, constant.DefaultKeyspaceGroupID)
 		return code == http.StatusOK && kg != nil
 	}, testutil.WithWaitFor(time.Second*1))
-	re.Equal(utils.DefaultKeyspaceGroupID, kg.ID)
+	re.Equal(constant.DefaultKeyspaceGroupID, kg.ID)
 	// the allocNodesToAllKeyspaceGroups loop will run every 100ms.
 	testutil.Eventually(re, func() bool {
-		return len(kg.Members) == utils.DefaultKeyspaceGroupReplicaCount
+		return len(kg.Members) == constant.DefaultKeyspaceGroupReplicaCount
 	})
 	for _, member := range kg.Members {
 		re.Contains(nodes, member.Address)
 	}
+}
+
+func (suite *keyspaceGroupTestSuite) TestAllocNodes() {
+	re := suite.Require()
+	// add three nodes.
+	nodes := make(map[string]bs.Server)
+	var cleanups []func()
+	defer func() {
+		for _, cleanup := range cleanups {
+			cleanup()
+		}
+	}()
+	for i := 0; i < constant.DefaultKeyspaceGroupReplicaCount+1; i++ {
+		s, cleanup := tests.StartSingleTSOTestServer(suite.ctx, re, suite.backendEndpoints, tempurl.Alloc())
+		cleanups = append(cleanups, cleanup)
+		nodes[s.GetAddr()] = s
+	}
+	tests.WaitForPrimaryServing(re, nodes)
+
+	// create a keyspace group.
+	kgs := &handlers.CreateKeyspaceGroupParams{KeyspaceGroups: []*endpoint.KeyspaceGroup{
+		{
+			ID:       uint32(1),
+			UserKind: endpoint.Standard.String(),
+		},
+	}}
+	code := suite.tryCreateKeyspaceGroup(re, kgs)
+	re.Equal(http.StatusOK, code)
+
+	// alloc nodes for the keyspace group
+	var kg *endpoint.KeyspaceGroup
+	testutil.Eventually(re, func() bool {
+		kg, code = suite.tryGetKeyspaceGroup(re, constant.DefaultKeyspaceGroupID)
+		return code == http.StatusOK && kg != nil && len(kg.Members) == constant.DefaultKeyspaceGroupReplicaCount
+	})
+	stopNode := kg.Members[0].Address
+	// close one of members
+	nodes[stopNode].Close()
+
+	// the member list will be updated
+	testutil.Eventually(re, func() bool {
+		kg, code = suite.tryGetKeyspaceGroup(re, constant.DefaultKeyspaceGroupID)
+		for _, member := range kg.Members {
+			if member.Address == stopNode {
+				return false
+			}
+		}
+		return code == http.StatusOK && kg != nil && len(kg.Members) == constant.DefaultKeyspaceGroupReplicaCount
+	})
+}
+
+func (suite *keyspaceGroupTestSuite) TestAllocOneNode() {
+	re := suite.Require()
+	// add one tso server
+	nodes := make(map[string]bs.Server)
+	oldTSOServer, cleanupOldTSOserver := tests.StartSingleTSOTestServer(suite.ctx, re, suite.backendEndpoints, tempurl.Alloc())
+	defer cleanupOldTSOserver()
+	nodes[oldTSOServer.GetAddr()] = oldTSOServer
+
+	tests.WaitForPrimaryServing(re, nodes)
+
+	// create a keyspace group.
+	kgs := &handlers.CreateKeyspaceGroupParams{KeyspaceGroups: []*endpoint.KeyspaceGroup{
+		{
+			ID:       uint32(1),
+			UserKind: endpoint.Standard.String(),
+		},
+	}}
+	code := suite.tryCreateKeyspaceGroup(re, kgs)
+	re.Equal(http.StatusOK, code)
+
+	// alloc nodes for the keyspace group
+	var kg *endpoint.KeyspaceGroup
+	testutil.Eventually(re, func() bool {
+		kg, code = suite.tryGetKeyspaceGroup(re, constant.DefaultKeyspaceGroupID)
+		return code == http.StatusOK && kg != nil && len(kg.Members) == 1
+	})
+	stopNode := kg.Members[0].Address
+	// close old tso server
+	nodes[stopNode].Close()
+
+	// create a new tso server
+	newTSOServer, cleanupNewTSOServer := tests.StartSingleTSOTestServer(suite.ctx, re, suite.backendEndpoints, tempurl.Alloc())
+	defer cleanupNewTSOServer()
+	nodes[newTSOServer.GetAddr()] = newTSOServer
+
+	tests.WaitForPrimaryServing(re, nodes)
+
+	// the member list will be updated
+	testutil.Eventually(re, func() bool {
+		kg, code = suite.tryGetKeyspaceGroup(re, constant.DefaultKeyspaceGroupID)
+		if len(kg.Members) != 0 && kg.Members[0].Address == stopNode {
+			return false
+		}
+		return code == http.StatusOK && kg != nil && len(kg.Members) == 1
+	})
 }
 
 func (suite *keyspaceGroupTestSuite) tryAllocNodesForKeyspaceGroup(re *require.Assertions, id int, request *handlers.AllocNodesForKeyspaceGroupParams) ([]endpoint.KeyspaceGroupMember, int) {
@@ -347,7 +436,7 @@ func (suite *keyspaceGroupTestSuite) tryAllocNodesForKeyspaceGroup(re *require.A
 	re.NoError(err)
 	httpReq, err := http.NewRequest(http.MethodPost, suite.server.GetAddr()+keyspaceGroupsPrefix+fmt.Sprintf("/%d/alloc", id), bytes.NewBuffer(data))
 	re.NoError(err)
-	resp, err := suite.dialClient.Do(httpReq)
+	resp, err := tests.TestDialClient.Do(httpReq)
 	re.NoError(err)
 	defer resp.Body.Close()
 	nodes := make([]endpoint.KeyspaceGroupMember, 0)
@@ -364,7 +453,7 @@ func (suite *keyspaceGroupTestSuite) tryCreateKeyspaceGroup(re *require.Assertio
 	re.NoError(err)
 	httpReq, err := http.NewRequest(http.MethodPost, suite.server.GetAddr()+keyspaceGroupsPrefix, bytes.NewBuffer(data))
 	re.NoError(err)
-	resp, err := suite.dialClient.Do(httpReq)
+	resp, err := tests.TestDialClient.Do(httpReq)
 	re.NoError(err)
 	defer resp.Body.Close()
 	return resp.StatusCode
@@ -373,7 +462,7 @@ func (suite *keyspaceGroupTestSuite) tryCreateKeyspaceGroup(re *require.Assertio
 func (suite *keyspaceGroupTestSuite) tryGetKeyspaceGroup(re *require.Assertions, id uint32) (*endpoint.KeyspaceGroup, int) {
 	httpReq, err := http.NewRequest(http.MethodGet, suite.server.GetAddr()+keyspaceGroupsPrefix+fmt.Sprintf("/%d", id), http.NoBody)
 	re.NoError(err)
-	resp, err := suite.dialClient.Do(httpReq)
+	resp, err := tests.TestDialClient.Do(httpReq)
 	re.NoError(err)
 	defer resp.Body.Close()
 	kg := &endpoint.KeyspaceGroup{}
@@ -390,7 +479,7 @@ func (suite *keyspaceGroupTestSuite) trySetNodesForKeyspaceGroup(re *require.Ass
 	re.NoError(err)
 	httpReq, err := http.NewRequest(http.MethodPatch, suite.server.GetAddr()+keyspaceGroupsPrefix+fmt.Sprintf("/%d", id), bytes.NewBuffer(data))
 	re.NoError(err)
-	resp, err := suite.dialClient.Do(httpReq)
+	resp, err := tests.TestDialClient.Do(httpReq)
 	re.NoError(err)
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {

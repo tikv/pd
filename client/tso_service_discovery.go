@@ -339,7 +339,9 @@ func (c *tsoServiceDiscovery) ScheduleCheckMemberChanged() {
 // CheckMemberChanged Immediately check if there is any membership change among the primary/secondaries in
 // a primary/secondary configured cluster.
 func (c *tsoServiceDiscovery) CheckMemberChanged() error {
-	c.apiSvcDiscovery.CheckMemberChanged()
+	if err := c.apiSvcDiscovery.CheckMemberChanged(); err != nil {
+		log.Warn("[tso] failed to check member changed", errs.ZapError(err))
+	}
 	if err := c.retry(tsoQueryRetryMaxTimes, tsoQueryRetryInterval, c.updateMember); err != nil {
 		log.Error("[tso] failed to update member", errs.ZapError(err))
 		return err
@@ -366,7 +368,9 @@ func (c *tsoServiceDiscovery) SetTSOLocalServURLsUpdatedCallback(callback tsoLoc
 func (c *tsoServiceDiscovery) SetTSOGlobalServURLUpdatedCallback(callback tsoGlobalServURLUpdatedFunc) {
 	url := c.getPrimaryURL()
 	if len(url) > 0 {
-		callback(url)
+		if err := callback(url); err != nil {
+			log.Error("[tso] failed to call back when tso global service url update", zap.String("url", url), errs.ZapError(err))
+		}
 	}
 	c.globalAllocPrimariesUpdatedCb = callback
 }
@@ -465,7 +469,7 @@ func (c *tsoServiceDiscovery) updateMember() error {
 	oldGroupID := c.GetKeyspaceGroupID()
 	if oldGroupID != keyspaceGroup.Id {
 		log.Info("[tso] the keyspace group changed",
-			zap.Uint32("keyspace-id", keyspaceGroup.Id),
+			zap.Uint32("keyspace-id", keyspaceID),
 			zap.Uint32("new-keyspace-group-id", keyspaceGroup.Id),
 			zap.Uint32("old-keyspace-group-id", oldGroupID))
 	}

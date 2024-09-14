@@ -47,7 +47,7 @@ func (h *statsHandler) GetRegionStatus(w http.ResponseWriter, r *http.Request) {
 	startKey, endKey := r.URL.Query().Get("start_key"), r.URL.Query().Get("end_key")
 	var stats *statistics.RegionStats
 	if r.URL.Query().Has("count") {
-		stats = rc.GetRegionCount([]byte(startKey), []byte(endKey))
+		stats = rc.GetRegionStatsCount([]byte(startKey), []byte(endKey))
 	} else {
 		stats = rc.GetRegionStatsByRange([]byte(startKey), []byte(endKey))
 	}

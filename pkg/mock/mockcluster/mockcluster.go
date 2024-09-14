@@ -55,8 +55,8 @@ type Cluster struct {
 	*labeler.RegionLabeler
 	*statistics.HotStat
 	*config.PersistOptions
-	ID             uint64
-	suspectRegions map[uint64]struct{}
+	ID                      uint64
+	pendingProcessedRegions map[uint64]struct{}
 	*buckets.HotBucketCache
 	storage.Storage
 }
@@ -64,14 +64,14 @@ type Cluster struct {
 // NewCluster creates a new Cluster
 func NewCluster(ctx context.Context, opts *config.PersistOptions) *Cluster {
 	c := &Cluster{
-		ctx:            ctx,
-		BasicCluster:   core.NewBasicCluster(),
-		IDAllocator:    mockid.NewIDAllocator(),
-		HotStat:        statistics.NewHotStat(ctx),
-		HotBucketCache: buckets.NewBucketsCache(ctx),
-		PersistOptions: opts,
-		suspectRegions: map[uint64]struct{}{},
-		Storage:        storage.NewStorageWithMemoryBackend(),
+		ctx:                     ctx,
+		BasicCluster:            core.NewBasicCluster(),
+		IDAllocator:             mockid.NewIDAllocator(),
+		HotStat:                 statistics.NewHotStat(ctx),
+		HotBucketCache:          buckets.NewBucketsCache(ctx),
+		PersistOptions:          opts,
+		pendingProcessedRegions: map[uint64]struct{}{},
+		Storage:                 storage.NewStorageWithMemoryBackend(),
 	}
 	if c.PersistOptions.GetReplicationConfig().EnablePlacementRules {
 		c.initRuleManager()
@@ -136,11 +136,6 @@ func (mc *Cluster) LoadRegion(regionID uint64, peerStoreIDs ...uint64) {
 func (mc *Cluster) GetStoresLoads() map[uint64][]float64 {
 	mc.HotStat.FilterUnhealthyStore(mc)
 	return mc.HotStat.GetStoresLoads()
-}
-
-// GetStore gets a store with a given store ID.
-func (mc *Cluster) GetStore(storeID uint64) *core.StoreInfo {
-	return mc.Stores.GetStore(storeID)
 }
 
 // IsRegionHot checks if the region is hot.
@@ -561,11 +556,6 @@ func (mc *Cluster) AddLeaderRegionWithWriteInfo(
 	return items
 }
 
-// DropCacheAllRegion removes all regions from the cache.
-func (mc *Cluster) DropCacheAllRegion() {
-	mc.ResetRegionCache()
-}
-
 // UpdateStoreLeaderWeight updates store leader weight.
 func (mc *Cluster) UpdateStoreLeaderWeight(storeID uint64, weight float64) {
 	store := mc.GetStore(storeID)
@@ -752,7 +742,7 @@ func (mc *Cluster) UpdateStoreStatus(id uint64) {
 	pendingPeerCount := mc.GetStorePendingPeerCount(id)
 	leaderSize := mc.GetStoreLeaderRegionSize(id)
 	regionSize := mc.GetStoreRegionSize(id)
-	store := mc.Stores.GetStore(id)
+	store := mc.GetStore(id)
 	stats := &pdpb.StoreStats{}
 	stats.Capacity = defaultStoreCapacity
 	stats.Available = stats.Capacity - uint64(store.GetRegionSize()*units.MiB)
@@ -854,27 +844,27 @@ func (mc *Cluster) SetStoreLabel(storeID uint64, labels map[string]string) {
 	mc.PutStore(newStore)
 }
 
-// AddSuspectRegions mock method
-func (mc *Cluster) AddSuspectRegions(ids ...uint64) {
+// AddPendingProcessedRegions mock method
+func (mc *Cluster) AddPendingProcessedRegions(_ bool, ids ...uint64) {
 	for _, id := range ids {
-		mc.suspectRegions[id] = struct{}{}
+		mc.pendingProcessedRegions[id] = struct{}{}
 	}
+}
+
+// CheckPendingProcessedRegions only used for unit test
+func (mc *Cluster) CheckPendingProcessedRegions(id uint64) bool {
+	_, ok := mc.pendingProcessedRegions[id]
+	return ok
+}
+
+// ResetPendingProcessedRegions only used for unit test
+func (mc *Cluster) ResetPendingProcessedRegions() {
+	mc.pendingProcessedRegions = map[uint64]struct{}{}
 }
 
 // GetBasicCluster mock method
 func (mc *Cluster) GetBasicCluster() *core.BasicCluster {
 	return mc.BasicCluster
-}
-
-// CheckRegionUnderSuspect only used for unit test
-func (mc *Cluster) CheckRegionUnderSuspect(id uint64) bool {
-	_, ok := mc.suspectRegions[id]
-	return ok
-}
-
-// ResetSuspectRegions only used for unit test
-func (mc *Cluster) ResetSuspectRegions() {
-	mc.suspectRegions = map[uint64]struct{}{}
 }
 
 // GetRegionByKey get region by key
@@ -896,14 +886,7 @@ func (mc *Cluster) CheckRegionRead(region *core.RegionInfo) []*statistics.HotPee
 	items = append(items, expiredItems...)
 	reportInterval := region.GetInterval()
 	interval := reportInterval.GetEndTimestamp() - reportInterval.GetStartTimestamp()
-	for _, peer := range region.GetPeers() {
-		peerInfo := core.NewPeerInfo(peer, region.GetLoads(), interval)
-		item := mc.HotCache.CheckReadPeerSync(peerInfo, region)
-		if item != nil {
-			items = append(items, item)
-		}
-	}
-	return items
+	return append(items, mc.HotCache.CheckReadPeerSync(region, region.GetPeers(), region.GetLoads(), interval)...)
 }
 
 // CheckRegionWrite checks region write info with all peers
@@ -913,14 +896,7 @@ func (mc *Cluster) CheckRegionWrite(region *core.RegionInfo) []*statistics.HotPe
 	items = append(items, expiredItems...)
 	reportInterval := region.GetInterval()
 	interval := reportInterval.GetEndTimestamp() - reportInterval.GetStartTimestamp()
-	for _, peer := range region.GetPeers() {
-		peerInfo := core.NewPeerInfo(peer, region.GetLoads(), interval)
-		item := mc.HotCache.CheckWritePeerSync(peerInfo, region)
-		if item != nil {
-			items = append(items, item)
-		}
-	}
-	return items
+	return append(items, mc.HotCache.CheckWritePeerSync(region, region.GetPeers(), region.GetLoads(), interval)...)
 }
 
 // CheckRegionLeaderRead checks region read info with leader peer
@@ -930,13 +906,7 @@ func (mc *Cluster) CheckRegionLeaderRead(region *core.RegionInfo) []*statistics.
 	items = append(items, expiredItems...)
 	reportInterval := region.GetInterval()
 	interval := reportInterval.GetEndTimestamp() - reportInterval.GetStartTimestamp()
-	peer := region.GetLeader()
-	peerInfo := core.NewPeerInfo(peer, region.GetLoads(), interval)
-	item := mc.HotCache.CheckReadPeerSync(peerInfo, region)
-	if item != nil {
-		items = append(items, item)
-	}
-	return items
+	return append(items, mc.HotCache.CheckReadPeerSync(region, []*metapb.Peer{region.GetLeader()}, region.GetLoads(), interval)...)
 }
 
 // ObserveRegionsStats records the current stores stats from region stats.

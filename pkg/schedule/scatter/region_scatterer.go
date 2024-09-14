@@ -125,12 +125,12 @@ type RegionScatterer struct {
 	ordinaryEngine    engineContext
 	specialEngines    sync.Map
 	opController      *operator.Controller
-	addSuspectRegions func(regionIDs ...uint64)
+	addSuspectRegions func(bool, ...uint64)
 }
 
 // NewRegionScatterer creates a region scatterer.
 // RegionScatter is used for the `Lightning`, it will scatter the specified regions before import data.
-func NewRegionScatterer(ctx context.Context, cluster sche.SharedCluster, opController *operator.Controller, addSuspectRegions func(regionIDs ...uint64)) *RegionScatterer {
+func NewRegionScatterer(ctx context.Context, cluster sche.SharedCluster, opController *operator.Controller, addSuspectRegions func(bool, ...uint64)) *RegionScatterer {
 	return &RegionScatterer{
 		ctx:               ctx,
 		name:              regionScatterName,
@@ -255,7 +255,7 @@ func (r *RegionScatterer) scatterRegions(regions map[uint64]*core.RegionInfo, fa
 					continue
 				}
 				failpoint.Inject("scatterHbStreamsDrain", func() {
-					r.opController.GetHBStreams().Drain(1)
+					_ = r.opController.GetHBStreams().Drain(1)
 					r.opController.RemoveOperator(op, operator.AdminStop)
 				})
 			}
@@ -275,7 +275,7 @@ func (r *RegionScatterer) scatterRegions(regions map[uint64]*core.RegionInfo, fa
 // in a group level instead of cluster level.
 func (r *RegionScatterer) Scatter(region *core.RegionInfo, group string, skipStoreLimit bool) (*operator.Operator, error) {
 	if !filter.IsRegionReplicated(r.cluster, region) {
-		r.addSuspectRegions(region.GetID())
+		r.addSuspectRegions(false, region.GetID())
 		scatterSkipNotReplicatedCounter.Inc()
 		log.Warn("region not replicated during scatter", zap.Uint64("region-id", region.GetID()))
 		return nil, errors.Errorf("region %d is not fully replicated", region.GetID())
@@ -399,8 +399,8 @@ func (r *RegionScatterer) scatterRegion(region *core.RegionInfo, group string, s
 	if op != nil {
 		scatterSuccessCounter.Inc()
 		r.Put(targetPeers, targetLeader, group)
-		op.AdditionalInfos["group"] = group
-		op.AdditionalInfos["leader-picked-count"] = strconv.FormatUint(leaderStorePickedCount, 10)
+		op.SetAdditionalInfo("group", group)
+		op.SetAdditionalInfo("leader-picked-count", strconv.FormatUint(leaderStorePickedCount, 10))
 		op.SetPriorityLevel(constant.High)
 	}
 	return op, nil
@@ -437,7 +437,7 @@ func isSameDistribution(region *core.RegionInfo, targetPeers map[uint64]*metapb.
 
 // selectNewPeer return the new peer which pick the fewest picked count.
 // it keeps the origin peer if the origin store's pick count is equal the fewest pick.
-// it can be diveded into three steps:
+// it can be divided into three steps:
 // 1. found the max pick count and the min pick count.
 // 2. if max pick count equals min pick count, it means all store picked count are some, return the origin peer.
 // 3. otherwise, select the store which pick count is the min pick count and pass all filter.

@@ -378,7 +378,7 @@ func (suite *globalConfigTestSuite) TestEtcdNotStart() {
 	re.Error(err)
 
 	_, err = suite.server.LoadGlobalConfig(suite.server.Context(), &pdpb.LoadGlobalConfigRequest{
-		Names: []string{"test_etcd"},
+		Names: []string{"pd_tests"},
 	})
 	re.Error(err)
 }

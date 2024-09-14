@@ -33,6 +33,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/scatter"
 	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/schedule/splitter"
+	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/statistics/buckets"
 	"github.com/tikv/pd/pkg/statistics/utils"
@@ -149,8 +150,7 @@ func (sc *schedulingController) runSchedulingMetricsCollectionJob() {
 
 	ticker := time.NewTicker(metricsCollectionJobInterval)
 	failpoint.Inject("highFrequencyClusterJobs", func() {
-		ticker.Stop()
-		ticker = time.NewTicker(time.Millisecond)
+		ticker.Reset(time.Millisecond)
 	})
 	defer ticker.Stop()
 
@@ -195,7 +195,7 @@ func (sc *schedulingController) collectSchedulingMetrics() {
 	// collect hot cache metrics
 	sc.hotStat.CollectMetrics()
 	// collect the lock metrics
-	sc.RegionsInfo.CollectWaitLockMetrics()
+	sc.CollectWaitLockMetrics()
 }
 
 func (sc *schedulingController) removeStoreStatistics(storeID uint64) {
@@ -403,25 +403,25 @@ func (sc *schedulingController) PauseOrResumeChecker(name string, t int64) error
 	return sc.coordinator.PauseOrResumeChecker(name, t)
 }
 
-// AddSuspectRegions adds regions to suspect list.
-func (sc *schedulingController) AddSuspectRegions(regionIDs ...uint64) {
+// AddPendingProcessedRegions adds regions to suspect list.
+func (sc *schedulingController) AddPendingProcessedRegions(needCheckLen bool, regionIDs ...uint64) {
 	sc.mu.RLock()
 	defer sc.mu.RUnlock()
-	sc.coordinator.GetCheckerController().AddSuspectRegions(regionIDs...)
+	sc.coordinator.GetCheckerController().AddPendingProcessedRegions(needCheckLen, regionIDs...)
 }
 
-// GetSuspectRegions gets all suspect regions.
-func (sc *schedulingController) GetSuspectRegions() []uint64 {
+// GetPendingProcessedRegions gets all suspect regions.
+func (sc *schedulingController) GetPendingProcessedRegions() []uint64 {
 	sc.mu.RLock()
 	defer sc.mu.RUnlock()
-	return sc.coordinator.GetCheckerController().GetSuspectRegions()
+	return sc.coordinator.GetCheckerController().GetPendingProcessedRegions()
 }
 
-// RemoveSuspectRegion removes region from suspect list.
-func (sc *schedulingController) RemoveSuspectRegion(id uint64) {
+// RemovePendingProcessedRegion removes region from pending processed regions.
+func (sc *schedulingController) RemovePendingProcessedRegion(id uint64) {
 	sc.mu.RLock()
 	defer sc.mu.RUnlock()
-	sc.coordinator.GetCheckerController().RemoveSuspectRegion(id)
+	sc.coordinator.GetCheckerController().RemovePendingProcessedRegion(id)
 }
 
 // PopOneSuspectKeyRange gets one suspect keyRange group.
@@ -440,13 +440,6 @@ func (sc *schedulingController) ClearSuspectKeyRanges() {
 	sc.coordinator.GetCheckerController().ClearSuspectKeyRanges()
 }
 
-// ClearSuspectRegions clears the suspect regions, only for unit test
-func (sc *schedulingController) ClearSuspectRegions() {
-	sc.mu.RLock()
-	defer sc.mu.RUnlock()
-	sc.coordinator.GetCheckerController().ClearSuspectRegions()
-}
-
 // AddSuspectKeyRange adds the key range with the its ruleID as the key
 // The instance of each keyRange is like following format:
 // [2][]byte: start key/end key
@@ -462,7 +455,7 @@ func (sc *schedulingController) getEvictLeaderStores() (evictStores []uint64) {
 	if sc.coordinator == nil {
 		return nil
 	}
-	handler, ok := sc.coordinator.GetSchedulersController().GetSchedulerHandlers()[schedulers.EvictLeaderName]
+	handler, ok := sc.coordinator.GetSchedulersController().GetSchedulerHandlers()[types.EvictLeaderScheduler.String()]
 	if !ok {
 		return
 	}

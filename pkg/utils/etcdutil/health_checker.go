@@ -26,7 +26,7 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
-	"go.etcd.io/etcd/clientv3"
+	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 )
 
@@ -273,7 +273,7 @@ func (checker *healthChecker) updateEvictedEps(lastEps, pickedEps []string) {
 	for _, ep := range pickedEps {
 		pickedSet[ep] = true
 	}
-	// Reset the count to 0 if it's in evictedEps but not in the pickedEps.
+	// Reset the count to 0 if it's in `evictedEps` but not in `pickedEps`.
 	checker.evictedEps.Range(func(key, value any) bool {
 		ep := key.(string)
 		count := value.(int)
@@ -286,10 +286,13 @@ func (checker *healthChecker) updateEvictedEps(lastEps, pickedEps []string) {
 		}
 		return true
 	})
-	// Find all endpoints which are in the lastEps but not in the pickedEps,
-	// and add them to the evictedEps.
+	// Find all endpoints which are in `lastEps` and `healthyClients` but not in `pickedEps`,
+	// and add them to the `evictedEps`.
 	for _, ep := range lastEps {
 		if pickedSet[ep] {
+			continue
+		}
+		if hc := checker.loadClient(ep); hc == nil {
 			continue
 		}
 		checker.evictedEps.Store(ep, 0)
@@ -297,7 +300,7 @@ func (checker *healthChecker) updateEvictedEps(lastEps, pickedEps []string) {
 			zap.String("endpoint", ep),
 			zap.String("source", checker.source))
 	}
-	// Find all endpoints which are in both pickedEps and evictedEps to
+	// Find all endpoints which are in both `pickedEps` and `evictedEps` to
 	// increase their picked count.
 	for _, ep := range pickedEps {
 		if count, ok := checker.evictedEps.Load(ep); ok {

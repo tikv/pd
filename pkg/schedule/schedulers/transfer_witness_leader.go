@@ -24,13 +24,10 @@ import (
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
+	"github.com/tikv/pd/pkg/schedule/types"
 )
 
 const (
-	// TransferWitnessLeaderName is transfer witness leader scheduler name.
-	TransferWitnessLeaderName = "transfer-witness-leader-scheduler"
-	// TransferWitnessLeaderType is transfer witness leader scheduler type.
-	TransferWitnessLeaderType = "transfer-witness-leader"
 	// TransferWitnessLeaderBatchSize is the number of operators to to transfer
 	// leaders by one scheduling
 	transferWitnessLeaderBatchSize = 3
@@ -38,13 +35,6 @@ const (
 	// TransferWitnessLeaderRecvMaxRegionSize is the max number of region can receive
 	// TODO: make it a reasonable value
 	transferWitnessLeaderRecvMaxRegionSize = 10000
-)
-
-var (
-	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
-	transferWitnessLeaderCounter              = schedulerCounter.WithLabelValues(TransferWitnessLeaderName, "schedule")
-	transferWitnessLeaderNewOperatorCounter   = schedulerCounter.WithLabelValues(TransferWitnessLeaderName, "new-operator")
-	transferWitnessLeaderNoTargetStoreCounter = schedulerCounter.WithLabelValues(TransferWitnessLeaderName, "no-target-store")
 )
 
 type transferWitnessLeaderScheduler struct {
@@ -55,35 +45,29 @@ type transferWitnessLeaderScheduler struct {
 // newTransferWitnessLeaderScheduler creates an admin scheduler that transfers witness leader of a region.
 func newTransferWitnessLeaderScheduler(opController *operator.Controller) Scheduler {
 	return &transferWitnessLeaderScheduler{
-		BaseScheduler: NewBaseScheduler(opController),
+		BaseScheduler: NewBaseScheduler(opController, types.TransferWitnessLeaderScheduler),
 		regions:       make(chan *core.RegionInfo, transferWitnessLeaderRecvMaxRegionSize),
 	}
 }
 
-func (*transferWitnessLeaderScheduler) GetName() string {
-	return TransferWitnessLeaderName
-}
-
-func (*transferWitnessLeaderScheduler) GetType() string {
-	return TransferWitnessLeaderType
-}
-
+// IsScheduleAllowed implements the Scheduler interface.
 func (*transferWitnessLeaderScheduler) IsScheduleAllowed(sche.SchedulerCluster) bool {
 	return true
 }
 
+// Schedule implements the Scheduler interface.
 func (s *transferWitnessLeaderScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) ([]*operator.Operator, []plan.Plan) {
 	transferWitnessLeaderCounter.Inc()
-	return s.scheduleTransferWitnessLeaderBatch(s.GetName(), s.GetType(), cluster, transferWitnessLeaderBatchSize), nil
+	return s.scheduleTransferWitnessLeaderBatch(s.GetName(), cluster, transferWitnessLeaderBatchSize), nil
 }
 
-func (s *transferWitnessLeaderScheduler) scheduleTransferWitnessLeaderBatch(name, typ string, cluster sche.SchedulerCluster, batchSize int) []*operator.Operator {
+func (s *transferWitnessLeaderScheduler) scheduleTransferWitnessLeaderBatch(name string, cluster sche.SchedulerCluster, batchSize int) []*operator.Operator {
 	var ops []*operator.Operator
 batchLoop:
 	for i := 0; i < batchSize; i++ {
 		select {
 		case region := <-s.regions:
-			op, err := scheduleTransferWitnessLeader(name, typ, cluster, region)
+			op, err := scheduleTransferWitnessLeader(name, cluster, region)
 			if err != nil {
 				log.Debug("fail to create transfer leader operator", errs.ZapError(err))
 				continue
@@ -100,7 +84,7 @@ batchLoop:
 	return ops
 }
 
-func scheduleTransferWitnessLeader(name, typ string, cluster sche.SchedulerCluster, region *core.RegionInfo) (*operator.Operator, error) {
+func scheduleTransferWitnessLeader(name string, cluster sche.SchedulerCluster, region *core.RegionInfo) (*operator.Operator, error) {
 	var filters []filter.Filter
 	unhealthyPeerStores := make(map[uint64]struct{})
 	for _, peer := range region.GetDownPeers() {
@@ -109,7 +93,8 @@ func scheduleTransferWitnessLeader(name, typ string, cluster sche.SchedulerClust
 	for _, peer := range region.GetPendingPeers() {
 		unhealthyPeerStores[peer.GetStoreId()] = struct{}{}
 	}
-	filters = append(filters, filter.NewExcludedFilter(name, nil, unhealthyPeerStores), &filter.StoreStateFilter{ActionScope: name, TransferLeader: true, OperatorLevel: constant.Urgent})
+	filters = append(filters, filter.NewExcludedFilter(name, nil, unhealthyPeerStores),
+		&filter.StoreStateFilter{ActionScope: name, TransferLeader: true, OperatorLevel: constant.Urgent})
 	candidates := filter.NewCandidates(cluster.GetFollowerStores(region)).FilterTarget(cluster.GetSchedulerConfig(), nil, nil, filters...)
 	// Compatible with old TiKV transfer leader logic.
 	target := candidates.RandomPick()
@@ -123,7 +108,7 @@ func scheduleTransferWitnessLeader(name, typ string, cluster sche.SchedulerClust
 	for _, t := range targets {
 		targetIDs = append(targetIDs, t.GetID())
 	}
-	return operator.CreateTransferLeaderOperator(typ, cluster, region, target.GetID(), targetIDs, operator.OpWitnessLeader)
+	return operator.CreateTransferLeaderOperator(name, cluster, region, target.GetID(), targetIDs, operator.OpWitnessLeader)
 }
 
 // RecvRegionInfo receives a checked region from coordinator

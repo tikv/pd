@@ -364,10 +364,10 @@ func (suite *operatorControllerTestSuite) TestPollDispatchRegion() {
 		oc.SetOperator(op4)
 		re.True(op2.Start())
 		oc.SetOperator(op2)
-		oc.opNotifierQueue.Push(&operatorWithTime{op: op1, time: time.Now().Add(100 * time.Millisecond)})
-		oc.opNotifierQueue.Push(&operatorWithTime{op: op3, time: time.Now().Add(300 * time.Millisecond)})
-		oc.opNotifierQueue.Push(&operatorWithTime{op: op4, time: time.Now().Add(499 * time.Millisecond)})
-		oc.opNotifierQueue.Push(&operatorWithTime{op: op2, time: time.Now().Add(500 * time.Millisecond)})
+		oc.opNotifierQueue.push(&operatorWithTime{op: op1, time: time.Now().Add(100 * time.Millisecond)})
+		oc.opNotifierQueue.push(&operatorWithTime{op: op3, time: time.Now().Add(300 * time.Millisecond)})
+		oc.opNotifierQueue.push(&operatorWithTime{op: op4, time: time.Now().Add(499 * time.Millisecond)})
+		oc.opNotifierQueue.push(&operatorWithTime{op: op2, time: time.Now().Add(500 * time.Millisecond)})
 	}
 	// first poll got nil
 	r, next := oc.pollNeedDispatchRegion()
@@ -447,7 +447,7 @@ func (suite *operatorControllerTestSuite) TestPollDispatchRegionForMergeRegion()
 	r, next = controller.pollNeedDispatchRegion()
 	re.True(next)
 	re.Nil(r)
-	re.Equal(1, controller.opNotifierQueue.Len())
+	re.Equal(1, controller.opNotifierQueue.len())
 	re.Empty(controller.GetOperators())
 	re.Empty(controller.wop.ListOperator())
 	re.NotNil(controller.records.Get(101))
@@ -458,7 +458,7 @@ func (suite *operatorControllerTestSuite) TestPollDispatchRegionForMergeRegion()
 	r, next = controller.pollNeedDispatchRegion()
 	re.True(next)
 	re.Nil(r)
-	re.Equal(0, controller.opNotifierQueue.Len())
+	re.Equal(0, controller.opNotifierQueue.len())
 
 	// Add the two ops to waiting operators again.
 	source.GetMeta().RegionEpoch = &metapb.RegionEpoch{ConfVer: 0, Version: 0}
@@ -478,7 +478,7 @@ func (suite *operatorControllerTestSuite) TestPollDispatchRegionForMergeRegion()
 	r, next = controller.pollNeedDispatchRegion()
 	re.True(next)
 	re.Nil(r)
-	re.Equal(1, controller.opNotifierQueue.Len())
+	re.Equal(1, controller.opNotifierQueue.len())
 	re.Empty(controller.GetOperators())
 	re.Empty(controller.wop.ListOperator())
 	re.NotNil(controller.records.Get(101))
@@ -488,7 +488,7 @@ func (suite *operatorControllerTestSuite) TestPollDispatchRegionForMergeRegion()
 	r, next = controller.pollNeedDispatchRegion()
 	re.True(next)
 	re.Nil(r)
-	re.Equal(0, controller.opNotifierQueue.Len())
+	re.Equal(0, controller.opNotifierQueue.len())
 }
 
 func (suite *operatorControllerTestSuite) TestCheckOperatorLightly() {
@@ -523,7 +523,7 @@ func (suite *operatorControllerTestSuite) TestCheckOperatorLightly() {
 	re.Nil(r)
 	re.Equal(reason, RegionNotFound)
 
-	// check failed because of verions of region epoch changed
+	// check failed because of versions of region epoch changed
 	cluster.PutRegion(target)
 	source.GetMeta().RegionEpoch = &metapb.RegionEpoch{ConfVer: 0, Version: 1}
 	r, reason = controller.checkOperatorLightly(ops[0])
@@ -954,4 +954,41 @@ func (suite *operatorControllerTestSuite) TestInvalidStoreId() {
 	re.True(oc.AddOperator(op))
 	// Although store 3 does not exist in PD, PD can also send op to TiKV.
 	re.Equal(pdpb.OperatorStatus_RUNNING, oc.GetOperatorStatus(1).Status)
+}
+
+func TestConcurrentAddOperatorAndSetStoreLimit(t *testing.T) {
+	re := require.New(t)
+	opt := mockconfig.NewTestOptions()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	tc := mockcluster.NewCluster(ctx, opt)
+	stream := hbstream.NewTestHeartbeatStreams(ctx, tc.ID, tc, false /* no need to run */)
+	oc := NewController(ctx, tc.GetBasicCluster(), tc.GetSharedConfig(), stream)
+
+	regionNum := 1000
+	limit := 1600.0
+	storeID := uint64(2)
+	for i := 1; i < 4; i++ {
+		tc.AddRegionStore(uint64(i), regionNum)
+		tc.SetStoreLimit(uint64(i), storelimit.AddPeer, limit)
+	}
+	for i := 1; i <= regionNum; i++ {
+		tc.AddLeaderRegion(uint64(i), 1, 3, 4)
+	}
+
+	// Add operator and set store limit concurrently
+	var wg sync.WaitGroup
+	for i := 1; i < 10; i++ {
+		wg.Add(1)
+		go func(i uint64) {
+			defer wg.Done()
+			for j := 1; j < 10; j++ {
+				regionID := uint64(j) + i*100
+				op := NewTestOperator(regionID, tc.GetRegion(regionID).GetRegionEpoch(), OpRegion, AddPeer{ToStore: storeID, PeerID: regionID})
+				re.True(oc.AddOperator(op))
+				tc.SetStoreLimit(storeID, storelimit.AddPeer, limit-float64(j)) // every goroutine set a different limit
+			}
+		}(uint64(i))
+	}
+	wg.Wait()
 }

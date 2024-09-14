@@ -51,6 +51,7 @@ var SetUpRestHandler = func(*Service) (http.Handler, apiutil.APIServiceGroup) {
 
 type dummyRestService struct{}
 
+// ServeHTTP implements the http.Handler interface.
 func (dummyRestService) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 	w.Write([]byte("not implemented"))
@@ -83,6 +84,7 @@ type heartbeatServer struct {
 	closed int32
 }
 
+// Send implements the HeartbeatStream interface.
 func (s *heartbeatServer) Send(m core.RegionHeartbeatResponse) error {
 	if atomic.LoadInt32(&s.closed) == 1 {
 		return io.EOF
@@ -106,7 +108,7 @@ func (s *heartbeatServer) Send(m core.RegionHeartbeatResponse) error {
 	}
 }
 
-func (s *heartbeatServer) Recv() (*schedulingpb.RegionHeartbeatRequest, error) {
+func (s *heartbeatServer) recv() (*schedulingpb.RegionHeartbeatRequest, error) {
 	if atomic.LoadInt32(&s.closed) == 1 {
 		return nil, io.EOF
 	}
@@ -133,7 +135,7 @@ func (s *Service) RegionHeartbeat(stream schedulingpb.Scheduling_RegionHeartbeat
 	}()
 
 	for {
-		request, err := server.Recv()
+		request, err := server.recv()
 		if err == io.EOF {
 			return nil
 		}
@@ -158,7 +160,8 @@ func (s *Service) RegionHeartbeat(stream schedulingpb.Scheduling_RegionHeartbeat
 			s.hbStreams.BindStream(storeID, server)
 			lastBind = time.Now()
 		}
-		region := core.RegionFromHeartbeat(request)
+		// scheduling service doesn't sync the pd server config, so we use 0 here
+		region := core.RegionFromHeartbeat(request, 0)
 		err = c.HandleRegionHeartbeat(region)
 		if err != nil {
 			// TODO: if we need to send the error back to API server.
@@ -275,7 +278,7 @@ func (s *Service) AskBatchSplit(_ context.Context, request *schedulingpb.AskBatc
 		}, nil
 	}
 
-	if c.persistConfig.IsSchedulingHalted() {
+	if c.IsSchedulingHalted() {
 		return nil, errs.ErrSchedulingIsHalted.FastGenByArgs()
 	}
 	if !c.persistConfig.IsTikvRegionSplitEnabled() {
@@ -321,7 +324,7 @@ func (s *Service) AskBatchSplit(_ context.Context, request *schedulingpb.AskBatc
 	// If region splits during the scheduling process, regions with abnormal
 	// status may be left, and these regions need to be checked with higher
 	// priority.
-	c.GetCoordinator().GetCheckerController().AddSuspectRegions(recordRegions...)
+	c.GetCoordinator().GetCheckerController().AddPendingProcessedRegions(false, recordRegions...)
 
 	return &schedulingpb.AskBatchSplitResponse{
 		Header: s.header(),
@@ -335,9 +338,9 @@ func (s *Service) RegisterGRPCService(g *grpc.Server) {
 }
 
 // RegisterRESTHandler registers the service to REST server.
-func (s *Service) RegisterRESTHandler(userDefineHandlers map[string]http.Handler) {
+func (s *Service) RegisterRESTHandler(userDefineHandlers map[string]http.Handler) error {
 	handler, group := SetUpRestHandler(s)
-	apiutil.RegisterUserDefinedHandlers(userDefineHandlers, &group, handler)
+	return apiutil.RegisterUserDefinedHandlers(userDefineHandlers, &group, handler)
 }
 
 func (s *Service) errorHeader(err *schedulingpb.Error) *schedulingpb.ResponseHeader {

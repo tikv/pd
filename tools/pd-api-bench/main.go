@@ -29,8 +29,8 @@ import (
 	"github.com/gin-contrib/gzip"
 	"github.com/gin-contrib/pprof"
 	"github.com/gin-gonic/gin"
+	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
-	"github.com/pkg/errors"
 	"github.com/prometheus/client_golang/prometheus"
 	flag "github.com/spf13/pflag"
 	pd "github.com/tikv/pd/client"
@@ -40,7 +40,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/tools/pd-api-bench/cases"
 	"github.com/tikv/pd/tools/pd-api-bench/config"
-	"go.etcd.io/etcd/clientv3"
+	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/keepalive"
@@ -92,7 +92,7 @@ func main() {
 	default:
 		log.Fatal("parse cmd flags error", zap.Error(err))
 	}
-	err = logutil.SetupLogger(cfg.Log, &cfg.Logger, &cfg.LogProps)
+	err = logutil.SetupLogger(cfg.Log, &cfg.Logger, &cfg.LogProps, logutil.RedactInfoLogOFF)
 	if err == nil {
 		log.ReplaceGlobals(cfg.Logger, cfg.LogProps)
 	} else {
@@ -199,9 +199,7 @@ func parseCaseNameAndConfig(str string) (string, *cases.Config) {
 		strsb := strings.Split(strs[1], "+")
 		cfg.QPS, err = strconv.ParseInt(strsb[0], 10, 64)
 		if err != nil {
-			if err != nil {
-				log.Error("parse qps failed for case", zap.String("case", name), zap.String("config", strsb[0]))
-			}
+			log.Error("parse qps failed for case", zap.String("case", name), zap.String("config", strsb[0]))
 		}
 		// to get case Burst
 		if len(strsb) > 1 {
@@ -257,6 +255,7 @@ func runHTTPServer(cfg *config.Config, co *cases.Coordinator) {
 			return
 		}
 		for name, cfg := range input {
+			cfg := cfg
 			co.SetHTTPCase(name, &cfg)
 		}
 		c.String(http.StatusOK, "")
@@ -274,6 +273,7 @@ func runHTTPServer(cfg *config.Config, co *cases.Coordinator) {
 			return
 		}
 		for name, cfg := range input {
+			cfg := cfg
 			co.SetGRPCCase(name, &cfg)
 		}
 		c.String(http.StatusOK, "")
@@ -291,14 +291,15 @@ func runHTTPServer(cfg *config.Config, co *cases.Coordinator) {
 			return
 		}
 		for name, cfg := range input {
-			co.SetETCDCase(name, &cfg)
+			cfg := cfg
+			co.SetEtcdCase(name, &cfg)
 		}
 		c.String(http.StatusOK, "")
 	})
 	engine.POST("config/etcd/:name", func(c *gin.Context) {
 		name := c.Param("name")
 		cfg := getCfg(c)
-		co.SetETCDCase(name, cfg)
+		co.SetEtcdCase(name, cfg)
 		c.String(http.StatusOK, "")
 	})
 
@@ -329,12 +330,12 @@ func runHTTPServer(cfg *config.Config, co *cases.Coordinator) {
 		c.IndentedJSON(http.StatusOK, cfg)
 	})
 	engine.GET("config/etcd/all", func(c *gin.Context) {
-		all := co.GetAllETCDCases()
+		all := co.GetAllEtcdCases()
 		c.IndentedJSON(http.StatusOK, all)
 	})
 	engine.GET("config/etcd/:name", func(c *gin.Context) {
 		name := c.Param("name")
-		cfg, err := co.GetETCDCase(name)
+		cfg, err := co.GetEtcdCase(name)
 		if err != nil {
 			c.String(http.StatusBadRequest, err.Error())
 			return

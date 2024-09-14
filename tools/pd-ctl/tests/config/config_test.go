@@ -103,7 +103,7 @@ func (suite *configTestSuite) TearDownTest() {
 func (suite *configTestSuite) TestConfig() {
 	re := suite.Require()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/dashboard/adapter/skipDashboardLoop", `return(true)`))
-	suite.env.RunTestInTwoModes(suite.checkConfig)
+	suite.env.RunTestBasedOnMode(suite.checkConfig)
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/dashboard/adapter/skipDashboardLoop"))
 }
 
@@ -130,7 +130,6 @@ func (suite *configTestSuite) checkConfig(cluster *pdTests.TestCluster) {
 
 	// hidden config
 	scheduleConfig.Schedulers = nil
-	scheduleConfig.SchedulersPayload = nil
 	scheduleConfig.StoreLimit = nil
 	scheduleConfig.SchedulerMaxWaitingOperator = 0
 	scheduleConfig.EnableRemoveDownReplica = false
@@ -181,9 +180,11 @@ func (suite *configTestSuite) checkConfig(cluster *pdTests.TestCluster) {
 	scheduleConfig.MaxMergeRegionKeys = scheduleConfig.GetMaxMergeRegionKeys()
 	re.Equal(scheduleConfig, &scheduleCfg)
 
-	re.Equal(20, int(svr.GetScheduleConfig().MaxMergeRegionSize))
+	// After https://github.com/tikv/tikv/issues/17309, the default value is enlarged from 20 to 54,
+	// to make it compatible with the default value of region size of tikv.
+	re.Equal(54, int(svr.GetScheduleConfig().MaxMergeRegionSize))
 	re.Equal(0, int(svr.GetScheduleConfig().MaxMergeRegionKeys))
-	re.Equal(20*10000, int(svr.GetScheduleConfig().GetMaxMergeRegionKeys()))
+	re.Equal(54*10000, int(svr.GetScheduleConfig().GetMaxMergeRegionKeys()))
 
 	// set max-merge-region-size to 40MB
 	args = []string{"-u", pdAddr, "config", "set", "max-merge-region-size", "40"}
@@ -348,7 +349,7 @@ func (suite *configTestSuite) checkConfig(cluster *pdTests.TestCluster) {
 func (suite *configTestSuite) TestConfigForwardControl() {
 	re := suite.Require()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/dashboard/adapter/skipDashboardLoop", `return(true)`))
-	suite.env.RunTestInTwoModes(suite.checkConfigForwardControl)
+	suite.env.RunTestBasedOnMode(suite.checkConfigForwardControl)
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/dashboard/adapter/skipDashboardLoop"))
 }
 
@@ -357,7 +358,7 @@ func (suite *configTestSuite) checkConfigForwardControl(cluster *pdTests.TestClu
 	leaderServer := cluster.GetLeaderServer()
 	pdAddr := leaderServer.GetAddr()
 
-	f, _ := os.CreateTemp("/tmp", "pd_tests")
+	f, _ := os.CreateTemp("", "pd_tests")
 	fname := f.Name()
 	f.Close()
 	defer os.RemoveAll(fname)
@@ -547,7 +548,7 @@ func (suite *configTestSuite) checkConfigForwardControl(cluster *pdTests.TestClu
 }
 
 func (suite *configTestSuite) TestPlacementRules() {
-	suite.env.RunTestInTwoModes(suite.checkPlacementRules)
+	suite.env.RunTestBasedOnMode(suite.checkPlacementRules)
 }
 
 func (suite *configTestSuite) checkPlacementRules(cluster *pdTests.TestCluster) {
@@ -570,7 +571,7 @@ func (suite *configTestSuite) checkPlacementRules(cluster *pdTests.TestCluster) 
 	// test show
 	checkShowRuleKey(re, pdAddr, [][2]string{{placement.DefaultGroupID, placement.DefaultRuleID}})
 
-	f, _ := os.CreateTemp("/tmp", "pd_tests")
+	f, _ := os.CreateTemp("", "pd_tests")
 	fname := f.Name()
 	f.Close()
 	defer os.RemoveAll(fname)
@@ -613,7 +614,7 @@ func (suite *configTestSuite) checkPlacementRules(cluster *pdTests.TestCluster) 
 }
 
 func (suite *configTestSuite) TestPlacementRuleGroups() {
-	suite.env.RunTestInTwoModes(suite.checkPlacementRuleGroups)
+	suite.env.RunTestBasedOnMode(suite.checkPlacementRuleGroups)
 }
 
 func (suite *configTestSuite) checkPlacementRuleGroups(cluster *pdTests.TestCluster) {
@@ -690,7 +691,7 @@ func (suite *configTestSuite) checkPlacementRuleGroups(cluster *pdTests.TestClus
 }
 
 func (suite *configTestSuite) TestPlacementRuleBundle() {
-	suite.env.RunTestInTwoModes(suite.checkPlacementRuleBundle)
+	suite.env.RunTestBasedOnMode(suite.checkPlacementRuleBundle)
 }
 
 func (suite *configTestSuite) checkPlacementRuleBundle(cluster *pdTests.TestCluster) {
@@ -717,7 +718,7 @@ func (suite *configTestSuite) checkPlacementRuleBundle(cluster *pdTests.TestClus
 	re.NoError(json.Unmarshal(output, &bundle))
 	re.Equal(placement.GroupBundle{ID: placement.DefaultGroupID, Index: 0, Override: false, Rules: []*placement.Rule{{GroupID: placement.DefaultGroupID, ID: placement.DefaultRuleID, Role: placement.Voter, Count: 3}}}, bundle)
 
-	f, err := os.CreateTemp("/tmp", "pd_tests")
+	f, err := os.CreateTemp("", "pd_tests")
 	re.NoError(err)
 	fname := f.Name()
 	f.Close()
@@ -882,7 +883,7 @@ func TestReplicationMode(t *testing.T) {
 	defer cluster.Destroy()
 	err = cluster.RunInitialServers()
 	re.NoError(err)
-	cluster.WaitLeader()
+	re.NotEmpty(cluster.WaitLeader())
 	pdAddr := cluster.GetConfig().GetClientURL()
 	cmd := ctl.GetRootCmd()
 
@@ -933,7 +934,7 @@ func TestReplicationMode(t *testing.T) {
 }
 
 func (suite *configTestSuite) TestUpdateDefaultReplicaConfig() {
-	suite.env.RunTestInTwoModes(suite.checkUpdateDefaultReplicaConfig)
+	suite.env.RunTestBasedOnMode(suite.checkUpdateDefaultReplicaConfig)
 }
 
 func (suite *configTestSuite) checkUpdateDefaultReplicaConfig(cluster *pdTests.TestCluster) {
@@ -1082,7 +1083,7 @@ func (suite *configTestSuite) checkUpdateDefaultReplicaConfig(cluster *pdTests.T
 }
 
 func (suite *configTestSuite) TestPDServerConfig() {
-	suite.env.RunTestInTwoModes(suite.checkPDServerConfig)
+	suite.env.RunTestBasedOnMode(suite.checkPDServerConfig)
 }
 
 func (suite *configTestSuite) checkPDServerConfig(cluster *pdTests.TestCluster) {
@@ -1115,7 +1116,7 @@ func (suite *configTestSuite) checkPDServerConfig(cluster *pdTests.TestCluster) 
 }
 
 func (suite *configTestSuite) TestMicroServiceConfig() {
-	suite.env.RunTestInTwoModes(suite.checkMicroServiceConfig)
+	suite.env.RunTestBasedOnMode(suite.checkMicroServiceConfig)
 }
 
 func (suite *configTestSuite) checkMicroServiceConfig(cluster *pdTests.TestCluster) {
@@ -1145,7 +1146,7 @@ func (suite *configTestSuite) checkMicroServiceConfig(cluster *pdTests.TestClust
 }
 
 func (suite *configTestSuite) TestRegionRules() {
-	suite.env.RunTestInTwoModes(suite.checkRegionRules)
+	suite.env.RunTestBasedOnMode(suite.checkRegionRules)
 }
 
 func (suite *configTestSuite) checkRegionRules(cluster *pdTests.TestCluster) {

@@ -409,6 +409,11 @@ func (ts *TokenSlot) assignSlotTokens(requiredToken float64, targetPeriodMs uint
 	//               |
 	// grant_rate 0  ------------------------------------------------------------------------------------
 	//         loan      ***    k*period_token    (k+k-1)*period_token    ***      (k+k+1...+1)*period_token
+
+	// loanCoefficient is relative to the capacity of load RUs.
+	// It's like a buffer to slow down the client consumption. the buffer capacity is `(1 + 2 ... +loanCoefficient) * fillRate * targetPeriodTimeSec`.
+	// Details see test case `TestGroupTokenBucketRequestLoop`.
+
 	p := make([]float64, loanCoefficient)
 	p[0] = float64(loanCoefficient) * float64(fillRate) * targetPeriodTimeSec
 	for i := 1; i < loanCoefficient; i++ {

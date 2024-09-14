@@ -28,6 +28,7 @@ import (
 	"github.com/tikv/pd/pkg/mcs/scheduling/server/config"
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/schedulers"
+	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
@@ -64,6 +65,7 @@ func (suite *configTestSuite) SetupSuite() {
 	err = suite.cluster.RunInitialServers()
 	re.NoError(err)
 	leaderName := suite.cluster.WaitLeader()
+	re.NotEmpty(leaderName)
 	suite.pdLeaderServer = suite.cluster.GetServer(leaderName)
 	re.NoError(suite.pdLeaderServer.BootstrapCluster())
 	// Force the coordinator to be prepared to initialize the schedulers.
@@ -164,18 +166,18 @@ func (suite *configTestSuite) TestSchedulerConfigWatch() {
 	})
 	re.Equal(namesFromAPIServer, namesFromSchedulingServer)
 	// Add a new scheduler.
-	api.MustAddScheduler(re, suite.pdLeaderServer.GetAddr(), schedulers.EvictLeaderName, map[string]any{
+	api.MustAddScheduler(re, suite.pdLeaderServer.GetAddr(), types.EvictLeaderScheduler.String(), map[string]any{
 		"store_id": 1,
 	})
 	// Check the new scheduler's config.
 	testutil.Eventually(re, func() bool {
 		namesFromSchedulingServer, _, err = storage.LoadAllSchedulerConfigs()
 		re.NoError(err)
-		return slice.Contains(namesFromSchedulingServer, schedulers.EvictLeaderName)
+		return slice.Contains(namesFromSchedulingServer, types.EvictLeaderScheduler.String())
 	})
 	assertEvictLeaderStoreIDs(re, storage, []uint64{1})
 	// Update the scheduler by adding a store.
-	err = suite.pdLeaderServer.GetServer().GetRaftCluster().PutStore(
+	err = suite.pdLeaderServer.GetServer().GetRaftCluster().PutMetaStore(
 		&metapb.Store{
 			Id:            2,
 			Address:       "mock://2",
@@ -186,20 +188,20 @@ func (suite *configTestSuite) TestSchedulerConfigWatch() {
 		},
 	)
 	re.NoError(err)
-	api.MustAddScheduler(re, suite.pdLeaderServer.GetAddr(), schedulers.EvictLeaderName, map[string]any{
+	api.MustAddScheduler(re, suite.pdLeaderServer.GetAddr(), types.EvictLeaderScheduler.String(), map[string]any{
 		"store_id": 2,
 	})
 	assertEvictLeaderStoreIDs(re, storage, []uint64{1, 2})
 	// Update the scheduler by removing a store.
-	api.MustDeleteScheduler(re, suite.pdLeaderServer.GetAddr(), fmt.Sprintf("%s-%d", schedulers.EvictLeaderName, 1))
+	api.MustDeleteScheduler(re, suite.pdLeaderServer.GetAddr(), fmt.Sprintf("%s-%d", types.EvictLeaderScheduler.String(), 1))
 	assertEvictLeaderStoreIDs(re, storage, []uint64{2})
 	// Delete the scheduler.
-	api.MustDeleteScheduler(re, suite.pdLeaderServer.GetAddr(), schedulers.EvictLeaderName)
+	api.MustDeleteScheduler(re, suite.pdLeaderServer.GetAddr(), types.EvictLeaderScheduler.String())
 	// Check the removed scheduler's config.
 	testutil.Eventually(re, func() bool {
 		namesFromSchedulingServer, _, err = storage.LoadAllSchedulerConfigs()
 		re.NoError(err)
-		return !slice.Contains(namesFromSchedulingServer, schedulers.EvictLeaderName)
+		return !slice.Contains(namesFromSchedulingServer, types.EvictLeaderScheduler.String())
 	})
 	watcher.Close()
 }
@@ -211,7 +213,7 @@ func assertEvictLeaderStoreIDs(
 		StoreIDWithRanges map[uint64][]core.KeyRange `json:"store-id-ranges"`
 	}
 	testutil.Eventually(re, func() bool {
-		cfg, err := storage.LoadSchedulerConfig(schedulers.EvictLeaderName)
+		cfg, err := storage.LoadSchedulerConfig(types.EvictLeaderScheduler.String())
 		re.NoError(err)
 		err = schedulers.DecodeConfig([]byte(cfg), &evictLeaderCfg)
 		re.NoError(err)

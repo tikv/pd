@@ -34,7 +34,7 @@ import (
 	"github.com/tikv/pd/pkg/id"
 	"github.com/tikv/pd/pkg/keyspace"
 	scheduling "github.com/tikv/pd/pkg/mcs/scheduling/server"
-	"github.com/tikv/pd/pkg/mcs/utils"
+	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/swaggerserver"
 	"github.com/tikv/pd/pkg/tso"
@@ -47,7 +47,7 @@ import (
 	"github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/join"
-	"go.etcd.io/etcd/clientv3"
+	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
 // TestServer states.
@@ -84,10 +84,12 @@ func NewTestServer(ctx context.Context, cfg *config.Config) (*TestServer, error)
 
 // NewTestAPIServer creates a new TestServer.
 func NewTestAPIServer(ctx context.Context, cfg *config.Config) (*TestServer, error) {
-	return createTestServer(ctx, cfg, []string{utils.APIServiceName})
+	return createTestServer(ctx, cfg, []string{constant.APIServiceName})
 }
 
 func createTestServer(ctx context.Context, cfg *config.Config, services []string) (*TestServer, error) {
+	//  disable the heartbeat async runner in test
+	cfg.Schedule.EnableHeartbeatConcurrentRunner = false
 	err := logutil.SetupLogger(cfg.Log, &cfg.Logger, &cfg.LogProps, cfg.Security.RedactInfoLog)
 	if err != nil {
 		return nil, err
@@ -609,6 +611,11 @@ func (c *TestCluster) StopAll() error {
 	return nil
 }
 
+// DeleteServer is used to delete a server.
+func (c *TestCluster) DeleteServer(name string) {
+	delete(c.servers, name)
+}
+
 // GetServer returns a server with a given name.
 func (c *TestCluster) GetServer(name string) *TestServer {
 	return c.servers[name]
@@ -808,7 +815,7 @@ func (c *TestCluster) HandleReportBuckets(b *metapb.Buckets) error {
 
 // Join is used to add a new TestServer into the cluster.
 func (c *TestCluster) Join(ctx context.Context, opts ...ConfigOption) (*TestServer, error) {
-	conf, err := c.config.Join().Generate(opts...)
+	conf, err := c.config.join().Generate(opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -822,7 +829,7 @@ func (c *TestCluster) Join(ctx context.Context, opts ...ConfigOption) (*TestServ
 
 // JoinAPIServer is used to add a new TestAPIServer into the cluster.
 func (c *TestCluster) JoinAPIServer(ctx context.Context, opts ...ConfigOption) (*TestServer, error) {
-	conf, err := c.config.Join().Generate(opts...)
+	conf, err := c.config.join().Generate(opts...)
 	if err != nil {
 		return nil, err
 	}

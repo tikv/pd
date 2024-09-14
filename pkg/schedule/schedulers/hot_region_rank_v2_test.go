@@ -21,7 +21,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/schedule/operator"
-	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/statistics/utils"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/utils/operatorutil"
@@ -29,21 +28,19 @@ import (
 )
 
 func TestHotWriteRegionScheduleWithRevertRegionsDimSecond(t *testing.T) {
-	// This is a test that searchRevertRegions finds a solution of rank -1.
+	// This is a test that searchRevertRegions finds a solution of rank 1.
 	re := require.New(t)
 	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
-	statistics.Denoising = false
-	statisticsInterval = 0
-	sche, err := CreateScheduler(utils.Write.String(), oc, storage.NewStorageWithMemoryBackend(), nil, nil)
+	sche, err := CreateScheduler(writeType, oc, storage.NewStorageWithMemoryBackend(), nil, nil)
 	re.NoError(err)
 	hb := sche.(*hotScheduler)
-	hb.conf.SetDstToleranceRatio(0.0)
-	hb.conf.SetSrcToleranceRatio(0.0)
-	hb.conf.SetRankFormulaVersion("v1")
-	hb.conf.SetHistorySampleDuration(0)
+	hb.types = []resourceType{writePeer}
+	hb.conf.setDstToleranceRatio(0.0)
+	hb.conf.setSrcToleranceRatio(0.0)
+	hb.conf.setRankFormulaVersion("v1")
+	hb.conf.setHistorySampleDuration(0)
 	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
-	tc.SetHotRegionCacheHitsThreshold(0)
 	tc.AddRegionStore(1, 20)
 	tc.AddRegionStore(2, 20)
 	tc.AddRegionStore(3, 20)
@@ -65,14 +62,14 @@ func TestHotWriteRegionScheduleWithRevertRegionsDimSecond(t *testing.T) {
 	re.Empty(ops)
 	re.False(hb.searchRevertRegions[writePeer])
 
-	hb.conf.SetRankFormulaVersion("v2")
+	hb.conf.setRankFormulaVersion("v2")
 	// searchRevertRegions becomes true after the first `Schedule`.
 	ops, _ = hb.Schedule(tc, false)
 	re.Empty(ops)
 	re.True(hb.searchRevertRegions[writePeer])
 	// Two operators can be generated when RankFormulaVersion == "v2".
 	ops, _ = hb.Schedule(tc, false)
-	/* The revert region is currently disabled for the -1 case.
+	/* The revert region is currently disabled for the rank 1 case.
 	re.Len(ops, 2)
 	operatorutil.CheckTransferPeer(re, ops[0], operator.OpHotRegion, 2, 5)
 	operatorutil.CheckTransferPeer(re, ops[1], operator.OpHotRegion, 5, 2)
@@ -92,21 +89,19 @@ func TestHotWriteRegionScheduleWithRevertRegionsDimSecond(t *testing.T) {
 }
 
 func TestHotWriteRegionScheduleWithRevertRegionsDimFirst(t *testing.T) {
-	// This is a test that searchRevertRegions finds a solution of rank -3.
+	// This is a test that searchRevertRegions finds a solution of rank 3.
 	re := require.New(t)
 	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
-	statistics.Denoising = false
-
-	sche, err := CreateScheduler(utils.Write.String(), oc, storage.NewStorageWithMemoryBackend(), nil, nil)
+	sche, err := CreateScheduler(writeType, oc, storage.NewStorageWithMemoryBackend(), nil, nil)
 	re.NoError(err)
 	hb := sche.(*hotScheduler)
-	hb.conf.SetDstToleranceRatio(0.0)
-	hb.conf.SetSrcToleranceRatio(0.0)
-	hb.conf.SetRankFormulaVersion("v1")
-	hb.conf.SetHistorySampleDuration(0)
+	hb.types = []resourceType{writePeer}
+	hb.conf.setDstToleranceRatio(0.0)
+	hb.conf.setSrcToleranceRatio(0.0)
+	hb.conf.setRankFormulaVersion("v1")
+	hb.conf.setHistorySampleDuration(0)
 	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
-	tc.SetHotRegionCacheHitsThreshold(0)
 	tc.AddRegionStore(1, 20)
 	tc.AddRegionStore(2, 20)
 	tc.AddRegionStore(3, 20)
@@ -130,7 +125,7 @@ func TestHotWriteRegionScheduleWithRevertRegionsDimFirst(t *testing.T) {
 	re.False(hb.searchRevertRegions[writePeer])
 	clearPendingInfluence(hb)
 
-	hb.conf.SetRankFormulaVersion("v2")
+	hb.conf.setRankFormulaVersion("v2")
 	// searchRevertRegions becomes true after the first `Schedule`.
 	ops, _ = hb.Schedule(tc, false)
 	re.Len(ops, 1)
@@ -146,22 +141,19 @@ func TestHotWriteRegionScheduleWithRevertRegionsDimFirst(t *testing.T) {
 }
 
 func TestHotWriteRegionScheduleWithRevertRegionsDimFirstOnly(t *testing.T) {
-	// This is a test that searchRevertRegions finds a solution of rank -2.
+	// This is a test that searchRevertRegions finds a solution of rank 2.
 	re := require.New(t)
-	statistics.Denoising = false
-	statisticsInterval = 0
-
 	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
-	sche, err := CreateScheduler(utils.Write.String(), oc, storage.NewStorageWithMemoryBackend(), nil, nil)
+	sche, err := CreateScheduler(writeType, oc, storage.NewStorageWithMemoryBackend(), nil, nil)
 	re.NoError(err)
 	hb := sche.(*hotScheduler)
-	hb.conf.SetDstToleranceRatio(0.0)
-	hb.conf.SetSrcToleranceRatio(0.0)
-	hb.conf.SetRankFormulaVersion("v1")
-	hb.conf.SetHistorySampleDuration(0)
+	hb.types = []resourceType{writePeer}
+	hb.conf.setDstToleranceRatio(0.0)
+	hb.conf.setSrcToleranceRatio(0.0)
+	hb.conf.setRankFormulaVersion("v1")
+	hb.conf.setHistorySampleDuration(0)
 	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
-	tc.SetHotRegionCacheHitsThreshold(0)
 	tc.AddRegionStore(1, 20)
 	tc.AddRegionStore(2, 20)
 	tc.AddRegionStore(3, 20)
@@ -185,7 +177,7 @@ func TestHotWriteRegionScheduleWithRevertRegionsDimFirstOnly(t *testing.T) {
 	re.False(hb.searchRevertRegions[writePeer])
 	clearPendingInfluence(hb)
 
-	hb.conf.SetRankFormulaVersion("v2")
+	hb.conf.setRankFormulaVersion("v2")
 	// searchRevertRegions becomes true after the first `Schedule`.
 	ops, _ = hb.Schedule(tc, false)
 	re.Len(ops, 1)
@@ -212,20 +204,16 @@ func TestHotWriteRegionScheduleWithRevertRegionsDimFirstOnly(t *testing.T) {
 func TestHotReadRegionScheduleWithRevertRegionsDimSecond(t *testing.T) {
 	// This is a test that searchRevertRegions finds a solution of rank -1.
 	re := require.New(t)
-	statistics.Denoising = false
-	statisticsInterval = 0
-
 	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
-	sche, err := CreateScheduler(utils.Read.String(), oc, storage.NewStorageWithMemoryBackend(), nil, nil)
+	sche, err := CreateScheduler(readType, oc, storage.NewStorageWithMemoryBackend(), nil, nil)
 	re.NoError(err)
 	hb := sche.(*hotScheduler)
-	hb.conf.SetDstToleranceRatio(0.0)
-	hb.conf.SetSrcToleranceRatio(0.0)
-	hb.conf.SetRankFormulaVersion("v1")
-	hb.conf.SetHistorySampleDuration(0)
+	hb.conf.setDstToleranceRatio(0.0)
+	hb.conf.setSrcToleranceRatio(0.0)
+	hb.conf.setRankFormulaVersion("v1")
+	hb.conf.setHistorySampleDuration(0)
 	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
-	tc.SetHotRegionCacheHitsThreshold(0)
 	tc.AddRegionStore(1, 20)
 	tc.AddRegionStore(2, 20)
 	tc.AddRegionStore(3, 20)
@@ -247,14 +235,14 @@ func TestHotReadRegionScheduleWithRevertRegionsDimSecond(t *testing.T) {
 	re.Empty(ops)
 	re.False(hb.searchRevertRegions[readLeader])
 
-	hb.conf.SetRankFormulaVersion("v2")
+	hb.conf.setRankFormulaVersion("v2")
 	// searchRevertRegions becomes true after the first `Schedule`.
 	ops, _ = hb.Schedule(tc, false)
 	re.Empty(ops)
 	re.True(hb.searchRevertRegions[readLeader])
 	// Two operators can be generated when RankFormulaVersion == "v2".
 	ops, _ = hb.Schedule(tc, false)
-	/* The revert region is currently disabled for the -1 case.
+	/* The revert region is currently disabled for the rank 1 case.
 	re.Len(ops, 2)
 	operatorutil.CheckTransferLeader(re, ops[0], operator.OpHotRegion, 2, 5)
 	operatorutil.CheckTransferLeader(re, ops[1], operator.OpHotRegion, 5, 2)
@@ -275,19 +263,15 @@ func TestHotReadRegionScheduleWithRevertRegionsDimSecond(t *testing.T) {
 
 func TestSkipUniformStore(t *testing.T) {
 	re := require.New(t)
-	statistics.Denoising = false
-	statisticsInterval = 0
-
 	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
-	hb, err := CreateScheduler(utils.Read.String(), oc, storage.NewStorageWithMemoryBackend(), nil, nil)
+	hb, err := CreateScheduler(readType, oc, storage.NewStorageWithMemoryBackend(), nil, nil)
 	re.NoError(err)
-	hb.(*hotScheduler).conf.SetSrcToleranceRatio(1)
-	hb.(*hotScheduler).conf.SetDstToleranceRatio(1)
-	hb.(*hotScheduler).conf.SetRankFormulaVersion("v2")
+	hb.(*hotScheduler).conf.setSrcToleranceRatio(1)
+	hb.(*hotScheduler).conf.setDstToleranceRatio(1)
+	hb.(*hotScheduler).conf.setRankFormulaVersion("v2")
 	hb.(*hotScheduler).conf.ReadPriorities = []string{utils.BytePriority, utils.KeyPriority}
-	hb.(*hotScheduler).conf.SetHistorySampleDuration(0)
-	tc.SetHotRegionCacheHitsThreshold(0)
+	hb.(*hotScheduler).conf.setHistorySampleDuration(0)
 	tc.AddRegionStore(1, 20)
 	tc.AddRegionStore(2, 20)
 	tc.AddRegionStore(3, 20)
@@ -371,11 +355,9 @@ func TestHotReadRegionScheduleWithSmallHotRegion(t *testing.T) {
 
 	// Case1: Before #6827, we only use minHotRatio, so cannot schedule small hot region in this case.
 	// Because 10000 is larger than the length of hotRegions, so `filterHotPeers` will skip the topn calculation.
-	origin := topnPosition
 	topnPosition = 10000
 	ops := checkHotReadRegionScheduleWithSmallHotRegion(re, highLoad, lowLoad, emptyFunc)
 	re.Empty(ops)
-	topnPosition = origin
 
 	// Case2: After #6827, we use top10 as the threshold of minHotPeer.
 	ops = checkHotReadRegionScheduleWithSmallHotRegion(re, highLoad, lowLoad, emptyFunc)
@@ -420,7 +402,6 @@ func TestHotReadRegionScheduleWithSmallHotRegion(t *testing.T) {
 		tc.AddRegionWithReadInfo(hotRegionID+1, 1, bigHotRegionByte, 0, bigHotRegionQuery, utils.StoreHeartBeatReportInterval, []uint64{2, 3})
 	})
 	re.Empty(ops)
-	topnPosition = origin
 
 	// Case7: If there are more than topnPosition hot regions, but them are pending,
 	// we will schedule large hot region rather than small hot region, so there is no operator.
@@ -432,22 +413,19 @@ func TestHotReadRegionScheduleWithSmallHotRegion(t *testing.T) {
 		hb.regionPendings[hotRegionID+1] = &pendingInfluence{}
 	})
 	re.Empty(ops)
-	topnPosition = origin
 }
 
 func checkHotReadRegionScheduleWithSmallHotRegion(re *require.Assertions, highLoad, lowLoad uint64,
 	addOtherRegions func(*mockcluster.Cluster, *hotScheduler)) []*operator.Operator {
 	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
-	statistics.Denoising = false
-	sche, err := CreateScheduler(utils.Read.String(), oc, storage.NewStorageWithMemoryBackend(), nil, nil)
+	sche, err := CreateScheduler(readType, oc, storage.NewStorageWithMemoryBackend(), nil, nil)
 	re.NoError(err)
 	hb := sche.(*hotScheduler)
-	hb.conf.SetSrcToleranceRatio(1)
-	hb.conf.SetDstToleranceRatio(1)
-	hb.conf.SetRankFormulaVersion("v2")
+	hb.conf.setSrcToleranceRatio(1)
+	hb.conf.setDstToleranceRatio(1)
+	hb.conf.setRankFormulaVersion("v2")
 	hb.conf.ReadPriorities = []string{utils.QueryPriority, utils.BytePriority}
-	tc.SetHotRegionCacheHitsThreshold(0)
 	tc.AddRegionStore(1, 40)
 	tc.AddRegionStore(2, 10)
 	tc.AddRegionStore(3, 10)
@@ -470,7 +448,6 @@ func checkHotReadRegionScheduleWithSmallHotRegion(re *require.Assertions, highLo
 		}
 	}
 	addRegionInfo(tc, utils.Read, regions)
-	tc.SetHotRegionCacheHitsThreshold(1)
 	addOtherRegions(tc, hb)
 	ops, _ := hb.Schedule(tc, false)
 	return ops

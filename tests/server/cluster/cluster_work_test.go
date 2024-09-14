@@ -40,7 +40,7 @@ func TestValidRequestRegion(t *testing.T) {
 	err = cluster.RunInitialServers()
 	re.NoError(err)
 
-	cluster.WaitLeader()
+	re.NotEmpty(cluster.WaitLeader())
 	leaderServer := cluster.GetLeaderServer()
 	grpcPDClient := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
 	clusterID := leaderServer.GetClusterID()
@@ -84,7 +84,7 @@ func TestAskSplit(t *testing.T) {
 	err = cluster.RunInitialServers()
 	re.NoError(err)
 
-	cluster.WaitLeader()
+	re.NotEmpty(cluster.WaitLeader())
 	leaderServer := cluster.GetLeaderServer()
 	grpcPDClient := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
 	clusterID := leaderServer.GetClusterID()
@@ -130,7 +130,7 @@ func TestAskSplit(t *testing.T) {
 	re.NoError(err)
 }
 
-func TestSuspectRegions(t *testing.T) {
+func TestPendingProcessedRegions(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -141,7 +141,7 @@ func TestSuspectRegions(t *testing.T) {
 	err = cluster.RunInitialServers()
 	re.NoError(err)
 
-	cluster.WaitLeader()
+	re.NotEmpty(cluster.WaitLeader())
 	leaderServer := cluster.GetLeaderServer()
 	grpcPDClient := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
 	clusterID := leaderServer.GetClusterID()
@@ -162,7 +162,7 @@ func TestSuspectRegions(t *testing.T) {
 	re.NoError(err)
 	ids := []uint64{regions[0].GetMeta().GetId(), res.Ids[0].NewRegionId, res.Ids[1].NewRegionId}
 	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
-	suspects := rc.GetSuspectRegions()
-	sort.Slice(suspects, func(i, j int) bool { return suspects[i] < suspects[j] })
-	re.Equal(ids, suspects)
+	pendingProcessedRegions := rc.GetPendingProcessedRegions()
+	sort.Slice(pendingProcessedRegions, func(i, j int) bool { return pendingProcessedRegions[i] < pendingProcessedRegions[j] })
+	re.Equal(ids, pendingProcessedRegions)
 }

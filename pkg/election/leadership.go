@@ -28,16 +28,17 @@ import (
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
-	"go.etcd.io/etcd/clientv3"
-	"go.etcd.io/etcd/mvcc/mvccpb"
+	"go.etcd.io/etcd/api/v3/mvccpb"
+	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 )
 
 const (
-	defaultCampaignTimesSlot   = 10
-	watchLoopUnhealthyTimeout  = 60 * time.Second
-	campaignTimesRecordTimeout = 5 * time.Minute
+	defaultCampaignTimesSlot  = 10
+	watchLoopUnhealthyTimeout = 60 * time.Second
 )
+
+var campaignTimesRecordTimeout = 5 * time.Minute
 
 // GetLeader gets the corresponding leader from etcd by given leaderPath (as the key).
 func GetLeader(c *clientv3.Client, leaderPath string) (*pdpb.Member, int64, error) {
@@ -70,6 +71,9 @@ type Leadership struct {
 	// campaignTimes is used to record the campaign times of the leader within `campaignTimesRecordTimeout`.
 	// It is ordered by time to prevent the leader from campaigning too frequently.
 	campaignTimes []time.Time
+	// primaryWatch is for the primary watch only,
+	// which is used to reuse `Watch` interface in `Leadership`.
+	primaryWatch atomic.Bool
 }
 
 // NewLeadership creates a new Leadership.
@@ -83,17 +87,18 @@ func NewLeadership(client *clientv3.Client, leaderKey, purpose string) *Leadersh
 	return leadership
 }
 
-// getLease gets the lease of leadership, only if leadership is valid,
+// GetLease gets the lease of leadership, only if leadership is valid,
 // i.e. the owner is a true leader, the lease is not nil.
-func (ls *Leadership) getLease() *lease {
+func (ls *Leadership) GetLease() *Lease {
 	l := ls.lease.Load()
 	if l == nil {
 		return nil
 	}
-	return l.(*lease)
+	return l.(*Lease)
 }
 
-func (ls *Leadership) setLease(lease *lease) {
+// SetLease sets the lease of leadership.
+func (ls *Leadership) SetLease(lease *Lease) {
 	ls.lease.Store(lease)
 }
 
@@ -113,7 +118,18 @@ func (ls *Leadership) GetLeaderKey() string {
 	return ls.leaderKey
 }
 
+// SetPrimaryWatch sets the primary watch flag.
+func (ls *Leadership) SetPrimaryWatch(val bool) {
+	ls.primaryWatch.Store(val)
+}
+
+// IsPrimary gets the primary watch flag.
+func (ls *Leadership) IsPrimary() bool {
+	return ls.primaryWatch.Load()
+}
+
 // GetCampaignTimesNum is used to get the campaign times of the leader within `campaignTimesRecordTimeout`.
+// Need to make sure `AddCampaignTimes` is called before this function.
 func (ls *Leadership) GetCampaignTimesNum() int {
 	if ls == nil {
 		return 0
@@ -129,8 +145,8 @@ func (ls *Leadership) ResetCampaignTimes() {
 	ls.campaignTimes = make([]time.Time, 0, defaultCampaignTimesSlot)
 }
 
-// addCampaignTimes is used to add the campaign times of the leader.
-func (ls *Leadership) addCampaignTimes() {
+// AddCampaignTimes is used to add the campaign times of the leader.
+func (ls *Leadership) AddCampaignTimes() {
 	if ls == nil {
 		return
 	}
@@ -138,7 +154,7 @@ func (ls *Leadership) addCampaignTimes() {
 		if time.Since(ls.campaignTimes[i]) > campaignTimesRecordTimeout {
 			// remove the time which is more than `campaignTimesRecordTimeout`
 			// array is sorted by time
-			ls.campaignTimes = ls.campaignTimes[i:]
+			ls.campaignTimes = ls.campaignTimes[i+1:]
 			break
 		}
 	}
@@ -148,21 +164,21 @@ func (ls *Leadership) addCampaignTimes() {
 
 // Campaign is used to campaign the leader with given lease and returns a leadership
 func (ls *Leadership) Campaign(leaseTimeout int64, leaderData string, cmps ...clientv3.Cmp) error {
-	ls.addCampaignTimes()
 	ls.leaderValue = leaderData
 	// Create a new lease to campaign
-	newLease := &lease{
-		Purpose: ls.purpose,
-		client:  ls.client,
-		lease:   clientv3.NewLease(ls.client),
-	}
-	ls.setLease(newLease)
+	newLease := NewLease(ls.client, ls.purpose)
+	ls.SetLease(newLease)
 
 	failpoint.Inject("skipGrantLeader", func(val failpoint.Value) {
-		var member pdpb.Member
-		member.Unmarshal([]byte(leaderData))
 		name, ok := val.(string)
+		if len(name) == 0 {
+			// return directly when not set the name
+			failpoint.Return(errors.Errorf("failed to grant lease"))
+		}
+		var member pdpb.Member
+		_ = member.Unmarshal([]byte(leaderData))
 		if ok && member.Name == name {
+			// only return when the name is set and the name is equal to the leader name
 			failpoint.Return(errors.Errorf("failed to grant lease"))
 		}
 	})
@@ -199,12 +215,12 @@ func (ls *Leadership) Keep(ctx context.Context) {
 	ls.keepAliveCancelFuncLock.Lock()
 	ls.keepAliveCtx, ls.keepAliveCancelFunc = context.WithCancel(ctx)
 	ls.keepAliveCancelFuncLock.Unlock()
-	go ls.getLease().KeepAlive(ls.keepAliveCtx)
+	go ls.GetLease().KeepAlive(ls.keepAliveCtx)
 }
 
 // Check returns whether the leadership is still available.
 func (ls *Leadership) Check() bool {
-	return ls != nil && ls.getLease() != nil && !ls.getLease().IsExpired()
+	return ls != nil && ls.GetLease() != nil && !ls.GetLease().IsExpired()
 }
 
 // LeaderTxn returns txn() with a leader comparison to guarantee that
@@ -375,6 +391,13 @@ func (ls *Leadership) Watch(serverCtx context.Context, revision int64) {
 						zap.Int64("revision", wresp.Header.Revision), zap.String("leader-key", ls.leaderKey), zap.String("purpose", ls.purpose))
 					return
 				}
+				// ONLY `{service}/primary/transfer` API update primary will meet this condition.
+				if ev.Type == mvccpb.PUT && ls.IsPrimary() {
+					log.Info("current leadership is updated", zap.Int64("revision", wresp.Header.Revision),
+						zap.String("leader-key", ls.leaderKey), zap.ByteString("cur-value", ev.Kv.Value),
+						zap.String("purpose", ls.purpose))
+					return
+				}
 			}
 			revision = wresp.Header.Revision + 1
 		}
@@ -384,7 +407,7 @@ func (ls *Leadership) Watch(serverCtx context.Context, revision int64) {
 
 // Reset does some defer jobs such as closing lease, resetting lease etc.
 func (ls *Leadership) Reset() {
-	if ls == nil || ls.getLease() == nil {
+	if ls == nil || ls.GetLease() == nil {
 		return
 	}
 	ls.keepAliveCancelFuncLock.Lock()
@@ -392,5 +415,6 @@ func (ls *Leadership) Reset() {
 		ls.keepAliveCancelFunc()
 	}
 	ls.keepAliveCancelFuncLock.Unlock()
-	ls.getLease().Close()
+	ls.GetLease().Close()
+	ls.SetPrimaryWatch(false)
 }

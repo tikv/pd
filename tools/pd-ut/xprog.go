@@ -34,7 +34,7 @@ func main() {
 
 	// Extract the current work directory
 	cwd := os.Args[0]
-	cwd = cwd[:len(cwd)-len("bin/xprog")]
+	cwd = cwd[:len(cwd)-len(filepath.Join("bin", "xprog"))]
 
 	testBinaryPath := os.Args[1]
 	dir, _ := filepath.Split(testBinaryPath)
@@ -42,7 +42,7 @@ func main() {
 	// Extract the package info from /tmp/go-build2662369829/b1382/importcfg.link
 	pkg := getPackageInfo(dir)
 
-	const prefix = "github.com/tikv/pd/"
+	var prefix = filepath.Join("github.com", "tikv", "pd")
 	if !strings.HasPrefix(pkg, prefix) {
 		os.Exit(-3)
 	}

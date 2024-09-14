@@ -24,9 +24,9 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/testutil"
-	"go.etcd.io/etcd/clientv3"
-	"go.etcd.io/etcd/embed"
-	"go.etcd.io/etcd/etcdserver/etcdserverpb"
+	"go.etcd.io/etcd/api/v3/etcdserverpb"
+	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.etcd.io/etcd/server/v3/embed"
 )
 
 // NewTestSingleConfig is used to create a etcd config for the unit test purpose.
@@ -51,7 +51,7 @@ func NewTestSingleConfig() *embed.Config {
 }
 
 func genRandName() string {
-	return "test_etcd_" + strconv.FormatInt(time.Now().UnixNano()%10000, 10)
+	return "pd" + strconv.FormatInt(time.Now().UnixNano(), 10)
 }
 
 // NewTestEtcdCluster is used to create a etcd cluster for the unit test purpose.
@@ -86,7 +86,14 @@ func NewTestEtcdCluster(t *testing.T, count int) (servers []*embed.Etcd, etcdCli
 	clean = func() {
 		etcdClient.Close()
 		for _, server := range servers {
-			if server != nil {
+			if server.Server != nil {
+				select {
+				case _, ok := <-server.Err():
+					if !ok {
+						return
+					}
+				default:
+				}
 				server.Close()
 			}
 		}
@@ -122,18 +129,27 @@ func MustAddEtcdMember(t *testing.T, cfg1 *embed.Config, client *clientv3.Client
 
 func checkMembers(re *require.Assertions, client *clientv3.Client, etcds []*embed.Etcd) {
 	// Check the client can get the new member.
-	listResp, err := ListEtcdMembers(client.Ctx(), client)
-	re.NoError(err)
-	re.Len(listResp.Members, len(etcds))
-	inList := func(m *etcdserverpb.Member) bool {
-		for _, etcd := range etcds {
-			if m.ID == uint64(etcd.Server.ID()) {
-				return true
+	testutil.Eventually(re, func() bool {
+		listResp, err := ListEtcdMembers(client.Ctx(), client)
+		if err != nil {
+			return false
+		}
+		if len(etcds) != len(listResp.Members) {
+			return false
+		}
+		inList := func(m *etcdserverpb.Member) bool {
+			for _, etcd := range etcds {
+				if m.ID == uint64(etcd.Server.ID()) {
+					return true
+				}
+			}
+			return false
+		}
+		for _, m := range listResp.Members {
+			if !inList(m) {
+				return false
 			}
 		}
-		return false
-	}
-	for _, m := range listResp.Members {
-		re.True(inList(m))
-	}
+		return true
+	})
 }

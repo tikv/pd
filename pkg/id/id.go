@@ -24,7 +24,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
-	"go.etcd.io/etcd/clientv3"
+	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 )
 
@@ -105,6 +105,7 @@ func (alloc *allocatorImpl) Alloc() (uint64, error) {
 	return alloc.base, nil
 }
 
+// SetBase sets the base.
 func (alloc *allocatorImpl) SetBase(newBase uint64) error {
 	alloc.mu.Lock()
 	defer alloc.mu.Unlock()

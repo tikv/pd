@@ -24,7 +24,7 @@ import (
 	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/mcs/registry"
 	"github.com/tikv/pd/pkg/utils/apiutil"
-	"go.etcd.io/etcd/clientv3"
+	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -71,9 +71,9 @@ func (s *Service) RegisterGRPCService(g *grpc.Server) {
 }
 
 // RegisterRESTHandler registers the service to REST server.
-func (s *Service) RegisterRESTHandler(userDefineHandlers map[string]http.Handler) {
-	handler, group := SetUpRestHandler(s)
-	apiutil.RegisterUserDefinedHandlers(userDefineHandlers, &group, handler)
+func (*Service) RegisterRESTHandler(_ map[string]http.Handler) error {
+	// restful API is not implemented yet.
+	return nil
 }
 
 func (s *Service) checkServing() error {

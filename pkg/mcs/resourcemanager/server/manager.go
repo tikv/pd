@@ -121,7 +121,7 @@ func (m *Manager) Init(ctx context.Context) error {
 		return err
 	}
 	if err = json.Unmarshal([]byte(v), &m.controllerConfig); err != nil {
-		log.Error("un-marshall controller config failed, fallback to default", zap.Error(err), zap.String("v", v))
+		log.Warn("un-marshall controller config failed, fallback to default", zap.Error(err), zap.String("v", v))
 	}
 
 	// re-save the config to make sure the config has been persisted.
@@ -129,7 +129,9 @@ func (m *Manager) Init(ctx context.Context) error {
 		return err
 	}
 	// Load resource group meta info from storage.
+	m.Lock()
 	m.groups = make(map[string]*ResourceGroup)
+	m.Unlock()
 	handler := func(k, v string) {
 		group := &rmpb.ResourceGroup{}
 		if err := proto.Unmarshal([]byte(v), group); err != nil {
@@ -322,8 +324,7 @@ func (m *Manager) GetResourceGroupList(withStats bool) []*ResourceGroup {
 func (m *Manager) persistLoop(ctx context.Context) {
 	ticker := time.NewTicker(time.Minute)
 	failpoint.Inject("fastPersist", func() {
-		ticker.Stop()
-		ticker = time.NewTicker(100 * time.Millisecond)
+		ticker.Reset(100 * time.Millisecond)
 	})
 	defer ticker.Stop()
 	for {
@@ -347,7 +348,9 @@ func (m *Manager) persistResourceGroupRunningState() {
 		m.RLock()
 		group, ok := m.groups[keys[idx]]
 		if ok {
-			group.persistStates(m.storage)
+			if err := group.persistStates(m.storage); err != nil {
+				log.Error("persist resource group state failed", zap.Error(err))
+			}
 		}
 		m.RUnlock()
 	}
@@ -453,6 +456,7 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 					delete(maxPerSecTrackers, r.name)
 					readRequestUnitMaxPerSecCost.DeleteLabelValues(r.name)
 					writeRequestUnitMaxPerSecCost.DeleteLabelValues(r.name)
+					resourceGroupConfigGauge.DeletePartialMatch(prometheus.Labels{newResourceGroupNameLabel: r.name})
 				}
 			}
 		case <-availableRUTicker.C:
@@ -472,8 +476,10 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 					ru = 0
 				}
 				availableRUCounter.WithLabelValues(group.Name, group.Name).Set(ru)
+				resourceGroupConfigGauge.WithLabelValues(group.Name, priorityLabel).Set(group.getPriority())
+				resourceGroupConfigGauge.WithLabelValues(group.Name, ruPerSecLabel).Set(group.getFillRate())
+				resourceGroupConfigGauge.WithLabelValues(group.Name, ruCapacityLabel).Set(group.getBurstLimit())
 			}
-
 		case <-recordMaxTicker.C:
 			// Record the sum of RRU and WRU every second.
 			m.RLock()

@@ -25,13 +25,15 @@ import (
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/id"
-	"github.com/tikv/pd/pkg/mcs/utils"
+	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
+	"github.com/tikv/pd/pkg/utils/keypath"
+	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"go.uber.org/zap"
 )
@@ -123,20 +125,20 @@ func NewKeyspaceManager(
 		cluster:           cluster,
 		config:            config,
 		kgm:               kgm,
-		nextPatrolStartID: utils.DefaultKeyspaceID,
+		nextPatrolStartID: constant.DefaultKeyspaceID,
 	}
 }
 
 // Bootstrap saves default keyspace info.
 func (manager *Manager) Bootstrap() error {
 	// Split Keyspace Region for default keyspace.
-	if err := manager.splitKeyspaceRegion(utils.DefaultKeyspaceID, false); err != nil {
+	if err := manager.splitKeyspaceRegion(constant.DefaultKeyspaceID, false); err != nil {
 		return err
 	}
 	now := time.Now().Unix()
 	defaultKeyspaceMeta := &keyspacepb.KeyspaceMeta{
-		Id:             utils.DefaultKeyspaceID,
-		Name:           utils.DefaultKeyspaceName,
+		Id:             constant.DefaultKeyspaceID,
+		Name:           constant.DefaultKeyspaceName,
 		State:          keyspacepb.KeyspaceState_ENABLED,
 		CreatedAt:      now,
 		StateChangedAt: now,
@@ -235,8 +237,8 @@ func (manager *Manager) CreateKeyspace(request *CreateKeyspaceRequest) (*keyspac
 	err = manager.splitKeyspaceRegion(newID, waitRegionSplit)
 	if err != nil {
 		err2 := manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
-			idPath := endpoint.KeyspaceIDPath(request.Name)
-			metaPath := endpoint.KeyspaceMetaPath(newID)
+			idPath := keypath.KeyspaceIDPath(request.Name)
+			metaPath := keypath.KeyspaceMetaPath(newID)
 			e := txn.Remove(idPath)
 			if e != nil {
 				return e
@@ -327,14 +329,19 @@ func (manager *Manager) splitKeyspaceRegion(id uint32, waitRegionSplit bool) (er
 	}
 	defer func() {
 		if err != nil {
-			cl.GetRegionLabeler().DeleteLabelRule(keyspaceRule.ID)
+			if err := cl.GetRegionLabeler().DeleteLabelRule(keyspaceRule.ID); err != nil {
+				log.Warn("[keyspace] failed to delete region label for keyspace",
+					zap.Uint32("keyspace-id", id),
+					zap.Error(err),
+				)
+			}
 		}
 	}()
 
 	if waitRegionSplit {
 		ranges := keyspaceRule.Data.([]*labeler.KeyRangeRule)
 		if len(ranges) < 2 {
-			log.Warn("[keyspace] failed to split keyspace region with insufficient range", zap.Any("label-rule", keyspaceRule))
+			log.Warn("[keyspace] failed to split keyspace region with insufficient range", logutil.ZapRedactString("label-rule", keyspaceRule.String()))
 			return ErrRegionSplitFailed
 		}
 		rawLeftBound, rawRightBound := ranges[0].StartKey, ranges[0].EndKey
@@ -349,20 +356,20 @@ func (manager *Manager) splitKeyspaceRegion(id uint32, waitRegionSplit bool) (er
 		for {
 			select {
 			case <-ticker.C:
-				regionsInfo := manager.cluster.GetBasicCluster().RegionsInfo
-				region := regionsInfo.GetRegionByKey(rawLeftBound)
+				c := manager.cluster.GetBasicCluster()
+				region := c.GetRegionByKey(rawLeftBound)
 				if region == nil || !bytes.Equal(region.GetStartKey(), rawLeftBound) {
 					continue
 				}
-				region = regionsInfo.GetRegionByKey(rawRightBound)
+				region = c.GetRegionByKey(rawRightBound)
 				if region == nil || !bytes.Equal(region.GetStartKey(), rawRightBound) {
 					continue
 				}
-				region = regionsInfo.GetRegionByKey(txnLeftBound)
+				region = c.GetRegionByKey(txnLeftBound)
 				if region == nil || !bytes.Equal(region.GetStartKey(), txnLeftBound) {
 					continue
 				}
-				region = regionsInfo.GetRegionByKey(txnRightBound)
+				region = c.GetRegionByKey(txnRightBound)
 				if region == nil || !bytes.Equal(region.GetStartKey(), txnRightBound) {
 					continue
 				}
@@ -383,7 +390,7 @@ func (manager *Manager) splitKeyspaceRegion(id uint32, waitRegionSplit bool) (er
 
 	log.Info("[keyspace] added region label for keyspace",
 		zap.Uint32("keyspace-id", id),
-		zap.Any("label-rule", keyspaceRule),
+		logutil.ZapRedactString("label-rule", keyspaceRule.String()),
 		zap.Duration("takes", time.Since(start)),
 	)
 	return
@@ -543,7 +550,7 @@ func (manager *Manager) UpdateKeyspaceConfig(name string, mutations []*Mutation)
 // It returns error if saving failed, operation not allowed, or if keyspace not exists.
 func (manager *Manager) UpdateKeyspaceState(name string, newState keyspacepb.KeyspaceState, now int64) (*keyspacepb.KeyspaceMeta, error) {
 	// Changing the state of default keyspace is not allowed.
-	if name == utils.DefaultKeyspaceName {
+	if name == constant.DefaultKeyspaceName {
 		log.Warn("[keyspace] failed to update keyspace config",
 			zap.Error(ErrModifyDefaultKeyspace),
 		)
@@ -595,7 +602,7 @@ func (manager *Manager) UpdateKeyspaceState(name string, newState keyspacepb.Key
 // It returns error if saving failed, operation not allowed, or if keyspace not exists.
 func (manager *Manager) UpdateKeyspaceStateByID(id uint32, newState keyspacepb.KeyspaceState, now int64) (*keyspacepb.KeyspaceMeta, error) {
 	// Changing the state of default keyspace is not allowed.
-	if id == utils.DefaultKeyspaceID {
+	if id == constant.DefaultKeyspaceID {
 		log.Warn("[keyspace] failed to update keyspace config",
 			zap.Error(ErrModifyDefaultKeyspace),
 		)
@@ -724,18 +731,18 @@ func (manager *Manager) PatrolKeyspaceAssignment(startKeyspaceID, endKeyspaceID 
 		var defaultKeyspaceGroup *endpoint.KeyspaceGroup
 		err = manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
 			var err error
-			defaultKeyspaceGroup, err = manager.kgm.store.LoadKeyspaceGroup(txn, utils.DefaultKeyspaceGroupID)
+			defaultKeyspaceGroup, err = manager.kgm.store.LoadKeyspaceGroup(txn, constant.DefaultKeyspaceGroupID)
 			if err != nil {
 				return err
 			}
 			if defaultKeyspaceGroup == nil {
-				return errors.Errorf("default keyspace group %d not found", utils.DefaultKeyspaceGroupID)
+				return errors.Errorf("default keyspace group %d not found", constant.DefaultKeyspaceGroupID)
 			}
 			if defaultKeyspaceGroup.IsSplitting() {
-				return ErrKeyspaceGroupInSplit(utils.DefaultKeyspaceGroupID)
+				return ErrKeyspaceGroupInSplit(constant.DefaultKeyspaceGroupID)
 			}
 			if defaultKeyspaceGroup.IsMerging() {
-				return ErrKeyspaceGroupInMerging(utils.DefaultKeyspaceGroupID)
+				return ErrKeyspaceGroupInMerging(constant.DefaultKeyspaceGroupID)
 			}
 			keyspaces, err := manager.store.LoadRangeKeyspace(txn, manager.nextPatrolStartID, etcdutil.MaxEtcdTxnOps)
 			if err != nil {
@@ -784,7 +791,7 @@ func (manager *Manager) PatrolKeyspaceAssignment(startKeyspaceID, endKeyspaceID 
 					// Only save the keyspace group meta if any keyspace is assigned to it.
 					assigned = true
 				}
-				ks.Config[TSOKeyspaceGroupIDKey] = strconv.FormatUint(uint64(utils.DefaultKeyspaceGroupID), 10)
+				ks.Config[TSOKeyspaceGroupIDKey] = strconv.FormatUint(uint64(constant.DefaultKeyspaceGroupID), 10)
 				err = manager.store.SaveKeyspaceMeta(txn, ks)
 				if err != nil {
 					log.Error("[keyspace] failed to save keyspace meta during patrol",

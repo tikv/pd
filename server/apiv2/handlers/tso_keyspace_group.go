@@ -22,7 +22,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/pingcap/errors"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/mcs/utils"
+	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/syncutil"
@@ -237,7 +237,7 @@ func SplitKeyspaceGroupByID(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusBadRequest, "invalid empty keyspaces")
 		return
 	}
-	if splitParams.StartKeyspaceID < utils.DefaultKeyspaceID ||
+	if splitParams.StartKeyspaceID < constant.DefaultKeyspaceID ||
 		splitParams.StartKeyspaceID > splitParams.EndKeyspaceID {
 		c.AbortWithStatusJSON(http.StatusBadRequest, "invalid start/end keyspace id")
 		return
@@ -400,7 +400,7 @@ func AllocNodesForKeyspaceGroup(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusBadRequest, errs.ErrBindJSON.Wrap(err).GenWithStackByCause())
 		return
 	}
-	if manager.GetNodesCount() < allocParams.Replica || allocParams.Replica < utils.DefaultKeyspaceGroupReplicaCount {
+	if manager.GetNodesCount() < allocParams.Replica || allocParams.Replica < constant.DefaultKeyspaceGroupReplicaCount {
 		c.AbortWithStatusJSON(http.StatusBadRequest, "invalid replica, should be in [2, nodes_num]")
 		return
 	}
@@ -413,8 +413,16 @@ func AllocNodesForKeyspaceGroup(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusBadRequest, "existed replica is larger than the new replica")
 		return
 	}
+
+	// check if nodes exist
+	existMembers := make(map[string]struct{})
+	for _, member := range keyspaceGroup.Members {
+		if exist, addr := manager.IsExistNode(member.Address); exist {
+			existMembers[addr] = struct{}{}
+		}
+	}
 	// get the nodes
-	nodes, err := manager.AllocNodesForKeyspaceGroup(id, allocParams.Replica)
+	nodes, err := manager.AllocNodesForKeyspaceGroup(id, existMembers, allocParams.Replica)
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
 		return
@@ -453,14 +461,9 @@ func SetNodesForKeyspaceGroup(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusBadRequest, "keyspace group does not exist")
 		return
 	}
-	// check if nodes is less than default replica count
-	if len(setParams.Nodes) < utils.DefaultKeyspaceGroupReplicaCount {
-		c.AbortWithStatusJSON(http.StatusBadRequest, "invalid num of nodes")
-		return
-	}
 	// check if node exists
 	for _, node := range setParams.Nodes {
-		if !manager.IsExistNode(node) {
+		if exist, _ := manager.IsExistNode(node); !exist {
 			c.AbortWithStatusJSON(http.StatusBadRequest, "node does not exist")
 			return
 		}
@@ -512,7 +515,7 @@ func SetPriorityForKeyspaceGroup(c *gin.Context) {
 	// check if node exists
 	members := kg.Members
 	if slice.NoneOf(members, func(i int) bool {
-		return members[i].Address == node
+		return members[i].IsAddressEquivalent(node)
 	}) {
 		c.AbortWithStatusJSON(http.StatusBadRequest, "tso node does not exist in the keyspace group")
 	}
@@ -550,5 +553,5 @@ func parseNodeAddress(c *gin.Context) (string, error) {
 }
 
 func isValid(id uint32) bool {
-	return id >= utils.DefaultKeyspaceGroupID && id <= utils.MaxKeyspaceGroupCountInUse
+	return id >= constant.DefaultKeyspaceGroupID && id <= constant.MaxKeyspaceGroupCountInUse
 }

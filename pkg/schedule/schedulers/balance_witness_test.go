@@ -23,6 +23,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
+	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/storage"
 )
 
@@ -50,7 +51,7 @@ func (suite *balanceWitnessSchedulerTestSuite) SetupTest() {
 			Count:   4,
 		},
 	})
-	lb, err := CreateScheduler(BalanceWitnessType, suite.oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(BalanceWitnessType, []string{"", ""}), nil)
+	lb, err := CreateScheduler(types.BalanceWitnessScheduler, suite.oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.BalanceWitnessScheduler, []string{"", ""}), nil)
 	re.NoError(err)
 	suite.lb = lb
 }

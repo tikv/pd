@@ -62,7 +62,7 @@ func (suite *ruleCheckerTestSuite) SetupTest() {
 	suite.cluster.SetEnableWitness(true)
 	suite.cluster.SetEnableUseJointConsensus(false)
 	suite.ruleManager = suite.cluster.RuleManager
-	suite.rc = NewRuleChecker(suite.ctx, suite.cluster, suite.ruleManager, cache.NewDefaultCache(10))
+	suite.rc = NewRuleChecker(suite.ctx, suite.cluster, suite.ruleManager, cache.NewIDTTL(suite.ctx, time.Minute, 3*time.Minute))
 }
 
 func (suite *ruleCheckerTestSuite) TearDownTest() {
@@ -1955,7 +1955,7 @@ func (suite *ruleCheckerTestAdvancedSuite) SetupTest() {
 	suite.cluster.SetEnableWitness(true)
 	suite.cluster.SetEnableUseJointConsensus(true)
 	suite.ruleManager = suite.cluster.RuleManager
-	suite.rc = NewRuleChecker(suite.ctx, suite.cluster, suite.ruleManager, cache.NewDefaultCache(10))
+	suite.rc = NewRuleChecker(suite.ctx, suite.cluster, suite.ruleManager, cache.NewIDTTL(suite.ctx, time.Minute, 3*time.Minute))
 }
 
 func (suite *ruleCheckerTestAdvancedSuite) TearDownTest() {
@@ -1980,7 +1980,7 @@ func makeStores() placement.StoreSet {
 				if zone == 1 && host == 1 {
 					labels["type"] = "read"
 				}
-				stores.SetStore(core.NewStoreInfoWithLabel(id, labels).Clone(core.SetLastHeartbeatTS(now), core.SetStoreState(metapb.StoreState_Up)))
+				stores.PutStore(core.NewStoreInfoWithLabel(id, labels).Clone(core.SetLastHeartbeatTS(now), core.SetStoreState(metapb.StoreState_Up)))
 			}
 		}
 	}
@@ -2053,7 +2053,7 @@ func (suite *ruleCheckerTestAdvancedSuite) TestReplaceAnExistingPeerCases() {
 		{"111_learner,211_learner,311_learner,151_leader,252,351", []string{"3/voter//", "3/learner/type=read/"}, ""},
 	}
 	groupName := "a_test"
-	for i, cas := range testCases {
+	for _, cas := range testCases {
 		bundle := placement.GroupBundle{
 			ID:       groupName,
 			Index:    1000,
@@ -2071,7 +2071,7 @@ func (suite *ruleCheckerTestAdvancedSuite) TestReplaceAnExistingPeerCases() {
 		suite.cluster.PutRegion(region)
 		op := suite.rc.Check(region)
 		if len(cas.opStr) > 0 {
-			re.Contains(op.String(), cas.opStr, i, cas.opStr)
+			re.Contains(op.String(), cas.opStr, cas.opStr)
 		}
 		suite.ruleManager.DeleteGroupBundle(groupName, false)
 	}

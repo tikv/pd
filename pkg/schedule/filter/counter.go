@@ -40,66 +40,6 @@ func (a action) String() string {
 	return "unknown"
 }
 
-type scope int
-
-const (
-	// BalanceLeader is the filter type for balance leader.
-	BalanceLeader scope = iota
-	// BalanceRegion is the filter type for balance region.
-	BalanceRegion
-	// BalanceHotRegion is the filter type for hot region.
-	BalanceHotRegion
-	// BalanceWitness is the filter type for balance witness.
-	BalanceWitness
-	// Label is the filter type for replica.
-	Label
-
-	// EvictLeader is the filter type for evict leader.
-	EvictLeader
-	// RegionScatter is the filter type for scatter region.
-	RegionScatter
-	// ReplicaChecker is the filter type for replica.
-	ReplicaChecker
-	// RuleChecker is the filter type for rule.
-	RuleChecker
-
-	// GrantHotLeader is the filter type for grant hot leader.
-	GrantHotLeader
-	// ShuffleHotRegion is the filter type for shuffle hot region.
-	ShuffleHotRegion
-	// ShuffleRegion is the filter type for shuffle region.
-	ShuffleRegion
-	// RandomMerge is the filter type for random merge.
-	RandomMerge
-	scopeLen
-)
-
-var scopes = [scopeLen]string{
-	"balance-leader-scheduler",
-	"balance-region-scheduler",
-	"balance-hot-region-scheduler",
-	"balance-witness-scheduler",
-	"label-scheduler",
-
-	"evict-leader-scheduler",
-	"region-scatter",
-	"replica-checker",
-	"rule-checker",
-
-	"grant-hot-leader-scheduler",
-	"shuffle-region-scheduler",
-	"shuffle-region-scheduler",
-	"random-merge-scheduler",
-}
-
-// String implements fmt.Stringer interface.
-func (s scope) String() string {
-	if s >= scopeLen {
-		return "unknown"
-	}
-	return scopes[s]
-}
-
 type filterType int
 
 const (
@@ -186,6 +126,11 @@ func NewCounter(scope string) *Counter {
 		}
 	}
 	return &Counter{counter: counter, scope: scope}
+}
+
+// SetScope sets the scope for the counter.
+func (c *Counter) SetScope(scope string) {
+	c.scope = scope
 }
 
 // Add adds the filter counter.

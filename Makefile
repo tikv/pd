@@ -121,13 +121,13 @@ pd-analysis:
 pd-heartbeat-bench:
 	cd tools && CGO_ENABLED=0 go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o $(BUILD_BIN_PATH)/pd-heartbeat-bench pd-heartbeat-bench/main.go
 simulator:
-	cd tools && CGO_ENABLED=0 go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o $(BUILD_BIN_PATH)/pd-simulator pd-simulator/main.go
+	cd tools && GOEXPERIMENT=$(BUILD_GOEXPERIMENT) CGO_ENABLED=$(BUILD_CGO_ENABLED) go build $(BUILD_FLAGS) -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o $(BUILD_BIN_PATH)/pd-simulator pd-simulator/main.go
 regions-dump:
 	cd tools && CGO_ENABLED=0 go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o $(BUILD_BIN_PATH)/regions-dump regions-dump/main.go
 stores-dump:
 	cd tools && CGO_ENABLED=0 go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o $(BUILD_BIN_PATH)/stores-dump stores-dump/main.go
 pd-ut: pd-xprog
-	cd tools && GOEXPERIMENT=$(BUILD_GOEXPERIMENT) CGO_ENABLED=$(BUILD_TOOL_CGO_ENABLED) go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o $(BUILD_BIN_PATH)/pd-ut pd-ut/ut.go
+	cd tools && GOEXPERIMENT=$(BUILD_GOEXPERIMENT) CGO_ENABLED=$(BUILD_TOOL_CGO_ENABLED) go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o $(BUILD_BIN_PATH)/pd-ut pd-ut/ut.go pd-ut/coverProfile.go
 pd-xprog:
 	cd tools && GOEXPERIMENT=$(BUILD_GOEXPERIMENT) CGO_ENABLED=$(BUILD_TOOL_CGO_ENABLED) go build -tags xprog -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o $(BUILD_BIN_PATH)/xprog pd-ut/xprog.go
 
@@ -227,7 +227,8 @@ failpoint-disable: install-tools
 
 ut: pd-ut
 	@$(FAILPOINT_ENABLE)
-	./bin/pd-ut run --race
+	# only run unit tests
+	./bin/pd-ut run --ignore tests --race --junitfile ./junitfile
 	@$(CLEAN_UT_BINARY)
 	@$(FAILPOINT_DISABLE)
 
@@ -251,9 +252,9 @@ basic-test: install-tools
 	go test $(BASIC_TEST_PKGS) || { $(FAILPOINT_DISABLE); exit 1; }
 	@$(FAILPOINT_DISABLE)
 
-ci-test-job: install-tools dashboard-ui
+ci-test-job: install-tools dashboard-ui pd-ut
 	@$(FAILPOINT_ENABLE)
-	./scripts/ci-subtask.sh $(JOB_COUNT) $(JOB_INDEX) || { $(FAILPOINT_DISABLE); exit 1; }
+	./scripts/ci-subtask.sh $(JOB_INDEX) || { $(FAILPOINT_DISABLE); exit 1; }
 	@$(FAILPOINT_DISABLE)
 
 TSO_INTEGRATION_TEST_PKGS := $(PD_PKG)/tests/server/tso
@@ -279,6 +280,7 @@ test-tso-consistency: install-tools
 REAL_CLUSTER_TEST_PATH := $(ROOT_PATH)/tests/integrations/realcluster
 
 test-real-cluster:
+	@ rm -rf ~/.tiup/data/pd_real_cluster_test
 	# testing with the real cluster...
 	cd $(REAL_CLUSTER_TEST_PATH) && $(MAKE) check
 
@@ -313,9 +315,7 @@ CLEAN_UT_BINARY := find . -name '*.test.bin'| xargs rm -f
 
 clean-test:
 	# Cleaning test tmp...
-	rm -rf /tmp/test_pd*
-	rm -rf /tmp/pd-tests*
-	rm -rf /tmp/test_etcd*
+	rm -rf /tmp/pd_tests*
 	rm -f $(REAL_CLUSTER_TEST_PATH)/playground.log
 	go clean -testcache
 	@$(CLEAN_UT_BINARY)

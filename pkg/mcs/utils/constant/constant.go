@@ -12,14 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package utils
+package constant
 
 import "time"
 
 const (
-	// RetryIntervalWaitAPIService is the interval to retry.
+	// ClusterIDPath is the path to store cluster id
+	ClusterIDPath = "/pd/cluster_id"
+	// RetryInterval is the interval to retry.
 	// Note: the interval must be less than the timeout of tidb and tikv, which is 2s by default in tikv.
-	RetryIntervalWaitAPIService = 500 * time.Millisecond
+	RetryInterval = 500 * time.Millisecond
 
 	// TCPNetworkStr is the string of tcp network
 	TCPNetworkStr = "tcp"
@@ -32,6 +34,8 @@ const (
 	DefaultHTTPGracefulShutdownTimeout = 5 * time.Second
 	// DefaultLogFormat is the default log format
 	DefaultLogFormat = "text"
+	// DefaultLogLevel is the default log level
+	DefaultLogLevel = "info"
 	// DefaultDisableErrorVerbose is the default value of DisableErrorVerbose
 	DefaultDisableErrorVerbose = true
 	// DefaultLeaderLease is the default value of LeaderLease

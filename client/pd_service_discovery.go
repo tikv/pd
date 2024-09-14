@@ -157,7 +157,7 @@ type pdServiceClient struct {
 }
 
 // NOTE: In the current implementation, the URL passed in is bound to have a scheme,
-// because it is processed in `newPDServiceDiscovery`, and the url returned by etcd member owns the sheme.
+// because it is processed in `newPDServiceDiscovery`, and the url returned by etcd member owns the scheme.
 // When testing, the URL is also bound to have a scheme.
 func newPDServiceClient(url, leaderURL string, conn *grpc.ClientConn, isLeader bool) ServiceClient {
 	cli := &pdServiceClient{
@@ -482,6 +482,7 @@ func newPDServiceDiscovery(
 	return pdsd
 }
 
+// Init initializes the PD service discovery.
 func (c *pdServiceDiscovery) Init() error {
 	if c.isInitialized {
 		return nil
@@ -805,7 +806,9 @@ func (c *pdServiceDiscovery) SetTSOLocalServURLsUpdatedCallback(callback tsoLoca
 func (c *pdServiceDiscovery) SetTSOGlobalServURLUpdatedCallback(callback tsoGlobalServURLUpdatedFunc) {
 	url := c.getLeaderURL()
 	if len(url) > 0 {
-		callback(url)
+		if err := callback(url); err != nil {
+			log.Error("[tso] failed to call back when tso global service url update", zap.String("url", url), errs.ZapError(err))
+		}
 	}
 	c.tsoGlobalAllocLeaderUpdatedCb = callback
 }
@@ -1071,7 +1074,7 @@ func (c *pdServiceDiscovery) updateServiceClient(members []*pdpb.Member, leader 
 	leaderURL := pickMatchedURL(leader.GetClientUrls(), c.tlsCfg)
 	leaderChanged, err := c.switchLeader(leaderURL)
 	followerChanged := c.updateFollowers(members, leader.GetMemberId(), leaderURL)
-	// don't need to recreate balancer if no changess.
+	// don't need to recreate balancer if no changes.
 	if !followerChanged && !leaderChanged {
 		return err
 	}

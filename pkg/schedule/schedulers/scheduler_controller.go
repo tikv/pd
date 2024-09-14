@@ -29,6 +29,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
+	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
@@ -115,7 +116,7 @@ func (c *Controller) CollectSchedulerMetrics() {
 		var allowScheduler float64
 		// If the scheduler is not allowed to schedule, it will disappear in Grafana panel.
 		// See issue #1341.
-		if !s.IsPaused() && !c.isSchedulingHalted() {
+		if !s.IsPaused() && !c.cluster.IsSchedulingHalted() {
 			allowScheduler = 1
 		}
 		schedulerStatusGauge.WithLabelValues(s.Scheduler.GetName(), "allow").Set(allowScheduler)
@@ -129,10 +130,6 @@ func (c *Controller) CollectSchedulerMetrics() {
 	groupCnt := ruleMgr.GetGroupsCount()
 	ruleStatusGauge.WithLabelValues("rule_count").Set(float64(ruleCnt))
 	ruleStatusGauge.WithLabelValues("group_count").Set(float64(groupCnt))
-}
-
-func (c *Controller) isSchedulingHalted() bool {
-	return c.cluster.GetSchedulerConfig().IsSchedulingHalted()
 }
 
 // ResetSchedulerMetrics resets metrics of all schedulers.
@@ -404,7 +401,7 @@ func (c *Controller) GetPausedSchedulerDelayUntil(name string) (int64, error) {
 func (c *Controller) CheckTransferWitnessLeader(region *core.RegionInfo) {
 	if core.NeedTransferWitnessLeader(region) {
 		c.RLock()
-		s, ok := c.schedulers[TransferWitnessLeaderName]
+		s, ok := c.schedulers[types.TransferWitnessLeaderScheduler.String()]
 		c.RUnlock()
 		if ok {
 			select {
@@ -444,7 +441,7 @@ func NewScheduleController(ctx context.Context, cluster sche.SchedulerCluster, o
 		nextInterval:       s.GetMinInterval(),
 		ctx:                ctx,
 		cancel:             cancel,
-		diagnosticRecorder: NewDiagnosticRecorder(s.GetName(), cluster.GetSchedulerConfig()),
+		diagnosticRecorder: NewDiagnosticRecorder(s.GetType(), cluster.GetSchedulerConfig()),
 	}
 }
 
@@ -460,6 +457,8 @@ func (s *ScheduleController) Stop() {
 
 // Schedule tries to create some operators.
 func (s *ScheduleController) Schedule(diagnosable bool) []*operator.Operator {
+	_, isEvictLeaderScheduler := s.Scheduler.(*evictLeaderScheduler)
+retry:
 	for i := 0; i < maxScheduleRetries; i++ {
 		// no need to retry if schedule should stop to speed exit
 		select {
@@ -474,29 +473,34 @@ func (s *ScheduleController) Schedule(diagnosable bool) []*operator.Operator {
 		if diagnosable {
 			s.diagnosticRecorder.SetResultFromPlans(ops, plans)
 		}
-		foundDisabled := false
-		for _, op := range ops {
-			if labelMgr := s.cluster.GetRegionLabeler(); labelMgr != nil {
-				region := s.cluster.GetRegion(op.RegionID())
-				if region == nil {
-					continue
-				}
-				if labelMgr.ScheduleDisabled(region) {
-					denySchedulersByLabelerCounter.Inc()
-					foundDisabled = true
-					break
-				}
-			}
+		if len(ops) == 0 {
+			continue
 		}
-		if len(ops) > 0 {
-			// If we have schedule, reset interval to the minimal interval.
-			s.nextInterval = s.Scheduler.GetMinInterval()
-			// try regenerating operators
-			if foundDisabled {
+
+		// If we have schedule, reset interval to the minimal interval.
+		s.nextInterval = s.Scheduler.GetMinInterval()
+		for i := 0; i < len(ops); i++ {
+			region := s.cluster.GetRegion(ops[i].RegionID())
+			if region == nil {
+				continue retry
+			}
+			labelMgr := s.cluster.GetRegionLabeler()
+			if labelMgr == nil {
 				continue
 			}
-			return ops
+
+			// If the evict-leader-scheduler is disabled, it will obstruct the restart operation of tikv by the operator.
+			// Refer: https://docs.pingcap.com/tidb-in-kubernetes/stable/restart-a-tidb-cluster#perform-a-graceful-restart-to-a-single-tikv-pod
+			if labelMgr.ScheduleDisabled(region) && !isEvictLeaderScheduler {
+				denySchedulersByLabelerCounter.Inc()
+				ops = append(ops[:i], ops[i+1:]...)
+				i--
+			}
 		}
+		if len(ops) == 0 {
+			continue
+		}
+		return ops
 	}
 	s.nextInterval = s.Scheduler.GetNextInterval(s.nextInterval)
 	return nil
@@ -526,7 +530,7 @@ func (s *ScheduleController) AllowSchedule(diagnosable bool) bool {
 		}
 		return false
 	}
-	if s.isSchedulingHalted() {
+	if s.cluster.IsSchedulingHalted() {
 		if diagnosable {
 			s.diagnosticRecorder.SetResultFromStatus(Halted)
 		}
@@ -539,10 +543,6 @@ func (s *ScheduleController) AllowSchedule(diagnosable bool) bool {
 		return false
 	}
 	return true
-}
-
-func (s *ScheduleController) isSchedulingHalted() bool {
-	return s.cluster.GetSchedulerConfig().IsSchedulingHalted()
 }
 
 // IsPaused returns if a scheduler is paused.

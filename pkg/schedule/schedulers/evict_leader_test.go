@@ -23,8 +23,10 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/schedule/operator"
+	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/utils/operatorutil"
+	"github.com/tikv/pd/pkg/utils/testutil"
 )
 
 func TestEvictLeader(t *testing.T) {
@@ -41,7 +43,7 @@ func TestEvictLeader(t *testing.T) {
 	tc.AddLeaderRegion(2, 2, 1)
 	tc.AddLeaderRegion(3, 3, 1)
 
-	sl, err := CreateScheduler(EvictLeaderType, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(EvictLeaderType, []string{"1"}), func(string) error { return nil })
+	sl, err := CreateScheduler(types.EvictLeaderScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.EvictLeaderScheduler, []string{"1"}), func(string) error { return nil })
 	re.NoError(err)
 	re.True(sl.IsScheduleAllowed(tc))
 	ops, _ := sl.Schedule(tc, false)
@@ -54,7 +56,7 @@ func TestEvictLeaderWithUnhealthyPeer(t *testing.T) {
 	re := require.New(t)
 	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
-	sl, err := CreateScheduler(EvictLeaderType, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(EvictLeaderType, []string{"1"}), func(string) error { return nil })
+	sl, err := CreateScheduler(types.EvictLeaderScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.EvictLeaderScheduler, []string{"1"}), func(string) error { return nil })
 	re.NoError(err)
 
 	// Add stores 1, 2, 3
@@ -88,19 +90,48 @@ func TestConfigClone(t *testing.T) {
 	re := require.New(t)
 
 	emptyConf := &evictLeaderSchedulerConfig{StoreIDWithRanges: make(map[uint64][]core.KeyRange)}
-	con2 := emptyConf.Clone()
-	re.Empty(emptyConf.getKeyRangesByID(1))
-	re.NoError(con2.BuildWithArgs([]string{"1"}))
-	re.NotEmpty(con2.getKeyRangesByID(1))
-	re.Empty(emptyConf.getKeyRangesByID(1))
+	con2 := emptyConf.clone()
+	re.Empty(con2.getKeyRangesByID(1))
 
-	con3 := con2.Clone()
-	con3.StoreIDWithRanges[1], _ = getKeyRanges([]string{"a", "b", "c", "d"})
-	re.Empty(emptyConf.getKeyRangesByID(1))
-	re.NotEqual(len(con3.getRanges(1)), len(con2.getRanges(1)))
+	con2.StoreIDWithRanges[1], _ = getKeyRanges([]string{"a", "b", "c", "d"})
+	con3 := con2.clone()
+	re.Equal(len(con3.getRanges(1)), len(con2.getRanges(1)))
 
-	con4 := con3.Clone()
+	con3.StoreIDWithRanges[1][0].StartKey = []byte("aaa")
+	con4 := con3.clone()
 	re.True(bytes.Equal(con4.StoreIDWithRanges[1][0].StartKey, con3.StoreIDWithRanges[1][0].StartKey))
-	con4.StoreIDWithRanges[1][0].StartKey = []byte("aaa")
-	re.False(bytes.Equal(con4.StoreIDWithRanges[1][0].StartKey, con3.StoreIDWithRanges[1][0].StartKey))
+
+	con4.Batch = 10
+	con5 := con4.clone()
+	re.Equal(con5.getBatch(), con4.getBatch())
+}
+
+func TestBatchEvict(t *testing.T) {
+	re := require.New(t)
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+
+	// Add stores 1, 2, 3
+	tc.AddLeaderStore(1, 0)
+	tc.AddLeaderStore(2, 0)
+	tc.AddLeaderStore(3, 0)
+	// the random might be the same, so we add 1000 regions to make sure the batch is full
+	for i := 1; i <= 10000; i++ {
+		tc.AddLeaderRegion(uint64(i), 1, 2, 3)
+	}
+	tc.AddLeaderRegion(6, 2, 1, 3)
+	tc.AddLeaderRegion(7, 3, 1, 2)
+
+	sl, err := CreateScheduler(types.EvictLeaderScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.EvictLeaderScheduler, []string{"1"}), func(string) error { return nil })
+	re.NoError(err)
+	re.True(sl.IsScheduleAllowed(tc))
+	testutil.Eventually(re, func() bool {
+		ops, _ := sl.Schedule(tc, false)
+		return len(ops) == 3
+	})
+	sl.(*evictLeaderScheduler).conf.Batch = 5
+	testutil.Eventually(re, func() bool {
+		ops, _ := sl.Schedule(tc, false)
+		return len(ops) == 5
+	})
 }

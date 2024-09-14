@@ -27,6 +27,7 @@ import (
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
+	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"go.uber.org/zap"
 )
@@ -36,7 +37,7 @@ type Scheduler interface {
 	http.Handler
 	GetName() string
 	// GetType should in accordance with the name passing to RegisterScheduler()
-	GetType() string
+	GetType() types.CheckerSchedulerType
 	EncodeConfig() ([]byte, error)
 	// ReloadConfig reloads the config from the storage.
 	ReloadConfig() error
@@ -98,11 +99,11 @@ func ConfigJSONDecoder(data []byte) ConfigDecoder {
 }
 
 // ConfigSliceDecoder the default decode for the config.
-func ConfigSliceDecoder(name string, args []string) ConfigDecoder {
-	builder, ok := schedulerArgsToDecoder[name]
+func ConfigSliceDecoder(typ types.CheckerSchedulerType, args []string) ConfigDecoder {
+	builder, ok := schedulerArgsToDecoder[typ]
 	if !ok {
 		return func(any) error {
-			return errors.Errorf("the config decoder do not register for %s", name)
+			return errors.Errorf("the config decoder do not register for %v", typ)
 		}
 	}
 	return builder(args)
@@ -112,31 +113,37 @@ func ConfigSliceDecoder(name string, args []string) ConfigDecoder {
 type CreateSchedulerFunc func(opController *operator.Controller, storage endpoint.ConfigStorage, dec ConfigDecoder, removeSchedulerCb ...func(string) error) (Scheduler, error)
 
 var (
-	schedulerMap           = make(map[string]CreateSchedulerFunc)
-	schedulerArgsToDecoder = make(map[string]ConfigSliceDecoderBuilder)
+	schedulerMap           = make(map[types.CheckerSchedulerType]CreateSchedulerFunc)
+	schedulerArgsToDecoder = make(map[types.CheckerSchedulerType]ConfigSliceDecoderBuilder)
 )
 
 // RegisterScheduler binds a scheduler creator. It should be called in init()
 // func of a package.
-func RegisterScheduler(typ string, createFn CreateSchedulerFunc) {
+func RegisterScheduler(typ types.CheckerSchedulerType, createFn CreateSchedulerFunc) {
 	if _, ok := schedulerMap[typ]; ok {
-		log.Fatal("duplicated scheduler", zap.String("type", typ), errs.ZapError(errs.ErrSchedulerDuplicated))
+		log.Fatal("duplicated scheduler", zap.Stringer("type", typ), errs.ZapError(errs.ErrSchedulerDuplicated))
 	}
 	schedulerMap[typ] = createFn
 }
 
 // RegisterSliceDecoderBuilder convert arguments to config. It should be called in init()
 // func of package.
-func RegisterSliceDecoderBuilder(typ string, builder ConfigSliceDecoderBuilder) {
+func RegisterSliceDecoderBuilder(typ types.CheckerSchedulerType, builder ConfigSliceDecoderBuilder) {
 	if _, ok := schedulerArgsToDecoder[typ]; ok {
-		log.Fatal("duplicated scheduler", zap.String("type", typ), errs.ZapError(errs.ErrSchedulerDuplicated))
+		log.Fatal("duplicated scheduler", zap.Stringer("type", typ), errs.ZapError(errs.ErrSchedulerDuplicated))
 	}
 	schedulerArgsToDecoder[typ] = builder
 	config.RegisterScheduler(typ)
 }
 
 // CreateScheduler creates a scheduler with registered creator func.
-func CreateScheduler(typ string, oc *operator.Controller, storage endpoint.ConfigStorage, dec ConfigDecoder, removeSchedulerCb ...func(string) error) (Scheduler, error) {
+func CreateScheduler(
+	typ types.CheckerSchedulerType,
+	oc *operator.Controller,
+	storage endpoint.ConfigStorage,
+	dec ConfigDecoder,
+	removeSchedulerCb ...func(string) error,
+) (Scheduler, error) {
 	fn, ok := schedulerMap[typ]
 	if !ok {
 		return nil, errs.ErrSchedulerCreateFuncNotRegistered.FastGenByArgs(typ)
@@ -155,10 +162,11 @@ func SaveSchedulerConfig(storage endpoint.ConfigStorage, s Scheduler) error {
 }
 
 // FindSchedulerTypeByName finds the type of the specified name.
-func FindSchedulerTypeByName(name string) string {
-	var typ string
+func FindSchedulerTypeByName(name string) types.CheckerSchedulerType {
+	var typ types.CheckerSchedulerType
 	for registeredType := range schedulerMap {
-		if strings.Contains(name, registeredType) {
+		if strings.Contains(name, registeredType.String()) {
+			// If the name matches multiple types, we should choose the longest one.
 			if len(registeredType) > len(typ) {
 				typ = registeredType
 			}

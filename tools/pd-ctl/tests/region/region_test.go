@@ -40,7 +40,7 @@ func TestRegionKeyFormat(t *testing.T) {
 	re.NoError(err)
 	err = cluster.RunInitialServers()
 	re.NoError(err)
-	cluster.WaitLeader()
+	re.NotEmpty(cluster.WaitLeader())
 	url := cluster.GetConfig().GetClientURL()
 	store := &metapb.Store{
 		Id:            1,
@@ -66,7 +66,7 @@ func TestRegion(t *testing.T) {
 	defer cluster.Destroy()
 	err = cluster.RunInitialServers()
 	re.NoError(err)
-	cluster.WaitLeader()
+	re.NotEmpty(cluster.WaitLeader())
 	pdAddr := cluster.GetConfig().GetClientURL()
 	cmd := ctl.GetRootCmd()
 
@@ -108,6 +108,11 @@ func TestRegion(t *testing.T) {
 	)
 	defer cluster.Destroy()
 
+	getRegionsByType := func(storeID uint64, regionType core.SubTreeRegionType) []*core.RegionInfo {
+		regions, _ := leaderServer.GetRaftCluster().GetStoreRegionsByTypeInSubTree(storeID, regionType)
+		return regions
+	}
+
 	var testRegionsCases = []struct {
 		args   []string
 		expect []*core.RegionInfo
@@ -118,7 +123,12 @@ func TestRegion(t *testing.T) {
 		{[]string{"region", "sibling", "2"}, leaderServer.GetAdjacentRegions(leaderServer.GetRegionInfoByID(2))},
 		// region store <store_id> command
 		{[]string{"region", "store", "1"}, leaderServer.GetStoreRegions(1)},
-		{[]string{"region", "store", "1"}, []*core.RegionInfo{r1, r2, r3, r4}},
+		{[]string{"region", "store", "1", "--type=leader"}, getRegionsByType(1, core.LeaderInSubTree)},
+		{[]string{"region", "store", "1", "--type=follower"}, getRegionsByType(1, core.FollowerInSubTree)},
+		{[]string{"region", "store", "1", "--type=learner"}, getRegionsByType(1, core.LearnerInSubTree)},
+		{[]string{"region", "store", "1", "--type=witness"}, getRegionsByType(1, core.WitnessInSubTree)},
+		{[]string{"region", "store", "1", "--type=pending"}, getRegionsByType(1, core.PendingPeerInSubTree)},
+		{[]string{"region", "store", "1", "--type=all"}, []*core.RegionInfo{r1, r2, r3, r4}},
 		// region check extra-peer command
 		{[]string{"region", "check", "extra-peer"}, []*core.RegionInfo{r1}},
 		// region check miss-peer command
@@ -132,7 +142,7 @@ func TestRegion(t *testing.T) {
 		// region check empty-region command
 		{[]string{"region", "check", "empty-region"}, []*core.RegionInfo{r1}},
 		// region check undersized-region command
-		{[]string{"region", "check", "undersized-region"}, []*core.RegionInfo{r1, r4}},
+		{[]string{"region", "check", "undersized-region"}, []*core.RegionInfo{r1, r3, r4}},
 		// region check oversized-region command
 		{[]string{"region", "check", "oversized-region"}, []*core.RegionInfo{r2}},
 		// region keys --format=raw <start_key> <end_key> <limit> command
@@ -260,7 +270,7 @@ func TestRegionNoLeader(t *testing.T) {
 	defer cluster.Destroy()
 	err = cluster.RunInitialServers()
 	re.NoError(err)
-	cluster.WaitLeader()
+	re.NotEmpty(cluster.WaitLeader())
 	url := cluster.GetConfig().GetClientURL()
 	stores := []*metapb.Store{
 		{

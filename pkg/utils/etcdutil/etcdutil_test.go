@@ -34,16 +34,26 @@ import (
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/testutil"
-	"go.etcd.io/etcd/clientv3"
-	"go.etcd.io/etcd/embed"
-	"go.etcd.io/etcd/etcdserver/etcdserverpb"
-	"go.etcd.io/etcd/mvcc/mvccpb"
-	"go.etcd.io/etcd/pkg/types"
+	"go.etcd.io/etcd/api/v3/etcdserverpb"
+	"go.etcd.io/etcd/api/v3/mvccpb"
+	etcdtypes "go.etcd.io/etcd/client/pkg/v3/types"
+	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.etcd.io/etcd/server/v3/embed"
 	"go.uber.org/goleak"
 )
 
 func TestMain(m *testing.M) {
 	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+}
+
+func TestAddMember(t *testing.T) {
+	re := require.New(t)
+	servers, client1, clean := NewTestEtcdCluster(t, 1)
+	defer clean()
+	etcd1, cfg1 := servers[0], servers[0].Config()
+	etcd2 := MustAddEtcdMember(t, &cfg1, client1)
+	defer etcd2.Close()
+	checkMembers(re, client1, []*embed.Etcd{etcd1, etcd2})
 }
 
 func TestMemberHelpers(t *testing.T) {
@@ -65,7 +75,7 @@ func TestMemberHelpers(t *testing.T) {
 	checkMembers(re, client1, []*embed.Etcd{etcd1, etcd2})
 
 	// Test CheckClusterID
-	urlsMap, err := types.NewURLsMap(etcd2.Config().InitialCluster)
+	urlsMap, err := etcdtypes.NewURLsMap(etcd2.Config().InitialCluster)
 	re.NoError(err)
 	err = CheckClusterID(etcd1.Server.Cluster().ID(), urlsMap, &tls.Config{MinVersion: tls.VersionTLS12})
 	re.NoError(err)
@@ -180,10 +190,22 @@ func TestEtcdClientSync(t *testing.T) {
 	// wait for etcd client sync endpoints
 	checkEtcdEndpointNum(re, client1, 2)
 
-	// Remove the first member and close the etcd1.
-	_, err := RemoveEtcdMember(client1, uint64(etcd1.Server.ID()))
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	// remove one member that is not the one we connected to.
+	resp, err := ListEtcdMembers(ctx, client1)
 	re.NoError(err)
-	etcd1.Close()
+
+	var memIDToRemove uint64
+	for _, m := range resp.Members {
+		if m.ID != resp.Header.MemberId {
+			memIDToRemove = m.ID
+			break
+		}
+	}
+
+	_, err = RemoveEtcdMember(client1, memIDToRemove)
+	re.NoError(err)
 
 	// Check the client can get the new member with the new endpoints.
 	checkEtcdEndpointNum(re, client1, 1)
@@ -290,7 +312,7 @@ func checkEtcdWithHangLeader(t *testing.T) error {
 	go proxyWithDiscard(ctx, re, cfg1.ListenClientUrls[0].String(), proxyAddr, &enableDiscard)
 
 	// Create an etcd client with etcd1 as endpoint.
-	urls, err := types.NewURLs([]string{proxyAddr})
+	urls, err := etcdtypes.NewURLs([]string{proxyAddr})
 	re.NoError(err)
 	client1, err := CreateEtcdClient(nil, urls)
 	re.NoError(err)
@@ -300,11 +322,10 @@ func checkEtcdWithHangLeader(t *testing.T) error {
 	etcd2 := MustAddEtcdMember(t, &cfg1, client1)
 	defer etcd2.Close()
 	checkMembers(re, client1, []*embed.Etcd{etcd1, etcd2})
-	time.Sleep(1 * time.Second) // wait for etcd client sync endpoints
 
 	// Hang the etcd1 and wait for the client to connect to etcd2.
 	enableDiscard.Store(true)
-	time.Sleep(time.Second)
+	time.Sleep(3 * time.Second)
 	_, err = EtcdKVGet(client1, "test/key1")
 	return err
 }
@@ -366,7 +387,8 @@ func ioCopy(ctx context.Context, dst io.Writer, src io.Reader, enableDiscard *at
 			return nil
 		default:
 			if enableDiscard.Load() {
-				io.Copy(io.Discard, src)
+				_, err := io.Copy(io.Discard, src)
+				return err
 			}
 			readNum, errRead := src.Read(buffer)
 			if readNum > 0 {
@@ -758,7 +780,16 @@ func (suite *loopWatcherTestSuite) startEtcd(re *require.Assertions) {
 	suite.etcd = etcd1
 	<-etcd1.Server.ReadyNotify()
 	suite.cleans = append(suite.cleans, func() {
-		suite.etcd.Close()
+		if suite.etcd.Server != nil {
+			select {
+			case _, ok := <-suite.etcd.Err():
+				if !ok {
+					return
+				}
+			default:
+			}
+			suite.etcd.Close()
+		}
 	})
 }
 

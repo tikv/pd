@@ -90,7 +90,7 @@ func (r *Rule) String() string {
 // Clone returns a copy of Rule.
 func (r *Rule) Clone() *Rule {
 	var clone Rule
-	json.Unmarshal([]byte(r.String()), &clone)
+	_ = json.Unmarshal([]byte(r.String()), &clone)
 	clone.StartKey = append(r.StartKey[:0:0], r.StartKey...)
 	clone.EndKey = append(r.EndKey[:0:0], r.EndKey...)
 	return &clone

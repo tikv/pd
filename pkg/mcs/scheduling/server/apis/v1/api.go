@@ -32,6 +32,7 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	scheserver "github.com/tikv/pd/pkg/mcs/scheduling/server"
 	mcsutils "github.com/tikv/pd/pkg/mcs/utils"
+	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/response"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/handler"
@@ -79,6 +80,7 @@ type server struct {
 	*scheserver.Server
 }
 
+// GetCluster returns the cluster.
 func (s *server) GetCluster() sche.SchedulerCluster {
 	return s.Server.GetCluster()
 }
@@ -119,6 +121,7 @@ func NewService(srv *scheserver.Service) *Service {
 	s.RegisterHotspotRouter()
 	s.RegisterRegionsRouter()
 	s.RegisterStoresRouter()
+	s.RegisterPrimaryRouter()
 	return s
 }
 
@@ -225,6 +228,12 @@ func (s *Service) RegisterConfigRouter() {
 	regions.GET("/:id/labels", getRegionLabels)
 }
 
+// RegisterPrimaryRouter registers the router of the primary handler.
+func (s *Service) RegisterPrimaryRouter() {
+	router := s.root.Group("primary")
+	router.POST("transfer", transferPrimary)
+}
+
 // @Tags     admin
 // @Summary  Change the log level.
 // @Produce  json
@@ -272,7 +281,7 @@ func deleteAllRegionCache(c *gin.Context) {
 		c.String(http.StatusInternalServerError, errs.ErrNotBootstrapped.GenWithStackByArgs().Error())
 		return
 	}
-	cluster.DropCacheAllRegion()
+	cluster.ResetRegionCache()
 	c.String(http.StatusOK, "All regions are removed from server cache.")
 }
 
@@ -297,7 +306,7 @@ func deleteRegionCacheByID(c *gin.Context) {
 		c.String(http.StatusBadRequest, err.Error())
 		return
 	}
-	cluster.DropCacheRegion(regionID)
+	cluster.RemoveRegionIfExist(regionID)
 	c.String(http.StatusOK, "The region is removed from server cache.")
 }
 
@@ -1476,4 +1485,32 @@ func getRegionByID(c *gin.Context) {
 		return
 	}
 	c.Data(http.StatusOK, "application/json", b)
+}
+
+// TransferPrimary transfers the primary member to `new_primary`.
+// @Tags     primary
+// @Summary  Transfer the primary member to `new_primary`.
+// @Produce  json
+// @Param    new_primary body   string  false "new primary name"
+// @Success  200  string  string
+// @Router   /primary/transfer [post]
+func transferPrimary(c *gin.Context) {
+	svr := c.MustGet(multiservicesapi.ServiceContextKey).(*scheserver.Server)
+	var input map[string]string
+	if err := c.BindJSON(&input); err != nil {
+		c.String(http.StatusBadRequest, err.Error())
+		return
+	}
+
+	newPrimary := ""
+	if v, ok := input["new_primary"]; ok {
+		newPrimary = v
+	}
+
+	if err := mcsutils.TransferPrimary(svr.GetClient(), svr.GetParticipant().GetExpectedPrimaryLease(),
+		constant.SchedulingServiceName, svr.Name(), newPrimary, 0, nil); err != nil {
+		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
+		return
+	}
+	c.IndentedJSON(http.StatusOK, "success")
 }

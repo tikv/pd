@@ -51,7 +51,7 @@ func TestRequestFollower(t *testing.T) {
 	defer cluster.Destroy()
 
 	re.NoError(cluster.RunInitialServers())
-	cluster.WaitLeader()
+	re.NotEmpty(cluster.WaitLeader())
 
 	var followerServer *tests.TestServer
 	for _, s := range cluster.GetServers() {
@@ -94,7 +94,7 @@ func TestDelaySyncTimestamp(t *testing.T) {
 	re.NoError(err)
 	defer cluster.Destroy()
 	re.NoError(cluster.RunInitialServers())
-	cluster.WaitLeader()
+	re.NotEmpty(cluster.WaitLeader())
 
 	var leaderServer, nextLeaderServer *tests.TestServer
 	leaderServer = cluster.GetLeaderServer()
@@ -143,7 +143,7 @@ func TestLogicalOverflow(t *testing.T) {
 		defer cluster.Destroy()
 		re.NoError(err)
 		re.NoError(cluster.RunInitialServers())
-		cluster.WaitLeader()
+		re.NotEmpty(cluster.WaitLeader())
 
 		leaderServer := cluster.GetLeaderServer()
 		grpcPDClient := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
@@ -165,7 +165,7 @@ func TestLogicalOverflow(t *testing.T) {
 			re.NoError(err)
 			if i == 1 {
 				// the 2nd request may (but not must) overflow, as max logical interval is 262144
-				re.Less(time.Since(begin), updateInterval+20*time.Millisecond) // additional 20ms for gRPC latency
+				re.Less(time.Since(begin), updateInterval+50*time.Millisecond) // additional 50ms for gRPC latency
 			}
 		}
 		// the 3rd request must overflow

@@ -25,6 +25,7 @@ import (
 	"github.com/spf13/pflag"
 	"github.com/tikv/pd/pkg/encryption"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
+	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 )
 
@@ -78,9 +79,12 @@ func (m *ConfigMetaData) CheckUndecoded() error {
 // SecurityConfig indicates the security configuration
 type SecurityConfig struct {
 	grpcutil.TLSConfig
-	// RedactInfoLog indicates that whether enabling redact log
-	RedactInfoLog bool              `toml:"redact-info-log" json:"redact-info-log"`
-	Encryption    encryption.Config `toml:"encryption" json:"encryption"`
+	// RedactInfoLog indicates that whether to enable the log redaction. It can be the following values:
+	//   - false: disable redact log.
+	//   - true: enable redact log, which will replace the sensitive information with "?".
+	//   - "MARKER": enable redact log, which will use single guillemets ‹› to enclose the sensitive information.
+	RedactInfoLog logutil.RedactInfoLogType `toml:"redact-info-log" json:"redact-info-log"`
+	Encryption    encryption.Config         `toml:"encryption" json:"encryption"`
 }
 
 // PrintConfigCheckMsg prints the message about configuration checks.
@@ -169,5 +173,12 @@ func AdjustPath(p *string) {
 	absPath, err := filepath.Abs(*p)
 	if err == nil {
 		*p = absPath
+	}
+}
+
+// AdjustBool adjusts the value of a bool variable.
+func AdjustBool(v *bool, defValue bool) {
+	if !*v {
+		*v = defValue
 	}
 }

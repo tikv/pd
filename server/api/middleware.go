@@ -46,7 +46,7 @@ func (s *serviceMiddlewareBuilder) createHandler(next func(http.ResponseWriter, 
 	return negroni.New(append(s.handlers, negroni.WrapFunc(next))...)
 }
 
-// requestInfoMiddleware is used to gather info from requsetInfo
+// requestInfoMiddleware is used to gather info from requestInfo
 type requestInfoMiddleware struct {
 	svr *server.Server
 }
@@ -88,7 +88,7 @@ func newClusterMiddleware(s *server.Server) clusterMiddleware {
 	}
 }
 
-func (m clusterMiddleware) Middleware(h http.Handler) http.Handler {
+func (m clusterMiddleware) middleware(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		rc := m.s.GetRaftCluster()
 		if rc == nil {

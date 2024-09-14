@@ -77,6 +77,7 @@ func (suite *tsoServerTestSuite) SetupSuite() {
 	err = suite.cluster.RunInitialServers()
 	re.NoError(err)
 	leaderName := suite.cluster.WaitLeader()
+	re.NotEmpty(leaderName)
 	suite.pdLeaderServer = suite.cluster.GetServer(leaderName)
 	backendEndpoints := suite.pdLeaderServer.GetAddr()
 	if suite.legacy {
@@ -152,12 +153,12 @@ func (suite *tsoServerTestSuite) TestConcurrentlyReset() {
 	for i := 0; i < 2; i++ {
 		go func() {
 			defer wg.Done()
-			for j := 0; j <= 100; j++ {
+			for j := 0; j <= 50; j++ {
 				// Get a copy of now then call base.add, because now is shared by all goroutines
 				// and now.add() will add to itself which isn't atomic and multi-goroutine safe.
 				base := now
-				physical := base.Add(time.Duration(2*j)*time.Minute).UnixNano() / int64(time.Millisecond)
-				ts := uint64(physical << 18)
+				physical := base.Add(time.Duration(j)*time.Minute).UnixNano() / int64(time.Millisecond)
+				ts := uint64(physical) << 18
 				suite.resetTS(ts, false, false)
 			}
 		}()

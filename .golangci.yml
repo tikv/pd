@@ -14,8 +14,10 @@ linters:
     - testifylint
     - gofmt
     - revive
-  disable:
     - errcheck
+    - exportloopref
+    - goimports
+    - depguard
 linters-settings:
   gocritic:
     # Which checks should be disabled; can't be combined with 'enabled-checks'; default is empty
@@ -30,7 +32,6 @@ linters-settings:
     excludes:
       - G402
       - G404
-      - G601
   testifylint:
     enable:
       - bool-compare
@@ -199,3 +200,30 @@ linters-settings:
         severity: warning
         disabled: false
         exclude: [""]
+  errcheck:
+    exclude-functions:
+      - (*github.com/unrolled/render.Render).JSON
+      - (*github.com/unrolled/render.Render).Data
+      - (*github.com/unrolled/render.Render).Text
+      - (net/http.ResponseWriter).Write
+      - github.com/pingcap/log.Sync
+      - (github.com/tikv/pd/pkg/ratelimit.Runner).RunTask
+  depguard:
+    rules:
+      denied-deps:
+        deny:
+          - pkg: go.uber.org/atomic
+            desc: "Use 'sync/atomic' instead of 'go.uber.org/atomic'"
+          - pkg: github.com/pkg/errors
+            desc: "Use 'github.com/pingcap/errors' instead of 'github.com/pkg/errors'"
+issues:
+  exclude-rules:
+    - path: (_test\.go|pkg/mock/.*\.go|tests/.*\.go)
+      linters:
+        - errcheck
+    # following path will enable in the future
+    - path: (pd-analysis|pd-api-bench|pd-backup|pd-ctl|pd-heartbeat-bench|pd-recover|pd-simulator|pd-tso-bench|pd-ut|regions-dump|stores-dump)
+      linters:
+        - errcheck
+  include:
+    - EXC0012

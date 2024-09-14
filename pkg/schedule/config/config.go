@@ -20,6 +20,7 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/pkg/core/storelimit"
+	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/utils/configutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
@@ -27,10 +28,13 @@ import (
 
 const (
 	// DefaultMaxReplicas is the default number of replicas for each region.
-	DefaultMaxReplicas            = 3
-	defaultMaxSnapshotCount       = 64
-	defaultMaxPendingPeerCount    = 64
-	defaultMaxMergeRegionSize     = 20
+	DefaultMaxReplicas         = 3
+	defaultMaxSnapshotCount    = 64
+	defaultMaxPendingPeerCount = 64
+	// defaultMaxMergeRegionSize is the default maximum size of region when regions can be merged.
+	// After https://github.com/tikv/tikv/issues/17309, the default value is enlarged from 20 to 54,
+	// to make it compatible with the default value of region size of tikv.
+	defaultMaxMergeRegionSize     = 54
 	defaultLeaderScheduleLimit    = 4
 	defaultRegionScheduleLimit    = 2048
 	defaultWitnessScheduleLimit   = 4
@@ -52,6 +56,7 @@ const (
 	defaultEnableJointConsensus            = true
 	defaultEnableTiKVSplitRegion           = true
 	defaultEnableHeartbeatBreakdownMetrics = true
+	defaultEnableHeartbeatConcurrentRunner = true
 	defaultEnableCrossTableMerge           = true
 	defaultEnableDiagnostic                = true
 	defaultStrictlyMatchLabel              = false
@@ -267,11 +272,11 @@ type ScheduleConfig struct {
 	// EnableHeartbeatBreakdownMetrics is the option to enable heartbeat stats metrics.
 	EnableHeartbeatBreakdownMetrics bool `toml:"enable-heartbeat-breakdown-metrics" json:"enable-heartbeat-breakdown-metrics,string"`
 
+	// EnableHeartbeatConcurrentRunner is the option to enable heartbeat concurrent runner.
+	EnableHeartbeatConcurrentRunner bool `toml:"enable-heartbeat-concurrent-runner" json:"enable-heartbeat-concurrent-runner,string"`
+
 	// Schedulers support for loading customized schedulers
 	Schedulers SchedulerConfigs `toml:"schedulers" json:"schedulers-v2"` // json v2 is for the sake of compatible upgrade
-
-	// Only used to display
-	SchedulersPayload map[string]any `toml:"schedulers-payload" json:"schedulers-payload"`
 
 	// Controls the time interval between write hot regions info into leveldb.
 	HotRegionsWriteInterval typeutil.Duration `toml:"hot-regions-write-interval" json:"hot-regions-write-interval"`
@@ -316,7 +321,6 @@ func (c *ScheduleConfig) Clone() *ScheduleConfig {
 	cfg := *c
 	cfg.StoreLimit = storeLimit
 	cfg.Schedulers = schedulers
-	cfg.SchedulersPayload = nil
 	return &cfg
 }
 
@@ -380,6 +384,10 @@ func (c *ScheduleConfig) Adjust(meta *configutil.ConfigMetaData, reloading bool)
 
 	if !meta.IsDefined("enable-heartbeat-breakdown-metrics") {
 		c.EnableHeartbeatBreakdownMetrics = defaultEnableHeartbeatBreakdownMetrics
+	}
+
+	if !meta.IsDefined("enable-heartbeat-concurrent-runner") {
+		c.EnableHeartbeatConcurrentRunner = defaultEnableHeartbeatConcurrentRunner
 	}
 
 	if !meta.IsDefined("enable-cross-table-merge") {
@@ -560,10 +568,10 @@ type SchedulerConfig struct {
 // If these schedulers are not in the persistent configuration, they
 // will be created automatically when reloading.
 var DefaultSchedulers = SchedulerConfigs{
-	{Type: "balance-region"},
-	{Type: "balance-leader"},
-	{Type: "hot-region"},
-	{Type: "evict-slow-store"},
+	{Type: types.SchedulerTypeCompatibleMap[types.BalanceRegionScheduler]},
+	{Type: types.SchedulerTypeCompatibleMap[types.BalanceLeaderScheduler]},
+	{Type: types.SchedulerTypeCompatibleMap[types.BalanceHotRegionScheduler]},
+	{Type: types.SchedulerTypeCompatibleMap[types.EvictSlowStoreScheduler]},
 }
 
 // IsDefaultScheduler checks whether the scheduler is enabled by default.
