@@ -34,7 +34,7 @@ func TestBufferSize(t *testing.T) {
 	h := newHistoryBuffer(1, kv.NewMemoryKV())
 	re.Equal(0, h.len())
 	for _, r := range regions {
-		h.Record(r)
+		h.record(r)
 	}
 	re.Equal(1, h.len())
 	re.Equal(regions[h.nextIndex()-1], h.get(100))
@@ -43,7 +43,7 @@ func TestBufferSize(t *testing.T) {
 	// size equals 2
 	h = newHistoryBuffer(2, kv.NewMemoryKV())
 	for _, r := range regions {
-		h.Record(r)
+		h.record(r)
 	}
 	re.Equal(2, h.len())
 	re.Equal(regions[h.nextIndex()-1], h.get(100))
@@ -54,7 +54,7 @@ func TestBufferSize(t *testing.T) {
 	kvMem := kv.NewMemoryKV()
 	h1 := newHistoryBuffer(100, kvMem)
 	for i := 0; i < 6; i++ {
-		h1.Record(regions[i])
+		h1.record(regions[i])
 	}
 	re.Equal(6, h1.len())
 	re.Equal(uint64(6), h1.nextIndex())
@@ -68,7 +68,7 @@ func TestBufferSize(t *testing.T) {
 	re.Equal(0, h2.len())
 	for _, r := range regions {
 		index := h2.nextIndex()
-		h2.Record(r)
+		h2.record(r)
 		re.Equal(r, h2.get(index))
 	}
 
@@ -79,9 +79,9 @@ func TestBufferSize(t *testing.T) {
 	// flush in index 106
 	re.Equal("106", s)
 
-	histories := h2.RecordsFrom(uint64(1))
+	histories := h2.recordsFrom(uint64(1))
 	re.Empty(histories)
-	histories = h2.RecordsFrom(h2.firstIndex())
+	histories = h2.recordsFrom(h2.firstIndex())
 	re.Len(histories, 100)
 	re.Equal(uint64(7), h2.firstIndex())
 	re.Equal(regions[1:], histories)

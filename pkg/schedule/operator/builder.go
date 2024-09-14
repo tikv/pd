@@ -117,15 +117,15 @@ func NewBuilder(desc string, ci sche.SharedCluster, region *core.RegionInfo, opt
 			err = errors.Errorf("cannot build operator for region with nil peer")
 			break
 		}
-		originPeers.Set(p)
+		originPeers.set(p)
 	}
 
 	for _, p := range region.GetPendingPeers() {
-		unhealthyPeers.Set(p)
+		unhealthyPeers.set(p)
 	}
 
 	for _, p := range region.GetDownPeers() {
-		unhealthyPeers.Set(p.Peer)
+		unhealthyPeers.set(p.Peer)
 	}
 
 	// origin leader
@@ -158,7 +158,7 @@ func NewBuilder(desc string, ci sche.SharedCluster, region *core.RegionInfo, opt
 	b.originPeers = originPeers
 	b.unhealthyPeers = unhealthyPeers
 	b.originLeaderStoreID = originLeaderStoreID
-	b.targetPeers = originPeers.Copy()
+	b.targetPeers = originPeers.copy()
 	b.useJointConsensus = supportConfChangeV2 && b.GetSharedConfig().IsUseJointConsensus()
 	b.err = err
 	return b
@@ -177,7 +177,7 @@ func (b *Builder) AddPeer(peer *metapb.Peer) *Builder {
 	} else if old, ok := b.targetPeers[peer.GetStoreId()]; ok {
 		b.err = errors.Errorf("cannot add peer %s: already have peer %s", peer, old)
 	} else {
-		b.targetPeers.Set(peer)
+		b.targetPeers.set(peer)
 	}
 	return b
 }
@@ -209,7 +209,7 @@ func (b *Builder) PromoteLearner(storeID uint64) *Builder {
 	} else if _, ok := b.unhealthyPeers[storeID]; ok {
 		b.err = errors.Errorf("cannot promote peer %d: unhealthy", storeID)
 	} else {
-		b.targetPeers.Set(&metapb.Peer{
+		b.targetPeers.set(&metapb.Peer{
 			Id:        peer.GetId(),
 			StoreId:   peer.GetStoreId(),
 			Role:      metapb.PeerRole_Voter,
@@ -229,7 +229,7 @@ func (b *Builder) DemoteVoter(storeID uint64) *Builder {
 	} else if core.IsLearner(peer) {
 		b.err = errors.Errorf("cannot demote voter %d: is already learner", storeID)
 	} else {
-		b.targetPeers.Set(&metapb.Peer{
+		b.targetPeers.set(&metapb.Peer{
 			Id:        peer.GetId(),
 			StoreId:   peer.GetStoreId(),
 			Role:      metapb.PeerRole_Learner,
@@ -249,7 +249,7 @@ func (b *Builder) BecomeWitness(storeID uint64) *Builder {
 	} else if core.IsWitness(peer) {
 		b.err = errors.Errorf("cannot switch peer to witness %d: is already witness", storeID)
 	} else {
-		b.targetPeers.Set(&metapb.Peer{
+		b.targetPeers.set(&metapb.Peer{
 			Id:        peer.GetId(),
 			StoreId:   peer.GetStoreId(),
 			Role:      peer.GetRole(),
@@ -269,7 +269,7 @@ func (b *Builder) BecomeNonWitness(storeID uint64) *Builder {
 	} else if !core.IsWitness(peer) {
 		b.err = errors.Errorf("cannot switch peer to non-witness %d: is already non-witness", storeID)
 	} else {
-		b.targetPeers.Set(&metapb.Peer{
+		b.targetPeers.set(&metapb.Peer{
 			Id:        peer.GetId(),
 			StoreId:   peer.GetStoreId(),
 			Role:      peer.GetRole(),
@@ -335,7 +335,7 @@ func (b *Builder) SetPeers(peers map[uint64]*metapb.Peer) *Builder {
 		b.targetLeaderStoreID = 0
 	}
 
-	b.targetPeers = peersMap(peers).Copy()
+	b.targetPeers = peersMap(peers).copy()
 	return b
 }
 
@@ -439,7 +439,7 @@ func (b *Builder) prepareBuild() (string, error) {
 	for _, o := range b.originPeers {
 		n := b.targetPeers[o.GetStoreId()]
 		if n == nil {
-			b.toRemove.Set(o)
+			b.toRemove.set(o)
 			continue
 		}
 
@@ -461,25 +461,25 @@ func (b *Builder) prepareBuild() (string, error) {
 			if !core.IsLearner(n) {
 				n.Role = metapb.PeerRole_Learner
 				n.IsWitness = true
-				b.toPromoteNonWitness.Set(n)
+				b.toPromoteNonWitness.set(n)
 			}
-			b.toNonWitness.Set(n)
+			b.toNonWitness.set(n)
 		} else if !isOriginPeerWitness && isTargetPeerWitness {
-			b.toWitness.Set(n)
+			b.toWitness.set(n)
 		}
 
 		isOriginPeerLearner := core.IsLearner(o)
 		isTargetPeerLearner := core.IsLearner(n)
 		if isOriginPeerLearner && !isTargetPeerLearner {
 			// learner -> voter
-			b.toPromote.Set(n)
+			b.toPromote.set(n)
 		} else if !isOriginPeerLearner && isTargetPeerLearner {
 			// voter -> learner
 			if b.useJointConsensus {
-				b.toDemote.Set(n)
+				b.toDemote.set(n)
 			} else {
-				b.toRemove.Set(o)
-				// the targetPeers loop below will add `b.toAdd.Set(n)`
+				b.toRemove.set(o)
+				// the targetPeers loop below will add `b.toAdd.set(n)`
 			}
 		}
 	}
@@ -500,8 +500,8 @@ func (b *Builder) prepareBuild() (string, error) {
 					IsWitness: n.GetIsWitness(),
 				}
 			}
-			// It is a pair with `b.toRemove.Set(o)` when `o != nil`.
-			b.toAdd.Set(n)
+			// It is a pair with `b.toRemove.set(o)` when `o != nil`.
+			b.toAdd.set(n)
 		}
 	}
 
@@ -510,7 +510,7 @@ func (b *Builder) prepareBuild() (string, error) {
 		b.targetLeaderStoreID = 0
 	}
 
-	b.currentPeers, b.currentLeaderStoreID = b.originPeers.Copy(), b.originLeaderStoreID
+	b.currentPeers, b.currentLeaderStoreID = b.originPeers.copy(), b.originLeaderStoreID
 
 	if b.targetLeaderStoreID != 0 {
 		targetLeader := b.targetPeers[b.targetLeaderStoreID]
@@ -580,7 +580,7 @@ func (b *Builder) buildStepsWithJointConsensus(kind OpKind) (OpKind, error) {
 				Role:      metapb.PeerRole_Learner,
 				IsWitness: peer.GetIsWitness(),
 			})
-			b.toPromote.Set(peer)
+			b.toPromote.set(peer)
 		} else {
 			b.execAddPeer(peer)
 		}
@@ -596,7 +596,7 @@ func (b *Builder) buildStepsWithJointConsensus(kind OpKind) (OpKind, error) {
 	for _, remove := range b.toRemove.IDs() {
 		peer := b.toRemove[remove]
 		if !core.IsLearner(peer) {
-			b.toDemote.Set(&metapb.Peer{
+			b.toDemote.set(&metapb.Peer{
 				Id:        peer.GetId(),
 				StoreId:   peer.GetStoreId(),
 				Role:      metapb.PeerRole_Learner,
@@ -637,7 +637,7 @@ func (b *Builder) buildStepsWithJointConsensus(kind OpKind) (OpKind, error) {
 	for _, promote := range b.toPromoteNonWitness.IDs() {
 		peer := b.toPromoteNonWitness[promote]
 		peer.IsWitness = false
-		b.toPromote.Set(peer)
+		b.toPromote.set(peer)
 		kind |= OpRegion
 	}
 	b.toPromoteNonWitness = newPeersMap()
@@ -771,13 +771,13 @@ func (b *Builder) execTransferLeader(targetStoreID uint64, targetStoreIDs []uint
 
 func (b *Builder) execPromoteLearner(peer *metapb.Peer) {
 	b.steps = append(b.steps, PromoteLearner{ToStore: peer.GetStoreId(), PeerID: peer.GetId(), IsWitness: peer.GetIsWitness()})
-	b.currentPeers.Set(peer)
+	b.currentPeers.set(peer)
 	delete(b.toPromote, peer.GetStoreId())
 }
 
 func (b *Builder) execPromoteNonWitness(peer *metapb.Peer) {
 	b.steps = append(b.steps, PromoteLearner{ToStore: peer.GetStoreId(), PeerID: peer.GetId(), IsWitness: false})
-	b.currentPeers.Set(peer)
+	b.currentPeers.set(peer)
 	delete(b.toPromoteNonWitness, peer.GetStoreId())
 }
 
@@ -786,7 +786,7 @@ func (b *Builder) execAddPeer(peer *metapb.Peer) {
 	if !core.IsLearner(peer) {
 		b.steps = append(b.steps, PromoteLearner{ToStore: peer.GetStoreId(), PeerID: peer.GetId(), IsWitness: peer.GetIsWitness()})
 	}
-	b.currentPeers.Set(peer)
+	b.currentPeers.set(peer)
 	b.peerAddStep[peer.GetStoreId()] = len(b.steps)
 	delete(b.toAdd, peer.GetStoreId())
 }
@@ -824,14 +824,14 @@ func (b *Builder) execChangePeerV2(needEnter bool, needTransferLeader bool) {
 	for _, p := range b.toPromote.IDs() {
 		peer := b.toPromote[p]
 		step.PromoteLearners = append(step.PromoteLearners, PromoteLearner{ToStore: peer.GetStoreId(), PeerID: peer.GetId(), IsWitness: peer.GetIsWitness()})
-		b.currentPeers.Set(peer)
+		b.currentPeers.set(peer)
 	}
 	b.toPromote = newPeersMap()
 
 	for _, d := range b.toDemote.IDs() {
 		peer := b.toDemote[d]
 		step.DemoteVoters = append(step.DemoteVoters, DemoteVoter{ToStore: peer.GetStoreId(), PeerID: peer.GetId(), IsWitness: peer.GetIsWitness()})
-		b.currentPeers.Set(peer)
+		b.currentPeers.set(peer)
 	}
 	b.toDemote = newPeersMap()
 
@@ -959,6 +959,7 @@ func (p stepPlan) String() string {
 		p.leaderBeforeAdd, p.add, p.promote, p.leaderBeforeRemove, p.demote, p.remove, p.nonWitness, p.promoteNonWitness, p.witness)
 }
 
+// IsEmpty checks if the plan is empty.
 func (p stepPlan) IsEmpty() bool {
 	return p.promote == nil && p.demote == nil && p.add == nil && p.remove == nil && p.nonWitness == nil && p.promoteNonWitness == nil && p.witness == nil
 }
@@ -1278,10 +1279,11 @@ func (pm peersMap) IDs() []uint64 {
 	return ids
 }
 
-func (pm peersMap) Set(peer *metapb.Peer) {
+func (pm peersMap) set(peer *metapb.Peer) {
 	pm[peer.GetStoreId()] = peer
 }
 
+// String returns a brief description of the peersMap.
 func (pm peersMap) String() string {
 	ids := make([]uint64, 0, len(pm))
 	for _, p := range pm {
@@ -1290,10 +1292,10 @@ func (pm peersMap) String() string {
 	return fmt.Sprintf("%v", ids)
 }
 
-func (pm peersMap) Copy() peersMap {
+func (pm peersMap) copy() peersMap {
 	var pm2 peersMap = make(map[uint64]*metapb.Peer, len(pm))
 	for _, p := range pm {
-		pm2.Set(p)
+		pm2.set(p)
 	}
 	return pm2
 }

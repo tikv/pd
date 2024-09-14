@@ -27,7 +27,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/logutil"
-	"go.etcd.io/etcd/pkg/transport"
+	"go.etcd.io/etcd/client/pkg/v3/transport"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/backoff"
@@ -52,8 +52,8 @@ type TLSConfig struct {
 	CertPath string `toml:"cert-path" json:"cert-path"`
 	// KeyPath is the path of file that contains X509 key in PEM format.
 	KeyPath string `toml:"key-path" json:"key-path"`
-	// CertAllowedCN is a CN which must be provided by a client
-	CertAllowedCN []string `toml:"cert-allowed-cn" json:"cert-allowed-cn"`
+	// CertAllowedCNs is the list of CN which must be provided by a client
+	CertAllowedCNs []string `toml:"cert-allowed-cn" json:"cert-allowed-cn"`
 
 	SSLCABytes   []byte
 	SSLCertBytes []byte
@@ -65,16 +65,12 @@ func (s TLSConfig) ToTLSInfo() (*transport.TLSInfo, error) {
 	if len(s.CertPath) == 0 && len(s.KeyPath) == 0 {
 		return nil, nil
 	}
-	allowedCN, err := s.GetOneAllowedCN()
-	if err != nil {
-		return nil, err
-	}
 
 	return &transport.TLSInfo{
 		CertFile:      s.CertPath,
 		KeyFile:       s.KeyPath,
 		TrustedCAFile: s.CAPath,
-		AllowedCN:     allowedCN,
+		AllowedCNs:    s.CertAllowedCNs,
 	}, nil
 }
 
@@ -112,18 +108,6 @@ func (s TLSConfig) ToTLSConfig() (*tls.Config, error) {
 		return nil, errs.ErrEtcdTLSConfig.Wrap(err).GenWithStackByCause()
 	}
 	return tlsConfig, nil
-}
-
-// GetOneAllowedCN only gets the first one CN.
-func (s TLSConfig) GetOneAllowedCN() (string, error) {
-	switch len(s.CertAllowedCN) {
-	case 1:
-		return s.CertAllowedCN[0], nil
-	case 0:
-		return "", nil
-	default:
-		return "", errs.ErrSecurityConfig.FastGenByArgs("only supports one CN")
-	}
 }
 
 // GetClientConn returns a gRPC client connection.

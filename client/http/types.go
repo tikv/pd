@@ -25,6 +25,22 @@ import (
 	pd "github.com/tikv/pd/client"
 )
 
+// ServiceSafePoint is the safepoint for a specific service
+// NOTE: This type is in sync with pd/pkg/storage/endpoint/gc_safe_point.go
+type ServiceSafePoint struct {
+	ServiceID string `json:"service_id"`
+	ExpiredAt int64  `json:"expired_at"`
+	SafePoint uint64 `json:"safe_point"`
+}
+
+// ListServiceGCSafepoint is the response for list service GC safepoint.
+// NOTE: This type is in sync with pd/server/api/service_gc_safepoint.go
+type ListServiceGCSafepoint struct {
+	ServiceGCSafepoints   []*ServiceSafePoint `json:"service_gc_safe_points"`
+	MinServiceGcSafepoint uint64              `json:"min_service_gc_safe_point,omitempty"`
+	GCSafePoint           uint64              `json:"gc_safe_point"`
+}
+
 // ClusterState saves some cluster state information.
 // NOTE: This type sync with https://github.com/tikv/pd/blob/5eae459c01a797cbd0c416054c6f0cad16b8740a/server/cluster/cluster.go#L173
 type ClusterState struct {

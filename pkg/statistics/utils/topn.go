@@ -58,35 +58,35 @@ func NewTopN(k, n int, ttl time.Duration) *TopN {
 func (tn *TopN) Len() int {
 	tn.rw.RLock()
 	defer tn.rw.RUnlock()
-	return tn.ttlLst.Len()
+	return tn.ttlLst.len()
 }
 
 // GetTopNMin returns the min item in top N of the `k`th dimension.
 func (tn *TopN) GetTopNMin(k int) TopNItem {
 	tn.rw.RLock()
 	defer tn.rw.RUnlock()
-	return tn.topns[k].GetTopNMin()
+	return tn.topns[k].getTopNMin()
 }
 
 // GetAllTopN returns the top N items of the `k`th dimension.
 func (tn *TopN) GetAllTopN(k int) []TopNItem {
 	tn.rw.RLock()
 	defer tn.rw.RUnlock()
-	return tn.topns[k].GetAllTopN()
+	return tn.topns[k].getAllTopN()
 }
 
 // GetAll returns all items.
 func (tn *TopN) GetAll() []TopNItem {
 	tn.rw.RLock()
 	defer tn.rw.RUnlock()
-	return tn.topns[0].GetAll()
+	return tn.topns[0].getAll()
 }
 
 // Get returns the item with given id, nil if there is no such item.
 func (tn *TopN) Get(id uint64) TopNItem {
 	tn.rw.RLock()
 	defer tn.rw.RUnlock()
-	return tn.topns[0].Get(id)
+	return tn.topns[0].get(id)
 }
 
 // Put inserts item or updates the old item if it exists.
@@ -94,9 +94,9 @@ func (tn *TopN) Put(item TopNItem) (isUpdate bool) {
 	tn.rw.Lock()
 	defer tn.rw.Unlock()
 	for _, stn := range tn.topns {
-		isUpdate = stn.Put(item)
+		isUpdate = stn.put(item)
 	}
-	tn.ttlLst.Put(item.ID())
+	tn.ttlLst.put(item.ID())
 	tn.maintain()
 	return
 }
@@ -113,17 +113,17 @@ func (tn *TopN) Remove(id uint64) (item TopNItem) {
 	tn.rw.Lock()
 	defer tn.rw.Unlock()
 	for _, stn := range tn.topns {
-		item = stn.Remove(id)
+		item = stn.remove(id)
 	}
-	_ = tn.ttlLst.Remove(id)
+	_ = tn.ttlLst.remove(id)
 	tn.maintain()
 	return
 }
 
 func (tn *TopN) maintain() {
-	for _, id := range tn.ttlLst.TakeExpired() {
+	for _, id := range tn.ttlLst.takeExpired() {
 		for _, stn := range tn.topns {
-			stn.Remove(id)
+			stn.remove(id)
 		}
 	}
 }
@@ -144,31 +144,27 @@ func newSingleTopN(k, n int) *singleTopN {
 	}
 }
 
-func (stn *singleTopN) Len() int {
-	return stn.topn.Len() + stn.rest.Len()
-}
-
-func (stn *singleTopN) GetTopNMin() TopNItem {
+func (stn *singleTopN) getTopNMin() TopNItem {
 	return stn.topn.Top()
 }
 
-func (stn *singleTopN) GetAllTopN() []TopNItem {
+func (stn *singleTopN) getAllTopN() []TopNItem {
 	return stn.topn.GetAll()
 }
 
-func (stn *singleTopN) GetAll() []TopNItem {
+func (stn *singleTopN) getAll() []TopNItem {
 	topn := stn.topn.GetAll()
 	return append(topn, stn.rest.GetAll()...)
 }
 
-func (stn *singleTopN) Get(id uint64) TopNItem {
+func (stn *singleTopN) get(id uint64) TopNItem {
 	if item := stn.topn.Get(id); item != nil {
 		return item
 	}
 	return stn.rest.Get(id)
 }
 
-func (stn *singleTopN) Put(item TopNItem) (isUpdate bool) {
+func (stn *singleTopN) put(item TopNItem) (isUpdate bool) {
 	if stn.topn.Get(item.ID()) != nil {
 		isUpdate = true
 		stn.topn.Put(item)
@@ -179,7 +175,7 @@ func (stn *singleTopN) Put(item TopNItem) (isUpdate bool) {
 	return
 }
 
-func (stn *singleTopN) Remove(id uint64) TopNItem {
+func (stn *singleTopN) remove(id uint64) TopNItem {
 	item := stn.topn.Remove(id)
 	if item == nil {
 		item = stn.rest.Remove(id)
@@ -340,11 +336,11 @@ func newTTLList(ttl time.Duration) *ttlList {
 	}
 }
 
-func (tl *ttlList) Len() int {
+func (tl *ttlList) len() int {
 	return tl.lst.Len()
 }
 
-func (tl *ttlList) TakeExpired() []uint64 {
+func (tl *ttlList) takeExpired() []uint64 {
 	expired := []uint64{}
 	now := time.Now()
 	for ele := tl.lst.Front(); ele != nil; ele = tl.lst.Front() {
@@ -359,7 +355,7 @@ func (tl *ttlList) TakeExpired() []uint64 {
 	return expired
 }
 
-func (tl *ttlList) Put(id uint64) (isUpdate bool) {
+func (tl *ttlList) put(id uint64) (isUpdate bool) {
 	item := ttlItem{id: id}
 	if ele, ok := tl.index[id]; ok {
 		isUpdate = true
@@ -370,7 +366,7 @@ func (tl *ttlList) Put(id uint64) (isUpdate bool) {
 	return
 }
 
-func (tl *ttlList) Remove(id uint64) (removed bool) {
+func (tl *ttlList) remove(id uint64) (removed bool) {
 	if ele, ok := tl.index[id]; ok {
 		_ = tl.lst.Remove(ele)
 		delete(tl.index, id)

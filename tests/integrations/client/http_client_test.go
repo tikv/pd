@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/pingcap/errors"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/prometheus/client_golang/prometheus"
 	dto "github.com/prometheus/client_model/go"
@@ -34,12 +35,15 @@ import (
 	pd "github.com/tikv/pd/client/http"
 	"github.com/tikv/pd/client/retry"
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/keyspace"
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/placement"
+	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/versioninfo"
+	"github.com/tikv/pd/server/api"
 	"github.com/tikv/pd/tests"
 )
 
@@ -69,6 +73,7 @@ func TestHTTPClientTestSuiteWithServiceDiscovery(t *testing.T) {
 
 func (suite *httpClientTestSuite) SetupSuite() {
 	re := suite.Require()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/member/skipCampaignLeaderCheck", "return(true)"))
 	suite.ctx, suite.cancelFunc = context.WithCancel(context.Background())
 
 	cluster, err := tests.NewTestCluster(suite.ctx, 2)
@@ -123,6 +128,8 @@ func (suite *httpClientTestSuite) SetupSuite() {
 }
 
 func (suite *httpClientTestSuite) TearDownSuite() {
+	re := suite.Require()
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/member/skipCampaignLeaderCheck"))
 	suite.cancelFunc()
 	suite.client.Close()
 	suite.cluster.Destroy()
@@ -440,6 +447,10 @@ func (suite *httpClientTestSuite) TestRegionLabel() {
 	re.Equal(labelRule.ID, allLabelRules[1].ID)
 	re.Equal(labelRule.Labels, allLabelRules[1].Labels)
 	re.Equal(labelRule.RuleType, allLabelRules[1].RuleType)
+	labelRules, err = client.GetRegionLabelRulesByIDs(ctx, []string{"rule2"})
+	re.NoError(err)
+	re.Len(labelRules, 1)
+	re.Equal(labelRule, labelRules[0])
 	labelRules, err = client.GetRegionLabelRulesByIDs(ctx, []string{"keyspaces/0", "rule2"})
 	re.NoError(err)
 	sort.Slice(labelRules, func(i, j int) bool {
@@ -760,7 +771,7 @@ func (suite *httpClientTestSuite) TestUpdateKeyspaceGCManagementType() {
 	defer cancel()
 
 	keyspaceName := "DEFAULT"
-	expectGCManagementType := "keyspace_level_gc"
+	expectGCManagementType := "test-type"
 
 	keyspaceSafePointVersionConfig := pd.KeyspaceGCManagementTypeConfig{
 		Config: pd.KeyspaceGCManagementType{
@@ -772,11 +783,20 @@ func (suite *httpClientTestSuite) TestUpdateKeyspaceGCManagementType() {
 
 	keyspaceMetaRes, err := client.GetKeyspaceMetaByName(ctx, keyspaceName)
 	re.NoError(err)
-	val, ok := keyspaceMetaRes.Config["gc_management_type"]
+	val, ok := keyspaceMetaRes.Config[keyspace.GCManagementType]
 
 	// Check it can get expect key and value in keyspace meta config.
 	re.True(ok)
 	re.Equal(expectGCManagementType, val)
+
+	// Check it doesn't support update config to keyspace.KeyspaceLevelGC now.
+	keyspaceSafePointVersionConfig = pd.KeyspaceGCManagementTypeConfig{
+		Config: pd.KeyspaceGCManagementType{
+			GCManagementType: keyspace.KeyspaceLevelGC,
+		},
+	}
+	err = client.UpdateKeyspaceGCManagementType(suite.ctx, keyspaceName, &keyspaceSafePointVersionConfig)
+	re.Error(err)
 }
 
 func (suite *httpClientTestSuite) TestGetHealthStatus() {
@@ -830,4 +850,84 @@ func (suite *httpClientTestSuite) TestRetryOnLeaderChange() {
 	// Cancel the context to stop the goroutine.
 	cancel()
 	wg.Wait()
+}
+
+func (suite *httpClientTestSuite) TestGetGCSafePoint() {
+	re := suite.Require()
+	client := suite.client
+	ctx, cancel := context.WithCancel(suite.ctx)
+	defer cancel()
+
+	// adding some safepoints to the server
+	list := &api.ListServiceGCSafepoint{
+		ServiceGCSafepoints: []*endpoint.ServiceSafePoint{
+			{
+				ServiceID: "AAA",
+				ExpiredAt: time.Now().Unix() + 10,
+				SafePoint: 1,
+			},
+			{
+				ServiceID: "BBB",
+				ExpiredAt: time.Now().Unix() + 10,
+				SafePoint: 2,
+			},
+			{
+				ServiceID: "CCC",
+				ExpiredAt: time.Now().Unix() + 10,
+				SafePoint: 3,
+			},
+		},
+		GCSafePoint:           1,
+		MinServiceGcSafepoint: 1,
+	}
+
+	storage := suite.cluster.GetLeaderServer().GetServer().GetStorage()
+	for _, ssp := range list.ServiceGCSafepoints {
+		err := storage.SaveServiceGCSafePoint(ssp)
+		re.NoError(err)
+	}
+	storage.SaveGCSafePoint(1)
+
+	// get the safepoints and start testing
+	l, err := client.GetGCSafePoint(ctx)
+	re.NoError(err)
+
+	re.Equal(uint64(1), l.GCSafePoint)
+	re.Equal(uint64(1), l.MinServiceGcSafepoint)
+	re.Len(l.ServiceGCSafepoints, 3)
+
+	// sort the gc safepoints based on order of ServiceID
+	sort.Slice(l.ServiceGCSafepoints, func(i, j int) bool {
+		return l.ServiceGCSafepoints[i].ServiceID < l.ServiceGCSafepoints[j].ServiceID
+	})
+
+	for i, val := range l.ServiceGCSafepoints {
+		re.Equal(list.ServiceGCSafepoints[i].ServiceID, val.ServiceID)
+		re.Equal(list.ServiceGCSafepoints[i].SafePoint, val.SafePoint)
+	}
+
+	// delete the safepoints
+	for i := 0; i < 3; i++ {
+		msg, err := client.DeleteGCSafePoint(ctx, list.ServiceGCSafepoints[i].ServiceID)
+		re.NoError(err)
+		re.Equal("Delete service GC safepoint successfully.", msg)
+	}
+
+	// check that the safepoitns are indeed deleted
+	l, err = client.GetGCSafePoint(ctx)
+	re.NoError(err)
+
+	re.Equal(uint64(1), l.GCSafePoint)
+	re.Equal(uint64(0), l.MinServiceGcSafepoint)
+	re.Empty(l.ServiceGCSafepoints)
+
+	// try delete gc_worker, should get an error
+	_, err = client.DeleteGCSafePoint(ctx, "gc_worker")
+	re.Error(err)
+
+	// try delete some non-exist safepoints, should return normally
+	var msg string
+	msg, err = client.DeleteGCSafePoint(ctx, "non_exist")
+	re.NoError(err)
+	re.Equal("Delete service GC safepoint successfully.", msg)
 }

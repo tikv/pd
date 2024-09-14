@@ -27,18 +27,11 @@ import (
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
-	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/unrolled/render"
 	"go.uber.org/zap"
-)
-
-const (
-	// EvictSlowTrendName is evict leader by slow trend scheduler name.
-	EvictSlowTrendName = "evict-slow-trend-scheduler"
-	// EvictSlowTrendType is evict leader by slow trend scheduler type.
-	EvictSlowTrendType = "evict-slow-trend"
 )
 
 const (
@@ -55,8 +48,9 @@ type slowCandidate struct {
 
 type evictSlowTrendSchedulerConfig struct {
 	syncutil.RWMutex
+	schedulerConfig
+
 	cluster *core.BasicCluster
-	storage endpoint.ConfigStorage
 	// Candidate for eviction in current tick.
 	evictCandidate slowCandidate
 	// Last chosen candidate for eviction.
@@ -67,9 +61,9 @@ type evictSlowTrendSchedulerConfig struct {
 	EvictedStores []uint64 `json:"evict-by-trend-stores"`
 }
 
-func initEvictSlowTrendSchedulerConfig(storage endpoint.ConfigStorage) *evictSlowTrendSchedulerConfig {
+func initEvictSlowTrendSchedulerConfig() *evictSlowTrendSchedulerConfig {
 	return &evictSlowTrendSchedulerConfig{
-		storage:             storage,
+		schedulerConfig:     &baseSchedulerConfig{},
 		evictCandidate:      slowCandidate{},
 		lastEvictCandidate:  slowCandidate{},
 		RecoveryDurationGap: defaultRecoveryDurationGap,
@@ -77,24 +71,12 @@ func initEvictSlowTrendSchedulerConfig(storage endpoint.ConfigStorage) *evictSlo
 	}
 }
 
-func (conf *evictSlowTrendSchedulerConfig) Clone() *evictSlowTrendSchedulerConfig {
+func (conf *evictSlowTrendSchedulerConfig) clone() *evictSlowTrendSchedulerConfig {
 	conf.RLock()
 	defer conf.RUnlock()
 	return &evictSlowTrendSchedulerConfig{
 		RecoveryDurationGap: conf.RecoveryDurationGap,
 	}
-}
-
-func (conf *evictSlowTrendSchedulerConfig) persistLocked() error {
-	name := EvictSlowTrendName
-	data, err := EncodeConfig(conf)
-	failpoint.Inject("persistFail", func() {
-		err = errors.New("fail to persist")
-	})
-	if err != nil {
-		return err
-	}
-	return conf.storage.SaveSchedulerConfig(name, data)
 }
 
 func (conf *evictSlowTrendSchedulerConfig) getStores() []uint64 {
@@ -160,7 +142,7 @@ func (conf *evictSlowTrendSchedulerConfig) lastCandidateCapturedSecs() uint64 {
 	return DurationSinceAsSecs(conf.lastEvictCandidate.captureTS)
 }
 
-// readyForRecovery checks whether the last cpatured candidate is ready for recovery.
+// readyForRecovery checks whether the last captured candidate is ready for recovery.
 func (conf *evictSlowTrendSchedulerConfig) readyForRecovery() bool {
 	conf.RLock()
 	defer conf.RUnlock()
@@ -207,7 +189,7 @@ func (conf *evictSlowTrendSchedulerConfig) setStoreAndPersist(id uint64) error {
 	conf.Lock()
 	defer conf.Unlock()
 	conf.EvictedStores = []uint64{id}
-	return conf.persistLocked()
+	return conf.save()
 }
 
 func (conf *evictSlowTrendSchedulerConfig) clearAndPersist(cluster sche.SchedulerCluster) (oldID uint64, err error) {
@@ -224,7 +206,7 @@ func (conf *evictSlowTrendSchedulerConfig) clearAndPersist(cluster sche.Schedule
 	conf.Lock()
 	defer conf.Unlock()
 	conf.EvictedStores = []uint64{}
-	return oldID, conf.persistLocked()
+	return oldID, conf.save()
 }
 
 type evictSlowTrendHandler struct {
@@ -238,12 +220,12 @@ func newEvictSlowTrendHandler(config *evictSlowTrendSchedulerConfig) http.Handle
 		rd:     render.New(render.Options{IndentJSON: true}),
 	}
 	router := mux.NewRouter()
-	router.HandleFunc("/config", h.UpdateConfig).Methods(http.MethodPost)
-	router.HandleFunc("/list", h.ListConfig).Methods(http.MethodGet)
+	router.HandleFunc("/config", h.updateConfig).Methods(http.MethodPost)
+	router.HandleFunc("/list", h.listConfig).Methods(http.MethodGet)
 	return router
 }
 
-func (handler *evictSlowTrendHandler) UpdateConfig(w http.ResponseWriter, r *http.Request) {
+func (handler *evictSlowTrendHandler) updateConfig(w http.ResponseWriter, r *http.Request) {
 	var input map[string]any
 	if err := apiutil.ReadJSONRespondError(handler.rd, w, r.Body, &input); err != nil {
 		return
@@ -258,7 +240,7 @@ func (handler *evictSlowTrendHandler) UpdateConfig(w http.ResponseWriter, r *htt
 	prevRecoveryDurationGap := handler.config.RecoveryDurationGap
 	recoveryDurationGap := uint64(recoveryDurationGapFloat)
 	handler.config.RecoveryDurationGap = recoveryDurationGap
-	if err := handler.config.persistLocked(); err != nil {
+	if err := handler.config.save(); err != nil {
 		handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		handler.config.RecoveryDurationGap = prevRecoveryDurationGap
 		return
@@ -267,8 +249,8 @@ func (handler *evictSlowTrendHandler) UpdateConfig(w http.ResponseWriter, r *htt
 	handler.rd.JSON(w, http.StatusOK, "Config updated.")
 }
 
-func (handler *evictSlowTrendHandler) ListConfig(w http.ResponseWriter, _ *http.Request) {
-	conf := handler.config.Clone()
+func (handler *evictSlowTrendHandler) listConfig(w http.ResponseWriter, _ *http.Request) {
+	conf := handler.config.clone()
 	handler.rd.JSON(w, http.StatusOK, conf)
 }
 
@@ -278,6 +260,7 @@ type evictSlowTrendScheduler struct {
 	handler http.Handler
 }
 
+// GetNextInterval implements the Scheduler interface.
 func (s *evictSlowTrendScheduler) GetNextInterval(time.Duration) time.Duration {
 	var growthType intervalGrowthType
 	// If it already found a slow node as candidate, the next interval should be shorter
@@ -291,36 +274,25 @@ func (s *evictSlowTrendScheduler) GetNextInterval(time.Duration) time.Duration {
 	return intervalGrow(s.GetMinInterval(), MaxScheduleInterval, growthType)
 }
 
+// ServeHTTP implements the http.Handler interface.
 func (s *evictSlowTrendScheduler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.handler.ServeHTTP(w, r)
 }
 
-func (*evictSlowTrendScheduler) GetName() string {
-	return EvictSlowTrendName
-}
-
-func (*evictSlowTrendScheduler) GetType() string {
-	return EvictSlowTrendType
-}
-
+// EncodeConfig implements the Scheduler interface.
 func (s *evictSlowTrendScheduler) EncodeConfig() ([]byte, error) {
 	return EncodeConfig(s.conf)
 }
 
+// ReloadConfig implements the Scheduler interface.
 func (s *evictSlowTrendScheduler) ReloadConfig() error {
 	s.conf.Lock()
 	defer s.conf.Unlock()
-	cfgData, err := s.conf.storage.LoadSchedulerConfig(s.GetName())
-	if err != nil {
-		return err
-	}
-	if len(cfgData) == 0 {
-		return nil
-	}
 	newCfg := &evictSlowTrendSchedulerConfig{}
-	if err = DecodeConfig([]byte(cfgData), newCfg); err != nil {
+	if err := s.conf.load(newCfg); err != nil {
 		return err
 	}
+
 	old := make(map[uint64]struct{})
 	for _, id := range s.conf.EvictedStores {
 		old[id] = struct{}{}
@@ -335,6 +307,7 @@ func (s *evictSlowTrendScheduler) ReloadConfig() error {
 	return nil
 }
 
+// PrepareConfig implements the Scheduler interface.
 func (s *evictSlowTrendScheduler) PrepareConfig(cluster sche.SchedulerCluster) error {
 	evictedStoreID := s.conf.evictedStore()
 	if evictedStoreID == 0 {
@@ -343,6 +316,7 @@ func (s *evictSlowTrendScheduler) PrepareConfig(cluster sche.SchedulerCluster) e
 	return cluster.SlowTrendEvicted(evictedStoreID)
 }
 
+// CleanConfig implements the Scheduler interface.
 func (s *evictSlowTrendScheduler) CleanConfig(cluster sche.SchedulerCluster) {
 	s.cleanupEvictLeader(cluster)
 }
@@ -374,20 +348,22 @@ func (s *evictSlowTrendScheduler) scheduleEvictLeader(cluster sche.SchedulerClus
 		return nil
 	}
 	storeSlowTrendEvictedStatusGauge.WithLabelValues(store.GetAddress(), strconv.FormatUint(store.GetID(), 10)).Set(1)
-	return scheduleEvictLeaderBatch(s.GetName(), s.GetType(), cluster, s.conf)
+	return scheduleEvictLeaderBatch(s.GetName(), cluster, s.conf)
 }
 
+// IsScheduleAllowed implements the Scheduler interface.
 func (s *evictSlowTrendScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) bool {
 	if s.conf.evictedStore() == 0 {
 		return true
 	}
 	allowed := s.OpController.OperatorCount(operator.OpLeader) < cluster.GetSchedulerConfig().GetLeaderScheduleLimit()
 	if !allowed {
-		operator.OperatorLimitCounter.WithLabelValues(s.GetType(), operator.OpLeader.String()).Inc()
+		operator.IncOperatorLimitCounter(s.GetType(), operator.OpLeader)
 	}
 	return allowed
 }
 
+// Schedule implements the Scheduler interface.
 func (s *evictSlowTrendScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) ([]*operator.Operator, []plan.Plan) {
 	schedulerCounter.WithLabelValues(s.GetName(), "schedule").Inc()
 
@@ -458,11 +434,12 @@ func (s *evictSlowTrendScheduler) Schedule(cluster sche.SchedulerCluster, _ bool
 
 func newEvictSlowTrendScheduler(opController *operator.Controller, conf *evictSlowTrendSchedulerConfig) Scheduler {
 	handler := newEvictSlowTrendHandler(conf)
-	return &evictSlowTrendScheduler{
-		BaseScheduler: NewBaseScheduler(opController),
+	sche := &evictSlowTrendScheduler{
+		BaseScheduler: NewBaseScheduler(opController, types.EvictSlowTrendScheduler),
 		conf:          conf,
 		handler:       handler,
 	}
+	return sche
 }
 
 func chooseEvictCandidate(cluster sche.SchedulerCluster, lastEvictCandidate *slowCandidate) (slowStore *core.StoreInfo) {

@@ -16,7 +16,6 @@ package typeutil
 
 import (
 	"encoding/binary"
-	"unsafe"
 
 	"github.com/tikv/pd/pkg/errs"
 )
@@ -68,20 +67,4 @@ func JSONToUint64Slice(from any) ([]uint64, bool) {
 		to = append(to, uint64(id))
 	}
 	return to, true
-}
-
-// BytesToString converts slice of bytes to string without copy.
-func BytesToString(b []byte) string {
-	if len(b) == 0 {
-		return ""
-	}
-	return unsafe.String(unsafe.SliceData(b), len(b))
-}
-
-// StringToBytes converts string to slice of bytes without copy.
-func StringToBytes(s string) []byte {
-	if len(s) == 0 {
-		return nil
-	}
-	return unsafe.Slice(unsafe.StringData(s), len(s))
 }

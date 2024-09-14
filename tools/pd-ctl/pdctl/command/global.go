@@ -29,10 +29,11 @@ import (
 	"github.com/spf13/cobra"
 	pd "github.com/tikv/pd/client/http"
 	"github.com/tikv/pd/pkg/utils/apiutil"
-	"go.etcd.io/etcd/pkg/transport"
+	"go.etcd.io/etcd/client/pkg/v3/transport"
 )
 
 const (
+	// PDControlCallerID is used to set the caller ID for PD client
 	PDControlCallerID = "pd-ctl"
 	clusterPrefix     = "pd/api/v1/cluster"
 )

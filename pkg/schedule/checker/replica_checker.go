@@ -26,7 +26,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/config"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/operator"
-	types "github.com/tikv/pd/pkg/schedule/type"
+	"github.com/tikv/pd/pkg/schedule/types"
 	"go.uber.org/zap"
 )
 
@@ -44,11 +44,11 @@ type ReplicaChecker struct {
 	PauseController
 	cluster                 sche.CheckerCluster
 	conf                    config.CheckerConfigProvider
-	pendingProcessedRegions cache.Cache
+	pendingProcessedRegions *cache.TTLUint64
 }
 
 // NewReplicaChecker creates a replica checker.
-func NewReplicaChecker(cluster sche.CheckerCluster, conf config.CheckerConfigProvider, pendingProcessedRegions cache.Cache) *ReplicaChecker {
+func NewReplicaChecker(cluster sche.CheckerCluster, conf config.CheckerConfigProvider, pendingProcessedRegions *cache.TTLUint64) *ReplicaChecker {
 	return &ReplicaChecker{
 		cluster:                 cluster,
 		conf:                    conf,
@@ -59,6 +59,11 @@ func NewReplicaChecker(cluster sche.CheckerCluster, conf config.CheckerConfigPro
 // Name return ReplicaChecker's name.
 func (*ReplicaChecker) Name() string {
 	return types.ReplicaChecker.String()
+}
+
+// GetType return ReplicaChecker's type.
+func (*ReplicaChecker) GetType() types.CheckerSchedulerType {
+	return types.ReplicaChecker
 }
 
 // Check verifies a region's replicas, creating an operator.Operator if need.

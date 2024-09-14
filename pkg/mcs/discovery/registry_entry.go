@@ -23,6 +23,9 @@ import (
 
 // ServiceRegistryEntry is the registry entry of a service
 type ServiceRegistryEntry struct {
+	// The specific value will be assigned only if the startup parameter is added.
+	// If not assigned, the default value(service-hostname) will be used.
+	Name           string `json:"name"`
 	ServiceAddr    string `json:"service-addr"`
 	Version        string `json:"version"`
 	GitHash        string `json:"git-hash"`
