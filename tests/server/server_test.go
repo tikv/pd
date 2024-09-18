@@ -162,7 +162,7 @@ func TestGRPCRateLimit(t *testing.T) {
 
 	// test rate limit
 	urlPrefix := fmt.Sprintf("%s/pd/api/v1/service-middleware/config/grpc-rate-limit", addr)
-	input := make(map[string]interface{})
+	input := make(map[string]any)
 	input["label"] = "GetRegion"
 	input["qps"] = 1
 	jsonBody, err := json.Marshal(input)
