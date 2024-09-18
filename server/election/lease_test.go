@@ -39,7 +39,7 @@ func (s *testLeaseSuite) TestLease(c *C) {
 	}()
 	c.Assert(err, IsNil)
 
-	ep := cfg.LCUrls[0].String()
+	ep := cfg.ListenClientUrls[0].String()
 	client, err := clientv3.New(clientv3.Config{
 		Endpoints: []string{ep},
 	})

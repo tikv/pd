@@ -27,7 +27,6 @@ import (
 	"time"
 
 	. "github.com/pingcap/check"
-	promClient "github.com/prometheus/client_golang/api"
 )
 
 const (
@@ -176,7 +175,7 @@ func (c *normalClient) URL(ep string, args map[string]string) *url.URL {
 	return doURL(ep, args)
 }
 
-func (c *normalClient) Do(_ context.Context, req *http.Request) (response *http.Response, body []byte, warnings promClient.Warnings, err error) {
+func (c *normalClient) Do(_ context.Context, req *http.Request) (response *http.Response, body []byte, err error) {
 	req.ParseForm()
 	query := req.Form.Get("query")
 	response, body, err = makeJSONResponse(c.mockData[query])
@@ -213,7 +212,7 @@ func (c *emptyResponseClient) URL(ep string, args map[string]string) *url.URL {
 	return doURL(ep, args)
 }
 
-func (c *emptyResponseClient) Do(_ context.Context, req *http.Request) (r *http.Response, body []byte, warnings promClient.Warnings, err error) {
+func (c *emptyResponseClient) Do(_ context.Context, req *http.Request) (r *http.Response, body []byte, err error) {
 	promResp := &response{
 		Status: "success",
 		Data: data{
@@ -241,7 +240,7 @@ func (c *errorHTTPStatusClient) URL(ep string, args map[string]string) *url.URL 
 	return doURL(ep, args)
 }
 
-func (c *errorHTTPStatusClient) Do(_ context.Context, req *http.Request) (r *http.Response, body []byte, warnings promClient.Warnings, err error) {
+func (c *errorHTTPStatusClient) Do(_ context.Context, req *http.Request) (r *http.Response, body []byte, err error) {
 	promResp := &response{}
 
 	r, body, err = makeJSONResponse(promResp)
@@ -267,7 +266,7 @@ func (c *errorPrometheusStatusClient) URL(ep string, args map[string]string) *ur
 	return doURL(ep, args)
 }
 
-func (c *errorPrometheusStatusClient) Do(_ context.Context, req *http.Request) (r *http.Response, body []byte, warnings promClient.Warnings, err error) {
+func (c *errorPrometheusStatusClient) Do(_ context.Context, req *http.Request) (r *http.Response, body []byte, err error) {
 	promResp := &response{
 		Status: "error",
 	}

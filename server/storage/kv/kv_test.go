@@ -44,7 +44,7 @@ func (s *testKVSuite) TestEtcd(c *C) {
 	c.Assert(err, IsNil)
 	defer etcd.Close()
 
-	ep := cfg.LCUrls[0].String()
+	ep := cfg.ListenClientUrls[0].String()
 	client, err := clientv3.New(clientv3.Config{
 		Endpoints: []string{ep},
 	})
@@ -135,14 +135,14 @@ func newTestSingleConfig() *embed.Config {
 	cfg.LogOutputs = []string{"stdout"}
 
 	pu, _ := url.Parse(tempurl.Alloc())
-	cfg.LPUrls = []url.URL{*pu}
-	cfg.APUrls = cfg.LPUrls
+	cfg.ListenPeerUrls = []url.URL{*pu}
+	cfg.AdvertisePeerUrls = cfg.ListenPeerUrls
 	cu, _ := url.Parse(tempurl.Alloc())
-	cfg.LCUrls = []url.URL{*cu}
-	cfg.ACUrls = cfg.LCUrls
+	cfg.ListenClientUrls = []url.URL{*cu}
+	cfg.AdvertiseClientUrls = cfg.ListenClientUrls
 
 	cfg.StrictReconfigCheck = false
-	cfg.InitialCluster = fmt.Sprintf("%s=%s", cfg.Name, &cfg.LPUrls[0])
+	cfg.InitialCluster = fmt.Sprintf("%s=%s", cfg.Name, &cfg.ListenPeerUrls[0])
 	cfg.ClusterState = embed.ClusterStateFlagNew
 	return cfg
 }
