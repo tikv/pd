@@ -768,10 +768,22 @@ func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.BootstrapRe
 		return nil, errs.ErrEtcdTxnInternal.Wrap(err).GenWithStackByCause()
 	}
 	if !resp.Succeeded {
-		log.Warn("cluster already bootstrapped", zap.Uint64("cluster-id", clusterID))
-		return nil, errs.ErrEtcdTxnConflict.FastGenByArgs()
+		// Ref issue: https://github.com/tikv/pd/issues/6311
+		// When etcd duration exceed gRPC context deadline, but still completes the txn write to etcd.
+		// The region meta is not written to LevelDB due to the error returned.
+		// Need to check the synchronization status of etcd and leveldb.
+		if err := storage.TryLoadRegionsOnce(s.ctx, s.storage, s.basicCluster.CheckAndPutRegion); err != nil {
+			return nil, errs.ErrEtcdTxnConflict.FastGenByArgs()
+		}
+		if s.cluster.GetRegionCount() != 0 {
+			log.Warn("cluster already bootstrapped", zap.Uint64("cluster-id", clusterID))
+			return nil, errs.ErrEtcdTxnConflict.FastGenByArgs()
+		}
 	}
 
+	failpoint.Inject("saveRegionFailed", func() {
+		failpoint.Return(&pdpb.BootstrapResponse{}, nil)
+	})
 	log.Info("bootstrap cluster ok", zap.Uint64("cluster-id", clusterID))
 	err = s.storage.SaveRegion(req.GetRegion())
 	if err != nil {
