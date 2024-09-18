@@ -521,9 +521,8 @@ func (td *tsoDispatcher) processRequests(
 
 			td.cancelCollectedRequests(tbc, stream.streamID, err)
 			return false, err
-		} else {
-			return true, nil
 		}
+		return true, nil
 	} else {
 		result, err := stream.ProcessRequests(
 			clusterID, keyspaceID, reqKeyspaceGroupID, dcLocation, count, tbc.extraBatchingStartTime)
