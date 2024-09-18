@@ -229,15 +229,20 @@ type testTSOStreamSuite struct {
 
 	inner  *mockTSOStreamImpl
 	stream *tsoStream
+
+	ctx    context.Context
+	cancel context.CancelFunc
 }
 
 func (s *testTSOStreamSuite) SetupTest() {
 	s.re = require.New(s.T())
-	s.inner = newMockTSOStreamImpl(context.Background(), false)
-	s.stream = newTSOStream(context.Background(), mockStreamURL, s.inner)
+	s.ctx, s.cancel = context.WithCancel(context.Background())
+	s.inner = newMockTSOStreamImpl(s.ctx, false)
+	s.stream = newTSOStream(s.ctx, mockStreamURL, s.inner)
 }
 
 func (s *testTSOStreamSuite) TearDownTest() {
+	s.cancel()
 	s.inner.stop()
 	s.stream.WaitForClosed()
 	s.inner = nil
@@ -268,7 +273,7 @@ func (s *testTSOStreamSuite) getResult(ch <-chan callbackInvocation) callbackInv
 
 func (s *testTSOStreamSuite) processRequestWithResultCh(count int64) (<-chan callbackInvocation, error) {
 	ch := make(chan callbackInvocation, 1)
-	err := s.stream.processRequests(1, 2, 3, globalDCLocation, count, time.Now(), func(result tsoRequestResult, reqKeyspaceGroupID uint32, err error) {
+	err := s.stream.ProcessRequestsAsync(1, 2, 3, globalDCLocation, count, time.Now(), func(result tsoRequestResult, reqKeyspaceGroupID uint32, err error) {
 		if err == nil {
 			s.re.Equal(uint32(3), reqKeyspaceGroupID)
 			s.re.Equal(uint32(0), result.suffixBits)
@@ -320,7 +325,7 @@ func (s *testTSOStreamSuite) TestTSOStreamBasic() {
 
 	// After an error from the (simulated) RPC stream, the tsoStream should be in a broken status and can't accept
 	// new request anymore.
-	err := s.stream.processRequests(1, 2, 3, globalDCLocation, 1, time.Now(), func(_result tsoRequestResult, _reqKeyspaceGroupID uint32, _err error) {
+	err := s.stream.ProcessRequestsAsync(1, 2, 3, globalDCLocation, 1, time.Now(), func(_result tsoRequestResult, _reqKeyspaceGroupID uint32, _err error) {
 		panic("unreachable")
 	})
 	s.re.Error(err)
@@ -341,6 +346,20 @@ func (s *testTSOStreamSuite) testTSOStreamBrokenImpl(err error, pendingRequests 
 		s.stream.WaitForClosed()
 		closedCh <- struct{}{}
 	}()
+
+	if pendingRequests == 0 {
+		// As the recvLoop retrieves the pending requests first before trying to receive from the stream, if there's
+		// no pending requests, it doesn't immediately detect the stream is broken, until when there's a new incoming
+		// request.
+		select {
+		case <-closedCh:
+			s.re.FailNow("stream receiver loop exists unexpectedly")
+		case <-time.After(time.Millisecond * 50):
+		}
+		ch := s.mustProcessRequestWithResultCh(1)
+		resultCh = append(resultCh, ch)
+	}
+
 	select {
 	case <-closedCh:
 	case <-time.After(time.Second):
@@ -443,7 +462,7 @@ func (s *testTSOStreamSuite) TestTSOStreamConcurrentRunning() {
 	}
 
 	// After handling all these requests, the stream is ended by an EOF error. The next request won't succeed.
-	// So, either the `processRequests` function returns an error or the callback is called with an error.
+	// So, either the `ProcessRequestsAsync` function returns an error or the callback is called with an error.
 	ch, err := s.processRequestWithResultCh(1)
 	if err != nil {
 		s.re.ErrorIs(err, errs.ErrClientTSOStreamClosed)
@@ -457,9 +476,11 @@ func (s *testTSOStreamSuite) TestTSOStreamConcurrentRunning() {
 func BenchmarkTSOStreamSendRecv(b *testing.B) {
 	log.SetLevel(zapcore.FatalLevel)
 
-	streamInner := newMockTSOStreamImpl(context.Background(), true)
-	stream := newTSOStream(context.Background(), mockStreamURL, streamInner)
+	ctx, cancel := context.WithCancel(context.Background())
+	streamInner := newMockTSOStreamImpl(ctx, true)
+	stream := newTSOStream(ctx, mockStreamURL, streamInner)
 	defer func() {
+		cancel()
 		streamInner.stop()
 		stream.WaitForClosed()
 	}()
@@ -469,7 +490,7 @@ func BenchmarkTSOStreamSendRecv(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		err := stream.processRequests(1, 1, 1, globalDCLocation, 1, now, func(result tsoRequestResult, _ uint32, err error) {
+		err := stream.ProcessRequestsAsync(1, 1, 1, globalDCLocation, 1, now, func(result tsoRequestResult, _ uint32, err error) {
 			if err != nil {
 				panic(err)
 			}

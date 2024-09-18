@@ -328,10 +328,10 @@ tsoBatchLoop:
 		case td.tsDeadlineCh <- dl:
 		}
 		// processRequests guarantees that the collected requests could be finished properly.
-		err = td.processRequests(stream, dc, batchController, done)
+		tbcConsumed, err := td.processRequests(stream, dc, batchController, done, false)
 		// If error happens during tso stream handling, reset stream and run the next trial.
-		if err == nil {
-			// A nil error returned by `processRequests` indicates that the request batch is started successfully.
+		if tbcConsumed {
+			// The function `processRequests` *consumed* the batchController.
 			// In this case, the `batchController` will be put back to the pool when the request is finished
 			// asynchronously (either successful or not). This infers that the current `batchController` object will
 			// be asynchronously accessed after the `processRequests` call. As a result, we need to use another
@@ -340,7 +340,8 @@ tsoBatchLoop:
 			// Otherwise, the `batchController` won't be processed in other goroutines concurrently, and it can be
 			// reused in the next loop safely.
 			batchController = nil
-		} else {
+		}
+		if err != nil {
 			exit := !td.handleProcessRequestError(ctx, bo, streamURL, cancel, err)
 			stream = nil
 			if exit {
@@ -462,10 +463,16 @@ func chooseStream(connectionCtxs *sync.Map) (connectionCtx *tsoConnectionContext
 // processRequests sends the RPC request for the batch. It's guaranteed that after calling this function, requests
 // in the batch must be eventually finished (done or canceled), either synchronously or asynchronously.
 // `close(done)` will be called at the same time when finishing the requests.
-// If this function returns a non-nil error, the requests will always be canceled synchronously.
+// If this function returns a non-nil error, infers that the requests must have been canceled synchronously, no matter
+// how `asyncMode` is set.
+//
+// When the batch of requests is scheduled to be processed asynchronously, the `tbc` may need to be used by other
+// goroutines later, and put it back to `td.batchBufferPool` after finishing using it. In this case, the `tbc` object
+// cannot be used after this function returns. It can be considered as this function *consumed* the `tbc` object.
+// To notify the caller about this, the function returns a bool to indicate whether the `tbc` is consumed.
 func (td *tsoDispatcher) processRequests(
-	stream *tsoStream, dcLocation string, tbc *tsoBatchController, done chan struct{},
-) error {
+	stream *tsoStream, dcLocation string, tbc *tsoBatchController, done chan struct{}, asyncMode bool,
+) (bool, error) {
 	// `done` must be guaranteed to be eventually called.
 	var (
 		requests     = tbc.getCollectedRequests()
@@ -501,35 +508,50 @@ func (td *tsoDispatcher) processRequests(
 		close(done)
 
 		defer td.batchBufferPool.Put(tbc)
-		if err != nil {
-			td.cancelCollectedRequests(tbc, stream.streamID, err)
-			return
-		}
 
-		curTSOInfo := &tsoInfo{
-			tsoServer:           stream.getServerURL(),
-			reqKeyspaceGroupID:  reqKeyspaceGroupID,
-			respKeyspaceGroupID: result.respKeyspaceGroupID,
-			respReceivedAt:      time.Now(),
-			physical:            result.physical,
-			logical:             result.logical,
-		}
-		// `logical` is the largest ts's logical part here, we need to do the subtracting before we finish each TSO request.
-		firstLogical := tsoutil.AddLogical(result.logical, -int64(result.count)+1, result.suffixBits)
-		td.compareAndSwapTS(curTSOInfo, firstLogical)
-		td.doneCollectedRequests(tbc, result.physical, firstLogical, result.suffixBits, stream.streamID)
+		td.handleTSOResultsForBatch(tbc, stream, result, reqKeyspaceGroupID, err)
 	}
 
-	err := stream.processRequests(
-		clusterID, keyspaceID, reqKeyspaceGroupID,
-		dcLocation, count, tbc.extraBatchingStartTime, cb)
-	if err != nil {
+	if asyncMode {
+		err := stream.ProcessRequestsAsync(
+			clusterID, keyspaceID, reqKeyspaceGroupID,
+			dcLocation, count, tbc.extraBatchingStartTime, cb)
+		if err != nil {
+			close(done)
+
+			td.cancelCollectedRequests(tbc, stream.streamID, err)
+			return false, err
+		} else {
+			return true, nil
+		}
+	} else {
+		result, err := stream.ProcessRequests(
+			clusterID, keyspaceID, reqKeyspaceGroupID, dcLocation, count, tbc.extraBatchingStartTime)
 		close(done)
 
-		td.cancelCollectedRequests(tbc, stream.streamID, err)
-		return err
+		td.handleTSOResultsForBatch(tbc, stream, result, reqKeyspaceGroupID, err)
+		return false, err
 	}
-	return nil
+}
+
+func (td *tsoDispatcher) handleTSOResultsForBatch(tbc *tsoBatchController, stream *tsoStream, result tsoRequestResult, reqKeyspaceGroupID uint32, err error) {
+	if err != nil {
+		td.cancelCollectedRequests(tbc, stream.streamID, err)
+		return
+	}
+
+	curTSOInfo := &tsoInfo{
+		tsoServer:           stream.getServerURL(),
+		reqKeyspaceGroupID:  reqKeyspaceGroupID,
+		respKeyspaceGroupID: result.respKeyspaceGroupID,
+		respReceivedAt:      time.Now(),
+		physical:            result.physical,
+		logical:             result.logical,
+	}
+	// `logical` is the largest ts's logical part here, we need to do the subtracting before we finish each TSO request.
+	firstLogical := tsoutil.AddLogical(result.logical, -int64(result.count)+1, result.suffixBits)
+	td.compareAndSwapTS(curTSOInfo, firstLogical)
+	td.doneCollectedRequests(tbc, result.physical, firstLogical, result.suffixBits, stream.streamID)
 }
 
 func (td *tsoDispatcher) cancelCollectedRequests(tbc *tsoBatchController, streamID string, err error) {
@@ -579,4 +601,8 @@ func (td *tsoDispatcher) compareAndSwapTS(
 		}
 	}
 	td.lastTSOInfo = curTSOInfo
+}
+
+func (td *tsoDispatcher) useAsyncStream() bool {
+	return false
 }
