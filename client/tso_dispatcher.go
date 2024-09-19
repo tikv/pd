@@ -328,7 +328,7 @@ tsoBatchLoop:
 		case td.tsDeadlineCh <- dl:
 		}
 		// processRequests guarantees that the collected requests could be finished properly.
-		tbcConsumed, err := td.processRequests(stream, dc, batchController, done, false)
+		tbcConsumed, err := td.processRequests(stream, dc, batchController, done, td.useAsyncStream())
 		// If error happens during tso stream handling, reset stream and run the next trial.
 		if tbcConsumed {
 			// The function `processRequests` *consumed* the batchController.
@@ -523,14 +523,13 @@ func (td *tsoDispatcher) processRequests(
 			return false, err
 		}
 		return true, nil
-	} else {
-		result, err := stream.ProcessRequests(
-			clusterID, keyspaceID, reqKeyspaceGroupID, dcLocation, count, tbc.extraBatchingStartTime)
-		close(done)
-
-		td.handleTSOResultsForBatch(tbc, stream, result, reqKeyspaceGroupID, err)
-		return false, err
 	}
+	result, err := stream.ProcessRequests(
+		clusterID, keyspaceID, reqKeyspaceGroupID, dcLocation, count, tbc.extraBatchingStartTime)
+	close(done)
+
+	td.handleTSOResultsForBatch(tbc, stream, result, reqKeyspaceGroupID, err)
+	return false, err
 }
 
 func (td *tsoDispatcher) handleTSOResultsForBatch(tbc *tsoBatchController, stream *tsoStream, result tsoRequestResult, reqKeyspaceGroupID uint32, err error) {
@@ -602,6 +601,6 @@ func (td *tsoDispatcher) compareAndSwapTS(
 	td.lastTSOInfo = curTSOInfo
 }
 
-func (td *tsoDispatcher) useAsyncStream() bool {
+func (*tsoDispatcher) useAsyncStream() bool {
 	return false
 }
