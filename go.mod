@@ -40,7 +40,7 @@ require (
 	github.com/pingcap/tidb-dashboard v0.0.0-20240924035706-618b5cded5bf
 	github.com/prometheus/client_golang v1.19.0
 	github.com/prometheus/common v0.51.1
-	github.com/sasha-s/go-deadlock v0.2.0
+	github.com/sasha-s/go-deadlock v0.3.3
 	github.com/shirou/gopsutil/v3 v3.23.3
 	github.com/smallnest/chanx v1.2.1-0.20240521153536-01121e21ff99
 	github.com/soheilhy/cmux v0.1.5

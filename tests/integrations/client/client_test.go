@@ -594,7 +594,7 @@ func requestGlobalAndLocalTSO(
 					re.Less(localTS, globalTS2)
 					lastTS = globalTS2
 				}
-				re.Greater(lastTS, uint64(0))
+				re.Positive(lastTS)
 			}(dcLocation)
 		}
 	}
@@ -1124,8 +1124,8 @@ func TestCloseClient(t *testing.T) {
 	cli.Close()
 	physical, logical, err := ts.Wait()
 	if err == nil {
-		re.Greater(physical, int64(0))
-		re.Greater(logical, int64(0))
+		re.Positive(physical)
+		re.Positive(logical)
 	} else {
 		re.ErrorIs(err, context.Canceled)
 		re.Zero(physical)

@@ -71,8 +71,8 @@ func FindFieldByJSONTag(t reflect.Type, tags []string) reflect.Type {
 		if i := strings.Index(jsonTag, ","); i != -1 { // trim 'foobar,string' to 'foobar'
 			jsonTag = jsonTag[:i]
 		}
-		if jsonTag == tags[0] {
-			return FindFieldByJSONTag(t.Field(i).Type, tags[1:])
+		if jsonTag == tags[0] { //nolint:gosec
+			return FindFieldByJSONTag(t.Field(i).Type, tags[1:]) //nolint:gosec
 		}
 	}
 	return nil
