@@ -15,10 +15,10 @@ jobs:
     strategy:
       fail-fast: true
     steps:
-      - uses: actions/setup-go@v3
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
         with:
           go-version: 1.19
-      - name: Checkout code
-        uses: actions/checkout@v3
       - name: Make
         run: make docker-image
