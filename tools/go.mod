@@ -131,7 +131,7 @@ require (
 	github.com/oleiade/reflections v1.0.1 // indirect
 	github.com/opentracing/opentracing-go v1.2.0 // indirect
 	github.com/pelletier/go-toml/v2 v2.2.2 // indirect
-	github.com/petermattis/goid v0.0.0-20211229010228-4d14c490ee36 // indirect
+	github.com/petermattis/goid v0.0.0-20240813172612-4fcff4a6cae7 // indirect
 	github.com/phf/go-queue v0.0.0-20170504031614-9abe38d0371d // indirect
 	github.com/pingcap/errcode v0.3.0 // indirect
 	github.com/pingcap/sysutil v1.0.1-0.20230407040306-fb007c5aff21 // indirect
@@ -144,7 +144,7 @@ require (
 	github.com/prometheus/procfs v0.13.0 // indirect
 	github.com/rs/cors v1.7.0 // indirect
 	github.com/samber/lo v1.37.0 // indirect
-	github.com/sasha-s/go-deadlock v0.3.3 // indirect
+	github.com/sasha-s/go-deadlock v0.3.5 // indirect
 	github.com/shirou/gopsutil/v3 v3.23.3 // indirect
 	github.com/shoenig/go-m1cpu v0.1.5 // indirect
 	github.com/shurcooL/httpgzip v0.0.0-20190720172056-320755c1c1b0 // indirect
