@@ -65,11 +65,16 @@ type BaseScheduler struct {
 
 	name string
 	tp   types.CheckerSchedulerType
+	conf schedulerConfig
 }
 
 // NewBaseScheduler returns a basic scheduler
-func NewBaseScheduler(opController *operator.Controller, tp types.CheckerSchedulerType) *BaseScheduler {
-	return &BaseScheduler{OpController: opController, tp: tp}
+func NewBaseScheduler(
+	opController *operator.Controller,
+	tp types.CheckerSchedulerType,
+	conf schedulerConfig,
+) *BaseScheduler {
+	return &BaseScheduler{OpController: opController, tp: tp, conf: conf}
 }
 
 func (*BaseScheduler) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
@@ -113,4 +118,28 @@ func (s *BaseScheduler) GetName() string {
 // GetType returns the type of the scheduler
 func (s *BaseScheduler) GetType() types.CheckerSchedulerType {
 	return s.tp
+}
+
+// IsDisable implements the Scheduler interface.
+func (s *BaseScheduler) IsDisable() bool {
+	if conf, ok := s.conf.(defaultSchedulerConfig); ok {
+		return conf.isDisable()
+	}
+	return false
+}
+
+// SetDisable implements the Scheduler interface.
+func (s *BaseScheduler) SetDisable(disable bool) error {
+	if conf, ok := s.conf.(defaultSchedulerConfig); ok {
+		return conf.setDisable(disable)
+	}
+	return nil
+}
+
+// IsDefault returns if the scheduler is a default scheduler.
+func (s *BaseScheduler) IsDefault() bool {
+	if _, ok := s.conf.(defaultSchedulerConfig); ok {
+		return true
+	}
+	return false
 }

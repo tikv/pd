@@ -231,7 +231,7 @@ type evictLeaderScheduler struct {
 func newEvictLeaderScheduler(opController *operator.Controller, conf *evictLeaderSchedulerConfig) Scheduler {
 	handler := newEvictLeaderHandler(conf)
 	return &evictLeaderScheduler{
-		BaseScheduler: NewBaseScheduler(opController, types.EvictLeaderScheduler),
+		BaseScheduler: NewBaseScheduler(opController, types.EvictLeaderScheduler, conf),
 		conf:          conf,
 		handler:       handler,
 	}
