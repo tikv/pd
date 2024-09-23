@@ -41,8 +41,10 @@ func TestBalanceLeaderSchedulerConfigClone(t *testing.T) {
 	re := require.New(t)
 	keyRanges1, _ := getKeyRanges([]string{"a", "b", "c", "d"})
 	conf := &balanceLeaderSchedulerConfig{
-		Ranges: keyRanges1,
-		Batch:  10,
+		balanceLeaderSchedulerParam: balanceLeaderSchedulerParam{
+			Ranges: keyRanges1,
+			Batch:  10,
+		},
 	}
 	conf2 := conf.clone()
 	re.Equal(conf.Batch, conf2.Batch)
