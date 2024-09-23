@@ -805,8 +805,8 @@ func (s *StoresInfo) PauseLeaderTransfer(storeID uint64, direction constant.Dire
 	return nil
 }
 
-// ResumeLeaderTransferIn cleans a store's pause state. The store can be selected
-// as target of TransferLeader again.
+// ResumeLeaderTransfer cleans a store's pause state. The store can be selected
+// as source or target of TransferLeader again.
 func (s *StoresInfo) ResumeLeaderTransfer(storeID uint64, direction constant.Direction) {
 	s.Lock()
 	defer s.Unlock()

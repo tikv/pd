@@ -165,3 +165,14 @@ const (
 	// Out indicates that the direction is out.
 	Out
 )
+
+func (d Direction) String() string {
+	switch d {
+	case In:
+		return "in"
+	case Out:
+		return "out"
+	default:
+		return "unknown"
+	}
+}

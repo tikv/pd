@@ -123,20 +123,6 @@ func ResumeLeaderTransfer(d constant.Direction) StoreCreateOption {
 	}
 }
 
-// PauseLeaderTransferOut prevents the store from been selected as source store of TransferLeader.
-func PauseLeaderTransferOut() StoreCreateOption {
-	return func(store *StoreInfo) {
-		store.pauseLeaderTransferOut = true
-	}
-}
-
-// ResumeLeaderTransferOut cleans a store's pause state. The store can be selected as source of TransferLeader again.
-func ResumeLeaderTransferOut() StoreCreateOption {
-	return func(store *StoreInfo) {
-		store.pauseLeaderTransferOut = false
-	}
-}
-
 // SlowStoreEvicted marks a store as a slow store and prevents transferring
 // leader to the store
 func SlowStoreEvicted() StoreCreateOption {
