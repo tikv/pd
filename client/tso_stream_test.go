@@ -455,14 +455,68 @@ func (s *testTSOStreamSuite) TestTSOStreamConcurrentRunning() {
 	}
 }
 
-//func (s *testTSOStreamSuite) TestEstimatedLatency() {
-//	s.inner.returnResult(100, 0, 1)
-//	res := s.getResult(s.mustProcessRequestWithResultCh(1))
-//	s.NoError(res.err)
-//	s.Equal(int64(100), res.result.physical)
-//	s.Equal(int64(0), res.result.logical)
-//	s.InDelta()
-//}
+func (s *testTSOStreamSuite) TestEstimatedLatency() {
+	s.inner.returnResult(100, 0, 1)
+	res := s.getResult(s.mustProcessRequestWithResultCh(1))
+	s.re.NoError(res.err)
+	s.re.Equal(int64(100), res.result.physical)
+	s.re.Equal(int64(0), res.result.logical)
+	estimation := s.stream.EstimatedRPCLatency().Seconds()
+	s.re.Greater(estimation, 0.0)
+	s.re.InDelta(0.0, estimation, 0.01)
+
+	// For each began request, record its startTime and send it to the result returning goroutine.
+	reqStartTimeCh := make(chan time.Time, maxPendingRequestsInTSOStream)
+	// Limit concurrent requests to be less than the capacity of tsoStream.pendingRequests.
+	tokenCh := make(chan struct{}, maxPendingRequestsInTSOStream-1)
+	for i := 0; i < 40; i++ {
+		tokenCh <- struct{}{}
+	}
+	// Return a result after 50ms delay for each requests
+	const delay = time.Millisecond * 50
+	// The goroutine to delay and return the result.
+	go func() {
+		allocated := int64(1)
+		for reqStartTime := range reqStartTimeCh {
+			now := time.Now()
+			elapsed := now.Sub(reqStartTime)
+			if elapsed < delay {
+				time.Sleep(delay - elapsed)
+			}
+			s.inner.returnResult(100, allocated, 1)
+			allocated++
+		}
+	}()
+
+	// Limit the test time within 1s
+	startTime := time.Now()
+	resCh := make(chan (<-chan callbackInvocation), 100)
+	// The sending goroutine
+	go func() {
+		for time.Since(startTime) < time.Second {
+			<-tokenCh
+			reqStartTimeCh <- time.Now()
+			r := s.mustProcessRequestWithResultCh(1)
+			resCh <- r
+		}
+		close(reqStartTimeCh)
+		close(resCh)
+	}()
+	// Check the result
+	index := 0
+	for r := range resCh {
+		// The first is 1
+		index++
+		res := s.getResult(r)
+		tokenCh <- struct{}{}
+		s.re.NoError(res.err)
+		s.re.Equal(int64(100), res.result.physical)
+		s.re.Equal(int64(index), res.result.logical)
+	}
+
+	s.re.Greater(s.stream.EstimatedRPCLatency(), time.Duration(int64(0.9*float64(delay))))
+	s.re.Less(s.stream.EstimatedRPCLatency(), time.Duration(math.Floor(1.1*float64(delay))))
+}
 
 func TestRCFilter(t *testing.T) {
 	re := require.New(t)

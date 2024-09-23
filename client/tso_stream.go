@@ -231,6 +231,8 @@ var streamIDAlloc atomic.Int32
 
 const invalidStreamID = "<invalid>"
 
+const maxPendingRequestsInTSOStream = 64
+
 func newTSOStream(ctx context.Context, serverURL string, stream grpcTSOStreamAdapter) *tsoStream {
 	streamID := fmt.Sprintf("%s-%d", serverURL, streamIDAlloc.Add(1))
 	// To make error handling in `tsoDispatcher` work, the internal `cancel` and external `cancel` is better to be
@@ -241,7 +243,7 @@ func newTSOStream(ctx context.Context, serverURL string, stream grpcTSOStreamAda
 		stream:    stream,
 		streamID:  streamID,
 
-		pendingRequests: make(chan batchedRequests, 64),
+		pendingRequests: make(chan batchedRequests, maxPendingRequestsInTSOStream),
 
 		cancel: cancel,
 
