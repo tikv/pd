@@ -97,14 +97,14 @@ func (conf *evictLeaderSchedulerConfig) removeStoreLocked(id uint64) (bool, erro
 	_, exists := conf.StoreIDWithRanges[id]
 	if exists {
 		delete(conf.StoreIDWithRanges, id)
-		conf.cluster.ResumeLeaderTransferIn(id)
+		conf.cluster.ResumeLeaderTransfer(id, constant.In)
 		return len(conf.StoreIDWithRanges) == 0, nil
 	}
 	return false, errs.ErrScheduleConfigNotExist.FastGenByArgs()
 }
 
 func (conf *evictLeaderSchedulerConfig) resetStoreLocked(id uint64, keyRange []core.KeyRange) {
-	if err := conf.cluster.PauseLeaderTransferIn(id); err != nil {
+	if err := conf.cluster.PauseLeaderTransfer(id, constant.In); err != nil {
 		log.Error("pause leader transfer failed", zap.Uint64("store-id", id), errs.ZapError(err))
 	}
 	conf.StoreIDWithRanges[id] = keyRange
@@ -138,7 +138,7 @@ func (conf *evictLeaderSchedulerConfig) reloadConfig() error {
 	if err := conf.load(newCfg); err != nil {
 		return err
 	}
-	pauseAndResumeLeaderTransferIn(conf.cluster, conf.StoreIDWithRanges, newCfg.StoreIDWithRanges)
+	pauseAndResumeLeaderTransfer(conf.cluster, constant.In, conf.StoreIDWithRanges, newCfg.StoreIDWithRanges)
 	conf.StoreIDWithRanges = newCfg.StoreIDWithRanges
 	conf.Batch = newCfg.Batch
 	return nil
@@ -149,7 +149,7 @@ func (conf *evictLeaderSchedulerConfig) pauseLeaderTransfer(cluster sche.Schedul
 	defer conf.RUnlock()
 	var res error
 	for id := range conf.StoreIDWithRanges {
-		if err := cluster.PauseLeaderTransferIn(id); err != nil {
+		if err := cluster.PauseLeaderTransfer(id, constant.In); err != nil {
 			res = err
 		}
 	}
@@ -160,7 +160,7 @@ func (conf *evictLeaderSchedulerConfig) resumeLeaderTransfer(cluster sche.Schedu
 	conf.RLock()
 	defer conf.RUnlock()
 	for id := range conf.StoreIDWithRanges {
-		cluster.ResumeLeaderTransferIn(id)
+		cluster.ResumeLeaderTransfer(id, constant.In)
 	}
 }
 
@@ -168,7 +168,7 @@ func (conf *evictLeaderSchedulerConfig) pauseLeaderTransferIfStoreNotExist(id ui
 	conf.RLock()
 	defer conf.RUnlock()
 	if _, exist := conf.StoreIDWithRanges[id]; !exist {
-		if err := conf.cluster.PauseLeaderTransferIn(id); err != nil {
+		if err := conf.cluster.PauseLeaderTransfer(id, constant.In); err != nil {
 			return exist, err
 		}
 	}

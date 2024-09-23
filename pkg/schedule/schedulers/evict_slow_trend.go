@@ -24,6 +24,7 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/core/constant"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
@@ -301,7 +302,7 @@ func (s *evictSlowTrendScheduler) ReloadConfig() error {
 	for _, id := range newCfg.EvictedStores {
 		new[id] = struct{}{}
 	}
-	pauseAndResumeLeaderTransferIn(s.conf.cluster, old, new)
+	pauseAndResumeLeaderTransfer(s.conf.cluster, constant.In, old, new)
 	s.conf.RecoveryDurationGap = newCfg.RecoveryDurationGap
 	s.conf.EvictedStores = newCfg.EvictedStores
 	return nil

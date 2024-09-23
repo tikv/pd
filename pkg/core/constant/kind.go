@@ -155,3 +155,13 @@ func StringToKeyType(input string) KeyType {
 		panic("invalid key type: " + input)
 	}
 }
+
+// Direction distinguishes different kinds of direction.
+type Direction int
+
+const (
+	// In indicates that the direction is in.
+	In Direction = iota
+	// Out indicates that the direction is out.
+	Out
+)

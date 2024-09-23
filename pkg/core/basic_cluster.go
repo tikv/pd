@@ -14,7 +14,11 @@
 
 package core
 
-import "bytes"
+import (
+	"bytes"
+
+	"github.com/tikv/pd/pkg/core/constant"
+)
 
 // BasicCluster provides basic data member and interface for a tikv cluster.
 type BasicCluster struct {
@@ -137,10 +141,8 @@ type StoreSetInformer interface {
 
 // StoreSetController is used to control stores' status.
 type StoreSetController interface {
-	PauseLeaderTransferIn(id uint64) error
-	ResumeLeaderTransferIn(id uint64)
-	PauseLeaderTransferOut(id uint64) error
-	ResumeLeaderTransferOut(id uint64)
+	PauseLeaderTransfer(id uint64, d constant.Direction) error
+	ResumeLeaderTransfer(id uint64, d constant.Direction)
 
 	SlowStoreEvicted(id uint64) error
 	SlowStoreRecovered(id uint64)

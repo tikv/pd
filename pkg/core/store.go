@@ -782,25 +782,32 @@ func (s *StoresInfo) ResetStores() {
 	s.stores = make(map[uint64]*StoreInfo)
 }
 
-// PauseLeaderTransferIn pauses a StoreInfo with storeID. The store can not be selected
-// as target of TransferLeader again.
-func (s *StoresInfo) PauseLeaderTransferIn(storeID uint64) error {
+// PauseLeaderTransfer pauses a StoreInfo with storeID. The store can not be selected
+// as source or target of TransferLeader.
+func (s *StoresInfo) PauseLeaderTransfer(storeID uint64, direction constant.Direction) error {
 	s.Lock()
 	defer s.Unlock()
 	store, ok := s.stores[storeID]
 	if !ok {
 		return errs.ErrStoreNotFound.FastGenByArgs(storeID)
 	}
-	if !store.AllowLeaderTransferIn() {
-		return errs.ErrPauseLeaderTransferIn.FastGenByArgs(storeID)
+	switch direction {
+	case constant.In:
+		if !store.AllowLeaderTransferIn() {
+			return errs.ErrPauseLeaderTransferIn.FastGenByArgs(storeID)
+		}
+	case constant.Out:
+		if !store.AllowLeaderTransferOut() {
+			return errs.ErrPauseLeaderTransferOut.FastGenByArgs(storeID)
+		}
 	}
-	s.stores[storeID] = store.Clone(PauseLeaderTransferIn())
+	s.stores[storeID] = store.Clone(PauseLeaderTransfer(direction))
 	return nil
 }
 
 // ResumeLeaderTransferIn cleans a store's pause state. The store can be selected
 // as target of TransferLeader again.
-func (s *StoresInfo) ResumeLeaderTransferIn(storeID uint64) {
+func (s *StoresInfo) ResumeLeaderTransfer(storeID uint64, direction constant.Direction) {
 	s.Lock()
 	defer s.Unlock()
 	store, ok := s.stores[storeID]
@@ -809,37 +816,7 @@ func (s *StoresInfo) ResumeLeaderTransferIn(storeID uint64) {
 			zap.Uint64("store-id", storeID))
 		return
 	}
-	s.stores[storeID] = store.Clone(ResumeLeaderTransferIn())
-}
-
-// PauseLeaderTransferOut pauses a StoreInfo with storeID. The store can not be selected
-// as source of TransferLeader again.
-func (s *StoresInfo) PauseLeaderTransferOut(storeID uint64) error {
-	s.Lock()
-	defer s.Unlock()
-	store, ok := s.stores[storeID]
-	if !ok {
-		return errs.ErrStoreNotFound.FastGenByArgs(storeID)
-	}
-	if !store.AllowLeaderTransferOut() {
-		return errs.ErrPauseLeaderTransferOut.FastGenByArgs(storeID)
-	}
-	s.stores[storeID] = store.Clone(PauseLeaderTransferOut())
-	return nil
-}
-
-// ResumeLeaderTransferOut cleans a store's pause state. The store can be selected
-// as source of TransferLeader again.
-func (s *StoresInfo) ResumeLeaderTransferOut(storeID uint64) {
-	s.Lock()
-	defer s.Unlock()
-	store, ok := s.stores[storeID]
-	if !ok {
-		log.Warn("try to clean a store's pause state, but it is not found. It may be cleanup",
-			zap.Uint64("store-id", storeID))
-		return
-	}
-	s.stores[storeID] = store.Clone(ResumeLeaderTransferOut())
+	s.stores[storeID] = store.Clone(ResumeLeaderTransfer(direction))
 }
 
 // SlowStoreEvicted marks a store as a slow store and prevents transferring

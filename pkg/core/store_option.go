@@ -19,6 +19,7 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 )
@@ -98,17 +99,27 @@ func SetStoreState(state metapb.StoreState, physicallyDestroyed ...bool) StoreCr
 	}
 }
 
-// PauseLeaderTransferIn prevents the store from been selected as target store of TransferLeader.
-func PauseLeaderTransferIn() StoreCreateOption {
+// PauseLeaderTransfer prevents the store from been selected as source or target store of TransferLeader.
+func PauseLeaderTransfer(d constant.Direction) StoreCreateOption {
 	return func(store *StoreInfo) {
-		store.pauseLeaderTransferIn = true
+		switch d {
+		case constant.In:
+			store.pauseLeaderTransferIn = true
+		case constant.Out:
+			store.pauseLeaderTransferOut = true
+		}
 	}
 }
 
-// ResumeLeaderTransferIn cleans a store's pause state. The store can be selected as target of TransferLeader again.
-func ResumeLeaderTransferIn() StoreCreateOption {
+// ResumeLeaderTransfer cleans a store's pause state. The store can be selected as source or target of TransferLeader again.
+func ResumeLeaderTransfer(d constant.Direction) StoreCreateOption {
 	return func(store *StoreInfo) {
-		store.pauseLeaderTransferIn = false
+		switch d {
+		case constant.In:
+			store.pauseLeaderTransferIn = false
+		case constant.Out:
+			store.pauseLeaderTransferOut = false
+		}
 	}
 }
 
