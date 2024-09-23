@@ -369,7 +369,7 @@ func (s *tsoStream) recvLoop(ctx context.Context) {
 	// For calculating the estimated RPC latency.
 	const (
 		filterCutoffFreq                float64 = 1.0
-		filterNewSampleWeightUpperbound         = 0.2
+		filterNewSampleWeightUpperbound float64 = 0.2
 	)
 	// The filter applies on logarithm of the latency of each TSO RPC in microseconds.
 	filter := newRCFilter(filterCutoffFreq, filterNewSampleWeightUpperbound)
