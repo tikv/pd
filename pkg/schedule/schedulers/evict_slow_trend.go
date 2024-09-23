@@ -47,35 +47,41 @@ type slowCandidate struct {
 	recoverTS time.Time
 }
 
-type evictSlowTrendSchedulerConfig struct {
-	syncutil.RWMutex
-	schedulerConfig
-
-	cluster *core.BasicCluster
-	// Candidate for eviction in current tick.
-	evictCandidate slowCandidate
-	// Last chosen candidate for eviction.
-	lastEvictCandidate slowCandidate
+type evictSlowTrendSchedulerParam struct {
 	// Duration gap for recovering the candidate, unit: s.
 	RecoveryDurationGap uint64 `json:"recovery-duration"`
 	// Only evict one store for now
 	EvictedStores []uint64 `json:"evict-by-trend-stores"`
 }
 
+type evictSlowTrendSchedulerConfig struct {
+	syncutil.RWMutex
+	schedulerConfig
+	evictSlowTrendSchedulerParam
+
+	cluster *core.BasicCluster
+	// Candidate for eviction in current tick.
+	evictCandidate slowCandidate
+	// Last chosen candidate for eviction.
+	lastEvictCandidate slowCandidate
+}
+
 func initEvictSlowTrendSchedulerConfig() *evictSlowTrendSchedulerConfig {
 	return &evictSlowTrendSchedulerConfig{
-		schedulerConfig:     &baseSchedulerConfig{},
-		evictCandidate:      slowCandidate{},
-		lastEvictCandidate:  slowCandidate{},
-		RecoveryDurationGap: defaultRecoveryDurationGap,
-		EvictedStores:       make([]uint64, 0),
+		schedulerConfig:    &baseSchedulerConfig{},
+		evictCandidate:     slowCandidate{},
+		lastEvictCandidate: slowCandidate{},
+		evictSlowTrendSchedulerParam: evictSlowTrendSchedulerParam{
+			RecoveryDurationGap: defaultRecoveryDurationGap,
+			EvictedStores:       make([]uint64, 0),
+		},
 	}
 }
 
-func (conf *evictSlowTrendSchedulerConfig) clone() *evictSlowTrendSchedulerConfig {
+func (conf *evictSlowTrendSchedulerConfig) clone() *evictSlowTrendSchedulerParam {
 	conf.RLock()
 	defer conf.RUnlock()
-	return &evictSlowTrendSchedulerConfig{
+	return &evictSlowTrendSchedulerParam{
 		RecoveryDurationGap: conf.RecoveryDurationGap,
 	}
 }
@@ -436,7 +442,7 @@ func (s *evictSlowTrendScheduler) Schedule(cluster sche.SchedulerCluster, _ bool
 func newEvictSlowTrendScheduler(opController *operator.Controller, conf *evictSlowTrendSchedulerConfig) Scheduler {
 	handler := newEvictSlowTrendHandler(conf)
 	sche := &evictSlowTrendScheduler{
-		BaseScheduler: NewBaseScheduler(opController, types.EvictSlowTrendScheduler),
+		BaseScheduler: NewBaseScheduler(opController, types.EvictSlowTrendScheduler, conf),
 		conf:          conf,
 		handler:       handler,
 	}

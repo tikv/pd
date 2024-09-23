@@ -35,6 +35,7 @@ import (
 	pd "github.com/tikv/pd/client/http"
 	"github.com/tikv/pd/client/retry"
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/keyspace"
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/placement"
@@ -770,7 +771,7 @@ func (suite *httpClientTestSuite) TestUpdateKeyspaceGCManagementType() {
 	defer cancel()
 
 	keyspaceName := "DEFAULT"
-	expectGCManagementType := "keyspace_level_gc"
+	expectGCManagementType := "test-type"
 
 	keyspaceSafePointVersionConfig := pd.KeyspaceGCManagementTypeConfig{
 		Config: pd.KeyspaceGCManagementType{
@@ -782,11 +783,20 @@ func (suite *httpClientTestSuite) TestUpdateKeyspaceGCManagementType() {
 
 	keyspaceMetaRes, err := client.GetKeyspaceMetaByName(ctx, keyspaceName)
 	re.NoError(err)
-	val, ok := keyspaceMetaRes.Config["gc_management_type"]
+	val, ok := keyspaceMetaRes.Config[keyspace.GCManagementType]
 
 	// Check it can get expect key and value in keyspace meta config.
 	re.True(ok)
 	re.Equal(expectGCManagementType, val)
+
+	// Check it doesn't support update config to keyspace.KeyspaceLevelGC now.
+	keyspaceSafePointVersionConfig = pd.KeyspaceGCManagementTypeConfig{
+		Config: pd.KeyspaceGCManagementType{
+			GCManagementType: keyspace.KeyspaceLevelGC,
+		},
+	}
+	err = client.UpdateKeyspaceGCManagementType(suite.ctx, keyspaceName, &keyspaceSafePointVersionConfig)
+	re.Error(err)
 }
 
 func (suite *httpClientTestSuite) TestGetHealthStatus() {
