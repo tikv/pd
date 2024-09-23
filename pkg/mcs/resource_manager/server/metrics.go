@@ -131,11 +131,7 @@ var (
 			Subsystem: ruSubsystem,
 			Name:      "available_ru",
 			Help:      "Counter of the available RU for all resource groups.",
-<<<<<<< HEAD:pkg/mcs/resource_manager/server/metrics.go
 		}, []string{resourceGroupNameLabel})
-=======
-		}, []string{resourceGroupNameLabel, newResourceGroupNameLabel})
-
 	resourceGroupConfigGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: namespace,
@@ -143,7 +139,6 @@ var (
 			Name:      "group_config",
 			Help:      "Config of the resource group.",
 		}, []string{newResourceGroupNameLabel, typeLabel})
->>>>>>> 56f082db6 (resource_manager: add metrics to show resource group configuration (#8478)):pkg/mcs/resourcemanager/server/metrics.go
 )
 
 func init() {
@@ -157,10 +152,7 @@ func init() {
 	prometheus.MustRegister(sqlCPUCost)
 	prometheus.MustRegister(requestCount)
 	prometheus.MustRegister(availableRUCounter)
-<<<<<<< HEAD:pkg/mcs/resource_manager/server/metrics.go
-=======
 	prometheus.MustRegister(readRequestUnitMaxPerSecCost)
 	prometheus.MustRegister(writeRequestUnitMaxPerSecCost)
 	prometheus.MustRegister(resourceGroupConfigGauge)
->>>>>>> 56f082db6 (resource_manager: add metrics to show resource group configuration (#8478)):pkg/mcs/resourcemanager/server/metrics.go
 }

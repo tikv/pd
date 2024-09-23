@@ -422,7 +422,6 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 			// Clean up the metrics that have not been updated for a long time.
 			for name, lastTime := range m.consumptionRecord {
 				if time.Since(lastTime) > metricsCleanupTimeout {
-<<<<<<< HEAD:pkg/mcs/resource_manager/server/manager.go
 					readRequestUnitCost.DeleteLabelValues(name)
 					writeRequestUnitCost.DeleteLabelValues(name)
 					sqlLayerRequestUnitCost.DeleteLabelValues(name)
@@ -437,23 +436,7 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 					delete(maxPerSecTrackers, name)
 					readRequestUnitMaxPerSecCost.DeleteLabelValues(name)
 					writeRequestUnitMaxPerSecCost.DeleteLabelValues(name)
-=======
-					readRequestUnitCost.DeleteLabelValues(r.name, r.name, r.ruType)
-					writeRequestUnitCost.DeleteLabelValues(r.name, r.name, r.ruType)
-					sqlLayerRequestUnitCost.DeleteLabelValues(r.name, r.name, r.ruType)
-					readByteCost.DeleteLabelValues(r.name, r.name, r.ruType)
-					writeByteCost.DeleteLabelValues(r.name, r.name, r.ruType)
-					kvCPUCost.DeleteLabelValues(r.name, r.name, r.ruType)
-					sqlCPUCost.DeleteLabelValues(r.name, r.name, r.ruType)
-					requestCount.DeleteLabelValues(r.name, r.name, readTypeLabel)
-					requestCount.DeleteLabelValues(r.name, r.name, writeTypeLabel)
-					availableRUCounter.DeleteLabelValues(r.name, r.name, r.ruType)
-					delete(m.consumptionRecord, r)
-					delete(maxPerSecTrackers, r.name)
-					readRequestUnitMaxPerSecCost.DeleteLabelValues(r.name)
-					writeRequestUnitMaxPerSecCost.DeleteLabelValues(r.name)
-					resourceGroupConfigGauge.DeletePartialMatch(prometheus.Labels{newResourceGroupNameLabel: r.name})
->>>>>>> 56f082db6 (resource_manager: add metrics to show resource group configuration (#8478)):pkg/mcs/resourcemanager/server/manager.go
+					resourceGroupConfigGauge.DeletePartialMatch(prometheus.Labels{newResourceGroupNameLabel: name})
 				}
 			}
 		case <-availableRUTicker.C:
@@ -472,14 +455,10 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 				if ru < 0 {
 					ru = 0
 				}
-<<<<<<< HEAD:pkg/mcs/resource_manager/server/manager.go
 				availableRUCounter.WithLabelValues(group.Name).Set(ru)
-=======
-				availableRUCounter.WithLabelValues(group.Name, group.Name).Set(ru)
 				resourceGroupConfigGauge.WithLabelValues(group.Name, priorityLabel).Set(float64(group.Priority))
 				resourceGroupConfigGauge.WithLabelValues(group.Name, ruPerSecLabel).Set(float64(group.RUSettings.RU.Settings.FillRate))
 				resourceGroupConfigGauge.WithLabelValues(group.Name, ruCapacityLabel).Set(float64(group.RUSettings.RU.Settings.BurstLimit))
->>>>>>> 56f082db6 (resource_manager: add metrics to show resource group configuration (#8478)):pkg/mcs/resourcemanager/server/manager.go
 			}
 		case <-recordMaxTicker.C:
 			// Record the sum of RRU and WRU every second.
