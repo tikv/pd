@@ -436,6 +436,7 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 					delete(maxPerSecTrackers, name)
 					readRequestUnitMaxPerSecCost.DeleteLabelValues(name)
 					writeRequestUnitMaxPerSecCost.DeleteLabelValues(name)
+					resourceGroupConfigGauge.DeletePartialMatch(prometheus.Labels{newResourceGroupNameLabel: name})
 				}
 			}
 		case <-availableRUTicker.C:
@@ -455,8 +456,10 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 					ru = 0
 				}
 				availableRUCounter.WithLabelValues(group.Name).Set(ru)
+				resourceGroupConfigGauge.WithLabelValues(group.Name, priorityLabel).Set(float64(group.Priority))
+				resourceGroupConfigGauge.WithLabelValues(group.Name, ruPerSecLabel).Set(float64(group.RUSettings.RU.Settings.FillRate))
+				resourceGroupConfigGauge.WithLabelValues(group.Name, ruCapacityLabel).Set(float64(group.RUSettings.RU.Settings.BurstLimit))
 			}
-
 		case <-recordMaxTicker.C:
 			// Record the sum of RRU and WRU every second.
 			m.RLock()
