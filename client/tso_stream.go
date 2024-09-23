@@ -468,6 +468,14 @@ func (s *tsoStream) WaitForClosed() {
 	s.wg.Wait()
 }
 
+// rcFilter is a simple implementation of a discrete-time low-pass filter.
+// Ref: https://en.wikipedia.org/wiki/Low-pass_filter#Simple_infinite_impulse_response_filter
+// There are some differences between this implementation and the wikipedia one:
+//   - Time-interval between each two samples is not necessarily a constant. We allow non-even sample interval by simply
+//     calculating the alpha (which is calculated by `dt / (rc + dt)`) dynamically for each sample, at the expense of
+//     losing some mathematical strictness.
+//   - Support specifying the upperbound of the new sample when updating. This can be an approach to avoid the output
+//     jumps drastically when the samples come in a low frequency.
 type rcFilter struct {
 	rc                        float64
 	newSampleWeightUpperBound float64
@@ -476,6 +484,8 @@ type rcFilter struct {
 	firstSampleArrived        bool
 }
 
+// newRCFilter initializes an rcFilter. `cutoff` is the cutoff frequency in Hertz. `newSampleWeightUpperbound` controls
+// the upper limit of the weight of each incoming sample (pass 1 for unlimited).
 func newRCFilter(cutoff float64, newSampleWeightUpperBound float64) rcFilter {
 	rc := 1.0 / (2.0 * math.Pi * cutoff)
 	return rcFilter{
@@ -493,9 +503,9 @@ func (f *rcFilter) update(sampleTime time.Time, newSample float64) float64 {
 		return newSample
 	}
 
-	// Delta time
+	// Delta time.
 	dt := sampleTime.Sub(f.lastSampleTime).Seconds()
-	// Current sample represented and calculated in log(microseconds)
+	// `alpha` is the weight of the new sample, limited with `newSampleWeightUpperBound`.
 	alpha := math.Min(dt/(f.rc+dt), f.newSampleWeightUpperBound)
 	f.value = (1-alpha)*f.value + alpha*newSample
 

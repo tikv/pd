@@ -17,6 +17,7 @@ package pd
 import (
 	"context"
 	"io"
+	"math"
 	"testing"
 	"time"
 
@@ -452,6 +453,67 @@ func (s *testTSOStreamSuite) TestTSOStreamConcurrentRunning() {
 		s.re.Error(res.err)
 		s.re.ErrorIs(res.err, errs.ErrClientTSOStreamClosed)
 	}
+}
+
+//func (s *testTSOStreamSuite) TestEstimatedLatency() {
+//	s.inner.returnResult(100, 0, 1)
+//	res := s.getResult(s.mustProcessRequestWithResultCh(1))
+//	s.NoError(res.err)
+//	s.Equal(int64(100), res.result.physical)
+//	s.Equal(int64(0), res.result.logical)
+//	s.InDelta()
+//}
+
+func TestRCFilter(t *testing.T) {
+	re := require.New(t)
+	// Test basic calculation with frequency 1
+	f := newRCFilter(1, 1)
+	now := time.Now()
+	// The first sample initializes the value.
+	re.Equal(10.0, f.update(now, 10))
+	now = now.Add(time.Second)
+	expectedValue := 10 / (2*math.Pi + 1)
+	re.InEpsilon(expectedValue, f.update(now, 0), 1e-8)
+	expectedValue = expectedValue*(1/(2*math.Pi))/(1/(2*math.Pi)+2) + 100*2/(1/(2*math.Pi)+2)
+	now = now.Add(time.Second * 2)
+	re.InEpsilon(expectedValue, f.update(now, 100), 1e-8)
+
+	// Test newSampleWeightUpperBound
+	f = newRCFilter(10, 0.5)
+	now = time.Now()
+	re.Equal(0.0, f.update(now, 0))
+	now = now.Add(time.Second)
+	re.InEpsilon(1.0, f.update(now, 2), 1e-8)
+	now = now.Add(time.Second * 2)
+	re.InEpsilon(3.0, f.update(now, 5), 1e-8)
+
+	// Test another cutoff frequency and weight upperbound.
+	f = newRCFilter(1/(2*math.Pi), 0.9)
+	now = time.Now()
+	re.Equal(1.0, f.update(now, 1))
+	now = now.Add(time.Second)
+	re.InEpsilon(2.0, f.update(now, 3), 1e-8)
+	now = now.Add(time.Second * 2)
+	re.InEpsilon(6.0, f.update(now, 8), 1e-8)
+	now = now.Add(time.Minute)
+	re.InEpsilon(15.0, f.update(now, 16), 1e-8)
+
+	// Test with dense samples
+	f = newRCFilter(1/(2*math.Pi), 0.9)
+	now = time.Now()
+	re.Equal(0.0, f.update(now, 0))
+	lastOutput := 0.0
+	// 10000 even samples in 1 second.
+	for i := 0; i < 10000; i++ {
+		now = now.Add(time.Microsecond * 100)
+		output := f.update(now, 1.0)
+		re.Greater(output, lastOutput)
+		re.Less(output, 1.0)
+		lastOutput = output
+	}
+	// Regarding the above samples as being close enough to a continuous function, the output after 1 second
+	// should be 1 - exp(-RC*t) = 1 - exp(-t). Here RC = 1/(2*pi*cutoff) = 1.
+	re.InDelta(0.63, lastOutput, 0.02)
 }
 
 func BenchmarkTSOStreamSendRecv(b *testing.B) {

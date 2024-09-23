@@ -570,6 +570,7 @@ func (td *tsoDispatcher) processRequests(
 		}
 		// `logical` is the largest ts's logical part here, we need to do the subtracting before we finish each TSO request.
 		firstLogical := tsoutil.AddLogical(result.logical, -int64(result.count)+1, result.suffixBits)
+		// Do the check before releasing the token.
 		td.compareAndSwapTS(curTSOInfo, firstLogical)
 		td.doneCollectedRequests(tbc, result.physical, firstLogical, result.suffixBits, stream.streamID)
 	}
