@@ -94,7 +94,7 @@ func (suite *schedulerTestSuite) TearDownTest() {
 			}
 		}
 	}
-	suite.env.RunFuncInTwoModes(cleanFunc)
+	suite.env.RunTestBasedOnMode(cleanFunc)
 	suite.env.Cleanup()
 }
 
@@ -722,6 +722,67 @@ func (suite *schedulerTestSuite) checkSchedulerDiagnostic(cluster *pdTests.TestC
 	checkSchedulerDescribeCommand("balance-leader-scheduler", "normal", "")
 }
 
+<<<<<<< HEAD
+=======
+func (suite *schedulerTestSuite) TestEvictLeaderScheduler() {
+	suite.env.RunTestBasedOnMode(suite.checkEvictLeaderScheduler)
+}
+
+func (suite *schedulerTestSuite) checkEvictLeaderScheduler(cluster *pdTests.TestCluster) {
+	re := suite.Require()
+	pdAddr := cluster.GetConfig().GetClientURL()
+	cmd := ctl.GetRootCmd()
+
+	stores := []*metapb.Store{
+		{
+			Id:            1,
+			State:         metapb.StoreState_Up,
+			LastHeartbeat: time.Now().UnixNano(),
+		},
+		{
+			Id:            2,
+			State:         metapb.StoreState_Up,
+			LastHeartbeat: time.Now().UnixNano(),
+		},
+		{
+			Id:            3,
+			State:         metapb.StoreState_Up,
+			LastHeartbeat: time.Now().UnixNano(),
+		},
+		{
+			Id:            4,
+			State:         metapb.StoreState_Up,
+			LastHeartbeat: time.Now().UnixNano(),
+		},
+	}
+	for _, store := range stores {
+		pdTests.MustPutStore(re, cluster, store)
+	}
+
+	pdTests.MustPutRegion(re, cluster, 1, 1, []byte("a"), []byte("b"))
+	output, err := tests.ExecuteCommand(cmd, []string{"-u", pdAddr, "scheduler", "add", "evict-leader-scheduler", "2"}...)
+	re.NoError(err)
+	re.Contains(string(output), "Success!")
+	output, err = tests.ExecuteCommand(cmd, []string{"-u", pdAddr, "scheduler", "add", "evict-leader-scheduler", "1"}...)
+	re.NoError(err)
+	re.Contains(string(output), "Success!")
+	output, err = tests.ExecuteCommand(cmd, []string{"-u", pdAddr, "scheduler", "remove", "evict-leader-scheduler"}...)
+	re.NoError(err)
+	re.Contains(string(output), "Success!")
+	output, err = tests.ExecuteCommand(cmd, []string{"-u", pdAddr, "scheduler", "add", "evict-leader-scheduler", "1"}...)
+	re.NoError(err)
+	re.Contains(string(output), "Success!")
+	testutil.Eventually(re, func() bool {
+		output, err = tests.ExecuteCommand(cmd, []string{"-u", pdAddr, "scheduler", "remove", "evict-leader-scheduler-1"}...)
+		return err == nil && strings.Contains(string(output), "Success!")
+	})
+	testutil.Eventually(re, func() bool {
+		output, err = tests.ExecuteCommand(cmd, []string{"-u", pdAddr, "scheduler", "show"}...)
+		return err == nil && !strings.Contains(string(output), "evict-leader-scheduler")
+	})
+}
+
+>>>>>>> f3e9d9ad0 (*: let TestEvictLeaderScheduler run in two modes (#8663))
 func mustExec(re *require.Assertions, cmd *cobra.Command, args []string, v any) string {
 	output, err := tests.ExecuteCommand(cmd, args...)
 	re.NoError(err)

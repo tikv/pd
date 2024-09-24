@@ -91,7 +91,7 @@ func (suite *regionTestSuite) TearDownTest() {
 			return true
 		})
 	}
-	suite.env.RunFuncInTwoModes(cleanFunc)
+	suite.env.RunTestBasedOnMode(cleanFunc)
 }
 
 func (suite *regionTestSuite) TestSplitRegions() {
