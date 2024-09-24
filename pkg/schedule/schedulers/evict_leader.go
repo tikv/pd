@@ -74,6 +74,9 @@ func (conf *evictLeaderSchedulerConfig) getStores() []uint64 {
 }
 
 func (conf *evictLeaderSchedulerConfig) BuildWithArgs(args []string) error {
+	failpoint.Inject("buildWithArgsErr", func() {
+		failpoint.Return(errors.New("fail to build with args"))
+	})
 	if len(args) != 1 {
 		return errs.ErrSchedulerConfig.FastGenByArgs("id")
 	}
@@ -144,25 +147,7 @@ func (conf *evictLeaderSchedulerConfig) removeStore(id uint64) (succ bool, last 
 		succ = true
 		last = len(conf.StoreIDWithRanges) == 0
 	}
-<<<<<<< HEAD
 	return succ, last
-=======
-	return false, errs.ErrScheduleConfigNotExist.FastGenByArgs()
-}
-
-func (conf *evictLeaderSchedulerConfig) removeStore(id uint64) {
-	conf.Lock()
-	defer conf.Unlock()
-	// if the store is not existed, no need to resume leader transfer
-	_, _ = conf.removeStoreLocked(id)
-}
-
-func (conf *evictLeaderSchedulerConfig) resetStoreLocked(id uint64, keyRange []core.KeyRange) {
-	if err := conf.cluster.PauseLeaderTransfer(id); err != nil {
-		log.Error("pause leader transfer failed", zap.Uint64("store-id", id), errs.ZapError(err))
-	}
-	conf.StoreIDWithRanges[id] = keyRange
->>>>>>> 6b927e117 (*: reset config if the input is invalid  (#8632))
 }
 
 func (conf *evictLeaderSchedulerConfig) resetStore(id uint64, keyRange []core.KeyRange) {
@@ -399,7 +384,6 @@ func (handler *evictLeaderHandler) UpdateConfig(w http.ResponseWriter, r *http.R
 	var id uint64
 	idFloat, ok := input["store_id"].(float64)
 	if ok {
-<<<<<<< HEAD
 		id = (uint64)(idFloat)
 		handler.config.mu.RLock()
 		if _, exists = handler.config.StoreIDWithRanges[id]; !exists {
@@ -408,12 +392,6 @@ func (handler *evictLeaderHandler) UpdateConfig(w http.ResponseWriter, r *http.R
 				handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
 				return
 			}
-=======
-		if batchFloat < 1 || batchFloat > 10 {
-			handler.config.removeStore(id)
-			handler.rd.JSON(w, http.StatusBadRequest, "batch is invalid, it should be in [1, 10]")
-			return
->>>>>>> 6b927e117 (*: reset config if the input is invalid  (#8632))
 		}
 		handler.config.mu.RUnlock()
 		args = append(args, strconv.FormatUint(id, 10))
@@ -421,33 +399,20 @@ func (handler *evictLeaderHandler) UpdateConfig(w http.ResponseWriter, r *http.R
 
 	ranges, ok := (input["ranges"]).([]string)
 	if ok {
-<<<<<<< HEAD
 		args = append(args, ranges...)
 	} else if exists {
 		args = append(args, handler.config.getRanges(id)...)
 	}
 
-	handler.config.BuildWithArgs(args)
-	err := handler.config.Persist()
-=======
-		if !inputHasStoreID {
-			handler.config.removeStore(id)
-			handler.rd.JSON(w, http.StatusInternalServerError, errs.ErrSchedulerConfig.FastGenByArgs("id"))
-			return
-		}
-	} else if exist {
-		ranges = handler.config.getRanges(id)
-	}
-
-	newRanges, err = getKeyRanges(ranges)
+	err := handler.config.BuildWithArgs(args)
 	if err != nil {
-		handler.config.removeStore(id)
-		handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		handler.config.mu.Lock()
+		handler.config.cluster.ResumeLeaderTransfer(id)
+		handler.config.mu.Unlock()
+		handler.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
-
-	err = handler.config.update(id, newRanges, batch)
->>>>>>> 6b927e117 (*: reset config if the input is invalid  (#8632))
+	err = handler.config.Persist()
 	if err != nil {
 		handler.config.removeStore(id)
 		handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
