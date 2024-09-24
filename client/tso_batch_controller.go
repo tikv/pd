@@ -47,7 +47,6 @@ func newTSOBatchController(maxBatchSize int) *tsoBatchController {
 // It returns nil error if everything goes well, otherwise a non-nil error which means we should stop the service.
 // It's guaranteed that if this function failed after collecting some requests, then these requests will be cancelled
 // when the function returns, so the caller don't need to clear them manually.
-// If maxBatchWaitInterval is not enabled,
 func (tbc *tsoBatchController) fetchPendingRequests(ctx context.Context, tsoRequestCh <-chan *tsoRequest, tokenCh chan struct{}, maxBatchWaitInterval time.Duration) (errRet error) {
 	var tokenAcquired bool
 	defer func() {

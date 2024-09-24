@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/pingcap/errors"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/tsopb"
 	"github.com/pingcap/log"
@@ -448,6 +449,17 @@ recvLoop:
 // EstimatedRPCLatency returns an estimation of the duration of each TSO RPC. If the stream has never handled any RPC,
 // this function returns 0.
 func (s *tsoStream) EstimatedRPCLatency() time.Duration {
+	failpoint.Inject("tsoStreamSimulateEstimatedRPCLatency", func(val failpoint.Value) {
+		if s, ok := val.(string); ok {
+			duration, err := time.ParseDuration(s)
+			if err != nil {
+				panic(err)
+			}
+			failpoint.Return(duration)
+		} else {
+			panic("invalid failpoint value for `tsoStreamSimulateEstimatedRPCLatency`: expected string")
+		}
+	})
 	latencyUs := s.estimatedLatencyMicros.Load()
 	// Limit it at least 100us
 	if latencyUs < 100 {

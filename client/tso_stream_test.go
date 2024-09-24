@@ -43,6 +43,14 @@ type resultMsg struct {
 	breakStream bool
 }
 
+type resultMode int
+
+const (
+	resultModeManual resultMode = iota
+	resultModeGenerated
+	resultModeGenerateOnSignal
+)
+
 type mockTSOStreamImpl struct {
 	ctx        context.Context
 	requestCh  chan requestMsg
@@ -50,21 +58,21 @@ type mockTSOStreamImpl struct {
 	keyspaceID uint32
 	errorState error
 
-	autoGenerateResult bool
+	resultMode resultMode
 	// Current progress of generating TSO results
 	resGenPhysical, resGenLogical int64
 }
 
-func newMockTSOStreamImpl(ctx context.Context, autoGenerateResult bool) *mockTSOStreamImpl {
+func newMockTSOStreamImpl(ctx context.Context, resultMode resultMode) *mockTSOStreamImpl {
 	return &mockTSOStreamImpl{
 		ctx:        ctx,
 		requestCh:  make(chan requestMsg, 64),
 		resultCh:   make(chan resultMsg, 64),
 		keyspaceID: 0,
 
-		autoGenerateResult: autoGenerateResult,
-		resGenPhysical:     10000,
-		resGenLogical:      0,
+		resultMode:     resultMode,
+		resGenPhysical: 10000,
+		resGenLogical:  0,
 	}
 }
 
@@ -83,6 +91,17 @@ func (s *mockTSOStreamImpl) Send(clusterID uint64, _keyspaceID, keyspaceGroupID 
 }
 
 func (s *mockTSOStreamImpl) Recv() (tsoRequestResult, error) {
+	var needGenerateResult, needResultSignal bool
+	switch s.resultMode {
+	case resultModeManual:
+		needResultSignal = true
+	case resultModeGenerated:
+		needGenerateResult = true
+	case resultModeGenerateOnSignal:
+		needResultSignal = true
+		needGenerateResult = true
+	}
+
 	// This stream have ever receive an error, it returns the error forever.
 	if s.errorState != nil {
 		return tsoRequestResult{}, s.errorState
@@ -131,12 +150,12 @@ func (s *mockTSOStreamImpl) Recv() (tsoRequestResult, error) {
 			}
 			s.errorState = res.err
 			return tsoRequestResult{}, s.errorState
-		} else if s.autoGenerateResult {
+		} else if !needResultSignal {
 			// Do not allow manually assigning result.
 			panic("trying manually specifying result for mockTSOStreamImpl when it's auto-generating mode")
 		}
-	} else if s.autoGenerateResult {
-		res = s.autoGenResult(req.count)
+	} else if !needResultSignal {
+		// Mark hasRes as true to skip receiving from resultCh. The actual value of the result will be generated later.
 		hasRes = true
 	}
 
@@ -161,6 +180,10 @@ func (s *mockTSOStreamImpl) Recv() (tsoRequestResult, error) {
 		}
 	}
 
+	if needGenerateResult {
+		res = s.autoGenResult(req.count)
+	}
+
 	// Both res and req should be ready here.
 	if res.err != nil {
 		s.errorState = res.err
@@ -169,11 +192,14 @@ func (s *mockTSOStreamImpl) Recv() (tsoRequestResult, error) {
 }
 
 func (s *mockTSOStreamImpl) autoGenResult(count int64) resultMsg {
+	if count >= (1 << 18) {
+		panic("requested count too large")
+	}
 	physical := s.resGenPhysical
 	logical := s.resGenLogical + count
 	if logical >= (1 << 18) {
-		physical += logical >> 18
-		logical &= (1 << 18) - 1
+		physical += 1
+		logical = count
 	}
 
 	s.resGenPhysical = physical
@@ -191,6 +217,9 @@ func (s *mockTSOStreamImpl) autoGenResult(count int64) resultMsg {
 }
 
 func (s *mockTSOStreamImpl) returnResult(physical int64, logical int64, count uint32) {
+	if s.resultMode != resultModeManual {
+		panic("trying to manually specifying tso result on generating mode")
+	}
 	s.resultCh <- resultMsg{
 		r: tsoRequestResult{
 			physical:            physical,
@@ -200,6 +229,13 @@ func (s *mockTSOStreamImpl) returnResult(physical int64, logical int64, count ui
 			respKeyspaceGroupID: s.keyspaceID,
 		},
 	}
+}
+
+func (s *mockTSOStreamImpl) generateNext() {
+	if s.resultMode != resultModeGenerateOnSignal {
+		panic("trying to signal generation when the stream is not generate-on-signal mode")
+	}
+	s.resultCh <- resultMsg{}
 }
 
 func (s *mockTSOStreamImpl) returnError(err error) {
@@ -234,7 +270,7 @@ type testTSOStreamSuite struct {
 
 func (s *testTSOStreamSuite) SetupTest() {
 	s.re = require.New(s.T())
-	s.inner = newMockTSOStreamImpl(context.Background(), false)
+	s.inner = newMockTSOStreamImpl(context.Background(), resultModeManual)
 	s.stream = newTSOStream(context.Background(), mockStreamURL, s.inner)
 }
 
@@ -573,7 +609,7 @@ func TestRCFilter(t *testing.T) {
 func BenchmarkTSOStreamSendRecv(b *testing.B) {
 	log.SetLevel(zapcore.FatalLevel)
 
-	streamInner := newMockTSOStreamImpl(context.Background(), true)
+	streamInner := newMockTSOStreamImpl(context.Background(), resultModeGenerated)
 	stream := newTSOStream(context.Background(), mockStreamURL, streamInner)
 	defer func() {
 		streamInner.stop()

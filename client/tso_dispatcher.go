@@ -121,7 +121,7 @@ func newTSODispatcher(
 		provider:       provider,
 		connectionCtxs: &sync.Map{},
 		tsoRequestCh:   tsoRequestCh,
-		tsDeadlineCh:   make(chan *deadline, 1),
+		tsDeadlineCh:   make(chan *deadline, tokenChCapacity),
 		batchBufferPool: &sync.Pool{
 			New: func() any {
 				return newTSOBatchController(maxBatchSize * 2)
@@ -193,9 +193,6 @@ func (td *tsoDispatcher) handleDispatcher(wg *sync.WaitGroup) {
 		batchController *tsoBatchController
 	)
 
-	// Currently only 1 concurrency is supported. Put one token in.
-	td.tokenCh <- struct{}{}
-
 	log.Info("[tso] tso dispatcher created", zap.String("dc-location", dc))
 	// Clean up the connectionCtxs when the dispatcher exits.
 	defer func() {
@@ -206,7 +203,10 @@ func (td *tsoDispatcher) handleDispatcher(wg *sync.WaitGroup) {
 			return true
 		})
 		if batchController != nil && batchController.collectedRequestCount != 0 {
-			log.Fatal("batched tso requests not cleared when exiting the tso dispatcher loop", zap.Any("panic", recover()))
+			if r := recover(); r != nil {
+				panic(r)
+			}
+			log.Fatal("batched tso requests not cleared when exiting the tso dispatcher loop")
 		}
 		tsoErr := errors.WithStack(errClosing)
 		td.revokePendingRequests(tsoErr)
@@ -341,12 +341,17 @@ tsoBatchLoop:
 			break streamChoosingLoop
 		}
 
+		noDelay := false
+		failpoint.Inject("tsoDispatcherConcurrentModeNoDelay", func() {
+			noDelay = true
+		})
+
 		// If concurrent RPC is enabled, the time for collecting each request batch is expected to be
 		// estimatedRPCDuration / concurrency. Note the time mentioned here is counted from starting trying to collect
 		// the batch, instead of the time when the first request arrives.
 		// Here, if the elapsed time since starting collecting this batch didn't reach the expected batch time, then
 		// continue collecting.
-		if td.isConcurrentRPCEnabled() {
+		if td.isConcurrentRPCEnabled() && !noDelay {
 			estimatedLatency := stream.EstimatedRPCLatency()
 			estimateTSOLatencyGauge.WithLabelValues(streamURL).Set(estimatedLatency.Seconds())
 
@@ -364,7 +369,7 @@ tsoBatchLoop:
 
 				err = batchController.fetchRequestsWithTimer(ctx, td.tsoRequestCh, batchingTimer)
 				if err != nil {
-					// There should not be
+					// There should not be other kinds of errors.
 					log.Info("[tso] stop fetching the pending tso requests due to context canceled",
 						zap.String("dc-location", dc), zap.Error(err))
 					td.cancelCollectedRequests(batchController, invalidStreamID, errors.WithStack(ctx.Err()))
@@ -671,6 +676,11 @@ func (td *tsoDispatcher) checkTSORPCConcurrency(ctx context.Context, maxBatchWai
 	// because that MaxTSOBatchWaitInterval is just enabled. In this case, disable concurrent TSO RPC requests
 	// immediately, because MaxTSOBatchWaitInterval and concurrent RPC requests has opposite purpose.
 	immediatelyUpdate := td.rpcConcurrency > 1 && maxBatchWaitInterval > 0
+
+	// Allow always updating for test purpose.
+	failpoint.Inject("tsoDispatcherAlwaysCheckConcurrency", func() {
+		immediatelyUpdate = true
+	})
 
 	if !immediatelyUpdate && now.Sub(td.lastCheckConcurrencyTime) < dispatcherCheckRPCConcurrencyInterval {
 		return nil
