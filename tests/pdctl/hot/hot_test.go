@@ -48,6 +48,34 @@ func TestHotTestSuite(t *testing.T) {
 	suite.Run(t, new(hotTestSuite))
 }
 
+<<<<<<< HEAD:tests/pdctl/hot/hot_test.go
+=======
+func (suite *hotTestSuite) SetupSuite() {
+	suite.env = pdTests.NewSchedulingTestEnvironment(suite.T(),
+		func(conf *config.Config, _ string) {
+			conf.Schedule.MaxStoreDownTime.Duration = time.Hour
+			conf.Schedule.HotRegionCacheHitsThreshold = 0
+		},
+	)
+}
+
+func (suite *hotTestSuite) TearDownSuite() {
+	suite.env.Cleanup()
+}
+
+func (suite *hotTestSuite) TearDownTest() {
+	cleanFunc := func(cluster *pdTests.TestCluster) {
+		leader := cluster.GetLeaderServer()
+		hotStat := leader.GetRaftCluster().GetHotStat()
+		if sche := cluster.GetSchedulingPrimaryServer(); sche != nil {
+			hotStat = sche.GetCluster().GetHotStat()
+		}
+		hotStat.HotCache.CleanCache()
+	}
+	suite.env.RunTestBasedOnMode(cleanFunc)
+}
+
+>>>>>>> f3e9d9ad0 (*: let TestEvictLeaderScheduler run in two modes (#8663)):tools/pd-ctl/tests/hot/hot_test.go
 func (suite *hotTestSuite) TestHot() {
 	var start time.Time
 	start = start.Add(time.Hour)

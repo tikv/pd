@@ -280,6 +280,7 @@ func (s *SchedulingTestEnvironment) RunTestInAPIMode(test func(*TestCluster)) {
 	s.t.Log("finish to run test in api mode")
 }
 
+<<<<<<< HEAD
 func (s *SchedulingTestEnvironment) cleanup() {
 	s.cluster.Destroy()
 	s.cancel()
@@ -287,6 +288,19 @@ func (s *SchedulingTestEnvironment) cleanup() {
 
 func (s *SchedulingTestEnvironment) startCluster(m mode) {
 	var err error
+=======
+// Cleanup is to cleanup the environment.
+func (s *SchedulingTestEnvironment) Cleanup() {
+	for _, cluster := range s.clusters {
+		cluster.Destroy()
+	}
+	for _, cancel := range s.cancels {
+		cancel()
+	}
+}
+
+func (s *SchedulingTestEnvironment) startCluster(m SchedulerMode) {
+>>>>>>> f3e9d9ad0 (*: let TestEvictLeaderScheduler run in two modes (#8663))
 	re := require.New(s.t)
 	s.ctx, s.cancel = context.WithCancel(context.Background())
 	switch m {
