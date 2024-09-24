@@ -158,7 +158,7 @@ type evictLeaderScheduler struct {
 // newEvictLeaderScheduler creates an admin scheduler that transfers all leaders
 // out of a store.
 func newEvictLeaderScheduler(opController *operator.Controller, conf *evictLeaderSchedulerConfig) schedulers.Scheduler {
-	base := schedulers.NewBaseScheduler(opController, userEvictLeaderScheduler)
+	base := schedulers.NewBaseScheduler(opController, userEvictLeaderScheduler, nil)
 	handler := newEvictLeaderHandler(conf)
 	return &evictLeaderScheduler{
 		BaseScheduler: base,

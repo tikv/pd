@@ -28,7 +28,7 @@ type memoryKV struct {
 	tree *btree.BTreeG[memoryKVItem]
 }
 
-// NewMemoryKV returns an in-memory kvBase for testing.
+// NewMemoryKV returns an in-memory kvBase.
 func NewMemoryKV() Base {
 	return &memoryKV{
 		tree: btree.NewG(2, func(i, j memoryKVItem) bool {

@@ -88,8 +88,12 @@ type baseHotScheduler struct {
 	updateWriteTime time.Time
 }
 
-func newBaseHotScheduler(opController *operator.Controller, sampleDuration time.Duration, sampleInterval time.Duration) *baseHotScheduler {
-	base := NewBaseScheduler(opController, types.BalanceHotRegionScheduler)
+func newBaseHotScheduler(
+	opController *operator.Controller,
+	sampleDuration, sampleInterval time.Duration,
+	schedulerConfig schedulerConfig,
+) *baseHotScheduler {
+	base := NewBaseScheduler(opController, types.BalanceHotRegionScheduler, schedulerConfig)
 	ret := &baseHotScheduler{
 		BaseScheduler:  base,
 		regionPendings: make(map[uint64]*pendingInfluence),
@@ -197,8 +201,8 @@ type hotScheduler struct {
 }
 
 func newHotScheduler(opController *operator.Controller, conf *hotRegionSchedulerConfig) *hotScheduler {
-	base := newBaseHotScheduler(opController,
-		conf.getHistorySampleDuration(), conf.getHistorySampleInterval())
+	base := newBaseHotScheduler(opController, conf.getHistorySampleDuration(),
+		conf.getHistorySampleInterval(), conf)
 	ret := &hotScheduler{
 		baseHotScheduler: base,
 		conf:             conf,

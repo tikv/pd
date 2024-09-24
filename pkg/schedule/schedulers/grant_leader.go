@@ -144,7 +144,7 @@ type grantLeaderScheduler struct {
 // newGrantLeaderScheduler creates an admin scheduler that transfers all leaders
 // to a store.
 func newGrantLeaderScheduler(opController *operator.Controller, conf *grantLeaderSchedulerConfig) Scheduler {
-	base := NewBaseScheduler(opController, types.GrantLeaderScheduler)
+	base := NewBaseScheduler(opController, types.GrantLeaderScheduler, conf)
 	handler := newGrantLeaderHandler(conf)
 	return &grantLeaderScheduler{
 		BaseScheduler: base,

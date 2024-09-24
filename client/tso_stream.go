@@ -16,13 +16,19 @@ package pd
 
 import (
 	"context"
+	"fmt"
 	"io"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/tsopb"
+	"github.com/pingcap/log"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/tikv/pd/client/errs"
+	"go.uber.org/zap"
 	"google.golang.org/grpc"
 )
 
@@ -62,7 +68,7 @@ func (b *pdTSOStreamBuilder) build(ctx context.Context, cancel context.CancelFun
 	stream, err := b.client.Tso(ctx)
 	done <- struct{}{}
 	if err == nil {
-		return &tsoStream{stream: pdTSOStreamAdapter{stream}, serverURL: b.serverURL}, nil
+		return newTSOStream(ctx, b.serverURL, pdTSOStreamAdapter{stream}), nil
 	}
 	return nil, err
 }
@@ -81,7 +87,7 @@ func (b *tsoTSOStreamBuilder) build(
 	stream, err := b.client.Tso(ctx)
 	done <- struct{}{}
 	if err == nil {
-		return &tsoStream{stream: tsoTSOStreamAdapter{stream}, serverURL: b.serverURL}, nil
+		return newTSOStream(ctx, b.serverURL, tsoTSOStreamAdapter{stream}), nil
 	}
 	return nil, err
 }
@@ -176,51 +182,255 @@ func (s tsoTSOStreamAdapter) Recv() (tsoRequestResult, error) {
 	}, nil
 }
 
+type onFinishedCallback func(result tsoRequestResult, reqKeyspaceGroupID uint32, err error)
+
+type batchedRequests struct {
+	startTime          time.Time
+	count              int64
+	reqKeyspaceGroupID uint32
+	callback           onFinishedCallback
+}
+
+// tsoStream represents an abstracted stream for requesting TSO.
+// This type designed decoupled with users of this type, so tsoDispatcher won't be directly accessed here.
+// Also in order to avoid potential memory allocations that might happen when passing closures as the callback,
+// we instead use the `batchedRequestsNotifier` as the abstraction, and accepts generic type instead of dynamic interface
+// type.
 type tsoStream struct {
 	serverURL string
 	// The internal gRPC stream.
 	//   - `pdpb.PD_TsoClient` for a leader/follower in the PD cluster.
 	//   - `tsopb.TSO_TsoClient` for a primary/secondary in the TSO cluster.
 	stream grpcTSOStreamAdapter
+	// An identifier of the tsoStream object for metrics reporting and diagnosing.
+	streamID string
+
+	pendingRequests chan batchedRequests
+
+	cancel context.CancelFunc
+	wg     sync.WaitGroup
+
+	// For syncing between sender and receiver to guarantee all requests are finished when closing.
+	state          atomic.Int32
+	stoppedWithErr atomic.Pointer[error]
+
+	ongoingRequestCountGauge prometheus.Gauge
+	ongoingRequests          atomic.Int32
+}
+
+const (
+	streamStateIdle int32 = iota
+	streamStateSending
+	streamStateClosing
+)
+
+var streamIDAlloc atomic.Int32
+
+const invalidStreamID = "<invalid>"
+
+func newTSOStream(ctx context.Context, serverURL string, stream grpcTSOStreamAdapter) *tsoStream {
+	streamID := fmt.Sprintf("%s-%d", serverURL, streamIDAlloc.Add(1))
+	// To make error handling in `tsoDispatcher` work, the internal `cancel` and external `cancel` is better to be
+	// distinguished.
+	ctx, cancel := context.WithCancel(ctx)
+	s := &tsoStream{
+		serverURL: serverURL,
+		stream:    stream,
+		streamID:  streamID,
+
+		pendingRequests: make(chan batchedRequests, 64),
+
+		cancel: cancel,
+
+		ongoingRequestCountGauge: ongoingRequestCountGauge.WithLabelValues(streamID),
+	}
+	s.wg.Add(1)
+	go s.recvLoop(ctx)
+	return s
 }
 
 func (s *tsoStream) getServerURL() string {
 	return s.serverURL
 }
 
+// processRequests starts an RPC to get a batch of timestamps without waiting for the result. When the result is ready,
+// it will be  passed th `notifier.finish`.
+//
+// This function is NOT thread-safe. Don't call this function concurrently in multiple goroutines.
+//
+// It's guaranteed that the `callback` will be called, but when the request is failed to be scheduled, the callback
+// will be ignored.
 func (s *tsoStream) processRequests(
-	clusterID uint64, keyspaceID, keyspaceGroupID uint32, dcLocation string, count int64, batchStartTime time.Time,
-) (respKeyspaceGroupID uint32, physical, logical int64, suffixBits uint32, err error) {
+	clusterID uint64, keyspaceID, keyspaceGroupID uint32, dcLocation string, count int64, batchStartTime time.Time, callback onFinishedCallback,
+) error {
 	start := time.Now()
-	if err = s.stream.Send(clusterID, keyspaceID, keyspaceGroupID, dcLocation, count); err != nil {
-		if err == io.EOF {
-			err = errs.ErrClientTSOStreamClosed
-		} else {
-			err = errors.WithStack(err)
+
+	// Check if the stream is closing or closed, in which case no more requests should be put in.
+	// Note that the prevState should be restored very soon, as the receiver may check
+	prevState := s.state.Swap(streamStateSending)
+	switch prevState {
+	case streamStateIdle:
+		// Expected case
+	case streamStateClosing:
+		s.state.Store(prevState)
+		err := s.GetRecvError()
+		log.Info("sending to closed tsoStream", zap.String("stream", s.streamID), zap.Error(err))
+		if err == nil {
+			err = errors.WithStack(errs.ErrClientTSOStreamClosed)
 		}
-		return
+		return err
+	case streamStateSending:
+		log.Fatal("unexpected concurrent sending on tsoStream", zap.String("stream", s.streamID))
+	default:
+		log.Fatal("unknown tsoStream state", zap.String("stream", s.streamID), zap.Int32("state", prevState))
+	}
+
+	select {
+	case s.pendingRequests <- batchedRequests{
+		startTime:          start,
+		count:              count,
+		reqKeyspaceGroupID: keyspaceGroupID,
+		callback:           callback,
+	}:
+	default:
+		s.state.Store(prevState)
+		return errors.New("unexpected channel full")
+	}
+	s.state.Store(prevState)
+
+	if err := s.stream.Send(clusterID, keyspaceID, keyspaceGroupID, dcLocation, count); err != nil {
+		// As the request is already put into `pendingRequests`, the request should finally be canceled by the recvLoop.
+		// So skip returning error here to avoid
+		// if err == io.EOF {
+		// 	return errors.WithStack(errs.ErrClientTSOStreamClosed)
+		// }
+		// return errors.WithStack(err)
+		log.Warn("failed to send RPC request through tsoStream", zap.String("stream", s.streamID), zap.Error(err))
+		return nil
 	}
 	tsoBatchSendLatency.Observe(time.Since(batchStartTime).Seconds())
-	res, err := s.stream.Recv()
-	duration := time.Since(start).Seconds()
-	if err != nil {
-		requestFailedDurationTSO.Observe(duration)
-		if err == io.EOF {
-			err = errs.ErrClientTSOStreamClosed
-		} else {
-			err = errors.WithStack(err)
+	s.ongoingRequestCountGauge.Set(float64(s.ongoingRequests.Add(1)))
+	return nil
+}
+
+func (s *tsoStream) recvLoop(ctx context.Context) {
+	var finishWithErr error
+	var currentReq batchedRequests
+	var hasReq bool
+
+	defer func() {
+		if r := recover(); r != nil {
+			log.Fatal("tsoStream.recvLoop internal panic", zap.Stack("stacktrace"), zap.Any("panicMessage", r))
 		}
-		return
-	}
-	requestDurationTSO.Observe(duration)
-	tsoBatchSize.Observe(float64(count))
 
-	if res.count != uint32(count) {
-		err = errors.WithStack(errTSOLength)
-		return
-	}
+		if finishWithErr == nil {
+			// The loop must exit with a non-nil error (including io.EOF and context.Canceled). This should be
+			// unreachable code.
+			log.Fatal("tsoStream.recvLoop exited without error info", zap.String("stream", s.streamID))
+		}
 
-	respKeyspaceGroupID = res.respKeyspaceGroupID
-	physical, logical, suffixBits = res.physical, res.logical, res.suffixBits
-	return
+		if hasReq {
+			// There's an unfinished request, cancel it, otherwise it will be blocked forever.
+			currentReq.callback(tsoRequestResult{}, currentReq.reqKeyspaceGroupID, finishWithErr)
+		}
+
+		s.stoppedWithErr.Store(&finishWithErr)
+		s.cancel()
+		for !s.state.CompareAndSwap(streamStateIdle, streamStateClosing) {
+			switch state := s.state.Load(); state {
+			case streamStateIdle, streamStateSending:
+				// streamStateSending should switch to streamStateIdle very quickly. Spin until successfully setting to
+				// streamStateClosing.
+				continue
+			case streamStateClosing:
+				log.Warn("unexpected double closing of tsoStream", zap.String("stream", s.streamID))
+			default:
+				log.Fatal("unknown tsoStream state", zap.String("stream", s.streamID), zap.Int32("state", state))
+			}
+		}
+
+		log.Info("tsoStream.recvLoop ended", zap.String("stream", s.streamID), zap.Error(finishWithErr))
+
+		close(s.pendingRequests)
+
+		// Cancel remaining pending requests.
+		for req := range s.pendingRequests {
+			req.callback(tsoRequestResult{}, req.reqKeyspaceGroupID, errors.WithStack(finishWithErr))
+		}
+
+		s.wg.Done()
+		s.ongoingRequests.Store(0)
+		s.ongoingRequestCountGauge.Set(0)
+	}()
+
+recvLoop:
+	for {
+		select {
+		case <-ctx.Done():
+			finishWithErr = context.Canceled
+			break recvLoop
+		default:
+		}
+
+		res, err := s.stream.Recv()
+
+		// Try to load the corresponding `batchedRequests`. If `Recv` is successful, there must be a request pending
+		// in the queue.
+		select {
+		case currentReq = <-s.pendingRequests:
+			hasReq = true
+		default:
+			hasReq = false
+		}
+
+		durationSeconds := time.Since(currentReq.startTime).Seconds()
+
+		if err != nil {
+			// If a request is pending and error occurs, observe the duration it has cost.
+			// Note that it's also possible that the stream is broken due to network without being requested. In this
+			// case, `Recv` may return an error while no request is pending.
+			if hasReq {
+				requestFailedDurationTSO.Observe(durationSeconds)
+			}
+			if err == io.EOF {
+				finishWithErr = errors.WithStack(errs.ErrClientTSOStreamClosed)
+			} else {
+				finishWithErr = errors.WithStack(err)
+			}
+			break recvLoop
+		} else if !hasReq {
+			finishWithErr = errors.New("tsoStream timing order broken")
+			break recvLoop
+		}
+
+		latencySeconds := durationSeconds
+		requestDurationTSO.Observe(latencySeconds)
+		tsoBatchSize.Observe(float64(res.count))
+
+		if res.count != uint32(currentReq.count) {
+			finishWithErr = errors.WithStack(errTSOLength)
+			break recvLoop
+		}
+
+		currentReq.callback(res, currentReq.reqKeyspaceGroupID, nil)
+		// After finishing the requests, unset these variables which will be checked in the defer block.
+		currentReq = batchedRequests{}
+		hasReq = false
+
+		s.ongoingRequestCountGauge.Set(float64(s.ongoingRequests.Add(-1)))
+	}
+}
+
+// GetRecvError returns the error (if any) that has been encountered when receiving response asynchronously.
+func (s *tsoStream) GetRecvError() error {
+	perr := s.stoppedWithErr.Load()
+	if perr == nil {
+		return nil
+	}
+	return *perr
+}
+
+// WaitForClosed blocks until the stream is closed and the inner loop exits.
+func (s *tsoStream) WaitForClosed() {
+	s.wg.Wait()
 }
