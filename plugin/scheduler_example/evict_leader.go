@@ -278,7 +278,6 @@ func (handler *evictLeaderHandler) UpdateConfig(w http.ResponseWriter, r *http.R
 	err := handler.config.BuildWithArgs(args)
 	if err != nil {
 		handler.config.mu.Lock()
-		delete(handler.config.StoreIDWitRanges, id)
 		handler.config.cluster.ResumeLeaderTransfer(id)
 		handler.config.mu.Unlock()
 		handler.rd.JSON(w, http.StatusBadRequest, err.Error())
