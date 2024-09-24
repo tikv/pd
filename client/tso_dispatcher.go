@@ -17,6 +17,7 @@ package pd
 import (
 	"context"
 	"fmt"
+	"math"
 	"math/rand"
 	"runtime/trace"
 	"sync"
@@ -203,10 +204,8 @@ func (td *tsoDispatcher) handleDispatcher(wg *sync.WaitGroup) {
 			return true
 		})
 		if batchController != nil && batchController.collectedRequestCount != 0 {
-			if r := recover(); r != nil {
-				panic(r)
-			}
-			log.Fatal("batched tso requests not cleared when exiting the tso dispatcher loop")
+			// If you encounter this failure, please check the stack in the logs to see if it's a panic.
+			log.Fatal("batched tso requests not cleared when exiting the tso dispatcher loop", zap.Any("panic", recover()))
 		}
 		tsoErr := errors.WithStack(errClosing)
 		td.revokePendingRequests(tsoErr)
@@ -351,14 +350,28 @@ tsoBatchLoop:
 		// the batch, instead of the time when the first request arrives.
 		// Here, if the elapsed time since starting collecting this batch didn't reach the expected batch time, then
 		// continue collecting.
-		if td.isConcurrentRPCEnabled() && !noDelay {
+		if td.isConcurrentRPCEnabled() {
 			estimatedLatency := stream.EstimatedRPCLatency()
 			estimateTSOLatencyGauge.WithLabelValues(streamURL).Set(estimatedLatency.Seconds())
+			goalBatchTime := estimatedLatency / time.Duration(td.rpcConcurrency)
 
-			totalBatchTime := estimatedLatency / time.Duration(td.rpcConcurrency)
+			failpoint.Inject("tsoDispatcherConcurrentModeAssertDelayDuration", func(val failpoint.Value) {
+				if s, ok := val.(string); ok {
+					expected, err := time.ParseDuration(s)
+					if err != nil {
+						panic(err)
+					}
+					if math.Abs(expected.Seconds()-goalBatchTime.Seconds()) > 1e-6 {
+						log.Fatal("tsoDispatcher: trying to delay for unexpected duration for the batch", zap.Duration("goalBatchTime", goalBatchTime), zap.Duration("expectedBatchTime", expected))
+					}
+				} else {
+					panic("invalid value for failpoint tsoDispatcherConcurrentModeAssertDelayDuration: expected string")
+				}
+			})
+
 			waitTimerStart := time.Now()
-			remainingBatchTime := totalBatchTime - waitTimerStart.Sub(currentBatchStartTime)
-			if remainingBatchTime > 0 {
+			remainingBatchTime := goalBatchTime - waitTimerStart.Sub(currentBatchStartTime)
+			if remainingBatchTime > 0 && !noDelay {
 				if !batchingTimer.Stop() {
 					select {
 					case <-batchingTimer.C:
