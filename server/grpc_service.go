@@ -1414,8 +1414,11 @@ func (s *GrpcServer) GetRegion(ctx context.Context, request *pdpb.GetRegionReque
 	} else if rsp != nil {
 		return rsp.(*pdpb.GetRegionResponse), nil
 	}
-	var rc *cluster.RaftCluster
-	var region *core.RegionInfo
+	failpoint.Inject("delayProcess", nil)
+	var (
+		rc     *cluster.RaftCluster
+		region *core.RegionInfo
+	)
 	if *followerHandle {
 		rc = s.cluster
 		if !rc.GetRegionSyncer().IsRunning() {

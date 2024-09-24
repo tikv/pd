@@ -31,6 +31,8 @@ import (
 )
 
 type balanceRegionSchedulerConfig struct {
+	baseDefaultSchedulerConfig
+
 	Ranges []core.KeyRange `json:"ranges"`
 	// TODO: When we prepare to use Ranges, we will need to implement the ReloadConfig function for this scheduler.
 }
@@ -48,7 +50,7 @@ type balanceRegionScheduler struct {
 // each store balanced.
 func newBalanceRegionScheduler(opController *operator.Controller, conf *balanceRegionSchedulerConfig, opts ...BalanceRegionCreateOption) Scheduler {
 	scheduler := &balanceRegionScheduler{
-		BaseScheduler: NewBaseScheduler(opController, types.BalanceRegionScheduler),
+		BaseScheduler: NewBaseScheduler(opController, types.BalanceRegionScheduler, conf),
 		retryQuota:    newRetryQuota(),
 		name:          types.BalanceRegionScheduler.String(),
 		conf:          conf,

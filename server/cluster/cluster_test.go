@@ -153,7 +153,9 @@ func TestStoreHeartbeat(t *testing.T) {
 		},
 		PeerStats: []*pdpb.PeerStat{},
 	}
-	cluster.opt.GetScheduleConfig().StoreLimitVersion = "v1"
+	scheCfg := cluster.opt.GetScheduleConfig().Clone()
+	scheCfg.StoreLimitVersion = "v1"
+	cluster.opt.SetScheduleConfig(scheCfg)
 	re.NoError(cluster.HandleStoreHeartbeat(hotReq, hotResp))
 	re.NoError(cluster.HandleStoreHeartbeat(hotReq, hotResp))
 	re.NoError(cluster.HandleStoreHeartbeat(hotReq, hotResp))

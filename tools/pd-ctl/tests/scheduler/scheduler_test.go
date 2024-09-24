@@ -320,12 +320,12 @@ func (suite *schedulerTestSuite) checkScheduler(cluster *pdTests.TestCluster) {
 	re.Contains(echo, "Success!")
 	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "remove", "evict-leader-scheduler-2"}, nil)
 	re.Contains(echo, "Success!")
-	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "remove", "evict-leader-scheduler-1"}, nil)
-	re.Contains(echo, "Unable to update config: scheduler evict-leader-scheduler does not exist.")
 	testutil.Eventually(re, func() bool { // wait for removed scheduler to be synced to scheduling server.
 		echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "evict-leader-scheduler"}, nil)
 		return strings.Contains(echo, "[404] scheduler not found")
 	})
+	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "remove", "evict-leader-scheduler-1"}, nil)
+	re.Contains(echo, "Unable to update config: scheduler evict-leader-scheduler does not exist.")
 
 	// test remove and add
 	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "remove", "balance-hot-region-scheduler"}, nil)
@@ -661,6 +661,8 @@ func (suite *schedulerTestSuite) checkHotRegionSchedulerConfig(cluster *pdTests.
 	re.Contains(echo, "Success!")
 	expected1["src-tolerance-ratio"] = 1.02
 	checkHotSchedulerConfig(expected1)
+	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "set", "disabled", "true"}, nil)
+	re.Contains(echo, "Failed!")
 
 	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "set", "read-priorities", "byte,key"}, nil)
 	re.Contains(echo, "Success!")
@@ -811,6 +813,60 @@ func (suite *schedulerTestSuite) checkSchedulerDiagnostic(cluster *pdTests.TestC
 	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "resume", "balance-leader-scheduler"}, nil)
 	re.Contains(echo, "Success!")
 	checkSchedulerDescribeCommand("balance-leader-scheduler", "normal", "")
+}
+
+func (suite *schedulerTestSuite) TestEvictLeaderScheduler() {
+	// FIXME: API mode may have the problem
+	suite.env.RunTestInPDMode(suite.checkEvictLeaderScheduler)
+}
+
+func (suite *schedulerTestSuite) checkEvictLeaderScheduler(cluster *pdTests.TestCluster) {
+	re := suite.Require()
+	pdAddr := cluster.GetConfig().GetClientURL()
+	cmd := ctl.GetRootCmd()
+
+	stores := []*metapb.Store{
+		{
+			Id:            1,
+			State:         metapb.StoreState_Up,
+			LastHeartbeat: time.Now().UnixNano(),
+		},
+		{
+			Id:            2,
+			State:         metapb.StoreState_Up,
+			LastHeartbeat: time.Now().UnixNano(),
+		},
+		{
+			Id:            3,
+			State:         metapb.StoreState_Up,
+			LastHeartbeat: time.Now().UnixNano(),
+		},
+		{
+			Id:            4,
+			State:         metapb.StoreState_Up,
+			LastHeartbeat: time.Now().UnixNano(),
+		},
+	}
+	for _, store := range stores {
+		pdTests.MustPutStore(re, cluster, store)
+	}
+
+	pdTests.MustPutRegion(re, cluster, 1, 1, []byte("a"), []byte("b"))
+	output, err := tests.ExecuteCommand(cmd, []string{"-u", pdAddr, "scheduler", "add", "evict-leader-scheduler", "2"}...)
+	re.NoError(err)
+	re.Contains(string(output), "Success!")
+	output, err = tests.ExecuteCommand(cmd, []string{"-u", pdAddr, "scheduler", "add", "evict-leader-scheduler", "1"}...)
+	re.NoError(err)
+	re.Contains(string(output), "Success!")
+	output, err = tests.ExecuteCommand(cmd, []string{"-u", pdAddr, "scheduler", "remove", "evict-leader-scheduler"}...)
+	re.NoError(err)
+	re.Contains(string(output), "Success!")
+	output, err = tests.ExecuteCommand(cmd, []string{"-u", pdAddr, "scheduler", "add", "evict-leader-scheduler", "1"}...)
+	re.NoError(err)
+	re.Contains(string(output), "Success!")
+	output, err = tests.ExecuteCommand(cmd, []string{"-u", pdAddr, "scheduler", "remove", "evict-leader-scheduler-1"}...)
+	re.NoError(err)
+	re.Contains(string(output), "Success!")
 }
 
 func mustExec(re *require.Assertions, cmd *cobra.Command, args []string, v any) string {
