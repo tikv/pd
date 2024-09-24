@@ -94,7 +94,7 @@ func (suite *schedulerTestSuite) TearDownTest() {
 			}
 		}
 	}
-	suite.env.RunFuncInTwoModes(cleanFunc)
+	suite.env.RunTestBasedOnMode(cleanFunc)
 	suite.env.Cleanup()
 }
 
@@ -816,8 +816,7 @@ func (suite *schedulerTestSuite) checkSchedulerDiagnostic(cluster *pdTests.TestC
 }
 
 func (suite *schedulerTestSuite) TestEvictLeaderScheduler() {
-	// FIXME: API mode may have the problem
-	suite.env.RunTestInPDMode(suite.checkEvictLeaderScheduler)
+	suite.env.RunTestBasedOnMode(suite.checkEvictLeaderScheduler)
 }
 
 func (suite *schedulerTestSuite) checkEvictLeaderScheduler(cluster *pdTests.TestCluster) {
@@ -864,9 +863,14 @@ func (suite *schedulerTestSuite) checkEvictLeaderScheduler(cluster *pdTests.Test
 	output, err = tests.ExecuteCommand(cmd, []string{"-u", pdAddr, "scheduler", "add", "evict-leader-scheduler", "1"}...)
 	re.NoError(err)
 	re.Contains(string(output), "Success!")
-	output, err = tests.ExecuteCommand(cmd, []string{"-u", pdAddr, "scheduler", "remove", "evict-leader-scheduler-1"}...)
-	re.NoError(err)
-	re.Contains(string(output), "Success!")
+	testutil.Eventually(re, func() bool {
+		output, err = tests.ExecuteCommand(cmd, []string{"-u", pdAddr, "scheduler", "remove", "evict-leader-scheduler-1"}...)
+		return err == nil && strings.Contains(string(output), "Success!")
+	})
+	testutil.Eventually(re, func() bool {
+		output, err = tests.ExecuteCommand(cmd, []string{"-u", pdAddr, "scheduler", "show"}...)
+		return err == nil && !strings.Contains(string(output), "evict-leader-scheduler")
+	})
 }
 
 func mustExec(re *require.Assertions, cmd *cobra.Command, args []string, v any) string {

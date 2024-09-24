@@ -103,13 +103,6 @@ func (conf *evictLeaderSchedulerConfig) removeStoreLocked(id uint64) (bool, erro
 	return false, errs.ErrScheduleConfigNotExist.FastGenByArgs()
 }
 
-func (conf *evictLeaderSchedulerConfig) removeStore(id uint64) {
-	conf.Lock()
-	defer conf.Unlock()
-	// if the store is not existed, no need to resume leader transfer
-	_, _ = conf.removeStoreLocked(id)
-}
-
 func (conf *evictLeaderSchedulerConfig) resetStoreLocked(id uint64, keyRange []core.KeyRange) {
 	if err := conf.cluster.PauseLeaderTransfer(id); err != nil {
 		log.Error("pause leader transfer failed", zap.Uint64("store-id", id), errs.ZapError(err))
@@ -180,6 +173,12 @@ func (conf *evictLeaderSchedulerConfig) pauseLeaderTransferIfStoreNotExist(id ui
 		}
 	}
 	return true, nil
+}
+
+func (conf *evictLeaderSchedulerConfig) resumeLeaderTransferIfExist(id uint64) {
+	conf.RLock()
+	defer conf.RUnlock()
+	conf.cluster.ResumeLeaderTransfer(id)
 }
 
 func (conf *evictLeaderSchedulerConfig) update(id uint64, newRanges []core.KeyRange, batch int) error {
@@ -415,7 +414,7 @@ func (handler *evictLeaderHandler) updateConfig(w http.ResponseWriter, r *http.R
 	batchFloat, ok := input["batch"].(float64)
 	if ok {
 		if batchFloat < 1 || batchFloat > 10 {
-			handler.config.removeStore(id)
+			handler.config.resumeLeaderTransferIfExist(id)
 			handler.rd.JSON(w, http.StatusBadRequest, "batch is invalid, it should be in [1, 10]")
 			return
 		}
@@ -425,7 +424,7 @@ func (handler *evictLeaderHandler) updateConfig(w http.ResponseWriter, r *http.R
 	ranges, ok := (input["ranges"]).([]string)
 	if ok {
 		if !inputHasStoreID {
-			handler.config.removeStore(id)
+			handler.config.resumeLeaderTransferIfExist(id)
 			handler.rd.JSON(w, http.StatusInternalServerError, errs.ErrSchedulerConfig.FastGenByArgs("id"))
 			return
 		}
@@ -435,11 +434,12 @@ func (handler *evictLeaderHandler) updateConfig(w http.ResponseWriter, r *http.R
 
 	newRanges, err = getKeyRanges(ranges)
 	if err != nil {
-		handler.config.removeStore(id)
+		handler.config.resumeLeaderTransferIfExist(id)
 		handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
+	// StoreIDWithRanges is only changed in update function.
 	err = handler.config.update(id, newRanges, batch)
 	if err != nil {
 		handler.rd.JSON(w, http.StatusInternalServerError, err.Error())

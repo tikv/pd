@@ -271,7 +271,9 @@ func (handler *grantLeaderHandler) updateConfig(w http.ResponseWriter, r *http.R
 
 	err := handler.config.buildWithArgs(args)
 	if err != nil {
-		_, _ = handler.config.removeStore(id)
+		handler.config.Lock()
+		handler.config.cluster.ResumeLeaderTransfer(id)
+		handler.config.Unlock()
 		handler.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
 	}

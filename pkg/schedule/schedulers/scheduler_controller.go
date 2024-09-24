@@ -169,6 +169,7 @@ func (c *Controller) RemoveSchedulerHandler(name string) error {
 	if c.cluster == nil {
 		return errs.ErrNotBootstrapped.FastGenByArgs()
 	}
+	fmt.Println("XXX", c.schedulerHandlers)
 	s, ok := c.schedulerHandlers[name]
 	if !ok {
 		return errs.ErrSchedulerNotFound.FastGenByArgs()
