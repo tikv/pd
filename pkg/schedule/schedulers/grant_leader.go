@@ -270,7 +270,19 @@ func (handler *grantLeaderHandler) UpdateConfig(w http.ResponseWriter, r *http.R
 	handler.config.BuildWithArgs(args)
 	err := handler.config.Persist()
 	if err != nil {
+<<<<<<< HEAD
 		handler.config.removeStore(id)
+=======
+		handler.config.Lock()
+		handler.config.cluster.ResumeLeaderTransfer(id)
+		handler.config.Unlock()
+		handler.rd.JSON(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	err = handler.config.persist()
+	if err != nil {
+		_, _ = handler.config.removeStore(id)
+>>>>>>> f3e9d9ad0 (*: let TestEvictLeaderScheduler run in two modes (#8663))
 		handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
