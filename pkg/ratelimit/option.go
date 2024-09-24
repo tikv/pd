@@ -78,7 +78,11 @@ func UpdateDimensionConfig(cfg *DimensionConfig) Option {
 			return InAllowList
 		}
 		lim, _ := l.limiters.LoadOrStore(label, newLimiter())
-		return lim.(*limiter).updateDimensionConfig(cfg)
+		status := lim.(*limiter).updateDimensionConfig(cfg)
+		if status&QPSDeleted != 0 && status&ConcurrencyDeleted != 0 {
+			l.limiters.Delete(label)
+		}
+		return status
 	}
 }
 
