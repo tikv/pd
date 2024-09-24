@@ -74,6 +74,9 @@ func (conf *evictLeaderSchedulerConfig) getStores() []uint64 {
 }
 
 func (conf *evictLeaderSchedulerConfig) BuildWithArgs(args []string) error {
+	failpoint.Inject("buildWithArgsErr", func() {
+		failpoint.Return(errors.New("fail to build with args"))
+	})
 	if len(args) != 1 {
 		return errs.ErrSchedulerConfig.FastGenByArgs("id")
 	}
@@ -401,8 +404,15 @@ func (handler *evictLeaderHandler) UpdateConfig(w http.ResponseWriter, r *http.R
 		args = append(args, handler.config.getRanges(id)...)
 	}
 
-	handler.config.BuildWithArgs(args)
-	err := handler.config.Persist()
+	err := handler.config.BuildWithArgs(args)
+	if err != nil {
+		handler.config.mu.Lock()
+		handler.config.cluster.ResumeLeaderTransfer(id)
+		handler.config.mu.Unlock()
+		handler.rd.JSON(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	err = handler.config.Persist()
 	if err != nil {
 		handler.config.removeStore(id)
 		handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
