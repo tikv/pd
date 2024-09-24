@@ -23,15 +23,12 @@ import (
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
-	types "github.com/tikv/pd/pkg/schedule/type"
-)
-
-const (
-	// ShuffleLeaderName is shuffle leader scheduler name.
-	ShuffleLeaderName = "shuffle-leader-scheduler"
+	"github.com/tikv/pd/pkg/schedule/types"
 )
 
 type shuffleLeaderSchedulerConfig struct {
+	schedulerConfig
+
 	Ranges []core.KeyRange `json:"ranges"`
 	// TODO: When we prepare to use Ranges, we will need to implement the ReloadConfig function for this scheduler.
 }
@@ -45,7 +42,7 @@ type shuffleLeaderScheduler struct {
 // newShuffleLeaderScheduler creates an admin scheduler that shuffles leaders
 // between stores.
 func newShuffleLeaderScheduler(opController *operator.Controller, conf *shuffleLeaderSchedulerConfig) Scheduler {
-	base := NewBaseScheduler(opController, types.ShuffleLeaderScheduler)
+	base := NewBaseScheduler(opController, types.ShuffleLeaderScheduler, conf)
 	filters := []filter.Filter{
 		&filter.StoreStateFilter{ActionScope: base.GetName(), TransferLeader: true, OperatorLevel: constant.Low},
 		filter.NewSpecialUseFilter(base.GetName()),

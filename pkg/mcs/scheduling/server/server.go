@@ -55,7 +55,9 @@ import (
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/apiutil"
+	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
+	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/memberutil"
 	"github.com/tikv/pd/pkg/utils/metricutil"
@@ -177,8 +179,7 @@ func (s *Server) updateAPIServerMemberLoop() {
 	defer cancel()
 	ticker := time.NewTicker(memberUpdateInterval)
 	failpoint.Inject("fastUpdateMember", func() {
-		ticker.Stop()
-		ticker = time.NewTicker(100 * time.Millisecond)
+		ticker.Reset(100 * time.Millisecond)
 	})
 	defer ticker.Stop()
 	var curLeader uint64
@@ -193,7 +194,7 @@ func (s *Server) updateAPIServerMemberLoop() {
 		if !s.IsServing() {
 			continue
 		}
-		members, err := s.GetClient().MemberList(ctx)
+		members, err := etcdutil.ListEtcdMembers(ctx, s.GetClient())
 		if err != nil {
 			log.Warn("failed to list members", errs.ZapError(err))
 			continue
@@ -212,6 +213,11 @@ func (s *Server) updateAPIServerMemberLoop() {
 				cc, err := s.GetDelegateClient(ctx, s.GetTLSConfig(), ep.ClientURLs[0])
 				if err != nil {
 					log.Info("failed to get delegate client", errs.ZapError(err))
+					continue
+				}
+				if !s.IsServing() {
+					// double check
+					break
 				}
 				if s.cluster.SwitchAPIServerLeader(pdpb.NewPDClient(cc)) {
 					if status.Leader != curLeader {
@@ -453,7 +459,7 @@ func (s *Server) startServer() (err error) {
 		Id:         uniqueID, // id is unique among all participants
 		ListenUrls: []string{s.cfg.GetAdvertiseListenAddr()},
 	}
-	s.participant.InitInfo(p, endpoint.SchedulingSvcRootPath(s.clusterID), constant.PrimaryKey, "primary election")
+	s.participant.InitInfo(p, keypath.SchedulingSvcRootPath(s.clusterID), constant.PrimaryKey, "primary election")
 
 	s.service = &Service{Server: s}
 	s.AddServiceReadyCallback(s.startCluster)

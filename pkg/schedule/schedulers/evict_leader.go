@@ -28,7 +28,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
-	types "github.com/tikv/pd/pkg/schedule/type"
+	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/unrolled/render"
@@ -36,8 +36,6 @@ import (
 )
 
 const (
-	// EvictLeaderName is evict leader scheduler name.
-	EvictLeaderName = "evict-leader-scheduler"
 	// EvictLeaderBatchSize is the number of operators to transfer
 	// leaders by one scheduling
 	EvictLeaderBatchSize = 3
@@ -177,6 +175,12 @@ func (conf *evictLeaderSchedulerConfig) pauseLeaderTransferIfStoreNotExist(id ui
 	return true, nil
 }
 
+func (conf *evictLeaderSchedulerConfig) resumeLeaderTransferIfExist(id uint64) {
+	conf.RLock()
+	defer conf.RUnlock()
+	conf.cluster.ResumeLeaderTransfer(id)
+}
+
 func (conf *evictLeaderSchedulerConfig) update(id uint64, newRanges []core.KeyRange, batch int) error {
 	conf.Lock()
 	defer conf.Unlock()
@@ -212,7 +216,7 @@ func (conf *evictLeaderSchedulerConfig) delete(id uint64) (any, error) {
 		return resp, nil
 	}
 	conf.Unlock()
-	if err := conf.removeSchedulerCb(EvictLeaderName); err != nil {
+	if err := conf.removeSchedulerCb(types.EvictLeaderScheduler.String()); err != nil {
 		if !errors.ErrorEqual(err, errs.ErrSchedulerNotFound.FastGenByArgs()) {
 			conf.resetStore(id, keyRanges)
 		}
@@ -233,7 +237,7 @@ type evictLeaderScheduler struct {
 func newEvictLeaderScheduler(opController *operator.Controller, conf *evictLeaderSchedulerConfig) Scheduler {
 	handler := newEvictLeaderHandler(conf)
 	return &evictLeaderScheduler{
-		BaseScheduler: NewBaseScheduler(opController, types.EvictLeaderScheduler),
+		BaseScheduler: NewBaseScheduler(opController, types.EvictLeaderScheduler, conf),
 		conf:          conf,
 		handler:       handler,
 	}
@@ -410,6 +414,7 @@ func (handler *evictLeaderHandler) updateConfig(w http.ResponseWriter, r *http.R
 	batchFloat, ok := input["batch"].(float64)
 	if ok {
 		if batchFloat < 1 || batchFloat > 10 {
+			handler.config.resumeLeaderTransferIfExist(id)
 			handler.rd.JSON(w, http.StatusBadRequest, "batch is invalid, it should be in [1, 10]")
 			return
 		}
@@ -419,6 +424,7 @@ func (handler *evictLeaderHandler) updateConfig(w http.ResponseWriter, r *http.R
 	ranges, ok := (input["ranges"]).([]string)
 	if ok {
 		if !inputHasStoreID {
+			handler.config.resumeLeaderTransferIfExist(id)
 			handler.rd.JSON(w, http.StatusInternalServerError, errs.ErrSchedulerConfig.FastGenByArgs("id"))
 			return
 		}
@@ -428,10 +434,12 @@ func (handler *evictLeaderHandler) updateConfig(w http.ResponseWriter, r *http.R
 
 	newRanges, err = getKeyRanges(ranges)
 	if err != nil {
+		handler.config.resumeLeaderTransferIfExist(id)
 		handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
+	// StoreIDWithRanges is only changed in update function.
 	err = handler.config.update(id, newRanges, batch)
 	if err != nil {
 		handler.rd.JSON(w, http.StatusInternalServerError, err.Error())

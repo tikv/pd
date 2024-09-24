@@ -34,11 +34,12 @@ import (
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
+	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
-	"go.etcd.io/etcd/clientv3"
-	"go.etcd.io/etcd/mvcc/mvccpb"
+	"go.etcd.io/etcd/api/v3/mvccpb"
+	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 )
 
@@ -162,8 +163,7 @@ func (m *GroupManager) allocNodesToAllKeyspaceGroups(ctx context.Context) {
 	defer m.wg.Done()
 	ticker := time.NewTicker(allocNodesToKeyspaceGroupsInterval)
 	failpoint.Inject("acceleratedAllocNodes", func() {
-		ticker.Stop()
-		ticker = time.NewTicker(time.Millisecond * 100)
+		ticker.Reset(time.Millisecond * 100)
 	})
 	defer ticker.Stop()
 	log.Info("start to alloc nodes to all keyspace groups")
@@ -1154,8 +1154,8 @@ func (m *GroupManager) GetKeyspaceGroupPrimaryByID(id uint32) (string, error) {
 		return "", ErrKeyspaceGroupNotExists(id)
 	}
 
-	rootPath := endpoint.TSOSvcRootPath(m.clusterID)
-	primaryPath := endpoint.KeyspaceGroupPrimaryPath(rootPath, id)
+	rootPath := keypath.TSOSvcRootPath(m.clusterID)
+	primaryPath := keypath.KeyspaceGroupPrimaryPath(rootPath, id)
 	leader := &tsopb.Participant{}
 	ok, _, err := etcdutil.GetProtoMsgWithModRev(m.client, primaryPath, leader)
 	if err != nil {

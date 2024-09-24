@@ -32,6 +32,7 @@ import (
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
+	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"go.uber.org/zap"
@@ -53,6 +54,13 @@ const (
 	// Note: Config[TSOKeyspaceGroupIDKey] is only used to judge whether there is keyspace group id.
 	// It will not update the keyspace group id when merging or splitting.
 	TSOKeyspaceGroupIDKey = "tso_keyspace_group_id"
+
+	// If `gc_management_type` is `global_gc`, it means the current keyspace requires a tidb without 'keyspace-name'
+	// configured to run a global gc worker to calculate a global gc safe point.
+	// If `gc_management_type` is `keyspace_level_gc` it means the current keyspace can calculate gc safe point by its own.
+	GCManagementType = "gc_management_type"
+	// KeyspaceLevelGC is a type of gc_management_type used to indicate that this keyspace independently advances its own gc safe point.
+	KeyspaceLevelGC = "keyspace_level_gc"
 )
 
 // Config is the interface for keyspace config.
@@ -230,8 +238,8 @@ func (manager *Manager) CreateKeyspace(request *CreateKeyspaceRequest) (*keyspac
 	err = manager.splitKeyspaceRegion(newID, waitRegionSplit)
 	if err != nil {
 		err2 := manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
-			idPath := endpoint.KeyspaceIDPath(request.Name)
-			metaPath := endpoint.KeyspaceMetaPath(newID)
+			idPath := keypath.KeyspaceIDPath(request.Name)
+			metaPath := keypath.KeyspaceMetaPath(newID)
 			e := txn.Remove(idPath)
 			if e != nil {
 				return e

@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -30,8 +31,8 @@ import (
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server/config"
-	"go.etcd.io/etcd/embed"
-	"go.etcd.io/etcd/pkg/types"
+	etcdtypes "go.etcd.io/etcd/client/pkg/v3/types"
+	"go.etcd.io/etcd/server/v3/embed"
 	"go.uber.org/goleak"
 )
 
@@ -290,8 +291,8 @@ func TestCheckClusterID(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	cfgs := NewTestMultiConfig(assertutil.CheckerWithNilAssert(re), 2)
-	for i, cfg := range cfgs {
-		cfg.DataDir = fmt.Sprintf("/tmp/test_pd_check_clusterID_%d", i)
+	for _, cfg := range cfgs {
+		cfg.DataDir, _ = os.MkdirTemp("", "pd_tests")
 		// Clean up before testing.
 		testutil.CleanServer(cfg.DataDir)
 	}
@@ -321,7 +322,7 @@ func TestCheckClusterID(t *testing.T) {
 
 	etcd, err := embed.StartEtcd(svr.etcdCfg)
 	re.NoError(err)
-	urlsMap, err := types.NewURLsMap(svr.cfg.InitialCluster)
+	urlsMap, err := etcdtypes.NewURLsMap(svr.cfg.InitialCluster)
 	re.NoError(err)
 	tlsConfig, err := svr.cfg.Security.ToTLSConfig()
 	re.NoError(err)

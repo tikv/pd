@@ -24,16 +24,13 @@ import (
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
-	types "github.com/tikv/pd/pkg/schedule/type"
+	"github.com/tikv/pd/pkg/schedule/types"
 	"go.uber.org/zap"
 )
 
-const (
-	// LabelName is label scheduler name.
-	LabelName = "label-scheduler"
-)
-
 type labelSchedulerConfig struct {
+	schedulerConfig
+
 	Ranges []core.KeyRange `json:"ranges"`
 	// TODO: When we prepare to use Ranges, we will need to implement the ReloadConfig function for this scheduler.
 }
@@ -48,7 +45,7 @@ type labelScheduler struct {
 // the store with the specific label.
 func newLabelScheduler(opController *operator.Controller, conf *labelSchedulerConfig) Scheduler {
 	return &labelScheduler{
-		BaseScheduler: NewBaseScheduler(opController, types.LabelScheduler),
+		BaseScheduler: NewBaseScheduler(opController, types.LabelScheduler, conf),
 		conf:          conf,
 	}
 }
@@ -95,7 +92,7 @@ func (s *labelScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) ([]*ope
 			f := filter.NewExcludedFilter(s.GetName(), nil, excludeStores)
 
 			target := filter.NewCandidates(cluster.GetFollowerStores(region)).
-				FilterTarget(cluster.GetSchedulerConfig(), nil, nil, &filter.StoreStateFilter{ActionScope: LabelName, TransferLeader: true, OperatorLevel: constant.Medium}, f).
+				FilterTarget(cluster.GetSchedulerConfig(), nil, nil, &filter.StoreStateFilter{ActionScope: s.GetName(), TransferLeader: true, OperatorLevel: constant.Medium}, f).
 				RandomPick()
 			if target == nil {
 				log.Debug("label scheduler no target found for region", zap.Uint64("region-id", region.GetID()))

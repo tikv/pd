@@ -294,6 +294,6 @@ func (r *RaftEngine) allocID(storeID uint64) (uint64, error) {
 	if !ok {
 		return 0, errors.Errorf("node %d not found", storeID)
 	}
-	id, err := node.client.AllocID(context.Background())
+	id, err := node.client.allocID(context.Background())
 	return id, errors.WithStack(err)
 }

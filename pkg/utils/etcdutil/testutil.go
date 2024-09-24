@@ -24,9 +24,9 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/testutil"
-	"go.etcd.io/etcd/clientv3"
-	"go.etcd.io/etcd/embed"
-	"go.etcd.io/etcd/etcdserver/etcdserverpb"
+	"go.etcd.io/etcd/api/v3/etcdserverpb"
+	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.etcd.io/etcd/server/v3/embed"
 )
 
 // NewTestSingleConfig is used to create a etcd config for the unit test purpose.
@@ -51,7 +51,7 @@ func NewTestSingleConfig() *embed.Config {
 }
 
 func genRandName() string {
-	return "test_etcd_" + strconv.FormatInt(time.Now().UnixNano(), 10)
+	return "pd" + strconv.FormatInt(time.Now().UnixNano(), 10)
 }
 
 // NewTestEtcdCluster is used to create a etcd cluster for the unit test purpose.
@@ -86,7 +86,14 @@ func NewTestEtcdCluster(t *testing.T, count int) (servers []*embed.Etcd, etcdCli
 	clean = func() {
 		etcdClient.Close()
 		for _, server := range servers {
-			if server != nil {
+			if server.Server != nil {
+				select {
+				case _, ok := <-server.Err():
+					if !ok {
+						return
+					}
+				default:
+				}
 				server.Close()
 			}
 		}

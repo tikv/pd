@@ -96,7 +96,7 @@ func (suite *configTestSuite) TearDownTest() {
 		err = testutil.CheckPostJSON(testDialClient, urlPrefix+"/pd/api/v1/config/placement-rule", data, testutil.StatusOK(re))
 		re.NoError(err)
 	}
-	suite.env.RunFuncInTwoModes(cleanFunc)
+	suite.env.RunTestBasedOnMode(cleanFunc)
 	suite.env.Cleanup()
 }
 
@@ -375,7 +375,7 @@ func (suite *configTestSuite) checkConfigForwardControl(cluster *pdTests.TestClu
 	leaderServer := cluster.GetLeaderServer()
 	pdAddr := leaderServer.GetAddr()
 
-	f, _ := os.CreateTemp(os.TempDir(), "pd_tests")
+	f, _ := os.CreateTemp("", "pd_tests")
 	fname := f.Name()
 	f.Close()
 	defer os.RemoveAll(fname)
@@ -510,8 +510,12 @@ func (suite *configTestSuite) checkConfigForwardControl(cluster *pdTests.TestClu
 	// Test Config
 	// inject different config to scheduling server
 	if sche := cluster.GetSchedulingPrimaryServer(); sche != nil {
-		sche.GetPersistConfig().GetScheduleConfig().LeaderScheduleLimit = 233
-		sche.GetPersistConfig().GetReplicationConfig().MaxReplicas = 7
+		scheCfg := sche.GetPersistConfig().GetScheduleConfig().Clone()
+		scheCfg.LeaderScheduleLimit = 233
+		sche.GetPersistConfig().SetScheduleConfig(scheCfg)
+		repCfg := sche.GetPersistConfig().GetReplicationConfig().Clone()
+		repCfg.MaxReplicas = 7
+		sche.GetPersistConfig().SetReplicationConfig(repCfg)
 		re.Equal(uint64(233), sche.GetPersistConfig().GetLeaderScheduleLimit())
 		re.Equal(7, sche.GetPersistConfig().GetMaxReplicas())
 	}
@@ -588,7 +592,7 @@ func (suite *configTestSuite) checkPlacementRules(cluster *pdTests.TestCluster) 
 	// test show
 	checkShowRuleKey(re, pdAddr, [][2]string{{placement.DefaultGroupID, placement.DefaultRuleID}})
 
-	f, _ := os.CreateTemp(os.TempDir(), "pd_tests")
+	f, _ := os.CreateTemp("", "pd_tests")
 	fname := f.Name()
 	f.Close()
 	defer os.RemoveAll(fname)
@@ -735,7 +739,7 @@ func (suite *configTestSuite) checkPlacementRuleBundle(cluster *pdTests.TestClus
 	re.NoError(json.Unmarshal(output, &bundle))
 	re.Equal(placement.GroupBundle{ID: placement.DefaultGroupID, Index: 0, Override: false, Rules: []*placement.Rule{{GroupID: placement.DefaultGroupID, ID: placement.DefaultRuleID, Role: placement.Voter, Count: 3}}}, bundle)
 
-	f, err := os.CreateTemp(os.TempDir(), "pd_tests")
+	f, err := os.CreateTemp("", "pd_tests")
 	re.NoError(err)
 	fname := f.Name()
 	f.Close()

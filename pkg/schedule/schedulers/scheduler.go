@@ -27,7 +27,7 @@ import (
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
-	types "github.com/tikv/pd/pkg/schedule/type"
+	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"go.uber.org/zap"
 )
@@ -47,6 +47,16 @@ type Scheduler interface {
 	CleanConfig(cluster sche.SchedulerCluster)
 	Schedule(cluster sche.SchedulerCluster, dryRun bool) ([]*operator.Operator, []plan.Plan)
 	IsScheduleAllowed(cluster sche.SchedulerCluster) bool
+	// IsDiable returns if the scheduler is disabled, it only works for default schedulers.
+	// - BalanceRegionScheduler
+	// - BalanceLeaderScheduler
+	// - BalanceHotRegionScheduler
+	// - EvictSlowStoreScheduler
+	IsDisable() bool
+	// SetDisable sets the scheduler's disable, it only works for default schedulers.
+	SetDisable(bool) error
+	// IsDefault returns if the scheduler is a default scheduler.
+	IsDefault() bool
 }
 
 // EncodeConfig encode the custom config for each scheduler.
@@ -171,6 +181,13 @@ func FindSchedulerTypeByName(name string) types.CheckerSchedulerType {
 				typ = registeredType
 			}
 		}
+	}
+	// This is for compatibility. Because the string of ScatterRangeScheduler is
+	// "scatter-range" before. If user adds a ScatterRangeScheduler(which is
+	// "scatter-range" yet) and then upgrades the cluster(its ScatterRangeScheduler
+	// is "scatter-range-scheduler"), we need these codes to keep the compatibility.
+	if len(typ) == 0 && strings.Contains(name, "scatter-range") {
+		return types.ScatterRangeScheduler
 	}
 	return typ
 }

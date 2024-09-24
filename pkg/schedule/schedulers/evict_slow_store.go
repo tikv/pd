@@ -26,24 +26,19 @@ import (
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
-	types "github.com/tikv/pd/pkg/schedule/type"
+	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/utils/apiutil"
-	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/unrolled/render"
 	"go.uber.org/zap"
 )
 
 const (
-	// EvictSlowStoreName is evict leader scheduler name.
-	EvictSlowStoreName = "evict-slow-store-scheduler"
-
 	slowStoreEvictThreshold   = 100
 	slowStoreRecoverThreshold = 1
 )
 
 type evictSlowStoreSchedulerConfig struct {
-	syncutil.RWMutex
-	schedulerConfig
+	baseDefaultSchedulerConfig
 
 	cluster *core.BasicCluster
 	// Last timestamp of the chosen slow store for eviction.
@@ -55,10 +50,10 @@ type evictSlowStoreSchedulerConfig struct {
 
 func initEvictSlowStoreSchedulerConfig() *evictSlowStoreSchedulerConfig {
 	return &evictSlowStoreSchedulerConfig{
-		schedulerConfig:        &baseSchedulerConfig{},
-		lastSlowStoreCaptureTS: time.Time{},
-		RecoveryDurationGap:    defaultRecoveryDurationGap,
-		EvictedStores:          make([]uint64, 0),
+		baseDefaultSchedulerConfig: newBaseDefaultSchedulerConfig(),
+		lastSlowStoreCaptureTS:     time.Time{},
+		RecoveryDurationGap:        defaultRecoveryDurationGap,
+		EvictedStores:              make([]uint64, 0),
 	}
 }
 
@@ -94,7 +89,7 @@ func (conf *evictSlowStoreSchedulerConfig) evictStore() uint64 {
 	return conf.getStores()[0]
 }
 
-// readyForRecovery checks whether the last cpatured candidate is ready for recovery.
+// readyForRecovery checks whether the last captured candidate is ready for recovery.
 func (conf *evictSlowStoreSchedulerConfig) readyForRecovery() bool {
 	conf.RLock()
 	defer conf.RUnlock()
@@ -317,7 +312,7 @@ func (s *evictSlowStoreScheduler) Schedule(cluster sche.SchedulerCluster, _ bool
 func newEvictSlowStoreScheduler(opController *operator.Controller, conf *evictSlowStoreSchedulerConfig) Scheduler {
 	handler := newEvictSlowStoreHandler(conf)
 	return &evictSlowStoreScheduler{
-		BaseScheduler: NewBaseScheduler(opController, types.EvictSlowStoreScheduler),
+		BaseScheduler: NewBaseScheduler(opController, types.EvictSlowStoreScheduler, conf),
 		conf:          conf,
 		handler:       handler,
 	}

@@ -26,16 +26,13 @@ import (
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
-	types "github.com/tikv/pd/pkg/schedule/type"
+	"github.com/tikv/pd/pkg/schedule/types"
 	"go.uber.org/zap"
 )
 
-const (
-	// BalanceRegionName is balance region scheduler name.
-	BalanceRegionName = "balance-region-scheduler"
-)
-
 type balanceRegionSchedulerConfig struct {
+	baseDefaultSchedulerConfig
+
 	Ranges []core.KeyRange `json:"ranges"`
 	// TODO: When we prepare to use Ranges, we will need to implement the ReloadConfig function for this scheduler.
 }
@@ -53,7 +50,7 @@ type balanceRegionScheduler struct {
 // each store balanced.
 func newBalanceRegionScheduler(opController *operator.Controller, conf *balanceRegionSchedulerConfig, opts ...BalanceRegionCreateOption) Scheduler {
 	scheduler := &balanceRegionScheduler{
-		BaseScheduler: NewBaseScheduler(opController, types.BalanceRegionScheduler),
+		BaseScheduler: NewBaseScheduler(opController, types.BalanceRegionScheduler, conf),
 		retryQuota:    newRetryQuota(),
 		name:          types.BalanceRegionScheduler.String(),
 		conf:          conf,

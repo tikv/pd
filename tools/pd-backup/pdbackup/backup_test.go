@@ -17,13 +17,13 @@ import (
 
 	"github.com/stretchr/testify/suite"
 	sc "github.com/tikv/pd/pkg/schedule/config"
-	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
+	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/server/config"
-	"go.etcd.io/etcd/clientv3"
-	"go.etcd.io/etcd/embed"
+	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.etcd.io/etcd/server/v3/embed"
 	"go.uber.org/goleak"
 )
 
@@ -114,7 +114,7 @@ func (s *backupTestSuite) BeforeTest(string, string) {
 		rootPath               = path.Join(pdRootPath, strconv.FormatUint(clusterID, 10))
 		allocTimestampMaxBytes = typeutil.Uint64ToBytes(allocTimestampMax)
 	)
-	_, err = s.etcdClient.Put(ctx, endpoint.TimestampPath(rootPath), string(allocTimestampMaxBytes))
+	_, err = s.etcdClient.Put(ctx, keypath.TimestampPath(rootPath), string(allocTimestampMaxBytes))
 	re.NoError(err)
 
 	var (
@@ -142,7 +142,7 @@ func (s *backupTestSuite) TestGetBackupInfo() {
 	}
 	re.Equal(expected, actual)
 
-	tmpFile, err := os.CreateTemp(os.TempDir(), "pd_backup_info_test.json")
+	tmpFile, err := os.CreateTemp("", "pd_tests")
 	re.NoError(err)
 	defer os.RemoveAll(tmpFile.Name())
 

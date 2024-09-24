@@ -177,7 +177,7 @@ type AddNode struct{}
 func (*AddNode) Run(raft *RaftEngine, _ int64) bool {
 	config := raft.storeConfig
 	nodes := raft.conn.getNodes()
-	id, err := nodes[0].client.AllocID(context.TODO())
+	id, err := nodes[0].client.allocID(context.TODO())
 	if err != nil {
 		simutil.Logger.Error("alloc node id failed", zap.Error(err))
 		return false
@@ -196,7 +196,7 @@ func (*AddNode) Run(raft *RaftEngine, _ int64) bool {
 
 	raft.conn.Nodes[s.ID] = n
 	n.raftEngine = raft
-	n.client = NewRetryClient(n)
+	n.client = newRetryClient(n)
 
 	err = n.Start()
 	if err != nil {

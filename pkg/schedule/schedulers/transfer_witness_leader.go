@@ -24,12 +24,10 @@ import (
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
-	types "github.com/tikv/pd/pkg/schedule/type"
+	"github.com/tikv/pd/pkg/schedule/types"
 )
 
 const (
-	// TransferWitnessLeaderName is transfer witness leader scheduler name.
-	TransferWitnessLeaderName = "transfer-witness-leader-scheduler"
 	// TransferWitnessLeaderBatchSize is the number of operators to to transfer
 	// leaders by one scheduling
 	transferWitnessLeaderBatchSize = 3
@@ -45,9 +43,9 @@ type transferWitnessLeaderScheduler struct {
 }
 
 // newTransferWitnessLeaderScheduler creates an admin scheduler that transfers witness leader of a region.
-func newTransferWitnessLeaderScheduler(opController *operator.Controller) Scheduler {
+func newTransferWitnessLeaderScheduler(opController *operator.Controller, conf schedulerConfig) Scheduler {
 	return &transferWitnessLeaderScheduler{
-		BaseScheduler: NewBaseScheduler(opController, types.TransferWitnessLeaderScheduler),
+		BaseScheduler: NewBaseScheduler(opController, types.TransferWitnessLeaderScheduler, conf),
 		regions:       make(chan *core.RegionInfo, transferWitnessLeaderRecvMaxRegionSize),
 	}
 }

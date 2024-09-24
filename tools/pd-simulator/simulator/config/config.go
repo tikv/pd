@@ -98,7 +98,7 @@ func NewSimConfig(serverLogLevel string) *SimConfig {
 
 	cfg.AdvertiseClientUrls = cfg.ClientUrls
 	cfg.AdvertisePeerUrls = cfg.PeerUrls
-	cfg.DataDir, _ = os.MkdirTemp(os.TempDir(), "test_pd")
+	cfg.DataDir, _ = os.MkdirTemp("", "pd_tests")
 	cfg.InitialCluster = fmt.Sprintf("pd=%s", cfg.PeerUrls)
 	cfg.Log.Level = serverLogLevel
 	return &SimConfig{ServerConfig: cfg}
@@ -130,6 +130,8 @@ func (sc *SimConfig) Adjust(meta *toml.MetaData) error {
 
 	return sc.ServerConfig.Adjust(meta, false)
 }
+
+// Speed returns the tick speed of the simulator.
 func (sc *SimConfig) Speed() uint64 {
 	return uint64(time.Second / sc.SimTickInterval.Duration)
 }

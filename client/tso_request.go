@@ -42,6 +42,9 @@ type tsoRequest struct {
 	logical    int64
 	dcLocation string
 
+	// The identifier of the RPC stream in which the request is processed.
+	streamID string
+
 	// Runtime fields.
 	start time.Time
 	pool  *sync.Pool

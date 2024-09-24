@@ -34,7 +34,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
-	types "github.com/tikv/pd/pkg/schedule/type"
+	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/statistics/buckets"
@@ -45,8 +45,6 @@ import (
 )
 
 const (
-	// HotRegionName is balance hot region scheduler name.
-	HotRegionName           = "balance-hot-region-scheduler"
 	splitHotReadBuckets     = "split-hot-read-region"
 	splitHotWriteBuckets    = "split-hot-write-region"
 	splitProgressiveRank    = 5
@@ -90,8 +88,12 @@ type baseHotScheduler struct {
 	updateWriteTime time.Time
 }
 
-func newBaseHotScheduler(opController *operator.Controller, sampleDuration time.Duration, sampleInterval time.Duration) *baseHotScheduler {
-	base := NewBaseScheduler(opController, types.BalanceHotRegionScheduler)
+func newBaseHotScheduler(
+	opController *operator.Controller,
+	sampleDuration, sampleInterval time.Duration,
+	schedulerConfig schedulerConfig,
+) *baseHotScheduler {
+	base := NewBaseScheduler(opController, types.BalanceHotRegionScheduler, schedulerConfig)
 	ret := &baseHotScheduler{
 		BaseScheduler:  base,
 		regionPendings: make(map[uint64]*pendingInfluence),
@@ -191,7 +193,6 @@ func (h *baseHotScheduler) randomType() resourceType {
 }
 
 type hotScheduler struct {
-	name string
 	*baseHotScheduler
 	syncutil.RWMutex
 	// config of hot scheduler
@@ -200,10 +201,9 @@ type hotScheduler struct {
 }
 
 func newHotScheduler(opController *operator.Controller, conf *hotRegionSchedulerConfig) *hotScheduler {
-	base := newBaseHotScheduler(opController,
-		conf.getHistorySampleDuration(), conf.getHistorySampleInterval())
+	base := newBaseHotScheduler(opController, conf.getHistorySampleDuration(),
+		conf.getHistorySampleInterval(), conf)
 	ret := &hotScheduler{
-		name:             HotRegionName,
 		baseHotScheduler: base,
 		conf:             conf,
 	}

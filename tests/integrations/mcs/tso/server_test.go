@@ -37,12 +37,13 @@ import (
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
+	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/tests"
 	"github.com/tikv/pd/tests/integrations/mcs"
-	"go.etcd.io/etcd/clientv3"
+	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/goleak"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -202,7 +203,7 @@ func getEtcdTimestampKeyNum(re *require.Assertions, client *clientv3.Client) int
 	var count int
 	for _, kv := range resp.Kvs {
 		key := strings.TrimSpace(string(kv.Key))
-		if !strings.HasSuffix(key, endpoint.TimestampKey) {
+		if !strings.HasSuffix(key, keypath.TimestampKey) {
 			continue
 		}
 		count++

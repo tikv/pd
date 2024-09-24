@@ -26,10 +26,10 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/discovery"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
-	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
-	"go.etcd.io/etcd/clientv3"
+	"github.com/tikv/pd/pkg/utils/keypath"
+	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 )
 
@@ -122,7 +122,7 @@ func watchExpectedPrimary(ctx context.Context,
 // TransferPrimary transfers the primary of the specified service.
 // keyspaceGroupID is optional, only used for TSO service.
 func TransferPrimary(client *clientv3.Client, lease *election.Lease, serviceName,
-	oldPrimary, newPrimary string, keyspaceGroupID uint32) error {
+	oldPrimary, newPrimary string, keyspaceGroupID uint32, tsoMembersMap map[string]bool) error {
 	if lease == nil {
 		return errors.New("current lease is nil, please check leadership")
 	}
@@ -139,6 +139,10 @@ func TransferPrimary(client *clientv3.Client, lease *election.Lease, serviceName
 
 	var primaryIDs []string
 	for _, member := range entries {
+		// only members of specific group are valid primary candidates for TSO service.
+		if tsoMembersMap != nil && !tsoMembersMap[member.ServiceAddr] {
+			continue
+		}
 		if (newPrimary == "" && member.Name != oldPrimary) || (newPrimary != "" && member.Name == newPrimary) {
 			primaryIDs = append(primaryIDs, member.ServiceAddr)
 		}
@@ -169,10 +173,10 @@ func TransferPrimary(client *clientv3.Client, lease *election.Lease, serviceName
 	var primaryPath string
 	switch serviceName {
 	case constant.SchedulingServiceName:
-		primaryPath = endpoint.SchedulingPrimaryPath(clusterID)
+		primaryPath = keypath.SchedulingPrimaryPath(clusterID)
 	case constant.TSOServiceName:
-		tsoRootPath := endpoint.TSOSvcRootPath(clusterID)
-		primaryPath = endpoint.KeyspaceGroupPrimaryPath(tsoRootPath, keyspaceGroupID)
+		tsoRootPath := keypath.TSOSvcRootPath(clusterID)
+		primaryPath = keypath.KeyspaceGroupPrimaryPath(tsoRootPath, keyspaceGroupID)
 	}
 	_, err = markExpectedPrimaryFlag(client, primaryPath, primaryIDs[nextPrimaryID], grantResp.ID)
 	if err != nil {

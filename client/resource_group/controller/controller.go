@@ -32,7 +32,6 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	pd "github.com/tikv/pd/client"
 	"github.com/tikv/pd/client/errs"
-	atomicutil "go.uber.org/atomic"
 	"go.uber.org/zap"
 	"golang.org/x/exp/slices"
 )
@@ -57,7 +56,7 @@ const (
 	lowToken       selectType = 1
 )
 
-var enableControllerTraceLog = atomicutil.NewBool(false)
+var enableControllerTraceLog atomic.Bool
 
 func logControllerTrace(msg string, fields ...zap.Field) {
 	if enableControllerTraceLog.Load() {
@@ -250,16 +249,13 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 		defer emergencyTokenAcquisitionTicker.Stop()
 
 		failpoint.Inject("fastCleanup", func() {
-			cleanupTicker.Stop()
-			cleanupTicker = time.NewTicker(100 * time.Millisecond)
+			cleanupTicker.Reset(100 * time.Millisecond)
 			// because of checking `gc.run.consumption` in cleanupTicker,
 			// so should also change the stateUpdateTicker.
-			stateUpdateTicker.Stop()
-			stateUpdateTicker = time.NewTicker(200 * time.Millisecond)
+			stateUpdateTicker.Reset(200 * time.Millisecond)
 		})
 		failpoint.Inject("acceleratedReportingPeriod", func() {
-			stateUpdateTicker.Stop()
-			stateUpdateTicker = time.NewTicker(time.Millisecond * 100)
+			stateUpdateTicker.Reset(time.Millisecond * 100)
 		})
 
 		_, metaRevision, err := c.provider.LoadResourceGroups(ctx)

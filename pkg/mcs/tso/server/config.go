@@ -37,7 +37,7 @@ import (
 const (
 	defaultMaxResetTSGap = 24 * time.Hour
 
-	defaultName             = "TSO"
+	defaultName             = "tso"
 	defaultBackendEndpoints = "http://127.0.0.1:2379"
 	defaultListenAddr       = "http://127.0.0.1:3379"
 

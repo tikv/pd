@@ -31,17 +31,14 @@ import (
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
-	types "github.com/tikv/pd/pkg/schedule/type"
+	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/utils/reflectutil"
-	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/unrolled/render"
 	"go.uber.org/zap"
 )
 
 const (
-	// BalanceLeaderName is balance leader scheduler name.
-	BalanceLeaderName = "balance-leader-scheduler"
 	// BalanceLeaderBatchSize is the default number of operators to transfer leaders by one scheduling.
 	// Default value is 4 which is subjected by scheduler-max-waiting-operator and leader-schedule-limit
 	// If you want to increase balance speed more, please increase above-mentioned param.
@@ -53,32 +50,36 @@ const (
 	transferOut = "transfer-out"
 )
 
-type balanceLeaderSchedulerConfig struct {
-	syncutil.RWMutex
-	schedulerConfig
-
+type balanceLeaderSchedulerParam struct {
 	Ranges []core.KeyRange `json:"ranges"`
 	// Batch is used to generate multiple operators by one scheduling
 	Batch int `json:"batch"`
+}
+
+type balanceLeaderSchedulerConfig struct {
+	baseDefaultSchedulerConfig
+	balanceLeaderSchedulerParam
 }
 
 func (conf *balanceLeaderSchedulerConfig) update(data []byte) (int, any) {
 	conf.Lock()
 	defer conf.Unlock()
 
-	oldConfig, _ := json.Marshal(conf)
+	param := &conf.balanceLeaderSchedulerParam
+	oldConfig, _ := json.Marshal(param)
 
-	if err := json.Unmarshal(data, conf); err != nil {
+	if err := json.Unmarshal(data, param); err != nil {
 		return http.StatusInternalServerError, err.Error()
 	}
-	newConfig, _ := json.Marshal(conf)
+	newConfig, _ := json.Marshal(param)
 	if !bytes.Equal(oldConfig, newConfig) {
 		if !conf.validateLocked() {
-			if err := json.Unmarshal(oldConfig, conf); err != nil {
+			if err := json.Unmarshal(oldConfig, param); err != nil {
 				return http.StatusInternalServerError, err.Error()
 			}
 			return http.StatusBadRequest, "invalid batch size which should be an integer between 1 and 10"
 		}
+		conf.balanceLeaderSchedulerParam = *param
 		if err := conf.save(); err != nil {
 			log.Warn("failed to save balance-leader-scheduler config", errs.ZapError(err))
 		}
@@ -89,23 +90,23 @@ func (conf *balanceLeaderSchedulerConfig) update(data []byte) (int, any) {
 	if err := json.Unmarshal(data, &m); err != nil {
 		return http.StatusInternalServerError, err.Error()
 	}
-	ok := reflectutil.FindSameFieldByJSON(conf, m)
+	ok := reflectutil.FindSameFieldByJSON(param, m)
 	if ok {
 		return http.StatusOK, "Config is the same with origin, so do nothing."
 	}
 	return http.StatusBadRequest, "Config item is not found."
 }
 
-func (conf *balanceLeaderSchedulerConfig) validateLocked() bool {
+func (conf *balanceLeaderSchedulerParam) validateLocked() bool {
 	return conf.Batch >= 1 && conf.Batch <= 10
 }
 
-func (conf *balanceLeaderSchedulerConfig) clone() *balanceLeaderSchedulerConfig {
+func (conf *balanceLeaderSchedulerConfig) clone() *balanceLeaderSchedulerParam {
 	conf.RLock()
 	defer conf.RUnlock()
 	ranges := make([]core.KeyRange, len(conf.Ranges))
 	copy(ranges, conf.Ranges)
-	return &balanceLeaderSchedulerConfig{
+	return &balanceLeaderSchedulerParam{
 		Ranges: ranges,
 		Batch:  conf.Batch,
 	}
@@ -166,7 +167,7 @@ type balanceLeaderScheduler struct {
 // each store balanced.
 func newBalanceLeaderScheduler(opController *operator.Controller, conf *balanceLeaderSchedulerConfig, options ...BalanceLeaderCreateOption) Scheduler {
 	s := &balanceLeaderScheduler{
-		BaseScheduler: NewBaseScheduler(opController, types.BalanceLeaderScheduler),
+		BaseScheduler: NewBaseScheduler(opController, types.BalanceLeaderScheduler, conf),
 		retryQuota:    newRetryQuota(),
 		conf:          conf,
 		handler:       newBalanceLeaderHandler(conf),

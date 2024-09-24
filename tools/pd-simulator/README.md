@@ -34,6 +34,8 @@ Run all cases:
 
 Run a specific case with an internal PD:
 
+You can check case name in `tools/pd-simulator/simulator/cases/cases.go`.
+
 ```shell
 ./pd-simulator -case="casename"
 ```
@@ -44,7 +46,7 @@ Run a specific case with an external PD:
 ./pd-simulator -pd="http://127.0.0.1:2379" -case="casename"
 ```
 
-Run with tiup playgroudn :
+Run with tiup playground:
 ```shell
 tiup playground nightly --host 127.0.0.1 --kv.binpath ./pd-simulator --kv=1 --db=0 --kv.config=./tikv.conf
 ```

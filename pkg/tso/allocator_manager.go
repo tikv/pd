@@ -40,7 +40,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
-	"go.etcd.io/etcd/clientv3"
+	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 )
@@ -715,8 +715,7 @@ func (am *AllocatorManager) AllocatorDaemon(ctx context.Context) {
 	}
 	tsTicker := time.NewTicker(am.updatePhysicalInterval)
 	failpoint.Inject("fastUpdatePhysicalInterval", func() {
-		tsTicker.Stop()
-		tsTicker = time.NewTicker(time.Millisecond)
+		tsTicker.Reset(time.Millisecond)
 	})
 	defer tsTicker.Stop()
 	checkerTicker := time.NewTicker(PriorityCheck)

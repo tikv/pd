@@ -38,6 +38,7 @@ func newServiceGCSafepointHandler(svr *server.Server, rd *render.Render) *servic
 
 // ListServiceGCSafepoint is the response for list service GC safepoint.
 // NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
+// This type is in sync with `pd/client/http/types.go`.
 type ListServiceGCSafepoint struct {
 	ServiceGCSafepoints   []*endpoint.ServiceSafePoint `json:"service_gc_safe_points"`
 	MinServiceGcSafepoint uint64                       `json:"min_service_gc_safe_point,omitempty"`

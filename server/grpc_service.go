@@ -47,7 +47,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/server/cluster"
-	"go.etcd.io/etcd/clientv3"
+	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/multierr"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -57,7 +57,7 @@ import (
 
 const (
 	heartbeatSendTimeout          = 5 * time.Second
-	maxRetryTimesRequestTSOServer = 3
+	maxRetryTimesRequestTSOServer = 6
 	retryIntervalRequestTSOServer = 500 * time.Millisecond
 	getMinTSFromTSOServerTimeout  = 1 * time.Second
 	defaultGRPCDialTimeout        = 3 * time.Second
@@ -1414,8 +1414,11 @@ func (s *GrpcServer) GetRegion(ctx context.Context, request *pdpb.GetRegionReque
 	} else if rsp != nil {
 		return rsp.(*pdpb.GetRegionResponse), nil
 	}
-	var rc *cluster.RaftCluster
-	var region *core.RegionInfo
+	failpoint.Inject("delayProcess", nil)
+	var (
+		rc     *cluster.RaftCluster
+		region *core.RegionInfo
+	)
 	if *followerHandle {
 		rc = s.cluster
 		if !rc.GetRegionSyncer().IsRunning() {
@@ -1756,10 +1759,7 @@ func (s *GrpcServer) AskSplit(ctx context.Context, request *pdpb.AskSplitRequest
 				"missing region for split"),
 		}, nil
 	}
-	req := &pdpb.AskSplitRequest{
-		Region: request.Region,
-	}
-	split, err := rc.HandleAskSplit(req)
+	split, err := rc.HandleAskSplit(request)
 	if err != nil {
 		return &pdpb.AskSplitResponse{
 			Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
@@ -1836,11 +1836,7 @@ func (s *GrpcServer) AskBatchSplit(ctx context.Context, request *pdpb.AskBatchSp
 				"missing region for split"),
 		}, nil
 	}
-	req := &pdpb.AskBatchSplitRequest{
-		Region:     request.Region,
-		SplitCount: request.SplitCount,
-	}
-	split, err := rc.HandleAskBatchSplit(req)
+	split, err := rc.HandleAskBatchSplit(request)
 	if err != nil {
 		return &pdpb.AskBatchSplitResponse{
 			Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),

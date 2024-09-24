@@ -18,13 +18,13 @@ import (
 	"context"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/retry"
-	"go.uber.org/atomic"
 )
 
 func TestPDAllowFollowerHandleHeader(t *testing.T) {
@@ -53,7 +53,8 @@ func TestPDAllowFollowerHandleHeader(t *testing.T) {
 func TestWithCallerID(t *testing.T) {
 	re := require.New(t)
 	checked := 0
-	expectedVal := atomic.NewString(defaultCallerID)
+	var expectedVal atomic.Value
+	expectedVal.Store(defaultCallerID)
 	httpClient := NewHTTPClientWithRequestChecker(func(req *http.Request) error {
 		val := req.Header.Get(xCallerIDKey)
 		// Exclude the request sent by the inner client.
@@ -68,7 +69,7 @@ func TestWithCallerID(t *testing.T) {
 	defer c.Close()
 	c.GetRegions(context.Background())
 	expectedVal.Store("test")
-	c.WithCallerID(expectedVal.Load()).GetRegions(context.Background())
+	c.WithCallerID(expectedVal.Load().(string)).GetRegions(context.Background())
 	re.Equal(2, checked)
 }
 

@@ -33,6 +33,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/scatter"
 	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/schedule/splitter"
+	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/statistics/buckets"
 	"github.com/tikv/pd/pkg/statistics/utils"
@@ -149,8 +150,7 @@ func (sc *schedulingController) runSchedulingMetricsCollectionJob() {
 
 	ticker := time.NewTicker(metricsCollectionJobInterval)
 	failpoint.Inject("highFrequencyClusterJobs", func() {
-		ticker.Stop()
-		ticker = time.NewTicker(time.Millisecond)
+		ticker.Reset(time.Millisecond)
 	})
 	defer ticker.Stop()
 
@@ -455,7 +455,7 @@ func (sc *schedulingController) getEvictLeaderStores() (evictStores []uint64) {
 	if sc.coordinator == nil {
 		return nil
 	}
-	handler, ok := sc.coordinator.GetSchedulersController().GetSchedulerHandlers()[schedulers.EvictLeaderName]
+	handler, ok := sc.coordinator.GetSchedulersController().GetSchedulerHandlers()[types.EvictLeaderScheduler.String()]
 	if !ok {
 		return
 	}

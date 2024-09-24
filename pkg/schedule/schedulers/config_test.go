@@ -48,3 +48,37 @@ func TestSchedulerConfig(t *testing.T) {
 	// report error because the config is empty and cannot be decoded
 	require.Error(t, cfg2.load(newTc))
 }
+
+func TestDefaultSchedulerConfig(t *testing.T) {
+	s := storage.NewStorageWithMemoryBackend()
+
+	type testConfig struct {
+		balanceLeaderSchedulerConfig
+		Value string `json:"value"`
+	}
+
+	cfg := &testConfig{
+		balanceLeaderSchedulerConfig: balanceLeaderSchedulerConfig{
+			baseDefaultSchedulerConfig: newBaseDefaultSchedulerConfig(),
+		},
+		Value: "test",
+	}
+	cfg.init("test", s, cfg)
+	require.False(t, cfg.isDisable())
+	require.NoError(t, cfg.setDisable(true))
+	require.True(t, cfg.isDisable())
+
+	cfg2 := &testConfig{
+		balanceLeaderSchedulerConfig: balanceLeaderSchedulerConfig{
+			baseDefaultSchedulerConfig: newBaseDefaultSchedulerConfig(),
+		},
+	}
+	cfg2.init("test", s, cfg2)
+	require.True(t, cfg2.isDisable())
+	require.Equal(t, "", cfg2.Value)
+
+	cfg3 := &testConfig{}
+	require.NoError(t, cfg2.load(cfg3))
+	require.Equal(t, cfg.Value, cfg3.Value)
+	require.True(t, cfg3.Disabled)
+}
