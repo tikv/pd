@@ -53,10 +53,10 @@ const (
 )
 
 var (
-	denyCheckersByLabelerCounter = labeler.LabelerEventCounter.WithLabelValues("checkers", "deny")
 	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
 	pendingProcessedRegionsGauge = regionListGauge.WithLabelValues("pending_processed_regions")
 	priorityListGauge            = regionListGauge.WithLabelValues("priority_list")
+	denyCheckersByLabelerCounter = labeler.LabelerEventCounter.WithLabelValues("checkers", "deny")
 )
 
 // Controller is used to manage all checkers.
@@ -85,7 +85,8 @@ type Controller struct {
 	// interval is the config interval of patrol regions.
 	// It's used to update the ticker, so we need to
 	// record it to avoid updating the ticker frequently.
-	interval    time.Duration
+	interval time.Duration
+	// workerCount is the count of workers to patrol regions.
 	workerCount int
 	// patrolRegionScanLimit is the limit of regions to scan.
 	// It is calculated by the number of regions.
@@ -490,7 +491,6 @@ func (c *Controller) GetPauseController(name string) (*PauseController, error) {
 
 // PatrolRegionContext is used to store the context of patrol regions.
 type PatrolRegionContext struct {
-	// workers
 	workersCtx    context.Context
 	workersCancel context.CancelFunc
 	regionChan    chan *core.RegionInfo
@@ -503,9 +503,11 @@ func (p *PatrolRegionContext) init(ctx context.Context) {
 }
 
 func (p *PatrolRegionContext) stop() {
+	log.Debug("closing patrol region workers")
 	close(p.regionChan)
 	p.workersCancel()
 	p.wg.Wait()
+	log.Debug("patrol region workers are closed")
 }
 
 func (p *PatrolRegionContext) startPatrolRegionWorkers(c *Controller) {
