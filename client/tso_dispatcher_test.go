@@ -191,7 +191,7 @@ func (s *testTSODispatcherSuite) checkIdleTokenCount(expectedTotal int) {
 		}
 	}
 	s.re.Equal(expectedTotal, s.dispatcher.tokenCount)
-	s.re.Equal(expectedTotal-1, len(s.dispatcher.tokenCh))
+	s.re.Len(s.dispatcher.tokenCh, expectedTotal-1)
 }
 
 func (s *testTSODispatcherSuite) testStaticConcurrencyImpl(concurrency int) {
@@ -200,7 +200,7 @@ func (s *testTSODispatcherSuite) testStaticConcurrencyImpl(concurrency int) {
 
 	// Make sure the state of the mock stream is clear. Unexpected batching may make the requests sent to the stream
 	// less than expected, causing there are more `generateNext` signals or generated results.
-	s.re.Equal(0, len(s.streamInner.resultCh))
+	s.re.Empty(s.streamInner.resultCh)
 
 	// The dispatcher may block on fetching requests, which is after checking concurrency option. Perform a request
 	// to make sure the concurrency setting takes effect.
@@ -229,7 +229,6 @@ func (s *testTSODispatcherSuite) testStaticConcurrencyImpl(concurrency int) {
 		reqs = append(reqs, req)
 	}
 
-	//time.Sleep(time.Hour)
 	// The dispatcher won't process more request batches if tokens are used up.
 	// Note that `reqMustNotReady` contains a delay, which makes it nearly impossible that dispatcher is processing the
 	// second batch but not finished yet.
@@ -251,7 +250,7 @@ func (s *testTSODispatcherSuite) testStaticConcurrencyImpl(concurrency int) {
 				break
 			}
 		}
-		s.re.Equal(expectedPending, len(s.stream.pendingRequests))
+		s.re.Len(s.stream.pendingRequests, expectedPending)
 
 		req := reqs[i]
 		// The last 3 requests should be in a single batch. Don't need to generate new results for the last 2.
