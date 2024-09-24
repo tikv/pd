@@ -57,8 +57,7 @@ const (
 	// RandomMergeScheduler is random merge scheduler name.
 	RandomMergeScheduler CheckerSchedulerType = "random-merge-scheduler"
 	// ScatterRangeScheduler is scatter range scheduler name.
-	// TODO: update to `scatter-range-scheduler`
-	ScatterRangeScheduler CheckerSchedulerType = "scatter-range"
+	ScatterRangeScheduler CheckerSchedulerType = "scatter-range-scheduler"
 	// ShuffleHotRegionScheduler is shuffle hot region scheduler name.
 	ShuffleHotRegionScheduler CheckerSchedulerType = "shuffle-hot-region-scheduler"
 	// ShuffleLeaderScheduler is shuffle leader scheduler name.
@@ -135,7 +134,8 @@ var (
 		"grant-hot-region-scheduler":   GrantHotRegionScheduler,
 		"balance-hot-region-scheduler": BalanceHotRegionScheduler,
 		"random-merge-scheduler":       RandomMergeScheduler,
-		// TODO: update to `scatter-range-scheduler`
+		"scatter-range-scheduler":      ScatterRangeScheduler,
+		// TODO: remove `scatter-range` after remove `NewScatterRangeSchedulerCommand` from pd-ctl
 		"scatter-range":                     ScatterRangeScheduler,
 		"shuffle-hot-region-scheduler":      ShuffleHotRegionScheduler,
 		"shuffle-leader-scheduler":          ShuffleLeaderScheduler,
