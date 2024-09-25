@@ -15,9 +15,6 @@
 package api
 
 import (
-	"encoding/json"
-	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -148,12 +145,12 @@ func (h *schedulerHandler) CreateScheduler(w http.ResponseWriter, r *http.Reques
 		}
 		collector(strconv.FormatUint(limit, 10))
 	case types.GrantHotRegionScheduler:
-		schedulers, err := h.getSchedulersOnDifferentMode()
+		isExist, err := h.isSchedulerExist(types.BalanceHotRegionScheduler)
 		if err != nil {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		if slice.Contains(schedulers, types.BalanceHotRegionScheduler.String()) {
+		if isExist {
 			h.r.JSON(w, http.StatusBadRequest, "balance-hot-region-scheduler is running, please remove it first")
 			return
 		}
@@ -170,12 +167,12 @@ func (h *schedulerHandler) CreateScheduler(w http.ResponseWriter, r *http.Reques
 		collector(leaderID)
 		collector(peerIDs)
 	case types.BalanceHotRegionScheduler:
-		schedulers, err := h.getSchedulersOnDifferentMode()
+		isExist, err := h.isSchedulerExist(types.GrantHotRegionScheduler)
 		if err != nil {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
-		if slice.Contains(schedulers, types.GrantHotRegionScheduler.String()) {
+		if isExist {
 			h.r.JSON(w, http.StatusBadRequest, "grant-hot-region-scheduler is running, please remove it first")
 			return
 		}
@@ -270,46 +267,21 @@ func (h *schedulerHandler) PauseOrResumeScheduler(w http.ResponseWriter, r *http
 	h.r.JSON(w, http.StatusOK, "Pause or resume the scheduler successfully.")
 }
 
-func (h *schedulerHandler) getSchedulersOnDifferentMode() ([]string, error) {
+func (h *schedulerHandler) isSchedulerExist(scheduler types.CheckerSchedulerType) (bool, error) {
 	rc, err := h.GetRaftCluster()
 	if err != nil {
-		return nil, err
+		return false, err
 	}
-	if !rc.IsServiceIndependent(constant.SchedulingServiceName) {
-		schedulers, err := h.GetSchedulerByStatus("", false)
-		if err != nil {
-			return nil, err
-		}
-		return schedulers.([]string), nil
+	if rc.IsServiceIndependent(constant.SchedulingServiceName) {
+		handlers := rc.GetSchedulerHandlers()
+		_, ok := handlers[scheduler.String()]
+		return ok, nil
 	}
-
-	addr, ok := h.svr.GetServicePrimaryAddr(h.svr.Context(), constant.SchedulingServiceName)
-	if !ok {
-		return nil, errs.ErrNotFoundSchedulingAddr.FastGenByArgs()
+	schedulers := rc.GetSchedulers()
+	if slice.Contains(schedulers, scheduler.String()) {
+		return !rc.GetSchedulerConfig().IsSchedulerDisabled(scheduler), nil
 	}
-	url := fmt.Sprintf("%s/scheduling/api/v1/schedulers", addr)
-	req, err := http.NewRequest(http.MethodGet, url, http.NoBody)
-	if err != nil {
-		return nil, err
-	}
-	resp, err := h.svr.GetHTTPClient().Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, errs.ErrSchedulingServer.FastGenByArgs(resp.StatusCode)
-	}
-	bs, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
-	var schedulers []string
-	err = json.Unmarshal(bs, &schedulers)
-	if err != nil {
-		return nil, err
-	}
-	return schedulers, nil
+	return false, nil
 }
 
 type schedulerConfigHandler struct {
