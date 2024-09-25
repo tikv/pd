@@ -385,7 +385,10 @@ func (s *tsoStream) recvLoop(ctx context.Context) {
 		}
 		currentSample := math.Log(float64(latency.Microseconds()))
 		filteredValue := filter.update(sampleTime, currentSample)
-		s.estimatedLatencyMicros.Store(uint64(math.Exp(filteredValue)))
+		micros := math.Exp(filteredValue)
+		s.estimatedLatencyMicros.Store(uint64(micros))
+		// Update the metrics in seconds.
+		estimateTSOLatencyGauge.WithLabelValues(s.streamID).Set(micros * 1e-6)
 	}
 
 recvLoop:

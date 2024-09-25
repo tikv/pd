@@ -353,7 +353,6 @@ tsoBatchLoop:
 		// continue collecting.
 		if td.isConcurrentRPCEnabled() {
 			estimatedLatency := stream.EstimatedRPCLatency()
-			estimateTSOLatencyGauge.WithLabelValues(streamURL).Set(estimatedLatency.Seconds())
 			goalBatchTime := estimatedLatency / time.Duration(td.rpcConcurrency)
 
 			failpoint.Inject("tsoDispatcherConcurrentModeAssertDelayDuration", func(val failpoint.Value) {
