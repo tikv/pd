@@ -597,25 +597,16 @@ func (suite *schedulerTestSuite) checkGrantLeaderScheduler(cluster *pdTests.Test
 	// note: because pdqsort is an unstable sort algorithm, set ApproximateSize for this region.
 	pdTests.MustPutRegion(re, cluster, 1, 1, []byte("a"), []byte("b"), core.SetApproximateSize(10))
 
-	expected := map[string]bool{
-		"balance-region-scheduler":     true,
-		"balance-leader-scheduler":     true,
-		"balance-hot-region-scheduler": true,
-		"evict-slow-store-scheduler":   true,
-	}
-	checkSchedulerCommand(re, cmd, pdAddr, nil, expected)
+	suite.checkDefaultSchedulers(re, cmd, pdAddr)
 
 	// case 1: add grant-hot-region-scheduler when balance-hot-region-scheduler is running
 	echo := mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "add", "grant-hot-region-scheduler", "1", "1,2,3"}, nil)
 	re.Contains(echo, "balance-hot-region-scheduler is running, please remove it first")
 
 	// case 2: add grant-hot-region-scheduler when balance-hot-region-scheduler is paused
-	checkSchedulerCommand(re, cmd, pdAddr, []string{"-u", pdAddr, "scheduler", "pause", "balance-hot-region-scheduler", "60"}, map[string]bool{
-		"balance-region-scheduler":     true,
-		"balance-leader-scheduler":     true,
-		"balance-hot-region-scheduler": true,
-		"evict-slow-store-scheduler":   true,
-	})
+	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "pause", "balance-hot-region-scheduler", "60"}, nil)
+	re.Contains(echo, "Success!")
+	suite.checkDefaultSchedulers(re, cmd, pdAddr)
 	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "add", "grant-hot-region-scheduler", "1", "1,2,3"}, nil)
 	re.Contains(echo, "balance-hot-region-scheduler is running, please remove it first")
 
@@ -660,12 +651,9 @@ func (suite *schedulerTestSuite) checkGrantLeaderScheduler(cluster *pdTests.Test
 		"evict-slow-store-scheduler": true,
 	})
 
-	checkSchedulerCommand(re, cmd, pdAddr, []string{"-u", pdAddr, "scheduler", "add", "balance-hot-region-scheduler"}, map[string]bool{
-		"balance-region-scheduler":     true,
-		"balance-leader-scheduler":     true,
-		"balance-hot-region-scheduler": true,
-		"evict-slow-store-scheduler":   true,
-	})
+	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "add", "balance-hot-region-scheduler"}, nil)
+	re.Contains(echo, "Success!")
+	suite.checkDefaultSchedulers(re, cmd, pdAddr)
 }
 
 func (suite *schedulerTestSuite) TestHotRegionSchedulerConfig() {
@@ -731,14 +719,6 @@ func (suite *schedulerTestSuite) checkHotRegionSchedulerConfig(cluster *pdTests.
 			return reflect.DeepEqual(expect, conf1)
 		})
 	}
-	// scheduler show command
-	expected := map[string]bool{
-		"balance-region-scheduler":     true,
-		"balance-leader-scheduler":     true,
-		"balance-hot-region-scheduler": true,
-		"evict-slow-store-scheduler":   true,
-	}
-	checkSchedulerCommand(re, cmd, pdAddr, nil, expected)
 	var conf map[string]any
 	mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "balance-hot-region-scheduler", "list"}, &conf)
 	re.Equal(expected1, conf)
