@@ -286,18 +286,15 @@ func (handler *grantLeaderHandler) UpdateConfig(w http.ResponseWriter, r *http.R
 		args = append(args, handler.config.getRanges(id)...)
 	}
 
-<<<<<<< HEAD:server/schedulers/grant_leader.go
-	handler.config.BuildWithArgs(args)
-	err := handler.config.Persist()
-=======
-	err := handler.config.buildWithArgs(args)
+	err := handler.config.BuildWithArgs(args)
 	if err != nil {
-		_, _ = handler.config.removeStore(id)
+		handler.config.mu.Lock()
+		handler.config.cluster.ResumeLeaderTransfer(id)
+		handler.config.mu.Unlock()
 		handler.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	err = handler.config.persist()
->>>>>>> 6b927e117 (*: reset config if the input is invalid  (#8632)):pkg/schedule/schedulers/grant_leader.go
+	err = handler.config.Persist()
 	if err != nil {
 		_, _ = handler.config.removeStore(id)
 		handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
