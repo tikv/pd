@@ -90,13 +90,16 @@ func (s *testTSODispatcherSuite) SetupTest() {
 	s.option.timeout = time.Hour
 	// As the internal logic of the tsoDispatcher allows it to create streams multiple times, but our tests needs
 	// single stable access to the inner stream, we do not allow it to create it more than once in these tests.
+	creating := new(atomic.Bool)
+	// To avoid data race on reading `stream` and `streamInner` fields.
 	created := new(atomic.Bool)
 	createStream := func(ctx context.Context) *tsoStream {
-		if !created.CompareAndSwap(false, true) {
+		if !creating.CompareAndSwap(false, true) {
 			s.re.FailNow("testTSODispatcherSuite: trying to create stream more than once, which is unsupported in this tests")
 		}
 		s.streamInner = newMockTSOStreamImpl(ctx, resultModeGenerateOnSignal)
 		s.stream = newTSOStream(ctx, mockStreamURL, s.streamInner)
+		created.Store(true)
 		return s.stream
 	}
 	s.dispatcher = newTSODispatcher(context.Background(), globalDCLocation, defaultMaxTSOBatchSize, newMockTSOServiceProvider(s.option, createStream))
@@ -120,9 +123,14 @@ func (s *testTSODispatcherSuite) SetupTest() {
 		ctx := context.Background()
 		req := s.sendReq(ctx)
 		s.reqMustNotReady(req)
+		// Wait until created
+		for !created.Load() {
+			time.Sleep(time.Millisecond)
+		}
 		s.streamInner.generateNext()
 		s.reqMustReady(req)
 	}
+	s.re.True(created.Load())
 	s.re.NotNil(s.stream)
 }
 
