@@ -20,6 +20,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/testutil"
@@ -479,4 +480,62 @@ func TestScheduler(t *testing.T) {
 	re.Contains(echo, "\"degree\": 10")
 	echo = mustExec([]string{"-u", pdAddr, "scheduler", "remove", "split-bucket-scheduler"}, nil)
 	re.Contains(echo, "Success!")
+}
+
+func TestEvictLeaderScheduler(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster, err := tests.NewTestCluster(ctx, 1)
+	re.NoError(err)
+	defer cluster.Destroy()
+	err = cluster.RunInitialServers()
+	re.NoError(err)
+	cluster.WaitLeader()
+	pdAddr := cluster.GetConfig().GetClientURL()
+	cmd := pdctlCmd.GetRootCmd()
+
+	stores := []*metapb.Store{
+		{
+			Id:            1,
+			State:         metapb.StoreState_Up,
+			LastHeartbeat: time.Now().UnixNano(),
+		},
+		{
+			Id:            2,
+			State:         metapb.StoreState_Up,
+			LastHeartbeat: time.Now().UnixNano(),
+		},
+		{
+			Id:            3,
+			State:         metapb.StoreState_Up,
+			LastHeartbeat: time.Now().UnixNano(),
+		},
+		{
+			Id:            4,
+			State:         metapb.StoreState_Up,
+			LastHeartbeat: time.Now().UnixNano(),
+		},
+	}
+	leaderServer := cluster.GetServer(cluster.GetLeader())
+	re.NoError(leaderServer.BootstrapCluster())
+	for _, store := range stores {
+		pdctl.MustPutStore(re, leaderServer.GetServer(), store)
+	}
+
+	pdctl.MustPutRegion(re, cluster, 1, 1, []byte("a"), []byte("b"))
+	output, err := pdctl.ExecuteCommand(cmd, []string{"-u", pdAddr, "scheduler", "add", "evict-leader-scheduler", "2"}...)
+	re.NoError(err)
+	re.Contains(string(output), "Success!")
+	failpoint.Enable("github.com/tikv/pd/server/schedulers/buildWithArgsErr", "return(true)")
+	output, err = pdctl.ExecuteCommand(cmd, []string{"-u", pdAddr, "scheduler", "add", "evict-leader-scheduler", "1"}...)
+	re.NoError(err)
+	re.Contains(string(output), "fail to build with args")
+	failpoint.Disable("github.com/tikv/pd/server/schedulers/buildWithArgsErr")
+	output, err = pdctl.ExecuteCommand(cmd, []string{"-u", pdAddr, "scheduler", "remove", "evict-leader-scheduler"}...)
+	re.NoError(err)
+	re.Contains(string(output), "Success!")
+	output, err = pdctl.ExecuteCommand(cmd, []string{"-u", pdAddr, "scheduler", "add", "evict-leader-scheduler", "1"}...)
+	re.NoError(err)
+	re.Contains(string(output), "Success!")
 }

@@ -274,10 +274,6 @@ func (handler *evictLeaderHandler) UpdateConfig(w http.ResponseWriter, r *http.R
 		args = append(args, handler.config.getRanges(id)...)
 	}
 
-<<<<<<< HEAD
-	handler.config.BuildWithArgs(args)
-	err := handler.config.Persist()
-=======
 	err := handler.config.BuildWithArgs(args)
 	if err != nil {
 		handler.config.mu.Lock()
@@ -286,8 +282,8 @@ func (handler *evictLeaderHandler) UpdateConfig(w http.ResponseWriter, r *http.R
 		handler.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
+
 	err = handler.config.Persist()
->>>>>>> 6b927e117 (*: reset config if the input is invalid  (#8632))
 	if err != nil {
 		handler.config.mu.Lock()
 		delete(handler.config.StoreIDWitRanges, id)
@@ -313,7 +309,6 @@ func (handler *evictLeaderHandler) DeleteConfig(w http.ResponseWriter, r *http.R
 
 	handler.config.mu.Lock()
 	defer handler.config.mu.Unlock()
-<<<<<<< HEAD
 	_, exists := handler.config.StoreIDWitRanges[id]
 	if exists {
 		delete(handler.config.StoreIDWitRanges, id)
@@ -332,27 +327,6 @@ func (handler *evictLeaderHandler) DeleteConfig(w http.ResponseWriter, r *http.R
 	}
 
 	handler.rd.JSON(w, http.StatusInternalServerError, errors.New("the config does not exist"))
-=======
-	ranges, exists := handler.config.StoreIDWitRanges[id]
-	if !exists {
-		handler.rd.JSON(w, http.StatusInternalServerError, errors.New("the config does not exist"))
-		return
-	}
-	delete(handler.config.StoreIDWitRanges, id)
-	handler.config.cluster.ResumeLeaderTransfer(id)
-
-	if err := handler.config.Persist(); err != nil {
-		handler.config.StoreIDWitRanges[id] = ranges
-		_ = handler.config.cluster.PauseLeaderTransfer(id)
-		handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	var resp any
-	if len(handler.config.StoreIDWitRanges) == 0 {
-		resp = noStoreInSchedulerInfo
-	}
-	handler.rd.JSON(w, http.StatusOK, resp)
->>>>>>> 6b927e117 (*: reset config if the input is invalid  (#8632))
 }
 
 func newEvictLeaderHandler(config *evictLeaderSchedulerConfig) http.Handler {
