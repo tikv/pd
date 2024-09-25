@@ -207,8 +207,7 @@ type tsoStream struct {
 
 	pendingRequests chan batchedRequests
 
-	cancel context.CancelFunc
-	wg     sync.WaitGroup
+	wg sync.WaitGroup
 
 	// For syncing between sender and receiver to guarantee all requests are finished when closing.
 	state          atomic.Int32
@@ -230,17 +229,11 @@ const invalidStreamID = "<invalid>"
 
 func newTSOStream(ctx context.Context, serverURL string, stream grpcTSOStreamAdapter) *tsoStream {
 	streamID := fmt.Sprintf("%s-%d", serverURL, streamIDAlloc.Add(1))
-	// To make error handling in `tsoDispatcher` work, the internal `cancel` and external `cancel` is better to be
-	// distinguished.
-	ctx, cancel := context.WithCancel(ctx)
 	s := &tsoStream{
-		serverURL: serverURL,
-		stream:    stream,
-		streamID:  streamID,
-
+		serverURL:       serverURL,
+		stream:          stream,
+		streamID:        streamID,
 		pendingRequests: make(chan batchedRequests, 64),
-
-		cancel: cancel,
 
 		ongoingRequestCountGauge: ongoingRequestCountGauge.WithLabelValues(streamID),
 	}
@@ -253,14 +246,70 @@ func (s *tsoStream) getServerURL() string {
 	return s.serverURL
 }
 
-// processRequests starts an RPC to get a batch of timestamps without waiting for the result. When the result is ready,
-// it will be  passed th `notifier.finish`.
+// ProcessRequests starts an RPC to get a batch of timestamps and synchronously waits for the result.
 //
-// This function is NOT thread-safe. Don't call this function concurrently in multiple goroutines.
+// This function is NOT thread-safe. Don't call this function concurrently in multiple goroutines. Neither should this
+// function be called concurrently with ProcessRequestsAsync.
+//
+// WARNING: The caller is responsible to guarantee that when using this function, there must NOT be any unfinished
+// async requests started by ProcessRequestsAsync. Otherwise, it might cause multiple goroutines calling `RecvMsg`
+// of gRPC, which is unsafe.
+//
+// Calling this may implicitly switch the stream to sync mode.
+func (s *tsoStream) ProcessRequests(
+	clusterID uint64, keyspaceID, keyspaceGroupID uint32, dcLocation string, count int64, batchStartTime time.Time,
+) (tsoRequestResult, error) {
+	start := time.Now()
+	if err := s.stream.Send(clusterID, keyspaceID, keyspaceGroupID, dcLocation, count); err != nil {
+		if err == io.EOF {
+			err = errs.ErrClientTSOStreamClosed
+		} else {
+			err = errors.WithStack(err)
+		}
+		return tsoRequestResult{}, err
+	}
+	tsoBatchSendLatency.Observe(time.Since(batchStartTime).Seconds())
+	res, err := s.stream.Recv()
+	duration := time.Since(start).Seconds()
+	if err != nil {
+		requestFailedDurationTSO.Observe(duration)
+		if err == io.EOF {
+			err = errs.ErrClientTSOStreamClosed
+		} else {
+			err = errors.WithStack(err)
+		}
+		return tsoRequestResult{}, err
+	}
+	requestDurationTSO.Observe(duration)
+	tsoBatchSize.Observe(float64(count))
+
+	if res.count != uint32(count) {
+		err = errors.WithStack(errTSOLength)
+		return tsoRequestResult{}, err
+	}
+
+	respKeyspaceGroupID := res.respKeyspaceGroupID
+	physical, logical, suffixBits := res.physical, res.logical, res.suffixBits
+	return tsoRequestResult{
+		physical:            physical,
+		logical:             logical,
+		count:               uint32(count),
+		suffixBits:          suffixBits,
+		respKeyspaceGroupID: respKeyspaceGroupID,
+	}, nil
+}
+
+// ProcessRequestsAsync starts an RPC to get a batch of timestamps without waiting for the result. When the result is ready,
+// it will be passed th `notifier.finish`.
+//
+// This function is NOT thread-safe. Don't call this function concurrently in multiple goroutines. Neither should this
+// function be called concurrently with ProcessRequests.
 //
 // It's guaranteed that the `callback` will be called, but when the request is failed to be scheduled, the callback
 // will be ignored.
-func (s *tsoStream) processRequests(
+//
+// Calling this may implicitly switch the stream to async mode.
+func (s *tsoStream) ProcessRequestsAsync(
 	clusterID uint64, keyspaceID, keyspaceGroupID uint32, dcLocation string, count int64, batchStartTime time.Time, callback onFinishedCallback,
 ) error {
 	start := time.Now()
@@ -300,11 +349,7 @@ func (s *tsoStream) processRequests(
 
 	if err := s.stream.Send(clusterID, keyspaceID, keyspaceGroupID, dcLocation, count); err != nil {
 		// As the request is already put into `pendingRequests`, the request should finally be canceled by the recvLoop.
-		// So skip returning error here to avoid
-		// if err == io.EOF {
-		// 	return errors.WithStack(errs.ErrClientTSOStreamClosed)
-		// }
-		// return errors.WithStack(err)
+		// So do not return error here to avoid double-cancelling.
 		log.Warn("failed to send RPC request through tsoStream", zap.String("stream", s.streamID), zap.Error(err))
 		return nil
 	}
@@ -335,7 +380,6 @@ func (s *tsoStream) recvLoop(ctx context.Context) {
 		}
 
 		s.stoppedWithErr.Store(&finishWithErr)
-		s.cancel()
 		for !s.state.CompareAndSwap(streamStateIdle, streamStateClosing) {
 			switch state := s.state.Load(); state {
 			case streamStateIdle, streamStateSending:
@@ -365,41 +409,28 @@ func (s *tsoStream) recvLoop(ctx context.Context) {
 
 recvLoop:
 	for {
-		select {
-		case <-ctx.Done():
-			finishWithErr = context.Canceled
-			break recvLoop
-		default:
-		}
-
-		res, err := s.stream.Recv()
-
 		// Try to load the corresponding `batchedRequests`. If `Recv` is successful, there must be a request pending
 		// in the queue.
 		select {
 		case currentReq = <-s.pendingRequests:
 			hasReq = true
-		default:
-			hasReq = false
+		case <-ctx.Done():
+			finishWithErr = ctx.Err()
+			return
 		}
+
+		res, err := s.stream.Recv()
 
 		durationSeconds := time.Since(currentReq.startTime).Seconds()
 
 		if err != nil {
 			// If a request is pending and error occurs, observe the duration it has cost.
-			// Note that it's also possible that the stream is broken due to network without being requested. In this
-			// case, `Recv` may return an error while no request is pending.
-			if hasReq {
-				requestFailedDurationTSO.Observe(durationSeconds)
-			}
+			requestFailedDurationTSO.Observe(durationSeconds)
 			if err == io.EOF {
 				finishWithErr = errors.WithStack(errs.ErrClientTSOStreamClosed)
 			} else {
 				finishWithErr = errors.WithStack(err)
 			}
-			break recvLoop
-		} else if !hasReq {
-			finishWithErr = errors.New("tsoStream timing order broken")
 			break recvLoop
 		}
 
