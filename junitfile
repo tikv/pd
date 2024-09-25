@@ -1,0 +1,1039 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites>
+	<testsuite tests="2" failures="0" time="2.463265" name="github.com/tikv/pd/pkg/schedule/config">
+		<properties>
+			<property name="go.version" value="go1.23.1 linux/amd64"></property>
+		</properties>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/config" name="TestMergeCheck" time="1.237702"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/config" name="TestValidateLabels" time="1.225563"></testcase>
+	</testsuite>
+	<testsuite tests="2" failures="0" time="2.132697" name="github.com/tikv/pd/pkg/utils/netutil">
+		<properties>
+			<property name="go.version" value="go1.23.1 linux/amd64"></property>
+		</properties>
+		<testcase classname="github.com/tikv/pd/pkg/utils/netutil" name="TestResolveLoopBackAddr" time="1.060846"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/utils/netutil" name="TestIsEnableHttps" time="1.071851"></testcase>
+	</testsuite>
+	<testsuite tests="10" failures="0" time="12.795968" name="github.com/tikv/pd/pkg/replication">
+		<properties>
+			<property name="go.version" value="go1.23.1 linux/amd64"></property>
+		</properties>
+		<testcase classname="github.com/tikv/pd/pkg/replication" name="TestRecoverProgress" time="1.323560"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/replication" name="TestComplexPlacementRules3" time="1.236863"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/replication" name="TestInitial" time="1.256734"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/replication" name="TestStateSwitch" time="1.354893"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/replication" name="TestReplicateState" time="1.265435"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/replication" name="TestAsynctimeout" time="1.269863"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/replication" name="TestComplexPlacementRules" time="1.338046"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/replication" name="TestRecoverProgressWithSplitAndMerge" time="1.250414"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/replication" name="TestStatus" time="1.203967"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/replication" name="TestComplexPlacementRules2" time="1.296193"></testcase>
+	</testsuite>
+	<testsuite tests="16" failures="0" time="20.218459" name="github.com/tikv/pd/server/config">
+		<properties>
+			<property name="go.version" value="go1.23.1 linux/amd64"></property>
+		</properties>
+		<testcase classname="github.com/tikv/pd/server/config" name="TestSecurity" time="1.312607"></testcase>
+		<testcase classname="github.com/tikv/pd/server/config" name="TestRateLimitClone" time="1.282837"></testcase>
+		<testcase classname="github.com/tikv/pd/server/config" name="TestPDServerConfig" time="1.250830"></testcase>
+		<testcase classname="github.com/tikv/pd/server/config" name="TestValidation" time="1.249856"></testcase>
+		<testcase classname="github.com/tikv/pd/server/config" name="TestReloadConfig" time="1.294103"></testcase>
+		<testcase classname="github.com/tikv/pd/server/config" name="TestTLS" time="1.278760"></testcase>
+		<testcase classname="github.com/tikv/pd/server/config" name="TestReplicationMode" time="1.257229"></testcase>
+		<testcase classname="github.com/tikv/pd/server/config" name="TestAdjust" time="1.258961"></testcase>
+		<testcase classname="github.com/tikv/pd/server/config" name="TestValidateURLWithScheme" time="1.254101"></testcase>
+		<testcase classname="github.com/tikv/pd/server/config" name="TestDashboardConfig" time="1.242475"></testcase>
+		<testcase classname="github.com/tikv/pd/server/config" name="TestMigrateFlags" time="1.226336"></testcase>
+		<testcase classname="github.com/tikv/pd/server/config" name="TestReloadUpgrade" time="1.318007"></testcase>
+		<testcase classname="github.com/tikv/pd/server/config" name="TestReloadUpgrade2" time="1.212038"></testcase>
+		<testcase classname="github.com/tikv/pd/server/config" name="TestConfigClone" time="1.247313"></testcase>
+		<testcase classname="github.com/tikv/pd/server/config" name="TestHotHistoryRegionConfig" time="1.216154"></testcase>
+		<testcase classname="github.com/tikv/pd/server/config" name="TestBadFormatJoinAddr" time="1.316852"></testcase>
+	</testsuite>
+	<testsuite tests="11" failures="0" time="22.259554" name="github.com/tikv/pd/pkg/window">
+		<properties>
+			<property name="go.version" value="go1.23.1 linux/amd64"></property>
+		</properties>
+		<testcase classname="github.com/tikv/pd/pkg/window" name="TestWindowResetBucket" time="1.050838"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/window" name="TestWindowResetBuckets" time="1.049775"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/window" name="TestWindowAdd" time="1.049786"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/window" name="TestRollingCounterDataRace" time="4.077611"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/window" name="TestRollingPolicy_AddWithTimespan" time="2.155458"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/window" name="TestRollingPolicy_Add" time="2.653726"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/window" name="TestWindowResetWindow" time="1.039188"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/window" name="TestWindowSize" time="1.041692"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/window" name="TestWindowAppend" time="1.051200"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/window" name="TestRollingCounterReduce" time="3.024783"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/window" name="TestRollingCounterAdd" time="4.065498"></testcase>
+	</testsuite>
+	<testsuite tests="1" failures="0" time="2.036853" name="github.com/tikv/pd/pkg/systimemon">
+		<properties>
+			<property name="go.version" value="go1.23.1 linux/amd64"></property>
+		</properties>
+		<testcase classname="github.com/tikv/pd/pkg/systimemon" name="TestSystimeMonitor" time="2.036853"></testcase>
+	</testsuite>
+	<testsuite tests="4" failures="0" time="4.461594" name="github.com/tikv/pd/pkg/utils/apiutil">
+		<properties>
+			<property name="go.version" value="go1.23.1 linux/amd64"></property>
+		</properties>
+		<testcase classname="github.com/tikv/pd/pkg/utils/apiutil" name="TestParseHexKeys" time="1.151292"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/utils/apiutil" name="TestGetIPPortFromHTTPRequest" time="1.089963"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/utils/apiutil" name="TestJsonRespondErrorBadInput" time="1.126818"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/utils/apiutil" name="TestJsonRespondErrorOk" time="1.093521"></testcase>
+	</testsuite>
+	<testsuite tests="26" failures="0" time="32.912080" name="github.com/tikv/pd/pkg/schedule/placement">
+		<properties>
+			<property name="go.version" value="go1.23.1 linux/amd64"></property>
+		</properties>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/placement" name="TestRangeGap" time="1.189660"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/placement" name="TestSaveLoad" time="1.254397"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/placement" name="TestSetAfterGet" time="1.354170"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/placement" name="TestLeaderCheck" time="1.187788"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/placement" name="TestPrepareRulesForApply" time="1.276306"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/placement" name="TestFitRegion" time="1.355827"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/placement" name="TestIsolationScore" time="1.365230"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/placement" name="TestDefault" time="1.252076"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/placement" name="TestPublicStoreCaches" time="1.223702"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/placement" name="TestAdjustRule" time="1.211760"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/placement" name="TestRuleKeyClone" time="1.219411"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/placement" name="TestLabelConstraints" time="1.278692"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/placement" name="TestLabelConstraint" time="1.192173"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/placement" name="TestCacheManager" time="1.373579"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/placement" name="TestDefault2" time="1.297108"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/placement" name="TestKeys" time="1.244776"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/placement" name="TestGroupConfig" time="1.295992"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/placement" name="TestBuildRuleList" time="1.289426"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/placement" name="TestRegionRuleFitCache" time="1.250701"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/placement" name="TestPickPeersFromBinaryInt" time="1.278361"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/placement" name="TestGroupProperties" time="1.272373"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/placement" name="TestDeleteByIDPrefix" time="1.257515"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/placement" name="TestRuleVersion" time="1.275888"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/placement" name="TestTrim" time="1.198882"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/placement" name="TestCheckApplyRules" time="1.202152"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/placement" name="TestReplace" time="1.314135"></testcase>
+	</testsuite>
+	<testsuite tests="4" failures="0" time="4.189604" name="github.com/tikv/pd/pkg/errs">
+		<properties>
+			<property name="go.version" value="go1.23.1 linux/amd64"></property>
+		</properties>
+		<testcase classname="github.com/tikv/pd/pkg/errs" name="TestErrorEqual" time="1.051130"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/errs" name="TestError" time="1.064401"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/errs" name="TestZapError" time="1.046870"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/errs" name="TestErrorWithStack" time="1.027202"></testcase>
+	</testsuite>
+	<testsuite tests="1" failures="0" time="1.419863" name="github.com/tikv/pd/pkg/dashboard/adapter">
+		<properties>
+			<property name="go.version" value="go1.23.1 linux/amd64"></property>
+		</properties>
+		<testcase classname="github.com/tikv/pd/pkg/dashboard/adapter" name="TestRedirectorTestSuite" time="1.419863"></testcase>
+	</testsuite>
+	<testsuite tests="3" failures="0" time="3.102904" name="github.com/tikv/pd/pkg/utils/logutil">
+		<properties>
+			<property name="go.version" value="go1.23.1 linux/amd64"></property>
+		</properties>
+		<testcase classname="github.com/tikv/pd/pkg/utils/logutil" name="TestStringToZapLogLevel" time="1.024590"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/utils/logutil" name="TestRedactInfoLogType" time="1.035278"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/utils/logutil" name="TestRedactLog" time="1.043035"></testcase>
+	</testsuite>
+	<testsuite tests="12" failures="0" time="26.674585" name="github.com/tikv/pd/pkg/ratelimit">
+		<properties>
+			<property name="go.version" value="go1.23.1 linux/amd64"></property>
+		</properties>
+		<testcase classname="github.com/tikv/pd/pkg/ratelimit" name="TestBlockList" time="1.074915"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/ratelimit" name="TestWithTwoLimiters" time="2.108471"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/ratelimit" name="TestControllerWithConcurrencyLimiter" time="1.079331"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/ratelimit" name="TestControllerWithQPSLimiter" time="2.043936"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/ratelimit" name="TestWithQPSLimiter" time="7.121818"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/ratelimit" name="TestConcurrencyLimiter" time="1.047244"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/ratelimit" name="TestConcurrentRunner" time="3.509646"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/ratelimit" name="TestWithConcurrencyLimiter" time="1.068267"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/ratelimit" name="TestConcurrencyLimiterAcquire" time="1.100994"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/ratelimit" name="TestConcurrencyLimiter2" time="1.360588"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/ratelimit" name="TestRateLimiter" time="2.079966"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/ratelimit" name="TestControllerWithTwoLimiters" time="3.079410"></testcase>
+	</testsuite>
+	<testsuite tests="3" failures="0" time="4.736144" name="github.com/tikv/pd/pkg/syncer">
+		<properties>
+			<property name="go.version" value="go1.23.1 linux/amd64"></property>
+		</properties>
+		<testcase classname="github.com/tikv/pd/pkg/syncer" name="TestErrorCode" time="1.269874"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/syncer" name="TestLoadRegion" time="2.243147"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/syncer" name="TestBufferSize" time="1.223123"></testcase>
+	</testsuite>
+	<testsuite tests="19" failures="0" time="31.716531" name="github.com/tikv/pd/pkg/statistics">
+		<properties>
+			<property name="go.version" value="go1.23.1 linux/amd64"></property>
+		</properties>
+		<testcase classname="github.com/tikv/pd/pkg/statistics" name="TestRemoveFromCacheRandom" time="4.618697"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/statistics" name="TestRegionLabelIsolationLevel" time="1.242813"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/statistics" name="TestIsHot" time="1.257541"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/statistics" name="TestHistoryLoads" time="1.303290"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/statistics" name="TestStoreStatistics" time="1.255559"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/statistics" name="TestCache" time="1.324769"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/statistics" name="TestHotPeerCacheTopNThreshold" time="2.637024"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/statistics" name="TestFilterUnhealthyStore" time="1.228941"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/statistics" name="TestRemoveFromCache" time="1.495910"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/statistics" name="TestRemoveExpireItems" time="1.476574"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/statistics" name="TestRegionStatistics" time="1.292817"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/statistics" name="TestCoolDownTransferLeader" time="2.654625"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/statistics" name="TestRegionStatisticsWithPlacementRule" time="1.246989"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/statistics" name="TestCacheInherit" time="1.800571"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/statistics" name="TestUpdateHotPeerStat" time="1.237087"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/statistics" name="TestSummaryStoreInfos" time="1.269772"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/statistics" name="TestDifferentReportInterval" time="1.236188"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/statistics" name="TestUnstableData" time="1.281474"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/statistics" name="TestThresholdWithUpdateHotPeerStat" time="1.855889"></testcase>
+	</testsuite>
+	<testsuite tests="6" failures="0" time="7.277816" name="github.com/tikv/pd/pkg/cache">
+		<properties>
+			<property name="go.version" value="go1.23.1 linux/amd64"></property>
+		</properties>
+		<testcase classname="github.com/tikv/pd/pkg/cache" name="TestPriorityQueue" time="1.146664"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/cache" name="TestFifoCache" time="1.181794"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/cache" name="TestExpireRegionCache" time="1.274195"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/cache" name="TestTwoQueueCache" time="1.201258"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/cache" name="TestFifoFromLastSameElems" time="1.217973"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/cache" name="TestLRUCache" time="1.255931"></testcase>
+	</testsuite>
+	<testsuite tests="9" failures="0" time="9.390270" name="github.com/tikv/pd/pkg/movingaverage">
+		<properties>
+			<property name="go.version" value="go1.23.1 linux/amd64"></property>
+		</properties>
+		<testcase classname="github.com/tikv/pd/pkg/movingaverage" name="TestMovingAvg" time="1.100236"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/movingaverage" name="TestUnstableInterval" time="1.063339"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/movingaverage" name="TestMaxFilter" time="1.034492"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/movingaverage" name="TestPulse2" time="1.026173"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/movingaverage" name="TestWeightAllocator" time="1.028279"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/movingaverage" name="TestPulse" time="1.027629"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/movingaverage" name="TestMinFilled" time="1.032111"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/movingaverage" name="TestChange" time="1.055160"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/movingaverage" name="TestMedianFilter" time="1.022852"></testcase>
+	</testsuite>
+	<testsuite tests="4" failures="0" time="5.169621" name="github.com/tikv/pd/pkg/gc">
+		<properties>
+			<property name="go.version" value="go1.23.1 linux/amd64"></property>
+		</properties>
+		<testcase classname="github.com/tikv/pd/pkg/gc" name="TestGCSafePointUpdateCurrently" time="1.476165"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/gc" name="TestServiceGCSafePointUpdate" time="1.294110"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/gc" name="TestBlockUpdateSafePointV1" time="1.214773"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/gc" name="TestGCSafePointUpdateSequentially" time="1.184574"></testcase>
+	</testsuite>
+	<testsuite tests="1" failures="0" time="2.095039" name="github.com/tikv/pd/pkg/schedule/splitter">
+		<properties>
+			<property name="go.version" value="go1.23.1 linux/amd64"></property>
+		</properties>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/splitter" name="TestRegionSplitterTestSuite" time="2.095039"></testcase>
+	</testsuite>
+	<testsuite tests="3" failures="0" time="42.520581" name="github.com/tikv/pd/pkg/mcs/discovery">
+		<properties>
+			<property name="go.version" value="go1.23.1 linux/amd64"></property>
+		</properties>
+		<testcase classname="github.com/tikv/pd/pkg/mcs/discovery" name="TestServiceRegistryEntry" time="4.751713"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/mcs/discovery" name="TestRegister" time="32.338972"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/mcs/discovery" name="TestDiscover" time="5.429896"></testcase>
+	</testsuite>
+	<testsuite tests="3" failures="0" time="4.463756" name="github.com/tikv/pd/pkg/audit">
+		<properties>
+			<property name="go.version" value="go1.23.1 linux/amd64"></property>
+		</properties>
+		<testcase classname="github.com/tikv/pd/pkg/audit" name="TestPrometheusHistogramBackend" time="2.201755"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/audit" name="TestLocalLogBackendUsingFile" time="1.133351"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/audit" name="TestLabelMatcher" time="1.128650"></testcase>
+	</testsuite>
+	<testsuite tests="9" failures="0" time="10.534880" name="github.com/tikv/pd/pkg/statistics/buckets">
+		<properties>
+			<property name="go.version" value="go1.23.1 linux/amd64"></property>
+		</properties>
+		<testcase classname="github.com/tikv/pd/pkg/statistics/buckets" name="TestGetBucketsByKeyRange" time="1.128219"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/statistics/buckets" name="TestCalculateHotDegree" time="1.097519"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/statistics/buckets" name="TestCheckBucketsTask" time="1.120457"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/statistics/buckets" name="TestCollectBucketStatsTask" time="1.135585"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/statistics/buckets" name="TestConvertToBucketTreeStat" time="1.110516"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/statistics/buckets" name="TestBucketTreeItemClone" time="1.124417"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/statistics/buckets" name="TestPutItem" time="1.151357"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/statistics/buckets" name="TestInherit" time="1.120061"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/statistics/buckets" name="TestColdHot" time="1.546748"></testcase>
+	</testsuite>
+	<testsuite tests="1" failures="0" time="1.320505" name="github.com/tikv/pd/pkg/utils/configutil">
+		<properties>
+			<property name="go.version" value="go1.23.1 linux/amd64"></property>
+		</properties>
+		<testcase classname="github.com/tikv/pd/pkg/utils/configutil" name="TestPrintConfigCheckMsg" time="1.320505"></testcase>
+	</testsuite>
+	<testsuite tests="12" failures="0" time="191.907066" name="github.com/tikv/pd/pkg/utils/etcdutil">
+		<properties>
+			<property name="go.version" value="go1.23.1 linux/amd64"></property>
+		</properties>
+		<testcase classname="github.com/tikv/pd/pkg/utils/etcdutil" name="TestRandomKillEtcd" time="32.028008"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/utils/etcdutil" name="TestLoopWatcherTestSuite" time="55.732928"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/utils/etcdutil" name="TestUpdateEvictedEpsAfterRemoval" time="1.287064"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/utils/etcdutil" name="TestEtcdKVGet" time="2.291026"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/utils/etcdutil" name="TestEtcdClientSync" time="13.028444"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/utils/etcdutil" name="TestMemberHelpers" time="11.913663"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/utils/etcdutil" name="TestAddMember" time="12.894086"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/utils/etcdutil" name="TestEtcdWithHangLeaderEnableCheck" time="39.907701"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/utils/etcdutil" name="TestEtcdKVPutWithTTL" time="7.411496"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/utils/etcdutil" name="TestPickEps" time="1.181150"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/utils/etcdutil" name="TestLatencyPick" time="1.227034"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/utils/etcdutil" name="TestEtcdScaleInAndOut" time="13.004465"></testcase>
+	</testsuite>
+	<testsuite tests="3" failures="0" time="3.287703" name="github.com/tikv/pd/pkg/balancer">
+		<properties>
+			<property name="go.version" value="go1.23.1 linux/amd64"></property>
+		</properties>
+		<testcase classname="github.com/tikv/pd/pkg/balancer" name="TestRoundRobin" time="1.135824"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/balancer" name="TestBalancerPutAndDelete" time="1.086570"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/balancer" name="TestBalancerDuplicate" time="1.065309"></testcase>
+	</testsuite>
+	<testsuite tests="19" failures="0" time="23.750160" name="github.com/tikv/pd/pkg/schedule/filter">
+		<properties>
+			<property name="go.version" value="go1.23.1 linux/amd64"></property>
+		</properties>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/filter" name="TestRegionWitnessFilter" time="1.233528"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/filter" name="TestCandidates" time="1.206995"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/filter" name="TestLabelConstraintsFilter" time="1.253091"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/filter" name="TestIsolationFilter" time="1.250083"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/filter" name="TestSpecialUseFilter" time="1.232742"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/filter" name="TestRegionPendingFilter" time="1.235551"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/filter" name="TestPlacementGuard" time="1.185256"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/filter" name="TestIsRegionHealthy" time="1.270166"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/filter" name="TestDistinctScoreFilter" time="1.277865"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/filter" name="TestStoreStateFilterReason" time="1.245604"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/filter" name="TestRuleFitFilter" time="1.259203"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/filter" name="TestCounter" time="1.214149"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/filter" name="TestRegionDownFilter" time="1.293165"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/filter" name="TestString" time="1.265800"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/filter" name="TestRuleFitFilterWithPlacementRule" time="1.241116"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/filter" name="TestStoreStateFilter" time="1.243184"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/filter" name="TestRegionEmptyFilter" time="1.336937"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/filter" name="TestRegionReplicatedFilter" time="1.296355"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/filter" name="TestSendStateFilter" time="1.209370"></testcase>
+	</testsuite>
+	<testsuite tests="4" failures="0" time="46.653081" name="github.com/tikv/pd/server">
+		<properties>
+			<property name="go.version" value="go1.23.1 linux/amd64"></property>
+		</properties>
+		<testcase classname="github.com/tikv/pd/server" name="TestAPIService" time="5.245682"></testcase>
+		<testcase classname="github.com/tikv/pd/server" name="TestCheckClusterID" time="11.785861"></testcase>
+		<testcase classname="github.com/tikv/pd/server" name="TestLeaderServerTestSuite" time="28.254388"></testcase>
+		<testcase classname="github.com/tikv/pd/server" name="TestIsPathInDirectory" time="1.367150"></testcase>
+	</testsuite>
+	<testsuite tests="1" failures="0" time="1.032249" name="github.com/tikv/pd/pkg/utils/assertutil">
+		<properties>
+			<property name="go.version" value="go1.23.1 linux/amd64"></property>
+		</properties>
+		<testcase classname="github.com/tikv/pd/pkg/utils/assertutil" name="TestNilFail" time="1.032249"></testcase>
+	</testsuite>
+	<testsuite tests="18" failures="0" time="27.749575" name="github.com/tikv/pd/pkg/schedule/operator">
+		<properties>
+			<property name="go.version" value="go1.23.1 linux/amd64"></property>
+		</properties>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/operator" name="TestConcurrentAddOperatorAndSetStoreLimit" time="1.609481"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/operator" name="TestCreateLeaveJointStateOperatorWithoutFitRules" time="1.299229"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/operator" name="TestCreateOperatorTestSuite" time="1.278649"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/operator" name="TestOperatorBuilderTestSuite" time="1.409931"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/operator" name="TestCreate" time="1.198113"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/operator" name="TestRandBuckets" time="1.265894"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/operator" name="TestOperatorCheckConcurrently" time="1.293671"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/operator" name="TestIsEndStatus" time="1.205316"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/operator" name="TestRandomBucketsWithMergeRegion" time="1.337223"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/operator" name="TestOperatorStepTestSuite" time="1.406837"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/operator" name="TestNonEndTrans" time="1.237003"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/operator" name="TestCheckStepTimeout" time="1.331054"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/operator" name="TestOperatorControllerTestSuite" time="4.451885"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/operator" name="TestCheckExpired" time="1.294119"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/operator" name="TestOperatorTestSuite" time="2.341359"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/operator" name="TestAdditionalInfoConcurrent" time="1.279745"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/operator" name="TestEndStatusTrans" time="1.265214"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/operator" name="TestListOperator" time="1.244853"></testcase>
+	</testsuite>
+	<testsuite tests="10" failures="0" time="13.435801" name="github.com/tikv/pd/pkg/schedule/labeler">
+		<properties>
+			<property name="go.version" value="go1.23.1 linux/amd64"></property>
+		</properties>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/labeler" name="TestAdjustRule" time="1.228181"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/labeler" name="TestKeyRange" time="1.218228"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/labeler" name="TestGetSetRule" time="1.275713"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/labeler" name="TestTxnWithEtcd" time="2.388508"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/labeler" name="TestGC" time="1.160697"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/labeler" name="TestIndex" time="1.186123"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/labeler" name="TestSaveLoadRule" time="1.204350"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/labeler" name="TestAdjustRule2" time="1.202146"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/labeler" name="TestRegionLabelTTL" time="1.181281"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/labeler" name="TestLabelerRuleTTL" time="1.390576"></testcase>
+	</testsuite>
+	<testsuite tests="3" failures="0" time="4.587369" name="github.com/tikv/pd/pkg/storage/kv">
+		<properties>
+			<property name="go.version" value="go1.23.1 linux/amd64"></property>
+		</properties>
+		<testcase classname="github.com/tikv/pd/pkg/storage/kv" name="TestMemKV" time="1.195086"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/storage/kv" name="TestEtcd" time="2.186025"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/storage/kv" name="TestLevelDB" time="1.206258"></testcase>
+	</testsuite>
+	<testsuite tests="2" failures="0" time="2.194763" name="github.com/tikv/pd/pkg/utils/requestutil">
+		<properties>
+			<property name="go.version" value="go1.23.1 linux/amd64"></property>
+		</properties>
+		<testcase classname="github.com/tikv/pd/pkg/utils/requestutil" name="TestEndTime" time="1.067621"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/utils/requestutil" name="TestRequestInfo" time="1.127142"></testcase>
+	</testsuite>
+	<testsuite tests="1" failures="0" time="4.125325" name="github.com/tikv/pd/pkg/id">
+		<properties>
+			<property name="go.version" value="go1.23.1 linux/amd64"></property>
+		</properties>
+		<testcase classname="github.com/tikv/pd/pkg/id" name="TestMultipleAllocator" time="4.125325"></testcase>
+	</testsuite>
+	<testsuite tests="6" failures="0" time="10.967629" name="github.com/tikv/pd/pkg/keyspace">
+		<properties>
+			<property name="go.version" value="go1.23.1 linux/amd64"></property>
+		</properties>
+		<testcase classname="github.com/tikv/pd/pkg/keyspace" name="TestValidateID" time="1.203727"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/keyspace" name="TestKeyspaceTestSuite" time="4.481590"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/keyspace" name="TestBuildSplitKeyspaces" time="1.233140"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/keyspace" name="TestValidateName" time="1.293618"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/keyspace" name="TestMakeLabelRule" time="1.225031"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/keyspace" name="TestKeyspaceGroupTestSuite" time="1.530523"></testcase>
+	</testsuite>
+	<testsuite tests="2" failures="0" time="10.589078" name="github.com/tikv/pd/pkg/utils/syncutil">
+		<properties>
+			<property name="go.version" value="go1.23.1 linux/amd64"></property>
+		</properties>
+		<testcase classname="github.com/tikv/pd/pkg/utils/syncutil" name="TestLockGroup" time="1.213112"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/utils/syncutil" name="TestLockGroupWithRemoveEntryOnUnlock" time="9.375966"></testcase>
+	</testsuite>
+	<testsuite tests="7" failures="0" time="8.784350" name="github.com/tikv/pd/pkg/mcs/resourcemanager/server">
+		<properties>
+			<property name="go.version" value="go1.23.1 linux/amd64"></property>
+		</properties>
+		<testcase classname="github.com/tikv/pd/pkg/mcs/resourcemanager/server" name="TestGroupTokenBucketRequestLoop" time="1.276597"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/mcs/resourcemanager/server" name="TestGroupTokenBucketUpdateAndPatch" time="1.321668"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/mcs/resourcemanager/server" name="TestPatchResourceGroup" time="1.228734"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/mcs/resourcemanager/server" name="TestClone" time="1.282103"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/mcs/resourcemanager/server" name="TestControllerConfig" time="1.299556"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/mcs/resourcemanager/server" name="TestMaxPerSecCostTracker" time="1.172777"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/mcs/resourcemanager/server" name="TestGroupTokenBucketRequest" time="1.202914"></testcase>
+	</testsuite>
+	<testsuite tests="6" failures="0" time="95.802386" name="github.com/tikv/pd/pkg/election">
+		<properties>
+			<property name="go.version" value="go1.23.1 linux/amd64"></property>
+		</properties>
+		<testcase classname="github.com/tikv/pd/pkg/election" name="TestLeadership" time="7.905016"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/election" name="TestRequestProgress" time="16.003913"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/election" name="TestLeaseKeepAlive" time="5.688037"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/election" name="TestCampaignTimes" time="3.402459"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/election" name="TestLease" time="10.716958"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/election" name="TestExitWatch" time="52.086005"></testcase>
+	</testsuite>
+	<testsuite tests="2" failures="0" time="2.555579" name="github.com/tikv/pd/pkg/response">
+		<properties>
+			<property name="go.version" value="go1.23.1 linux/amd64"></property>
+		</properties>
+		<testcase classname="github.com/tikv/pd/pkg/response" name="TestPeerStats" time="1.327756"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/response" name="TestPeer" time="1.227823"></testcase>
+	</testsuite>
+	<testsuite tests="14" failures="0" time="103.787436" name="github.com/tikv/pd/pkg/schedule/scatter">
+		<properties>
+			<property name="go.version" value="go1.23.1 linux/amd64"></property>
+		</properties>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/scatter" name="TestBalanceLeader" time="2.221052"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/scatter" name="TestSomeStoresFilteredScatterGroupInConcurrency" time="30.634885"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/scatter" name="TestBalanceRegion" time="2.587354"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/scatter" name="TestScatterCheck" time="1.295045"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/scatter" name="TestScatterForManyRegion" time="32.700256"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/scatter" name="TestStoreLimit" time="1.392830"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/scatter" name="TestScattersGroup" time="4.491391"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/scatter" name="TestRemoveStoreLimit" time="1.308859"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/scatter" name="TestScatterGroupInConcurrency" time="3.640007"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/scatter" name="TestRegionHasLearner" time="1.629587"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/scatter" name="TestSelectedStoresTooManyPeers" time="1.531593"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/scatter" name="TestScatterRegions" time="14.669819"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/scatter" name="TestSelectedStoresTooFewPeers" time="1.439835"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/scatter" name="TestSelectedStoreGC" time="4.244923"></testcase>
+	</testsuite>
+	<testsuite tests="23" failures="0" time="31.707445" name="github.com/tikv/pd/pkg/unsaferecovery">
+		<properties>
+			<property name="go.version" value="go1.23.1 linux/amd64"></property>
+		</properties>
+		<testcase classname="github.com/tikv/pd/pkg/unsaferecovery" name="TestExecutionTimeout" time="2.244684"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/unsaferecovery" name="TestAutoDetectMode" time="1.288034"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/unsaferecovery" name="TestRunning" time="1.197187"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/unsaferecovery" name="TestUninitializedPeer" time="1.335041"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/unsaferecovery" name="TestForceLeaderForCommitMerge" time="1.357296"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/unsaferecovery" name="TestJointState" time="1.330064"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/unsaferecovery" name="TestFinished" time="1.295102"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/unsaferecovery" name="TestOnHealthyRegions" time="1.231822"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/unsaferecovery" name="TestNoHeartbeatTimeout" time="2.306806"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/unsaferecovery" name="TestFailed" time="1.271282"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/unsaferecovery" name="TestEpochComparison" time="1.326694"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/unsaferecovery" name="TestAutoDetectWithOneLearner" time="1.250714"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/unsaferecovery" name="TestOneLearner" time="1.368894"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/unsaferecovery" name="TestAffectedTableID" time="1.222379"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/unsaferecovery" name="TestForceLeaderFail" time="1.298723"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/unsaferecovery" name="TestStep" time="1.296175"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/unsaferecovery" name="TestRangeOverlap1" time="1.257514"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/unsaferecovery" name="TestExitForceLeader" time="1.262312"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/unsaferecovery" name="TestSelectLeader" time="1.331055"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/unsaferecovery" name="TestRemoveFailedStores" time="1.291071"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/unsaferecovery" name="TestCreateEmptyRegion" time="1.328818"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/unsaferecovery" name="TestTiflashLearnerPeer" time="1.333068"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/unsaferecovery" name="TestRangeOverlap2" time="1.282709"></testcase>
+	</testsuite>
+	<testsuite tests="11" failures="0" time="14.214663" name="github.com/tikv/pd/pkg/autoscaling">
+		<properties>
+			<property name="go.version" value="go1.23.1 linux/amd64"></property>
+		</properties>
+		<testcase classname="github.com/tikv/pd/pkg/autoscaling" name="TestRetrieveCPUMetrics" time="1.346870"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/autoscaling" name="TestGetScaledTiKVGroups" time="1.253127"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/autoscaling" name="TestErrorHTTPStatus" time="1.272228"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/autoscaling" name="TestGetInstanceNameFromAddress" time="1.298162"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/autoscaling" name="TestGetDurationExpression" time="1.268945"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/autoscaling" name="TestErrorPrometheusStatus" time="1.321410"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/autoscaling" name="TestGetTotalCPUUseTime" time="1.285548"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/autoscaling" name="TestStrategyChangeCount" time="1.292864"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/autoscaling" name="TestEmptyResponse" time="1.263281"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/autoscaling" name="TestGetTotalCPUQuota" time="1.322388"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/autoscaling" name="TestScaleOutGroupLabel" time="1.289840"></testcase>
+	</testsuite>
+	<testsuite tests="4" failures="0" time="4.193859" name="github.com/tikv/pd/pkg/slice">
+		<properties>
+			<property name="go.version" value="go1.23.1 linux/amd64"></property>
+		</properties>
+		<testcase classname="github.com/tikv/pd/pkg/slice" name="TestSliceRemoveGenericTypes" time="1.035912"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/slice" name="TestSliceContains" time="1.064101"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/slice" name="TestSliceRemove" time="1.060220"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/slice" name="TestSlice" time="1.033626"></testcase>
+	</testsuite>
+	<testsuite tests="2" failures="0" time="2.069040" name="github.com/tikv/pd/pkg/utils/metricutil">
+		<properties>
+			<property name="go.version" value="go1.23.1 linux/amd64"></property>
+		</properties>
+		<testcase classname="github.com/tikv/pd/pkg/utils/metricutil" name="TestCoverage" time="1.036037"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/utils/metricutil" name="TestCamelCaseToSnakeCase" time="1.033003"></testcase>
+	</testsuite>
+	<testsuite tests="88" failures="0" time="221.820359" name="github.com/tikv/pd/pkg/schedule/schedulers">
+		<properties>
+			<property name="go.version" value="go1.23.1 linux/amd64"></property>
+		</properties>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/schedulers" name="TestSchedulerConfig" time="1.338357"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/schedulers" name="TestHotReadRegionScheduleWithKeyRate" time="3.917317"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/schedulers" name="TestScatterRangeBalance" time="9.263450"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/schedulers" name="TestSplitBucketsByLoad" time="1.246326"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/schedulers" name="TestBalanceRegionSchedule2" time="1.228173"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/schedulers" name="TestRemoveRejectLeader" time="1.302129"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/schedulers" name="TestBatchEvict" time="4.533353"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/schedulers" name="TestHotReadRegionScheduleWithSmallHotRegion" time="3.132691"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/schedulers" name="TestRejectLeader" time="1.382723"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/schedulers" name="TestEvictSlowStoreTestSuite" time="1.350436"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/schedulers" name="TestHotWriteRegionScheduleWithRuleEnabled" time="2.885243"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/schedulers" name="TestSplitIfRegionTooHot" time="1.307604"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/schedulers" name="TestTolerantRatio" time="1.210673"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/schedulers" name="TestBalanceRegionEmptyRegion" time="1.393049"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/schedulers" name="TestDefaultSchedulerConfig" time="1.259571"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/schedulers" name="TestMaxZombieDuration" time="1.273456"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/schedulers" name="TestCompatibilityConfig" time="1.286634"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/schedulers" name="TestDisabled" time="1.251409"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/schedulers" name="TestHotScheduleWithPriority" time="1.439241"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/schedulers" name="TestShuffleLeader" time="1.236157"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/schedulers" name="TestEvictSlowTrendTestSuite" time="1.400793"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/schedulers" name="TestInfluenceByRWType" time="1.412970"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/schedulers" name="TestBalanceLeaderSchedulerTestSuite" time="2.081680"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/schedulers" name="TestSplitBucket" time="1.263852"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/schedulers" name="TestHotWriteRegionScheduleWithRevertRegionsDimFirstOnly" time="1.362956"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/schedulers" name="TestHotCacheKeyThresholds" time="26.483037"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/schedulers" name="TestBucketFirstStat" time="1.260826"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/schedulers" name="TestHotWriteRegionScheduleWithRevertRegionsDimSecond" time="1.386362"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/schedulers" name="TestHotReadRegionScheduleWithRevertRegionsDimSecond" time="1.365927"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/schedulers" name="TestRetryQuota" time="1.357654"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/schedulers" name="TestCompatibility" time="1.394382"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/schedulers" name="TestEvictLeader" time="1.276877"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/schedulers" name="TestHotReadWithEvictLeaderScheduler" time="1.253678"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/schedulers" name="TestShouldBalance" time="1.371300"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/schedulers" name="TestBalanceLeaderWithConflictRule" time="1.260940"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/schedulers" name="TestHotWriteRegionScheduleCheckHot" time="1.339122"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/schedulers" name="TestRandomMergeSchedule" time="1.312126"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/schedulers" name="TestHotReadRegionScheduleByteRateOnly" time="1.584689"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/schedulers" name="TestHotScheduleWithStddev" time="1.345923"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/schedulers" name="TestHotWriteRegionScheduleWithLeader" time="4.677098"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/schedulers" name="TestBalanceRegionShouldNotBalance" time="1.354810"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/schedulers" name="TestHotWriteRegionScheduleWithKeyRate" time="4.192199"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/schedulers" name="TestSkipUniformStore" time="1.345014"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/schedulers" name="TestConfigValidation" time="1.258588"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/schedulers" name="TestBalanceRegionReplicas5" time="1.350007"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/schedulers" name="TestHotWriteRegionScheduleByteRateOnly" time="3.189410"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/schedulers" name="TestEvictLeaderWithUnhealthyPeer" time="1.313635"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/schedulers" name="TestHotWriteRegionScheduleWithPendingInfluence" time="31.660969"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/schedulers" name="TestHotReadRegionScheduleWithQuery" time="2.169163"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/schedulers" name="TestBalanceLeaderSchedulerConfigClone" time="1.256410"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/schedulers" name="TestTransferWitnessLeader" time="1.229155"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/schedulers" name="TestShuffleHotRegionScheduleBalance" time="1.488254"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/schedulers" name="TestBalanceRegionStoreWeight" time="1.224458"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/schedulers" name="TestSpecialUseHotRegion" time="2.295696"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/schedulers" name="TestShuffleRegion" time="1.234819"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/schedulers" name="TestBalanceRegionSchedule1" time="1.294204"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/schedulers" name="TestHotWriteRegionScheduleByteRateOnlyWithTiFlash" time="2.390164"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/schedulers" name="TestSplitBucketsBySize" time="1.308246"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/schedulers" name="TestHotRegionScheduleAbnormalReplica" time="1.356216"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/schedulers" name="TestHotCacheCheckRegionFlow" time="1.299176"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/schedulers" name="TestHotReadRegionScheduleWithPendingInfluence" time="10.963361"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/schedulers" name="TestInfluenceAmp" time="1.182730"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/schedulers" name="TestHotCacheUpdateCache" time="1.341068"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/schedulers" name="TestBalanceLeaderRangeSchedulerTestSuite" time="1.544319"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/schedulers" name="TestHotCacheCheckRegionFlowWithDifferentThreshold" time="1.575688"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/schedulers" name="TestBalanceRegionOpInfluence" time="1.354386"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/schedulers" name="TestUpgrade" time="1.373995"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/schedulers" name="TestEncodeConfig" time="1.308902"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/schedulers" name="TestTransferWitnessLeaderWithUnhealthyPeer" time="1.314789"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/schedulers" name="TestExpect" time="1.155508"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/schedulers" name="TestBalanceWitnessSchedulerTestSuite" time="1.590942"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/schedulers" name="TestHotCacheSortHotPeer" time="1.301075"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/schedulers" name="TestIsDefault" time="1.248069"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/schedulers" name="TestConcurrencyUpdateConfig" time="1.863568"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/schedulers" name="TestSpecialUseReserved" time="1.240725"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/schedulers" name="TestBalanceWhenRegionNotHeartbeat" time="2.660103"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/schedulers" name="TestHotReadPeerSchedule" time="1.365431"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/schedulers" name="TestBalanceRegionReplicas3" time="1.364784"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/schedulers" name="TestHotCacheByteAndKey" time="5.444127"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/schedulers" name="TestBalanceLeaderLimit" time="5.912298"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/schedulers" name="TestGCPendingOpInfos" time="1.266006"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/schedulers" name="TestShuffleRegionRole" time="1.315508"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/schedulers" name="TestHotWriteRegionScheduleUnhealthyStore" time="1.380920"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/schedulers" name="TestHotWriteLeaderScheduleWithPriority" time="1.264022"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/schedulers" name="TestHotWriteRegionScheduleWithQuery" time="1.921805"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/schedulers" name="TestBalanceRegionReplacePendingRegion" time="1.359043"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/schedulers" name="TestHotWriteRegionScheduleWithRevertRegionsDimFirst" time="1.281949"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/schedulers" name="TestConfigClone" time="1.284459"></testcase>
+	</testsuite>
+	<testsuite tests="1" failures="0" time="1.931123" name="github.com/tikv/pd/pkg/storage/endpoint">
+		<properties>
+			<property name="go.version" value="go1.23.1 linux/amd64"></property>
+		</properties>
+		<testcase classname="github.com/tikv/pd/pkg/storage/endpoint" name="TestInitClusterID" time="1.931123"></testcase>
+	</testsuite>
+	<testsuite tests="2" failures="0" time="2.080085" name="github.com/tikv/pd/pkg/codec">
+		<properties>
+			<property name="go.version" value="go1.23.1 linux/amd64"></property>
+		</properties>
+		<testcase classname="github.com/tikv/pd/pkg/codec" name="TestDecodeBytes" time="1.049885"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/codec" name="TestTableID" time="1.030200"></testcase>
+	</testsuite>
+	<testsuite tests="3" failures="0" time="3.118125" name="github.com/tikv/pd/pkg/utils/keyutil">
+		<properties>
+			<property name="go.version" value="go1.23.1 linux/amd64"></property>
+		</properties>
+		<testcase classname="github.com/tikv/pd/pkg/utils/keyutil" name="TestBetween" time="1.030011"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/utils/keyutil" name="TestLess" time="1.046002"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/utils/keyutil" name="TestKeyUtil" time="1.042112"></testcase>
+	</testsuite>
+	<testsuite tests="3" failures="0" time="5.241356" name="github.com/tikv/pd/pkg/progress">
+		<properties>
+			<property name="go.version" value="go1.23.1 linux/amd64"></property>
+		</properties>
+		<testcase classname="github.com/tikv/pd/pkg/progress" name="TestProgress" time="2.071472"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/progress" name="TestAbnormal" time="1.051229"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/progress" name="TestProgressWithDynamicWindow" time="2.118655"></testcase>
+	</testsuite>
+	<testsuite tests="1" failures="0" time="35.072709" name="github.com/tikv/pd/pkg/mcs/scheduling/server/rule">
+		<properties>
+			<property name="go.version" value="go1.23.1 linux/amd64"></property>
+		</properties>
+		<testcase classname="github.com/tikv/pd/pkg/mcs/scheduling/server/rule" name="TestLoadLargeRules" time="35.072709"></testcase>
+	</testsuite>
+	<testsuite tests="19" failures="0" time="19.659003" name="github.com/tikv/pd/pkg/utils/typeutil">
+		<properties>
+			<property name="go.version" value="go1.23.1 linux/amd64"></property>
+		</properties>
+		<testcase classname="github.com/tikv/pd/pkg/utils/typeutil" name="TestParseTimestamp" time="1.020040"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/utils/typeutil" name="TestSubTimeByWallClock" time="1.029045"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/utils/typeutil" name="TestCompareURLsWithoutScheme" time="1.028823"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/utils/typeutil" name="TestSmallTimeDifference" time="1.035472"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/utils/typeutil" name="TestDeepClone" time="1.042428"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/utils/typeutil" name="TestDurationJSON" time="1.026656"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/utils/typeutil" name="TestEqualFloat" time="1.019932"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/utils/typeutil" name="TestBytesToUint64" time="1.081653"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/utils/typeutil" name="TestParseMbFromText" time="1.038933"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/utils/typeutil" name="TestEmpty" time="1.023380"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/utils/typeutil" name="TestDurationTOML" time="1.030764"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/utils/typeutil" name="TestMinDuration" time="1.025642"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/utils/typeutil" name="TestStringSliceJSON" time="1.033247"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/utils/typeutil" name="TestSizeJSON" time="1.029845"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/utils/typeutil" name="TestJSONToUint64Slice" time="1.030962"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/utils/typeutil" name="TestMaxUint64" time="1.045943"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/utils/typeutil" name="TestMinUint64" time="1.020549"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/utils/typeutil" name="TestUint64ToBytes" time="1.055022"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/utils/typeutil" name="TestAreStringSlicesEquivalent" time="1.040667"></testcase>
+	</testsuite>
+	<testsuite tests="1" failures="0" time="1.765976" name="github.com/tikv/pd/pkg/utils/grpcutil">
+		<properties>
+			<property name="go.version" value="go1.23.1 linux/amd64"></property>
+		</properties>
+		<testcase classname="github.com/tikv/pd/pkg/utils/grpcutil" name="TestToTLSConfig" time="1.765976"></testcase>
+	</testsuite>
+	<testsuite tests="29" failures="0" time="182.577077" name="github.com/tikv/pd/server/api">
+		<properties>
+			<property name="go.version" value="go1.23.1 linux/amd64"></property>
+		</properties>
+		<testcase classname="github.com/tikv/pd/server/api" name="TestGetVersion" time="1.227671"></testcase>
+		<testcase classname="github.com/tikv/pd/server/api" name="TestRegionTestSuite" time="5.187004"></testcase>
+		<testcase classname="github.com/tikv/pd/server/api" name="TestAuditMiddlewareTestSuite" time="5.283264"></testcase>
+		<testcase classname="github.com/tikv/pd/server/api" name="TestHotStatusTestSuite" time="3.657420"></testcase>
+		<testcase classname="github.com/tikv/pd/server/api" name="TestDiagnosticTestSuite" time="5.822340"></testcase>
+		<testcase classname="github.com/tikv/pd/server/api" name="TestRegionLabelTestSuite" time="4.039744"></testcase>
+		<testcase classname="github.com/tikv/pd/server/api" name="TestStrictlyLabelsStoreTestSuite" time="3.680962"></testcase>
+		<testcase classname="github.com/tikv/pd/server/api" name="TestGRPCGateway" time="4.444682"></testcase>
+		<testcase classname="github.com/tikv/pd/server/api" name="TestTrend" time="4.732742"></testcase>
+		<testcase classname="github.com/tikv/pd/server/api" name="TestHealthSlice" time="18.767567"></testcase>
+		<testcase classname="github.com/tikv/pd/server/api" name="TestAdminTestSuite" time="18.659884"></testcase>
+		<testcase classname="github.com/tikv/pd/server/api" name="TestGetRegionTestSuite" time="3.918682"></testcase>
+		<testcase classname="github.com/tikv/pd/server/api" name="TestRateLimitConfigTestSuite" time="5.164211"></testcase>
+		<testcase classname="github.com/tikv/pd/server/api" name="TestMemberTestSuite" time="16.920168"></testcase>
+		<testcase classname="github.com/tikv/pd/server/api" name="TestGetRegionRangeHolesTestSuite" time="4.276415"></testcase>
+		<testcase classname="github.com/tikv/pd/server/api" name="TestUnsafeOperationTestSuite" time="7.711051"></testcase>
+		<testcase classname="github.com/tikv/pd/server/api" name="TestTSOTestSuite" time="5.736458"></testcase>
+		<testcase classname="github.com/tikv/pd/server/api" name="TestRegionsWithKillRequest" time="10.557340"></testcase>
+		<testcase classname="github.com/tikv/pd/server/api" name="TestStatus" time="3.064525"></testcase>
+		<testcase classname="github.com/tikv/pd/server/api" name="TestLabelsStoreTestSuite" time="3.555932"></testcase>
+		<testcase classname="github.com/tikv/pd/server/api" name="TestProfTestSuite" time="7.778306"></testcase>
+		<testcase classname="github.com/tikv/pd/server/api" name="TestLogTestSuite" time="3.277338"></testcase>
+		<testcase classname="github.com/tikv/pd/server/api" name="TestClusterTestSuite" time="5.145170"></testcase>
+		<testcase classname="github.com/tikv/pd/server/api" name="TestMinResolvedTSTestSuite" time="5.418132"></testcase>
+		<testcase classname="github.com/tikv/pd/server/api" name="TestStatsTestSuite" time="3.679272"></testcase>
+		<testcase classname="github.com/tikv/pd/server/api" name="TestRegionsInfoMarshal" time="1.175188"></testcase>
+		<testcase classname="github.com/tikv/pd/server/api" name="TestServiceGCSafepointTestSuite" time="4.204588"></testcase>
+		<testcase classname="github.com/tikv/pd/server/api" name="TestStoreTestSuite" time="12.925947"></testcase>
+		<testcase classname="github.com/tikv/pd/server/api" name="TestServiceTestSuite" time="2.565073"></testcase>
+	</testsuite>
+	<testsuite tests="1" failures="0" time="3.056475" name="github.com/tikv/pd/pkg/timerpool">
+		<properties>
+			<property name="go.version" value="go1.23.1 linux/amd64"></property>
+		</properties>
+		<testcase classname="github.com/tikv/pd/pkg/timerpool" name="TestTimerPool" time="3.056475"></testcase>
+	</testsuite>
+	<testsuite tests="2" failures="0" time="2.411737" name="github.com/tikv/pd/pkg/mcs/tso/server">
+		<properties>
+			<property name="go.version" value="go1.23.1 linux/amd64"></property>
+		</properties>
+		<testcase classname="github.com/tikv/pd/pkg/mcs/tso/server" name="TestLoadFromConfig" time="1.207556"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/mcs/tso/server" name="TestConfigBasic" time="1.204181"></testcase>
+	</testsuite>
+	<testsuite tests="2" failures="0" time="2.118414" name="github.com/tikv/pd/pkg/core/rangetree">
+		<properties>
+			<property name="go.version" value="go1.23.1 linux/amd64"></property>
+		</properties>
+		<testcase classname="github.com/tikv/pd/pkg/core/rangetree" name="TestDebris" time="1.081481"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/core/rangetree" name="TestRingPutItem" time="1.036933"></testcase>
+	</testsuite>
+	<testsuite tests="1" failures="0" time="1.154209" name="github.com/tikv/pd/pkg/schedule/plan">
+		<properties>
+			<property name="go.version" value="go1.23.1 linux/amd64"></property>
+		</properties>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/plan" name="TestBalanceSchedulerPlanAnalyzerTestSuite" time="1.154209"></testcase>
+	</testsuite>
+	<testsuite tests="26" failures="0" time="37.554593" name="github.com/tikv/pd/pkg/storage">
+		<properties>
+			<property name="go.version" value="go1.23.1 linux/amd64"></property>
+		</properties>
+		<testcase classname="github.com/tikv/pd/pkg/storage" name="TestLoadRegionsExceedRangeLimit" time="1.606402"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/storage" name="TestSaveLoadServiceSafePoint" time="1.218680"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/storage" name="TestLevelDBBackend" time="2.223080"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/storage" name="TestSaveServiceGCSafePoint" time="1.229597"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/storage" name="TestTimestampTxn" time="2.333669"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/storage" name="TestLoadRangeKeyspaces" time="1.218102"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/storage" name="TestSaveLoadTimestamp" time="2.194797"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/storage" name="TestLoadMinServiceGCSafePoint" time="1.237635"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/storage" name="TestEncodeSpaceID" time="1.232563"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/storage" name="TestLoadGCSafePoint" time="1.251183"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/storage" name="TestLoadRegionsToCache" time="1.225928"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/storage" name="TestTrySwitchRegionStorage" time="1.307008"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/storage" name="TestHotRegionWrite" time="1.395946"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/storage" name="TestTryGetLocalRegionStorage" time="1.272374"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/storage" name="TestLoadEmpty" time="1.217786"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/storage" name="TestLoadRegions" time="1.249826"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/storage" name="TestRemoveServiceSafePoint" time="1.318388"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/storage" name="TestRegionStorage" time="1.224601"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/storage" name="TestGlobalLocalTimestamp" time="2.619110"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/storage" name="TestStoreWeight" time="1.236066"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/storage" name="TestBasic" time="1.381486"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/storage" name="TestLoadMinServiceSafePoint" time="1.329784"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/storage" name="TestSaveLoadKeyspace" time="1.236888"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/storage" name="TestSaveLoadGCSafePoint" time="1.201516"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/storage" name="TestLoadStores" time="1.233596"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/storage" name="TestHotRegionDelete" time="1.358582"></testcase>
+	</testsuite>
+	<testsuite tests="2" failures="0" time="2.112597" name="github.com/tikv/pd/pkg/schedule/rangelist">
+		<properties>
+			<property name="go.version" value="go1.23.1 linux/amd64"></property>
+		</properties>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/rangelist" name="TestRangeList2" time="1.064532"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/rangelist" name="TestRangeList" time="1.048065"></testcase>
+	</testsuite>
+	<testsuite tests="33" failures="0" time="58.187873" name="github.com/tikv/pd/pkg/core">
+		<properties>
+			<property name="go.version" value="go1.23.1 linux/amd64"></property>
+		</properties>
+		<testcase classname="github.com/tikv/pd/pkg/core" name="TestRegionMap" time="1.179643"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/core" name="TestUpdateRegionEventualConsistency" time="1.232256"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/core" name="TestRegionTreeStat" time="1.237342"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/core" name="TestNeedMerge" time="1.366832"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/core" name="TestStoreStats" time="1.199962"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/core" name="TestSetRegionConcurrence" time="2.336663"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/core" name="TestInherit" time="1.261528"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/core" name="TestSortedEqual" time="1.226837"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/core" name="TestCloneMetaStore" time="1.341079"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/core" name="TestSetRegion" time="1.169067"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/core" name="TestShouldRemoveFromSubTree" time="1.230501"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/core" name="TestRandomRegionDiscontinuous" time="1.166765"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/core" name="TestCntRefAfterResetRegionCache" time="1.251204"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/core" name="TestLowSpaceScoreV2" time="1.224737"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/core" name="TestCloneStore" time="2.244540"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/core" name="TestScanRegion" time="1.253485"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/core" name="TestRegionScore" time="1.316274"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/core" name="TestMergeKeyRanges" time="1.285412"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/core" name="TestGetRegionSizeByRange" time="15.724913"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/core" name="TestRegionWriteRate" time="1.238184"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/core" name="TestDistinctScore" time="1.217063"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/core" name="TestCheckAndPutSubTree" time="1.177776"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/core" name="TestRegionInfo" time="1.301335"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/core" name="TestRegionTreeMerge" time="1.344341"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/core" name="TestLowSpaceRatio" time="1.199629"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/core" name="TestRandomRegion" time="1.295330"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/core" name="TestRegionItem" time="1.247595"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/core" name="TestRegionTree" time="1.218318"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/core" name="TestRegionRoundingFlow" time="1.285336"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/core" name="TestRegionKey" time="1.205800"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/core" name="TestUpdateRegionEquivalence" time="1.662272"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/core" name="TestRegionTreeSplitAndMerge" time="1.280065"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/core" name="TestNeedSync" time="1.265789"></testcase>
+	</testsuite>
+	<testsuite tests="74" failures="0" time="151.008887" name="github.com/tikv/pd/server/cluster">
+		<properties>
+			<property name="go.version" value="go1.23.1 linux/amd64"></property>
+		</properties>
+		<testcase classname="github.com/tikv/pd/server/cluster" name="TestCalculateStoreSize2" time="1.382887"></testcase>
+		<testcase classname="github.com/tikv/pd/server/cluster" name="Test" time="1.447799"></testcase>
+		<testcase classname="github.com/tikv/pd/server/cluster" name="TestStoreConfigUpdate" time="1.310909"></testcase>
+		<testcase classname="github.com/tikv/pd/server/cluster" name="TestRegionSizeChanged" time="1.238782"></testcase>
+		<testcase classname="github.com/tikv/pd/server/cluster" name="TestUpdateStorePendingPeerCount" time="1.390353"></testcase>
+		<testcase classname="github.com/tikv/pd/server/cluster" name="TestCheckStaleRegion" time="1.218288"></testcase>
+		<testcase classname="github.com/tikv/pd/server/cluster" name="TestCalculateStoreSize1" time="1.297175"></testcase>
+		<testcase classname="github.com/tikv/pd/server/cluster" name="TestTopologyWeight1" time="1.252976"></testcase>
+		<testcase classname="github.com/tikv/pd/server/cluster" name="TestCheckerIsBusy" time="1.374611"></testcase>
+		<testcase classname="github.com/tikv/pd/server/cluster" name="TestStatEntriesCPUStale" time="1.262758"></testcase>
+		<testcase classname="github.com/tikv/pd/server/cluster" name="TestAwakenStore" time="1.336165"></testcase>
+		<testcase classname="github.com/tikv/pd/server/cluster" name="TestConcurrentRegionHeartbeat" time="1.357524"></testcase>
+		<testcase classname="github.com/tikv/pd/server/cluster" name="TestReportSplit" time="1.241546"></testcase>
+		<testcase classname="github.com/tikv/pd/server/cluster" name="TestBucketHeartbeat" time="1.268550"></testcase>
+		<testcase classname="github.com/tikv/pd/server/cluster" name="TestFilterUnhealthyStore" time="1.298028"></testcase>
+		<testcase classname="github.com/tikv/pd/server/cluster" name="TestStoreOverloaded" time="5.137390"></testcase>
+		<testcase classname="github.com/tikv/pd/server/cluster" name="TestStoreOverloadedWithReplace" time="2.262728"></testcase>
+		<testcase classname="github.com/tikv/pd/server/cluster" name="TestReportBatchSplit" time="1.205848"></testcase>
+		<testcase classname="github.com/tikv/pd/server/cluster" name="TestRegionFlowChanged" time="1.281597"></testcase>
+		<testcase classname="github.com/tikv/pd/server/cluster" name="TestStoreClusterVersion" time="1.338187"></testcase>
+		<testcase classname="github.com/tikv/pd/server/cluster" name="TestTopologyWeight2" time="1.304966"></testcase>
+		<testcase classname="github.com/tikv/pd/server/cluster" name="TestCheckCache" time="2.400244"></testcase>
+		<testcase classname="github.com/tikv/pd/server/cluster" name="TestPauseScheduler" time="1.247224"></testcase>
+		<testcase classname="github.com/tikv/pd/server/cluster" name="TestRegionSplitAndMerge" time="1.846683"></testcase>
+		<testcase classname="github.com/tikv/pd/server/cluster" name="TestOperatorCount" time="1.418443"></testcase>
+		<testcase classname="github.com/tikv/pd/server/cluster" name="TestSetOfflineWithReplica" time="1.387725"></testcase>
+		<testcase classname="github.com/tikv/pd/server/cluster" name="TestStores" time="1.246721"></testcase>
+		<testcase classname="github.com/tikv/pd/server/cluster" name="TestPersistScheduler" time="1.294705"></testcase>
+		<testcase classname="github.com/tikv/pd/server/cluster" name="TestScanLimit" time="1.523312"></testcase>
+		<testcase classname="github.com/tikv/pd/server/cluster" name="TestUpdateAndDeleteLabel" time="1.319204"></testcase>
+		<testcase classname="github.com/tikv/pd/server/cluster" name="TestCollectMetrics" time="5.014345"></testcase>
+		<testcase classname="github.com/tikv/pd/server/cluster" name="TestAddScheduler" time="1.882223"></testcase>
+		<testcase classname="github.com/tikv/pd/server/cluster" name="TestForceBuryStore" time="1.198694"></testcase>
+		<testcase classname="github.com/tikv/pd/server/cluster" name="TestRegionHeartbeatHotStat" time="3.305352"></testcase>
+		<testcase classname="github.com/tikv/pd/server/cluster" name="TestTopologyWeight" time="1.225939"></testcase>
+		<testcase classname="github.com/tikv/pd/server/cluster" name="TestCPUEntriesCPU" time="1.336035"></testcase>
+		<testcase classname="github.com/tikv/pd/server/cluster" name="TestRemovingProcess" time="1.279530"></testcase>
+		<testcase classname="github.com/tikv/pd/server/cluster" name="TestDownStoreLimit" time="1.559596"></testcase>
+		<testcase classname="github.com/tikv/pd/server/cluster" name="TestCPUEntriesAppend" time="1.243809"></testcase>
+		<testcase classname="github.com/tikv/pd/server/cluster" name="TestTopologyWeight3" time="1.236830"></testcase>
+		<testcase classname="github.com/tikv/pd/server/cluster" name="TestDeleteStoreUpdatesClusterVersion" time="1.346271"></testcase>
+		<testcase classname="github.com/tikv/pd/server/cluster" name="TestRemoveScheduler" time="1.385918"></testcase>
+		<testcase classname="github.com/tikv/pd/server/cluster" name="TestCheckRegionWithScheduleDeny" time="1.293503"></testcase>
+		<testcase classname="github.com/tikv/pd/server/cluster" name="TestTopologyWeight4" time="1.247118"></testcase>
+		<testcase classname="github.com/tikv/pd/server/cluster" name="TestShouldRun" time="1.262317"></testcase>
+		<testcase classname="github.com/tikv/pd/server/cluster" name="TestUpStore" time="1.407381"></testcase>
+		<testcase classname="github.com/tikv/pd/server/cluster" name="TestStatEntriesCPU" time="1.263778"></testcase>
+		<testcase classname="github.com/tikv/pd/server/cluster" name="TestPeerState" time="2.054305"></testcase>
+		<testcase classname="github.com/tikv/pd/server/cluster" name="TestConcurrentReportBucket" time="1.858221"></testcase>
+		<testcase classname="github.com/tikv/pd/server/cluster" name="TestHeartbeatSplit" time="1.236496"></testcase>
+		<testcase classname="github.com/tikv/pd/server/cluster" name="TestRegionHeartbeat" time="1.491034"></testcase>
+		<testcase classname="github.com/tikv/pd/server/cluster" name="TestOfflineAndMerge" time="1.537291"></testcase>
+		<testcase classname="github.com/tikv/pd/server/cluster" name="TestCollectMetricsConcurrent" time="32.265001"></testcase>
+		<testcase classname="github.com/tikv/pd/server/cluster" name="TestDispatch" time="2.233973"></testcase>
+		<testcase classname="github.com/tikv/pd/server/cluster" name="TestInterval" time="1.450913"></testcase>
+		<testcase classname="github.com/tikv/pd/server/cluster" name="TestStoreHeartbeat" time="1.468798"></testcase>
+		<testcase classname="github.com/tikv/pd/server/cluster" name="TestSyncConfigContext" time="4.232077"></testcase>
+		<testcase classname="github.com/tikv/pd/server/cluster" name="TestReplica" time="2.566416"></testcase>
+		<testcase classname="github.com/tikv/pd/server/cluster" name="TestBasic" time="1.355334"></testcase>
+		<testcase classname="github.com/tikv/pd/server/cluster" name="TestStatEntriesState" time="1.265690"></testcase>
+		<testcase classname="github.com/tikv/pd/server/cluster" name="TestSetOfflineStoreWithEvictLeader" time="1.243695"></testcase>
+		<testcase classname="github.com/tikv/pd/server/cluster" name="TestSetOfflineStore" time="1.226669"></testcase>
+		<testcase classname="github.com/tikv/pd/server/cluster" name="TestShouldRunWithNonLeaderRegions" time="1.301691"></testcase>
+		<testcase classname="github.com/tikv/pd/server/cluster" name="TestRegionLabelIsolationLevel" time="1.316743"></testcase>
+		<testcase classname="github.com/tikv/pd/server/cluster" name="TestReuseAddress" time="1.356021"></testcase>
+		<testcase classname="github.com/tikv/pd/server/cluster" name="TestMergeRegionCancelOneOperator" time="1.263545"></testcase>
+		<testcase classname="github.com/tikv/pd/server/cluster" name="TestStoreLimitScene" time="1.273078"></testcase>
+		<testcase classname="github.com/tikv/pd/server/cluster" name="TestPatrolRegionConcurrency" time="4.216789"></testcase>
+		<testcase classname="github.com/tikv/pd/server/cluster" name="TestStoreConfigSync" time="1.325567"></testcase>
+		<testcase classname="github.com/tikv/pd/server/cluster" name="TestReplaceStoreLimitScene" time="1.322500"></testcase>
+		<testcase classname="github.com/tikv/pd/server/cluster" name="TestRestart" time="1.728247"></testcase>
+		<testcase classname="github.com/tikv/pd/server/cluster" name="TestStatEntriesAppend" time="1.334388"></testcase>
+		<testcase classname="github.com/tikv/pd/server/cluster" name="TestCheckRegion" time="1.386460"></testcase>
+		<testcase classname="github.com/tikv/pd/server/cluster" name="TestController" time="1.315974"></testcase>
+	</testsuite>
+	<testsuite tests="5" failures="0" time="5.478359" name="github.com/tikv/pd/pkg/cgroup">
+		<properties>
+			<property name="go.version" value="go1.23.1 linux/amd64"></property>
+		</properties>
+		<testcase classname="github.com/tikv/pd/pkg/cgroup" name="TestCgroupsGetCPU" time="1.136918"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/cgroup" name="TestGetCgroupCPU" time="1.107151"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/cgroup" name="TestCgroupsGetMemoryUsage" time="1.080777"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/cgroup" name="TestCgroupsGetMemoryInactiveFileUsage" time="1.069775"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/cgroup" name="TestCgroupsGetMemoryLimit" time="1.083738"></testcase>
+	</testsuite>
+	<testsuite tests="1" failures="0" time="1.071144" name="github.com/tikv/pd/pkg/utils/keypath">
+		<properties>
+			<property name="go.version" value="go1.23.1 linux/amd64"></property>
+		</properties>
+		<testcase classname="github.com/tikv/pd/pkg/utils/keypath" name="TestRegionPath" time="1.071144"></testcase>
+	</testsuite>
+	<testsuite tests="1" failures="0" time="1.653292" name="github.com/tikv/pd/server/join">
+		<properties>
+			<property name="go.version" value="go1.23.1 linux/amd64"></property>
+		</properties>
+		<testcase classname="github.com/tikv/pd/server/join" name="TestPDJoinsItself" time="1.653292"></testcase>
+	</testsuite>
+	<testsuite tests="42" failures="0" time="69.250040" name="github.com/tikv/pd/pkg/encryption">
+		<properties>
+			<property name="go.version" value="go1.23.1 linux/amd64"></property>
+		</properties>
+		<testcase classname="github.com/tikv/pd/pkg/encryption" name="TestAdjustNegativeRotationDuration" time="1.183028"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/encryption" name="TestEncryptionMethodSupported" time="1.142981"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/encryption" name="TestAdjustDefaultValue" time="1.238841"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/encryption" name="TestEncryptRegionWhileEncryptionDisabled" time="1.271013"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/encryption" name="TestNewFileMasterKey" time="1.227019"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/encryption" name="TestDecryptRegionWhileKeyMissing" time="1.216044"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/encryption" name="TestPlaintextMasterKey" time="1.275369"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/encryption" name="TestNewDataKey" time="1.213779"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/encryption" name="TestSetLeadershipWithEncryptionMethodChanged" time="2.727148"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/encryption" name="TestNilRegion" time="1.375310"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/encryption" name="TestNewFileMasterKeyMissingFile" time="1.253875"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/encryption" name="TestSetLeadershipWithEncryptionDisabling" time="2.190945"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/encryption" name="TestNewKeyManagerWithCustomConfig" time="2.065818"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/encryption" name="TestSetLeadershipWithEncryptionOff" time="2.007539"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/encryption" name="TestSetLeadershipMasterKeyWithCiphertextKey" time="1.872105"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/encryption" name="TestNewKeyManagerLoadKeys" time="2.357673"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/encryption" name="TestAesGcmCrypter" time="1.282169"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/encryption" name="TestSetLeadershipWithCurrentKeyExposed" time="2.429899"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/encryption" name="TestDecrypt" time="1.276011"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/encryption" name="TestKeyRotation" time="2.379142"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/encryption" name="TestEncryptRegion" time="1.286036"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/encryption" name="TestEncrypt" time="1.157555"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/encryption" name="TestSetLeadershipWithMasterKeyChanged" time="1.947596"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/encryption" name="TestAdjustInvalidDataEncryptionMethod" time="1.291617"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/encryption" name="TestDecryptRegion" time="1.206038"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/encryption" name="TestEncryptRegionWithoutKeyManager" time="1.213012"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/encryption" name="TestNewIv" time="1.177662"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/encryption" name="TestDecryptRegionNotEncrypted" time="1.286710"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/encryption" name="TestGetCurrentKey" time="2.131782"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/encryption" name="TestNewFileMasterKeyLengthMismatch" time="1.221644"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/encryption" name="TestNewFileMasterKeyMissingPath" time="1.198283"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/encryption" name="TestNewKeyManagerBasic" time="2.615858"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/encryption" name="TestNewFileMasterKeyNotHexString" time="1.197337"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/encryption" name="TestWatcher" time="2.126582"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/encryption" name="TestSetLeadershipWithEncryptionEnabling" time="2.224919"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/encryption" name="TestSetLeadershipWithCurrentKeyExpired" time="2.362878"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/encryption" name="TestAdjustInvalidMasterKeyType" time="1.291454"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/encryption" name="TestDecryptRegionWithoutKeyManager" time="1.387670"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/encryption" name="TestKeyLength" time="1.202479"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/encryption" name="TestKeyRotationConflict" time="1.699128"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/encryption" name="TestGetKey" time="2.804641"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/encryption" name="TestLoadKeyEmpty" time="2.233448"></testcase>
+	</testsuite>
+	<testsuite tests="4" failures="0" time="8.633991" name="github.com/tikv/pd/pkg/statistics/utils">
+		<properties>
+			<property name="go.version" value="go1.23.1 linux/amd64"></property>
+		</properties>
+		<testcase classname="github.com/tikv/pd/pkg/statistics/utils" name="TestPut" time="2.848139"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/statistics/utils" name="TestGetLoads" time="1.114523"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/statistics/utils" name="TestTTL" time="2.106752"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/statistics/utils" name="TestRemove" time="2.564576"></testcase>
+	</testsuite>
+	<testsuite tests="5" failures="0" time="9.686713" name="github.com/tikv/pd/pkg/gctuner">
+		<properties>
+			<property name="go.version" value="go1.23.1 linux/amd64"></property>
+		</properties>
+		<testcase classname="github.com/tikv/pd/pkg/gctuner" name="TestMem" time="1.081699"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/gctuner" name="TestGlobalMemoryTuner" time="3.666885"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/gctuner" name="TestFinalizer" time="1.164238"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/gctuner" name="TestTuner" time="2.711103"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/gctuner" name="TestCalcGCPercent" time="1.062787"></testcase>
+	</testsuite>
+	<testsuite tests="4" failures="0" time="13.456976" name="github.com/tikv/pd/pkg/core/storelimit">
+		<properties>
+			<property name="go.version" value="go1.23.1 linux/amd64"></property>
+		</properties>
+		<testcase classname="github.com/tikv/pd/pkg/core/storelimit" name="TestFeedback" time="10.321037"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/core/storelimit" name="TestStoreLimit" time="1.061068"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/core/storelimit" name="TestSlidingWindow" time="1.042989"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/core/storelimit" name="TestWindow" time="1.031882"></testcase>
+	</testsuite>
+	<testsuite tests="3" failures="0" time="3.135789" name="github.com/tikv/pd/pkg/utils/reflectutil">
+		<properties>
+			<property name="go.version" value="go1.23.1 linux/amd64"></property>
+		</properties>
+		<testcase classname="github.com/tikv/pd/pkg/utils/reflectutil" name="TestFindSameFieldByJSON" time="1.038173"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/utils/reflectutil" name="TestFindFieldByJSONTag" time="1.047214"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/utils/reflectutil" name="TestFindJSONFullTagByChildTag" time="1.050402"></testcase>
+	</testsuite>
+	<testsuite tests="11" failures="0" time="15.307784" name="github.com/tikv/pd/pkg/btree">
+		<properties>
+			<property name="go.version" value="go1.23.1 linux/amd64"></property>
+		</properties>
+		<testcase classname="github.com/tikv/pd/pkg/btree" name="TestDeleteMinG" time="1.034744"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/btree" name="TestDeleteMaxG" time="1.025689"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/btree" name="TestDescendRangeG" time="1.045396"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/btree" name="TestDescendGreaterThanG" time="1.019590"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/btree" name="TestDescendLessOrEqualG" time="1.038010"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/btree" name="TestAscendLessThanG" time="1.037234"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/btree" name="TestAscendRangeG" time="1.045330"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/btree" name="TestBTreeG" time="2.802175"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/btree" name="TestAscendGreaterOrEqualG" time="1.089894"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/btree" name="TestCloneConcurrentOperationsG" time="2.854923"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/btree" name="TestBTreeSizeInfo" time="1.314799"></testcase>
+	</testsuite>
+	<testsuite tests="1" failures="0" time="1.048948" name="github.com/tikv/pd/pkg/utils/jsonutil">
+		<properties>
+			<property name="go.version" value="go1.23.1 linux/amd64"></property>
+		</properties>
+		<testcase classname="github.com/tikv/pd/pkg/utils/jsonutil" name="TestJSONUtil" time="1.048948"></testcase>
+	</testsuite>
+	<testsuite tests="3" failures="0" time="22.014582" name="github.com/tikv/pd/pkg/tso">
+		<properties>
+			<property name="go.version" value="go1.23.1 linux/amd64"></property>
+		</properties>
+		<testcase classname="github.com/tikv/pd/pkg/tso" name="TestKeyspaceGroupManagerTestSuite" time="19.432637"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/tso" name="TestExtractKeyspaceGroupIDFromKeyspaceGroupMembershipPath" time="1.246282"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/tso" name="TestExtractKeyspaceGroupIDFromKeyspaceGroupPrimaryPath" time="1.335663"></testcase>
+	</testsuite>
+	<testsuite tests="7" failures="0" time="18.601054" name="github.com/tikv/pd/pkg/schedule/checker">
+		<properties>
+			<property name="go.version" value="go1.23.1 linux/amd64"></property>
+		</properties>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/checker" name="TestPromoteLearner" time="1.271606"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/checker" name="TestMergeCheckerTestSuite" time="5.034300"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/checker" name="TestSplit" time="1.355252"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/checker" name="TestReplicaCheckerTestSuite" time="1.421227"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/checker" name="TestRuleCheckerTestSuite" time="6.629353"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/checker" name="TestLeaveJointState" time="1.225617"></testcase>
+		<testcase classname="github.com/tikv/pd/pkg/schedule/checker" name="TestCheckPriorityRegions" time="1.663701"></testcase>
+	</testsuite>
+	<testsuite tests="1" failures="0" time="1.531702" name="github.com/tikv/pd/pkg/mock/mockhbstream">
+		<properties>
+			<property name="go.version" value="go1.23.1 linux/amd64"></property>
+		</properties>
+		<testcase classname="github.com/tikv/pd/pkg/mock/mockhbstream" name="TestActivity" time="1.531702"></testcase>
+	</testsuite>
+</testsuites>
