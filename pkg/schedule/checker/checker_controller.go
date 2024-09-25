@@ -169,7 +169,6 @@ func (c *Controller) PatrolRegions() {
 				start = time.Now()
 			}
 			failpoint.Inject("breakPatrol", func() {
-				time.Sleep(100 * time.Millisecond) // ensure the regions are handled by the workers
 				failpoint.Return()
 			})
 		case <-c.ctx.Done():
@@ -490,6 +489,13 @@ func (c *Controller) GetPauseController(name string) (*PauseController, error) {
 	default:
 		return nil, errs.ErrCheckerNotFound.FastGenByArgs()
 	}
+}
+
+func (c *Controller) IsPatrolRegionChanEmpty() bool {
+	if c.patrolRegionContext == nil {
+		return true
+	}
+	return len(c.patrolRegionContext.regionChan) == 0
 }
 
 // PatrolRegionContext is used to store the context of patrol regions.
