@@ -722,6 +722,64 @@ func (suite *schedulerTestSuite) checkSchedulerDiagnostic(cluster *pdTests.TestC
 	checkSchedulerDescribeCommand("balance-leader-scheduler", "normal", "")
 }
 
+func (suite *schedulerTestSuite) TestEvictLeaderScheduler() {
+	suite.env.RunTestInTwoModes(suite.checkEvictLeaderScheduler)
+}
+
+func (suite *schedulerTestSuite) checkEvictLeaderScheduler(cluster *pdTests.TestCluster) {
+	re := suite.Require()
+	pdAddr := cluster.GetConfig().GetClientURL()
+	cmd := ctl.GetRootCmd()
+
+	stores := []*metapb.Store{
+		{
+			Id:            1,
+			State:         metapb.StoreState_Up,
+			LastHeartbeat: time.Now().UnixNano(),
+		},
+		{
+			Id:            2,
+			State:         metapb.StoreState_Up,
+			LastHeartbeat: time.Now().UnixNano(),
+		},
+		{
+			Id:            3,
+			State:         metapb.StoreState_Up,
+			LastHeartbeat: time.Now().UnixNano(),
+		},
+		{
+			Id:            4,
+			State:         metapb.StoreState_Up,
+			LastHeartbeat: time.Now().UnixNano(),
+		},
+	}
+	for _, store := range stores {
+		pdTests.MustPutStore(re, cluster, store)
+	}
+
+	pdTests.MustPutRegion(re, cluster, 1, 1, []byte("a"), []byte("b"))
+	suite.checkDefaultSchedulers(re, cmd, pdAddr)
+
+	output, err := tests.ExecuteCommand(cmd, []string{"-u", pdAddr, "scheduler", "add", "evict-leader-scheduler", "2"}...)
+	re.NoError(err)
+	re.Contains(string(output), "Success!")
+	failpoint.Enable("github.com/tikv/pd/pkg/schedule/schedulers/buildWithArgsErr", "return(true)")
+	output, err = tests.ExecuteCommand(cmd, []string{"-u", pdAddr, "scheduler", "add", "evict-leader-scheduler", "1"}...)
+	re.NoError(err)
+	re.Contains(string(output), "fail to build with args")
+	failpoint.Disable("github.com/tikv/pd/pkg/schedule/schedulers/buildWithArgsErr")
+	output, err = tests.ExecuteCommand(cmd, []string{"-u", pdAddr, "scheduler", "remove", "evict-leader-scheduler"}...)
+	re.NoError(err)
+	re.Contains(string(output), "Success!")
+	testutil.Eventually(re, func() bool {
+		output, err = tests.ExecuteCommand(cmd, []string{"-u", pdAddr, "scheduler", "add", "evict-leader-scheduler", "1"}...)
+		return err == nil && strings.Contains(string(output), "Success!")
+	})
+	output, err = tests.ExecuteCommand(cmd, []string{"-u", pdAddr, "scheduler", "remove", "evict-leader-scheduler-1"}...)
+	re.NoError(err)
+	re.Contains(string(output), "Success!")
+}
+
 func mustExec(re *require.Assertions, cmd *cobra.Command, args []string, v any) string {
 	output, err := tests.ExecuteCommand(cmd, args...)
 	re.NoError(err)
@@ -739,4 +797,33 @@ func mightExec(re *require.Assertions, cmd *cobra.Command, args []string, v any)
 		return
 	}
 	json.Unmarshal(output, v)
+}
+
+func (suite *schedulerTestSuite) checkDefaultSchedulers(re *require.Assertions, cmd *cobra.Command, pdAddr string) {
+	// scheduler show command
+	expected := make(map[string]bool)
+	for _, scheduler := range suite.defaultSchedulers {
+		expected[scheduler] = true
+	}
+	checkSchedulerCommand(re, cmd, pdAddr, nil, expected)
+}
+
+func checkSchedulerCommand(re *require.Assertions, cmd *cobra.Command, pdAddr string, args []string, expected map[string]bool) {
+	if args != nil {
+		echo := mustExec(re, cmd, args, nil)
+		re.Contains(echo, "Success!")
+	}
+	testutil.Eventually(re, func() bool {
+		var schedulers []string
+		mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "show"}, &schedulers)
+		if len(schedulers) != len(expected) {
+			return false
+		}
+		for _, scheduler := range schedulers {
+			if _, ok := expected[scheduler]; !ok {
+				return false
+			}
+		}
+		return true
+	})
 }
