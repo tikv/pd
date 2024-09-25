@@ -16,6 +16,8 @@ package tso
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"math/rand"
 	"net/http"
 	"strings"
@@ -473,10 +475,11 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) dispatchClient(
 					strings.Contains(errMsg, clierrs.NotLeaderErr) ||
 					strings.Contains(errMsg, clierrs.NotServedErr) ||
 					strings.Contains(errMsg, "ErrKeyspaceNotAssigned") ||
-					strings.Contains(errMsg, "ErrKeyspaceGroupIsMerging") {
+					strings.Contains(errMsg, "ErrKeyspaceGroupIsMerging") ||
+					errors.Is(err, clierrs.ErrClientTSOStreamClosed) {
 					continue
 				}
-				re.FailNow(errMsg)
+				re.FailNow(fmt.Sprintf("%+v", err))
 			}
 			if physical == lastPhysical {
 				re.Greater(logical, lastLogical)

@@ -17,14 +17,20 @@ package schedulers
 import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
+	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/pkg/utils/syncutil"
+	"go.uber.org/zap"
 )
 
 type schedulerConfig interface {
+	init(name string, storage endpoint.ConfigStorage, data any)
 	save() error
 	load(any) error
-	init(name string, storage endpoint.ConfigStorage, data any)
 }
+
+var _ schedulerConfig = &baseSchedulerConfig{}
 
 type baseSchedulerConfig struct {
 	name    string
@@ -57,4 +63,43 @@ func (b *baseSchedulerConfig) load(v any) error {
 		return err
 	}
 	return DecodeConfig([]byte(data), v)
+}
+
+// defaultSchedulerConfig is the interface to represent the default scheduler
+// config. It is used in the BaseScheduler.
+type defaultSchedulerConfig interface {
+	schedulerConfig
+
+	isDisable() bool
+	setDisable(disabled bool) error
+}
+
+type baseDefaultSchedulerConfig struct {
+	schedulerConfig
+	syncutil.RWMutex
+
+	Disabled bool `json:"disabled"`
+}
+
+func newBaseDefaultSchedulerConfig() baseDefaultSchedulerConfig {
+	return baseDefaultSchedulerConfig{
+		schedulerConfig: &baseSchedulerConfig{},
+	}
+}
+
+func (b *baseDefaultSchedulerConfig) isDisable() bool {
+	b.Lock()
+	defer b.Unlock()
+	if err := b.load(b); err != nil {
+		log.Warn("failed to load scheduler config, maybe the config never persist", errs.ZapError(err))
+	}
+	return b.Disabled
+}
+
+func (b *baseDefaultSchedulerConfig) setDisable(disabled bool) error {
+	b.Lock()
+	defer b.Unlock()
+	b.Disabled = disabled
+	log.Info("set scheduler disable", zap.Bool("disabled", disabled))
+	return b.save()
 }

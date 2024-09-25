@@ -90,7 +90,7 @@ func (conf *scatterRangeSchedulerConfig) getEndKey() []byte {
 func (conf *scatterRangeSchedulerConfig) getSchedulerName() string {
 	conf.RLock()
 	defer conf.RUnlock()
-	return fmt.Sprintf("scatter-range-%s", conf.RangeName)
+	return fmt.Sprintf("%s-%s", types.ScatterRangeScheduler, conf.RangeName)
 }
 
 type scatterRangeScheduler struct {
@@ -103,7 +103,7 @@ type scatterRangeScheduler struct {
 
 // newScatterRangeScheduler creates a scheduler that balances the distribution of leaders and regions that in the specified key range.
 func newScatterRangeScheduler(opController *operator.Controller, config *scatterRangeSchedulerConfig) Scheduler {
-	base := NewBaseScheduler(opController, types.ScatterRangeScheduler)
+	base := NewBaseScheduler(opController, types.ScatterRangeScheduler, config)
 
 	handler := newScatterRangeHandler(config)
 	scheduler := &scatterRangeScheduler{
@@ -112,7 +112,10 @@ func newScatterRangeScheduler(opController *operator.Controller, config *scatter
 		handler:       handler,
 		balanceLeader: newBalanceLeaderScheduler(
 			opController,
-			&balanceLeaderSchedulerConfig{Ranges: []core.KeyRange{core.NewKeyRange("", "")}},
+			&balanceLeaderSchedulerConfig{
+				balanceLeaderSchedulerParam: balanceLeaderSchedulerParam{
+					Ranges: []core.KeyRange{core.NewKeyRange("", "")}},
+			},
 			// the name will not be persisted
 			WithBalanceLeaderName("scatter-range-leader"),
 		),

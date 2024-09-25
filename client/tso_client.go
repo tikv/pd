@@ -203,6 +203,7 @@ func (c *tsoClient) getTSORequest(ctx context.Context, dcLocation string) *tsoRe
 	req.physical = 0
 	req.logical = 0
 	req.dcLocation = dcLocation
+	req.streamID = ""
 	return req
 }
 

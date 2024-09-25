@@ -28,7 +28,6 @@ import (
 	"github.com/tikv/pd/pkg/schedule/plan"
 	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/utils/apiutil"
-	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/unrolled/render"
 	"go.uber.org/zap"
 )
@@ -39,8 +38,7 @@ const (
 )
 
 type evictSlowStoreSchedulerConfig struct {
-	syncutil.RWMutex
-	schedulerConfig
+	baseDefaultSchedulerConfig
 
 	cluster *core.BasicCluster
 	// Last timestamp of the chosen slow store for eviction.
@@ -52,10 +50,10 @@ type evictSlowStoreSchedulerConfig struct {
 
 func initEvictSlowStoreSchedulerConfig() *evictSlowStoreSchedulerConfig {
 	return &evictSlowStoreSchedulerConfig{
-		schedulerConfig:        &baseSchedulerConfig{},
-		lastSlowStoreCaptureTS: time.Time{},
-		RecoveryDurationGap:    defaultRecoveryDurationGap,
-		EvictedStores:          make([]uint64, 0),
+		baseDefaultSchedulerConfig: newBaseDefaultSchedulerConfig(),
+		lastSlowStoreCaptureTS:     time.Time{},
+		RecoveryDurationGap:        defaultRecoveryDurationGap,
+		EvictedStores:              make([]uint64, 0),
 	}
 }
 
@@ -314,7 +312,7 @@ func (s *evictSlowStoreScheduler) Schedule(cluster sche.SchedulerCluster, _ bool
 func newEvictSlowStoreScheduler(opController *operator.Controller, conf *evictSlowStoreSchedulerConfig) Scheduler {
 	handler := newEvictSlowStoreHandler(conf)
 	return &evictSlowStoreScheduler{
-		BaseScheduler: NewBaseScheduler(opController, types.EvictSlowStoreScheduler),
+		BaseScheduler: NewBaseScheduler(opController, types.EvictSlowStoreScheduler, conf),
 		conf:          conf,
 		handler:       handler,
 	}
