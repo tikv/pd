@@ -271,12 +271,15 @@ func (handler *grantLeaderHandler) updateConfig(w http.ResponseWriter, r *http.R
 
 	err := handler.config.buildWithArgs(args)
 	if err != nil {
+		handler.config.Lock()
+		handler.config.cluster.ResumeLeaderTransfer(id)
+		handler.config.Unlock()
 		handler.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	err = handler.config.persist()
 	if err != nil {
-		handler.config.removeStore(id)
+		_, _ = handler.config.removeStore(id)
 		handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}

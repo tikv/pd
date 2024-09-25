@@ -60,7 +60,7 @@ const (
 	RegionLabelRulesByIDs = "/pd/api/v1/config/region-label/rules/ids"
 	// Scheduler
 	Schedulers            = "/pd/api/v1/schedulers"
-	scatterRangeScheduler = "/pd/api/v1/schedulers/scatter-range-"
+	scatterRangeScheduler = "/pd/api/v1/schedulers/scatter-range-scheduler-"
 	// Admin
 	ResetTS                = "/pd/api/v1/admin/reset-ts"
 	BaseAllocID            = "/pd/api/v1/admin/base-alloc-id"
@@ -183,6 +183,7 @@ func SchedulerByName(name string) string {
 }
 
 // ScatterRangeSchedulerWithName returns the scatter range scheduler API with name parameter.
+// It is used in https://github.com/pingcap/tidb/blob/2a3352c45dd0f8dd5102adb92879bbfa964e7f5f/pkg/server/handler/tikvhandler/tikv_handler.go#L1252.
 func ScatterRangeSchedulerWithName(name string) string {
 	return fmt.Sprintf("%s%s", scatterRangeScheduler, name)
 }

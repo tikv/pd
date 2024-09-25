@@ -149,6 +149,7 @@ func NewAddSchedulerCommand() *cobra.Command {
 	c.AddCommand(NewShuffleRegionSchedulerCommand())
 	c.AddCommand(NewShuffleHotRegionSchedulerCommand())
 	c.AddCommand(NewScatterRangeSchedulerCommand())
+	c.AddCommand(NewScatterRangeSchedulerCommandV2())
 	c.AddCommand(NewBalanceLeaderSchedulerCommand())
 	c.AddCommand(NewBalanceRegionSchedulerCommand())
 	c.AddCommand(NewBalanceHotRegionSchedulerCommand())
@@ -354,9 +355,10 @@ func NewSplitBucketSchedulerCommand() *cobra.Command {
 // NewGrantHotRegionSchedulerCommand returns a command to add a grant-hot-region-scheduler.
 func NewGrantHotRegionSchedulerCommand() *cobra.Command {
 	c := &cobra.Command{
-		Use:   "grant-hot-region-scheduler <store_leader_id> <store_leader_id,store_peer_id_1,store_peer_id_2>",
-		Short: "add a scheduler to grant hot region to fixed stores",
-		Run:   addSchedulerForGrantHotRegionCommandFunc,
+		Use: "grant-hot-region-scheduler <store_leader_id> <store_leader_id,store_peer_id_1,store_peer_id_2>",
+		Short: `add a scheduler to grant hot region to fixed stores. 
+				Note: If there is balance-hot-region-scheduler running, please remove it first, otherwise grant-hot-region-scheduler will not work.`,
+		Run: addSchedulerForGrantHotRegionCommandFunc,
 	}
 	return c
 }
@@ -422,7 +424,18 @@ func addSchedulerCommandFunc(cmd *cobra.Command, args []string) {
 // NewScatterRangeSchedulerCommand returns a command to add a scatter-range-scheduler.
 func NewScatterRangeSchedulerCommand() *cobra.Command {
 	c := &cobra.Command{
-		Use:   "scatter-range [--format=raw|encode|hex] <start_key> <end_key> <range_name>",
+		Use:        "scatter-range [--format=raw|encode|hex] <start_key> <end_key> <range_name>",
+		Run:        addSchedulerForScatterRangeCommandFunc,
+		Deprecated: "scatter-range will be deprecated in the future, please use `scatter-range-scheduler` instead",
+	}
+	c.Flags().String("format", "hex", "the key format")
+	return c
+}
+
+// NewScatterRangeSchedulerCommandV2 returns a command to add a scatter-range-scheduler.
+func NewScatterRangeSchedulerCommandV2() *cobra.Command {
+	c := &cobra.Command{
+		Use:   "scatter-range-scheduler [--format=raw|encode|hex] <start_key> <end_key> <range_name>",
 		Short: "add a scheduler to scatter range",
 		Run:   addSchedulerForScatterRangeCommandFunc,
 	}
