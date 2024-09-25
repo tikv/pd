@@ -230,9 +230,10 @@ const (
 
 var streamIDAlloc atomic.Int32
 
-const invalidStreamID = "<invalid>"
-
-const maxPendingRequestsInTSOStream = 64
+const (
+	invalidStreamID               = "<invalid>"
+	maxPendingRequestsInTSOStream = 64
+)
 
 func newTSOStream(ctx context.Context, serverURL string, stream grpcTSOStreamAdapter) *tsoStream {
 	streamID := fmt.Sprintf("%s-%d", serverURL, streamIDAlloc.Add(1))
