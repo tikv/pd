@@ -487,64 +487,6 @@ func (suite *schedulerTestSuite) checkSchedulerConfig(cluster *pdTests.TestClust
 		"balance-hot-region-scheduler": true,
 	})
 
-	// test grant hot region scheduler config
-	// case 1: add grant-hot-region-scheduler when balance-hot-region-scheduler is running
-	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "add", "grant-hot-region-scheduler", "1", "1,2,3"}, nil)
-	re.Contains(echo, "balance-hot-region-scheduler is running, please remove it first")
-
-	// case 2: add grant-hot-region-scheduler when balance-hot-region-scheduler is paused
-	checkSchedulerCommand(re, cmd, pdAddr, []string{"-u", pdAddr, "scheduler", "pause", "balance-hot-region-scheduler", "60"}, map[string]bool{
-		"balance-region-scheduler":     true,
-		"balance-leader-scheduler":     true,
-		"balance-hot-region-scheduler": true,
-	})
-	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "add", "grant-hot-region-scheduler", "1", "1,2,3"}, nil)
-	re.Contains(echo, "balance-hot-region-scheduler is running, please remove it first")
-
-	// case 3: add grant-hot-region-scheduler when balance-hot-region-scheduler is disabled
-	checkSchedulerCommand(re, cmd, pdAddr, []string{"-u", pdAddr, "scheduler", "remove", "balance-hot-region-scheduler"}, map[string]bool{
-		"balance-region-scheduler": true,
-		"balance-leader-scheduler": true,
-	})
-
-	checkSchedulerCommand(re, cmd, pdAddr, []string{"-u", pdAddr, "scheduler", "add", "grant-hot-region-scheduler", "1", "1,2,3"}, map[string]bool{
-		"balance-region-scheduler":   true,
-		"balance-leader-scheduler":   true,
-		"grant-hot-region-scheduler": true,
-	})
-
-	// case 4: test grant-hot-region-scheduler config
-	var conf3 map[string]any
-	expected3 := map[string]any{
-		"store-id":        []any{float64(1), float64(2), float64(3)},
-		"store-leader-id": float64(1),
-	}
-	mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "grant-hot-region-scheduler"}, &conf3)
-	re.Equal(expected3, conf3)
-
-	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "grant-hot-region-scheduler", "set", "2", "1,2,3"}, nil)
-	re.Contains(echo, "Success!")
-	expected3["store-leader-id"] = float64(2)
-	testutil.Eventually(re, func() bool {
-		mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "grant-hot-region-scheduler"}, &conf3)
-		return reflect.DeepEqual(expected3, conf3)
-	})
-
-	// case 5: remove grant-hot-region-scheduler
-	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "add", "balance-hot-region-scheduler"}, nil)
-	re.Contains(echo, "grant-hot-region-scheduler is running, please remove it first")
-
-	checkSchedulerCommand(re, cmd, pdAddr, []string{"-u", pdAddr, "scheduler", "remove", "grant-hot-region-scheduler"}, map[string]bool{
-		"balance-region-scheduler": true,
-		"balance-leader-scheduler": true,
-	})
-
-	checkSchedulerCommand(re, cmd, pdAddr, []string{"-u", pdAddr, "scheduler", "add", "balance-hot-region-scheduler"}, map[string]bool{
-		"balance-region-scheduler":     true,
-		"balance-leader-scheduler":     true,
-		"balance-hot-region-scheduler": true,
-	})
-
 	// test shuffle hot region scheduler
 	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "add", "shuffle-hot-region-scheduler"}, nil)
 	re.Contains(echo, "Success!")
@@ -612,6 +554,115 @@ func (suite *schedulerTestSuite) checkSchedulerConfig(cluster *pdTests.TestClust
 	})
 	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "add", "balance-leader-scheduler"}, nil)
 	re.Contains(echo, "Success!")
+}
+
+func (suite *schedulerTestSuite) TestGrantLeaderScheduler() {
+	suite.env.RunTestBasedOnMode(suite.checkGrantLeaderScheduler)
+}
+
+func (suite *schedulerTestSuite) checkGrantLeaderScheduler(cluster *pdTests.TestCluster) {
+	re := suite.Require()
+	pdAddr := cluster.GetConfig().GetClientURL()
+	cmd := ctl.GetRootCmd()
+
+	stores := []*metapb.Store{
+		{
+			Id:            1,
+			State:         metapb.StoreState_Up,
+			LastHeartbeat: time.Now().UnixNano(),
+		},
+		{
+			Id:            2,
+			State:         metapb.StoreState_Up,
+			LastHeartbeat: time.Now().UnixNano(),
+		},
+		{
+			Id:            3,
+			State:         metapb.StoreState_Up,
+			LastHeartbeat: time.Now().UnixNano(),
+		},
+		{
+			Id:            4,
+			State:         metapb.StoreState_Up,
+			LastHeartbeat: time.Now().UnixNano(),
+		},
+	}
+	for _, store := range stores {
+		pdTests.MustPutStore(re, cluster, store)
+	}
+
+	// note: because pdqsort is an unstable sort algorithm, set ApproximateSize for this region.
+	pdTests.MustPutRegion(re, cluster, 1, 1, []byte("a"), []byte("b"), core.SetApproximateSize(10))
+
+	expected := map[string]bool{
+		"balance-region-scheduler":     true,
+		"balance-leader-scheduler":     true,
+		"balance-hot-region-scheduler": true,
+		"evict-slow-store-scheduler":   true,
+	}
+	checkSchedulerCommand(re, cmd, pdAddr, nil, expected)
+
+	// case 1: add grant-hot-region-scheduler when balance-hot-region-scheduler is running
+	echo := mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "add", "grant-hot-region-scheduler", "1", "1,2,3"}, nil)
+	re.Contains(echo, "balance-hot-region-scheduler is running, please remove it first")
+
+	// case 2: add grant-hot-region-scheduler when balance-hot-region-scheduler is paused
+	checkSchedulerCommand(re, cmd, pdAddr, []string{"-u", pdAddr, "scheduler", "pause", "balance-hot-region-scheduler", "60"}, map[string]bool{
+		"balance-region-scheduler":     true,
+		"balance-leader-scheduler":     true,
+		"balance-hot-region-scheduler": true,
+		"evict-slow-store-scheduler":   true,
+	})
+	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "add", "grant-hot-region-scheduler", "1", "1,2,3"}, nil)
+	re.Contains(echo, "balance-hot-region-scheduler is running, please remove it first")
+
+	// case 3: add grant-hot-region-scheduler when balance-hot-region-scheduler is disabled
+	checkSchedulerCommand(re, cmd, pdAddr, []string{"-u", pdAddr, "scheduler", "remove", "balance-hot-region-scheduler"}, map[string]bool{
+		"balance-region-scheduler":   true,
+		"balance-leader-scheduler":   true,
+		"evict-slow-store-scheduler": true,
+	})
+
+	checkSchedulerCommand(re, cmd, pdAddr, []string{"-u", pdAddr, "scheduler", "add", "grant-hot-region-scheduler", "1", "1,2,3"}, map[string]bool{
+		"balance-region-scheduler":   true,
+		"balance-leader-scheduler":   true,
+		"grant-hot-region-scheduler": true,
+		"evict-slow-store-scheduler": true,
+	})
+
+	// case 4: test grant-hot-region-scheduler config
+	var conf3 map[string]any
+	expected3 := map[string]any{
+		"store-id":        []any{float64(1), float64(2), float64(3)},
+		"store-leader-id": float64(1),
+	}
+	mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "grant-hot-region-scheduler"}, &conf3)
+	re.Equal(expected3, conf3)
+
+	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "grant-hot-region-scheduler", "set", "2", "1,2,3"}, nil)
+	re.Contains(echo, "Success!")
+	expected3["store-leader-id"] = float64(2)
+	testutil.Eventually(re, func() bool {
+		mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "grant-hot-region-scheduler"}, &conf3)
+		return reflect.DeepEqual(expected3, conf3)
+	})
+
+	// case 5: remove grant-hot-region-scheduler
+	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "add", "balance-hot-region-scheduler"}, nil)
+	re.Contains(echo, "grant-hot-region-scheduler is running, please remove it first")
+
+	checkSchedulerCommand(re, cmd, pdAddr, []string{"-u", pdAddr, "scheduler", "remove", "grant-hot-region-scheduler"}, map[string]bool{
+		"balance-region-scheduler":   true,
+		"balance-leader-scheduler":   true,
+		"evict-slow-store-scheduler": true,
+	})
+
+	checkSchedulerCommand(re, cmd, pdAddr, []string{"-u", pdAddr, "scheduler", "add", "balance-hot-region-scheduler"}, map[string]bool{
+		"balance-region-scheduler":     true,
+		"balance-leader-scheduler":     true,
+		"balance-hot-region-scheduler": true,
+		"evict-slow-store-scheduler":   true,
+	})
 }
 
 func (suite *schedulerTestSuite) TestHotRegionSchedulerConfig() {
