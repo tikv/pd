@@ -183,7 +183,8 @@ func (h *serviceMiddlewareHandler) SetRateLimitConfig(w http.ResponseWriter, r *
 		h.rd.Text(w, http.StatusBadRequest, "This service is in allow list whose config can not be changed.")
 		return
 	}
-	cfg := h.svr.GetRateLimitConfig().LimiterConfig[serviceLabel]
+	oldCfg := h.svr.GetRateLimitConfig().Clone()
+	cfg := oldCfg.LimiterConfig[serviceLabel]
 	// update concurrency limiter
 	concurrencyFloat, okc := input["concurrency"].(float64)
 	if okc {
@@ -208,7 +209,12 @@ func (h *serviceMiddlewareHandler) SetRateLimitConfig(w http.ResponseWriter, r *
 		if status&ratelimit.LimiterDeleted != 0 {
 			cfg := h.svr.GetServiceMiddlewareConfig()
 			delete(cfg.RateLimitConfig.LimiterConfig, serviceLabel)
-			h.svr.SetRateLimitConfig(cfg.RateLimitConfig)
+			if err := h.svr.SetRateLimitConfig(cfg.RateLimitConfig); err != nil {
+				old := oldCfg.LimiterConfig[serviceLabel]
+				h.svr.UpdateServiceRateLimiter(serviceLabel, ratelimit.UpdateDimensionConfig(&old))
+				h.rd.Text(w, http.StatusInternalServerError, err.Error())
+				return
+			}
 			h.rd.Text(w, http.StatusOK, "Rate limiter is deleted.")
 			return
 		}
@@ -245,7 +251,8 @@ func (h *serviceMiddlewareHandler) SetGRPCRateLimitConfig(w http.ResponseWriter,
 		return
 	}
 
-	cfg := h.svr.GetGRPCRateLimitConfig().LimiterConfig[serviceLabel]
+	oldCfg := h.svr.GetGRPCRateLimitConfig().Clone()
+	cfg := oldCfg.LimiterConfig[serviceLabel]
 	// update concurrency limiter
 	concurrencyFloat, okc := input["concurrency"].(float64)
 	if okc {
@@ -270,7 +277,12 @@ func (h *serviceMiddlewareHandler) SetGRPCRateLimitConfig(w http.ResponseWriter,
 		if status&ratelimit.LimiterDeleted != 0 {
 			cfg := h.svr.GetServiceMiddlewareConfig()
 			delete(cfg.GRPCRateLimitConfig.LimiterConfig, serviceLabel)
-			h.svr.SetGRPCRateLimitConfig(cfg.GRPCRateLimitConfig)
+			if err := h.svr.SetGRPCRateLimitConfig(cfg.GRPCRateLimitConfig); err != nil {
+				old := oldCfg.LimiterConfig[serviceLabel]
+				h.svr.UpdateGRPCServiceRateLimiter(serviceLabel, ratelimit.UpdateDimensionConfig(&old))
+				h.rd.Text(w, http.StatusInternalServerError, err.Error())
+				return
+			}
 			h.rd.Text(w, http.StatusOK, "gRPC limiter is deleted.")
 			return
 		}

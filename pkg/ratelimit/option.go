@@ -62,7 +62,6 @@ func UpdateQPSLimiter(limit float64, burst int) Option {
 		}
 		lim, _ := l.limiters.LoadOrStore(label, newLimiter())
 		return lim.(*limiter).updateQPSConfig(limit, burst)
-
 	}
 }
 
