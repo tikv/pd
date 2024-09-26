@@ -97,7 +97,7 @@ func (suite *configTestSuite) TearDownTest() {
 		err = testutil.CheckPostJSON(testDialClient, urlPrefix+"/pd/api/v1/config/placement-rule", data, testutil.StatusOK(re))
 		re.NoError(err)
 	}
-	suite.env.RunFuncInTwoModes(cleanFunc)
+	suite.env.RunTestBasedOnMode(cleanFunc)
 	suite.env.Cleanup()
 }
 
@@ -494,8 +494,12 @@ func (suite *configTestSuite) checkConfigForwardControl(cluster *pdTests.TestClu
 	// Test Config
 	// inject different config to scheduling server
 	if sche := cluster.GetSchedulingPrimaryServer(); sche != nil {
-		sche.GetPersistConfig().GetScheduleConfig().LeaderScheduleLimit = 233
-		sche.GetPersistConfig().GetReplicationConfig().MaxReplicas = 7
+		scheCfg := sche.GetPersistConfig().GetScheduleConfig().Clone()
+		scheCfg.LeaderScheduleLimit = 233
+		sche.GetPersistConfig().SetScheduleConfig(scheCfg)
+		repCfg := sche.GetPersistConfig().GetReplicationConfig().Clone()
+		repCfg.MaxReplicas = 7
+		sche.GetPersistConfig().SetReplicationConfig(repCfg)
 		re.Equal(uint64(233), sche.GetPersistConfig().GetLeaderScheduleLimit())
 		re.Equal(7, sche.GetPersistConfig().GetMaxReplicas())
 	}
