@@ -1020,6 +1020,14 @@ func TestServiceMiddlewareConfig(t *testing.T) {
 	re.NoError(err)
 	conf.GRPCRateLimitConfig.EnableRateLimit = false
 	check()
+	_, err = tests.ExecuteCommand(cmd, "-u", pdAddr, "config", "set", "service-middleware", "rate-limit", "GetRegion", "concurrency", "0")
+	re.NoError(err)
+	conf.RateLimitConfig.LimiterConfig["GetRegion"] = ratelimit.DimensionConfig{QPS: 100, QPSBurst: 100}
+	check()
+	_, err = tests.ExecuteCommand(cmd, "-u", pdAddr, "config", "set", "service-middleware", "rate-limit", "GetRegion", "qps", "0")
+	re.NoError(err)
+	delete(conf.RateLimitConfig.LimiterConfig, "GetRegion")
+	check()
 }
 
 func (suite *configTestSuite) TestUpdateDefaultReplicaConfig() {

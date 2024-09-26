@@ -68,40 +68,40 @@ func (h *serviceMiddlewareHandler) SetServiceMiddlewareConfig(w http.ResponseWri
 	data, err := io.ReadAll(r.Body)
 	r.Body.Close()
 	if err != nil {
-		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		h.rd.Text(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
 	conf := make(map[string]any)
 	if err := json.Unmarshal(data, &conf); err != nil {
-		h.rd.JSON(w, http.StatusBadRequest, err.Error())
+		h.rd.Text(w, http.StatusBadRequest, err.Error())
 		return
 	}
 
 	if len(conf) == 0 {
-		h.rd.JSON(w, http.StatusOK, "The input is empty.")
+		h.rd.Text(w, http.StatusOK, "The input is empty.")
 	}
 
 	for k, v := range conf {
 		if s := strings.Split(k, "."); len(s) > 1 {
 			if err := h.updateServiceMiddlewareConfig(cfg, k, v); err != nil {
-				h.rd.JSON(w, http.StatusBadRequest, err.Error())
+				h.rd.Text(w, http.StatusBadRequest, err.Error())
 				return
 			}
 			continue
 		}
 		key := reflectutil.FindJSONFullTagByChildTag(reflect.TypeOf(config.ServiceMiddlewareConfig{}), k)
 		if key == "" {
-			h.rd.JSON(w, http.StatusBadRequest, fmt.Sprintf("config item %s not found", k))
+			h.rd.Text(w, http.StatusBadRequest, fmt.Sprintf("config item %s not found", k))
 			return
 		}
 		if err := h.updateServiceMiddlewareConfig(cfg, key, v); err != nil {
-			h.rd.JSON(w, http.StatusBadRequest, err.Error())
+			h.rd.Text(w, http.StatusBadRequest, err.Error())
 			return
 		}
 	}
 
-	h.rd.JSON(w, http.StatusOK, "The service-middleware config is updated.")
+	h.rd.Text(w, http.StatusOK, "The service-middleware config is updated.")
 }
 
 func (h *serviceMiddlewareHandler) updateServiceMiddlewareConfig(cfg *config.ServiceMiddlewareConfig, key string, value any) error {
@@ -148,7 +148,7 @@ func (h *serviceMiddlewareHandler) SetRateLimitConfig(w http.ResponseWriter, r *
 	}
 	typeStr, ok := input["type"].(string)
 	if !ok {
-		h.rd.JSON(w, http.StatusBadRequest, "The type is empty.")
+		h.rd.Text(w, http.StatusBadRequest, "The type is empty.")
 		return
 	}
 	var serviceLabel string
@@ -156,42 +156,40 @@ func (h *serviceMiddlewareHandler) SetRateLimitConfig(w http.ResponseWriter, r *
 	case "label":
 		serviceLabel, ok = input["label"].(string)
 		if !ok || len(serviceLabel) == 0 {
-			h.rd.JSON(w, http.StatusBadRequest, "The label is empty.")
+			h.rd.Text(w, http.StatusBadRequest, "The label is empty.")
 			return
 		}
 		if len(h.svr.GetServiceLabels(serviceLabel)) == 0 {
-			h.rd.JSON(w, http.StatusBadRequest, "There is no label matched.")
+			h.rd.Text(w, http.StatusBadRequest, "There is no label matched.")
 			return
 		}
 	case "path":
 		method, _ := input["method"].(string)
 		path, ok := input["path"].(string)
 		if !ok || len(path) == 0 {
-			h.rd.JSON(w, http.StatusBadRequest, "The path is empty.")
+			h.rd.Text(w, http.StatusBadRequest, "The path is empty.")
 			return
 		}
 		serviceLabel = h.svr.GetAPIAccessServiceLabel(apiutil.NewAccessPath(path, method))
 		if len(serviceLabel) == 0 {
-			h.rd.JSON(w, http.StatusBadRequest, "There is no label matched.")
+			h.rd.Text(w, http.StatusBadRequest, "There is no label matched.")
 			return
 		}
 	default:
-		h.rd.JSON(w, http.StatusBadRequest, "The type is invalid.")
+		h.rd.Text(w, http.StatusBadRequest, "The type is invalid.")
 		return
 	}
 	if h.svr.IsInRateLimitAllowList(serviceLabel) {
-		h.rd.JSON(w, http.StatusBadRequest, "This service is in allow list whose config can not be changed.")
+		h.rd.Text(w, http.StatusBadRequest, "This service is in allow list whose config can not be changed.")
 		return
 	}
 	cfg := h.svr.GetRateLimitConfig().LimiterConfig[serviceLabel]
 	// update concurrency limiter
-	concurrencyUpdatedFlag := "Concurrency limiter is not changed."
 	concurrencyFloat, okc := input["concurrency"].(float64)
 	if okc {
 		cfg.ConcurrencyLimit = uint64(concurrencyFloat)
 	}
 	// update qps rate limiter
-	qpsRateUpdatedFlag := "QPS rate limiter is not changed."
 	qps, okq := input["qps"].(float64)
 	if okq {
 		burst := 0
@@ -204,27 +202,21 @@ func (h *serviceMiddlewareHandler) SetRateLimitConfig(w http.ResponseWriter, r *
 		cfg.QPSBurst = burst
 	}
 	if !okc && !okq {
-		h.rd.JSON(w, http.StatusOK, "No changed.")
+		h.rd.Text(w, http.StatusOK, "Rate limiter is not changed.")
 	} else {
 		status := h.svr.UpdateServiceRateLimiter(serviceLabel, ratelimit.UpdateDimensionConfig(&cfg))
-		switch {
-		case status&ratelimit.QPSChanged != 0:
-			qpsRateUpdatedFlag = "QPS rate limiter is changed."
-		case status&ratelimit.QPSDeleted != 0:
-			qpsRateUpdatedFlag = "QPS rate limiter is deleted."
-		}
-		switch {
-		case status&ratelimit.ConcurrencyChanged != 0:
-			concurrencyUpdatedFlag = "Concurrency limiter is changed."
-		case status&ratelimit.ConcurrencyDeleted != 0:
-			concurrencyUpdatedFlag = "Concurrency limiter is deleted."
+		if status&ratelimit.LimiterDeleted != 0 {
+			cfg := h.svr.GetServiceMiddlewareConfig()
+			delete(cfg.RateLimitConfig.LimiterConfig, serviceLabel)
+			h.svr.SetRateLimitConfig(cfg.RateLimitConfig)
+			h.rd.Text(w, http.StatusOK, "Rate limiter is deleted.")
+			return
 		}
 		err := h.svr.UpdateRateLimitConfig("limiter-config", serviceLabel, cfg)
 		if err != nil {
-			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+			h.rd.Text(w, http.StatusInternalServerError, err.Error())
 		} else {
-			result := rateLimitResult{concurrencyUpdatedFlag, qpsRateUpdatedFlag, h.svr.GetServiceMiddlewareConfig().RateLimitConfig.LimiterConfig}
-			h.rd.JSON(w, http.StatusOK, result)
+			h.rd.Text(w, http.StatusOK, "Rate limiter is updated.")
 		}
 	}
 }
@@ -245,23 +237,21 @@ func (h *serviceMiddlewareHandler) SetGRPCRateLimitConfig(w http.ResponseWriter,
 
 	serviceLabel, ok := input["label"].(string)
 	if !ok || len(serviceLabel) == 0 {
-		h.rd.JSON(w, http.StatusBadRequest, "The label is empty.")
+		h.rd.Text(w, http.StatusBadRequest, "The label is empty.")
 		return
 	}
 	if !h.svr.IsGRPCServiceLabelExist(serviceLabel) {
-		h.rd.JSON(w, http.StatusBadRequest, "There is no label matched.")
+		h.rd.Text(w, http.StatusBadRequest, "There is no label matched.")
 		return
 	}
 
 	cfg := h.svr.GetGRPCRateLimitConfig().LimiterConfig[serviceLabel]
 	// update concurrency limiter
-	concurrencyUpdatedFlag := "Concurrency limiter is not changed."
 	concurrencyFloat, okc := input["concurrency"].(float64)
 	if okc {
 		cfg.ConcurrencyLimit = uint64(concurrencyFloat)
 	}
 	// update qps rate limiter
-	qpsRateUpdatedFlag := "QPS rate limiter is not changed."
 	qps, okq := input["qps"].(float64)
 	if okq {
 		burst := 0
@@ -274,33 +264,21 @@ func (h *serviceMiddlewareHandler) SetGRPCRateLimitConfig(w http.ResponseWriter,
 		cfg.QPSBurst = burst
 	}
 	if !okc && !okq {
-		h.rd.JSON(w, http.StatusOK, "No changed.")
+		h.rd.Text(w, http.StatusOK, "gRPC limiter is not changed.")
 	} else {
 		status := h.svr.UpdateGRPCServiceRateLimiter(serviceLabel, ratelimit.UpdateDimensionConfig(&cfg))
-		switch {
-		case status&ratelimit.QPSChanged != 0:
-			qpsRateUpdatedFlag = "QPS rate limiter is changed."
-		case status&ratelimit.QPSDeleted != 0:
-			qpsRateUpdatedFlag = "QPS rate limiter is deleted."
-		}
-		switch {
-		case status&ratelimit.ConcurrencyChanged != 0:
-			concurrencyUpdatedFlag = "Concurrency limiter is changed."
-		case status&ratelimit.ConcurrencyDeleted != 0:
-			concurrencyUpdatedFlag = "Concurrency limiter is deleted."
+		if status&ratelimit.LimiterDeleted != 0 {
+			cfg := h.svr.GetServiceMiddlewareConfig()
+			delete(cfg.GRPCRateLimitConfig.LimiterConfig, serviceLabel)
+			h.svr.SetGRPCRateLimitConfig(cfg.GRPCRateLimitConfig)
+			h.rd.Text(w, http.StatusOK, "gRPC limiter is deleted.")
+			return
 		}
 		err := h.svr.UpdateGRPCRateLimitConfig("grpc-limiter-config", serviceLabel, cfg)
 		if err != nil {
-			h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+			h.rd.Text(w, http.StatusInternalServerError, err.Error())
 		} else {
-			result := rateLimitResult{concurrencyUpdatedFlag, qpsRateUpdatedFlag, h.svr.GetServiceMiddlewareConfig().GRPCRateLimitConfig.LimiterConfig}
-			h.rd.JSON(w, http.StatusOK, result)
+			h.rd.Text(w, http.StatusOK, "gRPC limiter is updated.")
 		}
 	}
-}
-
-type rateLimitResult struct {
-	ConcurrencyUpdatedFlag string                               `json:"concurrency"`
-	QPSRateUpdatedFlag     string                               `json:"qps"`
-	LimiterConfig          map[string]ratelimit.DimensionConfig `json:"limiter-config"`
 }
