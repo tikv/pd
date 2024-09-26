@@ -52,6 +52,11 @@ const (
 	getClusterStatusName                    = "GetClusterStatus"
 	getStatusName                           = "GetStatus"
 	getReplicateConfigName                  = "GetReplicateConfig"
+	getLabelPropertyConfigName              = "GetLabelPropertyConfig"
+	setLabelPropertyConfigName              = "SetLabelPropertyConfig"
+	getReplicationModeName                  = "GetReplicationMode"
+	setReplicationModeName                  = "SetReplicationMode"
+	getPDServerConfigName                   = "GetPDServerConfig"
 	getSchedulersName                       = "GetSchedulers"
 	createSchedulerName                     = "CreateScheduler"
 	deleteSchedulerName                     = "DeleteScheduler"
@@ -59,11 +64,15 @@ const (
 	getAllPlacementRuleBundlesName          = "GetAllPlacementRuleBundles"
 	getPlacementRuleBundleByGroupName       = "GetPlacementRuleBundleByGroup"
 	getPlacementRulesByGroupName            = "GetPlacementRulesByGroup"
+	getPlacementRulesByRegionName           = "GetPlacementRulesByRegion"
+	getAllPlacementRulesName                = "GetAllPlacementRules"
 	getPlacementRuleName                    = "GetPlacementRule"
 	setPlacementRuleName                    = "SetPlacementRule"
 	setPlacementRuleInBatchName             = "SetPlacementRuleInBatch"
 	setPlacementRuleBundlesName             = "SetPlacementRuleBundles"
+	setPlacementRuleBundleByGroup           = "SetPlacementRuleBundleByGroup"
 	deletePlacementRuleName                 = "DeletePlacementRule"
+	deletePlacementRuleBundleByGroup        = "DeletePlacementRuleBundleByGroup"
 	getAllPlacementRuleGroupsName           = "GetAllPlacementRuleGroups"
 	getPlacementRuleGroupByIDName           = "GetPlacementRuleGroupByID"
 	setPlacementRuleGroupName               = "SetPlacementRuleGroup"
@@ -171,5 +180,6 @@ func (ri *requestInfo) logFields() []zap.Field {
 		zap.String("uri", ri.uri),
 		zap.String("method", ri.method),
 		zap.String("target-url", ri.targetURL),
+		zap.Any("res", ri.res),
 	}
 }

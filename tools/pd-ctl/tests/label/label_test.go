@@ -138,6 +138,18 @@ func TestLabel(t *testing.T) {
 	args = []string{"-u", pdAddr, "label", "isolation"}
 	output, err = tests.ExecuteCommand(cmd, args...)
 	re.NoError(err)
-	re.Contains(string(output), "none")
-	re.Contains(string(output), "2")
+	// label-count:map[none:1],region-map:map[2:none]
+	re.Contains(string(output), "[2:none]")
+
+	// add location label
+	output, err = tests.ExecuteCommand(cmd, "-u", pdAddr, "config", "set", "location-labels", "zone,host")
+	re.NoError(err)
+	re.Contains(string(output), "Success!")
+
+	// label isolation [label]
+	args = []string{"-u", pdAddr, "label", "isolation"}
+	output, err = tests.ExecuteCommand(cmd, args...)
+	re.NoError(err)
+	// label-count:map[zone:1],region-map:map[2:zone]
+	re.Contains(string(output), "[2:zone]")
 }

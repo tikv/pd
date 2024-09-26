@@ -205,11 +205,6 @@ func dial(req *http.Request) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if req.Header.Get(apiutil.XForbiddenForwardToMicroServiceHeader) == "true" {
-		if resp.Header.Get(apiutil.XForwardedToMicroServiceHeader) == "true" {
-			return string(content), errors.Errorf("the request is forwarded to micro service unexpectedly")
-		}
-	}
 	return string(content), nil
 }
 
