@@ -168,7 +168,7 @@ func TestGRPCRateLimit(t *testing.T) {
 	jsonBody, err := json.Marshal(input)
 	re.NoError(err)
 	err = testutil.CheckPostJSON(tests.TestDialClient, urlPrefix, jsonBody,
-		testutil.StatusOK(re), testutil.StringContain(re, "QPS rate limiter is changed"))
+		testutil.StatusOK(re), testutil.StringContain(re, "gRPC limiter is updated"))
 	re.NoError(err)
 	for i := 0; i < 2; i++ {
 		resp, err := grpcPDClient.GetRegion(context.Background(), &pdpb.GetRegionRequest{
@@ -188,7 +188,7 @@ func TestGRPCRateLimit(t *testing.T) {
 	jsonBody, err = json.Marshal(input)
 	re.NoError(err)
 	err = testutil.CheckPostJSON(tests.TestDialClient, urlPrefix, jsonBody,
-		testutil.StatusOK(re), testutil.StringContain(re, "QPS rate limiter is deleted"))
+		testutil.StatusOK(re), testutil.StringContain(re, "gRPC limiter is deleted"))
 	re.NoError(err)
 	for i := 0; i < 100; i++ {
 		resp, err := grpcPDClient.GetRegion(context.Background(), &pdpb.GetRegionRequest{
@@ -208,7 +208,7 @@ func TestGRPCRateLimit(t *testing.T) {
 		errCh = make(chan string)
 	)
 	err = testutil.CheckPostJSON(tests.TestDialClient, urlPrefix, jsonBody,
-		testutil.StatusOK(re), testutil.StringContain(re, "Concurrency limiter is changed"))
+		testutil.StatusOK(re), testutil.StringContain(re, "gRPC limiter is updated"))
 	re.NoError(err)
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/delayProcess", `pause`))
 	var wg sync.WaitGroup
