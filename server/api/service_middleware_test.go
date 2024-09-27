@@ -347,7 +347,7 @@ func (suite *rateLimitConfigTestSuite) TestUpdateGRPCRateLimitConfig() {
 	jsonBody, err = json.Marshal(input)
 	re.NoError(err)
 	err = tu.CheckPostJSON(testDialClient, urlPrefix, jsonBody,
-		tu.StatusOK(re), tu.StringContain(re, "gRPC limiter is updated."))
+		tu.StatusOK(re), tu.StringContain(re, "gRPC limiter is deleted."))
 	re.NoError(err)
 
 	// change both
