@@ -273,7 +273,7 @@ func (suite *rateLimitConfigTestSuite) TestUpdateRateLimitConfig() {
 	jsonBody, err = json.Marshal(input)
 	re.NoError(err)
 	err = tu.CheckPostJSON(testDialClient, urlPrefix, jsonBody,
-		tu.StatusNotOK(re), tu.StringEqual(re, "\"This service is in allow list whose config can not be changed.\"\n"))
+		tu.StatusNotOK(re), tu.StringEqual(re, "This service is in allow list whose config can not be changed."))
 	re.NoError(err)
 }
 
@@ -304,7 +304,7 @@ func (suite *rateLimitConfigTestSuite) TestUpdateGRPCRateLimitConfig() {
 	jsonBody, err = json.Marshal(input)
 	re.NoError(err)
 	err = tu.CheckPostJSON(testDialClient, urlPrefix, jsonBody,
-		tu.StatusOK(re), tu.StringEqual(re, "gRPC rate limiter is not changed."))
+		tu.StatusOK(re), tu.StringEqual(re, "gRPC limiter is not changed."))
 	re.NoError(err)
 
 	// change concurrency
@@ -314,13 +314,13 @@ func (suite *rateLimitConfigTestSuite) TestUpdateGRPCRateLimitConfig() {
 	jsonBody, err = json.Marshal(input)
 	re.NoError(err)
 	err = tu.CheckPostJSON(testDialClient, urlPrefix, jsonBody,
-		tu.StatusOK(re), tu.StringContain(re, "gRPC rate limiter is updated."))
+		tu.StatusOK(re), tu.StringContain(re, "gRPC limiter is updated."))
 	re.NoError(err)
 	input["concurrency"] = 0
 	jsonBody, err = json.Marshal(input)
 	re.NoError(err)
 	err = tu.CheckPostJSON(testDialClient, urlPrefix, jsonBody,
-		tu.StatusOK(re), tu.StringContain(re, "gRPC rate limiter is deleted."))
+		tu.StatusOK(re), tu.StringContain(re, "gRPC limiter is deleted."))
 	re.NoError(err)
 
 	// change qps
@@ -330,7 +330,7 @@ func (suite *rateLimitConfigTestSuite) TestUpdateGRPCRateLimitConfig() {
 	jsonBody, err = json.Marshal(input)
 	re.NoError(err)
 	err = tu.CheckPostJSON(testDialClient, urlPrefix, jsonBody,
-		tu.StatusOK(re), tu.StringContain(re, "gRPC rate limiter is updated."))
+		tu.StatusOK(re), tu.StringContain(re, "gRPC limiter is updated."))
 	re.NoError(err)
 
 	input = make(map[string]any)
@@ -339,7 +339,7 @@ func (suite *rateLimitConfigTestSuite) TestUpdateGRPCRateLimitConfig() {
 	jsonBody, err = json.Marshal(input)
 	re.NoError(err)
 	err = tu.CheckPostJSON(testDialClient, urlPrefix, jsonBody,
-		tu.StatusOK(re), tu.StringContain(re, "gRPC rate limiter is updated."))
+		tu.StatusOK(re), tu.StringContain(re, "gRPC limiter is updated."))
 	re.NoError(err)
 	re.Equal(1, suite.svr.GetGRPCRateLimitConfig().LimiterConfig["StoreHeartbeat"].QPSBurst)
 
@@ -347,7 +347,7 @@ func (suite *rateLimitConfigTestSuite) TestUpdateGRPCRateLimitConfig() {
 	jsonBody, err = json.Marshal(input)
 	re.NoError(err)
 	err = tu.CheckPostJSON(testDialClient, urlPrefix, jsonBody,
-		tu.StatusOK(re), tu.StringContain(re, "gRPC rate limiter is updated."))
+		tu.StatusOK(re), tu.StringContain(re, "gRPC limiter is updated."))
 	re.NoError(err)
 
 	// change both
