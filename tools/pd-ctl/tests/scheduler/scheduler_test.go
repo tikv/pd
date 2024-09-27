@@ -18,6 +18,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -617,7 +618,7 @@ func (suite *schedulerTestSuite) checkGrantLeaderScheduler(cluster *pdTests.Test
 		"evict-slow-store-scheduler": true,
 	})
 
-	checkSchedulerCommand(re, cmd, pdAddr, []string{"-u", pdAddr, "scheduler", "add", "grant-hot-region-scheduler", "1", "1,2,3"}, map[string]bool{
+	checkSchedulerCommand(re, cmd, pdAddr, []string{"-u", pdAddr, "scheduler", "add", "grant-hot-region-scheduler", "1", "2,3"}, map[string]bool{
 		"balance-region-scheduler":   true,
 		"balance-leader-scheduler":   true,
 		"grant-hot-region-scheduler": true,
@@ -631,11 +632,32 @@ func (suite *schedulerTestSuite) checkGrantLeaderScheduler(cluster *pdTests.Test
 		"store-leader-id": float64(1),
 	}
 	mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "grant-hot-region-scheduler"}, &conf3)
+	sort.Strings(conf3["store-id"].([]string))
+	sort.Strings(expected3["store-id"].([]string))
 	re.Equal(expected3, conf3)
 
-	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "grant-hot-region-scheduler", "set", "2", "1,2,3"}, nil)
+	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "grant-hot-region-scheduler", "set", "2", "1,3"}, nil)
 	re.Contains(echo, "Success!")
 	expected3["store-leader-id"] = float64(2)
+	testutil.Eventually(re, func() bool {
+		mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "grant-hot-region-scheduler"}, &conf3)
+		return reflect.DeepEqual(expected3, conf3)
+	})
+
+	checkSchedulerCommand(re, cmd, pdAddr, []string{"-u", pdAddr, "scheduler", "remove", "grant-hot-region-scheduler"}, map[string]bool{
+		"balance-region-scheduler":   true,
+		"balance-leader-scheduler":   true,
+		"evict-slow-store-scheduler": true,
+	})
+
+	// use duplicate store id
+	checkSchedulerCommand(re, cmd, pdAddr, []string{"-u", pdAddr, "scheduler", "add", "grant-hot-region-scheduler", "3", "1,2,3"}, map[string]bool{
+		"balance-region-scheduler":   true,
+		"balance-leader-scheduler":   true,
+		"grant-hot-region-scheduler": true,
+		"evict-slow-store-scheduler": true,
+	})
+	expected3["store-leader-id"] = float64(3)
 	testutil.Eventually(re, func() bool {
 		mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "grant-hot-region-scheduler"}, &conf3)
 		return reflect.DeepEqual(expected3, conf3)
