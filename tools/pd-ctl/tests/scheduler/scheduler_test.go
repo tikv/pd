@@ -18,7 +18,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
-	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -560,11 +559,11 @@ func (suite *schedulerTestSuite) checkSchedulerConfig(cluster *pdTests.TestClust
 	re.Contains(echo, "Success!")
 }
 
-func (suite *schedulerTestSuite) TestGrantLeaderScheduler() {
-	suite.env.RunTestBasedOnMode(suite.checkGrantLeaderScheduler)
+func (suite *schedulerTestSuite) TestGrantHotRegionScheduler() {
+	suite.env.RunTestBasedOnMode(suite.checkGrantHotRegionScheduler)
 }
 
-func (suite *schedulerTestSuite) checkGrantLeaderScheduler(cluster *pdTests.TestCluster) {
+func (suite *schedulerTestSuite) checkGrantHotRegionScheduler(cluster *pdTests.TestCluster) {
 	re := suite.Require()
 	pdAddr := cluster.GetConfig().GetClientURL()
 	cmd := ctl.GetRootCmd()
@@ -632,16 +631,14 @@ func (suite *schedulerTestSuite) checkGrantLeaderScheduler(cluster *pdTests.Test
 		"store-leader-id": float64(1),
 	}
 	mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "grant-hot-region-scheduler"}, &conf3)
-	sort.Strings(conf3["store-id"].([]string))
-	sort.Strings(expected3["store-id"].([]string))
-	re.Equal(expected3, conf3)
+	re.True(compareGrantHotRegionSchedulerConfig(expected3, conf3))
 
 	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "grant-hot-region-scheduler", "set", "2", "1,3"}, nil)
 	re.Contains(echo, "Success!")
 	expected3["store-leader-id"] = float64(2)
 	testutil.Eventually(re, func() bool {
 		mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "grant-hot-region-scheduler"}, &conf3)
-		return reflect.DeepEqual(expected3, conf3)
+		return compareGrantHotRegionSchedulerConfig(expected3, conf3)
 	})
 
 	checkSchedulerCommand(re, cmd, pdAddr, []string{"-u", pdAddr, "scheduler", "remove", "grant-hot-region-scheduler"}, map[string]bool{
@@ -1001,4 +998,29 @@ func checkSchedulerCommand(re *require.Assertions, cmd *cobra.Command, pdAddr st
 		}
 		return true
 	})
+}
+
+func compareGrantHotRegionSchedulerConfig(expect, actual map[string]any) bool {
+	if expect["store-leader-id"] != actual["store-leader-id"] {
+		return false
+	}
+	expectStoreID := expect["store-id"].([]any)
+	actualStoreID := actual["store-id"].([]any)
+	if len(expectStoreID) != len(actualStoreID) {
+		return false
+	}
+	count := map[float64]any{}
+	for _, id := range expectStoreID {
+		// check if the store id is duplicated
+		if _, ok := count[id.(float64)]; ok {
+			return false
+		}
+		count[id.(float64)] = nil
+	}
+	for _, id := range actualStoreID {
+		if _, ok := count[id.(float64)]; !ok {
+			return false
+		}
+	}
+	return true
 }
