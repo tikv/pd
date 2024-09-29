@@ -49,6 +49,7 @@ function cleanup_certs() {
     rm -f ca.pem ca-key.pem ca.srl
     rm -f pd-server.pem pd-server-key.pem pd-server.csr
     rm -f client.pem client-key.pem client.csr
+    rm -f tidb-client.pem tidb-client-key.pem tidb-client.csr
 }
 
 if [[ "$1" == "generate" ]]; then
