@@ -491,6 +491,7 @@ func (c *Controller) GetPauseController(name string) (*PauseController, error) {
 	}
 }
 
+// IsPatrolRegionChanEmpty returns whether the patrol region channel is empty.
 func (c *Controller) IsPatrolRegionChanEmpty() bool {
 	if c.patrolRegionContext == nil {
 		return true
