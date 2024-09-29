@@ -15,6 +15,7 @@
 package schedulers
 
 import (
+	"math/rand"
 	"net/http"
 	"strconv"
 
@@ -272,7 +273,11 @@ func (s *evictLeaderScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) 
 
 func (s *evictLeaderScheduler) Schedule(cluster sche.SchedulerCluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
 	evictLeaderCounter.Inc()
+<<<<<<< HEAD
 	return scheduleEvictLeaderBatch(s.GetName(), s.GetType(), cluster, s.conf, EvictLeaderBatchSize), nil
+=======
+	return scheduleEvictLeaderBatch(s.R, s.GetName(), cluster, s.conf), nil
+>>>>>>> 25dedabf5 (*: reduce rand NewSource (#8675))
 }
 
 func uniqueAppendOperator(dst []*operator.Operator, src ...*operator.Operator) []*operator.Operator {
@@ -295,10 +300,18 @@ type evictLeaderStoresConf interface {
 	getKeyRangesByID(id uint64) []core.KeyRange
 }
 
+<<<<<<< HEAD
 func scheduleEvictLeaderBatch(name, typ string, cluster sche.SchedulerCluster, conf evictLeaderStoresConf, batchSize int) []*operator.Operator {
+=======
+func scheduleEvictLeaderBatch(r *rand.Rand, name string, cluster sche.SchedulerCluster, conf evictLeaderStoresConf) []*operator.Operator {
+>>>>>>> 25dedabf5 (*: reduce rand NewSource (#8675))
 	var ops []*operator.Operator
 	for i := 0; i < batchSize; i++ {
+<<<<<<< HEAD
 		once := scheduleEvictLeaderOnce(name, typ, cluster, conf)
+=======
+		once := scheduleEvictLeaderOnce(r, name, cluster, conf)
+>>>>>>> 25dedabf5 (*: reduce rand NewSource (#8675))
 		// no more regions
 		if len(once) == 0 {
 			break
@@ -312,7 +325,11 @@ func scheduleEvictLeaderBatch(name, typ string, cluster sche.SchedulerCluster, c
 	return ops
 }
 
+<<<<<<< HEAD
 func scheduleEvictLeaderOnce(name, typ string, cluster sche.SchedulerCluster, conf evictLeaderStoresConf) []*operator.Operator {
+=======
+func scheduleEvictLeaderOnce(r *rand.Rand, name string, cluster sche.SchedulerCluster, conf evictLeaderStoresConf) []*operator.Operator {
+>>>>>>> 25dedabf5 (*: reduce rand NewSource (#8675))
 	stores := conf.getStores()
 	ops := make([]*operator.Operator, 0, len(stores))
 	for _, storeID := range stores {
@@ -343,7 +360,7 @@ func scheduleEvictLeaderOnce(name, typ string, cluster sche.SchedulerCluster, co
 		}
 
 		filters = append(filters, &filter.StoreStateFilter{ActionScope: name, TransferLeader: true, OperatorLevel: constant.Urgent})
-		candidates := filter.NewCandidates(cluster.GetFollowerStores(region)).
+		candidates := filter.NewCandidates(r, cluster.GetFollowerStores(region)).
 			FilterTarget(cluster.GetSchedulerConfig(), nil, nil, filters...)
 		// Compatible with old TiKV transfer leader logic.
 		target := candidates.RandomPick()

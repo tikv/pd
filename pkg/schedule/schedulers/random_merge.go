@@ -88,8 +88,13 @@ func (s *randomMergeScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) 
 func (s *randomMergeScheduler) Schedule(cluster sche.SchedulerCluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
 	randomMergeCounter.Inc()
 
+<<<<<<< HEAD
 	store := filter.NewCandidates(cluster.GetStores()).
 		FilterSource(cluster.GetSchedulerConfig(), nil, nil, &filter.StoreStateFilter{ActionScope: s.conf.Name, MoveRegion: true, OperatorLevel: constant.Low}).
+=======
+	store := filter.NewCandidates(s.R, cluster.GetStores()).
+		FilterSource(cluster.GetSchedulerConfig(), nil, nil, &filter.StoreStateFilter{ActionScope: s.GetName(), MoveRegion: true, OperatorLevel: constant.Low}).
+>>>>>>> 25dedabf5 (*: reduce rand NewSource (#8675))
 		RandomPick()
 	if store == nil {
 		randomMergeNoSourceStoreCounter.Inc()
