@@ -657,7 +657,7 @@ func (suite *schedulerTestSuite) checkGrantHotRegionScheduler(cluster *pdTests.T
 	expected3["store-leader-id"] = float64(3)
 	testutil.Eventually(re, func() bool {
 		mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "grant-hot-region-scheduler"}, &conf3)
-		return reflect.DeepEqual(expected3, conf3)
+		return compareGrantHotRegionSchedulerConfig(expected3, conf3)
 	})
 
 	// case 5: remove grant-hot-region-scheduler
