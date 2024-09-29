@@ -253,6 +253,7 @@ const (
 	maxCheckRegionSplitInterval     = 100 * time.Millisecond
 
 	defaultEnableSchedulingFallback = true
+	defaultEnableTSOFallback        = true
 )
 
 // Special keys for Labels
@@ -855,11 +856,15 @@ func (c *DRAutoSyncReplicationConfig) adjust(meta *configutil.ConfigMetaData) {
 // MicroServiceConfig is the configuration for micro service.
 type MicroServiceConfig struct {
 	EnableSchedulingFallback bool `toml:"enable-scheduling-fallback" json:"enable-scheduling-fallback,string"`
+	EnableTSOFallback        bool `toml:"enable-tso-fallback" json:"enable-tso-fallback,string"`
 }
 
 func (c *MicroServiceConfig) adjust(meta *configutil.ConfigMetaData) {
 	if !meta.IsDefined("enable-scheduling-fallback") {
 		c.EnableSchedulingFallback = defaultEnableSchedulingFallback
+	}
+	if !meta.IsDefined("enable-tso-fallback") {
+		c.EnableTSOFallback = defaultEnableTSOFallback
 	}
 }
 
@@ -872,6 +877,11 @@ func (c *MicroServiceConfig) Clone() *MicroServiceConfig {
 // IsSchedulingFallbackEnabled returns whether to enable scheduling service fallback to api service.
 func (c *MicroServiceConfig) IsSchedulingFallbackEnabled() bool {
 	return c.EnableSchedulingFallback
+}
+
+// IsTSOFallbackEnabled returns whether to enable tso service fallback to api service.
+func (c *MicroServiceConfig) IsTSOFallbackEnabled() bool {
+	return c.EnableTSOFallback
 }
 
 // KeyspaceConfig is the configuration for keyspace management.

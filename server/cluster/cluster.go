@@ -417,7 +417,7 @@ func (c *RaftCluster) checkTSOService() {
 				log.Info("TSO server starts to provide timestamp")
 			}
 			c.SetServiceIndependent(constant.TSOServiceName)
-		} else {
+		} else if c.opt.GetMicroServiceConfig().IsTSOFallbackEnabled() {
 			// TSO server is not available, we need to initialize the PD's allocator group and
 			// let PD provide the timestamp through UnsetServiceIndependent.
 			if !allocator.IsInitialize() {
