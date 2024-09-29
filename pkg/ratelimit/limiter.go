@@ -41,7 +41,10 @@ type limiter struct {
 }
 
 func newLimiter() *limiter {
-	return &limiter{}
+	lim := &limiter{
+		concurrency: NewConcurrencyLimiter(0),
+	}
+	return lim
 }
 
 func (l *limiter) getConcurrencyLimiter() *ConcurrencyLimiter {
@@ -57,7 +60,7 @@ func (l *limiter) getRateLimiter() *RateLimiter {
 }
 
 func (l *limiter) isEmpty() bool {
-	return l.concurrency == nil && l.rate == nil
+	return (l.concurrency == nil || l.concurrency.limit == 0) && l.rate == nil
 }
 
 func (l *limiter) getQPSLimiterStatus() (limit rate.Limit, burst int) {
@@ -86,7 +89,7 @@ func (l *limiter) updateConcurrencyConfig(limit uint64) UpdateStatus {
 	defer l.mu.Unlock()
 	if l.concurrency != nil {
 		if limit < 1 {
-			l.concurrency = nil
+			l.concurrency = NewConcurrencyLimiter(0)
 			if l.isEmpty() {
 				return LimiterDeleted
 			}

@@ -140,8 +140,8 @@ func TestControllerWithConcurrencyLimiter(t *testing.T) {
 					waitDuration: 0,
 					checkStatusFunc: func(label string) {
 						limit, current := limiter.GetConcurrencyLimiterStatus(label)
-						re.Empty(limit)
-						re.Empty(current)
+						re.Equal(uint64(0), limit)
+						re.Equal(uint64(10), current)
 					},
 				},
 			},

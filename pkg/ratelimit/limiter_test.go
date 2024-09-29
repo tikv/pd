@@ -97,8 +97,8 @@ func TestWithConcurrencyLimiter(t *testing.T) {
 	re.Equal(15, successCount)
 
 	limit, current = limiter.getConcurrencyLimiterStatus()
-	re.Empty(limit)
-	re.Empty(current)
+	re.Equal(uint64(0), limit)
+	re.Equal(uint64(15), current)
 }
 
 func TestWithQPSLimiter(t *testing.T) {
