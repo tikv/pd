@@ -175,19 +175,19 @@ func (suite *schedulerTestSuite) checkScheduler(cluster *pdTests.TestCluster) {
 	schedulers := []string{"evict-leader-scheduler", "grant-leader-scheduler", "evict-leader-scheduler", "grant-leader-scheduler"}
 
 	checkStorePause := func(changedStores []uint64, schedulerName string) {
-		status := func() string {
-			switch schedulerName {
-			case "evict-leader-scheduler":
-				return "paused"
-			case "grant-leader-scheduler":
-				return "resumed"
-			default:
-				re.Fail(fmt.Sprintf("unknown scheduler %s", schedulerName))
-				return ""
-			}
-		}()
 		for _, store := range stores {
-			isStorePaused := !cluster.GetLeaderServer().GetRaftCluster().GetStore(store.GetId()).AllowLeaderTransfer()
+			storeInfo := cluster.GetLeaderServer().GetRaftCluster().GetStore(store.GetId())
+			status, isStorePaused := func() (string, bool) {
+				switch schedulerName {
+				case "evict-leader-scheduler":
+					return "paused", !storeInfo.AllowLeaderTransferIn()
+				case "grant-leader-scheduler":
+					return "paused", !storeInfo.AllowLeaderTransferOut()
+				default:
+					re.Fail(fmt.Sprintf("unknown scheduler %s", schedulerName))
+					return "", false
+				}
+			}()
 			if slice.AnyOf(changedStores, func(i int) bool {
 				return store.GetId() == changedStores[i]
 			}) {
@@ -198,7 +198,14 @@ func (suite *schedulerTestSuite) checkScheduler(cluster *pdTests.TestCluster) {
 					fmt.Sprintf("store %d should not be %s with %s", store.GetId(), status, schedulerName))
 			}
 			if sche := cluster.GetSchedulingPrimaryServer(); sche != nil {
-				re.Equal(isStorePaused, !sche.GetCluster().GetStore(store.GetId()).AllowLeaderTransfer())
+				switch schedulerName {
+				case "evict-leader-scheduler":
+					re.Equal(isStorePaused, !sche.GetCluster().GetStore(store.GetId()).AllowLeaderTransferIn())
+				case "grant-leader-scheduler":
+					re.Equal(isStorePaused, !sche.GetCluster().GetStore(store.GetId()).AllowLeaderTransferOut())
+				default:
+					re.Fail(fmt.Sprintf("unknown scheduler %s", schedulerName))
+				}
 			}
 		}
 	}

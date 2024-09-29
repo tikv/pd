@@ -37,6 +37,15 @@ func CheckTransferLeaderFrom(re *require.Assertions, op *operator.Operator, kind
 	re.Equal(kind, op.Kind()&kind)
 }
 
+// CheckMultiSourceTransferLeader checks if the operator is to transfer leader out of one of the source stores.
+func CheckMultiSourceTransferLeader(re *require.Assertions, op *operator.Operator, kind operator.OpKind, sourceIDs []uint64) {
+	re.NotNil(op)
+	re.Equal(1, op.Len())
+	re.Contains(sourceIDs, op.Step(0).(operator.TransferLeader).FromStore)
+	kind |= operator.OpLeader
+	re.Equal(kind, op.Kind()&kind)
+}
+
 // CheckMultiTargetTransferLeader checks if the operator is to transfer leader from the specified source to one of the target stores.
 func CheckMultiTargetTransferLeader(re *require.Assertions, op *operator.Operator, kind operator.OpKind, sourceID uint64, targetIDs []uint64) {
 	re.NotNil(op)
