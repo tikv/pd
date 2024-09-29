@@ -110,8 +110,13 @@ func (s *labelScheduler) Schedule(cluster sche.SchedulerCluster, dryRun bool) ([
 			}
 			f := filter.NewExcludedFilter(s.GetName(), nil, excludeStores)
 
+<<<<<<< HEAD
 			target := filter.NewCandidates(cluster.GetFollowerStores(region)).
 				FilterTarget(cluster.GetSchedulerConfig(), nil, nil, &filter.StoreStateFilter{ActionScope: LabelName, TransferLeader: true, OperatorLevel: constant.Medium}, f).
+=======
+			target := filter.NewCandidates(s.R, cluster.GetFollowerStores(region)).
+				FilterTarget(cluster.GetSchedulerConfig(), nil, nil, &filter.StoreStateFilter{ActionScope: s.GetName(), TransferLeader: true, OperatorLevel: constant.Medium}, f).
+>>>>>>> 25dedabf5 (*: reduce rand NewSource (#8675))
 				RandomPick()
 			if target == nil {
 				log.Debug("label scheduler no target found for region", zap.Uint64("region-id", region.GetID()))

@@ -15,6 +15,8 @@
 package schedulers
 
 import (
+	"math/rand"
+
 	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/core"
@@ -83,7 +85,11 @@ batchLoop:
 	for i := 0; i < batchSize; i++ {
 		select {
 		case region := <-s.regions:
+<<<<<<< HEAD
 			op, err := s.scheduleTransferWitnessLeader(name, typ, cluster, region)
+=======
+			op, err := scheduleTransferWitnessLeader(s.R, name, cluster, region)
+>>>>>>> 25dedabf5 (*: reduce rand NewSource (#8675))
 			if err != nil {
 				log.Debug("fail to create transfer leader operator", errs.ZapError(err))
 				continue
@@ -100,7 +106,11 @@ batchLoop:
 	return ops
 }
 
+<<<<<<< HEAD
 func (s *transferWitnessLeaderScheduler) scheduleTransferWitnessLeader(name, typ string, cluster sche.SchedulerCluster, region *core.RegionInfo) (*operator.Operator, error) {
+=======
+func scheduleTransferWitnessLeader(r *rand.Rand, name string, cluster sche.SchedulerCluster, region *core.RegionInfo) (*operator.Operator, error) {
+>>>>>>> 25dedabf5 (*: reduce rand NewSource (#8675))
 	var filters []filter.Filter
 	unhealthyPeerStores := make(map[uint64]struct{})
 	for _, peer := range region.GetDownPeers() {
@@ -109,8 +119,14 @@ func (s *transferWitnessLeaderScheduler) scheduleTransferWitnessLeader(name, typ
 	for _, peer := range region.GetPendingPeers() {
 		unhealthyPeerStores[peer.GetStoreId()] = struct{}{}
 	}
+<<<<<<< HEAD
 	filters = append(filters, filter.NewExcludedFilter(name, nil, unhealthyPeerStores), &filter.StoreStateFilter{ActionScope: name, TransferLeader: true, OperatorLevel: constant.Urgent})
 	candidates := filter.NewCandidates(cluster.GetFollowerStores(region)).FilterTarget(cluster.GetSchedulerConfig(), nil, nil, filters...)
+=======
+	filters = append(filters, filter.NewExcludedFilter(name, nil, unhealthyPeerStores),
+		&filter.StoreStateFilter{ActionScope: name, TransferLeader: true, OperatorLevel: constant.Urgent})
+	candidates := filter.NewCandidates(r, cluster.GetFollowerStores(region)).FilterTarget(cluster.GetSchedulerConfig(), nil, nil, filters...)
+>>>>>>> 25dedabf5 (*: reduce rand NewSource (#8675))
 	// Compatible with old TiKV transfer leader logic.
 	target := candidates.RandomPick()
 	targets := candidates.PickAll()
