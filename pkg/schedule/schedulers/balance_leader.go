@@ -512,7 +512,11 @@ func (l *balanceLeaderScheduler) transferLeaderIn(solver *solver, collector *pla
 	if leaderFilter := filter.NewPlacementLeaderSafeguard(l.GetName(), conf, solver.GetBasicCluster(), solver.GetRuleManager(), solver.region, solver.source, false /*allowMoveLeader*/); leaderFilter != nil {
 		finalFilters = append(l.filters, leaderFilter)
 	}
+<<<<<<< HEAD
 	target := filter.NewCandidates([]*core.StoreInfo{solver.target}).
+=======
+	target := filter.NewCandidates(l.R, []*core.StoreInfo{solver.Target}).
+>>>>>>> 25dedabf5 (*: reduce rand NewSource (#8675))
 		FilterTarget(conf, nil, l.filterCounter, finalFilters...).
 		PickFirst()
 	if target == nil {

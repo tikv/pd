@@ -112,9 +112,15 @@ func (s *shuffleRegionScheduler) Schedule(cluster schedule.Cluster, dryRun bool)
 	return []*operator.Operator{op}, nil
 }
 
+<<<<<<< HEAD
 func (s *shuffleRegionScheduler) scheduleRemovePeer(cluster schedule.Cluster) (*core.RegionInfo, *metapb.Peer) {
 	candidates := filter.NewCandidates(cluster.GetStores()).
 		FilterSource(cluster.GetOpts(), nil, nil, s.filters...).
+=======
+func (s *shuffleRegionScheduler) scheduleRemovePeer(cluster sche.SchedulerCluster) (*core.RegionInfo, *metapb.Peer) {
+	candidates := filter.NewCandidates(s.R, cluster.GetStores()).
+		FilterSource(cluster.GetSchedulerConfig(), nil, nil, s.filters...).
+>>>>>>> 25dedabf5 (*: reduce rand NewSource (#8675))
 		Shuffle()
 
 	pendingFilter := filter.NewRegionPendingFilter()
@@ -152,8 +158,13 @@ func (s *shuffleRegionScheduler) scheduleAddPeer(cluster schedule.Cluster, regio
 	scoreGuard := filter.NewPlacementSafeguard(s.GetName(), cluster.GetOpts(), cluster.GetBasicCluster(), cluster.GetRuleManager(), region, store, nil)
 	excludedFilter := filter.NewExcludedFilter(s.GetName(), nil, region.GetStoreIDs())
 
+<<<<<<< HEAD
 	target := filter.NewCandidates(cluster.GetStores()).
 		FilterTarget(cluster.GetOpts(), nil, nil, append(s.filters, scoreGuard, excludedFilter)...).
+=======
+	target := filter.NewCandidates(s.R, cluster.GetStores()).
+		FilterTarget(cluster.GetSchedulerConfig(), nil, nil, append(s.filters, scoreGuard, excludedFilter)...).
+>>>>>>> 25dedabf5 (*: reduce rand NewSource (#8675))
 		RandomPick()
 	if target == nil {
 		return nil
