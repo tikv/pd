@@ -443,7 +443,7 @@ func (td *tsoDispatcher) handleProcessRequestError(ctx context.Context, bo *retr
 	td.connectionCtxs.Delete(streamURL)
 	streamCancelFunc()
 	if errs.IsServiceModeChange(err) {
-		svcDiscovery.ScheduleServiceModeChanged()
+		svcDiscovery.ScheduleCheckServiceModeChanged()
 		return false
 	}
 	// Because ScheduleCheckMemberChanged is asynchronous, if the leader changes, we better call `updateMember` ASAP.
