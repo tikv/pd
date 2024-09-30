@@ -641,3 +641,86 @@ func TestTSOServiceSwitch(t *testing.T) {
 	<-ch
 	re.NoError(failpoint.Disable("github.com/tikv/pd/client/fastUpdateServiceMode"))
 }
+
+func TestTSOServiceBehaviorWithServerStartStop(t *testing.T) {
+	re := require.New(t)
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/fastUpdateServiceMode", `return(true)`))
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	tc, err := tests.NewTestAPICluster(ctx, 1)
+	re.NoError(err)
+	defer tc.Destroy()
+
+	err = tc.RunInitialServers()
+	re.NoError(err)
+	tc.WaitLeader()
+	leaderServer := tc.GetLeaderServer()
+	re.NotNil(leaderServer)
+	re.NoError(leaderServer.BootstrapCluster())
+
+	pdClient, err := pd.NewClientWithContext(ctx, tc.GetConfig().GetClientURLs(), pd.SecurityOption{})
+	re.NoError(err)
+	re.NotNil(pdClient)
+	defer pdClient.Close()
+
+	var globalLastTS uint64
+	checkTSOMonotonic := func(count int) error {
+		for i := 0; i < count; i++ {
+			physical, logical, err := pdClient.GetTS(ctx)
+			if err != nil {
+				return err
+			}
+			ts := (uint64(physical) << 18) + uint64(logical)
+			if ts <= globalLastTS {
+				return fmt.Errorf("TSO is not globally increasing: last %d, current %d", globalLastTS, ts)
+			}
+			globalLastTS = ts
+		}
+		return nil
+	}
+
+	// Initially, TSO service should be provided by PD
+	re.NoError(checkTSOMonotonic(10))
+
+	// Start TSO server
+	tsoCluster, err := tests.NewTestTSOCluster(ctx, 1, leaderServer.GetAddr())
+	re.NoError(err)
+	tsoCluster.WaitForDefaultPrimaryServing(re)
+
+	// Wait for TSO server to start and PD to detect it
+	time.Sleep(300 * time.Millisecond)
+
+	// Verify PD is not providing TSO service
+	err = checkTSOMonotonic(10)
+	re.NoError(err)
+
+	// Disable TSO fallback
+	cfg := leaderServer.GetServer().GetMicroServiceConfig().Clone()
+	cfg.EnableTSOFallback = false
+	leaderServer.GetServer().SetMicroServiceConfig(*cfg)
+
+	tsoCluster.Destroy()
+
+	// Wait for the configuration change to take effect
+	time.Sleep(300 * time.Millisecond)
+
+	// Verify PD is not providing TSO service multiple times
+	for i := 0; i < 5; i++ {
+		err = checkTSOMonotonic(1)
+		re.Error(err, "TSO service should not be available")
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	// Now enable TSO fallback
+	cfg = leaderServer.GetServer().GetMicroServiceConfig().Clone()
+	cfg.EnableTSOFallback = true
+	leaderServer.GetServer().SetMicroServiceConfig(*cfg)
+
+	// Wait for PD to detect the change
+	time.Sleep(300 * time.Millisecond)
+
+	// Verify PD is now providing TSO service and timestamps are monotonically increasing
+	re.NoError(checkTSOMonotonic(10))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/fastUpdateServiceMode"))
+}
