@@ -216,9 +216,7 @@ func schedulersRegister() {
 				}
 				storeIDs = append(storeIDs, storeID)
 			}
-			if !conf.setStore(leaderID, storeIDs) {
-				return errs.ErrSchedulerConfig
-			}
+			conf.setStore(leaderID, storeIDs)
 			return nil
 		}
 	})
