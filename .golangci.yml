@@ -15,6 +15,9 @@ linters:
     - gofmt
   disable:
     - errcheck
+    - copyloopvar
+    - goimports
+    - depguard
 linters-settings:
   gocritic:
     # Which checks should be disabled; can't be combined with 'enabled-checks'; default is empty

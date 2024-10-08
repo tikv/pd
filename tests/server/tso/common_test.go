@@ -36,7 +36,7 @@ const (
 func checkAndReturnTimestampResponse(re *require.Assertions, req *pdpb.TsoRequest, resp *pdpb.TsoResponse) *pdpb.Timestamp {
 	re.Equal(req.GetCount(), resp.GetCount())
 	timestamp := resp.GetTimestamp()
-	re.Greater(timestamp.GetPhysical(), int64(0))
+	re.Positive(timestamp.GetPhysical())
 	re.GreaterOrEqual(uint32(timestamp.GetLogical())>>timestamp.GetSuffixBits(), req.GetCount())
 	return timestamp
 }

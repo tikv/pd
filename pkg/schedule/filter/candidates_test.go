@@ -97,7 +97,7 @@ func TestCandidates(t *testing.T) {
 	cs.Sort(idComparer)
 	check(re, cs, 1, 2, 3, 4, 5, 6, 7)
 	store = cs.RandomPick()
-	re.Greater(store.GetID(), uint64(0))
+	re.Positive(store.GetID())
 	re.Less(store.GetID(), uint64(8))
 
 	cs = newTestCandidates(10, 15, 23, 20, 33, 32, 31)

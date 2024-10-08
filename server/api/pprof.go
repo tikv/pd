@@ -52,7 +52,7 @@ func newPprofHandler(svr *server.Server, rd *render.Render) *pprofHandler {
 // @Produce  application/octet-stream
 // @Router   /debug/pprof/zip [get]
 func (h *pprofHandler) PProfZip(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="pd_debug"`+time.Now().Format("20060102_150405")+".zip"))
+	w.Header().Set("Content-Disposition", `attachment; filename="pd_debug"`+time.Now().Format("20060102_150405")+".zip")
 
 	// dump goroutine/heap/mutex
 	items := []struct {

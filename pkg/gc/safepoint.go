@@ -56,7 +56,7 @@ func (manager *SafePointManager) UpdateGCSafePoint(newSafePoint uint64) (oldSafe
 		return
 	}
 	if manager.cfg.BlockSafePointV1 {
-		err = errors.Errorf(blockGCSafePointErrmsg)
+		err = errors.New(blockGCSafePointErrmsg)
 		return
 	}
 
@@ -73,7 +73,7 @@ func (manager *SafePointManager) UpdateGCSafePoint(newSafePoint uint64) (oldSafe
 // UpdateServiceGCSafePoint update the safepoint for a specific service.
 func (manager *SafePointManager) UpdateServiceGCSafePoint(serviceID string, newSafePoint uint64, ttl int64, now time.Time) (minServiceSafePoint *endpoint.ServiceSafePoint, updated bool, err error) {
 	if manager.cfg.BlockSafePointV1 {
-		return nil, false, errors.Errorf(blockServiceSafepointErrmsg)
+		return nil, false, errors.New(blockServiceSafepointErrmsg)
 	}
 	manager.serviceGCLock.Lock()
 	defer manager.serviceGCLock.Unlock()

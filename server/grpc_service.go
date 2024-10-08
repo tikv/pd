@@ -579,7 +579,7 @@ func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
 		ts, err := s.tsoAllocatorManager.HandleRequest(ctx, request.GetDcLocation(), count)
 		task.End()
 		if err != nil {
-			return status.Errorf(codes.Unknown, err.Error())
+			return status.Error(codes.Unknown, err.Error())
 		}
 		tsoHandleDuration.Observe(time.Since(start).Seconds())
 		response := &pdpb.TsoResponse{
