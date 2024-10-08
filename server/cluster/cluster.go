@@ -399,16 +399,20 @@ func (c *RaftCluster) checkSchedulingService() {
 
 // checkTSOService checks the TSO service.
 func (c *RaftCluster) checkTSOService() {
-	allocator, err := c.tsoAllocator.GetAllocator(tso.GlobalDCLocation)
-	if err != nil {
-		log.Error("failed to get global TSO allocator", errs.ZapError(err))
-		return
-	}
 	// We only need to check the TSO service in the API service mode.
 	if c.isAPIServiceMode {
 		servers, err := discovery.Discover(c.etcdClient, strconv.FormatUint(c.clusterID, 10), constant.TSOServiceName)
 		// check if the TSO server is available
-		if err == nil && len(servers) != 0 {
+		if c.opt.GetMicroServiceConfig().IsTSOFallbackEnabled() && (err != nil || len(servers) == 0) {
+			// If TSO fallback is enabled and TSO server is not available,
+			// we need to initialize the PD's allocator group and
+			// let PD provide the timestamp through UnsetServiceIndependent.
+			// Otherwise, we will wait for the TSO service to be available.
+			// In this case, no timestamp will be provided.
+			if err := c.startTSOJobs(); err != nil {
+				return
+			}
+		} else {
 			// If the previous TSO is provided by the PD server, we need to reset the PD's allocator group
 			// and start to let the TSO service provide the timestamp through SetServiceIndependent.
 			if !c.IsServiceIndependent(constant.TSOServiceName) {
@@ -417,34 +421,12 @@ func (c *RaftCluster) checkTSOService() {
 				log.Info("TSO server starts to provide timestamp")
 			}
 			c.SetServiceIndependent(constant.TSOServiceName)
-		} else if c.opt.GetMicroServiceConfig().IsTSOFallbackEnabled() {
-			// TSO server is not available.
-			// If TSO fallback is enabled, we need to initialize the PD's allocator group and
-			// let PD provide the timestamp through UnsetServiceIndependent.
-			// Otherwise, we will wait for the TSO service to be available.
-			// In this case, no timestamp will be provided.
-			if !allocator.IsInitialize() {
-				log.Info("initializing the global TSO allocator")
-				if err := allocator.Initialize(0); err != nil {
-					log.Error("failed to initialize the global TSO allocator", errs.ZapError(err))
-					return
-				}
-			}
-			if c.IsServiceIndependent(constant.TSOServiceName) {
-				log.Info("PD server starts to provide timestamp")
-			}
-			c.UnsetServiceIndependent(constant.TSOServiceName)
 		}
 	} else {
 		// If the PD server is not in the API service mode, PD should provide the TSO service.
-		if !allocator.IsInitialize() {
-			log.Info("initializing the global TSO allocator")
-			if err := allocator.Initialize(0); err != nil {
-				log.Error("failed to initialize the global TSO allocator", errs.ZapError(err))
-				return
-			}
+		if err := c.startTSOJobs(); err != nil {
+			return
 		}
-		c.UnsetServiceIndependent(constant.TSOServiceName)
 	}
 }
 
@@ -484,6 +466,26 @@ func (c *RaftCluster) runServiceCheckJob() {
 			c.checkTSOService()
 		}
 	}
+}
+
+func (c *RaftCluster) startTSOJobs() error {
+	allocator, err := c.tsoAllocator.GetAllocator(tso.GlobalDCLocation)
+	if err != nil {
+		log.Error("failed to get global TSO allocator", errs.ZapError(err))
+		return err
+	}
+	if !allocator.IsInitialize() {
+		log.Info("initializing the global TSO allocator")
+		if err := allocator.Initialize(0); err != nil {
+			log.Error("failed to initialize the global TSO allocator", errs.ZapError(err))
+			return err
+		}
+	}
+	if c.IsServiceIndependent(constant.TSOServiceName) {
+		log.Info("PD server starts to provide timestamp")
+	}
+	c.UnsetServiceIndependent(constant.TSOServiceName)
+	return nil
 }
 
 // startGCTuner
