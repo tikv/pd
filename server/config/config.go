@@ -253,7 +253,7 @@ const (
 	maxCheckRegionSplitInterval     = 100 * time.Millisecond
 
 	defaultEnableSchedulingFallback = true
-	defaultEnableTSOFallback        = true
+	defaultEnableTSOFallback        = false
 )
 
 // Special keys for Labels

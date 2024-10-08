@@ -593,7 +593,7 @@ func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
 		if s.forwardToTSOService() {
 			if request.GetCount() == 0 {
 				err = errs.ErrGenerateTimestamp.FastGenByArgs("tso count should be positive")
-				return status.Errorf(codes.Unknown, err.Error())
+				return status.Error(codes.Unknown, err.Error())
 			}
 
 			forwardedHost, ok := s.GetServicePrimaryAddr(stream.Context(), constant.TSOServiceName)
