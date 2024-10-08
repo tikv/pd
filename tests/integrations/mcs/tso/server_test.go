@@ -323,6 +323,7 @@ func TestForwardTSOWhenPrimaryChanged(t *testing.T) {
 
 func TestResignTSOPrimaryForward(t *testing.T) {
 	re := require.New(t)
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/fastUpdateServiceMode", `return(true)`))
 	suite := NewAPIServerForward(re)
 	defer suite.ShutDown()
 	// TODO: test random kill primary with 3 nodes
@@ -345,6 +346,7 @@ func TestResignTSOPrimaryForward(t *testing.T) {
 		re.NoError(err)
 		suite.checkAvailableTSO(re, true)
 	}
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/fastUpdateServiceMode"))
 }
 
 func TestResignAPIPrimaryForward(t *testing.T) {
