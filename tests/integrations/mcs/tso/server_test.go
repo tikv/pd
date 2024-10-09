@@ -279,7 +279,7 @@ func TestForwardTSORelated(t *testing.T) {
 	re.NoError(err)
 	defer tc.Destroy()
 	tc.WaitForDefaultPrimaryServing(re)
-	suite.checkAvailableTSO(re, true)
+	suite.checkAvailableTSO(re)
 	re.NoError(failpoint.Disable("github.com/tikv/pd/client/fastUpdateServiceMode"))
 }
 
@@ -296,7 +296,7 @@ func TestForwardTSOWhenPrimaryChanged(t *testing.T) {
 	// can use the tso-related interface with old primary
 	oldPrimary, exist := suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx, constant.TSOServiceName)
 	re.True(exist)
-	suite.checkAvailableTSO(re, true)
+	suite.checkAvailableTSO(re)
 
 	// can use the tso-related interface with new primary
 	tc.DestroyServer(oldPrimary)
@@ -305,11 +305,11 @@ func TestForwardTSOWhenPrimaryChanged(t *testing.T) {
 	primary, exist := suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx, constant.TSOServiceName)
 	re.True(exist)
 	re.NotEqual(oldPrimary, primary)
-	suite.checkAvailableTSO(re, true)
+	suite.checkAvailableTSO(re)
 
 	// can use the tso-related interface with old primary again
 	tc.AddServer(oldPrimary)
-	suite.checkAvailableTSO(re, true)
+	suite.checkAvailableTSO(re)
 	for addr := range tc.GetServers() {
 		if addr != oldPrimary {
 			tc.DestroyServer(addr)
@@ -320,7 +320,7 @@ func TestForwardTSOWhenPrimaryChanged(t *testing.T) {
 	primary, exist = suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx, constant.TSOServiceName)
 	re.True(exist)
 	re.Equal(oldPrimary, primary)
-	suite.checkAvailableTSO(re, true)
+	suite.checkAvailableTSO(re)
 }
 
 func TestResignTSOPrimaryForward(t *testing.T) {
@@ -346,7 +346,7 @@ func TestResignTSOPrimaryForward(t *testing.T) {
 			time.Sleep(100 * time.Millisecond)
 		}
 		re.NoError(err)
-		suite.checkAvailableTSO(re, true)
+		suite.checkAvailableTSO(re)
 	}
 	re.NoError(failpoint.Disable("github.com/tikv/pd/client/fastUpdateServiceMode"))
 }
@@ -449,7 +449,7 @@ func (suite *APIServerForward) checkForwardTSOUnexpectedToFollower(checkTSO func
 	checkTSO()
 
 	// test tso request will success after cache is updated
-	suite.checkAvailableTSO(re, true)
+	suite.checkAvailableTSO(re)
 	newPrimary, exist2 := suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx, constant.TSOServiceName)
 	re.True(exist2)
 	re.NotEqual(errorAddr, newPrimary)
@@ -471,10 +471,8 @@ func (suite *APIServerForward) addRegions() {
 	}
 }
 
-func (suite *APIServerForward) checkAvailableTSO(re *require.Assertions, needWait bool) {
-	if needWait {
-		mcs.WaitForTSOServiceAvailable(suite.ctx, re, suite.pdClient)
-	}
+func (suite *APIServerForward) checkAvailableTSO(re *require.Assertions) {
+	mcs.WaitForTSOServiceAvailable(suite.ctx, re, suite.pdClient)
 	// try to get ts
 	_, _, err := suite.pdClient.GetTS(suite.ctx)
 	re.NoError(err)
@@ -646,17 +644,17 @@ func TestTSOServiceSwitch1(t *testing.T) {
 			}
 		}
 	}()
-	waitOneTs := func() {
+	waitOneTS := func() {
 		ch1 <- struct{}{}
 		<-ch
 	}
-	waitOneTs()
+	waitOneTS()
 	tsoCluster, err := tests.NewTestTSOCluster(ctx, 1, backendEndpoints)
 	re.NoError(err)
 	tsoCluster.WaitForDefaultPrimaryServing(re)
-	waitOneTs()
+	waitOneTS()
 	tsoCluster.Destroy()
-	waitOneTs()
+	waitOneTS()
 	re.NoError(failpoint.Disable("github.com/tikv/pd/client/fastUpdateServiceMode"))
 }
 

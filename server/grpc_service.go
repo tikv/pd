@@ -532,7 +532,6 @@ func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
 
 	var (
 		forwardStream     tsopb.TSO_TsoClient
-		forwardCtx        context.Context
 		cancelForward     context.CancelFunc
 		tsoStreamErr      error
 		lastForwardedHost string
@@ -596,63 +595,12 @@ func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
 				return status.Error(codes.Unknown, err.Error())
 			}
 
-			forwardedHost, ok := s.GetServicePrimaryAddr(stream.Context(), constant.TSOServiceName)
-			if !ok || len(forwardedHost) == 0 {
-				tsoStreamErr = errors.WithStack(ErrNotFoundTSOAddr)
+			cancelForward, forwardStream, lastForwardedHost, tsoStreamErr, err = s.handleTSOForwarding(forwardStream, stream, nil, request, tsDeadlineCh, lastForwardedHost, cancelForward)
+			if tsoStreamErr != nil {
 				return tsoStreamErr
 			}
-			if forwardStream == nil || lastForwardedHost != forwardedHost {
-				if cancelForward != nil {
-					cancelForward()
-				}
-
-				clientConn, err := s.getDelegateClient(s.ctx, forwardedHost)
-				if err != nil {
-					tsoStreamErr = errors.WithStack(err)
-					return tsoStreamErr
-				}
-				forwardStream, forwardCtx, cancelForward, err = createTSOForwardStream(stream.Context(), clientConn)
-				if err != nil {
-					tsoStreamErr = errors.WithStack(err)
-					return tsoStreamErr
-				}
-				lastForwardedHost = forwardedHost
-			}
-
-			tsopbResp, err := s.forwardTSORequestWithDeadLine(forwardCtx, cancelForward, forwardStream, request, tsDeadlineCh)
 			if err != nil {
-				tsoStreamErr = errors.WithStack(err)
-				return tsoStreamErr
-			}
-
-			// The error types defined for tsopb and pdpb are different, so we need to convert them.
-			var pdpbErr *pdpb.Error
-			tsopbErr := tsopbResp.GetHeader().GetError()
-			if tsopbErr != nil {
-				if tsopbErr.Type == tsopb.ErrorType_OK {
-					pdpbErr = &pdpb.Error{
-						Type:    pdpb.ErrorType_OK,
-						Message: tsopbErr.GetMessage(),
-					}
-				} else {
-					// TODO: specify FORWARD FAILURE error type instead of UNKNOWN.
-					pdpbErr = &pdpb.Error{
-						Type:    pdpb.ErrorType_UNKNOWN,
-						Message: tsopbErr.GetMessage(),
-					}
-				}
-			}
-
-			response := &pdpb.TsoResponse{
-				Header: &pdpb.ResponseHeader{
-					ClusterId: tsopbResp.GetHeader().GetClusterId(),
-					Error:     pdpbErr,
-				},
-				Count:     tsopbResp.GetCount(),
-				Timestamp: tsopbResp.GetTimestamp(),
-			}
-			if err := stream.Send(response); err != nil {
-				return errors.WithStack(err)
+				return err
 			}
 			continue
 		}
