@@ -34,6 +34,10 @@ const (
 	RetryTimeoutErr = "retry timeout"
 	// NotPrimaryErr indicates the non-primary member received the requests which should be received by primary.
 	NotPrimaryErr = "not primary"
+	// NotFoundTSOErr indicates the tso address is not found.
+	NotFoundTSOErr = "not found tso address"
+	// MaximumRetriesExceededErr indicates the maximum retries exceeded.
+	MaximumRetriesExceededErr = "maximum number of retries exceeded"
 )
 
 // client errors

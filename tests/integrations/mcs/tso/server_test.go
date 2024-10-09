@@ -586,6 +586,10 @@ func (suite *CommonTestSuite) TestBootstrapDefaultKeyspaceGroup() {
 	suite.pdLeader = suite.cluster.GetServer(suite.cluster.WaitLeader())
 }
 
+// TestTSOServiceSwitch1 tests the switching behavior of the TSO service when TSO fallback is enabled.
+// The test ensures that initially, the TSO service is provided by PD. When a TSO server is started,
+// the service switches to the TSO server.
+// If the TSO server is stopped, the service should switch back to being provided by PD.
 func TestTSOServiceSwitch1(t *testing.T) {
 	re := require.New(t)
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/fastUpdateServiceMode", `return(true)`))
@@ -615,7 +619,7 @@ func TestTSOServiceSwitch1(t *testing.T) {
 	ch := make(chan struct{})
 	ch1 := make(chan struct{})
 	wg.Add(1)
-	go func(ctx context.Context, wg *sync.WaitGroup, ch, ch1 chan struct{}) {
+	go func() {
 		defer wg.Done()
 		var lastPhysical, lastLogical int64
 		for {
@@ -641,20 +645,25 @@ func TestTSOServiceSwitch1(t *testing.T) {
 				t.Log(err)
 			}
 		}
-	}(ctx, &wg, ch, ch1)
-	ch1 <- struct{}{}
-	<-ch
+	}()
+	waitOneTs := func() {
+		ch1 <- struct{}{}
+		<-ch
+	}
+	waitOneTs()
 	tsoCluster, err := tests.NewTestTSOCluster(ctx, 1, backendEndpoints)
 	re.NoError(err)
 	tsoCluster.WaitForDefaultPrimaryServing(re)
-	ch1 <- struct{}{}
-	<-ch
+	waitOneTs()
 	tsoCluster.Destroy()
-	ch1 <- struct{}{}
-	<-ch
+	waitOneTs()
 	re.NoError(failpoint.Disable("github.com/tikv/pd/client/fastUpdateServiceMode"))
 }
 
+// TestTSOServiceSwitch2 tests the behavior of TSO service switching when TSO fallback is enabled.
+// Initially, the TSO service should be provided by PD. After starting a TSO server, the service should switch to the TSO server.
+// When the TSO server is stopped, the PD should resume providing the TSO service if fallback is enabled.
+// If fallback is disabled, the PD should not provide TSO service after the TSO server is stopped.
 func TestTSOServiceSwitch2(t *testing.T) {
 	re := require.New(t)
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/fastUpdateServiceMode", `return(true)`))
@@ -727,6 +736,10 @@ func TestTSOServiceSwitch2(t *testing.T) {
 	re.NoError(failpoint.Disable("github.com/tikv/pd/client/fastUpdateServiceMode"))
 }
 
+// TestTSOServiceSwitch3 tests the behavior of TSO service switching under different configurations.
+// This test verifies that after disabling TSO fallback, the PD should not provide TSO service.
+// Then, it starts a TSO server and verifies that the TSO service is provided by this server.
+// Finally, it stops the TSO server and verifies that the PD no longer provides TSO service.
 func TestTSOServiceSwitch3(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())

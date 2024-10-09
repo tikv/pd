@@ -175,9 +175,12 @@ type RaftCluster struct {
 	regionSyncer             *syncer.RegionSyncer
 	changedRegions           chan *core.RegionInfo
 	keyspaceGroupManager     *keyspace.GroupManager
-	independentServices      sync.Map
-	hbstreams                *hbstream.HeartbeatStreams
-	tsoAllocator             *tso.AllocatorManager
+	// independentServices is a map of services that are independent of the PD server.
+	// If a service is not in this map, the PD server will provide the service itself.
+	// Otherwise, the service will be provided by the corresponding micro-service.
+	independentServices sync.Map
+	hbstreams           *hbstream.HeartbeatStreams
+	tsoAllocator        *tso.AllocatorManager
 
 	// heartbeatRunner is used to process the subtree update task asynchronously.
 	heartbeatRunner ratelimit.Runner
