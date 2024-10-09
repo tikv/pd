@@ -270,15 +270,17 @@ func (suite *APIServerForward) ShutDown() {
 
 func TestForwardTSORelated(t *testing.T) {
 	re := require.New(t)
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/fastUpdateServiceMode", `return(true)`))
 	suite := NewAPIServerForward(re)
 	defer suite.ShutDown()
-	// PD will serve the TSO request before TSO server is registered.
-	suite.checkAvailableTSO(re, false)
+	_, _, err := suite.pdClient.GetTS(suite.ctx)
+	re.Error(err)
 	tc, err := tests.NewTestTSOCluster(suite.ctx, 1, suite.backendEndpoints)
 	re.NoError(err)
 	defer tc.Destroy()
 	tc.WaitForDefaultPrimaryServing(re)
 	suite.checkAvailableTSO(re, true)
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/fastUpdateServiceMode"))
 }
 
 func TestForwardTSOWhenPrimaryChanged(t *testing.T) {
