@@ -533,6 +533,7 @@ func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
 	var (
 		forwardStream     tsopb.TSO_TsoClient
 		cancelForward     context.CancelFunc
+		forwardCtx        context.Context
 		tsoStreamErr      error
 		lastForwardedHost string
 	)
@@ -595,7 +596,7 @@ func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
 				return status.Error(codes.Unknown, err.Error())
 			}
 
-			cancelForward, forwardStream, lastForwardedHost, tsoStreamErr, err = s.handleTSOForwarding(forwardStream, stream, nil, request, tsDeadlineCh, lastForwardedHost, cancelForward)
+			forwardCtx, cancelForward, forwardStream, lastForwardedHost, tsoStreamErr, err = s.handleTSOForwarding(forwardCtx, forwardStream, stream, nil, request, tsDeadlineCh, lastForwardedHost, cancelForward)
 			if tsoStreamErr != nil {
 				return tsoStreamErr
 			}

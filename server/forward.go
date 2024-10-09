@@ -88,6 +88,7 @@ func (s *GrpcServer) forwardTSO(stream pdpb.PD_TsoServer) error {
 	var (
 		server            = &tsoServer{stream: stream}
 		forwardStream     tsopb.TSO_TsoClient
+		forwardCtx        context.Context
 		cancelForward     context.CancelFunc
 		tsoStreamErr      error
 		lastForwardedHost string
@@ -133,7 +134,7 @@ func (s *GrpcServer) forwardTSO(stream pdpb.PD_TsoServer) error {
 			return status.Error(codes.Unknown, err.Error())
 		}
 
-		cancelForward, forwardStream, lastForwardedHost, tsoStreamErr, err = s.handleTSOForwarding(forwardStream, stream, server, request, tsDeadlineCh, lastForwardedHost, cancelForward)
+		forwardCtx, cancelForward, forwardStream, lastForwardedHost, tsoStreamErr, err = s.handleTSOForwarding(forwardCtx, forwardStream, stream, server, request, tsDeadlineCh, lastForwardedHost, cancelForward)
 		if tsoStreamErr != nil {
 			return tsoStreamErr
 		}
@@ -143,19 +144,18 @@ func (s *GrpcServer) forwardTSO(stream pdpb.PD_TsoServer) error {
 	}
 }
 
-func (s *GrpcServer) handleTSOForwarding(forwardStream tsopb.TSO_TsoClient, stream pdpb.PD_TsoServer, server *tsoServer,
+func (s *GrpcServer) handleTSOForwarding(forwardCtx context.Context, forwardStream tsopb.TSO_TsoClient, stream pdpb.PD_TsoServer, server *tsoServer,
 	request *pdpb.TsoRequest, tsDeadlineCh chan<- *tsoutil.TSDeadline, lastForwardedHost string, cancelForward context.CancelFunc) (
-	cancelForwardRet context.CancelFunc,
-	forwardStreamRet tsopb.TSO_TsoClient,
-	lastForwardedHostRet string,
-	tsoStreamErr error, // tso stream error
-	err error, // send error
+	context.Context,
+	context.CancelFunc,
+	tsopb.TSO_TsoClient,
+	string,
+	error, // tso stream error
+	error, // send error
 ) {
-	var forwardCtx context.Context
 	forwardedHost, ok := s.GetServicePrimaryAddr(stream.Context(), constant.TSOServiceName)
 	if !ok || len(forwardedHost) == 0 {
-		tsoStreamErr = errors.WithStack(ErrNotFoundTSOAddr)
-		return cancelForwardRet, forwardStreamRet, lastForwardedHostRet, tsoStreamErr, nil
+		return forwardCtx, cancelForward, forwardStream, lastForwardedHost, errors.WithStack(ErrNotFoundTSOAddr), nil
 	}
 	if forwardStream == nil || lastForwardedHost != forwardedHost {
 		if cancelForward != nil {
@@ -164,21 +164,18 @@ func (s *GrpcServer) handleTSOForwarding(forwardStream tsopb.TSO_TsoClient, stre
 
 		clientConn, err := s.getDelegateClient(s.ctx, forwardedHost)
 		if err != nil {
-			tsoStreamErr = errors.WithStack(err)
-			return cancelForwardRet, forwardStreamRet, lastForwardedHostRet, tsoStreamErr, nil
+			return forwardCtx, cancelForward, forwardStream, lastForwardedHost, errors.WithStack(err), nil
 		}
-		forwardStreamRet, forwardCtx, cancelForwardRet, err = createTSOForwardStream(stream.Context(), clientConn)
+		forwardStream, forwardCtx, cancelForward, err = createTSOForwardStream(stream.Context(), clientConn)
 		if err != nil {
-			tsoStreamErr = errors.WithStack(err)
-			return cancelForwardRet, forwardStreamRet, lastForwardedHostRet, tsoStreamErr, nil
+			return forwardCtx, cancelForward, forwardStream, lastForwardedHost, errors.WithStack(err), nil
 		}
-		lastForwardedHostRet = forwardedHost
+		lastForwardedHost = forwardedHost
 	}
 
-	tsopbResp, err := s.forwardTSORequestWithDeadLine(forwardCtx, cancelForwardRet, forwardStreamRet, request, tsDeadlineCh)
+	tsopbResp, err := s.forwardTSORequestWithDeadLine(forwardCtx, cancelForward, forwardStream, request, tsDeadlineCh)
 	if err != nil {
-		tsoStreamErr = errors.WithStack(err)
-		return cancelForwardRet, forwardStreamRet, lastForwardedHostRet, tsoStreamErr, nil
+		return forwardCtx, cancelForward, forwardStream, lastForwardedHost, errors.WithStack(err), nil
 	}
 
 	// The error types defined for tsopb and pdpb are different, so we need to convert them.
@@ -212,7 +209,7 @@ func (s *GrpcServer) handleTSOForwarding(forwardStream tsopb.TSO_TsoClient, stre
 	} else {
 		err = stream.Send(response)
 	}
-	return cancelForwardRet, forwardStreamRet, lastForwardedHostRet, nil, errors.WithStack(err)
+	return forwardCtx, cancelForward, forwardStream, lastForwardedHost, nil, errors.WithStack(err)
 }
 
 func (s *GrpcServer) forwardTSORequestWithDeadLine(
