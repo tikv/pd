@@ -402,6 +402,10 @@ func TestTSOFollowerProxyWithTSOService(t *testing.T) {
 	backendEndpoints := pdLeaderServer.GetAddr()
 	tsoCluster, err := tests.NewTestTSOCluster(ctx, 2, backendEndpoints)
 	re.NoError(err)
+	// let service discovery know the TSO service
+	testutil.Eventually(re, func() bool {
+		return pdLeaderServer.GetRaftCluster().IsServiceIndependent(constant.TSOServiceName)
+	})
 	defer tsoCluster.Destroy()
 	cli := mcs.SetupClientWithKeyspaceID(ctx, re, constant.DefaultKeyspaceID, strings.Split(backendEndpoints, ","))
 	re.NotNil(cli)

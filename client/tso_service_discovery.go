@@ -349,6 +349,11 @@ func (c *tsoServiceDiscovery) CheckMemberChanged() error {
 	return nil
 }
 
+// ScheduleCheckServiceModeChanged is used to trigger a check to see if there is any change in service mode.
+func (c *tsoServiceDiscovery) ScheduleCheckServiceModeChanged() {
+	c.apiSvcDiscovery.ScheduleCheckServiceModeChanged()
+}
+
 // AddServingURLSwitchedCallback adds callbacks which will be called when the primary in
 // a primary/secondary configured cluster is switched.
 func (*tsoServiceDiscovery) AddServingURLSwitchedCallback(...func()) {}

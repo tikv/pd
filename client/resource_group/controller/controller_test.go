@@ -238,9 +238,11 @@ func TestControllerWithTwoGroupRequestConcurrency(t *testing.T) {
 	defer cancel()
 
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/resource_group/controller/triggerPeriodicReport", fmt.Sprintf("return(\"%s\")", defaultResourceGroupName)))
-	defer failpoint.Disable("github.com/tikv/pd/client/resource_group/controller/triggerPeriodicReport")
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/resource_group/controller/triggerLowRUReport", fmt.Sprintf("return(\"%s\")", "test-group")))
-	defer failpoint.Disable("github.com/tikv/pd/client/resource_group/controller/triggerLowRUReport")
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/client/resource_group/controller/triggerPeriodicReport"))
+		re.NoError(failpoint.Disable("github.com/tikv/pd/client/resource_group/controller/triggerLowRUReport"))
+	}()
 
 	mockProvider := newMockResourceGroupProvider()
 	controller, _ := NewResourceGroupController(ctx, 1, mockProvider, nil)
