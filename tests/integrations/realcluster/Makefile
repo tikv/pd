@@ -28,9 +28,11 @@ tidy:
 	git diff go.mod go.sum | cat
 	git diff --quiet go.mod go.sum
 
-check: deploy test kill_cluster
+check: test
 
-deploy: kill_cluster
+deploy: kill_cluster deploy_only
+
+deploy_only:
 	@ echo "deploying..."
 	./deploy.sh
 	@ echo "wait cluster ready..."
