@@ -481,7 +481,7 @@ func (suite *mergeCheckerTestSuite) TestStoreLimitWithMerge() {
 	}
 
 	mc := NewMergeChecker(suite.ctx, tc, tc.GetCheckerConfig())
-	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, tc.ID, tc, false /* no need to run */)
+	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, tc, false /* no need to run */)
 	oc := operator.NewController(suite.ctx, tc.GetBasicCluster(), tc.GetSharedConfig(), stream)
 
 	regions[2] = regions[2].Clone(

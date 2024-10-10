@@ -49,12 +49,12 @@ func (s *GrpcServer) GetGCSafePointV2(ctx context.Context, request *pdpb.GetGCSa
 
 	if err != nil {
 		return &pdpb.GetGCSafePointV2Response{
-			Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
+			Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
 		}, err
 	}
 
 	return &pdpb.GetGCSafePointV2Response{
-		Header:    s.header(),
+		Header:    wrapHeader(),
 		SafePoint: safePoint.SafePoint,
 	}, nil
 }
@@ -91,7 +91,7 @@ func (s *GrpcServer) UpdateGCSafePointV2(ctx context.Context, request *pdpb.Upda
 	}
 
 	return &pdpb.UpdateGCSafePointV2Response{
-		Header:       s.header(),
+		Header:       wrapHeader(),
 		NewSafePoint: newSafePoint,
 	}, nil
 }
@@ -133,7 +133,7 @@ func (s *GrpcServer) UpdateServiceSafePointV2(ctx context.Context, request *pdpb
 		return nil, err
 	}
 	return &pdpb.UpdateServiceSafePointV2Response{
-		Header:       s.header(),
+		Header:       wrapHeader(),
 		ServiceId:    []byte(minServiceSafePoint.ServiceID),
 		Ttl:          minServiceSafePoint.ExpiredAt - now.Unix(),
 		MinSafePoint: minServiceSafePoint.SafePoint,
@@ -158,10 +158,10 @@ func (s *GrpcServer) WatchGCSafePointV2(request *pdpb.WatchGCSafePointV2Request,
 			if res.Err() != nil {
 				var resp pdpb.WatchGCSafePointV2Response
 				if revision < res.CompactRevision {
-					resp.Header = s.wrapErrorToHeader(pdpb.ErrorType_DATA_COMPACTED,
+					resp.Header = wrapErrorToHeader(pdpb.ErrorType_DATA_COMPACTED,
 						fmt.Sprintf("required watch revision: %d is smaller than current compact/min revision %d.", revision, res.CompactRevision))
 				} else {
-					resp.Header = s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN,
+					resp.Header = wrapErrorToHeader(pdpb.ErrorType_UNKNOWN,
 						fmt.Sprintf("watch channel meet other error %s.", res.Err().Error()))
 				}
 				if err := stream.Send(&resp); err != nil {
@@ -185,7 +185,7 @@ func (s *GrpcServer) WatchGCSafePointV2(request *pdpb.WatchGCSafePointV2Request,
 				})
 			}
 			if len(safePointEvents) > 0 {
-				if err := stream.Send(&pdpb.WatchGCSafePointV2Response{Header: s.header(), Events: safePointEvents, Revision: res.Header.GetRevision()}); err != nil {
+				if err := stream.Send(&pdpb.WatchGCSafePointV2Response{Header: wrapHeader(), Events: safePointEvents, Revision: res.Header.GetRevision()}); err != nil {
 					return err
 				}
 			}
@@ -226,12 +226,12 @@ func (s *GrpcServer) GetAllGCSafePointV2(ctx context.Context, request *pdpb.GetA
 
 	if err != nil {
 		return &pdpb.GetAllGCSafePointV2Response{
-			Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
+			Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
 		}, err
 	}
 
 	return &pdpb.GetAllGCSafePointV2Response{
-		Header:       s.header(),
+		Header:       wrapHeader(),
 		GcSafePoints: gcSafePoints,
 		Revision:     revision,
 	}, nil

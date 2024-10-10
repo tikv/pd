@@ -27,6 +27,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/apiutil"
+	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/server/config"
 	"github.com/urfave/negroni"
@@ -56,7 +57,8 @@ func CheckPDVersionWithClusterVersion(opt *config.PersistOptions) {
 	}
 }
 
-func checkBootstrapRequest(clusterID uint64, req *pdpb.BootstrapRequest) error {
+func checkBootstrapRequest(req *pdpb.BootstrapRequest) error {
+	clusterID := keypath.ClusterID()
 	// TODO: do more check for request fields validation.
 
 	storeMeta := req.GetStore()

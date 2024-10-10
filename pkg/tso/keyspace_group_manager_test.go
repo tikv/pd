@@ -153,8 +153,10 @@ func (suite *keyspaceGroupManagerTestSuite) TestNewKeyspaceGroupManager() {
 	re := suite.Require()
 
 	tsoServiceID := &discovery.ServiceRegistryEntry{ServiceAddr: suite.cfg.AdvertiseListenAddr}
-	clusterID := rand.Uint64()
+	clusterID, err := endpoint.InitClusterID(suite.etcdClient)
+	re.NoError(err)
 	clusterIDStr := strconv.FormatUint(clusterID, 10)
+	keypath.SetClusterID(clusterID)
 
 	legacySvcRootPath := path.Join("/pd", clusterIDStr)
 	tsoSvcRootPath := path.Join(constant.MicroserviceRootPath, clusterIDStr, "tso")
@@ -162,10 +164,9 @@ func (suite *keyspaceGroupManagerTestSuite) TestNewKeyspaceGroupManager() {
 
 	kgm := NewKeyspaceGroupManager(
 		suite.ctx, tsoServiceID, suite.etcdClient, nil, electionNamePrefix,
-		clusterID, legacySvcRootPath, tsoSvcRootPath, suite.cfg)
+		legacySvcRootPath, tsoSvcRootPath, suite.cfg)
 	defer kgm.Close()
-	err := kgm.Initialize()
-	re.NoError(err)
+	re.NoError(kgm.Initialize())
 
 	re.Equal(tsoServiceID, kgm.tsoServiceID)
 	re.Equal(suite.etcdClient, kgm.etcdClient)
@@ -805,7 +806,7 @@ func (suite *keyspaceGroupManagerTestSuite) newKeyspaceGroupManager(
 
 	kgm := NewKeyspaceGroupManager(
 		suite.ctx, tsoServiceID, suite.etcdClient, nil, electionNamePrefix,
-		clusterID, legacySvcRootPath, tsoSvcRootPath, cfg)
+		legacySvcRootPath, tsoSvcRootPath, cfg)
 	if loadKeyspaceGroupsBatchSize != 0 {
 		kgm.loadKeyspaceGroupsBatchSize = loadKeyspaceGroupsBatchSize
 	}
@@ -1045,7 +1046,7 @@ func (suite *keyspaceGroupManagerTestSuite) TestPrimaryPriorityChange() {
 
 	var err error
 	defaultPriority := constant.DefaultKeyspaceGroupReplicaPriority
-	clusterID, err := etcdutil.InitOrGetClusterID(suite.etcdClient, "/pd/cluster_id")
+	clusterID, err := endpoint.InitClusterID(suite.etcdClient)
 	re.NoError(err)
 	clusterIDStr := strconv.FormatUint(clusterID, 10)
 	rootPath := path.Join("/pd", clusterIDStr)
@@ -1056,10 +1057,10 @@ func (suite *keyspaceGroupManagerTestSuite) TestPrimaryPriorityChange() {
 
 	// Register TSO server 1
 	cfg1.Name = "tso1"
-	err = suite.registerTSOServer(re, clusterIDStr, svcAddr1, cfg1)
+	err = suite.registerTSOServer(re, svcAddr1, cfg1)
 	re.NoError(err)
 	defer func() {
-		re.NoError(suite.deregisterTSOServer(clusterIDStr, svcAddr1))
+		re.NoError(suite.deregisterTSOServer(svcAddr1))
 	}()
 
 	// Create three keyspace groups on two TSO servers with default replica priority.
@@ -1105,7 +1106,7 @@ func (suite *keyspaceGroupManagerTestSuite) TestPrimaryPriorityChange() {
 
 	// Create the Second TSO server.
 	cfg2.Name = "tso2"
-	err = suite.registerTSOServer(re, clusterIDStr, svcAddr2, cfg2)
+	err = suite.registerTSOServer(re, svcAddr2, cfg2)
 	re.NoError(err)
 	mgr2 := suite.newKeyspaceGroupManager(1, clusterID, cfg2)
 	re.NotNil(mgr2)
@@ -1116,15 +1117,15 @@ func (suite *keyspaceGroupManagerTestSuite) TestPrimaryPriorityChange() {
 
 	// Shutdown the second TSO server.
 	mgr2.Close()
-	re.NoError(suite.deregisterTSOServer(clusterIDStr, svcAddr2))
+	re.NoError(suite.deregisterTSOServer(svcAddr2))
 	// The primaries should move back to the first TSO server.
 	waitForPrimariesServing(re, []*KeyspaceGroupManager{mgr1, mgr1, mgr1}, ids)
 
 	// Restart the Second TSO server.
-	err = suite.registerTSOServer(re, clusterIDStr, svcAddr2, cfg2)
+	err = suite.registerTSOServer(re, svcAddr2, cfg2)
 	re.NoError(err)
 	defer func() {
-		re.NoError(suite.deregisterTSOServer(clusterIDStr, svcAddr2))
+		re.NoError(suite.deregisterTSOServer(svcAddr2))
 	}()
 	mgr2 = suite.newKeyspaceGroupManager(1, clusterID, cfg2)
 	re.NotNil(mgr2)
@@ -1151,19 +1152,19 @@ func (suite *keyspaceGroupManagerTestSuite) TestPrimaryPriorityChange() {
 
 // Register TSO server.
 func (suite *keyspaceGroupManagerTestSuite) registerTSOServer(
-	re *require.Assertions, clusterID, svcAddr string, cfg *TestServiceConfig,
+	re *require.Assertions, svcAddr string, cfg *TestServiceConfig,
 ) error {
 	serviceID := &discovery.ServiceRegistryEntry{ServiceAddr: cfg.GetAdvertiseListenAddr(), Name: cfg.Name}
 	serializedEntry, err := serviceID.Serialize()
 	re.NoError(err)
-	serviceKey := discovery.RegistryPath(clusterID, constant.TSOServiceName, svcAddr)
+	serviceKey := keypath.RegistryPath(constant.TSOServiceName, svcAddr)
 	_, err = suite.etcdClient.Put(suite.ctx, serviceKey, serializedEntry)
 	return err
 }
 
 // Deregister TSO server.
-func (suite *keyspaceGroupManagerTestSuite) deregisterTSOServer(clusterID, svcAddr string) error {
-	serviceKey := discovery.RegistryPath(clusterID, constant.TSOServiceName, svcAddr)
+func (suite *keyspaceGroupManagerTestSuite) deregisterTSOServer(svcAddr string) error {
+	serviceKey := keypath.RegistryPath(constant.TSOServiceName, svcAddr)
 	if _, err := suite.etcdClient.Delete(suite.ctx, serviceKey); err != nil {
 		return err
 	}

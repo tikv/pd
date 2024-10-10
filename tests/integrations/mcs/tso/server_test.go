@@ -20,7 +20,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -252,11 +251,10 @@ func (suite *APIServerForward) ShutDown() {
 	re := suite.re
 
 	etcdClient := suite.pdLeader.GetEtcdClient()
-	clusterID := strconv.FormatUint(suite.pdLeader.GetClusterID(), 10)
-	endpoints, err := discovery.Discover(etcdClient, clusterID, constant.TSOServiceName)
+	endpoints, err := discovery.Discover(etcdClient, constant.TSOServiceName)
 	re.NoError(err)
 	if len(endpoints) != 0 {
-		endpoints, err = discovery.Discover(etcdClient, clusterID, constant.TSOServiceName)
+		endpoints, err = discovery.Discover(etcdClient, constant.TSOServiceName)
 		re.NoError(err)
 		re.Empty(endpoints)
 	}
@@ -524,11 +522,10 @@ func (suite *CommonTestSuite) TearDownSuite() {
 	re := suite.Require()
 	suite.tsoCluster.Destroy()
 	etcdClient := suite.pdLeader.GetEtcdClient()
-	clusterID := strconv.FormatUint(suite.pdLeader.GetClusterID(), 10)
-	endpoints, err := discovery.Discover(etcdClient, clusterID, constant.TSOServiceName)
+	endpoints, err := discovery.Discover(etcdClient, constant.TSOServiceName)
 	re.NoError(err)
 	if len(endpoints) != 0 {
-		endpoints, err = discovery.Discover(etcdClient, clusterID, constant.TSOServiceName)
+		endpoints, err = discovery.Discover(etcdClient, constant.TSOServiceName)
 		re.NoError(err)
 		re.Empty(endpoints)
 	}

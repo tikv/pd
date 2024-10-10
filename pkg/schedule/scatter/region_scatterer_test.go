@@ -91,7 +91,7 @@ func scatter(re *require.Assertions, numStores, numRegions uint64, useRules bool
 	defer cancel()
 	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
-	stream := hbstream.NewTestHeartbeatStreams(ctx, tc.ID, tc, false)
+	stream := hbstream.NewTestHeartbeatStreams(ctx, tc, false)
 	oc := operator.NewController(ctx, tc.GetBasicCluster(), tc.GetSharedConfig(), stream)
 	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 
@@ -171,7 +171,7 @@ func scatterSpecial(re *require.Assertions, numOrdinaryStores, numSpecialStores,
 	defer cancel()
 	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
-	stream := hbstream.NewTestHeartbeatStreams(ctx, tc.ID, tc, false)
+	stream := hbstream.NewTestHeartbeatStreams(ctx, tc, false)
 	oc := operator.NewController(ctx, tc.GetBasicCluster(), tc.GetSharedConfig(), stream)
 	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 
@@ -249,7 +249,7 @@ func TestStoreLimit(t *testing.T) {
 	defer cancel()
 	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
-	stream := hbstream.NewTestHeartbeatStreams(ctx, tc.ID, tc, false)
+	stream := hbstream.NewTestHeartbeatStreams(ctx, tc, false)
 	oc := operator.NewController(ctx, tc.GetBasicCluster(), tc.GetSharedConfig(), stream)
 
 	// Add stores 1~6.
@@ -281,7 +281,7 @@ func TestScatterCheck(t *testing.T) {
 	defer cancel()
 	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
-	stream := hbstream.NewTestHeartbeatStreams(ctx, tc.ID, tc, false)
+	stream := hbstream.NewTestHeartbeatStreams(ctx, tc, false)
 	oc := operator.NewController(ctx, tc.GetBasicCluster(), tc.GetSharedConfig(), stream)
 	// Add 5 stores.
 	for i := uint64(1); i <= 5; i++ {
@@ -330,7 +330,7 @@ func TestSomeStoresFilteredScatterGroupInConcurrency(t *testing.T) {
 	defer cancel()
 	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
-	stream := hbstream.NewTestHeartbeatStreams(ctx, tc.ID, tc, false)
+	stream := hbstream.NewTestHeartbeatStreams(ctx, tc, false)
 	oc := operator.NewController(ctx, tc.GetBasicCluster(), tc.GetSharedConfig(), stream)
 	// Add 5 connected stores.
 	for i := uint64(1); i <= 5; i++ {
@@ -375,7 +375,7 @@ func TestScatterGroupInConcurrency(t *testing.T) {
 	defer cancel()
 	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
-	stream := hbstream.NewTestHeartbeatStreams(ctx, tc.ID, tc, false)
+	stream := hbstream.NewTestHeartbeatStreams(ctx, tc, false)
 	oc := operator.NewController(ctx, tc.GetBasicCluster(), tc.GetSharedConfig(), stream)
 	// Add 5 stores.
 	for i := uint64(1); i <= 5; i++ {
@@ -447,7 +447,7 @@ func TestScatterForManyRegion(t *testing.T) {
 	defer cancel()
 	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
-	stream := hbstream.NewTestHeartbeatStreams(ctx, tc.ID, tc, false)
+	stream := hbstream.NewTestHeartbeatStreams(ctx, tc, false)
 	oc := operator.NewController(ctx, tc.GetBasicCluster(), tc.GetSharedConfig(), stream)
 	// Add 60 stores.
 	for i := uint64(1); i <= 60; i++ {
@@ -475,7 +475,7 @@ func TestScattersGroup(t *testing.T) {
 	defer cancel()
 	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
-	stream := hbstream.NewTestHeartbeatStreams(ctx, tc.ID, tc, false)
+	stream := hbstream.NewTestHeartbeatStreams(ctx, tc, false)
 	oc := operator.NewController(ctx, tc.GetBasicCluster(), tc.GetSharedConfig(), stream)
 	// Add 5 stores.
 	for i := uint64(1); i <= 5; i++ {
@@ -563,7 +563,7 @@ func TestRegionHasLearner(t *testing.T) {
 	group := "group"
 	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
-	stream := hbstream.NewTestHeartbeatStreams(ctx, tc.ID, tc, false)
+	stream := hbstream.NewTestHeartbeatStreams(ctx, tc, false)
 	oc := operator.NewController(ctx, tc.GetBasicCluster(), tc.GetSharedConfig(), stream)
 	// Add 8 stores.
 	voterCount := uint64(6)
@@ -651,7 +651,7 @@ func TestSelectedStoresTooFewPeers(t *testing.T) {
 	defer cancel()
 	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
-	stream := hbstream.NewTestHeartbeatStreams(ctx, tc.ID, tc, false)
+	stream := hbstream.NewTestHeartbeatStreams(ctx, tc, false)
 	oc := operator.NewController(ctx, tc.GetBasicCluster(), tc.GetSharedConfig(), stream)
 	// Add 4 stores.
 	for i := uint64(1); i <= 4; i++ {
@@ -692,7 +692,7 @@ func TestSelectedStoresTooManyPeers(t *testing.T) {
 	defer cancel()
 	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
-	stream := hbstream.NewTestHeartbeatStreams(ctx, tc.ID, tc, false)
+	stream := hbstream.NewTestHeartbeatStreams(ctx, tc, false)
 	oc := operator.NewController(ctx, tc.GetBasicCluster(), tc.GetSharedConfig(), stream)
 	// Add 4 stores.
 	for i := uint64(1); i <= 5; i++ {
@@ -729,7 +729,7 @@ func TestBalanceLeader(t *testing.T) {
 	defer cancel()
 	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
-	stream := hbstream.NewTestHeartbeatStreams(ctx, tc.ID, tc, false)
+	stream := hbstream.NewTestHeartbeatStreams(ctx, tc, false)
 	oc := operator.NewController(ctx, tc.GetBasicCluster(), tc.GetSharedConfig(), stream)
 	// Add 3 stores
 	for i := uint64(2); i <= 4; i++ {
@@ -760,7 +760,7 @@ func TestBalanceRegion(t *testing.T) {
 	opt := mockconfig.NewTestOptions()
 	opt.SetLocationLabels([]string{"host"})
 	tc := mockcluster.NewCluster(ctx, opt)
-	stream := hbstream.NewTestHeartbeatStreams(ctx, tc.ID, tc, false)
+	stream := hbstream.NewTestHeartbeatStreams(ctx, tc, false)
 	oc := operator.NewController(ctx, tc.GetBasicCluster(), tc.GetSharedConfig(), stream)
 	// Add 6 stores in 3 hosts.
 	for i := uint64(2); i <= 7; i++ {
@@ -810,7 +810,7 @@ func TestRemoveStoreLimit(t *testing.T) {
 	defer cancel()
 	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
-	stream := hbstream.NewTestHeartbeatStreams(ctx, tc.ID, tc, false)
+	stream := hbstream.NewTestHeartbeatStreams(ctx, tc, false)
 	oc := operator.NewController(ctx, tc.GetBasicCluster(), tc.GetSharedConfig(), stream)
 
 	// Add stores 1~6.
