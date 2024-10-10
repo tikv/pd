@@ -18,27 +18,15 @@ file_server_url=${2:-http://fileserver.pingcap.net}
 tidb_sha1_url="${file_server_url}/download/refs/pingcap/tidb/${branch}/sha1"
 tikv_sha1_url="${file_server_url}/download/refs/pingcap/tikv/${branch}/sha1"
 tiflash_sha1_url="${file_server_url}/download/refs/pingcap/tiflash/${branch}/sha1"
-# ticdc_sha1_url="${file_server_url}/download/refs/pingcap/ticdc/${branch}/sha1"
 
 tidb_sha1=$(curl "$tidb_sha1_url")
 tikv_sha1=$(curl "$tikv_sha1_url")
 tiflash_sha1=$(curl "$tiflash_sha1_url")
-# ticdc_sha1=$(curl "$ticdc_sha1_url")
 
-# download pd / tikv / tiflash binary build from tibuid multibranch pipeline
+# download tidb / tikv / tiflash binary build from tibuid multibranch pipeline
 tidb_download_url="${file_server_url}/download/builds/pingcap/tidb/${tidb_sha1}/centos7/tidb-server.tar.gz"
 tikv_download_url="${file_server_url}/download/builds/pingcap/tikv/${tikv_sha1}/centos7/tikv-server.tar.gz"
 tiflash_download_url="${file_server_url}/download/builds/pingcap/tiflash/${branch}/${tiflash_sha1}/centos7/tiflash.tar.gz"
-# ticdc_download_url="${file_server_url}/download/builds/pingcap/ticdc/${ticdc_sha1}/centos7/ticdc-linux-amd64.tar.gz"
-
-
-# download some dependencies tool binary from file server
-# minio_url="${file_server_url}/download/builds/minio/minio/RELEASE.2020-02-27T00-23-05Z/minio"
-# go_ycsb_url="${file_server_url}/download/builds/pingcap/go-ycsb/test-br/go-ycsb"
-# minio_cli_url="${file_server_url}/download/builds/minio/minio/RELEASE.2020-02-27T00-23-05Z/mc"
-# kes_url="${file_server_url}/download/kes"
-# fake_gcs_server_url="${file_server_url}/download/builds/fake-gcs-server"
-# brv_url="${file_server_url}/download/builds/brv4.0.8"
 
 set -o nounset
 
@@ -80,19 +68,6 @@ function main() {
     tar -xzf tmp/tiflash.tar.gz -C third_bin
     mv third_bin/tiflash third_bin/_tiflash
     mv third_bin/_tiflash/* third_bin && rm -rf third_bin/_tiflash
-
-    # TiCDC
-    # download "$ticdc_download_url" "ticdc-linux-amd64.tar.gz" "tmp/ticdc-linux-amd64.tar.gz"
-    # tar -xzf tmp/ticdc-linux-amd64.tar.gz -C third_bin --wildcards '*/bin/*'
-    # mv third_bin/ticdc-linux-amd64/bin/* third_bin/
-    # rm -rf third_bin/ticdc-linux-amd64
-
-    # download "$minio_url" "minio" "third_bin/minio"
-    # download "$go_ycsb_url" "go-ycsb" "third_bin/go-ycsb"
-    # download "$minio_cli_url" "mc" "third_bin/mc"
-    # download "$kes_url" "kes" "third_bin/kes"
-    # download "$fake_gcs_server_url" "fake-gcs-server" "third_bin/fake-gcs-server"
-    # download "$brv_url" "brv4.0.8" "third_bin/brv4.0.8"
 
     chmod +x third_bin/*
     rm -rf tmp
