@@ -113,6 +113,18 @@ func TestFailedAndDeletedPDJoinsPreviousCluster(t *testing.T) {
 	members, err := etcdutil.ListEtcdMembers(ctx, client)
 	re.NoError(err)
 	re.Len(members.Members, 2)
+
+	// Join another PD.
+	pd4, err := cluster.Join(ctx)
+	re.NoError(err)
+	err = pd4.Run()
+	re.NoError(err)
+	_, err = os.Stat(filepath.Join(pd4.GetConfig().DataDir, "join"))
+	re.False(os.IsNotExist(err))
+	re.NotEmpty(cluster.WaitLeader())
+	members, err = etcdutil.ListEtcdMembers(ctx, client)
+	re.NoError(err)
+	re.Len(members.Members, 3)
 }
 
 // A deleted PD joins the previous cluster.
