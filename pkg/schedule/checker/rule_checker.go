@@ -33,6 +33,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/schedule/types"
+	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/versioninfo"
 	"go.uber.org/zap"
 )
@@ -654,6 +655,7 @@ func (c *RuleChecker) handleFilterState(region *core.RegionInfo, filterByTempSta
 }
 
 type recorder struct {
+	syncutil.RWMutex
 	offlineLeaderCounter map[uint64]uint64
 	lastUpdateTime       time.Time
 }
@@ -666,10 +668,14 @@ func newRecord() *recorder {
 }
 
 func (o *recorder) getOfflineLeaderCount(storeID uint64) uint64 {
+	o.RLock()
+	defer o.RUnlock()
 	return o.offlineLeaderCounter[storeID]
 }
 
 func (o *recorder) incOfflineLeaderCount(storeID uint64) {
+	o.Lock()
+	defer o.Unlock()
 	o.offlineLeaderCounter[storeID] += 1
 	o.lastUpdateTime = time.Now()
 }
