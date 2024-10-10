@@ -30,7 +30,9 @@ tidy:
 
 check: deploy test kill_cluster
 
-deploy: kill_cluster
+deploy: kill_cluster deploy_only
+
+deploy_only:
 	@ echo "deploying..."
 	./deploy.sh
 	@ echo "wait cluster ready..."
