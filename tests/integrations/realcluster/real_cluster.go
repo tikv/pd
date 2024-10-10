@@ -35,7 +35,8 @@ type realClusterSuite struct {
 	suiteName  string
 }
 
-func (s *realClusterSuite) SetupTest() {
+// SetupSuite will run before the tests in the suite are run.
+func (s *realClusterSuite) SetupSuite() {
 	t := s.T()
 
 	dataDir := filepath.Join(os.Getenv("HOME"), ".tiup", "data", "pd_real_cluster_test_"+s.suiteName+"_*")
@@ -51,12 +52,13 @@ func (s *realClusterSuite) SetupTest() {
 	})
 }
 
-func (s *realClusterSuite) TearDownTest() {
+// TearDownSuite will run after all the tests in the suite have been run.
+func (s *realClusterSuite) TearDownSuite() {
 	// Even if the cluster deployment fails, we still need to destroy the cluster.
+	// If the cluster does not fail to deploy, the cluster will be destroyed in
+	// the cleanup function. And these code will not work.
 	s.clusterCnt++
-	for s.clusterCnt >= 0 {
-		s.stopRealCluster(s.T())
-	}
+	s.stopRealCluster(s.T())
 }
 
 func (s *realClusterSuite) startRealCluster(t *testing.T) {
@@ -78,17 +80,17 @@ func (s *realClusterSuite) tag() string {
 	return fmt.Sprintf("pd_real_cluster_test_%s_%d", s.suiteName, s.clusterCnt)
 }
 
-func restartTiUP() {
-	log.Info("start to restart TiUP")
-	cmd := exec.Command("make", "deploy")
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	err := cmd.Run()
-	if err != nil {
-		panic(err)
-	}
-	log.Info("TiUP restart success")
-}
+// func restartTiUP() {
+// 	log.Info("start to restart TiUP")
+// 	cmd := exec.Command("make", "deploy")
+// 	cmd.Stdout = os.Stdout
+// 	cmd.Stderr = os.Stderr
+// 	err := cmd.Run()
+// 	if err != nil {
+// 		panic(err)
+// 	}
+// 	log.Info("TiUP restart success")
+// }
 
 func (s *realClusterSuite) deploy(t *testing.T) {
 	tag := s.tag()
@@ -102,6 +104,7 @@ func destroy(t *testing.T, tag string) {
 	bytes, err := cmd.Output()
 	require.NoError(t, err)
 	pid := string(bytes)
+	// nolint:errcheck
 	runCommand("sh", "-c", "kill -9 "+pid)
 	log.Info("destroy success", zap.String("pid", pid))
 }
@@ -126,6 +129,7 @@ func deployTiupPlayground(t *testing.T, tag string) {
 	if !fileExists(filepath.Join(curPath, "playground")) {
 		require.NoError(t, os.Mkdir(filepath.Join(curPath, "playground"), 0755))
 	}
+	// nolint:errcheck
 	go runCommand("sh", "-c",
 		`tiup playground nightly --kv 3 --tiflash 1 --db 1 --pd 3 \
 		--without-monitor --tag `+tag+` --pd.binpath ./bin/pd-server \
@@ -145,7 +149,7 @@ func waitTiupReady(t *testing.T, tag string) {
 	)
 	log.Info("start to wait TiUP ready", zap.String("tag", tag))
 	for i := 0; i < maxTimes; i++ {
-		err := runCommand(tiupBin, "playground", "display", "--tag", tag)
+		err := runCommand("tiup", "playground", "display", "--tag", tag)
 		if err == nil {
 			log.Info("TiUP is ready", zap.String("tag", tag))
 			return

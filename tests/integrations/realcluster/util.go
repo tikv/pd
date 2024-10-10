@@ -22,11 +22,9 @@ import (
 
 const physicalShiftBits = 18
 
-var tiupBin = "tiup"
-
 var (
-	pdAddrs = []string{"http://127.0.0.1:2379"}
-	// pdHTTPCli = http.NewClient("pd-real-cluster-test", pdAddrs)
+// pdAddrs = []string{"http://127.0.0.1:2379"}
+// pdHTTPCli = http.NewClient("pd-real-cluster-test", pdAddrs)
 )
 
 // GetTimeFromTS extracts time.Time from a timestamp.
