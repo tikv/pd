@@ -20,6 +20,7 @@ import (
 
 	"github.com/pingcap/errors"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/tikv/pd/client/retry"
 	"google.golang.org/grpc"
 )
 
@@ -61,6 +62,7 @@ type option struct {
 	useTSOServerProxy bool
 	metricsLabels     prometheus.Labels
 	initMetrics       bool
+	bo                *retry.Backoffer
 
 	// Dynamic options.
 	dynamicOptions [dynamicOptionCount]atomic.Value

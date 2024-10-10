@@ -33,10 +33,13 @@ import (
 	"github.com/pingcap/log"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/tikv/pd/client/errs"
+	"github.com/tikv/pd/client/retry"
 	"github.com/tikv/pd/client/tlsutil"
 	"github.com/tikv/pd/client/tsoutil"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 const (
@@ -301,6 +304,13 @@ func WithMetricsLabels(labels prometheus.Labels) ClientOption {
 func WithInitMetricsOption(initMetrics bool) ClientOption {
 	return func(c *client) {
 		c.option.initMetrics = initMetrics
+	}
+}
+
+// WithBackoffer configures the client with backoffer.
+func WithBackoffer(bo *retry.Backoffer) ClientOption {
+	return func(c *client) {
+		c.option.bo = bo
 	}
 }
 
@@ -1033,35 +1043,72 @@ func (c *client) GetRegion(ctx context.Context, key []byte, opts ...GetRegionOpt
 	}
 	start := time.Now()
 	defer func() { cmdDurationGetRegion.Observe(time.Since(start).Seconds()) }()
-	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
-	defer cancel()
 
-	options := &GetRegionOp{}
-	for _, opt := range opts {
-		opt(options)
-	}
-	req := &pdpb.GetRegionRequest{
-		Header:      c.requestHeader(),
-		RegionKey:   key,
-		NeedBuckets: options.needBuckets,
-	}
-	serviceClient, cctx := c.getRegionAPIClientAndContext(ctx, options.allowFollowerHandle && c.option.getEnableFollowerHandle())
-	if serviceClient == nil {
-		return nil, errs.ErrClientGetProtoClient
-	}
-	resp, err := pdpb.NewPDClient(serviceClient.GetClientConn()).GetRegion(cctx, req)
-	if serviceClient.NeedRetry(resp.GetHeader().GetError(), err) {
-		protoClient, cctx := c.getClientAndContext(ctx)
-		if protoClient == nil {
+	execFunc := func() (any, error) {
+		ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
+		defer cancel()
+
+		options := &GetRegionOp{}
+		for _, opt := range opts {
+			opt(options)
+		}
+		req := &pdpb.GetRegionRequest{
+			Header:      c.requestHeader(),
+			RegionKey:   key,
+			NeedBuckets: options.needBuckets,
+		}
+		serviceClient, cctx := c.getRegionAPIClientAndContext(ctx, options.allowFollowerHandle && c.option.getEnableFollowerHandle())
+		if serviceClient == nil {
 			return nil, errs.ErrClientGetProtoClient
 		}
-		resp, err = protoClient.GetRegion(cctx, req)
-	}
+		resp, err := pdpb.NewPDClient(serviceClient.GetClientConn()).GetRegion(cctx, req)
+		if serviceClient.NeedRetry(resp.GetHeader().GetError(), err) {
+			protoClient, cctx := c.getClientAndContext(ctx)
+			if protoClient == nil {
+				return nil, errs.ErrClientGetProtoClient
+			}
+			resp, err = protoClient.GetRegion(cctx, req)
+		}
 
-	if err = c.respForErr(cmdFailDurationGetRegion, start, err, resp.GetHeader()); err != nil {
+		if err = c.respForErr(cmdFailDurationGetRegion, start, err, resp.GetHeader()); err != nil {
+			return nil, err
+		}
+		return handleRegionResponse(resp), nil
+	}
+	if c.option.bo == nil {
+		resp, err := execFunc()
+		if err != nil {
+			return nil, err
+		}
+		region, ok := resp.(*Region)
+		if !ok {
+			return nil, errs.ErrClientInvalidResponseType
+		}
+		return region, err
+	}
+	// Copy a new backoffer for each request.
+	bo := *c.option.bo
+	// Set the retryable checker for the backoffer if it's not set.
+	bo.SetRetryableChecker(func(err error) bool {
+		return err != nil && needRetry(err)
+	}, false)
+	resp, err := bo.ExecWithResult(ctx, execFunc)
+	if err != nil {
 		return nil, err
 	}
-	return handleRegionResponse(resp), nil
+	region, ok := resp.(*Region)
+	if !ok {
+		return nil, errs.ErrClientInvalidResponseType
+	}
+	return region, err
+}
+
+func needRetry(err error) bool {
+	st, ok := status.FromError(err)
+	if !ok {
+		return false
+	}
+	return st.Code() == codes.ResourceExhausted
 }
 
 // GetPrevRegion implements the RPCClient interface.

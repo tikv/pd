@@ -175,11 +175,12 @@ func TestGRPCRateLimit(t *testing.T) {
 			Header:    &pdpb.RequestHeader{ClusterId: leaderServer.GetClusterID()},
 			RegionKey: []byte(""),
 		})
-		re.NoError(err)
+		re.Empty(resp.GetHeader().GetError())
 		if i == 0 {
-			re.Empty(resp.GetHeader().GetError())
+			re.NoError(err)
 		} else {
-			re.Contains(resp.GetHeader().GetError().GetMessage(), "rate limit exceeded")
+			re.Error(err)
+			re.Contains(err.Error(), "rate limit exceeded")
 		}
 	}
 
@@ -219,9 +220,9 @@ func TestGRPCRateLimit(t *testing.T) {
 			Header:    &pdpb.RequestHeader{ClusterId: leaderServer.GetClusterID()},
 			RegionKey: []byte(""),
 		})
-		re.NoError(err)
-		if resp.GetHeader().GetError() != nil {
-			errCh <- resp.GetHeader().GetError().GetMessage()
+		re.Empty(resp.GetHeader().GetError())
+		if err != nil {
+			errCh <- err.Error()
 		} else {
 			okCh <- struct{}{}
 		}
@@ -234,9 +235,9 @@ func TestGRPCRateLimit(t *testing.T) {
 			Header:    &pdpb.RequestHeader{ClusterId: leaderServer.GetClusterID()},
 			RegionKey: []byte(""),
 		})
-		re.NoError(err)
-		if resp.GetHeader().GetError() != nil {
-			errCh <- resp.GetHeader().GetError().GetMessage()
+		re.Empty(resp.GetHeader().GetError())
+		if err != nil {
+			errCh <- err.Error()
 		} else {
 			okCh <- struct{}{}
 		}

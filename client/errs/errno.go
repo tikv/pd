@@ -39,6 +39,7 @@ const (
 // client errors
 var (
 	ErrClientGetProtoClient           = errors.Normalize("failed to get proto client", errors.RFCCodeText("PD:client:ErrClientGetProtoClient"))
+	ErrClientInvalidResponseType      = errors.Normalize("invalid response type", errors.RFCCodeText("PD:client:ErrClientInvalidResponseType"))
 	ErrClientGetMetaStorageClient     = errors.Normalize("failed to get meta storage client", errors.RFCCodeText("PD:client:ErrClientGetMetaStorageClient"))
 	ErrClientCreateTSOStream          = errors.Normalize("create TSO stream failed, %s", errors.RFCCodeText("PD:client:ErrClientCreateTSOStream"))
 	ErrClientTSOStreamClosed          = errors.Normalize("encountered TSO stream being closed unexpectedly", errors.RFCCodeText("PD:client:ErrClientTSOStreamClosed"))
