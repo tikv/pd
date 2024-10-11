@@ -300,9 +300,7 @@ func (s *GrpcServer) GetMinTS(
 		if done, err := limiter.Allow(fName); err == nil {
 			defer done()
 		} else {
-			return &pdpb.GetMinTSResponse{
-				Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
-			}, nil
+			return nil, status.Error(codes.ResourceExhausted, err.Error())
 		}
 	}
 	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
@@ -457,9 +455,7 @@ func (s *GrpcServer) GetMembers(context.Context, *pdpb.GetMembersRequest) (*pdpb
 		if done, err := limiter.Allow(fName); err == nil {
 			defer done()
 		} else {
-			return &pdpb.GetMembersResponse{
-				Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
-			}, nil
+			return nil, status.Error(codes.ResourceExhausted, err.Error())
 		}
 	}
 	// Here we purposely do not check the cluster ID because the client does not know the correct cluster ID
@@ -605,9 +601,7 @@ func (s *GrpcServer) Bootstrap(ctx context.Context, request *pdpb.BootstrapReque
 		if done, err := limiter.Allow(fName); err == nil {
 			defer done()
 		} else {
-			return &pdpb.BootstrapResponse{
-				Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
-			}, nil
+			return nil, status.Error(codes.ResourceExhausted, err.Error())
 		}
 	}
 	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
@@ -649,9 +643,7 @@ func (s *GrpcServer) IsBootstrapped(ctx context.Context, request *pdpb.IsBootstr
 		if done, err := limiter.Allow(fName); err == nil {
 			defer done()
 		} else {
-			return &pdpb.IsBootstrappedResponse{
-				Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
-			}, nil
+			return nil, status.Error(codes.ResourceExhausted, err.Error())
 		}
 	}
 	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
@@ -678,9 +670,7 @@ func (s *GrpcServer) AllocID(ctx context.Context, request *pdpb.AllocIDRequest) 
 		if done, err := limiter.Allow(fName); err == nil {
 			defer done()
 		} else {
-			return &pdpb.AllocIDResponse{
-				Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
-			}, nil
+			return nil, status.Error(codes.ResourceExhausted, err.Error())
 		}
 	}
 	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
@@ -714,9 +704,7 @@ func (s *GrpcServer) IsSnapshotRecovering(ctx context.Context, _ *pdpb.IsSnapsho
 		if done, err := limiter.Allow(fName); err == nil {
 			defer done()
 		} else {
-			return &pdpb.IsSnapshotRecoveringResponse{
-				Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
-			}, nil
+			return nil, status.Error(codes.ResourceExhausted, err.Error())
 		}
 	}
 	// recovering mark is stored in etcd directly, there's no need to forward.
@@ -740,9 +728,7 @@ func (s *GrpcServer) GetStore(ctx context.Context, request *pdpb.GetStoreRequest
 		if done, err := limiter.Allow(fName); err == nil {
 			defer done()
 		} else {
-			return &pdpb.GetStoreResponse{
-				Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
-			}, nil
+			return nil, status.Error(codes.ResourceExhausted, err.Error())
 		}
 	}
 	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
@@ -796,9 +782,7 @@ func (s *GrpcServer) PutStore(ctx context.Context, request *pdpb.PutStoreRequest
 		if done, err := limiter.Allow(fName); err == nil {
 			defer done()
 		} else {
-			return &pdpb.PutStoreResponse{
-				Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
-			}, nil
+			return nil, status.Error(codes.ResourceExhausted, err.Error())
 		}
 	}
 	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
@@ -853,9 +837,7 @@ func (s *GrpcServer) GetAllStores(ctx context.Context, request *pdpb.GetAllStore
 		if done, err := limiter.Allow(fName); err == nil {
 			defer done()
 		} else {
-			return &pdpb.GetAllStoresResponse{
-				Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
-			}, nil
+			return nil, status.Error(codes.ResourceExhausted, err.Error())
 		}
 	}
 	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
@@ -898,9 +880,7 @@ func (s *GrpcServer) StoreHeartbeat(ctx context.Context, request *pdpb.StoreHear
 		if done, err := limiter.Allow(fName); err == nil {
 			defer done()
 		} else {
-			return &pdpb.StoreHeartbeatResponse{
-				Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, errs.ErrRateLimitExceeded.FastGenByArgs().Error()),
-			}, nil
+			return nil, status.Error(codes.ResourceExhausted, err.Error())
 		}
 	}
 	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
@@ -1394,15 +1374,16 @@ func (s *GrpcServer) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error
 
 // GetRegion implements gRPC PDServer.
 func (s *GrpcServer) GetRegion(ctx context.Context, request *pdpb.GetRegionRequest) (*pdpb.GetRegionResponse, error) {
+	failpoint.Inject("rateLimit", func() {
+		failpoint.Return(nil, status.Error(codes.ResourceExhausted, errs.ErrRateLimitExceeded.Error()))
+	})
 	if s.GetServiceMiddlewarePersistOptions().IsGRPCRateLimitEnabled() {
 		fName := currentFunction()
 		limiter := s.GetGRPCRateLimiter()
 		if done, err := limiter.Allow(fName); err == nil {
 			defer done()
 		} else {
-			return &pdpb.GetRegionResponse{
-				Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
-			}, nil
+			return nil, status.Error(codes.ResourceExhausted, err.Error())
 		}
 	}
 	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
@@ -1464,9 +1445,7 @@ func (s *GrpcServer) GetPrevRegion(ctx context.Context, request *pdpb.GetRegionR
 		if done, err := limiter.Allow(fName); err == nil {
 			defer done()
 		} else {
-			return &pdpb.GetRegionResponse{
-				Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
-			}, nil
+			return nil, status.Error(codes.ResourceExhausted, err.Error())
 		}
 	}
 	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
@@ -1523,9 +1502,7 @@ func (s *GrpcServer) GetRegionByID(ctx context.Context, request *pdpb.GetRegionB
 		if done, err := limiter.Allow(fName); err == nil {
 			defer done()
 		} else {
-			return &pdpb.GetRegionResponse{
-				Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
-			}, nil
+			return nil, status.Error(codes.ResourceExhausted, err.Error())
 		}
 	}
 	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
@@ -1585,9 +1562,7 @@ func (s *GrpcServer) ScanRegions(ctx context.Context, request *pdpb.ScanRegionsR
 		if done, err := limiter.Allow(fName); err == nil {
 			defer done()
 		} else {
-			return &pdpb.ScanRegionsResponse{
-				Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
-			}, nil
+			return nil, status.Error(codes.ResourceExhausted, err.Error())
 		}
 	}
 	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
@@ -1643,9 +1618,7 @@ func (s *GrpcServer) BatchScanRegions(ctx context.Context, request *pdpb.BatchSc
 		if done, err := limiter.Allow(fName); err == nil {
 			defer done()
 		} else {
-			return &pdpb.BatchScanRegionsResponse{
-				Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
-			}, nil
+			return nil, status.Error(codes.ResourceExhausted, err.Error())
 		}
 	}
 	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
@@ -1735,9 +1708,7 @@ func (s *GrpcServer) AskSplit(ctx context.Context, request *pdpb.AskSplitRequest
 		if done, err := limiter.Allow(fName); err == nil {
 			defer done()
 		} else {
-			return &pdpb.AskSplitResponse{
-				Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
-			}, nil
+			return nil, status.Error(codes.ResourceExhausted, err.Error())
 		}
 	}
 	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
@@ -1781,9 +1752,7 @@ func (s *GrpcServer) AskBatchSplit(ctx context.Context, request *pdpb.AskBatchSp
 		if done, err := limiter.Allow(fName); err == nil {
 			defer done()
 		} else {
-			return &pdpb.AskBatchSplitResponse{
-				Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
-			}, nil
+			return nil, status.Error(codes.ResourceExhausted, err.Error())
 		}
 	}
 
@@ -1857,9 +1826,7 @@ func (s *GrpcServer) ReportSplit(ctx context.Context, request *pdpb.ReportSplitR
 		if done, err := limiter.Allow(fName); err == nil {
 			defer done()
 		} else {
-			return &pdpb.ReportSplitResponse{
-				Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
-			}, nil
+			return nil, status.Error(codes.ResourceExhausted, err.Error())
 		}
 	}
 	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
@@ -1895,9 +1862,7 @@ func (s *GrpcServer) ReportBatchSplit(ctx context.Context, request *pdpb.ReportB
 		if done, err := limiter.Allow(fName); err == nil {
 			defer done()
 		} else {
-			return &pdpb.ReportBatchSplitResponse{
-				Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
-			}, nil
+			return nil, status.Error(codes.ResourceExhausted, err.Error())
 		}
 	}
 	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
@@ -1934,9 +1899,7 @@ func (s *GrpcServer) GetClusterConfig(ctx context.Context, request *pdpb.GetClus
 		if done, err := limiter.Allow(fName); err == nil {
 			defer done()
 		} else {
-			return &pdpb.GetClusterConfigResponse{
-				Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
-			}, nil
+			return nil, status.Error(codes.ResourceExhausted, err.Error())
 		}
 	}
 	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
@@ -1966,9 +1929,7 @@ func (s *GrpcServer) PutClusterConfig(ctx context.Context, request *pdpb.PutClus
 		if done, err := limiter.Allow(fName); err == nil {
 			defer done()
 		} else {
-			return &pdpb.PutClusterConfigResponse{
-				Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
-			}, nil
+			return nil, status.Error(codes.ResourceExhausted, err.Error())
 		}
 	}
 	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
@@ -2007,9 +1968,7 @@ func (s *GrpcServer) ScatterRegion(ctx context.Context, request *pdpb.ScatterReg
 		if done, err := limiter.Allow(fName); err == nil {
 			defer done()
 		} else {
-			return &pdpb.ScatterRegionResponse{
-				Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
-			}, nil
+			return nil, status.Error(codes.ResourceExhausted, err.Error())
 		}
 	}
 
@@ -2121,9 +2080,7 @@ func (s *GrpcServer) GetGCSafePoint(ctx context.Context, request *pdpb.GetGCSafe
 		if done, err := limiter.Allow(fName); err == nil {
 			defer done()
 		} else {
-			return &pdpb.GetGCSafePointResponse{
-				Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
-			}, nil
+			return nil, status.Error(codes.ResourceExhausted, err.Error())
 		}
 	}
 	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
@@ -2180,9 +2137,7 @@ func (s *GrpcServer) UpdateGCSafePoint(ctx context.Context, request *pdpb.Update
 		if done, err := limiter.Allow(fName); err == nil {
 			defer done()
 		} else {
-			return &pdpb.UpdateGCSafePointResponse{
-				Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
-			}, nil
+			return nil, status.Error(codes.ResourceExhausted, err.Error())
 		}
 	}
 	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
@@ -2229,9 +2184,7 @@ func (s *GrpcServer) UpdateServiceGCSafePoint(ctx context.Context, request *pdpb
 		if done, err := limiter.Allow(fName); err == nil {
 			defer done()
 		} else {
-			return &pdpb.UpdateServiceGCSafePointResponse{
-				Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
-			}, nil
+			return nil, status.Error(codes.ResourceExhausted, err.Error())
 		}
 	}
 	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
@@ -2285,9 +2238,7 @@ func (s *GrpcServer) GetOperator(ctx context.Context, request *pdpb.GetOperatorR
 		if done, err := limiter.Allow(fName); err == nil {
 			defer done()
 		} else {
-			return &pdpb.GetOperatorResponse{
-				Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
-			}, nil
+			return nil, status.Error(codes.ResourceExhausted, err.Error())
 		}
 	}
 
@@ -2500,9 +2451,7 @@ func (s *GrpcServer) SyncMaxTS(_ context.Context, request *pdpb.SyncMaxTSRequest
 		if done, err := limiter.Allow(fName); err == nil {
 			defer done()
 		} else {
-			return &pdpb.SyncMaxTSResponse{
-				Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
-			}, nil
+			return nil, status.Error(codes.ResourceExhausted, err.Error())
 		}
 	}
 	tsoAllocatorManager := s.GetTSOAllocatorManager()
@@ -2605,9 +2554,7 @@ func (s *GrpcServer) SplitRegions(ctx context.Context, request *pdpb.SplitRegion
 		if done, err := limiter.Allow(fName); err == nil {
 			defer done()
 		} else {
-			return &pdpb.SplitRegionsResponse{
-				Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
-			}, nil
+			return nil, status.Error(codes.ResourceExhausted, err.Error())
 		}
 	}
 
@@ -2671,9 +2618,7 @@ func (s *GrpcServer) SplitAndScatterRegions(ctx context.Context, request *pdpb.S
 		if done, err := limiter.Allow(fName); err == nil {
 			defer done()
 		} else {
-			return &pdpb.SplitAndScatterRegionsResponse{
-				Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
-			}, nil
+			return nil, status.Error(codes.ResourceExhausted, err.Error())
 		}
 	}
 	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
@@ -2737,9 +2682,7 @@ func (s *GrpcServer) GetDCLocationInfo(ctx context.Context, request *pdpb.GetDCL
 		if done, err := limiter.Allow(fName); err == nil {
 			defer done()
 		} else {
-			return &pdpb.GetDCLocationInfoResponse{
-				Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
-			}, nil
+			return nil, status.Error(codes.ResourceExhausted, err.Error())
 		}
 	}
 	am := s.GetTSOAllocatorManager()
@@ -2999,9 +2942,7 @@ func (s *GrpcServer) ReportMinResolvedTS(ctx context.Context, request *pdpb.Repo
 		if done, err := limiter.Allow(fName); err == nil {
 			defer done()
 		} else {
-			return &pdpb.ReportMinResolvedTsResponse{
-				Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
-			}, nil
+			return nil, status.Error(codes.ResourceExhausted, err.Error())
 		}
 	}
 	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
@@ -3039,9 +2980,7 @@ func (s *GrpcServer) SetExternalTimestamp(ctx context.Context, request *pdpb.Set
 		if done, err := limiter.Allow(fName); err == nil {
 			defer done()
 		} else {
-			return &pdpb.SetExternalTimestampResponse{
-				Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
-			}, nil
+			return nil, status.Error(codes.ResourceExhausted, err.Error())
 		}
 	}
 	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
@@ -3077,9 +3016,7 @@ func (s *GrpcServer) GetExternalTimestamp(ctx context.Context, request *pdpb.Get
 		if done, err := limiter.Allow(fName); err == nil {
 			defer done()
 		} else {
-			return &pdpb.GetExternalTimestampResponse{
-				Header: s.wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
-			}, nil
+			return nil, status.Error(codes.ResourceExhausted, err.Error())
 		}
 	}
 	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
