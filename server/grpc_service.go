@@ -584,7 +584,7 @@ func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
 		task.End()
 		tsoHandleDuration.Observe(time.Since(start).Seconds())
 		if err != nil {
-			return status.Errorf(codes.Unknown, err.Error())
+			return status.Error(codes.Unknown, err.Error())
 		}
 		response := &pdpb.TsoResponse{
 			Header:    s.header(),
