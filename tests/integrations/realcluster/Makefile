@@ -28,7 +28,13 @@ tidy:
 	git diff go.mod go.sum | cat
 	git diff --quiet go.mod go.sum
 
-check: test
+check: tiup test
+
+tiup:
+	# if tiup binary not exist, download it
+	if ! which tiup > /dev/null 2>&1; then \
+        curl --proto '=https' --tlsv1.2 -sSf https://tiup-mirrors.pingcap.com/install.sh | sh; \
+    fi
 
 deploy: kill_cluster deploy_only
 
