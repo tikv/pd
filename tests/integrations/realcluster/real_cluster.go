@@ -35,6 +35,8 @@ type realClusterSuite struct {
 	suiteName  string
 }
 
+var tiupBin = os.Getenv("HOME") + "/.tiup/bin/tiup"
+
 // SetupSuite will run before the tests in the suite are run.
 func (s *realClusterSuite) SetupSuite() {
 	t := s.T()
@@ -131,10 +133,12 @@ func deployTiupPlayground(t *testing.T, tag string) {
 	}
 	// nolint:errcheck
 	go runCommand("sh", "-c",
-		`tiup playground nightly --kv 3 --tiflash 1 --db 1 --pd 3 \
+		tiupBin+` playground nightly --kv 3 --tiflash 1 --db 1 --pd 3 \
 		--without-monitor --tag `+tag+` --pd.binpath ./bin/pd-server \
-		--kv.binpath ./third_bin/tikv-server \
-		--db.binpath ./third_bin/tidb-server --tiflash.binpath ./third_bin/tiflash \
+		// --kv.binpath ./third_bin/tikv-server \
+		// --db.binpath ./third_bin/tidb-server --tiflash.binpath ./third_bin/tiflash \
+		--kv.binpath ./bin/tikv-server \
+		--db.binpath ./bin/tidb-server --tiflash.binpath ./bin/tiflash \
 		--pd.config ./tests/integrations/realcluster/pd.toml \
 		> `+filepath.Join(curPath, "playground", tag+".log")+` 2>&1 & `)
 
@@ -149,7 +153,7 @@ func waitTiupReady(t *testing.T, tag string) {
 	)
 	log.Info("start to wait TiUP ready", zap.String("tag", tag))
 	for i := 0; i < maxTimes; i++ {
-		err := runCommand("tiup", "playground", "display", "--tag", tag)
+		err := runCommand(tiupBin, "playground", "display", "--tag", tag)
 		if err == nil {
 			log.Info("TiUP is ready", zap.String("tag", tag))
 			return
