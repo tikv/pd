@@ -465,10 +465,6 @@ func (oc *Controller) checkAddOperator(isPromoting bool, ops ...*Operator) (bool
 			operatorCounter.WithLabelValues(op.Desc(), "exceed-max-waiting").Inc()
 			return false, ExceedWaitLimit
 		}
-
-		if op.SchedulerKind() == OpAdmin || op.IsLeaveJointStateOperator() {
-			continue
-		}
 	}
 	var reason CancelReasonType
 	for _, op := range ops {
