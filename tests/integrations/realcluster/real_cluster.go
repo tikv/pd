@@ -41,6 +41,7 @@ var tiupBin = os.Getenv("HOME") + "/.tiup/bin/tiup"
 func (s *realClusterSuite) SetupSuite() {
 	t := s.T()
 
+	// Clean the data dir. It is the default data dir of TiUP.
 	dataDir := filepath.Join(os.Getenv("HOME"), ".tiup", "data", "pd_real_cluster_test_"+s.suiteName+"_*")
 	matches, err := filepath.Glob(dataDir)
 	require.NoError(t, err)
@@ -142,6 +143,7 @@ func deployTiupPlayground(t *testing.T, tag string) {
 		--pd.config ./tests/integrations/realcluster/pd.toml \
 		> `+filepath.Join(curPath, "playground", tag+".log")+` 2>&1 & `)
 
+	// Avoid to change the dir before execute `tiup playground`.
 	time.Sleep(10 * time.Second)
 	require.NoError(t, os.Chdir(curPath))
 }
