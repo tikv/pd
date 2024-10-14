@@ -39,11 +39,11 @@ type HotCache struct {
 }
 
 // NewHotCache creates a new hot spot cache.
-func NewHotCache(ctx context.Context) *HotCache {
+func NewHotCache(ctx context.Context, cluster *core.BasicCluster) *HotCache {
 	w := &HotCache{
 		ctx:        ctx,
-		writeCache: NewHotPeerCache(ctx, utils.Write),
-		readCache:  NewHotPeerCache(ctx, utils.Read),
+		writeCache: NewHotPeerCache(ctx, cluster, utils.Write),
+		readCache:  NewHotPeerCache(ctx, cluster, utils.Read),
 	}
 	go w.updateItems(w.readCache.taskQueue, w.runReadTask)
 	go w.updateItems(w.writeCache.taskQueue, w.runWriteTask)
@@ -80,7 +80,7 @@ func (w *HotCache) CheckReadAsync(task func(cache *HotPeerCache)) bool {
 func (w *HotCache) RegionStats(kind utils.RWType, minHotDegree int) map[uint64][]*HotPeerStat {
 	ret := make(chan map[uint64][]*HotPeerStat, 1)
 	collectRegionStatsTask := func(cache *HotPeerCache) {
-		ret <- cache.RegionStats(minHotDegree)
+		ret <- cache.PeerStats(minHotDegree)
 	}
 	var succ bool
 	switch kind {

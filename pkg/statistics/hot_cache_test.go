@@ -19,6 +19,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/statistics/utils"
 )
 
@@ -27,8 +28,9 @@ func TestIsHot(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	for i := utils.RWType(0); i < utils.RWTypeLen; i++ {
-		cache := NewHotCache(ctx)
-		region := buildRegion(i, 3, 60)
+		cluster := core.NewBasicCluster()
+		cache := NewHotCache(ctx, cluster)
+		region := buildRegion(cluster, i, 3, 60)
 		stats := cache.CheckReadPeerSync(region, region.GetPeers(), []float64{100000000, 1000, 1000}, 60)
 		cache.Update(stats[0], i)
 		for i := 0; i < 100; i++ {
