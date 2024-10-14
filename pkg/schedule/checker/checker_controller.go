@@ -141,6 +141,8 @@ func (c *Controller) PatrolRegions() {
 			c.cluster.UpdateRegionsLabelLevelStats(regions)
 			// When the key is nil, it means that the scan is finished.
 			if len(key) == 0 {
+				// Clear the defunct regions label level statistics.
+				c.cluster.ClearDefunctRegionsLabelLevelStats()
 				// update the scan limit.
 				c.patrolRegionScanLimit = calculateScanLimit(c.cluster)
 				// update the metrics.
