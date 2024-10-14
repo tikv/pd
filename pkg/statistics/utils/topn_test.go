@@ -217,6 +217,7 @@ func TestTTL(t *testing.T) {
 		}
 		re.True(tn.Put(item))
 	}
+	tn.RemoveExpired()
 	for i := 3; i < Total; i += 3 {
 		item := &item{id: uint64(i), values: []float64{float64(-i) + 100}}
 		for k := 1; k < DimLen; k++ {
