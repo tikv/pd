@@ -26,6 +26,7 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mcs/scheduling/server/meta"
 	"github.com/tikv/pd/pkg/utils/testutil"
+	"github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/tests"
 )
 
@@ -80,12 +81,12 @@ func (suite *metaTestSuite) TestStoreWatch() {
 	)
 	re.NoError(err)
 	for i := uint64(1); i <= 4; i++ {
-		suite.pdLeaderServer.GetServer().GetRaftCluster().PutMetaStore(
+		suite.getRaftCluster().PutMetaStore(
 			&metapb.Store{Id: i, Address: fmt.Sprintf("mock-%d", i), State: metapb.StoreState_Up, NodeState: metapb.NodeState_Serving, LastHeartbeat: time.Now().UnixNano()},
 		)
 	}
 
-	suite.pdLeaderServer.GetRaftCluster().RemoveStore(2, false)
+	suite.getRaftCluster().RemoveStore(2, false)
 	testutil.Eventually(re, func() bool {
 		s := cluster.GetStore(2)
 		if s == nil {
@@ -97,13 +98,13 @@ func (suite *metaTestSuite) TestStoreWatch() {
 	testutil.Eventually(re, func() bool {
 		return cluster.GetStore(2).GetState() == metapb.StoreState_Tombstone
 	})
-	re.NoError(suite.pdLeaderServer.GetRaftCluster().RemoveTombStoneRecords())
+	re.NoError(suite.getRaftCluster().RemoveTombStoneRecords())
 	testutil.Eventually(re, func() bool {
 		return cluster.GetStore(2) == nil
 	})
 
 	// test synchronized store labels
-	suite.pdLeaderServer.GetServer().GetRaftCluster().PutMetaStore(
+	suite.getRaftCluster().PutMetaStore(
 		&metapb.Store{Id: 5, Address: "mock-5", State: metapb.StoreState_Up, NodeState: metapb.NodeState_Serving, LastHeartbeat: time.Now().UnixNano(), Labels: []*metapb.StoreLabel{{Key: "zone", Value: "z1"}}},
 	)
 	testutil.Eventually(re, func() bool {
@@ -112,4 +113,14 @@ func (suite *metaTestSuite) TestStoreWatch() {
 		}
 		return cluster.GetStore(5).GetLabels()[0].GetValue() == "z1"
 	})
+}
+
+func (suite *metaTestSuite) getRaftCluster() *cluster.RaftCluster {
+	re := suite.Require()
+	leaderName := suite.cluster.WaitLeader()
+	re.NotEmpty(leaderName)
+	leaderServer := suite.cluster.GetServer(leaderName)
+	cluster := leaderServer.GetServer().GetRaftCluster()
+	re.NotNil(cluster)
+	return cluster
 }
