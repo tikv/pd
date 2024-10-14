@@ -51,6 +51,7 @@ type CheckerCluster interface {
 	GetCheckerConfig() sc.CheckerConfigProvider
 	GetStoreConfig() sc.StoreConfigProvider
 	UpdateRegionsLabelLevelStats(regions []*core.RegionInfo)
+	ClearDefunctRegionsLabelLevelStats()
 }
 
 // SharedCluster is an aggregate interface that wraps multiple interfaces

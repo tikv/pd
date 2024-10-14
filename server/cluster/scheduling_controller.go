@@ -238,6 +238,11 @@ func (sc *schedulingController) UpdateRegionsLabelLevelStats(regions []*core.Reg
 	}
 }
 
+// ClearDefunctRegionsLabelLevelStats clears the status of the region label level by types.
+func (sc *schedulingController) ClearDefunctRegionsLabelLevelStats() {
+	sc.labelStats.ClearDefunctRegions()
+}
+
 func (sc *schedulingController) getStoresWithoutLabelLocked(region *core.RegionInfo, key, value string) []*core.StoreInfo {
 	stores := make([]*core.StoreInfo, 0, len(region.GetPeers()))
 	for _, p := range region.GetPeers() {
