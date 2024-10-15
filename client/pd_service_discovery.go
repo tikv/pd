@@ -461,7 +461,7 @@ func newPDServiceDiscovery(
 	ctx context.Context, cancel context.CancelFunc,
 	wg *sync.WaitGroup,
 	serviceModeUpdateCb func(pdpb.ServiceMode),
-	updateKeyspaceIDCb updateKeyspaceIDFunc,
+	updateKeyspaceIDFunc updateKeyspaceIDFunc,
 	keyspaceID uint32,
 	urls []string, tlsCfg *tls.Config, option *option,
 ) *pdServiceDiscovery {
@@ -472,7 +472,7 @@ func newPDServiceDiscovery(
 		wg:                   wg,
 		apiCandidateNodes:    [apiKindCount]*pdServiceBalancer{newPDServiceBalancer(emptyErrorFn), newPDServiceBalancer(regionAPIErrorFn)},
 		serviceModeUpdateCb:  serviceModeUpdateCb,
-		updateKeyspaceIDFunc: updateKeyspaceIDCb,
+		updateKeyspaceIDFunc: updateKeyspaceIDFunc,
 		keyspaceID:           keyspaceID,
 		tlsCfg:               tlsCfg,
 		option:               option,
