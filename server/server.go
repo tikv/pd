@@ -491,6 +491,16 @@ func (s *Server) startServer(ctx context.Context) error {
 	s.gcSafePointManager = gc.NewSafePointManager(s.storage, s.cfg.PDServerCfg)
 	s.basicCluster = core.NewBasicCluster()
 	s.cluster = cluster.NewRaftCluster(ctx, clusterID, s.GetBasicCluster(), s.GetStorage(), syncer.NewRegionSyncer(s), s.client, s.httpClient)
+	// used to load region from kv storage to cache storage.
+	start := time.Now()
+	if err = storage.TryLoadRegionsOnce(ctx, s.GetStorage(), s.cluster.CheckAndPutRegion); err != nil {
+		return err
+	}
+	log.Info("load regions",
+		zap.Int("count", s.cluster.GetTotalRegionCount()),
+		zap.Duration("cost", time.Since(start)),
+	)
+
 	keyspaceIDAllocator := id.NewAllocator(&id.AllocatorParams{
 		Client:    s.client,
 		RootPath:  s.rootPath,

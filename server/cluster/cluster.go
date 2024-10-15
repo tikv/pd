@@ -653,18 +653,6 @@ func (c *RaftCluster) LoadClusterInfo() (*RaftCluster, error) {
 		zap.Int("count", c.GetStoreCount()),
 		zap.Duration("cost", time.Since(start)),
 	)
-
-	start = time.Now()
-
-	// used to load region from kv storage to cache storage.
-	if err = storage.TryLoadRegionsOnce(c.ctx, c.storage, c.CheckAndPutRegion); err != nil {
-		return nil, err
-	}
-	log.Info("load regions",
-		zap.Int("count", c.GetTotalRegionCount()),
-		zap.Duration("cost", time.Since(start)),
-	)
-
 	return c, nil
 }
 
