@@ -44,6 +44,7 @@ import (
 	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/mcs/discovery"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
+	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/memory"
 	"github.com/tikv/pd/pkg/progress"
 	"github.com/tikv/pd/pkg/ratelimit"
@@ -147,6 +148,7 @@ type RaftCluster struct {
 	cancel    context.CancelFunc
 
 	*core.BasicCluster // cached cluster info
+	member             *member.EmbeddedEtcdMember
 
 	etcdClient *clientv3.Client
 	httpClient *http.Client
@@ -181,7 +183,7 @@ type RaftCluster struct {
 	independentServices sync.Map
 	hbstreams           *hbstream.HeartbeatStreams
 	tsoAllocator        *tso.AllocatorManager
-
+	tsoCh               chan struct{}
 	// heartbeatRunner is used to process the subtree update task asynchronously.
 	heartbeatRunner ratelimit.Runner
 	// miscRunner is used to process the statistics and persistent tasks asynchronously.
@@ -201,17 +203,19 @@ type Status struct {
 }
 
 // NewRaftCluster create a new cluster.
-func NewRaftCluster(ctx context.Context, clusterID uint64, basicCluster *core.BasicCluster, storage storage.Storage, regionSyncer *syncer.RegionSyncer, etcdClient *clientv3.Client,
-	httpClient *http.Client, tsoAllocator *tso.AllocatorManager) *RaftCluster {
+func NewRaftCluster(ctx context.Context, clusterID uint64, member *member.EmbeddedEtcdMember, basicCluster *core.BasicCluster, storage storage.Storage, regionSyncer *syncer.RegionSyncer, etcdClient *clientv3.Client,
+	httpClient *http.Client, tsoAllocator *tso.AllocatorManager, tsoCh chan struct{}) *RaftCluster {
 	return &RaftCluster{
 		serverCtx:       ctx,
 		clusterID:       clusterID,
+		member:          member,
 		regionSyncer:    regionSyncer,
 		httpClient:      httpClient,
 		etcdClient:      etcdClient,
 		BasicCluster:    basicCluster,
 		storage:         storage,
 		tsoAllocator:    tsoAllocator,
+		tsoCh:           tsoCh,
 		heartbeatRunner: ratelimit.NewConcurrentRunner(heartbeatTaskRunner, ratelimit.NewConcurrencyLimiter(uint64(runtime.NumCPU()*2)), time.Minute),
 		miscRunner:      ratelimit.NewConcurrentRunner(miscTaskRunner, ratelimit.NewConcurrencyLimiter(uint64(runtime.NumCPU()*2)), time.Minute),
 		logRunner:       ratelimit.NewConcurrentRunner(logTaskRunner, ratelimit.NewConcurrencyLimiter(uint64(runtime.NumCPU()*2)), time.Minute),
@@ -415,6 +419,10 @@ func (c *RaftCluster) checkTSOService() {
 			if err := c.startTSOJobs(); err != nil {
 				return
 			}
+			if c.IsServiceIndependent(constant.TSOServiceName) {
+				log.Info("PD server starts to provide timestamp")
+			}
+			c.UnsetServiceIndependent(constant.TSOServiceName)
 		} else {
 			// If the previous TSO is provided by the PD server, we need to reset the PD's allocator group
 			// and start to let the TSO service provide the timestamp through SetServiceIndependent.
@@ -427,8 +435,24 @@ func (c *RaftCluster) checkTSOService() {
 		}
 	} else {
 		// If the PD server is not in the API service mode, PD should provide the TSO service.
-		if err := c.startTSOJobs(); err != nil {
-			return
+		if c.member.IsLeader() {
+			if err := c.startTSOJobs(); err != nil {
+				// If there is an error, need to wait for the next check.
+				return
+			}
+		} else {
+			// leader exits, reset the allocator group
+			c.stopTSOJobs()
+
+			failpoint.Inject("updateAfterResetTSO", func() {
+				allocator, _ := c.tsoAllocator.GetAllocator(tso.GlobalDCLocation)
+				if err := allocator.UpdateTSO(); !errorspkg.Is(err, errs.ErrUpdateTimestamp) {
+					log.Panic("the tso update after reset should return ErrUpdateTimestamp as expected", zap.Error(err))
+				}
+				if allocator.IsInitialize() {
+					log.Panic("the allocator should be uninitialized after reset")
+				}
+			})
 		}
 	}
 }
@@ -448,24 +472,13 @@ func (c *RaftCluster) runServiceCheckJob() {
 	for {
 		select {
 		case <-c.ctx.Done():
-			if !c.IsServiceIndependent(constant.TSOServiceName) {
-				// leader exits, reset the allocator group
-				c.tsoAllocator.ResetAllocatorGroup(tso.GlobalDCLocation, true)
-			}
-			failpoint.Inject("updateAfterResetTSO", func() {
-				allocator, _ := c.tsoAllocator.GetAllocator(tso.GlobalDCLocation)
-				if err := allocator.UpdateTSO(); !errorspkg.Is(err, errs.ErrUpdateTimestamp) {
-					log.Panic("the tso update after reset should return ErrUpdateTimestamp as expected", zap.Error(err))
-				}
-				if allocator.IsInitialize() {
-					log.Panic("the allocator should be uninitialized after reset")
-				}
-			})
 			log.Info("service check job is stopped")
 			return
 		case <-schedulingTicker.C:
 			c.checkSchedulingService()
 		case <-tsoTicker.C:
+			c.checkTSOService()
+		case <-c.tsoCh:
 			c.checkTSOService()
 		}
 	}
@@ -484,11 +497,11 @@ func (c *RaftCluster) startTSOJobs() error {
 			return err
 		}
 	}
-	if c.IsServiceIndependent(constant.TSOServiceName) {
-		log.Info("PD server starts to provide timestamp")
-	}
-	c.UnsetServiceIndependent(constant.TSOServiceName)
 	return nil
+}
+
+func (c *RaftCluster) stopTSOJobs() {
+	c.tsoAllocator.ResetAllocatorGroup(tso.GlobalDCLocation, true)
 }
 
 // startGCTuner

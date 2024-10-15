@@ -236,6 +236,8 @@ type Server struct {
 
 	// Cgroup Monitor
 	cgMonitor cgroup.Monitor
+
+	tsoCh chan struct{}
 }
 
 // HandlerBuilder builds a server HTTP handler.
@@ -268,6 +270,7 @@ func CreateServer(ctx context.Context, cfg *config.Config, services []string, le
 		}{
 			clients: make(map[string]tsopb.TSO_TsoClient),
 		},
+		tsoCh: make(chan struct{}, 1),
 	}
 	s.handler = newHandler(s)
 
@@ -489,7 +492,7 @@ func (s *Server) startServer(ctx context.Context) error {
 
 	s.gcSafePointManager = gc.NewSafePointManager(s.storage, s.cfg.PDServerCfg)
 	s.basicCluster = core.NewBasicCluster()
-	s.cluster = cluster.NewRaftCluster(ctx, clusterID, s.GetBasicCluster(), s.GetStorage(), syncer.NewRegionSyncer(s), s.client, s.httpClient, s.tsoAllocatorManager)
+	s.cluster = cluster.NewRaftCluster(ctx, clusterID, s.member, s.GetBasicCluster(), s.GetStorage(), syncer.NewRegionSyncer(s), s.client, s.httpClient, s.tsoAllocatorManager, s.tsoCh)
 	keyspaceIDAllocator := id.NewAllocator(&id.AllocatorParams{
 		Client:    s.client,
 		RootPath:  s.rootPath,
@@ -909,6 +912,11 @@ func (s *Server) GetAllocator() id.Allocator {
 // GetTSOAllocatorManager returns the manager of TSO Allocator.
 func (s *Server) GetTSOAllocatorManager() *tso.AllocatorManager {
 	return s.tsoAllocatorManager
+}
+
+// GetTSOCh returns the TSO channel of server.
+func (s *Server) GetTSOCh() chan struct{} {
+	return s.tsoCh
 }
 
 // GetKeyspaceManager returns the keyspace manager of server.
@@ -1712,6 +1720,20 @@ func (s *Server) campaignLeader() {
 	// maintain the PD leadership, after this, TSO can be service.
 	s.member.KeepLeader(ctx)
 	log.Info(fmt.Sprintf("campaign %s leader ok", s.mode), zap.String("campaign-leader-name", s.Name()))
+
+	// notify cluster to start TSO service
+	select {
+	case s.tsoCh <- struct{}{}:
+	default:
+	}
+
+	defer func() {
+		// notify cluster to stop TSO service
+		select {
+		case s.tsoCh <- struct{}{}:
+		default:
+		}
+	}()
 
 	if err := s.reloadConfigFromKV(); err != nil {
 		log.Error("failed to reload configuration", errs.ZapError(err))
