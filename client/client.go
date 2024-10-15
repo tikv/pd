@@ -556,7 +556,7 @@ func (c *client) resetTSOClientLocked(mode pdpb.ServiceMode) {
 	case pdpb.ServiceMode_API_SVC_MODE:
 		newTSOSvcDiscovery = newTSOServiceDiscovery(
 			c.ctx, MetaStorageClient(c), c.pdSvcDiscovery,
-			c.GetClusterID(c.ctx), c.keyspaceID, c.tlsCfg, c.option)
+			c.keyspaceID, c.tlsCfg, c.option)
 		// At this point, the keyspace group isn't known yet. Starts from the default keyspace group,
 		// and will be updated later.
 		newTSOCli = newTSOClient(c.ctx, c.option,
