@@ -1576,6 +1576,11 @@ func (s *GrpcServer) GetRegionByID(ctx context.Context, request *pdpb.GetRegionB
 	}, nil
 }
 
+// QueryRegion provides a stream processing of the region query.
+func (s *GrpcServer) QueryRegion(stream pdpb.PD_QueryRegionServer) error {
+	return nil
+}
+
 // Deprecated: use BatchScanRegions instead.
 // ScanRegions implements gRPC PDServer.
 func (s *GrpcServer) ScanRegions(ctx context.Context, request *pdpb.ScanRegionsRequest) (*pdpb.ScanRegionsResponse, error) {
