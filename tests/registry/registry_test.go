@@ -30,8 +30,8 @@ import (
 	"github.com/tikv/pd/tests"
 	"go.uber.org/goleak"
 	"google.golang.org/grpc"
-
-	"google.golang.org/grpc/test/grpc_testing"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/interop/grpc_testing"
 )
 
 func TestMain(m *testing.M) {
@@ -80,7 +80,7 @@ func TestRegistryService(t *testing.T) {
 	leader := cluster.GetLeaderServer()
 
 	// Test registered GRPC Service
-	cc, err := grpc.DialContext(ctx, strings.TrimPrefix(leader.GetAddr(), "http://"), grpc.WithInsecure())
+	cc, err := grpc.DialContext(ctx, strings.TrimPrefix(leader.GetAddr(), "http://"), grpc.WithTransportCredentials(insecure.NewCredentials()))
 	re.NoError(err)
 	defer cc.Close()
 	grpcClient := grpc_testing.NewTestServiceClient(cc)

@@ -29,6 +29,11 @@ const (
 	tiflashTypeLabel          = "ap"
 	defaultTypeLabel          = "tp"
 	newResourceGroupNameLabel = "resource_group"
+
+	// Labels for the config.
+	ruPerSecLabel   = "ru_per_sec"
+	ruCapacityLabel = "ru_capacity"
+	priorityLabel   = "priority"
 )
 
 var (
@@ -56,6 +61,22 @@ var (
 			Name:      "write_request_unit_sum",
 			Help:      "Counter of the write request unit cost for all resource groups.",
 		}, []string{resourceGroupNameLabel, newResourceGroupNameLabel, typeLabel})
+
+	readRequestUnitMaxPerSecCost = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: namespace,
+			Subsystem: ruSubsystem,
+			Name:      "read_request_unit_max_per_sec",
+			Help:      "Gauge of the max read request unit per second for all resource groups.",
+		}, []string{newResourceGroupNameLabel})
+	writeRequestUnitMaxPerSecCost = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: namespace,
+			Subsystem: ruSubsystem,
+			Name:      "write_request_unit_max_per_sec",
+			Help:      "Gauge of the max write request unit per second for all resource groups.",
+		}, []string{newResourceGroupNameLabel})
+
 	sqlLayerRequestUnitCost = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: namespace,
@@ -108,6 +129,14 @@ var (
 			Name:      "available_ru",
 			Help:      "Counter of the available RU for all resource groups.",
 		}, []string{resourceGroupNameLabel, newResourceGroupNameLabel})
+
+	resourceGroupConfigGauge = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: namespace,
+			Subsystem: serverSubsystem,
+			Name:      "group_config",
+			Help:      "Config of the resource group.",
+		}, []string{newResourceGroupNameLabel, typeLabel})
 )
 
 func init() {
@@ -121,4 +150,7 @@ func init() {
 	prometheus.MustRegister(sqlCPUCost)
 	prometheus.MustRegister(requestCount)
 	prometheus.MustRegister(availableRUCounter)
+	prometheus.MustRegister(readRequestUnitMaxPerSecCost)
+	prometheus.MustRegister(writeRequestUnitMaxPerSecCost)
+	prometheus.MustRegister(resourceGroupConfigGauge)
 }

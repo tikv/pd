@@ -920,6 +920,14 @@ func (c *RaftCluster) RemoveSuspectRegion(id uint64) {
 	c.coordinator.GetCheckerController().RemoveSuspectRegion(id)
 }
 
+// IsSchedulingHalted returns whether the scheduling is halted.
+// Currently, the PD scheduling is halted when:
+//   - The `HaltScheduling` persist option is set to true.
+//   - Online unsafe recovery is running.
+func (c *RaftCluster) IsSchedulingHalted() bool {
+	return c.opt.IsSchedulingHalted() || c.unsafeRecoveryController.IsRunning()
+}
+
 // GetUnsafeRecoveryController returns the unsafe recovery controller.
 func (c *RaftCluster) GetUnsafeRecoveryController() *unsaferecovery.Controller {
 	return c.unsafeRecoveryController
@@ -1470,6 +1478,9 @@ func (c *RaftCluster) checkStoreLabels(s *core.StoreInfo) error {
 	}
 	for _, label := range s.GetLabels() {
 		key := label.GetKey()
+		if key == core.EngineKey {
+			continue
+		}
 		if _, ok := keysSet[key]; !ok {
 			log.Warn("not found the key match with the store label",
 				zap.Stringer("store", s.GetMeta()),
@@ -1516,7 +1527,7 @@ func (c *RaftCluster) RemoveStore(storeID uint64, physicallyDestroyed bool) erro
 	if err == nil {
 		regionSize := float64(c.core.GetStoreRegionSize(storeID))
 		c.resetProgress(storeID, store.GetAddress())
-		c.progressManager.AddProgress(encodeRemovingProgressKey(storeID), regionSize, regionSize, nodeStateCheckJobInterval)
+		c.progressManager.AddProgress(encodeRemovingProgressKey(storeID), regionSize, regionSize, nodeStateCheckJobInterval, progress.WindowDurationOption(c.GetCoordinator().GetPatrolRegionsDuration()))
 		// record the current store limit in memory
 		c.prevStoreLimit[storeID] = map[storelimit.Type]float64{
 			storelimit.AddPeer:    c.GetStoreLimitByType(storeID, storelimit.AddPeer),
@@ -2062,21 +2073,23 @@ func updateTopology(topology map[string]interface{}, sortedLabels []*metapb.Stor
 
 func (c *RaftCluster) updateProgress(storeID uint64, storeAddress, action string, current, remaining float64, isInc bool) {
 	storeLabel := strconv.FormatUint(storeID, 10)
-	var progress string
+	var progressName string
+	var opts []progress.Option
 	switch action {
 	case removingAction:
-		progress = encodeRemovingProgressKey(storeID)
+		progressName = encodeRemovingProgressKey(storeID)
+		opts = []progress.Option{progress.WindowDurationOption(c.coordinator.GetPatrolRegionsDuration())}
 	case preparingAction:
-		progress = encodePreparingProgressKey(storeID)
+		progressName = encodePreparingProgressKey(storeID)
 	}
 
-	if exist := c.progressManager.AddProgress(progress, current, remaining, nodeStateCheckJobInterval); !exist {
+	if exist := c.progressManager.AddProgress(progressName, current, remaining, nodeStateCheckJobInterval, opts...); !exist {
 		return
 	}
-	c.progressManager.UpdateProgress(progress, current, remaining, isInc)
-	process, ls, cs, err := c.progressManager.Status(progress)
+	c.progressManager.UpdateProgress(progressName, current, remaining, isInc, opts...)
+	process, ls, cs, err := c.progressManager.Status(progressName)
 	if err != nil {
-		log.Error("get progress status failed", zap.String("progress", progress), zap.Float64("remaining", remaining), errs.ZapError(err))
+		log.Error("get progress status failed", zap.String("progress", progressName), zap.Float64("remaining", remaining), errs.ZapError(err))
 		return
 	}
 	storesProgressGauge.WithLabelValues(storeAddress, storeLabel, action).Set(process)

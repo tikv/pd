@@ -380,12 +380,12 @@ func (s *Server) startClient() error {
 	}
 	/* Starting two different etcd clients here is to avoid the throttling. */
 	// This etcd client will be used to access the etcd cluster to read and write all kinds of meta data.
-	s.client, err = etcdutil.CreateEtcdClient(tlsConfig, etcdCfg.ACUrls, "server-etcd-client")
+	s.client, err = etcdutil.CreateEtcdClient(tlsConfig, etcdCfg.AdvertiseClientUrls, "server-etcd-client")
 	if err != nil {
 		return errs.ErrNewEtcdClient.Wrap(err).GenWithStackByCause()
 	}
 	// This etcd client will only be used to read and write the election-related data, such as leader key.
-	s.electionClient, err = etcdutil.CreateEtcdClient(tlsConfig, etcdCfg.ACUrls, "election-etcd-client")
+	s.electionClient, err = etcdutil.CreateEtcdClient(tlsConfig, etcdCfg.AdvertiseClientUrls, "election-etcd-client")
 	if err != nil {
 		return errs.ErrNewEtcdClient.Wrap(err).GenWithStackByCause()
 	}
@@ -444,6 +444,10 @@ func (s *Server) startServer(ctx context.Context) error {
 		Label:     idAllocLabel,
 		Member:    s.member.MemberValue(),
 	})
+	s.encryptionKeyManager, err = encryption.NewManager(s.client, &s.cfg.Security.Encryption)
+	if err != nil {
+		return err
+	}
 	regionStorage, err := storage.NewStorageWithLevelDBBackend(ctx, filepath.Join(s.cfg.DataDir, "region-meta"), s.encryptionKeyManager)
 	if err != nil {
 		return err
@@ -466,11 +470,6 @@ func (s *Server) startServer(ctx context.Context) error {
 				return err
 			}
 		}
-	}
-
-	s.encryptionKeyManager, err = encryption.NewManager(s.client, &s.cfg.Security.Encryption)
-	if err != nil {
-		return err
 	}
 
 	s.gcSafePointManager = gc.NewSafePointManager(s.storage, s.cfg.PDServerCfg)
@@ -998,6 +997,7 @@ func (s *Server) GetScheduleConfig() *sc.ScheduleConfig {
 }
 
 // SetScheduleConfig sets the balance config information.
+// This function is exported to be used by the API.
 func (s *Server) SetScheduleConfig(cfg sc.ScheduleConfig) error {
 	if err := cfg.Validate(); err != nil {
 		return err
@@ -1016,6 +1016,8 @@ func (s *Server) SetScheduleConfig(cfg sc.ScheduleConfig) error {
 			errs.ZapError(err))
 		return err
 	}
+	// Update the scheduling halt status at the same time.
+	s.persistOptions.SetSchedulingAllowanceStatus(cfg.HaltScheduling, "manually")
 	log.Info("schedule config is updated", zap.Reflect("new", cfg), zap.Reflect("old", old))
 	return nil
 }

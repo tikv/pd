@@ -114,7 +114,7 @@ func (c *Controller) CollectSchedulerMetrics() {
 		var allowScheduler float64
 		// If the scheduler is not allowed to schedule, it will disappear in Grafana panel.
 		// See issue #1341.
-		if !s.IsPaused() && !c.isSchedulingHalted() {
+		if !s.IsPaused() && !c.cluster.IsSchedulingHalted() {
 			allowScheduler = 1
 		}
 		schedulerStatusGauge.WithLabelValues(s.Scheduler.GetName(), "allow").Set(allowScheduler)
@@ -128,10 +128,6 @@ func (c *Controller) CollectSchedulerMetrics() {
 	groupCnt := ruleMgr.GetGroupsCount()
 	ruleStatusGauge.WithLabelValues("rule_count").Set(float64(ruleCnt))
 	ruleStatusGauge.WithLabelValues("group_count").Set(float64(groupCnt))
-}
-
-func (c *Controller) isSchedulingHalted() bool {
-	return c.cluster.GetSchedulerConfig().IsSchedulingHalted()
 }
 
 // ResetSchedulerMetrics resets metrics of all schedulers.
@@ -520,7 +516,7 @@ func (s *ScheduleController) AllowSchedule(diagnosable bool) bool {
 		}
 		return false
 	}
-	if s.isSchedulingHalted() {
+	if s.cluster.IsSchedulingHalted() {
 		if diagnosable {
 			s.diagnosticRecorder.SetResultFromStatus(Halted)
 		}
@@ -533,10 +529,6 @@ func (s *ScheduleController) AllowSchedule(diagnosable bool) bool {
 		return false
 	}
 	return true
-}
-
-func (s *ScheduleController) isSchedulingHalted() bool {
-	return s.cluster.GetSchedulerConfig().IsSchedulingHalted()
 }
 
 // IsPaused returns if a scheduler is paused.

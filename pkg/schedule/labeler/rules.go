@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"strings"
 	"time"
 
 	"github.com/pingcap/failpoint"
@@ -38,6 +39,10 @@ type RegionLabel struct {
 	expire  *time.Time
 }
 
+func (l *RegionLabel) String() string {
+	return fmt.Sprintf("key: %s, value: %s", l.Key, l.Value)
+}
+
 // LabelRule is the rule to assign labels to a region.
 // NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
 type LabelRule struct {
@@ -47,6 +52,37 @@ type LabelRule struct {
 	RuleType  string        `json:"rule_type"`
 	Data      interface{}   `json:"data"`
 	minExpire *time.Time
+}
+
+func (rule *LabelRule) String() string {
+	var b strings.Builder
+	b.WriteString(fmt.Sprintf("id: %s, index: %d, type: %s", rule.ID, rule.Index, rule.RuleType))
+	b.WriteString(", labels: ")
+	for i, l := range rule.Labels {
+		if i == 0 {
+			b.WriteString("[")
+		}
+		b.WriteString(l.String())
+		if i == len(rule.Labels)-1 {
+			b.WriteString("]")
+		} else {
+			b.WriteString(", ")
+		}
+	}
+	b.WriteString(", data: ")
+	ranges := rule.Data.([]*KeyRangeRule)
+	for i, r := range ranges {
+		if i == 0 {
+			b.WriteString("[")
+		}
+		b.WriteString(fmt.Sprintf("startKey: {%s}, endKey: {%s}", r.StartKeyHex, r.EndKeyHex))
+		if i == len(ranges)-1 {
+			b.WriteString("]")
+		} else {
+			b.WriteString(", ")
+		}
+	}
+	return b.String()
 }
 
 // NewLabelRuleFromJSON creates a label rule from the JSON data.

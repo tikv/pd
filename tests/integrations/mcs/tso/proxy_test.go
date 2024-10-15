@@ -34,6 +34,7 @@ import (
 	"github.com/tikv/pd/tests"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 )
 
 type tsoProxyTestSuite struct {
@@ -177,7 +178,7 @@ func (s *tsoProxyTestSuite) TestTSOProxyClientsWithSameContext() {
 	defer cancel()
 
 	for i := 0; i < clientCount; i++ {
-		conn, err := grpc.Dial(strings.TrimPrefix(s.backendEndpoints, "http://"), grpc.WithInsecure())
+		conn, err := grpc.Dial(strings.TrimPrefix(s.backendEndpoints, "http://"), grpc.WithTransportCredentials(insecure.NewCredentials()))
 		re.NoError(err)
 		grpcPDClient := pdpb.NewPDClient(conn)
 		stream, err := grpcPDClient.Tso(ctx)
@@ -375,7 +376,7 @@ func createTSOStreams(
 	streams := make([]pdpb.PD_TsoClient, clientCount)
 
 	for i := 0; i < clientCount; i++ {
-		conn, err := grpc.Dial(strings.TrimPrefix(backendEndpoints, "http://"), grpc.WithInsecure())
+		conn, err := grpc.Dial(strings.TrimPrefix(backendEndpoints, "http://"), grpc.WithTransportCredentials(insecure.NewCredentials()))
 		re.NoError(err)
 		grpcPDClient := pdpb.NewPDClient(conn)
 		cctx, cancel := context.WithCancel(ctx)

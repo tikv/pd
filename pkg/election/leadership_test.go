@@ -155,7 +155,7 @@ func TestExitWatch(t *testing.T) {
 	checkExitWatch(t, leaderKey, func(server *embed.Etcd, client *clientv3.Client) func() {
 		cfg1 := server.Config()
 		etcd2 := etcdutil.MustAddEtcdMember(t, &cfg1, client)
-		client2, err := etcdutil.CreateEtcdClient(nil, etcd2.Config().LCUrls)
+		client2, err := etcdutil.CreateEtcdClient(nil, etcd2.Config().ListenClientUrls)
 		re.NoError(err)
 		// close the original leader
 		server.Server.HardStop()
@@ -189,7 +189,7 @@ func checkExitWatch(t *testing.T, leaderKey string, injectFunc func(server *embe
 	re := require.New(t)
 	servers, client1, clean := etcdutil.NewTestEtcdCluster(t, 1)
 	defer clean()
-	client2, err := etcdutil.CreateEtcdClient(nil, servers[0].Config().LCUrls)
+	client2, err := etcdutil.CreateEtcdClient(nil, servers[0].Config().ListenClientUrls)
 	re.NoError(err)
 	defer client2.Close()
 
@@ -225,7 +225,7 @@ func TestRequestProgress(t *testing.T) {
 		defer os.RemoveAll(fname)
 		servers, client1, clean := etcdutil.NewTestEtcdCluster(t, 1)
 		defer clean()
-		client2, err := etcdutil.CreateEtcdClient(nil, servers[0].Config().LCUrls)
+		client2, err := etcdutil.CreateEtcdClient(nil, servers[0].Config().ListenClientUrls)
 		re.NoError(err)
 		defer client2.Close()
 
@@ -261,4 +261,37 @@ func TestRequestProgress(t *testing.T) {
 	}
 	checkWatcherRequestProgress(false)
 	checkWatcherRequestProgress(true)
+}
+
+func TestCampaignTimes(t *testing.T) {
+	re := require.New(t)
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1)
+	defer clean()
+	leadership := NewLeadership(client, "test_leader", "test_leader")
+
+	// all the campaign times are within the timeout.
+	campaignTimesRecordTimeout = 10 * time.Second
+	defer func() {
+		campaignTimesRecordTimeout = 5 * time.Minute
+	}()
+	for i := 0; i < 3; i++ {
+		leadership.AddCampaignTimes()
+		time.Sleep(100 * time.Millisecond)
+	}
+	re.Equal(3, leadership.GetCampaignTimesNum())
+
+	// only the last 2 records are valid.
+	campaignTimesRecordTimeout = 200 * time.Millisecond
+	for i := 0; i < 3; i++ {
+		leadership.AddCampaignTimes()
+		time.Sleep(100 * time.Millisecond)
+	}
+	re.Equal(2, leadership.GetCampaignTimesNum())
+
+	time.Sleep(200 * time.Millisecond)
+	// need to wait for the next addCampaignTimes to update the campaign time.
+	re.Equal(2, leadership.GetCampaignTimesNum())
+	// check campaign leader frequency.
+	leadership.AddCampaignTimes()
+	re.Equal(1, leadership.GetCampaignTimesNum())
 }
