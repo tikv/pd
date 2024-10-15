@@ -28,6 +28,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	pd "github.com/tikv/pd/client"
+	"github.com/tikv/pd/client/caller"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/netutil"
 	"github.com/tikv/pd/server/config"
@@ -161,11 +162,13 @@ func testTLSReload(
 	go func() {
 		for {
 			dctx, dcancel := context.WithTimeout(ctx, time.Second)
-			cli, err := pd.NewClientWithContext(dctx, endpoints, pd.SecurityOption{
-				CAPath:   testClientTLSInfo.TrustedCAFile,
-				CertPath: testClientTLSInfo.CertFile,
-				KeyPath:  testClientTLSInfo.KeyFile,
-			}, pd.WithGRPCDialOptions(grpc.WithBlock()))
+			cli, err := pd.NewClientWithContext(dctx,
+				caller.TestID, caller.TestComponent,
+				endpoints, pd.SecurityOption{
+					CAPath:   testClientTLSInfo.TrustedCAFile,
+					CertPath: testClientTLSInfo.CertFile,
+					KeyPath:  testClientTLSInfo.KeyFile,
+				}, pd.WithGRPCDialOptions(grpc.WithBlock()))
 			if err != nil {
 				errc <- err
 				dcancel()
@@ -192,11 +195,13 @@ func testTLSReload(
 
 	// 6. new requests should trigger listener to reload valid certs
 	dctx, dcancel := context.WithTimeout(ctx, 5*time.Second)
-	cli, err := pd.NewClientWithContext(dctx, endpoints, pd.SecurityOption{
-		CAPath:   testClientTLSInfo.TrustedCAFile,
-		CertPath: testClientTLSInfo.CertFile,
-		KeyPath:  testClientTLSInfo.KeyFile,
-	}, pd.WithGRPCDialOptions(grpc.WithBlock()))
+	cli, err := pd.NewClientWithContext(dctx,
+		caller.TestID, caller.TestComponent,
+		endpoints, pd.SecurityOption{
+			CAPath:   testClientTLSInfo.TrustedCAFile,
+			CertPath: testClientTLSInfo.CertFile,
+			KeyPath:  testClientTLSInfo.KeyFile,
+		}, pd.WithGRPCDialOptions(grpc.WithBlock()))
 	re.NoError(err)
 	dcancel()
 	cli.Close()
@@ -205,11 +210,13 @@ func testTLSReload(
 	caData, certData, keyData := loadTLSContent(re,
 		testClientTLSInfo.TrustedCAFile, testClientTLSInfo.CertFile, testClientTLSInfo.KeyFile)
 	ctx1, cancel1 := context.WithTimeout(ctx, 2*time.Second)
-	cli, err = pd.NewClientWithContext(ctx1, endpoints, pd.SecurityOption{
-		SSLCABytes:   caData,
-		SSLCertBytes: certData,
-		SSLKEYBytes:  keyData,
-	}, pd.WithGRPCDialOptions(grpc.WithBlock()))
+	cli, err = pd.NewClientWithContext(ctx1,
+		caller.TestID, caller.TestComponent,
+		endpoints, pd.SecurityOption{
+			SSLCABytes:   caData,
+			SSLCertBytes: certData,
+			SSLKEYBytes:  keyData,
+		}, pd.WithGRPCDialOptions(grpc.WithBlock()))
 	re.NoError(err)
 	defer cli.Close()
 	cancel1()
@@ -317,11 +324,13 @@ func TestMultiCN(t *testing.T) {
 func testAllowedCN(ctx context.Context, endpoints []string, tls transport.TLSInfo) error {
 	ctx1, cancel1 := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel1()
-	cli, err := pd.NewClientWithContext(ctx1, endpoints, pd.SecurityOption{
-		CAPath:   tls.TrustedCAFile,
-		CertPath: tls.CertFile,
-		KeyPath:  tls.KeyFile,
-	}, pd.WithGRPCDialOptions(grpc.WithBlock()))
+	cli, err := pd.NewClientWithContext(ctx1,
+		caller.TestID, caller.TestComponent,
+		endpoints, pd.SecurityOption{
+			CAPath:   tls.TrustedCAFile,
+			CertPath: tls.CertFile,
+			KeyPath:  tls.KeyFile,
+		}, pd.WithGRPCDialOptions(grpc.WithBlock()))
 	if err != nil {
 		return err
 	}

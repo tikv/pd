@@ -40,6 +40,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	pd "github.com/tikv/pd/client"
+	"github.com/tikv/pd/client/caller"
 	clierrs "github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/retry"
 	"github.com/tikv/pd/pkg/core"
@@ -85,7 +86,8 @@ func TestClientClusterIDCheck(t *testing.T) {
 	endpoints2 := runServer(re, cluster2)
 	// Try to create a client with the mixed endpoints.
 	_, err = pd.NewClientWithContext(
-		ctx, append(endpoints1, endpoints2...),
+		ctx, caller.TestID, caller.TestComponent,
+		append(endpoints1, endpoints2...),
 		pd.SecurityOption{}, pd.WithMaxErrorRetry(1),
 	)
 	re.Error(err)
@@ -93,7 +95,9 @@ func TestClientClusterIDCheck(t *testing.T) {
 	// updateMember should fail due to unmatched cluster ID found.
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/skipClusterIDCheck", `return(true)`))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/skipFirstUpdateMember", `return(true)`))
-	_, err = pd.NewClientWithContext(ctx, []string{endpoints1[0], endpoints2[0]},
+	_, err = pd.NewClientWithContext(ctx,
+		caller.TestID, caller.TestComponent,
+		[]string{endpoints1[0], endpoints2[0]},
 		pd.SecurityOption{}, pd.WithMaxErrorRetry(1),
 	)
 	re.Error(err)
@@ -1051,7 +1055,8 @@ func runServer(re *require.Assertions, cluster *tests.TestCluster) []string {
 }
 
 func setupCli(ctx context.Context, re *require.Assertions, endpoints []string, opts ...pd.ClientOption) pd.Client {
-	cli, err := pd.NewClientWithContext(ctx, endpoints, pd.SecurityOption{}, opts...)
+	cli, err := pd.NewClientWithContext(ctx, caller.TestID, caller.TestComponent,
+		endpoints, pd.SecurityOption{}, opts...)
 	re.NoError(err)
 	return cli
 }

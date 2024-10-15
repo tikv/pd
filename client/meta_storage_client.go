@@ -38,7 +38,7 @@ type MetaStorageClient interface {
 }
 
 // metaStorageClient gets the meta storage client from current PD leader.
-func (c *client) metaStorageClient() meta_storagepb.MetaStorageClient {
+func (c *innerClient) metaStorageClient() meta_storagepb.MetaStorageClient {
 	if client := c.pdSvcDiscovery.GetServingEndpointClientConn(); client != nil {
 		return meta_storagepb.NewMetaStorageClient(client)
 	}
@@ -105,7 +105,7 @@ func getPrefix(key []byte) []byte {
 }
 
 // Put implements the MetaStorageClient interface.
-func (c *client) Put(ctx context.Context, key, value []byte, opts ...OpOption) (*meta_storagepb.PutResponse, error) {
+func (c *innerClient) Put(ctx context.Context, key, value []byte, opts ...OpOption) (*meta_storagepb.PutResponse, error) {
 	options := &Op{}
 	for _, opt := range opts {
 		opt(options)
@@ -125,7 +125,7 @@ func (c *client) Put(ctx context.Context, key, value []byte, opts ...OpOption) (
 		Lease:  options.lease,
 		PrevKv: options.prevKv,
 	}
-	ctx = grpcutil.BuildForwardContext(ctx, c.GetLeaderURL())
+	ctx = grpcutil.BuildForwardContext(ctx, c.pdSvcDiscovery.GetServingURL())
 	cli := c.metaStorageClient()
 	if cli == nil {
 		cancel()
@@ -141,7 +141,7 @@ func (c *client) Put(ctx context.Context, key, value []byte, opts ...OpOption) (
 }
 
 // Get implements the MetaStorageClient interface.
-func (c *client) Get(ctx context.Context, key []byte, opts ...OpOption) (*meta_storagepb.GetResponse, error) {
+func (c *innerClient) Get(ctx context.Context, key []byte, opts ...OpOption) (*meta_storagepb.GetResponse, error) {
 	options := &Op{}
 	for _, opt := range opts {
 		opt(options)
@@ -164,7 +164,7 @@ func (c *client) Get(ctx context.Context, key []byte, opts ...OpOption) (*meta_s
 		Limit:    options.limit,
 		Revision: options.revision,
 	}
-	ctx = grpcutil.BuildForwardContext(ctx, c.GetLeaderURL())
+	ctx = grpcutil.BuildForwardContext(ctx, c.pdSvcDiscovery.GetServingURL())
 	cli := c.metaStorageClient()
 	if cli == nil {
 		cancel()
@@ -180,7 +180,7 @@ func (c *client) Get(ctx context.Context, key []byte, opts ...OpOption) (*meta_s
 }
 
 // Watch implements the MetaStorageClient interface.
-func (c *client) Watch(ctx context.Context, key []byte, opts ...OpOption) (chan []*meta_storagepb.Event, error) {
+func (c *innerClient) Watch(ctx context.Context, key []byte, opts ...OpOption) (chan []*meta_storagepb.Event, error) {
 	eventCh := make(chan []*meta_storagepb.Event, 100)
 	options := &Op{}
 	for _, opt := range opts {
@@ -226,7 +226,7 @@ func (c *client) Watch(ctx context.Context, key []byte, opts ...OpOption) (chan 
 	return eventCh, err
 }
 
-func (c *client) respForMetaStorageErr(observer prometheus.Observer, start time.Time, err error, header *meta_storagepb.ResponseHeader) error {
+func (c *innerClient) respForMetaStorageErr(observer prometheus.Observer, start time.Time, err error, header *meta_storagepb.ResponseHeader) error {
 	if err != nil || header.GetError() != nil {
 		observer.Observe(time.Since(start).Seconds())
 		if err != nil {
@@ -236,4 +236,16 @@ func (c *client) respForMetaStorageErr(observer prometheus.Observer, start time.
 		return errors.WithStack(errors.New(header.GetError().String()))
 	}
 	return nil
+}
+
+func (c *client) Put(ctx context.Context, key, value []byte, opts ...OpOption) (*meta_storagepb.PutResponse, error) {
+	return c.inner.Put(ctx, key, value, opts...)
+}
+
+func (c *client) Get(ctx context.Context, key []byte, opts ...OpOption) (*meta_storagepb.GetResponse, error) {
+	return c.inner.Get(ctx, key, opts...)
+}
+
+func (c *client) Watch(ctx context.Context, key []byte, opts ...OpOption) (chan []*meta_storagepb.Event, error) {
+	return c.inner.Watch(ctx, key, opts...)
 }
