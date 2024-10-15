@@ -236,10 +236,6 @@ func (sc *schedulingController) UpdateRegionsLabelLevelStats(regions []*core.Reg
 	for _, region := range regions {
 		sc.labelStats.Observe(region, sc.getStoresWithoutLabelLocked(region, core.EngineKey, core.EngineTiFlash), sc.opt.GetLocationLabels())
 	}
-}
-
-// ClearDefunctRegionsLabelLevelStats clears the status of the region label level by types.
-func (sc *schedulingController) ClearDefunctRegionsLabelLevelStats() {
 	sc.labelStats.ClearDefunctRegions()
 }
 
