@@ -125,9 +125,6 @@ func (mc *Cluster) AllocID() (uint64, error) {
 // UpdateRegionsLabelLevelStats updates the label level stats for the regions.
 func (*Cluster) UpdateRegionsLabelLevelStats(_ []*core.RegionInfo) {}
 
-// ClearDefunctRegionsLabelLevelStats clears the defunct regions' label level stats.
-func (*Cluster) ClearDefunctRegionsLabelLevelStats() {}
-
 // LoadRegion puts region info without leader
 func (mc *Cluster) LoadRegion(regionID uint64, peerStoreIDs ...uint64) {
 	//  regions load from etcd will have no leader

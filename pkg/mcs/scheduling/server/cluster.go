@@ -384,10 +384,6 @@ func (c *Cluster) UpdateRegionsLabelLevelStats(regions []*core.RegionInfo) {
 	for _, region := range regions {
 		c.labelStats.Observe(region, c.getStoresWithoutLabelLocked(region, core.EngineKey, core.EngineTiFlash), c.persistConfig.GetLocationLabels())
 	}
-}
-
-// ClearDefunctRegionsLabelLevelStats clears the defunct regions' label level stats.
-func (c *Cluster) ClearDefunctRegionsLabelLevelStats() {
 	c.labelStats.ClearDefunctRegions()
 }
 
