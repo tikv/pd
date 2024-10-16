@@ -79,6 +79,7 @@ func (suite *tsoServerTestSuite) SetupSuite() {
 	leaderName := suite.cluster.WaitLeader()
 	re.NotEmpty(leaderName)
 	suite.pdLeaderServer = suite.cluster.GetServer(leaderName)
+	suite.pdLeaderServer.BootstrapCluster()
 	backendEndpoints := suite.pdLeaderServer.GetAddr()
 	if suite.legacy {
 		suite.pdClient = tu.MustNewGrpcClient(re, backendEndpoints)
