@@ -361,7 +361,8 @@ func TestTSOFollowerProxy(t *testing.T) {
 	defer cli1.Close()
 	cli2 := setupCli(ctx, re, endpoints)
 	defer cli2.Close()
-	cli2.UpdateOption(pd.EnableTSOFollowerProxy, true)
+	err = cli2.UpdateOption(pd.EnableTSOFollowerProxy, true)
+	re.NoError(err)
 
 	var wg sync.WaitGroup
 	wg.Add(tsoRequestConcurrencyNumber)
@@ -382,6 +383,39 @@ func TestTSOFollowerProxy(t *testing.T) {
 				re.Less(lastTS, ts)
 				lastTS = ts
 			}
+		}()
+	}
+	wg.Wait()
+
+	// Disable the follower proxy and check if the stream is updated.
+	err = cli2.UpdateOption(pd.EnableTSOFollowerProxy, false)
+	re.NoError(err)
+
+	wg.Add(tsoRequestConcurrencyNumber)
+	for i := 0; i < tsoRequestConcurrencyNumber; i++ {
+		go func() {
+			defer wg.Done()
+			var lastTS uint64
+			for i := 0; i < tsoRequestRound; i++ {
+				physical, logical, err := cli2.GetTS(context.Background())
+				if err != nil {
+					// It can only be the context canceled error caused by the stale stream cleanup.
+					re.ErrorContains(err, "context canceled")
+					continue
+				}
+				re.NoError(err)
+				ts := tsoutil.ComposeTS(physical, logical)
+				re.Less(lastTS, ts)
+				lastTS = ts
+				// After requesting with the follower proxy, request with the leader directly.
+				physical, logical, err = cli1.GetTS(context.Background())
+				re.NoError(err)
+				ts = tsoutil.ComposeTS(physical, logical)
+				re.Less(lastTS, ts)
+				lastTS = ts
+			}
+			// Ensure at least one request is successful.
+			re.NotEmpty(lastTS)
 		}()
 	}
 	wg.Wait()
