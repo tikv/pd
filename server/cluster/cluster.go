@@ -827,7 +827,9 @@ func (c *RaftCluster) Stop() {
 	if !c.IsServiceIndependent(constant.SchedulingServiceName) {
 		c.stopSchedulingJobs()
 	}
-	c.stopTSOJobs()
+	if err := c.stopTSOJobs(); err != nil {
+		log.Error("failed to stop tso jobs", errs.ZapError(err))
+	}
 	c.heartbeatRunner.Stop()
 	c.miscRunner.Stop()
 	c.logRunner.Stop()
