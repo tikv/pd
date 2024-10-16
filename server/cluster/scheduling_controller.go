@@ -236,6 +236,7 @@ func (sc *schedulingController) UpdateRegionsLabelLevelStats(regions []*core.Reg
 	for _, region := range regions {
 		sc.labelStats.Observe(region, sc.getStoresWithoutLabelLocked(region, core.EngineKey, core.EngineTiFlash), sc.opt.GetLocationLabels())
 	}
+	sc.labelStats.ClearDefunctRegions()
 }
 
 func (sc *schedulingController) getStoresWithoutLabelLocked(region *core.RegionInfo, key, value string) []*core.StoreInfo {
