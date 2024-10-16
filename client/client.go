@@ -203,7 +203,9 @@ func (k *serviceModeKeeper) close() {
 	defer k.Unlock()
 	switch k.serviceMode {
 	case pdpb.ServiceMode_API_SVC_MODE:
-		k.tsoSvcDiscovery.Close()
+		if k.tsoSvcDiscovery != nil {
+			k.tsoSvcDiscovery.Close()
+		}
 		fallthrough
 	case pdpb.ServiceMode_PD_SVC_MODE:
 		if k.tsoClient != nil {
@@ -542,22 +544,21 @@ func (c *client) Close() {
 	}
 }
 
-func (c *client) setServiceMode(newMode pdpb.ServiceMode) {
+func (c *client) setServiceMode(newMode pdpb.ServiceMode, skipSameMode bool) {
 	c.Lock()
 	defer c.Unlock()
-
 	if c.option.useTSOServerProxy {
 		// If we are using TSO server proxy, we always use PD_SVC_MODE.
 		newMode = pdpb.ServiceMode_PD_SVC_MODE
 	}
 
-	if newMode == c.serviceMode {
+	if skipSameMode && newMode == c.serviceMode {
 		return
 	}
 	log.Info("[pd] changing service mode",
 		zap.String("old-mode", c.serviceMode.String()),
 		zap.String("new-mode", newMode.String()))
-	c.resetTSOClientLocked(newMode)
+	c.setTSOClientLocked(newMode)
 	oldMode := c.serviceMode
 	c.serviceMode = newMode
 	log.Info("[pd] service mode changed",
@@ -565,8 +566,8 @@ func (c *client) setServiceMode(newMode pdpb.ServiceMode) {
 		zap.String("new-mode", newMode.String()))
 }
 
-// Reset a new TSO client.
-func (c *client) resetTSOClientLocked(mode pdpb.ServiceMode) {
+// Set a new TSO client.
+func (c *client) setTSOClientLocked(mode pdpb.ServiceMode) {
 	// Re-create a new TSO client.
 	var (
 		newTSOCli          *tsoClient
@@ -618,11 +619,11 @@ func (c *client) getTSOClient() *tsoClient {
 	return c.tsoClient
 }
 
-// ResetTSOClient resets the TSO client, only for test.
-func (c *client) ResetTSOClient() {
+// SetTSOClient sets the TSO client, only for test.
+func (c *client) SetTSOClient() {
 	c.Lock()
 	defer c.Unlock()
-	c.resetTSOClientLocked(c.serviceMode)
+	c.setTSOClientLocked(c.serviceMode)
 }
 
 func (c *client) getServiceMode() pdpb.ServiceMode {

@@ -38,6 +38,16 @@ func IsLeaderChange(err error) bool {
 		strings.Contains(errMsg, NotPrimaryErr)
 }
 
+// IsServiceModeChange determines whether there is a service mode change.
+func IsServiceModeChange(err error) bool {
+	if err == nil {
+		return false
+	}
+	errMsg := err.Error()
+	return strings.Contains(errMsg, NotFoundTSOErr) ||
+		strings.Contains(errMsg, MaximumRetriesExceededErr)
+}
+
 // ZapError is used to make the log output easier.
 func ZapError(err error, causeError ...error) zap.Field {
 	if err == nil {

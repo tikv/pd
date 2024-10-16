@@ -442,6 +442,10 @@ func (td *tsoDispatcher) handleProcessRequestError(ctx context.Context, bo *retr
 	// Set `stream` to nil and remove this stream from the `connectionCtxs` due to error.
 	td.connectionCtxs.Delete(streamURL)
 	streamCancelFunc()
+	if errs.IsServiceModeChange(err) {
+		svcDiscovery.ScheduleCheckServiceModeChanged()
+		return false
+	}
 	// Because ScheduleCheckMemberChanged is asynchronous, if the leader changes, we better call `updateMember` ASAP.
 	if errs.IsLeaderChange(err) {
 		if err := bo.Exec(ctx, svcDiscovery.CheckMemberChanged); err != nil {

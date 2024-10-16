@@ -274,7 +274,8 @@ func (s *GrpcServer) GetClusterInfo(context.Context, *pdpb.GetClusterInfoRequest
 
 	var tsoServiceAddrs []string
 	svcModes := make([]pdpb.ServiceMode, 0)
-	if s.IsAPIServiceMode() {
+
+	if s.forwardToTSOService() {
 		svcModes = append(svcModes, pdpb.ServiceMode_API_SVC_MODE)
 		tsoServiceAddrs = s.keyspaceGroupManager.GetTSOServiceAddrs()
 	} else {
@@ -318,7 +319,7 @@ func (s *GrpcServer) GetMinTS(
 		minTS *pdpb.Timestamp
 		err   error
 	)
-	if s.IsAPIServiceMode() {
+	if s.forwardToTSOService() {
 		minTS, err = s.GetMinTSFromTSOService(tso.GlobalDCLocation)
 	} else {
 		start := time.Now()
@@ -524,9 +525,30 @@ func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
 			return err
 		}
 	}
-	if s.IsAPIServiceMode() {
+
+	if s.forwardToTSOService() {
 		return s.forwardTSO(stream)
 	}
+
+	var (
+		forwardStream     tsopb.TSO_TsoClient
+		cancelForward     context.CancelFunc
+		forwardCtx        context.Context
+		tsoStreamErr      error
+		lastForwardedHost string
+	)
+
+	defer func() {
+		if cancelForward != nil {
+			cancelForward()
+		}
+		if grpcutil.NeedRebuildConnection(tsoStreamErr) {
+			s.closeDelegateClient(lastForwardedHost)
+		}
+	}()
+
+	tsDeadlineCh := make(chan *tsoutil.TSDeadline, 1)
+	go tsoutil.WatchTSDeadline(stream.Context(), tsDeadlineCh)
 
 	var (
 		doneCh chan struct{}
@@ -550,7 +572,6 @@ func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
 		if err != nil {
 			return errors.WithStack(err)
 		}
-
 		forwardedHost := grpcutil.GetForwardedHost(stream.Context())
 		if !s.isLocalRequest(forwardedHost) {
 			clientConn, err := s.getDelegateClient(s.ctx, forwardedHost)
@@ -569,6 +590,21 @@ func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
 			continue
 		}
 
+		if s.forwardToTSOService() {
+			if request.GetCount() == 0 {
+				err = errs.ErrGenerateTimestamp.FastGenByArgs("tso count should be positive")
+				return status.Error(codes.Unknown, err.Error())
+			}
+
+			forwardCtx, cancelForward, forwardStream, lastForwardedHost, tsoStreamErr, err = s.handleTSOForwarding(forwardCtx, forwardStream, stream, nil, request, tsDeadlineCh, lastForwardedHost, cancelForward)
+			if tsoStreamErr != nil {
+				return tsoStreamErr
+			}
+			if err != nil {
+				return err
+			}
+			continue
+		}
 		start := time.Now()
 		// TSO uses leader lease to determine validity. No need to check leader here.
 		if s.IsClosed() {

@@ -22,6 +22,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -41,6 +42,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
+	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
 	"github.com/tikv/pd/tests/integrations/mcs"
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -164,7 +166,11 @@ func checkTSOPath(re *require.Assertions, isAPIServiceMode bool) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	if isAPIServiceMode {
-		cluster, err = tests.NewTestAPICluster(ctx, 1)
+		cluster, err = tests.NewTestAPICluster(ctx, 1,
+			func(conf *config.Config, _ string) {
+				conf.MicroService.EnableTSOFallback = true
+			},
+		)
 	} else {
 		cluster, err = tests.NewTestCluster(ctx, 1)
 	}
@@ -178,11 +184,8 @@ func checkTSOPath(re *require.Assertions, isAPIServiceMode bool) {
 	re.NoError(pdLeader.BootstrapCluster())
 	backendEndpoints := pdLeader.GetAddr()
 	client := pdLeader.GetEtcdClient()
-	if isAPIServiceMode {
-		re.Equal(0, getEtcdTimestampKeyNum(re, client))
-	} else {
-		re.Equal(1, getEtcdTimestampKeyNum(re, client))
-	}
+	// Although in API service mode, the PD will serve the TSO request unless the TSO server is registered.
+	re.Equal(1, getEtcdTimestampKeyNum(re, client))
 
 	_, cleanup := tests.StartSingleTSOTestServer(ctx, re, backendEndpoints, tempurl.Alloc())
 	defer cleanup()
@@ -267,15 +270,17 @@ func (suite *APIServerForward) ShutDown() {
 
 func TestForwardTSORelated(t *testing.T) {
 	re := require.New(t)
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/fastUpdateServiceMode", `return(true)`))
 	suite := NewAPIServerForward(re)
 	defer suite.ShutDown()
-	// Unable to use the tso-related interface without tso server
-	suite.checkUnavailableTSO(re)
+	_, _, err := suite.pdClient.GetTS(suite.ctx)
+	re.Error(err)
 	tc, err := tests.NewTestTSOCluster(suite.ctx, 1, suite.backendEndpoints)
 	re.NoError(err)
 	defer tc.Destroy()
 	tc.WaitForDefaultPrimaryServing(re)
 	suite.checkAvailableTSO(re)
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/fastUpdateServiceMode"))
 }
 
 func TestForwardTSOWhenPrimaryChanged(t *testing.T) {
@@ -320,6 +325,7 @@ func TestForwardTSOWhenPrimaryChanged(t *testing.T) {
 
 func TestResignTSOPrimaryForward(t *testing.T) {
 	re := require.New(t)
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/fastUpdateServiceMode", `return(true)`))
 	suite := NewAPIServerForward(re)
 	defer suite.ShutDown()
 	// TODO: test random kill primary with 3 nodes
@@ -342,6 +348,7 @@ func TestResignTSOPrimaryForward(t *testing.T) {
 		re.NoError(err)
 		suite.checkAvailableTSO(re)
 	}
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/fastUpdateServiceMode"))
 }
 
 func TestResignAPIPrimaryForward(t *testing.T) {
@@ -358,12 +365,21 @@ func TestResignAPIPrimaryForward(t *testing.T) {
 	defer func() {
 		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/member/skipCampaignLeaderCheck"))
 	}()
+	testutil.Eventually(re, func() bool {
+		return suite.pdLeader.GetRaftCluster().IsServiceIndependent(constant.TSOServiceName)
+	})
+	// Use a client to create a new connection.
+	// The client in the suite is not updated, which will send requests to the pd instead of forwarding.
+	pdClient, err := pd.NewClientWithContext(context.Background(),
+		[]string{suite.backendEndpoints}, pd.SecurityOption{}, pd.WithMaxErrorRetry(1))
+	re.NoError(err)
+	defer pdClient.Close()
 
 	for j := 0; j < 10; j++ {
 		suite.pdLeader.ResignLeader()
 		suite.pdLeader = suite.cluster.GetServer(suite.cluster.WaitLeader())
 		suite.backendEndpoints = suite.pdLeader.GetAddr()
-		_, _, err = suite.pdClient.GetTS(suite.ctx)
+		_, _, err = pdClient.GetTS(suite.ctx)
 		re.NoError(err)
 	}
 }
@@ -453,17 +469,6 @@ func (suite *APIServerForward) addRegions() {
 		}
 		rc.HandleRegionHeartbeat(core.NewRegionInfo(region, region.Peers[0]))
 	}
-}
-
-func (suite *APIServerForward) checkUnavailableTSO(re *require.Assertions) {
-	_, _, err := suite.pdClient.GetTS(suite.ctx)
-	re.Error(err)
-	// try to update gc safe point
-	_, err = suite.pdClient.UpdateServiceGCSafePoint(suite.ctx, "a", 1000, 1)
-	re.Error(err)
-	// try to set external ts
-	err = suite.pdClient.SetExternalTimestamp(suite.ctx, 1000)
-	re.Error(err)
 }
 
 func (suite *APIServerForward) checkAvailableTSO(re *require.Assertions) {
@@ -577,4 +582,226 @@ func (suite *CommonTestSuite) TestBootstrapDefaultKeyspaceGroup() {
 	check()
 	suite.pdLeader.ResignLeader()
 	suite.pdLeader = suite.cluster.GetServer(suite.cluster.WaitLeader())
+}
+
+// TestTSOServiceSwitch1 tests the switching behavior of the TSO service when TSO fallback is enabled.
+// The test ensures that initially, the TSO service is provided by PD. When a TSO server is started,
+// the service switches to the TSO server.
+// If the TSO server is stopped, the service should switch back to being provided by PD.
+func TestTSOServiceSwitch1(t *testing.T) {
+	re := require.New(t)
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/fastUpdateServiceMode", `return(true)`))
+	var wg sync.WaitGroup
+	defer wg.Wait()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	tc, err := tests.NewTestAPICluster(ctx, 1,
+		func(conf *config.Config, _ string) {
+			conf.MicroService.EnableTSOFallback = true
+		},
+	)
+	re.NoError(err)
+	defer tc.Destroy()
+
+	err = tc.RunInitialServers()
+	re.NoError(err)
+
+	leaderName := tc.WaitLeader()
+	re.NotEmpty(leaderName)
+	pdLeader := tc.GetServer(leaderName)
+	backendEndpoints := pdLeader.GetAddr()
+	re.NoError(pdLeader.BootstrapCluster())
+	pdClient, err := pd.NewClientWithContext(ctx, []string{backendEndpoints}, pd.SecurityOption{})
+	re.NoError(err)
+	defer pdClient.Close()
+	ch := make(chan struct{})
+	ch1 := make(chan struct{})
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		var lastPhysical, lastLogical int64
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+			physical, logical, err := pdClient.GetTS(context.Background())
+			if err == nil {
+				re.GreaterOrEqual(physical, lastPhysical)
+				if physical == lastPhysical {
+					re.Greater(logical, lastLogical)
+				}
+				lastPhysical = physical
+				lastLogical = logical
+				select {
+				case <-ch1:
+					ch <- struct{}{}
+				default:
+				}
+			} else {
+				t.Log(err)
+			}
+		}
+	}()
+	waitOneTS := func() {
+		ch1 <- struct{}{}
+		<-ch
+	}
+	waitOneTS()
+	tsoCluster, err := tests.NewTestTSOCluster(ctx, 1, backendEndpoints)
+	re.NoError(err)
+	tsoCluster.WaitForDefaultPrimaryServing(re)
+	waitOneTS()
+	tsoCluster.Destroy()
+	waitOneTS()
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/fastUpdateServiceMode"))
+}
+
+// TestTSOServiceSwitch2 tests the behavior of TSO service switching when TSO fallback is enabled.
+// Initially, the TSO service should be provided by PD. After starting a TSO server, the service should switch to the TSO server.
+// When the TSO server is stopped, the PD should resume providing the TSO service if fallback is enabled.
+// If fallback is disabled, the PD should not provide TSO service after the TSO server is stopped.
+func TestTSOServiceSwitch2(t *testing.T) {
+	re := require.New(t)
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/fastUpdateServiceMode", `return(true)`))
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	tc, err := tests.NewTestAPICluster(ctx, 1,
+		func(conf *config.Config, _ string) {
+			conf.MicroService.EnableTSOFallback = true
+		},
+	)
+	re.NoError(err)
+	defer tc.Destroy()
+
+	err = tc.RunInitialServers()
+	re.NoError(err)
+	leaderName := tc.WaitLeader()
+	re.NotEmpty(leaderName)
+	pdLeader := tc.GetServer(leaderName)
+	backendEndpoints := pdLeader.GetAddr()
+	re.NoError(pdLeader.BootstrapCluster())
+	pdClient, err := pd.NewClientWithContext(ctx, []string{backendEndpoints}, pd.SecurityOption{})
+	re.NoError(err)
+	re.NotNil(pdClient)
+	defer pdClient.Close()
+
+	var globalLastTS uint64
+	// Initially, TSO service should be provided by PD
+	re.NoError(checkTSOMonotonic(ctx, pdClient, &globalLastTS, 10))
+
+	// Start TSO server
+	tsoCluster, err := tests.NewTestTSOCluster(ctx, 1, pdLeader.GetAddr())
+	re.NoError(err)
+	tsoCluster.WaitForDefaultPrimaryServing(re)
+
+	// Wait for TSO server to start and PD to detect it
+	time.Sleep(300 * time.Millisecond)
+
+	// Verify PD is not providing TSO service
+	err = checkTSOMonotonic(ctx, pdClient, &globalLastTS, 10)
+	re.NoError(err)
+
+	// Disable TSO fallback
+	cfg := pdLeader.GetServer().GetMicroServiceConfig().Clone()
+	cfg.EnableTSOFallback = false
+	pdLeader.GetServer().SetMicroServiceConfig(*cfg)
+
+	tsoCluster.Destroy()
+
+	// Wait for the configuration change to take effect
+	time.Sleep(300 * time.Millisecond)
+
+	// Verify PD is not providing TSO service multiple times
+	for i := 0; i < 5; i++ {
+		err = checkTSOMonotonic(ctx, pdClient, &globalLastTS, 1)
+		re.Error(err, "TSO service should not be available")
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	// Now enable TSO fallback
+	cfg = pdLeader.GetServer().GetMicroServiceConfig().Clone()
+	cfg.EnableTSOFallback = true
+	pdLeader.GetServer().SetMicroServiceConfig(*cfg)
+
+	// Wait for PD to detect the change
+	time.Sleep(300 * time.Millisecond)
+
+	// Verify PD is now providing TSO service and timestamps are monotonically increasing
+	re.NoError(checkTSOMonotonic(ctx, pdClient, &globalLastTS, 10))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/fastUpdateServiceMode"))
+}
+
+// TestTSOServiceSwitch3 tests the behavior of TSO service switching under different configurations.
+// This test verifies that after disabling TSO fallback, the PD should not provide TSO service.
+// Then, it starts a TSO server and verifies that the TSO service is provided by this server.
+// Finally, it stops the TSO server and verifies that the PD no longer provides TSO service.
+func TestTSOServiceSwitch3(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	tc, err := tests.NewTestAPICluster(ctx, 1,
+		func(conf *config.Config, _ string) {
+			conf.MicroService.EnableTSOFallback = true
+		},
+	)
+	re.NoError(err)
+	defer tc.Destroy()
+
+	err = tc.RunInitialServers()
+	re.NoError(err)
+	leaderName := tc.WaitLeader()
+	re.NotEmpty(leaderName)
+	pdLeader := tc.GetServer(leaderName)
+	backendEndpoints := pdLeader.GetAddr()
+	re.NoError(pdLeader.BootstrapCluster())
+	pdClient, err := pd.NewClientWithContext(ctx, []string{backendEndpoints}, pd.SecurityOption{})
+	re.NoError(err)
+	re.NotNil(pdClient)
+	defer pdClient.Close()
+
+	var globalLastTS uint64
+	cfg := pdLeader.GetServer().GetMicroServiceConfig().Clone()
+	cfg.EnableTSOFallback = false
+	pdLeader.GetServer().SetMicroServiceConfig(*cfg)
+
+	time.Sleep(300 * time.Millisecond)
+	// TSO service should not be available
+	re.Error(checkTSOMonotonic(ctx, pdClient, &globalLastTS, 1))
+
+	// Start TSO server
+	tsoCluster, err := tests.NewTestTSOCluster(ctx, 1, pdLeader.GetAddr())
+	re.NoError(err)
+	tsoCluster.WaitForDefaultPrimaryServing(re)
+
+	// Wait for TSO server to start and PD to detect it
+	time.Sleep(300 * time.Millisecond)
+
+	// Verify TSO is provided by TSO server
+	re.NoError(checkTSOMonotonic(ctx, pdClient, &globalLastTS, 10))
+	// Stop TSO server
+	tsoCluster.Destroy()
+
+	// Wait for PD to detect the change
+	time.Sleep(300 * time.Millisecond)
+
+	// Verify PD is not providing TSO service
+	re.Error(checkTSOMonotonic(ctx, pdClient, &globalLastTS, 1))
+}
+
+func checkTSOMonotonic(ctx context.Context, pdClient pd.Client, globalLastTS *uint64, count int) error {
+	for i := 0; i < count; i++ {
+		physical, logical, err := pdClient.GetTS(ctx)
+		if err != nil {
+			return err
+		}
+		ts := (uint64(physical) << 18) + uint64(logical)
+		if ts <= *globalLastTS {
+			return fmt.Errorf("TSO is not globally increasing: last %d, current %d", globalLastTS, ts)
+		}
+		*globalLastTS = ts
+	}
+	return nil
 }
