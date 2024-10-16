@@ -1105,7 +1105,12 @@ func TestRegionLabelIsolationLevel(t *testing.T) {
 	cfg.LocationLabels = []string{"zone"}
 	opt.SetReplicationConfig(cfg)
 	re.NoError(err)
+<<<<<<< HEAD
 	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
+=======
+	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
+	cluster.coordinator = schedule.NewCoordinator(ctx, cluster, nil)
+>>>>>>> 26123dc75 (checker, statistic: avoid leak in label statistic (#8703))
 
 	for i := uint64(1); i <= 4; i++ {
 		var labels []*metapb.StoreLabel
@@ -1140,11 +1145,45 @@ func TestRegionLabelIsolationLevel(t *testing.T) {
 		StartKey: []byte{byte(1)},
 		EndKey:   []byte{byte(2)},
 	}
-	r := core.NewRegionInfo(region, peers[0])
-	re.NoError(cluster.putRegion(r))
+	r1 := core.NewRegionInfo(region, peers[0])
+	re.NoError(cluster.putRegion(r1))
 
+<<<<<<< HEAD
 	cluster.UpdateRegionsLabelLevelStats([]*core.RegionInfo{r})
 	counter := cluster.labelLevelStats.GetLabelCounter()
+=======
+	cluster.UpdateRegionsLabelLevelStats([]*core.RegionInfo{r1})
+	counter := cluster.labelStats.GetLabelCounter()
+>>>>>>> 26123dc75 (checker, statistic: avoid leak in label statistic (#8703))
+	re.Equal(0, counter["none"])
+	re.Equal(1, counter["zone"])
+
+	region = &metapb.Region{
+		Id:       10,
+		Peers:    peers,
+		StartKey: []byte{byte(2)},
+		EndKey:   []byte{byte(3)},
+	}
+	r2 := core.NewRegionInfo(region, peers[0])
+	re.NoError(cluster.putRegion(r2))
+
+	cluster.UpdateRegionsLabelLevelStats([]*core.RegionInfo{r2})
+	counter = cluster.labelStats.GetLabelCounter()
+	re.Equal(0, counter["none"])
+	re.Equal(2, counter["zone"])
+
+	// issue: https://github.com/tikv/pd/issues/8700
+	// step1: heartbeat a overlap region, which is used to simulate the case that the region is merged.
+	// step2: update region 9 and region 10, which is used to simulate the case that patrol is triggered.
+	// We should only count region 9.
+	overlapRegion := r1.Clone(
+		core.WithStartKey(r1.GetStartKey()),
+		core.WithEndKey(r2.GetEndKey()),
+		core.WithLeader(r2.GetPeer(8)),
+	)
+	re.NoError(cluster.HandleRegionHeartbeat(overlapRegion))
+	cluster.UpdateRegionsLabelLevelStats([]*core.RegionInfo{r1, r2})
+	counter = cluster.labelStats.GetLabelCounter()
 	re.Equal(0, counter["none"])
 	re.Equal(1, counter["zone"])
 }
