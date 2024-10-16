@@ -203,7 +203,9 @@ func (k *serviceModeKeeper) close() {
 	defer k.Unlock()
 	switch k.serviceMode {
 	case pdpb.ServiceMode_API_SVC_MODE:
-		k.tsoSvcDiscovery.Close()
+		if k.tsoSvcDiscovery != nil {
+			k.tsoSvcDiscovery.Close()
+		}
 		fallthrough
 	case pdpb.ServiceMode_PD_SVC_MODE:
 		if k.tsoClient != nil {
