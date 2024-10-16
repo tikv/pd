@@ -114,6 +114,8 @@ func TestDisableLocalTSOAfterEnabling(t *testing.T) {
 	re.NoError(cluster.RunInitialServers())
 
 	cluster.WaitAllLeaders(re, dcLocationConfig)
+	leaderServer := cluster.GetLeaderServer()
+	leaderServer.BootstrapCluster()
 	requestLocalTSOs(re, cluster, dcLocationConfig)
 
 	// Reboot the cluster.

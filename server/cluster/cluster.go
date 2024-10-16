@@ -402,29 +402,32 @@ func (c *RaftCluster) checkSchedulingService() {
 
 // checkTSOService checks the TSO service.
 func (c *RaftCluster) checkTSOService() {
-	if !c.isAPIServiceMode {
-		if c.member.IsLeader() {
-			if err := c.startTSOJobs(); err != nil {
-				// If there is an error, need to wait for the next check.
-				return
-			}
-		} else {
-			// leader exits, reset the allocator group
-			if err := c.stopTSOJobs(); err != nil {
-				// If there is an error, need to wait for the next check.
-				return
-			}
-
-			failpoint.Inject("updateAfterResetTSO", func() {
-				allocator, _ := c.tsoAllocator.GetAllocator(tso.GlobalDCLocation)
-				if err := allocator.UpdateTSO(); !errorspkg.Is(err, errs.ErrUpdateTimestamp) {
-					log.Panic("the tso update after reset should return ErrUpdateTimestamp as expected", zap.Error(err))
-				}
-				if allocator.IsInitialize() {
-					log.Panic("the allocator should be uninitialized after reset")
-				}
-			})
+	if c.isAPIServiceMode {
+		return
+	}
+	if c.member.IsLeader() {
+		if err := c.startTSOJobs(); err != nil {
+			// If there is an error, need to wait for the next check.
+			log.Error("failed to start TSO jobs", errs.ZapError(err))
+			return
 		}
+	} else {
+		// leader exits, reset the allocator group
+		if err := c.stopTSOJobs(); err != nil {
+			// If there is an error, need to wait for the next check.
+			log.Error("failed to stop TSO jobs", errs.ZapError(err))
+			return
+		}
+
+		failpoint.Inject("updateAfterResetTSO", func() {
+			allocator, _ := c.tsoAllocator.GetAllocator(tso.GlobalDCLocation)
+			if err := allocator.UpdateTSO(); !errorspkg.Is(err, errs.ErrUpdateTimestamp) {
+				log.Panic("the tso update after reset should return ErrUpdateTimestamp as expected", zap.Error(err))
+			}
+			if allocator.IsInitialize() {
+				log.Panic("the allocator should be uninitialized after reset")
+			}
+		})
 	}
 }
 
