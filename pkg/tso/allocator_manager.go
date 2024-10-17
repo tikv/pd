@@ -1393,7 +1393,7 @@ func (am *AllocatorManager) startGlobalAllocatorLoop() {
 	globalTSOAllocator, ok := am.mu.allocatorGroups[GlobalDCLocation].allocator.(*GlobalTSOAllocator)
 	if !ok {
 		// it should never happen
-		log.Error("failed to start global leader loop, global allocator not found")
+		log.Error("failed to start global allocator loop, global allocator not found")
 		return
 	}
 	globalTSOAllocator.wg.Add(1)
