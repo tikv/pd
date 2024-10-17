@@ -36,7 +36,6 @@ import (
 	"github.com/tikv/pd/client/tlsutil"
 	"github.com/tikv/pd/client/tsoutil"
 	"go.uber.org/zap"
-	"google.golang.org/grpc"
 )
 
 const (
@@ -174,69 +173,6 @@ type Client interface {
 	Close()
 }
 
-// GetStoreOp represents available options when getting stores.
-type GetStoreOp struct {
-	excludeTombstone bool
-}
-
-// GetStoreOption configures GetStoreOp.
-type GetStoreOption func(*GetStoreOp)
-
-// WithExcludeTombstone excludes tombstone stores from the result.
-func WithExcludeTombstone() GetStoreOption {
-	return func(op *GetStoreOp) { op.excludeTombstone = true }
-}
-
-// RegionsOp represents available options when operate regions
-type RegionsOp struct {
-	group          string
-	retryLimit     uint64
-	skipStoreLimit bool
-}
-
-// RegionsOption configures RegionsOp
-type RegionsOption func(op *RegionsOp)
-
-// WithGroup specify the group during Scatter/Split Regions
-func WithGroup(group string) RegionsOption {
-	return func(op *RegionsOp) { op.group = group }
-}
-
-// WithRetry specify the retry limit during Scatter/Split Regions
-func WithRetry(retry uint64) RegionsOption {
-	return func(op *RegionsOp) { op.retryLimit = retry }
-}
-
-// WithSkipStoreLimit specify if skip the store limit check during Scatter/Split Regions
-func WithSkipStoreLimit() RegionsOption {
-	return func(op *RegionsOp) { op.skipStoreLimit = true }
-}
-
-// GetRegionOp represents available options when getting regions.
-type GetRegionOp struct {
-	needBuckets                  bool
-	allowFollowerHandle          bool
-	outputMustContainAllKeyRange bool
-}
-
-// GetRegionOption configures GetRegionOp.
-type GetRegionOption func(op *GetRegionOp)
-
-// WithBuckets means getting region and its buckets.
-func WithBuckets() GetRegionOption {
-	return func(op *GetRegionOp) { op.needBuckets = true }
-}
-
-// WithAllowFollowerHandle means that client can send request to follower and let it handle this request.
-func WithAllowFollowerHandle() GetRegionOption {
-	return func(op *GetRegionOp) { op.allowFollowerHandle = true }
-}
-
-// WithOutputMustContainAllKeyRange means the output must contain all key ranges.
-func WithOutputMustContainAllKeyRange() GetRegionOption {
-	return func(op *GetRegionOp) { op.outputMustContainAllKeyRange = true }
-}
-
 var (
 	// errUnmatchedClusterID is returned when found a PD with a different cluster ID.
 	errUnmatchedClusterID = errors.New("[pd] unmatched cluster id")
@@ -249,60 +185,6 @@ var (
 	// errInvalidRespHeader is returned when the response doesn't contain service mode info unexpectedly.
 	errNoServiceModeReturned = errors.New("[pd] no service mode returned")
 )
-
-// ClientOption configures client.
-type ClientOption func(c *client)
-
-// WithGRPCDialOptions configures the client with gRPC dial options.
-func WithGRPCDialOptions(opts ...grpc.DialOption) ClientOption {
-	return func(c *client) {
-		c.option.gRPCDialOptions = append(c.option.gRPCDialOptions, opts...)
-	}
-}
-
-// WithCustomTimeoutOption configures the client with timeout option.
-func WithCustomTimeoutOption(timeout time.Duration) ClientOption {
-	return func(c *client) {
-		c.option.timeout = timeout
-	}
-}
-
-// WithForwardingOption configures the client with forwarding option.
-func WithForwardingOption(enableForwarding bool) ClientOption {
-	return func(c *client) {
-		c.option.enableForwarding = enableForwarding
-	}
-}
-
-// WithTSOServerProxyOption configures the client to use TSO server proxy,
-// i.e., the client will send TSO requests to the API leader (the TSO server
-// proxy) which will forward the requests to the TSO servers.
-func WithTSOServerProxyOption(useTSOServerProxy bool) ClientOption {
-	return func(c *client) {
-		c.option.useTSOServerProxy = useTSOServerProxy
-	}
-}
-
-// WithMaxErrorRetry configures the client max retry times when connect meets error.
-func WithMaxErrorRetry(count int) ClientOption {
-	return func(c *client) {
-		c.option.maxRetryTimes = count
-	}
-}
-
-// WithMetricsLabels configures the client with metrics labels.
-func WithMetricsLabels(labels prometheus.Labels) ClientOption {
-	return func(c *client) {
-		c.option.metricsLabels = labels
-	}
-}
-
-// WithInitMetricsOption configures the client with metrics labels.
-func WithInitMetricsOption(initMetrics bool) ClientOption {
-	return func(c *client) {
-		c.option.initMetrics = initMetrics
-	}
-}
 
 var _ Client = (*client)(nil)
 
@@ -560,6 +442,7 @@ func newClientWithKeyspaceName(
 	}
 	clientCtx, clientCancel := context.WithCancel(ctx)
 	c := &client{
+		keyspaceID:              nullKeyspaceID,
 		updateTokenConnectionCh: make(chan struct{}, 1),
 		ctx:                     clientCtx,
 		cancel:                  clientCancel,
@@ -573,10 +456,12 @@ func newClientWithKeyspaceName(
 		opt(c)
 	}
 
-	updateKeyspaceIDCb := func() error {
-		if err := c.initRetry(c.loadKeyspaceMeta, keyspaceName); err != nil {
+	updateKeyspaceIDFunc := func() error {
+		keyspaceMeta, err := c.LoadKeyspace(clientCtx, keyspaceName)
+		if err != nil {
 			return err
 		}
+		c.keyspaceID = keyspaceMeta.GetId()
 		// c.keyspaceID is the source of truth for keyspace id.
 		c.pdSvcDiscovery.SetKeyspaceID(c.keyspaceID)
 		return nil
@@ -584,8 +469,8 @@ func newClientWithKeyspaceName(
 
 	// Create a PD service discovery with null keyspace id, then query the real id with the keyspace name,
 	// finally update the keyspace id to the PD service discovery for the following interactions.
-	c.pdSvcDiscovery = newPDServiceDiscovery(
-		clientCtx, clientCancel, &c.wg, c.setServiceMode, updateKeyspaceIDCb, nullKeyspaceID, c.svrUrls, c.tlsCfg, c.option)
+	c.pdSvcDiscovery = newPDServiceDiscovery(clientCtx, clientCancel, &c.wg,
+		c.setServiceMode, updateKeyspaceIDFunc, nullKeyspaceID, c.svrUrls, c.tlsCfg, c.option)
 	if err := c.setup(); err != nil {
 		c.cancel()
 		if c.pdSvcDiscovery != nil {
@@ -598,32 +483,6 @@ func newClientWithKeyspaceName(
 		zap.String("keyspace-name", keyspaceName),
 		zap.Uint32("keyspace-id", c.keyspaceID))
 	return c, nil
-}
-
-func (c *client) initRetry(f func(s string) error, str string) error {
-	var err error
-	ticker := time.NewTicker(time.Second)
-	defer ticker.Stop()
-	for i := 0; i < c.option.maxRetryTimes; i++ {
-		if err = f(str); err == nil {
-			return nil
-		}
-		select {
-		case <-c.ctx.Done():
-			return err
-		case <-ticker.C:
-		}
-	}
-	return errors.WithStack(err)
-}
-
-func (c *client) loadKeyspaceMeta(keyspace string) error {
-	keyspaceMeta, err := c.LoadKeyspace(context.TODO(), keyspace)
-	if err != nil {
-		return err
-	}
-	c.keyspaceID = keyspaceMeta.GetId()
-	return nil
 }
 
 func (c *client) setup() error {
@@ -697,7 +556,7 @@ func (c *client) resetTSOClientLocked(mode pdpb.ServiceMode) {
 	case pdpb.ServiceMode_API_SVC_MODE:
 		newTSOSvcDiscovery = newTSOServiceDiscovery(
 			c.ctx, MetaStorageClient(c), c.pdSvcDiscovery,
-			c.GetClusterID(c.ctx), c.keyspaceID, c.tlsCfg, c.option)
+			c.keyspaceID, c.tlsCfg, c.option)
 		// At this point, the keyspace group isn't known yet. Starts from the default keyspace group,
 		// and will be updated later.
 		newTSOCli = newTSOClient(c.ctx, c.option,
