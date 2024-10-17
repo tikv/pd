@@ -1389,7 +1389,7 @@ func (am *AllocatorManager) GetLeaderAddr() string {
 	return leaderAddrs[0]
 }
 
-func (am *AllocatorManager) startGlobalLeaderLoop() {
+func (am *AllocatorManager) startGlobalAllocatorLoop() {
 	globalTSOAllocator, ok := am.mu.allocatorGroups[GlobalDCLocation].allocator.(*GlobalTSOAllocator)
 	if !ok {
 		// it should never happen

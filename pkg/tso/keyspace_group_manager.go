@@ -791,7 +791,7 @@ func (kgm *KeyspaceGroupManager) updateKeyspaceGroup(group *endpoint.KeyspaceGro
 	}
 	// Initialize all kinds of maps.
 	am := NewAllocatorManager(kgm.ctx, group.ID, participant, tsRootPath, storage, kgm.cfg)
-	am.startGlobalLeaderLoop()
+	am.startGlobalAllocatorLoop()
 	log.Info("created allocator manager",
 		zap.Uint32("keyspace-group-id", group.ID),
 		zap.String("timestamp-path", am.GetTimestampPath("")))
