@@ -63,36 +63,24 @@ var (
 // Location management, mainly used for cross data center deployment.
 type ReplicaChecker struct {
 	PauseController
-<<<<<<< HEAD
 	cluster           sche.CheckerCluster
 	conf              config.CheckerConfigProvider
 	regionWaitingList cache.Cache
-=======
-	cluster                 sche.CheckerCluster
-	conf                    config.CheckerConfigProvider
-	pendingProcessedRegions *cache.TTLUint64
-	r                       *rand.Rand
->>>>>>> 25dedabf5 (*: reduce rand NewSource (#8675))
+	r                 *rand.Rand
 }
 
 // NewReplicaChecker creates a replica checker.
 func NewReplicaChecker(cluster sche.CheckerCluster, conf config.CheckerConfigProvider, regionWaitingList cache.Cache) *ReplicaChecker {
 	return &ReplicaChecker{
-<<<<<<< HEAD
 		cluster:           cluster,
 		conf:              conf,
 		regionWaitingList: regionWaitingList,
-=======
-		cluster:                 cluster,
-		conf:                    conf,
-		pendingProcessedRegions: pendingProcessedRegions,
-		r:                       rand.New(rand.NewSource(time.Now().UnixNano())),
->>>>>>> 25dedabf5 (*: reduce rand NewSource (#8675))
+		r:                 rand.New(rand.NewSource(time.Now().UnixNano())),
 	}
 }
 
 // GetType return ReplicaChecker's type
-func (r *ReplicaChecker) GetType() string {
+func (c *ReplicaChecker) GetType() string {
 	return replicaCheckerName
 }
 
@@ -195,11 +183,7 @@ func (c *ReplicaChecker) checkMakeUpReplica(region *core.RegionInfo) *operator.O
 		log.Debug("no store to add replica", zap.Uint64("region-id", region.GetID()))
 		replicaCheckerNoTargetStoreCounter.Inc()
 		if filterByTempState {
-<<<<<<< HEAD
-			r.regionWaitingList.Put(region.GetID(), nil)
-=======
-			c.pendingProcessedRegions.Put(region.GetID(), nil)
->>>>>>> 25dedabf5 (*: reduce rand NewSource (#8675))
+			c.regionWaitingList.Put(region.GetID(), nil)
 		}
 		return nil
 	}
@@ -226,11 +210,7 @@ func (c *ReplicaChecker) checkRemoveExtraReplica(region *core.RegionInfo) *opera
 	old := c.strategy(c.r, region).SelectStoreToRemove(regionStores)
 	if old == 0 {
 		replicaCheckerNoWorstPeerCounter.Inc()
-<<<<<<< HEAD
-		r.regionWaitingList.Put(region.GetID(), nil)
-=======
-		c.pendingProcessedRegions.Put(region.GetID(), nil)
->>>>>>> 25dedabf5 (*: reduce rand NewSource (#8675))
+		c.regionWaitingList.Put(region.GetID(), nil)
 		return nil
 	}
 	op, err := operator.CreateRemovePeerOperator("remove-extra-replica", c.cluster, operator.OpReplica, region, old)
@@ -295,11 +275,7 @@ func (c *ReplicaChecker) fixPeer(region *core.RegionInfo, storeID uint64, status
 		}
 		log.Debug("no best store to add replica", zap.Uint64("region-id", region.GetID()))
 		if filterByTempState {
-<<<<<<< HEAD
-			r.regionWaitingList.Put(region.GetID(), nil)
-=======
-			c.pendingProcessedRegions.Put(region.GetID(), nil)
->>>>>>> 25dedabf5 (*: reduce rand NewSource (#8675))
+			c.regionWaitingList.Put(region.GetID(), nil)
 		}
 		return nil
 	}
@@ -319,17 +295,10 @@ func (c *ReplicaChecker) fixPeer(region *core.RegionInfo, storeID uint64, status
 
 func (c *ReplicaChecker) strategy(r *rand.Rand, region *core.RegionInfo) *ReplicaStrategy {
 	return &ReplicaStrategy{
-<<<<<<< HEAD
 		checkerName:    replicaCheckerName,
-		cluster:        r.cluster,
-		locationLabels: r.conf.GetLocationLabels(),
-		isolationLevel: r.conf.GetIsolationLevel(),
-=======
-		checkerName:    c.Name(),
 		cluster:        c.cluster,
 		locationLabels: c.conf.GetLocationLabels(),
 		isolationLevel: c.conf.GetIsolationLevel(),
->>>>>>> 25dedabf5 (*: reduce rand NewSource (#8675))
 		region:         region,
 		r:              r,
 	}
