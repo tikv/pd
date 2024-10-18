@@ -79,13 +79,8 @@ func (s *ReplicaStrategy) SelectStoreToAdd(coLocationStores []*core.StoreInfo, e
 
 	isolationComparer := filter.IsolationComparer(s.locationLabels, coLocationStores)
 	strictStateFilter := &filter.StoreStateFilter{ActionScope: s.checkerName, MoveRegion: true, AllowFastFailover: s.fastFailover, OperatorLevel: level}
-<<<<<<< HEAD
-	targetCandidate := filter.NewCandidates(s.cluster.GetStores()).
-		FilterTarget(s.cluster.GetOpts(), nil, nil, filters...).
-=======
 	targetCandidate := filter.NewCandidates(s.r, s.cluster.GetStores()).
-		FilterTarget(s.cluster.GetCheckerConfig(), nil, nil, filters...).
->>>>>>> 25dedabf5 (*: reduce rand NewSource (#8675))
+		FilterTarget(s.cluster.GetOpts(), nil, nil, filters...).
 		KeepTheTopStores(isolationComparer, false) // greater isolation score is better
 	if targetCandidate.Len() == 0 {
 		return 0, false
@@ -145,13 +140,8 @@ func (s *ReplicaStrategy) SelectStoreToRemove(coLocationStores []*core.StoreInfo
 	if s.fastFailover {
 		level = constant.Urgent
 	}
-<<<<<<< HEAD
-	source := filter.NewCandidates(coLocationStores).
-		FilterSource(s.cluster.GetOpts(), nil, nil, &filter.StoreStateFilter{ActionScope: s.checkerName, MoveRegion: true, OperatorLevel: level}).
-=======
 	source := filter.NewCandidates(s.r, coLocationStores).
-		FilterSource(s.cluster.GetCheckerConfig(), nil, nil, &filter.StoreStateFilter{ActionScope: s.checkerName, MoveRegion: true, OperatorLevel: level}).
->>>>>>> 25dedabf5 (*: reduce rand NewSource (#8675))
+		FilterSource(s.cluster.GetOpts(), nil, nil, &filter.StoreStateFilter{ActionScope: s.checkerName, MoveRegion: true, OperatorLevel: level}).
 		KeepTheTopStores(isolationComparer, true).
 		PickTheTopStore(filter.RegionScoreComparer(s.cluster.GetOpts()), false)
 	if source == nil {

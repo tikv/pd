@@ -177,11 +177,7 @@ func (s *evictSlowTrendScheduler) scheduleEvictLeader(cluster schedule.Cluster) 
 		return nil
 	}
 	storeSlowTrendEvictedStatusGauge.WithLabelValues(store.GetAddress(), strconv.FormatUint(store.GetID(), 10)).Set(1)
-<<<<<<< HEAD
-	return scheduleEvictLeaderBatch(s.GetName(), s.GetType(), cluster, s.conf, EvictLeaderBatchSize)
-=======
-	return scheduleEvictLeaderBatch(s.R, s.GetName(), cluster, s.conf)
->>>>>>> 25dedabf5 (*: reduce rand NewSource (#8675))
+	return scheduleEvictLeaderBatch(s.R, s.GetName(), s.GetType(), cluster, s.conf, EvictLeaderBatchSize)
 }
 
 func (s *evictSlowTrendScheduler) IsScheduleAllowed(cluster schedule.Cluster) bool {

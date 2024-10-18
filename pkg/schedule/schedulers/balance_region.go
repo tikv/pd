@@ -253,11 +253,7 @@ func (s *balanceRegionScheduler) transferPeer(solver *solver, collector *plan.Co
 		filter.NewPlacementSafeguard(s.GetName(), solver.GetOpts(), solver.GetBasicCluster(), solver.GetRuleManager(),
 			solver.region, solver.source, solver.fit),
 	}
-<<<<<<< HEAD
-	candidates := filter.NewCandidates(dstStores).FilterTarget(solver.GetOpts(), collector, s.filterCounter, filters...)
-=======
-	candidates := filter.NewCandidates(s.R, dstStores).FilterTarget(conf, collector, s.filterCounter, filters...)
->>>>>>> 25dedabf5 (*: reduce rand NewSource (#8675))
+	candidates := filter.NewCandidates(s.R, dstStores).FilterTarget(solver.GetOpts(), collector, s.filterCounter, filters...)
 	if len(candidates.Stores) != 0 {
 		solver.step++
 	}

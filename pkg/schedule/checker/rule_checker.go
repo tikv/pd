@@ -85,7 +85,6 @@ var (
 // RuleChecker fix/improve region by placement rules.
 type RuleChecker struct {
 	PauseController
-<<<<<<< HEAD
 	cluster            schedule.Cluster
 	ruleManager        *placement.RuleManager
 	name               string
@@ -93,21 +92,12 @@ type RuleChecker struct {
 	pendingList        cache.Cache
 	switchWitnessCache *cache.TTLUint64
 	record             *recorder
-=======
-	cluster                 sche.CheckerCluster
-	ruleManager             *placement.RuleManager
-	pendingProcessedRegions *cache.TTLUint64
-	pendingList             cache.Cache
-	switchWitnessCache      *cache.TTLUint64
-	record                  *recorder
-	r                       *rand.Rand
->>>>>>> 25dedabf5 (*: reduce rand NewSource (#8675))
+	r                  *rand.Rand
 }
 
 // NewRuleChecker creates a checker instance.
 func NewRuleChecker(ctx context.Context, cluster schedule.Cluster, ruleManager *placement.RuleManager, regionWaitingList cache.Cache) *RuleChecker {
 	return &RuleChecker{
-<<<<<<< HEAD
 		cluster:            cluster,
 		ruleManager:        ruleManager,
 		name:               ruleCheckerName,
@@ -115,15 +105,7 @@ func NewRuleChecker(ctx context.Context, cluster schedule.Cluster, ruleManager *
 		pendingList:        cache.NewDefaultCache(maxPendingListLen),
 		switchWitnessCache: cache.NewIDTTL(ctx, time.Minute, cluster.GetOpts().GetSwitchWitnessInterval()),
 		record:             newRecord(),
-=======
-		cluster:                 cluster,
-		ruleManager:             ruleManager,
-		pendingProcessedRegions: pendingProcessedRegions,
-		pendingList:             cache.NewDefaultCache(maxPendingListLen),
-		switchWitnessCache:      cache.NewIDTTL(ctx, time.Minute, cluster.GetCheckerConfig().GetSwitchWitnessInterval()),
-		record:                  newRecord(),
-		r:                       rand.New(rand.NewSource(time.Now().UnixNano())),
->>>>>>> 25dedabf5 (*: reduce rand NewSource (#8675))
+		r:                  rand.New(rand.NewSource(time.Now().UnixNano())),
 	}
 }
 
