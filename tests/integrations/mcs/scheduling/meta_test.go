@@ -86,7 +86,8 @@ func (suite *metaTestSuite) TestStoreWatch() {
 		)
 	}
 
-	suite.getRaftCluster().RemoveStore(2, false)
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/doNotBuryStore", `return(true)`))
+	re.NoError(suite.getRaftCluster().RemoveStore(2, false))
 	testutil.Eventually(re, func() bool {
 		s := cluster.GetStore(2)
 		if s == nil {
@@ -95,6 +96,7 @@ func (suite *metaTestSuite) TestStoreWatch() {
 		return s.GetState() == metapb.StoreState_Offline
 	})
 	re.Len(cluster.GetStores(), 4)
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/doNotBuryStore"))
 	testutil.Eventually(re, func() bool {
 		return cluster.GetStore(2).GetState() == metapb.StoreState_Tombstone
 	})

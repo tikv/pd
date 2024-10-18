@@ -469,16 +469,18 @@ func newClientWithKeyspaceName(
 		opt(c.inner)
 	}
 
-	updateKeyspaceIDCb := func() error {
-		if err := c.inner.initRetry(c.loadKeyspaceMeta, keyspaceName); err != nil {
+	updateKeyspaceIDFunc := func() error {
+		keyspaceMeta, err := c.LoadKeyspace(clientCtx, keyspaceName)
+		if err != nil {
 			return err
 		}
+		c.inner.keyspaceID = keyspaceMeta.GetId()
 		// c.keyspaceID is the source of truth for keyspace id.
 		c.inner.pdSvcDiscovery.SetKeyspaceID(c.inner.keyspaceID)
 		return nil
 	}
 
-	if err := c.inner.init(updateKeyspaceIDCb); err != nil {
+	if err := c.inner.init(updateKeyspaceIDFunc); err != nil {
 		return nil, err
 	}
 	log.Info("[pd] create pd client with endpoints and keyspace",
@@ -486,15 +488,6 @@ func newClientWithKeyspaceName(
 		zap.String("keyspace-name", keyspaceName),
 		zap.Uint32("keyspace-id", c.inner.keyspaceID))
 	return c, nil
-}
-
-func (c *client) loadKeyspaceMeta(keyspace string) error {
-	keyspaceMeta, err := c.LoadKeyspace(context.TODO(), keyspace)
-	if err != nil {
-		return err
-	}
-	c.inner.keyspaceID = keyspaceMeta.GetId()
-	return nil
 }
 
 // Close closes the client.
