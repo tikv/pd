@@ -442,6 +442,7 @@ func newClientWithKeyspaceName(
 	}
 	clientCtx, clientCancel := context.WithCancel(ctx)
 	c := &client{
+		keyspaceID:              nullKeyspaceID,
 		updateTokenConnectionCh: make(chan struct{}, 1),
 		ctx:                     clientCtx,
 		cancel:                  clientCancel,
@@ -455,10 +456,12 @@ func newClientWithKeyspaceName(
 		opt(c)
 	}
 
-	updateKeyspaceIDCb := func() error {
-		if err := c.initRetry(c.loadKeyspaceMeta, keyspaceName); err != nil {
+	updateKeyspaceIDFunc := func() error {
+		keyspaceMeta, err := c.LoadKeyspace(clientCtx, keyspaceName)
+		if err != nil {
 			return err
 		}
+		c.keyspaceID = keyspaceMeta.GetId()
 		// c.keyspaceID is the source of truth for keyspace id.
 		c.pdSvcDiscovery.SetKeyspaceID(c.keyspaceID)
 		return nil
@@ -466,8 +469,8 @@ func newClientWithKeyspaceName(
 
 	// Create a PD service discovery with null keyspace id, then query the real id with the keyspace name,
 	// finally update the keyspace id to the PD service discovery for the following interactions.
-	c.pdSvcDiscovery = newPDServiceDiscovery(
-		clientCtx, clientCancel, &c.wg, c.setServiceMode, updateKeyspaceIDCb, nullKeyspaceID, c.svrUrls, c.tlsCfg, c.option)
+	c.pdSvcDiscovery = newPDServiceDiscovery(clientCtx, clientCancel, &c.wg,
+		c.setServiceMode, updateKeyspaceIDFunc, nullKeyspaceID, c.svrUrls, c.tlsCfg, c.option)
 	if err := c.setup(); err != nil {
 		c.cancel()
 		if c.pdSvcDiscovery != nil {
@@ -480,32 +483,6 @@ func newClientWithKeyspaceName(
 		zap.String("keyspace-name", keyspaceName),
 		zap.Uint32("keyspace-id", c.keyspaceID))
 	return c, nil
-}
-
-func (c *client) initRetry(f func(s string) error, str string) error {
-	var err error
-	ticker := time.NewTicker(time.Second)
-	defer ticker.Stop()
-	for i := 0; i < c.option.maxRetryTimes; i++ {
-		if err = f(str); err == nil {
-			return nil
-		}
-		select {
-		case <-c.ctx.Done():
-			return err
-		case <-ticker.C:
-		}
-	}
-	return errors.WithStack(err)
-}
-
-func (c *client) loadKeyspaceMeta(keyspace string) error {
-	keyspaceMeta, err := c.LoadKeyspace(context.TODO(), keyspace)
-	if err != nil {
-		return err
-	}
-	c.keyspaceID = keyspaceMeta.GetId()
-	return nil
 }
 
 func (c *client) setup() error {
@@ -579,7 +556,7 @@ func (c *client) resetTSOClientLocked(mode pdpb.ServiceMode) {
 	case pdpb.ServiceMode_API_SVC_MODE:
 		newTSOSvcDiscovery = newTSOServiceDiscovery(
 			c.ctx, MetaStorageClient(c), c.pdSvcDiscovery,
-			c.GetClusterID(c.ctx), c.keyspaceID, c.tlsCfg, c.option)
+			c.keyspaceID, c.tlsCfg, c.option)
 		// At this point, the keyspace group isn't known yet. Starts from the default keyspace group,
 		// and will be updated later.
 		newTSOCli = newTSOClient(c.ctx, c.option,
