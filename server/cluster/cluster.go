@@ -322,7 +322,7 @@ func (c *RaftCluster) Start(s Server) error {
 	if err != nil {
 		return err
 	}
-	c.checkTSOService()
+	c.checkTSOService(true)
 	cluster, err := c.LoadClusterInfo()
 	if err != nil {
 		return err
@@ -401,11 +401,12 @@ func (c *RaftCluster) checkSchedulingService() {
 }
 
 // checkTSOService checks the TSO service.
-func (c *RaftCluster) checkTSOService() {
+func (c *RaftCluster) checkTSOService(skipCheckLeader bool) {
 	if c.isAPIServiceMode {
 		return
 	}
-	if c.member.IsLeader() {
+	// If skipCheckLeader is true, checkTSOService is called in champaign leader process which is no need to check the leader.
+	if skipCheckLeader || (!skipCheckLeader && c.member.IsLeader()) {
 		if err := c.startTSOJobs(); err != nil {
 			// If there is an error, need to wait for the next check.
 			log.Error("failed to start TSO jobs", errs.ZapError(err))
@@ -451,7 +452,7 @@ func (c *RaftCluster) runServiceCheckJob() {
 		case <-schedulingTicker.C:
 			c.checkSchedulingService()
 		case <-tsoTicker.C:
-			c.checkTSOService()
+			c.checkTSOService(false)
 		}
 	}
 }
