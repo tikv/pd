@@ -24,7 +24,9 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/schedule/types"
+	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/server"
 	"github.com/unrolled/render"
@@ -143,6 +145,15 @@ func (h *schedulerHandler) CreateScheduler(w http.ResponseWriter, r *http.Reques
 		}
 		collector(strconv.FormatUint(limit, 10))
 	case types.GrantHotRegionScheduler:
+		isExist, err := h.isSchedulerExist(types.BalanceHotRegionScheduler)
+		if err != nil {
+			h.r.JSON(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if isExist {
+			h.r.JSON(w, http.StatusBadRequest, "balance-hot-region-scheduler is running, please remove it first")
+			return
+		}
 		leaderID, ok := input["store-leader-id"].(string)
 		if !ok {
 			h.r.JSON(w, http.StatusBadRequest, "missing leader id")
@@ -155,6 +166,16 @@ func (h *schedulerHandler) CreateScheduler(w http.ResponseWriter, r *http.Reques
 		}
 		collector(leaderID)
 		collector(peerIDs)
+	case types.BalanceHotRegionScheduler:
+		isExist, err := h.isSchedulerExist(types.GrantHotRegionScheduler)
+		if err != nil {
+			h.r.JSON(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if isExist {
+			h.r.JSON(w, http.StatusBadRequest, "grant-hot-region-scheduler is running, please remove it first")
+			return
+		}
 	}
 
 	if err := h.AddScheduler(tp, args...); err != nil {
@@ -244,6 +265,23 @@ func (h *schedulerHandler) PauseOrResumeScheduler(w http.ResponseWriter, r *http
 		return
 	}
 	h.r.JSON(w, http.StatusOK, "Pause or resume the scheduler successfully.")
+}
+
+func (h *schedulerHandler) isSchedulerExist(scheduler types.CheckerSchedulerType) (bool, error) {
+	rc, err := h.GetRaftCluster()
+	if err != nil {
+		return false, err
+	}
+	if rc.IsServiceIndependent(constant.SchedulingServiceName) {
+		handlers := rc.GetSchedulerHandlers()
+		_, ok := handlers[scheduler.String()]
+		return ok, nil
+	}
+	schedulers := rc.GetSchedulers()
+	if slice.Contains(schedulers, scheduler.String()) {
+		return !rc.GetSchedulerConfig().IsSchedulerDisabled(scheduler), nil
+	}
+	return false, nil
 }
 
 type schedulerConfigHandler struct {

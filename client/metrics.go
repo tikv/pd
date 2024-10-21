@@ -47,6 +47,7 @@ var (
 	tsoBatchSendLatency      prometheus.Histogram
 	requestForwarded         *prometheus.GaugeVec
 	ongoingRequestCountGauge *prometheus.GaugeVec
+	estimateTSOLatencyGauge  *prometheus.GaugeVec
 )
 
 func initMetrics(constLabels prometheus.Labels) {
@@ -125,6 +126,14 @@ func initMetrics(constLabels prometheus.Labels) {
 			Subsystem:   "request",
 			Name:        "ongoing_requests_count",
 			Help:        "Current count of ongoing batch tso requests",
+			ConstLabels: constLabels,
+		}, []string{"stream"})
+	estimateTSOLatencyGauge = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace:   "pd_client",
+			Subsystem:   "request",
+			Name:        "estimate_tso_latency",
+			Help:        "Estimated latency of an RTT of getting TSO",
 			ConstLabels: constLabels,
 		}, []string{"stream"})
 }
@@ -236,4 +245,5 @@ func registerMetrics() {
 	prometheus.MustRegister(tsoBatchSize)
 	prometheus.MustRegister(tsoBatchSendLatency)
 	prometheus.MustRegister(requestForwarded)
+	prometheus.MustRegister(estimateTSOLatencyGauge)
 }

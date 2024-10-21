@@ -458,8 +458,8 @@ func (suite *scheduleTestSuite) checkAPI(cluster *tests.TestCluster) {
 			},
 		},
 		{
-			name:        "scatter-range",
-			createdName: "scatter-range-test",
+			name:        "scatter-range-scheduler",
+			createdName: "scatter-range-scheduler-test",
 			args:        []arg{{"start_key", ""}, {"end_key", ""}, {"range_name", "test"}},
 			// Test the scheduler config handler.
 			extraTestFunc: func(name string) {

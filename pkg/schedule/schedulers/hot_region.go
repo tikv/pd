@@ -109,18 +109,18 @@ func newBaseHotScheduler(
 
 // prepareForBalance calculate the summary of pending Influence for each store and prepare the load detail for
 // each store, only update read or write load detail
-func (h *baseHotScheduler) prepareForBalance(typ resourceType, cluster sche.SchedulerCluster) {
+func (s *baseHotScheduler) prepareForBalance(typ resourceType, cluster sche.SchedulerCluster) {
 	storeInfos := statistics.SummaryStoreInfos(cluster.GetStores())
-	h.summaryPendingInfluence(storeInfos)
+	s.summaryPendingInfluence(storeInfos)
 	storesLoads := cluster.GetStoresLoads()
 	isTraceRegionFlow := cluster.GetSchedulerConfig().IsTraceRegionFlow()
 
 	prepare := func(regionStats map[uint64][]*statistics.HotPeerStat, rw utils.RWType, resource constant.ResourceKind) {
 		ty := buildResourceType(rw, resource)
-		h.stLoadInfos[ty] = statistics.SummaryStoresLoad(
+		s.stLoadInfos[ty] = statistics.SummaryStoresLoad(
 			storeInfos,
 			storesLoads,
-			h.stHistoryLoads,
+			s.stHistoryLoads,
 			regionStats,
 			isTraceRegionFlow,
 			rw, resource)
@@ -129,35 +129,35 @@ func (h *baseHotScheduler) prepareForBalance(typ resourceType, cluster sche.Sche
 	case readLeader, readPeer:
 		// update read statistics
 		// avoid to update read statistics frequently
-		if time.Since(h.updateReadTime) >= statisticsInterval {
+		if time.Since(s.updateReadTime) >= statisticsInterval {
 			regionRead := cluster.RegionReadStats()
 			prepare(regionRead, utils.Read, constant.LeaderKind)
 			prepare(regionRead, utils.Read, constant.RegionKind)
-			h.updateReadTime = time.Now()
+			s.updateReadTime = time.Now()
 		}
 	case writeLeader, writePeer:
 		// update write statistics
 		// avoid to update write statistics frequently
-		if time.Since(h.updateWriteTime) >= statisticsInterval {
+		if time.Since(s.updateWriteTime) >= statisticsInterval {
 			regionWrite := cluster.RegionWriteStats()
 			prepare(regionWrite, utils.Write, constant.LeaderKind)
 			prepare(regionWrite, utils.Write, constant.RegionKind)
-			h.updateWriteTime = time.Now()
+			s.updateWriteTime = time.Now()
 		}
 	default:
 		log.Error("invalid resource type", zap.String("type", typ.String()))
 	}
 }
 
-func (h *baseHotScheduler) updateHistoryLoadConfig(sampleDuration, sampleInterval time.Duration) {
-	h.stHistoryLoads = h.stHistoryLoads.UpdateConfig(sampleDuration, sampleInterval)
+func (s *baseHotScheduler) updateHistoryLoadConfig(sampleDuration, sampleInterval time.Duration) {
+	s.stHistoryLoads = s.stHistoryLoads.UpdateConfig(sampleDuration, sampleInterval)
 }
 
 // summaryPendingInfluence calculate the summary of pending Influence for each store
 // and clean the region from regionInfluence if they have ended operator.
 // It makes each dim rate or count become `weight` times to the origin value.
-func (h *baseHotScheduler) summaryPendingInfluence(storeInfos map[uint64]*statistics.StoreSummaryInfo) {
-	for id, p := range h.regionPendings {
+func (s *baseHotScheduler) summaryPendingInfluence(storeInfos map[uint64]*statistics.StoreSummaryInfo) {
+	for id, p := range s.regionPendings {
 		for _, from := range p.froms {
 			from := storeInfos[from]
 			to := storeInfos[p.to]
@@ -165,7 +165,7 @@ func (h *baseHotScheduler) summaryPendingInfluence(storeInfos map[uint64]*statis
 			weight, needGC := calcPendingInfluence(p.op, maxZombieDur)
 
 			if needGC {
-				delete(h.regionPendings, id)
+				delete(s.regionPendings, id)
 				continue
 			}
 
@@ -188,8 +188,8 @@ func (h *baseHotScheduler) summaryPendingInfluence(storeInfos map[uint64]*statis
 	}
 }
 
-func (h *baseHotScheduler) randomType() resourceType {
-	return h.types[h.r.Int()%len(h.types)]
+func (s *baseHotScheduler) randomType() resourceType {
+	return s.types[s.r.Int()%len(s.types)]
 }
 
 type hotScheduler struct {
@@ -214,48 +214,48 @@ func newHotScheduler(opController *operator.Controller, conf *hotRegionScheduler
 }
 
 // EncodeConfig implements the Scheduler interface.
-func (h *hotScheduler) EncodeConfig() ([]byte, error) {
-	return h.conf.encodeConfig()
+func (s *hotScheduler) EncodeConfig() ([]byte, error) {
+	return s.conf.encodeConfig()
 }
 
 // ReloadConfig impl
-func (h *hotScheduler) ReloadConfig() error {
-	h.conf.Lock()
-	defer h.conf.Unlock()
+func (s *hotScheduler) ReloadConfig() error {
+	s.conf.Lock()
+	defer s.conf.Unlock()
 
 	newCfg := &hotRegionSchedulerConfig{}
-	if err := h.conf.load(newCfg); err != nil {
+	if err := s.conf.load(newCfg); err != nil {
 		return err
 	}
-	h.conf.MinHotByteRate = newCfg.MinHotByteRate
-	h.conf.MinHotKeyRate = newCfg.MinHotKeyRate
-	h.conf.MinHotQueryRate = newCfg.MinHotQueryRate
-	h.conf.MaxZombieRounds = newCfg.MaxZombieRounds
-	h.conf.MaxPeerNum = newCfg.MaxPeerNum
-	h.conf.ByteRateRankStepRatio = newCfg.ByteRateRankStepRatio
-	h.conf.KeyRateRankStepRatio = newCfg.KeyRateRankStepRatio
-	h.conf.QueryRateRankStepRatio = newCfg.QueryRateRankStepRatio
-	h.conf.CountRankStepRatio = newCfg.CountRankStepRatio
-	h.conf.GreatDecRatio = newCfg.GreatDecRatio
-	h.conf.MinorDecRatio = newCfg.MinorDecRatio
-	h.conf.SrcToleranceRatio = newCfg.SrcToleranceRatio
-	h.conf.DstToleranceRatio = newCfg.DstToleranceRatio
-	h.conf.WriteLeaderPriorities = newCfg.WriteLeaderPriorities
-	h.conf.WritePeerPriorities = newCfg.WritePeerPriorities
-	h.conf.ReadPriorities = newCfg.ReadPriorities
-	h.conf.StrictPickingStore = newCfg.StrictPickingStore
-	h.conf.EnableForTiFlash = newCfg.EnableForTiFlash
-	h.conf.RankFormulaVersion = newCfg.RankFormulaVersion
-	h.conf.ForbidRWType = newCfg.ForbidRWType
-	h.conf.SplitThresholds = newCfg.SplitThresholds
-	h.conf.HistorySampleDuration = newCfg.HistorySampleDuration
-	h.conf.HistorySampleInterval = newCfg.HistorySampleInterval
+	s.conf.MinHotByteRate = newCfg.MinHotByteRate
+	s.conf.MinHotKeyRate = newCfg.MinHotKeyRate
+	s.conf.MinHotQueryRate = newCfg.MinHotQueryRate
+	s.conf.MaxZombieRounds = newCfg.MaxZombieRounds
+	s.conf.MaxPeerNum = newCfg.MaxPeerNum
+	s.conf.ByteRateRankStepRatio = newCfg.ByteRateRankStepRatio
+	s.conf.KeyRateRankStepRatio = newCfg.KeyRateRankStepRatio
+	s.conf.QueryRateRankStepRatio = newCfg.QueryRateRankStepRatio
+	s.conf.CountRankStepRatio = newCfg.CountRankStepRatio
+	s.conf.GreatDecRatio = newCfg.GreatDecRatio
+	s.conf.MinorDecRatio = newCfg.MinorDecRatio
+	s.conf.SrcToleranceRatio = newCfg.SrcToleranceRatio
+	s.conf.DstToleranceRatio = newCfg.DstToleranceRatio
+	s.conf.WriteLeaderPriorities = newCfg.WriteLeaderPriorities
+	s.conf.WritePeerPriorities = newCfg.WritePeerPriorities
+	s.conf.ReadPriorities = newCfg.ReadPriorities
+	s.conf.StrictPickingStore = newCfg.StrictPickingStore
+	s.conf.EnableForTiFlash = newCfg.EnableForTiFlash
+	s.conf.RankFormulaVersion = newCfg.RankFormulaVersion
+	s.conf.ForbidRWType = newCfg.ForbidRWType
+	s.conf.SplitThresholds = newCfg.SplitThresholds
+	s.conf.HistorySampleDuration = newCfg.HistorySampleDuration
+	s.conf.HistorySampleInterval = newCfg.HistorySampleInterval
 	return nil
 }
 
 // ServeHTTP implements the http.Handler interface.
-func (h *hotScheduler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	h.conf.ServeHTTP(w, r)
+func (s *hotScheduler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	s.conf.ServeHTTP(w, r)
 }
 
 // GetMinInterval implements the Scheduler interface.
@@ -264,73 +264,73 @@ func (*hotScheduler) GetMinInterval() time.Duration {
 }
 
 // GetNextInterval implements the Scheduler interface.
-func (h *hotScheduler) GetNextInterval(time.Duration) time.Duration {
-	return intervalGrow(h.GetMinInterval(), maxHotScheduleInterval, exponentialGrowth)
+func (s *hotScheduler) GetNextInterval(time.Duration) time.Duration {
+	return intervalGrow(s.GetMinInterval(), maxHotScheduleInterval, exponentialGrowth)
 }
 
 // IsScheduleAllowed implements the Scheduler interface.
-func (h *hotScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) bool {
-	allowed := h.OpController.OperatorCount(operator.OpHotRegion) < cluster.GetSchedulerConfig().GetHotRegionScheduleLimit()
+func (s *hotScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) bool {
+	allowed := s.OpController.OperatorCount(operator.OpHotRegion) < cluster.GetSchedulerConfig().GetHotRegionScheduleLimit()
 	if !allowed {
-		operator.IncOperatorLimitCounter(h.GetType(), operator.OpHotRegion)
+		operator.IncOperatorLimitCounter(s.GetType(), operator.OpHotRegion)
 	}
 	return allowed
 }
 
 // Schedule implements the Scheduler interface.
-func (h *hotScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) ([]*operator.Operator, []plan.Plan) {
+func (s *hotScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) ([]*operator.Operator, []plan.Plan) {
 	hotSchedulerCounter.Inc()
-	typ := h.randomType()
-	return h.dispatch(typ, cluster), nil
+	typ := s.randomType()
+	return s.dispatch(typ, cluster), nil
 }
 
-func (h *hotScheduler) dispatch(typ resourceType, cluster sche.SchedulerCluster) []*operator.Operator {
-	h.Lock()
-	defer h.Unlock()
-	h.updateHistoryLoadConfig(h.conf.getHistorySampleDuration(), h.conf.getHistorySampleInterval())
-	h.prepareForBalance(typ, cluster)
+func (s *hotScheduler) dispatch(typ resourceType, cluster sche.SchedulerCluster) []*operator.Operator {
+	s.Lock()
+	defer s.Unlock()
+	s.updateHistoryLoadConfig(s.conf.getHistorySampleDuration(), s.conf.getHistorySampleInterval())
+	s.prepareForBalance(typ, cluster)
 	// isForbidRWType can not be move earlier to support to use api and metrics.
 	switch typ {
 	case readLeader, readPeer:
-		if h.conf.isForbidRWType(utils.Read) {
+		if s.conf.isForbidRWType(utils.Read) {
 			return nil
 		}
-		return h.balanceHotReadRegions(cluster)
+		return s.balanceHotReadRegions(cluster)
 	case writePeer:
-		if h.conf.isForbidRWType(utils.Write) {
+		if s.conf.isForbidRWType(utils.Write) {
 			return nil
 		}
-		return h.balanceHotWritePeers(cluster)
+		return s.balanceHotWritePeers(cluster)
 	case writeLeader:
-		if h.conf.isForbidRWType(utils.Write) {
+		if s.conf.isForbidRWType(utils.Write) {
 			return nil
 		}
-		return h.balanceHotWriteLeaders(cluster)
+		return s.balanceHotWriteLeaders(cluster)
 	}
 	return nil
 }
 
-func (h *hotScheduler) tryAddPendingInfluence(op *operator.Operator, srcStore []uint64, dstStore uint64, infl statistics.Influence, maxZombieDur time.Duration) bool {
+func (s *hotScheduler) tryAddPendingInfluence(op *operator.Operator, srcStore []uint64, dstStore uint64, infl statistics.Influence, maxZombieDur time.Duration) bool {
 	regionID := op.RegionID()
-	_, ok := h.regionPendings[regionID]
+	_, ok := s.regionPendings[regionID]
 	if ok {
 		pendingOpFailsStoreCounter.Inc()
 		return false
 	}
 
 	influence := newPendingInfluence(op, srcStore, dstStore, infl, maxZombieDur)
-	h.regionPendings[regionID] = influence
+	s.regionPendings[regionID] = influence
 
 	utils.ForeachRegionStats(func(rwTy utils.RWType, dim int, kind utils.RegionStatKind) {
-		hotPeerHist.WithLabelValues(h.GetName(), rwTy.String(), utils.DimToString(dim)).Observe(infl.Loads[kind])
+		hotPeerHist.WithLabelValues(s.GetName(), rwTy.String(), utils.DimToString(dim)).Observe(infl.Loads[kind])
 	})
 	return true
 }
 
-func (h *hotScheduler) balanceHotReadRegions(cluster sche.SchedulerCluster) []*operator.Operator {
-	leaderSolver := newBalanceSolver(h, cluster, utils.Read, transferLeader)
+func (s *hotScheduler) balanceHotReadRegions(cluster sche.SchedulerCluster) []*operator.Operator {
+	leaderSolver := newBalanceSolver(s, cluster, utils.Read, transferLeader)
 	leaderOps := leaderSolver.solve()
-	peerSolver := newBalanceSolver(h, cluster, utils.Read, movePeer)
+	peerSolver := newBalanceSolver(s, cluster, utils.Read, movePeer)
 	peerOps := peerSolver.solve()
 	if len(leaderOps) == 0 && len(peerOps) == 0 {
 		hotSchedulerSkipCounter.Inc()
@@ -370,8 +370,8 @@ func (h *hotScheduler) balanceHotReadRegions(cluster sche.SchedulerCluster) []*o
 	return nil
 }
 
-func (h *hotScheduler) balanceHotWritePeers(cluster sche.SchedulerCluster) []*operator.Operator {
-	peerSolver := newBalanceSolver(h, cluster, utils.Write, movePeer)
+func (s *hotScheduler) balanceHotWritePeers(cluster sche.SchedulerCluster) []*operator.Operator {
+	peerSolver := newBalanceSolver(s, cluster, utils.Write, movePeer)
 	ops := peerSolver.solve()
 	if len(ops) > 0 && peerSolver.tryAddPendingInfluence() {
 		return ops
@@ -379,8 +379,8 @@ func (h *hotScheduler) balanceHotWritePeers(cluster sche.SchedulerCluster) []*op
 	return nil
 }
 
-func (h *hotScheduler) balanceHotWriteLeaders(cluster sche.SchedulerCluster) []*operator.Operator {
-	leaderSolver := newBalanceSolver(h, cluster, utils.Write, transferLeader)
+func (s *hotScheduler) balanceHotWriteLeaders(cluster sche.SchedulerCluster) []*operator.Operator {
+	leaderSolver := newBalanceSolver(s, cluster, utils.Write, transferLeader)
 	ops := leaderSolver.solve()
 	if len(ops) > 0 && leaderSolver.tryAddPendingInfluence() {
 		return ops

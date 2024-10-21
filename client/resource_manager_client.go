@@ -198,7 +198,7 @@ func (c *client) LoadResourceGroups(ctx context.Context) ([]*rmpb.ResourceGroup,
 		return nil, 0, err
 	}
 	if resp.Header.Error != nil {
-		return nil, resp.Header.Revision, errors.Errorf(resp.Header.Error.Message)
+		return nil, resp.Header.Revision, errors.New(resp.Header.Error.Message)
 	}
 	groups := make([]*rmpb.ResourceGroup, 0, len(resp.Kvs))
 	for _, item := range resp.Kvs {

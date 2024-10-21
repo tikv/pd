@@ -371,16 +371,6 @@ func (s *SchedulingTestEnvironment) RunTestInAPIMode(test func(*TestCluster)) {
 	test(s.clusters[APIMode])
 }
 
-// RunFuncInTwoModes is to run func in two modes.
-func (s *SchedulingTestEnvironment) RunFuncInTwoModes(f func(*TestCluster)) {
-	if c, ok := s.clusters[PDMode]; ok {
-		f(c)
-	}
-	if c, ok := s.clusters[APIMode]; ok {
-		f(c)
-	}
-}
-
 // Cleanup is to cleanup the environment.
 func (s *SchedulingTestEnvironment) Cleanup() {
 	for _, cluster := range s.clusters {

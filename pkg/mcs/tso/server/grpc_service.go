@@ -117,7 +117,7 @@ func (s *Service) Tso(stream tsopb.TSO_TsoServer) error {
 			keyspaceID, keyspaceGroupID,
 			dcLocation, count)
 		if err != nil {
-			return status.Errorf(codes.Unknown, err.Error())
+			return status.Error(codes.Unknown, err.Error())
 		}
 		keyspaceGroupIDStr := strconv.FormatUint(uint64(keyspaceGroupID), 10)
 		tsoHandleDuration.WithLabelValues(keyspaceGroupIDStr).Observe(time.Since(start).Seconds())

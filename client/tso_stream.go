@@ -18,11 +18,13 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"math"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/pingcap/errors"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/tsopb"
 	"github.com/pingcap/log"
@@ -214,6 +216,8 @@ type tsoStream struct {
 	state          atomic.Int32
 	stoppedWithErr atomic.Pointer[error]
 
+	estimatedLatencyMicros atomic.Uint64
+
 	ongoingRequestCountGauge prometheus.Gauge
 	ongoingRequests          atomic.Int32
 }
@@ -226,7 +230,10 @@ const (
 
 var streamIDAlloc atomic.Int32
 
-const invalidStreamID = "<invalid>"
+const (
+	invalidStreamID               = "<invalid>"
+	maxPendingRequestsInTSOStream = 64
+)
 
 func newTSOStream(ctx context.Context, serverURL string, stream grpcTSOStreamAdapter) *tsoStream {
 	streamID := fmt.Sprintf("%s-%d", serverURL, streamIDAlloc.Add(1))
@@ -238,7 +245,7 @@ func newTSOStream(ctx context.Context, serverURL string, stream grpcTSOStreamAda
 		stream:    stream,
 		streamID:  streamID,
 
-		pendingRequests: make(chan batchedRequests, 64),
+		pendingRequests: make(chan batchedRequests, maxPendingRequestsInTSOStream),
 
 		cancel: cancel,
 
@@ -363,6 +370,27 @@ func (s *tsoStream) recvLoop(ctx context.Context) {
 		s.ongoingRequestCountGauge.Set(0)
 	}()
 
+	// For calculating the estimated RPC latency.
+	const (
+		filterCutoffFreq                float64 = 1.0
+		filterNewSampleWeightUpperbound float64 = 0.2
+	)
+	// The filter applies on logarithm of the latency of each TSO RPC in microseconds.
+	filter := newRCFilter(filterCutoffFreq, filterNewSampleWeightUpperbound)
+
+	updateEstimatedLatency := func(sampleTime time.Time, latency time.Duration) {
+		if latency < 0 {
+			// Unreachable
+			return
+		}
+		currentSample := math.Log(float64(latency.Microseconds()))
+		filteredValue := filter.update(sampleTime, currentSample)
+		micros := math.Exp(filteredValue)
+		s.estimatedLatencyMicros.Store(uint64(micros))
+		// Update the metrics in seconds.
+		estimateTSOLatencyGauge.WithLabelValues(s.streamID).Set(micros * 1e-6)
+	}
+
 recvLoop:
 	for {
 		select {
@@ -383,14 +411,15 @@ recvLoop:
 			hasReq = false
 		}
 
-		durationSeconds := time.Since(currentReq.startTime).Seconds()
+		latency := time.Since(currentReq.startTime)
+		latencySeconds := latency.Seconds()
 
 		if err != nil {
 			// If a request is pending and error occurs, observe the duration it has cost.
 			// Note that it's also possible that the stream is broken due to network without being requested. In this
 			// case, `Recv` may return an error while no request is pending.
 			if hasReq {
-				requestFailedDurationTSO.Observe(durationSeconds)
+				requestFailedDurationTSO.Observe(latencySeconds)
 			}
 			if err == io.EOF {
 				finishWithErr = errors.WithStack(errs.ErrClientTSOStreamClosed)
@@ -403,9 +432,9 @@ recvLoop:
 			break recvLoop
 		}
 
-		latencySeconds := durationSeconds
 		requestDurationTSO.Observe(latencySeconds)
 		tsoBatchSize.Observe(float64(res.count))
+		updateEstimatedLatency(currentReq.startTime, latency)
 
 		if res.count != uint32(currentReq.count) {
 			finishWithErr = errors.WithStack(errTSOLength)
@@ -421,6 +450,28 @@ recvLoop:
 	}
 }
 
+// EstimatedRPCLatency returns an estimation of the duration of each TSO RPC. If the stream has never handled any RPC,
+// this function returns 0.
+func (s *tsoStream) EstimatedRPCLatency() time.Duration {
+	failpoint.Inject("tsoStreamSimulateEstimatedRPCLatency", func(val failpoint.Value) {
+		if s, ok := val.(string); ok {
+			duration, err := time.ParseDuration(s)
+			if err != nil {
+				panic(err)
+			}
+			failpoint.Return(duration)
+		} else {
+			panic("invalid failpoint value for `tsoStreamSimulateEstimatedRPCLatency`: expected string")
+		}
+	})
+	latencyUs := s.estimatedLatencyMicros.Load()
+	// Limit it at least 100us
+	if latencyUs < 100 {
+		latencyUs = 100
+	}
+	return time.Microsecond * time.Duration(latencyUs)
+}
+
 // GetRecvError returns the error (if any) that has been encountered when receiving response asynchronously.
 func (s *tsoStream) GetRecvError() error {
 	perr := s.stoppedWithErr.Load()
@@ -433,4 +484,49 @@ func (s *tsoStream) GetRecvError() error {
 // WaitForClosed blocks until the stream is closed and the inner loop exits.
 func (s *tsoStream) WaitForClosed() {
 	s.wg.Wait()
+}
+
+// rcFilter is a simple implementation of a discrete-time low-pass filter.
+// Ref: https://en.wikipedia.org/wiki/Low-pass_filter#Simple_infinite_impulse_response_filter
+// There are some differences between this implementation and the wikipedia one:
+//   - Time-interval between each two samples is not necessarily a constant. We allow non-even sample interval by simply
+//     calculating the alpha (which is calculated by `dt / (rc + dt)`) dynamically for each sample, at the expense of
+//     losing some mathematical strictness.
+//   - Support specifying the upperbound of the new sample when updating. This can be an approach to avoid the output
+//     jumps drastically when the samples come in a low frequency.
+type rcFilter struct {
+	rc                        float64
+	newSampleWeightUpperBound float64
+	value                     float64
+	lastSampleTime            time.Time
+	firstSampleArrived        bool
+}
+
+// newRCFilter initializes an rcFilter. `cutoff` is the cutoff frequency in Hertz. `newSampleWeightUpperbound` controls
+// the upper limit of the weight of each incoming sample (pass 1 for unlimited).
+func newRCFilter(cutoff float64, newSampleWeightUpperBound float64) rcFilter {
+	rc := 1.0 / (2.0 * math.Pi * cutoff)
+	return rcFilter{
+		rc:                        rc,
+		newSampleWeightUpperBound: newSampleWeightUpperBound,
+	}
+}
+
+func (f *rcFilter) update(sampleTime time.Time, newSample float64) float64 {
+	// Handle the first sample
+	if !f.firstSampleArrived {
+		f.firstSampleArrived = true
+		f.lastSampleTime = sampleTime
+		f.value = newSample
+		return newSample
+	}
+
+	// Delta time.
+	dt := sampleTime.Sub(f.lastSampleTime).Seconds()
+	// `alpha` is the weight of the new sample, limited with `newSampleWeightUpperBound`.
+	alpha := math.Min(dt/(f.rc+dt), f.newSampleWeightUpperBound)
+	f.value = (1-alpha)*f.value + alpha*newSample
+
+	f.lastSampleTime = sampleTime
+	return f.value
 }

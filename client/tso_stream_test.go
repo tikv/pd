@@ -17,6 +17,7 @@ package pd
 import (
 	"context"
 	"io"
+	"math"
 	"testing"
 	"time"
 
@@ -42,6 +43,14 @@ type resultMsg struct {
 	breakStream bool
 }
 
+type resultMode int
+
+const (
+	resultModeManual resultMode = iota
+	resultModeGenerated
+	resultModeGenerateOnSignal
+)
+
 type mockTSOStreamImpl struct {
 	ctx        context.Context
 	requestCh  chan requestMsg
@@ -49,21 +58,21 @@ type mockTSOStreamImpl struct {
 	keyspaceID uint32
 	errorState error
 
-	autoGenerateResult bool
+	resultMode resultMode
 	// Current progress of generating TSO results
 	resGenPhysical, resGenLogical int64
 }
 
-func newMockTSOStreamImpl(ctx context.Context, autoGenerateResult bool) *mockTSOStreamImpl {
+func newMockTSOStreamImpl(ctx context.Context, resultMode resultMode) *mockTSOStreamImpl {
 	return &mockTSOStreamImpl{
 		ctx:        ctx,
 		requestCh:  make(chan requestMsg, 64),
 		resultCh:   make(chan resultMsg, 64),
 		keyspaceID: 0,
 
-		autoGenerateResult: autoGenerateResult,
-		resGenPhysical:     10000,
-		resGenLogical:      0,
+		resultMode:     resultMode,
+		resGenPhysical: 10000,
+		resGenLogical:  0,
 	}
 }
 
@@ -82,6 +91,17 @@ func (s *mockTSOStreamImpl) Send(clusterID uint64, _keyspaceID, keyspaceGroupID 
 }
 
 func (s *mockTSOStreamImpl) Recv() (tsoRequestResult, error) {
+	var needGenerateResult, needResultSignal bool
+	switch s.resultMode {
+	case resultModeManual:
+		needResultSignal = true
+	case resultModeGenerated:
+		needGenerateResult = true
+	case resultModeGenerateOnSignal:
+		needResultSignal = true
+		needGenerateResult = true
+	}
+
 	// This stream have ever receive an error, it returns the error forever.
 	if s.errorState != nil {
 		return tsoRequestResult{}, s.errorState
@@ -130,12 +150,12 @@ func (s *mockTSOStreamImpl) Recv() (tsoRequestResult, error) {
 			}
 			s.errorState = res.err
 			return tsoRequestResult{}, s.errorState
-		} else if s.autoGenerateResult {
+		} else if !needResultSignal {
 			// Do not allow manually assigning result.
 			panic("trying manually specifying result for mockTSOStreamImpl when it's auto-generating mode")
 		}
-	} else if s.autoGenerateResult {
-		res = s.autoGenResult(req.count)
+	} else if !needResultSignal {
+		// Mark hasRes as true to skip receiving from resultCh. The actual value of the result will be generated later.
 		hasRes = true
 	}
 
@@ -160,6 +180,10 @@ func (s *mockTSOStreamImpl) Recv() (tsoRequestResult, error) {
 		}
 	}
 
+	if needGenerateResult {
+		res = s.autoGenResult(req.count)
+	}
+
 	// Both res and req should be ready here.
 	if res.err != nil {
 		s.errorState = res.err
@@ -168,11 +192,14 @@ func (s *mockTSOStreamImpl) Recv() (tsoRequestResult, error) {
 }
 
 func (s *mockTSOStreamImpl) autoGenResult(count int64) resultMsg {
+	if count >= (1 << 18) {
+		panic("requested count too large")
+	}
 	physical := s.resGenPhysical
 	logical := s.resGenLogical + count
 	if logical >= (1 << 18) {
-		physical += logical >> 18
-		logical &= (1 << 18) - 1
+		physical += 1
+		logical = count
 	}
 
 	s.resGenPhysical = physical
@@ -190,6 +217,9 @@ func (s *mockTSOStreamImpl) autoGenResult(count int64) resultMsg {
 }
 
 func (s *mockTSOStreamImpl) returnResult(physical int64, logical int64, count uint32) {
+	if s.resultMode != resultModeManual {
+		panic("trying to manually specifying tso result on generating mode")
+	}
 	s.resultCh <- resultMsg{
 		r: tsoRequestResult{
 			physical:            physical,
@@ -199,6 +229,13 @@ func (s *mockTSOStreamImpl) returnResult(physical int64, logical int64, count ui
 			respKeyspaceGroupID: s.keyspaceID,
 		},
 	}
+}
+
+func (s *mockTSOStreamImpl) generateNext() {
+	if s.resultMode != resultModeGenerateOnSignal {
+		panic("trying to signal generation when the stream is not generate-on-signal mode")
+	}
+	s.resultCh <- resultMsg{}
 }
 
 func (s *mockTSOStreamImpl) returnError(err error) {
@@ -233,7 +270,7 @@ type testTSOStreamSuite struct {
 
 func (s *testTSOStreamSuite) SetupTest() {
 	s.re = require.New(s.T())
-	s.inner = newMockTSOStreamImpl(context.Background(), false)
+	s.inner = newMockTSOStreamImpl(context.Background(), resultModeManual)
 	s.stream = newTSOStream(context.Background(), mockStreamURL, s.inner)
 }
 
@@ -454,10 +491,125 @@ func (s *testTSOStreamSuite) TestTSOStreamConcurrentRunning() {
 	}
 }
 
+func (s *testTSOStreamSuite) TestEstimatedLatency() {
+	s.inner.returnResult(100, 0, 1)
+	res := s.getResult(s.mustProcessRequestWithResultCh(1))
+	s.re.NoError(res.err)
+	s.re.Equal(int64(100), res.result.physical)
+	s.re.Equal(int64(0), res.result.logical)
+	estimation := s.stream.EstimatedRPCLatency().Seconds()
+	s.re.Greater(estimation, 0.0)
+	s.re.InDelta(0.0, estimation, 0.01)
+
+	// For each began request, record its startTime and send it to the result returning goroutine.
+	reqStartTimeCh := make(chan time.Time, maxPendingRequestsInTSOStream)
+	// Limit concurrent requests to be less than the capacity of tsoStream.pendingRequests.
+	tokenCh := make(chan struct{}, maxPendingRequestsInTSOStream-1)
+	for i := 0; i < 40; i++ {
+		tokenCh <- struct{}{}
+	}
+	// Return a result after 50ms delay for each requests
+	const delay = time.Millisecond * 50
+	// The goroutine to delay and return the result.
+	go func() {
+		allocated := int64(1)
+		for reqStartTime := range reqStartTimeCh {
+			now := time.Now()
+			elapsed := now.Sub(reqStartTime)
+			if elapsed < delay {
+				time.Sleep(delay - elapsed)
+			}
+			s.inner.returnResult(100, allocated, 1)
+			allocated++
+		}
+	}()
+
+	// Limit the test time within 1s
+	startTime := time.Now()
+	resCh := make(chan (<-chan callbackInvocation), 100)
+	// The sending goroutine
+	go func() {
+		for time.Since(startTime) < time.Second {
+			<-tokenCh
+			reqStartTimeCh <- time.Now()
+			r := s.mustProcessRequestWithResultCh(1)
+			resCh <- r
+		}
+		close(reqStartTimeCh)
+		close(resCh)
+	}()
+	// Check the result
+	index := 0
+	for r := range resCh {
+		// The first is 1
+		index++
+		res := s.getResult(r)
+		tokenCh <- struct{}{}
+		s.re.NoError(res.err)
+		s.re.Equal(int64(100), res.result.physical)
+		s.re.Equal(int64(index), res.result.logical)
+	}
+
+	s.re.Greater(s.stream.EstimatedRPCLatency(), time.Duration(int64(0.9*float64(delay))))
+	s.re.Less(s.stream.EstimatedRPCLatency(), time.Duration(math.Floor(1.1*float64(delay))))
+}
+
+func TestRCFilter(t *testing.T) {
+	re := require.New(t)
+	// Test basic calculation with frequency 1
+	f := newRCFilter(1, 1)
+	now := time.Now()
+	// The first sample initializes the value.
+	re.Equal(10.0, f.update(now, 10))
+	now = now.Add(time.Second)
+	expectedValue := 10 / (2*math.Pi + 1)
+	re.InEpsilon(expectedValue, f.update(now, 0), 1e-8)
+	expectedValue = expectedValue*(1/(2*math.Pi))/(1/(2*math.Pi)+2) + 100*2/(1/(2*math.Pi)+2)
+	now = now.Add(time.Second * 2)
+	re.InEpsilon(expectedValue, f.update(now, 100), 1e-8)
+
+	// Test newSampleWeightUpperBound
+	f = newRCFilter(10, 0.5)
+	now = time.Now()
+	re.Equal(0.0, f.update(now, 0))
+	now = now.Add(time.Second)
+	re.InEpsilon(1.0, f.update(now, 2), 1e-8)
+	now = now.Add(time.Second * 2)
+	re.InEpsilon(3.0, f.update(now, 5), 1e-8)
+
+	// Test another cutoff frequency and weight upperbound.
+	f = newRCFilter(1/(2*math.Pi), 0.9)
+	now = time.Now()
+	re.Equal(1.0, f.update(now, 1))
+	now = now.Add(time.Second)
+	re.InEpsilon(2.0, f.update(now, 3), 1e-8)
+	now = now.Add(time.Second * 2)
+	re.InEpsilon(6.0, f.update(now, 8), 1e-8)
+	now = now.Add(time.Minute)
+	re.InEpsilon(15.0, f.update(now, 16), 1e-8)
+
+	// Test with dense samples
+	f = newRCFilter(1/(2*math.Pi), 0.9)
+	now = time.Now()
+	re.Equal(0.0, f.update(now, 0))
+	lastOutput := 0.0
+	// 10000 even samples in 1 second.
+	for i := 0; i < 10000; i++ {
+		now = now.Add(time.Microsecond * 100)
+		output := f.update(now, 1.0)
+		re.Greater(output, lastOutput)
+		re.Less(output, 1.0)
+		lastOutput = output
+	}
+	// Regarding the above samples as being close enough to a continuous function, the output after 1 second
+	// should be 1 - exp(-RC*t) = 1 - exp(-t). Here RC = 1/(2*pi*cutoff) = 1.
+	re.InDelta(0.63, lastOutput, 0.02)
+}
+
 func BenchmarkTSOStreamSendRecv(b *testing.B) {
 	log.SetLevel(zapcore.FatalLevel)
 
-	streamInner := newMockTSOStreamImpl(context.Background(), true)
+	streamInner := newMockTSOStreamImpl(context.Background(), resultModeGenerated)
 	stream := newTSOStream(context.Background(), mockStreamURL, streamInner)
 	defer func() {
 		streamInner.stop()
