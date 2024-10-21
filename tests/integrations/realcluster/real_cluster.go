@@ -35,7 +35,10 @@ type realClusterSuite struct {
 	suiteName  string
 }
 
-var tiupBin = os.Getenv("HOME") + "/.tiup/bin/tiup"
+var (
+	playgroundLogDir = filepath.Join("tmp", "real_cluster", "playground")
+	tiupBin          = os.Getenv("HOME") + "/.tiup/bin/tiup"
+)
 
 // SetupSuite will run before the tests in the suite are run.
 func (s *realClusterSuite) SetupSuite() {
@@ -115,11 +118,9 @@ func destroy(t *testing.T, tag string) {
 func deployTiupPlayground(t *testing.T, tag string) {
 	curPath, err := os.Getwd()
 	require.NoError(t, err)
-
-	log.Info(curPath)
 	require.NoError(t, os.Chdir("../../.."))
 
-	if !fileExists("bin") || !fileExists("bin/tikv-server") || !fileExists("bin/tidb-server") || !fileExists("bin/tiflash") {
+	if !fileExists("third_bin") || !fileExists("third_bin/tikv-server") || !fileExists("third_bin/tidb-server") || !fileExists("third_bin/tiflash") {
 		log.Info("downloading binaries...")
 		log.Info("this may take a few minutes, you can also download them manually and put them in the bin directory.")
 		require.NoError(t, runCommand("sh",
@@ -129,19 +130,20 @@ func deployTiupPlayground(t *testing.T, tag string) {
 		log.Info("complie pd binaries...")
 		require.NoError(t, runCommand("make", "pd-server"))
 	}
-	if !fileExists(filepath.Join(curPath, "playground")) {
-		require.NoError(t, os.Mkdir(filepath.Join(curPath, "playground"), 0755))
+
+	if !fileExists(playgroundLogDir) {
+		require.NoError(t, os.Mkdir(playgroundLogDir, 0755))
 	}
 	// nolint:errcheck
-	go runCommand("sh", "-c",
-		tiupBin+` playground nightly --kv 3 --tiflash 1 --db 1 --pd 3 \
+	go func() {
+		runCommand("sh", "-c",
+			tiupBin+` playground nightly --kv 3 --tiflash 1 --db 1 --pd 3 \
 		--without-monitor --tag `+tag+` --pd.binpath ./bin/pd-server \
-		// --kv.binpath ./third_bin/tikv-server \
-		// --db.binpath ./third_bin/tidb-server --tiflash.binpath ./third_bin/tiflash \
-		--kv.binpath ./bin/tikv-server \
-		--db.binpath ./bin/tidb-server --tiflash.binpath ./bin/tiflash \
+		--kv.binpath ./third_bin/tikv-server \
+		--db.binpath ./third_bin/tidb-server --tiflash.binpath ./third_bin/tiflash \
 		--pd.config ./tests/integrations/realcluster/pd.toml \
-		> `+filepath.Join(curPath, "playground", tag+".log")+` 2>&1 & `)
+		> `+filepath.Join(playgroundLogDir, tag+".log")+` 2>&1 & `)
+	}()
 
 	// Avoid to change the dir before execute `tiup playground`.
 	time.Sleep(10 * time.Second)
