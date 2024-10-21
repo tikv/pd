@@ -322,7 +322,7 @@ func (c *RaftCluster) Start(s Server) error {
 	if err != nil {
 		return err
 	}
-	c.checkTSOService(true)
+	c.checkTSOService()
 	cluster, err := c.LoadClusterInfo()
 	if err != nil {
 		return err
@@ -401,34 +401,15 @@ func (c *RaftCluster) checkSchedulingService() {
 }
 
 // checkTSOService checks the TSO service.
-func (c *RaftCluster) checkTSOService(skipCheckLeader bool) {
+func (c *RaftCluster) checkTSOService() {
 	if c.isAPIServiceMode {
 		return
 	}
-	// If skipCheckLeader is true, checkTSOService is called in champaign leader process which is no need to check the leader.
-	if skipCheckLeader || (!skipCheckLeader && c.member.IsLeader()) {
-		if err := c.startTSOJobs(); err != nil {
-			// If there is an error, need to wait for the next check.
-			log.Error("failed to start TSO jobs", errs.ZapError(err))
-			return
-		}
-	} else {
-		// leader exits, reset the allocator group
-		if err := c.stopTSOJobs(); err != nil {
-			// If there is an error, need to wait for the next check.
-			log.Error("failed to stop TSO jobs", errs.ZapError(err))
-			return
-		}
 
-		failpoint.Inject("updateAfterResetTSO", func() {
-			allocator, _ := c.tsoAllocator.GetAllocator(tso.GlobalDCLocation)
-			if err := allocator.UpdateTSO(); !errorspkg.Is(err, errs.ErrUpdateTimestamp) {
-				log.Panic("the tso update after reset should return ErrUpdateTimestamp as expected", zap.Error(err))
-			}
-			if allocator.IsInitialize() {
-				log.Panic("the allocator should be uninitialized after reset")
-			}
-		})
+	if err := c.startTSOJobs(); err != nil {
+		// If there is an error, need to wait for the next check.
+		log.Error("failed to start TSO jobs", errs.ZapError(err))
+		return
 	}
 }
 
@@ -452,7 +433,7 @@ func (c *RaftCluster) runServiceCheckJob() {
 		case <-schedulingTicker.C:
 			c.checkSchedulingService()
 		case <-tsoTicker.C:
-			c.checkTSOService(false)
+			c.checkTSOService()
 		}
 	}
 }
@@ -481,7 +462,17 @@ func (c *RaftCluster) stopTSOJobs() error {
 	}
 	if allocator.IsInitialize() {
 		c.tsoAllocator.ResetAllocatorGroup(tso.GlobalDCLocation, true)
+		failpoint.Inject("updateAfterResetTSO", func() {
+			allocator, _ := c.tsoAllocator.GetAllocator(tso.GlobalDCLocation)
+			if err := allocator.UpdateTSO(); !errorspkg.Is(err, errs.ErrUpdateTimestamp) {
+				log.Panic("the tso update after reset should return ErrUpdateTimestamp as expected", zap.Error(err))
+			}
+			if allocator.IsInitialize() {
+				log.Panic("the allocator should be uninitialized after reset")
+			}
+		})
 	}
+
 	return nil
 }
 
