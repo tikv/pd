@@ -119,7 +119,7 @@ func deployTiupPlayground(t *testing.T, tag string) {
 	log.Info(curPath)
 	require.NoError(t, os.Chdir("../../.."))
 
-	if !fileExists("third_bin") || !fileExists("third_bin/tikv-server") || !fileExists("third_bin/tidb-server") || !fileExists("third_bin/tiflash") {
+	if !fileExists("bin") || !fileExists("bin/tikv-server") || !fileExists("bin/tidb-server") || !fileExists("bin/tiflash") {
 		log.Info("downloading binaries...")
 		log.Info("this may take a few minutes, you can also download them manually and put them in the bin directory.")
 		require.NoError(t, runCommand("sh",
