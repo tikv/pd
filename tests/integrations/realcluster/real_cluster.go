@@ -38,16 +38,8 @@ type realClusterSuite struct {
 
 var (
 	playgroundLogDir = filepath.Join("tmp", "real_cluster", "playground")
-	tiupBin          string
+	tiupBin          = os.Getenv("HOME") + "/.tiup/bin/tiup"
 )
-
-func init() {
-	var err error
-	tiupBin, err = exec.LookPath("tiup")
-	if err != nil {
-		panic(err)
-	}
-}
 
 // SetupSuite will run before the tests in the suite are run.
 func (s *realClusterSuite) SetupSuite() {
