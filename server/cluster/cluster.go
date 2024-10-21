@@ -422,8 +422,6 @@ func (c *RaftCluster) runServiceCheckJob() {
 		schedulingTicker.Reset(time.Millisecond)
 	})
 	defer schedulingTicker.Stop()
-	tsoTicker := time.NewTicker(tsoServiceCheckInterval)
-	defer tsoTicker.Stop()
 
 	for {
 		select {
@@ -432,8 +430,6 @@ func (c *RaftCluster) runServiceCheckJob() {
 			return
 		case <-schedulingTicker.C:
 			c.checkSchedulingService()
-		case <-tsoTicker.C:
-			c.checkTSOService()
 		}
 	}
 }
