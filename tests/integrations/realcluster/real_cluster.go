@@ -132,7 +132,7 @@ func deployTiupPlayground(t *testing.T, tag string) {
 	}
 
 	if !fileExists(playgroundLogDir) {
-		require.NoError(t, os.Mkdir(playgroundLogDir, 0755))
+		require.NoError(t, os.MkdirAll(playgroundLogDir, 0755))
 	}
 	// nolint:errcheck
 	go func() {
