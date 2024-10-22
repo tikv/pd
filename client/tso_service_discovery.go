@@ -226,6 +226,9 @@ func (c *tsoServiceDiscovery) retry(
 
 // Close releases all resources
 func (c *tsoServiceDiscovery) Close() {
+	if c == nil {
+		return
+	}
 	log.Info("closing tso service discovery")
 
 	c.cancel()

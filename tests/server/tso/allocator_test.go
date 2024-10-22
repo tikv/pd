@@ -127,6 +127,9 @@ func TestPriorityAndDifferentLocalTSO(t *testing.T) {
 	re.NoError(cluster.RunInitialServers())
 
 	cluster.WaitAllLeaders(re, dcLocationConfig)
+	leaderServer := cluster.GetLeaderServer()
+	re.NotNil(leaderServer)
+	leaderServer.BootstrapCluster()
 
 	// Wait for all nodes becoming healthy.
 	time.Sleep(time.Second * 5)
