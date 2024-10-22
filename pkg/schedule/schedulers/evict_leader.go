@@ -15,6 +15,7 @@
 package schedulers
 
 import (
+	"math/rand"
 	"net/http"
 	"strconv"
 
@@ -175,6 +176,12 @@ func (conf *evictLeaderSchedulerConfig) pauseLeaderTransferIfStoreNotExist(id ui
 	return true, nil
 }
 
+func (conf *evictLeaderSchedulerConfig) resumeLeaderTransferIfExist(id uint64) {
+	conf.RLock()
+	defer conf.RUnlock()
+	conf.cluster.ResumeLeaderTransfer(id)
+}
+
 func (conf *evictLeaderSchedulerConfig) update(id uint64, newRanges []core.KeyRange, batch int) error {
 	conf.Lock()
 	defer conf.Unlock()
@@ -231,7 +238,7 @@ type evictLeaderScheduler struct {
 func newEvictLeaderScheduler(opController *operator.Controller, conf *evictLeaderSchedulerConfig) Scheduler {
 	handler := newEvictLeaderHandler(conf)
 	return &evictLeaderScheduler{
-		BaseScheduler: NewBaseScheduler(opController, types.EvictLeaderScheduler),
+		BaseScheduler: NewBaseScheduler(opController, types.EvictLeaderScheduler, conf),
 		conf:          conf,
 		handler:       handler,
 	}
@@ -279,7 +286,7 @@ func (s *evictLeaderScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) 
 // Schedule implements the Scheduler interface.
 func (s *evictLeaderScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) ([]*operator.Operator, []plan.Plan) {
 	evictLeaderCounter.Inc()
-	return scheduleEvictLeaderBatch(s.GetName(), cluster, s.conf), nil
+	return scheduleEvictLeaderBatch(s.R, s.GetName(), cluster, s.conf), nil
 }
 
 func uniqueAppendOperator(dst []*operator.Operator, src ...*operator.Operator) []*operator.Operator {
@@ -303,11 +310,11 @@ type evictLeaderStoresConf interface {
 	getBatch() int
 }
 
-func scheduleEvictLeaderBatch(name string, cluster sche.SchedulerCluster, conf evictLeaderStoresConf) []*operator.Operator {
+func scheduleEvictLeaderBatch(r *rand.Rand, name string, cluster sche.SchedulerCluster, conf evictLeaderStoresConf) []*operator.Operator {
 	var ops []*operator.Operator
 	batchSize := conf.getBatch()
 	for i := 0; i < batchSize; i++ {
-		once := scheduleEvictLeaderOnce(name, cluster, conf)
+		once := scheduleEvictLeaderOnce(r, name, cluster, conf)
 		// no more regions
 		if len(once) == 0 {
 			break
@@ -321,7 +328,7 @@ func scheduleEvictLeaderBatch(name string, cluster sche.SchedulerCluster, conf e
 	return ops
 }
 
-func scheduleEvictLeaderOnce(name string, cluster sche.SchedulerCluster, conf evictLeaderStoresConf) []*operator.Operator {
+func scheduleEvictLeaderOnce(r *rand.Rand, name string, cluster sche.SchedulerCluster, conf evictLeaderStoresConf) []*operator.Operator {
 	stores := conf.getStores()
 	ops := make([]*operator.Operator, 0, len(stores))
 	for _, storeID := range stores {
@@ -352,7 +359,7 @@ func scheduleEvictLeaderOnce(name string, cluster sche.SchedulerCluster, conf ev
 		}
 
 		filters = append(filters, &filter.StoreStateFilter{ActionScope: name, TransferLeader: true, OperatorLevel: constant.Urgent})
-		candidates := filter.NewCandidates(cluster.GetFollowerStores(region)).
+		candidates := filter.NewCandidates(r, cluster.GetFollowerStores(region)).
 			FilterTarget(cluster.GetSchedulerConfig(), nil, nil, filters...)
 		// Compatible with old TiKV transfer leader logic.
 		target := candidates.RandomPick()
@@ -408,6 +415,7 @@ func (handler *evictLeaderHandler) updateConfig(w http.ResponseWriter, r *http.R
 	batchFloat, ok := input["batch"].(float64)
 	if ok {
 		if batchFloat < 1 || batchFloat > 10 {
+			handler.config.resumeLeaderTransferIfExist(id)
 			handler.rd.JSON(w, http.StatusBadRequest, "batch is invalid, it should be in [1, 10]")
 			return
 		}
@@ -417,6 +425,7 @@ func (handler *evictLeaderHandler) updateConfig(w http.ResponseWriter, r *http.R
 	ranges, ok := (input["ranges"]).([]string)
 	if ok {
 		if !inputHasStoreID {
+			handler.config.resumeLeaderTransferIfExist(id)
 			handler.rd.JSON(w, http.StatusInternalServerError, errs.ErrSchedulerConfig.FastGenByArgs("id"))
 			return
 		}
@@ -426,10 +435,12 @@ func (handler *evictLeaderHandler) updateConfig(w http.ResponseWriter, r *http.R
 
 	newRanges, err = getKeyRanges(ranges)
 	if err != nil {
+		handler.config.resumeLeaderTransferIfExist(id)
 		handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
+	// StoreIDWithRanges is only changed in update function.
 	err = handler.config.update(id, newRanges, batch)
 	if err != nil {
 		handler.rd.JSON(w, http.StatusInternalServerError, err.Error())

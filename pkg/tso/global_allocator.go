@@ -97,7 +97,6 @@ type GlobalTSOAllocator struct {
 func NewGlobalTSOAllocator(
 	ctx context.Context,
 	am *AllocatorManager,
-	startGlobalLeaderLoop bool,
 ) Allocator {
 	ctx, cancel := context.WithCancel(ctx)
 	gta := &GlobalTSOAllocator{
@@ -107,11 +106,6 @@ func NewGlobalTSOAllocator(
 		member:                am.member,
 		timestampOracle:       newGlobalTimestampOracle(am),
 		tsoAllocatorRoleGauge: tsoAllocatorRole.WithLabelValues(am.getGroupIDStr(), GlobalDCLocation),
-	}
-
-	if startGlobalLeaderLoop {
-		gta.wg.Add(1)
-		go gta.primaryElectionLoop()
 	}
 
 	return gta
@@ -537,6 +531,8 @@ func (gta *GlobalTSOAllocator) Reset() {
 	gta.timestampOracle.ResetTimestamp()
 }
 
+// primaryElectionLoop is used to maintain the TSO primary election and TSO's
+// running allocator. It is only used in API mode.
 func (gta *GlobalTSOAllocator) primaryElectionLoop() {
 	defer logutil.LogPanic()
 	defer gta.wg.Done()

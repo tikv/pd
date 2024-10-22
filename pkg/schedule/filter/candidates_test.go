@@ -15,7 +15,9 @@
 package filter
 
 import (
+	"math/rand"
 	"testing"
+	"time"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/require"
@@ -95,7 +97,7 @@ func TestCandidates(t *testing.T) {
 	cs.Sort(idComparer)
 	check(re, cs, 1, 2, 3, 4, 5, 6, 7)
 	store = cs.RandomPick()
-	re.Greater(store.GetID(), uint64(0))
+	re.Positive(store.GetID())
 	re.Less(store.GetID(), uint64(8))
 
 	cs = newTestCandidates(10, 15, 23, 20, 33, 32, 31)
@@ -112,7 +114,7 @@ func newTestCandidates(ids ...uint64) *StoreCandidates {
 	for _, id := range ids {
 		stores = append(stores, core.NewStoreInfo(&metapb.Store{Id: id}))
 	}
-	return NewCandidates(stores)
+	return NewCandidates(rand.New(rand.NewSource(time.Now().UnixNano())), stores)
 }
 
 func check(re *require.Assertions, candidates *StoreCandidates, ids ...uint64) {

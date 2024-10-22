@@ -15,6 +15,8 @@
 package schedulers
 
 import (
+	"math/rand"
+
 	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/core"
@@ -43,9 +45,9 @@ type transferWitnessLeaderScheduler struct {
 }
 
 // newTransferWitnessLeaderScheduler creates an admin scheduler that transfers witness leader of a region.
-func newTransferWitnessLeaderScheduler(opController *operator.Controller) Scheduler {
+func newTransferWitnessLeaderScheduler(opController *operator.Controller, conf schedulerConfig) Scheduler {
 	return &transferWitnessLeaderScheduler{
-		BaseScheduler: NewBaseScheduler(opController, types.TransferWitnessLeaderScheduler),
+		BaseScheduler: NewBaseScheduler(opController, types.TransferWitnessLeaderScheduler, conf),
 		regions:       make(chan *core.RegionInfo, transferWitnessLeaderRecvMaxRegionSize),
 	}
 }
@@ -67,7 +69,7 @@ batchLoop:
 	for i := 0; i < batchSize; i++ {
 		select {
 		case region := <-s.regions:
-			op, err := scheduleTransferWitnessLeader(name, cluster, region)
+			op, err := scheduleTransferWitnessLeader(s.R, name, cluster, region)
 			if err != nil {
 				log.Debug("fail to create transfer leader operator", errs.ZapError(err))
 				continue
@@ -84,7 +86,7 @@ batchLoop:
 	return ops
 }
 
-func scheduleTransferWitnessLeader(name string, cluster sche.SchedulerCluster, region *core.RegionInfo) (*operator.Operator, error) {
+func scheduleTransferWitnessLeader(r *rand.Rand, name string, cluster sche.SchedulerCluster, region *core.RegionInfo) (*operator.Operator, error) {
 	var filters []filter.Filter
 	unhealthyPeerStores := make(map[uint64]struct{})
 	for _, peer := range region.GetDownPeers() {
@@ -95,7 +97,7 @@ func scheduleTransferWitnessLeader(name string, cluster sche.SchedulerCluster, r
 	}
 	filters = append(filters, filter.NewExcludedFilter(name, nil, unhealthyPeerStores),
 		&filter.StoreStateFilter{ActionScope: name, TransferLeader: true, OperatorLevel: constant.Urgent})
-	candidates := filter.NewCandidates(cluster.GetFollowerStores(region)).FilterTarget(cluster.GetSchedulerConfig(), nil, nil, filters...)
+	candidates := filter.NewCandidates(r, cluster.GetFollowerStores(region)).FilterTarget(cluster.GetSchedulerConfig(), nil, nil, filters...)
 	// Compatible with old TiKV transfer leader logic.
 	target := candidates.RandomPick()
 	targets := candidates.PickAll()

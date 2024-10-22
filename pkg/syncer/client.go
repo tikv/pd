@@ -105,9 +105,10 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 		log.Info("region syncer start load region")
 		start := time.Now()
 		err := storage.TryLoadRegionsOnce(ctx, regionStorage, bc.CheckAndPutRegion)
-		log.Info("region syncer finished load regions", zap.Duration("time-cost", time.Since(start)))
 		if err != nil {
-			log.Warn("failed to load regions", errs.ZapError(err))
+			log.Warn("region syncer failed to load regions", errs.ZapError(err), zap.Duration("time-cost", time.Since(start)))
+		} else {
+			log.Info("region syncer finished load regions", zap.Duration("time-cost", time.Since(start)))
 		}
 		// establish client.
 		conn := grpcutil.CreateClientConn(ctx, addr, s.tlsConfig,

@@ -203,6 +203,7 @@ func (c *tsoClient) getTSORequest(ctx context.Context, dcLocation string) *tsoRe
 	req.physical = 0
 	req.logical = 0
 	req.dcLocation = dcLocation
+	req.streamID = ""
 	return req
 }
 
@@ -385,7 +386,9 @@ func (c *tsoClient) tryConnectToTSO(
 		cc             *grpc.ClientConn
 		updateAndClear = func(newURL string, connectionCtx *tsoConnectionContext) {
 			// Only store the `connectionCtx` if it does not exist before.
-			connectionCtxs.LoadOrStore(newURL, connectionCtx)
+			if connectionCtx != nil {
+				connectionCtxs.LoadOrStore(newURL, connectionCtx)
+			}
 			// Remove all other `connectionCtx`s.
 			connectionCtxs.Range(func(url, cc any) bool {
 				if url.(string) != newURL {
@@ -404,6 +407,8 @@ func (c *tsoClient) tryConnectToTSO(
 		c.svcDiscovery.ScheduleCheckMemberChanged()
 		cc, url = c.GetTSOAllocatorClientConnByDCLocation(dc)
 		if _, ok := connectionCtxs.Load(url); ok {
+			// Just trigger the clean up of the stale connection contexts.
+			updateAndClear(url, nil)
 			return nil
 		}
 		if cc != nil {

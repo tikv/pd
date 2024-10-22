@@ -27,6 +27,8 @@ import (
 )
 
 type shuffleLeaderSchedulerConfig struct {
+	schedulerConfig
+
 	Ranges []core.KeyRange `json:"ranges"`
 	// TODO: When we prepare to use Ranges, we will need to implement the ReloadConfig function for this scheduler.
 }
@@ -40,7 +42,7 @@ type shuffleLeaderScheduler struct {
 // newShuffleLeaderScheduler creates an admin scheduler that shuffles leaders
 // between stores.
 func newShuffleLeaderScheduler(opController *operator.Controller, conf *shuffleLeaderSchedulerConfig) Scheduler {
-	base := NewBaseScheduler(opController, types.ShuffleLeaderScheduler)
+	base := NewBaseScheduler(opController, types.ShuffleLeaderScheduler, conf)
 	filters := []filter.Filter{
 		&filter.StoreStateFilter{ActionScope: base.GetName(), TransferLeader: true, OperatorLevel: constant.Low},
 		filter.NewSpecialUseFilter(base.GetName()),
@@ -72,7 +74,7 @@ func (s *shuffleLeaderScheduler) Schedule(cluster sche.SchedulerCluster, _ bool)
 	// 1. random select a valid store.
 	// 2. transfer a leader to the store.
 	shuffleLeaderCounter.Inc()
-	targetStore := filter.NewCandidates(cluster.GetStores()).
+	targetStore := filter.NewCandidates(s.R, cluster.GetStores()).
 		FilterTarget(cluster.GetSchedulerConfig(), nil, nil, s.filters...).
 		RandomPick()
 	if targetStore == nil {

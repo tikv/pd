@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -290,8 +291,8 @@ func TestCheckClusterID(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	cfgs := NewTestMultiConfig(assertutil.CheckerWithNilAssert(re), 2)
-	for i, cfg := range cfgs {
-		cfg.DataDir = fmt.Sprintf("/tmp/test_pd_check_clusterID_%d", i)
+	for _, cfg := range cfgs {
+		cfg.DataDir, _ = os.MkdirTemp("", "pd_tests")
 		// Clean up before testing.
 		testutil.CleanServer(cfg.DataDir)
 	}

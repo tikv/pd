@@ -170,7 +170,7 @@ SHELL := env PATH='$(PATH)' GOBIN='$(GO_TOOLS_BIN_PATH)' $(shell which bash)
 
 install-tools:
 	@mkdir -p $(GO_TOOLS_BIN_PATH)
-	@which golangci-lint >/dev/null 2>&1 || curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(GO_TOOLS_BIN_PATH) v1.56.2
+	@which golangci-lint >/dev/null 2>&1 || curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(GO_TOOLS_BIN_PATH) v1.61.0
 	@grep '_' tools.go | sed 's/"//g' | awk '{print $$2}' | xargs go install
 
 .PHONY: install-tools
@@ -315,9 +315,7 @@ CLEAN_UT_BINARY := find . -name '*.test.bin'| xargs rm -f
 
 clean-test:
 	# Cleaning test tmp...
-	rm -rf /tmp/test_pd*
-	rm -rf /tmp/pd-tests*
-	rm -rf /tmp/test_etcd*
+	rm -rf /tmp/pd_tests*
 	rm -f $(REAL_CLUSTER_TEST_PATH)/playground.log
 	go clean -testcache
 	@$(CLEAN_UT_BINARY)

@@ -70,7 +70,7 @@ func main() {
 	rootCmd.SetOutput(os.Stdout)
 	if err := rootCmd.Execute(); err != nil {
 		rootCmd.Println(err)
-		os.Exit(1)
+		exit(1)
 	}
 }
 

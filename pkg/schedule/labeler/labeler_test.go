@@ -341,7 +341,7 @@ func TestKeyRange(t *testing.T) {
 func TestLabelerRuleTTL(t *testing.T) {
 	re := require.New(t)
 	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
-	labeler, err := NewRegionLabeler(context.Background(), store, time.Millisecond*10)
+	labeler, err := NewRegionLabeler(context.Background(), store, time.Minute)
 	re.NoError(err)
 	rules := []*LabelRule{
 		{
