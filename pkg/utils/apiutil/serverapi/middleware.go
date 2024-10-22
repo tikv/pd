@@ -129,7 +129,7 @@ func (h *redirector) matchMicroServiceRedirectRules(r *http.Request) (bool, stri
 	for _, rule := range h.microserviceRedirectRules {
 		// Now we only support checking the scheduling service whether it is independent
 		if rule.targetServiceName == constant.SchedulingServiceName {
-			if !h.s.GetRaftCluster().IsServiceIndependent(constant.SchedulingServiceName) {
+			if !h.s.IsServiceIndependent(constant.SchedulingServiceName) {
 				continue
 			}
 		}
