@@ -19,6 +19,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -35,7 +36,10 @@ type realClusterSuite struct {
 	suiteName  string
 }
 
-var tiupBin = os.Getenv("HOME") + "/.tiup/bin/tiup"
+var (
+	playgroundLogDir = filepath.Join("tmp", "real_cluster", "playground")
+	tiupBin          = os.Getenv("HOME") + "/.tiup/bin/tiup"
+)
 
 // SetupSuite will run before the tests in the suite are run.
 func (s *realClusterSuite) SetupSuite() {
@@ -67,7 +71,9 @@ func (s *realClusterSuite) TearDownSuite() {
 func (s *realClusterSuite) startRealCluster(t *testing.T) {
 	log.Info("start to deploy a real cluster")
 
-	s.deploy(t)
+	tag := s.tag()
+	deployTiupPlayground(t, tag)
+	waitTiupReady(t, tag)
 	s.clusterCnt++
 }
 
@@ -83,40 +89,31 @@ func (s *realClusterSuite) tag() string {
 	return fmt.Sprintf("pd_real_cluster_test_%s_%d", s.suiteName, s.clusterCnt)
 }
 
-// func restartTiUP() {
-// 	log.Info("start to restart TiUP")
-// 	cmd := exec.Command("make", "deploy")
-// 	cmd.Stdout = os.Stdout
-// 	cmd.Stderr = os.Stderr
-// 	err := cmd.Run()
-// 	if err != nil {
-// 		panic(err)
-// 	}
-// 	log.Info("TiUP restart success")
-// }
-
-func (s *realClusterSuite) deploy(t *testing.T) {
+func (s *realClusterSuite) restart() {
 	tag := s.tag()
-	deployTiupPlayground(t, tag)
-	waitTiupReady(t, tag)
+	log.Info("start to restart", zap.String("tag", tag))
+	s.stopRealCluster(s.T())
+	s.startRealCluster(s.T())
+	log.Info("TiUP restart success")
 }
 
 func destroy(t *testing.T, tag string) {
-	cmdStr := fmt.Sprintf("ps -ef | grep 'tiup playground' | grep %s | awk '{print $2}' | head -n 1", tag)
+	cmdStr := fmt.Sprintf("ps -ef | grep %s | awk '{print $2}'", tag)
 	cmd := exec.Command("sh", "-c", cmdStr)
 	bytes, err := cmd.Output()
 	require.NoError(t, err)
-	pid := string(bytes)
-	// nolint:errcheck
-	runCommand("sh", "-c", "kill -9 "+pid)
-	log.Info("destroy success", zap.String("pid", pid))
+	pids := string(bytes)
+	pidArr := strings.Split(pids, "\n")
+	for _, pid := range pidArr {
+		// nolint:errcheck
+		runCommand("sh", "-c", "kill -9 "+pid)
+	}
+	log.Info("destroy success", zap.String("tag", tag))
 }
 
 func deployTiupPlayground(t *testing.T, tag string) {
 	curPath, err := os.Getwd()
 	require.NoError(t, err)
-
-	log.Info(curPath)
 	require.NoError(t, os.Chdir("../../.."))
 
 	if !fileExists("third_bin") || !fileExists("third_bin/tikv-server") || !fileExists("third_bin/tidb-server") || !fileExists("third_bin/tiflash") {
@@ -129,19 +126,20 @@ func deployTiupPlayground(t *testing.T, tag string) {
 		log.Info("complie pd binaries...")
 		require.NoError(t, runCommand("make", "pd-server"))
 	}
-	if !fileExists(filepath.Join(curPath, "playground")) {
-		require.NoError(t, os.Mkdir(filepath.Join(curPath, "playground"), 0755))
+
+	if !fileExists(playgroundLogDir) {
+		require.NoError(t, os.MkdirAll(playgroundLogDir, 0755))
 	}
 	// nolint:errcheck
-	go runCommand("sh", "-c",
-		tiupBin+` playground nightly --kv 3 --tiflash 1 --db 1 --pd 3 \
-		--without-monitor --tag `+tag+` --pd.binpath ./bin/pd-server \
-		// --kv.binpath ./third_bin/tikv-server \
-		// --db.binpath ./third_bin/tidb-server --tiflash.binpath ./third_bin/tiflash \
-		--kv.binpath ./bin/tikv-server \
-		--db.binpath ./bin/tidb-server --tiflash.binpath ./bin/tiflash \
-		--pd.config ./tests/integrations/realcluster/pd.toml \
-		> `+filepath.Join(curPath, "playground", tag+".log")+` 2>&1 & `)
+	go func() {
+		runCommand("sh", "-c",
+			tiupBin+` playground nightly --kv 3 --tiflash 1 --db 1 --pd 3 \
+			--without-monitor --tag `+tag+` --pd.binpath ./bin/pd-server \
+			--kv.binpath ./third_bin/tikv-server \
+			--db.binpath ./third_bin/tidb-server --tiflash.binpath ./third_bin/tiflash \
+			--pd.config ./tests/integrations/realcluster/pd.toml \
+			> `+filepath.Join(playgroundLogDir, tag+".log")+` 2>&1 & `)
+	}()
 
 	// Avoid to change the dir before execute `tiup playground`.
 	time.Sleep(10 * time.Second)

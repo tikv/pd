@@ -634,6 +634,9 @@ func (c *pdServiceDiscovery) checkFollowerHealth(ctx context.Context) {
 
 // Close releases all resources.
 func (c *pdServiceDiscovery) Close() {
+	if c == nil {
+		return
+	}
 	c.closeOnce.Do(func() {
 		log.Info("[pd] close pd service discovery client")
 		c.clientConns.Range(func(key, cc any) bool {
