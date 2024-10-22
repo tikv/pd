@@ -212,6 +212,13 @@ func WithBalanceLeaderName(name string) BalanceLeaderCreateOption {
 	}
 }
 
+// WithBalanceLeaderFilterCounterName sets the filter counter name for the scheduler.
+func WithBalanceLeaderFilterCounterName(name string) BalanceLeaderCreateOption {
+	return func(s *balanceLeaderScheduler) {
+		s.filterCounter.SetScope(name)
+	}
+}
+
 func (l *balanceLeaderScheduler) GetName() string {
 	return l.name
 }

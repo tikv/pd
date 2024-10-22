@@ -120,7 +120,9 @@ func (m *Manager) Init(ctx context.Context) error {
 		return err
 	}
 	// Load resource group meta info from storage.
+	m.Lock()
 	m.groups = make(map[string]*ResourceGroup)
+	m.Unlock()
 	handler := func(k, v string) {
 		group := &rmpb.ResourceGroup{}
 		if err := proto.Unmarshal([]byte(v), group); err != nil {
@@ -434,6 +436,7 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 					delete(maxPerSecTrackers, name)
 					readRequestUnitMaxPerSecCost.DeleteLabelValues(name)
 					writeRequestUnitMaxPerSecCost.DeleteLabelValues(name)
+					resourceGroupConfigGauge.DeletePartialMatch(prometheus.Labels{newResourceGroupNameLabel: name})
 				}
 			}
 		case <-availableRUTicker.C:
@@ -453,8 +456,10 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 					ru = 0
 				}
 				availableRUCounter.WithLabelValues(group.Name).Set(ru)
+				resourceGroupConfigGauge.WithLabelValues(group.Name, priorityLabel).Set(float64(group.Priority))
+				resourceGroupConfigGauge.WithLabelValues(group.Name, ruPerSecLabel).Set(float64(group.RUSettings.RU.Settings.FillRate))
+				resourceGroupConfigGauge.WithLabelValues(group.Name, ruCapacityLabel).Set(float64(group.RUSettings.RU.Settings.BurstLimit))
 			}
-
 		case <-recordMaxTicker.C:
 			// Record the sum of RRU and WRU every second.
 			m.RLock()

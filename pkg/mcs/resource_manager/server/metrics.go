@@ -28,6 +28,11 @@ const (
 	readTypeLabel             = "read"
 	writeTypeLabel            = "write"
 	newResourceGroupNameLabel = "resource_group"
+
+	// Labels for the config.
+	ruPerSecLabel   = "ru_per_sec"
+	ruCapacityLabel = "ru_capacity"
+	priorityLabel   = "priority"
 )
 
 var (
@@ -127,6 +132,13 @@ var (
 			Name:      "available_ru",
 			Help:      "Counter of the available RU for all resource groups.",
 		}, []string{resourceGroupNameLabel})
+	resourceGroupConfigGauge = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: namespace,
+			Subsystem: serverSubsystem,
+			Name:      "group_config",
+			Help:      "Config of the resource group.",
+		}, []string{newResourceGroupNameLabel, typeLabel})
 )
 
 func init() {
@@ -140,4 +152,7 @@ func init() {
 	prometheus.MustRegister(sqlCPUCost)
 	prometheus.MustRegister(requestCount)
 	prometheus.MustRegister(availableRUCounter)
+	prometheus.MustRegister(readRequestUnitMaxPerSecCost)
+	prometheus.MustRegister(writeRequestUnitMaxPerSecCost)
+	prometheus.MustRegister(resourceGroupConfigGauge)
 }
