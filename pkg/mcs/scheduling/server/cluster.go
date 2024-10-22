@@ -187,10 +187,11 @@ func (c *Cluster) GetHotPeerStat(rw utils.RWType, regionID, storeID uint64) *sta
 // GetHotPeerStats returns the read or write statistics for hot regions.
 // It returns a map where the keys are store IDs and the values are slices of HotPeerStat.
 // The result only includes peers that are hot enough.
+// GetHotPeerStats is a thread-safe method.
 func (c *Cluster) GetHotPeerStats(rw utils.RWType) map[uint64][]*statistics.HotPeerStat {
-	// GetHotPeerStats is a thread-safe method
 	threshold := c.persistConfig.GetHotRegionCacheHitsThreshold()
 	if rw == utils.Read {
+		// As read stats are reported by store heartbeat, the threshold needs to be adjusted.
 		threshold = c.persistConfig.GetHotRegionCacheHitsThreshold() *
 			(utils.RegionHeartBeatReportInterval / utils.StoreHeartBeatReportInterval)
 	}
