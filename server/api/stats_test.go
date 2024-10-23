@@ -20,6 +20,7 @@ import (
 	"testing"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/statistics"
@@ -205,17 +206,25 @@ func (suite *statsTestSuite) TestRegionStats() {
 	}
 }
 
-func (suite *statsTestSuite) TestRegionStatsHoles() {
-	statsURL := suite.urlPrefix + "/stats/region"
+func TestRegionStatsHoles(t *testing.T) {
+	re := require.New(t)
+	svr, cleanup := mustNewServer(re)
+	defer cleanup()
+	server.MustWaitLeader(re, []*server.Server{svr})
+
+	addr := svr.GetAddr()
+	urlPrefix := fmt.Sprintf("%s%s/api/v1", addr, apiPrefix)
+
+	mustBootstrapCluster(re, svr)
+
+	statsURL := urlPrefix + "/stats/region"
 	epoch := &metapb.RegionEpoch{
 		ConfVer: 1,
 		Version: 1,
 	}
 
-	re := suite.Require()
-
 	// range holes
-	regions_withholes := []*core.RegionInfo{
+	regionsWithholes := []*core.RegionInfo{
 		core.NewRegionInfo(
 			&metapb.Region{
 				Id:       1,
@@ -268,8 +277,8 @@ func (suite *statsTestSuite) TestRegionStatsHoles() {
 		),
 	}
 
-	for _, r := range regions_withholes {
-		mustRegionHeartbeat(re, suite.svr, r)
+	for _, r := range regionsWithholes {
+		mustRegionHeartbeat(re, svr, r)
 	}
 
 	// holes in between :
@@ -282,8 +291,8 @@ func (suite *statsTestSuite) TestRegionStatsHoles() {
 	for i := 0; i < 4; i++ {
 		startKey := url.QueryEscape(startKeys[i])
 		endKey := url.QueryEscape(endKeys[i])
-		args_withholes := fmt.Sprintf("?start_key=%s&end_key=%s&count", startKey, endKey)
-		res, err := testDialClient.Get(statsURL + args_withholes)
+		argsWithHoles := fmt.Sprintf("?start_key=%s&end_key=%s&count", startKey, endKey)
+		res, err := testDialClient.Get(statsURL + argsWithHoles)
 		re.NoError(err)
 		stats := &statistics.RegionStats{}
 		err = apiutil.ReadJSON(res.Body, stats)
