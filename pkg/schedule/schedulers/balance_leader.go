@@ -331,10 +331,8 @@ func (s *balanceLeaderScheduler) Schedule(cluster sche.SchedulerCluster, dryRun 
 	batch := s.conf.getBatch()
 	balanceLeaderScheduleCounter.Inc()
 
-	leaderSchedulePolicy := cluster.GetSchedulerConfig().GetLeaderSchedulePolicy()
 	opInfluence := s.OpController.GetOpInfluence(cluster.GetBasicCluster())
-	kind := constant.NewScheduleKind(constant.LeaderKind, leaderSchedulePolicy)
-	solver := newSolver(basePlan, kind, cluster, opInfluence)
+	solver := newSolver(basePlan, s.tp, cluster, opInfluence)
 
 	stores := cluster.GetStores()
 	scoreFunc := func(store *core.StoreInfo) float64 {
@@ -516,9 +514,13 @@ func (s *balanceLeaderScheduler) transferLeaderIn(solver *solver, collector *pla
 func (s *balanceLeaderScheduler) createOperator(solver *solver, collector *plan.Collector) *operator.Operator {
 	solver.Step++
 	defer func() { solver.Step-- }()
-	solver.sourceScore, solver.targetScore = solver.sourceStoreScore(s.GetName()), solver.targetStoreScore(s.GetName())
+	solver.calcSourceStoreScore(s.GetName())
+	solver.calcTargetStoreScore(s.GetName())
 	if !solver.shouldBalance(s.GetName()) {
 		balanceLeaderSkipCounter.Inc()
+		if solver.isPotentialReverse() {
+			balanceLeaderPotentialReverse.Inc()
+		}
 		if collector != nil {
 			collector.Collect(plan.SetStatus(plan.NewStatus(plan.StatusStoreScoreDisallowed)))
 		}

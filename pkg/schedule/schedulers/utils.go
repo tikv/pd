@@ -27,6 +27,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/schedule/plan"
+	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/statistics"
 	"go.uber.org/zap"
 )
@@ -50,12 +51,25 @@ type solver struct {
 	tolerantSizeRatio float64
 	tolerantSource    int64
 	fit               *placement.RegionFit
-
-	sourceScore float64
-	targetScore float64
+	sourceScore       float64
+	targetScore       float64
+	sourceDelta       int64
+	targetDelta       int64
 }
 
-func newSolver(basePlan *plan.BalanceSchedulerPlan, kind constant.ScheduleKind, cluster sche.SchedulerCluster, opInfluence operator.OpInfluence) *solver {
+func newSolver(basePlan *plan.BalanceSchedulerPlan, tp types.CheckerSchedulerType, cluster sche.SchedulerCluster, opInfluence operator.OpInfluence) *solver {
+	var kind constant.ScheduleKind
+	switch tp {
+	case types.BalanceLeaderScheduler:
+		leaderSchedulePolicy := cluster.GetSchedulerConfig().GetLeaderSchedulePolicy()
+		kind = constant.NewScheduleKind(constant.LeaderKind, leaderSchedulePolicy)
+	case types.BalanceRegionScheduler:
+		kind = constant.NewScheduleKind(constant.RegionKind, constant.BySize)
+	case types.BalanceWitnessScheduler:
+		kind = constant.NewScheduleKind(constant.WitnessKind, constant.ByCount)
+	default:
+		log.Fatal("invalid scheduler type")
+	}
 	return &solver{
 		BalanceSchedulerPlan: basePlan,
 		SchedulerCluster:     cluster,
@@ -85,7 +99,7 @@ func (p *solver) targetMetricLabel() string {
 	return strconv.FormatUint(p.targetStoreID(), 10)
 }
 
-func (p *solver) sourceStoreScore(scheduleName string) float64 {
+func (p *solver) calcSourceStoreScore(scheduleName string) {
 	sourceID := p.Source.GetID()
 	tolerantResource := p.getTolerantResource()
 	// to avoid schedule too much, if A's core greater than B and C a little
@@ -99,22 +113,20 @@ func (p *solver) sourceStoreScore(scheduleName string) float64 {
 		opInfluenceStatus.WithLabelValues(scheduleName, strconv.FormatUint(sourceID, 10), "source").Set(float64(influence))
 		tolerantResourceStatus.WithLabelValues(scheduleName).Set(float64(tolerantResource))
 	}
-	var score float64
 	switch p.kind.Resource {
 	case constant.LeaderKind:
-		sourceDelta := influence - tolerantResource
-		score = p.Source.LeaderScore(p.kind.Policy, sourceDelta)
+		p.sourceDelta = influence - tolerantResource
+		p.sourceScore = p.Source.LeaderScore(p.kind.Policy, p.sourceDelta)
 	case constant.RegionKind:
-		sourceDelta := influence*influenceAmp - tolerantResource
-		score = p.Source.RegionScore(p.GetSchedulerConfig().GetRegionScoreFormulaVersion(), p.GetSchedulerConfig().GetHighSpaceRatio(), p.GetSchedulerConfig().GetLowSpaceRatio(), sourceDelta)
+		p.sourceDelta = influence*influenceAmp - tolerantResource
+		p.sourceScore = p.Source.RegionScore(p.GetSchedulerConfig().GetRegionScoreFormulaVersion(), p.GetSchedulerConfig().GetHighSpaceRatio(), p.GetSchedulerConfig().GetLowSpaceRatio(), p.sourceDelta)
 	case constant.WitnessKind:
-		sourceDelta := influence - tolerantResource
-		score = p.Source.WitnessScore(sourceDelta)
+		p.sourceDelta = influence - tolerantResource
+		p.sourceScore = p.Source.WitnessScore(p.sourceDelta)
 	}
-	return score
 }
 
-func (p *solver) targetStoreScore(scheduleName string) float64 {
+func (p *solver) calcTargetStoreScore(scheduleName string) {
 	targetID := p.Target.GetID()
 	// to avoid schedule too much, if A's score less than B and C in small range,
 	// we want that A can be moved in one region not two
@@ -129,19 +141,17 @@ func (p *solver) targetStoreScore(scheduleName string) float64 {
 	if p.GetSchedulerConfig().IsDebugMetricsEnabled() {
 		opInfluenceStatus.WithLabelValues(scheduleName, strconv.FormatUint(targetID, 10), "target").Set(float64(influence))
 	}
-	var score float64
 	switch p.kind.Resource {
 	case constant.LeaderKind:
-		targetDelta := influence + tolerantResource
-		score = p.Target.LeaderScore(p.kind.Policy, targetDelta)
+		p.targetDelta = influence + tolerantResource
+		p.targetScore = p.Target.LeaderScore(p.kind.Policy, p.targetDelta)
 	case constant.RegionKind:
-		targetDelta := influence*influenceAmp + tolerantResource
-		score = p.Target.RegionScore(p.GetSchedulerConfig().GetRegionScoreFormulaVersion(), p.GetSchedulerConfig().GetHighSpaceRatio(), p.GetSchedulerConfig().GetLowSpaceRatio(), targetDelta)
+		p.targetDelta = influence*influenceAmp + tolerantResource
+		p.targetScore = p.Target.RegionScore(p.GetSchedulerConfig().GetRegionScoreFormulaVersion(), p.GetSchedulerConfig().GetHighSpaceRatio(), p.GetSchedulerConfig().GetLowSpaceRatio(), p.targetDelta)
 	case constant.WitnessKind:
-		targetDelta := influence + tolerantResource
-		score = p.Target.WitnessScore(targetDelta)
+		p.targetDelta = influence + tolerantResource
+		p.targetScore = p.Target.WitnessScore(p.targetDelta)
 	}
-	return score
 }
 
 // Both of the source store's score and target store's score should be calculated before calling this function.
@@ -164,6 +174,10 @@ func (p *solver) shouldBalance(scheduleName string) bool {
 			zap.Int64("tolerant-resource", p.getTolerantResource()))
 	}
 	return shouldBalance
+}
+
+func (p *solver) isPotentialReverse() bool {
+	return p.sourceScore+float64(p.sourceDelta) < p.targetScore+float64(p.targetDelta)
 }
 
 func (p *solver) getTolerantResource() int64 {

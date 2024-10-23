@@ -229,6 +229,7 @@ var (
 	balanceLeaderNoTargetStoreCounter    = balanceLeaderCounterWithEvent("no-target-store")
 	balanceLeaderNoFollowerRegionCounter = balanceLeaderCounterWithEvent("no-follower-region")
 	balanceLeaderSkipCounter             = balanceLeaderCounterWithEvent("skip")
+	balanceLeaderPotentialReverse        = balanceLeaderCounterWithEvent("potential-reverse")
 	balanceLeaderNewOpCounter            = balanceLeaderCounterWithEvent("new-operator")
 
 	balanceRegionScheduleCounter      = balanceRegionCounterWithEvent("schedule")
@@ -237,6 +238,7 @@ var (
 	balanceRegionNoLeaderCounter      = balanceRegionCounterWithEvent("no-leader")
 	balanceRegionNewOpCounter         = balanceRegionCounterWithEvent("new-operator")
 	balanceRegionSkipCounter          = balanceRegionCounterWithEvent("skip")
+	balanceRegionPotentialReverse     = balanceRegionCounterWithEvent("potential-reverse")
 	balanceRegionCreateOpFailCounter  = balanceRegionCounterWithEvent("create-operator-fail")
 	balanceRegionNoReplacementCounter = balanceRegionCounterWithEvent("no-replacement")
 
