@@ -177,7 +177,14 @@ func (p *solver) shouldBalance(scheduleName string) bool {
 }
 
 func (p *solver) isPotentialReverse() bool {
-	return p.sourceScore+float64(p.sourceDelta) < p.targetScore+float64(p.targetDelta)
+	// p.sourceScore is considered as the source store's score after the region is moved out.
+	// p.targetScore is considered as the target store's score after the region is moved in.
+	// So original source store's score is p.sourceScore+p.sourceDelta, original target store's score is p.targetScore-p.targetDelta.
+	// If p.sourceScore+float64(p.sourceDelta) < p.targetScore-float64(p.targetDelta),
+	// it means although the source store's score is larger than the target store's score,
+	// after the region is moved out, the source store's score will be less than the target store's score.
+	// In another word, there will be a reverse after the region is moved.
+	return p.sourceScore+float64(p.sourceDelta) < p.targetScore-float64(p.targetDelta)
 }
 
 func (p *solver) getTolerantResource() int64 {
