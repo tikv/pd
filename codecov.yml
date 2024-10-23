@@ -26,6 +26,15 @@ flag_management:
         target: 74% # increase it if you want to enforce higher coverage for project, current setting as 74% is for do not let the error be reported and lose the meaning of warning.
 
 ignore:
-  - "tools"
+  - "tools/pd-analysis"
+  - "tools/pd-api-bench"
+  - "tools/pd-backup"
+  - "tools/pd-heartbeat-bench"
+  - "tools/pd-recover"
+  - "tools/pd-simulator"
+  - "tools/pd-tso-bench"
+  - "tools/pd-ut"
+  - "tools/regions-dump"
+  - "tools/stores-dump"
   - "tests"
   
