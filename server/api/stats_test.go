@@ -204,3 +204,91 @@ func (suite *statsTestSuite) TestRegionStats() {
 		}
 	}
 }
+
+func (suite *statsTestSuite) TestRegionStatsHoles() {
+	statsURL := suite.urlPrefix + "/stats/region"
+	epoch := &metapb.RegionEpoch{
+		ConfVer: 1,
+		Version: 1,
+	}
+
+	re := suite.Require()
+
+	// range holes
+	regions_withholes := []*core.RegionInfo{
+		core.NewRegionInfo(
+			&metapb.Region{
+				Id:       1,
+				StartKey: []byte(""),
+				EndKey:   []byte("c"),
+				Peers: []*metapb.Peer{
+					{Id: 101, StoreId: 1},
+					{Id: 102, StoreId: 2},
+					{Id: 103, StoreId: 3},
+				},
+				RegionEpoch: epoch,
+			},
+			&metapb.Peer{Id: 101, StoreId: 1},
+			core.SetApproximateSize(100),
+			core.SetApproximateKvSize(80),
+			core.SetApproximateKeys(50),
+		),
+		core.NewRegionInfo(
+			&metapb.Region{
+				Id:       2,
+				StartKey: []byte("h"),
+				EndKey:   []byte("x"),
+				Peers: []*metapb.Peer{
+					{Id: 104, StoreId: 1},
+					{Id: 105, StoreId: 4},
+					{Id: 106, StoreId: 5},
+				},
+				RegionEpoch: epoch,
+			},
+			&metapb.Peer{Id: 105, StoreId: 4},
+			core.SetApproximateSize(200),
+			core.SetApproximateKvSize(180),
+			core.SetApproximateKeys(150),
+		),
+		core.NewRegionInfo(
+			&metapb.Region{
+				Id:       3,
+				StartKey: []byte("z"),
+				EndKey:   []byte(""),
+				Peers: []*metapb.Peer{
+					{Id: 106, StoreId: 1},
+					{Id: 107, StoreId: 5},
+				},
+				RegionEpoch: epoch,
+			},
+			&metapb.Peer{Id: 107, StoreId: 5},
+			core.SetApproximateSize(1),
+			core.SetApproximateKvSize(1),
+			core.SetApproximateKeys(1),
+		),
+	}
+
+	for _, r := range regions_withholes {
+		mustRegionHeartbeat(re, suite.svr, r)
+	}
+
+	// holes in between :
+	// | - c| ... |h - x| ... |z - |
+
+	startKeys := [4]string{"d", "b", "b", "i"}
+	endKeys := [4]string{"e", "e", "i", "j"}
+	ans := [4]int{0, 1, 2, 1}
+
+	for i := 0; i < 4; i++ {
+		startKey := url.QueryEscape(startKeys[i])
+		endKey := url.QueryEscape(endKeys[i])
+		args_withholes := fmt.Sprintf("?start_key=%s&end_key=%s&count", startKey, endKey)
+		res, err := testDialClient.Get(statsURL + args_withholes)
+		re.NoError(err)
+		stats := &statistics.RegionStats{}
+		err = apiutil.ReadJSON(res.Body, stats)
+		res.Body.Close()
+		re.NoError(err)
+		re.Equal(ans[i], stats.Count)
+	}
+}
