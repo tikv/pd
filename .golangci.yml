@@ -18,6 +18,17 @@ linters:
     - copyloopvar
     - goimports
     - depguard
+    - asasalint
+    - asciicheck
+    - bidichk
+    - durationcheck
+    - gocheckcompilerdirectives
+    - gochecksumtype
+    - makezero
+    - protogetter
+    - reassign
+    - zerologlint
+    - intrange
 linters-settings:
   gocritic:
     # Which checks should be disabled; can't be combined with 'enabled-checks'; default is empty
@@ -36,16 +47,21 @@ linters-settings:
       - G115
   testifylint:
     enable:
+      - blank-import
       - bool-compare
       - compares
       - empty
       - error-is-as
       - error-nil
       - expected-actual
+      - formatter
       - len
+      - negative-positive
       - require-error
       - suite-dont-use-pkg
       - suite-extra-assert-call
+      - suite-subtest-run
+      - useless-assert
     disable:
       - float-compare
       - go-require

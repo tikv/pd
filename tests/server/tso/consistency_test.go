@@ -92,7 +92,7 @@ func (suite *tsoConsistencyTestSuite) TestSynchronizedGlobalTSO() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	maxGlobalTSO := &pdpb.Timestamp{}
-	for i := 0; i < tsoRequestRound; i++ {
+	for range tsoRequestRound {
 		// Get some local TSOs first
 		oldLocalTSOs := make([]*pdpb.Timestamp, 0, dcLocationNum)
 		for _, dcLocation := range dcLocationConfig {
@@ -303,7 +303,7 @@ func (suite *tsoConsistencyTestSuite) testTSO(cluster *tests.TestCluster, dcLoca
 
 	var wg sync.WaitGroup
 	wg.Add(tsoRequestConcurrencyNumber)
-	for i := 0; i < tsoRequestConcurrencyNumber; i++ {
+	for range tsoRequestConcurrencyNumber {
 		go func() {
 			defer wg.Done()
 			lastList := make(map[string]*pdpb.Timestamp)
@@ -313,7 +313,7 @@ func (suite *tsoConsistencyTestSuite) testTSO(cluster *tests.TestCluster, dcLoca
 					Logical:  0,
 				}
 			}
-			for j := 0; j < tsoRequestRound; j++ {
+			for range tsoRequestRound {
 				for _, dcLocation := range dcLocationConfig {
 					req := &pdpb.TsoRequest{
 						Header:     testutil.NewRequestHeader(leaderServer.GetClusterID()),

@@ -48,7 +48,7 @@ func NewTopN(k, n int, ttl time.Duration) *TopN {
 		topns:  make([]*singleTopN, k),
 		ttlLst: newTTLList(ttl),
 	}
-	for i := 0; i < k; i++ {
+	for i := range k {
 		ret.topns[i] = newSingleTopN(i, n)
 	}
 	return ret

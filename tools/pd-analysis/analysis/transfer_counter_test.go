@@ -23,7 +23,7 @@ import (
 func addData(test [][]uint64) {
 	for i, row := range test {
 		for j, flow := range row {
-			for k := uint64(0); k < flow; k++ {
+			for range flow {
 				GetTransferCounter().AddTarget(64, uint64(j))
 				GetTransferCounter().AddSource(64, uint64(i))
 			}

@@ -1272,7 +1272,7 @@ func (suite *configTestSuite) checkRegionRules(cluster *pdTests.TestCluster) {
 
 func assertBundles(re *require.Assertions, a, b []placement.GroupBundle) {
 	re.Len(b, len(a))
-	for i := 0; i < len(a); i++ {
+	for i := range a {
 		assertBundle(re, a[i], b[i])
 	}
 }
@@ -1282,7 +1282,7 @@ func assertBundle(re *require.Assertions, a, b placement.GroupBundle) {
 	re.Equal(a.Index, b.Index)
 	re.Equal(a.Override, b.Override)
 	re.Len(b.Rules, len(a.Rules))
-	for i := 0; i < len(a.Rules); i++ {
+	for i := range a.Rules {
 		assertRule(re, a.Rules[i], b.Rules[i])
 	}
 }

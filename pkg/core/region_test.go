@@ -470,7 +470,7 @@ func TestSetRegionConcurrence(t *testing.T) {
 func TestSetRegion(t *testing.T) {
 	re := require.New(t)
 	regions := NewRegionsInfo()
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		peer1 := &metapb.Peer{StoreId: uint64(i%5 + 1), Id: uint64(i*5 + 1)}
 		peer2 := &metapb.Peer{StoreId: uint64((i+1)%5 + 1), Id: uint64(i*5 + 2)}
 		peer3 := &metapb.Peer{StoreId: uint64((i+2)%5 + 1), Id: uint64(i*5 + 3)}
@@ -646,7 +646,7 @@ func BenchmarkUpdateBuckets(b *testing.B) {
 func BenchmarkRandomRegion(b *testing.B) {
 	for _, size := range []int{10, 100, 1000, 10000, 100000, 1000000, 10000000} {
 		regions := NewRegionsInfo()
-		for i := 0; i < size; i++ {
+		for i := range size {
 			peer := &metapb.Peer{StoreId: 1, Id: uint64(i + 1)}
 			region := NewRegionInfo(&metapb.Region{
 				Id:       uint64(i + 1),
@@ -708,7 +708,7 @@ func BenchmarkRandomRegion(b *testing.B) {
 func BenchmarkRandomSetRegion(b *testing.B) {
 	regions := NewRegionsInfo()
 	var items []*RegionInfo
-	for i := 0; i < 1000000; i++ {
+	for i := range 1000000 {
 		peer := &metapb.Peer{StoreId: 1, Id: uint64(i + 1)}
 		region := NewRegionInfo(&metapb.Region{
 			Id:       uint64(i + 1),
@@ -733,7 +733,7 @@ func BenchmarkRandomSetRegion(b *testing.B) {
 func TestGetRegionSizeByRange(t *testing.T) {
 	regions := NewRegionsInfo()
 	nums := 100001
-	for i := 0; i < nums; i++ {
+	for i := range nums {
 		peer := &metapb.Peer{StoreId: 1, Id: uint64(i + 1)}
 		endKey := []byte(fmt.Sprintf("%20d", i+1))
 		if i == nums-1 {
@@ -761,7 +761,7 @@ func TestGetRegionSizeByRange(t *testing.T) {
 func BenchmarkRandomSetRegionWithGetRegionSizeByRange(b *testing.B) {
 	regions := NewRegionsInfo()
 	var items []*RegionInfo
-	for i := 0; i < 1000000; i++ {
+	for i := range 1000000 {
 		peer := &metapb.Peer{StoreId: 1, Id: uint64(i + 1)}
 		region := NewRegionInfo(&metapb.Region{
 			Id:       uint64(i + 1),
@@ -791,7 +791,7 @@ func BenchmarkRandomSetRegionWithGetRegionSizeByRange(b *testing.B) {
 func BenchmarkRandomSetRegionWithGetRegionSizeByRangeParallel(b *testing.B) {
 	regions := NewRegionsInfo()
 	var items []*RegionInfo
-	for i := 0; i < 1000000; i++ {
+	for i := range 1000000 {
 		peer := &metapb.Peer{StoreId: 1, Id: uint64(i + 1)}
 		region := NewRegionInfo(&metapb.Region{
 			Id:       uint64(i + 1),
@@ -836,7 +836,7 @@ func newRegionInfoIDRandom(idAllocator id.Allocator) *RegionInfo {
 	)
 	// Randomly select a peer as the leader.
 	leaderIdx := mrand.Intn(peerNum)
-	for i := 0; i < peerNum; i++ {
+	for i := range peerNum {
 		id, _ := idAllocator.Alloc()
 		// Randomly distribute the peers to different stores.
 		p := &metapb.Peer{Id: id, StoreId: uint64(mrand.Intn(storeNum) + 1)}
@@ -921,7 +921,7 @@ func BenchmarkUpdateSubTreeOrderInsensitive(b *testing.B) {
 
 func generateRegionItems(idAllocator *mockid.IDAllocator, size int) []*RegionInfo {
 	items := make([]*RegionInfo, size)
-	for i := 0; i < size; i++ {
+	for i := range size {
 		items[i] = newRegionInfoIDRandom(idAllocator)
 	}
 	return items
@@ -1022,7 +1022,7 @@ func TestUpdateRegionEquivalence(t *testing.T) {
 
 func generateTestRegions(count int, storeNum int) []*RegionInfo {
 	var items []*RegionInfo
-	for i := 0; i < count; i++ {
+	for i := range count {
 		peer1 := &metapb.Peer{StoreId: uint64(i%storeNum + 1), Id: uint64(i*storeNum + 1)}
 		peer2 := &metapb.Peer{StoreId: uint64((i+1)%storeNum + 1), Id: uint64(i*storeNum + 2)}
 		peer3 := &metapb.Peer{StoreId: uint64((i+2)%storeNum + 1), Id: uint64(i*storeNum + 3)}

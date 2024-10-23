@@ -109,7 +109,7 @@ func GenerateTestDataConcurrently(count int, f func(int)) {
 	var wg sync.WaitGroup
 	tasks := make(chan int, count)
 	workers := runtime.NumCPU()
-	for w := 0; w < workers; w++ {
+	for range workers {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -118,7 +118,7 @@ func GenerateTestDataConcurrently(count int, f func(int)) {
 			}
 		}()
 	}
-	for i := 0; i < count; i++ {
+	for i := range count {
 		tasks <- i
 	}
 	close(tasks)

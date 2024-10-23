@@ -27,7 +27,7 @@ func transferCounterParseLog(operator, content string, expect []uint64) bool {
 	if len(results) != len(expect) {
 		return false
 	}
-	for i := 0; i < len(results); i++ {
+	for i := range results {
 		if results[i] != expect[i] {
 			return false
 		}

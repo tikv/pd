@@ -435,7 +435,7 @@ func (s *GrpcServer) getGlobalTSO(ctx context.Context) (pdpb.Timestamp, error) {
 		}
 		return false
 	}
-	for i := 0; i < maxRetryTimesRequestTSOServer; i++ {
+	for i := range maxRetryTimesRequestTSOServer {
 		if i > 0 {
 			time.Sleep(retryIntervalRequestTSOServer)
 		}

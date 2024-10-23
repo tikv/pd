@@ -394,7 +394,7 @@ func (t *timestampOracle) getTS(ctx context.Context, leadership *election.Leader
 	if count == 0 {
 		return resp, errs.ErrGenerateTimestamp.FastGenByArgs("tso count should be positive")
 	}
-	for i := 0; i < maxRetryCount; i++ {
+	for i := range maxRetryCount {
 		currentPhysical, _ := t.getTSO()
 		if currentPhysical == typeutil.ZeroTime {
 			// If it's leader, maybe SyncTimestamp hasn't completed yet

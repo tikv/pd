@@ -231,7 +231,7 @@ func (s *testTSODispatcherSuite) testStaticConcurrencyImpl(concurrency int) {
 	// and will be batched together once there is a free token.
 	reqs := make([]*tsoRequest, 0, tokenCount+3)
 
-	for i := 0; i < tokenCount+3; i++ {
+	for range tokenCount + 3 {
 		req := s.sendReq(ctx)
 		s.reqMustNotReady(req)
 		reqs = append(reqs, req)
@@ -242,7 +242,7 @@ func (s *testTSODispatcherSuite) testStaticConcurrencyImpl(concurrency int) {
 	// second batch but not finished yet.
 	// Also note that in current implementation, the tsoStream tries to receive the next result before checking
 	// the `tsoStream.pendingRequests` queue. Changing this behavior may need to update this test.
-	for i := 0; i < tokenCount+3; i++ {
+	for i := range tokenCount + 3 {
 		expectedPending := tokenCount + 1 - i
 		if expectedPending > tokenCount {
 			expectedPending = tokenCount

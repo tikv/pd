@@ -54,7 +54,7 @@ func (s *schedulerSuite) TestTransferLeader() {
 	oldLeader := resp.Name
 
 	var newLeader string
-	for i := 0; i < 2; i++ {
+	for i := range 2 {
 		if resp.Name != fmt.Sprintf("pd-%d", i) {
 			newLeader = fmt.Sprintf("pd-%d", i)
 		}

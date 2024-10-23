@@ -590,7 +590,7 @@ func checkHotWriteRegionScheduleByteRateOnly(re *require.Assertions, enablePlace
 	//   Region 1 and 2 are the same, cannot move peer to store 5 due to the label.
 	//   Region 3 can only move peer to store 5.
 	//   Region 5 can only move peer to store 6.
-	for i := 0; i < 30; i++ {
+	for range 30 {
 		ops, _ = hb.Schedule(tc, false)
 		op := ops[0]
 		clearPendingInfluence(hb.(*hotScheduler))
@@ -739,7 +739,7 @@ func TestHotWriteRegionScheduleByteRateOnlyWithTiFlash(t *testing.T) {
 	pdServerCfg.FlowRoundByDigit = 3
 	// Disable for TiFlash
 	hb.conf.setEnableForTiFlash(false)
-	for i := 0; i < 20; i++ {
+	for range 20 {
 		clearPendingInfluence(hb)
 		ops, _ := hb.Schedule(tc, false)
 		if len(ops) == 0 {
@@ -820,7 +820,7 @@ func TestHotWriteRegionScheduleByteRateOnlyWithTiFlash(t *testing.T) {
 	}
 	// Will transfer a hot region from store 1, because the total count of peers
 	// which is hot for store 1 is larger than other stores.
-	for i := 0; i < 20; i++ {
+	for range 20 {
 		clearPendingInfluence(hb)
 		ops, _ := hb.Schedule(tc, false)
 		op := ops[0]
@@ -870,7 +870,7 @@ func TestHotWriteRegionScheduleWithQuery(t *testing.T) {
 		{2, []uint64{1, 2, 3}, 500, 0, 500},
 		{3, []uint64{2, 1, 3}, 500, 0, 500},
 	})
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		clearPendingInfluence(hb.(*hotScheduler))
 		ops, _ := hb.Schedule(tc, false)
 		if len(ops) == 0 {
@@ -913,7 +913,7 @@ func TestHotWriteRegionScheduleWithKeyRate(t *testing.T) {
 		{3, []uint64{2, 4, 3}, 0.05 * units.MiB, 0.1 * units.MiB, 0},
 	})
 
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		clearPendingInfluence(hb.(*hotScheduler))
 		ops, _ := hb.Schedule(tc, false)
 		op := ops[0]
@@ -1052,7 +1052,7 @@ func TestHotWriteRegionScheduleWithLeader(t *testing.T) {
 		{7, []uint64{3, 1, 2}, 0.5 * units.MiB, 1 * units.MiB, 0},
 	})
 
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		clearPendingInfluence(hb.(*hotScheduler))
 		ops, _ := hb.Schedule(tc, false)
 		re.Empty(ops)
@@ -1066,7 +1066,7 @@ func TestHotWriteRegionScheduleWithLeader(t *testing.T) {
 	// store2 has 4 peer as leader
 	// store3 has 2 peer as leader
 	// We expect to transfer leader from store2 to store1 or store3
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		clearPendingInfluence(hb.(*hotScheduler))
 		ops, _ := hb.Schedule(tc, false)
 		op := ops[0]
@@ -1128,11 +1128,11 @@ func checkHotWriteRegionScheduleWithPendingInfluence(re *require.Assertions, dim
 		})
 	}
 
-	for i := 0; i < 20; i++ {
+	for range 20 {
 		clearPendingInfluence(hb.(*hotScheduler))
 		cnt := 0
 	testLoop:
-		for j := 0; j < 1000; j++ {
+		for range 1000 {
 			re.LessOrEqual(cnt, 5)
 			emptyCnt := 0
 			ops, _ := hb.Schedule(tc, false)
@@ -1232,7 +1232,7 @@ func TestHotWriteRegionScheduleWithRuleEnabled(t *testing.T) {
 		{7, []uint64{2, 1, 3}, 0.5 * units.MiB, 1 * units.MiB, 0},
 	})
 
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		clearPendingInfluence(hb.(*hotScheduler))
 		ops, _ := hb.Schedule(tc, false)
 		if len(ops) == 0 {
@@ -1392,7 +1392,7 @@ func TestHotReadRegionScheduleWithQuery(t *testing.T) {
 		{2, []uint64{2, 1, 3}, 0, 0, 500},
 	})
 
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		clearPendingInfluence(hb.(*hotScheduler))
 		ops, _ := hb.Schedule(tc, false)
 		op := ops[0]
@@ -1431,7 +1431,7 @@ func TestHotReadRegionScheduleWithKeyRate(t *testing.T) {
 		{3, []uint64{3, 4, 5}, 0.05 * units.MiB, 0.1 * units.MiB, 0},
 	})
 
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		clearPendingInfluence(hb.(*hotScheduler))
 		ops, _ := hb.Schedule(tc, false)
 		op := ops[0]
@@ -1517,7 +1517,7 @@ func checkHotReadRegionScheduleWithPendingInfluence(re *require.Assertions, dim 
 
 	// Before schedule, store byte/key rate: 7.1 | 6.1 | 6 | 5
 	// Min and max from storeLoadPred. They will be generated in the comparison of current and future.
-	for j := 0; j < 20; j++ {
+	for range 20 {
 		clearPendingInfluence(hb.(*hotScheduler))
 
 		ops, _ := hb.Schedule(tc, false)
@@ -1540,7 +1540,7 @@ func checkHotReadRegionScheduleWithPendingInfluence(re *require.Assertions, dim 
 	}
 
 	// Before schedule, store byte/key rate: 7.1 | 6.1 | 6 | 5
-	for j := 0; j < 20; j++ {
+	for range 20 {
 		clearPendingInfluence(hb.(*hotScheduler))
 
 		ops, _ := hb.Schedule(tc, false)
@@ -1964,8 +1964,8 @@ func checkHotCacheCheckRegionFlowWithDifferentThreshold(re *require.Assertions, 
 	// some peers are hot, and some are cold #3198
 
 	rate := uint64(512 * units.KiB)
-	for i := 0; i < statistics.TopNN; i++ {
-		for j := 0; j < utils.DefaultAotSize; j++ {
+	for i := range statistics.TopNN {
+		for range utils.DefaultAotSize {
 			tc.AddLeaderRegionWithWriteInfo(uint64(i+100), 1, rate*utils.RegionHeartBeatReportInterval, 0, 0, utils.RegionHeartBeatReportInterval, []uint64{2, 3}, 1)
 		}
 	}

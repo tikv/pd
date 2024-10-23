@@ -151,7 +151,7 @@ func (suite *tsoServerTestSuite) TestConcurrentlyReset() {
 	var wg sync.WaitGroup
 	wg.Add(2)
 	now := time.Now()
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		go func() {
 			defer wg.Done()
 			for j := 0; j <= 50; j++ {

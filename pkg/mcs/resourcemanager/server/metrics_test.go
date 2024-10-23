@@ -30,7 +30,7 @@ func TestMaxPerSecCostTracker(t *testing.T) {
 	expectedMaxRU := []float64{19, 39, 59}
 	expectedSum := []float64{190, 780, 1770}
 
-	for i := 0; i < 60; i++ {
+	for i := range 60 {
 		// Record data
 		consumption := &rmpb.Consumption{
 			RRU: float64(i),

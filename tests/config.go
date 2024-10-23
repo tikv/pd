@@ -104,7 +104,7 @@ type clusterConfig struct {
 
 func newClusterConfig(n int) *clusterConfig {
 	var cc clusterConfig
-	for i := 0; i < n; i++ {
+	for range n {
 		c := newServerConfig(cc.nextServerName(), &cc, false)
 		cc.InitialServers = append(cc.InitialServers, c)
 	}

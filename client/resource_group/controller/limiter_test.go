@@ -246,7 +246,7 @@ func testQPSCase(concurrency int, reserveN int64, limit int64) (qps float64, ru 
 	var totalRequests int64
 	start := time.Now()
 
-	for i := 0; i < concurrency; i++ {
+	for range concurrency {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
