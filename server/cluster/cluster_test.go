@@ -161,7 +161,7 @@ func TestStoreHeartbeat(t *testing.T) {
 	re.NoError(cluster.HandleStoreHeartbeat(hotReq, hotResp))
 	re.Equal("v1", cluster.GetStore(1).GetStoreLimit().Version())
 	time.Sleep(20 * time.Millisecond)
-	storeStats := cluster.hotStat.RegionStats(utils.Read, 3)
+	storeStats := cluster.hotStat.GetHotPeerStats(utils.Read, 3)
 	re.Len(storeStats[1], 1)
 	re.Equal(uint64(1), storeStats[1][0].RegionID)
 	interval := float64(hotHeartBeat.Interval.EndTimestamp - hotHeartBeat.Interval.StartTimestamp)
@@ -169,15 +169,15 @@ func TestStoreHeartbeat(t *testing.T) {
 	re.Equal(float64(hotHeartBeat.PeerStats[0].ReadBytes)/interval, storeStats[1][0].Loads[utils.ByteDim])
 	re.Equal(float64(hotHeartBeat.PeerStats[0].ReadKeys)/interval, storeStats[1][0].Loads[utils.KeyDim])
 	re.Equal(float64(hotHeartBeat.PeerStats[0].QueryStats.Get)/interval, storeStats[1][0].Loads[utils.QueryDim])
-	// After cold heartbeat, we won't find region 1 peer in regionStats
+	// After cold heartbeat, we won't find region 1 peer in HotPeerStats
 	re.NoError(cluster.HandleStoreHeartbeat(coldReq, coldResp))
 	time.Sleep(20 * time.Millisecond)
-	storeStats = cluster.hotStat.RegionStats(utils.Read, 1)
+	storeStats = cluster.hotStat.GetHotPeerStats(utils.Read, 1)
 	re.Empty(storeStats[1])
 	// After hot heartbeat, we can find region 1 peer again
 	re.NoError(cluster.HandleStoreHeartbeat(hotReq, hotResp))
 	time.Sleep(20 * time.Millisecond)
-	storeStats = cluster.hotStat.RegionStats(utils.Read, 3)
+	storeStats = cluster.hotStat.GetHotPeerStats(utils.Read, 3)
 	re.Len(storeStats[1], 1)
 	re.Equal(uint64(1), storeStats[1][0].RegionID)
 	//  after several cold heartbeats, and one hot heartbeat, we also can't find region 1 peer
@@ -185,19 +185,19 @@ func TestStoreHeartbeat(t *testing.T) {
 	re.NoError(cluster.HandleStoreHeartbeat(coldReq, coldResp))
 	re.NoError(cluster.HandleStoreHeartbeat(coldReq, coldResp))
 	time.Sleep(20 * time.Millisecond)
-	storeStats = cluster.hotStat.RegionStats(utils.Read, 0)
+	storeStats = cluster.hotStat.GetHotPeerStats(utils.Read, 0)
 	re.Empty(storeStats[1])
 	re.NoError(cluster.HandleStoreHeartbeat(hotReq, hotResp))
 	time.Sleep(20 * time.Millisecond)
-	storeStats = cluster.hotStat.RegionStats(utils.Read, 1)
+	storeStats = cluster.hotStat.GetHotPeerStats(utils.Read, 1)
 	re.Empty(storeStats[1])
-	storeStats = cluster.hotStat.RegionStats(utils.Read, 3)
+	storeStats = cluster.hotStat.GetHotPeerStats(utils.Read, 3)
 	re.Empty(storeStats[1])
 	// after 2 hot heartbeats, wo can find region 1 peer again
 	re.NoError(cluster.HandleStoreHeartbeat(hotReq, hotResp))
 	re.NoError(cluster.HandleStoreHeartbeat(hotReq, hotResp))
 	time.Sleep(20 * time.Millisecond)
-	storeStats = cluster.hotStat.RegionStats(utils.Read, 3)
+	storeStats = cluster.hotStat.GetHotPeerStats(utils.Read, 3)
 	re.Len(storeStats[1], 1)
 	re.Equal(uint64(1), storeStats[1][0].RegionID)
 }
@@ -642,7 +642,7 @@ func TestRegionHeartbeatHotStat(t *testing.T) {
 	re.NoError(err)
 	// wait HotStat to update items
 	time.Sleep(time.Second)
-	stats := cluster.hotStat.RegionStats(utils.Write, 0)
+	stats := cluster.hotStat.GetHotPeerStats(utils.Write, 0)
 	re.Len(stats[1], 1)
 	re.Len(stats[2], 1)
 	re.Len(stats[3], 1)
@@ -655,7 +655,7 @@ func TestRegionHeartbeatHotStat(t *testing.T) {
 	re.NoError(err)
 	// wait HotStat to update items
 	time.Sleep(time.Second)
-	stats = cluster.hotStat.RegionStats(utils.Write, 0)
+	stats = cluster.hotStat.GetHotPeerStats(utils.Write, 0)
 	re.Len(stats[1], 1)
 	re.Empty(stats[2])
 	re.Len(stats[3], 1)
@@ -2593,7 +2593,7 @@ func TestCollectMetrics(t *testing.T) {
 		rc.collectSchedulingMetrics()
 	}
 	stores := co.GetCluster().GetStores()
-	regionStats := co.GetCluster().RegionWriteStats()
+	regionStats := co.GetCluster().GetHotPeerStats(utils.Write)
 	status1 := statistics.CollectHotPeerInfos(stores, regionStats)
 	status2 := statistics.GetHotStatus(stores, co.GetCluster().GetStoresLoads(), regionStats, utils.Write, co.GetCluster().GetSchedulerConfig().IsTraceRegionFlow())
 	for _, s := range status2.AsLeader {

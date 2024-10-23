@@ -76,11 +76,12 @@ func (w *HotCache) CheckReadAsync(task func(cache *HotPeerCache)) bool {
 	}
 }
 
-// RegionStats returns hot items according to kind
-func (w *HotCache) RegionStats(kind utils.RWType, minHotDegree int) map[uint64][]*HotPeerStat {
+// RegionStats returns the read or write statistics for hot regions.
+// It returns a map where the keys are store IDs and the values are slices of HotPeerStat.
+func (w *HotCache) GetHotPeerStats(kind utils.RWType, minHotDegree int) map[uint64][]*HotPeerStat {
 	ret := make(chan map[uint64][]*HotPeerStat, 1)
 	collectRegionStatsTask := func(cache *HotPeerCache) {
-		ret <- cache.RegionStats(minHotDegree)
+		ret <- cache.GetHotPeerStats(minHotDegree)
 	}
 	var succ bool
 	switch kind {

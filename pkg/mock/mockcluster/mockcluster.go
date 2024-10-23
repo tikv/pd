@@ -149,13 +149,6 @@ func (mc *Cluster) GetHotPeerStat(rw utils.RWType, regionID, storeID uint64) *st
 	return mc.HotCache.GetHotPeerStat(rw, regionID, storeID)
 }
 
-// RegionReadStats returns hot region's read stats.
-// The result only includes peers that are hot enough.
-func (mc *Cluster) RegionReadStats() map[uint64][]*statistics.HotPeerStat {
-	// We directly use threshold for read stats for mockCluster
-	return mc.HotCache.RegionStats(utils.Read, mc.GetHotRegionCacheHitsThreshold())
-}
-
 // BucketsStats returns hot region's buckets stats.
 func (mc *Cluster) BucketsStats(degree int, regions ...uint64) map[uint64][]*buckets.BucketStat {
 	task := buckets.NewCollectBucketStatsTask(degree, regions...)
@@ -165,10 +158,11 @@ func (mc *Cluster) BucketsStats(degree int, regions ...uint64) map[uint64][]*buc
 	return task.WaitRet(mc.ctx)
 }
 
-// RegionWriteStats returns hot region's write stats.
+// GetHotPeerStats returns the read or write statistics for hot regions.
+// It returns a map where the keys are store IDs and the values are slices of HotPeerStat.
 // The result only includes peers that are hot enough.
-func (mc *Cluster) RegionWriteStats() map[uint64][]*statistics.HotPeerStat {
-	return mc.HotCache.RegionStats(utils.Write, mc.GetHotRegionCacheHitsThreshold())
+func (mc *Cluster) GetHotPeerStats(rw utils.RWType) map[uint64][]*statistics.HotPeerStat {
+	return mc.HotCache.GetHotPeerStats(rw, mc.GetHotRegionCacheHitsThreshold())
 }
 
 // HotRegionsFromStore picks hot regions in specify store.
@@ -186,7 +180,7 @@ func (mc *Cluster) HotRegionsFromStore(store uint64, kind utils.RWType) []*core.
 
 // hotRegionsFromStore picks hot region in specify store.
 func hotRegionsFromStore(w *statistics.HotCache, storeID uint64, kind utils.RWType, minHotDegree int) []*statistics.HotPeerStat {
-	if stats, ok := w.RegionStats(kind, minHotDegree)[storeID]; ok && len(stats) > 0 {
+	if stats, ok := w.GetHotPeerStats(kind, minHotDegree)[storeID]; ok && len(stats) > 0 {
 		return stats
 	}
 	return nil
