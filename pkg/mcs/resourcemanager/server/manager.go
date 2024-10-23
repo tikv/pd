@@ -451,7 +451,7 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 					sqlCPUCost.DeleteLabelValues(r.name, r.name, r.ruType)
 					requestCount.DeleteLabelValues(r.name, r.name, readTypeLabel)
 					requestCount.DeleteLabelValues(r.name, r.name, writeTypeLabel)
-					availableRUCounter.DeleteLabelValues(r.name, r.name, r.ruType)
+					availableRUCounter.DeleteLabelValues(r.name, r.name)
 					delete(m.consumptionRecord, r)
 					delete(maxPerSecTrackers, r.name)
 					readRequestUnitMaxPerSecCost.DeleteLabelValues(r.name)

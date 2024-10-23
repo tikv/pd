@@ -22,19 +22,33 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
-	pd "github.com/tikv/pd/client/http"
+	"github.com/stretchr/testify/suite"
+	"github.com/tikv/pd/client/http"
 	"github.com/tikv/pd/client/testutil"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/types"
 )
 
+type schedulerSuite struct {
+	realClusterSuite
+}
+
+func TestScheduler(t *testing.T) {
+	suite.Run(t, &schedulerSuite{
+		realClusterSuite: realClusterSuite{
+			suiteName: "scheduler",
+		},
+	})
+}
+
 // https://github.com/tikv/pd/issues/6988#issuecomment-1694924611
 // https://github.com/tikv/pd/issues/6897
-func TestTransferLeader(t *testing.T) {
-	re := require.New(t)
+func (s *schedulerSuite) TestTransferLeader() {
+	re := require.New(s.T())
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	pdHTTPCli := http.NewClient("pd-real-cluster-test", getPDEndpoints(s.T()))
 	resp, err := pdHTTPCli.GetLeader(ctx)
 	re.NoError(err)
 	oldLeader := resp.Name
@@ -79,11 +93,12 @@ func TestTransferLeader(t *testing.T) {
 	re.Len(res, oldSchedulersLen)
 }
 
-func TestRegionLabelDenyScheduler(t *testing.T) {
-	re := require.New(t)
+func (s *schedulerSuite) TestRegionLabelDenyScheduler() {
+	re := require.New(s.T())
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	pdHTTPCli := http.NewClient("pd-real-cluster-test", getPDEndpoints(s.T()))
 	regions, err := pdHTTPCli.GetRegions(ctx)
 	re.NoError(err)
 	re.NotEmpty(regions.Regions)
@@ -114,15 +129,15 @@ func TestRegionLabelDenyScheduler(t *testing.T) {
 	}, testutil.WithWaitFor(time.Minute))
 
 	// disable schedule for region1
-	labelRule := &pd.LabelRule{
+	labelRule := &http.LabelRule{
 		ID:       "rule1",
-		Labels:   []pd.RegionLabel{{Key: "schedule", Value: "deny"}},
+		Labels:   []http.RegionLabel{{Key: "schedule", Value: "deny"}},
 		RuleType: "key-range",
 		Data:     labeler.MakeKeyRanges(region1.StartKey, region1.EndKey),
 	}
 	re.NoError(pdHTTPCli.SetRegionLabelRule(ctx, labelRule))
 	defer func() {
-		pdHTTPCli.PatchRegionLabelRules(ctx, &pd.LabelRulePatch{DeleteRules: []string{labelRule.ID}})
+		pdHTTPCli.PatchRegionLabelRules(ctx, &http.LabelRulePatch{DeleteRules: []string{labelRule.ID}})
 	}()
 	labelRules, err := pdHTTPCli.GetAllRegionLabelRules(ctx)
 	re.NoError(err)
@@ -170,7 +185,7 @@ func TestRegionLabelDenyScheduler(t *testing.T) {
 		return true
 	}, testutil.WithWaitFor(time.Minute))
 
-	pdHTTPCli.PatchRegionLabelRules(ctx, &pd.LabelRulePatch{DeleteRules: []string{labelRule.ID}})
+	pdHTTPCli.PatchRegionLabelRules(ctx, &http.LabelRulePatch{DeleteRules: []string{labelRule.ID}})
 	labelRules, err = pdHTTPCli.GetAllRegionLabelRules(ctx)
 	re.NoError(err)
 	re.Len(labelRules, 1)
