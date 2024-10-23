@@ -1791,10 +1791,10 @@ func (r *RegionsInfo) GetRegionCount(startKey, endKey []byte) int {
 	end := &regionItem{&RegionInfo{meta: &metapb.Region{StartKey: endKey}}}
 
 	// check if both keys are in the uncovered ranges.
-	startItemt, sit := r.tree.tree.GetWithIndex(start)
+	startItemt, startIndex := r.tree.tree.GetWithIndex(start)
 	endItemt, eit := r.tree.tree.GetWithIndex(end)
 	if startItemt == nil {
-		startItemt = r.tree.tree.GetAt(sit - 1)
+		startItemt = r.tree.tree.GetAt(startIndex - 1)
 	}
 	if endItemt == nil {
 		endItemt = r.tree.tree.GetAt(eit - 1)
@@ -1808,12 +1808,10 @@ func (r *RegionsInfo) GetRegionCount(startKey, endKey []byte) int {
 	if endItemt != nil {
 		endInAnInterval = (bytes.Compare(endItemt.GetStartKey(), endKey) <= 0) && (bytes.Compare(endKey, endItemt.GetEndKey()) <= 0)
 	}
-	if sit == eit && (!startInAnInterval) && (!endInAnInterval) {
+	if startIndex == eit && (!startInAnInterval) && (!endInAnInterval) {
 		return 0
 	}
 
-	// it returns 0 if startKey is nil.
-	_, startIndex := r.tree.tree.GetWithIndex(start)
 	var endIndex int
 	var item *regionItem
 	// it should return the length of the tree if endKey is nil.
