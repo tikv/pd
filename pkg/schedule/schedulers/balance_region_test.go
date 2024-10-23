@@ -214,6 +214,7 @@ func TestTolerantRatio(t *testing.T) {
 		basePlan := plan.NewBalanceSchedulerPlan()
 		solver := newSolver(basePlan, types.BalanceLeaderScheduler, tc, operator.OpInfluence{})
 		solver.kind = t.kind
+		solver.tolerantSizeRatio = adjustTolerantRatio(tc, t.kind)
 		solver.Region = region
 
 		sourceScore := t.expectTolerantResource(t.kind)
