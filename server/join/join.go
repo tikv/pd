@@ -182,7 +182,7 @@ func PrepareJoinCluster(cfg *config.Config) error {
 		linearizable = false
 	}
 
-	for i := 0; i < listMemberRetryTimes; i++ {
+	for range listMemberRetryTimes {
 		listResp, err = etcdutil.ListEtcdMembers(client.Ctx(), client, linearizable)
 		if err != nil {
 			return err

@@ -207,12 +207,12 @@ func (suite *tsoClientTestSuite) TestGetTS() {
 	re := suite.Require()
 	var wg sync.WaitGroup
 	wg.Add(tsoRequestConcurrencyNumber * len(suite.clients))
-	for i := 0; i < tsoRequestConcurrencyNumber; i++ {
+	for range tsoRequestConcurrencyNumber {
 		for _, client := range suite.clients {
 			go func(client pd.Client) {
 				defer wg.Done()
 				var lastTS uint64
-				for j := 0; j < tsoRequestRound; j++ {
+				for range tsoRequestRound {
 					physical, logical, err := client.GetTS(suite.ctx)
 					re.NoError(err)
 					ts := tsoutil.ComposeTS(physical, logical)
@@ -229,7 +229,7 @@ func (suite *tsoClientTestSuite) TestGetTSAsync() {
 	re := suite.Require()
 	var wg sync.WaitGroup
 	wg.Add(tsoRequestConcurrencyNumber * len(suite.clients))
-	for i := 0; i < tsoRequestConcurrencyNumber; i++ {
+	for range tsoRequestConcurrencyNumber {
 		for _, client := range suite.clients {
 			go func(client pd.Client) {
 				defer wg.Done()
@@ -272,7 +272,7 @@ func (suite *tsoClientTestSuite) TestDiscoverTSOServiceWithLegacyPath() {
 		ctx, re, keyspaceID, suite.getBackendEndpoints())
 	defer client.Close()
 	var lastTS uint64
-	for j := 0; j < tsoRequestRound; j++ {
+	for range tsoRequestRound {
 		physical, logical, err := client.GetTS(ctx)
 		re.NoError(err)
 		ts := tsoutil.ComposeTS(physical, logical)
@@ -286,12 +286,12 @@ func (suite *tsoClientTestSuite) TestGetMinTS() {
 	re := suite.Require()
 	var wg sync.WaitGroup
 	wg.Add(tsoRequestConcurrencyNumber * len(suite.clients))
-	for i := 0; i < tsoRequestConcurrencyNumber; i++ {
+	for range tsoRequestConcurrencyNumber {
 		for _, client := range suite.clients {
 			go func(client pd.Client) {
 				defer wg.Done()
 				var lastMinTS uint64
-				for j := 0; j < tsoRequestRound; j++ {
+				for range tsoRequestRound {
 					physical, logical, err := client.GetMinTS(suite.ctx)
 					re.NoError(err)
 					minTS := tsoutil.ComposeTS(physical, logical)
@@ -332,19 +332,19 @@ func (suite *tsoClientTestSuite) TestUpdateAfterResetTSO() {
 	defer func() {
 		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/member/skipCampaignLeaderCheck"))
 	}()
-	for i := 0; i < len(suite.clients); i++ {
+	for i := range suite.clients {
 		client := suite.clients[i]
 		testutil.Eventually(re, func() bool {
 			_, _, err := client.GetTS(ctx)
 			return err == nil
 		})
 		// Resign leader to trigger the TSO resetting.
-		re.NoError(failpoint.Enable("github.com/tikv/pd/server/updateAfterResetTSO", "return(true)"))
+		re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/updateAfterResetTSO", "return(true)"))
 		oldLeaderName := suite.cluster.WaitLeader()
 		re.NotEmpty(oldLeaderName)
 		err := suite.cluster.GetServer(oldLeaderName).ResignLeader()
 		re.NoError(err)
-		re.NoError(failpoint.Disable("github.com/tikv/pd/server/updateAfterResetTSO"))
+		re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/updateAfterResetTSO"))
 		newLeaderName := suite.cluster.WaitLeader()
 		re.NotEmpty(newLeaderName)
 		re.NotEqual(oldLeaderName, newLeaderName)
@@ -446,7 +446,7 @@ func (suite *tsoClientTestSuite) TestGetTSWhileResettingTSOClient() {
 	)
 
 	wg.Add(tsoRequestConcurrencyNumber * len(suite.clients))
-	for i := 0; i < tsoRequestConcurrencyNumber; i++ {
+	for range tsoRequestConcurrencyNumber {
 		for _, client := range suite.clients {
 			go func(client pd.Client) {
 				defer wg.Done()
@@ -465,7 +465,7 @@ func (suite *tsoClientTestSuite) TestGetTSWhileResettingTSOClient() {
 		}
 	}
 	// Reset the TSO clients while requesting TSO concurrently.
-	for i := 0; i < tsoRequestConcurrencyNumber; i++ {
+	for range tsoRequestConcurrencyNumber {
 		for _, client := range suite.clients {
 			client.(interface{ ResetTSOClient() }).ResetTSOClient()
 		}
@@ -514,7 +514,7 @@ func TestMixedTSODeployment(t *testing.T) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		for i := 0; i < 2; i++ {
+		for range 2 {
 			n := r.Intn(2) + 1
 			time.Sleep(time.Duration(n) * time.Second)
 			leaderServer.ResignLeader()
@@ -578,7 +578,7 @@ func checkTSO(
 	ctx context.Context, re *require.Assertions, wg *sync.WaitGroup, backendEndpoints string,
 ) {
 	wg.Add(tsoRequestConcurrencyNumber)
-	for i := 0; i < tsoRequestConcurrencyNumber; i++ {
+	for range tsoRequestConcurrencyNumber {
 		go func() {
 			defer wg.Done()
 			cli := mcs.SetupClientWithAPIContext(ctx, re, pd.NewAPIContextV1(), strings.Split(backendEndpoints, ","))

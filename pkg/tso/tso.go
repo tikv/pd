@@ -27,6 +27,7 @@ import (
 	"github.com/tikv/pd/pkg/election"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
@@ -152,7 +153,7 @@ func (t *timestampOracle) calibrateLogical(rawLogical int64, suffixBits int) int
 
 // GetTimestampPath returns the timestamp path in etcd.
 func (t *timestampOracle) GetTimestampPath() string {
-	return endpoint.TimestampPath(t.tsPath)
+	return keypath.TimestampPath(t.tsPath)
 }
 
 // SyncTimestamp is used to synchronize the timestamp.
@@ -393,7 +394,7 @@ func (t *timestampOracle) getTS(ctx context.Context, leadership *election.Leader
 	if count == 0 {
 		return resp, errs.ErrGenerateTimestamp.FastGenByArgs("tso count should be positive")
 	}
-	for i := 0; i < maxRetryCount; i++ {
+	for i := range maxRetryCount {
 		currentPhysical, _ := t.getTSO()
 		if currentPhysical == typeutil.ZeroTime {
 			// If it's leader, maybe SyncTimestamp hasn't completed yet

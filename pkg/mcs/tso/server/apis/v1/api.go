@@ -307,9 +307,15 @@ func transferPrimary(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
 		return
 	}
+	// only members of specific group are valid primary candidates.
+	group := svr.GetKeyspaceGroupManager().GetKeyspaceGroups()[keyspaceGroupID]
+	memberMap := make(map[string]bool, len(group.Members))
+	for _, member := range group.Members {
+		memberMap[member.Address] = true
+	}
 
 	if err := utils.TransferPrimary(svr.GetClient(), globalAllocator.(*tso.GlobalTSOAllocator).GetExpectedPrimaryLease(),
-		constant.TSOServiceName, svr.Name(), newPrimary, keyspaceGroupID); err != nil {
+		constant.TSOServiceName, svr.Name(), newPrimary, keyspaceGroupID, memberMap); err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
 		return
 	}

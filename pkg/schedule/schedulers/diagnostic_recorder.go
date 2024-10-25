@@ -104,7 +104,7 @@ func (d *DiagnosticRecorder) GetLastResult() *DiagnosticResult {
 	if firstStatus == Pending || firstStatus == Normal {
 		wa := movingaverage.NewWeightAllocator(length, 3)
 		counter := make(map[uint64]map[plan.Status]float64)
-		for i := 0; i < length; i++ {
+		for i := range length {
 			item := items[i].Value.(*DiagnosticResult)
 			for storeID, status := range item.StoreStatus {
 				if _, ok := counter[storeID]; !ok {

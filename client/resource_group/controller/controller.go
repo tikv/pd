@@ -249,16 +249,13 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 		defer emergencyTokenAcquisitionTicker.Stop()
 
 		failpoint.Inject("fastCleanup", func() {
-			cleanupTicker.Stop()
-			cleanupTicker = time.NewTicker(100 * time.Millisecond)
+			cleanupTicker.Reset(100 * time.Millisecond)
 			// because of checking `gc.run.consumption` in cleanupTicker,
 			// so should also change the stateUpdateTicker.
-			stateUpdateTicker.Stop()
-			stateUpdateTicker = time.NewTicker(200 * time.Millisecond)
+			stateUpdateTicker.Reset(200 * time.Millisecond)
 		})
 		failpoint.Inject("acceleratedReportingPeriod", func() {
-			stateUpdateTicker.Stop()
-			stateUpdateTicker = time.NewTicker(time.Millisecond * 100)
+			stateUpdateTicker.Reset(time.Millisecond * 100)
 		})
 
 		_, metaRevision, err := c.provider.LoadResourceGroups(ctx)
@@ -1350,7 +1347,7 @@ func (gc *groupCostController) acquireTokens(ctx context.Context, delta *rmpb.Co
 		d   time.Duration
 	)
 retryLoop:
-	for i := 0; i < gc.mainCfg.WaitRetryTimes; i++ {
+	for range gc.mainCfg.WaitRetryTimes {
 		now := time.Now()
 		switch gc.mode {
 		case rmpb.GroupMode_RawMode:

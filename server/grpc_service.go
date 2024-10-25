@@ -57,7 +57,7 @@ import (
 
 const (
 	heartbeatSendTimeout          = 5 * time.Second
-	maxRetryTimesRequestTSOServer = 3
+	maxRetryTimesRequestTSOServer = 6
 	retryIntervalRequestTSOServer = 500 * time.Millisecond
 	getMinTSFromTSOServerTimeout  = 1 * time.Second
 	defaultGRPCDialTimeout        = 3 * time.Second
@@ -274,7 +274,7 @@ func (s *GrpcServer) GetClusterInfo(context.Context, *pdpb.GetClusterInfoRequest
 
 	var tsoServiceAddrs []string
 	svcModes := make([]pdpb.ServiceMode, 0)
-	if s.IsAPIServiceMode() {
+	if s.IsServiceIndependent(constant.TSOServiceName) {
 		svcModes = append(svcModes, pdpb.ServiceMode_API_SVC_MODE)
 		tsoServiceAddrs = s.keyspaceGroupManager.GetTSOServiceAddrs()
 	} else {
@@ -318,7 +318,7 @@ func (s *GrpcServer) GetMinTS(
 		minTS *pdpb.Timestamp
 		err   error
 	)
-	if s.IsAPIServiceMode() {
+	if s.IsServiceIndependent(constant.TSOServiceName) {
 		minTS, err = s.GetMinTSFromTSOService(tso.GlobalDCLocation)
 	} else {
 		start := time.Now()
@@ -486,7 +486,7 @@ func (s *GrpcServer) GetMembers(context.Context, *pdpb.GetMembersRequest) (*pdpb
 	}
 
 	tsoAllocatorLeaders := make(map[string]*pdpb.Member)
-	if !s.IsAPIServiceMode() {
+	if !s.IsServiceIndependent(constant.TSOServiceName) {
 		tsoAllocatorManager := s.GetTSOAllocatorManager()
 		tsoAllocatorLeaders, err = tsoAllocatorManager.GetLocalAllocatorLeaders()
 	}
@@ -524,7 +524,7 @@ func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
 			return err
 		}
 	}
-	if s.IsAPIServiceMode() {
+	if s.IsServiceIndependent(constant.TSOServiceName) {
 		return s.forwardTSO(stream)
 	}
 
@@ -584,7 +584,7 @@ func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
 		task.End()
 		tsoHandleDuration.Observe(time.Since(start).Seconds())
 		if err != nil {
-			return status.Errorf(codes.Unknown, err.Error())
+			return status.Error(codes.Unknown, err.Error())
 		}
 		response := &pdpb.TsoResponse{
 			Header:    s.header(),
@@ -1414,8 +1414,11 @@ func (s *GrpcServer) GetRegion(ctx context.Context, request *pdpb.GetRegionReque
 	} else if rsp != nil {
 		return rsp.(*pdpb.GetRegionResponse), nil
 	}
-	var rc *cluster.RaftCluster
-	var region *core.RegionInfo
+	failpoint.Inject("delayProcess", nil)
+	var (
+		rc     *cluster.RaftCluster
+		region *core.RegionInfo
+	)
 	if *followerHandle {
 		rc = s.cluster
 		if !rc.GetRegionSyncer().IsRunning() {

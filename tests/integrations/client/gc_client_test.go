@@ -26,8 +26,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	pd "github.com/tikv/pd/client"
-	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/assertutil"
+	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server"
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -80,7 +80,7 @@ func (suite *gcClientTestSuite) SetupSuite() {
 	suite.client, err = pd.NewClientWithContext(suite.server.Context(), []string{addr}, pd.SecurityOption{})
 	re.NoError(err)
 	rootPath := path.Join("/pd", strconv.FormatUint(suite.server.ClusterID(), 10))
-	suite.gcSafePointV2Prefix = path.Join(rootPath, endpoint.GCSafePointV2Prefix())
+	suite.gcSafePointV2Prefix = path.Join(rootPath, keypath.GCSafePointV2Prefix())
 	// Enable the fail-point to skip checking keyspace validity.
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/gc/checkKeyspace", "return(true)"))
 }
@@ -110,7 +110,7 @@ func (suite *gcClientTestSuite) TestWatch1() {
 	}, receiver)
 
 	// Init gc safe points as index value of keyspace 0 ~ 5.
-	for i := 0; i < 6; i++ {
+	for i := range 6 {
 		suite.mustUpdateSafePoint(re, uint32(i), uint64(i))
 	}
 
@@ -120,7 +120,7 @@ func (suite *gcClientTestSuite) TestWatch1() {
 	}
 
 	// check gc safe point equal to keyspace id for keyspace 0 ~ 2 .
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		re.Equal(uint64(i), suite.mustLoadSafePoint(re, uint32(i)))
 	}
 
@@ -205,7 +205,7 @@ func (suite *gcClientTestSuite) mustLoadSafePoint(re *require.Assertions, keyspa
 
 // mustDeleteSafePoint deletes the gc safe point of the given keyspace id.
 func (suite *gcClientTestSuite) mustDeleteSafePoint(re *require.Assertions, keyspaceID uint32) {
-	safePointPath := path.Join(suite.gcSafePointV2Prefix, endpoint.EncodeKeyspaceID(keyspaceID))
+	safePointPath := path.Join(suite.gcSafePointV2Prefix, keypath.EncodeKeyspaceID(keyspaceID))
 	log.Info("test etcd path", zap.Any("path", safePointPath)) // TODO: Delete
 	_, err := suite.server.GetClient().Delete(suite.server.Context(), safePointPath)
 	re.NoError(err)
@@ -213,7 +213,7 @@ func (suite *gcClientTestSuite) mustDeleteSafePoint(re *require.Assertions, keys
 
 // mustGetRevision gets the revision of the given keyspace's gc safe point.
 func (suite *gcClientTestSuite) mustGetRevision(re *require.Assertions, keyspaceID uint32) int64 {
-	safePointPath := path.Join(suite.gcSafePointV2Prefix, endpoint.EncodeKeyspaceID(keyspaceID))
+	safePointPath := path.Join(suite.gcSafePointV2Prefix, keypath.EncodeKeyspaceID(keyspaceID))
 	res, err := suite.server.GetClient().Get(suite.server.Context(), safePointPath)
 	re.NoError(err)
 	return res.Header.GetRevision()

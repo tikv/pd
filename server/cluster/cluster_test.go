@@ -153,13 +153,15 @@ func TestStoreHeartbeat(t *testing.T) {
 		},
 		PeerStats: []*pdpb.PeerStat{},
 	}
-	cluster.opt.GetScheduleConfig().StoreLimitVersion = "v1"
+	scheCfg := cluster.opt.GetScheduleConfig().Clone()
+	scheCfg.StoreLimitVersion = "v1"
+	cluster.opt.SetScheduleConfig(scheCfg)
 	re.NoError(cluster.HandleStoreHeartbeat(hotReq, hotResp))
 	re.NoError(cluster.HandleStoreHeartbeat(hotReq, hotResp))
 	re.NoError(cluster.HandleStoreHeartbeat(hotReq, hotResp))
 	re.Equal("v1", cluster.GetStore(1).GetStoreLimit().Version())
 	time.Sleep(20 * time.Millisecond)
-	storeStats := cluster.hotStat.RegionStats(utils.Read, 3)
+	storeStats := cluster.hotStat.GetHotPeerStats(utils.Read, 3)
 	re.Len(storeStats[1], 1)
 	re.Equal(uint64(1), storeStats[1][0].RegionID)
 	interval := float64(hotHeartBeat.Interval.EndTimestamp - hotHeartBeat.Interval.StartTimestamp)
@@ -167,15 +169,15 @@ func TestStoreHeartbeat(t *testing.T) {
 	re.Equal(float64(hotHeartBeat.PeerStats[0].ReadBytes)/interval, storeStats[1][0].Loads[utils.ByteDim])
 	re.Equal(float64(hotHeartBeat.PeerStats[0].ReadKeys)/interval, storeStats[1][0].Loads[utils.KeyDim])
 	re.Equal(float64(hotHeartBeat.PeerStats[0].QueryStats.Get)/interval, storeStats[1][0].Loads[utils.QueryDim])
-	// After cold heartbeat, we won't find region 1 peer in regionStats
+	// After cold heartbeat, we won't find region 1 peer in HotPeerStats
 	re.NoError(cluster.HandleStoreHeartbeat(coldReq, coldResp))
 	time.Sleep(20 * time.Millisecond)
-	storeStats = cluster.hotStat.RegionStats(utils.Read, 1)
+	storeStats = cluster.hotStat.GetHotPeerStats(utils.Read, 1)
 	re.Empty(storeStats[1])
 	// After hot heartbeat, we can find region 1 peer again
 	re.NoError(cluster.HandleStoreHeartbeat(hotReq, hotResp))
 	time.Sleep(20 * time.Millisecond)
-	storeStats = cluster.hotStat.RegionStats(utils.Read, 3)
+	storeStats = cluster.hotStat.GetHotPeerStats(utils.Read, 3)
 	re.Len(storeStats[1], 1)
 	re.Equal(uint64(1), storeStats[1][0].RegionID)
 	//  after several cold heartbeats, and one hot heartbeat, we also can't find region 1 peer
@@ -183,19 +185,19 @@ func TestStoreHeartbeat(t *testing.T) {
 	re.NoError(cluster.HandleStoreHeartbeat(coldReq, coldResp))
 	re.NoError(cluster.HandleStoreHeartbeat(coldReq, coldResp))
 	time.Sleep(20 * time.Millisecond)
-	storeStats = cluster.hotStat.RegionStats(utils.Read, 0)
+	storeStats = cluster.hotStat.GetHotPeerStats(utils.Read, 0)
 	re.Empty(storeStats[1])
 	re.NoError(cluster.HandleStoreHeartbeat(hotReq, hotResp))
 	time.Sleep(20 * time.Millisecond)
-	storeStats = cluster.hotStat.RegionStats(utils.Read, 1)
+	storeStats = cluster.hotStat.GetHotPeerStats(utils.Read, 1)
 	re.Empty(storeStats[1])
-	storeStats = cluster.hotStat.RegionStats(utils.Read, 3)
+	storeStats = cluster.hotStat.GetHotPeerStats(utils.Read, 3)
 	re.Empty(storeStats[1])
 	// after 2 hot heartbeats, wo can find region 1 peer again
 	re.NoError(cluster.HandleStoreHeartbeat(hotReq, hotResp))
 	re.NoError(cluster.HandleStoreHeartbeat(hotReq, hotResp))
 	time.Sleep(20 * time.Millisecond)
-	storeStats = cluster.hotStat.RegionStats(utils.Read, 3)
+	storeStats = cluster.hotStat.GetHotPeerStats(utils.Read, 3)
 	re.Len(storeStats[1], 1)
 	re.Equal(uint64(1), storeStats[1][0].RegionID)
 }
@@ -640,7 +642,7 @@ func TestRegionHeartbeatHotStat(t *testing.T) {
 	re.NoError(err)
 	// wait HotStat to update items
 	time.Sleep(time.Second)
-	stats := cluster.hotStat.RegionStats(utils.Write, 0)
+	stats := cluster.hotStat.GetHotPeerStats(utils.Write, 0)
 	re.Len(stats[1], 1)
 	re.Len(stats[2], 1)
 	re.Len(stats[3], 1)
@@ -653,7 +655,7 @@ func TestRegionHeartbeatHotStat(t *testing.T) {
 	re.NoError(err)
 	// wait HotStat to update items
 	time.Sleep(time.Second)
-	stats = cluster.hotStat.RegionStats(utils.Write, 0)
+	stats = cluster.hotStat.GetHotPeerStats(utils.Write, 0)
 	re.Len(stats[1], 1)
 	re.Empty(stats[2])
 	re.Len(stats[3], 1)
@@ -1123,6 +1125,7 @@ func TestRegionLabelIsolationLevel(t *testing.T) {
 	opt.SetReplicationConfig(cfg)
 	re.NoError(err)
 	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
+	cluster.coordinator = schedule.NewCoordinator(ctx, cluster, nil)
 
 	for i := uint64(1); i <= 4; i++ {
 		var labels []*metapb.StoreLabel
@@ -1157,11 +1160,40 @@ func TestRegionLabelIsolationLevel(t *testing.T) {
 		StartKey: []byte{byte(1)},
 		EndKey:   []byte{byte(2)},
 	}
-	r := core.NewRegionInfo(region, peers[0])
-	re.NoError(cluster.putRegion(r))
+	r1 := core.NewRegionInfo(region, peers[0])
+	re.NoError(cluster.putRegion(r1))
 
-	cluster.UpdateRegionsLabelLevelStats([]*core.RegionInfo{r})
+	cluster.UpdateRegionsLabelLevelStats([]*core.RegionInfo{r1})
 	counter := cluster.labelStats.GetLabelCounter()
+	re.Equal(0, counter["none"])
+	re.Equal(1, counter["zone"])
+
+	region = &metapb.Region{
+		Id:       10,
+		Peers:    peers,
+		StartKey: []byte{byte(2)},
+		EndKey:   []byte{byte(3)},
+	}
+	r2 := core.NewRegionInfo(region, peers[0])
+	re.NoError(cluster.putRegion(r2))
+
+	cluster.UpdateRegionsLabelLevelStats([]*core.RegionInfo{r2})
+	counter = cluster.labelStats.GetLabelCounter()
+	re.Equal(0, counter["none"])
+	re.Equal(2, counter["zone"])
+
+	// issue: https://github.com/tikv/pd/issues/8700
+	// step1: heartbeat a overlap region, which is used to simulate the case that the region is merged.
+	// step2: update region 9 and region 10, which is used to simulate the case that patrol is triggered.
+	// We should only count region 9.
+	overlapRegion := r1.Clone(
+		core.WithStartKey(r1.GetStartKey()),
+		core.WithEndKey(r2.GetEndKey()),
+		core.WithLeader(r2.GetPeer(8)),
+	)
+	re.NoError(cluster.HandleRegionHeartbeat(overlapRegion))
+	cluster.UpdateRegionsLabelLevelStats([]*core.RegionInfo{r1, r2})
+	counter = cluster.labelStats.GetLabelCounter()
 	re.Equal(0, counter["none"])
 	re.Equal(1, counter["zone"])
 }
@@ -1254,19 +1286,19 @@ func TestRegionSplitAndMerge(t *testing.T) {
 	n := 7
 
 	// Split.
-	for i := 0; i < n; i++ {
+	for range n {
 		regions = core.SplitRegions(regions)
 		heartbeatRegions(re, cluster, regions)
 	}
 
 	// Merge.
-	for i := 0; i < n; i++ {
+	for range n {
 		regions = core.MergeRegions(regions)
 		heartbeatRegions(re, cluster, regions)
 	}
 
 	// Split twice and merge once.
-	for i := 0; i < n*2; i++ {
+	for i := range n * 2 {
 		if (i+1)%3 == 0 {
 			regions = core.MergeRegions(regions)
 		} else {
@@ -1331,14 +1363,14 @@ func TestOfflineAndMerge(t *testing.T) {
 
 	// Split.
 	n := 7
-	for i := 0; i < n; i++ {
+	for range n {
 		regions = core.SplitRegions(regions)
 	}
 	heartbeatRegions(re, cluster, regions)
 	re.Len(cluster.GetRegionStatsByType(statistics.OfflinePeer), len(regions))
 
 	// Merge.
-	for i := 0; i < n; i++ {
+	for range n {
 		regions = core.MergeRegions(regions)
 		heartbeatRegions(re, cluster, regions)
 		re.Len(cluster.GetRegionStatsByType(statistics.OfflinePeer), len(regions))
@@ -1849,7 +1881,7 @@ func Test(t *testing.T) {
 	tc := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opts, storage.NewStorageWithMemoryBackend())
 	cache := tc.BasicCluster
 
-	for i := uint64(0); i < n; i++ {
+	for i := range n {
 		region := regions[i]
 		regionKey := []byte(fmt.Sprintf("a%20d", i+1))
 
@@ -1895,7 +1927,7 @@ func Test(t *testing.T) {
 
 	pendingFilter := filter.NewRegionPendingFilter()
 	downFilter := filter.NewRegionDownFilter()
-	for i := uint64(0); i < n; i++ {
+	for i := range n {
 		region := filter.SelectOneRegion(tc.RandLeaderRegions(i, []core.KeyRange{core.NewKeyRange("", "")}), nil, pendingFilter, downFilter)
 		re.Equal(i, region.GetLeader().GetStoreId())
 
@@ -1914,8 +1946,8 @@ func Test(t *testing.T) {
 	re.NotNil(cache.GetRegion(n - 1))
 
 	// All regions will be filtered out if they have pending peers.
-	for i := uint64(0); i < n; i++ {
-		for j := 0; j < cache.GetStoreLeaderCount(i); j++ {
+	for i := range n {
+		for range cache.GetStoreLeaderCount(i) {
 			region := filter.SelectOneRegion(tc.RandLeaderRegions(i, []core.KeyRange{core.NewKeyRange("", "")}), nil, pendingFilter, downFilter)
 			newRegion := region.Clone(core.WithPendingPeers(region.GetPeers()))
 			origin, overlaps, rangeChanged = cache.SetRegion(newRegion)
@@ -1923,7 +1955,7 @@ func Test(t *testing.T) {
 		}
 		re.Nil(filter.SelectOneRegion(tc.RandLeaderRegions(i, []core.KeyRange{core.NewKeyRange("", "")}), nil, pendingFilter, downFilter))
 	}
-	for i := uint64(0); i < n; i++ {
+	for i := range n {
 		re.Nil(filter.SelectOneRegion(tc.RandFollowerRegions(i, []core.KeyRange{core.NewKeyRange("", "")}), nil, pendingFilter, downFilter))
 	}
 }
@@ -2181,9 +2213,9 @@ func newTestStores(n uint64, version string) []*core.StoreInfo {
 // Each region contains np peers, the first peer is the leader.
 func newTestRegions(n, m, np uint64) []*core.RegionInfo {
 	regions := make([]*core.RegionInfo, 0, n)
-	for i := uint64(0); i < n; i++ {
+	for i := range n {
 		peers := make([]*metapb.Peer, 0, np)
-		for j := uint64(0); j < np; j++ {
+		for j := range np {
 			peer := &metapb.Peer{
 				Id: 100000000 + i*np + j,
 			}
@@ -2510,12 +2542,12 @@ func TestCollectMetricsConcurrent(t *testing.T) {
 	for i := 0; i <= count; i++ {
 		go func(i int) {
 			defer wg.Done()
-			for j := 0; j < 1000; j++ {
+			for range 1000 {
 				re.NoError(tc.addRegionStore(uint64(i%5), rand.Intn(200)))
 			}
 		}(i)
 	}
-	for i := 0; i < 1000; i++ {
+	for range 1000 {
 		co.CollectHotSpotMetrics()
 		controller.CollectSchedulerMetrics()
 		rc.collectSchedulingMetrics()
@@ -2543,7 +2575,7 @@ func TestCollectMetrics(t *testing.T) {
 	controller := co.GetSchedulersController()
 	count := 10
 	for i := 0; i <= count; i++ {
-		for k := 0; k < 200; k++ {
+		for k := range 200 {
 			item := &statistics.HotPeerStat{
 				StoreID:   uint64(i % 5),
 				RegionID:  uint64(i*1000 + k),
@@ -2555,13 +2587,13 @@ func TestCollectMetrics(t *testing.T) {
 		}
 	}
 
-	for i := 0; i < 1000; i++ {
+	for range 1000 {
 		co.CollectHotSpotMetrics()
 		controller.CollectSchedulerMetrics()
 		rc.collectSchedulingMetrics()
 	}
 	stores := co.GetCluster().GetStores()
-	regionStats := co.GetCluster().RegionWriteStats()
+	regionStats := co.GetCluster().GetHotPeerStats(utils.Write)
 	status1 := statistics.CollectHotPeerInfos(stores, regionStats)
 	status2 := statistics.GetHotStatus(stores, co.GetCluster().GetStoresLoads(), regionStats, utils.Write, co.GetCluster().GetSchedulerConfig().IsTraceRegionFlow())
 	for _, s := range status2.AsLeader {
@@ -2709,7 +2741,7 @@ func TestCheckerIsBusy(t *testing.T) {
 		operator.OpReplica, operator.OpRegion | operator.OpMerge,
 	}
 	for i, operatorKind := range operatorKinds {
-		for j := uint64(0); j < num; j++ {
+		for j := range num {
 			regionID := j + uint64(i+1)*num
 			re.NoError(tc.addLeaderRegion(regionID, 1))
 			switch operatorKind {
@@ -3032,7 +3064,7 @@ func TestShouldRunWithNonLeaderRegions(t *testing.T) {
 	re.NoError(tc.addLeaderStore(1, 10))
 	re.NoError(tc.addLeaderStore(2, 0))
 	re.NoError(tc.addLeaderStore(3, 0))
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		re.NoError(tc.LoadRegion(uint64(i+1), 1, 2, 3))
 	}
 	re.False(co.ShouldRun())
@@ -3389,7 +3421,7 @@ func BenchmarkPatrolRegion(b *testing.B) {
 			return
 		}
 	}
-	for i := 0; i < regionNum; i++ {
+	for i := range regionNum {
 		if err := tc.addLeaderRegion(uint64(i), 1, 2, 3); err != nil {
 			return
 		}
@@ -3493,7 +3525,7 @@ func TestStoreOverloaded(t *testing.T) {
 	opt.SetAllStoresLimit(storelimit.AddPeer, 600)
 	opt.SetAllStoresLimit(storelimit.RemovePeer, 600)
 	time.Sleep(time.Second)
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		ops, _ := lb.Schedule(tc, false /* dryRun */)
 		re.Len(ops, 1)
 		op := ops[0]
@@ -3502,7 +3534,7 @@ func TestStoreOverloaded(t *testing.T) {
 	}
 	// sleep 1 seconds to make sure that the token is filled up
 	time.Sleep(time.Second)
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		ops, _ := lb.Schedule(tc, false /* dryRun */)
 		re.NotEmpty(ops)
 	}
@@ -3848,7 +3880,7 @@ func BenchmarkHandleRegionHeartbeat(b *testing.B) {
 	pendingPeers := []*metapb.Peer{peers[1], peers[2]}
 
 	var requests []*pdpb.RegionHeartbeatRequest
-	for i := 0; i < 1000000; i++ {
+	for i := range 1000000 {
 		request := &pdpb.RegionHeartbeatRequest{
 			Region:          &metapb.Region{Id: 10, Peers: peers, StartKey: []byte{byte(i)}, EndKey: []byte{byte(i + 1)}},
 			Leader:          peers[0],

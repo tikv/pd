@@ -119,7 +119,7 @@ func main() {
 
 	if coverProfile != "" {
 		var err error
-		coverFileTempDir, err = os.MkdirTemp(os.TempDir(), "cov")
+		coverFileTempDir, err = os.MkdirTemp("", "cov")
 		if err != nil {
 			fmt.Println("create temp dir fail", coverFileTempDir)
 			os.Exit(1)
@@ -350,7 +350,7 @@ func cmdRun(args ...string) bool {
 	taskCh := make(chan task, 100)
 	works := make([]numa, parallel)
 	var wg sync.WaitGroup
-	for i := 0; i < parallel; i++ {
+	for i := range parallel {
 		wg.Add(1)
 		go works[i].worker(&wg, taskCh)
 	}
@@ -465,7 +465,7 @@ func stripFlag(flag string) string {
 
 func handleFlag(f string) (found bool) {
 	tmp := os.Args[:0]
-	for i := 0; i < len(os.Args); i++ {
+	for i := range os.Args {
 		if os.Args[i] == f {
 			found = true
 			continue
@@ -585,7 +585,7 @@ func (n *numa) runTestCase(pkg string, fn string) testResult {
 	var buf bytes.Buffer
 	var err error
 	var start time.Time
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		cmd := n.testCommand(pkg, fn)
 		cmd.Dir = filepath.Join(workDir, pkg)
 		// Combine the test case output, so the run result for failed cases can be displayed.
@@ -771,7 +771,7 @@ func buildTestBinaryMulti(pkgs []string) ([]byte, error) {
 		cmd.Args = append(cmd.Args, "-race")
 	}
 	cmd.Dir = workDir
-	outputFile, err := os.CreateTemp("", "test_pd_ut*.out")
+	outputFile, err := os.CreateTemp("", "pd_tests")
 	if err != nil {
 		return nil, err
 	}

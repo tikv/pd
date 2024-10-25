@@ -16,6 +16,8 @@ package tso
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"math/rand"
 	"net/http"
 	"strings"
@@ -37,6 +39,7 @@ import (
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	tsopkg "github.com/tikv/pd/pkg/tso"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
+	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/server/apiv2/handlers"
@@ -217,9 +220,9 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestKeyspacesServedByNonDefaultKe
 						// for loading/saving timestamp from/to etcd and the right primary path
 						// for primary election.
 						clusterID := suite.pdLeaderServer.GetClusterID()
-						rootPath := endpoint.TSOSvcRootPath(clusterID)
-						primaryPath := endpoint.KeyspaceGroupPrimaryPath(rootPath, param.keyspaceGroupID)
-						timestampPath := endpoint.FullTimestampPath(clusterID, param.keyspaceGroupID)
+						rootPath := keypath.TSOSvcRootPath(clusterID)
+						primaryPath := keypath.KeyspaceGroupPrimaryPath(rootPath, param.keyspaceGroupID)
+						timestampPath := keypath.FullTimestampPath(clusterID, param.keyspaceGroupID)
 						re.Equal(timestampPath, am.GetTimestampPath(tsopkg.GlobalDCLocation))
 						re.Equal(primaryPath, am.GetMember().GetLeaderPath())
 
@@ -472,10 +475,11 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) dispatchClient(
 					strings.Contains(errMsg, clierrs.NotLeaderErr) ||
 					strings.Contains(errMsg, clierrs.NotServedErr) ||
 					strings.Contains(errMsg, "ErrKeyspaceNotAssigned") ||
-					strings.Contains(errMsg, "ErrKeyspaceGroupIsMerging") {
+					strings.Contains(errMsg, "ErrKeyspaceGroupIsMerging") ||
+					errors.Is(err, clierrs.ErrClientTSOStreamClosed) {
 					continue
 				}
-				re.FailNow(errMsg)
+				re.FailNow(fmt.Sprintf("%+v", err))
 			}
 			if physical == lastPhysical {
 				re.Greater(logical, lastLogical)

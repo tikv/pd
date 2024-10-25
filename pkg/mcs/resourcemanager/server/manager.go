@@ -324,8 +324,7 @@ func (m *Manager) GetResourceGroupList(withStats bool) []*ResourceGroup {
 func (m *Manager) persistLoop(ctx context.Context) {
 	ticker := time.NewTicker(time.Minute)
 	failpoint.Inject("fastPersist", func() {
-		ticker.Stop()
-		ticker = time.NewTicker(100 * time.Millisecond)
+		ticker.Reset(100 * time.Millisecond)
 	})
 	defer ticker.Stop()
 	for {
@@ -345,7 +344,7 @@ func (m *Manager) persistResourceGroupRunningState() {
 		keys = append(keys, k)
 	}
 	m.RUnlock()
-	for idx := 0; idx < len(keys); idx++ {
+	for idx := range keys {
 		m.RLock()
 		group, ok := m.groups[keys[idx]]
 		if ok {
@@ -452,7 +451,7 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 					sqlCPUCost.DeleteLabelValues(r.name, r.name, r.ruType)
 					requestCount.DeleteLabelValues(r.name, r.name, readTypeLabel)
 					requestCount.DeleteLabelValues(r.name, r.name, writeTypeLabel)
-					availableRUCounter.DeleteLabelValues(r.name, r.name, r.ruType)
+					availableRUCounter.DeleteLabelValues(r.name, r.name)
 					delete(m.consumptionRecord, r)
 					delete(maxPerSecTrackers, r.name)
 					readRequestUnitMaxPerSecCost.DeleteLabelValues(r.name)
@@ -477,9 +476,9 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 					ru = 0
 				}
 				availableRUCounter.WithLabelValues(group.Name, group.Name).Set(ru)
-				resourceGroupConfigGauge.WithLabelValues(group.Name, priorityLabel).Set(float64(group.Priority))
-				resourceGroupConfigGauge.WithLabelValues(group.Name, ruPerSecLabel).Set(float64(group.RUSettings.RU.Settings.FillRate))
-				resourceGroupConfigGauge.WithLabelValues(group.Name, ruCapacityLabel).Set(float64(group.RUSettings.RU.Settings.BurstLimit))
+				resourceGroupConfigGauge.WithLabelValues(group.Name, priorityLabel).Set(group.getPriority())
+				resourceGroupConfigGauge.WithLabelValues(group.Name, ruPerSecLabel).Set(group.getFillRate())
+				resourceGroupConfigGauge.WithLabelValues(group.Name, ruCapacityLabel).Set(group.getBurstLimit())
 			}
 		case <-recordMaxTicker.C:
 			// Record the sum of RRU and WRU every second.

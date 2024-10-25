@@ -16,6 +16,7 @@ package schedulers
 
 import (
 	"context"
+	"slices"
 	"testing"
 
 	"github.com/docker/go-units"
@@ -80,7 +81,7 @@ func TestShuffleLeader(t *testing.T) {
 	tc.AddLeaderRegion(3, 3, 4, 1, 2)
 	tc.AddLeaderRegion(4, 4, 1, 2, 3)
 
-	for i := 0; i < 4; i++ {
+	for range 4 {
 		ops, _ = sl.Schedule(tc, false)
 		re.NotEmpty(ops)
 		re.Equal(operator.OpLeader|operator.OpAdmin, ops[0].Kind())
@@ -196,7 +197,7 @@ func checkBalance(re *require.Assertions, enablePlacementRules bool) {
 
 	// try to get an operator
 	var ops []*operator.Operator
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		ops, _ = hb.Schedule(tc, false)
 		if ops != nil {
 			break
@@ -255,7 +256,7 @@ func TestShuffleRegion(t *testing.T) {
 	tc.AddLeaderRegion(3, 3, 4, 1)
 	tc.AddLeaderRegion(4, 4, 1, 2)
 
-	for i := 0; i < 4; i++ {
+	for range 4 {
 		ops, _ = sl.Schedule(tc, false)
 		re.NotEmpty(ops)
 		re.Equal(operator.OpRegion, ops[0].Kind())
@@ -362,7 +363,7 @@ func TestSpecialUseHotRegion(t *testing.T) {
 	tc.AddLeaderRegionWithWriteInfo(5, 3, 512*units.KiB*utils.RegionHeartBeatReportInterval, 0, 0, utils.RegionHeartBeatReportInterval, []uint64{1, 2})
 	hs, err := CreateScheduler(writeType, oc, storage, cd)
 	re.NoError(err)
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		ops, _ = hs.Schedule(tc, false)
 		if len(ops) == 0 {
 			continue
@@ -503,5 +504,54 @@ func TestBalanceLeaderWithConflictRule(t *testing.T) {
 		} else {
 			re.Empty(ops)
 		}
+	}
+}
+
+func testDecoder(v any) error {
+	conf, ok := v.(*scatterRangeSchedulerConfig)
+	if ok {
+		conf.RangeName = "test"
+	}
+	return nil
+}
+
+func TestIsDefault(t *testing.T) {
+	re := require.New(t)
+	cancel, _, _, oc := prepareSchedulersTest()
+	defer cancel()
+
+	for schedulerType := range types.SchedulerTypeCompatibleMap {
+		bs, err := CreateScheduler(schedulerType, oc,
+			storage.NewStorageWithMemoryBackend(),
+			testDecoder,
+			func(string) error { return nil })
+		re.NoError(err)
+		if slices.Contains(types.DefaultSchedulers, schedulerType) {
+			re.True(bs.IsDefault())
+		} else {
+			re.False(bs.IsDefault())
+		}
+	}
+}
+
+func TestDisabled(t *testing.T) {
+	re := require.New(t)
+	cancel, _, _, oc := prepareSchedulersTest()
+	defer cancel()
+
+	s := storage.NewStorageWithMemoryBackend()
+	for _, schedulerType := range types.DefaultSchedulers {
+		bs, err := CreateScheduler(schedulerType, oc, s, testDecoder,
+			func(string) error { return nil })
+		re.NoError(err)
+		re.False(bs.IsDisable())
+		re.NoError(bs.SetDisable(true))
+		re.True(bs.IsDisable())
+
+		// test ms scheduling server, another server
+		scheduling, err := CreateScheduler(schedulerType, oc, s, testDecoder,
+			func(string) error { return nil })
+		re.NoError(err)
+		re.True(scheduling.IsDisable())
 	}
 }

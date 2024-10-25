@@ -345,6 +345,7 @@ func (m *ModeManager) Run(ctx context.Context) {
 	select {
 	case <-timer.C:
 	case <-ctx.Done():
+		log.Info("replication mode manager is stopped")
 		return
 	}
 
@@ -383,6 +384,7 @@ func (m *ModeManager) Run(ctx context.Context) {
 	}()
 
 	wg.Wait()
+	log.Info("replication mode manager is stopped")
 }
 
 func minimalUpVoters(rule *placement.Rule, upStores, downStores []*core.StoreInfo) int {

@@ -39,7 +39,7 @@ func TestStoreTimeUnsync(t *testing.T) {
 		region := buildRegion(utils.Write, 3, interval)
 		checkAndUpdate(re, cache, region, 3)
 		{
-			stats := cache.RegionStats(0)
+			stats := cache.GetHotPeerStats(0)
 			re.Len(stats, 3)
 			for _, s := range stats {
 				re.Len(s, 1)
@@ -371,7 +371,7 @@ func TestUpdateHotPeerStat(t *testing.T) {
 	re.Equal(1, newItem[0].HotDegree)
 	re.Equal(2*m-1, newItem[0].AntiCount)
 	// sum of interval is larger than report interval, and cold
-	for i := 0; i < 2*m-1; i++ {
+	for range 2*m - 1 {
 		cache.UpdateStat(newItem[0])
 		newItem = cache.CheckPeerFlow(region, []*metapb.Peer{peer}, deltaLoads, interval)
 	}
@@ -667,13 +667,13 @@ func TestHotPeerCacheTopNThreshold(t *testing.T) {
 		ThresholdsUpdateInterval = interval
 		cache := NewHotPeerCache(context.Background(), utils.Write)
 		now := time.Now()
-		for id := uint64(0); id < 100; id++ {
+		for id := range uint64(100) {
 			meta := &metapb.Region{
 				Id:    id,
 				Peers: []*metapb.Peer{{Id: id, StoreId: 1}},
 			}
 			region := core.NewRegionInfo(meta, meta.Peers[0], core.SetWrittenBytes(id*6000), core.SetWrittenKeys(id*6000), core.SetWrittenQuery(id*6000))
-			for i := 0; i < 10; i++ {
+			for i := range 10 {
 				start := uint64(now.Add(time.Minute * time.Duration(i)).Unix())
 				end := uint64(now.Add(time.Minute * time.Duration(i+1)).Unix())
 				newRegion := region.Clone(core.WithInterval(&pdpb.TimeInterval{

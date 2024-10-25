@@ -158,7 +158,7 @@ type evictLeaderScheduler struct {
 // newEvictLeaderScheduler creates an admin scheduler that transfers all leaders
 // out of a store.
 func newEvictLeaderScheduler(opController *operator.Controller, conf *evictLeaderSchedulerConfig) schedulers.Scheduler {
-	base := schedulers.NewBaseScheduler(opController, userEvictLeaderScheduler)
+	base := schedulers.NewBaseScheduler(opController, userEvictLeaderScheduler, nil)
 	handler := newEvictLeaderHandler(conf)
 	return &evictLeaderScheduler{
 		BaseScheduler: base,
@@ -222,7 +222,7 @@ func (s *evictLeaderScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) (
 		if region == nil {
 			continue
 		}
-		target := filter.NewCandidates(cluster.GetFollowerStores(region)).
+		target := filter.NewCandidates(s.R, cluster.GetFollowerStores(region)).
 			FilterTarget(cluster.GetSchedulerConfig(), nil, nil, &filter.StoreStateFilter{ActionScope: EvictLeaderName, TransferLeader: true, OperatorLevel: constant.Urgent}).
 			RandomPick()
 		if target == nil {
@@ -275,11 +275,18 @@ func (handler *evictLeaderHandler) updateConfig(w http.ResponseWriter, r *http.R
 
 	err := handler.config.BuildWithArgs(args)
 	if err != nil {
+		handler.config.mu.Lock()
+		handler.config.cluster.ResumeLeaderTransfer(id)
+		handler.config.mu.Unlock()
 		handler.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	err = handler.config.Persist()
 	if err != nil {
+		handler.config.mu.Lock()
+		delete(handler.config.StoreIDWitRanges, id)
+		handler.config.cluster.ResumeLeaderTransfer(id)
+		handler.config.mu.Unlock()
 		handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -301,7 +308,7 @@ func (handler *evictLeaderHandler) deleteConfig(w http.ResponseWriter, r *http.R
 
 	handler.config.mu.Lock()
 	defer handler.config.mu.Unlock()
-	_, exists := handler.config.StoreIDWitRanges[id]
+	ranges, exists := handler.config.StoreIDWitRanges[id]
 	if !exists {
 		handler.rd.JSON(w, http.StatusInternalServerError, errors.New("the config does not exist"))
 		return
@@ -309,14 +316,12 @@ func (handler *evictLeaderHandler) deleteConfig(w http.ResponseWriter, r *http.R
 	delete(handler.config.StoreIDWitRanges, id)
 	handler.config.cluster.ResumeLeaderTransfer(id)
 
-	handler.config.mu.Unlock()
 	if err := handler.config.Persist(); err != nil {
-		handler.config.mu.Lock()
+		handler.config.StoreIDWitRanges[id] = ranges
+		_ = handler.config.cluster.PauseLeaderTransfer(id)
 		handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	handler.config.mu.Lock()
-
 	var resp any
 	if len(handler.config.StoreIDWitRanges) == 0 {
 		resp = noStoreInSchedulerInfo

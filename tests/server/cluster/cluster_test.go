@@ -614,7 +614,9 @@ func TestRaftClusterMultipleRestart(t *testing.T) {
 
 	// let the job run at small interval
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs", `return(true)`))
-	for i := 0; i < 100; i++ {
+	for range 100 {
+		// See https://github.com/tikv/pd/issues/8543
+		rc.Wait()
 		err = rc.Start(leaderServer.GetServer())
 		re.NoError(err)
 		time.Sleep(time.Millisecond)
@@ -793,7 +795,7 @@ func TestConcurrentHandleRegion(t *testing.T) {
 	}
 
 	concurrent := 1000
-	for i := 0; i < concurrent; i++ {
+	for i := range concurrent {
 		peerID, err := id.Alloc()
 		re.NoError(err)
 		regionID, err := id.Alloc()
@@ -910,7 +912,7 @@ func TestLoadClusterInfo(t *testing.T) {
 	tc.WaitLeader()
 	leaderServer := tc.GetLeaderServer()
 	svr := leaderServer.GetServer()
-	rc := cluster.NewRaftCluster(ctx, svr.ClusterID(), svr.GetBasicCluster(), svr.GetStorage(), syncer.NewRegionSyncer(svr), svr.GetClient(), svr.GetHTTPClient())
+	rc := cluster.NewRaftCluster(ctx, svr.ClusterID(), svr.GetMember(), svr.GetBasicCluster(), svr.GetStorage(), syncer.NewRegionSyncer(svr), svr.GetClient(), svr.GetHTTPClient(), svr.GetTSOAllocatorManager())
 
 	// Cluster is not bootstrapped.
 	rc.InitCluster(svr.GetAllocator(), svr.GetPersistOptions(), svr.GetHBStreams(), svr.GetKeyspaceGroupManager())
@@ -925,7 +927,7 @@ func TestLoadClusterInfo(t *testing.T) {
 	meta := &metapb.Cluster{Id: 123}
 	re.NoError(testStorage.SaveMeta(meta))
 	stores := make([]*metapb.Store, 0, n)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		store := &metapb.Store{Id: uint64(i)}
 		stores = append(stores, store)
 	}
@@ -935,7 +937,7 @@ func TestLoadClusterInfo(t *testing.T) {
 	}
 
 	regions := make([]*metapb.Region, 0, n)
-	for i := uint64(0); i < uint64(n); i++ {
+	for i := range uint64(n) {
 		region := &metapb.Region{
 			Id:          i,
 			StartKey:    []byte(fmt.Sprintf("%20d", i)),
@@ -950,7 +952,7 @@ func TestLoadClusterInfo(t *testing.T) {
 	}
 	re.NoError(testStorage.Flush())
 
-	raftCluster = cluster.NewRaftCluster(ctx, svr.ClusterID(), basicCluster, testStorage, syncer.NewRegionSyncer(svr), svr.GetClient(), svr.GetHTTPClient())
+	raftCluster = cluster.NewRaftCluster(ctx, svr.ClusterID(), svr.GetMember(), basicCluster, testStorage, syncer.NewRegionSyncer(svr), svr.GetClient(), svr.GetHTTPClient(), svr.GetTSOAllocatorManager())
 	raftCluster.InitCluster(mockid.NewIDAllocator(), svr.GetPersistOptions(), svr.GetHBStreams(), svr.GetKeyspaceGroupManager())
 	raftCluster, err = raftCluster.LoadClusterInfo()
 	re.NoError(err)
@@ -969,7 +971,7 @@ func TestLoadClusterInfo(t *testing.T) {
 
 	m := 20
 	regions = make([]*metapb.Region, 0, n)
-	for i := uint64(0); i < uint64(m); i++ {
+	for i := range uint64(m) {
 		region := &metapb.Region{
 			Id:          i,
 			StartKey:    []byte(fmt.Sprintf("%20d", i)),
@@ -1491,7 +1493,7 @@ func checkEvictLeaderStoreIDs(re *require.Assertions, sc *schedulers.Controller,
 }
 
 func putRegionWithLeader(re *require.Assertions, rc *cluster.RaftCluster, id id.Allocator, storeID uint64) {
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		regionID, err := id.Alloc()
 		re.NoError(err)
 		peerID, err := id.Alloc()
@@ -1664,7 +1666,7 @@ func TestTransferLeaderBack(t *testing.T) {
 	tc.WaitLeader()
 	leaderServer := tc.GetLeaderServer()
 	svr := leaderServer.GetServer()
-	rc := cluster.NewRaftCluster(ctx, svr.ClusterID(), svr.GetBasicCluster(), svr.GetStorage(), syncer.NewRegionSyncer(svr), svr.GetClient(), svr.GetHTTPClient())
+	rc := cluster.NewRaftCluster(ctx, svr.ClusterID(), svr.GetMember(), svr.GetBasicCluster(), svr.GetStorage(), syncer.NewRegionSyncer(svr), svr.GetClient(), svr.GetHTTPClient(), svr.GetTSOAllocatorManager())
 	rc.InitCluster(svr.GetAllocator(), svr.GetPersistOptions(), svr.GetHBStreams(), svr.GetKeyspaceGroupManager())
 	storage := rc.GetStorage()
 	meta := &metapb.Cluster{Id: 123}

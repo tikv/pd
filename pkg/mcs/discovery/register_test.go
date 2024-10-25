@@ -63,7 +63,7 @@ func TestRegister(t *testing.T) {
 	re.NoError(err)
 	fname := testutil.InitTempFileLogger("info")
 	defer os.Remove(fname)
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		re.Equal("127.0.0.1:2", getKeyAfterLeaseExpired(re, client, sr.key))
 		etcd.Server.HardStop() // close the etcd to make the keepalive failed
 		// ensure that the request is timeout

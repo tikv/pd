@@ -49,17 +49,14 @@ type grantHotRegionSchedulerConfig struct {
 	StoreLeaderID uint64   `json:"store-leader-id"`
 }
 
-func (conf *grantHotRegionSchedulerConfig) setStore(leaderID uint64, peers []uint64) bool {
+func (conf *grantHotRegionSchedulerConfig) setStore(leaderID uint64, peers []uint64) {
 	conf.Lock()
 	defer conf.Unlock()
-	ret := slice.AnyOf(peers, func(i int) bool {
-		return leaderID == peers[i]
-	})
-	if ret {
-		conf.StoreLeaderID = leaderID
-		conf.StoreIDs = peers
+	if !slice.Contains(peers, leaderID) {
+		peers = append(peers, leaderID)
 	}
-	return ret
+	conf.StoreLeaderID = leaderID
+	conf.StoreIDs = peers
 }
 
 func (conf *grantHotRegionSchedulerConfig) getStoreLeaderID() uint64 {
@@ -116,8 +113,8 @@ type grantHotRegionScheduler struct {
 
 // newGrantHotRegionScheduler creates an admin scheduler that transfers hot region peer to fixed store and hot region leader to one store.
 func newGrantHotRegionScheduler(opController *operator.Controller, conf *grantHotRegionSchedulerConfig) *grantHotRegionScheduler {
-	base := newBaseHotScheduler(opController,
-		statistics.DefaultHistorySampleDuration, statistics.DefaultHistorySampleInterval)
+	base := newBaseHotScheduler(opController, statistics.DefaultHistorySampleDuration,
+		statistics.DefaultHistorySampleInterval, conf)
 	base.tp = types.GrantHotRegionScheduler
 	handler := newGrantHotRegionHandler(conf)
 	ret := &grantHotRegionScheduler{
@@ -194,10 +191,7 @@ func (handler *grantHotRegionHandler) updateConfig(w http.ResponseWriter, r *htt
 		handler.rd.JSON(w, http.StatusBadRequest, errs.ErrBytesToUint64)
 		return
 	}
-	if !handler.config.setStore(leaderID, storeIDs) {
-		handler.rd.JSON(w, http.StatusBadRequest, errs.ErrSchedulerConfig)
-		return
-	}
+	handler.config.setStore(leaderID, storeIDs)
 
 	if err = handler.config.persist(); err != nil {
 		handler.config.setStoreLeaderID(0)

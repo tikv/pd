@@ -17,6 +17,7 @@ package cluster
 import (
 	"context"
 	"encoding/json"
+	errorspkg "errors"
 	"fmt"
 	"io"
 	"math"
@@ -43,6 +44,7 @@ import (
 	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/mcs/discovery"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
+	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/memory"
 	"github.com/tikv/pd/pkg/progress"
 	"github.com/tikv/pd/pkg/ratelimit"
@@ -55,10 +57,11 @@ import (
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/statistics/utils"
 	"github.com/tikv/pd/pkg/storage"
-	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/syncer"
+	"github.com/tikv/pd/pkg/tso"
 	"github.com/tikv/pd/pkg/unsaferecovery"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
+	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/netutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
@@ -88,12 +91,13 @@ const (
 	// nodeStateCheckJobInterval is the interval to run node state check job.
 	nodeStateCheckJobInterval = 10 * time.Second
 	// metricsCollectionJobInterval is the interval to run metrics collection job.
-	metricsCollectionJobInterval = 10 * time.Second
-	updateStoreStatsInterval     = 9 * time.Millisecond
-	clientTimeout                = 3 * time.Second
-	defaultChangedRegionsLimit   = 10000
-	gcTombstoneInterval          = 30 * 24 * time.Hour
-	serviceCheckInterval         = 10 * time.Second
+	metricsCollectionJobInterval   = 10 * time.Second
+	updateStoreStatsInterval       = 9 * time.Millisecond
+	clientTimeout                  = 3 * time.Second
+	defaultChangedRegionsLimit     = 10000
+	gcTombstoneInterval            = 30 * 24 * time.Hour
+	schedulingServiceCheckInterval = 10 * time.Second
+	tsoServiceCheckInterval        = 100 * time.Millisecond
 	// persistLimitRetryTimes is used to reduce the probability of the persistent error
 	// since the once the store is added or removed, we shouldn't return an error even if the store limit is failed to persist.
 	persistLimitRetryTimes  = 5
@@ -144,6 +148,7 @@ type RaftCluster struct {
 	cancel    context.CancelFunc
 
 	*core.BasicCluster // cached cluster info
+	member             *member.EmbeddedEtcdMember
 
 	etcdClient *clientv3.Client
 	httpClient *http.Client
@@ -174,6 +179,7 @@ type RaftCluster struct {
 	keyspaceGroupManager     *keyspace.GroupManager
 	independentServices      sync.Map
 	hbstreams                *hbstream.HeartbeatStreams
+	tsoAllocator             *tso.AllocatorManager
 
 	// heartbeatRunner is used to process the subtree update task asynchronously.
 	heartbeatRunner ratelimit.Runner
@@ -194,16 +200,18 @@ type Status struct {
 }
 
 // NewRaftCluster create a new cluster.
-func NewRaftCluster(ctx context.Context, clusterID uint64, basicCluster *core.BasicCluster, storage storage.Storage, regionSyncer *syncer.RegionSyncer, etcdClient *clientv3.Client,
-	httpClient *http.Client) *RaftCluster {
+func NewRaftCluster(ctx context.Context, clusterID uint64, member *member.EmbeddedEtcdMember, basicCluster *core.BasicCluster, storage storage.Storage, regionSyncer *syncer.RegionSyncer, etcdClient *clientv3.Client,
+	httpClient *http.Client, tsoAllocator *tso.AllocatorManager) *RaftCluster {
 	return &RaftCluster{
 		serverCtx:       ctx,
 		clusterID:       clusterID,
+		member:          member,
 		regionSyncer:    regionSyncer,
 		httpClient:      httpClient,
 		etcdClient:      etcdClient,
 		BasicCluster:    basicCluster,
 		storage:         storage,
+		tsoAllocator:    tsoAllocator,
 		heartbeatRunner: ratelimit.NewConcurrentRunner(heartbeatTaskRunner, ratelimit.NewConcurrencyLimiter(uint64(runtime.NumCPU()*2)), time.Minute),
 		miscRunner:      ratelimit.NewConcurrentRunner(miscTaskRunner, ratelimit.NewConcurrencyLimiter(uint64(runtime.NumCPU()*2)), time.Minute),
 		logRunner:       ratelimit.NewConcurrentRunner(logTaskRunner, ratelimit.NewConcurrencyLimiter(uint64(runtime.NumCPU()*2)), time.Minute),
@@ -265,7 +273,7 @@ func (c *RaftCluster) isInitialized() bool {
 // value of time.Time when there is error or the cluster is not bootstrapped yet.
 func (c *RaftCluster) loadBootstrapTime() (time.Time, error) {
 	var t time.Time
-	data, err := c.storage.Load(endpoint.ClusterBootstrapTimeKey())
+	data, err := c.storage.Load(keypath.ClusterBootstrapTimeKey())
 	if err != nil {
 		return t, err
 	}
@@ -314,11 +322,13 @@ func (c *RaftCluster) Start(s Server) error {
 	if err != nil {
 		return err
 	}
+	c.checkTSOService()
 	cluster, err := c.LoadClusterInfo()
 	if err != nil {
 		return err
 	}
 	if cluster == nil {
+		log.Warn("cluster is not bootstrapped")
 		return nil
 	}
 
@@ -351,7 +361,7 @@ func (c *RaftCluster) Start(s Server) error {
 			return err
 		}
 	}
-	c.checkServices()
+	c.checkSchedulingService()
 	c.wg.Add(9)
 	go c.runServiceCheckJob()
 	go c.runMetricsCollectionJob()
@@ -370,7 +380,7 @@ func (c *RaftCluster) Start(s Server) error {
 	return nil
 }
 
-func (c *RaftCluster) checkServices() {
+func (c *RaftCluster) checkSchedulingService() {
 	if c.isAPIServiceMode {
 		servers, err := discovery.Discover(c.etcdClient, strconv.FormatUint(c.clusterID, 10), constant.SchedulingServiceName)
 		if c.opt.GetMicroServiceConfig().IsSchedulingFallbackEnabled() && (err != nil || len(servers) == 0) {
@@ -390,26 +400,76 @@ func (c *RaftCluster) checkServices() {
 	}
 }
 
+// checkTSOService checks the TSO service.
+func (c *RaftCluster) checkTSOService() {
+	if c.isAPIServiceMode {
+		return
+	}
+
+	if err := c.startTSOJobs(); err != nil {
+		// If there is an error, need to wait for the next check.
+		log.Error("failed to start TSO jobs", errs.ZapError(err))
+		return
+	}
+}
+
 func (c *RaftCluster) runServiceCheckJob() {
 	defer logutil.LogPanic()
 	defer c.wg.Done()
 
-	ticker := time.NewTicker(serviceCheckInterval)
+	schedulingTicker := time.NewTicker(schedulingServiceCheckInterval)
 	failpoint.Inject("highFrequencyClusterJobs", func() {
-		ticker.Stop()
-		ticker = time.NewTicker(time.Millisecond)
+		schedulingTicker.Reset(time.Millisecond)
 	})
-	defer ticker.Stop()
+	defer schedulingTicker.Stop()
 
 	for {
 		select {
 		case <-c.ctx.Done():
 			log.Info("service check job is stopped")
 			return
-		case <-ticker.C:
-			c.checkServices()
+		case <-schedulingTicker.C:
+			c.checkSchedulingService()
 		}
 	}
+}
+
+func (c *RaftCluster) startTSOJobs() error {
+	allocator, err := c.tsoAllocator.GetAllocator(tso.GlobalDCLocation)
+	if err != nil {
+		log.Error("failed to get global TSO allocator", errs.ZapError(err))
+		return err
+	}
+	if !allocator.IsInitialize() {
+		log.Info("initializing the global TSO allocator")
+		if err := allocator.Initialize(0); err != nil {
+			log.Error("failed to initialize the global TSO allocator", errs.ZapError(err))
+			return err
+		}
+	}
+	return nil
+}
+
+func (c *RaftCluster) stopTSOJobs() error {
+	allocator, err := c.tsoAllocator.GetAllocator(tso.GlobalDCLocation)
+	if err != nil {
+		log.Error("failed to get global TSO allocator", errs.ZapError(err))
+		return err
+	}
+	if allocator.IsInitialize() {
+		c.tsoAllocator.ResetAllocatorGroup(tso.GlobalDCLocation, true)
+		failpoint.Inject("updateAfterResetTSO", func() {
+			allocator, _ := c.tsoAllocator.GetAllocator(tso.GlobalDCLocation)
+			if err := allocator.UpdateTSO(); !errorspkg.Is(err, errs.ErrUpdateTimestamp) {
+				log.Panic("the tso update after reset should return ErrUpdateTimestamp as expected", zap.Error(err))
+			}
+			if allocator.IsInitialize() {
+				log.Panic("the allocator should be uninitialized after reset")
+			}
+		})
+	}
+
+	return nil
 }
 
 // startGCTuner
@@ -675,8 +735,7 @@ func (c *RaftCluster) runMetricsCollectionJob() {
 
 	ticker := time.NewTicker(metricsCollectionJobInterval)
 	failpoint.Inject("highFrequencyClusterJobs", func() {
-		ticker.Stop()
-		ticker = time.NewTicker(time.Millisecond)
+		ticker.Reset(time.Millisecond)
 	})
 	defer ticker.Stop()
 
@@ -699,8 +758,7 @@ func (c *RaftCluster) runNodeStateCheckJob() {
 
 	ticker := time.NewTicker(nodeStateCheckJobInterval)
 	failpoint.Inject("highFrequencyClusterJobs", func() {
-		ticker.Stop()
-		ticker = time.NewTicker(2 * time.Second)
+		ticker.Reset(2 * time.Second)
 	})
 	defer ticker.Stop()
 
@@ -760,6 +818,9 @@ func (c *RaftCluster) Stop() {
 	if !c.IsServiceIndependent(constant.SchedulingServiceName) {
 		c.stopSchedulingJobs()
 	}
+	if err := c.stopTSOJobs(); err != nil {
+		log.Error("failed to stop tso jobs", errs.ZapError(err))
+	}
 	c.heartbeatRunner.Stop()
 	c.miscRunner.Stop()
 	c.logRunner.Stop()
@@ -767,6 +828,11 @@ func (c *RaftCluster) Stop() {
 
 	c.wg.Wait()
 	log.Info("raft cluster is stopped")
+}
+
+// Wait blocks until the cluster is stopped. Only for test purpose.
+func (c *RaftCluster) Wait() {
+	c.wg.Wait()
 }
 
 // IsRunning return if the cluster is running.
@@ -1009,7 +1075,7 @@ func (c *RaftCluster) processReportBuckets(buckets *metapb.Buckets) error {
 	// the two request(A:3,B:2) get the same region and need to update the buckets.
 	// the A will pass the check and set the version to 3, the B will fail because the region.bucket has changed.
 	// the retry should keep the old version and the new version will be set to the region.bucket, like two requests (A:2,B:3).
-	for retry := 0; retry < 3; retry++ {
+	for range 3 {
 		old := region.GetBuckets()
 		// region should not update if the version of the buckets is less than the old one.
 		if old != nil && buckets.GetVersion() <= old.GetVersion() {
@@ -2104,7 +2170,7 @@ func (c *RaftCluster) AddStoreLimit(store *metapb.Store) {
 	cfg.StoreLimit[storeID] = slc
 	c.opt.SetScheduleConfig(cfg)
 	var err error
-	for i := 0; i < persistLimitRetryTimes; i++ {
+	for range persistLimitRetryTimes {
 		if err = c.opt.Persist(c.storage); err == nil {
 			log.Info("store limit added", zap.Uint64("store-id", storeID))
 			return
@@ -2123,7 +2189,7 @@ func (c *RaftCluster) RemoveStoreLimit(storeID uint64) {
 	delete(cfg.StoreLimit, storeID)
 	c.opt.SetScheduleConfig(cfg)
 	var err error
-	for i := 0; i < persistLimitRetryTimes; i++ {
+	for range persistLimitRetryTimes {
 		if err = c.opt.Persist(c.storage); err == nil {
 			log.Info("store limit removed", zap.Uint64("store-id", storeID))
 			id := strconv.FormatUint(storeID, 10)
@@ -2444,25 +2510,16 @@ func IsClientURL(addr string, etcdClient *clientv3.Client) bool {
 
 // IsServiceIndependent returns whether the service is independent.
 func (c *RaftCluster) IsServiceIndependent(name string) bool {
-	if c == nil {
-		return false
-	}
 	_, exist := c.independentServices.Load(name)
 	return exist
 }
 
 // SetServiceIndependent sets the service to be independent.
 func (c *RaftCluster) SetServiceIndependent(name string) {
-	if c == nil {
-		return
-	}
 	c.independentServices.Store(name, struct{}{})
 }
 
 // UnsetServiceIndependent unsets the service to be independent.
 func (c *RaftCluster) UnsetServiceIndependent(name string) {
-	if c == nil {
-		return
-	}
 	c.independentServices.Delete(name)
 }

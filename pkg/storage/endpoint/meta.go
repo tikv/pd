@@ -26,6 +26,7 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/encryption"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/utils/keypath"
 )
 
 // MetaStorage defines the storage operations on the PD cluster meta info.
@@ -62,41 +63,41 @@ const (
 // LoadMeta loads cluster meta from the storage. This method will only
 // be used by the PD server, so we should only implement it for the etcd storage.
 func (se *StorageEndpoint) LoadMeta(meta *metapb.Cluster) (bool, error) {
-	return se.loadProto(clusterPath, meta)
+	return se.loadProto(keypath.ClusterPath, meta)
 }
 
 // SaveMeta save cluster meta to the storage. This method will only
 // be used by the PD server, so we should only implement it for the etcd storage.
 func (se *StorageEndpoint) SaveMeta(meta *metapb.Cluster) error {
-	return se.saveProto(clusterPath, meta)
+	return se.saveProto(keypath.ClusterPath, meta)
 }
 
 // LoadStoreMeta loads one store from storage.
 func (se *StorageEndpoint) LoadStoreMeta(storeID uint64, store *metapb.Store) (bool, error) {
-	return se.loadProto(StorePath(storeID), store)
+	return se.loadProto(keypath.StorePath(storeID), store)
 }
 
 // SaveStoreMeta saves one store to storage.
 func (se *StorageEndpoint) SaveStoreMeta(store *metapb.Store) error {
-	return se.saveProto(StorePath(store.GetId()), store)
+	return se.saveProto(keypath.StorePath(store.GetId()), store)
 }
 
 // SaveStoreWeight saves a store's leader and region weight to storage.
 func (se *StorageEndpoint) SaveStoreWeight(storeID uint64, leader, region float64) error {
 	leaderValue := strconv.FormatFloat(leader, 'f', -1, 64)
-	if err := se.Save(storeLeaderWeightPath(storeID), leaderValue); err != nil {
+	if err := se.Save(keypath.StoreLeaderWeightPath(storeID), leaderValue); err != nil {
 		return err
 	}
 	regionValue := strconv.FormatFloat(region, 'f', -1, 64)
-	return se.Save(storeRegionWeightPath(storeID), regionValue)
+	return se.Save(keypath.StoreRegionWeightPath(storeID), regionValue)
 }
 
 // LoadStores loads all stores from storage to StoresInfo.
 func (se *StorageEndpoint) LoadStores(f func(store *core.StoreInfo)) error {
 	nextID := uint64(0)
-	endKey := StorePath(math.MaxUint64)
+	endKey := keypath.StorePath(math.MaxUint64)
 	for {
-		key := StorePath(nextID)
+		key := keypath.StorePath(nextID)
 		_, res, err := se.LoadRange(key, endKey, MinKVRangeLimit)
 		if err != nil {
 			return err
@@ -112,11 +113,11 @@ func (se *StorageEndpoint) LoadStores(f func(store *core.StoreInfo)) error {
 			if store.State == metapb.StoreState_Tombstone {
 				store.NodeState = metapb.NodeState_Removed
 			}
-			leaderWeight, err := se.loadFloatWithDefaultValue(storeLeaderWeightPath(store.GetId()), 1.0)
+			leaderWeight, err := se.loadFloatWithDefaultValue(keypath.StoreLeaderWeightPath(store.GetId()), 1.0)
 			if err != nil {
 				return err
 			}
-			regionWeight, err := se.loadFloatWithDefaultValue(storeRegionWeightPath(store.GetId()), 1.0)
+			regionWeight, err := se.loadFloatWithDefaultValue(keypath.StoreRegionWeightPath(store.GetId()), 1.0)
 			if err != nil {
 				return err
 			}
@@ -148,12 +149,12 @@ func (se *StorageEndpoint) loadFloatWithDefaultValue(path string, def float64) (
 
 // DeleteStoreMeta deletes one store from storage.
 func (se *StorageEndpoint) DeleteStoreMeta(store *metapb.Store) error {
-	return se.Remove(StorePath(store.GetId()))
+	return se.Remove(keypath.StorePath(store.GetId()))
 }
 
 // LoadRegion loads one region from the backend storage.
 func (se *StorageEndpoint) LoadRegion(regionID uint64, region *metapb.Region) (ok bool, err error) {
-	value, err := se.Load(RegionPath(regionID))
+	value, err := se.Load(keypath.RegionPath(regionID))
 	if err != nil || value == "" {
 		return false, err
 	}
@@ -168,7 +169,7 @@ func (se *StorageEndpoint) LoadRegion(regionID uint64, region *metapb.Region) (o
 // LoadRegions loads all regions from storage to RegionsInfo.
 func (se *StorageEndpoint) LoadRegions(ctx context.Context, f func(region *core.RegionInfo) []*core.RegionInfo) error {
 	nextID := uint64(0)
-	endKey := RegionPath(math.MaxUint64)
+	endKey := keypath.RegionPath(math.MaxUint64)
 
 	// Since the region key may be very long, using a larger rangeLimit will cause
 	// the message packet to exceed the grpc message size limit (4MB). Here we use
@@ -179,7 +180,7 @@ func (se *StorageEndpoint) LoadRegions(ctx context.Context, f func(region *core.
 			rangeLimit = 1
 			time.Sleep(time.Second)
 		})
-		startKey := RegionPath(nextID)
+		startKey := keypath.RegionPath(nextID)
 		_, res, err := se.LoadRange(startKey, endKey, rangeLimit)
 		if err != nil {
 			if rangeLimit /= 2; rangeLimit >= MinKVRangeLimit {
@@ -227,12 +228,12 @@ func (se *StorageEndpoint) SaveRegion(region *metapb.Region) error {
 	if err != nil {
 		return errs.ErrProtoMarshal.Wrap(err).GenWithStackByArgs()
 	}
-	return se.Save(RegionPath(region.GetId()), string(value))
+	return se.Save(keypath.RegionPath(region.GetId()), string(value))
 }
 
 // DeleteRegion deletes one region from storage.
 func (se *StorageEndpoint) DeleteRegion(region *metapb.Region) error {
-	return se.Remove(RegionPath(region.GetId()))
+	return se.Remove(keypath.RegionPath(region.GetId()))
 }
 
 // Flush flushes the pending data to the underlying storage backend.

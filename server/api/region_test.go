@@ -126,9 +126,13 @@ func (suite *regionTestSuite) TestRegionCheck() {
 
 	url = fmt.Sprintf("%s/regions/check/%s", suite.urlPrefix, "down-peer")
 	r2 := &response.RegionsInfo{}
-	re.NoError(tu.ReadGetJSON(re, testDialClient, url, r2))
-	r2.Adjust()
-	re.Equal(&response.RegionsInfo{Count: 1, Regions: []response.RegionInfo{*response.NewAPIRegionInfo(r)}}, r2)
+	tu.Eventually(re, func() bool {
+		if err := tu.ReadGetJSON(re, testDialClient, url, r2); err != nil {
+			return false
+		}
+		r2.Adjust()
+		return suite.Equal(&response.RegionsInfo{Count: 1, Regions: []response.RegionInfo{*response.NewAPIRegionInfo(r)}}, r2)
+	})
 
 	url = fmt.Sprintf("%s/regions/check/%s", suite.urlPrefix, "pending-peer")
 	r3 := &response.RegionsInfo{}
@@ -146,25 +150,37 @@ func (suite *regionTestSuite) TestRegionCheck() {
 	mustRegionHeartbeat(re, suite.svr, r)
 	url = fmt.Sprintf("%s/regions/check/%s", suite.urlPrefix, "empty-region")
 	r5 := &response.RegionsInfo{}
-	re.NoError(tu.ReadGetJSON(re, testDialClient, url, r5))
-	r5.Adjust()
-	re.Equal(&response.RegionsInfo{Count: 1, Regions: []response.RegionInfo{*response.NewAPIRegionInfo(r)}}, r5)
+	tu.Eventually(re, func() bool {
+		if err := tu.ReadGetJSON(re, testDialClient, url, r5); err != nil {
+			return false
+		}
+		r5.Adjust()
+		return suite.Equal(&response.RegionsInfo{Count: 1, Regions: []response.RegionInfo{*response.NewAPIRegionInfo(r)}}, r5)
+	})
 
 	r = r.Clone(core.SetApproximateSize(1))
 	mustRegionHeartbeat(re, suite.svr, r)
 	url = fmt.Sprintf("%s/regions/check/%s", suite.urlPrefix, "hist-size")
 	r6 := make([]*histItem, 1)
-	re.NoError(tu.ReadGetJSON(re, testDialClient, url, &r6))
-	histSizes := []*histItem{{Start: 1, End: 1, Count: 1}}
-	re.Equal(histSizes, r6)
+	tu.Eventually(re, func() bool {
+		if err := tu.ReadGetJSON(re, testDialClient, url, &r6); err != nil {
+			return false
+		}
+		histSizes := []*histItem{{Start: 1, End: 1, Count: 1}}
+		return suite.Equal(histSizes, r6)
+	})
 
 	r = r.Clone(core.SetApproximateKeys(1000))
 	mustRegionHeartbeat(re, suite.svr, r)
 	url = fmt.Sprintf("%s/regions/check/%s", suite.urlPrefix, "hist-keys")
 	r7 := make([]*histItem, 1)
-	re.NoError(tu.ReadGetJSON(re, testDialClient, url, &r7))
-	histKeys := []*histItem{{Start: 1000, End: 1999, Count: 1}}
-	re.Equal(histKeys, r7)
+	tu.Eventually(re, func() bool {
+		if err := tu.ReadGetJSON(re, testDialClient, url, &r7); err != nil {
+			return false
+		}
+		histKeys := []*histItem{{Start: 1000, End: 1999, Count: 1}}
+		return suite.Equal(histKeys, r7)
+	})
 
 	// ref https://github.com/tikv/pd/issues/3558, we should change size to pass `NeedUpdate` for observing.
 	r = r.Clone(core.SetApproximateKeys(0))
@@ -172,10 +188,13 @@ func (suite *regionTestSuite) TestRegionCheck() {
 	mustRegionHeartbeat(re, suite.svr, r)
 	url = fmt.Sprintf("%s/regions/check/%s", suite.urlPrefix, "offline-peer")
 	r8 := &response.RegionsInfo{}
-	re.NoError(tu.ReadGetJSON(re, testDialClient, url, r8))
-	r4.Adjust()
-	re.Equal(1, r8.Count)
-	re.Equal(r.GetID(), r8.Regions[0].ID)
+	tu.Eventually(re, func() bool {
+		if err := tu.ReadGetJSON(re, testDialClient, url, r8); err != nil {
+			return false
+		}
+		r4.Adjust()
+		return suite.Equal(r.GetID(), r8.Regions[0].ID) && r8.Count == 1
+	})
 }
 
 func (suite *regionTestSuite) TestRegions() {
@@ -639,7 +658,7 @@ func BenchmarkGetRegions(b *testing.B) {
 	url := fmt.Sprintf("%s%s/api/v1/regions", addr, apiPrefix)
 	mustBootstrapCluster(re, svr)
 	regionCount := 1000000
-	for i := 0; i < regionCount; i++ {
+	for i := range regionCount {
 		r := core.NewTestRegionInfo(uint64(i+2), 1,
 			[]byte(fmt.Sprintf("%09d", i)),
 			[]byte(fmt.Sprintf("%09d", i+1)),

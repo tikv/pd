@@ -221,10 +221,10 @@ func (c *httpController) run() {
 		go func(hCli pdHttp.Client) {
 			defer c.wg.Done()
 			c.wg.Add(int(burst))
-			for i := int64(0); i < burst; i++ {
+			for range burst {
 				go func() {
 					defer c.wg.Done()
-					var ticker = time.NewTicker(tt)
+					ticker := time.NewTicker(tt)
 					defer ticker.Stop()
 					for {
 						select {
@@ -290,10 +290,10 @@ func (c *gRPCController) run() {
 		go func(cli pd.Client) {
 			defer c.wg.Done()
 			c.wg.Add(int(burst))
-			for i := int64(0); i < burst; i++ {
+			for range burst {
 				go func() {
 					defer c.wg.Done()
-					var ticker = time.NewTicker(tt)
+					ticker := time.NewTicker(tt)
 					defer ticker.Stop()
 					for {
 						select {
@@ -364,10 +364,10 @@ func (c *etcdController) run() {
 		go func(cli *clientv3.Client) {
 			defer c.wg.Done()
 			c.wg.Add(int(burst))
-			for i := int64(0); i < burst; i++ {
+			for range burst {
 				go func() {
 					defer c.wg.Done()
-					var ticker = time.NewTicker(tt)
+					ticker := time.NewTicker(tt)
 					defer ticker.Stop()
 					for {
 						select {

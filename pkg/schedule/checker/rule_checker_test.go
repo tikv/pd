@@ -187,7 +187,7 @@ func (suite *ruleCheckerTestSuite) TestFixPeer() {
 	nr1 := r1.Clone(core.WithPendingPeers([]*metapb.Peer{r1.GetStorePeer(3)}))
 	suite.cluster.PutRegion(nr1)
 	hasTransferLeader := false
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		op = suite.rc.Check(suite.cluster.GetRegion(1))
 		re.NotNil(op)
 		if step, ok := op.Step(0).(operator.TransferLeader); ok {
@@ -838,14 +838,14 @@ func (suite *ruleCheckerTestSuite) TestFixOrphanPeerWithDisconnectedStoreAndRule
 	// disconnect any two stores and change rule to 3 replicas
 	stores := []uint64{1, 2, 3, 4, 5}
 	testCases := [][]uint64{}
-	for i := 0; i < len(stores); i++ {
+	for i := range stores {
 		for j := i + 1; j < len(stores); j++ {
 			testCases = append(testCases, []uint64{stores[i], stores[j]})
 		}
 	}
 	for _, leader := range stores {
 		var followers []uint64
-		for i := 0; i < len(stores); i++ {
+		for i := range stores {
 			if stores[i] != leader {
 				followers = append(followers, stores[i])
 			}
@@ -896,7 +896,7 @@ func (suite *ruleCheckerTestSuite) TestFixOrphanPeerWithDisconnectedStoreAndRule
 				re.Contains(op.Desc(), "orphan")
 				var removedPeerStoreID uint64
 				newLeaderStoreID := r1.GetLeader().GetStoreId()
-				for i := 0; i < op.Len(); i++ {
+				for i := range op.Len() {
 					if s, ok := op.Step(i).(operator.RemovePeer); ok {
 						removedPeerStoreID = s.FromStore
 					}
@@ -931,7 +931,7 @@ func (suite *ruleCheckerTestSuite) TestFixOrphanPeerWithDisconnectedStoreAndRule
 	// and there is a learner in the disconnected store.
 	stores := []uint64{1, 2, 3, 4, 5, 6}
 	testCases := [][]uint64{}
-	for i := 0; i < len(stores); i++ {
+	for i := range stores {
 		for j := i + 1; j < len(stores); j++ {
 			for k := j + 1; k < len(stores); k++ {
 				testCases = append(testCases, []uint64{stores[i], stores[j], stores[k]})
@@ -940,7 +940,7 @@ func (suite *ruleCheckerTestSuite) TestFixOrphanPeerWithDisconnectedStoreAndRule
 	}
 	for _, leader := range stores {
 		var followers []uint64
-		for i := 0; i < len(stores); i++ {
+		for i := range stores {
 			if stores[i] != leader {
 				followers = append(followers, stores[i])
 			}
@@ -1020,7 +1020,7 @@ func (suite *ruleCheckerTestSuite) TestFixOrphanPeerWithDisconnectedStoreAndRule
 					re.Contains(op.Desc(), "orphan")
 					var removedPeerStoreID uint64
 					newLeaderStoreID := r1.GetLeader().GetStoreId()
-					for i := 0; i < op.Len(); i++ {
+					for i := range op.Len() {
 						if s, ok := op.Step(i).(operator.RemovePeer); ok {
 							removedPeerStoreID = s.FromStore
 						}

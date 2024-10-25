@@ -114,7 +114,7 @@ func testRange(re *require.Assertions, kv Base) {
 func testSaveMultiple(re *require.Assertions, kv Base, count int) {
 	err := kv.RunInTxn(context.Background(), func(txn Txn) error {
 		var saveErr error
-		for i := 0; i < count; i++ {
+		for i := range count {
 			saveErr = txn.Save("key"+strconv.Itoa(i), "val"+strconv.Itoa(i))
 			if saveErr != nil {
 				return saveErr
@@ -123,7 +123,7 @@ func testSaveMultiple(re *require.Assertions, kv Base, count int) {
 		return nil
 	})
 	re.NoError(err)
-	for i := 0; i < count; i++ {
+	for i := range count {
 		val, loadErr := kv.Load("key" + strconv.Itoa(i))
 		re.NoError(loadErr)
 		re.Equal("val"+strconv.Itoa(i), val)

@@ -161,21 +161,33 @@ func TestLeaderPriority(t *testing.T) {
 
 	re.NotEmpty(cluster.WaitLeader())
 
-	leader1, err := cluster.GetServer("pd1").GetEtcdLeader()
+	leader, err := cluster.GetServer("pd1").GetEtcdLeader()
 	re.NoError(err)
-	server1 := cluster.GetServer(leader1)
-	addr := server1.GetConfig().ClientUrls
+	server := cluster.GetServer(leader)
+	addr := server.GetConfig().ClientUrls
 	// PD leader should sync with etcd leader.
 	testutil.Eventually(re, func() bool {
-		return cluster.GetLeader() == leader1
+		leader, err := cluster.GetServer("pd1").GetEtcdLeader()
+		if err != nil {
+			return false
+		}
+		return cluster.GetLeader() == leader
 	})
 	// Bind a lower priority to current leader.
-	post(t, re, addr+"/pd/api/v1/members/name/"+leader1, `{"leader-priority": -1}`)
+	post(t, re, addr+"/pd/api/v1/members/name/"+leader, `{"leader-priority": -1}`)
+
 	// Wait etcd leader change.
-	leader2 := waitEtcdLeaderChange(re, server1, leader1)
+	waitEtcdLeaderChange(re, server, leader)
 	// PD leader should sync with etcd leader again.
 	testutil.Eventually(re, func() bool {
-		return cluster.GetLeader() == leader2
+		etcdLeader, err := server.GetEtcdLeader()
+		if err != nil {
+			return false
+		}
+		if cluster.GetLeader() == etcdLeader {
+			return true
+		}
+		return false
 	})
 }
 
@@ -343,7 +355,7 @@ func TestCampaignLeaderFrequently(t *testing.T) {
 	re.NotEmpty(cluster.GetLeader())
 
 	// need to prevent 3 times(including the above 1st time) campaign leader in 5 min.
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		cluster.GetLeaderServer().ResetPDLeader()
 		re.NotEmpty(cluster.WaitLeader())
 		re.Equal(leader, cluster.GetLeader())
@@ -371,7 +383,7 @@ func TestGrantLeaseFailed(t *testing.T) {
 	re.NotEmpty(cluster.GetLeader())
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/election/skipGrantLeader", fmt.Sprintf("return(\"%s\")", leader)))
 
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		cluster.GetLeaderServer().ResetPDLeader()
 		re.NotEmpty(cluster.WaitLeader())
 	}

@@ -72,7 +72,7 @@ func (suite *serverRegisterTestSuite) TearDownSuite() {
 }
 
 func (suite *serverRegisterTestSuite) TestServerRegister() {
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		suite.checkServerRegister(constant.TSOServiceName)
 	}
 }
@@ -124,7 +124,7 @@ func (suite *serverRegisterTestSuite) checkServerPrimaryChange(serviceName strin
 			cleanup()
 		}
 	}()
-	for i := 0; i < serverNum; i++ {
+	for range serverNum {
 		s, cleanup := suite.addServer(serviceName)
 		cleanups = append(cleanups, cleanup)
 		serverMap[s.GetAddr()] = s

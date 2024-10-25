@@ -202,7 +202,6 @@ func NewAllocatorManager(
 	rootPath string,
 	storage endpoint.TSOStorage,
 	cfg Config,
-	startGlobalLeaderLoop bool,
 ) *AllocatorManager {
 	ctx, cancel := context.WithCancel(ctx)
 	am := &AllocatorManager{
@@ -224,7 +223,7 @@ func NewAllocatorManager(
 	am.localAllocatorConn.clientConns = make(map[string]*grpc.ClientConn)
 
 	// Set up the Global TSO Allocator here, it will be initialized once the member campaigns leader successfully.
-	am.SetUpGlobalAllocator(am.ctx, am.member.GetLeadership(), startGlobalLeaderLoop)
+	am.SetUpGlobalAllocator(am.ctx, am.member.GetLeadership())
 	am.svcLoopWG.Add(1)
 	go am.tsoAllocatorLoop()
 
@@ -234,11 +233,11 @@ func NewAllocatorManager(
 // SetUpGlobalAllocator is used to set up the global allocator, which will initialize the allocator and put it into
 // an allocator daemon. An TSO Allocator should only be set once, and may be initialized and reset multiple times
 // depending on the election.
-func (am *AllocatorManager) SetUpGlobalAllocator(ctx context.Context, leadership *election.Leadership, startGlobalLeaderLoop bool) {
+func (am *AllocatorManager) SetUpGlobalAllocator(ctx context.Context, leadership *election.Leadership) {
 	am.mu.Lock()
 	defer am.mu.Unlock()
 
-	allocator := NewGlobalTSOAllocator(ctx, am, startGlobalLeaderLoop)
+	allocator := NewGlobalTSOAllocator(ctx, am)
 	// Create a new allocatorGroup
 	ctx, cancel := context.WithCancel(ctx)
 	am.mu.allocatorGroups[GlobalDCLocation] = &allocatorGroup{
@@ -715,8 +714,7 @@ func (am *AllocatorManager) AllocatorDaemon(ctx context.Context) {
 	}
 	tsTicker := time.NewTicker(am.updatePhysicalInterval)
 	failpoint.Inject("fastUpdatePhysicalInterval", func() {
-		tsTicker.Stop()
-		tsTicker = time.NewTicker(time.Millisecond)
+		tsTicker.Reset(time.Millisecond)
 	})
 	defer tsTicker.Stop()
 	checkerTicker := time.NewTicker(PriorityCheck)
@@ -1389,4 +1387,15 @@ func (am *AllocatorManager) GetLeaderAddr() string {
 		return ""
 	}
 	return leaderAddrs[0]
+}
+
+func (am *AllocatorManager) startGlobalAllocatorLoop() {
+	globalTSOAllocator, ok := am.mu.allocatorGroups[GlobalDCLocation].allocator.(*GlobalTSOAllocator)
+	if !ok {
+		// it should never happen
+		log.Error("failed to start global allocator loop, global allocator not found")
+		return
+	}
+	globalTSOAllocator.wg.Add(1)
+	go globalTSOAllocator.primaryElectionLoop()
 }

@@ -29,6 +29,8 @@ import (
 )
 
 type labelSchedulerConfig struct {
+	schedulerConfig
+
 	Ranges []core.KeyRange `json:"ranges"`
 	// TODO: When we prepare to use Ranges, we will need to implement the ReloadConfig function for this scheduler.
 }
@@ -43,7 +45,7 @@ type labelScheduler struct {
 // the store with the specific label.
 func newLabelScheduler(opController *operator.Controller, conf *labelSchedulerConfig) Scheduler {
 	return &labelScheduler{
-		BaseScheduler: NewBaseScheduler(opController, types.LabelScheduler),
+		BaseScheduler: NewBaseScheduler(opController, types.LabelScheduler, conf),
 		conf:          conf,
 	}
 }
@@ -89,7 +91,7 @@ func (s *labelScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) ([]*ope
 			}
 			f := filter.NewExcludedFilter(s.GetName(), nil, excludeStores)
 
-			target := filter.NewCandidates(cluster.GetFollowerStores(region)).
+			target := filter.NewCandidates(s.R, cluster.GetFollowerStores(region)).
 				FilterTarget(cluster.GetSchedulerConfig(), nil, nil, &filter.StoreStateFilter{ActionScope: s.GetName(), TransferLeader: true, OperatorLevel: constant.Medium}, f).
 				RandomPick()
 			if target == nil {

@@ -266,7 +266,6 @@ func (d *Driver) RegionsHeartbeat(ctx context.Context) {
 						healthyNodes[n.Store.GetId()] = true
 					}
 				}
-				report := 0
 				for _, region := range regions {
 					hibernatePercent := d.simConfig.HibernatePercent
 					// using rand(0,100) to meet hibernatePercent
@@ -280,7 +279,6 @@ func (d *Driver) RegionsHeartbeat(ctx context.Context) {
 							continue
 						}
 						nodesChannel[storeID] <- region.Clone()
-						report++
 					}
 				}
 

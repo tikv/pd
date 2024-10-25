@@ -34,7 +34,7 @@ import (
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/slice"
-	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
@@ -97,7 +97,6 @@ type GlobalTSOAllocator struct {
 func NewGlobalTSOAllocator(
 	ctx context.Context,
 	am *AllocatorManager,
-	startGlobalLeaderLoop bool,
 ) Allocator {
 	ctx, cancel := context.WithCancel(ctx)
 	gta := &GlobalTSOAllocator{
@@ -109,11 +108,6 @@ func NewGlobalTSOAllocator(
 		tsoAllocatorRoleGauge: tsoAllocatorRole.WithLabelValues(am.getGroupIDStr(), GlobalDCLocation),
 	}
 
-	if startGlobalLeaderLoop {
-		gta.wg.Add(1)
-		go gta.primaryElectionLoop()
-	}
-
 	return gta
 }
 
@@ -121,7 +115,7 @@ func newGlobalTimestampOracle(am *AllocatorManager) *timestampOracle {
 	oracle := &timestampOracle{
 		client:                 am.member.GetLeadership().GetClient(),
 		keyspaceGroupID:        am.kgID,
-		tsPath:                 endpoint.KeyspaceGroupGlobalTSPath(am.kgID),
+		tsPath:                 keypath.KeyspaceGroupGlobalTSPath(am.kgID),
 		storage:                am.storage,
 		saveInterval:           am.saveInterval,
 		updatePhysicalInterval: am.updatePhysicalInterval,
@@ -239,7 +233,7 @@ func (gta *GlobalTSOAllocator) GenerateTSO(ctx context.Context, count uint32) (p
 	// (whit synchronization with other Local TSO Allocators)
 	ctx, cancel := context.WithCancel(gta.ctx)
 	defer cancel()
-	for i := 0; i < maxRetryCount; i++ {
+	for range maxRetryCount {
 		var (
 			err                    error
 			shouldRetry, skipCheck bool
@@ -372,7 +366,7 @@ func (gta *GlobalTSOAllocator) SyncMaxTS(
 ) error {
 	defer trace.StartRegion(ctx, "GlobalTSOAllocator.SyncMaxTS").End()
 	originalMaxTSO := *maxTSO
-	for i := 0; i < syncMaxRetryCount; i++ {
+	for i := range syncMaxRetryCount {
 		// Collect all allocator leaders' client URLs
 		allocatorLeaders := make(map[string]*pdpb.Member)
 		for dcLocation := range dcLocationMap {
@@ -537,6 +531,8 @@ func (gta *GlobalTSOAllocator) Reset() {
 	gta.timestampOracle.ResetTimestamp()
 }
 
+// primaryElectionLoop is used to maintain the TSO primary election and TSO's
+// running allocator. It is only used in API mode.
 func (gta *GlobalTSOAllocator) primaryElectionLoop() {
 	defer logutil.LogPanic()
 	defer gta.wg.Done()

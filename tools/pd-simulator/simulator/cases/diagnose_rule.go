@@ -66,7 +66,7 @@ func newRule1(_ *sc.SimConfig) *Case {
 
 	storeNum, regionNum := 9, 300
 	allStores := make(map[uint64]struct{}, storeNum)
-	for i := 0; i < storeNum; i++ {
+	for range storeNum {
 		id := IDAllocator.nextID()
 		simCase.Stores = append(simCase.Stores, &Store{
 			ID:     id,
@@ -84,7 +84,7 @@ func newRule1(_ *sc.SimConfig) *Case {
 	simCase.Stores[7].Labels = []*metapb.StoreLabel{{Key: "region", Value: "region2"}, {Key: "idc", Value: "idc5"}}
 	simCase.Stores[8].Labels = []*metapb.StoreLabel{{Key: "region", Value: "region1"}}
 
-	for i := 0; i < regionNum; i++ {
+	for i := range regionNum {
 		peers := []*metapb.Peer{
 			{Id: IDAllocator.nextID(), StoreId: uint64(i%(storeNum-5) + 5)},
 			{Id: IDAllocator.nextID(), StoreId: uint64((i+1)%(storeNum-5) + 5)},
@@ -159,7 +159,7 @@ func newRule2(_ *sc.SimConfig) *Case {
 
 	storeNum, regionNum := 6, 300
 	allStores := make(map[uint64]struct{}, storeNum)
-	for i := 0; i < storeNum; i++ {
+	for range storeNum {
 		id := IDAllocator.nextID()
 		simCase.Stores = append(simCase.Stores, &Store{
 			ID:     id,
@@ -174,7 +174,7 @@ func newRule2(_ *sc.SimConfig) *Case {
 	simCase.Stores[4].Labels = []*metapb.StoreLabel{{Key: "region", Value: "region2"}}
 	simCase.Stores[5].Labels = []*metapb.StoreLabel{{Key: "region", Value: "region2"}}
 
-	for i := 0; i < regionNum; i++ {
+	for i := range regionNum {
 		peers := []*metapb.Peer{
 			{Id: IDAllocator.nextID(), StoreId: uint64(i%storeNum + 1)},
 			{Id: IDAllocator.nextID(), StoreId: uint64((i+1)%storeNum + 1)},
