@@ -245,7 +245,7 @@ func getIDAllocator() *mockid.IDAllocator {
 
 func buildRegion(cluster *core.BasicCluster, kind utils.RWType, peerCount int, interval uint64) (region *core.RegionInfo) {
 	peers := make([]*metapb.Peer, 0, peerCount)
-	for i := 0; i < peerCount; i++ {
+	for range peerCount {
 		id, _ := getIDAllocator().Alloc()
 		storeID, _ := getIDAllocator().Alloc()
 		peers = append(peers, &metapb.Peer{
@@ -366,7 +366,7 @@ func TestUpdateHotPeerStat(t *testing.T) {
 	re.Equal(1, newItem[0].HotDegree)
 	re.Equal(2*m-1, newItem[0].AntiCount)
 	// sum of interval is larger than report interval, and cold
-	for i := 0; i < 2*m-1; i++ {
+	for range 2*m - 1 {
 		cache.UpdateStat(newItem[0])
 		newItem = cache.CheckPeerFlow(region, []*metapb.Peer{peer}, deltaLoads, interval)
 	}
@@ -671,14 +671,14 @@ func TestHotPeerCacheTopNThreshold(t *testing.T) {
 		cache := NewHotPeerCache(context.Background(), cluster, utils.Write)
 		now := time.Now()
 		storeID := uint64(1)
-		for id := uint64(0); id < 100; id++ {
+		for id := range uint64(100) {
 			meta := &metapb.Region{
 				Id:    id,
 				Peers: []*metapb.Peer{{Id: id, StoreId: storeID}},
 			}
 			cluster.PutStore(core.NewStoreInfo(&metapb.Store{Id: storeID}, core.SetLastHeartbeatTS(time.Now())))
 			region := core.NewRegionInfo(meta, meta.Peers[0], core.SetWrittenBytes(id*6000), core.SetWrittenKeys(id*6000), core.SetWrittenQuery(id*6000))
-			for i := 0; i < 10; i++ {
+			for i := range 10 {
 				start := uint64(now.Add(time.Minute * time.Duration(i)).Unix())
 				end := uint64(now.Add(time.Minute * time.Duration(i+1)).Unix())
 				newRegion := region.Clone(core.WithInterval(&pdpb.TimeInterval{
@@ -745,7 +745,7 @@ func TestDifferentReportInterval(t *testing.T) {
 	for _, interval := range []uint64{120, 60, 30} {
 		region = region.Clone(core.SetReportInterval(0, interval))
 		checkAndUpdate(re, cache, region, 3)
-		stats := cache.PeerStats(0)
+		stats := cache.GetHotPeerStats(0)
 		re.Len(stats, 3)
 		for _, s := range stats {
 			re.Len(s, 1)

@@ -80,7 +80,7 @@ func (suite *keyspaceTestSuite) TestRegionLabeler() {
 	keyspaces := make([]*keyspacepb.KeyspaceMeta, count)
 	manager := suite.manager
 	var err error
-	for i := 0; i < count; i++ {
+	for i := range count {
 		keyspaces[i], err = manager.CreateKeyspace(&keyspace.CreateKeyspaceRequest{
 			Name:       fmt.Sprintf("test_keyspace_%d", i),
 			CreateTime: now,

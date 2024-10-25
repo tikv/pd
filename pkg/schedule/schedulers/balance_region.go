@@ -141,7 +141,7 @@ func (s *balanceRegionScheduler) Schedule(cluster sche.SchedulerCluster, dryRun 
 		if sourceIndex == len(sourceStores)-1 {
 			break
 		}
-		for i := 0; i < retryLimit; i++ {
+		for range retryLimit {
 			// Priority pick the region that has a pending peer.
 			// Pending region may mean the disk is overload, remove the pending region firstly.
 			solver.Region = filter.SelectOneRegion(cluster.RandPendingRegions(solver.sourceStoreID(), s.conf.Ranges), collector,

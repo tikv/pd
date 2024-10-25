@@ -50,7 +50,7 @@ func resetSizeCacheRecursive(value reflect.Value) {
 		return
 	}
 
-	for i := 0; i < value.NumField(); i++ {
+	for i := range value.NumField() {
 		fieldValue := value.Field(i)
 		fieldType := value.Type().Field(i)
 

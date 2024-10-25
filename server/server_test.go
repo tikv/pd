@@ -61,7 +61,7 @@ func (suite *leaderServerTestSuite) SetupSuite() {
 	cfgs := NewTestMultiConfig(assertutil.CheckerWithNilAssert(re), 3)
 
 	ch := make(chan *Server, 3)
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		cfg := cfgs[i]
 
 		go func() {
@@ -74,7 +74,7 @@ func (suite *leaderServerTestSuite) SetupSuite() {
 		}()
 	}
 
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		svr := <-ch
 		suite.svrs[svr.GetAddr()] = svr
 		suite.leaderPath = svr.GetMember().GetLeaderPath()
@@ -117,7 +117,7 @@ func newTestServersWithCfgs(
 		}(cfg)
 	}
 
-	for i := 0; i < len(cfgs); i++ {
+	for range cfgs {
 		svr := <-ch
 		re.NotNil(svr)
 		svrs = append(svrs, svr)

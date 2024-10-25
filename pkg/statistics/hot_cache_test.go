@@ -33,7 +33,7 @@ func TestIsHot(t *testing.T) {
 		region := buildRegion(cluster, i, 3, 60)
 		stats := cache.CheckReadPeerSync(region, region.GetPeers(), []float64{100000000, 1000, 1000}, 60)
 		cache.Update(stats[0], i)
-		for i := 0; i < 100; i++ {
+		for range 100 {
 			re.True(cache.IsRegionHot(region, 1))
 		}
 	}

@@ -43,7 +43,7 @@ func TestProgress(t *testing.T) {
 	re.Less(math.Abs(ls-30.0/7.0), 1e-6)
 	re.Less(math.Abs(cs-7), 1e-6)
 	// there is no scheduling
-	for i := 0; i < 1000; i++ {
+	for range 1000 {
 		m.UpdateProgress(n, 30, 30, false)
 	}
 	re.Equal(721, m.progresses[n].history.Len())
@@ -124,7 +124,7 @@ func TestProgressWithDynamicWindow(t *testing.T) {
 	re.Less(math.Abs(ls-30.0/(7.0/2)), 1e-6)
 	re.Less(math.Abs(cs-3.5), 1e-6)
 
-	for i := 0; i < 1000; i++ {
+	for range 1000 {
 		m.UpdateProgress(n, 30, 30, false)
 	}
 	re.Equal(721, m.progresses[n].history.Len())
@@ -138,7 +138,7 @@ func TestProgressWithDynamicWindow(t *testing.T) {
 	re.Equal(30.0, m.progresses[n].front.Value.(float64))
 	re.Equal(721, m.progresses[n].history.Len())
 
-	for i := 0; i < 60; i++ {
+	for range 60 {
 		m.UpdateProgress(n, 28, 28, false)
 	}
 	re.Equal(721, m.progresses[n].history.Len())
@@ -193,7 +193,7 @@ func TestProgressWithDynamicWindow(t *testing.T) {
 	re.Equal(0.99, p)
 	re.Equal(float64(1/(29./720)*10.), ls)
 	re.Equal(float64(29./720/10.), cs)
-	for i := 0; i < 2000; i++ {
+	for range 2000 {
 		m.UpdateProgress(n, 1, 1, false)
 	}
 	re.Equal(721, m.progresses[n].history.Len())

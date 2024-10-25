@@ -50,7 +50,7 @@ func TestPut(t *testing.T) {
 	}, true /*update*/)
 
 	// check GetTopNMin
-	for k := 0; k < DimLen; k++ {
+	for k := range DimLen {
 		re.Equal(float64(1-N), tn.GetTopNMin(k).(*item).values[k])
 	}
 
@@ -99,7 +99,7 @@ func TestPut(t *testing.T) {
 	}
 
 	// check Get
-	for i := uint64(0); i < Total; i++ {
+	for i := range uint64(Total) {
 		it := tn.Get(i).(*item)
 		re.Equal(i, it.id)
 		re.Equal(-float64(i), it.values[0])
@@ -109,15 +109,15 @@ func TestPut(t *testing.T) {
 func putPerm(re *require.Assertions, tn *TopN, total int, f func(x int) float64, isUpdate bool) {
 	{ // insert
 		dims := make([][]int, DimLen)
-		for k := 0; k < DimLen; k++ {
+		for k := range DimLen {
 			dims[k] = rand.Perm(total)
 		}
-		for i := 0; i < total; i++ {
+		for i := range total {
 			item := &item{
 				id:     uint64(dims[0][i]),
 				values: make([]float64, DimLen),
 			}
-			for k := 0; k < DimLen; k++ {
+			for k := range DimLen {
 				item.values[k] = f(dims[k][i])
 			}
 			re.Equal(isUpdate, tn.Put(item))
@@ -135,7 +135,7 @@ func TestRemove(t *testing.T) {
 	}, false /*insert*/)
 
 	// check Remove
-	for i := 0; i < Total; i++ {
+	for i := range Total {
 		if i%3 != 0 {
 			it := tn.Remove(uint64(i)).(*item)
 			re.Equal(uint64(i), it.id)
@@ -143,7 +143,7 @@ func TestRemove(t *testing.T) {
 	}
 
 	// check Remove worked
-	for i := 0; i < Total; i++ {
+	for i := range Total {
 		if i%3 != 0 {
 			re.Nil(tn.Remove(uint64(i)))
 		}

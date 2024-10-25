@@ -68,7 +68,7 @@ func SetRangePort(start, end int) {
 		dialer := &net.Dialer{}
 		randomPort := strconv.Itoa(rand.Intn(portRange[1]-portRange[0]) + portRange[0])
 		testPortMutex.Lock()
-		for i := 0; i < 10; i++ {
+		for range 10 {
 			if _, ok := testPortMap[randomPort]; !ok {
 				break
 			}
@@ -412,7 +412,7 @@ func (s *SchedulingTestEnvironment) startCluster(m SchedulerMode) {
 		cluster.SetSchedulingCluster(tc)
 		time.Sleep(200 * time.Millisecond) // wait for scheduling cluster to update member
 		testutil.Eventually(re, func() bool {
-			return cluster.GetLeaderServer().GetServer().GetRaftCluster().IsServiceIndependent(constant.SchedulingServiceName)
+			return cluster.GetLeaderServer().GetServer().IsServiceIndependent(constant.SchedulingServiceName)
 		})
 		s.clusters[APIMode] = cluster
 	}
@@ -431,7 +431,7 @@ func (i *idAllocator) alloc() uint64 {
 func InitRegions(regionLen int) []*core.RegionInfo {
 	allocator := &idAllocator{allocator: mockid.NewIDAllocator()}
 	regions := make([]*core.RegionInfo, 0, regionLen)
-	for i := 0; i < regionLen; i++ {
+	for i := range regionLen {
 		r := &metapb.Region{
 			Id: allocator.alloc(),
 			RegionEpoch: &metapb.RegionEpoch{

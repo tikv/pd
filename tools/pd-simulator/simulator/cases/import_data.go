@@ -38,7 +38,7 @@ func newImportData(config *sc.SimConfig) *Case {
 	replica := int(config.ServerConfig.Replication.MaxReplicas)
 	allStores := make(map[uint64]struct{}, totalStore)
 	// Initialize the cluster
-	for i := 0; i < totalStore; i++ {
+	for range totalStore {
 		id := simutil.IDAllocator.NextID()
 		simCase.Stores = append(simCase.Stores, &Store{
 			ID:     id,
@@ -47,9 +47,9 @@ func newImportData(config *sc.SimConfig) *Case {
 		allStores[id] = struct{}{}
 	}
 
-	for i := 0; i < totalRegion; i++ {
+	for i := range totalRegion {
 		peers := make([]*metapb.Peer, 0, replica)
-		for j := 0; j < replica; j++ {
+		for j := range replica {
 			peers = append(peers, &metapb.Peer{
 				Id:      IDAllocator.nextID(),
 				StoreId: uint64((i+j)%totalStore + 1),

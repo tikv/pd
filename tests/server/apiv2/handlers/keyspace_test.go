@@ -149,7 +149,7 @@ func mustMakeTestKeyspaces(re *require.Assertions, server *tests.TestServer, cou
 		"config2": "200",
 	}
 	resultMeta := make([]*keyspacepb.KeyspaceMeta, count)
-	for i := 0; i < count; i++ {
+	for i := range count {
 		createRequest := &handlers.CreateKeyspaceParams{
 			Name:   fmt.Sprintf("test_keyspace_%d", i),
 			Config: testConfig,

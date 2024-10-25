@@ -360,7 +360,7 @@ func (mc *Cluster) AddRegionStoreWithLeader(storeID uint64, regionCount int, lea
 		leaderCount = leaderCounts[0]
 	}
 	mc.AddRegionStore(storeID, regionCount)
-	for i := 0; i < leaderCount; i++ {
+	for range leaderCount {
 		id, _ := mc.AllocID()
 		mc.AddLeaderRegion(id, storeID)
 	}
@@ -464,7 +464,7 @@ func (mc *Cluster) AddRegionWithReadInfo(
 	}
 
 	var items []*statistics.HotPeerStat
-	for i := 0; i < filledNum; i++ {
+	for range filledNum {
 		items = mc.CheckRegionRead(r)
 		for _, item := range items {
 			mc.HotCache.Update(item, utils.Read)
@@ -484,7 +484,7 @@ func (mc *Cluster) AddRegionWithPeerReadInfo(regionID, leaderStoreID, targetStor
 		filledNum = filledNums[0]
 	}
 	var items []*statistics.HotPeerStat
-	for i := 0; i < filledNum; i++ {
+	for range filledNum {
 		items = mc.CheckRegionRead(r)
 		for _, item := range items {
 			if item.StoreID == targetStoreID {
@@ -513,7 +513,7 @@ func (mc *Cluster) AddRegionLeaderWithReadInfo(
 	}
 
 	var items []*statistics.HotPeerStat
-	for i := 0; i < filledNum; i++ {
+	for range filledNum {
 		items = mc.CheckRegionLeaderRead(r)
 		for _, item := range items {
 			mc.HotCache.Update(item, utils.Read)
@@ -541,7 +541,7 @@ func (mc *Cluster) AddLeaderRegionWithWriteInfo(
 	}
 
 	var items []*statistics.HotPeerStat
-	for i := 0; i < filledNum; i++ {
+	for range filledNum {
 		items = mc.CheckRegionWrite(r)
 		for _, item := range items {
 			mc.HotCache.Update(item, utils.Write)

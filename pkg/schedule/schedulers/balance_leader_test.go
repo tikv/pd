@@ -228,7 +228,7 @@ func (suite *balanceLeaderSchedulerTestSuite) TestTransferLeaderOut() {
 		1: 2,
 		2: 1,
 	}
-	for i := 0; i < 20; i++ {
+	for range 20 {
 		if len(suite.schedule()) == 0 {
 			continue
 		}
@@ -605,7 +605,7 @@ func checkBalanceLeaderLimit(re *require.Assertions, enablePlacementRules bool) 
 		id      uint64
 		regions []*metapb.Region
 	)
-	for i := 0; i < 50; i++ {
+	for i := range 50 {
 		peers := []*metapb.Peer{
 			{Id: id + 1, StoreId: 1},
 			{Id: id + 2, StoreId: 2},
@@ -634,7 +634,7 @@ func checkBalanceLeaderLimit(re *require.Assertions, enablePlacementRules bool) 
 		tc.UpdateSubTree(regionInfo, origin, overlaps, rangeChanged)
 	}
 
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		_, err := tc.AllocPeer(1)
 		re.NoError(err)
 	}

@@ -16,7 +16,7 @@ package slice
 
 // AnyOf returns true if any element in the slice matches the predict func.
 func AnyOf[T any](s []T, p func(int) bool) bool {
-	for i := 0; i < len(s); i++ {
+	for i := range s {
 		if p(i) {
 			return true
 		}

@@ -292,7 +292,7 @@ func TestRegionNoLeader(t *testing.T) {
 
 	leaderServer := cluster.GetLeaderServer()
 	re.NoError(leaderServer.BootstrapCluster())
-	for i := 0; i < len(stores); i++ {
+	for i := range stores {
 		pdTests.MustPutStore(re, cluster, stores[i])
 	}
 

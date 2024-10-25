@@ -110,7 +110,7 @@ func (suite *apiTestSuite) checkAPIForward(cluster *tests.TestCluster) {
 	var respSlice []string
 	var resp map[string]any
 	testutil.Eventually(re, func() bool {
-		return leader.GetRaftCluster().IsServiceIndependent(constant.SchedulingServiceName)
+		return leader.IsServiceIndependent(constant.SchedulingServiceName)
 	})
 
 	// Test operators
