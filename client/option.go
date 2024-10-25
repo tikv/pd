@@ -206,26 +206,26 @@ func WithOutputMustContainAllKeyRange() GetRegionOption {
 	return func(op *GetRegionOp) { op.outputMustContainAllKeyRange = true }
 }
 
-// ClientOption configures client.
-type ClientOption func(c *client)
+// ClientOption configures innerClient.
+type ClientOption func(c *innerClient)
 
 // WithGRPCDialOptions configures the client with gRPC dial options.
 func WithGRPCDialOptions(opts ...grpc.DialOption) ClientOption {
-	return func(c *client) {
+	return func(c *innerClient) {
 		c.option.gRPCDialOptions = append(c.option.gRPCDialOptions, opts...)
 	}
 }
 
 // WithCustomTimeoutOption configures the client with timeout option.
 func WithCustomTimeoutOption(timeout time.Duration) ClientOption {
-	return func(c *client) {
+	return func(c *innerClient) {
 		c.option.timeout = timeout
 	}
 }
 
 // WithForwardingOption configures the client with forwarding option.
 func WithForwardingOption(enableForwarding bool) ClientOption {
-	return func(c *client) {
+	return func(c *innerClient) {
 		c.option.enableForwarding = enableForwarding
 	}
 }
@@ -234,28 +234,28 @@ func WithForwardingOption(enableForwarding bool) ClientOption {
 // i.e., the client will send TSO requests to the API leader (the TSO server
 // proxy) which will forward the requests to the TSO servers.
 func WithTSOServerProxyOption(useTSOServerProxy bool) ClientOption {
-	return func(c *client) {
+	return func(c *innerClient) {
 		c.option.useTSOServerProxy = useTSOServerProxy
 	}
 }
 
 // WithMaxErrorRetry configures the client max retry times when connect meets error.
 func WithMaxErrorRetry(count int) ClientOption {
-	return func(c *client) {
+	return func(c *innerClient) {
 		c.option.maxRetryTimes = count
 	}
 }
 
 // WithMetricsLabels configures the client with metrics labels.
 func WithMetricsLabels(labels prometheus.Labels) ClientOption {
-	return func(c *client) {
+	return func(c *innerClient) {
 		c.option.metricsLabels = labels
 	}
 }
 
 // WithInitMetricsOption configures the client with metrics labels.
 func WithInitMetricsOption(initMetrics bool) ClientOption {
-	return func(c *client) {
+	return func(c *innerClient) {
 		c.option.initMetrics = initMetrics
 	}
 }

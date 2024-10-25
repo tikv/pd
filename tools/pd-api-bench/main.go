@@ -34,6 +34,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	flag "github.com/spf13/pflag"
 	pd "github.com/tikv/pd/client"
+	"github.com/tikv/pd/client/caller"
 	pdHttp "github.com/tikv/pd/client/http"
 	"github.com/tikv/pd/client/tlsutil"
 	"github.com/tikv/pd/pkg/mcs/utils"
@@ -375,11 +376,12 @@ func newEtcdClient(cfg *config.Config) *clientv3.Client {
 // newPDClient returns a pd client.
 func newPDClient(ctx context.Context, cfg *config.Config) pd.Client {
 	addrs := []string{cfg.PDAddr}
-	pdCli, err := pd.NewClientWithContext(ctx, addrs, pd.SecurityOption{
-		CAPath:   cfg.CaPath,
-		CertPath: cfg.CertPath,
-		KeyPath:  cfg.KeyPath,
-	},
+	pdCli, err := pd.NewClientWithContext(ctx, caller.TestID, caller.TestComponent,
+		addrs, pd.SecurityOption{
+			CAPath:   cfg.CaPath,
+			CertPath: cfg.CertPath,
+			KeyPath:  cfg.KeyPath,
+		},
 		pd.WithGRPCDialOptions(
 			grpc.WithKeepaliveParams(keepalive.ClientParameters{
 				Time:    keepaliveTime,

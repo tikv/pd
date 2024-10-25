@@ -20,6 +20,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	pd "github.com/tikv/pd/client"
+	"github.com/tikv/pd/client/caller"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 )
@@ -28,7 +29,9 @@ import (
 func SetupClientWithAPIContext(
 	ctx context.Context, re *require.Assertions, apiCtx pd.APIContext, endpoints []string, opts ...pd.ClientOption,
 ) pd.Client {
-	cli, err := pd.NewClientWithAPIContext(ctx, apiCtx, endpoints, pd.SecurityOption{}, opts...)
+	cli, err := pd.NewClientWithAPIContext(ctx, apiCtx,
+		caller.TestID, caller.TestComponent,
+		endpoints, pd.SecurityOption{}, opts...)
 	re.NoError(err)
 	return cli
 }
@@ -38,7 +41,9 @@ func SetupClientWithKeyspaceID(
 	ctx context.Context, re *require.Assertions,
 	keyspaceID uint32, endpoints []string, opts ...pd.ClientOption,
 ) pd.Client {
-	cli, err := pd.NewClientWithKeyspace(ctx, keyspaceID, endpoints, pd.SecurityOption{}, opts...)
+	cli, err := pd.NewClientWithKeyspace(ctx,
+		caller.TestID, caller.TestComponent,
+		keyspaceID, endpoints, pd.SecurityOption{}, opts...)
 	re.NoError(err)
 	return cli
 }
