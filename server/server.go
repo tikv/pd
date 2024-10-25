@@ -1417,6 +1417,18 @@ func (s *Server) GetRaftCluster() *cluster.RaftCluster {
 	return s.cluster
 }
 
+// IsServiceIndependent returns whether the service is independent.
+func (s *Server) IsServiceIndependent(name string) bool {
+	if s.mode == APIServiceMode && !s.IsClosed() {
+		// TODO: remove it after we support tso discovery
+		if name == constant.TSOServiceName {
+			return true
+		}
+		return s.cluster.IsServiceIndependent(name)
+	}
+	return false
+}
+
 // DirectlyGetRaftCluster returns raft cluster directly.
 // Only used for test.
 func (s *Server) DirectlyGetRaftCluster() *cluster.RaftCluster {
