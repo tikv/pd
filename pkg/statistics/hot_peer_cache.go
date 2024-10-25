@@ -117,7 +117,7 @@ func (f *HotPeerCache) UpdateStat(item *HotPeerStat) {
 		return
 	}
 	f.incMetrics(item.actionType, item.StoreID)
-	f.removeExpiredItems()
+	f.gc()
 }
 
 func (f *HotPeerCache) incMetrics(action utils.ActionType, storeID uint64) {
@@ -551,7 +551,7 @@ func (f *HotPeerCache) removeItem(item *HotPeerStat) {
 	}
 }
 
-func (f *HotPeerCache) removeExpiredItems() {
+func (f *HotPeerCache) gc() {
 	if time.Since(f.lastGCTime) < f.topNTTL {
 		return
 	}
