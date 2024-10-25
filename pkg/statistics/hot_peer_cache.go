@@ -84,9 +84,9 @@ func NewHotPeerCache(ctx context.Context, kind utils.RWType) *HotPeerCache {
 	}
 }
 
-// TODO: rename RegionStats as PeerStats
-// RegionStats returns hot items
-func (f *HotPeerCache) RegionStats(minHotDegree int) map[uint64][]*HotPeerStat {
+// GetHotPeerStats returns the read or write statistics for hot regions.
+// It returns a map where the keys are store IDs and the values are slices of HotPeerStat.
+func (f *HotPeerCache) GetHotPeerStats(minHotDegree int) map[uint64][]*HotPeerStat {
 	res := make(map[uint64][]*HotPeerStat)
 	defaultAntiCount := f.kind.DefaultAntiCount()
 	for storeID, peers := range f.peersOfStore {

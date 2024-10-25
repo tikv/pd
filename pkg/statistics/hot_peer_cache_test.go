@@ -39,7 +39,7 @@ func TestStoreTimeUnsync(t *testing.T) {
 		region := buildRegion(utils.Write, 3, interval)
 		checkAndUpdate(re, cache, region, 3)
 		{
-			stats := cache.RegionStats(0)
+			stats := cache.GetHotPeerStats(0)
 			re.Len(stats, 3)
 			for _, s := range stats {
 				re.Len(s, 1)

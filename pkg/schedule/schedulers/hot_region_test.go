@@ -1297,7 +1297,7 @@ func TestHotReadRegionScheduleByteRateOnly(t *testing.T) {
 	r := tc.HotRegionsFromStore(2, utils.Read)
 	re.Len(r, 3)
 	// check hot items
-	stats := tc.HotCache.RegionStats(utils.Read, 0)
+	stats := tc.HotCache.GetHotPeerStats(utils.Read, 0)
 	re.Len(stats, 3)
 	for _, ss := range stats {
 		for _, s := range ss {
@@ -1623,7 +1623,7 @@ func TestHotCacheUpdateCache(t *testing.T) {
 		// lower than hot read flow rate, but higher than write flow rate
 		{11, []uint64{1, 2, 3}, 7 * units.KiB, 0, 0},
 	})
-	stats := tc.RegionStats(utils.Read, 0)
+	stats := tc.HotCache.GetHotPeerStats(utils.Read, 0)
 	re.Len(stats[1], 3)
 	re.Len(stats[2], 3)
 	re.Len(stats[3], 3)
@@ -1632,7 +1632,7 @@ func TestHotCacheUpdateCache(t *testing.T) {
 		{3, []uint64{2, 1, 3}, 20 * units.KiB, 0, 0},
 		{11, []uint64{1, 2, 3}, 7 * units.KiB, 0, 0},
 	})
-	stats = tc.RegionStats(utils.Read, 0)
+	stats = tc.HotCache.GetHotPeerStats(utils.Read, 0)
 	re.Len(stats[1], 3)
 	re.Len(stats[2], 3)
 	re.Len(stats[3], 3)
@@ -1642,7 +1642,7 @@ func TestHotCacheUpdateCache(t *testing.T) {
 		{5, []uint64{1, 2, 3}, 20 * units.KiB, 0, 0},
 		{6, []uint64{1, 2, 3}, 0.8 * units.KiB, 0, 0},
 	})
-	stats = tc.RegionStats(utils.Write, 0)
+	stats = tc.HotCache.GetHotPeerStats(utils.Write, 0)
 	re.Len(stats[1], 2)
 	re.Len(stats[2], 2)
 	re.Len(stats[3], 2)
@@ -1650,7 +1650,7 @@ func TestHotCacheUpdateCache(t *testing.T) {
 	addRegionInfo(tc, utils.Write, []testRegionInfo{
 		{5, []uint64{1, 2, 5}, 20 * units.KiB, 0, 0},
 	})
-	stats = tc.RegionStats(utils.Write, 0)
+	stats = tc.HotCache.GetHotPeerStats(utils.Write, 0)
 
 	re.Len(stats[1], 2)
 	re.Len(stats[2], 2)
@@ -1665,7 +1665,7 @@ func TestHotCacheUpdateCache(t *testing.T) {
 		// lower than hot read flow rate, but higher than write flow rate
 		{31, []uint64{4, 5, 6}, 7 * units.KiB, 0, 0},
 	})
-	stats = tc.RegionStats(utils.Read, 0)
+	stats = tc.HotCache.GetHotPeerStats(utils.Read, 0)
 	re.Len(stats[4], 2)
 	re.Len(stats[5], 1)
 	re.Empty(stats[6])
@@ -1684,13 +1684,13 @@ func TestHotCacheKeyThresholds(t *testing.T) {
 			{1, []uint64{1, 2, 3}, 0, 1, 0},
 			{2, []uint64{1, 2, 3}, 0, 1 * units.KiB, 0},
 		})
-		stats := tc.RegionStats(utils.Read, 0)
+		stats := tc.HotCache.GetHotPeerStats(utils.Read, 0)
 		re.Len(stats[1], 1)
 		addRegionInfo(tc, utils.Write, []testRegionInfo{
 			{3, []uint64{4, 5, 6}, 0, 1, 0},
 			{4, []uint64{4, 5, 6}, 0, 1 * units.KiB, 0},
 		})
-		stats = tc.RegionStats(utils.Write, 0)
+		stats = tc.HotCache.GetHotPeerStats(utils.Write, 0)
 		re.Len(stats[4], 1)
 		re.Len(stats[5], 1)
 		re.Len(stats[6], 1)
@@ -1716,7 +1716,7 @@ func TestHotCacheKeyThresholds(t *testing.T) {
 
 		{ // read
 			addRegionInfo(tc, utils.Read, regions)
-			stats := tc.RegionStats(utils.Read, 0)
+			stats := tc.HotCache.GetHotPeerStats(utils.Read, 0)
 			re.Greater(len(stats[1]), 500)
 
 			// for AntiCount
@@ -1724,12 +1724,12 @@ func TestHotCacheKeyThresholds(t *testing.T) {
 			addRegionInfo(tc, utils.Read, regions)
 			addRegionInfo(tc, utils.Read, regions)
 			addRegionInfo(tc, utils.Read, regions)
-			stats = tc.RegionStats(utils.Read, 0)
+			stats = tc.HotCache.GetHotPeerStats(utils.Read, 0)
 			re.Len(stats[1], 500)
 		}
 		{ // write
 			addRegionInfo(tc, utils.Write, regions)
-			stats := tc.RegionStats(utils.Write, 0)
+			stats := tc.HotCache.GetHotPeerStats(utils.Write, 0)
 			re.Greater(len(stats[1]), 500)
 			re.Greater(len(stats[2]), 500)
 			re.Greater(len(stats[3]), 500)
@@ -1739,7 +1739,7 @@ func TestHotCacheKeyThresholds(t *testing.T) {
 			addRegionInfo(tc, utils.Write, regions)
 			addRegionInfo(tc, utils.Write, regions)
 			addRegionInfo(tc, utils.Write, regions)
-			stats = tc.RegionStats(utils.Write, 0)
+			stats = tc.HotCache.GetHotPeerStats(utils.Write, 0)
 			re.Len(stats[1], 500)
 			re.Len(stats[2], 500)
 			re.Len(stats[3], 500)
@@ -1766,7 +1766,7 @@ func TestHotCacheByteAndKey(t *testing.T) {
 	}
 	{ // read
 		addRegionInfo(tc, utils.Read, regions)
-		stats := tc.RegionStats(utils.Read, 0)
+		stats := tc.HotCache.GetHotPeerStats(utils.Read, 0)
 		re.Len(stats[1], 500)
 
 		addRegionInfo(tc, utils.Read, []testRegionInfo{
@@ -1775,12 +1775,12 @@ func TestHotCacheByteAndKey(t *testing.T) {
 			{10003, []uint64{1, 2, 3}, 10 * units.KiB, 500 * units.KiB, 0},
 			{10004, []uint64{1, 2, 3}, 500 * units.KiB, 500 * units.KiB, 0},
 		})
-		stats = tc.RegionStats(utils.Read, 0)
+		stats = tc.HotCache.GetHotPeerStats(utils.Read, 0)
 		re.Len(stats[1], 503)
 	}
 	{ // write
 		addRegionInfo(tc, utils.Write, regions)
-		stats := tc.RegionStats(utils.Write, 0)
+		stats := tc.HotCache.GetHotPeerStats(utils.Write, 0)
 		re.Len(stats[1], 500)
 		re.Len(stats[2], 500)
 		re.Len(stats[3], 500)
@@ -1790,7 +1790,7 @@ func TestHotCacheByteAndKey(t *testing.T) {
 			{10003, []uint64{1, 2, 3}, 10 * units.KiB, 500 * units.KiB, 0},
 			{10004, []uint64{1, 2, 3}, 500 * units.KiB, 500 * units.KiB, 0},
 		})
-		stats = tc.RegionStats(utils.Write, 0)
+		stats = tc.HotCache.GetHotPeerStats(utils.Write, 0)
 		re.Len(stats[1], 503)
 		re.Len(stats[2], 503)
 		re.Len(stats[3], 503)

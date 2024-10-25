@@ -19,6 +19,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -37,16 +38,8 @@ type realClusterSuite struct {
 
 var (
 	playgroundLogDir = filepath.Join("tmp", "real_cluster", "playground")
-	tiupBin          string
+	tiupBin          = os.Getenv("HOME") + "/.tiup/bin/tiup"
 )
-
-func init() {
-	var err error
-	tiupBin, err = exec.LookPath("tiup")
-	if err != nil {
-		panic(err)
-	}
-}
 
 // SetupSuite will run before the tests in the suite are run.
 func (s *realClusterSuite) SetupSuite() {
@@ -78,7 +71,9 @@ func (s *realClusterSuite) TearDownSuite() {
 func (s *realClusterSuite) startRealCluster(t *testing.T) {
 	log.Info("start to deploy a real cluster")
 
-	s.deploy(t)
+	tag := s.tag()
+	deployTiupPlayground(t, tag)
+	waitTiupReady(t, tag)
 	s.clusterCnt++
 }
 
@@ -94,33 +89,26 @@ func (s *realClusterSuite) tag() string {
 	return fmt.Sprintf("pd_real_cluster_test_%s_%d", s.suiteName, s.clusterCnt)
 }
 
-// func restartTiUP() {
-// 	log.Info("start to restart TiUP")
-// 	cmd := exec.Command("make", "deploy")
-// 	cmd.Stdout = os.Stdout
-// 	cmd.Stderr = os.Stderr
-// 	err := cmd.Run()
-// 	if err != nil {
-// 		panic(err)
-// 	}
-// 	log.Info("TiUP restart success")
-// }
-
-func (s *realClusterSuite) deploy(t *testing.T) {
+func (s *realClusterSuite) restart() {
 	tag := s.tag()
-	deployTiupPlayground(t, tag)
-	waitTiupReady(t, tag)
+	log.Info("start to restart", zap.String("tag", tag))
+	s.stopRealCluster(s.T())
+	s.startRealCluster(s.T())
+	log.Info("TiUP restart success")
 }
 
 func destroy(t *testing.T, tag string) {
-	cmdStr := fmt.Sprintf("ps -ef | grep 'tiup playground' | grep %s | awk '{print $2}' | head -n 1", tag)
+	cmdStr := fmt.Sprintf("ps -ef | grep %s | awk '{print $2}'", tag)
 	cmd := exec.Command("sh", "-c", cmdStr)
 	bytes, err := cmd.Output()
 	require.NoError(t, err)
-	pid := string(bytes)
-	// nolint:errcheck
-	runCommand("sh", "-c", "kill -9 "+pid)
-	log.Info("destroy success", zap.String("pid", pid))
+	pids := string(bytes)
+	pidArr := strings.Split(pids, "\n")
+	for _, pid := range pidArr {
+		// nolint:errcheck
+		runCommand("sh", "-c", "kill -9 "+pid)
+	}
+	log.Info("destroy success", zap.String("tag", tag))
 }
 
 func deployTiupPlayground(t *testing.T, tag string) {
@@ -146,11 +134,11 @@ func deployTiupPlayground(t *testing.T, tag string) {
 	go func() {
 		runCommand("sh", "-c",
 			tiupBin+` playground nightly --kv 3 --tiflash 1 --db 1 --pd 3 \
-		--without-monitor --tag `+tag+` --pd.binpath ./bin/pd-server \
-		--kv.binpath ./third_bin/tikv-server \
-		--db.binpath ./third_bin/tidb-server --tiflash.binpath ./third_bin/tiflash \
-		--pd.config ./tests/integrations/realcluster/pd.toml \
-		> `+filepath.Join(playgroundLogDir, tag+".log")+` 2>&1 & `)
+			--without-monitor --tag `+tag+` --pd.binpath ./bin/pd-server \
+			--kv.binpath ./third_bin/tikv-server \
+			--db.binpath ./third_bin/tidb-server --tiflash.binpath ./third_bin/tiflash \
+			--pd.config ./tests/integrations/realcluster/pd.toml \
+			> `+filepath.Join(playgroundLogDir, tag+".log")+` 2>&1 & `)
 	}()
 
 	// Avoid to change the dir before execute `tiup playground`.
