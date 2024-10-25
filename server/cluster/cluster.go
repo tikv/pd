@@ -409,11 +409,30 @@ func (c *RaftCluster) checkSchedulingService() {
 // checkTSOService checks the TSO service.
 func (c *RaftCluster) checkTSOService() {
 	if c.isAPIServiceMode {
+		if c.opt.GetMicroServiceConfig().IsTSODynamicSwitchingEnabled() {
+			servers, err := discovery.Discover(c.etcdClient, strconv.FormatUint(c.clusterID, 10), constant.TSOServiceName)
+			if err != nil || len(servers) == 0 {
+				if err := c.startTSOJobs(); err != nil {
+					log.Error("failed to start TSO jobs", errs.ZapError(err))
+					return
+				}
+				log.Info("TSO is provided by PD")
+				c.UnsetServiceIndependent(constant.TSOServiceName)
+			} else {
+				if err := c.stopTSOJobs(); err != nil {
+					log.Error("failed to stop TSO jobs", errs.ZapError(err))
+					return
+				}
+				log.Info("TSO is provided by TSO server")
+				if !c.IsServiceIndependent(constant.TSOServiceName) {
+					c.SetServiceIndependent(constant.TSOServiceName)
+				}
+			}
+		}
 		return
 	}
 
 	if err := c.startTSOJobs(); err != nil {
-		// If there is an error, need to wait for the next check.
 		log.Error("failed to start TSO jobs", errs.ZapError(err))
 		return
 	}
@@ -428,6 +447,8 @@ func (c *RaftCluster) runServiceCheckJob() {
 		schedulingTicker.Reset(time.Millisecond)
 	})
 	defer schedulingTicker.Stop()
+	tsoTicker := time.NewTicker(tsoServiceCheckInterval)
+	defer tsoTicker.Stop()
 
 	for {
 		select {
@@ -436,6 +457,8 @@ func (c *RaftCluster) runServiceCheckJob() {
 			return
 		case <-schedulingTicker.C:
 			c.checkSchedulingService()
+		case <-tsoTicker.C:
+			c.checkTSOService()
 		}
 	}
 }
