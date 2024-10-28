@@ -1644,7 +1644,13 @@ func TestHotCacheUpdateCache(t *testing.T) {
 	re := require.New(t)
 	cancel, _, tc, _ := prepareSchedulersTest()
 	defer cancel()
+<<<<<<< HEAD
 	tc.SetHotRegionCacheHitsThreshold(0)
+=======
+	for i := range 3 {
+		tc.PutStore(core.NewStoreInfo(&metapb.Store{Id: uint64(i + 1)}))
+	}
+>>>>>>> 20087e290 (statistics: add gc in hot peer cache (#8702))
 
 	// For read flow
 	addRegionInfo(tc, utils.Read, []testRegionInfo{
@@ -1711,7 +1717,13 @@ func TestHotCacheKeyThresholds(t *testing.T) {
 	{ // only a few regions
 		cancel, _, tc, _ := prepareSchedulersTest()
 		defer cancel()
+<<<<<<< HEAD
 		tc.SetHotRegionCacheHitsThreshold(0)
+=======
+		for i := range 6 {
+			tc.PutStore(core.NewStoreInfo(&metapb.Store{Id: uint64(i + 1)}))
+		}
+>>>>>>> 20087e290 (statistics: add gc in hot peer cache (#8702))
 		addRegionInfo(tc, utils.Read, []testRegionInfo{
 			{1, []uint64{1, 2, 3}, 0, 1, 0},
 			{2, []uint64{1, 2, 3}, 0, 1 * units.KiB, 0},
@@ -1730,6 +1742,9 @@ func TestHotCacheKeyThresholds(t *testing.T) {
 	{ // many regions
 		cancel, _, tc, _ := prepareSchedulersTest()
 		defer cancel()
+		for i := range 3 {
+			tc.PutStore(core.NewStoreInfo(&metapb.Store{Id: uint64(i + 1)}))
+		}
 		regions := []testRegionInfo{}
 		for i := 1; i <= 1000; i += 2 {
 			regions = append(regions,
@@ -1783,7 +1798,13 @@ func TestHotCacheByteAndKey(t *testing.T) {
 	re := require.New(t)
 	cancel, _, tc, _ := prepareSchedulersTest()
 	defer cancel()
+<<<<<<< HEAD
 	tc.SetHotRegionCacheHitsThreshold(0)
+=======
+	for i := range 3 {
+		tc.PutStore(core.NewStoreInfo(&metapb.Store{Id: uint64(i + 1)}))
+	}
+>>>>>>> 20087e290 (statistics: add gc in hot peer cache (#8702))
 	statistics.ThresholdsUpdateInterval = 0
 	defer func() {
 		statistics.ThresholdsUpdateInterval = 8 * time.Second
@@ -1910,6 +1931,9 @@ func TestHotCacheCheckRegionFlow(t *testing.T) {
 func checkHotCacheCheckRegionFlow(re *require.Assertions, testCase testHotCacheCheckRegionFlowCase, enablePlacementRules bool) {
 	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
+	for i := range 3 {
+		tc.PutStore(core.NewStoreInfo(&metapb.Store{Id: uint64(i + 1)}))
+	}
 	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 	tc.SetEnablePlacementRules(enablePlacementRules)
 	labels := []string{"zone", "host"}
@@ -1985,6 +2009,9 @@ func TestHotCacheCheckRegionFlowWithDifferentThreshold(t *testing.T) {
 func checkHotCacheCheckRegionFlowWithDifferentThreshold(re *require.Assertions, enablePlacementRules bool) {
 	cancel, _, tc, _ := prepareSchedulersTest()
 	defer cancel()
+	for i := range 3 {
+		tc.PutStore(core.NewStoreInfo(&metapb.Store{Id: uint64(i + 1)}))
+	}
 	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 	tc.SetEnablePlacementRules(enablePlacementRules)
 	labels := []string{"zone", "host"}

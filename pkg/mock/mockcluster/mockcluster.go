@@ -63,7 +63,9 @@ type Cluster struct {
 
 // NewCluster creates a new Cluster
 func NewCluster(ctx context.Context, opts *config.PersistOptions) *Cluster {
+	bc := core.NewBasicCluster()
 	c := &Cluster{
+<<<<<<< HEAD
 		ctx:            ctx,
 		BasicCluster:   core.NewBasicCluster(),
 		IDAllocator:    mockid.NewIDAllocator(),
@@ -72,6 +74,16 @@ func NewCluster(ctx context.Context, opts *config.PersistOptions) *Cluster {
 		PersistOptions: opts,
 		suspectRegions: map[uint64]struct{}{},
 		Storage:        storage.NewStorageWithMemoryBackend(),
+=======
+		ctx:                     ctx,
+		BasicCluster:            bc,
+		IDAllocator:             mockid.NewIDAllocator(),
+		HotStat:                 statistics.NewHotStat(ctx, bc),
+		HotBucketCache:          buckets.NewBucketsCache(ctx),
+		PersistOptions:          opts,
+		pendingProcessedRegions: map[uint64]struct{}{},
+		Storage:                 storage.NewStorageWithMemoryBackend(),
+>>>>>>> 20087e290 (statistics: add gc in hot peer cache (#8702))
 	}
 	if c.PersistOptions.GetReplicationConfig().EnablePlacementRules {
 		c.initRuleManager()

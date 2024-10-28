@@ -60,6 +60,7 @@ type thresholds struct {
 // hotPeerCache saves the hot peer's statistics.
 type hotPeerCache struct {
 	kind              utils.RWType
+	cluster           *core.BasicCluster
 	peersOfStore      map[uint64]*utils.TopN         // storeID -> hot peers
 	storesOfRegion    map[uint64]map[uint64]struct{} // regionID -> storeIDs
 	regionsOfStore    map[uint64]map[uint64]struct{} // storeID -> regionIDs
@@ -67,13 +68,20 @@ type hotPeerCache struct {
 	taskQueue         *chanx.UnboundedChan[FlowItemTask]
 	thresholdsOfStore map[uint64]*thresholds                           // storeID -> thresholds
 	metrics           map[uint64][utils.ActionTypeLen]prometheus.Gauge // storeID -> metrics
-	// TODO: consider to remove store info when store is offline.
+	lastGCTime        time.Time
 }
 
+<<<<<<< HEAD
 // NewHotPeerCache creates a hotPeerCache
 func NewHotPeerCache(ctx context.Context, kind utils.RWType) *hotPeerCache {
 	return &hotPeerCache{
+=======
+// NewHotPeerCache creates a HotPeerCache
+func NewHotPeerCache(ctx context.Context, cluster *core.BasicCluster, kind utils.RWType) *HotPeerCache {
+	return &HotPeerCache{
+>>>>>>> 20087e290 (statistics: add gc in hot peer cache (#8702))
 		kind:              kind,
+		cluster:           cluster,
 		peersOfStore:      make(map[uint64]*utils.TopN),
 		storesOfRegion:    make(map[uint64]map[uint64]struct{}),
 		regionsOfStore:    make(map[uint64]map[uint64]struct{}),
@@ -114,6 +122,7 @@ func (f *hotPeerCache) updateStat(item *HotPeerStat) {
 		return
 	}
 	f.incMetrics(item.actionType, item.StoreID)
+	f.gc()
 }
 
 func (f *hotPeerCache) incMetrics(action utils.ActionType, storeID uint64) {
@@ -544,7 +553,53 @@ func (f *hotPeerCache) removeItem(item *HotPeerStat) {
 	}
 }
 
+<<<<<<< HEAD
 func (f *hotPeerCache) coldItem(newItem, oldItem *HotPeerStat) {
+=======
+func (f *HotPeerCache) gc() {
+	if time.Since(f.lastGCTime) < f.topNTTL {
+		return
+	}
+	f.lastGCTime = time.Now()
+	// remove tombstone stores
+	stores := make(map[uint64]struct{})
+	for _, storeID := range f.cluster.GetStores() {
+		stores[storeID.GetID()] = struct{}{}
+	}
+	for storeID := range f.peersOfStore {
+		if _, ok := stores[storeID]; !ok {
+			delete(f.peersOfStore, storeID)
+			delete(f.regionsOfStore, storeID)
+			delete(f.thresholdsOfStore, storeID)
+			delete(f.metrics, storeID)
+		}
+	}
+	// remove expired items
+	for _, peers := range f.peersOfStore {
+		regions := peers.RemoveExpired()
+		for _, regionID := range regions {
+			delete(f.storesOfRegion, regionID)
+			for storeID := range f.regionsOfStore {
+				delete(f.regionsOfStore[storeID], regionID)
+			}
+		}
+	}
+}
+
+// removeAllItem removes all items of the cache.
+// It is used for test.
+func (f *HotPeerCache) removeAllItem() {
+	for _, peers := range f.peersOfStore {
+		for _, peer := range peers.GetAll() {
+			item := peer.(*HotPeerStat)
+			item.actionType = utils.Remove
+			f.UpdateStat(item)
+		}
+	}
+}
+
+func coldItem(newItem, oldItem *HotPeerStat) {
+>>>>>>> 20087e290 (statistics: add gc in hot peer cache (#8702))
 	newItem.HotDegree = oldItem.HotDegree - 1
 	newItem.AntiCount = oldItem.AntiCount - 1
 	if newItem.AntiCount <= 0 {
