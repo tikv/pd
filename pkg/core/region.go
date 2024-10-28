@@ -1816,7 +1816,10 @@ func (r *RegionsInfo) GetRegionCount(startKey, endKey []byte) int {
 	if len(endKey) == 0 {
 		endItem = r.tree.tree.GetAt(r.tree.tree.Len() - 1)
 		eit = r.tree.tree.Len()
-		endInAnInterval = (bytes.Compare(endItem.GetEndKey(), endKey) <= 0) && (bytes.Compare(endKey, endItem.GetEndKey()) <= 0)
+		endInAnInterval = false
+		if endItem != nil {
+			endInAnInterval = (bytes.Compare(endItem.GetEndKey(), endKey) <= 0) && (bytes.Compare(endKey, endItem.GetEndKey()) <= 0)
+		}
 	}
 	if sit == eit && (!startInAnInterval) && (!endInAnInterval) {
 		return 0
