@@ -228,7 +228,7 @@ func TestRegionStatsHoles(t *testing.T) {
 		core.NewRegionInfo(
 			&metapb.Region{
 				Id:       1,
-				StartKey: []byte(""),
+				StartKey: []byte("-"),
 				EndKey:   []byte("c"),
 				Peers: []*metapb.Peer{
 					{Id: 101, StoreId: 1},
@@ -245,8 +245,8 @@ func TestRegionStatsHoles(t *testing.T) {
 		core.NewRegionInfo(
 			&metapb.Region{
 				Id:       2,
-				StartKey: []byte("h"),
-				EndKey:   []byte("x"),
+				StartKey: []byte("g"),
+				EndKey:   []byte("l"),
 				Peers: []*metapb.Peer{
 					{Id: 104, StoreId: 1},
 					{Id: 105, StoreId: 4},
@@ -262,8 +262,8 @@ func TestRegionStatsHoles(t *testing.T) {
 		core.NewRegionInfo(
 			&metapb.Region{
 				Id:       3,
-				StartKey: []byte("z"),
-				EndKey:   []byte(""),
+				StartKey: []byte("o"),
+				EndKey:   []byte("u"),
 				Peers: []*metapb.Peer{
 					{Id: 106, StoreId: 1},
 					{Id: 107, StoreId: 5},
@@ -282,13 +282,13 @@ func TestRegionStatsHoles(t *testing.T) {
 	}
 
 	// holes in between :
-	// | - c| ... |h - x| ... |z - |
+	// | - c| ... |g - l| ... |o - u| ...
 
-	startKeys := [4]string{"d", "b", "b", "i"}
-	endKeys := [4]string{"e", "e", "i", "j"}
-	ans := [4]int{0, 1, 2, 1}
+	startKeys := [6]string{"d", "b", "b", "i", "", "v"}
+	endKeys := [6]string{"e", "e", "i", "j", "", ""}
+	ans := [6]int{0, 1, 2, 1, 3, 0}
 
-	for i := 0; i < 4; i++ {
+	for i := 0; i < len(startKeys); i++ {
 		startKey := url.QueryEscape(startKeys[i])
 		endKey := url.QueryEscape(endKeys[i])
 		argsWithHoles := fmt.Sprintf("?start_key=%s&end_key=%s&count", startKey, endKey)

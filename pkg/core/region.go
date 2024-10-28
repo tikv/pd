@@ -1249,11 +1249,11 @@ func (r *RegionsInfo) setRegionLocked(region *RegionInfo, withOverlaps bool, ol 
 
 // UpdateSubTree updates the subtree.
 func (r *RegionsInfo) UpdateSubTree(region, origin *RegionInfo, overlaps []*RegionInfo, rangeChanged bool) {
-	failpoint.Inject("UpdateSubTree", func() {
+	if _, _err_ := failpoint.Eval(_curpkg_("UpdateSubTree")); _err_ == nil {
 		if origin == nil {
 			time.Sleep(time.Second)
 		}
-	})
+	}
 	r.st.Lock()
 	defer r.st.Unlock()
 	if origin != nil {
@@ -1795,9 +1795,13 @@ func (r *RegionsInfo) GetRegionCount(startKey, endKey []byte) int {
 	endItem, eit := r.tree.tree.GetWithIndex(end)
 	if startItem == nil {
 		startItem = r.tree.tree.GetAt(startIndex - 1)
+	} else {
+		startIndex += 1
 	}
 	if endItem == nil {
 		endItem = r.tree.tree.GetAt(eit - 1)
+	} else {
+		eit += 1
 	}
 
 	startInAnInterval := false
@@ -1808,6 +1812,13 @@ func (r *RegionsInfo) GetRegionCount(startKey, endKey []byte) int {
 	if endItem != nil {
 		endInAnInterval = (bytes.Compare(endItem.GetStartKey(), endKey) <= 0) && (bytes.Compare(endKey, endItem.GetEndKey()) <= 0)
 	}
+
+	if len(endKey) == 0 {
+		endItem = r.tree.tree.GetAt(r.tree.tree.Len() - 1)
+		eit = r.tree.tree.Len()
+		endInAnInterval = (bytes.Compare(endItem.GetEndKey(), endKey) <= 0) && (bytes.Compare(endKey, endItem.GetEndKey()) <= 0)
+	}
+
 	if startIndex == eit && (!startInAnInterval) && (!endInAnInterval) {
 		return 0
 	}
@@ -1824,6 +1835,7 @@ func (r *RegionsInfo) GetRegionCount(startKey, endKey []byte) int {
 			endIndex--
 		}
 	}
+
 	return endIndex - startIndex + 1
 }
 
