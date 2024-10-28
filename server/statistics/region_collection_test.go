@@ -129,6 +129,10 @@ func TestRegionStatistics(t *testing.T) {
 	stores[3] = store3
 	regionStats.Observe(region1, stores)
 	re.Empty(regionStats.stats[OfflinePeer])
+
+	regionStats.ClearDefunctRegion(1)
+	re.Equal(1, len(regionStats.index))
+	re.Equal(1, len(regionStats.offlineIndex))
 }
 
 func TestRegionStatisticsWithPlacementRule(t *testing.T) {
