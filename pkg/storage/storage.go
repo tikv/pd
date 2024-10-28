@@ -77,9 +77,10 @@ type coreStorage struct {
 	Storage
 	regionStorage endpoint.RegionStorage
 
-	useRegionStorage int32
-	regionLoaded     bool
-	mu               syncutil.Mutex
+	useRegionStorage        int32
+	regionLoadedFromDefault bool
+	regionLoadedFromStorage bool
+	mu                      syncutil.RWMutex
 }
 
 // NewCoreStorage creates a new core storage with the given default and region storage.
@@ -133,17 +134,22 @@ func TryLoadRegionsOnce(ctx context.Context, s Storage, f func(region *core.Regi
 		return s.LoadRegions(ctx, f)
 	}
 
-	if atomic.LoadInt32(&ps.useRegionStorage) == 0 {
-		return ps.Storage.LoadRegions(ctx, f)
-	}
-
 	ps.mu.Lock()
 	defer ps.mu.Unlock()
-	if !ps.regionLoaded {
+
+	if atomic.LoadInt32(&ps.useRegionStorage) == 0 {
+		err := ps.Storage.LoadRegions(ctx, f)
+		if err == nil {
+			ps.regionLoadedFromDefault = true
+		}
+		return err
+	}
+
+	if !ps.regionLoadedFromStorage {
 		if err := ps.regionStorage.LoadRegions(ctx, f); err != nil {
 			return err
 		}
-		ps.regionLoaded = true
+		ps.regionLoadedFromStorage = true
 	}
 	return nil
 }
@@ -196,4 +202,15 @@ func (ps *coreStorage) Close() error {
 		return ps.regionStorage.Close()
 	}
 	return nil
+}
+
+// AreRegionsLoaded returns whether the regions are loaded.
+func AreRegionsLoaded(s Storage) bool {
+	ps := s.(*coreStorage)
+	ps.mu.RLock()
+	defer ps.mu.RUnlock()
+	if atomic.LoadInt32(&ps.useRegionStorage) == 0 {
+		return ps.regionLoadedFromDefault
+	}
+	return ps.regionLoadedFromStorage
 }
