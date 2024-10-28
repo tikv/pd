@@ -288,7 +288,7 @@ func TestRegionStatsHoles(t *testing.T) {
 	endKeys := [6]string{"e", "e", "i", "j", "", ""}
 	ans := [6]int{0, 1, 2, 1, 3, 0}
 
-	for i := 0; i < len(startKeys); i++ {
+	for i := range startKeys {
 		startKey := url.QueryEscape(startKeys[i])
 		endKey := url.QueryEscape(endKeys[i])
 		argsWithHoles := fmt.Sprintf("?start_key=%s&end_key=%s&count", startKey, endKey)
