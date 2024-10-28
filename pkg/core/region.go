@@ -1249,11 +1249,11 @@ func (r *RegionsInfo) setRegionLocked(region *RegionInfo, withOverlaps bool, ol 
 
 // UpdateSubTree updates the subtree.
 func (r *RegionsInfo) UpdateSubTree(region, origin *RegionInfo, overlaps []*RegionInfo, rangeChanged bool) {
-	if _, _err_ := failpoint.Eval(_curpkg_("UpdateSubTree")); _err_ == nil {
+	failpoint.Inject("UpdateSubTree", func() {
 		if origin == nil {
 			time.Sleep(time.Second)
 		}
-	}
+	})
 	r.st.Lock()
 	defer r.st.Unlock()
 	if origin != nil {
