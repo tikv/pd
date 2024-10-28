@@ -307,6 +307,7 @@ func (r *RegionStatistics) ClearDefunctRegion(regionID uint64) {
 		}
 	}
 	if oldIndex, ok := r.offlineIndex[regionID]; ok {
+		delete(r.offlineIndex, regionID)
 		r.deleteOfflineEntry(oldIndex, regionID)
 	}
 }
