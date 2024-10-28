@@ -225,7 +225,7 @@ func (s *evictLeaderScheduler) Schedule(cluster schedule.Cluster, dryRun bool) (
 		if region == nil {
 			continue
 		}
-		target := filter.NewCandidates(cluster.GetFollowerStores(region)).
+		target := filter.NewCandidates(s.R, cluster.GetFollowerStores(region)).
 			FilterTarget(cluster.GetOpts(), nil, nil, &filter.StoreStateFilter{ActionScope: EvictLeaderName, TransferLeader: true, OperatorLevel: constant.Urgent}).
 			RandomPick()
 		if target == nil {
