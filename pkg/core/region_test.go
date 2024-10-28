@@ -1201,3 +1201,50 @@ func TestScanRegion(t *testing.T) {
 	re.Len(scanNoError([]byte("a"), []byte("e"), 0), 3)
 	re.Len(scanNoError([]byte("c"), []byte("e"), 0), 1)
 }
+
+func TestQueryRegions(t *testing.T) {
+	re := require.New(t)
+	regions := NewRegionsInfo()
+	regions.CheckAndPutRegion(NewTestRegionInfo(1, 1, []byte("a"), []byte("b")))
+	regions.CheckAndPutRegion(NewTestRegionInfo(2, 1, []byte("b"), []byte("c")))
+	regions.CheckAndPutRegion(NewTestRegionInfo(3, 1, []byte("d"), []byte("e")))
+	// Query regions by keys.
+	keyIDMap, regionsByID := regions.QueryRegions([][]byte{[]byte("a"), []byte("b"), []byte("c")}, nil)
+	re.Len(keyIDMap, 3)
+	re.Equal(uint64(1), keyIDMap[0])
+	re.Equal(uint64(2), keyIDMap[1])
+	// The key is not in the region tree, so its ID should be 0.
+	re.Zero(keyIDMap[2])
+	re.Len(regionsByID, 2)
+	re.Equal(uint64(1), regionsByID[1].GetRegion().GetId())
+	re.Equal(uint64(2), regionsByID[2].GetRegion().GetId())
+	// Query regions by IDs.
+	keyIDMap, regionsByID = regions.QueryRegions(nil, []uint64{1, 2, 3})
+	re.Empty(keyIDMap)
+	re.Len(regionsByID, 3)
+	re.Equal(uint64(1), regionsByID[1].GetRegion().GetId())
+	re.Equal(uint64(2), regionsByID[2].GetRegion().GetId())
+	re.Equal(uint64(3), regionsByID[3].GetRegion().GetId())
+	// Query regions by keys and IDs.
+	keyIDMap, regionsByID = regions.QueryRegions([][]byte{[]byte("b"), []byte("c")}, []uint64{1, 3})
+	re.Len(keyIDMap, 2)
+	re.Equal(uint64(2), keyIDMap[0])
+	re.Zero(keyIDMap[1])
+	re.Len(regionsByID, 3)
+	re.Equal(uint64(1), regionsByID[1].GetRegion().GetId())
+	re.Equal(uint64(2), regionsByID[2].GetRegion().GetId())
+	re.Equal(uint64(3), regionsByID[3].GetRegion().GetId())
+	// Query the region that does not exist.
+	keyIDMap, regionsByID = regions.QueryRegions(nil, []uint64{4})
+	re.Empty(keyIDMap)
+	re.Len(regionsByID, 1)
+	re.Nil(regionsByID[4])
+	keyIDMap, regionsByID = regions.QueryRegions([][]byte{[]byte("c")}, nil)
+	re.Len(keyIDMap, 1)
+	re.Zero(keyIDMap[0])
+	re.Empty(regionsByID)
+	keyIDMap, regionsByID = regions.QueryRegions([][]byte{[]byte("c")}, []uint64{4})
+	re.Len(keyIDMap, 1)
+	re.Zero(keyIDMap[0])
+	re.Nil(regionsByID[4])
+}

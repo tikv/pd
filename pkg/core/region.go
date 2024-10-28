@@ -1462,6 +1462,71 @@ func (r *RegionsInfo) GetStoreRegions(storeID uint64) []*RegionInfo {
 	return regions
 }
 
+// TODO: benchmark the performance of `QueryRegions` and `getRegionsByKeys`.
+// QueryRegions searches RegionInfo from regionTree by keys and IDs in batch.
+func (r *RegionsInfo) QueryRegions(
+	keys [][]byte, ids []uint64,
+) ([]uint64, map[uint64]*pdpb.RegionResponse) {
+	// Iterate the region keys to find the regions.
+	regions := r.getRegionsByKeys(keys)
+	// Assert the returned regions count matches the input keys.
+	if len(regions) != len(keys) {
+		panic("returned regions count mismatch with the input keys")
+	}
+	// Build the key -> ID map for the final results.
+	var (
+		keyIDMap    = make([]uint64, len(regions))
+		regionsByID = make(map[uint64]*pdpb.RegionResponse, len(regions))
+	)
+	for idx, region := range regions {
+		regionID := region.GetMeta().GetId()
+		keyIDMap[idx] = regionID
+		// Check if the region has been found.
+		if regionFound, ok := regionsByID[regionID]; (ok && regionFound != nil) || regionID == 0 {
+			continue
+		}
+		// If the given key is not found in the region tree, set the region to nil.
+		if region == nil {
+			regionsByID[regionID] = nil
+		} else {
+			regionsByID[regionID] = &pdpb.RegionResponse{
+				Region:       region.GetMeta(),
+				Leader:       region.GetLeader(),
+				DownPeers:    region.GetDownPeers(),
+				PendingPeers: region.GetPendingPeers(),
+				// TODO: get the buckets info.
+			}
+		}
+	}
+	// Iterate the region IDs to find the regions.
+	for _, id := range ids {
+		// Check if the region has been found.
+		if regionFound, ok := regionsByID[id]; (ok && regionFound != nil) || id == 0 {
+			continue
+		}
+		// If the given region ID is not found in the region tree, set the region to nil.
+		if region := r.GetRegion(id); region == nil {
+			regionsByID[id] = nil
+		} else {
+			regionsByID[id] = &pdpb.RegionResponse{
+				Region:       region.GetMeta(),
+				Leader:       region.GetLeader(),
+				DownPeers:    region.GetDownPeers(),
+				PendingPeers: region.GetPendingPeers(),
+				// TODO: get the buckets info.
+			}
+		}
+	}
+	return keyIDMap, regionsByID
+}
+
+// getRegionsByKeys searches RegionInfo from regionTree by keys.
+func (r *RegionsInfo) getRegionsByKeys(keys [][]byte) []*RegionInfo {
+	r.t.RLock()
+	defer r.t.RUnlock()
+	return r.tree.searchByKeys(keys)
+}
+
 // SubTreeRegionType is the type of sub tree region.
 type SubTreeRegionType string
 
