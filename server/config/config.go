@@ -252,8 +252,7 @@ const (
 	minCheckRegionSplitInterval     = 1 * time.Millisecond
 	maxCheckRegionSplitInterval     = 100 * time.Millisecond
 
-	defaultEnableSchedulingFallback  = true
-	defaultEnableTSODynamicSwitching = false
+	defaultEnableSchedulingFallback = true
 )
 
 // Special keys for Labels
@@ -855,16 +854,12 @@ func (c *DRAutoSyncReplicationConfig) adjust(meta *configutil.ConfigMetaData) {
 
 // MicroServiceConfig is the configuration for micro service.
 type MicroServiceConfig struct {
-	EnableSchedulingFallback  bool `toml:"enable-scheduling-fallback" json:"enable-scheduling-fallback,string"`
-	EnableTSODynamicSwitching bool `toml:"enable-tso-dynamic-switching" json:"enable-tso-dynamic-switching,string"`
+	EnableSchedulingFallback bool `toml:"enable-scheduling-fallback" json:"enable-scheduling-fallback,string"`
 }
 
 func (c *MicroServiceConfig) adjust(meta *configutil.ConfigMetaData) {
 	if !meta.IsDefined("enable-scheduling-fallback") {
 		c.EnableSchedulingFallback = defaultEnableSchedulingFallback
-	}
-	if !meta.IsDefined("enable-dynamic-tso") {
-		c.EnableTSODynamicSwitching = defaultEnableTSODynamicSwitching
 	}
 }
 
@@ -880,8 +875,9 @@ func (c *MicroServiceConfig) IsSchedulingFallbackEnabled() bool {
 }
 
 // IsTSODynamicSwitchingEnabled returns whether to enable TSO dynamic switching.
-func (c *MicroServiceConfig) IsTSODynamicSwitchingEnabled() bool {
-	return c.EnableTSODynamicSwitching
+func (*MicroServiceConfig) IsTSODynamicSwitchingEnabled() bool {
+	// TODO: make it configurable
+	return false
 }
 
 // KeyspaceConfig is the configuration for keyspace management.
