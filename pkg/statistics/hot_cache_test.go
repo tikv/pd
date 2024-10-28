@@ -1,4 +1,4 @@
-// Copyright 2020 TiKV Project Authors.
+// Copyright 2024 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,23 +16,25 @@ package statistics
 
 import (
 	"context"
+	"testing"
 
+	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/core"
-	"github.com/tikv/pd/pkg/statistics/buckets"
+	"github.com/tikv/pd/pkg/statistics/utils"
 )
 
-// HotStat contains cluster's hotspot statistics.
-type HotStat struct {
-	*HotCache
-	*StoresStats
-	*buckets.HotBucketCache
-}
-
-// NewHotStat creates the container to hold cluster's hotspot statistics.
-func NewHotStat(ctx context.Context, cluster *core.BasicCluster) *HotStat {
-	return &HotStat{
-		HotCache:       NewHotCache(ctx, cluster),
-		StoresStats:    NewStoresStats(),
-		HotBucketCache: buckets.NewBucketsCache(ctx),
+func TestIsHot(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	for i := utils.RWType(0); i < utils.RWTypeLen; i++ {
+		cluster := core.NewBasicCluster()
+		cache := NewHotCache(ctx, cluster)
+		region := buildRegion(cluster, i, 3, 60)
+		stats := cache.CheckReadPeerSync(region, region.GetPeers(), []float64{100000000, 1000, 1000}, 60)
+		cache.Update(stats[0], i)
+		for range 100 {
+			re.True(cache.IsRegionHot(region, 1))
+		}
 	}
 }
