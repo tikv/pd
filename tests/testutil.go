@@ -42,6 +42,7 @@ import (
 	tso "github.com/tikv/pd/pkg/mcs/tso/server"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/mock/mockid"
+	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/versioninfo"
@@ -218,7 +219,7 @@ func MustPutStore(re *require.Assertions, cluster *TestCluster, store *metapb.St
 	svr := cluster.GetLeaderServer().GetServer()
 	grpcServer := &server.GrpcServer{Server: svr}
 	_, err := grpcServer.PutStore(context.Background(), &pdpb.PutStoreRequest{
-		Header: &pdpb.RequestHeader{ClusterId: svr.ClusterID()},
+		Header: &pdpb.RequestHeader{ClusterId: keypath.ClusterID()},
 		Store:  store,
 	})
 	re.NoError(err)

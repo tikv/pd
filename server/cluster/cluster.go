@@ -164,10 +164,9 @@ type RaftCluster struct {
 	prevStoreLimit map[uint64]map[storelimit.Type]float64
 
 	// This below fields are all read-only, we cannot update itself after the raft cluster starts.
-	clusterID uint64
-	id        id.Allocator
-	opt       *config.PersistOptions
-	limiter   *StoreLimiter
+	id      id.Allocator
+	opt     *config.PersistOptions
+	limiter *StoreLimiter
 	*schedulingController
 	ruleManager              *placement.RuleManager
 	regionLabeler            *labeler.RegionLabeler
@@ -200,11 +199,18 @@ type Status struct {
 }
 
 // NewRaftCluster create a new cluster.
-func NewRaftCluster(ctx context.Context, clusterID uint64, member *member.EmbeddedEtcdMember, basicCluster *core.BasicCluster, storage storage.Storage, regionSyncer *syncer.RegionSyncer, etcdClient *clientv3.Client,
-	httpClient *http.Client, tsoAllocator *tso.AllocatorManager) *RaftCluster {
+func NewRaftCluster(
+	ctx context.Context,
+	member *member.EmbeddedEtcdMember,
+	basicCluster *core.BasicCluster,
+	storage storage.Storage,
+	regionSyncer *syncer.RegionSyncer,
+	etcdClient *clientv3.Client,
+	httpClient *http.Client,
+	tsoAllocator *tso.AllocatorManager,
+) *RaftCluster {
 	return &RaftCluster{
 		serverCtx:       ctx,
-		clusterID:       clusterID,
 		member:          member,
 		regionSyncer:    regionSyncer,
 		httpClient:      httpClient,
@@ -382,7 +388,7 @@ func (c *RaftCluster) Start(s Server) error {
 
 func (c *RaftCluster) checkSchedulingService() {
 	if c.isAPIServiceMode {
-		servers, err := discovery.Discover(c.etcdClient, strconv.FormatUint(c.clusterID, 10), constant.SchedulingServiceName)
+		servers, err := discovery.Discover(c.etcdClient, constant.SchedulingServiceName)
 		if c.opt.GetMicroServiceConfig().IsSchedulingFallbackEnabled() && (err != nil || len(servers) == 0) {
 			c.startSchedulingJobs(c, c.hbstreams)
 			c.UnsetServiceIndependent(constant.SchedulingServiceName)
@@ -2103,8 +2109,8 @@ func (c *RaftCluster) GetMetaCluster() *metapb.Cluster {
 func (c *RaftCluster) PutMetaCluster(meta *metapb.Cluster) error {
 	c.Lock()
 	defer c.Unlock()
-	if meta.GetId() != c.clusterID {
-		return errors.Errorf("invalid cluster %v, mismatch cluster id %d", meta, c.clusterID)
+	if meta.GetId() != keypath.ClusterID() {
+		return errors.Errorf("invalid cluster %v, mismatch cluster id %d", meta, keypath.ClusterID())
 	}
 	return c.putMetaLocked(typeutil.DeepClone(meta, core.ClusterFactory))
 }

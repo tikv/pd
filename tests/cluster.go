@@ -38,6 +38,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/swaggerserver"
 	"github.com/tikv/pd/pkg/tso"
+	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
@@ -220,10 +221,8 @@ func (s *TestServer) GetServer() *server.Server {
 }
 
 // GetClusterID returns the cluster ID.
-func (s *TestServer) GetClusterID() uint64 {
-	s.RLock()
-	defer s.RUnlock()
-	return s.server.ClusterID()
+func (*TestServer) GetClusterID() uint64 {
+	return keypath.ClusterID()
 }
 
 // GetLeader returns current leader of PD cluster.
@@ -307,7 +306,7 @@ func (s *TestServer) IsAllocatorLeader(dcLocation string) bool {
 func (s *TestServer) GetEtcdLeader() (string, error) {
 	s.RLock()
 	defer s.RUnlock()
-	req := &pdpb.GetMembersRequest{Header: &pdpb.RequestHeader{ClusterId: s.server.ClusterID()}}
+	req := &pdpb.GetMembersRequest{Header: &pdpb.RequestHeader{ClusterId: keypath.ClusterID()}}
 	members, _ := s.grpcServer.GetMembers(context.TODO(), req)
 	if members.Header.GetError() != nil {
 		return "", errors.WithStack(errors.New(members.Header.GetError().String()))
@@ -319,7 +318,7 @@ func (s *TestServer) GetEtcdLeader() (string, error) {
 func (s *TestServer) GetEtcdLeaderID() (uint64, error) {
 	s.RLock()
 	defer s.RUnlock()
-	req := &pdpb.GetMembersRequest{Header: &pdpb.RequestHeader{ClusterId: s.server.ClusterID()}}
+	req := &pdpb.GetMembersRequest{Header: &pdpb.RequestHeader{ClusterId: keypath.ClusterID()}}
 	members, err := s.grpcServer.GetMembers(context.TODO(), req)
 	if err != nil {
 		return 0, errors.WithStack(err)
@@ -412,7 +411,7 @@ func (s *TestServer) GetStoreRegions(storeID uint64) []*core.RegionInfo {
 // BootstrapCluster is used to bootstrap the cluster.
 func (s *TestServer) BootstrapCluster() error {
 	bootstrapReq := &pdpb.BootstrapRequest{
-		Header: &pdpb.RequestHeader{ClusterId: s.GetClusterID()},
+		Header: &pdpb.RequestHeader{ClusterId: keypath.ClusterID()},
 		Store:  &metapb.Store{Id: 1, Address: "mock://1", LastHeartbeat: time.Now().UnixNano()},
 		Region: &metapb.Region{Id: 2, Peers: []*metapb.Peer{{Id: 3, StoreId: 1, Role: metapb.PeerRole_Voter}}},
 	}

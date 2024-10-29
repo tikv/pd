@@ -49,6 +49,7 @@ import (
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/tso"
 	"github.com/tikv/pd/pkg/utils/assertutil"
+	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
@@ -67,39 +68,6 @@ const (
 
 func TestMain(m *testing.M) {
 	goleak.VerifyTestMain(m, testutil.LeakOptions...)
-}
-
-func TestClientClusterIDCheck(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	// Create the cluster #1.
-	cluster1, err := tests.NewTestCluster(ctx, 3)
-	re.NoError(err)
-	defer cluster1.Destroy()
-	endpoints1 := runServer(re, cluster1)
-	// Create the cluster #2.
-	cluster2, err := tests.NewTestCluster(ctx, 3)
-	re.NoError(err)
-	defer cluster2.Destroy()
-	endpoints2 := runServer(re, cluster2)
-	// Try to create a client with the mixed endpoints.
-	_, err = pd.NewClientWithContext(
-		ctx, append(endpoints1, endpoints2...),
-		pd.SecurityOption{}, pd.WithMaxErrorRetry(1),
-	)
-	re.Error(err)
-	re.Contains(err.Error(), "unmatched cluster id")
-	// updateMember should fail due to unmatched cluster ID found.
-	re.NoError(failpoint.Enable("github.com/tikv/pd/client/skipClusterIDCheck", `return(true)`))
-	re.NoError(failpoint.Enable("github.com/tikv/pd/client/skipFirstUpdateMember", `return(true)`))
-	_, err = pd.NewClientWithContext(ctx, []string{endpoints1[0], endpoints2[0]},
-		pd.SecurityOption{}, pd.WithMaxErrorRetry(1),
-	)
-	re.Error(err)
-	re.Contains(err.Error(), "ErrClientGetMember")
-	re.NoError(failpoint.Disable("github.com/tikv/pd/client/skipFirstUpdateMember"))
-	re.NoError(failpoint.Disable("github.com/tikv/pd/client/skipClusterIDCheck"))
 }
 
 func TestClientLeaderChange(t *testing.T) {
@@ -706,7 +674,7 @@ func (suite *followerForwardAndHandleTestSuite) SetupSuite() {
 			Peers: peers,
 		}
 		req := &pdpb.RegionHeartbeatRequest{
-			Header: newHeader(leader.GetServer()),
+			Header: newHeader(),
 			Region: region,
 			Leader: peers[0],
 		}
@@ -1240,7 +1208,7 @@ func (suite *clientTestSuite) SetupSuite() {
 	suite.grpcSvr = &server.GrpcServer{Server: suite.srv}
 
 	server.MustWaitLeader(re, []*server.Server{suite.srv})
-	bootstrapServer(re, newHeader(suite.srv), suite.grpcPDClient)
+	bootstrapServer(re, newHeader(), suite.grpcPDClient)
 
 	suite.ctx, suite.clean = context.WithCancel(context.Background())
 	suite.client = setupCli(suite.ctx, re, suite.srv.GetEndpoints())
@@ -1254,7 +1222,7 @@ func (suite *clientTestSuite) SetupSuite() {
 	now := time.Now().UnixNano()
 	for _, store := range stores {
 		suite.grpcSvr.PutStore(context.Background(), &pdpb.PutStoreRequest{
-			Header: newHeader(suite.srv),
+			Header: newHeader(),
 			Store: &metapb.Store{
 				Id:            store.Id,
 				Address:       store.Address,
@@ -1279,9 +1247,9 @@ func (suite *clientTestSuite) TearDownSuite() {
 	suite.cleanup()
 }
 
-func newHeader(srv *server.Server) *pdpb.RequestHeader {
+func newHeader() *pdpb.RequestHeader {
 	return &pdpb.RequestHeader{
-		ClusterId: srv.ClusterID(),
+		ClusterId: keypath.ClusterID(),
 	}
 }
 
@@ -1317,7 +1285,7 @@ func (suite *clientTestSuite) TestGetRegion() {
 		Peers: peers,
 	}
 	req := &pdpb.RegionHeartbeatRequest{
-		Header: newHeader(suite.srv),
+		Header: newHeader(),
 		Region: region,
 		Leader: peers[0],
 	}
@@ -1334,7 +1302,7 @@ func (suite *clientTestSuite) TestGetRegion() {
 			r.Buckets == nil
 	})
 	breq := &pdpb.ReportBucketsRequest{
-		Header: newHeader(suite.srv),
+		Header: newHeader(),
 		Buckets: &metapb.Buckets{
 			RegionId:   regionID,
 			Version:    1,
@@ -1397,7 +1365,7 @@ func (suite *clientTestSuite) TestGetPrevRegion() {
 		}
 		regions = append(regions, r)
 		req := &pdpb.RegionHeartbeatRequest{
-			Header: newHeader(suite.srv),
+			Header: newHeader(),
 			Region: r,
 			Leader: peers[0],
 		}
@@ -1436,7 +1404,7 @@ func (suite *clientTestSuite) TestScanRegions() {
 		}
 		regions = append(regions, r)
 		req := &pdpb.RegionHeartbeatRequest{
-			Header: newHeader(suite.srv),
+			Header: newHeader(),
 			Region: r,
 			Leader: peers[0],
 		}
@@ -1507,7 +1475,7 @@ func (suite *clientTestSuite) TestGetRegionByID() {
 		Peers: peers,
 	}
 	req := &pdpb.RegionHeartbeatRequest{
-		Header: newHeader(suite.srv),
+		Header: newHeader(),
 		Region: region,
 		Leader: peers[0],
 	}
@@ -1604,7 +1572,7 @@ func (suite *clientTestSuite) TestGetStore() {
 
 func (suite *clientTestSuite) checkGCSafePoint(re *require.Assertions, expectedSafePoint uint64) {
 	req := &pdpb.GetGCSafePointRequest{
-		Header: newHeader(suite.srv),
+		Header: newHeader(),
 	}
 	resp, err := suite.grpcSvr.GetGCSafePoint(context.Background(), req)
 	re.NoError(err)
@@ -1794,7 +1762,7 @@ func (suite *clientTestSuite) TestScatterRegion() {
 			EndKey:   []byte("ggg"),
 		}
 		req := &pdpb.RegionHeartbeatRequest{
-			Header: newHeader(suite.srv),
+			Header: newHeader(),
 			Region: region,
 			Leader: peers[0],
 		}
@@ -2056,7 +2024,7 @@ func (suite *clientTestSuite) TestBatchScanRegions() {
 		}
 		regions = append(regions, r)
 		req := &pdpb.RegionHeartbeatRequest{
-			Header: newHeader(suite.srv),
+			Header: newHeader(),
 			Region: r,
 			Leader: peers[0],
 		}
@@ -2186,7 +2154,7 @@ func (suite *clientTestSuite) TestBatchScanRegions() {
 	)
 	re.ErrorContains(err, "found a hole region in the last")
 	req := &pdpb.RegionHeartbeatRequest{
-		Header: newHeader(suite.srv),
+		Header: newHeader(),
 		Region: &metapb.Region{
 			Id: 100,
 			RegionEpoch: &metapb.RegionEpoch{

@@ -26,6 +26,7 @@ import (
 	"github.com/stretchr/testify/suite"
 	tso "github.com/tikv/pd/pkg/mcs/tso/server"
 	tsopkg "github.com/tikv/pd/pkg/tso"
+	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/tempurl"
 	tu "github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
@@ -100,16 +101,9 @@ func (suite *tsoConsistencyTestSuite) TearDownSuite() {
 	suite.cluster.Destroy()
 }
 
-func (suite *tsoConsistencyTestSuite) getClusterID() uint64 {
-	if suite.legacy {
-		return suite.pdLeaderServer.GetServer().ClusterID()
-	}
-	return suite.tsoServer.ClusterID()
-}
-
 func (suite *tsoConsistencyTestSuite) request(ctx context.Context, count uint32) *pdpb.Timestamp {
 	re := suite.Require()
-	clusterID := suite.getClusterID()
+	clusterID := keypath.ClusterID()
 	if suite.legacy {
 		req := &pdpb.TsoRequest{
 			Header:     &pdpb.RequestHeader{ClusterId: clusterID},
