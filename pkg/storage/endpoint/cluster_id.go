@@ -38,12 +38,13 @@ func InitClusterID(c *clientv3.Client) (uint64, error) {
 	if err != nil {
 		return 0, err
 	}
-	// If no key exist, generate a random cluster ID.
+
 	if clusterID != 0 {
-		log.Info("Existed cluster id", zap.Uint64("cluster-id", clusterID))
+		log.Info("existed cluster id", zap.Uint64("cluster-id", clusterID))
 		return clusterID, nil
 	}
 
+	// If no key exist, generate a random cluster ID.
 	clusterID, err = initOrGetClusterID(c)
 	if err != nil {
 		return 0, err
