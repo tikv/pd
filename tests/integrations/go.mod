@@ -3,6 +3,7 @@ module github.com/tikv/pd/tests/integrations
 go 1.23
 
 replace (
+	github.com/pingcap/kvproto => github.com/JmPotato/kvproto v0.0.0-20241015032459-be1e7521da0a
 	github.com/tikv/pd => ../../
 	github.com/tikv/pd/client => ../../client
 	github.com/tikv/pd/tests/integrations/mcs => ./mcs
