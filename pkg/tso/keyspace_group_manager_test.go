@@ -1225,41 +1225,61 @@ func waitForPrimariesServing(
 func (suite *keyspaceGroupManagerTestSuite) TestRegisterAllocatorConflict() {
 	re := suite.Require()
 
+	legacySvcRootPath := keypath.LegacyRootPath(suite.ClusterID)
+	allocatorKeyPrefix := keypath.GlobalTSOAllocatorsPrefix(suite.ClusterID)
+	legacySvcStorage := endpoint.NewStorageEndpoint(kv.NewEtcdKVBase(suite.etcdClient, legacySvcRootPath), nil)
+	m := member.NewMember(suite.servers[0], suite.etcdClient, uint64(suite.servers[0].Server.ID()))
+	am := NewAllocatorManager(suite.ctx, suite.etcdClient, constant.DefaultKeyspaceGroupID, m, legacySvcRootPath, legacySvcStorage, suite.cfg, allocatorKeyPrefix, path.Join(allocatorKeyPrefix, "pd"))
+	gta := NewGlobalTSOAllocator(suite.ctx, am)
+	err := gta.Initialize(0)
+	re.NoError(err)
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+
+		kgm := suite.newKeyspaceGroupManager(0, suite.ClusterID, suite.cfg)
+		re.NotNil(kgm)
+		defer kgm.Close()
+		kgm.Initialize()
+		participant, err := kgm.GetElectionMember(0, 0)
+		re.NoError(err)
+		kam := NewAllocatorManager(kgm.ctx, kgm.etcdClient, constant.DefaultKeyspaceGroupID, participant, kgm.legacySvcRootPath, kgm.legacySvcStorage, kgm.cfg, allocatorKeyPrefix, path.Join(allocatorKeyPrefix, "tso", fmt.Sprintf("keyspace_group_%d", constant.DefaultKeyspaceGroupID)))
+		kgta := NewGlobalTSOAllocator(suite.ctx, kam)
+		err = kgta.Initialize(0)
+		re.NoError(err)
+		kgta.Reset()
+	}()
+
+	gta.Reset()
+	wg.Wait()
+
 	kgm := suite.newKeyspaceGroupManager(0, suite.ClusterID, suite.cfg)
 	re.NotNil(kgm)
 	defer kgm.Close()
 	kgm.Initialize()
 	participant, err := kgm.GetElectionMember(0, 0)
 	re.NoError(err)
-
-	legacySvcRootPath := keypath.LegacyRootPath(suite.ClusterID)
-	allocatorKeyPrefix := keypath.GlobalTSOAllocatorsPrefix(suite.ClusterID)
-	legacySvcStorage := endpoint.NewStorageEndpoint(kv.NewEtcdKVBase(suite.etcdClient, legacySvcRootPath), nil)
-	member := member.NewMember(suite.servers[0], suite.etcdClient, uint64(suite.servers[0].Server.ID()))
-	am := NewAllocatorManager(suite.ctx, suite.etcdClient, constant.DefaultKeyspaceGroupID, member, legacySvcRootPath, legacySvcStorage, kgm.cfg, allocatorKeyPrefix, path.Join(allocatorKeyPrefix, "pd"))
-	gta := NewGlobalTSOAllocator(suite.ctx, am)
-	err = gta.Initialize(0)
-	re.NoError(err)
-
 	kam := NewAllocatorManager(kgm.ctx, kgm.etcdClient, constant.DefaultKeyspaceGroupID, participant, kgm.legacySvcRootPath, kgm.legacySvcStorage, kgm.cfg, allocatorKeyPrefix, path.Join(allocatorKeyPrefix, "tso", fmt.Sprintf("keyspace_group_%d", constant.DefaultKeyspaceGroupID)))
 	kgta := NewGlobalTSOAllocator(suite.ctx, kam)
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		err = kgta.Initialize(0)
-		re.NoError(err)
-	}()
-
-	gta.Reset()
-	wg.Wait()
+	err = kgta.Initialize(0)
+	re.NoError(err)
 
 	var wg1 sync.WaitGroup
 	wg1.Add(1)
 	go func() {
 		defer wg1.Done()
-		err = gta.Initialize(0)
+
+		legacySvcRootPath := keypath.LegacyRootPath(suite.ClusterID)
+		allocatorKeyPrefix := keypath.GlobalTSOAllocatorsPrefix(suite.ClusterID)
+		legacySvcStorage := endpoint.NewStorageEndpoint(kv.NewEtcdKVBase(suite.etcdClient, legacySvcRootPath), nil)
+		m := member.NewMember(suite.servers[0], suite.etcdClient, uint64(suite.servers[0].Server.ID()))
+		am := NewAllocatorManager(suite.ctx, suite.etcdClient, constant.DefaultKeyspaceGroupID, m, legacySvcRootPath, legacySvcStorage, suite.cfg, allocatorKeyPrefix, path.Join(allocatorKeyPrefix, "pd"))
+		gta := NewGlobalTSOAllocator(suite.ctx, am)
+		err := gta.Initialize(0)
 		re.NoError(err)
+		gta.Reset()
 	}()
 	kgta.Reset()
 	wg1.Wait()
