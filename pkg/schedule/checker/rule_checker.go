@@ -18,6 +18,7 @@ import (
 	"context"
 	"errors"
 	"math"
+	"math/rand"
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -57,6 +58,7 @@ type RuleChecker struct {
 	pendingList             cache.Cache
 	switchWitnessCache      *cache.TTLUint64
 	record                  *recorder
+	r                       *rand.Rand
 }
 
 // NewRuleChecker creates a checker instance.
@@ -68,6 +70,7 @@ func NewRuleChecker(ctx context.Context, cluster sche.CheckerCluster, ruleManage
 		pendingList:             cache.NewDefaultCache(maxPendingListLen),
 		switchWitnessCache:      cache.NewIDTTL(ctx, time.Minute, cluster.GetCheckerConfig().GetSwitchWitnessInterval()),
 		record:                  newRecord(),
+		r:                       rand.New(rand.NewSource(time.Now().UnixNano())),
 	}
 }
 
@@ -202,7 +205,7 @@ func (c *RuleChecker) addRulePeer(region *core.RegionInfo, fit *placement.Region
 	ruleStores := c.getRuleFitStores(rf)
 	isWitness := rf.Rule.IsWitness && c.isWitnessEnabled()
 	// If the peer to be added is a witness, since no snapshot is needed, we also reuse the fast failover logic.
-	store, filterByTempState := c.strategy(region, rf.Rule, isWitness).SelectStoreToAdd(ruleStores)
+	store, filterByTempState := c.strategy(c.r, region, rf.Rule, isWitness).SelectStoreToAdd(ruleStores)
 	if store == 0 {
 		ruleCheckerNoStoreAddCounter.Inc()
 		c.handleFilterState(region, filterByTempState)
@@ -253,7 +256,7 @@ func (c *RuleChecker) replaceUnexpectedRulePeer(region *core.RegionInfo, rf *pla
 		fastFailover = false
 	}
 	ruleStores := c.getRuleFitStores(rf)
-	store, filterByTempState := c.strategy(region, rf.Rule, fastFailover).SelectStoreToFix(ruleStores, peer.GetStoreId())
+	store, filterByTempState := c.strategy(c.r, region, rf.Rule, fastFailover).SelectStoreToFix(ruleStores, peer.GetStoreId())
 	if store == 0 {
 		ruleCheckerNoStoreReplaceCounter.Inc()
 		c.handleFilterState(region, filterByTempState)
@@ -394,7 +397,7 @@ func (c *RuleChecker) fixBetterLocation(region *core.RegionInfo, rf *placement.R
 
 	isWitness := rf.Rule.IsWitness && c.isWitnessEnabled()
 	// If the peer to be moved is a witness, since no snapshot is needed, we also reuse the fast failover logic.
-	strategy := c.strategy(region, rf.Rule, isWitness)
+	strategy := c.strategy(c.r, region, rf.Rule, isWitness)
 	ruleStores := c.getRuleFitStores(rf)
 	oldStore := strategy.SelectStoreToRemove(ruleStores)
 	if oldStore == 0 {
@@ -619,7 +622,7 @@ func (c *RuleChecker) hasAvailableWitness(region *core.RegionInfo, peer *metapb.
 	return nil, false
 }
 
-func (c *RuleChecker) strategy(region *core.RegionInfo, rule *placement.Rule, fastFailover bool) *ReplicaStrategy {
+func (c *RuleChecker) strategy(r *rand.Rand, region *core.RegionInfo, rule *placement.Rule, fastFailover bool) *ReplicaStrategy {
 	return &ReplicaStrategy{
 		checkerName:    c.Name(),
 		cluster:        c.cluster,
@@ -628,6 +631,7 @@ func (c *RuleChecker) strategy(region *core.RegionInfo, rule *placement.Rule, fa
 		region:         region,
 		extraFilters:   []filter.Filter{filter.NewLabelConstraintFilter(c.Name(), rule.LabelConstraints)},
 		fastFailover:   fastFailover,
+		r:              r,
 	}
 }
 

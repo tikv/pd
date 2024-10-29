@@ -329,7 +329,7 @@ func (c *tsoClient) backupClientConn() (*grpc.ClientConn, string) {
 		cc  *grpc.ClientConn
 		err error
 	)
-	for i := 0; i < len(urls); i++ {
+	for range urls {
 		url := urls[rand.Intn(len(urls))]
 		if cc, err = c.svcDiscovery.GetOrCreateGRPCConn(url); err != nil {
 			continue
@@ -386,7 +386,9 @@ func (c *tsoClient) tryConnectToTSO(
 		cc             *grpc.ClientConn
 		updateAndClear = func(newURL string, connectionCtx *tsoConnectionContext) {
 			// Only store the `connectionCtx` if it does not exist before.
-			connectionCtxs.LoadOrStore(newURL, connectionCtx)
+			if connectionCtx != nil {
+				connectionCtxs.LoadOrStore(newURL, connectionCtx)
+			}
 			// Remove all other `connectionCtx`s.
 			connectionCtxs.Range(func(url, cc any) bool {
 				if url.(string) != newURL {
@@ -401,10 +403,12 @@ func (c *tsoClient) tryConnectToTSO(
 	ticker := time.NewTicker(retryInterval)
 	defer ticker.Stop()
 	// Retry several times before falling back to the follower when the network problem happens
-	for i := 0; i < maxRetryTimes; i++ {
+	for range maxRetryTimes {
 		c.svcDiscovery.ScheduleCheckMemberChanged()
 		cc, url = c.GetTSOAllocatorClientConnByDCLocation(dc)
 		if _, ok := connectionCtxs.Load(url); ok {
+			// Just trigger the clean up of the stale connection contexts.
+			updateAndClear(url, nil)
 			return nil
 		}
 		if cc != nil {

@@ -44,7 +44,7 @@ func NewTestSchedulingCluster(ctx context.Context, initialServerCount int, backe
 		servers:          make(map[string]*scheduling.Server, initialServerCount),
 		cleanupFuncs:     make(map[string]testutil.CleanupFunc, initialServerCount),
 	}
-	for i := 0; i < initialServerCount; i++ {
+	for range initialServerCount {
 		err = tc.AddServer(tempurl.Alloc())
 		if err != nil {
 			return nil, err

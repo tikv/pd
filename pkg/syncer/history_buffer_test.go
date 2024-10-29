@@ -53,7 +53,7 @@ func TestBufferSize(t *testing.T) {
 	// size equals 100
 	kvMem := kv.NewMemoryKV()
 	h1 := newHistoryBuffer(100, kvMem)
-	for i := 0; i < 6; i++ {
+	for i := range 6 {
 		h1.record(regions[i])
 	}
 	re.Equal(6, h1.len())

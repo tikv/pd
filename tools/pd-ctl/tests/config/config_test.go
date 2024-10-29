@@ -30,6 +30,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+	"github.com/tikv/pd/pkg/ratelimit"
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/utils/testutil"
@@ -954,6 +955,98 @@ func TestReplicationMode(t *testing.T) {
 	check()
 }
 
+func TestServiceMiddlewareConfig(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster, err := pdTests.NewTestCluster(ctx, 1)
+	re.NoError(err)
+	defer cluster.Destroy()
+	err = cluster.RunInitialServers()
+	re.NoError(err)
+	re.NotEmpty(cluster.WaitLeader())
+	pdAddr := cluster.GetConfig().GetClientURL()
+	cmd := ctl.GetRootCmd()
+
+	store := &metapb.Store{
+		Id:            1,
+		State:         metapb.StoreState_Up,
+		LastHeartbeat: time.Now().UnixNano(),
+	}
+	leaderServer := cluster.GetLeaderServer()
+	re.NoError(leaderServer.BootstrapCluster())
+	pdTests.MustPutStore(re, cluster, store)
+
+	conf := config.ServiceMiddlewareConfig{
+		AuditConfig: config.AuditConfig{
+			EnableAudit: true,
+		},
+		RateLimitConfig: config.RateLimitConfig{
+			EnableRateLimit: true,
+			LimiterConfig:   make(map[string]ratelimit.DimensionConfig),
+		},
+		GRPCRateLimitConfig: config.GRPCRateLimitConfig{
+			EnableRateLimit: true,
+			LimiterConfig:   make(map[string]ratelimit.DimensionConfig),
+		},
+	}
+
+	check := func() {
+		output, err := tests.ExecuteCommand(cmd, "-u", pdAddr, "config", "show", "service-middleware")
+		re.NoError(err)
+		var conf2 config.ServiceMiddlewareConfig
+		re.NoError(json.Unmarshal(output, &conf2))
+		re.Equal(conf, conf2)
+	}
+
+	check()
+
+	_, err = tests.ExecuteCommand(cmd, "-u", pdAddr, "config", "set", "service-middleware", "audit", "enable-audit", "false")
+	re.NoError(err)
+	conf.AuditConfig.EnableAudit = false
+	check()
+	_, err = tests.ExecuteCommand(cmd, "-u", pdAddr, "config", "set", "service-middleware", "rate-limit", "GetRegion", "qps", "100")
+	re.NoError(err)
+	conf.RateLimitConfig.LimiterConfig["GetRegion"] = ratelimit.DimensionConfig{QPS: 100, QPSBurst: 100}
+	check()
+	_, err = tests.ExecuteCommand(cmd, "-u", pdAddr, "config", "set", "service-middleware", "grpc-rate-limit", "GetRegion", "qps", "101")
+	re.NoError(err)
+	conf.GRPCRateLimitConfig.LimiterConfig["GetRegion"] = ratelimit.DimensionConfig{QPS: 101, QPSBurst: 101}
+	check()
+	_, err = tests.ExecuteCommand(cmd, "-u", pdAddr, "config", "set", "service-middleware", "rate-limit", "GetRegion", "concurrency", "10")
+	re.NoError(err)
+	conf.RateLimitConfig.LimiterConfig["GetRegion"] = ratelimit.DimensionConfig{QPS: 100, QPSBurst: 100, ConcurrencyLimit: 10}
+	check()
+	_, err = tests.ExecuteCommand(cmd, "-u", pdAddr, "config", "set", "service-middleware", "grpc-rate-limit", "GetRegion", "concurrency", "11")
+	re.NoError(err)
+	conf.GRPCRateLimitConfig.LimiterConfig["GetRegion"] = ratelimit.DimensionConfig{QPS: 101, QPSBurst: 101, ConcurrencyLimit: 11}
+	check()
+	output, err := tests.ExecuteCommand(cmd, "-u", pdAddr, "config", "set", "service-middleware", "xxx", "GetRegion", "qps", "1000")
+	re.NoError(err)
+	re.Contains(string(output), "correct type")
+	output, err = tests.ExecuteCommand(cmd, "-u", pdAddr, "config", "set", "service-middleware", "grpc-rate-limit", "xxx", "qps", "1000")
+	re.NoError(err)
+	re.Contains(string(output), "There is no label matched.")
+	output, err = tests.ExecuteCommand(cmd, "-u", pdAddr, "config", "set", "service-middleware", "grpc-rate-limit", "GetRegion", "xxx", "1000")
+	re.NoError(err)
+	re.Contains(string(output), "Input is invalid")
+	output, err = tests.ExecuteCommand(cmd, "-u", pdAddr, "config", "set", "service-middleware", "grpc-rate-limit", "GetRegion", "qps", "xxx")
+	re.NoError(err)
+	re.Contains(string(output), "strconv.ParseUint")
+	_, err = tests.ExecuteCommand(cmd, "-u", pdAddr, "config", "set", "service-middleware", "grpc-rate-limit", "enable-grpc-rate-limit", "false")
+	re.NoError(err)
+	conf.GRPCRateLimitConfig.EnableRateLimit = false
+	check()
+	_, err = tests.ExecuteCommand(cmd, "-u", pdAddr, "config", "set", "service-middleware", "rate-limit", "GetRegion", "concurrency", "0")
+	re.NoError(err)
+	conf.RateLimitConfig.LimiterConfig["GetRegion"] = ratelimit.DimensionConfig{QPS: 100, QPSBurst: 100}
+	check()
+	_, err = tests.ExecuteCommand(cmd, "-u", pdAddr, "config", "set", "service-middleware", "rate-limit", "GetRegion", "qps", "0")
+	re.NoError(err)
+	delete(conf.RateLimitConfig.LimiterConfig, "GetRegion")
+	check()
+}
+
 func (suite *configTestSuite) TestUpdateDefaultReplicaConfig() {
 	suite.env.RunTestBasedOnMode(suite.checkUpdateDefaultReplicaConfig)
 }
@@ -1196,7 +1289,7 @@ func (suite *configTestSuite) checkRegionRules(cluster *pdTests.TestCluster) {
 
 func assertBundles(re *require.Assertions, a, b []placement.GroupBundle) {
 	re.Len(b, len(a))
-	for i := 0; i < len(a); i++ {
+	for i := range a {
 		assertBundle(re, a[i], b[i])
 	}
 }
@@ -1206,7 +1299,7 @@ func assertBundle(re *require.Assertions, a, b placement.GroupBundle) {
 	re.Equal(a.Index, b.Index)
 	re.Equal(a.Override, b.Override)
 	re.Len(b.Rules, len(a.Rules))
-	for i := 0; i < len(a.Rules); i++ {
+	for i := range a.Rules {
 		assertRule(re, a.Rules[i], b.Rules[i])
 	}
 }

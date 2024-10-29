@@ -34,7 +34,7 @@ func TestGenerateTableKeys(t *testing.T) {
 		re.Less(keys[i-1], keys[i])
 		s := []byte(keys[i-1])
 		e := []byte(keys[i])
-		for j := 0; j < 1000; j++ {
+		for range 1000 {
 			split, err := GenerateTiDBEncodedSplitKey(s, e)
 			re.NoError(err)
 			re.Less(string(s), string(split))

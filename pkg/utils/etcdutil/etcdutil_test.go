@@ -261,7 +261,7 @@ func TestRandomKillEtcd(t *testing.T) {
 
 	// Randomly kill an etcd server and restart it
 	cfgs := []embed.Config{etcds[0].Config(), etcds[1].Config(), etcds[2].Config()}
-	for i := 0; i < len(cfgs)*2; i++ {
+	for range len(cfgs) * 2 {
 		killIndex := rand.Intn(len(etcds))
 		etcds[killIndex].Close()
 		checkEtcdEndpointNum(re, client1, 2)
@@ -541,7 +541,7 @@ func (suite *loopWatcherTestSuite) TestCallBack() {
 	re.NoError(err)
 
 	// put 10 keys
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		suite.put(re, fmt.Sprintf("TestCallBack%d", i), "")
 	}
 	time.Sleep(time.Second)
@@ -550,7 +550,7 @@ func (suite *loopWatcherTestSuite) TestCallBack() {
 	cache.RUnlock()
 
 	// delete 10 keys
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		key := fmt.Sprintf("TestCallBack%d", i)
 		_, err = suite.client.Delete(suite.ctx, key)
 		re.NoError(err)
@@ -564,9 +564,9 @@ func (suite *loopWatcherTestSuite) TestCallBack() {
 func (suite *loopWatcherTestSuite) TestWatcherLoadLimit() {
 	re := suite.Require()
 	for count := 1; count < 10; count++ {
-		for limit := 0; limit < 10; limit++ {
+		for limit := range 10 {
 			ctx, cancel := context.WithCancel(suite.ctx)
-			for i := 0; i < count; i++ {
+			for i := range count {
 				suite.put(re, fmt.Sprintf("TestWatcherLoadLimit%d", i), "")
 			}
 			cache := make([]string, 0)

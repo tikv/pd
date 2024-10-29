@@ -790,7 +790,8 @@ func (kgm *KeyspaceGroupManager) updateKeyspaceGroup(group *endpoint.KeyspaceGro
 		storage = kgm.tsoSvcStorage
 	}
 	// Initialize all kinds of maps.
-	am := NewAllocatorManager(kgm.ctx, group.ID, participant, tsRootPath, storage, kgm.cfg, true)
+	am := NewAllocatorManager(kgm.ctx, group.ID, participant, tsRootPath, storage, kgm.cfg)
+	am.startGlobalAllocatorLoop()
 	log.Info("created allocator manager",
 		zap.Uint32("keyspace-group-id", group.ID),
 		zap.String("timestamp-path", am.GetTimestampPath("")))
@@ -867,7 +868,7 @@ func (kgm *KeyspaceGroupManager) updateKeyspaceGroupMembership(
 	if oldLen != newLen {
 		sameMembership = false
 	} else {
-		for i := 0; i < oldLen; i++ {
+		for i := range oldLen {
 			if oldKeyspaces[i] != newKeyspaces[i] {
 				sameMembership = false
 				break

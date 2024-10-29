@@ -90,8 +90,8 @@ func NewKeyspaceGroupManager(
 ) *GroupManager {
 	ctx, cancel := context.WithCancel(ctx)
 	groups := make(map[endpoint.UserKind]*indexedHeap)
-	for i := 0; i < int(endpoint.UserKindCount); i++ {
-		groups[endpoint.UserKind(i)] = newIndexedHeap(int(constant.MaxKeyspaceGroupCountInUse))
+	for i := range endpoint.UserKindCount {
+		groups[i] = newIndexedHeap(int(constant.MaxKeyspaceGroupCountInUse))
 	}
 	m := &GroupManager{
 		ctx:                ctx,

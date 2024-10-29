@@ -64,6 +64,17 @@ func (tbc *tsoBatchController) fetchPendingRequests(ctx context.Context, tsoRequ
 	// TODO: `tbc.collectedRequestCount` should never be non-empty here. Consider do assertion here.
 	tbc.collectedRequestCount = 0
 	for {
+		// If the batch size reaches the maxBatchSize limit but the token haven't arrived yet, don't receive more
+		// requests, and return when token is ready.
+		if tbc.collectedRequestCount >= tbc.maxBatchSize && !tokenAcquired {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-tokenCh:
+				return nil
+			}
+		}
+
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
@@ -146,6 +157,37 @@ fetchPendingRequestsLoop:
 	return nil
 }
 
+// fetchRequestsWithTimer tries to fetch requests until the given timer ticks. The caller must set the timer properly
+// before calling this function.
+func (tbc *tsoBatchController) fetchRequestsWithTimer(ctx context.Context, tsoRequestCh <-chan *tsoRequest, timer *time.Timer) error {
+batchingLoop:
+	for tbc.collectedRequestCount < tbc.maxBatchSize {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case req := <-tsoRequestCh:
+			tbc.pushRequest(req)
+		case <-timer.C:
+			break batchingLoop
+		}
+	}
+
+	// Try to collect more requests in non-blocking way.
+nonWaitingBatchLoop:
+	for tbc.collectedRequestCount < tbc.maxBatchSize {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case req := <-tsoRequestCh:
+			tbc.pushRequest(req)
+		default:
+			break nonWaitingBatchLoop
+		}
+	}
+
+	return nil
+}
+
 func (tbc *tsoBatchController) pushRequest(tsoReq *tsoRequest) {
 	tbc.collectedRequests[tbc.collectedRequestCount] = tsoReq
 	tbc.collectedRequestCount++
@@ -169,7 +211,7 @@ func (tbc *tsoBatchController) adjustBestBatchSize() {
 }
 
 func (tbc *tsoBatchController) finishCollectedRequests(physical, firstLogical int64, suffixBits uint32, streamID string, err error) {
-	for i := 0; i < tbc.collectedRequestCount; i++ {
+	for i := range tbc.collectedRequestCount {
 		tsoReq := tbc.collectedRequests[i]
 		// Retrieve the request context before the request is done to trace without race.
 		requestCtx := tsoReq.requestCtx

@@ -79,6 +79,7 @@ func (suite *tsoServerTestSuite) SetupSuite() {
 	leaderName := suite.cluster.WaitLeader()
 	re.NotEmpty(leaderName)
 	suite.pdLeaderServer = suite.cluster.GetServer(leaderName)
+	suite.pdLeaderServer.BootstrapCluster()
 	backendEndpoints := suite.pdLeaderServer.GetAddr()
 	if suite.legacy {
 		suite.pdClient = tu.MustNewGrpcClient(re, backendEndpoints)
@@ -150,7 +151,7 @@ func (suite *tsoServerTestSuite) TestConcurrentlyReset() {
 	var wg sync.WaitGroup
 	wg.Add(2)
 	now := time.Now()
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		go func() {
 			defer wg.Done()
 			for j := 0; j <= 50; j++ {

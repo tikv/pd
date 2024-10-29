@@ -20,18 +20,12 @@ type UpdateStatus uint32
 // Flags for limiter.
 const (
 	eps float64 = 1e-8
-	// QPSNoChange shows that limiter's config isn't changed.
-	QPSNoChange UpdateStatus = 1 << iota
-	// QPSChanged shows that limiter's config is changed and not deleted.
-	QPSChanged
-	// QPSDeleted shows that limiter's config is deleted.
-	QPSDeleted
-	// ConcurrencyNoChange shows that limiter's config isn't changed.
-	ConcurrencyNoChange
-	// ConcurrencyChanged shows that limiter's config is changed and not deleted.
-	ConcurrencyChanged
-	// ConcurrencyDeleted shows that limiter's config is deleted.
-	ConcurrencyDeleted
+
+	LimiterNotChanged UpdateStatus = 1 << iota
+	// LimiterUpdated shows that limiter's config is updated.
+	LimiterUpdated
+	// LimiterDeleted shows that limiter's config is deleted.
+	LimiterDeleted
 	// InAllowList shows that limiter's config isn't changed because it is in in allow list.
 	InAllowList
 )
@@ -45,7 +39,7 @@ type Option func(string, *Controller) UpdateStatus
 func AddLabelAllowList() Option {
 	return func(label string, l *Controller) UpdateStatus {
 		l.labelAllowList[label] = struct{}{}
-		return 0
+		return InAllowList
 	}
 }
 
@@ -73,11 +67,11 @@ func UpdateQPSLimiter(limit float64, burst int) Option {
 
 // UpdateDimensionConfig creates QPS limiter and concurrency limiter for a given label by config if it doesn't exist.
 func UpdateDimensionConfig(cfg *DimensionConfig) Option {
-	return func(label string, l *Controller) UpdateStatus {
-		if _, allow := l.labelAllowList[label]; allow {
+	return func(label string, c *Controller) UpdateStatus {
+		if _, allow := c.labelAllowList[label]; allow {
 			return InAllowList
 		}
-		lim, _ := l.limiters.LoadOrStore(label, newLimiter())
+		lim, _ := c.limiters.LoadOrStore(label, newLimiter())
 		return lim.(*limiter).updateDimensionConfig(cfg)
 	}
 }
@@ -89,6 +83,6 @@ func InitLimiter() Option {
 			return InAllowList
 		}
 		l.limiters.LoadOrStore(label, newLimiter())
-		return ConcurrencyChanged
+		return LimiterNotChanged
 	}
 }

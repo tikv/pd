@@ -141,7 +141,7 @@ func (s *balanceRegionScheduler) Schedule(cluster sche.SchedulerCluster, dryRun 
 		if sourceIndex == len(sourceStores)-1 {
 			break
 		}
-		for i := 0; i < retryLimit; i++ {
+		for range retryLimit {
 			// Priority pick the region that has a pending peer.
 			// Pending region may mean the disk is overload, remove the pending region firstly.
 			solver.Region = filter.SelectOneRegion(cluster.RandPendingRegions(solver.sourceStoreID(), s.conf.Ranges), collector,
@@ -215,7 +215,7 @@ func (s *balanceRegionScheduler) transferPeer(solver *solver, collector *plan.Co
 		filter.NewPlacementSafeguard(s.GetName(), conf, solver.GetBasicCluster(), solver.GetRuleManager(),
 			solver.Region, solver.Source, solver.fit),
 	}
-	candidates := filter.NewCandidates(dstStores).FilterTarget(conf, collector, s.filterCounter, filters...)
+	candidates := filter.NewCandidates(s.R, dstStores).FilterTarget(conf, collector, s.filterCounter, filters...)
 	if len(candidates.Stores) != 0 {
 		solver.Step++
 	}

@@ -892,7 +892,7 @@ func (suite *operatorControllerTestSuite) TestAddWaitingOperator() {
 
 	// a batch of operators should be added atomically
 	var batch []*Operator
-	for i := uint64(0); i < cluster.GetSchedulerMaxWaitingOperator(); i++ {
+	for i := range cluster.GetSchedulerMaxWaitingOperator() {
 		batch = append(batch, addPeerOp(i))
 	}
 	added := controller.AddWaitingOperator(batch...)

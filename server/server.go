@@ -17,7 +17,6 @@ package server
 import (
 	"bytes"
 	"context"
-	errorspkg "errors"
 	"fmt"
 	"math/rand"
 	"net/http"
@@ -475,7 +474,7 @@ func (s *Server) startServer(ctx context.Context) error {
 	s.tsoDispatcher = tsoutil.NewTSODispatcher(tsoProxyHandleDuration, tsoProxyBatchSize)
 	s.tsoProtoFactory = &tsoutil.TSOProtoFactory{}
 	s.pdProtoFactory = &tsoutil.PDProtoFactory{}
-	s.tsoAllocatorManager = tso.NewAllocatorManager(s.ctx, constant.DefaultKeyspaceGroupID, s.member, s.rootPath, s.storage, s, false)
+	s.tsoAllocatorManager = tso.NewAllocatorManager(s.ctx, constant.DefaultKeyspaceGroupID, s.member, s.rootPath, s.storage, s)
 	// When disabled the Local TSO, we should clean up the Local TSO Allocator's meta info written in etcd if it exists.
 	if !s.cfg.EnableLocalTSO {
 		if err = s.tsoAllocatorManager.CleanUpDCLocation(); err != nil {
@@ -490,7 +489,7 @@ func (s *Server) startServer(ctx context.Context) error {
 
 	s.gcSafePointManager = gc.NewSafePointManager(s.storage, s.cfg.PDServerCfg)
 	s.basicCluster = core.NewBasicCluster()
-	s.cluster = cluster.NewRaftCluster(ctx, clusterID, s.GetBasicCluster(), s.GetStorage(), syncer.NewRegionSyncer(s), s.client, s.httpClient)
+	s.cluster = cluster.NewRaftCluster(ctx, clusterID, s.GetMember(), s.GetBasicCluster(), s.GetStorage(), syncer.NewRegionSyncer(s), s.client, s.httpClient, s.tsoAllocatorManager)
 	keyspaceIDAllocator := id.NewAllocator(&id.AllocatorParams{
 		Client:    s.client,
 		RootPath:  s.rootPath,
@@ -1418,6 +1417,18 @@ func (s *Server) GetRaftCluster() *cluster.RaftCluster {
 	return s.cluster
 }
 
+// IsServiceIndependent returns whether the service is independent.
+func (s *Server) IsServiceIndependent(name string) bool {
+	if s.mode == APIServiceMode && !s.IsClosed() {
+		// TODO: remove it after we support tso discovery
+		if name == constant.TSOServiceName {
+			return true
+		}
+		return s.cluster.IsServiceIndependent(name)
+	}
+	return false
+}
+
 // DirectlyGetRaftCluster returns raft cluster directly.
 // Only used for test.
 func (s *Server) DirectlyGetRaftCluster() *cluster.RaftCluster {
@@ -1715,29 +1726,6 @@ func (s *Server) campaignLeader() {
 	s.member.KeepLeader(ctx)
 	log.Info(fmt.Sprintf("campaign %s leader ok", s.mode), zap.String("campaign-leader-name", s.Name()))
 
-	if !s.IsAPIServiceMode() {
-		allocator, err := s.tsoAllocatorManager.GetAllocator(tso.GlobalDCLocation)
-		if err != nil {
-			log.Error("failed to get the global TSO allocator", errs.ZapError(err))
-			return
-		}
-		log.Info("initializing the global TSO allocator")
-		if err := allocator.Initialize(0); err != nil {
-			log.Error("failed to initialize the global TSO allocator", errs.ZapError(err))
-			return
-		}
-		defer func() {
-			s.tsoAllocatorManager.ResetAllocatorGroup(tso.GlobalDCLocation, false)
-			failpoint.Inject("updateAfterResetTSO", func() {
-				if err = allocator.UpdateTSO(); !errorspkg.Is(err, errs.ErrUpdateTimestamp) {
-					log.Panic("the tso update after reset should return ErrUpdateTimestamp as expected", zap.Error(err))
-				}
-				if allocator.IsInitialize() {
-					log.Panic("the allocator should be uninitialized after reset")
-				}
-			})
-		}()
-	}
 	if err := s.reloadConfigFromKV(); err != nil {
 		log.Error("failed to reload configuration", errs.ZapError(err))
 		return
@@ -1996,7 +1984,7 @@ func (s *Server) UnmarkSnapshotRecovering(ctx context.Context) error {
 func (s *Server) GetServicePrimaryAddr(ctx context.Context, serviceName string) (string, bool) {
 	ticker := time.NewTicker(retryIntervalGetServicePrimary)
 	defer ticker.Stop()
-	for i := 0; i < maxRetryTimesGetServicePrimary; i++ {
+	for range maxRetryTimesGetServicePrimary {
 		if v, ok := s.servicePrimaryMap.Load(serviceName); ok {
 			return v.(string), true
 		}

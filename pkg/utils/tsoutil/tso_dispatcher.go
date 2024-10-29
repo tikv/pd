@@ -186,7 +186,7 @@ func addLogical(logical, count int64, suffixBits uint32) int64 {
 
 func (*TSODispatcher) finishRequest(requests []Request, physical, firstLogical int64, suffixBits uint32) error {
 	countSum := int64(0)
-	for i := 0; i < len(requests); i++ {
+	for i := range requests {
 		newCountSum, err := requests[i].postProcess(countSum, physical, firstLogical, suffixBits)
 		if err != nil {
 			return err

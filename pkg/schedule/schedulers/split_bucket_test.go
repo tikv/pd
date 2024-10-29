@@ -33,7 +33,7 @@ func TestSplitBucket(t *testing.T) {
 	hotBuckets := make(map[uint64][]*buckets.BucketStat, 10)
 	// init cluster: there are 8 regions and their size is 600MB,
 	// their key range is [1 10][11 20]....[71 80]
-	for i := uint64(0); i < 8; i++ {
+	for i := range uint64(8) {
 		peers := []*metapb.Peer{{
 			Id:      i * 100,
 			StoreId: i,

@@ -40,7 +40,7 @@ func NewWeightAllocator(length, segNum int) *WeightAllocator {
 	segIndexes := make([]int, 0, segNum)
 	weights := make([]float64, 0, length)
 	unitCount := 0
-	for i := 0; i < segNum; i++ {
+	for i := range segNum {
 		next := segLength
 		if segMod > i {
 			next++
@@ -49,8 +49,8 @@ func NewWeightAllocator(length, segNum int) *WeightAllocator {
 		segIndexes = append(segIndexes, next)
 	}
 	unitWeight := 1.0 / float64(unitCount)
-	for i := 0; i < segNum; i++ {
-		for j := 0; j < segIndexes[i]; j++ {
+	for i := range segNum {
+		for range segIndexes[i] {
 			weights = append(weights, unitWeight*float64(segNum-i))
 		}
 	}
