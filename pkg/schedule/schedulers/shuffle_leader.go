@@ -92,7 +92,7 @@ func (s *shuffleLeaderScheduler) Schedule(cluster sche.SchedulerCluster, dryRun 
 	// 1. random select a valid store.
 	// 2. transfer a leader to the store.
 	shuffleLeaderCounter.Inc()
-	targetStore := filter.NewCandidates(cluster.GetStores()).
+	targetStore := filter.NewCandidates(s.R, cluster.GetStores()).
 		FilterTarget(cluster.GetSchedulerConfig(), nil, nil, s.filters...).
 		RandomPick()
 	if targetStore == nil {
