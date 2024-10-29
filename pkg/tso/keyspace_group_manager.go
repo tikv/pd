@@ -867,7 +867,7 @@ func (kgm *KeyspaceGroupManager) updateKeyspaceGroupMembership(
 	if oldLen != newLen {
 		sameMembership = false
 	} else {
-		for i := 0; i < oldLen; i++ {
+		for i := range oldLen {
 			if oldKeyspaces[i] != newKeyspaces[i] {
 				sameMembership = false
 				break

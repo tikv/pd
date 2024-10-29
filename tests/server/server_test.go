@@ -146,7 +146,7 @@ func TestGRPCRateLimit(t *testing.T) {
 	addr := leaderServer.GetAddr()
 	grpcPDClient := testutil.MustNewGrpcClient(re, addr)
 	leaderServer.BootstrapCluster()
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		resp, err := grpcPDClient.GetRegion(context.Background(), &pdpb.GetRegionRequest{
 			Header:    &pdpb.RequestHeader{ClusterId: clusterID},
 			RegionKey: []byte(""),
@@ -165,7 +165,7 @@ func TestGRPCRateLimit(t *testing.T) {
 	err = testutil.CheckPostJSON(tests.TestDialClient, urlPrefix, jsonBody,
 		testutil.StatusOK(re), testutil.StringContain(re, "gRPC limiter is updated"))
 	re.NoError(err)
-	for i := 0; i < 2; i++ {
+	for i := range 2 {
 		resp, err := grpcPDClient.GetRegion(context.Background(), &pdpb.GetRegionRequest{
 			Header:    &pdpb.RequestHeader{ClusterId: leaderServer.GetClusterID()},
 			RegionKey: []byte(""),
@@ -185,7 +185,7 @@ func TestGRPCRateLimit(t *testing.T) {
 	err = testutil.CheckPostJSON(tests.TestDialClient, urlPrefix, jsonBody,
 		testutil.StatusOK(re), testutil.StringContain(re, "gRPC limiter is deleted"))
 	re.NoError(err)
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		resp, err := grpcPDClient.GetRegion(context.Background(), &pdpb.GetRegionRequest{
 			Header:    &pdpb.RequestHeader{ClusterId: leaderServer.GetClusterID()},
 			RegionKey: []byte(""),

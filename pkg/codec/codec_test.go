@@ -23,7 +23,7 @@ import (
 func TestDecodeBytes(t *testing.T) {
 	re := require.New(t)
 	key := "abcdefghijklmnopqrstuvwxyz"
-	for i := 0; i < len(key); i++ {
+	for i := range key {
 		_, k, err := DecodeBytes(EncodeBytes([]byte(key[:i])))
 		re.NoError(err)
 		re.Equal(key[:i], string(k))

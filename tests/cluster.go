@@ -429,7 +429,7 @@ func (s *TestServer) BootstrapCluster() error {
 // make a test know the PD leader has been elected as soon as possible.
 // If it exceeds the maximum number of loops, it will return nil.
 func (s *TestServer) WaitLeader() bool {
-	for i := 0; i < WaitLeaderRetryTimes; i++ {
+	for range WaitLeaderRetryTimes {
 		if s.server.GetMember().IsLeader() {
 			return true
 		}
@@ -660,7 +660,7 @@ func (c *TestCluster) WaitLeader(ops ...WaitOption) string {
 	for _, op := range ops {
 		op(option)
 	}
-	for i := 0; i < option.retryTimes; i++ {
+	for range option.retryTimes {
 		counter := make(map[string]int)
 		running := 0
 		for _, s := range c.servers {
@@ -692,7 +692,7 @@ func (c *TestCluster) WaitRegionSyncerClientsReady(n int) bool {
 		retryTimes:   40,
 		waitInterval: WaitLeaderCheckInterval,
 	}
-	for i := 0; i < option.retryTimes; i++ {
+	for range option.retryTimes {
 		name := c.GetLeader()
 		if len(name) == 0 {
 			time.Sleep(option.waitInterval)
@@ -729,7 +729,7 @@ func (c *TestCluster) WaitAllocatorLeader(dcLocation string, ops ...WaitOption) 
 	for _, op := range ops {
 		op(option)
 	}
-	for i := 0; i < option.retryTimes; i++ {
+	for range option.retryTimes {
 		counter := make(map[string]int)
 		running := 0
 		for _, s := range c.servers {

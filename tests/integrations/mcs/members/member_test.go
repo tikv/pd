@@ -75,7 +75,7 @@ func (suite *memberTestSuite) SetupTest() {
 	// TSO
 	nodes := make(map[string]bs.Server)
 	// mock 3 tso nodes, which is more than the default replica count(DefaultKeyspaceGroupReplicaCount).
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		s, cleanup := tests.StartSingleTSOTestServer(suite.ctx, re, suite.backendEndpoints, tempurl.Alloc())
 		nodes[s.GetAddr()] = s
 		suite.cleanupFunc = append(suite.cleanupFunc, func() {
@@ -95,7 +95,7 @@ func (suite *memberTestSuite) SetupTest() {
 
 	// Scheduling
 	nodes = make(map[string]bs.Server)
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		s, cleanup := tests.StartSingleSchedulingTestServer(suite.ctx, re, suite.backendEndpoints, tempurl.Alloc())
 		nodes[s.GetAddr()] = s
 		suite.cleanupFunc = append(suite.cleanupFunc, func() {

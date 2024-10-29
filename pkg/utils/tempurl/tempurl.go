@@ -37,7 +37,7 @@ const AllocURLFromUT = "allocURLFromUT"
 
 // Alloc allocates a local URL for testing.
 func Alloc() string {
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		if u := tryAllocTestURL(); u != "" {
 			return u
 		}

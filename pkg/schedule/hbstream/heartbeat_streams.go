@@ -270,7 +270,7 @@ func (s *HeartbeatStreams) Drain(count int) error {
 	if s.needRun {
 		return errors.Normalize("hbstream running enabled")
 	}
-	for i := 0; i < count; i++ {
+	for range count {
 		<-s.msgCh
 	}
 	return nil

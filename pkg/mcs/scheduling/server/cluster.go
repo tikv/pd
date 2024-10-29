@@ -100,7 +100,7 @@ func NewCluster(
 		ruleManager:       ruleManager,
 		labelerManager:    labelerManager,
 		persistConfig:     persistConfig,
-		hotStat:           statistics.NewHotStat(ctx),
+		hotStat:           statistics.NewHotStat(ctx, basicCluster),
 		labelStats:        statistics.NewLabelStatistics(),
 		regionStats:       statistics.NewRegionStatistics(basicCluster, persistConfig, ruleManager),
 		storage:           storage,
@@ -190,21 +190,18 @@ func (c *Cluster) GetHotPeerStat(rw utils.RWType, regionID, storeID uint64) *sta
 	return c.hotStat.GetHotPeerStat(rw, regionID, storeID)
 }
 
-// RegionReadStats returns hot region's read stats.
+// GetHotPeerStats returns the read or write statistics for hot regions.
+// It returns a map where the keys are store IDs and the values are slices of HotPeerStat.
 // The result only includes peers that are hot enough.
-// RegionStats is a thread-safe method
-func (c *Cluster) RegionReadStats() map[uint64][]*statistics.HotPeerStat {
-	// As read stats are reported by store heartbeat, the threshold needs to be adjusted.
-	threshold := c.persistConfig.GetHotRegionCacheHitsThreshold() *
-		(utils.RegionHeartBeatReportInterval / utils.StoreHeartBeatReportInterval)
-	return c.hotStat.RegionStats(utils.Read, threshold)
-}
-
-// RegionWriteStats returns hot region's write stats.
-// The result only includes peers that are hot enough.
-func (c *Cluster) RegionWriteStats() map[uint64][]*statistics.HotPeerStat {
-	// RegionStats is a thread-safe method
-	return c.hotStat.RegionStats(utils.Write, c.persistConfig.GetHotRegionCacheHitsThreshold())
+// GetHotPeerStats is a thread-safe method.
+func (c *Cluster) GetHotPeerStats(rw utils.RWType) map[uint64][]*statistics.HotPeerStat {
+	threshold := c.persistConfig.GetHotRegionCacheHitsThreshold()
+	if rw == utils.Read {
+		// As read stats are reported by store heartbeat, the threshold needs to be adjusted.
+		threshold = c.persistConfig.GetHotRegionCacheHitsThreshold() *
+			(utils.RegionHeartBeatReportInterval / utils.StoreHeartBeatReportInterval)
+	}
+	return c.hotStat.GetHotPeerStats(rw, threshold)
 }
 
 // BucketsStats returns hot region's buckets stats.

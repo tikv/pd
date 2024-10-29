@@ -104,7 +104,7 @@ func mustNewCluster(re *require.Assertions, num int, opts ...func(cfg *config.Co
 		}(cfg)
 	}
 
-	for i := 0; i < num; i++ {
+	for range num {
 		svr := <-ch
 		svrs = append(svrs, svr)
 	}

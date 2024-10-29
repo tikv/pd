@@ -202,7 +202,7 @@ func (rs *Regions) init(cfg *config.Config) {
 	id := uint64(1)
 	now := uint64(time.Now().Unix())
 
-	for i := 0; i < cfg.RegionCount; i++ {
+	for i := range cfg.RegionCount {
 		region := &pdpb.RegionHeartbeatRequest{
 			Header: header(),
 			Region: &metapb.Region{
@@ -229,7 +229,7 @@ func (rs *Regions) init(cfg *config.Config) {
 		}
 
 		peers := make([]*metapb.Peer, 0, cfg.Replica)
-		for j := 0; j < cfg.Replica; j++ {
+		for j := range cfg.Replica {
 			peers = append(peers, &metapb.Peer{Id: id, StoreId: uint64((i+j)%cfg.StoreCount + 1)})
 			id += 1
 		}

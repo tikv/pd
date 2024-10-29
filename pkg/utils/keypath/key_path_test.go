@@ -30,7 +30,7 @@ func TestRegionPath(t *testing.T) {
 		return path.Join(regionPathPrefix, fmt.Sprintf("%020d", id))
 	}
 	rand.New(rand.NewSource(time.Now().Unix()))
-	for i := 0; i < 1000; i++ {
+	for range 1000 {
 		id := rand.Uint64()
 		re.Equal(f(id), RegionPath(id))
 	}

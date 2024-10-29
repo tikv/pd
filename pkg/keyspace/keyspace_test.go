@@ -103,7 +103,7 @@ func (suite *keyspaceTestSuite) TearDownSuite() {
 func makeCreateKeyspaceRequests(count int) []*CreateKeyspaceRequest {
 	now := time.Now().Unix()
 	requests := make([]*CreateKeyspaceRequest, count)
-	for i := 0; i < count; i++ {
+	for i := range count {
 		requests[i] = &CreateKeyspaceRequest{
 			Name: fmt.Sprintf("test_keyspace_%d", i),
 			Config: map[string]string{

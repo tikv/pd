@@ -152,7 +152,7 @@ func waitTiupReady(t *testing.T, tag string) {
 		maxTimes = 20
 	)
 	log.Info("start to wait TiUP ready", zap.String("tag", tag))
-	for i := 0; i < maxTimes; i++ {
+	for i := range maxTimes {
 		err := runCommand(tiupBin, "playground", "display", "--tag", tag)
 		if err == nil {
 			log.Info("TiUP is ready", zap.String("tag", tag))

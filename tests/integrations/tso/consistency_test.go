@@ -150,7 +150,7 @@ func (suite *tsoConsistencyTestSuite) requestTSOConcurrently() {
 
 	var wg sync.WaitGroup
 	wg.Add(tsoRequestConcurrencyNumber)
-	for i := 0; i < tsoRequestConcurrencyNumber; i++ {
+	for range tsoRequestConcurrencyNumber {
 		go func() {
 			defer wg.Done()
 			last := &pdpb.Timestamp{
@@ -158,7 +158,7 @@ func (suite *tsoConsistencyTestSuite) requestTSOConcurrently() {
 				Logical:  0,
 			}
 			var ts *pdpb.Timestamp
-			for j := 0; j < tsoRequestRound; j++ {
+			for range tsoRequestRound {
 				ts = suite.request(ctx, tsoCount)
 				// Check whether the TSO fallbacks
 				re.Equal(1, tsoutil.CompareTimestamp(ts, last))
@@ -185,7 +185,7 @@ func (suite *tsoConsistencyTestSuite) TestFallbackTSOConsistency() {
 	defer cancel()
 	var wg sync.WaitGroup
 	wg.Add(tsoRequestConcurrencyNumber)
-	for i := 0; i < tsoRequestConcurrencyNumber; i++ {
+	for range tsoRequestConcurrencyNumber {
 		go func() {
 			defer wg.Done()
 			last := &pdpb.Timestamp{
@@ -193,7 +193,7 @@ func (suite *tsoConsistencyTestSuite) TestFallbackTSOConsistency() {
 				Logical:  0,
 			}
 			var ts *pdpb.Timestamp
-			for j := 0; j < tsoRequestRound; j++ {
+			for range tsoRequestRound {
 				ts = suite.request(ctx, tsoCount)
 				re.Equal(1, tsoutil.CompareTimestamp(ts, last))
 				last = ts

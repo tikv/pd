@@ -27,11 +27,11 @@ func TestWindowResetWindow(t *testing.T) {
 	re := require.New(t)
 	opts := Options{Size: 3}
 	window := NewWindow(opts)
-	for i := 0; i < opts.Size; i++ {
+	for i := range opts.Size {
 		window.Append(i, 1.0)
 	}
 	window.ResetWindow()
-	for i := 0; i < opts.Size; i++ {
+	for i := range opts.Size {
 		re.Empty(window.Bucket(i).Points)
 	}
 }
@@ -40,7 +40,7 @@ func TestWindowResetBucket(t *testing.T) {
 	re := require.New(t)
 	opts := Options{Size: 3}
 	window := NewWindow(opts)
-	for i := 0; i < opts.Size; i++ {
+	for i := range opts.Size {
 		window.Append(i, 1.0)
 	}
 	window.ResetBucket(1)
@@ -53,11 +53,11 @@ func TestWindowResetBuckets(t *testing.T) {
 	re := require.New(t)
 	opts := Options{Size: 3}
 	window := NewWindow(opts)
-	for i := 0; i < opts.Size; i++ {
+	for i := range opts.Size {
 		window.Append(i, 1.0)
 	}
 	window.ResetBuckets(0, 3)
-	for i := 0; i < opts.Size; i++ {
+	for i := range opts.Size {
 		re.Empty(window.Bucket(i).Points)
 	}
 }
@@ -66,13 +66,13 @@ func TestWindowAppend(t *testing.T) {
 	re := require.New(t)
 	opts := Options{Size: 3}
 	window := NewWindow(opts)
-	for i := 0; i < opts.Size; i++ {
+	for i := range opts.Size {
 		window.Append(i, 1.0)
 	}
 	for i := 1; i < opts.Size; i++ {
 		window.Append(i, 2.0)
 	}
-	for i := 0; i < opts.Size; i++ {
+	for i := range opts.Size {
 		re.Equal(float64(1.0), window.Bucket(i).Points[0])
 	}
 	for i := 1; i < opts.Size; i++ {

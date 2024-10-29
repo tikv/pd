@@ -354,7 +354,7 @@ func (c *pdServiceBalancer) set(clients []ServiceClient) {
 func (c *pdServiceBalancer) check() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	for i := 0; i < c.totalNode; i++ {
+	for range c.totalNode {
 		c.now.markAsAvailable()
 		c.next()
 	}
@@ -523,7 +523,7 @@ func (c *pdServiceDiscovery) initRetry(f func() error) error {
 	var err error
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
-	for i := 0; i < c.option.maxRetryTimes; i++ {
+	for range c.option.maxRetryTimes {
 		if err = f(); err == nil {
 			return nil
 		}
@@ -1093,7 +1093,7 @@ func (c *pdServiceDiscovery) updateServiceClient(members []*pdpb.Member, leader 
 	})
 	c.all.Store(clients)
 	// create candidate services for all kinds of request.
-	for i := 0; i < int(apiKindCount); i++ {
+	for i := range apiKindCount {
 		c.apiCandidateNodes[i].set(clients)
 	}
 	return err

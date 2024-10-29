@@ -658,7 +658,7 @@ func BenchmarkGetRegions(b *testing.B) {
 	url := fmt.Sprintf("%s%s/api/v1/regions", addr, apiPrefix)
 	mustBootstrapCluster(re, svr)
 	regionCount := 1000000
-	for i := 0; i < regionCount; i++ {
+	for i := range regionCount {
 		r := core.NewTestRegionInfo(uint64(i+2), 1,
 			[]byte(fmt.Sprintf("%09d", i)),
 			[]byte(fmt.Sprintf("%09d", i+1)),

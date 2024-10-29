@@ -136,7 +136,7 @@ func (suite *keyspaceGroupTestSuite) TestKeyspaceAssignment() {
 	re.NoError(err)
 	re.Len(kgs, 4)
 
-	for i := 0; i < 99; i++ {
+	for i := range 99 {
 		_, err := suite.kg.CreateKeyspace(&CreateKeyspaceRequest{
 			Name: fmt.Sprintf("test%d", i),
 			Config: map[string]string{

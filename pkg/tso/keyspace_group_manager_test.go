@@ -883,7 +883,7 @@ func collectAssignedKeyspaceGroupIDs(re *require.Assertions, kgm *KeyspaceGroupM
 	defer kgm.RUnlock()
 
 	ids := []uint32{}
-	for i := 0; i < len(kgm.kgs); i++ {
+	for i := range kgm.kgs {
 		kg := kgm.kgs[i]
 		if kg == nil {
 			re.Nil(kgm.ams[i], fmt.Sprintf("ksg is nil but am is not nil for id %d", i))
@@ -910,7 +910,7 @@ func collectAllLoadedKeyspaceGroupIDs(kgm *KeyspaceGroupManager) []uint32 {
 	defer kgm.RUnlock()
 
 	ids := []uint32{}
-	for i := 0; i < len(kgm.kgs); i++ {
+	for i := range kgm.kgs {
 		kg := kgm.kgs[i]
 		if kg != nil {
 			ids = append(ids, uint32(i))
@@ -965,7 +965,7 @@ func (suite *keyspaceGroupManagerTestSuite) TestUpdateKeyspaceGroupMembership() 
 
 		// Verify the keyspaces loaded is sorted.
 		re.Equal(len(keyspaces), len(newGroup.Keyspaces))
-		for i := 0; i < len(newGroup.Keyspaces); i++ {
+		for i := range newGroup.Keyspaces {
 			if i > 0 {
 				re.Less(newGroup.Keyspaces[i-1], newGroup.Keyspaces[i])
 			}
@@ -1090,7 +1090,7 @@ func (suite *keyspaceGroupManagerTestSuite) TestPrimaryPriorityChange() {
 	}
 
 	// And the primaries on TSO Server 1 should continue to serve TSO requests without any failures.
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		for _, id := range ids {
 			_, keyspaceGroupBelongTo, err := mgr1.HandleTSORequest(suite.ctx, id, id, GlobalDCLocation, 1)
 			re.NoError(err)

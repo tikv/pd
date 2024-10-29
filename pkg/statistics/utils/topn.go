@@ -48,7 +48,7 @@ func NewTopN(k, n int, ttl time.Duration) *TopN {
 		topns:  make([]*singleTopN, k),
 		ttlLst: newTTLList(ttl),
 	}
-	for i := 0; i < k; i++ {
+	for i := range k {
 		ret.topns[i] = newSingleTopN(i, n)
 	}
 	return ret
@@ -97,15 +97,14 @@ func (tn *TopN) Put(item TopNItem) (isUpdate bool) {
 		isUpdate = stn.put(item)
 	}
 	tn.ttlLst.put(item.ID())
-	tn.maintain()
 	return
 }
 
 // RemoveExpired deletes all expired items.
-func (tn *TopN) RemoveExpired() {
+func (tn *TopN) RemoveExpired() []uint64 {
 	tn.rw.Lock()
 	defer tn.rw.Unlock()
-	tn.maintain()
+	return tn.maintain()
 }
 
 // Remove deletes the item by given ID and returns it.
@@ -116,16 +115,18 @@ func (tn *TopN) Remove(id uint64) (item TopNItem) {
 		item = stn.remove(id)
 	}
 	_ = tn.ttlLst.remove(id)
-	tn.maintain()
 	return
 }
 
-func (tn *TopN) maintain() {
+func (tn *TopN) maintain() []uint64 {
+	ids := make([]uint64, 0)
 	for _, id := range tn.ttlLst.takeExpired() {
 		for _, stn := range tn.topns {
 			stn.remove(id)
+			ids = append(ids, id)
 		}
 	}
+	return ids
 }
 
 type singleTopN struct {

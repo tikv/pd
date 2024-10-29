@@ -175,7 +175,7 @@ func RegionPath(regionID uint64) string {
 	if len(s) < keyLen {
 		diff := keyLen - len(s)
 		copy(b[diff:], s)
-		for i := 0; i < diff; i++ {
+		for i := range diff {
 			b[i] = '0'
 		}
 	} else if len(s) > keyLen {
@@ -384,7 +384,7 @@ func encodeKeyspaceGroupID(groupID uint32) string {
 
 func buildPath(withSuffix bool, str ...string) string {
 	var sb strings.Builder
-	for i := 0; i < len(str); i++ {
+	for i := range str {
 		if i != 0 {
 			sb.WriteString("/")
 		}

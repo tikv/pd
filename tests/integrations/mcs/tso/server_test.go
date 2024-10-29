@@ -326,11 +326,11 @@ func TestResignTSOPrimaryForward(t *testing.T) {
 	defer tc.Destroy()
 	tc.WaitForDefaultPrimaryServing(re)
 
-	for j := 0; j < 10; j++ {
+	for range 10 {
 		tc.ResignPrimary(constant.DefaultKeyspaceID, constant.DefaultKeyspaceGroupID)
 		tc.WaitForDefaultPrimaryServing(re)
 		var err error
-		for i := 0; i < 3; i++ { // try 3 times
+		for range 3 { // try 3 times
 			_, _, err = suite.pdClient.GetTS(suite.ctx)
 			if err == nil {
 				break
@@ -357,7 +357,7 @@ func TestResignAPIPrimaryForward(t *testing.T) {
 		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/member/skipCampaignLeaderCheck"))
 	}()
 
-	for j := 0; j < 10; j++ {
+	for range 10 {
 		suite.pdLeader.ResignLeader()
 		suite.pdLeader = suite.cluster.GetServer(suite.cluster.WaitLeader())
 		suite.backendEndpoints = suite.pdLeader.GetAddr()
@@ -442,7 +442,7 @@ func (suite *APIServerForward) checkForwardTSOUnexpectedToFollower(checkTSO func
 func (suite *APIServerForward) addRegions() {
 	leader := suite.cluster.GetServer(suite.cluster.WaitLeader())
 	rc := leader.GetServer().GetRaftCluster()
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		region := &metapb.Region{
 			Id:       uint64(i*4 + 1),
 			Peers:    []*metapb.Peer{{Id: uint64(i*4 + 2), StoreId: uint64(i*4 + 3)}},
