@@ -1102,6 +1102,9 @@ func (kgm *KeyspaceGroupManager) HandleTSORequest(
 		if err != nil {
 			return err
 		}
+		if allocator.IsInitialize() {
+			return nil
+		}
 		// TODO: support the Local TSO Allocator.
 		return allocator.Initialize(0)
 	})

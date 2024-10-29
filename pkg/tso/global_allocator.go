@@ -45,7 +45,11 @@ import (
 	"google.golang.org/grpc"
 )
 
-const ttlSeconds = 3
+const (
+	ttlSeconds          = 3
+	keyspaceGroupPrefix = "keyspace_group"
+	pdPrefix            = "pd"
+)
 
 // Allocator is a Timestamp Oracle allocator.
 type Allocator interface {
@@ -135,9 +139,6 @@ func newGlobalTimestampOracle(am *AllocatorManager) *timestampOracle {
 // close is used to shutdown the primary election loop.
 // tso service call this function to shutdown the loop here, but pd manages its own loop.
 func (gta *GlobalTSOAllocator) close() {
-	if err := gta.deregisterAllocator(); err != nil {
-		log.Warn("deregister tso allocator failed", zap.String("key", gta.am.allocatorKey), errs.ZapError(err))
-	}
 	gta.cancel()
 	gta.wg.Wait()
 }
@@ -540,6 +541,9 @@ func (gta *GlobalTSOAllocator) getCurrentTSO(ctx context.Context) (*pdpb.Timesta
 func (gta *GlobalTSOAllocator) Reset() {
 	gta.tsoAllocatorRoleGauge.Set(0)
 	gta.timestampOracle.ResetTimestamp()
+	if err := gta.deregisterAllocator(); err != nil {
+		log.Warn("deregister tso allocator failed", zap.String("key", gta.am.allocatorKey), errs.ZapError(err))
+	}
 }
 
 // primaryElectionLoop is used to maintain the TSO primary election and TSO's
@@ -803,11 +807,15 @@ func (gta *GlobalTSOAllocator) register() (<-chan *clientv3.LeaseKeepAliveRespon
 	if err != nil {
 		return nil, true
 	}
+	allocatorKey := strings.TrimLeft(gta.am.allocatorKey, gta.am.allocatorKeyPrefix)
 	// wait for the previous allocator with different mode to be deregistered
 	if len(resp.Kvs) > 0 {
 		for _, kv := range resp.Kvs {
-			key := string(kv.Key)
-			if !strings.Contains(key, gta.am.allocatorKeyPrefix) {
+			key := strings.TrimLeft(string(kv.Key), gta.am.allocatorKeyPrefix)
+			if strings.Contains(allocatorKey, keyspaceGroupPrefix) && strings.Contains(key, pdPrefix) {
+				return nil, true
+			}
+			if strings.Contains(allocatorKey, pdPrefix) && strings.Contains(key, keyspaceGroupPrefix) {
 				return nil, true
 			}
 		}
