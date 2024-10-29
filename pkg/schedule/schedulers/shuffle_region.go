@@ -113,7 +113,7 @@ func (s *shuffleRegionScheduler) Schedule(cluster schedule.Cluster, dryRun bool)
 }
 
 func (s *shuffleRegionScheduler) scheduleRemovePeer(cluster schedule.Cluster) (*core.RegionInfo, *metapb.Peer) {
-	candidates := filter.NewCandidates(cluster.GetStores()).
+	candidates := filter.NewCandidates(s.R, cluster.GetStores()).
 		FilterSource(cluster.GetOpts(), nil, nil, s.filters...).
 		Shuffle()
 
@@ -152,7 +152,7 @@ func (s *shuffleRegionScheduler) scheduleAddPeer(cluster schedule.Cluster, regio
 	scoreGuard := filter.NewPlacementSafeguard(s.GetName(), cluster.GetOpts(), cluster.GetBasicCluster(), cluster.GetRuleManager(), region, store, nil)
 	excludedFilter := filter.NewExcludedFilter(s.GetName(), nil, region.GetStoreIDs())
 
-	target := filter.NewCandidates(cluster.GetStores()).
+	target := filter.NewCandidates(s.R, cluster.GetStores()).
 		FilterTarget(cluster.GetOpts(), nil, nil, append(s.filters, scoreGuard, excludedFilter)...).
 		RandomPick()
 	if target == nil {

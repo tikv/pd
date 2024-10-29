@@ -109,7 +109,7 @@ func (s *labelScheduler) Schedule(cluster schedule.Cluster, dryRun bool) ([]*ope
 			}
 			f := filter.NewExcludedFilter(s.GetName(), nil, excludeStores)
 
-			target := filter.NewCandidates(cluster.GetFollowerStores(region)).
+			target := filter.NewCandidates(s.R, cluster.GetFollowerStores(region)).
 				FilterTarget(cluster.GetOpts(), nil, nil, &filter.StoreStateFilter{ActionScope: LabelName, TransferLeader: true, OperatorLevel: constant.Medium}, f).
 				RandomPick()
 			if target == nil {

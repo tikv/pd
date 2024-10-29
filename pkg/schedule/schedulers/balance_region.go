@@ -253,7 +253,7 @@ func (s *balanceRegionScheduler) transferPeer(solver *solver, collector *plan.Co
 		filter.NewPlacementSafeguard(s.GetName(), solver.GetOpts(), solver.GetBasicCluster(), solver.GetRuleManager(),
 			solver.region, solver.source, solver.fit),
 	}
-	candidates := filter.NewCandidates(dstStores).FilterTarget(solver.GetOpts(), collector, s.filterCounter, filters...)
+	candidates := filter.NewCandidates(s.R, dstStores).FilterTarget(solver.GetOpts(), collector, s.filterCounter, filters...)
 	if len(candidates.Stores) != 0 {
 		solver.step++
 	}
