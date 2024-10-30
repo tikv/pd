@@ -131,12 +131,12 @@ func (suite *globalConfigTestSuite) TestLoadWithoutConfigPath() {
 func (suite *globalConfigTestSuite) TestLoadOtherConfigPath() {
 	re := suite.Require()
 	defer func() {
-		for i := 0; i < 3; i++ {
+		for i := range 3 {
 			_, err := suite.server.GetClient().Delete(suite.server.Context(), getEtcdPath(strconv.Itoa(i)))
 			re.NoError(err)
 		}
 	}()
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		_, err := suite.server.GetClient().Put(suite.server.Context(), path.Join("OtherConfigPath", strconv.Itoa(i)), strconv.Itoa(i))
 		re.NoError(err)
 	}
@@ -154,7 +154,7 @@ func (suite *globalConfigTestSuite) TestLoadOtherConfigPath() {
 func (suite *globalConfigTestSuite) TestLoadAndStore() {
 	re := suite.Require()
 	defer func() {
-		for i := 0; i < 3; i++ {
+		for range 3 {
 			_, err := suite.server.GetClient().Delete(suite.server.Context(), getEtcdPath("test"))
 			re.NoError(err)
 		}
@@ -178,7 +178,7 @@ func (suite *globalConfigTestSuite) TestLoadAndStore() {
 func (suite *globalConfigTestSuite) TestStore() {
 	re := suite.Require()
 	defer func() {
-		for i := 0; i < 3; i++ {
+		for range 3 {
 			_, err := suite.server.GetClient().Delete(suite.server.Context(), getEtcdPath("test"))
 			re.NoError(err)
 		}
@@ -189,7 +189,7 @@ func (suite *globalConfigTestSuite) TestStore() {
 		Changes:    changes,
 	})
 	re.NoError(err)
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		res, err := suite.server.GetClient().Get(suite.server.Context(), getEtcdPath(strconv.Itoa(i)))
 		re.NoError(err)
 		re.Equal(getEtcdPath(string(res.Kvs[0].Value)), string(res.Kvs[0].Key))
@@ -199,7 +199,7 @@ func (suite *globalConfigTestSuite) TestStore() {
 func (suite *globalConfigTestSuite) TestWatch() {
 	re := suite.Require()
 	defer func() {
-		for i := 0; i < 3; i++ {
+		for i := range 3 {
 			// clean up
 			_, err := suite.server.GetClient().Delete(suite.server.Context(), getEtcdPath(strconv.Itoa(i)))
 			re.NoError(err)
@@ -212,7 +212,7 @@ func (suite *globalConfigTestSuite) TestWatch() {
 		ConfigPath: globalConfigPath,
 		Revision:   0,
 	}, server)
-	for i := 0; i < 6; i++ {
+	for i := range 6 {
 		_, err := suite.server.GetClient().Put(suite.server.Context(), getEtcdPath(strconv.Itoa(i)), strconv.Itoa(i))
 		re.NoError(err)
 	}
@@ -230,12 +230,12 @@ func (suite *globalConfigTestSuite) TestWatch() {
 func (suite *globalConfigTestSuite) TestClientLoadWithoutNames() {
 	re := suite.Require()
 	defer func() {
-		for i := 0; i < 3; i++ {
+		for i := range 3 {
 			_, err := suite.server.GetClient().Delete(suite.server.Context(), getEtcdPath(strconv.Itoa(i)))
 			re.NoError(err)
 		}
 	}()
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		_, err := suite.server.GetClient().Put(suite.server.Context(), getEtcdPath(strconv.Itoa(i)), strconv.Itoa(i))
 		re.NoError(err)
 	}
@@ -264,12 +264,12 @@ func (suite *globalConfigTestSuite) TestClientLoadWithoutConfigPath() {
 func (suite *globalConfigTestSuite) TestClientLoadOtherConfigPath() {
 	re := suite.Require()
 	defer func() {
-		for i := 0; i < 3; i++ {
+		for i := range 3 {
 			_, err := suite.server.GetClient().Delete(suite.server.Context(), getEtcdPath(strconv.Itoa(i)))
 			re.NoError(err)
 		}
 	}()
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		_, err := suite.server.GetClient().Put(suite.server.Context(), path.Join("OtherConfigPath", strconv.Itoa(i)), strconv.Itoa(i))
 		re.NoError(err)
 	}
@@ -284,7 +284,7 @@ func (suite *globalConfigTestSuite) TestClientLoadOtherConfigPath() {
 func (suite *globalConfigTestSuite) TestClientStore() {
 	re := suite.Require()
 	defer func() {
-		for i := 0; i < 3; i++ {
+		for i := range 3 {
 			_, err := suite.server.GetClient().Delete(suite.server.Context(), getEtcdPath(strconv.Itoa(i)))
 			re.NoError(err)
 		}
@@ -292,7 +292,7 @@ func (suite *globalConfigTestSuite) TestClientStore() {
 	err := suite.client.StoreGlobalConfig(suite.server.Context(), globalConfigPath,
 		[]pd.GlobalConfigItem{{Name: "0", Value: "0"}, {Name: "1", Value: "1"}, {Name: "2", Value: "2"}})
 	re.NoError(err)
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		res, err := suite.server.GetClient().Get(suite.server.Context(), getEtcdPath(strconv.Itoa(i)))
 		re.NoError(err)
 		re.Equal(getEtcdPath(string(res.Kvs[0].Value)), string(res.Kvs[0].Key))
@@ -320,7 +320,7 @@ func (suite *globalConfigTestSuite) TestClientWatchWithRevision() {
 	suite.LessOrEqual(r.Header.GetRevision(), revision)
 	re.Equal(pd.GlobalConfigItem{EventType: pdpb.EventType_PUT, Name: getEtcdPath("test"), PayLoad: []byte("test"), Value: "test"}, res[0])
 	// Mock when start watcher there are existed some keys, will load firstly
-	for i := 0; i < 6; i++ {
+	for i := range 6 {
 		_, err = suite.server.GetClient().Put(suite.server.Context(), getEtcdPath(strconv.Itoa(i)), strconv.Itoa(i))
 		re.NoError(err)
 	}
@@ -328,7 +328,7 @@ func (suite *globalConfigTestSuite) TestClientWatchWithRevision() {
 	configChan, err := suite.client.WatchGlobalConfig(suite.server.Context(), globalConfigPath, revision)
 	re.NoError(err)
 	// Mock delete
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		_, err = suite.server.GetClient().Delete(suite.server.Context(), getEtcdPath(strconv.Itoa(i)))
 		re.NoError(err)
 	}
@@ -378,7 +378,7 @@ func (suite *globalConfigTestSuite) TestEtcdNotStart() {
 	re.Error(err)
 
 	_, err = suite.server.LoadGlobalConfig(suite.server.Context(), &pdpb.LoadGlobalConfigRequest{
-		Names: []string{"test_etcd"},
+		Names: []string{"pd_tests"},
 	})
 	re.Error(err)
 }

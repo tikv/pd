@@ -402,7 +402,7 @@ func (m *Manager) rotateKeyIfNeeded(forceUpdate bool) error {
 		}
 		if needRotate {
 			rotated := false
-			for attempt := 0; attempt < keyRotationRetryLimit; attempt += 1 {
+			for range keyRotationRetryLimit {
 				keyID, key, err := NewDataKey(m.method, uint64(m.helper.now().Unix()))
 				if err != nil {
 					return nil

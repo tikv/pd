@@ -56,7 +56,7 @@ func schedulersRegister() {
 	RegisterScheduler(types.BalanceLeaderScheduler, func(opController *operator.Controller,
 		storage endpoint.ConfigStorage, decoder ConfigDecoder, _ ...func(string) error) (Scheduler, error) {
 		conf := &balanceLeaderSchedulerConfig{
-			schedulerConfig: &baseSchedulerConfig{},
+			baseDefaultSchedulerConfig: newBaseDefaultSchedulerConfig(),
 		}
 		if err := decoder(conf); err != nil {
 			return nil, err
@@ -86,12 +86,16 @@ func schedulersRegister() {
 	})
 
 	RegisterScheduler(types.BalanceRegionScheduler, func(opController *operator.Controller,
-		_ endpoint.ConfigStorage, decoder ConfigDecoder, _ ...func(string) error) (Scheduler, error) {
-		conf := &balanceRegionSchedulerConfig{}
+		storage endpoint.ConfigStorage, decoder ConfigDecoder, _ ...func(string) error) (Scheduler, error) {
+		conf := &balanceRegionSchedulerConfig{
+			baseDefaultSchedulerConfig: newBaseDefaultSchedulerConfig(),
+		}
 		if err := decoder(conf); err != nil {
 			return nil, err
 		}
-		return newBalanceRegionScheduler(opController, conf), nil
+		sche := newBalanceRegionScheduler(opController, conf)
+		conf.init(sche.GetName(), storage, conf)
+		return sche, nil
 	})
 
 	// balance witness
@@ -212,9 +216,7 @@ func schedulersRegister() {
 				}
 				storeIDs = append(storeIDs, storeID)
 			}
-			if !conf.setStore(leaderID, storeIDs) {
-				return errs.ErrSchedulerConfig
-			}
+			conf.setStore(leaderID, storeIDs)
 			return nil
 		}
 	})
@@ -321,12 +323,16 @@ func schedulersRegister() {
 	})
 
 	RegisterScheduler(types.LabelScheduler, func(opController *operator.Controller,
-		_ endpoint.ConfigStorage, decoder ConfigDecoder, _ ...func(string) error) (Scheduler, error) {
-		conf := &labelSchedulerConfig{}
+		storage endpoint.ConfigStorage, decoder ConfigDecoder, _ ...func(string) error) (Scheduler, error) {
+		conf := &labelSchedulerConfig{
+			schedulerConfig: &baseSchedulerConfig{},
+		}
 		if err := decoder(conf); err != nil {
 			return nil, err
 		}
-		return newLabelScheduler(opController, conf), nil
+		sche := newLabelScheduler(opController, conf)
+		conf.init(sche.GetName(), storage, conf)
+		return sche, nil
 	})
 
 	// random merge
@@ -346,12 +352,16 @@ func schedulersRegister() {
 	})
 
 	RegisterScheduler(types.RandomMergeScheduler, func(opController *operator.Controller,
-		_ endpoint.ConfigStorage, decoder ConfigDecoder, _ ...func(string) error) (Scheduler, error) {
-		conf := &randomMergeSchedulerConfig{}
+		storage endpoint.ConfigStorage, decoder ConfigDecoder, _ ...func(string) error) (Scheduler, error) {
+		conf := &randomMergeSchedulerConfig{
+			schedulerConfig: &baseSchedulerConfig{},
+		}
 		if err := decoder(conf); err != nil {
 			return nil, err
 		}
-		return newRandomMergeScheduler(opController, conf), nil
+		sche := newRandomMergeScheduler(opController, conf)
+		conf.init(sche.GetName(), storage, conf)
+		return sche, nil
 	})
 
 	// scatter range
@@ -442,12 +452,16 @@ func schedulersRegister() {
 	})
 
 	RegisterScheduler(types.ShuffleLeaderScheduler, func(opController *operator.Controller,
-		_ endpoint.ConfigStorage, decoder ConfigDecoder, _ ...func(string) error) (Scheduler, error) {
-		conf := &shuffleLeaderSchedulerConfig{}
+		storage endpoint.ConfigStorage, decoder ConfigDecoder, _ ...func(string) error) (Scheduler, error) {
+		conf := &shuffleLeaderSchedulerConfig{
+			schedulerConfig: &baseSchedulerConfig{},
+		}
 		if err := decoder(conf); err != nil {
 			return nil, err
 		}
-		return newShuffleLeaderScheduler(opController, conf), nil
+		sche := newShuffleLeaderScheduler(opController, conf)
+		conf.init(sche.GetName(), storage, conf)
+		return sche, nil
 	})
 
 	// shuffle region
@@ -506,8 +520,11 @@ func schedulersRegister() {
 	})
 
 	RegisterScheduler(types.TransferWitnessLeaderScheduler, func(opController *operator.Controller,
-		_ endpoint.ConfigStorage, _ ConfigDecoder, _ ...func(string) error) (Scheduler, error) {
-		return newTransferWitnessLeaderScheduler(opController), nil
+		storage endpoint.ConfigStorage, _ ConfigDecoder, _ ...func(string) error) (Scheduler, error) {
+		conf := &baseSchedulerConfig{}
+		sche := newTransferWitnessLeaderScheduler(opController, conf)
+		conf.init(sche.GetName(), storage, conf)
+		return sche, nil
 	})
 
 	// evict slow store by trend

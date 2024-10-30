@@ -198,7 +198,7 @@ func (c *client) LoadResourceGroups(ctx context.Context) ([]*rmpb.ResourceGroup,
 		return nil, 0, err
 	}
 	if resp.Header.Error != nil {
-		return nil, resp.Header.Revision, errors.Errorf(resp.Header.Error.Message)
+		return nil, resp.Header.Revision, errors.New(resp.Header.Error.Message)
 	}
 	groups := make([]*rmpb.ResourceGroup, 0, len(resp.Kvs))
 	for _, item := range resp.Kvs {
@@ -382,7 +382,7 @@ func (c *client) tryResourceManagerConnect(ctx context.Context, connection *reso
 	)
 	ticker := time.NewTicker(retryInterval)
 	defer ticker.Stop()
-	for i := 0; i < maxRetryTimes; i++ {
+	for range maxRetryTimes {
 		cc, err := c.resourceManagerClient()
 		if err != nil {
 			continue
@@ -406,7 +406,7 @@ func (c *client) tryResourceManagerConnect(ctx context.Context, connection *reso
 }
 
 func (tbc *tokenBatchController) revokePendingTokenRequest(err error) {
-	for i := 0; i < len(tbc.tokenRequestCh); i++ {
+	for range len(tbc.tokenRequestCh) {
 		req := <-tbc.tokenRequestCh
 		req.done <- err
 	}

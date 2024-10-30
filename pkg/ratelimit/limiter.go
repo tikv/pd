@@ -59,15 +59,8 @@ func (l *limiter) getRateLimiter() *RateLimiter {
 	return l.rate
 }
 
-func (l *limiter) deleteRateLimiter() bool {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	l.rate = nil
-	return l.isEmpty()
-}
-
 func (l *limiter) isEmpty() bool {
-	return l.concurrency == nil && l.rate == nil
+	return (l.concurrency == nil || l.concurrency.limit == 0) && l.rate == nil
 }
 
 func (l *limiter) getQPSLimiterStatus() (limit rate.Limit, burst int) {
@@ -89,47 +82,51 @@ func (l *limiter) getConcurrencyLimiterStatus() (limit uint64, current uint64) {
 func (l *limiter) updateConcurrencyConfig(limit uint64) UpdateStatus {
 	oldConcurrencyLimit, _ := l.getConcurrencyLimiterStatus()
 	if oldConcurrencyLimit == limit {
-		return ConcurrencyNoChange
+		return LimiterNotChanged
 	}
 
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if l.concurrency != nil {
 		if limit < 1 {
-			l.concurrency.setLimit(0)
-			return ConcurrencyDeleted
+			l.concurrency = NewConcurrencyLimiter(0)
+			if l.isEmpty() {
+				return LimiterDeleted
+			}
+			return LimiterUpdated
 		}
 		l.concurrency.setLimit(limit)
 	} else {
 		l.concurrency = NewConcurrencyLimiter(limit)
 	}
-	return ConcurrencyChanged
+	return LimiterUpdated
 }
 
 func (l *limiter) updateQPSConfig(limit float64, burst int) UpdateStatus {
 	oldQPSLimit, oldBurst := l.getQPSLimiterStatus()
 	if math.Abs(float64(oldQPSLimit)-limit) < eps && oldBurst == burst {
-		return QPSNoChange
-	}
-	if limit <= eps || burst < 1 {
-		l.deleteRateLimiter()
-		return QPSDeleted
+		return LimiterNotChanged
 	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	if l.rate != nil {
+		if limit <= eps || burst < 1 {
+			l.rate = nil
+			if l.isEmpty() {
+				return LimiterDeleted
+			}
+			return LimiterUpdated
+		}
 		l.rate.SetLimit(rate.Limit(limit))
 		l.rate.SetBurst(burst)
 	} else {
 		l.rate = NewRateLimiter(limit, burst)
 	}
-	return QPSChanged
+	return LimiterUpdated
 }
 
 func (l *limiter) updateDimensionConfig(cfg *DimensionConfig) UpdateStatus {
-	status := l.updateQPSConfig(cfg.QPS, cfg.QPSBurst)
-	status |= l.updateConcurrencyConfig(cfg.ConcurrencyLimit)
-	return status
+	return l.updateQPSConfig(cfg.QPS, cfg.QPSBurst) | l.updateConcurrencyConfig(cfg.ConcurrencyLimit)
 }
 
 func (l *limiter) allow() (DoneFunc, error) {

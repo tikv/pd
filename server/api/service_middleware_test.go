@@ -140,7 +140,7 @@ func (suite *rateLimitConfigTestSuite) TestUpdateRateLimitConfig() {
 	jsonBody, err := json.Marshal(input)
 	re.NoError(err)
 	err = tu.CheckPostJSON(testDialClient, urlPrefix, jsonBody,
-		tu.Status(re, http.StatusBadRequest), tu.StringEqual(re, "\"The type is empty.\"\n"))
+		tu.Status(re, http.StatusBadRequest), tu.StringEqual(re, "The type is empty."))
 	re.NoError(err)
 	// test invalid type
 	input = make(map[string]any)
@@ -148,7 +148,7 @@ func (suite *rateLimitConfigTestSuite) TestUpdateRateLimitConfig() {
 	jsonBody, err = json.Marshal(input)
 	re.NoError(err)
 	err = tu.CheckPostJSON(testDialClient, urlPrefix, jsonBody,
-		tu.Status(re, http.StatusBadRequest), tu.StringEqual(re, "\"The type is invalid.\"\n"))
+		tu.Status(re, http.StatusBadRequest), tu.StringEqual(re, "The type is invalid."))
 	re.NoError(err)
 
 	// test empty label
@@ -158,7 +158,7 @@ func (suite *rateLimitConfigTestSuite) TestUpdateRateLimitConfig() {
 	jsonBody, err = json.Marshal(input)
 	re.NoError(err)
 	err = tu.CheckPostJSON(testDialClient, urlPrefix, jsonBody,
-		tu.Status(re, http.StatusBadRequest), tu.StringEqual(re, "\"The label is empty.\"\n"))
+		tu.Status(re, http.StatusBadRequest), tu.StringEqual(re, "The label is empty."))
 	re.NoError(err)
 	// test no label matched
 	input = make(map[string]any)
@@ -167,7 +167,7 @@ func (suite *rateLimitConfigTestSuite) TestUpdateRateLimitConfig() {
 	jsonBody, err = json.Marshal(input)
 	re.NoError(err)
 	err = tu.CheckPostJSON(testDialClient, urlPrefix, jsonBody,
-		tu.Status(re, http.StatusBadRequest), tu.StringEqual(re, "\"There is no label matched.\"\n"))
+		tu.Status(re, http.StatusBadRequest), tu.StringEqual(re, "There is no label matched."))
 	re.NoError(err)
 
 	// test empty path
@@ -177,7 +177,7 @@ func (suite *rateLimitConfigTestSuite) TestUpdateRateLimitConfig() {
 	jsonBody, err = json.Marshal(input)
 	re.NoError(err)
 	err = tu.CheckPostJSON(testDialClient, urlPrefix, jsonBody,
-		tu.Status(re, http.StatusBadRequest), tu.StringEqual(re, "\"The path is empty.\"\n"))
+		tu.Status(re, http.StatusBadRequest), tu.StringEqual(re, "The path is empty."))
 	re.NoError(err)
 
 	// test path but no label matched
@@ -187,7 +187,7 @@ func (suite *rateLimitConfigTestSuite) TestUpdateRateLimitConfig() {
 	jsonBody, err = json.Marshal(input)
 	re.NoError(err)
 	err = tu.CheckPostJSON(testDialClient, urlPrefix, jsonBody,
-		tu.Status(re, http.StatusBadRequest), tu.StringEqual(re, "\"There is no label matched.\"\n"))
+		tu.Status(re, http.StatusBadRequest), tu.StringEqual(re, "There is no label matched."))
 	re.NoError(err)
 
 	// no change
@@ -197,7 +197,7 @@ func (suite *rateLimitConfigTestSuite) TestUpdateRateLimitConfig() {
 	jsonBody, err = json.Marshal(input)
 	re.NoError(err)
 	err = tu.CheckPostJSON(testDialClient, urlPrefix, jsonBody,
-		tu.StatusOK(re), tu.StringEqual(re, "\"No changed.\"\n"))
+		tu.StatusOK(re), tu.StringEqual(re, "Rate limiter is not changed."))
 	re.NoError(err)
 
 	// change concurrency
@@ -209,13 +209,13 @@ func (suite *rateLimitConfigTestSuite) TestUpdateRateLimitConfig() {
 	jsonBody, err = json.Marshal(input)
 	re.NoError(err)
 	err = tu.CheckPostJSON(testDialClient, urlPrefix, jsonBody,
-		tu.StatusOK(re), tu.StringContain(re, "Concurrency limiter is changed."))
+		tu.StatusOK(re), tu.StringContain(re, "Rate limiter is updated"))
 	re.NoError(err)
 	input["concurrency"] = 0
 	jsonBody, err = json.Marshal(input)
 	re.NoError(err)
 	err = tu.CheckPostJSON(testDialClient, urlPrefix, jsonBody,
-		tu.StatusOK(re), tu.StringContain(re, "Concurrency limiter is deleted."))
+		tu.StatusOK(re), tu.StringContain(re, "Rate limiter is deleted"))
 	re.NoError(err)
 
 	// change qps
@@ -227,7 +227,7 @@ func (suite *rateLimitConfigTestSuite) TestUpdateRateLimitConfig() {
 	jsonBody, err = json.Marshal(input)
 	re.NoError(err)
 	err = tu.CheckPostJSON(testDialClient, urlPrefix, jsonBody,
-		tu.StatusOK(re), tu.StringContain(re, "QPS rate limiter is changed."))
+		tu.StatusOK(re), tu.StringContain(re, "Rate limiter is updated."))
 	re.NoError(err)
 
 	input = make(map[string]any)
@@ -238,7 +238,7 @@ func (suite *rateLimitConfigTestSuite) TestUpdateRateLimitConfig() {
 	jsonBody, err = json.Marshal(input)
 	re.NoError(err)
 	err = tu.CheckPostJSON(testDialClient, urlPrefix, jsonBody,
-		tu.StatusOK(re), tu.StringContain(re, "QPS rate limiter is changed."))
+		tu.StatusOK(re), tu.StringContain(re, "Rate limiter is updated."))
 	re.NoError(err)
 	re.Equal(1, suite.svr.GetRateLimitConfig().LimiterConfig["GetHealthStatus"].QPSBurst)
 
@@ -246,7 +246,7 @@ func (suite *rateLimitConfigTestSuite) TestUpdateRateLimitConfig() {
 	jsonBody, err = json.Marshal(input)
 	re.NoError(err)
 	err = tu.CheckPostJSON(testDialClient, urlPrefix, jsonBody,
-		tu.StatusOK(re), tu.StringContain(re, "QPS rate limiter is deleted."))
+		tu.StatusOK(re), tu.StringContain(re, "Rate limiter is deleted."))
 	re.NoError(err)
 
 	// change both
@@ -257,15 +257,8 @@ func (suite *rateLimitConfigTestSuite) TestUpdateRateLimitConfig() {
 	input["concurrency"] = 100
 	jsonBody, err = json.Marshal(input)
 	re.NoError(err)
-	result := rateLimitResult{}
 	err = tu.CheckPostJSON(testDialClient, urlPrefix, jsonBody,
-		tu.StatusOK(re), tu.StringContain(re, "Concurrency limiter is changed."),
-		tu.StringContain(re, "QPS rate limiter is changed."),
-		tu.ExtractJSON(re, &result),
-	)
-	re.Equal(100., result.LimiterConfig["Profile"].QPS)
-	re.Equal(100, result.LimiterConfig["Profile"].QPSBurst)
-	re.Equal(uint64(100), result.LimiterConfig["Profile"].ConcurrencyLimit)
+		tu.StatusOK(re), tu.StringContain(re, "Rate limiter is updated."))
 	re.NoError(err)
 
 	limiter := suite.svr.GetServiceRateLimiter()
@@ -280,7 +273,7 @@ func (suite *rateLimitConfigTestSuite) TestUpdateRateLimitConfig() {
 	jsonBody, err = json.Marshal(input)
 	re.NoError(err)
 	err = tu.CheckPostJSON(testDialClient, urlPrefix, jsonBody,
-		tu.StatusNotOK(re), tu.StringEqual(re, "\"This service is in allow list whose config can not be changed.\"\n"))
+		tu.StatusNotOK(re), tu.StringEqual(re, "This service is in allow list whose config can not be changed."))
 	re.NoError(err)
 }
 
@@ -294,7 +287,7 @@ func (suite *rateLimitConfigTestSuite) TestUpdateGRPCRateLimitConfig() {
 	jsonBody, err := json.Marshal(input)
 	re.NoError(err)
 	err = tu.CheckPostJSON(testDialClient, urlPrefix, jsonBody,
-		tu.Status(re, http.StatusBadRequest), tu.StringEqual(re, "\"The label is empty.\"\n"))
+		tu.Status(re, http.StatusBadRequest), tu.StringEqual(re, "The label is empty."))
 	re.NoError(err)
 	// test no label matched
 	input = make(map[string]any)
@@ -302,7 +295,7 @@ func (suite *rateLimitConfigTestSuite) TestUpdateGRPCRateLimitConfig() {
 	jsonBody, err = json.Marshal(input)
 	re.NoError(err)
 	err = tu.CheckPostJSON(testDialClient, urlPrefix, jsonBody,
-		tu.Status(re, http.StatusBadRequest), tu.StringEqual(re, "\"There is no label matched.\"\n"))
+		tu.Status(re, http.StatusBadRequest), tu.StringEqual(re, "There is no label matched."))
 	re.NoError(err)
 
 	// no change
@@ -311,7 +304,7 @@ func (suite *rateLimitConfigTestSuite) TestUpdateGRPCRateLimitConfig() {
 	jsonBody, err = json.Marshal(input)
 	re.NoError(err)
 	err = tu.CheckPostJSON(testDialClient, urlPrefix, jsonBody,
-		tu.StatusOK(re), tu.StringEqual(re, "\"No changed.\"\n"))
+		tu.StatusOK(re), tu.StringEqual(re, "gRPC limiter is not changed."))
 	re.NoError(err)
 
 	// change concurrency
@@ -321,13 +314,13 @@ func (suite *rateLimitConfigTestSuite) TestUpdateGRPCRateLimitConfig() {
 	jsonBody, err = json.Marshal(input)
 	re.NoError(err)
 	err = tu.CheckPostJSON(testDialClient, urlPrefix, jsonBody,
-		tu.StatusOK(re), tu.StringContain(re, "Concurrency limiter is changed."))
+		tu.StatusOK(re), tu.StringContain(re, "gRPC limiter is updated."))
 	re.NoError(err)
 	input["concurrency"] = 0
 	jsonBody, err = json.Marshal(input)
 	re.NoError(err)
 	err = tu.CheckPostJSON(testDialClient, urlPrefix, jsonBody,
-		tu.StatusOK(re), tu.StringContain(re, "Concurrency limiter is deleted."))
+		tu.StatusOK(re), tu.StringContain(re, "gRPC limiter is deleted."))
 	re.NoError(err)
 
 	// change qps
@@ -337,7 +330,7 @@ func (suite *rateLimitConfigTestSuite) TestUpdateGRPCRateLimitConfig() {
 	jsonBody, err = json.Marshal(input)
 	re.NoError(err)
 	err = tu.CheckPostJSON(testDialClient, urlPrefix, jsonBody,
-		tu.StatusOK(re), tu.StringContain(re, "QPS rate limiter is changed."))
+		tu.StatusOK(re), tu.StringContain(re, "gRPC limiter is updated."))
 	re.NoError(err)
 
 	input = make(map[string]any)
@@ -346,7 +339,7 @@ func (suite *rateLimitConfigTestSuite) TestUpdateGRPCRateLimitConfig() {
 	jsonBody, err = json.Marshal(input)
 	re.NoError(err)
 	err = tu.CheckPostJSON(testDialClient, urlPrefix, jsonBody,
-		tu.StatusOK(re), tu.StringContain(re, "QPS rate limiter is changed."))
+		tu.StatusOK(re), tu.StringContain(re, "gRPC limiter is updated."))
 	re.NoError(err)
 	re.Equal(1, suite.svr.GetGRPCRateLimitConfig().LimiterConfig["StoreHeartbeat"].QPSBurst)
 
@@ -354,7 +347,7 @@ func (suite *rateLimitConfigTestSuite) TestUpdateGRPCRateLimitConfig() {
 	jsonBody, err = json.Marshal(input)
 	re.NoError(err)
 	err = tu.CheckPostJSON(testDialClient, urlPrefix, jsonBody,
-		tu.StatusOK(re), tu.StringContain(re, "QPS rate limiter is deleted."))
+		tu.StatusOK(re), tu.StringContain(re, "gRPC limiter is deleted."))
 	re.NoError(err)
 
 	// change both
@@ -364,15 +357,9 @@ func (suite *rateLimitConfigTestSuite) TestUpdateGRPCRateLimitConfig() {
 	input["concurrency"] = 100
 	jsonBody, err = json.Marshal(input)
 	re.NoError(err)
-	result := rateLimitResult{}
 	err = tu.CheckPostJSON(testDialClient, urlPrefix, jsonBody,
-		tu.StatusOK(re), tu.StringContain(re, "Concurrency limiter is changed."),
-		tu.StringContain(re, "QPS rate limiter is changed."),
-		tu.ExtractJSON(re, &result),
+		tu.StatusOK(re),
 	)
-	re.Equal(100., result.LimiterConfig["GetStore"].QPS)
-	re.Equal(100, result.LimiterConfig["GetStore"].QPSBurst)
-	re.Equal(uint64(100), result.LimiterConfig["GetStore"].ConcurrencyLimit)
 	re.NoError(err)
 }
 

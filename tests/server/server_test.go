@@ -16,9 +16,15 @@ package server_test
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
+	"sync"
 	"testing"
 
+	"github.com/pingcap/failpoint"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/require"
+	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server/config"
@@ -82,29 +88,23 @@ func TestClusterID(t *testing.T) {
 	err = cluster.RunInitialServers()
 	re.NoError(err)
 
-	clusterID := cluster.GetServer("pd1").GetClusterID()
-	for _, s := range cluster.GetServers() {
-		re.Equal(clusterID, s.GetClusterID())
-	}
+	clusterID := keypath.ClusterID()
+	keypath.ResetClusterID()
 
 	// Restart all PDs.
-	err = cluster.StopAll()
-	re.NoError(err)
-	err = cluster.RunInitialServers()
-	re.NoError(err)
+	re.NoError(cluster.StopAll())
+	re.NoError(cluster.RunInitialServers())
 
-	// All PDs should have the same cluster ID as before.
-	for _, s := range cluster.GetServers() {
-		re.Equal(clusterID, s.GetClusterID())
-	}
+	// PD should have the same cluster ID as before.
+	re.Equal(clusterID, keypath.ClusterID())
+	keypath.ResetClusterID()
 
 	cluster2, err := tests.NewTestCluster(ctx, 3, func(conf *config.Config, _ string) { conf.InitialClusterToken = "foobar" })
 	defer cluster2.Destroy()
 	re.NoError(err)
 	err = cluster2.RunInitialServers()
 	re.NoError(err)
-	clusterID2 := cluster2.GetServer("pd1").GetClusterID()
-	re.NotEqual(clusterID, clusterID2)
+	re.NotEqual(clusterID, keypath.ClusterID())
 }
 
 func TestLeader(t *testing.T) {
@@ -126,4 +126,119 @@ func TestLeader(t *testing.T) {
 	testutil.Eventually(re, func() bool {
 		return cluster.GetLeader() != leader1
 	})
+}
+
+func TestGRPCRateLimit(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster, err := tests.NewTestCluster(ctx, 1)
+	defer cluster.Destroy()
+	re.NoError(err)
+
+	err = cluster.RunInitialServers()
+	re.NoError(err)
+
+	leader := cluster.WaitLeader()
+	re.NotEmpty(leader)
+	leaderServer := cluster.GetServer(leader)
+	clusterID := leaderServer.GetClusterID()
+	addr := leaderServer.GetAddr()
+	grpcPDClient := testutil.MustNewGrpcClient(re, addr)
+	leaderServer.BootstrapCluster()
+	for range 100 {
+		resp, err := grpcPDClient.GetRegion(context.Background(), &pdpb.GetRegionRequest{
+			Header:    &pdpb.RequestHeader{ClusterId: clusterID},
+			RegionKey: []byte(""),
+		})
+		re.NoError(err)
+		re.Empty(resp.GetHeader().GetError())
+	}
+
+	// test rate limit
+	urlPrefix := fmt.Sprintf("%s/pd/api/v1/service-middleware/config/grpc-rate-limit", addr)
+	input := make(map[string]any)
+	input["label"] = "GetRegion"
+	input["qps"] = 1
+	jsonBody, err := json.Marshal(input)
+	re.NoError(err)
+	err = testutil.CheckPostJSON(tests.TestDialClient, urlPrefix, jsonBody,
+		testutil.StatusOK(re), testutil.StringContain(re, "gRPC limiter is updated"))
+	re.NoError(err)
+	for i := range 2 {
+		resp, err := grpcPDClient.GetRegion(context.Background(), &pdpb.GetRegionRequest{
+			Header:    &pdpb.RequestHeader{ClusterId: leaderServer.GetClusterID()},
+			RegionKey: []byte(""),
+		})
+		re.NoError(err)
+		if i == 0 {
+			re.Empty(resp.GetHeader().GetError())
+		} else {
+			re.Contains(resp.GetHeader().GetError().GetMessage(), "rate limit exceeded")
+		}
+	}
+
+	input["label"] = "GetRegion"
+	input["qps"] = 0
+	jsonBody, err = json.Marshal(input)
+	re.NoError(err)
+	err = testutil.CheckPostJSON(tests.TestDialClient, urlPrefix, jsonBody,
+		testutil.StatusOK(re), testutil.StringContain(re, "gRPC limiter is deleted"))
+	re.NoError(err)
+	for range 100 {
+		resp, err := grpcPDClient.GetRegion(context.Background(), &pdpb.GetRegionRequest{
+			Header:    &pdpb.RequestHeader{ClusterId: leaderServer.GetClusterID()},
+			RegionKey: []byte(""),
+		})
+		re.NoError(err)
+		re.Empty(resp.GetHeader().GetError())
+	}
+
+	// test concurrency limit
+	input["concurrency"] = 1
+	jsonBody, err = json.Marshal(input)
+	re.NoError(err)
+	var (
+		okCh  = make(chan struct{})
+		errCh = make(chan string)
+	)
+	err = testutil.CheckPostJSON(tests.TestDialClient, urlPrefix, jsonBody,
+		testutil.StatusOK(re), testutil.StringContain(re, "gRPC limiter is updated"))
+	re.NoError(err)
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/delayProcess", `pause`))
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		resp, err := grpcPDClient.GetRegion(context.Background(), &pdpb.GetRegionRequest{
+			Header:    &pdpb.RequestHeader{ClusterId: leaderServer.GetClusterID()},
+			RegionKey: []byte(""),
+		})
+		re.NoError(err)
+		if resp.GetHeader().GetError() != nil {
+			errCh <- resp.GetHeader().GetError().GetMessage()
+		} else {
+			okCh <- struct{}{}
+		}
+	}()
+
+	grpcPDClient1 := testutil.MustNewGrpcClient(re, addr)
+	go func() {
+		defer wg.Done()
+		resp, err := grpcPDClient1.GetRegion(context.Background(), &pdpb.GetRegionRequest{
+			Header:    &pdpb.RequestHeader{ClusterId: leaderServer.GetClusterID()},
+			RegionKey: []byte(""),
+		})
+		re.NoError(err)
+		if resp.GetHeader().GetError() != nil {
+			errCh <- resp.GetHeader().GetError().GetMessage()
+		} else {
+			okCh <- struct{}{}
+		}
+	}()
+	errStr := <-errCh
+	re.Contains(errStr, "rate limit exceeded")
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/delayProcess"))
+	<-okCh
+	wg.Wait()
 }

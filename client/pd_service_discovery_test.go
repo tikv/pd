@@ -137,7 +137,7 @@ func (suite *serviceClientTestSuite) SetupSuite() {
 	suite.followerServer = newTestServer(false)
 	go suite.leaderServer.run()
 	go suite.followerServer.run()
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		leaderConn, err1 := grpc.Dial(suite.leaderServer.addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 		followerConn, err2 := grpc.Dial(suite.followerServer.addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 		if err1 == nil && err2 == nil {
@@ -278,7 +278,7 @@ func (suite *serviceClientTestSuite) TestServiceClientBalancer() {
 	b.set([]ServiceClient{leader, follower})
 	re.Equal(2, b.totalNode)
 
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		client := b.get()
 		ctx := client.BuildGRPCTargetContext(suite.ctx, false)
 		conn := client.GetClientConn()
@@ -292,7 +292,7 @@ func (suite *serviceClientTestSuite) TestServiceClientBalancer() {
 	suite.followerServer.server.resetCount()
 	suite.leaderServer.server.resetCount()
 
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		client := b.get()
 		ctx := client.BuildGRPCTargetContext(suite.ctx, true)
 		conn := client.GetClientConn()

@@ -49,6 +49,7 @@ import (
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/tso"
 	"github.com/tikv/pd/pkg/utils/assertutil"
+	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
@@ -67,39 +68,6 @@ const (
 
 func TestMain(m *testing.M) {
 	goleak.VerifyTestMain(m, testutil.LeakOptions...)
-}
-
-func TestClientClusterIDCheck(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	// Create the cluster #1.
-	cluster1, err := tests.NewTestCluster(ctx, 3)
-	re.NoError(err)
-	defer cluster1.Destroy()
-	endpoints1 := runServer(re, cluster1)
-	// Create the cluster #2.
-	cluster2, err := tests.NewTestCluster(ctx, 3)
-	re.NoError(err)
-	defer cluster2.Destroy()
-	endpoints2 := runServer(re, cluster2)
-	// Try to create a client with the mixed endpoints.
-	_, err = pd.NewClientWithContext(
-		ctx, append(endpoints1, endpoints2...),
-		pd.SecurityOption{}, pd.WithMaxErrorRetry(1),
-	)
-	re.Error(err)
-	re.Contains(err.Error(), "unmatched cluster id")
-	// updateMember should fail due to unmatched cluster ID found.
-	re.NoError(failpoint.Enable("github.com/tikv/pd/client/skipClusterIDCheck", `return(true)`))
-	re.NoError(failpoint.Enable("github.com/tikv/pd/client/skipFirstUpdateMember", `return(true)`))
-	_, err = pd.NewClientWithContext(ctx, []string{endpoints1[0], endpoints2[0]},
-		pd.SecurityOption{}, pd.WithMaxErrorRetry(1),
-	)
-	re.Error(err)
-	re.Contains(err.Error(), "ErrClientGetMember")
-	re.NoError(failpoint.Disable("github.com/tikv/pd/client/skipFirstUpdateMember"))
-	re.NoError(failpoint.Disable("github.com/tikv/pd/client/skipClusterIDCheck"))
 }
 
 func TestClientLeaderChange(t *testing.T) {
@@ -217,7 +185,7 @@ func TestLeaderTransferAndMoveCluster(t *testing.T) {
 	}()
 
 	// Transfer leader.
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		oldLeaderName := cluster.WaitLeader()
 		err := cluster.GetServer(oldLeaderName).ResignLeader()
 		re.NoError(err)
@@ -228,7 +196,7 @@ func TestLeaderTransferAndMoveCluster(t *testing.T) {
 	// ABC->ABCDEF
 	oldServers := cluster.GetServers()
 	oldLeaderName := cluster.WaitLeader()
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		newPD, err := cluster.Join(ctx)
 		re.NoError(err)
 		re.NoError(newPD.Run())
@@ -361,15 +329,16 @@ func TestTSOFollowerProxy(t *testing.T) {
 	defer cli1.Close()
 	cli2 := setupCli(ctx, re, endpoints)
 	defer cli2.Close()
-	cli2.UpdateOption(pd.EnableTSOFollowerProxy, true)
+	err = cli2.UpdateOption(pd.EnableTSOFollowerProxy, true)
+	re.NoError(err)
 
 	var wg sync.WaitGroup
 	wg.Add(tsoRequestConcurrencyNumber)
-	for i := 0; i < tsoRequestConcurrencyNumber; i++ {
+	for range tsoRequestConcurrencyNumber {
 		go func() {
 			defer wg.Done()
 			var lastTS uint64
-			for i := 0; i < tsoRequestRound; i++ {
+			for range tsoRequestRound {
 				physical, logical, err := cli2.GetTS(context.Background())
 				re.NoError(err)
 				ts := tsoutil.ComposeTS(physical, logical)
@@ -382,6 +351,39 @@ func TestTSOFollowerProxy(t *testing.T) {
 				re.Less(lastTS, ts)
 				lastTS = ts
 			}
+		}()
+	}
+	wg.Wait()
+
+	// Disable the follower proxy and check if the stream is updated.
+	err = cli2.UpdateOption(pd.EnableTSOFollowerProxy, false)
+	re.NoError(err)
+
+	wg.Add(tsoRequestConcurrencyNumber)
+	for range tsoRequestConcurrencyNumber {
+		go func() {
+			defer wg.Done()
+			var lastTS uint64
+			for range tsoRequestRound {
+				physical, logical, err := cli2.GetTS(context.Background())
+				if err != nil {
+					// It can only be the context canceled error caused by the stale stream cleanup.
+					re.ErrorContains(err, "context canceled")
+					continue
+				}
+				re.NoError(err)
+				ts := tsoutil.ComposeTS(physical, logical)
+				re.Less(lastTS, ts)
+				lastTS = ts
+				// After requesting with the follower proxy, request with the leader directly.
+				physical, logical, err = cli1.GetTS(context.Background())
+				re.NoError(err)
+				ts = tsoutil.ComposeTS(physical, logical)
+				re.Less(lastTS, ts)
+				lastTS = ts
+			}
+			// Ensure at least one request is successful.
+			re.NotEmpty(lastTS)
 		}()
 	}
 	wg.Wait()
@@ -429,7 +431,7 @@ func TestUnavailableTimeAfterLeaderIsReady(t *testing.T) {
 	getTsoFunc := func() {
 		defer wg.Done()
 		var lastTS uint64
-		for i := 0; i < tsoRequestRound; i++ {
+		for range tsoRequestRound {
 			var physical, logical int64
 			var ts uint64
 			physical, logical, err = cli.GetTS(context.Background())
@@ -568,11 +570,11 @@ func requestGlobalAndLocalTSO(
 ) {
 	for _, dcLocation := range dcLocationConfig {
 		wg.Add(tsoRequestConcurrencyNumber)
-		for i := 0; i < tsoRequestConcurrencyNumber; i++ {
+		for range tsoRequestConcurrencyNumber {
 			go func(dc string) {
 				defer wg.Done()
 				var lastTS uint64
-				for i := 0; i < tsoRequestRound; i++ {
+				for range tsoRequestRound {
 					globalPhysical1, globalLogical1, err := cli.GetTS(context.TODO())
 					// The allocator leader may be changed due to the environment issue.
 					if err != nil {
@@ -594,7 +596,7 @@ func requestGlobalAndLocalTSO(
 					re.Less(localTS, globalTS2)
 					lastTS = globalTS2
 				}
-				re.Greater(lastTS, uint64(0))
+				re.Positive(lastTS)
 			}(dcLocation)
 		}
 	}
@@ -672,7 +674,7 @@ func (suite *followerForwardAndHandleTestSuite) SetupSuite() {
 			Peers: peers,
 		}
 		req := &pdpb.RegionHeartbeatRequest{
-			Header: newHeader(leader.GetServer()),
+			Header: newHeader(),
 			Region: region,
 			Leader: peers[0],
 		}
@@ -908,7 +910,7 @@ func (suite *followerForwardAndHandleTestSuite) TestGetRegionFromFollower() {
 	})
 	// follower have no region
 	cnt := 0
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		resp, err := cli.GetRegion(ctx, []byte("a"), pd.WithAllowFollowerHandle())
 		if err == nil && resp != nil {
 			cnt++
@@ -922,7 +924,7 @@ func (suite *followerForwardAndHandleTestSuite) TestGetRegionFromFollower() {
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/unreachableNetwork1", fmt.Sprintf("return(\"%s\")", leader.GetAddr())))
 	time.Sleep(150 * time.Millisecond)
 	cnt = 0
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		resp, err := cli.GetRegion(ctx, []byte("a"), pd.WithAllowFollowerHandle())
 		if err == nil && resp != nil {
 			cnt++
@@ -937,7 +939,7 @@ func (suite *followerForwardAndHandleTestSuite) TestGetRegionFromFollower() {
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/unreachableNetwork1", fmt.Sprintf("return(\"%s\")", follower.GetAddr())))
 	time.Sleep(100 * time.Millisecond)
 	cnt = 0
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		resp, err := cli.GetRegion(ctx, []byte("a"), pd.WithAllowFollowerHandle())
 		if err == nil && resp != nil {
 			cnt++
@@ -950,7 +952,7 @@ func (suite *followerForwardAndHandleTestSuite) TestGetRegionFromFollower() {
 	// follower client failed will retry by leader service client.
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/followerHandleError", "return(true)"))
 	cnt = 0
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		resp, err := cli.GetRegion(ctx, []byte("a"), pd.WithAllowFollowerHandle())
 		if err == nil && resp != nil {
 			cnt++
@@ -965,7 +967,7 @@ func (suite *followerForwardAndHandleTestSuite) TestGetRegionFromFollower() {
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/fastCheckAvailable", "return(true)"))
 	time.Sleep(100 * time.Millisecond)
 	cnt = 0
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		resp, err := cli.GetRegion(ctx, []byte("a"), pd.WithAllowFollowerHandle())
 		if err == nil && resp != nil {
 			cnt++
@@ -988,7 +990,7 @@ func (suite *followerForwardAndHandleTestSuite) TestGetTSFuture() {
 
 	ctxs := make([]context.Context, 20)
 	cancels := make([]context.CancelFunc, 20)
-	for i := 0; i < 20; i++ {
+	for i := range 20 {
 		ctxs[i], cancels[i] = context.WithCancel(ctx)
 	}
 	start := time.Now()
@@ -998,7 +1000,7 @@ func (suite *followerForwardAndHandleTestSuite) TestGetTSFuture() {
 	wg1.Add(1)
 	go func() {
 		<-time.After(time.Second)
-		for i := 0; i < 20; i++ {
+		for i := range 20 {
 			cancels[i]()
 		}
 		wg1.Done()
@@ -1010,7 +1012,7 @@ func (suite *followerForwardAndHandleTestSuite) TestGetTSFuture() {
 	}()
 	wg3.Add(1)
 	go func() {
-		for i := 0; i < 20; i++ {
+		for i := range 20 {
 			cli.GetTSAsync(ctxs[i])
 		}
 		wg3.Done()
@@ -1023,7 +1025,7 @@ func (suite *followerForwardAndHandleTestSuite) TestGetTSFuture() {
 }
 
 func checkTS(re *require.Assertions, cli pd.Client, lastTS uint64) uint64 {
-	for i := 0; i < tsoRequestRound; i++ {
+	for range tsoRequestRound {
 		physical, logical, err := cli.GetTS(context.TODO())
 		if err == nil {
 			ts := tsoutil.ComposeTS(physical, logical)
@@ -1124,8 +1126,8 @@ func TestCloseClient(t *testing.T) {
 	cli.Close()
 	physical, logical, err := ts.Wait()
 	if err == nil {
-		re.Greater(physical, int64(0))
-		re.Greater(logical, int64(0))
+		re.Positive(physical)
+		re.Positive(logical)
 	} else {
 		re.ErrorIs(err, context.Canceled)
 		re.Zero(physical)
@@ -1206,7 +1208,7 @@ func (suite *clientTestSuite) SetupSuite() {
 	suite.grpcSvr = &server.GrpcServer{Server: suite.srv}
 
 	server.MustWaitLeader(re, []*server.Server{suite.srv})
-	bootstrapServer(re, newHeader(suite.srv), suite.grpcPDClient)
+	bootstrapServer(re, newHeader(), suite.grpcPDClient)
 
 	suite.ctx, suite.clean = context.WithCancel(context.Background())
 	suite.client = setupCli(suite.ctx, re, suite.srv.GetEndpoints())
@@ -1220,7 +1222,7 @@ func (suite *clientTestSuite) SetupSuite() {
 	now := time.Now().UnixNano()
 	for _, store := range stores {
 		suite.grpcSvr.PutStore(context.Background(), &pdpb.PutStoreRequest{
-			Header: newHeader(suite.srv),
+			Header: newHeader(),
 			Store: &metapb.Store{
 				Id:            store.Id,
 				Address:       store.Address,
@@ -1245,9 +1247,9 @@ func (suite *clientTestSuite) TearDownSuite() {
 	suite.cleanup()
 }
 
-func newHeader(srv *server.Server) *pdpb.RequestHeader {
+func newHeader() *pdpb.RequestHeader {
 	return &pdpb.RequestHeader{
-		ClusterId: srv.ClusterID(),
+		ClusterId: keypath.ClusterID(),
 	}
 }
 
@@ -1283,7 +1285,7 @@ func (suite *clientTestSuite) TestGetRegion() {
 		Peers: peers,
 	}
 	req := &pdpb.RegionHeartbeatRequest{
-		Header: newHeader(suite.srv),
+		Header: newHeader(),
 		Region: region,
 		Leader: peers[0],
 	}
@@ -1300,7 +1302,7 @@ func (suite *clientTestSuite) TestGetRegion() {
 			r.Buckets == nil
 	})
 	breq := &pdpb.ReportBucketsRequest{
-		Header: newHeader(suite.srv),
+		Header: newHeader(),
 		Buckets: &metapb.Buckets{
 			RegionId:   regionID,
 			Version:    1,
@@ -1349,7 +1351,7 @@ func (suite *clientTestSuite) TestGetPrevRegion() {
 	re := suite.Require()
 	regionLen := 10
 	regions := make([]*metapb.Region, 0, regionLen)
-	for i := 0; i < regionLen; i++ {
+	for i := range regionLen {
 		regionID := regionIDAllocator.alloc()
 		r := &metapb.Region{
 			Id: regionID,
@@ -1363,7 +1365,7 @@ func (suite *clientTestSuite) TestGetPrevRegion() {
 		}
 		regions = append(regions, r)
 		req := &pdpb.RegionHeartbeatRequest{
-			Header: newHeader(suite.srv),
+			Header: newHeader(),
 			Region: r,
 			Leader: peers[0],
 		}
@@ -1371,7 +1373,7 @@ func (suite *clientTestSuite) TestGetPrevRegion() {
 		re.NoError(err)
 	}
 	time.Sleep(500 * time.Millisecond)
-	for i := 0; i < 20; i++ {
+	for i := range 20 {
 		testutil.Eventually(re, func() bool {
 			r, err := suite.client.GetPrevRegion(context.Background(), []byte{byte(i)})
 			re.NoError(err)
@@ -1388,7 +1390,7 @@ func (suite *clientTestSuite) TestScanRegions() {
 	re := suite.Require()
 	regionLen := 10
 	regions := make([]*metapb.Region, 0, regionLen)
-	for i := 0; i < regionLen; i++ {
+	for i := range regionLen {
 		regionID := regionIDAllocator.alloc()
 		r := &metapb.Region{
 			Id: regionID,
@@ -1402,7 +1404,7 @@ func (suite *clientTestSuite) TestScanRegions() {
 		}
 		regions = append(regions, r)
 		req := &pdpb.RegionHeartbeatRequest{
-			Header: newHeader(suite.srv),
+			Header: newHeader(),
 			Region: r,
 			Leader: peers[0],
 		}
@@ -1473,7 +1475,7 @@ func (suite *clientTestSuite) TestGetRegionByID() {
 		Peers: peers,
 	}
 	req := &pdpb.RegionHeartbeatRequest{
-		Header: newHeader(suite.srv),
+		Header: newHeader(),
 		Region: region,
 		Leader: peers[0],
 	}
@@ -1570,7 +1572,7 @@ func (suite *clientTestSuite) TestGetStore() {
 
 func (suite *clientTestSuite) checkGCSafePoint(re *require.Assertions, expectedSafePoint uint64) {
 	req := &pdpb.GetGCSafePointRequest{
-		Header: newHeader(suite.srv),
+		Header: newHeader(),
 	}
 	resp, err := suite.grpcSvr.GetGCSafePoint(context.Background(), req)
 	re.NoError(err)
@@ -1760,7 +1762,7 @@ func (suite *clientTestSuite) TestScatterRegion() {
 			EndKey:   []byte("ggg"),
 		}
 		req := &pdpb.RegionHeartbeatRequest{
-			Header: newHeader(suite.srv),
+			Header: newHeader(),
 			Region: region,
 			Leader: peers[0],
 		}
@@ -1916,7 +1918,7 @@ func TestClientWatchWithRevision(t *testing.T) {
 	re.LessOrEqual(r.Header.GetRevision(), res.GetHeader().GetRevision())
 	// Mock when start watcher there are existed some keys, will load firstly
 
-	for i := 0; i < 6; i++ {
+	for i := range 6 {
 		_, err = s.GetEtcdClient().Put(context.Background(), watchPrefix+strconv.Itoa(i), strconv.Itoa(i))
 		re.NoError(err)
 	}
@@ -1924,7 +1926,7 @@ func TestClientWatchWithRevision(t *testing.T) {
 	ch, err := client.Watch(context.Background(), []byte(watchPrefix), pd.WithRev(res.GetHeader().GetRevision()), pd.WithPrefix(), pd.WithPrevKV())
 	re.NoError(err)
 	// Mock delete
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		_, err = s.GetEtcdClient().Delete(context.Background(), watchPrefix+strconv.Itoa(i))
 		re.NoError(err)
 	}
@@ -2008,7 +2010,7 @@ func (suite *clientTestSuite) TestBatchScanRegions() {
 		regions   = make([]*metapb.Region, 0, regionLen)
 	)
 
-	for i := 0; i < regionLen; i++ {
+	for i := range regionLen {
 		regionID := regionIDAllocator.alloc()
 		r := &metapb.Region{
 			Id: regionID,
@@ -2022,7 +2024,7 @@ func (suite *clientTestSuite) TestBatchScanRegions() {
 		}
 		regions = append(regions, r)
 		req := &pdpb.RegionHeartbeatRequest{
-			Header: newHeader(suite.srv),
+			Header: newHeader(),
 			Region: r,
 			Leader: peers[0],
 		}
@@ -2152,7 +2154,7 @@ func (suite *clientTestSuite) TestBatchScanRegions() {
 	)
 	re.ErrorContains(err, "found a hole region in the last")
 	req := &pdpb.RegionHeartbeatRequest{
-		Header: newHeader(suite.srv),
+		Header: newHeader(),
 		Region: &metapb.Region{
 			Id: 100,
 			RegionEpoch: &metapb.RegionEpoch{

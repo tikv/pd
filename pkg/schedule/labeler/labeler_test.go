@@ -290,7 +290,7 @@ func expectSameRegionLabels(re *require.Assertions, r1, r2 *RegionLabel) {
 
 func expectSameRules(re *require.Assertions, r1, r2 *LabelRule) {
 	re.Len(r1.Labels, len(r2.Labels))
-	for id := 0; id < len(r1.Labels); id++ {
+	for id := range r1.Labels {
 		expectSameRegionLabels(re, &r1.Labels[id], &r2.Labels[id])
 	}
 
@@ -341,7 +341,7 @@ func TestKeyRange(t *testing.T) {
 func TestLabelerRuleTTL(t *testing.T) {
 	re := require.New(t)
 	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
-	labeler, err := NewRegionLabeler(context.Background(), store, time.Millisecond*10)
+	labeler, err := NewRegionLabeler(context.Background(), store, time.Minute)
 	re.NoError(err)
 	rules := []*LabelRule{
 		{

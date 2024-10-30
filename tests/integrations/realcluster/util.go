@@ -15,17 +15,12 @@
 package realcluster
 
 import (
+	"os"
+	"os/exec"
 	"time"
-
-	"github.com/tikv/pd/client/http"
 )
 
 const physicalShiftBits = 18
-
-var (
-	pdAddrs   = []string{"http://127.0.0.1:2379"}
-	pdHTTPCli = http.NewClient("pd-real-cluster-test", pdAddrs)
-)
 
 // GetTimeFromTS extracts time.Time from a timestamp.
 func GetTimeFromTS(ts uint64) time.Time {
@@ -36,4 +31,16 @@ func GetTimeFromTS(ts uint64) time.Time {
 // ExtractPhysical returns a ts's physical part.
 func ExtractPhysical(ts uint64) int64 {
 	return int64(ts >> physicalShiftBits)
+}
+
+func runCommand(name string, args ...string) error {
+	cmd := exec.Command(name, args...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
+
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return !os.IsNotExist(err)
 }

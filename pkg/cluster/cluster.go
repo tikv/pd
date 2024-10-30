@@ -68,7 +68,7 @@ func HandleOverlaps(ctx context.Context, c Cluster, overlaps []*core.RegionInfo)
 		if c.GetRegionStats() != nil {
 			c.GetRegionStats().ClearDefunctRegion(item.GetID())
 		}
-		c.GetLabelStats().ClearDefunctRegion(item.GetID())
+		c.GetLabelStats().MarkDefunctRegion(item.GetID())
 		c.GetRuleManager().InvalidCache(item.GetID())
 	}
 }

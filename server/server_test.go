@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -60,7 +61,7 @@ func (suite *leaderServerTestSuite) SetupSuite() {
 	cfgs := NewTestMultiConfig(assertutil.CheckerWithNilAssert(re), 3)
 
 	ch := make(chan *Server, 3)
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		cfg := cfgs[i]
 
 		go func() {
@@ -73,7 +74,7 @@ func (suite *leaderServerTestSuite) SetupSuite() {
 		}()
 	}
 
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		svr := <-ch
 		suite.svrs[svr.GetAddr()] = svr
 		suite.leaderPath = svr.GetMember().GetLeaderPath()
@@ -116,7 +117,7 @@ func newTestServersWithCfgs(
 		}(cfg)
 	}
 
-	for i := 0; i < len(cfgs); i++ {
+	for range cfgs {
 		svr := <-ch
 		re.NotNil(svr)
 		svrs = append(svrs, svr)
@@ -290,8 +291,8 @@ func TestCheckClusterID(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	cfgs := NewTestMultiConfig(assertutil.CheckerWithNilAssert(re), 2)
-	for i, cfg := range cfgs {
-		cfg.DataDir = fmt.Sprintf("/tmp/test_pd_check_clusterID_%d", i)
+	for _, cfg := range cfgs {
+		cfg.DataDir, _ = os.MkdirTemp("", "pd_tests")
 		// Clean up before testing.
 		testutil.CleanServer(cfg.DataDir)
 	}

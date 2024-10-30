@@ -17,7 +17,7 @@ If you're interested in contributing to PD, see [CONTRIBUTING.md](./CONTRIBUTING
 
 ## Build
 
-1. Make sure [*Go*](https://golang.org/) (version 1.21) is installed.
+1. Make sure [*Go*](https://golang.org/) (version 1.23) is installed.
 2. Use `make` to install PD. `pd-server` will be installed in the `bin` directory.
 
 ## Usage

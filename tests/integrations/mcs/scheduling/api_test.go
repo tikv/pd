@@ -110,7 +110,7 @@ func (suite *apiTestSuite) checkAPIForward(cluster *tests.TestCluster) {
 	var respSlice []string
 	var resp map[string]any
 	testutil.Eventually(re, func() bool {
-		return leader.GetRaftCluster().IsServiceIndependent(constant.SchedulingServiceName)
+		return leader.IsServiceIndependent(constant.SchedulingServiceName)
 	})
 
 	// Test operators
@@ -434,11 +434,15 @@ func (suite *apiTestSuite) checkConfigForward(cluster *tests.TestCluster) {
 
 	// Test to change config only in scheduling server
 	// Expect to get new config in scheduling server but not old config in api server
-	opts.GetScheduleConfig().LeaderScheduleLimit = 100
+	scheCfg := opts.GetScheduleConfig().Clone()
+	scheCfg.LeaderScheduleLimit = 100
+	opts.SetScheduleConfig(scheCfg)
 	re.Equal(100, int(opts.GetLeaderScheduleLimit()))
 	testutil.ReadGetJSON(re, tests.TestDialClient, urlPrefix, &cfg)
 	re.Equal(100., cfg["schedule"].(map[string]any)["leader-schedule-limit"])
-	opts.GetReplicationConfig().MaxReplicas = 5
+	repCfg := opts.GetReplicationConfig().Clone()
+	repCfg.MaxReplicas = 5
+	opts.SetReplicationConfig(repCfg)
 	re.Equal(5, int(opts.GetReplicationConfig().MaxReplicas))
 	testutil.ReadGetJSON(re, tests.TestDialClient, urlPrefix, &cfg)
 	re.Equal(5., cfg["replication"].(map[string]any)["max-replicas"])

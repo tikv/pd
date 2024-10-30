@@ -271,7 +271,7 @@ func TestPickPeersFromBinaryInt(t *testing.T) {
 		re.NoError(err)
 		selected := pickPeersFromBinaryInt(candidates, uint(binaryNumber))
 		re.Len(selected, len(c.expectedPeers))
-		for id := 0; id < len(selected); id++ {
+		for id := range selected {
 			re.Equal(selected[id].Id, c.expectedPeers[id])
 		}
 	}

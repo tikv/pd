@@ -18,12 +18,25 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/suite"
 )
 
-func TestTS(t *testing.T) {
-	re := require.New(t)
+type tsSuite struct {
+	realClusterSuite
+}
 
-	db := OpenTestDB(t)
+func TestTS(t *testing.T) {
+	suite.Run(t, &tsSuite{
+		realClusterSuite: realClusterSuite{
+			suiteName: "ts",
+		},
+	})
+}
+
+func (s *tsSuite) TestTS() {
+	re := require.New(s.T())
+
+	db := OpenTestDB(s.T())
 	db.MustExec("use test")
 	db.MustExec("drop table if exists t")
 	db.MustExec("create table t(a int, index i(a))")

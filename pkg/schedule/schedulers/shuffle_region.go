@@ -36,7 +36,7 @@ type shuffleRegionScheduler struct {
 // newShuffleRegionScheduler creates an admin scheduler that shuffles regions
 // between stores.
 func newShuffleRegionScheduler(opController *operator.Controller, conf *shuffleRegionSchedulerConfig) Scheduler {
-	base := NewBaseScheduler(opController, types.ShuffleRegionScheduler)
+	base := NewBaseScheduler(opController, types.ShuffleRegionScheduler, conf)
 	filters := []filter.Filter{
 		&filter.StoreStateFilter{ActionScope: base.GetName(), MoveRegion: true, OperatorLevel: constant.Low},
 		filter.NewSpecialUseFilter(base.GetName()),
@@ -106,7 +106,7 @@ func (s *shuffleRegionScheduler) Schedule(cluster sche.SchedulerCluster, _ bool)
 }
 
 func (s *shuffleRegionScheduler) scheduleRemovePeer(cluster sche.SchedulerCluster) (*core.RegionInfo, *metapb.Peer) {
-	candidates := filter.NewCandidates(cluster.GetStores()).
+	candidates := filter.NewCandidates(s.R, cluster.GetStores()).
 		FilterSource(cluster.GetSchedulerConfig(), nil, nil, s.filters...).
 		Shuffle()
 
@@ -146,7 +146,7 @@ func (s *shuffleRegionScheduler) scheduleAddPeer(cluster sche.SchedulerCluster, 
 	scoreGuard := filter.NewPlacementSafeguard(s.GetName(), cluster.GetSchedulerConfig(), cluster.GetBasicCluster(), cluster.GetRuleManager(), region, store, nil)
 	excludedFilter := filter.NewExcludedFilter(s.GetName(), nil, region.GetStoreIDs())
 
-	target := filter.NewCandidates(cluster.GetStores()).
+	target := filter.NewCandidates(s.R, cluster.GetStores()).
 		FilterTarget(cluster.GetSchedulerConfig(), nil, nil, append(s.filters, scoreGuard, excludedFilter)...).
 		RandomPick()
 	if target == nil {
