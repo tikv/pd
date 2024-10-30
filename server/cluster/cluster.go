@@ -412,14 +412,14 @@ func (c *RaftCluster) checkTSOService() {
 		if c.opt.GetMicroServiceConfig().IsTSODynamicSwitchingEnabled() {
 			servers, err := discovery.Discover(c.etcdClient, strconv.FormatUint(c.clusterID, 10), constant.TSOServiceName)
 			if err != nil || len(servers) == 0 {
-				if err := c.startTSOJobs(); err != nil {
+				if err := c.startTSOJobsIfNeeded(); err != nil {
 					log.Error("failed to start TSO jobs", errs.ZapError(err))
 					return
 				}
 				log.Info("TSO is provided by PD")
 				c.UnsetServiceIndependent(constant.TSOServiceName)
 			} else {
-				if err := c.stopTSOJobs(); err != nil {
+				if err := c.startTSOJobsIfNeeded(); err != nil {
 					log.Error("failed to stop TSO jobs", errs.ZapError(err))
 					return
 				}
@@ -432,7 +432,7 @@ func (c *RaftCluster) checkTSOService() {
 		return
 	}
 
-	if err := c.startTSOJobs(); err != nil {
+	if err := c.startTSOJobsIfNeeded(); err != nil {
 		log.Error("failed to start TSO jobs", errs.ZapError(err))
 		return
 	}
@@ -463,7 +463,7 @@ func (c *RaftCluster) runServiceCheckJob() {
 	}
 }
 
-func (c *RaftCluster) startTSOJobs() error {
+func (c *RaftCluster) startTSOJobsIfNeeded() error {
 	allocator, err := c.tsoAllocator.GetAllocator(tso.GlobalDCLocation)
 	if err != nil {
 		log.Error("failed to get global TSO allocator", errs.ZapError(err))
@@ -479,7 +479,7 @@ func (c *RaftCluster) startTSOJobs() error {
 	return nil
 }
 
-func (c *RaftCluster) stopTSOJobs() error {
+func (c *RaftCluster) stopTSOJobsIfNeeded() error {
 	allocator, err := c.tsoAllocator.GetAllocator(tso.GlobalDCLocation)
 	if err != nil {
 		log.Error("failed to get global TSO allocator", errs.ZapError(err))
@@ -847,7 +847,7 @@ func (c *RaftCluster) Stop() {
 	if !c.IsServiceIndependent(constant.SchedulingServiceName) {
 		c.stopSchedulingJobs()
 	}
-	if err := c.stopTSOJobs(); err != nil {
+	if err := c.stopTSOJobsIfNeeded(); err != nil {
 		log.Error("failed to stop tso jobs", errs.ZapError(err))
 	}
 	c.heartbeatRunner.Stop()
