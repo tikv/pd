@@ -62,7 +62,7 @@ type Cluster struct {
 
 // NewCluster creates a new Cluster
 func NewCluster(ctx context.Context, opts *config.PersistOptions) *Cluster {
-	basicCluster:= core.NewBasicCluster()
+	basicCluster := core.NewBasicCluster()
 	clus := &Cluster{
 		BasicCluster:       basicCluster,
 		IDAllocator:        mockid.NewIDAllocator(),
