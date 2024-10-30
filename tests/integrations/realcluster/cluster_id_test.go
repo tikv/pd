@@ -26,12 +26,12 @@ import (
 )
 
 type clusterIDSuite struct {
-	realClusterSuite
+	clusterSuite
 }
 
 func TestClusterID(t *testing.T) {
 	suite.Run(t, &clusterIDSuite{
-		realClusterSuite: realClusterSuite{
+		clusterSuite: clusterSuite{
 			suiteName: "cluster_id",
 		},
 	})

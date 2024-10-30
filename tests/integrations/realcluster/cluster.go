@@ -29,7 +29,7 @@ import (
 	"go.uber.org/zap"
 )
 
-type realClusterSuite struct {
+type clusterSuite struct {
 	suite.Suite
 
 	clusterCnt int
@@ -42,7 +42,7 @@ var (
 )
 
 // SetupSuite will run before the tests in the suite are run.
-func (s *realClusterSuite) SetupSuite() {
+func (s *clusterSuite) SetupSuite() {
 	t := s.T()
 
 	// Clean the data dir. It is the default data dir of TiUP.
@@ -60,7 +60,7 @@ func (s *realClusterSuite) SetupSuite() {
 }
 
 // TearDownSuite will run after all the tests in the suite have been run.
-func (s *realClusterSuite) TearDownSuite() {
+func (s *clusterSuite) TearDownSuite() {
 	// Even if the cluster deployment fails, we still need to destroy the cluster.
 	// If the cluster does not fail to deploy, the cluster will be destroyed in
 	// the cleanup function. And these code will not work.
@@ -68,16 +68,16 @@ func (s *realClusterSuite) TearDownSuite() {
 	s.stopRealCluster(s.T())
 }
 
-func (s *realClusterSuite) startRealCluster(t *testing.T) {
+func (s *clusterSuite) startRealCluster(t *testing.T) {
 	log.Info("start to deploy a real cluster")
 
 	tag := s.tag()
-	deployTiupPlayground(t, tag)
+	deployTiupPlayground(t, tag, false)
 	waitTiupReady(t, tag)
 	s.clusterCnt++
 }
 
-func (s *realClusterSuite) stopRealCluster(t *testing.T) {
+func (s *clusterSuite) stopRealCluster(t *testing.T) {
 	s.clusterCnt--
 
 	log.Info("start to destroy a real cluster", zap.String("tag", s.tag()))
@@ -85,11 +85,11 @@ func (s *realClusterSuite) stopRealCluster(t *testing.T) {
 	time.Sleep(5 * time.Second)
 }
 
-func (s *realClusterSuite) tag() string {
+func (s *clusterSuite) tag() string {
 	return fmt.Sprintf("pd_real_cluster_test_%s_%d", s.suiteName, s.clusterCnt)
 }
 
-func (s *realClusterSuite) restart() {
+func (s *clusterSuite) restart() {
 	tag := s.tag()
 	log.Info("start to restart", zap.String("tag", tag))
 	s.stopRealCluster(s.T())
@@ -111,7 +111,7 @@ func destroy(t *testing.T, tag string) {
 	log.Info("destroy success", zap.String("tag", tag))
 }
 
-func deployTiupPlayground(t *testing.T, tag string) {
+func deployTiupPlayground(t *testing.T, tag string, ms bool) {
 	curPath, err := os.Getwd()
 	require.NoError(t, err)
 	require.NoError(t, os.Chdir("../../.."))
@@ -130,15 +130,32 @@ func deployTiupPlayground(t *testing.T, tag string) {
 	if !fileExists(playgroundLogDir) {
 		require.NoError(t, os.MkdirAll(playgroundLogDir, 0755))
 	}
+
 	// nolint:errcheck
 	go func() {
-		runCommand("sh", "-c",
-			tiupBin+` playground nightly --kv 3 --tiflash 1 --db 1 --pd 3 \
-			--without-monitor --tag `+tag+` --pd.binpath ./bin/pd-server \
+		if ms {
+			runCommand("sh", "-c",
+				tiupBin+` playground nightly --pd.mode ms --kv 3 --tiflash 1 --db 1 --pd 3 --tso 1 --scheduling 1 \
+			--without-monitor --tag `+tag+` \ 
+			--pd.binpath ./bin/pd-server \
 			--kv.binpath ./third_bin/tikv-server \
-			--db.binpath ./third_bin/tidb-server --tiflash.binpath ./third_bin/tiflash \
+			--db.binpath ./third_bin/tidb-server \ 
+			--tiflash.binpath ./third_bin/tiflash \
+			--tso.binpath ./bin/pd-server \
+			--scheduling.binpath ./bin/pd-server \
 			--pd.config ./tests/integrations/realcluster/pd.toml \
 			> `+filepath.Join(playgroundLogDir, tag+".log")+` 2>&1 & `)
+		} else {
+			runCommand("sh", "-c",
+				tiupBin+` playground nightly --kv 3 --tiflash 1 --db 1 --pd 3 \
+			--without-monitor --tag `+tag+` \
+			--pd.binpath ./bin/pd-server \
+			--kv.binpath ./third_bin/tikv-server \
+			--db.binpath ./third_bin/tidb-server \
+			--tiflash.binpath ./third_bin/tiflash \
+			--pd.config ./tests/integrations/realcluster/pd.toml \
+			> `+filepath.Join(playgroundLogDir, tag+".log")+` 2>&1 & `)
+		}
 	}()
 
 	// Avoid to change the dir before execute `tiup playground`.
@@ -164,4 +181,59 @@ func waitTiupReady(t *testing.T, tag string) {
 		time.Sleep(time.Duration(interval) * time.Second)
 	}
 	require.Failf(t, "TiUP is not ready", "tag: %s", tag)
+}
+
+type msClusterSuite struct {
+	suite.Suite
+
+	clusterCnt int
+	suiteName  string
+}
+
+// SetupSuite will run before the tests in the suite are run.
+func (s *msClusterSuite) SetupSuite() {
+	t := s.T()
+
+	// Clean the data dir. It is the default data dir of TiUP.
+	dataDir := filepath.Join(os.Getenv("HOME"), ".tiup", "data", "pd_ms_cluster_test_"+s.suiteName+"_*")
+	matches, err := filepath.Glob(dataDir)
+	require.NoError(t, err)
+
+	for _, match := range matches {
+		require.NoError(t, runCommand("rm", "-rf", match))
+	}
+	s.startCluster(t)
+	t.Cleanup(func() {
+		s.stopCluster(t)
+	})
+}
+
+// TearDownSuite will run after all the tests in the suite have been run.
+func (s *msClusterSuite) TearDownSuite() {
+	// Even if the cluster deployment fails, we still need to destroy the cluster.
+	// If the cluster does not fail to deploy, the cluster will be destroyed in
+	// the cleanup function. And these code will not work.
+	s.clusterCnt++
+	s.stopCluster(s.T())
+}
+
+func (s *msClusterSuite) startCluster(t *testing.T) {
+	log.Info("start to deploy a ms cluster")
+
+	tag := s.tag()
+	deployTiupPlayground(t, tag, true)
+	waitTiupReady(t, tag)
+	s.clusterCnt++
+}
+
+func (s *msClusterSuite) stopCluster(t *testing.T) {
+	s.clusterCnt--
+
+	log.Info("start to destroy a ms cluster", zap.String("tag", s.tag()))
+	destroy(t, s.tag())
+	time.Sleep(5 * time.Second)
+}
+
+func (s *msClusterSuite) tag() string {
+	return fmt.Sprintf("pd_ms_cluster_test_%s_%d", s.suiteName, s.clusterCnt)
 }

@@ -30,12 +30,12 @@ import (
 )
 
 type schedulerSuite struct {
-	realClusterSuite
+	clusterSuite
 }
 
 func TestScheduler(t *testing.T) {
 	suite.Run(t, &schedulerSuite{
-		realClusterSuite: realClusterSuite{
+		clusterSuite: clusterSuite{
 			suiteName: "scheduler",
 		},
 	})
