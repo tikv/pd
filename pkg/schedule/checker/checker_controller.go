@@ -169,6 +169,9 @@ func (c *Controller) PatrolRegions() {
 				start = time.Now()
 			}
 			failpoint.Inject("breakPatrol", func() {
+				for !c.IsPatrolRegionChanEmpty() {
+					time.Sleep(time.Millisecond * 10)
+				}
 				failpoint.Return()
 			})
 		case <-c.ctx.Done():
@@ -521,7 +524,7 @@ func (p *PatrolRegionContext) stop() {
 }
 
 func (p *PatrolRegionContext) startPatrolRegionWorkers(c *Controller) {
-	for i := 0; i < c.workerCount; i++ {
+	for i := range c.workerCount {
 		p.wg.Add(1)
 		go func(i int) {
 			defer logutil.LogPanic()

@@ -2886,7 +2886,6 @@ func TestCheckCache(t *testing.T) {
 
 	// case 1: operator cannot be created due to replica-schedule-limit restriction
 	checker.PatrolRegions()
-	re.True(checker.IsPatrolRegionChanEmpty())
 	re.Empty(oc.GetOperators())
 	re.Len(checker.GetPendingProcessedRegions(), 1)
 
@@ -2895,7 +2894,6 @@ func TestCheckCache(t *testing.T) {
 	cfg.ReplicaScheduleLimit = 10
 	tc.SetScheduleConfig(cfg)
 	checker.PatrolRegions()
-	re.True(checker.IsPatrolRegionChanEmpty())
 	re.Len(oc.GetOperators(), 1)
 	re.Empty(checker.GetPendingProcessedRegions())
 
@@ -2903,14 +2901,12 @@ func TestCheckCache(t *testing.T) {
 	oc.RemoveOperator(oc.GetOperator(1))
 	tc.SetStoreLimit(1, storelimit.AddPeer, 0)
 	checker.PatrolRegions()
-	re.True(checker.IsPatrolRegionChanEmpty())
 	re.Len(checker.GetPendingProcessedRegions(), 1)
 
 	// cancel the store limit restriction
 	tc.SetStoreLimit(1, storelimit.AddPeer, 10)
 	time.Sleep(time.Second)
 	checker.PatrolRegions()
-	re.True(checker.IsPatrolRegionChanEmpty())
 	re.Len(oc.GetOperators(), 1)
 	re.Empty(checker.GetPendingProcessedRegions())
 
@@ -2934,12 +2930,12 @@ func TestPatrolRegionConcurrency(t *testing.T) {
 	checker := co.GetCheckerController()
 
 	tc.opt.SetSplitMergeInterval(time.Duration(0))
-	for i := 1; i < 4; i++ {
-		if err := tc.addRegionStore(uint64(i), regionNum); err != nil {
+	for i := range 3 {
+		if err := tc.addRegionStore(uint64(i+1), regionNum); err != nil {
 			return
 		}
 	}
-	for i := 0; i < regionNum; i++ {
+	for i := range regionNum {
 		if err := tc.addLeaderRegion(uint64(i), 1, 2, 3); err != nil {
 			return
 		}
@@ -2955,7 +2951,7 @@ func TestPatrolRegionConcurrency(t *testing.T) {
 
 	// test patrol region concurrency with suspect regions
 	suspectRegions := make([]uint64, 0)
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		suspectRegions = append(suspectRegions, uint64(i))
 	}
 	checker.AddPendingProcessedRegions(false, suspectRegions...)
