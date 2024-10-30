@@ -37,11 +37,11 @@ type HotCache struct {
 }
 
 // NewHotCache creates a new hot spot cache.
-func NewHotCache(ctx context.Context) *HotCache {
+func NewHotCache(ctx context.Context, cluster *core.BasicCluster) *HotCache {
 	w := &HotCache{
 		ctx:        ctx,
-		writeCache: NewHotPeerCache(ctx, Write),
-		readCache:  NewHotPeerCache(ctx, Read),
+		writeCache: NewHotPeerCache(ctx, cluster, Write),
+		readCache:  NewHotPeerCache(ctx, cluster, Read),
 	}
 	go w.updateItems(w.readCache.taskQueue, w.runReadTask)
 	go w.updateItems(w.writeCache.taskQueue, w.runWriteTask)
