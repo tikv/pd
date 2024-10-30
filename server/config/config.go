@@ -874,12 +874,6 @@ func (c *MicroServiceConfig) IsSchedulingFallbackEnabled() bool {
 	return c.EnableSchedulingFallback
 }
 
-// IsTSODynamicSwitchingEnabled returns whether to enable TSO dynamic switching.
-func (*MicroServiceConfig) IsTSODynamicSwitchingEnabled() bool {
-	// TODO: make it configurable
-	return false
-}
-
 // KeyspaceConfig is the configuration for keyspace management.
 type KeyspaceConfig struct {
 	// PreAlloc contains the keyspace to be allocated during keyspace manager initialization.
