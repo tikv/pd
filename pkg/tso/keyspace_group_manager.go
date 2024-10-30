@@ -322,7 +322,6 @@ type KeyspaceGroupManager struct {
 
 	// tsoServiceID is the service ID of the TSO service, registered in the service discovery
 	tsoServiceID *discovery.ServiceRegistryEntry
-	clusterID    uint64
 	etcdClient   *clientv3.Client
 	httpClient   *http.Client
 	// electionNamePrefix is the name prefix to generate the unique name of a participant,
@@ -417,7 +416,6 @@ func NewKeyspaceGroupManager(
 		ctx:                          ctx,
 		cancel:                       cancel,
 		tsoServiceID:                 tsoServiceID,
-		clusterID:                    clusterID,
 		etcdClient:                   etcdClient,
 		httpClient:                   httpClient,
 		electionNamePrefix:           electionNamePrefix,
