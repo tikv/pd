@@ -359,6 +359,7 @@ type LabelStatistics struct {
 	sync.RWMutex
 	regionLabelStats map[uint64]string
 	labelCounter     map[string]int
+	defunctRegions   map[uint64]struct{}
 }
 
 // NewLabelStatistics creates a new LabelStatistics.
@@ -366,6 +367,7 @@ func NewLabelStatistics() *LabelStatistics {
 	return &LabelStatistics{
 		regionLabelStats: make(map[uint64]string),
 		labelCounter:     make(map[string]int),
+		defunctRegions:   make(map[uint64]struct{}),
 	}
 }
 
@@ -399,14 +401,26 @@ func (l *LabelStatistics) Reset() {
 	regionLabelLevelGauge.Reset()
 }
 
-// ClearDefunctRegion is used to handle the overlap region.
-func (l *LabelStatistics) ClearDefunctRegion(regionID uint64) {
+// MarkDefunctRegion is used to handle the overlap region.
+// It is used to mark the region as defunct and remove it from the label statistics later.
+func (l *LabelStatistics) MarkDefunctRegion(regionID uint64) {
 	l.Lock()
 	defer l.Unlock()
-	if label, ok := l.regionLabelStats[regionID]; ok {
-		l.labelCounter[label]--
-		delete(l.regionLabelStats, regionID)
+	l.defunctRegions[regionID] = struct{}{}
+}
+
+// ClearDefunctRegions is used to handle the overlap region.
+// It is used to remove the defunct regions from the label statistics.
+func (l *LabelStatistics) ClearDefunctRegions() {
+	l.Lock()
+	defer l.Unlock()
+	for regionID := range l.defunctRegions {
+		if label, ok := l.regionLabelStats[regionID]; ok {
+			l.labelCounter[label]--
+			delete(l.regionLabelStats, regionID)
+		}
 	}
+	l.defunctRegions = make(map[uint64]struct{})
 }
 
 // GetLabelCounter is only used for tests.
