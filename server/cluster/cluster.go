@@ -410,7 +410,7 @@ func (c *RaftCluster) checkSchedulingService() {
 func (c *RaftCluster) checkTSOService() {
 	if c.isAPIServiceMode {
 		if c.opt.GetMicroServiceConfig().IsTSODynamicSwitchingEnabled() {
-			servers, err := discovery.Discover(c.etcdClient, strconv.FormatUint(c.clusterID, 10), constant.TSOServiceName)
+			servers, err := discovery.Discover(c.etcdClient, constant.TSOServiceName)
 			if err != nil || len(servers) == 0 {
 				if err := c.startTSOJobsIfNeeded(); err != nil {
 					log.Error("failed to start TSO jobs", errs.ZapError(err))
