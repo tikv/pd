@@ -27,11 +27,11 @@ import (
 // Status is the status of PD server.
 // NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
 type Status struct {
-	BuildTS        string `json:"build_ts"`
-	Version        string `json:"version"`
-	GitHash        string `json:"git_hash"`
-	StartTimestamp int64  `json:"start_timestamp"`
-	AreRegionsLoaded bool `json:"are_regions_loaded"`
+	BuildTS          string `json:"build_ts"`
+	Version          string `json:"version"`
+	GitHash          string `json:"git_hash"`
+	StartTimestamp   int64  `json:"start_timestamp"`
+	AreRegionsLoaded bool   `json:"are_regions_loaded"`
 }
 
 const (
