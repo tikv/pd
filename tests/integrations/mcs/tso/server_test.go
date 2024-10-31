@@ -633,7 +633,7 @@ func TestTSOServiceSwitch(t *testing.T) {
 	// Wait for the configuration change to take effect
 	time.Sleep(300 * time.Millisecond)
 	// Verify PD is not providing TSO service multiple times
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		err = checkTSOMonotonic(ctx, pdClient, &globalLastTS, 1)
 		re.Error(err, "TSO service should not be available")
 		time.Sleep(10 * time.Millisecond)
@@ -655,7 +655,7 @@ func TestTSOServiceSwitch(t *testing.T) {
 
 func checkTSOMonotonic(ctx context.Context, pdClient pd.Client, globalLastTS *uint64, count int) error {
 	fmt.Println("start to request TSO")
-	for i := 0; i < count; i++ {
+	for range count {
 		physical, logical, err := pdClient.GetTS(ctx)
 		if err != nil {
 			return err
