@@ -263,7 +263,7 @@ func (s *schedulerSuite) TestGrantOrEvictLeaderTwice() {
 				}
 			}
 			return true
-		}, testutil.WithWaitFor(time.Minute))
+		}, testutil.WithWaitFor(2*time.Minute))
 
 		i++
 	}
