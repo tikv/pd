@@ -21,12 +21,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pingcap/log"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/client/http"
 	"github.com/tikv/pd/client/testutil"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/types"
+	"go.uber.org/zap"
 )
 
 type schedulerSuite struct {
@@ -224,7 +226,10 @@ func (s *schedulerSuite) TestGrantOrEvictLeaderTwice() {
 		}
 		testutil.Eventually(re, func() bool {
 			regions, err := pdHTTPCli.GetRegions(ctx)
-			re.NoError(err)
+			if err != nil {
+				log.Error("get regions failed", zap.Error(err))
+				return false
+			}
 			for _, region := range regions.Regions {
 				if region.Leader.StoreID == region1.Leader.StoreID {
 					return false
@@ -248,7 +253,10 @@ func (s *schedulerSuite) TestGrantOrEvictLeaderTwice() {
 		}
 		testutil.Eventually(re, func() bool {
 			regions, err := pdHTTPCli.GetRegions(ctx)
-			re.NoError(err)
+			if err != nil {
+				log.Error("get regions failed", zap.Error(err))
+				return false
+			}
 			for _, region := range regions.Regions {
 				if region.Leader.StoreID != region1.Leader.StoreID {
 					return false
