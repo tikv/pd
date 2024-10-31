@@ -114,9 +114,6 @@ const (
 	heartbeatTaskRunner = "heartbeat-async"
 	miscTaskRunner      = "misc-async"
 	logTaskRunner       = "log-async"
-
-	// TODO: make it configurable
-	IsTSODynamicSwitchingEnabled = false
 )
 
 // Server is the interface for cluster.
@@ -412,7 +409,7 @@ func (c *RaftCluster) checkSchedulingService() {
 // checkTSOService checks the TSO service.
 func (c *RaftCluster) checkTSOService() {
 	if c.isAPIServiceMode {
-		if IsTSODynamicSwitchingEnabled {
+		if c.opt.GetMicroServiceConfig().IsTSODynamicSwitchingEnabled() {
 			servers, err := discovery.Discover(c.etcdClient, constant.TSOServiceName)
 			if err != nil || len(servers) == 0 {
 				if err := c.startTSOJobsIfNeeded(); err != nil {
@@ -422,7 +419,7 @@ func (c *RaftCluster) checkTSOService() {
 				log.Info("TSO is provided by PD")
 				c.UnsetServiceIndependent(constant.TSOServiceName)
 			} else {
-				if err := c.startTSOJobsIfNeeded(); err != nil {
+				if err := c.stopTSOJobsIfNeeded(); err != nil {
 					log.Error("failed to stop TSO jobs", errs.ZapError(err))
 					return
 				}

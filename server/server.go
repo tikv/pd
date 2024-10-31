@@ -1411,7 +1411,7 @@ func (s *Server) GetRaftCluster() *cluster.RaftCluster {
 // IsServiceIndependent returns whether the service is independent.
 func (s *Server) IsServiceIndependent(name string) bool {
 	if s.mode == APIServiceMode && !s.IsClosed() {
-		if name == constant.TSOServiceName && !cluster.IsTSODynamicSwitchingEnabled {
+		if name == constant.TSOServiceName && !s.GetMicroServiceConfig().IsTSODynamicSwitchingEnabled() {
 			return true
 		}
 		return s.cluster.IsServiceIndependent(name)
