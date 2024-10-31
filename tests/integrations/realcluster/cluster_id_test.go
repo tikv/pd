@@ -41,8 +41,8 @@ func (s *clusterIDSuite) TestClientClusterID() {
 	re := require.New(s.T())
 	ctx := context.Background()
 	// deploy second cluster
-	s.startRealCluster(s.T())
-	defer s.stopRealCluster(s.T())
+	s.startCluster(s.T())
+	defer s.stopCluster(s.T())
 
 	pdEndpoints := getPDEndpoints(s.T())
 	// Try to create a client with the mixed endpoints.

@@ -53,9 +53,9 @@ func (s *clusterSuite) SetupSuite() {
 	for _, match := range matches {
 		require.NoError(t, runCommand("rm", "-rf", match))
 	}
-	s.startRealCluster(t)
+	s.startCluster(t)
 	t.Cleanup(func() {
-		s.stopRealCluster(t)
+		s.stopCluster(t)
 	})
 }
 
@@ -65,10 +65,10 @@ func (s *clusterSuite) TearDownSuite() {
 	// If the cluster does not fail to deploy, the cluster will be destroyed in
 	// the cleanup function. And these code will not work.
 	s.clusterCnt++
-	s.stopRealCluster(s.T())
+	s.stopCluster(s.T())
 }
 
-func (s *clusterSuite) startRealCluster(t *testing.T) {
+func (s *clusterSuite) startCluster(t *testing.T) {
 	log.Info("start to deploy a real cluster")
 
 	tag := s.tag()
@@ -77,7 +77,7 @@ func (s *clusterSuite) startRealCluster(t *testing.T) {
 	s.clusterCnt++
 }
 
-func (s *clusterSuite) stopRealCluster(t *testing.T) {
+func (s *clusterSuite) stopCluster(t *testing.T) {
 	s.clusterCnt--
 
 	log.Info("start to destroy a real cluster", zap.String("tag", s.tag()))
@@ -92,8 +92,8 @@ func (s *clusterSuite) tag() string {
 func (s *clusterSuite) restart() {
 	tag := s.tag()
 	log.Info("start to restart", zap.String("tag", tag))
-	s.stopRealCluster(s.T())
-	s.startRealCluster(s.T())
+	s.stopCluster(s.T())
+	s.startCluster(s.T())
 	log.Info("TiUP restart success")
 }
 
