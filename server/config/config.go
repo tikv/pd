@@ -854,7 +854,8 @@ func (c *DRAutoSyncReplicationConfig) adjust(meta *configutil.ConfigMetaData) {
 
 // MicroServiceConfig is the configuration for micro service.
 type MicroServiceConfig struct {
-	EnableSchedulingFallback bool `toml:"enable-scheduling-fallback" json:"enable-scheduling-fallback,string"`
+	EnableSchedulingFallback  bool `toml:"enable-scheduling-fallback" json:"enable-scheduling-fallback,string"`
+	EnableTSODynamicSwitching bool `toml:"enable-tso-dynamic-switching" json:"enable-tso-dynamic-switching,string"`
 }
 
 func (c *MicroServiceConfig) adjust(meta *configutil.ConfigMetaData) {
@@ -872,6 +873,11 @@ func (c *MicroServiceConfig) Clone() *MicroServiceConfig {
 // IsSchedulingFallbackEnabled returns whether to enable scheduling service fallback to api service.
 func (c *MicroServiceConfig) IsSchedulingFallbackEnabled() bool {
 	return c.EnableSchedulingFallback
+}
+
+// IsTSODynamicSwitchingEnabled returns whether to enable TSO dynamic switching.
+func (c *MicroServiceConfig) IsTSODynamicSwitchingEnabled() bool {
+	return c.EnableTSODynamicSwitching
 }
 
 // KeyspaceConfig is the configuration for keyspace management.
