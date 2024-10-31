@@ -201,3 +201,41 @@ func (s *schedulerSuite) TestRegionLabelDenyScheduler() {
 		return true
 	}, testutil.WithWaitFor(time.Minute))
 }
+
+func (s *schedulerSuite) TestEvictLeaderTwice() {
+	re := require.New(s.T())
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	pdHTTPCli := http.NewClient("pd-real-cluster-test", getPDEndpoints(s.T()))
+	regions, err := pdHTTPCli.GetRegions(ctx)
+	re.NoError(err)
+	re.NotEmpty(regions.Regions)
+	region1 := regions.Regions[0]
+
+	f := func(i int) {
+		re.NoError(pdHTTPCli.CreateScheduler(ctx, types.EvictLeaderScheduler.String(), uint64(region1.Leader.StoreID)))
+		defer func() {
+			pdHTTPCli.DeleteScheduler(ctx, types.EvictLeaderScheduler.String())
+		}()
+		// if the second evict leader scheduler cause the pause-leader-filter
+		// disable, the balance-leader-scheduler need some time to transfer
+		// leader. See details in https://github.com/tikv/pd/issues/8756.
+		if i == 1 {
+			time.Sleep(3 * time.Second)
+		}
+		testutil.Eventually(re, func() bool {
+			regions, err := pdHTTPCli.GetRegions(ctx)
+			re.NoError(err)
+			for _, region := range regions.Regions {
+				if region.Leader.StoreID == region1.Leader.StoreID {
+					return false
+				}
+			}
+			return true
+		}, testutil.WithWaitFor(time.Minute))
+	}
+
+	f(0)
+	f(1)
+}
