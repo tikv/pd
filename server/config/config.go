@@ -252,7 +252,8 @@ const (
 	minCheckRegionSplitInterval     = 1 * time.Millisecond
 	maxCheckRegionSplitInterval     = 100 * time.Millisecond
 
-	defaultEnableSchedulingFallback = true
+	defaultEnableSchedulingFallback  = true
+	defaultEnableTSODynamicSwitching = true
 )
 
 // Special keys for Labels
@@ -861,6 +862,9 @@ type MicroServiceConfig struct {
 func (c *MicroServiceConfig) adjust(meta *configutil.ConfigMetaData) {
 	if !meta.IsDefined("enable-scheduling-fallback") {
 		c.EnableSchedulingFallback = defaultEnableSchedulingFallback
+	}
+	if !meta.IsDefined("enable-tso-dynamic-switching") {
+		c.EnableTSODynamicSwitching = defaultEnableTSODynamicSwitching
 	}
 }
 
