@@ -202,7 +202,7 @@ func (s *schedulerSuite) TestRegionLabelDenyScheduler() {
 	}, testutil.WithWaitFor(time.Minute))
 }
 
-func (s *schedulerSuite) TestEvictLeaderTwice() {
+func (s *schedulerSuite) TestGrantOrEvictLeaderTwice() {
 	re := require.New(s.T())
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -213,11 +213,9 @@ func (s *schedulerSuite) TestEvictLeaderTwice() {
 	re.NotEmpty(regions.Regions)
 	region1 := regions.Regions[0]
 
-	f := func(i int) {
+	var i int
+	evictLeader := func() {
 		re.NoError(pdHTTPCli.CreateScheduler(ctx, types.EvictLeaderScheduler.String(), uint64(region1.Leader.StoreID)))
-		defer func() {
-			pdHTTPCli.DeleteScheduler(ctx, types.EvictLeaderScheduler.String())
-		}()
 		// if the second evict leader scheduler cause the pause-leader-filter
 		// disable, the balance-leader-scheduler need some time to transfer
 		// leader. See details in https://github.com/tikv/pd/issues/8756.
@@ -234,8 +232,35 @@ func (s *schedulerSuite) TestEvictLeaderTwice() {
 			}
 			return true
 		}, testutil.WithWaitFor(time.Minute))
+
+		i++
 	}
 
-	f(0)
-	f(1)
+	evictLeader()
+	evictLeader()
+	pdHTTPCli.DeleteScheduler(ctx, types.EvictLeaderScheduler.String())
+
+	i = 0
+	grantLeader := func() {
+		re.NoError(pdHTTPCli.CreateScheduler(ctx, types.GrantLeaderScheduler.String(), uint64(region1.Leader.StoreID)))
+		if i == 1 {
+			time.Sleep(3 * time.Second)
+		}
+		testutil.Eventually(re, func() bool {
+			regions, err := pdHTTPCli.GetRegions(ctx)
+			re.NoError(err)
+			for _, region := range regions.Regions {
+				if region.Leader.StoreID != region1.Leader.StoreID {
+					return false
+				}
+			}
+			return true
+		}, testutil.WithWaitFor(time.Minute))
+
+		i++
+	}
+
+	grantLeader()
+	grantLeader()
+	pdHTTPCli.DeleteScheduler(ctx, types.GrantLeaderScheduler.String())
 }

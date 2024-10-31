@@ -134,7 +134,7 @@ func schedulersRegister() {
 	// evict leader
 	RegisterSliceDecoderBuilder(types.EvictLeaderScheduler, func(args []string) ConfigDecoder {
 		return func(v any) error {
-			if len(args) != 1 {
+			if len(args) < 1 {
 				return errs.ErrSchedulerConfig.FastGenByArgs("id")
 			}
 			conf, ok := v.(*evictLeaderSchedulerConfig)
@@ -268,7 +268,7 @@ func schedulersRegister() {
 	// grant leader
 	RegisterSliceDecoderBuilder(types.GrantLeaderScheduler, func(args []string) ConfigDecoder {
 		return func(v any) error {
-			if len(args) != 1 {
+			if len(args) < 1 {
 				return errs.ErrSchedulerConfig.FastGenByArgs("id")
 			}
 
