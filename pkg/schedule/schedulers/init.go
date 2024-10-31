@@ -119,7 +119,7 @@ func schedulersRegister() {
 	// evict leader
 	schedule.RegisterSliceDecoderBuilder(EvictLeaderType, func(args []string) schedule.ConfigDecoder {
 		return func(v interface{}) error {
-			if len(args) != 1 {
+			if len(args) < 1 {
 				return errs.ErrSchedulerConfig.FastGenByArgs("id")
 			}
 			conf, ok := v.(*evictLeaderSchedulerConfig)
@@ -235,7 +235,7 @@ func schedulersRegister() {
 	// grant leader
 	schedule.RegisterSliceDecoderBuilder(GrantLeaderType, func(args []string) schedule.ConfigDecoder {
 		return func(v interface{}) error {
-			if len(args) != 1 {
+			if len(args) < 1 {
 				return errs.ErrSchedulerConfig.FastGenByArgs("id")
 			}
 
