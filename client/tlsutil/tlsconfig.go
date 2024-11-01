@@ -79,7 +79,7 @@ func (info tlsInfo) clientConfig() (*tls.Config, error) {
 			return nil, err
 		}
 	} else {
-		cfg = &tls.Config{ServerName: info.serverName}
+		cfg = &tls.Config{ServerName: info.serverName, MinVersion: tls.VersionTLS12}
 	}
 	cfg.InsecureSkipVerify = info.insecureSkipVerify
 
@@ -190,6 +190,7 @@ func (s TLSConfig) ToTLSConfig() (*tls.Config, error) {
 			Certificates: certificates,
 			RootCAs:      certPool,
 			NextProtos:   []string{"h2", "http/1.1"}, // specify `h2` to let Go use HTTP/2.
+			MinVersion:   tls.VersionTLS12,
 		}, nil
 	}
 
