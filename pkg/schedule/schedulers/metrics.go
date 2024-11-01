@@ -226,6 +226,7 @@ var (
 	balanceLeaderScheduleCounter         = balanceLeaderCounterWithEvent("schedule")
 	balanceLeaderNoLeaderRegionCounter   = balanceLeaderCounterWithEvent("no-leader-region")
 	balanceLeaderRegionHotCounter        = balanceLeaderCounterWithEvent("region-hot")
+	balanceLeaderNoSourceStoreCounter    = balanceLeaderCounterWithEvent("no-source-store")
 	balanceLeaderNoTargetStoreCounter    = balanceLeaderCounterWithEvent("no-target-store")
 	balanceLeaderNoFollowerRegionCounter = balanceLeaderCounterWithEvent("no-follower-region")
 	balanceLeaderSkipCounter             = balanceLeaderCounterWithEvent("skip")
