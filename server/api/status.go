@@ -17,6 +17,7 @@ package api
 import (
 	"net/http"
 
+	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/server"
 	"github.com/unrolled/render"
@@ -44,6 +45,7 @@ func (h *statusHandler) GetPDStatus(w http.ResponseWriter, _ *http.Request) {
 		GitHash:        versioninfo.PDGitHash,
 		Version:        versioninfo.PDReleaseVersion,
 		StartTimestamp: h.svr.StartTimestamp(),
+		Loaded:         storage.AreRegionsLoaded(h.svr.GetStorage()),
 	}
 
 	h.rd.JSON(w, http.StatusOK, version)
