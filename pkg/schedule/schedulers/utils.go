@@ -397,13 +397,13 @@ func pauseAndResumeLeaderTransfer[T any](cluster *core.BasicCluster, old, new ma
 		if _, ok := new[id]; ok {
 			continue
 		}
-		cluster.ResumeLeaderTransfer(id)
+		cluster.ResumeLeaderTransfer(id, "moban")
 	}
 	for id := range new {
 		if _, ok := old[id]; ok {
 			continue
 		}
-		if err := cluster.PauseLeaderTransfer(id); err != nil {
+		if err := cluster.PauseLeaderTransfer(id, "moban"); err != nil {
 			log.Error("pause leader transfer failed", zap.Uint64("store-id", id), errs.ZapError(err))
 		}
 	}

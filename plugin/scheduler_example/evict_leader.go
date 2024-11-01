@@ -50,7 +50,7 @@ const (
 func init() {
 	schedulers.RegisterSliceDecoderBuilder(userEvictLeaderScheduler, func(args []string) schedulers.ConfigDecoder {
 		return func(v any) error {
-			if len(args) != 1 {
+			if len(args) < 1 {
 				return errors.New("should specify the store-id")
 			}
 			conf, ok := v.(*evictLeaderSchedulerConfig)
@@ -101,7 +101,7 @@ type evictLeaderSchedulerConfig struct {
 
 // BuildWithArgs builds the config with the args.
 func (conf *evictLeaderSchedulerConfig) BuildWithArgs(args []string) error {
-	if len(args) != 1 {
+	if len(args) < 1 {
 		return errors.New("should specify the store-id")
 	}
 
@@ -185,7 +185,7 @@ func (s *evictLeaderScheduler) PrepareConfig(cluster sche.SchedulerCluster) erro
 	defer s.conf.mu.RUnlock()
 	var res error
 	for id := range s.conf.StoreIDWitRanges {
-		if err := cluster.PauseLeaderTransfer(id); err != nil {
+		if err := cluster.PauseLeaderTransfer(id, ""); err != nil {
 			res = err
 		}
 	}
@@ -197,7 +197,7 @@ func (s *evictLeaderScheduler) CleanConfig(cluster sche.SchedulerCluster) {
 	s.conf.mu.RLock()
 	defer s.conf.mu.RUnlock()
 	for id := range s.conf.StoreIDWitRanges {
-		cluster.ResumeLeaderTransfer(id)
+		cluster.ResumeLeaderTransfer(id, "")
 	}
 }
 
@@ -258,7 +258,7 @@ func (handler *evictLeaderHandler) updateConfig(w http.ResponseWriter, r *http.R
 	if ok {
 		id = (uint64)(idFloat)
 		if _, exists = handler.config.StoreIDWitRanges[id]; !exists {
-			if err := handler.config.cluster.PauseLeaderTransfer(id); err != nil {
+			if err := handler.config.cluster.PauseLeaderTransfer(id, ""); err != nil {
 				handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
 				return
 			}
@@ -276,7 +276,7 @@ func (handler *evictLeaderHandler) updateConfig(w http.ResponseWriter, r *http.R
 	err := handler.config.BuildWithArgs(args)
 	if err != nil {
 		handler.config.mu.Lock()
-		handler.config.cluster.ResumeLeaderTransfer(id)
+		handler.config.cluster.ResumeLeaderTransfer(id, "")
 		handler.config.mu.Unlock()
 		handler.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
@@ -285,7 +285,7 @@ func (handler *evictLeaderHandler) updateConfig(w http.ResponseWriter, r *http.R
 	if err != nil {
 		handler.config.mu.Lock()
 		delete(handler.config.StoreIDWitRanges, id)
-		handler.config.cluster.ResumeLeaderTransfer(id)
+		handler.config.cluster.ResumeLeaderTransfer(id, "")
 		handler.config.mu.Unlock()
 		handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
@@ -314,11 +314,11 @@ func (handler *evictLeaderHandler) deleteConfig(w http.ResponseWriter, r *http.R
 		return
 	}
 	delete(handler.config.StoreIDWitRanges, id)
-	handler.config.cluster.ResumeLeaderTransfer(id)
+	handler.config.cluster.ResumeLeaderTransfer(id, "")
 
 	if err := handler.config.Persist(); err != nil {
 		handler.config.StoreIDWitRanges[id] = ranges
-		_ = handler.config.cluster.PauseLeaderTransfer(id)
+		_ = handler.config.cluster.PauseLeaderTransfer(id, "")
 		handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}

@@ -137,8 +137,8 @@ type StoreSetInformer interface {
 
 // StoreSetController is used to control stores' status.
 type StoreSetController interface {
-	PauseLeaderTransfer(id uint64) error
-	ResumeLeaderTransfer(id uint64)
+	PauseLeaderTransfer(id uint64, purpose string) error
+	ResumeLeaderTransfer(id uint64, purpose string)
 
 	SlowStoreEvicted(id uint64) error
 	SlowStoreRecovered(id uint64)
