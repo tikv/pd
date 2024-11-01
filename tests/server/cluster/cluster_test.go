@@ -1864,6 +1864,12 @@ func TestPatrolRegionConfigChange(t *testing.T) {
 	leaderServer.GetServer().SetScheduleConfig(schedule)
 	checkLog(re, fname, "starts patrol regions with new interval")
 
+	// test change patrol region worker count
+	schedule = leaderServer.GetConfig().Schedule
+	schedule.PatrolRegionWorkerCount = 8
+	leaderServer.GetServer().SetScheduleConfig(schedule)
+	checkLog(re, fname, "starts patrol regions with new workers count")
+
 	// test change schedule halt
 	schedule = leaderServer.GetConfig().Schedule
 	schedule.HaltScheduling = true
