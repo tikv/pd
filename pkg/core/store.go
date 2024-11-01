@@ -776,9 +776,10 @@ func (s *StoresInfo) ResetStores() {
 }
 
 // PauseLeaderTransfer pauses a StoreInfo with storeID.
-func (s *StoresInfo) PauseLeaderTransfer(storeID uint64) error {
+func (s *StoresInfo) PauseLeaderTransfer(storeID uint64, purpose string) error {
 	s.Lock()
 	defer s.Unlock()
+	log.Info("pause store leader transfer", zap.Uint64("store-id", storeID), zap.String("purpose", purpose))
 	store, ok := s.stores[storeID]
 	if !ok {
 		return errs.ErrStoreNotFound.FastGenByArgs(storeID)
@@ -792,9 +793,10 @@ func (s *StoresInfo) PauseLeaderTransfer(storeID uint64) error {
 
 // ResumeLeaderTransfer cleans a store's pause state. The store can be selected
 // as source or target of TransferLeader again.
-func (s *StoresInfo) ResumeLeaderTransfer(storeID uint64) {
+func (s *StoresInfo) ResumeLeaderTransfer(storeID uint64, purpose string) {
 	s.Lock()
 	defer s.Unlock()
+	log.Info("resume store leader transfer", zap.Uint64("store-id", storeID), zap.String("purpose", purpose))
 	store, ok := s.stores[storeID]
 	if !ok {
 		log.Warn("try to clean a store's pause state, but it is not found. It may be cleanup",
