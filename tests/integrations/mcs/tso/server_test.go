@@ -268,6 +268,10 @@ func TestForwardTSORelated(t *testing.T) {
 	re := require.New(t)
 	suite := NewAPIServerForward(re)
 	defer suite.ShutDown()
+	leaderServer := suite.cluster.GetLeaderServer().GetServer()
+	cfg := leaderServer.GetMicroServiceConfig().Clone()
+	cfg.EnableTSODynamicSwitching = false
+	leaderServer.SetMicroServiceConfig(*cfg)
 	// Unable to use the tso-related interface without tso server
 	suite.checkUnavailableTSO(re)
 	tc, err := tests.NewTestTSOCluster(suite.ctx, 1, suite.backendEndpoints)
