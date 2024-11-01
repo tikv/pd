@@ -164,7 +164,9 @@ func checkTSOPath(re *require.Assertions, isAPIServiceMode bool) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	if isAPIServiceMode {
-		cluster, err = tests.NewTestAPICluster(ctx, 1)
+		cluster, err = tests.NewTestAPICluster(ctx, 1, func(conf *config.Config, _ string) {
+			conf.MicroService.EnableTSODynamicSwitching = false
+		})
 	} else {
 		cluster, err = tests.NewTestCluster(ctx, 1)
 	}
