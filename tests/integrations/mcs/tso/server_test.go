@@ -35,6 +35,7 @@ import (
 	tsoapi "github.com/tikv/pd/pkg/mcs/tso/server/apis/v1"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/storage/endpoint"
+	tsopkg "github.com/tikv/pd/pkg/tso"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/tempurl"
@@ -622,10 +623,15 @@ func TestTSOServiceSwitch(t *testing.T) {
 	re.NoError(err)
 	tsoCluster.WaitForDefaultPrimaryServing(re)
 
-	// Wait for TSO server to start and PD to detect it
-	time.Sleep(300 * time.Millisecond)
-
 	// Verify PD is not providing TSO service
+	testutil.Eventually(re, func() bool {
+		allocator, err := pdLeader.GetServer().GetTSOAllocatorManager().GetAllocator(tsopkg.GlobalDCLocation)
+		if err != nil {
+			return false
+		}
+		return !allocator.IsInitialize()
+	})
+
 	err = checkTSOMonotonic(ctx, pdClient, &globalLastTS, 10)
 	re.NoError(err)
 
@@ -660,7 +666,6 @@ func TestTSOServiceSwitch(t *testing.T) {
 }
 
 func checkTSOMonotonic(ctx context.Context, pdClient pd.Client, globalLastTS *uint64, count int) error {
-	fmt.Println("start to request TSO")
 	for range count {
 		physical, logical, err := pdClient.GetTS(ctx)
 		if err != nil {
