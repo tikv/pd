@@ -34,12 +34,21 @@ import (
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/slice"
+	"github.com/tikv/pd/pkg/storage/kv"
+	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
+	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
+)
+
+const (
+	ttlSeconds          = 3
+	keyspaceGroupPrefix = "keyspace_group"
+	pdPrefix            = "pd"
 )
 
 // Allocator is a Timestamp Oracle allocator.
@@ -183,6 +192,9 @@ func (gta *GlobalTSOAllocator) estimateMaxTS(ctx context.Context, count uint32, 
 
 // Initialize will initialize the created global TSO allocator.
 func (gta *GlobalTSOAllocator) Initialize(int) error {
+	if err := gta.registerAllocator(); err != nil {
+		return err
+	}
 	gta.tsoAllocatorRoleGauge.Set(1)
 	// The suffix of a Global TSO should always be 0.
 	gta.timestampOracle.suffix = 0
@@ -529,6 +541,9 @@ func (gta *GlobalTSOAllocator) getCurrentTSO(ctx context.Context) (*pdpb.Timesta
 func (gta *GlobalTSOAllocator) Reset() {
 	gta.tsoAllocatorRoleGauge.Set(0)
 	gta.timestampOracle.ResetTimestamp()
+	if err := gta.deregisterAllocator(); err != nil {
+		log.Warn("deregister tso allocator failed", zap.String("key", gta.am.allocatorKey), errs.ZapError(err))
+	}
 }
 
 // primaryElectionLoop is used to maintain the TSO primary election and TSO's
@@ -694,4 +709,124 @@ func (gta *GlobalTSOAllocator) GetExpectedPrimaryLease() *election.Lease {
 
 func (gta *GlobalTSOAllocator) getMetrics() *tsoMetrics {
 	return gta.timestampOracle.metrics
+}
+
+// registerAllocator registers the tso allocator to etcd.
+// It is used when switching mode between pd and ms. We need to make sure only one TSO allocator is working at the same time.
+func (gta *GlobalTSOAllocator) registerAllocator() error {
+	log.Info("register tso allocator", zap.String("key", gta.am.allocatorKey))
+	kresp := gta.tryRegister()
+	if kresp == nil {
+		return errors.New("context canceled")
+	}
+	go func() {
+		defer logutil.LogPanic()
+		for {
+			select {
+			case <-gta.ctx.Done():
+				log.Info("exit register tso allocator", zap.String("key", gta.am.allocatorKey))
+				return
+			case _, ok := <-kresp:
+				if !ok {
+					log.Error("keep alive tso allocator failed", zap.String("key", gta.am.allocatorKey))
+					kresp = gta.renewKeepalive()
+				}
+			}
+		}
+	}()
+	return nil
+}
+
+func (gta *GlobalTSOAllocator) renewKeepalive() <-chan *clientv3.LeaseKeepAliveResponse {
+	t := time.NewTicker(time.Duration(ttlSeconds) * time.Second / 2)
+	defer t.Stop()
+	for {
+		select {
+		case <-gta.ctx.Done():
+			log.Info("exit register tso allocator", zap.String("key", gta.am.allocatorKey))
+			return nil
+		case <-t.C:
+			return gta.tryRegister()
+		}
+	}
+}
+
+func (gta *GlobalTSOAllocator) txnWithTTL(key, value string) (clientv3.LeaseID, error) {
+	ctx, cancel := context.WithTimeout(gta.ctx, etcdutil.DefaultRequestTimeout)
+	defer cancel()
+	grantResp, err := gta.am.etcdClient.Grant(ctx, ttlSeconds)
+	if err != nil {
+		return 0, err
+	}
+	resp, err := kv.NewSlowLogTxn(gta.am.etcdClient).
+		Then(clientv3.OpPut(key, value, clientv3.WithLease(grantResp.ID))).
+		Commit()
+	if err != nil {
+		return 0, errs.ErrEtcdTxnInternal.Wrap(err).GenWithStackByArgs()
+	}
+	if !resp.Succeeded {
+		return 0, errs.ErrEtcdTxnConflict.FastGenByArgs()
+	}
+
+	return grantResp.ID, nil
+}
+
+// deregisterAllocator deregisters the tso allocator from etcd.
+func (gta *GlobalTSOAllocator) deregisterAllocator() error {
+	log.Info("deregister tso allocator", zap.String("key", gta.am.allocatorKey))
+	ctx, cancel := context.WithTimeout(gta.ctx, time.Duration(3)*time.Second)
+	defer cancel()
+	_, err := gta.am.etcdClient.Delete(ctx, gta.am.allocatorKey)
+	return err
+}
+
+func (gta *GlobalTSOAllocator) tryRegister() <-chan *clientv3.LeaseKeepAliveResponse {
+	// register immediately
+	kresp, needRetry := gta.register()
+	if !needRetry {
+		return kresp
+	}
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-gta.ctx.Done():
+			return nil
+		case <-ticker.C:
+			if kresp, needRetry := gta.register(); !needRetry {
+				return kresp
+			}
+		}
+	}
+}
+
+func (gta *GlobalTSOAllocator) register() (<-chan *clientv3.LeaseKeepAliveResponse, bool) {
+	ctx, cancel := context.WithTimeout(gta.ctx, time.Duration(3)*time.Second)
+	resp, err := gta.am.etcdClient.Get(ctx, gta.am.allocatorKeyPrefix, clientv3.WithPrefix())
+	cancel()
+	if err != nil {
+		return nil, true
+	}
+	allocatorKey := strings.TrimLeft(gta.am.allocatorKey, gta.am.allocatorKeyPrefix)
+	// wait for the previous allocator with different mode to be deregistered
+	if len(resp.Kvs) > 0 {
+		for _, kv := range resp.Kvs {
+			key := strings.TrimLeft(string(kv.Key), gta.am.allocatorKeyPrefix)
+			if strings.Contains(allocatorKey, keyspaceGroupPrefix) && strings.Contains(key, pdPrefix) {
+				return nil, true
+			}
+			if strings.Contains(allocatorKey, pdPrefix) && strings.Contains(key, keyspaceGroupPrefix) {
+				return nil, true
+			}
+		}
+	}
+	id, err := gta.txnWithTTL(gta.am.allocatorKey, "")
+	if err != nil {
+		return nil, true
+	}
+	kresp, err := gta.am.etcdClient.KeepAlive(gta.ctx, id)
+	if err != nil {
+		return nil, true
+	}
+	return kresp, false
 }
