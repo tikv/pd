@@ -35,11 +35,13 @@ import (
 	tsoapi "github.com/tikv/pd/pkg/mcs/tso/server/apis/v1"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/storage/endpoint"
+	tsopkg "github.com/tikv/pd/pkg/tso"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
+	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
 	"github.com/tikv/pd/tests/integrations/mcs"
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -163,7 +165,9 @@ func checkTSOPath(re *require.Assertions, isAPIServiceMode bool) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	if isAPIServiceMode {
-		cluster, err = tests.NewTestAPICluster(ctx, 1)
+		cluster, err = tests.NewTestAPICluster(ctx, 1, func(conf *config.Config, _ string) {
+			conf.MicroService.EnableTSODynamicSwitching = false
+		})
 	} else {
 		cluster, err = tests.NewTestCluster(ctx, 1)
 	}
@@ -267,6 +271,10 @@ func TestForwardTSORelated(t *testing.T) {
 	re := require.New(t)
 	suite := NewAPIServerForward(re)
 	defer suite.ShutDown()
+	leaderServer := suite.cluster.GetLeaderServer().GetServer()
+	cfg := leaderServer.GetMicroServiceConfig().Clone()
+	cfg.EnableTSODynamicSwitching = false
+	leaderServer.SetMicroServiceConfig(*cfg)
 	// Unable to use the tso-related interface without tso server
 	suite.checkUnavailableTSO(re)
 	tc, err := tests.NewTestTSOCluster(suite.ctx, 1, suite.backendEndpoints)
@@ -574,4 +582,100 @@ func (suite *CommonTestSuite) TestBootstrapDefaultKeyspaceGroup() {
 	check()
 	suite.pdLeader.ResignLeader()
 	suite.pdLeader = suite.cluster.GetServer(suite.cluster.WaitLeader())
+}
+
+// TestTSOServiceSwitch tests the behavior of TSO service switching when `EnableTSODynamicSwitching` is enabled.
+// Initially, the TSO service should be provided by PD. After starting a TSO server, the service should switch to the TSO server.
+// When the TSO server is stopped, the PD should resume providing the TSO service if `EnableTSODynamicSwitching` is enabled.
+// If `EnableTSODynamicSwitching` is disabled, the PD should not provide TSO service after the TSO server is stopped.
+func TestTSOServiceSwitch(t *testing.T) {
+	re := require.New(t)
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/fastUpdateServiceMode", `return(true)`))
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	tc, err := tests.NewTestAPICluster(ctx, 1,
+		func(conf *config.Config, _ string) {
+			conf.MicroService.EnableTSODynamicSwitching = true
+		},
+	)
+	re.NoError(err)
+	defer tc.Destroy()
+
+	err = tc.RunInitialServers()
+	re.NoError(err)
+	leaderName := tc.WaitLeader()
+	re.NotEmpty(leaderName)
+	pdLeader := tc.GetServer(leaderName)
+	backendEndpoints := pdLeader.GetAddr()
+	re.NoError(pdLeader.BootstrapCluster())
+	pdClient, err := pd.NewClientWithContext(ctx, []string{backendEndpoints}, pd.SecurityOption{})
+	re.NoError(err)
+	re.NotNil(pdClient)
+	defer pdClient.Close()
+
+	var globalLastTS uint64
+	// Initially, TSO service should be provided by PD
+	re.NoError(checkTSOMonotonic(ctx, pdClient, &globalLastTS, 10))
+
+	// Start TSO server
+	tsoCluster, err := tests.NewTestTSOCluster(ctx, 1, pdLeader.GetAddr())
+	re.NoError(err)
+	tsoCluster.WaitForDefaultPrimaryServing(re)
+
+	// Verify PD is not providing TSO service
+	testutil.Eventually(re, func() bool {
+		allocator, err := pdLeader.GetServer().GetTSOAllocatorManager().GetAllocator(tsopkg.GlobalDCLocation)
+		if err != nil {
+			return false
+		}
+		return !allocator.IsInitialize()
+	})
+
+	err = checkTSOMonotonic(ctx, pdClient, &globalLastTS, 10)
+	re.NoError(err)
+
+	// Disable TSO switching
+	cfg := pdLeader.GetServer().GetMicroServiceConfig().Clone()
+	cfg.EnableTSODynamicSwitching = false
+	pdLeader.GetServer().SetMicroServiceConfig(*cfg)
+
+	tsoCluster.Destroy()
+
+	// Wait for the configuration change to take effect
+	time.Sleep(300 * time.Millisecond)
+	// Verify PD is not providing TSO service multiple times
+	for range 10 {
+		err = checkTSOMonotonic(ctx, pdClient, &globalLastTS, 1)
+		re.Error(err, "TSO service should not be available")
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	// Now enable TSO switching
+	cfg = pdLeader.GetServer().GetMicroServiceConfig().Clone()
+
+	cfg.EnableTSODynamicSwitching = true
+	pdLeader.GetServer().SetMicroServiceConfig(*cfg)
+
+	// Wait for PD to detect the change
+	time.Sleep(300 * time.Millisecond)
+
+	// Verify PD is now providing TSO service and timestamps are monotonically increasing
+	re.NoError(checkTSOMonotonic(ctx, pdClient, &globalLastTS, 10))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/fastUpdateServiceMode"))
+}
+
+func checkTSOMonotonic(ctx context.Context, pdClient pd.Client, globalLastTS *uint64, count int) error {
+	for range count {
+		physical, logical, err := pdClient.GetTS(ctx)
+		if err != nil {
+			return err
+		}
+		ts := (uint64(physical) << 18) + uint64(logical)
+		if ts <= *globalLastTS {
+			return fmt.Errorf("TSO is not globally increasing: last %d, current %d", globalLastTS, ts)
+		}
+		*globalLastTS = ts
+	}
+	return nil
 }
