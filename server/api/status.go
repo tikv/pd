@@ -40,13 +40,12 @@ func newStatusHandler(svr *server.Server, rd *render.Render) *statusHandler {
 // @Success  200  {object}  versioninfo.Status
 // @Router   /status [get]
 func (h *statusHandler) GetPDStatus(w http.ResponseWriter, _ *http.Request) {
-	areRegionsLoaded := storage.AreRegionsLoaded(h.svr.GetStorage())
 	version := versioninfo.Status{
-		BuildTS:          versioninfo.PDBuildTS,
-		GitHash:          versioninfo.PDGitHash,
-		Version:          versioninfo.PDReleaseVersion,
-		StartTimestamp:   h.svr.StartTimestamp(),
-		AreRegionsLoaded: areRegionsLoaded,
+		BuildTS:        versioninfo.PDBuildTS,
+		GitHash:        versioninfo.PDGitHash,
+		Version:        versioninfo.PDReleaseVersion,
+		StartTimestamp: h.svr.StartTimestamp(),
+		Loaded:         storage.AreRegionsLoaded(h.svr.GetStorage()),
 	}
 
 	h.rd.JSON(w, http.StatusOK, version)
