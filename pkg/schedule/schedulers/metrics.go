@@ -79,6 +79,14 @@ var (
 			Help:      "Counter of direction of balance related schedulers.",
 		}, []string{"type", "source", "target"})
 
+	balancePotentialReverseCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "pd",
+			Subsystem: "scheduler",
+			Name:      "potential_reverse",
+			Help:      "Counter of direction which would introduce potential reverse.",
+		}, []string{"type", "source", "target"})
+
 	// TODO: pre-allocate gauge metrics
 	hotDirectionCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
@@ -229,7 +237,6 @@ var (
 	balanceLeaderNoTargetStoreCounter    = balanceLeaderCounterWithEvent("no-target-store")
 	balanceLeaderNoFollowerRegionCounter = balanceLeaderCounterWithEvent("no-follower-region")
 	balanceLeaderSkipCounter             = balanceLeaderCounterWithEvent("skip")
-	balanceLeaderPotentialReverse        = balanceLeaderCounterWithEvent("potential-reverse")
 	balanceLeaderNewOpCounter            = balanceLeaderCounterWithEvent("new-operator")
 
 	balanceRegionScheduleCounter      = balanceRegionCounterWithEvent("schedule")
@@ -238,7 +245,6 @@ var (
 	balanceRegionNoLeaderCounter      = balanceRegionCounterWithEvent("no-leader")
 	balanceRegionNewOpCounter         = balanceRegionCounterWithEvent("new-operator")
 	balanceRegionSkipCounter          = balanceRegionCounterWithEvent("skip")
-	balanceRegionPotentialReverse     = balanceRegionCounterWithEvent("potential-reverse")
 	balanceRegionCreateOpFailCounter  = balanceRegionCounterWithEvent("create-operator-fail")
 	balanceRegionNoReplacementCounter = balanceRegionCounterWithEvent("no-replacement")
 

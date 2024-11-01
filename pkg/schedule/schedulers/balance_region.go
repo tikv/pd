@@ -226,12 +226,14 @@ func (s *balanceRegionScheduler) transferPeer(solver *solver, collector *plan.Co
 		regionID := solver.Region.GetID()
 		sourceID := solver.Source.GetID()
 		targetID := solver.Target.GetID()
+		sourceLabel := strconv.FormatUint(sourceID, 10)
+		targetLabel := strconv.FormatUint(targetID, 10)
 		log.Debug("candidate store", zap.Uint64("region-id", regionID), zap.Uint64("source-store", sourceID), zap.Uint64("target-store", targetID))
 
 		if !solver.shouldBalance(s.GetName()) {
 			balanceRegionSkipCounter.Inc()
 			if solver.isPotentialReverse() {
-				balanceRegionPotentialReverse.Inc()
+				balancePotentialReverseCounter.WithLabelValues(s.GetName(), sourceLabel, targetLabel)
 			}
 			if collector != nil {
 				collector.Collect(plan.SetStatus(plan.NewStatus(plan.StatusStoreScoreDisallowed)))
@@ -254,8 +256,6 @@ func (s *balanceRegionScheduler) transferPeer(solver *solver, collector *plan.Co
 			collector.Collect()
 		}
 		solver.Step--
-		sourceLabel := strconv.FormatUint(sourceID, 10)
-		targetLabel := strconv.FormatUint(targetID, 10)
 		op.FinishedCounters = append(op.FinishedCounters,
 			balanceDirectionCounter.WithLabelValues(s.GetName(), sourceLabel, targetLabel),
 		)
