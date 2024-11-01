@@ -34,6 +34,7 @@ type clusterSuite struct {
 
 	clusterCnt int
 	suiteName  string
+	ms         bool
 }
 
 var (
@@ -69,10 +70,10 @@ func (s *clusterSuite) TearDownSuite() {
 }
 
 func (s *clusterSuite) startCluster(t *testing.T) {
-	log.Info("start to deploy a real cluster")
+	log.Info("start to deploy a cluster", zap.Bool("ms", s.ms))
 
 	tag := s.tag()
-	deployTiupPlayground(t, tag, false)
+	deployTiupPlayground(t, tag, s.ms)
 	waitTiupReady(t, tag)
 	s.clusterCnt++
 }
@@ -80,7 +81,7 @@ func (s *clusterSuite) startCluster(t *testing.T) {
 func (s *clusterSuite) stopCluster(t *testing.T) {
 	s.clusterCnt--
 
-	log.Info("start to destroy a real cluster", zap.String("tag", s.tag()))
+	log.Info("start to destroy a cluster", zap.String("tag", s.tag()), zap.Bool("ms", s.ms))
 	destroy(t, s.tag())
 	time.Sleep(5 * time.Second)
 }
@@ -181,59 +182,4 @@ func waitTiupReady(t *testing.T, tag string) {
 		time.Sleep(time.Duration(interval) * time.Second)
 	}
 	require.Failf(t, "TiUP is not ready", "tag: %s", tag)
-}
-
-type msClusterSuite struct {
-	suite.Suite
-
-	clusterCnt int
-	suiteName  string
-}
-
-// SetupSuite will run before the tests in the suite are run.
-func (s *msClusterSuite) SetupSuite() {
-	t := s.T()
-
-	// Clean the data dir. It is the default data dir of TiUP.
-	dataDir := filepath.Join(os.Getenv("HOME"), ".tiup", "data", "pd_ms_cluster_test_"+s.suiteName+"_*")
-	matches, err := filepath.Glob(dataDir)
-	require.NoError(t, err)
-
-	for _, match := range matches {
-		require.NoError(t, runCommand("rm", "-rf", match))
-	}
-	s.startCluster(t)
-	t.Cleanup(func() {
-		s.stopCluster(t)
-	})
-}
-
-// TearDownSuite will run after all the tests in the suite have been run.
-func (s *msClusterSuite) TearDownSuite() {
-	// Even if the cluster deployment fails, we still need to destroy the cluster.
-	// If the cluster does not fail to deploy, the cluster will be destroyed in
-	// the cleanup function. And these code will not work.
-	s.clusterCnt++
-	s.stopCluster(s.T())
-}
-
-func (s *msClusterSuite) startCluster(t *testing.T) {
-	log.Info("start to deploy a ms cluster")
-
-	tag := s.tag()
-	deployTiupPlayground(t, tag, true)
-	waitTiupReady(t, tag)
-	s.clusterCnt++
-}
-
-func (s *msClusterSuite) stopCluster(t *testing.T) {
-	s.clusterCnt--
-
-	log.Info("start to destroy a ms cluster", zap.String("tag", s.tag()))
-	destroy(t, s.tag())
-	time.Sleep(5 * time.Second)
-}
-
-func (s *msClusterSuite) tag() string {
-	return fmt.Sprintf("pd_ms_cluster_test_%s_%d", s.suiteName, s.clusterCnt)
 }

@@ -58,13 +58,14 @@ func (s *tsSuite) TestTS() {
 }
 
 type msTSSuite struct {
-	msClusterSuite
+	clusterSuite
 }
 
 func TestMSTS(t *testing.T) {
 	suite.Run(t, &msTSSuite{
-		msClusterSuite: msClusterSuite{
+		clusterSuite: clusterSuite{
 			suiteName: "ts",
+			ms:        true,
 		},
 	})
 }
