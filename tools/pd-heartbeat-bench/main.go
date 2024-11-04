@@ -227,7 +227,7 @@ func (rs *Regions) init(cfg *config.Config) {
 		slice[i] = i
 	}
 
-	rand.Seed(0) // Ensure consistent behavior multiple times
+	rand.New(rand.NewSource(0)) // Ensure consistent behavior multiple times
 	pick := func(ratio float64) []int {
 		rand.Shuffle(cfg.RegionCount, func(i, j int) {
 			slice[i], slice[j] = slice[j], slice[i]

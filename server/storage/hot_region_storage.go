@@ -282,8 +282,8 @@ func (h *HotRegionStorage) packHistoryHotRegions(historyHotRegions []HistoryHotR
 		if err != nil {
 			return err
 		}
-		historyHotRegions[i].StartKey = core.String(region.StartKey)
-		historyHotRegions[i].EndKey = core.String(region.EndKey)
+		historyHotRegions[i].StartKey = string(region.StartKey)
+		historyHotRegions[i].EndKey = string(region.EndKey)
 		key := HotRegionStorePath(hotRegionType, historyHotRegions[i].UpdateTime, historyHotRegions[i].RegionID)
 		h.batchHotInfo[key] = &historyHotRegions[i]
 	}
@@ -401,8 +401,8 @@ func (it *HotRegionStorageIterator) Next() (*HistoryHotRegion, error) {
 	if err := encryption.DecryptRegion(region, it.encryptionKeyManager); err != nil {
 		return nil, err
 	}
-	message.StartKey = core.String(region.StartKey)
-	message.EndKey = core.String(region.EndKey)
+	message.StartKey = string(region.StartKey)
+	message.EndKey = string(region.EndKey)
 	message.EncryptionMeta = nil
 	return &message, nil
 }

@@ -1,6 +1,6 @@
 module github.com/tikv/pd
 
-go 1.19
+go 1.23
 
 require (
 	github.com/AlekSi/gocov-xml v1.0.0
