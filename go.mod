@@ -42,7 +42,7 @@ require (
 	github.com/unrolled/render v1.0.1
 	github.com/urfave/negroni v0.3.0
 	go.etcd.io/etcd v0.5.0-alpha.5.0.20240911181550-c123b3ea3db3
-	go.uber.org/goleak v1.1.12
+	go.uber.org/goleak v1.3.0
 	go.uber.org/zap v1.19.1
 	golang.org/x/text v0.15.0
 	golang.org/x/time v0.0.0-20220224211638-0e9765cccd65

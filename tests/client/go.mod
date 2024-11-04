@@ -9,7 +9,7 @@ require (
 	github.com/tikv/pd v0.0.0-00010101000000-000000000000
 	github.com/tikv/pd/client v0.0.0-00010101000000-000000000000
 	go.etcd.io/etcd v0.5.0-alpha.5.0.20240911181550-c123b3ea3db3
-	go.uber.org/goleak v1.1.12
+	go.uber.org/goleak v1.3.0
 	google.golang.org/grpc v1.58.3
 )
 
