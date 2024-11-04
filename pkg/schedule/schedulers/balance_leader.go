@@ -520,7 +520,7 @@ func (l *balanceLeaderScheduler) transferLeaderIn(solver *solver, collector *pla
 	if leaderFilter := filter.NewPlacementLeaderSafeguard(l.GetName(), conf, solver.GetBasicCluster(), solver.GetRuleManager(), solver.Region, solver.Source, false /*allowMoveLeader*/); leaderFilter != nil {
 		finalFilters = append(l.filters, leaderFilter)
 	}
-	target := filter.NewCandidates([]*core.StoreInfo{solver.Target}).
+	target := filter.NewCandidates(l.R, []*core.StoreInfo{solver.Target}).
 		FilterTarget(conf, nil, l.filterCounter, finalFilters...).
 		PickFirst()
 	if target == nil {
