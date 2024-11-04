@@ -90,7 +90,7 @@ func (suite *scheduleTestSuite) checkOriginAPI(cluster *tests.TestCluster) {
 		tests.MustPutStore(re, cluster, store)
 	}
 
-	input := make(map[string]interface{})
+	input := make(map[string]any)
 	input["name"] = "evict-leader-scheduler"
 	body, err := json.Marshal(input)
 	suite.NoError(err)
