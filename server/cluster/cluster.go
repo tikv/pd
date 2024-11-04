@@ -416,15 +416,17 @@ func (c *RaftCluster) checkTSOService() {
 					log.Error("failed to start TSO jobs", errs.ZapError(err))
 					return
 				}
-				log.Info("TSO is provided by PD")
-				c.UnsetServiceIndependent(constant.TSOServiceName)
+				if c.IsServiceIndependent(constant.TSOServiceName) {
+					log.Info("TSO is provided by PD")
+					c.UnsetServiceIndependent(constant.TSOServiceName)
+				}
 			} else {
 				if err := c.stopTSOJobsIfNeeded(); err != nil {
 					log.Error("failed to stop TSO jobs", errs.ZapError(err))
 					return
 				}
-				log.Info("TSO is provided by TSO server")
 				if !c.IsServiceIndependent(constant.TSOServiceName) {
+					log.Info("TSO is provided by TSO server")
 					c.SetServiceIndependent(constant.TSOServiceName)
 				}
 			}
