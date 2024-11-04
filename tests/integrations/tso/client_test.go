@@ -104,6 +104,11 @@ func (suite *tsoClientTestSuite) SetupSuite() {
 	suite.keyspaceIDs = make([]uint32, 0)
 
 	if !suite.legacy {
+		opt := suite.pdLeaderServer.GetServer().GetPersistOptions()
+		cfg := opt.GetMicroServiceConfig()
+		cfg.EnableTSODynamicSwitching = false
+		opt.SetMicroServiceConfig(cfg)
+
 		suite.tsoCluster, err = tests.NewTestTSOCluster(suite.ctx, 3, suite.backendEndpoints)
 		re.NoError(err)
 
