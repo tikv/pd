@@ -210,10 +210,23 @@ func (h *schedulerHandler) CreateScheduler(w http.ResponseWriter, r *http.Reques
 			return
 		}
 
-	case schedulers.GrantLeaderName:
-		h.addEvictOrGrant(w, input, schedulers.GrantLeaderName)
-	case schedulers.EvictLeaderName:
-		h.addEvictOrGrant(w, input, schedulers.EvictLeaderName)
+	case schedulers.GrantLeaderName, schedulers.EvictLeaderName:
+		storeID, ok := input["store_id"].(float64)
+		if !ok {
+			h.r.JSON(w, http.StatusBadRequest, "missing store id")
+			return
+		}
+		exist, err := h.AddEvictOrGrant(storeID, name)
+		if err != nil {
+			h.r.JSON(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		// we should ensure whether it is the first time to create evict-leader-scheduler
+		// or just update the evict-leader.
+		if exist {
+			h.r.JSON(w, http.StatusOK, "The scheduler has been applied to the store.")
+			return
+		}
 	case schedulers.ShuffleLeaderName:
 		if err := h.AddShuffleLeaderScheduler(); err != nil {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
@@ -270,18 +283,6 @@ func (h *schedulerHandler) CreateScheduler(w http.ResponseWriter, r *http.Reques
 	}
 
 	h.r.JSON(w, http.StatusOK, "The scheduler is created.")
-}
-
-func (h *schedulerHandler) addEvictOrGrant(w http.ResponseWriter, input map[string]interface{}, name string) {
-	storeID, ok := input["store_id"].(float64)
-	if !ok {
-		h.r.JSON(w, http.StatusBadRequest, "missing store id")
-		return
-	}
-	err := h.AddEvictOrGrant(storeID, name)
-	if err != nil {
-		h.r.JSON(w, http.StatusInternalServerError, err.Error())
-	}
 }
 
 // @Tags     scheduler
