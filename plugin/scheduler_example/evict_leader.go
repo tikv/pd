@@ -46,8 +46,13 @@ const (
 
 func init() {
 	schedulers.RegisterSliceDecoderBuilder(EvictLeaderType, func(args []string) schedulers.ConfigDecoder {
+<<<<<<< HEAD
 		return func(v any) error {
 			if len(args) != 1 {
+=======
+		return func(v interface{}) error {
+			if len(args) < 1 {
+>>>>>>> 10e4889ca (scheduler: use right check for evict/grant leader scheduler (#8758))
 				return errors.New("should specify the store-id")
 			}
 			conf, ok := v.(*evictLeaderSchedulerConfig)
@@ -99,7 +104,7 @@ type evictLeaderSchedulerConfig struct {
 }
 
 func (conf *evictLeaderSchedulerConfig) BuildWithArgs(args []string) error {
-	if len(args) != 1 {
+	if len(args) < 1 {
 		return errors.New("should specify the store-id")
 	}
 

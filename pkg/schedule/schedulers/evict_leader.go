@@ -75,7 +75,14 @@ func (conf *evictLeaderSchedulerConfig) getStores() []uint64 {
 }
 
 func (conf *evictLeaderSchedulerConfig) BuildWithArgs(args []string) error {
+<<<<<<< HEAD
 	if len(args) != 1 {
+=======
+	failpoint.Inject("buildWithArgsErr", func() {
+		failpoint.Return(errors.New("fail to build with args"))
+	})
+	if len(args) < 1 {
+>>>>>>> 10e4889ca (scheduler: use right check for evict/grant leader scheduler (#8758))
 		return errs.ErrSchedulerConfig.FastGenByArgs("id")
 	}
 
