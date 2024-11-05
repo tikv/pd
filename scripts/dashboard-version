@@ -1,3 +1,8 @@
 # This file is updated by running scripts/update-dashboard.sh
+<<<<<<< HEAD
 # Don't edit it manullay
 6.5.11-9d2b0ce6
+=======
+# Don't edit it manually
+8.5.0-bce95733
+>>>>>>> cfd8f3436 (chore(dashboard): update TiDB Dashboard to v8.5.0-bce95733 [master] (#8764))

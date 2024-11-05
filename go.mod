@@ -33,12 +33,24 @@ require (
 	github.com/pingcap/failpoint v0.0.0-20200702092429-9f69995143ce
 	github.com/pingcap/kvproto v0.0.0-20230726063044-73d6d7f3756b
 	github.com/pingcap/log v1.1.1-0.20221110025148-ca232912c9f3
+<<<<<<< HEAD
 	github.com/pingcap/sysutil v0.0.0-20211208032423-041a72e5860d
 	github.com/pingcap/tidb-dashboard v0.0.0-20240830072655-9d2b0ce603a1
 	github.com/prometheus/client_golang v1.11.1
 	github.com/prometheus/common v0.26.0
 	github.com/sasha-s/go-deadlock v0.2.0
 	github.com/spf13/cobra v1.0.0
+=======
+	github.com/pingcap/sysutil v1.0.1-0.20230407040306-fb007c5aff21
+	github.com/pingcap/tidb-dashboard v0.0.0-20241104061623-bce95733dad7
+	github.com/prometheus/client_golang v1.19.0
+	github.com/prometheus/common v0.51.1
+	github.com/sasha-s/go-deadlock v0.3.5
+	github.com/shirou/gopsutil/v3 v3.23.3
+	github.com/smallnest/chanx v1.2.1-0.20240521153536-01121e21ff99
+	github.com/soheilhy/cmux v0.1.5
+	github.com/spf13/cobra v1.8.0
+>>>>>>> cfd8f3436 (chore(dashboard): update TiDB Dashboard to v8.5.0-bce95733 [master] (#8764))
 	github.com/spf13/pflag v1.0.5
 	github.com/stretchr/testify v1.9.0
 	github.com/swaggo/http-swagger v1.2.6
