@@ -488,7 +488,14 @@ func (s *schedulerTestSuite) TestEvictLeaderScheduler(c *C) {
 	output, err := pdctl.ExecuteCommand(cmd, []string{"-u", pdAddr, "scheduler", "add", "evict-leader-scheduler", "2"}...)
 	c.Assert(err, IsNil)
 	c.Assert(strings.Contains(string(output), "Success!"), IsTrue)
-	failpoint.Enable("github.com/tikv/pd/server/schedulers/buildWithArgsErr", "return(true)")
+	c.Assert(leaderServer.GetRaftCluster().GetStore(2).AllowLeaderTransfer(), IsFalse)
+	// execute twice to verify this issue: https://github.com/tikv/pd/issues/8756
+	output, err = pdctl.ExecuteCommand(cmd, []string{"-u", pdAddr, "scheduler", "add", "evict-leader-scheduler", "2"}...)
+	c.Assert(err, IsNil)
+	c.Assert(strings.Contains(string(output), "Success!"), IsTrue)
+	c.Assert(leaderServer.GetRaftCluster().GetStore(2).AllowLeaderTransfer(), IsFalse)
+
+	failpoint.Enable("github.com/tikv/pd/pkg/schedule/schedulers/buildWithArgsErr", "return(true)")
 	output, err = pdctl.ExecuteCommand(cmd, []string{"-u", pdAddr, "scheduler", "add", "evict-leader-scheduler", "1"}...)
 	c.Assert(err, IsNil)
 	c.Assert(strings.Contains(string(output), "fail to build with args"), IsTrue)
