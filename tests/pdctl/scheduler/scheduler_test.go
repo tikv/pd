@@ -631,6 +631,13 @@ func TestEvictLeaderScheduler(t *testing.T) {
 	output, err := pdctl.ExecuteCommand(cmd, []string{"-u", pdAddr, "scheduler", "add", "evict-leader-scheduler", "2"}...)
 	re.NoError(err)
 	re.Contains(string(output), "Success!")
+	re.False(false, leaderServer.GetRaftCluster().GetStore(2).AllowLeaderTransfer())
+	// execute twice to verify this issue: https://github.com/tikv/pd/issues/8756
+	output, err = pdctl.ExecuteCommand(cmd, []string{"-u", pdAddr, "scheduler", "add", "evict-leader-scheduler", "2"}...)
+	re.NoError(err)
+	re.Contains(string(output), "Success!")
+	re.False(false, leaderServer.GetRaftCluster().GetStore(2).AllowLeaderTransfer())
+
 	failpoint.Enable("github.com/tikv/pd/pkg/schedule/schedulers/buildWithArgsErr", "return(true)")
 	output, err = pdctl.ExecuteCommand(cmd, []string{"-u", pdAddr, "scheduler", "add", "evict-leader-scheduler", "1"}...)
 	re.NoError(err)
