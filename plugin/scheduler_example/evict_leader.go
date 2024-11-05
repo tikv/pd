@@ -46,7 +46,7 @@ const (
 func init() {
 	schedule.RegisterSliceDecoderBuilder(EvictLeaderType, func(args []string) schedule.ConfigDecoder {
 		return func(v interface{}) error {
-			if len(args) != 1 {
+			if len(args) < 1 {
 				return errors.New("should specify the store-id")
 			}
 			conf, ok := v.(*evictLeaderSchedulerConfig)
@@ -98,7 +98,7 @@ type evictLeaderSchedulerConfig struct {
 }
 
 func (conf *evictLeaderSchedulerConfig) BuildWithArgs(args []string) error {
-	if len(args) != 1 {
+	if len(args) < 1 {
 		return errors.New("should specify the store-id")
 	}
 

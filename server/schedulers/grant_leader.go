@@ -83,7 +83,7 @@ type grantLeaderSchedulerConfig struct {
 }
 
 func (conf *grantLeaderSchedulerConfig) BuildWithArgs(args []string) error {
-	if len(args) != 1 {
+	if len(args) < 1 {
 		return errs.ErrSchedulerConfig.FastGenByArgs("id")
 	}
 
