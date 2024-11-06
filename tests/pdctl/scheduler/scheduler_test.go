@@ -463,23 +463,10 @@ func TestScheduler(t *testing.T) {
 	cfg.Schedulers = config.SchedulerConfigs{{Type: "label", Disable: true}}
 	err = leaderServer.GetServer().SetScheduleConfig(*cfg)
 	re.NoError(err)
-<<<<<<< HEAD
 	checkSchedulerWithStatusCommand(nil, "disabled", []string{"label-scheduler"})
 	// reset Schedulers in ScheduleConfig
 	cfg.Schedulers = origin
 	err = leaderServer.GetServer().SetScheduleConfig(*cfg)
-=======
-	re.Contains(string(output), "Success!")
-	re.False(false, leaderServer.GetRaftCluster().GetStore(2).AllowLeaderTransfer())
-	// execute twice to verify this issue: https://github.com/tikv/pd/issues/8756
-	output, err = pdctl.ExecuteCommand(cmd, []string{"-u", pdAddr, "scheduler", "add", "evict-leader-scheduler", "2"}...)
-	re.NoError(err)
-	re.Contains(string(output), "Success!")
-	re.False(false, leaderServer.GetRaftCluster().GetStore(2).AllowLeaderTransfer())
-
-	failpoint.Enable("github.com/tikv/pd/pkg/schedule/schedulers/buildWithArgsErr", "return(true)")
-	output, err = pdctl.ExecuteCommand(cmd, []string{"-u", pdAddr, "scheduler", "add", "evict-leader-scheduler", "1"}...)
->>>>>>> 10e4889ca (scheduler: use right check for evict/grant leader scheduler (#8758))
 	re.NoError(err)
 	checkSchedulerWithStatusCommand(nil, "disabled", nil)
 
