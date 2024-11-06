@@ -1496,6 +1496,21 @@ func (suite *clientTestSuite) TestGetRegionByID() {
 		return reflect.DeepEqual(region, r.Meta) &&
 			reflect.DeepEqual(peers[0], r.Leader)
 	})
+
+	// test WithCallerID and WithCallerComponent
+	testutil.Eventually(re, func() bool {
+		r, err := suite.client.
+			WithCallerID(caller.Tidb).
+			WithCallerComponent(caller.Ddl).
+			GetRegionByID(context.Background(), regionID)
+		re.NoError(err)
+		if r == nil {
+			return false
+		}
+		return reflect.DeepEqual(region, r.Meta) &&
+			reflect.DeepEqual(peers[0], r.Leader)
+	})
+
 }
 
 func (suite *clientTestSuite) TestGetStore() {
