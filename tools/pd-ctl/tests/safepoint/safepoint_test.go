@@ -99,7 +99,7 @@ func TestSafepoint(t *testing.T) {
 	}
 
 	// delete the safepoints
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		args = []string{"-u", pdAddr, "service-gc-safepoint", "delete", list.ServiceGCSafepoints[i].ServiceID}
 		output, err = tests.ExecuteCommand(cmd, args...)
 		re.NoError(err)

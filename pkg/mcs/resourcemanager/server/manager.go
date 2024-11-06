@@ -344,7 +344,7 @@ func (m *Manager) persistResourceGroupRunningState() {
 		keys = append(keys, k)
 	}
 	m.RUnlock()
-	for idx := 0; idx < len(keys); idx++ {
+	for idx := range keys {
 		m.RLock()
 		group, ok := m.groups[keys[idx]]
 		if ok {

@@ -659,6 +659,11 @@ func (o *PersistOptions) GetHotRegionCacheHitsThreshold() int {
 	return int(o.GetScheduleConfig().HotRegionCacheHitsThreshold)
 }
 
+// GetPatrolRegionWorkerCount returns the worker count of the patrol.
+func (o *PersistOptions) GetPatrolRegionWorkerCount() int {
+	return o.GetScheduleConfig().PatrolRegionWorkerCount
+}
+
 // GetStoresLimit gets the stores' limit.
 func (o *PersistOptions) GetStoresLimit() map[uint64]sc.StoreLimitConfig {
 	return o.GetScheduleConfig().StoreLimit

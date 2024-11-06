@@ -98,7 +98,7 @@ func TestRegionEmptyFilter(t *testing.T) {
 	re.Equal(filter.Select(region), statusOK)
 
 	region = region.Clone(core.SetApproximateSize(0))
-	for i := uint64(0); i < 100; i++ {
+	for i := range uint64(100) {
 		testCluster.PutRegion(core.NewRegionInfo(&metapb.Region{
 			Id: i,
 			Peers: []*metapb.Peer{

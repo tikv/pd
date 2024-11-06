@@ -261,7 +261,7 @@ func (r *RegionStatistics) Observe(region *core.RegionInfo, stores []*core.Store
 	}
 	// Check if the region meets any of the conditions and update the corresponding info.
 	regionID := region.GetID()
-	for i := 0; i < len(regionStatisticTypes); i++ {
+	for i := range regionStatisticTypes {
 		condition := RegionStatisticType(1 << i)
 		if conditions&condition == 0 {
 			continue

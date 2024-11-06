@@ -33,6 +33,7 @@ import (
 	"github.com/tikv/pd/pkg/statistics/buckets"
 	"github.com/tikv/pd/pkg/statistics/utils"
 	"github.com/tikv/pd/pkg/storage"
+	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"go.uber.org/zap"
 )
@@ -53,7 +54,6 @@ type Cluster struct {
 	coordinator       *schedule.Coordinator
 	checkMembershipCh chan struct{}
 	apiServerLeader   atomic.Value
-	clusterID         uint64
 	running           atomic.Bool
 
 	// heartbeatRunner is used to process the subtree update task asynchronously.
@@ -78,7 +78,14 @@ const (
 var syncRunner = ratelimit.NewSyncRunner()
 
 // NewCluster creates a new cluster.
-func NewCluster(parentCtx context.Context, persistConfig *config.PersistConfig, storage storage.Storage, basicCluster *core.BasicCluster, hbStreams *hbstream.HeartbeatStreams, clusterID uint64, checkMembershipCh chan struct{}) (*Cluster, error) {
+func NewCluster(
+	parentCtx context.Context,
+	persistConfig *config.PersistConfig,
+	storage storage.Storage,
+	basicCluster *core.BasicCluster,
+	hbStreams *hbstream.HeartbeatStreams,
+	checkMembershipCh chan struct{},
+) (*Cluster, error) {
 	ctx, cancel := context.WithCancel(parentCtx)
 	labelerManager, err := labeler.NewRegionLabeler(ctx, storage, regionLabelGCInterval)
 	if err != nil {
@@ -93,11 +100,10 @@ func NewCluster(parentCtx context.Context, persistConfig *config.PersistConfig, 
 		ruleManager:       ruleManager,
 		labelerManager:    labelerManager,
 		persistConfig:     persistConfig,
-		hotStat:           statistics.NewHotStat(ctx),
+		hotStat:           statistics.NewHotStat(ctx, basicCluster),
 		labelStats:        statistics.NewLabelStatistics(),
 		regionStats:       statistics.NewRegionStatistics(basicCluster, persistConfig, ruleManager),
 		storage:           storage,
-		clusterID:         clusterID,
 		checkMembershipCh: checkMembershipCh,
 
 		heartbeatRunner: ratelimit.NewConcurrentRunner(heartbeatTaskRunner, ratelimit.NewConcurrencyLimiter(uint64(runtime.NumCPU()*2)), time.Minute),
@@ -184,21 +190,18 @@ func (c *Cluster) GetHotPeerStat(rw utils.RWType, regionID, storeID uint64) *sta
 	return c.hotStat.GetHotPeerStat(rw, regionID, storeID)
 }
 
-// RegionReadStats returns hot region's read stats.
+// GetHotPeerStats returns the read or write statistics for hot regions.
+// It returns a map where the keys are store IDs and the values are slices of HotPeerStat.
 // The result only includes peers that are hot enough.
-// RegionStats is a thread-safe method
-func (c *Cluster) RegionReadStats() map[uint64][]*statistics.HotPeerStat {
-	// As read stats are reported by store heartbeat, the threshold needs to be adjusted.
-	threshold := c.persistConfig.GetHotRegionCacheHitsThreshold() *
-		(utils.RegionHeartBeatReportInterval / utils.StoreHeartBeatReportInterval)
-	return c.hotStat.RegionStats(utils.Read, threshold)
-}
-
-// RegionWriteStats returns hot region's write stats.
-// The result only includes peers that are hot enough.
-func (c *Cluster) RegionWriteStats() map[uint64][]*statistics.HotPeerStat {
-	// RegionStats is a thread-safe method
-	return c.hotStat.RegionStats(utils.Write, c.persistConfig.GetHotRegionCacheHitsThreshold())
+// GetHotPeerStats is a thread-safe method.
+func (c *Cluster) GetHotPeerStats(rw utils.RWType) map[uint64][]*statistics.HotPeerStat {
+	threshold := c.persistConfig.GetHotRegionCacheHitsThreshold()
+	if rw == utils.Read {
+		// As read stats are reported by store heartbeat, the threshold needs to be adjusted.
+		threshold = c.persistConfig.GetHotRegionCacheHitsThreshold() *
+			(utils.RegionHeartBeatReportInterval / utils.StoreHeartBeatReportInterval)
+	}
+	return c.hotStat.GetHotPeerStats(rw, threshold)
 }
 
 // BucketsStats returns hot region's buckets stats.
@@ -228,7 +231,7 @@ func (c *Cluster) AllocID() (uint64, error) {
 	}
 	ctx, cancel := context.WithTimeout(c.ctx, requestTimeout)
 	defer cancel()
-	resp, err := client.AllocID(ctx, &pdpb.AllocIDRequest{Header: &pdpb.RequestHeader{ClusterId: c.clusterID}})
+	resp, err := client.AllocID(ctx, &pdpb.AllocIDRequest{Header: &pdpb.RequestHeader{ClusterId: keypath.ClusterID()}})
 	if err != nil {
 		c.triggerMembershipCheck()
 		return 0, err

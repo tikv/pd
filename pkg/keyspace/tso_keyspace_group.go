@@ -57,11 +57,10 @@ const (
 
 // GroupManager is the manager of keyspace group related data.
 type GroupManager struct {
-	ctx       context.Context
-	cancel    context.CancelFunc
-	wg        sync.WaitGroup
-	client    *clientv3.Client
-	clusterID uint64
+	ctx    context.Context
+	cancel context.CancelFunc
+	wg     sync.WaitGroup
+	client *clientv3.Client
 
 	syncutil.RWMutex
 	// groups is the cache of keyspace group related information.
@@ -86,12 +85,11 @@ func NewKeyspaceGroupManager(
 	ctx context.Context,
 	store endpoint.KeyspaceGroupStorage,
 	client *clientv3.Client,
-	clusterID uint64,
 ) *GroupManager {
 	ctx, cancel := context.WithCancel(ctx)
 	groups := make(map[endpoint.UserKind]*indexedHeap)
-	for i := 0; i < int(endpoint.UserKindCount); i++ {
-		groups[endpoint.UserKind(i)] = newIndexedHeap(int(constant.MaxKeyspaceGroupCountInUse))
+	for i := range endpoint.UserKindCount {
+		groups[i] = newIndexedHeap(int(constant.MaxKeyspaceGroupCountInUse))
 	}
 	m := &GroupManager{
 		ctx:                ctx,
@@ -99,7 +97,6 @@ func NewKeyspaceGroupManager(
 		store:              store,
 		groups:             groups,
 		client:             client,
-		clusterID:          clusterID,
 		nodesBalancer:      balancer.GenByPolicy[string](defaultBalancerPolicy),
 		serviceRegistryMap: make(map[string]string),
 	}
@@ -107,7 +104,7 @@ func NewKeyspaceGroupManager(
 	// If the etcd client is not nil, start the watch loop for the registered tso servers.
 	// The PD(TSO) Client relies on this info to discover tso servers.
 	if m.client != nil {
-		m.initTSONodesWatcher(m.client, m.clusterID)
+		m.initTSONodesWatcher(m.client)
 		m.tsoNodesWatcher.StartWatchLoop()
 	}
 	return m
@@ -218,8 +215,8 @@ func (m *GroupManager) allocNodesToAllKeyspaceGroups(ctx context.Context) {
 	}
 }
 
-func (m *GroupManager) initTSONodesWatcher(client *clientv3.Client, clusterID uint64) {
-	tsoServiceKey := discovery.TSOPath(clusterID)
+func (m *GroupManager) initTSONodesWatcher(client *clientv3.Client) {
+	tsoServiceKey := keypath.TSOPath()
 
 	putFn := func(kv *mvccpb.KeyValue) error {
 		s := &discovery.ServiceRegistryEntry{}
@@ -1154,7 +1151,7 @@ func (m *GroupManager) GetKeyspaceGroupPrimaryByID(id uint32) (string, error) {
 		return "", ErrKeyspaceGroupNotExists(id)
 	}
 
-	rootPath := keypath.TSOSvcRootPath(m.clusterID)
+	rootPath := keypath.TSOSvcRootPath()
 	primaryPath := keypath.KeyspaceGroupPrimaryPath(rootPath, id)
 	leader := &tsopb.Participant{}
 	ok, _, err := etcdutil.GetProtoMsgWithModRev(m.client, primaryPath, leader)

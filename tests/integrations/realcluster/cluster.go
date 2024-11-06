@@ -29,11 +29,12 @@ import (
 	"go.uber.org/zap"
 )
 
-type realClusterSuite struct {
+type clusterSuite struct {
 	suite.Suite
 
 	clusterCnt int
 	suiteName  string
+	ms         bool
 }
 
 var (
@@ -42,7 +43,7 @@ var (
 )
 
 // SetupSuite will run before the tests in the suite are run.
-func (s *realClusterSuite) SetupSuite() {
+func (s *clusterSuite) SetupSuite() {
 	t := s.T()
 
 	// Clean the data dir. It is the default data dir of TiUP.
@@ -53,47 +54,47 @@ func (s *realClusterSuite) SetupSuite() {
 	for _, match := range matches {
 		require.NoError(t, runCommand("rm", "-rf", match))
 	}
-	s.startRealCluster(t)
+	s.startCluster(t)
 	t.Cleanup(func() {
-		s.stopRealCluster(t)
+		s.stopCluster(t)
 	})
 }
 
 // TearDownSuite will run after all the tests in the suite have been run.
-func (s *realClusterSuite) TearDownSuite() {
+func (s *clusterSuite) TearDownSuite() {
 	// Even if the cluster deployment fails, we still need to destroy the cluster.
 	// If the cluster does not fail to deploy, the cluster will be destroyed in
 	// the cleanup function. And these code will not work.
 	s.clusterCnt++
-	s.stopRealCluster(s.T())
+	s.stopCluster(s.T())
 }
 
-func (s *realClusterSuite) startRealCluster(t *testing.T) {
-	log.Info("start to deploy a real cluster")
+func (s *clusterSuite) startCluster(t *testing.T) {
+	log.Info("start to deploy a cluster", zap.Bool("ms", s.ms))
 
 	tag := s.tag()
-	deployTiupPlayground(t, tag)
+	deployTiupPlayground(t, tag, s.ms)
 	waitTiupReady(t, tag)
 	s.clusterCnt++
 }
 
-func (s *realClusterSuite) stopRealCluster(t *testing.T) {
+func (s *clusterSuite) stopCluster(t *testing.T) {
 	s.clusterCnt--
 
-	log.Info("start to destroy a real cluster", zap.String("tag", s.tag()))
+	log.Info("start to destroy a cluster", zap.String("tag", s.tag()), zap.Bool("ms", s.ms))
 	destroy(t, s.tag())
 	time.Sleep(5 * time.Second)
 }
 
-func (s *realClusterSuite) tag() string {
+func (s *clusterSuite) tag() string {
 	return fmt.Sprintf("pd_real_cluster_test_%s_%d", s.suiteName, s.clusterCnt)
 }
 
-func (s *realClusterSuite) restart() {
+func (s *clusterSuite) restart() {
 	tag := s.tag()
 	log.Info("start to restart", zap.String("tag", tag))
-	s.stopRealCluster(s.T())
-	s.startRealCluster(s.T())
+	s.stopCluster(s.T())
+	s.startCluster(s.T())
 	log.Info("TiUP restart success")
 }
 
@@ -111,7 +112,7 @@ func destroy(t *testing.T, tag string) {
 	log.Info("destroy success", zap.String("tag", tag))
 }
 
-func deployTiupPlayground(t *testing.T, tag string) {
+func deployTiupPlayground(t *testing.T, tag string, ms bool) {
 	curPath, err := os.Getwd()
 	require.NoError(t, err)
 	require.NoError(t, os.Chdir("../../.."))
@@ -130,15 +131,32 @@ func deployTiupPlayground(t *testing.T, tag string) {
 	if !fileExists(playgroundLogDir) {
 		require.NoError(t, os.MkdirAll(playgroundLogDir, 0755))
 	}
+
 	// nolint:errcheck
 	go func() {
-		runCommand("sh", "-c",
-			tiupBin+` playground nightly --kv 3 --tiflash 1 --db 1 --pd 3 \
-			--without-monitor --tag `+tag+` --pd.binpath ./bin/pd-server \
+		if ms {
+			runCommand("sh", "-c",
+				tiupBin+` playground nightly --pd.mode ms --kv 3 --tiflash 1 --db 1 --pd 3 --tso 1 --scheduling 1 \
+			--without-monitor --tag `+tag+` \ 
+			--pd.binpath ./bin/pd-server \
 			--kv.binpath ./third_bin/tikv-server \
-			--db.binpath ./third_bin/tidb-server --tiflash.binpath ./third_bin/tiflash \
+			--db.binpath ./third_bin/tidb-server \ 
+			--tiflash.binpath ./third_bin/tiflash \
+			--tso.binpath ./bin/pd-server \
+			--scheduling.binpath ./bin/pd-server \
 			--pd.config ./tests/integrations/realcluster/pd.toml \
 			> `+filepath.Join(playgroundLogDir, tag+".log")+` 2>&1 & `)
+		} else {
+			runCommand("sh", "-c",
+				tiupBin+` playground nightly --kv 3 --tiflash 1 --db 1 --pd 3 \
+			--without-monitor --tag `+tag+` \
+			--pd.binpath ./bin/pd-server \
+			--kv.binpath ./third_bin/tikv-server \
+			--db.binpath ./third_bin/tidb-server \
+			--tiflash.binpath ./third_bin/tiflash \
+			--pd.config ./tests/integrations/realcluster/pd.toml \
+			> `+filepath.Join(playgroundLogDir, tag+".log")+` 2>&1 & `)
+		}
 	}()
 
 	// Avoid to change the dir before execute `tiup playground`.
@@ -152,7 +170,7 @@ func waitTiupReady(t *testing.T, tag string) {
 		maxTimes = 20
 	)
 	log.Info("start to wait TiUP ready", zap.String("tag", tag))
-	for i := 0; i < maxTimes; i++ {
+	for i := range maxTimes {
 		err := runCommand(tiupBin, "playground", "display", "--tag", tag)
 		if err == nil {
 			log.Info("TiUP is ready", zap.String("tag", tag))

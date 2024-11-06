@@ -254,7 +254,7 @@ func (suite *middlewareTestSuite) TestRateLimitMiddleware() {
 	re.NoError(err)
 	re.Equal(http.StatusOK, resp.StatusCode)
 
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		req, _ = http.NewRequest(http.MethodPost, leader.GetAddr()+"/pd/api/v1/admin/log", strings.NewReader("\"info\""))
 		resp, err = tests.TestDialClient.Do(req)
 		re.NoError(err)
@@ -271,7 +271,7 @@ func (suite *middlewareTestSuite) TestRateLimitMiddleware() {
 
 	// qps = 0.5, so sleep 2s
 	time.Sleep(time.Second * 2)
-	for i := 0; i < 2; i++ {
+	for i := range 2 {
 		req, _ = http.NewRequest(http.MethodPost, leader.GetAddr()+"/pd/api/v1/admin/log", strings.NewReader("\"info\""))
 		resp, err = tests.TestDialClient.Do(req)
 		re.NoError(err)
@@ -288,7 +288,7 @@ func (suite *middlewareTestSuite) TestRateLimitMiddleware() {
 
 	// test only sleep 1s
 	time.Sleep(time.Second)
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		req, _ = http.NewRequest(http.MethodPost, leader.GetAddr()+"/pd/api/v1/admin/log", strings.NewReader("\"info\""))
 		resp, err = tests.TestDialClient.Do(req)
 		re.NoError(err)
@@ -315,7 +315,7 @@ func (suite *middlewareTestSuite) TestRateLimitMiddleware() {
 	re.Equal(0.5, cfg.QPS)
 	re.Equal(1, cfg.QPSBurst)
 
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		req, _ = http.NewRequest(http.MethodPost, leader.GetAddr()+"/pd/api/v1/admin/log", strings.NewReader("\"info\""))
 		resp, err = tests.TestDialClient.Do(req)
 		re.NoError(err)
@@ -332,7 +332,7 @@ func (suite *middlewareTestSuite) TestRateLimitMiddleware() {
 
 	// qps = 0.5, so sleep 2s
 	time.Sleep(time.Second * 2)
-	for i := 0; i < 2; i++ {
+	for i := range 2 {
 		req, _ = http.NewRequest(http.MethodPost, leader.GetAddr()+"/pd/api/v1/admin/log", strings.NewReader("\"info\""))
 		resp, err = tests.TestDialClient.Do(req)
 		re.NoError(err)
@@ -349,7 +349,7 @@ func (suite *middlewareTestSuite) TestRateLimitMiddleware() {
 
 	// test only sleep 1s
 	time.Sleep(time.Second)
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		req, _ = http.NewRequest(http.MethodPost, leader.GetAddr()+"/pd/api/v1/admin/log", strings.NewReader("\"info\""))
 		resp, err = tests.TestDialClient.Do(req)
 		re.NoError(err)
@@ -371,7 +371,7 @@ func (suite *middlewareTestSuite) TestRateLimitMiddleware() {
 	resp.Body.Close()
 	re.False(leader.GetServer().GetServiceMiddlewarePersistOptions().IsRateLimitEnabled())
 
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		req, _ = http.NewRequest(http.MethodPost, leader.GetAddr()+"/pd/api/v1/admin/log", strings.NewReader("\"info\""))
 		resp, err = tests.TestDialClient.Do(req)
 		re.NoError(err)
@@ -998,7 +998,7 @@ func TestPreparingProgress(t *testing.T) {
 	for _, store := range stores[:2] {
 		tests.MustPutStore(re, cluster, store)
 	}
-	for i := 0; i < core.InitClusterRegionThreshold; i++ {
+	for i := range core.InitClusterRegionThreshold {
 		tests.MustPutRegion(re, cluster, uint64(i+1), uint64(i)%3+1, []byte(fmt.Sprintf("%20d", i)), []byte(fmt.Sprintf("%20d", i+1)), core.SetApproximateSize(10))
 	}
 	testutil.Eventually(re, func() bool {

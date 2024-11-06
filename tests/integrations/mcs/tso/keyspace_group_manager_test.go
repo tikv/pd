@@ -220,10 +220,9 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestKeyspacesServedByNonDefaultKe
 						// Make sure every keyspace group is using the right timestamp path
 						// for loading/saving timestamp from/to etcd and the right primary path
 						// for primary election.
-						clusterID := suite.pdLeaderServer.GetClusterID()
-						rootPath := keypath.TSOSvcRootPath(clusterID)
+						rootPath := keypath.TSOSvcRootPath()
 						primaryPath := keypath.KeyspaceGroupPrimaryPath(rootPath, param.keyspaceGroupID)
-						timestampPath := keypath.FullTimestampPath(clusterID, param.keyspaceGroupID)
+						timestampPath := keypath.FullTimestampPath(param.keyspaceGroupID)
 						re.Equal(timestampPath, am.GetTimestampPath(tsopkg.GlobalDCLocation))
 						re.Equal(primaryPath, am.GetMember().GetLeaderPath())
 

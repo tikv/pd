@@ -14,30 +14,27 @@
 
 package keypath
 
-import (
-	"fmt"
-	"math/rand"
-	"path"
-	"testing"
-	"time"
+import "sync/atomic"
 
-	"github.com/stretchr/testify/require"
-)
+// clusterID is the unique ID for the cluster. We put it in this package is
+// because it is always used with key path.
+var clusterID atomic.Value
 
-func TestRegionPath(t *testing.T) {
-	re := require.New(t)
-	f := func(id uint64) string {
-		return path.Join(regionPathPrefix, fmt.Sprintf("%020d", id))
+// ClusterID returns the cluster ID.
+func ClusterID() uint64 {
+	id := clusterID.Load()
+	if id == nil {
+		return 0
 	}
-	rand.New(rand.NewSource(time.Now().Unix()))
-	for range 1000 {
-		id := rand.Uint64()
-		re.Equal(f(id), RegionPath(id))
-	}
+	return id.(uint64)
 }
 
-func BenchmarkRegionPath(b *testing.B) {
-	for i := 0; i < b.N; i++ {
-		_ = RegionPath(uint64(i))
-	}
+// SetClusterID sets the cluster ID.
+func SetClusterID(id uint64) {
+	clusterID.Store(id)
+}
+
+// ResetClusterID resets the cluster ID to 0. It's only used in tests.
+func ResetClusterID() {
+	clusterID.Store(uint64(0))
 }

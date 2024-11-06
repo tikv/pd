@@ -30,7 +30,7 @@ func newBalanceLeader(config *sc.SimConfig) *Case {
 	totalRegion := config.TotalRegion
 	allStores := make(map[uint64]struct{}, totalStore)
 	replica := int(config.ServerConfig.Replication.MaxReplicas)
-	for i := 0; i < totalStore; i++ {
+	for range totalStore {
 		id := simutil.IDAllocator.NextID()
 		simCase.Stores = append(simCase.Stores, &Store{
 			ID:     id,
@@ -40,7 +40,7 @@ func newBalanceLeader(config *sc.SimConfig) *Case {
 	}
 
 	leaderStoreID := simCase.Stores[totalStore-1].ID
-	for i := 0; i < totalRegion; i++ {
+	for i := range totalRegion {
 		peers := make([]*metapb.Peer, 0, replica)
 		peers = append(peers, &metapb.Peer{
 			Id:      simutil.IDAllocator.NextID(),

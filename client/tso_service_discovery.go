@@ -211,7 +211,7 @@ func (c *tsoServiceDiscovery) retry(
 	var err error
 	ticker := time.NewTicker(retryInterval)
 	defer ticker.Stop()
-	for i := 0; i < maxRetryTimes; i++ {
+	for range maxRetryTimes {
 		if err = f(); err == nil {
 			return nil
 		}

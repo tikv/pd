@@ -55,7 +55,6 @@ type Cluster struct {
 	*labeler.RegionLabeler
 	*statistics.HotStat
 	*config.PersistOptions
-	ID                      uint64
 	pendingProcessedRegions map[uint64]struct{}
 	*buckets.HotBucketCache
 	storage.Storage
@@ -63,11 +62,12 @@ type Cluster struct {
 
 // NewCluster creates a new Cluster
 func NewCluster(ctx context.Context, opts *config.PersistOptions) *Cluster {
+	bc := core.NewBasicCluster()
 	c := &Cluster{
 		ctx:                     ctx,
-		BasicCluster:            core.NewBasicCluster(),
+		BasicCluster:            bc,
 		IDAllocator:             mockid.NewIDAllocator(),
-		HotStat:                 statistics.NewHotStat(ctx),
+		HotStat:                 statistics.NewHotStat(ctx, bc),
 		HotBucketCache:          buckets.NewBucketsCache(ctx),
 		PersistOptions:          opts,
 		pendingProcessedRegions: map[uint64]struct{}{},
@@ -148,13 +148,6 @@ func (mc *Cluster) GetHotPeerStat(rw utils.RWType, regionID, storeID uint64) *st
 	return mc.HotCache.GetHotPeerStat(rw, regionID, storeID)
 }
 
-// RegionReadStats returns hot region's read stats.
-// The result only includes peers that are hot enough.
-func (mc *Cluster) RegionReadStats() map[uint64][]*statistics.HotPeerStat {
-	// We directly use threshold for read stats for mockCluster
-	return mc.HotCache.RegionStats(utils.Read, mc.GetHotRegionCacheHitsThreshold())
-}
-
 // BucketsStats returns hot region's buckets stats.
 func (mc *Cluster) BucketsStats(degree int, regions ...uint64) map[uint64][]*buckets.BucketStat {
 	task := buckets.NewCollectBucketStatsTask(degree, regions...)
@@ -164,10 +157,11 @@ func (mc *Cluster) BucketsStats(degree int, regions ...uint64) map[uint64][]*buc
 	return task.WaitRet(mc.ctx)
 }
 
-// RegionWriteStats returns hot region's write stats.
+// GetHotPeerStats returns the read or write statistics for hot regions.
+// It returns a map where the keys are store IDs and the values are slices of HotPeerStat.
 // The result only includes peers that are hot enough.
-func (mc *Cluster) RegionWriteStats() map[uint64][]*statistics.HotPeerStat {
-	return mc.HotCache.RegionStats(utils.Write, mc.GetHotRegionCacheHitsThreshold())
+func (mc *Cluster) GetHotPeerStats(rw utils.RWType) map[uint64][]*statistics.HotPeerStat {
+	return mc.HotCache.GetHotPeerStats(rw, mc.GetHotRegionCacheHitsThreshold())
 }
 
 // HotRegionsFromStore picks hot regions in specify store.
@@ -185,7 +179,7 @@ func (mc *Cluster) HotRegionsFromStore(store uint64, kind utils.RWType) []*core.
 
 // hotRegionsFromStore picks hot region in specify store.
 func hotRegionsFromStore(w *statistics.HotCache, storeID uint64, kind utils.RWType, minHotDegree int) []*statistics.HotPeerStat {
-	if stats, ok := w.RegionStats(kind, minHotDegree)[storeID]; ok && len(stats) > 0 {
+	if stats, ok := w.GetHotPeerStats(kind, minHotDegree)[storeID]; ok && len(stats) > 0 {
 		return stats
 	}
 	return nil
@@ -365,7 +359,7 @@ func (mc *Cluster) AddRegionStoreWithLeader(storeID uint64, regionCount int, lea
 		leaderCount = leaderCounts[0]
 	}
 	mc.AddRegionStore(storeID, regionCount)
-	for i := 0; i < leaderCount; i++ {
+	for range leaderCount {
 		id, _ := mc.AllocID()
 		mc.AddLeaderRegion(id, storeID)
 	}
@@ -469,7 +463,7 @@ func (mc *Cluster) AddRegionWithReadInfo(
 	}
 
 	var items []*statistics.HotPeerStat
-	for i := 0; i < filledNum; i++ {
+	for range filledNum {
 		items = mc.CheckRegionRead(r)
 		for _, item := range items {
 			mc.HotCache.Update(item, utils.Read)
@@ -489,7 +483,7 @@ func (mc *Cluster) AddRegionWithPeerReadInfo(regionID, leaderStoreID, targetStor
 		filledNum = filledNums[0]
 	}
 	var items []*statistics.HotPeerStat
-	for i := 0; i < filledNum; i++ {
+	for range filledNum {
 		items = mc.CheckRegionRead(r)
 		for _, item := range items {
 			if item.StoreID == targetStoreID {
@@ -518,7 +512,7 @@ func (mc *Cluster) AddRegionLeaderWithReadInfo(
 	}
 
 	var items []*statistics.HotPeerStat
-	for i := 0; i < filledNum; i++ {
+	for range filledNum {
 		items = mc.CheckRegionLeaderRead(r)
 		for _, item := range items {
 			mc.HotCache.Update(item, utils.Read)
@@ -546,7 +540,7 @@ func (mc *Cluster) AddLeaderRegionWithWriteInfo(
 	}
 
 	var items []*statistics.HotPeerStat
-	for i := 0; i < filledNum; i++ {
+	for range filledNum {
 		items = mc.CheckRegionWrite(r)
 		for _, item := range items {
 			mc.HotCache.Update(item, utils.Write)

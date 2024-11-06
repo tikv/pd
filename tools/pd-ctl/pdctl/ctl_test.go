@@ -57,7 +57,7 @@ func TestGenCompleter(t *testing.T) {
 			if len(runArray) != len(v.GetName())-1 {
 				continue
 			}
-			for i := 0; i < len(runArray); i++ {
+			for i := range runArray {
 				if runArray[i] != v.GetName()[i] {
 					inPrefixArray = false
 				}

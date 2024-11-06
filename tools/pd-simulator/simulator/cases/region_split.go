@@ -28,7 +28,7 @@ func newRegionSplit(config *sc.SimConfig) *Case {
 	totalStore := config.TotalStore
 	allStores := make(map[uint64]struct{}, totalStore)
 
-	for i := 0; i < totalStore; i++ {
+	for range totalStore {
 		storeID := simutil.IDAllocator.NextID()
 		simCase.Stores = append(simCase.Stores, &Store{
 			ID:     storeID,
@@ -38,7 +38,7 @@ func newRegionSplit(config *sc.SimConfig) *Case {
 	}
 	replica := int(config.ServerConfig.Replication.MaxReplicas)
 	peers := make([]*metapb.Peer, 0, replica)
-	for j := 0; j < replica; j++ {
+	for j := range replica {
 		peers = append(peers, &metapb.Peer{
 			Id:      simutil.IDAllocator.NextID(),
 			StoreId: uint64((j)%(totalStore-1) + 1),

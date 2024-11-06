@@ -32,7 +32,7 @@ func newScaleInOut(config *sc.SimConfig) *Case {
 		totalStore, totalRegion = 6, 4000
 	}
 
-	for i := 0; i < totalStore; i++ {
+	for i := range totalStore {
 		s := &Store{
 			ID:     IDAllocator.nextID(),
 			Status: metapb.StoreState_Up,
@@ -43,9 +43,9 @@ func newScaleInOut(config *sc.SimConfig) *Case {
 		simCase.Stores = append(simCase.Stores, s)
 	}
 
-	for i := 0; i < totalRegion; i++ {
+	for i := range totalRegion {
 		peers := make([]*metapb.Peer, 0, replica)
-		for j := 0; j < replica; j++ {
+		for j := range replica {
 			peers = append(peers, &metapb.Peer{
 				Id:      simutil.IDAllocator.NextID(),
 				StoreId: uint64((i+j)%totalStore + 1),

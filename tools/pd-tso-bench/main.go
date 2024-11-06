@@ -92,7 +92,7 @@ func main() {
 		cancel()
 	}()
 
-	for i := 0; i < *count; i++ {
+	for i := range *count {
 		fmt.Printf("\nStart benchmark #%d, duration: %+vs\n", i, duration.Seconds())
 		bench(ctx)
 	}
@@ -126,13 +126,13 @@ func bench(mainCtx context.Context) {
 	if *enableFaultInjection {
 		fmt.Printf("Enable fault injection, failure rate: %f\n", *faultInjectionRate)
 		wg.Add(*clientNumber)
-		for i := 0; i < *clientNumber; i++ {
+		for i := range *clientNumber {
 			go reqWorker(ctx, pdClients, i, durCh)
 		}
 	} else {
 		wg.Add((*concurrency) * (*clientNumber))
-		for i := 0; i < *clientNumber; i++ {
-			for j := 0; j < *concurrency; j++ {
+		for i := range *clientNumber {
+			for range *concurrency {
 				go reqWorker(ctx, pdClients, i, durCh)
 			}
 		}

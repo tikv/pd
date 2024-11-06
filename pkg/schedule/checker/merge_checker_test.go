@@ -481,7 +481,7 @@ func (suite *mergeCheckerTestSuite) TestStoreLimitWithMerge() {
 	}
 
 	mc := NewMergeChecker(suite.ctx, tc, tc.GetCheckerConfig())
-	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, tc.ID, tc, false /* no need to run */)
+	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, tc, false /* no need to run */)
 	oc := operator.NewController(suite.ctx, tc.GetBasicCluster(), tc.GetSharedConfig(), stream)
 
 	regions[2] = regions[2].Clone(
@@ -498,7 +498,7 @@ func (suite *mergeCheckerTestSuite) TestStoreLimitWithMerge() {
 	tc.SetAllStoresLimit(storelimit.RemovePeer, 0.0000001)
 	tc.PutRegion(regions[2])
 	// The size of Region is less or equal than 1MB.
-	for i := 0; i < 50; i++ {
+	for range 50 {
 		ops := mc.Check(regions[2])
 		re.NotNil(ops)
 		re.True(oc.AddOperator(ops...))
@@ -512,7 +512,7 @@ func (suite *mergeCheckerTestSuite) TestStoreLimitWithMerge() {
 	)
 	tc.PutRegion(regions[2])
 	// The size of Region is more than 1MB but no more than 20MB.
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		ops := mc.Check(regions[2])
 		re.NotNil(ops)
 		re.True(oc.AddOperator(ops...))
