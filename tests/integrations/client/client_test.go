@@ -1510,7 +1510,6 @@ func (suite *clientTestSuite) TestGetRegionByID() {
 		return reflect.DeepEqual(region, r.Meta) &&
 			reflect.DeepEqual(peers[0], r.Leader)
 	})
-
 }
 
 func (suite *clientTestSuite) TestGetStore() {
