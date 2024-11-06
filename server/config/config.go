@@ -248,7 +248,7 @@ const (
 	maxCheckRegionSplitInterval     = 100 * time.Millisecond
 
 	defaultEnableSchedulingFallback  = true
-	defaultEnableTSODynamicSwitching = false
+	defaultEnableTSODynamicSwitching = true
 )
 
 var (
