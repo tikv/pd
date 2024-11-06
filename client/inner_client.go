@@ -230,7 +230,7 @@ func (c *innerClient) dispatchTSORequestWithRetry(ctx context.Context, dcLocatio
 		err       error
 		req       *tsoRequest
 	)
-	for i := 0; i < dispatchRetryCount; i++ {
+	for i := range dispatchRetryCount {
 		// Do not delay for the first time.
 		if i > 0 {
 			time.Sleep(dispatchRetryDelay)
