@@ -611,7 +611,8 @@ func TestTSOServiceSwitch(t *testing.T) {
 	pdLeader := tc.GetServer(leaderName)
 	backendEndpoints := pdLeader.GetAddr()
 	re.NoError(pdLeader.BootstrapCluster())
-	pdClient, err := pd.NewClientWithContext(ctx, []string{backendEndpoints}, pd.SecurityOption{})
+	pdClient, err := pd.NewClientWithContext(ctx, caller.TestID,
+		caller.TestComponent, []string{backendEndpoints}, pd.SecurityOption{})
 	re.NoError(err)
 	re.NotNil(pdClient)
 	defer pdClient.Close()
