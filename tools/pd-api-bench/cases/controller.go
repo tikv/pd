@@ -23,7 +23,7 @@ import (
 	"github.com/pingcap/log"
 	pd "github.com/tikv/pd/client"
 	pdHttp "github.com/tikv/pd/client/http"
-	"go.etcd.io/etcd/clientv3"
+	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 )
 
@@ -62,7 +62,7 @@ func (c *Coordinator) GetHTTPCase(name string) (*Config, error) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	if controller, ok := c.http[name]; ok {
-		return controller.GetConfig(), nil
+		return controller.getConfig(), nil
 	}
 	return nil, errors.Errorf("case %v does not exist", name)
 }
@@ -72,17 +72,17 @@ func (c *Coordinator) GetGRPCCase(name string) (*Config, error) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	if controller, ok := c.grpc[name]; ok {
-		return controller.GetConfig(), nil
+		return controller.getConfig(), nil
 	}
 	return nil, errors.Errorf("case %v does not exist", name)
 }
 
-// GetETCDCase returns the etcd case config.
-func (c *Coordinator) GetETCDCase(name string) (*Config, error) {
+// GetEtcdCase returns the etcd case config.
+func (c *Coordinator) GetEtcdCase(name string) (*Config, error) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	if controller, ok := c.etcd[name]; ok {
-		return controller.GetConfig(), nil
+		return controller.getConfig(), nil
 	}
 	return nil, errors.Errorf("case %v does not exist", name)
 }
@@ -93,7 +93,7 @@ func (c *Coordinator) GetAllHTTPCases() map[string]*Config {
 	defer c.mu.RUnlock()
 	ret := make(map[string]*Config)
 	for name, c := range c.http {
-		ret[name] = c.GetConfig()
+		ret[name] = c.getConfig()
 	}
 	return ret
 }
@@ -104,18 +104,18 @@ func (c *Coordinator) GetAllGRPCCases() map[string]*Config {
 	defer c.mu.RUnlock()
 	ret := make(map[string]*Config)
 	for name, c := range c.grpc {
-		ret[name] = c.GetConfig()
+		ret[name] = c.getConfig()
 	}
 	return ret
 }
 
-// GetAllETCDCases returns the all etcd case configs.
-func (c *Coordinator) GetAllETCDCases() map[string]*Config {
+// GetAllEtcdCases returns the all etcd case configs.
+func (c *Coordinator) GetAllEtcdCases() map[string]*Config {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	ret := make(map[string]*Config)
 	for name, c := range c.etcd {
-		ret[name] = c.GetConfig()
+		ret[name] = c.getConfig()
 	}
 	return ret
 }
@@ -131,9 +131,9 @@ func (c *Coordinator) SetHTTPCase(name string, cfg *Config) error {
 			c.http[name] = controller
 		}
 		controller.stop()
-		controller.SetQPS(cfg.QPS)
+		controller.setQPS(cfg.QPS)
 		if cfg.Burst > 0 {
-			controller.SetBurst(cfg.Burst)
+			controller.setBurst(cfg.Burst)
 		}
 		controller.run()
 	} else {
@@ -153,9 +153,9 @@ func (c *Coordinator) SetGRPCCase(name string, cfg *Config) error {
 			c.grpc[name] = controller
 		}
 		controller.stop()
-		controller.SetQPS(cfg.QPS)
+		controller.setQPS(cfg.QPS)
 		if cfg.Burst > 0 {
-			controller.SetBurst(cfg.Burst)
+			controller.setBurst(cfg.Burst)
 		}
 		controller.run()
 	} else {
@@ -164,20 +164,20 @@ func (c *Coordinator) SetGRPCCase(name string, cfg *Config) error {
 	return nil
 }
 
-// SetETCDCase sets the config for the specific case.
-func (c *Coordinator) SetETCDCase(name string, cfg *Config) error {
+// SetEtcdCase sets the config for the specific case.
+func (c *Coordinator) SetEtcdCase(name string, cfg *Config) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if fn, ok := ETCDCaseFnMap[name]; ok {
+	if fn, ok := EtcdCaseFnMap[name]; ok {
 		var controller *etcdController
 		if controller, ok = c.etcd[name]; !ok {
 			controller = newEtcdController(c.ctx, c.etcdClients, fn)
 			c.etcd[name] = controller
 		}
 		controller.stop()
-		controller.SetQPS(cfg.QPS)
+		controller.setQPS(cfg.QPS)
 		if cfg.Burst > 0 {
-			controller.SetBurst(cfg.Burst)
+			controller.setBurst(cfg.Burst)
 		}
 		controller.run()
 	} else {
@@ -207,34 +207,34 @@ func newHTTPController(ctx context.Context, clis []pdHttp.Client, fn HTTPCreateF
 
 // run tries to run the HTTP api bench.
 func (c *httpController) run() {
-	if c.GetQPS() <= 0 || c.cancel != nil {
+	if c.getQPS() <= 0 || c.cancel != nil {
 		return
 	}
 	c.ctx, c.cancel = context.WithCancel(c.pctx)
-	qps := c.GetQPS()
-	burst := c.GetBurst()
+	qps := c.getQPS()
+	burst := c.getBurst()
 	cliNum := int64(len(c.clients))
 	tt := time.Duration(base*burst*cliNum/qps) * time.Microsecond
-	log.Info("begin to run http case", zap.String("case", c.Name()), zap.Int64("qps", qps), zap.Int64("burst", burst), zap.Duration("interval", tt))
+	log.Info("begin to run http case", zap.String("case", c.getName()), zap.Int64("qps", qps), zap.Int64("burst", burst), zap.Duration("interval", tt))
 	for _, hCli := range c.clients {
 		c.wg.Add(1)
 		go func(hCli pdHttp.Client) {
 			defer c.wg.Done()
 			c.wg.Add(int(burst))
-			for i := int64(0); i < burst; i++ {
+			for range burst {
 				go func() {
 					defer c.wg.Done()
-					var ticker = time.NewTicker(tt)
+					ticker := time.NewTicker(tt)
 					defer ticker.Stop()
 					for {
 						select {
 						case <-ticker.C:
-							err := c.Do(c.ctx, hCli)
+							err := c.do(c.ctx, hCli)
 							if err != nil {
-								log.Error("meet erorr when doing HTTP request", zap.String("case", c.Name()), zap.Error(err))
+								log.Error("meet error when doing HTTP request", zap.String("case", c.getName()), zap.Error(err))
 							}
 						case <-c.ctx.Done():
-							log.Info("Got signal to exit running HTTP case")
+							log.Info("got signal to exit running HTTP case")
 							return
 						}
 					}
@@ -276,34 +276,34 @@ func newGRPCController(ctx context.Context, clis []pd.Client, fn GRPCCreateFn) *
 
 // run tries to run the gRPC api bench.
 func (c *gRPCController) run() {
-	if c.GetQPS() <= 0 || c.cancel != nil {
+	if c.getQPS() <= 0 || c.cancel != nil {
 		return
 	}
 	c.ctx, c.cancel = context.WithCancel(c.pctx)
-	qps := c.GetQPS()
-	burst := c.GetBurst()
+	qps := c.getQPS()
+	burst := c.getBurst()
 	cliNum := int64(len(c.clients))
 	tt := time.Duration(base*burst*cliNum/qps) * time.Microsecond
-	log.Info("begin to run gRPC case", zap.String("case", c.Name()), zap.Int64("qps", qps), zap.Int64("burst", burst), zap.Duration("interval", tt))
+	log.Info("begin to run gRPC case", zap.String("case", c.getName()), zap.Int64("qps", qps), zap.Int64("burst", burst), zap.Duration("interval", tt))
 	for _, cli := range c.clients {
 		c.wg.Add(1)
 		go func(cli pd.Client) {
 			defer c.wg.Done()
 			c.wg.Add(int(burst))
-			for i := int64(0); i < burst; i++ {
+			for range burst {
 				go func() {
 					defer c.wg.Done()
-					var ticker = time.NewTicker(tt)
+					ticker := time.NewTicker(tt)
 					defer ticker.Stop()
 					for {
 						select {
 						case <-ticker.C:
-							err := c.Unary(c.ctx, cli)
+							err := c.unary(c.ctx, cli)
 							if err != nil {
-								log.Error("meet erorr when doing gRPC request", zap.String("case", c.Name()), zap.Error(err))
+								log.Error("meet error when doing gRPC request", zap.String("case", c.getName()), zap.Error(err))
 							}
 						case <-c.ctx.Done():
-							log.Info("Got signal to exit running gRPC case")
+							log.Info("got signal to exit running gRPC case")
 							return
 						}
 					}
@@ -324,7 +324,7 @@ func (c *gRPCController) stop() {
 }
 
 type etcdController struct {
-	ETCDCase
+	EtcdCase
 	clients []*clientv3.Client
 	pctx    context.Context
 
@@ -334,29 +334,29 @@ type etcdController struct {
 	wg sync.WaitGroup
 }
 
-func newEtcdController(ctx context.Context, clis []*clientv3.Client, fn ETCDCreateFn) *etcdController {
+func newEtcdController(ctx context.Context, clis []*clientv3.Client, fn EtcdCreateFn) *etcdController {
 	c := &etcdController{
 		pctx:     ctx,
 		clients:  clis,
-		ETCDCase: fn(),
+		EtcdCase: fn(),
 	}
 	return c
 }
 
 // run tries to run the gRPC api bench.
 func (c *etcdController) run() {
-	if c.GetQPS() <= 0 || c.cancel != nil {
+	if c.getQPS() <= 0 || c.cancel != nil {
 		return
 	}
 	c.ctx, c.cancel = context.WithCancel(c.pctx)
-	qps := c.GetQPS()
-	burst := c.GetBurst()
+	qps := c.getQPS()
+	burst := c.getBurst()
 	cliNum := int64(len(c.clients))
 	tt := time.Duration(base*burst*cliNum/qps) * time.Microsecond
-	log.Info("begin to run etcd case", zap.String("case", c.Name()), zap.Int64("qps", qps), zap.Int64("burst", burst), zap.Duration("interval", tt))
-	err := c.Init(c.ctx, c.clients[0])
+	log.Info("begin to run etcd case", zap.String("case", c.getName()), zap.Int64("qps", qps), zap.Int64("burst", burst), zap.Duration("interval", tt))
+	err := c.init(c.ctx, c.clients[0])
 	if err != nil {
-		log.Error("init error", zap.String("case", c.Name()), zap.Error(err))
+		log.Error("init error", zap.String("case", c.getName()), zap.Error(err))
 		return
 	}
 	for _, cli := range c.clients {
@@ -364,20 +364,20 @@ func (c *etcdController) run() {
 		go func(cli *clientv3.Client) {
 			defer c.wg.Done()
 			c.wg.Add(int(burst))
-			for i := int64(0); i < burst; i++ {
+			for range burst {
 				go func() {
 					defer c.wg.Done()
-					var ticker = time.NewTicker(tt)
+					ticker := time.NewTicker(tt)
 					defer ticker.Stop()
 					for {
 						select {
 						case <-ticker.C:
-							err := c.Unary(c.ctx, cli)
+							err := c.unary(c.ctx, cli)
 							if err != nil {
-								log.Error("meet erorr when doing etcd request", zap.String("case", c.Name()), zap.Error(err))
+								log.Error("meet error when doing etcd request", zap.String("case", c.getName()), zap.Error(err))
 							}
 						case <-c.ctx.Done():
-							log.Info("Got signal to exit running etcd case")
+							log.Info("got signal to exit running etcd case")
 							return
 						}
 					}

@@ -4,7 +4,7 @@ pd-ut is a tool to run unit tests for PD.
 
 ## Build
 
-1. [Go](https://golang.org/) Version 1.21 or later
+1. [Go](https://golang.org/) Version 1.23 or later
 2. In the root directory of the [PD project](https://github.com/tikv/pd), use the `make pd-ut` command to compile and generate `bin/pd-ut`
 
 ## Usage

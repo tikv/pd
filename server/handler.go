@@ -28,13 +28,13 @@ import (
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/encryption"
 	"github.com/tikv/pd/pkg/errs"
-	mcsutils "github.com/tikv/pd/pkg/mcs/utils"
+	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/schedule"
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/handler"
 	"github.com/tikv/pd/pkg/schedule/schedulers"
-	types "github.com/tikv/pd/pkg/schedule/type"
+	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/statistics/utils"
 	"github.com/tikv/pd/pkg/storage"
@@ -53,6 +53,7 @@ type server struct {
 	*Server
 }
 
+// GetCoordinator returns the coordinator.
 func (s *server) GetCoordinator() *schedule.Coordinator {
 	c := s.GetRaftCluster()
 	if c == nil {
@@ -61,6 +62,7 @@ func (s *server) GetCoordinator() *schedule.Coordinator {
 	return c.GetCoordinator()
 }
 
+// GetCluster returns RaftCluster.
 func (s *server) GetCluster() sche.SchedulerCluster {
 	return s.GetRaftCluster()
 }
@@ -186,41 +188,40 @@ func (h *Handler) GetAllRequestHistoryHotRegion(request *HistoryHotRegionsReques
 
 // AddScheduler adds a scheduler.
 func (h *Handler) AddScheduler(tp types.CheckerSchedulerType, args ...string) error {
-	name := types.SchedulerTypeCompatibleMap[tp]
 	c, err := h.GetRaftCluster()
 	if err != nil {
 		return err
 	}
 
 	var removeSchedulerCb func(string) error
-	if c.IsServiceIndependent(mcsutils.SchedulingServiceName) {
+	if c.IsServiceIndependent(constant.SchedulingServiceName) {
 		removeSchedulerCb = c.GetCoordinator().GetSchedulersController().RemoveSchedulerHandler
 	} else {
 		removeSchedulerCb = c.GetCoordinator().GetSchedulersController().RemoveScheduler
 	}
-	s, err := schedulers.CreateScheduler(name, c.GetOperatorController(), h.s.storage, schedulers.ConfigSliceDecoder(name, args), removeSchedulerCb)
+	s, err := schedulers.CreateScheduler(tp, c.GetOperatorController(), h.s.storage, schedulers.ConfigSliceDecoder(tp, args), removeSchedulerCb)
 	if err != nil {
 		return err
 	}
 	log.Info("create scheduler", zap.String("scheduler-name", s.GetName()), zap.Strings("scheduler-args", args))
-	if c.IsServiceIndependent(mcsutils.SchedulingServiceName) {
+	if c.IsServiceIndependent(constant.SchedulingServiceName) {
 		if err = c.AddSchedulerHandler(s, args...); err != nil {
 			log.Error("can not add scheduler handler", zap.String("scheduler-name", s.GetName()), zap.Strings("scheduler-args", args), errs.ZapError(err))
 			return err
 		}
-		log.Info("add scheduler handler successfully", zap.String("scheduler-name", name), zap.Strings("scheduler-args", args))
+		log.Info("add scheduler handler successfully", zap.String("scheduler-name", s.GetName()), zap.Strings("scheduler-args", args))
 	} else {
 		if err = c.AddScheduler(s, args...); err != nil {
 			log.Error("can not add scheduler", zap.String("scheduler-name", s.GetName()), zap.Strings("scheduler-args", args), errs.ZapError(err))
 			return err
 		}
-		log.Info("add scheduler successfully", zap.String("scheduler-name", name), zap.Strings("scheduler-args", args))
+		log.Info("add scheduler successfully", zap.String("scheduler-name", s.GetName()), zap.Strings("scheduler-args", args))
 	}
 	if err = h.opt.Persist(c.GetStorage()); err != nil {
 		log.Error("can not persist scheduler config", errs.ZapError(err))
 		return err
 	}
-	log.Info("persist scheduler config successfully", zap.String("scheduler-name", name), zap.Strings("scheduler-args", args))
+	log.Info("persist scheduler config successfully", zap.String("scheduler-name", s.GetName()), zap.Strings("scheduler-args", args))
 	return nil
 }
 
@@ -230,7 +231,7 @@ func (h *Handler) RemoveScheduler(name string) error {
 	if err != nil {
 		return err
 	}
-	if c.IsServiceIndependent(mcsutils.SchedulingServiceName) {
+	if c.IsServiceIndependent(constant.SchedulingServiceName) {
 		if err = c.RemoveSchedulerHandler(name); err != nil {
 			log.Error("can not remove scheduler handler", zap.String("scheduler-name", name), errs.ZapError(err))
 		} else {

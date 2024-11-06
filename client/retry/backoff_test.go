@@ -70,7 +70,7 @@ func TestBackoffer(t *testing.T) {
 	bo = InitialBackoffer(base, max, total)
 	re.Equal(bo.nextInterval(), base)
 	re.Equal(bo.nextInterval(), 2*base)
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		re.LessOrEqual(bo.nextInterval(), max)
 	}
 	re.Equal(bo.nextInterval(), max)

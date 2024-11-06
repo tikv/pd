@@ -26,48 +26,27 @@ import (
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
+	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/statistics"
-	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/unrolled/render"
 	"go.uber.org/zap"
 )
 
-const (
-	// ShuffleHotRegionName is shuffle hot region scheduler name.
-	ShuffleHotRegionName = "shuffle-hot-region-scheduler"
-	// ShuffleHotRegionType is shuffle hot region scheduler type.
-	ShuffleHotRegionType = "shuffle-hot-region"
-)
-
 type shuffleHotRegionSchedulerConfig struct {
 	syncutil.RWMutex
-	storage endpoint.ConfigStorage
-	Name    string `json:"name"`
-	Limit   uint64 `json:"limit"`
+	schedulerConfig
+
+	Limit uint64 `json:"limit"`
 }
 
-func (conf *shuffleHotRegionSchedulerConfig) getSchedulerName() string {
-	return conf.Name
-}
-
-func (conf *shuffleHotRegionSchedulerConfig) Clone() *shuffleHotRegionSchedulerConfig {
+func (conf *shuffleHotRegionSchedulerConfig) clone() *shuffleHotRegionSchedulerConfig {
 	conf.RLock()
 	defer conf.RUnlock()
 	return &shuffleHotRegionSchedulerConfig{
-		Name:  conf.Name,
 		Limit: conf.Limit,
 	}
-}
-
-func (conf *shuffleHotRegionSchedulerConfig) persistLocked() error {
-	name := conf.getSchedulerName()
-	data, err := EncodeConfig(conf)
-	if err != nil {
-		return err
-	}
-	return conf.storage.SaveSchedulerConfig(name, data)
 }
 
 func (conf *shuffleHotRegionSchedulerConfig) getLimit() uint64 {
@@ -88,8 +67,9 @@ type shuffleHotRegionScheduler struct {
 
 // newShuffleHotRegionScheduler creates an admin scheduler that random balance hot regions
 func newShuffleHotRegionScheduler(opController *operator.Controller, conf *shuffleHotRegionSchedulerConfig) Scheduler {
-	base := newBaseHotScheduler(opController,
-		statistics.DefaultHistorySampleDuration, statistics.DefaultHistorySampleInterval)
+	base := newBaseHotScheduler(opController, statistics.DefaultHistorySampleDuration,
+		statistics.DefaultHistorySampleInterval, conf)
+	base.tp = types.ShuffleHotRegionScheduler
 	handler := newShuffleHotRegionHandler(conf)
 	ret := &shuffleHotRegionScheduler{
 		baseHotScheduler: base,
@@ -99,57 +79,47 @@ func newShuffleHotRegionScheduler(opController *operator.Controller, conf *shuff
 	return ret
 }
 
+// ServeHTTP implements the http.Handler interface.
 func (s *shuffleHotRegionScheduler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.handler.ServeHTTP(w, r)
 }
 
-func (s *shuffleHotRegionScheduler) GetName() string {
-	return s.conf.Name
-}
-
-func (*shuffleHotRegionScheduler) GetType() string {
-	return ShuffleHotRegionType
-}
-
+// EncodeConfig implements the Scheduler interface.
 func (s *shuffleHotRegionScheduler) EncodeConfig() ([]byte, error) {
 	return EncodeConfig(s.conf)
 }
 
+// ReloadConfig implements the Scheduler interface.
 func (s *shuffleHotRegionScheduler) ReloadConfig() error {
 	s.conf.Lock()
 	defer s.conf.Unlock()
-	cfgData, err := s.conf.storage.LoadSchedulerConfig(s.GetName())
-	if err != nil {
-		return err
-	}
-	if len(cfgData) == 0 {
-		return nil
-	}
 	newCfg := &shuffleHotRegionSchedulerConfig{}
-	if err = DecodeConfig([]byte(cfgData), newCfg); err != nil {
+	if err := s.conf.load(newCfg); err != nil {
 		return err
 	}
 	s.conf.Limit = newCfg.Limit
 	return nil
 }
 
+// IsScheduleAllowed implements the Scheduler interface.
 func (s *shuffleHotRegionScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) bool {
 	hotRegionAllowed := s.OpController.OperatorCount(operator.OpHotRegion) < s.conf.getLimit()
 	conf := cluster.GetSchedulerConfig()
 	regionAllowed := s.OpController.OperatorCount(operator.OpRegion) < conf.GetRegionScheduleLimit()
 	leaderAllowed := s.OpController.OperatorCount(operator.OpLeader) < conf.GetLeaderScheduleLimit()
 	if !hotRegionAllowed {
-		operator.OperatorLimitCounter.WithLabelValues(s.GetType(), operator.OpHotRegion.String()).Inc()
+		operator.IncOperatorLimitCounter(s.GetType(), operator.OpHotRegion)
 	}
 	if !regionAllowed {
-		operator.OperatorLimitCounter.WithLabelValues(s.GetType(), operator.OpRegion.String()).Inc()
+		operator.IncOperatorLimitCounter(s.GetType(), operator.OpRegion)
 	}
 	if !leaderAllowed {
-		operator.OperatorLimitCounter.WithLabelValues(s.GetType(), operator.OpLeader.String()).Inc()
+		operator.IncOperatorLimitCounter(s.GetType(), operator.OpLeader)
 	}
 	return hotRegionAllowed && regionAllowed && leaderAllowed
 }
 
+// Schedule implements the Scheduler interface.
 func (s *shuffleHotRegionScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) ([]*operator.Operator, []plan.Plan) {
 	shuffleHotRegionCounter.Inc()
 	typ := s.randomType()
@@ -224,7 +194,7 @@ type shuffleHotRegionHandler struct {
 	config *shuffleHotRegionSchedulerConfig
 }
 
-func (handler *shuffleHotRegionHandler) UpdateConfig(w http.ResponseWriter, r *http.Request) {
+func (handler *shuffleHotRegionHandler) updateConfig(w http.ResponseWriter, r *http.Request) {
 	var input map[string]any
 	if err := apiutil.ReadJSONRespondError(handler.rd, w, r.Body, &input); err != nil {
 		return
@@ -234,11 +204,12 @@ func (handler *shuffleHotRegionHandler) UpdateConfig(w http.ResponseWriter, r *h
 		handler.rd.JSON(w, http.StatusBadRequest, "invalid limit")
 		return
 	}
+
 	handler.config.Lock()
 	defer handler.config.Unlock()
 	previous := handler.config.Limit
 	handler.config.Limit = uint64(limit)
-	err := handler.config.persistLocked()
+	err := handler.config.save()
 	if err != nil {
 		handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		handler.config.Limit = previous
@@ -247,8 +218,8 @@ func (handler *shuffleHotRegionHandler) UpdateConfig(w http.ResponseWriter, r *h
 	handler.rd.JSON(w, http.StatusOK, nil)
 }
 
-func (handler *shuffleHotRegionHandler) ListConfig(w http.ResponseWriter, _ *http.Request) {
-	conf := handler.config.Clone()
+func (handler *shuffleHotRegionHandler) listConfig(w http.ResponseWriter, _ *http.Request) {
+	conf := handler.config.clone()
 	handler.rd.JSON(w, http.StatusOK, conf)
 }
 
@@ -258,7 +229,7 @@ func newShuffleHotRegionHandler(config *shuffleHotRegionSchedulerConfig) http.Ha
 		rd:     render.New(render.Options{IndentJSON: true}),
 	}
 	router := mux.NewRouter()
-	router.HandleFunc("/config", h.UpdateConfig).Methods(http.MethodPost)
-	router.HandleFunc("/list", h.ListConfig).Methods(http.MethodGet)
+	router.HandleFunc("/config", h.updateConfig).Methods(http.MethodPost)
+	router.HandleFunc("/list", h.listConfig).Methods(http.MethodGet)
 	return router
 }

@@ -4,7 +4,7 @@ pd-simulator is a tool to reproduce some scenarios and evaluate the schedulers' 
 
 ## Build
 
-1. [Go](https://golang.org/) Version 1.21 or later
+1. [Go](https://golang.org/) Version 1.23 or later
 2. In the root directory of the [PD project](https://github.com/tikv/pd), use the `make simulator` command to compile and generate `bin/pd-simulator`
 
 ## Usage
@@ -34,6 +34,8 @@ Run all cases:
 
 Run a specific case with an internal PD:
 
+You can check case name in `tools/pd-simulator/simulator/cases/cases.go`.
+
 ```shell
 ./pd-simulator -case="casename"
 ```
@@ -44,7 +46,7 @@ Run a specific case with an external PD:
 ./pd-simulator -pd="http://127.0.0.1:2379" -case="casename"
 ```
 
-Run with tiup playgroudn :
+Run with tiup playground:
 ```shell
 tiup playground nightly --host 127.0.0.1 --kv.binpath ./pd-simulator --kv=1 --db=0 --kv.config=./tikv.conf
 ```

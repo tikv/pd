@@ -33,6 +33,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/scatter"
 	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/schedule/splitter"
+	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/statistics/buckets"
 	"github.com/tikv/pd/pkg/statistics/utils"
@@ -67,7 +68,7 @@ func newSchedulingController(parentCtx context.Context, basicCluster *core.Basic
 		BasicCluster: basicCluster,
 		opt:          opt,
 		labelStats:   statistics.NewLabelStatistics(),
-		hotStat:      statistics.NewHotStat(parentCtx),
+		hotStat:      statistics.NewHotStat(parentCtx, basicCluster),
 		slowStat:     statistics.NewSlowStat(),
 		regionStats:  statistics.NewRegionStatistics(basicCluster, opt, ruleManager),
 	}
@@ -149,8 +150,7 @@ func (sc *schedulingController) runSchedulingMetricsCollectionJob() {
 
 	ticker := time.NewTicker(metricsCollectionJobInterval)
 	failpoint.Inject("highFrequencyClusterJobs", func() {
-		ticker.Stop()
-		ticker = time.NewTicker(time.Millisecond)
+		ticker.Reset(time.Millisecond)
 	})
 	defer ticker.Stop()
 
@@ -236,6 +236,7 @@ func (sc *schedulingController) UpdateRegionsLabelLevelStats(regions []*core.Reg
 	for _, region := range regions {
 		sc.labelStats.Observe(region, sc.getStoresWithoutLabelLocked(region, core.EngineKey, core.EngineTiFlash), sc.opt.GetLocationLabels())
 	}
+	sc.labelStats.ClearDefunctRegions()
 }
 
 func (sc *schedulingController) getStoresWithoutLabelLocked(region *core.RegionInfo, key, value string) []*core.StoreInfo {
@@ -269,21 +270,17 @@ func (sc *schedulingController) GetHotPeerStat(rw utils.RWType, regionID, storeI
 	return sc.hotStat.GetHotPeerStat(rw, regionID, storeID)
 }
 
-// RegionReadStats returns hot region's read stats.
+// GetHotPeerStats returns the read or write statistics for hot regions.
+// It returns a map where the keys are store IDs and the values are slices of HotPeerStat.
 // The result only includes peers that are hot enough.
-// RegionStats is a thread-safe method
-func (sc *schedulingController) RegionReadStats() map[uint64][]*statistics.HotPeerStat {
-	// As read stats are reported by store heartbeat, the threshold needs to be adjusted.
-	threshold := sc.opt.GetHotRegionCacheHitsThreshold() *
-		(utils.RegionHeartBeatReportInterval / utils.StoreHeartBeatReportInterval)
-	return sc.hotStat.RegionStats(utils.Read, threshold)
-}
-
-// RegionWriteStats returns hot region's write stats.
-// The result only includes peers that are hot enough.
-func (sc *schedulingController) RegionWriteStats() map[uint64][]*statistics.HotPeerStat {
-	// RegionStats is a thread-safe method
-	return sc.hotStat.RegionStats(utils.Write, sc.opt.GetHotRegionCacheHitsThreshold())
+func (sc *schedulingController) GetHotPeerStats(rw utils.RWType) map[uint64][]*statistics.HotPeerStat {
+	// GetHotPeerStats is a thread-safe method
+	threshold := sc.opt.GetHotRegionCacheHitsThreshold()
+	if rw == utils.Read {
+		threshold = sc.opt.GetHotRegionCacheHitsThreshold() *
+			(utils.RegionHeartBeatReportInterval / utils.StoreHeartBeatReportInterval)
+	}
+	return sc.hotStat.GetHotPeerStats(rw, threshold)
 }
 
 // BucketsStats returns hot region's buckets stats.
@@ -404,10 +401,10 @@ func (sc *schedulingController) PauseOrResumeChecker(name string, t int64) error
 }
 
 // AddPendingProcessedRegions adds regions to suspect list.
-func (sc *schedulingController) AddPendingProcessedRegions(regionIDs ...uint64) {
+func (sc *schedulingController) AddPendingProcessedRegions(needCheckLen bool, regionIDs ...uint64) {
 	sc.mu.RLock()
 	defer sc.mu.RUnlock()
-	sc.coordinator.GetCheckerController().AddPendingProcessedRegions(regionIDs...)
+	sc.coordinator.GetCheckerController().AddPendingProcessedRegions(needCheckLen, regionIDs...)
 }
 
 // GetPendingProcessedRegions gets all suspect regions.
@@ -455,7 +452,7 @@ func (sc *schedulingController) getEvictLeaderStores() (evictStores []uint64) {
 	if sc.coordinator == nil {
 		return nil
 	}
-	handler, ok := sc.coordinator.GetSchedulersController().GetSchedulerHandlers()[schedulers.EvictLeaderName]
+	handler, ok := sc.coordinator.GetSchedulersController().GetSchedulerHandlers()[types.EvictLeaderScheduler.String()]
 	if !ok {
 		return
 	}

@@ -18,13 +18,13 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/pkg/utils/keypath"
 )
 
 func TestExtractKeyspaceGroupIDFromKeyspaceGroupMembershipPath(t *testing.T) {
 	re := require.New(t)
 
-	compiledRegexp := endpoint.GetCompiledKeyspaceGroupIDRegexp()
+	compiledRegexp := keypath.GetCompiledKeyspaceGroupIDRegexp()
 
 	rightCases := []struct {
 		path string
@@ -74,15 +74,15 @@ func TestExtractKeyspaceGroupIDFromKeyspaceGroupMembershipPath(t *testing.T) {
 func TestExtractKeyspaceGroupIDFromKeyspaceGroupPrimaryPath(t *testing.T) {
 	re := require.New(t)
 
-	compiledRegexp := endpoint.GetCompiledNonDefaultIDRegexp(uint64(111))
+	compiledRegexp := keypath.GetCompiledNonDefaultIDRegexp()
 
 	rightCases := []struct {
 		path string
 		id   uint32
 	}{
-		{path: "/ms/111/tso/keyspace_groups/election/00001/primary", id: 1},
-		{path: "/ms/111/tso/keyspace_groups/election/12345/primary", id: 12345},
-		{path: "/ms/111/tso/keyspace_groups/election/99999/primary", id: 99999},
+		{path: "/ms/0/tso/keyspace_groups/election/00001/primary", id: 1},
+		{path: "/ms/0/tso/keyspace_groups/election/12345/primary", id: 12345},
+		{path: "/ms/0/tso/keyspace_groups/election/99999/primary", id: 99999},
 	}
 
 	for _, tt := range rightCases {

@@ -17,7 +17,6 @@ package server
 import (
 	"bytes"
 	"context"
-	errorspkg "errors"
 	"fmt"
 	"math/rand"
 	"net/http"
@@ -56,14 +55,13 @@ import (
 	rm_server "github.com/tikv/pd/pkg/mcs/resourcemanager/server"
 	_ "github.com/tikv/pd/pkg/mcs/resourcemanager/server/apis/v1" // init API group
 	_ "github.com/tikv/pd/pkg/mcs/tso/server/apis/v1"             // init tso API group
-	mcs "github.com/tikv/pd/pkg/mcs/utils"
+	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/ratelimit"
 	"github.com/tikv/pd/pkg/replication"
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/hbstream"
 	"github.com/tikv/pd/pkg/schedule/placement"
-	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
@@ -74,6 +72,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/jsonutil"
+	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
@@ -81,10 +80,10 @@ import (
 	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/server/config"
-	"go.etcd.io/etcd/clientv3"
-	"go.etcd.io/etcd/embed"
-	"go.etcd.io/etcd/mvcc/mvccpb"
-	"go.etcd.io/etcd/pkg/types"
+	"go.etcd.io/etcd/api/v3/mvccpb"
+	etcdtypes "go.etcd.io/etcd/client/pkg/v3/types"
+	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.etcd.io/etcd/server/v3/embed"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 )
@@ -92,9 +91,8 @@ import (
 const (
 	serverMetricsInterval = time.Minute
 	// pdRootPath for all pd servers.
-	pdRootPath      = "/pd"
-	pdAPIPrefix     = "/pd/"
-	pdClusterIDPath = "/pd/cluster_id"
+	pdRootPath  = "/pd"
+	pdAPIPrefix = "/pd/"
 	// idAllocPath for idAllocator to save persistent window's end.
 	idAllocPath  = "alloc_id"
 	idAllocLabel = "idalloc"
@@ -157,9 +155,7 @@ type Server struct {
 	electionClient *clientv3.Client
 	// http client
 	httpClient *http.Client
-	// PD cluster ID.
-	clusterID atomic.Uint64
-	rootPath  string
+	rootPath   string
 
 	// Server services.
 	// for id allocator, we can use one allocator for
@@ -302,7 +298,7 @@ func CreateServer(ctx context.Context, cfg *config.Config, services []string, le
 	failpoint.Inject("useGlobalRegistry", func() {
 		s.registry = registry.ServerServiceRegistry
 	})
-	s.registry.RegisterService("MetaStorage", ms_server.NewService[*Server])
+	s.registry.RegisterService("MetaStorage", ms_server.NewService)
 	s.registry.RegisterService("ResourceManager", rm_server.NewService[*Server])
 	// Register the micro services REST path.
 	s.registry.InstallAllRESTHandler(s, etcdCfg.UserHandlers)
@@ -332,7 +328,7 @@ func (s *Server) startEtcd(ctx context.Context) error {
 	}
 
 	// Check cluster ID
-	urlMap, err := types.NewURLsMap(s.cfg.InitialCluster)
+	urlMap, err := etcdtypes.NewURLsMap(s.cfg.InitialCluster)
 	if err != nil {
 		return errs.ErrEtcdURLMap.Wrap(err).GenWithStackByCause()
 	}
@@ -429,18 +425,16 @@ func (s *Server) AddStartCallback(callbacks ...func()) {
 }
 
 func (s *Server) startServer(ctx context.Context) error {
-	clusterID, err := etcdutil.InitClusterID(s.client, pdClusterIDPath)
+	clusterID, err := endpoint.InitClusterID(s.client)
 	if err != nil {
 		log.Error("failed to init cluster id", errs.ZapError(err))
 		return err
 	}
-	s.clusterID.Store(clusterID)
-	log.Info("init cluster id", zap.Uint64("cluster-id", clusterID))
 	// It may lose accuracy if use float64 to store uint64. So we store the cluster id in label.
 	metadataGauge.WithLabelValues(fmt.Sprintf("cluster%d", clusterID)).Set(0)
 	bs.ServerInfoGauge.WithLabelValues(versioninfo.PDReleaseVersion, versioninfo.PDGitHash).Set(float64(time.Now().Unix()))
 
-	s.rootPath = endpoint.PDRootPath(clusterID)
+	s.rootPath = keypath.PDRootPath()
 	s.member.InitMemberInfo(s.cfg.AdvertiseClientUrls, s.cfg.AdvertisePeerUrls, s.Name(), s.rootPath)
 	if err := s.member.SetMemberDeployPath(s.member.ID()); err != nil {
 		return err
@@ -476,38 +470,36 @@ func (s *Server) startServer(ctx context.Context) error {
 	s.tsoDispatcher = tsoutil.NewTSODispatcher(tsoProxyHandleDuration, tsoProxyBatchSize)
 	s.tsoProtoFactory = &tsoutil.TSOProtoFactory{}
 	s.pdProtoFactory = &tsoutil.PDProtoFactory{}
-	if !s.IsAPIServiceMode() {
-		s.tsoAllocatorManager = tso.NewAllocatorManager(s.ctx, mcs.DefaultKeyspaceGroupID, s.member, s.rootPath, s.storage, s, false)
-		// When disabled the Local TSO, we should clean up the Local TSO Allocator's meta info written in etcd if it exists.
-		if !s.cfg.EnableLocalTSO {
-			if err = s.tsoAllocatorManager.CleanUpDCLocation(); err != nil {
-				return err
-			}
+	s.tsoAllocatorManager = tso.NewAllocatorManager(s.ctx, constant.DefaultKeyspaceGroupID, s.member, s.rootPath, s.storage, s)
+	// When disabled the Local TSO, we should clean up the Local TSO Allocator's meta info written in etcd if it exists.
+	if !s.cfg.EnableLocalTSO {
+		if err = s.tsoAllocatorManager.CleanUpDCLocation(); err != nil {
+			return err
 		}
-		if zone, exist := s.cfg.Labels[config.ZoneLabel]; exist && zone != "" && s.cfg.EnableLocalTSO {
-			if err = s.tsoAllocatorManager.SetLocalTSOConfig(zone); err != nil {
-				return err
-			}
+	}
+	if zone, exist := s.cfg.Labels[config.ZoneLabel]; exist && zone != "" && s.cfg.EnableLocalTSO {
+		if err = s.tsoAllocatorManager.SetLocalTSOConfig(zone); err != nil {
+			return err
 		}
 	}
 
 	s.gcSafePointManager = gc.NewSafePointManager(s.storage, s.cfg.PDServerCfg)
 	s.basicCluster = core.NewBasicCluster()
-	s.cluster = cluster.NewRaftCluster(ctx, clusterID, s.GetBasicCluster(), s.GetStorage(), syncer.NewRegionSyncer(s), s.client, s.httpClient)
+	s.cluster = cluster.NewRaftCluster(ctx, s.GetMember(), s.GetBasicCluster(), s.GetStorage(), syncer.NewRegionSyncer(s), s.client, s.httpClient, s.tsoAllocatorManager)
 	keyspaceIDAllocator := id.NewAllocator(&id.AllocatorParams{
 		Client:    s.client,
 		RootPath:  s.rootPath,
-		AllocPath: endpoint.KeyspaceIDAlloc(),
+		AllocPath: keypath.KeyspaceIDAlloc(),
 		Label:     keyspace.AllocLabel,
 		Member:    s.member.MemberValue(),
 		Step:      keyspace.AllocStep,
 	})
 	if s.IsAPIServiceMode() {
-		s.keyspaceGroupManager = keyspace.NewKeyspaceGroupManager(s.ctx, s.storage, s.client, clusterID)
+		s.keyspaceGroupManager = keyspace.NewKeyspaceGroupManager(s.ctx, s.storage, s.client)
 	}
 	s.keyspaceManager = keyspace.NewKeyspaceManager(s.ctx, s.storage, s.cluster, keyspaceIDAllocator, &s.cfg.Keyspace, s.keyspaceGroupManager)
 	s.safePointV2Manager = gc.NewSafePointManagerV2(s.ctx, s.storage, s.storage, s.storage)
-	s.hbStreams = hbstream.NewHeartbeatStreams(ctx, clusterID, "", s.cluster)
+	s.hbStreams = hbstream.NewHeartbeatStreams(ctx, "", s.cluster)
 	// initial hot_region_storage in here.
 
 	s.hotRegionStorage, err = storage.NewHotRegionsStorage(
@@ -712,13 +704,13 @@ func (s *Server) collectEtcdStateMetrics() {
 }
 
 func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.BootstrapResponse, error) {
-	clusterID := s.ClusterID()
+	clusterID := keypath.ClusterID()
 
 	log.Info("try to bootstrap raft cluster",
 		zap.Uint64("cluster-id", clusterID),
 		zap.String("request", fmt.Sprintf("%v", req)))
 
-	if err := checkBootstrapRequest(clusterID, req); err != nil {
+	if err := checkBootstrapRequest(req); err != nil {
 		return nil, err
 	}
 
@@ -732,7 +724,7 @@ func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.BootstrapRe
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}
-	clusterRootPath := endpoint.ClusterRootPath(s.rootPath)
+	clusterRootPath := keypath.ClusterRootPath(s.rootPath)
 
 	var ops []clientv3.Op
 	ops = append(ops, clientv3.OpPut(clusterRootPath, string(clusterValue)))
@@ -740,7 +732,7 @@ func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.BootstrapRe
 	// Set bootstrap time
 	// Because we will write the cluster meta into etcd directly,
 	// so we need to handle the root key path manually here.
-	bootstrapKey := endpoint.AppendToRootPath(s.rootPath, endpoint.ClusterBootstrapTimeKey())
+	bootstrapKey := keypath.AppendToRootPath(s.rootPath, keypath.ClusterBootstrapTimeKey())
 	nano := time.Now().UnixNano()
 
 	timeData := typeutil.Uint64ToBytes(uint64(nano))
@@ -748,7 +740,7 @@ func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.BootstrapRe
 
 	// Set store meta
 	storeMeta := req.GetStore()
-	storePath := endpoint.AppendToRootPath(s.rootPath, endpoint.StorePath(storeMeta.GetId()))
+	storePath := keypath.AppendToRootPath(s.rootPath, keypath.StorePath(storeMeta.GetId()))
 	storeValue, err := storeMeta.Marshal()
 	if err != nil {
 		return nil, errors.WithStack(err)
@@ -761,7 +753,7 @@ func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.BootstrapRe
 	}
 
 	// Set region meta with region id.
-	regionPath := endpoint.AppendToRootPath(s.rootPath, endpoint.RegionPath(req.GetRegion().GetId()))
+	regionPath := keypath.AppendToRootPath(s.rootPath, keypath.RegionPath(req.GetRegion().GetId()))
 	ops = append(ops, clientv3.OpPut(regionPath, string(regionValue)))
 
 	// TODO: we must figure out a better way to handle bootstrap failed, maybe intervene manually.
@@ -941,11 +933,6 @@ func (s *Server) Name() string {
 	return s.cfg.Name
 }
 
-// ClusterID returns the cluster ID of this server.
-func (s *Server) ClusterID() uint64 {
-	return s.clusterID.Load()
-}
-
 // StartTimestamp returns the start timestamp of this server
 func (s *Server) StartTimestamp() int64 {
 	return s.startTimestamp
@@ -984,14 +971,6 @@ func (s *Server) GetConfig() *config.Config {
 	cfg.MicroService = *s.persistOptions.GetMicroServiceConfig().Clone()
 	cfg.LabelProperty = s.persistOptions.GetLabelPropertyConfig().Clone()
 	cfg.ClusterVersion = *s.persistOptions.GetClusterVersion()
-	if s.storage == nil {
-		return cfg
-	}
-	sches, configs, err := s.storage.LoadAllSchedulerConfigs()
-	if err != nil {
-		return cfg
-	}
-	cfg.Schedule.SchedulersPayload = schedulers.ToPayload(sches, configs)
 	return cfg
 }
 
@@ -1056,7 +1035,6 @@ func (s *Server) SetScheduleConfig(cfg sc.ScheduleConfig) error {
 		return err
 	}
 	old := s.persistOptions.GetScheduleConfig()
-	cfg.SchedulersPayload = nil
 	s.persistOptions.SetScheduleConfig(&cfg)
 	if err := s.persistOptions.Persist(s.storage); err != nil {
 		s.persistOptions.SetScheduleConfig(old)
@@ -1430,6 +1408,17 @@ func (s *Server) GetRaftCluster() *cluster.RaftCluster {
 	return s.cluster
 }
 
+// IsServiceIndependent returns whether the service is independent.
+func (s *Server) IsServiceIndependent(name string) bool {
+	if s.mode == APIServiceMode && !s.IsClosed() {
+		if name == constant.TSOServiceName && !cluster.IsTSODynamicSwitchingEnabled {
+			return true
+		}
+		return s.cluster.IsServiceIndependent(name)
+	}
+	return false
+}
+
 // DirectlyGetRaftCluster returns raft cluster directly.
 // Only used for test.
 func (s *Server) DirectlyGetRaftCluster() *cluster.RaftCluster {
@@ -1439,7 +1428,7 @@ func (s *Server) DirectlyGetRaftCluster() *cluster.RaftCluster {
 // GetCluster gets cluster.
 func (s *Server) GetCluster() *metapb.Cluster {
 	return &metapb.Cluster{
-		Id:           s.ClusterID(),
+		Id:           keypath.ClusterID(),
 		MaxPeerCount: uint32(s.persistOptions.GetMaxReplicas()),
 	}
 }
@@ -1465,15 +1454,6 @@ func (s *Server) GetRegions() []*core.RegionInfo {
 		return rc.GetRegions()
 	}
 	return nil
-}
-
-// IsServiceIndependent returns if the service is enabled
-func (s *Server) IsServiceIndependent(name string) bool {
-	rc := s.GetRaftCluster()
-	if rc != nil {
-		return rc.IsServiceIndependent(name)
-	}
-	return false
 }
 
 // GetServiceLabels returns ApiAccessPaths by given service label
@@ -1688,8 +1668,8 @@ func (s *Server) leaderLoop() {
 					log.Info("the pd leader is lost for a long time, try to re-campaign a pd leader with resign etcd leader",
 						zap.Duration("timeout", randomTimeout),
 						zap.Time("last-updated", lastUpdated),
-						zap.String("current-leader-member-id", types.ID(etcdLeader).String()),
-						zap.String("transferee-member-id", types.ID(s.member.ID()).String()),
+						zap.String("current-leader-member-id", etcdtypes.ID(etcdLeader).String()),
+						zap.String("transferee-member-id", etcdtypes.ID(s.member.ID()).String()),
 					)
 					if err := s.member.MoveEtcdLeader(s.ctx, etcdLeader, s.member.ID()); err != nil {
 						log.Error("failed to move etcd leader", errs.ZapError(err))
@@ -1736,29 +1716,6 @@ func (s *Server) campaignLeader() {
 	s.member.KeepLeader(ctx)
 	log.Info(fmt.Sprintf("campaign %s leader ok", s.mode), zap.String("campaign-leader-name", s.Name()))
 
-	if !s.IsAPIServiceMode() {
-		allocator, err := s.tsoAllocatorManager.GetAllocator(tso.GlobalDCLocation)
-		if err != nil {
-			log.Error("failed to get the global TSO allocator", errs.ZapError(err))
-			return
-		}
-		log.Info("initializing the global TSO allocator")
-		if err := allocator.Initialize(0); err != nil {
-			log.Error("failed to initialize the global TSO allocator", errs.ZapError(err))
-			return
-		}
-		defer func() {
-			s.tsoAllocatorManager.ResetAllocatorGroup(tso.GlobalDCLocation)
-			failpoint.Inject("updateAfterResetTSO", func() {
-				if err = allocator.UpdateTSO(); !errorspkg.Is(err, errs.ErrUpdateTimestamp) {
-					log.Panic("the tso update after reset should return ErrUpdateTimestamp as expected", zap.Error(err))
-				}
-				if allocator.IsInitialize() {
-					log.Panic("the allocator should be uninitialized after reset")
-				}
-			})
-		}()
-	}
 	if err := s.reloadConfigFromKV(); err != nil {
 		log.Error("failed to reload configuration", errs.ZapError(err))
 		return
@@ -1810,7 +1767,7 @@ func (s *Server) campaignLeader() {
 	CheckPDVersionWithClusterVersion(s.persistOptions)
 	log.Info(fmt.Sprintf("%s leader is ready to serve", s.mode), zap.String("leader-name", s.Name()))
 
-	leaderTicker := time.NewTicker(mcs.LeaderTickInterval)
+	leaderTicker := time.NewTicker(constant.LeaderTickInterval)
 	defer leaderTicker.Stop()
 
 	for {
@@ -1983,7 +1940,7 @@ func (s *Server) IsTTLConfigExist(key string) bool {
 // and is deleted after BR EBS restore is done.
 func (s *Server) MarkSnapshotRecovering() error {
 	log.Info("mark snapshot recovering")
-	markPath := endpoint.AppendToRootPath(s.rootPath, recoveringMarkPath)
+	markPath := keypath.AppendToRootPath(s.rootPath, recoveringMarkPath)
 	// the value doesn't matter, set to a static string
 	_, err := kv.NewSlowLogTxn(s.client).
 		If(clientv3.Compare(clientv3.CreateRevision(markPath), "=", 0)).
@@ -1995,7 +1952,7 @@ func (s *Server) MarkSnapshotRecovering() error {
 
 // IsSnapshotRecovering check whether recovering-mark marked
 func (s *Server) IsSnapshotRecovering(ctx context.Context) (bool, error) {
-	markPath := endpoint.AppendToRootPath(s.rootPath, recoveringMarkPath)
+	markPath := keypath.AppendToRootPath(s.rootPath, recoveringMarkPath)
 	resp, err := s.client.Get(ctx, markPath)
 	if err != nil {
 		return false, err
@@ -2006,7 +1963,7 @@ func (s *Server) IsSnapshotRecovering(ctx context.Context) (bool, error) {
 // UnmarkSnapshotRecovering unmark recovering mark
 func (s *Server) UnmarkSnapshotRecovering(ctx context.Context) error {
 	log.Info("unmark snapshot recovering")
-	markPath := endpoint.AppendToRootPath(s.rootPath, recoveringMarkPath)
+	markPath := keypath.AppendToRootPath(s.rootPath, recoveringMarkPath)
 	_, err := s.client.Delete(ctx, markPath)
 	// if other client already unmarked, return success too
 	return err
@@ -2017,7 +1974,7 @@ func (s *Server) UnmarkSnapshotRecovering(ctx context.Context) error {
 func (s *Server) GetServicePrimaryAddr(ctx context.Context, serviceName string) (string, bool) {
 	ticker := time.NewTicker(retryIntervalGetServicePrimary)
 	defer ticker.Stop()
-	for i := 0; i < maxRetryTimesGetServicePrimary; i++ {
+	for range maxRetryTimesGetServicePrimary {
 		if v, ok := s.servicePrimaryMap.Load(serviceName); ok {
 			return v.(string), true
 		}
@@ -2039,16 +1996,16 @@ func (s *Server) SetServicePrimaryAddr(serviceName, addr string) {
 }
 
 func (s *Server) initTSOPrimaryWatcher() {
-	serviceName := mcs.TSOServiceName
-	tsoRootPath := endpoint.TSOSvcRootPath(s.ClusterID())
-	tsoServicePrimaryKey := endpoint.KeyspaceGroupPrimaryPath(tsoRootPath, mcs.DefaultKeyspaceGroupID)
+	serviceName := constant.TSOServiceName
+	tsoRootPath := keypath.TSOSvcRootPath()
+	tsoServicePrimaryKey := keypath.KeyspaceGroupPrimaryPath(tsoRootPath, constant.DefaultKeyspaceGroupID)
 	s.tsoPrimaryWatcher = s.initServicePrimaryWatcher(serviceName, tsoServicePrimaryKey)
 	s.tsoPrimaryWatcher.StartWatchLoop()
 }
 
 func (s *Server) initSchedulingPrimaryWatcher() {
-	serviceName := mcs.SchedulingServiceName
-	primaryKey := endpoint.SchedulingPrimaryPath(s.ClusterID())
+	serviceName := constant.SchedulingServiceName
+	primaryKey := keypath.SchedulingPrimaryPath()
 	s.schedulingPrimaryWatcher = s.initServicePrimaryWatcher(serviceName, primaryKey)
 	s.schedulingPrimaryWatcher.StartWatchLoop()
 }

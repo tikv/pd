@@ -40,8 +40,9 @@ import (
 	scheduling "github.com/tikv/pd/pkg/mcs/scheduling/server"
 	sc "github.com/tikv/pd/pkg/mcs/scheduling/server/config"
 	tso "github.com/tikv/pd/pkg/mcs/tso/server"
-	"github.com/tikv/pd/pkg/mcs/utils"
+	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/mock/mockid"
+	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/versioninfo"
@@ -50,6 +51,7 @@ import (
 )
 
 var (
+	// TestDialClient is a http client for test.
 	TestDialClient = &http.Client{
 		Transport: &http.Transport{
 			DisableKeepAlives: true,
@@ -67,7 +69,7 @@ func SetRangePort(start, end int) {
 		dialer := &net.Dialer{}
 		randomPort := strconv.Itoa(rand.Intn(portRange[1]-portRange[0]) + portRange[0])
 		testPortMutex.Lock()
-		for i := 0; i < 10; i++ {
+		for range 10 {
 			if _, ok := testPortMap[randomPort]; !ok {
 				break
 			}
@@ -110,6 +112,7 @@ func StartSingleResourceManagerTestServer(ctx context.Context, re *require.Asser
 	cfg := rm.NewConfig()
 	cfg.BackendEndpoints = backendEndpoints
 	cfg.ListenAddr = listenAddrs
+	cfg.Name = cfg.ListenAddr
 	cfg, err := rm.GenerateConfig(cfg)
 	re.NoError(err)
 
@@ -127,6 +130,7 @@ func StartSingleTSOTestServerWithoutCheck(ctx context.Context, re *require.Asser
 	cfg := tso.NewConfig()
 	cfg.BackendEndpoints = backendEndpoints
 	cfg.ListenAddr = listenAddrs
+	cfg.Name = cfg.ListenAddr
 	cfg, err := tso.GenerateConfig(cfg)
 	re.NoError(err)
 	// Setup the logger.
@@ -164,6 +168,7 @@ func StartSingleSchedulingTestServer(ctx context.Context, re *require.Assertions
 	cfg := sc.NewConfig()
 	cfg.BackendEndpoints = backendEndpoints
 	cfg.ListenAddr = listenAddrs
+	cfg.Name = cfg.ListenAddr
 	cfg, err := scheduling.GenerateConfig(cfg)
 	re.NoError(err)
 
@@ -214,7 +219,7 @@ func MustPutStore(re *require.Assertions, cluster *TestCluster, store *metapb.St
 	svr := cluster.GetLeaderServer().GetServer()
 	grpcServer := &server.GrpcServer{Server: svr}
 	_, err := grpcServer.PutStore(context.Background(), &pdpb.PutStoreRequest{
-		Header: &pdpb.RequestHeader{ClusterId: svr.ClusterID()},
+		Header: &pdpb.RequestHeader{ClusterId: keypath.ClusterID()},
 		Store:  store,
 	})
 	re.NoError(err)
@@ -283,11 +288,15 @@ func MustReportBuckets(re *require.Assertions, cluster *TestCluster, regionID ui
 	return buckets
 }
 
+// SchedulerMode is used for test purpose.
 type SchedulerMode int
 
 const (
+	// Both represents both PD mode and API mode.
 	Both SchedulerMode = iota
+	// PDMode represents PD mode.
 	PDMode
+	// APIMode represents API mode.
 	APIMode
 )
 
@@ -363,16 +372,6 @@ func (s *SchedulingTestEnvironment) RunTestInAPIMode(test func(*TestCluster)) {
 	test(s.clusters[APIMode])
 }
 
-// RunFuncInTwoModes is to run func in two modes.
-func (s *SchedulingTestEnvironment) RunFuncInTwoModes(f func(*TestCluster)) {
-	if c, ok := s.clusters[PDMode]; ok {
-		f(c)
-	}
-	if c, ok := s.clusters[APIMode]; ok {
-		f(c)
-	}
-}
-
 // Cleanup is to cleanup the environment.
 func (s *SchedulingTestEnvironment) Cleanup() {
 	for _, cluster := range s.clusters {
@@ -414,7 +413,7 @@ func (s *SchedulingTestEnvironment) startCluster(m SchedulerMode) {
 		cluster.SetSchedulingCluster(tc)
 		time.Sleep(200 * time.Millisecond) // wait for scheduling cluster to update member
 		testutil.Eventually(re, func() bool {
-			return cluster.GetLeaderServer().GetServer().GetRaftCluster().IsServiceIndependent(utils.SchedulingServiceName)
+			return cluster.GetLeaderServer().GetServer().IsServiceIndependent(constant.SchedulingServiceName)
 		})
 		s.clusters[APIMode] = cluster
 	}
@@ -433,7 +432,7 @@ func (i *idAllocator) alloc() uint64 {
 func InitRegions(regionLen int) []*core.RegionInfo {
 	allocator := &idAllocator{allocator: mockid.NewIDAllocator()}
 	regions := make([]*core.RegionInfo, 0, regionLen)
-	for i := 0; i < regionLen; i++ {
+	for i := range regionLen {
 		r := &metapb.Region{
 			Id: allocator.alloc(),
 			RegionEpoch: &metapb.RegionEpoch{

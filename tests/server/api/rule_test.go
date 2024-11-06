@@ -74,7 +74,7 @@ func (suite *ruleTestSuite) TearDownTest() {
 		err = tu.CheckPostJSON(tests.TestDialClient, urlPrefix+"/pd/api/v1/config/placement-rule", data, tu.StatusOK(re))
 		re.NoError(err)
 	}
-	suite.env.RunFuncInTwoModes(cleanFunc)
+	suite.env.RunTestBasedOnMode(cleanFunc)
 }
 
 func (suite *ruleTestSuite) TestSet() {
@@ -173,7 +173,7 @@ func (suite *ruleTestSuite) checkSet(cluster *tests.TestCluster) {
 		if testCase.success {
 			err = tu.CheckPostJSON(tests.TestDialClient, urlPrefix+"/rule", testCase.rawData, tu.StatusOK(re))
 			popKeyRangeMap := map[string]struct{}{}
-			for i := 0; i < len(testCase.popKeyRange)/2; i++ {
+			for range len(testCase.popKeyRange) / 2 {
 				v, got := leaderServer.GetRaftCluster().PopOneSuspectKeyRange()
 				re.True(got)
 				popKeyRangeMap[hex.EncodeToString(v[0])] = struct{}{}
@@ -614,7 +614,7 @@ func (suite *ruleTestSuite) checkDelete(cluster *tests.TestCluster) {
 		re.NoError(err)
 		if len(testCase.popKeyRange) > 0 {
 			popKeyRangeMap := map[string]struct{}{}
-			for i := 0; i < len(testCase.popKeyRange)/2; i++ {
+			for range len(testCase.popKeyRange) / 2 {
 				v, got := leaderServer.GetRaftCluster().PopOneSuspectKeyRange()
 				re.True(got)
 				popKeyRangeMap[hex.EncodeToString(v[0])] = struct{}{}
@@ -985,13 +985,7 @@ func (suite *ruleTestSuite) checkLeaderAndVoter(cluster *tests.TestCluster) {
 				tu.StatusOK(re), tu.ExtractJSON(re, &respBundle))
 			re.NoError(err)
 			re.Len(respBundle, 1)
-			if bundle[0].Rules[0].Role == placement.Leader {
-				return respBundle[0].Rules[0].Role == placement.Leader
-			}
-			if bundle[0].Rules[0].Role == placement.Voter {
-				return respBundle[0].Rules[0].Role == placement.Voter
-			}
-			return false
+			return compareBundle(respBundle[0], bundle[0])
 		})
 	}
 }
@@ -1142,7 +1136,7 @@ func (suite *ruleTestSuite) checkConcurrencyWith(cluster *tests.TestCluster,
 			bundle := genBundle(i)
 			data, err := json.Marshal(bundle)
 			re.NoError(err)
-			for j := 0; j < 10; j++ {
+			for range 10 {
 				expectResult.Lock()
 				err = tu.CheckPostJSON(tests.TestDialClient, urlPrefix+"/config/placement-rule", data, tu.StatusOK(re))
 				re.NoError(err)
@@ -1182,7 +1176,7 @@ func (suite *ruleTestSuite) checkLargeRules(cluster *tests.TestCluster) {
 				Rules: make([]*placement.Rule, 0),
 			},
 		}
-		for i := 0; i < num; i++ {
+		for i := range num {
 			bundle[0].Rules = append(bundle[0].Rules, &placement.Rule{
 				ID: strconv.Itoa(i), Index: i, Role: placement.Voter, Count: 1, GroupID: "1",
 				StartKey: []byte(strconv.Itoa(i)), EndKey: []byte(strconv.Itoa(i + 1)),

@@ -23,7 +23,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
-	"github.com/tikv/pd/pkg/mcs/utils"
+	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server/apiv2/handlers"
 	"github.com/tikv/pd/tests"
@@ -73,8 +73,8 @@ func (suite *keyspaceTestSuite) TestCreateLoadKeyspace() {
 		loaded := mustLoadKeyspaces(re, suite.server, created.Name)
 		re.Equal(created, loaded)
 	}
-	defaultKeyspace := mustLoadKeyspaces(re, suite.server, utils.DefaultKeyspaceName)
-	re.Equal(utils.DefaultKeyspaceName, defaultKeyspace.Name)
+	defaultKeyspace := mustLoadKeyspaces(re, suite.server, constant.DefaultKeyspaceName)
+	re.Equal(constant.DefaultKeyspaceName, defaultKeyspace.Name)
 	re.Equal(keyspacepb.KeyspaceState_ENABLED, defaultKeyspace.State)
 }
 
@@ -109,7 +109,7 @@ func (suite *keyspaceTestSuite) TestUpdateKeyspaceState() {
 		success, disabledAgain := sendUpdateStateRequest(re, suite.server, created.Name, &handlers.UpdateStateParam{State: "disabled"})
 		re.True(success)
 		re.Equal(disabled, disabledAgain)
-		// Tombstoning a DISABLED keyspace should not be allowed.
+		// Tombstone a DISABLED keyspace should not be allowed.
 		success, _ = sendUpdateStateRequest(re, suite.server, created.Name, &handlers.UpdateStateParam{State: "tombstone"})
 		re.False(success)
 		// Archiving a DISABLED keyspace should be allowed.
@@ -119,13 +119,13 @@ func (suite *keyspaceTestSuite) TestUpdateKeyspaceState() {
 		// Enabling an ARCHIVED keyspace is not allowed.
 		success, _ = sendUpdateStateRequest(re, suite.server, created.Name, &handlers.UpdateStateParam{State: "enabled"})
 		re.False(success)
-		// Tombstoning an ARCHIVED keyspace is allowed.
+		// Tombstone an ARCHIVED keyspace is allowed.
 		success, tombstone := sendUpdateStateRequest(re, suite.server, created.Name, &handlers.UpdateStateParam{State: "tombstone"})
 		re.True(success)
 		re.Equal(keyspacepb.KeyspaceState_TOMBSTONE, tombstone.State)
 	}
 	// Changing default keyspace's state is NOT allowed.
-	success, _ := sendUpdateStateRequest(re, suite.server, utils.DefaultKeyspaceName, &handlers.UpdateStateParam{State: "disabled"})
+	success, _ := sendUpdateStateRequest(re, suite.server, constant.DefaultKeyspaceName, &handlers.UpdateStateParam{State: "disabled"})
 	re.False(success)
 }
 
@@ -139,7 +139,7 @@ func (suite *keyspaceTestSuite) TestLoadRangeKeyspace() {
 	for i, created := range keyspaces {
 		re.Equal(created, loadResponse.Keyspaces[i+1].KeyspaceMeta)
 	}
-	re.Equal(utils.DefaultKeyspaceName, loadResponse.Keyspaces[0].Name)
+	re.Equal(constant.DefaultKeyspaceName, loadResponse.Keyspaces[0].Name)
 	re.Equal(keyspacepb.KeyspaceState_ENABLED, loadResponse.Keyspaces[0].State)
 }
 
@@ -149,7 +149,7 @@ func mustMakeTestKeyspaces(re *require.Assertions, server *tests.TestServer, cou
 		"config2": "200",
 	}
 	resultMeta := make([]*keyspacepb.KeyspaceMeta, count)
-	for i := 0; i < count; i++ {
+	for i := range count {
 		createRequest := &handlers.CreateKeyspaceParams{
 			Name:   fmt.Sprintf("test_keyspace_%d", i),
 			Config: testConfig,

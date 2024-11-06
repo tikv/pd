@@ -22,7 +22,9 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/suite"
+	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/response"
+	"github.com/tikv/pd/pkg/utils/keypath"
 	tu "github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
@@ -277,19 +279,47 @@ func (suite *strictlyLabelsStoreTestSuite) TestStoreMatch() {
 			valid:       false,
 			expectError: "key matching the label was not found",
 		},
+		{
+			store: &metapb.Store{
+				Id:      3,
+				Address: "tiflash1",
+				State:   metapb.StoreState_Up,
+				Labels: []*metapb.StoreLabel{
+					{
+						Key:   "zone",
+						Value: "us-west-1",
+					},
+					{
+						Key:   "disk",
+						Value: "ssd",
+					},
+					{
+						Key:   core.EngineKey,
+						Value: core.EngineTiFlash,
+					},
+				},
+				Version: "3.0.0",
+			},
+			valid:       true,
+			expectError: "placement rules is disabled",
+		},
 	}
 
 	for _, testCase := range testCases {
 		resp, err := suite.grpcSvr.PutStore(context.Background(), &pdpb.PutStoreRequest{
-			Header: &pdpb.RequestHeader{ClusterId: suite.svr.ClusterID()},
+			Header: &pdpb.RequestHeader{ClusterId: keypath.ClusterID()},
 			Store: &metapb.Store{
 				Id:      testCase.store.Id,
-				Address: fmt.Sprintf("tikv%d", testCase.store.Id),
+				Address: testCase.store.Address,
 				State:   testCase.store.State,
 				Labels:  testCase.store.Labels,
 				Version: testCase.store.Version,
 			},
 		})
+		if testCase.store.Address == "tiflash1" {
+			re.Contains(resp.GetHeader().GetError().String(), testCase.expectError)
+			continue
+		}
 		if testCase.valid {
 			re.NoError(err)
 			re.Nil(resp.GetHeader().GetError())
@@ -306,10 +336,10 @@ func (suite *strictlyLabelsStoreTestSuite) TestStoreMatch() {
 		tu.StatusOK(re)))
 	for _, testCase := range testCases {
 		resp, err := suite.grpcSvr.PutStore(context.Background(), &pdpb.PutStoreRequest{
-			Header: &pdpb.RequestHeader{ClusterId: suite.svr.ClusterID()},
+			Header: &pdpb.RequestHeader{ClusterId: keypath.ClusterID()},
 			Store: &metapb.Store{
 				Id:      testCase.store.Id,
-				Address: fmt.Sprintf("tikv%d", testCase.store.Id),
+				Address: testCase.store.Address,
 				State:   testCase.store.State,
 				Labels:  testCase.store.Labels,
 				Version: testCase.store.Version,

@@ -17,6 +17,7 @@ package gctuner
 import (
 	"math"
 	"runtime/debug"
+	"sync/atomic"
 	"time"
 
 	"github.com/pingcap/failpoint"
@@ -24,7 +25,6 @@ import (
 	util "github.com/tikv/pd/pkg/gogc"
 	"github.com/tikv/pd/pkg/memory"
 	"github.com/tikv/pd/pkg/utils/logutil"
-	atomicutil "go.uber.org/atomic"
 	"go.uber.org/zap"
 )
 
@@ -35,10 +35,10 @@ var GlobalMemoryLimitTuner = &memoryLimitTuner{}
 // So we can change memory limit dynamically to avoid frequent GC when memory usage is greater than the limit.
 type memoryLimitTuner struct {
 	finalizer                    *finalizer
-	isTuning                     atomicutil.Bool
-	percentage                   atomicutil.Float64
-	waitingReset                 atomicutil.Bool
-	nextGCTriggeredByMemoryLimit atomicutil.Bool
+	isTuning                     atomic.Bool
+	percentage                   atomic.Value
+	waitingReset                 atomic.Bool
+	nextGCTriggeredByMemoryLimit atomic.Bool
 }
 
 // fallbackPercentage indicates the fallback memory limit percentage when turning.
@@ -74,8 +74,6 @@ func (t *memoryLimitTuner) tuning() {
 		if t.nextGCTriggeredByMemoryLimit.Load() && t.waitingReset.CompareAndSwap(false, true) {
 			go func() {
 				defer logutil.LogPanic()
-				memory.MemoryLimitGCLast.Store(time.Now())
-				memory.MemoryLimitGCTotal.Add(1)
 				setMemoryLimit(t.calcMemoryLimit(fallbackPercentage))
 				resetInterval := 1 * time.Minute // Wait 1 minute and set back, to avoid frequent GC
 				failpoint.Inject("testMemoryLimitTuner", func(val failpoint.Value) {
@@ -89,12 +87,10 @@ func (t *memoryLimitTuner) tuning() {
 					continue
 				}
 			}()
-			memory.TriggerMemoryLimitGC.Store(true)
 		}
 		t.nextGCTriggeredByMemoryLimit.Store(true)
 	} else {
 		t.nextGCTriggeredByMemoryLimit.Store(false)
-		memory.TriggerMemoryLimitGC.Store(false)
 	}
 }
 
@@ -117,7 +113,7 @@ func (t *memoryLimitTuner) SetPercentage(percentage float64) {
 
 // GetPercentage get the percentage from memory limit tuner.
 func (t *memoryLimitTuner) GetPercentage() float64 {
-	return t.percentage.Load()
+	return t.percentage.Load().(float64)
 }
 
 // UpdateMemoryLimit updates the memory limit.

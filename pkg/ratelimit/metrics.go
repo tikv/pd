@@ -24,35 +24,35 @@ const (
 )
 
 var (
-	RunnerTaskMaxWaitingDuration = prometheus.NewGaugeVec(
+	runnerTaskMaxWaitingDuration = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: "pd",
 			Subsystem: "ratelimit",
 			Name:      "runner_task_max_waiting_duration_seconds",
 			Help:      "The duration of tasks waiting in the runner.",
 		}, []string{nameStr})
-	RunnerPendingTasks = prometheus.NewGaugeVec(
+	runnerPendingTasks = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: "pd",
 			Subsystem: "ratelimit",
 			Name:      "runner_pending_tasks",
 			Help:      "The number of pending tasks in the runner.",
 		}, []string{nameStr, taskStr})
-	RunnerFailedTasks = prometheus.NewCounterVec(
+	runnerFailedTasks = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: "pd",
 			Subsystem: "ratelimit",
 			Name:      "runner_failed_tasks_total",
 			Help:      "The number of failed tasks in the runner.",
 		}, []string{nameStr, taskStr})
-	RunnerSucceededTasks = prometheus.NewCounterVec(
+	runnerSucceededTasks = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: "pd",
 			Subsystem: "ratelimit",
 			Name:      "runner_success_tasks_total",
 			Help:      "The number of tasks in the runner.",
 		}, []string{nameStr, taskStr})
-	RunnerTaskExecutionDuration = prometheus.NewHistogramVec(
+	runnerTaskExecutionDuration = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: "pd",
 			Subsystem: "ratelimit",
@@ -63,9 +63,9 @@ var (
 )
 
 func init() {
-	prometheus.MustRegister(RunnerTaskMaxWaitingDuration)
-	prometheus.MustRegister(RunnerPendingTasks)
-	prometheus.MustRegister(RunnerFailedTasks)
-	prometheus.MustRegister(RunnerTaskExecutionDuration)
-	prometheus.MustRegister(RunnerSucceededTasks)
+	prometheus.MustRegister(runnerTaskMaxWaitingDuration)
+	prometheus.MustRegister(runnerPendingTasks)
+	prometheus.MustRegister(runnerFailedTasks)
+	prometheus.MustRegister(runnerTaskExecutionDuration)
+	prometheus.MustRegister(runnerSucceededTasks)
 }

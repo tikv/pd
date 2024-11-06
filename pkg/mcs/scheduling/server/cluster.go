@@ -27,11 +27,13 @@ import (
 	"github.com/tikv/pd/pkg/schedule/scatter"
 	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/schedule/splitter"
+	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/statistics/buckets"
 	"github.com/tikv/pd/pkg/statistics/utils"
 	"github.com/tikv/pd/pkg/storage"
+	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"go.uber.org/zap"
 )
@@ -52,7 +54,6 @@ type Cluster struct {
 	coordinator       *schedule.Coordinator
 	checkMembershipCh chan struct{}
 	apiServerLeader   atomic.Value
-	clusterID         uint64
 	running           atomic.Bool
 
 	// heartbeatRunner is used to process the subtree update task asynchronously.
@@ -77,7 +78,14 @@ const (
 var syncRunner = ratelimit.NewSyncRunner()
 
 // NewCluster creates a new cluster.
-func NewCluster(parentCtx context.Context, persistConfig *config.PersistConfig, storage storage.Storage, basicCluster *core.BasicCluster, hbStreams *hbstream.HeartbeatStreams, clusterID uint64, checkMembershipCh chan struct{}) (*Cluster, error) {
+func NewCluster(
+	parentCtx context.Context,
+	persistConfig *config.PersistConfig,
+	storage storage.Storage,
+	basicCluster *core.BasicCluster,
+	hbStreams *hbstream.HeartbeatStreams,
+	checkMembershipCh chan struct{},
+) (*Cluster, error) {
 	ctx, cancel := context.WithCancel(parentCtx)
 	labelerManager, err := labeler.NewRegionLabeler(ctx, storage, regionLabelGCInterval)
 	if err != nil {
@@ -92,11 +100,10 @@ func NewCluster(parentCtx context.Context, persistConfig *config.PersistConfig, 
 		ruleManager:       ruleManager,
 		labelerManager:    labelerManager,
 		persistConfig:     persistConfig,
-		hotStat:           statistics.NewHotStat(ctx),
+		hotStat:           statistics.NewHotStat(ctx, basicCluster),
 		labelStats:        statistics.NewLabelStatistics(),
 		regionStats:       statistics.NewRegionStatistics(basicCluster, persistConfig, ruleManager),
 		storage:           storage,
-		clusterID:         clusterID,
 		checkMembershipCh: checkMembershipCh,
 
 		heartbeatRunner: ratelimit.NewConcurrentRunner(heartbeatTaskRunner, ratelimit.NewConcurrencyLimiter(uint64(runtime.NumCPU()*2)), time.Minute),
@@ -183,21 +190,18 @@ func (c *Cluster) GetHotPeerStat(rw utils.RWType, regionID, storeID uint64) *sta
 	return c.hotStat.GetHotPeerStat(rw, regionID, storeID)
 }
 
-// RegionReadStats returns hot region's read stats.
+// GetHotPeerStats returns the read or write statistics for hot regions.
+// It returns a map where the keys are store IDs and the values are slices of HotPeerStat.
 // The result only includes peers that are hot enough.
-// RegionStats is a thread-safe method
-func (c *Cluster) RegionReadStats() map[uint64][]*statistics.HotPeerStat {
-	// As read stats are reported by store heartbeat, the threshold needs to be adjusted.
-	threshold := c.persistConfig.GetHotRegionCacheHitsThreshold() *
-		(utils.RegionHeartBeatReportInterval / utils.StoreHeartBeatReportInterval)
-	return c.hotStat.RegionStats(utils.Read, threshold)
-}
-
-// RegionWriteStats returns hot region's write stats.
-// The result only includes peers that are hot enough.
-func (c *Cluster) RegionWriteStats() map[uint64][]*statistics.HotPeerStat {
-	// RegionStats is a thread-safe method
-	return c.hotStat.RegionStats(utils.Write, c.persistConfig.GetHotRegionCacheHitsThreshold())
+// GetHotPeerStats is a thread-safe method.
+func (c *Cluster) GetHotPeerStats(rw utils.RWType) map[uint64][]*statistics.HotPeerStat {
+	threshold := c.persistConfig.GetHotRegionCacheHitsThreshold()
+	if rw == utils.Read {
+		// As read stats are reported by store heartbeat, the threshold needs to be adjusted.
+		threshold = c.persistConfig.GetHotRegionCacheHitsThreshold() *
+			(utils.RegionHeartBeatReportInterval / utils.StoreHeartBeatReportInterval)
+	}
+	return c.hotStat.GetHotPeerStats(rw, threshold)
 }
 
 // BucketsStats returns hot region's buckets stats.
@@ -227,7 +231,7 @@ func (c *Cluster) AllocID() (uint64, error) {
 	}
 	ctx, cancel := context.WithTimeout(c.ctx, requestTimeout)
 	defer cancel()
-	resp, err := client.AllocID(ctx, &pdpb.AllocIDRequest{Header: &pdpb.RequestHeader{ClusterId: c.clusterID}})
+	resp, err := client.AllocID(ctx, &pdpb.AllocIDRequest{Header: &pdpb.RequestHeader{ClusterId: keypath.ClusterID()}})
 	if err != nil {
 		c.triggerMembershipCheck()
 		return 0, err
@@ -308,11 +312,12 @@ func (c *Cluster) updateScheduler() {
 		)
 		// Create the newly added schedulers.
 		for _, scheduler := range latestSchedulersConfig {
+			schedulerType := types.ConvertOldStrToType[scheduler.Type]
 			s, err := schedulers.CreateScheduler(
-				scheduler.Type,
+				schedulerType,
 				c.coordinator.GetOperatorController(),
 				c.storage,
-				schedulers.ConfigSliceDecoder(scheduler.Type, scheduler.Args),
+				schedulers.ConfigSliceDecoder(schedulerType, scheduler.Args),
 				schedulersController.RemoveScheduler,
 			)
 			if err != nil {
@@ -343,8 +348,9 @@ func (c *Cluster) updateScheduler() {
 		// Remove the deleted schedulers.
 		for _, name := range schedulersController.GetSchedulerNames() {
 			scheduler := schedulersController.GetScheduler(name)
+			oldType := types.SchedulerTypeCompatibleMap[scheduler.GetType()]
 			if slice.AnyOf(latestSchedulersConfig, func(i int) bool {
-				return latestSchedulersConfig[i].Type == scheduler.GetType()
+				return latestSchedulersConfig[i].Type == oldType
 			}) {
 				continue
 			}
@@ -376,13 +382,12 @@ func (c *Cluster) waitSchedulersInitialized() {
 	}
 }
 
-// TODO: implement the following methods
-
 // UpdateRegionsLabelLevelStats updates the status of the region label level by types.
 func (c *Cluster) UpdateRegionsLabelLevelStats(regions []*core.RegionInfo) {
 	for _, region := range regions {
 		c.labelStats.Observe(region, c.getStoresWithoutLabelLocked(region, core.EngineKey, core.EngineTiFlash), c.persistConfig.GetLocationLabels())
 	}
+	c.labelStats.ClearDefunctRegions()
 }
 
 func (c *Cluster) getStoresWithoutLabelLocked(region *core.RegionInfo, key, value string) []*core.StoreInfo {
@@ -628,7 +633,7 @@ func (c *Cluster) processRegionHeartbeat(ctx *core.MetaProcessContext, region *c
 				regionID,
 				ratelimit.ObserveRegionStatsAsync,
 				func(ctx context.Context) {
-					cluster.Collect(ctx, c, region, hasRegionStats)
+					cluster.Collect(ctx, c, region)
 				},
 			)
 		}
@@ -676,14 +681,17 @@ func (c *Cluster) processRegionHeartbeat(ctx *core.MetaProcessContext, region *c
 		)
 	}
 	tracer.OnSaveCacheFinished()
-	// handle region stats
-	ctx.TaskRunner.RunTask(
-		regionID,
-		ratelimit.CollectRegionStatsAsync,
-		func(ctx context.Context) {
-			cluster.Collect(ctx, c, region, hasRegionStats)
-		},
-	)
+	if hasRegionStats {
+		// handle region stats
+		ctx.TaskRunner.RunTask(
+			regionID,
+			ratelimit.CollectRegionStatsAsync,
+			func(ctx context.Context) {
+				cluster.Collect(ctx, c, region)
+			},
+		)
+	}
+
 	tracer.OnCollectRegionStatsFinished()
 	return nil
 }

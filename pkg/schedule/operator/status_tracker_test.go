@@ -185,7 +185,7 @@ func TestAdditionalInfoConcurrent(t *testing.T) {
 	op := NewOperator("test", "test", 0, nil, OpAdmin, 0)
 
 	var wg sync.WaitGroup
-	for i := 0; i < 1000; i++ {
+	for i := range 1000 {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()

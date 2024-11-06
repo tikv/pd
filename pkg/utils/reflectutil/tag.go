@@ -23,7 +23,7 @@ import (
 // If we have both "a.c" and "b.c" config items, for a given c, it's hard for us to decide which config item it represents.
 // We'd better to naming a config item without duplication.
 func FindJSONFullTagByChildTag(t reflect.Type, tag string) string {
-	for i := 0; i < t.NumField(); i++ {
+	for i := range t.NumField() {
 		field := t.Field(i)
 
 		column := field.Tag.Get("json")
@@ -46,7 +46,7 @@ func FindJSONFullTagByChildTag(t reflect.Type, tag string) string {
 // FindSameFieldByJSON is used to check whether there is same field between `m` and `v`
 func FindSameFieldByJSON(v any, m map[string]any) bool {
 	t := reflect.TypeOf(v).Elem()
-	for i := 0; i < t.NumField(); i++ {
+	for i := range t.NumField() {
 		jsonTag := t.Field(i).Tag.Get("json")
 		if i := strings.Index(jsonTag, ","); i != -1 { // trim 'foobar,string' to 'foobar'
 			jsonTag = jsonTag[:i]
@@ -66,13 +66,15 @@ func FindFieldByJSONTag(t reflect.Type, tags []string) reflect.Type {
 	if t.Kind() != reflect.Struct {
 		return nil
 	}
-	for i := 0; i < t.NumField(); i++ {
+	tag := tags[0]
+	tagRemain := tags[1:]
+	for i := range t.NumField() {
 		jsonTag := t.Field(i).Tag.Get("json")
-		if i := strings.Index(jsonTag, ","); i != -1 { // trim 'foobar,string' to 'foobar'
-			jsonTag = jsonTag[:i]
+		if j := strings.Index(jsonTag, ","); j != -1 { // trim 'foobar,string' to 'foobar'
+			jsonTag = jsonTag[:j]
 		}
-		if jsonTag == tags[0] {
-			return FindFieldByJSONTag(t.Field(i).Type, tags[1:])
+		if jsonTag == tag {
+			return FindFieldByJSONTag(t.Field(i).Type, tagRemain)
 		}
 	}
 	return nil

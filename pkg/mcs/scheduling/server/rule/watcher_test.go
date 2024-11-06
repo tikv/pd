@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"strconv"
 	"testing"
 	"time"
@@ -28,8 +29,9 @@ import (
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
-	"go.etcd.io/etcd/clientv3"
-	"go.etcd.io/etcd/embed"
+	"github.com/tikv/pd/pkg/utils/keypath"
+	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.etcd.io/etcd/server/v3/embed"
 )
 
 const (
@@ -64,10 +66,10 @@ func runWatcherLoadLabelRule(ctx context.Context, re *require.Assertions, client
 	rw := &Watcher{
 		ctx:                   ctx,
 		cancel:                cancel,
-		rulesPathPrefix:       endpoint.RulesPathPrefix(clusterID),
-		ruleCommonPathPrefix:  endpoint.RuleCommonPathPrefix(clusterID),
-		ruleGroupPathPrefix:   endpoint.RuleGroupPathPrefix(clusterID),
-		regionLabelPathPrefix: endpoint.RegionLabelPathPrefix(clusterID),
+		rulesPathPrefix:       keypath.RulesPathPrefix(),
+		ruleCommonPathPrefix:  keypath.RuleCommonPathPrefix(),
+		ruleGroupPathPrefix:   keypath.RuleGroupPathPrefix(),
+		regionLabelPathPrefix: keypath.RegionLabelPathPrefix(),
 		etcdClient:            client,
 		ruleStorage:           storage,
 		regionLabeler:         labelerManager,
@@ -82,7 +84,7 @@ func prepare(t require.TestingT) (context.Context, *clientv3.Client, func()) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	cfg := etcdutil.NewTestSingleConfig()
-	cfg.Dir = os.TempDir() + "/test_etcd"
+	cfg.Dir = filepath.Join(os.TempDir(), "/pd_tests")
 	os.RemoveAll(cfg.Dir)
 	etcd, err := embed.StartEtcd(cfg)
 	re.NoError(err)
@@ -99,7 +101,7 @@ func prepare(t require.TestingT) (context.Context, *clientv3.Client, func()) {
 		}
 		value, err := json.Marshal(rule)
 		re.NoError(err)
-		key := endpoint.RegionLabelPathPrefix(clusterID) + "/" + rule.ID
+		key := keypath.RegionLabelPathPrefix() + "/" + rule.ID
 		_, err = clientv3.NewKV(client).Put(ctx, key, string(value))
 		re.NoError(err)
 	}

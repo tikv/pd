@@ -25,7 +25,7 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
 	"github.com/spf13/pflag"
-	"github.com/tikv/pd/pkg/mcs/utils"
+	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/tso"
 	"github.com/tikv/pd/pkg/utils/configutil"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
@@ -37,11 +37,11 @@ import (
 const (
 	defaultMaxResetTSGap = 24 * time.Hour
 
-	defaultName             = "TSO"
+	defaultName             = "tso"
 	defaultBackendEndpoints = "http://127.0.0.1:2379"
 	defaultListenAddr       = "http://127.0.0.1:3379"
 
-	defaultTSOSaveInterval           = time.Duration(utils.DefaultLeaderLease) * time.Second
+	defaultTSOSaveInterval           = time.Duration(constant.DefaultLeaderLease) * time.Second
 	defaultTSOUpdatePhysicalInterval = 50 * time.Millisecond
 	maxTSOUpdatePhysicalInterval     = 10 * time.Second
 	minTSOUpdatePhysicalInterval     = 1 * time.Millisecond
@@ -167,6 +167,7 @@ func (c *Config) Parse(flagSet *pflag.FlagSet) error {
 	}
 
 	// Ignore the error check here
+	configutil.AdjustCommandLineString(flagSet, &c.Name, "name")
 	configutil.AdjustCommandLineString(flagSet, &c.Log.Level, "log-level")
 	configutil.AdjustCommandLineString(flagSet, &c.Log.File.Filename, "log-file")
 	configutil.AdjustCommandLineString(flagSet, &c.Metric.PushAddress, "metrics-addr")
@@ -205,7 +206,7 @@ func (c *Config) Adjust(meta *toml.MetaData) error {
 	configutil.AdjustString(&c.AdvertiseListenAddr, c.ListenAddr)
 
 	configutil.AdjustDuration(&c.MaxResetTSGap, defaultMaxResetTSGap)
-	configutil.AdjustInt64(&c.LeaderLease, utils.DefaultLeaderLease)
+	configutil.AdjustInt64(&c.LeaderLease, constant.DefaultLeaderLease)
 	configutil.AdjustDuration(&c.TSOSaveInterval, defaultTSOSaveInterval)
 	configutil.AdjustDuration(&c.TSOUpdatePhysicalInterval, defaultTSOUpdatePhysicalInterval)
 
@@ -220,7 +221,7 @@ func (c *Config) Adjust(meta *toml.MetaData) error {
 	}
 
 	if !configMetaData.IsDefined("enable-grpc-gateway") {
-		c.EnableGRPCGateway = utils.DefaultEnableGRPCGateway
+		c.EnableGRPCGateway = constant.DefaultEnableGRPCGateway
 	}
 
 	c.adjustLog(configMetaData.Child("log"))
@@ -229,10 +230,10 @@ func (c *Config) Adjust(meta *toml.MetaData) error {
 
 func (c *Config) adjustLog(meta *configutil.ConfigMetaData) {
 	if !meta.IsDefined("disable-error-verbose") {
-		c.Log.DisableErrorVerbose = utils.DefaultDisableErrorVerbose
+		c.Log.DisableErrorVerbose = constant.DefaultDisableErrorVerbose
 	}
-	configutil.AdjustString(&c.Log.Format, utils.DefaultLogFormat)
-	configutil.AdjustString(&c.Log.Level, utils.DefaultLogLevel)
+	configutil.AdjustString(&c.Log.Format, constant.DefaultLogFormat)
+	configutil.AdjustString(&c.Log.Level, constant.DefaultLogLevel)
 }
 
 // Validate is used to validate if some configurations are right.

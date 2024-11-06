@@ -20,6 +20,7 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/pkg/core/storelimit"
+	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/utils/configutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
@@ -27,10 +28,13 @@ import (
 
 const (
 	// DefaultMaxReplicas is the default number of replicas for each region.
-	DefaultMaxReplicas            = 3
-	defaultMaxSnapshotCount       = 64
-	defaultMaxPendingPeerCount    = 64
-	defaultMaxMergeRegionSize     = 20
+	DefaultMaxReplicas         = 3
+	defaultMaxSnapshotCount    = 64
+	defaultMaxPendingPeerCount = 64
+	// defaultMaxMergeRegionSize is the default maximum size of region when regions can be merged.
+	// After https://github.com/tikv/tikv/issues/17309, the default value is enlarged from 20 to 54,
+	// to make it compatible with the default value of region size of tikv.
+	defaultMaxMergeRegionSize     = 54
 	defaultLeaderScheduleLimit    = 4
 	defaultRegionScheduleLimit    = 2048
 	defaultWitnessScheduleLimit   = 4
@@ -63,6 +67,9 @@ const (
 	defaultRegionScoreFormulaVersion = "v2"
 	defaultLeaderSchedulePolicy      = "count"
 	defaultStoreLimitVersion         = "v1"
+	defaultPatrolRegionWorkerCount   = 1
+	maxPatrolRegionWorkerCount       = 8
+
 	// DefaultSplitMergeInterval is the default value of config split merge interval.
 	DefaultSplitMergeInterval      = time.Hour
 	defaultSwitchWitnessInterval   = time.Hour
@@ -274,9 +281,6 @@ type ScheduleConfig struct {
 	// Schedulers support for loading customized schedulers
 	Schedulers SchedulerConfigs `toml:"schedulers" json:"schedulers-v2"` // json v2 is for the sake of compatible upgrade
 
-	// Only used to display
-	SchedulersPayload map[string]any `toml:"schedulers-payload" json:"schedulers-payload"`
-
 	// Controls the time interval between write hot regions info into leveldb.
 	HotRegionsWriteInterval typeutil.Duration `toml:"hot-regions-write-interval" json:"hot-regions-write-interval"`
 
@@ -305,6 +309,9 @@ type ScheduleConfig struct {
 	// HaltScheduling is the option to halt the scheduling. Once it's on, PD will halt the scheduling,
 	// and any other scheduling configs will be ignored.
 	HaltScheduling bool `toml:"halt-scheduling" json:"halt-scheduling,string,omitempty"`
+
+	// PatrolRegionWorkerCount is the number of workers to patrol region.
+	PatrolRegionWorkerCount int `toml:"patrol-region-worker-count" json:"patrol-region-worker-count"`
 }
 
 // Clone returns a cloned scheduling configuration.
@@ -320,7 +327,6 @@ func (c *ScheduleConfig) Clone() *ScheduleConfig {
 	cfg := *c
 	cfg.StoreLimit = storeLimit
 	cfg.Schedulers = schedulers
-	cfg.SchedulersPayload = nil
 	return &cfg
 }
 
@@ -373,6 +379,9 @@ func (c *ScheduleConfig) Adjust(meta *configutil.ConfigMetaData, reloading bool)
 	}
 	if !meta.IsDefined("store-limit-version") {
 		configutil.AdjustString(&c.StoreLimitVersion, defaultStoreLimitVersion)
+	}
+	if !meta.IsDefined("patrol-region-worker-count") {
+		configutil.AdjustInt(&c.PatrolRegionWorkerCount, defaultPatrolRegionWorkerCount)
 	}
 
 	if !meta.IsDefined("enable-joint-consensus") {
@@ -518,6 +527,9 @@ func (c *ScheduleConfig) Validate() error {
 	if c.SlowStoreEvictingAffectedStoreRatioThreshold == 0 {
 		return errors.Errorf("slow-store-evicting-affected-store-ratio-threshold is not set")
 	}
+	if c.PatrolRegionWorkerCount > maxPatrolRegionWorkerCount || c.PatrolRegionWorkerCount < 1 {
+		return errors.Errorf("patrol-region-worker-count should be between 1 and %d", maxPatrolRegionWorkerCount)
+	}
 	return nil
 }
 
@@ -568,10 +580,10 @@ type SchedulerConfig struct {
 // If these schedulers are not in the persistent configuration, they
 // will be created automatically when reloading.
 var DefaultSchedulers = SchedulerConfigs{
-	{Type: "balance-region"},
-	{Type: "balance-leader"},
-	{Type: "hot-region"},
-	{Type: "evict-slow-store"},
+	{Type: types.SchedulerTypeCompatibleMap[types.BalanceRegionScheduler]},
+	{Type: types.SchedulerTypeCompatibleMap[types.BalanceLeaderScheduler]},
+	{Type: types.SchedulerTypeCompatibleMap[types.BalanceHotRegionScheduler]},
+	{Type: types.SchedulerTypeCompatibleMap[types.EvictSlowStoreScheduler]},
 }
 
 // IsDefaultScheduler checks whether the scheduler is enabled by default.

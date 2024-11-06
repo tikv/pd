@@ -52,7 +52,7 @@ func camelCaseToSnakeCase(str string) string {
 	length := len(runes)
 
 	var ret []rune
-	for i := 0; i < length; i++ {
+	for i := range length {
 		if i > 0 && unicode.IsUpper(runes[i]) && runesHasLowerNeighborAt(runes, i) {
 			ret = append(ret, '_')
 		}

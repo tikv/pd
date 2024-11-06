@@ -39,8 +39,8 @@ import (
 	"github.com/tikv/pd/pkg/utils/metricutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/pkg/versioninfo"
-	"go.etcd.io/etcd/embed"
-	"go.etcd.io/etcd/pkg/transport"
+	"go.etcd.io/etcd/client/pkg/v3/transport"
+	"go.etcd.io/etcd/server/v3/embed"
 	"go.uber.org/zap"
 )
 
@@ -133,14 +133,14 @@ type Config struct {
 	AutoCompactionRetention string `toml:"auto-compaction-retention" json:"auto-compaction-retention-v2"`
 
 	// TickInterval is the interval for etcd Raft tick.
-	TickInterval typeutil.Duration `toml:"tick-interval"`
+	TickInterval typeutil.Duration `toml:"tick-interval" json:"tick-interval"`
 	// ElectionInterval is the interval for etcd Raft election.
-	ElectionInterval typeutil.Duration `toml:"election-interval"`
+	ElectionInterval typeutil.Duration `toml:"election-interval" json:"election-interval"`
 	// Prevote is true to enable Raft Pre-Vote.
 	// If enabled, Raft runs an additional election phase
 	// to check whether it would get enough votes to win
 	// an election, thus minimizing disruptions.
-	PreVote bool `toml:"enable-prevote"`
+	PreVote bool `toml:"enable-prevote" json:"enable-prevote"`
 
 	MaxRequestBytes uint `toml:"max-request-bytes" json:"max-request-bytes"`
 
@@ -149,12 +149,12 @@ type Config struct {
 	LabelProperty LabelPropertyConfig `toml:"label-property" json:"label-property"`
 
 	// For all warnings during parsing.
-	WarningMsgs []string
+	WarningMsgs []string `json:"-"`
 
-	DisableStrictReconfigCheck bool
+	DisableStrictReconfigCheck bool `json:"-"`
 
-	HeartbeatStreamBindInterval typeutil.Duration
-	LeaderPriorityCheckInterval typeutil.Duration
+	HeartbeatStreamBindInterval typeutil.Duration `json:"-"`
+	LeaderPriorityCheckInterval typeutil.Duration `json:"-"`
 
 	Logger   *zap.Logger        `json:"-"`
 	LogProps *log.ZapProperties `json:"-"`
@@ -726,24 +726,23 @@ func (c *Config) GenEmbedEtcdConfig() (*embed.Config, error) {
 	cfg.QuotaBackendBytes = int64(c.QuotaBackendBytes)
 	cfg.MaxRequestBytes = c.MaxRequestBytes
 
-	allowedCN, serr := c.Security.GetOneAllowedCN()
-	if serr != nil {
-		return nil, serr
-	}
 	cfg.ClientTLSInfo.ClientCertAuth = len(c.Security.CAPath) != 0
 	cfg.ClientTLSInfo.TrustedCAFile = c.Security.CAPath
 	cfg.ClientTLSInfo.CertFile = c.Security.CertPath
 	cfg.ClientTLSInfo.KeyFile = c.Security.KeyPath
-	// Client no need to set the CN. (cfg.ClientTLSInfo.AllowedCN = allowedCN)
+	// Keep compatibility with https://github.com/tikv/pd/pull/2305
+	// Only check client cert when there are multiple CNs.
+	if len(c.Security.CertAllowedCNs) > 1 {
+		cfg.ClientTLSInfo.AllowedCNs = c.Security.CertAllowedCNs
+	}
 	cfg.PeerTLSInfo.ClientCertAuth = len(c.Security.CAPath) != 0
 	cfg.PeerTLSInfo.TrustedCAFile = c.Security.CAPath
 	cfg.PeerTLSInfo.CertFile = c.Security.CertPath
 	cfg.PeerTLSInfo.KeyFile = c.Security.KeyPath
-	cfg.PeerTLSInfo.AllowedCN = allowedCN
+	cfg.PeerTLSInfo.AllowedCNs = c.Security.CertAllowedCNs
 	cfg.ForceNewCluster = c.ForceNewCluster
 	cfg.ZapLoggerBuilder = embed.NewZapCoreLoggerBuilder(c.Logger, c.Logger.Core(), c.LogProps.Syncer)
 	cfg.EnableGRPCGateway = c.EnableGRPCGateway
-	cfg.EnableV2 = true
 	cfg.Logger = "zap"
 	var err error
 
@@ -772,13 +771,14 @@ func (c *Config) GenEmbedEtcdConfig() (*embed.Config, error) {
 
 // DashboardConfig is the configuration for tidb-dashboard.
 type DashboardConfig struct {
-	TiDBCAPath         string `toml:"tidb-cacert-path" json:"tidb-cacert-path"`
-	TiDBCertPath       string `toml:"tidb-cert-path" json:"tidb-cert-path"`
-	TiDBKeyPath        string `toml:"tidb-key-path" json:"tidb-key-path"`
-	PublicPathPrefix   string `toml:"public-path-prefix" json:"public-path-prefix"`
-	InternalProxy      bool   `toml:"internal-proxy" json:"internal-proxy"`
-	EnableTelemetry    bool   `toml:"enable-telemetry" json:"enable-telemetry"`
-	EnableExperimental bool   `toml:"enable-experimental" json:"enable-experimental"`
+	TiDBCAPath            string `toml:"tidb-cacert-path" json:"tidb-cacert-path"`
+	TiDBCertPath          string `toml:"tidb-cert-path" json:"tidb-cert-path"`
+	TiDBKeyPath           string `toml:"tidb-key-path" json:"tidb-key-path"`
+	PublicPathPrefix      string `toml:"public-path-prefix" json:"public-path-prefix"`
+	InternalProxy         bool   `toml:"internal-proxy" json:"internal-proxy"`
+	EnableTelemetry       bool   `toml:"enable-telemetry" json:"enable-telemetry"`
+	EnableExperimental    bool   `toml:"enable-experimental" json:"enable-experimental"`
+	DisableCustomPromAddr bool   `toml:"disable-custom-prom-addr" json:"disable-custom-prom-addr"`
 }
 
 // ToTiDBTLSConfig generates tls config for connecting to TiDB, used by tidb-dashboard.

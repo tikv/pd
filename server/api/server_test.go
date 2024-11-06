@@ -31,6 +31,7 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/assertutil"
+	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/versioninfo"
@@ -103,7 +104,7 @@ func mustNewCluster(re *require.Assertions, num int, opts ...func(cfg *config.Co
 		}(cfg)
 	}
 
-	for i := 0; i < num; i++ {
+	for range num {
 		svr := <-ch
 		svrs = append(svrs, svr)
 	}
@@ -128,7 +129,7 @@ func mustNewCluster(re *require.Assertions, num int, opts ...func(cfg *config.Co
 func mustBootstrapCluster(re *require.Assertions, s *server.Server) {
 	grpcPDClient := testutil.MustNewGrpcClient(re, s.GetAddr())
 	req := &pdpb.BootstrapRequest{
-		Header: testutil.NewRequestHeader(s.ClusterID()),
+		Header: testutil.NewRequestHeader(keypath.ClusterID()),
 		Store:  store,
 		Region: region,
 	}
@@ -158,7 +159,7 @@ func mustPutRegion(re *require.Assertions, svr *server.Server, regionID, storeID
 func mustPutStore(re *require.Assertions, svr *server.Server, id uint64, state metapb.StoreState, nodeState metapb.NodeState, labels []*metapb.StoreLabel) {
 	s := &server.GrpcServer{Server: svr}
 	_, err := s.PutStore(context.Background(), &pdpb.PutStoreRequest{
-		Header: &pdpb.RequestHeader{ClusterId: svr.ClusterID()},
+		Header: &pdpb.RequestHeader{ClusterId: keypath.ClusterID()},
 		Store: &metapb.Store{
 			Id:        id,
 			Address:   fmt.Sprintf("tikv%d", id),
@@ -171,7 +172,7 @@ func mustPutStore(re *require.Assertions, svr *server.Server, id uint64, state m
 	re.NoError(err)
 	if state == metapb.StoreState_Up {
 		_, err = s.StoreHeartbeat(context.Background(), &pdpb.StoreHeartbeatRequest{
-			Header: &pdpb.RequestHeader{ClusterId: svr.ClusterID()},
+			Header: &pdpb.RequestHeader{ClusterId: keypath.ClusterID()},
 			Stats:  &pdpb.StoreStats{StoreId: id},
 		})
 		re.NoError(err)
@@ -242,7 +243,7 @@ func (suite *serviceTestSuite) TestServiceLabels() {
 		apiutil.NewAccessPath("/pd/api/v1/leader/resign", ""))
 	re.Equal("", serviceLabel)
 
-	accessPaths = suite.svr.GetServiceLabels("QueryMetric")
+	accessPaths = suite.svr.GetServiceLabels("queryMetric")
 	re.Len(accessPaths, 4)
 	sort.Slice(accessPaths, func(i, j int) bool {
 		if accessPaths[i].Path == accessPaths[j].Path {
@@ -260,10 +261,10 @@ func (suite *serviceTestSuite) TestServiceLabels() {
 	re.Equal(http.MethodPost, accessPaths[3].Method)
 	serviceLabel = suite.svr.GetAPIAccessServiceLabel(
 		apiutil.NewAccessPath("/pd/api/v1/metric/query", http.MethodPost))
-	re.Equal("QueryMetric", serviceLabel)
+	re.Equal("queryMetric", serviceLabel)
 	serviceLabel = suite.svr.GetAPIAccessServiceLabel(
 		apiutil.NewAccessPath("/pd/api/v1/metric/query", http.MethodGet))
-	re.Equal("QueryMetric", serviceLabel)
+	re.Equal("queryMetric", serviceLabel)
 }
 
 func (suite *adminTestSuite) TestCleanPath() {

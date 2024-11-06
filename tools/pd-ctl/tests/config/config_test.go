@@ -30,6 +30,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+	"github.com/tikv/pd/pkg/ratelimit"
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/utils/testutil"
@@ -96,7 +97,7 @@ func (suite *configTestSuite) TearDownTest() {
 		err = testutil.CheckPostJSON(testDialClient, urlPrefix+"/pd/api/v1/config/placement-rule", data, testutil.StatusOK(re))
 		re.NoError(err)
 	}
-	suite.env.RunFuncInTwoModes(cleanFunc)
+	suite.env.RunTestBasedOnMode(cleanFunc)
 	suite.env.Cleanup()
 }
 
@@ -130,7 +131,6 @@ func (suite *configTestSuite) checkConfig(cluster *pdTests.TestCluster) {
 
 	// hidden config
 	scheduleConfig.Schedulers = nil
-	scheduleConfig.SchedulersPayload = nil
 	scheduleConfig.StoreLimit = nil
 	scheduleConfig.SchedulerMaxWaitingOperator = 0
 	scheduleConfig.EnableRemoveDownReplica = false
@@ -181,9 +181,11 @@ func (suite *configTestSuite) checkConfig(cluster *pdTests.TestCluster) {
 	scheduleConfig.MaxMergeRegionKeys = scheduleConfig.GetMaxMergeRegionKeys()
 	re.Equal(scheduleConfig, &scheduleCfg)
 
-	re.Equal(20, int(svr.GetScheduleConfig().MaxMergeRegionSize))
+	// After https://github.com/tikv/tikv/issues/17309, the default value is enlarged from 20 to 54,
+	// to make it compatible with the default value of region size of tikv.
+	re.Equal(54, int(svr.GetScheduleConfig().MaxMergeRegionSize))
 	re.Equal(0, int(svr.GetScheduleConfig().MaxMergeRegionKeys))
-	re.Equal(20*10000, int(svr.GetScheduleConfig().GetMaxMergeRegionKeys()))
+	re.Equal(54*10000, int(svr.GetScheduleConfig().GetMaxMergeRegionKeys()))
 
 	// set max-merge-region-size to 40MB
 	args = []string{"-u", pdAddr, "config", "set", "max-merge-region-size", "40"}
@@ -343,6 +345,23 @@ func (suite *configTestSuite) checkConfig(cluster *pdTests.TestCluster) {
 	output, err = tests.ExecuteCommand(cmd, argsInvalid...)
 	re.NoError(err)
 	re.Contains(string(output), "is invalid")
+
+	// config set patrol-region-worker-count
+	args = []string{"-u", pdAddr, "config", "set", "patrol-region-worker-count", "8"}
+	_, err = tests.ExecuteCommand(cmd, args...)
+	re.NoError(err)
+	re.Equal(8, svr.GetScheduleConfig().PatrolRegionWorkerCount)
+	// the max value of patrol-region-worker-count is 8 and the min value is 1
+	args = []string{"-u", pdAddr, "config", "set", "patrol-region-worker-count", "9"}
+	output, err = tests.ExecuteCommand(cmd, args...)
+	re.NoError(err)
+	re.Contains(string(output), "patrol-region-worker-count should be between 1 and 8")
+	re.Equal(8, svr.GetScheduleConfig().PatrolRegionWorkerCount)
+	args = []string{"-u", pdAddr, "config", "set", "patrol-region-worker-count", "0"}
+	output, err = tests.ExecuteCommand(cmd, args...)
+	re.NoError(err)
+	re.Contains(string(output), "patrol-region-worker-count should be between 1 and 8")
+	re.Equal(8, svr.GetScheduleConfig().PatrolRegionWorkerCount)
 }
 
 func (suite *configTestSuite) TestConfigForwardControl() {
@@ -357,7 +376,7 @@ func (suite *configTestSuite) checkConfigForwardControl(cluster *pdTests.TestClu
 	leaderServer := cluster.GetLeaderServer()
 	pdAddr := leaderServer.GetAddr()
 
-	f, _ := os.CreateTemp("/tmp", "pd_tests")
+	f, _ := os.CreateTemp("", "pd_tests")
 	fname := f.Name()
 	f.Close()
 	defer os.RemoveAll(fname)
@@ -492,8 +511,12 @@ func (suite *configTestSuite) checkConfigForwardControl(cluster *pdTests.TestClu
 	// Test Config
 	// inject different config to scheduling server
 	if sche := cluster.GetSchedulingPrimaryServer(); sche != nil {
-		sche.GetPersistConfig().GetScheduleConfig().LeaderScheduleLimit = 233
-		sche.GetPersistConfig().GetReplicationConfig().MaxReplicas = 7
+		scheCfg := sche.GetPersistConfig().GetScheduleConfig().Clone()
+		scheCfg.LeaderScheduleLimit = 233
+		sche.GetPersistConfig().SetScheduleConfig(scheCfg)
+		repCfg := sche.GetPersistConfig().GetReplicationConfig().Clone()
+		repCfg.MaxReplicas = 7
+		sche.GetPersistConfig().SetReplicationConfig(repCfg)
 		re.Equal(uint64(233), sche.GetPersistConfig().GetLeaderScheduleLimit())
 		re.Equal(7, sche.GetPersistConfig().GetMaxReplicas())
 	}
@@ -570,7 +593,7 @@ func (suite *configTestSuite) checkPlacementRules(cluster *pdTests.TestCluster) 
 	// test show
 	checkShowRuleKey(re, pdAddr, [][2]string{{placement.DefaultGroupID, placement.DefaultRuleID}})
 
-	f, _ := os.CreateTemp("/tmp", "pd_tests")
+	f, _ := os.CreateTemp("", "pd_tests")
 	fname := f.Name()
 	f.Close()
 	defer os.RemoveAll(fname)
@@ -717,7 +740,7 @@ func (suite *configTestSuite) checkPlacementRuleBundle(cluster *pdTests.TestClus
 	re.NoError(json.Unmarshal(output, &bundle))
 	re.Equal(placement.GroupBundle{ID: placement.DefaultGroupID, Index: 0, Override: false, Rules: []*placement.Rule{{GroupID: placement.DefaultGroupID, ID: placement.DefaultRuleID, Role: placement.Voter, Count: 3}}}, bundle)
 
-	f, err := os.CreateTemp("/tmp", "pd_tests")
+	f, err := os.CreateTemp("", "pd_tests")
 	re.NoError(err)
 	fname := f.Name()
 	f.Close()
@@ -929,6 +952,98 @@ func TestReplicationMode(t *testing.T) {
 	_, err = tests.ExecuteCommand(cmd, "-u", pdAddr, "config", "set", "replication-mode", "dr-auto-sync", "wait-store-timeout", "10m")
 	re.NoError(err)
 	conf.DRAutoSync.WaitStoreTimeout = typeutil.NewDuration(time.Minute * 10)
+	check()
+}
+
+func TestServiceMiddlewareConfig(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster, err := pdTests.NewTestCluster(ctx, 1)
+	re.NoError(err)
+	defer cluster.Destroy()
+	err = cluster.RunInitialServers()
+	re.NoError(err)
+	re.NotEmpty(cluster.WaitLeader())
+	pdAddr := cluster.GetConfig().GetClientURL()
+	cmd := ctl.GetRootCmd()
+
+	store := &metapb.Store{
+		Id:            1,
+		State:         metapb.StoreState_Up,
+		LastHeartbeat: time.Now().UnixNano(),
+	}
+	leaderServer := cluster.GetLeaderServer()
+	re.NoError(leaderServer.BootstrapCluster())
+	pdTests.MustPutStore(re, cluster, store)
+
+	conf := config.ServiceMiddlewareConfig{
+		AuditConfig: config.AuditConfig{
+			EnableAudit: true,
+		},
+		RateLimitConfig: config.RateLimitConfig{
+			EnableRateLimit: true,
+			LimiterConfig:   make(map[string]ratelimit.DimensionConfig),
+		},
+		GRPCRateLimitConfig: config.GRPCRateLimitConfig{
+			EnableRateLimit: true,
+			LimiterConfig:   make(map[string]ratelimit.DimensionConfig),
+		},
+	}
+
+	check := func() {
+		output, err := tests.ExecuteCommand(cmd, "-u", pdAddr, "config", "show", "service-middleware")
+		re.NoError(err)
+		var conf2 config.ServiceMiddlewareConfig
+		re.NoError(json.Unmarshal(output, &conf2))
+		re.Equal(conf, conf2)
+	}
+
+	check()
+
+	_, err = tests.ExecuteCommand(cmd, "-u", pdAddr, "config", "set", "service-middleware", "audit", "enable-audit", "false")
+	re.NoError(err)
+	conf.AuditConfig.EnableAudit = false
+	check()
+	_, err = tests.ExecuteCommand(cmd, "-u", pdAddr, "config", "set", "service-middleware", "rate-limit", "GetRegion", "qps", "100")
+	re.NoError(err)
+	conf.RateLimitConfig.LimiterConfig["GetRegion"] = ratelimit.DimensionConfig{QPS: 100, QPSBurst: 100}
+	check()
+	_, err = tests.ExecuteCommand(cmd, "-u", pdAddr, "config", "set", "service-middleware", "grpc-rate-limit", "GetRegion", "qps", "101")
+	re.NoError(err)
+	conf.GRPCRateLimitConfig.LimiterConfig["GetRegion"] = ratelimit.DimensionConfig{QPS: 101, QPSBurst: 101}
+	check()
+	_, err = tests.ExecuteCommand(cmd, "-u", pdAddr, "config", "set", "service-middleware", "rate-limit", "GetRegion", "concurrency", "10")
+	re.NoError(err)
+	conf.RateLimitConfig.LimiterConfig["GetRegion"] = ratelimit.DimensionConfig{QPS: 100, QPSBurst: 100, ConcurrencyLimit: 10}
+	check()
+	_, err = tests.ExecuteCommand(cmd, "-u", pdAddr, "config", "set", "service-middleware", "grpc-rate-limit", "GetRegion", "concurrency", "11")
+	re.NoError(err)
+	conf.GRPCRateLimitConfig.LimiterConfig["GetRegion"] = ratelimit.DimensionConfig{QPS: 101, QPSBurst: 101, ConcurrencyLimit: 11}
+	check()
+	output, err := tests.ExecuteCommand(cmd, "-u", pdAddr, "config", "set", "service-middleware", "xxx", "GetRegion", "qps", "1000")
+	re.NoError(err)
+	re.Contains(string(output), "correct type")
+	output, err = tests.ExecuteCommand(cmd, "-u", pdAddr, "config", "set", "service-middleware", "grpc-rate-limit", "xxx", "qps", "1000")
+	re.NoError(err)
+	re.Contains(string(output), "There is no label matched.")
+	output, err = tests.ExecuteCommand(cmd, "-u", pdAddr, "config", "set", "service-middleware", "grpc-rate-limit", "GetRegion", "xxx", "1000")
+	re.NoError(err)
+	re.Contains(string(output), "Input is invalid")
+	output, err = tests.ExecuteCommand(cmd, "-u", pdAddr, "config", "set", "service-middleware", "grpc-rate-limit", "GetRegion", "qps", "xxx")
+	re.NoError(err)
+	re.Contains(string(output), "strconv.ParseUint")
+	_, err = tests.ExecuteCommand(cmd, "-u", pdAddr, "config", "set", "service-middleware", "grpc-rate-limit", "enable-grpc-rate-limit", "false")
+	re.NoError(err)
+	conf.GRPCRateLimitConfig.EnableRateLimit = false
+	check()
+	_, err = tests.ExecuteCommand(cmd, "-u", pdAddr, "config", "set", "service-middleware", "rate-limit", "GetRegion", "concurrency", "0")
+	re.NoError(err)
+	conf.RateLimitConfig.LimiterConfig["GetRegion"] = ratelimit.DimensionConfig{QPS: 100, QPSBurst: 100}
+	check()
+	_, err = tests.ExecuteCommand(cmd, "-u", pdAddr, "config", "set", "service-middleware", "rate-limit", "GetRegion", "qps", "0")
+	re.NoError(err)
+	delete(conf.RateLimitConfig.LimiterConfig, "GetRegion")
 	check()
 }
 
@@ -1174,7 +1289,7 @@ func (suite *configTestSuite) checkRegionRules(cluster *pdTests.TestCluster) {
 
 func assertBundles(re *require.Assertions, a, b []placement.GroupBundle) {
 	re.Len(b, len(a))
-	for i := 0; i < len(a); i++ {
+	for i := range a {
 		assertBundle(re, a[i], b[i])
 	}
 }
@@ -1184,7 +1299,7 @@ func assertBundle(re *require.Assertions, a, b placement.GroupBundle) {
 	re.Equal(a.Index, b.Index)
 	re.Equal(a.Override, b.Override)
 	re.Len(b.Rules, len(a.Rules))
-	for i := 0; i < len(a.Rules); i++ {
+	for i := range a.Rules {
 		assertRule(re, a.Rules[i], b.Rules[i])
 	}
 }

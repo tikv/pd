@@ -28,9 +28,7 @@ import (
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/statistics/utils"
-	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/reflectutil"
-	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/unrolled/render"
@@ -59,33 +57,36 @@ var compatiblePrioritiesConfig = prioritiesConfig{
 // params about hot region.
 func initHotRegionScheduleConfig() *hotRegionSchedulerConfig {
 	cfg := &hotRegionSchedulerConfig{
-		MinHotByteRate:         100,
-		MinHotKeyRate:          10,
-		MinHotQueryRate:        10,
-		MaxZombieRounds:        3,
-		MaxPeerNum:             1000,
-		ByteRateRankStepRatio:  0.05,
-		KeyRateRankStepRatio:   0.05,
-		QueryRateRankStepRatio: 0.05,
-		CountRankStepRatio:     0.01,
-		GreatDecRatio:          0.95,
-		MinorDecRatio:          0.99,
-		SrcToleranceRatio:      1.05, // Tolerate 5% difference
-		DstToleranceRatio:      1.05, // Tolerate 5% difference
-		StrictPickingStore:     true,
-		EnableForTiFlash:       true,
-		RankFormulaVersion:     "v2",
-		ForbidRWType:           "none",
-		SplitThresholds:        0.2,
-		HistorySampleDuration:  typeutil.NewDuration(statistics.DefaultHistorySampleDuration),
-		HistorySampleInterval:  typeutil.NewDuration(statistics.DefaultHistorySampleInterval),
+		baseDefaultSchedulerConfig: newBaseDefaultSchedulerConfig(),
+		hotRegionSchedulerParam: hotRegionSchedulerParam{
+			MinHotByteRate:         100,
+			MinHotKeyRate:          10,
+			MinHotQueryRate:        10,
+			MaxZombieRounds:        3,
+			MaxPeerNum:             1000,
+			ByteRateRankStepRatio:  0.05,
+			KeyRateRankStepRatio:   0.05,
+			QueryRateRankStepRatio: 0.05,
+			CountRankStepRatio:     0.01,
+			GreatDecRatio:          0.95,
+			MinorDecRatio:          0.99,
+			SrcToleranceRatio:      1.05, // Tolerate 5% difference
+			DstToleranceRatio:      1.05, // Tolerate 5% difference
+			StrictPickingStore:     true,
+			EnableForTiFlash:       true,
+			RankFormulaVersion:     "v2",
+			ForbidRWType:           "none",
+			SplitThresholds:        0.2,
+			HistorySampleDuration:  typeutil.NewDuration(statistics.DefaultHistorySampleDuration),
+			HistorySampleInterval:  typeutil.NewDuration(statistics.DefaultHistorySampleInterval),
+		},
 	}
 	cfg.applyPrioritiesConfig(defaultPrioritiesConfig)
 	return cfg
 }
 
-func (conf *hotRegionSchedulerConfig) getValidConf() *hotRegionSchedulerConfig {
-	return &hotRegionSchedulerConfig{
+func (conf *hotRegionSchedulerConfig) getValidConf() *hotRegionSchedulerParam {
+	return &hotRegionSchedulerParam{
 		MinHotByteRate:         conf.MinHotByteRate,
 		MinHotKeyRate:          conf.MinHotKeyRate,
 		MinHotQueryRate:        conf.MinHotQueryRate,
@@ -112,11 +113,7 @@ func (conf *hotRegionSchedulerConfig) getValidConf() *hotRegionSchedulerConfig {
 	}
 }
 
-type hotRegionSchedulerConfig struct {
-	syncutil.RWMutex
-	storage            endpoint.ConfigStorage
-	lastQuerySupported bool
-
+type hotRegionSchedulerParam struct {
 	MinHotByteRate  float64 `json:"min-hot-byte-rate"`
 	MinHotKeyRate   float64 `json:"min-hot-key-rate"`
 	MinHotQueryRate float64 `json:"min-hot-query-rate"`
@@ -157,181 +154,190 @@ type hotRegionSchedulerConfig struct {
 	HistorySampleInterval typeutil.Duration `json:"history-sample-interval"`
 }
 
-func (conf *hotRegionSchedulerConfig) EncodeConfig() ([]byte, error) {
+type hotRegionSchedulerConfig struct {
+	baseDefaultSchedulerConfig
+	hotRegionSchedulerParam
+
+	lastQuerySupported bool
+}
+
+func (conf *hotRegionSchedulerConfig) encodeConfig() ([]byte, error) {
 	conf.RLock()
 	defer conf.RUnlock()
 	return EncodeConfig(conf)
 }
 
-func (conf *hotRegionSchedulerConfig) GetStoreStatZombieDuration() time.Duration {
+func (conf *hotRegionSchedulerConfig) getStoreStatZombieDuration() time.Duration {
 	conf.RLock()
 	defer conf.RUnlock()
 	return time.Duration(conf.MaxZombieRounds*utils.StoreHeartBeatReportInterval) * time.Second
 }
 
-func (conf *hotRegionSchedulerConfig) GetRegionsStatZombieDuration() time.Duration {
+func (conf *hotRegionSchedulerConfig) getRegionsStatZombieDuration() time.Duration {
 	conf.RLock()
 	defer conf.RUnlock()
 	return time.Duration(conf.MaxZombieRounds*utils.RegionHeartBeatReportInterval) * time.Second
 }
 
-func (conf *hotRegionSchedulerConfig) GetMaxPeerNumber() int {
+func (conf *hotRegionSchedulerConfig) getMaxPeerNumber() int {
 	conf.RLock()
 	defer conf.RUnlock()
 	return conf.MaxPeerNum
 }
 
-func (conf *hotRegionSchedulerConfig) GetSrcToleranceRatio() float64 {
+func (conf *hotRegionSchedulerConfig) getSrcToleranceRatio() float64 {
 	conf.RLock()
 	defer conf.RUnlock()
 	return conf.SrcToleranceRatio
 }
 
-func (conf *hotRegionSchedulerConfig) SetSrcToleranceRatio(tol float64) {
+func (conf *hotRegionSchedulerConfig) setSrcToleranceRatio(tol float64) {
 	conf.Lock()
 	defer conf.Unlock()
 	conf.SrcToleranceRatio = tol
 }
 
-func (conf *hotRegionSchedulerConfig) GetDstToleranceRatio() float64 {
+func (conf *hotRegionSchedulerConfig) getDstToleranceRatio() float64 {
 	conf.RLock()
 	defer conf.RUnlock()
 	return conf.DstToleranceRatio
 }
 
-func (conf *hotRegionSchedulerConfig) SetDstToleranceRatio(tol float64) {
+func (conf *hotRegionSchedulerConfig) setDstToleranceRatio(tol float64) {
 	conf.Lock()
 	defer conf.Unlock()
 	conf.DstToleranceRatio = tol
 }
 
-func (conf *hotRegionSchedulerConfig) GetByteRankStepRatio() float64 {
+func (conf *hotRegionSchedulerConfig) getByteRankStepRatio() float64 {
 	conf.RLock()
 	defer conf.RUnlock()
 	return conf.ByteRateRankStepRatio
 }
 
-func (conf *hotRegionSchedulerConfig) GetKeyRankStepRatio() float64 {
+func (conf *hotRegionSchedulerConfig) getKeyRankStepRatio() float64 {
 	conf.RLock()
 	defer conf.RUnlock()
 	return conf.KeyRateRankStepRatio
 }
 
-func (conf *hotRegionSchedulerConfig) GetQueryRateRankStepRatio() float64 {
+func (conf *hotRegionSchedulerConfig) getQueryRateRankStepRatio() float64 {
 	conf.RLock()
 	defer conf.RUnlock()
 	return conf.QueryRateRankStepRatio
 }
 
-func (conf *hotRegionSchedulerConfig) GetCountRankStepRatio() float64 {
+func (conf *hotRegionSchedulerConfig) getCountRankStepRatio() float64 {
 	conf.RLock()
 	defer conf.RUnlock()
 	return conf.CountRankStepRatio
 }
 
-func (conf *hotRegionSchedulerConfig) GetGreatDecRatio() float64 {
+func (conf *hotRegionSchedulerConfig) getGreatDecRatio() float64 {
 	conf.RLock()
 	defer conf.RUnlock()
 	return conf.GreatDecRatio
 }
 
-func (conf *hotRegionSchedulerConfig) SetStrictPickingStore(v bool) {
+func (conf *hotRegionSchedulerConfig) setStrictPickingStore(v bool) {
 	conf.RLock()
 	defer conf.RUnlock()
 	conf.StrictPickingStore = v
 }
 
-func (conf *hotRegionSchedulerConfig) GetMinorDecRatio() float64 {
+func (conf *hotRegionSchedulerConfig) getMinorDecRatio() float64 {
 	conf.RLock()
 	defer conf.RUnlock()
 	return conf.MinorDecRatio
 }
 
-func (conf *hotRegionSchedulerConfig) GetMinHotKeyRate() float64 {
+func (conf *hotRegionSchedulerConfig) getMinHotKeyRate() float64 {
 	conf.RLock()
 	defer conf.RUnlock()
 	return conf.MinHotKeyRate
 }
 
-func (conf *hotRegionSchedulerConfig) GetMinHotByteRate() float64 {
+func (conf *hotRegionSchedulerConfig) getMinHotByteRate() float64 {
 	conf.RLock()
 	defer conf.RUnlock()
 	return conf.MinHotByteRate
 }
 
-func (conf *hotRegionSchedulerConfig) GetEnableForTiFlash() bool {
+func (conf *hotRegionSchedulerConfig) getEnableForTiFlash() bool {
 	conf.RLock()
 	defer conf.RUnlock()
 	return conf.EnableForTiFlash
 }
 
-func (conf *hotRegionSchedulerConfig) SetEnableForTiFlash(enable bool) {
+func (conf *hotRegionSchedulerConfig) setEnableForTiFlash(enable bool) {
 	conf.Lock()
 	defer conf.Unlock()
 	conf.EnableForTiFlash = enable
 }
 
-func (conf *hotRegionSchedulerConfig) GetMinHotQueryRate() float64 {
+func (conf *hotRegionSchedulerConfig) getMinHotQueryRate() float64 {
 	conf.RLock()
 	defer conf.RUnlock()
 	return conf.MinHotQueryRate
 }
 
-func (conf *hotRegionSchedulerConfig) GetReadPriorities() []string {
+func (conf *hotRegionSchedulerConfig) getReadPriorities() []string {
 	conf.RLock()
 	defer conf.RUnlock()
 	return conf.ReadPriorities
 }
 
-func (conf *hotRegionSchedulerConfig) GetWriteLeaderPriorities() []string {
+func (conf *hotRegionSchedulerConfig) getWriteLeaderPriorities() []string {
 	conf.RLock()
 	defer conf.RUnlock()
 	return conf.WriteLeaderPriorities
 }
 
-func (conf *hotRegionSchedulerConfig) GetWritePeerPriorities() []string {
+func (conf *hotRegionSchedulerConfig) getWritePeerPriorities() []string {
 	conf.RLock()
 	defer conf.RUnlock()
 	return conf.WritePeerPriorities
 }
 
-func (conf *hotRegionSchedulerConfig) IsStrictPickingStoreEnabled() bool {
+func (conf *hotRegionSchedulerConfig) isStrictPickingStoreEnabled() bool {
 	conf.RLock()
 	defer conf.RUnlock()
 	return conf.StrictPickingStore
 }
 
-func (conf *hotRegionSchedulerConfig) SetRankFormulaVersion(v string) {
+func (conf *hotRegionSchedulerConfig) setRankFormulaVersion(v string) {
 	conf.Lock()
 	defer conf.Unlock()
 	conf.RankFormulaVersion = v
 }
 
-func (conf *hotRegionSchedulerConfig) GetRankFormulaVersion() string {
+func (conf *hotRegionSchedulerConfig) getRankFormulaVersion() string {
 	conf.RLock()
 	defer conf.RUnlock()
 	return conf.getRankFormulaVersionLocked()
 }
 
-func (conf *hotRegionSchedulerConfig) GetHistorySampleDuration() time.Duration {
+func (conf *hotRegionSchedulerConfig) getHistorySampleDuration() time.Duration {
 	conf.RLock()
 	defer conf.RUnlock()
 	return conf.HistorySampleDuration.Duration
 }
 
-func (conf *hotRegionSchedulerConfig) GetHistorySampleInterval() time.Duration {
+func (conf *hotRegionSchedulerConfig) getHistorySampleInterval() time.Duration {
 	conf.RLock()
 	defer conf.RUnlock()
 	return conf.HistorySampleInterval.Duration
 }
 
-func (conf *hotRegionSchedulerConfig) SetHistorySampleDuration(d time.Duration) {
+// nolint: unused, unparam
+func (conf *hotRegionSchedulerConfig) setHistorySampleDuration(d time.Duration) {
 	conf.Lock()
 	defer conf.Unlock()
 	conf.HistorySampleDuration = typeutil.NewDuration(d)
 }
 
-func (conf *hotRegionSchedulerConfig) SetHistorySampleInterval(d time.Duration) {
+// nolint: unused
+func (conf *hotRegionSchedulerConfig) setHistorySampleInterval(d time.Duration) {
 	conf.Lock()
 	defer conf.Unlock()
 	conf.HistorySampleInterval = typeutil.NewDuration(d)
@@ -346,7 +352,7 @@ func (conf *hotRegionSchedulerConfig) getRankFormulaVersionLocked() string {
 	}
 }
 
-func (conf *hotRegionSchedulerConfig) IsForbidRWType(rw utils.RWType) bool {
+func (conf *hotRegionSchedulerConfig) isForbidRWType(rw utils.RWType) bool {
 	conf.RLock()
 	defer conf.RUnlock()
 	return rw.String() == conf.ForbidRWType
@@ -367,6 +373,7 @@ func (conf *hotRegionSchedulerConfig) getForbidRWTypeLocked() string {
 	}
 }
 
+// ServeHTTP implements the http.Handler interface.
 func (conf *hotRegionSchedulerConfig) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	router := mux.NewRouter()
 	router.HandleFunc("/list", conf.handleGetConfig).Methods(http.MethodGet)
@@ -398,7 +405,7 @@ func isPriorityValid(priorities []string) (map[string]bool, error) {
 	return priorityMap, nil
 }
 
-func (conf *hotRegionSchedulerConfig) validateLocked() error {
+func (conf *hotRegionSchedulerParam) validateLocked() error {
 	if _, err := isPriorityValid(conf.ReadPriorities); err != nil {
 		return err
 	}
@@ -429,7 +436,9 @@ func (conf *hotRegionSchedulerConfig) handleSetConfig(w http.ResponseWriter, r *
 	conf.Lock()
 	defer conf.Unlock()
 	rd := render.New(render.Options{IndentJSON: true})
-	oldc, _ := json.Marshal(conf)
+
+	param := &conf.hotRegionSchedulerParam
+	oldc, _ := json.Marshal(param)
 	data, err := io.ReadAll(r.Body)
 	r.Body.Close()
 	if err != nil {
@@ -437,22 +446,23 @@ func (conf *hotRegionSchedulerConfig) handleSetConfig(w http.ResponseWriter, r *
 		return
 	}
 
-	if err := json.Unmarshal(data, conf); err != nil {
+	if err := json.Unmarshal(data, param); err != nil {
 		rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if err := conf.validateLocked(); err != nil {
+	if err := param.validateLocked(); err != nil {
 		// revert to old version
-		if err2 := json.Unmarshal(oldc, conf); err2 != nil {
+		if err2 := json.Unmarshal(oldc, param); err2 != nil {
 			rd.JSON(w, http.StatusInternalServerError, err2.Error())
 		} else {
 			rd.JSON(w, http.StatusBadRequest, err.Error())
 		}
 		return
 	}
-	newc, _ := json.Marshal(conf)
+	newc, _ := json.Marshal(param)
 	if !bytes.Equal(oldc, newc) {
-		if err := conf.persistLocked(); err != nil {
+		conf.hotRegionSchedulerParam = *param
+		if err := conf.save(); err != nil {
 			log.Warn("failed to persist config", zap.Error(err))
 		}
 		log.Info("hot-region-scheduler config is updated", zap.String("old", string(oldc)), zap.String("new", string(newc)))
@@ -465,21 +475,13 @@ func (conf *hotRegionSchedulerConfig) handleSetConfig(w http.ResponseWriter, r *
 		rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	ok := reflectutil.FindSameFieldByJSON(conf, m)
+	ok := reflectutil.FindSameFieldByJSON(param, m)
 	if ok {
 		rd.Text(w, http.StatusOK, "Config is the same with origin, so do nothing.")
 		return
 	}
 
 	rd.Text(w, http.StatusBadRequest, "Config item is not found.")
-}
-
-func (conf *hotRegionSchedulerConfig) persistLocked() error {
-	data, err := EncodeConfig(conf)
-	if err != nil {
-		return err
-	}
-	return conf.storage.SaveSchedulerConfig(HotRegionName, data)
 }
 
 func (conf *hotRegionSchedulerConfig) checkQuerySupport(cluster sche.SchedulerCluster) bool {

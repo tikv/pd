@@ -34,8 +34,9 @@ import (
 	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/core/storelimit"
-	"github.com/tikv/pd/pkg/mcs/utils"
+	mcsconstant "github.com/tikv/pd/pkg/mcs/utils/constant"
 	sc "github.com/tikv/pd/pkg/schedule/config"
+	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/configutil"
@@ -46,7 +47,7 @@ import (
 )
 
 const (
-	defaultName             = "Scheduling"
+	defaultName             = "scheduling"
 	defaultBackendEndpoints = "http://127.0.0.1:2379"
 	defaultListenAddr       = "http://127.0.0.1:3379"
 )
@@ -104,6 +105,7 @@ func (c *Config) Parse(flagSet *pflag.FlagSet) error {
 	}
 
 	// Ignore the error check here
+	configutil.AdjustCommandLineString(flagSet, &c.Name, "name")
 	configutil.AdjustCommandLineString(flagSet, &c.Log.Level, "log-level")
 	configutil.AdjustCommandLineString(flagSet, &c.Log.File.Filename, "log-file")
 	configutil.AdjustCommandLineString(flagSet, &c.Metric.PushAddress, "metrics-addr")
@@ -142,7 +144,7 @@ func (c *Config) adjust(meta *toml.MetaData) error {
 	configutil.AdjustString(&c.AdvertiseListenAddr, c.ListenAddr)
 
 	if !configMetaData.IsDefined("enable-grpc-gateway") {
-		c.EnableGRPCGateway = utils.DefaultEnableGRPCGateway
+		c.EnableGRPCGateway = mcsconstant.DefaultEnableGRPCGateway
 	}
 
 	c.adjustLog(configMetaData.Child("log"))
@@ -150,7 +152,7 @@ func (c *Config) adjust(meta *toml.MetaData) error {
 		return err
 	}
 
-	configutil.AdjustInt64(&c.LeaderLease, utils.DefaultLeaderLease)
+	configutil.AdjustInt64(&c.LeaderLease, mcsconstant.DefaultLeaderLease)
 
 	if err := c.Schedule.Adjust(configMetaData.Child("schedule"), false); err != nil {
 		return err
@@ -160,10 +162,10 @@ func (c *Config) adjust(meta *toml.MetaData) error {
 
 func (c *Config) adjustLog(meta *configutil.ConfigMetaData) {
 	if !meta.IsDefined("disable-error-verbose") {
-		c.Log.DisableErrorVerbose = utils.DefaultDisableErrorVerbose
+		c.Log.DisableErrorVerbose = mcsconstant.DefaultDisableErrorVerbose
 	}
-	configutil.AdjustString(&c.Log.Format, utils.DefaultLogFormat)
-	configutil.AdjustString(&c.Log.Level, utils.DefaultLogLevel)
+	configutil.AdjustString(&c.Log.Format, mcsconstant.DefaultLogFormat)
+	configutil.AdjustString(&c.Log.Level, mcsconstant.DefaultLogLevel)
 }
 
 // GetName returns the Name
@@ -396,6 +398,11 @@ func (o *PersistConfig) GetRegionScoreFormulaVersion() string {
 // GetHotRegionCacheHitsThreshold returns the hot region cache hits threshold.
 func (o *PersistConfig) GetHotRegionCacheHitsThreshold() int {
 	return int(o.GetScheduleConfig().HotRegionCacheHitsThreshold)
+}
+
+// GetPatrolRegionWorkerCount returns the worker count of the patrol.
+func (o *PersistConfig) GetPatrolRegionWorkerCount() int {
+	return o.GetScheduleConfig().PatrolRegionWorkerCount
 }
 
 // GetMaxMovableHotPeerSize returns the max movable hot peer size.
@@ -646,10 +653,11 @@ func (o *PersistConfig) SetMaxReplicas(replicas int) {
 }
 
 // IsSchedulerDisabled returns if the scheduler is disabled.
-func (o *PersistConfig) IsSchedulerDisabled(t string) bool {
+func (o *PersistConfig) IsSchedulerDisabled(tp types.CheckerSchedulerType) bool {
+	oldType := types.SchedulerTypeCompatibleMap[tp]
 	schedulers := o.GetScheduleConfig().Schedulers
 	for _, s := range schedulers {
-		if t == s.Type {
+		if oldType == s.Type {
 			return s.Disable
 		}
 	}
@@ -739,11 +747,11 @@ func (o *PersistConfig) IsRaftKV2() bool {
 
 // AddSchedulerCfg adds the scheduler configurations.
 // This method is a no-op since we only use configurations derived from one-way synchronization from API server now.
-func (*PersistConfig) AddSchedulerCfg(string, []string) {}
+func (*PersistConfig) AddSchedulerCfg(types.CheckerSchedulerType, []string) {}
 
 // RemoveSchedulerCfg removes the scheduler configurations.
 // This method is a no-op since we only use configurations derived from one-way synchronization from API server now.
-func (*PersistConfig) RemoveSchedulerCfg(string) {}
+func (*PersistConfig) RemoveSchedulerCfg(types.CheckerSchedulerType) {}
 
 // CheckLabelProperty checks if the label property is satisfied.
 func (*PersistConfig) CheckLabelProperty(string, []*metapb.StoreLabel) bool {

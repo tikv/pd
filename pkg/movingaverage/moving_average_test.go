@@ -25,7 +25,7 @@ import (
 
 func addRandData(ma MovingAvg, n int, mx float64) {
 	r := rand.New(rand.NewSource(time.Now().UnixNano()))
-	for i := 0; i < n; i++ {
+	for range n {
 		ma.Add(r.Float64() * mx)
 	}
 }

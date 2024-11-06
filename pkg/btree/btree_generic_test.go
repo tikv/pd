@@ -50,7 +50,7 @@ func perm(n int) (out []Int) {
 
 // rang returns an ordered list of Int items in the range [0, n).
 func rang(n int) (out []Int) {
-	for i := 0; i < n; i++ {
+	for i := range n {
 		out = append(out, Int(i))
 	}
 	return
@@ -101,10 +101,10 @@ func TestBTreeSizeInfo(t *testing.T) {
 		max, _ := tr.Max()
 		assertEq(t, "check max", tr.GetAt(tr.Len()-1), max)
 	}
-	for k := 0; k < treeSize; k++ {
+	for k := range treeSize {
 		assertEq(t, "get k-th", tr.GetAt(k), Int(k))
 	}
-	for x := Int(0); x < treeSize; x++ {
+	for x := range Int(treeSize) {
 		y, rk := tr.GetWithIndex(x)
 		assertEq(t, "get", y, x)
 		assertEq(t, "get rank", rk, int(x))
@@ -128,10 +128,10 @@ func TestBTreeSizeInfo(t *testing.T) {
 		max, _ := tr.Max()
 		assertEq(t, "after delete check max", tr.GetAt(tr.Len()-1), max)
 	}
-	for k := 0; k < treeSize/3; k++ {
+	for k := range treeSize / 3 {
 		assertEq(t, "after delete get k-th", tr.GetAt(k), Int(3*k))
 	}
-	for x := Int(0); x < treeSize; x++ {
+	for x := range Int(treeSize) {
 		y, rk := tr.GetWithIndex(x)
 		if x%3 == 0 {
 			assertEq(t, "after delete get", y, x)
@@ -169,7 +169,7 @@ func TestBTreeSizeInfo(t *testing.T) {
 func TestBTreeG(t *testing.T) {
 	tr := NewG[Int](*btreeDegree)
 	const treeSize = 10000
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		if min, found := tr.Min(); found {
 			t.Fatalf("empty min, got %+v", min)
 		}
@@ -281,7 +281,7 @@ func TestDeleteMaxG(t *testing.T) {
 		got = append(got, v)
 	}
 	// Reverse our list.
-	for i := 0; i < len(got)/2; i++ {
+	for i := range len(got) / 2 {
 		got[i], got[len(got)-i-1] = got[len(got)-i-1], got[i]
 	}
 	if want := rang(100); !reflect.DeepEqual(got, want) {
@@ -786,7 +786,7 @@ func TestCloneConcurrentOperationsG(t *testing.T) {
 	}
 	t.Log("Removing half from first half")
 	toRemove := rang(cloneTestSize)[cloneTestSize/2:]
-	for i := 0; i < len(trees)/2; i++ {
+	for i := range len(trees) / 2 {
 		tree := trees[i]
 		wg.Add(1)
 		go func() {

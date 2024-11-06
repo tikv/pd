@@ -16,31 +16,31 @@ package realcluster
 
 import (
 	"context"
-	"os"
-	"os/exec"
 	"testing"
 
-	"github.com/pingcap/log"
 	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/suite"
+	"github.com/tikv/pd/client/http"
 )
 
-func restartTiUP() {
-	log.Info("start to restart TiUP")
-	cmd := exec.Command("make", "deploy")
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	err := cmd.Run()
-	if err != nil {
-		panic(err)
-	}
-	log.Info("TiUP restart success")
+type rebootPDSuite struct {
+	clusterSuite
+}
+
+func TestRebootPD(t *testing.T) {
+	suite.Run(t, &rebootPDSuite{
+		clusterSuite: clusterSuite{
+			suiteName: "reboot_pd",
+		},
+	})
 }
 
 // https://github.com/tikv/pd/issues/6467
-func TestReloadLabel(t *testing.T) {
-	re := require.New(t)
+func (s *rebootPDSuite) TestReloadLabel() {
+	re := require.New(s.T())
 	ctx := context.Background()
 
+	pdHTTPCli := http.NewClient("pd-real-cluster-test", getPDEndpoints(s.T()))
 	resp, err := pdHTTPCli.GetStores(ctx)
 	re.NoError(err)
 	re.NotEmpty(resp.Stores)
@@ -74,7 +74,8 @@ func TestReloadLabel(t *testing.T) {
 	}
 	// Check the label is set
 	checkLabelsAreEqual()
-	// Restart TiUP to reload the label
-	restartTiUP()
+	// Restart to reload the label
+	s.restart()
+	pdHTTPCli = http.NewClient("pd-real-cluster-test", getPDEndpoints(s.T()))
 	checkLabelsAreEqual()
 }

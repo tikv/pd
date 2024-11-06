@@ -20,9 +20,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/pingcap/errors"
 	"github.com/stretchr/testify/require"
 	tso "github.com/tikv/pd/pkg/mcs/tso/server"
-	mcsutils "github.com/tikv/pd/pkg/mcs/utils"
+	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/testutil"
@@ -45,7 +46,7 @@ func NewTestTSOCluster(ctx context.Context, initialServerCount int, backendEndpo
 		servers:          make(map[string]*tso.Server, initialServerCount),
 		cleanupFuncs:     make(map[string]testutil.CleanupFunc, initialServerCount),
 	}
-	for i := 0; i < initialServerCount; i++ {
+	for range initialServerCount {
 		err = tc.AddServer(tempurl.Alloc())
 		if err != nil {
 			return nil, err
@@ -98,7 +99,7 @@ func RestartTestTSOCluster(
 	})
 
 	if err != nil {
-		return nil, fmt.Errorf("failed to restart the cluster." + err.Error())
+		return nil, errors.New("failed to restart the cluster." + err.Error())
 	}
 
 	return newCluster, nil
@@ -180,7 +181,7 @@ func (tc *TestTSOCluster) WaitForPrimaryServing(re *require.Assertions, keyspace
 
 // WaitForDefaultPrimaryServing waits for one of servers being elected to be the primary/leader of the default keyspace.
 func (tc *TestTSOCluster) WaitForDefaultPrimaryServing(re *require.Assertions) *tso.Server {
-	return tc.WaitForPrimaryServing(re, mcsutils.DefaultKeyspaceID, mcsutils.DefaultKeyspaceGroupID)
+	return tc.WaitForPrimaryServing(re, constant.DefaultKeyspaceID, constant.DefaultKeyspaceGroupID)
 }
 
 // GetServer returns the TSO server by the given address.
@@ -203,7 +204,7 @@ func (tc *TestTSOCluster) GetKeyspaceGroupMember() (members []endpoint.KeyspaceG
 	for _, server := range tc.servers {
 		members = append(members, endpoint.KeyspaceGroupMember{
 			Address:  server.GetAddr(),
-			Priority: mcsutils.DefaultKeyspaceGroupReplicaPriority,
+			Priority: constant.DefaultKeyspaceGroupReplicaPriority,
 		})
 	}
 	return

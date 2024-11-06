@@ -255,9 +255,9 @@ func TestPrepareChecker(t *testing.T) {
 // ref: https://github.com/tikv/pd/issues/6988
 func TestPrepareCheckerWithTransferLeader(t *testing.T) {
 	re := require.New(t)
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/member/changeFrequencyTimes", "return(10)"))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/member/skipCampaignLeaderCheck", "return(true)"))
 	defer func() {
-		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/member/changeFrequencyTimes"))
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/member/skipCampaignLeaderCheck"))
 	}()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

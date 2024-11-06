@@ -45,7 +45,7 @@ var (
 	EpochNotMatch CancelReasonType = "epoch not match"
 	// AlreadyExist is the cancel reason when the operator is running.
 	AlreadyExist CancelReasonType = "already exist"
-	// AdminStop is the cancel reason when the operator is stopped by adminer.
+	// AdminStop is the cancel reason when the operator is stopped by admin.
 	AdminStop CancelReasonType = "admin stop"
 	// NotInRunningState is the cancel reason when the operator is not in running state.
 	NotInRunningState CancelReasonType = "not in running state"
@@ -430,7 +430,7 @@ func (o *Operator) TotalInfluence(opInfluence OpInfluence, region *core.RegionIn
 	}
 	if o.influence == nil {
 		o.influence = NewOpInfluence()
-		for step := 0; step < len(o.steps); step++ {
+		for step := range o.steps {
 			o.steps[step].Influence(*o.influence, region)
 		}
 	}

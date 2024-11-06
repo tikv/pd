@@ -42,6 +42,9 @@ type tsoRequest struct {
 	logical    int64
 	dcLocation string
 
+	// The identifier of the RPC stream in which the request is processed.
+	streamID string
+
 	// Runtime fields.
 	start time.Time
 	pool  *sync.Pool
@@ -57,6 +60,11 @@ func (req *tsoRequest) tryDone(err error) {
 
 // Wait will block until the TSO result is ready.
 func (req *tsoRequest) Wait() (physical int64, logical int64, err error) {
+	return req.waitCtx(req.requestCtx)
+}
+
+// waitCtx waits for the TSO result with specified ctx, while not using req.requestCtx.
+func (req *tsoRequest) waitCtx(ctx context.Context) (physical int64, logical int64, err error) {
 	// If tso command duration is observed very high, the reason could be it
 	// takes too long for Wait() be called.
 	start := time.Now()
@@ -66,20 +74,28 @@ func (req *tsoRequest) Wait() (physical int64, logical int64, err error) {
 		defer req.pool.Put(req)
 		defer trace.StartRegion(req.requestCtx, "pdclient.tsoReqDone").End()
 		err = errors.WithStack(err)
+		now := time.Now()
 		if err != nil {
-			cmdFailDurationTSO.Observe(time.Since(req.start).Seconds())
+			cmdFailDurationTSOWait.Observe(now.Sub(start).Seconds())
+			cmdFailDurationTSO.Observe(now.Sub(req.start).Seconds())
 			return 0, 0, err
 		}
 		physical, logical = req.physical, req.logical
-		now := time.Now()
-		cmdDurationWait.Observe(now.Sub(start).Seconds())
+		cmdDurationTSOWait.Observe(now.Sub(start).Seconds())
 		cmdDurationTSO.Observe(now.Sub(req.start).Seconds())
 		return
-	case <-req.requestCtx.Done():
-		return 0, 0, errors.WithStack(req.requestCtx.Err())
+	case <-ctx.Done():
+		return 0, 0, errors.WithStack(ctx.Err())
 	case <-req.clientCtx.Done():
 		return 0, 0, errors.WithStack(req.clientCtx.Err())
 	}
+}
+
+// waitTimeout waits for the TSO result for limited time. Currently only for test purposes.
+func (req *tsoRequest) waitTimeout(timeout time.Duration) (physical int64, logical int64, err error) {
+	ctx, cancel := context.WithTimeout(req.requestCtx, timeout)
+	defer cancel()
+	return req.waitCtx(ctx)
 }
 
 type tsoRequestFastFail struct {

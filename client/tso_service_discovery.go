@@ -158,7 +158,7 @@ type tsoServiceDiscovery struct {
 // newTSOServiceDiscovery returns a new client-side service discovery for the independent TSO service.
 func newTSOServiceDiscovery(
 	ctx context.Context, metacli MetaStorageClient, apiSvcDiscovery ServiceDiscovery,
-	clusterID uint64, keyspaceID uint32, tlsCfg *tls.Config, option *option,
+	keyspaceID uint32, tlsCfg *tls.Config, option *option,
 ) ServiceDiscovery {
 	ctx, cancel := context.WithCancel(ctx)
 	c := &tsoServiceDiscovery{
@@ -166,7 +166,7 @@ func newTSOServiceDiscovery(
 		cancel:            cancel,
 		metacli:           metacli,
 		apiSvcDiscovery:   apiSvcDiscovery,
-		clusterID:         clusterID,
+		clusterID:         apiSvcDiscovery.GetClusterID(),
 		tlsCfg:            tlsCfg,
 		option:            option,
 		checkMembershipCh: make(chan struct{}, 1),
@@ -180,10 +180,10 @@ func newTSOServiceDiscovery(
 	c.tsoServerDiscovery = &tsoServerDiscovery{urls: make([]string, 0)}
 	// Start with the default keyspace group. The actual keyspace group, to which the keyspace belongs,
 	// will be discovered later.
-	c.defaultDiscoveryKey = fmt.Sprintf(tsoSvcDiscoveryFormat, clusterID, defaultKeySpaceGroupID)
+	c.defaultDiscoveryKey = fmt.Sprintf(tsoSvcDiscoveryFormat, c.clusterID, defaultKeySpaceGroupID)
 
 	log.Info("created tso service discovery",
-		zap.Uint64("cluster-id", clusterID),
+		zap.Uint64("cluster-id", c.clusterID),
 		zap.Uint32("keyspace-id", keyspaceID),
 		zap.String("default-discovery-key", c.defaultDiscoveryKey))
 
@@ -211,7 +211,7 @@ func (c *tsoServiceDiscovery) retry(
 	var err error
 	ticker := time.NewTicker(retryInterval)
 	defer ticker.Stop()
-	for i := 0; i < maxRetryTimes; i++ {
+	for range maxRetryTimes {
 		if err = f(); err == nil {
 			return nil
 		}
@@ -226,6 +226,9 @@ func (c *tsoServiceDiscovery) retry(
 
 // Close releases all resources
 func (c *tsoServiceDiscovery) Close() {
+	if c == nil {
+		return
+	}
 	log.Info("closing tso service discovery")
 
 	c.cancel()

@@ -16,6 +16,8 @@ package checker
 
 import (
 	"fmt"
+	"math/rand"
+	"time"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
@@ -26,7 +28,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/config"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/operator"
-	types "github.com/tikv/pd/pkg/schedule/type"
+	"github.com/tikv/pd/pkg/schedule/types"
 	"go.uber.org/zap"
 )
 
@@ -44,15 +46,17 @@ type ReplicaChecker struct {
 	PauseController
 	cluster                 sche.CheckerCluster
 	conf                    config.CheckerConfigProvider
-	pendingProcessedRegions cache.Cache
+	pendingProcessedRegions *cache.TTLUint64
+	r                       *rand.Rand
 }
 
 // NewReplicaChecker creates a replica checker.
-func NewReplicaChecker(cluster sche.CheckerCluster, conf config.CheckerConfigProvider, pendingProcessedRegions cache.Cache) *ReplicaChecker {
+func NewReplicaChecker(cluster sche.CheckerCluster, conf config.CheckerConfigProvider, pendingProcessedRegions *cache.TTLUint64) *ReplicaChecker {
 	return &ReplicaChecker{
 		cluster:                 cluster,
 		conf:                    conf,
 		pendingProcessedRegions: pendingProcessedRegions,
+		r:                       rand.New(rand.NewSource(time.Now().UnixNano())),
 	}
 }
 
@@ -61,41 +65,46 @@ func (*ReplicaChecker) Name() string {
 	return types.ReplicaChecker.String()
 }
 
+// GetType return ReplicaChecker's type.
+func (*ReplicaChecker) GetType() types.CheckerSchedulerType {
+	return types.ReplicaChecker
+}
+
 // Check verifies a region's replicas, creating an operator.Operator if need.
-func (r *ReplicaChecker) Check(region *core.RegionInfo) *operator.Operator {
+func (c *ReplicaChecker) Check(region *core.RegionInfo) *operator.Operator {
 	replicaCheckerCounter.Inc()
-	if r.IsPaused() {
+	if c.IsPaused() {
 		replicaCheckerPausedCounter.Inc()
 		return nil
 	}
-	if op := r.checkDownPeer(region); op != nil {
+	if op := c.checkDownPeer(region); op != nil {
 		replicaCheckerNewOpCounter.Inc()
 		op.SetPriorityLevel(constant.High)
 		return op
 	}
-	if op := r.checkOfflinePeer(region); op != nil {
+	if op := c.checkOfflinePeer(region); op != nil {
 		replicaCheckerNewOpCounter.Inc()
 		op.SetPriorityLevel(constant.High)
 		return op
 	}
-	if op := r.checkMakeUpReplica(region); op != nil {
+	if op := c.checkMakeUpReplica(region); op != nil {
 		replicaCheckerNewOpCounter.Inc()
 		op.SetPriorityLevel(constant.High)
 		return op
 	}
-	if op := r.checkRemoveExtraReplica(region); op != nil {
+	if op := c.checkRemoveExtraReplica(region); op != nil {
 		replicaCheckerNewOpCounter.Inc()
 		return op
 	}
-	if op := r.checkLocationReplacement(region); op != nil {
+	if op := c.checkLocationReplacement(region); op != nil {
 		replicaCheckerNewOpCounter.Inc()
 		return op
 	}
 	return nil
 }
 
-func (r *ReplicaChecker) checkDownPeer(region *core.RegionInfo) *operator.Operator {
-	if !r.conf.IsRemoveDownReplicaEnabled() {
+func (c *ReplicaChecker) checkDownPeer(region *core.RegionInfo) *operator.Operator {
+	if !c.conf.IsRemoveDownReplicaEnabled() {
 		return nil
 	}
 
@@ -105,22 +114,22 @@ func (r *ReplicaChecker) checkDownPeer(region *core.RegionInfo) *operator.Operat
 			continue
 		}
 		storeID := peer.GetStoreId()
-		store := r.cluster.GetStore(storeID)
+		store := c.cluster.GetStore(storeID)
 		if store == nil {
 			log.Warn("lost the store, maybe you are recovering the PD cluster", zap.Uint64("store-id", storeID))
 			return nil
 		}
 		// Only consider the state of the Store, not `stats.DownSeconds`.
-		if store.DownTime() < r.conf.GetMaxStoreDownTime() {
+		if store.DownTime() < c.conf.GetMaxStoreDownTime() {
 			continue
 		}
-		return r.fixPeer(region, storeID, downStatus)
+		return c.fixPeer(region, storeID, downStatus)
 	}
 	return nil
 }
 
-func (r *ReplicaChecker) checkOfflinePeer(region *core.RegionInfo) *operator.Operator {
-	if !r.conf.IsReplaceOfflineReplicaEnabled() {
+func (c *ReplicaChecker) checkOfflinePeer(region *core.RegionInfo) *operator.Operator {
+	if !c.conf.IsReplaceOfflineReplicaEnabled() {
 		return nil
 	}
 
@@ -131,7 +140,7 @@ func (r *ReplicaChecker) checkOfflinePeer(region *core.RegionInfo) *operator.Ope
 
 	for _, peer := range region.GetPeers() {
 		storeID := peer.GetStoreId()
-		store := r.cluster.GetStore(storeID)
+		store := c.cluster.GetStore(storeID)
 		if store == nil {
 			log.Warn("lost the store, maybe you are recovering the PD cluster", zap.Uint64("store-id", storeID))
 			return nil
@@ -140,32 +149,32 @@ func (r *ReplicaChecker) checkOfflinePeer(region *core.RegionInfo) *operator.Ope
 			continue
 		}
 
-		return r.fixPeer(region, storeID, offlineStatus)
+		return c.fixPeer(region, storeID, offlineStatus)
 	}
 
 	return nil
 }
 
-func (r *ReplicaChecker) checkMakeUpReplica(region *core.RegionInfo) *operator.Operator {
-	if !r.conf.IsMakeUpReplicaEnabled() {
+func (c *ReplicaChecker) checkMakeUpReplica(region *core.RegionInfo) *operator.Operator {
+	if !c.conf.IsMakeUpReplicaEnabled() {
 		return nil
 	}
-	if len(region.GetPeers()) >= r.conf.GetMaxReplicas() {
+	if len(region.GetPeers()) >= c.conf.GetMaxReplicas() {
 		return nil
 	}
 	log.Debug("region has fewer than max replicas", zap.Uint64("region-id", region.GetID()), zap.Int("peers", len(region.GetPeers())))
-	regionStores := r.cluster.GetRegionStores(region)
-	target, filterByTempState := r.strategy(region).SelectStoreToAdd(regionStores)
+	regionStores := c.cluster.GetRegionStores(region)
+	target, filterByTempState := c.strategy(c.r, region).SelectStoreToAdd(regionStores)
 	if target == 0 {
 		log.Debug("no store to add replica", zap.Uint64("region-id", region.GetID()))
 		replicaCheckerNoTargetStoreCounter.Inc()
 		if filterByTempState {
-			r.pendingProcessedRegions.Put(region.GetID(), nil)
+			c.pendingProcessedRegions.Put(region.GetID(), nil)
 		}
 		return nil
 	}
 	newPeer := &metapb.Peer{StoreId: target}
-	op, err := operator.CreateAddPeerOperator("make-up-replica", r.cluster, region, newPeer, operator.OpReplica)
+	op, err := operator.CreateAddPeerOperator("make-up-replica", c.cluster, region, newPeer, operator.OpReplica)
 	if err != nil {
 		log.Debug("create make-up-replica operator fail", errs.ZapError(err))
 		return nil
@@ -173,24 +182,24 @@ func (r *ReplicaChecker) checkMakeUpReplica(region *core.RegionInfo) *operator.O
 	return op
 }
 
-func (r *ReplicaChecker) checkRemoveExtraReplica(region *core.RegionInfo) *operator.Operator {
-	if !r.conf.IsRemoveExtraReplicaEnabled() {
+func (c *ReplicaChecker) checkRemoveExtraReplica(region *core.RegionInfo) *operator.Operator {
+	if !c.conf.IsRemoveExtraReplicaEnabled() {
 		return nil
 	}
 	// when add learner peer, the number of peer will exceed max replicas for a while,
 	// just comparing the the number of voters to avoid too many cancel add operator log.
-	if len(region.GetVoters()) <= r.conf.GetMaxReplicas() {
+	if len(region.GetVoters()) <= c.conf.GetMaxReplicas() {
 		return nil
 	}
 	log.Debug("region has more than max replicas", zap.Uint64("region-id", region.GetID()), zap.Int("peers", len(region.GetPeers())))
-	regionStores := r.cluster.GetRegionStores(region)
-	old := r.strategy(region).SelectStoreToRemove(regionStores)
+	regionStores := c.cluster.GetRegionStores(region)
+	old := c.strategy(c.r, region).SelectStoreToRemove(regionStores)
 	if old == 0 {
 		replicaCheckerNoWorstPeerCounter.Inc()
-		r.pendingProcessedRegions.Put(region.GetID(), nil)
+		c.pendingProcessedRegions.Put(region.GetID(), nil)
 		return nil
 	}
-	op, err := operator.CreateRemovePeerOperator("remove-extra-replica", r.cluster, operator.OpReplica, region, old)
+	op, err := operator.CreateRemovePeerOperator("remove-extra-replica", c.cluster, operator.OpReplica, region, old)
 	if err != nil {
 		replicaCheckerCreateOpFailedCounter.Inc()
 		return nil
@@ -198,13 +207,13 @@ func (r *ReplicaChecker) checkRemoveExtraReplica(region *core.RegionInfo) *opera
 	return op
 }
 
-func (r *ReplicaChecker) checkLocationReplacement(region *core.RegionInfo) *operator.Operator {
-	if !r.conf.IsLocationReplacementEnabled() {
+func (c *ReplicaChecker) checkLocationReplacement(region *core.RegionInfo) *operator.Operator {
+	if !c.conf.IsLocationReplacementEnabled() {
 		return nil
 	}
 
-	strategy := r.strategy(region)
-	regionStores := r.cluster.GetRegionStores(region)
+	strategy := c.strategy(c.r, region)
+	regionStores := c.cluster.GetRegionStores(region)
 	oldStore := strategy.SelectStoreToRemove(regionStores)
 	if oldStore == 0 {
 		replicaCheckerAllRightCounter.Inc()
@@ -218,7 +227,7 @@ func (r *ReplicaChecker) checkLocationReplacement(region *core.RegionInfo) *oper
 	}
 
 	newPeer := &metapb.Peer{StoreId: newStore}
-	op, err := operator.CreateMovePeerOperator("move-to-better-location", r.cluster, region, operator.OpReplica, oldStore, newPeer)
+	op, err := operator.CreateMovePeerOperator("move-to-better-location", c.cluster, region, operator.OpReplica, oldStore, newPeer)
 	if err != nil {
 		replicaCheckerCreateOpFailedCounter.Inc()
 		return nil
@@ -226,11 +235,11 @@ func (r *ReplicaChecker) checkLocationReplacement(region *core.RegionInfo) *oper
 	return op
 }
 
-func (r *ReplicaChecker) fixPeer(region *core.RegionInfo, storeID uint64, status string) *operator.Operator {
+func (c *ReplicaChecker) fixPeer(region *core.RegionInfo, storeID uint64, status string) *operator.Operator {
 	// Check the number of replicas first.
-	if len(region.GetVoters()) > r.conf.GetMaxReplicas() {
+	if len(region.GetVoters()) > c.conf.GetMaxReplicas() {
 		removeExtra := fmt.Sprintf("remove-extra-%s-replica", status)
-		op, err := operator.CreateRemovePeerOperator(removeExtra, r.cluster, operator.OpReplica, region, storeID)
+		op, err := operator.CreateRemovePeerOperator(removeExtra, c.cluster, operator.OpReplica, region, storeID)
 		if err != nil {
 			if status == offlineStatus {
 				replicaCheckerRemoveExtraOfflineFailedCounter.Inc()
@@ -242,8 +251,8 @@ func (r *ReplicaChecker) fixPeer(region *core.RegionInfo, storeID uint64, status
 		return op
 	}
 
-	regionStores := r.cluster.GetRegionStores(region)
-	target, filterByTempState := r.strategy(region).SelectStoreToFix(regionStores, storeID)
+	regionStores := c.cluster.GetRegionStores(region)
+	target, filterByTempState := c.strategy(c.r, region).SelectStoreToFix(regionStores, storeID)
 	if target == 0 {
 		if status == offlineStatus {
 			replicaCheckerNoStoreOfflineCounter.Inc()
@@ -252,13 +261,13 @@ func (r *ReplicaChecker) fixPeer(region *core.RegionInfo, storeID uint64, status
 		}
 		log.Debug("no best store to add replica", zap.Uint64("region-id", region.GetID()))
 		if filterByTempState {
-			r.pendingProcessedRegions.Put(region.GetID(), nil)
+			c.pendingProcessedRegions.Put(region.GetID(), nil)
 		}
 		return nil
 	}
 	newPeer := &metapb.Peer{StoreId: target}
 	replace := fmt.Sprintf("replace-%s-replica", status)
-	op, err := operator.CreateMovePeerOperator(replace, r.cluster, region, operator.OpReplica, storeID, newPeer)
+	op, err := operator.CreateMovePeerOperator(replace, c.cluster, region, operator.OpReplica, storeID, newPeer)
 	if err != nil {
 		if status == offlineStatus {
 			replicaCheckerReplaceOfflineFailedCounter.Inc()
@@ -270,12 +279,13 @@ func (r *ReplicaChecker) fixPeer(region *core.RegionInfo, storeID uint64, status
 	return op
 }
 
-func (r *ReplicaChecker) strategy(region *core.RegionInfo) *ReplicaStrategy {
+func (c *ReplicaChecker) strategy(r *rand.Rand, region *core.RegionInfo) *ReplicaStrategy {
 	return &ReplicaStrategy{
-		checkerName:    r.Name(),
-		cluster:        r.cluster,
-		locationLabels: r.conf.GetLocationLabels(),
-		isolationLevel: r.conf.GetIsolationLevel(),
+		checkerName:    c.Name(),
+		cluster:        c.cluster,
+		locationLabels: c.conf.GetLocationLabels(),
+		isolationLevel: c.conf.GetIsolationLevel(),
 		region:         region,
+		r:              r,
 	}
 }

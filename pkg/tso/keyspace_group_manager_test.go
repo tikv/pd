@@ -32,16 +32,17 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/mcs/discovery"
-	mcsutils "github.com/tikv/pd/pkg/mcs/utils"
+	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
+	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
-	"go.etcd.io/etcd/clientv3"
-	"go.etcd.io/etcd/mvcc/mvccpb"
+	"go.etcd.io/etcd/api/v3/mvccpb"
+	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/goleak"
 )
 
@@ -85,10 +86,10 @@ func (suite *keyspaceGroupManagerTestSuite) createConfig() *TestServiceConfig {
 		BackendEndpoints:          suite.backendEndpoints,
 		ListenAddr:                addr,
 		AdvertiseListenAddr:       addr,
-		LeaderLease:               mcsutils.DefaultLeaderLease,
+		LeaderLease:               constant.DefaultLeaderLease,
 		LocalTSOEnabled:           false,
 		TSOUpdatePhysicalInterval: 50 * time.Millisecond,
-		TSOSaveInterval:           time.Duration(mcsutils.DefaultLeaderLease) * time.Second,
+		TSOSaveInterval:           time.Duration(constant.DefaultLeaderLease) * time.Second,
 		MaxResetTSGap:             time.Hour * 24,
 		TLSConfig:                 nil,
 	}
@@ -112,7 +113,7 @@ func (suite *keyspaceGroupManagerTestSuite) TestDeletedGroupCleanup() {
 	suite.applyEtcdEvents(re, rootPath, []*etcdEvent{generateKeyspaceGroupPutEvent(1, []uint32{1}, []string{svcAddr})})
 	// Check if the TSO key is created.
 	testutil.Eventually(re, func() bool {
-		ts, err := mgr.tsoSvcStorage.LoadTimestamp(endpoint.KeyspaceGroupGlobalTSPath(1))
+		ts, err := mgr.tsoSvcStorage.LoadTimestamp(keypath.KeyspaceGroupGlobalTSPath(1))
 		re.NoError(err)
 		return ts != typeutil.ZeroTime
 	})
@@ -120,7 +121,7 @@ func (suite *keyspaceGroupManagerTestSuite) TestDeletedGroupCleanup() {
 	suite.applyEtcdEvents(re, rootPath, []*etcdEvent{generateKeyspaceGroupDeleteEvent(1)})
 	// Check if the TSO key is deleted.
 	testutil.Eventually(re, func() bool {
-		ts, err := mgr.tsoSvcStorage.LoadTimestamp(endpoint.KeyspaceGroupGlobalTSPath(1))
+		ts, err := mgr.tsoSvcStorage.LoadTimestamp(keypath.KeyspaceGroupGlobalTSPath(1))
 		re.NoError(err)
 		return ts == typeutil.ZeroTime
 	})
@@ -131,15 +132,15 @@ func (suite *keyspaceGroupManagerTestSuite) TestDeletedGroupCleanup() {
 	re.NotContains(mgr.deletedGroups, 1)
 	mgr.RUnlock()
 	// Try to delete the default keyspace group.
-	suite.applyEtcdEvents(re, rootPath, []*etcdEvent{generateKeyspaceGroupDeleteEvent(mcsutils.DefaultKeyspaceGroupID)})
+	suite.applyEtcdEvents(re, rootPath, []*etcdEvent{generateKeyspaceGroupDeleteEvent(constant.DefaultKeyspaceGroupID)})
 	// Default keyspace group should NOT be deleted.
 	mgr.RLock()
-	re.NotNil(mgr.ams[mcsutils.DefaultKeyspaceGroupID])
-	re.NotNil(mgr.kgs[mcsutils.DefaultKeyspaceGroupID])
-	re.NotContains(mgr.deletedGroups, mcsutils.DefaultKeyspaceGroupID)
+	re.NotNil(mgr.ams[constant.DefaultKeyspaceGroupID])
+	re.NotNil(mgr.kgs[constant.DefaultKeyspaceGroupID])
+	re.NotContains(mgr.deletedGroups, constant.DefaultKeyspaceGroupID)
 	mgr.RUnlock()
 	// Default keyspace group TSO key should NOT be deleted.
-	ts, err := mgr.legacySvcStorage.LoadTimestamp(endpoint.KeyspaceGroupGlobalTSPath(mcsutils.DefaultKeyspaceGroupID))
+	ts, err := mgr.legacySvcStorage.LoadTimestamp(keypath.KeyspaceGroupGlobalTSPath(constant.DefaultKeyspaceGroupID))
 	re.NoError(err)
 	re.NotEmpty(ts)
 
@@ -152,19 +153,20 @@ func (suite *keyspaceGroupManagerTestSuite) TestNewKeyspaceGroupManager() {
 	re := suite.Require()
 
 	tsoServiceID := &discovery.ServiceRegistryEntry{ServiceAddr: suite.cfg.AdvertiseListenAddr}
-	clusterID := rand.Uint64()
+	clusterID, err := endpoint.InitClusterID(suite.etcdClient)
+	re.NoError(err)
 	clusterIDStr := strconv.FormatUint(clusterID, 10)
+	keypath.SetClusterID(clusterID)
 
 	legacySvcRootPath := path.Join("/pd", clusterIDStr)
-	tsoSvcRootPath := path.Join(mcsutils.MicroserviceRootPath, clusterIDStr, "tso")
+	tsoSvcRootPath := path.Join(constant.MicroserviceRootPath, clusterIDStr, "tso")
 	electionNamePrefix := "tso-server-" + clusterIDStr
 
 	kgm := NewKeyspaceGroupManager(
 		suite.ctx, tsoServiceID, suite.etcdClient, nil, electionNamePrefix,
-		clusterID, legacySvcRootPath, tsoSvcRootPath, suite.cfg)
+		legacySvcRootPath, tsoSvcRootPath, suite.cfg)
 	defer kgm.Close()
-	err := kgm.Initialize()
-	re.NoError(err)
+	re.NoError(kgm.Initialize())
 
 	re.Equal(tsoServiceID, kgm.tsoServiceID)
 	re.Equal(suite.etcdClient, kgm.etcdClient)
@@ -173,14 +175,14 @@ func (suite *keyspaceGroupManagerTestSuite) TestNewKeyspaceGroupManager() {
 	re.Equal(tsoSvcRootPath, kgm.tsoSvcRootPath)
 	re.Equal(suite.cfg, kgm.cfg)
 
-	am, err := kgm.GetAllocatorManager(mcsutils.DefaultKeyspaceGroupID)
+	am, err := kgm.GetAllocatorManager(constant.DefaultKeyspaceGroupID)
 	re.NoError(err)
 	re.False(am.enableLocalTSO)
-	re.Equal(mcsutils.DefaultKeyspaceGroupID, am.kgID)
-	re.Equal(mcsutils.DefaultLeaderLease, am.leaderLease)
+	re.Equal(constant.DefaultKeyspaceGroupID, am.kgID)
+	re.Equal(constant.DefaultLeaderLease, am.leaderLease)
 	re.Equal(time.Hour*24, am.maxResetTSGap())
 	re.Equal(legacySvcRootPath, am.rootPath)
-	re.Equal(time.Duration(mcsutils.DefaultLeaderLease)*time.Second, am.saveInterval)
+	re.Equal(time.Duration(constant.DefaultLeaderLease)*time.Second, am.saveInterval)
 	re.Equal(time.Duration(50)*time.Millisecond, am.updatePhysicalInterval)
 }
 
@@ -436,38 +438,38 @@ func (suite *keyspaceGroupManagerTestSuite) TestGetKeyspaceGroupMetaWithCheck() 
 	re.NoError(err)
 
 	// Should be able to get AM for the default/null keyspace and keyspace 1, 2 in keyspace group 0.
-	am, kg, kgid, err = mgr.getKeyspaceGroupMetaWithCheck(mcsutils.DefaultKeyspaceID, 0)
+	am, kg, kgid, err = mgr.getKeyspaceGroupMetaWithCheck(constant.DefaultKeyspaceID, 0)
 	re.NoError(err)
-	re.Equal(mcsutils.DefaultKeyspaceGroupID, kgid)
+	re.Equal(constant.DefaultKeyspaceGroupID, kgid)
 	re.NotNil(am)
 	re.NotNil(kg)
-	am, kg, kgid, err = mgr.getKeyspaceGroupMetaWithCheck(mcsutils.NullKeyspaceID, 0)
+	am, kg, kgid, err = mgr.getKeyspaceGroupMetaWithCheck(constant.NullKeyspaceID, 0)
 	re.NoError(err)
-	re.Equal(mcsutils.DefaultKeyspaceGroupID, kgid)
+	re.Equal(constant.DefaultKeyspaceGroupID, kgid)
 	re.NotNil(am)
 	re.NotNil(kg)
 	am, kg, kgid, err = mgr.getKeyspaceGroupMetaWithCheck(1, 0)
 	re.NoError(err)
-	re.Equal(mcsutils.DefaultKeyspaceGroupID, kgid)
+	re.Equal(constant.DefaultKeyspaceGroupID, kgid)
 	re.NotNil(am)
 	re.NotNil(kg)
 	am, kg, kgid, err = mgr.getKeyspaceGroupMetaWithCheck(2, 0)
 	re.NoError(err)
-	re.Equal(mcsutils.DefaultKeyspaceGroupID, kgid)
+	re.Equal(constant.DefaultKeyspaceGroupID, kgid)
 	re.NotNil(am)
 	re.NotNil(kg)
 	// Should still succeed even keyspace 3 isn't explicitly assigned to any
 	// keyspace group. It will be assigned to the default keyspace group.
 	am, kg, kgid, err = mgr.getKeyspaceGroupMetaWithCheck(3, 0)
 	re.NoError(err)
-	re.Equal(mcsutils.DefaultKeyspaceGroupID, kgid)
+	re.Equal(constant.DefaultKeyspaceGroupID, kgid)
 	re.NotNil(am)
 	re.NotNil(kg)
 	// Should succeed and get the meta of keyspace group 0, because keyspace 0
 	// belongs to group 0, though the specified group 1 doesn't exist.
-	am, kg, kgid, err = mgr.getKeyspaceGroupMetaWithCheck(mcsutils.DefaultKeyspaceID, 1)
+	am, kg, kgid, err = mgr.getKeyspaceGroupMetaWithCheck(constant.DefaultKeyspaceID, 1)
 	re.NoError(err)
-	re.Equal(mcsutils.DefaultKeyspaceGroupID, kgid)
+	re.Equal(constant.DefaultKeyspaceGroupID, kgid)
 	re.NotNil(am)
 	re.NotNil(kg)
 	// Should fail because keyspace 3 isn't explicitly assigned to any keyspace
@@ -501,8 +503,8 @@ func (suite *keyspaceGroupManagerTestSuite) TestDefaultMembershipRestriction() {
 
 	// Create keyspace group 0 which contains keyspace 0, 1, 2.
 	addKeyspaceGroupAssignment(
-		suite.ctx, suite.etcdClient, mcsutils.DefaultKeyspaceGroupID, rootPath,
-		[]string{svcAddr}, []int{0}, []uint32{mcsutils.DefaultKeyspaceID, 1, 2})
+		suite.ctx, suite.etcdClient, constant.DefaultKeyspaceGroupID, rootPath,
+		[]string{svcAddr}, []int{0}, []uint32{constant.DefaultKeyspaceID, 1, 2})
 	// Create keyspace group 3 which contains keyspace 3, 4.
 	addKeyspaceGroupAssignment(
 		suite.ctx, suite.etcdClient, uint32(3), mgr.legacySvcRootPath,
@@ -513,18 +515,18 @@ func (suite *keyspaceGroupManagerTestSuite) TestDefaultMembershipRestriction() {
 
 	// Should be able to get AM for keyspace 0 in keyspace group 0.
 	am, kg, kgid, err = mgr.getKeyspaceGroupMetaWithCheck(
-		mcsutils.DefaultKeyspaceID, mcsutils.DefaultKeyspaceGroupID)
+		constant.DefaultKeyspaceID, constant.DefaultKeyspaceGroupID)
 	re.NoError(err)
-	re.Equal(mcsutils.DefaultKeyspaceGroupID, kgid)
+	re.Equal(constant.DefaultKeyspaceGroupID, kgid)
 	re.NotNil(am)
 	re.NotNil(kg)
 
 	event = generateKeyspaceGroupPutEvent(
-		mcsutils.DefaultKeyspaceGroupID, []uint32{1, 2}, []string{svcAddr})
+		constant.DefaultKeyspaceGroupID, []uint32{1, 2}, []string{svcAddr})
 	err = putKeyspaceGroupToEtcd(suite.ctx, suite.etcdClient, rootPath, event.ksg)
 	re.NoError(err)
 	event = generateKeyspaceGroupPutEvent(
-		3, []uint32{mcsutils.DefaultKeyspaceID, 3, 4}, []string{svcAddr})
+		3, []uint32{constant.DefaultKeyspaceID, 3, 4}, []string{svcAddr})
 	err = putKeyspaceGroupToEtcd(suite.ctx, suite.etcdClient, rootPath, event.ksg)
 	re.NoError(err)
 
@@ -533,15 +535,15 @@ func (suite *keyspaceGroupManagerTestSuite) TestDefaultMembershipRestriction() {
 	time.Sleep(1 * time.Second)
 	// Should still be able to get AM for keyspace 0 in keyspace group 0.
 	am, kg, kgid, err = mgr.getKeyspaceGroupMetaWithCheck(
-		mcsutils.DefaultKeyspaceID, mcsutils.DefaultKeyspaceGroupID)
+		constant.DefaultKeyspaceID, constant.DefaultKeyspaceGroupID)
 	re.NoError(err)
-	re.Equal(mcsutils.DefaultKeyspaceGroupID, kgid)
+	re.Equal(constant.DefaultKeyspaceGroupID, kgid)
 	re.NotNil(am)
 	re.NotNil(kg)
 	// Should succeed and return the keyspace group meta from the default keyspace group
-	am, kg, kgid, err = mgr.getKeyspaceGroupMetaWithCheck(mcsutils.DefaultKeyspaceID, 3)
+	am, kg, kgid, err = mgr.getKeyspaceGroupMetaWithCheck(constant.DefaultKeyspaceID, 3)
 	re.NoError(err)
-	re.Equal(mcsutils.DefaultKeyspaceGroupID, kgid)
+	re.Equal(constant.DefaultKeyspaceGroupID, kgid)
 	re.NotNil(am)
 	re.NotNil(kg)
 }
@@ -574,8 +576,8 @@ func (suite *keyspaceGroupManagerTestSuite) TestKeyspaceMovementConsistency() {
 
 	// Create keyspace group 0 which contains keyspace 0, 1, 2.
 	addKeyspaceGroupAssignment(
-		suite.ctx, suite.etcdClient, mcsutils.DefaultKeyspaceGroupID,
-		rootPath, []string{svcAddr}, []int{0}, []uint32{mcsutils.DefaultKeyspaceID, 10, 20})
+		suite.ctx, suite.etcdClient, constant.DefaultKeyspaceGroupID,
+		rootPath, []string{svcAddr}, []int{0}, []uint32{constant.DefaultKeyspaceID, 10, 20})
 	// Create keyspace group 1 which contains keyspace 3, 4.
 	addKeyspaceGroupAssignment(
 		suite.ctx, suite.etcdClient, uint32(1), rootPath,
@@ -585,9 +587,9 @@ func (suite *keyspaceGroupManagerTestSuite) TestKeyspaceMovementConsistency() {
 	re.NoError(err)
 
 	// Should be able to get AM for keyspace 10 in keyspace group 0.
-	am, kg, kgid, err = mgr.getKeyspaceGroupMetaWithCheck(10, mcsutils.DefaultKeyspaceGroupID)
+	am, kg, kgid, err = mgr.getKeyspaceGroupMetaWithCheck(10, constant.DefaultKeyspaceGroupID)
 	re.NoError(err)
-	re.Equal(mcsutils.DefaultKeyspaceGroupID, kgid)
+	re.Equal(constant.DefaultKeyspaceGroupID, kgid)
 	re.NotNil(am)
 	re.NotNil(kg)
 
@@ -603,7 +605,7 @@ func (suite *keyspaceGroupManagerTestSuite) TestKeyspaceMovementConsistency() {
 	}, testutil.WithWaitFor(3*time.Second), testutil.WithTickInterval(50*time.Millisecond))
 
 	event = generateKeyspaceGroupPutEvent(
-		mcsutils.DefaultKeyspaceGroupID, []uint32{mcsutils.DefaultKeyspaceID, 20}, []string{svcAddr})
+		constant.DefaultKeyspaceGroupID, []uint32{constant.DefaultKeyspaceID, 20}, []string{svcAddr})
 	err = putKeyspaceGroupToEtcd(suite.ctx, suite.etcdClient, rootPath, event.ksg)
 	re.NoError(err)
 
@@ -773,7 +775,7 @@ func (suite *keyspaceGroupManagerTestSuite) runTestLoadKeyspaceGroupsAssignment(
 
 	// If no keyspace group is assigned to this host/pod, the default keyspace group should be initialized.
 	if numberOfKeyspaceGroupsToAdd <= 0 {
-		expectedGroupIDs = append(expectedGroupIDs, mcsutils.DefaultKeyspaceGroupID)
+		expectedGroupIDs = append(expectedGroupIDs, constant.DefaultKeyspaceGroupID)
 	}
 
 	// Verify the keyspace group assignment.
@@ -799,12 +801,12 @@ func (suite *keyspaceGroupManagerTestSuite) newKeyspaceGroupManager(
 	tsoServiceID := &discovery.ServiceRegistryEntry{ServiceAddr: cfg.GetAdvertiseListenAddr()}
 	clusterIDStr := strconv.FormatUint(clusterID, 10)
 	legacySvcRootPath := path.Join("/pd", clusterIDStr)
-	tsoSvcRootPath := path.Join(mcsutils.MicroserviceRootPath, clusterIDStr, "tso")
+	tsoSvcRootPath := path.Join(constant.MicroserviceRootPath, clusterIDStr, "tso")
 	electionNamePrefix := "kgm-test-" + cfg.GetAdvertiseListenAddr()
 
 	kgm := NewKeyspaceGroupManager(
 		suite.ctx, tsoServiceID, suite.etcdClient, nil, electionNamePrefix,
-		clusterID, legacySvcRootPath, tsoSvcRootPath, cfg)
+		legacySvcRootPath, tsoSvcRootPath, cfg)
 	if loadKeyspaceGroupsBatchSize != 0 {
 		kgm.loadKeyspaceGroupsBatchSize = loadKeyspaceGroupsBatchSize
 	}
@@ -816,7 +818,7 @@ func putKeyspaceGroupToEtcd(
 	ctx context.Context, etcdClient *clientv3.Client,
 	rootPath string, group *endpoint.KeyspaceGroup,
 ) error {
-	key := strings.Join([]string{rootPath, endpoint.KeyspaceGroupIDPath(group.ID)}, "/")
+	key := strings.Join([]string{rootPath, keypath.KeyspaceGroupIDPath(group.ID)}, "/")
 	value, err := json.Marshal(group)
 	if err != nil {
 		return err
@@ -834,7 +836,7 @@ func deleteKeyspaceGroupInEtcd(
 	ctx context.Context, etcdClient *clientv3.Client,
 	rootPath string, id uint32,
 ) error {
-	key := strings.Join([]string{rootPath, endpoint.KeyspaceGroupIDPath(id)}, "/")
+	key := strings.Join([]string{rootPath, keypath.KeyspaceGroupIDPath(id)}, "/")
 
 	if _, err := etcdClient.Delete(ctx, key); err != nil {
 		return err
@@ -863,7 +865,7 @@ func addKeyspaceGroupAssignment(
 		Keyspaces: keyspaces,
 	}
 
-	key := strings.Join([]string{rootPath, endpoint.KeyspaceGroupIDPath(groupID)}, "/")
+	key := strings.Join([]string{rootPath, keypath.KeyspaceGroupIDPath(groupID)}, "/")
 	value, err := json.Marshal(group)
 	if err != nil {
 		return err
@@ -881,7 +883,7 @@ func collectAssignedKeyspaceGroupIDs(re *require.Assertions, kgm *KeyspaceGroupM
 	defer kgm.RUnlock()
 
 	ids := []uint32{}
-	for i := 0; i < len(kgm.kgs); i++ {
+	for i := range kgm.kgs {
 		kg := kgm.kgs[i]
 		if kg == nil {
 			re.Nil(kgm.ams[i], fmt.Sprintf("ksg is nil but am is not nil for id %d", i))
@@ -908,7 +910,7 @@ func collectAllLoadedKeyspaceGroupIDs(kgm *KeyspaceGroupManager) []uint32 {
 	defer kgm.RUnlock()
 
 	ids := []uint32{}
-	for i := 0; i < len(kgm.kgs); i++ {
+	for i := range kgm.kgs {
 		kg := kgm.kgs[i]
 		if kg != nil {
 			ids = append(ids, uint32(i))
@@ -963,7 +965,7 @@ func (suite *keyspaceGroupManagerTestSuite) TestUpdateKeyspaceGroupMembership() 
 
 		// Verify the keyspaces loaded is sorted.
 		re.Equal(len(keyspaces), len(newGroup.Keyspaces))
-		for i := 0; i < len(newGroup.Keyspaces); i++ {
+		for i := range newGroup.Keyspaces {
 			if i > 0 {
 				re.Less(newGroup.Keyspaces[i-1], newGroup.Keyspaces[i])
 			}
@@ -1043,10 +1045,10 @@ func (suite *keyspaceGroupManagerTestSuite) TestPrimaryPriorityChange() {
 	}()
 
 	var err error
-	defaultPriority := mcsutils.DefaultKeyspaceGroupReplicaPriority
-	clusterID := rand.Uint64()
+	defaultPriority := constant.DefaultKeyspaceGroupReplicaPriority
+	clusterID, err := endpoint.InitClusterID(suite.etcdClient)
+	re.NoError(err)
 	clusterIDStr := strconv.FormatUint(clusterID, 10)
-
 	rootPath := path.Join("/pd", clusterIDStr)
 	cfg1 := suite.createConfig()
 	cfg2 := suite.createConfig()
@@ -1054,14 +1056,15 @@ func (suite *keyspaceGroupManagerTestSuite) TestPrimaryPriorityChange() {
 	svcAddr2 := cfg2.GetAdvertiseListenAddr()
 
 	// Register TSO server 1
-	err = suite.registerTSOServer(re, clusterIDStr, svcAddr1, cfg1)
+	cfg1.Name = "tso1"
+	err = suite.registerTSOServer(re, svcAddr1, cfg1)
 	re.NoError(err)
 	defer func() {
-		re.NoError(suite.deregisterTSOServer(clusterIDStr, svcAddr1))
+		re.NoError(suite.deregisterTSOServer(svcAddr1))
 	}()
 
 	// Create three keyspace groups on two TSO servers with default replica priority.
-	ids := []uint32{0, mcsutils.MaxKeyspaceGroupCountInUse / 2, mcsutils.MaxKeyspaceGroupCountInUse - 1}
+	ids := []uint32{0, constant.MaxKeyspaceGroupCountInUse / 2, constant.MaxKeyspaceGroupCountInUse - 1}
 	for _, id := range ids {
 		addKeyspaceGroupAssignment(
 			suite.ctx, suite.etcdClient, id, rootPath,
@@ -1087,7 +1090,7 @@ func (suite *keyspaceGroupManagerTestSuite) TestPrimaryPriorityChange() {
 	}
 
 	// And the primaries on TSO Server 1 should continue to serve TSO requests without any failures.
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		for _, id := range ids {
 			_, keyspaceGroupBelongTo, err := mgr1.HandleTSORequest(suite.ctx, id, id, GlobalDCLocation, 1)
 			re.NoError(err)
@@ -1102,7 +1105,8 @@ func (suite *keyspaceGroupManagerTestSuite) TestPrimaryPriorityChange() {
 	checkTSO(ctx, re, &wg, mgr1, ids)
 
 	// Create the Second TSO server.
-	err = suite.registerTSOServer(re, clusterIDStr, svcAddr2, cfg2)
+	cfg2.Name = "tso2"
+	err = suite.registerTSOServer(re, svcAddr2, cfg2)
 	re.NoError(err)
 	mgr2 := suite.newKeyspaceGroupManager(1, clusterID, cfg2)
 	re.NotNil(mgr2)
@@ -1113,15 +1117,15 @@ func (suite *keyspaceGroupManagerTestSuite) TestPrimaryPriorityChange() {
 
 	// Shutdown the second TSO server.
 	mgr2.Close()
-	re.NoError(suite.deregisterTSOServer(clusterIDStr, svcAddr2))
+	re.NoError(suite.deregisterTSOServer(svcAddr2))
 	// The primaries should move back to the first TSO server.
 	waitForPrimariesServing(re, []*KeyspaceGroupManager{mgr1, mgr1, mgr1}, ids)
 
 	// Restart the Second TSO server.
-	err = suite.registerTSOServer(re, clusterIDStr, svcAddr2, cfg2)
+	err = suite.registerTSOServer(re, svcAddr2, cfg2)
 	re.NoError(err)
 	defer func() {
-		re.NoError(suite.deregisterTSOServer(clusterIDStr, svcAddr2))
+		re.NoError(suite.deregisterTSOServer(svcAddr2))
 	}()
 	mgr2 = suite.newKeyspaceGroupManager(1, clusterID, cfg2)
 	re.NotNil(mgr2)
@@ -1148,20 +1152,19 @@ func (suite *keyspaceGroupManagerTestSuite) TestPrimaryPriorityChange() {
 
 // Register TSO server.
 func (suite *keyspaceGroupManagerTestSuite) registerTSOServer(
-	re *require.Assertions, clusterID, svcAddr string, cfg *TestServiceConfig,
+	re *require.Assertions, svcAddr string, cfg *TestServiceConfig,
 ) error {
-	// Register TSO server 1
-	serviceID := &discovery.ServiceRegistryEntry{ServiceAddr: cfg.GetAdvertiseListenAddr()}
+	serviceID := &discovery.ServiceRegistryEntry{ServiceAddr: cfg.GetAdvertiseListenAddr(), Name: cfg.Name}
 	serializedEntry, err := serviceID.Serialize()
 	re.NoError(err)
-	serviceKey := discovery.RegistryPath(clusterID, mcsutils.TSOServiceName, svcAddr)
+	serviceKey := keypath.RegistryPath(constant.TSOServiceName, svcAddr)
 	_, err = suite.etcdClient.Put(suite.ctx, serviceKey, serializedEntry)
 	return err
 }
 
 // Deregister TSO server.
-func (suite *keyspaceGroupManagerTestSuite) deregisterTSOServer(clusterID, svcAddr string) error {
-	serviceKey := discovery.RegistryPath(clusterID, mcsutils.TSOServiceName, svcAddr)
+func (suite *keyspaceGroupManagerTestSuite) deregisterTSOServer(svcAddr string) error {
+	serviceKey := keypath.RegistryPath(constant.TSOServiceName, svcAddr)
 	if _, err := suite.etcdClient.Delete(suite.ctx, serviceKey); err != nil {
 		return err
 	}

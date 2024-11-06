@@ -31,6 +31,7 @@ import (
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/response"
+	"github.com/tikv/pd/pkg/utils/keypath"
 	tu "github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/pkg/versioninfo"
@@ -176,7 +177,7 @@ func (suite *storeTestSuite) TestStoresList() {
 		LastHeartbeat: time.Now().UnixNano() - int64(1*time.Hour),
 	}
 	_, err = s.PutStore(context.Background(), &pdpb.PutStoreRequest{
-		Header: &pdpb.RequestHeader{ClusterId: suite.svr.ClusterID()},
+		Header: &pdpb.RequestHeader{ClusterId: keypath.ClusterID()},
 		Store:  store,
 	})
 	re.NoError(err)
@@ -190,7 +191,7 @@ func (suite *storeTestSuite) TestStoresList() {
 	// disconnect store
 	store.LastHeartbeat = time.Now().UnixNano() - int64(1*time.Minute)
 	_, err = s.PutStore(context.Background(), &pdpb.PutStoreRequest{
-		Header: &pdpb.RequestHeader{ClusterId: suite.svr.ClusterID()},
+		Header: &pdpb.RequestHeader{ClusterId: keypath.ClusterID()},
 		Store:  store,
 	})
 	re.NoError(err)
@@ -207,7 +208,7 @@ func (suite *storeTestSuite) TestStoreGet() {
 	url := fmt.Sprintf("%s/store/1", suite.urlPrefix)
 	suite.grpcSvr.StoreHeartbeat(
 		context.Background(), &pdpb.StoreHeartbeatRequest{
-			Header: &pdpb.RequestHeader{ClusterId: suite.svr.ClusterID()},
+			Header: &pdpb.RequestHeader{ClusterId: keypath.ClusterID()},
 			Stats: &pdpb.StoreStats{
 				StoreId:   1,
 				Capacity:  1798985089024,
@@ -509,7 +510,7 @@ func (suite *storeTestSuite) TestGetAllLimit() {
 
 	re := suite.Require()
 	for _, testCase := range testCases {
-		suite.T().Logf(testCase.name)
+		suite.T().Log(testCase.name)
 		info := make(map[uint64]any, 4)
 		err := tu.ReadGetJSON(re, testDialClient, testCase.url, &info)
 		re.NoError(err)

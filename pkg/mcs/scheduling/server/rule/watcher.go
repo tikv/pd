@@ -26,8 +26,9 @@ import (
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
-	"go.etcd.io/etcd/clientv3"
-	"go.etcd.io/etcd/mvcc/mvccpb"
+	"github.com/tikv/pd/pkg/utils/keypath"
+	"go.etcd.io/etcd/api/v3/mvccpb"
+	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 )
 
@@ -75,7 +76,6 @@ type Watcher struct {
 func NewWatcher(
 	ctx context.Context,
 	etcdClient *clientv3.Client,
-	clusterID uint64,
 	ruleStorage endpoint.RuleStorage,
 	checkerController *checker.Controller,
 	ruleManager *placement.RuleManager,
@@ -85,10 +85,10 @@ func NewWatcher(
 	rw := &Watcher{
 		ctx:                   ctx,
 		cancel:                cancel,
-		rulesPathPrefix:       endpoint.RulesPathPrefix(clusterID),
-		ruleCommonPathPrefix:  endpoint.RuleCommonPathPrefix(clusterID),
-		ruleGroupPathPrefix:   endpoint.RuleGroupPathPrefix(clusterID),
-		regionLabelPathPrefix: endpoint.RegionLabelPathPrefix(clusterID),
+		rulesPathPrefix:       keypath.RulesPathPrefix(),
+		ruleCommonPathPrefix:  keypath.RuleCommonPathPrefix(),
+		ruleGroupPathPrefix:   keypath.RuleGroupPathPrefix(),
+		regionLabelPathPrefix: keypath.RegionLabelPathPrefix(),
 		etcdClient:            etcdClient,
 		ruleStorage:           ruleStorage,
 		checkerController:     checkerController,

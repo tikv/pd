@@ -136,7 +136,7 @@ func (suite *operatorControllerTestSuite) TestOperatorStatus() {
 	re := suite.Require()
 	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(suite.ctx, opt)
-	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, tc.ID, tc, false /* no need to run */)
+	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, tc, false /* no need to run */)
 	oc := NewController(suite.ctx, tc.GetBasicCluster(), tc.GetSharedConfig(), stream)
 	tc.AddLeaderStore(1, 2)
 	tc.AddLeaderStore(2, 0)
@@ -172,7 +172,7 @@ func (suite *operatorControllerTestSuite) TestFastFailOperator() {
 	re := suite.Require()
 	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(suite.ctx, opt)
-	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, tc.ID, tc, false /* no need to run */)
+	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, tc, false /* no need to run */)
 	oc := NewController(suite.ctx, tc.GetBasicCluster(), tc.GetSharedConfig(), stream)
 	tc.AddLeaderStore(1, 2)
 	tc.AddLeaderStore(2, 0)
@@ -207,7 +207,7 @@ func (suite *operatorControllerTestSuite) TestFastFailWithUnhealthyStore() {
 	re := suite.Require()
 	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(suite.ctx, opt)
-	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, tc.ID, tc, false /* no need to run */)
+	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, tc, false /* no need to run */)
 	oc := NewController(suite.ctx, tc.GetBasicCluster(), tc.GetSharedConfig(), stream)
 	tc.AddLeaderStore(1, 2)
 	tc.AddLeaderStore(2, 0)
@@ -228,7 +228,7 @@ func (suite *operatorControllerTestSuite) TestCheckAddUnexpectedStatus() {
 
 	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(suite.ctx, opt)
-	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, tc.ID, tc, false /* no need to run */)
+	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, tc, false /* no need to run */)
 	oc := NewController(suite.ctx, tc.GetBasicCluster(), tc.GetSharedConfig(), stream)
 	tc.AddLeaderStore(1, 0)
 	tc.AddLeaderStore(2, 1)
@@ -294,7 +294,7 @@ func (suite *operatorControllerTestSuite) TestConcurrentRemoveOperator() {
 	re := suite.Require()
 	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(suite.ctx, opt)
-	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, tc.ID, tc, false /* no need to run */)
+	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, tc, false /* no need to run */)
 	oc := NewController(suite.ctx, tc.GetBasicCluster(), tc.GetSharedConfig(), stream)
 	tc.AddLeaderStore(1, 0)
 	tc.AddLeaderStore(2, 1)
@@ -336,7 +336,7 @@ func (suite *operatorControllerTestSuite) TestPollDispatchRegion() {
 	re := suite.Require()
 	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(suite.ctx, opt)
-	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, tc.ID, tc, false /* no need to run */)
+	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, tc, false /* no need to run */)
 	oc := NewController(suite.ctx, tc.GetBasicCluster(), tc.GetSharedConfig(), stream)
 	tc.AddLeaderStore(1, 2)
 	tc.AddLeaderStore(2, 1)
@@ -364,10 +364,10 @@ func (suite *operatorControllerTestSuite) TestPollDispatchRegion() {
 		oc.SetOperator(op4)
 		re.True(op2.Start())
 		oc.SetOperator(op2)
-		oc.opNotifierQueue.Push(&operatorWithTime{op: op1, time: time.Now().Add(100 * time.Millisecond)})
-		oc.opNotifierQueue.Push(&operatorWithTime{op: op3, time: time.Now().Add(300 * time.Millisecond)})
-		oc.opNotifierQueue.Push(&operatorWithTime{op: op4, time: time.Now().Add(499 * time.Millisecond)})
-		oc.opNotifierQueue.Push(&operatorWithTime{op: op2, time: time.Now().Add(500 * time.Millisecond)})
+		oc.opNotifierQueue.push(&operatorWithTime{op: op1, time: time.Now().Add(100 * time.Millisecond)})
+		oc.opNotifierQueue.push(&operatorWithTime{op: op3, time: time.Now().Add(300 * time.Millisecond)})
+		oc.opNotifierQueue.push(&operatorWithTime{op: op4, time: time.Now().Add(499 * time.Millisecond)})
+		oc.opNotifierQueue.push(&operatorWithTime{op: op2, time: time.Now().Add(500 * time.Millisecond)})
 	}
 	// first poll got nil
 	r, next := oc.pollNeedDispatchRegion()
@@ -411,7 +411,7 @@ func (suite *operatorControllerTestSuite) TestPollDispatchRegionForMergeRegion()
 	re := suite.Require()
 	opts := mockconfig.NewTestOptions()
 	cluster := mockcluster.NewCluster(suite.ctx, opts)
-	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, cluster.ID, cluster, false /* no need to run */)
+	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, cluster, false /* no need to run */)
 	controller := NewController(suite.ctx, cluster.GetBasicCluster(), cluster.GetSharedConfig(), stream)
 	cluster.AddLabelsStore(1, 1, map[string]string{"host": "host1"})
 	cluster.AddLabelsStore(2, 1, map[string]string{"host": "host2"})
@@ -447,7 +447,7 @@ func (suite *operatorControllerTestSuite) TestPollDispatchRegionForMergeRegion()
 	r, next = controller.pollNeedDispatchRegion()
 	re.True(next)
 	re.Nil(r)
-	re.Equal(1, controller.opNotifierQueue.Len())
+	re.Equal(1, controller.opNotifierQueue.len())
 	re.Empty(controller.GetOperators())
 	re.Empty(controller.wop.ListOperator())
 	re.NotNil(controller.records.Get(101))
@@ -458,7 +458,7 @@ func (suite *operatorControllerTestSuite) TestPollDispatchRegionForMergeRegion()
 	r, next = controller.pollNeedDispatchRegion()
 	re.True(next)
 	re.Nil(r)
-	re.Equal(0, controller.opNotifierQueue.Len())
+	re.Equal(0, controller.opNotifierQueue.len())
 
 	// Add the two ops to waiting operators again.
 	source.GetMeta().RegionEpoch = &metapb.RegionEpoch{ConfVer: 0, Version: 0}
@@ -478,7 +478,7 @@ func (suite *operatorControllerTestSuite) TestPollDispatchRegionForMergeRegion()
 	r, next = controller.pollNeedDispatchRegion()
 	re.True(next)
 	re.Nil(r)
-	re.Equal(1, controller.opNotifierQueue.Len())
+	re.Equal(1, controller.opNotifierQueue.len())
 	re.Empty(controller.GetOperators())
 	re.Empty(controller.wop.ListOperator())
 	re.NotNil(controller.records.Get(101))
@@ -488,14 +488,14 @@ func (suite *operatorControllerTestSuite) TestPollDispatchRegionForMergeRegion()
 	r, next = controller.pollNeedDispatchRegion()
 	re.True(next)
 	re.Nil(r)
-	re.Equal(0, controller.opNotifierQueue.Len())
+	re.Equal(0, controller.opNotifierQueue.len())
 }
 
 func (suite *operatorControllerTestSuite) TestCheckOperatorLightly() {
 	re := suite.Require()
 	opts := mockconfig.NewTestOptions()
 	cluster := mockcluster.NewCluster(suite.ctx, opts)
-	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, cluster.ID, cluster, false /* no need to run */)
+	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, cluster, false /* no need to run */)
 	controller := NewController(suite.ctx, cluster.GetBasicCluster(), cluster.GetSharedConfig(), stream)
 	cluster.AddLabelsStore(1, 1, map[string]string{"host": "host1"})
 	cluster.AddLabelsStore(2, 1, map[string]string{"host": "host2"})
@@ -523,7 +523,7 @@ func (suite *operatorControllerTestSuite) TestCheckOperatorLightly() {
 	re.Nil(r)
 	re.Equal(reason, RegionNotFound)
 
-	// check failed because of verions of region epoch changed
+	// check failed because of versions of region epoch changed
 	cluster.PutRegion(target)
 	source.GetMeta().RegionEpoch = &metapb.RegionEpoch{ConfVer: 0, Version: 1}
 	r, reason = controller.checkOperatorLightly(ops[0])
@@ -535,7 +535,7 @@ func (suite *operatorControllerTestSuite) TestStoreLimit() {
 	re := suite.Require()
 	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(suite.ctx, opt)
-	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, tc.ID, tc, false /* no need to run */)
+	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, tc, false /* no need to run */)
 	oc := NewController(suite.ctx, tc.GetBasicCluster(), tc.GetSharedConfig(), stream)
 	tc.AddLeaderStore(1, 0)
 	tc.UpdateLeaderCount(1, 1000)
@@ -603,7 +603,7 @@ func (suite *operatorControllerTestSuite) TestStoreLimit() {
 func (suite *operatorControllerTestSuite) TestDispatchOutdatedRegion() {
 	re := suite.Require()
 	cluster := mockcluster.NewCluster(suite.ctx, mockconfig.NewTestOptions())
-	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, cluster.ID, cluster, false /* no need to run */)
+	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, cluster, false /* no need to run */)
 	controller := NewController(suite.ctx, cluster.GetBasicCluster(), cluster.GetSharedConfig(), stream)
 
 	cluster.AddLeaderStore(1, 2)
@@ -654,7 +654,7 @@ func (suite *operatorControllerTestSuite) TestDispatchOutdatedRegion() {
 func (suite *operatorControllerTestSuite) TestCalcInfluence() {
 	re := suite.Require()
 	cluster := mockcluster.NewCluster(suite.ctx, mockconfig.NewTestOptions())
-	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, cluster.ID, cluster, false /* no need to run */)
+	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, cluster, false /* no need to run */)
 	controller := NewController(suite.ctx, cluster.GetBasicCluster(), cluster.GetSharedConfig(), stream)
 
 	epoch := &metapb.RegionEpoch{ConfVer: 0, Version: 0}
@@ -732,7 +732,7 @@ func (suite *operatorControllerTestSuite) TestCalcInfluence() {
 func (suite *operatorControllerTestSuite) TestDispatchUnfinishedStep() {
 	re := suite.Require()
 	cluster := mockcluster.NewCluster(suite.ctx, mockconfig.NewTestOptions())
-	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, cluster.ID, cluster, false /* no need to run */)
+	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, cluster, false /* no need to run */)
 	controller := NewController(suite.ctx, cluster.GetBasicCluster(), cluster.GetSharedConfig(), stream)
 
 	// Create a new region with epoch(0, 0)
@@ -870,7 +870,7 @@ func (suite *operatorControllerTestSuite) TestAddWaitingOperator() {
 	re := suite.Require()
 	opts := mockconfig.NewTestOptions()
 	cluster := mockcluster.NewCluster(suite.ctx, opts)
-	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, cluster.ID, cluster, false /* no need to run */)
+	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, cluster, false /* no need to run */)
 	controller := NewController(suite.ctx, cluster.GetBasicCluster(), cluster.GetSharedConfig(), stream)
 	cluster.AddLabelsStore(1, 1, map[string]string{"host": "host1"})
 	cluster.AddLabelsStore(2, 1, map[string]string{"host": "host2"})
@@ -892,7 +892,7 @@ func (suite *operatorControllerTestSuite) TestAddWaitingOperator() {
 
 	// a batch of operators should be added atomically
 	var batch []*Operator
-	for i := uint64(0); i < cluster.GetSchedulerMaxWaitingOperator(); i++ {
+	for i := range cluster.GetSchedulerMaxWaitingOperator() {
 		batch = append(batch, addPeerOp(i))
 	}
 	added := controller.AddWaitingOperator(batch...)
@@ -940,7 +940,7 @@ func (suite *operatorControllerTestSuite) TestInvalidStoreId() {
 	re := suite.Require()
 	opt := mockconfig.NewTestOptions()
 	tc := mockcluster.NewCluster(suite.ctx, opt)
-	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, tc.ID, tc, false /* no need to run */)
+	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, tc, false /* no need to run */)
 	oc := NewController(suite.ctx, tc.GetBasicCluster(), tc.GetSharedConfig(), stream)
 	// If PD and store 3 are gone, PD will not have info of store 3 after recreating it.
 	tc.AddRegionStore(1, 1)
@@ -962,7 +962,7 @@ func TestConcurrentAddOperatorAndSetStoreLimit(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	tc := mockcluster.NewCluster(ctx, opt)
-	stream := hbstream.NewTestHeartbeatStreams(ctx, tc.ID, tc, false /* no need to run */)
+	stream := hbstream.NewTestHeartbeatStreams(ctx, tc, false /* no need to run */)
 	oc := NewController(ctx, tc.GetBasicCluster(), tc.GetSharedConfig(), stream)
 
 	regionNum := 1000

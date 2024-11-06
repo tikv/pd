@@ -18,7 +18,7 @@ import (
 	"context"
 	"net/http"
 
-	"go.etcd.io/etcd/clientv3"
+	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
 // Server defines the common basic behaviors of a server

@@ -24,19 +24,18 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/statistics"
-	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
-	"go.etcd.io/etcd/clientv3"
-	"go.etcd.io/etcd/mvcc/mvccpb"
+	"github.com/tikv/pd/pkg/utils/keypath"
+	"go.etcd.io/etcd/api/v3/mvccpb"
+	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 )
 
 // Watcher is used to watch the PD API server for any meta changes.
 type Watcher struct {
-	wg        sync.WaitGroup
-	ctx       context.Context
-	cancel    context.CancelFunc
-	clusterID uint64
+	wg     sync.WaitGroup
+	ctx    context.Context
+	cancel context.CancelFunc
 	// storePathPrefix is the path of the store in etcd:
 	//  - Key: /pd/{cluster_id}/raft/s/
 	//  - Value: meta store proto.
@@ -51,15 +50,13 @@ type Watcher struct {
 func NewWatcher(
 	ctx context.Context,
 	etcdClient *clientv3.Client,
-	clusterID uint64,
 	basicCluster *core.BasicCluster,
 ) (*Watcher, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	w := &Watcher{
 		ctx:             ctx,
 		cancel:          cancel,
-		clusterID:       clusterID,
-		storePathPrefix: endpoint.StorePathPrefix(clusterID),
+		storePathPrefix: keypath.StorePathPrefix(),
 		etcdClient:      etcdClient,
 		basicCluster:    basicCluster,
 	}
@@ -95,7 +92,7 @@ func (w *Watcher) initializeStoreWatcher() error {
 	}
 	deleteFn := func(kv *mvccpb.KeyValue) error {
 		key := string(kv.Key)
-		storeID, err := endpoint.ExtractStoreIDFromPath(w.clusterID, key)
+		storeID, err := keypath.ExtractStoreIDFromPath(key)
 		if err != nil {
 			return err
 		}

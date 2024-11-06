@@ -17,7 +17,6 @@ package server
 import (
 	"context"
 	"net/http"
-	"net/http/pprof"
 	"path/filepath"
 	"strings"
 
@@ -28,6 +27,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/apiutil"
+	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/server/config"
 	"github.com/urfave/negroni"
@@ -57,7 +57,8 @@ func CheckPDVersionWithClusterVersion(opt *config.PersistOptions) {
 	}
 }
 
-func checkBootstrapRequest(clusterID uint64, req *pdpb.BootstrapRequest) error {
+func checkBootstrapRequest(req *pdpb.BootstrapRequest) error {
+	clusterID := keypath.ClusterID()
 	// TODO: do more check for request fields validation.
 
 	storeMeta := req.GetStore()
@@ -133,10 +134,6 @@ func combineBuilderServerHTTPService(ctx context.Context, svr *Server, serviceBu
 
 	apiService.UseHandler(router)
 	userHandlers[pdAPIPrefix] = apiService
-
-	// fix issue https://github.com/tikv/pd/issues/7253
-	// FIXME: remove me after upgrade
-	userHandlers["/debug/pprof/trace"] = http.HandlerFunc(pprof.Trace)
 	return userHandlers, nil
 }
 

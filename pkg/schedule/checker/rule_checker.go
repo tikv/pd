@@ -18,6 +18,7 @@ import (
 	"context"
 	"errors"
 	"math"
+	"math/rand"
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -31,7 +32,8 @@ import (
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
-	types "github.com/tikv/pd/pkg/schedule/type"
+	"github.com/tikv/pd/pkg/schedule/types"
+	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/versioninfo"
 	"go.uber.org/zap"
 )
@@ -50,29 +52,36 @@ var (
 // RuleChecker fix/improve region by placement rules.
 type RuleChecker struct {
 	PauseController
-	cluster            sche.CheckerCluster
-	ruleManager        *placement.RuleManager
-	regionWaitingList  cache.Cache
-	pendingList        cache.Cache
-	switchWitnessCache *cache.TTLUint64
-	record             *recorder
+	cluster                 sche.CheckerCluster
+	ruleManager             *placement.RuleManager
+	pendingProcessedRegions *cache.TTLUint64
+	pendingList             cache.Cache
+	switchWitnessCache      *cache.TTLUint64
+	record                  *recorder
+	r                       *rand.Rand
 }
 
 // NewRuleChecker creates a checker instance.
-func NewRuleChecker(ctx context.Context, cluster sche.CheckerCluster, ruleManager *placement.RuleManager, regionWaitingList cache.Cache) *RuleChecker {
+func NewRuleChecker(ctx context.Context, cluster sche.CheckerCluster, ruleManager *placement.RuleManager, pendingProcessedRegions *cache.TTLUint64) *RuleChecker {
 	return &RuleChecker{
-		cluster:            cluster,
-		ruleManager:        ruleManager,
-		regionWaitingList:  regionWaitingList,
-		pendingList:        cache.NewDefaultCache(maxPendingListLen),
-		switchWitnessCache: cache.NewIDTTL(ctx, time.Minute, cluster.GetCheckerConfig().GetSwitchWitnessInterval()),
-		record:             newRecord(),
+		cluster:                 cluster,
+		ruleManager:             ruleManager,
+		pendingProcessedRegions: pendingProcessedRegions,
+		pendingList:             cache.NewDefaultCache(maxPendingListLen),
+		switchWitnessCache:      cache.NewIDTTL(ctx, time.Minute, cluster.GetCheckerConfig().GetSwitchWitnessInterval()),
+		record:                  newRecord(),
+		r:                       rand.New(rand.NewSource(time.Now().UnixNano())),
 	}
 }
 
 // Name returns RuleChecker's name.
 func (*RuleChecker) Name() string {
 	return types.RuleChecker.String()
+}
+
+// GetType returns RuleChecker's type.
+func (*RuleChecker) GetType() types.CheckerSchedulerType {
+	return types.RuleChecker
 }
 
 // Check checks if the region matches placement rules and returns Operator to
@@ -196,7 +205,7 @@ func (c *RuleChecker) addRulePeer(region *core.RegionInfo, fit *placement.Region
 	ruleStores := c.getRuleFitStores(rf)
 	isWitness := rf.Rule.IsWitness && c.isWitnessEnabled()
 	// If the peer to be added is a witness, since no snapshot is needed, we also reuse the fast failover logic.
-	store, filterByTempState := c.strategy(region, rf.Rule, isWitness).SelectStoreToAdd(ruleStores)
+	store, filterByTempState := c.strategy(c.r, region, rf.Rule, isWitness).SelectStoreToAdd(ruleStores)
 	if store == 0 {
 		ruleCheckerNoStoreAddCounter.Inc()
 		c.handleFilterState(region, filterByTempState)
@@ -247,7 +256,7 @@ func (c *RuleChecker) replaceUnexpectedRulePeer(region *core.RegionInfo, rf *pla
 		fastFailover = false
 	}
 	ruleStores := c.getRuleFitStores(rf)
-	store, filterByTempState := c.strategy(region, rf.Rule, fastFailover).SelectStoreToFix(ruleStores, peer.GetStoreId())
+	store, filterByTempState := c.strategy(c.r, region, rf.Rule, fastFailover).SelectStoreToFix(ruleStores, peer.GetStoreId())
 	if store == 0 {
 		ruleCheckerNoStoreReplaceCounter.Inc()
 		c.handleFilterState(region, filterByTempState)
@@ -260,7 +269,7 @@ func (c *RuleChecker) replaceUnexpectedRulePeer(region *core.RegionInfo, rf *pla
 		minCount := uint64(math.MaxUint64)
 		for _, p := range region.GetPeers() {
 			count := c.record.getOfflineLeaderCount(p.GetStoreId())
-			checkPeerhealth := func() bool {
+			checkPeerHealth := func() bool {
 				if p.GetId() == peer.GetId() {
 					return true
 				}
@@ -269,7 +278,7 @@ func (c *RuleChecker) replaceUnexpectedRulePeer(region *core.RegionInfo, rf *pla
 				}
 				return c.allowLeader(fit, p)
 			}
-			if minCount > count && checkPeerhealth() {
+			if minCount > count && checkPeerHealth() {
 				minCount = count
 				newLeader = p
 			}
@@ -388,7 +397,7 @@ func (c *RuleChecker) fixBetterLocation(region *core.RegionInfo, rf *placement.R
 
 	isWitness := rf.Rule.IsWitness && c.isWitnessEnabled()
 	// If the peer to be moved is a witness, since no snapshot is needed, we also reuse the fast failover logic.
-	strategy := c.strategy(region, rf.Rule, isWitness)
+	strategy := c.strategy(c.r, region, rf.Rule, isWitness)
 	ruleStores := c.getRuleFitStores(rf)
 	oldStore := strategy.SelectStoreToRemove(ruleStores)
 	if oldStore == 0 {
@@ -613,7 +622,7 @@ func (c *RuleChecker) hasAvailableWitness(region *core.RegionInfo, peer *metapb.
 	return nil, false
 }
 
-func (c *RuleChecker) strategy(region *core.RegionInfo, rule *placement.Rule, fastFailover bool) *ReplicaStrategy {
+func (c *RuleChecker) strategy(r *rand.Rand, region *core.RegionInfo, rule *placement.Rule, fastFailover bool) *ReplicaStrategy {
 	return &ReplicaStrategy{
 		checkerName:    c.Name(),
 		cluster:        c.cluster,
@@ -622,6 +631,7 @@ func (c *RuleChecker) strategy(region *core.RegionInfo, rule *placement.Rule, fa
 		region:         region,
 		extraFilters:   []filter.Filter{filter.NewLabelConstraintFilter(c.Name(), rule.LabelConstraints)},
 		fastFailover:   fastFailover,
+		r:              r,
 	}
 }
 
@@ -637,7 +647,7 @@ func (c *RuleChecker) getRuleFitStores(rf *placement.RuleFit) []*core.StoreInfo 
 
 func (c *RuleChecker) handleFilterState(region *core.RegionInfo, filterByTempState bool) {
 	if filterByTempState {
-		c.regionWaitingList.Put(region.GetID(), nil)
+		c.pendingProcessedRegions.Put(region.GetID(), nil)
 		c.pendingList.Remove(region.GetID())
 	} else {
 		c.pendingList.Put(region.GetID(), nil)
@@ -645,6 +655,7 @@ func (c *RuleChecker) handleFilterState(region *core.RegionInfo, filterByTempSta
 }
 
 type recorder struct {
+	syncutil.RWMutex
 	offlineLeaderCounter map[uint64]uint64
 	lastUpdateTime       time.Time
 }
@@ -657,10 +668,14 @@ func newRecord() *recorder {
 }
 
 func (o *recorder) getOfflineLeaderCount(storeID uint64) uint64 {
+	o.RLock()
+	defer o.RUnlock()
 	return o.offlineLeaderCounter[storeID]
 }
 
 func (o *recorder) incOfflineLeaderCount(storeID uint64) {
+	o.Lock()
+	defer o.Unlock()
 	o.offlineLeaderCounter[storeID] += 1
 	o.lastUpdateTime = time.Now()
 }

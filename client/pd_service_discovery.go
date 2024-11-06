@@ -157,7 +157,7 @@ type pdServiceClient struct {
 }
 
 // NOTE: In the current implementation, the URL passed in is bound to have a scheme,
-// because it is processed in `newPDServiceDiscovery`, and the url returned by etcd member owns the sheme.
+// because it is processed in `newPDServiceDiscovery`, and the url returned by etcd member owns the scheme.
 // When testing, the URL is also bound to have a scheme.
 func newPDServiceClient(url, leaderURL string, conn *grpc.ClientConn, isLeader bool) ServiceClient {
 	cli := &pdServiceClient{
@@ -354,7 +354,7 @@ func (c *pdServiceBalancer) set(clients []ServiceClient) {
 func (c *pdServiceBalancer) check() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	for i := 0; i < c.totalNode; i++ {
+	for range c.totalNode {
 		c.now.markAsAvailable()
 		c.next()
 	}
@@ -440,9 +440,9 @@ type pdServiceDiscovery struct {
 	cancel    context.CancelFunc
 	closeOnce sync.Once
 
-	updateKeyspaceIDCb updateKeyspaceIDFunc
-	keyspaceID         uint32
-	tlsCfg             *tls.Config
+	updateKeyspaceIDFunc updateKeyspaceIDFunc
+	keyspaceID           uint32
+	tlsCfg               *tls.Config
 	// Client option.
 	option *option
 }
@@ -461,27 +461,28 @@ func newPDServiceDiscovery(
 	ctx context.Context, cancel context.CancelFunc,
 	wg *sync.WaitGroup,
 	serviceModeUpdateCb func(pdpb.ServiceMode),
-	updateKeyspaceIDCb updateKeyspaceIDFunc,
+	updateKeyspaceIDFunc updateKeyspaceIDFunc,
 	keyspaceID uint32,
 	urls []string, tlsCfg *tls.Config, option *option,
 ) *pdServiceDiscovery {
 	pdsd := &pdServiceDiscovery{
-		checkMembershipCh:   make(chan struct{}, 1),
-		ctx:                 ctx,
-		cancel:              cancel,
-		wg:                  wg,
-		apiCandidateNodes:   [apiKindCount]*pdServiceBalancer{newPDServiceBalancer(emptyErrorFn), newPDServiceBalancer(regionAPIErrorFn)},
-		serviceModeUpdateCb: serviceModeUpdateCb,
-		updateKeyspaceIDCb:  updateKeyspaceIDCb,
-		keyspaceID:          keyspaceID,
-		tlsCfg:              tlsCfg,
-		option:              option,
+		checkMembershipCh:    make(chan struct{}, 1),
+		ctx:                  ctx,
+		cancel:               cancel,
+		wg:                   wg,
+		apiCandidateNodes:    [apiKindCount]*pdServiceBalancer{newPDServiceBalancer(emptyErrorFn), newPDServiceBalancer(regionAPIErrorFn)},
+		serviceModeUpdateCb:  serviceModeUpdateCb,
+		updateKeyspaceIDFunc: updateKeyspaceIDFunc,
+		keyspaceID:           keyspaceID,
+		tlsCfg:               tlsCfg,
+		option:               option,
 	}
 	urls = addrsToURLs(urls, tlsCfg)
 	pdsd.urls.Store(urls)
 	return pdsd
 }
 
+// Init initializes the PD service discovery.
 func (c *pdServiceDiscovery) Init() error {
 	if c.isInitialized {
 		return nil
@@ -499,8 +500,8 @@ func (c *pdServiceDiscovery) Init() error {
 
 	// We need to update the keyspace ID before we discover and update the service mode
 	// so that TSO in API mode can be initialized with the correct keyspace ID.
-	if c.updateKeyspaceIDCb != nil {
-		if err := c.updateKeyspaceIDCb(); err != nil {
+	if c.keyspaceID == nullKeyspaceID && c.updateKeyspaceIDFunc != nil {
+		if err := c.initRetry(c.updateKeyspaceIDFunc); err != nil {
 			return err
 		}
 	}
@@ -522,7 +523,7 @@ func (c *pdServiceDiscovery) initRetry(f func() error) error {
 	var err error
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
-	for i := 0; i < c.option.maxRetryTimes; i++ {
+	for range c.option.maxRetryTimes {
 		if err = f(); err == nil {
 			return nil
 		}
@@ -633,6 +634,9 @@ func (c *pdServiceDiscovery) checkFollowerHealth(ctx context.Context) {
 
 // Close releases all resources.
 func (c *pdServiceDiscovery) Close() {
+	if c == nil {
+		return
+	}
 	c.closeOnce.Do(func() {
 		log.Info("[pd] close pd service discovery client")
 		c.clientConns.Range(func(key, cc any) bool {
@@ -1073,7 +1077,7 @@ func (c *pdServiceDiscovery) updateServiceClient(members []*pdpb.Member, leader 
 	leaderURL := pickMatchedURL(leader.GetClientUrls(), c.tlsCfg)
 	leaderChanged, err := c.switchLeader(leaderURL)
 	followerChanged := c.updateFollowers(members, leader.GetMemberId(), leaderURL)
-	// don't need to recreate balancer if no changess.
+	// don't need to recreate balancer if no changes.
 	if !followerChanged && !leaderChanged {
 		return err
 	}
@@ -1089,7 +1093,7 @@ func (c *pdServiceDiscovery) updateServiceClient(members []*pdpb.Member, leader 
 	})
 	c.all.Store(clients)
 	// create candidate services for all kinds of request.
-	for i := 0; i < int(apiKindCount); i++ {
+	for i := range apiKindCount {
 		c.apiCandidateNodes[i].set(clients)
 	}
 	return err

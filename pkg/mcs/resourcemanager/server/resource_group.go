@@ -108,6 +108,24 @@ func (rg *ResourceGroup) getRUToken() float64 {
 	return rg.RUSettings.RU.Tokens
 }
 
+func (rg *ResourceGroup) getPriority() float64 {
+	rg.RLock()
+	defer rg.RUnlock()
+	return float64(rg.Priority)
+}
+
+func (rg *ResourceGroup) getFillRate() float64 {
+	rg.RLock()
+	defer rg.RUnlock()
+	return float64(rg.RUSettings.RU.Settings.FillRate)
+}
+
+func (rg *ResourceGroup) getBurstLimit() float64 {
+	rg.RLock()
+	defer rg.RUnlock()
+	return float64(rg.RUSettings.RU.Settings.BurstLimit)
+}
+
 // PatchSettings patches the resource group settings.
 // Only used to patch the resource group when updating.
 // Note: the tokens is the delta value to patch.

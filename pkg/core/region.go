@@ -45,7 +45,8 @@ import (
 const (
 	randomRegionMaxRetry = 10
 	scanRegionLimit      = 1000
-	CollectFactor        = 0.9
+	// CollectFactor is the factor to collect the count of region.
+	CollectFactor = 0.9
 )
 
 // errRegionIsStale is error info for region is stale.
@@ -721,7 +722,7 @@ func (r *RegionInfo) isRegionRecreated() bool {
 	return r.GetRegionEpoch().GetVersion() == 1 && r.GetRegionEpoch().GetConfVer() == 1 && (len(r.GetStartKey()) != 0 || len(r.GetEndKey()) != 0)
 }
 
-func (r *RegionInfo) Contains(key []byte) bool {
+func (r *RegionInfo) contain(key []byte) bool {
 	start, end := r.GetStartKey(), r.GetEndKey()
 	return bytes.Compare(key, start) >= 0 && (len(end) == 0 || bytes.Compare(key, end) < 0)
 }
@@ -2107,7 +2108,7 @@ func DiffRegionKeyInfo(origin *RegionInfo, other *RegionInfo) string {
 // ToUpperASCIIInplace bytes.ToUpper but zero-cost
 func ToUpperASCIIInplace(s []byte) []byte {
 	hasLower := false
-	for i := 0; i < len(s); i++ {
+	for i := range s {
 		c := s[i]
 		hasLower = hasLower || ('a' <= c && c <= 'z')
 	}
@@ -2116,7 +2117,7 @@ func ToUpperASCIIInplace(s []byte) []byte {
 		return s
 	}
 	var c byte
-	for i := 0; i < len(s); i++ {
+	for i := range s {
 		c = s[i]
 		if 'a' <= c && c <= 'z' {
 			c -= 'a' - 'A'
@@ -2142,7 +2143,7 @@ func HexRegionKey(key []byte) []byte {
 // HexRegionKeyStr converts region key to hex format. Used for formatting region in
 // logs.
 func HexRegionKeyStr(key []byte) string {
-	return typeutil.BytesToString(HexRegionKey(key))
+	return string(HexRegionKey(key))
 }
 
 // RegionToHexMeta converts a region meta's keys to hex format. Used for formatting

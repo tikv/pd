@@ -18,12 +18,62 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/suite"
 )
 
-func TestTS(t *testing.T) {
-	re := require.New(t)
+type tsSuite struct {
+	clusterSuite
+}
 
-	db := OpenTestDB(t)
+func TestTS(t *testing.T) {
+	suite.Run(t, &tsSuite{
+		clusterSuite: clusterSuite{
+			suiteName: "ts",
+		},
+	})
+}
+
+func (s *tsSuite) TestTS() {
+	re := require.New(s.T())
+
+	db := OpenTestDB(s.T())
+	db.MustExec("use test")
+	db.MustExec("drop table if exists t")
+	db.MustExec("create table t(a int, index i(a))")
+	db.MustExec("insert t values (1), (2), (3)")
+	var rows int
+	err := db.inner.Raw("select count(*) from t").Row().Scan(&rows)
+	re.NoError(err)
+	re.Equal(3, rows)
+
+	re.NoError(err)
+	re.Equal(3, rows)
+
+	var ts uint64
+	err = db.inner.Begin().Raw("select @@tidb_current_ts").Scan(&ts).Rollback().Error
+	re.NoError(err)
+	re.NotEqual(0, GetTimeFromTS(ts))
+
+	db.MustClose()
+}
+
+type msTSSuite struct {
+	clusterSuite
+}
+
+func TestMSTS(t *testing.T) {
+	suite.Run(t, &msTSSuite{
+		clusterSuite: clusterSuite{
+			suiteName: "ts",
+			ms:        true,
+		},
+	})
+}
+
+func (s *msTSSuite) TestTS() {
+	re := require.New(s.T())
+
+	db := OpenTestDB(s.T())
 	db.MustExec("use test")
 	db.MustExec("drop table if exists t")
 	db.MustExec("create table t(a int, index i(a))")

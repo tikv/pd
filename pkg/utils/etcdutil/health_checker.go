@@ -26,7 +26,7 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
-	"go.etcd.io/etcd/clientv3"
+	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 )
 
@@ -247,7 +247,7 @@ func (checker *healthChecker) pickEps(probeCh <-chan healthProbe) []string {
 	//  - [9s, 10s)
 	// Then the picked endpoints will be {A, B} and if C is in the last used endpoints, it will be evicted later.
 	factor := int(DefaultRequestTimeout / DefaultSlowRequestTime)
-	for i := 0; i < factor; i++ {
+	for i := range factor {
 		minLatency, maxLatency := DefaultSlowRequestTime*time.Duration(i), DefaultSlowRequestTime*time.Duration(i+1)
 		for _, probe := range probes {
 			if minLatency <= probe.took && probe.took < maxLatency {

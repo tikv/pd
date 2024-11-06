@@ -39,13 +39,15 @@ func initAndRegisterMetrics(constLabels prometheus.Labels) {
 }
 
 var (
-	cmdDuration         *prometheus.HistogramVec
-	cmdFailedDuration   *prometheus.HistogramVec
-	requestDuration     *prometheus.HistogramVec
-	tsoBestBatchSize    prometheus.Histogram
-	tsoBatchSize        prometheus.Histogram
-	tsoBatchSendLatency prometheus.Histogram
-	requestForwarded    *prometheus.GaugeVec
+	cmdDuration              *prometheus.HistogramVec
+	cmdFailedDuration        *prometheus.HistogramVec
+	requestDuration          *prometheus.HistogramVec
+	tsoBestBatchSize         prometheus.Histogram
+	tsoBatchSize             prometheus.Histogram
+	tsoBatchSendLatency      prometheus.Histogram
+	requestForwarded         *prometheus.GaugeVec
+	ongoingRequestCountGauge *prometheus.GaugeVec
+	estimateTSOLatencyGauge  *prometheus.GaugeVec
 )
 
 func initMetrics(constLabels prometheus.Labels) {
@@ -117,10 +119,27 @@ func initMetrics(constLabels prometheus.Labels) {
 			Help:        "The status to indicate if the request is forwarded",
 			ConstLabels: constLabels,
 		}, []string{"host", "delegate"})
+
+	ongoingRequestCountGauge = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace:   "pd_client",
+			Subsystem:   "request",
+			Name:        "ongoing_requests_count",
+			Help:        "Current count of ongoing batch tso requests",
+			ConstLabels: constLabels,
+		}, []string{"stream"})
+	estimateTSOLatencyGauge = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace:   "pd_client",
+			Subsystem:   "request",
+			Name:        "estimate_tso_latency",
+			Help:        "Estimated latency of an RTT of getting TSO",
+			ConstLabels: constLabels,
+		}, []string{"stream"})
 }
 
 var (
-	cmdDurationWait                     prometheus.Observer
+	cmdDurationTSOWait                  prometheus.Observer
 	cmdDurationTSO                      prometheus.Observer
 	cmdDurationTSOAsyncWait             prometheus.Observer
 	cmdDurationGetRegion                prometheus.Observer
@@ -147,6 +166,7 @@ var (
 	cmdDurationUpdateServiceSafePointV2 prometheus.Observer
 
 	cmdFailDurationGetRegion                  prometheus.Observer
+	cmdFailDurationTSOWait                    prometheus.Observer
 	cmdFailDurationTSO                        prometheus.Observer
 	cmdFailDurationGetAllMembers              prometheus.Observer
 	cmdFailDurationGetPrevRegion              prometheus.Observer
@@ -170,7 +190,7 @@ var (
 
 func initCmdDurations() {
 	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
-	cmdDurationWait = cmdDuration.WithLabelValues("wait")
+	cmdDurationTSOWait = cmdDuration.WithLabelValues("wait")
 	cmdDurationTSO = cmdDuration.WithLabelValues("tso")
 	cmdDurationTSOAsyncWait = cmdDuration.WithLabelValues("tso_async_wait")
 	cmdDurationGetRegion = cmdDuration.WithLabelValues("get_region")
@@ -197,6 +217,7 @@ func initCmdDurations() {
 	cmdDurationUpdateServiceSafePointV2 = cmdDuration.WithLabelValues("update_service_safe_point_v2")
 
 	cmdFailDurationGetRegion = cmdFailedDuration.WithLabelValues("get_region")
+	cmdFailDurationTSOWait = cmdFailedDuration.WithLabelValues("wait")
 	cmdFailDurationTSO = cmdFailedDuration.WithLabelValues("tso")
 	cmdFailDurationGetAllMembers = cmdFailedDuration.WithLabelValues("get_member_info")
 	cmdFailDurationGetPrevRegion = cmdFailedDuration.WithLabelValues("get_prev_region")
@@ -226,4 +247,5 @@ func registerMetrics() {
 	prometheus.MustRegister(tsoBatchSize)
 	prometheus.MustRegister(tsoBatchSendLatency)
 	prometheus.MustRegister(requestForwarded)
+	prometheus.MustRegister(estimateTSOLatencyGauge)
 }
