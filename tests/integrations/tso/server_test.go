@@ -71,11 +71,7 @@ func (suite *tsoServerTestSuite) SetupSuite() {
 
 	var err error
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
-	if suite.legacy {
-		suite.cluster, err = tests.NewTestCluster(suite.ctx, serverCount)
-	} else {
-		suite.cluster, err = tests.NewTestClusterWithKeyspaceGroup(suite.ctx, serverCount)
-	}
+	suite.cluster, err = tests.NewTestCluster(suite.ctx, serverCount)
 	re.NoError(err)
 	err = suite.cluster.RunInitialServers()
 	re.NoError(err)

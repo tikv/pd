@@ -248,7 +248,8 @@ const (
 	minCheckRegionSplitInterval     = 1 * time.Millisecond
 	maxCheckRegionSplitInterval     = 100 * time.Millisecond
 
-	defaultEnableSchedulingFallback  = true
+	defaultEnableSchedulingFallback = true
+	// In serverless environment, the default value of `enable-scheduling` is always false.
 	defaultEnableTSODynamicSwitching = false
 )
 

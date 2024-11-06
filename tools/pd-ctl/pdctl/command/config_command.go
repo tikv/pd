@@ -49,7 +49,7 @@ const (
 	ruleBundlePrefix              = "pd/api/v1/config/placement-rule"
 	pdServerPrefix                = "pd/api/v1/config/pd-server"
 	serviceMiddlewareConfigPrefix = "pd/api/v1/service-middleware/config"
-	// flagFromPD has no influence for pd mode, but it is useful for us to debug in pd service mode.
+	// flagFromPD is useful for us to debug.
 	flagFromPD = "from_pd"
 )
 

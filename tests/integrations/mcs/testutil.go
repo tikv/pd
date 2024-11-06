@@ -16,6 +16,7 @@ package mcs
 
 import (
 	"context"
+	"fmt"
 	"sync"
 
 	"github.com/stretchr/testify/require"
@@ -56,6 +57,7 @@ func WaitForTSOServiceAvailable(
 ) {
 	testutil.Eventually(re, func() bool {
 		_, _, err := client.GetTS(ctx)
+		fmt.Println("XXX", err)
 		return err == nil
 	})
 }

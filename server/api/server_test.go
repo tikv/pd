@@ -98,7 +98,7 @@ func mustNewCluster(re *require.Assertions, num int, opts ...func(cfg *config.Co
 			for _, opt := range opts {
 				opt(cfg)
 			}
-			s, err := server.CreateServer(ctx, cfg, nil, NewHandler)
+			s, err := server.CreateServer(ctx, cfg, false, NewHandler)
 			re.NoError(err)
 			err = s.Run()
 			re.NoError(err)

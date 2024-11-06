@@ -29,7 +29,6 @@ import (
 	"go.etcd.io/etcd/server/v3/embed"
 	"go.uber.org/goleak"
 
-	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/assertutil"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
@@ -67,7 +66,7 @@ func (suite *leaderServerTestSuite) SetupSuite() {
 
 		go func() {
 			mockHandler := CreateMockHandler(re, "127.0.0.1")
-			svr, err := CreateServer(suite.ctx, cfg, nil, mockHandler)
+			svr, err := CreateServer(suite.ctx, cfg, false, mockHandler)
 			re.NoError(err)
 			err = svr.Run()
 			re.NoError(err)
@@ -101,7 +100,7 @@ func newTestServersWithCfgs(
 	for _, cfg := range cfgs {
 		go func(cfg *config.Config) {
 			mockHandler := CreateMockHandler(re, "127.0.0.1")
-			svr, err := CreateServer(ctx, cfg, nil, mockHandler)
+			svr, err := CreateServer(ctx, cfg, false, mockHandler)
 			// prevent blocking if Asserts fails
 			failed := true
 			defer func() {
@@ -142,9 +141,9 @@ func (suite *leaderServerTestSuite) TestRegisterServerHandler() {
 	cfg := NewTestSingleConfig(assertutil.CheckerWithNilAssert(re))
 	ctx, cancel := context.WithCancel(context.Background())
 	mockHandler := CreateMockHandler(re, "127.0.0.1")
-	svr, err := CreateServer(ctx, cfg, nil, mockHandler)
+	svr, err := CreateServer(ctx, cfg, false, mockHandler)
 	re.NoError(err)
-	_, err = CreateServer(ctx, cfg, nil, mockHandler, mockHandler)
+	_, err = CreateServer(ctx, cfg, false, mockHandler, mockHandler)
 	// Repeat register.
 	re.Error(err)
 	defer func() {
@@ -169,9 +168,9 @@ func (suite *leaderServerTestSuite) TestSourceIpForHeaderForwarded() {
 	mockHandler := CreateMockHandler(re, "127.0.0.2")
 	cfg := NewTestSingleConfig(assertutil.CheckerWithNilAssert(re))
 	ctx, cancel := context.WithCancel(context.Background())
-	svr, err := CreateServer(ctx, cfg, nil, mockHandler)
+	svr, err := CreateServer(ctx, cfg, false, mockHandler)
 	re.NoError(err)
-	_, err = CreateServer(ctx, cfg, nil, mockHandler, mockHandler)
+	_, err = CreateServer(ctx, cfg, false, mockHandler, mockHandler)
 	// Repeat register.
 	re.Error(err)
 	defer func() {
@@ -200,9 +199,9 @@ func (suite *leaderServerTestSuite) TestSourceIpForHeaderXReal() {
 	mockHandler := CreateMockHandler(re, "127.0.0.2")
 	cfg := NewTestSingleConfig(assertutil.CheckerWithNilAssert(re))
 	ctx, cancel := context.WithCancel(context.Background())
-	svr, err := CreateServer(ctx, cfg, nil, mockHandler)
+	svr, err := CreateServer(ctx, cfg, false, mockHandler)
 	re.NoError(err)
-	_, err = CreateServer(ctx, cfg, nil, mockHandler, mockHandler)
+	_, err = CreateServer(ctx, cfg, false, mockHandler, mockHandler)
 	// Repeat register.
 	re.Error(err)
 	defer func() {
@@ -231,9 +230,9 @@ func (suite *leaderServerTestSuite) TestSourceIpForHeaderBoth() {
 	mockHandler := CreateMockHandler(re, "127.0.0.2")
 	cfg := NewTestSingleConfig(assertutil.CheckerWithNilAssert(re))
 	ctx, cancel := context.WithCancel(context.Background())
-	svr, err := CreateServer(ctx, cfg, nil, mockHandler)
+	svr, err := CreateServer(ctx, cfg, false, mockHandler)
 	re.NoError(err)
-	_, err = CreateServer(ctx, cfg, nil, mockHandler, mockHandler)
+	_, err = CreateServer(ctx, cfg, false, mockHandler, mockHandler)
 	// Repeat register.
 	re.Error(err)
 	defer func() {
@@ -258,7 +257,7 @@ func (suite *leaderServerTestSuite) TestSourceIpForHeaderBoth() {
 	re.Equal("Hello World\n", bodyString)
 }
 
-func TestAPIService(t *testing.T) {
+func TestMode(t *testing.T) {
 	re := require.New(t)
 
 	cfg := NewTestSingleConfig(assertutil.CheckerWithNilAssert(re))
@@ -266,7 +265,7 @@ func TestAPIService(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	mockHandler := CreateMockHandler(re, "127.0.0.1")
-	svr, err := CreateServer(ctx, cfg, []string{constant.PDServiceName}, mockHandler)
+	svr, err := CreateServer(ctx, cfg, true, mockHandler)
 	re.NoError(err)
 	defer svr.Close()
 	err = svr.Run()
@@ -318,7 +317,7 @@ func TestCheckClusterID(t *testing.T) {
 	// Start previous cluster, expect an error.
 	cfgA.InitialCluster = originInitial
 	mockHandler := CreateMockHandler(re, "127.0.0.1")
-	svr, err := CreateServer(ctx, cfgA, nil, mockHandler)
+	svr, err := CreateServer(ctx, cfgA, false, mockHandler)
 	re.NoError(err)
 
 	etcd, err := embed.StartEtcd(svr.etcdCfg)

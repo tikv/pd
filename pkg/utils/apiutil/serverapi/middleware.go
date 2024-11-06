@@ -116,7 +116,7 @@ func MicroserviceRedirectRule(matchPath, targetPath, targetServiceName string,
 }
 
 func (h *redirector) matchMicroserviceRedirectRules(r *http.Request) (bool, string) {
-	if !h.s.IsKeyspaceGroupEnabled() {
+	if !h.s.IsServiceIndependent(constant.TSOServiceName) && !h.s.IsServiceIndependent(constant.SchedulingServiceName) {
 		return false, ""
 	}
 	if len(h.microserviceRedirectRules) == 0 {
@@ -145,7 +145,8 @@ func (h *redirector) matchMicroserviceRedirectRules(r *http.Request) (bool, stri
 			addr, ok := h.s.GetServicePrimaryAddr(r.Context(), rule.targetServiceName)
 			if !ok || addr == "" {
 				log.Warn("failed to get the service primary addr when trying to match redirect rules",
-					zap.String("path", r.URL.Path))
+					zap.String("path", r.URL.Path), zap.String("addr", addr),
+					zap.String("target", rule.targetServiceName))
 				return true, ""
 			}
 			// If the URL contains escaped characters, use RawPath instead of Path

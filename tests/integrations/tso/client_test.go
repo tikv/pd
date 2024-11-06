@@ -568,7 +568,7 @@ func TestUpgradingPDAndTSOClusters(t *testing.T) {
 	// The TSO service should be eventually healthy
 	mcs.WaitForTSOServiceAvailable(ctx, re, pdClient)
 
-	// Restart the API cluster
+	// Restart the PD cluster
 	pdCluster, err = tests.RestartTestPDCluster(ctx, pdCluster)
 	re.NoError(err)
 	// The TSO service should be eventually healthy

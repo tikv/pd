@@ -642,10 +642,8 @@ func (s *Server) startServerLoop(ctx context.Context) {
 	go s.etcdLeaderLoop()
 	go s.serverMetricsLoop()
 	go s.encryptionKeyManagerLoop()
-	if s.IsKeyspaceGroupEnabled() {
-		s.initTSOPrimaryWatcher()
-		s.initSchedulingPrimaryWatcher()
-	}
+	s.initTSOPrimaryWatcher()
+	s.initSchedulingPrimaryWatcher()
 }
 
 func (s *Server) stopServerLoop() {
@@ -789,7 +787,7 @@ func (s *Server) stopRaftCluster() {
 	s.cluster.Stop()
 }
 
-// IsKeyspaceGroupEnabled return whether the server is in PD.
+// IsKeyspaceGroupEnabled returns whether the keyspace group is enabled.
 func (s *Server) IsKeyspaceGroupEnabled() bool {
 	return s.isKeyspaceGroupEnabled
 }
@@ -1393,7 +1391,7 @@ func (s *Server) GetRaftCluster() *cluster.RaftCluster {
 func (s *Server) IsServiceIndependent(name string) bool {
 	if s.isKeyspaceGroupEnabled && !s.IsClosed() {
 		if name == constant.TSOServiceName && !s.GetMicroserviceConfig().IsTSODynamicSwitchingEnabled() {
-			return true
+			return false
 		}
 		return s.cluster.IsServiceIndependent(name)
 	}

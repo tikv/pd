@@ -404,53 +404,68 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 }
 
 func (c *RaftCluster) checkSchedulingService() {
-	if c.isKeyspaceGroupEnabled {
-		servers, err := discovery.Discover(c.etcdClient, constant.SchedulingServiceName)
-		if c.opt.GetMicroserviceConfig().IsSchedulingFallbackEnabled() && (err != nil || len(servers) == 0) {
-			c.startSchedulingJobs(c, c.hbstreams)
-			c.UnsetServiceIndependent(constant.SchedulingServiceName)
-		} else {
-			if c.stopSchedulingJobs() || c.coordinator == nil {
-				c.initCoordinator(c.ctx, c, c.hbstreams)
-			}
-			if !c.IsServiceIndependent(constant.SchedulingServiceName) {
-				c.SetServiceIndependent(constant.SchedulingServiceName)
-			}
-		}
-	} else {
+	servers, err := discovery.Discover(c.etcdClient, constant.SchedulingServiceName)
+	if c.opt.GetMicroserviceConfig().IsSchedulingFallbackEnabled() && (err != nil || len(servers) == 0) {
 		c.startSchedulingJobs(c, c.hbstreams)
 		c.UnsetServiceIndependent(constant.SchedulingServiceName)
+	} else {
+		if c.stopSchedulingJobs() || c.coordinator == nil {
+			c.initCoordinator(c.ctx, c, c.hbstreams)
+		}
+		if !c.IsServiceIndependent(constant.SchedulingServiceName) {
+			c.SetServiceIndependent(constant.SchedulingServiceName)
+		}
 	}
 }
 
 // checkTSOService checks the TSO service.
+// In non-serverless env:
+//  1. If the dynamic switching is disabled, it will switch to the internal TSO service.
+//  2. If the dynamic switching is enabled, it will check the external TSO service.
+//     If the external TSO service is available, it will switch to the external TSO service.
+//     If the external TSO service is unavailable, it will switch to the internal TSO service.
+//
+// In serverless env, we don't allow dynamic switching.
+// Whether we use the internal TSO service or the external TSO service is determined by the `isKeyspaceGroupEnabled`.
 func (c *RaftCluster) checkTSOService() {
 	if c.isKeyspaceGroupEnabled {
-		if c.opt.GetMicroserviceConfig().IsTSODynamicSwitchingEnabled() {
-			servers, err := discovery.Discover(c.etcdClient, constant.TSOServiceName)
-			if err != nil || len(servers) == 0 {
-				if err := c.startTSOJobsIfNeeded(); err != nil {
-					log.Error("failed to start TSO jobs", errs.ZapError(err))
-					return
-				}
-				if c.IsServiceIndependent(constant.TSOServiceName) {
-					log.Info("TSO is provided by PD")
-					c.UnsetServiceIndependent(constant.TSOServiceName)
-				}
-			} else {
-				c.stopTSOJobsIfNeeded()
-				if !c.IsServiceIndependent(constant.TSOServiceName) {
-					log.Info("TSO is provided by TSO server")
-					c.SetServiceIndependent(constant.TSOServiceName)
-				}
-			}
+		return
+	}
+	if !c.opt.GetMicroserviceConfig().IsTSODynamicSwitchingEnabled() {
+		if err := c.switchToInternalTSO(); err != nil {
+			log.Error("failed to start TSO jobs", errs.ZapError(err))
+			return
 		}
 		return
 	}
 
+	servers, err := discovery.Discover(c.etcdClient, constant.TSOServiceName)
+	if err != nil || len(servers) == 0 {
+		if err := c.switchToInternalTSO(); err != nil {
+			log.Error("failed to switch to internal TSO", errs.ZapError(err))
+			return
+		}
+	} else if len(servers) > 0 {
+		c.switchToExternalTSO()
+	}
+}
+
+func (c *RaftCluster) switchToInternalTSO() error {
 	if err := c.startTSOJobsIfNeeded(); err != nil {
-		log.Error("failed to start TSO jobs", errs.ZapError(err))
-		return
+		return err
+	}
+	if c.IsServiceIndependent(constant.TSOServiceName) {
+		c.UnsetServiceIndependent(constant.TSOServiceName)
+		log.Info("successfully switched to internal TSO")
+	}
+	return nil
+}
+
+func (c *RaftCluster) switchToExternalTSO() {
+	c.stopTSOJobsIfNeeded()
+	if !c.IsServiceIndependent(constant.TSOServiceName) {
+		c.SetServiceIndependent(constant.TSOServiceName)
+		log.Info("successfully switched to external TSO")
 	}
 }
 

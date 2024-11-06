@@ -79,7 +79,7 @@ type TestServer struct {
 var zapLogOnce sync.Once
 
 // NewTestServer creates a new TestServer.
-func NewTestServer(ctx context.Context, cfg *config.Config, services []string) (*TestServer, error) {
+func NewTestServer(ctx context.Context, cfg *config.Config, isKeyspaceGroupEnabled ...bool) (*TestServer, error) {
 	//  disable the heartbeat async runner in test
 	cfg.Schedule.EnableHeartbeatConcurrentRunner = false
 	err := logutil.SetupLogger(cfg.Log, &cfg.Logger, &cfg.LogProps, cfg.Security.RedactInfoLog)
@@ -98,7 +98,11 @@ func NewTestServer(ctx context.Context, cfg *config.Config, services []string) (
 		serviceBuilders = append(serviceBuilders, swaggerserver.NewHandler)
 	}
 	serviceBuilders = append(serviceBuilders, dashboard.GetServiceBuilders()...)
-	svr, err := server.CreateServer(ctx, cfg, services, serviceBuilders...)
+	var enableKeyspaceGroup bool
+	if len(isKeyspaceGroupEnabled) > 0 {
+		enableKeyspaceGroup = isKeyspaceGroupEnabled[0]
+	}
+	svr, err := server.CreateServer(ctx, cfg, enableKeyspaceGroup, serviceBuilders...)
 	if err != nil {
 		return nil, err
 	}
@@ -426,15 +430,15 @@ type ConfigOption func(conf *config.Config, serverName string)
 
 // NewTestCluster creates a new TestCluster.
 func NewTestCluster(ctx context.Context, initialServerCount int, opts ...ConfigOption) (*TestCluster, error) {
-	return createTestCluster(ctx, initialServerCount, nil, opts...)
+	return createTestCluster(ctx, initialServerCount, false, opts...)
 }
 
-// NewTestClusterWithKeyspaceGroup creates a new TestCluster with PD.
+// NewTestClusterWithKeyspaceGroup creates a new TestCluster with keyspace group enabled.
 func NewTestClusterWithKeyspaceGroup(ctx context.Context, initialServerCount int, opts ...ConfigOption) (*TestCluster, error) {
-	return createTestCluster(ctx, initialServerCount, []string{constant.PDServiceName}, opts...)
+	return createTestCluster(ctx, initialServerCount, true, opts...)
 }
 
-func createTestCluster(ctx context.Context, initialServerCount int, services []string, opts ...ConfigOption) (*TestCluster, error) {
+func createTestCluster(ctx context.Context, initialServerCount int, isKeyspaceGroupEnabled bool, opts ...ConfigOption) (*TestCluster, error) {
 	schedulers.Register()
 	config := newClusterConfig(initialServerCount)
 	servers := make(map[string]*TestServer)
@@ -443,7 +447,7 @@ func createTestCluster(ctx context.Context, initialServerCount int, services []s
 		if err != nil {
 			return nil, err
 		}
-		s, err := NewTestServer(ctx, serverConf, services)
+		s, err := NewTestServer(ctx, serverConf, isKeyspaceGroupEnabled)
 		if err != nil {
 			return nil, err
 		}
@@ -721,7 +725,7 @@ func (c *TestCluster) Join(ctx context.Context, opts ...ConfigOption) (*TestServ
 	if err != nil {
 		return nil, err
 	}
-	s, err := NewTestServer(ctx, conf, nil)
+	s, err := NewTestServer(ctx, conf)
 	if err != nil {
 		return nil, err
 	}
@@ -735,7 +739,7 @@ func (c *TestCluster) JoinWithKeyspaceGroup(ctx context.Context, opts ...ConfigO
 	if err != nil {
 		return nil, err
 	}
-	s, err := NewTestServer(ctx, conf, []string{constant.PDServiceName})
+	s, err := NewTestServer(ctx, conf, true)
 	if err != nil {
 		return nil, err
 	}
