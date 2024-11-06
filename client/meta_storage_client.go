@@ -238,14 +238,17 @@ func (c *innerClient) respForMetaStorageErr(observer prometheus.Observer, start 
 	return nil
 }
 
+// Put implements the MetaStorageClient interface.
 func (c *client) Put(ctx context.Context, key, value []byte, opts ...OpOption) (*meta_storagepb.PutResponse, error) {
 	return c.inner.Put(ctx, key, value, opts...)
 }
 
+// Get implements the MetaStorageClient interface.
 func (c *client) Get(ctx context.Context, key []byte, opts ...OpOption) (*meta_storagepb.GetResponse, error) {
 	return c.inner.Get(ctx, key, opts...)
 }
 
+// Watch implements the MetaStorageClient interface.
 func (c *client) Watch(ctx context.Context, key []byte, opts ...OpOption) (chan []*meta_storagepb.Event, error) {
 	return c.inner.Watch(ctx, key, opts...)
 }

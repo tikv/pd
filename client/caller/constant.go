@@ -15,12 +15,14 @@
 package caller
 
 type (
-	ID        string
+	// ID represents the caller ID.
+	ID string
+	// Component represents the caller component.
 	Component string
 )
 
+// nolint:exported
 const (
-	// Unknown represents that don't know which component the caller is temporarily.
 	Unknown   ID = "unknown"
 	Tidb      ID = "tidb"
 	Pd        ID = "pd"

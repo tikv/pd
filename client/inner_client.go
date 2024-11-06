@@ -192,23 +192,6 @@ func (c *innerClient) getRegionAPIClientAndContext(ctx context.Context, allowFol
 	return serviceClient, serviceClient.BuildGRPCTargetContext(ctx, !allowFollower)
 }
 
-func (c *innerClient) initRetry(f func(s string) error, str string) error {
-	var err error
-	ticker := time.NewTicker(time.Second)
-	defer ticker.Stop()
-	for i := 0; i < c.option.maxRetryTimes; i++ {
-		if err = f(str); err == nil {
-			return nil
-		}
-		select {
-		case <-c.ctx.Done():
-			return err
-		case <-ticker.C:
-		}
-	}
-	return errors.WithStack(err)
-}
-
 // gRPCErrorHandler is used to handle the gRPC error returned by the resource manager service.
 func (c *innerClient) gRPCErrorHandler(err error) {
 	if errs.IsLeaderChange(err) {
