@@ -452,13 +452,9 @@ func (m *EmbeddedEtcdMember) GetMemberLeaderPriority(id uint64) (int, error) {
 	return int(priority), nil
 }
 
-func (m *EmbeddedEtcdMember) getMemberBinaryDeployPath(id uint64) string {
-	return path.Join(m.rootPath, fmt.Sprintf("member/%d/deploy_path", id))
-}
-
 // GetMemberDeployPath loads a member's binary deploy path.
 func (m *EmbeddedEtcdMember) GetMemberDeployPath(id uint64) (string, error) {
-	key := m.getMemberBinaryDeployPath(id)
+	key := keypath.MemberBinaryDeployPath(id)
 	res, err := etcdutil.EtcdKVGet(m.client, key)
 	if err != nil {
 		return "", err
@@ -471,7 +467,7 @@ func (m *EmbeddedEtcdMember) GetMemberDeployPath(id uint64) (string, error) {
 
 // SetMemberDeployPath saves a member's binary deploy path.
 func (m *EmbeddedEtcdMember) SetMemberDeployPath(id uint64) error {
-	key := m.getMemberBinaryDeployPath(id)
+	key := keypath.MemberBinaryDeployPath(id)
 	txn := kv.NewSlowLogTxn(m.client)
 	execPath, err := os.Executable()
 	deployPath := filepath.Dir(execPath)
@@ -488,17 +484,9 @@ func (m *EmbeddedEtcdMember) SetMemberDeployPath(id uint64) error {
 	return nil
 }
 
-func (m *EmbeddedEtcdMember) getMemberGitHashPath(id uint64) string {
-	return path.Join(m.rootPath, fmt.Sprintf("member/%d/git_hash", id))
-}
-
-func (m *EmbeddedEtcdMember) getMemberBinaryVersionPath(id uint64) string {
-	return path.Join(m.rootPath, fmt.Sprintf("member/%d/binary_version", id))
-}
-
 // GetMemberBinaryVersion loads a member's binary version.
 func (m *EmbeddedEtcdMember) GetMemberBinaryVersion(id uint64) (string, error) {
-	key := m.getMemberBinaryVersionPath(id)
+	key := keypath.MemberBinaryVersionPath(id)
 	res, err := etcdutil.EtcdKVGet(m.client, key)
 	if err != nil {
 		return "", err
@@ -511,7 +499,7 @@ func (m *EmbeddedEtcdMember) GetMemberBinaryVersion(id uint64) (string, error) {
 
 // GetMemberGitHash loads a member's git hash.
 func (m *EmbeddedEtcdMember) GetMemberGitHash(id uint64) (string, error) {
-	key := m.getMemberGitHashPath(id)
+	key := keypath.MemberGitHashPath(id)
 	res, err := etcdutil.EtcdKVGet(m.client, key)
 	if err != nil {
 		return "", err
@@ -524,7 +512,7 @@ func (m *EmbeddedEtcdMember) GetMemberGitHash(id uint64) (string, error) {
 
 // SetMemberBinaryVersion saves a member's binary version.
 func (m *EmbeddedEtcdMember) SetMemberBinaryVersion(id uint64, releaseVersion string) error {
-	key := m.getMemberBinaryVersionPath(id)
+	key := keypath.MemberBinaryVersionPath(id)
 	txn := kv.NewSlowLogTxn(m.client)
 	res, err := txn.Then(clientv3.OpPut(key, releaseVersion)).Commit()
 	if err != nil {
@@ -538,7 +526,7 @@ func (m *EmbeddedEtcdMember) SetMemberBinaryVersion(id uint64, releaseVersion st
 
 // SetMemberGitHash saves a member's git hash.
 func (m *EmbeddedEtcdMember) SetMemberGitHash(id uint64, gitHash string) error {
-	key := m.getMemberGitHashPath(id)
+	key := keypath.MemberGitHashPath(id)
 	txn := kv.NewSlowLogTxn(m.client)
 	res, err := txn.Then(clientv3.OpPut(key, gitHash)).Commit()
 	if err != nil {

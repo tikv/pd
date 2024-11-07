@@ -20,8 +20,11 @@ import (
 )
 
 const (
-	leaderPathFormat     = "/pd/%d/leader"         // "/pd/{cluster_id}/leader"
-	dcLocationPathFormat = "/pd/%d/dc-location/%d" // "/pd/{cluster_id}/dc-location/{member_id}"
+	leaderPathFormat              = "/pd/%d/leader"                   // "/pd/{cluster_id}/leader"
+	dcLocationPathFormat          = "/pd/%d/dc-location/%d"           // "/pd/{cluster_id}/dc-location/{member_id}"
+	memberBinaryDeployPathFormat  = "/pd/%d/member/%d/deploy_path"    // "/pd/{cluster_id}/member/{member_id}/deploy_path"
+	memberGitHashPath             = "/pd/%d/member/%d/git_hash"       // "/pd/{cluster_id}/member/{member_id}/git_hash"
+	memberBinaryVersionPathFormat = "/pd/%d/member/%d/binary_version" // "/pd/{cluster_id}/member/{member_id}/binary_version"
 
 	msLeaderPathFormat     = "/ms/%d/%s/primary"        // "/ms/{cluster_id}/{service_name}/primary"
 	msDCLocationPathFormat = "/ms/%d/%s/dc-location/%d" // "/ms/{cluster_id}/{service_name}/dc-location/{member_id}"
@@ -43,4 +46,16 @@ func DCLocationPath(serviceName string, id uint64) string {
 		return fmt.Sprintf(dcLocationPathFormat, ClusterID(), id)
 	}
 	return fmt.Sprintf(msDCLocationPathFormat, ClusterID(), serviceName, id)
+}
+
+func MemberBinaryDeployPath(id uint64) string {
+	return fmt.Sprintf(memberBinaryDeployPathFormat, ClusterID(), id)
+}
+
+func MemberGitHashPath(id uint64) string {
+	return fmt.Sprintf(memberGitHashPath, ClusterID(), id)
+}
+
+func MemberBinaryVersionPath(id uint64) string {
+	return fmt.Sprintf(memberBinaryVersionPathFormat, ClusterID(), id)
 }
