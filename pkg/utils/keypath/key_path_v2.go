@@ -28,9 +28,18 @@ const (
 	allocIDPathFormat             = "/pd/%d/alloc_id"                 // "/pd/{cluster_id}/alloc_id"
 	keyspaceAllocIDPathFormat     = "/pd/%d/keyspaces/alloc_id"       // "/pd/{cluster_id}/keyspaces/alloc_id"
 
-	msLeaderPathFormat     = "/ms/%d/%s/primary"        // "/ms/{cluster_id}/{service_name}/primary"
-	msDCLocationPathFormat = "/ms/%d/%s/dc-location/%d" // "/ms/{cluster_id}/{service_name}/dc-location/{member_id}"
+	msLeaderPathFormat           = "/ms/%d/%s/primary"                                       // "/ms/{cluster_id}/{service_name}/primary"
+	msTsoDefaultLeaderPathFormat = "/ms/%d/tso/00000/primary"                                // "/ms/{cluster_id}/tso/00000/primary"
+	msTsoKespaceLeaderPathFormat = "/ms/%d/tso/keyspace_groups/election/%05d/primary"        // "/ms/{cluster_id}/tso/keyspace_groups/election/{group_id}/primary"
+	msDCLocationPathFormat       = "/ms/%d/%s/dc-location/%d"                                // "/ms/{cluster_id}/{service_name}/dc-location/{member_id}"
+	msTsoDefaultDCLocationPath   = "/ms/%d/tso/00000/dc-location/%d"                         // "/ms/{cluster_id}/tso/00000/dc-location/{member_id}"
+	msTsoKespaceDCLocationPath   = "/ms/%d/tso/keyspace_groups/election/%05d/dc-location/%d" // "/ms/{cluster_id}/tso/keyspace_groups/election/{group_id}/dc-location/{member_id}"
 )
+
+type MsParam struct {
+	ServiceName string
+	GroupID     uint32 // only used for tso keyspace group
+}
 
 // Prefix returns the parent directory of the given path.
 func Prefix(str string) string {
@@ -38,19 +47,31 @@ func Prefix(str string) string {
 }
 
 // LeaderPath returns the leader path.
-func LeaderPath(serviceName string) string {
-	if serviceName == "" {
+func LeaderPath(p *MsParam) string {
+	if p == nil || p.ServiceName == "" {
 		return fmt.Sprintf(leaderPathFormat, ClusterID())
 	}
-	return fmt.Sprintf(msLeaderPathFormat, ClusterID(), serviceName)
+	if p.ServiceName == "tso" {
+		if p.GroupID == 0 {
+			return fmt.Sprintf(msTsoDefaultLeaderPathFormat, ClusterID())
+		}
+		return fmt.Sprintf(msTsoKespaceLeaderPathFormat, ClusterID(), p.GroupID)
+	}
+	return fmt.Sprintf(msLeaderPathFormat, ClusterID(), p.ServiceName)
 }
 
 // DCLocationPath returns the dc-location path.
-func DCLocationPath(serviceName string, id uint64) string {
-	if serviceName == "" {
-		return fmt.Sprintf(dcLocationPathFormat, ClusterID(), id)
+func DCLocationPath(p *MsParam, memberID uint64) string {
+	if p == nil || p.ServiceName == "" {
+		return fmt.Sprintf(dcLocationPathFormat, ClusterID(), memberID)
 	}
-	return fmt.Sprintf(msDCLocationPathFormat, ClusterID(), serviceName, id)
+	if p.ServiceName == "tso" {
+		if p.GroupID == 0 {
+			return fmt.Sprintf(msTsoDefaultDCLocationPath, ClusterID(), memberID)
+		}
+		return fmt.Sprintf(msTsoKespaceDCLocationPath, ClusterID(), p.GroupID, memberID)
+	}
+	return fmt.Sprintf(msDCLocationPathFormat, ClusterID(), p.ServiceName, memberID)
 }
 
 // MemberBinaryDeployPath returns the member binary deploy path.

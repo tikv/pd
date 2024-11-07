@@ -160,8 +160,8 @@ func (m *EmbeddedEtcdMember) EnableLeader() {
 }
 
 // GetLeaderPath returns the path of the PD leader.
-func (m *EmbeddedEtcdMember) GetLeaderPath() string {
-	return keypath.LeaderPath("")
+func (*EmbeddedEtcdMember) GetLeaderPath() string {
+	return keypath.LeaderPath(nil)
 }
 
 // GetLeadership returns the leadership of the PD member.
@@ -384,13 +384,13 @@ func (m *EmbeddedEtcdMember) getMemberLeaderPriorityPath(id uint64) string {
 }
 
 // GetDCLocationPathPrefix returns the dc-location path prefix of the cluster.
-func (m *EmbeddedEtcdMember) GetDCLocationPathPrefix() string {
-	return keypath.Prefix(keypath.DCLocationPath("", 0))
+func (*EmbeddedEtcdMember) GetDCLocationPathPrefix() string {
+	return keypath.Prefix(keypath.DCLocationPath(nil, 0))
 }
 
 // GetDCLocationPath returns the dc-location path of a member with the given member ID.
-func (m *EmbeddedEtcdMember) GetDCLocationPath(id uint64) string {
-	return keypath.DCLocationPath("", id)
+func (*EmbeddedEtcdMember) GetDCLocationPath(id uint64) string {
+	return keypath.DCLocationPath(nil, id)
 }
 
 // SetMemberLeaderPriority saves a member's priority to be elected as the etcd leader.

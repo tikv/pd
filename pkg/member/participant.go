@@ -51,13 +51,13 @@ type participant interface {
 // EmbeddedEtcdMember, Participant relies on etcd for election, but it's decoupled
 // from the embedded etcd. It implements Member interface.
 type Participant struct {
+	keypath.MsParam
 	leadership *election.Leadership
 	// stored as member type
-	leader      atomic.Value
-	client      *clientv3.Client
-	rootPath    string
-	member      participant
-	serviceName string
+	leader   atomic.Value
+	client   *clientv3.Client
+	rootPath string
+	member   participant
 	// memberValue is the serialized string of `member`. It will be saved in the
 	// leader key when this participant is successfully elected as the leader of
 	// the group. Every write will use it to check the leadership.
@@ -72,15 +72,15 @@ type Participant struct {
 }
 
 // NewParticipant create a new Participant.
-func NewParticipant(client *clientv3.Client, serviceName string) *Participant {
+func NewParticipant(client *clientv3.Client, msParam keypath.MsParam) *Participant {
 	return &Participant{
-		client:      client,
-		serviceName: serviceName,
+		MsParam: msParam,
+		client:  client,
 	}
 }
 
-// InitInfo initializes the member info. The leader key is path.Join(rootPath, leaderName)
-func (m *Participant) InitInfo(p participant, rootPath string, leaderName string, purpose string) {
+// InitInfo initializes the member info.
+func (m *Participant) InitInfo(p participant, rootPath string, purpose string) {
 	data, err := p.Marshal()
 	if err != nil {
 		// can't fail, so panic here.
@@ -144,7 +144,7 @@ func (m *Participant) GetLeaderID() uint64 {
 func (m *Participant) GetLeader() participant {
 	leader := m.leader.Load()
 	if leader == nil {
-		return NewParticipantByService(m.serviceName)
+		return NewParticipantByService(m.ServiceName)
 	}
 	return leader.(participant)
 }
@@ -157,7 +157,7 @@ func (m *Participant) setLeader(member participant) {
 
 // unsetLeader unsets the member's leader.
 func (m *Participant) unsetLeader() {
-	leader := NewParticipantByService(m.serviceName)
+	leader := NewParticipantByService(m.ServiceName)
 	m.leader.Store(leader)
 	m.lastLeaderUpdatedTime.Store(time.Now())
 }
@@ -169,7 +169,7 @@ func (m *Participant) EnableLeader() {
 
 // GetLeaderPath returns the path of the leader.
 func (m *Participant) GetLeaderPath() string {
-	return keypath.LeaderPath(m.serviceName)
+	return keypath.LeaderPath(&m.MsParam)
 }
 
 // GetLastLeaderUpdatedTime returns the last time when the leader is updated.
@@ -208,7 +208,7 @@ func (*Participant) PreCheckLeader() error {
 
 // getPersistentLeader gets the corresponding leader from etcd by given leaderPath (as the key).
 func (m *Participant) getPersistentLeader() (participant, int64, error) {
-	leader := NewParticipantByService(m.serviceName)
+	leader := NewParticipantByService(m.ServiceName)
 	ok, rev, err := etcdutil.GetProtoMsgWithModRev(m.client, m.GetLeaderPath(), leader)
 	if err != nil {
 		return nil, 0, err
@@ -291,12 +291,12 @@ func (m *Participant) getLeaderPriorityPath(id uint64) string {
 
 // GetDCLocationPathPrefix returns the dc-location path prefix of the cluster.
 func (m *Participant) GetDCLocationPathPrefix() string {
-	return keypath.Prefix(keypath.DCLocationPath(m.serviceName, 0))
+	return keypath.Prefix(keypath.DCLocationPath(&m.MsParam, 0))
 }
 
 // GetDCLocationPath returns the dc-location path of a member with the given member ID.
 func (m *Participant) GetDCLocationPath(id uint64) string {
-	return keypath.DCLocationPath(m.serviceName, id)
+	return keypath.DCLocationPath(&m.MsParam, id)
 }
 
 // SetLeaderPriority saves the priority to be elected as the etcd leader.

@@ -134,7 +134,7 @@ func (alloc *allocatorImpl) rebaseLocked(checkCurrEnd bool) error {
 		key = keypath.AllocIDPath()
 	}
 
-	leaderPath := keypath.LeaderPath("")
+	leaderPath := keypath.LeaderPath(nil)
 	var (
 		cmps = []clientv3.Cmp{clientv3.Compare(clientv3.Value(leaderPath), "=", alloc.member)}
 		end  uint64
