@@ -463,6 +463,7 @@ func (c *RaftCluster) runServiceCheckJob() {
 		case <-tsoTicker.C:
 			// ensure raft cluster is running
 			// avoid unexpected startTSOJobsIfNeeded when raft cluster is stopping
+			// ref: https://github.com/tikv/pd/issues/8781
 			c.RLock()
 			if c.running {
 				c.checkTSOService()
