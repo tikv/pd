@@ -25,5 +25,5 @@ func init() {
 
 // Install registers the API group and grpc service.
 func Install(register *registry.ServiceRegistry) {
-	register.RegisterService("MetaStorage", ms_server.NewService[ms_server.ClusterIDProvider])
+	register.RegisterService("MetaStorage", ms_server.NewService)
 }

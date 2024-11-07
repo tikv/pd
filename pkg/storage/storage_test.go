@@ -82,7 +82,7 @@ func TestBasic(t *testing.T) {
 
 func mustSaveStores(re *require.Assertions, s Storage, n int) []*metapb.Store {
 	stores := make([]*metapb.Store, 0, n)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		store := &metapb.Store{Id: uint64(i)}
 		stores = append(stores, store)
 	}
@@ -121,7 +121,7 @@ func TestStoreWeight(t *testing.T) {
 	re.NoError(storage.LoadStores(cache.PutStore))
 	leaderWeights := []float64{1.0, 2.0, 0.2}
 	regionWeights := []float64{1.0, 3.0, 0.3}
-	for i := 0; i < n; i++ {
+	for i := range n {
 		re.Equal(leaderWeights[i], cache.GetStore(uint64(i)).GetLeaderWeight())
 		re.Equal(regionWeights[i], cache.GetStore(uint64(i)).GetRegionWeight())
 	}
@@ -278,7 +278,7 @@ func TestLoadRegions(t *testing.T) {
 
 func mustSaveRegions(re *require.Assertions, s endpoint.RegionStorage, n int) []*metapb.Region {
 	regions := make([]*metapb.Region, 0, n)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		region := newTestRegionMeta(uint64(i))
 		regions = append(regions, region)
 	}
@@ -392,7 +392,7 @@ func generateKeys(size int) []string {
 func randomMerge(regions []*metapb.Region, n int, ratio int) {
 	rand.New(rand.NewSource(6))
 	note := make(map[int]bool)
-	for i := 0; i < n*ratio/100; i++ {
+	for range n * ratio / 100 {
 		pos := rand.Intn(n - 1)
 		for {
 			if _, ok := note[pos]; !ok {
@@ -422,7 +422,7 @@ func randomMerge(regions []*metapb.Region, n int, ratio int) {
 func saveRegions(storage endpoint.RegionStorage, n int, ratio int) error {
 	keys := generateKeys(n)
 	regions := make([]*metapb.Region, 0, n)
-	for i := uint64(0); i < uint64(n); i++ {
+	for i := range uint64(n) {
 		var region *metapb.Region
 		if i == 0 {
 			region = &metapb.Region{

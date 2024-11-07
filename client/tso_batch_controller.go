@@ -211,7 +211,7 @@ func (tbc *tsoBatchController) adjustBestBatchSize() {
 }
 
 func (tbc *tsoBatchController) finishCollectedRequests(physical, firstLogical int64, suffixBits uint32, streamID string, err error) {
-	for i := 0; i < tbc.collectedRequestCount; i++ {
+	for i := range tbc.collectedRequestCount {
 		tsoReq := tbc.collectedRequests[i]
 		// Retrieve the request context before the request is done to trace without race.
 		requestCtx := tsoReq.requestCtx

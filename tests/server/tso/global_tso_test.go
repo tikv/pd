@@ -157,7 +157,7 @@ func TestLogicalOverflow(t *testing.T) {
 		defer tsoClient.CloseSend()
 
 		begin := time.Now()
-		for i := 0; i < 3; i++ {
+		for i := range 3 {
 			req := &pdpb.TsoRequest{
 				Header:     testutil.NewRequestHeader(clusterID),
 				Count:      150000,

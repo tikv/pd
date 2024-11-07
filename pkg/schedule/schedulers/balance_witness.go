@@ -268,7 +268,7 @@ func createTransferWitnessOperator(cs *candidateStores, s *balanceWitnessSchedul
 	retryLimit := s.retryQuota.getLimit(store)
 	ssolver.Source, ssolver.Target = store, nil
 	var op *operator.Operator
-	for i := 0; i < retryLimit; i++ {
+	for range retryLimit {
 		schedulerCounter.WithLabelValues(s.GetName(), "total").Inc()
 		if op = s.transferWitnessOut(ssolver, collector); op != nil {
 			if _, ok := usedRegions[op.RegionID()]; !ok {

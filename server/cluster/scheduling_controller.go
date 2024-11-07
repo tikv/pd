@@ -68,7 +68,7 @@ func newSchedulingController(parentCtx context.Context, basicCluster *core.Basic
 		BasicCluster: basicCluster,
 		opt:          opt,
 		labelStats:   statistics.NewLabelStatistics(),
-		hotStat:      statistics.NewHotStat(parentCtx),
+		hotStat:      statistics.NewHotStat(parentCtx, basicCluster),
 		slowStat:     statistics.NewSlowStat(),
 		regionStats:  statistics.NewRegionStatistics(basicCluster, opt, ruleManager),
 	}

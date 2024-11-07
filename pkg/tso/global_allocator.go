@@ -233,7 +233,7 @@ func (gta *GlobalTSOAllocator) GenerateTSO(ctx context.Context, count uint32) (p
 	// (whit synchronization with other Local TSO Allocators)
 	ctx, cancel := context.WithCancel(gta.ctx)
 	defer cancel()
-	for i := 0; i < maxRetryCount; i++ {
+	for range maxRetryCount {
 		var (
 			err                    error
 			shouldRetry, skipCheck bool
@@ -366,7 +366,7 @@ func (gta *GlobalTSOAllocator) SyncMaxTS(
 ) error {
 	defer trace.StartRegion(ctx, "GlobalTSOAllocator.SyncMaxTS").End()
 	originalMaxTSO := *maxTSO
-	for i := 0; i < syncMaxRetryCount; i++ {
+	for i := range syncMaxRetryCount {
 		// Collect all allocator leaders' client URLs
 		allocatorLeaders := make(map[string]*pdpb.Member)
 		for dcLocation := range dcLocationMap {

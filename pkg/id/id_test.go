@@ -45,7 +45,7 @@ func TestMultipleAllocator(t *testing.T) {
 	re.NoError(err)
 
 	wg := sync.WaitGroup{}
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		iStr := strconv.Itoa(i)
 		wg.Add(1)
 		// All allocators share rootPath and memberVal, but they have different allocPaths, labels and steps.

@@ -400,6 +400,11 @@ func (o *PersistConfig) GetHotRegionCacheHitsThreshold() int {
 	return int(o.GetScheduleConfig().HotRegionCacheHitsThreshold)
 }
 
+// GetPatrolRegionWorkerCount returns the worker count of the patrol.
+func (o *PersistConfig) GetPatrolRegionWorkerCount() int {
+	return o.GetScheduleConfig().PatrolRegionWorkerCount
+}
+
 // GetMaxMovableHotPeerSize returns the max movable hot peer size.
 func (o *PersistConfig) GetMaxMovableHotPeerSize() int64 {
 	return o.GetScheduleConfig().MaxMovableHotPeerSize

@@ -586,7 +586,7 @@ func TestOperatorCheckConcurrently(t *testing.T) {
 	checkSteps(re, op, steps)
 	op.Start()
 	var wg sync.WaitGroup
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()

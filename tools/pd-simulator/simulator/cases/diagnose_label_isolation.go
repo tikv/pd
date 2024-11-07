@@ -34,7 +34,7 @@ func newLabelNotMatch1(_ *sc.SimConfig) *Case {
 	num1, num2 := 3, 1
 	storeNum, regionNum := num1+num2, 200
 	allStores := make(map[uint64]struct{}, storeNum+1)
-	for i := 0; i < num1; i++ {
+	for range num1 {
 		id := IDAllocator.nextID()
 		simCase.Stores = append(simCase.Stores, &Store{
 			ID:     id,
@@ -50,7 +50,7 @@ func newLabelNotMatch1(_ *sc.SimConfig) *Case {
 	})
 	allStores[id] = struct{}{}
 
-	for i := 0; i < regionNum; i++ {
+	for i := range regionNum {
 		peers := []*metapb.Peer{
 			{Id: IDAllocator.nextID(), StoreId: uint64(i%num1 + 1)},
 			{Id: IDAllocator.nextID(), StoreId: uint64((i+1)%num1 + 1)},
@@ -106,7 +106,7 @@ func newLabelIsolation1(_ *sc.SimConfig) *Case {
 	num1, num2 := 2, 2
 	storeNum, regionNum := num1+num2, 300
 	allStores := make(map[uint64]struct{}, storeNum+1)
-	for i := 0; i < num1; i++ {
+	for range num1 {
 		id := IDAllocator.nextID()
 		simCase.Stores = append(simCase.Stores, &Store{
 			ID:     id,
@@ -115,7 +115,7 @@ func newLabelIsolation1(_ *sc.SimConfig) *Case {
 		})
 		allStores[id] = struct{}{}
 	}
-	for i := 0; i < num2; i++ {
+	for range num2 {
 		id := IDAllocator.nextID()
 		simCase.Stores = append(simCase.Stores, &Store{
 			ID:     id,
@@ -125,7 +125,7 @@ func newLabelIsolation1(_ *sc.SimConfig) *Case {
 		allStores[id] = struct{}{}
 	}
 
-	for i := 0; i < regionNum; i++ {
+	for i := range regionNum {
 		peers := []*metapb.Peer{
 			{Id: IDAllocator.nextID(), StoreId: uint64(i%num1 + 1)},
 			{Id: IDAllocator.nextID(), StoreId: uint64((i+1)%num1 + 1)},
@@ -180,7 +180,7 @@ func newLabelIsolation2(_ *sc.SimConfig) *Case {
 
 	storeNum, regionNum := 5, 200
 	allStores := make(map[uint64]struct{}, storeNum)
-	for i := 0; i < storeNum; i++ {
+	for range storeNum {
 		id := IDAllocator.nextID()
 		simCase.Stores = append(simCase.Stores, &Store{
 			ID:     id,
@@ -194,7 +194,7 @@ func newLabelIsolation2(_ *sc.SimConfig) *Case {
 	simCase.Stores[3].Labels = []*metapb.StoreLabel{{Key: "dc", Value: "dc1"}, {Key: "zone", Value: "zone2"}, {Key: "host", Value: "host4"}}
 	simCase.Stores[4].Labels = []*metapb.StoreLabel{{Key: "dc", Value: "dc1"}, {Key: "zone", Value: "zone3"}, {Key: "host", Value: "host5"}}
 
-	for i := 0; i < regionNum; i++ {
+	for i := range regionNum {
 		peers := []*metapb.Peer{
 			{Id: IDAllocator.nextID(), StoreId: uint64(i%storeNum + 1)},
 			{Id: IDAllocator.nextID(), StoreId: uint64((i+1)%storeNum + 1)},

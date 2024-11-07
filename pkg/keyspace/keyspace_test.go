@@ -80,7 +80,7 @@ func (suite *keyspaceTestSuite) SetupTest() {
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
 	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
 	allocator := mockid.NewIDAllocator()
-	kgm := NewKeyspaceGroupManager(suite.ctx, store, nil, 0)
+	kgm := NewKeyspaceGroupManager(suite.ctx, store, nil)
 	suite.manager = NewKeyspaceManager(suite.ctx, store, nil, allocator, &mockConfig{}, kgm)
 	re.NoError(kgm.Bootstrap(suite.ctx))
 	re.NoError(suite.manager.Bootstrap())
@@ -103,7 +103,7 @@ func (suite *keyspaceTestSuite) TearDownSuite() {
 func makeCreateKeyspaceRequests(count int) []*CreateKeyspaceRequest {
 	now := time.Now().Unix()
 	requests := make([]*CreateKeyspaceRequest, count)
-	for i := 0; i < count; i++ {
+	for i := range count {
 		requests[i] = &CreateKeyspaceRequest{
 			Name: fmt.Sprintf("test_keyspace_%d", i),
 			Config: map[string]string{

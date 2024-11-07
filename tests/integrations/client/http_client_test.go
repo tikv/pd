@@ -725,7 +725,7 @@ func (suite *httpClientTestSuite) TestRedirectWithMetrics() {
 	failureCnt, err := metricCnt.GetMetricWithLabelValues([]string{"CreateScheduler", "network error"}...)
 	re.NoError(err)
 	failureCnt.Write(&out)
-	re.Equal(float64(2), out.Counter.GetValue())
+	re.Equal(float64(2), out.GetCounter().GetValue())
 	c.Close()
 
 	leader := sd.GetServingURL()
@@ -741,7 +741,7 @@ func (suite *httpClientTestSuite) TestRedirectWithMetrics() {
 	successCnt, err := metricCnt.GetMetricWithLabelValues([]string{"CreateScheduler", ""}...)
 	re.NoError(err)
 	successCnt.Write(&out)
-	re.Equal(float64(1), out.Counter.GetValue())
+	re.Equal(float64(1), out.GetCounter().GetValue())
 	c.Close()
 
 	httpClient = pd.NewHTTPClientWithRequestChecker(func(req *http.Request) error {
@@ -756,11 +756,11 @@ func (suite *httpClientTestSuite) TestRedirectWithMetrics() {
 	successCnt, err = metricCnt.GetMetricWithLabelValues([]string{"CreateScheduler", ""}...)
 	re.NoError(err)
 	successCnt.Write(&out)
-	re.Equal(float64(2), out.Counter.GetValue())
+	re.Equal(float64(2), out.GetCounter().GetValue())
 	failureCnt, err = metricCnt.GetMetricWithLabelValues([]string{"CreateScheduler", "network error"}...)
 	re.NoError(err)
 	failureCnt.Write(&out)
-	re.Equal(float64(3), out.Counter.GetValue())
+	re.Equal(float64(3), out.GetCounter().GetValue())
 	c.Close()
 }
 
@@ -840,7 +840,7 @@ func (suite *httpClientTestSuite) TestRetryOnLeaderChange() {
 
 	leader := suite.cluster.GetLeaderServer()
 	re.NotNil(leader)
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		leader.ResignLeader()
 		re.NotEmpty(suite.cluster.WaitLeader())
 		leader = suite.cluster.GetLeaderServer()
@@ -907,7 +907,7 @@ func (suite *httpClientTestSuite) TestGetGCSafePoint() {
 	}
 
 	// delete the safepoints
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		msg, err := client.DeleteGCSafePoint(ctx, list.ServiceGCSafepoints[i].ServiceID)
 		re.NoError(err)
 		re.Equal("Delete service GC safepoint successfully.", msg)

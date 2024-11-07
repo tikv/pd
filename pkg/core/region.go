@@ -2108,7 +2108,7 @@ func DiffRegionKeyInfo(origin *RegionInfo, other *RegionInfo) string {
 // ToUpperASCIIInplace bytes.ToUpper but zero-cost
 func ToUpperASCIIInplace(s []byte) []byte {
 	hasLower := false
-	for i := 0; i < len(s); i++ {
+	for i := range s {
 		c := s[i]
 		hasLower = hasLower || ('a' <= c && c <= 'z')
 	}
@@ -2117,7 +2117,7 @@ func ToUpperASCIIInplace(s []byte) []byte {
 		return s
 	}
 	var c byte
-	for i := 0; i < len(s); i++ {
+	for i := range s {
 		c = s[i]
 		if 'a' <= c && c <= 'z' {
 			c -= 'a' - 'A'

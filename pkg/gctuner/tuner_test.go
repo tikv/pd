@@ -37,7 +37,7 @@ func TestTuner(t *testing.T) {
 	testHeap = make([]byte, 1)
 	runtime.GC()
 	runtime.GC()
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		runtime.GC()
 		require.Eventually(t, func() bool { return maxGCPercent.Load() == tn.getGCPercent() },
 			1*time.Second, 50*time.Microsecond)
@@ -45,7 +45,7 @@ func TestTuner(t *testing.T) {
 
 	// 1/4 threshold
 	testHeap = make([]byte, threshold/4)
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		runtime.GC()
 		require.GreaterOrEqual(t, tn.getGCPercent(), maxGCPercent.Load()/2)
 		require.LessOrEqual(t, tn.getGCPercent(), maxGCPercent.Load())
@@ -54,7 +54,7 @@ func TestTuner(t *testing.T) {
 	// 1/2 threshold
 	testHeap = make([]byte, threshold/2)
 	runtime.GC()
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		runtime.GC()
 		require.Eventually(t, func() bool { return tn.getGCPercent() >= minGCPercent.Load() },
 			1*time.Second, 50*time.Microsecond)
@@ -65,7 +65,7 @@ func TestTuner(t *testing.T) {
 	// 3/4 threshold
 	testHeap = make([]byte, threshold/4*3)
 	runtime.GC()
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		runtime.GC()
 		require.Eventually(t, func() bool { return minGCPercent.Load() == tn.getGCPercent() },
 			1*time.Second, 50*time.Microsecond)
@@ -74,7 +74,7 @@ func TestTuner(t *testing.T) {
 	// out of threshold
 	testHeap = make([]byte, threshold+1024)
 	runtime.GC()
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		runtime.GC()
 		require.Eventually(t, func() bool { return minGCPercent.Load() == tn.getGCPercent() },
 			1*time.Second, 50*time.Microsecond)

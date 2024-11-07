@@ -345,6 +345,23 @@ func (suite *configTestSuite) checkConfig(cluster *pdTests.TestCluster) {
 	output, err = tests.ExecuteCommand(cmd, argsInvalid...)
 	re.NoError(err)
 	re.Contains(string(output), "is invalid")
+
+	// config set patrol-region-worker-count
+	args = []string{"-u", pdAddr, "config", "set", "patrol-region-worker-count", "8"}
+	_, err = tests.ExecuteCommand(cmd, args...)
+	re.NoError(err)
+	re.Equal(8, svr.GetScheduleConfig().PatrolRegionWorkerCount)
+	// the max value of patrol-region-worker-count is 8 and the min value is 1
+	args = []string{"-u", pdAddr, "config", "set", "patrol-region-worker-count", "9"}
+	output, err = tests.ExecuteCommand(cmd, args...)
+	re.NoError(err)
+	re.Contains(string(output), "patrol-region-worker-count should be between 1 and 8")
+	re.Equal(8, svr.GetScheduleConfig().PatrolRegionWorkerCount)
+	args = []string{"-u", pdAddr, "config", "set", "patrol-region-worker-count", "0"}
+	output, err = tests.ExecuteCommand(cmd, args...)
+	re.NoError(err)
+	re.Contains(string(output), "patrol-region-worker-count should be between 1 and 8")
+	re.Equal(8, svr.GetScheduleConfig().PatrolRegionWorkerCount)
 }
 
 func (suite *configTestSuite) TestConfigForwardControl() {
@@ -1272,7 +1289,7 @@ func (suite *configTestSuite) checkRegionRules(cluster *pdTests.TestCluster) {
 
 func assertBundles(re *require.Assertions, a, b []placement.GroupBundle) {
 	re.Len(b, len(a))
-	for i := 0; i < len(a); i++ {
+	for i := range a {
 		assertBundle(re, a[i], b[i])
 	}
 }
@@ -1282,7 +1299,7 @@ func assertBundle(re *require.Assertions, a, b placement.GroupBundle) {
 	re.Equal(a.Index, b.Index)
 	re.Equal(a.Override, b.Override)
 	re.Len(b.Rules, len(a.Rules))
-	for i := 0; i < len(a.Rules); i++ {
+	for i := range a.Rules {
 		assertRule(re, a.Rules[i], b.Rules[i])
 	}
 }

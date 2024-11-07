@@ -108,9 +108,9 @@ func (suite *adminTestSuite) TestDropRegions() {
 	np := uint64(3)
 
 	regions := make([]*core.RegionInfo, 0, n)
-	for i := uint64(0); i < n; i++ {
+	for i := range n {
 		peers := make([]*metapb.Peer, 0, np)
-		for j := uint64(0); j < np; j++ {
+		for j := range np {
 			peer := &metapb.Peer{
 				Id: i*np + j,
 			}
@@ -130,7 +130,7 @@ func (suite *adminTestSuite) TestDropRegions() {
 	}
 
 	// Region epoch cannot decrease.
-	for i := uint64(0); i < n; i++ {
+	for i := range n {
 		region := regions[i].Clone(
 			core.SetRegionConfVer(50),
 			core.SetRegionVersion(50),
@@ -140,7 +140,7 @@ func (suite *adminTestSuite) TestDropRegions() {
 		re.Error(err)
 	}
 
-	for i := uint64(0); i < n; i++ {
+	for i := range n {
 		region := cluster.GetRegionByKey([]byte(fmt.Sprintf("%d", i)))
 
 		re.Equal(uint64(100), region.GetRegionEpoch().ConfVer)
@@ -161,7 +161,7 @@ func (suite *adminTestSuite) TestDropRegions() {
 		re.NoError(err)
 	}
 
-	for i := uint64(0); i < n; i++ {
+	for i := range n {
 		region := cluster.GetRegionByKey([]byte(fmt.Sprintf("%d", i)))
 
 		re.Equal(uint64(50), region.GetRegionEpoch().ConfVer)

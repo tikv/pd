@@ -24,7 +24,7 @@ import (
 
 func TestParseTimestamp(t *testing.T) {
 	re := require.New(t)
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		t := time.Now().Add(time.Second * time.Duration(rand.Int31n(1000)))
 		data := Uint64ToBytes(uint64(t.UnixNano()))
 		nt, err := ParseTimestamp(data)
@@ -39,7 +39,7 @@ func TestParseTimestamp(t *testing.T) {
 
 func TestSubTimeByWallClock(t *testing.T) {
 	re := require.New(t)
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		r := rand.Int63n(1000)
 		t1 := time.Now()
 		// Add r seconds.
