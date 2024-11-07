@@ -32,10 +32,12 @@ const (
 	msDCLocationPathFormat = "/ms/%d/%s/dc-location/%d" // "/ms/{cluster_id}/{service_name}/dc-location/{member_id}"
 )
 
+// Prefix returns the parent directory of the given path.
 func Prefix(str string) string {
 	return path.Dir(str)
 }
 
+// LeaderPath returns the leader path.
 func LeaderPath(serviceName string) string {
 	if serviceName == "" {
 		return fmt.Sprintf(leaderPathFormat, ClusterID())
@@ -43,6 +45,7 @@ func LeaderPath(serviceName string) string {
 	return fmt.Sprintf(msLeaderPathFormat, ClusterID(), serviceName)
 }
 
+// DCLocationPath returns the dc-location path.
 func DCLocationPath(serviceName string, id uint64) string {
 	if serviceName == "" {
 		return fmt.Sprintf(dcLocationPathFormat, ClusterID(), id)
@@ -50,22 +53,27 @@ func DCLocationPath(serviceName string, id uint64) string {
 	return fmt.Sprintf(msDCLocationPathFormat, ClusterID(), serviceName, id)
 }
 
+// MemberBinaryDeployPath returns the member binary deploy path.
 func MemberBinaryDeployPath(id uint64) string {
 	return fmt.Sprintf(memberBinaryDeployPathFormat, ClusterID(), id)
 }
 
+// MemberGitHashPath returns the member git hash path.
 func MemberGitHashPath(id uint64) string {
 	return fmt.Sprintf(memberGitHashPath, ClusterID(), id)
 }
 
+// MemberBinaryVersionPath returns the member binary version path.
 func MemberBinaryVersionPath(id uint64) string {
 	return fmt.Sprintf(memberBinaryVersionPathFormat, ClusterID(), id)
 }
 
+// AllocIDPath returns the alloc id path.
 func AllocIDPath() string {
 	return fmt.Sprintf(allocIDPathFormat, ClusterID())
 }
 
+// KeyspaceAllocIDPath returns the keyspace alloc id path.
 func KeyspaceAllocIDPath() string {
 	return fmt.Sprintf(keyspaceAllocIDPathFormat, ClusterID())
 }
