@@ -33,7 +33,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
-	"github.com/tikv/pd/pkg/utils/syncutil"
+	"github.com/tikv/pd/pkg/utils/typeutil"
 	"go.uber.org/zap"
 )
 
@@ -78,10 +78,8 @@ type Controller struct {
 
 	// duration is the duration of the last patrol round.
 	// It's exported, so it should be protected by a mutex.
-	mu struct {
-		syncutil.RWMutex
-		duration time.Duration
-	}
+	duration typeutil.LockedValue[time.Duration]
+
 	// interval is the config interval of patrol regions.
 	// It's used to update the ticker, so we need to
 	// record it to avoid updating the ticker frequently.
@@ -210,15 +208,11 @@ func (c *Controller) updatePatrolWorkersIfNeeded() {
 
 // GetPatrolRegionsDuration returns the duration of the last patrol region round.
 func (c *Controller) GetPatrolRegionsDuration() time.Duration {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	return c.mu.duration
+	return c.duration.Get()
 }
 
 func (c *Controller) setPatrolRegionsDuration(dur time.Duration) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.mu.duration = dur
+	c.duration.Set(dur)
 }
 
 func (c *Controller) checkRegions(startKey []byte) (key []byte, regions []*core.RegionInfo) {
