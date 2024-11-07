@@ -30,7 +30,9 @@ import (
 type label string
 
 const (
-	DefaultLabel  label = "idalloc"
+	// DefaultLabel is the default label for id allocator.
+	DefaultLabel label = "idalloc"
+	// KeyspaceLabel is the label for keyspace id allocator.
 	KeyspaceLabel label = "keyspace-idAlloc"
 )
 

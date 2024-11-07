@@ -36,6 +36,7 @@ const (
 	msTsoKespaceDCLocationPath   = "/ms/%d/tso/keyspace_groups/election/%05d/dc-location/%d" // "/ms/{cluster_id}/tso/keyspace_groups/election/{group_id}/dc-location/{member_id}"
 )
 
+// MsParam is the parameter of micro service.
 type MsParam struct {
 	ServiceName string
 	GroupID     uint32 // only used for tso keyspace group
