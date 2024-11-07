@@ -25,7 +25,6 @@ import (
 
 const (
 	leaderPath = "/pd/0/leader"
-	allocPath  = "alloc_id"
 	memberVal  = "member"
 	step       = uint64(500)
 )
@@ -45,7 +44,7 @@ func TestMultipleAllocator(t *testing.T) {
 	wg := sync.WaitGroup{}
 	fn := func(label label) {
 		wg.Add(1)
-		// All allocators share rootPath and memberVal, but they have different allocPaths, labels and steps.
+		// Different allocators have different labels and steps.
 		allocator := NewAllocator(&AllocatorParams{
 			Client: client,
 			Label:  label,
