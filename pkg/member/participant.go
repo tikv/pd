@@ -30,6 +30,7 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
+	"github.com/tikv/pd/pkg/utils/keypath"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 )
@@ -55,7 +56,6 @@ type Participant struct {
 	leader      atomic.Value
 	client      *clientv3.Client
 	rootPath    string
-	leaderPath  string
 	member      participant
 	serviceName string
 	// memberValue is the serialized string of `member`. It will be saved in the
@@ -89,10 +89,9 @@ func (m *Participant) InitInfo(p participant, rootPath string, leaderName string
 	m.member = p
 	m.memberValue = string(data)
 	m.rootPath = rootPath
-	m.leaderPath = path.Join(rootPath, leaderName)
 	m.leadership = election.NewLeadership(m.client, m.GetLeaderPath(), purpose)
 	m.lastLeaderUpdatedTime.Store(time.Now())
-	log.Info("participant joining election", zap.String("participant-info", p.String()), zap.String("leader-path", m.leaderPath))
+	log.Info("participant joining election", zap.String("participant-info", p.String()), zap.String("leader-path", m.GetLeaderPath()))
 }
 
 // ID returns the unique ID for this participant in the election group
@@ -170,7 +169,7 @@ func (m *Participant) EnableLeader() {
 
 // GetLeaderPath returns the path of the leader.
 func (m *Participant) GetLeaderPath() string {
-	return m.leaderPath
+	return keypath.GetLeaderPath(m.serviceName)
 }
 
 // GetLastLeaderUpdatedTime returns the last time when the leader is updated.

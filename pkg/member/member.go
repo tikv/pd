@@ -34,6 +34,7 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
+	"github.com/tikv/pd/pkg/utils/keypath"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.etcd.io/etcd/server/v3/embed"
 	"go.uber.org/zap"
@@ -161,7 +162,7 @@ func (m *EmbeddedEtcdMember) EnableLeader() {
 
 // GetLeaderPath returns the path of the PD leader.
 func (m *EmbeddedEtcdMember) GetLeaderPath() string {
-	return path.Join(m.rootPath, "leader")
+	return keypath.GetLeaderPath("")
 }
 
 // GetLeadership returns the leadership of the PD member.
