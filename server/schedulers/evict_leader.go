@@ -98,7 +98,7 @@ func (conf *evictLeaderSchedulerConfig) getStores() []uint64 {
 }
 
 func (conf *evictLeaderSchedulerConfig) BuildWithArgs(args []string) error {
-	if len(args) != 1 {
+	if len(args) < 1 {
 		return errs.ErrSchedulerConfig.FastGenByArgs("id")
 	}
 
