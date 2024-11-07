@@ -1789,7 +1789,42 @@ func (r *RegionsInfo) GetRegionCount(startKey, endKey []byte) int {
 	defer r.t.RUnlock()
 	start := &regionItem{&RegionInfo{meta: &metapb.Region{StartKey: startKey}}}
 	end := &regionItem{&RegionInfo{meta: &metapb.Region{StartKey: endKey}}}
-	// it returns 0 if startKey is nil.
+
+	// check if both keys are in the uncovered ranges.
+	startItem, sit := r.tree.tree.GetWithIndex(start)
+	endItem, eit := r.tree.tree.GetWithIndex(end)
+	if startItem == nil {
+		startItem = r.tree.tree.GetAt(sit - 1)
+	} else {
+		sit += 1
+	}
+	if endItem == nil {
+		endItem = r.tree.tree.GetAt(eit - 1)
+	} else {
+		eit += 1
+	}
+
+	startInAnInterval := false
+	if startItem != nil {
+		startInAnInterval = (bytes.Compare(startItem.GetStartKey(), startKey) <= 0) && (bytes.Compare(startKey, startItem.GetEndKey()) <= 0)
+	}
+	endInAnInterval := false
+	if endItem != nil {
+		endInAnInterval = (bytes.Compare(endItem.GetStartKey(), endKey) <= 0) && (bytes.Compare(endKey, endItem.GetEndKey()) <= 0)
+	}
+
+	if len(endKey) == 0 {
+		endItem = r.tree.tree.GetAt(r.tree.tree.Len() - 1)
+		eit = r.tree.tree.Len()
+		endInAnInterval = false
+		if endItem != nil {
+			endInAnInterval = (bytes.Compare(endItem.GetEndKey(), endKey) <= 0) && (bytes.Compare(endKey, endItem.GetEndKey()) <= 0)
+		}
+	}
+	if sit == eit && (!startInAnInterval) && (!endInAnInterval) {
+		return 0
+	}
+
 	_, startIndex := r.tree.tree.GetWithIndex(start)
 	var endIndex int
 	var item *regionItem
