@@ -42,8 +42,7 @@ import (
 
 const (
 	// The timeout to wait transfer etcd leader to complete.
-	moveLeaderTimeout          = 5 * time.Second
-	dcLocationConfigEtcdPrefix = "dc-location"
+	moveLeaderTimeout = 5 * time.Second
 	// If the campaign times is more than this value in `campaignTimesRecordTimeout`, the PD will resign and campaign again.
 	campaignLeaderFrequencyTimes = 3
 )
@@ -162,7 +161,7 @@ func (m *EmbeddedEtcdMember) EnableLeader() {
 
 // GetLeaderPath returns the path of the PD leader.
 func (m *EmbeddedEtcdMember) GetLeaderPath() string {
-	return keypath.GetLeaderPath("")
+	return keypath.LeaderPath("")
 }
 
 // GetLeadership returns the leadership of the PD member.
@@ -386,12 +385,12 @@ func (m *EmbeddedEtcdMember) getMemberLeaderPriorityPath(id uint64) string {
 
 // GetDCLocationPathPrefix returns the dc-location path prefix of the cluster.
 func (m *EmbeddedEtcdMember) GetDCLocationPathPrefix() string {
-	return path.Join(m.rootPath, dcLocationConfigEtcdPrefix)
+	return keypath.Prefix(keypath.DCLocationPath("", 0))
 }
 
 // GetDCLocationPath returns the dc-location path of a member with the given member ID.
 func (m *EmbeddedEtcdMember) GetDCLocationPath(id uint64) string {
-	return path.Join(m.GetDCLocationPathPrefix(), fmt.Sprint(id))
+	return keypath.DCLocationPath("", id)
 }
 
 // SetMemberLeaderPriority saves a member's priority to be elected as the etcd leader.

@@ -14,19 +14,33 @@
 
 package keypath
 
-import "fmt"
-
-const (
-	// "/pd/{cluster_id}/leader"
-	leaderPathFormat = "/pd/%d/leader"
-
-	// "/ms/{cluster_id}/{service_name}/primary"
-	msLeaderPathFormat = "/ms/%d/%s/primary"
+import (
+	"fmt"
+	"path"
 )
 
-func GetLeaderPath(serviceName string) string {
+const (
+	leaderPathFormat     = "/pd/%d/leader"         // "/pd/{cluster_id}/leader"
+	dcLocationPathFormat = "/pd/%d/dc-location/%d" // "/pd/{cluster_id}/dc-location/{member_id}"
+
+	msLeaderPathFormat     = "/ms/%d/%s/primary"        // "/ms/{cluster_id}/{service_name}/primary"
+	msDCLocationPathFormat = "/ms/%d/%s/dc-location/%d" // "/ms/{cluster_id}/{service_name}/dc-location/{member_id}"
+)
+
+func Prefix(str string) string {
+	return path.Dir(str)
+}
+
+func LeaderPath(serviceName string) string {
 	if serviceName == "" {
 		return fmt.Sprintf(leaderPathFormat, ClusterID())
 	}
 	return fmt.Sprintf(msLeaderPathFormat, ClusterID(), serviceName)
+}
+
+func DCLocationPath(serviceName string, id uint64) string {
+	if serviceName == "" {
+		return fmt.Sprintf(dcLocationPathFormat, ClusterID(), id)
+	}
+	return fmt.Sprintf(msDCLocationPathFormat, ClusterID(), serviceName, id)
 }

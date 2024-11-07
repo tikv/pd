@@ -169,7 +169,7 @@ func (m *Participant) EnableLeader() {
 
 // GetLeaderPath returns the path of the leader.
 func (m *Participant) GetLeaderPath() string {
-	return keypath.GetLeaderPath(m.serviceName)
+	return keypath.LeaderPath(m.serviceName)
 }
 
 // GetLastLeaderUpdatedTime returns the last time when the leader is updated.
@@ -291,12 +291,12 @@ func (m *Participant) getLeaderPriorityPath(id uint64) string {
 
 // GetDCLocationPathPrefix returns the dc-location path prefix of the cluster.
 func (m *Participant) GetDCLocationPathPrefix() string {
-	return path.Join(m.rootPath, dcLocationConfigEtcdPrefix)
+	return keypath.Prefix(keypath.DCLocationPath(m.serviceName, 0))
 }
 
 // GetDCLocationPath returns the dc-location path of a member with the given member ID.
 func (m *Participant) GetDCLocationPath(id uint64) string {
-	return path.Join(m.GetDCLocationPathPrefix(), fmt.Sprint(id))
+	return keypath.DCLocationPath(m.serviceName, id)
 }
 
 // SetLeaderPriority saves the priority to be elected as the etcd leader.
