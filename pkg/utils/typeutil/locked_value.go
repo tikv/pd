@@ -14,19 +14,22 @@
 
 package typeutil
 
-import "sync"
+import "github.com/tikv/pd/pkg/utils/syncutil"
 
+// LockedValue is a thread-safe value holder.
 type LockedValue[T any] struct {
-	sync.Mutex
+	syncutil.Mutex
 	val T
 }
 
+// Set sets the value.
 func (lv *LockedValue[T]) Set(value T) {
 	lv.Lock()
 	defer lv.Unlock()
 	lv.val = value
 }
 
+// Get gets the value.
 func (lv *LockedValue[T]) Get() T {
 	lv.Lock()
 	defer lv.Unlock()
