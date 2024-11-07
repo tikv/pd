@@ -25,6 +25,8 @@ const (
 	memberBinaryDeployPathFormat  = "/pd/%d/member/%d/deploy_path"    // "/pd/{cluster_id}/member/{member_id}/deploy_path"
 	memberGitHashPath             = "/pd/%d/member/%d/git_hash"       // "/pd/{cluster_id}/member/{member_id}/git_hash"
 	memberBinaryVersionPathFormat = "/pd/%d/member/%d/binary_version" // "/pd/{cluster_id}/member/{member_id}/binary_version"
+	allocIDPathFormat             = "/pd/%d/alloc_id"                 // "/pd/{cluster_id}/alloc_id"
+	keyspaceAllocIDPathFormat     = "/pd/%d/keyspaces/alloc_id"       // "/pd/{cluster_id}/keyspaces/alloc_id"
 
 	msLeaderPathFormat     = "/ms/%d/%s/primary"        // "/ms/{cluster_id}/{service_name}/primary"
 	msDCLocationPathFormat = "/ms/%d/%s/dc-location/%d" // "/ms/{cluster_id}/{service_name}/dc-location/{member_id}"
@@ -58,4 +60,12 @@ func MemberGitHashPath(id uint64) string {
 
 func MemberBinaryVersionPath(id uint64) string {
 	return fmt.Sprintf(memberBinaryVersionPathFormat, ClusterID(), id)
+}
+
+func AllocIDPath() string {
+	return fmt.Sprintf(allocIDPathFormat, ClusterID())
+}
+
+func KeyspaceAllocIDPath() string {
+	return fmt.Sprintf(keyspaceAllocIDPathFormat, ClusterID())
 }
