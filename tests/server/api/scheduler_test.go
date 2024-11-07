@@ -92,10 +92,24 @@ func (suite *scheduleTestSuite) checkOriginAPI(cluster *tests.TestCluster) {
 
 	input := make(map[string]any)
 	input["name"] = "evict-leader-scheduler"
-	input["store_id"] = 1
 	body, err := json.Marshal(input)
-	re.NoError(err)
-	re.NoError(tu.CheckPostJSON(tests.TestDialClient, urlPrefix, body, tu.StatusOK(re)))
+	suite.NoError(err)
+	suite.NoError(tu.CheckPostJSON(tests.TestDialClient, urlPrefix, body,
+		tu.Status(re, http.StatusBadRequest),
+		tu.StringEqual(re, "missing store id")),
+	)
+	input["store_id"] = "abc" // bad case
+	body, err = json.Marshal(input)
+	suite.NoError(err)
+	suite.NoError(tu.CheckPostJSON(tests.TestDialClient, urlPrefix, body,
+		tu.Status(re, http.StatusBadRequest),
+		tu.StringEqual(re, "please input a right store id")),
+	)
+
+	input["store_id"] = 1
+	body, err = json.Marshal(input)
+	suite.NoError(err)
+	suite.NoError(tu.CheckPostJSON(tests.TestDialClient, urlPrefix, body, tu.StatusOK(re)))
 
 	suite.assertSchedulerExists(urlPrefix, "evict-leader-scheduler")
 	resp := make(map[string]any)
