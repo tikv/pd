@@ -459,7 +459,13 @@ func (c *RaftCluster) runServiceCheckJob() {
 			log.Info("service check job is stopped")
 			return
 		case <-schedulingTicker.C:
-			c.checkSchedulingService()
+			// ensure raft cluster is running
+			// avoid unexpected startSchedulingJobs when raft cluster is stopping
+			c.RLock()
+			if c.running {
+				c.checkSchedulingService()
+			}
+			c.RUnlock()
 		case <-tsoTicker.C:
 			// ensure raft cluster is running
 			// avoid unexpected startTSOJobsIfNeeded when raft cluster is stopping
