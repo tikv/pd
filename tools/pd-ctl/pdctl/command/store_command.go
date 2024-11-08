@@ -381,13 +381,13 @@ func deleteStoreCommandFunc(cmd *cobra.Command, args []string) {
 func deleteStoreCommandByAddrFunc(cmd *cobra.Command, args []string) error {
 	id := getStoreID(cmd, args, false)
 	if id == -1 {
-		return fmt.Errorf("Store not find.")
+		return fmt.Errorf("store not find")
 	}
 	// delete store by its ID
 	prefix := fmt.Sprintf(storePrefix, id)
 	_, err := doRequest(cmd, prefix, http.MethodDelete, http.Header{})
 	if err != nil {
-		return fmt.Errorf("Failed to delete store.")
+		return fmt.Errorf("failed to delete store")
 	}
 	cmd.Println("Success!")
 	return nil
