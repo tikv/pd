@@ -21,6 +21,12 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 )
 
+// Starting from a low value is necessary because we need to make sure it will be converged to (current_batch_size - 4).
+const defaultBestBatchSize = 8
+
+// finisherFunc is used to finish a request, it accepts the index of the request in the batch, the request itself and an error.
+type finisherFunc[T any] func(int, T, error)
+
 type batchController[T any] struct {
 	maxBatchSize int
 	// bestBatchSize is a dynamic size that changed based on the current batch effect.
@@ -30,17 +36,17 @@ type batchController[T any] struct {
 	collectedRequestCount int
 
 	// The finisher function to cancel collected requests when an internal error occurs.
-	cancelFinisher func(int, T)
+	cancelFinisher finisherFunc[T]
 	// The observer to record the best batch size.
 	bestBatchObserver prometheus.Histogram
 	// The time after getting the first request and the token, and before performing extra batching.
 	extraBatchingStartTime time.Time
 }
 
-func newBatchController[T any](maxBatchSize int, cancelFinisher func(int, T), bestBatchObserver prometheus.Histogram) *batchController[T] {
+func newBatchController[T any](maxBatchSize int, cancelFinisher finisherFunc[T], bestBatchObserver prometheus.Histogram) *batchController[T] {
 	return &batchController[T]{
 		maxBatchSize:          maxBatchSize,
-		bestBatchSize:         8, /* Starting from a low value is necessary because we need to make sure it will be converged to (current_batch_size - 4) */
+		bestBatchSize:         defaultBestBatchSize,
 		collectedRequests:     make([]T, maxBatchSize+1),
 		collectedRequestCount: 0,
 		cancelFinisher:        cancelFinisher,
@@ -61,7 +67,7 @@ func (bc *batchController[T]) fetchPendingRequests(ctx context.Context, requestC
 			if tokenAcquired {
 				tokenCh <- struct{}{}
 			}
-			bc.finishCollectedRequests(bc.cancelFinisher)
+			bc.finishCollectedRequests(bc.cancelFinisher, errRet)
 		}
 	}()
 
@@ -203,7 +209,9 @@ func (bc *batchController[T]) getCollectedRequests() []T {
 
 // adjustBestBatchSize stabilizes the latency with the AIAD algorithm.
 func (bc *batchController[T]) adjustBestBatchSize() {
-	bc.bestBatchObserver.Observe(float64(bc.bestBatchSize))
+	if bc.bestBatchObserver != nil {
+		bc.bestBatchObserver.Observe(float64(bc.bestBatchSize))
+	}
 	length := bc.collectedRequestCount
 	if length < bc.bestBatchSize && bc.bestBatchSize > 1 {
 		// Waits too long to collect requests, reduce the target batch size.
@@ -214,12 +222,14 @@ func (bc *batchController[T]) adjustBestBatchSize() {
 	}
 }
 
-func (bc *batchController[T]) finishCollectedRequests(finisher func(int, T)) {
+func (bc *batchController[T]) finishCollectedRequests(finisher finisherFunc[T], err error) {
 	if finisher == nil {
 		finisher = bc.cancelFinisher
 	}
-	for i := range bc.collectedRequestCount {
-		finisher(i, bc.collectedRequests[i])
+	if finisher != nil {
+		for i := range bc.collectedRequestCount {
+			finisher(i, bc.collectedRequests[i], err)
+		}
 	}
 	// Prevent the finished requests from being processed again.
 	bc.collectedRequestCount = 0
