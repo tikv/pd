@@ -471,14 +471,20 @@ func setServiceMiddlewareCommandFunc(cmd *cobra.Command, args []string) {
 	input := map[string]any{
 		"label": args[1],
 	}
-	value, err := strconv.ParseUint(args[3], 10, 64)
-	if err != nil {
-		cmd.Println(err)
-		return
-	}
+
 	if strings.ToLower(args[2]) == "qps" {
+		value, err := strconv.ParseFloat(args[3], 64)
+		if err != nil {
+			cmd.Println(err)
+			return
+		}
 		input["qps"] = value
 	} else if strings.ToLower(args[2]) == "concurrency" {
+		value, err := strconv.ParseUint(args[3], 10, 64)
+		if err != nil {
+			cmd.Println(err)
+			return
+		}
 		input["concurrency"] = value
 	} else {
 		cmd.Println("Input is invalid, should be qps or concurrency")

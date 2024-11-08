@@ -1005,21 +1005,21 @@ func TestServiceMiddlewareConfig(t *testing.T) {
 	re.NoError(err)
 	conf.AuditConfig.EnableAudit = false
 	check()
-	_, err = tests.ExecuteCommand(cmd, "-u", pdAddr, "config", "set", "service-middleware", "rate-limit", "GetRegion", "qps", "100")
+	_, err = tests.ExecuteCommand(cmd, "-u", pdAddr, "config", "set", "service-middleware", "rate-limit", "GetRegion", "qps", "100.1")
 	re.NoError(err)
-	conf.RateLimitConfig.LimiterConfig["GetRegion"] = ratelimit.DimensionConfig{QPS: 100, QPSBurst: 100}
+	conf.RateLimitConfig.LimiterConfig["GetRegion"] = ratelimit.DimensionConfig{QPS: 100.1, QPSBurst: 100}
 	check()
-	_, err = tests.ExecuteCommand(cmd, "-u", pdAddr, "config", "set", "service-middleware", "grpc-rate-limit", "GetRegion", "qps", "101")
+	_, err = tests.ExecuteCommand(cmd, "-u", pdAddr, "config", "set", "service-middleware", "grpc-rate-limit", "GetRegion", "qps", "101.1")
 	re.NoError(err)
-	conf.GRPCRateLimitConfig.LimiterConfig["GetRegion"] = ratelimit.DimensionConfig{QPS: 101, QPSBurst: 101}
+	conf.GRPCRateLimitConfig.LimiterConfig["GetRegion"] = ratelimit.DimensionConfig{QPS: 101.1, QPSBurst: 101}
 	check()
 	_, err = tests.ExecuteCommand(cmd, "-u", pdAddr, "config", "set", "service-middleware", "rate-limit", "GetRegion", "concurrency", "10")
 	re.NoError(err)
-	conf.RateLimitConfig.LimiterConfig["GetRegion"] = ratelimit.DimensionConfig{QPS: 100, QPSBurst: 100, ConcurrencyLimit: 10}
+	conf.RateLimitConfig.LimiterConfig["GetRegion"] = ratelimit.DimensionConfig{QPS: 100.1, QPSBurst: 100, ConcurrencyLimit: 10}
 	check()
 	_, err = tests.ExecuteCommand(cmd, "-u", pdAddr, "config", "set", "service-middleware", "grpc-rate-limit", "GetRegion", "concurrency", "11")
 	re.NoError(err)
-	conf.GRPCRateLimitConfig.LimiterConfig["GetRegion"] = ratelimit.DimensionConfig{QPS: 101, QPSBurst: 101, ConcurrencyLimit: 11}
+	conf.GRPCRateLimitConfig.LimiterConfig["GetRegion"] = ratelimit.DimensionConfig{QPS: 101.1, QPSBurst: 101, ConcurrencyLimit: 11}
 	check()
 	output, err := tests.ExecuteCommand(cmd, "-u", pdAddr, "config", "set", "service-middleware", "xxx", "GetRegion", "qps", "1000")
 	re.NoError(err)
@@ -1032,14 +1032,14 @@ func TestServiceMiddlewareConfig(t *testing.T) {
 	re.Contains(string(output), "Input is invalid")
 	output, err = tests.ExecuteCommand(cmd, "-u", pdAddr, "config", "set", "service-middleware", "grpc-rate-limit", "GetRegion", "qps", "xxx")
 	re.NoError(err)
-	re.Contains(string(output), "strconv.ParseUint")
+	re.Contains(string(output), "strconv.ParseFloat")
 	_, err = tests.ExecuteCommand(cmd, "-u", pdAddr, "config", "set", "service-middleware", "grpc-rate-limit", "enable-grpc-rate-limit", "false")
 	re.NoError(err)
 	conf.GRPCRateLimitConfig.EnableRateLimit = false
 	check()
 	_, err = tests.ExecuteCommand(cmd, "-u", pdAddr, "config", "set", "service-middleware", "rate-limit", "GetRegion", "concurrency", "0")
 	re.NoError(err)
-	conf.RateLimitConfig.LimiterConfig["GetRegion"] = ratelimit.DimensionConfig{QPS: 100, QPSBurst: 100}
+	conf.RateLimitConfig.LimiterConfig["GetRegion"] = ratelimit.DimensionConfig{QPS: 100.1, QPSBurst: 100}
 	check()
 	_, err = tests.ExecuteCommand(cmd, "-u", pdAddr, "config", "set", "service-middleware", "rate-limit", "GetRegion", "qps", "0")
 	re.NoError(err)
