@@ -15,29 +15,29 @@
 package caller
 
 type (
-	// ID represents the caller ID.
+	// Caller ID can be understood as a binary file; it is a process.
 	ID string
-	// Component represents the caller component.
+	// Caller component refers to the components within the process.
 	Component string
 )
 
 // nolint:exported
 const (
 	Unknown   ID = "unknown"
-	Tidb      ID = "tidb"
-	Pd        ID = "pd"
-	Tikv      ID = "tikv"
+	TiDB      ID = "tidb"
+	PD        ID = "pd"
+	TiKV      ID = "tikv"
 	TiFlash   ID = "tiflash"
 	Lightning ID = "lightning"
 	Dumpling  ID = "dumpling"
-	Br        ID = "br"
-	Dm        ID = "dm"
-	Cdc       ID = "cdc"
+	BR        ID = "br"
+	DM        ID = "dm"
+	CDC       ID = "cdc"
 	Operator  ID = "operator"
 	Dashboard ID = "dashboard"
 
 	// If the component you used is not in the list, please add it here.
-	Ddl Component = "ddl"
+	DDL Component = "ddl"
 
 	// TestID is used for test.
 	TestID ID = "test"

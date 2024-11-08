@@ -142,8 +142,10 @@ type RPCClient interface {
 	SetExternalTimestamp(ctx context.Context, timestamp uint64) error
 
 	// WithCallerID returns a new RPCClient with the specified caller ID.
+	// Caller ID can be understood as a binary file; it is a process.
 	WithCallerID(callerID caller.ID) RPCClient
 	// WithCallerComponent returns a new RPCClient with the specified caller component.
+	// Caller component refers to the components within the process.
 	WithCallerComponent(callerComponent caller.Component) RPCClient
 
 	// TSOClient is the TSO client.
@@ -217,7 +219,9 @@ func (k *serviceModeKeeper) close() {
 }
 
 type client struct {
-	callerID        caller.ID
+	// Caller ID can be understood as a binary file; it is a process.
+	callerID caller.ID
+	// Caller component refers to the components within the process.
 	callerComponent caller.Component
 
 	inner *innerClient
