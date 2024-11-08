@@ -139,7 +139,7 @@ func initMetrics(constLabels prometheus.Labels) {
 }
 
 var (
-	cmdDurationWait                     prometheus.Observer
+	cmdDurationTSOWait                  prometheus.Observer
 	cmdDurationTSO                      prometheus.Observer
 	cmdDurationTSOAsyncWait             prometheus.Observer
 	cmdDurationGetRegion                prometheus.Observer
@@ -166,6 +166,7 @@ var (
 	cmdDurationUpdateServiceSafePointV2 prometheus.Observer
 
 	cmdFailDurationGetRegion                  prometheus.Observer
+	cmdFailDurationTSOWait                    prometheus.Observer
 	cmdFailDurationTSO                        prometheus.Observer
 	cmdFailDurationGetAllMembers              prometheus.Observer
 	cmdFailDurationGetPrevRegion              prometheus.Observer
@@ -189,7 +190,7 @@ var (
 
 func initCmdDurations() {
 	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
-	cmdDurationWait = cmdDuration.WithLabelValues("wait")
+	cmdDurationTSOWait = cmdDuration.WithLabelValues("wait")
 	cmdDurationTSO = cmdDuration.WithLabelValues("tso")
 	cmdDurationTSOAsyncWait = cmdDuration.WithLabelValues("tso_async_wait")
 	cmdDurationGetRegion = cmdDuration.WithLabelValues("get_region")
@@ -216,6 +217,7 @@ func initCmdDurations() {
 	cmdDurationUpdateServiceSafePointV2 = cmdDuration.WithLabelValues("update_service_safe_point_v2")
 
 	cmdFailDurationGetRegion = cmdFailedDuration.WithLabelValues("get_region")
+	cmdFailDurationTSOWait = cmdFailedDuration.WithLabelValues("wait")
 	cmdFailDurationTSO = cmdFailedDuration.WithLabelValues("tso")
 	cmdFailDurationGetAllMembers = cmdFailedDuration.WithLabelValues("get_member_info")
 	cmdFailDurationGetPrevRegion = cmdFailedDuration.WithLabelValues("get_prev_region")

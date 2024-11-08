@@ -391,6 +391,7 @@ func TestTSOFollowerProxy(t *testing.T) {
 
 func TestTSOFollowerProxyWithTSOService(t *testing.T) {
 	re := require.New(t)
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/fastUpdateServiceMode", `return(true)`))
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	cluster, err := tests.NewTestAPICluster(ctx, 1)
@@ -405,12 +406,14 @@ func TestTSOFollowerProxyWithTSOService(t *testing.T) {
 	tsoCluster, err := tests.NewTestTSOCluster(ctx, 2, backendEndpoints)
 	re.NoError(err)
 	defer tsoCluster.Destroy()
+	time.Sleep(100 * time.Millisecond)
 	cli := mcs.SetupClientWithKeyspaceID(ctx, re, constant.DefaultKeyspaceID, strings.Split(backendEndpoints, ","))
 	re.NotNil(cli)
 	defer cli.Close()
 	// TSO service does not support the follower proxy, so enabling it should fail.
 	err = cli.UpdateOption(pd.EnableTSOFollowerProxy, true)
 	re.Error(err)
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/fastUpdateServiceMode"))
 }
 
 // TestUnavailableTimeAfterLeaderIsReady is used to test https://github.com/tikv/pd/issues/5207

@@ -37,6 +37,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/server/apiv2/handlers"
+	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
 	"github.com/tikv/pd/tests/integrations/mcs"
 	handlersutil "github.com/tikv/pd/tests/server/apiv2/handlers"
@@ -91,7 +92,9 @@ func (suite *tsoClientTestSuite) SetupSuite() {
 	if suite.legacy {
 		suite.cluster, err = tests.NewTestCluster(suite.ctx, serverCount)
 	} else {
-		suite.cluster, err = tests.NewTestAPICluster(suite.ctx, serverCount)
+		suite.cluster, err = tests.NewTestAPICluster(suite.ctx, serverCount, func(conf *config.Config, _ string) {
+			conf.MicroService.EnableTSODynamicSwitching = false
+		})
 	}
 	re.NoError(err)
 	err = suite.cluster.RunInitialServers()

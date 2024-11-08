@@ -22,6 +22,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/config"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/placement"
+	"github.com/tikv/pd/pkg/utils/syncutil"
 )
 
 // defaultPriorityQueueSize is the default value of priority queue size.
@@ -31,16 +32,20 @@ const defaultPriorityQueueSize = 1280
 type PriorityInspector struct {
 	cluster sche.CheckerCluster
 	conf    config.CheckerConfigProvider
-	queue   *cache.PriorityQueue
+	mu      struct {
+		syncutil.RWMutex
+		queue *cache.PriorityQueue
+	}
 }
 
 // NewPriorityInspector creates a priority inspector.
 func NewPriorityInspector(cluster sche.CheckerCluster, conf config.CheckerConfigProvider) *PriorityInspector {
-	return &PriorityInspector{
+	res := &PriorityInspector{
 		cluster: cluster,
 		conf:    conf,
-		queue:   cache.NewPriorityQueue(defaultPriorityQueueSize),
 	}
+	res.mu.queue = cache.NewPriorityQueue(defaultPriorityQueueSize)
+	return res
 }
 
 // RegionPriorityEntry records region priority info.
@@ -99,24 +104,28 @@ func (p *PriorityInspector) inspectRegionInReplica(region *core.RegionInfo) (mak
 // It will remove if region's priority equal 0.
 // It's Attempt will increase if region's priority equal last.
 func (p *PriorityInspector) addOrRemoveRegion(priority int, regionID uint64) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	if priority < 0 {
-		if entry := p.queue.Get(regionID); entry != nil && entry.Priority == priority {
+		if entry := p.mu.queue.Get(regionID); entry != nil && entry.Priority == priority {
 			e := entry.Value.(*RegionPriorityEntry)
 			e.Attempt++
 			e.Last = time.Now()
-			p.queue.Put(priority, e)
+			p.mu.queue.Put(priority, e)
 		} else {
 			entry := NewRegionEntry(regionID)
-			p.queue.Put(priority, entry)
+			p.mu.queue.Put(priority, entry)
 		}
 	} else {
-		p.queue.Remove(regionID)
+		p.mu.queue.Remove(regionID)
 	}
 }
 
 // GetPriorityRegions returns all regions in priority queue that needs rerun.
 func (p *PriorityInspector) GetPriorityRegions() (ids []uint64) {
-	entries := p.queue.Elems()
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	entries := p.mu.queue.Elems()
 	for _, e := range entries {
 		re := e.Value.(*RegionPriorityEntry)
 		// avoid to some priority region occupy checker, region don't need check on next check interval
@@ -130,11 +139,15 @@ func (p *PriorityInspector) GetPriorityRegions() (ids []uint64) {
 
 // RemovePriorityRegion removes priority region from priority queue.
 func (p *PriorityInspector) RemovePriorityRegion(regionID uint64) {
-	p.queue.Remove(regionID)
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.mu.queue.Remove(regionID)
 }
 
 // getQueueLen returns the length of priority queue.
 // it's only used for test.
 func (p *PriorityInspector) getQueueLen() int {
-	return p.queue.Len()
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.mu.queue.Len()
 }

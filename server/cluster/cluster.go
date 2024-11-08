@@ -409,11 +409,32 @@ func (c *RaftCluster) checkSchedulingService() {
 // checkTSOService checks the TSO service.
 func (c *RaftCluster) checkTSOService() {
 	if c.isAPIServiceMode {
+		if c.opt.GetMicroServiceConfig().IsTSODynamicSwitchingEnabled() {
+			servers, err := discovery.Discover(c.etcdClient, constant.TSOServiceName)
+			if err != nil || len(servers) == 0 {
+				if err := c.startTSOJobsIfNeeded(); err != nil {
+					log.Error("failed to start TSO jobs", errs.ZapError(err))
+					return
+				}
+				if c.IsServiceIndependent(constant.TSOServiceName) {
+					log.Info("TSO is provided by PD")
+					c.UnsetServiceIndependent(constant.TSOServiceName)
+				}
+			} else {
+				if err := c.stopTSOJobsIfNeeded(); err != nil {
+					log.Error("failed to stop TSO jobs", errs.ZapError(err))
+					return
+				}
+				if !c.IsServiceIndependent(constant.TSOServiceName) {
+					log.Info("TSO is provided by TSO server")
+					c.SetServiceIndependent(constant.TSOServiceName)
+				}
+			}
+		}
 		return
 	}
 
-	if err := c.startTSOJobs(); err != nil {
-		// If there is an error, need to wait for the next check.
+	if err := c.startTSOJobsIfNeeded(); err != nil {
 		log.Error("failed to start TSO jobs", errs.ZapError(err))
 		return
 	}
@@ -428,6 +449,8 @@ func (c *RaftCluster) runServiceCheckJob() {
 		schedulingTicker.Reset(time.Millisecond)
 	})
 	defer schedulingTicker.Stop()
+	tsoTicker := time.NewTicker(tsoServiceCheckInterval)
+	defer tsoTicker.Stop()
 
 	for {
 		select {
@@ -435,12 +458,27 @@ func (c *RaftCluster) runServiceCheckJob() {
 			log.Info("service check job is stopped")
 			return
 		case <-schedulingTicker.C:
-			c.checkSchedulingService()
+			// ensure raft cluster is running
+			// avoid unexpected startSchedulingJobs when raft cluster is stopping
+			c.RLock()
+			if c.running {
+				c.checkSchedulingService()
+			}
+			c.RUnlock()
+		case <-tsoTicker.C:
+			// ensure raft cluster is running
+			// avoid unexpected startTSOJobsIfNeeded when raft cluster is stopping
+			// ref: https://github.com/tikv/pd/issues/8781
+			c.RLock()
+			if c.running {
+				c.checkTSOService()
+			}
+			c.RUnlock()
 		}
 	}
 }
 
-func (c *RaftCluster) startTSOJobs() error {
+func (c *RaftCluster) startTSOJobsIfNeeded() error {
 	allocator, err := c.tsoAllocator.GetAllocator(tso.GlobalDCLocation)
 	if err != nil {
 		log.Error("failed to get global TSO allocator", errs.ZapError(err))
@@ -456,13 +494,14 @@ func (c *RaftCluster) startTSOJobs() error {
 	return nil
 }
 
-func (c *RaftCluster) stopTSOJobs() error {
+func (c *RaftCluster) stopTSOJobsIfNeeded() error {
 	allocator, err := c.tsoAllocator.GetAllocator(tso.GlobalDCLocation)
 	if err != nil {
 		log.Error("failed to get global TSO allocator", errs.ZapError(err))
 		return err
 	}
 	if allocator.IsInitialize() {
+		log.Info("closing the global TSO allocator")
 		c.tsoAllocator.ResetAllocatorGroup(tso.GlobalDCLocation, true)
 		failpoint.Inject("updateAfterResetTSO", func() {
 			allocator, _ := c.tsoAllocator.GetAllocator(tso.GlobalDCLocation)
@@ -824,7 +863,7 @@ func (c *RaftCluster) Stop() {
 	if !c.IsServiceIndependent(constant.SchedulingServiceName) {
 		c.stopSchedulingJobs()
 	}
-	if err := c.stopTSOJobs(); err != nil {
+	if err := c.stopTSOJobsIfNeeded(); err != nil {
 		log.Error("failed to stop tso jobs", errs.ZapError(err))
 	}
 	c.heartbeatRunner.Stop()

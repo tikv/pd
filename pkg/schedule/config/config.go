@@ -67,6 +67,9 @@ const (
 	defaultRegionScoreFormulaVersion = "v2"
 	defaultLeaderSchedulePolicy      = "count"
 	defaultStoreLimitVersion         = "v1"
+	defaultPatrolRegionWorkerCount   = 1
+	maxPatrolRegionWorkerCount       = 8
+
 	// DefaultSplitMergeInterval is the default value of config split merge interval.
 	DefaultSplitMergeInterval      = time.Hour
 	defaultSwitchWitnessInterval   = time.Hour
@@ -306,6 +309,9 @@ type ScheduleConfig struct {
 	// HaltScheduling is the option to halt the scheduling. Once it's on, PD will halt the scheduling,
 	// and any other scheduling configs will be ignored.
 	HaltScheduling bool `toml:"halt-scheduling" json:"halt-scheduling,string,omitempty"`
+
+	// PatrolRegionWorkerCount is the number of workers to patrol region.
+	PatrolRegionWorkerCount int `toml:"patrol-region-worker-count" json:"patrol-region-worker-count"`
 }
 
 // Clone returns a cloned scheduling configuration.
@@ -373,6 +379,9 @@ func (c *ScheduleConfig) Adjust(meta *configutil.ConfigMetaData, reloading bool)
 	}
 	if !meta.IsDefined("store-limit-version") {
 		configutil.AdjustString(&c.StoreLimitVersion, defaultStoreLimitVersion)
+	}
+	if !meta.IsDefined("patrol-region-worker-count") {
+		configutil.AdjustInt(&c.PatrolRegionWorkerCount, defaultPatrolRegionWorkerCount)
 	}
 
 	if !meta.IsDefined("enable-joint-consensus") {
@@ -517,6 +526,9 @@ func (c *ScheduleConfig) Validate() error {
 	}
 	if c.SlowStoreEvictingAffectedStoreRatioThreshold == 0 {
 		return errors.Errorf("slow-store-evicting-affected-store-ratio-threshold is not set")
+	}
+	if c.PatrolRegionWorkerCount > maxPatrolRegionWorkerCount || c.PatrolRegionWorkerCount < 1 {
+		return errors.Errorf("patrol-region-worker-count should be between 1 and %d", maxPatrolRegionWorkerCount)
 	}
 	return nil
 }

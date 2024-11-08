@@ -529,10 +529,29 @@ func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
 		return s.forwardTSO(stream)
 	}
 
+	tsDeadlineCh := make(chan *tsoutil.TSDeadline, 1)
+	go tsoutil.WatchTSDeadline(stream.Context(), tsDeadlineCh)
+
 	var (
 		doneCh chan struct{}
 		errCh  chan error
+		// The following are tso forward stream related variables.
+		forwardStream     tsopb.TSO_TsoClient
+		cancelForward     context.CancelFunc
+		forwardCtx        context.Context
+		tsoStreamErr      error
+		lastForwardedHost string
 	)
+
+	defer func() {
+		if cancelForward != nil {
+			cancelForward()
+		}
+		if grpcutil.NeedRebuildConnection(tsoStreamErr) {
+			s.closeDelegateClient(lastForwardedHost)
+		}
+	}()
+
 	ctx, cancel := context.WithCancel(stream.Context())
 	defer cancel()
 	for {
@@ -567,6 +586,21 @@ func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
 
 			tsoRequest := tsoutil.NewPDProtoRequest(forwardedHost, clientConn, request, stream)
 			s.tsoDispatcher.DispatchRequest(ctx, tsoRequest, s.pdProtoFactory, doneCh, errCh, s.tsoPrimaryWatcher)
+			continue
+		}
+
+		if s.IsServiceIndependent(constant.TSOServiceName) {
+			if request.GetCount() == 0 {
+				err = errs.ErrGenerateTimestamp.FastGenByArgs("tso count should be positive")
+				return status.Error(codes.Unknown, err.Error())
+			}
+			forwardCtx, cancelForward, forwardStream, lastForwardedHost, tsoStreamErr, err = s.handleTSOForwarding(forwardCtx, forwardStream, stream, nil, request, tsDeadlineCh, lastForwardedHost, cancelForward)
+			if tsoStreamErr != nil {
+				return tsoStreamErr
+			}
+			if err != nil {
+				return err
+			}
 			continue
 		}
 
