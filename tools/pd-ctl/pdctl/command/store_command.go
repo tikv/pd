@@ -19,7 +19,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"os"
 	"path"
 	"strconv"
 	"strings"
@@ -64,7 +63,7 @@ func NewDeleteStoreByAddrCommand() *cobra.Command {
 	d := &cobra.Command{
 		Use:   "addr <address>",
 		Short: "delete store by its address",
-		Run:   deleteStoreCommandByAddrFunc,
+		RunE:  deleteStoreCommandByAddrFunc,
 	}
 	return d
 }
@@ -379,21 +378,19 @@ func deleteStoreCommandFunc(cmd *cobra.Command, args []string) {
 	cmd.Println("Success!")
 }
 
-func deleteStoreCommandByAddrFunc(cmd *cobra.Command, args []string) {
+func deleteStoreCommandByAddrFunc(cmd *cobra.Command, args []string) error {
 	id := getStoreID(cmd, args, false)
 	if id == -1 {
-		os.Exit(1)
-		return
+		return fmt.Errorf("Store not find.")
 	}
 	// delete store by its ID
 	prefix := fmt.Sprintf(storePrefix, id)
 	_, err := doRequest(cmd, prefix, http.MethodDelete, http.Header{})
 	if err != nil {
-		cmd.Printf("Failed to delete store %s: %s\n", args[0], err)
-		os.Exit(1)
-		return
+		return fmt.Errorf("Failed to delete store.")
 	}
 	cmd.Println("Success!")
+	return nil
 }
 
 func cancelDeleteStoreCommandFunc(cmd *cobra.Command, args []string) {
