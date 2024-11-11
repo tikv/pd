@@ -438,6 +438,7 @@ func cancelDeleteStoreCommandByAddrFunc(cmd *cobra.Command, args []string) {
 	id := getStoreID(cmd, args, true)
 	if id == -1 {
 		cmd.Printf("address not found: %s\n", args[0])
+		return
 	}
 	if id == 0 {
 		return
