@@ -2134,7 +2134,7 @@ func (c *RaftCluster) changedRegionNotifier() <-chan *core.RegionInfo {
 }
 
 // GetMetaCluster gets meta cluster.
-func (c *RaftCluster) GetMetaCluster() *metapb.Cluster { // need?
+func (c *RaftCluster) GetMetaCluster() *metapb.Cluster {
 	c.RLock()
 	defer c.RUnlock()
 	return typeutil.DeepClone(c.meta, core.ClusterFactory)
@@ -2256,6 +2256,7 @@ func (c *RaftCluster) SetMinResolvedTS(storeID, minResolvedTS uint64) error {
 }
 
 // CheckAndUpdateMinResolvedTS checks and updates the min resolved ts of the cluster.
+// It only be called by the background job runMinResolvedTSJob.
 // This is exported for testing purpose.
 func (c *RaftCluster) CheckAndUpdateMinResolvedTS() (uint64, bool) {
 	if !c.isInitialized() {
