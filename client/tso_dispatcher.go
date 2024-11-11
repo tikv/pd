@@ -128,7 +128,7 @@ func newTSODispatcher(
 			New: func() any {
 				return newBatchController[*tsoRequest](
 					maxBatchSize*2,
-					tsoRequestFinisherFactory(0, 0, 0, invalidStreamID),
+					tsoRequestFinisher(0, 0, 0, invalidStreamID),
 					tsoBestBatchSize,
 				)
 			},
@@ -614,7 +614,7 @@ func (td *tsoDispatcher) processRequests(
 	return nil
 }
 
-func tsoRequestFinisherFactory(physical, firstLogical int64, suffixBits uint32, streamID string) finisherFunc[*tsoRequest] {
+func tsoRequestFinisher(physical, firstLogical int64, suffixBits uint32, streamID string) finisherFunc[*tsoRequest] {
 	return func(idx int, tsoReq *tsoRequest, err error) {
 		// Retrieve the request context before the request is done to trace without race.
 		requestCtx := tsoReq.requestCtx
@@ -627,12 +627,12 @@ func tsoRequestFinisherFactory(physical, firstLogical int64, suffixBits uint32, 
 
 func (td *tsoDispatcher) cancelCollectedRequests(tbc *batchController[*tsoRequest], streamID string, err error) {
 	td.tokenCh <- struct{}{}
-	tbc.finishCollectedRequests(tsoRequestFinisherFactory(0, 0, 0, streamID), err)
+	tbc.finishCollectedRequests(tsoRequestFinisher(0, 0, 0, streamID), err)
 }
 
 func (td *tsoDispatcher) doneCollectedRequests(tbc *batchController[*tsoRequest], physical, firstLogical int64, suffixBits uint32, streamID string) {
 	td.tokenCh <- struct{}{}
-	tbc.finishCollectedRequests(tsoRequestFinisherFactory(physical, firstLogical, suffixBits, streamID), nil)
+	tbc.finishCollectedRequests(tsoRequestFinisher(physical, firstLogical, suffixBits, streamID), nil)
 }
 
 // checkMonotonicity checks whether the monotonicity of the TSO allocation is violated.
