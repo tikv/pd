@@ -23,12 +23,11 @@ import (
 	"github.com/tikv/pd/pkg/versioninfo"
 )
 
-func checkStatusResponse(re *require.Assertions, body []byte) {
-	got := versioninfo.Status{}
-	re.NoError(json.Unmarshal(body, &got))
-	re.Equal(versioninfo.PDBuildTS, got.BuildTS)
-	re.Equal(versioninfo.PDGitHash, got.GitHash)
-	re.Equal(versioninfo.PDReleaseVersion, got.Version)
+type oldStatus struct {
+	BuildTS        string `json:"build_ts"`
+	Version        string `json:"version"`
+	GitHash        string `json:"git_hash"`
+	StartTimestamp int64  `json:"start_timestamp"`
 }
 
 func TestStatus(t *testing.T) {
@@ -45,4 +44,18 @@ func TestStatus(t *testing.T) {
 		checkStatusResponse(re, buf)
 		resp.Body.Close()
 	}
+}
+
+func checkStatusResponse(re *require.Assertions, body []byte) {
+	got := versioninfo.Status{}
+	re.NoError(json.Unmarshal(body, &got))
+	re.Equal(versioninfo.PDBuildTS, got.BuildTS)
+	re.Equal(versioninfo.PDGitHash, got.GitHash)
+	re.Equal(versioninfo.PDReleaseVersion, got.Version)
+	re.Equal(false, got.Loaded)
+	gotWithOldStatus := oldStatus{}
+	re.NoError(json.Unmarshal(body, &gotWithOldStatus))
+	re.Equal(versioninfo.PDBuildTS, gotWithOldStatus.BuildTS)
+	re.Equal(versioninfo.PDGitHash, gotWithOldStatus.GitHash)
+	re.Equal(versioninfo.PDReleaseVersion, gotWithOldStatus.Version)
 }
