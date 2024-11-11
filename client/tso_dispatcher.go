@@ -30,8 +30,8 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/retry"
-	"github.com/tikv/pd/client/timerpool"
-	"github.com/tikv/pd/client/tsoutil"
+	"github.com/tikv/pd/client/utils/timerutil"
+	"github.com/tikv/pd/client/utils/tsoutil"
 	"go.uber.org/zap"
 )
 
@@ -48,7 +48,7 @@ func newTSDeadline(
 	done chan struct{},
 	cancel context.CancelFunc,
 ) *deadline {
-	timer := timerpool.GlobalTimerPool.Get(timeout)
+	timer := timerutil.GlobalTimerPool.Get(timeout)
 	return &deadline{
 		timer:  timer,
 		done:   done,
@@ -151,11 +151,11 @@ func (td *tsoDispatcher) watchTSDeadline() {
 				log.Error("[tso] tso request is canceled due to timeout",
 					zap.String("dc-location", td.dc), errs.ZapError(errs.ErrClientGetTSOTimeout))
 				d.cancel()
-				timerpool.GlobalTimerPool.Put(d.timer)
+				timerutil.GlobalTimerPool.Put(d.timer)
 			case <-d.done:
-				timerpool.GlobalTimerPool.Put(d.timer)
+				timerutil.GlobalTimerPool.Put(d.timer)
 			case <-td.ctx.Done():
-				timerpool.GlobalTimerPool.Put(d.timer)
+				timerutil.GlobalTimerPool.Put(d.timer)
 				return
 			}
 		case <-td.ctx.Done():
