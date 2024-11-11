@@ -355,11 +355,8 @@ func (c *RaftCluster) Start(s Server) error {
 		return err
 	}
 	c.limiter = NewStoreLimiter(s.GetPersistOptions())
-	externalTS, err := c.storage.LoadExternalTS()
-	if err != nil {
-		log.Error("load external timestamp meets error", zap.Error(err))
-	}
-	c.externalTS.Store(externalTS)
+	c.loadExternalTS()
+	c.loadMinResolvedTS()
 
 	if c.isAPIServiceMode {
 		// bootstrap keyspace group manager after starting other parts successfully.
@@ -2290,7 +2287,6 @@ func (c *RaftCluster) runMinResolvedTSJob() {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
-	c.loadMinResolvedTS()
 	for {
 		select {
 		case <-c.ctx.Done():
@@ -2370,6 +2366,16 @@ func (c *RaftCluster) GetExternalTS() uint64 {
 func (c *RaftCluster) SetExternalTS(timestamp uint64) error {
 	c.externalTS.Store(timestamp)
 	return c.storage.SaveExternalTS(timestamp)
+}
+
+func (c *RaftCluster) loadExternalTS() {
+	// Use `c.GetStorage()` here to prevent from the data race in test.
+	externalTS, err := c.GetStorage().LoadExternalTS()
+	if err != nil {
+		log.Error("load external ts meet error", errs.ZapError(err))
+		return
+	}
+	c.externalTS.Store(externalTS)
 }
 
 // SetStoreLimit sets a store limit for a given type and rate.
