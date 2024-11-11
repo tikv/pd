@@ -19,6 +19,7 @@ import (
 	"context"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/pingcap/failpoint"
@@ -33,7 +34,6 @@ import (
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
-	"github.com/tikv/pd/pkg/utils/typeutil"
 	"go.uber.org/zap"
 )
 
@@ -78,7 +78,7 @@ type Controller struct {
 
 	// duration is the duration of the last patrol round.
 	// It's exported, so it should be protected by a mutex.
-	duration typeutil.LockedValue[time.Duration]
+	duration atomic.Value // Store as time.Duration
 
 	// interval is the config interval of patrol regions.
 	// It's used to update the ticker, so we need to
@@ -208,11 +208,11 @@ func (c *Controller) updatePatrolWorkersIfNeeded() {
 
 // GetPatrolRegionsDuration returns the duration of the last patrol region round.
 func (c *Controller) GetPatrolRegionsDuration() time.Duration {
-	return c.duration.Get()
+	return c.duration.Load().(time.Duration)
 }
 
 func (c *Controller) setPatrolRegionsDuration(dur time.Duration) {
-	c.duration.Set(dur)
+	c.duration.Store(dur)
 }
 
 func (c *Controller) checkRegions(startKey []byte) (key []byte, regions []*core.RegionInfo) {
