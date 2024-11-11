@@ -458,9 +458,22 @@ func (c *RaftCluster) runServiceCheckJob() {
 			log.Info("service check job is stopped")
 			return
 		case <-schedulingTicker.C:
-			c.checkSchedulingService()
+			// ensure raft cluster is running
+			// avoid unexpected startSchedulingJobs when raft cluster is stopping
+			c.RLock()
+			if c.running {
+				c.checkSchedulingService()
+			}
+			c.RUnlock()
 		case <-tsoTicker.C:
-			c.checkTSOService()
+			// ensure raft cluster is running
+			// avoid unexpected startTSOJobsIfNeeded when raft cluster is stopping
+			// ref: https://github.com/tikv/pd/issues/8781
+			c.RLock()
+			if c.running {
+				c.checkTSOService()
+			}
+			c.RUnlock()
 		}
 	}
 }
@@ -488,6 +501,7 @@ func (c *RaftCluster) stopTSOJobsIfNeeded() error {
 		return err
 	}
 	if allocator.IsInitialize() {
+		log.Info("closing the global TSO allocator")
 		c.tsoAllocator.ResetAllocatorGroup(tso.GlobalDCLocation, true)
 		failpoint.Inject("updateAfterResetTSO", func() {
 			allocator, _ := c.tsoAllocator.GetAllocator(tso.GlobalDCLocation)
