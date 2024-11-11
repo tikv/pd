@@ -1500,8 +1500,8 @@ func (suite *clientTestSuite) TestGetRegionByID() {
 	// test WithCallerID and WithCallerComponent
 	testutil.Eventually(re, func() bool {
 		r, err := suite.client.
-			WithCallerID(caller.Tidb).
-			WithCallerComponent(caller.Ddl).
+			WithCallerID(caller.TiDB).
+			WithCallerComponent(caller.DDL).
 			GetRegionByID(context.Background(), regionID)
 		re.NoError(err)
 		if r == nil {
