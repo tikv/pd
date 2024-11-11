@@ -343,7 +343,7 @@ func (suite *hotTestSuite) checkHotWithoutHotPeer(cluster *pdTests.TestCluster) 
 	load := 1024.0
 	s := &server.GrpcServer{Server: leaderServer.GetServer()}
 	for _, store := range stores {
-		for i := 0; i < 5; i++ {
+		for i := range 5 {
 			resp1, err := s.StoreHeartbeat(
 				context.Background(), &pdpb.StoreHeartbeatRequest{
 					Header: &pdpb.RequestHeader{ClusterId: leaderServer.GetClusterID()},

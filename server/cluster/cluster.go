@@ -164,10 +164,9 @@ type RaftCluster struct {
 	prevStoreLimit map[uint64]map[storelimit.Type]float64
 
 	// This below fields are all read-only, we cannot update itself after the raft cluster starts.
-	clusterID uint64
-	id        id.Allocator
-	opt       *config.PersistOptions
-	limiter   *StoreLimiter
+	id      id.Allocator
+	opt     *config.PersistOptions
+	limiter *StoreLimiter
 	*schedulingController
 	ruleManager              *placement.RuleManager
 	regionLabeler            *labeler.RegionLabeler
@@ -200,11 +199,18 @@ type Status struct {
 }
 
 // NewRaftCluster create a new cluster.
-func NewRaftCluster(ctx context.Context, clusterID uint64, member *member.EmbeddedEtcdMember, basicCluster *core.BasicCluster, storage storage.Storage, regionSyncer *syncer.RegionSyncer, etcdClient *clientv3.Client,
-	httpClient *http.Client, tsoAllocator *tso.AllocatorManager) *RaftCluster {
+func NewRaftCluster(
+	ctx context.Context,
+	member *member.EmbeddedEtcdMember,
+	basicCluster *core.BasicCluster,
+	storage storage.Storage,
+	regionSyncer *syncer.RegionSyncer,
+	etcdClient *clientv3.Client,
+	httpClient *http.Client,
+	tsoAllocator *tso.AllocatorManager,
+) *RaftCluster {
 	return &RaftCluster{
 		serverCtx:       ctx,
-		clusterID:       clusterID,
 		member:          member,
 		regionSyncer:    regionSyncer,
 		httpClient:      httpClient,
@@ -382,7 +388,7 @@ func (c *RaftCluster) Start(s Server) error {
 
 func (c *RaftCluster) checkSchedulingService() {
 	if c.isAPIServiceMode {
-		servers, err := discovery.Discover(c.etcdClient, strconv.FormatUint(c.clusterID, 10), constant.SchedulingServiceName)
+		servers, err := discovery.Discover(c.etcdClient, constant.SchedulingServiceName)
 		if c.opt.GetMicroServiceConfig().IsSchedulingFallbackEnabled() && (err != nil || len(servers) == 0) {
 			c.startSchedulingJobs(c, c.hbstreams)
 			c.UnsetServiceIndependent(constant.SchedulingServiceName)
@@ -403,11 +409,32 @@ func (c *RaftCluster) checkSchedulingService() {
 // checkTSOService checks the TSO service.
 func (c *RaftCluster) checkTSOService() {
 	if c.isAPIServiceMode {
+		if c.opt.GetMicroServiceConfig().IsTSODynamicSwitchingEnabled() {
+			servers, err := discovery.Discover(c.etcdClient, constant.TSOServiceName)
+			if err != nil || len(servers) == 0 {
+				if err := c.startTSOJobsIfNeeded(); err != nil {
+					log.Error("failed to start TSO jobs", errs.ZapError(err))
+					return
+				}
+				if c.IsServiceIndependent(constant.TSOServiceName) {
+					log.Info("TSO is provided by PD")
+					c.UnsetServiceIndependent(constant.TSOServiceName)
+				}
+			} else {
+				if err := c.stopTSOJobsIfNeeded(); err != nil {
+					log.Error("failed to stop TSO jobs", errs.ZapError(err))
+					return
+				}
+				if !c.IsServiceIndependent(constant.TSOServiceName) {
+					log.Info("TSO is provided by TSO server")
+					c.SetServiceIndependent(constant.TSOServiceName)
+				}
+			}
+		}
 		return
 	}
 
-	if err := c.startTSOJobs(); err != nil {
-		// If there is an error, need to wait for the next check.
+	if err := c.startTSOJobsIfNeeded(); err != nil {
 		log.Error("failed to start TSO jobs", errs.ZapError(err))
 		return
 	}
@@ -422,6 +449,8 @@ func (c *RaftCluster) runServiceCheckJob() {
 		schedulingTicker.Reset(time.Millisecond)
 	})
 	defer schedulingTicker.Stop()
+	tsoTicker := time.NewTicker(tsoServiceCheckInterval)
+	defer tsoTicker.Stop()
 
 	for {
 		select {
@@ -429,12 +458,27 @@ func (c *RaftCluster) runServiceCheckJob() {
 			log.Info("service check job is stopped")
 			return
 		case <-schedulingTicker.C:
-			c.checkSchedulingService()
+			// ensure raft cluster is running
+			// avoid unexpected startSchedulingJobs when raft cluster is stopping
+			c.RLock()
+			if c.running {
+				c.checkSchedulingService()
+			}
+			c.RUnlock()
+		case <-tsoTicker.C:
+			// ensure raft cluster is running
+			// avoid unexpected startTSOJobsIfNeeded when raft cluster is stopping
+			// ref: https://github.com/tikv/pd/issues/8781
+			c.RLock()
+			if c.running {
+				c.checkTSOService()
+			}
+			c.RUnlock()
 		}
 	}
 }
 
-func (c *RaftCluster) startTSOJobs() error {
+func (c *RaftCluster) startTSOJobsIfNeeded() error {
 	allocator, err := c.tsoAllocator.GetAllocator(tso.GlobalDCLocation)
 	if err != nil {
 		log.Error("failed to get global TSO allocator", errs.ZapError(err))
@@ -450,13 +494,14 @@ func (c *RaftCluster) startTSOJobs() error {
 	return nil
 }
 
-func (c *RaftCluster) stopTSOJobs() error {
+func (c *RaftCluster) stopTSOJobsIfNeeded() error {
 	allocator, err := c.tsoAllocator.GetAllocator(tso.GlobalDCLocation)
 	if err != nil {
 		log.Error("failed to get global TSO allocator", errs.ZapError(err))
 		return err
 	}
 	if allocator.IsInitialize() {
+		log.Info("closing the global TSO allocator")
 		c.tsoAllocator.ResetAllocatorGroup(tso.GlobalDCLocation, true)
 		failpoint.Inject("updateAfterResetTSO", func() {
 			allocator, _ := c.tsoAllocator.GetAllocator(tso.GlobalDCLocation)
@@ -818,7 +863,7 @@ func (c *RaftCluster) Stop() {
 	if !c.IsServiceIndependent(constant.SchedulingServiceName) {
 		c.stopSchedulingJobs()
 	}
-	if err := c.stopTSOJobs(); err != nil {
+	if err := c.stopTSOJobsIfNeeded(); err != nil {
 		log.Error("failed to stop tso jobs", errs.ZapError(err))
 	}
 	c.heartbeatRunner.Stop()
@@ -1075,7 +1120,7 @@ func (c *RaftCluster) processReportBuckets(buckets *metapb.Buckets) error {
 	// the two request(A:3,B:2) get the same region and need to update the buckets.
 	// the A will pass the check and set the version to 3, the B will fail because the region.bucket has changed.
 	// the retry should keep the old version and the new version will be set to the region.bucket, like two requests (A:2,B:3).
-	for retry := 0; retry < 3; retry++ {
+	for range 3 {
 		old := region.GetBuckets()
 		// region should not update if the version of the buckets is less than the old one.
 		if old != nil && buckets.GetVersion() <= old.GetVersion() {
@@ -2103,8 +2148,8 @@ func (c *RaftCluster) GetMetaCluster() *metapb.Cluster {
 func (c *RaftCluster) PutMetaCluster(meta *metapb.Cluster) error {
 	c.Lock()
 	defer c.Unlock()
-	if meta.GetId() != c.clusterID {
-		return errors.Errorf("invalid cluster %v, mismatch cluster id %d", meta, c.clusterID)
+	if meta.GetId() != keypath.ClusterID() {
+		return errors.Errorf("invalid cluster %v, mismatch cluster id %d", meta, keypath.ClusterID())
 	}
 	return c.putMetaLocked(typeutil.DeepClone(meta, core.ClusterFactory))
 }
@@ -2170,7 +2215,7 @@ func (c *RaftCluster) AddStoreLimit(store *metapb.Store) {
 	cfg.StoreLimit[storeID] = slc
 	c.opt.SetScheduleConfig(cfg)
 	var err error
-	for i := 0; i < persistLimitRetryTimes; i++ {
+	for range persistLimitRetryTimes {
 		if err = c.opt.Persist(c.storage); err == nil {
 			log.Info("store limit added", zap.Uint64("store-id", storeID))
 			return
@@ -2189,7 +2234,7 @@ func (c *RaftCluster) RemoveStoreLimit(storeID uint64) {
 	delete(cfg.StoreLimit, storeID)
 	c.opt.SetScheduleConfig(cfg)
 	var err error
-	for i := 0; i < persistLimitRetryTimes; i++ {
+	for range persistLimitRetryTimes {
 		if err = c.opt.Persist(c.storage); err == nil {
 			log.Info("store limit removed", zap.Uint64("store-id", storeID))
 			id := strconv.FormatUint(storeID, 10)
@@ -2510,25 +2555,16 @@ func IsClientURL(addr string, etcdClient *clientv3.Client) bool {
 
 // IsServiceIndependent returns whether the service is independent.
 func (c *RaftCluster) IsServiceIndependent(name string) bool {
-	if c == nil {
-		return false
-	}
 	_, exist := c.independentServices.Load(name)
 	return exist
 }
 
 // SetServiceIndependent sets the service to be independent.
 func (c *RaftCluster) SetServiceIndependent(name string) {
-	if c == nil {
-		return
-	}
 	c.independentServices.Store(name, struct{}{})
 }
 
 // UnsetServiceIndependent unsets the service to be independent.
 func (c *RaftCluster) UnsetServiceIndependent(name string) {
-	if c == nil {
-		return
-	}
 	c.independentServices.Delete(name)
 }

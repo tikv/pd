@@ -30,7 +30,7 @@ func TestConcurrentRunner(t *testing.T) {
 		defer runner.Stop()
 
 		var wg sync.WaitGroup
-		for i := 0; i < 10; i++ {
+		for i := range 10 {
 			time.Sleep(50 * time.Millisecond)
 			wg.Add(1)
 			err := runner.RunTask(
@@ -51,7 +51,7 @@ func TestConcurrentRunner(t *testing.T) {
 		runner.Start(context.TODO())
 		defer runner.Stop()
 		var wg sync.WaitGroup
-		for i := 0; i < 10; i++ {
+		for i := range 10 {
 			wg.Add(1)
 			err := runner.RunTask(
 				uint64(i),

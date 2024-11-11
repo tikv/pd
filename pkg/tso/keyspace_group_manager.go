@@ -400,7 +400,6 @@ func NewKeyspaceGroupManager(
 	etcdClient *clientv3.Client,
 	httpClient *http.Client,
 	electionNamePrefix string,
-	clusterID uint64,
 	legacySvcRootPath string,
 	tsoSvcRootPath string,
 	cfg ServiceConfig,
@@ -419,7 +418,7 @@ func NewKeyspaceGroupManager(
 		etcdClient:                   etcdClient,
 		httpClient:                   httpClient,
 		electionNamePrefix:           electionNamePrefix,
-		tsoServiceKey:                discovery.TSOPath(clusterID),
+		tsoServiceKey:                keypath.TSOPath(),
 		legacySvcRootPath:            legacySvcRootPath,
 		tsoSvcRootPath:               tsoSvcRootPath,
 		primaryPriorityCheckInterval: defaultPrimaryPriorityCheckInterval,
@@ -868,7 +867,7 @@ func (kgm *KeyspaceGroupManager) updateKeyspaceGroupMembership(
 	if oldLen != newLen {
 		sameMembership = false
 	} else {
-		for i := 0; i < oldLen; i++ {
+		for i := range oldLen {
 			if oldKeyspaces[i] != newKeyspaces[i] {
 				sameMembership = false
 				break

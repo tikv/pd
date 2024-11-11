@@ -38,7 +38,7 @@ func mustMakeTestKeyspaces(re *require.Assertions, server *server.Server, start 
 	var err error
 	keyspaces := make([]*keyspacepb.KeyspaceMeta, testKeyspaceCount)
 	manager := server.GetKeyspaceManager()
-	for i := 0; i < testKeyspaceCount; i++ {
+	for i := range testKeyspaceCount {
 		keyspaces[i], err = manager.CreateKeyspace(&keyspace.CreateKeyspaceRequest{
 			Name: fmt.Sprintf("test_keyspace_%d", start+i),
 			Config: map[string]string{

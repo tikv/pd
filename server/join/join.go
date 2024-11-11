@@ -174,7 +174,7 @@ func PrepareJoinCluster(cfg *config.Config) error {
 		listSucc bool
 	)
 
-	for i := 0; i < listMemberRetryTimes; i++ {
+	for range listMemberRetryTimes {
 		listResp, err = etcdutil.ListEtcdMembers(client.Ctx(), client)
 		if err != nil {
 			return err

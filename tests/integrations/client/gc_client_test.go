@@ -79,7 +79,7 @@ func (suite *gcClientTestSuite) SetupSuite() {
 	addr := suite.server.GetAddr()
 	suite.client, err = pd.NewClientWithContext(suite.server.Context(), []string{addr}, pd.SecurityOption{})
 	re.NoError(err)
-	rootPath := path.Join("/pd", strconv.FormatUint(suite.server.ClusterID(), 10))
+	rootPath := path.Join("/pd", strconv.FormatUint(keypath.ClusterID(), 10))
 	suite.gcSafePointV2Prefix = path.Join(rootPath, keypath.GCSafePointV2Prefix())
 	// Enable the fail-point to skip checking keyspace validity.
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/gc/checkKeyspace", "return(true)"))
@@ -110,7 +110,7 @@ func (suite *gcClientTestSuite) TestWatch1() {
 	}, receiver)
 
 	// Init gc safe points as index value of keyspace 0 ~ 5.
-	for i := 0; i < 6; i++ {
+	for i := range 6 {
 		suite.mustUpdateSafePoint(re, uint32(i), uint64(i))
 	}
 
@@ -120,7 +120,7 @@ func (suite *gcClientTestSuite) TestWatch1() {
 	}
 
 	// check gc safe point equal to keyspace id for keyspace 0 ~ 2 .
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		re.Equal(uint64(i), suite.mustLoadSafePoint(re, uint32(i)))
 	}
 

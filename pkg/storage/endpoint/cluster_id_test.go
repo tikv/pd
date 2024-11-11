@@ -12,29 +12,37 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package statistics
+package endpoint
 
 import (
-	"context"
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"github.com/tikv/pd/pkg/core"
-	"github.com/tikv/pd/pkg/statistics/utils"
+	"github.com/tikv/pd/pkg/utils/etcdutil"
+	"github.com/tikv/pd/pkg/utils/keypath"
 )
 
-func TestIsHot(t *testing.T) {
+func TestInitClusterID(t *testing.T) {
 	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	for i := utils.RWType(0); i < utils.RWTypeLen; i++ {
-		cluster := core.NewBasicCluster()
-		cache := NewHotCache(ctx, cluster)
-		region := buildRegion(cluster, i, 3, 60)
-		stats := cache.CheckReadPeerSync(region, region.GetPeers(), []float64{100000000, 1000, 1000}, 60)
-		cache.Update(stats[0], i)
-		for range 100 {
-			re.True(cache.IsRegionHot(region, 1))
-		}
-	}
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1)
+	defer clean()
+
+	id, err := getClusterIDFromEtcd(client)
+	re.NoError(err)
+	re.Equal(uint64(0), id)
+	re.Equal(uint64(0), keypath.ClusterID())
+
+	clusterID, err := InitClusterID(client)
+	re.NoError(err)
+	re.NotZero(clusterID)
+	re.Equal(clusterID, keypath.ClusterID())
+
+	clusterID1, err := InitClusterID(client)
+	re.NoError(err)
+	re.Equal(clusterID, clusterID1)
+
+	id, err = getClusterIDFromEtcd(client)
+	re.NoError(err)
+	re.Equal(clusterID, id)
+	re.Equal(clusterID, keypath.ClusterID())
 }

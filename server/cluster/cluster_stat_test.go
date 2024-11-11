@@ -26,7 +26,7 @@ func cpu(usage int64) []*pdpb.RecordPair {
 	n := 10
 	name := "cpu"
 	pairs := make([]*pdpb.RecordPair, n)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		pairs[i] = &pdpb.RecordPair{
 			Key:   fmt.Sprintf("%s:%d", name, i),
 			Value: uint64(usage),
@@ -42,7 +42,7 @@ func TestCPUEntriesAppend(t *testing.T) {
 	checkAppend := func(appended bool, usage int64, threads ...string) {
 		entries := NewCPUEntries(N)
 		re.NotNil(entries)
-		for i := 0; i < N; i++ {
+		for range N {
 			entry := &StatEntry{
 				CpuUsages: cpu(usage),
 			}
@@ -63,7 +63,7 @@ func TestCPUEntriesCPU(t *testing.T) {
 	re.NotNil(entries)
 
 	usages := cpu(20)
-	for i := 0; i < N; i++ {
+	for range N {
 		entry := &StatEntry{
 			CpuUsages: usages,
 		}
@@ -80,7 +80,7 @@ func TestStatEntriesAppend(t *testing.T) {
 	ThreadsCollected = []string{"cpu:"}
 
 	// fill 2*N entries, 2 entries for each store
-	for i := 0; i < 2*N; i++ {
+	for i := range 2 * N {
 		entry := &StatEntry{
 			StoreId:   uint64(i % N),
 			CpuUsages: cpu(20),
@@ -89,7 +89,7 @@ func TestStatEntriesAppend(t *testing.T) {
 	}
 
 	// use i as the store ID
-	for i := 0; i < N; i++ {
+	for i := range N {
 		re.Equal(float64(20), cst.stats[uint64(i)].CPU())
 	}
 }
@@ -105,7 +105,7 @@ func TestStatEntriesCPU(t *testing.T) {
 	ThreadsCollected = []string{"cpu:"}
 
 	// 2 entries per store
-	for i := 0; i < 2*N; i++ {
+	for i := range 2 * N {
 		entry := &StatEntry{
 			StoreId:   uint64(i % N),
 			CpuUsages: usages,
@@ -126,7 +126,7 @@ func TestStatEntriesCPUStale(t *testing.T) {
 
 	usages := cpu(20)
 	ThreadsCollected = []string{"cpu:"}
-	for i := 0; i < 2*N; i++ {
+	for i := range 2 * N {
 		entry := &StatEntry{
 			StoreId:   uint64(i % N),
 			CpuUsages: usages,
@@ -145,7 +145,7 @@ func TestStatEntriesState(t *testing.T) {
 		usages := cpu(usage)
 		ThreadsCollected = []string{"cpu:"}
 
-		for i := 0; i < NumberOfEntries; i++ {
+		for range NumberOfEntries {
 			entry := &StatEntry{
 				StoreId:   0,
 				CpuUsages: usages,

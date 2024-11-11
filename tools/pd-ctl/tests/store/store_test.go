@@ -211,7 +211,7 @@ func TestStore(t *testing.T) {
 			re.NoError(json.Unmarshal(output, &storeInfo))
 			labels := storeInfo.Store.Labels
 			re.Len(labels, testcase.expectLabelLength)
-			for i := 0; i < testcase.expectLabelLength; i++ {
+			for i := range testcase.expectLabelLength {
 				re.Equal(testcase.expectKeys[i], labels[i].Key)
 				re.Equal(testcase.expectValues[i], labels[i].Value)
 			}

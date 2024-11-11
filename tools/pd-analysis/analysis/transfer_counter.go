@@ -125,7 +125,7 @@ func (c *TransferCounter) prepare() {
 	}
 
 	c.graphMat = nil
-	for i := 0; i < c.scheduledStoreNum; i++ {
+	for range c.scheduledStoreNum {
 		tmp := make([]uint64, c.scheduledStoreNum)
 		c.graphMat = append(c.graphMat, tmp)
 	}
@@ -157,7 +157,7 @@ func (c *TransferCounter) dfs(cur int, path []int) {
 		if path[0] == target { // is a loop
 			// get curMinFlow
 			curMinFlow := flow
-			for i := 0; i < len(path)-1; i++ {
+			for i := range len(path) - 1 {
 				pathFlow := c.graphMat[path[i]][path[i+1]]
 				if curMinFlow > pathFlow {
 					curMinFlow = pathFlow
@@ -167,7 +167,7 @@ func (c *TransferCounter) dfs(cur int, path []int) {
 			if curMinFlow != 0 {
 				c.loopResultPath = append(c.loopResultPath, path)
 				c.loopResultCount = append(c.loopResultCount, curMinFlow*uint64(len(path)))
-				for i := 0; i < len(path)-1; i++ {
+				for i := range len(path) - 1 {
 					c.graphMat[path[i]][path[i+1]] -= curMinFlow
 				}
 				c.graphMat[cur][target] -= curMinFlow
@@ -186,7 +186,7 @@ func (c *TransferCounter) Result() {
 		c.prepare()
 	}
 
-	for i := 0; i < c.scheduledStoreNum; i++ {
+	for i := range c.scheduledStoreNum {
 		c.dfs(i, make([]int, 0))
 	}
 

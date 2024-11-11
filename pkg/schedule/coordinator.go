@@ -253,7 +253,7 @@ func (c *Coordinator) InitSchedulers(needRun bool) {
 		configs       []string
 		err           error
 	)
-	for i := 0; i < maxLoadConfigRetries; i++ {
+	for i := range maxLoadConfigRetries {
 		scheduleNames, configs, err = c.cluster.GetStorage().LoadAllSchedulerConfigs()
 		select {
 		case <-c.ctx.Done():

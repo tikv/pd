@@ -113,9 +113,14 @@ func (h *schedulerHandler) CreateScheduler(w http.ResponseWriter, r *http.Reques
 			return
 		}
 	case types.GrantLeaderScheduler, types.EvictLeaderScheduler:
-		storeID, ok := input["store_id"].(float64)
+		_, ok := input["store_id"]
 		if !ok {
 			h.r.JSON(w, http.StatusBadRequest, "missing store id")
+			return
+		}
+		storeID, ok := input["store_id"].(float64)
+		if !ok {
+			h.r.JSON(w, http.StatusBadRequest, "please input a right store id")
 			return
 		}
 		var (

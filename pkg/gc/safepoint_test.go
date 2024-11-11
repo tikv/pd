@@ -66,7 +66,7 @@ func TestGCSafePointUpdateCurrently(t *testing.T) {
 	re := require.New(t)
 
 	// update gc safePoint concurrently
-	for id := 0; id < 20; id++ {
+	for id := range 20 {
 		wg.Add(1)
 		go func(step uint64) {
 			for safePoint := step; safePoint <= maxSafePoint; safePoint += step {

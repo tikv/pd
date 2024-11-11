@@ -47,7 +47,7 @@ func (suite *keyspaceGroupTestSuite) SetupTest() {
 	re := suite.Require()
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
 	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
-	suite.kgm = NewKeyspaceGroupManager(suite.ctx, store, nil, 0)
+	suite.kgm = NewKeyspaceGroupManager(suite.ctx, store, nil)
 	idAllocator := mockid.NewIDAllocator()
 	cluster := mockcluster.NewCluster(suite.ctx, mockconfig.NewTestOptions())
 	suite.kg = NewKeyspaceManager(suite.ctx, store, cluster, idAllocator, &mockConfig{}, suite.kgm)
@@ -136,7 +136,7 @@ func (suite *keyspaceGroupTestSuite) TestKeyspaceAssignment() {
 	re.NoError(err)
 	re.Len(kgs, 4)
 
-	for i := 0; i < 99; i++ {
+	for i := range 99 {
 		_, err := suite.kg.CreateKeyspace(&CreateKeyspaceRequest{
 			Name: fmt.Sprintf("test%d", i),
 			Config: map[string]string{
