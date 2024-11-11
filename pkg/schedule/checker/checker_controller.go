@@ -94,7 +94,7 @@ type Controller struct {
 // NewController create a new Controller.
 func NewController(ctx context.Context, cluster sche.CheckerCluster, conf config.CheckerConfigProvider, ruleManager *placement.RuleManager, labeler *labeler.RegionLabeler, opController *operator.Controller) *Controller {
 	pendingProcessedRegions := cache.NewIDTTL(ctx, time.Minute, 3*time.Minute)
-	return &Controller{
+	c := &Controller{
 		ctx:                     ctx,
 		cluster:                 cluster,
 		conf:                    conf,
@@ -112,6 +112,8 @@ func NewController(ctx context.Context, cluster sche.CheckerCluster, conf config
 		interval:                cluster.GetCheckerConfig().GetPatrolRegionInterval(),
 		patrolRegionScanLimit:   calculateScanLimit(cluster),
 	}
+	c.duration.Store(time.Duration(0))
+	return c
 }
 
 // PatrolRegions is used to scan regions.
