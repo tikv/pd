@@ -1,4 +1,4 @@
-// Copyright 2023 TiKV Project Authors.
+// Copyright 2024 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -36,20 +36,20 @@ type batchController[T any] struct {
 	collectedRequestCount int
 
 	// The finisher function to cancel collected requests when an internal error occurs.
-	cancelFinisher finisherFunc[T]
+	finisher finisherFunc[T]
 	// The observer to record the best batch size.
 	bestBatchObserver prometheus.Histogram
 	// The time after getting the first request and the token, and before performing extra batching.
 	extraBatchingStartTime time.Time
 }
 
-func newBatchController[T any](maxBatchSize int, cancelFinisher finisherFunc[T], bestBatchObserver prometheus.Histogram) *batchController[T] {
+func newBatchController[T any](maxBatchSize int, finisher finisherFunc[T], bestBatchObserver prometheus.Histogram) *batchController[T] {
 	return &batchController[T]{
 		maxBatchSize:          maxBatchSize,
 		bestBatchSize:         defaultBestBatchSize,
 		collectedRequests:     make([]T, maxBatchSize+1),
 		collectedRequestCount: 0,
-		cancelFinisher:        cancelFinisher,
+		finisher:              finisher,
 		bestBatchObserver:     bestBatchObserver,
 	}
 }
@@ -67,7 +67,7 @@ func (bc *batchController[T]) fetchPendingRequests(ctx context.Context, requestC
 			if tokenAcquired {
 				tokenCh <- struct{}{}
 			}
-			bc.finishCollectedRequests(bc.cancelFinisher, errRet)
+			bc.finishCollectedRequests(bc.finisher, errRet)
 		}
 	}()
 
@@ -224,7 +224,7 @@ func (bc *batchController[T]) adjustBestBatchSize() {
 
 func (bc *batchController[T]) finishCollectedRequests(finisher finisherFunc[T], err error) {
 	if finisher == nil {
-		finisher = bc.cancelFinisher
+		finisher = bc.finisher
 	}
 	if finisher != nil {
 		for i := range bc.collectedRequestCount {
