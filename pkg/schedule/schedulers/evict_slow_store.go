@@ -19,6 +19,7 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/core/constant"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
@@ -109,7 +110,35 @@ func (s *evictSlowStoreScheduler) EncodeConfig() ([]byte, error) {
 	return EncodeConfig(s.conf)
 }
 
+<<<<<<< HEAD
 func (s *evictSlowStoreScheduler) Prepare(cluster sche.SchedulerCluster) error {
+=======
+// ReloadConfig implements the Scheduler interface.
+func (s *evictSlowStoreScheduler) ReloadConfig() error {
+	s.conf.Lock()
+	defer s.conf.Unlock()
+
+	newCfg := &evictSlowStoreSchedulerConfig{}
+	if err := s.conf.load(newCfg); err != nil {
+		return err
+	}
+	old := make(map[uint64]struct{})
+	for _, id := range s.conf.EvictedStores {
+		old[id] = struct{}{}
+	}
+	new := make(map[uint64]struct{})
+	for _, id := range newCfg.EvictedStores {
+		new[id] = struct{}{}
+	}
+	pauseAndResumeLeaderTransfer(s.conf.cluster, constant.In, old, new)
+	s.conf.RecoveryDurationGap = newCfg.RecoveryDurationGap
+	s.conf.EvictedStores = newCfg.EvictedStores
+	return nil
+}
+
+// PrepareConfig implements the Scheduler interface.
+func (s *evictSlowStoreScheduler) PrepareConfig(cluster sche.SchedulerCluster) error {
+>>>>>>> 8bc974941 (scheduler: replace pauseLeader with two flags and add source filter to transferIn (#8623))
 	evictStore := s.conf.evictStore()
 	if evictStore != 0 {
 		return cluster.SlowStoreEvicted(evictStore)

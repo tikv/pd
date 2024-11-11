@@ -191,7 +191,7 @@ func (s *evictLeaderScheduler) Prepare(cluster sche.SchedulerCluster) error {
 	defer s.conf.mu.RUnlock()
 	var res error
 	for id := range s.conf.StoreIDWitRanges {
-		if err := cluster.PauseLeaderTransfer(id); err != nil {
+		if err := cluster.PauseLeaderTransfer(id, constant.In); err != nil {
 			res = err
 		}
 	}
@@ -202,7 +202,7 @@ func (s *evictLeaderScheduler) Cleanup(cluster sche.SchedulerCluster) {
 	s.conf.mu.RLock()
 	defer s.conf.mu.RUnlock()
 	for id := range s.conf.StoreIDWitRanges {
-		cluster.ResumeLeaderTransfer(id)
+		cluster.ResumeLeaderTransfer(id, constant.In)
 	}
 }
 
@@ -260,7 +260,7 @@ func (handler *evictLeaderHandler) UpdateConfig(w http.ResponseWriter, r *http.R
 	if ok {
 		id = (uint64)(idFloat)
 		if _, exists = handler.config.StoreIDWitRanges[id]; !exists {
-			if err := handler.config.cluster.PauseLeaderTransfer(id); err != nil {
+			if err := handler.config.cluster.PauseLeaderTransfer(id, constant.In); err != nil {
 				handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
 				return
 			}
@@ -278,7 +278,7 @@ func (handler *evictLeaderHandler) UpdateConfig(w http.ResponseWriter, r *http.R
 	err := handler.config.BuildWithArgs(args)
 	if err != nil {
 		handler.config.mu.Lock()
-		handler.config.cluster.ResumeLeaderTransfer(id)
+		handler.config.cluster.ResumeLeaderTransfer(id, constant.In)
 		handler.config.mu.Unlock()
 		handler.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
@@ -288,7 +288,7 @@ func (handler *evictLeaderHandler) UpdateConfig(w http.ResponseWriter, r *http.R
 	if err != nil {
 		handler.config.mu.Lock()
 		delete(handler.config.StoreIDWitRanges, id)
-		handler.config.cluster.ResumeLeaderTransfer(id)
+		handler.config.cluster.ResumeLeaderTransfer(id, constant.In)
 		handler.config.mu.Unlock()
 		handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
 	}
@@ -310,6 +310,7 @@ func (handler *evictLeaderHandler) DeleteConfig(w http.ResponseWriter, r *http.R
 
 	handler.config.mu.Lock()
 	defer handler.config.mu.Unlock()
+<<<<<<< HEAD
 	_, exists := handler.config.StoreIDWitRanges[id]
 	if exists {
 		delete(handler.config.StoreIDWitRanges, id)
@@ -324,6 +325,20 @@ func (handler *evictLeaderHandler) DeleteConfig(w http.ResponseWriter, r *http.R
 			resp = noStoreInSchedulerInfo
 		}
 		handler.rd.JSON(w, http.StatusOK, resp)
+=======
+	ranges, exists := handler.config.StoreIDWitRanges[id]
+	if !exists {
+		handler.rd.JSON(w, http.StatusInternalServerError, errors.New("the config does not exist"))
+		return
+	}
+	delete(handler.config.StoreIDWitRanges, id)
+	handler.config.cluster.ResumeLeaderTransfer(id, constant.In)
+
+	if err := handler.config.Persist(); err != nil {
+		handler.config.StoreIDWitRanges[id] = ranges
+		_ = handler.config.cluster.PauseLeaderTransfer(id, constant.In)
+		handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
+>>>>>>> 8bc974941 (scheduler: replace pauseLeader with two flags and add source filter to transferIn (#8623))
 		return
 	}
 

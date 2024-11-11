@@ -144,11 +144,25 @@ func (conf *evictLeaderSchedulerConfig) removeStore(id uint64) (succ bool, last 
 	succ, last = false, false
 	if exists {
 		delete(conf.StoreIDWithRanges, id)
+<<<<<<< HEAD
 		conf.cluster.ResumeLeaderTransfer(id)
 		succ = true
 		last = len(conf.StoreIDWithRanges) == 0
 	}
 	return succ, last
+=======
+		conf.cluster.ResumeLeaderTransfer(id, constant.In)
+		return len(conf.StoreIDWithRanges) == 0, nil
+	}
+	return false, errs.ErrScheduleConfigNotExist.FastGenByArgs()
+}
+
+func (conf *evictLeaderSchedulerConfig) resetStoreLocked(id uint64, keyRange []core.KeyRange) {
+	if err := conf.cluster.PauseLeaderTransfer(id, constant.In); err != nil {
+		log.Error("pause leader transfer failed", zap.Uint64("store-id", id), errs.ZapError(err))
+	}
+	conf.StoreIDWithRanges[id] = keyRange
+>>>>>>> 8bc974941 (scheduler: replace pauseLeader with two flags and add source filter to transferIn (#8623))
 }
 
 func (conf *evictLeaderSchedulerConfig) resetStore(id uint64, keyRange []core.KeyRange) {
@@ -167,6 +181,110 @@ func (conf *evictLeaderSchedulerConfig) getKeyRangesByID(id uint64) []core.KeyRa
 	return nil
 }
 
+<<<<<<< HEAD
+=======
+func (conf *evictLeaderSchedulerConfig) encodeConfig() ([]byte, error) {
+	conf.RLock()
+	defer conf.RUnlock()
+	return EncodeConfig(conf)
+}
+
+func (conf *evictLeaderSchedulerConfig) reloadConfig() error {
+	conf.Lock()
+	defer conf.Unlock()
+	newCfg := &evictLeaderSchedulerConfig{}
+	if err := conf.load(newCfg); err != nil {
+		return err
+	}
+	pauseAndResumeLeaderTransfer(conf.cluster, constant.In, conf.StoreIDWithRanges, newCfg.StoreIDWithRanges)
+	conf.StoreIDWithRanges = newCfg.StoreIDWithRanges
+	conf.Batch = newCfg.Batch
+	return nil
+}
+
+func (conf *evictLeaderSchedulerConfig) pauseLeaderTransfer(cluster sche.SchedulerCluster) error {
+	conf.RLock()
+	defer conf.RUnlock()
+	var res error
+	for id := range conf.StoreIDWithRanges {
+		if err := cluster.PauseLeaderTransfer(id, constant.In); err != nil {
+			res = err
+		}
+	}
+	return res
+}
+
+func (conf *evictLeaderSchedulerConfig) resumeLeaderTransfer(cluster sche.SchedulerCluster) {
+	conf.RLock()
+	defer conf.RUnlock()
+	for id := range conf.StoreIDWithRanges {
+		cluster.ResumeLeaderTransfer(id, constant.In)
+	}
+}
+
+func (conf *evictLeaderSchedulerConfig) pauseLeaderTransferIfStoreNotExist(id uint64) (bool, error) {
+	conf.RLock()
+	defer conf.RUnlock()
+	if _, exist := conf.StoreIDWithRanges[id]; !exist {
+		if err := conf.cluster.PauseLeaderTransfer(id, constant.In); err != nil {
+			return exist, err
+		}
+	}
+	return true, nil
+}
+
+func (conf *evictLeaderSchedulerConfig) resumeLeaderTransferIfExist(id uint64) {
+	conf.RLock()
+	defer conf.RUnlock()
+	conf.cluster.ResumeLeaderTransfer(id, constant.In)
+}
+
+func (conf *evictLeaderSchedulerConfig) update(id uint64, newRanges []core.KeyRange, batch int) error {
+	conf.Lock()
+	defer conf.Unlock()
+	if id != 0 {
+		conf.StoreIDWithRanges[id] = newRanges
+	}
+	conf.Batch = batch
+	err := conf.save()
+	if err != nil && id != 0 {
+		_, _ = conf.removeStoreLocked(id)
+	}
+	return err
+}
+
+func (conf *evictLeaderSchedulerConfig) delete(id uint64) (any, error) {
+	conf.Lock()
+	var resp any
+	last, err := conf.removeStoreLocked(id)
+	if err != nil {
+		conf.Unlock()
+		return resp, err
+	}
+
+	keyRanges := conf.StoreIDWithRanges[id]
+	err = conf.save()
+	if err != nil {
+		conf.resetStoreLocked(id, keyRanges)
+		conf.Unlock()
+		return resp, err
+	}
+	if !last {
+		conf.Unlock()
+		return resp, nil
+	}
+	conf.Unlock()
+	if err := conf.removeSchedulerCb(types.EvictLeaderScheduler.String()); err != nil {
+		if !errors.ErrorEqual(err, errs.ErrSchedulerNotFound.FastGenByArgs()) {
+			conf.resetStore(id, keyRanges)
+		}
+		return resp, err
+	}
+	resp = lastStoreDeleteInfo
+	return resp, nil
+}
+
+>>>>>>> 8bc974941 (scheduler: replace pauseLeader with two flags and add source filter to transferIn (#8623))
 type evictLeaderScheduler struct {
 	*BaseScheduler
 	conf    *evictLeaderSchedulerConfig

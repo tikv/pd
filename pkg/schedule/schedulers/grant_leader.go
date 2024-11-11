@@ -120,7 +120,7 @@ func (conf *grantLeaderSchedulerConfig) removeStore(id uint64) (succ bool, last 
 	succ, last = false, false
 	if exists {
 		delete(conf.StoreIDWithRanges, id)
-		conf.cluster.ResumeLeaderTransfer(id)
+		conf.cluster.ResumeLeaderTransfer(id, constant.Out)
 		succ = true
 		last = len(conf.StoreIDWithRanges) == 0
 	}
@@ -128,9 +128,17 @@ func (conf *grantLeaderSchedulerConfig) removeStore(id uint64) (succ bool, last 
 }
 
 func (conf *grantLeaderSchedulerConfig) resetStore(id uint64, keyRange []core.KeyRange) {
+<<<<<<< HEAD
 	conf.mu.Lock()
 	defer conf.mu.Unlock()
 	conf.cluster.PauseLeaderTransfer(id)
+=======
+	conf.Lock()
+	defer conf.Unlock()
+	if err := conf.cluster.PauseLeaderTransfer(id, constant.Out); err != nil {
+		log.Error("pause leader transfer failed", zap.Uint64("store-id", id), errs.ZapError(err))
+	}
+>>>>>>> 8bc974941 (scheduler: replace pauseLeader with two flags and add source filter to transferIn (#8623))
 	conf.StoreIDWithRanges[id] = keyRange
 }
 
@@ -192,7 +200,7 @@ func (s *grantLeaderScheduler) ReloadConfig() error {
 	if err = DecodeConfig([]byte(cfgData), newCfg); err != nil {
 		return err
 	}
-	pauseAndResumeLeaderTransfer(s.conf.cluster, s.conf.StoreIDWithRanges, newCfg.StoreIDWithRanges)
+	pauseAndResumeLeaderTransfer(s.conf.cluster, constant.Out, s.conf.StoreIDWithRanges, newCfg.StoreIDWithRanges)
 	s.conf.StoreIDWithRanges = newCfg.StoreIDWithRanges
 	return nil
 }
@@ -202,7 +210,7 @@ func (s *grantLeaderScheduler) Prepare(cluster sche.SchedulerCluster) error {
 	defer s.conf.mu.RUnlock()
 	var res error
 	for id := range s.conf.StoreIDWithRanges {
-		if err := cluster.PauseLeaderTransfer(id); err != nil {
+		if err := cluster.PauseLeaderTransfer(id, constant.Out); err != nil {
 			res = err
 		}
 	}
@@ -213,7 +221,7 @@ func (s *grantLeaderScheduler) Cleanup(cluster sche.SchedulerCluster) {
 	s.conf.mu.RLock()
 	defer s.conf.mu.RUnlock()
 	for id := range s.conf.StoreIDWithRanges {
-		cluster.ResumeLeaderTransfer(id)
+		cluster.ResumeLeaderTransfer(id, constant.Out)
 	}
 }
 
@@ -270,8 +278,13 @@ func (handler *grantLeaderHandler) UpdateConfig(w http.ResponseWriter, r *http.R
 		id = (uint64)(idFloat)
 		handler.config.mu.RLock()
 		if _, exists = handler.config.StoreIDWithRanges[id]; !exists {
+<<<<<<< HEAD
 			if err := handler.config.cluster.PauseLeaderTransfer(id); err != nil {
 				handler.config.mu.RUnlock()
+=======
+			if err := handler.config.cluster.PauseLeaderTransfer(id, constant.Out); err != nil {
+				handler.config.RUnlock()
+>>>>>>> 8bc974941 (scheduler: replace pauseLeader with two flags and add source filter to transferIn (#8623))
 				handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
 				return
 			}
@@ -289,9 +302,15 @@ func (handler *grantLeaderHandler) UpdateConfig(w http.ResponseWriter, r *http.R
 
 	err := handler.config.BuildWithArgs(args)
 	if err != nil {
+<<<<<<< HEAD
 		handler.config.mu.Lock()
 		handler.config.cluster.ResumeLeaderTransfer(id)
 		handler.config.mu.Unlock()
+=======
+		handler.config.Lock()
+		handler.config.cluster.ResumeLeaderTransfer(id, constant.Out)
+		handler.config.Unlock()
+>>>>>>> 8bc974941 (scheduler: replace pauseLeader with two flags and add source filter to transferIn (#8623))
 		handler.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
 	}

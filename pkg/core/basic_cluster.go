@@ -15,9 +15,15 @@
 package core
 
 import (
+<<<<<<< HEAD
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/utils/syncutil"
+=======
+	"bytes"
+
+	"github.com/tikv/pd/pkg/core/constant"
+>>>>>>> 8bc974941 (scheduler: replace pauseLeader with two flags and add source filter to transferIn (#8623))
 )
 
 // BasicCluster provides basic data member and interface for a tikv cluster.
@@ -287,8 +293,8 @@ type StoreSetInformer interface {
 
 // StoreSetController is used to control stores' status.
 type StoreSetController interface {
-	PauseLeaderTransfer(id uint64) error
-	ResumeLeaderTransfer(id uint64)
+	PauseLeaderTransfer(id uint64, d constant.Direction) error
+	ResumeLeaderTransfer(id uint64, d constant.Direction)
 
 	SlowStoreEvicted(id uint64) error
 	SlowStoreRecovered(id uint64)
