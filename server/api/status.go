@@ -45,7 +45,7 @@ func (h *statusHandler) GetPDStatus(w http.ResponseWriter, _ *http.Request) {
 		GitHash:        versioninfo.PDGitHash,
 		Version:        versioninfo.PDReleaseVersion,
 		StartTimestamp: h.svr.StartTimestamp(),
-		Loaded:         storage.AreRegionsLoaded(h.svr.GetStorage()),
+		RegionLoaded:   storage.AreRegionsLoaded(h.svr.GetStorage()),
 	}
 
 	h.rd.JSON(w, http.StatusOK, version)

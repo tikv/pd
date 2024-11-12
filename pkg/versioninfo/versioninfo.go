@@ -31,7 +31,7 @@ type Status struct {
 	Version        string `json:"version"`
 	GitHash        string `json:"git_hash"`
 	StartTimestamp int64  `json:"start_timestamp"`
-	Loaded         bool   `json:"loaded"`
+	RegionLoaded   bool   `json:"region_loaded"`
 }
 
 const (

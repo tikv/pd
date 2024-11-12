@@ -52,7 +52,7 @@ func checkStatusResponse(re *require.Assertions, body []byte) {
 	re.Equal(versioninfo.PDBuildTS, got.BuildTS)
 	re.Equal(versioninfo.PDGitHash, got.GitHash)
 	re.Equal(versioninfo.PDReleaseVersion, got.Version)
-	re.Equal(false, got.Loaded)
+	re.False(got.RegionLoaded)
 	gotWithOldStatus := oldStatus{}
 	re.NoError(json.Unmarshal(body, &gotWithOldStatus))
 	re.Equal(versioninfo.PDBuildTS, gotWithOldStatus.BuildTS)
