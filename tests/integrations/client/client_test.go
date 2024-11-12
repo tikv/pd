@@ -791,7 +791,7 @@ func (suite *followerForwardAndHandleTestSuite) TestGetTsoAndRegionByFollowerFor
 	leader := cluster.GetLeaderServer()
 
 	follower := cluster.GetServer(cluster.GetFollower())
-	re.NoError(failpoint.Enable("github.com/tikv/pd/client/grpcutil/unreachableNetwork2", fmt.Sprintf("return(\"%s\")", follower.GetAddr())))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/utils/grpcutil/unreachableNetwork2", fmt.Sprintf("return(\"%s\")", follower.GetAddr())))
 
 	cli := setupCli(ctx, re, suite.endpoints, pd.WithForwardingOption(true))
 	defer cli.Close()
@@ -830,7 +830,7 @@ func (suite *followerForwardAndHandleTestSuite) TestGetTsoAndRegionByFollowerFor
 		return false
 	})
 
-	re.NoError(failpoint.Disable("github.com/tikv/pd/client/grpcutil/unreachableNetwork2"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/utils/grpcutil/unreachableNetwork2"))
 	testutil.Eventually(re, func() bool {
 		physical, logical, err := cli.GetTS(context.TODO())
 		if err == nil {
@@ -860,7 +860,7 @@ func (suite *followerForwardAndHandleTestSuite) TestGetRegionFromLeaderWhenNetwo
 	leader := cluster.GetLeaderServer()
 
 	follower := cluster.GetServer(cluster.GetFollower())
-	re.NoError(failpoint.Enable("github.com/tikv/pd/client/grpcutil/unreachableNetwork2", fmt.Sprintf("return(\"%s\")", follower.GetAddr())))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/utils/grpcutil/unreachableNetwork2", fmt.Sprintf("return(\"%s\")", follower.GetAddr())))
 
 	cli := setupCli(ctx, re, suite.endpoints)
 	defer cli.Close()
@@ -878,7 +878,7 @@ func (suite *followerForwardAndHandleTestSuite) TestGetRegionFromLeaderWhenNetwo
 	re.Error(err)
 	re.Nil(r)
 
-	re.NoError(failpoint.Disable("github.com/tikv/pd/client/grpcutil/unreachableNetwork2"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/utils/grpcutil/unreachableNetwork2"))
 	cli.GetServiceDiscovery().CheckMemberChanged()
 	testutil.Eventually(re, func() bool {
 		r, err = cli.GetRegion(context.Background(), []byte("a"))

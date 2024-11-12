@@ -23,8 +23,8 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/client/caller"
-	"github.com/tikv/pd/client/testutil"
-	"github.com/tikv/pd/client/tsoutil"
+	"github.com/tikv/pd/client/utils/testutil"
+	"github.com/tikv/pd/client/utils/tsoutil"
 	"go.uber.org/goleak"
 	"google.golang.org/grpc"
 )

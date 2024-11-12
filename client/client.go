@@ -33,8 +33,8 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/tikv/pd/client/caller"
 	"github.com/tikv/pd/client/errs"
-	"github.com/tikv/pd/client/tlsutil"
-	"github.com/tikv/pd/client/tsoutil"
+	"github.com/tikv/pd/client/utils/tlsutil"
+	"github.com/tikv/pd/client/utils/tsoutil"
 	"go.uber.org/zap"
 )
 
