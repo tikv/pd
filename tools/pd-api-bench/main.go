@@ -35,7 +35,7 @@ import (
 	flag "github.com/spf13/pflag"
 	pd "github.com/tikv/pd/client"
 	pdHttp "github.com/tikv/pd/client/http"
-	"github.com/tikv/pd/client/tlsutil"
+	"github.com/tikv/pd/client/utils/tlsutil"
 	"github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/tools/pd-api-bench/cases"
