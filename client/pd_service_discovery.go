@@ -384,8 +384,9 @@ func (c *pdServiceBalancer) get() (ret ServiceClient) {
 type updateKeyspaceIDFunc func() error
 type tsoLeaderURLUpdatedFunc func(string) error
 
+// tsoEventSource subscribes to events related to changes in the TSO leader/primary from the service discovery.
 type tsoEventSource interface {
-	// SetTSOLeaderURLUpdatedCallback adds a callback which will be called when the TSO leader is updated.
+	// SetTSOLeaderURLUpdatedCallback adds a callback which will be called when the TSO leader/primary is updated.
 	SetTSOLeaderURLUpdatedCallback(callback tsoLeaderURLUpdatedFunc)
 }
 

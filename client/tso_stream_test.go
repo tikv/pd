@@ -210,7 +210,6 @@ func (s *mockTSOStreamImpl) autoGenResult(count int64) resultMsg {
 			physical:            s.resGenPhysical,
 			logical:             s.resGenLogical,
 			count:               uint32(count),
-			suffixBits:          0,
 			respKeyspaceGroupID: 0,
 		},
 	}
@@ -225,7 +224,6 @@ func (s *mockTSOStreamImpl) returnResult(physical int64, logical int64, count ui
 			physical:            physical,
 			logical:             logical,
 			count:               count,
-			suffixBits:          0,
 			respKeyspaceGroupID: s.keyspaceID,
 		},
 	}
@@ -308,7 +306,6 @@ func (s *testTSOStreamSuite) processRequestWithResultCh(count int64) (<-chan cal
 	err := s.stream.processRequests(1, 2, 3, count, time.Now(), func(result tsoRequestResult, reqKeyspaceGroupID uint32, err error) {
 		if err == nil {
 			s.re.Equal(uint32(3), reqKeyspaceGroupID)
-			s.re.Equal(uint32(0), result.suffixBits)
 		}
 		ch <- callbackInvocation{
 			result: result,

@@ -125,7 +125,7 @@ func newTSODispatcher(
 			New: func() any {
 				return newBatchController[*tsoRequest](
 					maxBatchSize*2,
-					tsoRequestFinisher(0, 0, 0, invalidStreamID),
+					tsoRequestFinisher(0, 0, invalidStreamID),
 					tsoBestBatchSize,
 				)
 			},
@@ -459,7 +459,7 @@ func (td *tsoDispatcher) handleProcessRequestError(ctx context.Context, bo *retr
 	return true
 }
 
-// updateConnectionCtxs updates the `connectionCtxs` for the specified DC location regularly.
+// updateConnectionCtxs updates the `connectionCtxs` regularly.
 func (td *tsoDispatcher) connectionCtxsUpdater() {
 	var (
 		ctx            = td.ctx
@@ -583,10 +583,10 @@ func (td *tsoDispatcher) processRequests(
 			sourceStreamID:      stream.streamID,
 		}
 		// `logical` is the largest ts's logical part here, we need to do the subtracting before we finish each TSO request.
-		firstLogical := tsoutil.AddLogical(result.logical, -int64(result.count)+1, result.suffixBits)
+		firstLogical := result.logical - int64(result.count) + 1
 		// Do the check before releasing the token.
 		td.checkMonotonicity(tsoInfoBeforeReq, curTSOInfo, firstLogical)
-		td.doneCollectedRequests(tbc, result.physical, firstLogical, result.suffixBits, stream.streamID)
+		td.doneCollectedRequests(tbc, result.physical, firstLogical, stream.streamID)
 	}
 
 	err := stream.processRequests(
@@ -601,11 +601,11 @@ func (td *tsoDispatcher) processRequests(
 	return nil
 }
 
-func tsoRequestFinisher(physical, firstLogical int64, suffixBits uint32, streamID string) finisherFunc[*tsoRequest] {
+func tsoRequestFinisher(physical, firstLogical int64, streamID string) finisherFunc[*tsoRequest] {
 	return func(idx int, tsoReq *tsoRequest, err error) {
 		// Retrieve the request context before the request is done to trace without race.
 		requestCtx := tsoReq.requestCtx
-		tsoReq.physical, tsoReq.logical = physical, tsoutil.AddLogical(firstLogical, int64(idx), suffixBits)
+		tsoReq.physical, tsoReq.logical = physical, firstLogical+int64(idx)
 		tsoReq.streamID = streamID
 		tsoReq.tryDone(err)
 		trace.StartRegion(requestCtx, "pdclient.tsoReqDequeue").End()
@@ -614,12 +614,12 @@ func tsoRequestFinisher(physical, firstLogical int64, suffixBits uint32, streamI
 
 func (td *tsoDispatcher) cancelCollectedRequests(tbc *batchController[*tsoRequest], streamID string, err error) {
 	td.tokenCh <- struct{}{}
-	tbc.finishCollectedRequests(tsoRequestFinisher(0, 0, 0, streamID), err)
+	tbc.finishCollectedRequests(tsoRequestFinisher(0, 0, streamID), err)
 }
 
-func (td *tsoDispatcher) doneCollectedRequests(tbc *batchController[*tsoRequest], physical, firstLogical int64, suffixBits uint32, streamID string) {
+func (td *tsoDispatcher) doneCollectedRequests(tbc *batchController[*tsoRequest], physical, firstLogical int64, streamID string) {
 	td.tokenCh <- struct{}{}
-	tbc.finishCollectedRequests(tsoRequestFinisher(physical, firstLogical, suffixBits, streamID), nil)
+	tbc.finishCollectedRequests(tsoRequestFinisher(physical, firstLogical, streamID), nil)
 }
 
 // checkMonotonicity checks whether the monotonicity of the TSO allocation is violated.

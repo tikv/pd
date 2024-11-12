@@ -34,7 +34,6 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/utils/tlsutil"
-	"github.com/tikv/pd/client/utils/tsoutil"
 	"go.uber.org/zap"
 )
 
@@ -723,6 +722,9 @@ func (c *client) GetTSAsync(ctx context.Context) TSFuture {
 }
 
 // GetLocalTSAsync implements the TSOClient interface.
+//
+// Deprecated: Local TSO will be completely removed in the future. Currently, regardless of the
+// parameters passed in, this method will default to returning the global TSO.
 func (c *client) GetLocalTSAsync(ctx context.Context, _ string) TSFuture {
 	return c.GetTSAsync(ctx)
 }
@@ -774,9 +776,11 @@ func (c *client) GetTS(ctx context.Context) (physical int64, logical int64, err 
 }
 
 // GetLocalTS implements the TSOClient interface.
-func (c *client) GetLocalTS(ctx context.Context, dcLocation string) (physical int64, logical int64, err error) {
-	resp := c.GetLocalTSAsync(ctx, dcLocation)
-	return resp.Wait()
+//
+// Deprecated: Local TSO will be completely removed in the future. Currently, regardless of the
+// parameters passed in, this method will default to returning the global TSO.
+func (c *client) GetLocalTS(ctx context.Context, _ string) (physical int64, logical int64, err error) {
+	return c.GetTS(ctx)
 }
 
 // GetMinTS implements the TSOClient interface.
@@ -822,7 +826,7 @@ func (c *client) GetMinTS(ctx context.Context) (physical int64, logical int64, e
 	}
 
 	minTS := resp.GetTimestamp()
-	return minTS.Physical, tsoutil.AddLogical(minTS.Logical, 0, minTS.SuffixBits), nil
+	return minTS.Physical, minTS.Logical, nil
 }
 
 func handleRegionResponse(res *pdpb.GetRegionResponse) *Region {

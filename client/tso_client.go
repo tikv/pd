@@ -53,10 +53,14 @@ type TSOClient interface {
 	GetMinTS(ctx context.Context) (int64, int64, error)
 
 	// GetLocalTS gets a local timestamp from PD or TSO microservice.
-	// Deprecated: Local TSO will be completely removed in the future.
+	//
+	// Deprecated: Local TSO will be completely removed in the future. Currently, regardless of the
+	// parameters passed in, this method will default to returning the global TSO.
 	GetLocalTS(ctx context.Context, _ string) (int64, int64, error)
 	// GetLocalTSAsync gets a local timestamp from PD or TSO microservice, without block the caller.
-	// Deprecated: Local TSO will be completely removed in the future.
+	//
+	// Deprecated: Local TSO will be completely removed in the future. Currently, regardless of the
+	// parameters passed in, this method will default to returning the global TSO.
 	GetLocalTSAsync(ctx context.Context, _ string) TSFuture
 }
 
@@ -155,7 +159,7 @@ func (c *tsoClient) getTSORequest(ctx context.Context) *tsoRequest {
 	return req
 }
 
-func (c *tsoClient) getTSOLeaderURL() string {
+func (c *tsoClient) getLeaderURL() string {
 	url := c.leaderURL.Load()
 	if url == nil {
 		return ""
@@ -165,7 +169,7 @@ func (c *tsoClient) getTSOLeaderURL() string {
 
 // getTSOLeaderClientConn returns the TSO leader gRPC client connection.
 func (c *tsoClient) getTSOLeaderClientConn() (*grpc.ClientConn, string) {
-	url := c.getTSOLeaderURL()
+	url := c.getLeaderURL()
 	if len(url) == 0 {
 		log.Fatal("[tso] the tso leader should exist")
 	}
@@ -228,7 +232,7 @@ type tsoConnectionContext struct {
 func (c *tsoClient) updateConnectionCtxs(ctx context.Context, connectionCtxs *sync.Map) bool {
 	// Normal connection creating, it will be affected by the `enableForwarding`.
 	createTSOConnection := c.tryConnectToTSO
-	if c.option.enableForwarding {
+	if c.option.getEnableTSOFollowerProxy() {
 		createTSOConnection = c.tryConnectToTSOWithProxy
 	}
 	if err := createTSOConnection(ctx, connectionCtxs); err != nil {
@@ -317,7 +321,7 @@ func (c *tsoClient) tryConnectToTSO(
 		backupClientConn, backupURL := c.backupClientConn()
 		if backupClientConn != nil {
 			log.Info("[tso] fall back to use follower to forward tso stream", zap.String("follower-url", backupURL))
-			forwardedHost := c.getTSOLeaderURL()
+			forwardedHost := c.getLeaderURL()
 			if len(forwardedHost) == 0 {
 				return errors.Errorf("cannot find the tso leader")
 			}
@@ -401,7 +405,7 @@ func (c *tsoClient) tryConnectToTSOWithProxy(
 ) error {
 	tsoStreamBuilders := c.getAllTSOStreamBuilders()
 	leaderAddr := c.svcDiscovery.GetServingURL()
-	forwardedHost := c.getTSOLeaderURL()
+	forwardedHost := c.getLeaderURL()
 	if len(forwardedHost) == 0 {
 		return errors.Errorf("cannot find the tso leader")
 	}
@@ -418,7 +422,8 @@ func (c *tsoClient) tryConnectToTSOWithProxy(
 	})
 	// Update the missing one.
 	for addr, tsoStreamBuilder := range tsoStreamBuilders {
-		if _, ok := connectionCtxs.Load(addr); ok {
+		_, ok := connectionCtxs.Load(addr)
+		if ok {
 			continue
 		}
 		log.Info("[tso] try to create tso stream", zap.String("addr", addr))
@@ -473,13 +478,14 @@ func (c *tsoClient) getAllTSOStreamBuilders() map[string]tsoStreamBuilder {
 	return streamBuilders
 }
 
+// tryCreateTSODispatcher will try to create the TSO dispatcher if it is not created yet.
 func (c *tsoClient) tryCreateTSODispatcher() {
 	// The dispatcher is already created.
 	if c.getDispatcher() != nil {
 		return
 	}
 	// The TSO leader is not ready.
-	url := c.getTSOLeaderURL()
+	url := c.getLeaderURL()
 	if len(url) == 0 {
 		return
 	}
