@@ -1057,7 +1057,7 @@ func runServer(re *require.Assertions, cluster *tests.TestCluster) []string {
 }
 
 func setupCli(ctx context.Context, re *require.Assertions, endpoints []string, opts ...pd.ClientOption) pd.Client {
-	cli, err := pd.NewClientWithContext(ctx, caller.TestID, caller.TestComponent,
+	cli, err := pd.NewClientWithContext(ctx, caller.TestComponent,
 		endpoints, pd.SecurityOption{}, opts...)
 	re.NoError(err)
 	return cli
@@ -1500,8 +1500,8 @@ func (suite *clientTestSuite) TestGetRegionByID() {
 	// test WithCallerID and WithCallerComponent
 	testutil.Eventually(re, func() bool {
 		r, err := suite.client.
-			WithCallerID(caller.TiDB).
-			WithCallerComponent(caller.DDL).
+			WithCallerID(caller.GetCallerID()).
+			WithCallerComponent(caller.GetComponent(0)).
 			GetRegionByID(context.Background(), regionID)
 		re.NoError(err)
 		if r == nil {

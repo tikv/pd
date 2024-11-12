@@ -30,7 +30,7 @@ func SetupClientWithAPIContext(
 	ctx context.Context, re *require.Assertions, apiCtx pd.APIContext, endpoints []string, opts ...pd.ClientOption,
 ) pd.Client {
 	cli, err := pd.NewClientWithAPIContext(ctx, apiCtx,
-		caller.TestID, caller.TestComponent,
+		caller.TestComponent,
 		endpoints, pd.SecurityOption{}, opts...)
 	re.NoError(err)
 	return cli
@@ -42,7 +42,7 @@ func SetupClientWithKeyspaceID(
 	keyspaceID uint32, endpoints []string, opts ...pd.ClientOption,
 ) pd.Client {
 	cli, err := pd.NewClientWithKeyspace(ctx,
-		caller.TestID, caller.TestComponent,
+		caller.TestComponent,
 		keyspaceID, endpoints, pd.SecurityOption{}, opts...)
 	re.NoError(err)
 	return cli

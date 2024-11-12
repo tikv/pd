@@ -48,7 +48,7 @@ func (s *clusterIDSuite) TestClientClusterID() {
 	pdEndpoints := getPDEndpoints(s.T())
 	// Try to create a client with the mixed endpoints.
 	_, err := pd.NewClientWithContext(
-		ctx, caller.TestID, caller.TestComponent, pdEndpoints,
+		ctx, caller.TestComponent, pdEndpoints,
 		pd.SecurityOption{}, pd.WithMaxErrorRetry(1),
 	)
 	re.Error(err)

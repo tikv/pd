@@ -451,7 +451,7 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) dispatchClient(
 	re.NotNil(member)
 	// Prepare the client for keyspace.
 	tsoClient, err := pd.NewClientWithKeyspace(suite.ctx,
-		caller.TestID, caller.TestComponent,
+		caller.TestComponent,
 		keyspaceID, []string{suite.pdLeaderServer.GetAddr()}, pd.SecurityOption{})
 	re.NoError(err)
 	re.NotNil(tsoClient)
@@ -783,7 +783,7 @@ func TestGetTSOImmediately(t *testing.T) {
 
 	apiCtx := pd.NewAPIContextV2("keyspace_b") // its keyspace id is 2.
 	cli, err := pd.NewClientWithAPIContext(ctx, apiCtx,
-		caller.TestID, caller.TestComponent,
+		caller.TestComponent,
 		[]string{pdAddr}, pd.SecurityOption{})
 	re.NoError(err)
 	_, _, err = cli.GetTS(ctx)

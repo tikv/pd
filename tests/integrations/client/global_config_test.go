@@ -81,7 +81,7 @@ func (suite *globalConfigTestSuite) SetupSuite() {
 	re.NoError(err)
 	addr := suite.server.GetAddr()
 	suite.client, err = pd.NewClientWithContext(suite.server.Context(),
-		caller.TestID, caller.TestComponent,
+		caller.TestComponent,
 		[]string{addr}, pd.SecurityOption{},
 	)
 	re.NoError(err)

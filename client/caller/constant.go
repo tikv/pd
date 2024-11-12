@@ -21,24 +21,7 @@ type (
 	Component string
 )
 
-// nolint:exported
 const (
-	Unknown   ID = "unknown"
-	TiDB      ID = "tidb"
-	PD        ID = "pd"
-	TiKV      ID = "tikv"
-	TiFlash   ID = "tiflash"
-	Lightning ID = "lightning"
-	Dumpling  ID = "dumpling"
-	BR        ID = "br"
-	DM        ID = "dm"
-	CDC       ID = "cdc"
-	Operator  ID = "operator"
-	Dashboard ID = "dashboard"
-
-	// If the component you used is not in the list, please add it here.
-	DDL Component = "ddl"
-
 	// TestID is used for test.
 	TestID ID = "test"
 	// TestComponent is used for test.

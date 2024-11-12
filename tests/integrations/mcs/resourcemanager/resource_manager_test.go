@@ -79,7 +79,7 @@ func (suite *resourceManagerClientTestSuite) SetupSuite() {
 	re.NoError(err)
 
 	suite.client, err = pd.NewClientWithContext(suite.ctx,
-		caller.TestID, caller.TestComponent,
+		caller.TestComponent,
 		suite.cluster.GetConfig().GetClientURLs(), pd.SecurityOption{})
 	re.NoError(err)
 	leader := suite.cluster.GetServer(suite.cluster.WaitLeader())
@@ -1080,7 +1080,7 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 	re.NotEmpty(suite.cluster.WaitLeader())
 	// re-connect client as well
 	suite.client, err = pd.NewClientWithContext(suite.ctx,
-		caller.TestID, caller.TestComponent,
+		caller.TestComponent,
 		suite.cluster.GetConfig().GetClientURLs(), pd.SecurityOption{})
 	re.NoError(err)
 	cli = suite.client
@@ -1156,7 +1156,7 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupRUConsumption() {
 	// re-connect client as
 	cli.Close()
 	suite.client, err = pd.NewClientWithContext(suite.ctx,
-		caller.TestID, caller.TestComponent,
+		caller.TestComponent,
 		suite.cluster.GetConfig().GetClientURLs(), pd.SecurityOption{})
 	re.NoError(err)
 	cli = suite.client

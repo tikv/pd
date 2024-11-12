@@ -446,7 +446,7 @@ func createPDClient(ctx context.Context) (pd.Client, error) {
 	if len(*keyspaceName) > 0 {
 		apiCtx := pd.NewAPIContextV2(*keyspaceName)
 		pdCli, err = pd.NewClientWithAPIContext(ctx, apiCtx,
-			caller.TestID, caller.TestComponent, []string{*pdAddrs},
+			caller.TestComponent, []string{*pdAddrs},
 			pd.SecurityOption{
 				CAPath:   *caPath,
 				CertPath: *certPath,
@@ -454,7 +454,7 @@ func createPDClient(ctx context.Context) (pd.Client, error) {
 			}, opts...)
 	} else {
 		pdCli, err = pd.NewClientWithKeyspace(ctx,
-			caller.TestID, caller.TestComponent,
+			caller.TestComponent,
 			uint32(*keyspaceID), []string{*pdAddrs},
 			pd.SecurityOption{
 				CAPath:   *caPath,

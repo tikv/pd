@@ -376,7 +376,7 @@ func newEtcdClient(cfg *config.Config) *clientv3.Client {
 // newPDClient returns a pd client.
 func newPDClient(ctx context.Context, cfg *config.Config) pd.Client {
 	addrs := []string{cfg.PDAddr}
-	pdCli, err := pd.NewClientWithContext(ctx, caller.TestID, caller.TestComponent,
+	pdCli, err := pd.NewClientWithContext(ctx, caller.TestComponent,
 		addrs, pd.SecurityOption{
 			CAPath:   cfg.CaPath,
 			CertPath: cfg.CertPath,

@@ -246,7 +246,7 @@ func NewAPIServerForward(re *require.Assertions) APIServerForward {
 
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/usePDServiceMode", "return(true)"))
 	suite.pdClient, err = pd.NewClientWithContext(context.Background(),
-		caller.TestID, caller.TestComponent,
+		caller.TestComponent,
 		[]string{suite.backendEndpoints}, pd.SecurityOption{}, pd.WithMaxErrorRetry(1))
 	re.NoError(err)
 	return suite
@@ -611,8 +611,8 @@ func TestTSOServiceSwitch(t *testing.T) {
 	pdLeader := tc.GetServer(leaderName)
 	backendEndpoints := pdLeader.GetAddr()
 	re.NoError(pdLeader.BootstrapCluster())
-	pdClient, err := pd.NewClientWithContext(ctx, caller.TestID,
-		caller.TestComponent, []string{backendEndpoints}, pd.SecurityOption{})
+	pdClient, err := pd.NewClientWithContext(ctx, caller.TestComponent,
+		[]string{backendEndpoints}, pd.SecurityOption{})
 	re.NoError(err)
 	re.NotNil(pdClient)
 	defer pdClient.Close()

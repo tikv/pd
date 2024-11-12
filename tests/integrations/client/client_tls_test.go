@@ -163,7 +163,7 @@ func testTLSReload(
 		for {
 			dctx, dcancel := context.WithTimeout(ctx, time.Second)
 			cli, err := pd.NewClientWithContext(dctx,
-				caller.TestID, caller.TestComponent,
+				caller.TestComponent,
 				endpoints, pd.SecurityOption{
 					CAPath:   testClientTLSInfo.TrustedCAFile,
 					CertPath: testClientTLSInfo.CertFile,
@@ -196,7 +196,7 @@ func testTLSReload(
 	// 6. new requests should trigger listener to reload valid certs
 	dctx, dcancel := context.WithTimeout(ctx, 5*time.Second)
 	cli, err := pd.NewClientWithContext(dctx,
-		caller.TestID, caller.TestComponent,
+		caller.TestComponent,
 		endpoints, pd.SecurityOption{
 			CAPath:   testClientTLSInfo.TrustedCAFile,
 			CertPath: testClientTLSInfo.CertFile,
@@ -211,7 +211,7 @@ func testTLSReload(
 		testClientTLSInfo.TrustedCAFile, testClientTLSInfo.CertFile, testClientTLSInfo.KeyFile)
 	ctx1, cancel1 := context.WithTimeout(ctx, 2*time.Second)
 	cli, err = pd.NewClientWithContext(ctx1,
-		caller.TestID, caller.TestComponent,
+		caller.TestComponent,
 		endpoints, pd.SecurityOption{
 			SSLCABytes:   caData,
 			SSLCertBytes: certData,
@@ -325,7 +325,7 @@ func testAllowedCN(ctx context.Context, endpoints []string, tls transport.TLSInf
 	ctx1, cancel1 := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel1()
 	cli, err := pd.NewClientWithContext(ctx1,
-		caller.TestID, caller.TestComponent,
+		caller.TestComponent,
 		endpoints, pd.SecurityOption{
 			CAPath:   tls.TrustedCAFile,
 			CertPath: tls.CertFile,

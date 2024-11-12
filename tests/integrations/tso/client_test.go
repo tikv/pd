@@ -150,7 +150,7 @@ func (suite *tsoClientTestSuite) SetupTest() {
 	re := suite.Require()
 	if suite.legacy {
 		client, err := pd.NewClientWithContext(suite.ctx,
-			caller.TestID, caller.TestComponent,
+			caller.TestComponent,
 			suite.getBackendEndpoints(), pd.SecurityOption{}, pd.WithForwardingOption(true))
 		re.NoError(err)
 		innerClient, ok := client.(interface{ GetServiceDiscovery() pd.ServiceDiscovery })
@@ -551,7 +551,7 @@ func TestUpgradingAPIandTSOClusters(t *testing.T) {
 	// Create a pd client in PD mode to let the API leader to forward requests to the TSO cluster.
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/usePDServiceMode", "return(true)"))
 	pdClient, err := pd.NewClientWithContext(context.Background(),
-		caller.TestID, caller.TestComponent,
+		caller.TestComponent,
 		[]string{backendEndpoints}, pd.SecurityOption{}, pd.WithMaxErrorRetry(1))
 	re.NoError(err)
 	defer pdClient.Close()

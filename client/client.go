@@ -272,22 +272,21 @@ func (r *KeyRange) EscapeAsHexStr() (startKeyStr, endKeyStr string) {
 
 // NewClient creates a PD client.
 func NewClient(
-	callerID caller.ID, callerComponent caller.Component,
+	callerComponent caller.Component,
 	svrAddrs []string, security SecurityOption, opts ...ClientOption,
 ) (Client, error) {
-	return NewClientWithContext(context.Background(), callerID, callerComponent,
+	return NewClientWithContext(context.Background(), callerComponent,
 		svrAddrs, security, opts...)
 }
 
 // NewClientWithContext creates a PD client with context. This API uses the default keyspace id 0.
 func NewClientWithContext(
 	ctx context.Context,
-	callerID caller.ID,
 	callerComponent caller.Component,
 	svrAddrs []string,
 	security SecurityOption, opts ...ClientOption,
 ) (Client, error) {
-	return createClientWithKeyspace(ctx, callerID, callerComponent,
+	return createClientWithKeyspace(ctx, callerComponent,
 		nullKeyspaceID, svrAddrs, security, opts...)
 }
 
@@ -295,7 +294,6 @@ func NewClientWithContext(
 // And now, it's only for test purpose.
 func NewClientWithKeyspace(
 	ctx context.Context,
-	callerID caller.ID,
 	callerComponent caller.Component,
 	keyspaceID uint32, svrAddrs []string,
 	security SecurityOption, opts ...ClientOption,
@@ -304,14 +302,13 @@ func NewClientWithKeyspace(
 		return nil, errors.Errorf("invalid keyspace id %d. It must be in the range of [%d, %d]",
 			keyspaceID, defaultKeyspaceID, maxKeyspaceID)
 	}
-	return createClientWithKeyspace(ctx, callerID, callerComponent, keyspaceID,
+	return createClientWithKeyspace(ctx, callerComponent, keyspaceID,
 		svrAddrs, security, opts...)
 }
 
 // createClientWithKeyspace creates a client with context and the specified keyspace id.
 func createClientWithKeyspace(
 	ctx context.Context,
-	callerID caller.ID,
 	callerComponent caller.Component,
 	keyspaceID uint32, svrAddrs []string,
 	security SecurityOption, opts ...ClientOption,
@@ -328,10 +325,11 @@ func createClientWithKeyspace(
 	if err != nil {
 		return nil, err
 	}
+
 	clientCtx, clientCancel := context.WithCancel(ctx)
 	c := &client{
-		callerID:        callerID,
-		callerComponent: callerComponent,
+		callerID:        caller.ID(caller.GetCallerID()),
+		callerComponent: adjustCallerComponent(callerComponent),
 		inner: &innerClient{
 			keyspaceID:              keyspaceID,
 			svrUrls:                 svrAddrs,
@@ -411,7 +409,6 @@ func (apiCtx *apiContextV2) GetKeyspaceName() (keyspaceName string) {
 // NewClientWithAPIContext creates a client according to the API context.
 func NewClientWithAPIContext(
 	ctx context.Context, apiCtx APIContext,
-	callerID caller.ID,
 	callerComponent caller.Component,
 	svrAddrs []string,
 	security SecurityOption, opts ...ClientOption,
@@ -419,10 +416,10 @@ func NewClientWithAPIContext(
 	apiVersion, keyspaceName := apiCtx.GetAPIVersion(), apiCtx.GetKeyspaceName()
 	switch apiVersion {
 	case V1:
-		return NewClientWithContext(ctx, callerID, callerComponent, svrAddrs,
+		return NewClientWithContext(ctx, callerComponent, svrAddrs,
 			security, opts...)
 	case V2:
-		return newClientWithKeyspaceName(ctx, callerID, callerComponent,
+		return newClientWithKeyspaceName(ctx, callerComponent,
 			keyspaceName, svrAddrs, security, opts...)
 	default:
 		return nil, errors.Errorf("[pd] invalid API version %d", apiVersion)
@@ -432,7 +429,6 @@ func NewClientWithAPIContext(
 // newClientWithKeyspaceName creates a client with context and the specified keyspace name.
 func newClientWithKeyspaceName(
 	ctx context.Context,
-	callerID caller.ID,
 	callerComponent caller.Component,
 	keyspaceName string, svrAddrs []string,
 	security SecurityOption, opts ...ClientOption,
@@ -451,8 +447,8 @@ func newClientWithKeyspaceName(
 	}
 	clientCtx, clientCancel := context.WithCancel(ctx)
 	c := &client{
-		callerID:        callerID,
-		callerComponent: callerComponent,
+		callerID:        caller.ID(caller.GetCallerID()),
+		callerComponent: adjustCallerComponent(callerComponent),
 		inner: &innerClient{
 			// Create a PD service discovery with null keyspace id, then query the real id with the keyspace name,
 			// finally update the keyspace id to the PD service discovery for the following interactions.
@@ -1464,4 +1460,21 @@ func (c *client) WithCallerComponent(callerComponent caller.Component) RPCClient
 	newClient := *c
 	newClient.callerComponent = callerComponent
 	return &newClient
+}
+
+// adjustCallerComponent returns the caller component if it is empty, it
+// is the upper layer of the pd client.
+func adjustCallerComponent(callerComponent caller.Component) caller.Component {
+	if len(callerComponent) != 0 {
+		return callerComponent
+	}
+	for i := range 10 { // limit the loop to 10 iterations to avoid infinite loop
+		callerComponent = caller.GetComponent(i)
+		if !strings.Contains(string(callerComponent), "pd/client") {
+			return callerComponent
+		}
+	}
+	log.Warn("Unknown callerComponent", zap.String("callerComponent", string(callerComponent)))
+	// If the callerComponent is still in pd/client, we set it to empty.
+	return ""
 }
