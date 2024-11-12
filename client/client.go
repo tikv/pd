@@ -328,7 +328,7 @@ func createClientWithKeyspace(
 
 	clientCtx, clientCancel := context.WithCancel(ctx)
 	c := &client{
-		callerID:        caller.ID(caller.GetCallerID()),
+		callerID:        caller.GetCallerID(),
 		callerComponent: adjustCallerComponent(callerComponent),
 		inner: &innerClient{
 			keyspaceID:              keyspaceID,
@@ -447,7 +447,7 @@ func newClientWithKeyspaceName(
 	}
 	clientCtx, clientCancel := context.WithCancel(ctx)
 	c := &client{
-		callerID:        caller.ID(caller.GetCallerID()),
+		callerID:        caller.GetCallerID(),
 		callerComponent: adjustCallerComponent(callerComponent),
 		inner: &innerClient{
 			// Create a PD service discovery with null keyspace id, then query the real id with the keyspace name,
