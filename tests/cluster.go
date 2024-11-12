@@ -81,8 +81,8 @@ func NewTestServer(ctx context.Context, cfg *config.Config) (*TestServer, error)
 	return createTestServer(ctx, cfg, nil)
 }
 
-// NewTestAPIServer creates a new TestServer.
-func NewTestAPIServer(ctx context.Context, cfg *config.Config) (*TestServer, error) {
+// NewTestServerWithKeyspace creates a new TestServer.
+func NewTestServerWithKeyspace(ctx context.Context, cfg *config.Config) (*TestServer, error) {
 	return createTestServer(ctx, cfg, []string{constant.APIServiceName})
 }
 
@@ -436,12 +436,12 @@ func NewTestCluster(ctx context.Context, initialServerCount int, opts ...ConfigO
 	return createTestCluster(ctx, initialServerCount, false, opts...)
 }
 
-// NewTestAPICluster creates a new TestCluster with API service.
-func NewTestAPICluster(ctx context.Context, initialServerCount int, opts ...ConfigOption) (*TestCluster, error) {
+// NewTestClusterWithKeyspace creates a new TestCluster with keyspace.
+func NewTestClusterWithKeyspace(ctx context.Context, initialServerCount int, opts ...ConfigOption) (*TestCluster, error) {
 	return createTestCluster(ctx, initialServerCount, true, opts...)
 }
 
-func createTestCluster(ctx context.Context, initialServerCount int, isAPIServiceMode bool, opts ...ConfigOption) (*TestCluster, error) {
+func createTestCluster(ctx context.Context, initialServerCount int, isKeyspaceEnabled bool, opts ...ConfigOption) (*TestCluster, error) {
 	schedulers.Register()
 	config := newClusterConfig(initialServerCount)
 	servers := make(map[string]*TestServer)
@@ -451,8 +451,8 @@ func createTestCluster(ctx context.Context, initialServerCount int, isAPIService
 			return nil, err
 		}
 		var s *TestServer
-		if isAPIServiceMode {
-			s, err = NewTestAPIServer(ctx, serverConf)
+		if isKeyspaceEnabled {
+			s, err = NewTestServerWithKeyspace(ctx, serverConf)
 		} else {
 			s, err = NewTestServer(ctx, serverConf)
 		}
@@ -479,7 +479,7 @@ func RestartTestAPICluster(ctx context.Context, cluster *TestCluster) (*TestClus
 }
 
 func restartTestCluster(
-	ctx context.Context, cluster *TestCluster, isAPIServiceMode bool,
+	ctx context.Context, cluster *TestCluster, isKeyspaceEnabled bool,
 ) (newTestCluster *TestCluster, err error) {
 	schedulers.Register()
 	newTestCluster = &TestCluster{
@@ -506,8 +506,8 @@ func restartTestCluster(
 				newServer *TestServer
 				serverErr error
 			)
-			if isAPIServiceMode {
-				newServer, serverErr = NewTestAPIServer(ctx, serverCfg)
+			if isKeyspaceEnabled {
+				newServer, serverErr = NewTestServerWithKeyspace(ctx, serverCfg)
 			} else {
 				newServer, serverErr = NewTestServer(ctx, serverCfg)
 			}
@@ -741,13 +741,13 @@ func (c *TestCluster) Join(ctx context.Context, opts ...ConfigOption) (*TestServ
 	return s, nil
 }
 
-// JoinAPIServer is used to add a new TestAPIServer into the cluster.
-func (c *TestCluster) JoinAPIServer(ctx context.Context, opts ...ConfigOption) (*TestServer, error) {
+// JoinServerWithKeyspace is used to add a new TestServerWithKeyspace into the cluster.
+func (c *TestCluster) JoinServerWithKeyspace(ctx context.Context, opts ...ConfigOption) (*TestServer, error) {
 	conf, err := c.config.join().Generate(opts...)
 	if err != nil {
 		return nil, err
 	}
-	s, err := NewTestAPIServer(ctx, conf)
+	s, err := NewTestServerWithKeyspace(ctx, conf)
 	if err != nil {
 		return nil, err
 	}

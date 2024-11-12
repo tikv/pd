@@ -60,7 +60,7 @@ func (suite *tsoAPITestSuite) SetupTest() {
 
 	var err error
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
-	suite.pdCluster, err = tests.NewTestAPICluster(suite.ctx, 1)
+	suite.pdCluster, err = tests.NewTestClusterWithKeyspace(suite.ctx, 1)
 	re.NoError(err)
 	err = suite.pdCluster.RunInitialServers()
 	re.NoError(err)
@@ -135,7 +135,7 @@ func TestTSOServerStartFirst(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	apiCluster, err := tests.NewTestAPICluster(ctx, 1, func(conf *config.Config, _ string) {
+	apiCluster, err := tests.NewTestClusterWithKeyspace(ctx, 1, func(conf *config.Config, _ string) {
 		conf.Keyspace.PreAlloc = []string{"k1", "k2"}
 	})
 	defer apiCluster.Destroy()
@@ -198,7 +198,7 @@ func TestForwardOnlyTSONoScheduling(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	tc, err := tests.NewTestAPICluster(ctx, 1)
+	tc, err := tests.NewTestClusterWithKeyspace(ctx, 1)
 	defer tc.Destroy()
 	re.NoError(err)
 	err = tc.RunInitialServers()
