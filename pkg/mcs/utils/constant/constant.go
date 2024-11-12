@@ -61,8 +61,6 @@ const (
 	APIServiceName = "api"
 	// TSOServiceName is the name of tso server.
 	TSOServiceName = "tso"
-	// ResourceManagerServiceName is the name of resource manager server.
-	ResourceManagerServiceName = "resource_manager"
 	// SchedulingServiceName is the name of scheduling server.
 	SchedulingServiceName = "scheduling"
 	// KeyspaceGroupsKey is the path component of keyspace groups.
