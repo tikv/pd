@@ -80,7 +80,7 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) SetupSuite() {
 
 	var err error
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
-	suite.cluster, err = tests.NewTestAPICluster(suite.ctx, 1)
+	suite.cluster, err = tests.NewTestClusterWithKeyspace(suite.ctx, 1)
 	re.NoError(err)
 	err = suite.cluster.RunInitialServers()
 	re.NoError(err)
@@ -536,7 +536,7 @@ func TestTwiceSplitKeyspaceGroup(t *testing.T) {
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/fastGroupSplitPatroller", `return(true)`))
 
 	// Init api server config but not start.
-	tc, err := tests.NewTestAPICluster(ctx, 1, func(conf *config.Config, _ string) {
+	tc, err := tests.NewTestClusterWithKeyspace(ctx, 1, func(conf *config.Config, _ string) {
 		conf.Keyspace.PreAlloc = []string{
 			"keyspace_a", "keyspace_b",
 		}
@@ -733,7 +733,7 @@ func TestGetTSOImmediately(t *testing.T) {
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/fastGroupSplitPatroller", `return(true)`))
 
 	// Init api server config but not start.
-	tc, err := tests.NewTestAPICluster(ctx, 1, func(conf *config.Config, _ string) {
+	tc, err := tests.NewTestClusterWithKeyspace(ctx, 1, func(conf *config.Config, _ string) {
 		conf.Keyspace.PreAlloc = []string{
 			"keyspace_a", "keyspace_b",
 		}

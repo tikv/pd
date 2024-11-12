@@ -73,7 +73,7 @@ func (suite *tsoServerTestSuite) SetupSuite() {
 	re := suite.Require()
 
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
-	suite.cluster, err = tests.NewTestAPICluster(suite.ctx, 1)
+	suite.cluster, err = tests.NewTestClusterWithKeyspace(suite.ctx, 1)
 	re.NoError(err)
 
 	err = suite.cluster.RunInitialServers()
@@ -154,19 +154,19 @@ func (suite *tsoServerTestSuite) TestParticipantStartWithAdvertiseListenAddr() {
 
 func TestTSOPath(t *testing.T) {
 	re := require.New(t)
-	checkTSOPath(re, true /*isAPIServiceMode*/)
-	checkTSOPath(re, false /*isAPIServiceMode*/)
+	checkTSOPath(re, true /*isKeyspaceEnabled*/)
+	checkTSOPath(re, false /*isKeyspaceEnabled*/)
 }
 
-func checkTSOPath(re *require.Assertions, isAPIServiceMode bool) {
+func checkTSOPath(re *require.Assertions, isKeyspaceEnabled bool) {
 	var (
 		cluster *tests.TestCluster
 		err     error
 	)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	if isAPIServiceMode {
-		cluster, err = tests.NewTestAPICluster(ctx, 1, func(conf *config.Config, _ string) {
+	if isKeyspaceEnabled {
+		cluster, err = tests.NewTestClusterWithKeyspace(ctx, 1, func(conf *config.Config, _ string) {
 			conf.MicroService.EnableTSODynamicSwitching = false
 		})
 	} else {
@@ -182,7 +182,7 @@ func checkTSOPath(re *require.Assertions, isAPIServiceMode bool) {
 	re.NoError(pdLeader.BootstrapCluster())
 	backendEndpoints := pdLeader.GetAddr()
 	client := pdLeader.GetEtcdClient()
-	if isAPIServiceMode {
+	if isKeyspaceEnabled {
 		re.Equal(0, getEtcdTimestampKeyNum(re, client))
 	} else {
 		re.Equal(1, getEtcdTimestampKeyNum(re, client))
@@ -225,13 +225,13 @@ type APIServerForward struct {
 	pdClient         pd.Client
 }
 
-func NewAPIServerForward(re *require.Assertions) APIServerForward {
+func NewServerForward(re *require.Assertions) APIServerForward {
 	suite := APIServerForward{
 		re: re,
 	}
 	var err error
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
-	suite.cluster, err = tests.NewTestAPICluster(suite.ctx, 3)
+	suite.cluster, err = tests.NewTestCluster(suite.ctx, 3)
 	re.NoError(err)
 
 	err = suite.cluster.RunInitialServers()
@@ -271,7 +271,7 @@ func (suite *APIServerForward) ShutDown() {
 
 func TestForwardTSORelated(t *testing.T) {
 	re := require.New(t)
-	suite := NewAPIServerForward(re)
+	suite := NewServerForward(re)
 	defer suite.ShutDown()
 	leaderServer := suite.cluster.GetLeaderServer().GetServer()
 	cfg := leaderServer.GetMicroServiceConfig().Clone()
@@ -288,7 +288,7 @@ func TestForwardTSORelated(t *testing.T) {
 
 func TestForwardTSOWhenPrimaryChanged(t *testing.T) {
 	re := require.New(t)
-	suite := NewAPIServerForward(re)
+	suite := NewServerForward(re)
 	defer suite.ShutDown()
 
 	tc, err := tests.NewTestTSOCluster(suite.ctx, 2, suite.backendEndpoints)
@@ -328,7 +328,7 @@ func TestForwardTSOWhenPrimaryChanged(t *testing.T) {
 
 func TestResignTSOPrimaryForward(t *testing.T) {
 	re := require.New(t)
-	suite := NewAPIServerForward(re)
+	suite := NewServerForward(re)
 	defer suite.ShutDown()
 	// TODO: test random kill primary with 3 nodes
 	tc, err := tests.NewTestTSOCluster(suite.ctx, 2, suite.backendEndpoints)
@@ -354,7 +354,7 @@ func TestResignTSOPrimaryForward(t *testing.T) {
 
 func TestResignAPIPrimaryForward(t *testing.T) {
 	re := require.New(t)
-	suite := NewAPIServerForward(re)
+	suite := NewServerForward(re)
 	defer suite.ShutDown()
 
 	tc, err := tests.NewTestTSOCluster(suite.ctx, 2, suite.backendEndpoints)
@@ -378,7 +378,7 @@ func TestResignAPIPrimaryForward(t *testing.T) {
 
 func TestForwardTSOUnexpectedToFollower1(t *testing.T) {
 	re := require.New(t)
-	suite := NewAPIServerForward(re)
+	suite := NewServerForward(re)
 	defer suite.ShutDown()
 	suite.checkForwardTSOUnexpectedToFollower(func() {
 		// unary call will retry internally
@@ -391,7 +391,7 @@ func TestForwardTSOUnexpectedToFollower1(t *testing.T) {
 
 func TestForwardTSOUnexpectedToFollower2(t *testing.T) {
 	re := require.New(t)
-	suite := NewAPIServerForward(re)
+	suite := NewServerForward(re)
 	defer suite.ShutDown()
 	suite.checkForwardTSOUnexpectedToFollower(func() {
 		// unary call will retry internally
@@ -405,7 +405,7 @@ func TestForwardTSOUnexpectedToFollower2(t *testing.T) {
 
 func TestForwardTSOUnexpectedToFollower3(t *testing.T) {
 	re := require.New(t)
-	suite := NewAPIServerForward(re)
+	suite := NewServerForward(re)
 	defer suite.ShutDown()
 	suite.checkForwardTSOUnexpectedToFollower(func() {
 		_, _, err := suite.pdClient.GetTS(suite.ctx)
@@ -510,7 +510,7 @@ func (suite *CommonTestSuite) SetupSuite() {
 	var err error
 	re := suite.Require()
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
-	suite.cluster, err = tests.NewTestAPICluster(suite.ctx, 1)
+	suite.cluster, err = tests.NewTestClusterWithKeyspace(suite.ctx, 1)
 	re.NoError(err)
 
 	err = suite.cluster.RunInitialServers()
@@ -574,7 +574,7 @@ func (suite *CommonTestSuite) TestBootstrapDefaultKeyspaceGroup() {
 	}
 	check()
 
-	s, err := suite.cluster.JoinAPIServer(suite.ctx)
+	s, err := suite.cluster.JoinServerWithKeyspace(suite.ctx)
 	re.NoError(err)
 	re.NoError(s.Run())
 
@@ -596,7 +596,7 @@ func TestTSOServiceSwitch(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	tc, err := tests.NewTestAPICluster(ctx, 1,
+	tc, err := tests.NewTestClusterWithKeyspace(ctx, 1,
 		func(conf *config.Config, _ string) {
 			conf.MicroService.EnableTSODynamicSwitching = true
 		},
