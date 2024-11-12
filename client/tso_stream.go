@@ -115,8 +115,7 @@ type tsoRequestResult struct {
 }
 
 type grpcTSOStreamAdapter interface {
-	Send(clusterID uint64, keyspaceID, keyspaceGroupID uint32, dcLocation string,
-		count int64) error
+	Send(clusterID uint64, keyspaceID, keyspaceGroupID uint32, count int64) error
 	Recv() (tsoRequestResult, error)
 }
 
@@ -125,13 +124,12 @@ type pdTSOStreamAdapter struct {
 }
 
 // Send implements the grpcTSOStreamAdapter interface.
-func (s pdTSOStreamAdapter) Send(clusterID uint64, _, _ uint32, dcLocation string, count int64) error {
+func (s pdTSOStreamAdapter) Send(clusterID uint64, _, _ uint32, count int64) error {
 	req := &pdpb.TsoRequest{
 		Header: &pdpb.RequestHeader{
 			ClusterId: clusterID,
 		},
-		Count:      uint32(count),
-		DcLocation: dcLocation,
+		Count: uint32(count),
 	}
 	return s.stream.Send(req)
 }
@@ -156,15 +154,14 @@ type tsoTSOStreamAdapter struct {
 }
 
 // Send implements the grpcTSOStreamAdapter interface.
-func (s tsoTSOStreamAdapter) Send(clusterID uint64, keyspaceID, keyspaceGroupID uint32, dcLocation string, count int64) error {
+func (s tsoTSOStreamAdapter) Send(clusterID uint64, keyspaceID, keyspaceGroupID uint32, count int64) error {
 	req := &tsopb.TsoRequest{
 		Header: &tsopb.RequestHeader{
 			ClusterId:       clusterID,
 			KeyspaceId:      keyspaceID,
 			KeyspaceGroupId: keyspaceGroupID,
 		},
-		Count:      uint32(count),
-		DcLocation: dcLocation,
+		Count: uint32(count),
 	}
 	return s.stream.Send(req)
 }
@@ -268,7 +265,7 @@ func (s *tsoStream) getServerURL() string {
 // It's guaranteed that the `callback` will be called, but when the request is failed to be scheduled, the callback
 // will be ignored.
 func (s *tsoStream) processRequests(
-	clusterID uint64, keyspaceID, keyspaceGroupID uint32, dcLocation string, count int64, batchStartTime time.Time, callback onFinishedCallback,
+	clusterID uint64, keyspaceID, keyspaceGroupID uint32, count int64, batchStartTime time.Time, callback onFinishedCallback,
 ) error {
 	start := time.Now()
 
@@ -305,7 +302,7 @@ func (s *tsoStream) processRequests(
 	}
 	s.state.Store(prevState)
 
-	if err := s.stream.Send(clusterID, keyspaceID, keyspaceGroupID, dcLocation, count); err != nil {
+	if err := s.stream.Send(clusterID, keyspaceID, keyspaceGroupID, count); err != nil {
 		// As the request is already put into `pendingRequests`, the request should finally be canceled by the recvLoop.
 		// So skip returning error here to avoid
 		// if err == io.EOF {

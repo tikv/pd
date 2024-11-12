@@ -50,7 +50,7 @@ func (*mockTSOServiceProvider) getServiceDiscovery() ServiceDiscovery {
 	return NewMockPDServiceDiscovery([]string{mockStreamURL}, nil)
 }
 
-func (m *mockTSOServiceProvider) updateConnectionCtxs(ctx context.Context, _dc string, connectionCtxs *sync.Map) bool {
+func (m *mockTSOServiceProvider) updateConnectionCtxs(ctx context.Context, connectionCtxs *sync.Map) bool {
 	// Avoid concurrent updating in the background updating goroutine and active updating in the dispatcher loop when
 	// stream is missing.
 	m.updateConnMu.Lock()
@@ -102,14 +102,13 @@ func (s *testTSODispatcherSuite) SetupTest() {
 		created.Store(true)
 		return s.stream
 	}
-	s.dispatcher = newTSODispatcher(context.Background(), globalDCLocation, defaultMaxTSOBatchSize, newMockTSOServiceProvider(s.option, createStream))
+	s.dispatcher = newTSODispatcher(context.Background(), defaultMaxTSOBatchSize, newMockTSOServiceProvider(s.option, createStream))
 	s.reqPool = &sync.Pool{
 		New: func() any {
 			return &tsoRequest{
-				done:       make(chan error, 1),
-				physical:   0,
-				logical:    0,
-				dcLocation: globalDCLocation,
+				done:     make(chan error, 1),
+				physical: 0,
+				logical:  0,
 			}
 		},
 	}
@@ -331,10 +330,9 @@ func BenchmarkTSODispatcherHandleRequests(b *testing.B) {
 	reqPool := &sync.Pool{
 		New: func() any {
 			return &tsoRequest{
-				done:       make(chan error, 1),
-				physical:   0,
-				logical:    0,
-				dcLocation: globalDCLocation,
+				done:     make(chan error, 1),
+				physical: 0,
+				logical:  0,
 			}
 		},
 	}
@@ -349,7 +347,7 @@ func BenchmarkTSODispatcherHandleRequests(b *testing.B) {
 		return req
 	}
 
-	dispatcher := newTSODispatcher(ctx, globalDCLocation, defaultMaxTSOBatchSize, newMockTSOServiceProvider(newOption(), nil))
+	dispatcher := newTSODispatcher(ctx, defaultMaxTSOBatchSize, newMockTSOServiceProvider(newOption(), nil))
 	var wg sync.WaitGroup
 	wg.Add(1)
 
