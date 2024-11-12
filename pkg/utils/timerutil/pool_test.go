@@ -4,7 +4,7 @@
 
 // Note: This file is copied from https://go-review.googlesource.com/c/go/+/276133
 
-package timerpool
+package timerutil
 
 import (
 	"testing"
@@ -12,7 +12,7 @@ import (
 )
 
 func TestTimerPool(t *testing.T) {
-	var tp TimerPool
+	var tp timerPool
 
 	for range 100 {
 		timer := tp.Get(20 * time.Millisecond)

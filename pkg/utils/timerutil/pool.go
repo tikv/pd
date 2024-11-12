@@ -4,7 +4,7 @@
 
 // Note: This file is copied from https://go-review.googlesource.com/c/go/+/276133
 
-package timerpool
+package timerutil
 
 import (
 	"sync"
@@ -12,15 +12,15 @@ import (
 )
 
 // GlobalTimerPool is a global pool for reusing *time.Timer.
-var GlobalTimerPool TimerPool
+var GlobalTimerPool timerPool
 
-// TimerPool is a wrapper of sync.Pool which caches *time.Timer for reuse.
-type TimerPool struct {
+// timerPool is a wrapper of sync.Pool which caches *time.Timer for reuse.
+type timerPool struct {
 	pool sync.Pool
 }
 
 // Get returns a timer with a given duration.
-func (tp *TimerPool) Get(d time.Duration) *time.Timer {
+func (tp *timerPool) Get(d time.Duration) *time.Timer {
 	if v := tp.pool.Get(); v != nil {
 		timer := v.(*time.Timer)
 		timer.Reset(d)
@@ -32,7 +32,7 @@ func (tp *TimerPool) Get(d time.Duration) *time.Timer {
 // Put tries to call timer.Stop() before putting it back into pool,
 // if the timer.Stop() returns false (it has either already expired or been stopped),
 // have a shot at draining the channel with residual time if there is one.
-func (tp *TimerPool) Put(timer *time.Timer) {
+func (tp *timerPool) Put(timer *time.Timer) {
 	if !timer.Stop() {
 		select {
 		case <-timer.C:

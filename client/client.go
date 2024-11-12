@@ -36,9 +36,15 @@ import (
 	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/client/errs"
+<<<<<<< HEAD
 	"github.com/tikv/pd/client/metrics"
 	"github.com/tikv/pd/client/tlsutil"
 	"github.com/tikv/pd/client/tsoutil"
+=======
+	"github.com/tikv/pd/client/utils/tlsutil"
+	"github.com/tikv/pd/client/utils/tsoutil"
+	"go.uber.org/zap"
+>>>>>>> 2637331866 (*: aggregate the utils package within the client (#8799))
 )
 
 const (
