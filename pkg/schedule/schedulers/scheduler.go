@@ -57,6 +57,8 @@ type Scheduler interface {
 	SetDisable(bool) error
 	// IsDefault returns if the scheduler is a default scheduler.
 	IsDefault() bool
+	// IsFinished if an adhoc scheduler has done its work.
+	IsFinished() bool
 }
 
 // EncodeConfig encode the custom config for each scheduler.
