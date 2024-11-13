@@ -41,7 +41,6 @@ type tsoRequest struct {
 	done       chan error
 	physical   int64
 	logical    int64
-	dcLocation string
 
 	// The identifier of the RPC stream in which the request is processed.
 	streamID string

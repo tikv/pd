@@ -342,8 +342,8 @@ func (s *tsoProxyTestSuite) verifyTSOProxy(
 				re.Equal(req.GetCount(), resp.GetCount())
 				ts := resp.GetTimestamp()
 				count := int64(resp.GetCount())
-				physical, largestLogic, suffixBits := ts.GetPhysical(), ts.GetLogical(), ts.GetSuffixBits()
-				firstLogical := tsoutil.AddLogical(largestLogic, -count+1, suffixBits)
+				physical, largestLogic := ts.GetPhysical(), ts.GetLogical()
+				firstLogical := largestLogic - count + 1
 				re.False(tsoutil.TSLessEqual(physical, firstLogical, lastPhysical, lastLogical))
 			}
 		}(i)
