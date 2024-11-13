@@ -1000,30 +1000,46 @@ func (c *pdServiceDiscovery) updateURLs(members []*pdpb.Member) {
 	log.Info("[pd] update member urls", zap.Strings("old-urls", oldURLs), zap.Strings("new-urls", urls))
 }
 
-func (c *pdServiceDiscovery) switchLeader(url string) (bool, error) {
+// switchLeader switches the leader of the PD cluster.
+// Note: For current implementation, when initializing the client, the connection to leader should be established.
+// Otherwise, the initialization will fail.
+func (c *pdServiceDiscovery) switchLeader(url string) (change bool, err error) {
 	oldLeader := c.getLeaderServiceClient()
 	if url == oldLeader.GetURL() && oldLeader.GetClientConn() != nil {
 		return false, nil
 	}
 
-	newConn, err := c.GetOrCreateGRPCConn(url)
+	var newConn *grpc.ClientConn
+	newConn, err = c.GetOrCreateGRPCConn(url)
 	// If gRPC connect is created successfully or leader is new, still saves.
-	if url != oldLeader.GetURL() || newConn != nil {
+	if url != oldLeader.GetURL() {
+		change = true
+		log.Info("[pd] switch leader", zap.String("new-leader", url), zap.String("old-leader", oldLeader.GetURL()))
+	}
+	if err == nil {
+		change = true
+		log.Info("[pd] successfully connected to leader", zap.String("leader", url))
+	} else {
+		log.Warn("[pd] failed to connect leader", zap.String("leader", url), errs.ZapError(err))
+	}
+	if change {
 		// Set PD leader and Global TSO Allocator (which is also the PD leader)
+		// Note: Even if the connection is not established, the leader is still updated.
+		// The reason is that the leader has transferred to another PD server, and the client should
+		// update the member information. Meanwhile, the client must know the newest leader for follower proxy.
 		leaderClient := newPDServiceClient(url, url, newConn, true)
 		c.leader.Store(leaderClient)
-	}
-	// Run callbacks
-	if c.tsoGlobalAllocLeaderUpdatedCb != nil {
-		if err := c.tsoGlobalAllocLeaderUpdatedCb(url); err != nil {
-			return true, err
+		// Run callbacks
+		if c.tsoGlobalAllocLeaderUpdatedCb != nil {
+			if err := c.tsoGlobalAllocLeaderUpdatedCb(url); err != nil {
+				return change, err
+			}
+		}
+		for _, cb := range c.leaderSwitchedCbs {
+			cb()
 		}
 	}
-	for _, cb := range c.leaderSwitchedCbs {
-		cb()
-	}
-	log.Info("[pd] switch leader", zap.String("new-leader", url), zap.String("old-leader", oldLeader.GetURL()))
-	return true, err
+	return
 }
 
 func (c *pdServiceDiscovery) updateFollowers(members []*pdpb.Member, leaderID uint64, leaderURL string) (changed bool) {
