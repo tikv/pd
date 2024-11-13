@@ -156,8 +156,6 @@ func (suite *serverRegisterTestSuite) addServer(serviceName string) (bs.Server, 
 	switch serviceName {
 	case constant.TSOServiceName:
 		return tests.StartSingleTSOTestServer(suite.ctx, re, suite.backendEndpoints, tempurl.Alloc())
-	case constant.ResourceManagerServiceName:
-		return tests.StartSingleResourceManagerTestServer(suite.ctx, re, suite.backendEndpoints, tempurl.Alloc())
 	default:
 		return nil, nil
 	}

@@ -310,12 +310,6 @@ func GetCompiledKeyspaceGroupIDRegexp() *regexp.Regexp {
 	return regexp.MustCompile(pattern)
 }
 
-// ResourceManagerSvcRootPath returns the root path of resource manager service.
-// Path: /ms/{cluster_id}/resource_manager
-func ResourceManagerSvcRootPath() string {
-	return svcRootPath(constant.ResourceManagerServiceName)
-}
-
 // SchedulingSvcRootPath returns the root path of scheduling service.
 // Path: /ms/{cluster_id}/scheduling
 func SchedulingSvcRootPath() string {

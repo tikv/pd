@@ -46,7 +46,7 @@ func Discover(cli *clientv3.Client, serviceName string) ([]string, error) {
 // GetMSMembers returns all the members of the specified service name.
 func GetMSMembers(serviceName string, client *clientv3.Client) ([]ServiceRegistryEntry, error) {
 	switch serviceName {
-	case constant.TSOServiceName, constant.SchedulingServiceName, constant.ResourceManagerServiceName:
+	case constant.TSOServiceName, constant.SchedulingServiceName:
 		servicePath := keypath.ServicePath(serviceName)
 		resps, err := kv.NewSlowLogTxn(client).Then(clientv3.OpGet(servicePath, clientv3.WithPrefix())).Commit()
 		if err != nil {

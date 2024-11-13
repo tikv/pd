@@ -16,13 +16,9 @@ package member
 
 import (
 	"context"
-	"fmt"
-	"path"
-	"strconv"
 	"sync/atomic"
 	"time"
 
-	"github.com/pingcap/kvproto/pkg/resource_manager"
 	"github.com/pingcap/kvproto/pkg/schedulingpb"
 	"github.com/pingcap/kvproto/pkg/tsopb"
 	"github.com/pingcap/log"
@@ -280,15 +276,6 @@ func (m *Participant) IsSameLeader(leader participant) bool {
 	return leader.GetId() == m.ID()
 }
 
-// CheckPriority checks whether there is another participant has higher priority and resign it as the leader if so.
-func (*Participant) CheckPriority(_ context.Context) {
-	// TODO: implement weighted-election when it's in need
-}
-
-func (m *Participant) getLeaderPriorityPath(id uint64) string {
-	return path.Join(m.rootPath, fmt.Sprintf("participant/%d/leader_priority", id))
-}
-
 // GetDCLocationPathPrefix returns the dc-location path prefix of the cluster.
 func (m *Participant) GetDCLocationPathPrefix() string {
 	return keypath.Prefix(keypath.DCLocationPath(&m.MsParam, 0))
@@ -297,65 +284,6 @@ func (m *Participant) GetDCLocationPathPrefix() string {
 // GetDCLocationPath returns the dc-location path of a member with the given member ID.
 func (m *Participant) GetDCLocationPath(id uint64) string {
 	return keypath.DCLocationPath(&m.MsParam, id)
-}
-
-// SetLeaderPriority saves the priority to be elected as the etcd leader.
-func (m *Participant) SetLeaderPriority(id uint64, priority int) error {
-	key := m.getLeaderPriorityPath(id)
-	res, err := m.leadership.LeaderTxn().Then(clientv3.OpPut(key, strconv.Itoa(priority))).Commit()
-	if err != nil {
-		return errs.ErrEtcdTxnInternal.Wrap(err).GenWithStackByCause()
-	}
-	if !res.Succeeded {
-		log.Error("save etcd leader priority failed, maybe not the leader")
-		return errs.ErrEtcdTxnConflict.FastGenByArgs()
-	}
-	return nil
-}
-
-// DeleteLeaderPriority removes the etcd leader priority config.
-func (m *Participant) DeleteLeaderPriority(id uint64) error {
-	key := m.getLeaderPriorityPath(id)
-	res, err := m.leadership.LeaderTxn().Then(clientv3.OpDelete(key)).Commit()
-	if err != nil {
-		return errs.ErrEtcdTxnInternal.Wrap(err).GenWithStackByCause()
-	}
-	if !res.Succeeded {
-		log.Error("delete etcd leader priority failed, maybe not the leader")
-		return errs.ErrEtcdTxnConflict.FastGenByArgs()
-	}
-	return nil
-}
-
-// DeleteDCLocationInfo removes the dc-location info.
-func (m *Participant) DeleteDCLocationInfo(id uint64) error {
-	key := m.GetDCLocationPath(id)
-	res, err := m.leadership.LeaderTxn().Then(clientv3.OpDelete(key)).Commit()
-	if err != nil {
-		return errs.ErrEtcdTxnInternal.Wrap(err).GenWithStackByCause()
-	}
-	if !res.Succeeded {
-		log.Error("delete dc-location info failed, maybe not the leader")
-		return errs.ErrEtcdTxnConflict.FastGenByArgs()
-	}
-	return nil
-}
-
-// GetLeaderPriority loads the priority to be elected as the etcd leader.
-func (m *Participant) GetLeaderPriority(id uint64) (int, error) {
-	key := m.getLeaderPriorityPath(id)
-	res, err := etcdutil.EtcdKVGet(m.client, key)
-	if err != nil {
-		return 0, err
-	}
-	if len(res.Kvs) == 0 {
-		return 0, nil
-	}
-	priority, err := strconv.ParseInt(string(res.Kvs[0].Value), 10, 32)
-	if err != nil {
-		return 0, errs.ErrStrconvParseInt.Wrap(err).GenWithStackByCause()
-	}
-	return int(priority), nil
 }
 
 func (m *Participant) campaignCheck() bool {
@@ -396,8 +324,6 @@ func NewParticipantByService(serviceName string) (p participant) {
 		p = &tsopb.Participant{}
 	case constant.SchedulingServiceName:
 		p = &schedulingpb.Participant{}
-	case constant.ResourceManagerServiceName:
-		p = &resource_manager.Participant{}
 	}
 	return p
 }
