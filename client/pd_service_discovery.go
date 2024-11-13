@@ -17,6 +17,7 @@ package pd
 import (
 	"context"
 	"crypto/tls"
+	"fmt"
 	"net/url"
 	"reflect"
 	"sort"
@@ -885,8 +886,12 @@ func (c *pdServiceDiscovery) updateMember() error {
 
 		members, err := c.getMembers(c.ctx, url, updateMemberTimeout)
 		// Check the cluster ID.
-		if err == nil && members.GetHeader().GetClusterId() != c.clusterID {
-			err = errs.ErrClientUpdateMember.FastGenByArgs("cluster id does not match")
+		updatedClusterID := members.GetHeader().GetClusterId()
+		if err == nil && updatedClusterID != c.clusterID {
+			log.Warn("[pd] cluster id does not match",
+				zap.Uint64("updated-cluster-id", updatedClusterID),
+				zap.Uint64("expected-cluster-id", c.clusterID))
+			err = errs.ErrClientUpdateMember.FastGenByArgs(fmt.Sprintf("cluster id does not match: %d != %d", updatedClusterID, c.clusterID))
 		}
 		if err == nil && (members.GetLeader() == nil || len(members.GetLeader().GetClientUrls()) == 0) {
 			err = errs.ErrClientGetLeader.FastGenByArgs("leader url doesn't exist")
