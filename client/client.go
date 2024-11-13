@@ -141,11 +141,17 @@ type RPCClient interface {
 	// SetExternalTimestamp sets external timestamp
 	SetExternalTimestamp(ctx context.Context, timestamp uint64) error
 
-	// WithCallerID returns a new RPCClient with the specified caller ID.
-	// Caller ID can be understood as a binary file; it is a process.
+	// WithCallerID returns a new RPCClient with the specified caller ID. Caller
+	// ID can be understood as the name of the binary file.
 	WithCallerID(callerID caller.ID) RPCClient
-	// WithCallerComponent returns a new RPCClient with the specified caller component.
-	// Caller component refers to the components within the process.
+	// WithCallerComponent returns a new RPCClient with the specified caller
+	// component. Caller component refers to the specific part or module within
+	// the process. You can set the component in two ways:
+	//   * Define it manually, like `caller.Component("DDL")`.
+	//   * Use the provided helper function, `caller.GetComponent(upperLayer)`.
+	//     The upperLayer parameter specifies the depth of the caller stack,
+	//     where 0 means the current function. Adjust the upperLayer value based
+	//     on your needs.
 	WithCallerComponent(callerComponent caller.Component) RPCClient
 
 	// TSOClient is the TSO client.

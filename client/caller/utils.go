@@ -27,10 +27,10 @@ func GetCallerID() ID {
 }
 
 // GetComponent returns the package path of the calling function
-// The argument i is the number of stack frames to ascend.
-func GetComponent(i int) Component {
+// The argument upperLayer specifies the number of stack frames to ascend.
+func GetComponent(upperLayer int) Component {
 	// Get the program counter for the calling function
-	pc, _, _, ok := runtime.Caller(i + 1)
+	pc, _, _, ok := runtime.Caller(upperLayer + 1)
 	if !ok {
 		return "unknown"
 	}

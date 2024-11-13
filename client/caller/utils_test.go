@@ -24,6 +24,9 @@ func TestGetComponent(t *testing.T) {
 	re := require.New(t)
 
 	re.Equal(Component("github.com/tikv/pd/client/caller"), GetComponent(0))
+	re.Equal(Component("testing"), GetComponent(1))
+	re.Equal(Component("runtime"), GetComponent(2))
+	re.Equal(Component("unknown"), GetComponent(3))
 }
 
 func TestGetCallerID(t *testing.T) {
