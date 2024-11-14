@@ -29,6 +29,7 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/client/errs"
+	"github.com/tikv/pd/client/opt"
 	"github.com/tikv/pd/client/retry"
 	"github.com/tikv/pd/client/utils/timerutil"
 	"github.com/tikv/pd/client/utils/tsoutil"
@@ -67,7 +68,7 @@ type tsoInfo struct {
 }
 
 type tsoServiceProvider interface {
-	getOption() *option
+	getOption() *opt.Option
 	getServiceDiscovery() ServiceDiscovery
 	updateConnectionCtxs(ctx context.Context, connectionCtxs *sync.Map) bool
 }
@@ -223,7 +224,7 @@ func (td *tsoDispatcher) handleDispatcher(wg *sync.WaitGroup) {
 		stream    *tsoStream
 	)
 	// Loop through each batch of TSO requests and send them for processing.
-	streamLoopTimer := time.NewTimer(option.timeout)
+	streamLoopTimer := time.NewTimer(option.Timeout)
 	defer streamLoopTimer.Stop()
 
 	// Create a not-started-timer to be used for collecting batches for concurrent RPC.
@@ -245,7 +246,7 @@ tsoBatchLoop:
 			tsoBatchController = td.batchBufferPool.Get().(*batchController[*tsoRequest])
 		}
 
-		maxBatchWaitInterval := option.getMaxTSOBatchWaitInterval()
+		maxBatchWaitInterval := option.GetMaxTSOBatchWaitInterval()
 
 		currentBatchStartTime := time.Now()
 		// Update concurrency settings if needed.
@@ -280,7 +281,7 @@ tsoBatchLoop:
 		}
 		// We need be careful here, see more details in the comments of Timer.Reset.
 		// https://pkg.go.dev/time@master#Timer.Reset
-		streamLoopTimer.Reset(option.timeout)
+		streamLoopTimer.Reset(option.Timeout)
 		// Choose a stream to send the TSO gRPC request.
 	streamChoosingLoop:
 		for {
@@ -390,7 +391,7 @@ tsoBatchLoop:
 		}
 
 		done := make(chan struct{})
-		dl := newTSDeadline(option.timeout, done, cancel)
+		dl := newTSDeadline(option.Timeout, done, cancel)
 		select {
 		case <-ctx.Done():
 			// Finish the collected requests if the context is canceled.
@@ -485,8 +486,8 @@ func (td *tsoDispatcher) connectionCtxsUpdater() {
 		case <-ctx.Done():
 			log.Info("[tso] exit tso connection contexts updater")
 			return
-		case <-option.enableTSOFollowerProxyCh:
-			enableTSOFollowerProxy := option.getEnableTSOFollowerProxy()
+		case <-option.EnableTSOFollowerProxyCh:
+			enableTSOFollowerProxy := option.GetEnableTSOFollowerProxy()
 			log.Info("[tso] tso follower proxy status changed",
 				zap.Bool("enable", enableTSOFollowerProxy))
 			if enableTSOFollowerProxy && updateTicker.C == nil {
@@ -711,8 +712,8 @@ func (td *tsoDispatcher) checkTSORPCConcurrency(ctx context.Context, maxBatchWai
 	}
 	td.lastCheckConcurrencyTime = now
 
-	newConcurrency := td.provider.getOption().getTSOClientRPCConcurrency()
-	if maxBatchWaitInterval > 0 || td.provider.getOption().getEnableTSOFollowerProxy() {
+	newConcurrency := td.provider.getOption().GetTSOClientRPCConcurrency()
+	if maxBatchWaitInterval > 0 || td.provider.getOption().GetEnableTSOFollowerProxy() {
 		newConcurrency = 1
 	}
 
