@@ -1,4 +1,4 @@
-// Copyright 2021 TiKV Project Authors.
+// Copyright 2024 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package pd
+package opt
 
 import (
 	"sync/atomic"
@@ -50,31 +50,31 @@ const (
 	dynamicOptionCount
 )
 
-// option is the configurable option for the PD client.
+// Option is the configurable option for the PD client.
 // It provides the ability to change some PD client's options online from the outside.
-type option struct {
+type Option struct {
 	// Static options.
-	gRPCDialOptions   []grpc.DialOption
-	timeout           time.Duration
-	maxRetryTimes     int
-	enableForwarding  bool
-	useTSOServerProxy bool
-	metricsLabels     prometheus.Labels
-	initMetrics       bool
+	GRPCDialOptions   []grpc.DialOption
+	Timeout           time.Duration
+	MaxRetryTimes     int
+	EnableForwarding  bool
+	UseTSOServerProxy bool
+	MetricsLabels     prometheus.Labels
+	InitMetrics       bool
 
 	// Dynamic options.
 	dynamicOptions [dynamicOptionCount]atomic.Value
 
-	enableTSOFollowerProxyCh chan struct{}
+	EnableTSOFollowerProxyCh chan struct{}
 }
 
-// newOption creates a new PD client option with the default values set.
-func newOption() *option {
-	co := &option{
-		timeout:                  defaultPDTimeout,
-		maxRetryTimes:            maxInitClusterRetries,
-		enableTSOFollowerProxyCh: make(chan struct{}, 1),
-		initMetrics:              true,
+// NewOption creates a new PD client option with the default values set.
+func NewOption() *Option {
+	co := &Option{
+		Timeout:                  defaultPDTimeout,
+		MaxRetryTimes:            maxInitClusterRetries,
+		EnableTSOFollowerProxyCh: make(chan struct{}, 1),
+		InitMetrics:              true,
 	}
 
 	co.dynamicOptions[MaxTSOBatchWaitInterval].Store(defaultMaxTSOBatchWaitInterval)
@@ -84,149 +84,88 @@ func newOption() *option {
 	return co
 }
 
-// setMaxTSOBatchWaitInterval sets the max TSO batch wait interval option.
+// SetMaxTSOBatchWaitInterval sets the max TSO batch wait interval option.
 // It only accepts the interval value between 0 and 10ms.
-func (o *option) setMaxTSOBatchWaitInterval(interval time.Duration) error {
+func (o *Option) SetMaxTSOBatchWaitInterval(interval time.Duration) error {
 	if interval < 0 || interval > 10*time.Millisecond {
 		return errors.New("[pd] invalid max TSO batch wait interval, should be between 0 and 10ms")
 	}
-	old := o.getMaxTSOBatchWaitInterval()
+	old := o.GetMaxTSOBatchWaitInterval()
 	if interval != old {
 		o.dynamicOptions[MaxTSOBatchWaitInterval].Store(interval)
 	}
 	return nil
 }
 
-// setEnableFollowerHandle set the Follower Handle option.
-func (o *option) setEnableFollowerHandle(enable bool) {
-	old := o.getEnableFollowerHandle()
+// SetEnableFollowerHandle set the Follower Handle option.
+func (o *Option) SetEnableFollowerHandle(enable bool) {
+	old := o.GetEnableFollowerHandle()
 	if enable != old {
 		o.dynamicOptions[EnableFollowerHandle].Store(enable)
 	}
 }
 
-// getMaxTSOBatchWaitInterval gets the Follower Handle enable option.
-func (o *option) getEnableFollowerHandle() bool {
+// GetEnableFollowerHandle gets the Follower Handle enable option.
+func (o *Option) GetEnableFollowerHandle() bool {
 	return o.dynamicOptions[EnableFollowerHandle].Load().(bool)
 }
 
-// getMaxTSOBatchWaitInterval gets the max TSO batch wait interval option.
-func (o *option) getMaxTSOBatchWaitInterval() time.Duration {
+// GetMaxTSOBatchWaitInterval gets the max TSO batch wait interval option.
+func (o *Option) GetMaxTSOBatchWaitInterval() time.Duration {
 	return o.dynamicOptions[MaxTSOBatchWaitInterval].Load().(time.Duration)
 }
 
-// setEnableTSOFollowerProxy sets the TSO Follower Proxy option.
-func (o *option) setEnableTSOFollowerProxy(enable bool) {
-	old := o.getEnableTSOFollowerProxy()
+// SetEnableTSOFollowerProxy sets the TSO Follower Proxy option.
+func (o *Option) SetEnableTSOFollowerProxy(enable bool) {
+	old := o.GetEnableTSOFollowerProxy()
 	if enable != old {
 		o.dynamicOptions[EnableTSOFollowerProxy].Store(enable)
 		select {
-		case o.enableTSOFollowerProxyCh <- struct{}{}:
+		case o.EnableTSOFollowerProxyCh <- struct{}{}:
 		default:
 		}
 	}
 }
 
-// getEnableTSOFollowerProxy gets the TSO Follower Proxy option.
-func (o *option) getEnableTSOFollowerProxy() bool {
+// GetEnableTSOFollowerProxy gets the TSO Follower Proxy option.
+func (o *Option) GetEnableTSOFollowerProxy() bool {
 	return o.dynamicOptions[EnableTSOFollowerProxy].Load().(bool)
 }
 
-func (o *option) setTSOClientRPCConcurrency(value int) {
-	old := o.getTSOClientRPCConcurrency()
+// SetTSOClientRPCConcurrency sets the TSO client RPC concurrency option.
+func (o *Option) SetTSOClientRPCConcurrency(value int) {
+	old := o.GetTSOClientRPCConcurrency()
 	if value != old {
 		o.dynamicOptions[TSOClientRPCConcurrency].Store(value)
 	}
 }
 
-func (o *option) getTSOClientRPCConcurrency() int {
+// GetTSOClientRPCConcurrency gets the TSO client RPC concurrency option.
+func (o *Option) GetTSOClientRPCConcurrency() int {
 	return o.dynamicOptions[TSOClientRPCConcurrency].Load().(int)
 }
 
-// GetStoreOp represents available options when getting stores.
-type GetStoreOp struct {
-	excludeTombstone bool
-}
-
-// GetStoreOption configures GetStoreOp.
-type GetStoreOption func(*GetStoreOp)
-
-// WithExcludeTombstone excludes tombstone stores from the result.
-func WithExcludeTombstone() GetStoreOption {
-	return func(op *GetStoreOp) { op.excludeTombstone = true }
-}
-
-// RegionsOp represents available options when operate regions
-type RegionsOp struct {
-	group          string
-	retryLimit     uint64
-	skipStoreLimit bool
-}
-
-// RegionsOption configures RegionsOp
-type RegionsOption func(op *RegionsOp)
-
-// WithGroup specify the group during Scatter/Split Regions
-func WithGroup(group string) RegionsOption {
-	return func(op *RegionsOp) { op.group = group }
-}
-
-// WithRetry specify the retry limit during Scatter/Split Regions
-func WithRetry(retry uint64) RegionsOption {
-	return func(op *RegionsOp) { op.retryLimit = retry }
-}
-
-// WithSkipStoreLimit specify if skip the store limit check during Scatter/Split Regions
-func WithSkipStoreLimit() RegionsOption {
-	return func(op *RegionsOp) { op.skipStoreLimit = true }
-}
-
-// GetRegionOp represents available options when getting regions.
-type GetRegionOp struct {
-	needBuckets                  bool
-	allowFollowerHandle          bool
-	outputMustContainAllKeyRange bool
-}
-
-// GetRegionOption configures GetRegionOp.
-type GetRegionOption func(op *GetRegionOp)
-
-// WithBuckets means getting region and its buckets.
-func WithBuckets() GetRegionOption {
-	return func(op *GetRegionOp) { op.needBuckets = true }
-}
-
-// WithAllowFollowerHandle means that client can send request to follower and let it handle this request.
-func WithAllowFollowerHandle() GetRegionOption {
-	return func(op *GetRegionOp) { op.allowFollowerHandle = true }
-}
-
-// WithOutputMustContainAllKeyRange means the output must contain all key ranges.
-func WithOutputMustContainAllKeyRange() GetRegionOption {
-	return func(op *GetRegionOp) { op.outputMustContainAllKeyRange = true }
-}
-
 // ClientOption configures client.
-type ClientOption func(c *client)
+type ClientOption func(*Option)
 
 // WithGRPCDialOptions configures the client with gRPC dial options.
 func WithGRPCDialOptions(opts ...grpc.DialOption) ClientOption {
-	return func(c *client) {
-		c.option.gRPCDialOptions = append(c.option.gRPCDialOptions, opts...)
+	return func(op *Option) {
+		op.GRPCDialOptions = append(op.GRPCDialOptions, opts...)
 	}
 }
 
 // WithCustomTimeoutOption configures the client with timeout option.
 func WithCustomTimeoutOption(timeout time.Duration) ClientOption {
-	return func(c *client) {
-		c.option.timeout = timeout
+	return func(op *Option) {
+		op.Timeout = timeout
 	}
 }
 
 // WithForwardingOption configures the client with forwarding option.
 func WithForwardingOption(enableForwarding bool) ClientOption {
-	return func(c *client) {
-		c.option.enableForwarding = enableForwarding
+	return func(op *Option) {
+		op.EnableForwarding = enableForwarding
 	}
 }
 
@@ -234,28 +173,91 @@ func WithForwardingOption(enableForwarding bool) ClientOption {
 // i.e., the client will send TSO requests to the API leader (the TSO server
 // proxy) which will forward the requests to the TSO servers.
 func WithTSOServerProxyOption(useTSOServerProxy bool) ClientOption {
-	return func(c *client) {
-		c.option.useTSOServerProxy = useTSOServerProxy
+	return func(op *Option) {
+		op.UseTSOServerProxy = useTSOServerProxy
 	}
 }
 
 // WithMaxErrorRetry configures the client max retry times when connect meets error.
 func WithMaxErrorRetry(count int) ClientOption {
-	return func(c *client) {
-		c.option.maxRetryTimes = count
+	return func(op *Option) {
+		op.MaxRetryTimes = count
 	}
 }
 
 // WithMetricsLabels configures the client with metrics labels.
 func WithMetricsLabels(labels prometheus.Labels) ClientOption {
-	return func(c *client) {
-		c.option.metricsLabels = labels
+	return func(op *Option) {
+		op.MetricsLabels = labels
 	}
 }
 
 // WithInitMetricsOption configures the client with metrics labels.
 func WithInitMetricsOption(initMetrics bool) ClientOption {
-	return func(c *client) {
-		c.option.initMetrics = initMetrics
+	return func(op *Option) {
+		op.InitMetrics = initMetrics
 	}
+}
+
+// GetStoreOp represents available options when getting stores.
+type GetStoreOp struct {
+	ExcludeTombstone bool
+}
+
+// GetStoreOption configures GetStoreOp.
+type GetStoreOption func(*GetStoreOp)
+
+// WithExcludeTombstone excludes tombstone stores from the result.
+func WithExcludeTombstone() GetStoreOption {
+	return func(op *GetStoreOp) { op.ExcludeTombstone = true }
+}
+
+// RegionsOp represents available options when operate regions
+type RegionsOp struct {
+	Group          string
+	RetryLimit     uint64
+	SkipStoreLimit bool
+}
+
+// RegionsOption configures RegionsOp
+type RegionsOption func(op *RegionsOp)
+
+// WithGroup specify the group during Scatter/Split Regions
+func WithGroup(group string) RegionsOption {
+	return func(op *RegionsOp) { op.Group = group }
+}
+
+// WithRetry specify the retry limit during Scatter/Split Regions
+func WithRetry(retry uint64) RegionsOption {
+	return func(op *RegionsOp) { op.RetryLimit = retry }
+}
+
+// WithSkipStoreLimit specify if skip the store limit check during Scatter/Split Regions
+func WithSkipStoreLimit() RegionsOption {
+	return func(op *RegionsOp) { op.SkipStoreLimit = true }
+}
+
+// GetRegionOp represents available options when getting regions.
+type GetRegionOp struct {
+	NeedBuckets                  bool
+	AllowFollowerHandle          bool
+	OutputMustContainAllKeyRange bool
+}
+
+// GetRegionOption configures GetRegionOp.
+type GetRegionOption func(op *GetRegionOp)
+
+// WithBuckets means getting region and its buckets.
+func WithBuckets() GetRegionOption {
+	return func(op *GetRegionOp) { op.NeedBuckets = true }
+}
+
+// WithAllowFollowerHandle means that client can send request to follower and let it handle this request.
+func WithAllowFollowerHandle() GetRegionOption {
+	return func(op *GetRegionOp) { op.AllowFollowerHandle = true }
+}
+
+// WithOutputMustContainAllKeyRange means the output must contain all key ranges.
+func WithOutputMustContainAllKeyRange() GetRegionOption {
+	return func(op *GetRegionOp) { op.OutputMustContainAllKeyRange = true }
 }
