@@ -15,6 +15,7 @@
 package schedulers
 
 import (
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -127,6 +128,44 @@ func schedulersRegister() {
 			conf.Batch = balanceWitnessBatchSize
 		}
 		sche := newBalanceWitnessScheduler(opController, conf)
+		conf.init(sche.GetName(), storage, conf)
+		return sche, nil
+	})
+
+	// balance keyrange
+	RegisterSliceDecoderBuilder(types.BalanceKeyrangeScheduler, func(args []string) ConfigDecoder {
+		return func(v any) error {
+			conf, ok := v.(*balanceKeyrangeSchedulerConfig)
+			if !ok {
+				return errs.ErrScheduleConfigNotExist.FastGenByArgs()
+			}
+			b, err := strconv.ParseUint(args[0], 10, 64)
+			if err != nil {
+				return errs.ErrQueryUnescape.Wrap(err)
+			}
+			conf.BatchSize = b
+			startKey, err := url.QueryUnescape(args[1])
+			if err != nil {
+				return errs.ErrQueryUnescape.Wrap(err)
+			}
+			endKey, err := url.QueryUnescape(args[2])
+			if err != nil {
+				return errs.ErrQueryUnescape.Wrap(err)
+			}
+			conf.Range = core.NewKeyRange(startKey, endKey)
+			return nil
+		}
+	})
+
+	RegisterScheduler(types.BalanceKeyrangeScheduler, func(opController *operator.Controller,
+		storage endpoint.ConfigStorage, decoder ConfigDecoder, _ ...func(string) error) (Scheduler, error) {
+		conf := &balanceKeyrangeSchedulerConfig{
+			baseDefaultSchedulerConfig: newBaseDefaultSchedulerConfig(),
+		}
+		if err := decoder(conf); err != nil {
+			return nil, err
+		}
+		sche := newBalanceKeyrangeScheduler(opController, conf)
 		conf.init(sche.GetName(), storage, conf)
 		return sche, nil
 	})

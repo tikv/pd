@@ -25,6 +25,7 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/pingcap/errors"
+	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/keyspace"
@@ -126,6 +127,19 @@ func (h *regionsHandler) CheckRegionsReplicated(w http.ResponseWriter, r *http.R
 		return
 	}
 	h.rd.JSON(w, http.StatusOK, state)
+}
+
+func (h *regionsHandler) RedistibuteRegions(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	rawStartKey := vars["startKey"]
+	rawEndKey := vars["endKey"]
+	storeLabels := make([]*metapb.StoreLabel, 0)
+	result, err := h.Handler.RedistibuteRegions(rawStartKey, rawEndKey, storeLabels)
+	if err != nil {
+		h.rd.JSON(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	h.rd.JSON(w, http.StatusOK, result)
 }
 
 type regionsHandler struct {
