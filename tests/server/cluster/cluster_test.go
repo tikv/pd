@@ -589,7 +589,9 @@ func TestRaftClusterMultipleRestart(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	tc, err := tests.NewTestCluster(ctx, 1)
+	tc, err := tests.NewTestCluster(ctx, 1, func(conf *config.Config, _ string) {
+		conf.LeaderLease = 300
+	})
 	defer tc.Destroy()
 	re.NoError(err)
 

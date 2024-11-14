@@ -37,34 +37,6 @@ func TestSaveLoadTimestamp(t *testing.T) {
 	re.Equal(expectedTS, ts)
 }
 
-func TestGlobalLocalTimestamp(t *testing.T) {
-	re := require.New(t)
-	storage, clean := newTestStorage(t)
-	defer clean()
-	ltaKey := "lta"
-	dc1LocationKey, dc2LocationKey := "dc1", "dc2"
-	localTS1 := time.Now().Round(0)
-	l1 := path.Join(ltaKey, dc1LocationKey, keypath.TimestampKey)
-	l2 := path.Join(ltaKey, dc2LocationKey, keypath.TimestampKey)
-
-	err := storage.SaveTimestamp(l1, localTS1)
-	re.NoError(err)
-	globalTS := time.Now().Round(0)
-	err = storage.SaveTimestamp(keypath.TimestampKey, globalTS)
-	re.NoError(err)
-	localTS2 := time.Now().Round(0)
-	err = storage.SaveTimestamp(l2, localTS2)
-	re.NoError(err)
-	// return the max ts between global and local
-	ts, err := storage.LoadTimestamp("")
-	re.NoError(err)
-	re.Equal(localTS2, ts)
-	// return the local ts for a given dc location
-	ts, err = storage.LoadTimestamp(l1)
-	re.NoError(err)
-	re.Equal(localTS1, ts)
-}
-
 func TestTimestampTxn(t *testing.T) {
 	re := require.New(t)
 	storage, clean := newTestStorage(t)

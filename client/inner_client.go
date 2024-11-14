@@ -207,7 +207,7 @@ func (c *innerClient) getOrCreateGRPCConn() (*grpc.ClientConn, error) {
 	return cc, err
 }
 
-func (c *innerClient) dispatchTSORequestWithRetry(ctx context.Context, dcLocation string) TSFuture {
+func (c *innerClient) dispatchTSORequestWithRetry(ctx context.Context) TSFuture {
 	var (
 		retryable bool
 		err       error
@@ -226,7 +226,7 @@ func (c *innerClient) dispatchTSORequestWithRetry(ctx context.Context, dcLocatio
 		}
 		// Get a new request from the pool if it's nil or not from the current pool.
 		if req == nil || req.pool != tsoClient.tsoReqPool {
-			req = tsoClient.getTSORequest(ctx, dcLocation)
+			req = tsoClient.getTSORequest(ctx)
 		}
 		retryable, err = tsoClient.dispatchRequest(req)
 		if !retryable {
