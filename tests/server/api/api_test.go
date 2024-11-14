@@ -938,6 +938,8 @@ func TestPreparingProgress(t *testing.T) {
 	defer cancel()
 	cluster, err := tests.NewTestCluster(ctx, 1, func(conf *config.Config, _ string) {
 		conf.Replication.MaxReplicas = 1
+		// prevent scheduling
+		conf.Schedule.RegionScheduleLimit = 0
 	})
 	re.NoError(err)
 	defer cluster.Destroy()
@@ -1008,28 +1010,15 @@ func TestPreparingProgress(t *testing.T) {
 	for _, store := range stores[2:] {
 		tests.MustPutStore(re, cluster, store)
 	}
-	// no store preparing
-	output := sendRequest(re, leader.GetAddr()+"/pd/api/v1/stores/progress?action=preparing", http.MethodGet, http.StatusNotFound)
-	re.Contains(string(output), "no progress found for the action")
-	output = sendRequest(re, leader.GetAddr()+"/pd/api/v1/stores/progress?id=4", http.MethodGet, http.StatusNotFound)
-	re.Contains(string(output), "no progress found for the given store ID")
 
 	if !leader.GetRaftCluster().IsPrepared() {
 		testutil.Eventually(re, func() bool {
 			if leader.GetRaftCluster().IsPrepared() {
 				return true
 			}
-			url := leader.GetAddr() + "/pd/api/v1/stores/progress?action=preparing"
-			req, _ := http.NewRequest(http.MethodGet, url, http.NoBody)
-			resp, err := tests.TestDialClient.Do(req)
-			re.NoError(err)
-			defer resp.Body.Close()
-			if resp.StatusCode != http.StatusNotFound {
-				return false
-			}
-			// is not prepared
-			output, err := io.ReadAll(resp.Body)
-			re.NoError(err)
+
+			// no store preparing
+			output := sendRequest(re, leader.GetAddr()+"/pd/api/v1/stores/progress?action=preparing", http.MethodGet, http.StatusNotFound)
 			re.Contains(string(output), "no progress found for the action")
 			output = sendRequest(re, leader.GetAddr()+"/pd/api/v1/stores/progress?id=4", http.MethodGet, http.StatusNotFound)
 			re.Contains(string(output), "no progress found for the given store ID")
@@ -1092,7 +1081,7 @@ func TestPreparingProgress(t *testing.T) {
 		return true
 	})
 
-	output = sendRequest(re, leader.GetAddr()+"/pd/api/v1/stores/progress?id=4", http.MethodGet, http.StatusOK)
+	output := sendRequest(re, leader.GetAddr()+"/pd/api/v1/stores/progress?id=4", http.MethodGet, http.StatusOK)
 	re.NoError(json.Unmarshal(output, &p))
 	re.Equal("preparing", p.Action)
 	re.Equal("0.05", fmt.Sprintf("%.2f", p.Progress))
