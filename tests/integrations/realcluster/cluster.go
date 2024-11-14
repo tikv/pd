@@ -87,6 +87,9 @@ func (s *clusterSuite) stopCluster(t *testing.T) {
 }
 
 func (s *clusterSuite) tag() string {
+	if s.ms {
+		return fmt.Sprintf("pd_real_cluster_test_ms_%s_%d", s.suiteName, s.clusterCnt)
+	}
 	return fmt.Sprintf("pd_real_cluster_test_%s_%d", s.suiteName, s.clusterCnt)
 }
 
