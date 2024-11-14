@@ -1499,7 +1499,7 @@ func (c *client) ScanRegions(ctx context.Context, key, endKey []byte, limit int)
 		defer span.Finish()
 	}
 	start := time.Now()
-	defer cmdDurationScanRegions.Observe(time.Since(start).Seconds())
+	defer func() { cmdDurationScanRegions.Observe(time.Since(start).Seconds()) }()
 
 	var cancel context.CancelFunc
 	scanCtx := ctx
@@ -1865,7 +1865,7 @@ func (c *client) StoreGlobalConfig(ctx context.Context, items []GlobalConfigItem
 	}
 	resErr := res.GetError()
 	if resErr != nil {
-		return errors.Errorf("[pd]" + resErr.Message)
+		return errors.New("[pd]" + resErr.Message)
 	}
 	return err
 }
@@ -1914,7 +1914,7 @@ func (c *client) GetExternalTimestamp(ctx context.Context) (uint64, error) {
 	}
 	resErr := resp.GetHeader().GetError()
 	if resErr != nil {
-		return 0, errors.Errorf("[pd]" + resErr.Message)
+		return 0, errors.New("[pd]" + resErr.Message)
 	}
 	return resp.GetTimestamp(), nil
 }
@@ -1929,7 +1929,7 @@ func (c *client) SetExternalTimestamp(ctx context.Context, timestamp uint64) err
 	}
 	resErr := resp.GetHeader().GetError()
 	if resErr != nil {
-		return errors.Errorf("[pd]" + resErr.Message)
+		return errors.New("[pd]" + resErr.Message)
 	}
 	return nil
 }

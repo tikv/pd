@@ -23,4 +23,5 @@ var LeakOptions = []goleak.Option{
 	goleak.IgnoreTopFunction("google.golang.org/grpc.(*addrConn).createTransport"),
 	goleak.IgnoreTopFunction("google.golang.org/grpc.(*addrConn).resetTransport"),
 	goleak.IgnoreTopFunction("google.golang.org/grpc.(*Server).handleRawConn"),
+	goleak.IgnoreTopFunction("google.golang.org/grpc/internal/grpcsync.(*CallbackSerializer).run"),
 }

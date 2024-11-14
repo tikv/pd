@@ -206,7 +206,7 @@ func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
 		count := request.GetCount()
 		ts, err := s.tsoAllocatorManager.HandleTSORequest(request.GetDcLocation(), count)
 		if err != nil {
-			return status.Errorf(codes.Unknown, err.Error())
+			return status.Error(codes.Unknown, err.Error())
 		}
 		tsoHandleDuration.Observe(time.Since(start).Seconds())
 		response := &pdpb.TsoResponse{

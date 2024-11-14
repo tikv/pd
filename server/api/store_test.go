@@ -457,7 +457,7 @@ func (suite *storeTestSuite) TestGetAllLimit() {
 
 	re := suite.Require()
 	for _, testCase := range testCases {
-		suite.T().Logf(testCase.name)
+		suite.T().Log(testCase.name)
 		info := make(map[uint64]interface{}, 4)
 		err := tu.ReadGetJSON(re, testDialClient, testCase.url, &info)
 		suite.NoError(err)

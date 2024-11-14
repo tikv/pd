@@ -57,20 +57,20 @@ func newTestEtcd(t *testing.T, re *require.Assertions) (client *clientv3.Client)
 	cfg.Logger = "zap"
 	pu, err := url.Parse(tempurl.Alloc())
 	re.NoError(err)
-	cfg.LPUrls = []url.URL{*pu}
-	cfg.APUrls = cfg.LPUrls
+	cfg.ListenPeerUrls = []url.URL{*pu}
+	cfg.AdvertisePeerUrls = cfg.ListenPeerUrls
 	cu, err := url.Parse(tempurl.Alloc())
 	re.NoError(err)
-	cfg.LCUrls = []url.URL{*cu}
-	cfg.ACUrls = cfg.LCUrls
-	cfg.InitialCluster = fmt.Sprintf("%s=%s", cfg.Name, &cfg.LPUrls[0])
+	cfg.ListenClientUrls = []url.URL{*cu}
+	cfg.AdvertiseClientUrls = cfg.ListenClientUrls
+	cfg.InitialCluster = fmt.Sprintf("%s=%s", cfg.Name, &cfg.ListenPeerUrls[0])
 	cfg.ClusterState = embed.ClusterStateFlagNew
 	server, err := embed.StartEtcd(cfg)
 	re.NoError(err)
 	<-server.Server.ReadyNotify()
 
 	client, err = clientv3.New(clientv3.Config{
-		Endpoints: []string{cfg.LCUrls[0].String()},
+		Endpoints: []string{cfg.ListenClientUrls[0].String()},
 	})
 	re.NoError(err)
 

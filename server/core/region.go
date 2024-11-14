@@ -1573,18 +1573,6 @@ func DiffRegionKeyInfo(origin *RegionInfo, other *RegionInfo) string {
 	return strings.Join(ret, ", ")
 }
 
-// String converts slice of bytes to string without copy.
-func String(b []byte) (s string) {
-	if len(b) == 0 {
-		return ""
-	}
-	pbytes := (*reflect.SliceHeader)(unsafe.Pointer(&b))
-	pstring := (*reflect.StringHeader)(unsafe.Pointer(&s))
-	pstring.Data = pbytes.Data
-	pstring.Len = pbytes.Len
-	return
-}
-
 // ToUpperASCIIInplace bytes.ToUpper but zero-cost
 func ToUpperASCIIInplace(s []byte) []byte {
 	hasLower := false
@@ -1623,7 +1611,7 @@ func HexRegionKey(key []byte) []byte {
 // HexRegionKeyStr converts region key to hex format. Used for formating region in
 // logs.
 func HexRegionKeyStr(key []byte) string {
-	return String(HexRegionKey(key))
+	return string(HexRegionKey(key))
 }
 
 // RegionToHexMeta converts a region meta's keys to hex format. Used for formating

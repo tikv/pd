@@ -15,9 +15,10 @@
 package core
 
 import (
+	"crypto/rand"
 	"fmt"
 	"math"
-	"math/rand"
+	mrand "math/rand"
 	"strconv"
 	"testing"
 	"time"
@@ -755,7 +756,7 @@ func BenchmarkRandomSetRegionWithGetRegionSizeByRangeParallel(b *testing.B) {
 	b.RunParallel(
 		func(pb *testing.PB) {
 			for pb.Next() {
-				item := items[rand.Intn(len(items))]
+				item := items[mrand.Intn(len(items))]
 				n := item.Clone(SetApproximateSize(20))
 				origin, overlaps, rangeChanged := regions.SetRegionWithUpdate(n)
 				regions.UpdateSubTree(item, origin, overlaps, rangeChanged)

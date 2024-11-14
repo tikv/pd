@@ -32,3 +32,6 @@ linters-settings:
     excludes:
       - G402
       - G404
+      # TODO: enable G115 after fixing the issues
+      # It is consistent with https://github.com/tikv/pd/pull/8637
+      - G115
