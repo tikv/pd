@@ -51,7 +51,7 @@ const (
 )
 
 var _ ServiceDiscovery = (*tsoServiceDiscovery)(nil)
-var _ tsoAllocatorEventSource = (*tsoServiceDiscovery)(nil)
+var _ tsoEventSource = (*tsoServiceDiscovery)(nil)
 
 // keyspaceGroupSvcDiscovery is used for discovering the serving endpoints of the keyspace
 // group to which the keyspace belongs
@@ -136,11 +136,8 @@ type tsoServiceDiscovery struct {
 	// URL -> a gRPC connection
 	clientConns sync.Map // Store as map[string]*grpc.ClientConn
 
-	// localAllocPrimariesUpdatedCb will be called when the local tso allocator primary list is updated.
-	// The input is a map {DC Location -> Leader URL}
-	localAllocPrimariesUpdatedCb tsoLocalServURLsUpdatedFunc
-	// globalAllocPrimariesUpdatedCb will be called when the local tso allocator primary list is updated.
-	globalAllocPrimariesUpdatedCb tsoGlobalServURLUpdatedFunc
+	// tsoLeaderUpdatedCb will be called when the TSO leader is updated.
+	tsoLeaderUpdatedCb tsoLeaderURLUpdatedFunc
 
 	checkMembershipCh chan struct{}
 
@@ -360,22 +357,15 @@ func (*tsoServiceDiscovery) AddServingURLSwitchedCallback(...func()) {}
 // in a primary/secondary configured cluster is changed.
 func (*tsoServiceDiscovery) AddServiceURLsSwitchedCallback(...func()) {}
 
-// SetTSOLocalServURLsUpdatedCallback adds a callback which will be called when the local tso
-// allocator leader list is updated.
-func (c *tsoServiceDiscovery) SetTSOLocalServURLsUpdatedCallback(callback tsoLocalServURLsUpdatedFunc) {
-	c.localAllocPrimariesUpdatedCb = callback
-}
-
-// SetTSOGlobalServURLUpdatedCallback adds a callback which will be called when the global tso
-// allocator leader is updated.
-func (c *tsoServiceDiscovery) SetTSOGlobalServURLUpdatedCallback(callback tsoGlobalServURLUpdatedFunc) {
+// SetTSOLeaderURLUpdatedCallback adds a callback which will be called when the TSO leader is updated.
+func (c *tsoServiceDiscovery) SetTSOLeaderURLUpdatedCallback(callback tsoLeaderURLUpdatedFunc) {
 	url := c.getPrimaryURL()
 	if len(url) > 0 {
 		if err := callback(url); err != nil {
 			log.Error("[tso] failed to call back when tso global service url update", zap.String("url", url), errs.ZapError(err))
 		}
 	}
-	c.globalAllocPrimariesUpdatedCb = callback
+	c.tsoLeaderUpdatedCb = callback
 }
 
 // GetServiceClient implements ServiceDiscovery
@@ -404,8 +394,8 @@ func (c *tsoServiceDiscovery) getSecondaryURLs() []string {
 
 func (c *tsoServiceDiscovery) afterPrimarySwitched(oldPrimary, newPrimary string) error {
 	// Run callbacks
-	if c.globalAllocPrimariesUpdatedCb != nil {
-		if err := c.globalAllocPrimariesUpdatedCb(newPrimary); err != nil {
+	if c.tsoLeaderUpdatedCb != nil {
+		if err := c.tsoLeaderUpdatedCb(newPrimary); err != nil {
 			return err
 		}
 	}

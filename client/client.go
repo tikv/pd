@@ -34,7 +34,6 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/utils/tlsutil"
-	"github.com/tikv/pd/client/utils/tsoutil"
 	"go.uber.org/zap"
 )
 
@@ -714,18 +713,20 @@ func (c *client) getRegionAPIClientAndContext(ctx context.Context, allowFollower
 
 // GetTSAsync implements the TSOClient interface.
 func (c *client) GetTSAsync(ctx context.Context) TSFuture {
-	return c.GetLocalTSAsync(ctx, globalDCLocation)
+	defer trace.StartRegion(ctx, "pdclient.GetTSAsync").End()
+	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
+		span = span.Tracer().StartSpan("pdclient.GetTSAsync", opentracing.ChildOf(span.Context()))
+		defer span.Finish()
+	}
+	return c.dispatchTSORequestWithRetry(ctx)
 }
 
 // GetLocalTSAsync implements the TSOClient interface.
-func (c *client) GetLocalTSAsync(ctx context.Context, dcLocation string) TSFuture {
-	defer trace.StartRegion(ctx, "pdclient.GetLocalTSAsync").End()
-	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
-		span = span.Tracer().StartSpan("pdclient.GetLocalTSAsync", opentracing.ChildOf(span.Context()))
-		defer span.Finish()
-	}
-
-	return c.dispatchTSORequestWithRetry(ctx, dcLocation)
+//
+// Deprecated: Local TSO will be completely removed in the future. Currently, regardless of the
+// parameters passed in, this method will default to returning the global TSO.
+func (c *client) GetLocalTSAsync(ctx context.Context, _ string) TSFuture {
+	return c.GetTSAsync(ctx)
 }
 
 const (
@@ -733,7 +734,7 @@ const (
 	dispatchRetryCount = 2
 )
 
-func (c *client) dispatchTSORequestWithRetry(ctx context.Context, dcLocation string) TSFuture {
+func (c *client) dispatchTSORequestWithRetry(ctx context.Context) TSFuture {
 	var (
 		retryable bool
 		err       error
@@ -752,7 +753,7 @@ func (c *client) dispatchTSORequestWithRetry(ctx context.Context, dcLocation str
 		}
 		// Get a new request from the pool if it's nil or not from the current pool.
 		if req == nil || req.pool != tsoClient.tsoReqPool {
-			req = tsoClient.getTSORequest(ctx, dcLocation)
+			req = tsoClient.getTSORequest(ctx)
 		}
 		retryable, err = tsoClient.dispatchRequest(req)
 		if !retryable {
@@ -775,9 +776,11 @@ func (c *client) GetTS(ctx context.Context) (physical int64, logical int64, err 
 }
 
 // GetLocalTS implements the TSOClient interface.
-func (c *client) GetLocalTS(ctx context.Context, dcLocation string) (physical int64, logical int64, err error) {
-	resp := c.GetLocalTSAsync(ctx, dcLocation)
-	return resp.Wait()
+//
+// Deprecated: Local TSO will be completely removed in the future. Currently, regardless of the
+// parameters passed in, this method will default to returning the global TSO.
+func (c *client) GetLocalTS(ctx context.Context, _ string) (physical int64, logical int64, err error) {
+	return c.GetTS(ctx)
 }
 
 // GetMinTS implements the TSOClient interface.
@@ -823,7 +826,7 @@ func (c *client) GetMinTS(ctx context.Context) (physical int64, logical int64, e
 	}
 
 	minTS := resp.GetTimestamp()
-	return minTS.Physical, tsoutil.AddLogical(minTS.Logical, 0, minTS.SuffixBits), nil
+	return minTS.Physical, minTS.Logical, nil
 }
 
 func handleRegionResponse(res *pdpb.GetRegionResponse) *Region {
@@ -1599,14 +1602,4 @@ func (c *client) respForErr(observer prometheus.Observer, start time.Time, err e
 		return errors.WithStack(errors.New(header.GetError().String()))
 	}
 	return nil
-}
-
-// GetTSOAllocators returns {dc-location -> TSO allocator leader URL} connection map
-// For test only.
-func (c *client) GetTSOAllocators() *sync.Map {
-	tsoClient := c.getTSOClient()
-	if tsoClient == nil {
-		return nil
-	}
-	return tsoClient.GetTSOAllocators()
 }
