@@ -16,6 +16,7 @@ package realcluster
 
 import (
 	"fmt"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -45,11 +46,13 @@ func TestMSEtcdKey(t *testing.T) {
 }
 
 var (
+	// The keys that prefix is `/pd`.
 	pdKeys = []string{
 		"",
 		"/pd//alloc_id",
 		"/pd//config",
-		"/pd//gc/safe_point",
+		// If not call `UpdateGCSafePoint`, this key will not exist.
+		// "/pd//gc/safe_point",
 		"/pd//gc/safe_point/service/gc_worker",
 		"/pd//keyspaces/id/DEFAULT",
 		"/pd//keyspaces/meta/",
@@ -70,9 +73,10 @@ var (
 		"/pd//scheduler_config/balance-region-scheduler",
 		"/pd//scheduler_config/evict-slow-store-scheduler",
 		"/pd//timestamp",
-		"/pd//tso/keyspace_groups/membership/",
+		"/pd//tso/keyspace_groups/membership/", // ms
 		"/pd/cluster_id",
 	}
+	// The keys that prefix is `/ms`.
 	msKeys = []string{
 		"",
 		"/ms//scheduling/primary",
@@ -82,9 +86,23 @@ var (
 		"/ms//tso//primary/expected_primary",
 		"/ms//tso/registry/http://...:",
 	}
+	// These keys with `/pd` are only in `ms` mode.
+	pdMSKeys = []string{
+		"/pd//tso/keyspace_groups/membership/",
+	}
 )
 
 func (s *etcdKeySuite) TestEtcdKey() {
+	var keysBackup []string
+	if !s.ms {
+		keysBackup = pdKeys
+		pdKeys = slices.DeleteFunc(pdKeys, func(s string) bool {
+			return slices.Contains(pdMSKeys, s)
+		})
+		defer func() {
+			pdKeys = keysBackup
+		}()
+	}
 	t := s.T()
 	endpoints := getPDEndpoints(t)
 
