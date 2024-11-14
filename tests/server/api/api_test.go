@@ -938,6 +938,8 @@ func TestPreparingProgress(t *testing.T) {
 	defer cancel()
 	cluster, err := tests.NewTestCluster(ctx, 1, func(conf *config.Config, _ string) {
 		conf.Replication.MaxReplicas = 1
+		// prevent scheduling
+		conf.Schedule.RegionScheduleLimit = 0
 	})
 	re.NoError(err)
 	defer cluster.Destroy()
