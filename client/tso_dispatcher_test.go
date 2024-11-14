@@ -26,23 +26,24 @@ import (
 	"github.com/pingcap/log"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+	"github.com/tikv/pd/client/opt"
 	"go.uber.org/zap/zapcore"
 )
 
 type mockTSOServiceProvider struct {
-	option       *option
+	option       *opt.Option
 	createStream func(ctx context.Context) *tsoStream
 	updateConnMu sync.Mutex
 }
 
-func newMockTSOServiceProvider(option *option, createStream func(ctx context.Context) *tsoStream) *mockTSOServiceProvider {
+func newMockTSOServiceProvider(option *opt.Option, createStream func(ctx context.Context) *tsoStream) *mockTSOServiceProvider {
 	return &mockTSOServiceProvider{
 		option:       option,
 		createStream: createStream,
 	}
 }
 
-func (m *mockTSOServiceProvider) getOption() *option {
+func (m *mockTSOServiceProvider) getOption() *opt.Option {
 	return m.option
 }
 
@@ -79,15 +80,15 @@ type testTSODispatcherSuite struct {
 	stream       *tsoStream
 	dispatcher   *tsoDispatcher
 	dispatcherWg sync.WaitGroup
-	option       *option
+	option       *opt.Option
 
 	reqPool *sync.Pool
 }
 
 func (s *testTSODispatcherSuite) SetupTest() {
 	s.re = require.New(s.T())
-	s.option = newOption()
-	s.option.timeout = time.Hour
+	s.option = opt.NewOption()
+	s.option.Timeout = time.Hour
 	// As the internal logic of the tsoDispatcher allows it to create streams multiple times, but our tests needs
 	// single stable access to the inner stream, we do not allow it to create it more than once in these tests.
 	creating := new(atomic.Bool)
@@ -203,7 +204,7 @@ func (s *testTSODispatcherSuite) checkIdleTokenCount(expectedTotal int) {
 
 func (s *testTSODispatcherSuite) testStaticConcurrencyImpl(concurrency int) {
 	ctx := context.Background()
-	s.option.setTSOClientRPCConcurrency(concurrency)
+	s.option.SetTSOClientRPCConcurrency(concurrency)
 
 	// Make sure the state of the mock stream is clear. Unexpected batching may make the requests sent to the stream
 	// less than expected, causing there are more `generateNext` signals or generated results.
@@ -285,7 +286,7 @@ func (s *testTSODispatcherSuite) TestConcurrentRPC() {
 
 func (s *testTSODispatcherSuite) TestBatchDelaying() {
 	ctx := context.Background()
-	s.option.setTSOClientRPCConcurrency(2)
+	s.option.SetTSOClientRPCConcurrency(2)
 
 	s.re.NoError(failpoint.Enable("github.com/tikv/pd/client/tsoDispatcherConcurrentModeNoDelay", "return"))
 	s.re.NoError(failpoint.Enable("github.com/tikv/pd/client/tsoStreamSimulateEstimatedRPCLatency", `return("12ms")`))
@@ -309,13 +310,13 @@ func (s *testTSODispatcherSuite) TestBatchDelaying() {
 	s.reqMustReady(req)
 
 	// Try other concurrency.
-	s.option.setTSOClientRPCConcurrency(3)
+	s.option.SetTSOClientRPCConcurrency(3)
 	s.re.NoError(failpoint.Enable("github.com/tikv/pd/client/tsoDispatcherConcurrentModeAssertDelayDuration", `return("4ms")`))
 	req = s.sendReq(ctx)
 	s.streamInner.generateNext()
 	s.reqMustReady(req)
 
-	s.option.setTSOClientRPCConcurrency(4)
+	s.option.SetTSOClientRPCConcurrency(4)
 	s.re.NoError(failpoint.Enable("github.com/tikv/pd/client/tsoDispatcherConcurrentModeAssertDelayDuration", `return("3ms")`))
 	req = s.sendReq(ctx)
 	s.streamInner.generateNext()
@@ -347,7 +348,7 @@ func BenchmarkTSODispatcherHandleRequests(b *testing.B) {
 		return req
 	}
 
-	dispatcher := newTSODispatcher(ctx, defaultMaxTSOBatchSize, newMockTSOServiceProvider(newOption(), nil))
+	dispatcher := newTSODispatcher(ctx, defaultMaxTSOBatchSize, newMockTSOServiceProvider(opt.NewOption(), nil))
 	var wg sync.WaitGroup
 	wg.Add(1)
 

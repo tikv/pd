@@ -53,7 +53,7 @@ func (c *client) LoadKeyspace(ctx context.Context, name string) (*keyspacepb.Key
 	}
 	start := time.Now()
 	defer func() { metrics.CmdDurationLoadKeyspace.Observe(time.Since(start).Seconds()) }()
-	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
+	ctx, cancel := context.WithTimeout(ctx, c.option.Timeout)
 	req := &keyspacepb.LoadKeyspaceRequest{
 		Header: c.requestHeader(),
 		Name:   name,
@@ -97,7 +97,7 @@ func (c *client) UpdateKeyspaceState(ctx context.Context, id uint32, state keysp
 	}
 	start := time.Now()
 	defer func() { metrics.CmdDurationUpdateKeyspaceState.Observe(time.Since(start).Seconds()) }()
-	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
+	ctx, cancel := context.WithTimeout(ctx, c.option.Timeout)
 	req := &keyspacepb.UpdateKeyspaceStateRequest{
 		Header: c.requestHeader(),
 		Id:     id,
@@ -141,7 +141,7 @@ func (c *client) GetAllKeyspaces(ctx context.Context, startID uint32, limit uint
 	}
 	start := time.Now()
 	defer func() { metrics.CmdDurationGetAllKeyspaces.Observe(time.Since(start).Seconds()) }()
-	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
+	ctx, cancel := context.WithTimeout(ctx, c.option.Timeout)
 	req := &keyspacepb.GetAllKeyspacesRequest{
 		Header:  c.requestHeader(),
 		StartId: startID,

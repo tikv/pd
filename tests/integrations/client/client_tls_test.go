@@ -28,6 +28,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	pd "github.com/tikv/pd/client"
+	"github.com/tikv/pd/client/opt"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/netutil"
 	"github.com/tikv/pd/server/config"
@@ -165,7 +166,7 @@ func testTLSReload(
 				CAPath:   testClientTLSInfo.TrustedCAFile,
 				CertPath: testClientTLSInfo.CertFile,
 				KeyPath:  testClientTLSInfo.KeyFile,
-			}, pd.WithGRPCDialOptions(grpc.WithBlock()))
+			}, opt.WithGRPCDialOptions(grpc.WithBlock()))
 			if err != nil {
 				errc <- err
 				dcancel()
@@ -196,7 +197,7 @@ func testTLSReload(
 		CAPath:   testClientTLSInfo.TrustedCAFile,
 		CertPath: testClientTLSInfo.CertFile,
 		KeyPath:  testClientTLSInfo.KeyFile,
-	}, pd.WithGRPCDialOptions(grpc.WithBlock()))
+	}, opt.WithGRPCDialOptions(grpc.WithBlock()))
 	re.NoError(err)
 	dcancel()
 	cli.Close()
@@ -209,7 +210,7 @@ func testTLSReload(
 		SSLCABytes:   caData,
 		SSLCertBytes: certData,
 		SSLKEYBytes:  keyData,
-	}, pd.WithGRPCDialOptions(grpc.WithBlock()))
+	}, opt.WithGRPCDialOptions(grpc.WithBlock()))
 	re.NoError(err)
 	defer cli.Close()
 	cancel1()
@@ -321,7 +322,7 @@ func testAllowedCN(ctx context.Context, endpoints []string, tls transport.TLSInf
 		CAPath:   tls.TrustedCAFile,
 		CertPath: tls.CertFile,
 		KeyPath:  tls.KeyFile,
-	}, pd.WithGRPCDialOptions(grpc.WithBlock()))
+	}, opt.WithGRPCDialOptions(grpc.WithBlock()))
 	if err != nil {
 		return err
 	}

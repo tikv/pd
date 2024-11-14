@@ -29,6 +29,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	pd "github.com/tikv/pd/client"
+	"github.com/tikv/pd/client/opt"
 	"github.com/tikv/pd/client/utils/testutil"
 	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
@@ -145,7 +146,7 @@ func (suite *tsoClientTestSuite) SetupSuite() {
 func (suite *tsoClientTestSuite) SetupTest() {
 	re := suite.Require()
 	if suite.legacy {
-		client, err := pd.NewClientWithContext(suite.ctx, suite.getBackendEndpoints(), pd.SecurityOption{}, pd.WithForwardingOption(true))
+		client, err := pd.NewClientWithContext(suite.ctx, suite.getBackendEndpoints(), pd.SecurityOption{}, opt.WithForwardingOption(true))
 		re.NoError(err)
 		innerClient, ok := client.(interface{ GetServiceDiscovery() pd.ServiceDiscovery })
 		re.True(ok)
@@ -489,10 +490,10 @@ func TestTSOFollowerProxyWhenLeaderChanged(t *testing.T) {
 	pdLeader := pdCluster.GetServer(leaderName)
 	backendEndpoints := pdLeader.GetAddr()
 	pdClient, err := pd.NewClientWithContext(context.Background(),
-		[]string{backendEndpoints}, pd.SecurityOption{}, pd.WithMaxErrorRetry(1))
+		[]string{backendEndpoints}, pd.SecurityOption{}, opt.WithMaxErrorRetry(1))
 	re.NoError(err)
 	defer pdClient.Close()
-	re.NoError(pdClient.UpdateOption(pd.EnableTSOFollowerProxy, true))
+	re.NoError(pdClient.UpdateOption(opt.EnableTSOFollowerProxy, true))
 	// client can get ts response after pd leader changed
 	re.NoError(pdLeader.ResignLeader())
 	reqCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
@@ -528,7 +529,7 @@ func TestTSONotLeader(t *testing.T) {
 	pdLeader := pdCluster.GetServer(leaderName)
 	backendEndpoints := pdLeader.GetAddr()
 	pdClient, err := pd.NewClientWithContext(context.Background(),
-		[]string{backendEndpoints}, pd.SecurityOption{}, pd.WithMaxErrorRetry(1))
+		[]string{backendEndpoints}, pd.SecurityOption{}, opt.WithMaxErrorRetry(1))
 	re.NoError(err)
 	defer pdClient.Close()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/rebaseErr", "return(true)"))
@@ -617,7 +618,7 @@ func TestUpgradingAPIandTSOClusters(t *testing.T) {
 	// Create a pd client in PD mode to let the API leader to forward requests to the TSO cluster.
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/usePDServiceMode", "return(true)"))
 	pdClient, err := pd.NewClientWithContext(context.Background(),
-		[]string{backendEndpoints}, pd.SecurityOption{}, pd.WithMaxErrorRetry(1))
+		[]string{backendEndpoints}, pd.SecurityOption{}, opt.WithMaxErrorRetry(1))
 	re.NoError(err)
 	defer pdClient.Close()
 
