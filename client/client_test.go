@@ -22,8 +22,14 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/require"
+<<<<<<< HEAD
 	"github.com/tikv/pd/client/testutil"
 	"github.com/tikv/pd/client/tsoutil"
+=======
+	"github.com/tikv/pd/client/opt"
+	"github.com/tikv/pd/client/utils/testutil"
+	"github.com/tikv/pd/client/utils/tsoutil"
+>>>>>>> 71745a16db (*: independent the client option (#8813))
 	"go.uber.org/goleak"
 	"google.golang.org/grpc"
 )
@@ -55,7 +61,7 @@ func TestUpdateURLs(t *testing.T) {
 		}
 		return
 	}
-	cli := &pdServiceDiscovery{option: newOption()}
+	cli := &pdServiceDiscovery{option: opt.NewOption()}
 	cli.urls.Store([]string{})
 	cli.updateURLs(members[1:])
 	re.Equal(getURLs([]*pdpb.Member{members[1], members[3], members[2]}), cli.GetServiceURLs())
@@ -86,7 +92,7 @@ func TestClientCtx(t *testing.T) {
 func TestClientWithRetry(t *testing.T) {
 	re := require.New(t)
 	start := time.Now()
-	_, err := NewClientWithContext(context.TODO(), []string{testClientURL}, SecurityOption{}, WithMaxErrorRetry(5))
+	_, err := NewClientWithContext(context.TODO(), []string{testClientURL}, SecurityOption{}, opt.WithMaxErrorRetry(5))
 	re.Error(err)
 	re.Less(time.Since(start), time.Second*10)
 }
@@ -101,10 +107,10 @@ func TestGRPCDialOption(t *testing.T) {
 		ctx:               ctx,
 		cancel:            cancel,
 		tlsCfg:            nil,
-		option:            newOption(),
+		option:            opt.NewOption(),
 	}
 	cli.urls.Store([]string{testClientURL})
-	cli.option.gRPCDialOptions = []grpc.DialOption{grpc.WithBlock()}
+	cli.option.GRPCDialOptions = []grpc.DialOption{grpc.WithBlock()}
 	err := cli.updateMember()
 	re.Error(err)
 	re.Greater(time.Since(start), 500*time.Millisecond)

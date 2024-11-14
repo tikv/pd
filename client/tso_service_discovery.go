@@ -30,7 +30,12 @@ import (
 	"github.com/pingcap/kvproto/pkg/tsopb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/client/errs"
+<<<<<<< HEAD
 	"github.com/tikv/pd/client/grpcutil"
+=======
+	"github.com/tikv/pd/client/opt"
+	"github.com/tikv/pd/client/utils/grpcutil"
+>>>>>>> 71745a16db (*: independent the client option (#8813))
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 )
@@ -137,13 +142,13 @@ type tsoServiceDiscovery struct {
 	tlsCfg *tls.Config
 
 	// Client option.
-	option *option
+	option *opt.Option
 }
 
 // newTSOServiceDiscovery returns a new client-side service discovery for the independent TSO service.
 func newTSOServiceDiscovery(
 	ctx context.Context, metacli MetaStorageClient, apiSvcDiscovery ServiceDiscovery,
-	keyspaceID uint32, tlsCfg *tls.Config, option *option,
+	keyspaceID uint32, tlsCfg *tls.Config, option *opt.Option,
 ) ServiceDiscovery {
 	ctx, cancel := context.WithCancel(ctx)
 	c := &tsoServiceDiscovery{
@@ -178,9 +183,9 @@ func newTSOServiceDiscovery(
 // Init initialize the concrete client underlying
 func (c *tsoServiceDiscovery) Init() error {
 	log.Info("initializing tso service discovery",
-		zap.Int("max-retry-times", c.option.maxRetryTimes),
+		zap.Int("max-retry-times", c.option.MaxRetryTimes),
 		zap.Duration("retry-interval", initRetryInterval))
-	if err := c.retry(c.option.maxRetryTimes, initRetryInterval, c.updateMember); err != nil {
+	if err := c.retry(c.option.MaxRetryTimes, initRetryInterval, c.updateMember); err != nil {
 		log.Error("failed to update member. initialization failed.", zap.Error(err))
 		c.cancel()
 		return err
@@ -313,7 +318,7 @@ func (c *tsoServiceDiscovery) GetBackupURLs() []string {
 
 // GetOrCreateGRPCConn returns the corresponding grpc client connection of the given URL.
 func (c *tsoServiceDiscovery) GetOrCreateGRPCConn(url string) (*grpc.ClientConn, error) {
-	return grpcutil.GetOrCreateGRPCConn(c.ctx, &c.clientConns, url, c.tlsCfg, c.option.gRPCDialOptions...)
+	return grpcutil.GetOrCreateGRPCConn(c.ctx, &c.clientConns, url, c.tlsCfg, c.option.GRPCDialOptions...)
 }
 
 // ScheduleCheckMemberChanged is used to trigger a check to see if there is any change in service endpoints.

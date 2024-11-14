@@ -23,6 +23,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	pd "github.com/tikv/pd/client"
+	"github.com/tikv/pd/client/opt"
 )
 
 type clusterIDSuite struct {
@@ -48,7 +49,7 @@ func (s *clusterIDSuite) TestClientClusterID() {
 	// Try to create a client with the mixed endpoints.
 	_, err := pd.NewClientWithContext(
 		ctx, pdEndpoints,
-		pd.SecurityOption{}, pd.WithMaxErrorRetry(1),
+		pd.SecurityOption{}, opt.WithMaxErrorRetry(1),
 	)
 	re.Error(err)
 	re.Contains(err.Error(), "unmatched cluster id")

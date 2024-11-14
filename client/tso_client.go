@@ -26,8 +26,13 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/client/errs"
+<<<<<<< HEAD
 	"github.com/tikv/pd/client/grpcutil"
 	"github.com/tikv/pd/client/metrics"
+=======
+	"github.com/tikv/pd/client/opt"
+	"github.com/tikv/pd/client/utils/grpcutil"
+>>>>>>> 71745a16db (*: independent the client option (#8813))
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -63,7 +68,7 @@ type tsoClient struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
-	option *option
+	option *opt.Option
 
 	svcDiscovery ServiceDiscovery
 	tsoStreamBuilderFactory
@@ -84,7 +89,7 @@ type tsoClient struct {
 
 // newTSOClient returns a new TSO client.
 func newTSOClient(
-	ctx context.Context, option *option,
+	ctx context.Context, option *opt.Option,
 	svcDiscovery ServiceDiscovery, factory tsoStreamBuilderFactory,
 ) *tsoClient {
 	ctx, cancel := context.WithCancel(ctx)
@@ -114,7 +119,7 @@ func newTSOClient(
 	return c
 }
 
-func (c *tsoClient) getOption() *option { return c.option }
+func (c *tsoClient) getOption() *opt.Option { return c.option }
 
 func (c *tsoClient) getServiceDiscovery() ServiceDiscovery { return c.svcDiscovery }
 
@@ -335,7 +340,7 @@ func (c *tsoClient) backupClientConn() (*grpc.ClientConn, string) {
 		if cc, err = c.svcDiscovery.GetOrCreateGRPCConn(url); err != nil {
 			continue
 		}
-		healthCtx, healthCancel := context.WithTimeout(c.ctx, c.option.timeout)
+		healthCtx, healthCancel := context.WithTimeout(c.ctx, c.option.Timeout)
 		resp, err := healthpb.NewHealthClient(cc).Check(healthCtx, &healthpb.HealthCheckRequest{Service: ""})
 		healthCancel()
 		if err == nil && resp.GetStatus() == healthpb.HealthCheckResponse_SERVING {
@@ -360,7 +365,11 @@ type tsoConnectionContext struct {
 func (c *tsoClient) updateConnectionCtxs(ctx context.Context, dc string, connectionCtxs *sync.Map) bool {
 	// Normal connection creating, it will be affected by the `enableForwarding`.
 	createTSOConnection := c.tryConnectToTSO
+<<<<<<< HEAD
 	if c.allowTSOFollowerProxy(dc) {
+=======
+	if c.option.GetEnableTSOFollowerProxy() {
+>>>>>>> 71745a16db (*: independent the client option (#8813))
 		createTSOConnection = c.tryConnectToTSOWithProxy
 	}
 	if err := createTSOConnection(ctx, dc, connectionCtxs); err != nil {
@@ -414,7 +423,7 @@ func (c *tsoClient) tryConnectToTSO(
 		}
 		if cc != nil {
 			cctx, cancel := context.WithCancel(ctx)
-			stream, err = c.tsoStreamBuilderFactory.makeBuilder(cc).build(cctx, cancel, c.option.timeout)
+			stream, err = c.tsoStreamBuilderFactory.makeBuilder(cc).build(cctx, cancel, c.option.Timeout)
 			failpoint.Inject("unreachableNetwork", func() {
 				stream = nil
 				err = status.New(codes.Unavailable, "unavailable").Err()
@@ -424,7 +433,7 @@ func (c *tsoClient) tryConnectToTSO(
 				return nil
 			}
 
-			if err != nil && c.option.enableForwarding {
+			if err != nil && c.option.EnableForwarding {
 				// The reason we need to judge if the error code is equal to "Canceled" here is that
 				// when we create a stream we use a goroutine to manually control the timeout of the connection.
 				// There is no need to wait for the transport layer timeout which can reduce the time of unavailability.
@@ -458,7 +467,7 @@ func (c *tsoClient) tryConnectToTSO(
 			// create the follower stream
 			cctx, cancel := context.WithCancel(ctx)
 			cctx = grpcutil.BuildForwardContext(cctx, forwardedHost)
-			stream, err = c.tsoStreamBuilderFactory.makeBuilder(backupClientConn).build(cctx, cancel, c.option.timeout)
+			stream, err = c.tsoStreamBuilderFactory.makeBuilder(backupClientConn).build(cctx, cancel, c.option.Timeout)
 			if err == nil {
 				forwardedHostTrim := trimHTTPPrefix(forwardedHost)
 				addr := trimHTTPPrefix(backupURL)
@@ -499,7 +508,7 @@ func (c *tsoClient) checkAllocator(
 			healthCli = healthpb.NewHealthClient(cc)
 		}
 		if healthCli != nil {
-			healthCtx, healthCancel := context.WithTimeout(ctx, c.option.timeout)
+			healthCtx, healthCancel := context.WithTimeout(ctx, c.option.Timeout)
 			resp, err := healthCli.Check(healthCtx, &healthpb.HealthCheckRequest{Service: ""})
 			failpoint.Inject("unreachableNetwork", func() {
 				resp.Status = healthpb.HealthCheckResponse_UNKNOWN
@@ -508,7 +517,7 @@ func (c *tsoClient) checkAllocator(
 			if err == nil && resp.GetStatus() == healthpb.HealthCheckResponse_SERVING {
 				// create a stream of the original allocator
 				cctx, cancel := context.WithCancel(ctx)
-				stream, err := c.tsoStreamBuilderFactory.makeBuilder(cc).build(cctx, cancel, c.option.timeout)
+				stream, err := c.tsoStreamBuilderFactory.makeBuilder(cc).build(cctx, cancel, c.option.Timeout)
 				if err == nil && stream != nil {
 					log.Info("[tso] recover the original tso stream since the network has become normal", zap.String("dc", dc), zap.String("url", url))
 					updateAndClear(url, &tsoConnectionContext{cctx, cancel, url, stream})
@@ -567,7 +576,7 @@ func (c *tsoClient) tryConnectToTSOWithProxy(
 			cctx = grpcutil.BuildForwardContext(cctx, forwardedHost)
 		}
 		// Create the TSO stream.
-		stream, err := tsoStreamBuilder.build(cctx, cancel, c.option.timeout)
+		stream, err := tsoStreamBuilder.build(cctx, cancel, c.option.Timeout)
 		if err == nil {
 			if addr != leaderAddr {
 				forwardedHostTrim := trimHTTPPrefix(forwardedHost)
@@ -600,7 +609,7 @@ func (c *tsoClient) getAllTSOStreamBuilders() map[string]tsoStreamBuilder {
 		if cc, err = c.svcDiscovery.GetOrCreateGRPCConn(addr); err != nil {
 			continue
 		}
-		healthCtx, healthCancel := context.WithTimeout(c.ctx, c.option.timeout)
+		healthCtx, healthCancel := context.WithTimeout(c.ctx, c.option.Timeout)
 		resp, err := healthpb.NewHealthClient(cc).Check(healthCtx, &healthpb.HealthCheckRequest{Service: ""})
 		healthCancel()
 		if err == nil && resp.GetStatus() == healthpb.HealthCheckResponse_SERVING {

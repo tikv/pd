@@ -41,8 +41,12 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	pd "github.com/tikv/pd/client"
+<<<<<<< HEAD
 	cb "github.com/tikv/pd/client/circuitbreaker"
 	clierrs "github.com/tikv/pd/client/errs"
+=======
+	"github.com/tikv/pd/client/opt"
+>>>>>>> 71745a16db (*: independent the client option (#8813))
 	"github.com/tikv/pd/client/retry"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
@@ -231,7 +235,7 @@ func TestGetTSAfterTransferLeader(t *testing.T) {
 	re.NotEmpty(leader)
 	defer cluster.Destroy()
 
-	cli := setupCli(ctx, re, endpoints, pd.WithCustomTimeoutOption(10*time.Second))
+	cli := setupCli(ctx, re, endpoints, opt.WithCustomTimeoutOption(10*time.Second))
 	defer cli.Close()
 
 	var leaderSwitched atomic.Bool
@@ -331,7 +335,7 @@ func TestTSOFollowerProxy(t *testing.T) {
 	defer cli1.Close()
 	cli2 := setupCli(ctx, re, endpoints)
 	defer cli2.Close()
-	err = cli2.UpdateOption(pd.EnableTSOFollowerProxy, true)
+	err = cli2.UpdateOption(opt.EnableTSOFollowerProxy, true)
 	re.NoError(err)
 
 	var wg sync.WaitGroup
@@ -358,7 +362,7 @@ func TestTSOFollowerProxy(t *testing.T) {
 	wg.Wait()
 
 	// Disable the follower proxy and check if the stream is updated.
-	err = cli2.UpdateOption(pd.EnableTSOFollowerProxy, false)
+	err = cli2.UpdateOption(opt.EnableTSOFollowerProxy, false)
 	re.NoError(err)
 
 	wg.Add(tsoRequestConcurrencyNumber)
@@ -411,7 +415,7 @@ func TestTSOFollowerProxyWithTSOService(t *testing.T) {
 	re.NotNil(cli)
 	defer cli.Close()
 	// TSO service does not support the follower proxy, so enabling it should fail.
-	err = cli.UpdateOption(pd.EnableTSOFollowerProxy, true)
+	err = cli.UpdateOption(opt.EnableTSOFollowerProxy, true)
 	re.Error(err)
 }
 
@@ -626,7 +630,7 @@ func TestCustomTimeout(t *testing.T) {
 	defer cluster.Destroy()
 
 	endpoints := runServer(re, cluster)
-	cli := setupCli(ctx, re, endpoints, pd.WithCustomTimeoutOption(time.Second))
+	cli := setupCli(ctx, re, endpoints, opt.WithCustomTimeoutOption(time.Second))
 	defer cli.Close()
 
 	start := time.Now()
@@ -699,7 +703,7 @@ func (suite *followerForwardAndHandleTestSuite) TestGetRegionByFollowerForwardin
 	ctx, cancel := context.WithCancel(suite.ctx)
 	defer cancel()
 
-	cli := setupCli(ctx, re, suite.endpoints, pd.WithForwardingOption(true))
+	cli := setupCli(ctx, re, suite.endpoints, opt.WithForwardingOption(true))
 	defer cli.Close()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/unreachableNetwork1", "return(true)"))
 	time.Sleep(200 * time.Millisecond)
@@ -719,7 +723,7 @@ func (suite *followerForwardAndHandleTestSuite) TestGetTsoByFollowerForwarding1(
 	re := suite.Require()
 	ctx, cancel := context.WithCancel(suite.ctx)
 	defer cancel()
-	cli := setupCli(ctx, re, suite.endpoints, pd.WithForwardingOption(true))
+	cli := setupCli(ctx, re, suite.endpoints, opt.WithForwardingOption(true))
 	defer cli.Close()
 
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/unreachableNetwork", "return(true)"))
@@ -754,7 +758,7 @@ func (suite *followerForwardAndHandleTestSuite) TestGetTsoByFollowerForwarding2(
 	re := suite.Require()
 	ctx, cancel := context.WithCancel(suite.ctx)
 	defer cancel()
-	cli := setupCli(ctx, re, suite.endpoints, pd.WithForwardingOption(true))
+	cli := setupCli(ctx, re, suite.endpoints, opt.WithForwardingOption(true))
 	defer cli.Close()
 
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/unreachableNetwork", "return(true)"))
@@ -791,7 +795,7 @@ func (suite *followerForwardAndHandleTestSuite) TestGetTsoAndRegionByFollowerFor
 	follower := cluster.GetServer(cluster.GetFollower())
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/grpcutil/unreachableNetwork2", fmt.Sprintf("return(\"%s\")", follower.GetAddr())))
 
-	cli := setupCli(ctx, re, suite.endpoints, pd.WithForwardingOption(true))
+	cli := setupCli(ctx, re, suite.endpoints, opt.WithForwardingOption(true))
 	defer cli.Close()
 	var lastTS uint64
 	testutil.Eventually(re, func() bool {
@@ -895,7 +899,7 @@ func (suite *followerForwardAndHandleTestSuite) TestGetRegionFromFollower() {
 	cluster := suite.cluster
 	cli := setupCli(ctx, re, suite.endpoints)
 	defer cli.Close()
-	cli.UpdateOption(pd.EnableFollowerHandle, true)
+	cli.UpdateOption(opt.EnableFollowerHandle, true)
 	re.NotEmpty(cluster.WaitLeader())
 	leader := cluster.GetLeaderServer()
 	testutil.Eventually(re, func() bool {
@@ -913,7 +917,7 @@ func (suite *followerForwardAndHandleTestSuite) TestGetRegionFromFollower() {
 	// follower have no region
 	cnt := 0
 	for range 100 {
-		resp, err := cli.GetRegion(ctx, []byte("a"), pd.WithAllowFollowerHandle())
+		resp, err := cli.GetRegion(ctx, []byte("a"), opt.WithAllowFollowerHandle())
 		if err == nil && resp != nil {
 			cnt++
 		}
@@ -927,7 +931,7 @@ func (suite *followerForwardAndHandleTestSuite) TestGetRegionFromFollower() {
 	time.Sleep(150 * time.Millisecond)
 	cnt = 0
 	for range 100 {
-		resp, err := cli.GetRegion(ctx, []byte("a"), pd.WithAllowFollowerHandle())
+		resp, err := cli.GetRegion(ctx, []byte("a"), opt.WithAllowFollowerHandle())
 		if err == nil && resp != nil {
 			cnt++
 		}
@@ -942,7 +946,7 @@ func (suite *followerForwardAndHandleTestSuite) TestGetRegionFromFollower() {
 	time.Sleep(100 * time.Millisecond)
 	cnt = 0
 	for range 100 {
-		resp, err := cli.GetRegion(ctx, []byte("a"), pd.WithAllowFollowerHandle())
+		resp, err := cli.GetRegion(ctx, []byte("a"), opt.WithAllowFollowerHandle())
 		if err == nil && resp != nil {
 			cnt++
 		}
@@ -955,7 +959,7 @@ func (suite *followerForwardAndHandleTestSuite) TestGetRegionFromFollower() {
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/followerHandleError", "return(true)"))
 	cnt = 0
 	for range 100 {
-		resp, err := cli.GetRegion(ctx, []byte("a"), pd.WithAllowFollowerHandle())
+		resp, err := cli.GetRegion(ctx, []byte("a"), opt.WithAllowFollowerHandle())
 		if err == nil && resp != nil {
 			cnt++
 		}
@@ -970,7 +974,7 @@ func (suite *followerForwardAndHandleTestSuite) TestGetRegionFromFollower() {
 	time.Sleep(100 * time.Millisecond)
 	cnt = 0
 	for range 100 {
-		resp, err := cli.GetRegion(ctx, []byte("a"), pd.WithAllowFollowerHandle())
+		resp, err := cli.GetRegion(ctx, []byte("a"), opt.WithAllowFollowerHandle())
 		if err == nil && resp != nil {
 			cnt++
 		}
@@ -1054,7 +1058,7 @@ func runServer(re *require.Assertions, cluster *tests.TestCluster) []string {
 	return endpoints
 }
 
-func setupCli(ctx context.Context, re *require.Assertions, endpoints []string, opts ...pd.ClientOption) pd.Client {
+func setupCli(ctx context.Context, re *require.Assertions, endpoints []string, opts ...opt.ClientOption) pd.Client {
 	cli, err := pd.NewClientWithContext(ctx, endpoints, pd.SecurityOption{}, opts...)
 	re.NoError(err)
 	return cli
@@ -1322,7 +1326,7 @@ func (suite *clientTestSuite) TestGetRegion() {
 	}
 	re.NoError(suite.reportBucket.Send(breq))
 	testutil.Eventually(re, func() bool {
-		r, err := suite.client.GetRegion(context.Background(), []byte("a"), pd.WithBuckets())
+		r, err := suite.client.GetRegion(context.Background(), []byte("a"), opt.WithBuckets())
 		re.NoError(err)
 		if r == nil {
 			return false
@@ -1332,7 +1336,7 @@ func (suite *clientTestSuite) TestGetRegion() {
 	suite.srv.GetRaftCluster().GetOpts().(*config.PersistOptions).SetRegionBucketEnabled(false)
 
 	testutil.Eventually(re, func() bool {
-		r, err := suite.client.GetRegion(context.Background(), []byte("a"), pd.WithBuckets())
+		r, err := suite.client.GetRegion(context.Background(), []byte("a"), opt.WithBuckets())
 		re.NoError(err)
 		if r == nil {
 			return false
@@ -1572,7 +1576,7 @@ func (suite *clientTestSuite) TestGetStore() {
 	re.True(contains)
 
 	// Should not return tombstone stores.
-	stores, err = suite.client.GetAllStores(context.Background(), pd.WithExcludeTombstone())
+	stores, err = suite.client.GetAllStores(context.Background(), opt.WithExcludeTombstone())
 	re.NoError(err)
 	for _, store := range stores {
 		if store.GetId() == physicallyDestroyedStoreID {
@@ -1786,7 +1790,7 @@ func (suite *clientTestSuite) TestScatterRegion() {
 	regionsID := []uint64{regionID}
 	// Test interface `ScatterRegions`.
 	testutil.Eventually(re, func() bool {
-		scatterResp, err := suite.client.ScatterRegions(context.Background(), regionsID, pd.WithGroup("test"), pd.WithRetry(1))
+		scatterResp, err := suite.client.ScatterRegions(context.Background(), regionsID, opt.WithGroup("test"), opt.WithRetry(1))
 		if err != nil {
 			return false
 		}
@@ -2073,12 +2077,12 @@ func (suite *clientTestSuite) TestBatchScanRegions() {
 	check := func(ranges []pd.KeyRange, limit int, expect []*metapb.Region) {
 		for _, bucket := range []bool{false, true} {
 			for _, outputMustContainAllKeyRange := range outputMustContainAllKeyRangeOptions {
-				var opts []pd.GetRegionOption
+				var opts []opt.GetRegionOption
 				if bucket {
-					opts = append(opts, pd.WithBuckets())
+					opts = append(opts, opt.WithBuckets())
 				}
 				if outputMustContainAllKeyRange {
-					opts = append(opts, pd.WithOutputMustContainAllKeyRange())
+					opts = append(opts, opt.WithOutputMustContainAllKeyRange())
 				}
 				scanRegions, err := suite.client.BatchScanRegions(ctx, ranges, limit, opts...)
 				re.NoError(err)
@@ -2152,7 +2156,7 @@ func (suite *clientTestSuite) TestBatchScanRegions() {
 		ctx,
 		[]pd.KeyRange{{StartKey: []byte{1}, EndKey: []byte{0}}},
 		10,
-		pd.WithOutputMustContainAllKeyRange(),
+		opt.WithOutputMustContainAllKeyRange(),
 	)
 	re.ErrorContains(err, "invalid key range, start key > end key")
 	_, err = suite.client.BatchScanRegions(ctx, []pd.KeyRange{
@@ -2164,7 +2168,7 @@ func (suite *clientTestSuite) TestBatchScanRegions() {
 		ctx,
 		[]pd.KeyRange{{StartKey: []byte{9}, EndKey: []byte{10, 1}}},
 		10,
-		pd.WithOutputMustContainAllKeyRange(),
+		opt.WithOutputMustContainAllKeyRange(),
 	)
 	re.ErrorContains(err, "found a hole region in the last")
 	req := &pdpb.RegionHeartbeatRequest{
@@ -2189,7 +2193,7 @@ func (suite *clientTestSuite) TestBatchScanRegions() {
 			ctx,
 			[]pd.KeyRange{{StartKey: []byte{9}, EndKey: []byte{101}}},
 			10,
-			pd.WithOutputMustContainAllKeyRange(),
+			opt.WithOutputMustContainAllKeyRange(),
 		)
 		return err != nil && strings.Contains(err.Error(), "found a hole region between")
 	})

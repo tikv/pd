@@ -52,8 +52,13 @@ func (c *client) LoadKeyspace(ctx context.Context, name string) (*keyspacepb.Key
 		defer span.Finish()
 	}
 	start := time.Now()
+<<<<<<< HEAD
 	defer func() { metrics.CmdDurationLoadKeyspace.Observe(time.Since(start).Seconds()) }()
 	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
+=======
+	defer func() { cmdDurationLoadKeyspace.Observe(time.Since(start).Seconds()) }()
+	ctx, cancel := context.WithTimeout(ctx, c.option.Timeout)
+>>>>>>> 71745a16db (*: independent the client option (#8813))
 	req := &keyspacepb.LoadKeyspaceRequest{
 		Header: c.requestHeader(),
 		Name:   name,
@@ -96,8 +101,13 @@ func (c *client) UpdateKeyspaceState(ctx context.Context, id uint32, state keysp
 		defer span.Finish()
 	}
 	start := time.Now()
+<<<<<<< HEAD
 	defer func() { metrics.CmdDurationUpdateKeyspaceState.Observe(time.Since(start).Seconds()) }()
 	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
+=======
+	defer func() { cmdDurationUpdateKeyspaceState.Observe(time.Since(start).Seconds()) }()
+	ctx, cancel := context.WithTimeout(ctx, c.option.Timeout)
+>>>>>>> 71745a16db (*: independent the client option (#8813))
 	req := &keyspacepb.UpdateKeyspaceStateRequest{
 		Header: c.requestHeader(),
 		Id:     id,
@@ -140,8 +150,13 @@ func (c *client) GetAllKeyspaces(ctx context.Context, startID uint32, limit uint
 		defer span.Finish()
 	}
 	start := time.Now()
+<<<<<<< HEAD
 	defer func() { metrics.CmdDurationGetAllKeyspaces.Observe(time.Since(start).Seconds()) }()
 	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
+=======
+	defer func() { cmdDurationGetAllKeyspaces.Observe(time.Since(start).Seconds()) }()
+	ctx, cancel := context.WithTimeout(ctx, c.option.Timeout)
+>>>>>>> 71745a16db (*: independent the client option (#8813))
 	req := &keyspacepb.GetAllKeyspacesRequest{
 		Header:  c.requestHeader(),
 		StartId: startID,
