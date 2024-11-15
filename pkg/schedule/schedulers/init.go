@@ -158,12 +158,15 @@ func schedulersRegister() {
 	})
 
 	RegisterScheduler(types.BalanceKeyrangeScheduler, func(opController *operator.Controller,
-		storage endpoint.ConfigStorage, decoder ConfigDecoder, _ ...func(string) error) (Scheduler, error) {
+		storage endpoint.ConfigStorage, decoder ConfigDecoder, removeSchedulerCb ...func(string) error) (Scheduler, error) {
 		conf := &balanceKeyrangeSchedulerConfig{
 			baseDefaultSchedulerConfig: newBaseDefaultSchedulerConfig(),
 		}
 		if err := decoder(conf); err != nil {
 			return nil, err
+		}
+		if len(removeSchedulerCb) > 0 {
+			conf.removeSchedulerCb = removeSchedulerCb[0]
 		}
 		sche := newBalanceKeyrangeScheduler(opController, conf)
 		conf.init(sche.GetName(), storage, conf)

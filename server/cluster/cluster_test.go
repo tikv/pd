@@ -64,6 +64,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/server/config"
+	"go.uber.org/zap"
 )
 
 func TestStoreHeartbeat(t *testing.T) {
@@ -3968,4 +3969,43 @@ func BenchmarkHandleRegionHeartbeat(b *testing.B) {
 		region := core.RegionFromHeartbeat(requests[i], flowRoundDivisor)
 		c.HandleRegionHeartbeat(region)
 	}
+}
+
+func TestAddAdhocScheduler(t *testing.T) {
+	re := require.New(t)
+
+	tc, co, cleanup := prepare(nil, nil, func(co *schedule.Coordinator) { co.Run() }, re)
+	defer cleanup()
+	controller := co.GetSchedulersController()
+	re.Len(controller.GetSchedulerNames(), len(sc.DefaultSchedulers))
+	re.NoError(controller.RemoveScheduler(types.BalanceLeaderScheduler.String()))
+	re.NoError(controller.RemoveScheduler(types.BalanceRegionScheduler.String()))
+	re.NoError(controller.RemoveScheduler(types.BalanceHotRegionScheduler.String()))
+	re.NoError(controller.RemoveScheduler(types.EvictSlowStoreScheduler.String()))
+	re.Empty(controller.GetSchedulerNames())
+
+	tc.addLeaderStore(10, 5)
+	tc.addLeaderStore(11, 5)
+	tc.addLeaderStore(12, 5)
+
+	tc.addLeaderRegion(1, 10, 11)
+	tc.addLeaderRegion(2, 10, 11)
+	tc.addLeaderRegion(3, 10, 11)
+	tc.addLeaderRegion(4, 10, 11)
+	tc.addLeaderRegion(5, 10, 11)
+	tc.addLeaderRegion(6, 10, 12)
+
+	oc := co.GetOperatorController()
+
+	cb := func(s string) error {
+		log.Info("!!!!! RemoveScheduler", zap.Any("s", s))
+		return controller.RemoveScheduler(s)
+	}
+	log.Info("!!!!! AddScheduler")
+
+	s, err := schedulers.CreateScheduler(types.BalanceKeyrangeScheduler, oc, storage.NewStorageWithMemoryBackend(), schedulers.ConfigSliceDecoder(types.BalanceKeyrangeScheduler, []string{"1", "", ""}), cb)
+	re.NoError(err)
+	re.NoError(controller.AddScheduler(s))
+	time.Sleep(time.Second * 5)
+	panic(1)
 }

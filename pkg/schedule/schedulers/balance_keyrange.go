@@ -32,8 +32,9 @@ import (
 )
 
 type StoreRegionSet struct {
-	ID           uint64
-	Info         *core.StoreInfo
+	ID   uint64
+	Info *metapb.Store
+	// If the region still exists durgin migration
 	RegionIDSet  map[uint64]bool
 	OriginalPeer map[uint64]*metapb.Peer
 }
@@ -41,7 +42,7 @@ type StoreRegionSet struct {
 type MigrationOp struct {
 	FromStore    uint64          `json:"from_store"`
 	ToStore      uint64          `json:"to_store"`
-	ToStoreInfo  *core.StoreInfo `json:"to_store_info"`
+	ToStoreInfo  *metapb.Store   `json:"to_store_info"`
 	OriginalPeer *metapb.Peer    `json:"original_peer"`
 	Regions      map[uint64]bool `json:"regions"`
 }
@@ -53,29 +54,31 @@ func PickRegions(n int, fromStore *StoreRegionSet, toStore *StoreRegionSet) *Mig
 		ToStoreInfo: toStore.Info,
 		Regions:     make(map[uint64]bool),
 	}
-	for r, removed := range fromStore.RegionIDSet {
-		if n == 0 {
-			break
-		}
-		if removed {
-			continue
-		}
-		if _, exist := toStore.RegionIDSet[r]; !exist {
-			// If toStore doesn't has this region, then create a move op.
-			o.Regions[r] = false
-			o.OriginalPeer = fromStore.OriginalPeer[r]
-			fromStore.RegionIDSet[r] = true
-			n--
+
+	log.Info("!!!!! gem", zap.Any("from", fromStore.ID), zap.Any("to", toStore.ID), zap.Any("c", n))
+	for i := 0; i < n; i++ {
+		for r, fromHasRegion := range fromStore.RegionIDSet {
+			if !fromHasRegion {
+				continue
+			}
+			if toHasRegion, exist := toStore.RegionIDSet[r]; !exist || !toHasRegion {
+				// If toStore doesn't has this region, then create a move op.
+				o.Regions[r] = false
+				o.OriginalPeer = fromStore.OriginalPeer[r]
+				toStore.RegionIDSet[r] = true
+				fromStore.RegionIDSet[r] = false
+				break
+			}
 		}
 	}
 	return &o
 }
 
-func buildMigrationPlan(stores []*StoreRegionSet) ([]int, []int, []*MigrationOp) {
+func BuildMigrationPlan(stores []*StoreRegionSet) ([]int, []int, []*MigrationOp, int) {
 	totalRegionCount := 0
 	if len(stores) == 0 {
 		log.Info("no stores for migration")
-		return []int{}, []int{}, []*MigrationOp{}
+		return []int{}, []int{}, []*MigrationOp{}, 0
 	}
 	for _, store := range stores {
 		totalRegionCount += len(store.RegionIDSet)
@@ -117,7 +120,7 @@ func buildMigrationPlan(stores []*StoreRegionSet) ([]int, []int, []*MigrationOp)
 	}
 
 	ops := []*MigrationOp{}
-
+	movements := 0
 	for i, senderIndex := range senders {
 		fromStore := stores[senderIndex]
 		for {
@@ -133,13 +136,16 @@ func buildMigrationPlan(stores []*StoreRegionSet) ([]int, []int, []*MigrationOp)
 					}
 					receiversVolume[j] -= n
 					sendersVolume[i] -= n
-					ops = append(ops, PickRegions(n, fromStore, toStore))
+					op := PickRegions(n, fromStore, toStore)
+					movements += len(op.Regions)
+					log.Info("!!!!!! pick result", zap.Any("from", fromStore.ID), zap.Any("to", toStore.ID), zap.Any("region", op.Regions))
+					ops = append(ops, op)
 				}
 			}
 		}
 	}
 
-	return senders, receivers, ops
+	return senders, receivers, ops, movements
 }
 
 type MigrationPlan struct {
@@ -150,7 +156,7 @@ type MigrationPlan struct {
 	Operators []*operator.Operator `json:"operators"`
 }
 
-func ComputeCandidateStores(requiredLabels []*metapb.StoreLabel, stores []*core.StoreInfo, regions []*core.RegionInfo) []*StoreRegionSet {
+func ComputeCandidateStores(requiredLabels []*metapb.StoreLabel, stores []*metapb.Store, regions []*core.RegionInfo) []*StoreRegionSet {
 	candidates := make([]*StoreRegionSet, 0)
 	for _, s := range stores {
 		storeLabelMap := make(map[string]*metapb.StoreLabel)
@@ -174,15 +180,15 @@ func ComputeCandidateStores(requiredLabels []*metapb.StoreLabel, stores []*core.
 			continue
 		}
 		candidate := &StoreRegionSet{
-			ID:           s.GetID(),
+			ID:           s.GetId(),
 			Info:         s,
 			RegionIDSet:  make(map[uint64]bool),
 			OriginalPeer: make(map[uint64]*metapb.Peer),
 		}
 		for _, r := range regions {
 			for _, p := range r.GetPeers() {
-				if p.StoreId == s.GetID() {
-					candidate.RegionIDSet[r.GetID()] = false
+				if p.StoreId == s.GetId() {
+					candidate.RegionIDSet[r.GetID()] = true
 					candidate.OriginalPeer[r.GetID()] = p
 				}
 			}
@@ -198,14 +204,6 @@ func buildErrorMigrationPlan() *MigrationPlan {
 
 // RedistibuteRegions checks if regions are imbalanced and rebalance them.
 func RedistibuteRegions(c sche.SchedulerCluster, startKey, endKey []byte, requiredLabels []*metapb.StoreLabel) (*MigrationPlan, error) {
-	// startKey, err := hex.DecodeString(string(rawStartKey))
-	// if err != nil {
-	// 	return buildErrorMigrationPlan(), err
-	// }
-	// endKey, err := hex.DecodeString(string(rawEndKey))
-	// if err != nil {
-	// 	return buildErrorMigrationPlan(), err
-	// }
 	if c == nil {
 		return buildErrorMigrationPlan(), errs.ErrNotBootstrapped.GenWithStackByArgs()
 	}
@@ -216,12 +214,15 @@ func RedistibuteRegions(c sche.SchedulerCluster, startKey, endKey []byte, requir
 		regionIDMap[r.GetID()] = r
 	}
 
-	stores := c.GetStores()
+	stores := make([]*metapb.Store, 0)
+	for _, s := range c.GetStores() {
+		stores = append(stores, s.GetMeta())
+	}
 	candidates := ComputeCandidateStores(requiredLabels, stores, regions)
 
-	senders, receivers, ops := buildMigrationPlan(candidates)
+	senders, receivers, ops, movements := BuildMigrationPlan(candidates)
 
-	log.Info("Migration plan details", zap.Any("startKey", startKey), zap.Any("DstartKey", startKey), zap.Any("endKey", endKey), zap.Any("senders", senders), zap.Any("receivers", receivers), zap.Any("ops", ops), zap.Any("stores", stores))
+	log.Info("Migration plan details", zap.Any("startKey", startKey), zap.Any("endKey", endKey), zap.Any("senders", senders), zap.Any("receivers", receivers), zap.Any("movements", movements), zap.Any("ops", ops), zap.Any("stores", stores))
 
 	operators := make([]*operator.Operator, 0)
 	for _, op := range ops {
@@ -248,9 +249,10 @@ func RedistibuteRegions(c sche.SchedulerCluster, startKey, endKey []byte, requir
 type balanceKeyrangeSchedulerConfig struct {
 	baseDefaultSchedulerConfig
 
-	Range          core.KeyRange `json:"range"`
-	RequiredLabels []*metapb.StoreLabel
-	BatchSize      uint64
+	Range             core.KeyRange `json:"range"`
+	RequiredLabels    []*metapb.StoreLabel
+	BatchSize         uint64
+	removeSchedulerCb func(string) error
 }
 
 type balanceKeyrangeScheduler struct {
@@ -314,19 +316,33 @@ func (s *balanceKeyrangeScheduler) IsTimeout() bool {
 // Schedule implements the Scheduler interface.
 func (s *balanceKeyrangeScheduler) Schedule(cluster sche.SchedulerCluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
 	balanceKeyrangeScheduleCounter.Inc()
+	log.Error("!!!!! ScheduleSchedule")
 
-	if s.IsFinished() {
-		// Generate a new schedule.
-		p, err := RedistibuteRegions(cluster, s.conf.Range.StartKey, s.conf.Range.EndKey, s.conf.RequiredLabels)
-		if err != nil {
-			log.Error("balance keyrange can't generate plan", zap.Error(err))
-		}
-		s.migrationPlan = p
+	// TODO If the scheduler is scheduled from when bootstrapping, it will cause a extra scehdule on "", ""
+	rangeChanged := true
+	if s.migrationPlan != nil {
+		rangeChanged = !bytes.Equal(s.conf.Range.StartKey, s.migrationPlan.StartKey) || !bytes.Equal(s.conf.Range.EndKey, s.migrationPlan.EndKey)
 	}
-
-	if !bytes.Equal(s.conf.Range.StartKey, s.migrationPlan.StartKey) || !bytes.Equal(s.conf.Range.EndKey, s.migrationPlan.EndKey) {
-		log.Error("balance keyrange range mismatch", zap.ByteString("confStartKey", s.conf.Range.StartKey), zap.ByteString("confEndKey", s.conf.Range.EndKey), zap.ByteString("planStartKey", s.migrationPlan.StartKey), zap.ByteString("planStartKey", s.migrationPlan.EndKey), zap.Bool("IsFinished", s.IsFinished()))
-		return []*operator.Operator{}, make([]plan.Plan, 0)
+	if s.IsFinished() {
+		if rangeChanged {
+			// Generate a new schedule.
+			p, err := RedistibuteRegions(cluster, s.conf.Range.StartKey, s.conf.Range.EndKey, s.conf.RequiredLabels)
+			if err != nil {
+				log.Error("balance keyrange can't generate plan", zap.Error(err))
+			}
+			s.migrationPlan = p
+		} else {
+			log.Info("shutdown balance keyrange", zap.Any("conf", s.conf))
+			if s.conf.removeSchedulerCb != nil {
+				s.conf.removeSchedulerCb(string(types.BalanceKeyrangeScheduler))
+			}
+			return []*operator.Operator{}, []plan.Plan{}
+		}
+	} else {
+		if rangeChanged {
+			log.Error("balance keyrange range mismatch", zap.ByteString("confStartKey", s.conf.Range.StartKey), zap.ByteString("confEndKey", s.conf.Range.EndKey), zap.ByteString("planStartKey", s.migrationPlan.StartKey), zap.ByteString("planStartKey", s.migrationPlan.EndKey), zap.Bool("IsFinished", s.IsFinished()))
+			return []*operator.Operator{}, make([]plan.Plan, 0)
+		}
 	}
 
 	batchSize := int(s.conf.BatchSize)
@@ -338,5 +354,6 @@ func (s *balanceKeyrangeScheduler) Schedule(cluster sche.SchedulerCluster, dryRu
 		part = s.migrationPlan.Operators
 		s.migrationPlan.Operators = make([]*operator.Operator, 0)
 	}
+	log.Info("!!!!! balance keyrange issue operators", zap.Any("count", len(part)))
 	return part, make([]plan.Plan, 0)
 }
