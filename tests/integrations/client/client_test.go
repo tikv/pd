@@ -1291,10 +1291,9 @@ func (suite *clientTestSuite) TestGetRegionByID() {
 			reflect.DeepEqual(peers[0], r.Leader)
 	})
 
-	// test WithCallerID and WithCallerComponent
+	// test WithCallerComponent
 	testutil.Eventually(re, func() bool {
 		r, err := suite.client.
-			WithCallerID(caller.GetCallerID()).
 			WithCallerComponent(caller.GetComponent(0)).
 			GetRegionByID(context.Background(), regionID)
 		re.NoError(err)

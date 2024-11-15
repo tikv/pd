@@ -141,9 +141,6 @@ type RPCClient interface {
 	// SetExternalTimestamp sets external timestamp
 	SetExternalTimestamp(ctx context.Context, timestamp uint64) error
 
-	// WithCallerID returns a new RPCClient with the specified caller ID. Caller
-	// ID can be understood as the name of the binary file.
-	WithCallerID(callerID caller.ID) RPCClient
 	// WithCallerComponent returns a new RPCClient with the specified caller
 	// component. Caller component refers to the specific part or module within
 	// the process. You can set the component in two ways:
@@ -1446,13 +1443,6 @@ func (c *client) respForErr(observer prometheus.Observer, start time.Time, err e
 		return errors.WithStack(errors.New(header.GetError().String()))
 	}
 	return nil
-}
-
-// WithCallerID implements the RPCClient interface.
-func (c *client) WithCallerID(callerID caller.ID) RPCClient {
-	newClient := *c
-	newClient.callerID = callerID
-	return &newClient
 }
 
 // WithCallerComponent implements the RPCClient interface.
