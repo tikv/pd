@@ -118,7 +118,7 @@ func (c *innerClient) Put(ctx context.Context, key, value []byte, opts ...OpOpti
 	start := time.Now()
 	defer func() { cmdDurationPut.Observe(time.Since(start).Seconds()) }()
 
-	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
+	ctx, cancel := context.WithTimeout(ctx, c.option.Timeout)
 	req := &meta_storagepb.PutRequest{
 		Key:    key,
 		Value:  value,
@@ -157,7 +157,7 @@ func (c *innerClient) Get(ctx context.Context, key []byte, opts ...OpOption) (*m
 	start := time.Now()
 	defer func() { cmdDurationGet.Observe(time.Since(start).Seconds()) }()
 
-	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
+	ctx, cancel := context.WithTimeout(ctx, c.option.Timeout)
 	req := &meta_storagepb.GetRequest{
 		Key:      key,
 		RangeEnd: options.rangeEnd,

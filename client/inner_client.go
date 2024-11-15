@@ -10,6 +10,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/client/errs"
+	"github.com/tikv/pd/client/opt"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 )
@@ -35,7 +36,7 @@ type innerClient struct {
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
 	tlsCfg *tls.Config
-	option *option
+	option *opt.Option
 }
 
 func (c *innerClient) init(updateKeyspaceIDCb updateKeyspaceIDFunc) error {
@@ -57,7 +58,7 @@ func (c *innerClient) setServiceMode(newMode pdpb.ServiceMode) {
 	c.Lock()
 	defer c.Unlock()
 
-	if c.option.useTSOServerProxy {
+	if c.option.UseTSOServerProxy {
 		// If we are using TSO server proxy, we always use PD_SVC_MODE.
 		newMode = pdpb.ServiceMode_PD_SVC_MODE
 	}
@@ -158,8 +159,8 @@ func (c *innerClient) close() {
 
 func (c *innerClient) setup() error {
 	// Init the metrics.
-	if c.option.initMetrics {
-		initAndRegisterMetrics(c.option.metricsLabels)
+	if c.option.InitMetrics {
+		initAndRegisterMetrics(c.option.MetricsLabels)
 	}
 
 	// Init the client base.
