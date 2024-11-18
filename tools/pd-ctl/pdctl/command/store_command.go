@@ -51,7 +51,6 @@ func NewStoreCommand() *cobra.Command {
 	s.AddCommand(NewSetStoreWeightCommand())
 	s.AddCommand(NewStoreLimitCommand())
 	s.AddCommand(NewRemoveTombStoneCommand())
-	s.AddCommand(NewStoreLimitSceneCommand())
 	s.AddCommand(NewStoreCheckCommand())
 	s.Flags().String("jq", "", "jq query")
 	s.Flags().StringSlice("state", nil, "state filter")
@@ -226,56 +225,6 @@ func NewSetAllLimitCommand() *cobra.Command {
 		Long:       "set all store's rate limit, <type> can be 'add-peer'(default) or 'remove-peer'",
 		Deprecated: "use store limit all <rate> instead",
 		Run:        setAllLimitCommandFunc,
-	}
-}
-
-// NewStoreLimitSceneCommand returns a limit-scene command for store command
-func NewStoreLimitSceneCommand() *cobra.Command {
-	return &cobra.Command{
-		Use:   "limit-scene [<type>]|[<scene> <rate> <type>]",
-		Short: "show or set the limit value for a scene",
-		Long:  "show or set the limit value for a scene, <type> can be 'add-peer'(default) or 'remove-peer'",
-		Run:   storeLimitSceneCommandFunc,
-	}
-}
-
-func storeLimitSceneCommandFunc(cmd *cobra.Command, args []string) {
-	var resp string
-	var err error
-	prefix := fmt.Sprintf("%s/limit/scene", storesPrefix)
-
-	switch len(args) {
-	case 0, 1:
-		// show all limit values
-		if len(args) == 1 {
-			prefix += fmt.Sprintf("?type=%v", args[0])
-		}
-		resp, err = doRequest(cmd, prefix, http.MethodGet, http.Header{})
-		if err != nil {
-			cmd.Println(err)
-			return
-		}
-		cmd.Println(resp)
-	case 2, 3:
-		// set limit value for a scene
-		scene := args[0]
-		if scene != "idle" &&
-			scene != "low" &&
-			scene != "normal" &&
-			scene != "high" {
-			cmd.Println("invalid scene")
-			return
-		}
-
-		rate, err := strconv.Atoi(args[1])
-		if err != nil {
-			cmd.Println(err)
-			return
-		}
-		if len(args) == 3 {
-			prefix = path.Join(prefix, fmt.Sprintf("?type=%s", args[2]))
-		}
-		postJSON(cmd, prefix, map[string]any{scene: rate})
 	}
 }
 
