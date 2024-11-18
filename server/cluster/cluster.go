@@ -165,9 +165,8 @@ type RaftCluster struct {
 	prevStoreLimit map[uint64]map[storelimit.Type]float64
 
 	// This below fields are all read-only, we cannot update itself after the raft cluster starts.
-	id      id.Allocator
-	opt     *config.PersistOptions
-	limiter *StoreLimiter
+	id  id.Allocator
+	opt *config.PersistOptions
 	*schedulingController
 	ruleManager              *placement.RuleManager
 	regionLabeler            *labeler.RegionLabeler
@@ -354,7 +353,6 @@ func (c *RaftCluster) Start(s Server) error {
 	if err != nil {
 		return err
 	}
-	c.limiter = NewStoreLimiter(s.GetPersistOptions())
 	c.loadExternalTS()
 	c.loadMinResolvedTS()
 
@@ -2175,11 +2173,6 @@ func (c *RaftCluster) putRegion(region *core.RegionInfo) error {
 	}
 	c.PutRegion(region)
 	return nil
-}
-
-// GetStoreLimiter returns the dynamic adjusting limiter
-func (c *RaftCluster) GetStoreLimiter() *StoreLimiter {
-	return c.limiter
 }
 
 // GetStoreLimitByType returns the store limit for a given store ID and type.
