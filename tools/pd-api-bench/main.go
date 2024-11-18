@@ -35,6 +35,7 @@ import (
 	flag "github.com/spf13/pflag"
 	pd "github.com/tikv/pd/client"
 	pdHttp "github.com/tikv/pd/client/http"
+	"github.com/tikv/pd/client/opt"
 	"github.com/tikv/pd/client/utils/tlsutil"
 	"github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/utils/logutil"
@@ -118,7 +119,7 @@ func main() {
 	pdClis := make([]pd.Client, cfg.Client)
 	for i := range cfg.Client {
 		pdClis[i] = newPDClient(ctx, cfg)
-		pdClis[i].UpdateOption(pd.EnableFollowerHandle, true)
+		pdClis[i].UpdateOption(opt.EnableFollowerHandle, true)
 	}
 	etcdClis := make([]*clientv3.Client, cfg.Client)
 	for i := range cfg.Client {
@@ -380,7 +381,7 @@ func newPDClient(ctx context.Context, cfg *config.Config) pd.Client {
 		CertPath: cfg.CertPath,
 		KeyPath:  cfg.KeyPath,
 	},
-		pd.WithGRPCDialOptions(
+		opt.WithGRPCDialOptions(
 			grpc.WithKeepaliveParams(keepalive.ClientParameters{
 				Time:    keepaliveTime,
 				Timeout: keepaliveTimeout,

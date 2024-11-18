@@ -1,4 +1,4 @@
-// Copyright 2021 TiKV Project Authors.
+// Copyright 2024 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package pd
+package opt
 
 import (
 	"testing"
@@ -24,43 +24,43 @@ import (
 
 func TestDynamicOptionChange(t *testing.T) {
 	re := require.New(t)
-	o := newOption()
+	o := NewOption()
 	// Check the default value setting.
-	re.Equal(defaultMaxTSOBatchWaitInterval, o.getMaxTSOBatchWaitInterval())
-	re.Equal(defaultEnableTSOFollowerProxy, o.getEnableTSOFollowerProxy())
-	re.Equal(defaultEnableFollowerHandle, o.getEnableFollowerHandle())
+	re.Equal(defaultMaxTSOBatchWaitInterval, o.GetMaxTSOBatchWaitInterval())
+	re.Equal(defaultEnableTSOFollowerProxy, o.GetEnableTSOFollowerProxy())
+	re.Equal(defaultEnableFollowerHandle, o.GetEnableFollowerHandle())
 
 	// Check the invalid value setting.
-	re.Error(o.setMaxTSOBatchWaitInterval(time.Second))
-	re.Equal(defaultMaxTSOBatchWaitInterval, o.getMaxTSOBatchWaitInterval())
+	re.Error(o.SetMaxTSOBatchWaitInterval(time.Second))
+	re.Equal(defaultMaxTSOBatchWaitInterval, o.GetMaxTSOBatchWaitInterval())
 	expectInterval := time.Millisecond
-	o.setMaxTSOBatchWaitInterval(expectInterval)
-	re.Equal(expectInterval, o.getMaxTSOBatchWaitInterval())
+	o.SetMaxTSOBatchWaitInterval(expectInterval)
+	re.Equal(expectInterval, o.GetMaxTSOBatchWaitInterval())
 	expectInterval = time.Duration(float64(time.Millisecond) * 0.5)
-	o.setMaxTSOBatchWaitInterval(expectInterval)
-	re.Equal(expectInterval, o.getMaxTSOBatchWaitInterval())
+	o.SetMaxTSOBatchWaitInterval(expectInterval)
+	re.Equal(expectInterval, o.GetMaxTSOBatchWaitInterval())
 	expectInterval = time.Duration(float64(time.Millisecond) * 1.5)
-	o.setMaxTSOBatchWaitInterval(expectInterval)
-	re.Equal(expectInterval, o.getMaxTSOBatchWaitInterval())
+	o.SetMaxTSOBatchWaitInterval(expectInterval)
+	re.Equal(expectInterval, o.GetMaxTSOBatchWaitInterval())
 
 	expectBool := true
-	o.setEnableTSOFollowerProxy(expectBool)
+	o.SetEnableTSOFollowerProxy(expectBool)
 	// Check the value changing notification.
 	testutil.Eventually(re, func() bool {
-		<-o.enableTSOFollowerProxyCh
+		<-o.EnableTSOFollowerProxyCh
 		return true
 	})
-	re.Equal(expectBool, o.getEnableTSOFollowerProxy())
+	re.Equal(expectBool, o.GetEnableTSOFollowerProxy())
 	// Check whether any data will be sent to the channel.
 	// It will panic if the test fails.
-	close(o.enableTSOFollowerProxyCh)
+	close(o.EnableTSOFollowerProxyCh)
 	// Setting the same value should not notify the channel.
-	o.setEnableTSOFollowerProxy(expectBool)
+	o.SetEnableTSOFollowerProxy(expectBool)
 
 	expectBool = true
-	o.setEnableFollowerHandle(expectBool)
-	re.Equal(expectBool, o.getEnableFollowerHandle())
+	o.SetEnableFollowerHandle(expectBool)
+	re.Equal(expectBool, o.GetEnableFollowerHandle())
 	expectBool = false
-	o.setEnableFollowerHandle(expectBool)
-	re.Equal(expectBool, o.getEnableFollowerHandle())
+	o.SetEnableFollowerHandle(expectBool)
+	re.Equal(expectBool, o.GetEnableFollowerHandle())
 }

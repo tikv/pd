@@ -33,6 +33,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	pd "github.com/tikv/pd/client"
+	"github.com/tikv/pd/client/opt"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/keepalive"
@@ -430,11 +431,11 @@ func createPDClient(ctx context.Context) (pd.Client, error) {
 		err   error
 	)
 
-	opts := make([]pd.ClientOption, 0)
+	opts := make([]opt.ClientOption, 0)
 	if *useTSOServerProxy {
-		opts = append(opts, pd.WithTSOServerProxyOption(true))
+		opts = append(opts, opt.WithTSOServerProxyOption(true))
 	}
-	opts = append(opts, pd.WithGRPCDialOptions(
+	opts = append(opts, opt.WithGRPCDialOptions(
 		grpc.WithKeepaliveParams(keepalive.ClientParameters{
 			Time:    keepaliveTime,
 			Timeout: keepaliveTimeout,
@@ -459,8 +460,8 @@ func createPDClient(ctx context.Context) (pd.Client, error) {
 		return nil, err
 	}
 
-	pdCli.UpdateOption(pd.MaxTSOBatchWaitInterval, *maxBatchWaitInterval)
-	pdCli.UpdateOption(pd.EnableTSOFollowerProxy, *enableTSOFollowerProxy)
+	pdCli.UpdateOption(opt.MaxTSOBatchWaitInterval, *maxBatchWaitInterval)
+	pdCli.UpdateOption(opt.EnableTSOFollowerProxy, *enableTSOFollowerProxy)
 	return pdCli, err
 }
 
