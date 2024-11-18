@@ -30,7 +30,8 @@ import (
 	"github.com/pingcap/kvproto/pkg/tsopb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/client/errs"
-	"github.com/tikv/pd/client/grpcutil"
+	"github.com/tikv/pd/client/opt"
+	"github.com/tikv/pd/client/utils/grpcutil"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 )
@@ -51,7 +52,7 @@ const (
 )
 
 var _ ServiceDiscovery = (*tsoServiceDiscovery)(nil)
-var _ tsoAllocatorEventSource = (*tsoServiceDiscovery)(nil)
+var _ tsoEventSource = (*tsoServiceDiscovery)(nil)
 
 // keyspaceGroupSvcDiscovery is used for discovering the serving endpoints of the keyspace
 // group to which the keyspace belongs
@@ -136,11 +137,8 @@ type tsoServiceDiscovery struct {
 	// URL -> a gRPC connection
 	clientConns sync.Map // Store as map[string]*grpc.ClientConn
 
-	// localAllocPrimariesUpdatedCb will be called when the local tso allocator primary list is updated.
-	// The input is a map {DC Location -> Leader URL}
-	localAllocPrimariesUpdatedCb tsoLocalServURLsUpdatedFunc
-	// globalAllocPrimariesUpdatedCb will be called when the local tso allocator primary list is updated.
-	globalAllocPrimariesUpdatedCb tsoGlobalServURLUpdatedFunc
+	// tsoLeaderUpdatedCb will be called when the TSO leader is updated.
+	tsoLeaderUpdatedCb tsoLeaderURLUpdatedFunc
 
 	checkMembershipCh chan struct{}
 
@@ -152,13 +150,13 @@ type tsoServiceDiscovery struct {
 	tlsCfg *tls.Config
 
 	// Client option.
-	option *option
+	option *opt.Option
 }
 
 // newTSOServiceDiscovery returns a new client-side service discovery for the independent TSO service.
 func newTSOServiceDiscovery(
 	ctx context.Context, metacli MetaStorageClient, apiSvcDiscovery ServiceDiscovery,
-	keyspaceID uint32, tlsCfg *tls.Config, option *option,
+	keyspaceID uint32, tlsCfg *tls.Config, option *opt.Option,
 ) ServiceDiscovery {
 	ctx, cancel := context.WithCancel(ctx)
 	c := &tsoServiceDiscovery{
@@ -193,9 +191,9 @@ func newTSOServiceDiscovery(
 // Init initialize the concrete client underlying
 func (c *tsoServiceDiscovery) Init() error {
 	log.Info("initializing tso service discovery",
-		zap.Int("max-retry-times", c.option.maxRetryTimes),
+		zap.Int("max-retry-times", c.option.MaxRetryTimes),
 		zap.Duration("retry-interval", initRetryInterval))
-	if err := c.retry(c.option.maxRetryTimes, initRetryInterval, c.updateMember); err != nil {
+	if err := c.retry(c.option.MaxRetryTimes, initRetryInterval, c.updateMember); err != nil {
 		log.Error("failed to update member. initialization failed.", zap.Error(err))
 		c.cancel()
 		return err
@@ -328,7 +326,7 @@ func (c *tsoServiceDiscovery) GetBackupURLs() []string {
 
 // GetOrCreateGRPCConn returns the corresponding grpc client connection of the given URL.
 func (c *tsoServiceDiscovery) GetOrCreateGRPCConn(url string) (*grpc.ClientConn, error) {
-	return grpcutil.GetOrCreateGRPCConn(c.ctx, &c.clientConns, url, c.tlsCfg, c.option.gRPCDialOptions...)
+	return grpcutil.GetOrCreateGRPCConn(c.ctx, &c.clientConns, url, c.tlsCfg, c.option.GRPCDialOptions...)
 }
 
 // ScheduleCheckMemberChanged is used to trigger a check to see if there is any change in service endpoints.
@@ -360,22 +358,15 @@ func (*tsoServiceDiscovery) AddServingURLSwitchedCallback(...func()) {}
 // in a primary/secondary configured cluster is changed.
 func (*tsoServiceDiscovery) AddServiceURLsSwitchedCallback(...func()) {}
 
-// SetTSOLocalServURLsUpdatedCallback adds a callback which will be called when the local tso
-// allocator leader list is updated.
-func (c *tsoServiceDiscovery) SetTSOLocalServURLsUpdatedCallback(callback tsoLocalServURLsUpdatedFunc) {
-	c.localAllocPrimariesUpdatedCb = callback
-}
-
-// SetTSOGlobalServURLUpdatedCallback adds a callback which will be called when the global tso
-// allocator leader is updated.
-func (c *tsoServiceDiscovery) SetTSOGlobalServURLUpdatedCallback(callback tsoGlobalServURLUpdatedFunc) {
+// SetTSOLeaderURLUpdatedCallback adds a callback which will be called when the TSO leader is updated.
+func (c *tsoServiceDiscovery) SetTSOLeaderURLUpdatedCallback(callback tsoLeaderURLUpdatedFunc) {
 	url := c.getPrimaryURL()
 	if len(url) > 0 {
 		if err := callback(url); err != nil {
 			log.Error("[tso] failed to call back when tso global service url update", zap.String("url", url), errs.ZapError(err))
 		}
 	}
-	c.globalAllocPrimariesUpdatedCb = callback
+	c.tsoLeaderUpdatedCb = callback
 }
 
 // GetServiceClient implements ServiceDiscovery
@@ -404,8 +395,8 @@ func (c *tsoServiceDiscovery) getSecondaryURLs() []string {
 
 func (c *tsoServiceDiscovery) afterPrimarySwitched(oldPrimary, newPrimary string) error {
 	// Run callbacks
-	if c.globalAllocPrimariesUpdatedCb != nil {
-		if err := c.globalAllocPrimariesUpdatedCb(newPrimary); err != nil {
+	if c.tsoLeaderUpdatedCb != nil {
+		if err := c.tsoLeaderUpdatedCb(newPrimary); err != nil {
 			return err
 		}
 	}

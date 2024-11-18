@@ -36,7 +36,6 @@ import (
 	"github.com/stretchr/testify/require"
 	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/core"
-	rm "github.com/tikv/pd/pkg/mcs/resourcemanager/server"
 	scheduling "github.com/tikv/pd/pkg/mcs/scheduling/server"
 	sc "github.com/tikv/pd/pkg/mcs/scheduling/server/config"
 	tso "github.com/tikv/pd/pkg/mcs/tso/server"
@@ -105,24 +104,6 @@ func InitLogger(logConfig log.Config, logger *zap.Logger, logProps *log.ZapPrope
 		log.Sync()
 	})
 	return err
-}
-
-// StartSingleResourceManagerTestServer creates and starts a resource manager server with default config for testing.
-func StartSingleResourceManagerTestServer(ctx context.Context, re *require.Assertions, backendEndpoints, listenAddrs string) (*rm.Server, func()) {
-	cfg := rm.NewConfig()
-	cfg.BackendEndpoints = backendEndpoints
-	cfg.ListenAddr = listenAddrs
-	cfg.Name = cfg.ListenAddr
-	cfg, err := rm.GenerateConfig(cfg)
-	re.NoError(err)
-
-	s, cleanup, err := rm.NewTestServer(ctx, re, cfg)
-	re.NoError(err)
-	testutil.Eventually(re, func() bool {
-		return !s.IsClosed()
-	}, testutil.WithWaitFor(5*time.Second), testutil.WithTickInterval(50*time.Millisecond))
-
-	return s, cleanup
 }
 
 // StartSingleTSOTestServerWithoutCheck creates and starts a tso server with default config for testing.

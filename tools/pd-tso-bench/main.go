@@ -33,6 +33,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	pd "github.com/tikv/pd/client"
+	"github.com/tikv/pd/client/opt"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/keepalive"
@@ -49,7 +50,6 @@ var (
 	concurrency                    = flag.Int("c", 1000, "concurrency")
 	count                          = flag.Int("count", 1, "the count number that the test will run")
 	duration                       = flag.Duration("duration", 60*time.Second, "how many seconds the test will last")
-	dcLocation                     = flag.String("dc", "global", "which dc-location this bench will request")
 	verbose                        = flag.Bool("v", false, "output statistics info every interval and output metrics info at the end")
 	interval                       = flag.Duration("interval", time.Second, "interval to output the statistics")
 	caPath                         = flag.String("cacert", "", "path of file that contains list of trusted SSL CAs")
@@ -114,7 +114,7 @@ func bench(mainCtx context.Context) {
 	ctx, cancel := context.WithCancel(mainCtx)
 	// To avoid the first time high latency.
 	for idx, pdCli := range pdClients {
-		_, _, err := pdCli.GetLocalTS(ctx, *dcLocation)
+		_, _, err := pdCli.GetTS(ctx)
 		if err != nil {
 			log.Fatal("get first time tso failed", zap.Int("client-number", idx), zap.Error(err))
 		}
@@ -395,7 +395,7 @@ func reqWorker(ctx context.Context, pdClients []pd.Client, clientIdx int, durCh 
 					}
 				}
 			}
-			_, _, err = pdCli.GetLocalTS(reqCtx, *dcLocation)
+			_, _, err = pdCli.GetTS(reqCtx)
 			if errors.Cause(err) == context.Canceled {
 				if ticker != nil {
 					ticker.Stop()
@@ -431,11 +431,11 @@ func createPDClient(ctx context.Context) (pd.Client, error) {
 		err   error
 	)
 
-	opts := make([]pd.ClientOption, 0)
+	opts := make([]opt.ClientOption, 0)
 	if *useTSOServerProxy {
-		opts = append(opts, pd.WithTSOServerProxyOption(true))
+		opts = append(opts, opt.WithTSOServerProxyOption(true))
 	}
-	opts = append(opts, pd.WithGRPCDialOptions(
+	opts = append(opts, opt.WithGRPCDialOptions(
 		grpc.WithKeepaliveParams(keepalive.ClientParameters{
 			Time:    keepaliveTime,
 			Timeout: keepaliveTimeout,
@@ -460,8 +460,8 @@ func createPDClient(ctx context.Context) (pd.Client, error) {
 		return nil, err
 	}
 
-	pdCli.UpdateOption(pd.MaxTSOBatchWaitInterval, *maxBatchWaitInterval)
-	pdCli.UpdateOption(pd.EnableTSOFollowerProxy, *enableTSOFollowerProxy)
+	pdCli.UpdateOption(opt.MaxTSOBatchWaitInterval, *maxBatchWaitInterval)
+	pdCli.UpdateOption(opt.EnableTSOFollowerProxy, *enableTSOFollowerProxy)
 	return pdCli, err
 }
 

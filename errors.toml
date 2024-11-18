@@ -141,9 +141,14 @@ error = '''
 can not remove store %d since there are no extra up store to store the leader
 '''
 
-["PD:core:ErrPauseLeaderTransfer"]
+["PD:core:ErrPauseLeaderTransferIn"]
 error = '''
-store %v is paused for leader transfer
+store %v is paused for leader transfer in
+'''
+
+["PD:core:ErrPauseLeaderTransferOut"]
+error = '''
+store %v is paused for leader transfer out
 '''
 
 ["PD:core:ErrSlowStoreEvicted"]

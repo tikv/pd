@@ -76,7 +76,7 @@ func newMockTSOStreamImpl(ctx context.Context, resultMode resultMode) *mockTSOSt
 	}
 }
 
-func (s *mockTSOStreamImpl) Send(clusterID uint64, _keyspaceID, keyspaceGroupID uint32, _dcLocation string, count int64) error {
+func (s *mockTSOStreamImpl) Send(clusterID uint64, _keyspaceID, keyspaceGroupID uint32, count int64) error {
 	select {
 	case <-s.ctx.Done():
 		return s.ctx.Err()
@@ -210,7 +210,6 @@ func (s *mockTSOStreamImpl) autoGenResult(count int64) resultMsg {
 			physical:            s.resGenPhysical,
 			logical:             s.resGenLogical,
 			count:               uint32(count),
-			suffixBits:          0,
 			respKeyspaceGroupID: 0,
 		},
 	}
@@ -225,7 +224,6 @@ func (s *mockTSOStreamImpl) returnResult(physical int64, logical int64, count ui
 			physical:            physical,
 			logical:             logical,
 			count:               count,
-			suffixBits:          0,
 			respKeyspaceGroupID: s.keyspaceID,
 		},
 	}
@@ -305,10 +303,9 @@ func (s *testTSOStreamSuite) getResult(ch <-chan callbackInvocation) callbackInv
 
 func (s *testTSOStreamSuite) processRequestWithResultCh(count int64) (<-chan callbackInvocation, error) {
 	ch := make(chan callbackInvocation, 1)
-	err := s.stream.processRequests(1, 2, 3, globalDCLocation, count, time.Now(), func(result tsoRequestResult, reqKeyspaceGroupID uint32, err error) {
+	err := s.stream.processRequests(1, 2, 3, count, time.Now(), func(result tsoRequestResult, reqKeyspaceGroupID uint32, err error) {
 		if err == nil {
 			s.re.Equal(uint32(3), reqKeyspaceGroupID)
-			s.re.Equal(uint32(0), result.suffixBits)
 		}
 		ch <- callbackInvocation{
 			result: result,
@@ -357,7 +354,7 @@ func (s *testTSOStreamSuite) TestTSOStreamBasic() {
 
 	// After an error from the (simulated) RPC stream, the tsoStream should be in a broken status and can't accept
 	// new request anymore.
-	err := s.stream.processRequests(1, 2, 3, globalDCLocation, 1, time.Now(), func(_result tsoRequestResult, _reqKeyspaceGroupID uint32, _err error) {
+	err := s.stream.processRequests(1, 2, 3, 1, time.Now(), func(_result tsoRequestResult, _reqKeyspaceGroupID uint32, _err error) {
 		panic("unreachable")
 	})
 	s.re.Error(err)
@@ -621,7 +618,7 @@ func BenchmarkTSOStreamSendRecv(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		err := stream.processRequests(1, 1, 1, globalDCLocation, 1, now, func(result tsoRequestResult, _ uint32, err error) {
+		err := stream.processRequests(1, 1, 1, 1, now, func(result tsoRequestResult, _ uint32, err error) {
 			if err != nil {
 				panic(err)
 			}

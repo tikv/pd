@@ -63,7 +63,7 @@ func NewDeleteStoreByAddrCommand() *cobra.Command {
 	d := &cobra.Command{
 		Use:   "addr <address>",
 		Short: "delete store by its address",
-		Run:   deleteStoreCommandByAddrFunc,
+		RunE:  deleteStoreCommandByAddrFunc,
 	}
 	return d
 }
@@ -378,19 +378,19 @@ func deleteStoreCommandFunc(cmd *cobra.Command, args []string) {
 	cmd.Println("Success!")
 }
 
-func deleteStoreCommandByAddrFunc(cmd *cobra.Command, args []string) {
+func deleteStoreCommandByAddrFunc(cmd *cobra.Command, args []string) error {
 	id := getStoreID(cmd, args, false)
 	if id == -1 {
-		return
+		return fmt.Errorf("address not found: %s", args[0])
 	}
 	// delete store by its ID
 	prefix := fmt.Sprintf(storePrefix, id)
 	_, err := doRequest(cmd, prefix, http.MethodDelete, http.Header{})
 	if err != nil {
-		cmd.Printf("Failed to delete store %s: %s\n", args[0], err)
-		return
+		return fmt.Errorf("failed to delete store %s: %s", args[0], err)
 	}
 	cmd.Println("Success!")
+	return nil
 }
 
 func cancelDeleteStoreCommandFunc(cmd *cobra.Command, args []string) {
@@ -436,6 +436,10 @@ func cancelDeleteStoreCommandFunc(cmd *cobra.Command, args []string) {
 
 func cancelDeleteStoreCommandByAddrFunc(cmd *cobra.Command, args []string) {
 	id := getStoreID(cmd, args, true)
+	if id == -1 {
+		cmd.Printf("address not found: %s\n", args[0])
+		return
+	}
 	if id == 0 {
 		return
 	}
@@ -490,9 +494,6 @@ func getStoreID(cmd *cobra.Command, args []string, isCancel bool) (id int) {
 		}
 	}
 
-	if id == -1 {
-		cmd.Printf("address not found: %s\n", addr)
-	}
 	return
 }
 

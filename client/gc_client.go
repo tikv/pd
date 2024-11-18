@@ -41,7 +41,7 @@ func (c *client) UpdateGCSafePointV2(ctx context.Context, keyspaceID uint32, saf
 	start := time.Now()
 	defer func() { cmdDurationUpdateGCSafePointV2.Observe(time.Since(start).Seconds()) }()
 
-	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
+	ctx, cancel := context.WithTimeout(ctx, c.option.Timeout)
 	req := &pdpb.UpdateGCSafePointV2Request{
 		Header:     c.requestHeader(),
 		KeyspaceId: keyspaceID,
@@ -70,7 +70,7 @@ func (c *client) UpdateServiceSafePointV2(ctx context.Context, keyspaceID uint32
 	start := time.Now()
 	defer func() { cmdDurationUpdateServiceSafePointV2.Observe(time.Since(start).Seconds()) }()
 
-	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
+	ctx, cancel := context.WithTimeout(ctx, c.option.Timeout)
 	req := &pdpb.UpdateServiceSafePointV2Request{
 		Header:     c.requestHeader(),
 		KeyspaceId: keyspaceID,
@@ -99,7 +99,7 @@ func (c *client) WatchGCSafePointV2(ctx context.Context, revision int64) (chan [
 		Revision: revision,
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
+	ctx, cancel := context.WithTimeout(ctx, c.option.Timeout)
 	defer cancel()
 	protoClient, ctx := c.getClientAndContext(ctx)
 	if protoClient == nil {
