@@ -24,18 +24,9 @@ import (
 	"github.com/pingcap/kvproto/pkg/meta_storagepb"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/tikv/pd/client/errs"
+	"github.com/tikv/pd/client/opt"
 	"github.com/tikv/pd/client/utils/grpcutil"
 )
-
-// MetaStorageClient is the interface for meta storage client.
-type MetaStorageClient interface {
-	// Watch watches on a key or prefix.
-	Watch(ctx context.Context, key []byte, opts ...OpOption) (chan []*meta_storagepb.Event, error)
-	// Get gets the value for a key.
-	Get(ctx context.Context, key []byte, opts ...OpOption) (*meta_storagepb.GetResponse, error)
-	// Put puts a key-value pair into meta storage.
-	Put(ctx context.Context, key []byte, value []byte, opts ...OpOption) (*meta_storagepb.PutResponse, error)
-}
 
 // metaStorageClient gets the meta storage client from current PD leader.
 func (c *client) metaStorageClient() meta_storagepb.MetaStorageClient {
@@ -43,51 +34,6 @@ func (c *client) metaStorageClient() meta_storagepb.MetaStorageClient {
 		return meta_storagepb.NewMetaStorageClient(client)
 	}
 	return nil
-}
-
-// Op represents available options when using meta storage client.
-type Op struct {
-	rangeEnd         []byte
-	revision         int64
-	prevKv           bool
-	lease            int64
-	limit            int64
-	isOptsWithPrefix bool
-}
-
-// OpOption configures etcd Op.
-type OpOption func(*Op)
-
-// WithLimit specifies the limit of the key.
-func WithLimit(limit int64) OpOption {
-	return func(op *Op) { op.limit = limit }
-}
-
-// WithRangeEnd specifies the range end of the key.
-func WithRangeEnd(rangeEnd []byte) OpOption {
-	return func(op *Op) { op.rangeEnd = rangeEnd }
-}
-
-// WithRev specifies the start revision of the key.
-func WithRev(revision int64) OpOption {
-	return func(op *Op) { op.revision = revision }
-}
-
-// WithPrevKV specifies the previous key-value pair of the key.
-func WithPrevKV() OpOption {
-	return func(op *Op) { op.prevKv = true }
-}
-
-// WithLease specifies the lease of the key.
-func WithLease(lease int64) OpOption {
-	return func(op *Op) { op.lease = lease }
-}
-
-// WithPrefix specifies the prefix of the key.
-func WithPrefix() OpOption {
-	return func(op *Op) {
-		op.isOptsWithPrefix = true
-	}
 }
 
 // See https://github.com/etcd-io/etcd/blob/da4bf0f76fb708e0b57763edb46ba523447b9510/client/v3/op.go#L372-L385
@@ -105,8 +51,8 @@ func getPrefix(key []byte) []byte {
 }
 
 // Put implements the MetaStorageClient interface.
-func (c *client) Put(ctx context.Context, key, value []byte, opts ...OpOption) (*meta_storagepb.PutResponse, error) {
-	options := &Op{}
+func (c *client) Put(ctx context.Context, key, value []byte, opts ...opt.MetaStorageOption) (*meta_storagepb.PutResponse, error) {
+	options := &opt.MetaStorageOp{}
 	for _, opt := range opts {
 		opt(options)
 	}
@@ -122,8 +68,8 @@ func (c *client) Put(ctx context.Context, key, value []byte, opts ...OpOption) (
 	req := &meta_storagepb.PutRequest{
 		Key:    key,
 		Value:  value,
-		Lease:  options.lease,
-		PrevKv: options.prevKv,
+		Lease:  options.Lease,
+		PrevKv: options.PrevKv,
 	}
 	ctx = grpcutil.BuildForwardContext(ctx, c.GetLeaderURL())
 	cli := c.metaStorageClient()
@@ -141,13 +87,13 @@ func (c *client) Put(ctx context.Context, key, value []byte, opts ...OpOption) (
 }
 
 // Get implements the MetaStorageClient interface.
-func (c *client) Get(ctx context.Context, key []byte, opts ...OpOption) (*meta_storagepb.GetResponse, error) {
-	options := &Op{}
+func (c *client) Get(ctx context.Context, key []byte, opts ...opt.MetaStorageOption) (*meta_storagepb.GetResponse, error) {
+	options := &opt.MetaStorageOp{}
 	for _, opt := range opts {
 		opt(options)
 	}
-	if options.isOptsWithPrefix {
-		options.rangeEnd = getPrefix(key)
+	if options.IsOptsWithPrefix {
+		options.RangeEnd = getPrefix(key)
 	}
 
 	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
@@ -160,9 +106,9 @@ func (c *client) Get(ctx context.Context, key []byte, opts ...OpOption) (*meta_s
 	ctx, cancel := context.WithTimeout(ctx, c.option.Timeout)
 	req := &meta_storagepb.GetRequest{
 		Key:      key,
-		RangeEnd: options.rangeEnd,
-		Limit:    options.limit,
-		Revision: options.revision,
+		RangeEnd: options.RangeEnd,
+		Limit:    options.Limit,
+		Revision: options.Revision,
 	}
 	ctx = grpcutil.BuildForwardContext(ctx, c.GetLeaderURL())
 	cli := c.metaStorageClient()
@@ -180,14 +126,14 @@ func (c *client) Get(ctx context.Context, key []byte, opts ...OpOption) (*meta_s
 }
 
 // Watch implements the MetaStorageClient interface.
-func (c *client) Watch(ctx context.Context, key []byte, opts ...OpOption) (chan []*meta_storagepb.Event, error) {
+func (c *client) Watch(ctx context.Context, key []byte, opts ...opt.MetaStorageOption) (chan []*meta_storagepb.Event, error) {
 	eventCh := make(chan []*meta_storagepb.Event, 100)
-	options := &Op{}
+	options := &opt.MetaStorageOp{}
 	for _, opt := range opts {
 		opt(options)
 	}
-	if options.isOptsWithPrefix {
-		options.rangeEnd = getPrefix(key)
+	if options.IsOptsWithPrefix {
+		options.RangeEnd = getPrefix(key)
 	}
 
 	cli := c.metaStorageClient()
@@ -196,9 +142,9 @@ func (c *client) Watch(ctx context.Context, key []byte, opts ...OpOption) (chan 
 	}
 	res, err := cli.Watch(ctx, &meta_storagepb.WatchRequest{
 		Key:           key,
-		RangeEnd:      options.rangeEnd,
-		StartRevision: options.revision,
-		PrevKv:        options.prevKv,
+		RangeEnd:      options.RangeEnd,
+		StartRevision: options.Revision,
+		PrevKv:        options.PrevKv,
 	})
 	if err != nil {
 		close(eventCh)
