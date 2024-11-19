@@ -31,6 +31,7 @@ import (
 	"github.com/stretchr/testify/require"
 	pd "github.com/tikv/pd/client"
 	"github.com/tikv/pd/client/errs"
+	"github.com/tikv/pd/client/opt"
 )
 
 func createTestGroupCostController(re *require.Assertions) *groupCostController {
@@ -222,14 +223,19 @@ func (m *MockResourceGroupProvider) LoadResourceGroups(ctx context.Context) ([]*
 	return args.Get(0).([]*rmpb.ResourceGroup), args.Get(1).(int64), args.Error(2)
 }
 
-func (m *MockResourceGroupProvider) Watch(ctx context.Context, key []byte, opts ...pd.OpOption) (chan []*meta_storagepb.Event, error) {
+func (m *MockResourceGroupProvider) Watch(ctx context.Context, key []byte, opts ...opt.MetaStorageOption) (chan []*meta_storagepb.Event, error) {
 	args := m.Called(ctx, key, opts)
 	return args.Get(0).(chan []*meta_storagepb.Event), args.Error(1)
 }
 
-func (m *MockResourceGroupProvider) Get(ctx context.Context, key []byte, opts ...pd.OpOption) (*meta_storagepb.GetResponse, error) {
+func (m *MockResourceGroupProvider) Get(ctx context.Context, key []byte, opts ...opt.MetaStorageOption) (*meta_storagepb.GetResponse, error) {
 	args := m.Called(ctx, key, opts)
 	return args.Get(0).(*meta_storagepb.GetResponse), args.Error(1)
+}
+
+func (m *MockResourceGroupProvider) Put(ctx context.Context, key []byte, value []byte, opts ...opt.MetaStorageOption) (*meta_storagepb.PutResponse, error) {
+	args := m.Called(ctx, key, value, opts)
+	return args.Get(0).(*meta_storagepb.PutResponse), args.Error(1)
 }
 
 func TestControllerWithTwoGroupRequestConcurrency(t *testing.T) {

@@ -261,3 +261,48 @@ func WithAllowFollowerHandle() GetRegionOption {
 func WithOutputMustContainAllKeyRange() GetRegionOption {
 	return func(op *GetRegionOp) { op.OutputMustContainAllKeyRange = true }
 }
+
+// MetaStorageOp represents available options when using meta storage client.
+type MetaStorageOp struct {
+	RangeEnd         []byte
+	Revision         int64
+	PrevKv           bool
+	Lease            int64
+	Limit            int64
+	IsOptsWithPrefix bool
+}
+
+// MetaStorageOption configures MetaStorageOp.
+type MetaStorageOption func(*MetaStorageOp)
+
+// WithLimit specifies the limit of the key.
+func WithLimit(limit int64) MetaStorageOption {
+	return func(op *MetaStorageOp) { op.Limit = limit }
+}
+
+// WithRangeEnd specifies the range end of the key.
+func WithRangeEnd(rangeEnd []byte) MetaStorageOption {
+	return func(op *MetaStorageOp) { op.RangeEnd = rangeEnd }
+}
+
+// WithRev specifies the start revision of the key.
+func WithRev(revision int64) MetaStorageOption {
+	return func(op *MetaStorageOp) { op.Revision = revision }
+}
+
+// WithPrevKV specifies the previous key-value pair of the key.
+func WithPrevKV() MetaStorageOption {
+	return func(op *MetaStorageOp) { op.PrevKv = true }
+}
+
+// WithLease specifies the lease of the key.
+func WithLease(lease int64) MetaStorageOption {
+	return func(op *MetaStorageOp) { op.Lease = lease }
+}
+
+// WithPrefix specifies the prefix of the key.
+func WithPrefix() MetaStorageOption {
+	return func(op *MetaStorageOp) {
+		op.IsOptsWithPrefix = true
+	}
+}

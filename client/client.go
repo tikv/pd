@@ -32,6 +32,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/tikv/pd/client/caller"
+	"github.com/tikv/pd/client/clients/metastorage"
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/opt"
 	"github.com/tikv/pd/client/utils/tlsutil"
@@ -153,8 +154,7 @@ type RPCClient interface {
 
 	// TSOClient is the TSO client.
 	TSOClient
-	// MetaStorageClient is the meta storage client.
-	MetaStorageClient
+	metastorage.Client
 	// KeyspaceClient manages keyspace metadata.
 	KeyspaceClient
 	// GCClient manages gcSafePointV2 and serviceSafePointV2
