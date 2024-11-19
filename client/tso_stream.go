@@ -31,6 +31,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/metrics"
+	"github.com/tikv/pd/client/utils"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 )
@@ -144,7 +145,7 @@ func (s pdTSOStreamAdapter) Recv() (tsoRequestResult, error) {
 		physical:            resp.GetTimestamp().GetPhysical(),
 		logical:             resp.GetTimestamp().GetLogical(),
 		count:               resp.GetCount(),
-		respKeyspaceGroupID: defaultKeySpaceGroupID,
+		respKeyspaceGroupID: utils.DefaultKeyspaceGroupID,
 	}, nil
 }
 
@@ -432,7 +433,7 @@ recvLoop:
 		updateEstimatedLatency(currentReq.startTime, latency)
 
 		if res.count != uint32(currentReq.count) {
-			finishWithErr = errors.WithStack(errTSOLength)
+			finishWithErr = errors.WithStack(errs.ErrTSOLength)
 			break recvLoop
 		}
 

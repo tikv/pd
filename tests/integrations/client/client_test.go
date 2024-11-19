@@ -41,6 +41,7 @@ import (
 	"github.com/tikv/pd/client/caller"
 	"github.com/tikv/pd/client/opt"
 	"github.com/tikv/pd/client/retry"
+	"github.com/tikv/pd/client/sd"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/mock/mockid"
@@ -83,7 +84,7 @@ func TestClientLeaderChange(t *testing.T) {
 	}
 	cli := setupCli(ctx, re, endpointsWithWrongURL)
 	defer cli.Close()
-	innerCli, ok := cli.(interface{ GetServiceDiscovery() pd.ServiceDiscovery })
+	innerCli, ok := cli.(interface{ GetServiceDiscovery() sd.ServiceDiscovery })
 	re.True(ok)
 
 	var ts1, ts2 uint64
@@ -451,7 +452,7 @@ func TestFollowerForwardAndHandleTestSuite(t *testing.T) {
 func (suite *followerForwardAndHandleTestSuite) SetupSuite() {
 	re := suite.Require()
 	suite.ctx, suite.clean = context.WithCancel(context.Background())
-	pd.MemberHealthCheckInterval = 100 * time.Millisecond
+	sd.MemberHealthCheckInterval = 100 * time.Millisecond
 	cluster, err := tests.NewTestCluster(suite.ctx, 3)
 	re.NoError(err)
 	suite.cluster = cluster
@@ -857,7 +858,7 @@ func setupCli(ctx context.Context, re *require.Assertions, endpoints []string, o
 	return cli
 }
 
-func waitLeader(re *require.Assertions, cli pd.ServiceDiscovery, leader *tests.TestServer) {
+func waitLeader(re *require.Assertions, cli sd.ServiceDiscovery, leader *tests.TestServer) {
 	testutil.Eventually(re, func() bool {
 		cli.ScheduleCheckMemberChanged()
 		return cli.GetServingURL() == leader.GetConfig().ClientUrls && leader.GetAddr() == cli.GetServingURL()
@@ -1778,7 +1779,7 @@ func (suite *clientTestSuite) TestMemberUpdateBackOff() {
 	endpoints := runServer(re, cluster)
 	cli := setupCli(ctx, re, endpoints)
 	defer cli.Close()
-	innerCli, ok := cli.(interface{ GetServiceDiscovery() pd.ServiceDiscovery })
+	innerCli, ok := cli.(interface{ GetServiceDiscovery() sd.ServiceDiscovery })
 	re.True(ok)
 
 	leader := cluster.GetLeader()
@@ -1801,7 +1802,7 @@ func (suite *clientTestSuite) TestMemberUpdateBackOff() {
 	re.NoError(failpoint.Disable("github.com/tikv/pd/client/retry/backOffExecute"))
 }
 
-func waitLeaderChange(re *require.Assertions, cluster *tests.TestCluster, old string, cli pd.ServiceDiscovery) string {
+func waitLeaderChange(re *require.Assertions, cluster *tests.TestCluster, old string, cli sd.ServiceDiscovery) string {
 	var leader string
 	testutil.Eventually(re, func() bool {
 		cli.ScheduleCheckMemberChanged()

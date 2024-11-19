@@ -31,6 +31,7 @@ import (
 	pd "github.com/tikv/pd/client"
 	"github.com/tikv/pd/client/caller"
 	"github.com/tikv/pd/client/opt"
+	"github.com/tikv/pd/client/sd"
 	"github.com/tikv/pd/client/utils/testutil"
 	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
@@ -154,7 +155,7 @@ func (suite *tsoClientTestSuite) SetupTest() {
 			caller.TestComponent,
 			suite.getBackendEndpoints(), pd.SecurityOption{}, opt.WithForwardingOption(true))
 		re.NoError(err)
-		innerClient, ok := client.(interface{ GetServiceDiscovery() pd.ServiceDiscovery })
+		innerClient, ok := client.(interface{ GetServiceDiscovery() sd.ServiceDiscovery })
 		re.True(ok)
 		re.Equal(constant.NullKeyspaceID, innerClient.GetServiceDiscovery().GetKeyspaceID())
 		re.Equal(constant.DefaultKeyspaceGroupID, innerClient.GetServiceDiscovery().GetKeyspaceGroupID())
