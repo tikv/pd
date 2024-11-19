@@ -782,7 +782,6 @@ func (s *StoresInfo) ResetStores() {
 	s.stores = make(map[uint64]*StoreInfo)
 }
 
-
 // PauseLeaderTransfer pauses a StoreInfo with storeID. The store can not be selected
 // as source or target of TransferLeader.
 func (s *StoresInfo) PauseLeaderTransfer(storeID uint64, purpose string, direction constant.Direction) error {
