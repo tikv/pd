@@ -24,6 +24,7 @@ import (
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/client/errs"
+	"github.com/tikv/pd/client/opt"
 	"go.uber.org/zap"
 )
 
@@ -51,7 +52,7 @@ type ResourceManagerClient interface {
 	DeleteResourceGroup(ctx context.Context, resourceGroupName string) (string, error)
 	LoadResourceGroups(ctx context.Context) ([]*rmpb.ResourceGroup, int64, error)
 	AcquireTokenBuckets(ctx context.Context, request *rmpb.TokenBucketsRequest) ([]*rmpb.TokenBucketResponse, error)
-	Watch(ctx context.Context, key []byte, opts ...OpOption) (chan []*meta_storagepb.Event, error)
+	Watch(ctx context.Context, key []byte, opts ...opt.MetaStorageOption) (chan []*meta_storagepb.Event, error)
 }
 
 // GetResourceGroupOp represents available options when getting resource group.
@@ -193,7 +194,7 @@ func (c *client) DeleteResourceGroup(ctx context.Context, resourceGroupName stri
 
 // LoadResourceGroups implements the ResourceManagerClient interface.
 func (c *client) LoadResourceGroups(ctx context.Context) ([]*rmpb.ResourceGroup, int64, error) {
-	resp, err := c.Get(ctx, GroupSettingsPathPrefixBytes, WithPrefix())
+	resp, err := c.Get(ctx, GroupSettingsPathPrefixBytes, opt.WithPrefix())
 	if err != nil {
 		return nil, 0, err
 	}
