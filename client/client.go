@@ -1455,6 +1455,7 @@ func (c *client) WithCallerComponent(callerComponent caller.Component) RPCClient
 // adjustCallerComponent returns the caller component if it is empty, it
 // is the upper layer of the pd client.
 func adjustCallerComponent(callerComponent caller.Component) caller.Component {
+	callerComponent = caller.Component(strings.TrimSpace(string(callerComponent)))
 	if len(callerComponent) != 0 {
 		return callerComponent
 	}
