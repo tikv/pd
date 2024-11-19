@@ -233,6 +233,11 @@ func (m *MockResourceGroupProvider) Get(ctx context.Context, key []byte, opts ..
 	return args.Get(0).(*meta_storagepb.GetResponse), args.Error(1)
 }
 
+func (m *MockResourceGroupProvider) Put(ctx context.Context, key []byte, value []byte, opts ...opt.MetaStorageOption) (*meta_storagepb.PutResponse, error) {
+	args := m.Called(ctx, key, value, opts)
+	return args.Get(0).(*meta_storagepb.PutResponse), args.Error(1)
+}
+
 func TestControllerWithTwoGroupRequestConcurrency(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
