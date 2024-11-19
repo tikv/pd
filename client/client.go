@@ -34,7 +34,12 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+<<<<<<< HEAD
 
+=======
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/tikv/pd/client/clients/metastorage"
+>>>>>>> 36cc3f41f2 (client: split the meta storage client (#8822))
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/metrics"
 	"github.com/tikv/pd/client/tlsutil"
@@ -149,8 +154,7 @@ type RPCClient interface {
 
 	// TSOClient is the TSO client.
 	TSOClient
-	// MetaStorageClient is the meta storage client.
-	MetaStorageClient
+	metastorage.Client
 	// KeyspaceClient manages keyspace metadata.
 	KeyspaceClient
 	// GCClient manages gcSafePointV2 and serviceSafePointV2
@@ -559,7 +563,7 @@ func (c *client) resetTSOClientLocked(mode pdpb.ServiceMode) {
 			c.pdSvcDiscovery, &pdTSOStreamBuilderFactory{})
 	case pdpb.ServiceMode_API_SVC_MODE:
 		newTSOSvcDiscovery = newTSOServiceDiscovery(
-			c.ctx, MetaStorageClient(c), c.pdSvcDiscovery,
+			c.ctx, metastorage.Client(c), c.pdSvcDiscovery,
 			c.keyspaceID, c.tlsCfg, c.option)
 		// At this point, the keyspace group isn't known yet. Starts from the default keyspace group,
 		// and will be updated later.
