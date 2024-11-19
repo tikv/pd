@@ -267,11 +267,11 @@ func (suite *tsoClientTestSuite) TestDiscoverTSOServiceWithLegacyPath() {
 	failpointValue := fmt.Sprintf(`return(%d)`, keyspaceID)
 	// Simulate the case that the server has lower version than the client and returns no tso addrs
 	// in the GetClusterInfo RPC.
-	re.NoError(failpoint.Enable("github.com/tikv/pd/client/serverReturnsNoTSOAddrs", `return(true)`))
-	re.NoError(failpoint.Enable("github.com/tikv/pd/client/unexpectedCallOfFindGroupByKeyspaceID", failpointValue))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/sd/serverReturnsNoTSOAddrs", `return(true)`))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/sd/unexpectedCallOfFindGroupByKeyspaceID", failpointValue))
 	defer func() {
-		re.NoError(failpoint.Disable("github.com/tikv/pd/client/serverReturnsNoTSOAddrs"))
-		re.NoError(failpoint.Disable("github.com/tikv/pd/client/unexpectedCallOfFindGroupByKeyspaceID"))
+		re.NoError(failpoint.Disable("github.com/tikv/pd/client/sd/serverReturnsNoTSOAddrs"))
+		re.NoError(failpoint.Disable("github.com/tikv/pd/client/sd/unexpectedCallOfFindGroupByKeyspaceID"))
 	}()
 
 	ctx, cancel := context.WithCancel(suite.ctx)
@@ -321,14 +321,14 @@ func (suite *tsoClientTestSuite) TestGetMinTS() {
 	}
 	wg.Wait()
 
-	re.NoError(failpoint.Enable("github.com/tikv/pd/client/unreachableNetwork1", "return(true)"))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/sd/unreachableNetwork1", "return(true)"))
 	time.Sleep(time.Second)
 	testutil.Eventually(re, func() bool {
 		var err error
 		_, _, err = suite.clients[0].GetMinTS(suite.ctx)
 		return err == nil
 	})
-	re.NoError(failpoint.Disable("github.com/tikv/pd/client/unreachableNetwork1"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/sd/unreachableNetwork1"))
 }
 
 // More details can be found in this issue: https://github.com/tikv/pd/issues/4884
@@ -488,10 +488,10 @@ func TestMixedTSODeployment(t *testing.T) {
 	re := require.New(t)
 
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/fastUpdatePhysicalInterval", "return(true)"))
-	re.NoError(failpoint.Enable("github.com/tikv/pd/client/skipUpdateServiceMode", "return(true)"))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/sd/skipUpdateServiceMode", "return(true)"))
 	defer func() {
 		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/tso/fastUpdatePhysicalInterval"))
-		re.NoError(failpoint.Disable("github.com/tikv/pd/client/skipUpdateServiceMode"))
+		re.NoError(failpoint.Disable("github.com/tikv/pd/client/sd/skipUpdateServiceMode"))
 	}()
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -551,7 +551,7 @@ func TestUpgradingAPIandTSOClusters(t *testing.T) {
 	backendEndpoints := pdLeader.GetAddr()
 
 	// Create a pd client in PD mode to let the API leader to forward requests to the TSO cluster.
-	re.NoError(failpoint.Enable("github.com/tikv/pd/client/usePDServiceMode", "return(true)"))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/sd/usePDServiceMode", "return(true)"))
 	pdClient, err := pd.NewClientWithContext(context.Background(),
 		caller.TestComponent,
 		[]string{backendEndpoints}, pd.SecurityOption{}, opt.WithMaxErrorRetry(1))
@@ -580,7 +580,7 @@ func TestUpgradingAPIandTSOClusters(t *testing.T) {
 	tsoCluster.Destroy()
 	apiCluster.Destroy()
 	cancel()
-	re.NoError(failpoint.Disable("github.com/tikv/pd/client/usePDServiceMode"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/sd/usePDServiceMode"))
 }
 
 func checkTSO(

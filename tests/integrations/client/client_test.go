@@ -325,7 +325,7 @@ func TestTSOFollowerProxy(t *testing.T) {
 
 func TestTSOFollowerProxyWithTSOService(t *testing.T) {
 	re := require.New(t)
-	re.NoError(failpoint.Enable("github.com/tikv/pd/client/fastUpdateServiceMode", `return(true)`))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/sd/fastUpdateServiceMode", `return(true)`))
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	cluster, err := tests.NewTestAPICluster(ctx, 1)
@@ -347,7 +347,7 @@ func TestTSOFollowerProxyWithTSOService(t *testing.T) {
 	// TSO service does not support the follower proxy, so enabling it should fail.
 	err = cli.UpdateOption(opt.EnableTSOFollowerProxy, true)
 	re.Error(err)
-	re.NoError(failpoint.Disable("github.com/tikv/pd/client/fastUpdateServiceMode"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/sd/fastUpdateServiceMode"))
 }
 
 // TestUnavailableTimeAfterLeaderIsReady is used to test https://github.com/tikv/pd/issues/5207
@@ -498,13 +498,13 @@ func (suite *followerForwardAndHandleTestSuite) TestGetRegionByFollowerForwardin
 
 	cli := setupCli(ctx, re, suite.endpoints, opt.WithForwardingOption(true))
 	defer cli.Close()
-	re.NoError(failpoint.Enable("github.com/tikv/pd/client/unreachableNetwork1", "return(true)"))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/sd/unreachableNetwork1", "return(true)"))
 	time.Sleep(200 * time.Millisecond)
 	r, err := cli.GetRegion(context.Background(), []byte("a"))
 	re.NoError(err)
 	re.NotNil(r)
 
-	re.NoError(failpoint.Disable("github.com/tikv/pd/client/unreachableNetwork1"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/sd/unreachableNetwork1"))
 	time.Sleep(200 * time.Millisecond)
 	r, err = cli.GetRegion(context.Background(), []byte("a"))
 	re.NoError(err)
@@ -720,7 +720,7 @@ func (suite *followerForwardAndHandleTestSuite) TestGetRegionFromFollower() {
 
 	// because we can't check whether this request is processed by followers from response,
 	// we can disable forward and make network problem for leader.
-	re.NoError(failpoint.Enable("github.com/tikv/pd/client/unreachableNetwork1", fmt.Sprintf("return(\"%s\")", leader.GetAddr())))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/sd/unreachableNetwork1", fmt.Sprintf("return(\"%s\")", leader.GetAddr())))
 	time.Sleep(150 * time.Millisecond)
 	cnt = 0
 	for range 100 {
@@ -731,11 +731,11 @@ func (suite *followerForwardAndHandleTestSuite) TestGetRegionFromFollower() {
 		re.Equal(resp.Meta.Id, suite.regionID)
 	}
 	re.Equal(100, cnt)
-	re.NoError(failpoint.Disable("github.com/tikv/pd/client/unreachableNetwork1"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/sd/unreachableNetwork1"))
 
 	// make network problem for follower.
 	follower := cluster.GetServer(cluster.GetFollower())
-	re.NoError(failpoint.Enable("github.com/tikv/pd/client/unreachableNetwork1", fmt.Sprintf("return(\"%s\")", follower.GetAddr())))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/sd/unreachableNetwork1", fmt.Sprintf("return(\"%s\")", follower.GetAddr())))
 	time.Sleep(100 * time.Millisecond)
 	cnt = 0
 	for range 100 {
@@ -746,7 +746,7 @@ func (suite *followerForwardAndHandleTestSuite) TestGetRegionFromFollower() {
 		re.Equal(resp.Meta.Id, suite.regionID)
 	}
 	re.Equal(100, cnt)
-	re.NoError(failpoint.Disable("github.com/tikv/pd/client/unreachableNetwork1"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/sd/unreachableNetwork1"))
 
 	// follower client failed will retry by leader service client.
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/followerHandleError", "return(true)"))
@@ -762,8 +762,8 @@ func (suite *followerForwardAndHandleTestSuite) TestGetRegionFromFollower() {
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/followerHandleError"))
 
 	// test after being healthy
-	re.NoError(failpoint.Enable("github.com/tikv/pd/client/unreachableNetwork1", fmt.Sprintf("return(\"%s\")", leader.GetAddr())))
-	re.NoError(failpoint.Enable("github.com/tikv/pd/client/fastCheckAvailable", "return(true)"))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/sd/unreachableNetwork1", fmt.Sprintf("return(\"%s\")", leader.GetAddr())))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/sd/fastCheckAvailable", "return(true)"))
 	time.Sleep(100 * time.Millisecond)
 	cnt = 0
 	for range 100 {
@@ -774,8 +774,8 @@ func (suite *followerForwardAndHandleTestSuite) TestGetRegionFromFollower() {
 		re.Equal(resp.Meta.Id, suite.regionID)
 	}
 	re.Equal(100, cnt)
-	re.NoError(failpoint.Disable("github.com/tikv/pd/client/unreachableNetwork1"))
-	re.NoError(failpoint.Disable("github.com/tikv/pd/client/fastCheckAvailable"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/sd/unreachableNetwork1"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/sd/fastCheckAvailable"))
 }
 
 func (suite *followerForwardAndHandleTestSuite) TestGetTSFuture() {
