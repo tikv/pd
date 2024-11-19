@@ -1850,15 +1850,15 @@ func TestStores(t *testing.T) {
 	for i, store := range stores {
 		id := store.GetID()
 		re.Nil(cache.GetStore(id))
-		re.Error(cache.PauseLeaderTransfer(id, ""))
+		re.Error(cache.PauseLeaderTransfer(id, "", constant.In))
 		cache.PutStore(store)
 		re.Equal(store, cache.GetStore(id))
 		re.Equal(i+1, cache.GetStoreCount())
-		re.NoError(cache.PauseLeaderTransfer(id, ""))
-		re.False(cache.GetStore(id).AllowLeaderTransfer())
-		re.Error(cache.PauseLeaderTransfer(id, ""))
-		cache.ResumeLeaderTransfer(id, "")
-		re.True(cache.GetStore(id).AllowLeaderTransfer())
+		re.NoError(cache.PauseLeaderTransfer(id, "", constant.In))
+		re.False(cache.GetStore(id).AllowLeaderTransferIn())
+		re.Error(cache.PauseLeaderTransfer(id, "", constant.In))
+		cache.ResumeLeaderTransfer(id, "", constant.In)
+		re.True(cache.GetStore(id).AllowLeaderTransferIn())
 	}
 	re.Equal(int(n), cache.GetStoreCount())
 
@@ -2619,7 +2619,7 @@ func prepare(setCfg func(*sc.ScheduleConfig), setTc func(*testCluster), run func
 		setCfg(cfg)
 	}
 	tc := newTestCluster(ctx, opt)
-	hbStreams := hbstream.NewTestHeartbeatStreams(ctx, tc.meta.GetId(), tc, true /* need to run */)
+	hbStreams := hbstream.NewTestHeartbeatStreams(ctx, tc, true /* need to run */)
 	if setTc != nil {
 		setTc(tc)
 	}
@@ -2873,6 +2873,8 @@ func TestCheckCache(t *testing.T) {
 		cfg.ReplicaScheduleLimit = 0
 	}, nil, nil, re)
 	defer cleanup()
+	oc := co.GetOperatorController()
+	checker := co.GetCheckerController()
 
 	re.NoError(tc.addRegionStore(1, 0))
 	re.NoError(tc.addRegionStore(2, 0))
@@ -2883,38 +2885,94 @@ func TestCheckCache(t *testing.T) {
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/checker/breakPatrol", `return`))
 
 	// case 1: operator cannot be created due to replica-schedule-limit restriction
-	co.GetWaitGroup().Add(1)
-	co.PatrolRegions()
-	re.Len(co.GetCheckerController().GetPendingProcessedRegions(), 1)
+	checker.PatrolRegions()
+	re.Empty(oc.GetOperators())
+	re.Len(checker.GetPendingProcessedRegions(), 1)
 
 	// cancel the replica-schedule-limit restriction
 	cfg := tc.GetScheduleConfig()
 	cfg.ReplicaScheduleLimit = 10
 	tc.SetScheduleConfig(cfg)
-	co.GetWaitGroup().Add(1)
-	co.PatrolRegions()
-	oc := co.GetOperatorController()
+	checker.PatrolRegions()
 	re.Len(oc.GetOperators(), 1)
-	re.Empty(co.GetCheckerController().GetPendingProcessedRegions())
+	re.Empty(checker.GetPendingProcessedRegions())
 
 	// case 2: operator cannot be created due to store limit restriction
 	oc.RemoveOperator(oc.GetOperator(1))
 	tc.SetStoreLimit(1, storelimit.AddPeer, 0)
-	co.GetWaitGroup().Add(1)
-	co.PatrolRegions()
-	re.Len(co.GetCheckerController().GetPendingProcessedRegions(), 1)
+	checker.PatrolRegions()
+	re.Len(checker.GetPendingProcessedRegions(), 1)
 
 	// cancel the store limit restriction
 	tc.SetStoreLimit(1, storelimit.AddPeer, 10)
 	time.Sleep(time.Second)
-	co.GetWaitGroup().Add(1)
-	co.PatrolRegions()
+	checker.PatrolRegions()
 	re.Len(oc.GetOperators(), 1)
-	re.Empty(co.GetCheckerController().GetPendingProcessedRegions())
+	re.Empty(checker.GetPendingProcessedRegions())
 
 	co.GetSchedulersController().Wait()
 	co.GetWaitGroup().Wait()
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/checker/breakPatrol"))
+}
+
+func TestPatrolRegionConcurrency(t *testing.T) {
+	re := require.New(t)
+
+	regionNum := 10000
+	mergeScheduleLimit := 15
+
+	tc, co, cleanup := prepare(func(cfg *sc.ScheduleConfig) {
+		cfg.PatrolRegionWorkerCount = 8
+		cfg.MergeScheduleLimit = uint64(mergeScheduleLimit)
+	}, nil, nil, re)
+	defer cleanup()
+	oc := co.GetOperatorController()
+	checker := co.GetCheckerController()
+
+	tc.opt.SetSplitMergeInterval(time.Duration(0))
+	for i := range 3 {
+		if err := tc.addRegionStore(uint64(i+1), regionNum); err != nil {
+			return
+		}
+	}
+	for i := range regionNum {
+		if err := tc.addLeaderRegion(uint64(i), 1, 2, 3); err != nil {
+			return
+		}
+	}
+
+	// test patrol region concurrency
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/checker/breakPatrol", `return`))
+	checker.PatrolRegions()
+	testutil.Eventually(re, func() bool {
+		return len(oc.GetOperators()) >= mergeScheduleLimit
+	})
+	checkOperatorDuplicate(re, oc.GetOperators())
+
+	// test patrol region concurrency with suspect regions
+	suspectRegions := make([]uint64, 0)
+	for i := range 10 {
+		suspectRegions = append(suspectRegions, uint64(i))
+	}
+	checker.AddPendingProcessedRegions(false, suspectRegions...)
+	checker.PatrolRegions()
+	testutil.Eventually(re, func() bool {
+		return len(oc.GetOperators()) >= mergeScheduleLimit
+	})
+	checkOperatorDuplicate(re, oc.GetOperators())
+	co.GetSchedulersController().Wait()
+	co.GetWaitGroup().Wait()
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/checker/breakPatrol"))
+}
+
+func checkOperatorDuplicate(re *require.Assertions, ops []*operator.Operator) {
+	regionMap := make(map[uint64]struct{})
+	for _, op := range ops {
+		if _, ok := regionMap[op.RegionID()]; ok {
+			re.Fail("duplicate operator")
+		}
+		regionMap[op.RegionID()] = struct{}{}
+	}
 }
 
 func TestScanLimit(t *testing.T) {
@@ -2951,8 +3009,7 @@ func checkScanLimit(re *require.Assertions, regionCount int, expectScanLimit ...
 		re.NoError(tc.putRegion(region))
 	}
 
-	co.GetWaitGroup().Add(1)
-	co.PatrolRegions()
+	co.GetCheckerController().PatrolRegions()
 	defer func() {
 		co.GetSchedulersController().Wait()
 		co.GetWaitGroup().Wait()
@@ -3443,9 +3500,9 @@ func BenchmarkPatrolRegion(b *testing.B) {
 	}()
 	<-listen
 
-	co.GetWaitGroup().Add(1)
 	b.ResetTimer()
-	co.PatrolRegions()
+	checker := co.GetCheckerController()
+	checker.PatrolRegions()
 }
 
 func waitOperator(re *require.Assertions, co *schedule.Coordinator, regionID uint64) {

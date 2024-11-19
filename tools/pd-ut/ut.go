@@ -719,8 +719,8 @@ func generateBuildCache() error {
 		return nil
 	}
 	fmt.Println("generate build cache")
-	// cd cmd/pd-server && go test -tags=tso_function_test,deadlock -exec-=true -vet=off -toolexec=go-compile-without-link
-	cmd := exec.Command("go", "test", "-exec=true", "-vet", "off", "--tags=tso_function_test,deadlock")
+	// cd cmd/pd-server && go test -tags=deadlock -exec-=true -vet=off -toolexec=go-compile-without-link
+	cmd := exec.Command("go", "test", "-exec=true", "-vet", "off", "--tags=deadlock")
 	goCompileWithoutLink := fmt.Sprintf("-toolexec=%s", filepath.Join(workDir, "tools", "pd-ut", "go-compile-without-link.sh"))
 	cmd.Dir = filepath.Join(workDir, "cmd", "pd-server")
 	if strings.Contains(workDir, integrationsTestPath) {
@@ -745,7 +745,7 @@ func buildTestBinaryMulti(pkgs []string) ([]byte, error) {
 		return nil, withTrace(err)
 	}
 
-	// go test --exec=xprog --tags=tso_function_test,deadlock -vet=off --count=0 $(pkgs)
+	// go test --exec=xprog --tags=deadlock -vet=off --count=0 $(pkgs)
 	// workPath just like `/pd/tests/integrations`
 	xprogPath := filepath.Join(workDir, "bin", "xprog")
 	if strings.Contains(workDir, integrationsTestPath) {
@@ -758,7 +758,7 @@ func buildTestBinaryMulti(pkgs []string) ([]byte, error) {
 
 	// We use 2 * parallel for `go build` to make it faster.
 	p := strconv.Itoa(parallel * 2)
-	cmd := exec.Command("go", "test", "-p", p, "--exec", xprogPath, "-vet", "off", "--tags=tso_function_test,deadlock")
+	cmd := exec.Command("go", "test", "-p", p, "--exec", xprogPath, "-vet", "off", "--tags=deadlock")
 	if coverProfile != "" {
 		coverPkg := strings.Join([]string{".", "..."}, string(filepath.Separator))
 		if strings.Contains(workDir, integrationsTestPath) {
@@ -793,7 +793,7 @@ func buildTestBinaryMulti(pkgs []string) ([]byte, error) {
 
 func buildTestBinary(pkg string) error {
 	//nolint:gosec
-	cmd := exec.Command("go", "test", "-c", "-vet", "off", "--tags=tso_function_test,deadlock", "-o", testFileName(pkg), "-v")
+	cmd := exec.Command("go", "test", "-c", "-vet", "off", "--tags=deadlock", "-o", testFileName(pkg), "-v")
 	if coverProfile != "" {
 		coverPkg := strings.Join([]string{".", "..."}, string(filepath.Separator))
 		cmd.Args = append(cmd.Args, "-cover", fmt.Sprintf("-coverpkg=%s", coverPkg))

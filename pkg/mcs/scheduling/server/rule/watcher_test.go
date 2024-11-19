@@ -66,10 +66,10 @@ func runWatcherLoadLabelRule(ctx context.Context, re *require.Assertions, client
 	rw := &Watcher{
 		ctx:                   ctx,
 		cancel:                cancel,
-		rulesPathPrefix:       keypath.RulesPathPrefix(clusterID),
-		ruleCommonPathPrefix:  keypath.RuleCommonPathPrefix(clusterID),
-		ruleGroupPathPrefix:   keypath.RuleGroupPathPrefix(clusterID),
-		regionLabelPathPrefix: keypath.RegionLabelPathPrefix(clusterID),
+		rulesPathPrefix:       keypath.RulesPathPrefix(),
+		ruleCommonPathPrefix:  keypath.RuleCommonPathPrefix(),
+		ruleGroupPathPrefix:   keypath.RuleGroupPathPrefix(),
+		regionLabelPathPrefix: keypath.RegionLabelPathPrefix(),
 		etcdClient:            client,
 		ruleStorage:           storage,
 		regionLabeler:         labelerManager,
@@ -101,7 +101,7 @@ func prepare(t require.TestingT) (context.Context, *clientv3.Client, func()) {
 		}
 		value, err := json.Marshal(rule)
 		re.NoError(err)
-		key := keypath.RegionLabelPathPrefix(clusterID) + "/" + rule.ID
+		key := keypath.RegionLabelPathPrefix() + "/" + rule.ID
 		_, err = clientv3.NewKV(client).Put(ctx, key, string(value))
 		re.NoError(err)
 	}

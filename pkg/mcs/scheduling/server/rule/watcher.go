@@ -76,7 +76,6 @@ type Watcher struct {
 func NewWatcher(
 	ctx context.Context,
 	etcdClient *clientv3.Client,
-	clusterID uint64,
 	ruleStorage endpoint.RuleStorage,
 	checkerController *checker.Controller,
 	ruleManager *placement.RuleManager,
@@ -86,10 +85,10 @@ func NewWatcher(
 	rw := &Watcher{
 		ctx:                   ctx,
 		cancel:                cancel,
-		rulesPathPrefix:       keypath.RulesPathPrefix(clusterID),
-		ruleCommonPathPrefix:  keypath.RuleCommonPathPrefix(clusterID),
-		ruleGroupPathPrefix:   keypath.RuleGroupPathPrefix(clusterID),
-		regionLabelPathPrefix: keypath.RegionLabelPathPrefix(clusterID),
+		rulesPathPrefix:       keypath.RulesPathPrefix(),
+		ruleCommonPathPrefix:  keypath.RuleCommonPathPrefix(),
+		ruleGroupPathPrefix:   keypath.RuleGroupPathPrefix(),
+		regionLabelPathPrefix: keypath.RegionLabelPathPrefix(),
 		etcdClient:            etcdClient,
 		ruleStorage:           ruleStorage,
 		checkerController:     checkerController,

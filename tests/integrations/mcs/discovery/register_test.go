@@ -85,7 +85,7 @@ func (suite *serverRegisterTestSuite) checkServerRegister(serviceName string) {
 	client := suite.pdLeader.GetEtcdClient()
 	// test API server discovery
 
-	endpoints, err := discovery.Discover(client, suite.clusterID, serviceName)
+	endpoints, err := discovery.Discover(client, serviceName)
 	re.NoError(err)
 	returnedEntry := &discovery.ServiceRegistryEntry{}
 	returnedEntry.Deserialize([]byte(endpoints[0]))
@@ -99,7 +99,7 @@ func (suite *serverRegisterTestSuite) checkServerRegister(serviceName string) {
 
 	// test API server discovery after unregister
 	cleanup()
-	endpoints, err = discovery.Discover(client, suite.clusterID, serviceName)
+	endpoints, err = discovery.Discover(client, serviceName)
 	re.NoError(err)
 	re.Empty(endpoints)
 	testutil.Eventually(re, func() bool {
@@ -141,7 +141,7 @@ func (suite *serverRegisterTestSuite) checkServerPrimaryChange(serviceName strin
 	expectedPrimary = tests.WaitForPrimaryServing(re, serverMap)
 	// test API server discovery
 	client := suite.pdLeader.GetEtcdClient()
-	endpoints, err := discovery.Discover(client, suite.clusterID, serviceName)
+	endpoints, err := discovery.Discover(client, serviceName)
 	re.NoError(err)
 	re.Len(endpoints, serverNum-1)
 
@@ -156,8 +156,6 @@ func (suite *serverRegisterTestSuite) addServer(serviceName string) (bs.Server, 
 	switch serviceName {
 	case constant.TSOServiceName:
 		return tests.StartSingleTSOTestServer(suite.ctx, re, suite.backendEndpoints, tempurl.Alloc())
-	case constant.ResourceManagerServiceName:
-		return tests.StartSingleResourceManagerTestServer(suite.ctx, re, suite.backendEndpoints, tempurl.Alloc())
 	default:
 		return nil, nil
 	}

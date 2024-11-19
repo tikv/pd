@@ -26,6 +26,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/coreos/go-semver/semver"
@@ -157,17 +158,15 @@ type RaftCluster struct {
 	isAPIServiceMode bool
 	meta             *metapb.Cluster
 	storage          storage.Storage
-	minResolvedTS    uint64
-	externalTS       uint64
+	minResolvedTS    atomic.Value // Store as uint64
+	externalTS       atomic.Value // Store as uint64
 
 	// Keep the previous store limit settings when removing a store.
 	prevStoreLimit map[uint64]map[storelimit.Type]float64
 
 	// This below fields are all read-only, we cannot update itself after the raft cluster starts.
-	clusterID uint64
-	id        id.Allocator
-	opt       *config.PersistOptions
-	limiter   *StoreLimiter
+	id  id.Allocator
+	opt *config.PersistOptions
 	*schedulingController
 	ruleManager              *placement.RuleManager
 	regionLabeler            *labeler.RegionLabeler
@@ -200,11 +199,18 @@ type Status struct {
 }
 
 // NewRaftCluster create a new cluster.
-func NewRaftCluster(ctx context.Context, clusterID uint64, member *member.EmbeddedEtcdMember, basicCluster *core.BasicCluster, storage storage.Storage, regionSyncer *syncer.RegionSyncer, etcdClient *clientv3.Client,
-	httpClient *http.Client, tsoAllocator *tso.AllocatorManager) *RaftCluster {
+func NewRaftCluster(
+	ctx context.Context,
+	member *member.EmbeddedEtcdMember,
+	basicCluster *core.BasicCluster,
+	storage storage.Storage,
+	regionSyncer *syncer.RegionSyncer,
+	etcdClient *clientv3.Client,
+	httpClient *http.Client,
+	tsoAllocator *tso.AllocatorManager,
+) *RaftCluster {
 	return &RaftCluster{
 		serverCtx:       ctx,
-		clusterID:       clusterID,
 		member:          member,
 		regionSyncer:    regionSyncer,
 		httpClient:      httpClient,
@@ -347,11 +353,8 @@ func (c *RaftCluster) Start(s Server) error {
 	if err != nil {
 		return err
 	}
-	c.limiter = NewStoreLimiter(s.GetPersistOptions())
-	c.externalTS, err = c.storage.LoadExternalTS()
-	if err != nil {
-		log.Error("load external timestamp meets error", zap.Error(err))
-	}
+	c.loadExternalTS()
+	c.loadMinResolvedTS()
 
 	if c.isAPIServiceMode {
 		// bootstrap keyspace group manager after starting other parts successfully.
@@ -382,7 +385,7 @@ func (c *RaftCluster) Start(s Server) error {
 
 func (c *RaftCluster) checkSchedulingService() {
 	if c.isAPIServiceMode {
-		servers, err := discovery.Discover(c.etcdClient, strconv.FormatUint(c.clusterID, 10), constant.SchedulingServiceName)
+		servers, err := discovery.Discover(c.etcdClient, constant.SchedulingServiceName)
 		if c.opt.GetMicroServiceConfig().IsSchedulingFallbackEnabled() && (err != nil || len(servers) == 0) {
 			c.startSchedulingJobs(c, c.hbstreams)
 			c.UnsetServiceIndependent(constant.SchedulingServiceName)
@@ -403,11 +406,32 @@ func (c *RaftCluster) checkSchedulingService() {
 // checkTSOService checks the TSO service.
 func (c *RaftCluster) checkTSOService() {
 	if c.isAPIServiceMode {
+		if c.opt.GetMicroServiceConfig().IsTSODynamicSwitchingEnabled() {
+			servers, err := discovery.Discover(c.etcdClient, constant.TSOServiceName)
+			if err != nil || len(servers) == 0 {
+				if err := c.startTSOJobsIfNeeded(); err != nil {
+					log.Error("failed to start TSO jobs", errs.ZapError(err))
+					return
+				}
+				if c.IsServiceIndependent(constant.TSOServiceName) {
+					log.Info("TSO is provided by PD")
+					c.UnsetServiceIndependent(constant.TSOServiceName)
+				}
+			} else {
+				if err := c.stopTSOJobsIfNeeded(); err != nil {
+					log.Error("failed to stop TSO jobs", errs.ZapError(err))
+					return
+				}
+				if !c.IsServiceIndependent(constant.TSOServiceName) {
+					log.Info("TSO is provided by TSO server")
+					c.SetServiceIndependent(constant.TSOServiceName)
+				}
+			}
+		}
 		return
 	}
 
-	if err := c.startTSOJobs(); err != nil {
-		// If there is an error, need to wait for the next check.
+	if err := c.startTSOJobsIfNeeded(); err != nil {
 		log.Error("failed to start TSO jobs", errs.ZapError(err))
 		return
 	}
@@ -422,6 +446,8 @@ func (c *RaftCluster) runServiceCheckJob() {
 		schedulingTicker.Reset(time.Millisecond)
 	})
 	defer schedulingTicker.Stop()
+	tsoTicker := time.NewTicker(tsoServiceCheckInterval)
+	defer tsoTicker.Stop()
 
 	for {
 		select {
@@ -429,12 +455,27 @@ func (c *RaftCluster) runServiceCheckJob() {
 			log.Info("service check job is stopped")
 			return
 		case <-schedulingTicker.C:
-			c.checkSchedulingService()
+			// ensure raft cluster is running
+			// avoid unexpected startSchedulingJobs when raft cluster is stopping
+			c.RLock()
+			if c.running {
+				c.checkSchedulingService()
+			}
+			c.RUnlock()
+		case <-tsoTicker.C:
+			// ensure raft cluster is running
+			// avoid unexpected startTSOJobsIfNeeded when raft cluster is stopping
+			// ref: https://github.com/tikv/pd/issues/8781
+			c.RLock()
+			if c.running {
+				c.checkTSOService()
+			}
+			c.RUnlock()
 		}
 	}
 }
 
-func (c *RaftCluster) startTSOJobs() error {
+func (c *RaftCluster) startTSOJobsIfNeeded() error {
 	allocator, err := c.tsoAllocator.GetAllocator(tso.GlobalDCLocation)
 	if err != nil {
 		log.Error("failed to get global TSO allocator", errs.ZapError(err))
@@ -450,13 +491,14 @@ func (c *RaftCluster) startTSOJobs() error {
 	return nil
 }
 
-func (c *RaftCluster) stopTSOJobs() error {
+func (c *RaftCluster) stopTSOJobsIfNeeded() error {
 	allocator, err := c.tsoAllocator.GetAllocator(tso.GlobalDCLocation)
 	if err != nil {
 		log.Error("failed to get global TSO allocator", errs.ZapError(err))
 		return err
 	}
 	if allocator.IsInitialize() {
+		log.Info("closing the global TSO allocator")
 		c.tsoAllocator.ResetAllocatorGroup(tso.GlobalDCLocation, true)
 		failpoint.Inject("updateAfterResetTSO", func() {
 			allocator, _ := c.tsoAllocator.GetAllocator(tso.GlobalDCLocation)
@@ -818,7 +860,7 @@ func (c *RaftCluster) Stop() {
 	if !c.IsServiceIndependent(constant.SchedulingServiceName) {
 		c.stopSchedulingJobs()
 	}
-	if err := c.stopTSOJobs(); err != nil {
+	if err := c.stopTSOJobsIfNeeded(); err != nil {
 		log.Error("failed to stop tso jobs", errs.ZapError(err))
 	}
 	c.heartbeatRunner.Stop()
@@ -2103,8 +2145,8 @@ func (c *RaftCluster) GetMetaCluster() *metapb.Cluster {
 func (c *RaftCluster) PutMetaCluster(meta *metapb.Cluster) error {
 	c.Lock()
 	defer c.Unlock()
-	if meta.GetId() != c.clusterID {
-		return errors.Errorf("invalid cluster %v, mismatch cluster id %d", meta, c.clusterID)
+	if meta.GetId() != keypath.ClusterID() {
+		return errors.Errorf("invalid cluster %v, mismatch cluster id %d", meta, keypath.ClusterID())
 	}
 	return c.putMetaLocked(typeutil.DeepClone(meta, core.ClusterFactory))
 }
@@ -2131,11 +2173,6 @@ func (c *RaftCluster) putRegion(region *core.RegionInfo) error {
 	}
 	c.PutRegion(region)
 	return nil
-}
-
-// GetStoreLimiter returns the dynamic adjusting limiter
-func (c *RaftCluster) GetStoreLimiter() *StoreLimiter {
-	return c.limiter
 }
 
 // GetStoreLimitByType returns the store limit for a given store ID and type.
@@ -2215,28 +2252,27 @@ func (c *RaftCluster) SetMinResolvedTS(storeID, minResolvedTS uint64) error {
 }
 
 // CheckAndUpdateMinResolvedTS checks and updates the min resolved ts of the cluster.
+// It only be called by the background job runMinResolvedTSJob.
 // This is exported for testing purpose.
 func (c *RaftCluster) CheckAndUpdateMinResolvedTS() (uint64, bool) {
-	c.Lock()
-	defer c.Unlock()
-
 	if !c.isInitialized() {
 		return math.MaxUint64, false
 	}
-	curMinResolvedTS := uint64(math.MaxUint64)
+	newMinResolvedTS := uint64(math.MaxUint64)
 	for _, s := range c.GetStores() {
 		if !core.IsAvailableForMinResolvedTS(s) {
 			continue
 		}
-		if curMinResolvedTS > s.GetMinResolvedTS() {
-			curMinResolvedTS = s.GetMinResolvedTS()
+		if newMinResolvedTS > s.GetMinResolvedTS() {
+			newMinResolvedTS = s.GetMinResolvedTS()
 		}
 	}
-	if curMinResolvedTS == math.MaxUint64 || curMinResolvedTS <= c.minResolvedTS {
-		return c.minResolvedTS, false
+	oldMinResolvedTS := c.minResolvedTS.Load().(uint64)
+	if newMinResolvedTS == math.MaxUint64 || newMinResolvedTS <= oldMinResolvedTS {
+		return oldMinResolvedTS, false
 	}
-	c.minResolvedTS = curMinResolvedTS
-	return c.minResolvedTS, true
+	c.minResolvedTS.Store(newMinResolvedTS)
+	return newMinResolvedTS, true
 }
 
 func (c *RaftCluster) runMinResolvedTSJob() {
@@ -2250,7 +2286,6 @@ func (c *RaftCluster) runMinResolvedTSJob() {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
-	c.loadMinResolvedTS()
 	for {
 		select {
 		case <-c.ctx.Done():
@@ -2280,25 +2315,19 @@ func (c *RaftCluster) loadMinResolvedTS() {
 		log.Error("load min resolved ts meet error", errs.ZapError(err))
 		return
 	}
-	c.Lock()
-	defer c.Unlock()
-	c.minResolvedTS = minResolvedTS
+	c.minResolvedTS.Store(minResolvedTS)
 }
 
 // GetMinResolvedTS returns the min resolved ts of the cluster.
 func (c *RaftCluster) GetMinResolvedTS() uint64 {
-	c.RLock()
-	defer c.RUnlock()
 	if !c.isInitialized() {
 		return math.MaxUint64
 	}
-	return c.minResolvedTS
+	return c.minResolvedTS.Load().(uint64)
 }
 
 // GetStoreMinResolvedTS returns the min resolved ts of the store.
 func (c *RaftCluster) GetStoreMinResolvedTS(storeID uint64) uint64 {
-	c.RLock()
-	defer c.RUnlock()
 	store := c.GetStore(storeID)
 	if store == nil {
 		return math.MaxUint64
@@ -2326,20 +2355,26 @@ func (c *RaftCluster) GetMinResolvedTSByStoreIDs(ids []uint64) (uint64, map[uint
 
 // GetExternalTS returns the external timestamp.
 func (c *RaftCluster) GetExternalTS() uint64 {
-	c.RLock()
-	defer c.RUnlock()
 	if !c.isInitialized() {
 		return math.MaxUint64
 	}
-	return c.externalTS
+	return c.externalTS.Load().(uint64)
 }
 
 // SetExternalTS sets the external timestamp.
 func (c *RaftCluster) SetExternalTS(timestamp uint64) error {
-	c.Lock()
-	defer c.Unlock()
-	c.externalTS = timestamp
+	c.externalTS.Store(timestamp)
 	return c.storage.SaveExternalTS(timestamp)
+}
+
+func (c *RaftCluster) loadExternalTS() {
+	// Use `c.GetStorage()` here to prevent from the data race in test.
+	externalTS, err := c.GetStorage().LoadExternalTS()
+	if err != nil {
+		log.Error("load external ts meet error", errs.ZapError(err))
+		return
+	}
+	c.externalTS.Store(externalTS)
 }
 
 // SetStoreLimit sets a store limit for a given type and rate.

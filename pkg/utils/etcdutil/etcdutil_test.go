@@ -156,25 +156,6 @@ func TestEtcdKVPutWithTTL(t *testing.T) {
 	re.Equal(int64(0), resp.Count)
 }
 
-func TestInitClusterID(t *testing.T) {
-	re := require.New(t)
-	_, client, clean := NewTestEtcdCluster(t, 1)
-	defer clean()
-	pdClusterIDPath := "test/TestInitClusterID/pd/cluster_id"
-	// Get any cluster key to parse the cluster ID.
-	resp, err := EtcdKVGet(client, pdClusterIDPath)
-	re.NoError(err)
-	re.Empty(resp.Kvs)
-
-	clusterID, err := InitClusterID(client, pdClusterIDPath)
-	re.NoError(err)
-	re.NotZero(clusterID)
-
-	clusterID1, err := InitClusterID(client, pdClusterIDPath)
-	re.NoError(err)
-	re.Equal(clusterID, clusterID1)
-}
-
 func TestEtcdClientSync(t *testing.T) {
 	re := require.New(t)
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/utils/etcdutil/fastTick", "return(true)"))

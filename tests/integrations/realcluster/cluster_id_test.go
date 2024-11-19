@@ -23,15 +23,16 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	pd "github.com/tikv/pd/client"
+	"github.com/tikv/pd/client/opt"
 )
 
 type clusterIDSuite struct {
-	realClusterSuite
+	clusterSuite
 }
 
 func TestClusterID(t *testing.T) {
 	suite.Run(t, &clusterIDSuite{
-		realClusterSuite: realClusterSuite{
+		clusterSuite: clusterSuite{
 			suiteName: "cluster_id",
 		},
 	})
@@ -41,14 +42,14 @@ func (s *clusterIDSuite) TestClientClusterID() {
 	re := require.New(s.T())
 	ctx := context.Background()
 	// deploy second cluster
-	s.startRealCluster(s.T())
-	defer s.stopRealCluster(s.T())
+	s.startCluster(s.T())
+	defer s.stopCluster(s.T())
 
 	pdEndpoints := getPDEndpoints(s.T())
 	// Try to create a client with the mixed endpoints.
 	_, err := pd.NewClientWithContext(
 		ctx, pdEndpoints,
-		pd.SecurityOption{}, pd.WithMaxErrorRetry(1),
+		pd.SecurityOption{}, opt.WithMaxErrorRetry(1),
 	)
 	re.Error(err)
 	re.Contains(err.Error(), "unmatched cluster id")

@@ -53,7 +53,7 @@ func prepareSchedulersTest(needToRunStream ...bool) (func(), config.SchedulerCon
 	if len(needToRunStream) == 0 {
 		stream = nil
 	} else {
-		stream = hbstream.NewTestHeartbeatStreams(ctx, tc.ID, tc, needToRunStream[0])
+		stream = hbstream.NewTestHeartbeatStreams(ctx, tc, needToRunStream[0])
 	}
 	oc := operator.NewController(ctx, tc.GetBasicCluster(), tc.GetSchedulerConfig(), stream)
 	tc.SetHotRegionCacheHitsThreshold(1)

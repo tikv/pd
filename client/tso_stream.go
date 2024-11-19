@@ -110,13 +110,11 @@ func checkStreamTimeout(ctx context.Context, cancel context.CancelFunc, done cha
 type tsoRequestResult struct {
 	physical, logical   int64
 	count               uint32
-	suffixBits          uint32
 	respKeyspaceGroupID uint32
 }
 
 type grpcTSOStreamAdapter interface {
-	Send(clusterID uint64, keyspaceID, keyspaceGroupID uint32, dcLocation string,
-		count int64) error
+	Send(clusterID uint64, keyspaceID, keyspaceGroupID uint32, count int64) error
 	Recv() (tsoRequestResult, error)
 }
 
@@ -125,13 +123,12 @@ type pdTSOStreamAdapter struct {
 }
 
 // Send implements the grpcTSOStreamAdapter interface.
-func (s pdTSOStreamAdapter) Send(clusterID uint64, _, _ uint32, dcLocation string, count int64) error {
+func (s pdTSOStreamAdapter) Send(clusterID uint64, _, _ uint32, count int64) error {
 	req := &pdpb.TsoRequest{
 		Header: &pdpb.RequestHeader{
 			ClusterId: clusterID,
 		},
-		Count:      uint32(count),
-		DcLocation: dcLocation,
+		Count: uint32(count),
 	}
 	return s.stream.Send(req)
 }
@@ -146,7 +143,6 @@ func (s pdTSOStreamAdapter) Recv() (tsoRequestResult, error) {
 		physical:            resp.GetTimestamp().GetPhysical(),
 		logical:             resp.GetTimestamp().GetLogical(),
 		count:               resp.GetCount(),
-		suffixBits:          resp.GetTimestamp().GetSuffixBits(),
 		respKeyspaceGroupID: defaultKeySpaceGroupID,
 	}, nil
 }
@@ -156,15 +152,14 @@ type tsoTSOStreamAdapter struct {
 }
 
 // Send implements the grpcTSOStreamAdapter interface.
-func (s tsoTSOStreamAdapter) Send(clusterID uint64, keyspaceID, keyspaceGroupID uint32, dcLocation string, count int64) error {
+func (s tsoTSOStreamAdapter) Send(clusterID uint64, keyspaceID, keyspaceGroupID uint32, count int64) error {
 	req := &tsopb.TsoRequest{
 		Header: &tsopb.RequestHeader{
 			ClusterId:       clusterID,
 			KeyspaceId:      keyspaceID,
 			KeyspaceGroupId: keyspaceGroupID,
 		},
-		Count:      uint32(count),
-		DcLocation: dcLocation,
+		Count: uint32(count),
 	}
 	return s.stream.Send(req)
 }
@@ -179,7 +174,6 @@ func (s tsoTSOStreamAdapter) Recv() (tsoRequestResult, error) {
 		physical:            resp.GetTimestamp().GetPhysical(),
 		logical:             resp.GetTimestamp().GetLogical(),
 		count:               resp.GetCount(),
-		suffixBits:          resp.GetTimestamp().GetSuffixBits(),
 		respKeyspaceGroupID: resp.GetHeader().GetKeyspaceGroupId(),
 	}, nil
 }
@@ -268,7 +262,7 @@ func (s *tsoStream) getServerURL() string {
 // It's guaranteed that the `callback` will be called, but when the request is failed to be scheduled, the callback
 // will be ignored.
 func (s *tsoStream) processRequests(
-	clusterID uint64, keyspaceID, keyspaceGroupID uint32, dcLocation string, count int64, batchStartTime time.Time, callback onFinishedCallback,
+	clusterID uint64, keyspaceID, keyspaceGroupID uint32, count int64, batchStartTime time.Time, callback onFinishedCallback,
 ) error {
 	start := time.Now()
 
@@ -305,7 +299,7 @@ func (s *tsoStream) processRequests(
 	}
 	s.state.Store(prevState)
 
-	if err := s.stream.Send(clusterID, keyspaceID, keyspaceGroupID, dcLocation, count); err != nil {
+	if err := s.stream.Send(clusterID, keyspaceID, keyspaceGroupID, count); err != nil {
 		// As the request is already put into `pendingRequests`, the request should finally be canceled by the recvLoop.
 		// So skip returning error here to avoid
 		// if err == io.EOF {

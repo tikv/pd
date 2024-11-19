@@ -589,7 +589,9 @@ func TestRaftClusterMultipleRestart(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	tc, err := tests.NewTestCluster(ctx, 1)
+	tc, err := tests.NewTestCluster(ctx, 1, func(conf *config.Config, _ string) {
+		conf.LeaderLease = 300
+	})
 	defer tc.Destroy()
 	re.NoError(err)
 
@@ -912,7 +914,7 @@ func TestLoadClusterInfo(t *testing.T) {
 	tc.WaitLeader()
 	leaderServer := tc.GetLeaderServer()
 	svr := leaderServer.GetServer()
-	rc := cluster.NewRaftCluster(ctx, svr.ClusterID(), svr.GetMember(), svr.GetBasicCluster(), svr.GetStorage(), syncer.NewRegionSyncer(svr), svr.GetClient(), svr.GetHTTPClient(), svr.GetTSOAllocatorManager())
+	rc := cluster.NewRaftCluster(ctx, svr.GetMember(), svr.GetBasicCluster(), svr.GetStorage(), syncer.NewRegionSyncer(svr), svr.GetClient(), svr.GetHTTPClient(), svr.GetTSOAllocatorManager())
 
 	// Cluster is not bootstrapped.
 	rc.InitCluster(svr.GetAllocator(), svr.GetPersistOptions(), svr.GetHBStreams(), svr.GetKeyspaceGroupManager())
@@ -952,7 +954,8 @@ func TestLoadClusterInfo(t *testing.T) {
 	}
 	re.NoError(testStorage.Flush())
 
-	raftCluster = cluster.NewRaftCluster(ctx, svr.ClusterID(), svr.GetMember(), basicCluster, testStorage, syncer.NewRegionSyncer(svr), svr.GetClient(), svr.GetHTTPClient(), svr.GetTSOAllocatorManager())
+	raftCluster = cluster.NewRaftCluster(ctx, svr.GetMember(), basicCluster,
+		testStorage, syncer.NewRegionSyncer(svr), svr.GetClient(), svr.GetHTTPClient(), svr.GetTSOAllocatorManager())
 	raftCluster.InitCluster(mockid.NewIDAllocator(), svr.GetPersistOptions(), svr.GetHBStreams(), svr.GetKeyspaceGroupManager())
 	raftCluster, err = raftCluster.LoadClusterInfo()
 	re.NoError(err)
@@ -1666,7 +1669,9 @@ func TestTransferLeaderBack(t *testing.T) {
 	tc.WaitLeader()
 	leaderServer := tc.GetLeaderServer()
 	svr := leaderServer.GetServer()
-	rc := cluster.NewRaftCluster(ctx, svr.ClusterID(), svr.GetMember(), svr.GetBasicCluster(), svr.GetStorage(), syncer.NewRegionSyncer(svr), svr.GetClient(), svr.GetHTTPClient(), svr.GetTSOAllocatorManager())
+	rc := cluster.NewRaftCluster(ctx, svr.GetMember(), svr.GetBasicCluster(),
+		svr.GetStorage(), syncer.NewRegionSyncer(svr), svr.GetClient(),
+		svr.GetHTTPClient(), svr.GetTSOAllocatorManager())
 	rc.InitCluster(svr.GetAllocator(), svr.GetPersistOptions(), svr.GetHBStreams(), svr.GetKeyspaceGroupManager())
 	storage := rc.GetStorage()
 	meta := &metapb.Cluster{Id: 123}
@@ -1860,6 +1865,12 @@ func TestPatrolRegionConfigChange(t *testing.T) {
 	schedule.PatrolRegionInterval = typeutil.NewDuration(99 * time.Millisecond)
 	leaderServer.GetServer().SetScheduleConfig(schedule)
 	checkLog(re, fname, "starts patrol regions with new interval")
+
+	// test change patrol region worker count
+	schedule = leaderServer.GetConfig().Schedule
+	schedule.PatrolRegionWorkerCount = 8
+	leaderServer.GetServer().SetScheduleConfig(schedule)
+	checkLog(re, fname, "starts patrol regions with new workers count")
 
 	// test change schedule halt
 	schedule = leaderServer.GetConfig().Schedule

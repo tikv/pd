@@ -15,21 +15,20 @@
 package discovery
 
 import (
-	"strconv"
-
 	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
+	"github.com/tikv/pd/pkg/utils/keypath"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 )
 
 // Discover is used to get all the service instances of the specified service name.
-func Discover(cli *clientv3.Client, clusterID, serviceName string) ([]string, error) {
-	key := ServicePath(clusterID, serviceName)
+func Discover(cli *clientv3.Client, serviceName string) ([]string, error) {
+	key := keypath.ServicePath(serviceName)
 	endKey := clientv3.GetPrefixRangeEnd(key)
 
 	withRange := clientv3.WithRange(endKey)
@@ -47,12 +46,8 @@ func Discover(cli *clientv3.Client, clusterID, serviceName string) ([]string, er
 // GetMSMembers returns all the members of the specified service name.
 func GetMSMembers(serviceName string, client *clientv3.Client) ([]ServiceRegistryEntry, error) {
 	switch serviceName {
-	case constant.TSOServiceName, constant.SchedulingServiceName, constant.ResourceManagerServiceName:
-		clusterID, err := etcdutil.GetClusterID(client, constant.ClusterIDPath)
-		if err != nil {
-			return nil, err
-		}
-		servicePath := ServicePath(strconv.FormatUint(clusterID, 10), serviceName)
+	case constant.TSOServiceName, constant.SchedulingServiceName:
+		servicePath := keypath.ServicePath(serviceName)
 		resps, err := kv.NewSlowLogTxn(client).Then(clientv3.OpGet(servicePath, clientv3.WithPrefix())).Commit()
 		if err != nil {
 			return nil, errs.ErrEtcdKVGet.Wrap(err).GenWithStackByCause()

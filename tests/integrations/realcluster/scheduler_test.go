@@ -25,19 +25,19 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/client/http"
-	"github.com/tikv/pd/client/testutil"
+	"github.com/tikv/pd/client/utils/testutil"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/types"
 	"go.uber.org/zap"
 )
 
 type schedulerSuite struct {
-	realClusterSuite
+	clusterSuite
 }
 
 func TestScheduler(t *testing.T) {
 	suite.Run(t, &schedulerSuite{
-		realClusterSuite: realClusterSuite{
+		clusterSuite: clusterSuite{
 			suiteName: "scheduler",
 		},
 	})

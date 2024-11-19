@@ -17,6 +17,7 @@ package pd
 import (
 	"context"
 	"crypto/tls"
+	"fmt"
 	"net/url"
 	"reflect"
 	"sort"
@@ -30,8 +31,9 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/client/errs"
-	"github.com/tikv/pd/client/grpcutil"
+	"github.com/tikv/pd/client/opt"
 	"github.com/tikv/pd/client/retry"
+	"github.com/tikv/pd/client/utils/grpcutil"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -40,7 +42,6 @@ import (
 )
 
 const (
-	globalDCLocation            = "global"
 	memberUpdateInterval        = time.Minute
 	serviceModeUpdateInterval   = 3 * time.Second
 	updateMemberTimeout         = time.Second // Use a shorter timeout to recover faster from network isolation.
@@ -383,21 +384,17 @@ func (c *pdServiceBalancer) get() (ret ServiceClient) {
 }
 
 type updateKeyspaceIDFunc func() error
-type tsoLocalServURLsUpdatedFunc func(map[string]string) error
-type tsoGlobalServURLUpdatedFunc func(string) error
+type tsoLeaderURLUpdatedFunc func(string) error
 
-type tsoAllocatorEventSource interface {
-	// SetTSOLocalServURLsUpdatedCallback adds a callback which will be called when the local tso
-	// allocator leader list is updated.
-	SetTSOLocalServURLsUpdatedCallback(callback tsoLocalServURLsUpdatedFunc)
-	// SetTSOGlobalServURLUpdatedCallback adds a callback which will be called when the global tso
-	// allocator leader is updated.
-	SetTSOGlobalServURLUpdatedCallback(callback tsoGlobalServURLUpdatedFunc)
+// tsoEventSource subscribes to events related to changes in the TSO leader/primary from the service discovery.
+type tsoEventSource interface {
+	// SetTSOLeaderURLUpdatedCallback adds a callback which will be called when the TSO leader/primary is updated.
+	SetTSOLeaderURLUpdatedCallback(callback tsoLeaderURLUpdatedFunc)
 }
 
 var (
-	_ ServiceDiscovery        = (*pdServiceDiscovery)(nil)
-	_ tsoAllocatorEventSource = (*pdServiceDiscovery)(nil)
+	_ ServiceDiscovery = (*pdServiceDiscovery)(nil)
+	_ tsoEventSource   = (*pdServiceDiscovery)(nil)
 )
 
 // pdServiceDiscovery is the service discovery client of PD/API service which is quorum based
@@ -426,12 +423,8 @@ type pdServiceDiscovery struct {
 	// membersChangedCbs will be called after there is any membership change in the
 	// leader and followers
 	membersChangedCbs []func()
-	// tsoLocalAllocLeadersUpdatedCb will be called when the local tso allocator
-	// leader list is updated. The input is a map {DC Location -> Leader URL}
-	tsoLocalAllocLeadersUpdatedCb tsoLocalServURLsUpdatedFunc
-	// tsoGlobalAllocLeaderUpdatedCb will be called when the global tso allocator
-	// leader is updated.
-	tsoGlobalAllocLeaderUpdatedCb tsoGlobalServURLUpdatedFunc
+	// tsoLeaderUpdatedCb will be called when the TSO leader is updated.
+	tsoLeaderUpdatedCb tsoLeaderURLUpdatedFunc
 
 	checkMembershipCh chan struct{}
 
@@ -444,7 +437,7 @@ type pdServiceDiscovery struct {
 	keyspaceID           uint32
 	tlsCfg               *tls.Config
 	// Client option.
-	option *option
+	option *opt.Option
 }
 
 // NewDefaultPDServiceDiscovery returns a new default PD service discovery-based client.
@@ -453,7 +446,7 @@ func NewDefaultPDServiceDiscovery(
 	urls []string, tlsCfg *tls.Config,
 ) *pdServiceDiscovery {
 	var wg sync.WaitGroup
-	return newPDServiceDiscovery(ctx, cancel, &wg, nil, nil, defaultKeyspaceID, urls, tlsCfg, newOption())
+	return newPDServiceDiscovery(ctx, cancel, &wg, nil, nil, defaultKeyspaceID, urls, tlsCfg, opt.NewOption())
 }
 
 // newPDServiceDiscovery returns a new PD service discovery-based client.
@@ -463,7 +456,7 @@ func newPDServiceDiscovery(
 	serviceModeUpdateCb func(pdpb.ServiceMode),
 	updateKeyspaceIDFunc updateKeyspaceIDFunc,
 	keyspaceID uint32,
-	urls []string, tlsCfg *tls.Config, option *option,
+	urls []string, tlsCfg *tls.Config, option *opt.Option,
 ) *pdServiceDiscovery {
 	pdsd := &pdServiceDiscovery{
 		checkMembershipCh:    make(chan struct{}, 1),
@@ -523,7 +516,7 @@ func (c *pdServiceDiscovery) initRetry(f func() error) error {
 	var err error
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
-	for range c.option.maxRetryTimes {
+	for range c.option.MaxRetryTimes {
 		if err = f(); err == nil {
 			return nil
 		}
@@ -575,6 +568,9 @@ func (c *pdServiceDiscovery) updateServiceModeLoop() {
 	ctx, cancel := context.WithCancel(c.ctx)
 	defer cancel()
 	ticker := time.NewTicker(serviceModeUpdateInterval)
+	failpoint.Inject("fastUpdateServiceMode", func() {
+		ticker.Reset(10 * time.Millisecond)
+	})
 	defer ticker.Stop()
 
 	for {
@@ -612,7 +608,7 @@ func (c *pdServiceDiscovery) memberHealthCheckLoop() {
 }
 
 func (c *pdServiceDiscovery) checkLeaderHealth(ctx context.Context) {
-	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
+	ctx, cancel := context.WithTimeout(ctx, c.option.Timeout)
 	defer cancel()
 	leader := c.getLeaderServiceClient()
 	leader.checkNetworkAvailable(ctx)
@@ -678,7 +674,7 @@ func (c *pdServiceDiscovery) discoverMicroservice(svcType serviceType) (urls []s
 	case tsoService:
 		leaderURL := c.getLeaderURL()
 		if len(leaderURL) > 0 {
-			clusterInfo, err := c.getClusterInfo(c.ctx, leaderURL, c.option.timeout)
+			clusterInfo, err := c.getClusterInfo(c.ctx, leaderURL, c.option.Timeout)
 			if err != nil {
 				log.Error("[pd] failed to get cluster info",
 					zap.String("leader-url", leaderURL), errs.ZapError(err))
@@ -749,7 +745,7 @@ func (c *pdServiceDiscovery) getServiceClientByKind(kind apiKind) ServiceClient 
 // GetServiceClient returns the leader/primary ServiceClient if it is healthy.
 func (c *pdServiceDiscovery) GetServiceClient() ServiceClient {
 	leaderClient := c.getLeaderServiceClient()
-	if c.option.enableForwarding && !leaderClient.Available() {
+	if c.option.EnableForwarding && !leaderClient.Available() {
 		if followerClient := c.getServiceClientByKind(forwardAPIKind); followerClient != nil {
 			log.Debug("[pd] use follower client", zap.String("url", followerClient.GetURL()))
 			return followerClient
@@ -798,22 +794,15 @@ func (c *pdServiceDiscovery) AddServiceURLsSwitchedCallback(callbacks ...func())
 	c.membersChangedCbs = append(c.membersChangedCbs, callbacks...)
 }
 
-// SetTSOLocalServURLsUpdatedCallback adds a callback which will be called when the local tso
-// allocator leader list is updated.
-func (c *pdServiceDiscovery) SetTSOLocalServURLsUpdatedCallback(callback tsoLocalServURLsUpdatedFunc) {
-	c.tsoLocalAllocLeadersUpdatedCb = callback
-}
-
-// SetTSOGlobalServURLUpdatedCallback adds a callback which will be called when the global tso
-// allocator leader is updated.
-func (c *pdServiceDiscovery) SetTSOGlobalServURLUpdatedCallback(callback tsoGlobalServURLUpdatedFunc) {
+// SetTSOLeaderURLUpdatedCallback adds a callback which will be called when the TSO leader is updated.
+func (c *pdServiceDiscovery) SetTSOLeaderURLUpdatedCallback(callback tsoLeaderURLUpdatedFunc) {
 	url := c.getLeaderURL()
 	if len(url) > 0 {
 		if err := callback(url); err != nil {
-			log.Error("[tso] failed to call back when tso global service url update", zap.String("url", url), errs.ZapError(err))
+			log.Error("[tso] failed to call back when tso leader url update", zap.String("url", url), errs.ZapError(err))
 		}
 	}
-	c.tsoGlobalAllocLeaderUpdatedCb = callback
+	c.tsoLeaderUpdatedCb = callback
 }
 
 // getLeaderURL returns the leader URL.
@@ -835,7 +824,7 @@ func (c *pdServiceDiscovery) initClusterID() error {
 	defer cancel()
 	clusterID := uint64(0)
 	for _, url := range c.GetServiceURLs() {
-		members, err := c.getMembers(ctx, url, c.option.timeout)
+		members, err := c.getMembers(ctx, url, c.option.Timeout)
 		if err != nil || members.GetHeader() == nil {
 			log.Warn("[pd] failed to get cluster id", zap.String("url", url), errs.ZapError(err))
 			continue
@@ -866,7 +855,7 @@ func (c *pdServiceDiscovery) checkServiceModeChanged() error {
 		return errors.New("no leader found")
 	}
 
-	clusterInfo, err := c.getClusterInfo(c.ctx, leaderURL, c.option.timeout)
+	clusterInfo, err := c.getClusterInfo(c.ctx, leaderURL, c.option.Timeout)
 	if err != nil {
 		if strings.Contains(err.Error(), "Unimplemented") {
 			// If the method is not supported, we set it to pd mode.
@@ -898,19 +887,16 @@ func (c *pdServiceDiscovery) updateMember() error {
 
 		members, err := c.getMembers(c.ctx, url, updateMemberTimeout)
 		// Check the cluster ID.
-		if err == nil && members.GetHeader().GetClusterId() != c.clusterID {
-			err = errs.ErrClientUpdateMember.FastGenByArgs("cluster id does not match")
+		updatedClusterID := members.GetHeader().GetClusterId()
+		if err == nil && updatedClusterID != c.clusterID {
+			log.Warn("[pd] cluster id does not match",
+				zap.Uint64("updated-cluster-id", updatedClusterID),
+				zap.Uint64("expected-cluster-id", c.clusterID))
+			err = errs.ErrClientUpdateMember.FastGenByArgs(fmt.Sprintf("cluster id does not match: %d != %d", updatedClusterID, c.clusterID))
 		}
-		// Check the TSO Allocator Leader.
-		var errTSO error
-		if err == nil {
-			if members.GetLeader() == nil || len(members.GetLeader().GetClientUrls()) == 0 {
-				err = errs.ErrClientGetLeader.FastGenByArgs("leader url doesn't exist")
-			}
-			// Still need to update TsoAllocatorLeaders, even if there is no PD leader
-			errTSO = c.switchTSOAllocatorLeaders(members.GetTsoAllocatorLeaders())
+		if err == nil && (members.GetLeader() == nil || len(members.GetLeader().GetClientUrls()) == 0) {
+			err = errs.ErrClientGetLeader.FastGenByArgs("leader url doesn't exist")
 		}
-
 		// Failed to get members
 		if err != nil {
 			log.Info("[pd] cannot update member from this url",
@@ -923,15 +909,9 @@ func (c *pdServiceDiscovery) updateMember() error {
 				continue
 			}
 		}
-
 		c.updateURLs(members.GetMembers())
-		if err := c.updateServiceClient(members.GetMembers(), members.GetLeader()); err != nil {
-			return err
-		}
 
-		// If `switchLeader` succeeds but `switchTSOAllocatorLeader` has an error,
-		// the error of `switchTSOAllocatorLeader` will be returned.
-		return errTSO
+		return c.updateServiceClient(members.GetMembers(), members.GetLeader())
 	}
 	return errs.ErrClientGetMember.FastGenByArgs()
 }
@@ -988,7 +968,7 @@ func (c *pdServiceDiscovery) updateURLs(members []*pdpb.Member) {
 	}
 	c.urls.Store(urls)
 	// Update the connection contexts when member changes if TSO Follower Proxy is enabled.
-	if c.option.getEnableTSOFollowerProxy() {
+	if c.option.GetEnableTSOFollowerProxy() {
 		// Run callbacks to reflect the membership changes in the leader and followers.
 		for _, cb := range c.membersChangedCbs {
 			cb()
@@ -1006,13 +986,12 @@ func (c *pdServiceDiscovery) switchLeader(url string) (bool, error) {
 	newConn, err := c.GetOrCreateGRPCConn(url)
 	// If gRPC connect is created successfully or leader is new, still saves.
 	if url != oldLeader.GetURL() || newConn != nil {
-		// Set PD leader and Global TSO Allocator (which is also the PD leader)
 		leaderClient := newPDServiceClient(url, url, newConn, true)
 		c.leader.Store(leaderClient)
 	}
 	// Run callbacks
-	if c.tsoGlobalAllocLeaderUpdatedCb != nil {
-		if err := c.tsoGlobalAllocLeaderUpdatedCb(url); err != nil {
+	if c.tsoLeaderUpdatedCb != nil {
+		if err := c.tsoLeaderUpdatedCb(url); err != nil {
 			return true, err
 		}
 	}
@@ -1099,33 +1078,9 @@ func (c *pdServiceDiscovery) updateServiceClient(members []*pdpb.Member, leader 
 	return err
 }
 
-func (c *pdServiceDiscovery) switchTSOAllocatorLeaders(allocatorMap map[string]*pdpb.Member) error {
-	if len(allocatorMap) == 0 {
-		return nil
-	}
-
-	allocMap := make(map[string]string)
-	// Switch to the new one
-	for dcLocation, member := range allocatorMap {
-		if len(member.GetClientUrls()) == 0 {
-			continue
-		}
-		allocMap[dcLocation] = member.GetClientUrls()[0]
-	}
-
-	// Run the callback to reflect any possible change in the local tso allocators.
-	if c.tsoLocalAllocLeadersUpdatedCb != nil {
-		if err := c.tsoLocalAllocLeadersUpdatedCb(allocMap); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
 // GetOrCreateGRPCConn returns the corresponding grpc client connection of the given URL.
 func (c *pdServiceDiscovery) GetOrCreateGRPCConn(url string) (*grpc.ClientConn, error) {
-	return grpcutil.GetOrCreateGRPCConn(c.ctx, &c.clientConns, url, c.tlsCfg, c.option.gRPCDialOptions...)
+	return grpcutil.GetOrCreateGRPCConn(c.ctx, &c.clientConns, url, c.tlsCfg, c.option.GRPCDialOptions...)
 }
 
 func addrsToURLs(addrs []string, tlsCfg *tls.Config) []string {

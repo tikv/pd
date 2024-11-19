@@ -30,6 +30,7 @@ import (
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/tso"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
+	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/server/cluster"
@@ -418,12 +419,12 @@ func (s *GrpcServer) isLocalRequest(host string) bool {
 }
 
 func (s *GrpcServer) getGlobalTSO(ctx context.Context) (pdpb.Timestamp, error) {
-	if !s.IsAPIServiceMode() {
+	if !s.IsServiceIndependent(constant.TSOServiceName) {
 		return s.tsoAllocatorManager.HandleRequest(ctx, tso.GlobalDCLocation, 1)
 	}
 	request := &tsopb.TsoRequest{
 		Header: &tsopb.RequestHeader{
-			ClusterId:       s.ClusterID(),
+			ClusterId:       keypath.ClusterID(),
 			KeyspaceId:      constant.DefaultKeyspaceID,
 			KeyspaceGroupId: constant.DefaultKeyspaceGroupID,
 		},

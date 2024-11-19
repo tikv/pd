@@ -40,7 +40,6 @@ type tsoRequest struct {
 	done       chan error
 	physical   int64
 	logical    int64
-	dcLocation string
 
 	// The identifier of the RPC stream in which the request is processed.
 	streamID string
@@ -74,13 +73,14 @@ func (req *tsoRequest) waitCtx(ctx context.Context) (physical int64, logical int
 		defer req.pool.Put(req)
 		defer trace.StartRegion(req.requestCtx, "pdclient.tsoReqDone").End()
 		err = errors.WithStack(err)
+		now := time.Now()
 		if err != nil {
-			cmdFailDurationTSO.Observe(time.Since(req.start).Seconds())
+			cmdFailDurationTSOWait.Observe(now.Sub(start).Seconds())
+			cmdFailDurationTSO.Observe(now.Sub(req.start).Seconds())
 			return 0, 0, err
 		}
 		physical, logical = req.physical, req.logical
-		now := time.Now()
-		cmdDurationWait.Observe(now.Sub(start).Seconds())
+		cmdDurationTSOWait.Observe(now.Sub(start).Seconds())
 		cmdDurationTSO.Observe(now.Sub(req.start).Seconds())
 		return
 	case <-ctx.Done():

@@ -20,7 +20,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -34,6 +33,7 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/discovery"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
+	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/apiutil/multiservicesapi"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
@@ -46,28 +46,6 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/keepalive"
 )
-
-// InitClusterID initializes the cluster ID.
-func InitClusterID(ctx context.Context, client *clientv3.Client) (id uint64, err error) {
-	ticker := time.NewTicker(constant.RetryInterval)
-	defer ticker.Stop()
-	retryTimes := 0
-	for {
-		if clusterID, err := etcdutil.GetClusterID(client, constant.ClusterIDPath); err == nil && clusterID != 0 {
-			return clusterID, nil
-		}
-		select {
-		case <-ctx.Done():
-			return 0, err
-		case <-ticker.C:
-			retryTimes++
-			if retryTimes/500 > 0 {
-				log.Warn("etcd is not ready, retrying", errs.ZapError(err))
-				retryTimes /= 500
-			}
-		}
-	}
-}
 
 // PromHandler is a handler to get prometheus metrics.
 func PromHandler() gin.HandlerFunc {
@@ -279,15 +257,10 @@ func StopGRPCServer(s server) {
 }
 
 // Register registers the service.
-func Register(s server, serviceName string) (uint64, *discovery.ServiceRegistryEntry, *discovery.ServiceRegister, error) {
-	var (
-		clusterID uint64
-		err       error
-	)
-	if clusterID, err = InitClusterID(s.Context(), s.GetEtcdClient()); err != nil {
-		return 0, nil, nil, err
+func Register(s server, serviceName string) (*discovery.ServiceRegistryEntry, *discovery.ServiceRegister, error) {
+	if err := endpoint.InitClusterIDForMs(s.Context(), s.GetEtcdClient()); err != nil {
+		return nil, nil, err
 	}
-	log.Info("init cluster id", zap.Uint64("cluster-id", clusterID))
 	execPath, err := os.Executable()
 	deployPath := filepath.Dir(execPath)
 	if err != nil {
@@ -303,15 +276,16 @@ func Register(s server, serviceName string) (uint64, *discovery.ServiceRegistryE
 	}
 	serializedEntry, err := serviceID.Serialize()
 	if err != nil {
-		return 0, nil, nil, err
+		return nil, nil, err
 	}
-	serviceRegister := discovery.NewServiceRegister(s.Context(), s.GetEtcdClient(), strconv.FormatUint(clusterID, 10),
-		serviceName, s.GetAdvertiseListenAddr(), serializedEntry, discovery.DefaultLeaseInSeconds)
+	serviceRegister := discovery.NewServiceRegister(s.Context(), s.GetEtcdClient(),
+		serviceName, s.GetAdvertiseListenAddr(), serializedEntry,
+		discovery.DefaultLeaseInSeconds)
 	if err := serviceRegister.Register(); err != nil {
 		log.Error("failed to register the service", zap.String("service-name", serviceName), errs.ZapError(err))
-		return 0, nil, nil, err
+		return nil, nil, err
 	}
-	return clusterID, serviceID, serviceRegister, nil
+	return serviceID, serviceRegister, nil
 }
 
 // Exit exits the program with the given code.

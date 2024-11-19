@@ -29,7 +29,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	pd "github.com/tikv/pd/client"
-	"github.com/tikv/pd/client/testutil"
+	"github.com/tikv/pd/client/opt"
+	"github.com/tikv/pd/client/utils/testutil"
 	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/slice"
@@ -37,6 +38,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/server/apiv2/handlers"
+	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
 	"github.com/tikv/pd/tests/integrations/mcs"
 	handlersutil "github.com/tikv/pd/tests/server/apiv2/handlers"
@@ -91,7 +93,9 @@ func (suite *tsoClientTestSuite) SetupSuite() {
 	if suite.legacy {
 		suite.cluster, err = tests.NewTestCluster(suite.ctx, serverCount)
 	} else {
-		suite.cluster, err = tests.NewTestAPICluster(suite.ctx, serverCount)
+		suite.cluster, err = tests.NewTestAPICluster(suite.ctx, serverCount, func(conf *config.Config, _ string) {
+			conf.MicroService.EnableTSODynamicSwitching = false
+		})
 	}
 	re.NoError(err)
 	err = suite.cluster.RunInitialServers()
@@ -145,7 +149,7 @@ func (suite *tsoClientTestSuite) SetupSuite() {
 func (suite *tsoClientTestSuite) SetupTest() {
 	re := suite.Require()
 	if suite.legacy {
-		client, err := pd.NewClientWithContext(suite.ctx, suite.getBackendEndpoints(), pd.SecurityOption{}, pd.WithForwardingOption(true))
+		client, err := pd.NewClientWithContext(suite.ctx, suite.getBackendEndpoints(), pd.SecurityOption{}, opt.WithForwardingOption(true))
 		re.NoError(err)
 		innerClient, ok := client.(interface{ GetServiceDiscovery() pd.ServiceDiscovery })
 		re.True(ok)
@@ -545,7 +549,7 @@ func TestUpgradingAPIandTSOClusters(t *testing.T) {
 	// Create a pd client in PD mode to let the API leader to forward requests to the TSO cluster.
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/usePDServiceMode", "return(true)"))
 	pdClient, err := pd.NewClientWithContext(context.Background(),
-		[]string{backendEndpoints}, pd.SecurityOption{}, pd.WithMaxErrorRetry(1))
+		[]string{backendEndpoints}, pd.SecurityOption{}, opt.WithMaxErrorRetry(1))
 	re.NoError(err)
 	defer pdClient.Close()
 

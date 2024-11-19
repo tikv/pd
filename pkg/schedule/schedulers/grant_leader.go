@@ -99,7 +99,7 @@ func (conf *grantLeaderSchedulerConfig) removeStore(id uint64) (succ bool, last 
 	succ, last = false, false
 	if exists {
 		delete(conf.StoreIDWithRanges, id)
-		conf.cluster.ResumeLeaderTransfer(id, "grant remove store")
+		conf.cluster.ResumeLeaderTransfer(id, "grant remove store", constant.Out)
 		succ = true
 		last = len(conf.StoreIDWithRanges) == 0
 	}
@@ -109,7 +109,7 @@ func (conf *grantLeaderSchedulerConfig) removeStore(id uint64) (succ bool, last 
 func (conf *grantLeaderSchedulerConfig) resetStore(id uint64, keyRange []core.KeyRange) {
 	conf.Lock()
 	defer conf.Unlock()
-	if err := conf.cluster.PauseLeaderTransfer(id, "grant reset store"); err != nil {
+	if err := conf.cluster.PauseLeaderTransfer(id, "grant reset store", constant.Out); err != nil {
 		log.Error("pause leader transfer failed", zap.Uint64("store-id", id), errs.ZapError(err))
 	}
 	conf.StoreIDWithRanges[id] = keyRange
@@ -171,7 +171,7 @@ func (s *grantLeaderScheduler) ReloadConfig() error {
 	if err := s.conf.load(newCfg); err != nil {
 		return err
 	}
-	pauseAndResumeLeaderTransfer(s.conf.cluster, s.conf.StoreIDWithRanges, newCfg.StoreIDWithRanges)
+	pauseAndResumeLeaderTransfer(s.conf.cluster, constant.Out, s.conf.StoreIDWithRanges, newCfg.StoreIDWithRanges)
 	s.conf.StoreIDWithRanges = newCfg.StoreIDWithRanges
 	return nil
 }
@@ -182,7 +182,7 @@ func (s *grantLeaderScheduler) PrepareConfig(cluster sche.SchedulerCluster) erro
 	defer s.conf.RUnlock()
 	var res error
 	for id := range s.conf.StoreIDWithRanges {
-		if err := cluster.PauseLeaderTransfer(id, s.name+" prepare config"); err != nil {
+		if err := cluster.PauseLeaderTransfer(id, s.name+" prepare config", constant.Out); err != nil {
 			res = err
 		}
 	}
@@ -194,7 +194,7 @@ func (s *grantLeaderScheduler) CleanConfig(cluster sche.SchedulerCluster) {
 	s.conf.RLock()
 	defer s.conf.RUnlock()
 	for id := range s.conf.StoreIDWithRanges {
-		cluster.ResumeLeaderTransfer(id, s.name+" clean config")
+		cluster.ResumeLeaderTransfer(id, s.name+" clean config", constant.Out)
 	}
 }
 
@@ -252,7 +252,7 @@ func (handler *grantLeaderHandler) updateConfig(w http.ResponseWriter, r *http.R
 		id = (uint64)(idFloat)
 		handler.config.RLock()
 		if _, exists = handler.config.StoreIDWithRanges[id]; !exists {
-			if err := handler.config.cluster.PauseLeaderTransfer(id, "grant update exist"); err != nil {
+			if err := handler.config.cluster.PauseLeaderTransfer(id, "grant update exist", constant.Out); err != nil {
 				handler.config.RUnlock()
 				handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
 				return
@@ -273,7 +273,7 @@ func (handler *grantLeaderHandler) updateConfig(w http.ResponseWriter, r *http.R
 	if err != nil {
 		log.Error("fail to build config", errs.ZapError(err))
 		handler.config.Lock()
-		handler.config.cluster.ResumeLeaderTransfer(id, "grant build arg")
+		handler.config.cluster.ResumeLeaderTransfer(id, "grant build arg", constant.Out)
 		handler.config.Unlock()
 		handler.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
