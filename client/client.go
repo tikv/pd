@@ -42,11 +42,6 @@ import (
 	"go.uber.org/zap"
 )
 
-const (
-	maxKeyspaceID       = uint32(0xFFFFFF)
-	defaultKeyspaceName = "DEFAULT"
-)
-
 // Region contains information of a region's meta and its peers.
 type Region struct {
 	Meta         *metapb.Region
@@ -279,9 +274,9 @@ func NewClientWithKeyspace(
 	keyspaceID uint32, svrAddrs []string,
 	security SecurityOption, opts ...opt.ClientOption,
 ) (Client, error) {
-	if keyspaceID < utils.DefaultKeyspaceID || keyspaceID > maxKeyspaceID {
+	if keyspaceID < utils.DefaultKeyspaceID || keyspaceID > utils.MaxKeyspaceID {
 		return nil, errors.Errorf("invalid keyspace id %d. It must be in the range of [%d, %d]",
-			keyspaceID, utils.DefaultKeyspaceID, maxKeyspaceID)
+			keyspaceID, utils.DefaultKeyspaceID, utils.MaxKeyspaceID)
 	}
 	return createClientWithKeyspace(ctx, callerComponent, keyspaceID,
 		svrAddrs, security, opts...)
@@ -371,7 +366,7 @@ type apiContextV2 struct {
 // NewAPIContextV2 creates a API context with the specified keyspace name for V2.
 func NewAPIContextV2(keyspaceName string) APIContext {
 	if len(keyspaceName) == 0 {
-		keyspaceName = defaultKeyspaceName
+		keyspaceName = utils.DefaultKeyspaceName
 	}
 	return &apiContextV2{keyspaceName: keyspaceName}
 }

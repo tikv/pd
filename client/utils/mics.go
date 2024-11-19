@@ -20,9 +20,13 @@ const (
 	// ​0 is reserved for default keyspace with the name "DEFAULT", It's initialized
 	// when PD bootstrap and reserved for users who haven't been assigned keyspace.
 	DefaultKeyspaceID = uint32(0)
+	// MaxKeyspaceID is the maximum keyspace ID.
+	MaxKeyspaceID = uint32(0xFFFFFF)
 	// NullKeyspaceID is used for API v1 or legacy path where is keyspace agnostic.
 	NullKeyspaceID = uint32(0xFFFFFFFF)
 	// DefaultKeyspaceGroupID is the default key space group id.
 	// We also reserved 0 for the keyspace group for the same purpose.
 	DefaultKeyspaceGroupID = uint32(0)
+	// DefaultKeyspaceName is the default keyspace name.
+	DefaultKeyspaceName = "DEFAULT"
 )
