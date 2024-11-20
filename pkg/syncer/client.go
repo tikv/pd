@@ -156,6 +156,7 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 				log.Error("server failed to establish sync stream with leader", zap.String("server", s.server.Name()), zap.String("leader", s.server.GetLeader().GetName()), errs.ZapError(err))
 				select {
 				case <-ctx.Done():
+					log.Info("context is done, server stops to synchronize with leader", zap.String("server", s.server.Name()), zap.String("leader", s.server.GetLeader().GetName()))
 					return
 				case <-time.After(retryInterval):
 				}
@@ -172,6 +173,7 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 					}
 					select {
 					case <-ctx.Done():
+						log.Info("context is done, server stops to synchronize with leader", zap.String("server", s.server.Name()), zap.String("leader", s.server.GetLeader().GetName()))
 						return
 					case <-time.After(retryInterval):
 					}
