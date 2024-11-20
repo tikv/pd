@@ -21,9 +21,29 @@ import (
 	"strings"
 )
 
+type (
+	// Caller ID can be understood as a binary file; it is a process.
+	ID string
+	// Caller component refers to the components within the process.
+	Component string
+)
+
+const (
+	// TestID is used for test.
+	TestID ID = "test"
+	// TestComponent is used for test.
+	TestComponent Component = "test"
+)
+
+var processName ID
+
+func init() {
+	processName = ID(filepath.Base(os.Args[0]))
+}
+
 // GetCallerID returns the name of the currently running process
 func GetCallerID() ID {
-	return ID(filepath.Base(os.Args[0]))
+	return processName
 }
 
 // GetComponent returns the package path of the calling function

@@ -222,8 +222,6 @@ func (k *serviceModeKeeper) close() {
 }
 
 type client struct {
-	// Caller ID can be understood as a binary file; it is a process.
-	callerID caller.ID
 	// Caller component refers to the components within the process.
 	callerComponent caller.Component
 
@@ -331,7 +329,6 @@ func createClientWithKeyspace(
 
 	clientCtx, clientCancel := context.WithCancel(ctx)
 	c := &client{
-		callerID:        caller.GetCallerID(),
 		callerComponent: adjustCallerComponent(callerComponent),
 		inner: &innerClient{
 			keyspaceID:              keyspaceID,
@@ -450,7 +447,6 @@ func newClientWithKeyspaceName(
 	}
 	clientCtx, clientCancel := context.WithCancel(ctx)
 	c := &client{
-		callerID:        caller.GetCallerID(),
 		callerComponent: adjustCallerComponent(callerComponent),
 		inner: &innerClient{
 			// Create a PD service discovery with null keyspace id, then query the real id with the keyspace name,
@@ -1243,7 +1239,7 @@ func (c *client) SplitRegions(ctx context.Context, splitKeys [][]byte, opts ...o
 func (c *client) requestHeader() *pdpb.RequestHeader {
 	return &pdpb.RequestHeader{
 		ClusterId:       c.inner.pdSvcDiscovery.GetClusterID(),
-		CallerId:        string(c.callerID),
+		CallerId:        string(caller.GetCallerID()),
 		CallerComponent: string(c.callerComponent),
 	}
 }
