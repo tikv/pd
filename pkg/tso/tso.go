@@ -348,7 +348,7 @@ func (t *timestampOracle) updateTimestamp(purpose updatePurpose) (bool, error) {
 	t.metrics.tsoPhysicalGapGauge.Set(float64(jetLag.Milliseconds()))
 
 	if jetLag > 3*t.updatePhysicalInterval && jetLag > jetLagWarningThreshold {
-		log.Warn("clock offset",
+		log.Warn("There hasn't been a physical time update for a while, which may caused by PD restart, leader transfer, etcd IO lag, local time offset etc.",
 			logutil.CondUint32("keyspace-group-id", t.keyspaceGroupID, t.keyspaceGroupID > 0),
 			zap.Duration("jet-lag", jetLag),
 			zap.Time("prev-physical", prevPhysical),
