@@ -298,8 +298,7 @@ func (t *timestampOracle) resetUserTimestampInner(leadership *election.Leadershi
 	return nil
 }
 
-// UpdateTimestamp is used to update the timestamp.
-// This function will do two things:
+// UpdateTimestamp will do two things:
 //  1. When the logical time is going to be used up, increase the current physical time.
 //  2. When the time window is not big enough, which means the saved etcd time minus the next physical time
 //     will be less than or equal to `UpdateTimestampGuard`, then the time window needs to be updated and
@@ -332,7 +331,7 @@ func (t *timestampOracle) UpdateTimestamp() error {
 
 	jetLag := typeutil.SubRealTimeByWallClock(now, prevPhysical)
 	if jetLag > 3*t.updatePhysicalInterval && jetLag > jetLagWarningThreshold {
-		log.Warn("clock offset",
+		log.Warn("There hasn't been a physical time update for a while, which may caused by PD restart, leader transfer, etcd IO lag, local time offset etc.",
 			logutil.CondUint32("keyspace-group-id", t.keyspaceGroupID, t.keyspaceGroupID > 0),
 			zap.Duration("jet-lag", jetLag),
 			zap.Time("prev-physical", prevPhysical),
