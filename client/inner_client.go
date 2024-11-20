@@ -10,6 +10,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/client/errs"
+	"github.com/tikv/pd/client/metrics"
 	"github.com/tikv/pd/client/opt"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -160,7 +161,7 @@ func (c *innerClient) close() {
 func (c *innerClient) setup() error {
 	// Init the metrics.
 	if c.option.InitMetrics {
-		initAndRegisterMetrics(c.option.MetricsLabels)
+		metrics.InitAndRegisterMetrics(c.option.MetricsLabels)
 	}
 
 	// Init the client base.

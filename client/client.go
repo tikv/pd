@@ -34,6 +34,7 @@ import (
 	"github.com/tikv/pd/client/caller"
 	"github.com/tikv/pd/client/clients/metastorage"
 	"github.com/tikv/pd/client/errs"
+	"github.com/tikv/pd/client/metrics"
 	"github.com/tikv/pd/client/opt"
 	"github.com/tikv/pd/client/utils/tlsutil"
 	"go.uber.org/zap"
@@ -555,7 +556,7 @@ func (c *client) UpdateOption(option opt.DynamicOption, value any) error {
 // GetAllMembers gets the members Info from PD.
 func (c *client) GetAllMembers(ctx context.Context) ([]*pdpb.Member, error) {
 	start := time.Now()
-	defer func() { cmdDurationGetAllMembers.Observe(time.Since(start).Seconds()) }()
+	defer func() { metrics.CmdDurationGetAllMembers.Observe(time.Since(start).Seconds()) }()
 
 	ctx, cancel := context.WithTimeout(ctx, c.inner.option.Timeout)
 	defer cancel()
@@ -565,7 +566,7 @@ func (c *client) GetAllMembers(ctx context.Context) ([]*pdpb.Member, error) {
 		return nil, errs.ErrClientGetProtoClient
 	}
 	resp, err := protoClient.GetMembers(ctx, req)
-	if err = c.respForErr(cmdFailDurationGetAllMembers, start, err, resp.GetHeader()); err != nil {
+	if err = c.respForErr(metrics.CmdFailedDurationGetAllMembers, start, err, resp.GetHeader()); err != nil {
 		return nil, err
 	}
 	return resp.GetMembers(), nil
@@ -683,7 +684,7 @@ func (c *client) GetRegionFromMember(ctx context.Context, key []byte, memberURLs
 		defer span.Finish()
 	}
 	start := time.Now()
-	defer func() { cmdDurationGetRegion.Observe(time.Since(start).Seconds()) }()
+	defer func() { metrics.CmdDurationGetRegion.Observe(time.Since(start).Seconds()) }()
 
 	var resp *pdpb.GetRegionResponse
 	for _, url := range memberURLs {
@@ -707,7 +708,7 @@ func (c *client) GetRegionFromMember(ctx context.Context, key []byte, memberURLs
 	}
 
 	if resp == nil {
-		cmdFailDurationGetRegion.Observe(time.Since(start).Seconds())
+		metrics.CmdFailedDurationGetRegion.Observe(time.Since(start).Seconds())
 		c.inner.pdSvcDiscovery.ScheduleCheckMemberChanged()
 		errorMsg := fmt.Sprintf("[pd] can't get region info from member URLs: %+v", memberURLs)
 		return nil, errors.WithStack(errors.New(errorMsg))
@@ -722,7 +723,7 @@ func (c *client) GetRegion(ctx context.Context, key []byte, opts ...opt.GetRegio
 		defer span.Finish()
 	}
 	start := time.Now()
-	defer func() { cmdDurationGetRegion.Observe(time.Since(start).Seconds()) }()
+	defer func() { metrics.CmdDurationGetRegion.Observe(time.Since(start).Seconds()) }()
 	ctx, cancel := context.WithTimeout(ctx, c.inner.option.Timeout)
 	defer cancel()
 
@@ -749,7 +750,7 @@ func (c *client) GetRegion(ctx context.Context, key []byte, opts ...opt.GetRegio
 		resp, err = protoClient.GetRegion(cctx, req)
 	}
 
-	if err = c.respForErr(cmdFailDurationGetRegion, start, err, resp.GetHeader()); err != nil {
+	if err = c.respForErr(metrics.CmdFailedDurationGetRegion, start, err, resp.GetHeader()); err != nil {
 		return nil, err
 	}
 	return handleRegionResponse(resp), nil
@@ -762,7 +763,7 @@ func (c *client) GetPrevRegion(ctx context.Context, key []byte, opts ...opt.GetR
 		defer span.Finish()
 	}
 	start := time.Now()
-	defer func() { cmdDurationGetPrevRegion.Observe(time.Since(start).Seconds()) }()
+	defer func() { metrics.CmdDurationGetPrevRegion.Observe(time.Since(start).Seconds()) }()
 	ctx, cancel := context.WithTimeout(ctx, c.inner.option.Timeout)
 	defer cancel()
 
@@ -789,7 +790,7 @@ func (c *client) GetPrevRegion(ctx context.Context, key []byte, opts ...opt.GetR
 		resp, err = protoClient.GetPrevRegion(cctx, req)
 	}
 
-	if err = c.respForErr(cmdFailDurationGetPrevRegion, start, err, resp.GetHeader()); err != nil {
+	if err = c.respForErr(metrics.CmdFailedDurationGetPrevRegion, start, err, resp.GetHeader()); err != nil {
 		return nil, err
 	}
 	return handleRegionResponse(resp), nil
@@ -802,7 +803,7 @@ func (c *client) GetRegionByID(ctx context.Context, regionID uint64, opts ...opt
 		defer span.Finish()
 	}
 	start := time.Now()
-	defer func() { cmdDurationGetRegionByID.Observe(time.Since(start).Seconds()) }()
+	defer func() { metrics.CmdDurationGetRegionByID.Observe(time.Since(start).Seconds()) }()
 	ctx, cancel := context.WithTimeout(ctx, c.inner.option.Timeout)
 	defer cancel()
 
@@ -829,7 +830,7 @@ func (c *client) GetRegionByID(ctx context.Context, regionID uint64, opts ...opt
 		resp, err = protoClient.GetRegionByID(cctx, req)
 	}
 
-	if err = c.respForErr(cmdFailedDurationGetRegionByID, start, err, resp.GetHeader()); err != nil {
+	if err = c.respForErr(metrics.CmdFailedDurationGetRegionByID, start, err, resp.GetHeader()); err != nil {
 		return nil, err
 	}
 	return handleRegionResponse(resp), nil
@@ -842,7 +843,7 @@ func (c *client) ScanRegions(ctx context.Context, key, endKey []byte, limit int,
 		defer span.Finish()
 	}
 	start := time.Now()
-	defer func() { cmdDurationScanRegions.Observe(time.Since(start).Seconds()) }()
+	defer func() { metrics.CmdDurationScanRegions.Observe(time.Since(start).Seconds()) }()
 
 	var cancel context.CancelFunc
 	scanCtx := ctx
@@ -879,7 +880,7 @@ func (c *client) ScanRegions(ctx context.Context, key, endKey []byte, limit int,
 		resp, err = protoClient.ScanRegions(cctx, req)
 	}
 
-	if err = c.respForErr(cmdFailedDurationScanRegions, start, err, resp.GetHeader()); err != nil {
+	if err = c.respForErr(metrics.CmdFailedDurationScanRegions, start, err, resp.GetHeader()); err != nil {
 		return nil, err
 	}
 
@@ -893,7 +894,7 @@ func (c *client) BatchScanRegions(ctx context.Context, ranges []KeyRange, limit 
 		defer span.Finish()
 	}
 	start := time.Now()
-	defer func() { cmdDurationBatchScanRegions.Observe(time.Since(start).Seconds()) }()
+	defer func() { metrics.CmdDurationBatchScanRegions.Observe(time.Since(start).Seconds()) }()
 
 	var cancel context.CancelFunc
 	scanCtx := ctx
@@ -933,7 +934,7 @@ func (c *client) BatchScanRegions(ctx context.Context, ranges []KeyRange, limit 
 		resp, err = protoClient.BatchScanRegions(cctx, req)
 	}
 
-	if err = c.respForErr(cmdFailedDurationBatchScanRegions, start, err, resp.GetHeader()); err != nil {
+	if err = c.respForErr(metrics.CmdFailedDurationBatchScanRegions, start, err, resp.GetHeader()); err != nil {
 		return nil, err
 	}
 
@@ -993,7 +994,7 @@ func (c *client) GetStore(ctx context.Context, storeID uint64) (*metapb.Store, e
 		defer span.Finish()
 	}
 	start := time.Now()
-	defer func() { cmdDurationGetStore.Observe(time.Since(start).Seconds()) }()
+	defer func() { metrics.CmdDurationGetStore.Observe(time.Since(start).Seconds()) }()
 
 	ctx, cancel := context.WithTimeout(ctx, c.inner.option.Timeout)
 	defer cancel()
@@ -1007,7 +1008,7 @@ func (c *client) GetStore(ctx context.Context, storeID uint64) (*metapb.Store, e
 	}
 	resp, err := protoClient.GetStore(ctx, req)
 
-	if err = c.respForErr(cmdFailedDurationGetStore, start, err, resp.GetHeader()); err != nil {
+	if err = c.respForErr(metrics.CmdFailedDurationGetStore, start, err, resp.GetHeader()); err != nil {
 		return nil, err
 	}
 	return handleStoreResponse(resp)
@@ -1037,7 +1038,7 @@ func (c *client) GetAllStores(ctx context.Context, opts ...opt.GetStoreOption) (
 		defer span.Finish()
 	}
 	start := time.Now()
-	defer func() { cmdDurationGetAllStores.Observe(time.Since(start).Seconds()) }()
+	defer func() { metrics.CmdDurationGetAllStores.Observe(time.Since(start).Seconds()) }()
 
 	ctx, cancel := context.WithTimeout(ctx, c.inner.option.Timeout)
 	defer cancel()
@@ -1051,7 +1052,7 @@ func (c *client) GetAllStores(ctx context.Context, opts ...opt.GetStoreOption) (
 	}
 	resp, err := protoClient.GetAllStores(ctx, req)
 
-	if err = c.respForErr(cmdFailedDurationGetAllStores, start, err, resp.GetHeader()); err != nil {
+	if err = c.respForErr(metrics.CmdFailedDurationGetAllStores, start, err, resp.GetHeader()); err != nil {
 		return nil, err
 	}
 	return resp.GetStores(), nil
@@ -1064,7 +1065,7 @@ func (c *client) UpdateGCSafePoint(ctx context.Context, safePoint uint64) (uint6
 		defer span.Finish()
 	}
 	start := time.Now()
-	defer func() { cmdDurationUpdateGCSafePoint.Observe(time.Since(start).Seconds()) }()
+	defer func() { metrics.CmdDurationUpdateGCSafePoint.Observe(time.Since(start).Seconds()) }()
 
 	ctx, cancel := context.WithTimeout(ctx, c.inner.option.Timeout)
 	defer cancel()
@@ -1078,7 +1079,7 @@ func (c *client) UpdateGCSafePoint(ctx context.Context, safePoint uint64) (uint6
 	}
 	resp, err := protoClient.UpdateGCSafePoint(ctx, req)
 
-	if err = c.respForErr(cmdFailedDurationUpdateGCSafePoint, start, err, resp.GetHeader()); err != nil {
+	if err = c.respForErr(metrics.CmdFailedDurationUpdateGCSafePoint, start, err, resp.GetHeader()); err != nil {
 		return 0, err
 	}
 	return resp.GetNewSafePoint(), nil
@@ -1095,7 +1096,7 @@ func (c *client) UpdateServiceGCSafePoint(ctx context.Context, serviceID string,
 	}
 
 	start := time.Now()
-	defer func() { cmdDurationUpdateServiceGCSafePoint.Observe(time.Since(start).Seconds()) }()
+	defer func() { metrics.CmdDurationUpdateServiceGCSafePoint.Observe(time.Since(start).Seconds()) }()
 
 	ctx, cancel := context.WithTimeout(ctx, c.inner.option.Timeout)
 	defer cancel()
@@ -1111,7 +1112,7 @@ func (c *client) UpdateServiceGCSafePoint(ctx context.Context, serviceID string,
 	}
 	resp, err := protoClient.UpdateServiceGCSafePoint(ctx, req)
 
-	if err = c.respForErr(cmdFailedDurationUpdateServiceGCSafePoint, start, err, resp.GetHeader()); err != nil {
+	if err = c.respForErr(metrics.CmdFailedDurationUpdateServiceGCSafePoint, start, err, resp.GetHeader()); err != nil {
 		return 0, err
 	}
 	return resp.GetMinSafePoint(), nil
@@ -1128,7 +1129,7 @@ func (c *client) ScatterRegion(ctx context.Context, regionID uint64) error {
 
 func (c *client) scatterRegionsWithGroup(ctx context.Context, regionID uint64, group string) error {
 	start := time.Now()
-	defer func() { cmdDurationScatterRegion.Observe(time.Since(start).Seconds()) }()
+	defer func() { metrics.CmdDurationScatterRegion.Observe(time.Since(start).Seconds()) }()
 
 	ctx, cancel := context.WithTimeout(ctx, c.inner.option.Timeout)
 	defer cancel()
@@ -1167,7 +1168,7 @@ func (c *client) SplitAndScatterRegions(ctx context.Context, splitKeys [][]byte,
 		defer span.Finish()
 	}
 	start := time.Now()
-	defer func() { cmdDurationSplitAndScatterRegions.Observe(time.Since(start).Seconds()) }()
+	defer func() { metrics.CmdDurationSplitAndScatterRegions.Observe(time.Since(start).Seconds()) }()
 	ctx, cancel := context.WithTimeout(ctx, c.inner.option.Timeout)
 	defer cancel()
 	options := &opt.RegionsOp{}
@@ -1195,7 +1196,7 @@ func (c *client) GetOperator(ctx context.Context, regionID uint64) (*pdpb.GetOpe
 		defer span.Finish()
 	}
 	start := time.Now()
-	defer func() { cmdDurationGetOperator.Observe(time.Since(start).Seconds()) }()
+	defer func() { metrics.CmdDurationGetOperator.Observe(time.Since(start).Seconds()) }()
 
 	ctx, cancel := context.WithTimeout(ctx, c.inner.option.Timeout)
 	defer cancel()
@@ -1217,7 +1218,7 @@ func (c *client) SplitRegions(ctx context.Context, splitKeys [][]byte, opts ...o
 		defer span.Finish()
 	}
 	start := time.Now()
-	defer func() { cmdDurationSplitRegions.Observe(time.Since(start).Seconds()) }()
+	defer func() { metrics.CmdDurationSplitRegions.Observe(time.Since(start).Seconds()) }()
 	ctx, cancel := context.WithTimeout(ctx, c.inner.option.Timeout)
 	defer cancel()
 	options := &opt.RegionsOp{}
@@ -1246,7 +1247,7 @@ func (c *client) requestHeader() *pdpb.RequestHeader {
 
 func (c *client) scatterRegionsWithOptions(ctx context.Context, regionsID []uint64, opts ...opt.RegionsOption) (*pdpb.ScatterRegionResponse, error) {
 	start := time.Now()
-	defer func() { cmdDurationScatterRegions.Observe(time.Since(start).Seconds()) }()
+	defer func() { metrics.CmdDurationScatterRegions.Observe(time.Since(start).Seconds()) }()
 	options := &opt.RegionsOp{}
 	for _, opt := range opts {
 		opt(options)

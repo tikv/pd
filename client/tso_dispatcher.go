@@ -29,6 +29,7 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/client/errs"
+	"github.com/tikv/pd/client/metrics"
 	"github.com/tikv/pd/client/opt"
 	"github.com/tikv/pd/client/retry"
 	"github.com/tikv/pd/client/utils/timerutil"
@@ -127,7 +128,7 @@ func newTSODispatcher(
 				return newBatchController[*tsoRequest](
 					maxBatchSize*2,
 					tsoRequestFinisher(0, 0, invalidStreamID),
-					tsoBestBatchSize,
+					metrics.TSOBestBatchSize,
 				)
 			},
 		},

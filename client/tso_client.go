@@ -26,6 +26,7 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/client/errs"
+	"github.com/tikv/pd/client/metrics"
 	"github.com/tikv/pd/client/opt"
 	"github.com/tikv/pd/client/utils/grpcutil"
 	"go.uber.org/zap"
@@ -336,7 +337,7 @@ func (c *tsoClient) tryConnectToTSO(
 				addr := trimHTTPPrefix(backupURL)
 				// the goroutine is used to check the network and change back to the original stream
 				go c.checkLeader(ctx, cancel, forwardedHostTrim, addr, url, updateAndClear)
-				requestForwarded.WithLabelValues(forwardedHostTrim, addr).Set(1)
+				metrics.RequestForwarded.WithLabelValues(forwardedHostTrim, addr).Set(1)
 				updateAndClear(backupURL, &tsoConnectionContext{cctx, cancel, backupURL, stream})
 				return nil
 			}
@@ -355,7 +356,7 @@ func (c *tsoClient) checkLeader(
 	defer func() {
 		// cancel the forward stream
 		forwardCancel()
-		requestForwarded.WithLabelValues(forwardedHostTrim, addr).Set(0)
+		metrics.RequestForwarded.WithLabelValues(forwardedHostTrim, addr).Set(0)
 	}()
 	cc, u := c.getTSOLeaderClientConn()
 	var healthCli healthpb.HealthClient
@@ -441,7 +442,7 @@ func (c *tsoClient) tryConnectToTSOWithProxy(
 			if addr != leaderAddr {
 				forwardedHostTrim := trimHTTPPrefix(forwardedHost)
 				addrTrim := trimHTTPPrefix(addr)
-				requestForwarded.WithLabelValues(forwardedHostTrim, addrTrim).Set(1)
+				metrics.RequestForwarded.WithLabelValues(forwardedHostTrim, addrTrim).Set(1)
 			}
 			connectionCtxs.Store(addr, &tsoConnectionContext{cctx, cancel, addr, stream})
 			continue
