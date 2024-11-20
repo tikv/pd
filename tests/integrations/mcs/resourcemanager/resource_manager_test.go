@@ -34,7 +34,7 @@ import (
 	pd "github.com/tikv/pd/client"
 	"github.com/tikv/pd/client/caller"
 	"github.com/tikv/pd/client/resource_group/controller"
-	"github.com/tikv/pd/client/sd"
+	sd "github.com/tikv/pd/client/servicediscovery"
 	"github.com/tikv/pd/pkg/mcs/resourcemanager/server"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"

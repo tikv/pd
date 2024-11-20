@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package sd
+package servicediscovery
 
 import (
 	"context"
@@ -190,12 +190,12 @@ func (suite *serviceClientTestSuite) TestServiceClient() {
 	re.False(follower.IsConnectedToLeader())
 	re.True(leader.IsConnectedToLeader())
 
-	re.NoError(failpoint.Enable("github.com/tikv/pd/client/sd/unreachableNetwork1", "return(true)"))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/servicediscovery/unreachableNetwork1", "return(true)"))
 	follower.(*pdServiceClient).checkNetworkAvailable(suite.ctx)
 	leader.(*pdServiceClient).checkNetworkAvailable(suite.ctx)
 	re.False(follower.Available())
 	re.False(leader.Available())
-	re.NoError(failpoint.Disable("github.com/tikv/pd/client/sd/unreachableNetwork1"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/servicediscovery/unreachableNetwork1"))
 
 	follower.(*pdServiceClient).checkNetworkAvailable(suite.ctx)
 	leader.(*pdServiceClient).checkNetworkAvailable(suite.ctx)
@@ -237,7 +237,7 @@ func (suite *serviceClientTestSuite) TestServiceClient() {
 	followerAPIClient := newPDServiceAPIClient(follower, regionAPIErrorFn)
 	leaderAPIClient := newPDServiceAPIClient(leader, regionAPIErrorFn)
 
-	re.NoError(failpoint.Enable("github.com/tikv/pd/client/sd/fastCheckAvailable", "return(true)"))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/servicediscovery/fastCheckAvailable", "return(true)"))
 
 	re.True(followerAPIClient.Available())
 	re.True(leaderAPIClient.Available())
@@ -269,7 +269,7 @@ func (suite *serviceClientTestSuite) TestServiceClient() {
 	re.True(followerAPIClient.Available())
 	re.True(leaderAPIClient.Available())
 
-	re.NoError(failpoint.Disable("github.com/tikv/pd/client/sd/fastCheckAvailable"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/servicediscovery/fastCheckAvailable"))
 }
 
 func (suite *serviceClientTestSuite) TestServiceClientBalancer() {

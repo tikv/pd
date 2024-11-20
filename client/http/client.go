@@ -28,7 +28,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/retry"
-	"github.com/tikv/pd/client/sd"
+	sd "github.com/tikv/pd/client/servicediscovery"
 	"go.uber.org/zap"
 )
 

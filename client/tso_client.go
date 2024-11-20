@@ -28,7 +28,7 @@ import (
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/metrics"
 	"github.com/tikv/pd/client/opt"
-	"github.com/tikv/pd/client/sd"
+	sd "github.com/tikv/pd/client/servicediscovery"
 	"github.com/tikv/pd/client/utils/grpcutil"
 	"github.com/tikv/pd/client/utils/tlsutil"
 	"go.uber.org/zap"

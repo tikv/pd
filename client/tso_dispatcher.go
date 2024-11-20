@@ -32,7 +32,7 @@ import (
 	"github.com/tikv/pd/client/metrics"
 	"github.com/tikv/pd/client/opt"
 	"github.com/tikv/pd/client/retry"
-	"github.com/tikv/pd/client/sd"
+	sd "github.com/tikv/pd/client/servicediscovery"
 	"github.com/tikv/pd/client/utils/timerutil"
 	"github.com/tikv/pd/client/utils/tsoutil"
 	"go.uber.org/zap"

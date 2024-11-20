@@ -12,7 +12,7 @@ import (
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/metrics"
 	"github.com/tikv/pd/client/opt"
-	"github.com/tikv/pd/client/sd"
+	sd "github.com/tikv/pd/client/servicediscovery"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 )
