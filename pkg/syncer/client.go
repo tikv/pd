@@ -156,7 +156,6 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 				log.Error("server failed to establish sync stream with leader", zap.String("server", s.server.Name()), zap.String("leader", s.server.GetLeader().GetName()), errs.ZapError(err))
 				select {
 				case <-ctx.Done():
-					log.Info("context is done, server stops to synchronize with leader", zap.String("server", s.server.Name()), zap.String("leader", s.server.GetLeader().GetName()))
 					return
 				case <-time.After(retryInterval):
 				}
@@ -173,7 +172,6 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 					}
 					select {
 					case <-ctx.Done():
-						log.Info("context is done, server stops to synchronize with leader", zap.String("server", s.server.Name()), zap.String("leader", s.server.GetLeader().GetName()))
 						return
 					case <-time.After(retryInterval):
 					}
@@ -219,13 +217,13 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 						log.Debug("region is stale", zap.Stringer("origin", origin.GetMeta()), errs.ZapError(err))
 						continue
 					}
-					ctx := &core.MetaProcessContext{
+					cctx := &core.MetaProcessContext{
 						Context:    ctx,
 						TaskRunner: ratelimit.NewSyncRunner(),
 						Tracer:     core.NewNoopHeartbeatProcessTracer(),
 						// no limit for followers.
 					}
-					saveKV, _, _, _ := regionGuide(ctx, region, origin)
+					saveKV, _, _, _ := regionGuide(cctx, region, origin)
 					overlaps := bc.PutRegion(region)
 
 					if hasBuckets {
