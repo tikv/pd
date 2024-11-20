@@ -3,7 +3,6 @@ module github.com/tikv/pd/tools
 go 1.23
 
 replace (
-	github.com/pingcap/kvproto => github.com/okjiang/kvproto v0.0.0-20241015031153-47f8a06418b6
 	github.com/tikv/pd => ../
 	github.com/tikv/pd/client => ../client
 )
@@ -23,7 +22,7 @@ require (
 	github.com/mattn/go-shellwords v1.0.12
 	github.com/pingcap/errors v0.11.5-0.20211224045212-9687c2b0f87c
 	github.com/pingcap/failpoint v0.0.0-20210918120811-547c13e3eb00
-	github.com/pingcap/kvproto v0.0.0-20240910154453-b242104f8d31
+	github.com/pingcap/kvproto v0.0.0-20241120071417-b5b7843d9037
 	github.com/pingcap/log v1.1.1-0.20221110025148-ca232912c9f3
 	github.com/prometheus/client_golang v1.19.0
 	github.com/prometheus/common v0.51.1
