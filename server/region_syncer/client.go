@@ -38,11 +38,7 @@ import (
 const (
 	keepaliveTime    = 10 * time.Second
 	keepaliveTimeout = 3 * time.Second
-<<<<<<< HEAD:server/region_syncer/client.go
-=======
-	msgSize          = 8 * units.MiB
 	retryInterval    = time.Second
->>>>>>> 41ec8dced (syncer: exit watch leader immediately (#8824)):pkg/syncer/client.go
 )
 
 // StopSyncWithLeader stop to sync the region with leader.
@@ -233,17 +229,7 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 						log.Debug("region is stale", zap.Stringer("origin", origin.GetMeta()), errs.ZapError(err))
 						continue
 					}
-<<<<<<< HEAD:server/region_syncer/client.go
 					saveKV, _, _ := regionGuide(region, origin)
-=======
-					cctx := &core.MetaProcessContext{
-						Context:    ctx,
-						TaskRunner: ratelimit.NewSyncRunner(),
-						Tracer:     core.NewNoopHeartbeatProcessTracer(),
-						// no limit for followers.
-					}
-					saveKV, _, _, _ := regionGuide(cctx, region, origin)
->>>>>>> 41ec8dced (syncer: exit watch leader immediately (#8824)):pkg/syncer/client.go
 					overlaps := bc.PutRegion(region)
 
 					if hasBuckets {
