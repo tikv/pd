@@ -487,6 +487,8 @@ func (c *RaftCluster) startTSOJobsIfNeeded() error {
 			log.Error("failed to initialize the global TSO allocator", errs.ZapError(err))
 			return err
 		}
+	} else {
+		log.Warn("the global TSO allocator is already initialized")
 	}
 	return nil
 }
@@ -851,6 +853,15 @@ func (c *RaftCluster) runReplicationMode() {
 // Stop stops the cluster.
 func (c *RaftCluster) Stop() {
 	c.Lock()
+	// We need to try to stop tso jobs whatever the cluster is running or not.
+	// Because we need to call checkTSOService as soon as possible while the cluster is starting,
+	// which makes the cluster may not be running but the tso job has been started.
+	// For example, the cluster meets an error when starting, such as cluster is not bootstrapped.
+	// In this case, the `running` in `RaftCluster` is false, but the tso job has been started.
+	// Ref: https://github.com/tikv/pd/issues/8836
+	if err := c.stopTSOJobsIfNeeded(); err != nil {
+		log.Error("failed to stop tso jobs", errs.ZapError(err))
+	}
 	if !c.running {
 		c.Unlock()
 		return
@@ -859,9 +870,6 @@ func (c *RaftCluster) Stop() {
 	c.cancel()
 	if !c.IsServiceIndependent(constant.SchedulingServiceName) {
 		c.stopSchedulingJobs()
-	}
-	if err := c.stopTSOJobsIfNeeded(); err != nil {
-		log.Error("failed to stop tso jobs", errs.ZapError(err))
 	}
 	c.heartbeatRunner.Stop()
 	c.miscRunner.Stop()

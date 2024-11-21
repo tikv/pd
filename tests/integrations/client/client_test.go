@@ -194,11 +194,11 @@ func TestLeaderTransferAndMoveCluster(t *testing.T) {
 	oldServers := cluster.GetServers()
 	oldLeaderName := cluster.WaitLeader()
 	for range 3 {
+		time.Sleep(5 * time.Second)
 		newPD, err := cluster.Join(ctx)
 		re.NoError(err)
 		re.NoError(newPD.Run())
 		oldLeaderName = cluster.WaitLeader()
-		time.Sleep(5 * time.Second)
 	}
 
 	// ABCDEF->DEF
