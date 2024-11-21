@@ -220,15 +220,15 @@ func (s *balanceRegionScheduler) transferPeer(solver *solver, collector *plan.Co
 		solver.Step++
 	}
 
-	// candidates are sorted by region score desc, so we pick the last store as target store.
+	// candidates are sorted by region score asc, so we pick the first store as target store.
 	sort.Slice(candidates.Stores, func(i, j int) bool {
 		iOp := solver.getOpInfluence(candidates.Stores[i].GetID())
 		jOp := solver.getOpInfluence(candidates.Stores[j].GetID())
-		return candidates.Stores[i].RegionScore(conf.GetRegionScoreFormulaVersion(), conf.GetHighSpaceRatio(), conf.GetLowSpaceRatio(), iOp) >
+		return candidates.Stores[i].RegionScore(conf.GetRegionScoreFormulaVersion(), conf.GetHighSpaceRatio(), conf.GetLowSpaceRatio(), iOp) <
 			candidates.Stores[j].RegionScore(conf.GetRegionScoreFormulaVersion(), conf.GetHighSpaceRatio(), conf.GetLowSpaceRatio(), jOp)
 	})
 	for i := range candidates.Stores {
-		solver.Target = candidates.Stores[len(candidates.Stores)-i-1]
+		solver.Target = candidates.Stores[i]
 		solver.targetScore = solver.targetStoreScore(s.GetName())
 		regionID := solver.Region.GetID()
 		sourceID := solver.Source.GetID()
