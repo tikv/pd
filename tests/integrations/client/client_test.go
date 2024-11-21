@@ -38,6 +38,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	pd "github.com/tikv/pd/client"
+	"github.com/tikv/pd/client/caller"
 	"github.com/tikv/pd/client/opt"
 	"github.com/tikv/pd/client/retry"
 	"github.com/tikv/pd/pkg/core"
@@ -850,7 +851,8 @@ func runServer(re *require.Assertions, cluster *tests.TestCluster) []string {
 }
 
 func setupCli(ctx context.Context, re *require.Assertions, endpoints []string, opts ...opt.ClientOption) pd.Client {
-	cli, err := pd.NewClientWithContext(ctx, endpoints, pd.SecurityOption{}, opts...)
+	cli, err := pd.NewClientWithContext(ctx, caller.TestComponent,
+		endpoints, pd.SecurityOption{}, opts...)
 	re.NoError(err)
 	return cli
 }
@@ -1281,6 +1283,19 @@ func (suite *clientTestSuite) TestGetRegionByID() {
 
 	testutil.Eventually(re, func() bool {
 		r, err := suite.client.GetRegionByID(context.Background(), regionID)
+		re.NoError(err)
+		if r == nil {
+			return false
+		}
+		return reflect.DeepEqual(region, r.Meta) &&
+			reflect.DeepEqual(peers[0], r.Leader)
+	})
+
+	// test WithCallerComponent
+	testutil.Eventually(re, func() bool {
+		r, err := suite.client.
+			WithCallerComponent(caller.GetComponent(0)).
+			GetRegionByID(context.Background(), regionID)
 		re.NoError(err)
 		if r == nil {
 			return false

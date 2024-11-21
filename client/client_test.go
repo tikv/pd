@@ -22,6 +22,7 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/require"
+	"github.com/tikv/pd/client/caller"
 	"github.com/tikv/pd/client/opt"
 	"github.com/tikv/pd/client/utils/testutil"
 	"github.com/tikv/pd/client/utils/tsoutil"
@@ -79,7 +80,8 @@ func TestClientCtx(t *testing.T) {
 	start := time.Now()
 	ctx, cancel := context.WithTimeout(context.TODO(), time.Second*3)
 	defer cancel()
-	_, err := NewClientWithContext(ctx, []string{testClientURL}, SecurityOption{})
+	_, err := NewClientWithContext(ctx, caller.TestComponent,
+		[]string{testClientURL}, SecurityOption{})
 	re.Error(err)
 	re.Less(time.Since(start), time.Second*5)
 }
@@ -87,7 +89,8 @@ func TestClientCtx(t *testing.T) {
 func TestClientWithRetry(t *testing.T) {
 	re := require.New(t)
 	start := time.Now()
-	_, err := NewClientWithContext(context.TODO(), []string{testClientURL}, SecurityOption{}, opt.WithMaxErrorRetry(5))
+	_, err := NewClientWithContext(context.TODO(), caller.TestComponent,
+		[]string{testClientURL}, SecurityOption{}, opt.WithMaxErrorRetry(5))
 	re.Error(err)
 	re.Less(time.Since(start), time.Second*10)
 }

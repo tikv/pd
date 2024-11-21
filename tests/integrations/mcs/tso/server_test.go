@@ -29,6 +29,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	pd "github.com/tikv/pd/client"
+	"github.com/tikv/pd/client/caller"
 	"github.com/tikv/pd/client/opt"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mcs/discovery"
@@ -246,6 +247,7 @@ func NewAPIServerForward(re *require.Assertions) APIServerForward {
 
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/usePDServiceMode", "return(true)"))
 	suite.pdClient, err = pd.NewClientWithContext(context.Background(),
+		caller.TestComponent,
 		[]string{suite.backendEndpoints}, pd.SecurityOption{}, opt.WithMaxErrorRetry(1))
 	re.NoError(err)
 	return suite
@@ -610,7 +612,8 @@ func TestTSOServiceSwitch(t *testing.T) {
 	pdLeader := tc.GetServer(leaderName)
 	backendEndpoints := pdLeader.GetAddr()
 	re.NoError(pdLeader.BootstrapCluster())
-	pdClient, err := pd.NewClientWithContext(ctx, []string{backendEndpoints}, pd.SecurityOption{})
+	pdClient, err := pd.NewClientWithContext(ctx, caller.TestComponent,
+		[]string{backendEndpoints}, pd.SecurityOption{})
 	re.NoError(err)
 	re.NotNil(pdClient)
 	defer pdClient.Close()

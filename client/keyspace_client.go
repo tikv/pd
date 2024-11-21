@@ -38,7 +38,7 @@ type KeyspaceClient interface {
 
 // keyspaceClient returns the KeyspaceClient from current PD leader.
 func (c *client) keyspaceClient() keyspacepb.KeyspaceClient {
-	if client := c.pdSvcDiscovery.GetServingEndpointClientConn(); client != nil {
+	if client := c.inner.pdSvcDiscovery.GetServingEndpointClientConn(); client != nil {
 		return keyspacepb.NewKeyspaceClient(client)
 	}
 	return nil
@@ -52,7 +52,7 @@ func (c *client) LoadKeyspace(ctx context.Context, name string) (*keyspacepb.Key
 	}
 	start := time.Now()
 	defer func() { cmdDurationLoadKeyspace.Observe(time.Since(start).Seconds()) }()
-	ctx, cancel := context.WithTimeout(ctx, c.option.Timeout)
+	ctx, cancel := context.WithTimeout(ctx, c.inner.option.Timeout)
 	req := &keyspacepb.LoadKeyspaceRequest{
 		Header: c.requestHeader(),
 		Name:   name,
@@ -67,7 +67,7 @@ func (c *client) LoadKeyspace(ctx context.Context, name string) (*keyspacepb.Key
 
 	if err != nil {
 		cmdFailedDurationLoadKeyspace.Observe(time.Since(start).Seconds())
-		c.pdSvcDiscovery.ScheduleCheckMemberChanged()
+		c.inner.pdSvcDiscovery.ScheduleCheckMemberChanged()
 		return nil, err
 	}
 
@@ -96,7 +96,7 @@ func (c *client) UpdateKeyspaceState(ctx context.Context, id uint32, state keysp
 	}
 	start := time.Now()
 	defer func() { cmdDurationUpdateKeyspaceState.Observe(time.Since(start).Seconds()) }()
-	ctx, cancel := context.WithTimeout(ctx, c.option.Timeout)
+	ctx, cancel := context.WithTimeout(ctx, c.inner.option.Timeout)
 	req := &keyspacepb.UpdateKeyspaceStateRequest{
 		Header: c.requestHeader(),
 		Id:     id,
@@ -112,7 +112,7 @@ func (c *client) UpdateKeyspaceState(ctx context.Context, id uint32, state keysp
 
 	if err != nil {
 		cmdFailedDurationUpdateKeyspaceState.Observe(time.Since(start).Seconds())
-		c.pdSvcDiscovery.ScheduleCheckMemberChanged()
+		c.inner.pdSvcDiscovery.ScheduleCheckMemberChanged()
 		return nil, err
 	}
 
@@ -140,7 +140,7 @@ func (c *client) GetAllKeyspaces(ctx context.Context, startID uint32, limit uint
 	}
 	start := time.Now()
 	defer func() { cmdDurationGetAllKeyspaces.Observe(time.Since(start).Seconds()) }()
-	ctx, cancel := context.WithTimeout(ctx, c.option.Timeout)
+	ctx, cancel := context.WithTimeout(ctx, c.inner.option.Timeout)
 	req := &keyspacepb.GetAllKeyspacesRequest{
 		Header:  c.requestHeader(),
 		StartId: startID,
@@ -156,7 +156,7 @@ func (c *client) GetAllKeyspaces(ctx context.Context, startID uint32, limit uint
 
 	if err != nil {
 		cmdDurationGetAllKeyspaces.Observe(time.Since(start).Seconds())
-		c.pdSvcDiscovery.ScheduleCheckMemberChanged()
+		c.inner.pdSvcDiscovery.ScheduleCheckMemberChanged()
 		return nil, err
 	}
 

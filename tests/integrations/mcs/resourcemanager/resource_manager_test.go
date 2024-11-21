@@ -32,6 +32,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	pd "github.com/tikv/pd/client"
+	"github.com/tikv/pd/client/caller"
 	"github.com/tikv/pd/client/resource_group/controller"
 	"github.com/tikv/pd/pkg/mcs/resourcemanager/server"
 	"github.com/tikv/pd/pkg/utils/testutil"
@@ -77,7 +78,9 @@ func (suite *resourceManagerClientTestSuite) SetupSuite() {
 	err = suite.cluster.RunInitialServers()
 	re.NoError(err)
 
-	suite.client, err = pd.NewClientWithContext(suite.ctx, suite.cluster.GetConfig().GetClientURLs(), pd.SecurityOption{})
+	suite.client, err = pd.NewClientWithContext(suite.ctx,
+		caller.TestComponent,
+		suite.cluster.GetConfig().GetClientURLs(), pd.SecurityOption{})
 	re.NoError(err)
 	leader := suite.cluster.GetServer(suite.cluster.WaitLeader())
 	re.NotNil(leader)
@@ -1076,7 +1079,9 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 	re.NoError(tests.RunServers(serverList))
 	re.NotEmpty(suite.cluster.WaitLeader())
 	// re-connect client as well
-	suite.client, err = pd.NewClientWithContext(suite.ctx, suite.cluster.GetConfig().GetClientURLs(), pd.SecurityOption{})
+	suite.client, err = pd.NewClientWithContext(suite.ctx,
+		caller.TestComponent,
+		suite.cluster.GetConfig().GetClientURLs(), pd.SecurityOption{})
 	re.NoError(err)
 	cli = suite.client
 	var newGroups []*rmpb.ResourceGroup
@@ -1150,7 +1155,9 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupRUConsumption() {
 	suite.cluster.WaitLeader()
 	// re-connect client as
 	cli.Close()
-	suite.client, err = pd.NewClientWithContext(suite.ctx, suite.cluster.GetConfig().GetClientURLs(), pd.SecurityOption{})
+	suite.client, err = pd.NewClientWithContext(suite.ctx,
+		caller.TestComponent,
+		suite.cluster.GetConfig().GetClientURLs(), pd.SecurityOption{})
 	re.NoError(err)
 	cli = suite.client
 	// check ru stats not loss after restart

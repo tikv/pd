@@ -33,6 +33,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	pd "github.com/tikv/pd/client"
+	"github.com/tikv/pd/client/caller"
 	"github.com/tikv/pd/client/opt"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -444,17 +445,22 @@ func createPDClient(ctx context.Context) (pd.Client, error) {
 
 	if len(*keyspaceName) > 0 {
 		apiCtx := pd.NewAPIContextV2(*keyspaceName)
-		pdCli, err = pd.NewClientWithAPIContext(ctx, apiCtx, []string{*pdAddrs}, pd.SecurityOption{
-			CAPath:   *caPath,
-			CertPath: *certPath,
-			KeyPath:  *keyPath,
-		}, opts...)
+		pdCli, err = pd.NewClientWithAPIContext(ctx, apiCtx,
+			caller.TestComponent, []string{*pdAddrs},
+			pd.SecurityOption{
+				CAPath:   *caPath,
+				CertPath: *certPath,
+				KeyPath:  *keyPath,
+			}, opts...)
 	} else {
-		pdCli, err = pd.NewClientWithKeyspace(ctx, uint32(*keyspaceID), []string{*pdAddrs}, pd.SecurityOption{
-			CAPath:   *caPath,
-			CertPath: *certPath,
-			KeyPath:  *keyPath,
-		}, opts...)
+		pdCli, err = pd.NewClientWithKeyspace(ctx,
+			caller.TestComponent,
+			uint32(*keyspaceID), []string{*pdAddrs},
+			pd.SecurityOption{
+				CAPath:   *caPath,
+				CertPath: *certPath,
+				KeyPath:  *keyPath,
+			}, opts...)
 	}
 	if err != nil {
 		return nil, err
