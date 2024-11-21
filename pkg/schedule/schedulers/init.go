@@ -117,8 +117,13 @@ func schedulersRegister() {
 	})
 
 	// evict leader
+<<<<<<< HEAD
 	RegisterSliceDecoderBuilder(EvictLeaderType, func(args []string) ConfigDecoder {
 		return func(v interface{}) error {
+=======
+	RegisterSliceDecoderBuilder(types.EvictLeaderScheduler, func(args []string) ConfigDecoder {
+		return func(v any) error {
+>>>>>>> 90cc61b43 (scheduler: add test for creating evict-leader-scheduler twice (#8757))
 			if len(args) < 1 {
 				return errs.ErrSchedulerConfig.FastGenByArgs("id")
 			}
@@ -234,8 +239,13 @@ func schedulersRegister() {
 	})
 
 	// grant leader
+<<<<<<< HEAD
 	RegisterSliceDecoderBuilder(GrantLeaderType, func(args []string) ConfigDecoder {
 		return func(v interface{}) error {
+=======
+	RegisterSliceDecoderBuilder(types.GrantLeaderScheduler, func(args []string) ConfigDecoder {
+		return func(v any) error {
+>>>>>>> 90cc61b43 (scheduler: add test for creating evict-leader-scheduler twice (#8757))
 			if len(args) < 1 {
 				return errs.ErrSchedulerConfig.FastGenByArgs("id")
 			}
