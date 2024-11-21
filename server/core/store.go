@@ -608,8 +608,24 @@ func (s *StoresInfo) SetStore(store *StoreInfo) {
 	s.stores[store.GetID()] = store
 }
 
+<<<<<<< HEAD:server/core/store.go
 // PauseLeaderTransfer pauses a StoreInfo with storeID.
 func (s *StoresInfo) PauseLeaderTransfer(storeID uint64) error {
+=======
+// ResetStores resets the store cache.
+func (s *StoresInfo) ResetStores() {
+	s.Lock()
+	defer s.Unlock()
+	s.stores = make(map[uint64]*StoreInfo)
+}
+
+// PauseLeaderTransfer pauses a StoreInfo with storeID. The store can not be selected
+// as source or target of TransferLeader.
+func (s *StoresInfo) PauseLeaderTransfer(storeID uint64, direction constant.Direction) error {
+	s.Lock()
+	defer s.Unlock()
+	log.Info("pause store leader transfer", zap.Uint64("store-id", storeID), zap.String("direction", direction.String()))
+>>>>>>> 90cc61b43 (scheduler: add test for creating evict-leader-scheduler twice (#8757)):pkg/core/store.go
 	store, ok := s.stores[storeID]
 	if !ok {
 		return errs.ErrStoreNotFound.FastGenByArgs(storeID)
@@ -623,7 +639,14 @@ func (s *StoresInfo) PauseLeaderTransfer(storeID uint64) error {
 
 // ResumeLeaderTransfer cleans a store's pause state. The store can be selected
 // as source or target of TransferLeader again.
+<<<<<<< HEAD:server/core/store.go
 func (s *StoresInfo) ResumeLeaderTransfer(storeID uint64) {
+=======
+func (s *StoresInfo) ResumeLeaderTransfer(storeID uint64, direction constant.Direction) {
+	s.Lock()
+	defer s.Unlock()
+	log.Info("resume store leader transfer", zap.Uint64("store-id", storeID), zap.String("direction", direction.String()))
+>>>>>>> 90cc61b43 (scheduler: add test for creating evict-leader-scheduler twice (#8757)):pkg/core/store.go
 	store, ok := s.stores[storeID]
 	if !ok {
 		log.Warn("try to clean a store's pause state, but it is not found. It may be cleanup",

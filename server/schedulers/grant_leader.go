@@ -75,6 +75,7 @@ func init() {
 	})
 }
 
+<<<<<<< HEAD:server/schedulers/grant_leader.go
 type grantLeaderSchedulerConfig struct {
 	mu                syncutil.RWMutex
 	storage           endpoint.ConfigStorage
@@ -83,6 +84,9 @@ type grantLeaderSchedulerConfig struct {
 }
 
 func (conf *grantLeaderSchedulerConfig) BuildWithArgs(args []string) error {
+=======
+func (conf *grantLeaderSchedulerConfig) buildWithArgs(args []string) error {
+>>>>>>> 90cc61b43 (scheduler: add test for creating evict-leader-scheduler twice (#8757)):pkg/schedule/schedulers/grant_leader.go
 	if len(args) < 1 {
 		return errs.ErrSchedulerConfig.FastGenByArgs("id")
 	}
@@ -297,7 +301,21 @@ func (handler *grantLeaderHandler) UpdateConfig(w http.ResponseWriter, r *http.R
 	handler.config.BuildWithArgs(args)
 	err := handler.config.Persist()
 	if err != nil {
+<<<<<<< HEAD:server/schedulers/grant_leader.go
 		handler.config.removeStore(id)
+=======
+		log.Error("fail to build config", errs.ZapError(err))
+		handler.config.Lock()
+		handler.config.cluster.ResumeLeaderTransfer(id, constant.Out)
+		handler.config.Unlock()
+		handler.rd.JSON(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	err = handler.config.persist()
+	if err != nil {
+		log.Error("fail to persist config", errs.ZapError(err))
+		_, _ = handler.config.removeStore(id)
+>>>>>>> 90cc61b43 (scheduler: add test for creating evict-leader-scheduler twice (#8757)):pkg/schedule/schedulers/grant_leader.go
 		handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
