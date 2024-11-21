@@ -45,8 +45,13 @@ const (
 )
 
 func init() {
+<<<<<<< HEAD
 	schedule.RegisterSliceDecoderBuilder(EvictLeaderType, func(args []string) schedule.ConfigDecoder {
 		return func(v interface{}) error {
+=======
+	schedulers.RegisterSliceDecoderBuilder(userEvictLeaderScheduler, func(args []string) schedulers.ConfigDecoder {
+		return func(v any) error {
+>>>>>>> 90cc61b43 (scheduler: add test for creating evict-leader-scheduler twice (#8757))
 			if len(args) < 1 {
 				return errors.New("should specify the store-id")
 			}

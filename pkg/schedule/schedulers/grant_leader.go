@@ -55,7 +55,11 @@ type grantLeaderSchedulerConfig struct {
 	cluster           schedule.Cluster
 }
 
+<<<<<<< HEAD
 func (conf *grantLeaderSchedulerConfig) BuildWithArgs(args []string) error {
+=======
+func (conf *grantLeaderSchedulerConfig) buildWithArgs(args []string) error {
+>>>>>>> 90cc61b43 (scheduler: add test for creating evict-leader-scheduler twice (#8757))
 	if len(args) < 1 {
 		return errs.ErrSchedulerConfig.FastGenByArgs("id")
 	}
@@ -269,14 +273,22 @@ func (handler *grantLeaderHandler) UpdateConfig(w http.ResponseWriter, r *http.R
 
 	err := handler.config.BuildWithArgs(args)
 	if err != nil {
+<<<<<<< HEAD
 		handler.config.mu.Lock()
 		handler.config.cluster.ResumeLeaderTransfer(id)
 		handler.config.mu.Unlock()
+=======
+		log.Error("fail to build config", errs.ZapError(err))
+		handler.config.Lock()
+		handler.config.cluster.ResumeLeaderTransfer(id, constant.Out)
+		handler.config.Unlock()
+>>>>>>> 90cc61b43 (scheduler: add test for creating evict-leader-scheduler twice (#8757))
 		handler.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	err = handler.config.Persist()
 	if err != nil {
+		log.Error("fail to persist config", errs.ZapError(err))
 		_, _ = handler.config.removeStore(id)
 		handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
