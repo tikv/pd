@@ -205,17 +205,7 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 						log.Debug("region is stale", zap.Stringer("origin", origin.GetMeta()), errs.ZapError(err))
 						continue
 					}
-<<<<<<< HEAD
 					saveKV, _, _ := regionGuide(region, origin)
-=======
-					cctx := &core.MetaProcessContext{
-						Context:    ctx,
-						TaskRunner: ratelimit.NewSyncRunner(),
-						Tracer:     core.NewNoopHeartbeatProcessTracer(),
-						// no limit for followers.
-					}
-					saveKV, _, _, _ := regionGuide(cctx, region, origin)
->>>>>>> 41ec8dced (syncer: exit watch leader immediately (#8824))
 					overlaps := bc.PutRegion(region)
 
 					if hasBuckets {
