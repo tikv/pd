@@ -502,12 +502,7 @@ func (am *AllocatorManager) AllocatorDaemon(ctx context.Context) {
 		case <-checkerTicker.C:
 			// Check and maintain the cluster's meta info about dc-location distribution.
 			go am.ClusterDCLocationChecker()
-			// We won't have any Local TSO Allocator set up in PD without enabling Local TSO.
-			if am.enableLocalTSO {
-				// Check the election priority of every Local TSO Allocator this PD is holding.
-				go am.PriorityChecker()
-			}
-			// PS: ClusterDCLocationChecker and PriorityChecker are time consuming and low frequent to run,
+			// PS: ClusterDCLocationChecker are time consuming and low frequent to run,
 			// we should run them concurrently to speed up the progress.
 		case <-ctx.Done():
 			log.Info("exit allocator daemon", logutil.CondUint32("keyspace-group-id", am.kgID, am.kgID > 0))
@@ -719,72 +714,6 @@ func (am *AllocatorManager) GetLocalTSOSuffixPath(dcLocation string) string {
 	return path.Join(am.GetLocalTSOSuffixPathPrefix(), dcLocation)
 }
 
-// PriorityChecker is used to check the election priority of a Local TSO Allocator.
-// In the normal case, if we want to elect a Local TSO Allocator for a certain DC,
-// such as dc-1, we need to make sure the follow priority rules:
-// 1. The PD server with dc-location="dc-1" needs to be elected as the allocator
-// leader with the highest priority.
-// 2. If all PD servers with dc-location="dc-1" are down, then the other PD servers
-// of DC could be elected.
-func (am *AllocatorManager) PriorityChecker() {
-	defer logutil.LogPanic()
-
-	serverID := am.member.ID()
-	myServerDCLocation := am.getServerDCLocation(serverID)
-	// Check all Local TSO Allocator followers to see if their priorities is higher than the leaders
-	// Filter out allocators with leadership and initialized
-	allocatorGroups := am.getAllocatorGroups(FilterDCLocation(GlobalDCLocation), FilterAvailableLeadership())
-	for _, allocatorGroup := range allocatorGroups {
-		localTSOAllocator, _ := allocatorGroup.allocator.(*LocalTSOAllocator)
-		leaderServerID := localTSOAllocator.GetAllocatorLeader().GetMemberId()
-		// No leader, maybe the leader is not been watched yet
-		if leaderServerID == 0 {
-			continue
-		}
-		leaderServerDCLocation := am.getServerDCLocation(leaderServerID)
-		// For example, an allocator leader for dc-1 is elected by a server of dc-2, then the server of dc-1 will
-		// find this allocator's dc-location isn't the same with server of dc-2 but is same with itself.
-		if allocatorGroup.dcLocation != leaderServerDCLocation && allocatorGroup.dcLocation == myServerDCLocation {
-			log.Info("try to move the local tso allocator",
-				logutil.CondUint32("keyspace-group-id", am.kgID, am.kgID > 0),
-				zap.Uint64("old-leader-id", leaderServerID),
-				zap.String("old-dc-location", leaderServerDCLocation),
-				zap.Uint64("next-leader-id", serverID),
-				zap.String("next-dc-location", myServerDCLocation))
-			if err := am.transferLocalAllocator(allocatorGroup.dcLocation, am.member.ID()); err != nil {
-				log.Error("move the local tso allocator failed",
-					logutil.CondUint32("keyspace-group-id", am.kgID, am.kgID > 0),
-					zap.Uint64("old-leader-id", leaderServerID),
-					zap.String("old-dc-location", leaderServerDCLocation),
-					zap.Uint64("next-leader-id", serverID),
-					zap.String("next-dc-location", myServerDCLocation),
-					errs.ZapError(err))
-				continue
-			}
-		}
-	}
-	// Check next leader and resign
-	// Filter out allocators with leadership
-	allocatorGroups = am.getAllocatorGroups(FilterDCLocation(GlobalDCLocation), FilterUnavailableLeadership())
-	for _, allocatorGroup := range allocatorGroups {
-		nextLeader, err := am.getNextLeaderID(allocatorGroup.dcLocation)
-		if err != nil {
-			log.Error("get next leader from etcd failed",
-				logutil.CondUint32("keyspace-group-id", am.kgID, am.kgID > 0),
-				zap.String("dc-location", allocatorGroup.dcLocation),
-				errs.ZapError(err))
-			continue
-		}
-		// nextLeader is not empty and isn't same with the server ID, resign the leader
-		if nextLeader != 0 && nextLeader != serverID {
-			log.Info("next leader key found, resign current leader",
-				logutil.CondUint32("keyspace-group-id", am.kgID, am.kgID > 0),
-				zap.Uint64("nextLeaderID", nextLeader))
-			am.ResetAllocatorGroup(allocatorGroup.dcLocation, false)
-		}
-	}
-}
-
 // TransferAllocatorForDCLocation transfer local tso allocator to the target member for the given dcLocation
 func (am *AllocatorManager) TransferAllocatorForDCLocation(dcLocation string, memberID uint64) error {
 	if dcLocation == GlobalDCLocation {
@@ -805,29 +734,6 @@ func (am *AllocatorManager) TransferAllocatorForDCLocation(dcLocation string, me
 		return nil
 	}
 	return am.transferLocalAllocator(dcLocation, memberID)
-}
-
-func (am *AllocatorManager) getServerDCLocation(serverID uint64) string {
-	am.mu.RLock()
-	defer am.mu.RUnlock()
-	for dcLocation, info := range am.mu.clusterDCLocations {
-		if slice.AnyOf(info.ServerIDs, func(i int) bool { return info.ServerIDs[i] == serverID }) {
-			return dcLocation
-		}
-	}
-	return ""
-}
-
-func (am *AllocatorManager) getNextLeaderID(dcLocation string) (uint64, error) {
-	nextLeaderKey := am.nextLeaderKey(dcLocation)
-	nextLeaderValue, err := etcdutil.GetValue(am.member.Client(), nextLeaderKey)
-	if err != nil {
-		return 0, err
-	}
-	if len(nextLeaderValue) == 0 {
-		return 0, nil
-	}
-	return strconv.ParseUint(string(nextLeaderValue), 10, 64)
 }
 
 // HandleRequest forwards TSO allocation requests to correct TSO Allocators.
