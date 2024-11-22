@@ -15,6 +15,7 @@
 package schedulers
 
 import (
+	"encoding/json"
 	"net/url"
 	"strconv"
 	"strings"
@@ -144,11 +145,17 @@ func schedulersRegister() {
 				return errs.ErrQueryUnescape.Wrap(err)
 			}
 			conf.BatchSize = b
-			startKey, err := url.QueryUnescape(args[1])
+			if args[1] != "" {
+				err = json.Unmarshal([]byte(args[1]), &conf.RequiredLabels)
+			}
 			if err != nil {
 				return errs.ErrQueryUnescape.Wrap(err)
 			}
-			endKey, err := url.QueryUnescape(args[2])
+			startKey, err := url.QueryUnescape(args[2])
+			if err != nil {
+				return errs.ErrQueryUnescape.Wrap(err)
+			}
+			endKey, err := url.QueryUnescape(args[3])
 			if err != nil {
 				return errs.ErrQueryUnescape.Wrap(err)
 			}
