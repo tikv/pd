@@ -169,7 +169,6 @@ func (gta *GlobalTSOAllocator) SetTSO(tso uint64, ignoreSmaller, skipUpperBoundC
 // Basically, there are two ways to generate a Global TSO:
 //  1. The old way to generate a normal TSO from memory directly, which makes the TSO service node become single point.
 //  2. Deprecated: The new way to generate a Global TSO by synchronizing with all other Local TSO Allocators.
-
 func (gta *GlobalTSOAllocator) GenerateTSO(ctx context.Context, count uint32) (pdpb.Timestamp, error) {
 	defer trace.StartRegion(ctx, "GlobalTSOAllocator.GenerateTSO").End()
 	if !gta.member.GetLeadership().Check() {

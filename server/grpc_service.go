@@ -2757,7 +2757,7 @@ func scatterRegions(cluster *cluster.RaftCluster, regionsID []uint64, group stri
 }
 
 // Deprecated
-func (s *GrpcServer) GetDCLocationInfo(ctx context.Context, request *pdpb.GetDCLocationInfoRequest) (*pdpb.GetDCLocationInfoResponse, error) {
+func (s *GrpcServer) GetDCLocationInfo(ctx context.Context, _ *pdpb.GetDCLocationInfoRequest) (*pdpb.GetDCLocationInfoResponse, error) {
 	return &pdpb.GetDCLocationInfoResponse{
 		Header: wrapHeader(),
 	}, nil
