@@ -26,11 +26,8 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/tikv/pd/pkg/election"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/utils/keypath"
-	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
-	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 )
 
@@ -51,37 +48,6 @@ type LocalTSOAllocator struct {
 	allocatorLeader atomic.Value // stored as *pdpb.Member
 	// pre-initialized metrics
 	tsoAllocatorRoleGauge prometheus.Gauge
-}
-
-// NewLocalTSOAllocator creates a new local TSO allocator.
-func NewLocalTSOAllocator(
-	am *AllocatorManager,
-	leadership *election.Leadership,
-	dcLocation string,
-) Allocator {
-	return &LocalTSOAllocator{
-		allocatorManager:      am,
-		leadership:            leadership,
-		timestampOracle:       newLocalTimestampOracle(am, leadership, dcLocation),
-		rootPath:              leadership.GetLeaderKey(),
-		tsoAllocatorRoleGauge: tsoAllocatorRole.WithLabelValues(am.getGroupIDStr(), dcLocation),
-	}
-}
-
-func newLocalTimestampOracle(am *AllocatorManager, leadership *election.Leadership, dcLocation string) *timestampOracle {
-	oracle := &timestampOracle{
-		client:                 leadership.GetClient(),
-		keyspaceGroupID:        am.kgID,
-		tsPath:                 keypath.KeyspaceGroupLocalTSPath(localTSOAllocatorEtcdPrefix, am.kgID, dcLocation),
-		storage:                am.storage,
-		saveInterval:           am.saveInterval,
-		updatePhysicalInterval: am.updatePhysicalInterval,
-		maxResetTSGap:          am.maxResetTSGap,
-		dcLocation:             dcLocation,
-		tsoMux:                 &tsoObject{},
-		metrics:                newTSOMetrics(am.getGroupIDStr(), dcLocation),
-	}
-	return oracle
 }
 
 // GetTimestampPath returns the timestamp path in etcd.
@@ -138,16 +104,6 @@ func (lta *LocalTSOAllocator) Reset() {
 	lta.timestampOracle.ResetTimestamp()
 }
 
-// setAllocatorLeader sets the current Local TSO Allocator leader.
-func (lta *LocalTSOAllocator) setAllocatorLeader(member any) {
-	lta.allocatorLeader.Store(member)
-}
-
-// unsetAllocatorLeader unsets the current Local TSO Allocator leader.
-func (lta *LocalTSOAllocator) unsetAllocatorLeader() {
-	lta.allocatorLeader.Store(&pdpb.Member{})
-}
-
 // GetAllocatorLeader returns the Local TSO Allocator leader.
 func (lta *LocalTSOAllocator) GetAllocatorLeader() *pdpb.Member {
 	allocatorLeader := lta.allocatorLeader.Load()
@@ -182,22 +138,6 @@ func (lta *LocalTSOAllocator) WriteTSO(maxTS *pdpb.Timestamp) error {
 		return nil
 	}
 	return lta.timestampOracle.resetUserTimestamp(context.Background(), lta.leadership, tsoutil.GenerateTS(maxTS), true)
-}
-
-// EnableAllocatorLeader sets the Local TSO Allocator itself to a leader.
-func (lta *LocalTSOAllocator) EnableAllocatorLeader() {
-	lta.setAllocatorLeader(lta.allocatorManager.member.GetMember())
-}
-
-// CampaignAllocatorLeader is used to campaign a Local TSO Allocator's leadership.
-func (lta *LocalTSOAllocator) CampaignAllocatorLeader(leaseTimeout int64, cmps ...clientv3.Cmp) error {
-	return lta.leadership.Campaign(leaseTimeout, lta.allocatorManager.member.MemberValue(), cmps...)
-}
-
-// KeepAllocatorLeader is used to keep the PD leader's leadership.
-func (lta *LocalTSOAllocator) KeepAllocatorLeader(ctx context.Context) {
-	defer logutil.LogPanic()
-	lta.leadership.Keep(ctx)
 }
 
 // IsAllocatorLeader returns whether the allocator is still a
@@ -249,15 +189,6 @@ func (lta *LocalTSOAllocator) CheckAllocatorLeader() (*pdpb.Member, int64, bool)
 		}
 	}
 	return allocatorLeader, rev, false
-}
-
-// WatchAllocatorLeader is used to watch the changes of the Local TSO Allocator leader.
-func (lta *LocalTSOAllocator) WatchAllocatorLeader(serverCtx context.Context, allocatorLeader *pdpb.Member, revision int64) {
-	lta.setAllocatorLeader(allocatorLeader)
-	// Check the cluster dc-locations to update the max suffix bits
-	go lta.allocatorManager.ClusterDCLocationChecker()
-	lta.leadership.Watch(serverCtx, revision)
-	lta.unsetAllocatorLeader()
 }
 
 func (lta *LocalTSOAllocator) getMetrics() *tsoMetrics {
