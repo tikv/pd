@@ -40,6 +40,6 @@ func newTSOHandler(svr *server.Server, rd *render.Render) *tsoHandler {
 // @Param    body  body  object  true  "json params"
 // @Produce  json
 // @Router   /tso/allocator/transfer/{name} [post]
-func (h *tsoHandler) TransferLocalTSOAllocator(w http.ResponseWriter, r *http.Request) {
+func (h *tsoHandler) TransferLocalTSOAllocator(w http.ResponseWriter, _ *http.Request) {
 	h.rd.JSON(w, http.StatusOK, "The transfer command is deprecated.")
 }
