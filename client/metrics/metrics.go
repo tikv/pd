@@ -15,7 +15,10 @@
 package metrics
 
 import (
+<<<<<<< HEAD
 	"sync"
+=======
+>>>>>>> 20c4157ed1 (client: separate the metrics package (#8833))
 	"sync/atomic"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -27,6 +30,7 @@ var initialized int32
 func init() {
 	initMetrics(prometheus.Labels{})
 	initCmdDurations()
+<<<<<<< HEAD
 	initRegisteredConsumers()
 }
 
@@ -49,6 +53,8 @@ func initRegisteredConsumers() {
 	for _, initConsumer := range consumersInitializers.value {
 		initConsumer()
 	}
+=======
+>>>>>>> 20c4157ed1 (client: separate the metrics package (#8833))
 }
 
 // InitAndRegisterMetrics initializes and registers the metrics manually.
@@ -57,7 +63,10 @@ func InitAndRegisterMetrics(constLabels prometheus.Labels) {
 		// init metrics with constLabels
 		initMetrics(constLabels)
 		initCmdDurations()
+<<<<<<< HEAD
 		initRegisteredConsumers()
+=======
+>>>>>>> 20c4157ed1 (client: separate the metrics package (#8833))
 		// register metrics
 		registerMetrics()
 	}
@@ -67,6 +76,10 @@ var (
 	cmdDuration       *prometheus.HistogramVec
 	cmdFailedDuration *prometheus.HistogramVec
 	requestDuration   *prometheus.HistogramVec
+<<<<<<< HEAD
+=======
+
+>>>>>>> 20c4157ed1 (client: separate the metrics package (#8833))
 	// TSOBestBatchSize is the histogram of the best batch size of TSO requests.
 	TSOBestBatchSize prometheus.Histogram
 	// TSOBatchSize is the histogram of the batch size of TSO requests.
@@ -79,8 +92,11 @@ var (
 	OngoingRequestCountGauge *prometheus.GaugeVec
 	// EstimateTSOLatencyGauge is the gauge to indicate the estimated latency of TSO requests.
 	EstimateTSOLatencyGauge *prometheus.GaugeVec
+<<<<<<< HEAD
 	// CircuitBreakerCounters is a vector for different circuit breaker counters
 	CircuitBreakerCounters *prometheus.CounterVec
+=======
+>>>>>>> 20c4157ed1 (client: separate the metrics package (#8833))
 )
 
 func initMetrics(constLabels prometheus.Labels) {
@@ -169,6 +185,7 @@ func initMetrics(constLabels prometheus.Labels) {
 			Help:        "Estimated latency of an RTT of getting TSO",
 			ConstLabels: constLabels,
 		}, []string{"stream"})
+<<<<<<< HEAD
 
 	CircuitBreakerCounters = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
@@ -178,11 +195,17 @@ func initMetrics(constLabels prometheus.Labels) {
 			Help:        "Circuit breaker counters",
 			ConstLabels: constLabels,
 		}, []string{"name", "event"})
+=======
+>>>>>>> 20c4157ed1 (client: separate the metrics package (#8833))
 }
 
 // CmdDurationXXX and CmdFailedDurationXXX are the durations of the client commands.
 var (
+<<<<<<< HEAD
 	CmdDurationWait                     prometheus.Observer
+=======
+	CmdDurationTSOWait                  prometheus.Observer
+>>>>>>> 20c4157ed1 (client: separate the metrics package (#8833))
 	CmdDurationTSO                      prometheus.Observer
 	CmdDurationTSOAsyncWait             prometheus.Observer
 	CmdDurationGetRegion                prometheus.Observer
@@ -208,10 +231,18 @@ var (
 	CmdDurationUpdateGCSafePointV2      prometheus.Observer
 	CmdDurationUpdateServiceSafePointV2 prometheus.Observer
 
+<<<<<<< HEAD
 	CmdFailDurationGetRegion                  prometheus.Observer
 	CmdFailDurationTSO                        prometheus.Observer
 	CmdFailDurationGetAllMembers              prometheus.Observer
 	CmdFailDurationGetPrevRegion              prometheus.Observer
+=======
+	CmdFailedDurationGetRegion                prometheus.Observer
+	CmdFailedDurationTSOWait                  prometheus.Observer
+	CmdFailedDurationTSO                      prometheus.Observer
+	CmdFailedDurationGetAllMembers            prometheus.Observer
+	CmdFailedDurationGetPrevRegion            prometheus.Observer
+>>>>>>> 20c4157ed1 (client: separate the metrics package (#8833))
 	CmdFailedDurationGetRegionByID            prometheus.Observer
 	CmdFailedDurationScanRegions              prometheus.Observer
 	CmdFailedDurationBatchScanRegions         prometheus.Observer
@@ -225,7 +256,10 @@ var (
 	CmdFailedDurationPut                      prometheus.Observer
 	CmdFailedDurationUpdateGCSafePointV2      prometheus.Observer
 	CmdFailedDurationUpdateServiceSafePointV2 prometheus.Observer
+<<<<<<< HEAD
 	CmdFailedDurationGetAllKeyspaces          prometheus.Observer
+=======
+>>>>>>> 20c4157ed1 (client: separate the metrics package (#8833))
 
 	// RequestDurationTSO records the durations of the successful TSO requests.
 	RequestDurationTSO prometheus.Observer
@@ -235,7 +269,11 @@ var (
 
 func initCmdDurations() {
 	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
+<<<<<<< HEAD
 	CmdDurationWait = cmdDuration.WithLabelValues("wait")
+=======
+	CmdDurationTSOWait = cmdDuration.WithLabelValues("wait")
+>>>>>>> 20c4157ed1 (client: separate the metrics package (#8833))
 	CmdDurationTSO = cmdDuration.WithLabelValues("tso")
 	CmdDurationTSOAsyncWait = cmdDuration.WithLabelValues("tso_async_wait")
 	CmdDurationGetRegion = cmdDuration.WithLabelValues("get_region")
@@ -261,10 +299,18 @@ func initCmdDurations() {
 	CmdDurationUpdateGCSafePointV2 = cmdDuration.WithLabelValues("update_gc_safe_point_v2")
 	CmdDurationUpdateServiceSafePointV2 = cmdDuration.WithLabelValues("update_service_safe_point_v2")
 
+<<<<<<< HEAD
 	CmdFailDurationGetRegion = cmdFailedDuration.WithLabelValues("get_region")
 	CmdFailDurationTSO = cmdFailedDuration.WithLabelValues("tso")
 	CmdFailDurationGetAllMembers = cmdFailedDuration.WithLabelValues("get_member_info")
 	CmdFailDurationGetPrevRegion = cmdFailedDuration.WithLabelValues("get_prev_region")
+=======
+	CmdFailedDurationGetRegion = cmdFailedDuration.WithLabelValues("get_region")
+	CmdFailedDurationTSOWait = cmdFailedDuration.WithLabelValues("wait")
+	CmdFailedDurationTSO = cmdFailedDuration.WithLabelValues("tso")
+	CmdFailedDurationGetAllMembers = cmdFailedDuration.WithLabelValues("get_member_info")
+	CmdFailedDurationGetPrevRegion = cmdFailedDuration.WithLabelValues("get_prev_region")
+>>>>>>> 20c4157ed1 (client: separate the metrics package (#8833))
 	CmdFailedDurationGetRegionByID = cmdFailedDuration.WithLabelValues("get_region_byid")
 	CmdFailedDurationScanRegions = cmdFailedDuration.WithLabelValues("scan_regions")
 	CmdFailedDurationBatchScanRegions = cmdFailedDuration.WithLabelValues("batch_scan_regions")
@@ -278,7 +324,10 @@ func initCmdDurations() {
 	CmdFailedDurationPut = cmdFailedDuration.WithLabelValues("put")
 	CmdFailedDurationUpdateGCSafePointV2 = cmdFailedDuration.WithLabelValues("update_gc_safe_point_v2")
 	CmdFailedDurationUpdateServiceSafePointV2 = cmdFailedDuration.WithLabelValues("update_service_safe_point_v2")
+<<<<<<< HEAD
 	CmdFailedDurationGetAllKeyspaces = cmdFailedDuration.WithLabelValues("get_all_keyspaces")
+=======
+>>>>>>> 20c4157ed1 (client: separate the metrics package (#8833))
 
 	RequestDurationTSO = requestDuration.WithLabelValues("tso")
 	RequestFailedDurationTSO = requestDuration.WithLabelValues("tso-failed")
@@ -293,5 +342,8 @@ func registerMetrics() {
 	prometheus.MustRegister(TSOBatchSendLatency)
 	prometheus.MustRegister(RequestForwarded)
 	prometheus.MustRegister(EstimateTSOLatencyGauge)
+<<<<<<< HEAD
 	prometheus.MustRegister(CircuitBreakerCounters)
+=======
+>>>>>>> 20c4157ed1 (client: separate the metrics package (#8833))
 }

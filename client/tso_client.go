@@ -26,8 +26,14 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/client/errs"
+<<<<<<< HEAD
 	"github.com/tikv/pd/client/grpcutil"
 	"github.com/tikv/pd/client/metrics"
+=======
+	"github.com/tikv/pd/client/metrics"
+	"github.com/tikv/pd/client/opt"
+	"github.com/tikv/pd/client/utils/grpcutil"
+>>>>>>> 20c4157ed1 (client: separate the metrics package (#8833))
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -463,7 +469,11 @@ func (c *tsoClient) tryConnectToTSO(
 				forwardedHostTrim := trimHTTPPrefix(forwardedHost)
 				addr := trimHTTPPrefix(backupURL)
 				// the goroutine is used to check the network and change back to the original stream
+<<<<<<< HEAD
 				go c.checkAllocator(ctx, cancel, dc, forwardedHostTrim, addr, url, updateAndClear)
+=======
+				go c.checkLeader(ctx, cancel, forwardedHostTrim, addr, url, updateAndClear)
+>>>>>>> 20c4157ed1 (client: separate the metrics package (#8833))
 				metrics.RequestForwarded.WithLabelValues(forwardedHostTrim, addr).Set(1)
 				updateAndClear(backupURL, &tsoConnectionContext{cctx, cancel, backupURL, stream})
 				return nil

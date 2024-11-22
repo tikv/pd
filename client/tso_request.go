@@ -76,12 +76,21 @@ func (req *tsoRequest) waitCtx(ctx context.Context) (physical int64, logical int
 		defer trace.StartRegion(req.requestCtx, "pdclient.tsoReqDone").End()
 		err = errors.WithStack(err)
 		if err != nil {
+<<<<<<< HEAD
 			metrics.CmdFailDurationTSO.Observe(time.Since(req.start).Seconds())
 			return 0, 0, err
 		}
 		physical, logical = req.physical, req.logical
 		now := time.Now()
 		metrics.CmdDurationWait.Observe(now.Sub(start).Seconds())
+=======
+			metrics.CmdFailedDurationTSOWait.Observe(now.Sub(start).Seconds())
+			metrics.CmdFailedDurationTSO.Observe(now.Sub(req.start).Seconds())
+			return 0, 0, err
+		}
+		physical, logical = req.physical, req.logical
+		metrics.CmdDurationTSOWait.Observe(now.Sub(start).Seconds())
+>>>>>>> 20c4157ed1 (client: separate the metrics package (#8833))
 		metrics.CmdDurationTSO.Observe(now.Sub(req.start).Seconds())
 		return
 	case <-ctx.Done():

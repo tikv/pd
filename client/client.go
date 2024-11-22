@@ -37,8 +37,14 @@ import (
 
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/metrics"
+<<<<<<< HEAD
 	"github.com/tikv/pd/client/tlsutil"
 	"github.com/tikv/pd/client/tsoutil"
+=======
+	"github.com/tikv/pd/client/opt"
+	"github.com/tikv/pd/client/utils/tlsutil"
+	"go.uber.org/zap"
+>>>>>>> 20c4157ed1 (client: separate the metrics package (#8833))
 )
 
 const (
@@ -690,7 +696,11 @@ func (c *client) GetAllMembers(ctx context.Context) ([]*pdpb.Member, error) {
 		return nil, errs.ErrClientGetProtoClient
 	}
 	resp, err := protoClient.GetMembers(ctx, req)
+<<<<<<< HEAD
 	if err = c.respForErr(metrics.CmdFailDurationGetAllMembers, start, err, resp.GetHeader()); err != nil {
+=======
+	if err = c.respForErr(metrics.CmdFailedDurationGetAllMembers, start, err, resp.GetHeader()); err != nil {
+>>>>>>> 20c4157ed1 (client: separate the metrics package (#8833))
 		return nil, err
 	}
 	return resp.GetMembers(), nil
@@ -880,8 +890,13 @@ func (c *client) GetRegionFromMember(ctx context.Context, key []byte, memberURLs
 	}
 
 	if resp == nil {
+<<<<<<< HEAD
 		metrics.CmdFailDurationGetRegion.Observe(time.Since(start).Seconds())
 		c.pdSvcDiscovery.ScheduleCheckMemberChanged()
+=======
+		metrics.CmdFailedDurationGetRegion.Observe(time.Since(start).Seconds())
+		c.inner.pdSvcDiscovery.ScheduleCheckMemberChanged()
+>>>>>>> 20c4157ed1 (client: separate the metrics package (#8833))
 		errorMsg := fmt.Sprintf("[pd] can't get region info from member URLs: %+v", memberURLs)
 		return nil, errors.WithStack(errors.New(errorMsg))
 	}
@@ -896,7 +911,11 @@ func (c *client) GetRegion(ctx context.Context, key []byte, opts ...GetRegionOpt
 	}
 	start := time.Now()
 	defer func() { metrics.CmdDurationGetRegion.Observe(time.Since(start).Seconds()) }()
+<<<<<<< HEAD
 	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
+=======
+	ctx, cancel := context.WithTimeout(ctx, c.inner.option.Timeout)
+>>>>>>> 20c4157ed1 (client: separate the metrics package (#8833))
 	defer cancel()
 
 	options := &GetRegionOp{}
@@ -920,7 +939,12 @@ func (c *client) GetRegion(ctx context.Context, key []byte, opts ...GetRegionOpt
 		}
 		resp, err = protoClient.GetRegion(cctx, req)
 	}
+<<<<<<< HEAD
 	if err = c.respForErr(metrics.CmdFailDurationGetRegion, start, err, resp.GetHeader()); err != nil {
+=======
+
+	if err = c.respForErr(metrics.CmdFailedDurationGetRegion, start, err, resp.GetHeader()); err != nil {
+>>>>>>> 20c4157ed1 (client: separate the metrics package (#8833))
 		return nil, err
 	}
 	return handleRegionResponse(resp), nil
@@ -934,7 +958,11 @@ func (c *client) GetPrevRegion(ctx context.Context, key []byte, opts ...GetRegio
 	}
 	start := time.Now()
 	defer func() { metrics.CmdDurationGetPrevRegion.Observe(time.Since(start).Seconds()) }()
+<<<<<<< HEAD
 	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
+=======
+	ctx, cancel := context.WithTimeout(ctx, c.inner.option.Timeout)
+>>>>>>> 20c4157ed1 (client: separate the metrics package (#8833))
 	defer cancel()
 
 	options := &GetRegionOp{}
@@ -959,7 +987,11 @@ func (c *client) GetPrevRegion(ctx context.Context, key []byte, opts ...GetRegio
 		resp, err = protoClient.GetPrevRegion(cctx, req)
 	}
 
+<<<<<<< HEAD
 	if err = c.respForErr(metrics.CmdFailDurationGetPrevRegion, start, err, resp.GetHeader()); err != nil {
+=======
+	if err = c.respForErr(metrics.CmdFailedDurationGetPrevRegion, start, err, resp.GetHeader()); err != nil {
+>>>>>>> 20c4157ed1 (client: separate the metrics package (#8833))
 		return nil, err
 	}
 	return handleRegionResponse(resp), nil
@@ -973,7 +1005,11 @@ func (c *client) GetRegionByID(ctx context.Context, regionID uint64, opts ...Get
 	}
 	start := time.Now()
 	defer func() { metrics.CmdDurationGetRegionByID.Observe(time.Since(start).Seconds()) }()
+<<<<<<< HEAD
 	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
+=======
+	ctx, cancel := context.WithTimeout(ctx, c.inner.option.Timeout)
+>>>>>>> 20c4157ed1 (client: separate the metrics package (#8833))
 	defer cancel()
 
 	options := &GetRegionOp{}
@@ -1336,7 +1372,11 @@ func (c *client) SplitAndScatterRegions(ctx context.Context, splitKeys [][]byte,
 	}
 	start := time.Now()
 	defer func() { metrics.CmdDurationSplitAndScatterRegions.Observe(time.Since(start).Seconds()) }()
+<<<<<<< HEAD
 	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
+=======
+	ctx, cancel := context.WithTimeout(ctx, c.inner.option.Timeout)
+>>>>>>> 20c4157ed1 (client: separate the metrics package (#8833))
 	defer cancel()
 	options := &RegionsOp{}
 	for _, opt := range opts {
@@ -1386,7 +1426,11 @@ func (c *client) SplitRegions(ctx context.Context, splitKeys [][]byte, opts ...R
 	}
 	start := time.Now()
 	defer func() { metrics.CmdDurationSplitRegions.Observe(time.Since(start).Seconds()) }()
+<<<<<<< HEAD
 	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
+=======
+	ctx, cancel := context.WithTimeout(ctx, c.inner.option.Timeout)
+>>>>>>> 20c4157ed1 (client: separate the metrics package (#8833))
 	defer cancel()
 	options := &RegionsOp{}
 	for _, opt := range opts {
@@ -1413,7 +1457,11 @@ func (c *client) requestHeader() *pdpb.RequestHeader {
 func (c *client) scatterRegionsWithOptions(ctx context.Context, regionsID []uint64, opts ...RegionsOption) (*pdpb.ScatterRegionResponse, error) {
 	start := time.Now()
 	defer func() { metrics.CmdDurationScatterRegions.Observe(time.Since(start).Seconds()) }()
+<<<<<<< HEAD
 	options := &RegionsOp{}
+=======
+	options := &opt.RegionsOp{}
+>>>>>>> 20c4157ed1 (client: separate the metrics package (#8833))
 	for _, opt := range opts {
 		opt(options)
 	}

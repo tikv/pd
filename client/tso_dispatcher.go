@@ -29,6 +29,11 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/client/errs"
+<<<<<<< HEAD
+=======
+	"github.com/tikv/pd/client/metrics"
+	"github.com/tikv/pd/client/opt"
+>>>>>>> 20c4157ed1 (client: separate the metrics package (#8833))
 	"github.com/tikv/pd/client/retry"
 	"github.com/tikv/pd/client/timerpool"
 	"github.com/tikv/pd/client/tsoutil"
@@ -126,7 +131,15 @@ func newTSODispatcher(
 		tsDeadlineCh:   make(chan *deadline, tokenChCapacity),
 		batchBufferPool: &sync.Pool{
 			New: func() any {
+<<<<<<< HEAD
 				return newTSOBatchController(maxBatchSize * 2)
+=======
+				return newBatchController[*tsoRequest](
+					maxBatchSize*2,
+					tsoRequestFinisher(0, 0, invalidStreamID),
+					metrics.TSOBestBatchSize,
+				)
+>>>>>>> 20c4157ed1 (client: separate the metrics package (#8833))
 			},
 		},
 		tokenCh:                tokenCh,

@@ -53,7 +53,11 @@ func (c *client) LoadKeyspace(ctx context.Context, name string) (*keyspacepb.Key
 	}
 	start := time.Now()
 	defer func() { metrics.CmdDurationLoadKeyspace.Observe(time.Since(start).Seconds()) }()
+<<<<<<< HEAD
 	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
+=======
+	ctx, cancel := context.WithTimeout(ctx, c.inner.option.Timeout)
+>>>>>>> 20c4157ed1 (client: separate the metrics package (#8833))
 	req := &keyspacepb.LoadKeyspaceRequest{
 		Header: c.requestHeader(),
 		Name:   name,
@@ -68,7 +72,11 @@ func (c *client) LoadKeyspace(ctx context.Context, name string) (*keyspacepb.Key
 
 	if err != nil {
 		metrics.CmdFailedDurationLoadKeyspace.Observe(time.Since(start).Seconds())
+<<<<<<< HEAD
 		c.pdSvcDiscovery.ScheduleCheckMemberChanged()
+=======
+		c.inner.pdSvcDiscovery.ScheduleCheckMemberChanged()
+>>>>>>> 20c4157ed1 (client: separate the metrics package (#8833))
 		return nil, err
 	}
 
@@ -97,7 +105,11 @@ func (c *client) UpdateKeyspaceState(ctx context.Context, id uint32, state keysp
 	}
 	start := time.Now()
 	defer func() { metrics.CmdDurationUpdateKeyspaceState.Observe(time.Since(start).Seconds()) }()
+<<<<<<< HEAD
 	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
+=======
+	ctx, cancel := context.WithTimeout(ctx, c.inner.option.Timeout)
+>>>>>>> 20c4157ed1 (client: separate the metrics package (#8833))
 	req := &keyspacepb.UpdateKeyspaceStateRequest{
 		Header: c.requestHeader(),
 		Id:     id,
@@ -113,7 +125,11 @@ func (c *client) UpdateKeyspaceState(ctx context.Context, id uint32, state keysp
 
 	if err != nil {
 		metrics.CmdFailedDurationUpdateKeyspaceState.Observe(time.Since(start).Seconds())
+<<<<<<< HEAD
 		c.pdSvcDiscovery.ScheduleCheckMemberChanged()
+=======
+		c.inner.pdSvcDiscovery.ScheduleCheckMemberChanged()
+>>>>>>> 20c4157ed1 (client: separate the metrics package (#8833))
 		return nil, err
 	}
 
@@ -141,7 +157,11 @@ func (c *client) GetAllKeyspaces(ctx context.Context, startID uint32, limit uint
 	}
 	start := time.Now()
 	defer func() { metrics.CmdDurationGetAllKeyspaces.Observe(time.Since(start).Seconds()) }()
+<<<<<<< HEAD
 	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
+=======
+	ctx, cancel := context.WithTimeout(ctx, c.inner.option.Timeout)
+>>>>>>> 20c4157ed1 (client: separate the metrics package (#8833))
 	req := &keyspacepb.GetAllKeyspacesRequest{
 		Header:  c.requestHeader(),
 		StartId: startID,
@@ -156,13 +176,22 @@ func (c *client) GetAllKeyspaces(ctx context.Context, startID uint32, limit uint
 	cancel()
 
 	if err != nil {
+<<<<<<< HEAD
 		metrics.CmdFailedDurationGetAllKeyspaces.Observe(time.Since(start).Seconds())
 		c.pdSvcDiscovery.ScheduleCheckMemberChanged()
+=======
+		metrics.CmdDurationGetAllKeyspaces.Observe(time.Since(start).Seconds())
+		c.inner.pdSvcDiscovery.ScheduleCheckMemberChanged()
+>>>>>>> 20c4157ed1 (client: separate the metrics package (#8833))
 		return nil, err
 	}
 
 	if resp.Header.GetError() != nil {
+<<<<<<< HEAD
 		metrics.CmdFailedDurationGetAllKeyspaces.Observe(time.Since(start).Seconds())
+=======
+		metrics.CmdDurationGetAllKeyspaces.Observe(time.Since(start).Seconds())
+>>>>>>> 20c4157ed1 (client: separate the metrics package (#8833))
 		return nil, errors.Errorf("Get all keyspaces metadata failed: %s", resp.Header.GetError().String())
 	}
 

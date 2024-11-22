@@ -24,8 +24,14 @@ import (
 	"github.com/pingcap/kvproto/pkg/meta_storagepb"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/tikv/pd/client/errs"
+<<<<<<< HEAD
 	"github.com/tikv/pd/client/grpcutil"
 	"github.com/tikv/pd/client/metrics"
+=======
+	"github.com/tikv/pd/client/metrics"
+	"github.com/tikv/pd/client/opt"
+	"github.com/tikv/pd/client/utils/grpcutil"
+>>>>>>> 20c4157ed1 (client: separate the metrics package (#8833))
 )
 
 // MetaStorageClient is the interface for meta storage client.
