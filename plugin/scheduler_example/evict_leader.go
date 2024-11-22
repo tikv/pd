@@ -50,7 +50,7 @@ const (
 func init() {
 	schedulers.RegisterSliceDecoderBuilder(userEvictLeaderScheduler, func(args []string) schedulers.ConfigDecoder {
 		return func(v any) error {
-			if len(args) != 1 {
+			if len(args) < 1 {
 				return errors.New("should specify the store-id")
 			}
 			conf, ok := v.(*evictLeaderSchedulerConfig)
@@ -101,7 +101,7 @@ type evictLeaderSchedulerConfig struct {
 
 // BuildWithArgs builds the config with the args.
 func (conf *evictLeaderSchedulerConfig) BuildWithArgs(args []string) error {
-	if len(args) != 1 {
+	if len(args) < 1 {
 		return errors.New("should specify the store-id")
 	}
 

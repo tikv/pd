@@ -787,6 +787,7 @@ func (s *StoresInfo) ResetStores() {
 func (s *StoresInfo) PauseLeaderTransfer(storeID uint64, direction constant.Direction) error {
 	s.Lock()
 	defer s.Unlock()
+	log.Info("pause store leader transfer", zap.Uint64("store-id", storeID), zap.String("direction", direction.String()))
 	store, ok := s.stores[storeID]
 	if !ok {
 		return errs.ErrStoreNotFound.FastGenByArgs(storeID)
@@ -810,6 +811,7 @@ func (s *StoresInfo) PauseLeaderTransfer(storeID uint64, direction constant.Dire
 func (s *StoresInfo) ResumeLeaderTransfer(storeID uint64, direction constant.Direction) {
 	s.Lock()
 	defer s.Unlock()
+	log.Info("resume store leader transfer", zap.Uint64("store-id", storeID), zap.String("direction", direction.String()))
 	store, ok := s.stores[storeID]
 	if !ok {
 		log.Warn("try to clean a store's pause state, but it is not found. It may be cleanup",

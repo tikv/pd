@@ -22,6 +22,7 @@ import (
 	"time"
 
 	pd "github.com/tikv/pd/client"
+	"github.com/tikv/pd/client/caller"
 
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
@@ -79,7 +80,10 @@ func (suite *globalConfigTestSuite) SetupSuite() {
 	suite.server = &server.GrpcServer{Server: gsi}
 	re.NoError(err)
 	addr := suite.server.GetAddr()
-	suite.client, err = pd.NewClientWithContext(suite.server.Context(), []string{addr}, pd.SecurityOption{})
+	suite.client, err = pd.NewClientWithContext(suite.server.Context(),
+		caller.TestComponent,
+		[]string{addr}, pd.SecurityOption{},
+	)
 	re.NoError(err)
 }
 

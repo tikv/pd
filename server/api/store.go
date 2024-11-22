@@ -528,46 +528,6 @@ func (h *storesHandler) GetAllStoresLimit(w http.ResponseWriter, r *http.Request
 	h.rd.JSON(w, http.StatusOK, limits)
 }
 
-// @Tags     store
-// @Summary  Set limit scene in the cluster.
-// @Accept   json
-// @Param    body  body  storelimit.Scene  true  "Store limit scene"
-// @Produce  json
-// @Success  200  {string}  string  "Set store limit scene successfully."
-// @Failure  400  {string}  string  "The input is invalid."
-// @Failure  500  {string}  string  "PD server failed to proceed the request."
-// @Router   /stores/limit/scene [post]
-func (h *storesHandler) SetStoreLimitScene(w http.ResponseWriter, r *http.Request) {
-	typeName := r.URL.Query().Get("type")
-	typeValue, err := parseStoreLimitType(typeName)
-	if err != nil {
-		h.rd.JSON(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	scene := h.Handler.GetStoreLimitScene(typeValue)
-	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &scene); err != nil {
-		return
-	}
-	h.Handler.SetStoreLimitScene(scene, typeValue)
-	h.rd.JSON(w, http.StatusOK, "Set store limit scene successfully.")
-}
-
-// @Tags     store
-// @Summary  Get limit scene in the cluster.
-// @Produce  json
-// @Success  200  {string}  string  "Get store limit scene successfully."
-// @Router   /stores/limit/scene [get]
-func (h *storesHandler) GetStoreLimitScene(w http.ResponseWriter, r *http.Request) {
-	typeName := r.URL.Query().Get("type")
-	typeValue, err := parseStoreLimitType(typeName)
-	if err != nil {
-		h.rd.JSON(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	scene := h.Handler.GetStoreLimitScene(typeValue)
-	h.rd.JSON(w, http.StatusOK, scene)
-}
-
 // Progress contains status about a progress.
 type Progress struct {
 	Action       string  `json:"action"`

@@ -12,41 +12,25 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package typeutil
+package caller
 
 import (
-	"encoding/json"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
-type fate struct {
-	ID   uint64
-	Attr struct {
-		Age int64
-	}
+func TestGetComponent(t *testing.T) {
+	re := require.New(t)
+
+	re.Equal(Component("github.com/tikv/pd/client/caller"), GetComponent(0))
+	re.Equal(Component("testing"), GetComponent(1))
+	re.Equal(Component("runtime"), GetComponent(2))
+	re.Equal(Component("unknown"), GetComponent(3))
 }
 
-func (f *fate) Marshal() ([]byte, error) {
-	return json.Marshal(f)
-}
+func TestGetCallerID(t *testing.T) {
+	re := require.New(t)
 
-func (f *fate) Unmarshal(data []byte) error {
-	return json.Unmarshal(data, f)
-}
-
-var fateFactory = func() *fate { return &fate{} }
-
-func TestDeepClone(t *testing.T) {
-	re := assert.New(t)
-	src := &fate{ID: 1}
-	dst := DeepClone(src, fateFactory)
-	re.EqualValues(1, dst.ID)
-	dst.ID = 2
-	re.EqualValues(1, src.ID)
-
-	// case2: the source is nil
-	var src2 *fate
-	re.Nil(DeepClone(src2, fateFactory))
+	re.Equal(ID("caller.test"), GetCallerID())
 }

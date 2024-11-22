@@ -38,6 +38,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	pd "github.com/tikv/pd/client"
+	"github.com/tikv/pd/client/caller"
 	"github.com/tikv/pd/client/opt"
 	"github.com/tikv/pd/client/retry"
 	"github.com/tikv/pd/pkg/core"
@@ -193,11 +194,11 @@ func TestLeaderTransferAndMoveCluster(t *testing.T) {
 	oldServers := cluster.GetServers()
 	oldLeaderName := cluster.WaitLeader()
 	for range 3 {
+		time.Sleep(5 * time.Second)
 		newPD, err := cluster.Join(ctx)
 		re.NoError(err)
 		re.NoError(newPD.Run())
 		oldLeaderName = cluster.WaitLeader()
-		time.Sleep(5 * time.Second)
 	}
 
 	// ABCDEF->DEF
@@ -850,7 +851,8 @@ func runServer(re *require.Assertions, cluster *tests.TestCluster) []string {
 }
 
 func setupCli(ctx context.Context, re *require.Assertions, endpoints []string, opts ...opt.ClientOption) pd.Client {
-	cli, err := pd.NewClientWithContext(ctx, endpoints, pd.SecurityOption{}, opts...)
+	cli, err := pd.NewClientWithContext(ctx, caller.TestComponent,
+		endpoints, pd.SecurityOption{}, opts...)
 	re.NoError(err)
 	return cli
 }
@@ -1288,6 +1290,19 @@ func (suite *clientTestSuite) TestGetRegionByID() {
 		return reflect.DeepEqual(region, r.Meta) &&
 			reflect.DeepEqual(peers[0], r.Leader)
 	})
+
+	// test WithCallerComponent
+	testutil.Eventually(re, func() bool {
+		r, err := suite.client.
+			WithCallerComponent(caller.GetComponent(0)).
+			GetRegionByID(context.Background(), regionID)
+		re.NoError(err)
+		if r == nil {
+			return false
+		}
+		return reflect.DeepEqual(region, r.Meta) &&
+			reflect.DeepEqual(peers[0], r.Leader)
+	})
 }
 
 func (suite *clientTestSuite) TestGetStore() {
@@ -1622,7 +1637,7 @@ func TestWatch(t *testing.T) {
 	resp, err := client.Get(ctx, []byte(key))
 	re.NoError(err)
 	rev := resp.GetHeader().GetRevision()
-	ch, err := client.Watch(ctx, []byte(key), pd.WithRev(rev))
+	ch, err := client.Watch(ctx, []byte(key), opt.WithRev(rev))
 	re.NoError(err)
 	exit := make(chan struct{})
 	go func() {
@@ -1669,7 +1684,7 @@ func TestPutGet(t *testing.T) {
 	re.NoError(err)
 	re.Equal([]byte("1"), getResp.GetKvs()[0].Value)
 	re.NotEqual(0, getResp.GetHeader().GetRevision())
-	putResp, err = client.Put(context.Background(), key, []byte("2"), pd.WithPrevKV())
+	putResp, err = client.Put(context.Background(), key, []byte("2"), opt.WithPrevKV())
 	re.NoError(err)
 	re.Equal([]byte("1"), putResp.GetPrevKv().Value)
 	getResp, err = client.Get(context.Background(), key)
@@ -1709,7 +1724,7 @@ func TestClientWatchWithRevision(t *testing.T) {
 	// Mock get revision by loading
 	r, err := s.GetEtcdClient().Put(context.Background(), watchPrefix+"test", "test")
 	re.NoError(err)
-	res, err := client.Get(context.Background(), []byte(watchPrefix), pd.WithPrefix())
+	res, err := client.Get(context.Background(), []byte(watchPrefix), opt.WithPrefix())
 	re.NoError(err)
 	re.Len(res.Kvs, 1)
 	re.LessOrEqual(r.Header.GetRevision(), res.GetHeader().GetRevision())
@@ -1720,7 +1735,7 @@ func TestClientWatchWithRevision(t *testing.T) {
 		re.NoError(err)
 	}
 	// Start watcher at next revision
-	ch, err := client.Watch(context.Background(), []byte(watchPrefix), pd.WithRev(res.GetHeader().GetRevision()), pd.WithPrefix(), pd.WithPrevKV())
+	ch, err := client.Watch(context.Background(), []byte(watchPrefix), opt.WithRev(res.GetHeader().GetRevision()), opt.WithPrefix(), opt.WithPrevKV())
 	re.NoError(err)
 	// Mock delete
 	for i := range 3 {

@@ -29,6 +29,7 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/tsopb"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/client/clients/metastorage"
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/opt"
 	"github.com/tikv/pd/client/utils/grpcutil"
@@ -120,7 +121,7 @@ func (t *tsoServerDiscovery) resetFailure() {
 // tsoServiceDiscovery is the service discovery client of the independent TSO service
 
 type tsoServiceDiscovery struct {
-	metacli         MetaStorageClient
+	metacli         metastorage.Client
 	apiSvcDiscovery ServiceDiscovery
 	clusterID       uint64
 	keyspaceID      atomic.Uint32
@@ -155,7 +156,7 @@ type tsoServiceDiscovery struct {
 
 // newTSOServiceDiscovery returns a new client-side service discovery for the independent TSO service.
 func newTSOServiceDiscovery(
-	ctx context.Context, metacli MetaStorageClient, apiSvcDiscovery ServiceDiscovery,
+	ctx context.Context, metacli metastorage.Client, apiSvcDiscovery ServiceDiscovery,
 	keyspaceID uint32, tlsCfg *tls.Config, option *opt.Option,
 ) ServiceDiscovery {
 	ctx, cancel := context.WithCancel(ctx)

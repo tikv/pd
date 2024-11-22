@@ -21,12 +21,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pingcap/log"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/client/http"
 	"github.com/tikv/pd/client/utils/testutil"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/types"
+	"go.uber.org/zap"
 )
 
 type schedulerSuite struct {
@@ -200,4 +202,73 @@ func (s *schedulerSuite) TestRegionLabelDenyScheduler() {
 		}
 		return true
 	}, testutil.WithWaitFor(time.Minute))
+}
+
+func (s *schedulerSuite) TestGrantOrEvictLeaderTwice() {
+	re := require.New(s.T())
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	pdHTTPCli := http.NewClient("pd-real-cluster-test", getPDEndpoints(s.T()))
+	regions, err := pdHTTPCli.GetRegions(ctx)
+	re.NoError(err)
+	re.NotEmpty(regions.Regions)
+	region1 := regions.Regions[0]
+
+	var i int
+	evictLeader := func() {
+		re.NoError(pdHTTPCli.CreateScheduler(ctx, types.EvictLeaderScheduler.String(), uint64(region1.Leader.StoreID)))
+		// if the second evict leader scheduler cause the pause-leader-filter
+		// disable, the balance-leader-scheduler need some time to transfer
+		// leader. See details in https://github.com/tikv/pd/issues/8756.
+		if i == 1 {
+			time.Sleep(3 * time.Second)
+		}
+		testutil.Eventually(re, func() bool {
+			regions, err := pdHTTPCli.GetRegions(ctx)
+			if err != nil {
+				log.Error("get regions failed", zap.Error(err))
+				return false
+			}
+			for _, region := range regions.Regions {
+				if region.Leader.StoreID == region1.Leader.StoreID {
+					return false
+				}
+			}
+			return true
+		}, testutil.WithWaitFor(time.Minute))
+
+		i++
+	}
+
+	evictLeader()
+	evictLeader()
+	pdHTTPCli.DeleteScheduler(ctx, types.EvictLeaderScheduler.String())
+
+	i = 0
+	grantLeader := func() {
+		re.NoError(pdHTTPCli.CreateScheduler(ctx, types.GrantLeaderScheduler.String(), uint64(region1.Leader.StoreID)))
+		if i == 1 {
+			time.Sleep(3 * time.Second)
+		}
+		testutil.Eventually(re, func() bool {
+			regions, err := pdHTTPCli.GetRegions(ctx)
+			if err != nil {
+				log.Error("get regions failed", zap.Error(err))
+				return false
+			}
+			for _, region := range regions.Regions {
+				if region.Leader.StoreID != region1.Leader.StoreID {
+					return false
+				}
+			}
+			return true
+		}, testutil.WithWaitFor(2*time.Minute))
+
+		i++
+	}
+
+	grantLeader()
+	grantLeader()
+	pdHTTPCli.DeleteScheduler(ctx, types.GrantLeaderScheduler.String())
 }

@@ -30,6 +30,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	pd "github.com/tikv/pd/client"
+	"github.com/tikv/pd/client/caller"
 	clierrs "github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/pkg/election"
 	"github.com/tikv/pd/pkg/errs"
@@ -449,7 +450,9 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) dispatchClient(
 	re.NoError(err)
 	re.NotNil(member)
 	// Prepare the client for keyspace.
-	tsoClient, err := pd.NewClientWithKeyspace(suite.ctx, keyspaceID, []string{suite.pdLeaderServer.GetAddr()}, pd.SecurityOption{})
+	tsoClient, err := pd.NewClientWithKeyspace(suite.ctx,
+		caller.TestComponent,
+		keyspaceID, []string{suite.pdLeaderServer.GetAddr()}, pd.SecurityOption{})
 	re.NoError(err)
 	re.NotNil(tsoClient)
 	var (
@@ -779,7 +782,9 @@ func TestGetTSOImmediately(t *testing.T) {
 	}, testutil.WithWaitFor(5*time.Second), testutil.WithTickInterval(50*time.Millisecond))
 
 	apiCtx := pd.NewAPIContextV2("keyspace_b") // its keyspace id is 2.
-	cli, err := pd.NewClientWithAPIContext(ctx, apiCtx, []string{pdAddr}, pd.SecurityOption{})
+	cli, err := pd.NewClientWithAPIContext(ctx, apiCtx,
+		caller.TestComponent,
+		[]string{pdAddr}, pd.SecurityOption{})
 	re.NoError(err)
 	_, _, err = cli.GetTS(ctx)
 	re.NoError(err)
