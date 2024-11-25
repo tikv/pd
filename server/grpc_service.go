@@ -40,7 +40,6 @@ import (
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
-	"github.com/tikv/pd/pkg/tso"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/logutil"
@@ -320,10 +319,10 @@ func (s *GrpcServer) GetMinTS(
 		err   error
 	)
 	if s.IsServiceIndependent(constant.TSOServiceName) {
-		minTS, err = s.GetMinTSFromTSOService(tso.GlobalDCLocation)
+		minTS, err = s.GetMinTSFromTSOService()
 	} else {
 		start := time.Now()
-		ts, internalErr := s.tsoAllocatorManager.HandleRequest(ctx, tso.GlobalDCLocation, 1)
+		ts, internalErr := s.tsoAllocatorManager.HandleRequest(ctx, 1)
 		if internalErr == nil {
 			tsoHandleDuration.Observe(time.Since(start).Seconds())
 		}
@@ -344,7 +343,7 @@ func (s *GrpcServer) GetMinTS(
 
 // GetMinTSFromTSOService queries all tso servers and gets the minimum timestamp across
 // all keyspace groups.
-func (s *GrpcServer) GetMinTSFromTSOService(dcLocation string) (*pdpb.Timestamp, error) {
+func (s *GrpcServer) GetMinTSFromTSOService() (*pdpb.Timestamp, error) {
 	addrs := s.keyspaceGroupManager.GetTSOServiceAddrs()
 	if len(addrs) == 0 {
 		return &pdpb.Timestamp{}, errs.ErrGetMinTS.FastGenByArgs("no tso servers/pods discovered")
@@ -358,7 +357,7 @@ func (s *GrpcServer) GetMinTSFromTSOService(dcLocation string) (*pdpb.Timestamp,
 	for _, addr := range addrs {
 		go func(addr string) {
 			defer wg.Done()
-			resp, err := s.getMinTSFromSingleServer(s.ctx, dcLocation, addr)
+			resp, err := s.getMinTSFromSingleServer(s.ctx, addr)
 			if err != nil || resp == nil {
 				log.Warn("failed to get min ts from tso server",
 					zap.String("address", addr), zap.Error(err))
@@ -413,7 +412,7 @@ func (s *GrpcServer) GetMinTSFromTSOService(dcLocation string) (*pdpb.Timestamp,
 }
 
 func (s *GrpcServer) getMinTSFromSingleServer(
-	ctx context.Context, dcLocation, tsoSrvAddr string,
+	ctx context.Context, tsoSrvAddr string,
 ) (*tsopb.GetMinTSResponse, error) {
 	cc, err := s.getDelegateClient(s.ctx, tsoSrvAddr)
 	if err != nil {
@@ -429,7 +428,6 @@ func (s *GrpcServer) getMinTSFromSingleServer(
 			Header: &tsopb.RequestHeader{
 				ClusterId: keypath.ClusterID(),
 			},
-			DcLocation: dcLocation,
 		})
 	if err != nil {
 		attachErr := errors.Errorf("error:%s target:%s status:%s",
@@ -603,7 +601,7 @@ func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
 		}
 		count := request.GetCount()
 		ctx, task := trace.NewTask(ctx, "tso")
-		ts, err := s.tsoAllocatorManager.HandleRequest(ctx, request.GetDcLocation(), count)
+		ts, err := s.tsoAllocatorManager.HandleRequest(ctx, count)
 		task.End()
 		tsoHandleDuration.Observe(time.Since(start).Seconds())
 		if err != nil {

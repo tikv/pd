@@ -219,13 +219,10 @@ func (am *AllocatorManager) getGroupIDStr() string {
 	return strconv.FormatUint(uint64(am.kgID), 10)
 }
 
-// GetTimestampPath returns the timestamp path in etcd for the given DCLocation.
-func (am *AllocatorManager) GetTimestampPath(dcLocation string) string {
+// GetTimestampPath returns the timestamp path in etcd.
+func (am *AllocatorManager) GetTimestampPath() string {
 	if am == nil {
 		return ""
-	}
-	if len(dcLocation) == 0 {
-		dcLocation = GlobalDCLocation
 	}
 
 	am.mu.RLock()

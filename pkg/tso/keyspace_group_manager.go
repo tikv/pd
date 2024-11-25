@@ -791,7 +791,7 @@ func (kgm *KeyspaceGroupManager) updateKeyspaceGroup(group *endpoint.KeyspaceGro
 	am.startGlobalAllocatorLoop()
 	log.Info("created allocator manager",
 		zap.Uint32("keyspace-group-id", group.ID),
-		zap.String("timestamp-path", am.GetTimestampPath("")))
+		zap.String("timestamp-path", am.GetTimestampPath()))
 	kgm.Lock()
 	group.KeyspaceLookupTable = make(map[uint32]struct{})
 	for _, kid := range group.Keyspaces {

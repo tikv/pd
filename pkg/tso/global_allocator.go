@@ -111,7 +111,6 @@ func newGlobalTimestampOracle(am *AllocatorManager) *timestampOracle {
 		saveInterval:           am.saveInterval,
 		updatePhysicalInterval: am.updatePhysicalInterval,
 		maxResetTSGap:          am.maxResetTSGap,
-		dcLocation:             GlobalDCLocation,
 		tsoMux:                 &tsoObject{},
 		metrics:                newTSOMetrics(am.getGroupIDStr(), GlobalDCLocation),
 	}
@@ -301,8 +300,6 @@ func (gta *GlobalTSOAllocator) campaignLeader() {
 		member.ServiceMemberGauge.WithLabelValues(tsoLabel).Set(0)
 	})
 
-	// TODO: if enable-local-tso is true, check the cluster dc-location after the primary is elected
-	// go gta.tsoAllocatorManager.ClusterDCLocationChecker()
 	log.Info("tso primary is ready to serve",
 		logutil.CondUint32("keyspace-group-id", gta.getGroupID(), gta.getGroupID() > 0),
 		zap.String("tso-primary-name", gta.member.Name()))

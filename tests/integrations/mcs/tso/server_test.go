@@ -629,10 +629,7 @@ func TestTSOServiceSwitch(t *testing.T) {
 
 	// Verify PD is not providing TSO service
 	testutil.Eventually(re, func() bool {
-		allocator, err := pdLeader.GetServer().GetTSOAllocatorManager().GetAllocator(tsopkg.GlobalDCLocation)
-		if err != nil {
-			return false
-		}
+		allocator := pdLeader.GetServer().GetTSOAllocatorManager().GetAllocator()
 		return !allocator.IsInitialize()
 	})
 

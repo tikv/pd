@@ -76,7 +76,6 @@ type timestampOracle struct {
 	// last timestamp window stored in etcd
 	lastSavedTime atomic.Value // stored as time.Time
 	suffix        int
-	dcLocation    string
 
 	// pre-initialized metrics
 	metrics *tsoMetrics
@@ -370,7 +369,6 @@ func (t *timestampOracle) UpdateTimestamp() error {
 		if err := t.storage.SaveTimestamp(t.GetTimestampPath(), save); err != nil {
 			log.Warn("save timestamp failed",
 				logutil.CondUint32("keyspace-group-id", t.keyspaceGroupID, t.keyspaceGroupID > 0),
-				zap.String("dc-location", t.dcLocation),
 				zap.String("timestamp-path", t.GetTimestampPath()),
 				zap.Error(err))
 			t.metrics.errSaveUpdateTSEvent.Inc()
@@ -427,7 +425,7 @@ func (t *timestampOracle) getTS(ctx context.Context, leadership *election.Leader
 		return resp, nil
 	}
 	t.metrics.exceededMaxRetryEvent.Inc()
-	return resp, errs.ErrGenerateTimestamp.FastGenByArgs(fmt.Sprintf("generate %s tso maximum number of retries exceeded", t.dcLocation))
+	return resp, errs.ErrGenerateTimestamp.FastGenByArgs(fmt.Sprintf("generate global tso maximum number of retries exceeded"))
 }
 
 // ResetTimestamp is used to reset the timestamp in memory.

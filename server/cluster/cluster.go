@@ -476,11 +476,7 @@ func (c *RaftCluster) runServiceCheckJob() {
 }
 
 func (c *RaftCluster) startTSOJobsIfNeeded() error {
-	allocator, err := c.tsoAllocator.GetAllocator(tso.GlobalDCLocation)
-	if err != nil {
-		log.Error("failed to get global TSO allocator", errs.ZapError(err))
-		return err
-	}
+	allocator := c.tsoAllocator.GetAllocator()
 	if !allocator.IsInitialize() {
 		log.Info("initializing the global TSO allocator")
 		if err := allocator.Initialize(0); err != nil {
@@ -494,16 +490,12 @@ func (c *RaftCluster) startTSOJobsIfNeeded() error {
 }
 
 func (c *RaftCluster) stopTSOJobsIfNeeded() error {
-	allocator, err := c.tsoAllocator.GetAllocator(tso.GlobalDCLocation)
-	if err != nil {
-		log.Error("failed to get global TSO allocator", errs.ZapError(err))
-		return err
-	}
+	allocator := c.tsoAllocator.GetAllocator()
 	if allocator.IsInitialize() {
 		log.Info("closing the global TSO allocator")
-		c.tsoAllocator.ResetAllocatorGroup(tso.GlobalDCLocation, true)
+		c.tsoAllocator.ResetAllocatorGroup(true)
 		failpoint.Inject("updateAfterResetTSO", func() {
-			allocator, _ := c.tsoAllocator.GetAllocator(tso.GlobalDCLocation)
+			allocator := c.tsoAllocator.GetAllocator()
 			if err := allocator.UpdateTSO(); !errorspkg.Is(err, errs.ErrUpdateTimestamp) {
 				log.Panic("the tso update after reset should return ErrUpdateTimestamp as expected", zap.Error(err))
 			}

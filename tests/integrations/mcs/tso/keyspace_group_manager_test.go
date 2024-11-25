@@ -38,7 +38,6 @@ import (
 	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/mock/mockid"
 	"github.com/tikv/pd/pkg/storage/endpoint"
-	tsopkg "github.com/tikv/pd/pkg/tso"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/testutil"
@@ -223,7 +222,7 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestKeyspacesServedByNonDefaultKe
 						rootPath := keypath.TSOSvcRootPath()
 						primaryPath := keypath.KeyspaceGroupPrimaryPath(rootPath, param.keyspaceGroupID)
 						timestampPath := keypath.FullTimestampPath(param.keyspaceGroupID)
-						re.Equal(timestampPath, am.GetTimestampPath(tsopkg.GlobalDCLocation))
+						re.Equal(timestampPath, am.GetTimestampPath())
 						re.Equal(primaryPath, am.GetMember().GetLeaderPath())
 
 						served = true
@@ -315,7 +314,7 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) requestTSO(
 	primary := suite.tsoCluster.WaitForPrimaryServing(re, keyspaceID, keyspaceGroupID)
 	kgm := primary.GetKeyspaceGroupManager()
 	re.NotNil(kgm)
-	ts, _, err := kgm.HandleTSORequest(suite.ctx, keyspaceID, keyspaceGroupID, tsopkg.GlobalDCLocation, 1)
+	ts, _, err := kgm.HandleTSORequest(suite.ctx, keyspaceID, keyspaceGroupID, 1)
 	return ts, err
 }
 
