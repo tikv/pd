@@ -16,7 +16,6 @@ package tso
 
 import (
 	"context"
-	"fmt"
 	"math"
 	"path"
 	"runtime/trace"
@@ -30,7 +29,6 @@ import (
 	"github.com/tikv/pd/pkg/election"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/member"
-	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
@@ -123,12 +121,9 @@ type ElectionMember interface {
 type AllocatorManager struct {
 	mu struct {
 		syncutil.RWMutex
-		// There are two kinds of TSO Allocators:
-		//   1. Global TSO Allocator, as a global single point to allocate
-		//      TSO for global transactions, such as cross-region cases.
-		//   2. Local TSO Allocator, servers for DC-level transactions.
-		// dc-location/global (string) -> TSO Allocator
-		allocatorGroups map[string]*allocatorGroup
+		// Global TSO Allocator, as a global single point to allocate
+		// TSO for global transactions, such as cross-region cases.
+		allocatorGroup *allocatorGroup
 		// The max suffix sign we have so far, it will be used to calculate
 		// the number of suffix bits we need in the TSO logical part.
 		maxSuffix int32
@@ -147,7 +142,6 @@ type AllocatorManager struct {
 	// TSO config
 	rootPath               string
 	storage                endpoint.TSOStorage
-	enableLocalTSO         bool
 	saveInterval           time.Duration
 	updatePhysicalInterval time.Duration
 	// leaderLease defines the time within which a TSO primary/leader must update its TTL
@@ -175,34 +169,33 @@ func NewAllocatorManager(
 		member:                 member,
 		rootPath:               rootPath,
 		storage:                storage,
-		enableLocalTSO:         cfg.IsLocalTSOEnabled(),
 		saveInterval:           cfg.GetTSOSaveInterval(),
 		updatePhysicalInterval: cfg.GetTSOUpdatePhysicalInterval(),
 		leaderLease:            cfg.GetLeaderLease(),
 		maxResetTSGap:          cfg.GetMaxResetTSGap,
 		securityConfig:         cfg.GetTLSConfig(),
 	}
-	am.mu.allocatorGroups = make(map[string]*allocatorGroup)
+	am.mu.allocatorGroup = &allocatorGroup{}
 
-	// Set up the Global TSO Allocator here, it will be initialized once the member campaigns leader successfully.
-	am.SetUpGlobalAllocator(am.ctx, am.member.GetLeadership())
+	// Set up the TSO Allocator here, it will be initialized once the member campaigns leader successfully.
+	am.SetUpAllocator(am.ctx, am.member.GetLeadership())
 	am.svcLoopWG.Add(1)
 	go am.tsoAllocatorLoop()
 
 	return am
 }
 
-// SetUpGlobalAllocator is used to set up the global allocator, which will initialize the allocator and put it into
+// SetUpAllocator is used to set up the allocator, which will initialize the allocator and put it into
 // an allocator daemon. An TSO Allocator should only be set once, and may be initialized and reset multiple times
 // depending on the election.
-func (am *AllocatorManager) SetUpGlobalAllocator(ctx context.Context, leadership *election.Leadership) {
+func (am *AllocatorManager) SetUpAllocator(ctx context.Context, leadership *election.Leadership) {
 	am.mu.Lock()
 	defer am.mu.Unlock()
 
 	allocator := NewGlobalTSOAllocator(ctx, am)
 	// Create a new allocatorGroup
 	ctx, cancel := context.WithCancel(ctx)
-	am.mu.allocatorGroups[GlobalDCLocation] = &allocatorGroup{
+	am.mu.allocatorGroup = &allocatorGroup{
 		ctx:        ctx,
 		cancel:     cancel,
 		leadership: leadership,
@@ -237,10 +230,7 @@ func (am *AllocatorManager) GetTimestampPath(dcLocation string) string {
 
 	am.mu.RLock()
 	defer am.mu.RUnlock()
-	if allocatorGroup, exist := am.mu.allocatorGroups[dcLocation]; exist {
-		return path.Join(am.rootPath, allocatorGroup.allocator.GetTimestampPath())
-	}
-	return ""
+	return path.Join(am.rootPath, am.mu.allocatorGroup.allocator.GetTimestampPath())
 }
 
 // tsoAllocatorLoop is used to run the TSO Allocator updating daemon.
@@ -257,10 +247,7 @@ func (am *AllocatorManager) tsoAllocatorLoop() {
 func (am *AllocatorManager) close() {
 	log.Info("closing the allocator manager", logutil.CondUint32("keyspace-group-id", am.kgID, am.kgID > 0))
 
-	if allocatorGroup, exist := am.getAllocatorGroup(GlobalDCLocation); exist {
-		allocatorGroup.allocator.(*GlobalTSOAllocator).close()
-	}
-
+	am.GetAllocator().(*GlobalTSOAllocator).close()
 	am.cancel()
 	am.svcLoopWG.Wait()
 
@@ -302,24 +289,12 @@ func (am *AllocatorManager) AllocatorDaemon(ctx context.Context) {
 		select {
 		case <-tsTicker.C:
 			// Update the initialized TSO Allocator to advance TSO.
-			am.allocatorUpdater()
+			am.updateAllocator(am.mu.allocatorGroup)
 		case <-ctx.Done():
 			log.Info("exit allocator daemon", logutil.CondUint32("keyspace-group-id", am.kgID, am.kgID > 0))
 			return
 		}
 	}
-}
-
-// Update the Local TSO Allocator leaders TSO in memory concurrently.
-func (am *AllocatorManager) allocatorUpdater() {
-	// Filter out allocators without leadership and uninitialized
-	allocatorGroups := am.getAllocatorGroups(FilterUninitialized(), FilterUnavailableLeadership())
-	// Update each allocator concurrently
-	for _, ag := range allocatorGroups {
-		am.wg.Add(1)
-		go am.updateAllocator(ag)
-	}
-	am.wg.Wait()
 }
 
 // updateAllocator is used to update the allocator in the group.
@@ -346,89 +321,34 @@ func (am *AllocatorManager) updateAllocator(ag *allocatorGroup) {
 			logutil.CondUint32("keyspace-group-id", am.kgID, am.kgID > 0),
 			zap.String("name", am.member.Name()),
 			errs.ZapError(err))
-		am.ResetAllocatorGroup(GlobalDCLocation, false)
+		am.ResetAllocatorGroup(false)
 		return
 	}
 }
 
 // HandleRequest forwards TSO allocation requests to correct TSO Allocators.
-func (am *AllocatorManager) HandleRequest(ctx context.Context, dcLocation string, count uint32) (pdpb.Timestamp, error) {
+func (am *AllocatorManager) HandleRequest(ctx context.Context, count uint32) (pdpb.Timestamp, error) {
 	defer trace.StartRegion(ctx, "AllocatorManager.HandleRequest").End()
-	if len(dcLocation) == 0 {
-		dcLocation = GlobalDCLocation
-	}
-	allocatorGroup, exist := am.getAllocatorGroup(dcLocation)
-	if !exist {
-		err := errs.ErrGetAllocator.FastGenByArgs(fmt.Sprintf("%s allocator not found, generate timestamp failed", dcLocation))
-		return pdpb.Timestamp{}, err
-	}
-
-	return allocatorGroup.allocator.GenerateTSO(ctx, count)
+	return am.GetAllocator().GenerateTSO(ctx, count)
 }
 
 // ResetAllocatorGroup will reset the allocator's leadership and TSO initialized in memory.
 // It usually should be called before re-triggering an Allocator leader campaign.
-func (am *AllocatorManager) ResetAllocatorGroup(dcLocation string, skipResetLeader bool) {
+func (am *AllocatorManager) ResetAllocatorGroup(skipResetLeader bool) {
 	am.mu.Lock()
 	defer am.mu.Unlock()
-	if allocatorGroup, exist := am.mu.allocatorGroups[dcLocation]; exist {
-		allocatorGroup.allocator.Reset()
-		// Reset if it still has the leadership. Otherwise the data race may occur because of the re-campaigning.
-		if !skipResetLeader && allocatorGroup.leadership.Check() {
-			allocatorGroup.leadership.Reset()
-		}
+	am.mu.allocatorGroup.allocator.Reset()
+	// Reset if it still has the leadership. Otherwise the data race may occur because of the re-campaigning.
+	if !skipResetLeader && am.mu.allocatorGroup.leadership.Check() {
+		am.mu.allocatorGroup.leadership.Reset()
 	}
-}
-
-func (am *AllocatorManager) getAllocatorGroups(filters ...AllocatorGroupFilter) []*allocatorGroup {
-	am.mu.RLock()
-	defer am.mu.RUnlock()
-	var allocatorGroups []*allocatorGroup
-	for _, ag := range am.mu.allocatorGroups {
-		if ag == nil {
-			continue
-		}
-		if slice.NoneOf(filters, func(i int) bool { return filters[i](ag) }) {
-			allocatorGroups = append(allocatorGroups, ag)
-		}
-	}
-	return allocatorGroups
-}
-
-func (am *AllocatorManager) getAllocatorGroup(dcLocation string) (*allocatorGroup, bool) {
-	am.mu.RLock()
-	defer am.mu.RUnlock()
-	allocatorGroup, exist := am.mu.allocatorGroups[dcLocation]
-	return allocatorGroup, exist
 }
 
 // GetAllocator get the allocator by dc-location.
-func (am *AllocatorManager) GetAllocator(dcLocation string) (Allocator, error) {
+func (am *AllocatorManager) GetAllocator() Allocator {
 	am.mu.RLock()
 	defer am.mu.RUnlock()
-	if len(dcLocation) == 0 {
-		dcLocation = GlobalDCLocation
-	}
-	allocatorGroup, exist := am.mu.allocatorGroups[dcLocation]
-	if !exist {
-		return nil, errs.ErrGetAllocator.FastGenByArgs(fmt.Sprintf("%s allocator not found", dcLocation))
-	}
-	return allocatorGroup.allocator, nil
-}
-
-// GetAllocators get all allocators with some filters.
-func (am *AllocatorManager) GetAllocators(filters ...AllocatorGroupFilter) []Allocator {
-	allocatorGroups := am.getAllocatorGroups(filters...)
-	allocators := make([]Allocator, 0, len(allocatorGroups))
-	for _, ag := range allocatorGroups {
-		allocators = append(allocators, ag.allocator)
-	}
-	return allocators
-}
-
-// EnableLocalTSO returns the value of AllocatorManager.enableLocalTSO.
-func (am *AllocatorManager) EnableLocalTSO() bool {
-	return am.enableLocalTSO
+	return am.mu.allocatorGroup.allocator
 }
 
 // IsLeader returns whether the current member is the leader in the election group.
@@ -452,7 +372,7 @@ func (am *AllocatorManager) GetLeaderAddr() string {
 }
 
 func (am *AllocatorManager) startGlobalAllocatorLoop() {
-	globalTSOAllocator, ok := am.mu.allocatorGroups[GlobalDCLocation].allocator.(*GlobalTSOAllocator)
+	globalTSOAllocator, ok := am.mu.allocatorGroup.allocator.(*GlobalTSOAllocator)
 	if !ok {
 		// it should never happen
 		log.Error("failed to start global allocator loop, global allocator not found")

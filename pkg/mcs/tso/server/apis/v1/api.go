@@ -302,11 +302,6 @@ func transferPrimary(c *gin.Context) {
 		return
 	}
 
-	globalAllocator, err := allocator.GetAllocator(tso.GlobalDCLocation)
-	if err != nil {
-		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
-		return
-	}
 	// only members of specific group are valid primary candidates.
 	group := svr.GetKeyspaceGroupManager().GetKeyspaceGroups()[keyspaceGroupID]
 	memberMap := make(map[string]bool, len(group.Members))
@@ -314,7 +309,7 @@ func transferPrimary(c *gin.Context) {
 		memberMap[member.Address] = true
 	}
 
-	if err := utils.TransferPrimary(svr.GetClient(), globalAllocator.(*tso.GlobalTSOAllocator).GetExpectedPrimaryLease(),
+	if err := utils.TransferPrimary(svr.GetClient(), allocator.GetAllocator().(*tso.GlobalTSOAllocator).GetExpectedPrimaryLease(),
 		constant.TSOServiceName, svr.Name(), newPrimary, keyspaceGroupID, memberMap); err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
 		return

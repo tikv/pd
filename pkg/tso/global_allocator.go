@@ -271,22 +271,15 @@ func (gta *GlobalTSOAllocator) campaignLeader() {
 		logutil.CondUint32("keyspace-group-id", gta.getGroupID(), gta.getGroupID() > 0),
 		zap.String("campaign-tso-primary-name", gta.member.Name()))
 
-	allocator, err := gta.am.GetAllocator(GlobalDCLocation)
-	if err != nil {
-		log.Error("failed to get the global tso allocator",
-			logutil.CondUint32("keyspace-group-id", gta.getGroupID(), gta.getGroupID() > 0),
-			errs.ZapError(err))
-		return
-	}
 	log.Info("initializing the global tso allocator")
-	if err := allocator.Initialize(0); err != nil {
+	if err := gta.am.GetAllocator().Initialize(0); err != nil {
 		log.Error("failed to initialize the global tso allocator",
 			logutil.CondUint32("keyspace-group-id", gta.getGroupID(), gta.getGroupID() > 0),
 			errs.ZapError(err))
 		return
 	}
 	defer func() {
-		gta.am.ResetAllocatorGroup(GlobalDCLocation, false)
+		gta.am.ResetAllocatorGroup(false)
 	}()
 
 	// check expected primary and watch the primary.
