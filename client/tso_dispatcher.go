@@ -545,10 +545,10 @@ func (td *tsoDispatcher) processRequests(
 		}
 	}
 	defer func() {
-		for i := range spans {
+		for i := len(spans) - 1; i >= 0; i-- {
 			spans[i].Finish()
 		}
-		for i := range traceRegions {
+		for i := len(traceRegions) - 1; i >= 0; i-- {
 			traceRegions[i].End()
 		}
 	}()
