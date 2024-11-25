@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package pd
+package servicediscovery
 
 import (
 	"context"
@@ -30,6 +30,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/tsopb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/client/clients/metastorage"
+	"github.com/tikv/pd/client/constants"
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/opt"
 	"github.com/tikv/pd/client/utils/grpcutil"
@@ -52,8 +53,10 @@ const (
 	tsoQueryRetryInterval = 500 * time.Millisecond
 )
 
-var _ ServiceDiscovery = (*tsoServiceDiscovery)(nil)
-var _ tsoEventSource = (*tsoServiceDiscovery)(nil)
+var (
+	_ ServiceDiscovery = (*tsoServiceDiscovery)(nil)
+	_ TSOEventSource   = (*tsoServiceDiscovery)(nil)
+)
 
 // keyspaceGroupSvcDiscovery is used for discovering the serving endpoints of the keyspace
 // group to which the keyspace belongs
@@ -154,8 +157,8 @@ type tsoServiceDiscovery struct {
 	option *opt.Option
 }
 
-// newTSOServiceDiscovery returns a new client-side service discovery for the independent TSO service.
-func newTSOServiceDiscovery(
+// NewTSOServiceDiscovery returns a new client-side service discovery for the independent TSO service.
+func NewTSOServiceDiscovery(
 	ctx context.Context, metacli metastorage.Client, apiSvcDiscovery ServiceDiscovery,
 	keyspaceID uint32, tlsCfg *tls.Config, option *opt.Option,
 ) ServiceDiscovery {
@@ -179,7 +182,7 @@ func newTSOServiceDiscovery(
 	c.tsoServerDiscovery = &tsoServerDiscovery{urls: make([]string, 0)}
 	// Start with the default keyspace group. The actual keyspace group, to which the keyspace belongs,
 	// will be discovered later.
-	c.defaultDiscoveryKey = fmt.Sprintf(tsoSvcDiscoveryFormat, c.clusterID, defaultKeySpaceGroupID)
+	c.defaultDiscoveryKey = fmt.Sprintf(tsoSvcDiscoveryFormat, c.clusterID, constants.DefaultKeyspaceGroupID)
 
 	log.Info("created tso service discovery",
 		zap.Uint64("cluster-id", c.clusterID),
@@ -249,7 +252,7 @@ func (c *tsoServiceDiscovery) startCheckMemberLoop() {
 
 	ctx, cancel := context.WithCancel(c.ctx)
 	defer cancel()
-	ticker := time.NewTicker(memberUpdateInterval)
+	ticker := time.NewTicker(MemberUpdateInterval)
 	defer ticker.Stop()
 
 	for {
@@ -279,13 +282,18 @@ func (c *tsoServiceDiscovery) GetKeyspaceID() uint32 {
 	return c.keyspaceID.Load()
 }
 
+// SetKeyspaceID sets the ID of the keyspace
+func (c *tsoServiceDiscovery) SetKeyspaceID(keyspaceID uint32) {
+	c.keyspaceID.Store(keyspaceID)
+}
+
 // GetKeyspaceGroupID returns the ID of the keyspace group. If the keyspace group is unknown,
 // it returns the default keyspace group ID.
 func (c *tsoServiceDiscovery) GetKeyspaceGroupID() uint32 {
 	c.keyspaceGroupSD.RLock()
 	defer c.keyspaceGroupSD.RUnlock()
 	if c.keyspaceGroupSD.group == nil {
-		return defaultKeySpaceGroupID
+		return constants.DefaultKeyspaceGroupID
 	}
 	return c.keyspaceGroupSD.group.Id
 }
@@ -375,6 +383,11 @@ func (c *tsoServiceDiscovery) GetServiceClient() ServiceClient {
 	return c.apiSvcDiscovery.GetServiceClient()
 }
 
+// GetServiceClientByKind implements ServiceDiscovery
+func (c *tsoServiceDiscovery) GetServiceClientByKind(kind APIKind) ServiceClient {
+	return c.apiSvcDiscovery.GetServiceClientByKind(kind)
+}
+
 // GetAllServiceClients implements ServiceDiscovery
 func (c *tsoServiceDiscovery) GetAllServiceClients() []ServiceClient {
 	return c.apiSvcDiscovery.GetAllServiceClients()
@@ -419,7 +432,7 @@ func (c *tsoServiceDiscovery) updateMember() error {
 	keyspaceID := c.GetKeyspaceID()
 	var keyspaceGroup *tsopb.KeyspaceGroup
 	if len(tsoServerURL) > 0 {
-		keyspaceGroup, err = c.findGroupByKeyspaceID(keyspaceID, tsoServerURL, updateMemberTimeout)
+		keyspaceGroup, err = c.findGroupByKeyspaceID(keyspaceID, tsoServerURL, UpdateMemberTimeout)
 		if err != nil {
 			if c.tsoServerDiscovery.countFailure() {
 				log.Error("[tso] failed to find the keyspace group",
@@ -456,7 +469,7 @@ func (c *tsoServiceDiscovery) updateMember() error {
 		}
 		members[0].IsPrimary = true
 		keyspaceGroup = &tsopb.KeyspaceGroup{
-			Id:      defaultKeySpaceGroupID,
+			Id:      constants.DefaultKeyspaceGroupID,
 			Members: members,
 		}
 	}
@@ -541,7 +554,7 @@ func (c *tsoServiceDiscovery) findGroupByKeyspaceID(
 			Header: &tsopb.RequestHeader{
 				ClusterId:       c.clusterID,
 				KeyspaceId:      keyspaceID,
-				KeyspaceGroupId: defaultKeySpaceGroupID,
+				KeyspaceGroupId: constants.DefaultKeyspaceGroupID,
 			},
 			KeyspaceId: keyspaceID,
 		})

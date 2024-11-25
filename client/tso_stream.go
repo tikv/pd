@@ -29,7 +29,9 @@ import (
 	"github.com/pingcap/kvproto/pkg/tsopb"
 	"github.com/pingcap/log"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/tikv/pd/client/constants"
 	"github.com/tikv/pd/client/errs"
+	"github.com/tikv/pd/client/metrics"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 )
@@ -143,7 +145,7 @@ func (s pdTSOStreamAdapter) Recv() (tsoRequestResult, error) {
 		physical:            resp.GetTimestamp().GetPhysical(),
 		logical:             resp.GetTimestamp().GetLogical(),
 		count:               resp.GetCount(),
-		respKeyspaceGroupID: defaultKeySpaceGroupID,
+		respKeyspaceGroupID: constants.DefaultKeyspaceGroupID,
 	}, nil
 }
 
@@ -243,7 +245,7 @@ func newTSOStream(ctx context.Context, serverURL string, stream grpcTSOStreamAda
 
 		cancel: cancel,
 
-		ongoingRequestCountGauge: ongoingRequestCountGauge.WithLabelValues(streamID),
+		ongoingRequestCountGauge: metrics.OngoingRequestCountGauge.WithLabelValues(streamID),
 	}
 	s.wg.Add(1)
 	go s.recvLoop(ctx)
@@ -309,7 +311,7 @@ func (s *tsoStream) processRequests(
 		log.Warn("failed to send RPC request through tsoStream", zap.String("stream", s.streamID), zap.Error(err))
 		return nil
 	}
-	tsoBatchSendLatency.Observe(time.Since(batchStartTime).Seconds())
+	metrics.TSOBatchSendLatency.Observe(time.Since(batchStartTime).Seconds())
 	s.ongoingRequestCountGauge.Set(float64(s.ongoingRequests.Add(1)))
 	return nil
 }
@@ -382,7 +384,7 @@ func (s *tsoStream) recvLoop(ctx context.Context) {
 		micros := math.Exp(filteredValue)
 		s.estimatedLatencyMicros.Store(uint64(micros))
 		// Update the metrics in seconds.
-		estimateTSOLatencyGauge.WithLabelValues(s.streamID).Set(micros * 1e-6)
+		metrics.EstimateTSOLatencyGauge.WithLabelValues(s.streamID).Set(micros * 1e-6)
 	}
 
 recvLoop:
@@ -413,7 +415,7 @@ recvLoop:
 			// Note that it's also possible that the stream is broken due to network without being requested. In this
 			// case, `Recv` may return an error while no request is pending.
 			if hasReq {
-				requestFailedDurationTSO.Observe(latencySeconds)
+				metrics.RequestFailedDurationTSO.Observe(latencySeconds)
 			}
 			if err == io.EOF {
 				finishWithErr = errors.WithStack(errs.ErrClientTSOStreamClosed)
@@ -426,12 +428,12 @@ recvLoop:
 			break recvLoop
 		}
 
-		requestDurationTSO.Observe(latencySeconds)
-		tsoBatchSize.Observe(float64(res.count))
+		metrics.RequestDurationTSO.Observe(latencySeconds)
+		metrics.TSOBatchSize.Observe(float64(res.count))
 		updateEstimatedLatency(currentReq.startTime, latency)
 
 		if res.count != uint32(currentReq.count) {
-			finishWithErr = errors.WithStack(errTSOLength)
+			finishWithErr = errors.WithStack(errs.ErrTSOLength)
 			break recvLoop
 		}
 

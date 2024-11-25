@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package pd
+package servicediscovery
 
 import (
 	"context"
@@ -30,8 +30,10 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/client/errs"
+	"github.com/tikv/pd/client/opt"
 	"github.com/tikv/pd/client/utils/grpcutil"
 	"github.com/tikv/pd/client/utils/testutil"
+	"github.com/tikv/pd/client/utils/tlsutil"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	pb "google.golang.org/grpc/examples/helloworld/helloworld"
@@ -142,12 +144,12 @@ func (suite *serviceClientTestSuite) SetupSuite() {
 		followerConn, err2 := grpc.Dial(suite.followerServer.addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 		if err1 == nil && err2 == nil {
 			suite.followerClient = newPDServiceClient(
-				modifyURLScheme(suite.followerServer.addr, nil),
-				modifyURLScheme(suite.leaderServer.addr, nil),
+				tlsutil.ModifyURLScheme(suite.followerServer.addr, nil),
+				tlsutil.ModifyURLScheme(suite.leaderServer.addr, nil),
 				followerConn, false)
 			suite.leaderClient = newPDServiceClient(
-				modifyURLScheme(suite.leaderServer.addr, nil),
-				modifyURLScheme(suite.leaderServer.addr, nil),
+				tlsutil.ModifyURLScheme(suite.leaderServer.addr, nil),
+				tlsutil.ModifyURLScheme(suite.leaderServer.addr, nil),
 				leaderConn, true)
 			suite.followerServer.server.leaderConn = suite.leaderClient.GetClientConn()
 			suite.followerServer.server.leaderAddr = suite.leaderClient.GetURL()
@@ -173,8 +175,8 @@ func (suite *serviceClientTestSuite) TearDownSuite() {
 
 func (suite *serviceClientTestSuite) TestServiceClient() {
 	re := suite.Require()
-	leaderAddress := modifyURLScheme(suite.leaderServer.addr, nil)
-	followerAddress := modifyURLScheme(suite.followerServer.addr, nil)
+	leaderAddress := tlsutil.ModifyURLScheme(suite.leaderServer.addr, nil)
+	followerAddress := tlsutil.ModifyURLScheme(suite.followerServer.addr, nil)
 
 	follower := suite.followerClient
 	leader := suite.leaderClient
@@ -188,12 +190,12 @@ func (suite *serviceClientTestSuite) TestServiceClient() {
 	re.False(follower.IsConnectedToLeader())
 	re.True(leader.IsConnectedToLeader())
 
-	re.NoError(failpoint.Enable("github.com/tikv/pd/client/unreachableNetwork1", "return(true)"))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/servicediscovery/unreachableNetwork1", "return(true)"))
 	follower.(*pdServiceClient).checkNetworkAvailable(suite.ctx)
 	leader.(*pdServiceClient).checkNetworkAvailable(suite.ctx)
 	re.False(follower.Available())
 	re.False(leader.Available())
-	re.NoError(failpoint.Disable("github.com/tikv/pd/client/unreachableNetwork1"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/servicediscovery/unreachableNetwork1"))
 
 	follower.(*pdServiceClient).checkNetworkAvailable(suite.ctx)
 	leader.(*pdServiceClient).checkNetworkAvailable(suite.ctx)
@@ -235,7 +237,7 @@ func (suite *serviceClientTestSuite) TestServiceClient() {
 	followerAPIClient := newPDServiceAPIClient(follower, regionAPIErrorFn)
 	leaderAPIClient := newPDServiceAPIClient(leader, regionAPIErrorFn)
 
-	re.NoError(failpoint.Enable("github.com/tikv/pd/client/fastCheckAvailable", "return(true)"))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/servicediscovery/fastCheckAvailable", "return(true)"))
 
 	re.True(followerAPIClient.Available())
 	re.True(leaderAPIClient.Available())
@@ -267,7 +269,7 @@ func (suite *serviceClientTestSuite) TestServiceClient() {
 	re.True(followerAPIClient.Available())
 	re.True(leaderAPIClient.Available())
 
-	re.NoError(failpoint.Disable("github.com/tikv/pd/client/fastCheckAvailable"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/servicediscovery/fastCheckAvailable"))
 }
 
 func (suite *serviceClientTestSuite) TestServiceClientBalancer() {
@@ -308,17 +310,17 @@ func (suite *serviceClientTestSuite) TestServiceClientBalancer() {
 
 func TestServiceClientScheme(t *testing.T) {
 	re := require.New(t)
-	cli := newPDServiceClient(modifyURLScheme("127.0.0.1:2379", nil), modifyURLScheme("127.0.0.1:2379", nil), nil, false)
+	cli := newPDServiceClient(tlsutil.ModifyURLScheme("127.0.0.1:2379", nil), tlsutil.ModifyURLScheme("127.0.0.1:2379", nil), nil, false)
 	re.Equal("http://127.0.0.1:2379", cli.GetURL())
-	cli = newPDServiceClient(modifyURLScheme("https://127.0.0.1:2379", nil), modifyURLScheme("127.0.0.1:2379", nil), nil, false)
+	cli = newPDServiceClient(tlsutil.ModifyURLScheme("https://127.0.0.1:2379", nil), tlsutil.ModifyURLScheme("127.0.0.1:2379", nil), nil, false)
 	re.Equal("http://127.0.0.1:2379", cli.GetURL())
-	cli = newPDServiceClient(modifyURLScheme("http://127.0.0.1:2379", nil), modifyURLScheme("127.0.0.1:2379", nil), nil, false)
+	cli = newPDServiceClient(tlsutil.ModifyURLScheme("http://127.0.0.1:2379", nil), tlsutil.ModifyURLScheme("127.0.0.1:2379", nil), nil, false)
 	re.Equal("http://127.0.0.1:2379", cli.GetURL())
-	cli = newPDServiceClient(modifyURLScheme("127.0.0.1:2379", &tls.Config{}), modifyURLScheme("127.0.0.1:2379", &tls.Config{}), nil, false)
+	cli = newPDServiceClient(tlsutil.ModifyURLScheme("127.0.0.1:2379", &tls.Config{}), tlsutil.ModifyURLScheme("127.0.0.1:2379", &tls.Config{}), nil, false)
 	re.Equal("https://127.0.0.1:2379", cli.GetURL())
-	cli = newPDServiceClient(modifyURLScheme("https://127.0.0.1:2379", &tls.Config{}), modifyURLScheme("127.0.0.1:2379", &tls.Config{}), nil, false)
+	cli = newPDServiceClient(tlsutil.ModifyURLScheme("https://127.0.0.1:2379", &tls.Config{}), tlsutil.ModifyURLScheme("127.0.0.1:2379", &tls.Config{}), nil, false)
 	re.Equal("https://127.0.0.1:2379", cli.GetURL())
-	cli = newPDServiceClient(modifyURLScheme("http://127.0.0.1:2379", &tls.Config{}), modifyURLScheme("127.0.0.1:2379", &tls.Config{}), nil, false)
+	cli = newPDServiceClient(tlsutil.ModifyURLScheme("http://127.0.0.1:2379", &tls.Config{}), tlsutil.ModifyURLScheme("127.0.0.1:2379", &tls.Config{}), nil, false)
 	re.Equal("https://127.0.0.1:2379", cli.GetURL())
 }
 
@@ -336,48 +338,97 @@ func TestSchemeFunction(t *testing.T) {
 		"http://127.0.0.1:2379",
 		"https://127.0.0.1:2379",
 	}
-	urls := addrsToURLs(endpoints1, tlsCfg)
+	urls := tlsutil.AddrsToURLs(endpoints1, tlsCfg)
 	for _, u := range urls {
 		re.Equal("https://tc-pd:2379", u)
 	}
-	urls = addrsToURLs(endpoints2, tlsCfg)
+	urls = tlsutil.AddrsToURLs(endpoints2, tlsCfg)
 	for _, u := range urls {
 		re.Equal("https://127.0.0.1:2379", u)
 	}
-	urls = addrsToURLs(endpoints1, nil)
+	urls = tlsutil.AddrsToURLs(endpoints1, nil)
 	for _, u := range urls {
 		re.Equal("http://tc-pd:2379", u)
 	}
-	urls = addrsToURLs(endpoints2, nil)
+	urls = tlsutil.AddrsToURLs(endpoints2, nil)
 	for _, u := range urls {
 		re.Equal("http://127.0.0.1:2379", u)
 	}
 
-	re.Equal("https://127.0.0.1:2379", modifyURLScheme("https://127.0.0.1:2379", tlsCfg))
-	re.Equal("https://127.0.0.1:2379", modifyURLScheme("http://127.0.0.1:2379", tlsCfg))
-	re.Equal("https://127.0.0.1:2379", modifyURLScheme("127.0.0.1:2379", tlsCfg))
-	re.Equal("https://tc-pd:2379", modifyURLScheme("tc-pd:2379", tlsCfg))
-	re.Equal("http://127.0.0.1:2379", modifyURLScheme("https://127.0.0.1:2379", nil))
-	re.Equal("http://127.0.0.1:2379", modifyURLScheme("http://127.0.0.1:2379", nil))
-	re.Equal("http://127.0.0.1:2379", modifyURLScheme("127.0.0.1:2379", nil))
-	re.Equal("http://tc-pd:2379", modifyURLScheme("tc-pd:2379", nil))
+	re.Equal("https://127.0.0.1:2379", tlsutil.ModifyURLScheme("https://127.0.0.1:2379", tlsCfg))
+	re.Equal("https://127.0.0.1:2379", tlsutil.ModifyURLScheme("http://127.0.0.1:2379", tlsCfg))
+	re.Equal("https://127.0.0.1:2379", tlsutil.ModifyURLScheme("127.0.0.1:2379", tlsCfg))
+	re.Equal("https://tc-pd:2379", tlsutil.ModifyURLScheme("tc-pd:2379", tlsCfg))
+	re.Equal("http://127.0.0.1:2379", tlsutil.ModifyURLScheme("https://127.0.0.1:2379", nil))
+	re.Equal("http://127.0.0.1:2379", tlsutil.ModifyURLScheme("http://127.0.0.1:2379", nil))
+	re.Equal("http://127.0.0.1:2379", tlsutil.ModifyURLScheme("127.0.0.1:2379", nil))
+	re.Equal("http://tc-pd:2379", tlsutil.ModifyURLScheme("tc-pd:2379", nil))
 
 	urls = []string{
 		"http://127.0.0.1:2379",
 		"https://127.0.0.1:2379",
 	}
-	re.Equal("https://127.0.0.1:2379", pickMatchedURL(urls, tlsCfg))
+	re.Equal("https://127.0.0.1:2379", tlsutil.PickMatchedURL(urls, tlsCfg))
 	urls = []string{
 		"http://127.0.0.1:2379",
 	}
-	re.Equal("https://127.0.0.1:2379", pickMatchedURL(urls, tlsCfg))
+	re.Equal("https://127.0.0.1:2379", tlsutil.PickMatchedURL(urls, tlsCfg))
 	urls = []string{
 		"http://127.0.0.1:2379",
 		"https://127.0.0.1:2379",
 	}
-	re.Equal("http://127.0.0.1:2379", pickMatchedURL(urls, nil))
+	re.Equal("http://127.0.0.1:2379", tlsutil.PickMatchedURL(urls, nil))
 	urls = []string{
 		"https://127.0.0.1:2379",
 	}
-	re.Equal("http://127.0.0.1:2379", pickMatchedURL(urls, nil))
+	re.Equal("http://127.0.0.1:2379", tlsutil.PickMatchedURL(urls, nil))
+}
+
+func TestUpdateURLs(t *testing.T) {
+	re := require.New(t)
+	members := []*pdpb.Member{
+		{Name: "pd4", ClientUrls: []string{"tmp://pd4"}},
+		{Name: "pd1", ClientUrls: []string{"tmp://pd1"}},
+		{Name: "pd3", ClientUrls: []string{"tmp://pd3"}},
+		{Name: "pd2", ClientUrls: []string{"tmp://pd2"}},
+	}
+	getURLs := func(ms []*pdpb.Member) (urls []string) {
+		for _, m := range ms {
+			urls = append(urls, m.GetClientUrls()[0])
+		}
+		return
+	}
+	cli := &pdServiceDiscovery{option: opt.NewOption()}
+	cli.urls.Store([]string{})
+	cli.updateURLs(members[1:])
+	re.Equal(getURLs([]*pdpb.Member{members[1], members[3], members[2]}), cli.GetServiceURLs())
+	cli.updateURLs(members[1:])
+	re.Equal(getURLs([]*pdpb.Member{members[1], members[3], members[2]}), cli.GetServiceURLs())
+	cli.updateURLs(members)
+	re.Equal(getURLs([]*pdpb.Member{members[1], members[3], members[2], members[0]}), cli.GetServiceURLs())
+	cli.updateURLs(members[1:])
+	re.Equal(getURLs([]*pdpb.Member{members[1], members[3], members[2]}), cli.GetServiceURLs())
+	cli.updateURLs(members[2:])
+	re.Equal(getURLs([]*pdpb.Member{members[3], members[2]}), cli.GetServiceURLs())
+	cli.updateURLs(members[3:])
+	re.Equal(getURLs([]*pdpb.Member{members[3]}), cli.GetServiceURLs())
+}
+
+func TestGRPCDialOption(t *testing.T) {
+	re := require.New(t)
+	start := time.Now()
+	ctx, cancel := context.WithTimeout(context.TODO(), 500*time.Millisecond)
+	defer cancel()
+	cli := &pdServiceDiscovery{
+		checkMembershipCh: make(chan struct{}, 1),
+		ctx:               ctx,
+		cancel:            cancel,
+		tlsCfg:            nil,
+		option:            opt.NewOption(),
+	}
+	cli.urls.Store([]string{"tmp://test.url:5255"})
+	cli.option.GRPCDialOptions = []grpc.DialOption{grpc.WithBlock()}
+	err := cli.updateMember()
+	re.Error(err)
+	re.Greater(time.Since(start), 500*time.Millisecond)
 }

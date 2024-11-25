@@ -20,6 +20,7 @@ import (
 	"github.com/pingcap/errors"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
+	"google.golang.org/grpc/codes"
 )
 
 // IsLeaderChange will determine whether there is a leader/primary change.
@@ -36,6 +37,11 @@ func IsLeaderChange(err error) bool {
 		strings.Contains(errMsg, MismatchLeaderErr) ||
 		strings.Contains(errMsg, NotServedErr) ||
 		strings.Contains(errMsg, NotPrimaryErr)
+}
+
+// IsNetworkError returns true if the error is a network error.
+func IsNetworkError(code codes.Code) bool {
+	return code == codes.Unavailable || code == codes.DeadlineExceeded
 }
 
 // ZapError is used to make the log output easier.
