@@ -45,12 +45,7 @@ func TestMemberTestSuite(t *testing.T) {
 }
 
 func (suite *memberTestSuite) SetupSuite() {
-	suite.cfgs, suite.servers, suite.clean = mustNewCluster(suite.Require(), 3, func(cfg *config.Config) {
-		cfg.EnableLocalTSO = true
-		cfg.Labels = map[string]string{
-			config.ZoneLabel: "dc-1",
-		}
-	})
+	suite.cfgs, suite.servers, suite.clean = mustNewCluster(suite.Require(), 3)
 }
 
 func (suite *memberTestSuite) TearDownSuite() {
@@ -76,7 +71,6 @@ func checkListResponse(re *require.Assertions, body []byte, cfgs []*config.Confi
 			if member.GetName() != cfg.Name {
 				continue
 			}
-			re.Equal("dc-1", member.DcLocation)
 			relaxEqualStings(re, member.ClientUrls, strings.Split(cfg.ClientUrls, ","))
 			relaxEqualStings(re, member.PeerUrls, strings.Split(cfg.PeerUrls, ","))
 		}

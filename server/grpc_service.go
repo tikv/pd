@@ -2756,54 +2756,11 @@ func scatterRegions(cluster *cluster.RaftCluster, regionsID []uint64, group stri
 	return percentage, nil
 }
 
-// GetDCLocationInfo gets the dc-location info of the given dc-location from PD leader's TSO allocator manager.
-func (s *GrpcServer) GetDCLocationInfo(ctx context.Context, request *pdpb.GetDCLocationInfoRequest) (*pdpb.GetDCLocationInfoResponse, error) {
-	// TODO: support local tso forward in api service mode in the future.
-	var err error
-	if err = s.validateInternalRequest(request.GetHeader(), false); err != nil {
-		return nil, err
-	}
-	if !s.member.IsLeader() {
-		return nil, ErrNotLeader
-	}
-	if s.GetServiceMiddlewarePersistOptions().IsGRPCRateLimitEnabled() {
-		fName := currentFunction()
-		limiter := s.GetGRPCRateLimiter()
-		if done, err := limiter.Allow(fName); err == nil {
-			defer done()
-		} else {
-			return &pdpb.GetDCLocationInfoResponse{
-				Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
-			}, nil
-		}
-	}
-	am := s.GetTSOAllocatorManager()
-	info, ok := am.GetDCLocationInfo(request.GetDcLocation())
-	if !ok {
-		am.ClusterDCLocationChecker()
-		return &pdpb.GetDCLocationInfoResponse{
-			Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN,
-				fmt.Sprintf("dc-location %s is not found", request.GetDcLocation())),
-		}, nil
-	}
-	resp := &pdpb.GetDCLocationInfoResponse{
+// Deprecated
+func (*GrpcServer) GetDCLocationInfo(_ context.Context, _ *pdpb.GetDCLocationInfoRequest) (*pdpb.GetDCLocationInfoResponse, error) {
+	return &pdpb.GetDCLocationInfoResponse{
 		Header: wrapHeader(),
-		Suffix: info.Suffix,
-	}
-	// Because the number of suffix bits is changing dynamically according to the dc-location number,
-	// there is a corner case may cause the Local TSO is not unique while member changing.
-	// Example:
-	//     t1: xxxxxxxxxxxxxxx1 | 11
-	//     t2: xxxxxxxxxxxxxxx | 111
-	// So we will force the newly added Local TSO Allocator to have a Global TSO synchronization
-	// when it becomes the Local TSO Allocator leader.
-	// Please take a look at https://github.com/tikv/pd/issues/3260 for more details.
-	if resp.MaxTs, err = am.GetMaxLocalTSO(ctx); err != nil {
-		return &pdpb.GetDCLocationInfoResponse{
-			Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
-		}, nil
-	}
-	return resp, nil
+	}, nil
 }
 
 // validateInternalRequest checks if server is closed, which is used to validate

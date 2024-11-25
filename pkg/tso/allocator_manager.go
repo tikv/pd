@@ -33,7 +33,6 @@ import (
 	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/storage/endpoint"
-	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
@@ -315,64 +314,6 @@ func (am *AllocatorManager) GetMember() ElectionMember {
 	return am.member
 }
 
-// SetLocalTSOConfig receives the zone label of this PD server and write it into etcd as dc-location
-// to make the whole cluster know the DC-level topology for later Local TSO Allocator campaign.
-func (am *AllocatorManager) SetLocalTSOConfig(dcLocation string) error {
-	serverName := am.member.Name()
-	serverID := am.member.ID()
-	if err := am.checkDCLocationUpperLimit(dcLocation); err != nil {
-		log.Error("check dc-location upper limit failed",
-			logutil.CondUint32("keyspace-group-id", am.kgID, am.kgID != 0),
-			zap.Int("upper-limit", int(math.Pow(2, MaxSuffixBits))-1),
-			zap.String("dc-location", dcLocation),
-			zap.String("server-name", serverName),
-			zap.Uint64("server-id", serverID),
-			errs.ZapError(err))
-		return err
-	}
-	// The key-value pair in etcd will be like: serverID -> dcLocation
-	dcLocationKey := am.member.GetDCLocationPath(serverID)
-	resp, err := kv.
-		NewSlowLogTxn(am.member.Client()).
-		Then(clientv3.OpPut(dcLocationKey, dcLocation)).
-		Commit()
-	if err != nil {
-		return errs.ErrEtcdTxnInternal.Wrap(err).GenWithStackByCause()
-	}
-	if !resp.Succeeded {
-		log.Warn("write dc-location configuration into etcd failed",
-			logutil.CondUint32("keyspace-group-id", am.kgID, am.kgID > 0),
-			zap.String("dc-location", dcLocation),
-			zap.String("server-name", serverName),
-			zap.Uint64("server-id", serverID))
-		return errs.ErrEtcdTxnConflict.FastGenByArgs()
-	}
-	log.Info("write dc-location configuration into etcd",
-		logutil.CondUint32("keyspace-group-id", am.kgID, am.kgID > 0),
-		zap.String("dc-location", dcLocation),
-		zap.String("server-name", serverName),
-		zap.Uint64("server-id", serverID))
-	go am.ClusterDCLocationChecker()
-	return nil
-}
-
-func (am *AllocatorManager) checkDCLocationUpperLimit(dcLocation string) error {
-	clusterDCLocations, err := am.GetClusterDCLocationsFromEtcd()
-	if err != nil {
-		return err
-	}
-	// It's ok to add a new PD to the old dc-location.
-	if _, ok := clusterDCLocations[dcLocation]; ok {
-		return nil
-	}
-	// Check whether the dc-location number meets the upper limit 2**(LogicalBits-1)-1,
-	// which includes 1 global and 2**(LogicalBits-1) local
-	if len(clusterDCLocations) == int(math.Pow(2, MaxSuffixBits))-1 {
-		return errs.ErrSetLocalTSOConfig.FastGenByArgs("the number of dc-location meets the upper limit")
-	}
-	return nil
-}
-
 // GetClusterDCLocationsFromEtcd fetches dcLocation topology from etcd
 func (am *AllocatorManager) GetClusterDCLocationsFromEtcd() (clusterDCLocations map[string][]uint64, err error) {
 	resp, err := etcdutil.EtcdKVGet(
@@ -413,26 +354,6 @@ func (am *AllocatorManager) GetDCLocationInfo(dcLocation string) (DCLocationInfo
 	return infoPtr.clone(), true
 }
 
-// CleanUpDCLocation cleans up certain server's DCLocationInfo
-func (am *AllocatorManager) CleanUpDCLocation() error {
-	serverID := am.member.ID()
-	dcLocationKey := am.member.GetDCLocationPath(serverID)
-	// remove dcLocationKey from etcd
-	if resp, err := kv.
-		NewSlowLogTxn(am.member.Client()).
-		Then(clientv3.OpDelete(dcLocationKey)).
-		Commit(); err != nil {
-		return errs.ErrEtcdTxnInternal.Wrap(err).GenWithStackByCause()
-	} else if !resp.Succeeded {
-		return errs.ErrEtcdTxnConflict.FastGenByArgs()
-	}
-	log.Info("delete the dc-location key previously written in etcd",
-		logutil.CondUint32("keyspace-group-id", am.kgID, am.kgID > 0),
-		zap.Uint64("server-id", serverID))
-	go am.ClusterDCLocationChecker()
-	return nil
-}
-
 // GetClusterDCLocations returns all dc-locations of a cluster with a copy of map,
 // which satisfies dcLocation -> DCLocationInfo.
 func (am *AllocatorManager) GetClusterDCLocations() map[string]DCLocationInfo {
@@ -467,20 +388,6 @@ func CalSuffixBits(maxSuffix int32) int {
 	return int(math.Ceil(math.Log2(float64(maxSuffix + 1))))
 }
 
-func (am *AllocatorManager) getAllocatorPath(dcLocation string) string {
-	// For backward compatibility, the global timestamp's store path will still use the old one
-	if dcLocation == GlobalDCLocation {
-		return am.rootPath
-	}
-	return path.Join(am.getLocalTSOAllocatorPath(), dcLocation)
-}
-
-// Add a prefix to the root path to prevent being conflicted
-// with other system key paths such as leader, member, alloc_id, raft, etc.
-func (am *AllocatorManager) getLocalTSOAllocatorPath() string {
-	return path.Join(am.rootPath, localTSOAllocatorEtcdPrefix)
-}
-
 // AllocatorDaemon is used to update every allocator's TSO and check whether we have
 // any new local allocator that needs to be set up.
 func (am *AllocatorManager) AllocatorDaemon(ctx context.Context) {
@@ -491,19 +398,12 @@ func (am *AllocatorManager) AllocatorDaemon(ctx context.Context) {
 		tsTicker.Reset(time.Millisecond)
 	})
 	defer tsTicker.Stop()
-	checkerTicker := time.NewTicker(PriorityCheck)
-	defer checkerTicker.Stop()
 
 	for {
 		select {
 		case <-tsTicker.C:
 			// Update the initialized TSO Allocator to advance TSO.
 			am.allocatorUpdater()
-		case <-checkerTicker.C:
-			// Check and maintain the cluster's meta info about dc-location distribution.
-			go am.ClusterDCLocationChecker()
-			// PS: ClusterDCLocationChecker are time consuming and low frequent to run,
-			// we should run them concurrently to speed up the progress.
 		case <-ctx.Done():
 			log.Info("exit allocator daemon", logutil.CondUint32("keyspace-group-id", am.kgID, am.kgID > 0))
 			return
@@ -552,188 +452,6 @@ func (am *AllocatorManager) updateAllocator(ag *allocatorGroup) {
 		am.ResetAllocatorGroup(ag.dcLocation, false)
 		return
 	}
-}
-
-// ClusterDCLocationChecker collects all dc-locations of a cluster, computes some related info
-// and stores them into the DCLocationInfo, then finally writes them into am.mu.clusterDCLocations.
-func (am *AllocatorManager) ClusterDCLocationChecker() {
-	defer logutil.LogPanic()
-	// Wait for the group leader to be elected out.
-	if !am.member.IsLeaderElected() {
-		return
-	}
-	newClusterDCLocations, err := am.GetClusterDCLocationsFromEtcd()
-	if err != nil {
-		log.Error("get cluster dc-locations from etcd failed",
-			logutil.CondUint32("keyspace-group-id", am.kgID, am.kgID > 0),
-			errs.ZapError(err))
-		return
-	}
-	am.mu.Lock()
-	// Clean up the useless dc-locations
-	for dcLocation := range am.mu.clusterDCLocations {
-		if _, ok := newClusterDCLocations[dcLocation]; !ok {
-			delete(am.mu.clusterDCLocations, dcLocation)
-		}
-	}
-	// May be used to rollback the updating after
-	newDCLocations := make([]string, 0)
-	// Update the new dc-locations
-	for dcLocation, serverIDs := range newClusterDCLocations {
-		if _, ok := am.mu.clusterDCLocations[dcLocation]; !ok {
-			am.mu.clusterDCLocations[dcLocation] = &DCLocationInfo{
-				ServerIDs: serverIDs,
-				Suffix:    -1,
-			}
-			newDCLocations = append(newDCLocations, dcLocation)
-		}
-	}
-	// Only leader can write the TSO suffix to etcd in order to make it consistent in the cluster
-	if am.IsLeader() {
-		for dcLocation, info := range am.mu.clusterDCLocations {
-			if info.Suffix > 0 {
-				continue
-			}
-			suffix, err := am.getOrCreateLocalTSOSuffix(dcLocation)
-			if err != nil {
-				log.Warn("get or create the local tso suffix failed",
-					logutil.CondUint32("keyspace-group-id", am.kgID, am.kgID > 0),
-					zap.String("dc-location", dcLocation),
-					errs.ZapError(err))
-				continue
-			}
-			if suffix > am.mu.maxSuffix {
-				am.mu.maxSuffix = suffix
-			}
-			am.mu.clusterDCLocations[dcLocation].Suffix = suffix
-		}
-	} else {
-		// Follower should check and update the am.mu.maxSuffix
-		maxSuffix, err := am.getMaxLocalTSOSuffix()
-		if err != nil {
-			log.Error("get the max local tso suffix from etcd failed",
-				logutil.CondUint32("keyspace-group-id", am.kgID, am.kgID > 0),
-				errs.ZapError(err))
-			// Rollback the new dc-locations we update before
-			for _, dcLocation := range newDCLocations {
-				delete(am.mu.clusterDCLocations, dcLocation)
-			}
-		} else if maxSuffix > am.mu.maxSuffix {
-			am.mu.maxSuffix = maxSuffix
-		}
-	}
-	am.mu.Unlock()
-}
-
-// getOrCreateLocalTSOSuffix will check whether we have the Local TSO suffix written into etcd.
-// If not, it will write a number into etcd according to the its joining order.
-// If yes, it will just return the previous persisted one.
-func (am *AllocatorManager) getOrCreateLocalTSOSuffix(dcLocation string) (int32, error) {
-	// Try to get the suffix from etcd
-	dcLocationSuffix, err := am.getDCLocationSuffixMapFromEtcd()
-	if err != nil {
-		return -1, nil
-	}
-	var maxSuffix int32
-	for curDCLocation, suffix := range dcLocationSuffix {
-		// If we already have the suffix persisted in etcd before,
-		// just use it as the result directly.
-		if curDCLocation == dcLocation {
-			return suffix, nil
-		}
-		if suffix > maxSuffix {
-			maxSuffix = suffix
-		}
-	}
-	maxSuffix++
-	localTSOSuffixKey := am.GetLocalTSOSuffixPath(dcLocation)
-	// The Local TSO suffix is determined by the joining order of this dc-location.
-	localTSOSuffixValue := strconv.FormatInt(int64(maxSuffix), 10)
-	txnResp, err := kv.NewSlowLogTxn(am.member.Client()).
-		If(clientv3.Compare(clientv3.CreateRevision(localTSOSuffixKey), "=", 0)).
-		Then(clientv3.OpPut(localTSOSuffixKey, localTSOSuffixValue)).
-		Commit()
-	if err != nil {
-		return -1, errs.ErrEtcdTxnInternal.Wrap(err).GenWithStackByCause()
-	}
-	if !txnResp.Succeeded {
-		log.Warn("write local tso suffix into etcd failed",
-			logutil.CondUint32("keyspace-group-id", am.kgID, am.kgID > 0),
-			zap.String("dc-location", dcLocation),
-			zap.String("local-tso-suffix", localTSOSuffixValue),
-			zap.String("server-name", am.member.Name()),
-			zap.Uint64("server-id", am.member.ID()))
-		return -1, errs.ErrEtcdTxnConflict.FastGenByArgs()
-	}
-	return maxSuffix, nil
-}
-
-func (am *AllocatorManager) getDCLocationSuffixMapFromEtcd() (map[string]int32, error) {
-	resp, err := etcdutil.EtcdKVGet(
-		am.member.Client(),
-		am.GetLocalTSOSuffixPathPrefix(),
-		clientv3.WithPrefix())
-	if err != nil {
-		return nil, err
-	}
-	dcLocationSuffix := make(map[string]int32)
-	for _, kv := range resp.Kvs {
-		suffix, err := strconv.ParseInt(string(kv.Value), 10, 32)
-		if err != nil {
-			return nil, err
-		}
-		splitKey := strings.Split(string(kv.Key), "/")
-		dcLocation := splitKey[len(splitKey)-1]
-		dcLocationSuffix[dcLocation] = int32(suffix)
-	}
-	return dcLocationSuffix, nil
-}
-
-func (am *AllocatorManager) getMaxLocalTSOSuffix() (int32, error) {
-	// Try to get the suffix from etcd
-	dcLocationSuffix, err := am.getDCLocationSuffixMapFromEtcd()
-	if err != nil {
-		return -1, err
-	}
-	var maxSuffix int32
-	for _, suffix := range dcLocationSuffix {
-		if suffix > maxSuffix {
-			maxSuffix = suffix
-		}
-	}
-	return maxSuffix, nil
-}
-
-// GetLocalTSOSuffixPathPrefix returns the etcd key prefix of the Local TSO suffix for the given dc-location.
-func (am *AllocatorManager) GetLocalTSOSuffixPathPrefix() string {
-	return path.Join(am.rootPath, localTSOSuffixEtcdPrefix)
-}
-
-// GetLocalTSOSuffixPath returns the etcd key of the Local TSO suffix for the given dc-location.
-func (am *AllocatorManager) GetLocalTSOSuffixPath(dcLocation string) string {
-	return path.Join(am.GetLocalTSOSuffixPathPrefix(), dcLocation)
-}
-
-// TransferAllocatorForDCLocation transfer local tso allocator to the target member for the given dcLocation
-func (am *AllocatorManager) TransferAllocatorForDCLocation(dcLocation string, memberID uint64) error {
-	if dcLocation == GlobalDCLocation {
-		return fmt.Errorf("dc-location %v should be transferred by transfer leader", dcLocation)
-	}
-	dcLocationsInfo := am.GetClusterDCLocations()
-	_, ok := dcLocationsInfo[dcLocation]
-	if !ok {
-		return fmt.Errorf("dc-location %v haven't been discovered yet", dcLocation)
-	}
-	allocator, err := am.GetAllocator(dcLocation)
-	if err != nil {
-		return err
-	}
-	localTSOAllocator, _ := allocator.(*LocalTSOAllocator)
-	leaderServerID := localTSOAllocator.GetAllocatorLeader().GetMemberId()
-	if leaderServerID == memberID {
-		return nil
-	}
-	return am.transferLocalAllocator(dcLocation, memberID)
 }
 
 // HandleRequest forwards TSO allocation requests to correct TSO Allocators.
@@ -839,113 +557,6 @@ func (am *AllocatorManager) GetLocalAllocatorLeaders() (map[string]*pdpb.Member,
 		localAllocatorLeaderMember[localAllocator.GetDCLocation()] = localAllocator.GetAllocatorLeader()
 	}
 	return localAllocatorLeaderMember, nil
-}
-
-func (am *AllocatorManager) getOrCreateGRPCConn(ctx context.Context, addr string) (*grpc.ClientConn, error) {
-	conn, ok := am.getGRPCConn(addr)
-	if ok {
-		return conn, nil
-	}
-	tlsCfg, err := am.securityConfig.ToTLSConfig()
-	if err != nil {
-		return nil, err
-	}
-	ctxWithTimeout, cancel := context.WithTimeout(ctx, dialTimeout)
-	defer cancel()
-	cc, err := grpcutil.GetClientConn(ctxWithTimeout, addr, tlsCfg)
-	if err != nil {
-		return nil, err
-	}
-	am.setGRPCConn(cc, addr)
-	conn, _ = am.getGRPCConn(addr)
-	return conn, nil
-}
-
-// GetMaxLocalTSO will sync with the current Local TSO Allocators among the cluster to get the
-// max Local TSO.
-func (am *AllocatorManager) GetMaxLocalTSO(ctx context.Context) (*pdpb.Timestamp, error) {
-	// Sync the max local TSO from the other Local TSO Allocators who has been initialized
-	clusterDCLocations := am.GetClusterDCLocations()
-	for dcLocation := range clusterDCLocations {
-		allocatorGroup, ok := am.getAllocatorGroup(dcLocation)
-		if !(ok && allocatorGroup.leadership.Check()) {
-			delete(clusterDCLocations, dcLocation)
-		}
-	}
-	maxTSO := &pdpb.Timestamp{}
-	if len(clusterDCLocations) == 0 {
-		return maxTSO, nil
-	}
-	globalAllocator, err := am.GetAllocator(GlobalDCLocation)
-	if err != nil {
-		return nil, err
-	}
-	if err := globalAllocator.(*GlobalTSOAllocator).SyncMaxTS(ctx, clusterDCLocations, maxTSO, false); err != nil {
-		return nil, err
-	}
-	return maxTSO, nil
-}
-
-func (am *AllocatorManager) getGRPCConn(addr string) (*grpc.ClientConn, bool) {
-	am.localAllocatorConn.RLock()
-	defer am.localAllocatorConn.RUnlock()
-	conn, ok := am.localAllocatorConn.clientConns[addr]
-	return conn, ok
-}
-
-func (am *AllocatorManager) setGRPCConn(newConn *grpc.ClientConn, addr string) {
-	am.localAllocatorConn.Lock()
-	defer am.localAllocatorConn.Unlock()
-	if _, ok := am.localAllocatorConn.clientConns[addr]; ok {
-		newConn.Close()
-		log.Debug("use old connection",
-			logutil.CondUint32("keyspace-group-id", am.kgID, am.kgID > 0),
-			zap.String("target", newConn.Target()),
-			zap.String("state", newConn.GetState().String()))
-		return
-	}
-	am.localAllocatorConn.clientConns[addr] = newConn
-}
-
-func (am *AllocatorManager) transferLocalAllocator(dcLocation string, serverID uint64) error {
-	nextLeaderKey := am.nextLeaderKey(dcLocation)
-	// Grant a etcd lease with checkStep * 1.5
-	nextLeaderLease := clientv3.NewLease(am.member.Client())
-	ctx, cancel := context.WithTimeout(am.member.Client().Ctx(), etcdutil.DefaultRequestTimeout)
-	leaseResp, err := nextLeaderLease.Grant(ctx, int64(checkStep.Seconds()*1.5))
-	cancel()
-	if err != nil {
-		err = errs.ErrEtcdGrantLease.Wrap(err).GenWithStackByCause()
-		log.Error("failed to grant the lease of the next leader key",
-			logutil.CondUint32("keyspace-group-id", am.kgID, am.kgID > 0),
-			zap.String("dc-location", dcLocation),
-			zap.Uint64("serverID", serverID),
-			errs.ZapError(err))
-		return err
-	}
-	resp, err := kv.NewSlowLogTxn(am.member.Client()).
-		If(clientv3.Compare(clientv3.CreateRevision(nextLeaderKey), "=", 0)).
-		Then(clientv3.OpPut(nextLeaderKey, fmt.Sprint(serverID), clientv3.WithLease(leaseResp.ID))).
-		Commit()
-	if err != nil {
-		err = errs.ErrEtcdTxnInternal.Wrap(err).GenWithStackByCause()
-		log.Error("failed to write next leader key into etcd",
-			logutil.CondUint32("keyspace-group-id", am.kgID, am.kgID > 0),
-			zap.String("dc-location", dcLocation), zap.Uint64("serverID", serverID),
-			errs.ZapError(err))
-		return err
-	}
-	if !resp.Succeeded {
-		log.Warn("write next leader id into etcd unsuccessfully",
-			logutil.CondUint32("keyspace-group-id", am.kgID, am.kgID > 0),
-			zap.String("dc-location", dcLocation))
-		return errs.ErrEtcdTxnConflict.GenWithStack("write next leader id into etcd unsuccessfully")
-	}
-	return nil
-}
-
-func (am *AllocatorManager) nextLeaderKey(dcLocation string) string {
-	return path.Join(am.getAllocatorPath(dcLocation), "next-leader")
 }
 
 // EnableLocalTSO returns the value of AllocatorManager.enableLocalTSO.
