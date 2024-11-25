@@ -319,7 +319,7 @@ func (h *Handler) GetSchedulerConfigHandler() (http.Handler, error) {
 
 // ResetTS resets the ts with specified tso.
 func (h *Handler) ResetTS(ts uint64, ignoreSmaller, skipUpperBoundCheck bool, _ uint32) error {
-	log.Info("reset-ts",
+	log.Info("reset ts",
 		zap.Uint64("new-ts", ts),
 		zap.Bool("ignore-smaller", ignoreSmaller),
 		zap.Bool("skip-upper-bound-check", skipUpperBoundCheck))

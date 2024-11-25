@@ -73,6 +73,8 @@ const (
 	keyspaceGroupsMembershipKey = "membership"
 	keyspaceGroupsElectionKey   = "election"
 
+	tsoAllocatorsPrefix = "tso_allocators"
+
 	// we use uint64 to represent ID, the max length of uint64 is 20.
 	keyLen = 20
 
@@ -445,4 +447,9 @@ func ServicePath(serviceName string) string {
 // TSOPath returns the path to store TSO addresses.
 func TSOPath() string {
 	return ServicePath("tso")
+}
+
+// GlobalTSOAllocatorsPrefix returns the global TSO allocators prefix.
+func GlobalTSOAllocatorsPrefix() string {
+	return path.Join(PDRootPath(), tsoAllocatorsPrefix)
 }
