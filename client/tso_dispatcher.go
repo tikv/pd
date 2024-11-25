@@ -32,6 +32,7 @@ import (
 	"github.com/tikv/pd/client/metrics"
 	"github.com/tikv/pd/client/opt"
 	"github.com/tikv/pd/client/retry"
+	sd "github.com/tikv/pd/client/servicediscovery"
 	"github.com/tikv/pd/client/utils/timerutil"
 	"github.com/tikv/pd/client/utils/tsoutil"
 	"go.uber.org/zap"
@@ -70,7 +71,7 @@ type tsoInfo struct {
 
 type tsoServiceProvider interface {
 	getOption() *opt.Option
-	getServiceDiscovery() ServiceDiscovery
+	getServiceDiscovery() sd.ServiceDiscovery
 	updateConnectionCtxs(ctx context.Context, connectionCtxs *sync.Map) bool
 }
 
@@ -179,7 +180,7 @@ func (td *tsoDispatcher) revokePendingRequests(err error) {
 
 func (td *tsoDispatcher) close() {
 	td.cancel()
-	tsoErr := errors.WithStack(errClosing)
+	tsoErr := errors.WithStack(errs.ErrClosing)
 	td.revokePendingRequests(tsoErr)
 }
 
@@ -210,7 +211,7 @@ func (td *tsoDispatcher) handleDispatcher(wg *sync.WaitGroup) {
 			// If you encounter this failure, please check the stack in the logs to see if it's a panic.
 			log.Fatal("batched tso requests not cleared when exiting the tso dispatcher loop", zap.Any("panic", recover()))
 		}
-		tsoErr := errors.WithStack(errClosing)
+		tsoErr := errors.WithStack(errs.ErrClosing)
 		td.revokePendingRequests(tsoErr)
 		wg.Done()
 	}()
@@ -233,7 +234,7 @@ func (td *tsoDispatcher) handleDispatcher(wg *sync.WaitGroup) {
 	<-batchingTimer.C
 	defer batchingTimer.Stop()
 
-	bo := retry.InitialBackoffer(updateMemberBackOffBaseTime, updateMemberTimeout, updateMemberBackOffBaseTime)
+	bo := retry.InitialBackoffer(sd.UpdateMemberBackOffBaseTime, sd.UpdateMemberTimeout, sd.UpdateMemberBackOffBaseTime)
 tsoBatchLoop:
 	for {
 		select {
@@ -494,7 +495,7 @@ func (td *tsoDispatcher) connectionCtxsUpdater() {
 			if enableTSOFollowerProxy && updateTicker.C == nil {
 				// Because the TSO Follower Proxy is enabled,
 				// the periodic check needs to be performed.
-				setNewUpdateTicker(time.NewTicker(memberUpdateInterval))
+				setNewUpdateTicker(time.NewTicker(sd.MemberUpdateInterval))
 			} else if !enableTSOFollowerProxy && updateTicker.C != nil {
 				// Because the TSO Follower Proxy is disabled,
 				// the periodic check needs to be turned off.

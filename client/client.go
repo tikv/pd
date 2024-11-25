@@ -33,26 +33,13 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/tikv/pd/client/caller"
 	"github.com/tikv/pd/client/clients/metastorage"
+	"github.com/tikv/pd/client/constants"
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/metrics"
 	"github.com/tikv/pd/client/opt"
+	sd "github.com/tikv/pd/client/servicediscovery"
 	"github.com/tikv/pd/client/utils/tlsutil"
 	"go.uber.org/zap"
-)
-
-const (
-	// defaultKeyspaceID is the default key space id.
-	// Valid keyspace id range is [0, 0xFFFFFF](uint24max, or 16777215)
-	// ​0 is reserved for default keyspace with the name "DEFAULT", It's initialized
-	// when PD bootstrap and reserved for users who haven't been assigned keyspace.
-	defaultKeyspaceID = uint32(0)
-	maxKeyspaceID     = uint32(0xFFFFFF)
-	// nullKeyspaceID is used for api v1 or legacy path where is keyspace agnostic.
-	nullKeyspaceID = uint32(0xFFFFFFFF)
-	// defaultKeySpaceGroupID is the default key space group id.
-	// We also reserved 0 for the keyspace group for the same purpose.
-	defaultKeySpaceGroupID = uint32(0)
-	defaultKeyspaceName    = "DEFAULT"
 )
 
 // Region contains information of a region's meta and its peers.
@@ -175,7 +162,7 @@ type Client interface {
 	// syncing leader from server.
 	GetLeaderURL() string
 	// GetServiceDiscovery returns ServiceDiscovery
-	GetServiceDiscovery() ServiceDiscovery
+	GetServiceDiscovery() sd.ServiceDiscovery
 
 	// UpdateOption updates the client option.
 	UpdateOption(option opt.DynamicOption, value any) error
@@ -183,19 +170,6 @@ type Client interface {
 	// Close closes the client.
 	Close()
 }
-
-var (
-	// errUnmatchedClusterID is returned when found a PD with a different cluster ID.
-	errUnmatchedClusterID = errors.New("[pd] unmatched cluster id")
-	// errFailInitClusterID is returned when failed to load clusterID from all supplied PD addresses.
-	errFailInitClusterID = errors.New("[pd] failed to get cluster id")
-	// errClosing is returned when request is canceled when client is closing.
-	errClosing = errors.New("[pd] closing")
-	// errTSOLength is returned when the number of response timestamps is inconsistent with request.
-	errTSOLength = errors.New("[pd] tso length in rpc response is incorrect")
-	// errInvalidRespHeader is returned when the response doesn't contain service mode info unexpectedly.
-	errNoServiceModeReturned = errors.New("[pd] no service mode returned")
-)
 
 var _ Client = (*client)(nil)
 
@@ -206,7 +180,7 @@ type serviceModeKeeper struct {
 	sync.RWMutex
 	serviceMode     pdpb.ServiceMode
 	tsoClient       *tsoClient
-	tsoSvcDiscovery ServiceDiscovery
+	tsoSvcDiscovery sd.ServiceDiscovery
 }
 
 func (k *serviceModeKeeper) close() {
@@ -289,7 +263,7 @@ func NewClientWithContext(
 	security SecurityOption, opts ...opt.ClientOption,
 ) (Client, error) {
 	return createClientWithKeyspace(ctx, callerComponent,
-		nullKeyspaceID, svrAddrs, security, opts...)
+		constants.NullKeyspaceID, svrAddrs, security, opts...)
 }
 
 // NewClientWithKeyspace creates a client with context and the specified keyspace id.
@@ -300,9 +274,9 @@ func NewClientWithKeyspace(
 	keyspaceID uint32, svrAddrs []string,
 	security SecurityOption, opts ...opt.ClientOption,
 ) (Client, error) {
-	if keyspaceID < defaultKeyspaceID || keyspaceID > maxKeyspaceID {
+	if keyspaceID < constants.DefaultKeyspaceID || keyspaceID > constants.MaxKeyspaceID {
 		return nil, errors.Errorf("invalid keyspace id %d. It must be in the range of [%d, %d]",
-			keyspaceID, defaultKeyspaceID, maxKeyspaceID)
+			keyspaceID, constants.DefaultKeyspaceID, constants.MaxKeyspaceID)
 	}
 	return createClientWithKeyspace(ctx, callerComponent, keyspaceID,
 		svrAddrs, security, opts...)
@@ -392,7 +366,7 @@ type apiContextV2 struct {
 // NewAPIContextV2 creates a API context with the specified keyspace name for V2.
 func NewAPIContextV2(keyspaceName string) APIContext {
 	if len(keyspaceName) == 0 {
-		keyspaceName = defaultKeyspaceName
+		keyspaceName = constants.DefaultKeyspaceName
 	}
 	return &apiContextV2{keyspaceName: keyspaceName}
 }
@@ -452,7 +426,7 @@ func newClientWithKeyspaceName(
 		inner: &innerClient{
 			// Create a PD service discovery with null keyspace id, then query the real id with the keyspace name,
 			// finally update the keyspace id to the PD service discovery for the following interactions.
-			keyspaceID:              nullKeyspaceID,
+			keyspaceID:              constants.NullKeyspaceID,
 			updateTokenConnectionCh: make(chan struct{}, 1),
 			ctx:                     clientCtx,
 			cancel:                  clientCancel,
@@ -511,7 +485,7 @@ func (c *client) GetLeaderURL() string {
 }
 
 // GetServiceDiscovery returns the client-side service discovery object
-func (c *client) GetServiceDiscovery() ServiceDiscovery {
+func (c *client) GetServiceDiscovery() sd.ServiceDiscovery {
 	return c.inner.pdSvcDiscovery
 }
 
@@ -1275,17 +1249,6 @@ func (c *client) scatterRegionsWithOptions(ctx context.Context, regionsID []uint
 		return nil, errors.Errorf("scatter regions %v failed: %s", regionsID, resp.GetHeader().GetError().String())
 	}
 	return resp, nil
-}
-
-const (
-	httpSchemePrefix  = "http://"
-	httpsSchemePrefix = "https://"
-)
-
-func trimHTTPPrefix(str string) string {
-	str = strings.TrimPrefix(str, httpSchemePrefix)
-	str = strings.TrimPrefix(str, httpsSchemePrefix)
-	return str
 }
 
 // LoadGlobalConfig implements the RPCClient interface.
