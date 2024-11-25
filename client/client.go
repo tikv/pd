@@ -33,6 +33,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/tikv/pd/client/caller"
 	"github.com/tikv/pd/client/clients/metastorage"
+	"github.com/tikv/pd/client/clients/tso"
 	"github.com/tikv/pd/client/constants"
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/metrics"
@@ -140,8 +141,7 @@ type RPCClient interface {
 	//     on your needs.
 	WithCallerComponent(callerComponent caller.Component) RPCClient
 
-	// TSOClient is the TSO client.
-	TSOClient
+	tso.Client
 	metastorage.Client
 	// KeyspaceClient manages keyspace metadata.
 	KeyspaceClient
@@ -179,7 +179,7 @@ type serviceModeKeeper struct {
 	// triggering service mode switching concurrently.
 	sync.RWMutex
 	serviceMode     pdpb.ServiceMode
-	tsoClient       *tsoClient
+	tsoClient       *tso.Cli
 	tsoSvcDiscovery sd.ServiceDiscovery
 }
 
@@ -191,7 +191,7 @@ func (k *serviceModeKeeper) close() {
 		k.tsoSvcDiscovery.Close()
 		fallthrough
 	case pdpb.ServiceMode_PD_SVC_MODE:
-		k.tsoClient.close()
+		k.tsoClient.Close()
 	case pdpb.ServiceMode_UNKNOWN_SVC_MODE:
 	}
 }
@@ -557,7 +557,7 @@ func (c *client) getClientAndContext(ctx context.Context) (pdpb.PDClient, contex
 }
 
 // GetTSAsync implements the TSOClient interface.
-func (c *client) GetTSAsync(ctx context.Context) TSFuture {
+func (c *client) GetTSAsync(ctx context.Context) tso.TSFuture {
 	defer trace.StartRegion(ctx, "pdclient.GetTSAsync").End()
 	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
 		span = span.Tracer().StartSpan("pdclient.GetTSAsync", opentracing.ChildOf(span.Context()))
@@ -570,7 +570,7 @@ func (c *client) GetTSAsync(ctx context.Context) TSFuture {
 //
 // Deprecated: Local TSO will be completely removed in the future. Currently, regardless of the
 // parameters passed in, this method will default to returning the global TSO.
-func (c *client) GetLocalTSAsync(ctx context.Context, _ string) TSFuture {
+func (c *client) GetLocalTSAsync(ctx context.Context, _ string) tso.TSFuture {
 	return c.GetTSAsync(ctx)
 }
 

@@ -19,7 +19,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pingcap/errors"
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/client/caller"
 	"github.com/tikv/pd/client/opt"
@@ -61,31 +60,4 @@ func TestClientWithRetry(t *testing.T) {
 		[]string{testClientURL}, SecurityOption{}, opt.WithMaxErrorRetry(5))
 	re.Error(err)
 	re.Less(time.Since(start), time.Second*10)
-}
-
-func TestTsoRequestWait(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	req := &tsoRequest{
-		done:       make(chan error, 1),
-		physical:   0,
-		logical:    0,
-		requestCtx: context.TODO(),
-		clientCtx:  ctx,
-	}
-	cancel()
-	_, _, err := req.Wait()
-	re.ErrorIs(errors.Cause(err), context.Canceled)
-
-	ctx, cancel = context.WithCancel(context.Background())
-	req = &tsoRequest{
-		done:       make(chan error, 1),
-		physical:   0,
-		logical:    0,
-		requestCtx: ctx,
-		clientCtx:  context.TODO(),
-	}
-	cancel()
-	_, _, err = req.Wait()
-	re.ErrorIs(errors.Cause(err), context.Canceled)
 }

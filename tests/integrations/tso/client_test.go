@@ -30,6 +30,7 @@ import (
 	"github.com/stretchr/testify/suite"
 	pd "github.com/tikv/pd/client"
 	"github.com/tikv/pd/client/caller"
+	"github.com/tikv/pd/client/clients/tso"
 	"github.com/tikv/pd/client/opt"
 	sd "github.com/tikv/pd/client/servicediscovery"
 	"github.com/tikv/pd/client/utils/testutil"
@@ -241,7 +242,7 @@ func (suite *tsoClientTestSuite) TestGetTSAsync() {
 		for _, client := range suite.clients {
 			go func(client pd.Client) {
 				defer wg.Done()
-				tsFutures := make([]pd.TSFuture, tsoRequestRound)
+				tsFutures := make([]tso.TSFuture, tsoRequestRound)
 				for j := range tsFutures {
 					tsFutures[j] = client.GetTSAsync(suite.ctx)
 				}
