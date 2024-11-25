@@ -29,9 +29,9 @@ import (
 	"github.com/pingcap/kvproto/pkg/tsopb"
 	"github.com/pingcap/log"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/tikv/pd/client/constants"
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/metrics"
-	"github.com/tikv/pd/client/utils"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 )
@@ -145,7 +145,7 @@ func (s pdTSOStreamAdapter) Recv() (tsoRequestResult, error) {
 		physical:            resp.GetTimestamp().GetPhysical(),
 		logical:             resp.GetTimestamp().GetLogical(),
 		count:               resp.GetCount(),
-		respKeyspaceGroupID: utils.DefaultKeyspaceGroupID,
+		respKeyspaceGroupID: constants.DefaultKeyspaceGroupID,
 	}, nil
 }
 

@@ -29,10 +29,10 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/client/constants"
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/opt"
 	"github.com/tikv/pd/client/retry"
-	"github.com/tikv/pd/client/utils"
 	"github.com/tikv/pd/client/utils/grpcutil"
 	"github.com/tikv/pd/client/utils/tlsutil"
 	"go.uber.org/zap"
@@ -454,7 +454,7 @@ func NewDefaultPDServiceDiscovery(
 	urls []string, tlsCfg *tls.Config,
 ) ServiceDiscovery {
 	var wg sync.WaitGroup
-	return NewPDServiceDiscovery(ctx, cancel, &wg, nil, nil, utils.DefaultKeyspaceID, urls, tlsCfg, opt.NewOption())
+	return NewPDServiceDiscovery(ctx, cancel, &wg, nil, nil, constants.DefaultKeyspaceID, urls, tlsCfg, opt.NewOption())
 }
 
 // NewPDServiceDiscovery returns a new PD service discovery-based client.
@@ -501,7 +501,7 @@ func (c *pdServiceDiscovery) Init() error {
 
 	// We need to update the keyspace ID before we discover and update the service mode
 	// so that TSO in API mode can be initialized with the correct keyspace ID.
-	if c.keyspaceID == utils.NullKeyspaceID && c.updateKeyspaceIDFunc != nil {
+	if c.keyspaceID == constants.NullKeyspaceID && c.updateKeyspaceIDFunc != nil {
 		if err := c.initRetry(c.updateKeyspaceIDFunc); err != nil {
 			return err
 		}
@@ -668,7 +668,7 @@ func (c *pdServiceDiscovery) SetKeyspaceID(keyspaceID uint32) {
 // GetKeyspaceGroupID returns the ID of the keyspace group
 func (*pdServiceDiscovery) GetKeyspaceGroupID() uint32 {
 	// PD/API service only supports the default keyspace group
-	return utils.DefaultKeyspaceGroupID
+	return constants.DefaultKeyspaceGroupID
 }
 
 // DiscoverMicroservice discovers the microservice with the specified type and returns the server urls.

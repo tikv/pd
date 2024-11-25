@@ -33,11 +33,11 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/tikv/pd/client/caller"
 	"github.com/tikv/pd/client/clients/metastorage"
+	"github.com/tikv/pd/client/constants"
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/metrics"
 	"github.com/tikv/pd/client/opt"
 	sd "github.com/tikv/pd/client/servicediscovery"
-	"github.com/tikv/pd/client/utils"
 	"github.com/tikv/pd/client/utils/tlsutil"
 	"go.uber.org/zap"
 )
@@ -263,7 +263,7 @@ func NewClientWithContext(
 	security SecurityOption, opts ...opt.ClientOption,
 ) (Client, error) {
 	return createClientWithKeyspace(ctx, callerComponent,
-		utils.NullKeyspaceID, svrAddrs, security, opts...)
+		constants.NullKeyspaceID, svrAddrs, security, opts...)
 }
 
 // NewClientWithKeyspace creates a client with context and the specified keyspace id.
@@ -274,9 +274,9 @@ func NewClientWithKeyspace(
 	keyspaceID uint32, svrAddrs []string,
 	security SecurityOption, opts ...opt.ClientOption,
 ) (Client, error) {
-	if keyspaceID < utils.DefaultKeyspaceID || keyspaceID > utils.MaxKeyspaceID {
+	if keyspaceID < constants.DefaultKeyspaceID || keyspaceID > constants.MaxKeyspaceID {
 		return nil, errors.Errorf("invalid keyspace id %d. It must be in the range of [%d, %d]",
-			keyspaceID, utils.DefaultKeyspaceID, utils.MaxKeyspaceID)
+			keyspaceID, constants.DefaultKeyspaceID, constants.MaxKeyspaceID)
 	}
 	return createClientWithKeyspace(ctx, callerComponent, keyspaceID,
 		svrAddrs, security, opts...)
@@ -366,7 +366,7 @@ type apiContextV2 struct {
 // NewAPIContextV2 creates a API context with the specified keyspace name for V2.
 func NewAPIContextV2(keyspaceName string) APIContext {
 	if len(keyspaceName) == 0 {
-		keyspaceName = utils.DefaultKeyspaceName
+		keyspaceName = constants.DefaultKeyspaceName
 	}
 	return &apiContextV2{keyspaceName: keyspaceName}
 }
@@ -426,7 +426,7 @@ func newClientWithKeyspaceName(
 		inner: &innerClient{
 			// Create a PD service discovery with null keyspace id, then query the real id with the keyspace name,
 			// finally update the keyspace id to the PD service discovery for the following interactions.
-			keyspaceID:              utils.NullKeyspaceID,
+			keyspaceID:              constants.NullKeyspaceID,
 			updateTokenConnectionCh: make(chan struct{}, 1),
 			ctx:                     clientCtx,
 			cancel:                  clientCancel,

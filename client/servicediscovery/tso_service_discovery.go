@@ -30,9 +30,9 @@ import (
 	"github.com/pingcap/kvproto/pkg/tsopb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/client/clients/metastorage"
+	"github.com/tikv/pd/client/constants"
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/opt"
-	"github.com/tikv/pd/client/utils"
 	"github.com/tikv/pd/client/utils/grpcutil"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -182,7 +182,7 @@ func NewTSOServiceDiscovery(
 	c.tsoServerDiscovery = &tsoServerDiscovery{urls: make([]string, 0)}
 	// Start with the default keyspace group. The actual keyspace group, to which the keyspace belongs,
 	// will be discovered later.
-	c.defaultDiscoveryKey = fmt.Sprintf(tsoSvcDiscoveryFormat, c.clusterID, utils.DefaultKeyspaceGroupID)
+	c.defaultDiscoveryKey = fmt.Sprintf(tsoSvcDiscoveryFormat, c.clusterID, constants.DefaultKeyspaceGroupID)
 
 	log.Info("created tso service discovery",
 		zap.Uint64("cluster-id", c.clusterID),
@@ -293,7 +293,7 @@ func (c *tsoServiceDiscovery) GetKeyspaceGroupID() uint32 {
 	c.keyspaceGroupSD.RLock()
 	defer c.keyspaceGroupSD.RUnlock()
 	if c.keyspaceGroupSD.group == nil {
-		return utils.DefaultKeyspaceGroupID
+		return constants.DefaultKeyspaceGroupID
 	}
 	return c.keyspaceGroupSD.group.Id
 }
@@ -469,7 +469,7 @@ func (c *tsoServiceDiscovery) updateMember() error {
 		}
 		members[0].IsPrimary = true
 		keyspaceGroup = &tsopb.KeyspaceGroup{
-			Id:      utils.DefaultKeyspaceGroupID,
+			Id:      constants.DefaultKeyspaceGroupID,
 			Members: members,
 		}
 	}
@@ -554,7 +554,7 @@ func (c *tsoServiceDiscovery) findGroupByKeyspaceID(
 			Header: &tsopb.RequestHeader{
 				ClusterId:       c.clusterID,
 				KeyspaceId:      keyspaceID,
-				KeyspaceGroupId: utils.DefaultKeyspaceGroupID,
+				KeyspaceGroupId: constants.DefaultKeyspaceGroupID,
 			},
 			KeyspaceId: keyspaceID,
 		})
