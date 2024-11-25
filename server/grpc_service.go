@@ -20,7 +20,6 @@ import (
 	"fmt"
 	"io"
 	"path"
-	"runtime"
 	"runtime/trace"
 	"strconv"
 	"strings"
@@ -233,36 +232,6 @@ func (s *schedulingClient) getPrimaryAddr() string {
 	return s.primary
 }
 
-type request interface {
-	GetHeader() *pdpb.RequestHeader
-}
-
-type forwardFn func(ctx context.Context, client *grpc.ClientConn) (any, error)
-
-func (s *GrpcServer) unaryMiddleware(ctx context.Context, req request, fn forwardFn) (rsp any, err error) {
-	return s.unaryFollowerMiddleware(ctx, req, fn, nil)
-}
-
-// unaryFollowerMiddleware adds the check of followers enable compared to unaryMiddleware.
-func (s *GrpcServer) unaryFollowerMiddleware(ctx context.Context, req request, fn forwardFn, allowFollower *bool) (rsp any, err error) {
-	failpoint.Inject("customTimeout", func() {
-		time.Sleep(5 * time.Second)
-	})
-	forwardedHost := grpcutil.GetForwardedHost(ctx)
-	if !s.isLocalRequest(forwardedHost) {
-		client, err := s.getDelegateClient(ctx, forwardedHost)
-		if err != nil {
-			return nil, err
-		}
-		ctx = grpcutil.ResetForwardContext(ctx)
-		return fn(ctx, client)
-	}
-	if err := s.validateRoleInRequest(ctx, req.GetHeader(), allowFollower); err != nil {
-		return nil, err
-	}
-	return nil, nil
-}
-
 // GetClusterInfo implements gRPC PDServer.
 func (s *GrpcServer) GetClusterInfo(context.Context, *pdpb.GetClusterInfoRequest) (*pdpb.GetClusterInfoResponse, error) {
 	// Here we purposely do not check the cluster ID because the client does not know the correct cluster ID
@@ -306,10 +275,8 @@ func (s *GrpcServer) GetMinTS(
 			}, nil
 		}
 	}
-	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
-		return pdpb.NewPDClient(client).GetMinTS(ctx, request)
-	}
-	if rsp, err := s.unaryMiddleware(ctx, request, fn); err != nil {
+
+	if rsp, err := s.unaryMiddleware(ctx, request, "GetMinTS"); err != nil {
 		return nil, err
 	} else if rsp != nil {
 		return rsp.(*pdpb.GetMinTSResponse), nil
@@ -645,10 +612,7 @@ func (s *GrpcServer) Bootstrap(ctx context.Context, request *pdpb.BootstrapReque
 			}, nil
 		}
 	}
-	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
-		return pdpb.NewPDClient(client).Bootstrap(ctx, request)
-	}
-	if rsp, err := s.unaryMiddleware(ctx, request, fn); err != nil {
+	if rsp, err := s.unaryMiddleware(ctx, request, "Bootstrap"); err != nil {
 		return nil, err
 	} else if rsp != nil {
 		return rsp.(*pdpb.BootstrapResponse), nil
@@ -689,10 +653,8 @@ func (s *GrpcServer) IsBootstrapped(ctx context.Context, request *pdpb.IsBootstr
 			}, nil
 		}
 	}
-	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
-		return pdpb.NewPDClient(client).IsBootstrapped(ctx, request)
-	}
-	if rsp, err := s.unaryMiddleware(ctx, request, fn); err != nil {
+
+	if rsp, err := s.unaryMiddleware(ctx, request, "IsBootstrapped"); err != nil {
 		return nil, err
 	} else if rsp != nil {
 		return rsp.(*pdpb.IsBootstrappedResponse), err
@@ -718,10 +680,8 @@ func (s *GrpcServer) AllocID(ctx context.Context, request *pdpb.AllocIDRequest) 
 			}, nil
 		}
 	}
-	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
-		return pdpb.NewPDClient(client).AllocID(ctx, request)
-	}
-	if rsp, err := s.unaryMiddleware(ctx, request, fn); err != nil {
+
+	if rsp, err := s.unaryMiddleware(ctx, request, "AllocID"); err != nil {
 		return nil, err
 	} else if rsp != nil {
 		return rsp.(*pdpb.AllocIDResponse), err
@@ -780,10 +740,7 @@ func (s *GrpcServer) GetStore(ctx context.Context, request *pdpb.GetStoreRequest
 			}, nil
 		}
 	}
-	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
-		return pdpb.NewPDClient(client).GetStore(ctx, request)
-	}
-	if rsp, err := s.unaryMiddleware(ctx, request, fn); err != nil {
+	if rsp, err := s.unaryMiddleware(ctx, request, "GetStore"); err != nil {
 		return nil, err
 	} else if rsp != nil {
 		return rsp.(*pdpb.GetStoreResponse), err
@@ -836,10 +793,8 @@ func (s *GrpcServer) PutStore(ctx context.Context, request *pdpb.PutStoreRequest
 			}, nil
 		}
 	}
-	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
-		return pdpb.NewPDClient(client).PutStore(ctx, request)
-	}
-	if rsp, err := s.unaryMiddleware(ctx, request, fn); err != nil {
+
+	if rsp, err := s.unaryMiddleware(ctx, request, "PutStore"); err != nil {
 		return nil, err
 	} else if rsp != nil {
 		return rsp.(*pdpb.PutStoreResponse), err
@@ -893,10 +848,7 @@ func (s *GrpcServer) GetAllStores(ctx context.Context, request *pdpb.GetAllStore
 			}, nil
 		}
 	}
-	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
-		return pdpb.NewPDClient(client).GetAllStores(ctx, request)
-	}
-	if rsp, err := s.unaryMiddleware(ctx, request, fn); err != nil {
+	if rsp, err := s.unaryMiddleware(ctx, request, "GetAllStores"); err != nil {
 		return nil, err
 	} else if rsp != nil {
 		return rsp.(*pdpb.GetAllStoresResponse), err
@@ -938,10 +890,7 @@ func (s *GrpcServer) StoreHeartbeat(ctx context.Context, request *pdpb.StoreHear
 			}, nil
 		}
 	}
-	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
-		return pdpb.NewPDClient(client).StoreHeartbeat(ctx, request)
-	}
-	if rsp, err := s.unaryMiddleware(ctx, request, fn); err != nil {
+	if rsp, err := s.unaryMiddleware(ctx, request, "StoreHearbeat"); err != nil {
 		return nil, err
 	} else if rsp != nil {
 		return rsp.(*pdpb.StoreHeartbeatResponse), err
@@ -1440,8 +1389,8 @@ func (s *GrpcServer) GetRegion(ctx context.Context, request *pdpb.GetRegionReque
 			}, nil
 		}
 	}
-	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
-		return pdpb.NewPDClient(client).GetRegion(ctx, request)
+	fn := func(ctx context.Context, client *grpc.ClientConn, req any) (any, error) {
+		return pdpb.NewPDClient(client).GetRegion(ctx, req.(*pdpb.GetRegionRequest))
 	}
 	followerHandle := new(bool)
 	if rsp, err := s.unaryFollowerMiddleware(ctx, request, fn, followerHandle); err != nil {
@@ -1504,8 +1453,8 @@ func (s *GrpcServer) GetPrevRegion(ctx context.Context, request *pdpb.GetRegionR
 			}, nil
 		}
 	}
-	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
-		return pdpb.NewPDClient(client).GetPrevRegion(ctx, request)
+	fn := func(ctx context.Context, client *grpc.ClientConn, req any) (any, error) {
+		return pdpb.NewPDClient(client).GetPrevRegion(ctx, req.(*pdpb.GetRegionRequest))
 	}
 	followerHandle := new(bool)
 	if rsp, err := s.unaryFollowerMiddleware(ctx, request, fn, followerHandle); err != nil {
@@ -1563,8 +1512,8 @@ func (s *GrpcServer) GetRegionByID(ctx context.Context, request *pdpb.GetRegionB
 			}, nil
 		}
 	}
-	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
-		return pdpb.NewPDClient(client).GetRegionByID(ctx, request)
+	fn := func(ctx context.Context, client *grpc.ClientConn, req any) (any, error) {
+		return pdpb.NewPDClient(client).GetRegionByID(ctx, req.(*pdpb.GetRegionByIDRequest))
 	}
 	followerHandle := new(bool)
 	if rsp, err := s.unaryFollowerMiddleware(ctx, request, fn, followerHandle); err != nil {
@@ -1625,8 +1574,8 @@ func (s *GrpcServer) ScanRegions(ctx context.Context, request *pdpb.ScanRegionsR
 			}, nil
 		}
 	}
-	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
-		return pdpb.NewPDClient(client).ScanRegions(ctx, request)
+	fn := func(ctx context.Context, client *grpc.ClientConn, req any) (any, error) {
+		return pdpb.NewPDClient(client).ScanRegions(ctx, req.(*pdpb.ScanRegionsRequest))
 	}
 	followerHandle := new(bool)
 	if rsp, err := s.unaryFollowerMiddleware(ctx, request, fn, followerHandle); err != nil {
@@ -1683,8 +1632,8 @@ func (s *GrpcServer) BatchScanRegions(ctx context.Context, request *pdpb.BatchSc
 			}, nil
 		}
 	}
-	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
-		return pdpb.NewPDClient(client).BatchScanRegions(ctx, request)
+	fn := func(ctx context.Context, client *grpc.ClientConn, req any) (any, error) {
+		return pdpb.NewPDClient(client).BatchScanRegions(ctx, req.(*pdpb.BatchScanRegionsRequest))
 	}
 	followerHandle := new(bool)
 	if rsp, err := s.unaryFollowerMiddleware(ctx, request, fn, followerHandle); err != nil {
@@ -1775,10 +1724,7 @@ func (s *GrpcServer) AskSplit(ctx context.Context, request *pdpb.AskSplitRequest
 			}, nil
 		}
 	}
-	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
-		return pdpb.NewPDClient(client).AskSplit(ctx, request)
-	}
-	if rsp, err := s.unaryMiddleware(ctx, request, fn); err != nil {
+	if rsp, err := s.unaryMiddleware(ctx, request, "AskSplit"); err != nil {
 		return nil, err
 	} else if rsp != nil {
 		return rsp.(*pdpb.AskSplitResponse), err
@@ -1853,10 +1799,8 @@ func (s *GrpcServer) AskBatchSplit(ctx context.Context, request *pdpb.AskBatchSp
 			return convertAskSplitResponse(resp), nil
 		}
 	}
-	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
-		return pdpb.NewPDClient(client).AskBatchSplit(ctx, request)
-	}
-	if rsp, err := s.unaryMiddleware(ctx, request, fn); err != nil {
+
+	if rsp, err := s.unaryMiddleware(ctx, request, "AskBatchSplit"); err != nil {
 		return nil, err
 	} else if rsp != nil {
 		return rsp.(*pdpb.AskBatchSplitResponse), err
@@ -1897,10 +1841,8 @@ func (s *GrpcServer) ReportSplit(ctx context.Context, request *pdpb.ReportSplitR
 			}, nil
 		}
 	}
-	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
-		return pdpb.NewPDClient(client).ReportSplit(ctx, request)
-	}
-	if rsp, err := s.unaryMiddleware(ctx, request, fn); err != nil {
+
+	if rsp, err := s.unaryMiddleware(ctx, request, "ReportSplit"); err != nil {
 		return nil, err
 	} else if rsp != nil {
 		return rsp.(*pdpb.ReportSplitResponse), err
@@ -1935,10 +1877,8 @@ func (s *GrpcServer) ReportBatchSplit(ctx context.Context, request *pdpb.ReportB
 			}, nil
 		}
 	}
-	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
-		return pdpb.NewPDClient(client).ReportBatchSplit(ctx, request)
-	}
-	if rsp, err := s.unaryMiddleware(ctx, request, fn); err != nil {
+
+	if rsp, err := s.unaryMiddleware(ctx, request, "ReportBatchSplit"); err != nil {
 		return nil, err
 	} else if rsp != nil {
 		return rsp.(*pdpb.ReportBatchSplitResponse), err
@@ -1974,10 +1914,8 @@ func (s *GrpcServer) GetClusterConfig(ctx context.Context, request *pdpb.GetClus
 			}, nil
 		}
 	}
-	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
-		return pdpb.NewPDClient(client).GetClusterConfig(ctx, request)
-	}
-	if rsp, err := s.unaryMiddleware(ctx, request, fn); err != nil {
+
+	if rsp, err := s.unaryMiddleware(ctx, request, "GetClusterConfig"); err != nil {
 		return nil, err
 	} else if rsp != nil {
 		return rsp.(*pdpb.GetClusterConfigResponse), err
@@ -2006,10 +1944,8 @@ func (s *GrpcServer) PutClusterConfig(ctx context.Context, request *pdpb.PutClus
 			}, nil
 		}
 	}
-	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
-		return pdpb.NewPDClient(client).PutClusterConfig(ctx, request)
-	}
-	if rsp, err := s.unaryMiddleware(ctx, request, fn); err != nil {
+
+	if rsp, err := s.unaryMiddleware(ctx, request, "PutClusterConfig"); err != nil {
 		return nil, err
 	} else if rsp != nil {
 		return rsp.(*pdpb.PutClusterConfigResponse), err
@@ -2096,10 +2032,7 @@ func (s *GrpcServer) ScatterRegion(ctx context.Context, request *pdpb.ScatterReg
 		}
 	}
 
-	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
-		return pdpb.NewPDClient(client).ScatterRegion(ctx, request)
-	}
-	if rsp, err := s.unaryMiddleware(ctx, request, fn); err != nil {
+	if rsp, err := s.unaryMiddleware(ctx, request, "ScatterRegion"); err != nil {
 		return nil, err
 	} else if rsp != nil {
 		return rsp.(*pdpb.ScatterRegionResponse), err
@@ -2161,10 +2094,8 @@ func (s *GrpcServer) GetGCSafePoint(ctx context.Context, request *pdpb.GetGCSafe
 			}, nil
 		}
 	}
-	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
-		return pdpb.NewPDClient(client).GetGCSafePoint(ctx, request)
-	}
-	if rsp, err := s.unaryMiddleware(ctx, request, fn); err != nil {
+
+	if rsp, err := s.unaryMiddleware(ctx, request, "GetGCSafePoint"); err != nil {
 		return nil, err
 	} else if rsp != nil {
 		return rsp.(*pdpb.GetGCSafePointResponse), err
@@ -2220,10 +2151,8 @@ func (s *GrpcServer) UpdateGCSafePoint(ctx context.Context, request *pdpb.Update
 			}, nil
 		}
 	}
-	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
-		return pdpb.NewPDClient(client).UpdateGCSafePoint(ctx, request)
-	}
-	if rsp, err := s.unaryMiddleware(ctx, request, fn); err != nil {
+
+	if rsp, err := s.unaryMiddleware(ctx, request, "UpdateGCSafePoint"); err != nil {
 		return nil, err
 	} else if rsp != nil {
 		return rsp.(*pdpb.UpdateGCSafePointResponse), err
@@ -2269,10 +2198,8 @@ func (s *GrpcServer) UpdateServiceGCSafePoint(ctx context.Context, request *pdpb
 			}, nil
 		}
 	}
-	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
-		return pdpb.NewPDClient(client).UpdateServiceGCSafePoint(ctx, request)
-	}
-	if rsp, err := s.unaryMiddleware(ctx, request, fn); err != nil {
+
+	if rsp, err := s.unaryMiddleware(ctx, request, "UpdateServiceGCSafePoint"); err != nil {
 		return nil, err
 	} else if rsp != nil {
 		return rsp.(*pdpb.UpdateServiceGCSafePointResponse), err
@@ -2357,10 +2284,8 @@ func (s *GrpcServer) GetOperator(ctx context.Context, request *pdpb.GetOperatorR
 			return convertOperatorResponse(resp), nil
 		}
 	}
-	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
-		return pdpb.NewPDClient(client).GetOperator(ctx, request)
-	}
-	if rsp, err := s.unaryMiddleware(ctx, request, fn); err != nil {
+
+	if rsp, err := s.unaryMiddleware(ctx, request, "GetOperator"); err != nil {
 		return nil, err
 	} else if rsp != nil {
 		return rsp.(*pdpb.GetOperatorResponse), err
@@ -2679,10 +2604,7 @@ func (s *GrpcServer) SplitRegions(ctx context.Context, request *pdpb.SplitRegion
 		}
 	}
 
-	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
-		return pdpb.NewPDClient(client).SplitRegions(ctx, request)
-	}
-	if rsp, err := s.unaryMiddleware(ctx, request, fn); err != nil {
+	if rsp, err := s.unaryMiddleware(ctx, request, "SplitRegions"); err != nil {
 		return nil, err
 	} else if rsp != nil {
 		return rsp.(*pdpb.SplitRegionsResponse), err
@@ -2711,10 +2633,8 @@ func (s *GrpcServer) SplitAndScatterRegions(ctx context.Context, request *pdpb.S
 			}, nil
 		}
 	}
-	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
-		return pdpb.NewPDClient(client).SplitAndScatterRegions(ctx, request)
-	}
-	if rsp, err := s.unaryMiddleware(ctx, request, fn); err != nil {
+
+	if rsp, err := s.unaryMiddleware(ctx, request, "SplitAndScatterRegions"); err != nil {
 		return nil, err
 	} else if rsp != nil {
 		return rsp.(*pdpb.SplitAndScatterRegionsResponse), err
@@ -3039,10 +2959,8 @@ func (s *GrpcServer) ReportMinResolvedTS(ctx context.Context, request *pdpb.Repo
 			}, nil
 		}
 	}
-	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
-		return pdpb.NewPDClient(client).ReportMinResolvedTS(ctx, request)
-	}
-	if rsp, err := s.unaryMiddleware(ctx, request, fn); err != nil {
+
+	if rsp, err := s.unaryMiddleware(ctx, request, "ReportMinResolvedTS"); err != nil {
 		return nil, err
 	} else if rsp != nil {
 		return rsp.(*pdpb.ReportMinResolvedTsResponse), nil
@@ -3079,10 +2997,8 @@ func (s *GrpcServer) SetExternalTimestamp(ctx context.Context, request *pdpb.Set
 			}, nil
 		}
 	}
-	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
-		return pdpb.NewPDClient(client).SetExternalTimestamp(ctx, request)
-	}
-	if rsp, err := s.unaryMiddleware(ctx, request, fn); err != nil {
+
+	if rsp, err := s.unaryMiddleware(ctx, request, "SetExternalTimestamp"); err != nil {
 		return nil, err
 	} else if rsp != nil {
 		return rsp.(*pdpb.SetExternalTimestampResponse), nil
@@ -3117,10 +3033,8 @@ func (s *GrpcServer) GetExternalTimestamp(ctx context.Context, request *pdpb.Get
 			}, nil
 		}
 	}
-	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
-		return pdpb.NewPDClient(client).GetExternalTimestamp(ctx, request)
-	}
-	if rsp, err := s.unaryMiddleware(ctx, request, fn); err != nil {
+
+	if rsp, err := s.unaryMiddleware(ctx, request, "GetExternalTimestamp"); err != nil {
 		return nil, err
 	} else if rsp != nil {
 		return rsp.(*pdpb.GetExternalTimestampResponse), nil
@@ -3131,10 +3045,4 @@ func (s *GrpcServer) GetExternalTimestamp(ctx context.Context, request *pdpb.Get
 		Header:    wrapHeader(),
 		Timestamp: timestamp,
 	}, nil
-}
-
-func currentFunction() string {
-	counter, _, _, _ := runtime.Caller(1)
-	s := strings.Split(runtime.FuncForPC(counter).Name(), ".")
-	return s[len(s)-1]
 }
