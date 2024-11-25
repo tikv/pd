@@ -144,15 +144,40 @@ var allowFollowerMethods = map[string]struct{}{
 	"BatchScanRegions": {},
 }
 
-func (s *GrpcServer) unaryMiddleware(ctx context.Context, req request, methodName string) (rsp any, err error) {
+var notRateLimitMethods = map[string]struct{}{
+	"GetGCSafePointV2":         {},
+	"UpdateGCSafePointV2":      {},
+	"UpdateServiceSafePointV2": {},
+	"GetAllGCSafePointV2":      {},
+}
+
+type middlewareResponse struct {
+	resp      any
+	header    *pdpb.ResponseHeader
+	deferFunc func()
+}
+
+func (s *GrpcServer) unaryMiddleware(ctx context.Context, req request, methodName string) (rsp *middlewareResponse, err error) {
+	midResp := &middlewareResponse{}
+	_, ok := notRateLimitMethods[methodName]
+	if !ok && s.GetServiceMiddlewarePersistOptions().IsGRPCRateLimitEnabled() {
+		limiter := s.GetGRPCRateLimiter()
+		if done, err := limiter.Allow(methodName); err != nil {
+			midResp.header = wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error())
+			return midResp, nil
+		} else {
+			midResp.deferFunc = done
+		}
+	}
 	resp, err := s.unaryFollowerMiddleware(ctx, req, forwardFns[methodName])
 	if resp != nil || err != nil {
-		return resp, err
+		midResp.resp = resp
+		return midResp, err
 	}
 	if err := s.validateRoleInRequest(ctx, req.GetHeader(), methodName); err != nil {
 		return nil, err
 	}
-	return nil, nil
+	return midResp, nil
 }
 
 // unaryFollowerMiddleware forward the request to the leader if the request is

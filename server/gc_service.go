@@ -35,10 +35,20 @@ import (
 
 // GetGCSafePointV2 return gc safe point for the given keyspace.
 func (s *GrpcServer) GetGCSafePointV2(ctx context.Context, request *pdpb.GetGCSafePointV2Request) (*pdpb.GetGCSafePointV2Response, error) {
-	if rsp, err := s.unaryMiddleware(ctx, request, "GetGCSafePointV2"); err != nil {
+	if midResp, err := s.unaryMiddleware(ctx, request, "GetGCSafePointV2"); err != nil {
 		return nil, err
-	} else if rsp != nil {
-		return rsp.(*pdpb.GetGCSafePointV2Response), err
+	} else if midResp != nil {
+		if midResp.header != nil {
+			return &pdpb.GetGCSafePointV2Response{
+				Header: midResp.header,
+			}, nil
+		}
+		if midResp.deferFunc != nil {
+			defer midResp.deferFunc()
+		}
+		if midResp.resp != nil {
+			return midResp.resp.(*pdpb.GetGCSafePointV2Response), nil
+		}
 	}
 
 	safePoint, err := s.safePointV2Manager.LoadGCSafePoint(request.GetKeyspaceId())
@@ -57,10 +67,20 @@ func (s *GrpcServer) GetGCSafePointV2(ctx context.Context, request *pdpb.GetGCSa
 
 // UpdateGCSafePointV2 update gc safe point for the given keyspace.
 func (s *GrpcServer) UpdateGCSafePointV2(ctx context.Context, request *pdpb.UpdateGCSafePointV2Request) (*pdpb.UpdateGCSafePointV2Response, error) {
-	if rsp, err := s.unaryMiddleware(ctx, request, "UpdateGCSafePointV2"); err != nil {
+	if midResp, err := s.unaryMiddleware(ctx, request, "UpdateGCSafePointV2"); err != nil {
 		return nil, err
-	} else if rsp != nil {
-		return rsp.(*pdpb.UpdateGCSafePointV2Response), err
+	} else if midResp != nil {
+		if midResp.header != nil {
+			return &pdpb.UpdateGCSafePointV2Response{
+				Header: midResp.header,
+			}, nil
+		}
+		if midResp.deferFunc != nil {
+			defer midResp.deferFunc()
+		}
+		if midResp.resp != nil {
+			return midResp.resp.(*pdpb.UpdateGCSafePointV2Response), nil
+		}
 	}
 
 	newSafePoint := request.GetSafePoint()
@@ -91,10 +111,20 @@ func (s *GrpcServer) UpdateGCSafePointV2(ctx context.Context, request *pdpb.Upda
 
 // UpdateServiceSafePointV2 update service safe point for the given keyspace.
 func (s *GrpcServer) UpdateServiceSafePointV2(ctx context.Context, request *pdpb.UpdateServiceSafePointV2Request) (*pdpb.UpdateServiceSafePointV2Response, error) {
-	if rsp, err := s.unaryMiddleware(ctx, request, "UpdateServiceSafePointV2"); err != nil {
+	if midResp, err := s.unaryMiddleware(ctx, request, "UpdateServiceSafePointV2"); err != nil {
 		return nil, err
-	} else if rsp != nil {
-		return rsp.(*pdpb.UpdateServiceSafePointV2Response), err
+	} else if midResp != nil {
+		if midResp.header != nil {
+			return &pdpb.UpdateServiceSafePointV2Response{
+				Header: midResp.header,
+			}, nil
+		}
+		if midResp.deferFunc != nil {
+			defer midResp.deferFunc()
+		}
+		if midResp.resp != nil {
+			return midResp.resp.(*pdpb.UpdateServiceSafePointV2Response), nil
+		}
 	}
 
 	nowTSO, err := s.getGlobalTSO(ctx)
@@ -185,10 +215,20 @@ func (s *GrpcServer) WatchGCSafePointV2(request *pdpb.WatchGCSafePointV2Request,
 
 // GetAllGCSafePointV2 return all gc safe point v2.
 func (s *GrpcServer) GetAllGCSafePointV2(ctx context.Context, request *pdpb.GetAllGCSafePointV2Request) (*pdpb.GetAllGCSafePointV2Response, error) {
-	if rsp, err := s.unaryMiddleware(ctx, request, "GetAllGCSafePointV2"); err != nil {
+	if midResp, err := s.unaryMiddleware(ctx, request, "GetAllGCSafePointV2"); err != nil {
 		return nil, err
-	} else if rsp != nil {
-		return rsp.(*pdpb.GetAllGCSafePointV2Response), err
+	} else if midResp != nil {
+		if midResp.header != nil {
+			return &pdpb.GetAllGCSafePointV2Response{
+				Header: midResp.header,
+			}, nil
+		}
+		if midResp.deferFunc != nil {
+			defer midResp.deferFunc()
+		}
+		if midResp.resp != nil {
+			return midResp.resp.(*pdpb.GetAllGCSafePointV2Response), nil
+		}
 	}
 
 	startkey := keypath.GCSafePointV2Prefix()
