@@ -93,9 +93,6 @@ const (
 	// pdRootPath for all pd servers.
 	pdRootPath  = "/pd"
 	pdAPIPrefix = "/pd/"
-	// idAllocPath for idAllocator to save persistent window's end.
-	idAllocPath  = "alloc_id"
-	idAllocLabel = "idalloc"
 
 	recoveringMarkPath = "cluster/markers/snapshot-recovering"
 
@@ -446,11 +443,9 @@ func (s *Server) startServer(ctx context.Context) error {
 		return err
 	}
 	s.idAllocator = id.NewAllocator(&id.AllocatorParams{
-		Client:    s.client,
-		RootPath:  s.rootPath,
-		AllocPath: idAllocPath,
-		Label:     idAllocLabel,
-		Member:    s.member.MemberValue(),
+		Client: s.client,
+		Label:  id.DefaultLabel,
+		Member: s.member.MemberValue(),
 	})
 	s.encryptionKeyManager, err = encryption.NewManager(s.client, &s.cfg.Security.Encryption)
 	if err != nil {
@@ -487,12 +482,10 @@ func (s *Server) startServer(ctx context.Context) error {
 	s.basicCluster = core.NewBasicCluster()
 	s.cluster = cluster.NewRaftCluster(ctx, s.GetMember(), s.GetBasicCluster(), s.GetStorage(), syncer.NewRegionSyncer(s), s.client, s.httpClient, s.tsoAllocatorManager)
 	keyspaceIDAllocator := id.NewAllocator(&id.AllocatorParams{
-		Client:    s.client,
-		RootPath:  s.rootPath,
-		AllocPath: keypath.KeyspaceIDAlloc(),
-		Label:     keyspace.AllocLabel,
-		Member:    s.member.MemberValue(),
-		Step:      keyspace.AllocStep,
+		Client: s.client,
+		Label:  id.KeyspaceLabel,
+		Member: s.member.MemberValue(),
+		Step:   keyspace.AllocStep,
 	})
 	if s.IsAPIServiceMode() {
 		s.keyspaceGroupManager = keyspace.NewKeyspaceGroupManager(s.ctx, s.storage, s.client)

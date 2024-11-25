@@ -42,8 +42,6 @@ const (
 	// AllocStep set idAllocator's step when write persistent window boundary.
 	// Use a lower value for denser idAllocation in the event of frequent pd leader change.
 	AllocStep = uint64(100)
-	// AllocLabel is used to label keyspace idAllocator's metrics.
-	AllocLabel = "keyspace-idAlloc"
 	// regionLabelIDPrefix is used to prefix the keyspace region label.
 	regionLabelIDPrefix = "keyspaces/"
 	// regionLabelKey is the key for keyspace id in keyspace region label.

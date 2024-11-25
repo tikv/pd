@@ -16,7 +16,6 @@ package realcluster
 
 import (
 	"context"
-	"os/exec"
 	"strings"
 	"testing"
 
@@ -57,10 +56,8 @@ func (s *clusterIDSuite) TestClientClusterID() {
 }
 
 func getPDEndpoints(t *testing.T) []string {
-	cmd := exec.Command("sh", "-c", "ps -ef | grep tikv-server | awk -F '--pd-endpoints=' '{print $2}' | awk '{print $1}'")
-	bytes, err := cmd.Output()
+	pdAddrsForEachTikv, err := runCommandWithOutput("ps -ef | grep tikv-server | awk -F '--pd-endpoints=' '{print $2}' | awk '{print $1}'")
 	require.NoError(t, err)
-	pdAddrsForEachTikv := strings.Split(string(bytes), "\n")
 	var pdAddrs []string
 	for _, addr := range pdAddrsForEachTikv {
 		// length of addr is less than 5 means it must not be a valid address
