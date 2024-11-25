@@ -58,11 +58,6 @@ func (lta *LocalTSOAllocator) GetTimestampPath() string {
 	return lta.timestampOracle.GetTimestampPath()
 }
 
-// GetDCLocation returns the local allocator's dc-location.
-func (lta *LocalTSOAllocator) GetDCLocation() string {
-	return lta.timestampOracle.dcLocation
-}
-
 // Initialize will initialize the created local TSO allocator.
 func (lta *LocalTSOAllocator) Initialize(suffix int) error {
 	lta.tsoAllocatorRoleGauge.Set(1)

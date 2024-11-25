@@ -21,19 +21,15 @@ import (
 
 const (
 	leaderPathFormat              = "/pd/%d/leader"                   // "/pd/{cluster_id}/leader"
-	dcLocationPathFormat          = "/pd/%d/dc-location/%d"           // "/pd/{cluster_id}/dc-location/{member_id}"
 	memberBinaryDeployPathFormat  = "/pd/%d/member/%d/deploy_path"    // "/pd/{cluster_id}/member/{member_id}/deploy_path"
 	memberGitHashPath             = "/pd/%d/member/%d/git_hash"       // "/pd/{cluster_id}/member/{member_id}/git_hash"
 	memberBinaryVersionPathFormat = "/pd/%d/member/%d/binary_version" // "/pd/{cluster_id}/member/{member_id}/binary_version"
 	allocIDPathFormat             = "/pd/%d/alloc_id"                 // "/pd/{cluster_id}/alloc_id"
 	keyspaceAllocIDPathFormat     = "/pd/%d/keyspaces/alloc_id"       // "/pd/{cluster_id}/keyspaces/alloc_id"
 
-	msLeaderPathFormat           = "/ms/%d/%s/primary"                                       // "/ms/{cluster_id}/{service_name}/primary"
-	msTsoDefaultLeaderPathFormat = "/ms/%d/tso/00000/primary"                                // "/ms/{cluster_id}/tso/00000/primary"
-	msTsoKespaceLeaderPathFormat = "/ms/%d/tso/keyspace_groups/election/%05d/primary"        // "/ms/{cluster_id}/tso/keyspace_groups/election/{group_id}/primary"
-	msDCLocationPathFormat       = "/ms/%d/%s/dc-location/%d"                                // "/ms/{cluster_id}/{service_name}/dc-location/{member_id}"
-	msTsoDefaultDCLocationPath   = "/ms/%d/tso/00000/dc-location/%d"                         // "/ms/{cluster_id}/tso/00000/dc-location/{member_id}"
-	msTsoKespaceDCLocationPath   = "/ms/%d/tso/keyspace_groups/election/%05d/dc-location/%d" // "/ms/{cluster_id}/tso/keyspace_groups/election/{group_id}/dc-location/{member_id}"
+	msLeaderPathFormat           = "/ms/%d/%s/primary"                                // "/ms/{cluster_id}/{service_name}/primary"
+	msTsoDefaultLeaderPathFormat = "/ms/%d/tso/00000/primary"                         // "/ms/{cluster_id}/tso/00000/primary"
+	msTsoKespaceLeaderPathFormat = "/ms/%d/tso/keyspace_groups/election/%05d/primary" // "/ms/{cluster_id}/tso/keyspace_groups/election/{group_id}/primary"
 )
 
 // MsParam is the parameter of micro service.
@@ -59,20 +55,6 @@ func LeaderPath(p *MsParam) string {
 		return fmt.Sprintf(msTsoKespaceLeaderPathFormat, ClusterID(), p.GroupID)
 	}
 	return fmt.Sprintf(msLeaderPathFormat, ClusterID(), p.ServiceName)
-}
-
-// DCLocationPath returns the dc-location path.
-func DCLocationPath(p *MsParam, memberID uint64) string {
-	if p == nil || p.ServiceName == "" {
-		return fmt.Sprintf(dcLocationPathFormat, ClusterID(), memberID)
-	}
-	if p.ServiceName == "tso" {
-		if p.GroupID == 0 {
-			return fmt.Sprintf(msTsoDefaultDCLocationPath, ClusterID(), memberID)
-		}
-		return fmt.Sprintf(msTsoKespaceDCLocationPath, ClusterID(), p.GroupID, memberID)
-	}
-	return fmt.Sprintf(msDCLocationPathFormat, ClusterID(), p.ServiceName, memberID)
 }
 
 // MemberBinaryDeployPath returns the member binary deploy path.

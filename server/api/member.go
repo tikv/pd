@@ -25,7 +25,6 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
@@ -71,13 +70,7 @@ func getMembers(svr *server.Server) (*pdpb.GetMembersResponse, error) {
 	if members.GetHeader().GetError() != nil {
 		return nil, errors.WithStack(errors.New(members.GetHeader().GetError().String()))
 	}
-	dclocationDistribution := make(map[string][]uint64)
-	if !svr.IsAPIServiceMode() {
-		dclocationDistribution, err = svr.GetTSOAllocatorManager().GetClusterDCLocationsFromEtcd()
-		if err != nil {
-			return nil, errors.WithStack(err)
-		}
-	}
+
 	for _, m := range members.GetMembers() {
 		var e error
 		m.BinaryVersion, e = svr.GetMember().GetMemberBinaryVersion(m.GetMemberId())
@@ -102,13 +95,6 @@ func getMembers(svr *server.Server) (*pdpb.GetMembersResponse, error) {
 		if e != nil {
 			log.Error("failed to load git hash", zap.Uint64("member", m.GetMemberId()), errs.ZapError(e))
 			continue
-		}
-		for dcLocation, serverIDs := range dclocationDistribution {
-			found := slice.Contains(serverIDs, m.MemberId)
-			if found {
-				m.DcLocation = dcLocation
-				break
-			}
 		}
 	}
 	return members, nil
@@ -152,13 +138,6 @@ func (h *memberHandler) DeleteMemberByName(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	// Delete dc-location info.
-	err = h.svr.GetMember().DeleteMemberDCLocationInfo(id)
-	if err != nil {
-		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-
 	// Remove member by id
 	_, err = etcdutil.RemoveEtcdMember(client, id)
 	if err != nil {
@@ -186,13 +165,6 @@ func (h *memberHandler) DeleteMemberByID(w http.ResponseWriter, r *http.Request)
 
 	// Delete config.
 	err = h.svr.GetMember().DeleteMemberLeaderPriority(id)
-	if err != nil {
-		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-
-	// Delete dc-location info.
-	err = h.svr.GetMember().DeleteMemberDCLocationInfo(id)
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return

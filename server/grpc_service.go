@@ -486,17 +486,6 @@ func (s *GrpcServer) GetMembers(context.Context, *pdpb.GetMembersRequest) (*pdpb
 		}
 	}
 
-	tsoAllocatorLeaders := make(map[string]*pdpb.Member)
-	if !s.IsServiceIndependent(constant.TSOServiceName) {
-		tsoAllocatorManager := s.GetTSOAllocatorManager()
-		tsoAllocatorLeaders, err = tsoAllocatorManager.GetLocalAllocatorLeaders()
-	}
-	if err != nil {
-		return &pdpb.GetMembersResponse{
-			Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
-		}, nil
-	}
-
 	leader := s.member.GetLeader()
 	for _, m := range members {
 		if m.MemberId == leader.GetMemberId() {
@@ -506,11 +495,10 @@ func (s *GrpcServer) GetMembers(context.Context, *pdpb.GetMembersRequest) (*pdpb
 	}
 
 	return &pdpb.GetMembersResponse{
-		Header:              wrapHeader(),
-		Members:             members,
-		Leader:              pdLeader,
-		EtcdLeader:          etcdLeader,
-		TsoAllocatorLeaders: tsoAllocatorLeaders,
+		Header:     wrapHeader(),
+		Members:    members,
+		Leader:     pdLeader,
+		EtcdLeader: etcdLeader,
 	}, nil
 }
 
@@ -2522,113 +2510,10 @@ func convertAskSplitResponse(resp *schedulingpb.AskBatchSplitResponse) *pdpb.Ask
 // Only used for the TestLocalAllocatorLeaderChange.
 var mockLocalAllocatorLeaderChangeFlag = false
 
-// SyncMaxTS will check whether MaxTS is the biggest one among all Local TSOs this PD is holding when skipCheck is set,
-// and write it into all Local TSO Allocators then if it's indeed the biggest one.
+// Deprecated.
 func (s *GrpcServer) SyncMaxTS(_ context.Context, request *pdpb.SyncMaxTSRequest) (*pdpb.SyncMaxTSResponse, error) {
-	// TODO: support local tso forward in api service mode in the future.
-	if err := s.validateInternalRequest(request.GetHeader(), true); err != nil {
-		return nil, err
-	}
-	if s.GetServiceMiddlewarePersistOptions().IsGRPCRateLimitEnabled() {
-		fName := currentFunction()
-		limiter := s.GetGRPCRateLimiter()
-		if done, err := limiter.Allow(fName); err == nil {
-			defer done()
-		} else {
-			return &pdpb.SyncMaxTSResponse{
-				Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
-			}, nil
-		}
-	}
-	tsoAllocatorManager := s.GetTSOAllocatorManager()
-	// There is no dc-location found in this server, return err.
-	if tsoAllocatorManager.GetClusterDCLocationsNumber() == 0 {
-		return &pdpb.SyncMaxTSResponse{
-			Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN,
-				"empty cluster dc-location found, checker may not work properly"),
-		}, nil
-	}
-	// Get all Local TSO Allocator leaders
-	allocatorLeaders, err := tsoAllocatorManager.GetHoldingLocalAllocatorLeaders()
-	if err != nil {
-		return &pdpb.SyncMaxTSResponse{
-			Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
-		}, nil
-	}
-	if !request.GetSkipCheck() {
-		var maxLocalTS *pdpb.Timestamp
-		syncedDCs := make([]string, 0, len(allocatorLeaders))
-		for _, allocator := range allocatorLeaders {
-			// No longer leader, just skip here because
-			// the global allocator will check if all DCs are handled.
-			if !allocator.IsAllocatorLeader() {
-				continue
-			}
-			currentLocalTSO, err := allocator.GetCurrentTSO()
-			if err != nil {
-				return &pdpb.SyncMaxTSResponse{
-					Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
-				}, nil
-			}
-			if tsoutil.CompareTimestamp(currentLocalTSO, maxLocalTS) > 0 {
-				maxLocalTS = currentLocalTSO
-			}
-			syncedDCs = append(syncedDCs, allocator.GetDCLocation())
-		}
-
-		failpoint.Inject("mockLocalAllocatorLeaderChange", func() {
-			if !mockLocalAllocatorLeaderChangeFlag {
-				maxLocalTS = nil
-				request.MaxTs = nil
-				mockLocalAllocatorLeaderChangeFlag = true
-			}
-		})
-
-		if maxLocalTS == nil {
-			return &pdpb.SyncMaxTSResponse{
-				Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN,
-					"local tso allocator leaders have changed during the sync, should retry"),
-			}, nil
-		}
-		if request.GetMaxTs() == nil {
-			return &pdpb.SyncMaxTSResponse{
-				Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN,
-					"empty maxTS in the request, should retry"),
-			}, nil
-		}
-		// Found a bigger or equal maxLocalTS, return it directly.
-		cmpResult := tsoutil.CompareTimestamp(maxLocalTS, request.GetMaxTs())
-		if cmpResult >= 0 {
-			// Found an equal maxLocalTS, plus 1 to logical part before returning it.
-			// For example, we have a Global TSO t1 and a Local TSO t2, they have the
-			// same physical and logical parts. After being differentiating with suffix,
-			// there will be (t1.logical << suffixNum + 0) < (t2.logical << suffixNum + N),
-			// where N is bigger than 0, which will cause a Global TSO fallback than the previous Local TSO.
-			if cmpResult == 0 {
-				maxLocalTS.Logical += 1
-			}
-			return &pdpb.SyncMaxTSResponse{
-				Header:     wrapHeader(),
-				MaxLocalTs: maxLocalTS,
-				SyncedDcs:  syncedDCs,
-			}, nil
-		}
-	}
-	syncedDCs := make([]string, 0, len(allocatorLeaders))
-	for _, allocator := range allocatorLeaders {
-		if !allocator.IsAllocatorLeader() {
-			continue
-		}
-		if err := allocator.WriteTSO(request.GetMaxTs()); err != nil {
-			return &pdpb.SyncMaxTSResponse{
-				Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
-			}, nil
-		}
-		syncedDCs = append(syncedDCs, allocator.GetDCLocation())
-	}
 	return &pdpb.SyncMaxTSResponse{
-		Header:    wrapHeader(),
-		SyncedDcs: syncedDCs,
+		Header: wrapHeader(),
 	}, nil
 }
 

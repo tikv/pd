@@ -276,16 +276,6 @@ func (m *Participant) IsSameLeader(leader participant) bool {
 	return leader.GetId() == m.ID()
 }
 
-// GetDCLocationPathPrefix returns the dc-location path prefix of the cluster.
-func (m *Participant) GetDCLocationPathPrefix() string {
-	return keypath.Prefix(keypath.DCLocationPath(&m.MsParam, 0))
-}
-
-// GetDCLocationPath returns the dc-location path of a member with the given member ID.
-func (m *Participant) GetDCLocationPath(id uint64) string {
-	return keypath.DCLocationPath(&m.MsParam, id)
-}
-
 func (m *Participant) campaignCheck() bool {
 	checker := m.campaignChecker.Load()
 	if checker == nil {
