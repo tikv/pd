@@ -17,6 +17,7 @@ package realcluster
 import (
 	"os"
 	"os/exec"
+	"strings"
 	"time"
 )
 
@@ -38,6 +39,16 @@ func runCommand(name string, args ...string) error {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
+}
+
+func runCommandWithOutput(cmdStr string) ([]string, error) {
+	cmd := exec.Command("sh", "-c", cmdStr)
+	bytes, err := cmd.Output()
+	if err != nil {
+		return nil, err
+	}
+	output := strings.Split(string(bytes), "\n")
+	return output, nil
 }
 
 func fileExists(path string) bool {

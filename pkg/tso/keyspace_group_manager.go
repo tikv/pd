@@ -751,13 +751,16 @@ func (kgm *KeyspaceGroupManager) updateKeyspaceGroup(group *endpoint.KeyspaceGro
 		zap.String("participant-name", uniqueName),
 		zap.Uint64("participant-id", uniqueID))
 	// Initialize the participant info to join the primary election.
-	participant := member.NewParticipant(kgm.etcdClient, constant.TSOServiceName)
+	participant := member.NewParticipant(kgm.etcdClient, keypath.MsParam{
+		ServiceName: constant.TSOServiceName,
+		GroupID:     group.ID,
+	})
 	p := &tsopb.Participant{
 		Name:       uniqueName,
 		Id:         uniqueID, // id is unique among all participants
 		ListenUrls: []string{kgm.cfg.GetAdvertiseListenAddr()},
 	}
-	participant.InitInfo(p, keypath.KeyspaceGroupsElectionPath(kgm.tsoSvcRootPath, group.ID), constant.PrimaryKey, "keyspace group primary election")
+	participant.InitInfo(p, keypath.KeyspaceGroupsElectionPath(kgm.tsoSvcRootPath, group.ID), "keyspace group primary election")
 	// If the keyspace group is in split, we should ensure that the primary elected by the new keyspace group
 	// is always on the same TSO Server node as the primary of the old keyspace group, and this constraint cannot
 	// be broken until the entire split process is completed.
