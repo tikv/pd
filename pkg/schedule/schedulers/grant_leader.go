@@ -45,7 +45,7 @@ type grantLeaderSchedulerConfig struct {
 }
 
 func (conf *grantLeaderSchedulerConfig) buildWithArgs(args []string) error {
-	if len(args) != 1 {
+	if len(args) < 1 {
 		return errs.ErrSchedulerConfig.FastGenByArgs("id")
 	}
 
@@ -271,6 +271,7 @@ func (handler *grantLeaderHandler) updateConfig(w http.ResponseWriter, r *http.R
 
 	err := handler.config.buildWithArgs(args)
 	if err != nil {
+		log.Error("fail to build config", errs.ZapError(err))
 		handler.config.Lock()
 		handler.config.cluster.ResumeLeaderTransfer(id, constant.Out)
 		handler.config.Unlock()
@@ -279,6 +280,7 @@ func (handler *grantLeaderHandler) updateConfig(w http.ResponseWriter, r *http.R
 	}
 	err = handler.config.persist()
 	if err != nil {
+		log.Error("fail to persist config", errs.ZapError(err))
 		_, _ = handler.config.removeStore(id)
 		handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return

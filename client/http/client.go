@@ -26,9 +26,9 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
 	"github.com/prometheus/client_golang/prometheus"
-	pd "github.com/tikv/pd/client"
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/retry"
+	sd "github.com/tikv/pd/client/servicediscovery"
 	"go.uber.org/zap"
 )
 
@@ -56,7 +56,7 @@ type clientInner struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	sd pd.ServiceDiscovery
+	sd sd.ServiceDiscovery
 
 	// source is used to mark the source of the client creation,
 	// it will also be used in the caller ID of the inner client.
@@ -74,7 +74,7 @@ func newClientInner(ctx context.Context, cancel context.CancelFunc, source strin
 	return &clientInner{ctx: ctx, cancel: cancel, source: source}
 }
 
-func (ci *clientInner) init(sd pd.ServiceDiscovery) {
+func (ci *clientInner) init(sd sd.ServiceDiscovery) {
 	// Init the HTTP client if it's not configured.
 	if ci.cli == nil {
 		ci.cli = &http.Client{Timeout: defaultTimeout}
@@ -305,7 +305,7 @@ func WithMetrics(
 // NewClientWithServiceDiscovery creates a PD HTTP client with the given PD service discovery.
 func NewClientWithServiceDiscovery(
 	source string,
-	sd pd.ServiceDiscovery,
+	sd sd.ServiceDiscovery,
 	opts ...ClientOption,
 ) Client {
 	ctx, cancel := context.WithCancel(context.Background())
@@ -330,7 +330,7 @@ func NewClient(
 	for _, opt := range opts {
 		opt(c)
 	}
-	sd := pd.NewDefaultPDServiceDiscovery(ctx, cancel, pdAddrs, c.inner.tlsConf)
+	sd := sd.NewDefaultPDServiceDiscovery(ctx, cancel, pdAddrs, c.inner.tlsConf)
 	if err := sd.Init(); err != nil {
 		log.Error("[pd] init service discovery failed",
 			zap.String("source", source), zap.Strings("pd-addrs", pdAddrs), zap.Error(err))
@@ -430,7 +430,7 @@ func newClientWithMockServiceDiscovery(
 	for _, opt := range opts {
 		opt(c)
 	}
-	sd := pd.NewMockPDServiceDiscovery(pdAddrs, c.inner.tlsConf)
+	sd := sd.NewMockPDServiceDiscovery(pdAddrs, c.inner.tlsConf)
 	if err := sd.Init(); err != nil {
 		log.Error("[pd] init mock service discovery failed",
 			zap.String("source", source), zap.Strings("pd-addrs", pdAddrs), zap.Error(err))
