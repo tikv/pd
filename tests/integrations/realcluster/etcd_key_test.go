@@ -64,7 +64,7 @@ var (
 		"/pd//raft/status/raft_bootstrap_time",
 		"/pd//region_label/keyspaces/",
 		"/pd//rule_group/tiflash",
-		"/pd//rules/-c",
+		"/pd//rules/-c", // Why -c? See https://github.com/tikv/pd/pull/8789#discussion_r1853341293
 		"/pd//scheduler_config/balance-hot-region-scheduler",
 		"/pd//scheduler_config/balance-leader-scheduler",
 		"/pd//scheduler_config/balance-region-scheduler",
