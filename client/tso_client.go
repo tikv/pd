@@ -28,6 +28,13 @@ import (
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/grpcutil"
 	"github.com/tikv/pd/client/metrics"
+<<<<<<< HEAD
+=======
+	"github.com/tikv/pd/client/opt"
+	sd "github.com/tikv/pd/client/servicediscovery"
+	"github.com/tikv/pd/client/utils/grpcutil"
+	"github.com/tikv/pd/client/utils/tlsutil"
+>>>>>>> ec77762762 (*: independent the service discovery package (#8825))
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -65,7 +72,7 @@ type tsoClient struct {
 	wg     sync.WaitGroup
 	option *option
 
-	svcDiscovery ServiceDiscovery
+	svcDiscovery sd.ServiceDiscovery
 	tsoStreamBuilderFactory
 	// tsoAllocators defines the mapping {dc-location -> TSO allocator leader URL}
 	tsoAllocators sync.Map // Store as map[string]string
@@ -84,8 +91,13 @@ type tsoClient struct {
 
 // newTSOClient returns a new TSO client.
 func newTSOClient(
+<<<<<<< HEAD
 	ctx context.Context, option *option,
 	svcDiscovery ServiceDiscovery, factory tsoStreamBuilderFactory,
+=======
+	ctx context.Context, option *opt.Option,
+	svcDiscovery sd.ServiceDiscovery, factory tsoStreamBuilderFactory,
+>>>>>>> ec77762762 (*: independent the service discovery package (#8825))
 ) *tsoClient {
 	ctx, cancel := context.WithCancel(ctx)
 	c := &tsoClient{
@@ -106,17 +118,23 @@ func newTSOClient(
 		checkTSODispatcherCh: make(chan struct{}, 1),
 	}
 
+<<<<<<< HEAD
 	eventSrc := svcDiscovery.(tsoAllocatorEventSource)
 	eventSrc.SetTSOLocalServURLsUpdatedCallback(c.updateTSOLocalServURLs)
 	eventSrc.SetTSOGlobalServURLUpdatedCallback(c.updateTSOGlobalServURL)
 	c.svcDiscovery.AddServiceURLsSwitchedCallback(c.scheduleUpdateAllTSOConnectionCtxs)
+=======
+	eventSrc := svcDiscovery.(sd.TSOEventSource)
+	eventSrc.SetTSOLeaderURLUpdatedCallback(c.updateTSOLeaderURL)
+	c.svcDiscovery.AddServiceURLsSwitchedCallback(c.scheduleUpdateTSOConnectionCtxs)
+>>>>>>> ec77762762 (*: independent the service discovery package (#8825))
 
 	return c
 }
 
 func (c *tsoClient) getOption() *option { return c.option }
 
-func (c *tsoClient) getServiceDiscovery() ServiceDiscovery { return c.svcDiscovery }
+func (c *tsoClient) getServiceDiscovery() sd.ServiceDiscovery { return c.svcDiscovery }
 
 func (c *tsoClient) setup() {
 	if err := c.svcDiscovery.CheckMemberChanged(); err != nil {
@@ -430,7 +448,7 @@ func (c *tsoClient) tryConnectToTSO(
 				// There is no need to wait for the transport layer timeout which can reduce the time of unavailability.
 				// But it conflicts with the retry mechanism since we use the error code to decide if it is caused by network error.
 				// And actually the `Canceled` error can be regarded as a kind of network error in some way.
-				if rpcErr, ok := status.FromError(err); ok && (isNetworkError(rpcErr.Code()) || rpcErr.Code() == codes.Canceled) {
+				if rpcErr, ok := status.FromError(err); ok && (errs.IsNetworkError(rpcErr.Code()) || rpcErr.Code() == codes.Canceled) {
 					networkErrNum++
 				}
 			}
@@ -460,8 +478,8 @@ func (c *tsoClient) tryConnectToTSO(
 			cctx = grpcutil.BuildForwardContext(cctx, forwardedHost)
 			stream, err = c.tsoStreamBuilderFactory.makeBuilder(backupClientConn).build(cctx, cancel, c.option.timeout)
 			if err == nil {
-				forwardedHostTrim := trimHTTPPrefix(forwardedHost)
-				addr := trimHTTPPrefix(backupURL)
+				forwardedHostTrim := tlsutil.TrimHTTPPrefix(forwardedHost)
+				addr := tlsutil.TrimHTTPPrefix(backupURL)
 				// the goroutine is used to check the network and change back to the original stream
 				go c.checkAllocator(ctx, cancel, dc, forwardedHostTrim, addr, url, updateAndClear)
 				metrics.RequestForwarded.WithLabelValues(forwardedHostTrim, addr).Set(1)
@@ -570,8 +588,8 @@ func (c *tsoClient) tryConnectToTSOWithProxy(
 		stream, err := tsoStreamBuilder.build(cctx, cancel, c.option.timeout)
 		if err == nil {
 			if addr != leaderAddr {
-				forwardedHostTrim := trimHTTPPrefix(forwardedHost)
-				addrTrim := trimHTTPPrefix(addr)
+				forwardedHostTrim := tlsutil.TrimHTTPPrefix(forwardedHost)
+				addrTrim := tlsutil.TrimHTTPPrefix(addr)
 				metrics.RequestForwarded.WithLabelValues(forwardedHostTrim, addrTrim).Set(1)
 			}
 			connectionCtxs.Store(addr, &tsoConnectionContext{cctx, cancel, addr, stream})

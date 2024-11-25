@@ -44,6 +44,7 @@ import (
 	cb "github.com/tikv/pd/client/circuitbreaker"
 	clierrs "github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/retry"
+	sd "github.com/tikv/pd/client/servicediscovery"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
@@ -88,7 +89,7 @@ func TestClientLeaderChange(t *testing.T) {
 	}
 	cli := setupCli(ctx, re, endpointsWithWrongURL)
 	defer cli.Close()
-	innerCli, ok := cli.(interface{ GetServiceDiscovery() pd.ServiceDiscovery })
+	innerCli, ok := cli.(interface{ GetServiceDiscovery() sd.ServiceDiscovery })
 	re.True(ok)
 
 	var ts1, ts2 uint64
@@ -393,6 +394,10 @@ func TestTSOFollowerProxy(t *testing.T) {
 
 func TestTSOFollowerProxyWithTSOService(t *testing.T) {
 	re := require.New(t)
+<<<<<<< HEAD
+=======
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/servicediscovery/fastUpdateServiceMode", `return(true)`))
+>>>>>>> ec77762762 (*: independent the service discovery package (#8825))
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	cluster, err := tests.NewTestAPICluster(ctx, 1)
@@ -413,6 +418,10 @@ func TestTSOFollowerProxyWithTSOService(t *testing.T) {
 	// TSO service does not support the follower proxy, so enabling it should fail.
 	err = cli.UpdateOption(pd.EnableTSOFollowerProxy, true)
 	re.Error(err)
+<<<<<<< HEAD
+=======
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/servicediscovery/fastUpdateServiceMode"))
+>>>>>>> ec77762762 (*: independent the service discovery package (#8825))
 }
 
 // TestUnavailableTimeAfterLeaderIsReady is used to test https://github.com/tikv/pd/issues/5207
@@ -655,7 +664,7 @@ func TestFollowerForwardAndHandleTestSuite(t *testing.T) {
 func (suite *followerForwardAndHandleTestSuite) SetupSuite() {
 	re := suite.Require()
 	suite.ctx, suite.clean = context.WithCancel(context.Background())
-	pd.MemberHealthCheckInterval = 100 * time.Millisecond
+	sd.MemberHealthCheckInterval = 100 * time.Millisecond
 	cluster, err := tests.NewTestCluster(suite.ctx, 3)
 	re.NoError(err)
 	suite.cluster = cluster
@@ -701,13 +710,13 @@ func (suite *followerForwardAndHandleTestSuite) TestGetRegionByFollowerForwardin
 
 	cli := setupCli(ctx, re, suite.endpoints, pd.WithForwardingOption(true))
 	defer cli.Close()
-	re.NoError(failpoint.Enable("github.com/tikv/pd/client/unreachableNetwork1", "return(true)"))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/servicediscovery/unreachableNetwork1", "return(true)"))
 	time.Sleep(200 * time.Millisecond)
 	r, err := cli.GetRegion(context.Background(), []byte("a"))
 	re.NoError(err)
 	re.NotNil(r)
 
-	re.NoError(failpoint.Disable("github.com/tikv/pd/client/unreachableNetwork1"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/servicediscovery/unreachableNetwork1"))
 	time.Sleep(200 * time.Millisecond)
 	r, err = cli.GetRegion(context.Background(), []byte("a"))
 	re.NoError(err)
@@ -923,7 +932,7 @@ func (suite *followerForwardAndHandleTestSuite) TestGetRegionFromFollower() {
 
 	// because we can't check whether this request is processed by followers from response,
 	// we can disable forward and make network problem for leader.
-	re.NoError(failpoint.Enable("github.com/tikv/pd/client/unreachableNetwork1", fmt.Sprintf("return(\"%s\")", leader.GetAddr())))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/servicediscovery/unreachableNetwork1", fmt.Sprintf("return(\"%s\")", leader.GetAddr())))
 	time.Sleep(150 * time.Millisecond)
 	cnt = 0
 	for range 100 {
@@ -934,11 +943,11 @@ func (suite *followerForwardAndHandleTestSuite) TestGetRegionFromFollower() {
 		re.Equal(resp.Meta.Id, suite.regionID)
 	}
 	re.Equal(100, cnt)
-	re.NoError(failpoint.Disable("github.com/tikv/pd/client/unreachableNetwork1"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/servicediscovery/unreachableNetwork1"))
 
 	// make network problem for follower.
 	follower := cluster.GetServer(cluster.GetFollower())
-	re.NoError(failpoint.Enable("github.com/tikv/pd/client/unreachableNetwork1", fmt.Sprintf("return(\"%s\")", follower.GetAddr())))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/servicediscovery/unreachableNetwork1", fmt.Sprintf("return(\"%s\")", follower.GetAddr())))
 	time.Sleep(100 * time.Millisecond)
 	cnt = 0
 	for range 100 {
@@ -949,7 +958,7 @@ func (suite *followerForwardAndHandleTestSuite) TestGetRegionFromFollower() {
 		re.Equal(resp.Meta.Id, suite.regionID)
 	}
 	re.Equal(100, cnt)
-	re.NoError(failpoint.Disable("github.com/tikv/pd/client/unreachableNetwork1"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/servicediscovery/unreachableNetwork1"))
 
 	// follower client failed will retry by leader service client.
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/followerHandleError", "return(true)"))
@@ -965,8 +974,8 @@ func (suite *followerForwardAndHandleTestSuite) TestGetRegionFromFollower() {
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/followerHandleError"))
 
 	// test after being healthy
-	re.NoError(failpoint.Enable("github.com/tikv/pd/client/unreachableNetwork1", fmt.Sprintf("return(\"%s\")", leader.GetAddr())))
-	re.NoError(failpoint.Enable("github.com/tikv/pd/client/fastCheckAvailable", "return(true)"))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/servicediscovery/unreachableNetwork1", fmt.Sprintf("return(\"%s\")", leader.GetAddr())))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/servicediscovery/fastCheckAvailable", "return(true)"))
 	time.Sleep(100 * time.Millisecond)
 	cnt = 0
 	for range 100 {
@@ -977,8 +986,8 @@ func (suite *followerForwardAndHandleTestSuite) TestGetRegionFromFollower() {
 		re.Equal(resp.Meta.Id, suite.regionID)
 	}
 	re.Equal(100, cnt)
-	re.NoError(failpoint.Disable("github.com/tikv/pd/client/unreachableNetwork1"))
-	re.NoError(failpoint.Disable("github.com/tikv/pd/client/fastCheckAvailable"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/servicediscovery/unreachableNetwork1"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/servicediscovery/fastCheckAvailable"))
 }
 
 func (suite *followerForwardAndHandleTestSuite) TestGetTSFuture() {
@@ -1060,7 +1069,7 @@ func setupCli(ctx context.Context, re *require.Assertions, endpoints []string, o
 	return cli
 }
 
-func waitLeader(re *require.Assertions, cli pd.ServiceDiscovery, leader *tests.TestServer) {
+func waitLeader(re *require.Assertions, cli sd.ServiceDiscovery, leader *tests.TestServer) {
 	testutil.Eventually(re, func() bool {
 		cli.ScheduleCheckMemberChanged()
 		return cli.GetServingURL() == leader.GetConfig().ClientUrls && leader.GetAddr() == cli.GetServingURL()
@@ -1980,7 +1989,7 @@ func (suite *clientTestSuite) TestMemberUpdateBackOff() {
 	endpoints := runServer(re, cluster)
 	cli := setupCli(ctx, re, endpoints)
 	defer cli.Close()
-	innerCli, ok := cli.(interface{ GetServiceDiscovery() pd.ServiceDiscovery })
+	innerCli, ok := cli.(interface{ GetServiceDiscovery() sd.ServiceDiscovery })
 	re.True(ok)
 
 	leader := cluster.GetLeader()
@@ -2003,7 +2012,7 @@ func (suite *clientTestSuite) TestMemberUpdateBackOff() {
 	re.NoError(failpoint.Disable("github.com/tikv/pd/client/retry/backOffExecute"))
 }
 
-func waitLeaderChange(re *require.Assertions, cluster *tests.TestCluster, old string, cli pd.ServiceDiscovery) string {
+func waitLeaderChange(re *require.Assertions, cluster *tests.TestCluster, old string, cli sd.ServiceDiscovery) string {
 	var leader string
 	testutil.Eventually(re, func() bool {
 		cli.ScheduleCheckMemberChanged()

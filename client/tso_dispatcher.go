@@ -30,8 +30,14 @@ import (
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/retry"
+<<<<<<< HEAD
 	"github.com/tikv/pd/client/timerpool"
 	"github.com/tikv/pd/client/tsoutil"
+=======
+	sd "github.com/tikv/pd/client/servicediscovery"
+	"github.com/tikv/pd/client/utils/timerutil"
+	"github.com/tikv/pd/client/utils/tsoutil"
+>>>>>>> ec77762762 (*: independent the service discovery package (#8825))
 	"go.uber.org/zap"
 )
 
@@ -67,9 +73,15 @@ type tsoInfo struct {
 }
 
 type tsoServiceProvider interface {
+<<<<<<< HEAD
 	getOption() *option
 	getServiceDiscovery() ServiceDiscovery
 	updateConnectionCtxs(ctx context.Context, dc string, connectionCtxs *sync.Map) bool
+=======
+	getOption() *opt.Option
+	getServiceDiscovery() sd.ServiceDiscovery
+	updateConnectionCtxs(ctx context.Context, connectionCtxs *sync.Map) bool
+>>>>>>> ec77762762 (*: independent the service discovery package (#8825))
 }
 
 const dispatcherCheckRPCConcurrencyInterval = time.Second * 5
@@ -176,7 +188,7 @@ func (td *tsoDispatcher) revokePendingRequests(err error) {
 
 func (td *tsoDispatcher) close() {
 	td.cancel()
-	tsoErr := errors.WithStack(errClosing)
+	tsoErr := errors.WithStack(errs.ErrClosing)
 	td.revokePendingRequests(tsoErr)
 }
 
@@ -208,7 +220,7 @@ func (td *tsoDispatcher) handleDispatcher(wg *sync.WaitGroup) {
 			// If you encounter this failure, please check the stack in the logs to see if it's a panic.
 			log.Fatal("batched tso requests not cleared when exiting the tso dispatcher loop", zap.Any("panic", recover()))
 		}
-		tsoErr := errors.WithStack(errClosing)
+		tsoErr := errors.WithStack(errs.ErrClosing)
 		td.revokePendingRequests(tsoErr)
 		wg.Done()
 	}()
@@ -231,7 +243,11 @@ func (td *tsoDispatcher) handleDispatcher(wg *sync.WaitGroup) {
 	<-batchingTimer.C
 	defer batchingTimer.Stop()
 
+<<<<<<< HEAD
 	bo := retry.InitialBackoffer(updateMemberBackOffBaseTime, updateMemberMaxBackoffTime, updateMemberTimeout)
+=======
+	bo := retry.InitialBackoffer(sd.UpdateMemberBackOffBaseTime, sd.UpdateMemberTimeout, sd.UpdateMemberBackOffBaseTime)
+>>>>>>> ec77762762 (*: independent the service discovery package (#8825))
 tsoBatchLoop:
 	for {
 		select {
@@ -509,7 +525,11 @@ func (td *tsoDispatcher) connectionCtxsUpdater() {
 			if enableTSOFollowerProxy && updateTicker.C == nil {
 				// Because the TSO Follower Proxy is enabled,
 				// the periodic check needs to be performed.
+<<<<<<< HEAD
 				setNewUpdateTicker(memberUpdateInterval)
+=======
+				setNewUpdateTicker(time.NewTicker(sd.MemberUpdateInterval))
+>>>>>>> ec77762762 (*: independent the service discovery package (#8825))
 			} else if !enableTSOFollowerProxy && updateTicker.C != nil {
 				// Because the TSO Follower Proxy is disabled,
 				// the periodic check needs to be turned off.

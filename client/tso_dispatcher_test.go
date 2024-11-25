@@ -26,6 +26,11 @@ import (
 	"github.com/pingcap/log"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+<<<<<<< HEAD
+=======
+	"github.com/tikv/pd/client/opt"
+	sd "github.com/tikv/pd/client/servicediscovery"
+>>>>>>> ec77762762 (*: independent the service discovery package (#8825))
 	"go.uber.org/zap/zapcore"
 )
 
@@ -46,8 +51,8 @@ func (m *mockTSOServiceProvider) getOption() *option {
 	return m.option
 }
 
-func (*mockTSOServiceProvider) getServiceDiscovery() ServiceDiscovery {
-	return NewMockPDServiceDiscovery([]string{mockStreamURL}, nil)
+func (*mockTSOServiceProvider) getServiceDiscovery() sd.ServiceDiscovery {
+	return sd.NewMockPDServiceDiscovery([]string{mockStreamURL}, nil)
 }
 
 func (m *mockTSOServiceProvider) updateConnectionCtxs(ctx context.Context, _dc string, connectionCtxs *sync.Map) bool {

@@ -12,12 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package pd
+package servicediscovery
 
 import (
 	"context"
 	"crypto/tls"
+<<<<<<< HEAD:client/pd_service_discovery.go
 	"net/url"
+=======
+	"fmt"
+>>>>>>> ec77762762 (*: independent the service discovery package (#8825)):client/servicediscovery/pd_service_discovery.go
 	"reflect"
 	"sort"
 	"strings"
@@ -29,9 +33,15 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/client/constants"
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/grpcutil"
 	"github.com/tikv/pd/client/retry"
+<<<<<<< HEAD:client/pd_service_discovery.go
+=======
+	"github.com/tikv/pd/client/utils/grpcutil"
+	"github.com/tikv/pd/client/utils/tlsutil"
+>>>>>>> ec77762762 (*: independent the service discovery package (#8825)):client/servicediscovery/pd_service_discovery.go
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -40,25 +50,38 @@ import (
 )
 
 const (
+<<<<<<< HEAD:client/pd_service_discovery.go
 	globalDCLocation            = "global"
 	memberUpdateInterval        = time.Minute
 	serviceModeUpdateInterval   = 3 * time.Second
 	updateMemberTimeout         = time.Second // Use a shorter timeout to recover faster from network isolation.
 	updateMemberMaxBackoffTime  = 100 * time.Millisecond
 	updateMemberBackOffBaseTime = 20 * time.Millisecond
+=======
+	// MemberUpdateInterval is the interval to update the member list.
+	MemberUpdateInterval = time.Minute
+	// UpdateMemberTimeout is the timeout to update the member list.
+	// Use a shorter timeout to recover faster from network isolation.
+	UpdateMemberTimeout = time.Second
+	// UpdateMemberBackOffBaseTime is the base time to back off when updating the member list.
+	UpdateMemberBackOffBaseTime = 100 * time.Millisecond
+>>>>>>> ec77762762 (*: independent the service discovery package (#8825)):client/servicediscovery/pd_service_discovery.go
 
-	httpScheme  = "http"
-	httpsScheme = "https"
+	serviceModeUpdateInterval = 3 * time.Second
 )
 
 // MemberHealthCheckInterval might be changed in the unit to shorten the testing time.
 var MemberHealthCheckInterval = time.Second
 
-type apiKind int
+// APIKind defines how this API should be handled.
+type APIKind int
 
 const (
-	forwardAPIKind apiKind = iota
-	regionAPIKind
+	// ForwardAPIKind means this API should be forwarded from the followers to the leader.
+	ForwardAPIKind APIKind = iota
+	// UniversalAPIKind means this API can be handled by both the leader and the followers.
+	UniversalAPIKind
+
 	apiKindCount
 )
 
@@ -80,6 +103,8 @@ type ServiceDiscovery interface {
 	GetClusterID() uint64
 	// GetKeyspaceID returns the ID of the keyspace
 	GetKeyspaceID() uint32
+	// SetKeyspaceID sets the ID of the keyspace
+	SetKeyspaceID(id uint32)
 	// GetKeyspaceGroupID returns the ID of the keyspace group
 	GetKeyspaceGroupID() uint32
 	// GetServiceURLs returns the URLs of the servers providing the service
@@ -101,6 +126,8 @@ type ServiceDiscovery interface {
 	// If the leader ServiceClient meets network problem,
 	// it returns a follower/secondary ServiceClient which can forward the request to leader.
 	GetServiceClient() ServiceClient
+	// GetServiceClientByKind tries to get the ServiceClient with the given API kind.
+	GetServiceClientByKind(kind APIKind) ServiceClient
 	// GetAllServiceClients tries to get all ServiceClient.
 	// If the leader is not nil, it will put the leader service client first in the slice.
 	GetAllServiceClients() []ServiceClient
@@ -221,15 +248,11 @@ func (c *pdServiceClient) checkNetworkAvailable(ctx context.Context) {
 		}
 	})
 	rpcErr, ok := status.FromError(err)
-	if (ok && isNetworkError(rpcErr.Code())) || resp.GetStatus() != healthpb.HealthCheckResponse_SERVING {
+	if (ok && errs.IsNetworkError(rpcErr.Code())) || resp.GetStatus() != healthpb.HealthCheckResponse_SERVING {
 		c.networkFailure.Store(true)
 	} else {
 		c.networkFailure.Store(false)
 	}
-}
-
-func isNetworkError(code codes.Code) bool {
-	return code == codes.Unavailable || code == codes.DeadlineExceeded
 }
 
 // GetClientConn implements ServiceClient.
@@ -383,6 +406,7 @@ func (c *pdServiceBalancer) get() (ret ServiceClient) {
 	return
 }
 
+<<<<<<< HEAD:client/pd_service_discovery.go
 type updateKeyspaceIDFunc func() error
 type tsoLocalServURLsUpdatedFunc func(map[string]string) error
 type tsoGlobalServURLUpdatedFunc func(string) error
@@ -399,6 +423,21 @@ type tsoAllocatorEventSource interface {
 var (
 	_ ServiceDiscovery        = (*pdServiceDiscovery)(nil)
 	_ tsoAllocatorEventSource = (*pdServiceDiscovery)(nil)
+=======
+// UpdateKeyspaceIDFunc is the function type for updating the keyspace ID.
+type UpdateKeyspaceIDFunc func() error
+type tsoLeaderURLUpdatedFunc func(string) error
+
+// TSOEventSource subscribes to events related to changes in the TSO leader/primary from the service discovery.
+type TSOEventSource interface {
+	// SetTSOLeaderURLUpdatedCallback adds a callback which will be called when the TSO leader/primary is updated.
+	SetTSOLeaderURLUpdatedCallback(callback tsoLeaderURLUpdatedFunc)
+}
+
+var (
+	_ ServiceDiscovery = (*pdServiceDiscovery)(nil)
+	_ TSOEventSource   = (*pdServiceDiscovery)(nil)
+>>>>>>> ec77762762 (*: independent the service discovery package (#8825)):client/servicediscovery/pd_service_discovery.go
 )
 
 // pdServiceDiscovery is the service discovery client of PD/API service which is quorum based
@@ -441,7 +480,7 @@ type pdServiceDiscovery struct {
 	cancel    context.CancelFunc
 	closeOnce sync.Once
 
-	updateKeyspaceIDFunc updateKeyspaceIDFunc
+	updateKeyspaceIDFunc UpdateKeyspaceIDFunc
 	keyspaceID           uint32
 	tlsCfg               *tls.Config
 	// Client option.
@@ -452,20 +491,29 @@ type pdServiceDiscovery struct {
 func NewDefaultPDServiceDiscovery(
 	ctx context.Context, cancel context.CancelFunc,
 	urls []string, tlsCfg *tls.Config,
-) *pdServiceDiscovery {
+) ServiceDiscovery {
 	var wg sync.WaitGroup
+<<<<<<< HEAD:client/pd_service_discovery.go
 	return newPDServiceDiscovery(ctx, cancel, &wg, nil, nil, defaultKeyspaceID, urls, tlsCfg, newOption())
+=======
+	return NewPDServiceDiscovery(ctx, cancel, &wg, nil, nil, constants.DefaultKeyspaceID, urls, tlsCfg, opt.NewOption())
+>>>>>>> ec77762762 (*: independent the service discovery package (#8825)):client/servicediscovery/pd_service_discovery.go
 }
 
-// newPDServiceDiscovery returns a new PD service discovery-based client.
-func newPDServiceDiscovery(
+// NewPDServiceDiscovery returns a new PD service discovery-based client.
+func NewPDServiceDiscovery(
 	ctx context.Context, cancel context.CancelFunc,
 	wg *sync.WaitGroup,
 	serviceModeUpdateCb func(pdpb.ServiceMode),
-	updateKeyspaceIDFunc updateKeyspaceIDFunc,
+	updateKeyspaceIDFunc UpdateKeyspaceIDFunc,
 	keyspaceID uint32,
+<<<<<<< HEAD:client/pd_service_discovery.go
 	urls []string, tlsCfg *tls.Config, option *option,
 ) *pdServiceDiscovery {
+=======
+	urls []string, tlsCfg *tls.Config, option *opt.Option,
+) ServiceDiscovery {
+>>>>>>> ec77762762 (*: independent the service discovery package (#8825)):client/servicediscovery/pd_service_discovery.go
 	pdsd := &pdServiceDiscovery{
 		checkMembershipCh:    make(chan struct{}, 1),
 		ctx:                  ctx,
@@ -478,7 +526,7 @@ func newPDServiceDiscovery(
 		tlsCfg:               tlsCfg,
 		option:               option,
 	}
-	urls = addrsToURLs(urls, tlsCfg)
+	urls = tlsutil.AddrsToURLs(urls, tlsCfg)
 	pdsd.urls.Store(urls)
 	return pdsd
 }
@@ -501,7 +549,7 @@ func (c *pdServiceDiscovery) Init() error {
 
 	// We need to update the keyspace ID before we discover and update the service mode
 	// so that TSO in API mode can be initialized with the correct keyspace ID.
-	if c.keyspaceID == nullKeyspaceID && c.updateKeyspaceIDFunc != nil {
+	if c.keyspaceID == constants.NullKeyspaceID && c.updateKeyspaceIDFunc != nil {
 		if err := c.initRetry(c.updateKeyspaceIDFunc); err != nil {
 			return err
 		}
@@ -543,10 +591,14 @@ func (c *pdServiceDiscovery) updateMemberLoop() {
 
 	ctx, cancel := context.WithCancel(c.ctx)
 	defer cancel()
-	ticker := time.NewTicker(memberUpdateInterval)
+	ticker := time.NewTicker(MemberUpdateInterval)
 	defer ticker.Stop()
 
+<<<<<<< HEAD:client/pd_service_discovery.go
 	bo := retry.InitialBackoffer(updateMemberBackOffBaseTime, updateMemberMaxBackoffTime, updateMemberTimeout)
+=======
+	bo := retry.InitialBackoffer(UpdateMemberBackOffBaseTime, UpdateMemberTimeout, UpdateMemberBackOffBaseTime)
+>>>>>>> ec77762762 (*: independent the service discovery package (#8825)):client/servicediscovery/pd_service_discovery.go
 	for {
 		select {
 		case <-ctx.Done():
@@ -555,9 +607,6 @@ func (c *pdServiceDiscovery) updateMemberLoop() {
 		case <-ticker.C:
 		case <-c.checkMembershipCh:
 		}
-		failpoint.Inject("skipUpdateMember", func() {
-			failpoint.Continue()
-		})
 		if err := bo.Exec(ctx, c.updateMember); err != nil {
 			log.Warn("[pd] failed to update member", zap.Strings("urls", c.GetServiceURLs()), errs.ZapError(err))
 		}
@@ -669,7 +718,7 @@ func (c *pdServiceDiscovery) SetKeyspaceID(keyspaceID uint32) {
 // GetKeyspaceGroupID returns the ID of the keyspace group
 func (*pdServiceDiscovery) GetKeyspaceGroupID() uint32 {
 	// PD/API service only supports the default keyspace group
-	return defaultKeySpaceGroupID
+	return constants.DefaultKeyspaceGroupID
 }
 
 // DiscoverMicroservice discovers the microservice with the specified type and returns the server urls.
@@ -739,8 +788,8 @@ func (c *pdServiceDiscovery) getLeaderServiceClient() *pdServiceClient {
 	return leader.(*pdServiceClient)
 }
 
-// getServiceClientByKind returns ServiceClient of the specific kind.
-func (c *pdServiceDiscovery) getServiceClientByKind(kind apiKind) ServiceClient {
+// GetServiceClientByKind returns ServiceClient of the specific kind.
+func (c *pdServiceDiscovery) GetServiceClientByKind(kind APIKind) ServiceClient {
 	client := c.apiCandidateNodes[kind].get()
 	if client == nil {
 		return nil
@@ -751,8 +800,13 @@ func (c *pdServiceDiscovery) getServiceClientByKind(kind apiKind) ServiceClient 
 // GetServiceClient returns the leader/primary ServiceClient if it is healthy.
 func (c *pdServiceDiscovery) GetServiceClient() ServiceClient {
 	leaderClient := c.getLeaderServiceClient()
+<<<<<<< HEAD:client/pd_service_discovery.go
 	if c.option.enableForwarding && !leaderClient.Available() {
 		if followerClient := c.getServiceClientByKind(forwardAPIKind); followerClient != nil {
+=======
+	if c.option.EnableForwarding && !leaderClient.Available() {
+		if followerClient := c.GetServiceClientByKind(ForwardAPIKind); followerClient != nil {
+>>>>>>> ec77762762 (*: independent the service discovery package (#8825)):client/servicediscovery/pd_service_discovery.go
 			log.Debug("[pd] use follower client", zap.String("url", followerClient.GetURL()))
 			return followerClient
 		}
@@ -846,17 +900,14 @@ func (c *pdServiceDiscovery) initClusterID() error {
 			clusterID = members.GetHeader().GetClusterId()
 			continue
 		}
-		failpoint.Inject("skipClusterIDCheck", func() {
-			failpoint.Continue()
-		})
 		// All URLs passed in should have the same cluster ID.
 		if members.GetHeader().GetClusterId() != clusterID {
-			return errors.WithStack(errUnmatchedClusterID)
+			return errors.WithStack(errs.ErrUnmatchedClusterID)
 		}
 	}
 	// Failed to init the cluster ID.
 	if clusterID == 0 {
-		return errors.WithStack(errFailInitClusterID)
+		return errors.WithStack(errs.ErrFailInitClusterID)
 	}
 	c.clusterID = clusterID
 	return nil
@@ -882,7 +933,7 @@ func (c *pdServiceDiscovery) checkServiceModeChanged() error {
 		return err
 	}
 	if clusterInfo == nil || len(clusterInfo.ServiceModes) == 0 {
-		return errors.WithStack(errNoServiceModeReturned)
+		return errors.WithStack(errs.ErrNoServiceModeReturned)
 	}
 	if c.serviceModeUpdateCb != nil {
 		c.serviceModeUpdateCb(clusterInfo.ServiceModes[0])
@@ -891,14 +942,8 @@ func (c *pdServiceDiscovery) checkServiceModeChanged() error {
 }
 
 func (c *pdServiceDiscovery) updateMember() error {
-	for i, url := range c.GetServiceURLs() {
-		failpoint.Inject("skipFirstUpdateMember", func() {
-			if i == 0 {
-				failpoint.Continue()
-			}
-		})
-
-		members, err := c.getMembers(c.ctx, url, updateMemberTimeout)
+	for _, url := range c.GetServiceURLs() {
+		members, err := c.getMembers(c.ctx, url, UpdateMemberTimeout)
 		// Check the cluster ID.
 		if err == nil && members.GetHeader().GetClusterId() != c.clusterID {
 			err = errs.ErrClientUpdateMember.FastGenByArgs("cluster id does not match")
@@ -1039,7 +1084,7 @@ func (c *pdServiceDiscovery) updateFollowers(members []*pdpb.Member, leaderID ui
 				followerURLs = append(followerURLs, member.GetClientUrls()...)
 
 				// FIXME: How to safely compare urls(also for leader)? For now, only allows one client url.
-				url := pickMatchedURL(member.GetClientUrls(), c.tlsCfg)
+				url := tlsutil.PickMatchedURL(member.GetClientUrls(), c.tlsCfg)
 				if client, ok := c.followers.Load(url); ok {
 					if client.(*pdServiceClient).GetClientConn() == nil {
 						conn, err := c.GetOrCreateGRPCConn(url)
@@ -1076,7 +1121,7 @@ func (c *pdServiceDiscovery) updateFollowers(members []*pdpb.Member, leaderID ui
 
 func (c *pdServiceDiscovery) updateServiceClient(members []*pdpb.Member, leader *pdpb.Member) error {
 	// FIXME: How to safely compare leader urls? For now, only allows one client url.
-	leaderURL := pickMatchedURL(leader.GetClientUrls(), c.tlsCfg)
+	leaderURL := tlsutil.PickMatchedURL(leader.GetClientUrls(), c.tlsCfg)
 	leaderChanged, err := c.switchLeader(leaderURL)
 	followerChanged := c.updateFollowers(members, leader.GetMemberId(), leaderURL)
 	// don't need to recreate balancer if no changes.
@@ -1128,52 +1173,4 @@ func (c *pdServiceDiscovery) switchTSOAllocatorLeaders(allocatorMap map[string]*
 // GetOrCreateGRPCConn returns the corresponding grpc client connection of the given URL.
 func (c *pdServiceDiscovery) GetOrCreateGRPCConn(url string) (*grpc.ClientConn, error) {
 	return grpcutil.GetOrCreateGRPCConn(c.ctx, &c.clientConns, url, c.tlsCfg, c.option.gRPCDialOptions...)
-}
-
-func addrsToURLs(addrs []string, tlsCfg *tls.Config) []string {
-	// Add default schema "http://" to addrs.
-	urls := make([]string, 0, len(addrs))
-	for _, addr := range addrs {
-		urls = append(urls, modifyURLScheme(addr, tlsCfg))
-	}
-	return urls
-}
-
-func modifyURLScheme(url string, tlsCfg *tls.Config) string {
-	if tlsCfg == nil {
-		if strings.HasPrefix(url, httpsSchemePrefix) {
-			url = httpSchemePrefix + strings.TrimPrefix(url, httpsSchemePrefix)
-		} else if !strings.HasPrefix(url, httpSchemePrefix) {
-			url = httpSchemePrefix + url
-		}
-	} else {
-		if strings.HasPrefix(url, httpSchemePrefix) {
-			url = httpsSchemePrefix + strings.TrimPrefix(url, httpSchemePrefix)
-		} else if !strings.HasPrefix(url, httpsSchemePrefix) {
-			url = httpsSchemePrefix + url
-		}
-	}
-	return url
-}
-
-// pickMatchedURL picks the matched URL based on the TLS config.
-// Note: please make sure the URLs are valid.
-func pickMatchedURL(urls []string, tlsCfg *tls.Config) string {
-	for _, uStr := range urls {
-		u, err := url.Parse(uStr)
-		if err != nil {
-			continue
-		}
-		if tlsCfg != nil && u.Scheme == httpsScheme {
-			return uStr
-		}
-		if tlsCfg == nil && u.Scheme == httpScheme {
-			return uStr
-		}
-	}
-	ret := modifyURLScheme(urls[0], tlsCfg)
-	log.Warn("[pd] no matched url found", zap.Strings("urls", urls),
-		zap.Bool("tls-enabled", tlsCfg != nil),
-		zap.String("attempted-url", ret))
-	return ret
 }

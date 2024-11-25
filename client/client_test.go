@@ -20,12 +20,10 @@ import (
 	"time"
 
 	"github.com/pingcap/errors"
-	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/client/testutil"
 	"github.com/tikv/pd/client/tsoutil"
 	"go.uber.org/goleak"
-	"google.golang.org/grpc"
 )
 
 func TestMain(m *testing.M) {
@@ -41,6 +39,7 @@ func TestTSLessEqual(t *testing.T) {
 	re.True(tsoutil.TSLessEqual(9, 6, 9, 8))
 }
 
+<<<<<<< HEAD
 func TestUpdateURLs(t *testing.T) {
 	re := require.New(t)
 	members := []*pdpb.Member{
@@ -71,6 +70,8 @@ func TestUpdateURLs(t *testing.T) {
 	re.Equal(getURLs([]*pdpb.Member{members[3]}), cli.GetServiceURLs())
 }
 
+=======
+>>>>>>> ec77762762 (*: independent the service discovery package (#8825))
 const testClientURL = "tmp://test.url:5255"
 
 func TestClientCtx(t *testing.T) {
@@ -91,6 +92,7 @@ func TestClientWithRetry(t *testing.T) {
 	re.Less(time.Since(start), time.Second*10)
 }
 
+<<<<<<< HEAD
 func TestGRPCDialOption(t *testing.T) {
 	re := require.New(t)
 	start := time.Now()
@@ -110,6 +112,8 @@ func TestGRPCDialOption(t *testing.T) {
 	re.Greater(time.Since(start), 500*time.Millisecond)
 }
 
+=======
+>>>>>>> ec77762762 (*: independent the service discovery package (#8825))
 func TestTsoRequestWait(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())

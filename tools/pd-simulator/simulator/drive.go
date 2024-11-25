@@ -30,8 +30,8 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-	pd "github.com/tikv/pd/client"
 	pdHttp "github.com/tikv/pd/client/http"
+	sd "github.com/tikv/pd/client/servicediscovery"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/cases"
@@ -163,7 +163,7 @@ func (d *Driver) allocID() error {
 func (d *Driver) updateNodesClient() error {
 	urls := strings.Split(d.pdAddr, ",")
 	ctx, cancel := context.WithCancel(context.Background())
-	SD = pd.NewDefaultPDServiceDiscovery(ctx, cancel, urls, nil)
+	SD = sd.NewDefaultPDServiceDiscovery(ctx, cancel, urls, nil)
 	if err := SD.Init(); err != nil {
 		return err
 	}

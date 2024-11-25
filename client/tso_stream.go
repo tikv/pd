@@ -29,6 +29,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/tsopb"
 	"github.com/pingcap/log"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/tikv/pd/client/constants"
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/metrics"
 	"go.uber.org/zap"
@@ -147,8 +148,12 @@ func (s pdTSOStreamAdapter) Recv() (tsoRequestResult, error) {
 		physical:            resp.GetTimestamp().GetPhysical(),
 		logical:             resp.GetTimestamp().GetLogical(),
 		count:               resp.GetCount(),
+<<<<<<< HEAD
 		suffixBits:          resp.GetTimestamp().GetSuffixBits(),
 		respKeyspaceGroupID: defaultKeySpaceGroupID,
+=======
+		respKeyspaceGroupID: constants.DefaultKeyspaceGroupID,
+>>>>>>> ec77762762 (*: independent the service discovery package (#8825))
 	}, nil
 }
 
@@ -438,7 +443,7 @@ recvLoop:
 		updateEstimatedLatency(currentReq.startTime, latency)
 
 		if res.count != uint32(currentReq.count) {
-			finishWithErr = errors.WithStack(errTSOLength)
+			finishWithErr = errors.WithStack(errs.ErrTSOLength)
 			break recvLoop
 		}
 
