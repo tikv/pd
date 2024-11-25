@@ -20,13 +20,14 @@ import (
 
 	"github.com/stretchr/testify/require"
 	pd "github.com/tikv/pd/client"
+	"github.com/tikv/pd/client/opt"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 )
 
 // SetupClientWithAPIContext creates a TSO client with api context name for test.
 func SetupClientWithAPIContext(
-	ctx context.Context, re *require.Assertions, apiCtx pd.APIContext, endpoints []string, opts ...pd.ClientOption,
+	ctx context.Context, re *require.Assertions, apiCtx pd.APIContext, endpoints []string, opts ...opt.ClientOption,
 ) pd.Client {
 	cli, err := pd.NewClientWithAPIContext(ctx, apiCtx, endpoints, pd.SecurityOption{}, opts...)
 	re.NoError(err)
@@ -36,7 +37,7 @@ func SetupClientWithAPIContext(
 // SetupClientWithKeyspaceID creates a TSO client with the given keyspace id for test.
 func SetupClientWithKeyspaceID(
 	ctx context.Context, re *require.Assertions,
-	keyspaceID uint32, endpoints []string, opts ...pd.ClientOption,
+	keyspaceID uint32, endpoints []string, opts ...opt.ClientOption,
 ) pd.Client {
 	cli, err := pd.NewClientWithKeyspace(ctx, keyspaceID, endpoints, pd.SecurityOption{}, opts...)
 	re.NoError(err)
@@ -106,7 +107,7 @@ func WaitForMultiKeyspacesTSOAvailable(
 
 	clients := make([]pd.Client, 0, len(keyspaceIDs))
 	for _, keyspaceID := range keyspaceIDs {
-		cli := SetupClientWithKeyspaceID(ctx, re, keyspaceID, backendEndpoints, pd.WithForwardingOption(true))
+		cli := SetupClientWithKeyspaceID(ctx, re, keyspaceID, backendEndpoints, opt.WithForwardingOption(true))
 		re.NotNil(cli)
 		clients = append(clients, cli)
 

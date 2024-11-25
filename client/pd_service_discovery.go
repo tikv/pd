@@ -31,6 +31,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/client/errs"
+	"github.com/tikv/pd/client/opt"
 	"github.com/tikv/pd/client/retry"
 	"github.com/tikv/pd/client/utils/grpcutil"
 	"go.uber.org/zap"
@@ -436,7 +437,7 @@ type pdServiceDiscovery struct {
 	keyspaceID           uint32
 	tlsCfg               *tls.Config
 	// Client option.
-	option *option
+	option *opt.Option
 }
 
 // NewDefaultPDServiceDiscovery returns a new default PD service discovery-based client.
@@ -445,7 +446,7 @@ func NewDefaultPDServiceDiscovery(
 	urls []string, tlsCfg *tls.Config,
 ) *pdServiceDiscovery {
 	var wg sync.WaitGroup
-	return newPDServiceDiscovery(ctx, cancel, &wg, nil, nil, defaultKeyspaceID, urls, tlsCfg, newOption())
+	return newPDServiceDiscovery(ctx, cancel, &wg, nil, nil, defaultKeyspaceID, urls, tlsCfg, opt.NewOption())
 }
 
 // newPDServiceDiscovery returns a new PD service discovery-based client.
@@ -455,7 +456,7 @@ func newPDServiceDiscovery(
 	serviceModeUpdateCb func(pdpb.ServiceMode),
 	updateKeyspaceIDFunc updateKeyspaceIDFunc,
 	keyspaceID uint32,
-	urls []string, tlsCfg *tls.Config, option *option,
+	urls []string, tlsCfg *tls.Config, option *opt.Option,
 ) *pdServiceDiscovery {
 	pdsd := &pdServiceDiscovery{
 		checkMembershipCh:    make(chan struct{}, 1),
@@ -515,7 +516,7 @@ func (c *pdServiceDiscovery) initRetry(f func() error) error {
 	var err error
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
-	for range c.option.maxRetryTimes {
+	for range c.option.MaxRetryTimes {
 		if err = f(); err == nil {
 			return nil
 		}
@@ -607,7 +608,7 @@ func (c *pdServiceDiscovery) memberHealthCheckLoop() {
 }
 
 func (c *pdServiceDiscovery) checkLeaderHealth(ctx context.Context) {
-	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
+	ctx, cancel := context.WithTimeout(ctx, c.option.Timeout)
 	defer cancel()
 	leader := c.getLeaderServiceClient()
 	leader.checkNetworkAvailable(ctx)
@@ -673,7 +674,7 @@ func (c *pdServiceDiscovery) discoverMicroservice(svcType serviceType) (urls []s
 	case tsoService:
 		leaderURL := c.getLeaderURL()
 		if len(leaderURL) > 0 {
-			clusterInfo, err := c.getClusterInfo(c.ctx, leaderURL, c.option.timeout)
+			clusterInfo, err := c.getClusterInfo(c.ctx, leaderURL, c.option.Timeout)
 			if err != nil {
 				log.Error("[pd] failed to get cluster info",
 					zap.String("leader-url", leaderURL), errs.ZapError(err))
@@ -744,7 +745,7 @@ func (c *pdServiceDiscovery) getServiceClientByKind(kind apiKind) ServiceClient 
 // GetServiceClient returns the leader/primary ServiceClient if it is healthy.
 func (c *pdServiceDiscovery) GetServiceClient() ServiceClient {
 	leaderClient := c.getLeaderServiceClient()
-	if c.option.enableForwarding && !leaderClient.Available() {
+	if c.option.EnableForwarding && !leaderClient.Available() {
 		if followerClient := c.getServiceClientByKind(forwardAPIKind); followerClient != nil {
 			log.Debug("[pd] use follower client", zap.String("url", followerClient.GetURL()))
 			return followerClient
@@ -823,7 +824,7 @@ func (c *pdServiceDiscovery) initClusterID() error {
 	defer cancel()
 	clusterID := uint64(0)
 	for _, url := range c.GetServiceURLs() {
-		members, err := c.getMembers(ctx, url, c.option.timeout)
+		members, err := c.getMembers(ctx, url, c.option.Timeout)
 		if err != nil || members.GetHeader() == nil {
 			log.Warn("[pd] failed to get cluster id", zap.String("url", url), errs.ZapError(err))
 			continue
@@ -854,7 +855,7 @@ func (c *pdServiceDiscovery) checkServiceModeChanged() error {
 		return errors.New("no leader found")
 	}
 
-	clusterInfo, err := c.getClusterInfo(c.ctx, leaderURL, c.option.timeout)
+	clusterInfo, err := c.getClusterInfo(c.ctx, leaderURL, c.option.Timeout)
 	if err != nil {
 		if strings.Contains(err.Error(), "Unimplemented") {
 			// If the method is not supported, we set it to pd mode.
@@ -967,7 +968,7 @@ func (c *pdServiceDiscovery) updateURLs(members []*pdpb.Member) {
 	}
 	c.urls.Store(urls)
 	// Update the connection contexts when member changes if TSO Follower Proxy is enabled.
-	if c.option.getEnableTSOFollowerProxy() {
+	if c.option.GetEnableTSOFollowerProxy() {
 		// Run callbacks to reflect the membership changes in the leader and followers.
 		for _, cb := range c.membersChangedCbs {
 			cb()
@@ -1079,7 +1080,7 @@ func (c *pdServiceDiscovery) updateServiceClient(members []*pdpb.Member, leader 
 
 // GetOrCreateGRPCConn returns the corresponding grpc client connection of the given URL.
 func (c *pdServiceDiscovery) GetOrCreateGRPCConn(url string) (*grpc.ClientConn, error) {
-	return grpcutil.GetOrCreateGRPCConn(c.ctx, &c.clientConns, url, c.tlsCfg, c.option.gRPCDialOptions...)
+	return grpcutil.GetOrCreateGRPCConn(c.ctx, &c.clientConns, url, c.tlsCfg, c.option.GRPCDialOptions...)
 }
 
 func addrsToURLs(addrs []string, tlsCfg *tls.Config) []string {

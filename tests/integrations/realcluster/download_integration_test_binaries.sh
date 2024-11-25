@@ -28,7 +28,7 @@ tidb_download_url="${file_server_url}/download/builds/pingcap/tidb/${tidb_sha1}/
 tikv_download_url="${file_server_url}/download/builds/pingcap/tikv/${tikv_sha1}/centos7/tikv-server.tar.gz"
 tiflash_download_url="${file_server_url}/download/builds/pingcap/tiflash/${branch}/${tiflash_sha1}/centos7/tiflash.tar.gz"
 
-ETCD_VERSION=v3.5.9
+ETCD_VERSION=v3.5.15
 
 set -o nounset
 
