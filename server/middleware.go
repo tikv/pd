@@ -118,30 +118,59 @@ var forwardFns = map[string]forwardFn{
 	"GetAllGCSafePointV2": func(ctx context.Context, client *grpc.ClientConn, request any) (any, error) {
 		return pdpb.NewPDClient(client).GetAllGCSafePointV2(ctx, request.(*pdpb.GetAllGCSafePointV2Request))
 	},
+
+	"GetRegion": func(ctx context.Context, client *grpc.ClientConn, req any) (any, error) {
+		return pdpb.NewPDClient(client).GetRegion(ctx, req.(*pdpb.GetRegionRequest))
+	},
+	"GetPreRegion": func(ctx context.Context, client *grpc.ClientConn, req any) (any, error) {
+		return pdpb.NewPDClient(client).GetPrevRegion(ctx, req.(*pdpb.GetRegionRequest))
+	},
+	"GetRegionByID": func(ctx context.Context, client *grpc.ClientConn, req any) (any, error) {
+		return pdpb.NewPDClient(client).GetRegionByID(ctx, req.(*pdpb.GetRegionByIDRequest))
+	},
+	"ScanRegions": func(ctx context.Context, client *grpc.ClientConn, req any) (any, error) {
+		return pdpb.NewPDClient(client).ScanRegions(ctx, req.(*pdpb.ScanRegionsRequest))
+	},
+	"BatchScanRegions": func(ctx context.Context, client *grpc.ClientConn, req any) (any, error) {
+		return pdpb.NewPDClient(client).BatchScanRegions(ctx, req.(*pdpb.BatchScanRegionsRequest))
+	},
+}
+
+var allowFollowerMethods = map[string]struct{}{
+	"GetRegion":        {},
+	"GetPrevRegion":    {},
+	"GetRegionByID":    {},
+	"ScanRegions":      {},
+	"BatchScanRegions": {},
 }
 
 func (s *GrpcServer) unaryMiddleware(ctx context.Context, req request, methodName string) (rsp any, err error) {
-	return s.unaryFollowerMiddleware(ctx, req, forwardFns[methodName], nil)
+	resp, err := s.unaryFollowerMiddleware(ctx, req, forwardFns[methodName])
+	if resp != nil || err != nil {
+		return resp, err
+	}
+	if err := s.validateRoleInRequest(ctx, req.GetHeader(), methodName); err != nil {
+		return nil, err
+	}
+	return nil, nil
 }
 
-// unaryFollowerMiddleware adds the check of followers enable compared to unaryMiddleware.
-func (s *GrpcServer) unaryFollowerMiddleware(ctx context.Context, req request, fn forwardFn, allowFollower *bool) (rsp any, err error) {
+// unaryFollowerMiddleware forward the request to the leader if the request is
+// not sent by the leader. (client <-> follower <-> leader)
+func (s *GrpcServer) unaryFollowerMiddleware(ctx context.Context, req request, fn forwardFn) (rsp any, err error) {
 	failpoint.Inject("customTimeout", func() {
 		time.Sleep(5 * time.Second)
 	})
 	forwardedHost := grpcutil.GetForwardedHost(ctx)
-	if !s.isLocalRequest(forwardedHost) {
-		client, err := s.getDelegateClient(ctx, forwardedHost)
-		if err != nil {
-			return nil, err
-		}
-		ctx = grpcutil.ResetForwardContext(ctx)
-		return fn(ctx, client, req)
+	if s.isLocalRequest(forwardedHost) {
+		return nil, nil
 	}
-	if err := s.validateRoleInRequest(ctx, req.GetHeader(), allowFollower); err != nil {
+	client, err := s.getDelegateClient(ctx, forwardedHost)
+	if err != nil {
 		return nil, err
 	}
-	return nil, nil
+	ctx = grpcutil.ResetForwardContext(ctx)
+	return fn(ctx, client, req)
 }
 
 func currentFunction() string {
