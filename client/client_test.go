@@ -20,10 +20,10 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
-	"github.com/tikv/pd/client/caller"
 	"github.com/tikv/pd/client/opt"
-	"github.com/tikv/pd/client/utils/testutil"
-	"github.com/tikv/pd/client/utils/tsoutil"
+	"github.com/tikv/pd/client/pkg/caller"
+	"github.com/tikv/pd/client/pkg/utils/testutil"
+	"github.com/tikv/pd/client/pkg/utils/tsoutil"
 	"go.uber.org/goleak"
 )
 

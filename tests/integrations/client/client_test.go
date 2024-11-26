@@ -38,9 +38,9 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	pd "github.com/tikv/pd/client"
-	"github.com/tikv/pd/client/caller"
 	"github.com/tikv/pd/client/opt"
-	"github.com/tikv/pd/client/retry"
+	"github.com/tikv/pd/client/pkg/caller"
+	"github.com/tikv/pd/client/pkg/retry"
 	sd "github.com/tikv/pd/client/servicediscovery"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
@@ -586,7 +586,7 @@ func (suite *followerForwardAndHandleTestSuite) TestGetTsoAndRegionByFollowerFor
 	leader := cluster.GetLeaderServer()
 
 	follower := cluster.GetServer(cluster.GetFollower())
-	re.NoError(failpoint.Enable("github.com/tikv/pd/client/utils/grpcutil/unreachableNetwork2", fmt.Sprintf("return(\"%s\")", follower.GetAddr())))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/pkg/utils/grpcutil/unreachableNetwork2", fmt.Sprintf("return(\"%s\")", follower.GetAddr())))
 
 	cli := setupCli(ctx, re, suite.endpoints, opt.WithForwardingOption(true))
 	defer cli.Close()
@@ -625,7 +625,7 @@ func (suite *followerForwardAndHandleTestSuite) TestGetTsoAndRegionByFollowerFor
 		return false
 	})
 
-	re.NoError(failpoint.Disable("github.com/tikv/pd/client/utils/grpcutil/unreachableNetwork2"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/pkg/utils/grpcutil/unreachableNetwork2"))
 	testutil.Eventually(re, func() bool {
 		physical, logical, err := cli.GetTS(context.TODO())
 		if err == nil {
@@ -655,7 +655,7 @@ func (suite *followerForwardAndHandleTestSuite) TestGetRegionFromLeaderWhenNetwo
 	leader := cluster.GetLeaderServer()
 
 	follower := cluster.GetServer(cluster.GetFollower())
-	re.NoError(failpoint.Enable("github.com/tikv/pd/client/utils/grpcutil/unreachableNetwork2", fmt.Sprintf("return(\"%s\")", follower.GetAddr())))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/pkg/utils/grpcutil/unreachableNetwork2", fmt.Sprintf("return(\"%s\")", follower.GetAddr())))
 
 	cli := setupCli(ctx, re, suite.endpoints)
 	defer cli.Close()
@@ -673,7 +673,7 @@ func (suite *followerForwardAndHandleTestSuite) TestGetRegionFromLeaderWhenNetwo
 	re.Error(err)
 	re.Nil(r)
 
-	re.NoError(failpoint.Disable("github.com/tikv/pd/client/utils/grpcutil/unreachableNetwork2"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/pkg/utils/grpcutil/unreachableNetwork2"))
 	cli.GetServiceDiscovery().CheckMemberChanged()
 	testutil.Eventually(re, func() bool {
 		r, err = cli.GetRegion(context.Background(), []byte("a"))
@@ -1790,7 +1790,7 @@ func (suite *clientTestSuite) TestMemberUpdateBackOff() {
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/exitCampaignLeader", fmt.Sprintf("return(\"%d\")", memberID)))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/timeoutWaitPDLeader", `return(true)`))
 	// make sure back off executed.
-	re.NoError(failpoint.Enable("github.com/tikv/pd/client/retry/backOffExecute", `return(true)`))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/pkg/retry/backOffExecute", `return(true)`))
 	leader2 := waitLeaderChange(re, cluster, leader, innerCli.GetServiceDiscovery())
 	re.True(retry.TestBackOffExecute())
 
@@ -1799,7 +1799,7 @@ func (suite *clientTestSuite) TestMemberUpdateBackOff() {
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/leaderLoopCheckAgain"))
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/exitCampaignLeader"))
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/timeoutWaitPDLeader"))
-	re.NoError(failpoint.Disable("github.com/tikv/pd/client/retry/backOffExecute"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/pkg/retry/backOffExecute"))
 }
 
 func waitLeaderChange(re *require.Assertions, cluster *tests.TestCluster, old string, cli sd.ServiceDiscovery) string {

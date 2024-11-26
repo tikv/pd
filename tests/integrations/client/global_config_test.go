@@ -22,7 +22,7 @@ import (
 	"time"
 
 	pd "github.com/tikv/pd/client"
-	"github.com/tikv/pd/client/caller"
+	"github.com/tikv/pd/client/pkg/caller"
 
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"

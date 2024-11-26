@@ -31,15 +31,15 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/tikv/pd/client/caller"
 	"github.com/tikv/pd/client/clients/metastorage"
 	"github.com/tikv/pd/client/clients/tso"
 	"github.com/tikv/pd/client/constants"
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/metrics"
 	"github.com/tikv/pd/client/opt"
+	"github.com/tikv/pd/client/pkg/caller"
+	"github.com/tikv/pd/client/pkg/utils/tlsutil"
 	sd "github.com/tikv/pd/client/servicediscovery"
-	"github.com/tikv/pd/client/utils/tlsutil"
 	"go.uber.org/zap"
 )
 
