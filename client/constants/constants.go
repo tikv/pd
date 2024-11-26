@@ -14,6 +14,8 @@
 
 package constants
 
+import "time"
+
 const (
 	// DefaultKeyspaceID is the default keyspace ID.
 	// Valid keyspace id range is [0, 0xFFFFFF](uint24max, or 16777215)
@@ -29,4 +31,9 @@ const (
 	DefaultKeyspaceGroupID = uint32(0)
 	// DefaultKeyspaceName is the default keyspace name.
 	DefaultKeyspaceName = "DEFAULT"
+
+	// RetryInterval is the base retry interval.
+	RetryInterval = 500 * time.Millisecond
+	// MaxRetryTimes is the max retry times.
+	MaxRetryTimes = 6
 )

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package pd
+package tso
 
 import (
 	"context"
@@ -31,11 +31,12 @@ type TSFuture interface {
 }
 
 var (
-	_ TSFuture = (*tsoRequest)(nil)
+	_ TSFuture = (*Request)(nil)
 	_ TSFuture = (*tsoRequestFastFail)(nil)
 )
 
-type tsoRequest struct {
+// Request is a TSO request.
+type Request struct {
 	requestCtx context.Context
 	clientCtx  context.Context
 	done       chan error
@@ -50,8 +51,16 @@ type tsoRequest struct {
 	pool  *sync.Pool
 }
 
-// tryDone tries to send the result to the channel, it will not block.
-func (req *tsoRequest) tryDone(err error) {
+// IsFrom checks if the request is from the specified pool.
+func (req *Request) IsFrom(pool *sync.Pool) bool {
+	if req == nil {
+		return false
+	}
+	return req.pool == pool
+}
+
+// TryDone tries to send the result to the channel, it will not block.
+func (req *Request) TryDone(err error) {
 	select {
 	case req.done <- err:
 	default:
@@ -59,12 +68,12 @@ func (req *tsoRequest) tryDone(err error) {
 }
 
 // Wait will block until the TSO result is ready.
-func (req *tsoRequest) Wait() (physical int64, logical int64, err error) {
+func (req *Request) Wait() (physical int64, logical int64, err error) {
 	return req.waitCtx(req.requestCtx)
 }
 
 // waitCtx waits for the TSO result with specified ctx, while not using req.requestCtx.
-func (req *tsoRequest) waitCtx(ctx context.Context) (physical int64, logical int64, err error) {
+func (req *Request) waitCtx(ctx context.Context) (physical int64, logical int64, err error) {
 	// If tso command duration is observed very high, the reason could be it
 	// takes too long for Wait() be called.
 	start := time.Now()
@@ -92,7 +101,7 @@ func (req *tsoRequest) waitCtx(ctx context.Context) (physical int64, logical int
 }
 
 // waitTimeout waits for the TSO result for limited time. Currently only for test purposes.
-func (req *tsoRequest) waitTimeout(timeout time.Duration) (physical int64, logical int64, err error) {
+func (req *Request) waitTimeout(timeout time.Duration) (physical int64, logical int64, err error) {
 	ctx, cancel := context.WithTimeout(req.requestCtx, timeout)
 	defer cancel()
 	return req.waitCtx(ctx)
@@ -102,7 +111,8 @@ type tsoRequestFastFail struct {
 	err error
 }
 
-func newTSORequestFastFail(err error) *tsoRequestFastFail {
+// NewRequestFastFail creates a new fast fail TSO request.
+func NewRequestFastFail(err error) *tsoRequestFastFail {
 	return &tsoRequestFastFail{err}
 }
 
