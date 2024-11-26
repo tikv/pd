@@ -10,7 +10,9 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/client/errs"
+	"github.com/tikv/pd/client/metrics"
 	"github.com/tikv/pd/client/opt"
+	sd "github.com/tikv/pd/client/servicediscovery"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 )
@@ -23,7 +25,7 @@ const (
 type innerClient struct {
 	keyspaceID      uint32
 	svrUrls         []string
-	pdSvcDiscovery  *pdServiceDiscovery
+	pdSvcDiscovery  sd.ServiceDiscovery
 	tokenDispatcher *tokenDispatcher
 
 	// For service mode switching.
@@ -39,8 +41,8 @@ type innerClient struct {
 	option *opt.Option
 }
 
-func (c *innerClient) init(updateKeyspaceIDCb updateKeyspaceIDFunc) error {
-	c.pdSvcDiscovery = newPDServiceDiscovery(
+func (c *innerClient) init(updateKeyspaceIDCb sd.UpdateKeyspaceIDFunc) error {
+	c.pdSvcDiscovery = sd.NewPDServiceDiscovery(
 		c.ctx, c.cancel, &c.wg, c.setServiceMode,
 		updateKeyspaceIDCb, c.keyspaceID, c.svrUrls, c.tlsCfg, c.option)
 	if err := c.setup(); err != nil {
@@ -82,14 +84,14 @@ func (c *innerClient) resetTSOClientLocked(mode pdpb.ServiceMode) {
 	// Re-create a new TSO client.
 	var (
 		newTSOCli          *tsoClient
-		newTSOSvcDiscovery ServiceDiscovery
+		newTSOSvcDiscovery sd.ServiceDiscovery
 	)
 	switch mode {
 	case pdpb.ServiceMode_PD_SVC_MODE:
 		newTSOCli = newTSOClient(c.ctx, c.option,
 			c.pdSvcDiscovery, &pdTSOStreamBuilderFactory{})
 	case pdpb.ServiceMode_API_SVC_MODE:
-		newTSOSvcDiscovery = newTSOServiceDiscovery(
+		newTSOSvcDiscovery = sd.NewTSOServiceDiscovery(
 			c.ctx, c, c.pdSvcDiscovery,
 			c.keyspaceID, c.tlsCfg, c.option)
 		// At this point, the keyspace group isn't known yet. Starts from the default keyspace group,
@@ -151,7 +153,7 @@ func (c *innerClient) close() {
 	c.pdSvcDiscovery.Close()
 
 	if c.tokenDispatcher != nil {
-		tokenErr := errors.WithStack(errClosing)
+		tokenErr := errors.WithStack(errs.ErrClosing)
 		c.tokenDispatcher.tokenBatchController.revokePendingTokenRequest(tokenErr)
 		c.tokenDispatcher.dispatcherCancel()
 	}
@@ -160,7 +162,7 @@ func (c *innerClient) close() {
 func (c *innerClient) setup() error {
 	// Init the metrics.
 	if c.option.InitMetrics {
-		initAndRegisterMetrics(c.option.MetricsLabels)
+		metrics.InitAndRegisterMetrics(c.option.MetricsLabels)
 	}
 
 	// Init the client base.
@@ -178,10 +180,10 @@ func (c *innerClient) setup() error {
 
 // getClientAndContext returns the leader pd client and the original context. If leader is unhealthy, it returns
 // follower pd client and the context which holds forward information.
-func (c *innerClient) getRegionAPIClientAndContext(ctx context.Context, allowFollower bool) (ServiceClient, context.Context) {
-	var serviceClient ServiceClient
+func (c *innerClient) getRegionAPIClientAndContext(ctx context.Context, allowFollower bool) (sd.ServiceClient, context.Context) {
+	var serviceClient sd.ServiceClient
 	if allowFollower {
-		serviceClient = c.pdSvcDiscovery.getServiceClientByKind(regionAPIKind)
+		serviceClient = c.pdSvcDiscovery.GetServiceClientByKind(sd.UniversalAPIKind)
 		if serviceClient != nil {
 			return serviceClient, serviceClient.BuildGRPCTargetContext(ctx, !allowFollower)
 		}
@@ -201,7 +203,7 @@ func (c *innerClient) gRPCErrorHandler(err error) {
 }
 
 func (c *innerClient) getOrCreateGRPCConn() (*grpc.ClientConn, error) {
-	cc, err := c.pdSvcDiscovery.GetOrCreateGRPCConn(c.pdSvcDiscovery.getLeaderURL())
+	cc, err := c.pdSvcDiscovery.GetOrCreateGRPCConn(c.pdSvcDiscovery.GetServingURL())
 	if err != nil {
 		return nil, err
 	}

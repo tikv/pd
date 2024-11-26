@@ -15,10 +15,8 @@
 package api
 
 import (
-	"fmt"
 	"net/http"
 
-	"github.com/gorilla/mux"
 	"github.com/tikv/pd/server"
 	"github.com/unrolled/render"
 )
@@ -41,39 +39,7 @@ func newTSOHandler(svr *server.Server, rd *render.Render) *tsoHandler {
 // @Param    name  path  string  true  "PD server name"
 // @Param    body  body  object  true  "json params"
 // @Produce  json
-// @Success  200  {string}  string  "The transfer command is submitted."
-// @Failure  400  {string}  string  "The input is invalid."
-// @Failure  404  {string}  string  "The member does not exist."
-// @Failure  500  {string}  string  "PD server failed to proceed the request."
 // @Router   /tso/allocator/transfer/{name} [post]
-func (h *tsoHandler) TransferLocalTSOAllocator(w http.ResponseWriter, r *http.Request) {
-	members, membersErr := getMembers(h.svr)
-	if membersErr != nil {
-		h.rd.JSON(w, http.StatusInternalServerError, membersErr.Error())
-		return
-	}
-	name := mux.Vars(r)["name"]
-	dcLocation := r.URL.Query().Get("dcLocation")
-	if len(dcLocation) < 1 {
-		h.rd.JSON(w, http.StatusBadRequest, "dcLocation is undefined")
-		return
-	}
-	var memberID uint64
-	for _, m := range members.GetMembers() {
-		if m.GetName() == name {
-			memberID = m.GetMemberId()
-			break
-		}
-	}
-	if memberID == 0 {
-		h.rd.JSON(w, http.StatusNotFound, fmt.Sprintf("not found, pd: %s", name))
-		return
-	}
-	// TODO: support local tso forward in api service mode in the future.
-	err := h.svr.GetTSOAllocatorManager().TransferAllocatorForDCLocation(dcLocation, memberID)
-	if err != nil {
-		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
-		return
-	}
-	h.rd.JSON(w, http.StatusOK, "The transfer command is submitted.")
+func (h *tsoHandler) TransferLocalTSOAllocator(w http.ResponseWriter, _ *http.Request) {
+	h.rd.JSON(w, http.StatusOK, "The transfer command is deprecated.")
 }

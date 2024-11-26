@@ -26,8 +26,8 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	pd "github.com/tikv/pd/client"
 	pdHttp "github.com/tikv/pd/client/http"
+	sd "github.com/tikv/pd/client/servicediscovery"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	sc "github.com/tikv/pd/tools/pd-simulator/simulator/config"
@@ -64,7 +64,7 @@ var (
 	// PDHTTPClient is a client for PD HTTP API.
 	PDHTTPClient pdHttp.Client
 	// SD is a service discovery for PD.
-	SD        pd.ServiceDiscovery
+	SD        sd.ServiceDiscovery
 	clusterID atomic.Uint64
 )
 

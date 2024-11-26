@@ -256,12 +256,6 @@ const (
 	defaultEnableTSODynamicSwitching = false
 )
 
-// Special keys for Labels
-const (
-	// ZoneLabel is the name of the key which indicates DC location of this PD server.
-	ZoneLabel = "zone"
-)
-
 var (
 	defaultEnableTelemetry = false
 	defaultRuntimeServices = []string{}

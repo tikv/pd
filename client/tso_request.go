@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/pingcap/errors"
+	"github.com/tikv/pd/client/metrics"
 )
 
 // TSFuture is a future which promises to return a TSO.
@@ -67,7 +68,7 @@ func (req *tsoRequest) waitCtx(ctx context.Context) (physical int64, logical int
 	// If tso command duration is observed very high, the reason could be it
 	// takes too long for Wait() be called.
 	start := time.Now()
-	cmdDurationTSOAsyncWait.Observe(start.Sub(req.start).Seconds())
+	metrics.CmdDurationTSOAsyncWait.Observe(start.Sub(req.start).Seconds())
 	select {
 	case err = <-req.done:
 		defer req.pool.Put(req)
@@ -75,13 +76,13 @@ func (req *tsoRequest) waitCtx(ctx context.Context) (physical int64, logical int
 		err = errors.WithStack(err)
 		now := time.Now()
 		if err != nil {
-			cmdFailDurationTSOWait.Observe(now.Sub(start).Seconds())
-			cmdFailDurationTSO.Observe(now.Sub(req.start).Seconds())
+			metrics.CmdFailedDurationTSOWait.Observe(now.Sub(start).Seconds())
+			metrics.CmdFailedDurationTSO.Observe(now.Sub(req.start).Seconds())
 			return 0, 0, err
 		}
 		physical, logical = req.physical, req.logical
-		cmdDurationTSOWait.Observe(now.Sub(start).Seconds())
-		cmdDurationTSO.Observe(now.Sub(req.start).Seconds())
+		metrics.CmdDurationTSOWait.Observe(now.Sub(start).Seconds())
+		metrics.CmdDurationTSO.Observe(now.Sub(req.start).Seconds())
 		return
 	case <-ctx.Done():
 		return 0, 0, errors.WithStack(ctx.Err())

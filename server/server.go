@@ -93,9 +93,6 @@ const (
 	// pdRootPath for all pd servers.
 	pdRootPath  = "/pd"
 	pdAPIPrefix = "/pd/"
-	// idAllocPath for idAllocator to save persistent window's end.
-	idAllocPath  = "alloc_id"
-	idAllocLabel = "idalloc"
 
 	recoveringMarkPath = "cluster/markers/snapshot-recovering"
 
@@ -446,11 +443,9 @@ func (s *Server) startServer(ctx context.Context) error {
 		return err
 	}
 	s.idAllocator = id.NewAllocator(&id.AllocatorParams{
-		Client:    s.client,
-		RootPath:  s.rootPath,
-		AllocPath: idAllocPath,
-		Label:     idAllocLabel,
-		Member:    s.member.MemberValue(),
+		Client: s.client,
+		Label:  id.DefaultLabel,
+		Member: s.member.MemberValue(),
 	})
 	s.encryptionKeyManager, err = encryption.NewManager(s.client, &s.cfg.Security.Encryption)
 	if err != nil {
@@ -471,28 +466,14 @@ func (s *Server) startServer(ctx context.Context) error {
 	s.tsoProtoFactory = &tsoutil.TSOProtoFactory{}
 	s.pdProtoFactory = &tsoutil.PDProtoFactory{}
 	s.tsoAllocatorManager = tso.NewAllocatorManager(s.ctx, constant.DefaultKeyspaceGroupID, s.member, s.rootPath, s.storage, s)
-	// When disabled the Local TSO, we should clean up the Local TSO Allocator's meta info written in etcd if it exists.
-	if !s.cfg.EnableLocalTSO {
-		if err = s.tsoAllocatorManager.CleanUpDCLocation(); err != nil {
-			return err
-		}
-	}
-	if zone, exist := s.cfg.Labels[config.ZoneLabel]; exist && zone != "" && s.cfg.EnableLocalTSO {
-		if err = s.tsoAllocatorManager.SetLocalTSOConfig(zone); err != nil {
-			return err
-		}
-	}
-
 	s.gcSafePointManager = gc.NewSafePointManager(s.storage, s.cfg.PDServerCfg)
 	s.basicCluster = core.NewBasicCluster()
 	s.cluster = cluster.NewRaftCluster(ctx, s.GetMember(), s.GetBasicCluster(), s.GetStorage(), syncer.NewRegionSyncer(s), s.client, s.httpClient, s.tsoAllocatorManager)
 	keyspaceIDAllocator := id.NewAllocator(&id.AllocatorParams{
-		Client:    s.client,
-		RootPath:  s.rootPath,
-		AllocPath: keypath.KeyspaceIDAlloc(),
-		Label:     keyspace.AllocLabel,
-		Member:    s.member.MemberValue(),
-		Step:      keyspace.AllocStep,
+		Client: s.client,
+		Label:  id.KeyspaceLabel,
+		Member: s.member.MemberValue(),
+		Step:   keyspace.AllocStep,
 	})
 	if s.IsAPIServiceMode() {
 		s.keyspaceGroupManager = keyspace.NewKeyspaceGroupManager(s.ctx, s.storage, s.client)
@@ -1637,10 +1618,6 @@ func (s *Server) leaderLoop() {
 				log.Error("reload config failed", errs.ZapError(err))
 				continue
 			}
-			if !s.IsAPIServiceMode() {
-				// Check the cluster dc-location after the PD leader is elected
-				go s.tsoAllocatorManager.ClusterDCLocationChecker()
-			}
 			syncer := s.cluster.GetRegionSyncer()
 			if s.persistOptions.IsUseRegionStorage() {
 				syncer.StartSyncWithLeader(leader.GetListenUrls()[0])
@@ -1752,10 +1729,6 @@ func (s *Server) campaignLeader() {
 	// EnableLeader to accept the remaining service, such as GetStore, GetRegion.
 	s.member.EnableLeader()
 	member.ServiceMemberGauge.WithLabelValues(s.mode).Set(1)
-	if !s.IsAPIServiceMode() {
-		// Check the cluster dc-location after the PD leader is elected.
-		go s.tsoAllocatorManager.ClusterDCLocationChecker()
-	}
 	defer resetLeaderOnce.Do(func() {
 		// as soon as cancel the leadership keepalive, then other member have chance
 		// to be new leader.

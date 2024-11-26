@@ -28,6 +28,8 @@ tidb_download_url="${file_server_url}/download/builds/pingcap/tidb/${tidb_sha1}/
 tikv_download_url="${file_server_url}/download/builds/pingcap/tikv/${tikv_sha1}/centos7/tikv-server.tar.gz"
 tiflash_download_url="${file_server_url}/download/builds/pingcap/tiflash/${branch}/${tiflash_sha1}/centos7/tiflash.tar.gz"
 
+ETCD_VERSION=v3.5.15
+
 set -o nounset
 
 # See https://misc.flogisoft.com/bash/tip_colors_and_formatting.
@@ -68,6 +70,12 @@ function main() {
     tar -xzf tmp/tiflash.tar.gz -C third_bin
     mv third_bin/tiflash third_bin/_tiflash
     mv third_bin/_tiflash/* third_bin && rm -rf third_bin/_tiflash
+
+    # etcdctl
+    curl -L https://github.com/etcd-io/etcd/releases/download/${ETCD_VERSION}/etcd-${ETCD_VERSION}-linux-amd64.tar.gz -o etcd-${ETCD_VERSION}-linux-amd64.tar.gz
+    tar -xvf etcd-${ETCD_VERSION}-linux-amd64.tar.gz
+    sudo mv etcd-${ETCD_VERSION}-linux-amd64/etcdctl /usr/local/bin/
+    etcdctl version
 
     chmod +x third_bin/*
     rm -rf tmp

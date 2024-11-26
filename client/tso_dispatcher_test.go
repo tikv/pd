@@ -27,6 +27,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/client/opt"
+	sd "github.com/tikv/pd/client/servicediscovery"
 	"go.uber.org/zap/zapcore"
 )
 
@@ -47,8 +48,8 @@ func (m *mockTSOServiceProvider) getOption() *opt.Option {
 	return m.option
 }
 
-func (*mockTSOServiceProvider) getServiceDiscovery() ServiceDiscovery {
-	return NewMockPDServiceDiscovery([]string{mockStreamURL}, nil)
+func (*mockTSOServiceProvider) getServiceDiscovery() sd.ServiceDiscovery {
+	return sd.NewMockPDServiceDiscovery([]string{mockStreamURL}, nil)
 }
 
 func (m *mockTSOServiceProvider) updateConnectionCtxs(ctx context.Context, connectionCtxs *sync.Map) bool {
