@@ -230,7 +230,7 @@ func (ci *clientInner) doRequest(
 	req.Header.Set(xCallerIDKey, callerID)
 	start := time.Now()
 	var resp *http.Response
-	if _, exists := regionRequestNames[reqInfo.name]; exists {
+	if _, exists := regionRequestNames[reqInfo.name]; exists && ci.regionMetaCircuitBreaker != nil {
 		resp, err = ci.regionMetaCircuitBreaker.Execute(func() (*http.Response, error, cb.Overloading) {
 			resp, err := ci.cli.Do(req)
 			return resp, err, isOverloaded(resp)

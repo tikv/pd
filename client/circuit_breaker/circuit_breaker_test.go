@@ -156,12 +156,10 @@ func TestCircuitBreaker_Half_Open_Fail_Over_Pending_Count(t *testing.T) {
 
 func TestCircuitBreaker_ChangeSettings(t *testing.T) {
 	re := require.New(t)
-	disabledSettings := settings
-	disabledSettings.ErrorRateThresholdPct = 0
 
-	cb := NewCircuitBreaker[int]("test_cb", disabledSettings)
-	driveQPS(cb, minCountToOpen, Yes, re)
-	cb.advance(settings.ErrorRateWindow)
+	cb := NewCircuitBreaker[int]("test_cb", AlwaysOpenSettings)
+	driveQPS(cb, int(AlwaysOpenSettings.MinQPSForOpen*uint32(AlwaysOpenSettings.ErrorRateWindow.Seconds())), Yes, re)
+	cb.advance(AlwaysOpenSettings.ErrorRateWindow)
 	assertSucceeds(cb, re)
 	re.Equal(StateClosed, cb.state.stateType)
 

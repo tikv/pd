@@ -75,10 +75,11 @@ type Option struct {
 // NewOption creates a new PD client option with the default values set.
 func NewOption() *Option {
 	co := &Option{
-		Timeout:                  defaultPDTimeout,
-		MaxRetryTimes:            maxInitClusterRetries,
-		EnableTSOFollowerProxyCh: make(chan struct{}, 1),
-		InitMetrics:              true,
+		Timeout:                          defaultPDTimeout,
+		MaxRetryTimes:                    maxInitClusterRetries,
+		EnableTSOFollowerProxyCh:         make(chan struct{}, 1),
+		InitMetrics:                      true,
+		RegionMetaCircuitBreakerSettings: cb.AlwaysOpenSettings,
 	}
 
 	co.dynamicOptions[MaxTSOBatchWaitInterval].Store(defaultMaxTSOBatchWaitInterval)

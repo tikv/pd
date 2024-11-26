@@ -53,6 +53,14 @@ type Settings struct {
 	HalfOpenSuccessCount uint32
 }
 
+var AlwaysOpenSettings = Settings{
+	ErrorRateThresholdPct: 0,                // never trips
+	ErrorRateWindow:       10 * time.Second, // effectively results in testing for new settings every 10 seconds
+	MinQPSForOpen:         10,
+	CoolDownInterval:      10 * time.Second,
+	HalfOpenSuccessCount:  1,
+}
+
 // CircuitBreaker is a state machine to prevent sending requests that are likely to fail.
 type CircuitBreaker[T any] struct {
 	config *Settings
