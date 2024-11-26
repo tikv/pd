@@ -23,6 +23,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/meta_storagepb"
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/client/constants"
 	"github.com/tikv/pd/client/errs"
 	"go.uber.org/zap"
 )
@@ -380,9 +381,9 @@ func (c *client) tryResourceManagerConnect(ctx context.Context, connection *reso
 		err    error
 		stream rmpb.ResourceManager_AcquireTokenBucketsClient
 	)
-	ticker := time.NewTicker(retryInterval)
+	ticker := time.NewTicker(constants.RetryInterval)
 	defer ticker.Stop()
-	for range maxRetryTimes {
+	for range constants.MaxRetryTimes {
 		cc, err := c.resourceManagerClient()
 		if err != nil {
 			continue

@@ -29,7 +29,15 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	pd "github.com/tikv/pd/client"
+<<<<<<< HEAD
 	"github.com/tikv/pd/client/testutil"
+=======
+	"github.com/tikv/pd/client/caller"
+	"github.com/tikv/pd/client/clients/tso"
+	"github.com/tikv/pd/client/opt"
+	sd "github.com/tikv/pd/client/servicediscovery"
+	"github.com/tikv/pd/client/utils/testutil"
+>>>>>>> 176ab2364a (client: separate the TSO client implementation (#8848))
 	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/slice"
@@ -233,7 +241,7 @@ func (suite *tsoClientTestSuite) TestGetTSAsync() {
 		for _, client := range suite.clients {
 			go func(client pd.Client) {
 				defer wg.Done()
-				tsFutures := make([]pd.TSFuture, tsoRequestRound)
+				tsFutures := make([]tso.TSFuture, tsoRequestRound)
 				for j := range tsFutures {
 					tsFutures[j] = client.GetTSAsync(suite.ctx)
 				}
@@ -439,7 +447,7 @@ func (suite *tsoClientTestSuite) TestRandomShutdown() {
 
 func (suite *tsoClientTestSuite) TestGetTSWhileResettingTSOClient() {
 	re := suite.Require()
-	re.NoError(failpoint.Enable("github.com/tikv/pd/client/delayDispatchTSORequest", "return(true)"))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/clients/tso/delayDispatchTSORequest", "return(true)"))
 	var (
 		stopSignal atomic.Bool
 		wg         sync.WaitGroup
@@ -472,7 +480,7 @@ func (suite *tsoClientTestSuite) TestGetTSWhileResettingTSOClient() {
 	}
 	stopSignal.Store(true)
 	wg.Wait()
-	re.NoError(failpoint.Disable("github.com/tikv/pd/client/delayDispatchTSORequest"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/clients/tso/delayDispatchTSORequest"))
 }
 
 func TestTSOFollowerProxyWhenLeaderChanged(t *testing.T) {

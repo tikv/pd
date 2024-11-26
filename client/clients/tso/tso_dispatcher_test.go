@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package pd
+package tso
 
 import (
 	"context"
@@ -105,11 +105,18 @@ func (s *testTSODispatcherSuite) SetupTest() {
 	s.dispatcher = newTSODispatcher(context.Background(), globalDCLocation, defaultMaxTSOBatchSize, newMockTSOServiceProvider(s.option, createStream))
 	s.reqPool = &sync.Pool{
 		New: func() any {
+<<<<<<< HEAD:client/tso_dispatcher_test.go
 			return &tsoRequest{
 				done:       make(chan error, 1),
 				physical:   0,
 				logical:    0,
 				dcLocation: globalDCLocation,
+=======
+			return &Request{
+				done:     make(chan error, 1),
+				physical: 0,
+				logical:  0,
+>>>>>>> 176ab2364a (client: separate the TSO client implementation (#8848)):client/clients/tso/tso_dispatcher_test.go
 			}
 		},
 	}
@@ -145,8 +152,8 @@ func (s *testTSODispatcherSuite) TearDownTest() {
 	s.reqPool = nil
 }
 
-func (s *testTSODispatcherSuite) getReq(ctx context.Context) *tsoRequest {
-	req := s.reqPool.Get().(*tsoRequest)
+func (s *testTSODispatcherSuite) getReq(ctx context.Context) *Request {
+	req := s.reqPool.Get().(*Request)
 	req.clientCtx = context.Background()
 	req.requestCtx = ctx
 	req.physical = 0
@@ -156,19 +163,19 @@ func (s *testTSODispatcherSuite) getReq(ctx context.Context) *tsoRequest {
 	return req
 }
 
-func (s *testTSODispatcherSuite) sendReq(ctx context.Context) *tsoRequest {
+func (s *testTSODispatcherSuite) sendReq(ctx context.Context) *Request {
 	req := s.getReq(ctx)
 	s.dispatcher.push(req)
 	return req
 }
 
-func (s *testTSODispatcherSuite) reqMustNotReady(req *tsoRequest) {
+func (s *testTSODispatcherSuite) reqMustNotReady(req *Request) {
 	_, _, err := req.waitTimeout(time.Millisecond * 50)
 	s.re.Error(err)
 	s.re.ErrorIs(err, context.DeadlineExceeded)
 }
 
-func (s *testTSODispatcherSuite) reqMustReady(req *tsoRequest) (physical int64, logical int64) {
+func (s *testTSODispatcherSuite) reqMustReady(req *Request) (physical int64, logical int64) {
 	physical, logical, err := req.waitTimeout(time.Second)
 	s.re.NoError(err)
 	return physical, logical
@@ -229,7 +236,7 @@ func (s *testTSODispatcherSuite) testStaticConcurrencyImpl(concurrency int) {
 	// way. And as `reqMustNotReady` delays for a while, requests shouldn't be batched as long as there are free tokens.
 	// The first N requests (N=tokenCount) will each be a single batch, occupying a token. The last 3 are blocked,
 	// and will be batched together once there is a free token.
-	reqs := make([]*tsoRequest, 0, tokenCount+3)
+	reqs := make([]*Request, 0, tokenCount+3)
 
 	for range tokenCount + 3 {
 		req := s.sendReq(ctx)
@@ -271,11 +278,11 @@ func (s *testTSODispatcherSuite) testStaticConcurrencyImpl(concurrency int) {
 }
 
 func (s *testTSODispatcherSuite) TestConcurrentRPC() {
-	s.re.NoError(failpoint.Enable("github.com/tikv/pd/client/tsoDispatcherConcurrentModeNoDelay", "return"))
-	s.re.NoError(failpoint.Enable("github.com/tikv/pd/client/tsoDispatcherAlwaysCheckConcurrency", "return"))
+	s.re.NoError(failpoint.Enable("github.com/tikv/pd/client/clients/tso/tsoDispatcherConcurrentModeNoDelay", "return"))
+	s.re.NoError(failpoint.Enable("github.com/tikv/pd/client/clients/tso/tsoDispatcherAlwaysCheckConcurrency", "return"))
 	defer func() {
-		s.re.NoError(failpoint.Disable("github.com/tikv/pd/client/tsoDispatcherConcurrentModeNoDelay"))
-		s.re.NoError(failpoint.Disable("github.com/tikv/pd/client/tsoDispatcherAlwaysCheckConcurrency"))
+		s.re.NoError(failpoint.Disable("github.com/tikv/pd/client/clients/tso/tsoDispatcherConcurrentModeNoDelay"))
+		s.re.NoError(failpoint.Disable("github.com/tikv/pd/client/clients/tso/tsoDispatcherAlwaysCheckConcurrency"))
 	}()
 
 	s.testStaticConcurrencyImpl(1)
@@ -288,11 +295,11 @@ func (s *testTSODispatcherSuite) TestBatchDelaying() {
 	ctx := context.Background()
 	s.option.setTSOClientRPCConcurrency(2)
 
-	s.re.NoError(failpoint.Enable("github.com/tikv/pd/client/tsoDispatcherConcurrentModeNoDelay", "return"))
-	s.re.NoError(failpoint.Enable("github.com/tikv/pd/client/tsoStreamSimulateEstimatedRPCLatency", `return("12ms")`))
+	s.re.NoError(failpoint.Enable("github.com/tikv/pd/client/clients/tso/tsoDispatcherConcurrentModeNoDelay", "return"))
+	s.re.NoError(failpoint.Enable("github.com/tikv/pd/client/clients/tso/tsoStreamSimulateEstimatedRPCLatency", `return("12ms")`))
 	defer func() {
-		s.re.NoError(failpoint.Disable("github.com/tikv/pd/client/tsoDispatcherConcurrentModeNoDelay"))
-		s.re.NoError(failpoint.Disable("github.com/tikv/pd/client/tsoStreamSimulateEstimatedRPCLatency"))
+		s.re.NoError(failpoint.Disable("github.com/tikv/pd/client/clients/tso/tsoDispatcherConcurrentModeNoDelay"))
+		s.re.NoError(failpoint.Disable("github.com/tikv/pd/client/clients/tso/tsoStreamSimulateEstimatedRPCLatency"))
 	}()
 
 	// Make sure concurrency option takes effect.
@@ -301,23 +308,33 @@ func (s *testTSODispatcherSuite) TestBatchDelaying() {
 	s.reqMustReady(req)
 
 	// Trigger the check.
-	s.re.NoError(failpoint.Enable("github.com/tikv/pd/client/tsoDispatcherConcurrentModeAssertDelayDuration", `return("6ms")`))
+	s.re.NoError(failpoint.Enable("github.com/tikv/pd/client/clients/tso/tsoDispatcherConcurrentModeAssertDelayDuration", `return("6ms")`))
 	defer func() {
-		s.re.NoError(failpoint.Disable("github.com/tikv/pd/client/tsoDispatcherConcurrentModeAssertDelayDuration"))
+		s.re.NoError(failpoint.Disable("github.com/tikv/pd/client/clients/tso/tsoDispatcherConcurrentModeAssertDelayDuration"))
 	}()
 	req = s.sendReq(ctx)
 	s.streamInner.generateNext()
 	s.reqMustReady(req)
 
 	// Try other concurrency.
+<<<<<<< HEAD:client/tso_dispatcher_test.go
 	s.option.setTSOClientRPCConcurrency(3)
 	s.re.NoError(failpoint.Enable("github.com/tikv/pd/client/tsoDispatcherConcurrentModeAssertDelayDuration", `return("4ms")`))
+=======
+	s.option.SetTSOClientRPCConcurrency(3)
+	s.re.NoError(failpoint.Enable("github.com/tikv/pd/client/clients/tso/tsoDispatcherConcurrentModeAssertDelayDuration", `return("4ms")`))
+>>>>>>> 176ab2364a (client: separate the TSO client implementation (#8848)):client/clients/tso/tso_dispatcher_test.go
 	req = s.sendReq(ctx)
 	s.streamInner.generateNext()
 	s.reqMustReady(req)
 
+<<<<<<< HEAD:client/tso_dispatcher_test.go
 	s.option.setTSOClientRPCConcurrency(4)
 	s.re.NoError(failpoint.Enable("github.com/tikv/pd/client/tsoDispatcherConcurrentModeAssertDelayDuration", `return("3ms")`))
+=======
+	s.option.SetTSOClientRPCConcurrency(4)
+	s.re.NoError(failpoint.Enable("github.com/tikv/pd/client/clients/tso/tsoDispatcherConcurrentModeAssertDelayDuration", `return("3ms")`))
+>>>>>>> 176ab2364a (client: separate the TSO client implementation (#8848)):client/clients/tso/tso_dispatcher_test.go
 	req = s.sendReq(ctx)
 	s.streamInner.generateNext()
 	s.reqMustReady(req)
@@ -330,16 +347,23 @@ func BenchmarkTSODispatcherHandleRequests(b *testing.B) {
 
 	reqPool := &sync.Pool{
 		New: func() any {
+<<<<<<< HEAD:client/tso_dispatcher_test.go
 			return &tsoRequest{
 				done:       make(chan error, 1),
 				physical:   0,
 				logical:    0,
 				dcLocation: globalDCLocation,
+=======
+			return &Request{
+				done:     make(chan error, 1),
+				physical: 0,
+				logical:  0,
+>>>>>>> 176ab2364a (client: separate the TSO client implementation (#8848)):client/clients/tso/tso_dispatcher_test.go
 			}
 		},
 	}
-	getReq := func() *tsoRequest {
-		req := reqPool.Get().(*tsoRequest)
+	getReq := func() *Request {
+		req := reqPool.Get().(*Request)
 		req.clientCtx = ctx
 		req.requestCtx = ctx
 		req.physical = 0

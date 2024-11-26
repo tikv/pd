@@ -19,8 +19,11 @@ import (
 	"testing"
 	"time"
 
+<<<<<<< HEAD
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+=======
+>>>>>>> 176ab2364a (client: separate the TSO client implementation (#8848))
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/client/testutil"
 	"github.com/tikv/pd/client/tsoutil"
@@ -90,6 +93,7 @@ func TestClientWithRetry(t *testing.T) {
 	re.Error(err)
 	re.Less(time.Since(start), time.Second*10)
 }
+<<<<<<< HEAD
 
 func TestGRPCDialOption(t *testing.T) {
 	re := require.New(t)
@@ -136,3 +140,5 @@ func TestTsoRequestWait(t *testing.T) {
 	_, _, err = req.Wait()
 	re.ErrorIs(errors.Cause(err), context.Canceled)
 }
+=======
+>>>>>>> 176ab2364a (client: separate the TSO client implementation (#8848))

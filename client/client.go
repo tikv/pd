@@ -34,7 +34,15 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+<<<<<<< HEAD
 
+=======
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/tikv/pd/client/caller"
+	"github.com/tikv/pd/client/clients/metastorage"
+	"github.com/tikv/pd/client/clients/tso"
+	"github.com/tikv/pd/client/constants"
+>>>>>>> 176ab2364a (client: separate the TSO client implementation (#8848))
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/metrics"
 	"github.com/tikv/pd/client/tlsutil"
@@ -147,10 +155,25 @@ type RPCClient interface {
 	// SetExternalTimestamp sets external timestamp
 	SetExternalTimestamp(ctx context.Context, timestamp uint64) error
 
+<<<<<<< HEAD
 	// TSOClient is the TSO client.
 	TSOClient
 	// MetaStorageClient is the meta storage client.
 	MetaStorageClient
+=======
+	// WithCallerComponent returns a new RPCClient with the specified caller
+	// component. Caller component refers to the specific part or module within
+	// the process. You can set the component in two ways:
+	//   * Define it manually, like `caller.Component("DDL")`.
+	//   * Use the provided helper function, `caller.GetComponent(upperLayer)`.
+	//     The upperLayer parameter specifies the depth of the caller stack,
+	//     where 0 means the current function. Adjust the upperLayer value based
+	//     on your needs.
+	WithCallerComponent(callerComponent caller.Component) RPCClient
+
+	tso.Client
+	metastorage.Client
+>>>>>>> 176ab2364a (client: separate the TSO client implementation (#8848))
 	// KeyspaceClient manages keyspace metadata.
 	KeyspaceClient
 	// GCClient manages gcSafePointV2 and serviceSafePointV2
@@ -200,8 +223,13 @@ type serviceModeKeeper struct {
 	// triggering service mode switching concurrently.
 	sync.RWMutex
 	serviceMode     pdpb.ServiceMode
+<<<<<<< HEAD
 	tsoClient       *tsoClient
 	tsoSvcDiscovery ServiceDiscovery
+=======
+	tsoClient       *tso.Cli
+	tsoSvcDiscovery sd.ServiceDiscovery
+>>>>>>> 176ab2364a (client: separate the TSO client implementation (#8848))
 }
 
 func (k *serviceModeKeeper) close() {
@@ -212,7 +240,7 @@ func (k *serviceModeKeeper) close() {
 		k.tsoSvcDiscovery.Close()
 		fallthrough
 	case pdpb.ServiceMode_PD_SVC_MODE:
-		k.tsoClient.close()
+		k.tsoClient.Close()
 	case pdpb.ServiceMode_UNKNOWN_SVC_MODE:
 	}
 }
@@ -724,6 +752,7 @@ func (c *client) getRegionAPIClientAndContext(ctx context.Context, allowFollower
 }
 
 // GetTSAsync implements the TSOClient interface.
+<<<<<<< HEAD
 func (c *client) GetTSAsync(ctx context.Context) TSFuture {
 	return c.GetLocalTSAsync(ctx, globalDCLocation)
 }
@@ -772,6 +801,23 @@ func (c *client) dispatchTSORequestWithRetry(ctx context.Context, dcLocation str
 		req.tryDone(err)
 	}
 	return req
+=======
+func (c *client) GetTSAsync(ctx context.Context) tso.TSFuture {
+	defer trace.StartRegion(ctx, "pdclient.GetTSAsync").End()
+	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
+		span = span.Tracer().StartSpan("pdclient.GetTSAsync", opentracing.ChildOf(span.Context()))
+		defer span.Finish()
+	}
+	return c.inner.dispatchTSORequestWithRetry(ctx)
+}
+
+// GetLocalTSAsync implements the TSOClient interface.
+//
+// Deprecated: Local TSO will be completely removed in the future. Currently, regardless of the
+// parameters passed in, this method will default to returning the global TSO.
+func (c *client) GetLocalTSAsync(ctx context.Context, _ string) tso.TSFuture {
+	return c.GetTSAsync(ctx)
+>>>>>>> 176ab2364a (client: separate the TSO client implementation (#8848))
 }
 
 // GetTS implements the TSOClient interface.
