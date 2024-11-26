@@ -418,10 +418,7 @@ func (c *RaftCluster) checkTSOService() {
 					c.UnsetServiceIndependent(constant.TSOServiceName)
 				}
 			} else {
-				if err := c.stopTSOJobsIfNeeded(); err != nil {
-					log.Error("failed to stop TSO jobs", errs.ZapError(err))
-					return
-				}
+				c.stopTSOJobsIfNeeded()
 				if !c.IsServiceIndependent(constant.TSOServiceName) {
 					log.Info("TSO is provided by TSO server")
 					c.SetServiceIndependent(constant.TSOServiceName)
@@ -489,23 +486,22 @@ func (c *RaftCluster) startTSOJobsIfNeeded() error {
 	return nil
 }
 
-func (c *RaftCluster) stopTSOJobsIfNeeded() error {
+func (c *RaftCluster) stopTSOJobsIfNeeded() {
 	allocator := c.tsoAllocator.GetAllocator()
-	if allocator.IsInitialize() {
-		log.Info("closing the global TSO allocator")
-		c.tsoAllocator.ResetAllocatorGroup(true)
-		failpoint.Inject("updateAfterResetTSO", func() {
-			allocator := c.tsoAllocator.GetAllocator()
-			if err := allocator.UpdateTSO(); !errorspkg.Is(err, errs.ErrUpdateTimestamp) {
-				log.Panic("the tso update after reset should return ErrUpdateTimestamp as expected", zap.Error(err))
-			}
-			if allocator.IsInitialize() {
-				log.Panic("the allocator should be uninitialized after reset")
-			}
-		})
+	if !allocator.IsInitialize() {
+		return
 	}
-
-	return nil
+	log.Info("closing the global TSO allocator")
+	c.tsoAllocator.ResetAllocatorGroup(true)
+	failpoint.Inject("updateAfterResetTSO", func() {
+		allocator := c.tsoAllocator.GetAllocator()
+		if err := allocator.UpdateTSO(); !errorspkg.Is(err, errs.ErrUpdateTimestamp) {
+			log.Panic("the tso update after reset should return ErrUpdateTimestamp as expected", zap.Error(err))
+		}
+		if allocator.IsInitialize() {
+			log.Panic("the allocator should be uninitialized after reset")
+		}
+	})
 }
 
 // startGCTuner
@@ -851,9 +847,7 @@ func (c *RaftCluster) Stop() {
 	// For example, the cluster meets an error when starting, such as cluster is not bootstrapped.
 	// In this case, the `running` in `RaftCluster` is false, but the tso job has been started.
 	// Ref: https://github.com/tikv/pd/issues/8836
-	if err := c.stopTSOJobsIfNeeded(); err != nil {
-		log.Error("failed to stop tso jobs", errs.ZapError(err))
-	}
+	c.stopTSOJobsIfNeeded()
 	if !c.running {
 		c.Unlock()
 		return

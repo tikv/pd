@@ -2505,11 +2505,8 @@ func convertAskSplitResponse(resp *schedulingpb.AskBatchSplitResponse) *pdpb.Ask
 	}
 }
 
-// Only used for the TestLocalAllocatorLeaderChange.
-var mockLocalAllocatorLeaderChangeFlag = false
-
 // Deprecated.
-func (s *GrpcServer) SyncMaxTS(_ context.Context, request *pdpb.SyncMaxTSRequest) (*pdpb.SyncMaxTSResponse, error) {
+func (*GrpcServer) SyncMaxTS(_ context.Context, _ *pdpb.SyncMaxTSRequest) (*pdpb.SyncMaxTSResponse, error) {
 	return &pdpb.SyncMaxTSResponse{
 		Header: wrapHeader(),
 	}, nil
@@ -2644,22 +2641,6 @@ func (*GrpcServer) GetDCLocationInfo(_ context.Context, _ *pdpb.GetDCLocationInf
 	return &pdpb.GetDCLocationInfoResponse{
 		Header: wrapHeader(),
 	}, nil
-}
-
-// validateInternalRequest checks if server is closed, which is used to validate
-// the gRPC communication between PD servers internally.
-func (s *GrpcServer) validateInternalRequest(header *pdpb.RequestHeader, onlyAllowLeader bool) error {
-	if s.IsClosed() {
-		return ErrNotStarted
-	}
-	// If onlyAllowLeader is true, check whether the sender is PD leader.
-	if onlyAllowLeader {
-		leaderID := s.GetLeader().GetMemberId()
-		if leaderID != header.GetSenderId() {
-			return status.Errorf(codes.FailedPrecondition, "%s, need %d but got %d", errs.MismatchLeaderErr, leaderID, header.GetSenderId())
-		}
-	}
-	return nil
 }
 
 // for CDC compatibility, we need to initialize config path to `globalConfigPath`
