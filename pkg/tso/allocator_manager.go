@@ -128,8 +128,6 @@ type AllocatorManager struct {
 		// the number of suffix bits we need in the TSO logical part.
 		maxSuffix int32
 	}
-	// for the synchronization purpose of the allocator update checks
-	wg sync.WaitGroup
 	// for the synchronization purpose of the service loops
 	svcLoopWG sync.WaitGroup
 
@@ -285,8 +283,11 @@ func (am *AllocatorManager) AllocatorDaemon(ctx context.Context) {
 	for {
 		select {
 		case <-tsTicker.C:
+			allocatorGroup := am.mu.allocatorGroup
 			// Update the initialized TSO Allocator to advance TSO.
-			am.updateAllocator(am.mu.allocatorGroup)
+			if allocatorGroup.allocator.IsInitialize() && allocatorGroup.leadership.Check() {
+				am.updateAllocator(allocatorGroup)
+			}
 		case <-ctx.Done():
 			log.Info("exit allocator daemon", logutil.CondUint32("keyspace-group-id", am.kgID, am.kgID > 0))
 			return
@@ -297,7 +298,6 @@ func (am *AllocatorManager) AllocatorDaemon(ctx context.Context) {
 // updateAllocator is used to update the allocator in the group.
 func (am *AllocatorManager) updateAllocator(ag *allocatorGroup) {
 	defer logutil.LogPanic()
-	defer am.wg.Done()
 
 	select {
 	case <-ag.ctx.Done():
