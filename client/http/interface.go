@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	cb "github.com/tikv/pd/client/circuit_breaker"
 	"net/http"
 	"strconv"
 	"strings"
@@ -63,6 +64,7 @@ type Client interface {
 	GetClusterStatus(context.Context) (*ClusterState, error)
 	GetStatus(context.Context) (*State, error)
 	GetReplicateConfig(context.Context) (map[string]any, error)
+	UpdateCircuitBreakerSettings(apply func(config *pd.Settings))
 	/* Scheduler-related interfaces */
 	GetSchedulers(context.Context) ([]string, error)
 	CreateScheduler(ctx context.Context, name string, storeID uint64) error
@@ -539,6 +541,11 @@ func (c *client) GetReplicateConfig(ctx context.Context) (map[string]any, error)
 		return nil, err
 	}
 	return config, nil
+}
+
+// UpdateCircuitBreakerSettings updates config for circuit breaker
+func (c *client) UpdateCircuitBreakerSettings(apply func(config *cb.Settings)) {
+	c.inner.regionMetaCircuitBreaker.ChangeSettings(apply)
 }
 
 // GetAllPlacementRuleBundles gets all placement rules bundles.

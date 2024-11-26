@@ -89,6 +89,14 @@ const (
 	DeleteGCSafePointName                   = "DeleteGCSafePoint"
 )
 
+var regionRequestNames = map[string]struct{}{
+	getRegionByIDName:        {},
+	getRegionByKeyName:       {},
+	getRegionsName:           {},
+	getRegionsByKeyRangeName: {},
+	getRegionsByStoreIDName:  {},
+}
+
 type requestInfo struct {
 	callerID    string
 	name        string
