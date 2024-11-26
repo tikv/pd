@@ -28,10 +28,22 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
+<<<<<<< HEAD:client/tso_dispatcher.go
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/retry"
 	"github.com/tikv/pd/client/timerpool"
 	"github.com/tikv/pd/client/tsoutil"
+=======
+	"github.com/tikv/pd/client/constants"
+	"github.com/tikv/pd/client/errs"
+	"github.com/tikv/pd/client/metrics"
+	"github.com/tikv/pd/client/opt"
+	"github.com/tikv/pd/client/pkg/batch"
+	"github.com/tikv/pd/client/pkg/retry"
+	"github.com/tikv/pd/client/pkg/utils/timerutil"
+	"github.com/tikv/pd/client/pkg/utils/tsoutil"
+	sd "github.com/tikv/pd/client/servicediscovery"
+>>>>>>> da0000a9eb (*: move some common libraries to the client/pkg directory (#8858)):client/clients/tso/tso_dispatcher.go
 	"go.uber.org/zap"
 )
 

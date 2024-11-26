@@ -19,7 +19,11 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+<<<<<<< HEAD:client/option_test.go
 	"github.com/tikv/pd/client/testutil"
+=======
+	"github.com/tikv/pd/client/pkg/utils/testutil"
+>>>>>>> da0000a9eb (*: move some common libraries to the client/pkg directory (#8858)):client/opt/option_test.go
 )
 
 func TestDynamicOptionChange(t *testing.T) {

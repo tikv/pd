@@ -30,7 +30,12 @@ import (
 	"github.com/pingcap/kvproto/pkg/tsopb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/client/errs"
+<<<<<<< HEAD:client/tso_service_discovery.go
 	"github.com/tikv/pd/client/grpcutil"
+=======
+	"github.com/tikv/pd/client/opt"
+	"github.com/tikv/pd/client/pkg/utils/grpcutil"
+>>>>>>> da0000a9eb (*: move some common libraries to the client/pkg directory (#8858)):client/servicediscovery/tso_service_discovery.go
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 )

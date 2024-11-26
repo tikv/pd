@@ -26,6 +26,11 @@ import (
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/grpcutil"
 	"github.com/tikv/pd/client/metrics"
+<<<<<<< HEAD
+=======
+	"github.com/tikv/pd/client/opt"
+	"github.com/tikv/pd/client/pkg/utils/grpcutil"
+>>>>>>> da0000a9eb (*: move some common libraries to the client/pkg directory (#8858))
 )
 
 // MetaStorageClient is the interface for meta storage client.

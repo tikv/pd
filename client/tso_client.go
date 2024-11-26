@@ -28,6 +28,13 @@ import (
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/grpcutil"
 	"github.com/tikv/pd/client/metrics"
+<<<<<<< HEAD:client/tso_client.go
+=======
+	"github.com/tikv/pd/client/opt"
+	"github.com/tikv/pd/client/pkg/utils/grpcutil"
+	"github.com/tikv/pd/client/pkg/utils/tlsutil"
+	sd "github.com/tikv/pd/client/servicediscovery"
+>>>>>>> da0000a9eb (*: move some common libraries to the client/pkg directory (#8858)):client/clients/tso/tso_client.go
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"

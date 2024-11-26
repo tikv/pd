@@ -41,7 +41,12 @@ import (
 	"github.com/spf13/pflag"
 	"github.com/tikv/pd/client/grpcutil"
 	pdHttp "github.com/tikv/pd/client/http"
+<<<<<<< HEAD
 	"github.com/tikv/pd/client/tlsutil"
+=======
+	"github.com/tikv/pd/client/pkg/utils/grpcutil"
+	"github.com/tikv/pd/client/pkg/utils/tlsutil"
+>>>>>>> da0000a9eb (*: move some common libraries to the client/pkg directory (#8858))
 	"github.com/tikv/pd/pkg/codec"
 	"github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/statistics"

@@ -29,7 +29,15 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	pd "github.com/tikv/pd/client"
+<<<<<<< HEAD
 	"github.com/tikv/pd/client/testutil"
+=======
+	"github.com/tikv/pd/client/clients/tso"
+	"github.com/tikv/pd/client/opt"
+	"github.com/tikv/pd/client/pkg/caller"
+	"github.com/tikv/pd/client/pkg/utils/testutil"
+	sd "github.com/tikv/pd/client/servicediscovery"
+>>>>>>> da0000a9eb (*: move some common libraries to the client/pkg directory (#8858))
 	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/slice"

@@ -28,7 +28,12 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	pd "github.com/tikv/pd/client"
 	"github.com/tikv/pd/client/errs"
+<<<<<<< HEAD
 	"github.com/tikv/pd/client/retry"
+=======
+	"github.com/tikv/pd/client/pkg/retry"
+	sd "github.com/tikv/pd/client/servicediscovery"
+>>>>>>> da0000a9eb (*: move some common libraries to the client/pkg directory (#8858))
 	"go.uber.org/zap"
 )
 

@@ -30,8 +30,15 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/client/errs"
+<<<<<<< HEAD:client/pd_service_discovery_test.go
 	"github.com/tikv/pd/client/grpcutil"
 	"github.com/tikv/pd/client/testutil"
+=======
+	"github.com/tikv/pd/client/opt"
+	"github.com/tikv/pd/client/pkg/utils/grpcutil"
+	"github.com/tikv/pd/client/pkg/utils/testutil"
+	"github.com/tikv/pd/client/pkg/utils/tlsutil"
+>>>>>>> da0000a9eb (*: move some common libraries to the client/pkg directory (#8858)):client/servicediscovery/pd_service_discovery_test.go
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	pb "google.golang.org/grpc/examples/helloworld/helloworld"

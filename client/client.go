@@ -34,6 +34,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+<<<<<<< HEAD
 
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/metrics"
@@ -57,6 +58,19 @@ const (
 
 	dispatchRetryDelay = 50 * time.Millisecond
 	dispatchRetryCount = 2
+=======
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/tikv/pd/client/clients/metastorage"
+	"github.com/tikv/pd/client/clients/tso"
+	"github.com/tikv/pd/client/constants"
+	"github.com/tikv/pd/client/errs"
+	"github.com/tikv/pd/client/metrics"
+	"github.com/tikv/pd/client/opt"
+	"github.com/tikv/pd/client/pkg/caller"
+	"github.com/tikv/pd/client/pkg/utils/tlsutil"
+	sd "github.com/tikv/pd/client/servicediscovery"
+	"go.uber.org/zap"
+>>>>>>> da0000a9eb (*: move some common libraries to the client/pkg directory (#8858))
 )
 
 // Region contains information of a region's meta and its peers.

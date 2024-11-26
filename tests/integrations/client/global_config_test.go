@@ -22,6 +22,10 @@ import (
 	"time"
 
 	pd "github.com/tikv/pd/client"
+<<<<<<< HEAD
+=======
+	"github.com/tikv/pd/client/pkg/caller"
+>>>>>>> da0000a9eb (*: move some common libraries to the client/pkg directory (#8858))
 
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"

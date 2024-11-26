@@ -29,7 +29,11 @@ import (
 	"github.com/pingcap/log"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+<<<<<<< HEAD
 	"github.com/tikv/pd/client/tsoutil"
+=======
+	"github.com/tikv/pd/client/pkg/utils/tsoutil"
+>>>>>>> da0000a9eb (*: move some common libraries to the client/pkg directory (#8858))
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/tests"
 	"go.uber.org/zap"

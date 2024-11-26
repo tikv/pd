@@ -22,8 +22,15 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/require"
+<<<<<<< HEAD
 	"github.com/tikv/pd/client/testutil"
 	"github.com/tikv/pd/client/tsoutil"
+=======
+	"github.com/tikv/pd/client/opt"
+	"github.com/tikv/pd/client/pkg/caller"
+	"github.com/tikv/pd/client/pkg/utils/testutil"
+	"github.com/tikv/pd/client/pkg/utils/tsoutil"
+>>>>>>> da0000a9eb (*: move some common libraries to the client/pkg directory (#8858))
 	"go.uber.org/goleak"
 	"google.golang.org/grpc"
 )
