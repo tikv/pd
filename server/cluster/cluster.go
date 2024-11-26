@@ -491,12 +491,10 @@ func (c *RaftCluster) startTSOJobsIfNeeded() error {
 			log.Error("failed to initialize the global TSO allocator", errs.ZapError(err))
 			return err
 		}
-	} else {
+	} else if !c.running {
 		// If the global TSO allocator is already initialized, but the running flag is false,
 		// it means there maybe unexpected error happened before.
-		if !c.running {
-			log.Warn("the global TSO allocator is already initialized before, but the cluster is not running")
-		}
+		log.Warn("the global TSO allocator is already initialized before, but the cluster is not running")
 	}
 	return nil
 }
