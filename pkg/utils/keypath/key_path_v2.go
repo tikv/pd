@@ -20,13 +20,14 @@ import (
 )
 
 const (
-	leaderPathFormat              = "/pd/%d/leader"                   // "/pd/{cluster_id}/leader"
-	dcLocationPathFormat          = "/pd/%d/dc-location/%d"           // "/pd/{cluster_id}/dc-location/{member_id}"
-	memberBinaryDeployPathFormat  = "/pd/%d/member/%d/deploy_path"    // "/pd/{cluster_id}/member/{member_id}/deploy_path"
-	memberGitHashPath             = "/pd/%d/member/%d/git_hash"       // "/pd/{cluster_id}/member/{member_id}/git_hash"
-	memberBinaryVersionPathFormat = "/pd/%d/member/%d/binary_version" // "/pd/{cluster_id}/member/{member_id}/binary_version"
-	allocIDPathFormat             = "/pd/%d/alloc_id"                 // "/pd/{cluster_id}/alloc_id"
-	keyspaceAllocIDPathFormat     = "/pd/%d/keyspaces/alloc_id"       // "/pd/{cluster_id}/keyspaces/alloc_id"
+	leaderPathFormat               = "/pd/%d/leader"                    // "/pd/{cluster_id}/leader"
+	dcLocationPathFormat           = "/pd/%d/dc-location/%d"            // "/pd/{cluster_id}/dc-location/{member_id}"
+	memberBinaryDeployPathFormat   = "/pd/%d/member/%d/deploy_path"     // "/pd/{cluster_id}/member/{member_id}/deploy_path"
+	memberGitHashPath              = "/pd/%d/member/%d/git_hash"        // "/pd/{cluster_id}/member/{member_id}/git_hash"
+	memberBinaryVersionPathFormat  = "/pd/%d/member/%d/binary_version"  // "/pd/{cluster_id}/member/{member_id}/binary_version"
+	allocIDPathFormat              = "/pd/%d/alloc_id"                  // "/pd/{cluster_id}/alloc_id"
+	keyspaceAllocIDPathFormat      = "/pd/%d/keyspaces/alloc_id"        // "/pd/{cluster_id}/keyspaces/alloc_id"
+	kemberLeaderPriorityPathFormat = "/pd/%d/member/%d/leader_priority" // "/pd/{cluster_id}/member/{member_id}/leader_priority"
 
 	msLeaderPathFormat           = "/ms/%d/%s/primary"                                       // "/ms/{cluster_id}/{service_name}/primary"
 	msTsoDefaultLeaderPathFormat = "/ms/%d/tso/00000/primary"                                // "/ms/{cluster_id}/tso/00000/primary"
@@ -98,4 +99,8 @@ func AllocIDPath() string {
 // KeyspaceAllocIDPath returns the keyspace alloc id path.
 func KeyspaceAllocIDPath() string {
 	return fmt.Sprintf(keyspaceAllocIDPathFormat, ClusterID())
+}
+
+func MemberLeaderPriorityPath(id uint64) string {
+	return fmt.Sprintf(kemberLeaderPriorityPathFormat, ClusterID(), id)
 }
