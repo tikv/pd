@@ -26,7 +26,7 @@ import (
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/metrics"
 	"github.com/tikv/pd/client/opt"
-	"github.com/tikv/pd/client/utils/grpcutil"
+	"github.com/tikv/pd/client/pkg/utils/grpcutil"
 )
 
 // metaStorageClient gets the meta storage client from current PD leader.

@@ -17,7 +17,7 @@ package http
 import (
 	"fmt"
 
-	"github.com/tikv/pd/client/retry"
+	"github.com/tikv/pd/client/pkg/retry"
 	"go.uber.org/zap"
 )
 
