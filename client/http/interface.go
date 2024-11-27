@@ -64,7 +64,7 @@ type Client interface {
 	GetClusterStatus(context.Context) (*ClusterState, error)
 	GetStatus(context.Context) (*State, error)
 	GetReplicateConfig(context.Context) (map[string]any, error)
-	UpdateCircuitBreakerSettings(apply func(config *pd.Settings))
+	UpdateCircuitBreakerSettings(apply func(config *cb.Settings))
 	/* Scheduler-related interfaces */
 	GetSchedulers(context.Context) ([]string, error)
 	CreateScheduler(ctx context.Context, name string, storeID uint64) error
