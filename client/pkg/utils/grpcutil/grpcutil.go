@@ -108,6 +108,10 @@ func GetClientConn(ctx context.Context, addr string, tlsCfg *tls.Config, do ...g
 		creds := credentials.NewTLS(tlsCfg)
 		opt = grpc.WithTransportCredentials(creds)
 	}
+	u, err := url.Parse(addr)
+	if err != nil {
+		return nil, errs.ErrURLParse.Wrap(err).GenWithStackByCause()
+	}
 
 	// Add retry interceptor
 	retryOpt := grpc.WithUnaryInterceptor(UnaryBackofferInterceptor())
@@ -123,12 +127,6 @@ func GetClientConn(ctx context.Context, addr string, tlsCfg *tls.Config, do ...g
 	})
 
 	do = append(do, opt, retryOpt, backoffOpts)
-
-	u, err := url.Parse(addr)
-	if err != nil {
-		return nil, errs.ErrURLParse.Wrap(err).GenWithStackByCause()
-	}
-
 	cc, err := grpc.DialContext(ctx, u.Host, do...)
 	if err != nil {
 		return nil, errs.ErrGRPCDial.Wrap(err).GenWithStackByCause()

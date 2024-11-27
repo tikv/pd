@@ -715,7 +715,8 @@ func (c *client) GetRegion(ctx context.Context, key []byte, opts ...opt.GetRegio
 		RegionKey:   key,
 		NeedBuckets: options.NeedBuckets,
 	}
-	serviceClient, cctx := c.inner.getRegionAPIClientAndContext(ctx, options.AllowFollowerHandle && c.inner.option.GetEnableFollowerHandle())
+	serviceClient, cctx := c.inner.getRegionAPIClientAndContext(ctx,
+		options.AllowFollowerHandle && c.inner.option.GetEnableFollowerHandle())
 	if serviceClient == nil {
 		return nil, errs.ErrClientGetProtoClient
 	}
@@ -729,7 +730,7 @@ func (c *client) GetRegion(ctx context.Context, key []byte, opts ...opt.GetRegio
 		}
 		resp, err = protoClient.GetRegion(cctx, req)
 	}
-	if err = c.respForErr(metrics.CmdDurationGetRegion, start, err, resp.GetHeader()); err != nil {
+	if err = c.respForErr(metrics.CmdFailedDurationGetRegion, start, err, resp.GetHeader()); err != nil {
 		return nil, err
 	}
 	return handleRegionResponse(resp), nil
