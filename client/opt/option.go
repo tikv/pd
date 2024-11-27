@@ -201,6 +201,13 @@ func WithInitMetricsOption(initMetrics bool) ClientOption {
 	}
 }
 
+// WithBackoffer configures the client with backoffer.
+func WithBackoffer(bo *retry.Backoffer) ClientOption {
+	return func(op *Option) {
+		op.Backoffer = bo
+	}
+}
+
 // GetStoreOp represents available options when getting stores.
 type GetStoreOp struct {
 	ExcludeTombstone bool

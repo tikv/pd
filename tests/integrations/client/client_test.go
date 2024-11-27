@@ -57,6 +57,8 @@ import (
 	"github.com/tikv/pd/tests/integrations/mcs"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/goleak"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 const (
@@ -2012,14 +2014,16 @@ func TestGetRegionWithBackoff(t *testing.T) {
 
 	// Create a backoff strategy
 	bo := retry.InitialBackoffer(base, max, total)
+	bo.SetRetryableChecker(needRetry, true)
 
 	// Initialize the client with context and backoff
-	client, err := pd.NewClientWithContext(ctx, endpoints, pd.SecurityOption{}, pd.WithBackoffer(bo))
+	client, err := pd.NewClientWithContext(ctx, caller.TestComponent, endpoints, pd.SecurityOption{})
 	re.NoError(err)
 
 	// Record the start time
 	start := time.Now()
 
+	ctx = retry.WithBackoffer(ctx, bo)
 	// Call GetRegion and expect it to handle backoff internally
 	_, err = client.GetRegion(ctx, []byte("key"))
 	re.Error(err)
@@ -2033,4 +2037,12 @@ func TestGetRegionWithBackoff(t *testing.T) {
 	region, err := client.GetRegion(ctx, []byte("key"))
 	re.NoError(err)
 	re.Equal(uint64(2), region.Meta.Id) // Adjust this based on expected region
+}
+
+func needRetry(err error) bool {
+	st, ok := status.FromError(err)
+	if !ok {
+		return false
+	}
+	return st.Code() == codes.ResourceExhausted
 }

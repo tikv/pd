@@ -25,6 +25,7 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/client/errs"
+	"github.com/tikv/pd/client/pkg/retry"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/backoff"
@@ -40,6 +41,52 @@ const (
 	// FollowerHandleMetadataKey is used to mark the permit of follower handle.
 	FollowerHandleMetadataKey = "pd-allow-follower-handle"
 )
+
+// Add retry related CallOption
+type retryCallOption struct {
+	grpc.EmptyCallOption
+	bo *retry.Backoffer
+}
+
+func WithBackoffer(bo *retry.Backoffer) grpc.CallOption {
+	return &retryCallOption{bo: bo}
+}
+
+func getBackofferFromCallOptions(opts []grpc.CallOption) *retry.Backoffer {
+	for _, opt := range opts {
+		if bo, ok := opt.(*retryCallOption); ok {
+			return bo.bo
+		}
+	}
+	return nil
+}
+
+// Add retry interceptor
+func UnaryBackofferInterceptor() grpc.UnaryClientInterceptor {
+	return func(ctx context.Context, method string, req, reply interface{}, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
+		bo := getBackofferFromCallOptions(opts)
+		if bo == nil {
+			return invoker(ctx, method, req, reply, cc, opts...)
+		}
+
+		// Copy a new backoffer
+		newBo := *bo
+		var lastErr error
+		err := newBo.Exec(ctx, func() error {
+			err := invoker(ctx, method, req, reply, cc, opts...)
+			if err != nil {
+				lastErr = err
+				return err
+			}
+			return nil
+		})
+
+		if err != nil {
+			return lastErr
+		}
+		return nil
+	}
+}
 
 // GetClientConn returns a gRPC client connection.
 // creates a client connection to the given target. By default, it's
@@ -60,12 +107,11 @@ func GetClientConn(ctx context.Context, addr string, tlsCfg *tls.Config, do ...g
 		creds := credentials.NewTLS(tlsCfg)
 		opt = grpc.WithTransportCredentials(creds)
 	}
-	u, err := url.Parse(addr)
-	if err != nil {
-		return nil, errs.ErrURLParse.Wrap(err).GenWithStackByCause()
-	}
-	// Here we use a shorter MaxDelay to make the connection recover faster.
-	// The default MaxDelay is 120s, which is too long for us.
+
+	// Add retry interceptor
+	retryOpt := grpc.WithUnaryInterceptor(UnaryBackofferInterceptor())
+
+	// Add retry related connection parameters
 	backoffOpts := grpc.WithConnectParams(grpc.ConnectParams{
 		Backoff: backoff.Config{
 			BaseDelay:  time.Second,
@@ -74,7 +120,14 @@ func GetClientConn(ctx context.Context, addr string, tlsCfg *tls.Config, do ...g
 			MaxDelay:   3 * time.Second,
 		},
 	})
-	do = append(do, opt, backoffOpts)
+
+	do = append(do, opt, retryOpt, backoffOpts)
+
+	u, err := url.Parse(addr)
+	if err != nil {
+		return nil, errs.ErrURLParse.Wrap(err).GenWithStackByCause()
+	}
+
 	cc, err := grpc.DialContext(ctx, u.Host, do...)
 	if err != nil {
 		return nil, errs.ErrGRPCDial.Wrap(err).GenWithStackByCause()

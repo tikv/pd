@@ -109,57 +109,6 @@ func (bo *Backoffer) Exec(
 	return err
 }
 
-// ExecWithResult is a helper function to exec backoff with result.
-func (bo *Backoffer) ExecWithResult(
-	ctx context.Context,
-	fn func() (any, error),
-) (any, error) {
-	defer bo.resetBackoff()
-	var (
-		resp  any
-		err   error
-		after *time.Timer
-	)
-	fnName := getFunctionName(fn)
-	for {
-		resp, err = fn()
-		bo.attempt++
-		if err == nil || !bo.isRetryable(err) {
-			break
-		}
-		currentInterval := bo.nextInterval()
-		bo.nextLogTime += currentInterval
-		if bo.logInterval > 0 && bo.nextLogTime >= bo.logInterval {
-			bo.nextLogTime %= bo.logInterval
-			log.Warn("[pd.backoffer] exec fn failed and retrying",
-				zap.String("fn-name", fnName), zap.Int("retry-time", bo.attempt), zap.Error(err))
-		}
-		if after == nil {
-			after = time.NewTimer(currentInterval)
-		} else {
-			after.Reset(currentInterval)
-		}
-		select {
-		case <-ctx.Done():
-			after.Stop()
-			return nil, errors.Trace(ctx.Err())
-		case <-after.C:
-			failpoint.Inject("backOffExecute", func() {
-				testBackOffExecuteFlag = true
-			})
-		}
-		after.Stop()
-		// If the current total time exceeds the maximum total time, return the last error.
-		if bo.total > 0 {
-			bo.currentTotal += currentInterval
-			if bo.currentTotal >= bo.total {
-				break
-			}
-		}
-	}
-	return resp, err
-}
-
 // InitialBackoffer make the initial state for retrying.
 //   - `base` defines the initial time interval to wait before each retry.
 //   - `max` defines the max time interval to wait before each retry.
@@ -241,4 +190,26 @@ func TestBackOffExecute() bool {
 func getFunctionName(f any) string {
 	strs := strings.Split(runtime.FuncForPC(reflect.ValueOf(f).Pointer()).Name(), ".")
 	return strings.Split(strs[len(strs)-1], "-")[0]
+}
+
+// Define context key type
+type boCtxKey struct{}
+
+// Key used to store backoffer
+var backofferKey = boCtxKey{}
+
+// FromContext retrieves the backoffer from the context
+func FromContext(ctx context.Context) *Backoffer {
+	if ctx == nil {
+		return nil
+	}
+	if bo, ok := ctx.Value(backofferKey).(*Backoffer); ok {
+		return bo
+	}
+	return nil
+}
+
+// WithBackoffer stores the backoffer into a new context
+func WithBackoffer(ctx context.Context, bo *Backoffer) context.Context {
+	return context.WithValue(ctx, backofferKey, bo)
 }
