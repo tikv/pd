@@ -1970,15 +1970,19 @@ func (s *Server) SetServicePrimaryAddr(serviceName, addr string) {
 
 func (s *Server) initTSOPrimaryWatcher() {
 	serviceName := constant.TSOServiceName
-	tsoRootPath := keypath.TSOSvcRootPath()
-	tsoServicePrimaryKey := keypath.KeyspaceGroupPrimaryPath(tsoRootPath, constant.DefaultKeyspaceGroupID)
+	tsoServicePrimaryKey := keypath.LeaderPath(&keypath.MsParam{
+		ServiceName: constant.TSOServiceName,
+		GroupID:     constant.DefaultKeyspaceGroupID,
+	})
 	s.tsoPrimaryWatcher = s.initServicePrimaryWatcher(serviceName, tsoServicePrimaryKey)
 	s.tsoPrimaryWatcher.StartWatchLoop()
 }
 
 func (s *Server) initSchedulingPrimaryWatcher() {
 	serviceName := constant.SchedulingServiceName
-	primaryKey := keypath.SchedulingPrimaryPath()
+	primaryKey := keypath.LeaderPath(&keypath.MsParam{
+		ServiceName: constant.SchedulingServiceName,
+	})
 	s.schedulingPrimaryWatcher = s.initServicePrimaryWatcher(serviceName, primaryKey)
 	s.schedulingPrimaryWatcher.StartWatchLoop()
 }

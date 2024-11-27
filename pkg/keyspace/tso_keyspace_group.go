@@ -1151,8 +1151,10 @@ func (m *GroupManager) GetKeyspaceGroupPrimaryByID(id uint32) (string, error) {
 		return "", ErrKeyspaceGroupNotExists(id)
 	}
 
-	rootPath := keypath.TSOSvcRootPath()
-	primaryPath := keypath.KeyspaceGroupPrimaryPath(rootPath, id)
+	primaryPath := keypath.LeaderPath(&keypath.MsParam{
+		ServiceName: constant.TSOServiceName,
+		GroupID:     id,
+	})
 	leader := &tsopb.Participant{}
 	ok, _, err := etcdutil.GetProtoMsgWithModRev(m.client, primaryPath, leader)
 	if err != nil {
