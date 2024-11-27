@@ -48,6 +48,7 @@ type retryCallOption struct {
 	bo *retry.Backoffer
 }
 
+// WithBackoffer returns a CallOption that adds a backoffer to the call.
 func WithBackoffer(bo *retry.Backoffer) grpc.CallOption {
 	return &retryCallOption{bo: bo}
 }
@@ -61,9 +62,9 @@ func getBackofferFromCallOptions(opts []grpc.CallOption) *retry.Backoffer {
 	return nil
 }
 
-// Add retry interceptor
+// UnaryBackofferInterceptor is a gRPC interceptor that adds a backoffer to the call.
 func UnaryBackofferInterceptor() grpc.UnaryClientInterceptor {
-	return func(ctx context.Context, method string, req, reply interface{}, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
+	return func(ctx context.Context, method string, req, reply any, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
 		bo := getBackofferFromCallOptions(opts)
 		if bo == nil {
 			return invoker(ctx, method, req, reply, cc, opts...)

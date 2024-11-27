@@ -26,6 +26,7 @@ import (
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/metrics"
 	"github.com/tikv/pd/client/opt"
+	"github.com/tikv/pd/client/pkg/retry"
 	"github.com/tikv/pd/client/pkg/utils/grpcutil"
 )
 
@@ -78,7 +79,8 @@ func (c *innerClient) Put(ctx context.Context, key, value []byte, opts ...opt.Me
 		cancel()
 		return nil, errs.ErrClientGetMetaStorageClient
 	}
-	resp, err := cli.Put(ctx, req)
+	bo := retry.FromContext(ctx)
+	resp, err := cli.Put(ctx, req, grpcutil.WithBackoffer(bo))
 	cancel()
 
 	if err = c.respForMetaStorageErr(metrics.CmdFailedDurationPut, start, err, resp.GetHeader()); err != nil {
@@ -117,7 +119,8 @@ func (c *innerClient) Get(ctx context.Context, key []byte, opts ...opt.MetaStora
 		cancel()
 		return nil, errs.ErrClientGetMetaStorageClient
 	}
-	resp, err := cli.Get(ctx, req)
+	bo := retry.FromContext(ctx)
+	resp, err := cli.Get(ctx, req, grpcutil.WithBackoffer(bo))
 	cancel()
 
 	if err = c.respForMetaStorageErr(metrics.CmdFailedDurationGet, start, err, resp.GetHeader()); err != nil {
