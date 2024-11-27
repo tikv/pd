@@ -50,10 +50,9 @@ type Participant struct {
 	keypath.MsParam
 	leadership *election.Leadership
 	// stored as member type
-	leader   atomic.Value
-	client   *clientv3.Client
-	rootPath string
-	member   participant
+	leader atomic.Value
+	client *clientv3.Client
+	member participant
 	// memberValue is the serialized string of `member`. It will be saved in the
 	// leader key when this participant is successfully elected as the leader of
 	// the group. Every write will use it to check the leadership.
