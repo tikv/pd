@@ -72,6 +72,7 @@ func LeaderPath(p *MsParam) string {
 	return fmt.Sprintf(msLeaderPathFormat, ClusterID(), p.ServiceName)
 }
 
+// ExpectedPrimaryPath returns the expected_primary path.
 func ExpectedPrimaryPath(p *MsParam) string {
 	if p.ServiceName == "tso" {
 		if p.GroupID == 0 {
