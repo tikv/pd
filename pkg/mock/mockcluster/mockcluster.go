@@ -909,3 +909,6 @@ func (mc *Cluster) ObserveRegionsStats() {
 	storeIDs, writeBytesRates, writeKeysRates := mc.BasicCluster.GetStoresWriteRate()
 	mc.HotStat.ObserveRegionsStats(storeIDs, writeBytesRates, writeKeysRates)
 }
+
+// ResetPrepared mocks method.
+func (*Cluster) ResetPrepared() {}
