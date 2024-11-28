@@ -11,32 +11,31 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-package circuit_breaker
+package circuitbreaker
 
 import (
-	"errors"
 	"fmt"
-	"github.com/prometheus/client_golang/prometheus"
-	m "github.com/tikv/pd/client/metrics"
-	"go.uber.org/zap"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/tikv/pd/client/errs"
+
+	"github.com/prometheus/client_golang/prometheus"
+	m "github.com/tikv/pd/client/metrics"
+	"go.uber.org/zap"
+
 	"github.com/pingcap/log"
 )
 
-// ErrOpenState is returned when the CircuitBreaker is open or half-open with pending requests.
-var ErrOpenState = errors.New("circuit breaker is open")
-
 // Overloading is a type describing service return value
-type Overloading int
+type Overloading bool
 
 const (
 	// No means the service is not overloaded
-	No Overloading = iota
+	No = false
 	// Yes means the service is overloaded
-	Yes
+	Yes = true
 )
 
 // Settings describes configuration for Circuit Breaker
@@ -53,6 +52,7 @@ type Settings struct {
 	HalfOpenSuccessCount uint32
 }
 
+// AlwaysOpenSettings is a configuration that never trips the circuit breaker.
 var AlwaysOpenSettings = Settings{
 	ErrorRateThresholdPct: 0,                // never trips
 	ErrorRateWindow:       10 * time.Second, // effectively results in testing for new settings every 10 seconds
@@ -126,25 +126,10 @@ func (cb *CircuitBreaker[T]) ChangeSettings(apply func(config *Settings)) {
 // Execute calls the given function if the CircuitBreaker is closed and returns the result of execution.
 // Execute returns an error instantly if the CircuitBreaker is open.
 // https://github.com/tikv/rfcs/blob/master/text/0115-circuit-breaker.md
-func (cb *CircuitBreaker[T]) Execute(call func() (T, error, Overloading)) (T, error) {
-	result, err := cb.ExecuteAny(func() (interface{}, error, Overloading) {
-		res, err, open := call()
-		return res, err, open
-	})
-	if result == nil {
-		// this branch is required to support primitive types like int, which can't be nil
-		var defaultValue T
-		return defaultValue, err
-	} else {
-		return result.(T), err
-	}
-}
-
-// ExecuteAny is similar to Execute, but allows the caller to return any type of result.
-func (cb *CircuitBreaker[T]) ExecuteAny(call func() (interface{}, error, Overloading)) (interface{}, error) {
+func (cb *CircuitBreaker[T]) Execute(call func() (T, Overloading, error)) (T, error) {
 	state, err := cb.onRequest()
 	if err != nil {
-		var defaultValue interface{}
+		var defaultValue T
 		return defaultValue, err
 	}
 
@@ -156,8 +141,8 @@ func (cb *CircuitBreaker[T]) ExecuteAny(call func() (interface{}, error, Overloa
 		}
 	}()
 
-	result, err, open := call()
-	cb.onResult(state, open)
+	result, overloaded, err := call()
+	cb.onResult(state, overloaded)
 	return result, err
 }
 
@@ -179,6 +164,7 @@ func (cb *CircuitBreaker[T]) onResult(state *State[T], open Overloading) {
 	} // else the state moved forward so we don't need to update the counts
 }
 
+// State represents the state of CircuitBreaker.
 type State[T any] struct {
 	stateType StateType
 	cb        *CircuitBreaker[T]
@@ -200,7 +186,7 @@ func (cb *CircuitBreaker[T]) newState(now time.Time, stateType StateType) *State
 		end = now.Add(cb.config.CoolDownInterval)
 	case StateHalfOpen:
 		// we transition to HalfOpen state on the first request after the cooldown period,
-		//so we start with 1 pending request
+		// so we start with 1 pending request
 		pendingCount = 1
 	default:
 		panic("unknown state")
@@ -231,16 +217,14 @@ func (s *State[T]) onRequest(cb *CircuitBreaker[T]) (*State[T], error) {
 					zap.Uint32("observedErrorRatePct", observedErrorRatePct),
 					zap.String("config", fmt.Sprintf("%+v", cb.config)))
 				cb.fastFailCounter.Inc()
-				return cb.newState(now, StateOpen), ErrOpenState
-			} else {
-				// the error threshold is not breached or there were not enough requests to evaluate it,
-				// continue in the closed state and allow all requests
-				return cb.newState(now, StateClosed), nil
+				return cb.newState(now, StateOpen), errs.ErrCircuitBreakerOpen
 			}
-		} else {
-			// continue in closed state till ErrorRateWindow is over
-			return s, nil
+			// the error threshold is not breached or there were not enough requests to evaluate it,
+			// continue in the closed state and allow all requests
+			return cb.newState(now, StateClosed), nil
 		}
+		// continue in closed state till ErrorRateWindow is over
+		return s, nil
 	case StateOpen:
 		if s.end.Before(now) {
 			// CoolDownInterval is over, it is time to transition to half-open state
@@ -251,7 +235,7 @@ func (s *State[T]) onRequest(cb *CircuitBreaker[T]) (*State[T], error) {
 		} else {
 			// continue in the open state till CoolDownInterval is over
 			cb.fastFailCounter.Inc()
-			return s, ErrOpenState
+			return s, errs.ErrCircuitBreakerOpen
 		}
 	case StateHalfOpen:
 		// do we need some expire time here in case of one of pending requests is stuck forever?
@@ -261,7 +245,7 @@ func (s *State[T]) onRequest(cb *CircuitBreaker[T]) (*State[T], error) {
 				zap.String("name", cb.name),
 				zap.String("config", fmt.Sprintf("%+v", cb.config)))
 			cb.fastFailCounter.Inc()
-			return cb.newState(now, StateOpen), ErrOpenState
+			return cb.newState(now, StateOpen), errs.ErrCircuitBreakerOpen
 		} else if s.successCount == s.cb.config.HalfOpenSuccessCount {
 			// all probe requests are succeeded, we can move to closed state and allow all requests
 			log.Info("Circuit breaker is closed. Start allowing all requests",
@@ -275,7 +259,7 @@ func (s *State[T]) onRequest(cb *CircuitBreaker[T]) (*State[T], error) {
 		} else {
 			// continue in half-open state till all probe requests are done and fail all other requests for now
 			cb.fastFailCounter.Inc()
-			return s, ErrOpenState
+			return s, errs.ErrCircuitBreakerOpen
 		}
 	default:
 		panic("unknown state")
@@ -289,7 +273,7 @@ func (s *State[T]) onResult(open Overloading) {
 		s.cb.successCounter.Inc()
 	case Yes:
 		s.failureCount++
-		s.cb.fastFailCounter.Inc()
+		s.cb.failureCounter.Inc()
 	default:
 		panic("unknown state")
 	}

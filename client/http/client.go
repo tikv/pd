@@ -19,7 +19,6 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
-	cb "github.com/tikv/pd/client/circuit_breaker"
 	"io"
 	"net/http"
 	"time"
@@ -61,10 +60,9 @@ type clientInner struct {
 
 	// source is used to mark the source of the client creation,
 	// it will also be used in the caller ID of the inner client.
-	source                   string
-	tlsConf                  *tls.Config
-	cli                      *http.Client
-	regionMetaCircuitBreaker *cb.CircuitBreaker[*http.Response]
+	source  string
+	tlsConf *tls.Config
+	cli     *http.Client
 
 	requestCounter    *prometheus.CounterVec
 	executionDuration *prometheus.HistogramVec
@@ -188,19 +186,6 @@ func noNeedRetry(statusCode int) bool {
 		statusCode == http.StatusBadRequest
 }
 
-func isOverloaded(resp *http.Response) cb.Overloading {
-	if resp == nil {
-		// request probably didn't reach target hence don't count it
-		return cb.Yes
-	}
-	switch resp.StatusCode {
-	case http.StatusRequestTimeout, http.StatusTooManyRequests, http.StatusServiceUnavailable:
-		return cb.Yes
-	default:
-		return cb.No
-	}
-}
-
 func (ci *clientInner) doRequest(
 	ctx context.Context,
 	serverURL string, reqInfo *requestInfo,
@@ -228,17 +213,9 @@ func (ci *clientInner) doRequest(
 		opt(req.Header)
 	}
 	req.Header.Set(xCallerIDKey, callerID)
-	start := time.Now()
-	var resp *http.Response
-	if _, exists := regionRequestNames[reqInfo.name]; exists && ci.regionMetaCircuitBreaker != nil {
-		resp, err = ci.regionMetaCircuitBreaker.Execute(func() (*http.Response, error, cb.Overloading) {
-			resp, err := ci.cli.Do(req)
-			return resp, err, isOverloaded(resp)
-		})
-	} else {
-		resp, err = ci.cli.Do(req)
-	}
 
+	start := time.Now()
+	resp, err := ci.cli.Do(req)
 	if err != nil {
 		ci.reqCounter(name, networkErrorStatus)
 		log.Error("[pd] do http request failed", append(logFields, zap.Error(err))...)
@@ -322,13 +299,6 @@ func WithMetrics(
 	return func(c *client) {
 		c.inner.requestCounter = requestCounter
 		c.inner.executionDuration = executionDuration
-	}
-}
-
-// WithRegionMetaCircuitBreaker configures the client with circuit breaker for region meta calls
-func WithRegionMetaCircuitBreaker(config cb.Settings) ClientOption {
-	return func(c *client) {
-		c.inner.regionMetaCircuitBreaker = cb.NewCircuitBreaker[*http.Response]("region-meta-http", config)
 	}
 }
 

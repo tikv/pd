@@ -3,14 +3,15 @@ package pd
 import (
 	"context"
 	"crypto/tls"
-	"google.golang.org/grpc/codes"
 	"sync"
 	"time"
+
+	"google.golang.org/grpc/codes"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
-	cb "github.com/tikv/pd/client/circuit_breaker"
+	cb "github.com/tikv/pd/client/circuitbreaker"
 	"github.com/tikv/pd/client/clients/tso"
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/metrics"

@@ -1,10 +1,13 @@
-package circuit_breaker
+package circuitbreaker
 
 import (
 	"errors"
-	"github.com/stretchr/testify/require"
 	"testing"
 	"time"
+
+	"github.com/tikv/pd/client/errs"
+
+	"github.com/stretchr/testify/require"
 )
 
 // advance emulate the state machine clock moves forward by the given duration
@@ -27,15 +30,15 @@ func TestCircuitBreaker_Execute_Wrapper_Return_Values(t *testing.T) {
 	cb := NewCircuitBreaker[int]("test_cb", settings)
 	originalError := errors.New("circuit breaker is open")
 
-	result, err := cb.Execute(func() (int, error, Overloading) {
-		return 42, originalError, No
+	result, err := cb.Execute(func() (int, Overloading, error) {
+		return 42, No, originalError
 	})
 	re.Equal(err, originalError)
 	re.Equal(42, result)
 
 	// same by interpret the result as overloading error
-	result, err = cb.Execute(func() (int, error, Overloading) {
-		return 42, originalError, Yes
+	result, err = cb.Execute(func() (int, Overloading, error) {
+		return 42, Yes, originalError
 	})
 	re.Equal(err, originalError)
 	re.Equal(42, result)
@@ -55,7 +58,7 @@ func TestCircuitBreaker_OpenState(t *testing.T) {
 func TestCircuitBreaker_OpenState_Not_Enough_QPS(t *testing.T) {
 	re := require.New(t)
 	cb := NewCircuitBreaker[int]("test_cb", settings)
-	re.Equal(StateClosed, cb.state)
+	re.Equal(StateClosed, cb.state.stateType)
 	driveQPS(cb, minCountToOpen/2, Yes, re)
 	cb.advance(settings.ErrorRateWindow)
 	assertSucceeds(cb, re)
@@ -99,8 +102,8 @@ func TestCircuitBreaker_Half_Open_To_Open(t *testing.T) {
 	cb.advance(settings.CoolDownInterval)
 	assertSucceeds(cb, re)
 	re.Equal(StateHalfOpen, cb.state.stateType)
-	_, err := cb.Execute(func() (int, error, Overloading) {
-		return 42, nil, Yes // this trip circuit breaker again
+	_, err := cb.Execute(func() (int, Overloading, error) {
+		return 42, Yes, nil // this trip circuit breaker again
 	})
 	re.NoError(err)
 	re.Equal(StateHalfOpen, cb.state.stateType)
@@ -122,7 +125,7 @@ func TestCircuitBreaker_Half_Open_Fail_Over_Pending_Count(t *testing.T) {
 	var started []chan bool
 	var waited []chan bool
 	var ended []chan bool
-	for i := 0; i < int(settings.HalfOpenSuccessCount); i++ {
+	for range int(settings.HalfOpenSuccessCount) {
 		start := make(chan bool)
 		wait := make(chan bool)
 		end := make(chan bool)
@@ -133,20 +136,20 @@ func TestCircuitBreaker_Half_Open_Fail_Over_Pending_Count(t *testing.T) {
 			defer func() {
 				end <- true
 			}()
-			_, err := cb.Execute(func() (int, error, Overloading) {
+			_, err := cb.Execute(func() (int, Overloading, error) {
 				start <- true
 				<-wait
-				return 42, nil, No
+				return 42, No, nil
 			})
 			re.NoError(err)
 		}()
 	}
-	for i := 0; i < len(started); i++ {
+	for i := range started {
 		<-started[i]
 	}
 	assertFastFail(cb, re)
 	re.Equal(StateHalfOpen, cb.state.stateType)
-	for i := 0; i < len(ended); i++ {
+	for i := range ended {
 		waited[i] <- true
 		<-ended[i]
 	}
@@ -175,9 +178,9 @@ func TestCircuitBreaker_ChangeSettings(t *testing.T) {
 }
 
 func driveQPS(cb *CircuitBreaker[int], count int, overload Overloading, re *require.Assertions) {
-	for i := 0; i < count; i++ {
-		_, err := cb.Execute(func() (int, error, Overloading) {
-			return 42, nil, overload
+	for range count {
+		_, err := cb.Execute(func() (int, Overloading, error) {
+			return 42, overload, nil
 		})
 		re.NoError(err)
 	}
@@ -185,18 +188,18 @@ func driveQPS(cb *CircuitBreaker[int], count int, overload Overloading, re *requ
 
 func assertFastFail(cb *CircuitBreaker[int], re *require.Assertions) {
 	var executed = false
-	_, err := cb.Execute(func() (int, error, Overloading) {
+	_, err := cb.Execute(func() (int, Overloading, error) {
 		executed = true
-		return 42, nil, No
+		return 42, No, nil
 	})
-	re.Equal(err, ErrOpenState)
+	re.Equal(err, errs.ErrCircuitBreakerOpen)
 	re.False(executed)
 }
 
 func assertSucceeds(cb *CircuitBreaker[int], re *require.Assertions) {
-	result, err := cb.Execute(func() (int, error, Overloading) {
-		return 42, nil, No
+	result, err := cb.Execute(func() (int, Overloading, error) {
+		return 42, No, nil
 	})
 	re.NoError(err)
-	re.Equal(result, 42)
+	re.Equal(42, result)
 }

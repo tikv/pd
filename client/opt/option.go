@@ -15,9 +15,10 @@
 package opt
 
 import (
-	cb "github.com/tikv/pd/client/circuit_breaker"
 	"sync/atomic"
 	"time"
+
+	cb "github.com/tikv/pd/client/circuitbreaker"
 
 	"github.com/pingcap/errors"
 	"github.com/prometheus/client_golang/prometheus"

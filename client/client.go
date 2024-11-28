@@ -18,12 +18,13 @@ import (
 	"context"
 	"encoding/hex"
 	"fmt"
-	"github.com/tikv/pd/client/circuit_breaker"
 	"net/url"
 	"runtime/trace"
 	"strings"
 	"sync"
 	"time"
+
+	cb "github.com/tikv/pd/client/circuitbreaker"
 
 	"github.com/opentracing/opentracing-go"
 	"github.com/pingcap/errors"
@@ -523,7 +524,7 @@ func (c *client) UpdateOption(option opt.DynamicOption, value any) error {
 		}
 		c.inner.option.SetTSOClientRPCConcurrency(value)
 	case opt.RegionMetadataCircuitBreakerSettings:
-		applySettingsChange, ok := value.(func(config *circuit_breaker.Settings))
+		applySettingsChange, ok := value.(func(config *cb.Settings))
 		if !ok {
 			return errors.New("[pd] invalid value type for RegionMetadataCircuitBreakerSettings option, it should be pd.Settings")
 		}
@@ -722,9 +723,9 @@ func (c *client) GetRegion(ctx context.Context, key []byte, opts ...opt.GetRegio
 	if serviceClient == nil {
 		return nil, errs.ErrClientGetProtoClient
 	}
-	resp, err := c.inner.regionMetaCircuitBreaker.Execute(func() (*pdpb.GetRegionResponse, error, circuit_breaker.Overloading) {
+	resp, err := c.inner.regionMetaCircuitBreaker.Execute(func() (*pdpb.GetRegionResponse, cb.Overloading, error) {
 		region, err := pdpb.NewPDClient(serviceClient.GetClientConn()).GetRegion(cctx, req)
-		return region, err, isOverloaded(err)
+		return region, isOverloaded(err), err
 	})
 	if serviceClient.NeedRetry(resp.GetHeader().GetError(), err) {
 		protoClient, cctx := c.getClientAndContext(ctx)
@@ -765,9 +766,9 @@ func (c *client) GetPrevRegion(ctx context.Context, key []byte, opts ...opt.GetR
 	if serviceClient == nil {
 		return nil, errs.ErrClientGetProtoClient
 	}
-	resp, err := c.inner.regionMetaCircuitBreaker.Execute(func() (*pdpb.GetRegionResponse, error, circuit_breaker.Overloading) {
+	resp, err := c.inner.regionMetaCircuitBreaker.Execute(func() (*pdpb.GetRegionResponse, cb.Overloading, error) {
 		resp, err := pdpb.NewPDClient(serviceClient.GetClientConn()).GetPrevRegion(cctx, req)
-		return resp, err, isOverloaded(err)
+		return resp, isOverloaded(err), err
 	})
 	if serviceClient.NeedRetry(resp.GetHeader().GetError(), err) {
 		protoClient, cctx := c.getClientAndContext(ctx)
@@ -808,9 +809,9 @@ func (c *client) GetRegionByID(ctx context.Context, regionID uint64, opts ...opt
 	if serviceClient == nil {
 		return nil, errs.ErrClientGetProtoClient
 	}
-	resp, err := c.inner.regionMetaCircuitBreaker.Execute(func() (*pdpb.GetRegionResponse, error, circuit_breaker.Overloading) {
+	resp, err := c.inner.regionMetaCircuitBreaker.Execute(func() (*pdpb.GetRegionResponse, cb.Overloading, error) {
 		resp, err := pdpb.NewPDClient(serviceClient.GetClientConn()).GetRegionByID(cctx, req)
-		return resp, err, isOverloaded(err)
+		return resp, isOverloaded(err), err
 	})
 	if serviceClient.NeedRetry(resp.GetHeader().GetError(), err) {
 		protoClient, cctx := c.getClientAndContext(ctx)
