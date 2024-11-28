@@ -25,6 +25,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/syncutil"
 )
 
+// prepareChecker is used to check if the coordinator has finished cluster information preparation.
 type prepareChecker struct {
 	syncutil.RWMutex
 	start              time.Time
@@ -40,13 +41,13 @@ func newPrepareChecker(totalRegionCountFn func() (int, error)) *prepareChecker {
 }
 
 // Before starting up the scheduler, we need to take the proportion of the regions on each store into consideration.
-func (checker *prepareChecker) check(c *core.BasicCluster) bool {
+func (checker *prepareChecker) Check(c *core.BasicCluster) bool {
 	checker.Lock()
 	defer checker.Unlock()
 	if checker.prepared {
 		return true
 	}
-	if time.Since(checker.start) > CollectTimeout {
+	if time.Since(checker.start) > collectTimeout {
 		checker.prepared = true
 		return true
 	}
@@ -92,4 +93,12 @@ func (checker *prepareChecker) SetPrepared() {
 	checker.Lock()
 	defer checker.Unlock()
 	checker.prepared = true
+}
+
+// ResetPrepared is for test purpose
+func (checker *prepareChecker) ResetPrepared() {
+	checker.Lock()
+	defer checker.Unlock()
+	checker.prepared = false
+	checker.start = time.Now()
 }

@@ -37,6 +37,7 @@ import (
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/response"
+	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
@@ -171,7 +172,6 @@ func (suite *middlewareTestSuite) TestRequestInfoMiddleware() {
 	resp.Body.Close()
 	re.NoError(err)
 	re.Equal(http.StatusOK, resp.StatusCode)
-
 	re.Equal("Profile", resp.Header.Get("service-label"))
 	re.JSONEq("{\"seconds\":[\"1\"]}", resp.Header.Get("url-param"))
 	re.JSONEq("{\"testkey\":\"testvalue\"}", resp.Header.Get("body-param"))
@@ -1284,4 +1284,79 @@ func sendRequest(re *require.Assertions, url string, method string, statusCode i
 	})
 
 	return output
+}
+
+func TestDeleteAllRegionCacheScheduling(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster, err := tests.NewTestCluster(ctx, 1)
+	re.NoError(err)
+	defer cluster.Destroy()
+
+	// Initialize the cluster
+	re.NoError(cluster.RunInitialServers())
+	re.NotEmpty(cluster.WaitLeader())
+	leaderServer := cluster.GetLeaderServer()
+	re.NotNil(leaderServer)
+	re.NoError(leaderServer.BootstrapCluster())
+	rc := leaderServer.GetRaftCluster()
+	re.NotNil(rc)
+
+	// Add 3 storage nodes
+	for i := uint64(1); i <= 3; i++ {
+		store := &metapb.Store{
+			Id:            i,
+			Address:       fmt.Sprintf("tikv%d", i),
+			State:         metapb.StoreState_Up,
+			NodeState:     metapb.NodeState_Serving,
+			LastHeartbeat: time.Now().UnixNano(),
+		}
+		tests.MustPutStore(re, cluster, store)
+	}
+
+	// Create a test region
+	region := &metapb.Region{
+		Id:       2,
+		StartKey: []byte(""),
+		EndKey:   []byte(""),
+		RegionEpoch: &metapb.RegionEpoch{
+			ConfVer: 1,
+			Version: 1,
+		},
+		Peers: []*metapb.Peer{
+			{Id: 11, StoreId: 1, Role: metapb.PeerRole_Voter},
+			{Id: 12, StoreId: 2, Role: metapb.PeerRole_Voter},
+		},
+	}
+	regionInfo := core.NewRegionInfo(region, region.Peers[0], core.SetSource(core.Heartbeat))
+
+	// Wait for the cluster to be ready
+	testutil.Eventually(re, func() bool {
+		return rc.GetCoordinator() != nil
+	})
+	rc.HandleRegionHeartbeat(regionInfo)
+	testutil.Eventually(re, func() bool {
+		return rc.GetCoordinator().GetPrepareChecker().IsPrepared()
+	})
+
+	testutil.Eventually(re, func() bool {
+		count := rc.GetOperatorController().OperatorCount(operator.OpSplit)
+		return count > 0
+	})
+
+	// Call the delete API and verify
+	addr := leaderServer.GetAddr() + "/pd/api/v1/admin/cache/regions"
+	output := sendRequest(re, addr, http.MethodDelete, http.StatusOK)
+	re.Contains(string(output), "All regions are removed from server cache")
+	rc.GetOperatorController().RemoveOperators()
+	re.Equal(0, int(rc.GetOperatorController().OperatorCount(operator.OpSplit)))
+
+	// Simulate continuous heartbeat and verify scheduling recovery
+	rc.HandleRegionHeartbeat(regionInfo)
+
+	testutil.Eventually(re, func() bool {
+		count := rc.GetOperatorController().OperatorCount(operator.OpSplit)
+		return count > 0
+	})
 }

@@ -35,7 +35,6 @@ import (
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/operator"
-	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
 )
@@ -93,12 +92,16 @@ type Controller struct {
 	// patrolRegionScanLimit is the limit of regions to scan.
 	// It is calculated by the number of regions.
 	patrolRegionScanLimit int
+	prepareChecker        *sche.PrepareChecker
 	metrics               *checkerControllerMetrics
 }
 
 // NewController create a new Controller.
-func NewController(ctx context.Context, cluster sche.CheckerCluster, conf config.CheckerConfigProvider, ruleManager *placement.RuleManager, labeler *labeler.RegionLabeler, opController *operator.Controller) *Controller {
+func NewController(ctx context.Context, cluster sche.CheckerCluster, opController *operator.Controller, prepareChecker *sche.PrepareChecker) *Controller {
 	pendingProcessedRegions := cache.NewIDTTL(ctx, time.Minute, 3*time.Minute)
+	conf := cluster.GetCheckerConfig()
+	ruleManager := cluster.GetRuleManager()
+	labeler := cluster.GetRegionLabeler()
 	c := &Controller{
 		ctx:                     ctx,
 		cluster:                 cluster,
@@ -116,6 +119,7 @@ func NewController(ctx context.Context, cluster sche.CheckerCluster, conf config
 		patrolRegionContext:     &PatrolRegionContext{},
 		interval:                cluster.GetCheckerConfig().GetPatrolRegionInterval(),
 		patrolRegionScanLimit:   calculateScanLimit(cluster),
+		prepareChecker:          prepareChecker,
 		metrics:                 newCheckerControllerMetrics(),
 	}
 	c.duration.Store(time.Duration(0))
@@ -140,6 +144,9 @@ func (c *Controller) PatrolRegions() {
 		case <-ticker.C:
 			c.updateTickerIfNeeded(ticker)
 			c.updatePatrolWorkersIfNeeded()
+			if !c.prepareChecker.IsPrepared() {
+				continue
+			}
 			if c.cluster.IsSchedulingHalted() {
 				for len(c.patrolRegionContext.regionChan) > 0 {
 					<-c.patrolRegionContext.regionChan

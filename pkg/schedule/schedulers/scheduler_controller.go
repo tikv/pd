@@ -57,10 +57,11 @@ type Controller struct {
 	// which will only be initialized and used in the microservice env now.
 	schedulerHandlers map[string]http.Handler
 	opController      *operator.Controller
+	prepareChecker    *sche.PrepareChecker
 }
 
 // NewController creates a scheduler controller.
-func NewController(ctx context.Context, cluster sche.SchedulerCluster, storage endpoint.ConfigStorage, opController *operator.Controller) *Controller {
+func NewController(ctx context.Context, cluster sche.SchedulerCluster, storage endpoint.ConfigStorage, opController *operator.Controller, prepareChecker *sche.PrepareChecker) *Controller {
 	return &Controller{
 		ctx:               ctx,
 		cluster:           cluster,
@@ -68,6 +69,7 @@ func NewController(ctx context.Context, cluster sche.SchedulerCluster, storage e
 		schedulers:        make(map[string]*ScheduleController),
 		schedulerHandlers: make(map[string]http.Handler),
 		opController:      opController,
+		prepareChecker:    prepareChecker,
 	}
 }
 
@@ -369,6 +371,9 @@ func (c *Controller) runScheduler(s *ScheduleController) {
 	for {
 		select {
 		case <-ticker.C:
+			if !c.prepareChecker.IsPrepared() {
+				continue
+			}
 			diagnosable := s.IsDiagnosticAllowed()
 			if !s.AllowSchedule(diagnosable) {
 				continue

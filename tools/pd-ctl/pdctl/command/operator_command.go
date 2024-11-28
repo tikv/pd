@@ -274,13 +274,13 @@ func NewAddLearnerCommand() *cobra.Command {
 
 func addLearnerCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) != 2 {
-		fmt.Println(cmd.UsageString())
+		cmd.Println(cmd.UsageString())
 		return
 	}
 
 	ids, err := parseUint64s(args)
 	if err != nil {
-		fmt.Println(err)
+		cmd.Println(err)
 		return
 	}
 

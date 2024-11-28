@@ -1927,9 +1927,12 @@ func TestExternalTimestamp(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+
 	tc, err := tests.NewTestCluster(ctx, 1)
 	defer tc.Destroy()
 	re.NoError(err)
+	fname := testutil.InitTempFileLogger("debug")
+	defer os.RemoveAll(fname)
 	err = tc.RunInitialServers()
 	re.NoError(err)
 	tc.WaitLeader()
@@ -2061,8 +2064,6 @@ func TestPatrolRegionConfigChange(t *testing.T) {
 		endKey := []byte(strconv.Itoa(i * 2))
 		tests.MustPutRegion(re, tc, uint64(i), uint64(i%3+1), startKey, endKey)
 	}
-	fname := testutil.InitTempFileLogger("debug")
-	defer os.RemoveAll(fname)
 	checkLog(re, fname, "coordinator starts patrol regions")
 
 	// test change patrol region interval
