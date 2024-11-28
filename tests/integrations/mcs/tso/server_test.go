@@ -182,11 +182,8 @@ func checkTSOPath(re *require.Assertions, isKeyspaceEnabled bool) {
 	re.NoError(pdLeader.BootstrapCluster())
 	backendEndpoints := pdLeader.GetAddr()
 	client := pdLeader.GetEtcdClient()
-	if isKeyspaceEnabled {
-		re.Equal(0, getEtcdTimestampKeyNum(re, client))
-	} else {
-		re.Equal(1, getEtcdTimestampKeyNum(re, client))
-	}
+	// PD will provide TSO service, so etcd has one key related to the timestamp.
+	re.Equal(1, getEtcdTimestampKeyNum(re, client))
 
 	_, cleanup := tests.StartSingleTSOTestServer(ctx, re, backendEndpoints, tempurl.Alloc())
 	defer cleanup()
@@ -277,12 +274,18 @@ func TestForwardTSORelated(t *testing.T) {
 	cfg := leaderServer.GetMicroServiceConfig().Clone()
 	cfg.EnableTSODynamicSwitching = false
 	leaderServer.SetMicroServiceConfig(*cfg)
-	// Unable to use the tso-related interface without tso server
-	suite.checkUnavailableTSO(re)
+	suite.checkAvailableTSO(re)
+	// If EnableTSODynamicSwitching is false, the tso server will be provided by PD.
+	// The tso server won't affect the PD.
 	tc, err := tests.NewTestTSOCluster(suite.ctx, 1, suite.backendEndpoints)
 	re.NoError(err)
 	defer tc.Destroy()
 	tc.WaitForDefaultPrimaryServing(re)
+	suite.checkAvailableTSO(re)
+
+	cfg = leaderServer.GetMicroServiceConfig().Clone()
+	cfg.EnableTSODynamicSwitching = true
+	leaderServer.SetMicroServiceConfig(*cfg)
 	suite.checkAvailableTSO(re)
 }
 
@@ -463,17 +466,6 @@ func (suite *APIServerForward) addRegions() {
 	}
 }
 
-func (suite *APIServerForward) checkUnavailableTSO(re *require.Assertions) {
-	_, _, err := suite.pdClient.GetTS(suite.ctx)
-	re.Error(err)
-	// try to update gc safe point
-	_, err = suite.pdClient.UpdateServiceGCSafePoint(suite.ctx, "a", 1000, 1)
-	re.Error(err)
-	// try to set external ts
-	err = suite.pdClient.SetExternalTimestamp(suite.ctx, 1000)
-	re.Error(err)
-}
-
 func (suite *APIServerForward) checkAvailableTSO(re *require.Assertions) {
 	mcs.WaitForTSOServiceAvailable(suite.ctx, re, suite.pdClient)
 	// try to get ts
@@ -644,10 +636,10 @@ func TestTSOServiceSwitch(t *testing.T) {
 
 	// Wait for the configuration change to take effect
 	time.Sleep(300 * time.Millisecond)
-	// Verify PD is not providing TSO service multiple times
+	// PD should provide TSO service
 	for range 10 {
 		err = checkTSOMonotonic(ctx, pdClient, &globalLastTS, 1)
-		re.Error(err, "TSO service should not be available")
+		re.NoError(err, "TSO service should not be available")
 		time.Sleep(10 * time.Millisecond)
 	}
 
@@ -657,7 +649,7 @@ func TestTSOServiceSwitch(t *testing.T) {
 	cfg.EnableTSODynamicSwitching = true
 	pdLeader.GetServer().SetMicroServiceConfig(*cfg)
 
-	// Wait for PD to detect the change
+	// Wait for PD to detect the change, PD will keep providing TSO service
 	time.Sleep(300 * time.Millisecond)
 
 	// Verify PD is now providing TSO service and timestamps are monotonically increasing
