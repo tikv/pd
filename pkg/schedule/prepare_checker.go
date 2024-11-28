@@ -86,3 +86,10 @@ func (checker *prepareChecker) SetPrepared() {
 	defer checker.Unlock()
 	checker.prepared = true
 }
+
+// ResetPrepared is for test purpose
+func (checker *prepareChecker) ResetPrepared() {
+	checker.Lock()
+	defer checker.Unlock()
+	checker.prepared = false
+}
