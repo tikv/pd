@@ -169,7 +169,6 @@ func (suite *middlewareTestSuite) TestRequestInfoMiddleware() {
 	resp.Body.Close()
 	re.NoError(err)
 	re.Equal(http.StatusOK, resp.StatusCode)
-
 	re.Equal("Profile", resp.Header.Get("service-label"))
 	re.Equal("{\"seconds\":[\"1\"]}", resp.Header.Get("url-param"))
 	re.Equal("{\"testkey\":\"testvalue\"}", resp.Header.Get("body-param"))

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package schedule
+package core
 
 import (
 	"time"
@@ -23,31 +23,33 @@ import (
 	"go.uber.org/zap"
 )
 
-type prepareChecker struct {
+const collectTimeout = 5 * time.Minute
+
+// PrepareChecker is used to check if the coordinator has finished cluster information preparation.
+type PrepareChecker struct {
 	syncutil.RWMutex
 	start    time.Time
 	prepared bool
 }
 
-func newPrepareChecker() *prepareChecker {
-	return &prepareChecker{
+// NewPrepareChecker creates a new PrepareChecker.
+func NewPrepareChecker() *PrepareChecker {
+	return &PrepareChecker{
 		start: time.Now(),
 	}
 }
 
-// Before starting up the scheduler, we need to take the proportion of the regions on each store into consideration.
-func (checker *prepareChecker) check(c *core.BasicCluster, collectWaitTime ...time.Duration) bool {
-	checker.Lock()
-	defer checker.Unlock()
-	if checker.prepared {
+// Check checks if the coordinator has finished cluster information preparation.
+func (checker *PrepareChecker) Check(c *core.BasicCluster) bool {
+	if checker.IsPrepared() {
 		return true
 	}
+	checker.Lock()
+	defer checker.Unlock()
+
 	if time.Since(checker.start) > collectTimeout {
 		checker.prepared = true
 		return true
-	}
-	if len(collectWaitTime) > 0 && time.Since(checker.start) < collectWaitTime[0] {
-		return false
 	}
 	notLoadedFromRegionsCnt := c.GetClusterNotFromStorageRegionsCnt()
 	totalRegionsCnt := c.GetTotalRegionCount()
@@ -61,7 +63,7 @@ func (checker *prepareChecker) check(c *core.BasicCluster, collectWaitTime ...ti
 		}
 		storeID := store.GetID()
 		// It is used to avoid sudden scheduling when scheduling service is just started.
-		if len(collectWaitTime) > 0 && (float64(store.GetStoreStats().GetRegionCount())*core.CollectFactor > float64(c.GetNotFromStorageRegionsCntByStore(storeID))) {
+		if float64(store.GetStoreStats().GetRegionCount())*core.CollectFactor > float64(c.GetNotFromStorageRegionsCntByStore(storeID)) {
 			return false
 		}
 		if !c.IsStorePrepared(storeID) {
@@ -74,22 +76,23 @@ func (checker *prepareChecker) check(c *core.BasicCluster, collectWaitTime ...ti
 }
 
 // IsPrepared returns whether the coordinator is prepared.
-func (checker *prepareChecker) IsPrepared() bool {
+func (checker *PrepareChecker) IsPrepared() bool {
 	checker.RLock()
 	defer checker.RUnlock()
 	return checker.prepared
 }
 
 // SetPrepared is for test purpose
-func (checker *prepareChecker) SetPrepared() {
+func (checker *PrepareChecker) SetPrepared() {
 	checker.Lock()
 	defer checker.Unlock()
 	checker.prepared = true
 }
 
 // ResetPrepared is for test purpose
-func (checker *prepareChecker) ResetPrepared() {
+func (checker *PrepareChecker) ResetPrepared() {
 	checker.Lock()
 	defer checker.Unlock()
 	checker.prepared = false
+	checker.start = time.Now()
 }

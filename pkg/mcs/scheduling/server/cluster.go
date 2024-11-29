@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/pingcap/errors"
-	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/schedulingpb"
@@ -67,7 +66,6 @@ type Cluster struct {
 const (
 	regionLabelGCInterval = time.Hour
 	requestTimeout        = 3 * time.Second
-	collectWaitTime       = time.Minute
 
 	// heartbeat relative const
 	heartbeatTaskRunner = "heartbeat-task-runner"
@@ -491,12 +489,7 @@ func (c *Cluster) runUpdateStoreStats() {
 func (c *Cluster) runCoordinator() {
 	defer logutil.LogPanic()
 	defer c.wg.Done()
-	// force wait for 1 minute to make prepare checker won't be directly skipped
-	runCollectWaitTime := collectWaitTime
-	failpoint.Inject("changeRunCollectWaitTime", func() {
-		runCollectWaitTime = 1 * time.Second
-	})
-	c.coordinator.RunUntilStop(runCollectWaitTime)
+	c.coordinator.RunUntilStop()
 }
 
 func (c *Cluster) runMetricsCollectionJob() {
