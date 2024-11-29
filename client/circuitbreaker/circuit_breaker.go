@@ -71,6 +71,7 @@ type CircuitBreaker[T any] struct {
 
 	successCounter  prometheus.Counter
 	failureCounter  prometheus.Counter
+	overloadCounter prometheus.Counter
 	fastFailCounter prometheus.Counter
 }
 
@@ -109,7 +110,8 @@ func NewCircuitBreaker[T any](name string, st Settings) *CircuitBreaker[T] {
 
 	metricName := replacer.Replace(name)
 	cb.successCounter = m.CircuitBreakerCounters.WithLabelValues(metricName, "success")
-	cb.failureCounter = m.CircuitBreakerCounters.WithLabelValues(metricName, "failure")
+	cb.failureCounter = m.CircuitBreakerCounters.WithLabelValues(metricName, "error")
+	cb.overloadCounter = m.CircuitBreakerCounters.WithLabelValues(metricName, "overload")
 	cb.fastFailCounter = m.CircuitBreakerCounters.WithLabelValues(metricName, "fast_fail")
 	return cb
 }
@@ -129,6 +131,7 @@ func (cb *CircuitBreaker[T]) ChangeSettings(apply func(config *Settings)) {
 func (cb *CircuitBreaker[T]) Execute(call func() (T, Overloading, error)) (T, error) {
 	state, err := cb.onRequest()
 	if err != nil {
+		cb.fastFailCounter.Inc()
 		var defaultValue T
 		return defaultValue, err
 	}
@@ -136,12 +139,14 @@ func (cb *CircuitBreaker[T]) Execute(call func() (T, Overloading, error)) (T, er
 	defer func() {
 		e := recover()
 		if e != nil {
+			cb.emitMetric(Yes, err)
 			cb.onResult(state, Yes)
 			panic(e)
 		}
 	}()
 
 	result, overloaded, err := call()
+	cb.emitMetric(overloaded, err)
 	cb.onResult(state, overloaded)
 	return result, err
 }
@@ -155,13 +160,24 @@ func (cb *CircuitBreaker[T]) onRequest() (*State[T], error) {
 	return state, err
 }
 
-func (cb *CircuitBreaker[T]) onResult(state *State[T], open Overloading) {
+func (cb *CircuitBreaker[T]) onResult(state *State[T], overloaded Overloading) {
 	cb.mutex.Lock()
 	defer cb.mutex.Unlock()
 
-	if cb.state == state {
-		state.onResult(open)
-	} // else the state moved forward so we don't need to update the counts
+	// even if the circuit breaker already moved to a new state while the request was in progress,
+	// it is still ok to update the old state, but it is not relevant anymore
+	state.onResult(overloaded)
+}
+
+func (cb *CircuitBreaker[T]) emitMetric(overloaded Overloading, err error) {
+	if err == nil {
+		cb.successCounter.Inc()
+	} else {
+		cb.failureCounter.Inc()
+	}
+	if overloaded {
+		cb.overloadCounter.Inc()
+	}
 }
 
 // State represents the state of CircuitBreaker.
@@ -216,7 +232,6 @@ func (s *State[T]) onRequest(cb *CircuitBreaker[T]) (*State[T], error) {
 					zap.String("name", cb.name),
 					zap.Uint32("observedErrorRatePct", observedErrorRatePct),
 					zap.String("config", fmt.Sprintf("%+v", cb.config)))
-				cb.fastFailCounter.Inc()
 				return cb.newState(now, StateOpen), errs.ErrCircuitBreakerOpen
 			}
 			// the error threshold is not breached or there were not enough requests to evaluate it,
@@ -234,7 +249,6 @@ func (s *State[T]) onRequest(cb *CircuitBreaker[T]) (*State[T], error) {
 			return cb.newState(now, StateHalfOpen), nil
 		} else {
 			// continue in the open state till CoolDownInterval is over
-			cb.fastFailCounter.Inc()
 			return s, errs.ErrCircuitBreakerOpen
 		}
 	case StateHalfOpen:
@@ -244,7 +258,6 @@ func (s *State[T]) onRequest(cb *CircuitBreaker[T]) (*State[T], error) {
 			log.Error("Circuit breaker goes from half-open to open again as errors persist and continue to fail all requests",
 				zap.String("name", cb.name),
 				zap.String("config", fmt.Sprintf("%+v", cb.config)))
-			cb.fastFailCounter.Inc()
 			return cb.newState(now, StateOpen), errs.ErrCircuitBreakerOpen
 		} else if s.successCount == s.cb.config.HalfOpenSuccessCount {
 			// all probe requests are succeeded, we can move to closed state and allow all requests
@@ -258,7 +271,6 @@ func (s *State[T]) onRequest(cb *CircuitBreaker[T]) (*State[T], error) {
 			return s, nil
 		} else {
 			// continue in half-open state till all probe requests are done and fail all other requests for now
-			cb.fastFailCounter.Inc()
 			return s, errs.ErrCircuitBreakerOpen
 		}
 	default:
@@ -266,14 +278,12 @@ func (s *State[T]) onRequest(cb *CircuitBreaker[T]) (*State[T], error) {
 	}
 }
 
-func (s *State[T]) onResult(open Overloading) {
-	switch open {
+func (s *State[T]) onResult(overloaded Overloading) {
+	switch overloaded {
 	case No:
 		s.successCount++
-		s.cb.successCounter.Inc()
 	case Yes:
 		s.failureCount++
-		s.cb.failureCounter.Inc()
 	default:
 		panic("unknown state")
 	}

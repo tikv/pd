@@ -83,8 +83,10 @@ func TestCircuitBreaker_Half_Open_To_Closed(t *testing.T) {
 	driveQPS(cb, minCountToOpen, Yes, re)
 	cb.advance(settings.ErrorRateWindow)
 	assertFastFail(cb, re)
+	re.Equal(StateOpen, cb.state.stateType)
 	cb.advance(settings.CoolDownInterval)
 	assertSucceeds(cb, re)
+	re.Equal(StateHalfOpen, cb.state.stateType)
 	assertSucceeds(cb, re)
 	re.Equal(StateHalfOpen, cb.state.stateType)
 	// state always transferred on the incoming request
@@ -99,6 +101,7 @@ func TestCircuitBreaker_Half_Open_To_Open(t *testing.T) {
 	driveQPS(cb, minCountToOpen, Yes, re)
 	cb.advance(settings.ErrorRateWindow)
 	assertFastFail(cb, re)
+	re.Equal(StateOpen, cb.state.stateType)
 	cb.advance(settings.CoolDownInterval)
 	assertSucceeds(cb, re)
 	re.Equal(StateHalfOpen, cb.state.stateType)
@@ -112,20 +115,17 @@ func TestCircuitBreaker_Half_Open_To_Open(t *testing.T) {
 	re.Equal(StateOpen, cb.state.stateType)
 }
 
+// in half open state, circuit breaker will allow only HalfOpenSuccessCount pending and should fast fail all other request till HalfOpenSuccessCount requests is completed
+// this test moves circuit breaker to the half open state and verifies that requests above HalfOpenSuccessCount are failing
 func TestCircuitBreaker_Half_Open_Fail_Over_Pending_Count(t *testing.T) {
 	re := require.New(t)
-	cb := NewCircuitBreaker[int]("test_cb", settings)
-	re.Equal(StateClosed, cb.state.stateType)
-	driveQPS(cb, minCountToOpen, Yes, re)
-	cb.advance(settings.ErrorRateWindow)
-	assertFastFail(cb, re)
-	re.Equal(StateOpen, cb.state.stateType)
-	cb.advance(settings.CoolDownInterval)
+	cb := newCircuitBreakerMovedToHalfOpenState(re)
 
+	// the next request will move circuit breaker into the half open state
 	var started []chan bool
 	var waited []chan bool
 	var ended []chan bool
-	for range int(settings.HalfOpenSuccessCount) {
+	for range settings.HalfOpenSuccessCount {
 		start := make(chan bool)
 		wait := make(chan bool)
 		end := make(chan bool)
@@ -144,17 +144,23 @@ func TestCircuitBreaker_Half_Open_Fail_Over_Pending_Count(t *testing.T) {
 			re.NoError(err)
 		}()
 	}
+	// make sure all requests are started
 	for i := range started {
 		<-started[i]
 	}
+	// validate that requests beyond HalfOpenSuccessCount are failing
 	assertFastFail(cb, re)
 	re.Equal(StateHalfOpen, cb.state.stateType)
+	// unblock pending requests and wait till they are completed
 	for i := range ended {
 		waited[i] <- true
 		<-ended[i]
 	}
+	// validate that circuit breaker moves to closed state
 	assertSucceeds(cb, re)
 	re.Equal(StateClosed, cb.state.stateType)
+	// make sure that after moving to open state all counters are reset
+	re.Equal(uint32(1), cb.state.successCount)
 }
 
 func TestCircuitBreaker_ChangeSettings(t *testing.T) {
@@ -175,6 +181,17 @@ func TestCircuitBreaker_ChangeSettings(t *testing.T) {
 	cb.advance(settings.ErrorRateWindow)
 	assertFastFail(cb, re)
 	re.Equal(StateOpen, cb.state.stateType)
+}
+
+func newCircuitBreakerMovedToHalfOpenState(re *require.Assertions) *CircuitBreaker[int] {
+	cb := NewCircuitBreaker[int]("test_cb", settings)
+	re.Equal(StateClosed, cb.state.stateType)
+	driveQPS(cb, minCountToOpen, Yes, re)
+	cb.advance(settings.ErrorRateWindow)
+	assertFastFail(cb, re)
+	re.Equal(StateOpen, cb.state.stateType)
+	cb.advance(settings.CoolDownInterval)
+	return cb
 }
 
 func driveQPS(cb *CircuitBreaker[int], count int, overload Overloading, re *require.Assertions) {
