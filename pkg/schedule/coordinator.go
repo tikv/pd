@@ -46,7 +46,6 @@ import (
 
 const (
 	runSchedulerCheckInterval = 3 * time.Second
-	collectTimeout            = 5 * time.Minute
 	maxLoadConfigRetries      = 10
 	// pushOperatorTickInterval is the interval try to push the operator.
 	pushOperatorTickInterval = 500 * time.Millisecond
@@ -68,7 +67,7 @@ type Coordinator struct {
 	schedulersInitialized bool
 
 	cluster           sche.ClusterInformer
-	prepareChecker    *prepareChecker
+	prepareChecker    *sche.PrepareChecker
 	checkers          *checker.Controller
 	regionScatterer   *scatter.RegionScatterer
 	regionSplitter    *splitter.RegionSplitter
@@ -82,15 +81,16 @@ type Coordinator struct {
 // NewCoordinator creates a new Coordinator.
 func NewCoordinator(parentCtx context.Context, cluster sche.ClusterInformer, hbStreams *hbstream.HeartbeatStreams) *Coordinator {
 	ctx, cancel := context.WithCancel(parentCtx)
+	prepareChecker := sche.NewPrepareChecker()
 	opController := operator.NewController(ctx, cluster.GetBasicCluster(), cluster.GetSharedConfig(), hbStreams)
-	schedulers := schedulers.NewController(ctx, cluster, cluster.GetStorage(), opController)
-	checkers := checker.NewController(ctx, cluster, cluster.GetCheckerConfig(), cluster.GetRuleManager(), cluster.GetRegionLabeler(), opController)
+	schedulers := schedulers.NewController(ctx, cluster, cluster.GetStorage(), opController, prepareChecker)
+	checkers := checker.NewController(ctx, cluster, cluster.GetCheckerConfig(), cluster.GetRuleManager(), cluster.GetRegionLabeler(), opController, prepareChecker)
 	return &Coordinator{
 		ctx:                   ctx,
 		cancel:                cancel,
 		schedulersInitialized: false,
 		cluster:               cluster,
-		prepareChecker:        newPrepareChecker(),
+		prepareChecker:        prepareChecker,
 		checkers:              checkers,
 		regionScatterer:       scatter.NewRegionScatterer(ctx, cluster, opController, checkers.AddPendingProcessedRegions),
 		regionSplitter:        splitter.NewRegionSplitter(cluster, splitter.NewSplitRegionsHandler(cluster, opController), checkers.AddPendingProcessedRegions),
@@ -206,8 +206,8 @@ func (c *Coordinator) driveSlowNodeScheduler() {
 }
 
 // RunUntilStop runs the coordinator until receiving the stop signal.
-func (c *Coordinator) RunUntilStop(collectWaitTime ...time.Duration) {
-	c.Run(collectWaitTime...)
+func (c *Coordinator) RunUntilStop() {
+	c.Run()
 	<-c.ctx.Done()
 	log.Info("coordinator is stopping")
 	c.GetSchedulersController().Wait()
@@ -216,25 +216,12 @@ func (c *Coordinator) RunUntilStop(collectWaitTime ...time.Duration) {
 }
 
 // Run starts coordinator.
-func (c *Coordinator) Run(collectWaitTime ...time.Duration) {
+func (c *Coordinator) Run() {
 	ticker := time.NewTicker(runSchedulerCheckInterval)
 	failpoint.Inject("changeCoordinatorTicker", func() {
 		ticker.Reset(100 * time.Millisecond)
 	})
 	defer ticker.Stop()
-	log.Info("coordinator starts to collect cluster information")
-	for {
-		if c.ShouldRun(collectWaitTime...) {
-			log.Info("coordinator has finished cluster information preparation")
-			break
-		}
-		select {
-		case <-ticker.C:
-		case <-c.ctx.Done():
-			log.Info("coordinator stops running")
-			return
-		}
-	}
 	log.Info("coordinator starts to run schedulers")
 	c.InitSchedulers(true)
 
@@ -549,8 +536,8 @@ func ResetHotSpotMetrics() {
 }
 
 // ShouldRun returns true if the coordinator should run.
-func (c *Coordinator) ShouldRun(collectWaitTime ...time.Duration) bool {
-	return c.prepareChecker.check(c.cluster.GetBasicCluster(), collectWaitTime...)
+func (c *Coordinator) ShouldRun() bool {
+	return c.prepareChecker.Check(c.cluster.GetBasicCluster())
 }
 
 // GetSchedulersController returns the schedulers controller.
@@ -618,7 +605,7 @@ func (c *Coordinator) GetRuleChecker() *checker.RuleChecker {
 }
 
 // GetPrepareChecker returns the prepare checker.
-func (c *Coordinator) GetPrepareChecker() *prepareChecker {
+func (c *Coordinator) GetPrepareChecker() *sche.PrepareChecker {
 	return c.prepareChecker
 }
 

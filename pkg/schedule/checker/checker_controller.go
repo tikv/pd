@@ -91,10 +91,11 @@ type Controller struct {
 	// patrolRegionScanLimit is the limit of regions to scan.
 	// It is calculated by the number of regions.
 	patrolRegionScanLimit int
+	prepareChecker        *sche.PrepareChecker
 }
 
 // NewController create a new Controller.
-func NewController(ctx context.Context, cluster sche.CheckerCluster, conf config.CheckerConfigProvider, ruleManager *placement.RuleManager, labeler *labeler.RegionLabeler, opController *operator.Controller) *Controller {
+func NewController(ctx context.Context, cluster sche.CheckerCluster, conf config.CheckerConfigProvider, ruleManager *placement.RuleManager, labeler *labeler.RegionLabeler, opController *operator.Controller, prepareChecker *sche.PrepareChecker) *Controller {
 	pendingProcessedRegions := cache.NewIDTTL(ctx, time.Minute, 3*time.Minute)
 	c := &Controller{
 		ctx:                     ctx,
@@ -113,6 +114,7 @@ func NewController(ctx context.Context, cluster sche.CheckerCluster, conf config
 		patrolRegionContext:     &PatrolRegionContext{},
 		interval:                cluster.GetCheckerConfig().GetPatrolRegionInterval(),
 		patrolRegionScanLimit:   calculateScanLimit(cluster),
+		prepareChecker:          prepareChecker,
 	}
 	c.duration.Store(time.Duration(0))
 	return c
@@ -132,6 +134,10 @@ func (c *Controller) PatrolRegions() {
 		regions []*core.RegionInfo
 	)
 	for {
+		if !c.prepareChecker.Check(c.cluster.GetBasicCluster()) {
+			time.Sleep(time.Second)
+			continue
+		}
 		select {
 		case <-ticker.C:
 			c.updateTickerIfNeeded(ticker)

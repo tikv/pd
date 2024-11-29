@@ -63,7 +63,6 @@ func (suite *serverTestSuite) SetupSuite() {
 	var err error
 	re := suite.Require()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/changeCoordinatorTicker", `return(true)`))
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/mcs/scheduling/server/changeRunCollectWaitTime", `return(true)`))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs", `return(true)`))
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
 	suite.cluster, err = tests.NewTestAPICluster(suite.ctx, 1)
@@ -85,7 +84,6 @@ func (suite *serverTestSuite) TearDownSuite() {
 	suite.cancel()
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs"))
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/changeCoordinatorTicker"))
-	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/scheduling/server/changeRunCollectWaitTime"))
 }
 
 func (suite *serverTestSuite) TestAllocID() {
