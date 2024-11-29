@@ -42,30 +42,10 @@ const (
 	FollowerHandleMetadataKey = "pd-allow-follower-handle"
 )
 
-// Add retry related CallOption
-type retryCallOption struct {
-	grpc.EmptyCallOption
-	bo *retry.Backoffer
-}
-
-// WithBackoffer returns a CallOption that adds a backoffer to the call.
-func WithBackoffer(bo *retry.Backoffer) grpc.CallOption {
-	return &retryCallOption{bo: bo}
-}
-
-func getBackofferFromCallOptions(opts []grpc.CallOption) *retry.Backoffer {
-	for _, opt := range opts {
-		if bo, ok := opt.(*retryCallOption); ok {
-			return bo.bo
-		}
-	}
-	return nil
-}
-
 // UnaryBackofferInterceptor is a gRPC interceptor that adds a backoffer to the call.
 func UnaryBackofferInterceptor() grpc.UnaryClientInterceptor {
 	return func(ctx context.Context, method string, req, reply any, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
-		bo := getBackofferFromCallOptions(opts)
+		bo := retry.FromContext(ctx)
 		if bo == nil {
 			return invoker(ctx, method, req, reply, cc, opts...)
 		}
@@ -113,7 +93,7 @@ func GetClientConn(ctx context.Context, addr string, tlsCfg *tls.Config, do ...g
 		return nil, errs.ErrURLParse.Wrap(err).GenWithStackByCause()
 	}
 
-	// Add retry interceptor
+	// Add backoffer interceptor
 	retryOpt := grpc.WithUnaryInterceptor(UnaryBackofferInterceptor())
 
 	// Add retry related connection parameters
