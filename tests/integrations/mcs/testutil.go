@@ -20,8 +20,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 	pd "github.com/tikv/pd/client"
-	"github.com/tikv/pd/client/caller"
 	"github.com/tikv/pd/client/opt"
+	"github.com/tikv/pd/client/pkg/caller"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 )

@@ -26,7 +26,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/tikv/pd/client/retry"
+	"github.com/tikv/pd/client/pkg/retry"
 )
 
 // Client is a PD (Placement Driver) HTTP client.
