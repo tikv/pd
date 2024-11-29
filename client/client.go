@@ -698,7 +698,6 @@ func (c *client) GetRegion(ctx context.Context, key []byte, opts ...opt.GetRegio
 	}
 	start := time.Now()
 	defer func() { metrics.CmdDurationGetRegion.Observe(time.Since(start).Seconds()) }()
-
 	ctx, cancel := context.WithTimeout(ctx, c.inner.option.Timeout)
 	defer cancel()
 
@@ -716,7 +715,6 @@ func (c *client) GetRegion(ctx context.Context, key []byte, opts ...opt.GetRegio
 	if serviceClient == nil {
 		return nil, errs.ErrClientGetProtoClient
 	}
-
 	resp, err := pdpb.NewPDClient(serviceClient.GetClientConn()).GetRegion(cctx, req)
 	if serviceClient.NeedRetry(resp.GetHeader().GetError(), err) {
 		protoClient, cctx := c.getClientAndContext(ctx)
@@ -725,6 +723,7 @@ func (c *client) GetRegion(ctx context.Context, key []byte, opts ...opt.GetRegio
 		}
 		resp, err = protoClient.GetRegion(cctx, req)
 	}
+
 	if err = c.respForErr(metrics.CmdFailedDurationGetRegion, start, err, resp.GetHeader()); err != nil {
 		return nil, err
 	}
