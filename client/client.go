@@ -568,7 +568,7 @@ func (c *client) GetTSAsync(ctx context.Context) tso.TSFuture {
 
 // GetLocalTSAsync implements the TSOClient interface.
 //
-// Deprecated: Local TSO will be completely removed in the future. Currently, regardless of the
+// Deprecated: Currently, regardless of the
 // parameters passed in, this method will default to returning the global TSO.
 func (c *client) GetLocalTSAsync(ctx context.Context, _ string) tso.TSFuture {
 	return c.GetTSAsync(ctx)
@@ -582,7 +582,7 @@ func (c *client) GetTS(ctx context.Context) (physical int64, logical int64, err 
 
 // GetLocalTS implements the TSOClient interface.
 //
-// Deprecated: Local TSO will be completely removed in the future. Currently, regardless of the
+// Deprecated: Currently, regardless of the
 // parameters passed in, this method will default to returning the global TSO.
 func (c *client) GetLocalTS(ctx context.Context, _ string) (physical int64, logical int64, err error) {
 	return c.GetTS(ctx)

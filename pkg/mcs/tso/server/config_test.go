@@ -36,7 +36,6 @@ func TestConfigBasic(t *testing.T) {
 	re.Equal(defaultBackendEndpoints, cfg.BackendEndpoints)
 	re.Equal(defaultListenAddr, cfg.ListenAddr)
 	re.Equal(constant.DefaultLeaderLease, cfg.LeaderLease)
-	re.False(cfg.EnableLocalTSO)
 	re.True(cfg.EnableGRPCGateway)
 	re.Equal(defaultTSOSaveInterval, cfg.TSOSaveInterval.Duration)
 	re.Equal(defaultTSOUpdatePhysicalInterval, cfg.TSOUpdatePhysicalInterval.Duration)
@@ -48,7 +47,6 @@ func TestConfigBasic(t *testing.T) {
 	cfg.ListenAddr = "test-listen-addr"
 	cfg.AdvertiseListenAddr = "test-advertise-listen-addr"
 	cfg.LeaderLease = 123
-	cfg.EnableLocalTSO = true
 	cfg.TSOSaveInterval.Duration = time.Duration(10) * time.Second
 	cfg.TSOUpdatePhysicalInterval.Duration = time.Duration(100) * time.Millisecond
 	cfg.MaxResetTSGap.Duration = time.Duration(1) * time.Hour
@@ -58,7 +56,6 @@ func TestConfigBasic(t *testing.T) {
 	re.Equal("test-listen-addr", cfg.GetListenAddr())
 	re.Equal("test-advertise-listen-addr", cfg.GetAdvertiseListenAddr())
 	re.Equal(int64(123), cfg.GetLeaderLease())
-	re.True(cfg.EnableLocalTSO)
 	re.Equal(time.Duration(10)*time.Second, cfg.TSOSaveInterval.Duration)
 	re.Equal(time.Duration(100)*time.Millisecond, cfg.TSOUpdatePhysicalInterval.Duration)
 	re.Equal(time.Duration(1)*time.Hour, cfg.MaxResetTSGap.Duration)
@@ -74,7 +71,6 @@ name = "tso-test-name"
 data-dir = "/var/lib/tso"
 enable-grpc-gateway = false
 lease = 123
-enable-local-tso = true
 tso-save-interval = "10s"
 tso-update-physical-interval = "100ms"
 max-gap-reset-ts = "1h"
@@ -92,7 +88,6 @@ max-gap-reset-ts = "1h"
 	re.Equal("test-advertise-listen-addr", cfg.GetAdvertiseListenAddr())
 	re.Equal("/var/lib/tso", cfg.DataDir)
 	re.Equal(int64(123), cfg.GetLeaderLease())
-	re.True(cfg.EnableLocalTSO)
 	re.Equal(time.Duration(10)*time.Second, cfg.TSOSaveInterval.Duration)
 	re.Equal(time.Duration(100)*time.Millisecond, cfg.TSOUpdatePhysicalInterval.Duration)
 	re.Equal(time.Duration(1)*time.Hour, cfg.MaxResetTSGap.Duration)

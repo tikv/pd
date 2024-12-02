@@ -17,7 +17,6 @@ package tso
 import (
 	"context"
 	"math"
-	"path"
 	"runtime/trace"
 	"strconv"
 	"sync"
@@ -43,8 +42,6 @@ const (
 	checkStep                   = time.Minute
 	patrolStep                  = time.Second
 	defaultAllocatorLeaderLease = 3
-	localTSOAllocatorEtcdPrefix = "lta"
-	localTSOSuffixEtcdPrefix    = "lts"
 )
 
 var (
@@ -215,17 +212,6 @@ func (am *AllocatorManager) getGroupIDStr() string {
 		return "0"
 	}
 	return strconv.FormatUint(uint64(am.kgID), 10)
-}
-
-// GetTimestampPath returns the timestamp path in etcd.
-func (am *AllocatorManager) GetTimestampPath() string {
-	if am == nil {
-		return ""
-	}
-
-	am.mu.RLock()
-	defer am.mu.RUnlock()
-	return path.Join(am.rootPath, am.mu.allocatorGroup.allocator.GetTimestampPath())
 }
 
 // tsoAllocatorLoop is used to run the TSO Allocator updating daemon.

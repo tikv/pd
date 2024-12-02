@@ -221,8 +221,6 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestKeyspacesServedByNonDefaultKe
 						// for primary election.
 						rootPath := keypath.TSOSvcRootPath()
 						primaryPath := keypath.KeyspaceGroupPrimaryPath(rootPath, param.keyspaceGroupID)
-						timestampPath := keypath.FullTimestampPath(param.keyspaceGroupID)
-						re.Equal(timestampPath, am.GetTimestampPath())
 						re.Equal(primaryPath, am.GetMember().GetLeaderPath())
 
 						served = true

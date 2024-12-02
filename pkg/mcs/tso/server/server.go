@@ -272,15 +272,6 @@ func (s *Server) GetTSOAllocatorManager(keyspaceGroupID uint32) (*tso.AllocatorM
 	return s.keyspaceGroupManager.GetAllocatorManager(keyspaceGroupID)
 }
 
-// IsLocalRequest checks if the forwarded host is the current host
-func (*Server) IsLocalRequest(forwardedHost string) bool {
-	// TODO: Check if the forwarded host is the current host.
-	// The logic is depending on etcd service mode -- if the TSO service
-	// uses the embedded etcd, check against ClientUrls; otherwise check
-	// against the cluster membership.
-	return forwardedHost == ""
-}
-
 // ValidateInternalRequest checks if server is closed, which is used to validate
 // the gRPC communication between TSO servers internally.
 // TODO: Check if the sender is from the global TSO allocator

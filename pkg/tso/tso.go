@@ -75,7 +75,6 @@ type timestampOracle struct {
 	tsoMux *tsoObject
 	// last timestamp window stored in etcd
 	lastSavedTime atomic.Value // stored as time.Time
-	suffix        int
 
 	// pre-initialized metrics
 	metrics *tsoMetrics
@@ -116,9 +115,6 @@ func (t *timestampOracle) generateTSO(ctx context.Context, count int64, suffixBi
 	physical = t.tsoMux.physical.UnixNano() / int64(time.Millisecond)
 	t.tsoMux.logical += count
 	logical = t.tsoMux.logical
-	if suffixBits > 0 && t.suffix >= 0 {
-		logical = t.calibrateLogical(logical, suffixBits)
-	}
 	// Return the last update time
 	lastUpdateTime = t.tsoMux.updateTime
 	t.tsoMux.updateTime = time.Now()
@@ -131,28 +127,6 @@ func (t *timestampOracle) getLastSavedTime() time.Time {
 		return typeutil.ZeroTime
 	}
 	return last.(time.Time)
-}
-
-// Because the Local TSO in each Local TSO Allocator is independent, so they are possible
-// to be the same at sometimes, to avoid this case, we need to use the logical part of the
-// Local TSO to do some differentiating work.
-// For example, we have three DCs: dc-1, dc-2 and dc-3. The bits of suffix is defined by
-// the const suffixBits. Then, for dc-2, the suffix may be 1 because it's persisted
-// in etcd with the value of 1.
-// Once we get a normal TSO like this (18 bits): xxxxxxxxxxxxxxxxxx. We will make the TSO's
-// low bits of logical part from each DC looks like:
-//
-//	global: xxxxxxxxxx00000000
-//	  dc-1: xxxxxxxxxx00000001
-//	  dc-2: xxxxxxxxxx00000010
-//	  dc-3: xxxxxxxxxx00000011
-func (t *timestampOracle) calibrateLogical(rawLogical int64, suffixBits int) int64 {
-	return rawLogical<<suffixBits + int64(t.suffix)
-}
-
-// GetTimestampPath returns the timestamp path in etcd.
-func (t *timestampOracle) GetTimestampPath() string {
-	return keypath.TimestampPath(t.tsPath)
 }
 
 // SyncTimestamp is used to synchronize the timestamp.
@@ -209,7 +183,7 @@ func (t *timestampOracle) SyncTimestamp() error {
 	})
 	save := next.Add(t.saveInterval)
 	start := time.Now()
-	if err = t.storage.SaveTimestamp(t.GetTimestampPath(), save); err != nil {
+	if err = t.storage.SaveTimestamp(keypath.TimestampPath(t.tsPath), save); err != nil {
 		t.metrics.errSaveSyncTSEvent.Inc()
 		return err
 	}
@@ -277,7 +251,7 @@ func (t *timestampOracle) resetUserTimestamp(leadership *election.Leadership, ts
 	if typeutil.SubRealTimeByWallClock(t.getLastSavedTime(), nextPhysical) <= UpdateTimestampGuard {
 		save := nextPhysical.Add(t.saveInterval)
 		start := time.Now()
-		if err := t.storage.SaveTimestamp(t.GetTimestampPath(), save); err != nil {
+		if err := t.storage.SaveTimestamp(keypath.TimestampPath(t.tsPath), save); err != nil {
 			t.metrics.errSaveResetTSEvent.Inc()
 			return err
 		}
@@ -361,10 +335,10 @@ func (t *timestampOracle) UpdateTimestamp() error {
 	if typeutil.SubRealTimeByWallClock(t.getLastSavedTime(), next) <= UpdateTimestampGuard {
 		save := next.Add(t.saveInterval)
 		start := time.Now()
-		if err := t.storage.SaveTimestamp(t.GetTimestampPath(), save); err != nil {
+		if err := t.storage.SaveTimestamp(keypath.TimestampPath(t.tsPath), save); err != nil {
 			log.Warn("save timestamp failed",
 				logutil.CondUint32("keyspace-group-id", t.keyspaceGroupID, t.keyspaceGroupID > 0),
-				zap.String("timestamp-path", t.GetTimestampPath()),
+				zap.String("timestamp-path", keypath.TimestampPath(t.tsPath)),
 				zap.Error(err))
 			t.metrics.errSaveUpdateTSEvent.Inc()
 			return err
