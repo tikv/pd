@@ -328,10 +328,7 @@ func (s *Server) ResetTS(ts uint64, ignoreSmaller, skipUpperBoundCheck bool, key
 		log.Error("failed to get allocator manager", errs.ZapError(err))
 		return err
 	}
-	tsoAllocator, err := tsoAllocatorManager.GetAllocator(tso.GlobalDCLocation)
-	if err != nil {
-		return err
-	}
+	tsoAllocator := tsoAllocatorManager.GetAllocator()
 	if tsoAllocator == nil {
 		return errs.ErrServerNotStarted
 	}

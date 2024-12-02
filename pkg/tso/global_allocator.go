@@ -111,7 +111,6 @@ func newGlobalTimestampOracle(am *AllocatorManager) *timestampOracle {
 		saveInterval:           am.saveInterval,
 		updatePhysicalInterval: am.updatePhysicalInterval,
 		maxResetTSGap:          am.maxResetTSGap,
-		dcLocation:             GlobalDCLocation,
 		tsoMux:                 &tsoObject{},
 		metrics:                newTSOMetrics(am.getGroupIDStr(), GlobalDCLocation),
 	}
@@ -161,7 +160,7 @@ func (gta *GlobalTSOAllocator) UpdateTSO() error {
 
 // SetTSO sets the physical part with given TSO.
 func (gta *GlobalTSOAllocator) SetTSO(tso uint64, ignoreSmaller, skipUpperBoundCheck bool) error {
-	return gta.timestampOracle.resetUserTimestampInner(gta.member.GetLeadership(), tso, ignoreSmaller, skipUpperBoundCheck)
+	return gta.timestampOracle.resetUserTimestamp(gta.member.GetLeadership(), tso, ignoreSmaller, skipUpperBoundCheck)
 }
 
 // GenerateTSO is used to generate the given number of TSOs.
@@ -274,22 +273,15 @@ func (gta *GlobalTSOAllocator) campaignLeader() {
 		logutil.CondUint32("keyspace-group-id", gta.getGroupID(), gta.getGroupID() > 0),
 		zap.String("campaign-tso-primary-name", gta.member.Name()))
 
-	allocator, err := gta.am.GetAllocator(GlobalDCLocation)
-	if err != nil {
-		log.Error("failed to get the global tso allocator",
-			logutil.CondUint32("keyspace-group-id", gta.getGroupID(), gta.getGroupID() > 0),
-			errs.ZapError(err))
-		return
-	}
 	log.Info("initializing the global tso allocator")
-	if err := allocator.Initialize(0); err != nil {
+	if err := gta.am.GetAllocator().Initialize(0); err != nil {
 		log.Error("failed to initialize the global tso allocator",
 			logutil.CondUint32("keyspace-group-id", gta.getGroupID(), gta.getGroupID() > 0),
 			errs.ZapError(err))
 		return
 	}
 	defer func() {
-		gta.am.ResetAllocatorGroup(GlobalDCLocation, false)
+		gta.am.ResetAllocatorGroup(false)
 	}()
 
 	// check expected primary and watch the primary.
@@ -314,8 +306,6 @@ func (gta *GlobalTSOAllocator) campaignLeader() {
 		member.ServiceMemberGauge.WithLabelValues(tsoLabel).Set(0)
 	})
 
-	// TODO: if enable-local-tso is true, check the cluster dc-location after the primary is elected
-	// go gta.tsoAllocatorManager.ClusterDCLocationChecker()
 	log.Info("tso primary is ready to serve",
 		logutil.CondUint32("keyspace-group-id", gta.getGroupID(), gta.getGroupID() > 0),
 		zap.String("tso-primary-name", gta.member.Name()))

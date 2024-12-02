@@ -375,16 +375,6 @@ func (m *EmbeddedEtcdMember) ResignEtcdLeader(ctx context.Context, from string, 
 	return m.MoveEtcdLeader(ctx, m.ID(), nextEtcdLeaderID)
 }
 
-// GetDCLocationPathPrefix returns the dc-location path prefix of the cluster.
-func (*EmbeddedEtcdMember) GetDCLocationPathPrefix() string {
-	return keypath.Prefix(keypath.DCLocationPath(nil, 0))
-}
-
-// GetDCLocationPath returns the dc-location path of a member with the given member ID.
-func (*EmbeddedEtcdMember) GetDCLocationPath(id uint64) string {
-	return keypath.DCLocationPath(nil, id)
-}
-
 // SetMemberLeaderPriority saves a member's priority to be elected as the etcd leader.
 func (m *EmbeddedEtcdMember) SetMemberLeaderPriority(id uint64, priority int) error {
 	key := keypath.MemberLeaderPriorityPath(id)
@@ -408,20 +398,6 @@ func (m *EmbeddedEtcdMember) DeleteMemberLeaderPriority(id uint64) error {
 	}
 	if !res.Succeeded {
 		log.Error("delete etcd leader priority failed, maybe not pd leader")
-		return errs.ErrEtcdTxnConflict.FastGenByArgs()
-	}
-	return nil
-}
-
-// DeleteMemberDCLocationInfo removes a member's dc-location info.
-func (m *EmbeddedEtcdMember) DeleteMemberDCLocationInfo(id uint64) error {
-	key := m.GetDCLocationPath(id)
-	res, err := m.leadership.LeaderTxn().Then(clientv3.OpDelete(key)).Commit()
-	if err != nil {
-		return errs.ErrEtcdTxnInternal.Wrap(err).GenWithStackByCause()
-	}
-	if !res.Succeeded {
-		log.Error("delete dc-location info failed, maybe not pd leader")
 		return errs.ErrEtcdTxnConflict.FastGenByArgs()
 	}
 	return nil

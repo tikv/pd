@@ -554,7 +554,8 @@ func (c *pdServiceDiscovery) updateMemberLoop() {
 		case <-ticker.C:
 		case <-c.checkMembershipCh:
 		}
-		if err := bo.Exec(ctx, c.updateMember); err != nil {
+		err := bo.Exec(ctx, c.updateMember)
+		if err != nil {
 			log.Error("[pd] failed to update member", zap.Strings("urls", c.GetServiceURLs()), errs.ZapError(err))
 		}
 	}

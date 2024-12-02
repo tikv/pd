@@ -671,11 +671,6 @@ func (c *Config) GetLeaderLease() int64 {
 	return c.LeaderLease
 }
 
-// IsLocalTSOEnabled returns if the local TSO is enabled.
-func (c *Config) IsLocalTSOEnabled() bool {
-	return c.EnableLocalTSO
-}
-
 // GetMaxConcurrentTSOProxyStreamings returns the max concurrent TSO proxy streamings.
 // If the value is negative, there is no limit.
 func (c *Config) GetMaxConcurrentTSOProxyStreamings() int {

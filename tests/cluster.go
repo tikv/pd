@@ -230,21 +230,6 @@ func (s *TestServer) GetLeader() *pdpb.Member {
 	return s.server.GetLeader()
 }
 
-// GetAllocatorLeader returns current allocator leader
-// of PD cluster for given dc-location.
-func (s *TestServer) GetAllocatorLeader(dcLocation string) *pdpb.Member {
-	// For the leader of Global TSO Allocator, it's the PD leader
-	if dcLocation == tso.GlobalDCLocation {
-		return s.GetLeader()
-	}
-	tsoAllocatorManager := s.GetTSOAllocatorManager()
-	allocator, err := tsoAllocatorManager.GetAllocator(dcLocation)
-	if err != nil {
-		return nil
-	}
-	return allocator.(*tso.LocalTSOAllocator).GetAllocatorLeader()
-}
-
 // GetKeyspaceManager returns the current TestServer's Keyspace Manager.
 func (s *TestServer) GetKeyspaceManager() *keyspace.Manager {
 	s.RLock()
@@ -285,19 +270,6 @@ func (s *TestServer) IsLeader() bool {
 	s.RLock()
 	defer s.RUnlock()
 	return !s.server.IsClosed() && s.server.GetMember().IsLeader()
-}
-
-// IsAllocatorLeader returns whether the server is a TSO Allocator leader or not.
-func (s *TestServer) IsAllocatorLeader(dcLocation string) bool {
-	if dcLocation == tso.GlobalDCLocation {
-		return s.IsLeader()
-	}
-	tsoAllocatorManager := s.GetTSOAllocatorManager()
-	allocator, err := tsoAllocatorManager.GetAllocator(dcLocation)
-	if err != nil {
-		return false
-	}
-	return !s.server.IsClosed() && allocator.(*tso.LocalTSOAllocator).IsAllocatorLeader()
 }
 
 // GetEtcdLeader returns the builtin etcd leader.
