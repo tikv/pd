@@ -17,6 +17,8 @@ package keypath
 import (
 	"fmt"
 	"path"
+
+	"github.com/tikv/pd/pkg/mcs/utils/constant"
 )
 
 // Leader and primary are the same thing in this context.
@@ -58,7 +60,7 @@ func LeaderPath(p *MsParam) string {
 	if p == nil || p.ServiceName == "" {
 		return fmt.Sprintf(leaderPathFormat, ClusterID())
 	}
-	if p.ServiceName == "tso" {
+	if p.ServiceName == constant.TSOServiceName {
 		if p.GroupID == 0 {
 			return fmt.Sprintf(msTsoDefaultLeaderPathFormat, ClusterID())
 		}
@@ -69,7 +71,7 @@ func LeaderPath(p *MsParam) string {
 
 // ExpectedPrimaryPath returns the expected_primary path.
 func ExpectedPrimaryPath(p *MsParam) string {
-	if p.ServiceName == "tso" {
+	if p.ServiceName == constant.TSOServiceName {
 		if p.GroupID == 0 {
 			return fmt.Sprintf(msTsoDefaultExpectedLeaderPathFormat, ClusterID())
 		}
