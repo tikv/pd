@@ -2030,7 +2030,7 @@ func TestGetRegionWithBackoff(t *testing.T) {
 	// Calculate the elapsed time
 	elapsed := time.Since(start)
 	// Verify that some backoff occurred by checking if the elapsed time is greater than the base backoff
-	re.Greater(elapsed, base, "Expected some backoff to have occurred")
+	re.Greater(elapsed, total, "Expected some backoff to have occurred")
 
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/rateLimit"))
 	// Call GetRegion again and expect it to succeed
