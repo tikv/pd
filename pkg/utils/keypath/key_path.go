@@ -310,12 +310,6 @@ func GetCompiledKeyspaceGroupIDRegexp() *regexp.Regexp {
 	return regexp.MustCompile(pattern)
 }
 
-// SchedulingSvcRootPath returns the root path of scheduling service.
-// Path: /ms/{cluster_id}/scheduling
-func SchedulingSvcRootPath() string {
-	return svcRootPath(constant.SchedulingServiceName)
-}
-
 // TSOSvcRootPath returns the root path of tso service.
 // Path: /ms/{cluster_id}/tso
 func TSOSvcRootPath() string {
@@ -331,30 +325,6 @@ func svcRootPath(svcName string) string {
 // Path: /pd/{cluster_id}
 func LegacyRootPath() string {
 	return path.Join(pdRootPath, strconv.FormatUint(ClusterID(), 10))
-}
-
-// KeyspaceGroupPrimaryPath returns the path of keyspace group primary.
-// default keyspace group: "/ms/{cluster_id}/tso/00000/primary".
-// non-default keyspace group: "/ms/{cluster_id}/tso/keyspace_groups/election/{group}/primary".
-func KeyspaceGroupPrimaryPath(rootPath string, keyspaceGroupID uint32) string {
-	electionPath := KeyspaceGroupsElectionPath(rootPath, keyspaceGroupID)
-	return path.Join(electionPath, constant.PrimaryKey)
-}
-
-// SchedulingPrimaryPath returns the path of scheduling primary.
-// Path: /ms/{cluster_id}/scheduling/primary
-func SchedulingPrimaryPath() string {
-	return path.Join(SchedulingSvcRootPath(), constant.PrimaryKey)
-}
-
-// KeyspaceGroupsElectionPath returns the path of keyspace groups election.
-// default keyspace group: "/ms/{cluster_id}/tso/00000".
-// non-default keyspace group: "/ms/{cluster_id}/tso/keyspace_groups/election/{group}".
-func KeyspaceGroupsElectionPath(rootPath string, keyspaceGroupID uint32) string {
-	if keyspaceGroupID == constant.DefaultKeyspaceGroupID {
-		return path.Join(rootPath, "00000")
-	}
-	return path.Join(rootPath, constant.KeyspaceGroupsKey, keyspaceGroupsElectionKey, fmt.Sprintf("%05d", keyspaceGroupID))
 }
 
 // GetCompiledNonDefaultIDRegexp returns the compiled regular expression for matching non-default keyspace group id.

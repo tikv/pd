@@ -16,10 +16,8 @@ package member
 
 import (
 	"context"
-	"fmt"
 	"math/rand"
 	"os"
-	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -52,11 +50,10 @@ type EmbeddedEtcdMember struct {
 	leadership *election.Leadership
 	leader     atomic.Value // stored as *pdpb.Member
 	// etcd and cluster information.
-	etcd     *embed.Etcd
-	client   *clientv3.Client
-	id       uint64       // etcd server id.
-	member   *pdpb.Member // current PD's info.
-	rootPath string
+	etcd   *embed.Etcd
+	client *clientv3.Client
+	id     uint64       // etcd server id.
+	member *pdpb.Member // current PD's info.
 	// memberValue is the serialized string of `member`. It will be saved in
 	// etcd leader key when the PD node is successfully elected as the PD leader
 	// of the cluster. Every write will use it to check PD leadership.
@@ -330,7 +327,7 @@ func (m *EmbeddedEtcdMember) IsSameLeader(leader any) bool {
 }
 
 // InitMemberInfo initializes the member info.
-func (m *EmbeddedEtcdMember) InitMemberInfo(advertiseClientUrls, advertisePeerUrls, name string, rootPath string) {
+func (m *EmbeddedEtcdMember) InitMemberInfo(advertiseClientUrls, advertisePeerUrls, name string) {
 	leader := &pdpb.Member{
 		Name:       name,
 		MemberId:   m.ID(),
@@ -345,9 +342,8 @@ func (m *EmbeddedEtcdMember) InitMemberInfo(advertiseClientUrls, advertisePeerUr
 	}
 	m.member = leader
 	m.memberValue = string(data)
-	m.rootPath = rootPath
 	m.leadership = election.NewLeadership(m.client, m.GetLeaderPath(), "leader election")
-	log.Info("member joining election", zap.Stringer("member-info", m.member), zap.String("root-path", m.rootPath))
+	log.Info("member joining election", zap.Stringer("member-info", m.member))
 }
 
 // ResignEtcdLeader resigns current PD's etcd leadership. If nextLeader is empty, all
@@ -379,13 +375,9 @@ func (m *EmbeddedEtcdMember) ResignEtcdLeader(ctx context.Context, from string, 
 	return m.MoveEtcdLeader(ctx, m.ID(), nextEtcdLeaderID)
 }
 
-func (m *EmbeddedEtcdMember) getMemberLeaderPriorityPath(id uint64) string {
-	return path.Join(m.rootPath, fmt.Sprintf("member/%d/leader_priority", id))
-}
-
 // SetMemberLeaderPriority saves a member's priority to be elected as the etcd leader.
 func (m *EmbeddedEtcdMember) SetMemberLeaderPriority(id uint64, priority int) error {
-	key := m.getMemberLeaderPriorityPath(id)
+	key := keypath.MemberLeaderPriorityPath(id)
 	res, err := m.leadership.LeaderTxn().Then(clientv3.OpPut(key, strconv.Itoa(priority))).Commit()
 	if err != nil {
 		return errs.ErrEtcdTxnInternal.Wrap(err).GenWithStackByCause()
@@ -399,7 +391,7 @@ func (m *EmbeddedEtcdMember) SetMemberLeaderPriority(id uint64, priority int) er
 
 // DeleteMemberLeaderPriority removes a member's etcd leader priority config.
 func (m *EmbeddedEtcdMember) DeleteMemberLeaderPriority(id uint64) error {
-	key := m.getMemberLeaderPriorityPath(id)
+	key := keypath.MemberLeaderPriorityPath(id)
 	res, err := m.leadership.LeaderTxn().Then(clientv3.OpDelete(key)).Commit()
 	if err != nil {
 		return errs.ErrEtcdTxnInternal.Wrap(err).GenWithStackByCause()
@@ -413,7 +405,7 @@ func (m *EmbeddedEtcdMember) DeleteMemberLeaderPriority(id uint64) error {
 
 // GetMemberLeaderPriority loads a member's priority to be elected as the etcd leader.
 func (m *EmbeddedEtcdMember) GetMemberLeaderPriority(id uint64) (int, error) {
-	key := m.getMemberLeaderPriorityPath(id)
+	key := keypath.MemberLeaderPriorityPath(id)
 	res, err := etcdutil.EtcdKVGet(m.client, key)
 	if err != nil {
 		return 0, err

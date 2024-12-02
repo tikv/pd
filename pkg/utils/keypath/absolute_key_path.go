@@ -17,19 +17,31 @@ package keypath
 import (
 	"fmt"
 	"path"
+
+	"github.com/tikv/pd/pkg/mcs/utils/constant"
 )
 
+// Leader and primary are the same thing in this context.
 const (
-	leaderPathFormat              = "/pd/%d/leader"                   // "/pd/{cluster_id}/leader"
-	memberBinaryDeployPathFormat  = "/pd/%d/member/%d/deploy_path"    // "/pd/{cluster_id}/member/{member_id}/deploy_path"
-	memberGitHashPath             = "/pd/%d/member/%d/git_hash"       // "/pd/{cluster_id}/member/{member_id}/git_hash"
-	memberBinaryVersionPathFormat = "/pd/%d/member/%d/binary_version" // "/pd/{cluster_id}/member/{member_id}/binary_version"
-	allocIDPathFormat             = "/pd/%d/alloc_id"                 // "/pd/{cluster_id}/alloc_id"
-	keyspaceAllocIDPathFormat     = "/pd/%d/keyspaces/alloc_id"       // "/pd/{cluster_id}/keyspaces/alloc_id"
+	leaderPathFormat               = "/pd/%d/leader"                    // "/pd/{cluster_id}/leader"
+	memberBinaryDeployPathFormat   = "/pd/%d/member/%d/deploy_path"     // "/pd/{cluster_id}/member/{member_id}/deploy_path"
+	memberGitHashPath              = "/pd/%d/member/%d/git_hash"        // "/pd/{cluster_id}/member/{member_id}/git_hash"
+	memberBinaryVersionPathFormat  = "/pd/%d/member/%d/binary_version"  // "/pd/{cluster_id}/member/{member_id}/binary_version"
+	allocIDPathFormat              = "/pd/%d/alloc_id"                  // "/pd/{cluster_id}/alloc_id"
+	keyspaceAllocIDPathFormat      = "/pd/%d/keyspaces/alloc_id"        // "/pd/{cluster_id}/keyspaces/alloc_id"
+	kemberLeaderPriorityPathFormat = "/pd/%d/member/%d/leader_priority" // "/pd/{cluster_id}/member/{member_id}/leader_priority"
 
 	msLeaderPathFormat           = "/ms/%d/%s/primary"                                // "/ms/{cluster_id}/{service_name}/primary"
 	msTsoDefaultLeaderPathFormat = "/ms/%d/tso/00000/primary"                         // "/ms/{cluster_id}/tso/00000/primary"
 	msTsoKespaceLeaderPathFormat = "/ms/%d/tso/keyspace_groups/election/%05d/primary" // "/ms/{cluster_id}/tso/keyspace_groups/election/{group_id}/primary"
+
+	// `expected_primary` is the flag to indicate the expected primary/leader.
+	// 1. When the leader was campaigned successfully, it will set the `expected_primary` flag.
+	// 2. Using `{service}/primary/transfer` API will revoke the previous lease and set a new `expected_primary` flag.
+	// This flag used to help new primary to campaign successfully while other secondaries can skip the campaign.
+	msExpectedLeaderPathFormat           = "/ms/%d/%s/primary/expected_primary"                                // "/ms/{cluster_id}/{service_name}/primary/expected_primary"
+	msTsoDefaultExpectedLeaderPathFormat = "/ms/%d/tso/00000/primary/expected_primary"                         // "/ms/{cluster_id}/tso/00000/primary"
+	msTsoKespaceExpectedLeaderPathFormat = "/ms/%d/tso/keyspace_groups/election/%05d/primary/expected_primary" // "/ms/{cluster_id}/tso/keyspace_groups/election/{group_id}/primary"
 )
 
 // MsParam is the parameter of micro service.
@@ -48,13 +60,24 @@ func LeaderPath(p *MsParam) string {
 	if p == nil || p.ServiceName == "" {
 		return fmt.Sprintf(leaderPathFormat, ClusterID())
 	}
-	if p.ServiceName == "tso" {
+	if p.ServiceName == constant.TSOServiceName {
 		if p.GroupID == 0 {
 			return fmt.Sprintf(msTsoDefaultLeaderPathFormat, ClusterID())
 		}
 		return fmt.Sprintf(msTsoKespaceLeaderPathFormat, ClusterID(), p.GroupID)
 	}
 	return fmt.Sprintf(msLeaderPathFormat, ClusterID(), p.ServiceName)
+}
+
+// ExpectedPrimaryPath returns the expected_primary path.
+func ExpectedPrimaryPath(p *MsParam) string {
+	if p.ServiceName == constant.TSOServiceName {
+		if p.GroupID == 0 {
+			return fmt.Sprintf(msTsoDefaultExpectedLeaderPathFormat, ClusterID())
+		}
+		return fmt.Sprintf(msTsoKespaceExpectedLeaderPathFormat, ClusterID(), p.GroupID)
+	}
+	return fmt.Sprintf(msExpectedLeaderPathFormat, ClusterID(), p.ServiceName)
 }
 
 // MemberBinaryDeployPath returns the member binary deploy path.
@@ -80,4 +103,9 @@ func AllocIDPath() string {
 // KeyspaceAllocIDPath returns the keyspace alloc id path.
 func KeyspaceAllocIDPath() string {
 	return fmt.Sprintf(keyspaceAllocIDPathFormat, ClusterID())
+}
+
+// MemberLeaderPriorityPath returns the member leader priority path.
+func MemberLeaderPriorityPath(id uint64) string {
+	return fmt.Sprintf(kemberLeaderPriorityPathFormat, ClusterID(), id)
 }

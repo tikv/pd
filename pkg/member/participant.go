@@ -50,10 +50,9 @@ type Participant struct {
 	keypath.MsParam
 	leadership *election.Leadership
 	// stored as member type
-	leader   atomic.Value
-	client   *clientv3.Client
-	rootPath string
-	member   participant
+	leader atomic.Value
+	client *clientv3.Client
+	member participant
 	// memberValue is the serialized string of `member`. It will be saved in the
 	// leader key when this participant is successfully elected as the leader of
 	// the group. Every write will use it to check the leadership.
@@ -76,7 +75,7 @@ func NewParticipant(client *clientv3.Client, msParam keypath.MsParam) *Participa
 }
 
 // InitInfo initializes the member info.
-func (m *Participant) InitInfo(p participant, rootPath string, purpose string) {
+func (m *Participant) InitInfo(p participant, purpose string) {
 	data, err := p.Marshal()
 	if err != nil {
 		// can't fail, so panic here.
@@ -84,7 +83,6 @@ func (m *Participant) InitInfo(p participant, rootPath string, purpose string) {
 	}
 	m.member = p
 	m.memberValue = string(data)
-	m.rootPath = rootPath
 	m.leadership = election.NewLeadership(m.client, m.GetLeaderPath(), purpose)
 	m.lastLeaderUpdatedTime.Store(time.Now())
 	log.Info("participant joining election", zap.String("participant-info", p.String()), zap.String("leader-path", m.GetLeaderPath()))
