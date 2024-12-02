@@ -2057,11 +2057,6 @@ func (s *Server) SetExternalTS(externalTS, globalTS uint64) error {
 	return c.SetExternalTS(externalTS)
 }
 
-// IsLocalTSOEnabled returns if the local TSO is enabled.
-func (s *Server) IsLocalTSOEnabled() bool {
-	return s.cfg.IsLocalTSOEnabled()
-}
-
 // GetMaxConcurrentTSOProxyStreamings returns the max concurrent TSO proxy streamings.
 // If the value is negative, there is no limit.
 func (s *Server) GetMaxConcurrentTSOProxyStreamings() int {

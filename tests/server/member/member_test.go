@@ -30,7 +30,6 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/utils/assertutil"
-	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/server"
@@ -101,13 +100,6 @@ func TestMemberDelete(t *testing.T) {
 			}
 			return true
 		})
-	}
-	// Check whether the dc-location info of the corresponding member is deleted.
-	for _, member := range members {
-		key := member.GetServer().GetMember().GetDCLocationPath(member.GetServerID())
-		resp, err := etcdutil.EtcdKVGet(leader.GetEtcdClient(), key)
-		re.NoError(err)
-		re.Empty(resp.Kvs)
 	}
 }
 

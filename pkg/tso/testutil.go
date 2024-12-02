@@ -61,11 +61,6 @@ func (c *TestServiceConfig) GetLeaderLease() int64 {
 	return c.LeaderLease
 }
 
-// IsLocalTSOEnabled returns the LocalTSOEnabled field of TestServiceConfig.
-func (c *TestServiceConfig) IsLocalTSOEnabled() bool {
-	return c.LocalTSOEnabled
-}
-
 // GetTSOUpdatePhysicalInterval returns the TSOUpdatePhysicalInterval field of TestServiceConfig.
 func (c *TestServiceConfig) GetTSOUpdatePhysicalInterval() time.Duration {
 	return c.TSOUpdatePhysicalInterval

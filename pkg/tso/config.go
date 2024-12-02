@@ -38,8 +38,6 @@ type ServiceConfig interface {
 type Config interface {
 	// GetLeaderLease returns the leader lease.
 	GetLeaderLease() int64
-	// IsLocalTSOEnabled returns if the local TSO is enabled.
-	IsLocalTSOEnabled() bool
 	// GetTSOUpdatePhysicalInterval returns TSO update physical interval.
 	GetTSOUpdatePhysicalInterval() time.Duration
 	// GetTSOSaveInterval returns TSO save interval.

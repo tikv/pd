@@ -37,7 +37,6 @@ import (
 	tsoapi "github.com/tikv/pd/pkg/mcs/tso/server/apis/v1"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/storage/endpoint"
-	tsopkg "github.com/tikv/pd/pkg/tso"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/tempurl"
@@ -629,10 +628,7 @@ func TestTSOServiceSwitch(t *testing.T) {
 
 	// Verify PD is not providing TSO service
 	testutil.Eventually(re, func() bool {
-		allocator, err := pdLeader.GetServer().GetTSOAllocatorManager().GetAllocator(tsopkg.GlobalDCLocation)
-		if err != nil {
-			return false
-		}
+		allocator := pdLeader.GetServer().GetTSOAllocatorManager().GetAllocator()
 		return !allocator.IsInitialize()
 	})
 

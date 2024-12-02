@@ -395,18 +395,6 @@ func KeyspaceGroupGlobalTSPath(groupID uint32) string {
 	return path.Join(fmt.Sprintf("%05d", groupID), globalTSOAllocatorEtcdPrefix)
 }
 
-// KeyspaceGroupLocalTSPath constructs the timestampOracle path prefix for Local TSO, which is:
-//  1. for the default keyspace group:
-//     lta/{dc-location} in /pd/{cluster_id}/lta/{dc-location}/timestamp
-//  2. for the non-default keyspace groups:
-//     {group}/lta/{dc-location} in /ms/{cluster_id}/tso/{group}/lta/{dc-location}/timestamp
-func KeyspaceGroupLocalTSPath(keyPrefix string, groupID uint32, dcLocation string) string {
-	if groupID == constant.DefaultKeyspaceGroupID {
-		return path.Join(keyPrefix, dcLocation)
-	}
-	return path.Join(fmt.Sprintf("%05d", groupID), keyPrefix, dcLocation)
-}
-
 // TimestampPath returns the timestamp path for the given timestamp oracle path prefix.
 func TimestampPath(tsPath string) string {
 	return path.Join(tsPath, TimestampKey)

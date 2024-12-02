@@ -653,11 +653,6 @@ func (kgm *KeyspaceGroupManager) primaryPriorityCheckLoop() {
 							log.Error("failed to get allocator manager", zap.Error(err))
 							continue
 						}
-						globalAllocator, err := allocator.GetAllocator(GlobalDCLocation)
-						if err != nil {
-							log.Error("failed to get global allocator", zap.Error(err))
-							continue
-						}
 						// only members of specific group are valid primary candidates.
 						group := kgm.GetKeyspaceGroups()[kg.ID]
 						memberMap := make(map[string]bool, len(group.Members))
@@ -668,7 +663,7 @@ func (kgm *KeyspaceGroupManager) primaryPriorityCheckLoop() {
 							zap.String("local-address", kgm.tsoServiceID.ServiceAddr),
 							zap.Uint32("keyspace-group-id", kg.ID),
 							zap.Int("local-priority", localPriority))
-						if err := utils.TransferPrimary(kgm.etcdClient, globalAllocator.(*GlobalTSOAllocator).GetExpectedPrimaryLease(),
+						if err := utils.TransferPrimary(kgm.etcdClient, allocator.GetAllocator().(*GlobalTSOAllocator).GetExpectedPrimaryLease(),
 							constant.TSOServiceName, kgm.GetServiceConfig().GetName(), "", kg.ID, memberMap); err != nil {
 							log.Error("failed to transfer primary", zap.Error(err))
 							continue
@@ -796,7 +791,7 @@ func (kgm *KeyspaceGroupManager) updateKeyspaceGroup(group *endpoint.KeyspaceGro
 	am.startGlobalAllocatorLoop()
 	log.Info("created allocator manager",
 		zap.Uint32("keyspace-group-id", group.ID),
-		zap.String("timestamp-path", am.GetTimestampPath("")))
+		zap.String("timestamp-path", am.GetTimestampPath()))
 	kgm.Lock()
 	group.KeyspaceLookupTable = make(map[uint32]struct{})
 	for _, kid := range group.Keyspaces {
@@ -1075,7 +1070,7 @@ func (kgm *KeyspaceGroupManager) GetKeyspaceGroups() map[uint32]*endpoint.Keyspa
 func (kgm *KeyspaceGroupManager) HandleTSORequest(
 	ctx context.Context,
 	keyspaceID, keyspaceGroupID uint32,
-	dcLocation string, count uint32,
+	count uint32,
 ) (ts pdpb.Timestamp, curKeyspaceGroupID uint32, err error) {
 	if err := checkKeySpaceGroupID(keyspaceGroupID); err != nil {
 		return pdpb.Timestamp{}, keyspaceGroupID, err
@@ -1084,7 +1079,7 @@ func (kgm *KeyspaceGroupManager) HandleTSORequest(
 	if err != nil {
 		return pdpb.Timestamp{}, curKeyspaceGroupID, err
 	}
-	err = kgm.checkTSOSplit(curKeyspaceGroupID, dcLocation)
+	err = kgm.checkTSOSplit(curKeyspaceGroupID)
 	if err != nil {
 		return pdpb.Timestamp{}, curKeyspaceGroupID, err
 	}
@@ -1097,17 +1092,12 @@ func (kgm *KeyspaceGroupManager) HandleTSORequest(
 	// TSO is the latest one from the storage, which could prevent the potential
 	// fallback caused by the rolling update of the mixed old PD and TSO service deployment.
 	err = kgm.markGroupRequested(curKeyspaceGroupID, func() error {
-		allocator, err := am.GetAllocator(dcLocation)
-		if err != nil {
-			return err
-		}
-		// TODO: support the Local TSO Allocator.
-		return allocator.Initialize(0)
+		return am.GetAllocator().Initialize(0)
 	})
 	if err != nil {
 		return pdpb.Timestamp{}, curKeyspaceGroupID, err
 	}
-	ts, err = am.HandleRequest(ctx, dcLocation, count)
+	ts, err = am.HandleRequest(ctx, count)
 	return ts, curKeyspaceGroupID, err
 }
 
@@ -1120,9 +1110,7 @@ func checkKeySpaceGroupID(id uint32) error {
 }
 
 // GetMinTS returns the minimum timestamp across all keyspace groups served by this TSO server/pod.
-func (kgm *KeyspaceGroupManager) GetMinTS(
-	dcLocation string,
-) (_ pdpb.Timestamp, kgAskedCount, kgTotalCount uint32, err error) {
+func (kgm *KeyspaceGroupManager) GetMinTS() (_ pdpb.Timestamp, kgAskedCount, kgTotalCount uint32, err error) {
 	kgm.RLock()
 	defer kgm.RUnlock()
 
@@ -1146,7 +1134,7 @@ func (kgm *KeyspaceGroupManager) GetMinTS(
 		if kgm.kgs[i] != nil && kgm.kgs[i].IsSplitTarget() {
 			continue
 		}
-		ts, err := am.HandleRequest(context.Background(), dcLocation, 1)
+		ts, err := am.HandleRequest(context.Background(), 1)
 		if err != nil {
 			return pdpb.Timestamp{}, kgAskedCount, kgTotalCount, err
 		}
@@ -1176,20 +1164,13 @@ func genNotServedErr(perr *perrors.Error, keyspaceGroupID uint32) error {
 // newly split TSO keep consistent with the original one.
 func (kgm *KeyspaceGroupManager) checkTSOSplit(
 	keyspaceGroupID uint32,
-	dcLocation string,
 ) error {
 	splitTargetAM, splitSourceAM, err := kgm.state.checkGroupSplit(keyspaceGroupID)
 	if err != nil || splitTargetAM == nil {
 		return err
 	}
-	splitTargetAllocator, err := splitTargetAM.GetAllocator(dcLocation)
-	if err != nil {
-		return err
-	}
-	splitSourceAllocator, err := splitSourceAM.GetAllocator(dcLocation)
-	if err != nil {
-		return err
-	}
+	splitTargetAllocator := splitTargetAM.GetAllocator()
+	splitSourceAllocator := splitSourceAM.GetAllocator()
 	splitTargetTSO, err := splitTargetAllocator.GenerateTSO(context.Background(), 1)
 	if err != nil {
 		return err
@@ -1413,17 +1394,7 @@ mergeLoop:
 				zap.Uint32("merge-target-id", mergeTargetID),
 				zap.Any("merge-list", mergeList),
 				zap.Time("merged-ts", mergedTS))
-			// TODO: support the Local TSO Allocator.
-			allocator, err := am.GetAllocator(GlobalDCLocation)
-			if err != nil {
-				log.Error("failed to get the allocator",
-					zap.String("member", kgm.tsoServiceID.ServiceAddr),
-					zap.Uint32("merge-target-id", mergeTargetID),
-					zap.Any("merge-list", mergeList),
-					zap.Error(err))
-				continue
-			}
-			err = allocator.SetTSO(
+			err = am.GetAllocator().SetTSO(
 				tsoutil.GenerateTS(tsoutil.GenerateTimestamp(mergedTS, 1)),
 				true, true)
 			if err != nil {
@@ -1490,7 +1461,7 @@ func (kgm *KeyspaceGroupManager) groupSplitPatroller() {
 				zap.Uint32("keyspace-group-id", groupID),
 				zap.Uint32("keyspace-id", group.Keyspaces[0]))
 			// Request the TSO manually to speed up the split process.
-			_, _, err := kgm.HandleTSORequest(kgm.ctx, group.Keyspaces[0], groupID, GlobalDCLocation, 1)
+			_, _, err := kgm.HandleTSORequest(kgm.ctx, group.Keyspaces[0], groupID, 1)
 			if err != nil {
 				log.Warn("failed to request tso for the splitting keyspace group",
 					zap.Uint32("keyspace-group-id", groupID),

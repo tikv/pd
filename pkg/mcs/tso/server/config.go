@@ -127,11 +127,6 @@ func (c *Config) GetLeaderLease() int64 {
 	return c.LeaderLease
 }
 
-// IsLocalTSOEnabled returns if the local TSO is enabled.
-func (c *Config) IsLocalTSOEnabled() bool {
-	return c.EnableLocalTSO
-}
-
 // GetTSOUpdatePhysicalInterval returns TSO update physical interval.
 func (c *Config) GetTSOUpdatePhysicalInterval() time.Duration {
 	return c.TSOUpdatePhysicalInterval.Duration
