@@ -500,7 +500,6 @@ func (suite *serverTestSuite) TestStoreLimit() {
 	defer tc.Destroy()
 	leaderServer := suite.pdLeader.GetServer()
 	tc.WaitForPrimaryServing(re)
-	waitSwitchFinish(re, leaderServer, constant.SchedulingServiceName)
 	oc := tc.GetPrimaryServer().GetCluster().GetCoordinator().GetOperatorController()
 
 	conf := leaderServer.GetReplicationConfig().Clone()
@@ -610,12 +609,6 @@ func checkOperatorFail(re *require.Assertions, oc *operator.Controller, op *oper
 func waitSyncFinish(re *require.Assertions, tc *tests.TestSchedulingCluster, typ storelimit.Type, expectedLimit float64) {
 	testutil.Eventually(re, func() bool {
 		return tc.GetPrimaryServer().GetCluster().GetSharedConfig().GetStoreLimitByType(2, typ) == expectedLimit
-	})
-}
-
-func waitSwitchFinish(re *require.Assertions, server *server.Server, serviceName string) {
-	testutil.Eventually(re, func() bool {
-		return server.IsServiceIndependent(serviceName)
 	})
 }
 
