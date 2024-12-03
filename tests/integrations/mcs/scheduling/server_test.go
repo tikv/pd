@@ -505,6 +505,9 @@ func (suite *serverTestSuite) TestStoreLimit() {
 	conf := leaderServer.GetReplicationConfig().Clone()
 	conf.MaxReplicas = 1
 	leaderServer.SetReplicationConfig(*conf)
+	conf1 := leaderServer.GetScheduleConfig().Clone()
+	conf1.RegionScheduleLimit = 0
+	leaderServer.SetScheduleConfig(*conf1)
 	grpcPDClient := testutil.MustNewGrpcClient(re, suite.pdLeader.GetServer().GetAddr())
 	for i := uint64(1); i <= 2; i++ {
 		resp, err := grpcPDClient.PutStore(
