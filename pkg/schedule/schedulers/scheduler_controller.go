@@ -373,7 +373,6 @@ func (c *Controller) runScheduler(s *ScheduleController) {
 		select {
 		case <-ticker.C:
 			if !c.prepareChecker.Check(c.cluster.GetBasicCluster()) {
-				time.Sleep(time.Second)
 				continue
 			}
 			diagnosable := s.IsDiagnosticAllowed()
