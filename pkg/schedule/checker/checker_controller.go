@@ -132,12 +132,12 @@ func (c *Controller) PatrolRegions() {
 		regions []*core.RegionInfo
 	)
 	for {
-		if !c.prepareChecker.Check(c.cluster.GetBasicCluster()) {
-			time.Sleep(time.Second)
-			continue
-		}
 		select {
 		case <-ticker.C:
+			if !c.prepareChecker.Check(c.cluster.GetBasicCluster()) {
+				time.Sleep(time.Second)
+				continue
+			}
 			c.updateTickerIfNeeded(ticker)
 			c.updatePatrolWorkersIfNeeded()
 			if c.cluster.IsSchedulingHalted() {
