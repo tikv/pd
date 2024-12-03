@@ -159,7 +159,7 @@ func (gta *GlobalTSOAllocator) GenerateTSO(ctx context.Context, count uint32) (p
 		return pdpb.Timestamp{}, errs.ErrGenerateTimestamp.FastGenByArgs(fmt.Sprintf("requested pd %s of cluster", errs.NotLeaderErr))
 	}
 
-	return gta.timestampOracle.getTS(ctx, gta.member.GetLeadership(), count, 0)
+	return gta.timestampOracle.getTS(ctx, gta.member.GetLeadership(), count)
 }
 
 // Reset is used to reset the TSO allocator.

@@ -16,7 +16,6 @@ package tso
 
 import (
 	"context"
-	"math"
 	"runtime/trace"
 	"strconv"
 	"sync"
@@ -238,21 +237,6 @@ func (am *AllocatorManager) close() {
 // GetMember returns the ElectionMember of this AllocatorManager.
 func (am *AllocatorManager) GetMember() ElectionMember {
 	return am.member
-}
-
-// GetSuffixBits calculates the bits of suffix sign
-// by the max number of suffix so far,
-// which will be used in the TSO logical part.
-func (am *AllocatorManager) GetSuffixBits() int {
-	am.mu.RLock()
-	defer am.mu.RUnlock()
-	return CalSuffixBits(am.mu.maxSuffix)
-}
-
-// CalSuffixBits calculates the bits of suffix by the max suffix sign.
-func CalSuffixBits(maxSuffix int32) int {
-	// maxSuffix + 1 because we have the Global TSO holds 0 as the suffix sign
-	return int(math.Ceil(math.Log2(float64(maxSuffix + 1))))
 }
 
 // AllocatorDaemon is used to update every allocator's TSO and check whether we have
