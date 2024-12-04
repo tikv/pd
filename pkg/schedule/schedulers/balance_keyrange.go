@@ -19,6 +19,7 @@ import (
 	"cmp"
 	"fmt"
 	"slices"
+	"time"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
@@ -253,6 +254,7 @@ type balanceKeyrangeSchedulerConfig struct {
 	Range             core.KeyRange `json:"range"`
 	RequiredLabels    []*metapb.StoreLabel
 	BatchSize         uint64
+	MaxRunMillis      int64
 	removeSchedulerCb func(string) error
 }
 
@@ -262,6 +264,7 @@ type balanceKeyrangeScheduler struct {
 	name          string
 	conf          *balanceKeyrangeSchedulerConfig
 	migrationPlan *MigrationPlan
+	StartTime     time.Time
 }
 
 // newBalanceKeyrangeScheduler creates a scheduler that tends to keep key-range on
@@ -310,8 +313,7 @@ func (s *balanceKeyrangeScheduler) IsFinished() bool {
 
 // IsTimeout is true if the schedule took too much time and needs to be canceled.
 func (s *balanceKeyrangeScheduler) IsTimeout() bool {
-	// TODO
-	return false
+	return time.Since(s.StartTime).Microseconds() > s.conf.MaxRunMillis
 }
 
 // Schedule implements the Scheduler interface.
@@ -322,17 +324,26 @@ func (s *balanceKeyrangeScheduler) Schedule(cluster sche.SchedulerCluster, dryRu
 	// TODO If the scheduler is scheduled from when bootstrapping, it will cause a extra scehdule on "", ""
 	rangeChanged := true
 	if s.migrationPlan != nil {
+		// If there is a ongoing schedule,
+		// - Check if it is timeout
+		if s.IsTimeout() {
+			log.Info("balance keyrange range timeout", zap.ByteString("planStartKey", s.migrationPlan.StartKey), zap.ByteString("planStartKey", s.migrationPlan.EndKey), zap.Any("StartTime", s.StartTime))
+		}
+		// - Check if there comes a new schedule
 		rangeChanged = !bytes.Equal(s.conf.Range.StartKey, s.migrationPlan.StartKey) || !bytes.Equal(s.conf.Range.EndKey, s.migrationPlan.EndKey)
 	}
 	if s.IsFinished() {
+		// If the current schedule is finished.
 		if rangeChanged {
-			// Generate a new schedule.
+			// If there comes a new schedule task, generate a new schedule.
 			p, err := RedistibuteRegions(cluster, s.conf.Range.StartKey, s.conf.Range.EndKey, s.conf.RequiredLabels)
 			if err != nil {
 				log.Error("balance keyrange can't generate plan", zap.Error(err))
 			}
 			s.migrationPlan = p
+			s.StartTime = time.Now()
 		} else {
+			// Otherwise, just shutdown.
 			log.Info("shutdown balance keyrange", zap.Any("conf", s.conf))
 			if s.conf.removeSchedulerCb != nil {
 				s.conf.removeSchedulerCb(string(types.BalanceKeyrangeScheduler))
@@ -341,9 +352,13 @@ func (s *balanceKeyrangeScheduler) Schedule(cluster sche.SchedulerCluster, dryRu
 		}
 	} else {
 		if rangeChanged {
-			log.Error("balance keyrange range mismatch", zap.ByteString("confStartKey", s.conf.Range.StartKey), zap.ByteString("confEndKey", s.conf.Range.EndKey), zap.ByteString("planStartKey", s.migrationPlan.StartKey), zap.ByteString("planStartKey", s.migrationPlan.EndKey), zap.Bool("IsFinished", s.IsFinished()))
+			// If the current schedule is ongoing, we should not schedule a new one.
+			// However, if they did, we can not do anything, but reject here and clean the previous plan, because the conf has been changed.
+			log.Error("balance keyrange range mismatch, clean the former plan", zap.ByteString("confStartKey", s.conf.Range.StartKey), zap.ByteString("confEndKey", s.conf.Range.EndKey), zap.ByteString("planStartKey", s.migrationPlan.StartKey), zap.ByteString("planStartKey", s.migrationPlan.EndKey), zap.Bool("IsFinished", s.IsFinished()))
+			s.migrationPlan = nil
 			return []*operator.Operator{}, make([]plan.Plan, 0)
 		}
+		// This is the normal branch that the current schedule is ongoing.
 	}
 
 	batchSize := int(s.conf.BatchSize)

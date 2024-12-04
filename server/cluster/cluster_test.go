@@ -4003,7 +4003,7 @@ func TestAddAdhocScheduler(t *testing.T) {
 	}
 	log.Info("!!!!! AddScheduler")
 
-	s, err := schedulers.CreateScheduler(types.BalanceKeyrangeScheduler, oc, storage.NewStorageWithMemoryBackend(), schedulers.ConfigSliceDecoder(types.BalanceKeyrangeScheduler, []string{"1", "", "", ""}), cb)
+	s, err := schedulers.CreateScheduler(types.BalanceKeyrangeScheduler, oc, storage.NewStorageWithMemoryBackend(), schedulers.ConfigSliceDecoder(types.BalanceKeyrangeScheduler, []string{"1", "", "100000", "", ""}), cb)
 	re.NoError(err)
 	re.NoError(controller.AddScheduler(s))
 	time.Sleep(time.Second * 5)

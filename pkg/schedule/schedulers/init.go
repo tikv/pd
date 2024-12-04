@@ -140,6 +140,9 @@ func schedulersRegister() {
 			if !ok {
 				return errs.ErrScheduleConfigNotExist.FastGenByArgs()
 			}
+			if len(args) != 5 {
+				return errs.ErrSchedulerConfig.FastGenByArgs("Must provide `batchSize`, `labels`, `maxRunMillis`, `startKey`, `endKey`")
+			}
 			b, err := strconv.ParseUint(args[0], 10, 64)
 			if err != nil {
 				return errs.ErrQueryUnescape.Wrap(err)
@@ -151,11 +154,16 @@ func schedulersRegister() {
 			if err != nil {
 				return errs.ErrQueryUnescape.Wrap(err)
 			}
-			startKey, err := url.QueryUnescape(args[2])
+			mr, err := strconv.ParseInt(args[2], 10, 64)
+			if args[2] != "" {
+				return errs.ErrQueryUnescape.Wrap(err)
+			}
+			conf.MaxRunMillis = mr
+			startKey, err := url.QueryUnescape(args[3])
 			if err != nil {
 				return errs.ErrQueryUnescape.Wrap(err)
 			}
-			endKey, err := url.QueryUnescape(args[3])
+			endKey, err := url.QueryUnescape(args[4])
 			if err != nil {
 				return errs.ErrQueryUnescape.Wrap(err)
 			}
