@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"cmp"
 	"fmt"
+	"runtime"
 	"slices"
 	"time"
 
@@ -76,23 +77,23 @@ func PickRegions(n int, fromStore *StoreRegionSet, toStore *StoreRegionSet) *Mig
 }
 
 func BuildMigrationPlan(stores []*StoreRegionSet) ([]int, []int, []*MigrationOp, int) {
-	totalRegionCount := 0
+	totalPeersCount := 0
 	if len(stores) == 0 {
 		log.Info("no stores for migration")
 		return []int{}, []int{}, []*MigrationOp{}, 0
 	}
 	for _, store := range stores {
-		totalRegionCount += len(store.RegionIDSet)
+		totalPeersCount += len(store.RegionIDSet)
 	}
 	for _, store := range stores {
-		percentage := 100 * float64(len(store.RegionIDSet)) / float64(totalRegionCount)
+		percentage := 100 * float64(len(store.RegionIDSet)) / float64(totalPeersCount)
 		log.Info("!!! store region dist",
 			zap.Uint64("store-id", store.ID),
 			zap.Int("num-region", len(store.RegionIDSet)),
 			zap.String("percentage", fmt.Sprintf("%.2f%%", percentage)))
 	}
-	avr := totalRegionCount / len(stores)
-	remainder := totalRegionCount % len(stores)
+	avr := totalPeersCount / len(stores)
+	remainder := totalPeersCount % len(stores)
 	// sort TiFlash stores by region count in descending order
 	slices.SortStableFunc(stores, func(lhs, rhs *StoreRegionSet) int {
 		return -cmp.Compare(len(lhs.RegionIDSet), len(rhs.RegionIDSet))
@@ -316,20 +317,35 @@ func (s *balanceKeyrangeScheduler) IsTimeout() bool {
 	return time.Since(s.StartTime).Microseconds() > s.conf.MaxRunMillis
 }
 
+func getStackTrace() string {
+	var buffer [4096]byte
+	n := runtime.Stack(buffer[:], false)
+	return string(buffer[:n])
+}
+
 // Schedule implements the Scheduler interface.
 func (s *balanceKeyrangeScheduler) Schedule(cluster sche.SchedulerCluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
 	balanceKeyrangeScheduleCounter.Inc()
-	log.Error("!!!!! ScheduleSchedule")
+	log.Error("!!!!! ScheduleSchedule", zap.Any("s", getStackTrace()))
+
+	doShutdown := func() {
+		s.migrationPlan = nil
+		if s.conf.removeSchedulerCb != nil {
+			s.conf.removeSchedulerCb(string(types.BalanceKeyrangeScheduler))
+		}
+	}
 
 	// TODO If the scheduler is scheduled from when bootstrapping, it will cause a extra scehdule on "", ""
 	rangeChanged := true
 	if s.migrationPlan != nil {
 		// If there is a ongoing schedule,
-		// - Check if it is timeout
+		// - If it is timeout, then return.
 		if s.IsTimeout() {
 			log.Info("balance keyrange range timeout", zap.ByteString("planStartKey", s.migrationPlan.StartKey), zap.ByteString("planStartKey", s.migrationPlan.EndKey), zap.Any("StartTime", s.StartTime))
+			doShutdown()
+			return []*operator.Operator{}, make([]plan.Plan, 0)
 		}
-		// - Check if there comes a new schedule
+		// - Then check if there comes a new schedule
 		rangeChanged = !bytes.Equal(s.conf.Range.StartKey, s.migrationPlan.StartKey) || !bytes.Equal(s.conf.Range.EndKey, s.migrationPlan.EndKey)
 	}
 	if s.IsFinished() {
@@ -345,9 +361,7 @@ func (s *balanceKeyrangeScheduler) Schedule(cluster sche.SchedulerCluster, dryRu
 		} else {
 			// Otherwise, just shutdown.
 			log.Info("shutdown balance keyrange", zap.Any("conf", s.conf))
-			if s.conf.removeSchedulerCb != nil {
-				s.conf.removeSchedulerCb(string(types.BalanceKeyrangeScheduler))
-			}
+			doShutdown()
 			return []*operator.Operator{}, []plan.Plan{}
 		}
 	} else {

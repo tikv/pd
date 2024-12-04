@@ -3971,7 +3971,7 @@ func BenchmarkHandleRegionHeartbeat(b *testing.B) {
 	}
 }
 
-func TestAddAdhocScheduler(t *testing.T) {
+func TestAddKeyrangeScheduler(t *testing.T) {
 	re := require.New(t)
 
 	tc, co, cleanup := prepare(nil, nil, func(co *schedule.Coordinator) { co.Run() }, re)
@@ -3982,6 +3982,7 @@ func TestAddAdhocScheduler(t *testing.T) {
 	re.NoError(controller.RemoveScheduler(types.BalanceRegionScheduler.String()))
 	re.NoError(controller.RemoveScheduler(types.BalanceHotRegionScheduler.String()))
 	re.NoError(controller.RemoveScheduler(types.EvictSlowStoreScheduler.String()))
+	re.False(controller.IsSchedulerExisted(types.EvictSlowStoreScheduler.String()))
 	re.Empty(controller.GetSchedulerNames())
 
 	tc.addLeaderStore(10, 5)
@@ -4001,11 +4002,15 @@ func TestAddAdhocScheduler(t *testing.T) {
 		log.Info("!!!!! RemoveScheduler", zap.Any("s", s))
 		return controller.RemoveScheduler(s)
 	}
-	log.Info("!!!!! AddScheduler")
 
-	s, err := schedulers.CreateScheduler(types.BalanceKeyrangeScheduler, oc, storage.NewStorageWithMemoryBackend(), schedulers.ConfigSliceDecoder(types.BalanceKeyrangeScheduler, []string{"1", "", "100000", "", ""}), cb)
+	s, err := schedulers.CreateScheduler(types.BalanceKeyrangeScheduler, oc, storage.NewStorageWithMemoryBackend(), schedulers.ConfigSliceDecoder(types.BalanceKeyrangeScheduler, []string{"1", "", "1000", "", ""}), cb)
+	log.Info("!!!!! AddScheduler", zap.Any("interval", s.GetMinInterval()))
 	re.NoError(err)
 	re.NoError(controller.AddScheduler(s))
-	time.Sleep(time.Second * 5)
+	// The scheduler timeout.
+	time.Sleep(time.Second * 2)
+	re.True(s.IsFinished())
+	// log.Info("!!!! GetInterval", zap.Any("Interval", controller.Get))
+	time.Sleep(time.Second * 10)
 	panic(1)
 }

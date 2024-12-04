@@ -165,13 +165,17 @@ func (suite *balanceKeyrangeSchedulerTestSuite) TestBalanceKeyrangeFinish() {
 }
 
 func (suite *balanceKeyrangeSchedulerTestSuite) TestBalanceKeyrangeConfChanged() {
+	// TODO
+}
+
+func (suite *balanceKeyrangeSchedulerTestSuite) TestBalanceKeyrangeConfTimeout() {
 	re := suite.Require()
 
 	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
 	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 
-	sb, err := CreateScheduler(types.BalanceKeyrangeScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.BalanceKeyrangeScheduler, []string{"1", "", "100000", "", ""}))
+	sb, err := CreateScheduler(types.BalanceKeyrangeScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.BalanceKeyrangeScheduler, []string{"1", "", "1000", "", ""}))
 	re.NoError(err)
 
 	tc.AddLabelsStore(10, 16, map[string]string{"engine": "tiflash"})
@@ -187,8 +191,9 @@ func (suite *balanceKeyrangeSchedulerTestSuite) TestBalanceKeyrangeConfChanged()
 
 	sb.Schedule(tc, false)
 	re.False(sb.IsFinished())
+	time.Sleep(time.Second * 2)
 	sb.Schedule(tc, false)
-	re.False(sb.IsFinished())
+	re.True(sb.IsFinished())
 }
 
 func assertvalidateMigrationPlan(re *require.Assertions, ops []*MigrationOp, storeIDs []uint64, regions []*core.RegionInfo, storeCounts []int) {
@@ -377,4 +382,70 @@ func TestBalanceKeyrangeAlgorithm(t *testing.T) {
 	s = ComputeCandidateStores([]*metapb.StoreLabel{}, stores, regions)
 	_, _, ops, _ = BuildMigrationPlan(s)
 	assertvalidateMigrationPlan(re, ops, storeIds, regions, []int{0, 0})
+
+	// 10:
+	// 11: 1 2 3 4 5 6 7 8 9
+	// 12:
+	// 13: 1 2 3 4 5 6 7 8 9
+	storeIds = []uint64{10, 11, 12, 13}
+	stores, regions = buildRedistributeRegionsTestCases(storeIds, []regionStoresPair{
+		{1, []uint64{3, 1}},
+		{2, []uint64{3, 1}},
+		{3, []uint64{3, 1}},
+		{4, []uint64{3, 1}},
+		{5, []uint64{3, 1}},
+		{6, []uint64{3, 1}},
+		{7, []uint64{3, 1}},
+		{8, []uint64{3, 1}},
+		{9, []uint64{3, 1}},
+	})
+	s = ComputeCandidateStores([]*metapb.StoreLabel{}, stores, regions)
+	_, _, ops, _ = BuildMigrationPlan(s)
+	assertvalidateMigrationPlan(re, ops, storeIds, regions, []int{4, -4, 4, -4})
+
+	// Won't happen, since regions with in a table have the same replica count, however, test it in case.
+	// 10: 1 2 3 4 5
+	// 11: 1 2 3
+	// 12:
+	storeIds = []uint64{10, 11, 12}
+	stores, regions = buildRedistributeRegionsTestCases(storeIds, []regionStoresPair{
+		{1, []uint64{0, 1}},
+		{2, []uint64{0, 1}},
+		{3, []uint64{0, 1}},
+		{4, []uint64{0}},
+		{5, []uint64{0}},
+	})
+	s = ComputeCandidateStores([]*metapb.StoreLabel{}, stores, regions)
+	_, _, ops, _ = BuildMigrationPlan(s)
+	assertvalidateMigrationPlan(re, ops, storeIds, regions, []int{-2, 0, 2})
+
+	// Won't happen
+	// 10: 1 2 3
+	// 11: 3 4 5 6
+	// 12:
+	storeIds = []uint64{10, 11, 12}
+	stores, regions = buildRedistributeRegionsTestCases(storeIds, []regionStoresPair{
+		{1, []uint64{0}},
+		{2, []uint64{0}},
+		{3, []uint64{0, 1}},
+		{4, []uint64{1}},
+		{5, []uint64{1}},
+		{6, []uint64{1}},
+	})
+	s = ComputeCandidateStores([]*metapb.StoreLabel{}, stores, regions)
+	_, _, ops, _ = BuildMigrationPlan(s)
+	assertvalidateMigrationPlan(re, ops, storeIds, regions, []int{-1, -1, 2})
+
+	// Won't happen because a region can't have two peers in a store.
+	// 10: 1 1
+	// 11: 2
+	// 12:
+	storeIds = []uint64{10, 11, 12}
+	stores, regions = buildRedistributeRegionsTestCases(storeIds, []regionStoresPair{
+		{1, []uint64{0, 0}},
+		{2, []uint64{1}},
+	})
+	s = ComputeCandidateStores([]*metapb.StoreLabel{}, stores, regions)
+	_, _, ops, _ = BuildMigrationPlan(s)
+	assertvalidateMigrationPlan(re, ops, storeIds, regions, []int{0, 0, 0})
 }

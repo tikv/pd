@@ -155,7 +155,7 @@ func schedulersRegister() {
 				return errs.ErrQueryUnescape.Wrap(err)
 			}
 			mr, err := strconv.ParseInt(args[2], 10, 64)
-			if args[2] != "" {
+			if err != nil {
 				return errs.ErrQueryUnescape.Wrap(err)
 			}
 			conf.MaxRunMillis = mr
