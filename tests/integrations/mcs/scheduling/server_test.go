@@ -500,6 +500,9 @@ func (suite *serverTestSuite) TestStoreLimit() {
 	defer tc.Destroy()
 	leaderServer := suite.pdLeader.GetServer()
 	tc.WaitForPrimaryServing(re)
+	testutil.Eventually(re, func() bool {
+		return leaderServer.GetRaftCluster().IsServiceIndependent(constant.SchedulingServiceName)
+	})
 	oc := tc.GetPrimaryServer().GetCluster().GetCoordinator().GetOperatorController()
 
 	conf := leaderServer.GetReplicationConfig().Clone()

@@ -2389,12 +2389,12 @@ func (c *testCluster) updateLeaderCount(storeID uint64, leaderCount int) error {
 	return c.setStore(newStore)
 }
 
-func (c *testCluster) addLeaderStore(storeID uint64, leaderCount int) error {
+func (c *testCluster) addLeaderStore(storeID uint64) error {
 	stats := &pdpb.StoreStats{}
 	newStore := core.NewStoreInfo(&metapb.Store{Id: storeID},
 		core.SetStoreStats(stats),
-		core.SetLeaderCount(leaderCount),
-		core.SetLeaderSize(int64(leaderCount)*10),
+		core.SetLeaderCount(1),
+		core.SetLeaderSize(10),
 		core.SetLastHeartbeatTS(time.Now()),
 	)
 
@@ -3083,9 +3083,9 @@ func TestAddScheduler(t *testing.T) {
 	stream := mockhbstream.NewHeartbeatStream()
 
 	// Add stores 1,2,3
-	re.NoError(tc.addLeaderStore(1, 1))
-	re.NoError(tc.addLeaderStore(2, 1))
-	re.NoError(tc.addLeaderStore(3, 1))
+	re.NoError(tc.addLeaderStore(1))
+	re.NoError(tc.addLeaderStore(2))
+	re.NoError(tc.addLeaderStore(3))
 	// Add regions 1 with leader in store 1 and followers in stores 2,3
 	re.NoError(tc.addLeaderRegion(1, 1, 2, 3))
 	// Add regions 2 with leader in store 2 and followers in stores 1,3
@@ -3149,8 +3149,8 @@ func TestPersistScheduler(t *testing.T) {
 	defer cleanup()
 	defaultCount := len(sc.DefaultSchedulers)
 	// Add stores 1,2
-	re.NoError(tc.addLeaderStore(1, 1))
-	re.NoError(tc.addLeaderStore(2, 1))
+	re.NoError(tc.addLeaderStore(1))
+	re.NoError(tc.addLeaderStore(2))
 
 	controller := co.GetSchedulersController()
 	re.Len(controller.GetSchedulerNames(), defaultCount)
@@ -3265,8 +3265,8 @@ func TestRemoveScheduler(t *testing.T) {
 	defer cleanup()
 
 	// Add stores 1,2
-	re.NoError(tc.addLeaderStore(1, 1))
-	re.NoError(tc.addLeaderStore(2, 1))
+	re.NoError(tc.addLeaderStore(1))
+	re.NoError(tc.addLeaderStore(2))
 	defaultCount := len(sc.DefaultSchedulers)
 	controller := co.GetSchedulersController()
 	re.Len(controller.GetSchedulerNames(), defaultCount)
