@@ -938,9 +938,6 @@ func TestSetScheduleOpt(t *testing.T) {
 
 	tc.WaitLeader()
 	leaderServer := tc.GetLeaderServer()
-	grpcPDClient := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
-	clusterID := leaderServer.GetClusterID()
-	bootstrapCluster(re, clusterID, grpcPDClient)
 
 	cfg := config.NewConfig()
 	cfg.Schedule.TolerantSizeRatio = 5
