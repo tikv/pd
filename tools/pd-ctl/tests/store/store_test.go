@@ -34,6 +34,7 @@ import (
 	"github.com/tikv/pd/pkg/response"
 	"github.com/tikv/pd/pkg/statistics/utils"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
+	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server/config"
 	pdTests "github.com/tikv/pd/tests"
 	ctl "github.com/tikv/pd/tools/pd-ctl/pdctl"
@@ -56,13 +57,19 @@ func TestStoreLimitV2(t *testing.T) {
 	re.NoError(leaderServer.BootstrapCluster())
 	defer cluster.Destroy()
 
+	// TODO: fix https://github.com/tikv/pd/issues/7464
+	testutil.Eventually(re, func() bool {
+		return leaderServer.GetRaftCluster().GetCoordinator().AreSchedulersInitialized()
+	})
+
 	// store command
 	args := []string{"-u", pdAddr, "config", "set", "store-limit-version", "v2"}
-	_, err = tests.ExecuteCommand(cmd, args...)
+	output, err := tests.ExecuteCommand(cmd, args...)
 	re.NoError(err)
+	re.Contains(string(output), "Success")
 
 	args = []string{"-u", pdAddr, "store", "limit"}
-	output, err := tests.ExecuteCommand(cmd, args...)
+	output, err = tests.ExecuteCommand(cmd, args...)
 	re.NoError(err)
 	re.Contains(string(output), "not support get limit")
 

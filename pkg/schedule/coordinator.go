@@ -84,7 +84,7 @@ func NewCoordinator(parentCtx context.Context, cluster sche.ClusterInformer, hbS
 	prepareChecker := sche.NewPrepareChecker()
 	opController := operator.NewController(ctx, cluster.GetBasicCluster(), cluster.GetSharedConfig(), hbStreams)
 	schedulers := schedulers.NewController(ctx, cluster, cluster.GetStorage(), opController, prepareChecker)
-	checkers := checker.NewController(ctx, cluster, cluster.GetCheckerConfig(), cluster.GetRuleManager(), cluster.GetRegionLabeler(), opController, prepareChecker)
+	checkers := checker.NewController(ctx, cluster, opController, prepareChecker)
 	return &Coordinator{
 		ctx:                   ctx,
 		cancel:                cancel,
@@ -533,11 +533,6 @@ func collectHotMetrics(cluster sche.ClusterInformer, stores []*core.StoreInfo, t
 func ResetHotSpotMetrics() {
 	hotSpotStatusGauge.Reset()
 	schedulers.HotPendingSum.Reset()
-}
-
-// ShouldRun returns true if the coordinator should run.
-func (c *Coordinator) ShouldRun() bool {
-	return c.prepareChecker.Check(c.cluster.GetBasicCluster())
 }
 
 // GetSchedulersController returns the schedulers controller.
