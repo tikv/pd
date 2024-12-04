@@ -55,6 +55,9 @@ func (checker *PrepareChecker) Check(c *core.BasicCluster) bool {
 	}
 	notLoadedFromRegionsCnt := c.GetClusterNotFromStorageRegionsCnt()
 	totalRegionsCnt := c.GetTotalRegionCount()
+	if totalRegionsCnt == 0 {
+		return false
+	}
 	// The number of active regions should be more than total region of all stores * core.CollectFactor
 	if float64(totalRegionsCnt)*core.CollectFactor > float64(notLoadedFromRegionsCnt) {
 		return false

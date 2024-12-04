@@ -1161,11 +1161,12 @@ func TestDeleteAllRegionCacheScheduling(t *testing.T) {
 		count := rc.GetOperatorController().OperatorCount(operator.OpSplit)
 		return count > 0
 	})
-	rc.GetOperatorController().RemoveOperators()
+
 	// Call the delete API and verify
 	addr := leaderServer.GetAddr() + "/pd/api/v1/admin/cache/regions"
 	output := sendRequest(re, addr, http.MethodDelete, http.StatusOK)
 	re.Contains(string(output), "All regions are removed from server cache")
+	rc.GetOperatorController().RemoveOperators()
 	re.Equal(0, int(rc.GetOperatorController().OperatorCount(operator.OpSplit)))
 
 	// Simulate continuous heartbeat and verify scheduling recovery
