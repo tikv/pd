@@ -31,7 +31,6 @@ import (
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/operator"
-	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"go.uber.org/zap"
@@ -93,8 +92,11 @@ type Controller struct {
 }
 
 // NewController create a new Controller.
-func NewController(ctx context.Context, cluster sche.CheckerCluster, conf config.CheckerConfigProvider, ruleManager *placement.RuleManager, labeler *labeler.RegionLabeler, opController *operator.Controller, prepareChecker *sche.PrepareChecker) *Controller {
+func NewController(ctx context.Context, cluster sche.CheckerCluster, opController *operator.Controller, prepareChecker *sche.PrepareChecker) *Controller {
 	pendingProcessedRegions := cache.NewIDTTL(ctx, time.Minute, 3*time.Minute)
+	conf := cluster.GetCheckerConfig()
+	ruleManager := cluster.GetRuleManager()
+	labeler := cluster.GetRegionLabeler()
 	c := &Controller{
 		ctx:                     ctx,
 		cluster:                 cluster,
