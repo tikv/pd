@@ -18,18 +18,12 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
-<<<<<<< HEAD:tests/pdctl/completion/completion_test.go
 	"github.com/tikv/pd/tests/pdctl"
 	pdctlCmd "github.com/tikv/pd/tools/pd-ctl/pdctl"
-=======
-	"github.com/tikv/pd/pkg/core"
-	"github.com/tikv/pd/pkg/statistics/utils"
->>>>>>> 20087e290 (statistics: add gc in hot peer cache (#8702)):pkg/statistics/hot_cache_test.go
 )
 
 func TestCompletion(t *testing.T) {
 	re := require.New(t)
-<<<<<<< HEAD:tests/pdctl/completion/completion_test.go
 	cmd := pdctlCmd.GetRootCmd()
 
 	// completion command
@@ -41,18 +35,4 @@ func TestCompletion(t *testing.T) {
 	args = []string{"completion", "zsh"}
 	_, err = pdctl.ExecuteCommand(cmd, args...)
 	re.NoError(err)
-=======
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	for i := utils.RWType(0); i < utils.RWTypeLen; i++ {
-		cluster := core.NewBasicCluster()
-		cache := NewHotCache(ctx, cluster)
-		region := buildRegion(cluster, i, 3, 60)
-		stats := cache.CheckReadPeerSync(region, region.GetPeers(), []float64{100000000, 1000, 1000}, 60)
-		cache.Update(stats[0], i)
-		for range 100 {
-			re.True(cache.IsRegionHot(region, 1))
-		}
-	}
->>>>>>> 20087e290 (statistics: add gc in hot peer cache (#8702)):pkg/statistics/hot_cache_test.go
 }

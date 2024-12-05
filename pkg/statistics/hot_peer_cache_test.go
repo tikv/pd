@@ -33,26 +33,6 @@ import (
 	"github.com/tikv/pd/pkg/utils/typeutil"
 )
 
-<<<<<<< HEAD
-func TestStoreTimeUnsync(t *testing.T) {
-	re := require.New(t)
-	cache := NewHotPeerCache(context.Background(), utils.Write)
-	intervals := []uint64{120, 60}
-	for _, interval := range intervals {
-		region := buildRegion(utils.Write, 3, interval)
-		checkAndUpdate(re, cache, region, 3)
-		{
-			stats := cache.RegionStats(0)
-			re.Len(stats, 3)
-			for _, s := range stats {
-				re.Len(s, 1)
-			}
-		}
-	}
-}
-
-=======
->>>>>>> 20087e290 (statistics: add gc in hot peer cache (#8702))
 type operator int
 
 const (
@@ -272,7 +252,7 @@ func getIDAllocator() *mockid.IDAllocator {
 
 func buildRegion(cluster *core.BasicCluster, kind utils.RWType, peerCount int, interval uint64) (region *core.RegionInfo) {
 	peers := make([]*metapb.Peer, 0, peerCount)
-	for range peerCount {
+	for i := 0; i < peerCount; i++ {
 		id, _ := getIDAllocator().Alloc()
 		storeID, _ := getIDAllocator().Alloc()
 		peers = append(peers, &metapb.Peer{
@@ -698,12 +678,8 @@ func TestHotPeerCacheTopNThreshold(t *testing.T) {
 		cluster := core.NewBasicCluster()
 		cache := NewHotPeerCache(context.Background(), cluster, utils.Write)
 		now := time.Now()
-<<<<<<< HEAD
-		for id := uint64(0); id < 100; id++ {
-=======
 		storeID := uint64(1)
-		for id := range uint64(100) {
->>>>>>> 20087e290 (statistics: add gc in hot peer cache (#8702))
+		for id := uint64(0); id < 100; id++ {
 			meta := &metapb.Region{
 				Id:    id,
 				Peers: []*metapb.Peer{{Id: id, StoreId: storeID}},
@@ -778,7 +754,7 @@ func TestDifferentReportInterval(t *testing.T) {
 	for _, interval := range []uint64{120, 60, 30} {
 		region = region.Clone(core.SetReportInterval(0, interval))
 		checkAndUpdate(re, cache, region, 3)
-		stats := cache.GetHotPeerStats(0)
+		stats := cache.RegionStats(0)
 		re.Len(stats, 3)
 		for _, s := range stats {
 			re.Len(s, 1)
@@ -787,19 +763,14 @@ func TestDifferentReportInterval(t *testing.T) {
 }
 
 func BenchmarkCheckRegionFlow(b *testing.B) {
-<<<<<<< HEAD
-	cache := NewHotPeerCache(context.Background(), utils.Read)
-	region := buildRegion(utils.Read, 3, 10)
+	cluster := core.NewBasicCluster()
+	cache := NewHotPeerCache(context.Background(), cluster, utils.Read)
+	region := buildRegion(cluster, utils.Read, 3, 10)
 	peerInfos := make([]*core.PeerInfo, 0)
 	for _, peer := range region.GetPeers() {
 		peerInfo := core.NewPeerInfo(peer, region.GetLoads(), 10)
 		peerInfos = append(peerInfos, peerInfo)
 	}
-=======
-	cluster := core.NewBasicCluster()
-	cache := NewHotPeerCache(context.Background(), cluster, utils.Read)
-	region := buildRegion(cluster, utils.Read, 3, 10)
->>>>>>> 20087e290 (statistics: add gc in hot peer cache (#8702))
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		items := make([]*HotPeerStat, 0)

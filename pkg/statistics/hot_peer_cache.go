@@ -71,15 +71,9 @@ type hotPeerCache struct {
 	lastGCTime        time.Time
 }
 
-<<<<<<< HEAD
 // NewHotPeerCache creates a hotPeerCache
-func NewHotPeerCache(ctx context.Context, kind utils.RWType) *hotPeerCache {
+func NewHotPeerCache(ctx context.Context, cluster *core.BasicCluster, kind utils.RWType) *hotPeerCache {
 	return &hotPeerCache{
-=======
-// NewHotPeerCache creates a HotPeerCache
-func NewHotPeerCache(ctx context.Context, cluster *core.BasicCluster, kind utils.RWType) *HotPeerCache {
-	return &HotPeerCache{
->>>>>>> 20087e290 (statistics: add gc in hot peer cache (#8702))
 		kind:              kind,
 		cluster:           cluster,
 		peersOfStore:      make(map[uint64]*utils.TopN),
@@ -553,10 +547,7 @@ func (f *hotPeerCache) removeItem(item *HotPeerStat) {
 	}
 }
 
-<<<<<<< HEAD
-func (f *hotPeerCache) coldItem(newItem, oldItem *HotPeerStat) {
-=======
-func (f *HotPeerCache) gc() {
+func (f *hotPeerCache) gc() {
 	if time.Since(f.lastGCTime) < f.topNTTL {
 		return
 	}
@@ -586,20 +577,7 @@ func (f *HotPeerCache) gc() {
 	}
 }
 
-// removeAllItem removes all items of the cache.
-// It is used for test.
-func (f *HotPeerCache) removeAllItem() {
-	for _, peers := range f.peersOfStore {
-		for _, peer := range peers.GetAll() {
-			item := peer.(*HotPeerStat)
-			item.actionType = utils.Remove
-			f.UpdateStat(item)
-		}
-	}
-}
-
-func coldItem(newItem, oldItem *HotPeerStat) {
->>>>>>> 20087e290 (statistics: add gc in hot peer cache (#8702))
+func (f *hotPeerCache) coldItem(newItem, oldItem *HotPeerStat) {
 	newItem.HotDegree = oldItem.HotDegree - 1
 	newItem.AntiCount = oldItem.AntiCount - 1
 	if newItem.AntiCount <= 0 {
