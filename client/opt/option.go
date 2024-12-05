@@ -216,6 +216,8 @@ func WithInitMetricsOption(initMetrics bool) ClientOption {
 func WithRegionMetaCircuitBreaker(config cb.Settings) ClientOption {
 	return func(op *Option) {
 		op.RegionMetaCircuitBreakerSettings = config
+	}
+}
 
 // WithBackoffer configures the client with backoffer.
 func WithBackoffer(bo *retry.Backoffer) ClientOption {
