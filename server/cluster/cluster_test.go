@@ -2927,6 +2927,7 @@ func TestPatrolRegionConcurrency(t *testing.T) {
 		cfg.MergeScheduleLimit = uint64(mergeScheduleLimit)
 	}, nil, nil, re)
 	defer cleanup()
+	co.GetPrepareChecker().SetPrepared()
 	oc := co.GetOperatorController()
 	checker := co.GetCheckerController()
 
