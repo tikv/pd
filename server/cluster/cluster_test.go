@@ -1105,12 +1105,8 @@ func TestRegionLabelIsolationLevel(t *testing.T) {
 	cfg.LocationLabels = []string{"zone"}
 	opt.SetReplicationConfig(cfg)
 	re.NoError(err)
-<<<<<<< HEAD
 	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
-=======
-	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
 	cluster.coordinator = schedule.NewCoordinator(ctx, cluster, nil)
->>>>>>> 26123dc75 (checker, statistic: avoid leak in label statistic (#8703))
 
 	for i := uint64(1); i <= 4; i++ {
 		var labels []*metapb.StoreLabel
@@ -1148,13 +1144,8 @@ func TestRegionLabelIsolationLevel(t *testing.T) {
 	r1 := core.NewRegionInfo(region, peers[0])
 	re.NoError(cluster.putRegion(r1))
 
-<<<<<<< HEAD
-	cluster.UpdateRegionsLabelLevelStats([]*core.RegionInfo{r})
-	counter := cluster.labelLevelStats.GetLabelCounter()
-=======
 	cluster.UpdateRegionsLabelLevelStats([]*core.RegionInfo{r1})
-	counter := cluster.labelStats.GetLabelCounter()
->>>>>>> 26123dc75 (checker, statistic: avoid leak in label statistic (#8703))
+	counter := cluster.labelLevelStats.GetLabelCounter()
 	re.Equal(0, counter["none"])
 	re.Equal(1, counter["zone"])
 
@@ -1168,7 +1159,7 @@ func TestRegionLabelIsolationLevel(t *testing.T) {
 	re.NoError(cluster.putRegion(r2))
 
 	cluster.UpdateRegionsLabelLevelStats([]*core.RegionInfo{r2})
-	counter = cluster.labelStats.GetLabelCounter()
+	counter = cluster.labelLevelStats.GetLabelCounter()
 	re.Equal(0, counter["none"])
 	re.Equal(2, counter["zone"])
 
@@ -1183,7 +1174,7 @@ func TestRegionLabelIsolationLevel(t *testing.T) {
 	)
 	re.NoError(cluster.HandleRegionHeartbeat(overlapRegion))
 	cluster.UpdateRegionsLabelLevelStats([]*core.RegionInfo{r1, r2})
-	counter = cluster.labelStats.GetLabelCounter()
+	counter = cluster.labelLevelStats.GetLabelCounter()
 	re.Equal(0, counter["none"])
 	re.Equal(1, counter["zone"])
 }
