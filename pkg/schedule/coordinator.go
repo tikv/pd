@@ -43,7 +43,7 @@ import (
 )
 
 const (
-	runSchedulerCheckInterval = 3 * time.Second
+	runPrepareCheckerInterval = 3 * time.Second
 	maxLoadConfigRetries      = 10
 	// pushOperatorTickInterval is the interval try to push the operator.
 	pushOperatorTickInterval = 500 * time.Millisecond
@@ -203,6 +203,25 @@ func (c *Coordinator) driveSlowNodeScheduler() {
 	}
 }
 
+func (c *Coordinator) runPrepareChecker() {
+	defer logutil.LogPanic()
+	defer c.wg.Done()
+
+	ticker := time.NewTicker(runPrepareCheckerInterval)
+	failpoint.Inject("changeCoordinatorTicker", func() {
+		ticker.Reset(100 * time.Millisecond)
+	})
+	defer ticker.Stop()
+	for {
+		select {
+		case <-c.ctx.Done():
+			return
+		case <-ticker.C:
+			c.prepareChecker.Check(c.cluster.GetBasicCluster())
+		}
+	}
+}
+
 // RunUntilStop runs the coordinator until receiving the stop signal.
 func (c *Coordinator) RunUntilStop() {
 	c.Run()
@@ -215,15 +234,11 @@ func (c *Coordinator) RunUntilStop() {
 
 // Run starts coordinator.
 func (c *Coordinator) Run() {
-	ticker := time.NewTicker(runSchedulerCheckInterval)
-	failpoint.Inject("changeCoordinatorTicker", func() {
-		ticker.Reset(100 * time.Millisecond)
-	})
-	defer ticker.Stop()
 	log.Info("coordinator starts to run schedulers")
 	c.InitSchedulers(true)
 
-	c.wg.Add(4)
+	c.wg.Add(5)
+	go c.runPrepareChecker()
 	// Starts to patrol regions.
 	go c.PatrolRegions()
 	// Checks suspect key ranges

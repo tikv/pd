@@ -138,7 +138,7 @@ func (c *Controller) PatrolRegions() {
 		case <-ticker.C:
 			c.updateTickerIfNeeded(ticker)
 			c.updatePatrolWorkersIfNeeded()
-			if !c.prepareChecker.Check(c.cluster.GetBasicCluster()) {
+			if !c.prepareChecker.IsPrepared() {
 				continue
 			}
 			if c.cluster.IsSchedulingHalted() {

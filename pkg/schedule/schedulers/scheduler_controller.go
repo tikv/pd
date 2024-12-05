@@ -370,7 +370,7 @@ func (c *Controller) runScheduler(s *ScheduleController) {
 	for {
 		select {
 		case <-ticker.C:
-			if !c.prepareChecker.Check(c.cluster.GetBasicCluster()) {
+			if !c.prepareChecker.IsPrepared() {
 				continue
 			}
 			diagnosable := s.IsDiagnosticAllowed()
