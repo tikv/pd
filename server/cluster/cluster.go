@@ -2442,13 +2442,14 @@ func (c *RaftCluster) GetProgressByID(storeID string) (action string, process, l
 	}
 	progress := c.progressManager.GetProgresses(filter)
 	if len(progress) != 0 {
-		process, ls, cs, err = c.progressManager.Status(progress[0])
+		pg := progress[0]
+		process, ls, cs, err = c.progressManager.Status(pg)
 		if err != nil {
 			return
 		}
-		if strings.HasPrefix(progress[0], removingAction) {
+		if strings.HasPrefix(pg, removingAction) {
 			action = removingAction
-		} else if strings.HasPrefix(progress[0], preparingAction) {
+		} else if strings.HasPrefix(pg, preparingAction) {
 			action = preparingAction
 		}
 		return
