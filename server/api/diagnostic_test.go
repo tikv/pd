@@ -130,9 +130,7 @@ func (suite *diagnosticTestSuite) TestSchedulerDiagnosticAPI() {
 	re.NoError(err)
 	suite.checkStatus("pending", balanceRegionURL)
 
-	fmt.Println("before put region")
 	mustPutRegion(re, suite.svr, 1000, 1, []byte("a"), []byte("b"), core.SetApproximateSize(60))
-	fmt.Println("after put region")
 	suite.checkStatus("normal", balanceRegionURL)
 
 	deleteURL := fmt.Sprintf("%s/%s", suite.schedulerPrefix, types.BalanceRegionScheduler.String())

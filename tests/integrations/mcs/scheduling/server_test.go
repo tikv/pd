@@ -63,6 +63,7 @@ func (suite *serverTestSuite) SetupSuite() {
 	var err error
 	re := suite.Require()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/changeCoordinatorTicker", `return(true)`))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/mcs/scheduling/server/changeRunCollectWaitTime", `return(true)`))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs", `return(true)`))
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
 	suite.cluster, err = tests.NewTestAPICluster(suite.ctx, 1)
@@ -83,6 +84,7 @@ func (suite *serverTestSuite) TearDownSuite() {
 	suite.cluster.Destroy()
 	suite.cancel()
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/scheduling/server/changeRunCollectWaitTime"))
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/changeCoordinatorTicker"))
 }
 
@@ -502,13 +504,9 @@ func (suite *serverTestSuite) TestStoreLimit() {
 	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.cluster)
 	re.NoError(err)
 	defer tc.Destroy()
-	leaderServer := suite.pdLeader.GetServer()
 	tc.WaitForPrimaryServing(re)
-	testutil.Eventually(re, func() bool {
-		return leaderServer.GetRaftCluster().IsServiceIndependent(constant.SchedulingServiceName)
-	})
 	oc := tc.GetPrimaryServer().GetCluster().GetCoordinator().GetOperatorController()
-
+	leaderServer := suite.pdLeader.GetServer()
 	conf := leaderServer.GetReplicationConfig().Clone()
 	conf.MaxReplicas = 1
 	leaderServer.SetReplicationConfig(*conf)

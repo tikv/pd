@@ -42,22 +42,22 @@ func NewPrepareChecker() *PrepareChecker {
 }
 
 // Check checks if the coordinator has finished cluster information preparation.
-func (checker *PrepareChecker) Check(c *core.BasicCluster) bool {
-	if checker.IsPrepared() {
-		return true
-	}
+func (checker *PrepareChecker) Check(c *core.BasicCluster, collectWaitTime ...time.Duration) bool {
 	checker.Lock()
 	defer checker.Unlock()
+	if checker.prepared {
+		return true
+	}
 
 	if time.Since(checker.start) > collectTimeout {
 		checker.prepared = true
 		return true
 	}
-	notLoadedFromRegionsCnt := c.GetClusterNotFromStorageRegionsCnt()
-	totalRegionsCnt := c.GetTotalRegionCount()
-	if totalRegionsCnt == 0 {
+	if len(collectWaitTime) > 0 && time.Since(checker.start) < collectWaitTime[0] {
 		return false
 	}
+	notLoadedFromRegionsCnt := c.GetClusterNotFromStorageRegionsCnt()
+	totalRegionsCnt := c.GetTotalRegionCount()
 	// The number of active regions should be more than total region of all stores * core.CollectFactor
 	if float64(totalRegionsCnt)*core.CollectFactor > float64(notLoadedFromRegionsCnt) {
 		return false
@@ -68,7 +68,7 @@ func (checker *PrepareChecker) Check(c *core.BasicCluster) bool {
 		}
 		storeID := store.GetID()
 		// It is used to avoid sudden scheduling when scheduling service is just started.
-		if float64(store.GetStoreStats().GetRegionCount())*core.CollectFactor > float64(c.GetNotFromStorageRegionsCntByStore(storeID)) {
+		if len(collectWaitTime) > 0 && (float64(store.GetStoreStats().GetRegionCount())*core.CollectFactor > float64(c.GetNotFromStorageRegionsCntByStore(storeID))) {
 			return false
 		}
 		if !c.IsStorePrepared(storeID) {
