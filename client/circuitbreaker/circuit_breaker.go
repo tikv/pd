@@ -70,7 +70,7 @@ type CircuitBreaker[T any] struct {
 	state *State[T]
 
 	successCounter  prometheus.Counter
-	failureCounter  prometheus.Counter
+	errorCounter    prometheus.Counter
 	overloadCounter prometheus.Counter
 	fastFailCounter prometheus.Counter
 }
@@ -110,7 +110,7 @@ func NewCircuitBreaker[T any](name string, st Settings) *CircuitBreaker[T] {
 
 	metricName := replacer.Replace(name)
 	cb.successCounter = m.CircuitBreakerCounters.WithLabelValues(metricName, "success")
-	cb.failureCounter = m.CircuitBreakerCounters.WithLabelValues(metricName, "error")
+	cb.errorCounter = m.CircuitBreakerCounters.WithLabelValues(metricName, "error")
 	cb.overloadCounter = m.CircuitBreakerCounters.WithLabelValues(metricName, "overload")
 	cb.fastFailCounter = m.CircuitBreakerCounters.WithLabelValues(metricName, "fast_fail")
 	return cb
@@ -170,13 +170,16 @@ func (cb *CircuitBreaker[T]) onResult(state *State[T], overloaded Overloading) {
 }
 
 func (cb *CircuitBreaker[T]) emitMetric(overloaded Overloading, err error) {
-	if err == nil {
+	switch overloaded {
+	case No:
 		cb.successCounter.Inc()
-	} else {
-		cb.failureCounter.Inc()
-	}
-	if overloaded {
+	case Yes:
 		cb.overloadCounter.Inc()
+	default:
+		panic("unknown state")
+	}
+	if err != nil {
+		cb.errorCounter.Inc()
 	}
 }
 
@@ -216,23 +219,32 @@ func (cb *CircuitBreaker[T]) newState(now time.Time, stateType StateType) *State
 }
 
 // onRequest transitions the state to the next state based on the current state and the previous requests results
+// The implementation represents a state machine for CircuitBreaker
 // All state transitions happens at the request evaluation time only
-// The implementation represents a state machine effectively
+// Circuit breaker start with a closed state, allows all requests to pass through and always lasts for a fixed duration of `Settings.ErrorRateWindow`.
+// If `Settings.ErrorRateThresholdPct` is breached at the end of the window, then it moves to Open state, otherwise it moves to a new Closed state with a new window.
+// Open state fails all request, it has a fixed duration of `Settings.CoolDownInterval` and always moves to HalfOpen state at the end of the interval.
+// HalfOpen state does not have a fixed duration and lasts till `Settings.HalfOpenSuccessCount` are evaluated.
+// If any of `Settings.HalfOpenSuccessCount` fails then it moves back to Open state, otherwise it moves to Closed state.
 func (s *State[T]) onRequest(cb *CircuitBreaker[T]) (*State[T], error) {
 	var now = time.Now()
 	switch s.stateType {
 	case StateClosed:
-		if s.end.Before(now) {
+		if now.After(s.end) {
 			// ErrorRateWindow is over, let's evaluate the error rate
-			total := s.failureCount + s.successCount
-			observedErrorRatePct := s.failureCount * 100 / total
-			if s.cb.config.ErrorRateThresholdPct > 0 && total >= uint32(s.cb.config.ErrorRateWindow.Seconds())*s.cb.config.MinQPSForOpen && observedErrorRatePct >= s.cb.config.ErrorRateThresholdPct {
-				// the error threshold is breached, let's move to open state and start failing all requests
-				log.Error("Circuit breaker tripped. Starting to fail all requests",
-					zap.String("name", cb.name),
-					zap.Uint32("observedErrorRatePct", observedErrorRatePct),
-					zap.String("config", fmt.Sprintf("%+v", cb.config)))
-				return cb.newState(now, StateOpen), errs.ErrCircuitBreakerOpen
+			if s.cb.config.ErrorRateThresholdPct > 0 { // otherwise circuit breaker is disabled
+				total := s.failureCount + s.successCount
+				if total > 0 {
+					observedErrorRatePct := s.failureCount * 100 / total
+					if total >= uint32(s.cb.config.ErrorRateWindow.Seconds())*s.cb.config.MinQPSForOpen && observedErrorRatePct >= s.cb.config.ErrorRateThresholdPct {
+						// the error threshold is breached, let's move to open state and start failing all requests
+						log.Error("Circuit breaker tripped. Starting to fail all requests",
+							zap.String("name", cb.name),
+							zap.Uint32("observedErrorRatePct", observedErrorRatePct),
+							zap.String("config", fmt.Sprintf("%+v", cb.config)))
+						return cb.newState(now, StateOpen), errs.ErrCircuitBreakerOpen
+					}
+				}
 			}
 			// the error threshold is not breached or there were not enough requests to evaluate it,
 			// continue in the closed state and allow all requests
@@ -241,7 +253,7 @@ func (s *State[T]) onRequest(cb *CircuitBreaker[T]) (*State[T], error) {
 		// continue in closed state till ErrorRateWindow is over
 		return s, nil
 	case StateOpen:
-		if s.end.Before(now) {
+		if now.After(s.end) {
 			// CoolDownInterval is over, it is time to transition to half-open state
 			log.Info("Circuit breaker cooldown period is over. Transitioning to half-open state to test the service",
 				zap.String("name", cb.name),
