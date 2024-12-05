@@ -37,6 +37,7 @@ import (
 	"github.com/tikv/pd/pkg/dashboard"
 	"github.com/tikv/pd/pkg/id"
 	"github.com/tikv/pd/pkg/mock/mockid"
+	"github.com/tikv/pd/pkg/mock/mockserver"
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/schedulers"
@@ -45,6 +46,7 @@ import (
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/syncer"
 	"github.com/tikv/pd/pkg/tso"
+	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
@@ -1886,4 +1888,46 @@ func checkLog(re *require.Assertions, fname, expect string) {
 		return strings.Contains(l, expect)
 	})
 	os.Truncate(fname, 0)
+}
+
+func TestFollowerExitSyncTime(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	tc, err := tests.NewTestCluster(ctx, 1)
+	defer tc.Destroy()
+	re.NoError(err)
+	err = tc.RunInitialServers()
+	re.NoError(err)
+	tc.WaitLeader()
+	leaderServer := tc.GetLeaderServer()
+	re.NoError(leaderServer.BootstrapCluster())
+
+	tempDir := t.TempDir()
+	rs, err := storage.NewRegionStorageWithLevelDBBackend(context.Background(), tempDir, nil)
+	re.NoError(err)
+
+	server := mockserver.NewMockServer(
+		context.Background(),
+		&pdpb.Member{MemberId: 1, Name: "test", ClientUrls: []string{tempurl.Alloc()}},
+		nil,
+		storage.NewCoreStorage(storage.NewStorageWithMemoryBackend(), rs),
+		core.NewBasicCluster(),
+	)
+	s := syncer.NewRegionSyncer(server)
+	s.StartSyncWithLeader(leaderServer.GetAddr())
+	time.Sleep(time.Second)
+
+	// Record the time when exiting sync
+	startTime := time.Now()
+
+	// Simulate leader change scenario
+	// Directly call StopSyncWithLeader to simulate exit
+	s.StopSyncWithLeader()
+
+	// Calculate time difference
+	elapsedTime := time.Since(startTime)
+
+	// Assert that the sync exit time is within expected range
+	re.Less(elapsedTime, time.Second)
 }
