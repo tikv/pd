@@ -107,7 +107,7 @@ func (tc *TestSchedulingCluster) WaitForPrimaryServing(re *require.Assertions) *
 	var primary *scheduling.Server
 	testutil.Eventually(re, func() bool {
 		for _, server := range tc.servers {
-			if server.IsServing() && server.GetCoordinator().AreSchedulersInitialized() {
+			if server.IsServing() {
 				primary = server
 				return true
 			}

@@ -21,7 +21,6 @@ import (
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pingcap/log"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/cache"
@@ -37,7 +36,6 @@ import (
 	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/tests"
 	"github.com/tikv/pd/tests/server/api"
-	"go.uber.org/zap"
 )
 
 type configTestSuite struct {
@@ -135,7 +133,6 @@ func (suite *configTestSuite) TestConfigWatch() {
 // Manually trigger the config persistence in the PD API server side.
 func persistConfig(re *require.Assertions, pdLeaderServer *tests.TestServer) {
 	err := pdLeaderServer.GetPersistOptions().Persist(pdLeaderServer.GetServer().GetStorage())
-	log.Info("persistConfig", zap.Reflect("opts", pdLeaderServer.GetPersistOptions()))
 	re.NoError(err)
 }
 

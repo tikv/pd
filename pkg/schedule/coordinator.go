@@ -43,7 +43,8 @@ import (
 )
 
 const (
-	runPrepareCheckerInterval = 3 * time.Second
+	runSchedulerCheckInterval = 3 * time.Second
+	collectTimeout            = 5 * time.Minute
 	maxLoadConfigRetries      = 10
 	// pushOperatorTickInterval is the interval try to push the operator.
 	pushOperatorTickInterval = 500 * time.Millisecond
@@ -207,24 +208,25 @@ func (c *Coordinator) runPrepareChecker() {
 	defer logutil.LogPanic()
 	defer c.wg.Done()
 
-	ticker := time.NewTicker(runPrepareCheckerInterval)
-	failpoint.Inject("changeCoordinatorTicker", func() {
-		ticker.Reset(100 * time.Millisecond)
-	})
+	ticker := time.NewTicker(3 * time.Second)
 	defer ticker.Stop()
 	for {
 		select {
 		case <-c.ctx.Done():
 			return
 		case <-ticker.C:
-			c.prepareChecker.Check(c.cluster.GetBasicCluster())
+			if !c.prepareChecker.IsPrepared() {
+				if c.prepareChecker.Check(c.cluster.GetBasicCluster()) {
+					log.Info("prepare checker is ready")
+				}
+			}
 		}
 	}
 }
 
 // RunUntilStop runs the coordinator until receiving the stop signal.
-func (c *Coordinator) RunUntilStop() {
-	c.Run()
+func (c *Coordinator) RunUntilStop(collectWaitTime ...time.Duration) {
+	c.Run(collectWaitTime...)
 	<-c.ctx.Done()
 	log.Info("coordinator is stopping")
 	c.GetSchedulersController().Wait()
@@ -233,7 +235,25 @@ func (c *Coordinator) RunUntilStop() {
 }
 
 // Run starts coordinator.
-func (c *Coordinator) Run() {
+func (c *Coordinator) Run(collectWaitTime ...time.Duration) {
+	ticker := time.NewTicker(runSchedulerCheckInterval)
+	failpoint.Inject("changeCoordinatorTicker", func() {
+		ticker.Reset(100 * time.Millisecond)
+	})
+	defer ticker.Stop()
+	log.Info("coordinator starts to collect cluster information")
+	for {
+		if c.ShouldRun(collectWaitTime...) {
+			log.Info("coordinator has finished cluster information preparation")
+			break
+		}
+		select {
+		case <-ticker.C:
+		case <-c.ctx.Done():
+			log.Info("coordinator stops running")
+			return
+		}
+	}
 	log.Info("coordinator starts to run schedulers")
 	c.InitSchedulers(true)
 
@@ -546,6 +566,11 @@ func collectHotMetrics(cluster sche.ClusterInformer, stores []*core.StoreInfo, t
 func ResetHotSpotMetrics() {
 	hotSpotStatusGauge.Reset()
 	schedulers.HotPendingSum.Reset()
+}
+
+// ShouldRun returns true if the coordinator should run.
+func (c *Coordinator) ShouldRun(collectWaitTime ...time.Duration) bool {
+	return c.prepareChecker.Check(c.cluster.GetBasicCluster(), collectWaitTime...)
 }
 
 // GetSchedulersController returns the schedulers controller.

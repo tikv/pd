@@ -2389,12 +2389,12 @@ func (c *testCluster) updateLeaderCount(storeID uint64, leaderCount int) error {
 	return c.setStore(newStore)
 }
 
-func (c *testCluster) addLeaderStore(storeID uint64) error {
+func (c *testCluster) addLeaderStore(storeID uint64, leaderCount int) error {
 	stats := &pdpb.StoreStats{}
 	newStore := core.NewStoreInfo(&metapb.Store{Id: storeID},
 		core.SetStoreStats(stats),
-		core.SetLeaderCount(1),
-		core.SetLeaderSize(10),
+		core.SetLeaderCount(leaderCount),
+		core.SetLeaderSize(int64(leaderCount)*10),
 		core.SetLastHeartbeatTS(time.Now()),
 	)
 
@@ -2873,6 +2873,7 @@ func TestCheckCache(t *testing.T) {
 		cfg.ReplicaScheduleLimit = 0
 	}, nil, nil, re)
 	defer cleanup()
+	co.GetPrepareChecker().SetPrepared()
 	oc := co.GetOperatorController()
 	checker := co.GetCheckerController()
 
@@ -3067,6 +3068,99 @@ func TestPeerState(t *testing.T) {
 	waitNoResponse(re, stream)
 }
 
+func TestShouldRun(t *testing.T) {
+	re := require.New(t)
+
+	tc, co, cleanup := prepare(nil, nil, nil, re)
+	tc.RaftCluster.coordinator = co
+	defer cleanup()
+
+	re.NoError(tc.addLeaderStore(1, 5))
+	re.NoError(tc.addLeaderStore(2, 2))
+	re.NoError(tc.addLeaderStore(3, 0))
+	re.NoError(tc.addLeaderStore(4, 0))
+	re.NoError(tc.LoadRegion(1, 1, 2, 3))
+	re.NoError(tc.LoadRegion(2, 1, 2, 3))
+	re.NoError(tc.LoadRegion(3, 1, 2, 3))
+	re.NoError(tc.LoadRegion(4, 1, 2, 3))
+	re.NoError(tc.LoadRegion(5, 1, 2, 3))
+	re.NoError(tc.LoadRegion(6, 2, 1, 4))
+	re.NoError(tc.LoadRegion(7, 2, 1, 4))
+	re.False(co.ShouldRun())
+	re.Equal(2, tc.GetStoreRegionCount(4))
+
+	testCases := []struct {
+		regionID  uint64
+		ShouldRun bool
+	}{
+		{1, false},
+		{2, false},
+		{3, false},
+		{4, false},
+		{5, false},
+		// store4 needs Collect two region
+		{6, false},
+		{7, true},
+	}
+
+	for _, testCase := range testCases {
+		r := tc.GetRegion(testCase.regionID)
+		nr := r.Clone(core.WithLeader(r.GetPeers()[0]), core.SetSource(core.Heartbeat))
+		re.NoError(tc.processRegionHeartbeat(core.ContextTODO(), nr))
+		re.Equal(testCase.ShouldRun, co.ShouldRun())
+	}
+	nr := &metapb.Region{Id: 6, Peers: []*metapb.Peer{}}
+	newRegion := core.NewRegionInfo(nr, nil, core.SetSource(core.Heartbeat))
+	re.Error(tc.processRegionHeartbeat(core.ContextTODO(), newRegion))
+	re.Equal(7, tc.GetClusterNotFromStorageRegionsCnt())
+}
+
+func TestShouldRunWithNonLeaderRegions(t *testing.T) {
+	re := require.New(t)
+
+	tc, co, cleanup := prepare(nil, nil, nil, re)
+	tc.RaftCluster.coordinator = co
+	defer cleanup()
+
+	re.NoError(tc.addLeaderStore(1, 10))
+	re.NoError(tc.addLeaderStore(2, 0))
+	re.NoError(tc.addLeaderStore(3, 0))
+	for i := range 10 {
+		re.NoError(tc.LoadRegion(uint64(i+1), 1, 2, 3))
+	}
+	re.False(co.ShouldRun())
+	re.Equal(10, tc.GetStoreRegionCount(1))
+
+	testCases := []struct {
+		regionID  uint64
+		ShouldRun bool
+	}{
+		{1, false},
+		{2, false},
+		{3, false},
+		{4, false},
+		{5, false},
+		{6, false},
+		{7, false},
+		{8, false},
+		{9, true},
+	}
+
+	for _, testCase := range testCases {
+		r := tc.GetRegion(testCase.regionID)
+		nr := r.Clone(core.WithLeader(r.GetPeers()[0]), core.SetSource(core.Heartbeat))
+		re.NoError(tc.processRegionHeartbeat(core.ContextTODO(), nr))
+		re.Equal(testCase.ShouldRun, co.ShouldRun())
+	}
+	nr := &metapb.Region{Id: 9, Peers: []*metapb.Peer{}}
+	newRegion := core.NewRegionInfo(nr, nil, core.SetSource(core.Heartbeat))
+	re.Error(tc.processRegionHeartbeat(core.ContextTODO(), newRegion))
+	re.Equal(9, tc.GetClusterNotFromStorageRegionsCnt())
+
+	// Now, after server is prepared, there exist some regions with no leader.
+	re.Equal(uint64(0), tc.GetRegion(10).GetLeader().GetStoreId())
+}
+
 func TestAddScheduler(t *testing.T) {
 	re := require.New(t)
 
@@ -3083,9 +3177,9 @@ func TestAddScheduler(t *testing.T) {
 	stream := mockhbstream.NewHeartbeatStream()
 
 	// Add stores 1,2,3
-	re.NoError(tc.addLeaderStore(1))
-	re.NoError(tc.addLeaderStore(2))
-	re.NoError(tc.addLeaderStore(3))
+	re.NoError(tc.addLeaderStore(1, 1))
+	re.NoError(tc.addLeaderStore(2, 1))
+	re.NoError(tc.addLeaderStore(3, 1))
 	// Add regions 1 with leader in store 1 and followers in stores 2,3
 	re.NoError(tc.addLeaderRegion(1, 1, 2, 3))
 	// Add regions 2 with leader in store 2 and followers in stores 1,3
@@ -3149,8 +3243,8 @@ func TestPersistScheduler(t *testing.T) {
 	defer cleanup()
 	defaultCount := len(sc.DefaultSchedulers)
 	// Add stores 1,2
-	re.NoError(tc.addLeaderStore(1))
-	re.NoError(tc.addLeaderStore(2))
+	re.NoError(tc.addLeaderStore(1, 1))
+	re.NoError(tc.addLeaderStore(2, 1))
 
 	controller := co.GetSchedulersController()
 	re.Len(controller.GetSchedulerNames(), defaultCount)
@@ -3265,8 +3359,8 @@ func TestRemoveScheduler(t *testing.T) {
 	defer cleanup()
 
 	// Add stores 1,2
-	re.NoError(tc.addLeaderStore(1))
-	re.NoError(tc.addLeaderStore(2))
+	re.NoError(tc.addLeaderStore(1, 1))
+	re.NoError(tc.addLeaderStore(2, 1))
 	defaultCount := len(sc.DefaultSchedulers)
 	controller := co.GetSchedulersController()
 	re.Len(controller.GetSchedulerNames(), defaultCount)
