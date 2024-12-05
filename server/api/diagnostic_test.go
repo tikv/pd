@@ -59,6 +59,7 @@ func (suite *diagnosticTestSuite) SetupSuite() {
 	mustBootstrapCluster(re, suite.svr)
 	mustPutStore(re, suite.svr, 1, metapb.StoreState_Up, metapb.NodeState_Serving, nil)
 	mustPutStore(re, suite.svr, 2, metapb.StoreState_Up, metapb.NodeState_Serving, nil)
+	suite.svr.GetRaftCluster().GetCoordinator().GetPrepareChecker().SetPrepared()
 }
 
 func (suite *diagnosticTestSuite) TearDownSuite() {
