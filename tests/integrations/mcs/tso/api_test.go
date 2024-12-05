@@ -276,7 +276,6 @@ func (suite *tsoAPITestSuite) TestConfig() {
 	re.NoError(json.Unmarshal(respBytes, &cfg))
 	re.Equal(cfg.GetListenAddr(), primary.GetConfig().GetListenAddr())
 	re.Equal(cfg.GetTSOSaveInterval(), primary.GetConfig().GetTSOSaveInterval())
-	re.Equal(cfg.IsLocalTSOEnabled(), primary.GetConfig().IsLocalTSOEnabled())
 	re.Equal(cfg.GetTSOUpdatePhysicalInterval(), primary.GetConfig().GetTSOUpdatePhysicalInterval())
 	re.Equal(cfg.GetMaxResetTSGap(), primary.GetConfig().GetMaxResetTSGap())
 }

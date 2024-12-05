@@ -22,6 +22,7 @@ import (
 
 	"github.com/pingcap/errors"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/tikv/pd/client/pkg/retry"
 	"google.golang.org/grpc"
 )
 
@@ -65,6 +66,7 @@ type Option struct {
 	UseTSOServerProxy bool
 	MetricsLabels     prometheus.Labels
 	InitMetrics       bool
+	Backoffer         *retry.Backoffer
 
 	// Dynamic options.
 	dynamicOptions [dynamicOptionCount]atomic.Value
@@ -214,6 +216,11 @@ func WithInitMetricsOption(initMetrics bool) ClientOption {
 func WithRegionMetaCircuitBreaker(config cb.Settings) ClientOption {
 	return func(op *Option) {
 		op.RegionMetaCircuitBreakerSettings = config
+
+// WithBackoffer configures the client with backoffer.
+func WithBackoffer(bo *retry.Backoffer) ClientOption {
+	return func(op *Option) {
+		op.Backoffer = bo
 	}
 }
 

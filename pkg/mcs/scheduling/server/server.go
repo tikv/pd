@@ -254,7 +254,7 @@ func (s *Server) primaryElectionLoop() {
 		}
 
 		// To make sure the expected primary(if existed) and new primary are on the same server.
-		expectedPrimary := utils.GetExpectedPrimaryFlag(s.GetClient(), s.participant.GetLeaderPath())
+		expectedPrimary := utils.GetExpectedPrimaryFlag(s.GetClient(), &s.participant.MsParam)
 		// skip campaign the primary if the expected primary is not empty and not equal to the current memberValue.
 		// expected primary ONLY SET BY `{service}/primary/transfer` API.
 		if len(expectedPrimary) > 0 && !strings.Contains(s.participant.MemberValue(), expectedPrimary) {
@@ -313,7 +313,9 @@ func (s *Server) campaignLeader() {
 	// check expected primary and watch the primary.
 	exitPrimary := make(chan struct{})
 	lease, err := utils.KeepExpectedPrimaryAlive(ctx, s.GetClient(), exitPrimary,
-		s.cfg.LeaderLease, s.participant.GetLeaderPath(), s.participant.MemberValue(), constant.SchedulingServiceName)
+		s.cfg.LeaderLease, &keypath.MsParam{
+			ServiceName: constant.SchedulingServiceName,
+		}, s.participant.MemberValue())
 	if err != nil {
 		log.Error("prepare scheduling primary watch error", errs.ZapError(err))
 		return
@@ -460,7 +462,7 @@ func (s *Server) startServer() (err error) {
 		Id:         uniqueID, // id is unique among all participants
 		ListenUrls: []string{s.cfg.GetAdvertiseListenAddr()},
 	}
-	s.participant.InitInfo(p, keypath.SchedulingSvcRootPath(), "primary election")
+	s.participant.InitInfo(p, "primary election")
 
 	s.service = &Service{Server: s}
 	s.AddServiceReadyCallback(s.startCluster)

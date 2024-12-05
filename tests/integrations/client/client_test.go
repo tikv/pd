@@ -57,6 +57,8 @@ import (
 	"github.com/tikv/pd/tests/integrations/mcs"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/goleak"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 const (
@@ -1992,4 +1994,55 @@ func (suite *clientTestSuite) TestBatchScanRegions() {
 		)
 		return err != nil && strings.Contains(err.Error(), "found a hole region between")
 	})
+}
+
+func TestGetRegionWithBackoff(t *testing.T) {
+	re := require.New(t)
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/rateLimit", "return(true)"))
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	cluster, err := tests.NewTestCluster(ctx, 1)
+	re.NoError(err)
+	defer cluster.Destroy()
+	endpoints := runServer(re, cluster)
+
+	// Define the backoff parameters
+	base := 100 * time.Millisecond
+	max := 500 * time.Millisecond
+	total := 3 * time.Second
+
+	// Create a backoff strategy
+	bo := retry.InitialBackoffer(base, max, total)
+	bo.SetRetryableChecker(needRetry, true)
+
+	// Initialize the client with context and backoff
+	client, err := pd.NewClientWithContext(ctx, caller.TestComponent, endpoints, pd.SecurityOption{})
+	re.NoError(err)
+
+	// Record the start time
+	start := time.Now()
+
+	ctx = retry.WithBackoffer(ctx, bo)
+	// Call GetRegion and expect it to handle backoff internally
+	_, err = client.GetRegion(ctx, []byte("key"))
+	re.Error(err)
+	// Calculate the elapsed time
+	elapsed := time.Since(start)
+	// Verify that some backoff occurred by checking if the elapsed time is greater than the base backoff
+	re.Greater(elapsed, total, "Expected some backoff to have occurred")
+
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/rateLimit"))
+	// Call GetRegion again and expect it to succeed
+	region, err := client.GetRegion(ctx, []byte("key"))
+	re.NoError(err)
+	re.Equal(uint64(2), region.Meta.Id) // Adjust this based on expected region
+}
+
+func needRetry(err error) bool {
+	st, ok := status.FromError(err)
+	if !ok {
+		return false
+	}
+	return st.Code() == codes.ResourceExhausted
 }
