@@ -29,7 +29,6 @@ type TestServiceConfig struct {
 	ListenAddr                string              // Address the service listens on.
 	AdvertiseListenAddr       string              // Address the service advertises to the clients.
 	LeaderLease               int64               // Leader lease.
-	LocalTSOEnabled           bool                // Whether local TSO is enabled.
 	TSOUpdatePhysicalInterval time.Duration       // Interval to update TSO in physical storage.
 	TSOSaveInterval           time.Duration       // Interval to save TSO to physical storage.
 	MaxResetTSGap             time.Duration       // Maximum gap to reset TSO.

@@ -64,10 +64,7 @@ type Config struct {
 	// the primary/leader again. Etcd only supports seconds TTL, so here is second too.
 	LeaderLease int64 `toml:"lease" json:"lease"`
 
-	// EnableLocalTSO is used to enable the Local TSO Allocator feature,
-	// which allows the PD server to generate Local TSO for certain DC-level transactions.
-	// To make this feature meaningful, user has to set the "zone" label for the PD server
-	// to indicate which DC this PD belongs to.
+	// Deprecated
 	EnableLocalTSO bool `toml:"enable-local-tso" json:"enable-local-tso"`
 
 	// TSOSaveInterval is the interval to save timestamp.

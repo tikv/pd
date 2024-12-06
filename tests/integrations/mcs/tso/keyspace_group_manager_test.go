@@ -223,8 +223,6 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestKeyspacesServedByNonDefaultKe
 							ServiceName: constant.TSOServiceName,
 							GroupID:     param.keyspaceGroupID,
 						})
-						timestampPath := keypath.FullTimestampPath(param.keyspaceGroupID)
-						re.Equal(timestampPath, am.GetTimestampPath())
 						re.Equal(primaryPath, am.GetMember().GetLeaderPath())
 
 						served = true

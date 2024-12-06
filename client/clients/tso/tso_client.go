@@ -58,13 +58,13 @@ type Client interface {
 
 	// GetLocalTS gets a local timestamp from PD or TSO microservice.
 	//
-	// Deprecated: Local TSO will be completely removed in the future. Currently, regardless of the
-	// parameters passed in, this method will default to returning the global TSO.
+	// Deprecated: Currently, regardless of the parameters passed in, this
+	// method will default to returning the global TSO.
 	GetLocalTS(ctx context.Context, _ string) (int64, int64, error)
 	// GetLocalTSAsync gets a local timestamp from PD or TSO microservice, without block the caller.
 	//
-	// Deprecated: Local TSO will be completely removed in the future. Currently, regardless of the
-	// parameters passed in, this method will default to returning the global TSO.
+	// Deprecated: Currently, regardless of the parameters passed in, this
+	// method will default to returning the global TSO.
 	GetLocalTSAsync(ctx context.Context, _ string) TSFuture
 }
 
