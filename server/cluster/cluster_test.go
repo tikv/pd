@@ -2873,6 +2873,7 @@ func TestCheckCache(t *testing.T) {
 		cfg.ReplicaScheduleLimit = 0
 	}, nil, nil, re)
 	defer cleanup()
+	co.GetPrepareChecker().SetPrepared()
 	oc := co.GetOperatorController()
 	checker := co.GetCheckerController()
 
@@ -2926,6 +2927,7 @@ func TestPatrolRegionConcurrency(t *testing.T) {
 		cfg.MergeScheduleLimit = uint64(mergeScheduleLimit)
 	}, nil, nil, re)
 	defer cleanup()
+	co.GetPrepareChecker().SetPrepared()
 	oc := co.GetOperatorController()
 	checker := co.GetCheckerController()
 
@@ -2988,6 +2990,8 @@ func TestScanLimit(t *testing.T) {
 func checkScanLimit(re *require.Assertions, regionCount int, expectScanLimit ...int) {
 	tc, co, cleanup := prepare(nil, nil, nil, re)
 	defer cleanup()
+	// set prepared to avoid prepare checker block the patrol
+	co.GetPrepareChecker().SetPrepared()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/checker/breakPatrol", `return`))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/checker/regionCount", fmt.Sprintf("return(\"%d\")", regionCount)))
 	defer func() {
