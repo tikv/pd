@@ -300,6 +300,15 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 					watchMetaChannel, err = c.provider.Watch(ctx, pd.GroupSettingsPathPrefixBytes, opt.WithRev(metaRevision), opt.WithPrefix(), opt.WithPrevKV())
 					if err != nil {
 						log.Warn("watch resource group meta failed", zap.Error(err))
+						// Stop the timer if it's not stopped.
+						if !watchRetryTimer.Stop() {
+							select {
+							case <-watchRetryTimer.C: // try to drain from the channel
+							default:
+							}
+						}
+						// We need be careful here, see more details in the comments of Timer.Reset.
+						// https://pkg.go.dev/time@master#Timer.Reset
 						watchRetryTimer.Reset(watchRetryInterval)
 						failpoint.Inject("watchStreamError", func() {
 							watchRetryTimer.Reset(20 * time.Millisecond)
@@ -310,6 +319,15 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 					watchConfigChannel, err = c.provider.Watch(ctx, pd.ControllerConfigPathPrefixBytes, opt.WithRev(cfgRevision), opt.WithPrefix())
 					if err != nil {
 						log.Warn("watch resource group config failed", zap.Error(err))
+						// Stop the timer if it's not stopped.
+						if !watchRetryTimer.Stop() {
+							select {
+							case <-watchRetryTimer.C: // try to drain from the channel
+							default:
+							}
+						}
+						// We need be careful here, see more details in the comments of Timer.Reset.
+						// https://pkg.go.dev/time@master#Timer.Reset
 						watchRetryTimer.Reset(watchRetryInterval)
 					}
 				}
@@ -344,6 +362,15 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 				})
 				if !ok {
 					watchMetaChannel = nil
+					// Stop the timer if it's not stopped.
+					if !watchRetryTimer.Stop() {
+						select {
+						case <-watchRetryTimer.C: // try to drain from the channel
+						default:
+						}
+					}
+					// We need be careful here, see more details in the comments of Timer.Reset.
+					// https://pkg.go.dev/time@master#Timer.Reset
 					watchRetryTimer.Reset(watchRetryInterval)
 					failpoint.Inject("watchStreamError", func() {
 						watchRetryTimer.Reset(20 * time.Millisecond)
@@ -395,6 +422,15 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 			case resp, ok := <-watchConfigChannel:
 				if !ok {
 					watchConfigChannel = nil
+					// Stop the timer if it's not stopped.
+					if !watchRetryTimer.Stop() {
+						select {
+						case <-watchRetryTimer.C: // try to drain from the channel
+						default:
+						}
+					}
+					// We need be careful here, see more details in the comments of Timer.Reset.
+					// https://pkg.go.dev/time@master#Timer.Reset
 					watchRetryTimer.Reset(watchRetryInterval)
 					failpoint.Inject("watchStreamError", func() {
 						watchRetryTimer.Reset(20 * time.Millisecond)
