@@ -56,6 +56,8 @@ var (
 	OngoingRequestCountGauge *prometheus.GaugeVec
 	// EstimateTSOLatencyGauge is the gauge to indicate the estimated latency of TSO requests.
 	EstimateTSOLatencyGauge *prometheus.GaugeVec
+	// CircuitBreakerCounters is a vector for different circuit breaker counters
+	CircuitBreakerCounters *prometheus.CounterVec
 )
 
 func initMetrics(constLabels prometheus.Labels) {
@@ -144,6 +146,15 @@ func initMetrics(constLabels prometheus.Labels) {
 			Help:        "Estimated latency of an RTT of getting TSO",
 			ConstLabels: constLabels,
 		}, []string{"stream"})
+
+	CircuitBreakerCounters = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace:   "pd_client",
+			Subsystem:   "request",
+			Name:        "circuit_breaker_count",
+			Help:        "Circuit Breaker counters",
+			ConstLabels: constLabels,
+		}, []string{"name", "success"})
 }
 
 // CmdDurationXXX and CmdFailedDurationXXX are the durations of the client commands.
@@ -259,4 +270,5 @@ func registerMetrics() {
 	prometheus.MustRegister(TSOBatchSendLatency)
 	prometheus.MustRegister(RequestForwarded)
 	prometheus.MustRegister(EstimateTSOLatencyGauge)
+	prometheus.MustRegister(CircuitBreakerCounters)
 }

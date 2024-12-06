@@ -6,9 +6,12 @@ import (
 	"sync"
 	"time"
 
+	"google.golang.org/grpc/codes"
+
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+	cb "github.com/tikv/pd/client/circuitbreaker"
 	"github.com/tikv/pd/client/clients/tso"
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/metrics"
@@ -16,6 +19,7 @@ import (
 	sd "github.com/tikv/pd/client/servicediscovery"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/status"
 )
 
 const (
@@ -24,10 +28,11 @@ const (
 )
 
 type innerClient struct {
-	keyspaceID      uint32
-	svrUrls         []string
-	pdSvcDiscovery  sd.ServiceDiscovery
-	tokenDispatcher *tokenDispatcher
+	keyspaceID               uint32
+	svrUrls                  []string
+	pdSvcDiscovery           sd.ServiceDiscovery
+	tokenDispatcher          *tokenDispatcher
+	regionMetaCircuitBreaker *cb.CircuitBreaker[*pdpb.GetRegionResponse]
 
 	// For service mode switching.
 	serviceModeKeeper
@@ -53,6 +58,7 @@ func (c *innerClient) init(updateKeyspaceIDCb sd.UpdateKeyspaceIDFunc) error {
 		}
 		return err
 	}
+	c.regionMetaCircuitBreaker = cb.NewCircuitBreaker[*pdpb.GetRegionResponse]("region_meta", c.option.RegionMetaCircuitBreakerSettings)
 
 	return nil
 }
@@ -244,4 +250,13 @@ func (c *innerClient) dispatchTSORequestWithRetry(ctx context.Context) tso.TSFut
 		req.TryDone(err)
 	}
 	return req
+}
+
+func isOverloaded(err error) cb.Overloading {
+	switch status.Code(errors.Cause(err)) {
+	case codes.DeadlineExceeded, codes.Unavailable, codes.ResourceExhausted:
+		return cb.Yes
+	default:
+		return cb.No
+	}
 }
