@@ -90,6 +90,8 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 	go func() {
 		defer logutil.LogPanic()
 		defer s.wg.Done()
+		timer := time.NewTimer(retryInterval)
+		defer timer.Stop()
 		// used to load region from kv storage to cache storage.
 		bc := s.server.GetBasicCluster()
 		regionStorage := s.server.GetStorage()
@@ -140,11 +142,18 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 					}
 				}
 				log.Error("server failed to establish sync stream with leader", zap.String("server", s.server.Name()), zap.String("leader", s.server.GetLeader().GetName()), errs.ZapError(err))
+				if !timer.Stop() {
+					select {
+					case <-timer.C: // try to drain from the channel
+					default:
+					}
+				}
+				timer.Reset(retryInterval)
 				select {
 				case <-ctx.Done():
 					log.Info("stop synchronizing with leader due to context canceled")
 					return
-				case <-time.After(retryInterval):
+				case <-timer.C:
 				}
 				continue
 			}
@@ -157,11 +166,18 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 					if err = stream.CloseSend(); err != nil {
 						log.Error("failed to terminate client stream", errs.ZapError(errs.ErrGRPCCloseSend, err))
 					}
+					if !timer.Stop() {
+						select {
+						case <-timer.C: // try to drain from the channel
+						default:
+						}
+					}
+					timer.Reset(retryInterval)
 					select {
 					case <-ctx.Done():
 						log.Info("stop synchronizing with leader due to context canceled")
 						return
-					case <-time.After(retryInterval):
+					case <-timer.C:
 					}
 					break
 				}
