@@ -2256,6 +2256,7 @@ func (c *RaftCluster) UpdateRegionsLabelLevelStats(regions []*core.RegionInfo) {
 	for _, region := range regions {
 		c.labelLevelStats.Observe(region, c.getStoresWithoutLabelLocked(region, core.EngineKey, core.EngineTiFlash), c.opt.GetLocationLabels())
 	}
+	c.labelLevelStats.ClearDefunctRegions()
 }
 
 func (c *RaftCluster) getRegionStoresLocked(region *core.RegionInfo) []*core.StoreInfo {
