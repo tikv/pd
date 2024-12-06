@@ -60,20 +60,22 @@ func NewStoreCommand() *cobra.Command {
 // NewDeleteStoreByAddrCommand returns a subcommand of delete
 func NewDeleteStoreByAddrCommand() *cobra.Command {
 	d := &cobra.Command{
-		Use:   "addr <address>",
+		Use:   "addr <address> [flag]",
 		Short: "delete store by its address",
 		RunE:  deleteStoreCommandByAddrFunc,
 	}
+	d.Flags().BoolP("force", "f", false, "Set status to Tombstone directly")
 	return d
 }
 
 // NewDeleteStoreCommand return a delete subcommand of storeCmd
 func NewDeleteStoreCommand() *cobra.Command {
 	d := &cobra.Command{
-		Use:   "delete <store_id>",
+		Use:   "delete <store_id> [flag]",
 		Short: "delete the store",
 		Run:   deleteStoreCommandFunc,
 	}
+	d.Flags().BoolP("force", "f", false, "Set status to Tombstone directly")
 	d.AddCommand(NewDeleteStoreByAddrCommand())
 	return d
 }
@@ -319,6 +321,9 @@ func deleteStoreCommandFunc(cmd *cobra.Command, args []string) {
 		return
 	}
 	prefix := fmt.Sprintf(storePrefix, args[0])
+	if force, _ := cmd.Flags().GetBool("force"); force {
+		prefix += "?force=true"
+	}
 	_, err := doRequest(cmd, prefix, http.MethodDelete, http.Header{})
 	if err != nil {
 		cmd.Printf("Failed to delete store %s: %s\n", args[0], err)
@@ -334,6 +339,9 @@ func deleteStoreCommandByAddrFunc(cmd *cobra.Command, args []string) error {
 	}
 	// delete store by its ID
 	prefix := fmt.Sprintf(storePrefix, id)
+	if force, _ := cmd.Flags().GetBool("force"); force {
+		prefix += "?force=true"
+	}
 	_, err := doRequest(cmd, prefix, http.MethodDelete, http.Header{})
 	if err != nil {
 		return fmt.Errorf("failed to delete store %s: %s", args[0], err)
