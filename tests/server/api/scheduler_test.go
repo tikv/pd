@@ -53,7 +53,7 @@ func TestPDSchedulingTestSuite(t *testing.T) {
 
 func TestAPISchedulingTestSuite(t *testing.T) {
 	suite.Run(t, &scheduleTestSuite{
-		runMode: tests.APIMode,
+		runMode: tests.KeyspaceMode,
 	})
 }
 
