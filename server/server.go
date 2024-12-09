@@ -2128,6 +2128,6 @@ func (s *Server) SetClient(client *clientv3.Client) {
 
 // GetGlobalTSOAllocator return global tso allocator
 // It only is used for test.
-func (s *Server) GetGlobalTSOAllocator() (tso.Allocator, error) {
+func (s *Server) GetGlobalTSOAllocator() tso.Allocator {
 	return s.cluster.GetGlobalTSOAllocator()
 }
