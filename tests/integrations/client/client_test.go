@@ -41,9 +41,17 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	pd "github.com/tikv/pd/client"
+<<<<<<< HEAD
 	cb "github.com/tikv/pd/client/circuitbreaker"
 	clierrs "github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/retry"
+=======
+	"github.com/tikv/pd/client/clients/router"
+	"github.com/tikv/pd/client/opt"
+	"github.com/tikv/pd/client/pkg/caller"
+	"github.com/tikv/pd/client/pkg/retry"
+	sd "github.com/tikv/pd/client/servicediscovery"
+>>>>>>> 536ae495c5 (client: introduce an independent region client interface (#8874))
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
@@ -740,11 +748,11 @@ func (suite *followerForwardAndHandleTestSuite) TestGetTsoByFollowerForwarding1(
 	checkTS(re, cli, lastTS)
 
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/responseNil", "return(true)"))
-	regions, err := cli.BatchScanRegions(ctx, []pd.KeyRange{{StartKey: []byte(""), EndKey: []byte("")}}, 100)
+	regions, err := cli.BatchScanRegions(ctx, []router.KeyRange{{StartKey: []byte(""), EndKey: []byte("")}}, 100)
 	re.NoError(err)
 	re.Empty(regions)
 	re.NoError(failpoint.Disable("github.com/tikv/pd/client/responseNil"))
-	regions, err = cli.BatchScanRegions(ctx, []pd.KeyRange{{StartKey: []byte(""), EndKey: []byte("")}}, 100)
+	regions, err = cli.BatchScanRegions(ctx, []router.KeyRange{{StartKey: []byte(""), EndKey: []byte("")}}, 100)
 	re.NoError(err)
 	re.Len(regions, 1)
 }
@@ -1416,6 +1424,7 @@ func (suite *clientTestSuite) TestScanRegions() {
 
 	// Wait for region heartbeats.
 	testutil.Eventually(re, func() bool {
+<<<<<<< HEAD
 		region1 := suite.srv.GetRaftCluster().GetRegion(regions[0].GetId())
 		if region1 != nil {
 			digit := suite.srv.GetPDServerConfig().FlowRoundByDigit
@@ -1427,6 +1436,9 @@ func (suite *clientTestSuite) TestScanRegions() {
 	})
 	testutil.Eventually(re, func() bool {
 		scanRegions, err := suite.client.BatchScanRegions(context.Background(), []pd.KeyRange{{StartKey: []byte{0}, EndKey: nil}}, 10)
+=======
+		scanRegions, err := suite.client.BatchScanRegions(context.Background(), []router.KeyRange{{StartKey: []byte{0}, EndKey: nil}}, 10)
+>>>>>>> 536ae495c5 (client: introduce an independent region client interface (#8874))
 		return err == nil && len(scanRegions) == 10
 	})
 
@@ -1444,7 +1456,7 @@ func (suite *clientTestSuite) TestScanRegions() {
 
 	t := suite.T()
 	check := func(start, end []byte, limit int, expect []*metapb.Region) {
-		scanRegions, err := suite.client.BatchScanRegions(context.Background(), []pd.KeyRange{{StartKey: start, EndKey: end}}, limit)
+		scanRegions, err := suite.client.BatchScanRegions(context.Background(), []router.KeyRange{{StartKey: start, EndKey: end}}, limit)
 		re.NoError(err)
 		re.Len(scanRegions, len(expect))
 		t.Log("scanRegions", scanRegions)
@@ -2048,7 +2060,7 @@ func (suite *clientTestSuite) TestBatchScanRegions() {
 
 	// Wait for region heartbeats.
 	testutil.Eventually(re, func() bool {
-		scanRegions, err := suite.client.BatchScanRegions(ctx, []pd.KeyRange{{StartKey: []byte{0}, EndKey: nil}}, 10)
+		scanRegions, err := suite.client.BatchScanRegions(ctx, []router.KeyRange{{StartKey: []byte{0}, EndKey: nil}}, 10)
 		return err == nil && len(scanRegions) == 10
 	})
 
@@ -2070,7 +2082,7 @@ func (suite *clientTestSuite) TestBatchScanRegions() {
 
 	t := suite.T()
 	var outputMustContainAllKeyRangeOptions []bool
-	check := func(ranges []pd.KeyRange, limit int, expect []*metapb.Region) {
+	check := func(ranges []router.KeyRange, limit int, expect []*metapb.Region) {
 		for _, bucket := range []bool{false, true} {
 			for _, outputMustContainAllKeyRange := range outputMustContainAllKeyRangeOptions {
 				var opts []pd.GetRegionOption
@@ -2116,16 +2128,16 @@ func (suite *clientTestSuite) TestBatchScanRegions() {
 
 	// valid ranges
 	outputMustContainAllKeyRangeOptions = []bool{false, true}
-	check([]pd.KeyRange{{StartKey: []byte{0}, EndKey: nil}}, 10, regions)
-	check([]pd.KeyRange{{StartKey: []byte{1}, EndKey: nil}}, 5, regions[1:6])
-	check([]pd.KeyRange{
+	check([]router.KeyRange{{StartKey: []byte{0}, EndKey: nil}}, 10, regions)
+	check([]router.KeyRange{{StartKey: []byte{1}, EndKey: nil}}, 5, regions[1:6])
+	check([]router.KeyRange{
 		{StartKey: []byte{0}, EndKey: []byte{1}},
 		{StartKey: []byte{2}, EndKey: []byte{3}},
 		{StartKey: []byte{4}, EndKey: []byte{5}},
 		{StartKey: []byte{6}, EndKey: []byte{7}},
 		{StartKey: []byte{8}, EndKey: []byte{9}},
 	}, 10, []*metapb.Region{regions[0], regions[2], regions[4], regions[6], regions[8]})
-	check([]pd.KeyRange{
+	check([]router.KeyRange{
 		{StartKey: []byte{0}, EndKey: []byte{1}},
 		{StartKey: []byte{2}, EndKey: []byte{3}},
 		{StartKey: []byte{4}, EndKey: []byte{5}},
@@ -2134,7 +2146,7 @@ func (suite *clientTestSuite) TestBatchScanRegions() {
 	}, 3, []*metapb.Region{regions[0], regions[2], regions[4]})
 
 	outputMustContainAllKeyRangeOptions = []bool{false}
-	check([]pd.KeyRange{
+	check([]router.KeyRange{
 		{StartKey: []byte{0}, EndKey: []byte{0, 1}}, // non-continuous ranges in a region
 		{StartKey: []byte{0, 2}, EndKey: []byte{0, 3}},
 		{StartKey: []byte{0, 3}, EndKey: []byte{0, 4}},
@@ -2143,26 +2155,26 @@ func (suite *clientTestSuite) TestBatchScanRegions() {
 		{StartKey: []byte{4}, EndKey: []byte{5}},
 	}, 10, []*metapb.Region{regions[0], regions[1], regions[2], regions[4]})
 	outputMustContainAllKeyRangeOptions = []bool{false}
-	check([]pd.KeyRange{
+	check([]router.KeyRange{
 		{StartKey: []byte{9}, EndKey: []byte{10, 1}},
 	}, 10, []*metapb.Region{regions[9]})
 
 	// invalid ranges
 	_, err := suite.client.BatchScanRegions(
 		ctx,
-		[]pd.KeyRange{{StartKey: []byte{1}, EndKey: []byte{0}}},
+		[]router.KeyRange{{StartKey: []byte{1}, EndKey: []byte{0}}},
 		10,
 		pd.WithOutputMustContainAllKeyRange(),
 	)
 	re.ErrorContains(err, "invalid key range, start key > end key")
-	_, err = suite.client.BatchScanRegions(ctx, []pd.KeyRange{
+	_, err = suite.client.BatchScanRegions(ctx, []router.KeyRange{
 		{StartKey: []byte{0}, EndKey: []byte{2}},
 		{StartKey: []byte{1}, EndKey: []byte{3}},
 	}, 10)
 	re.ErrorContains(err, "invalid key range, ranges overlapped")
 	_, err = suite.client.BatchScanRegions(
 		ctx,
-		[]pd.KeyRange{{StartKey: []byte{9}, EndKey: []byte{10, 1}}},
+		[]router.KeyRange{{StartKey: []byte{9}, EndKey: []byte{10, 1}}},
 		10,
 		pd.WithOutputMustContainAllKeyRange(),
 	)
@@ -2187,7 +2199,7 @@ func (suite *clientTestSuite) TestBatchScanRegions() {
 	testutil.Eventually(re, func() bool {
 		_, err = suite.client.BatchScanRegions(
 			ctx,
-			[]pd.KeyRange{{StartKey: []byte{9}, EndKey: []byte{101}}},
+			[]router.KeyRange{{StartKey: []byte{9}, EndKey: []byte{101}}},
 			10,
 			pd.WithOutputMustContainAllKeyRange(),
 		)

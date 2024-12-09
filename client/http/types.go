@@ -22,7 +22,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/encryptionpb"
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	pd "github.com/tikv/pd/client"
+	pd "github.com/tikv/pd/client/clients/router"
 )
 
 // ServiceSafePoint is the safepoint for a specific service
