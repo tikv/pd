@@ -2570,6 +2570,6 @@ func (c *RaftCluster) UnsetServiceIndependent(name string) {
 
 // GetGlobalTSOAllocator return global tso allocator
 // It only is used for test.
-func (c *RaftCluster) GetGlobalTSOAllocator() (tso.Allocator, error) {
-	return c.tsoAllocator.GetAllocator(tso.GlobalDCLocation)
+func (c *RaftCluster) GetGlobalTSOAllocator() tso.Allocator {
+	return c.tsoAllocator.GetAllocator()
 }
