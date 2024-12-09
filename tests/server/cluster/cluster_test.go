@@ -627,6 +627,62 @@ func TestRaftClusterMultipleRestart(t *testing.T) {
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs"))
 }
 
+// TestRaftClusterStartTSOJob is used to test whether tso job service is normally closed
+// when raft cluster is stopped ahead of time.
+// Ref: https://github.com/tikv/pd/issues/8836
+func TestRaftClusterStartTSOJob(t *testing.T) {
+	re := require.New(t)
+	name := "pd1"
+	// case 1: normal start
+	ctx, cancel := context.WithCancel(context.Background())
+	tc, err := tests.NewTestCluster(ctx, 1, func(conf *config.Config, _ string) {
+		conf.LeaderLease = 300
+	})
+	re.NoError(err)
+	re.NoError(tc.RunInitialServers())
+	re.NotEmpty(tc.WaitLeader())
+	leaderServer := tc.GetLeaderServer()
+	re.NotNil(leaderServer)
+	leaderServer.BootstrapCluster()
+	allocator, err := tc.GetServer(name).GetServer().GetGlobalTSOAllocator()
+	re.NoError(err)
+	re.True(allocator.IsInitialize())
+	tc.Destroy()
+	cancel()
+	// case 2: return ahead of time but no error when start raft cluster
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/raftClusterReturn", `return(false)`))
+	ctx, cancel = context.WithCancel(context.Background())
+	tc, err = tests.NewTestCluster(ctx, 1, func(conf *config.Config, _ string) {
+		conf.LeaderLease = 300
+	})
+	re.NoError(err)
+	err = tc.RunInitialServers()
+	re.NoError(err)
+	tc.WaitLeader()
+	allocator, err = tc.GetServer(name).GetServer().GetGlobalTSOAllocator()
+	re.NoError(err)
+	re.False(allocator.IsInitialize())
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/raftClusterReturn"))
+	tc.Destroy()
+	cancel()
+	// case 3: meet error when start raft cluster
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/raftClusterReturn", `return(true)`))
+	ctx, cancel = context.WithCancel(context.Background())
+	tc, err = tests.NewTestCluster(ctx, 1, func(conf *config.Config, _ string) {
+		conf.LeaderLease = 300
+	})
+	re.NoError(err)
+	err = tc.RunInitialServers()
+	re.NoError(err)
+	tc.WaitLeader()
+	allocator, err = tc.GetServer(name).GetServer().GetGlobalTSOAllocator()
+	re.NoError(err)
+	re.False(allocator.IsInitialize())
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/raftClusterReturn"))
+	tc.Destroy()
+	cancel()
+}
+
 func newMetaStore(storeID uint64, addr, version string, state metapb.StoreState, deployPath string) *metapb.Store {
 	return &metapb.Store{Id: storeID, Address: addr, Version: version, State: state, DeployPath: deployPath}
 }
