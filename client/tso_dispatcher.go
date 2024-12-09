@@ -31,6 +31,7 @@ import (
 	"github.com/tikv/pd/client/retry"
 	"github.com/tikv/pd/client/timerpool"
 	"github.com/tikv/pd/client/tsoutil"
+	"github.com/tikv/pd/client/utils"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -419,15 +420,7 @@ tsoBatchLoop:
 		if maxBatchWaitInterval >= 0 {
 			tbc.adjustBestBatchSize()
 		}
-		// Stop the timer if it's not stopped.
-		if !streamLoopTimer.Stop() {
-			select {
-			case <-streamLoopTimer.C: // try to drain from the channel
-			default:
-			}
-		}
-		// We need be careful here, see more details in the comments of Timer.Reset.
-		// https://pkg.go.dev/time@master#Timer.Reset
+		utils.DrainAndStopTimer(streamLoopTimer)
 		streamLoopTimer.Reset(c.option.timeout)
 		// Choose a stream to send the TSO gRPC request.
 	streamChoosingLoop:
