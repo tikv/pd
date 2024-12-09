@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package region
+package router
 
 import (
 	"context"
@@ -20,7 +20,6 @@ import (
 	"net/url"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/tikv/pd/client/opt"
 )
 
@@ -65,7 +64,7 @@ func (r *KeyRange) EscapeAsHexStr() (startKeyStr, endKeyStr string) {
 	return
 }
 
-// Client defines the interface of a region client.
+// Client defines the interface of a router client, which includes the methods for obtaining the routing information.
 type Client interface {
 	// GetRegion gets a region and its leader Peer from PD by key.
 	// The region may expire after split. Caller is responsible for caching and
@@ -91,15 +90,4 @@ type Client interface {
 	// with empty value (PeerID is 0).
 	// The returned regions are flattened, even there are key ranges located in the same region, only one region will be returned.
 	BatchScanRegions(ctx context.Context, keyRanges []KeyRange, limit int, opts ...opt.GetRegionOption) ([]*Region, error)
-	// ScatterRegion scatters the specified region. Should use it for a batch of regions,
-	// and the distribution of these regions will be dispersed.
-	// NOTICE: This method is the old version of ScatterRegions, you should use the later one as your first choice.
-	ScatterRegion(ctx context.Context, regionID uint64) error
-	// ScatterRegions scatters the specified regions. Should use it for a batch of regions,
-	// and the distribution of these regions will be dispersed.
-	ScatterRegions(ctx context.Context, regionsID []uint64, opts ...opt.RegionsOption) (*pdpb.ScatterRegionResponse, error)
-	// SplitRegions split regions by given split keys
-	SplitRegions(ctx context.Context, splitKeys [][]byte, opts ...opt.RegionsOption) (*pdpb.SplitRegionsResponse, error)
-	// SplitAndScatterRegions split regions by given split keys and scatter new regions
-	SplitAndScatterRegions(ctx context.Context, splitKeys [][]byte, opts ...opt.RegionsOption) (*pdpb.SplitAndScatterRegionsResponse, error)
 }

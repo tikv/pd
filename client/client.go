@@ -30,7 +30,7 @@ import (
 	"github.com/pingcap/log"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/tikv/pd/client/clients/metastorage"
-	"github.com/tikv/pd/client/clients/region"
+	"github.com/tikv/pd/client/clients/router"
 	"github.com/tikv/pd/client/clients/tso"
 	"github.com/tikv/pd/client/constants"
 	"github.com/tikv/pd/client/errs"
@@ -71,6 +71,17 @@ type RPCClient interface {
 	// determine the safepoint for multiple services, it does not trigger a GC
 	// job. Use UpdateGCSafePoint to trigger the GC job if needed.
 	UpdateServiceGCSafePoint(ctx context.Context, serviceID string, ttl int64, safePoint uint64) (uint64, error)
+	// ScatterRegion scatters the specified region. Should use it for a batch of regions,
+	// and the distribution of these regions will be dispersed.
+	// NOTICE: This method is the old version of ScatterRegions, you should use the later one as your first choice.
+	ScatterRegion(ctx context.Context, regionID uint64) error
+	// ScatterRegions scatters the specified regions. Should use it for a batch of regions,
+	// and the distribution of these regions will be dispersed.
+	ScatterRegions(ctx context.Context, regionsID []uint64, opts ...opt.RegionsOption) (*pdpb.ScatterRegionResponse, error)
+	// SplitRegions split regions by given split keys
+	SplitRegions(ctx context.Context, splitKeys [][]byte, opts ...opt.RegionsOption) (*pdpb.SplitRegionsResponse, error)
+	// SplitAndScatterRegions split regions by given split keys and scatter new regions
+	SplitAndScatterRegions(ctx context.Context, splitKeys [][]byte, opts ...opt.RegionsOption) (*pdpb.SplitAndScatterRegionsResponse, error)
 	// GetOperator gets the status of operator of the specified region.
 	GetOperator(ctx context.Context, regionID uint64) (*pdpb.GetOperatorResponse, error)
 
@@ -96,7 +107,7 @@ type RPCClient interface {
 	//     on your needs.
 	WithCallerComponent(callerComponent caller.Component) RPCClient
 
-	region.Client
+	router.Client
 	tso.Client
 	metastorage.Client
 	// KeyspaceClient manages keyspace metadata.
@@ -558,12 +569,12 @@ func (c *client) GetMinTS(ctx context.Context) (physical int64, logical int64, e
 	return minTS.Physical, minTS.Logical, nil
 }
 
-func handleRegionResponse(res *pdpb.GetRegionResponse) *region.Region {
+func handleRegionResponse(res *pdpb.GetRegionResponse) *router.Region {
 	if res.Region == nil {
 		return nil
 	}
 
-	r := &region.Region{
+	r := &router.Region{
 		Meta:         res.Region,
 		Leader:       res.Leader,
 		PendingPeers: res.PendingPeers,
@@ -576,7 +587,7 @@ func handleRegionResponse(res *pdpb.GetRegionResponse) *region.Region {
 }
 
 // GetRegionFromMember implements the RPCClient interface.
-func (c *client) GetRegionFromMember(ctx context.Context, key []byte, memberURLs []string, _ ...opt.GetRegionOption) (*region.Region, error) {
+func (c *client) GetRegionFromMember(ctx context.Context, key []byte, memberURLs []string, _ ...opt.GetRegionOption) (*router.Region, error) {
 	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
 		span = span.Tracer().StartSpan("pdclient.GetRegionFromMember", opentracing.ChildOf(span.Context()))
 		defer span.Finish()
@@ -615,7 +626,7 @@ func (c *client) GetRegionFromMember(ctx context.Context, key []byte, memberURLs
 }
 
 // GetRegion implements the RPCClient interface.
-func (c *client) GetRegion(ctx context.Context, key []byte, opts ...opt.GetRegionOption) (*region.Region, error) {
+func (c *client) GetRegion(ctx context.Context, key []byte, opts ...opt.GetRegionOption) (*router.Region, error) {
 	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
 		span = span.Tracer().StartSpan("pdclient.GetRegion", opentracing.ChildOf(span.Context()))
 		defer span.Finish()
@@ -655,7 +666,7 @@ func (c *client) GetRegion(ctx context.Context, key []byte, opts ...opt.GetRegio
 }
 
 // GetPrevRegion implements the RPCClient interface.
-func (c *client) GetPrevRegion(ctx context.Context, key []byte, opts ...opt.GetRegionOption) (*region.Region, error) {
+func (c *client) GetPrevRegion(ctx context.Context, key []byte, opts ...opt.GetRegionOption) (*router.Region, error) {
 	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
 		span = span.Tracer().StartSpan("pdclient.GetPrevRegion", opentracing.ChildOf(span.Context()))
 		defer span.Finish()
@@ -695,7 +706,7 @@ func (c *client) GetPrevRegion(ctx context.Context, key []byte, opts ...opt.GetR
 }
 
 // GetRegionByID implements the RPCClient interface.
-func (c *client) GetRegionByID(ctx context.Context, regionID uint64, opts ...opt.GetRegionOption) (*region.Region, error) {
+func (c *client) GetRegionByID(ctx context.Context, regionID uint64, opts ...opt.GetRegionOption) (*router.Region, error) {
 	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
 		span = span.Tracer().StartSpan("pdclient.GetRegionByID", opentracing.ChildOf(span.Context()))
 		defer span.Finish()
@@ -735,7 +746,7 @@ func (c *client) GetRegionByID(ctx context.Context, regionID uint64, opts ...opt
 }
 
 // ScanRegions implements the RPCClient interface.
-func (c *client) ScanRegions(ctx context.Context, key, endKey []byte, limit int, opts ...opt.GetRegionOption) ([]*region.Region, error) {
+func (c *client) ScanRegions(ctx context.Context, key, endKey []byte, limit int, opts ...opt.GetRegionOption) ([]*router.Region, error) {
 	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
 		span = span.Tracer().StartSpan("pdclient.ScanRegions", opentracing.ChildOf(span.Context()))
 		defer span.Finish()
@@ -786,7 +797,7 @@ func (c *client) ScanRegions(ctx context.Context, key, endKey []byte, limit int,
 }
 
 // BatchScanRegions implements the RPCClient interface.
-func (c *client) BatchScanRegions(ctx context.Context, ranges []region.KeyRange, limit int, opts ...opt.GetRegionOption) ([]*region.Region, error) {
+func (c *client) BatchScanRegions(ctx context.Context, ranges []router.KeyRange, limit int, opts ...opt.GetRegionOption) ([]*router.Region, error) {
 	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
 		span = span.Tracer().StartSpan("pdclient.BatchScanRegions", opentracing.ChildOf(span.Context()))
 		defer span.Finish()
@@ -839,10 +850,10 @@ func (c *client) BatchScanRegions(ctx context.Context, ranges []region.KeyRange,
 	return handleBatchRegionsResponse(resp), nil
 }
 
-func handleBatchRegionsResponse(resp *pdpb.BatchScanRegionsResponse) []*region.Region {
-	regions := make([]*region.Region, 0, len(resp.GetRegions()))
+func handleBatchRegionsResponse(resp *pdpb.BatchScanRegionsResponse) []*router.Region {
+	regions := make([]*router.Region, 0, len(resp.GetRegions()))
 	for _, r := range resp.GetRegions() {
-		region := &region.Region{
+		region := &router.Region{
 			Meta:         r.Region,
 			Leader:       r.Leader,
 			PendingPeers: r.PendingPeers,
@@ -856,13 +867,13 @@ func handleBatchRegionsResponse(resp *pdpb.BatchScanRegionsResponse) []*region.R
 	return regions
 }
 
-func handleRegionsResponse(resp *pdpb.ScanRegionsResponse) []*region.Region {
-	var regions []*region.Region
+func handleRegionsResponse(resp *pdpb.ScanRegionsResponse) []*router.Region {
+	var regions []*router.Region
 	if len(resp.GetRegions()) == 0 {
 		// Make it compatible with old server.
 		metas, leaders := resp.GetRegionMetas(), resp.GetLeaders()
 		for i := range metas {
-			r := &region.Region{Meta: metas[i]}
+			r := &router.Region{Meta: metas[i]}
 			if i < len(leaders) {
 				r.Leader = leaders[i]
 			}
@@ -870,7 +881,7 @@ func handleRegionsResponse(resp *pdpb.ScanRegionsResponse) []*region.Region {
 		}
 	} else {
 		for _, r := range resp.GetRegions() {
-			region := &region.Region{
+			region := &router.Region{
 				Meta:         r.Region,
 				Leader:       r.Leader,
 				PendingPeers: r.PendingPeers,
