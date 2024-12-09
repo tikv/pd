@@ -329,6 +329,19 @@ func (c *RaftCluster) Start(s Server) error {
 		return err
 	}
 	c.checkTSOService()
+	defer func() {
+		// We need to try to stop tso jobs when the cluster is not running.
+		// Ref: https://github.com/tikv/pd/issues/8836
+		if !c.running {
+			c.stopTSOJobsIfNeeded()
+		}
+	}()
+	failpoint.Inject("raftClusterReturn", func(val failpoint.Value) {
+		if val, ok := val.(bool); (ok && val) || !ok {
+			failpoint.Return(errors.New("raftClusterReturn"))
+		}
+		failpoint.Return(nil)
+	})
 	cluster, err := c.LoadClusterInfo()
 	if err != nil {
 		return err
@@ -2553,4 +2566,10 @@ func (c *RaftCluster) SetServiceIndependent(name string) {
 // UnsetServiceIndependent unsets the service to be independent.
 func (c *RaftCluster) UnsetServiceIndependent(name string) {
 	c.independentServices.Delete(name)
+}
+
+// GetGlobalTSOAllocator return global tso allocator
+// It only is used for test.
+func (c *RaftCluster) GetGlobalTSOAllocator() (tso.Allocator, error) {
+	return c.tsoAllocator.GetAllocator(tso.GlobalDCLocation)
 }

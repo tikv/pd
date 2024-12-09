@@ -2097,3 +2097,9 @@ func (s *Server) GetMaxResetTSGap() time.Duration {
 func (s *Server) SetClient(client *clientv3.Client) {
 	s.client = client
 }
+
+// GetGlobalTSOAllocator return global tso allocator
+// It only is used for test.
+func (s *Server) GetGlobalTSOAllocator() (tso.Allocator, error) {
+	return s.cluster.GetGlobalTSOAllocator()
+}
