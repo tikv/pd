@@ -4,7 +4,7 @@
 
 // Note: This file is copied from https://go-review.googlesource.com/c/go/+/276133
 
-package timerpool
+package timerutils
 
 import (
 	"sync"

@@ -32,7 +32,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	pd "github.com/tikv/pd/client"
 	"github.com/tikv/pd/client/errs"
-	"github.com/tikv/pd/client/utils"
+	"github.com/tikv/pd/client/timerutils"
 	atomicutil "go.uber.org/atomic"
 	"go.uber.org/zap"
 	"golang.org/x/exp/slices"
@@ -290,7 +290,7 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 					watchMetaChannel, err = c.provider.Watch(ctx, pd.GroupSettingsPathPrefixBytes, pd.WithRev(metaRevision), pd.WithPrefix(), pd.WithPrevKV())
 					if err != nil {
 						log.Warn("watch resource group meta failed", zap.Error(err))
-						utils.DrainAndStopTimer(watchRetryTimer)
+						timerutils.DrainAndStopTimer(watchRetryTimer)
 						watchRetryTimer.Reset(watchRetryInterval)
 						failpoint.Inject("watchStreamError", func() {
 							watchRetryTimer.Reset(20 * time.Millisecond)
@@ -301,7 +301,7 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 					watchConfigChannel, err = c.provider.Watch(ctx, pd.ControllerConfigPathPrefixBytes, pd.WithRev(cfgRevision), pd.WithPrefix())
 					if err != nil {
 						log.Warn("watch resource group config failed", zap.Error(err))
-						utils.DrainAndStopTimer(watchRetryTimer)
+						timerutils.DrainAndStopTimer(watchRetryTimer)
 						watchRetryTimer.Reset(watchRetryInterval)
 					}
 				}
@@ -336,7 +336,7 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 				})
 				if !ok {
 					watchMetaChannel = nil
-					utils.DrainAndStopTimer(watchRetryTimer)
+					timerutils.DrainAndStopTimer(watchRetryTimer)
 					watchRetryTimer.Reset(watchRetryInterval)
 					failpoint.Inject("watchStreamError", func() {
 						watchRetryTimer.Reset(20 * time.Millisecond)
@@ -373,7 +373,7 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 			case resp, ok := <-watchConfigChannel:
 				if !ok {
 					watchConfigChannel = nil
-					utils.DrainAndStopTimer(watchRetryTimer)
+					timerutils.DrainAndStopTimer(watchRetryTimer)
 					watchRetryTimer.Reset(watchRetryInterval)
 					failpoint.Inject("watchStreamError", func() {
 						watchRetryTimer.Reset(20 * time.Millisecond)
