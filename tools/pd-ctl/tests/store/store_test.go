@@ -355,6 +355,7 @@ func TestStore(t *testing.T) {
 
 	storeInfo.Store.State = metapb.StoreState(metapb.StoreState_value[storeInfo.Store.StateName])
 	re.Equal(metapb.StoreState_Offline, storeInfo.Store.State)
+	re.Equal(false, storeInfo.Store.PhysicallyDestroyed)
 
 	// store check status
 	args = []string{"-u", pdAddr, "store", "check", "Offline"}
@@ -425,6 +426,7 @@ func TestStore(t *testing.T) {
 
 	storeInfo.Store.State = metapb.StoreState(metapb.StoreState_value[storeInfo.Store.StateName])
 	re.Equal(metapb.StoreState_Offline, storeInfo.Store.State)
+	re.Equal(false, storeInfo.Store.PhysicallyDestroyed)
 
 	// store cancel-delete addr <address>
 	limit = leaderServer.GetRaftCluster().GetStoreLimitByType(3, storelimit.RemovePeer)
@@ -442,6 +444,37 @@ func TestStore(t *testing.T) {
 	re.Equal(metapb.StoreState_Up, storeInfo.Store.State)
 	limit = leaderServer.GetRaftCluster().GetStoreLimitByType(3, storelimit.RemovePeer)
 	re.Equal(25.0, limit)
+
+	// store delete <store_id> --force
+	args = []string{"-u", pdAddr, "store", "delete", "1", "--force"}
+	output, err = tests.ExecuteCommand(cmd, args...)
+	re.NoError(err)
+	re.Contains(string(output), "Success")
+	args = []string{"-u", pdAddr, "store", "1"}
+	output, err = tests.ExecuteCommand(cmd, args...)
+	re.NoError(err)
+	storeInfo = new(response.StoreInfo)
+	re.NoError(json.Unmarshal(output, &storeInfo))
+
+	storeInfo.Store.State = metapb.StoreState(metapb.StoreState_value[storeInfo.Store.StateName])
+	re.Equal(metapb.StoreState_Offline, storeInfo.Store.State)
+	re.Equal(true, storeInfo.Store.PhysicallyDestroyed)
+
+	// store delete addr <address> --force
+	args = []string{"-u", pdAddr, "store", "delete", "addr", "tikv3", "--force"}
+	output, err = tests.ExecuteCommand(cmd, args...)
+	re.Equal("Success!\n", string(output))
+	re.NoError(err)
+
+	args = []string{"-u", pdAddr, "store", "3"}
+	output, err = tests.ExecuteCommand(cmd, args...)
+	re.NoError(err)
+	storeInfo = new(response.StoreInfo)
+	re.NoError(json.Unmarshal(output, &storeInfo))
+
+	storeInfo.Store.State = metapb.StoreState(metapb.StoreState_value[storeInfo.Store.StateName])
+	re.Equal(metapb.StoreState_Offline, storeInfo.Store.State)
+	re.Equal(true, storeInfo.Store.PhysicallyDestroyed)
 
 	// store remove-tombstone
 	args = []string{"-u", pdAddr, "store", "check", "Tombstone"}
