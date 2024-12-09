@@ -601,7 +601,10 @@ func TestRegionHeartbeatHotStat(t *testing.T) {
 	re.NoError(err)
 	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend(), core.NewBasicCluster())
 	cluster.coordinator = schedule.NewCoordinator(ctx, cluster, nil)
-	newTestStores(4, "2.0.0")
+	stores := newTestStores(4, "2.0.0")
+	for _, store := range stores {
+		cluster.PutStore(store.GetMeta())
+	}
 	peers := []*metapb.Peer{
 		{
 			Id:      1,
