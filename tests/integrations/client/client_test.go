@@ -44,6 +44,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 
 	pd "github.com/tikv/pd/client"
+	cb "github.com/tikv/pd/client/circuitbreaker"
 	"github.com/tikv/pd/client/clients/router"
 	"github.com/tikv/pd/client/opt"
 	"github.com/tikv/pd/client/pkg/caller"
@@ -2048,4 +2049,57 @@ func needRetry(err error) bool {
 		return false
 	}
 	return st.Code() == codes.ResourceExhausted
+}
+
+func TestCircuitBreaker(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	cluster, err := tests.NewTestCluster(ctx, 1)
+	re.NoError(err)
+	defer cluster.Destroy()
+
+	circuitBreakerSettings := cb.Settings{
+		ErrorRateThresholdPct: 60,
+		MinQPSForOpen:         10,
+		ErrorRateWindow:       time.Millisecond,
+		CoolDownInterval:      time.Second,
+		HalfOpenSuccessCount:  1,
+	}
+
+	endpoints := runServer(re, cluster)
+	cli := setupCli(ctx, re, endpoints, opt.WithRegionMetaCircuitBreaker(circuitBreakerSettings))
+	defer cli.Close()
+
+	for i := 0; i < 10; i++ {
+		region, err := cli.GetRegion(context.TODO(), []byte("a"))
+		re.NoError(err)
+		re.NotNil(region)
+	}
+
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/triggerCircuitBreaker", "return(true)"))
+
+	for i := 0; i < 100; i++ {
+		_, err := cli.GetRegion(context.TODO(), []byte("a"))
+		re.Error(err)
+	}
+
+	_, err = cli.GetRegion(context.TODO(), []byte("a"))
+	re.Error(err)
+	re.Contains(err.Error(), "circuit breaker is open")
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/triggerCircuitBreaker"))
+
+	_, err = cli.GetRegion(context.TODO(), []byte("a"))
+	re.Error(err)
+	re.Contains(err.Error(), "circuit breaker is open")
+
+	// wait cooldown
+	time.Sleep(time.Second)
+
+	for i := 0; i < 10; i++ {
+		region, err := cli.GetRegion(context.TODO(), []byte("a"))
+		re.NoError(err)
+		re.NotNil(region)
+	}
 }

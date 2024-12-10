@@ -38,7 +38,7 @@ var settings = Settings{
 
 var minCountToOpen = int(settings.MinQPSForOpen * uint32(settings.ErrorRateWindow.Seconds()))
 
-func TestCircuitBreaker_Execute_Wrapper_Return_Values(t *testing.T) {
+func TestCircuitBreakerExecuteWrapperReturnValues(t *testing.T) {
 	re := require.New(t)
 	cb := NewCircuitBreaker[int]("test_cb", settings)
 	originalError := errors.New("circuit breaker is open")
@@ -57,7 +57,7 @@ func TestCircuitBreaker_Execute_Wrapper_Return_Values(t *testing.T) {
 	re.Equal(42, result)
 }
 
-func TestCircuitBreaker_OpenState(t *testing.T) {
+func TestCircuitBreakerOpenState(t *testing.T) {
 	re := require.New(t)
 	cb := NewCircuitBreaker[int]("test_cb", settings)
 	driveQPS(cb, minCountToOpen, Yes, re)
@@ -68,7 +68,7 @@ func TestCircuitBreaker_OpenState(t *testing.T) {
 	re.Equal(StateOpen, cb.state.stateType)
 }
 
-func TestCircuitBreaker_CloseState_Not_Enough_QPS(t *testing.T) {
+func TestCircuitBreakerCloseStateNotEnoughQPS(t *testing.T) {
 	re := require.New(t)
 	cb := NewCircuitBreaker[int]("test_cb", settings)
 	re.Equal(StateClosed, cb.state.stateType)
@@ -78,7 +78,7 @@ func TestCircuitBreaker_CloseState_Not_Enough_QPS(t *testing.T) {
 	re.Equal(StateClosed, cb.state.stateType)
 }
 
-func TestCircuitBreaker_CloseState_Not_Enough_Error_Rate(t *testing.T) {
+func TestCircuitBreakerCloseStateNotEnoughErrorRate(t *testing.T) {
 	re := require.New(t)
 	cb := NewCircuitBreaker[int]("test_cb", settings)
 	re.Equal(StateClosed, cb.state.stateType)
@@ -89,7 +89,7 @@ func TestCircuitBreaker_CloseState_Not_Enough_Error_Rate(t *testing.T) {
 	re.Equal(StateClosed, cb.state.stateType)
 }
 
-func TestCircuitBreaker_Half_Open_To_Closed(t *testing.T) {
+func TestCircuitBreakerHalfOpenToClosed(t *testing.T) {
 	re := require.New(t)
 	cb := NewCircuitBreaker[int]("test_cb", settings)
 	re.Equal(StateClosed, cb.state.stateType)
@@ -107,7 +107,7 @@ func TestCircuitBreaker_Half_Open_To_Closed(t *testing.T) {
 	re.Equal(StateClosed, cb.state.stateType)
 }
 
-func TestCircuitBreaker_Half_Open_To_Open(t *testing.T) {
+func TestCircuitBreakerHalfOpenToOpen(t *testing.T) {
 	re := require.New(t)
 	cb := NewCircuitBreaker[int]("test_cb", settings)
 	re.Equal(StateClosed, cb.state.stateType)
@@ -130,7 +130,7 @@ func TestCircuitBreaker_Half_Open_To_Open(t *testing.T) {
 
 // in half open state, circuit breaker will allow only HalfOpenSuccessCount pending and should fast fail all other request till HalfOpenSuccessCount requests is completed
 // this test moves circuit breaker to the half open state and verifies that requests above HalfOpenSuccessCount are failing
-func TestCircuitBreaker_Half_Open_Fail_Over_Pending_Count(t *testing.T) {
+func TestCircuitBreakerHalfOpenFailOverPendingCount(t *testing.T) {
 	re := require.New(t)
 	cb := newCircuitBreakerMovedToHalfOpenState(re)
 
@@ -176,7 +176,7 @@ func TestCircuitBreaker_Half_Open_Fail_Over_Pending_Count(t *testing.T) {
 	re.Equal(uint32(1), cb.state.successCount)
 }
 
-func TestCircuitBreaker_Count_Only_Requests_In_Same_Window(t *testing.T) {
+func TestCircuitBreakerCountOnlyRequestsInSameWindow(t *testing.T) {
 	re := require.New(t)
 	cb := NewCircuitBreaker[int]("test_cb", settings)
 	re.Equal(StateClosed, cb.state.stateType)
@@ -211,7 +211,7 @@ func TestCircuitBreaker_Count_Only_Requests_In_Same_Window(t *testing.T) {
 	re.Equal(uint32(1), cb.state.successCount)
 }
 
-func TestCircuitBreaker_ChangeSettings(t *testing.T) {
+func TestCircuitBreakerChangeSettings(t *testing.T) {
 	re := require.New(t)
 
 	cb := NewCircuitBreaker[int]("test_cb", AlwaysClosedSettings)

@@ -25,6 +25,8 @@ import (
 	"github.com/opentracing/opentracing-go"
 	"github.com/prometheus/client_golang/prometheus"
 	"go.uber.org/zap"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
@@ -661,6 +663,9 @@ func (c *client) GetRegion(ctx context.Context, key []byte, opts ...opt.GetRegio
 	}
 	resp, err := c.inner.regionMetaCircuitBreaker.Execute(func() (*pdpb.GetRegionResponse, cb.Overloading, error) {
 		region, err := pdpb.NewPDClient(serviceClient.GetClientConn()).GetRegion(cctx, req)
+		failpoint.Inject("triggerCircuitBreaker", func() {
+			err = status.Error(codes.ResourceExhausted, "resource exhausted")
+		})
 		return region, isOverloaded(err), err
 	})
 	if serviceClient.NeedRetry(resp.GetHeader().GetError(), err) {
