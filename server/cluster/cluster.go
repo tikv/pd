@@ -339,7 +339,10 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 	}
 	defer func() {
 		if !bootstrap && err != nil {
-			c.stopTSOJobsIfNeeded()
+			if err := c.stopTSOJobsIfNeeded(); err != nil {
+				log.Error("failed to stop TSO jobs", errs.ZapError(err))
+				return
+			}
 		}
 	}()
 	failpoint.Inject("raftClusterReturn", func(val failpoint.Value) {
