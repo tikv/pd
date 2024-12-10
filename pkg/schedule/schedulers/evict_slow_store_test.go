@@ -158,7 +158,7 @@ func TestEvictSlowStoreBatch(t *testing.T) {
 	tc.AddLeaderStore(2, 0)
 	tc.AddLeaderStore(3, 0)
 	// Add regions with leader in store 1
-	for i := 0; i < 10000; i++ {
+	for i := range 10000 {
 		tc.AddLeaderRegion(uint64(i), 1, 2)
 	}
 
