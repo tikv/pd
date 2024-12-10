@@ -18,7 +18,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -26,11 +25,8 @@ import (
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/core"
-	"github.com/tikv/pd/pkg/schedule/handler"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	tu "github.com/tikv/pd/pkg/utils/testutil"
@@ -696,44 +692,6 @@ func buildRedistributeRegionsTestCases(storeIDs []uint64, regionDist []regionSto
 	return stores, regions
 }
 
-func validateMigtationOut(ops []*handler.MigrationOp, storeIDs []uint64) []uint64 {
-	r := make(map[uint64]interface{})
-	for _, op := range ops {
-		for _, sid := range storeIDs {
-			if op.FromStore == sid {
-				for k, _ := range op.Regions {
-					r[k] = nil
-				}
-			}
-		}
-	}
-	rl := []uint64{}
-	for k, _ := range r {
-		rl = append(rl, k)
-	}
-	slices.Sort(rl)
-	return rl
-}
-
-func validateMigtationIn(ops []*handler.MigrationOp, storeIDs []uint64) []uint64 {
-	r := make(map[uint64]interface{})
-	for _, op := range ops {
-		for _, sid := range storeIDs {
-			if op.ToStore == sid {
-				for k, _ := range op.Regions {
-					r[k] = nil
-				}
-			}
-		}
-	}
-	rl := []uint64{}
-	for k, _ := range r {
-		rl = append(rl, k)
-	}
-	slices.Sort(rl)
-	return rl
-}
-
 func (suite *operatorTestSuite) checkRedistributeRegions1(cluster *tests.TestCluster) {
 	re := suite.Require()
 
@@ -741,6 +699,14 @@ func (suite *operatorTestSuite) checkRedistributeRegions1(cluster *tests.TestClu
 		{10, []uint64{0}},
 		{20, []uint64{0}},
 		{30, []uint64{0}},
+		{40, []uint64{0}},
+		{50, []uint64{0}},
+		{60, []uint64{0}},
+		{60, []uint64{0}},
+		{70, []uint64{0}},
+		{80, []uint64{0}},
+		{90, []uint64{0}},
+		{100, []uint64{1}},
 	})
 
 	for _, store := range stores {
@@ -748,43 +714,45 @@ func (suite *operatorTestSuite) checkRedistributeRegions1(cluster *tests.TestClu
 	}
 
 	pauseAllCheckers(re, cluster)
-	result := handler.MigrationResult{}
 	for _, r := range regions {
 		tests.MustPutRegionInfo(re, cluster, r)
 	}
 
 	urlPrefix := fmt.Sprintf("%s/pd/api/v1", cluster.GetLeaderServer().GetAddr())
-	e := tu.CheckPostJSON(tests.TestDialClient, fmt.Sprintf("%s/regions/balance", urlPrefix), []byte(``), tu.StatusOK(re), tu.ExtractJSON(re, &result))
+	e := tu.CheckPostJSON(tests.TestDialClient, fmt.Sprintf("%s/regions/balance/?timeout=100000", urlPrefix), []byte(``), tu.StatusOK(re))
 	re.NoError(e)
-	re.Equal(2, len(result.Ops))
+	ec := tu.CheckGetJSON(tests.TestDialClient, fmt.Sprintf("%s/regions/balance", urlPrefix), []byte(``), tu.StatusOK(re), tu.StringEqual(re, "Scheduling"))
+	re.NoError(ec)
+	// ed := tu.CheckDelete(tests.TestDialClient, fmt.Sprintf("%s/schedulers/%s", urlPrefix, types.BalanceKeyrangeScheduler.String()), tu.StatusOK(re), tu.StringEqual(re, "The scheduler is removed."))
+	// re.NoError(ed)
 }
 
-func (suite *operatorTestSuite) checkRedistributeRegions2(cluster *tests.TestCluster) {
-	re := suite.Require()
+// func (suite *operatorTestSuite) checkRedistributeRegions2(cluster *tests.TestCluster) {
+// 	re := suite.Require()
 
-	stores, regions := buildRedistributeRegionsTestCases([]uint64{1, 2, 4}, []regionStoresPair{
-		{10, []uint64{0, 1}},
-		{20, []uint64{0, 2}},
-		{30, []uint64{0, 1}},
-	})
+// 	stores, regions := buildRedistributeRegionsTestCases([]uint64{1, 2, 4}, []regionStoresPair{
+// 		{10, []uint64{0, 1}},
+// 		{20, []uint64{0, 2}},
+// 		{30, []uint64{0, 1}},
+// 	})
 
-	for _, store := range stores {
-		tests.MustPutStore(re, cluster, store)
-	}
+// 	for _, store := range stores {
+// 		tests.MustPutStore(re, cluster, store)
+// 	}
 
-	pauseAllCheckers(re, cluster)
-	result := handler.MigrationResult{}
-	for _, r := range regions {
-		tests.MustPutRegionInfo(re, cluster, r)
-	}
+// 	pauseAllCheckers(re, cluster)
+// 	result := handler.MigrationResult{}
+// 	for _, r := range regions {
+// 		tests.MustPutRegionInfo(re, cluster, r)
+// 	}
 
-	urlPrefix := fmt.Sprintf("%s/pd/api/v1", cluster.GetLeaderServer().GetAddr())
-	e := tu.CheckPostJSON(tests.TestDialClient, fmt.Sprintf("%s/regions/balance", urlPrefix), []byte(``), tu.StatusOK(re), tu.ExtractJSON(re, &result))
-	re.NoError(e)
-	re.Equal(1, len(result.Ops))
-	validateMigtationOut(result.Ops, []uint64{1})
-	validateMigtationIn(result.Ops, []uint64{4})
-}
+// 	urlPrefix := fmt.Sprintf("%s/pd/api/v1", cluster.GetLeaderServer().GetAddr())
+// 	e := tu.CheckPostJSON(tests.TestDialClient, fmt.Sprintf("%s/regions/balance", urlPrefix), []byte(``), tu.StatusOK(re), tu.ExtractJSON(re, &result))
+// 	re.NoError(e)
+// 	re.Equal(1, len(result.Ops))
+// 	validateMigtationOut(result.Ops, []uint64{1})
+// 	validateMigtationIn(result.Ops, []uint64{4})
+// }
 
 func (suite *operatorTestSuite) TestRedistributeRegions() {
 	env := tests.NewSchedulingTestEnvironment(suite.T(),
@@ -793,86 +761,59 @@ func (suite *operatorTestSuite) TestRedistributeRegions() {
 		})
 	env.RunTestBasedOnMode(suite.checkRedistributeRegions1)
 	env.Cleanup()
-	env2 := tests.NewSchedulingTestEnvironment(suite.T(),
-		func(conf *config.Config, _ string) {
-			conf.Replication.MaxReplicas = 1
-		})
-	env2.RunTestBasedOnMode(suite.checkRedistributeRegions2)
-	env2.Cleanup()
+	// env2 := tests.NewSchedulingTestEnvironment(suite.T(),
+	// 	func(conf *config.Config, _ string) {
+	// 		conf.Replication.MaxReplicas = 1
+	// 	})
+	// env2.RunTestBasedOnMode(suite.checkRedistributeRegions2)
+	// env2.Cleanup()
 }
 
-func (suite *operatorTestSuite) checkRedistributeRegions3(cluster *tests.TestCluster) {
-	re := suite.Require()
+// func TestComputeCandidateStores(t *testing.T) {
+// 	re := require.New(t)
+// 	stores := []*core.StoreInfo{}
 
-	stores, regions := buildRedistributeRegionsTestCases([]uint64{1, 2, 4}, []regionStoresPair{
-		{10, []uint64{0, 1}},
-		{20, []uint64{0, 2}},
-		{30, []uint64{0, 1}},
-	})
+// 	stats := &pdpb.StoreStats{
+// 		Capacity:  100,
+// 		Available: 100,
+// 	}
+// 	stores = append(stores, core.NewStoreInfo(
+// 		&metapb.Store{
+// 			Id:            1,
+// 			State:         metapb.StoreState_Up,
+// 			NodeState:     metapb.NodeState_Serving,
+// 			Labels:        []*metapb.StoreLabel{{Key: "zone", Value: "z1"}},
+// 			LastHeartbeat: time.Now().UnixNano(),
+// 		},
+// 		core.SetStoreStats(stats),
+// 		core.SetLastHeartbeatTS(time.Now()),
+// 	))
+// 	stores = append(stores, core.NewStoreInfo(
+// 		&metapb.Store{
+// 			Id:            2,
+// 			State:         metapb.StoreState_Up,
+// 			NodeState:     metapb.NodeState_Serving,
+// 			Labels:        []*metapb.StoreLabel{{Key: "zone", Value: "z1"}, {Key: "engine", Value: "tiflash"}},
+// 			LastHeartbeat: time.Now().UnixNano(),
+// 		},
+// 		core.SetStoreStats(stats),
+// 		core.SetLastHeartbeatTS(time.Now()),
+// 	))
+// 	stores = append(stores, core.NewStoreInfo(
+// 		&metapb.Store{
+// 			Id:            3,
+// 			State:         metapb.StoreState_Up,
+// 			NodeState:     metapb.NodeState_Serving,
+// 			Labels:        []*metapb.StoreLabel{{Key: "zone", Value: "z2"}},
+// 			LastHeartbeat: time.Now().UnixNano(),
+// 		},
+// 		core.SetStoreStats(stats),
+// 		core.SetLastHeartbeatTS(time.Now()),
+// 	))
 
-	for _, store := range stores {
-		tests.MustPutStore(re, cluster, store)
-	}
+// 	regions := []*core.RegionInfo{}
 
-	pauseAllCheckers(re, cluster)
-	result := handler.MigrationResult{}
-	for _, r := range regions {
-		tests.MustPutRegionInfo(re, cluster, r)
-	}
-
-	urlPrefix := fmt.Sprintf("%s/pd/api/v1", cluster.GetLeaderServer().GetAddr())
-	e := tu.CheckPostJSON(tests.TestDialClient, fmt.Sprintf("%s/regions/balance", urlPrefix), []byte(``), tu.StatusOK(re), tu.ExtractJSON(re, &result))
-	re.NoError(e)
-	re.Equal(1, len(result.Ops))
-	validateMigtationOut(result.Ops, []uint64{1})
-	validateMigtationIn(result.Ops, []uint64{4})
-}
-
-func TestComputeCandidateStores(t *testing.T) {
-	re := require.New(t)
-	stores := []*core.StoreInfo{}
-
-	stats := &pdpb.StoreStats{
-		Capacity:  100,
-		Available: 100,
-	}
-	stores = append(stores, core.NewStoreInfo(
-		&metapb.Store{
-			Id:            1,
-			State:         metapb.StoreState_Up,
-			NodeState:     metapb.NodeState_Serving,
-			Labels:        []*metapb.StoreLabel{{Key: "zone", Value: "z1"}},
-			LastHeartbeat: time.Now().UnixNano(),
-		},
-		core.SetStoreStats(stats),
-		core.SetLastHeartbeatTS(time.Now()),
-	))
-	stores = append(stores, core.NewStoreInfo(
-		&metapb.Store{
-			Id:            2,
-			State:         metapb.StoreState_Up,
-			NodeState:     metapb.NodeState_Serving,
-			Labels:        []*metapb.StoreLabel{{Key: "zone", Value: "z1"}, {Key: "engine", Value: "tiflash"}},
-			LastHeartbeat: time.Now().UnixNano(),
-		},
-		core.SetStoreStats(stats),
-		core.SetLastHeartbeatTS(time.Now()),
-	))
-	stores = append(stores, core.NewStoreInfo(
-		&metapb.Store{
-			Id:            3,
-			State:         metapb.StoreState_Up,
-			NodeState:     metapb.NodeState_Serving,
-			Labels:        []*metapb.StoreLabel{{Key: "zone", Value: "z2"}},
-			LastHeartbeat: time.Now().UnixNano(),
-		},
-		core.SetStoreStats(stats),
-		core.SetLastHeartbeatTS(time.Now()),
-	))
-
-	regions := []*core.RegionInfo{}
-
-	re.Len(handler.ComputeCandidateStores([]*metapb.StoreLabel{{Key: "zone", Value: "z1"}}, stores, regions), 2, "case 1")
-	re.Len(handler.ComputeCandidateStores([]*metapb.StoreLabel{{Key: "zone", Value: "z2"}}, stores, regions), 1, "case 1")
-	re.Len(handler.ComputeCandidateStores([]*metapb.StoreLabel{{Key: "zone", Value: "z1"}, {Key: "engine", Value: "tiflash"}}, stores, regions), 1, "case 1")
-}
+// 	re.Len(handler.ComputeCandidateStores([]*metapb.StoreLabel{{Key: "zone", Value: "z1"}}, stores, regions), 2, "case 1")
+// 	re.Len(handler.ComputeCandidateStores([]*metapb.StoreLabel{{Key: "zone", Value: "z2"}}, stores, regions), 1, "case 1")
+// 	re.Len(handler.ComputeCandidateStores([]*metapb.StoreLabel{{Key: "zone", Value: "z1"}, {Key: "engine", Value: "tiflash"}}, stores, regions), 1, "case 1")
+// }

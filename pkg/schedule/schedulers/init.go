@@ -15,17 +15,19 @@
 package schedulers
 
 import (
+	"encoding/hex"
 	"encoding/json"
-	"net/url"
 	"strconv"
 	"strings"
 	"sync"
 
+	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/storage/endpoint"
+	"go.uber.org/zap"
 )
 
 var registerOnce sync.Once
@@ -143,31 +145,48 @@ func schedulersRegister() {
 			if len(args) != 5 {
 				return errs.ErrSchedulerConfig.FastGenByArgs("Must provide `batchSize`, `labels`, `maxRunMillis`, `startKey`, `endKey`")
 			}
-			b, err := strconv.ParseUint(args[0], 10, 64)
-			if err != nil {
-				return errs.ErrQueryUnescape.Wrap(err)
+			log.Info("!!!! BalanceKeyrangeScheduler 1")
+			if args[0] != "" {
+				b, err := strconv.ParseUint(args[0], 10, 64)
+				if err != nil {
+					return errs.ErrQueryUnescape.Wrap(err)
+				}
+				conf.BatchSize = b
+			} else {
+				conf.BatchSize = 5
 			}
-			conf.BatchSize = b
+			log.Info("!!!! BalanceKeyrangeScheduler 2")
 			if args[1] != "" {
-				err = json.Unmarshal([]byte(args[1]), &conf.RequiredLabels)
+				err := json.Unmarshal([]byte(args[1]), &conf.RequiredLabels)
+				if err != nil {
+					return errs.ErrQueryUnescape.Wrap(err)
+				}
 			}
+			log.Info("!!!! BalanceKeyrangeScheduler 22", zap.Any("z", conf.RequiredLabels))
+			log.Info("!!!! BalanceKeyrangeScheduler 3")
+			if args[2] != "" {
+				mr, err := strconv.ParseInt(args[2], 10, 64)
+				if err != nil {
+					return errs.ErrQueryUnescape.Wrap(err)
+				}
+				conf.MaxRunMillis = mr
+			} else {
+				conf.MaxRunMillis = 5 * 60 * 1000
+			}
+			log.Info("!!!! BalanceKeyrangeScheduler 4", zap.Any("s", args[3]))
+			startKey, err := hex.DecodeString(args[3])
+			log.Info("!!!! BalanceKeyrangeScheduler 44", zap.Any("s", startKey))
 			if err != nil {
 				return errs.ErrQueryUnescape.Wrap(err)
 			}
-			mr, err := strconv.ParseInt(args[2], 10, 64)
+			log.Info("!!!! BalanceKeyrangeScheduler 5", zap.Any("s", args[4]))
+			endKey, err := hex.DecodeString(args[4])
+			log.Info("!!!! BalanceKeyrangeScheduler 44", zap.Any("s", endKey))
 			if err != nil {
 				return errs.ErrQueryUnescape.Wrap(err)
 			}
-			conf.MaxRunMillis = mr
-			startKey, err := url.QueryUnescape(args[3])
-			if err != nil {
-				return errs.ErrQueryUnescape.Wrap(err)
-			}
-			endKey, err := url.QueryUnescape(args[4])
-			if err != nil {
-				return errs.ErrQueryUnescape.Wrap(err)
-			}
-			conf.Range = core.NewKeyRange(startKey, endKey)
+			log.Info("!!!! BalanceKeyrangeScheduler 6")
+			conf.Range = core.KeyRange{StartKey: startKey, EndKey: endKey}
 			return nil
 		}
 	})

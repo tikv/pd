@@ -18,7 +18,6 @@ import (
 	"bytes"
 	"cmp"
 	"fmt"
-	"runtime"
 	"slices"
 	"time"
 
@@ -49,7 +48,7 @@ type MigrationOp struct {
 	Regions      map[uint64]bool `json:"regions"`
 }
 
-func PickRegions(n int, fromStore *StoreRegionSet, toStore *StoreRegionSet) *MigrationOp {
+func pickRegions(n int, fromStore *StoreRegionSet, toStore *StoreRegionSet) *MigrationOp {
 	o := MigrationOp{
 		FromStore:   fromStore.ID,
 		ToStore:     toStore.ID,
@@ -138,7 +137,7 @@ func BuildMigrationPlan(stores []*StoreRegionSet) ([]int, []int, []*MigrationOp,
 					}
 					receiversVolume[j] -= n
 					sendersVolume[i] -= n
-					op := PickRegions(n, fromStore, toStore)
+					op := pickRegions(n, fromStore, toStore)
 					movements += len(op.Regions)
 					log.Info("!!!!!! pick result", zap.Any("from", fromStore.ID), zap.Any("to", toStore.ID), zap.Any("region", op.Regions))
 					ops = append(ops, op)
@@ -225,6 +224,9 @@ func RedistibuteRegions(c sche.SchedulerCluster, startKey, endKey []byte, requir
 	senders, receivers, ops, movements := BuildMigrationPlan(candidates)
 
 	log.Info("Migration plan details", zap.Any("startKey", startKey), zap.Any("endKey", endKey), zap.Any("senders", senders), zap.Any("receivers", receivers), zap.Any("movements", movements), zap.Any("ops", ops), zap.Any("stores", stores), zap.Any("candidates", len(candidates)))
+	for _, m := range ops {
+		log.Info("!!!! Migration", zap.Any("ops", m))
+	}
 
 	operators := make([]*operator.Operator, 0)
 	for _, op := range ops {
@@ -233,7 +235,7 @@ func RedistibuteRegions(c sche.SchedulerCluster, startKey, endKey []byte, requir
 			log.Debug("Create balace region op", zap.Uint64("from", op.FromStore), zap.Uint64("to", op.ToStore), zap.Uint64("region_id", rid))
 			o, err := operator.CreateMovePeerOperator("balance-keyrange", c, regionIDMap[rid], operator.OpReplica, op.FromStore, newPeer)
 			if err != nil {
-				log.Info("!!!! err balace region op", zap.Uint64("from", op.FromStore), zap.Uint64("to", op.ToStore), zap.Uint64("region_id", rid))
+				log.Info("Failed to schedule operator", zap.Any("startKey", startKey), zap.Any("endKey", endKey), zap.Any("op", o), zap.Error(err))
 				return buildErrorMigrationPlan(), err
 			}
 			operators = append(operators, o)
@@ -317,25 +319,26 @@ func (s *balanceKeyrangeScheduler) IsTimeout() bool {
 	return time.Since(s.StartTime).Microseconds() > s.conf.MaxRunMillis
 }
 
-func getStackTrace() string {
-	var buffer [4096]byte
-	n := runtime.Stack(buffer[:], false)
-	return string(buffer[:n])
-}
-
 // Schedule implements the Scheduler interface.
 func (s *balanceKeyrangeScheduler) Schedule(cluster sche.SchedulerCluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
 	balanceKeyrangeScheduleCounter.Inc()
-	log.Error("!!!!! ScheduleSchedule", zap.Any("s", getStackTrace()))
+	log.Info("!!!! balanceKeyrangeScheduler called", zap.Any("StartTime", s.StartTime))
 
 	doShutdown := func() {
 		s.migrationPlan = nil
 		if s.conf.removeSchedulerCb != nil {
-			s.conf.removeSchedulerCb(string(types.BalanceKeyrangeScheduler))
+			s.conf.removeSchedulerCb(types.BalanceKeyrangeScheduler.String())
 		}
 	}
 
-	// TODO If the scheduler is scheduled from when bootstrapping, it will cause a extra scehdule on "", ""
+	// When a pd cluster is bootstrapping, it should not create this scheduler.
+	// However, in order to prevent a wrong operation which could also be from outside pd, we reject a schedule of a universal key-range.
+	if len(s.conf.Range.StartKey) == 0 && len(s.conf.Range.EndKey) == 0 {
+		log.Debug("Invalid keyrange", zap.ByteString("startKey", s.conf.Range.StartKey), zap.ByteString("endtartKey", s.conf.Range.EndKey), zap.Any("StartTime", s.StartTime))
+		doShutdown()
+		return []*operator.Operator{}, []plan.Plan{}
+	}
+
 	rangeChanged := true
 	if s.migrationPlan != nil {
 		// If there is a ongoing schedule,

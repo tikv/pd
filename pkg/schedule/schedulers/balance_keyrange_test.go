@@ -17,12 +17,10 @@ package schedulers
 import (
 	"context"
 	"fmt"
-	"net/url"
 	"testing"
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pingcap/log"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/core"
@@ -33,7 +31,6 @@ import (
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/utils/operatorutil"
 	"github.com/tikv/pd/pkg/versioninfo"
-	"go.uber.org/zap"
 )
 
 type balanceKeyrangeSchedulerTestSuite struct {
@@ -63,9 +60,9 @@ func (suite *balanceKeyrangeSchedulerTestSuite) TestBalanceKeyrangeNormal() {
 	defer cancel()
 	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 
-	sb, err := CreateScheduler(types.BalanceKeyrangeScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.BalanceKeyrangeScheduler, []string{"1", "", "100000", "", ""}))
-	re.NoError(err)
-
+	// 10: 1 2 3
+	// 11: 1 2
+	// 12: 3
 	tc.AddLabelsStore(10, 16, map[string]string{"engine": "tiflash"})
 	tc.AddLabelsStore(11, 16, map[string]string{})
 	tc.AddLabelsStore(12, 16, map[string]string{})
@@ -74,22 +71,25 @@ func (suite *balanceKeyrangeSchedulerTestSuite) TestBalanceKeyrangeNormal() {
 	tc.AddLeaderRegion(2, 10, 11)
 	tc.AddLeaderRegion(3, 10, 12)
 
+	// See MockRegionInfo.
+	r1StartKey := string(tc.GetRegion(1).GetMeta().GetStartKey())
+	r2StartKey := string(tc.GetRegion(2).GetMeta().GetStartKey())
+	r3EndKey := string(tc.GetRegion(3).GetMeta().GetEndKey())
+	sb, err := CreateScheduler(types.BalanceKeyrangeScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.BalanceKeyrangeScheduler, []string{"1", "", "100000", r1StartKey, r3EndKey}))
+	re.NoError(err)
+
 	ops, _ := sb.Schedule(tc, false)
 	re.True(sb.IsFinished())
+	re.NotEmpty(ops)
 	op := ops[0]
 	operatorutil.CheckTransferPeer(re, op, operator.OpKind(0), 10, 12)
 
-	sb, err = CreateScheduler(types.BalanceKeyrangeScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.BalanceKeyrangeScheduler, []string{"1", "", "100000", url.QueryEscape("11"), ""}))
+	sb, err = CreateScheduler(types.BalanceKeyrangeScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.BalanceKeyrangeScheduler, []string{"1", "", "100000", r2StartKey, r3EndKey}))
 	ops, _ = sb.Schedule(tc, false)
 	re.True(sb.IsFinished())
 	re.Empty(ops)
 
-	sb, err = CreateScheduler(types.BalanceKeyrangeScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.BalanceKeyrangeScheduler, []string{"1", "", "", "100000", url.QueryEscape("21")}))
-	ops, _ = sb.Schedule(tc, false)
-	re.True(sb.IsFinished())
-	re.Empty(ops)
-
-	sb, err = CreateScheduler(types.BalanceKeyrangeScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.BalanceKeyrangeScheduler, []string{"1", "[{\"key\":\"engine\",\"value\":\"tiflash\"}]", "100000", "", ""}))
+	sb, err = CreateScheduler(types.BalanceKeyrangeScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.BalanceKeyrangeScheduler, []string{"1", "[{\"key\":\"engine\",\"value\":\"tiflash\"}]", "100000", r1StartKey, r3EndKey}))
 	ops, _ = sb.Schedule(tc, false)
 	re.True(sb.IsFinished())
 	re.Empty(ops)
@@ -112,15 +112,14 @@ func (suite *balanceKeyrangeSchedulerTestSuite) TestBalanceKeyrangeLabel() {
 	tc.AddLeaderRegion(4, 10, 11)
 	tc.AddLeaderRegion(5, 10, 12)
 
-	sb, err := CreateScheduler(types.BalanceKeyrangeScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.BalanceKeyrangeScheduler, []string{"5", "[{\"key\":\"engine\",\"value\":\"tiflash\"}]", "100000", "", ""}))
+	sb, err := CreateScheduler(types.BalanceKeyrangeScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.BalanceKeyrangeScheduler, []string{"5", "[{\"key\":\"engine\",\"value\":\"tiflash\"}]", "100000", "", "Z"}))
 	re.NoError(err)
 
 	ops, _ := sb.Schedule(tc, false)
 	re.Equal(2, len(ops))
 
-	sb, err = CreateScheduler(types.BalanceKeyrangeScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.BalanceKeyrangeScheduler, []string{"5", "[{\"key\":\"engine\",\"value\":\"tiflash\"},{\"label1\": \"value1\"}]", "100000", "", ""}))
+	sb, err = CreateScheduler(types.BalanceKeyrangeScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.BalanceKeyrangeScheduler, []string{"5", "[{\"key\":\"engine\",\"value\":\"tiflash\"},{\"label1\": \"value1\"}]", "100000", "", "Z"}))
 	re.NoError(err)
-
 	ops, _ = sb.Schedule(tc, false)
 	re.Empty(ops)
 }
@@ -132,7 +131,7 @@ func (suite *balanceKeyrangeSchedulerTestSuite) TestBalanceKeyrangeFinish() {
 	defer cancel()
 	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 
-	sb, err := CreateScheduler(types.BalanceKeyrangeScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.BalanceKeyrangeScheduler, []string{"1", "", "100000", "", ""}))
+	sb, err := CreateScheduler(types.BalanceKeyrangeScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.BalanceKeyrangeScheduler, []string{"1", "", "100000", "", "Z"}))
 	re.NoError(err)
 
 	tc.AddLabelsStore(10, 16, map[string]string{"engine": "tiflash"})
@@ -153,13 +152,14 @@ func (suite *balanceKeyrangeSchedulerTestSuite) TestBalanceKeyrangeFinish() {
 	// store 10: 3 4 5 6
 	// store 11: 1 2 3 4
 	// store 12: 1 2 5 6
+	// 3 ops in total.
 
 	sb.Schedule(tc, false)
 	re.False(sb.IsFinished())
 	sb.Schedule(tc, false)
 	re.False(sb.IsFinished())
 	sb.Schedule(tc, false)
-	re.True(sb.IsFinished())
+	re.True(sb.IsFinished()) // the third and last op.
 	sb.Schedule(tc, false)
 	sb.Schedule(tc, false)
 }
@@ -175,7 +175,7 @@ func (suite *balanceKeyrangeSchedulerTestSuite) TestBalanceKeyrangeConfTimeout()
 	defer cancel()
 	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 
-	sb, err := CreateScheduler(types.BalanceKeyrangeScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.BalanceKeyrangeScheduler, []string{"1", "", "1000", "", ""}))
+	sb, err := CreateScheduler(types.BalanceKeyrangeScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.BalanceKeyrangeScheduler, []string{"1", "", "1000", "", "Z"}))
 	re.NoError(err)
 
 	tc.AddLabelsStore(10, 16, map[string]string{"engine": "tiflash"})
@@ -196,7 +196,7 @@ func (suite *balanceKeyrangeSchedulerTestSuite) TestBalanceKeyrangeConfTimeout()
 	re.True(sb.IsFinished())
 }
 
-func assertvalidateMigrationPlan(re *require.Assertions, ops []*MigrationOp, storeIDs []uint64, regions []*core.RegionInfo, storeCounts []int) {
+func assertValidateMigrationPlan(re *require.Assertions, ops []*MigrationOp, storeIDs []uint64, regions []*core.RegionInfo, storeCounts []int) {
 	storesIn := make(map[uint64]int)
 	storesOut := make(map[uint64]int)
 	regionMap := make(map[uint64]*core.RegionInfo)
@@ -208,7 +208,6 @@ func assertvalidateMigrationPlan(re *require.Assertions, ops []*MigrationOp, sto
 		regionMap[r.GetID()] = r
 	}
 	for _, op := range ops {
-		log.Info("!!! r", zap.Any("to", op.ToStore), zap.Any("fr", op.FromStore))
 		storesIn[op.ToStore] += len(op.Regions)
 		storesOut[op.FromStore] += len(op.Regions)
 		// For each region in migration plan, it no longer exists in FromStore, and exists in ToStore
@@ -234,7 +233,6 @@ func assertvalidateMigrationPlan(re *require.Assertions, ops []*MigrationOp, sto
 		in := storesIn[storeId]
 		out := storesOut[storeId]
 		re.True(in == 0 || out == 0)
-		log.Info("!!! f", zap.Any("storeId", storeId), zap.Any("in", in), zap.Any("out", out))
 		storeList = append(storeList, in-out)
 	}
 	re.Equal(storeCounts, storeList)
@@ -246,14 +244,40 @@ type regionStoresPair struct {
 }
 
 func buildRedistributeRegionsTestCases(storeIDs []uint64, regionDist []regionStoresPair) ([]*metapb.Store, []*core.RegionInfo) {
+	storeIdLabels := []uint64{}
+	for _ = range storeIDs {
+		storeIdLabels = append(storeIdLabels, 0)
+	}
+	return buildRedistributeRegionsTestCasesWithLabel(storeIDs, storeIdLabels, regionDist)
+}
+
+func buildRedistributeRegionsTestCasesWithLabel(storeIDs []uint64, storeIdLabels []uint64, regionDist []regionStoresPair) ([]*metapb.Store, []*core.RegionInfo) {
+	tiflashLabel := metapb.StoreLabel{
+		Key:   "engine",
+		Value: "tiflash",
+	}
+	someOtherLabel := metapb.StoreLabel{
+		Key:   "label1",
+		Value: "value1",
+	}
 	stores := []*metapb.Store{}
 	regions := []*core.RegionInfo{}
-	for _, i := range storeIDs {
+	for index, i := range storeIDs {
+		labels := []*metapb.StoreLabel{}
+		if storeIdLabels[index] == 1 {
+			labels = append(labels, &tiflashLabel)
+		} else if storeIdLabels[index] == 2 {
+			labels = append(labels, &someOtherLabel)
+		} else if storeIdLabels[index] == 3 {
+			labels = append(labels, &tiflashLabel)
+			labels = append(labels, &someOtherLabel)
+		}
 		stores = append(stores, &metapb.Store{
 			Id:            i,
 			State:         metapb.StoreState_Up,
 			NodeState:     metapb.NodeState_Serving,
 			LastHeartbeat: time.Now().UnixNano(),
+			Labels:        labels,
 		})
 	}
 
@@ -279,6 +303,10 @@ func buildRedistributeRegionsTestCases(storeIDs []uint64, regionDist []regionSto
 }
 
 func TestBalanceKeyrangeAlgorithm(t *testing.T) {
+	tiflashLabel := metapb.StoreLabel{
+		Key:   "engine",
+		Value: "tiflash",
+	}
 	re := require.New(t)
 	// 10: 1 2 3
 	// 11:
@@ -291,7 +319,18 @@ func TestBalanceKeyrangeAlgorithm(t *testing.T) {
 	})
 	s := ComputeCandidateStores([]*metapb.StoreLabel{}, stores, regions)
 	_, _, ops, _ := BuildMigrationPlan(s)
-	assertvalidateMigrationPlan(re, ops, storeIds, regions, []int{-2, 1, 1})
+	assertValidateMigrationPlan(re, ops, storeIds, regions, []int{-2, 1, 1})
+
+	// Same case which requires TiFlash label
+	storeIds = []uint64{10, 11, 12}
+	stores, regions = buildRedistributeRegionsTestCasesWithLabel(storeIds, []uint64{0, 1, 1}, []regionStoresPair{
+		{1, []uint64{0}},
+		{2, []uint64{0}},
+		{3, []uint64{0}},
+	})
+	s = ComputeCandidateStores([]*metapb.StoreLabel{&tiflashLabel}, stores, regions)
+	_, _, ops, _ = BuildMigrationPlan(s)
+	assertValidateMigrationPlan(re, ops, storeIds, regions, []int{0, 0, 0})
 
 	// 10: 1 2 3 4 5 6
 	// 11: 1 2 3 4 5
@@ -307,7 +346,35 @@ func TestBalanceKeyrangeAlgorithm(t *testing.T) {
 	})
 	s = ComputeCandidateStores([]*metapb.StoreLabel{}, stores, regions)
 	_, _, ops, _ = BuildMigrationPlan(s)
-	assertvalidateMigrationPlan(re, ops, storeIds, regions, []int{-2, -1, 3})
+	assertValidateMigrationPlan(re, ops, storeIds, regions, []int{-2, -1, 3})
+
+	// Same case which requires TiFlash label
+	storeIds = []uint64{10, 11, 12}
+	stores, regions = buildRedistributeRegionsTestCasesWithLabel(storeIds, []uint64{0, 1, 1}, []regionStoresPair{
+		{1, []uint64{0, 1}},
+		{2, []uint64{0, 1}},
+		{3, []uint64{0, 1}},
+		{4, []uint64{0, 1}},
+		{5, []uint64{0, 1}},
+		{6, []uint64{0, 2}},
+	})
+	s = ComputeCandidateStores([]*metapb.StoreLabel{&tiflashLabel}, stores, regions)
+	_, _, ops, _ = BuildMigrationPlan(s)
+	assertValidateMigrationPlan(re, ops, storeIds, regions, []int{0, -2, 2})
+
+	// Same case which requires TiFlash label
+	storeIds = []uint64{10, 11, 12}
+	stores, regions = buildRedistributeRegionsTestCasesWithLabel(storeIds, []uint64{3, 1, 1}, []regionStoresPair{
+		{1, []uint64{0, 1}},
+		{2, []uint64{0, 1}},
+		{3, []uint64{0, 1}},
+		{4, []uint64{0, 1}},
+		{5, []uint64{0, 1}},
+		{6, []uint64{0, 2}},
+	})
+	s = ComputeCandidateStores([]*metapb.StoreLabel{&tiflashLabel}, stores, regions)
+	_, _, ops, _ = BuildMigrationPlan(s)
+	assertValidateMigrationPlan(re, ops, storeIds, regions, []int{-2, -1, 3})
 
 	// 10: 1 2
 	// 11: 2 3
@@ -320,7 +387,7 @@ func TestBalanceKeyrangeAlgorithm(t *testing.T) {
 	})
 	s = ComputeCandidateStores([]*metapb.StoreLabel{}, stores, regions)
 	_, _, ops, _ = BuildMigrationPlan(s)
-	assertvalidateMigrationPlan(re, ops, storeIds, regions, []int{0, 0, 0})
+	assertValidateMigrationPlan(re, ops, storeIds, regions, []int{0, 0, 0})
 
 	// 10: 1 2
 	// 11: 3
@@ -332,7 +399,7 @@ func TestBalanceKeyrangeAlgorithm(t *testing.T) {
 	})
 	s = ComputeCandidateStores([]*metapb.StoreLabel{}, stores, regions)
 	_, _, ops, _ = BuildMigrationPlan(s)
-	assertvalidateMigrationPlan(re, ops, storeIds, regions, []int{0, 0})
+	assertValidateMigrationPlan(re, ops, storeIds, regions, []int{0, 0})
 
 	// 10: 1
 	// 11:
@@ -343,7 +410,7 @@ func TestBalanceKeyrangeAlgorithm(t *testing.T) {
 	})
 	s = ComputeCandidateStores([]*metapb.StoreLabel{}, stores, regions)
 	_, _, ops, _ = BuildMigrationPlan(s)
-	assertvalidateMigrationPlan(re, ops, storeIds, regions, []int{0, 0, 0})
+	assertValidateMigrationPlan(re, ops, storeIds, regions, []int{0, 0, 0})
 
 	// 10:
 	// 11:
@@ -352,7 +419,7 @@ func TestBalanceKeyrangeAlgorithm(t *testing.T) {
 	stores, regions = buildRedistributeRegionsTestCases(storeIds, []regionStoresPair{})
 	s = ComputeCandidateStores([]*metapb.StoreLabel{}, stores, regions)
 	_, _, ops, _ = BuildMigrationPlan(s)
-	assertvalidateMigrationPlan(re, ops, storeIds, regions, []int{0, 0, 0})
+	assertValidateMigrationPlan(re, ops, storeIds, regions, []int{0, 0, 0})
 
 	// 10: 1 2 3 4 5
 	// 11: 1 2 3 4 5
@@ -367,7 +434,35 @@ func TestBalanceKeyrangeAlgorithm(t *testing.T) {
 	})
 	s = ComputeCandidateStores([]*metapb.StoreLabel{}, stores, regions)
 	_, _, ops, _ = BuildMigrationPlan(s)
-	assertvalidateMigrationPlan(re, ops, storeIds, regions, []int{-1, -2, 3})
+	assertValidateMigrationPlan(re, ops, storeIds, regions, []int{-1, -2, 3})
+
+	// Same case which requires TiFlash label
+	storeIds = []uint64{10, 11, 12}
+	stores, regions = buildRedistributeRegionsTestCasesWithLabel(storeIds, []uint64{0, 1, 1}, []regionStoresPair{
+		{1, []uint64{0, 1}},
+		{2, []uint64{0, 1}},
+		{3, []uint64{0, 1}},
+		{4, []uint64{0, 1}},
+		{5, []uint64{0, 1}},
+		{6, []uint64{0, 2}},
+	})
+	s = ComputeCandidateStores([]*metapb.StoreLabel{&tiflashLabel}, stores, regions)
+	_, _, ops, _ = BuildMigrationPlan(s)
+	assertValidateMigrationPlan(re, ops, storeIds, regions, []int{0, -2, 2})
+
+	// Same case which requires TiFlash label
+	storeIds = []uint64{10, 11, 12}
+	stores, regions = buildRedistributeRegionsTestCasesWithLabel(storeIds, []uint64{3, 1, 1}, []regionStoresPair{
+		{1, []uint64{0, 1}},
+		{2, []uint64{0, 1}},
+		{3, []uint64{0, 1}},
+		{4, []uint64{0, 1}},
+		{5, []uint64{0, 1}},
+		{6, []uint64{0, 2}},
+	})
+	s = ComputeCandidateStores([]*metapb.StoreLabel{&tiflashLabel}, stores, regions)
+	_, _, ops, _ = BuildMigrationPlan(s)
+	assertValidateMigrationPlan(re, ops, storeIds, regions, []int{-2, -1, 3})
 
 	// 10: 1 2 3 4 5
 	// 11: 1 2 3 4 5
@@ -381,7 +476,7 @@ func TestBalanceKeyrangeAlgorithm(t *testing.T) {
 	})
 	s = ComputeCandidateStores([]*metapb.StoreLabel{}, stores, regions)
 	_, _, ops, _ = BuildMigrationPlan(s)
-	assertvalidateMigrationPlan(re, ops, storeIds, regions, []int{0, 0})
+	assertValidateMigrationPlan(re, ops, storeIds, regions, []int{0, 0})
 
 	// 10:
 	// 11: 1 2 3 4 5 6 7 8 9
@@ -401,7 +496,7 @@ func TestBalanceKeyrangeAlgorithm(t *testing.T) {
 	})
 	s = ComputeCandidateStores([]*metapb.StoreLabel{}, stores, regions)
 	_, _, ops, _ = BuildMigrationPlan(s)
-	assertvalidateMigrationPlan(re, ops, storeIds, regions, []int{4, -4, 4, -4})
+	assertValidateMigrationPlan(re, ops, storeIds, regions, []int{4, -4, 4, -4})
 
 	// Won't happen, since regions with in a table have the same replica count, however, test it in case.
 	// 10: 1 2 3 4 5
@@ -417,7 +512,7 @@ func TestBalanceKeyrangeAlgorithm(t *testing.T) {
 	})
 	s = ComputeCandidateStores([]*metapb.StoreLabel{}, stores, regions)
 	_, _, ops, _ = BuildMigrationPlan(s)
-	assertvalidateMigrationPlan(re, ops, storeIds, regions, []int{-2, 0, 2})
+	assertValidateMigrationPlan(re, ops, storeIds, regions, []int{-2, 0, 2})
 
 	// Won't happen
 	// 10: 1 2 3
@@ -434,7 +529,7 @@ func TestBalanceKeyrangeAlgorithm(t *testing.T) {
 	})
 	s = ComputeCandidateStores([]*metapb.StoreLabel{}, stores, regions)
 	_, _, ops, _ = BuildMigrationPlan(s)
-	assertvalidateMigrationPlan(re, ops, storeIds, regions, []int{-1, -1, 2})
+	assertValidateMigrationPlan(re, ops, storeIds, regions, []int{-1, -1, 2})
 
 	// Won't happen because a region can't have two peers in a store.
 	// 10: 1 1
@@ -447,5 +542,5 @@ func TestBalanceKeyrangeAlgorithm(t *testing.T) {
 	})
 	s = ComputeCandidateStores([]*metapb.StoreLabel{}, stores, regions)
 	_, _, ops, _ = BuildMigrationPlan(s)
-	assertvalidateMigrationPlan(re, ops, storeIds, regions, []int{0, 0, 0})
+	assertValidateMigrationPlan(re, ops, storeIds, regions, []int{0, 0, 0})
 }

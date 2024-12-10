@@ -42,6 +42,7 @@ import (
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/statistics/buckets"
 	"github.com/tikv/pd/pkg/statistics/utils"
+	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"go.uber.org/zap"
 )
@@ -1299,6 +1300,48 @@ func (h *Handler) CheckRegionsReplicated(rawStartKey, rawEndKey string) (string,
 		}
 	})
 	return state, nil
+}
+
+// RedistibuteRegions
+func (h *Handler) RedistibuteRegions(rawStartKey, rawEndKey, requireLabels, timeout, batchSize string) (string, error) {
+	sc, err := h.GetSchedulersController()
+	if err != nil {
+		return "", err
+	}
+
+	log.Info("!!!!! RedistibuteRegions check 1")
+	exist, err := sc.IsSchedulerExisted(types.BalanceKeyrangeScheduler.String())
+	if exist {
+		return "Already existed", errs.ErrSchedulerExisted.FastGenByArgs()
+	}
+	log.Info("!!!!! RedistibuteRegions check 2")
+	oc := h.GetCoordinator().GetOperatorController()
+	controller := h.GetCoordinator().GetSchedulersController()
+	cb := func(s string) error {
+		return controller.RemoveScheduler(s)
+	}
+	log.Info("!!!!! RedistibuteRegions check 3")
+	s, err := schedulers.CreateScheduler(types.BalanceKeyrangeScheduler, oc, storage.NewStorageWithMemoryBackend(), schedulers.ConfigSliceDecoder(types.BalanceKeyrangeScheduler, []string{batchSize, requireLabels, timeout, rawStartKey, rawEndKey}), cb)
+	if err != nil {
+		return "Created scheduler failed", err
+	}
+	log.Info("!!!!! RedistibuteRegions check 4")
+	if err = controller.AddScheduler(s); err != nil {
+		return "Add scheduler failed", err
+	}
+	return "Scheduler added successfully", nil
+}
+
+func (h *Handler) CheckRedistibuteRegionsStatus() (string, error) {
+	sc, err := h.GetSchedulersController()
+	if err != nil {
+		return "", err
+	}
+	s := sc.GetScheduler(types.BalanceKeyrangeScheduler.String())
+	if s == nil {
+		return "No scheduled", nil
+	}
+	return "Scheduling", nil
 }
 
 // GetRuleManager returns the rule manager.

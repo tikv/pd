@@ -16,16 +16,18 @@ package api
 
 import (
 	"container/heap"
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/url"
+	"reflect"
 	"sort"
 	"strconv"
 	"strings"
 
 	"github.com/gorilla/mux"
 	"github.com/pingcap/errors"
-	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/keyspace"
@@ -35,6 +37,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/server"
 	"github.com/unrolled/render"
+	"go.uber.org/zap"
 )
 
 type regionHandler struct {
@@ -131,10 +134,49 @@ func (h *regionsHandler) CheckRegionsReplicated(w http.ResponseWriter, r *http.R
 
 func (h *regionsHandler) RedistibuteRegions(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
-	rawStartKey := vars["startKey"]
-	rawEndKey := vars["endKey"]
-	storeLabels := make([]*metapb.StoreLabel, 0)
-	result, err := h.Handler.RedistibuteRegions(rawStartKey, rawEndKey, storeLabels)
+
+	var input map[string]any
+	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &input); err != nil {
+		return
+	}
+	rawStartKey, ok := input["start_key"].(string)
+	if !ok {
+		rawStartKey = ""
+	}
+	rawEndKey, ok := input["end_key"].(string)
+	if !ok {
+		rawEndKey = ""
+	}
+	requireLabelsJson, ok := input["required_labels"]
+	log.Info("!!!! dddd", zap.Any("a", reflect.TypeOf(requireLabelsJson)), zap.Any("b", reflect.TypeOf(requireLabelsJson).Kind()), zap.Any("c", requireLabelsJson))
+	if !ok {
+		requireLabelsJson = ""
+	}
+	requireLabels, err := json.Marshal(requireLabelsJson)
+	if err != nil {
+		log.Info("!!!! dddd eee")
+		requireLabelsJson = ""
+	}
+	timeout, ok := input["timeout"].(string)
+	if !ok {
+		timeout = ""
+	}
+	batchSize, ok := input["batch_size"].(string)
+	if !ok {
+		batchSize = ""
+	}
+
+	log.Info("!!!!! RedistibuteRegions called", zap.Any("vars", vars), zap.Any("rawStartKey", rawStartKey))
+	result, err := h.Handler.RedistibuteRegions(rawStartKey, rawEndKey, string(requireLabels), timeout, batchSize)
+	if err != nil {
+		h.rd.JSON(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	h.rd.JSON(w, http.StatusOK, result)
+}
+
+func (h *regionsHandler) CheckRedistibuteRegionsStatus(w http.ResponseWriter, r *http.Request) {
+	result, err := h.Handler.CheckRedistibuteRegionsStatus()
 	if err != nil {
 		h.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return

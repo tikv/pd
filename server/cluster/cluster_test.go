@@ -64,7 +64,6 @@ import (
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/server/config"
-	"go.uber.org/zap"
 )
 
 func TestStoreHeartbeat(t *testing.T) {
@@ -3999,18 +3998,28 @@ func TestAddKeyrangeScheduler(t *testing.T) {
 	oc := co.GetOperatorController()
 
 	cb := func(s string) error {
-		log.Info("!!!!! RemoveScheduler", zap.Any("s", s))
 		return controller.RemoveScheduler(s)
 	}
 
-	s, err := schedulers.CreateScheduler(types.BalanceKeyrangeScheduler, oc, storage.NewStorageWithMemoryBackend(), schedulers.ConfigSliceDecoder(types.BalanceKeyrangeScheduler, []string{"1", "", "1000", "", ""}), cb)
-	log.Info("!!!!! AddScheduler", zap.Any("interval", s.GetMinInterval()))
+	/// Test if a scheduler can timeout.
+	s, err := schedulers.CreateScheduler(types.BalanceKeyrangeScheduler, oc, storage.NewStorageWithMemoryBackend(), schedulers.ConfigSliceDecoder(types.BalanceKeyrangeScheduler, []string{"1", "", "1000", "", "Z"}), cb)
 	re.NoError(err)
 	re.NoError(controller.AddScheduler(s))
 	// The scheduler timeout.
-	time.Sleep(time.Second * 2)
+	time.Sleep(time.Second * 3)
 	re.True(s.IsFinished())
-	// log.Info("!!!! GetInterval", zap.Any("Interval", controller.Get))
-	time.Sleep(time.Second * 10)
-	panic(1)
+
+	/// Test if a scheduler can be deleted.
+	s2, err := schedulers.CreateScheduler(types.BalanceKeyrangeScheduler, oc, storage.NewStorageWithMemoryBackend(), schedulers.ConfigSliceDecoder(types.BalanceKeyrangeScheduler, []string{"1", "", "1000", "", "Z"}), cb)
+	re.NoError(err)
+	re.NoError(controller.AddScheduler(s2))
+	re.NoError(controller.RemoveScheduler(types.BalanceKeyrangeScheduler.String()))
+	n := controller.GetScheduler(types.BalanceKeyrangeScheduler.String())
+	re.True(n == nil)
+
+	/// Test if this scheduler is singular.
+	s3, err := schedulers.CreateScheduler(types.BalanceKeyrangeScheduler, oc, storage.NewStorageWithMemoryBackend(), schedulers.ConfigSliceDecoder(types.BalanceKeyrangeScheduler, []string{"1", "", "1000", "", "Z"}), cb)
+	s4, err := schedulers.CreateScheduler(types.BalanceKeyrangeScheduler, oc, storage.NewStorageWithMemoryBackend(), schedulers.ConfigSliceDecoder(types.BalanceKeyrangeScheduler, []string{"1", "", "1000", "", "Z"}), cb)
+	re.NoError(controller.AddScheduler(s3))
+	re.Error(controller.AddScheduler(s4), "[PD:scheduler:ErrSchedulerExisted]scheduler existed")
 }
