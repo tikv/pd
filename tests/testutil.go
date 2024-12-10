@@ -277,8 +277,8 @@ const (
 	Both SchedulerMode = iota
 	// PDMode represents PD mode.
 	PDMode
-	// APIMode represents API mode.
-	APIMode
+	// KeyspaceMode represents keyspace mode.
+	KeyspaceMode
 )
 
 // SchedulingTestEnvironment is used for test purpose.
@@ -301,16 +301,16 @@ func NewSchedulingTestEnvironment(t *testing.T, opts ...ConfigOption) *Schedulin
 }
 
 // RunTestBasedOnMode runs test based on mode.
-// If mode not set, it will run test in both PD mode and API mode.
+// If mode not set, it will run test in both PD mode and keyspace mode.
 func (s *SchedulingTestEnvironment) RunTestBasedOnMode(test func(*TestCluster)) {
 	switch s.RunMode {
 	case PDMode:
 		s.RunTestInPDMode(test)
-	case APIMode:
-		s.RunTestInAPIMode(test)
+	case KeyspaceMode:
+		s.RunTestInKeyspaceMode(test)
 	default:
 		s.RunTestInPDMode(test)
-		s.RunTestInAPIMode(test)
+		s.RunTestInKeyspaceMode(test)
 	}
 }
 
@@ -337,8 +337,8 @@ func getTestName() string {
 	return ""
 }
 
-// RunTestInAPIMode is to run test in api mode.
-func (s *SchedulingTestEnvironment) RunTestInAPIMode(test func(*TestCluster)) {
+// RunTestInKeyspace is to run test with keyspace.
+func (s *SchedulingTestEnvironment) RunTestInKeyspaceMode(test func(*TestCluster)) {
 	re := require.New(s.t)
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs", `return(true)`))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/mcs/scheduling/server/fastUpdateMember", `return(true)`))
@@ -346,11 +346,11 @@ func (s *SchedulingTestEnvironment) RunTestInAPIMode(test func(*TestCluster)) {
 		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/scheduling/server/fastUpdateMember"))
 		re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs"))
 	}()
-	s.t.Logf("start test %s in api mode", getTestName())
-	if _, ok := s.clusters[APIMode]; !ok {
-		s.startCluster(APIMode)
+	s.t.Logf("start test %s with keyspace", getTestName())
+	if _, ok := s.clusters[KeyspaceMode]; !ok {
+		s.startCluster(KeyspaceMode)
 	}
-	test(s.clusters[APIMode])
+	test(s.clusters[KeyspaceMode])
 }
 
 // Cleanup is to cleanup the environment.
@@ -377,8 +377,8 @@ func (s *SchedulingTestEnvironment) startCluster(m SchedulerMode) {
 		leaderServer := cluster.GetServer(cluster.GetLeader())
 		re.NoError(leaderServer.BootstrapCluster())
 		s.clusters[PDMode] = cluster
-	case APIMode:
-		cluster, err := NewTestAPICluster(ctx, 1, s.opts...)
+	case KeyspaceMode:
+		cluster, err := NewTestClusterWithKeyspace(ctx, 1, s.opts...)
 		re.NoError(err)
 		err = cluster.RunInitialServers()
 		re.NoError(err)
@@ -396,7 +396,7 @@ func (s *SchedulingTestEnvironment) startCluster(m SchedulerMode) {
 		testutil.Eventually(re, func() bool {
 			return cluster.GetLeaderServer().GetServer().IsServiceIndependent(constant.SchedulingServiceName)
 		})
-		s.clusters[APIMode] = cluster
+		s.clusters[KeyspaceMode] = cluster
 	}
 }
 
