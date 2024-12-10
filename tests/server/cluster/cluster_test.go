@@ -646,8 +646,10 @@ func TestRaftClusterStartTSOJob(t *testing.T) {
 	leaderServer := tc.GetLeaderServer()
 	re.NotNil(leaderServer)
 	leaderServer.BootstrapCluster()
-	allocator := tc.GetServer(name).GetServer().GetGlobalTSOAllocator()
-	re.True(allocator.IsInitialize())
+	testutil.Eventually(re, func() bool {
+		allocator := tc.GetServer(name).GetServer().GetGlobalTSOAllocator()
+		return allocator.IsInitialize()
+	})
 	tc.Destroy()
 	cancel()
 	// case 2: return ahead of time but no error when start raft cluster
@@ -660,8 +662,10 @@ func TestRaftClusterStartTSOJob(t *testing.T) {
 	err = tc.RunInitialServers()
 	re.NoError(err)
 	tc.WaitLeader()
-	allocator = tc.GetServer(name).GetServer().GetGlobalTSOAllocator()
-	re.False(allocator.IsInitialize())
+	testutil.Eventually(re, func() bool {
+		allocator := tc.GetServer(name).GetServer().GetGlobalTSOAllocator()
+		return !allocator.IsInitialize()
+	})
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/raftClusterReturn"))
 	tc.Destroy()
 	cancel()
@@ -675,10 +679,43 @@ func TestRaftClusterStartTSOJob(t *testing.T) {
 	err = tc.RunInitialServers()
 	re.NoError(err)
 	tc.WaitLeader()
-	allocator = tc.GetServer(name).GetServer().GetGlobalTSOAllocator()
-	re.NoError(err)
-	re.False(allocator.IsInitialize())
+	testutil.Eventually(re, func() bool {
+		allocator := tc.GetServer(name).GetServer().GetGlobalTSOAllocator()
+		return !allocator.IsInitialize()
+	})
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/raftClusterReturn"))
+	tc.Destroy()
+	cancel()
+	// case 4: multiple bootstrap in 3 pd cluster
+	ctx, cancel = context.WithCancel(context.Background())
+	tc, err = tests.NewTestCluster(ctx, 3, func(conf *config.Config, _ string) {
+		conf.LeaderLease = 300
+	})
+	re.NoError(err)
+	re.NoError(tc.RunInitialServers())
+	re.NotEmpty(tc.WaitLeader())
+	leaderServer = tc.GetLeaderServer()
+	re.NotNil(leaderServer)
+	name = leaderServer.GetLeader().GetName()
+	wg := sync.WaitGroup{}
+	for range 3 {
+		wg.Add(1)
+		go func() {
+			leaderServer.BootstrapCluster()
+			wg.Done()
+		}()
+	}
+	wg.Wait()
+	testutil.Eventually(re, func() bool {
+		allocator := leaderServer.GetServer().GetGlobalTSOAllocator()
+		return allocator.IsInitialize()
+	})
+	re.NoError(tc.ResignLeader())
+	re.NotEmpty(tc.WaitLeader())
+	testutil.Eventually(re, func() bool {
+		allocator := tc.GetServer(name).GetServer().GetGlobalTSOAllocator()
+		return !allocator.IsInitialize()
+	})
 	tc.Destroy()
 	cancel()
 }
