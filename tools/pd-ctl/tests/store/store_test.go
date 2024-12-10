@@ -56,11 +56,12 @@ func TestStoreLimitV2(t *testing.T) {
 
 	// store command
 	args := []string{"-u", pdAddr, "config", "set", "store-limit-version", "v2"}
-	_, err = tests.ExecuteCommand(cmd, args...)
+	output, err := tests.ExecuteCommand(cmd, args...)
 	re.NoError(err)
+	re.Contains(string(output), "Success")
 
 	args = []string{"-u", pdAddr, "store", "limit"}
-	output, err := tests.ExecuteCommand(cmd, args...)
+	output, err = tests.ExecuteCommand(cmd, args...)
 	re.NoError(err)
 	re.Contains(string(output), "not support get limit")
 
