@@ -25,6 +25,7 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/client/errs"
+	"github.com/tikv/pd/client/pkg/retry"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/backoff"
@@ -40,6 +41,33 @@ const (
 	// FollowerHandleMetadataKey is used to mark the permit of follower handle.
 	FollowerHandleMetadataKey = "pd-allow-follower-handle"
 )
+
+// UnaryBackofferInterceptor is a gRPC interceptor that adds a backoffer to the call.
+func UnaryBackofferInterceptor() grpc.UnaryClientInterceptor {
+	return func(ctx context.Context, method string, req, reply any, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
+		bo := retry.FromContext(ctx)
+		if bo == nil {
+			return invoker(ctx, method, req, reply, cc, opts...)
+		}
+
+		// Copy a new backoffer
+		newBo := *bo
+		var lastErr error
+		err := newBo.Exec(ctx, func() error {
+			err := invoker(ctx, method, req, reply, cc, opts...)
+			if err != nil {
+				lastErr = err
+				return err
+			}
+			return nil
+		})
+
+		if err != nil {
+			return lastErr
+		}
+		return nil
+	}
+}
 
 // GetClientConn returns a gRPC client connection.
 // creates a client connection to the given target. By default, it's
@@ -64,8 +92,11 @@ func GetClientConn(ctx context.Context, addr string, tlsCfg *tls.Config, do ...g
 	if err != nil {
 		return nil, errs.ErrURLParse.Wrap(err).GenWithStackByCause()
 	}
-	// Here we use a shorter MaxDelay to make the connection recover faster.
-	// The default MaxDelay is 120s, which is too long for us.
+
+	// Add backoffer interceptor
+	retryOpt := grpc.WithUnaryInterceptor(UnaryBackofferInterceptor())
+
+	// Add retry related connection parameters
 	backoffOpts := grpc.WithConnectParams(grpc.ConnectParams{
 		Backoff: backoff.Config{
 			BaseDelay:  time.Second,
@@ -74,7 +105,8 @@ func GetClientConn(ctx context.Context, addr string, tlsCfg *tls.Config, do ...g
 			MaxDelay:   3 * time.Second,
 		},
 	})
-	do = append(do, opt, backoffOpts)
+
+	do = append(do, opt, retryOpt, backoffOpts)
 	cc, err := grpc.DialContext(ctx, u.Host, do...)
 	if err != nil {
 		return nil, errs.ErrGRPCDial.Wrap(err).GenWithStackByCause()

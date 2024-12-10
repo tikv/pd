@@ -22,6 +22,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/client/errs"
+	"github.com/tikv/pd/client/metrics"
 	"go.uber.org/zap"
 )
 
@@ -39,7 +40,7 @@ func (c *client) UpdateGCSafePointV2(ctx context.Context, keyspaceID uint32, saf
 		defer span.Finish()
 	}
 	start := time.Now()
-	defer func() { cmdDurationUpdateGCSafePointV2.Observe(time.Since(start).Seconds()) }()
+	defer func() { metrics.CmdDurationUpdateGCSafePointV2.Observe(time.Since(start).Seconds()) }()
 
 	ctx, cancel := context.WithTimeout(ctx, c.inner.option.Timeout)
 	req := &pdpb.UpdateGCSafePointV2Request{
@@ -55,7 +56,7 @@ func (c *client) UpdateGCSafePointV2(ctx context.Context, keyspaceID uint32, saf
 	resp, err := protoClient.UpdateGCSafePointV2(ctx, req)
 	cancel()
 
-	if err = c.respForErr(cmdFailedDurationUpdateGCSafePointV2, start, err, resp.GetHeader()); err != nil {
+	if err = c.respForErr(metrics.CmdFailedDurationUpdateGCSafePointV2, start, err, resp.GetHeader()); err != nil {
 		return 0, err
 	}
 	return resp.GetNewSafePoint(), nil
@@ -68,7 +69,7 @@ func (c *client) UpdateServiceSafePointV2(ctx context.Context, keyspaceID uint32
 		defer span.Finish()
 	}
 	start := time.Now()
-	defer func() { cmdDurationUpdateServiceSafePointV2.Observe(time.Since(start).Seconds()) }()
+	defer func() { metrics.CmdDurationUpdateServiceSafePointV2.Observe(time.Since(start).Seconds()) }()
 
 	ctx, cancel := context.WithTimeout(ctx, c.inner.option.Timeout)
 	req := &pdpb.UpdateServiceSafePointV2Request{
@@ -85,7 +86,7 @@ func (c *client) UpdateServiceSafePointV2(ctx context.Context, keyspaceID uint32
 	}
 	resp, err := protoClient.UpdateServiceSafePointV2(ctx, req)
 	cancel()
-	if err = c.respForErr(cmdFailedDurationUpdateServiceSafePointV2, start, err, resp.GetHeader()); err != nil {
+	if err = c.respForErr(metrics.CmdFailedDurationUpdateServiceSafePointV2, start, err, resp.GetHeader()); err != nil {
 		return 0, err
 	}
 	return resp.GetMinSafePoint(), nil

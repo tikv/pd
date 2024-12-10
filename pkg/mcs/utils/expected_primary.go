@@ -33,20 +33,9 @@ import (
 	"go.uber.org/zap"
 )
 
-// expectedPrimaryFlag is the flag to indicate the expected primary.
-// 1. When the primary was campaigned successfully, it will set the `expected_primary` flag.
-// 2. Using `{service}/primary/transfer` API will revoke the previous lease and set a new `expected_primary` flag.
-// This flag used to help new primary to campaign successfully while other secondaries can skip the campaign.
-const expectedPrimaryFlag = "expected_primary"
-
-// expectedPrimaryPath formats the primary path with the expected primary flag.
-func expectedPrimaryPath(primaryPath string) string {
-	return fmt.Sprintf("%s/%s", primaryPath, expectedPrimaryFlag)
-}
-
 // GetExpectedPrimaryFlag gets the expected primary flag.
-func GetExpectedPrimaryFlag(client *clientv3.Client, primaryPath string) string {
-	path := expectedPrimaryPath(primaryPath)
+func GetExpectedPrimaryFlag(client *clientv3.Client, msParam *keypath.MsParam) string {
+	path := keypath.ExpectedPrimaryPath(msParam)
 	primary, err := etcdutil.GetValue(client, path)
 	if err != nil {
 		log.Error("get expected primary flag error", errs.ZapError(err), zap.String("primary-path", path))
@@ -57,12 +46,12 @@ func GetExpectedPrimaryFlag(client *clientv3.Client, primaryPath string) string 
 }
 
 // markExpectedPrimaryFlag marks the expected primary flag when the primary is specified.
-func markExpectedPrimaryFlag(client *clientv3.Client, primaryPath string, leaderRaw string, leaseID clientv3.LeaseID) (int64, error) {
-	path := expectedPrimaryPath(primaryPath)
+func markExpectedPrimaryFlag(client *clientv3.Client, msParam *keypath.MsParam, leaderRaw string, leaseID clientv3.LeaseID) (int64, error) {
+	path := keypath.ExpectedPrimaryPath(msParam)
 	log.Info("set expected primary flag", zap.String("primary-path", path), zap.String("leader-raw", leaderRaw))
 	// write a flag to indicate the expected primary.
 	resp, err := kv.NewSlowLogTxn(client).
-		Then(clientv3.OpPut(expectedPrimaryPath(primaryPath), leaderRaw, clientv3.WithLease(leaseID))).
+		Then(clientv3.OpPut(path, leaderRaw, clientv3.WithLease(leaseID))).
 		Commit()
 	if err != nil || !resp.Succeeded {
 		log.Error("mark expected primary error", errs.ZapError(err), zap.String("primary-path", path))
@@ -77,23 +66,29 @@ func markExpectedPrimaryFlag(client *clientv3.Client, primaryPath string, leader
 // - changed by `{service}/primary/transfer` API.
 // - leader lease expired.
 // ONLY primary called this function.
-func KeepExpectedPrimaryAlive(ctx context.Context, cli *clientv3.Client, exitPrimary chan<- struct{},
-	leaseTimeout int64, leaderPath, memberValue, service string) (*election.Lease, error) {
-	log.Info("primary start to watch the expected primary", zap.String("service", service), zap.String("primary-value", memberValue))
-	service = fmt.Sprintf("%s expected primary", service)
+func KeepExpectedPrimaryAlive(
+	ctx context.Context,
+	cli *clientv3.Client,
+	exitPrimary chan<- struct{},
+	leaseTimeout int64,
+	msParam *keypath.MsParam,
+	memberValue string) (*election.Lease, error) {
+	log.Info("primary start to watch the expected primary",
+		zap.String("service", msParam.ServiceName), zap.String("primary-value", memberValue))
+	service := fmt.Sprintf("%s expected primary", msParam.ServiceName)
 	lease := election.NewLease(cli, service)
 	if err := lease.Grant(leaseTimeout); err != nil {
 		return nil, err
 	}
 
-	revision, err := markExpectedPrimaryFlag(cli, leaderPath, memberValue, lease.ID.Load().(clientv3.LeaseID))
+	revision, err := markExpectedPrimaryFlag(cli, msParam, memberValue, lease.ID.Load().(clientv3.LeaseID))
 	if err != nil {
 		log.Error("mark expected primary error", errs.ZapError(err))
 		return nil, err
 	}
 	// Keep alive the current expected primary leadership to indicate that the server is still alive.
 	// Watch the expected primary path to check whether the expected primary has changed by `{service}/primary/transfer` API.
-	expectedPrimary := election.NewLeadership(cli, expectedPrimaryPath(leaderPath), service)
+	expectedPrimary := election.NewLeadership(cli, keypath.ExpectedPrimaryPath(msParam), service)
 	expectedPrimary.SetLease(lease)
 	expectedPrimary.Keep(ctx)
 
@@ -165,15 +160,10 @@ func TransferPrimary(client *clientv3.Client, lease *election.Lease, serviceName
 		return errors.Errorf("failed to revoke current primary's lease: %v", err)
 	}
 
-	var primaryPath string
-	switch serviceName {
-	case constant.SchedulingServiceName:
-		primaryPath = keypath.SchedulingPrimaryPath()
-	case constant.TSOServiceName:
-		tsoRootPath := keypath.TSOSvcRootPath()
-		primaryPath = keypath.KeyspaceGroupPrimaryPath(tsoRootPath, keyspaceGroupID)
-	}
-	_, err = markExpectedPrimaryFlag(client, primaryPath, primaryIDs[nextPrimaryID], grantResp.ID)
+	_, err = markExpectedPrimaryFlag(client, &keypath.MsParam{
+		ServiceName: serviceName,
+		GroupID:     keyspaceGroupID,
+	}, primaryIDs[nextPrimaryID], grantResp.ID)
 	if err != nil {
 		return errors.Errorf("failed to mark expected primary flag for %s, err: %v", serviceName, err)
 	}

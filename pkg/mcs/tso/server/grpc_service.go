@@ -111,12 +111,11 @@ func (s *Service) Tso(stream tsopb.TSO_TsoServer) error {
 		}
 		keyspaceID := header.GetKeyspaceId()
 		keyspaceGroupID := header.GetKeyspaceGroupId()
-		dcLocation := request.GetDcLocation()
 		count := request.GetCount()
 		ts, keyspaceGroupBelongTo, err := s.keyspaceGroupManager.HandleTSORequest(
 			ctx,
 			keyspaceID, keyspaceGroupID,
-			dcLocation, count)
+			count)
 		if err != nil {
 			return status.Error(codes.Unknown, err.Error())
 		}
@@ -198,7 +197,7 @@ func (s *Service) GetMinTS(
 		}, nil
 	}
 
-	minTS, kgAskedCount, kgTotalCount, err := s.keyspaceGroupManager.GetMinTS(request.GetDcLocation())
+	minTS, kgAskedCount, kgTotalCount, err := s.keyspaceGroupManager.GetMinTS()
 	if err != nil {
 		return &tsopb.GetMinTSResponse{
 			Header: wrapErrorToHeader(

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package pd
+package batch
 
 import (
 	"context"
@@ -24,10 +24,11 @@ import (
 // Starting from a low value is necessary because we need to make sure it will be converged to (current_batch_size - 4).
 const defaultBestBatchSize = 8
 
-// finisherFunc is used to finish a request, it accepts the index of the request in the batch, the request itself and an error.
-type finisherFunc[T any] func(int, T, error)
+// FinisherFunc is used to finish a request, it accepts the index of the request in the batch, the request itself and an error.
+type FinisherFunc[T any] func(int, T, error)
 
-type batchController[T any] struct {
+// Controller is used to batch requests.
+type Controller[T any] struct {
 	maxBatchSize int
 	// bestBatchSize is a dynamic size that changed based on the current batch effect.
 	bestBatchSize int
@@ -36,15 +37,16 @@ type batchController[T any] struct {
 	collectedRequestCount int
 
 	// The finisher function to cancel collected requests when an internal error occurs.
-	finisher finisherFunc[T]
+	finisher FinisherFunc[T]
 	// The observer to record the best batch size.
 	bestBatchObserver prometheus.Histogram
 	// The time after getting the first request and the token, and before performing extra batching.
 	extraBatchingStartTime time.Time
 }
 
-func newBatchController[T any](maxBatchSize int, finisher finisherFunc[T], bestBatchObserver prometheus.Histogram) *batchController[T] {
-	return &batchController[T]{
+// NewController creates a new batch controller.
+func NewController[T any](maxBatchSize int, finisher FinisherFunc[T], bestBatchObserver prometheus.Histogram) *Controller[T] {
+	return &Controller[T]{
 		maxBatchSize:          maxBatchSize,
 		bestBatchSize:         defaultBestBatchSize,
 		collectedRequests:     make([]T, maxBatchSize+1),
@@ -54,11 +56,11 @@ func newBatchController[T any](maxBatchSize int, finisher finisherFunc[T], bestB
 	}
 }
 
-// fetchPendingRequests will start a new round of the batch collecting from the channel.
+// FetchPendingRequests will start a new round of the batch collecting from the channel.
 // It returns nil error if everything goes well, otherwise a non-nil error which means we should stop the service.
 // It's guaranteed that if this function failed after collecting some requests, then these requests will be cancelled
 // when the function returns, so the caller don't need to clear them manually.
-func (bc *batchController[T]) fetchPendingRequests(ctx context.Context, requestCh <-chan T, tokenCh chan struct{}, maxBatchWaitInterval time.Duration) (errRet error) {
+func (bc *Controller[T]) FetchPendingRequests(ctx context.Context, requestCh <-chan T, tokenCh chan struct{}, maxBatchWaitInterval time.Duration) (errRet error) {
 	var tokenAcquired bool
 	defer func() {
 		if errRet != nil {
@@ -67,7 +69,7 @@ func (bc *batchController[T]) fetchPendingRequests(ctx context.Context, requestC
 			if tokenAcquired {
 				tokenCh <- struct{}{}
 			}
-			bc.finishCollectedRequests(bc.finisher, errRet)
+			bc.FinishCollectedRequests(bc.finisher, errRet)
 		}
 	}()
 
@@ -167,9 +169,9 @@ fetchPendingRequestsLoop:
 	return nil
 }
 
-// fetchRequestsWithTimer tries to fetch requests until the given timer ticks. The caller must set the timer properly
+// FetchRequestsWithTimer tries to fetch requests until the given timer ticks. The caller must set the timer properly
 // before calling this function.
-func (bc *batchController[T]) fetchRequestsWithTimer(ctx context.Context, requestCh <-chan T, timer *time.Timer) error {
+func (bc *Controller[T]) FetchRequestsWithTimer(ctx context.Context, requestCh <-chan T, timer *time.Timer) error {
 batchingLoop:
 	for bc.collectedRequestCount < bc.maxBatchSize {
 		select {
@@ -198,17 +200,23 @@ nonWaitingBatchLoop:
 	return nil
 }
 
-func (bc *batchController[T]) pushRequest(req T) {
+func (bc *Controller[T]) pushRequest(req T) {
 	bc.collectedRequests[bc.collectedRequestCount] = req
 	bc.collectedRequestCount++
 }
 
-func (bc *batchController[T]) getCollectedRequests() []T {
+// GetCollectedRequests returns the collected requests.
+func (bc *Controller[T]) GetCollectedRequests() []T {
 	return bc.collectedRequests[:bc.collectedRequestCount]
 }
 
-// adjustBestBatchSize stabilizes the latency with the AIAD algorithm.
-func (bc *batchController[T]) adjustBestBatchSize() {
+// GetCollectedRequestCount returns the number of collected requests.
+func (bc *Controller[T]) GetCollectedRequestCount() int {
+	return bc.collectedRequestCount
+}
+
+// AdjustBestBatchSize stabilizes the latency with the AIAD algorithm.
+func (bc *Controller[T]) AdjustBestBatchSize() {
 	if bc.bestBatchObserver != nil {
 		bc.bestBatchObserver.Observe(float64(bc.bestBatchSize))
 	}
@@ -222,7 +230,8 @@ func (bc *batchController[T]) adjustBestBatchSize() {
 	}
 }
 
-func (bc *batchController[T]) finishCollectedRequests(finisher finisherFunc[T], err error) {
+// FinishCollectedRequests finishes the collected requests.
+func (bc *Controller[T]) FinishCollectedRequests(finisher FinisherFunc[T], err error) {
 	if finisher == nil {
 		finisher = bc.finisher
 	}
@@ -233,4 +242,9 @@ func (bc *batchController[T]) finishCollectedRequests(finisher finisherFunc[T], 
 	}
 	// Prevent the finished requests from being processed again.
 	bc.collectedRequestCount = 0
+}
+
+// GetExtraBatchingStartTime returns the extra batching start time.
+func (bc *Controller[T]) GetExtraBatchingStartTime() time.Time {
+	return bc.extraBatchingStartTime
 }

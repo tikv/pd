@@ -901,16 +901,6 @@ error = '''
 reset user timestamp failed, %s
 '''
 
-["PD:tso:ErrSetLocalTSOConfig"]
-error = '''
-set local tso config failed, %s
-'''
-
-["PD:tso:ErrSyncMaxTS"]
-error = '''
-sync max ts failed, %s
-'''
-
 ["PD:tso:ErrUpdateTimestamp"]
 error = '''
 update timestamp failed, %s

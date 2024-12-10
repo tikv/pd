@@ -16,7 +16,6 @@ package id
 
 import (
 	"context"
-	"strconv"
 	"sync"
 	"testing"
 
@@ -25,10 +24,7 @@ import (
 )
 
 const (
-	rootPath   = "/pd"
-	leaderPath = "/pd/leader"
-	allocPath  = "alloc_id"
-	label      = "idalloc"
+	leaderPath = "/pd/0/leader"
 	memberVal  = "member"
 	step       = uint64(500)
 )
@@ -44,24 +40,25 @@ func TestMultipleAllocator(t *testing.T) {
 	_, err := client.Put(context.Background(), leaderPath, memberVal)
 	re.NoError(err)
 
+	var i uint64
 	wg := sync.WaitGroup{}
-	for i := range 3 {
-		iStr := strconv.Itoa(i)
+	fn := func(label label) {
 		wg.Add(1)
-		// All allocators share rootPath and memberVal, but they have different allocPaths, labels and steps.
+		// Different allocators have different labels and steps.
 		allocator := NewAllocator(&AllocatorParams{
-			Client:    client,
-			RootPath:  rootPath,
-			AllocPath: allocPath + iStr,
-			Label:     label + iStr,
-			Member:    memberVal,
-			Step:      step * uint64(i), // allocator 0, 1, 2 should have step size 1000 (default), 500, 1000 respectively.
+			Client: client,
+			Label:  label,
+			Member: memberVal,
+			Step:   step * i, // allocator 0, 1 should have step size 1000 (default), 500 respectively.
 		})
 		go func(re *require.Assertions, allocator Allocator) {
 			defer wg.Done()
 			testAllocator(re, allocator)
 		}(re, allocator)
+		i++
 	}
+	fn(DefaultLabel)
+	fn(KeyspaceLabel)
 	wg.Wait()
 }
 

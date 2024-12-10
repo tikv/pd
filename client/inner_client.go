@@ -6,13 +6,20 @@ import (
 	"sync"
 	"time"
 
+	"google.golang.org/grpc/codes"
+
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+	cb "github.com/tikv/pd/client/circuitbreaker"
+	"github.com/tikv/pd/client/clients/tso"
 	"github.com/tikv/pd/client/errs"
+	"github.com/tikv/pd/client/metrics"
 	"github.com/tikv/pd/client/opt"
+	sd "github.com/tikv/pd/client/servicediscovery"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/status"
 )
 
 const (
@@ -21,10 +28,11 @@ const (
 )
 
 type innerClient struct {
-	keyspaceID      uint32
-	svrUrls         []string
-	pdSvcDiscovery  *pdServiceDiscovery
-	tokenDispatcher *tokenDispatcher
+	keyspaceID               uint32
+	svrUrls                  []string
+	pdSvcDiscovery           sd.ServiceDiscovery
+	tokenDispatcher          *tokenDispatcher
+	regionMetaCircuitBreaker *cb.CircuitBreaker[*pdpb.GetRegionResponse]
 
 	// For service mode switching.
 	serviceModeKeeper
@@ -39,8 +47,8 @@ type innerClient struct {
 	option *opt.Option
 }
 
-func (c *innerClient) init(updateKeyspaceIDCb updateKeyspaceIDFunc) error {
-	c.pdSvcDiscovery = newPDServiceDiscovery(
+func (c *innerClient) init(updateKeyspaceIDCb sd.UpdateKeyspaceIDFunc) error {
+	c.pdSvcDiscovery = sd.NewPDServiceDiscovery(
 		c.ctx, c.cancel, &c.wg, c.setServiceMode,
 		updateKeyspaceIDCb, c.keyspaceID, c.svrUrls, c.tlsCfg, c.option)
 	if err := c.setup(); err != nil {
@@ -50,6 +58,7 @@ func (c *innerClient) init(updateKeyspaceIDCb updateKeyspaceIDFunc) error {
 		}
 		return err
 	}
+	c.regionMetaCircuitBreaker = cb.NewCircuitBreaker[*pdpb.GetRegionResponse]("region_meta", c.option.RegionMetaCircuitBreakerSettings)
 
 	return nil
 }
@@ -81,21 +90,21 @@ func (c *innerClient) setServiceMode(newMode pdpb.ServiceMode) {
 func (c *innerClient) resetTSOClientLocked(mode pdpb.ServiceMode) {
 	// Re-create a new TSO client.
 	var (
-		newTSOCli          *tsoClient
-		newTSOSvcDiscovery ServiceDiscovery
+		newTSOCli          *tso.Cli
+		newTSOSvcDiscovery sd.ServiceDiscovery
 	)
 	switch mode {
 	case pdpb.ServiceMode_PD_SVC_MODE:
-		newTSOCli = newTSOClient(c.ctx, c.option,
-			c.pdSvcDiscovery, &pdTSOStreamBuilderFactory{})
+		newTSOCli = tso.NewClient(c.ctx, c.option,
+			c.pdSvcDiscovery, &tso.PDStreamBuilderFactory{})
 	case pdpb.ServiceMode_API_SVC_MODE:
-		newTSOSvcDiscovery = newTSOServiceDiscovery(
+		newTSOSvcDiscovery = sd.NewTSOServiceDiscovery(
 			c.ctx, c, c.pdSvcDiscovery,
 			c.keyspaceID, c.tlsCfg, c.option)
 		// At this point, the keyspace group isn't known yet. Starts from the default keyspace group,
 		// and will be updated later.
-		newTSOCli = newTSOClient(c.ctx, c.option,
-			newTSOSvcDiscovery, &tsoTSOStreamBuilderFactory{})
+		newTSOCli = tso.NewClient(c.ctx, c.option,
+			newTSOSvcDiscovery, &tso.MSStreamBuilderFactory{})
 		if err := newTSOSvcDiscovery.Init(); err != nil {
 			log.Error("[pd] failed to initialize tso service discovery. keep the current service mode",
 				zap.Strings("svr-urls", c.svrUrls),
@@ -107,11 +116,11 @@ func (c *innerClient) resetTSOClientLocked(mode pdpb.ServiceMode) {
 		log.Warn("[pd] intend to switch to unknown service mode, just return")
 		return
 	}
-	newTSOCli.setup()
+	newTSOCli.Setup()
 	// Replace the old TSO client.
 	oldTSOClient := c.tsoClient
 	c.tsoClient = newTSOCli
-	oldTSOClient.close()
+	oldTSOClient.Close()
 	// Replace the old TSO service discovery if needed.
 	oldTSOSvcDiscovery := c.tsoSvcDiscovery
 	// If newTSOSvcDiscovery is nil, that's expected, as it means we are switching to PD service mode and
@@ -137,7 +146,7 @@ func (c *innerClient) getServiceMode() pdpb.ServiceMode {
 	return c.serviceMode
 }
 
-func (c *innerClient) getTSOClient() *tsoClient {
+func (c *innerClient) getTSOClient() *tso.Cli {
 	c.RLock()
 	defer c.RUnlock()
 	return c.tsoClient
@@ -151,7 +160,7 @@ func (c *innerClient) close() {
 	c.pdSvcDiscovery.Close()
 
 	if c.tokenDispatcher != nil {
-		tokenErr := errors.WithStack(errClosing)
+		tokenErr := errors.WithStack(errs.ErrClosing)
 		c.tokenDispatcher.tokenBatchController.revokePendingTokenRequest(tokenErr)
 		c.tokenDispatcher.dispatcherCancel()
 	}
@@ -160,7 +169,7 @@ func (c *innerClient) close() {
 func (c *innerClient) setup() error {
 	// Init the metrics.
 	if c.option.InitMetrics {
-		initAndRegisterMetrics(c.option.MetricsLabels)
+		metrics.InitAndRegisterMetrics(c.option.MetricsLabels)
 	}
 
 	// Init the client base.
@@ -178,10 +187,10 @@ func (c *innerClient) setup() error {
 
 // getClientAndContext returns the leader pd client and the original context. If leader is unhealthy, it returns
 // follower pd client and the context which holds forward information.
-func (c *innerClient) getRegionAPIClientAndContext(ctx context.Context, allowFollower bool) (ServiceClient, context.Context) {
-	var serviceClient ServiceClient
+func (c *innerClient) getRegionAPIClientAndContext(ctx context.Context, allowFollower bool) (sd.ServiceClient, context.Context) {
+	var serviceClient sd.ServiceClient
 	if allowFollower {
-		serviceClient = c.pdSvcDiscovery.getServiceClientByKind(regionAPIKind)
+		serviceClient = c.pdSvcDiscovery.GetServiceClientByKind(sd.UniversalAPIKind)
 		if serviceClient != nil {
 			return serviceClient, serviceClient.BuildGRPCTargetContext(ctx, !allowFollower)
 		}
@@ -201,18 +210,18 @@ func (c *innerClient) gRPCErrorHandler(err error) {
 }
 
 func (c *innerClient) getOrCreateGRPCConn() (*grpc.ClientConn, error) {
-	cc, err := c.pdSvcDiscovery.GetOrCreateGRPCConn(c.pdSvcDiscovery.getLeaderURL())
+	cc, err := c.pdSvcDiscovery.GetOrCreateGRPCConn(c.pdSvcDiscovery.GetServingURL())
 	if err != nil {
 		return nil, err
 	}
 	return cc, err
 }
 
-func (c *innerClient) dispatchTSORequestWithRetry(ctx context.Context) TSFuture {
+func (c *innerClient) dispatchTSORequestWithRetry(ctx context.Context) tso.TSFuture {
 	var (
 		retryable bool
 		err       error
-		req       *tsoRequest
+		req       *tso.Request
 	)
 	for i := range dispatchRetryCount {
 		// Do not delay for the first time.
@@ -225,20 +234,29 @@ func (c *innerClient) dispatchTSORequestWithRetry(ctx context.Context) TSFuture 
 			err = errs.ErrClientGetTSO.FastGenByArgs("tso client is nil")
 			continue
 		}
-		// Get a new request from the pool if it's nil or not from the current pool.
-		if req == nil || req.pool != tsoClient.tsoReqPool {
-			req = tsoClient.getTSORequest(ctx)
+		// Get a new request from the pool if it's not from the current pool.
+		if !req.IsFrom(tsoClient.GetRequestPool()) {
+			req = tsoClient.GetTSORequest(ctx)
 		}
-		retryable, err = tsoClient.dispatchRequest(req)
+		retryable, err = tsoClient.DispatchRequest(req)
 		if !retryable {
 			break
 		}
 	}
 	if err != nil {
 		if req == nil {
-			return newTSORequestFastFail(err)
+			return tso.NewRequestFastFail(err)
 		}
-		req.tryDone(err)
+		req.TryDone(err)
 	}
 	return req
+}
+
+func isOverloaded(err error) cb.Overloading {
+	switch status.Code(errors.Cause(err)) {
+	case codes.DeadlineExceeded, codes.Unavailable, codes.ResourceExhausted:
+		return cb.Yes
+	default:
+		return cb.No
+	}
 }

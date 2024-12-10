@@ -29,15 +29,14 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	pd "github.com/tikv/pd/client"
-	"github.com/tikv/pd/client/caller"
 	"github.com/tikv/pd/client/opt"
+	"github.com/tikv/pd/client/pkg/caller"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mcs/discovery"
 	tso "github.com/tikv/pd/pkg/mcs/tso/server"
 	tsoapi "github.com/tikv/pd/pkg/mcs/tso/server/apis/v1"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/storage/endpoint"
-	tsopkg "github.com/tikv/pd/pkg/tso"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/tempurl"
@@ -245,7 +244,7 @@ func NewAPIServerForward(re *require.Assertions) APIServerForward {
 	re.NoError(suite.pdLeader.BootstrapCluster())
 	suite.addRegions()
 
-	re.NoError(failpoint.Enable("github.com/tikv/pd/client/usePDServiceMode", "return(true)"))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/servicediscovery/usePDServiceMode", "return(true)"))
 	suite.pdClient, err = pd.NewClientWithContext(context.Background(),
 		caller.TestComponent,
 		[]string{suite.backendEndpoints}, pd.SecurityOption{}, opt.WithMaxErrorRetry(1))
@@ -267,7 +266,7 @@ func (suite *APIServerForward) ShutDown() {
 	}
 	suite.cluster.Destroy()
 	suite.cancel()
-	re.NoError(failpoint.Disable("github.com/tikv/pd/client/usePDServiceMode"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/servicediscovery/usePDServiceMode"))
 }
 
 func TestForwardTSORelated(t *testing.T) {
@@ -593,7 +592,7 @@ func (suite *CommonTestSuite) TestBootstrapDefaultKeyspaceGroup() {
 // If `EnableTSODynamicSwitching` is disabled, the PD should not provide TSO service after the TSO server is stopped.
 func TestTSOServiceSwitch(t *testing.T) {
 	re := require.New(t)
-	re.NoError(failpoint.Enable("github.com/tikv/pd/client/fastUpdateServiceMode", `return(true)`))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/servicediscovery/fastUpdateServiceMode", `return(true)`))
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -629,10 +628,7 @@ func TestTSOServiceSwitch(t *testing.T) {
 
 	// Verify PD is not providing TSO service
 	testutil.Eventually(re, func() bool {
-		allocator, err := pdLeader.GetServer().GetTSOAllocatorManager().GetAllocator(tsopkg.GlobalDCLocation)
-		if err != nil {
-			return false
-		}
+		allocator := pdLeader.GetServer().GetTSOAllocatorManager().GetAllocator()
 		return !allocator.IsInitialize()
 	})
 
@@ -666,7 +662,7 @@ func TestTSOServiceSwitch(t *testing.T) {
 
 	// Verify PD is now providing TSO service and timestamps are monotonically increasing
 	re.NoError(checkTSOMonotonic(ctx, pdClient, &globalLastTS, 10))
-	re.NoError(failpoint.Disable("github.com/tikv/pd/client/fastUpdateServiceMode"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/servicediscovery/fastUpdateServiceMode"))
 }
 
 func checkTSOMonotonic(ctx context.Context, pdClient pd.Client, globalLastTS *uint64, count int) error {

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package pd
+package tso
 
 import (
 	"context"
@@ -29,7 +29,9 @@ import (
 	"github.com/pingcap/kvproto/pkg/tsopb"
 	"github.com/pingcap/log"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/tikv/pd/client/constants"
 	"github.com/tikv/pd/client/errs"
+	"github.com/tikv/pd/client/metrics"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 )
@@ -40,16 +42,18 @@ type tsoStreamBuilderFactory interface {
 	makeBuilder(cc *grpc.ClientConn) tsoStreamBuilder
 }
 
-type pdTSOStreamBuilderFactory struct{}
+// PDStreamBuilderFactory is a factory for building TSO streams to the PD cluster.
+type PDStreamBuilderFactory struct{}
 
-func (*pdTSOStreamBuilderFactory) makeBuilder(cc *grpc.ClientConn) tsoStreamBuilder {
-	return &pdTSOStreamBuilder{client: pdpb.NewPDClient(cc), serverURL: cc.Target()}
+func (*PDStreamBuilderFactory) makeBuilder(cc *grpc.ClientConn) tsoStreamBuilder {
+	return &pdStreamBuilder{client: pdpb.NewPDClient(cc), serverURL: cc.Target()}
 }
 
-type tsoTSOStreamBuilderFactory struct{}
+// MSStreamBuilderFactory is a factory for building TSO streams to the microservice cluster.
+type MSStreamBuilderFactory struct{}
 
-func (*tsoTSOStreamBuilderFactory) makeBuilder(cc *grpc.ClientConn) tsoStreamBuilder {
-	return &tsoTSOStreamBuilder{client: tsopb.NewTSOClient(cc), serverURL: cc.Target()}
+func (*MSStreamBuilderFactory) makeBuilder(cc *grpc.ClientConn) tsoStreamBuilder {
+	return &msStreamBuilder{client: tsopb.NewTSOClient(cc), serverURL: cc.Target()}
 }
 
 // TSO Stream Builder
@@ -58,12 +62,12 @@ type tsoStreamBuilder interface {
 	build(context.Context, context.CancelFunc, time.Duration) (*tsoStream, error)
 }
 
-type pdTSOStreamBuilder struct {
+type pdStreamBuilder struct {
 	serverURL string
 	client    pdpb.PDClient
 }
 
-func (b *pdTSOStreamBuilder) build(ctx context.Context, cancel context.CancelFunc, timeout time.Duration) (*tsoStream, error) {
+func (b *pdStreamBuilder) build(ctx context.Context, cancel context.CancelFunc, timeout time.Duration) (*tsoStream, error) {
 	done := make(chan struct{})
 	// TODO: we need to handle a conner case that this goroutine is timeout while the stream is successfully created.
 	go checkStreamTimeout(ctx, cancel, done, timeout)
@@ -75,12 +79,12 @@ func (b *pdTSOStreamBuilder) build(ctx context.Context, cancel context.CancelFun
 	return nil, err
 }
 
-type tsoTSOStreamBuilder struct {
+type msStreamBuilder struct {
 	serverURL string
 	client    tsopb.TSOClient
 }
 
-func (b *tsoTSOStreamBuilder) build(
+func (b *msStreamBuilder) build(
 	ctx context.Context, cancel context.CancelFunc, timeout time.Duration,
 ) (*tsoStream, error) {
 	done := make(chan struct{})
@@ -143,7 +147,7 @@ func (s pdTSOStreamAdapter) Recv() (tsoRequestResult, error) {
 		physical:            resp.GetTimestamp().GetPhysical(),
 		logical:             resp.GetTimestamp().GetLogical(),
 		count:               resp.GetCount(),
-		respKeyspaceGroupID: defaultKeySpaceGroupID,
+		respKeyspaceGroupID: constants.DefaultKeyspaceGroupID,
 	}, nil
 }
 
@@ -243,7 +247,7 @@ func newTSOStream(ctx context.Context, serverURL string, stream grpcTSOStreamAda
 
 		cancel: cancel,
 
-		ongoingRequestCountGauge: ongoingRequestCountGauge.WithLabelValues(streamID),
+		ongoingRequestCountGauge: metrics.OngoingRequestCountGauge.WithLabelValues(streamID),
 	}
 	s.wg.Add(1)
 	go s.recvLoop(ctx)
@@ -309,7 +313,7 @@ func (s *tsoStream) processRequests(
 		log.Warn("failed to send RPC request through tsoStream", zap.String("stream", s.streamID), zap.Error(err))
 		return nil
 	}
-	tsoBatchSendLatency.Observe(time.Since(batchStartTime).Seconds())
+	metrics.TSOBatchSendLatency.Observe(time.Since(batchStartTime).Seconds())
 	s.ongoingRequestCountGauge.Set(float64(s.ongoingRequests.Add(1)))
 	return nil
 }
@@ -382,7 +386,7 @@ func (s *tsoStream) recvLoop(ctx context.Context) {
 		micros := math.Exp(filteredValue)
 		s.estimatedLatencyMicros.Store(uint64(micros))
 		// Update the metrics in seconds.
-		estimateTSOLatencyGauge.WithLabelValues(s.streamID).Set(micros * 1e-6)
+		metrics.EstimateTSOLatencyGauge.WithLabelValues(s.streamID).Set(micros * 1e-6)
 	}
 
 recvLoop:
@@ -413,7 +417,7 @@ recvLoop:
 			// Note that it's also possible that the stream is broken due to network without being requested. In this
 			// case, `Recv` may return an error while no request is pending.
 			if hasReq {
-				requestFailedDurationTSO.Observe(latencySeconds)
+				metrics.RequestFailedDurationTSO.Observe(latencySeconds)
 			}
 			if err == io.EOF {
 				finishWithErr = errors.WithStack(errs.ErrClientTSOStreamClosed)
@@ -426,12 +430,12 @@ recvLoop:
 			break recvLoop
 		}
 
-		requestDurationTSO.Observe(latencySeconds)
-		tsoBatchSize.Observe(float64(res.count))
+		metrics.RequestDurationTSO.Observe(latencySeconds)
+		metrics.TSOBatchSize.Observe(float64(res.count))
 		updateEstimatedLatency(currentReq.startTime, latency)
 
 		if res.count != uint32(currentReq.count) {
-			finishWithErr = errors.WithStack(errTSOLength)
+			finishWithErr = errors.WithStack(errs.ErrTSOLength)
 			break recvLoop
 		}
 

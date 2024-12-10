@@ -80,7 +80,7 @@ func (r *TSOProtoRequest) getCount() uint32 {
 // count defines the count of timestamps to retrieve.
 func (r *TSOProtoRequest) process(forwardStream stream, count uint32) (tsoResp, error) {
 	return forwardStream.process(r.request.GetHeader().GetClusterId(), count,
-		r.request.GetHeader().GetKeyspaceId(), r.request.GetHeader().GetKeyspaceGroupId(), r.request.GetDcLocation())
+		r.request.GetHeader().GetKeyspaceId(), r.request.GetHeader().GetKeyspaceGroupId())
 }
 
 // postProcess sends the response back to the sender of the request
@@ -141,7 +141,7 @@ func (r *PDProtoRequest) getCount() uint32 {
 // count defines the count of timestamps to retrieve.
 func (r *PDProtoRequest) process(forwardStream stream, count uint32) (tsoResp, error) {
 	return forwardStream.process(r.request.GetHeader().GetClusterId(), count,
-		constant.DefaultKeyspaceID, constant.DefaultKeyspaceGroupID, r.request.GetDcLocation())
+		constant.DefaultKeyspaceID, constant.DefaultKeyspaceGroupID)
 }
 
 // postProcess sends the response back to the sender of the request

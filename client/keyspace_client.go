@@ -22,6 +22,7 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/tikv/pd/client/errs"
+	"github.com/tikv/pd/client/metrics"
 )
 
 // KeyspaceClient manages keyspace metadata.
@@ -51,7 +52,7 @@ func (c *client) LoadKeyspace(ctx context.Context, name string) (*keyspacepb.Key
 		defer span.Finish()
 	}
 	start := time.Now()
-	defer func() { cmdDurationLoadKeyspace.Observe(time.Since(start).Seconds()) }()
+	defer func() { metrics.CmdDurationLoadKeyspace.Observe(time.Since(start).Seconds()) }()
 	ctx, cancel := context.WithTimeout(ctx, c.inner.option.Timeout)
 	req := &keyspacepb.LoadKeyspaceRequest{
 		Header: c.requestHeader(),
@@ -66,13 +67,13 @@ func (c *client) LoadKeyspace(ctx context.Context, name string) (*keyspacepb.Key
 	cancel()
 
 	if err != nil {
-		cmdFailedDurationLoadKeyspace.Observe(time.Since(start).Seconds())
+		metrics.CmdFailedDurationLoadKeyspace.Observe(time.Since(start).Seconds())
 		c.inner.pdSvcDiscovery.ScheduleCheckMemberChanged()
 		return nil, err
 	}
 
 	if resp.Header.GetError() != nil {
-		cmdFailedDurationLoadKeyspace.Observe(time.Since(start).Seconds())
+		metrics.CmdFailedDurationLoadKeyspace.Observe(time.Since(start).Seconds())
 		return nil, errors.Errorf("Load keyspace %s failed: %s", name, resp.Header.GetError().String())
 	}
 
@@ -95,7 +96,7 @@ func (c *client) UpdateKeyspaceState(ctx context.Context, id uint32, state keysp
 		defer span.Finish()
 	}
 	start := time.Now()
-	defer func() { cmdDurationUpdateKeyspaceState.Observe(time.Since(start).Seconds()) }()
+	defer func() { metrics.CmdDurationUpdateKeyspaceState.Observe(time.Since(start).Seconds()) }()
 	ctx, cancel := context.WithTimeout(ctx, c.inner.option.Timeout)
 	req := &keyspacepb.UpdateKeyspaceStateRequest{
 		Header: c.requestHeader(),
@@ -111,13 +112,13 @@ func (c *client) UpdateKeyspaceState(ctx context.Context, id uint32, state keysp
 	cancel()
 
 	if err != nil {
-		cmdFailedDurationUpdateKeyspaceState.Observe(time.Since(start).Seconds())
+		metrics.CmdFailedDurationUpdateKeyspaceState.Observe(time.Since(start).Seconds())
 		c.inner.pdSvcDiscovery.ScheduleCheckMemberChanged()
 		return nil, err
 	}
 
 	if resp.Header.GetError() != nil {
-		cmdFailedDurationUpdateKeyspaceState.Observe(time.Since(start).Seconds())
+		metrics.CmdFailedDurationUpdateKeyspaceState.Observe(time.Since(start).Seconds())
 		return nil, errors.Errorf("Update state for keyspace id %d failed: %s", id, resp.Header.GetError().String())
 	}
 
@@ -139,7 +140,7 @@ func (c *client) GetAllKeyspaces(ctx context.Context, startID uint32, limit uint
 		defer span.Finish()
 	}
 	start := time.Now()
-	defer func() { cmdDurationGetAllKeyspaces.Observe(time.Since(start).Seconds()) }()
+	defer func() { metrics.CmdDurationGetAllKeyspaces.Observe(time.Since(start).Seconds()) }()
 	ctx, cancel := context.WithTimeout(ctx, c.inner.option.Timeout)
 	req := &keyspacepb.GetAllKeyspacesRequest{
 		Header:  c.requestHeader(),
@@ -155,13 +156,13 @@ func (c *client) GetAllKeyspaces(ctx context.Context, startID uint32, limit uint
 	cancel()
 
 	if err != nil {
-		cmdDurationGetAllKeyspaces.Observe(time.Since(start).Seconds())
+		metrics.CmdDurationGetAllKeyspaces.Observe(time.Since(start).Seconds())
 		c.inner.pdSvcDiscovery.ScheduleCheckMemberChanged()
 		return nil, err
 	}
 
 	if resp.Header.GetError() != nil {
-		cmdDurationGetAllKeyspaces.Observe(time.Since(start).Seconds())
+		metrics.CmdDurationGetAllKeyspaces.Observe(time.Since(start).Seconds())
 		return nil, errors.Errorf("Get all keyspaces metadata failed: %s", resp.Header.GetError().String())
 	}
 

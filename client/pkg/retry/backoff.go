@@ -191,3 +191,25 @@ func getFunctionName(f any) string {
 	strs := strings.Split(runtime.FuncForPC(reflect.ValueOf(f).Pointer()).Name(), ".")
 	return strings.Split(strs[len(strs)-1], "-")[0]
 }
+
+// Define context key type
+type boCtxKey struct{}
+
+// Key used to store backoffer
+var backofferKey = boCtxKey{}
+
+// FromContext retrieves the backoffer from the context
+func FromContext(ctx context.Context) *Backoffer {
+	if ctx == nil {
+		return nil
+	}
+	if bo, ok := ctx.Value(backofferKey).(*Backoffer); ok {
+		return bo
+	}
+	return nil
+}
+
+// WithBackoffer stores the backoffer into a new context
+func WithBackoffer(ctx context.Context, bo *Backoffer) context.Context {
+	return context.WithValue(ctx, backofferKey, bo)
+}
