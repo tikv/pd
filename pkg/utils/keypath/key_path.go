@@ -370,20 +370,6 @@ func TimestampPath(tsPath string) string {
 	return path.Join(tsPath, TimestampKey)
 }
 
-// FullTimestampPath returns the full timestamp path.
-//  1. for the default keyspace group:
-//     /pd/{cluster_id}/timestamp
-//  2. for the non-default keyspace groups:
-//     /ms/{cluster_id}/tso/{group}/gta/timestamp
-func FullTimestampPath(groupID uint32) string {
-	rootPath := TSOSvcRootPath()
-	tsPath := TimestampPath(KeyspaceGroupGlobalTSPath(groupID))
-	if groupID == constant.DefaultKeyspaceGroupID {
-		rootPath = LegacyRootPath()
-	}
-	return path.Join(rootPath, tsPath)
-}
-
 const (
 	registryKey = "registry"
 )
