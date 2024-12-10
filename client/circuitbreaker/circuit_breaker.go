@@ -123,6 +123,7 @@ func (cb *CircuitBreaker[T]) ChangeSettings(apply func(config *Settings)) {
 	defer cb.mutex.Unlock()
 
 	apply(cb.config)
+	log.Info("circuit breaker settings changed", zap.Any("config", cb.config))
 }
 
 // Execute calls the given function if the CircuitBreaker is closed and returns the result of execution.
@@ -253,6 +254,10 @@ func (s *State[T]) onRequest(cb *CircuitBreaker[T]) (*State[T], error) {
 		// continue in closed state till ErrorRateWindow is over
 		return s, nil
 	case StateOpen:
+		if s.cb.config.ErrorRateThresholdPct == 0 {
+			return cb.newState(now, StateClosed), nil
+		}
+
 		if now.After(s.end) {
 			// CoolDownInterval is over, it is time to transition to half-open state
 			log.Info("circuit breaker cooldown period is over. Transitioning to half-open state to test the service",
@@ -264,7 +269,10 @@ func (s *State[T]) onRequest(cb *CircuitBreaker[T]) (*State[T], error) {
 			return s, errs.ErrCircuitBreakerOpen
 		}
 	case StateHalfOpen:
-		fmt.Println("StateHalfOpen", s.failureCount, s.successCount, s.pendingCount, s.cb.config.HalfOpenSuccessCount)
+		if s.cb.config.ErrorRateThresholdPct == 0 {
+			return cb.newState(now, StateClosed), nil
+		}
+
 		// do we need some expire time here in case of one of pending requests is stuck forever?
 		if s.failureCount > 0 {
 			// there were some failures during half-open state, let's go back to open state to wait a bit longer

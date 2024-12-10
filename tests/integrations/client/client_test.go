@@ -2103,3 +2103,51 @@ func TestCircuitBreaker(t *testing.T) {
 		re.NotNil(region)
 	}
 }
+
+func TestCircuitBreakerChangeSettings(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	cluster, err := tests.NewTestCluster(ctx, 1)
+	re.NoError(err)
+	defer cluster.Destroy()
+
+	circuitBreakerSettings := cb.Settings{
+		ErrorRateThresholdPct: 60,
+		MinQPSForOpen:         10,
+		ErrorRateWindow:       time.Millisecond,
+		CoolDownInterval:      time.Second,
+		HalfOpenSuccessCount:  1,
+	}
+
+	endpoints := runServer(re, cluster)
+	cli := setupCli(ctx, re, endpoints, opt.WithRegionMetaCircuitBreaker(circuitBreakerSettings))
+	defer cli.Close()
+
+	for i := 0; i < 10; i++ {
+		region, err := cli.GetRegion(context.TODO(), []byte("a"))
+		re.NoError(err)
+		re.NotNil(region)
+	}
+
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/triggerCircuitBreaker", "return(true)"))
+
+	for i := 0; i < 100; i++ {
+		_, err := cli.GetRegion(context.TODO(), []byte("a"))
+		re.Error(err)
+	}
+
+	_, err = cli.GetRegion(context.TODO(), []byte("a"))
+	re.Error(err)
+	re.Contains(err.Error(), "circuit breaker is open")
+
+	cli.UpdateOption(opt.RegionMetadataCircuitBreakerSettings, func(config *cb.Settings) {
+		*config = cb.AlwaysClosedSettings
+	})
+
+	_, err = cli.GetRegion(context.TODO(), []byte("a"))
+	re.Error(err)
+	re.Contains(err.Error(), "ResourceExhausted")
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/triggerCircuitBreaker"))
+}
