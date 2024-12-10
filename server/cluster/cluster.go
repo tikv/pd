@@ -440,12 +440,12 @@ func (c *RaftCluster) checkTSOService() {
 				log.Info("TSO is provided by PD")
 				c.UnsetServiceIndependent(constant.TSOServiceName)
 			} else {
-				if err := c.startTSOJobsIfNeeded(); err != nil {
+				if err := c.stopTSOJobsIfNeeded(); err != nil {
 					log.Error("failed to stop TSO jobs", errs.ZapError(err))
 					return
 				}
-				log.Info("TSO is provided by TSO server")
 				if !c.IsServiceIndependent(constant.TSOServiceName) {
+					log.Info("TSO is provided by TSO server")
 					c.SetServiceIndependent(constant.TSOServiceName)
 				}
 			}
@@ -2601,5 +2601,9 @@ func (c *RaftCluster) UnsetServiceIndependent(name string) {
 // GetGlobalTSOAllocator return global tso allocator
 // It only is used for test.
 func (c *RaftCluster) GetGlobalTSOAllocator() tso.Allocator {
-	return c.tsoAllocator.GetAllocator()
+	allocator, err := c.tsoAllocator.GetAllocator(tso.GlobalDCLocation)
+	if err != nil {
+		return nil
+	}
+	return allocator
 }
