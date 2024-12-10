@@ -82,7 +82,7 @@ func NewOption() *Option {
 		MaxRetryTimes:                    maxInitClusterRetries,
 		EnableTSOFollowerProxyCh:         make(chan struct{}, 1),
 		InitMetrics:                      true,
-		RegionMetaCircuitBreakerSettings: cb.AlwaysOpenSettings,
+		RegionMetaCircuitBreakerSettings: cb.AlwaysClosedSettings,
 	}
 
 	co.dynamicOptions[MaxTSOBatchWaitInterval].Store(defaultMaxTSOBatchWaitInterval)

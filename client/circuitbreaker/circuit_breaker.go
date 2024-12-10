@@ -52,8 +52,8 @@ type Settings struct {
 	HalfOpenSuccessCount uint32
 }
 
-// AlwaysOpenSettings is a configuration that never trips the circuit breaker.
-var AlwaysOpenSettings = Settings{
+// AlwaysClosedSettings is a configuration that never trips the circuit breaker.
+var AlwaysClosedSettings = Settings{
 	ErrorRateThresholdPct: 0,                // never trips
 	ErrorRateWindow:       10 * time.Second, // effectively results in testing for new settings every 10 seconds
 	MinQPSForOpen:         10,

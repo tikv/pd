@@ -68,7 +68,7 @@ func TestCircuitBreaker_OpenState(t *testing.T) {
 	re.Equal(StateOpen, cb.state.stateType)
 }
 
-func TestCircuitBreaker_OpenState_Not_Enough_QPS(t *testing.T) {
+func TestCircuitBreaker_CloseState_Not_Enough_QPS(t *testing.T) {
 	re := require.New(t)
 	cb := NewCircuitBreaker[int]("test_cb", settings)
 	re.Equal(StateClosed, cb.state.stateType)
@@ -78,7 +78,7 @@ func TestCircuitBreaker_OpenState_Not_Enough_QPS(t *testing.T) {
 	re.Equal(StateClosed, cb.state.stateType)
 }
 
-func TestCircuitBreaker_OpenState_Not_Enough_Error_Rate(t *testing.T) {
+func TestCircuitBreaker_CloseState_Not_Enough_Error_Rate(t *testing.T) {
 	re := require.New(t)
 	cb := NewCircuitBreaker[int]("test_cb", settings)
 	re.Equal(StateClosed, cb.state.stateType)
@@ -176,12 +176,47 @@ func TestCircuitBreaker_Half_Open_Fail_Over_Pending_Count(t *testing.T) {
 	re.Equal(uint32(1), cb.state.successCount)
 }
 
+func TestCircuitBreaker_Count_Only_Requests_In_Same_Window(t *testing.T) {
+	re := require.New(t)
+	cb := NewCircuitBreaker[int]("test_cb", settings)
+	re.Equal(StateClosed, cb.state.stateType)
+
+	start := make(chan bool)
+	wait := make(chan bool)
+	end := make(chan bool)
+	go func() {
+		defer func() {
+			end <- true
+		}()
+		_, err := cb.Execute(func() (int, Overloading, error) {
+			start <- true
+			<-wait
+			return 42, No, nil
+		})
+		re.NoError(err)
+	}()
+	<-start // make sure the request is started
+	// assert running request is not counted
+	re.Equal(uint32(0), cb.state.successCount)
+
+	// advance request to the next window
+	cb.advance(settings.ErrorRateWindow)
+	assertSucceeds(cb, re)
+	re.Equal(uint32(1), cb.state.successCount)
+
+	// complete the request from the previous window
+	wait <- true // resume
+	<-end        // wait for the request to complete
+	// assert request from last window is not counted
+	re.Equal(uint32(1), cb.state.successCount)
+}
+
 func TestCircuitBreaker_ChangeSettings(t *testing.T) {
 	re := require.New(t)
 
-	cb := NewCircuitBreaker[int]("test_cb", AlwaysOpenSettings)
-	driveQPS(cb, int(AlwaysOpenSettings.MinQPSForOpen*uint32(AlwaysOpenSettings.ErrorRateWindow.Seconds())), Yes, re)
-	cb.advance(AlwaysOpenSettings.ErrorRateWindow)
+	cb := NewCircuitBreaker[int]("test_cb", AlwaysClosedSettings)
+	driveQPS(cb, int(AlwaysClosedSettings.MinQPSForOpen*uint32(AlwaysClosedSettings.ErrorRateWindow.Seconds())), Yes, re)
+	cb.advance(AlwaysClosedSettings.ErrorRateWindow)
 	assertSucceeds(cb, re)
 	re.Equal(StateClosed, cb.state.stateType)
 
