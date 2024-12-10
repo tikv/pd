@@ -4001,8 +4001,28 @@ func TestAddKeyrangeScheduler(t *testing.T) {
 		return controller.RemoveScheduler(s)
 	}
 
+	const VeryBigEndKey = "748000000005F5E0FFFF00000000000000F8"
+
+	makeConfigJson := func(batch uint64, labelsStr string, timeout int64, start, end string) []string {
+		customerJson := struct {
+			StartKey       string               `json:"start_key"`
+			EndKey         string               `json:"end_key"`
+			BatchSize      uint64               `json:"batch_size,omitempty"`
+			Timeout        int64                `json:"timeout,omitempty"`
+			RequiredLabels []*metapb.StoreLabel `json:"required_labels,omitempty"`
+		}{
+			Timeout:   5 * 60 * 1000,
+			BatchSize: batch,
+			StartKey:  start,
+			EndKey:    end,
+		}
+		json.Unmarshal([]byte(labelsStr), &customerJson.RequiredLabels)
+		s, _ := json.Marshal(customerJson)
+		return []string{string(s)}
+	}
+
 	/// Test if a scheduler can timeout.
-	s, err := schedulers.CreateScheduler(types.BalanceKeyrangeScheduler, oc, storage.NewStorageWithMemoryBackend(), schedulers.ConfigSliceDecoder(types.BalanceKeyrangeScheduler, []string{"1", "", "1000", "", "Z"}), cb)
+	s, err := schedulers.CreateScheduler(types.BalanceKeyrangeScheduler, oc, storage.NewStorageWithMemoryBackend(), schedulers.ConfigSliceDecoder(types.BalanceKeyrangeScheduler, makeConfigJson(1, "", 1000, "", VeryBigEndKey)), cb)
 	re.NoError(err)
 	re.NoError(controller.AddScheduler(s))
 	// The scheduler timeout.
@@ -4010,7 +4030,7 @@ func TestAddKeyrangeScheduler(t *testing.T) {
 	re.True(s.IsFinished())
 
 	/// Test if a scheduler can be deleted.
-	s2, err := schedulers.CreateScheduler(types.BalanceKeyrangeScheduler, oc, storage.NewStorageWithMemoryBackend(), schedulers.ConfigSliceDecoder(types.BalanceKeyrangeScheduler, []string{"1", "", "1000", "", "Z"}), cb)
+	s2, err := schedulers.CreateScheduler(types.BalanceKeyrangeScheduler, oc, storage.NewStorageWithMemoryBackend(), schedulers.ConfigSliceDecoder(types.BalanceKeyrangeScheduler, makeConfigJson(1, "", 1000, "", VeryBigEndKey)), cb)
 	re.NoError(err)
 	re.NoError(controller.AddScheduler(s2))
 	re.NoError(controller.RemoveScheduler(types.BalanceKeyrangeScheduler.String()))
@@ -4018,8 +4038,8 @@ func TestAddKeyrangeScheduler(t *testing.T) {
 	re.True(n == nil)
 
 	/// Test if this scheduler is singular.
-	s3, err := schedulers.CreateScheduler(types.BalanceKeyrangeScheduler, oc, storage.NewStorageWithMemoryBackend(), schedulers.ConfigSliceDecoder(types.BalanceKeyrangeScheduler, []string{"1", "", "1000", "", "Z"}), cb)
-	s4, err := schedulers.CreateScheduler(types.BalanceKeyrangeScheduler, oc, storage.NewStorageWithMemoryBackend(), schedulers.ConfigSliceDecoder(types.BalanceKeyrangeScheduler, []string{"1", "", "1000", "", "Z"}), cb)
+	s3, err := schedulers.CreateScheduler(types.BalanceKeyrangeScheduler, oc, storage.NewStorageWithMemoryBackend(), schedulers.ConfigSliceDecoder(types.BalanceKeyrangeScheduler, makeConfigJson(1, "", 1000, "", VeryBigEndKey)), cb)
+	s4, err := schedulers.CreateScheduler(types.BalanceKeyrangeScheduler, oc, storage.NewStorageWithMemoryBackend(), schedulers.ConfigSliceDecoder(types.BalanceKeyrangeScheduler, makeConfigJson(1, "", 1000, "", VeryBigEndKey)), cb)
 	re.NoError(controller.AddScheduler(s3))
 	re.Error(controller.AddScheduler(s4), "[PD:scheduler:ErrSchedulerExisted]scheduler existed")
 }

@@ -16,6 +16,7 @@ package schedulers
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"testing"
 	"time"
@@ -53,6 +54,26 @@ func (suite *balanceKeyrangeSchedulerTestSuite) TearDownTest() {
 	suite.cancel()
 }
 
+const VeryBigEndKey = "748000000005F5E0FFFF00000000000000F8"
+
+func MakeConfigJson(batch uint64, labelsStr string, timeout int64, start, end string) []string {
+	customerJson := struct {
+		StartKey       string               `json:"start_key"`
+		EndKey         string               `json:"end_key"`
+		BatchSize      uint64               `json:"batch_size,omitempty"`
+		Timeout        int64                `json:"timeout,omitempty"`
+		RequiredLabels []*metapb.StoreLabel `json:"required_labels,omitempty"`
+	}{
+		Timeout:   5 * 60 * 1000,
+		BatchSize: batch,
+		StartKey:  start,
+		EndKey:    end,
+	}
+	json.Unmarshal([]byte(labelsStr), &customerJson.RequiredLabels)
+	s, _ := json.Marshal(customerJson)
+	return []string{string(s)}
+}
+
 func (suite *balanceKeyrangeSchedulerTestSuite) TestBalanceKeyrangeNormal() {
 	re := suite.Require()
 
@@ -75,7 +96,7 @@ func (suite *balanceKeyrangeSchedulerTestSuite) TestBalanceKeyrangeNormal() {
 	r1StartKey := string(tc.GetRegion(1).GetMeta().GetStartKey())
 	r2StartKey := string(tc.GetRegion(2).GetMeta().GetStartKey())
 	r3EndKey := string(tc.GetRegion(3).GetMeta().GetEndKey())
-	sb, err := CreateScheduler(types.BalanceKeyrangeScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.BalanceKeyrangeScheduler, []string{"1", "", "100000", r1StartKey, r3EndKey}))
+	sb, err := CreateScheduler(types.BalanceKeyrangeScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.BalanceKeyrangeScheduler, MakeConfigJson(1, "", 100000, r1StartKey, r3EndKey)))
 	re.NoError(err)
 
 	ops, _ := sb.Schedule(tc, false)
@@ -84,12 +105,12 @@ func (suite *balanceKeyrangeSchedulerTestSuite) TestBalanceKeyrangeNormal() {
 	op := ops[0]
 	operatorutil.CheckTransferPeer(re, op, operator.OpKind(0), 10, 12)
 
-	sb, err = CreateScheduler(types.BalanceKeyrangeScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.BalanceKeyrangeScheduler, []string{"1", "", "100000", r2StartKey, r3EndKey}))
+	sb, err = CreateScheduler(types.BalanceKeyrangeScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.BalanceKeyrangeScheduler, MakeConfigJson(1, "", 100000, r2StartKey, r3EndKey)))
 	ops, _ = sb.Schedule(tc, false)
 	re.True(sb.IsFinished())
 	re.Empty(ops)
 
-	sb, err = CreateScheduler(types.BalanceKeyrangeScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.BalanceKeyrangeScheduler, []string{"1", "[{\"key\":\"engine\",\"value\":\"tiflash\"}]", "100000", r1StartKey, r3EndKey}))
+	sb, err = CreateScheduler(types.BalanceKeyrangeScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.BalanceKeyrangeScheduler, MakeConfigJson(1, "[{\"key\":\"engine\",\"value\":\"tiflash\"}]", 100000, r1StartKey, r3EndKey)))
 	ops, _ = sb.Schedule(tc, false)
 	re.True(sb.IsFinished())
 	re.Empty(ops)
@@ -112,13 +133,13 @@ func (suite *balanceKeyrangeSchedulerTestSuite) TestBalanceKeyrangeLabel() {
 	tc.AddLeaderRegion(4, 10, 11)
 	tc.AddLeaderRegion(5, 10, 12)
 
-	sb, err := CreateScheduler(types.BalanceKeyrangeScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.BalanceKeyrangeScheduler, []string{"5", "[{\"key\":\"engine\",\"value\":\"tiflash\"}]", "100000", "", "Z"}))
+	sb, err := CreateScheduler(types.BalanceKeyrangeScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.BalanceKeyrangeScheduler, MakeConfigJson(5, "[{\"key\":\"engine\",\"value\":\"tiflash\"}]", 100000, "", VeryBigEndKey)))
 	re.NoError(err)
 
 	ops, _ := sb.Schedule(tc, false)
 	re.Equal(2, len(ops))
 
-	sb, err = CreateScheduler(types.BalanceKeyrangeScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.BalanceKeyrangeScheduler, []string{"5", "[{\"key\":\"engine\",\"value\":\"tiflash\"},{\"label1\": \"value1\"}]", "100000", "", "Z"}))
+	sb, err = CreateScheduler(types.BalanceKeyrangeScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.BalanceKeyrangeScheduler, MakeConfigJson(5, "[{\"key\":\"engine\",\"value\":\"tiflash\"},{\"label1\": \"value1\"}]", 100000, "", VeryBigEndKey)))
 	re.NoError(err)
 	ops, _ = sb.Schedule(tc, false)
 	re.Empty(ops)
@@ -131,7 +152,7 @@ func (suite *balanceKeyrangeSchedulerTestSuite) TestBalanceKeyrangeFinish() {
 	defer cancel()
 	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 
-	sb, err := CreateScheduler(types.BalanceKeyrangeScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.BalanceKeyrangeScheduler, []string{"1", "", "100000", "", "Z"}))
+	sb, err := CreateScheduler(types.BalanceKeyrangeScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.BalanceKeyrangeScheduler, MakeConfigJson(1, "", 100000, "", VeryBigEndKey)))
 	re.NoError(err)
 
 	tc.AddLabelsStore(10, 16, map[string]string{"engine": "tiflash"})
@@ -175,7 +196,7 @@ func (suite *balanceKeyrangeSchedulerTestSuite) TestBalanceKeyrangeConfTimeout()
 	defer cancel()
 	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 
-	sb, err := CreateScheduler(types.BalanceKeyrangeScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.BalanceKeyrangeScheduler, []string{"1", "", "1000", "", "Z"}))
+	sb, err := CreateScheduler(types.BalanceKeyrangeScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.BalanceKeyrangeScheduler, MakeConfigJson(1, "", 1000, "", VeryBigEndKey)))
 	re.NoError(err)
 
 	tc.AddLabelsStore(10, 16, map[string]string{"engine": "tiflash"})

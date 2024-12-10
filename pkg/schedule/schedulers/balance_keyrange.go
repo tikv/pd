@@ -254,7 +254,7 @@ func RedistibuteRegions(c sche.SchedulerCluster, startKey, endKey []byte, requir
 type balanceKeyrangeSchedulerConfig struct {
 	baseDefaultSchedulerConfig
 
-	Range             core.KeyRange `json:"range"`
+	Range             core.KeyRange
 	RequiredLabels    []*metapb.StoreLabel
 	BatchSize         uint64
 	MaxRunMillis      int64

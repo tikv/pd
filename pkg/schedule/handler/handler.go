@@ -1303,7 +1303,7 @@ func (h *Handler) CheckRegionsReplicated(rawStartKey, rawEndKey string) (string,
 }
 
 // RedistibuteRegions
-func (h *Handler) RedistibuteRegions(rawStartKey, rawEndKey, requireLabels, timeout, batchSize string) (string, error) {
+func (h *Handler) RedistibuteRegions(data string) (string, error) {
 	sc, err := h.GetSchedulersController()
 	if err != nil {
 		return "", err
@@ -1321,7 +1321,7 @@ func (h *Handler) RedistibuteRegions(rawStartKey, rawEndKey, requireLabels, time
 		return controller.RemoveScheduler(s)
 	}
 	log.Info("!!!!! RedistibuteRegions check 3")
-	s, err := schedulers.CreateScheduler(types.BalanceKeyrangeScheduler, oc, storage.NewStorageWithMemoryBackend(), schedulers.ConfigSliceDecoder(types.BalanceKeyrangeScheduler, []string{batchSize, requireLabels, timeout, rawStartKey, rawEndKey}), cb)
+	s, err := schedulers.CreateScheduler(types.BalanceKeyrangeScheduler, oc, storage.NewStorageWithMemoryBackend(), schedulers.ConfigSliceDecoder(types.BalanceKeyrangeScheduler, []string{data}), cb)
 	if err != nil {
 		return "Created scheduler failed", err
 	}

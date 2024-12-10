@@ -21,6 +21,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
@@ -138,54 +139,47 @@ func schedulersRegister() {
 	// balance keyrange
 	RegisterSliceDecoderBuilder(types.BalanceKeyrangeScheduler, func(args []string) ConfigDecoder {
 		return func(v any) error {
+			log.Info("!!!!! aaaaaaaaaa 1")
 			conf, ok := v.(*balanceKeyrangeSchedulerConfig)
 			if !ok {
 				return errs.ErrScheduleConfigNotExist.FastGenByArgs()
 			}
-			if len(args) != 5 {
-				return errs.ErrSchedulerConfig.FastGenByArgs("Must provide `batchSize`, `labels`, `maxRunMillis`, `startKey`, `endKey`")
+			log.Info("!!!!! aaaaaaaaaa 3")
+			if len(args) != 1 {
+				return errs.ErrSchedulerConfig.FastGenByArgs("Invalid arguments number")
 			}
-			log.Info("!!!! BalanceKeyrangeScheduler 1")
-			if args[0] != "" {
-				b, err := strconv.ParseUint(args[0], 10, 64)
-				if err != nil {
-					return errs.ErrQueryUnescape.Wrap(err)
-				}
-				conf.BatchSize = b
-			} else {
-				conf.BatchSize = 5
+			customerJson := struct {
+				StartKey       string               `json:"start_key"`
+				EndKey         string               `json:"end_key"`
+				BatchSize      uint64               `json:"batch_size,omitempty"`
+				Timeout        int64                `json:"timeout,omitempty"`
+				RequiredLabels []*metapb.StoreLabel `json:"required_labels,omitempty"`
+			}{
+				RequiredLabels: make([]*metapb.StoreLabel, 0),
+				Timeout:        5 * 60 * 1000,
+				BatchSize:      5,
 			}
-			log.Info("!!!! BalanceKeyrangeScheduler 2")
-			if args[1] != "" {
-				err := json.Unmarshal([]byte(args[1]), &conf.RequiredLabels)
-				if err != nil {
-					return errs.ErrQueryUnescape.Wrap(err)
-				}
-			}
-			log.Info("!!!! BalanceKeyrangeScheduler 22", zap.Any("z", conf.RequiredLabels))
-			log.Info("!!!! BalanceKeyrangeScheduler 3")
-			if args[2] != "" {
-				mr, err := strconv.ParseInt(args[2], 10, 64)
-				if err != nil {
-					return errs.ErrQueryUnescape.Wrap(err)
-				}
-				conf.MaxRunMillis = mr
-			} else {
-				conf.MaxRunMillis = 5 * 60 * 1000
-			}
-			log.Info("!!!! BalanceKeyrangeScheduler 4", zap.Any("s", args[3]))
-			startKey, err := hex.DecodeString(args[3])
-			log.Info("!!!! BalanceKeyrangeScheduler 44", zap.Any("s", startKey))
+			err := json.Unmarshal([]byte(args[0]), &customerJson)
+			log.Info("!!!!! fdsfsdfsdf 1")
 			if err != nil {
-				return errs.ErrQueryUnescape.Wrap(err)
+				return errs.ErrSchedulerConfig.FastGenByArgs("Invalid arguments", err.Error())
 			}
-			log.Info("!!!! BalanceKeyrangeScheduler 5", zap.Any("s", args[4]))
-			endKey, err := hex.DecodeString(args[4])
-			log.Info("!!!! BalanceKeyrangeScheduler 44", zap.Any("s", endKey))
+
+			conf.BatchSize = customerJson.BatchSize
+			conf.RequiredLabels = customerJson.RequiredLabels
+			conf.MaxRunMillis = customerJson.Timeout
+			startKey, err := hex.DecodeString(customerJson.StartKey)
+			log.Info("!!!!! fdsfsdfsdf 2")
 			if err != nil {
-				return errs.ErrQueryUnescape.Wrap(err)
+				return errs.ErrSchedulerConfig.FastGenByArgs("Invalid arguments(start_key)", err.Error())
 			}
-			log.Info("!!!! BalanceKeyrangeScheduler 6")
+			log.Info("!!!!! fdsfsdfsdf 4")
+			endKey, err := hex.DecodeString(customerJson.EndKey)
+			if err != nil {
+				log.Info("!!!!! fdsfsdfsdf e", zap.Error(err), zap.Any("b", customerJson.EndKey))
+				return errs.ErrSchedulerConfig.FastGenByArgs("Invalid arguments(end_key)", err.Error())
+			}
+			log.Info("!!!!! fdsfsdfsdf 9")
 			conf.Range = core.KeyRange{StartKey: startKey, EndKey: endKey}
 			return nil
 		}
