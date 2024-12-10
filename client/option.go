@@ -18,6 +18,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	cb "github.com/tikv/pd/client/circuitbreaker"
+
 	"github.com/pingcap/errors"
 	"github.com/prometheus/client_golang/prometheus"
 	"google.golang.org/grpc"
@@ -46,6 +48,8 @@ const (
 	EnableFollowerHandle
 	// TSOClientRPCConcurrency controls the amount of ongoing TSO RPC requests at the same time in a single TSO client.
 	TSOClientRPCConcurrency
+	// RegionMetadataCircuitBreakerSettings controls settings for circuit breaker for region metadata requests.
+	RegionMetadataCircuitBreakerSettings
 
 	dynamicOptionCount
 )
@@ -65,6 +69,7 @@ type option struct {
 	// Dynamic options.
 	dynamicOptions [dynamicOptionCount]atomic.Value
 
+<<<<<<< HEAD:client/option.go
 	enableTSOFollowerProxyCh chan struct{}
 }
 
@@ -75,6 +80,20 @@ func newOption() *option {
 		maxRetryTimes:            maxInitClusterRetries,
 		enableTSOFollowerProxyCh: make(chan struct{}, 1),
 		initMetrics:              true,
+=======
+	EnableTSOFollowerProxyCh         chan struct{}
+	RegionMetaCircuitBreakerSettings cb.Settings
+}
+
+// NewOption creates a new PD client option with the default values set.
+func NewOption() *Option {
+	co := &Option{
+		Timeout:                          defaultPDTimeout,
+		MaxRetryTimes:                    maxInitClusterRetries,
+		EnableTSOFollowerProxyCh:         make(chan struct{}, 1),
+		InitMetrics:                      true,
+		RegionMetaCircuitBreakerSettings: cb.AlwaysClosedSettings,
+>>>>>>> 1e76110a1 (client: introduce circuit breaker for region calls (#8856)):client/opt/option.go
 	}
 
 	co.dynamicOptions[MaxTSOBatchWaitInterval].Store(defaultMaxTSOBatchWaitInterval)
@@ -143,6 +162,82 @@ func (o *option) getTSOClientRPCConcurrency() int {
 	return o.dynamicOptions[TSOClientRPCConcurrency].Load().(int)
 }
 
+<<<<<<< HEAD:client/option.go
+=======
+// GetRegionMetadataCircuitBreakerSettings gets circuit breaker settings for PD region metadata calls.
+func (o *Option) GetRegionMetadataCircuitBreakerSettings() cb.Settings {
+	return o.dynamicOptions[RegionMetadataCircuitBreakerSettings].Load().(cb.Settings)
+}
+
+// ClientOption configures client.
+type ClientOption func(*Option)
+
+// WithGRPCDialOptions configures the client with gRPC dial options.
+func WithGRPCDialOptions(opts ...grpc.DialOption) ClientOption {
+	return func(op *Option) {
+		op.GRPCDialOptions = append(op.GRPCDialOptions, opts...)
+	}
+}
+
+// WithCustomTimeoutOption configures the client with timeout option.
+func WithCustomTimeoutOption(timeout time.Duration) ClientOption {
+	return func(op *Option) {
+		op.Timeout = timeout
+	}
+}
+
+// WithForwardingOption configures the client with forwarding option.
+func WithForwardingOption(enableForwarding bool) ClientOption {
+	return func(op *Option) {
+		op.EnableForwarding = enableForwarding
+	}
+}
+
+// WithTSOServerProxyOption configures the client to use TSO server proxy,
+// i.e., the client will send TSO requests to the API leader (the TSO server
+// proxy) which will forward the requests to the TSO servers.
+func WithTSOServerProxyOption(useTSOServerProxy bool) ClientOption {
+	return func(op *Option) {
+		op.UseTSOServerProxy = useTSOServerProxy
+	}
+}
+
+// WithMaxErrorRetry configures the client max retry times when connect meets error.
+func WithMaxErrorRetry(count int) ClientOption {
+	return func(op *Option) {
+		op.MaxRetryTimes = count
+	}
+}
+
+// WithMetricsLabels configures the client with metrics labels.
+func WithMetricsLabels(labels prometheus.Labels) ClientOption {
+	return func(op *Option) {
+		op.MetricsLabels = labels
+	}
+}
+
+// WithInitMetricsOption configures the client with metrics labels.
+func WithInitMetricsOption(initMetrics bool) ClientOption {
+	return func(op *Option) {
+		op.InitMetrics = initMetrics
+	}
+}
+
+// WithRegionMetaCircuitBreaker configures the client with circuit breaker for region meta calls
+func WithRegionMetaCircuitBreaker(config cb.Settings) ClientOption {
+	return func(op *Option) {
+		op.RegionMetaCircuitBreakerSettings = config
+	}
+}
+
+// WithBackoffer configures the client with backoffer.
+func WithBackoffer(bo *retry.Backoffer) ClientOption {
+	return func(op *Option) {
+		op.Backoffer = bo
+	}
+}
+
+>>>>>>> 1e76110a1 (client: introduce circuit breaker for region calls (#8856)):client/opt/option.go
 // GetStoreOp represents available options when getting stores.
 type GetStoreOp struct {
 	excludeTombstone bool
