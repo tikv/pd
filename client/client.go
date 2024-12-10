@@ -22,8 +22,6 @@ import (
 	"sync"
 	"time"
 
-	cb "github.com/tikv/pd/client/circuitbreaker"
-
 	"github.com/opentracing/opentracing-go"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
@@ -31,6 +29,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/prometheus/client_golang/prometheus"
+	cb "github.com/tikv/pd/client/circuitbreaker"
 	"github.com/tikv/pd/client/clients/metastorage"
 	"github.com/tikv/pd/client/clients/router"
 	"github.com/tikv/pd/client/clients/tso"
@@ -42,6 +41,8 @@ import (
 	"github.com/tikv/pd/client/pkg/utils/tlsutil"
 	sd "github.com/tikv/pd/client/servicediscovery"
 	"go.uber.org/zap"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // GlobalConfigItem standard format of KV pair in GlobalConfig client
@@ -660,6 +661,9 @@ func (c *client) GetRegion(ctx context.Context, key []byte, opts ...opt.GetRegio
 	}
 	resp, err := c.inner.regionMetaCircuitBreaker.Execute(func() (*pdpb.GetRegionResponse, cb.Overloading, error) {
 		region, err := pdpb.NewPDClient(serviceClient.GetClientConn()).GetRegion(cctx, req)
+		failpoint.Inject("triggerCircuitBreaker", func() {
+			err = status.Error(codes.ResourceExhausted, "resource exhausted")
+		})
 		return region, isOverloaded(err), err
 	})
 	if serviceClient.NeedRetry(resp.GetHeader().GetError(), err) {
