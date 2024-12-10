@@ -315,7 +315,7 @@ func (c *RaftCluster) InitCluster(
 }
 
 // Start starts a cluster.
-func (c *RaftCluster) Start(s Server) error {
+func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 	c.Lock()
 	defer c.Unlock()
 
@@ -324,23 +324,28 @@ func (c *RaftCluster) Start(s Server) error {
 		return nil
 	}
 	c.isAPIServiceMode = s.IsAPIServiceMode()
-	err := c.InitCluster(s.GetAllocator(), s.GetPersistOptions(), s.GetHBStreams(), s.GetKeyspaceGroupManager())
+	err = c.InitCluster(s.GetAllocator(), s.GetPersistOptions(), s.GetHBStreams(), s.GetKeyspaceGroupManager())
 	if err != nil {
 		return err
 	}
-	c.checkTSOService()
+	// We should not manage tso service when bootstrap try to start raft cluster.
+	// It only is controlled by leader election.
+	// Ref: https://github.com/tikv/pd/issues/8836
+	if !bootstrap {
+		c.checkTSOService()
+	}
 	defer func() {
-		// We need to try to stop tso jobs when the cluster is not running.
-		// Ref: https://github.com/tikv/pd/issues/8836
-		if !c.running {
+		if !bootstrap && err != nil {
 			c.stopTSOJobsIfNeeded()
 		}
 	}()
 	failpoint.Inject("raftClusterReturn", func(val failpoint.Value) {
 		if val, ok := val.(bool); (ok && val) || !ok {
-			failpoint.Return(errors.New("raftClusterReturn"))
+			err = errors.New("raftClusterReturn")
+		} else {
+			err = nil
 		}
-		failpoint.Return(nil)
+		failpoint.Return(err)
 	})
 	cluster, err := c.LoadClusterInfo()
 	if err != nil {

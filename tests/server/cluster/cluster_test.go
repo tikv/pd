@@ -578,7 +578,7 @@ func TestRaftClusterRestart(t *testing.T) {
 	re.NotNil(rc)
 	rc.Stop()
 
-	err = rc.Start(leaderServer.GetServer())
+	err = rc.Start(leaderServer.GetServer(), false)
 	re.NoError(err)
 
 	rc = leaderServer.GetRaftCluster()
@@ -621,7 +621,7 @@ func TestRaftClusterMultipleRestart(t *testing.T) {
 	for range 100 {
 		// See https://github.com/tikv/pd/issues/8543
 		rc.Wait()
-		err = rc.Start(leaderServer.GetServer())
+		err = rc.Start(leaderServer.GetServer(), false)
 		re.NoError(err)
 		time.Sleep(time.Millisecond)
 		rc.Stop()
@@ -664,7 +664,7 @@ func TestRaftClusterStartTSOJob(t *testing.T) {
 	tc.WaitLeader()
 	testutil.Eventually(re, func() bool {
 		allocator := tc.GetServer(name).GetServer().GetGlobalTSOAllocator()
-		return !allocator.IsInitialize()
+		return allocator.IsInitialize()
 	})
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/raftClusterReturn"))
 	tc.Destroy()
@@ -1528,7 +1528,7 @@ func TestTransferLeaderForScheduler(t *testing.T) {
 	tc.WaitLeader()
 	leaderServer = tc.GetLeaderServer()
 	rc1 := leaderServer.GetServer().GetRaftCluster()
-	rc1.Start(leaderServer.GetServer())
+	rc1.Start(leaderServer.GetServer(), false)
 	re.NoError(err)
 	re.NotNil(rc1)
 	// region heartbeat
@@ -1548,7 +1548,7 @@ func TestTransferLeaderForScheduler(t *testing.T) {
 	tc.WaitLeader()
 	leaderServer = tc.GetLeaderServer()
 	rc = leaderServer.GetServer().GetRaftCluster()
-	rc.Start(leaderServer.GetServer())
+	rc.Start(leaderServer.GetServer(), false)
 	re.NotNil(rc)
 	// region heartbeat
 	id = leaderServer.GetAllocator()
