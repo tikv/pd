@@ -2072,7 +2072,7 @@ func TestCircuitBreaker(t *testing.T) {
 	cli := setupCli(ctx, re, endpoints, opt.WithRegionMetaCircuitBreaker(circuitBreakerSettings))
 	defer cli.Close()
 
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		region, err := cli.GetRegion(context.TODO(), []byte("a"))
 		re.NoError(err)
 		re.NotNil(region)
@@ -2080,7 +2080,7 @@ func TestCircuitBreaker(t *testing.T) {
 
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/triggerCircuitBreaker", "return(true)"))
 
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		_, err := cli.GetRegion(context.TODO(), []byte("a"))
 		re.Error(err)
 	}
@@ -2097,7 +2097,7 @@ func TestCircuitBreaker(t *testing.T) {
 	// wait cooldown
 	time.Sleep(time.Second)
 
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		region, err := cli.GetRegion(context.TODO(), []byte("a"))
 		re.NoError(err)
 		re.NotNil(region)
@@ -2125,7 +2125,7 @@ func TestCircuitBreakerChangeSettings(t *testing.T) {
 	cli := setupCli(ctx, re, endpoints, opt.WithRegionMetaCircuitBreaker(circuitBreakerSettings))
 	defer cli.Close()
 
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		region, err := cli.GetRegion(context.TODO(), []byte("a"))
 		re.NoError(err)
 		re.NotNil(region)
@@ -2133,7 +2133,7 @@ func TestCircuitBreakerChangeSettings(t *testing.T) {
 
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/triggerCircuitBreaker", "return(true)"))
 
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		_, err := cli.GetRegion(context.TODO(), []byte("a"))
 		re.Error(err)
 	}
