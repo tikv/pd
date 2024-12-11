@@ -101,8 +101,6 @@ type CreateKeyspaceRequest struct {
 	Config map[string]string
 	// CreateTime is the timestamp used to record creation time.
 	CreateTime int64
-	// IsPreAlloc indicates whether the keyspace is pre-allocated when the cluster starts.
-	IsPreAlloc bool
 }
 
 // NewKeyspaceManager creates a Manager of keyspace related data.
@@ -163,24 +161,29 @@ func (manager *Manager) Bootstrap() error {
 	// Initialize pre-alloc keyspace.
 	preAlloc := manager.config.GetPreAlloc()
 	for _, keyspaceName := range preAlloc {
-		config, err := manager.kgm.GetKeyspaceConfigByKind(endpoint.Basic)
-		if err != nil {
-			return err
-		}
-		req := &CreateKeyspaceRequest{
-			Name:       keyspaceName,
-			CreateTime: now,
-			IsPreAlloc: true,
-			Config:     config,
-		}
-		keyspace, err := manager.CreateKeyspace(req)
-		// Ignore the keyspaceExists error for the same reason as saving default keyspace.
-		if err != nil && err != errs.ErrKeyspaceExists {
-			return err
-		}
-		if err := manager.kgm.UpdateKeyspaceForGroup(endpoint.Basic, config[TSOKeyspaceGroupIDKey], keyspace.GetId(), opAdd); err != nil {
-			return err
-		}
+		keyspaceName := keyspaceName
+		go func() {
+			config, err := manager.kgm.GetKeyspaceConfigByKind(endpoint.Basic)
+			if err != nil {
+				log.Error("[keyspace] failed to get keyspace config for pre-alloc keyspace", zap.String("keyspaceName", keyspaceName), zap.Error(err))
+				return
+			}
+			req := &CreateKeyspaceRequest{
+				Name:       keyspaceName,
+				CreateTime: now,
+				Config:     config,
+			}
+			keyspace, err := manager.CreateKeyspace(req)
+			// Ignore the keyspaceExists error for the same reason as saving default keyspace.
+			if err != nil && err != errs.ErrKeyspaceExists {
+				log.Error("[keyspace] failed to create pre-alloc keyspace", zap.String("keyspaceName", keyspaceName), zap.Error(err))
+				return
+			}
+			if err := manager.kgm.UpdateKeyspaceForGroup(endpoint.Basic, config[TSOKeyspaceGroupIDKey], keyspace.GetId(), opAdd); err != nil {
+				log.Error("[keyspace] failed to update pre-alloc keyspace for group", zap.String("keyspaceName", keyspaceName), zap.Error(err))
+				return
+			}
+		}()
 	}
 	return nil
 }
@@ -232,11 +235,8 @@ func (manager *Manager) CreateKeyspace(request *CreateKeyspaceRequest) (*keyspac
 		)
 		return nil, err
 	}
-	// If the request to create a keyspace is pre-allocated when the PD starts,
-	// there is no need to wait for the region split, because TiKV has not started.
-	waitRegionSplit := !request.IsPreAlloc && manager.config.ToWaitRegionSplit()
 	// Split keyspace region.
-	err = manager.splitKeyspaceRegion(newID, waitRegionSplit)
+	err = manager.splitKeyspaceRegion(newID, manager.config.ToWaitRegionSplit())
 	if err != nil {
 		err2 := manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
 			idPath := keypath.KeyspaceIDPath(request.Name)
@@ -531,7 +531,6 @@ func (manager *Manager) UpdateKeyspaceConfig(name string, mutations []*Mutation)
 		}
 		return nil
 	})
-
 	if err != nil {
 		log.Warn("[keyspace] failed to update keyspace config",
 			zap.Uint32("keyspace-id", meta.GetId()),
