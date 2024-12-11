@@ -1654,7 +1654,7 @@ func (s *Server) campaignLeader() {
 	log.Info("start to campaign PD leader", zap.String("campaign-leader-name", s.Name()))
 	if err := s.member.CampaignLeader(s.ctx, s.cfg.LeaderLease); err != nil {
 		if err.Error() == errs.ErrEtcdTxnConflict.Error() {
-			log.Info("campaign %PD leader meets error due to txn conflict, another PD/API server may campaign successfully",
+			log.Info("campaign PD leader meets error due to txn conflict, another PD/API server may campaign successfully",
 				zap.String("campaign-leader-name", s.Name()))
 		} else {
 			log.Error("campaign PD leader meets error due to etcd error",
