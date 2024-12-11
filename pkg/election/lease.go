@@ -125,7 +125,7 @@ func (l *lease) KeepAlive(ctx context.Context) {
 					l.expireTime.Store(t)
 				}
 			}
-			timerutil.SafeResetTimer(timer,l.leaseTimeout)
+			timerutil.SafeResetTimer(timer, l.leaseTimeout)
 		case <-timer.C:
 			log.Info("lease timeout", zap.Time("expire", l.expireTime.Load().(time.Time)), zap.String("purpose", l.Purpose))
 			return
