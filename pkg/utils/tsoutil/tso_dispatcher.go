@@ -24,7 +24,12 @@ import (
 	"github.com/pingcap/log"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/tikv/pd/pkg/errs"
+<<<<<<< HEAD
+=======
+	"github.com/tikv/pd/pkg/utils/etcdutil"
+>>>>>>> 86d4ad0f1 (resource control: fix unsafe usage of timer.Reset (#8877))
 	"github.com/tikv/pd/pkg/utils/logutil"
+	"github.com/tikv/pd/pkg/utils/timerutil"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 )
@@ -210,7 +215,26 @@ type deadline struct {
 	cancel context.CancelFunc
 }
 
+<<<<<<< HEAD
 func watchTSDeadline(ctx context.Context, tsDeadlineCh <-chan deadline) {
+=======
+// NewTSDeadline creates a new TSDeadline.
+func NewTSDeadline(
+	timeout time.Duration,
+	done chan struct{},
+	cancel context.CancelFunc,
+) *TSDeadline {
+	timer := timerutil.GlobalTimerPool.Get(timeout)
+	return &TSDeadline{
+		timer:  timer,
+		done:   done,
+		cancel: cancel,
+	}
+}
+
+// WatchTSDeadline watches the deadline of each tso request.
+func WatchTSDeadline(ctx context.Context, tsDeadlineCh <-chan *TSDeadline) {
+>>>>>>> 86d4ad0f1 (resource control: fix unsafe usage of timer.Reset (#8877))
 	defer logutil.LogPanic()
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -222,9 +246,17 @@ func watchTSDeadline(ctx context.Context, tsDeadlineCh <-chan deadline) {
 				log.Error("tso proxy request processing is canceled due to timeout",
 					errs.ZapError(errs.ErrProxyTSOTimeout))
 				d.cancel()
+<<<<<<< HEAD
 			case <-d.done:
 				continue
 			case <-ctx.Done():
+=======
+				timerutil.GlobalTimerPool.Put(d.timer)
+			case <-d.done:
+				timerutil.GlobalTimerPool.Put(d.timer)
+			case <-ctx.Done():
+				timerutil.GlobalTimerPool.Put(d.timer)
+>>>>>>> 86d4ad0f1 (resource control: fix unsafe usage of timer.Reset (#8877))
 				return
 			}
 		case <-ctx.Done():

@@ -28,6 +28,11 @@ import (
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/grpcutil"
 	"github.com/tikv/pd/client/retry"
+<<<<<<< HEAD
+=======
+	"github.com/tikv/pd/client/timerutil"
+	"github.com/tikv/pd/client/tsoutil"
+>>>>>>> 86d4ad0f1 (resource control: fix unsafe usage of timer.Reset (#8877))
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -140,6 +145,22 @@ type deadline struct {
 	cancel context.CancelFunc
 }
 
+<<<<<<< HEAD
+=======
+func newTSDeadline(
+	timeout time.Duration,
+	done chan struct{},
+	cancel context.CancelFunc,
+) *deadline {
+	timer := timerutil.GlobalTimerPool.Get(timeout)
+	return &deadline{
+		timer:  timer,
+		done:   done,
+		cancel: cancel,
+	}
+}
+
+>>>>>>> 86d4ad0f1 (resource control: fix unsafe usage of timer.Reset (#8877))
 func (c *tsoClient) tsCancelLoop() {
 	defer c.wg.Done()
 
@@ -178,9 +199,17 @@ func (c *tsoClient) watchTSDeadline(ctx context.Context, dcLocation string) {
 					case <-d.timer:
 						log.Error("[tso] tso request is canceled due to timeout", zap.String("dc-location", dc), errs.ZapError(errs.ErrClientGetTSOTimeout))
 						d.cancel()
+<<<<<<< HEAD
 					case <-d.done:
 						continue
 					case <-ctx.Done():
+=======
+						timerutil.GlobalTimerPool.Put(d.timer)
+					case <-d.done:
+						timerutil.GlobalTimerPool.Put(d.timer)
+					case <-ctx.Done():
+						timerutil.GlobalTimerPool.Put(d.timer)
+>>>>>>> 86d4ad0f1 (resource control: fix unsafe usage of timer.Reset (#8877))
 						return
 					}
 				case <-ctx.Done():
@@ -390,7 +419,11 @@ tsoBatchLoop:
 		if maxBatchWaitInterval >= 0 {
 			tbc.adjustBestBatchSize()
 		}
+<<<<<<< HEAD
 		streamLoopTimer.Reset(c.option.timeout)
+=======
+		timerutil.SafeResetTimer(streamLoopTimer, c.option.timeout)
+>>>>>>> 86d4ad0f1 (resource control: fix unsafe usage of timer.Reset (#8877))
 		// Choose a stream to send the TSO gRPC request.
 	streamChoosingLoop:
 		for {
