@@ -501,11 +501,9 @@ func (c *client) GetTSAsync(ctx context.Context) tso.TSFuture {
 	return c.inner.dispatchTSORequestWithRetry(ctx)
 }
 
-// GetLocalTSAsync implements the TSOClient interface.
-//
 // Deprecated: the Local TSO feature has been deprecated. Regardless of the
 // parameters passed, the behavior of this interface will be equivalent to
-// `GetTSAsync/GetTS`. If you want to use a separately deployed TSO service,
+// `GetTSAsync`. If you want to use a separately deployed TSO service,
 // please refer to the deployment of the TSO microservice.
 func (c *client) GetLocalTSAsync(ctx context.Context, _ string) tso.TSFuture {
 	return c.GetTSAsync(ctx)
@@ -517,11 +515,9 @@ func (c *client) GetTS(ctx context.Context) (physical int64, logical int64, err 
 	return resp.Wait()
 }
 
-// GetLocalTS implements the TSOClient interface.
-//
 // Deprecated: the Local TSO feature has been deprecated. Regardless of the
 // parameters passed, the behavior of this interface will be equivalent to
-// `GetTSAsync/GetTS`. If you want to use a separately deployed TSO service,
+// `GetTS`. If you want to use a separately deployed TSO service,
 // please refer to the deployment of the TSO microservice.
 func (c *client) GetLocalTS(ctx context.Context, _ string) (physical int64, logical int64, err error) {
 	return c.GetTS(ctx)
