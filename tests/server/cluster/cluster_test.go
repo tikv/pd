@@ -1416,7 +1416,7 @@ func TestTransferLeaderForScheduler(t *testing.T) {
 		"store_id": 2,
 	})
 	// Check scheduler updated.
-	re.Len(rc.GetSchedulers(), 6)
+	re.Len(rc.GetSchedulers(), 4)
 	checkEvictLeaderSchedulerExist(re, rc, true)
 	checkEvictLeaderStoreIDs(re, rc, []uint64{1, 2})
 
@@ -1435,7 +1435,7 @@ func TestTransferLeaderForScheduler(t *testing.T) {
 	time.Sleep(time.Second)
 	re.True(leaderServer.GetRaftCluster().IsPrepared())
 	// Check scheduler updated.
-	re.Len(rc1.GetSchedulers(), 6)
+	re.Len(rc1.GetSchedulers(), 4)
 	checkEvictLeaderSchedulerExist(re, rc, true)
 	checkEvictLeaderStoreIDs(re, rc, []uint64{1, 2})
 
@@ -1453,7 +1453,7 @@ func TestTransferLeaderForScheduler(t *testing.T) {
 	time.Sleep(time.Second)
 	re.True(leaderServer.GetRaftCluster().IsPrepared())
 	// Check scheduler updated
-	re.Len(rc.GetSchedulers(), 6)
+	re.Len(rc.GetSchedulers(), 4)
 	checkEvictLeaderSchedulerExist(re, rc, true)
 	checkEvictLeaderStoreIDs(re, rc, []uint64{1, 2})
 
