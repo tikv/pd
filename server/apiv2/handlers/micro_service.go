@@ -38,11 +38,6 @@ func RegisterMicroService(r *gin.RouterGroup) {
 // @Router   /ms/members/{service} [get]
 func GetMembers(c *gin.Context) {
 	svr := c.MustGet(middlewares.ServerContextKey).(*server.Server)
-	if !svr.IsAPIServiceMode() {
-		c.AbortWithStatusJSON(http.StatusNotFound, "not support micro service")
-		return
-	}
-
 	if service := c.Param("service"); len(service) > 0 {
 		entries, err := discovery.GetMSMembers(service, svr.GetClient())
 		if err != nil {
@@ -64,11 +59,6 @@ func GetMembers(c *gin.Context) {
 // @Router   /ms/primary/{service} [get]
 func GetPrimary(c *gin.Context) {
 	svr := c.MustGet(middlewares.ServerContextKey).(*server.Server)
-	if !svr.IsAPIServiceMode() {
-		c.AbortWithStatusJSON(http.StatusNotFound, "not support micro service")
-		return
-	}
-
 	if service := c.Param("service"); len(service) > 0 {
 		addr, _ := svr.GetServicePrimaryAddr(c.Request.Context(), service)
 		c.IndentedJSON(http.StatusOK, addr)

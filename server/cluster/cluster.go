@@ -129,7 +129,7 @@ type Server interface {
 	GetMembers() ([]*pdpb.Member, error)
 	ReplicateFileToMember(ctx context.Context, member *pdpb.Member, name string, data []byte) error
 	GetKeyspaceGroupManager() *keyspace.GroupManager
-	IsAPIServiceMode() bool
+	IsKeyspaceEnabled() bool
 	GetSafePointV2Manager() *gc.SafePointV2Manager
 }
 
@@ -154,12 +154,12 @@ type RaftCluster struct {
 	etcdClient *clientv3.Client
 	httpClient *http.Client
 
-	running          bool
-	isAPIServiceMode bool
-	meta             *metapb.Cluster
-	storage          storage.Storage
-	minResolvedTS    atomic.Value // Store as uint64
-	externalTS       atomic.Value // Store as uint64
+	running           bool
+	isKeyspaceEnabled bool
+	meta              *metapb.Cluster
+	storage           storage.Storage
+	minResolvedTS     atomic.Value // Store as uint64
+	externalTS        atomic.Value // Store as uint64
 
 	// Keep the previous store limit settings when removing a store.
 	prevStoreLimit map[uint64]map[storelimit.Type]float64
@@ -323,7 +323,7 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 		log.Warn("raft cluster has already been started")
 		return nil
 	}
-	c.isAPIServiceMode = s.IsAPIServiceMode()
+	c.isKeyspaceEnabled = s.IsKeyspaceEnabled()
 	err = c.InitCluster(s.GetAllocator(), s.GetPersistOptions(), s.GetHBStreams(), s.GetKeyspaceGroupManager())
 	if err != nil {
 		return err
@@ -374,7 +374,7 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 	c.loadExternalTS()
 	c.loadMinResolvedTS()
 
-	if c.isAPIServiceMode {
+	if c.isKeyspaceEnabled {
 		// bootstrap keyspace group manager after starting other parts successfully.
 		// This order avoids a stuck goroutine in keyspaceGroupManager when it fails to create raftcluster.
 		err = c.keyspaceGroupManager.Bootstrap(c.ctx)
@@ -402,53 +402,57 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 }
 
 func (c *RaftCluster) checkSchedulingService() {
-	if c.isAPIServiceMode {
-		servers, err := discovery.Discover(c.etcdClient, constant.SchedulingServiceName)
-		if c.opt.GetMicroServiceConfig().IsSchedulingFallbackEnabled() && (err != nil || len(servers) == 0) {
-			c.startSchedulingJobs(c, c.hbstreams)
-			c.UnsetServiceIndependent(constant.SchedulingServiceName)
-		} else {
-			if c.stopSchedulingJobs() || c.coordinator == nil {
-				c.initCoordinator(c.ctx, c, c.hbstreams)
-			}
-			if !c.IsServiceIndependent(constant.SchedulingServiceName) {
-				c.SetServiceIndependent(constant.SchedulingServiceName)
-			}
-		}
-	} else {
+	servers, err := discovery.Discover(c.etcdClient, constant.SchedulingServiceName)
+	if c.opt.GetMicroServiceConfig().IsSchedulingFallbackEnabled() && (err != nil || len(servers) == 0) {
 		c.startSchedulingJobs(c, c.hbstreams)
 		c.UnsetServiceIndependent(constant.SchedulingServiceName)
+	} else {
+		if c.stopSchedulingJobs() || c.coordinator == nil {
+			c.initCoordinator(c.ctx, c, c.hbstreams)
+		}
+		if !c.IsServiceIndependent(constant.SchedulingServiceName) {
+			c.SetServiceIndependent(constant.SchedulingServiceName)
+		}
 	}
 }
 
 // checkTSOService checks the TSO service.
 func (c *RaftCluster) checkTSOService() {
-	if c.isAPIServiceMode {
-		if c.opt.GetMicroServiceConfig().IsTSODynamicSwitchingEnabled() {
-			servers, err := discovery.Discover(c.etcdClient, constant.TSOServiceName)
-			if err != nil || len(servers) == 0 {
-				if err := c.startTSOJobsIfNeeded(); err != nil {
-					log.Error("failed to start TSO jobs", errs.ZapError(err))
-					return
-				}
-				if c.IsServiceIndependent(constant.TSOServiceName) {
-					log.Info("TSO is provided by PD")
-					c.UnsetServiceIndependent(constant.TSOServiceName)
-				}
-			} else {
-				c.stopTSOJobsIfNeeded()
-				if !c.IsServiceIndependent(constant.TSOServiceName) {
-					log.Info("TSO is provided by TSO server")
-					c.SetServiceIndependent(constant.TSOServiceName)
-				}
-			}
+	if !c.opt.GetMicroServiceConfig().IsTSODynamicSwitchingEnabled() {
+		if err := c.switchToInternalTSO(); err != nil {
+			log.Error("failed to start TSO jobs", errs.ZapError(err))
+			return
 		}
 		return
 	}
 
+	servers, err := discovery.Discover(c.etcdClient, constant.TSOServiceName)
+	if err != nil || len(servers) == 0 {
+		if err := c.switchToInternalTSO(); err != nil {
+			log.Error("failed to switch to internal TSO", errs.ZapError(err))
+			return
+		}
+	} else if len(servers) > 0 {
+		c.switchToExternalTSO()
+	}
+}
+
+func (c *RaftCluster) switchToInternalTSO() error {
 	if err := c.startTSOJobsIfNeeded(); err != nil {
-		log.Error("failed to start TSO jobs", errs.ZapError(err))
-		return
+		return err
+	}
+	if c.IsServiceIndependent(constant.TSOServiceName) {
+		c.UnsetServiceIndependent(constant.TSOServiceName)
+		log.Info("successfully switched to internal TSO")
+	}
+	return nil
+}
+
+func (c *RaftCluster) switchToExternalTSO() {
+	c.stopTSOJobsIfNeeded()
+	if !c.IsServiceIndependent(constant.TSOServiceName) {
+		c.SetServiceIndependent(constant.TSOServiceName)
+		log.Info("successfully switched to external TSO")
 	}
 }
 

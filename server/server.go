@@ -96,10 +96,8 @@ const (
 
 	recoveringMarkPath = "cluster/markers/snapshot-recovering"
 
-	// PDMode represents that server is in PD mode.
-	PDMode = "PD"
-	// APIServiceMode represents that server is in API service mode.
-	APIServiceMode = "API Service"
+	// PD is the default service name.
+	PD = "PD"
 
 	// maxRetryTimesGetServicePrimary is the max retry times for getting primary addr.
 	// Note: it need to be less than client.defaultPDTimeout
@@ -224,7 +222,7 @@ type Server struct {
 	auditBackends []audit.Backend
 
 	registry                 *registry.ServiceRegistry
-	mode                     string
+	isKeyspaceEnabled        bool
 	servicePrimaryMap        sync.Map /* Store as map[string]string */
 	tsoPrimaryWatcher        *etcdutil.LoopWatcher
 	schedulingPrimaryWatcher *etcdutil.LoopWatcher
@@ -238,13 +236,11 @@ type HandlerBuilder func(context.Context, *Server) (http.Handler, apiutil.APISer
 
 // CreateServer creates the UNINITIALIZED pd server with given configuration.
 func CreateServer(ctx context.Context, cfg *config.Config, services []string, legacyServiceBuilders ...HandlerBuilder) (*Server, error) {
-	var mode string
+	var isKeyspaceEnabled bool
 	if len(services) != 0 {
-		mode = APIServiceMode
-	} else {
-		mode = PDMode
+		isKeyspaceEnabled = true
 	}
-	log.Info(fmt.Sprintf("%s config", mode), zap.Reflect("config", cfg))
+	log.Info("PD config", zap.Reflect("config", cfg))
 	serviceMiddlewareCfg := config.NewServiceMiddlewareConfig()
 
 	s := &Server{
@@ -256,7 +252,7 @@ func CreateServer(ctx context.Context, cfg *config.Config, services []string, le
 		ctx:                             ctx,
 		startTimestamp:                  time.Now().Unix(),
 		DiagnosticsServer:               sysutil.NewDiagnosticsServer(cfg.Log.File.Filename),
-		mode:                            mode,
+		isKeyspaceEnabled:               isKeyspaceEnabled,
 		tsoClientPool: struct {
 			syncutil.RWMutex
 			clients map[string]tsopb.TSO_TsoClient
@@ -475,7 +471,7 @@ func (s *Server) startServer(ctx context.Context) error {
 		Member: s.member.MemberValue(),
 		Step:   keyspace.AllocStep,
 	})
-	if s.IsAPIServiceMode() {
+	if s.IsKeyspaceEnabled() {
 		s.keyspaceGroupManager = keyspace.NewKeyspaceGroupManager(s.ctx, s.storage, s.client)
 	}
 	s.keyspaceManager = keyspace.NewKeyspaceManager(s.ctx, s.storage, s.cluster, keyspaceIDAllocator, &s.cfg.Keyspace, s.keyspaceGroupManager)
@@ -526,7 +522,7 @@ func (s *Server) Close() {
 	s.cgMonitor.StopMonitor()
 
 	s.stopServerLoop()
-	if s.IsAPIServiceMode() {
+	if s.IsKeyspaceEnabled() {
 		s.keyspaceGroupManager.Close()
 	}
 
@@ -637,10 +633,8 @@ func (s *Server) startServerLoop(ctx context.Context) {
 	go s.etcdLeaderLoop()
 	go s.serverMetricsLoop()
 	go s.encryptionKeyManagerLoop()
-	if s.IsAPIServiceMode() {
-		s.initTSOPrimaryWatcher()
-		s.initSchedulingPrimaryWatcher()
-	}
+	s.initTSOPrimaryWatcher()
+	s.initSchedulingPrimaryWatcher()
 }
 
 func (s *Server) stopServerLoop() {
@@ -784,9 +778,9 @@ func (s *Server) stopRaftCluster() {
 	s.cluster.Stop()
 }
 
-// IsAPIServiceMode return whether the server is in API service mode.
-func (s *Server) IsAPIServiceMode() bool {
-	return s.mode == APIServiceMode
+// IsKeyspaceEnabled return whether the keyspace is enabled.
+func (s *Server) IsKeyspaceEnabled() bool {
+	return s.isKeyspaceEnabled
 }
 
 // GetAddr returns the server urls for clients.
@@ -1386,10 +1380,7 @@ func (s *Server) GetRaftCluster() *cluster.RaftCluster {
 
 // IsServiceIndependent returns whether the service is independent.
 func (s *Server) IsServiceIndependent(name string) bool {
-	if s.mode == APIServiceMode && !s.IsClosed() {
-		if name == constant.TSOServiceName && !s.GetMicroServiceConfig().IsTSODynamicSwitchingEnabled() {
-			return true
-		}
+	if !s.IsClosed() {
 		return s.cluster.IsServiceIndependent(name)
 	}
 	return false
@@ -1591,7 +1582,7 @@ func (s *Server) leaderLoop() {
 
 	for {
 		if s.IsClosed() {
-			log.Info(fmt.Sprintf("server is closed, return %s leader loop", s.mode))
+			log.Info("server is closed, return PD leader loop")
 			return
 		}
 
@@ -1660,13 +1651,13 @@ func (s *Server) leaderLoop() {
 }
 
 func (s *Server) campaignLeader() {
-	log.Info(fmt.Sprintf("start to campaign %s leader", s.mode), zap.String("campaign-leader-name", s.Name()))
+	log.Info("start to campaign PD leader", zap.String("campaign-leader-name", s.Name()))
 	if err := s.member.CampaignLeader(s.ctx, s.cfg.LeaderLease); err != nil {
 		if err.Error() == errs.ErrEtcdTxnConflict.Error() {
-			log.Info(fmt.Sprintf("campaign %s leader meets error due to txn conflict, another PD/API server may campaign successfully", s.mode),
+			log.Info("campaign PD leader meets error due to txn conflict, another PD/API server may campaign successfully",
 				zap.String("campaign-leader-name", s.Name()))
 		} else {
-			log.Error(fmt.Sprintf("campaign %s leader meets error due to etcd error", s.mode),
+			log.Error("campaign PD leader meets error due to etcd error",
 				zap.String("campaign-leader-name", s.Name()),
 				errs.ZapError(err))
 		}
@@ -1686,7 +1677,7 @@ func (s *Server) campaignLeader() {
 
 	// maintain the PD leadership, after this, TSO can be service.
 	s.member.KeepLeader(ctx)
-	log.Info(fmt.Sprintf("campaign %s leader ok", s.mode), zap.String("campaign-leader-name", s.Name()))
+	log.Info("campaign PD leader ok", zap.String("campaign-leader-name", s.Name()))
 
 	if err := s.reloadConfigFromKV(); err != nil {
 		log.Error("failed to reload configuration", errs.ZapError(err))
@@ -1723,17 +1714,17 @@ func (s *Server) campaignLeader() {
 	}
 	// EnableLeader to accept the remaining service, such as GetStore, GetRegion.
 	s.member.EnableLeader()
-	member.ServiceMemberGauge.WithLabelValues(s.mode).Set(1)
+	member.ServiceMemberGauge.WithLabelValues(PD).Set(1)
 	defer resetLeaderOnce.Do(func() {
 		// as soon as cancel the leadership keepalive, then other member have chance
 		// to be new leader.
 		cancel()
 		s.member.ResetLeader()
-		member.ServiceMemberGauge.WithLabelValues(s.mode).Set(0)
+		member.ServiceMemberGauge.WithLabelValues(PD).Set(0)
 	})
 
 	CheckPDVersionWithClusterVersion(s.persistOptions)
-	log.Info(fmt.Sprintf("%s leader is ready to serve", s.mode), zap.String("leader-name", s.Name()))
+	log.Info("PD leader is ready to serve", zap.String("leader-name", s.Name()))
 
 	leaderTicker := time.NewTicker(constant.LeaderTickInterval)
 	defer leaderTicker.Stop()
