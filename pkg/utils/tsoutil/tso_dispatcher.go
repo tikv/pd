@@ -24,9 +24,9 @@ import (
 	"github.com/pingcap/log"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/timerpool"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
+	"github.com/tikv/pd/pkg/utils/timerutil"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 )
@@ -209,7 +209,7 @@ func NewTSDeadline(
 	done chan struct{},
 	cancel context.CancelFunc,
 ) *TSDeadline {
-	timer := timerpool.GlobalTimerPool.Get(timeout)
+	timer := timerutil.GlobalTimerPool.Get(timeout)
 	return &TSDeadline{
 		timer:  timer,
 		done:   done,
@@ -230,11 +230,11 @@ func WatchTSDeadline(ctx context.Context, tsDeadlineCh <-chan *TSDeadline) {
 				log.Error("tso proxy request processing is canceled due to timeout",
 					errs.ZapError(errs.ErrProxyTSOTimeout))
 				d.cancel()
-				timerpool.GlobalTimerPool.Put(d.timer)
+				timerutil.GlobalTimerPool.Put(d.timer)
 			case <-d.done:
-				timerpool.GlobalTimerPool.Put(d.timer)
+				timerutil.GlobalTimerPool.Put(d.timer)
 			case <-ctx.Done():
-				timerpool.GlobalTimerPool.Put(d.timer)
+				timerutil.GlobalTimerPool.Put(d.timer)
 				return
 			}
 		case <-ctx.Done():
