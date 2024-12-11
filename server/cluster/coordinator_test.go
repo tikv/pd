@@ -725,8 +725,6 @@ func TestAddScheduler(t *testing.T) {
 	re.NoError(co.removeScheduler(schedulers.BalanceLeaderName))
 	re.NoError(co.removeScheduler(schedulers.BalanceRegionName))
 	re.NoError(co.removeScheduler(schedulers.HotRegionName))
-	re.NoError(co.removeScheduler(schedulers.BalanceWitnessName))
-	re.NoError(co.removeScheduler(schedulers.TransferWitnessLeaderName))
 	re.Empty(co.schedulers)
 
 	stream := mockhbstream.NewHeartbeatStream()
@@ -817,12 +815,10 @@ func TestPersistScheduler(t *testing.T) {
 	re.NoError(err)
 	re.Len(sches, defaultCount+2)
 
-	// remove 5 schedulers
+	// remove 3 schedulers
 	re.NoError(co.removeScheduler(schedulers.BalanceLeaderName))
 	re.NoError(co.removeScheduler(schedulers.BalanceRegionName))
 	re.NoError(co.removeScheduler(schedulers.HotRegionName))
-	re.NoError(co.removeScheduler(schedulers.BalanceWitnessName))
-	re.NoError(co.removeScheduler(schedulers.TransferWitnessLeaderName))
 	re.Len(co.schedulers, defaultCount-3)
 	re.NoError(co.cluster.opt.Persist(storage))
 	co.stop()
@@ -966,8 +962,6 @@ func TestRemoveScheduler(t *testing.T) {
 	re.NoError(co.removeScheduler(schedulers.BalanceRegionName))
 	re.NoError(co.removeScheduler(schedulers.HotRegionName))
 	re.NoError(co.removeScheduler(schedulers.GrantLeaderName))
-	re.NoError(co.removeScheduler(schedulers.BalanceWitnessName))
-	re.NoError(co.removeScheduler(schedulers.TransferWitnessLeaderName))
 	// all removed
 	sches, _, err = storage.LoadAllScheduleConfig()
 	re.NoError(err)
