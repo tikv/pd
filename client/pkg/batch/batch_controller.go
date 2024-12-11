@@ -66,7 +66,7 @@ func (bc *Controller[T]) FetchPendingRequests(ctx context.Context, requestCh <-c
 		if errRet != nil {
 			// Something went wrong when collecting a batch of requests. Release the token and cancel collected requests
 			// if any.
-			if tokenAcquired {
+			if tokenAcquired && tokenCh != nil {
 				tokenCh <- struct{}{}
 			}
 			bc.FinishCollectedRequests(bc.finisher, errRet)
@@ -80,6 +80,9 @@ func (bc *Controller[T]) FetchPendingRequests(ctx context.Context, requestCh <-c
 		// If the batch size reaches the maxBatchSize limit but the token haven't arrived yet, don't receive more
 		// requests, and return when token is ready.
 		if bc.collectedRequestCount >= bc.maxBatchSize && !tokenAcquired {
+			if tokenCh == nil {
+				return nil
+			}
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
@@ -88,17 +91,19 @@ func (bc *Controller[T]) FetchPendingRequests(ctx context.Context, requestCh <-c
 			}
 		}
 
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case req := <-requestCh:
-			// Start to batch when the first request arrives.
-			bc.pushRequest(req)
-			// A request arrives but the token is not ready yet. Continue waiting, and also allowing collecting the next
-			// request if it arrives.
-			continue
-		case <-tokenCh:
-			tokenAcquired = true
+		if tokenCh != nil {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case req := <-requestCh:
+				// Start to batch when the first request arrives.
+				bc.pushRequest(req)
+				// A request arrives but the token is not ready yet. Continue waiting, and also allowing collecting the next
+				// request if it arrives.
+				continue
+			case <-tokenCh:
+				tokenAcquired = true
+			}
 		}
 
 		// The token is ready. If the first request didn't arrive, wait for it.
