@@ -42,10 +42,14 @@ func TestRegionTestSuite(t *testing.T) {
 }
 
 func (suite *regionTestSuite) SetupSuite() {
+	re := suite.Require()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/checker/skipCheckSuspectRanges", "return(true)"))
 	suite.env = tests.NewSchedulingTestEnvironment(suite.T())
 }
 
 func (suite *regionTestSuite) TearDownSuite() {
+	re := suite.Require()
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/checker/skipCheckSuspectRanges"))
 	suite.env.Cleanup()
 }
 
@@ -138,10 +142,7 @@ func (suite *regionTestSuite) checkSplitRegions(cluster *tests.TestCluster) {
 }
 
 func (suite *regionTestSuite) TestAccelerateRegionsScheduleInRange() {
-	re := suite.Require()
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/checker/skipCheckSuspectRanges", "return(true)"))
 	suite.env.RunTestBasedOnMode(suite.checkAccelerateRegionsScheduleInRange)
-	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/checker/skipCheckSuspectRanges"))
 }
 
 func (suite *regionTestSuite) checkAccelerateRegionsScheduleInRange(cluster *tests.TestCluster) {
@@ -176,10 +177,7 @@ func (suite *regionTestSuite) checkAccelerateRegionsScheduleInRange(cluster *tes
 }
 
 func (suite *regionTestSuite) TestAccelerateRegionsScheduleInRanges() {
-	re := suite.Require()
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/checker/skipCheckSuspectRanges", "return(true)"))
 	suite.env.RunTestBasedOnMode(suite.checkAccelerateRegionsScheduleInRanges)
-	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/checker/skipCheckSuspectRanges"))
 }
 
 func (suite *regionTestSuite) checkAccelerateRegionsScheduleInRanges(cluster *tests.TestCluster) {
