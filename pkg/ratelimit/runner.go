@@ -16,11 +16,11 @@ package ratelimit
 
 import (
 	"context"
-	"errors"
 	"sync"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/tikv/pd/pkg/errs"
 	"go.uber.org/zap"
 
 	"github.com/pingcap/log"
@@ -57,9 +57,6 @@ type Task struct {
 	// retained indicates whether the task should be dropped if the task queue exceeds maxPendingDuration.
 	retained bool
 }
-
-// ErrMaxWaitingTasksExceeded is returned when the number of waiting tasks exceeds the maximum.
-var ErrMaxWaitingTasksExceeded = errors.New("max waiting tasks exceeded")
 
 type taskID struct {
 	id   uint64
@@ -217,12 +214,12 @@ func (cr *ConcurrentRunner) RunTask(id uint64, name string, f func(context.Conte
 			maxWait := time.Since(cr.pendingTasks[0].submittedAt)
 			if maxWait > cr.maxPendingDuration {
 				runnerFailedTasks.WithLabelValues(cr.name, task.name).Inc()
-				return ErrMaxWaitingTasksExceeded
+				return errs.ErrMaxWaitingTasksExceeded
 			}
 		}
 		if pendingTaskNum > maxPendingTaskNum {
 			runnerFailedTasks.WithLabelValues(cr.name, task.name).Inc()
-			return ErrMaxWaitingTasksExceeded
+			return errs.ErrMaxWaitingTasksExceeded
 		}
 	}
 	cr.pendingTasks = append(cr.pendingTasks, task)
