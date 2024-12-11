@@ -450,7 +450,7 @@ func (suite *keyspaceGroupTestSuite) TestKeyspaceGroupMerge() {
 
 	// merge a non-existing keyspace group
 	err = suite.kgm.MergeKeyspaceGroups(4, []uint32{5})
-	re.ErrorContains(err, errs.ErrKeyspaceGroupNotExists.FastGenByArgs(4).Error())
+	re.ErrorContains(err, errs.ErrKeyspaceGroupNotExists.FastGenByArgs(5).Error())
 	// merge with the number of keyspace groups exceeds the limit
 	err = suite.kgm.MergeKeyspaceGroups(1, make([]uint32, etcdutil.MaxEtcdTxnOps/2))
 	re.ErrorIs(err, errs.ErrExceedMaxEtcdTxnOps)
