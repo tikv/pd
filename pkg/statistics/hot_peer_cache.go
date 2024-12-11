@@ -71,15 +71,9 @@ type hotPeerCache struct {
 	lastGCTime        time.Time
 }
 
-<<<<<<< HEAD
 // NewHotPeerCache creates a hotPeerCache
-func NewHotPeerCache(ctx context.Context, kind utils.RWType) *hotPeerCache {
+func NewHotPeerCache(ctx context.Context, cluster *core.BasicCluster, kind utils.RWType) *hotPeerCache {
 	return &hotPeerCache{
-=======
-// NewHotPeerCache creates a HotPeerCache
-func NewHotPeerCache(ctx context.Context, cluster *core.BasicCluster, kind utils.RWType) *HotPeerCache {
-	return &HotPeerCache{
->>>>>>> 20087e290 (statistics: add gc in hot peer cache (#8702))
 		kind:              kind,
 		cluster:           cluster,
 		peersOfStore:      make(map[uint64]*utils.TopN),
@@ -553,7 +547,7 @@ func (f *hotPeerCache) removeItem(item *HotPeerStat) {
 	}
 }
 
-func (f *HotPeerCache) gc() {
+func (f *hotPeerCache) gc() {
 	if time.Since(f.lastGCTime) < f.topNTTL {
 		return
 	}

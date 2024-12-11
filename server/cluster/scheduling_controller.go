@@ -67,13 +67,8 @@ func newSchedulingController(parentCtx context.Context, basicCluster *core.Basic
 		BasicCluster: basicCluster,
 		opt:          opt,
 		labelStats:   statistics.NewLabelStatistics(),
-<<<<<<< HEAD
-		hotStat:      statistics.NewHotStat(parentCtx),
-		slowStat:     statistics.NewSlowStat(parentCtx),
-=======
 		hotStat:      statistics.NewHotStat(parentCtx, basicCluster),
-		slowStat:     statistics.NewSlowStat(),
->>>>>>> 20087e290 (statistics: add gc in hot peer cache (#8702))
+		slowStat:     statistics.NewSlowStat(parentCtx),
 		regionStats:  statistics.NewRegionStatistics(basicCluster, opt, ruleManager),
 	}
 }

@@ -604,7 +604,7 @@ func TestRegionHeartbeatHotStat(t *testing.T) {
 	cluster.coordinator = schedule.NewCoordinator(ctx, cluster, nil)
 	stores := newTestStores(4, "2.0.0")
 	for _, store := range stores {
-		cluster.PutStore(store)
+		cluster.PutStore(store.GetMeta())
 	}
 	peers := []*metapb.Peer{
 		{

@@ -96,12 +96,7 @@ func (tn *TopN) Put(item TopNItem) (isUpdate bool) {
 	for _, stn := range tn.topns {
 		isUpdate = stn.Put(item)
 	}
-<<<<<<< HEAD
 	tn.ttlLst.Put(item.ID())
-	tn.maintain()
-=======
-	tn.ttlLst.put(item.ID())
->>>>>>> 20087e290 (statistics: add gc in hot peer cache (#8702))
 	return
 }
 
@@ -119,28 +114,16 @@ func (tn *TopN) Remove(id uint64) (item TopNItem) {
 	for _, stn := range tn.topns {
 		item = stn.Remove(id)
 	}
-<<<<<<< HEAD
 	_ = tn.ttlLst.Remove(id)
-	tn.maintain()
-	return
-}
-
-func (tn *TopN) maintain() {
-	for _, id := range tn.ttlLst.TakeExpired() {
-		for _, stn := range tn.topns {
-			stn.Remove(id)
-=======
-	_ = tn.ttlLst.remove(id)
 	return
 }
 
 func (tn *TopN) maintain() []uint64 {
 	ids := make([]uint64, 0)
-	for _, id := range tn.ttlLst.takeExpired() {
+	for _, id := range tn.ttlLst.TakeExpired() {
 		for _, stn := range tn.topns {
-			stn.remove(id)
+			stn.Remove(id)
 			ids = append(ids, id)
->>>>>>> 20087e290 (statistics: add gc in hot peer cache (#8702))
 		}
 	}
 	return ids
