@@ -29,7 +29,7 @@ import (
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/grpcutil"
 	"github.com/tikv/pd/client/retry"
-	"github.com/tikv/pd/client/timerpool"
+	"github.com/tikv/pd/client/timerutil"
 	"github.com/tikv/pd/client/tsoutil"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -151,7 +151,7 @@ func newTSDeadline(
 	done chan struct{},
 	cancel context.CancelFunc,
 ) *deadline {
-	timer := timerpool.GlobalTimerPool.Get(timeout)
+	timer := timerutil.GlobalTimerPool.Get(timeout)
 	return &deadline{
 		timer:  timer,
 		done:   done,
@@ -197,11 +197,11 @@ func (c *tsoClient) watchTSDeadline(ctx context.Context, dcLocation string) {
 					case <-d.timer.C:
 						log.Error("[tso] tso request is canceled due to timeout", zap.String("dc-location", dc), errs.ZapError(errs.ErrClientGetTSOTimeout))
 						d.cancel()
-						timerpool.GlobalTimerPool.Put(d.timer)
+						timerutil.GlobalTimerPool.Put(d.timer)
 					case <-d.done:
-						timerpool.GlobalTimerPool.Put(d.timer)
+						timerutil.GlobalTimerPool.Put(d.timer)
 					case <-ctx.Done():
-						timerpool.GlobalTimerPool.Put(d.timer)
+						timerutil.GlobalTimerPool.Put(d.timer)
 						return
 					}
 				case <-ctx.Done():
@@ -432,16 +432,7 @@ tsoBatchLoop:
 		if maxBatchWaitInterval >= 0 {
 			tbc.adjustBestBatchSize()
 		}
-		// Stop the timer if it's not stopped.
-		if !streamLoopTimer.Stop() {
-			select {
-			case <-streamLoopTimer.C: // try to drain from the channel
-			default:
-			}
-		}
-		// We need be careful here, see more details in the comments of Timer.Reset.
-		// https://pkg.go.dev/time@master#Timer.Reset
-		streamLoopTimer.Reset(c.option.timeout)
+		timerutil.SafeResetTimer(streamLoopTimer, c.option.timeout)
 		// Choose a stream to send the TSO gRPC request.
 	streamChoosingLoop:
 		for {
