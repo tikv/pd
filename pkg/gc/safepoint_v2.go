@@ -22,6 +22,7 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/storage/endpoint"
@@ -99,7 +100,7 @@ func (manager *SafePointV2Manager) checkKeyspace(keyspaceID uint32, updateReques
 		}
 		// If a keyspace does not exist, then loading its gc safe point is prohibited.
 		if meta == nil {
-			return keyspace.ErrKeyspaceNotFound
+			return errs.ErrKeyspaceNotFound
 		}
 		// If keyspace's state does not permit updating safe point, we return error.
 		if updateRequest && !slice.Contains(allowUpdateSafePoint, meta.GetState()) {
