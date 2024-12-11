@@ -23,7 +23,6 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
-	"github.com/tikv/pd/pkg/utils/timerutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
@@ -119,14 +118,8 @@ func (l *lease) KeepAlive(ctx context.Context) {
 					l.expireTime.Store(t)
 				}
 			}
-<<<<<<< HEAD
 		case <-time.After(l.leaseTimeout):
 			log.Info("lease timeout", zap.Time("expire", l.expireTime.Load().(time.Time)), zap.String("purpose", l.Purpose))
-=======
-			timerutil.SafeResetTimer(timer, l.leaseTimeout)
-		case <-timer.C:
-			log.Info("keep alive lease too slow", zap.Duration("timeout-duration", l.leaseTimeout), zap.Time("actual-expire", l.expireTime.Load().(time.Time)), zap.String("purpose", l.Purpose))
->>>>>>> 86d4ad0f1 (resource control: fix unsafe usage of timer.Reset (#8877))
 			return
 		case <-ctx.Done():
 			return
