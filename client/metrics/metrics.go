@@ -152,7 +152,7 @@ func initMetrics(constLabels prometheus.Labels) {
 			Namespace:   "pd_client",
 			Subsystem:   "request",
 			Name:        "circuit_breaker_count",
-			Help:        "Circuit Breaker counters",
+			Help:        "Circuit breaker counters",
 			ConstLabels: constLabels,
 		}, []string{"name", "success"})
 }
