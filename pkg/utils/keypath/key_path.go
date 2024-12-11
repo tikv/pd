@@ -383,24 +383,3 @@ func FullTimestampPath(groupID uint32) string {
 	}
 	return path.Join(rootPath, tsPath)
 }
-
-const (
-	registryKey = "registry"
-)
-
-// RegistryPath returns the full path to store microservice addresses.
-func RegistryPath(serviceName, serviceAddr string) string {
-	return strings.Join([]string{constant.MicroserviceRootPath,
-		strconv.FormatUint(ClusterID(), 10), serviceName, registryKey, serviceAddr}, "/")
-}
-
-// ServicePath returns the path to store microservice addresses.
-func ServicePath(serviceName string) string {
-	return strings.Join([]string{constant.MicroserviceRootPath,
-		strconv.FormatUint(ClusterID(), 10), serviceName, registryKey, ""}, "/")
-}
-
-// TSOPath returns the path to store TSO addresses.
-func TSOPath() string {
-	return ServicePath("tso")
-}

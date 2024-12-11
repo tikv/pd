@@ -418,7 +418,7 @@ func NewKeyspaceGroupManager(
 		etcdClient:                   etcdClient,
 		httpClient:                   httpClient,
 		electionNamePrefix:           electionNamePrefix,
-		tsoServiceKey:                keypath.TSOPath(),
+		tsoServiceKey:                keypath.ServicePath(constant.TSOServiceName),
 		legacySvcRootPath:            legacySvcRootPath,
 		tsoSvcRootPath:               tsoSvcRootPath,
 		primaryPriorityCheckInterval: defaultPrimaryPriorityCheckInterval,

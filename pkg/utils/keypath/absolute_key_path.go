@@ -31,6 +31,9 @@ const (
 	keyspaceAllocIDPathFormat      = "/pd/%d/keyspaces/alloc_id"        // "/pd/{cluster_id}/keyspaces/alloc_id"
 	kemberLeaderPriorityPathFormat = "/pd/%d/member/%d/leader_priority" // "/pd/{cluster_id}/member/{member_id}/leader_priority"
 
+	servicePathFormat  = "/ms/%d/%s/registry"    // "/ms/{cluster_id}/{service_name}/registry"
+	registryPathFormat = "/ms/%d/%s/registry/%s" // "/ms/{cluster_id}/{service_name}/registry/{service_addr}"
+
 	msLeaderPathFormat           = "/ms/%d/%s/primary"                                // "/ms/{cluster_id}/{service_name}/primary"
 	msTsoDefaultLeaderPathFormat = "/ms/%d/tso/00000/primary"                         // "/ms/{cluster_id}/tso/00000/primary"
 	msTsoKespaceLeaderPathFormat = "/ms/%d/tso/keyspace_groups/election/%05d/primary" // "/ms/{cluster_id}/tso/keyspace_groups/election/{group_id}/primary"
@@ -108,4 +111,14 @@ func KeyspaceAllocIDPath() string {
 // MemberLeaderPriorityPath returns the member leader priority path.
 func MemberLeaderPriorityPath(id uint64) string {
 	return fmt.Sprintf(kemberLeaderPriorityPathFormat, ClusterID(), id)
+}
+
+// RegistryPath returns the full path to store microservice addresses.
+func RegistryPath(serviceName, serviceAddr string) string {
+	return fmt.Sprintf(registryPathFormat, ClusterID(), serviceName, serviceAddr)
+}
+
+// ServicePath returns the path to store microservice addresses.
+func ServicePath(serviceName string) string {
+	return fmt.Sprintf(servicePathFormat, ClusterID(), serviceName)
 }
