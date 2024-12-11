@@ -208,6 +208,7 @@ func TestTTL(t *testing.T) {
 	putPerm(re, tn, Total, func(x int) float64 {
 		return float64(-x)
 	}, false /*insert*/)
+	re.Len(tn.GetAll(), Total)
 
 	time.Sleep(900 * time.Millisecond)
 	{
@@ -217,6 +218,8 @@ func TestTTL(t *testing.T) {
 		}
 		re.True(tn.Put(item))
 	}
+	re.Len(tn.RemoveExpired(), (Total-1)*DimLen)
+
 	for i := 3; i < Total; i += 3 {
 		item := &item{id: uint64(i), values: []float64{float64(-i) + 100}}
 		for k := 1; k < DimLen; k++ {
@@ -224,7 +227,6 @@ func TestTTL(t *testing.T) {
 		}
 		re.False(tn.Put(item))
 	}
-	tn.RemoveExpired()
 
 	re.Equal(Total/3+1, tn.Len())
 	items := tn.GetAllTopN(0)

@@ -97,15 +97,14 @@ func (tn *TopN) Put(item TopNItem) (isUpdate bool) {
 		isUpdate = stn.Put(item)
 	}
 	tn.ttlLst.Put(item.ID())
-	tn.maintain()
 	return
 }
 
 // RemoveExpired deletes all expired items.
-func (tn *TopN) RemoveExpired() {
+func (tn *TopN) RemoveExpired() []uint64 {
 	tn.rw.Lock()
 	defer tn.rw.Unlock()
-	tn.maintain()
+	return tn.maintain()
 }
 
 // Remove deletes the item by given ID and returns it.
@@ -116,16 +115,18 @@ func (tn *TopN) Remove(id uint64) (item TopNItem) {
 		item = stn.Remove(id)
 	}
 	_ = tn.ttlLst.Remove(id)
-	tn.maintain()
 	return
 }
 
-func (tn *TopN) maintain() {
+func (tn *TopN) maintain() []uint64 {
+	ids := make([]uint64, 0)
 	for _, id := range tn.ttlLst.TakeExpired() {
 		for _, stn := range tn.topns {
 			stn.Remove(id)
+			ids = append(ids, id)
 		}
 	}
+	return ids
 }
 
 type singleTopN struct {
