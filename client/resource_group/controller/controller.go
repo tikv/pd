@@ -32,7 +32,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	pd "github.com/tikv/pd/client"
 	"github.com/tikv/pd/client/errs"
-	"github.com/tikv/pd/client/timerutils"
+	"github.com/tikv/pd/client/timerutil"
 	atomicutil "go.uber.org/atomic"
 	"go.uber.org/zap"
 	"golang.org/x/exp/slices"
@@ -292,8 +292,7 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 					watchMetaChannel, err = c.provider.Watch(ctx, pd.GroupSettingsPathPrefixBytes, pd.WithRev(metaRevision), pd.WithPrefix(), pd.WithPrevKV())
 					if err != nil {
 						log.Warn("watch resource group meta failed", zap.Error(err))
-						timerutils.DrainAndStopTimer(watchRetryTimer)
-						watchRetryTimer.Reset(watchRetryInterval)
+						timerutil.SafeResetTimer(watchRetryTimer, watchRetryInterval)
 						failpoint.Inject("watchStreamError", func() {
 							watchRetryTimer.Reset(20 * time.Millisecond)
 						})
@@ -303,8 +302,7 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 					watchConfigChannel, err = c.provider.Watch(ctx, pd.ControllerConfigPathPrefixBytes, pd.WithRev(cfgRevision), pd.WithPrefix())
 					if err != nil {
 						log.Warn("watch resource group config failed", zap.Error(err))
-						timerutils.DrainAndStopTimer(watchRetryTimer)
-						watchRetryTimer.Reset(watchRetryInterval)
+						timerutil.SafeResetTimer(watchRetryTimer, watchRetryInterval)
 					}
 				}
 			case <-emergencyTokenAcquisitionTicker.C:
@@ -338,8 +336,7 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 				})
 				if !ok {
 					watchMetaChannel = nil
-					timerutils.DrainAndStopTimer(watchRetryTimer)
-					watchRetryTimer.Reset(watchRetryInterval)
+					timerutil.SafeResetTimer(watchRetryTimer, watchRetryInterval)
 					failpoint.Inject("watchStreamError", func() {
 						watchRetryTimer.Reset(20 * time.Millisecond)
 					})
@@ -375,8 +372,7 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 			case resp, ok := <-watchConfigChannel:
 				if !ok {
 					watchConfigChannel = nil
-					timerutils.DrainAndStopTimer(watchRetryTimer)
-					watchRetryTimer.Reset(watchRetryInterval)
+					timerutil.SafeResetTimer(watchRetryTimer, watchRetryInterval)
 					failpoint.Inject("watchStreamError", func() {
 						watchRetryTimer.Reset(20 * time.Millisecond)
 					})

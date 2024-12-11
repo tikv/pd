@@ -12,14 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package timerutils
+package timerutil
 
 import "time"
 
-// DrainAndStopTimer is used to drain and stop timer.
+// SafeResetTimer is used to reset timer safely.
+// Before Go 1.23, the only safe way to use Reset was to call Timer.Stop and explicitly drain the timer first.
 // We need be careful here, see more details in the comments of Timer.Reset.
 // https://pkg.go.dev/time@master#Timer.Reset
-func DrainAndStopTimer(t *time.Timer) {
+func SafeResetTimer(t *time.Timer, d time.Duration) {
 	// Stop the timer if it's not stopped.
 	if !t.Stop() {
 		select {
@@ -27,4 +28,5 @@ func DrainAndStopTimer(t *time.Timer) {
 		default:
 		}
 	}
+	t.Reset(d)
 }
