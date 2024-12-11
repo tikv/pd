@@ -1416,7 +1416,7 @@ func TestTransferLeaderForScheduler(t *testing.T) {
 	})
 	// Check scheduler updated.
 	schedulersController := rc.GetCoordinator().GetSchedulersController()
-	re.Len(schedulersController.GetSchedulerNames(), 6)
+	re.Len(schedulersController.GetSchedulerNames(), 4)
 	checkEvictLeaderSchedulerExist(re, schedulersController, true)
 	checkEvictLeaderStoreIDs(re, schedulersController, []uint64{1, 2})
 
@@ -1436,7 +1436,7 @@ func TestTransferLeaderForScheduler(t *testing.T) {
 	re.True(leaderServer.GetRaftCluster().IsPrepared())
 	// Check scheduler updated.
 	schedulersController = rc1.GetCoordinator().GetSchedulersController()
-	re.Len(schedulersController.GetSchedulerNames(), 6)
+	re.Len(schedulersController.GetSchedulerNames(), 4)
 	checkEvictLeaderSchedulerExist(re, schedulersController, true)
 	checkEvictLeaderStoreIDs(re, schedulersController, []uint64{1, 2})
 
@@ -1455,7 +1455,7 @@ func TestTransferLeaderForScheduler(t *testing.T) {
 	re.True(leaderServer.GetRaftCluster().IsPrepared())
 	// Check scheduler updated
 	schedulersController = rc.GetCoordinator().GetSchedulersController()
-	re.Len(schedulersController.GetSchedulerNames(), 6)
+	re.Len(schedulersController.GetSchedulerNames(), 4)
 	checkEvictLeaderSchedulerExist(re, schedulersController, true)
 	checkEvictLeaderStoreIDs(re, schedulersController, []uint64{1, 2})
 
