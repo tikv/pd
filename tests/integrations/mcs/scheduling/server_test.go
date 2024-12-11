@@ -126,7 +126,7 @@ func (suite *serverTestSuite) TestPrimaryChange() {
 	tc.WaitForPrimaryServing(re)
 	primary := tc.GetPrimaryServer()
 	oldPrimaryAddr := primary.GetAddr()
-	re.Len(primary.GetCluster().GetCoordinator().GetSchedulersController().GetSchedulerNames(), 5)
+	re.Len(primary.GetCluster().GetCoordinator().GetSchedulersController().GetSchedulerNames(), 4)
 	testutil.Eventually(re, func() bool {
 		watchedAddr, ok := suite.pdLeader.GetServicePrimaryAddr(suite.ctx, mcs.SchedulingServiceName)
 		return ok && oldPrimaryAddr == watchedAddr
@@ -137,7 +137,7 @@ func (suite *serverTestSuite) TestPrimaryChange() {
 	primary = tc.GetPrimaryServer()
 	newPrimaryAddr := primary.GetAddr()
 	re.NotEqual(oldPrimaryAddr, newPrimaryAddr)
-	re.Len(primary.GetCluster().GetCoordinator().GetSchedulersController().GetSchedulerNames(), 5)
+	re.Len(primary.GetCluster().GetCoordinator().GetSchedulersController().GetSchedulerNames(), 4)
 	testutil.Eventually(re, func() bool {
 		watchedAddr, ok := suite.pdLeader.GetServicePrimaryAddr(suite.ctx, mcs.SchedulingServiceName)
 		return ok && newPrimaryAddr == watchedAddr
@@ -265,7 +265,6 @@ func (suite *serverTestSuite) TestSchedulerSync() {
 	api.MustDeleteScheduler(re, suite.backendEndpoints, schedulers.EvictLeaderName)
 	checkEvictLeaderSchedulerExist(re, schedulersController, false)
 
-<<<<<<< HEAD
 	// TODO: test more schedulers.
 	// Fixme: the following code will fail because the scheduler is not removed but not synced.
 	// checkDelete := func(schedulerName string) {
@@ -278,32 +277,6 @@ func (suite *serverTestSuite) TestSchedulerSync() {
 	// checkDelete(schedulers.BalanceLeaderName)
 	// checkDelete(schedulers.BalanceRegionName)
 	// checkDelete(schedulers.HotRegionName)
-=======
-	// The default scheduler could not be deleted, it could only be disabled.
-	defaultSchedulerNames := []string{
-		schedulers.BalanceLeaderName,
-		schedulers.BalanceRegionName,
-		schedulers.HotRegionName,
-	}
-	checkDisabled := func(name string, shouldDisabled bool) {
-		re.NotNil(schedulersController.GetScheduler(name), name)
-		testutil.Eventually(re, func() bool {
-			disabled, err := schedulersController.IsSchedulerDisabled(name)
-			re.NoError(err, name)
-			return disabled == shouldDisabled
-		})
-	}
-	for _, name := range defaultSchedulerNames {
-		checkDisabled(name, false)
-		api.MustDeleteScheduler(re, suite.backendEndpoints, name)
-		checkDisabled(name, true)
-	}
-	for _, name := range defaultSchedulerNames {
-		checkDisabled(name, true)
-		api.MustAddScheduler(re, suite.backendEndpoints, name, nil)
-		checkDisabled(name, false)
-	}
->>>>>>> 5b939c6fc (config: disable witness related schedulers by default (#7765))
 }
 
 func checkEvictLeaderSchedulerExist(re *require.Assertions, sc *schedulers.Controller, exist bool) {
