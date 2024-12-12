@@ -87,7 +87,6 @@ func (suite *keyspaceGroupManagerTestSuite) createConfig() *TestServiceConfig {
 		ListenAddr:                addr,
 		AdvertiseListenAddr:       addr,
 		LeaderLease:               constant.DefaultLeaderLease,
-		LocalTSOEnabled:           false,
 		TSOUpdatePhysicalInterval: 50 * time.Millisecond,
 		TSOSaveInterval:           time.Duration(constant.DefaultLeaderLease) * time.Second,
 		MaxResetTSGap:             time.Hour * 24,

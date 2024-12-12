@@ -96,10 +96,7 @@ type Config struct {
 	// be automatically clamped to the range.
 	TSOUpdatePhysicalInterval typeutil.Duration `toml:"tso-update-physical-interval" json:"tso-update-physical-interval"`
 
-	// EnableLocalTSO is used to enable the Local TSO Allocator feature,
-	// which allows the PD server to generate Local TSO for certain DC-level transactions.
-	// To make this feature meaningful, user has to set the "zone" label for the PD server
-	// to indicate which DC this PD belongs to.
+	// Deprecated
 	EnableLocalTSO bool `toml:"enable-local-tso" json:"enable-local-tso"`
 
 	Metric metricutil.MetricConfig `toml:"metric" json:"metric"`
@@ -115,8 +112,6 @@ type Config struct {
 	// Labels indicates the labels set for **this** PD server. The labels describe some specific properties
 	// like `zone`/`rack`/`host`. Currently, labels won't affect the PD server except for some special
 	// label keys. Now we have following special keys:
-	// 1. 'zone' is a special key that indicates the DC location of this PD server. If it is set, the value for this
-	// will be used to determine which DC's Local TSO service this PD will provide with if EnableLocalTSO is true.
 	Labels map[string]string `toml:"labels" json:"labels"`
 
 	// QuotaBackendBytes Raise alarms when backend size exceeds the given quota. 0 means use the default quota.

@@ -16,8 +16,6 @@ package tso
 
 import (
 	"context"
-	"math"
-	"path"
 	"runtime/trace"
 	"strconv"
 	"sync"
@@ -43,8 +41,6 @@ const (
 	checkStep                   = time.Minute
 	patrolStep                  = time.Second
 	defaultAllocatorLeaderLease = 3
-	localTSOAllocatorEtcdPrefix = "lta"
-	localTSOSuffixEtcdPrefix    = "lts"
 )
 
 var (
@@ -217,17 +213,6 @@ func (am *AllocatorManager) getGroupIDStr() string {
 	return strconv.FormatUint(uint64(am.kgID), 10)
 }
 
-// GetTimestampPath returns the timestamp path in etcd.
-func (am *AllocatorManager) GetTimestampPath() string {
-	if am == nil {
-		return ""
-	}
-
-	am.mu.RLock()
-	defer am.mu.RUnlock()
-	return path.Join(am.rootPath, am.mu.allocatorGroup.allocator.GetTimestampPath())
-}
-
 // tsoAllocatorLoop is used to run the TSO Allocator updating daemon.
 func (am *AllocatorManager) tsoAllocatorLoop() {
 	defer logutil.LogPanic()
@@ -252,21 +237,6 @@ func (am *AllocatorManager) close() {
 // GetMember returns the ElectionMember of this AllocatorManager.
 func (am *AllocatorManager) GetMember() ElectionMember {
 	return am.member
-}
-
-// GetSuffixBits calculates the bits of suffix sign
-// by the max number of suffix so far,
-// which will be used in the TSO logical part.
-func (am *AllocatorManager) GetSuffixBits() int {
-	am.mu.RLock()
-	defer am.mu.RUnlock()
-	return CalSuffixBits(am.mu.maxSuffix)
-}
-
-// CalSuffixBits calculates the bits of suffix by the max suffix sign.
-func CalSuffixBits(maxSuffix int32) int {
-	// maxSuffix + 1 because we have the Global TSO holds 0 as the suffix sign
-	return int(math.Ceil(math.Log2(float64(maxSuffix + 1))))
 }
 
 // AllocatorDaemon is used to update every allocator's TSO and check whether we have

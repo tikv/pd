@@ -47,14 +47,6 @@ type Allocator interface {
 	IsInitialize() bool
 	// UpdateTSO is used to update the TSO in memory and the time window in etcd.
 	UpdateTSO() error
-	// GetTimestampPath returns the timestamp path in etcd, which is:
-	// 1. for the default keyspace group:
-	//     a. timestamp in /pd/{cluster_id}/timestamp
-	//     b. lta/{dc-location}/timestamp in /pd/{cluster_id}/lta/{dc-location}/timestamp
-	// 1. for the non-default keyspace groups:
-	//     a. {group}/gts/timestamp in /ms/{cluster_id}/tso/{group}/gta/timestamp
-	//     b. {group}/lts/{dc-location}/timestamp in /ms/{cluster_id}/tso/{group}/lta/{dc-location}/timestamp
-	GetTimestampPath() string
 	// SetTSO sets the physical part with given TSO. It's mainly used for BR restore.
 	// Cannot set the TSO smaller than now in any case.
 	// if ignoreSmaller=true, if input ts is smaller than current, ignore silently, else return error
@@ -68,6 +60,8 @@ type Allocator interface {
 }
 
 // GlobalTSOAllocator is the global single point TSO allocator.
+// TODO: Local TSO allocator is deprecated now, we can update the name to
+// TSOAllocator and remove the `Global` concept.
 type GlobalTSOAllocator struct {
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -132,19 +126,9 @@ func (gta *GlobalTSOAllocator) getGroupID() uint32 {
 	return gta.am.getGroupID()
 }
 
-// GetTimestampPath returns the timestamp path in etcd.
-func (gta *GlobalTSOAllocator) GetTimestampPath() string {
-	if gta == nil || gta.timestampOracle == nil {
-		return ""
-	}
-	return gta.timestampOracle.GetTimestampPath()
-}
-
 // Initialize will initialize the created global TSO allocator.
 func (gta *GlobalTSOAllocator) Initialize(int) error {
 	gta.tsoAllocatorRoleGauge.Set(1)
-	// The suffix of a Global TSO should always be 0.
-	gta.timestampOracle.suffix = 0
 	return gta.timestampOracle.SyncTimestamp()
 }
 
@@ -175,7 +159,7 @@ func (gta *GlobalTSOAllocator) GenerateTSO(ctx context.Context, count uint32) (p
 		return pdpb.Timestamp{}, errs.ErrGenerateTimestamp.FastGenByArgs(fmt.Sprintf("requested pd %s of cluster", errs.NotLeaderErr))
 	}
 
-	return gta.timestampOracle.getTS(ctx, gta.member.GetLeadership(), count, 0)
+	return gta.timestampOracle.getTS(ctx, gta.member.GetLeadership(), count)
 }
 
 // Reset is used to reset the TSO allocator.
