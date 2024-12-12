@@ -60,6 +60,11 @@ func NewController[T any](maxBatchSize int, finisher FinisherFunc[T], bestBatchO
 // It returns nil error if everything goes well, otherwise a non-nil error which means we should stop the service.
 // It's guaranteed that if this function failed after collecting some requests, then these requests will be cancelled
 // when the function returns, so the caller don't need to clear them manually.
+// `tokenCh` is an optional parameter:
+//   - If it's nil, the batching process will not wait for the token to arrive to continue.
+//   - If it's not nil, the batching process will wait for a token to arrive before continuing.
+//     The token will be given back if any error occurs, otherwise it's the caller's responsibility
+//     to decide when to recycle the signal.
 func (bc *Controller[T]) FetchPendingRequests(ctx context.Context, requestCh <-chan T, tokenCh chan struct{}, maxBatchWaitInterval time.Duration) (errRet error) {
 	var tokenAcquired bool
 	defer func() {
@@ -106,7 +111,8 @@ func (bc *Controller[T]) FetchPendingRequests(ctx context.Context, requestCh <-c
 			}
 		}
 
-		// The token is ready. If the first request didn't arrive, wait for it.
+		// After the token is ready or it's working without token,
+		// wait for the first request to arrive.
 		if bc.collectedRequestCount == 0 {
 			select {
 			case <-ctx.Done():
