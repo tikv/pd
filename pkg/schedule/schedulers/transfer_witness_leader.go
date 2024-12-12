@@ -98,19 +98,22 @@ func scheduleTransferWitnessLeader(r *rand.Rand, name string, cluster sche.Sched
 	filters = append(filters, filter.NewExcludedFilter(name, nil, unhealthyPeerStores),
 		&filter.StoreStateFilter{ActionScope: name, TransferLeader: true, OperatorLevel: constant.Urgent})
 	candidates := filter.NewCandidates(r, cluster.GetFollowerStores(region)).FilterTarget(cluster.GetSchedulerConfig(), nil, nil, filters...)
-	// Compatible with old TiKV transfer leader logic.
-	target := candidates.RandomPick()
-	targets := candidates.PickAll()
-	// `targets` MUST contains `target`, so only needs to check if `target` is nil here.
-	if target == nil {
+	if len(candidates.Stores) == 0 {
 		transferWitnessLeaderNoTargetStoreCounter.Inc()
 		return nil, errors.New("no target store to schedule")
 	}
-	targetIDs := make([]uint64, 0, len(targets))
-	for _, t := range targets {
-		targetIDs = append(targetIDs, t.GetID())
+	// TODO: also add sort such as evict leader
+	var (
+		op  *operator.Operator
+		err error
+	)
+	for _, target := range candidates.Stores {
+		op, err = operator.CreateTransferLeaderOperator(name, cluster, region, target.GetID(), operator.OpLeader)
+		if op != nil && err == nil {
+			return op, err
+		}
 	}
-	return operator.CreateTransferLeaderOperator(name, cluster, region, target.GetID(), targetIDs, operator.OpWitnessLeader)
+	return op, err
 }
 
 // RecvRegionInfo receives a checked region from coordinator

@@ -361,19 +361,12 @@ func scheduleEvictLeaderOnce(r *rand.Rand, name string, cluster sche.SchedulerCl
 		filters = append(filters, &filter.StoreStateFilter{ActionScope: name, TransferLeader: true, OperatorLevel: constant.Urgent})
 		candidates := filter.NewCandidates(r, cluster.GetFollowerStores(region)).
 			FilterTarget(cluster.GetSchedulerConfig(), nil, nil, filters...)
-		// Compatible with old TiKV transfer leader logic.
-		target := candidates.RandomPick()
-		targets := candidates.PickAll()
-		// `targets` MUST contains `target`, so only needs to check if `target` is nil here.
-		if target == nil {
+
+		if len(candidates.Stores) == 0 {
 			evictLeaderNoTargetStoreCounter.Inc()
 			continue
 		}
-		targetIDs := make([]uint64, 0, len(targets))
-		for _, t := range targets {
-			targetIDs = append(targetIDs, t.GetID())
-		}
-		op, err := operator.CreateTransferLeaderOperator(name, cluster, region, target.GetID(), targetIDs, operator.OpLeader)
+		op, err := createOperatorWithSort(name, cluster, candidates, region)
 		if err != nil {
 			log.Debug("fail to create evict leader operator", errs.ZapError(err))
 			continue
@@ -383,6 +376,22 @@ func scheduleEvictLeaderOnce(r *rand.Rand, name string, cluster sche.SchedulerCl
 		ops = append(ops, op)
 	}
 	return ops
+}
+
+func createOperatorWithSort(name string, cluster sche.SchedulerCluster, candidates *filter.StoreCandidates, region *core.RegionInfo) (*operator.Operator, error) {
+	// we will pick low leader score store firstly.
+	candidates.Sort(filter.RegionScoreComparer(cluster.GetSharedConfig()))
+	var (
+		op  *operator.Operator
+		err error
+	)
+	for _, target := range candidates.Stores {
+		op, err = operator.CreateTransferLeaderOperator(name, cluster, region, target.GetID(), operator.OpLeader)
+		if op != nil && err == nil {
+			return op, err
+		}
+	}
+	return op, err
 }
 
 type evictLeaderHandler struct {

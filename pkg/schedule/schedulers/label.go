@@ -100,7 +100,7 @@ func (s *labelScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) ([]*ope
 				continue
 			}
 
-			op, err := operator.CreateTransferLeaderOperator("label-reject-leader", cluster, region, target.GetID(), []uint64{}, operator.OpLeader)
+			op, err := operator.CreateTransferLeaderOperator("label-reject-leader", cluster, region, target.GetID(), operator.OpLeader)
 			if err != nil {
 				log.Debug("fail to create transfer label reject leader operator", errs.ZapError(err))
 				return nil, nil

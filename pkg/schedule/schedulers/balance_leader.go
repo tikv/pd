@@ -535,7 +535,7 @@ func (s *balanceLeaderScheduler) createOperator(solver *solver, collector *plan.
 	}
 	solver.Step++
 	defer func() { solver.Step-- }()
-	op, err := operator.CreateTransferLeaderOperator(s.GetName(), solver, solver.Region, solver.targetStoreID(), []uint64{}, operator.OpLeader)
+	op, err := operator.CreateTransferLeaderOperator(s.GetName(), solver, solver.Region, solver.targetStoreID(), operator.OpLeader)
 	if err != nil {
 		log.Debug("fail to create balance leader operator", errs.ZapError(err))
 		if collector != nil {

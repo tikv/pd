@@ -296,25 +296,6 @@ func (b *Builder) SetLeader(storeID uint64) *Builder {
 	return b
 }
 
-// SetLeaders records all valid target leaders in Builder.
-func (b *Builder) SetLeaders(storeIDs []uint64) *Builder {
-	if b.err != nil {
-		return b
-	}
-	sort.Slice(storeIDs, func(i, j int) bool { return storeIDs[i] < storeIDs[j] })
-	for _, storeID := range storeIDs {
-		peer := b.targetPeers[storeID]
-		if peer == nil || core.IsLearner(peer) || b.unhealthyPeers[storeID] != nil {
-			continue
-		}
-		b.targetLeaderStoreIDs = append(b.targetLeaderStoreIDs, storeID)
-	}
-	// Don't need to check if there's valid target, because `targetLeaderStoreIDs`
-	// can be empty if this is not a multi-target evict leader operation. Besides,
-	// `targetLeaderStoreID` must be valid and there must be at least one valid target.
-	return b
-}
-
 // SetPeers resets the target peer list.
 //
 // If peer's ID is 0, the builder will allocate a new ID later. If current

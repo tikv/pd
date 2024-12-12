@@ -148,7 +148,7 @@ func checkGCPendingOpInfos(re *require.Assertions, enablePlacementRules bool) {
 		case movePeer:
 			op, err = operator.CreateMovePeerOperator("move-peer-test", tc, region, operator.OpAdmin, 2, &metapb.Peer{Id: region.GetID()*10000 + 1, StoreId: 4})
 		case transferLeader:
-			op, err = operator.CreateTransferLeaderOperator("transfer-leader-test", tc, region, 2, []uint64{}, operator.OpAdmin)
+			op, err = operator.CreateTransferLeaderOperator("transfer-leader-test", tc, region, 2, operator.OpAdmin)
 		}
 		re.NoError(err)
 		re.NotNil(op)

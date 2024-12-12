@@ -423,7 +423,7 @@ func (suite *createOperatorTestSuite) TestCreateTransferLeaderOperator() {
 	}
 	for _, testCase := range testCases {
 		region := core.NewRegionInfo(&metapb.Region{Id: 1, Peers: testCase.originPeers}, testCase.originPeers[0])
-		op, err := CreateTransferLeaderOperator("test", suite.cluster, region, testCase.targetLeaderStoreID, []uint64{}, 0)
+		op, err := CreateTransferLeaderOperator("test", suite.cluster, region, testCase.targetLeaderStoreID, 0)
 
 		if testCase.isErr {
 			re.Error(err)
