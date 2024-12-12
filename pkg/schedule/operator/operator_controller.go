@@ -416,6 +416,14 @@ func (oc *Controller) PromoteWaitingOperator() {
 	}
 }
 
+func (oc *Controller) GetWopCount(kind string) uint64 {
+	return oc.wopStatus.getCount(kind)
+}
+
+func (oc *Controller) GetSchedulerMaxWaitingOperator() uint64 {
+	return oc.config.GetSchedulerMaxWaitingOperator()
+}
+
 // checkAddOperator checks if the operator can be added.
 // There are several situations that cannot be added:
 // - There is no such region in the cluster
@@ -946,7 +954,7 @@ func (o *records) Put(op *Operator) {
 	o.ttl.Put(id, record)
 }
 
-// ExceedStoreLimit returns true if the store exceeds the cost limit after adding the  Otherwise, returns false.
+// ExceedStoreLimit returns true if the store exceeds the cost limit after adding the opertor. Otherwise, returns false.
 func (oc *Controller) ExceedStoreLimit(ops ...*Operator) bool {
 	// The operator with Urgent priority, like admin operators, should ignore the store limit check.
 	var desc string

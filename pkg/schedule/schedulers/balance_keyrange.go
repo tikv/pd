@@ -149,12 +149,19 @@ func BuildMigrationPlan(stores []*StoreRegionSet) ([]int, []int, []*MigrationOp,
 	return senders, receivers, ops, movements
 }
 
+type OperatorWrapper struct {
+	Operator  *operator.Operator `json:"operators"`
+	Region    *core.RegionInfo
+	FromStore uint64
+	Peer      *metapb.Peer
+}
 type MigrationPlan struct {
-	ErrorCode uint64               `json:"error_code"`
-	StartKey  []byte               `json:"start_key"`
-	EndKey    []byte               `json:"end_key"`
-	Ops       []*MigrationOp       `json:"ops"`
-	Operators []*operator.Operator `json:"operators"`
+	ErrorCode uint64             `json:"error_code"`
+	StartKey  []byte             `json:"start_key"`
+	EndKey    []byte             `json:"end_key"`
+	Ops       []*MigrationOp     `json:"ops"`
+	Operators []*OperatorWrapper `json:"operators"`
+	Running   []*OperatorWrapper `json:"running"`
 }
 
 func ComputeCandidateStores(requiredLabels []*metapb.StoreLabel, stores []*metapb.Store, regions []*core.RegionInfo) []*StoreRegionSet {
@@ -228,17 +235,22 @@ func RedistibuteRegions(c sche.SchedulerCluster, startKey, endKey []byte, requir
 		log.Info("!!!! Migration", zap.Any("ops", m))
 	}
 
-	operators := make([]*operator.Operator, 0)
+	operators := make([]*OperatorWrapper, 0)
 	for _, op := range ops {
 		for rid := range op.Regions {
 			newPeer := &metapb.Peer{StoreId: op.ToStore, Role: op.OriginalPeer.Role, IsWitness: op.OriginalPeer.IsWitness}
 			log.Debug("Create balace region op", zap.Uint64("from", op.FromStore), zap.Uint64("to", op.ToStore), zap.Uint64("region_id", rid))
 			o, err := operator.CreateMovePeerOperator("balance-keyrange", c, regionIDMap[rid], operator.OpReplica, op.FromStore, newPeer)
 			if err != nil {
-				log.Info("Failed to schedule operator", zap.Any("startKey", startKey), zap.Any("endKey", endKey), zap.Any("op", o), zap.Error(err))
+				log.Info("Failed to create operator", zap.Any("startKey", startKey), zap.Any("endKey", endKey), zap.Any("op", o), zap.Error(err))
 				return buildErrorMigrationPlan(), err
 			}
-			operators = append(operators, o)
+			operators = append(operators, &OperatorWrapper{
+				Operator:  o,
+				Region:    regionIDMap[rid],
+				FromStore: op.FromStore,
+				Peer:      newPeer,
+			})
 		}
 	}
 
@@ -248,6 +260,7 @@ func RedistibuteRegions(c sche.SchedulerCluster, startKey, endKey []byte, requir
 		EndKey:    endKey,
 		Ops:       ops,
 		Operators: operators,
+		Running:   make([]*OperatorWrapper, 0),
 	}, nil
 }
 
@@ -311,12 +324,12 @@ func (s *balanceKeyrangeScheduler) IsScheduleAllowed(cluster sche.SchedulerClust
 
 // IsFinished is true if the former schedule is finished, or there is no former schedule at all.
 func (s *balanceKeyrangeScheduler) IsFinished() bool {
-	return s.migrationPlan == nil || len(s.migrationPlan.Operators) == 0
+	return s.migrationPlan == nil || (len(s.migrationPlan.Operators) == 0 && len(s.migrationPlan.Running) == 0)
 }
 
 // IsTimeout is true if the schedule took too much time and needs to be canceled.
 func (s *balanceKeyrangeScheduler) IsTimeout() bool {
-	return time.Since(s.StartTime).Microseconds() > s.conf.MaxRunMillis
+	return time.Since(s.StartTime).Milliseconds() > s.conf.MaxRunMillis
 }
 
 // Schedule implements the Scheduler interface.
@@ -339,17 +352,45 @@ func (s *balanceKeyrangeScheduler) Schedule(cluster sche.SchedulerCluster, dryRu
 		return []*operator.Operator{}, []plan.Plan{}
 	}
 
+	oc := s.BaseScheduler.OpController
 	rangeChanged := true
 	if s.migrationPlan != nil {
 		// If there is a ongoing schedule,
 		// - If it is timeout, then return.
 		if s.IsTimeout() {
-			log.Info("balance keyrange range timeout", zap.ByteString("planStartKey", s.migrationPlan.StartKey), zap.ByteString("planStartKey", s.migrationPlan.EndKey), zap.Any("StartTime", s.StartTime))
+			log.Info("balance keyrange range timeout", zap.ByteString("planStartKey", s.migrationPlan.StartKey), zap.ByteString("planStartKey", s.migrationPlan.EndKey), zap.Any("StartTime", s.StartTime), zap.Any("timeout", s.conf.MaxRunMillis))
 			doShutdown()
 			return []*operator.Operator{}, make([]plan.Plan, 0)
 		}
 		// - Then check if there comes a new schedule
 		rangeChanged = !bytes.Equal(s.conf.Range.StartKey, s.migrationPlan.StartKey) || !bytes.Equal(s.conf.Range.EndKey, s.migrationPlan.EndKey)
+
+		running := make([]*OperatorWrapper, 0)
+		rerun := make([]*OperatorWrapper, 0)
+		for _, opw := range s.migrationPlan.Running {
+			op := opw.Operator
+			canceledByStoreLimit := op.Status() == operator.CANCELED && op.GetAdditionalInfo("cancel-reason") == string(operator.ExceedStoreLimit)
+			if op.Status() == operator.CANCELED {
+				if op.GetAdditionalInfo("cancel-reason") == string(operator.ExceedStoreLimit) {
+					log.Info("!!!!! Readd", zap.Any("op", op))
+				} else {
+					log.Info("!!!!! Do not Readd", zap.Any("why", op.GetAdditionalInfo("cancel-reason")), zap.Any("op", op))
+				}
+			}
+
+			if canceledByStoreLimit {
+				o, err := operator.CreateMovePeerOperator("balance-keyrange", cluster, opw.Region, operator.OpReplica, opw.FromStore, opw.Peer)
+				opw.Operator = o
+				if err == nil {
+					rerun = append(rerun, opw)
+				}
+			} else if op.Status() == operator.CREATED || op.Status() == operator.STARTED {
+				running = append(running, opw)
+			}
+		}
+		log.Info("!!!!! Canceld", zap.Any("rerun", len(rerun)), zap.Any("running", len(running)))
+		s.migrationPlan.Running = running
+		s.migrationPlan.Operators = append(s.migrationPlan.Operators, rerun...)
 	}
 	if s.IsFinished() {
 		// If the current schedule is finished.
@@ -378,15 +419,29 @@ func (s *balanceKeyrangeScheduler) Schedule(cluster sche.SchedulerCluster, dryRu
 		// This is the normal branch that the current schedule is ongoing.
 	}
 
-	batchSize := int(s.conf.BatchSize)
-	var part []*operator.Operator
-	if batchSize <= len(s.migrationPlan.Operators) {
-		part = s.migrationPlan.Operators[:batchSize]
-		s.migrationPlan.Operators = s.migrationPlan.Operators[batchSize:]
+	batchSize := s.conf.BatchSize
+	limit := oc.GetSchedulerMaxWaitingOperator()
+	queued := oc.GetWopCount(types.BalanceKeyrangeScheduler.String())
+	if queued >= limit {
+		batchSize = 0
 	} else {
-		part = s.migrationPlan.Operators
-		s.migrationPlan.Operators = make([]*operator.Operator, 0)
+		batchSize = limit - queued
 	}
-	log.Info("!!!!! balance keyrange issue operators", zap.Any("count", len(part)))
+	var part []*operator.Operator
+	scheduleSize := int(batchSize)
+	if scheduleSize <= len(s.migrationPlan.Operators) {
+		for _, opw := range s.migrationPlan.Operators[:scheduleSize] {
+			part = append(part, opw.Operator)
+		}
+		s.migrationPlan.Running = append(s.migrationPlan.Running, s.migrationPlan.Operators[:scheduleSize]...)
+		s.migrationPlan.Operators = s.migrationPlan.Operators[scheduleSize:]
+	} else {
+		for _, opw := range s.migrationPlan.Operators {
+			part = append(part, opw.Operator)
+		}
+		s.migrationPlan.Running = s.migrationPlan.Operators
+		s.migrationPlan.Operators = make([]*OperatorWrapper, 0)
+	}
+	log.Info("!!!!! balance keyrange issue operators", zap.Any("count", len(part)), zap.Any("GetSchedulerMaxWaitingOperator", limit), zap.Any("queued", queued), zap.Any("batchSize", batchSize))
 	return part, make([]plan.Plan, 0)
 }

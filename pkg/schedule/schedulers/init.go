@@ -22,13 +22,11 @@ import (
 	"sync"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/storage/endpoint"
-	"go.uber.org/zap"
 )
 
 var registerOnce sync.Once
@@ -139,12 +137,10 @@ func schedulersRegister() {
 	// balance keyrange
 	RegisterSliceDecoderBuilder(types.BalanceKeyrangeScheduler, func(args []string) ConfigDecoder {
 		return func(v any) error {
-			log.Info("!!!!! aaaaaaaaaa 1")
 			conf, ok := v.(*balanceKeyrangeSchedulerConfig)
 			if !ok {
 				return errs.ErrScheduleConfigNotExist.FastGenByArgs()
 			}
-			log.Info("!!!!! aaaaaaaaaa 3")
 			if len(args) != 1 {
 				return errs.ErrSchedulerConfig.FastGenByArgs("Invalid arguments number")
 			}
@@ -160,7 +156,6 @@ func schedulersRegister() {
 				BatchSize:      5,
 			}
 			err := json.Unmarshal([]byte(args[0]), &customerJson)
-			log.Info("!!!!! fdsfsdfsdf 1")
 			if err != nil {
 				return errs.ErrSchedulerConfig.FastGenByArgs("Invalid arguments", err.Error())
 			}
@@ -169,17 +164,13 @@ func schedulersRegister() {
 			conf.RequiredLabels = customerJson.RequiredLabels
 			conf.MaxRunMillis = customerJson.Timeout
 			startKey, err := hex.DecodeString(customerJson.StartKey)
-			log.Info("!!!!! fdsfsdfsdf 2")
 			if err != nil {
 				return errs.ErrSchedulerConfig.FastGenByArgs("Invalid arguments(start_key)", err.Error())
 			}
-			log.Info("!!!!! fdsfsdfsdf 4")
 			endKey, err := hex.DecodeString(customerJson.EndKey)
 			if err != nil {
-				log.Info("!!!!! fdsfsdfsdf e", zap.Error(err), zap.Any("b", customerJson.EndKey))
 				return errs.ErrSchedulerConfig.FastGenByArgs("Invalid arguments(end_key)", err.Error())
 			}
-			log.Info("!!!!! fdsfsdfsdf 9")
 			conf.Range = core.KeyRange{StartKey: startKey, EndKey: endKey}
 			return nil
 		}
