@@ -68,7 +68,7 @@ func NewCluster(parentCtx context.Context, persistConfig *config.PersistConfig, 
 		ruleManager:       ruleManager,
 		labelerManager:    labelerManager,
 		persistConfig:     persistConfig,
-		hotStat:           statistics.NewHotStat(ctx),
+		hotStat:           statistics.NewHotStat(ctx, basicCluster),
 		labelStats:        statistics.NewLabelStatistics(),
 		regionStats:       statistics.NewRegionStatistics(basicCluster, persistConfig, ruleManager),
 		storage:           storage,
@@ -329,13 +329,12 @@ func (c *Cluster) waitSchedulersInitialized() {
 	}
 }
 
-// TODO: implement the following methods
-
 // UpdateRegionsLabelLevelStats updates the status of the region label level by types.
 func (c *Cluster) UpdateRegionsLabelLevelStats(regions []*core.RegionInfo) {
 	for _, region := range regions {
 		c.labelStats.Observe(region, c.getStoresWithoutLabelLocked(region, core.EngineKey, core.EngineTiFlash), c.persistConfig.GetLocationLabels())
 	}
+	c.labelStats.ClearDefunctRegions()
 }
 
 func (c *Cluster) getStoresWithoutLabelLocked(region *core.RegionInfo, key, value string) []*core.StoreInfo {

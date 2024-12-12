@@ -270,7 +270,7 @@ func (c *RaftCluster) InitCluster(
 	c.core, c.opt, c.storage, c.id = basicCluster, opt.(*config.PersistOptions), storage, id
 	c.ctx, c.cancel = context.WithCancel(c.serverCtx)
 	c.labelLevelStats = statistics.NewLabelStatistics()
-	c.hotStat = statistics.NewHotStat(c.ctx)
+	c.hotStat = statistics.NewHotStat(c.ctx, basicCluster)
 	c.slowStat = statistics.NewSlowStat(c.ctx)
 	c.progressManager = progress.NewManager()
 	c.changedRegions = make(chan *core.RegionInfo, defaultChangedRegionsLimit)
@@ -2256,6 +2256,7 @@ func (c *RaftCluster) UpdateRegionsLabelLevelStats(regions []*core.RegionInfo) {
 	for _, region := range regions {
 		c.labelLevelStats.Observe(region, c.getStoresWithoutLabelLocked(region, core.EngineKey, core.EngineTiFlash), c.opt.GetLocationLabels())
 	}
+	c.labelLevelStats.ClearDefunctRegions()
 }
 
 func (c *RaftCluster) getRegionStoresLocked(region *core.RegionInfo) []*core.StoreInfo {
