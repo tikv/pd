@@ -15,8 +15,6 @@
 package storage
 
 import (
-	"path"
-	"strconv"
 	"testing"
 	"time"
 
@@ -56,6 +54,5 @@ func TestTimestampTxn(t *testing.T) {
 
 func newTestStorage(t *testing.T) (Storage, func()) {
 	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1)
-	rootPath := path.Join("/pd", strconv.FormatUint(100, 10))
-	return NewStorageWithEtcdBackend(client, rootPath), clean
+	return NewStorageWithEtcdBackend(client), clean
 }

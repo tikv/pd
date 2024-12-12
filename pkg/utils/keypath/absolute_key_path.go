@@ -17,6 +17,9 @@ package keypath
 import (
 	"fmt"
 	"path"
+	"regexp"
+	"strconv"
+	"strings"
 
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 )
@@ -30,6 +33,21 @@ const (
 	allocIDPathFormat              = "/pd/%d/alloc_id"                  // "/pd/{cluster_id}/alloc_id"
 	keyspaceAllocIDPathFormat      = "/pd/%d/keyspaces/alloc_id"        // "/pd/{cluster_id}/keyspaces/alloc_id"
 	kemberLeaderPriorityPathFormat = "/pd/%d/member/%d/leader_priority" // "/pd/{cluster_id}/member/{member_id}/leader_priority"
+	gcSafePointV2PrefixFormat      = "/pd/%d/keyspaces/gc_safe_point/"  // "/pd/{cluster_id}/keyspaces/gc_safe_point/"
+
+	clusterPathFormat              = "/pd/%d/raft"                            // "/pd/{cluster_id}/raft"
+	clusterBootstrapTimePathFormat = "/pd/%d/raft/status/raft_bootstrap_time" // "/pd/{cluster_id}/raft/status/raft_bootstrap_time"
+	storePathPrefixFormat          = "/pd/%d/raft/s/"                         // "/pd/{cluster_id}/raft/s/"
+	storePathFormat                = "/pd/%d/raft/s/%020d"                    // "/pd/{cluster_id}/raft/s/{store_id}"
+	minResolvedTSPathFormat        = "/pd/%d/raft/min_resolved_ts"            // "/pd/{cluster_id}/raft/min_resolved_ts"
+	externalTimestampPathFormat    = "/pd/%d/raft/external_timestamp"         // "/pd/{cluster_id}/raft/external_timestamp"
+
+	keyspaceMetaPrefixFormat    = "/pd/%d/keyspaces/meta/"                 // "/pd/{cluster_id}/keyspaces/meta/"
+	keyspaceMetaPathFormat      = "/pd/%d/keyspaces/meta/%08d"             // "/pd/{cluster_id}/keyspaces/meta/{keyspace_id}"
+	keyspaceIDPathFormat        = "/pd/%d/keyspaces/id/%s"                 // "/pd/{cluster_id}/keyspaces/id/{keyspace_name}"
+	keyspaceGroupIDPrefixFormat = "/pd/%d/tso/keyspace_groups/membership/" // "/pd/{cluster_id}/tso/keyspace_groups/membership/"
+
+	recoveringMarkPathFormat = "/pd/%d/cluster/markers/snapshot-recovering" // "/pd/{cluster_id}/cluster/markers/snapshot-recovering"
 
 	servicePathFormat  = "/ms/%d/%s/registry"    // "/ms/{cluster_id}/{service_name}/registry"
 	registryPathFormat = "/ms/%d/%s/registry/%s" // "/ms/{cluster_id}/{service_name}/registry/{service_addr}"
@@ -121,4 +139,110 @@ func RegistryPath(serviceName, serviceAddr string) string {
 // ServicePath returns the path to store microservice addresses.
 func ServicePath(serviceName string) string {
 	return fmt.Sprintf(servicePathFormat, ClusterID(), serviceName)
+}
+
+// GCSafePointV2Prefix is the path prefix to all gc safe point v2.
+func GCSafePointV2Prefix() string {
+	return fmt.Sprintf(gcSafePointV2PrefixFormat, ClusterID())
+}
+
+// ClusterPath is the path to save the cluster meta information.
+func ClusterPath() string {
+	return fmt.Sprintf(clusterPathFormat, ClusterID())
+}
+
+// ClusterBootstrapTimeKey returns the path to save the cluster bootstrap timestamp.
+func ClusterBootstrapTimePath() string {
+	return fmt.Sprintf(clusterBootstrapTimePathFormat, ClusterID())
+}
+
+// StorePath returns the store meta info key path with the given store ID.
+func StorePath(storeID uint64) string {
+	return fmt.Sprintf(storePathFormat, ClusterID(), storeID)
+}
+
+// StorePathPrefix returns the store meta info key path prefix.
+func StorePathPrefix() string {
+	return fmt.Sprintf(storePathPrefixFormat, ClusterID())
+}
+
+// ExtractStoreIDFromPath extracts the store ID from the given path.
+func ExtractStoreIDFromPath(path string) (uint64, error) {
+	idStr := strings.TrimLeft(strings.TrimPrefix(path, StorePathPrefix()), "0")
+	return strconv.ParseUint(idStr, 10, 64)
+}
+
+// MinResolvedTSPath returns the min resolved ts path.
+func MinResolvedTSPath() string {
+	return fmt.Sprintf(minResolvedTSPathFormat, ClusterID())
+}
+
+// ExternalTimestampPath returns the external timestamp path.
+func ExternalTimestampPath() string {
+	return fmt.Sprintf(externalTimestampPathFormat, ClusterID())
+}
+
+func RecoveringMarkPath() string {
+	return fmt.Sprintf(recoveringMarkPathFormat, ClusterID())
+}
+
+// KeyspaceMetaPrefix returns the prefix of keyspaces' metadata.
+func KeyspaceMetaPrefix() string {
+	return fmt.Sprintf(keyspaceMetaPrefixFormat, ClusterID())
+}
+
+// KeyspaceMetaPath returns the path to the given keyspace's metadata.
+func KeyspaceMetaPath(spaceID uint32) string {
+	return fmt.Sprintf(keyspaceMetaPathFormat, ClusterID(), spaceID)
+}
+
+// KeyspaceIDPath returns the path to keyspace id from the given keyspace name.
+func KeyspaceIDPath(name string) string {
+	return fmt.Sprintf(keyspaceIDPathFormat, ClusterID(), name)
+}
+
+// KeyspaceGroupIDPrefix returns the prefix of keyspace group id.
+func KeyspaceGroupIDPrefix() string {
+	return fmt.Sprintf(keyspaceGroupIDPrefixFormat, ClusterID())
+}
+
+// KeyspaceGroupIDPath returns the path to keyspace id from the given name.
+// Path: tso/keyspace_groups/membership/{id}
+func KeyspaceGroupIDPath(id uint32) string {
+	return path.Join(tsoKeyspaceGroupPrefix, keyspaceGroupsMembershipKey, encodeKeyspaceGroupID(id))
+}
+
+// GetCompiledKeyspaceGroupIDRegexp returns the compiled regular expression for matching keyspace group id.
+func GetCompiledKeyspaceGroupIDRegexp() *regexp.Regexp {
+	pattern := strings.Join([]string{KeyspaceGroupIDPrefix(), `(\d{5})$`}, "/")
+	return regexp.MustCompile(pattern)
+}
+
+// RegionPath returns the region meta info key path with the given region ID.
+func RegionPath(regionID uint64) string {
+	var buf strings.Builder
+
+	clusterID := strconv.FormatUint(ClusterID(), 10)
+	buf.Grow(4 + len(clusterID) + len(regionPathPrefix) + 1 + keyLen) // Preallocate memory
+
+	buf.WriteString("/pd/")
+	buf.WriteString(clusterID)
+	buf.WriteString("/")
+	buf.WriteString(regionPathPrefix)
+	buf.WriteString("/")
+	s := strconv.FormatUint(regionID, 10)
+	b := make([]byte, keyLen)
+	copy(b, s)
+	if len(s) < keyLen {
+		diff := keyLen - len(s)
+		copy(b[diff:], s)
+		for i := range diff {
+			b[i] = '0'
+		}
+	} else if len(s) > keyLen {
+		copy(b, s[len(s)-keyLen:])
+	}
+	buf.Write(b)
+
+	return buf.String()
 }

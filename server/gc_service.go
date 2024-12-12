@@ -19,8 +19,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
-	"path"
-	"strings"
 
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
@@ -149,7 +147,7 @@ func (s *GrpcServer) WatchGCSafePointV2(request *pdpb.WatchGCSafePointV2Request,
 	// - If required revision < CompactRevision, we need to reload all configs to avoid losing data.
 	// - If required revision >= CompactRevision, just keep watching.
 	// Use WithPrevKV() to get the previous key-value pair when get Delete Event.
-	watchChan := s.client.Watch(ctx, path.Join(s.rootPath, keypath.GCSafePointV2Prefix()), clientv3.WithRev(revision), clientv3.WithPrefix())
+	watchChan := s.client.Watch(ctx, keypath.GCSafePointV2Prefix(), clientv3.WithRev(revision), clientv3.WithPrefix())
 	for {
 		select {
 		case <-ctx.Done():
@@ -238,12 +236,10 @@ func (s *GrpcServer) GetAllGCSafePointV2(ctx context.Context, request *pdpb.GetA
 }
 
 func (s *GrpcServer) loadRangeFromEtcd(startKey, endKey string) ([]string, []string, int64, error) {
-	startKey = strings.Join([]string{s.rootPath, startKey}, "/")
 	var opOption []clientv3.OpOption
 	if endKey == "\x00" {
 		opOption = append(opOption, clientv3.WithPrefix())
 	} else {
-		endKey = strings.Join([]string{s.rootPath, endKey}, "/")
 		opOption = append(opOption, clientv3.WithRange(endKey))
 	}
 	resp, err := etcdutil.EtcdKVGet(s.client, startKey, opOption...)
@@ -253,7 +249,7 @@ func (s *GrpcServer) loadRangeFromEtcd(startKey, endKey string) ([]string, []str
 	keys := make([]string, 0, len(resp.Kvs))
 	values := make([]string, 0, len(resp.Kvs))
 	for _, item := range resp.Kvs {
-		keys = append(keys, strings.TrimPrefix(strings.TrimPrefix(string(item.Key), s.rootPath), "/"))
+		keys = append(keys, string(item.Key), "/")
 		values = append(values, string(item.Value))
 	}
 	return keys, values, resp.Header.Revision, nil

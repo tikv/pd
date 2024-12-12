@@ -26,8 +26,6 @@ import (
 
 const (
 	pdRootPath = "/pd"
-	// ClusterPath is the path to save the cluster meta information.
-	ClusterPath = "raft"
 	// Config is the path to save the PD config.
 	Config = "config"
 	// ServiceMiddlewarePath is the path to save the service middleware config.
@@ -85,21 +83,6 @@ func PDRootPath() string {
 	return path.Join(pdRootPath, strconv.FormatUint(ClusterID(), 10))
 }
 
-// AppendToRootPath appends the given key to the rootPath.
-func AppendToRootPath(rootPath string, key string) string {
-	return path.Join(rootPath, key)
-}
-
-// ClusterRootPath appends the `ClusterPath` to the rootPath.
-func ClusterRootPath(rootPath string) string {
-	return AppendToRootPath(rootPath, ClusterPath)
-}
-
-// ClusterBootstrapTimeKey returns the path to save the cluster bootstrap timestamp.
-func ClusterBootstrapTimeKey() string {
-	return path.Join(ClusterPath, "status", "raft_bootstrap_time")
-}
-
 // ConfigPath returns the path to save the PD config.
 func ConfigPath() string {
 	return path.Join(PDRootPath(), Config)
@@ -135,22 +118,6 @@ func SchedulerConfigPath(schedulerName string) string {
 	return path.Join(CustomSchedulerConfigPath, schedulerName)
 }
 
-// StorePath returns the store meta info key path with the given store ID.
-func StorePath(storeID uint64) string {
-	return path.Join(ClusterPath, "s", fmt.Sprintf("%020d", storeID))
-}
-
-// StorePathPrefix returns the store meta info key path prefix.
-func StorePathPrefix() string {
-	return path.Join(PDRootPath(), ClusterPath, "s") + "/"
-}
-
-// ExtractStoreIDFromPath extracts the store ID from the given path.
-func ExtractStoreIDFromPath(path string) (uint64, error) {
-	idStr := strings.TrimLeft(strings.TrimPrefix(path, StorePathPrefix()), "0")
-	return strconv.ParseUint(idStr, 10, 64)
-}
-
 // StoreLeaderWeightPath returns the store leader weight key path with the given store ID.
 func StoreLeaderWeightPath(storeID uint64) string {
 	return path.Join(schedulePath, "store_weight", fmt.Sprintf("%020d", storeID), "leader")
@@ -159,30 +126,6 @@ func StoreLeaderWeightPath(storeID uint64) string {
 // StoreRegionWeightPath returns the store region weight key path with the given store ID.
 func StoreRegionWeightPath(storeID uint64) string {
 	return path.Join(schedulePath, "store_weight", fmt.Sprintf("%020d", storeID), "region")
-}
-
-// RegionPath returns the region meta info key path with the given region ID.
-func RegionPath(regionID uint64) string {
-	var buf strings.Builder
-	buf.Grow(len(regionPathPrefix) + 1 + keyLen) // Preallocate memory
-
-	buf.WriteString(regionPathPrefix)
-	buf.WriteString("/")
-	s := strconv.FormatUint(regionID, 10)
-	b := make([]byte, keyLen)
-	copy(b, s)
-	if len(s) < keyLen {
-		diff := keyLen - len(s)
-		copy(b[diff:], s)
-		for i := range diff {
-			b[i] = '0'
-		}
-	} else if len(s) > keyLen {
-		copy(b, s[len(s)-keyLen:])
-	}
-	buf.Write(b)
-
-	return buf.String()
 }
 
 // ResourceGroupSettingKeyPath returns the path to save the resource group settings.
@@ -230,26 +173,10 @@ func GCSafePointServicePath(serviceID string) string {
 	return path.Join(GCSafePointPath(), "service", serviceID)
 }
 
-// MinResolvedTSPath returns the min resolved ts path.
-func MinResolvedTSPath() string {
-	return path.Join(ClusterPath, minResolvedTS)
-}
-
-// ExternalTimestampPath returns the external timestamp path.
-func ExternalTimestampPath() string {
-	return path.Join(ClusterPath, externalTimeStamp)
-}
-
 // GCSafePointV2Path is the storage path of gc safe point v2.
 // Path: keyspaces/gc_safe_point/{keyspaceID}
 func GCSafePointV2Path(keyspaceID uint32) string {
 	return buildPath(false, keyspacePrefix, gcSafePointInfix, EncodeKeyspaceID(keyspaceID))
-}
-
-// GCSafePointV2Prefix is the path prefix to all gc safe point v2.
-// Prefix: keyspaces/gc_safe_point/
-func GCSafePointV2Prefix() string {
-	return buildPath(true, keyspacePrefix, gcSafePointInfix)
 }
 
 // ServiceSafePointV2Path is the storage path of service safe point v2.
@@ -263,51 +190,6 @@ func ServiceSafePointV2Path(keyspaceID uint32, serviceID string) string {
 // Path: keyspaces/service_safe_point/{spaceID}/
 func ServiceSafePointV2Prefix(keyspaceID uint32) string {
 	return buildPath(true, keyspacePrefix, serviceSafePointInfix, EncodeKeyspaceID(keyspaceID))
-}
-
-// KeyspaceMetaPrefix returns the prefix of keyspaces' metadata.
-// Prefix: keyspaces/meta/
-func KeyspaceMetaPrefix() string {
-	return path.Join(keyspacePrefix, keyspaceMetaInfix) + "/"
-}
-
-// KeyspaceMetaPath returns the path to the given keyspace's metadata.
-// Path: keyspaces/meta/{space_id}
-func KeyspaceMetaPath(spaceID uint32) string {
-	idStr := EncodeKeyspaceID(spaceID)
-	return path.Join(KeyspaceMetaPrefix(), idStr)
-}
-
-// KeyspaceIDPath returns the path to keyspace id from the given name.
-// Path: keyspaces/id/{name}
-func KeyspaceIDPath(name string) string {
-	return path.Join(keyspacePrefix, keyspaceIDInfix, name)
-}
-
-// EncodeKeyspaceID from uint32 to string.
-// It adds extra padding to make encoded ID ordered.
-// Encoded ID can be decoded directly with strconv.ParseUint.
-// Width of the padded keyspaceID is 8 (decimal representation of uint24max is 16777215).
-func EncodeKeyspaceID(spaceID uint32) string {
-	return fmt.Sprintf("%08d", spaceID)
-}
-
-// KeyspaceGroupIDPrefix returns the prefix of keyspace group id.
-// Path: tso/keyspace_groups/membership
-func KeyspaceGroupIDPrefix() string {
-	return path.Join(tsoKeyspaceGroupPrefix, keyspaceGroupsMembershipKey)
-}
-
-// KeyspaceGroupIDPath returns the path to keyspace id from the given name.
-// Path: tso/keyspace_groups/membership/{id}
-func KeyspaceGroupIDPath(id uint32) string {
-	return path.Join(tsoKeyspaceGroupPrefix, keyspaceGroupsMembershipKey, encodeKeyspaceGroupID(id))
-}
-
-// GetCompiledKeyspaceGroupIDRegexp returns the compiled regular expression for matching keyspace group id.
-func GetCompiledKeyspaceGroupIDRegexp() *regexp.Regexp {
-	pattern := strings.Join([]string{KeyspaceGroupIDPrefix(), `(\d{5})$`}, "/")
-	return regexp.MustCompile(pattern)
 }
 
 // TSOSvcRootPath returns the root path of tso service.

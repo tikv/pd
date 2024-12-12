@@ -151,7 +151,6 @@ func NewAllocatorManager(
 	ctx context.Context,
 	keyspaceGroupID uint32,
 	member ElectionMember,
-	rootPath string,
 	storage endpoint.TSOStorage,
 	cfg Config,
 ) *AllocatorManager {
@@ -161,7 +160,6 @@ func NewAllocatorManager(
 		cancel:                 cancel,
 		kgID:                   keyspaceGroupID,
 		member:                 member,
-		rootPath:               rootPath,
 		storage:                storage,
 		saveInterval:           cfg.GetTSOSaveInterval(),
 		updatePhysicalInterval: cfg.GetTSOUpdatePhysicalInterval(),
