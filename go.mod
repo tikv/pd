@@ -8,10 +8,10 @@ go 1.23
 // replace github.com/pingcap/kvproto => github.com/$YourPrivateRepo $YourPrivateBranch
 
 replace (
-	go.etcd.io/etcd/api/v3 v3.5.15 => github.com/bufferflies/etcd/api/v3 v3.0.0-20241212080120-e2583fc19cad
-	go.etcd.io/etcd/client/pkg/v3 v3.5.15 => github.com/bufferflies/etcd/client/pkg/v3 v3.0.0-20241212080120-e2583fc19cad
-	go.etcd.io/etcd/client/v3 v3.5.15 => github.com/bufferflies/etcd/client/v3 v3.0.0-20241212080120-e2583fc19cad
-	go.etcd.io/etcd/server/v3 v3.5.15 => github.com/bufferflies/etcd/server/v3 v3.0.0-20241212080120-e2583fc19cad
+	go.etcd.io/etcd/api/v3 v3.5.15 => github.com/bufferflies/etcd/api/v3 v3.0.0-20241212081845-8abaa0f3653c
+	go.etcd.io/etcd/client/pkg/v3 v3.5.15 => github.com/bufferflies/etcd/client/pkg/v3 v3.0.0-20241212081845-8abaa0f3653c
+	go.etcd.io/etcd/client/v3 v3.5.15 => github.com/bufferflies/etcd/client/v3 v3.0.0-20241212081845-8abaa0f3653c
+	go.etcd.io/etcd/server/v3 v3.5.15 => github.com/bufferflies/etcd/server/v3 v3.0.0-20241212081845-8abaa0f3653c
 )
 
 require (
