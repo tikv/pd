@@ -7,7 +7,12 @@ go 1.23
 // After the PR to kvproto is merged, remember to comment this out and run `go mod tidy`.
 // replace github.com/pingcap/kvproto => github.com/$YourPrivateRepo $YourPrivateBranch
 
-replace github.com/prometheus/client_golang v1.11.0 => github.com/prometheus/client_golang v1.20.5
+replace (
+	go.etcd.io/etcd/api/v3 v3.5.15 => github.com/bufferflies/etcd/api/v3 v3.0.0-20241212080120-e2583fc19cad
+	go.etcd.io/etcd/client/pkg/v3 v3.5.15 => github.com/bufferflies/etcd/client/pkg/v3 v3.0.0-20241212080120-e2583fc19cad
+	go.etcd.io/etcd/client/v3 v3.5.15 => github.com/bufferflies/etcd/client/v3 v3.0.0-20241212080120-e2583fc19cad
+	go.etcd.io/etcd/server/v3 v3.5.15 => github.com/bufferflies/etcd/server/v3 v3.0.0-20241212080120-e2583fc19cad
+)
 
 require (
 	github.com/AlekSi/gocov-xml v1.0.0
