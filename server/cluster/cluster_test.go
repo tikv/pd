@@ -3041,8 +3041,6 @@ func TestAddScheduler(t *testing.T) {
 	re.NoError(controller.RemoveScheduler(schedulers.BalanceLeaderName))
 	re.NoError(controller.RemoveScheduler(schedulers.BalanceRegionName))
 	re.NoError(controller.RemoveScheduler(schedulers.HotRegionName))
-	re.NoError(controller.RemoveScheduler(schedulers.BalanceWitnessName))
-	re.NoError(controller.RemoveScheduler(schedulers.TransferWitnessLeaderName))
 	re.Empty(controller.GetSchedulerNames())
 
 	stream := mockhbstream.NewHeartbeatStream()
@@ -3133,13 +3131,12 @@ func TestPersistScheduler(t *testing.T) {
 	re.NoError(err)
 	re.Len(sches, defaultCount+2)
 
-	// remove 5 schedulers
+	// remove 3 schedulers
 	re.NoError(controller.RemoveScheduler(schedulers.BalanceLeaderName))
 	re.NoError(controller.RemoveScheduler(schedulers.BalanceRegionName))
 	re.NoError(controller.RemoveScheduler(schedulers.HotRegionName))
-	re.NoError(controller.RemoveScheduler(schedulers.BalanceWitnessName))
-	re.NoError(controller.RemoveScheduler(schedulers.TransferWitnessLeaderName))
-	re.Len(controller.GetSchedulerNames(), defaultCount-3)
+	// only remains 2 items with independent config.
+	re.Len(controller.GetSchedulerNames(), 2)
 	re.NoError(co.GetCluster().GetSchedulerConfig().Persist(storage))
 	co.Stop()
 	co.GetSchedulersController().Wait()
@@ -3190,7 +3187,7 @@ func TestPersistScheduler(t *testing.T) {
 	brs, err := schedulers.CreateScheduler(schedulers.BalanceRegionType, oc, storage, schedulers.ConfigSliceDecoder(schedulers.BalanceRegionType, []string{"", ""}))
 	re.NoError(err)
 	re.NoError(controller.AddScheduler(brs))
-	re.Len(controller.GetSchedulerNames(), defaultCount)
+	re.Len(controller.GetSchedulerNames(), 5)
 
 	// the scheduler option should contain 6 items
 	// the `hot scheduler` are disabled
@@ -3211,9 +3208,9 @@ func TestPersistScheduler(t *testing.T) {
 
 	co.Run()
 	controller = co.GetSchedulersController()
-	re.Len(controller.GetSchedulerNames(), defaultCount-1)
+	re.Len(controller.GetSchedulerNames(), 4)
 	re.NoError(controller.RemoveScheduler(schedulers.EvictLeaderName))
-	re.Len(controller.GetSchedulerNames(), defaultCount-2)
+	re.Len(controller.GetSchedulerNames(), 3)
 }
 
 func TestRemoveScheduler(t *testing.T) {
@@ -3249,8 +3246,6 @@ func TestRemoveScheduler(t *testing.T) {
 	re.NoError(controller.RemoveScheduler(schedulers.BalanceRegionName))
 	re.NoError(controller.RemoveScheduler(schedulers.HotRegionName))
 	re.NoError(controller.RemoveScheduler(schedulers.GrantLeaderName))
-	re.NoError(controller.RemoveScheduler(schedulers.BalanceWitnessName))
-	re.NoError(controller.RemoveScheduler(schedulers.TransferWitnessLeaderName))
 	// all removed
 	sches, _, err = storage.LoadAllSchedulerConfigs()
 	re.NoError(err)

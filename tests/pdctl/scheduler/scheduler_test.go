@@ -111,11 +111,9 @@ func (suite *schedulerTestSuite) checkScheduler(cluster *tests.TestCluster) {
 
 	// scheduler show command
 	expected := map[string]bool{
-		"balance-region-scheduler":          true,
-		"balance-leader-scheduler":          true,
-		"balance-hot-region-scheduler":      true,
-		"transfer-witness-leader-scheduler": true,
-		"balance-witness-scheduler":         true,
+		"balance-region-scheduler":     true,
+		"balance-leader-scheduler":     true,
+		"balance-hot-region-scheduler": true,
 	}
 	checkSchedulerCommand(nil, expected)
 
@@ -123,10 +121,8 @@ func (suite *schedulerTestSuite) checkScheduler(cluster *tests.TestCluster) {
 	args := []string{"-u", pdAddr, "scheduler", "remove", "balance-region-scheduler"}
 	time.Sleep(10 * time.Second)
 	expected = map[string]bool{
-		"balance-leader-scheduler":          true,
-		"balance-hot-region-scheduler":      true,
-		"transfer-witness-leader-scheduler": true,
-		"balance-witness-scheduler":         true,
+		"balance-leader-scheduler":     true,
+		"balance-hot-region-scheduler": true,
 	}
 	checkSchedulerCommand(args, expected)
 
@@ -136,11 +132,9 @@ func (suite *schedulerTestSuite) checkScheduler(cluster *tests.TestCluster) {
 		// scheduler add command
 		args = []string{"-u", pdAddr, "scheduler", "add", schedulers[idx], "2"}
 		expected = map[string]bool{
-			"balance-leader-scheduler":          true,
-			"balance-hot-region-scheduler":      true,
-			schedulers[idx]:                     true,
-			"transfer-witness-leader-scheduler": true,
-			"balance-witness-scheduler":         true,
+			"balance-leader-scheduler":     true,
+			"balance-hot-region-scheduler": true,
+			schedulers[idx]:                true,
 		}
 		checkSchedulerCommand(args, expected)
 
@@ -152,11 +146,9 @@ func (suite *schedulerTestSuite) checkScheduler(cluster *tests.TestCluster) {
 		// scheduler config update command
 		args = []string{"-u", pdAddr, "scheduler", "config", schedulers[idx], "add-store", "3"}
 		expected = map[string]bool{
-			"balance-leader-scheduler":          true,
-			"balance-hot-region-scheduler":      true,
-			schedulers[idx]:                     true,
-			"transfer-witness-leader-scheduler": true,
-			"balance-witness-scheduler":         true,
+			"balance-leader-scheduler":     true,
+			"balance-hot-region-scheduler": true,
+			schedulers[idx]:                true,
 		}
 		checkSchedulerCommand(args, expected)
 
@@ -167,32 +159,26 @@ func (suite *schedulerTestSuite) checkScheduler(cluster *tests.TestCluster) {
 		// scheduler delete command
 		args = []string{"-u", pdAddr, "scheduler", "remove", schedulers[idx]}
 		expected = map[string]bool{
-			"balance-leader-scheduler":          true,
-			"balance-hot-region-scheduler":      true,
-			"transfer-witness-leader-scheduler": true,
-			"balance-witness-scheduler":         true,
+			"balance-leader-scheduler":     true,
+			"balance-hot-region-scheduler": true,
 		}
 		checkSchedulerCommand(args, expected)
 
 		// scheduler add command
 		args = []string{"-u", pdAddr, "scheduler", "add", schedulers[idx], "2"}
 		expected = map[string]bool{
-			"balance-leader-scheduler":          true,
-			"balance-hot-region-scheduler":      true,
-			schedulers[idx]:                     true,
-			"transfer-witness-leader-scheduler": true,
-			"balance-witness-scheduler":         true,
+			"balance-leader-scheduler":     true,
+			"balance-hot-region-scheduler": true,
+			schedulers[idx]:                true,
 		}
 		checkSchedulerCommand(args, expected)
 
 		// scheduler add command twice
 		args = []string{"-u", pdAddr, "scheduler", "add", schedulers[idx], "4"}
 		expected = map[string]bool{
-			"balance-leader-scheduler":          true,
-			"balance-hot-region-scheduler":      true,
-			schedulers[idx]:                     true,
-			"transfer-witness-leader-scheduler": true,
-			"balance-witness-scheduler":         true,
+			"balance-leader-scheduler":     true,
+			"balance-hot-region-scheduler": true,
+			schedulers[idx]:                true,
 		}
 		checkSchedulerCommand(args, expected)
 
@@ -203,11 +189,9 @@ func (suite *schedulerTestSuite) checkScheduler(cluster *tests.TestCluster) {
 		// scheduler remove command [old]
 		args = []string{"-u", pdAddr, "scheduler", "remove", schedulers[idx] + "-4"}
 		expected = map[string]bool{
-			"balance-leader-scheduler":          true,
-			"balance-hot-region-scheduler":      true,
-			schedulers[idx]:                     true,
-			"transfer-witness-leader-scheduler": true,
-			"balance-witness-scheduler":         true,
+			"balance-leader-scheduler":     true,
+			"balance-hot-region-scheduler": true,
+			schedulers[idx]:                true,
 		}
 		checkSchedulerCommand(args, expected)
 
@@ -218,21 +202,17 @@ func (suite *schedulerTestSuite) checkScheduler(cluster *tests.TestCluster) {
 		// scheduler remove command, when remove the last store, it should remove whole scheduler
 		args = []string{"-u", pdAddr, "scheduler", "remove", schedulers[idx] + "-2"}
 		expected = map[string]bool{
-			"balance-leader-scheduler":          true,
-			"balance-hot-region-scheduler":      true,
-			"transfer-witness-leader-scheduler": true,
-			"balance-witness-scheduler":         true,
+			"balance-leader-scheduler":     true,
+			"balance-hot-region-scheduler": true,
 		}
 		checkSchedulerCommand(args, expected)
 	}
 
 	// test shuffle region config
 	checkSchedulerCommand([]string{"-u", pdAddr, "scheduler", "add", "shuffle-region-scheduler"}, map[string]bool{
-		"balance-leader-scheduler":          true,
-		"balance-hot-region-scheduler":      true,
-		"shuffle-region-scheduler":          true,
-		"transfer-witness-leader-scheduler": true,
-		"balance-witness-scheduler":         true,
+		"balance-leader-scheduler":     true,
+		"balance-hot-region-scheduler": true,
+		"shuffle-region-scheduler":     true,
 	})
 	var roles []string
 	mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "shuffle-region-scheduler", "show-roles"}, &roles)
@@ -245,12 +225,10 @@ func (suite *schedulerTestSuite) checkScheduler(cluster *tests.TestCluster) {
 
 	// test grant hot region scheduler config
 	checkSchedulerCommand([]string{"-u", pdAddr, "scheduler", "add", "grant-hot-region-scheduler", "1", "1,2,3"}, map[string]bool{
-		"balance-leader-scheduler":          true,
-		"balance-hot-region-scheduler":      true,
-		"shuffle-region-scheduler":          true,
-		"grant-hot-region-scheduler":        true,
-		"transfer-witness-leader-scheduler": true,
-		"balance-witness-scheduler":         true,
+		"balance-leader-scheduler":     true,
+		"balance-hot-region-scheduler": true,
+		"shuffle-region-scheduler":     true,
+		"grant-hot-region-scheduler":   true,
 	})
 	var conf3 map[string]interface{}
 	expected3 := map[string]interface{}{
