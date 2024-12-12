@@ -2,6 +2,8 @@ module github.com/tikv/pd/client
 
 go 1.23
 
+replace github.com/prometheus/client_golang v1.11.0 => github.com/prometheus/client_golang v1.20.5
+
 require (
 	github.com/BurntSushi/toml v0.3.1
 	github.com/cakturk/go-netstat v0.0.0-20200220111822-e5b49efee7a5
