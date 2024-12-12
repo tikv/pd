@@ -23,6 +23,7 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
+	"github.com/tikv/pd/pkg/utils/timerutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
@@ -124,16 +125,7 @@ func (l *lease) KeepAlive(ctx context.Context) {
 					l.expireTime.Store(t)
 				}
 			}
-			// Stop the timer if it's not stopped.
-			if !timer.Stop() {
-				select {
-				case <-timer.C: // try to drain from the channel
-				default:
-				}
-			}
-			// We need be careful here, see more details in the comments of Timer.Reset.
-			// https://pkg.go.dev/time@master#Timer.Reset
-			timer.Reset(l.leaseTimeout)
+			timerutil.SafeResetTimer(timer, l.leaseTimeout)
 		case <-timer.C:
 			log.Info("keep alive lease too slow", zap.Duration("timeout-duration", l.leaseTimeout), zap.Time("actual-expire", l.expireTime.Load().(time.Time)), zap.String("purpose", l.Purpose))
 			return
