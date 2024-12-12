@@ -60,6 +60,7 @@ type thresholds struct {
 // hotPeerCache saves the hot peer's statistics.
 type hotPeerCache struct {
 	kind              utils.RWType
+	cluster           *core.BasicCluster
 	peersOfStore      map[uint64]*utils.TopN         // storeID -> hot peers
 	storesOfRegion    map[uint64]map[uint64]struct{} // regionID -> storeIDs
 	regionsOfStore    map[uint64]map[uint64]struct{} // storeID -> regionIDs
@@ -67,13 +68,14 @@ type hotPeerCache struct {
 	taskQueue         *chanx.UnboundedChan[FlowItemTask]
 	thresholdsOfStore map[uint64]*thresholds                           // storeID -> thresholds
 	metrics           map[uint64][utils.ActionTypeLen]prometheus.Gauge // storeID -> metrics
-	// TODO: consider to remove store info when store is offline.
+	lastGCTime        time.Time
 }
 
 // NewHotPeerCache creates a hotPeerCache
-func NewHotPeerCache(ctx context.Context, kind utils.RWType) *hotPeerCache {
+func NewHotPeerCache(ctx context.Context, cluster *core.BasicCluster, kind utils.RWType) *hotPeerCache {
 	return &hotPeerCache{
 		kind:              kind,
+		cluster:           cluster,
 		peersOfStore:      make(map[uint64]*utils.TopN),
 		storesOfRegion:    make(map[uint64]map[uint64]struct{}),
 		regionsOfStore:    make(map[uint64]map[uint64]struct{}),
@@ -114,6 +116,7 @@ func (f *hotPeerCache) updateStat(item *HotPeerStat) {
 		return
 	}
 	f.incMetrics(item.actionType, item.StoreID)
+	f.gc()
 }
 
 func (f *hotPeerCache) incMetrics(action utils.ActionType, storeID uint64) {
@@ -541,6 +544,36 @@ func (f *hotPeerCache) removeItem(item *HotPeerStat) {
 	}
 	if regions, ok := f.regionsOfStore[item.StoreID]; ok {
 		delete(regions, item.RegionID)
+	}
+}
+
+func (f *hotPeerCache) gc() {
+	if time.Since(f.lastGCTime) < f.topNTTL {
+		return
+	}
+	f.lastGCTime = time.Now()
+	// remove tombstone stores
+	stores := make(map[uint64]struct{})
+	for _, storeID := range f.cluster.GetStores() {
+		stores[storeID.GetID()] = struct{}{}
+	}
+	for storeID := range f.peersOfStore {
+		if _, ok := stores[storeID]; !ok {
+			delete(f.peersOfStore, storeID)
+			delete(f.regionsOfStore, storeID)
+			delete(f.thresholdsOfStore, storeID)
+			delete(f.metrics, storeID)
+		}
+	}
+	// remove expired items
+	for _, peers := range f.peersOfStore {
+		regions := peers.RemoveExpired()
+		for _, regionID := range regions {
+			delete(f.storesOfRegion, regionID)
+			for storeID := range f.regionsOfStore {
+				delete(f.regionsOfStore[storeID], regionID)
+			}
+		}
 	}
 }
 
