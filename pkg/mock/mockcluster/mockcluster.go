@@ -365,8 +365,8 @@ func (mc *Cluster) AddRegionStoreWithLeader(storeID uint64, regionCount int, lea
 	}
 }
 
-// AddLabelsStore adds store with specified count of region and labels.
-func (mc *Cluster) AddLabelsStore(storeID uint64, regionCount int, labels map[string]string) {
+// AddLabelsStoreWithLimit adds store with specified count of region and labels and store limit.
+func (mc *Cluster) AddLabelsStoreWithLimit(storeID uint64, regionCount int, labels map[string]string, limit float64) {
 	newLabels := make([]*metapb.StoreLabel, 0, len(labels))
 	for k, v := range labels {
 		newLabels = append(newLabels, &metapb.StoreLabel{Key: k, Value: v})
@@ -385,9 +385,14 @@ func (mc *Cluster) AddLabelsStore(storeID uint64, regionCount int, labels map[st
 		core.SetRegionSize(int64(regionCount)*defaultRegionSize/units.MiB),
 		core.SetLastHeartbeatTS(time.Now()),
 	)
-	mc.SetStoreLimit(storeID, storelimit.AddPeer, 60)
-	mc.SetStoreLimit(storeID, storelimit.RemovePeer, 60)
+	mc.SetStoreLimit(storeID, storelimit.AddPeer, limit)
+	mc.SetStoreLimit(storeID, storelimit.RemovePeer, limit)
 	mc.PutStore(store)
+}
+
+// AddLabelsStore adds store with specified count of region and labels.
+func (mc *Cluster) AddLabelsStore(storeID uint64, regionCount int, labels map[string]string) {
+	mc.AddLabelsStoreWithLimit(storeID, regionCount, labels, 60)
 }
 
 // AddLabersStoreWithLearnerCount adds store with specified count of region, learner and labels.

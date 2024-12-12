@@ -22,10 +22,13 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/log"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
+	"go.uber.org/zap"
 )
 
 const (
@@ -290,7 +293,13 @@ func (o *Operator) IsEnd() bool {
 
 // CheckSuccess checks if all steps are finished, and update the status.
 func (o *Operator) CheckSuccess() bool {
+	failpoint.Inject("forceSucess", func() {
+		log.Info("!!!! fsdfd")
+		atomic.StoreInt32(&o.currentStep, int32(len(o.steps)))
+	})
+	log.Info("!!!! c", zap.Any("a", o.currentStep), zap.Any("b", len(o.steps)))
 	if atomic.LoadInt32(&o.currentStep) >= int32(len(o.steps)) {
+		log.Info("!!!! cdsds", zap.Any("a", o.status.To(SUCCESS)), zap.Any("b", len(o.steps)))
 		return o.status.To(SUCCESS) || o.Status() == SUCCESS
 	}
 	return false

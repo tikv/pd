@@ -425,7 +425,9 @@ func (s *balanceKeyrangeScheduler) Schedule(cluster sche.SchedulerCluster, dryRu
 	if queued >= limit {
 		batchSize = 0
 	} else {
-		batchSize = limit - queued
+		if batchSize > limit-queued {
+			batchSize = limit - queued
+		}
 	}
 	var part []*operator.Operator
 	scheduleSize := int(batchSize)
@@ -439,9 +441,9 @@ func (s *balanceKeyrangeScheduler) Schedule(cluster sche.SchedulerCluster, dryRu
 		for _, opw := range s.migrationPlan.Operators {
 			part = append(part, opw.Operator)
 		}
-		s.migrationPlan.Running = s.migrationPlan.Operators
+		s.migrationPlan.Running = append(s.migrationPlan.Running, s.migrationPlan.Operators...)
 		s.migrationPlan.Operators = make([]*OperatorWrapper, 0)
 	}
-	log.Info("!!!!! balance keyrange issue operators", zap.Any("count", len(part)), zap.Any("GetSchedulerMaxWaitingOperator", limit), zap.Any("queued", queued), zap.Any("batchSize", batchSize))
+	log.Info("!!!!! balance keyrange issue operators", zap.Any("count", len(part)), zap.Any("conf", s.conf.BatchSize), zap.Any("GetSchedulerMaxWaitingOperator", limit), zap.Any("queued", queued), zap.Any("batchSize", batchSize), zap.Any("f", s.IsFinished()))
 	return part, make([]plan.Plan, 0)
 }

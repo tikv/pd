@@ -21,6 +21,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
@@ -155,9 +156,9 @@ func (suite *balanceKeyrangeSchedulerTestSuite) TestBalanceKeyrangeFinish() {
 	sb, err := CreateScheduler(types.BalanceKeyrangeScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.BalanceKeyrangeScheduler, MakeConfigJson(1, "", 100000, "", VeryBigEndKey)))
 	re.NoError(err)
 
-	tc.AddLabelsStore(10, 16, map[string]string{"engine": "tiflash"})
-	tc.AddLabelsStore(11, 16, map[string]string{})
-	tc.AddLabelsStore(12, 16, map[string]string{})
+	tc.AddLabelsStoreWithLimit(10, 16, map[string]string{"engine": "tiflash"}, 999999999)
+	tc.AddLabelsStoreWithLimit(11, 16, map[string]string{}, 999999999)
+	tc.AddLabelsStoreWithLimit(12, 16, map[string]string{}, 999999999)
 
 	tc.AddLeaderRegion(1, 10, 11)
 	tc.AddLeaderRegion(2, 10, 11)
@@ -175,14 +176,28 @@ func (suite *balanceKeyrangeSchedulerTestSuite) TestBalanceKeyrangeFinish() {
 	// store 12: 1 2 5 6
 	// 3 ops in total.
 
-	sb.Schedule(tc, false)
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/operator/forceSucess", "return(true)"))
+	ops, _ := sb.Schedule(tc, false)
+	re.Equal(len(ops), 1)
+	ops[0].Start()
+	re.True(ops[0].CheckSuccess())
 	re.False(sb.IsFinished())
-	sb.Schedule(tc, false)
+	ops, _ = sb.Schedule(tc, false)
+	re.Equal(len(ops), 1)
+	ops[0].Start()
+	re.True(ops[0].CheckSuccess())
 	re.False(sb.IsFinished())
+	ops, _ = sb.Schedule(tc, false)
+	re.Equal(len(ops), 1)
+	ops[0].Start()
+	re.True(ops[0].CheckSuccess())
+	re.True(ops[0].IsEnd())
+	re.False(sb.IsFinished()) // the third and last op.
+	ops, _ = sb.Schedule(tc, false)
+	re.True(sb.IsFinished())
 	sb.Schedule(tc, false)
-	re.True(sb.IsFinished()) // the third and last op.
 	sb.Schedule(tc, false)
-	sb.Schedule(tc, false)
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/operator/forceSucess"))
 }
 
 func (suite *balanceKeyrangeSchedulerTestSuite) TestBalanceKeyrangeConfChanged() {

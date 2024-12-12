@@ -994,7 +994,9 @@ func (oc *Controller) getOrCreateStoreLimit(storeID uint64, limitType storelimit
 	}
 	// The other limits do not need to update by config exclude StoreRateLimit.
 	if limit, ok := s.GetStoreLimit().(*storelimit.StoreRateLimit); ok && limit.Rate(limitType) != ratePerSec {
+		log.Info("!!!! dfdsf 1")
 		oc.cluster.ResetStoreLimit(storeID, limitType, ratePerSec)
 	}
+	log.Info("!!!! dfdsf 2")
 	return s.GetStoreLimit()
 }
