@@ -16,8 +16,13 @@ package server
 
 import (
 	"context"
+<<<<<<< HEAD
 	"fmt"
 	"math/rand"
+=======
+	"net/http"
+	"net/http/pprof"
+>>>>>>> bfc988bb3 (api: fix cannot dump trace (#7255))
 	"path/filepath"
 	"strings"
 	"time"
@@ -160,6 +165,56 @@ func checkBootstrapRequest(clusterID uint64, req *pdpb.BootstrapRequest) error {
 	return nil
 }
 
+<<<<<<< HEAD
+=======
+func combineBuilderServerHTTPService(ctx context.Context, svr *Server, serviceBuilders ...HandlerBuilder) (map[string]http.Handler, error) {
+	userHandlers := make(map[string]http.Handler)
+	registerMap := make(map[string]http.Handler)
+
+	apiService := negroni.New()
+	recovery := negroni.NewRecovery()
+	apiService.Use(recovery)
+	router := mux.NewRouter()
+
+	for _, build := range serviceBuilders {
+		handler, info, err := build(ctx, svr)
+		if err != nil {
+			return nil, err
+		}
+		if !info.IsCore && len(info.PathPrefix) == 0 && (len(info.Name) == 0 || len(info.Version) == 0) {
+			return nil, errs.ErrAPIInformationInvalid.FastGenByArgs(info.Name, info.Version)
+		}
+
+		if err := apiutil.RegisterUserDefinedHandlers(registerMap, &info, handler); err != nil {
+			return nil, err
+		}
+	}
+
+	// Combine the pd service to the router. the extension service will be added to the userHandlers.
+	for pathPrefix, handler := range registerMap {
+		if strings.Contains(pathPrefix, apiutil.CorePath) || strings.Contains(pathPrefix, apiutil.ExtensionsPath) {
+			router.PathPrefix(pathPrefix).Handler(handler)
+			if pathPrefix == apiutil.CorePath {
+				// Deprecated
+				router.Path("/pd/health").Handler(handler)
+				// Deprecated
+				router.Path("/pd/ping").Handler(handler)
+			}
+		} else {
+			userHandlers[pathPrefix] = handler
+		}
+	}
+
+	apiService.UseHandler(router)
+	userHandlers[pdAPIPrefix] = apiService
+
+	// fix issue https://github.com/tikv/pd/issues/7253
+	// FIXME: remove me after upgrade
+	userHandlers["/debug/pprof/trace"] = http.HandlerFunc(pprof.Trace)
+	return userHandlers, nil
+}
+
+>>>>>>> bfc988bb3 (api: fix cannot dump trace (#7255))
 func isPathInDirectory(path, directory string) bool {
 	absPath, err := filepath.Abs(path)
 	if err != nil {
