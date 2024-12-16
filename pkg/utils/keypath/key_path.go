@@ -17,99 +17,23 @@ package keypath
 import (
 	"fmt"
 	"path"
-	"regexp"
-	"strconv"
-	"strings"
 
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 )
 
 const (
-	pdRootPath = "/pd"
 	// Config is the path to save the PD config.
-	Config = "config"
-	// ServiceMiddlewarePath is the path to save the service middleware config.
-	ServiceMiddlewarePath = "service_middleware"
-	schedulePath          = "schedule"
-	gcPath                = "gc"
-	ruleCommonPath        = "rule"
-	// RulesPath is the path to save the placement rules.
-	RulesPath = "rules"
-	// RuleGroupPath is the path to save the placement rule groups.
-	RuleGroupPath = "rule_group"
-	// RegionLabelPath is the path to save the region label.
-	RegionLabelPath = "region_label"
+	Config       = "config"
+	schedulePath = "schedule"
+
 	replicationPath = "replication_mode"
-	// CustomSchedulerConfigPath is the path to save the scheduler config.
-	CustomSchedulerConfigPath = "scheduler_config"
 	// GCWorkerServiceSafePointID is the service id of GC worker.
 	GCWorkerServiceSafePointID = "gc_worker"
-	minResolvedTS              = "min_resolved_ts"
-	externalTimeStamp          = "external_timestamp"
-	keyspaceSafePointPrefix    = "keyspaces/gc_safepoint"
-	keyspaceGCSafePointSuffix  = "gc"
-	keyspacePrefix             = "keyspaces"
-	keyspaceMetaInfix          = "meta"
-	keyspaceIDInfix            = "id"
-	gcSafePointInfix           = "gc_safe_point"
-	serviceSafePointInfix      = "service_safe_point"
-	regionPathPrefix           = "raft/r"
-	// tso storage endpoint has prefix `tso`
-	tsoServiceKey                = constant.TSOServiceName
+
 	globalTSOAllocatorEtcdPrefix = "gta"
 	// TimestampKey is the key of timestamp oracle used for the suffix.
 	TimestampKey = "timestamp"
-
-	tsoKeyspaceGroupPrefix      = tsoServiceKey + "/" + constant.KeyspaceGroupsKey
-	keyspaceGroupsMembershipKey = "membership"
-	keyspaceGroupsElectionKey   = "election"
-
-	// we use uint64 to represent ID, the max length of uint64 is 20.
-	keyLen = 20
-
-	// ClusterIDPath is the path to store cluster id
-	ClusterIDPath = "/pd/cluster_id"
 )
-
-// PDRootPath returns the PD root path.
-func PDRootPath() string {
-	return path.Join(pdRootPath, strconv.FormatUint(ClusterID(), 10))
-}
-
-// ConfigPath returns the path to save the PD config.
-func ConfigPath() string {
-	return path.Join(PDRootPath(), Config)
-}
-
-// SchedulerConfigPathPrefix returns the path prefix to save the scheduler config.
-func SchedulerConfigPathPrefix() string {
-	return path.Join(PDRootPath(), CustomSchedulerConfigPath)
-}
-
-// RulesPathPrefix returns the path prefix to save the placement rules.
-func RulesPathPrefix() string {
-	return path.Join(PDRootPath(), RulesPath)
-}
-
-// RuleCommonPathPrefix returns the path prefix to save the placement rule common config.
-func RuleCommonPathPrefix() string {
-	return path.Join(PDRootPath(), ruleCommonPath)
-}
-
-// RuleGroupPathPrefix returns the path prefix to save the placement rule groups.
-func RuleGroupPathPrefix() string {
-	return path.Join(PDRootPath(), RuleGroupPath)
-}
-
-// RegionLabelPathPrefix returns the path prefix to save the region label.
-func RegionLabelPathPrefix() string {
-	return path.Join(PDRootPath(), RegionLabelPath)
-}
-
-// SchedulerConfigPath returns the path to save the scheduler config.
-func SchedulerConfigPath(schedulerName string) string {
-	return path.Join(CustomSchedulerConfigPath, schedulerName)
-}
 
 // StoreLeaderWeightPath returns the store leader weight key path with the given store ID.
 func StoreLeaderWeightPath(storeID uint64) string {
@@ -121,62 +45,9 @@ func StoreRegionWeightPath(storeID uint64) string {
 	return path.Join(schedulePath, "store_weight", fmt.Sprintf("%020d", storeID), "region")
 }
 
-// RuleKeyPath returns the path to save the placement rule with the given rule key.
-func RuleKeyPath(ruleKey string) string {
-	return path.Join(RulesPath, ruleKey)
-}
-
-// RuleGroupIDPath returns the path to save the placement rule group with the given group ID.
-func RuleGroupIDPath(groupID string) string {
-	return path.Join(RuleGroupPath, groupID)
-}
-
-// RegionLabelKeyPath returns the path to save the region label with the given rule key.
-func RegionLabelKeyPath(ruleKey string) string {
-	return path.Join(RegionLabelPath, ruleKey)
-}
-
 // ReplicationModePath returns the path to save the replication mode with the given mode.
 func ReplicationModePath(mode string) string {
 	return path.Join(replicationPath, mode)
-}
-
-// TSOSvcRootPath returns the root path of tso service.
-// Path: /ms/{cluster_id}/tso
-func TSOSvcRootPath() string {
-	return svcRootPath(constant.TSOServiceName)
-}
-
-func svcRootPath(svcName string) string {
-	c := strconv.FormatUint(ClusterID(), 10)
-	return path.Join(constant.MicroserviceRootPath, c, svcName)
-}
-
-// LegacyRootPath returns the root path of legacy pd service.
-// Path: /pd/{cluster_id}
-func LegacyRootPath() string {
-	return path.Join(pdRootPath, strconv.FormatUint(ClusterID(), 10))
-}
-
-// GetCompiledNonDefaultIDRegexp returns the compiled regular expression for matching non-default keyspace group id.
-func GetCompiledNonDefaultIDRegexp() *regexp.Regexp {
-	rootPath := TSOSvcRootPath()
-	pattern := strings.Join([]string{rootPath, constant.KeyspaceGroupsKey, keyspaceGroupsElectionKey, `(\d{5})`, constant.PrimaryKey + `$`}, "/")
-	return regexp.MustCompile(pattern)
-}
-
-func buildPath(withSuffix bool, str ...string) string {
-	var sb strings.Builder
-	for i := range str {
-		if i != 0 {
-			sb.WriteString("/")
-		}
-		sb.WriteString(str[i])
-	}
-	if withSuffix {
-		sb.WriteString("/")
-	}
-	return sb.String()
 }
 
 // KeyspaceGroupGlobalTSPath constructs the timestampOracle path prefix for Global TSO, which is:

@@ -26,6 +26,8 @@ import (
 
 // Leader and primary are the same thing in this context.
 const (
+	// ClusterIDPath is the path to store cluster id
+	ClusterIDPath                  = "/pd/cluster_id"                   // "/pd/cluster_id"
 	leaderPathFormat               = "/pd/%d/leader"                    // "/pd/{cluster_id}/leader"
 	memberBinaryDeployPathFormat   = "/pd/%d/member/%d/deploy_path"     // "/pd/{cluster_id}/member/{member_id}/deploy_path"
 	memberGitHashPath              = "/pd/%d/member/%d/git_hash"        // "/pd/{cluster_id}/member/{member_id}/git_hash"
@@ -33,6 +35,15 @@ const (
 	allocIDPathFormat              = "/pd/%d/alloc_id"                  // "/pd/{cluster_id}/alloc_id"
 	keyspaceAllocIDPathFormat      = "/pd/%d/keyspaces/alloc_id"        // "/pd/{cluster_id}/keyspaces/alloc_id"
 	kemberLeaderPriorityPathFormat = "/pd/%d/member/%d/leader_priority" // "/pd/{cluster_id}/member/{member_id}/leader_priority"
+	configPathFormat               = "/pd/%d/config"                    // "/pd/{cluster_id}/config"
+	schedulerConfigPathFormat      = "/pd/%d/schedule/%s"               // "/pd/{cluster_id}/schedule/{scheduler_name}"
+	serviceMiddlewarePathFormat    = "/pd/%d/service_middleware"        // "/pd/{cluster_id}/service_middleware"
+
+	rulePathFormat          = "/pd/%d/rules/%s"        // "/pd/{cluster_id}/rules/{rule_id}"
+	ruleConfigPrefixFormat  = "/pd/%d/rule/"           // "/pd/{cluster_id}/rule/"
+	ruleGroupPathFormat     = "/pd/%d/rule_group/%s"   // "/pd/{cluster_id}/rule_group/{group_id}"
+	regionLablePathFormat   = "/pd/%d/region_label/%s" // "/pd/{cluster_id}/region_label/{label_id}"
+	regionLabelPrefixFormat = "/pd/%d/region_label/"   // "/pd/{cluster_id}/region_label/"
 
 	gcSafePointPathFormat        = "/pd/%d/gc/safe_point/"                       // "/pd/{cluster_id}/gc/safe_point"
 	gcSafePointServicePathFormat = "/pd/%d/gc/safe_point/service/%s"             // "/pd/{cluster_id}/gc/safe_point/service/{service_id}"
@@ -222,8 +233,19 @@ func GetCompiledKeyspaceGroupIDRegexp() *regexp.Regexp {
 	return regexp.MustCompile(pattern)
 }
 
+// ServiceMiddlewarePath is the path to save the service middleware config.
+func ServiceMiddlewarePath() string {
+	return fmt.Sprintf(serviceMiddlewarePathFormat, ClusterID())
+}
+
 // RegionPath returns the region meta info key path with the given region ID.
 func RegionPath(regionID uint64) string {
+	// we use uint64 to represent ID, the max length of uint64 is 20.
+	const (
+		keyLen           = 20
+		regionPathPrefix = "raft/r"
+	)
+
 	var buf strings.Builder
 
 	clusterID := strconv.FormatUint(ClusterID(), 10)

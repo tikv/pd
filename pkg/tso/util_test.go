@@ -70,24 +70,3 @@ func TestExtractKeyspaceGroupIDFromKeyspaceGroupMembershipPath(t *testing.T) {
 		re.Error(err)
 	}
 }
-
-func TestExtractKeyspaceGroupIDFromKeyspaceGroupPrimaryPath(t *testing.T) {
-	re := require.New(t)
-
-	compiledRegexp := keypath.GetCompiledNonDefaultIDRegexp()
-
-	rightCases := []struct {
-		path string
-		id   uint32
-	}{
-		{path: "/ms/0/tso/keyspace_groups/election/00001/primary", id: 1},
-		{path: "/ms/0/tso/keyspace_groups/election/12345/primary", id: 12345},
-		{path: "/ms/0/tso/keyspace_groups/election/99999/primary", id: 99999},
-	}
-
-	for _, tt := range rightCases {
-		id, err := ExtractKeyspaceGroupIDFromPath(compiledRegexp, tt.path)
-		re.Equal(tt.id, id)
-		re.NoError(err)
-	}
-}
