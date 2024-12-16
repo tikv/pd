@@ -61,9 +61,7 @@ type tsoObject struct {
 type timestampOracle struct {
 	client          *clientv3.Client
 	keyspaceGroupID uint32
-	// When tsPath is empty, it means that it is a global timestampOracle.
-	tsPath  string
-	storage endpoint.TSOStorage
+	storage         endpoint.TSOStorage
 	// TODO: remove saveInterval
 	saveInterval           time.Duration
 	updatePhysicalInterval time.Duration
@@ -131,7 +129,7 @@ func (t *timestampOracle) SyncTimestamp() error {
 		time.Sleep(time.Second)
 	})
 
-	last, err := t.storage.LoadTimestamp(t.tsPath)
+	last, err := t.storage.LoadTimestamp(keypath.Prefix(keypath.TimestampPath(t.keyspaceGroupID)))
 	if err != nil {
 		return err
 	}
@@ -176,7 +174,7 @@ func (t *timestampOracle) SyncTimestamp() error {
 	})
 	save := next.Add(t.saveInterval)
 	start := time.Now()
-	if err = t.storage.SaveTimestamp(keypath.TimestampPath(t.tsPath), save); err != nil {
+	if err = t.storage.SaveTimestamp(t.keyspaceGroupID, save); err != nil {
 		t.metrics.errSaveSyncTSEvent.Inc()
 		return err
 	}
@@ -244,7 +242,7 @@ func (t *timestampOracle) resetUserTimestamp(leadership *election.Leadership, ts
 	if typeutil.SubRealTimeByWallClock(t.getLastSavedTime(), nextPhysical) <= UpdateTimestampGuard {
 		save := nextPhysical.Add(t.saveInterval)
 		start := time.Now()
-		if err := t.storage.SaveTimestamp(keypath.TimestampPath(t.tsPath), save); err != nil {
+		if err := t.storage.SaveTimestamp(t.keyspaceGroupID, save); err != nil {
 			t.metrics.errSaveResetTSEvent.Inc()
 			return err
 		}
@@ -327,10 +325,9 @@ func (t *timestampOracle) UpdateTimestamp() error {
 	if typeutil.SubRealTimeByWallClock(t.getLastSavedTime(), next) <= UpdateTimestampGuard {
 		save := next.Add(t.saveInterval)
 		start := time.Now()
-		if err := t.storage.SaveTimestamp(keypath.TimestampPath(t.tsPath), save); err != nil {
+		if err := t.storage.SaveTimestamp(t.keyspaceGroupID, save); err != nil {
 			log.Warn("save timestamp failed",
 				logutil.CondUint32("keyspace-group-id", t.keyspaceGroupID, t.keyspaceGroupID > 0),
-				zap.String("timestamp-path", keypath.TimestampPath(t.tsPath)),
 				zap.Error(err))
 			t.metrics.errSaveUpdateTSEvent.Inc()
 			return err
