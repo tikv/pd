@@ -1334,6 +1334,7 @@ func (h *Handler) RedistibuteRegions(data string) (string, error) {
 
 func (h *Handler) CheckRedistibuteRegionsStatus() (string, error) {
 	sc, err := h.GetSchedulersController()
+	log.Info("!!!!! CheckRedistibuteRegionsStatus 111")
 	if err != nil {
 		return "", err
 	}
@@ -1341,6 +1342,10 @@ func (h *Handler) CheckRedistibuteRegionsStatus() (string, error) {
 	if s == nil {
 		return "No scheduled", nil
 	}
+	if s.IsDisable() {
+		return "Disabled", nil
+	}
+	log.Info("!!!!! CheckRedistibuteRegionsStatus 222")
 	return "Scheduling", nil
 }
 

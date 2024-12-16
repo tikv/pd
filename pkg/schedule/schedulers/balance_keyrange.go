@@ -335,7 +335,7 @@ func (s *balanceKeyrangeScheduler) IsTimeout() bool {
 // Schedule implements the Scheduler interface.
 func (s *balanceKeyrangeScheduler) Schedule(cluster sche.SchedulerCluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
 	balanceKeyrangeScheduleCounter.Inc()
-	log.Info("!!!! balanceKeyrangeScheduler called", zap.Any("StartTime", s.StartTime))
+	log.Info("!!!! balanceKeyrangeScheduler called", zap.Any("StartTime", s.StartTime), zap.Any("MaxRunMillis", s.conf.MaxRunMillis), zap.Any("Since", time.Since(s.StartTime).Milliseconds()))
 
 	doShutdown := func() {
 		s.migrationPlan = nil

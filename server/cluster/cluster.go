@@ -2543,11 +2543,13 @@ func IsClientURL(addr string, etcdClient *clientv3.Client) bool {
 // IsServiceIndependent returns whether the service is independent.
 func (c *RaftCluster) IsServiceIndependent(name string) bool {
 	_, exist := c.independentServices.Load(name)
+	log.Info("!!!! IsServiceIndependent", zap.Any("e", exist), zap.Any("name", name))
 	return exist
 }
 
 // SetServiceIndependent sets the service to be independent.
 func (c *RaftCluster) SetServiceIndependent(name string) {
+	log.Info("!!!! SetServiceIndependent", zap.Any("name", name))
 	c.independentServices.Store(name, struct{}{})
 }
 

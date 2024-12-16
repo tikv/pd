@@ -4011,7 +4011,7 @@ func TestAddKeyrangeScheduler(t *testing.T) {
 			Timeout        int64                `json:"timeout,omitempty"`
 			RequiredLabels []*metapb.StoreLabel `json:"required_labels,omitempty"`
 		}{
-			Timeout:   5 * 60 * 1000,
+			Timeout:   timeout,
 			BatchSize: batch,
 			StartKey:  start,
 			EndKey:    end,
