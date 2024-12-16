@@ -33,7 +33,11 @@ const (
 	allocIDPathFormat              = "/pd/%d/alloc_id"                  // "/pd/{cluster_id}/alloc_id"
 	keyspaceAllocIDPathFormat      = "/pd/%d/keyspaces/alloc_id"        // "/pd/{cluster_id}/keyspaces/alloc_id"
 	kemberLeaderPriorityPathFormat = "/pd/%d/member/%d/leader_priority" // "/pd/{cluster_id}/member/{member_id}/leader_priority"
-	gcSafePointV2PrefixFormat      = "/pd/%d/keyspaces/gc_safe_point/"  // "/pd/{cluster_id}/keyspaces/gc_safe_point/"
+
+	gcSafePointPathFormat        = "/pd/%d/gc/safe_point/"                       // "/pd/{cluster_id}/gc/safe_point"
+	gcSafePointServicePathFormat = "/pd/%d/gc/safe_point/service/%s"             // "/pd/{cluster_id}/gc/safe_point/service/{service_id}"
+	gcSafePointV2PathFormat      = "/pd/%d/keyspaces/gc_safe_point/%08d"         // "/pd/{cluster_id}/keyspaces/gc_safe_point/{keyspace_id}"
+	serviceSafePointV2PathFormat = "/pd/%d/keyspaces/service_safe_point/%08d/%s" // "/pd/{cluster_id}/keyspaces/service_safe_point/{keyspace_id}/{service_id}"
 
 	clusterPathFormat              = "/pd/%d/raft"                            // "/pd/{cluster_id}/raft"
 	clusterBootstrapTimePathFormat = "/pd/%d/raft/status/raft_bootstrap_time" // "/pd/{cluster_id}/raft/status/raft_bootstrap_time"
@@ -145,11 +149,6 @@ func RegistryPath(serviceName, serviceAddr string) string {
 // ServicePath returns the path to store microservice addresses.
 func ServicePath(serviceName string) string {
 	return fmt.Sprintf(servicePathFormat, ClusterID(), serviceName)
-}
-
-// GCSafePointV2Prefix is the path prefix to all gc safe point v2.
-func GCSafePointV2Prefix() string {
-	return fmt.Sprintf(gcSafePointV2PrefixFormat, ClusterID())
 }
 
 // ClusterPath is the path to save the cluster meta information.

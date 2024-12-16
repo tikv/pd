@@ -141,40 +141,6 @@ func ReplicationModePath(mode string) string {
 	return path.Join(replicationPath, mode)
 }
 
-// GCSafePointPath returns the GC safe point key path.
-func GCSafePointPath() string {
-	return path.Join(gcPath, "safe_point")
-}
-
-// GCSafePointServicePrefixPath returns the GC safe point service key path prefix.
-func GCSafePointServicePrefixPath() string {
-	return path.Join(GCSafePointPath(), "service") + "/"
-}
-
-// GCSafePointServicePath returns the GC safe point service key path with the given service ID.
-func GCSafePointServicePath(serviceID string) string {
-	return path.Join(GCSafePointPath(), "service", serviceID)
-}
-
-// GCSafePointV2Path is the storage path of gc safe point v2.
-// Path: keyspaces/gc_safe_point/{keyspaceID}
-func GCSafePointV2Path(keyspaceID uint32) string {
-	return buildPath(false, keyspacePrefix, gcSafePointInfix, EncodeKeyspaceID(keyspaceID))
-}
-
-// ServiceSafePointV2Path is the storage path of service safe point v2.
-// Path: keyspaces/service_safe_point/{spaceID}/{serviceID}
-func ServiceSafePointV2Path(keyspaceID uint32, serviceID string) string {
-	return buildPath(false, keyspacePrefix, serviceSafePointInfix, EncodeKeyspaceID(keyspaceID), serviceID)
-}
-
-// ServiceSafePointV2Prefix is the path prefix of all service safe point that belongs to a specific keyspace.
-// Can be used to retrieve keyspace's service safe point at once.
-// Path: keyspaces/service_safe_point/{spaceID}/
-func ServiceSafePointV2Prefix(keyspaceID uint32) string {
-	return buildPath(true, keyspacePrefix, serviceSafePointInfix, EncodeKeyspaceID(keyspaceID))
-}
-
 // TSOSvcRootPath returns the root path of tso service.
 // Path: /ms/{cluster_id}/tso
 func TSOSvcRootPath() string {
