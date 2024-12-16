@@ -331,36 +331,6 @@ type KeyspaceGroupManager struct {
 	// Key: /ms/{cluster_id}/tso/registry/{tsoServerAddress}
 	// Value: discover.ServiceRegistryEntry
 	tsoServiceKey string
-	// legacySvcRootPath defines the legacy root path for all etcd paths which derives from
-	// the PD/API service. It's in the format of "/pd/{cluster_id}".
-	// The main paths for different usages include:
-	// 1. The path, used by the default keyspace group, for LoadTimestamp/SaveTimestamp in the
-	//    storage endpoint.
-	//    Key: /pd/{cluster_id}/timestamp
-	//    Value: ts(time.Time)
-	//    Key: /pd/{cluster_id}/lta/{dc-location}/timestamp
-	//    Value: ts(time.Time)
-	// 2. The path for storing keyspace group membership/distribution metadata.
-	//    Key: /pd/{cluster_id}/tso/keyspace_groups/membership/{group}
-	//    Value: endpoint.KeyspaceGroup
-	// Note: The {group} is 5 digits integer with leading zeros.
-	legacySvcRootPath string
-	// tsoSvcRootPath defines the root path for all etcd paths used in the tso microservices.
-	// It is in the format of "/ms/<cluster-id>/tso".
-	// The main paths for different usages include:
-	// 1. The path for keyspace group primary election.
-	//    default keyspace group: "/ms/{cluster_id}/tso/00000/primary".
-	//    non-default keyspace group: "/ms/{cluster_id}/tso/keyspace_groups/election/{group}/primary".
-	// 2. The path for LoadTimestamp/SaveTimestamp in the storage endpoint for all the non-default
-	//    keyspace groups.
-	//    Key: /ms/{cluster_id}/tso/{group}/gta/timestamp
-	//    Value: ts(time.Time)
-	//    Key: /ms/{cluster_id}/tso/{group}/lta/{dc-location}/timestamp
-	//    Value: ts(time.Time)
-	// Note: The {group} is 5 digits integer with leading zeros.
-	tsoSvcRootPath string
-	// legacySvcStorage is storage with legacySvcRootPath.
-	legacySvcStorage *endpoint.StorageEndpoint
 	// tsoSvcStorage is storage with tsoSvcRootPath.
 	tsoSvcStorage *endpoint.StorageEndpoint
 	// cfg is the TSO config
@@ -400,8 +370,6 @@ func NewKeyspaceGroupManager(
 	etcdClient *clientv3.Client,
 	httpClient *http.Client,
 	electionNamePrefix string,
-	legacySvcRootPath string,
-	tsoSvcRootPath string,
 	cfg ServiceConfig,
 ) *KeyspaceGroupManager {
 	if constant.MaxKeyspaceGroupCountInUse > constant.MaxKeyspaceGroupCount {
@@ -419,16 +387,12 @@ func NewKeyspaceGroupManager(
 		httpClient:                   httpClient,
 		electionNamePrefix:           electionNamePrefix,
 		tsoServiceKey:                keypath.ServicePath(constant.TSOServiceName),
-		legacySvcRootPath:            legacySvcRootPath,
-		tsoSvcRootPath:               tsoSvcRootPath,
 		primaryPriorityCheckInterval: defaultPrimaryPriorityCheckInterval,
 		cfg:                          cfg,
 		groupUpdateRetryList:         make(map[uint32]*endpoint.KeyspaceGroup),
 		serviceRegistryMap:           make(map[string]string),
 		metrics:                      newKeyspaceGroupMetrics(),
 	}
-	kgm.legacySvcStorage = endpoint.NewStorageEndpoint(
-		kv.NewEtcdKVBase(kgm.etcdClient), nil)
 	kgm.tsoSvcStorage = endpoint.NewStorageEndpoint(
 		kv.NewEtcdKVBase(kgm.etcdClient), nil)
 	kgm.compiledKGMembershipIDRegexp = keypath.GetCompiledKeyspaceGroupIDRegexp()
@@ -773,20 +737,8 @@ func (kgm *KeyspaceGroupManager) updateKeyspaceGroup(group *endpoint.KeyspaceGro
 			return splitSourceAM.GetMember().IsLeader()
 		})
 	}
-	// Only the default keyspace group uses the legacy service root path for LoadTimestamp/SyncTimestamp.
-	var (
-		tsRootPath string
-		storage    *endpoint.StorageEndpoint
-	)
-	if group.ID == constant.DefaultKeyspaceGroupID {
-		tsRootPath = kgm.legacySvcRootPath
-		storage = kgm.legacySvcStorage
-	} else {
-		tsRootPath = kgm.tsoSvcRootPath
-		storage = kgm.tsoSvcStorage
-	}
 	// Initialize all kinds of maps.
-	am := NewAllocatorManager(kgm.ctx, group.ID, participant, tsRootPath, storage, kgm.cfg)
+	am := NewAllocatorManager(kgm.ctx, group.ID, participant, kgm.tsoSvcStorage, kgm.cfg)
 	am.startGlobalAllocatorLoop()
 	log.Info("created allocator manager",
 		zap.Uint32("keyspace-group-id", group.ID))

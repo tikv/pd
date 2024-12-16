@@ -54,13 +54,6 @@ const (
 	gcSafePointInfix           = "gc_safe_point"
 	serviceSafePointInfix      = "service_safe_point"
 	regionPathPrefix           = "raft/r"
-	// resource group storage endpoint has prefix `resource_group`
-	// ResourceGroupSettingsPath is the path to save the resource group settings.
-	ResourceGroupSettingsPath = "settings"
-	// ResourceGroupStatesPath is the path to save the resource group states.
-	ResourceGroupStatesPath = "states"
-	// ControllerConfigPath is the path to save the controller config.
-	ControllerConfigPath = "controller"
 	// tso storage endpoint has prefix `tso`
 	tsoServiceKey                = constant.TSOServiceName
 	globalTSOAllocatorEtcdPrefix = "gta"
@@ -126,16 +119,6 @@ func StoreLeaderWeightPath(storeID uint64) string {
 // StoreRegionWeightPath returns the store region weight key path with the given store ID.
 func StoreRegionWeightPath(storeID uint64) string {
 	return path.Join(schedulePath, "store_weight", fmt.Sprintf("%020d", storeID), "region")
-}
-
-// ResourceGroupSettingKeyPath returns the path to save the resource group settings.
-func ResourceGroupSettingKeyPath(groupName string) string {
-	return path.Join(ResourceGroupSettingsPath, groupName)
-}
-
-// ResourceGroupStateKeyPath returns the path to save the resource group states.
-func ResourceGroupStateKeyPath(groupName string) string {
-	return path.Join(ResourceGroupStatesPath, groupName)
 }
 
 // RuleKeyPath returns the path to save the placement rule with the given rule key.
@@ -214,11 +197,6 @@ func GetCompiledNonDefaultIDRegexp() *regexp.Regexp {
 	rootPath := TSOSvcRootPath()
 	pattern := strings.Join([]string{rootPath, constant.KeyspaceGroupsKey, keyspaceGroupsElectionKey, `(\d{5})`, constant.PrimaryKey + `$`}, "/")
 	return regexp.MustCompile(pattern)
-}
-
-// encodeKeyspaceGroupID from uint32 to string.
-func encodeKeyspaceGroupID(groupID uint32) string {
-	return fmt.Sprintf("%05d", groupID)
 }
 
 func buildPath(withSuffix bool, str ...string) string {

@@ -157,21 +157,16 @@ func (suite *keyspaceGroupManagerTestSuite) TestNewKeyspaceGroupManager() {
 	clusterIDStr := strconv.FormatUint(clusterID, 10)
 	keypath.SetClusterID(clusterID)
 
-	legacySvcRootPath := path.Join("/pd", clusterIDStr)
-	tsoSvcRootPath := path.Join(constant.MicroserviceRootPath, clusterIDStr, "tso")
 	electionNamePrefix := "tso-server-" + clusterIDStr
 
-	kgm := NewKeyspaceGroupManager(
-		suite.ctx, tsoServiceID, suite.etcdClient, nil, electionNamePrefix,
-		legacySvcRootPath, tsoSvcRootPath, suite.cfg)
+	kgm := NewKeyspaceGroupManager(suite.ctx, tsoServiceID, suite.etcdClient,
+		nil, electionNamePrefix, suite.cfg)
 	defer kgm.Close()
 	re.NoError(kgm.Initialize())
 
 	re.Equal(tsoServiceID, kgm.tsoServiceID)
 	re.Equal(suite.etcdClient, kgm.etcdClient)
 	re.Equal(electionNamePrefix, kgm.electionNamePrefix)
-	re.Equal(legacySvcRootPath, kgm.legacySvcRootPath)
-	re.Equal(tsoSvcRootPath, kgm.tsoSvcRootPath)
 	re.Equal(suite.cfg, kgm.cfg)
 
 	am, err := kgm.GetAllocatorManager(constant.DefaultKeyspaceGroupID)
@@ -179,7 +174,6 @@ func (suite *keyspaceGroupManagerTestSuite) TestNewKeyspaceGroupManager() {
 	re.Equal(constant.DefaultKeyspaceGroupID, am.kgID)
 	re.Equal(constant.DefaultLeaderLease, am.leaderLease)
 	re.Equal(time.Hour*24, am.maxResetTSGap())
-	re.Equal(legacySvcRootPath, am.rootPath)
 	re.Equal(time.Duration(constant.DefaultLeaderLease)*time.Second, am.saveInterval)
 	re.Equal(time.Duration(50)*time.Millisecond, am.updatePhysicalInterval)
 }

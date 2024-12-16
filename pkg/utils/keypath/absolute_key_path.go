@@ -42,10 +42,11 @@ const (
 	minResolvedTSPathFormat        = "/pd/%d/raft/min_resolved_ts"            // "/pd/{cluster_id}/raft/min_resolved_ts"
 	externalTimestampPathFormat    = "/pd/%d/raft/external_timestamp"         // "/pd/{cluster_id}/raft/external_timestamp"
 
-	keyspaceMetaPrefixFormat    = "/pd/%d/keyspaces/meta/"                 // "/pd/{cluster_id}/keyspaces/meta/"
-	keyspaceMetaPathFormat      = "/pd/%d/keyspaces/meta/%08d"             // "/pd/{cluster_id}/keyspaces/meta/{keyspace_id}"
-	keyspaceIDPathFormat        = "/pd/%d/keyspaces/id/%s"                 // "/pd/{cluster_id}/keyspaces/id/{keyspace_name}"
-	keyspaceGroupIDPrefixFormat = "/pd/%d/tso/keyspace_groups/membership/" // "/pd/{cluster_id}/tso/keyspace_groups/membership/"
+	keyspaceMetaPrefixFormat    = "/pd/%d/keyspaces/meta/"                     // "/pd/{cluster_id}/keyspaces/meta/"
+	keyspaceMetaPathFormat      = "/pd/%d/keyspaces/meta/%08d"                 // "/pd/{cluster_id}/keyspaces/meta/{keyspace_id}"
+	keyspaceIDPathFormat        = "/pd/%d/keyspaces/id/%s"                     // "/pd/{cluster_id}/keyspaces/id/{keyspace_name}"
+	keyspaceGroupIDPrefixFormat = "/pd/%d/tso/keyspace_groups/membership/"     // "/pd/{cluster_id}/tso/keyspace_groups/membership/"
+	keyspaceGroupIDPathFormat   = "/pd/%d/tso/keyspace_groups/membership/%05d" // "/pd/{cluster_id}/tso/keyspace_groups/membership/{group_id}"
 
 	recoveringMarkPathFormat = "/pd/%d/cluster/markers/snapshot-recovering" // "/pd/{cluster_id}/cluster/markers/snapshot-recovering"
 
@@ -63,6 +64,11 @@ const (
 	msExpectedLeaderPathFormat           = "/ms/%d/%s/primary/expected_primary"                                // "/ms/{cluster_id}/{service_name}/primary/expected_primary"
 	msTsoDefaultExpectedLeaderPathFormat = "/ms/%d/tso/00000/primary/expected_primary"                         // "/ms/{cluster_id}/tso/00000/primary"
 	msTsoKespaceExpectedLeaderPathFormat = "/ms/%d/tso/keyspace_groups/election/%05d/primary/expected_primary" // "/ms/{cluster_id}/tso/keyspace_groups/election/{group_id}/primary"
+
+	// resource group path
+	resourceGroupSettingsPathFormat = "/resource_group/settings/%s" // "/resource_group/settings/{group_name}"
+	resourceGroupStatesPathFormat   = "/resource_group/states/%s"   // "/resource_group/states/{group_name}"
+	controllerConfigPath            = "/resource_group/controller"  // "/resource_group/controller"
 )
 
 // MsParam is the parameter of micro service.
@@ -207,9 +213,8 @@ func KeyspaceGroupIDPrefix() string {
 }
 
 // KeyspaceGroupIDPath returns the path to keyspace id from the given name.
-// Path: tso/keyspace_groups/membership/{id}
 func KeyspaceGroupIDPath(id uint32) string {
-	return path.Join(tsoKeyspaceGroupPrefix, keyspaceGroupsMembershipKey, encodeKeyspaceGroupID(id))
+	return fmt.Sprintf(keyspaceGroupIDPathFormat, ClusterID(), id)
 }
 
 // GetCompiledKeyspaceGroupIDRegexp returns the compiled regular expression for matching keyspace group id.
