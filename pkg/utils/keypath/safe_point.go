@@ -34,7 +34,6 @@ func GCSafePointServicePath(serviceID string) string {
 }
 
 // GCSafePointV2Path is the storage path of gc safe point v2.
-// Path: keyspaces/gc_safe_point/{keyspaceID}
 func GCSafePointV2Path(keyspaceID uint32) string {
 	return fmt.Sprintf(gcSafePointV2PathFormat, ClusterID(), keyspaceID)
 }

@@ -57,6 +57,9 @@ const (
 	regionLablePathFormat   = "/pd/%d/region_label/%s" // "/pd/{cluster_id}/region_label/{label_id}"
 	regionLabelPrefixFormat = "/pd/%d/region_label/"   // "/pd/{cluster_id}/region_label/"
 
+	// "%08d" adds extra padding to make encoded ID ordered.
+	// Encoded ID can be decoded directly with strconv.ParseUint. Width of the
+	// padded keyspaceID is 8 (decimal representation of uint24max is 16777215).
 	gcSafePointPathFormat        = "/pd/%d/gc/safe_point/"                       // "/pd/{cluster_id}/gc/safe_point"
 	gcSafePointServicePathFormat = "/pd/%d/gc/safe_point/service/%s"             // "/pd/{cluster_id}/gc/safe_point/service/{service_id}"
 	gcSafePointV2PathFormat      = "/pd/%d/keyspaces/gc_safe_point/%08d"         // "/pd/{cluster_id}/keyspaces/gc_safe_point/{keyspace_id}"

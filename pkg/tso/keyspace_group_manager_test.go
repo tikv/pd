@@ -109,7 +109,7 @@ func (suite *keyspaceGroupManagerTestSuite) TestDeletedGroupCleanup() {
 	suite.applyEtcdEvents(re, []*etcdEvent{generateKeyspaceGroupPutEvent(1, []uint32{1}, []string{svcAddr})})
 	// Check if the TSO key is created.
 	testutil.Eventually(re, func() bool {
-		ts, err := mgr.tsoSvcStorage.LoadTimestamp(keypath.Prefix(keypath.TimestampPath(1)))
+		ts, err := mgr.storage.LoadTimestamp(keypath.Prefix(keypath.TimestampPath(1)))
 		re.NoError(err)
 		return ts != typeutil.ZeroTime
 	})
@@ -117,7 +117,7 @@ func (suite *keyspaceGroupManagerTestSuite) TestDeletedGroupCleanup() {
 	suite.applyEtcdEvents(re, []*etcdEvent{generateKeyspaceGroupDeleteEvent(1)})
 	// Check if the TSO key is deleted.
 	testutil.Eventually(re, func() bool {
-		ts, err := mgr.tsoSvcStorage.LoadTimestamp(keypath.Prefix(keypath.TimestampPath(1)))
+		ts, err := mgr.storage.LoadTimestamp(keypath.Prefix(keypath.TimestampPath(1)))
 		re.NoError(err)
 		return ts == typeutil.ZeroTime
 	})
@@ -136,7 +136,7 @@ func (suite *keyspaceGroupManagerTestSuite) TestDeletedGroupCleanup() {
 	re.NotContains(mgr.deletedGroups, constant.DefaultKeyspaceGroupID)
 	mgr.RUnlock()
 	// Default keyspace group TSO key should NOT be deleted.
-	ts, err := mgr.tsoSvcStorage.LoadTimestamp(keypath.Prefix(keypath.TimestampPath(0)))
+	ts, err := mgr.storage.LoadTimestamp(keypath.Prefix(keypath.TimestampPath(0)))
 	re.NoError(err)
 	re.NotEmpty(ts)
 
@@ -774,12 +774,11 @@ func (suite *keyspaceGroupManagerTestSuite) runTestLoadKeyspaceGroupsAssignment(
 func (suite *keyspaceGroupManagerTestSuite) newUniqueKeyspaceGroupManager(
 	loadKeyspaceGroupsBatchSize int64, // set to 0 to use the default value
 ) *KeyspaceGroupManager {
-	return suite.newKeyspaceGroupManager(loadKeyspaceGroupsBatchSize, rand.Uint64(), suite.cfg)
+	return suite.newKeyspaceGroupManager(loadKeyspaceGroupsBatchSize, suite.cfg)
 }
 
 func (suite *keyspaceGroupManagerTestSuite) newKeyspaceGroupManager(
 	loadKeyspaceGroupsBatchSize int64, // set to 0 to use the default value
-	clusterID uint64,
 	cfg *TestServiceConfig,
 ) *KeyspaceGroupManager {
 	tsoServiceID := &discovery.ServiceRegistryEntry{ServiceAddr: cfg.GetAdvertiseListenAddr()}
@@ -1020,8 +1019,6 @@ func (suite *keyspaceGroupManagerTestSuite) TestPrimaryPriorityChange() {
 
 	var err error
 	defaultPriority := constant.DefaultKeyspaceGroupReplicaPriority
-	clusterID, err := endpoint.InitClusterID(suite.etcdClient)
-	re.NoError(err)
 	cfg1 := suite.createConfig()
 	cfg2 := suite.createConfig()
 	svcAddr1 := cfg1.GetAdvertiseListenAddr()
@@ -1045,7 +1042,7 @@ func (suite *keyspaceGroupManagerTestSuite) TestPrimaryPriorityChange() {
 
 	// Create the first TSO server which loads all three keyspace groups created above.
 	// All primaries should be on the first TSO server.
-	mgr1 := suite.newKeyspaceGroupManager(1, clusterID, cfg1)
+	mgr1 := suite.newKeyspaceGroupManager(1, cfg1)
 	re.NotNil(mgr1)
 	defer mgr1.Close()
 	err = mgr1.Initialize()
@@ -1080,7 +1077,7 @@ func (suite *keyspaceGroupManagerTestSuite) TestPrimaryPriorityChange() {
 	cfg2.Name = "tso2"
 	err = suite.registerTSOServer(re, svcAddr2, cfg2)
 	re.NoError(err)
-	mgr2 := suite.newKeyspaceGroupManager(1, clusterID, cfg2)
+	mgr2 := suite.newKeyspaceGroupManager(1, cfg2)
 	re.NotNil(mgr2)
 	err = mgr2.Initialize()
 	re.NoError(err)
@@ -1099,7 +1096,7 @@ func (suite *keyspaceGroupManagerTestSuite) TestPrimaryPriorityChange() {
 	defer func() {
 		re.NoError(suite.deregisterTSOServer(svcAddr2))
 	}()
-	mgr2 = suite.newKeyspaceGroupManager(1, clusterID, cfg2)
+	mgr2 = suite.newKeyspaceGroupManager(1, cfg2)
 	re.NotNil(mgr2)
 	defer mgr2.Close()
 	err = mgr2.Initialize()

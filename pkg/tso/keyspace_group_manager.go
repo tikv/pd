@@ -331,8 +331,7 @@ type KeyspaceGroupManager struct {
 	// Key: /ms/{cluster_id}/tso/registry/{tsoServerAddress}
 	// Value: discover.ServiceRegistryEntry
 	tsoServiceKey string
-	// tsoSvcStorage is storage with tsoSvcRootPath.
-	tsoSvcStorage *endpoint.StorageEndpoint
+	storage       *endpoint.StorageEndpoint
 	// cfg is the TSO config
 	cfg ServiceConfig
 
@@ -393,7 +392,7 @@ func NewKeyspaceGroupManager(
 		serviceRegistryMap:           make(map[string]string),
 		metrics:                      newKeyspaceGroupMetrics(),
 	}
-	kgm.tsoSvcStorage = endpoint.NewStorageEndpoint(
+	kgm.storage = endpoint.NewStorageEndpoint(
 		kv.NewEtcdKVBase(kgm.etcdClient), nil)
 	kgm.compiledKGMembershipIDRegexp = keypath.GetCompiledKeyspaceGroupIDRegexp()
 	kgm.state.initialize()
@@ -738,7 +737,7 @@ func (kgm *KeyspaceGroupManager) updateKeyspaceGroup(group *endpoint.KeyspaceGro
 		})
 	}
 	// Initialize all kinds of maps.
-	am := NewAllocatorManager(kgm.ctx, group.ID, participant, kgm.tsoSvcStorage, kgm.cfg)
+	am := NewAllocatorManager(kgm.ctx, group.ID, participant, kgm.storage, kgm.cfg)
 	am.startGlobalAllocatorLoop()
 	log.Info("created allocator manager",
 		zap.Uint32("keyspace-group-id", group.ID))
@@ -1295,7 +1294,7 @@ mergeLoop:
 					ServiceName: constant.TSOServiceName,
 					GroupID:     id,
 				})
-				val, err := kgm.tsoSvcStorage.Load(leaderPath)
+				val, err := kgm.storage.Load(leaderPath)
 				if err != nil {
 					log.Error("failed to check if the keyspace group primary in the merge list has gone",
 						zap.String("member", kgm.tsoServiceID.ServiceAddr),
@@ -1324,7 +1323,7 @@ mergeLoop:
 		// calculate the newly merged TSO to make sure it is greater than the original ones.
 		var mergedTS time.Time
 		for _, id := range mergeList {
-			ts, err := kgm.tsoSvcStorage.LoadTimestamp(
+			ts, err := kgm.storage.LoadTimestamp(
 				keypath.Prefix(keypath.TimestampPath(id)))
 			if err != nil {
 				log.Error("failed to load the keyspace group TSO",
@@ -1468,7 +1467,7 @@ func (kgm *KeyspaceGroupManager) deletedGroupCleaner() {
 			log.Info("delete the keyspace group tso key",
 				zap.Uint32("keyspace-group-id", groupID))
 			// Clean up the remaining TSO keys.
-			err := kgm.tsoSvcStorage.DeleteTimestamp(groupID)
+			err := kgm.storage.DeleteTimestamp(groupID)
 			if err != nil {
 				log.Warn("failed to delete the keyspace group tso key",
 					zap.Uint32("keyspace-group-id", groupID),
