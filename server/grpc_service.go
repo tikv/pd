@@ -1761,10 +1761,12 @@ func forwardReportBucketClientToServer(forwardStream pdpb.PD_ReportBucketsClient
 // TODO: If goroutine here timeout when tso stream created successfully, we need to handle it correctly.
 func checkStream(streamCtx context.Context, cancel context.CancelFunc, done chan struct{}) {
 	defer logutil.LogPanic()
+	timer := time.NewTimer(3 * time.Second)
+	defer timer.Stop()
 	select {
 	case <-done:
 		return
-	case <-time.After(3 * time.Second):
+	case <-timer.C:
 		cancel()
 	case <-streamCtx.Done():
 	}
