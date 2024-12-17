@@ -21,9 +21,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+const testMaxBatchSize = 20
+
 func TestAdjustBestBatchSize(t *testing.T) {
 	re := require.New(t)
-	bc := NewController[int](20, nil, nil)
+	bc := NewController[int](testMaxBatchSize, nil, nil)
 	re.Equal(defaultBestBatchSize, bc.bestBatchSize)
 	bc.AdjustBestBatchSize()
 	re.Equal(defaultBestBatchSize-1, bc.bestBatchSize)
@@ -52,7 +54,7 @@ type testRequest struct {
 
 func TestFinishCollectedRequests(t *testing.T) {
 	re := require.New(t)
-	bc := NewController[*testRequest](20, nil, nil)
+	bc := NewController[*testRequest](testMaxBatchSize, nil, nil)
 	// Finish with zero request count.
 	re.Zero(bc.collectedRequestCount)
 	bc.FinishCollectedRequests(nil, nil)
@@ -80,4 +82,59 @@ func TestFinishCollectedRequests(t *testing.T) {
 		re.Equal(i, requests[i].idx)
 		re.Equal(context.Canceled, requests[i].err)
 	}
+}
+
+func TestFetchPendingRequests(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	re := require.New(t)
+	bc := NewController[int](testMaxBatchSize, nil, nil)
+	requestCh := make(chan int, testMaxBatchSize+1)
+	// Fetch a nil `tokenCh`.
+	requestCh <- 1
+	re.NoError(bc.FetchPendingRequests(ctx, requestCh, nil, 0))
+	re.Empty(requestCh)
+	re.Equal(1, bc.collectedRequestCount)
+	// Fetch a nil `tokenCh` with max batch size.
+	for i := range testMaxBatchSize {
+		requestCh <- i
+	}
+	re.NoError(bc.FetchPendingRequests(ctx, requestCh, nil, 0))
+	re.Empty(requestCh)
+	re.Equal(testMaxBatchSize, bc.collectedRequestCount)
+	// Fetch a nil `tokenCh` with max batch size + 1.
+	for i := range testMaxBatchSize + 1 {
+		requestCh <- i
+	}
+	re.NoError(bc.FetchPendingRequests(ctx, requestCh, nil, 0))
+	re.Len(requestCh, 1)
+	re.Equal(testMaxBatchSize, bc.collectedRequestCount)
+	// Drain the requestCh.
+	<-requestCh
+	// Fetch a non-nil `tokenCh`.
+	tokenCh := make(chan struct{}, 1)
+	requestCh <- 1
+	tokenCh <- struct{}{}
+	re.NoError(bc.FetchPendingRequests(ctx, requestCh, tokenCh, 0))
+	re.Empty(requestCh)
+	re.Equal(1, bc.collectedRequestCount)
+	// Fetch a non-nil `tokenCh` with max batch size.
+	for i := range testMaxBatchSize {
+		requestCh <- i
+	}
+	tokenCh <- struct{}{}
+	re.NoError(bc.FetchPendingRequests(ctx, requestCh, tokenCh, 0))
+	re.Empty(requestCh)
+	re.Equal(testMaxBatchSize, bc.collectedRequestCount)
+	// Fetch a non-nil `tokenCh` with max batch size + 1.
+	for i := range testMaxBatchSize + 1 {
+		requestCh <- i
+	}
+	tokenCh <- struct{}{}
+	re.NoError(bc.FetchPendingRequests(ctx, requestCh, tokenCh, 0))
+	re.Len(requestCh, 1)
+	re.Equal(testMaxBatchSize, bc.collectedRequestCount)
+	// Drain the requestCh.
+	<-requestCh
 }
