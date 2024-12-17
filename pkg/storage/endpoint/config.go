@@ -39,7 +39,7 @@ var _ ConfigStorage = (*StorageEndpoint)(nil)
 
 // LoadConfig loads config from keypath.Config then unmarshal it to cfg.
 func (se *StorageEndpoint) LoadConfig(cfg any) (bool, error) {
-	value, err := se.Load(keypath.Config)
+	value, err := se.Load(keypath.ConfigPath())
 	if err != nil || value == "" {
 		return false, err
 	}
@@ -52,12 +52,12 @@ func (se *StorageEndpoint) LoadConfig(cfg any) (bool, error) {
 
 // SaveConfig stores marshallable cfg to the keypath.Config.
 func (se *StorageEndpoint) SaveConfig(cfg any) error {
-	return se.saveJSON(keypath.Config, cfg)
+	return se.saveJSON(keypath.ConfigPath(), cfg)
 }
 
 // LoadAllSchedulerConfigs loads all schedulers' config.
 func (se *StorageEndpoint) LoadAllSchedulerConfigs() ([]string, []string, error) {
-	prefix := keypath.CustomSchedulerConfigPath + "/"
+	prefix := keypath.SchedulerConfigPathPrefix()
 	keys, values, err := se.LoadRange(prefix, clientv3.GetPrefixRangeEnd(prefix), MinKVRangeLimit)
 	for i, key := range keys {
 		keys[i] = strings.TrimPrefix(key, prefix)

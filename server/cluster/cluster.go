@@ -279,7 +279,7 @@ func (c *RaftCluster) isInitialized() bool {
 // value of time.Time when there is error or the cluster is not bootstrapped yet.
 func (c *RaftCluster) loadBootstrapTime() (time.Time, error) {
 	var t time.Time
-	data, err := c.storage.Load(keypath.ClusterBootstrapTimeKey())
+	data, err := c.storage.Load(keypath.ClusterBootstrapTimePath())
 	if err != nil {
 		return t, err
 	}

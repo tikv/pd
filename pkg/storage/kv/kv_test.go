@@ -16,7 +16,6 @@ package kv
 
 import (
 	"context"
-	"path"
 	"sort"
 	"strconv"
 	"testing"
@@ -30,9 +29,8 @@ func TestEtcd(t *testing.T) {
 	re := require.New(t)
 	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1)
 	defer clean()
-	rootPath := path.Join("/pd", strconv.FormatUint(100, 10))
 
-	kv := NewEtcdKVBase(client, rootPath)
+	kv := NewEtcdKVBase(client)
 	testReadWrite(re, kv)
 	testRange(re, kv)
 	testSaveMultiple(re, kv, 20)

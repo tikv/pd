@@ -100,7 +100,6 @@ func newGlobalTimestampOracle(am *AllocatorManager) *timestampOracle {
 	oracle := &timestampOracle{
 		client:                 am.member.GetLeadership().GetClient(),
 		keyspaceGroupID:        am.kgID,
-		tsPath:                 keypath.KeyspaceGroupGlobalTSPath(am.kgID),
 		storage:                am.storage,
 		saveInterval:           am.saveInterval,
 		updatePhysicalInterval: am.updatePhysicalInterval,

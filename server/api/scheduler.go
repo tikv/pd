@@ -228,7 +228,7 @@ func (h *schedulerHandler) handleErr(w http.ResponseWriter, err error) {
 func (h *schedulerHandler) redirectSchedulerDelete(w http.ResponseWriter, name, schedulerName string) {
 	args := strings.Split(name, "-")
 	args = args[len(args)-1:]
-	deleteURL, err := url.JoinPath(h.GetAddr(), "pd", server.SchedulerConfigHandlerPath, schedulerName, "delete", args[0])
+	deleteURL, err := url.JoinPath(h.GetAddr(), server.SchedulerConfigHandlerPath, schedulerName, "delete", args[0])
 	if err != nil {
 		h.r.JSON(w, http.StatusInternalServerError, err.Error())
 		return

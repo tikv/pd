@@ -16,8 +16,6 @@ package kv
 
 import (
 	"context"
-	"path"
-	"strings"
 	"time"
 
 	"github.com/pingcap/errors"
@@ -43,22 +41,16 @@ var (
 )
 
 type etcdKVBase struct {
-	client   *clientv3.Client
-	rootPath string
+	client *clientv3.Client
 }
 
 // NewEtcdKVBase creates a new etcd kv.
-func NewEtcdKVBase(client *clientv3.Client, rootPath string) *etcdKVBase {
-	return &etcdKVBase{
-		client:   client,
-		rootPath: rootPath,
-	}
+func NewEtcdKVBase(client *clientv3.Client) *etcdKVBase {
+	return &etcdKVBase{client: client}
 }
 
 // NewEtcdKV creates a new etcd kv.
 func (kv *etcdKVBase) Load(key string) (string, error) {
-	key = path.Join(kv.rootPath, key)
-
 	resp, err := etcdutil.EtcdKVGet(kv.client, key)
 	if err != nil {
 		return "", err
@@ -73,17 +65,11 @@ func (kv *etcdKVBase) Load(key string) (string, error) {
 
 // LoadRange loads a range of keys [key, endKey) from etcd.
 func (kv *etcdKVBase) LoadRange(key, endKey string, limit int) ([]string, []string, error) {
-	// Note: reason to use `strings.Join` instead of `path.Join` is that the latter will
-	// removes suffix '/' of the joined string.
-	// As a result, when we try to scan from "foo/", it ends up scanning from "/pd/foo"
-	// internally, and returns unexpected keys such as "foo_bar/baz".
-	key = strings.Join([]string{kv.rootPath, key}, "/")
 	var OpOption []clientv3.OpOption
 	// If endKey is "\x00", it means to scan with prefix.
 	if endKey == "\x00" {
 		OpOption = append(OpOption, clientv3.WithPrefix())
 	} else {
-		endKey = strings.Join([]string{kv.rootPath, endKey}, "/")
 		OpOption = append(OpOption, clientv3.WithRange(endKey))
 	}
 
@@ -95,7 +81,7 @@ func (kv *etcdKVBase) LoadRange(key, endKey string, limit int) ([]string, []stri
 	keys := make([]string, 0, len(resp.Kvs))
 	values := make([]string, 0, len(resp.Kvs))
 	for _, item := range resp.Kvs {
-		keys = append(keys, strings.TrimPrefix(strings.TrimPrefix(string(item.Key), kv.rootPath), "/"))
+		keys = append(keys, string(item.Key))
 		values = append(values, string(item.Value))
 	}
 	return keys, values, nil
@@ -106,7 +92,6 @@ func (kv *etcdKVBase) Save(key, value string) error {
 	failpoint.Inject("etcdSaveFailed", func() {
 		failpoint.Return(errors.New("save failed"))
 	})
-	key = path.Join(kv.rootPath, key)
 	txn := NewSlowLogTxn(kv.client)
 	resp, err := txn.Then(clientv3.OpPut(key, value)).Commit()
 	if err != nil {
@@ -122,8 +107,6 @@ func (kv *etcdKVBase) Save(key, value string) error {
 
 // Remove removes the key from etcd.
 func (kv *etcdKVBase) Remove(key string) error {
-	key = path.Join(kv.rootPath, key)
-
 	txn := NewSlowLogTxn(kv.client)
 	resp, err := txn.Then(clientv3.OpDelete(key)).Commit()
 	if err != nil {
@@ -220,7 +203,6 @@ func (kv *etcdKVBase) RunInTxn(ctx context.Context, f func(txn Txn) error) error
 // Save puts a put operation into operations.
 // Note that save result are not immediately observable before current transaction commit.
 func (txn *etcdTxn) Save(key, value string) error {
-	key = path.Join(txn.kv.rootPath, key)
 	operation := clientv3.OpPut(key, value)
 	txn.operations = append(txn.operations, operation)
 	return nil
@@ -228,7 +210,6 @@ func (txn *etcdTxn) Save(key, value string) error {
 
 // Remove puts a delete operation into operations.
 func (txn *etcdTxn) Remove(key string) error {
-	key = path.Join(txn.kv.rootPath, key)
 	operation := clientv3.OpDelete(key)
 	txn.operations = append(txn.operations, operation)
 	return nil
@@ -236,7 +217,6 @@ func (txn *etcdTxn) Remove(key string) error {
 
 // Load loads the target value from etcd and puts a comparator into conditions.
 func (txn *etcdTxn) Load(key string) (string, error) {
-	key = path.Join(txn.kv.rootPath, key)
 	resp, err := etcdutil.EtcdKVGet(txn.kv.client, key)
 	if err != nil {
 		return "", err
@@ -272,8 +252,7 @@ func (txn *etcdTxn) LoadRange(key, endKey string, limit int) (keys []string, val
 	}
 	// If LoadRange successful, must make sure values stay the same before commit.
 	for i := range keys {
-		fullKey := path.Join(txn.kv.rootPath, keys[i])
-		condition := clientv3.Compare(clientv3.Value(fullKey), "=", values[i])
+		condition := clientv3.Compare(clientv3.Value(keys[i]), "=", values[i])
 		txn.conditions = append(txn.conditions, condition)
 	}
 	return keys, values, err
