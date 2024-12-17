@@ -292,7 +292,7 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 						log.Warn("watch resource group meta failed", zap.Error(err))
 						timerutil.SafeResetTimer(watchRetryTimer, watchRetryInterval)
 						failpoint.Inject("watchStreamError", func() {
-							watchRetryTimer.Reset(20 * time.Millisecond)
+							timerutil.SafeResetTimer(watchRetryTimer, 20*time.Millisecond)
 						})
 					}
 				}
@@ -336,7 +336,7 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 					watchMetaChannel = nil
 					timerutil.SafeResetTimer(watchRetryTimer, watchRetryInterval)
 					failpoint.Inject("watchStreamError", func() {
-						watchRetryTimer.Reset(20 * time.Millisecond)
+						timerutil.SafeResetTimer(watchRetryTimer, 20*time.Millisecond)
 					})
 					continue
 				}
@@ -372,7 +372,7 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 					watchConfigChannel = nil
 					timerutil.SafeResetTimer(watchRetryTimer, watchRetryInterval)
 					failpoint.Inject("watchStreamError", func() {
-						watchRetryTimer.Reset(20 * time.Millisecond)
+						timerutil.SafeResetTimer(watchRetryTimer, 20*time.Millisecond)
 					})
 					continue
 				}
@@ -525,7 +525,7 @@ func (c *ResourceGroupsController) sendTokenBucketRequests(ctx context.Context, 
 		ClientUniqueId:        c.clientUniqueID,
 	}
 	if c.ruConfig.DegradedModeWaitDuration > 0 && c.responseDeadlineCh == nil {
-		c.run.responseDeadline.Reset(c.ruConfig.DegradedModeWaitDuration)
+		timerutil.SafeResetTimer(c.run.responseDeadline, c.ruConfig.DegradedModeWaitDuration)
 		c.responseDeadlineCh = c.run.responseDeadline.C
 	}
 	go func() {
