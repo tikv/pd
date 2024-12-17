@@ -20,9 +20,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pingcap/log"
 	"github.com/prometheus/client_golang/prometheus"
 	"go.uber.org/zap"
+
+	"github.com/pingcap/log"
 )
 
 // RegionHeartbeatStageName is the name of the stage of the region heartbeat.

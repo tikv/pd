@@ -18,8 +18,9 @@ package testutil
 
 import (
 	"github.com/cakturk/go-netstat/netstat"
-	"github.com/pingcap/log"
 	"go.uber.org/zap"
+
+	"github.com/pingcap/log"
 )
 
 func environmentCheck(addr string) bool {

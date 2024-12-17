@@ -18,9 +18,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tikv/pd/client/errs"
-
 	"github.com/stretchr/testify/require"
+
+	"github.com/tikv/pd/client/errs"
 )
 
 // advance emulate the state machine clock moves forward by the given duration

@@ -27,6 +27,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/stretchr/testify/require"
+
 	"github.com/tikv/pd/pkg/utils/requestutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 )

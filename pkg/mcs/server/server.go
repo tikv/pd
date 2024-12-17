@@ -23,11 +23,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pingcap/log"
-	"github.com/tikv/pd/pkg/mcs/utils/constant"
-	"github.com/tikv/pd/pkg/utils/grpcutil"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"google.golang.org/grpc"
+
+	"github.com/pingcap/log"
+
+	"github.com/tikv/pd/pkg/mcs/utils/constant"
+	"github.com/tikv/pd/pkg/utils/grpcutil"
 )
 
 // BaseServer is a basic server that provides some common functionality.

@@ -19,13 +19,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/tikv/pd/client/errs"
-
 	"github.com/prometheus/client_golang/prometheus"
-	m "github.com/tikv/pd/client/metrics"
 	"go.uber.org/zap"
 
 	"github.com/pingcap/log"
+
+	"github.com/tikv/pd/client/errs"
+	m "github.com/tikv/pd/client/metrics"
 )
 
 // Overloading is a type describing service return value

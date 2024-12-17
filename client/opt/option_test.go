@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+
 	"github.com/tikv/pd/client/pkg/utils/testutil"
 )
 

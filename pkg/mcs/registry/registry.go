@@ -20,10 +20,12 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/pingcap/log"
-	bs "github.com/tikv/pd/pkg/basicserver"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
+
+	"github.com/pingcap/log"
+
+	bs "github.com/tikv/pd/pkg/basicserver"
 )
 
 var (
