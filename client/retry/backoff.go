@@ -24,6 +24,7 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/client/timerutil"
 	"go.uber.org/zap"
 )
 
@@ -86,7 +87,7 @@ func (bo *Backoffer) Exec(
 		if after == nil {
 			after = time.NewTimer(currentInterval)
 		} else {
-			after.Reset(currentInterval)
+			timerutil.SafeResetTimer(after, currentInterval)
 		}
 		select {
 		case <-ctx.Done():
