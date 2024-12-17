@@ -694,9 +694,12 @@ func buildRedistributeRegionsTestCases(storeIDs []uint64, regionDist []regionSto
 	return stores, regions
 }
 
-func (suite *operatorTestSuite) checkRedistributeRegions1(cluster *tests.TestCluster) {
+func (suite *operatorTestSuite) checkRedistributeRegions(cluster *tests.TestCluster) {
 	re := suite.Require()
 
+	// 1: 10 20 30 40 50 60 70 80 90
+	// 2: 100
+	// 4:
 	stores, regions := buildRedistributeRegionsTestCases([]uint64{1, 2, 4}, []regionStoresPair{
 		{10, []uint64{0}},
 		{20, []uint64{0}},
@@ -724,11 +727,18 @@ func (suite *operatorTestSuite) checkRedistributeRegions1(cluster *tests.TestClu
 	e := tu.CheckPostJSON(tests.TestDialClient, fmt.Sprintf("%s/regions/balance", urlPrefix), []byte(`{"start_key":"", "end_key":"748000000005F5E0FFFF00000000000000F8"}`), tu.StatusOK(re))
 	re.NoError(e)
 	log.Info("!!!!! XXX GET")
-	ec := tu.CheckGetJSON(tests.TestDialClient, fmt.Sprintf("%s/regions/balance", urlPrefix), []byte(``), tu.StatusOK(re), tu.StringEqual(re, "Scheduling"))
+	j := struct {
+		Scheduling bool `json:"scheduling"`
+		TotalCount int  `json:"total"`
+	}{}
+	time.Sleep(time.Millisecond * 500)
+	ec := tu.CheckGetJSON(tests.TestDialClient, fmt.Sprintf("%s/regions/balance", urlPrefix), []byte(``), tu.StatusOK(re), tu.ExtractJSON(re, &j))
+	re.Equal(5, j.TotalCount)
 	re.NoError(ec)
 	log.Info("!!!!! XXX DELETE")
 	ed := tu.CheckDelete(tests.TestDialClient, fmt.Sprintf("%s/schedulers/%s", urlPrefix, types.BalanceKeyrangeScheduler.String()), tu.StatusOK(re), tu.StringEqual(re, "The scheduler is removed."))
 	re.NoError(ed)
+	log.Info("!!!!! XXX CONFIG")
 	econfig := tu.CheckPostJSON(tests.TestDialClient, fmt.Sprintf("%s/regions/balance/", urlPrefix), []byte(`{"start_key":"7480000000000000FF785F720000000000FA", "end_key":"7480000000000000FF785F72FFFFFFFFFFFFFFFFFF0000000000FB", "required_labels":[{"key":"engine","value":"tiflash"}]}`), tu.StatusOK(re))
 	re.NoError(econfig)
 }
@@ -739,61 +749,6 @@ func (suite *operatorTestSuite) TestRedistributeRegions() {
 			conf.Replication.MaxReplicas = 1
 		})
 	env.RunMode = 1
-	env.RunTestBasedOnMode(suite.checkRedistributeRegions1)
+	env.RunTestBasedOnMode(suite.checkRedistributeRegions)
 	env.Cleanup()
-	// env2 := tests.NewSchedulingTestEnvironment(suite.T(),
-	// 	func(conf *config.Config, _ string) {
-	// 		conf.Replication.MaxReplicas = 1
-	// 	})
-	// env2.RunTestBasedOnMode(suite.checkRedistributeRegions2)
-	// env2.Cleanup()
 }
-
-// func TestComputeCandidateStores(t *testing.T) {
-// 	re := require.New(t)
-// 	stores := []*core.StoreInfo{}
-
-// 	stats := &pdpb.StoreStats{
-// 		Capacity:  100,
-// 		Available: 100,
-// 	}
-// 	stores = append(stores, core.NewStoreInfo(
-// 		&metapb.Store{
-// 			Id:            1,
-// 			State:         metapb.StoreState_Up,
-// 			NodeState:     metapb.NodeState_Serving,
-// 			Labels:        []*metapb.StoreLabel{{Key: "zone", Value: "z1"}},
-// 			LastHeartbeat: time.Now().UnixNano(),
-// 		},
-// 		core.SetStoreStats(stats),
-// 		core.SetLastHeartbeatTS(time.Now()),
-// 	))
-// 	stores = append(stores, core.NewStoreInfo(
-// 		&metapb.Store{
-// 			Id:            2,
-// 			State:         metapb.StoreState_Up,
-// 			NodeState:     metapb.NodeState_Serving,
-// 			Labels:        []*metapb.StoreLabel{{Key: "zone", Value: "z1"}, {Key: "engine", Value: "tiflash"}},
-// 			LastHeartbeat: time.Now().UnixNano(),
-// 		},
-// 		core.SetStoreStats(stats),
-// 		core.SetLastHeartbeatTS(time.Now()),
-// 	))
-// 	stores = append(stores, core.NewStoreInfo(
-// 		&metapb.Store{
-// 			Id:            3,
-// 			State:         metapb.StoreState_Up,
-// 			NodeState:     metapb.NodeState_Serving,
-// 			Labels:        []*metapb.StoreLabel{{Key: "zone", Value: "z2"}},
-// 			LastHeartbeat: time.Now().UnixNano(),
-// 		},
-// 		core.SetStoreStats(stats),
-// 		core.SetLastHeartbeatTS(time.Now()),
-// 	))
-
-// 	regions := []*core.RegionInfo{}
-
-// 	re.Len(handler.ComputeCandidateStores([]*metapb.StoreLabel{{Key: "zone", Value: "z1"}}, stores, regions), 2, "case 1")
-// 	re.Len(handler.ComputeCandidateStores([]*metapb.StoreLabel{{Key: "zone", Value: "z2"}}, stores, regions), 1, "case 1")
-// 	re.Len(handler.ComputeCandidateStores([]*metapb.StoreLabel{{Key: "zone", Value: "z1"}, {Key: "engine", Value: "tiflash"}}, stores, regions), 1, "case 1")
-// }

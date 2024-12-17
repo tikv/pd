@@ -353,7 +353,7 @@ func TestBalanceKeyrangeAlgorithm(t *testing.T) {
 		{2, []uint64{0}},
 		{3, []uint64{0}},
 	})
-	s := ComputeCandidateStores([]*metapb.StoreLabel{}, stores, regions)
+	s := computeCandidateStores([]*metapb.StoreLabel{}, stores, regions)
 	_, _, ops, _ := BuildMigrationPlan(s)
 	assertValidateMigrationPlan(re, ops, storeIds, regions, []int{-2, 1, 1})
 
@@ -364,7 +364,7 @@ func TestBalanceKeyrangeAlgorithm(t *testing.T) {
 		{2, []uint64{0}},
 		{3, []uint64{0}},
 	})
-	s = ComputeCandidateStores([]*metapb.StoreLabel{&tiflashLabel}, stores, regions)
+	s = computeCandidateStores([]*metapb.StoreLabel{&tiflashLabel}, stores, regions)
 	_, _, ops, _ = BuildMigrationPlan(s)
 	assertValidateMigrationPlan(re, ops, storeIds, regions, []int{0, 0, 0})
 
@@ -380,7 +380,7 @@ func TestBalanceKeyrangeAlgorithm(t *testing.T) {
 		{5, []uint64{0, 1}},
 		{6, []uint64{0, 2}},
 	})
-	s = ComputeCandidateStores([]*metapb.StoreLabel{}, stores, regions)
+	s = computeCandidateStores([]*metapb.StoreLabel{}, stores, regions)
 	_, _, ops, _ = BuildMigrationPlan(s)
 	assertValidateMigrationPlan(re, ops, storeIds, regions, []int{-2, -1, 3})
 
@@ -394,7 +394,7 @@ func TestBalanceKeyrangeAlgorithm(t *testing.T) {
 		{5, []uint64{0, 1}},
 		{6, []uint64{0, 2}},
 	})
-	s = ComputeCandidateStores([]*metapb.StoreLabel{&tiflashLabel}, stores, regions)
+	s = computeCandidateStores([]*metapb.StoreLabel{&tiflashLabel}, stores, regions)
 	_, _, ops, _ = BuildMigrationPlan(s)
 	assertValidateMigrationPlan(re, ops, storeIds, regions, []int{0, -2, 2})
 
@@ -408,7 +408,7 @@ func TestBalanceKeyrangeAlgorithm(t *testing.T) {
 		{5, []uint64{0, 1}},
 		{6, []uint64{0, 2}},
 	})
-	s = ComputeCandidateStores([]*metapb.StoreLabel{&tiflashLabel}, stores, regions)
+	s = computeCandidateStores([]*metapb.StoreLabel{&tiflashLabel}, stores, regions)
 	_, _, ops, _ = BuildMigrationPlan(s)
 	assertValidateMigrationPlan(re, ops, storeIds, regions, []int{-2, -1, 3})
 
@@ -421,7 +421,7 @@ func TestBalanceKeyrangeAlgorithm(t *testing.T) {
 		{2, []uint64{1, 2}},
 		{3, []uint64{2, 0}},
 	})
-	s = ComputeCandidateStores([]*metapb.StoreLabel{}, stores, regions)
+	s = computeCandidateStores([]*metapb.StoreLabel{}, stores, regions)
 	_, _, ops, _ = BuildMigrationPlan(s)
 	assertValidateMigrationPlan(re, ops, storeIds, regions, []int{0, 0, 0})
 
@@ -433,7 +433,7 @@ func TestBalanceKeyrangeAlgorithm(t *testing.T) {
 		{2, []uint64{0}},
 		{3, []uint64{1}},
 	})
-	s = ComputeCandidateStores([]*metapb.StoreLabel{}, stores, regions)
+	s = computeCandidateStores([]*metapb.StoreLabel{}, stores, regions)
 	_, _, ops, _ = BuildMigrationPlan(s)
 	assertValidateMigrationPlan(re, ops, storeIds, regions, []int{0, 0})
 
@@ -444,7 +444,7 @@ func TestBalanceKeyrangeAlgorithm(t *testing.T) {
 	stores, regions = buildRedistributeRegionsTestCases(storeIds, []regionStoresPair{
 		{1, []uint64{0}},
 	})
-	s = ComputeCandidateStores([]*metapb.StoreLabel{}, stores, regions)
+	s = computeCandidateStores([]*metapb.StoreLabel{}, stores, regions)
 	_, _, ops, _ = BuildMigrationPlan(s)
 	assertValidateMigrationPlan(re, ops, storeIds, regions, []int{0, 0, 0})
 
@@ -453,7 +453,7 @@ func TestBalanceKeyrangeAlgorithm(t *testing.T) {
 	// 12:
 	storeIds = []uint64{10, 11, 12}
 	stores, regions = buildRedistributeRegionsTestCases(storeIds, []regionStoresPair{})
-	s = ComputeCandidateStores([]*metapb.StoreLabel{}, stores, regions)
+	s = computeCandidateStores([]*metapb.StoreLabel{}, stores, regions)
 	_, _, ops, _ = BuildMigrationPlan(s)
 	assertValidateMigrationPlan(re, ops, storeIds, regions, []int{0, 0, 0})
 
@@ -468,7 +468,7 @@ func TestBalanceKeyrangeAlgorithm(t *testing.T) {
 		{4, []uint64{0, 1}},
 		{5, []uint64{0, 1}},
 	})
-	s = ComputeCandidateStores([]*metapb.StoreLabel{}, stores, regions)
+	s = computeCandidateStores([]*metapb.StoreLabel{}, stores, regions)
 	_, _, ops, _ = BuildMigrationPlan(s)
 	assertValidateMigrationPlan(re, ops, storeIds, regions, []int{-1, -2, 3})
 
@@ -482,7 +482,7 @@ func TestBalanceKeyrangeAlgorithm(t *testing.T) {
 		{5, []uint64{0, 1}},
 		{6, []uint64{0, 2}},
 	})
-	s = ComputeCandidateStores([]*metapb.StoreLabel{&tiflashLabel}, stores, regions)
+	s = computeCandidateStores([]*metapb.StoreLabel{&tiflashLabel}, stores, regions)
 	_, _, ops, _ = BuildMigrationPlan(s)
 	assertValidateMigrationPlan(re, ops, storeIds, regions, []int{0, -2, 2})
 
@@ -496,7 +496,7 @@ func TestBalanceKeyrangeAlgorithm(t *testing.T) {
 		{5, []uint64{0, 1}},
 		{6, []uint64{0, 2}},
 	})
-	s = ComputeCandidateStores([]*metapb.StoreLabel{&tiflashLabel}, stores, regions)
+	s = computeCandidateStores([]*metapb.StoreLabel{&tiflashLabel}, stores, regions)
 	_, _, ops, _ = BuildMigrationPlan(s)
 	assertValidateMigrationPlan(re, ops, storeIds, regions, []int{-2, -1, 3})
 
@@ -510,7 +510,7 @@ func TestBalanceKeyrangeAlgorithm(t *testing.T) {
 		{4, []uint64{0, 1}},
 		{5, []uint64{0, 1}},
 	})
-	s = ComputeCandidateStores([]*metapb.StoreLabel{}, stores, regions)
+	s = computeCandidateStores([]*metapb.StoreLabel{}, stores, regions)
 	_, _, ops, _ = BuildMigrationPlan(s)
 	assertValidateMigrationPlan(re, ops, storeIds, regions, []int{0, 0})
 
@@ -530,7 +530,7 @@ func TestBalanceKeyrangeAlgorithm(t *testing.T) {
 		{8, []uint64{3, 1}},
 		{9, []uint64{3, 1}},
 	})
-	s = ComputeCandidateStores([]*metapb.StoreLabel{}, stores, regions)
+	s = computeCandidateStores([]*metapb.StoreLabel{}, stores, regions)
 	_, _, ops, _ = BuildMigrationPlan(s)
 	assertValidateMigrationPlan(re, ops, storeIds, regions, []int{4, -4, 4, -4})
 
@@ -546,7 +546,7 @@ func TestBalanceKeyrangeAlgorithm(t *testing.T) {
 		{4, []uint64{0}},
 		{5, []uint64{0}},
 	})
-	s = ComputeCandidateStores([]*metapb.StoreLabel{}, stores, regions)
+	s = computeCandidateStores([]*metapb.StoreLabel{}, stores, regions)
 	_, _, ops, _ = BuildMigrationPlan(s)
 	assertValidateMigrationPlan(re, ops, storeIds, regions, []int{-2, 0, 2})
 
@@ -563,7 +563,7 @@ func TestBalanceKeyrangeAlgorithm(t *testing.T) {
 		{5, []uint64{1}},
 		{6, []uint64{1}},
 	})
-	s = ComputeCandidateStores([]*metapb.StoreLabel{}, stores, regions)
+	s = computeCandidateStores([]*metapb.StoreLabel{}, stores, regions)
 	_, _, ops, _ = BuildMigrationPlan(s)
 	assertValidateMigrationPlan(re, ops, storeIds, regions, []int{-1, -1, 2})
 
@@ -576,7 +576,7 @@ func TestBalanceKeyrangeAlgorithm(t *testing.T) {
 		{1, []uint64{0, 0}},
 		{2, []uint64{1}},
 	})
-	s = ComputeCandidateStores([]*metapb.StoreLabel{}, stores, regions)
+	s = computeCandidateStores([]*metapb.StoreLabel{}, stores, regions)
 	_, _, ops, _ = BuildMigrationPlan(s)
 	assertValidateMigrationPlan(re, ops, storeIds, regions, []int{0, 0, 0})
 }

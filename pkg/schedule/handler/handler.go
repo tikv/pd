@@ -1332,7 +1332,7 @@ func (h *Handler) RedistibuteRegions(data string) (string, error) {
 	return "Scheduler added successfully", nil
 }
 
-func (h *Handler) CheckRedistibuteRegionsStatus() (string, error) {
+func (h *Handler) CheckRedistibuteRegionsStatus() (any, error) {
 	sc, err := h.GetSchedulersController()
 	log.Info("!!!!! CheckRedistibuteRegionsStatus 111")
 	if err != nil {
@@ -1340,13 +1340,16 @@ func (h *Handler) CheckRedistibuteRegionsStatus() (string, error) {
 	}
 	s := sc.GetScheduler(types.BalanceKeyrangeScheduler.String())
 	if s == nil {
-		return "No scheduled", nil
+		return "", nil
 	}
 	if s.IsDisable() {
-		return "Disabled", nil
+		return "", nil
 	}
-	log.Info("!!!!! CheckRedistibuteRegionsStatus 222")
-	return "Scheduling", nil
+	st := sc.GetSchedulerStatus(types.BalanceKeyrangeScheduler.String())
+	if st == nil {
+		return "", nil
+	}
+	return st, nil
 }
 
 // GetRuleManager returns the rule manager.

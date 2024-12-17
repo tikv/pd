@@ -156,15 +156,16 @@ type OperatorWrapper struct {
 	Peer      *metapb.Peer
 }
 type MigrationPlan struct {
-	ErrorCode uint64             `json:"error_code"`
-	StartKey  []byte             `json:"start_key"`
-	EndKey    []byte             `json:"end_key"`
-	Ops       []*MigrationOp     `json:"ops"`
-	Operators []*OperatorWrapper `json:"operators"`
-	Running   []*OperatorWrapper `json:"running"`
+	ErrorCode  uint64             `json:"error_code"`
+	StartKey   []byte             `json:"start_key"`
+	EndKey     []byte             `json:"end_key"`
+	Ops        []*MigrationOp     `json:"ops"`
+	Operators  []*OperatorWrapper `json:"operators"`
+	Running    []*OperatorWrapper `json:"running"`
+	TotalCount int                `json:"total"`
 }
 
-func ComputeCandidateStores(requiredLabels []*metapb.StoreLabel, stores []*metapb.Store, regions []*core.RegionInfo) []*StoreRegionSet {
+func computeCandidateStores(requiredLabels []*metapb.StoreLabel, stores []*metapb.Store, regions []*core.RegionInfo) []*StoreRegionSet {
 	candidates := make([]*StoreRegionSet, 0)
 	for _, s := range stores {
 		storeLabelMap := make(map[string]*metapb.StoreLabel)
@@ -226,7 +227,7 @@ func RedistibuteRegions(c sche.SchedulerCluster, startKey, endKey []byte, requir
 	for _, s := range c.GetStores() {
 		stores = append(stores, s.GetMeta())
 	}
-	candidates := ComputeCandidateStores(requiredLabels, stores, regions)
+	candidates := computeCandidateStores(requiredLabels, stores, regions)
 
 	senders, receivers, ops, movements := BuildMigrationPlan(candidates)
 
@@ -255,12 +256,13 @@ func RedistibuteRegions(c sche.SchedulerCluster, startKey, endKey []byte, requir
 	}
 
 	return &MigrationPlan{
-		ErrorCode: 0,
-		StartKey:  startKey,
-		EndKey:    endKey,
-		Ops:       ops,
-		Operators: operators,
-		Running:   make([]*OperatorWrapper, 0),
+		ErrorCode:  0,
+		StartKey:   startKey,
+		EndKey:     endKey,
+		Ops:        ops,
+		Operators:  operators,
+		Running:    make([]*OperatorWrapper, 0),
+		TotalCount: len(operators),
 	}, nil
 }
 
@@ -332,6 +334,32 @@ func (s *balanceKeyrangeScheduler) IsTimeout() bool {
 	return time.Since(s.StartTime).Milliseconds() > s.conf.MaxRunMillis
 }
 
+func (s *balanceKeyrangeScheduler) GetStatus() any {
+	scheduling := false
+	// running := make([]*OperatorWrapper, 0)
+	// pending := make([]*OperatorWrapper, 0)
+	total := 0
+	if s.migrationPlan != nil {
+		scheduling = true
+		// running = s.migrationPlan.Running
+		// pending = s.migrationPlan.Operators
+		total = s.migrationPlan.TotalCount
+		j := struct {
+			Scheduling bool `json:"scheduling"`
+			// RunningOps []*OperatorWrapper `json:"running"`
+			// Pending    []*OperatorWrapper `json:"pending"`
+			TotalCount int `json:"total"`
+		}{
+			Scheduling: scheduling,
+			// RunningOps: running,
+			// Pending:    pending,
+			TotalCount: total,
+		}
+		return j
+	}
+	return nil
+}
+
 // Schedule implements the Scheduler interface.
 func (s *balanceKeyrangeScheduler) Schedule(cluster sche.SchedulerCluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
 	balanceKeyrangeScheduleCounter.Inc()
@@ -388,7 +416,6 @@ func (s *balanceKeyrangeScheduler) Schedule(cluster sche.SchedulerCluster, dryRu
 				running = append(running, opw)
 			}
 		}
-		log.Info("!!!!! Canceld", zap.Any("rerun", len(rerun)), zap.Any("running", len(running)))
 		s.migrationPlan.Running = running
 		s.migrationPlan.Operators = append(s.migrationPlan.Operators, rerun...)
 	}

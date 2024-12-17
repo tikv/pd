@@ -436,6 +436,15 @@ func (c *Controller) GetAllSchedulerConfigs() ([]string, []string, error) {
 	return c.storage.LoadAllSchedulerConfigs()
 }
 
+func (c *Controller) GetSchedulerStatus(name string) any {
+	if s := c.GetScheduler(name); s != nil {
+		if sbr, ok := s.Scheduler.(*balanceKeyrangeScheduler); ok {
+			return sbr.GetStatus()
+		}
+	}
+	return ""
+}
+
 // ScheduleController is used to manage a scheduler.
 type ScheduleController struct {
 	Scheduler
