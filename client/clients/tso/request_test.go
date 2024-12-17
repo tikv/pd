@@ -18,8 +18,9 @@ import (
 	"context"
 	"testing"
 
-	"github.com/pingcap/errors"
 	"github.com/stretchr/testify/require"
+
+	"github.com/pingcap/errors"
 )
 
 func TestTsoRequestWait(t *testing.T) {

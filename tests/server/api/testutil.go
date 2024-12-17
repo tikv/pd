@@ -23,6 +23,7 @@ import (
 	"path"
 
 	"github.com/stretchr/testify/require"
+
 	"github.com/tikv/pd/tests"
 )
 

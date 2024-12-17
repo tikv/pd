@@ -33,8 +33,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/tikv/pd/tools/pd-ut/alloc"
 	"go.uber.org/zap"
+
+	"github.com/tikv/pd/tools/pd-ut/alloc"
 
 	// Set the correct value when it runs inside docker.
 	_ "go.uber.org/automaxprocs"

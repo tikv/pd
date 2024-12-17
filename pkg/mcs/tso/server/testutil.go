@@ -17,11 +17,12 @@ package server
 import (
 	"strings"
 
-	"github.com/pingcap/kvproto/pkg/tsopb"
 	"github.com/spf13/pflag"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+
+	"github.com/pingcap/kvproto/pkg/tsopb"
 )
 
 // MustNewGrpcClient must create a new TSO grpc client.

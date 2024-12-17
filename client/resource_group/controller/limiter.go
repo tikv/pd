@@ -25,10 +25,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pingcap/log"
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/tikv/pd/client/errs"
 	"go.uber.org/zap"
+
+	"github.com/pingcap/log"
+
+	"github.com/tikv/pd/client/errs"
 )
 
 // Limit defines the maximum frequency of some events.

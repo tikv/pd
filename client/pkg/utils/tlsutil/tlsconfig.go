@@ -40,6 +40,7 @@ import (
 	"fmt"
 
 	"github.com/pingcap/errors"
+
 	"github.com/tikv/pd/client/errs"
 )
 

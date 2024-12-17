@@ -22,15 +22,16 @@ import (
 	"reflect"
 	"strings"
 
+	"github.com/unrolled/render"
+
 	"github.com/pingcap/errors"
+
 	"github.com/tikv/pd/pkg/ratelimit"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/jsonutil"
 	"github.com/tikv/pd/pkg/utils/reflectutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
-
-	"github.com/unrolled/render"
 )
 
 type serviceMiddlewareHandler struct {

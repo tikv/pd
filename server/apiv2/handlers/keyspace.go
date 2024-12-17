@@ -22,8 +22,10 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
+
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/server"
