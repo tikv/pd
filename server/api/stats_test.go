@@ -20,6 +20,7 @@ import (
 	"testing"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/statistics"
@@ -202,5 +203,101 @@ func (suite *statsTestSuite) TestRegionStats() {
 				re.Equal(data.expect, stats)
 			}
 		}
+	}
+}
+
+func TestRegionStatsHoles(t *testing.T) {
+	re := require.New(t)
+	svr, cleanup := mustNewServer(re)
+	defer cleanup()
+	server.MustWaitLeader(re, []*server.Server{svr})
+
+	addr := svr.GetAddr()
+	urlPrefix := fmt.Sprintf("%s%s/api/v1", addr, apiPrefix)
+
+	mustBootstrapCluster(re, svr)
+
+	statsURL := urlPrefix + "/stats/region"
+	epoch := &metapb.RegionEpoch{
+		ConfVer: 1,
+		Version: 1,
+	}
+
+	// range holes
+	regionsWithholes := []*core.RegionInfo{
+		core.NewRegionInfo(
+			&metapb.Region{
+				Id:       1,
+				StartKey: []byte("-"),
+				EndKey:   []byte("c"),
+				Peers: []*metapb.Peer{
+					{Id: 101, StoreId: 1},
+					{Id: 102, StoreId: 2},
+					{Id: 103, StoreId: 3},
+				},
+				RegionEpoch: epoch,
+			},
+			&metapb.Peer{Id: 101, StoreId: 1},
+			core.SetApproximateSize(100),
+			core.SetApproximateKvSize(80),
+			core.SetApproximateKeys(50),
+		),
+		core.NewRegionInfo(
+			&metapb.Region{
+				Id:       2,
+				StartKey: []byte("g"),
+				EndKey:   []byte("l"),
+				Peers: []*metapb.Peer{
+					{Id: 104, StoreId: 1},
+					{Id: 105, StoreId: 4},
+					{Id: 106, StoreId: 5},
+				},
+				RegionEpoch: epoch,
+			},
+			&metapb.Peer{Id: 105, StoreId: 4},
+			core.SetApproximateSize(200),
+			core.SetApproximateKvSize(180),
+			core.SetApproximateKeys(150),
+		),
+		core.NewRegionInfo(
+			&metapb.Region{
+				Id:       3,
+				StartKey: []byte("o"),
+				EndKey:   []byte("u"),
+				Peers: []*metapb.Peer{
+					{Id: 106, StoreId: 1},
+					{Id: 107, StoreId: 5},
+				},
+				RegionEpoch: epoch,
+			},
+			&metapb.Peer{Id: 107, StoreId: 5},
+			core.SetApproximateSize(1),
+			core.SetApproximateKvSize(1),
+			core.SetApproximateKeys(1),
+		),
+	}
+
+	for _, r := range regionsWithholes {
+		mustRegionHeartbeat(re, svr, r)
+	}
+
+	// holes in between :
+	// | - c| ... |g - l| ... |o - u| ...
+
+	startKeys := [6]string{"d", "b", "b", "i", "", "v"}
+	endKeys := [6]string{"e", "e", "i", "j", "", ""}
+	ans := [6]int{0, 1, 2, 1, 3, 0}
+
+	for i := range startKeys {
+		startKey := url.QueryEscape(startKeys[i])
+		endKey := url.QueryEscape(endKeys[i])
+		argsWithHoles := fmt.Sprintf("?start_key=%s&end_key=%s&count", startKey, endKey)
+		res, err := testDialClient.Get(statsURL + argsWithHoles)
+		re.NoError(err)
+		stats := &statistics.RegionStats{}
+		err = apiutil.ReadJSON(res.Body, stats)
+		res.Body.Close()
+		re.NoError(err)
+		re.Equal(ans[i], stats.Count)
 	}
 }
