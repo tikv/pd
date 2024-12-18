@@ -436,6 +436,7 @@ func (c *Controller) GetAllSchedulerConfigs() ([]string, []string, error) {
 	return c.storage.LoadAllSchedulerConfigs()
 }
 
+// GetSchedulerStatus returns the status of a certain scheduler.
 func (c *Controller) GetSchedulerStatus(name string) any {
 	if s := c.GetScheduler(name); s != nil {
 		if sbr, ok := s.Scheduler.(*balanceKeyrangeScheduler); ok {

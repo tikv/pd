@@ -416,10 +416,12 @@ func (oc *Controller) PromoteWaitingOperator() {
 	}
 }
 
+// GetWopCount returns the count in the waiting list of a kind of scheduler.
 func (oc *Controller) GetWopCount(kind string) uint64 {
 	return oc.wopStatus.getCount(kind)
 }
 
+// GetSchedulerMaxWaitingOperator returns the waiting queue side.
 func (oc *Controller) GetSchedulerMaxWaitingOperator() uint64 {
 	return oc.config.GetSchedulerMaxWaitingOperator()
 }

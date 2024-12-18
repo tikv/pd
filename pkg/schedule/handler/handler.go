@@ -1328,6 +1328,7 @@ func (h *Handler) BalanceKeyrange(data string) (string, error) {
 	return "Scheduler added successfully", nil
 }
 
+// GetSchedulerStatus returns the status of the balance-keyrange scheduler
 func (h *Handler) CheckBalanceKeyrangeStatus() (any, error) {
 	sc, err := h.GetSchedulersController()
 	if err != nil {
