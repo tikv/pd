@@ -38,6 +38,7 @@ import (
 const (
 	keepaliveTime    = 10 * time.Second
 	keepaliveTimeout = 3 * time.Second
+	retryInterval    = time.Second
 )
 
 // StopSyncWithLeader stop to sync the region with leader.
@@ -163,7 +164,12 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 					}
 				}
 				log.Error("server failed to establish sync stream with leader", zap.String("server", s.server.Name()), zap.String("leader", s.server.GetLeader().GetName()), errs.ZapError(err))
-				time.Sleep(time.Second)
+				select {
+				case <-ctx.Done():
+					log.Info("stop synchronizing with leader due to context canceled")
+					return
+				case <-time.After(retryInterval):
+				}
 				continue
 			}
 
@@ -175,7 +181,12 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 					if err = stream.CloseSend(); err != nil {
 						log.Error("failed to terminate client stream", errs.ZapError(errs.ErrGRPCCloseSend, err))
 					}
-					time.Sleep(time.Second)
+					select {
+					case <-ctx.Done():
+						log.Info("stop synchronizing with leader due to context canceled")
+						return
+					case <-time.After(retryInterval):
+					}
 					break
 				}
 				if s.history.GetNextIndex() != resp.GetStartIndex() {
