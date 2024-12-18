@@ -24,9 +24,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/unrolled/render"
+
 	"github.com/pingcap/errcode"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
+
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	sc "github.com/tikv/pd/pkg/schedule/config"
@@ -36,7 +39,6 @@ import (
 	"github.com/tikv/pd/pkg/utils/reflectutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
-	"github.com/unrolled/render"
 )
 
 // This line is to ensure the package `sc` could always be imported so that

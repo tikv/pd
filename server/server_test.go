@@ -25,15 +25,16 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+	etcdtypes "go.etcd.io/etcd/client/pkg/v3/types"
+	"go.etcd.io/etcd/server/v3/embed"
+	"go.uber.org/goleak"
+
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/assertutil"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server/config"
-	etcdtypes "go.etcd.io/etcd/client/pkg/v3/types"
-	"go.etcd.io/etcd/server/v3/embed"
-	"go.uber.org/goleak"
 )
 
 func TestMain(m *testing.M) {

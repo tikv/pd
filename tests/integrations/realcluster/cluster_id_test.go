@@ -16,13 +16,15 @@ package realcluster
 
 import (
 	"context"
-	"os/exec"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+
 	pd "github.com/tikv/pd/client"
+	"github.com/tikv/pd/client/opt"
+	"github.com/tikv/pd/client/pkg/caller"
 )
 
 type clusterIDSuite struct {
@@ -47,18 +49,16 @@ func (s *clusterIDSuite) TestClientClusterID() {
 	pdEndpoints := getPDEndpoints(s.T())
 	// Try to create a client with the mixed endpoints.
 	_, err := pd.NewClientWithContext(
-		ctx, pdEndpoints,
-		pd.SecurityOption{}, pd.WithMaxErrorRetry(1),
+		ctx, caller.TestComponent, pdEndpoints,
+		pd.SecurityOption{}, opt.WithMaxErrorRetry(1),
 	)
 	re.Error(err)
 	re.Contains(err.Error(), "unmatched cluster id")
 }
 
 func getPDEndpoints(t *testing.T) []string {
-	cmd := exec.Command("sh", "-c", "ps -ef | grep tikv-server | awk -F '--pd-endpoints=' '{print $2}' | awk '{print $1}'")
-	bytes, err := cmd.Output()
+	pdAddrsForEachTikv, err := runCommandWithOutput("ps -ef | grep tikv-server | awk -F '--pd-endpoints=' '{print $2}' | awk '{print $1}'")
 	require.NoError(t, err)
-	pdAddrsForEachTikv := strings.Split(string(bytes), "\n")
 	var pdAddrs []string
 	for _, addr := range pdAddrsForEachTikv {
 		// length of addr is less than 5 means it must not be a valid address

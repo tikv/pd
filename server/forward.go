@@ -20,24 +20,25 @@ import (
 	"strings"
 	"time"
 
+	"go.uber.org/zap"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/schedulingpb"
 	"github.com/pingcap/kvproto/pkg/tsopb"
 	"github.com/pingcap/log"
+
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
-	"github.com/tikv/pd/pkg/tso"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/server/cluster"
-	"go.uber.org/zap"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 )
 
 func forwardTSORequest(
@@ -51,8 +52,7 @@ func forwardTSORequest(
 			KeyspaceId:      constant.DefaultKeyspaceID,
 			KeyspaceGroupId: constant.DefaultKeyspaceGroupID,
 		},
-		Count:      request.GetCount(),
-		DcLocation: request.GetDcLocation(),
+		Count: request.GetCount(),
 	}
 
 	failpoint.Inject("tsoProxySendToTSOTimeout", func() {
@@ -419,8 +419,8 @@ func (s *GrpcServer) isLocalRequest(host string) bool {
 }
 
 func (s *GrpcServer) getGlobalTSO(ctx context.Context) (pdpb.Timestamp, error) {
-	if !s.IsAPIServiceMode() {
-		return s.tsoAllocatorManager.HandleRequest(ctx, tso.GlobalDCLocation, 1)
+	if !s.IsServiceIndependent(constant.TSOServiceName) {
+		return s.tsoAllocatorManager.HandleRequest(ctx, 1)
 	}
 	request := &tsopb.TsoRequest{
 		Header: &tsopb.RequestHeader{

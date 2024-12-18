@@ -16,6 +16,7 @@ package schedulers
 
 import (
 	"github.com/prometheus/client_golang/prometheus"
+
 	"github.com/tikv/pd/pkg/schedule/types"
 )
 
@@ -230,6 +231,7 @@ var (
 	balanceLeaderScheduleCounter         = balanceLeaderCounterWithEvent("schedule")
 	balanceLeaderNoLeaderRegionCounter   = balanceLeaderCounterWithEvent("no-leader-region")
 	balanceLeaderRegionHotCounter        = balanceLeaderCounterWithEvent("region-hot")
+	balanceLeaderNoSourceStoreCounter    = balanceLeaderCounterWithEvent("no-source-store")
 	balanceLeaderNoTargetStoreCounter    = balanceLeaderCounterWithEvent("no-target-store")
 	balanceLeaderNoFollowerRegionCounter = balanceLeaderCounterWithEvent("no-follower-region")
 	balanceLeaderSkipCounter             = balanceLeaderCounterWithEvent("skip")

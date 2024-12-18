@@ -10,11 +10,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/suite"
+
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/stretchr/testify/suite"
+
 	"github.com/tikv/pd/pkg/core"
-	_ "github.com/tikv/pd/pkg/mcs/scheduling/server/apis/v1"
 	"github.com/tikv/pd/pkg/mcs/scheduling/server/config"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/schedule/handler"
@@ -27,6 +28,8 @@ import (
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/tests"
+
+	_ "github.com/tikv/pd/pkg/mcs/scheduling/server/apis/v1"
 )
 
 type apiTestSuite struct {
@@ -508,6 +511,8 @@ func (suite *apiTestSuite) checkAdminRegionCacheForward(cluster *tests.TestClust
 
 func (suite *apiTestSuite) TestFollowerForward() {
 	suite.env.RunTestBasedOnMode(suite.checkFollowerForward)
+	suite.TearDownSuite()
+	suite.SetupSuite()
 }
 
 func (suite *apiTestSuite) checkFollowerForward(cluster *tests.TestCluster) {
@@ -517,20 +522,6 @@ func (suite *apiTestSuite) checkFollowerForward(cluster *tests.TestCluster) {
 	defer cancel()
 	follower, err := cluster.JoinAPIServer(ctx)
 	re.NoError(err)
-	defer func() {
-		leader := cluster.GetLeaderServer()
-		cli := leader.GetEtcdClient()
-		testutil.Eventually(re, func() bool {
-			_, err = cli.MemberRemove(context.Background(), follower.GetServer().GetMember().ID())
-			return err == nil
-		})
-		testutil.Eventually(re, func() bool {
-			res, err := cli.MemberList(context.Background())
-			return err == nil && len(res.Members) == 1
-		})
-		cluster.DeleteServer(follower.GetConfig().Name)
-		follower.Destroy()
-	}()
 	re.NoError(follower.Run())
 	re.NotEmpty(cluster.WaitLeader())
 

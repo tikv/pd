@@ -21,16 +21,18 @@ import (
 	"strconv"
 	"time"
 
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/tsopb"
 	"github.com/pingcap/log"
+
 	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/mcs/registry"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 )
 
 // gRPC errors
@@ -111,12 +113,11 @@ func (s *Service) Tso(stream tsopb.TSO_TsoServer) error {
 		}
 		keyspaceID := header.GetKeyspaceId()
 		keyspaceGroupID := header.GetKeyspaceGroupId()
-		dcLocation := request.GetDcLocation()
 		count := request.GetCount()
 		ts, keyspaceGroupBelongTo, err := s.keyspaceGroupManager.HandleTSORequest(
 			ctx,
 			keyspaceID, keyspaceGroupID,
-			dcLocation, count)
+			count)
 		if err != nil {
 			return status.Error(codes.Unknown, err.Error())
 		}
@@ -198,7 +199,7 @@ func (s *Service) GetMinTS(
 		}, nil
 	}
 
-	minTS, kgAskedCount, kgTotalCount, err := s.keyspaceGroupManager.GetMinTS(request.GetDcLocation())
+	minTS, kgAskedCount, kgTotalCount, err := s.keyspaceGroupManager.GetMinTS()
 	if err != nil {
 		return &tsopb.GetMinTSResponse{
 			Header: wrapErrorToHeader(

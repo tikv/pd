@@ -24,17 +24,19 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pingcap/failpoint"
-	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/pingcap/log"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
-	"github.com/tikv/pd/client/tsoutil"
-	"github.com/tikv/pd/pkg/utils/testutil"
-	"github.com/tikv/pd/tests"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+
+	"github.com/pingcap/failpoint"
+	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/log"
+
+	"github.com/tikv/pd/client/pkg/utils/tsoutil"
+	"github.com/tikv/pd/pkg/utils/testutil"
+	"github.com/tikv/pd/tests"
 )
 
 type tsoProxyTestSuite struct {
@@ -342,8 +344,8 @@ func (s *tsoProxyTestSuite) verifyTSOProxy(
 				re.Equal(req.GetCount(), resp.GetCount())
 				ts := resp.GetTimestamp()
 				count := int64(resp.GetCount())
-				physical, largestLogic, suffixBits := ts.GetPhysical(), ts.GetLogical(), ts.GetSuffixBits()
-				firstLogical := tsoutil.AddLogical(largestLogic, -count+1, suffixBits)
+				physical, largestLogic := ts.GetPhysical(), ts.GetLogical()
+				firstLogical := largestLogic - count + 1
 				re.False(tsoutil.TSLessEqual(physical, firstLogical, lastPhysical, lastLogical))
 			}
 		}(i)

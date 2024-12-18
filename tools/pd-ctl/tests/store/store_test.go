@@ -24,8 +24,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/require"
+	"go.etcd.io/etcd/client/pkg/v3/transport"
+
+	"github.com/pingcap/kvproto/pkg/metapb"
+
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/response"
@@ -35,7 +38,6 @@ import (
 	pdTests "github.com/tikv/pd/tests"
 	ctl "github.com/tikv/pd/tools/pd-ctl/pdctl"
 	"github.com/tikv/pd/tools/pd-ctl/tests"
-	"go.etcd.io/etcd/client/pkg/v3/transport"
 )
 
 func TestStoreLimitV2(t *testing.T) {
@@ -477,38 +479,6 @@ func TestStore(t *testing.T) {
 	output, err = tests.ExecuteCommand(cmd, args...)
 	re.NoError(err)
 	re.NotContains(string(output), "PANIC")
-	// store limit-scene
-	args = []string{"-u", pdAddr, "store", "limit-scene"}
-	output, err = tests.ExecuteCommand(cmd, args...)
-	re.NoError(err)
-	scene := &storelimit.Scene{}
-	err = json.Unmarshal(output, scene)
-	re.NoError(err)
-	re.Equal(storelimit.DefaultScene(storelimit.AddPeer), scene)
-
-	// store limit-scene <scene> <rate>
-	args = []string{"-u", pdAddr, "store", "limit-scene", "idle", "200"}
-	_, err = tests.ExecuteCommand(cmd, args...)
-	re.NoError(err)
-	args = []string{"-u", pdAddr, "store", "limit-scene"}
-	scene = &storelimit.Scene{}
-	output, err = tests.ExecuteCommand(cmd, args...)
-	re.NoError(err)
-	err = json.Unmarshal(output, scene)
-	re.NoError(err)
-	re.Equal(200, scene.Idle)
-
-	// store limit-scene <scene> <rate> <type>
-	args = []string{"-u", pdAddr, "store", "limit-scene", "idle", "100", "remove-peer"}
-	_, err = tests.ExecuteCommand(cmd, args...)
-	re.NoError(err)
-	args = []string{"-u", pdAddr, "store", "limit-scene", "remove-peer"}
-	scene = &storelimit.Scene{}
-	output, err = tests.ExecuteCommand(cmd, args...)
-	re.NoError(err)
-	err = json.Unmarshal(output, scene)
-	re.NoError(err)
-	re.Equal(100, scene.Idle)
 
 	// store limit all 201 is invalid for all
 	args = []string{"-u", pdAddr, "store", "limit", "all", "201"}

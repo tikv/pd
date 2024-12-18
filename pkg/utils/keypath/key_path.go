@@ -53,7 +53,6 @@ const (
 	keyspacePrefix             = "keyspaces"
 	keyspaceMetaInfix          = "meta"
 	keyspaceIDInfix            = "id"
-	keyspaceAllocID            = "alloc_id"
 	gcSafePointInfix           = "gc_safe_point"
 	serviceSafePointInfix      = "service_safe_point"
 	regionPathPrefix           = "raft/r"
@@ -285,12 +284,6 @@ func KeyspaceIDPath(name string) string {
 	return path.Join(keyspacePrefix, keyspaceIDInfix, name)
 }
 
-// KeyspaceIDAlloc returns the path of the keyspace id's persistent window boundary.
-// Path: keyspaces/alloc_id
-func KeyspaceIDAlloc() string {
-	return path.Join(keyspacePrefix, keyspaceAllocID)
-}
-
 // EncodeKeyspaceID from uint32 to string.
 // It adds extra padding to make encoded ID ordered.
 // Encoded ID can be decoded directly with strconv.ParseUint.
@@ -317,18 +310,6 @@ func GetCompiledKeyspaceGroupIDRegexp() *regexp.Regexp {
 	return regexp.MustCompile(pattern)
 }
 
-// ResourceManagerSvcRootPath returns the root path of resource manager service.
-// Path: /ms/{cluster_id}/resource_manager
-func ResourceManagerSvcRootPath() string {
-	return svcRootPath(constant.ResourceManagerServiceName)
-}
-
-// SchedulingSvcRootPath returns the root path of scheduling service.
-// Path: /ms/{cluster_id}/scheduling
-func SchedulingSvcRootPath() string {
-	return svcRootPath(constant.SchedulingServiceName)
-}
-
 // TSOSvcRootPath returns the root path of tso service.
 // Path: /ms/{cluster_id}/tso
 func TSOSvcRootPath() string {
@@ -344,30 +325,6 @@ func svcRootPath(svcName string) string {
 // Path: /pd/{cluster_id}
 func LegacyRootPath() string {
 	return path.Join(pdRootPath, strconv.FormatUint(ClusterID(), 10))
-}
-
-// KeyspaceGroupPrimaryPath returns the path of keyspace group primary.
-// default keyspace group: "/ms/{cluster_id}/tso/00000/primary".
-// non-default keyspace group: "/ms/{cluster_id}/tso/keyspace_groups/election/{group}/primary".
-func KeyspaceGroupPrimaryPath(rootPath string, keyspaceGroupID uint32) string {
-	electionPath := KeyspaceGroupsElectionPath(rootPath, keyspaceGroupID)
-	return path.Join(electionPath, constant.PrimaryKey)
-}
-
-// SchedulingPrimaryPath returns the path of scheduling primary.
-// Path: /ms/{cluster_id}/scheduling/primary
-func SchedulingPrimaryPath() string {
-	return path.Join(SchedulingSvcRootPath(), constant.PrimaryKey)
-}
-
-// KeyspaceGroupsElectionPath returns the path of keyspace groups election.
-// default keyspace group: "/ms/{cluster_id}/tso/00000".
-// non-default keyspace group: "/ms/{cluster_id}/tso/keyspace_groups/election/{group}".
-func KeyspaceGroupsElectionPath(rootPath string, keyspaceGroupID uint32) string {
-	if keyspaceGroupID == constant.DefaultKeyspaceGroupID {
-		return path.Join(rootPath, "00000")
-	}
-	return path.Join(rootPath, constant.KeyspaceGroupsKey, keyspaceGroupsElectionKey, fmt.Sprintf("%05d", keyspaceGroupID))
 }
 
 // GetCompiledNonDefaultIDRegexp returns the compiled regular expression for matching non-default keyspace group id.
@@ -408,35 +365,9 @@ func KeyspaceGroupGlobalTSPath(groupID uint32) string {
 	return path.Join(fmt.Sprintf("%05d", groupID), globalTSOAllocatorEtcdPrefix)
 }
 
-// KeyspaceGroupLocalTSPath constructs the timestampOracle path prefix for Local TSO, which is:
-//  1. for the default keyspace group:
-//     lta/{dc-location} in /pd/{cluster_id}/lta/{dc-location}/timestamp
-//  2. for the non-default keyspace groups:
-//     {group}/lta/{dc-location} in /ms/{cluster_id}/tso/{group}/lta/{dc-location}/timestamp
-func KeyspaceGroupLocalTSPath(keyPrefix string, groupID uint32, dcLocation string) string {
-	if groupID == constant.DefaultKeyspaceGroupID {
-		return path.Join(keyPrefix, dcLocation)
-	}
-	return path.Join(fmt.Sprintf("%05d", groupID), keyPrefix, dcLocation)
-}
-
 // TimestampPath returns the timestamp path for the given timestamp oracle path prefix.
 func TimestampPath(tsPath string) string {
 	return path.Join(tsPath, TimestampKey)
-}
-
-// FullTimestampPath returns the full timestamp path.
-//  1. for the default keyspace group:
-//     /pd/{cluster_id}/timestamp
-//  2. for the non-default keyspace groups:
-//     /ms/{cluster_id}/tso/{group}/gta/timestamp
-func FullTimestampPath(groupID uint32) string {
-	rootPath := TSOSvcRootPath()
-	tsPath := TimestampPath(KeyspaceGroupGlobalTSPath(groupID))
-	if groupID == constant.DefaultKeyspaceGroupID {
-		rootPath = LegacyRootPath()
-	}
-	return path.Join(rootPath, tsPath)
 }
 
 const (

@@ -11,7 +11,7 @@
 //     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,g
+// distributed under the License is distributed on an "AS IS" BASIS,
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
@@ -24,13 +24,16 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
+
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/meta_storagepb"
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
-	"github.com/stretchr/testify/mock"
-	"github.com/stretchr/testify/require"
+
 	pd "github.com/tikv/pd/client"
 	"github.com/tikv/pd/client/errs"
+	"github.com/tikv/pd/client/opt"
 )
 
 func createTestGroupCostController(re *require.Assertions) *groupCostController {
@@ -222,14 +225,19 @@ func (m *MockResourceGroupProvider) LoadResourceGroups(ctx context.Context) ([]*
 	return args.Get(0).([]*rmpb.ResourceGroup), args.Get(1).(int64), args.Error(2)
 }
 
-func (m *MockResourceGroupProvider) Watch(ctx context.Context, key []byte, opts ...pd.OpOption) (chan []*meta_storagepb.Event, error) {
+func (m *MockResourceGroupProvider) Watch(ctx context.Context, key []byte, opts ...opt.MetaStorageOption) (chan []*meta_storagepb.Event, error) {
 	args := m.Called(ctx, key, opts)
 	return args.Get(0).(chan []*meta_storagepb.Event), args.Error(1)
 }
 
-func (m *MockResourceGroupProvider) Get(ctx context.Context, key []byte, opts ...pd.OpOption) (*meta_storagepb.GetResponse, error) {
+func (m *MockResourceGroupProvider) Get(ctx context.Context, key []byte, opts ...opt.MetaStorageOption) (*meta_storagepb.GetResponse, error) {
 	args := m.Called(ctx, key, opts)
 	return args.Get(0).(*meta_storagepb.GetResponse), args.Error(1)
+}
+
+func (m *MockResourceGroupProvider) Put(ctx context.Context, key []byte, value []byte, opts ...opt.MetaStorageOption) (*meta_storagepb.PutResponse, error) {
+	args := m.Called(ctx, key, value, opts)
+	return args.Get(0).(*meta_storagepb.PutResponse), args.Error(1)
 }
 
 func TestControllerWithTwoGroupRequestConcurrency(t *testing.T) {

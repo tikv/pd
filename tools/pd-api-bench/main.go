@@ -29,21 +29,25 @@ import (
 	"github.com/gin-contrib/gzip"
 	"github.com/gin-contrib/pprof"
 	"github.com/gin-gonic/gin"
-	"github.com/pingcap/errors"
-	"github.com/pingcap/log"
 	"github.com/prometheus/client_golang/prometheus"
 	flag "github.com/spf13/pflag"
-	pd "github.com/tikv/pd/client"
-	pdHttp "github.com/tikv/pd/client/http"
-	"github.com/tikv/pd/client/tlsutil"
-	"github.com/tikv/pd/pkg/mcs/utils"
-	"github.com/tikv/pd/pkg/utils/logutil"
-	"github.com/tikv/pd/tools/pd-api-bench/cases"
-	"github.com/tikv/pd/tools/pd-api-bench/config"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/keepalive"
+
+	"github.com/pingcap/errors"
+	"github.com/pingcap/log"
+
+	pd "github.com/tikv/pd/client"
+	pdHttp "github.com/tikv/pd/client/http"
+	"github.com/tikv/pd/client/opt"
+	"github.com/tikv/pd/client/pkg/caller"
+	"github.com/tikv/pd/client/pkg/utils/tlsutil"
+	"github.com/tikv/pd/pkg/mcs/utils"
+	"github.com/tikv/pd/pkg/utils/logutil"
+	"github.com/tikv/pd/tools/pd-api-bench/cases"
+	"github.com/tikv/pd/tools/pd-api-bench/config"
 )
 
 var (
@@ -118,7 +122,7 @@ func main() {
 	pdClis := make([]pd.Client, cfg.Client)
 	for i := range cfg.Client {
 		pdClis[i] = newPDClient(ctx, cfg)
-		pdClis[i].UpdateOption(pd.EnableFollowerHandle, true)
+		pdClis[i].UpdateOption(opt.EnableFollowerHandle, true)
 	}
 	etcdClis := make([]*clientv3.Client, cfg.Client)
 	for i := range cfg.Client {
@@ -375,12 +379,13 @@ func newEtcdClient(cfg *config.Config) *clientv3.Client {
 // newPDClient returns a pd client.
 func newPDClient(ctx context.Context, cfg *config.Config) pd.Client {
 	addrs := []string{cfg.PDAddr}
-	pdCli, err := pd.NewClientWithContext(ctx, addrs, pd.SecurityOption{
-		CAPath:   cfg.CaPath,
-		CertPath: cfg.CertPath,
-		KeyPath:  cfg.KeyPath,
-	},
-		pd.WithGRPCDialOptions(
+	pdCli, err := pd.NewClientWithContext(ctx, caller.TestComponent,
+		addrs, pd.SecurityOption{
+			CAPath:   cfg.CaPath,
+			CertPath: cfg.CertPath,
+			KeyPath:  cfg.KeyPath,
+		},
+		opt.WithGRPCDialOptions(
 			grpc.WithKeepaliveParams(keepalive.ClientParameters{
 				Time:    keepaliveTime,
 				Timeout: keepaliveTimeout,

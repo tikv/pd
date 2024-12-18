@@ -21,16 +21,18 @@ import (
 	"strings"
 
 	"github.com/gorilla/mux"
+	"github.com/unrolled/render"
+	"go.uber.org/zap"
+
 	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
+
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/server"
-	"github.com/unrolled/render"
-	"go.uber.org/zap"
 )
 
 type schedulerHandler struct {
@@ -113,9 +115,14 @@ func (h *schedulerHandler) CreateScheduler(w http.ResponseWriter, r *http.Reques
 			return
 		}
 	case types.GrantLeaderScheduler, types.EvictLeaderScheduler:
-		storeID, ok := input["store_id"].(float64)
+		_, ok := input["store_id"]
 		if !ok {
 			h.r.JSON(w, http.StatusBadRequest, "missing store id")
+			return
+		}
+		storeID, ok := input["store_id"].(float64)
+		if !ok {
+			h.r.JSON(w, http.StatusBadRequest, "please input a right store id")
 			return
 		}
 		var (

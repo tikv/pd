@@ -19,11 +19,19 @@ import (
 	"time"
 
 	"github.com/docker/go-units"
+	"go.uber.org/zap"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/backoff"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/keepalive"
+	"google.golang.org/grpc/status"
+
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/ratelimit"
@@ -31,18 +39,13 @@ import (
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/logutil"
-	"go.uber.org/zap"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/backoff"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/keepalive"
-	"google.golang.org/grpc/status"
 )
 
 const (
 	keepaliveTime    = 10 * time.Second
 	keepaliveTimeout = 3 * time.Second
 	msgSize          = 8 * units.MiB
+	retryInterval    = time.Second
 )
 
 // StopSyncWithLeader stop to sync the region with leader.
@@ -153,7 +156,12 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 					}
 				}
 				log.Error("server failed to establish sync stream with leader", zap.String("server", s.server.Name()), zap.String("leader", s.server.GetLeader().GetName()), errs.ZapError(err))
-				time.Sleep(time.Second)
+				select {
+				case <-ctx.Done():
+					log.Info("stop synchronizing with leader due to context canceled")
+					return
+				case <-time.After(retryInterval):
+				}
 				continue
 			}
 			log.Info("server starts to synchronize with leader", zap.String("server", s.server.Name()), zap.String("leader", s.server.GetLeader().GetName()), zap.Uint64("request-index", s.history.getNextIndex()))
@@ -165,7 +173,12 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 					if err = stream.CloseSend(); err != nil {
 						log.Error("failed to terminate client stream", errs.ZapError(errs.ErrGRPCCloseSend, err))
 					}
-					time.Sleep(time.Second)
+					select {
+					case <-ctx.Done():
+						log.Info("stop synchronizing with leader due to context canceled")
+						return
+					case <-time.After(retryInterval):
+					}
 					break
 				}
 				if s.history.getNextIndex() != resp.GetStartIndex() {
@@ -208,13 +221,13 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 						log.Debug("region is stale", zap.Stringer("origin", origin.GetMeta()), errs.ZapError(err))
 						continue
 					}
-					ctx := &core.MetaProcessContext{
+					cctx := &core.MetaProcessContext{
 						Context:    ctx,
 						TaskRunner: ratelimit.NewSyncRunner(),
 						Tracer:     core.NewNoopHeartbeatProcessTracer(),
 						// no limit for followers.
 					}
-					saveKV, _, _, _ := regionGuide(ctx, region, origin)
+					saveKV, _, _, _ := regionGuide(cctx, region, origin)
 					overlaps := bc.PutRegion(region)
 
 					if hasBuckets {

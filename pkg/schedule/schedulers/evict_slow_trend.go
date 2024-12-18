@@ -20,18 +20,21 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
+	"github.com/unrolled/render"
+	"go.uber.org/zap"
+
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
+
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/core/constant"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
 	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
-	"github.com/unrolled/render"
-	"go.uber.org/zap"
 )
 
 const (
@@ -307,7 +310,7 @@ func (s *evictSlowTrendScheduler) ReloadConfig() error {
 	for _, id := range newCfg.EvictedStores {
 		new[id] = struct{}{}
 	}
-	pauseAndResumeLeaderTransfer(s.conf.cluster, old, new)
+	pauseAndResumeLeaderTransfer(s.conf.cluster, constant.In, old, new)
 	s.conf.RecoveryDurationGap = newCfg.RecoveryDurationGap
 	s.conf.EvictedStores = newCfg.EvictedStores
 	return nil

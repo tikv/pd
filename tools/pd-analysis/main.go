@@ -18,9 +18,11 @@ import (
 	"flag"
 	"os"
 
-	"github.com/pingcap/log"
-	"github.com/tikv/pd/tools/pd-analysis/analysis"
 	"go.uber.org/zap"
+
+	"github.com/pingcap/log"
+
+	"github.com/tikv/pd/tools/pd-analysis/analysis"
 )
 
 var (

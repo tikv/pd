@@ -23,10 +23,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pingcap/log"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/zap"
+
+	"github.com/pingcap/log"
 )
 
 type clusterSuite struct {
@@ -38,7 +39,7 @@ type clusterSuite struct {
 }
 
 var (
-	playgroundLogDir = filepath.Join("tmp", "real_cluster", "playground")
+	playgroundLogDir = "/tmp/real_cluster/playground"
 	tiupBin          = os.Getenv("HOME") + "/.tiup/bin/tiup"
 )
 
@@ -87,6 +88,9 @@ func (s *clusterSuite) stopCluster(t *testing.T) {
 }
 
 func (s *clusterSuite) tag() string {
+	if s.ms {
+		return fmt.Sprintf("pd_real_cluster_test_ms_%s_%d", s.suiteName, s.clusterCnt)
+	}
 	return fmt.Sprintf("pd_real_cluster_test_%s_%d", s.suiteName, s.clusterCnt)
 }
 
@@ -181,5 +185,6 @@ func waitTiupReady(t *testing.T, tag string) {
 			zap.String("tag", tag), zap.Error(err))
 		time.Sleep(time.Duration(interval) * time.Second)
 	}
-	require.Failf(t, "TiUP is not ready", "tag: %s", tag)
+	// this check can trigger the cleanup function
+	require.NotZero(t, 1, "TiUP is not ready", "tag: %s", tag)
 }

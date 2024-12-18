@@ -36,6 +36,20 @@ const (
 	NotPrimaryErr = "not primary"
 )
 
+// internal errors
+var (
+	// ErrUnmatchedClusterID is returned when found a PD with a different cluster ID.
+	ErrUnmatchedClusterID = errors.New("[pd] unmatched cluster id")
+	// ErrFailInitClusterID is returned when failed to load clusterID from all supplied PD addresses.
+	ErrFailInitClusterID = errors.New("[pd] failed to get cluster id")
+	// ErrClosing is returned when request is canceled when client is closing.
+	ErrClosing = errors.New("[pd] closing")
+	// ErrTSOLength is returned when the number of response timestamps is inconsistent with request.
+	ErrTSOLength = errors.New("[pd] tso length in rpc response is incorrect")
+	// ErrNoServiceModeReturned is returned when the response doesn't contain service mode info unexpectedly.
+	ErrNoServiceModeReturned = errors.New("[pd] no service mode returned")
+)
+
 // client errors
 var (
 	ErrClientGetProtoClient           = errors.Normalize("failed to get proto client", errors.RFCCodeText("PD:client:ErrClientGetProtoClient"))
@@ -56,6 +70,7 @@ var (
 	ErrClientGetServingEndpoint       = errors.Normalize("get serving endpoint failed", errors.RFCCodeText("PD:client:ErrClientGetServingEndpoint"))
 	ErrClientFindGroupByKeyspaceID    = errors.Normalize("can't find keyspace group by keyspace id", errors.RFCCodeText("PD:client:ErrClientFindGroupByKeyspaceID"))
 	ErrClientWatchGCSafePointV2Stream = errors.Normalize("watch gc safe point v2 stream failed", errors.RFCCodeText("PD:client:ErrClientWatchGCSafePointV2Stream"))
+	ErrCircuitBreakerOpen             = errors.Normalize("circuit breaker is open", errors.RFCCodeText("PD:client:ErrCircuitBreakerOpen"))
 )
 
 // grpcutil errors

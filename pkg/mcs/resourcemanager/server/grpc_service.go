@@ -20,17 +20,19 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/pingcap/errors"
-	"github.com/pingcap/failpoint"
-	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
-	"github.com/pingcap/log"
-	bs "github.com/tikv/pd/pkg/basicserver"
-	"github.com/tikv/pd/pkg/mcs/registry"
-	"github.com/tikv/pd/pkg/utils/apiutil"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+
+	"github.com/pingcap/errors"
+	"github.com/pingcap/failpoint"
+	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
+	"github.com/pingcap/log"
+
+	bs "github.com/tikv/pd/pkg/basicserver"
+	"github.com/tikv/pd/pkg/mcs/registry"
+	"github.com/tikv/pd/pkg/utils/apiutil"
 )
 
 var (
@@ -54,8 +56,7 @@ func (dummyRestService) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
 
 // Service is the gRPC service for resource manager.
 type Service struct {
-	ctx context.Context
-	*Server
+	ctx     context.Context
 	manager *Manager
 	// settings
 }
