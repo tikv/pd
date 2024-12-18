@@ -25,7 +25,6 @@ import (
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pingcap/log"
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/schedule/operator"
@@ -726,7 +725,6 @@ func (suite *operatorTestSuite) checkRedistributeRegions(cluster *tests.TestClus
 	urlPrefix := fmt.Sprintf("%s/pd/api/v1", cluster.GetLeaderServer().GetAddr())
 	e := tu.CheckPostJSON(tests.TestDialClient, fmt.Sprintf("%s/regions/balance", urlPrefix), []byte(`{"start_key":"", "end_key":"748000000005F5E0FFFF00000000000000F8"}`), tu.StatusOK(re))
 	re.NoError(e)
-	log.Info("!!!!! XXX GET")
 	j := struct {
 		Scheduling bool `json:"scheduling"`
 		TotalCount int  `json:"total"`
@@ -735,10 +733,8 @@ func (suite *operatorTestSuite) checkRedistributeRegions(cluster *tests.TestClus
 	ec := tu.CheckGetJSON(tests.TestDialClient, fmt.Sprintf("%s/regions/balance", urlPrefix), []byte(``), tu.StatusOK(re), tu.ExtractJSON(re, &j))
 	re.Equal(5, j.TotalCount)
 	re.NoError(ec)
-	log.Info("!!!!! XXX DELETE")
 	ed := tu.CheckDelete(tests.TestDialClient, fmt.Sprintf("%s/schedulers/%s", urlPrefix, types.BalanceKeyrangeScheduler.String()), tu.StatusOK(re), tu.StringEqual(re, "The scheduler is removed."))
 	re.NoError(ed)
-	log.Info("!!!!! XXX CONFIG")
 	econfig := tu.CheckPostJSON(tests.TestDialClient, fmt.Sprintf("%s/regions/balance/", urlPrefix), []byte(`{"start_key":"7480000000000000FF785F720000000000FA", "end_key":"7480000000000000FF785F72FFFFFFFFFFFFFFFFFF0000000000FB", "required_labels":[{"key":"engine","value":"tiflash"}]}`), tu.StatusOK(re))
 	re.NoError(econfig)
 }

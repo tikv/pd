@@ -18,9 +18,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/utils/syncutil"
-	"go.uber.org/zap"
 	"golang.org/x/time/rate"
 )
 
@@ -46,7 +44,6 @@ func (l *RateLimiter) Available(n int) bool {
 	now := time.Now()
 	r := l.limiter.ReserveN(now, n)
 	delay := r.DelayFrom(now)
-	log.Info("!!!!! RateLimiter", zap.Any("n", n), zap.Any("delay", delay))
 	r.CancelAt(now)
 	return delay == 0
 }

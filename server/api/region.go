@@ -26,7 +26,6 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/pingcap/errors"
-	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/keyspace"
@@ -36,7 +35,6 @@ import (
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/server"
 	"github.com/unrolled/render"
-	"go.uber.org/zap"
 )
 
 type regionHandler struct {
@@ -131,15 +129,13 @@ func (h *regionsHandler) CheckRegionsReplicated(w http.ResponseWriter, r *http.R
 	h.rd.JSON(w, http.StatusOK, state)
 }
 
-func (h *regionsHandler) RedistibuteRegions(w http.ResponseWriter, r *http.Request) {
+func (h *regionsHandler) BalanceKeyrange(w http.ResponseWriter, r *http.Request) {
 	data, err := io.ReadAll(r.Body)
 	if err != nil {
 		h.rd.JSON(w, http.StatusBadRequest, err.Error())
 	}
 
-	log.Info("!!!! dddd", zap.Any("data", data))
-
-	result, err := h.Handler.RedistibuteRegions(string(data))
+	result, err := h.Handler.BalanceKeyrange(string(data))
 	if err != nil {
 		h.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
@@ -147,8 +143,8 @@ func (h *regionsHandler) RedistibuteRegions(w http.ResponseWriter, r *http.Reque
 	h.rd.JSON(w, http.StatusOK, result)
 }
 
-func (h *regionsHandler) CheckRedistibuteRegionsStatus(w http.ResponseWriter, r *http.Request) {
-	result, err := h.Handler.CheckRedistibuteRegionsStatus()
+func (h *regionsHandler) CheckBalanceKeyrangeStatus(w http.ResponseWriter, r *http.Request) {
+	result, err := h.Handler.CheckBalanceKeyrangeStatus()
 	if err != nil {
 		h.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return

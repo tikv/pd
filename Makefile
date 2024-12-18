@@ -243,14 +243,12 @@ SUBMODULES := $(filter $(shell find . -iname "go.mod" -exec dirname {} \;),\
 test: install-tools
 	# testing all pkgs...
 	@$(FAILPOINT_ENABLE)
-	echo ${TEST_PKGS}
 	CGO_ENABLED=1 go test -tags tso_function_test,deadlock -timeout 20m -race -cover $(TEST_PKGS) || { $(FAILPOINT_DISABLE); exit 1; }
 	@$(FAILPOINT_DISABLE)
 
 basic-test: install-tools
 	# testing basic pkgs...
 	@$(FAILPOINT_ENABLE)
-	echo ${TEST_PKGS}
 	go test $(BASIC_TEST_PKGS) || { $(FAILPOINT_DISABLE); exit 1; }
 	@$(FAILPOINT_DISABLE)
 

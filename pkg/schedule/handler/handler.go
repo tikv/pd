@@ -1302,39 +1302,34 @@ func (h *Handler) CheckRegionsReplicated(rawStartKey, rawEndKey string) (string,
 	return state, nil
 }
 
-// RedistibuteRegions
-func (h *Handler) RedistibuteRegions(data string) (string, error) {
+// BalanceKeyrange
+func (h *Handler) BalanceKeyrange(data string) (string, error) {
 	sc, err := h.GetSchedulersController()
 	if err != nil {
 		return "", err
 	}
 
-	log.Info("!!!!! RedistibuteRegions check 1")
 	exist, err := sc.IsSchedulerExisted(types.BalanceKeyrangeScheduler.String())
 	if exist {
 		return "Already existed", errs.ErrSchedulerExisted.FastGenByArgs()
 	}
-	log.Info("!!!!! RedistibuteRegions check 2")
 	oc := h.GetCoordinator().GetOperatorController()
 	controller := h.GetCoordinator().GetSchedulersController()
 	cb := func(s string) error {
 		return controller.RemoveScheduler(s)
 	}
-	log.Info("!!!!! RedistibuteRegions check 3")
 	s, err := schedulers.CreateScheduler(types.BalanceKeyrangeScheduler, oc, storage.NewStorageWithMemoryBackend(), schedulers.ConfigSliceDecoder(types.BalanceKeyrangeScheduler, []string{data}), cb)
 	if err != nil {
 		return "Created scheduler failed", err
 	}
-	log.Info("!!!!! RedistibuteRegions check 4")
 	if err = controller.AddScheduler(s); err != nil {
 		return "Add scheduler failed", err
 	}
 	return "Scheduler added successfully", nil
 }
 
-func (h *Handler) CheckRedistibuteRegionsStatus() (any, error) {
+func (h *Handler) CheckBalanceKeyrangeStatus() (any, error) {
 	sc, err := h.GetSchedulersController()
-	log.Info("!!!!! CheckRedistibuteRegionsStatus 111")
 	if err != nil {
 		return "", err
 	}
