@@ -23,6 +23,7 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
+	"github.com/tikv/pd/pkg/utils/timerutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"go.etcd.io/etcd/clientv3"
 	"go.uber.org/zap"
@@ -105,6 +106,8 @@ func (l *lease) KeepAlive(ctx context.Context) {
 	timeCh := l.keepAliveWorker(ctx, l.leaseTimeout/3)
 
 	var maxExpire time.Time
+	timer := time.NewTimer(l.leaseTimeout)
+	defer timer.Stop()
 	for {
 		select {
 		case t := <-timeCh:
@@ -118,7 +121,8 @@ func (l *lease) KeepAlive(ctx context.Context) {
 					l.expireTime.Store(t)
 				}
 			}
-		case <-time.After(l.leaseTimeout):
+			timerutil.SafeResetTimer(timer, l.leaseTimeout)
+		case <-timer.C:
 			log.Info("lease timeout", zap.Time("expire", l.expireTime.Load().(time.Time)), zap.String("purpose", l.Purpose))
 			return
 		case <-ctx.Done():

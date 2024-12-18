@@ -115,6 +115,8 @@ func (c *tsoServiceDiscovery) Init() error {
 
 func (c *tsoServiceDiscovery) initRetry(f func() error) error {
 	var err error
+	ticker := time.NewTicker(retryInterval)
+	defer ticker.Stop()
 	for i := 0; i < c.option.maxRetryTimes; i++ {
 		if err = f(); err == nil {
 			return nil
@@ -122,7 +124,7 @@ func (c *tsoServiceDiscovery) initRetry(f func() error) error {
 		select {
 		case <-c.ctx.Done():
 			return err
-		case <-time.After(time.Second):
+		case <-ticker.C:
 		}
 	}
 	return errors.WithStack(err)
@@ -151,11 +153,13 @@ func (c *tsoServiceDiscovery) startCheckMemberLoop() {
 
 	ctx, cancel := context.WithCancel(c.ctx)
 	defer cancel()
+	ticker := time.NewTicker(memberUpdateInterval)
+	defer ticker.Stop()
 
 	for {
 		select {
 		case <-c.checkMembershipCh:
-		case <-time.After(memberUpdateInterval):
+		case <-ticker.C:
 		case <-ctx.Done():
 			log.Info("[tso] exit check member loop")
 			return

@@ -284,10 +284,12 @@ func (kgm *KeyspaceGroupManager) Close() {
 func (kgm *KeyspaceGroupManager) checkInitProgress(ctx context.Context, cancel context.CancelFunc, done chan struct{}) {
 	defer logutil.LogPanic()
 
+	timer := time.NewTimer(kgm.loadKeyspaceGroupsTimeout)
+	defer timer.Stop()
 	select {
 	case <-done:
 		return
-	case <-time.After(kgm.loadKeyspaceGroupsTimeout):
+	case <-timer.C:
 		log.Error("failed to initialize keyspace group manager",
 			zap.Any("timeout-setting", kgm.loadKeyspaceGroupsTimeout),
 			errs.ZapError(errs.ErrLoadKeyspaceGroupsTimeout))
@@ -374,6 +376,8 @@ func (kgm *KeyspaceGroupManager) loadKeyspaceGroups(
 		i    int
 		resp *clientv3.GetResponse
 	)
+	ticker := time.NewTicker(defaultLoadFromEtcdRetryInterval)
+	defer ticker.Stop()
 	for ; i < kgm.loadFromEtcdMaxRetryTimes; i++ {
 		resp, err = etcdutil.EtcdKVGet(kgm.etcdClient, startKey, opOption...)
 
@@ -397,7 +401,7 @@ func (kgm *KeyspaceGroupManager) loadKeyspaceGroups(
 		select {
 		case <-ctx.Done():
 			return 0, []*endpoint.KeyspaceGroup{}, false, errs.ErrLoadKeyspaceGroupsTerminated
-		case <-time.After(defaultLoadFromEtcdRetryInterval):
+		case <-ticker.C:
 		}
 	}
 

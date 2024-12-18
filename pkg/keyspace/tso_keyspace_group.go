@@ -153,11 +153,13 @@ func (m *GroupManager) startWatchLoop() {
 		revision int64
 		err      error
 	)
+	ticker := time.NewTicker(retryInterval)
+	defer ticker.Stop()
 	for i := 0; i < maxRetryTimes; i++ {
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(retryInterval):
+		case <-ticker.C:
 		}
 		resp, err = etcdutil.EtcdKVGet(m.client, m.tsoServiceKey, clientv3.WithRange(m.tsoServiceEndKey))
 		if err == nil {

@@ -86,6 +86,7 @@ func (sr *ServiceRegister) Register() error {
 						select {
 						case <-sr.ctx.Done():
 							log.Info("exit register process", zap.String("key", sr.key))
+							t.Stop()
 							return
 						default:
 						}
@@ -94,11 +95,13 @@ func (sr *ServiceRegister) Register() error {
 						resp, err := sr.cli.Grant(sr.ctx, sr.ttl)
 						if err != nil {
 							log.Error("grant lease failed", zap.String("key", sr.key), zap.Error(err))
+							t.Stop()
 							continue
 						}
 
 						if _, err := sr.cli.Put(sr.ctx, sr.key, sr.value, clientv3.WithLease(resp.ID)); err != nil {
 							log.Error("put the key failed", zap.String("key", sr.key), zap.Error(err))
+							t.Stop()
 							continue
 						}
 					}
