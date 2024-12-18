@@ -26,6 +26,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/tikv/pd/pkg/errs"
 )
 
 func checkKernelVersionNewerThan(re *require.Assertions, t *testing.T, major, minor int) bool {
@@ -82,7 +84,7 @@ func TestGetCgroupCPU(t *testing.T) {
 		}()
 	}
 	cpu, err := GetCgroupCPU()
-	if err == errNoCPUControllerDetected {
+	if err == errs.ErrNoCPUControllerDetected {
 		// for more information, please refer https://github.com/pingcap/tidb/pull/41347
 		if checkKernelVersionNewerThan(re, t, 4, 7) {
 			re.NoError(err, "linux version > v4.7 and err still happens")

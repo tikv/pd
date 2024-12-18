@@ -23,6 +23,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/mock/mockconfig"
@@ -256,13 +257,13 @@ func (suite *keyspaceGroupTestSuite) TestKeyspaceGroupSplit() {
 	re.NoError(err)
 	// split the default keyspace
 	err = suite.kgm.SplitKeyspaceGroupByID(0, 4, []uint32{constant.DefaultKeyspaceID})
-	re.ErrorIs(err, ErrModifyDefaultKeyspace)
+	re.ErrorIs(err, errs.ErrModifyDefaultKeyspace)
 	// split the keyspace group 1 to 4
 	err = suite.kgm.SplitKeyspaceGroupByID(1, 4, []uint32{444})
-	re.ErrorIs(err, ErrKeyspaceGroupNotEnoughReplicas)
+	re.ErrorIs(err, errs.ErrKeyspaceGroupNotEnoughReplicas)
 	// split the keyspace group 2 to 4 without giving any keyspace
 	err = suite.kgm.SplitKeyspaceGroupByID(2, 4, []uint32{})
-	re.ErrorIs(err, ErrKeyspaceNotInKeyspaceGroup)
+	re.ErrorIs(err, errs.ErrKeyspaceNotInKeyspaceGroup)
 	// split the keyspace group 2 to 4
 	err = suite.kgm.SplitKeyspaceGroupByID(2, 4, []uint32{333})
 	re.NoError(err)
@@ -283,25 +284,25 @@ func (suite *keyspaceGroupTestSuite) TestKeyspaceGroupSplit() {
 
 	// finish the split of the keyspace group 2
 	err = suite.kgm.FinishSplitKeyspaceByID(2)
-	re.ErrorContains(err, ErrKeyspaceGroupNotInSplit(2).Error())
+	re.ErrorContains(err, errs.ErrKeyspaceGroupNotInSplit.FastGenByArgs(2).Error())
 	// finish the split of a non-existing keyspace group
 	err = suite.kgm.FinishSplitKeyspaceByID(5)
-	re.ErrorContains(err, ErrKeyspaceGroupNotExists(5).Error())
+	re.ErrorContains(err, errs.ErrKeyspaceGroupNotExists.FastGenByArgs(5).Error())
 	// split the in-split keyspace group
 	err = suite.kgm.SplitKeyspaceGroupByID(2, 4, []uint32{333})
-	re.ErrorContains(err, ErrKeyspaceGroupInSplit(2).Error())
+	re.ErrorContains(err, errs.ErrKeyspaceGroupInSplit.FastGenByArgs(2).Error())
 	// remove the in-split keyspace group
 	kg2, err = suite.kgm.DeleteKeyspaceGroupByID(2)
 	re.Nil(kg2)
-	re.ErrorContains(err, ErrKeyspaceGroupInSplit(2).Error())
+	re.ErrorContains(err, errs.ErrKeyspaceGroupInSplit.FastGenByArgs(2).Error())
 	kg4, err = suite.kgm.DeleteKeyspaceGroupByID(4)
 	re.Nil(kg4)
-	re.ErrorContains(err, ErrKeyspaceGroupInSplit(4).Error())
+	re.ErrorContains(err, errs.ErrKeyspaceGroupInSplit.FastGenByArgs(4).Error())
 	// update the in-split keyspace group
 	err = suite.kg.kgm.UpdateKeyspaceForGroup(endpoint.Standard, "2", 444, opAdd)
-	re.ErrorContains(err, ErrKeyspaceGroupInSplit(2).Error())
+	re.ErrorContains(err, errs.ErrKeyspaceGroupInSplit.FastGenByArgs(2).Error())
 	err = suite.kg.kgm.UpdateKeyspaceForGroup(endpoint.Standard, "4", 444, opAdd)
-	re.ErrorContains(err, ErrKeyspaceGroupInSplit(4).Error())
+	re.ErrorContains(err, errs.ErrKeyspaceGroupInSplit.FastGenByArgs(4).Error())
 
 	// finish the split of keyspace group 4
 	err = suite.kgm.FinishSplitKeyspaceByID(4)
@@ -321,13 +322,13 @@ func (suite *keyspaceGroupTestSuite) TestKeyspaceGroupSplit() {
 
 	// split a non-existing keyspace group
 	err = suite.kgm.SplitKeyspaceGroupByID(3, 5, nil)
-	re.ErrorContains(err, ErrKeyspaceGroupNotExists(3).Error())
+	re.ErrorContains(err, errs.ErrKeyspaceGroupNotExists.FastGenByArgs(3).Error())
 	// split into an existing keyspace group
 	err = suite.kgm.SplitKeyspaceGroupByID(2, 4, []uint32{111})
-	re.ErrorIs(err, ErrKeyspaceGroupExists)
+	re.ErrorIs(err, errs.ErrKeyspaceGroupExists)
 	// split with the wrong keyspaces.
 	err = suite.kgm.SplitKeyspaceGroupByID(2, 5, []uint32{111, 222, 444})
-	re.ErrorIs(err, ErrKeyspaceNotInKeyspaceGroup)
+	re.ErrorIs(err, errs.ErrKeyspaceNotInKeyspaceGroup)
 }
 
 func (suite *keyspaceGroupTestSuite) TestKeyspaceGroupSplitRange() {
@@ -449,13 +450,13 @@ func (suite *keyspaceGroupTestSuite) TestKeyspaceGroupMerge() {
 
 	// merge a non-existing keyspace group
 	err = suite.kgm.MergeKeyspaceGroups(4, []uint32{5})
-	re.ErrorContains(err, ErrKeyspaceGroupNotExists(5).Error())
+	re.ErrorContains(err, errs.ErrKeyspaceGroupNotExists.FastGenByArgs(5).Error())
 	// merge with the number of keyspace groups exceeds the limit
 	err = suite.kgm.MergeKeyspaceGroups(1, make([]uint32, etcdutil.MaxEtcdTxnOps/2))
-	re.ErrorIs(err, ErrExceedMaxEtcdTxnOps)
+	re.ErrorIs(err, errs.ErrExceedMaxEtcdTxnOps)
 	// merge the default keyspace group
 	err = suite.kgm.MergeKeyspaceGroups(1, []uint32{constant.DefaultKeyspaceGroupID})
-	re.ErrorIs(err, ErrModifyDefaultKeyspaceGroup)
+	re.ErrorIs(err, errs.ErrModifyDefaultKeyspaceGroup)
 }
 
 func TestBuildSplitKeyspaces(t *testing.T) {
@@ -484,7 +485,7 @@ func TestBuildSplitKeyspaces(t *testing.T) {
 		{
 			old: []uint32{1, 2, 3, 4, 5},
 			new: []uint32{6},
-			err: ErrKeyspaceNotInKeyspaceGroup,
+			err: errs.ErrKeyspaceNotInKeyspaceGroup,
 		},
 		{
 			old:         []uint32{1, 2},
@@ -545,11 +546,11 @@ func TestBuildSplitKeyspaces(t *testing.T) {
 			old:             []uint32{1, 2, 3, 4, 5},
 			startKeyspaceID: 7,
 			endKeyspaceID:   10,
-			err:             ErrKeyspaceGroupWithEmptyKeyspace,
+			err:             errs.ErrKeyspaceGroupWithEmptyKeyspace,
 		},
 		{
 			old: []uint32{1, 2, 3, 4, 5},
-			err: ErrKeyspaceNotInKeyspaceGroup,
+			err: errs.ErrKeyspaceNotInKeyspaceGroup,
 		},
 	}
 	for idx, testCase := range testCases {

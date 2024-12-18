@@ -16,7 +16,6 @@ package checker
 
 import (
 	"context"
-	"errors"
 	"math"
 	"math/rand"
 	"time"
@@ -41,15 +40,6 @@ import (
 )
 
 const maxPendingListLen = 100000
-
-var (
-	errNoStoreToAdd        = errors.New("no store to add peer")
-	errNoStoreToReplace    = errors.New("no store to replace peer")
-	errPeerCannotBeLeader  = errors.New("peer cannot be leader")
-	errPeerCannotBeWitness = errors.New("peer cannot be witness")
-	errNoNewLeader         = errors.New("no new leader")
-	errRegionNoLeader      = errors.New("region no leader")
-)
 
 // RuleChecker fix/improve region by placement rules.
 type RuleChecker struct {
@@ -103,7 +93,7 @@ func (c *RuleChecker) CheckWithFit(region *core.RegionInfo, fit *placement.Regio
 	// skip no leader region
 	if region.GetLeader() == nil {
 		ruleCheckerRegionNoLeaderCounter.Inc()
-		log.Debug("fail to check region", zap.Uint64("region-id", region.GetID()), zap.Error(errRegionNoLeader))
+		log.Debug("fail to check region", zap.Uint64("region-id", region.GetID()), errs.ZapError(errs.ErrRegionNoLeader))
 		return
 	}
 
@@ -230,7 +220,7 @@ func (c *RuleChecker) addRulePeer(region *core.RegionInfo, fit *placement.Region
 				}
 			}
 		}
-		return nil, errNoStoreToAdd
+		return nil, errs.ErrNoStoreToAdd
 	}
 	peer := &metapb.Peer{StoreId: store, Role: rf.Rule.Role.MetaPeerRole(), IsWitness: isWitness}
 	op, err := operator.CreateAddPeerOperator("add-rule-peer", c.cluster, region, peer, operator.OpReplica)
@@ -262,7 +252,7 @@ func (c *RuleChecker) replaceUnexpectedRulePeer(region *core.RegionInfo, rf *pla
 	if store == 0 {
 		ruleCheckerNoStoreReplaceCounter.Inc()
 		c.handleFilterState(region, filterByTempState)
-		return nil, errNoStoreToReplace
+		return nil, errs.ErrNoStoreToReplace
 	}
 	newPeer := &metapb.Peer{StoreId: store, Role: rf.Rule.Role.MetaPeerRole(), IsWitness: fastFailover}
 	//  pick the smallest leader store to avoid the Offline store be snapshot generator bottleneck.
@@ -325,7 +315,7 @@ func (c *RuleChecker) fixLooseMatchPeer(region *core.RegionInfo, fit *placement.
 			return operator.CreateTransferLeaderOperator("fix-leader-role", c.cluster, region, peer.GetStoreId(), []uint64{}, 0)
 		}
 		ruleCheckerNotAllowLeaderCounter.Inc()
-		return nil, errPeerCannotBeLeader
+		return nil, errs.ErrPeerCannotBeLeader
 	}
 	if region.GetLeader().GetId() == peer.GetId() && rf.Rule.Role == placement.Follower {
 		ruleCheckerFixFollowerRoleCounter.Inc()
@@ -335,14 +325,14 @@ func (c *RuleChecker) fixLooseMatchPeer(region *core.RegionInfo, fit *placement.
 			}
 		}
 		ruleCheckerNoNewLeaderCounter.Inc()
-		return nil, errNoNewLeader
+		return nil, errs.ErrNoNewLeader
 	}
 	if core.IsVoter(peer) && rf.Rule.Role == placement.Learner {
 		ruleCheckerDemoteVoterRoleCounter.Inc()
 		return operator.CreateDemoteVoterOperator("fix-demote-voter", c.cluster, region, peer)
 	}
 	if region.GetLeader().GetId() == peer.GetId() && rf.Rule.IsWitness {
-		return nil, errPeerCannotBeWitness
+		return nil, errs.ErrPeerCannotBeWitness
 	}
 	if !core.IsWitness(peer) && rf.Rule.IsWitness && c.isWitnessEnabled() {
 		c.switchWitnessCache.UpdateTTL(c.cluster.GetCheckerConfig().GetSwitchWitnessInterval())

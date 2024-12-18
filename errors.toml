@@ -61,6 +61,11 @@ error = '''
 unsupported metrics type %v
 '''
 
+["PD:cgroup:ErrNoCPUControllerDetected"]
+error = '''
+no cpu controller detected
+'''
+
 ["PD:checker:ErrCheckerMergeAgain"]
 error = '''
 region will be merged again, %s
@@ -69,6 +74,36 @@ region will be merged again, %s
 ["PD:checker:ErrCheckerNotFound"]
 error = '''
 checker not found
+'''
+
+["PD:checker:ErrNoNewLeader"]
+error = '''
+no new leader
+'''
+
+["PD:checker:ErrNoStoreToAdd"]
+error = '''
+no store to add peer
+'''
+
+["PD:checker:ErrNoStoreToReplace"]
+error = '''
+no store to replace peer
+'''
+
+["PD:checker:ErrPeerCannotBeLeader"]
+error = '''
+peer cannot be leader
+'''
+
+["PD:checker:ErrPeerCannotBeWitness"]
+error = '''
+peer cannot be witness
+'''
+
+["PD:checker:ErrRegionNoLeader"]
+error = '''
+region no leader
 '''
 
 ["PD:client:ErrClientCreateTSOStream"]
@@ -491,6 +526,116 @@ error = '''
 failed to unmarshal json
 '''
 
+["PD:keyspace:ErrExceedMaxEtcdTxnOps"]
+error = '''
+exceed max etcd txn operations
+'''
+
+["PD:keyspace:ErrIllegalOperation"]
+error = '''
+unknown operation
+'''
+
+["PD:keyspace:ErrKeyspaceExists"]
+error = '''
+keyspace already exists
+'''
+
+["PD:keyspace:ErrKeyspaceGroupExists"]
+error = '''
+keyspace group already exists
+'''
+
+["PD:keyspace:ErrKeyspaceGroupInMerging"]
+error = '''
+keyspace group %v is in merging state
+'''
+
+["PD:keyspace:ErrKeyspaceGroupInSplit"]
+error = '''
+keyspace group %v is in split state
+'''
+
+["PD:keyspace:ErrKeyspaceGroupNotEnoughReplicas"]
+error = '''
+not enough replicas in the keyspace group
+'''
+
+["PD:keyspace:ErrKeyspaceGroupNotExists"]
+error = '''
+keyspace group %v does not exist
+'''
+
+["PD:keyspace:ErrKeyspaceGroupNotInMerging"]
+error = '''
+keyspace group %v is not in merging state
+'''
+
+["PD:keyspace:ErrKeyspaceGroupNotInSplit"]
+error = '''
+keyspace group %v is not in split state
+'''
+
+["PD:keyspace:ErrKeyspaceGroupPrimaryNotFound"]
+error = '''
+primary of keyspace group does not exist
+'''
+
+["PD:keyspace:ErrKeyspaceGroupWithEmptyKeyspace"]
+error = '''
+keyspace group with empty keyspace
+'''
+
+["PD:keyspace:ErrKeyspaceNotFound"]
+error = '''
+keyspace does not exist
+'''
+
+["PD:keyspace:ErrKeyspaceNotInAnyKeyspaceGroup"]
+error = '''
+keyspace is not in any keyspace group
+'''
+
+["PD:keyspace:ErrKeyspaceNotInKeyspaceGroup"]
+error = '''
+keyspace is not in this keyspace group
+'''
+
+["PD:keyspace:ErrModifyDefaultKeyspace"]
+error = '''
+cannot modify default keyspace's state
+'''
+
+["PD:keyspace:ErrModifyDefaultKeyspaceGroup"]
+error = '''
+default keyspace group cannot be modified
+'''
+
+["PD:keyspace:ErrNoAvailableNode"]
+error = '''
+no available node
+'''
+
+["PD:keyspace:ErrNodeNotInKeyspaceGroup"]
+error = '''
+the tso node is not in this keyspace group
+'''
+
+["PD:keyspace:ErrRegionSplitFailed"]
+error = '''
+region split failed
+'''
+
+["PD:keyspace:ErrRegionSplitTimeout"]
+error = '''
+region split timeout
+'''
+
+["PD:keyspace:ErrUnsupportedOperationInKeyspace"]
+error = '''
+it's a unsupported operation
+'''
+
 ["PD:leveldb:ErrLevelDBClose"]
 error = '''
 close leveldb error
@@ -646,6 +791,11 @@ error = '''
 failed to unmarshal proto
 '''
 
+["PD:ratelimit:ErrMaxWaitingTasksExceeded"]
+error = '''
+max waiting tasks exceeded
+'''
+
 ["PD:region:ErrRegionAbnormalPeer"]
 error = '''
 region %v has abnormal peer
@@ -689,6 +839,11 @@ the %s resource group does not exist
 ["PD:resourcemanager:ErrInvalidGroup"]
 error = '''
 invalid group settings, please check the group name, priority and the number of resources
+'''
+
+["PD:scatter:ErrEmptyRegion"]
+error = '''
+empty region
 '''
 
 ["PD:schedule:ErrCreateOperator"]

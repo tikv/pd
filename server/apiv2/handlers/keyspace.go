@@ -300,7 +300,7 @@ func UpdateKeyspaceConfig(c *gin.Context) {
 	// Check if the update is supported.
 	for _, mutation := range mutations {
 		if mutation.Key == keyspace.GCManagementType && mutation.Value == keyspace.KeyspaceLevelGC {
-			err = keyspace.ErrUnsupportedOperationInKeyspace
+			err = errs.ErrUnsupportedOperationInKeyspace
 			c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
 			return
 		}
