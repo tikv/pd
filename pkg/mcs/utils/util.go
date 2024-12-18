@@ -51,7 +51,9 @@ import (
 // PromHandler is a handler to get prometheus metrics.
 func PromHandler() gin.HandlerFunc {
 	prometheus.DefaultRegisterer.Unregister(collectors.NewGoCollector())
-	prometheus.Register(collectors.NewGoCollector(collectors.WithGoCollectorRuntimeMetrics(collectors.MetricsGC, collectors.MetricsMemory, collectors.MetricsScheduler)))
+	if err := prometheus.Register(collectors.NewGoCollector(collectors.WithGoCollectorRuntimeMetrics(collectors.MetricsGC, collectors.MetricsMemory, collectors.MetricsScheduler))); err != nil {
+		log.Warn("go runtime collectors have already registered", errs.ZapError(err))
+	}
 	return func(c *gin.Context) {
 		// register promhttp.HandlerOpts DisableCompression
 		promhttp.InstrumentMetricHandler(prometheus.DefaultRegisterer, promhttp.HandlerFor(prometheus.DefaultGatherer, promhttp.HandlerOpts{
