@@ -34,7 +34,6 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 
-	cb "github.com/tikv/pd/client/circuitbreaker"
 	"github.com/tikv/pd/client/clients/metastorage"
 	"github.com/tikv/pd/client/clients/router"
 	"github.com/tikv/pd/client/clients/tso"
@@ -43,6 +42,7 @@ import (
 	"github.com/tikv/pd/client/metrics"
 	"github.com/tikv/pd/client/opt"
 	"github.com/tikv/pd/client/pkg/caller"
+	cb "github.com/tikv/pd/client/pkg/circuitbreaker"
 	"github.com/tikv/pd/client/pkg/utils/tlsutil"
 	sd "github.com/tikv/pd/client/servicediscovery"
 )

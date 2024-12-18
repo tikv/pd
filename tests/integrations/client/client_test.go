@@ -45,10 +45,10 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 
 	pd "github.com/tikv/pd/client"
-	cb "github.com/tikv/pd/client/circuitbreaker"
 	"github.com/tikv/pd/client/clients/router"
 	"github.com/tikv/pd/client/opt"
 	"github.com/tikv/pd/client/pkg/caller"
+	cb "github.com/tikv/pd/client/pkg/circuitbreaker"
 	"github.com/tikv/pd/client/pkg/retry"
 	sd "github.com/tikv/pd/client/servicediscovery"
 	"github.com/tikv/pd/pkg/core"

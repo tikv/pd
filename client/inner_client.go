@@ -15,11 +15,11 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 
-	cb "github.com/tikv/pd/client/circuitbreaker"
 	"github.com/tikv/pd/client/clients/tso"
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/metrics"
 	"github.com/tikv/pd/client/opt"
+	cb "github.com/tikv/pd/client/pkg/circuitbreaker"
 	sd "github.com/tikv/pd/client/servicediscovery"
 )
 

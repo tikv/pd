@@ -23,7 +23,7 @@ import (
 
 	"github.com/pingcap/errors"
 
-	cb "github.com/tikv/pd/client/circuitbreaker"
+	cb "github.com/tikv/pd/client/pkg/circuitbreaker"
 	"github.com/tikv/pd/client/pkg/retry"
 )
 
