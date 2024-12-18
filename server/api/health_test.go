@@ -17,15 +17,11 @@ package api
 import (
 	"encoding/json"
 	"io"
-	"net/http"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/pingcap/failpoint"
-
-	tu "github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
 )
@@ -72,39 +68,4 @@ func TestHealthSlice(t *testing.T) {
 	buf, err := io.ReadAll(resp.Body)
 	re.NoError(err)
 	checkSliceResponse(re, buf, cfgs, follower.GetConfig().Name)
-}
-
-func TestReady(t *testing.T) {
-	re := require.New(t)
-	_, svrs, clean := mustNewCluster(re, 1)
-	defer clean()
-	mustBootstrapCluster(re, svrs[0])
-	url := svrs[0].GetConfig().ClientUrls + apiPrefix + "/api/v1/ready"
-	failpoint.Enable("github.com/tikv/pd/pkg/storage/loadRegionSlow", `return()`)
-	checkReady(re, url, false)
-	failpoint.Disable("github.com/tikv/pd/pkg/storage/loadRegionSlow")
-	checkReady(re, url, true)
-}
-
-func checkReady(re *require.Assertions, url string, isReady bool) {
-	expectCode := http.StatusOK
-	if !isReady {
-		expectCode = http.StatusInternalServerError
-	}
-	resp, err := testDialClient.Get(url)
-	re.NoError(err)
-	defer resp.Body.Close()
-	buf, err := io.ReadAll(resp.Body)
-	re.NoError(err)
-	re.Empty(buf)
-	re.Equal(expectCode, resp.StatusCode)
-	r := &ReadyStatus{}
-	if isReady {
-		r.RegionLoaded = true
-	}
-	data, err := json.Marshal(r)
-	re.NoError(err)
-	err = tu.CheckGetJSON(testDialClient, url+"?verbose", data,
-		tu.Status(re, expectCode))
-	re.NoError(err)
 }
