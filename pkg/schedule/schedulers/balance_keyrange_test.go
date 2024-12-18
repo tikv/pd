@@ -354,7 +354,7 @@ func TestBalanceKeyrangeAlgorithm(t *testing.T) {
 		{3, []uint64{0}},
 	})
 	s := computeCandidateStores([]*metapb.StoreLabel{}, stores, regions)
-	_, _, ops, _ := BuildMigrationPlan(s)
+	_, _, ops, _ := buildMigrationPlan(s)
 	assertValidateMigrationPlan(re, ops, storeIds, regions, []int{-2, 1, 1})
 
 	// Same case which requires TiFlash label
@@ -365,7 +365,7 @@ func TestBalanceKeyrangeAlgorithm(t *testing.T) {
 		{3, []uint64{0}},
 	})
 	s = computeCandidateStores([]*metapb.StoreLabel{&tiflashLabel}, stores, regions)
-	_, _, ops, _ = BuildMigrationPlan(s)
+	_, _, ops, _ = buildMigrationPlan(s)
 	assertValidateMigrationPlan(re, ops, storeIds, regions, []int{0, 0, 0})
 
 	// 10: 1 2 3 4 5 6
@@ -381,7 +381,7 @@ func TestBalanceKeyrangeAlgorithm(t *testing.T) {
 		{6, []uint64{0, 2}},
 	})
 	s = computeCandidateStores([]*metapb.StoreLabel{}, stores, regions)
-	_, _, ops, _ = BuildMigrationPlan(s)
+	_, _, ops, _ = buildMigrationPlan(s)
 	assertValidateMigrationPlan(re, ops, storeIds, regions, []int{-2, -1, 3})
 
 	// Same case which requires TiFlash label
@@ -395,7 +395,7 @@ func TestBalanceKeyrangeAlgorithm(t *testing.T) {
 		{6, []uint64{0, 2}},
 	})
 	s = computeCandidateStores([]*metapb.StoreLabel{&tiflashLabel}, stores, regions)
-	_, _, ops, _ = BuildMigrationPlan(s)
+	_, _, ops, _ = buildMigrationPlan(s)
 	assertValidateMigrationPlan(re, ops, storeIds, regions, []int{0, -2, 2})
 
 	// Same case which requires TiFlash label
@@ -409,7 +409,7 @@ func TestBalanceKeyrangeAlgorithm(t *testing.T) {
 		{6, []uint64{0, 2}},
 	})
 	s = computeCandidateStores([]*metapb.StoreLabel{&tiflashLabel}, stores, regions)
-	_, _, ops, _ = BuildMigrationPlan(s)
+	_, _, ops, _ = buildMigrationPlan(s)
 	assertValidateMigrationPlan(re, ops, storeIds, regions, []int{-2, -1, 3})
 
 	// 10: 1 2
@@ -422,7 +422,7 @@ func TestBalanceKeyrangeAlgorithm(t *testing.T) {
 		{3, []uint64{2, 0}},
 	})
 	s = computeCandidateStores([]*metapb.StoreLabel{}, stores, regions)
-	_, _, ops, _ = BuildMigrationPlan(s)
+	_, _, ops, _ = buildMigrationPlan(s)
 	assertValidateMigrationPlan(re, ops, storeIds, regions, []int{0, 0, 0})
 
 	// 10: 1 2
@@ -434,7 +434,7 @@ func TestBalanceKeyrangeAlgorithm(t *testing.T) {
 		{3, []uint64{1}},
 	})
 	s = computeCandidateStores([]*metapb.StoreLabel{}, stores, regions)
-	_, _, ops, _ = BuildMigrationPlan(s)
+	_, _, ops, _ = buildMigrationPlan(s)
 	assertValidateMigrationPlan(re, ops, storeIds, regions, []int{0, 0})
 
 	// 10: 1
@@ -445,7 +445,7 @@ func TestBalanceKeyrangeAlgorithm(t *testing.T) {
 		{1, []uint64{0}},
 	})
 	s = computeCandidateStores([]*metapb.StoreLabel{}, stores, regions)
-	_, _, ops, _ = BuildMigrationPlan(s)
+	_, _, ops, _ = buildMigrationPlan(s)
 	assertValidateMigrationPlan(re, ops, storeIds, regions, []int{0, 0, 0})
 
 	// 10:
@@ -454,7 +454,7 @@ func TestBalanceKeyrangeAlgorithm(t *testing.T) {
 	storeIds = []uint64{10, 11, 12}
 	stores, regions = buildRedistributeRegionsTestCases(storeIds, []regionStoresPair{})
 	s = computeCandidateStores([]*metapb.StoreLabel{}, stores, regions)
-	_, _, ops, _ = BuildMigrationPlan(s)
+	_, _, ops, _ = buildMigrationPlan(s)
 	assertValidateMigrationPlan(re, ops, storeIds, regions, []int{0, 0, 0})
 
 	// 10: 1 2 3 4 5
@@ -469,7 +469,7 @@ func TestBalanceKeyrangeAlgorithm(t *testing.T) {
 		{5, []uint64{0, 1}},
 	})
 	s = computeCandidateStores([]*metapb.StoreLabel{}, stores, regions)
-	_, _, ops, _ = BuildMigrationPlan(s)
+	_, _, ops, _ = buildMigrationPlan(s)
 	assertValidateMigrationPlan(re, ops, storeIds, regions, []int{-1, -2, 3})
 
 	// Same case which requires TiFlash label
@@ -483,7 +483,7 @@ func TestBalanceKeyrangeAlgorithm(t *testing.T) {
 		{6, []uint64{0, 2}},
 	})
 	s = computeCandidateStores([]*metapb.StoreLabel{&tiflashLabel}, stores, regions)
-	_, _, ops, _ = BuildMigrationPlan(s)
+	_, _, ops, _ = buildMigrationPlan(s)
 	assertValidateMigrationPlan(re, ops, storeIds, regions, []int{0, -2, 2})
 
 	// Same case which requires TiFlash label
@@ -497,7 +497,7 @@ func TestBalanceKeyrangeAlgorithm(t *testing.T) {
 		{6, []uint64{0, 2}},
 	})
 	s = computeCandidateStores([]*metapb.StoreLabel{&tiflashLabel}, stores, regions)
-	_, _, ops, _ = BuildMigrationPlan(s)
+	_, _, ops, _ = buildMigrationPlan(s)
 	assertValidateMigrationPlan(re, ops, storeIds, regions, []int{-2, -1, 3})
 
 	// 10: 1 2 3 4 5
@@ -511,7 +511,7 @@ func TestBalanceKeyrangeAlgorithm(t *testing.T) {
 		{5, []uint64{0, 1}},
 	})
 	s = computeCandidateStores([]*metapb.StoreLabel{}, stores, regions)
-	_, _, ops, _ = BuildMigrationPlan(s)
+	_, _, ops, _ = buildMigrationPlan(s)
 	assertValidateMigrationPlan(re, ops, storeIds, regions, []int{0, 0})
 
 	// 10:
@@ -531,7 +531,7 @@ func TestBalanceKeyrangeAlgorithm(t *testing.T) {
 		{9, []uint64{3, 1}},
 	})
 	s = computeCandidateStores([]*metapb.StoreLabel{}, stores, regions)
-	_, _, ops, _ = BuildMigrationPlan(s)
+	_, _, ops, _ = buildMigrationPlan(s)
 	assertValidateMigrationPlan(re, ops, storeIds, regions, []int{4, -4, 4, -4})
 
 	// Won't happen, since regions with in a table have the same replica count, however, test it in case.
@@ -547,7 +547,7 @@ func TestBalanceKeyrangeAlgorithm(t *testing.T) {
 		{5, []uint64{0}},
 	})
 	s = computeCandidateStores([]*metapb.StoreLabel{}, stores, regions)
-	_, _, ops, _ = BuildMigrationPlan(s)
+	_, _, ops, _ = buildMigrationPlan(s)
 	assertValidateMigrationPlan(re, ops, storeIds, regions, []int{-2, 0, 2})
 
 	// Won't happen
@@ -564,7 +564,7 @@ func TestBalanceKeyrangeAlgorithm(t *testing.T) {
 		{6, []uint64{1}},
 	})
 	s = computeCandidateStores([]*metapb.StoreLabel{}, stores, regions)
-	_, _, ops, _ = BuildMigrationPlan(s)
+	_, _, ops, _ = buildMigrationPlan(s)
 	assertValidateMigrationPlan(re, ops, storeIds, regions, []int{-1, -1, 2})
 
 	// Won't happen because a region can't have two peers in a store.
@@ -577,6 +577,6 @@ func TestBalanceKeyrangeAlgorithm(t *testing.T) {
 		{2, []uint64{1}},
 	})
 	s = computeCandidateStores([]*metapb.StoreLabel{}, stores, regions)
-	_, _, ops, _ = BuildMigrationPlan(s)
+	_, _, ops, _ = buildMigrationPlan(s)
 	assertValidateMigrationPlan(re, ops, storeIds, regions, []int{0, 0, 0})
 }

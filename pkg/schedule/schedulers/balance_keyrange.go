@@ -76,7 +76,7 @@ func pickRegions(n int, fromStore *StoreRegionSet, toStore *StoreRegionSet) *Mig
 	return &o
 }
 
-func BuildMigrationPlan(stores []*StoreRegionSet) ([]int, []int, []*MigrationOp, int) {
+func buildMigrationPlan(stores []*StoreRegionSet) ([]int, []int, []*MigrationOp, int) {
 	totalPeersCount := 0
 	if len(stores) == 0 {
 		log.Info("no stores for migration")
@@ -231,7 +231,7 @@ func RedistibuteRegions(c sche.SchedulerCluster, startKey, endKey []byte, requir
 	}
 	candidates := computeCandidateStores(requiredLabels, stores, regions)
 
-	senders, receivers, ops, movements := BuildMigrationPlan(candidates)
+	senders, receivers, ops, movements := buildMigrationPlan(candidates)
 
 	log.Info("Migration plan details", zap.Any("startKey", startKey), zap.Any("endKey", endKey), zap.Any("senders", senders), zap.Any("receivers", receivers), zap.Any("movements", movements), zap.Any("ops", ops), zap.Any("stores", stores), zap.Any("candidates", len(candidates)))
 	for _, m := range ops {
