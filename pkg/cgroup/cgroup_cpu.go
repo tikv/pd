@@ -19,6 +19,7 @@ import (
 	"path/filepath"
 
 	"github.com/pingcap/errors"
+
 	"github.com/tikv/pd/pkg/errs"
 )
 
