@@ -318,6 +318,10 @@ func (s *grantHotRegionScheduler) transfer(cluster sche.SchedulerCluster, region
 	} else {
 		op, err = operator.CreateMovePeerOperator(s.GetName()+"-move", cluster, srcRegion, operator.OpRegion|operator.OpLeader, srcStore.GetID(), dstStore)
 	}
+	if err != nil {
+		log.Error("fail to create grant hot leader operator", errs.ZapError(err))
+		return
+	}
 	op.SetPriorityLevel(constant.High)
 	return
 }
