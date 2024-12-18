@@ -20,15 +20,17 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/pingcap/log"
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/timerpool"
-	"github.com/tikv/pd/pkg/utils/etcdutil"
-	"github.com/tikv/pd/pkg/utils/logutil"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
+
+	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/log"
+
+	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/utils/etcdutil"
+	"github.com/tikv/pd/pkg/utils/logutil"
+	"github.com/tikv/pd/pkg/utils/timerutil"
 )
 
 const (
@@ -171,23 +173,23 @@ func (s *TSODispatcher) processRequests(forwardStream stream, requests []Request
 	s.tsoProxyBatchSize.Observe(float64(count))
 	// Split the response
 	ts := resp.GetTimestamp()
-	physical, logical, suffixBits := ts.GetPhysical(), ts.GetLogical(), ts.GetSuffixBits()
+	physical, logical := ts.GetPhysical(), ts.GetLogical()
 	// `logical` is the largest ts's logical part here, we need to do the subtracting before we finish each TSO request.
 	// This is different from the logic of client batch, for example, if we have a largest ts whose logical part is 10,
 	// count is 5, then the splitting results should be 5 and 10.
-	firstLogical := addLogical(logical, -int64(count), suffixBits)
-	return s.finishRequest(requests, physical, firstLogical, suffixBits)
+	firstLogical := addLogical(logical, -int64(count))
+	return s.finishRequest(requests, physical, firstLogical)
 }
 
 // Because of the suffix, we need to shift the count before we add it to the logical part.
-func addLogical(logical, count int64, suffixBits uint32) int64 {
-	return logical + count<<suffixBits
+func addLogical(logical, count int64) int64 {
+	return logical + count
 }
 
-func (*TSODispatcher) finishRequest(requests []Request, physical, firstLogical int64, suffixBits uint32) error {
+func (*TSODispatcher) finishRequest(requests []Request, physical, firstLogical int64) error {
 	countSum := int64(0)
-	for i := 0; i < len(requests); i++ {
-		newCountSum, err := requests[i].postProcess(countSum, physical, firstLogical, suffixBits)
+	for i := range requests {
+		newCountSum, err := requests[i].postProcess(countSum, physical, firstLogical)
 		if err != nil {
 			return err
 		}
@@ -209,7 +211,7 @@ func NewTSDeadline(
 	done chan struct{},
 	cancel context.CancelFunc,
 ) *TSDeadline {
-	timer := timerpool.GlobalTimerPool.Get(timeout)
+	timer := timerutil.GlobalTimerPool.Get(timeout)
 	return &TSDeadline{
 		timer:  timer,
 		done:   done,
@@ -230,11 +232,11 @@ func WatchTSDeadline(ctx context.Context, tsDeadlineCh <-chan *TSDeadline) {
 				log.Error("tso proxy request processing is canceled due to timeout",
 					errs.ZapError(errs.ErrProxyTSOTimeout))
 				d.cancel()
-				timerpool.GlobalTimerPool.Put(d.timer)
+				timerutil.GlobalTimerPool.Put(d.timer)
 			case <-d.done:
-				timerpool.GlobalTimerPool.Put(d.timer)
+				timerutil.GlobalTimerPool.Put(d.timer)
 			case <-ctx.Done():
-				timerpool.GlobalTimerPool.Put(d.timer)
+				timerutil.GlobalTimerPool.Put(d.timer)
 				return
 			}
 		case <-ctx.Done():

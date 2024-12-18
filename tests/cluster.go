@@ -22,11 +22,13 @@ import (
 	"time"
 
 	"github.com/coreos/go-semver/semver"
+	clientv3 "go.etcd.io/etcd/client/v3"
+
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
-	"github.com/stretchr/testify/require"
+
 	"github.com/tikv/pd/pkg/autoscaling"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/dashboard"
@@ -38,16 +40,15 @@ import (
 	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/swaggerserver"
 	"github.com/tikv/pd/pkg/tso"
+	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
-	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/api"
 	"github.com/tikv/pd/server/apiv2"
 	"github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/join"
-	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
 // TestServer states.
@@ -186,11 +187,6 @@ func (s *TestServer) GetConfig() *config.Config {
 	return s.server.GetConfig()
 }
 
-// SetEnableLocalTSO sets the enable-local-tso flag of the TestServer.
-func (s *TestServer) SetEnableLocalTSO(enableLocalTSO bool) {
-	s.server.SetEnableLocalTSO(enableLocalTSO)
-}
-
 // GetPersistOptions returns the current TestServer's schedule option.
 func (s *TestServer) GetPersistOptions() *config.PersistOptions {
 	s.RLock()
@@ -220,10 +216,8 @@ func (s *TestServer) GetServer() *server.Server {
 }
 
 // GetClusterID returns the cluster ID.
-func (s *TestServer) GetClusterID() uint64 {
-	s.RLock()
-	defer s.RUnlock()
-	return s.server.ClusterID()
+func (*TestServer) GetClusterID() uint64 {
+	return keypath.ClusterID()
 }
 
 // GetLeader returns current leader of PD cluster.
@@ -231,21 +225,6 @@ func (s *TestServer) GetLeader() *pdpb.Member {
 	s.RLock()
 	defer s.RUnlock()
 	return s.server.GetLeader()
-}
-
-// GetAllocatorLeader returns current allocator leader
-// of PD cluster for given dc-location.
-func (s *TestServer) GetAllocatorLeader(dcLocation string) *pdpb.Member {
-	// For the leader of Global TSO Allocator, it's the PD leader
-	if dcLocation == tso.GlobalDCLocation {
-		return s.GetLeader()
-	}
-	tsoAllocatorManager := s.GetTSOAllocatorManager()
-	allocator, err := tsoAllocatorManager.GetAllocator(dcLocation)
-	if err != nil {
-		return nil
-	}
-	return allocator.(*tso.LocalTSOAllocator).GetAllocatorLeader()
 }
 
 // GetKeyspaceManager returns the current TestServer's Keyspace Manager.
@@ -290,24 +269,11 @@ func (s *TestServer) IsLeader() bool {
 	return !s.server.IsClosed() && s.server.GetMember().IsLeader()
 }
 
-// IsAllocatorLeader returns whether the server is a TSO Allocator leader or not.
-func (s *TestServer) IsAllocatorLeader(dcLocation string) bool {
-	if dcLocation == tso.GlobalDCLocation {
-		return s.IsLeader()
-	}
-	tsoAllocatorManager := s.GetTSOAllocatorManager()
-	allocator, err := tsoAllocatorManager.GetAllocator(dcLocation)
-	if err != nil {
-		return false
-	}
-	return !s.server.IsClosed() && allocator.(*tso.LocalTSOAllocator).IsAllocatorLeader()
-}
-
 // GetEtcdLeader returns the builtin etcd leader.
 func (s *TestServer) GetEtcdLeader() (string, error) {
 	s.RLock()
 	defer s.RUnlock()
-	req := &pdpb.GetMembersRequest{Header: &pdpb.RequestHeader{ClusterId: s.server.ClusterID()}}
+	req := &pdpb.GetMembersRequest{Header: &pdpb.RequestHeader{ClusterId: keypath.ClusterID()}}
 	members, _ := s.grpcServer.GetMembers(context.TODO(), req)
 	if members.Header.GetError() != nil {
 		return "", errors.WithStack(errors.New(members.Header.GetError().String()))
@@ -319,7 +285,7 @@ func (s *TestServer) GetEtcdLeader() (string, error) {
 func (s *TestServer) GetEtcdLeaderID() (uint64, error) {
 	s.RLock()
 	defer s.RUnlock()
-	req := &pdpb.GetMembersRequest{Header: &pdpb.RequestHeader{ClusterId: s.server.ClusterID()}}
+	req := &pdpb.GetMembersRequest{Header: &pdpb.RequestHeader{ClusterId: keypath.ClusterID()}}
 	members, err := s.grpcServer.GetMembers(context.TODO(), req)
 	if err != nil {
 		return 0, errors.WithStack(err)
@@ -412,7 +378,7 @@ func (s *TestServer) GetStoreRegions(storeID uint64) []*core.RegionInfo {
 // BootstrapCluster is used to bootstrap the cluster.
 func (s *TestServer) BootstrapCluster() error {
 	bootstrapReq := &pdpb.BootstrapRequest{
-		Header: &pdpb.RequestHeader{ClusterId: s.GetClusterID()},
+		Header: &pdpb.RequestHeader{ClusterId: keypath.ClusterID()},
 		Store:  &metapb.Store{Id: 1, Address: "mock://1", LastHeartbeat: time.Now().UnixNano()},
 		Region: &metapb.Region{Id: 2, Peers: []*metapb.Peer{{Id: 3, StoreId: 1, Role: metapb.PeerRole_Voter}}},
 	}
@@ -430,7 +396,7 @@ func (s *TestServer) BootstrapCluster() error {
 // make a test know the PD leader has been elected as soon as possible.
 // If it exceeds the maximum number of loops, it will return nil.
 func (s *TestServer) WaitLeader() bool {
-	for i := 0; i < WaitLeaderRetryTimes; i++ {
+	for range WaitLeaderRetryTimes {
 		if s.server.GetMember().IsLeader() {
 			return true
 		}
@@ -661,7 +627,7 @@ func (c *TestCluster) WaitLeader(ops ...WaitOption) string {
 	for _, op := range ops {
 		op(option)
 	}
-	for i := 0; i < option.retryTimes; i++ {
+	for range option.retryTimes {
 		counter := make(map[string]int)
 		running := 0
 		for _, s := range c.servers {
@@ -693,7 +659,7 @@ func (c *TestCluster) WaitRegionSyncerClientsReady(n int) bool {
 		retryTimes:   40,
 		waitInterval: WaitLeaderCheckInterval,
 	}
-	for i := 0; i < option.retryTimes; i++ {
+	for range option.retryTimes {
 		name := c.GetLeader()
 		if len(name) == 0 {
 			time.Sleep(option.waitInterval)
@@ -718,56 +684,6 @@ func (c *TestCluster) ResignLeader() error {
 		return c.servers[leader].ResignLeader()
 	}
 	return errors.New("no leader")
-}
-
-// WaitAllocatorLeader is used to get the Local TSO Allocator leader.
-// If it exceeds the maximum number of loops, it will return an empty string.
-func (c *TestCluster) WaitAllocatorLeader(dcLocation string, ops ...WaitOption) string {
-	option := &WaitOp{
-		retryTimes:   WaitLeaderRetryTimes,
-		waitInterval: WaitLeaderCheckInterval,
-	}
-	for _, op := range ops {
-		op(option)
-	}
-	for i := 0; i < option.retryTimes; i++ {
-		counter := make(map[string]int)
-		running := 0
-		for _, s := range c.servers {
-			if s.state == Running && s.GetTSOAllocatorManager().EnableLocalTSO() {
-				running++
-			}
-			serverName := s.GetAllocatorLeader(dcLocation).GetName()
-			if serverName != "" {
-				counter[serverName]++
-			}
-		}
-		for serverName, num := range counter {
-			if num == running && c.GetServer(serverName).IsAllocatorLeader(dcLocation) {
-				return serverName
-			}
-		}
-		time.Sleep(option.waitInterval)
-	}
-	return ""
-}
-
-// WaitAllLeaders will block and wait for the election of PD leader and all Local TSO Allocator leaders.
-func (c *TestCluster) WaitAllLeaders(re *require.Assertions, dcLocations map[string]string) {
-	c.WaitLeader()
-	c.CheckClusterDCLocation()
-	// Wait for each DC's Local TSO Allocator leader
-	wg := sync.WaitGroup{}
-	for _, dcLocation := range dcLocations {
-		wg.Add(1)
-		go func(dc string) {
-			testutil.Eventually(re, func() bool {
-				return c.WaitAllocatorLeader(dc) != ""
-			})
-			wg.Done()
-		}(dcLocation)
-	}
-	wg.Wait()
 }
 
 // GetCluster returns PD cluster.
@@ -852,19 +768,6 @@ func (c *TestCluster) Destroy() {
 	if c.schedulingCluster != nil {
 		c.schedulingCluster.Destroy()
 	}
-}
-
-// CheckClusterDCLocation will force the cluster to do the dc-location check in order to speed up the test.
-func (c *TestCluster) CheckClusterDCLocation() {
-	wg := sync.WaitGroup{}
-	for _, server := range c.GetServers() {
-		wg.Add(1)
-		go func(s *TestServer) {
-			s.GetTSOAllocatorManager().ClusterDCLocationChecker()
-			wg.Done()
-		}(server)
-	}
-	wg.Wait()
 }
 
 // CheckTSOUnique will check whether the TSO is unique among the cluster in the past and present.

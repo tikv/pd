@@ -20,6 +20,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/suite"
+
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/mock/mockconfig"
@@ -52,7 +53,7 @@ func (m *mockSplitRegionsHandler) ScanRegionsByKeyRange(groupKeys *regionGroupKe
 	for regionID, keyRange := range m.regions {
 		if bytes.Equal(startKey, keyRange[0]) && bytes.Equal(endKey, keyRange[1]) {
 			regions := make(map[uint64][]byte)
-			for i := 0; i < len(splitKeys); i++ {
+			for i := range splitKeys {
 				regions[regionID+uint64(i)+1000] = splitKeys[i]
 			}
 			results.addRegionsID(regions)

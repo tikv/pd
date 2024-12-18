@@ -21,11 +21,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/pingcap/log"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+
+	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/log"
 )
 
 const (
@@ -109,7 +110,7 @@ func GenerateTestDataConcurrently(count int, f func(int)) {
 	var wg sync.WaitGroup
 	tasks := make(chan int, count)
 	workers := runtime.NumCPU()
-	for w := 0; w < workers; w++ {
+	for range workers {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
@@ -118,7 +119,7 @@ func GenerateTestDataConcurrently(count int, f func(int)) {
 			}
 		}()
 	}
-	for i := 0; i < count; i++ {
+	for i := range count {
 		tasks <- i
 	}
 	close(tasks)

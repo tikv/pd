@@ -34,22 +34,24 @@ import (
 	"github.com/gin-contrib/gzip"
 	"github.com/gin-contrib/pprof"
 	"github.com/gin-gonic/gin"
+	"github.com/spf13/pflag"
+	"go.etcd.io/etcd/pkg/v3/report"
+	"go.uber.org/zap"
+
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
-	"github.com/spf13/pflag"
-	"github.com/tikv/pd/client/grpcutil"
+
 	pdHttp "github.com/tikv/pd/client/http"
-	"github.com/tikv/pd/client/tlsutil"
+	"github.com/tikv/pd/client/pkg/utils/grpcutil"
+	"github.com/tikv/pd/client/pkg/utils/tlsutil"
 	"github.com/tikv/pd/pkg/codec"
 	"github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/tools/pd-heartbeat-bench/config"
 	"github.com/tikv/pd/tools/pd-heartbeat-bench/metrics"
-	"go.etcd.io/etcd/pkg/v3/report"
-	"go.uber.org/zap"
 )
 
 const (
@@ -202,7 +204,7 @@ func (rs *Regions) init(cfg *config.Config) {
 	id := uint64(1)
 	now := uint64(time.Now().Unix())
 
-	for i := 0; i < cfg.RegionCount; i++ {
+	for i := range cfg.RegionCount {
 		region := &pdpb.RegionHeartbeatRequest{
 			Header: header(),
 			Region: &metapb.Region{
@@ -229,7 +231,7 @@ func (rs *Regions) init(cfg *config.Config) {
 		}
 
 		peers := make([]*metapb.Peer, 0, cfg.Replica)
-		for j := 0; j < cfg.Replica; j++ {
+		for j := range cfg.Replica {
 			peers = append(peers, &metapb.Peer{Id: id, StoreId: uint64((i+j)%cfg.StoreCount + 1)})
 			id += 1
 		}

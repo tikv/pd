@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
+
 	"github.com/tikv/pd/pkg/core"
 )
 
@@ -200,7 +201,7 @@ func BenchmarkFitRegionMorePeersSplitRules(b *testing.B) {
 			LocationLabels: []string{},
 		},
 	}
-	for i := 0; i < 4; i++ {
+	for i := range 4 {
 		rules = append(rules, &Rule{
 			GroupID:        DefaultGroupID,
 			ID:             fmt.Sprintf("%v", i),
@@ -228,7 +229,7 @@ func BenchmarkFitRegionMoreVotersSplitRules(b *testing.B) {
 			LocationLabels: []string{},
 		},
 	}
-	for i := 0; i < 4; i++ {
+	for i := range 4 {
 		rules = append(rules, &Rule{
 			GroupID:        DefaultGroupID,
 			ID:             fmt.Sprintf("%v", i),
@@ -266,7 +267,7 @@ func BenchmarkFitRegionCrossRegion(b *testing.B) {
 		Count:          1,
 		LocationLabels: []string{},
 	})
-	for i := 0; i < 2; i++ {
+	for i := range 2 {
 		rules = append(rules, &Rule{
 			GroupID:        DefaultGroupID,
 			ID:             fmt.Sprintf("%v", i),
@@ -287,7 +288,7 @@ func BenchmarkFitRegionWithMoreRulesAndStoreLabels(b *testing.B) {
 	region := mockRegion(5, 0)
 	rules := []*Rule{}
 	// create 100 rules, with each rule has 101 LabelConstraints.
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		rule := &Rule{
 			GroupID:          DefaultGroupID,
 			ID:               fmt.Sprintf("%v", i),
@@ -319,7 +320,7 @@ func BenchmarkFitRegionWithMoreRulesAndStoreLabels(b *testing.B) {
 	// create stores, with each store has 101 normal labels(1 exclusive label).
 	lists := make([]*core.StoreInfo, 0)
 	labels := make([]*metapb.StoreLabel, 0, 101)
-	for labID := 0; labID < 100; labID++ {
+	for labID := range 100 {
 		label := &metapb.StoreLabel{Key: fmt.Sprintf("store_%08d", labID), Value: fmt.Sprintf("value_%08d", labID)}
 		labels = append(labels, label)
 	}

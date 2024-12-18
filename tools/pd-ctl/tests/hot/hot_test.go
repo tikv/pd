@@ -22,10 +22,12 @@ import (
 	"time"
 
 	"github.com/docker/go-units"
-	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+
+	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/kvproto/pkg/pdpb"
+
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/schedule/handler"
 	"github.com/tikv/pd/pkg/statistics"
@@ -343,7 +345,7 @@ func (suite *hotTestSuite) checkHotWithoutHotPeer(cluster *pdTests.TestCluster) 
 	load := 1024.0
 	s := &server.GrpcServer{Server: leaderServer.GetServer()}
 	for _, store := range stores {
-		for i := 0; i < 5; i++ {
+		for i := range 5 {
 			resp1, err := s.StoreHeartbeat(
 				context.Background(), &pdpb.StoreHeartbeatRequest{
 					Header: &pdpb.RequestHeader{ClusterId: leaderServer.GetClusterID()},

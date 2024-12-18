@@ -21,11 +21,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/pingcap/kvproto/pkg/eraftpb"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/raft_serverpb"
-	"github.com/stretchr/testify/require"
+
 	"github.com/tikv/pd/pkg/codec"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
@@ -194,7 +196,7 @@ func TestFinished(t *testing.T) {
 
 	opts := mockconfig.NewTestOptions()
 	cluster := mockcluster.NewCluster(ctx, opts)
-	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster.ID, cluster, true))
+	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster, true))
 	coordinator.Run()
 	for _, store := range newTestStores(3, "6.0.0") {
 		cluster.PutStore(store)
@@ -274,7 +276,7 @@ func TestFailed(t *testing.T) {
 
 	opts := mockconfig.NewTestOptions()
 	cluster := mockcluster.NewCluster(ctx, opts)
-	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster.ID, cluster, true))
+	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster, true))
 	coordinator.Run()
 	for _, store := range newTestStores(3, "6.0.0") {
 		cluster.PutStore(store)
@@ -367,7 +369,7 @@ func TestForceLeaderFail(t *testing.T) {
 
 	opts := mockconfig.NewTestOptions()
 	cluster := mockcluster.NewCluster(ctx, opts)
-	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster.ID, cluster, true))
+	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster, true))
 	coordinator.Run()
 	for _, store := range newTestStores(4, "6.0.0") {
 		cluster.PutStore(store)
@@ -447,7 +449,7 @@ func TestAffectedTableID(t *testing.T) {
 
 	opts := mockconfig.NewTestOptions()
 	cluster := mockcluster.NewCluster(ctx, opts)
-	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster.ID, cluster, true))
+	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster, true))
 	coordinator.Run()
 	for _, store := range newTestStores(3, "6.0.0") {
 		cluster.PutStore(store)
@@ -488,7 +490,7 @@ func TestForceLeaderForCommitMerge(t *testing.T) {
 
 	opts := mockconfig.NewTestOptions()
 	cluster := mockcluster.NewCluster(ctx, opts)
-	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster.ID, cluster, true))
+	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster, true))
 	coordinator.Run()
 	for _, store := range newTestStores(3, "6.0.0") {
 		cluster.PutStore(store)
@@ -564,7 +566,7 @@ func TestAutoDetectMode(t *testing.T) {
 
 	opts := mockconfig.NewTestOptions()
 	cluster := mockcluster.NewCluster(ctx, opts)
-	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster.ID, cluster, true))
+	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster, true))
 	coordinator.Run()
 	for _, store := range newTestStores(1, "6.0.0") {
 		cluster.PutStore(store)
@@ -617,7 +619,7 @@ func TestAutoDetectWithOneLearner(t *testing.T) {
 
 	opts := mockconfig.NewTestOptions()
 	cluster := mockcluster.NewCluster(ctx, opts)
-	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster.ID, cluster, true))
+	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster, true))
 	coordinator.Run()
 	for _, store := range newTestStores(1, "6.0.0") {
 		cluster.PutStore(store)
@@ -658,7 +660,7 @@ func TestOneLearner(t *testing.T) {
 
 	opts := mockconfig.NewTestOptions()
 	cluster := mockcluster.NewCluster(ctx, opts)
-	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster.ID, cluster, true))
+	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster, true))
 	coordinator.Run()
 	for _, store := range newTestStores(3, "6.0.0") {
 		cluster.PutStore(store)
@@ -713,7 +715,7 @@ func TestTiflashLearnerPeer(t *testing.T) {
 
 	opts := mockconfig.NewTestOptions()
 	cluster := mockcluster.NewCluster(ctx, opts)
-	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster.ID, cluster, true))
+	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster, true))
 	coordinator.Run()
 	for _, store := range newTestStores(5, "6.0.0") {
 		if store.GetID() == 3 {
@@ -888,7 +890,7 @@ func TestUninitializedPeer(t *testing.T) {
 
 	opts := mockconfig.NewTestOptions()
 	cluster := mockcluster.NewCluster(ctx, opts)
-	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster.ID, cluster, true))
+	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster, true))
 	coordinator.Run()
 	for _, store := range newTestStores(3, "6.0.0") {
 		cluster.PutStore(store)
@@ -944,7 +946,7 @@ func TestJointState(t *testing.T) {
 
 	opts := mockconfig.NewTestOptions()
 	cluster := mockcluster.NewCluster(ctx, opts)
-	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster.ID, cluster, true))
+	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster, true))
 	coordinator.Run()
 	for _, store := range newTestStores(5, "6.0.0") {
 		cluster.PutStore(store)
@@ -1137,7 +1139,7 @@ func TestExecutionTimeout(t *testing.T) {
 
 	opts := mockconfig.NewTestOptions()
 	cluster := mockcluster.NewCluster(ctx, opts)
-	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster.ID, cluster, true))
+	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster, true))
 	coordinator.Run()
 	for _, store := range newTestStores(3, "6.0.0") {
 		cluster.PutStore(store)
@@ -1169,7 +1171,7 @@ func TestNoHeartbeatTimeout(t *testing.T) {
 
 	opts := mockconfig.NewTestOptions()
 	cluster := mockcluster.NewCluster(ctx, opts)
-	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster.ID, cluster, true))
+	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster, true))
 	coordinator.Run()
 	for _, store := range newTestStores(3, "6.0.0") {
 		cluster.PutStore(store)
@@ -1192,7 +1194,7 @@ func TestExitForceLeader(t *testing.T) {
 
 	opts := mockconfig.NewTestOptions()
 	cluster := mockcluster.NewCluster(ctx, opts)
-	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster.ID, cluster, true))
+	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster, true))
 	coordinator.Run()
 	for _, store := range newTestStores(3, "6.0.0") {
 		cluster.PutStore(store)
@@ -1270,7 +1272,7 @@ func TestStep(t *testing.T) {
 
 	opts := mockconfig.NewTestOptions()
 	cluster := mockcluster.NewCluster(ctx, opts)
-	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster.ID, cluster, true))
+	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster, true))
 	coordinator.Run()
 	for _, store := range newTestStores(3, "6.0.0") {
 		cluster.PutStore(store)
@@ -1325,7 +1327,7 @@ func TestOnHealthyRegions(t *testing.T) {
 
 	opts := mockconfig.NewTestOptions()
 	cluster := mockcluster.NewCluster(ctx, opts)
-	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster.ID, cluster, true))
+	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster, true))
 	coordinator.Run()
 	for _, store := range newTestStores(5, "6.0.0") {
 		cluster.PutStore(store)
@@ -1401,7 +1403,7 @@ func TestCreateEmptyRegion(t *testing.T) {
 
 	opts := mockconfig.NewTestOptions()
 	cluster := mockcluster.NewCluster(ctx, opts)
-	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster.ID, cluster, true))
+	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster, true))
 	coordinator.Run()
 	for _, store := range newTestStores(3, "6.0.0") {
 		cluster.PutStore(store)
@@ -1510,7 +1512,7 @@ func TestRangeOverlap1(t *testing.T) {
 
 	opts := mockconfig.NewTestOptions()
 	cluster := mockcluster.NewCluster(ctx, opts)
-	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster.ID, cluster, true))
+	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster, true))
 	coordinator.Run()
 	for _, store := range newTestStores(5, "6.0.0") {
 		cluster.PutStore(store)
@@ -1605,7 +1607,7 @@ func TestRangeOverlap2(t *testing.T) {
 
 	opts := mockconfig.NewTestOptions()
 	cluster := mockcluster.NewCluster(ctx, opts)
-	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster.ID, cluster, true))
+	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster, true))
 	coordinator.Run()
 	for _, store := range newTestStores(5, "6.0.0") {
 		cluster.PutStore(store)
@@ -1699,7 +1701,7 @@ func TestRemoveFailedStores(t *testing.T) {
 
 	opts := mockconfig.NewTestOptions()
 	cluster := mockcluster.NewCluster(ctx, opts)
-	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster.ID, cluster, true))
+	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster, true))
 	coordinator.Run()
 	stores := newTestStores(2, "5.3.0")
 	stores[1] = stores[1].Clone(core.SetLastHeartbeatTS(time.Now()))
@@ -1740,7 +1742,7 @@ func TestRunning(t *testing.T) {
 
 	opts := mockconfig.NewTestOptions()
 	cluster := mockcluster.NewCluster(ctx, opts)
-	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster.ID, cluster, true))
+	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster, true))
 	coordinator.Run()
 	stores := newTestStores(2, "5.3.0")
 	stores[1] = stores[1].Clone(core.SetLastHeartbeatTS(time.Now()))
@@ -1762,7 +1764,7 @@ func TestEpochComparison(t *testing.T) {
 
 	opts := mockconfig.NewTestOptions()
 	cluster := mockcluster.NewCluster(ctx, opts)
-	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster.ID, cluster, true))
+	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster, true))
 	coordinator.Run()
 	for _, store := range newTestStores(3, "6.0.0") {
 		cluster.PutStore(store)
@@ -1864,7 +1866,7 @@ func TestSelectLeader(t *testing.T) {
 
 	opts := mockconfig.NewTestOptions()
 	cluster := mockcluster.NewCluster(ctx, opts)
-	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster.ID, cluster, true))
+	coordinator := schedule.NewCoordinator(ctx, cluster, hbstream.NewTestHeartbeatStreams(ctx, cluster, true))
 	coordinator.Run()
 	stores := newTestStores(6, "6.0.0")
 	labels := []*metapb.StoreLabel{

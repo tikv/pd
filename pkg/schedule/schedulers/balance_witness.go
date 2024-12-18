@@ -23,8 +23,12 @@ import (
 	"strconv"
 
 	"github.com/gorilla/mux"
-	"github.com/pingcap/log"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/unrolled/render"
+	"go.uber.org/zap"
+
+	"github.com/pingcap/log"
+
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/errs"
@@ -35,8 +39,6 @@ import (
 	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/utils/reflectutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
-	"github.com/unrolled/render"
-	"go.uber.org/zap"
 )
 
 const (
@@ -268,7 +270,7 @@ func createTransferWitnessOperator(cs *candidateStores, s *balanceWitnessSchedul
 	retryLimit := s.retryQuota.getLimit(store)
 	ssolver.Source, ssolver.Target = store, nil
 	var op *operator.Operator
-	for i := 0; i < retryLimit; i++ {
+	for range retryLimit {
 		schedulerCounter.WithLabelValues(s.GetName(), "total").Inc()
 		if op = s.transferWitnessOut(ssolver, collector); op != nil {
 			if _, ok := usedRegions[op.RegionID()]; !ok {

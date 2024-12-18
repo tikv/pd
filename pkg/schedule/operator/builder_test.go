@@ -18,9 +18,11 @@ import (
 	"context"
 	"testing"
 
+	"github.com/stretchr/testify/suite"
+
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/stretchr/testify/suite"
+
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/mock/mockconfig"
@@ -555,7 +557,7 @@ func (suite *operatorBuilderTestSuite) TestBuild() {
 		re.NoError(err)
 		re.Equal(testCase.kind, op.Kind())
 		re.Len(testCase.steps, op.Len())
-		for i := 0; i < op.Len(); i++ {
+		for i := range op.Len() {
 			switch step := op.Step(i).(type) {
 			case TransferLeader:
 				re.Equal(testCase.steps[i].(TransferLeader).FromStore, step.FromStore)

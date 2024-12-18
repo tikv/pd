@@ -21,11 +21,14 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/pingcap/log"
-	pd "github.com/tikv/pd/client"
-	pdHttp "github.com/tikv/pd/client/http"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
+
+	"github.com/pingcap/log"
+
+	pd "github.com/tikv/pd/client"
+	pdHttp "github.com/tikv/pd/client/http"
+	"github.com/tikv/pd/client/opt"
 )
 
 var (
@@ -323,7 +326,7 @@ func newGetRegionEnableFollower() func() GRPCCase {
 
 func (*getRegionEnableFollower) unary(ctx context.Context, cli pd.Client) error {
 	id := rand.Intn(totalRegion)*4 + 1
-	_, err := cli.GetRegion(ctx, generateKeyForSimulator(id), pd.WithAllowFollowerHandle())
+	_, err := cli.GetRegion(ctx, generateKeyForSimulator(id), opt.WithAllowFollowerHandle())
 	if err != nil {
 		return err
 	}
@@ -452,7 +455,7 @@ func newGetKV() func() EtcdCase {
 }
 
 func (*getKV) init(ctx context.Context, cli *clientv3.Client) error {
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		_, err := cli.Put(ctx, fmt.Sprintf("/test/0001/%4d", i), fmt.Sprintf("%4d", i))
 		if err != nil {
 			return err

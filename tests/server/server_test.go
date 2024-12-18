@@ -21,14 +21,17 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+	"go.uber.org/goleak"
+
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/stretchr/testify/require"
+
+	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
-	"go.uber.org/goleak"
 )
 
 func TestMain(m *testing.M) {
@@ -87,29 +90,23 @@ func TestClusterID(t *testing.T) {
 	err = cluster.RunInitialServers()
 	re.NoError(err)
 
-	clusterID := cluster.GetServer("pd1").GetClusterID()
-	for _, s := range cluster.GetServers() {
-		re.Equal(clusterID, s.GetClusterID())
-	}
+	clusterID := keypath.ClusterID()
+	keypath.ResetClusterID()
 
 	// Restart all PDs.
-	err = cluster.StopAll()
-	re.NoError(err)
-	err = cluster.RunInitialServers()
-	re.NoError(err)
+	re.NoError(cluster.StopAll())
+	re.NoError(cluster.RunInitialServers())
 
-	// All PDs should have the same cluster ID as before.
-	for _, s := range cluster.GetServers() {
-		re.Equal(clusterID, s.GetClusterID())
-	}
+	// PD should have the same cluster ID as before.
+	re.Equal(clusterID, keypath.ClusterID())
+	keypath.ResetClusterID()
 
 	cluster2, err := tests.NewTestCluster(ctx, 3, func(conf *config.Config, _ string) { conf.InitialClusterToken = "foobar" })
 	defer cluster2.Destroy()
 	re.NoError(err)
 	err = cluster2.RunInitialServers()
 	re.NoError(err)
-	clusterID2 := cluster2.GetServer("pd1").GetClusterID()
-	re.NotEqual(clusterID, clusterID2)
+	re.NotEqual(clusterID, keypath.ClusterID())
 }
 
 func TestLeader(t *testing.T) {
@@ -151,7 +148,7 @@ func TestGRPCRateLimit(t *testing.T) {
 	addr := leaderServer.GetAddr()
 	grpcPDClient := testutil.MustNewGrpcClient(re, addr)
 	leaderServer.BootstrapCluster()
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		resp, err := grpcPDClient.GetRegion(context.Background(), &pdpb.GetRegionRequest{
 			Header:    &pdpb.RequestHeader{ClusterId: clusterID},
 			RegionKey: []byte(""),
@@ -170,16 +167,17 @@ func TestGRPCRateLimit(t *testing.T) {
 	err = testutil.CheckPostJSON(tests.TestDialClient, urlPrefix, jsonBody,
 		testutil.StatusOK(re), testutil.StringContain(re, "gRPC limiter is updated"))
 	re.NoError(err)
-	for i := 0; i < 2; i++ {
+	for i := range 2 {
 		resp, err := grpcPDClient.GetRegion(context.Background(), &pdpb.GetRegionRequest{
 			Header:    &pdpb.RequestHeader{ClusterId: leaderServer.GetClusterID()},
 			RegionKey: []byte(""),
 		})
-		re.NoError(err)
+		re.Empty(resp.GetHeader().GetError())
 		if i == 0 {
-			re.Empty(resp.GetHeader().GetError())
+			re.NoError(err)
 		} else {
-			re.Contains(resp.GetHeader().GetError().GetMessage(), "rate limit exceeded")
+			re.Error(err)
+			re.Contains(err.Error(), "rate limit exceeded")
 		}
 	}
 
@@ -190,7 +188,7 @@ func TestGRPCRateLimit(t *testing.T) {
 	err = testutil.CheckPostJSON(tests.TestDialClient, urlPrefix, jsonBody,
 		testutil.StatusOK(re), testutil.StringContain(re, "gRPC limiter is deleted"))
 	re.NoError(err)
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		resp, err := grpcPDClient.GetRegion(context.Background(), &pdpb.GetRegionRequest{
 			Header:    &pdpb.RequestHeader{ClusterId: leaderServer.GetClusterID()},
 			RegionKey: []byte(""),
@@ -219,9 +217,9 @@ func TestGRPCRateLimit(t *testing.T) {
 			Header:    &pdpb.RequestHeader{ClusterId: leaderServer.GetClusterID()},
 			RegionKey: []byte(""),
 		})
-		re.NoError(err)
-		if resp.GetHeader().GetError() != nil {
-			errCh <- resp.GetHeader().GetError().GetMessage()
+		re.Empty(resp.GetHeader().GetError())
+		if err != nil {
+			errCh <- err.Error()
 		} else {
 			okCh <- struct{}{}
 		}
@@ -234,9 +232,9 @@ func TestGRPCRateLimit(t *testing.T) {
 			Header:    &pdpb.RequestHeader{ClusterId: leaderServer.GetClusterID()},
 			RegionKey: []byte(""),
 		})
-		re.NoError(err)
-		if resp.GetHeader().GetError() != nil {
-			errCh <- resp.GetHeader().GetError().GetMessage()
+		re.Empty(resp.GetHeader().GetError())
+		if err != nil {
+			errCh <- err.Error()
 		} else {
 			okCh <- struct{}{}
 		}

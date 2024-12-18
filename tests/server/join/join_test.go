@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/join"
@@ -62,7 +63,6 @@ func TestSimpleJoin(t *testing.T) {
 	members, err = etcdutil.ListEtcdMembers(ctx, client)
 	re.NoError(err)
 	re.Len(members.Members, 2)
-	re.Equal(pd1.GetClusterID(), pd2.GetClusterID())
 
 	// Wait for all nodes becoming healthy.
 	time.Sleep(time.Second * 5)
@@ -78,7 +78,6 @@ func TestSimpleJoin(t *testing.T) {
 	members, err = etcdutil.ListEtcdMembers(ctx, client)
 	re.NoError(err)
 	re.Len(members.Members, 3)
-	re.Equal(pd1.GetClusterID(), pd3.GetClusterID())
 }
 
 // A failed PD tries to join the previous cluster but it has been deleted

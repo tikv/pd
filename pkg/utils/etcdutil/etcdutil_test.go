@@ -28,18 +28,20 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pingcap/failpoint"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
-	"github.com/tikv/pd/pkg/utils/syncutil"
-	"github.com/tikv/pd/pkg/utils/tempurl"
-	"github.com/tikv/pd/pkg/utils/testutil"
 	"go.etcd.io/etcd/api/v3/etcdserverpb"
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	etcdtypes "go.etcd.io/etcd/client/pkg/v3/types"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.etcd.io/etcd/server/v3/embed"
 	"go.uber.org/goleak"
+
+	"github.com/pingcap/failpoint"
+
+	"github.com/tikv/pd/pkg/utils/syncutil"
+	"github.com/tikv/pd/pkg/utils/tempurl"
+	"github.com/tikv/pd/pkg/utils/testutil"
 )
 
 func TestMain(m *testing.M) {
@@ -156,25 +158,6 @@ func TestEtcdKVPutWithTTL(t *testing.T) {
 	re.Equal(int64(0), resp.Count)
 }
 
-func TestInitClusterID(t *testing.T) {
-	re := require.New(t)
-	_, client, clean := NewTestEtcdCluster(t, 1)
-	defer clean()
-	pdClusterIDPath := "test/TestInitClusterID/pd/cluster_id"
-	// Get any cluster key to parse the cluster ID.
-	resp, err := EtcdKVGet(client, pdClusterIDPath)
-	re.NoError(err)
-	re.Empty(resp.Kvs)
-
-	clusterID, err := InitClusterID(client, pdClusterIDPath)
-	re.NoError(err)
-	re.NotZero(clusterID)
-
-	clusterID1, err := InitClusterID(client, pdClusterIDPath)
-	re.NoError(err)
-	re.Equal(clusterID, clusterID1)
-}
-
 func TestEtcdClientSync(t *testing.T) {
 	re := require.New(t)
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/utils/etcdutil/fastTick", "return(true)"))
@@ -261,7 +244,7 @@ func TestRandomKillEtcd(t *testing.T) {
 
 	// Randomly kill an etcd server and restart it
 	cfgs := []embed.Config{etcds[0].Config(), etcds[1].Config(), etcds[2].Config()}
-	for i := 0; i < len(cfgs)*2; i++ {
+	for range len(cfgs) * 2 {
 		killIndex := rand.Intn(len(etcds))
 		etcds[killIndex].Close()
 		checkEtcdEndpointNum(re, client1, 2)
@@ -541,7 +524,7 @@ func (suite *loopWatcherTestSuite) TestCallBack() {
 	re.NoError(err)
 
 	// put 10 keys
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		suite.put(re, fmt.Sprintf("TestCallBack%d", i), "")
 	}
 	time.Sleep(time.Second)
@@ -550,7 +533,7 @@ func (suite *loopWatcherTestSuite) TestCallBack() {
 	cache.RUnlock()
 
 	// delete 10 keys
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		key := fmt.Sprintf("TestCallBack%d", i)
 		_, err = suite.client.Delete(suite.ctx, key)
 		re.NoError(err)
@@ -564,9 +547,9 @@ func (suite *loopWatcherTestSuite) TestCallBack() {
 func (suite *loopWatcherTestSuite) TestWatcherLoadLimit() {
 	re := suite.Require()
 	for count := 1; count < 10; count++ {
-		for limit := 0; limit < 10; limit++ {
+		for limit := range 10 {
 			ctx, cancel := context.WithCancel(suite.ctx)
-			for i := 0; i < count; i++ {
+			for i := range count {
 				suite.put(re, fmt.Sprintf("TestWatcherLoadLimit%d", i), "")
 			}
 			cache := make([]string, 0)

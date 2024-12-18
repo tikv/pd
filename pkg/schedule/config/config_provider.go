@@ -19,7 +19,9 @@ import (
 	"time"
 
 	"github.com/coreos/go-semver/semver"
+
 	"github.com/pingcap/kvproto/pkg/metapb"
+
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/schedule/types"
@@ -89,6 +91,7 @@ type CheckerConfigProvider interface {
 	GetIsolationLevel() string
 	GetSplitMergeInterval() time.Duration
 	GetPatrolRegionInterval() time.Duration
+	GetPatrolRegionWorkerCount() int
 	GetMaxMergeRegionSize() uint64
 	GetMaxMergeRegionKeys() uint64
 	GetReplicaScheduleLimit() uint64

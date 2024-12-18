@@ -33,8 +33,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/tikv/pd/tools/pd-ut/alloc"
 	"go.uber.org/zap"
+
+	"github.com/tikv/pd/tools/pd-ut/alloc"
 
 	// Set the correct value when it runs inside docker.
 	_ "go.uber.org/automaxprocs"
@@ -350,7 +351,7 @@ func cmdRun(args ...string) bool {
 	taskCh := make(chan task, 100)
 	works := make([]numa, parallel)
 	var wg sync.WaitGroup
-	for i := 0; i < parallel; i++ {
+	for i := range parallel {
 		wg.Add(1)
 		go works[i].worker(&wg, taskCh)
 	}
@@ -465,7 +466,7 @@ func stripFlag(flag string) string {
 
 func handleFlag(f string) (found bool) {
 	tmp := os.Args[:0]
-	for i := 0; i < len(os.Args); i++ {
+	for i := range os.Args {
 		if os.Args[i] == f {
 			found = true
 			continue
@@ -585,7 +586,7 @@ func (n *numa) runTestCase(pkg string, fn string) testResult {
 	var buf bytes.Buffer
 	var err error
 	var start time.Time
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		cmd := n.testCommand(pkg, fn)
 		cmd.Dir = filepath.Join(workDir, pkg)
 		// Combine the test case output, so the run result for failed cases can be displayed.
@@ -719,8 +720,8 @@ func generateBuildCache() error {
 		return nil
 	}
 	fmt.Println("generate build cache")
-	// cd cmd/pd-server && go test -tags=tso_function_test,deadlock -exec-=true -vet=off -toolexec=go-compile-without-link
-	cmd := exec.Command("go", "test", "-exec=true", "-vet", "off", "--tags=tso_function_test,deadlock")
+	// cd cmd/pd-server && go test -tags=deadlock -exec-=true -vet=off -toolexec=go-compile-without-link
+	cmd := exec.Command("go", "test", "-exec=true", "-vet", "off", "--tags=deadlock")
 	goCompileWithoutLink := fmt.Sprintf("-toolexec=%s", filepath.Join(workDir, "tools", "pd-ut", "go-compile-without-link.sh"))
 	cmd.Dir = filepath.Join(workDir, "cmd", "pd-server")
 	if strings.Contains(workDir, integrationsTestPath) {
@@ -745,7 +746,7 @@ func buildTestBinaryMulti(pkgs []string) ([]byte, error) {
 		return nil, withTrace(err)
 	}
 
-	// go test --exec=xprog --tags=tso_function_test,deadlock -vet=off --count=0 $(pkgs)
+	// go test --exec=xprog --tags=deadlock -vet=off --count=0 $(pkgs)
 	// workPath just like `/pd/tests/integrations`
 	xprogPath := filepath.Join(workDir, "bin", "xprog")
 	if strings.Contains(workDir, integrationsTestPath) {
@@ -758,7 +759,7 @@ func buildTestBinaryMulti(pkgs []string) ([]byte, error) {
 
 	// We use 2 * parallel for `go build` to make it faster.
 	p := strconv.Itoa(parallel * 2)
-	cmd := exec.Command("go", "test", "-p", p, "--exec", xprogPath, "-vet", "off", "--tags=tso_function_test,deadlock")
+	cmd := exec.Command("go", "test", "-p", p, "--exec", xprogPath, "-vet", "off", "--tags=deadlock")
 	if coverProfile != "" {
 		coverPkg := strings.Join([]string{".", "..."}, string(filepath.Separator))
 		if strings.Contains(workDir, integrationsTestPath) {
@@ -793,7 +794,7 @@ func buildTestBinaryMulti(pkgs []string) ([]byte, error) {
 
 func buildTestBinary(pkg string) error {
 	//nolint:gosec
-	cmd := exec.Command("go", "test", "-c", "-vet", "off", "--tags=tso_function_test,deadlock", "-o", testFileName(pkg), "-v")
+	cmd := exec.Command("go", "test", "-c", "-vet", "off", "--tags=deadlock", "-o", testFileName(pkg), "-v")
 	if coverProfile != "" {
 		coverPkg := strings.Join([]string{".", "..."}, string(filepath.Separator))
 		cmd.Args = append(cmd.Args, "-cover", fmt.Sprintf("-coverpkg=%s", coverPkg))

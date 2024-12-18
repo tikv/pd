@@ -24,17 +24,19 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pingcap/failpoint"
-	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/pingcap/log"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
-	"github.com/tikv/pd/client/tsoutil"
-	"github.com/tikv/pd/pkg/utils/testutil"
-	"github.com/tikv/pd/tests"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+
+	"github.com/pingcap/failpoint"
+	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/log"
+
+	"github.com/tikv/pd/client/pkg/utils/tsoutil"
+	"github.com/tikv/pd/pkg/utils/testutil"
+	"github.com/tikv/pd/tests"
 )
 
 type tsoProxyTestSuite struct {
@@ -108,15 +110,15 @@ func (s *tsoProxyTestSuite) TestTSOProxyWorksWithCancellation() {
 		defer wg.Done()
 		go func() {
 			defer wg.Done()
-			for i := 0; i < 3; i++ {
+			for range 3 {
 				streams, cleanupFuncs := createTSOStreams(s.ctx, re, s.backendEndpoints, 10)
-				for j := 0; j < 10; j++ {
+				for range 10 {
 					s.verifyTSOProxy(s.ctx, streams, cleanupFuncs, 10, true)
 				}
 				cleanupGRPCStreams(cleanupFuncs)
 			}
 		}()
-		for i := 0; i < 10; i++ {
+		for range 10 {
 			s.verifyTSOProxy(s.ctx, s.streams, s.cleanupFuncs, 10, true)
 		}
 	}()
@@ -146,7 +148,7 @@ func TestTSOProxyStress(_ *testing.T) {
 	defer cancel()
 
 	// Push load from many concurrent clients in multiple rounds and increase the #client each round.
-	for i := 0; i < totalRounds; i++ {
+	for i := range totalRounds {
 		log.Info("start a new round of stress test",
 			zap.Int("round-id", i), zap.Int("clients-count", len(streams)+clientsIncr))
 		streamsTemp, cleanupFuncsTemp :=
@@ -178,7 +180,7 @@ func (s *tsoProxyTestSuite) TestTSOProxyClientsWithSameContext() {
 	ctx, cancel := context.WithCancel(s.ctx)
 	defer cancel()
 
-	for i := 0; i < clientCount; i++ {
+	for i := range clientCount {
 		conn, err := grpc.Dial(strings.TrimPrefix(s.backendEndpoints, "http://"), grpc.WithTransportCredentials(insecure.NewCredentials()))
 		re.NoError(err)
 		grpcPDClient := pdpb.NewPDClient(conn)
@@ -308,7 +310,7 @@ func (s *tsoProxyTestSuite) verifyTSOProxy(
 	var respErr atomic.Value
 
 	wg := &sync.WaitGroup{}
-	for i := 0; i < len(streams); i++ {
+	for i := range streams {
 		if streams[i] == nil {
 			continue
 		}
@@ -316,7 +318,7 @@ func (s *tsoProxyTestSuite) verifyTSOProxy(
 		go func(i int) {
 			defer wg.Done()
 			lastPhysical, lastLogical := int64(0), int64(0)
-			for j := 0; j < requestsPerClient; j++ {
+			for range requestsPerClient {
 				select {
 				case <-ctx.Done():
 					cleanupGRPCStream(streams, cleanupFuncs, i)
@@ -342,8 +344,8 @@ func (s *tsoProxyTestSuite) verifyTSOProxy(
 				re.Equal(req.GetCount(), resp.GetCount())
 				ts := resp.GetTimestamp()
 				count := int64(resp.GetCount())
-				physical, largestLogic, suffixBits := ts.GetPhysical(), ts.GetLogical(), ts.GetSuffixBits()
-				firstLogical := tsoutil.AddLogical(largestLogic, -count+1, suffixBits)
+				physical, largestLogic := ts.GetPhysical(), ts.GetLogical()
+				firstLogical := largestLogic - count + 1
 				re.False(tsoutil.TSLessEqual(physical, firstLogical, lastPhysical, lastLogical))
 			}
 		}(i)
@@ -358,7 +360,7 @@ func (s *tsoProxyTestSuite) verifyTSOProxy(
 
 func (s *tsoProxyTestSuite) generateRequests(requestsPerClient int) []*pdpb.TsoRequest {
 	reqs := make([]*pdpb.TsoRequest, requestsPerClient)
-	for i := 0; i < requestsPerClient; i++ {
+	for i := range requestsPerClient {
 		reqs[i] = &pdpb.TsoRequest{
 			Header: &pdpb.RequestHeader{ClusterId: s.apiLeader.GetClusterID()},
 			Count:  uint32(i) + 1, // Make sure the count is positive.
@@ -376,7 +378,7 @@ func createTSOStreams(
 	cleanupFuncs := make([]testutil.CleanupFunc, clientCount)
 	streams := make([]pdpb.PD_TsoClient, clientCount)
 
-	for i := 0; i < clientCount; i++ {
+	for i := range clientCount {
 		conn, err := grpc.Dial(strings.TrimPrefix(backendEndpoints, "http://"), grpc.WithTransportCredentials(insecure.NewCredentials()))
 		re.NoError(err)
 		grpcPDClient := pdpb.NewPDClient(conn)
@@ -407,7 +409,7 @@ func tsoProxy(
 			wg.Add(1)
 			go func(index int, streamCopy pdpb.PD_TsoClient) {
 				defer wg.Done()
-				for i := 0; i < requestsPerClient; i++ {
+				for range requestsPerClient {
 					if err := streamCopy.Send(tsoReq); err != nil {
 						errsReturned[index] = err
 						return
@@ -426,7 +428,7 @@ func tsoProxy(
 		}
 	} else {
 		for _, stream := range streams {
-			for i := 0; i < requestsPerClient; i++ {
+			for range requestsPerClient {
 				if err := stream.Send(tsoReq); err != nil {
 					return err
 				}

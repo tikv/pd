@@ -24,9 +24,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pingcap/failpoint"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+
+	"github.com/pingcap/failpoint"
+
 	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/storage/endpoint"
@@ -88,7 +90,7 @@ func (suite *keyspaceGroupTestSuite) TestAllocNodesUpdate() {
 			cleanup()
 		}
 	}()
-	for i := 0; i < constant.DefaultKeyspaceGroupReplicaCount+1; i++ {
+	for range constant.DefaultKeyspaceGroupReplicaCount + 1 {
 		s, cleanup := tests.StartSingleTSOTestServer(suite.ctx, re, suite.backendEndpoints, tempurl.Alloc())
 		cleanups = append(cleanups, cleanup)
 		nodes[s.GetAddr()] = s
@@ -144,7 +146,7 @@ func (suite *keyspaceGroupTestSuite) TestAllocReplica() {
 			cleanup()
 		}
 	}()
-	for i := 0; i < constant.DefaultKeyspaceGroupReplicaCount; i++ {
+	for range constant.DefaultKeyspaceGroupReplicaCount {
 		s, cleanup := tests.StartSingleTSOTestServer(suite.ctx, re, suite.backendEndpoints, tempurl.Alloc())
 		cleanups = append(cleanups, cleanup)
 		nodes[s.GetAddr()] = s
@@ -244,7 +246,7 @@ func (suite *keyspaceGroupTestSuite) TestSetNodes() {
 			cleanup()
 		}
 	}()
-	for i := 0; i < constant.DefaultKeyspaceGroupReplicaCount; i++ {
+	for range constant.DefaultKeyspaceGroupReplicaCount {
 		s, cleanup := tests.StartSingleTSOTestServer(suite.ctx, re, suite.backendEndpoints, tempurl.Alloc())
 		cleanups = append(cleanups, cleanup)
 		nodes[s.GetAddr()] = s
@@ -311,7 +313,7 @@ func (suite *keyspaceGroupTestSuite) TestDefaultKeyspaceGroup() {
 			cleanup()
 		}
 	}()
-	for i := 0; i < constant.DefaultKeyspaceGroupReplicaCount; i++ {
+	for range constant.DefaultKeyspaceGroupReplicaCount {
 		s, cleanup := tests.StartSingleTSOTestServer(suite.ctx, re, suite.backendEndpoints, tempurl.Alloc())
 		cleanups = append(cleanups, cleanup)
 		nodes[s.GetAddr()] = s
@@ -345,7 +347,7 @@ func (suite *keyspaceGroupTestSuite) TestAllocNodes() {
 			cleanup()
 		}
 	}()
-	for i := 0; i < constant.DefaultKeyspaceGroupReplicaCount+1; i++ {
+	for range constant.DefaultKeyspaceGroupReplicaCount + 1 {
 		s, cleanup := tests.StartSingleTSOTestServer(suite.ctx, re, suite.backendEndpoints, tempurl.Alloc())
 		cleanups = append(cleanups, cleanup)
 		nodes[s.GetAddr()] = s

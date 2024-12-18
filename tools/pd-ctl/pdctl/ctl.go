@@ -24,6 +24,7 @@ import (
 	shellwords "github.com/mattn/go-shellwords"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
+
 	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/tools/pd-ctl/pdctl/command"
 )
@@ -173,7 +174,7 @@ func genCompleter(cmd *cobra.Command) []readline.PrefixCompleterInterface {
 		if v.HasFlags() {
 			flagsPc := []readline.PrefixCompleterInterface{}
 			flagUsages := strings.Split(strings.Trim(v.Flags().FlagUsages(), " "), "\n")
-			for i := 0; i < len(flagUsages)-1; i++ {
+			for i := range len(flagUsages) - 1 {
 				flagsPc = append(flagsPc, readline.PcItem(strings.Split(strings.Trim(flagUsages[i], " "), " ")[0]))
 			}
 			flagsPc = append(flagsPc, genCompleter(v)...)

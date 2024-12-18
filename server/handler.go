@@ -22,8 +22,11 @@ import (
 	"path/filepath"
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
+
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/encryption"
@@ -38,12 +41,10 @@ import (
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/statistics/utils"
 	"github.com/tikv/pd/pkg/storage"
-	"github.com/tikv/pd/pkg/tso"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/server/config"
-	"go.uber.org/zap"
 )
 
 // SchedulerConfigHandlerPath is the api router path of the schedule config handler.
@@ -323,32 +324,11 @@ func (h *Handler) ResetTS(ts uint64, ignoreSmaller, skipUpperBoundCheck bool, _ 
 		zap.Uint64("new-ts", ts),
 		zap.Bool("ignore-smaller", ignoreSmaller),
 		zap.Bool("skip-upper-bound-check", skipUpperBoundCheck))
-	tsoAllocator, err := h.s.tsoAllocatorManager.GetAllocator(tso.GlobalDCLocation)
-	if err != nil {
-		return err
-	}
+	tsoAllocator := h.s.tsoAllocatorManager.GetAllocator()
 	if tsoAllocator == nil {
 		return errs.ErrServerNotStarted
 	}
 	return tsoAllocator.SetTSO(ts, ignoreSmaller, skipUpperBoundCheck)
-}
-
-// SetStoreLimitScene sets the limit values for different scenes
-func (h *Handler) SetStoreLimitScene(scene *storelimit.Scene, limitType storelimit.Type) {
-	rc := h.s.GetRaftCluster()
-	if rc == nil {
-		return
-	}
-	rc.GetStoreLimiter().ReplaceStoreLimitScene(scene, limitType)
-}
-
-// GetStoreLimitScene returns the limit values for different scenes
-func (h *Handler) GetStoreLimitScene(limitType storelimit.Type) *storelimit.Scene {
-	rc := h.s.GetRaftCluster()
-	if rc == nil {
-		return nil
-	}
-	return rc.GetStoreLimiter().StoreLimitScene(limitType)
 }
 
 // GetProgressByID returns the progress details for a given store ID.

@@ -20,9 +20,11 @@ import (
 	"time"
 
 	"github.com/docker/go-units"
+	"github.com/stretchr/testify/require"
+
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/stretchr/testify/require"
+
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/mock/mockconfig"
@@ -122,8 +124,8 @@ func TestSummaryStoreInfos(t *testing.T) {
 	expectHistoryLoads := []float64{1, 2, 5}
 	for _, storeID := range []uint64{1, 3} {
 		loads := storeHistoryLoad.Get(storeID, rw, kind)
-		for i := 0; i < len(loads); i++ {
-			for j := 0; j < len(loads[0]); j++ {
+		for i := range loads {
+			for j := range loads[0] {
 				if loads[i][j] != 0 {
 					re.Equal(loads[i][j]/float64(storeID), expectHistoryLoads[i])
 				}
@@ -139,8 +141,8 @@ func TestSummaryStoreInfos(t *testing.T) {
 		for _, detail := range details {
 			loads := detail.LoadPred.Current.HistoryLoads
 			storeID := detail.GetID()
-			for i := 0; i < len(loads); i++ {
-				for j := 0; j < len(loads[0]); j++ {
+			for i := range loads {
+				for j := range loads[0] {
 					if loads[i][j] != 0 {
 						re.Equal(loads[i][j]/float64(storeID), expectHistoryLoads[i])
 					}

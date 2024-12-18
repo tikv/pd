@@ -22,8 +22,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/prometheus/client_golang/prometheus"
+
+	"github.com/pingcap/kvproto/pkg/metapb"
+
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
 )
@@ -430,7 +432,7 @@ func (o *Operator) TotalInfluence(opInfluence OpInfluence, region *core.RegionIn
 	}
 	if o.influence == nil {
 		o.influence = NewOpInfluence()
-		for step := 0; step < len(o.steps); step++ {
+		for step := range o.steps {
 			o.steps[step].Influence(*o.influence, region)
 		}
 	}

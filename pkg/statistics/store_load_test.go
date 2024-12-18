@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/statistics/utils"
 )
@@ -33,10 +34,10 @@ func TestHistoryLoads(t *testing.T) {
 	re.Len(historyLoads.Get(1, rwTp, kind)[0], 10)
 
 	expectLoads := make([][]float64, utils.DimLen)
-	for i := 0; i < len(loads); i++ {
+	for i := range loads {
 		expectLoads[i] = make([]float64, 10)
 	}
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		historyLoads.Add(1, rwTp, kind, loads)
 		expectLoads[utils.ByteDim][i] = 1.0
 		expectLoads[utils.KeyDim][i] = 2.0

@@ -20,16 +20,17 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+
 	"github.com/tikv/pd/client/http"
 )
 
 type rebootPDSuite struct {
-	realClusterSuite
+	clusterSuite
 }
 
 func TestRebootPD(t *testing.T) {
 	suite.Run(t, &rebootPDSuite{
-		realClusterSuite: realClusterSuite{
+		clusterSuite: clusterSuite{
 			suiteName: "reboot_pd",
 		},
 	})

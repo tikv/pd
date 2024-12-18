@@ -20,15 +20,17 @@ import (
 	"strings"
 	"time"
 
+	"github.com/urfave/negroni"
+	"go.uber.org/zap"
+
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/server"
-	"github.com/urfave/negroni"
-	"go.uber.org/zap"
 )
 
 type runtimeServiceValidator struct {
@@ -129,7 +131,7 @@ func (h *redirector) matchMicroServiceRedirectRules(r *http.Request) (bool, stri
 	for _, rule := range h.microserviceRedirectRules {
 		// Now we only support checking the scheduling service whether it is independent
 		if rule.targetServiceName == constant.SchedulingServiceName {
-			if !h.s.GetRaftCluster().IsServiceIndependent(constant.SchedulingServiceName) {
+			if !h.s.IsServiceIndependent(constant.SchedulingServiceName) {
 				continue
 			}
 		}

@@ -26,14 +26,19 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/coreos/go-semver/semver"
+	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.uber.org/zap"
+
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+
 	"github.com/tikv/pd/pkg/cluster"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/storelimit"
@@ -68,8 +73,6 @@ import (
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/server/config"
-	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.uber.org/zap"
 )
 
 var (
@@ -157,17 +160,15 @@ type RaftCluster struct {
 	isAPIServiceMode bool
 	meta             *metapb.Cluster
 	storage          storage.Storage
-	minResolvedTS    uint64
-	externalTS       uint64
+	minResolvedTS    atomic.Value // Store as uint64
+	externalTS       atomic.Value // Store as uint64
 
 	// Keep the previous store limit settings when removing a store.
 	prevStoreLimit map[uint64]map[storelimit.Type]float64
 
 	// This below fields are all read-only, we cannot update itself after the raft cluster starts.
-	clusterID uint64
-	id        id.Allocator
-	opt       *config.PersistOptions
-	limiter   *StoreLimiter
+	id  id.Allocator
+	opt *config.PersistOptions
 	*schedulingController
 	ruleManager              *placement.RuleManager
 	regionLabeler            *labeler.RegionLabeler
@@ -200,11 +201,18 @@ type Status struct {
 }
 
 // NewRaftCluster create a new cluster.
-func NewRaftCluster(ctx context.Context, clusterID uint64, member *member.EmbeddedEtcdMember, basicCluster *core.BasicCluster, storage storage.Storage, regionSyncer *syncer.RegionSyncer, etcdClient *clientv3.Client,
-	httpClient *http.Client, tsoAllocator *tso.AllocatorManager) *RaftCluster {
+func NewRaftCluster(
+	ctx context.Context,
+	member *member.EmbeddedEtcdMember,
+	basicCluster *core.BasicCluster,
+	storage storage.Storage,
+	regionSyncer *syncer.RegionSyncer,
+	etcdClient *clientv3.Client,
+	httpClient *http.Client,
+	tsoAllocator *tso.AllocatorManager,
+) *RaftCluster {
 	return &RaftCluster{
 		serverCtx:       ctx,
-		clusterID:       clusterID,
 		member:          member,
 		regionSyncer:    regionSyncer,
 		httpClient:      httpClient,
@@ -309,7 +317,7 @@ func (c *RaftCluster) InitCluster(
 }
 
 // Start starts a cluster.
-func (c *RaftCluster) Start(s Server) error {
+func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 	c.Lock()
 	defer c.Unlock()
 
@@ -318,11 +326,29 @@ func (c *RaftCluster) Start(s Server) error {
 		return nil
 	}
 	c.isAPIServiceMode = s.IsAPIServiceMode()
-	err := c.InitCluster(s.GetAllocator(), s.GetPersistOptions(), s.GetHBStreams(), s.GetKeyspaceGroupManager())
+	err = c.InitCluster(s.GetAllocator(), s.GetPersistOptions(), s.GetHBStreams(), s.GetKeyspaceGroupManager())
 	if err != nil {
 		return err
 	}
-	c.checkTSOService()
+	// We should not manage tso service when bootstrap try to start raft cluster.
+	// It only is controlled by leader election.
+	// Ref: https://github.com/tikv/pd/issues/8836
+	if !bootstrap {
+		c.checkTSOService()
+	}
+	defer func() {
+		if !bootstrap && err != nil {
+			c.stopTSOJobsIfNeeded()
+		}
+	}()
+	failpoint.Inject("raftClusterReturn", func(val failpoint.Value) {
+		if val, ok := val.(bool); (ok && val) || !ok {
+			err = errors.New("raftClusterReturn")
+		} else {
+			err = nil
+		}
+		failpoint.Return(err)
+	})
 	cluster, err := c.LoadClusterInfo()
 	if err != nil {
 		return err
@@ -347,11 +373,8 @@ func (c *RaftCluster) Start(s Server) error {
 	if err != nil {
 		return err
 	}
-	c.limiter = NewStoreLimiter(s.GetPersistOptions())
-	c.externalTS, err = c.storage.LoadExternalTS()
-	if err != nil {
-		log.Error("load external timestamp meets error", zap.Error(err))
-	}
+	c.loadExternalTS()
+	c.loadMinResolvedTS()
 
 	if c.isAPIServiceMode {
 		// bootstrap keyspace group manager after starting other parts successfully.
@@ -382,7 +405,7 @@ func (c *RaftCluster) Start(s Server) error {
 
 func (c *RaftCluster) checkSchedulingService() {
 	if c.isAPIServiceMode {
-		servers, err := discovery.Discover(c.etcdClient, strconv.FormatUint(c.clusterID, 10), constant.SchedulingServiceName)
+		servers, err := discovery.Discover(c.etcdClient, constant.SchedulingServiceName)
 		if c.opt.GetMicroServiceConfig().IsSchedulingFallbackEnabled() && (err != nil || len(servers) == 0) {
 			c.startSchedulingJobs(c, c.hbstreams)
 			c.UnsetServiceIndependent(constant.SchedulingServiceName)
@@ -403,11 +426,29 @@ func (c *RaftCluster) checkSchedulingService() {
 // checkTSOService checks the TSO service.
 func (c *RaftCluster) checkTSOService() {
 	if c.isAPIServiceMode {
+		if c.opt.GetMicroServiceConfig().IsTSODynamicSwitchingEnabled() {
+			servers, err := discovery.Discover(c.etcdClient, constant.TSOServiceName)
+			if err != nil || len(servers) == 0 {
+				if err := c.startTSOJobsIfNeeded(); err != nil {
+					log.Error("failed to start TSO jobs", errs.ZapError(err))
+					return
+				}
+				if c.IsServiceIndependent(constant.TSOServiceName) {
+					log.Info("TSO is provided by PD")
+					c.UnsetServiceIndependent(constant.TSOServiceName)
+				}
+			} else {
+				c.stopTSOJobsIfNeeded()
+				if !c.IsServiceIndependent(constant.TSOServiceName) {
+					log.Info("TSO is provided by TSO server")
+					c.SetServiceIndependent(constant.TSOServiceName)
+				}
+			}
+		}
 		return
 	}
 
-	if err := c.startTSOJobs(); err != nil {
-		// If there is an error, need to wait for the next check.
+	if err := c.startTSOJobsIfNeeded(); err != nil {
 		log.Error("failed to start TSO jobs", errs.ZapError(err))
 		return
 	}
@@ -422,6 +463,8 @@ func (c *RaftCluster) runServiceCheckJob() {
 		schedulingTicker.Reset(time.Millisecond)
 	})
 	defer schedulingTicker.Stop()
+	tsoTicker := time.NewTicker(tsoServiceCheckInterval)
+	defer tsoTicker.Stop()
 
 	for {
 		select {
@@ -429,47 +472,58 @@ func (c *RaftCluster) runServiceCheckJob() {
 			log.Info("service check job is stopped")
 			return
 		case <-schedulingTicker.C:
-			c.checkSchedulingService()
+			// ensure raft cluster is running
+			// avoid unexpected startSchedulingJobs when raft cluster is stopping
+			c.RLock()
+			if c.running {
+				c.checkSchedulingService()
+			}
+			c.RUnlock()
+		case <-tsoTicker.C:
+			// ensure raft cluster is running
+			// avoid unexpected startTSOJobsIfNeeded when raft cluster is stopping
+			// ref: https://github.com/tikv/pd/issues/8781
+			c.RLock()
+			if c.running {
+				c.checkTSOService()
+			}
+			c.RUnlock()
 		}
 	}
 }
 
-func (c *RaftCluster) startTSOJobs() error {
-	allocator, err := c.tsoAllocator.GetAllocator(tso.GlobalDCLocation)
-	if err != nil {
-		log.Error("failed to get global TSO allocator", errs.ZapError(err))
-		return err
-	}
+func (c *RaftCluster) startTSOJobsIfNeeded() error {
+	allocator := c.tsoAllocator.GetAllocator()
 	if !allocator.IsInitialize() {
 		log.Info("initializing the global TSO allocator")
 		if err := allocator.Initialize(0); err != nil {
 			log.Error("failed to initialize the global TSO allocator", errs.ZapError(err))
 			return err
 		}
+	} else if !c.running {
+		// If the global TSO allocator is already initialized, but the running flag is false,
+		// it means there maybe unexpected error happened before.
+		log.Warn("the global TSO allocator is already initialized before, but the cluster is not running")
 	}
 	return nil
 }
 
-func (c *RaftCluster) stopTSOJobs() error {
-	allocator, err := c.tsoAllocator.GetAllocator(tso.GlobalDCLocation)
-	if err != nil {
-		log.Error("failed to get global TSO allocator", errs.ZapError(err))
-		return err
+func (c *RaftCluster) stopTSOJobsIfNeeded() {
+	allocator := c.tsoAllocator.GetAllocator()
+	if !allocator.IsInitialize() {
+		return
 	}
-	if allocator.IsInitialize() {
-		c.tsoAllocator.ResetAllocatorGroup(tso.GlobalDCLocation, true)
-		failpoint.Inject("updateAfterResetTSO", func() {
-			allocator, _ := c.tsoAllocator.GetAllocator(tso.GlobalDCLocation)
-			if err := allocator.UpdateTSO(); !errorspkg.Is(err, errs.ErrUpdateTimestamp) {
-				log.Panic("the tso update after reset should return ErrUpdateTimestamp as expected", zap.Error(err))
-			}
-			if allocator.IsInitialize() {
-				log.Panic("the allocator should be uninitialized after reset")
-			}
-		})
-	}
-
-	return nil
+	log.Info("closing the global TSO allocator")
+	c.tsoAllocator.ResetAllocatorGroup(true)
+	failpoint.Inject("updateAfterResetTSO", func() {
+		allocator := c.tsoAllocator.GetAllocator()
+		if err := allocator.UpdateTSO(); !errorspkg.Is(err, errs.ErrUpdateTimestamp) {
+			log.Panic("the tso update after reset should return ErrUpdateTimestamp as expected", zap.Error(err))
+		}
+		if allocator.IsInitialize() {
+			log.Panic("the allocator should be uninitialized after reset")
+		}
+	})
 }
 
 // startGCTuner
@@ -809,6 +863,13 @@ func (c *RaftCluster) runReplicationMode() {
 // Stop stops the cluster.
 func (c *RaftCluster) Stop() {
 	c.Lock()
+	// We need to try to stop tso jobs whatever the cluster is running or not.
+	// Because we need to call checkTSOService as soon as possible while the cluster is starting,
+	// which makes the cluster may not be running but the tso job has been started.
+	// For example, the cluster meets an error when starting, such as cluster is not bootstrapped.
+	// In this case, the `running` in `RaftCluster` is false, but the tso job has been started.
+	// Ref: https://github.com/tikv/pd/issues/8836
+	c.stopTSOJobsIfNeeded()
 	if !c.running {
 		c.Unlock()
 		return
@@ -817,9 +878,6 @@ func (c *RaftCluster) Stop() {
 	c.cancel()
 	if !c.IsServiceIndependent(constant.SchedulingServiceName) {
 		c.stopSchedulingJobs()
-	}
-	if err := c.stopTSOJobs(); err != nil {
-		log.Error("failed to stop tso jobs", errs.ZapError(err))
 	}
 	c.heartbeatRunner.Stop()
 	c.miscRunner.Stop()
@@ -1075,7 +1133,7 @@ func (c *RaftCluster) processReportBuckets(buckets *metapb.Buckets) error {
 	// the two request(A:3,B:2) get the same region and need to update the buckets.
 	// the A will pass the check and set the version to 3, the B will fail because the region.bucket has changed.
 	// the retry should keep the old version and the new version will be set to the region.bucket, like two requests (A:2,B:3).
-	for retry := 0; retry < 3; retry++ {
+	for range 3 {
 		old := region.GetBuckets()
 		// region should not update if the version of the buckets is less than the old one.
 		if old != nil && buckets.GetVersion() <= old.GetVersion() {
@@ -2103,8 +2161,8 @@ func (c *RaftCluster) GetMetaCluster() *metapb.Cluster {
 func (c *RaftCluster) PutMetaCluster(meta *metapb.Cluster) error {
 	c.Lock()
 	defer c.Unlock()
-	if meta.GetId() != c.clusterID {
-		return errors.Errorf("invalid cluster %v, mismatch cluster id %d", meta, c.clusterID)
+	if meta.GetId() != keypath.ClusterID() {
+		return errors.Errorf("invalid cluster %v, mismatch cluster id %d", meta, keypath.ClusterID())
 	}
 	return c.putMetaLocked(typeutil.DeepClone(meta, core.ClusterFactory))
 }
@@ -2131,11 +2189,6 @@ func (c *RaftCluster) putRegion(region *core.RegionInfo) error {
 	}
 	c.PutRegion(region)
 	return nil
-}
-
-// GetStoreLimiter returns the dynamic adjusting limiter
-func (c *RaftCluster) GetStoreLimiter() *StoreLimiter {
-	return c.limiter
 }
 
 // GetStoreLimitByType returns the store limit for a given store ID and type.
@@ -2170,7 +2223,7 @@ func (c *RaftCluster) AddStoreLimit(store *metapb.Store) {
 	cfg.StoreLimit[storeID] = slc
 	c.opt.SetScheduleConfig(cfg)
 	var err error
-	for i := 0; i < persistLimitRetryTimes; i++ {
+	for range persistLimitRetryTimes {
 		if err = c.opt.Persist(c.storage); err == nil {
 			log.Info("store limit added", zap.Uint64("store-id", storeID))
 			return
@@ -2189,7 +2242,7 @@ func (c *RaftCluster) RemoveStoreLimit(storeID uint64) {
 	delete(cfg.StoreLimit, storeID)
 	c.opt.SetScheduleConfig(cfg)
 	var err error
-	for i := 0; i < persistLimitRetryTimes; i++ {
+	for range persistLimitRetryTimes {
 		if err = c.opt.Persist(c.storage); err == nil {
 			log.Info("store limit removed", zap.Uint64("store-id", storeID))
 			id := strconv.FormatUint(storeID, 10)
@@ -2215,28 +2268,27 @@ func (c *RaftCluster) SetMinResolvedTS(storeID, minResolvedTS uint64) error {
 }
 
 // CheckAndUpdateMinResolvedTS checks and updates the min resolved ts of the cluster.
+// It only be called by the background job runMinResolvedTSJob.
 // This is exported for testing purpose.
 func (c *RaftCluster) CheckAndUpdateMinResolvedTS() (uint64, bool) {
-	c.Lock()
-	defer c.Unlock()
-
 	if !c.isInitialized() {
 		return math.MaxUint64, false
 	}
-	curMinResolvedTS := uint64(math.MaxUint64)
+	newMinResolvedTS := uint64(math.MaxUint64)
 	for _, s := range c.GetStores() {
 		if !core.IsAvailableForMinResolvedTS(s) {
 			continue
 		}
-		if curMinResolvedTS > s.GetMinResolvedTS() {
-			curMinResolvedTS = s.GetMinResolvedTS()
+		if newMinResolvedTS > s.GetMinResolvedTS() {
+			newMinResolvedTS = s.GetMinResolvedTS()
 		}
 	}
-	if curMinResolvedTS == math.MaxUint64 || curMinResolvedTS <= c.minResolvedTS {
-		return c.minResolvedTS, false
+	oldMinResolvedTS := c.minResolvedTS.Load().(uint64)
+	if newMinResolvedTS == math.MaxUint64 || newMinResolvedTS <= oldMinResolvedTS {
+		return oldMinResolvedTS, false
 	}
-	c.minResolvedTS = curMinResolvedTS
-	return c.minResolvedTS, true
+	c.minResolvedTS.Store(newMinResolvedTS)
+	return newMinResolvedTS, true
 }
 
 func (c *RaftCluster) runMinResolvedTSJob() {
@@ -2250,7 +2302,6 @@ func (c *RaftCluster) runMinResolvedTSJob() {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
-	c.loadMinResolvedTS()
 	for {
 		select {
 		case <-c.ctx.Done():
@@ -2280,25 +2331,19 @@ func (c *RaftCluster) loadMinResolvedTS() {
 		log.Error("load min resolved ts meet error", errs.ZapError(err))
 		return
 	}
-	c.Lock()
-	defer c.Unlock()
-	c.minResolvedTS = minResolvedTS
+	c.minResolvedTS.Store(minResolvedTS)
 }
 
 // GetMinResolvedTS returns the min resolved ts of the cluster.
 func (c *RaftCluster) GetMinResolvedTS() uint64 {
-	c.RLock()
-	defer c.RUnlock()
 	if !c.isInitialized() {
 		return math.MaxUint64
 	}
-	return c.minResolvedTS
+	return c.minResolvedTS.Load().(uint64)
 }
 
 // GetStoreMinResolvedTS returns the min resolved ts of the store.
 func (c *RaftCluster) GetStoreMinResolvedTS(storeID uint64) uint64 {
-	c.RLock()
-	defer c.RUnlock()
 	store := c.GetStore(storeID)
 	if store == nil {
 		return math.MaxUint64
@@ -2326,20 +2371,26 @@ func (c *RaftCluster) GetMinResolvedTSByStoreIDs(ids []uint64) (uint64, map[uint
 
 // GetExternalTS returns the external timestamp.
 func (c *RaftCluster) GetExternalTS() uint64 {
-	c.RLock()
-	defer c.RUnlock()
 	if !c.isInitialized() {
 		return math.MaxUint64
 	}
-	return c.externalTS
+	return c.externalTS.Load().(uint64)
 }
 
 // SetExternalTS sets the external timestamp.
 func (c *RaftCluster) SetExternalTS(timestamp uint64) error {
-	c.Lock()
-	defer c.Unlock()
-	c.externalTS = timestamp
+	c.externalTS.Store(timestamp)
 	return c.storage.SaveExternalTS(timestamp)
+}
+
+func (c *RaftCluster) loadExternalTS() {
+	// Use `c.GetStorage()` here to prevent from the data race in test.
+	externalTS, err := c.GetStorage().LoadExternalTS()
+	if err != nil {
+		log.Error("load external ts meet error", errs.ZapError(err))
+		return
+	}
+	c.externalTS.Store(externalTS)
 }
 
 // SetStoreLimit sets a store limit for a given type and rate.
@@ -2510,25 +2561,22 @@ func IsClientURL(addr string, etcdClient *clientv3.Client) bool {
 
 // IsServiceIndependent returns whether the service is independent.
 func (c *RaftCluster) IsServiceIndependent(name string) bool {
-	if c == nil {
-		return false
-	}
 	_, exist := c.independentServices.Load(name)
 	return exist
 }
 
 // SetServiceIndependent sets the service to be independent.
 func (c *RaftCluster) SetServiceIndependent(name string) {
-	if c == nil {
-		return
-	}
 	c.independentServices.Store(name, struct{}{})
 }
 
 // UnsetServiceIndependent unsets the service to be independent.
 func (c *RaftCluster) UnsetServiceIndependent(name string) {
-	if c == nil {
-		return
-	}
 	c.independentServices.Delete(name)
+}
+
+// GetGlobalTSOAllocator return global tso allocator
+// It only is used for test.
+func (c *RaftCluster) GetGlobalTSOAllocator() tso.Allocator {
+	return c.tsoAllocator.GetAllocator()
 }

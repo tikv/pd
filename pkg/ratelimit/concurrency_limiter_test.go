@@ -28,7 +28,7 @@ import (
 func TestConcurrencyLimiter(t *testing.T) {
 	re := require.New(t)
 	cl := NewConcurrencyLimiter(10)
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		re.True(cl.allow())
 	}
 	re.False(cl.allow())
@@ -42,15 +42,15 @@ func TestConcurrencyLimiter(t *testing.T) {
 	re.Equal(uint64(10), cl.GetRunningTasksNum())
 	cl.release()
 	re.Equal(uint64(9), cl.GetRunningTasksNum())
-	for i := 0; i < 9; i++ {
+	for range 9 {
 		cl.release()
 	}
 	re.Equal(uint64(10), cl.getMaxConcurrency())
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		re.True(cl.allow())
 	}
 	re.Equal(uint64(5), cl.GetRunningTasksNum())
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		cl.release()
 	}
 	re.Equal(uint64(5), cl.getMaxConcurrency())
@@ -106,7 +106,7 @@ func TestConcurrencyLimiterAcquire(t *testing.T) {
 	start := time.Now()
 	wg := &sync.WaitGroup{}
 	wg.Add(100)
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		go func(i int) {
 			defer wg.Done()
 			token, err := limiter.AcquireToken(ctx)

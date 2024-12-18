@@ -29,17 +29,19 @@ import (
 
 	"github.com/docker/go-units"
 	"github.com/gogo/protobuf/proto"
+	"go.uber.org/zap"
+
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/replication_modepb"
 	"github.com/pingcap/log"
+
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
-	"go.uber.org/zap"
 )
 
 const (
@@ -2108,7 +2110,7 @@ func DiffRegionKeyInfo(origin *RegionInfo, other *RegionInfo) string {
 // ToUpperASCIIInplace bytes.ToUpper but zero-cost
 func ToUpperASCIIInplace(s []byte) []byte {
 	hasLower := false
-	for i := 0; i < len(s); i++ {
+	for i := range s {
 		c := s[i]
 		hasLower = hasLower || ('a' <= c && c <= 'z')
 	}
@@ -2117,7 +2119,7 @@ func ToUpperASCIIInplace(s []byte) []byte {
 		return s
 	}
 	var c byte
-	for i := 0; i < len(s); i++ {
+	for i := range s {
 		c = s[i]
 		if 'a' <= c && c <= 'z' {
 			c -= 'a' - 'A'

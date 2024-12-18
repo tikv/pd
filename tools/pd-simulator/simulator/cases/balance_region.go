@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
+
 	"github.com/tikv/pd/pkg/core"
 	sc "github.com/tikv/pd/tools/pd-simulator/simulator/config"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/info"
@@ -32,7 +33,7 @@ func newRedundantBalanceRegion(config *sc.SimConfig) *Case {
 	replica := int(config.ServerConfig.Replication.MaxReplicas)
 	allStores := make(map[uint64]struct{}, totalStore)
 
-	for i := 0; i < totalStore; i++ {
+	for i := range totalStore {
 		s := &Store{
 			ID:     simutil.IDAllocator.NextID(),
 			Status: metapb.StoreState_Up,
@@ -44,9 +45,9 @@ func newRedundantBalanceRegion(config *sc.SimConfig) *Case {
 		allStores[s.ID] = struct{}{}
 	}
 
-	for i := 0; i < totalRegion; i++ {
+	for i := range totalRegion {
 		peers := make([]*metapb.Peer, 0, replica)
-		for j := 0; j < replica; j++ {
+		for j := range replica {
 			peers = append(peers, &metapb.Peer{
 				Id:      simutil.IDAllocator.NextID(),
 				StoreId: uint64((i+j)%totalStore + 1),

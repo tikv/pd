@@ -18,12 +18,14 @@ import (
 	"math"
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/pingcap/log"
+
 	"github.com/tikv/pd/pkg/movingaverage"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/statistics/utils"
 	"github.com/tikv/pd/pkg/utils/syncutil"
-	"go.uber.org/zap"
 )
 
 type dimStat struct {
@@ -183,7 +185,7 @@ func (stat *HotPeerStat) GetLoads() []float64 {
 func (stat *HotPeerStat) Clone() *HotPeerStat {
 	ret := *stat
 	ret.Loads = make([]float64, utils.DimLen)
-	for i := 0; i < utils.DimLen; i++ {
+	for i := range utils.DimLen {
 		ret.Loads[i] = stat.GetLoad(i) // replace with denoising loads
 	}
 	ret.rollingLoads = nil

@@ -25,15 +25,16 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+	etcdtypes "go.etcd.io/etcd/client/pkg/v3/types"
+	"go.etcd.io/etcd/server/v3/embed"
+	"go.uber.org/goleak"
+
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/assertutil"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server/config"
-	etcdtypes "go.etcd.io/etcd/client/pkg/v3/types"
-	"go.etcd.io/etcd/server/v3/embed"
-	"go.uber.org/goleak"
 )
 
 func TestMain(m *testing.M) {
@@ -61,7 +62,7 @@ func (suite *leaderServerTestSuite) SetupSuite() {
 	cfgs := NewTestMultiConfig(assertutil.CheckerWithNilAssert(re), 3)
 
 	ch := make(chan *Server, 3)
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		cfg := cfgs[i]
 
 		go func() {
@@ -74,7 +75,7 @@ func (suite *leaderServerTestSuite) SetupSuite() {
 		}()
 	}
 
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		svr := <-ch
 		suite.svrs[svr.GetAddr()] = svr
 		suite.leaderPath = svr.GetMember().GetLeaderPath()
@@ -117,7 +118,7 @@ func newTestServersWithCfgs(
 		}(cfg)
 	}
 
-	for i := 0; i < len(cfgs); i++ {
+	for range cfgs {
 		svr := <-ch
 		re.NotNil(svr)
 		svrs = append(svrs, svr)

@@ -27,10 +27,13 @@ import (
 
 	"github.com/BurntSushi/toml"
 	"github.com/coreos/go-semver/semver"
+	"github.com/spf13/pflag"
+	"go.uber.org/zap"
+
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
-	"github.com/spf13/pflag"
+
 	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/core/storelimit"
@@ -43,7 +46,6 @@ import (
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/metricutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
-	"go.uber.org/zap"
 )
 
 const (
@@ -398,6 +400,11 @@ func (o *PersistConfig) GetRegionScoreFormulaVersion() string {
 // GetHotRegionCacheHitsThreshold returns the hot region cache hits threshold.
 func (o *PersistConfig) GetHotRegionCacheHitsThreshold() int {
 	return int(o.GetScheduleConfig().HotRegionCacheHitsThreshold)
+}
+
+// GetPatrolRegionWorkerCount returns the worker count of the patrol.
+func (o *PersistConfig) GetPatrolRegionWorkerCount() int {
+	return o.GetScheduleConfig().PatrolRegionWorkerCount
 }
 
 // GetMaxMovableHotPeerSize returns the max movable hot peer size.

@@ -19,9 +19,10 @@ import (
 	"math/rand"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/stretchr/testify/require"
 )
 
 func TestRegionInfo(t *testing.T) {
@@ -29,7 +30,7 @@ func TestRegionInfo(t *testing.T) {
 	n := uint64(3)
 
 	peers := make([]*metapb.Peer, 0, n)
-	for i := uint64(0); i < n; i++ {
+	for i := range n {
 		p := &metapb.Peer{
 			Id:      i,
 			StoreId: i,
@@ -50,7 +51,7 @@ func TestRegionInfo(t *testing.T) {
 	r := info.Clone()
 	re.Equal(info, r)
 
-	for i := uint64(0); i < n; i++ {
+	for i := range n {
 		re.Equal(r.meta.Peers[i], r.GetPeer(i))
 	}
 	re.Nil(r.GetPeer(n))
@@ -59,7 +60,7 @@ func TestRegionInfo(t *testing.T) {
 	re.Nil(r.GetPendingPeer(n))
 	re.Equal(pendingPeer, r.GetPendingPeer(pendingPeer.GetId()))
 
-	for i := uint64(0); i < n; i++ {
+	for i := range n {
 		re.Equal(i, r.GetStorePeer(i).GetStoreId())
 	}
 	re.Nil(r.GetStorePeer(n))
@@ -82,7 +83,7 @@ func TestRegionInfo(t *testing.T) {
 
 	stores := r.GetStoreIDs()
 	re.Len(stores, int(n))
-	for i := uint64(0); i < n; i++ {
+	for i := range n {
 		_, ok := stores[i]
 		re.True(ok)
 	}
@@ -249,19 +250,19 @@ func TestRegionTreeSplitAndMerge(t *testing.T) {
 	n := 7
 
 	// Split.
-	for i := 0; i < n; i++ {
+	for range n {
 		regions = SplitRegions(regions)
 		updateRegions(re, tree, regions)
 	}
 
 	// Merge.
-	for i := 0; i < n; i++ {
+	for range n {
 		regions = MergeRegions(regions)
 		updateRegions(re, tree, regions)
 	}
 
 	// Split twice and merge once.
-	for i := 0; i < n*2; i++ {
+	for i := range n * 2 {
 		if (i+1)%3 == 0 {
 			regions = MergeRegions(regions)
 		} else {
@@ -413,7 +414,7 @@ func (m *mockRegionTreeData) shuffleItems() *mockRegionTreeData {
 
 func mock1MRegionTree() *mockRegionTreeData {
 	data := &mockRegionTreeData{newRegionTree(), make([]*RegionInfo, 1000000)}
-	for i := 0; i < 1_000_000; i++ {
+	for i := range 1_000_000 {
 		region := &RegionInfo{meta: &metapb.Region{Id: uint64(i), StartKey: []byte(fmt.Sprintf("%20d", i)), EndKey: []byte(fmt.Sprintf("%20d", i+1))}}
 		updateNewItem(data.tree, region)
 		data.items[i] = region
@@ -443,7 +444,7 @@ func BenchmarkRegionTreeRandomInsert(b *testing.B) {
 func BenchmarkRegionTreeRandomOverlapsInsert(b *testing.B) {
 	tree := newRegionTree()
 	var items []*RegionInfo
-	for i := 0; i < MaxCount; i++ {
+	for range MaxCount {
 		var startKey, endKey int
 		key1 := rand.Intn(MaxCount)
 		key2 := rand.Intn(MaxCount)
@@ -493,7 +494,7 @@ func BenchmarkRegionTreeRandomLookUpRegion(b *testing.B) {
 func BenchmarkRegionTreeScan(b *testing.B) {
 	data := mock1MRegionTree().shuffleItems()
 	b.ResetTimer()
-	for i := 0; i < 1; i++ {
+	for i := 0; i < b.N; i++ {
 		data.tree.scanRanges()
 	}
 }

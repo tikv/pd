@@ -20,6 +20,7 @@ import (
 	"strings"
 
 	"github.com/pingcap/errors"
+
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/schedule/rangelist"
 )
@@ -81,7 +82,7 @@ func buildRuleList(rules ruleContainer) (ruleList, error) {
 	rl := ruleList{
 		rangeList: rangeList,
 	}
-	for i := 0; i < rangeList.Len(); i++ {
+	for i := range rangeList.Len() {
 		start, data := rangeList.Get(i)
 		var end []byte
 		if i < rangeList.Len()-1 {

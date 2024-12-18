@@ -21,9 +21,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/pingcap/kvproto/pkg/metapb"
+
 	"github.com/tikv/pd/pkg/core"
 )
 
@@ -271,7 +273,7 @@ func TestPickPeersFromBinaryInt(t *testing.T) {
 		re.NoError(err)
 		selected := pickPeersFromBinaryInt(candidates, uint(binaryNumber))
 		re.Len(selected, len(c.expectedPeers))
-		for id := 0; id < len(selected); id++ {
+		for id := range selected {
 			re.Equal(selected[id].Id, c.expectedPeers[id])
 		}
 	}

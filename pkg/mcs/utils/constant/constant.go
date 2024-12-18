@@ -17,8 +17,6 @@ package constant
 import "time"
 
 const (
-	// ClusterIDPath is the path to store cluster id
-	ClusterIDPath = "/pd/cluster_id"
 	// RetryInterval is the interval to retry.
 	// Note: the interval must be less than the timeout of tidb and tikv, which is 2s by default in tikv.
 	RetryInterval = 500 * time.Millisecond
@@ -63,8 +61,6 @@ const (
 	APIServiceName = "api"
 	// TSOServiceName is the name of tso server.
 	TSOServiceName = "tso"
-	// ResourceManagerServiceName is the name of resource manager server.
-	ResourceManagerServiceName = "resource_manager"
 	// SchedulingServiceName is the name of scheduling server.
 	SchedulingServiceName = "scheduling"
 	// KeyspaceGroupsKey is the path component of keyspace groups.

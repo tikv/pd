@@ -17,8 +17,10 @@ package syncer
 import (
 	"testing"
 
-	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/require"
+
+	"github.com/pingcap/kvproto/pkg/metapb"
+
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/storage/kv"
 )
@@ -53,7 +55,7 @@ func TestBufferSize(t *testing.T) {
 	// size equals 100
 	kvMem := kv.NewMemoryKV()
 	h1 := newHistoryBuffer(100, kvMem)
-	for i := 0; i < 6; i++ {
+	for i := range 6 {
 		h1.record(regions[i])
 	}
 	re.Equal(6, h1.len())

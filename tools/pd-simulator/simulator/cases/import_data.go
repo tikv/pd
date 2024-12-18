@@ -21,14 +21,16 @@ import (
 
 	"github.com/docker/go-units"
 	"github.com/go-echarts/go-echarts/charts"
+	"go.uber.org/zap"
+
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
+
 	"github.com/tikv/pd/pkg/codec"
 	"github.com/tikv/pd/pkg/core"
 	sc "github.com/tikv/pd/tools/pd-simulator/simulator/config"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/info"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/simutil"
-	"go.uber.org/zap"
 )
 
 func newImportData(config *sc.SimConfig) *Case {
@@ -38,7 +40,7 @@ func newImportData(config *sc.SimConfig) *Case {
 	replica := int(config.ServerConfig.Replication.MaxReplicas)
 	allStores := make(map[uint64]struct{}, totalStore)
 	// Initialize the cluster
-	for i := 0; i < totalStore; i++ {
+	for range totalStore {
 		id := simutil.IDAllocator.NextID()
 		simCase.Stores = append(simCase.Stores, &Store{
 			ID:     id,
@@ -47,9 +49,9 @@ func newImportData(config *sc.SimConfig) *Case {
 		allStores[id] = struct{}{}
 	}
 
-	for i := 0; i < totalRegion; i++ {
+	for i := range totalRegion {
 		peers := make([]*metapb.Peer, 0, replica)
-		for j := 0; j < replica; j++ {
+		for j := range replica {
 			peers = append(peers, &metapb.Peer{
 				Id:      IDAllocator.nextID(),
 				StoreId: uint64((i+j)%totalStore + 1),

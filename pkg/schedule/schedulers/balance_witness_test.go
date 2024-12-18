@@ -19,6 +19,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/suite"
+
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/operator"
@@ -114,7 +115,7 @@ func (suite *balanceWitnessSchedulerTestSuite) TestTransferWitnessOut() {
 		1: 2,
 		2: 1,
 	}
-	for i := 0; i < 20; i++ {
+	for range 20 {
 		if len(suite.schedule()) == 0 {
 			continue
 		}

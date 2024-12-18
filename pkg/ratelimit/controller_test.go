@@ -21,8 +21,9 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
-	"github.com/tikv/pd/pkg/utils/syncutil"
 	"golang.org/x/time/rate"
+
+	"github.com/tikv/pd/pkg/utils/syncutil"
 )
 
 type changeAndResult struct {
@@ -55,7 +56,7 @@ func runMulitLabelLimiter(t *testing.T, limiter *Controller, testCase []labelCas
 			for _, rd := range cas.round {
 				rd.checkOptionStatus(cas.label, rd.opt)
 				time.Sleep(rd.waitDuration)
-				for i := 0; i < rd.totalRequest; i++ {
+				for range rd.totalRequest {
 					wg.Add(1)
 					go func() {
 						countRateLimiterHandleResult(limiter, cas.label, &successCount, &failedCount, &lock, &wg, r)
@@ -64,7 +65,7 @@ func runMulitLabelLimiter(t *testing.T, limiter *Controller, testCase []labelCas
 				wg.Wait()
 				re.Equal(rd.fail, failedCount)
 				re.Equal(rd.success, successCount)
-				for i := 0; i < rd.release; i++ {
+				for range rd.release {
 					r.release()
 				}
 				rd.checkStatusFunc(cas.label)
@@ -204,7 +205,7 @@ func TestBlockList(t *testing.T) {
 
 	status := UpdateQPSLimiter(float64(rate.Every(time.Second)), 1)(label, limiter)
 	re.NotZero(status & InAllowList)
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		_, err := limiter.Allow(label)
 		re.NoError(err)
 	}

@@ -22,10 +22,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/pingcap/failpoint"
-	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+
+	"github.com/pingcap/failpoint"
+	"github.com/pingcap/kvproto/pkg/keyspacepb"
+
 	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/utils/testutil"
@@ -283,7 +285,7 @@ func (suite *keyspaceTestSuite) TestUpdateKeyspaceState() {
 func (suite *keyspaceTestSuite) TestListKeyspace() {
 	re := suite.Require()
 	var param api.CreateKeyspaceParams
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		param = api.CreateKeyspaceParams{
 			Name: fmt.Sprintf("test_keyspace_%d", i),
 			Config: map[string]string{

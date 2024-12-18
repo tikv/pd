@@ -21,11 +21,14 @@ import (
 	"time"
 
 	"github.com/docker/go-units"
+
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mock/mockid"
@@ -55,7 +58,6 @@ type Cluster struct {
 	*labeler.RegionLabeler
 	*statistics.HotStat
 	*config.PersistOptions
-	ID                      uint64
 	pendingProcessedRegions map[uint64]struct{}
 	*buckets.HotBucketCache
 	storage.Storage
@@ -63,11 +65,12 @@ type Cluster struct {
 
 // NewCluster creates a new Cluster
 func NewCluster(ctx context.Context, opts *config.PersistOptions) *Cluster {
+	bc := core.NewBasicCluster()
 	c := &Cluster{
 		ctx:                     ctx,
-		BasicCluster:            core.NewBasicCluster(),
+		BasicCluster:            bc,
 		IDAllocator:             mockid.NewIDAllocator(),
-		HotStat:                 statistics.NewHotStat(ctx),
+		HotStat:                 statistics.NewHotStat(ctx, bc),
 		HotBucketCache:          buckets.NewBucketsCache(ctx),
 		PersistOptions:          opts,
 		pendingProcessedRegions: map[uint64]struct{}{},
@@ -359,7 +362,7 @@ func (mc *Cluster) AddRegionStoreWithLeader(storeID uint64, regionCount int, lea
 		leaderCount = leaderCounts[0]
 	}
 	mc.AddRegionStore(storeID, regionCount)
-	for i := 0; i < leaderCount; i++ {
+	for range leaderCount {
 		id, _ := mc.AllocID()
 		mc.AddLeaderRegion(id, storeID)
 	}
@@ -463,7 +466,7 @@ func (mc *Cluster) AddRegionWithReadInfo(
 	}
 
 	var items []*statistics.HotPeerStat
-	for i := 0; i < filledNum; i++ {
+	for range filledNum {
 		items = mc.CheckRegionRead(r)
 		for _, item := range items {
 			mc.HotCache.Update(item, utils.Read)
@@ -483,7 +486,7 @@ func (mc *Cluster) AddRegionWithPeerReadInfo(regionID, leaderStoreID, targetStor
 		filledNum = filledNums[0]
 	}
 	var items []*statistics.HotPeerStat
-	for i := 0; i < filledNum; i++ {
+	for range filledNum {
 		items = mc.CheckRegionRead(r)
 		for _, item := range items {
 			if item.StoreID == targetStoreID {
@@ -512,7 +515,7 @@ func (mc *Cluster) AddRegionLeaderWithReadInfo(
 	}
 
 	var items []*statistics.HotPeerStat
-	for i := 0; i < filledNum; i++ {
+	for range filledNum {
 		items = mc.CheckRegionLeaderRead(r)
 		for _, item := range items {
 			mc.HotCache.Update(item, utils.Read)
@@ -540,7 +543,7 @@ func (mc *Cluster) AddLeaderRegionWithWriteInfo(
 	}
 
 	var items []*statistics.HotPeerStat
-	for i := 0; i < filledNum; i++ {
+	for range filledNum {
 		items = mc.CheckRegionWrite(r)
 		for _, item := range items {
 			mc.HotCache.Update(item, utils.Write)
@@ -561,9 +564,9 @@ func (mc *Cluster) UpdateStoreLeaderWeight(storeID uint64, weight float64) {
 func (mc *Cluster) SetStoreEvictLeader(storeID uint64, enableEvictLeader bool) {
 	store := mc.GetStore(storeID)
 	if enableEvictLeader {
-		mc.PutStore(store.Clone(core.PauseLeaderTransfer()))
+		mc.PutStore(store.Clone(core.PauseLeaderTransfer(constant.In)))
 	} else {
-		mc.PutStore(store.Clone(core.ResumeLeaderTransfer()))
+		mc.PutStore(store.Clone(core.ResumeLeaderTransfer(constant.In)))
 	}
 }
 

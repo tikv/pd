@@ -18,8 +18,10 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/pingcap/kvproto/pkg/metapb"
+
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/mock/mockconfig"
 	"github.com/tikv/pd/pkg/schedule/operator"
@@ -70,7 +72,7 @@ func newBenchCluster(ruleEnable, labelEnable bool, tombstoneEnable bool) (contex
 				tc.AddLabelsStore(storeID, regionCount-int(storeID), label)
 				storeID++
 			}
-			for j := 0; j < regionCount; j++ {
+			for range regionCount {
 				if ruleEnable {
 					learnID := regionID%uint64(tiflashCount) + uint64(storeCount)
 					tc.AddRegionWithLearner(regionID, storeID-1, []uint64{storeID - 2, storeID - 3}, []uint64{learnID})
@@ -82,7 +84,7 @@ func newBenchCluster(ruleEnable, labelEnable bool, tombstoneEnable bool) (contex
 		}
 	}
 	if tombstoneEnable {
-		for i := uint64(0); i < uint64(storeCount*2/3); i++ {
+		for i := range uint64(storeCount * 2 / 3) {
 			s := tc.GetStore(i)
 			s.GetMeta().State = metapb.StoreState_Tombstone
 		}
@@ -105,7 +107,7 @@ func newBenchBigCluster(storeNumInOneRack, regionNum int) (context.CancelFunc, *
 
 	storeID, regionID := uint64(0), uint64(0)
 	hosts := make([]string, 0)
-	for i := 0; i < storeNumInOneRack; i++ {
+	for i := range storeNumInOneRack {
 		hosts = append(hosts, fmt.Sprintf("host%d", i+1))
 	}
 	for _, host := range hosts {
@@ -118,7 +120,7 @@ func newBenchBigCluster(storeNumInOneRack, regionNum int) (context.CancelFunc, *
 				storeID++
 				tc.AddLabelsStore(storeID, regionNum, label)
 			}
-			for j := 0; j < regionCount; j++ {
+			for range regionCount {
 				tc.AddRegionWithLearner(regionID, storeID, []uint64{storeID - 1, storeID - 2}, nil)
 				regionID++
 			}
@@ -129,7 +131,7 @@ func newBenchBigCluster(storeNumInOneRack, regionNum int) (context.CancelFunc, *
 
 func addTiflash(tc *mockcluster.Cluster) {
 	tc.SetPlacementRuleEnabled(true)
-	for i := 0; i < tiflashCount; i++ {
+	for i := range tiflashCount {
 		label := make(map[string]string, 3)
 		label["engine"] = "tiflash"
 		if i == tiflashCount-1 {

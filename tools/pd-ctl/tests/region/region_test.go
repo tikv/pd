@@ -20,9 +20,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/stretchr/testify/require"
+
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/response"
 	"github.com/tikv/pd/server/api"
@@ -292,7 +294,7 @@ func TestRegionNoLeader(t *testing.T) {
 
 	leaderServer := cluster.GetLeaderServer()
 	re.NoError(leaderServer.BootstrapCluster())
-	for i := 0; i < len(stores); i++ {
+	for i := range stores {
 		pdTests.MustPutStore(re, cluster, stores[i])
 	}
 

@@ -22,8 +22,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/pingcap/failpoint"
 	"github.com/stretchr/testify/require"
+
+	"github.com/pingcap/failpoint"
+
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/testutil"
@@ -97,7 +99,7 @@ func TestSplitKeyspaceGroup(t *testing.T) {
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/delayStartServerLoop", `return(true)`))
 	keyspaces := make([]string, 0)
 	// we test the case which exceed the default max txn ops limit in etcd, which is 128.
-	for i := 0; i < 129; i++ {
+	for i := range 129 {
 		keyspaces = append(keyspaces, fmt.Sprintf("keyspace_%d", i))
 	}
 	tc, err := pdTests.NewTestAPICluster(ctx, 3, func(conf *config.Config, _ string) {
@@ -152,7 +154,7 @@ func TestExternalAllocNodeWhenStart(t *testing.T) {
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/acceleratedAllocNodes", `return(true)`))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/delayStartServerLoop", `return(true)`))
 	keyspaces := make([]string, 0)
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		keyspaces = append(keyspaces, fmt.Sprintf("keyspace_%d", i))
 	}
 	tc, err := pdTests.NewTestAPICluster(ctx, 1, func(conf *config.Config, _ string) {
@@ -192,7 +194,7 @@ func TestSetNodeAndPriorityKeyspaceGroup(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	keyspaces := make([]string, 0)
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		keyspaces = append(keyspaces, fmt.Sprintf("keyspace_%d", i))
 	}
 	tc, err := pdTests.NewTestAPICluster(ctx, 3, func(conf *config.Config, _ string) {
@@ -296,7 +298,7 @@ func TestMergeKeyspaceGroup(t *testing.T) {
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/delayStartServerLoop", `return(true)`))
 	keyspaces := make([]string, 0)
 	// we test the case which exceed the default max txn ops limit in etcd, which is 128.
-	for i := 0; i < 129; i++ {
+	for i := range 129 {
 		keyspaces = append(keyspaces, fmt.Sprintf("keyspace_%d", i))
 	}
 	tc, err := pdTests.NewTestAPICluster(ctx, 1, func(conf *config.Config, _ string) {
@@ -415,7 +417,7 @@ func TestKeyspaceGroupState(t *testing.T) {
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/acceleratedAllocNodes", `return(true)`))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/delayStartServerLoop", `return(true)`))
 	keyspaces := make([]string, 0)
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		keyspaces = append(keyspaces, fmt.Sprintf("keyspace_%d", i))
 	}
 	tc, err := pdTests.NewTestAPICluster(ctx, 1, func(conf *config.Config, _ string) {
@@ -506,7 +508,7 @@ func TestShowKeyspaceGroupPrimary(t *testing.T) {
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/fastGroupSplitPatroller", `return(true)`))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/delayStartServerLoop", `return(true)`))
 	keyspaces := make([]string, 0)
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		keyspaces = append(keyspaces, fmt.Sprintf("keyspace_%d", i))
 	}
 	tc, err := pdTests.NewTestAPICluster(ctx, 1, func(conf *config.Config, _ string) {

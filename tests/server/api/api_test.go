@@ -27,11 +27,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/suite"
+	"go.uber.org/goleak"
+
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/stretchr/testify/require"
-	"github.com/stretchr/testify/suite"
+
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
@@ -40,7 +43,6 @@ import (
 	"github.com/tikv/pd/server/api"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
-	"go.uber.org/goleak"
 )
 
 func TestMain(m *testing.M) {
@@ -254,7 +256,7 @@ func (suite *middlewareTestSuite) TestRateLimitMiddleware() {
 	re.NoError(err)
 	re.Equal(http.StatusOK, resp.StatusCode)
 
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		req, _ = http.NewRequest(http.MethodPost, leader.GetAddr()+"/pd/api/v1/admin/log", strings.NewReader("\"info\""))
 		resp, err = tests.TestDialClient.Do(req)
 		re.NoError(err)
@@ -271,7 +273,7 @@ func (suite *middlewareTestSuite) TestRateLimitMiddleware() {
 
 	// qps = 0.5, so sleep 2s
 	time.Sleep(time.Second * 2)
-	for i := 0; i < 2; i++ {
+	for i := range 2 {
 		req, _ = http.NewRequest(http.MethodPost, leader.GetAddr()+"/pd/api/v1/admin/log", strings.NewReader("\"info\""))
 		resp, err = tests.TestDialClient.Do(req)
 		re.NoError(err)
@@ -288,7 +290,7 @@ func (suite *middlewareTestSuite) TestRateLimitMiddleware() {
 
 	// test only sleep 1s
 	time.Sleep(time.Second)
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		req, _ = http.NewRequest(http.MethodPost, leader.GetAddr()+"/pd/api/v1/admin/log", strings.NewReader("\"info\""))
 		resp, err = tests.TestDialClient.Do(req)
 		re.NoError(err)
@@ -315,7 +317,7 @@ func (suite *middlewareTestSuite) TestRateLimitMiddleware() {
 	re.Equal(0.5, cfg.QPS)
 	re.Equal(1, cfg.QPSBurst)
 
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		req, _ = http.NewRequest(http.MethodPost, leader.GetAddr()+"/pd/api/v1/admin/log", strings.NewReader("\"info\""))
 		resp, err = tests.TestDialClient.Do(req)
 		re.NoError(err)
@@ -332,7 +334,7 @@ func (suite *middlewareTestSuite) TestRateLimitMiddleware() {
 
 	// qps = 0.5, so sleep 2s
 	time.Sleep(time.Second * 2)
-	for i := 0; i < 2; i++ {
+	for i := range 2 {
 		req, _ = http.NewRequest(http.MethodPost, leader.GetAddr()+"/pd/api/v1/admin/log", strings.NewReader("\"info\""))
 		resp, err = tests.TestDialClient.Do(req)
 		re.NoError(err)
@@ -349,7 +351,7 @@ func (suite *middlewareTestSuite) TestRateLimitMiddleware() {
 
 	// test only sleep 1s
 	time.Sleep(time.Second)
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		req, _ = http.NewRequest(http.MethodPost, leader.GetAddr()+"/pd/api/v1/admin/log", strings.NewReader("\"info\""))
 		resp, err = tests.TestDialClient.Do(req)
 		re.NoError(err)
@@ -371,7 +373,7 @@ func (suite *middlewareTestSuite) TestRateLimitMiddleware() {
 	resp.Body.Close()
 	re.False(leader.GetServer().GetServiceMiddlewarePersistOptions().IsRateLimitEnabled())
 
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		req, _ = http.NewRequest(http.MethodPost, leader.GetAddr()+"/pd/api/v1/admin/log", strings.NewReader("\"info\""))
 		resp, err = tests.TestDialClient.Do(req)
 		re.NoError(err)
@@ -925,7 +927,7 @@ func TestSendApiWhenRestartRaftCluster(t *testing.T) {
 	output := sendRequest(re, leader.GetAddr()+"/pd/api/v1/min-resolved-ts", http.MethodGet, http.StatusInternalServerError)
 	re.Contains(string(output), "TiKV cluster not bootstrapped, please start TiKV first")
 
-	err = rc.Start(leader.GetServer())
+	err = rc.Start(leader.GetServer(), false)
 	re.NoError(err)
 	rc = leader.GetRaftCluster()
 	re.NotNil(rc)
@@ -938,6 +940,8 @@ func TestPreparingProgress(t *testing.T) {
 	defer cancel()
 	cluster, err := tests.NewTestCluster(ctx, 1, func(conf *config.Config, _ string) {
 		conf.Replication.MaxReplicas = 1
+		// prevent scheduling
+		conf.Schedule.RegionScheduleLimit = 0
 	})
 	re.NoError(err)
 	defer cluster.Destroy()
@@ -998,7 +1002,7 @@ func TestPreparingProgress(t *testing.T) {
 	for _, store := range stores[:2] {
 		tests.MustPutStore(re, cluster, store)
 	}
-	for i := 0; i < core.InitClusterRegionThreshold; i++ {
+	for i := range core.InitClusterRegionThreshold {
 		tests.MustPutRegion(re, cluster, uint64(i+1), uint64(i)%3+1, []byte(fmt.Sprintf("%20d", i)), []byte(fmt.Sprintf("%20d", i+1)), core.SetApproximateSize(10))
 	}
 	testutil.Eventually(re, func() bool {
@@ -1008,28 +1012,15 @@ func TestPreparingProgress(t *testing.T) {
 	for _, store := range stores[2:] {
 		tests.MustPutStore(re, cluster, store)
 	}
-	// no store preparing
-	output := sendRequest(re, leader.GetAddr()+"/pd/api/v1/stores/progress?action=preparing", http.MethodGet, http.StatusNotFound)
-	re.Contains(string(output), "no progress found for the action")
-	output = sendRequest(re, leader.GetAddr()+"/pd/api/v1/stores/progress?id=4", http.MethodGet, http.StatusNotFound)
-	re.Contains(string(output), "no progress found for the given store ID")
 
 	if !leader.GetRaftCluster().IsPrepared() {
 		testutil.Eventually(re, func() bool {
 			if leader.GetRaftCluster().IsPrepared() {
 				return true
 			}
-			url := leader.GetAddr() + "/pd/api/v1/stores/progress?action=preparing"
-			req, _ := http.NewRequest(http.MethodGet, url, http.NoBody)
-			resp, err := tests.TestDialClient.Do(req)
-			re.NoError(err)
-			defer resp.Body.Close()
-			if resp.StatusCode != http.StatusNotFound {
-				return false
-			}
-			// is not prepared
-			output, err := io.ReadAll(resp.Body)
-			re.NoError(err)
+
+			// no store preparing
+			output := sendRequest(re, leader.GetAddr()+"/pd/api/v1/stores/progress?action=preparing", http.MethodGet, http.StatusNotFound)
 			re.Contains(string(output), "no progress found for the action")
 			output = sendRequest(re, leader.GetAddr()+"/pd/api/v1/stores/progress?id=4", http.MethodGet, http.StatusNotFound)
 			re.Contains(string(output), "no progress found for the given store ID")
@@ -1092,7 +1083,7 @@ func TestPreparingProgress(t *testing.T) {
 		return true
 	})
 
-	output = sendRequest(re, leader.GetAddr()+"/pd/api/v1/stores/progress?id=4", http.MethodGet, http.StatusOK)
+	output := sendRequest(re, leader.GetAddr()+"/pd/api/v1/stores/progress?id=4", http.MethodGet, http.StatusOK)
 	re.NoError(json.Unmarshal(output, &p))
 	re.Equal("preparing", p.Action)
 	re.Equal("0.05", fmt.Sprintf("%.2f", p.Progress))

@@ -21,15 +21,17 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pingcap/errors"
-	"github.com/pingcap/failpoint"
-	"github.com/pingcap/log"
-	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/utils/etcdutil"
-	"github.com/tikv/pd/server/config"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.etcd.io/etcd/server/v3/embed"
 	"go.uber.org/zap"
+
+	"github.com/pingcap/errors"
+	"github.com/pingcap/failpoint"
+	"github.com/pingcap/log"
+
+	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/utils/etcdutil"
+	"github.com/tikv/pd/server/config"
 )
 
 const (
@@ -174,7 +176,7 @@ func PrepareJoinCluster(cfg *config.Config) error {
 		listSucc bool
 	)
 
-	for i := 0; i < listMemberRetryTimes; i++ {
+	for range listMemberRetryTimes {
 		listResp, err = etcdutil.ListEtcdMembers(client.Ctx(), client)
 		if err != nil {
 			return err

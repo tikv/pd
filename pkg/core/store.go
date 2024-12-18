@@ -20,15 +20,17 @@ import (
 	"time"
 
 	"github.com/docker/go-units"
+	"go.uber.org/zap"
+
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
-	"go.uber.org/zap"
 )
 
 const (
@@ -51,22 +53,23 @@ const (
 type StoreInfo struct {
 	meta *metapb.Store
 	*storeStats
-	pauseLeaderTransfer bool // not allow to be used as source or target of transfer leader
-	slowStoreEvicted    bool // this store has been evicted as a slow store, should not transfer leader to it
-	slowTrendEvicted    bool // this store has been evicted as a slow store by trend, should not transfer leader to it
-	leaderCount         int
-	regionCount         int
-	learnerCount        int
-	witnessCount        int
-	leaderSize          int64
-	regionSize          int64
-	pendingPeerCount    int
-	lastPersistTime     time.Time
-	leaderWeight        float64
-	regionWeight        float64
-	limiter             storelimit.StoreLimit
-	minResolvedTS       uint64
-	lastAwakenTime      time.Time
+	pauseLeaderTransferIn  bool // not allow to be used as target of transfer leader
+	pauseLeaderTransferOut bool // not allow to be used as source of transfer leader
+	slowStoreEvicted       bool // this store has been evicted as a slow store, should not transfer leader to it
+	slowTrendEvicted       bool // this store has been evicted as a slow store by trend, should not transfer leader to it
+	leaderCount            int
+	regionCount            int
+	learnerCount           int
+	witnessCount           int
+	leaderSize             int64
+	regionSize             int64
+	pendingPeerCount       int
+	lastPersistTime        time.Time
+	leaderWeight           float64
+	regionWeight           float64
+	limiter                storelimit.StoreLimit
+	minResolvedTS          uint64
+	lastAwakenTime         time.Time
 }
 
 // NewStoreInfo creates StoreInfo with meta data.
@@ -138,10 +141,16 @@ func (s *StoreInfo) ShallowClone(opts ...StoreCreateOption) *StoreInfo {
 	return &store
 }
 
-// AllowLeaderTransfer returns if the store is allowed to be selected
-// as source or target of transfer leader.
-func (s *StoreInfo) AllowLeaderTransfer() bool {
-	return !s.pauseLeaderTransfer
+// AllowLeaderTransferIn returns if the store is allowed to be selected
+// as target of transfer leader.
+func (s *StoreInfo) AllowLeaderTransferIn() bool {
+	return !s.pauseLeaderTransferIn
+}
+
+// AllowLeaderTransferOut returns if the store is allowed to be selected
+// as source of transfer leader.
+func (s *StoreInfo) AllowLeaderTransferOut() bool {
+	return !s.pauseLeaderTransferOut
 }
 
 // EvictedAsSlowStore returns if the store should be evicted as a slow store.
@@ -775,33 +784,43 @@ func (s *StoresInfo) ResetStores() {
 	s.stores = make(map[uint64]*StoreInfo)
 }
 
-// PauseLeaderTransfer pauses a StoreInfo with storeID.
-func (s *StoresInfo) PauseLeaderTransfer(storeID uint64) error {
+// PauseLeaderTransfer pauses a StoreInfo with storeID. The store can not be selected
+// as source or target of TransferLeader.
+func (s *StoresInfo) PauseLeaderTransfer(storeID uint64, direction constant.Direction) error {
 	s.Lock()
 	defer s.Unlock()
+	log.Info("pause store leader transfer", zap.Uint64("store-id", storeID), zap.String("direction", direction.String()))
 	store, ok := s.stores[storeID]
 	if !ok {
 		return errs.ErrStoreNotFound.FastGenByArgs(storeID)
 	}
-	if !store.AllowLeaderTransfer() {
-		return errs.ErrPauseLeaderTransfer.FastGenByArgs(storeID)
+	switch direction {
+	case constant.In:
+		if !store.AllowLeaderTransferIn() {
+			return errs.ErrPauseLeaderTransferIn.FastGenByArgs(storeID)
+		}
+	case constant.Out:
+		if !store.AllowLeaderTransferOut() {
+			return errs.ErrPauseLeaderTransferOut.FastGenByArgs(storeID)
+		}
 	}
-	s.stores[storeID] = store.Clone(PauseLeaderTransfer())
+	s.stores[storeID] = store.Clone(PauseLeaderTransfer(direction))
 	return nil
 }
 
 // ResumeLeaderTransfer cleans a store's pause state. The store can be selected
 // as source or target of TransferLeader again.
-func (s *StoresInfo) ResumeLeaderTransfer(storeID uint64) {
+func (s *StoresInfo) ResumeLeaderTransfer(storeID uint64, direction constant.Direction) {
 	s.Lock()
 	defer s.Unlock()
+	log.Info("resume store leader transfer", zap.Uint64("store-id", storeID), zap.String("direction", direction.String()))
 	store, ok := s.stores[storeID]
 	if !ok {
 		log.Warn("try to clean a store's pause state, but it is not found. It may be cleanup",
 			zap.Uint64("store-id", storeID))
 		return
 	}
-	s.stores[storeID] = store.Clone(ResumeLeaderTransfer())
+	s.stores[storeID] = store.Clone(ResumeLeaderTransfer(direction))
 }
 
 // SlowStoreEvicted marks a store as a slow store and prevents transferring

@@ -19,12 +19,14 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pingcap/errors"
-	"github.com/pingcap/log"
-	pd "github.com/tikv/pd/client"
-	pdHttp "github.com/tikv/pd/client/http"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
+
+	"github.com/pingcap/errors"
+	"github.com/pingcap/log"
+
+	pd "github.com/tikv/pd/client"
+	pdHttp "github.com/tikv/pd/client/http"
 )
 
 var base = int64(time.Second) / int64(time.Microsecond)
@@ -221,7 +223,7 @@ func (c *httpController) run() {
 		go func(hCli pdHttp.Client) {
 			defer c.wg.Done()
 			c.wg.Add(int(burst))
-			for i := int64(0); i < burst; i++ {
+			for range burst {
 				go func() {
 					defer c.wg.Done()
 					ticker := time.NewTicker(tt)
@@ -290,7 +292,7 @@ func (c *gRPCController) run() {
 		go func(cli pd.Client) {
 			defer c.wg.Done()
 			c.wg.Add(int(burst))
-			for i := int64(0); i < burst; i++ {
+			for range burst {
 				go func() {
 					defer c.wg.Done()
 					ticker := time.NewTicker(tt)
@@ -364,7 +366,7 @@ func (c *etcdController) run() {
 		go func(cli *clientv3.Client) {
 			defer c.wg.Done()
 			c.wg.Add(int(burst))
-			for i := int64(0); i < burst; i++ {
+			for range burst {
 				go func() {
 					defer c.wg.Done()
 					ticker := time.NewTicker(tt)

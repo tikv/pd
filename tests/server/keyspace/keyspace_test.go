@@ -23,9 +23,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+
+	"github.com/pingcap/kvproto/pkg/keyspacepb"
+
 	"github.com/tikv/pd/pkg/codec"
 	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/schedule/labeler"
@@ -80,7 +82,7 @@ func (suite *keyspaceTestSuite) TestRegionLabeler() {
 	keyspaces := make([]*keyspacepb.KeyspaceMeta, count)
 	manager := suite.manager
 	var err error
-	for i := 0; i < count; i++ {
+	for i := range count {
 		keyspaces[i], err = manager.CreateKeyspace(&keyspace.CreateKeyspaceRequest{
 			Name:       fmt.Sprintf("test_keyspace_%d", i),
 			CreateTime: now,

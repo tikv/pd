@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+
 	"github.com/tikv/pd/pkg/core/constant"
 )
 
@@ -85,7 +86,7 @@ func TestSlidingWindow(t *testing.T) {
 	re.Equal([]int64{capacity - minSnapSize, 0, 0, 0}, s.GetUsed())
 
 	// case 3: skip the type is not the SendSnapshot
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		re.True(s.Take(capacity, AddPeer, constant.Low))
 	}
 }

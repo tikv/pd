@@ -20,17 +20,20 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/suite"
+	"google.golang.org/grpc"
+
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/tsopb"
-	"github.com/stretchr/testify/suite"
+
 	tso "github.com/tikv/pd/pkg/mcs/tso/server"
 	tsopkg "github.com/tikv/pd/pkg/tso"
+	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/tempurl"
 	tu "github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/tests"
-	"google.golang.org/grpc"
 )
 
 type tsoConsistencyTestSuite struct {
@@ -100,16 +103,9 @@ func (suite *tsoConsistencyTestSuite) TearDownSuite() {
 	suite.cluster.Destroy()
 }
 
-func (suite *tsoConsistencyTestSuite) getClusterID() uint64 {
-	if suite.legacy {
-		return suite.pdLeaderServer.GetServer().ClusterID()
-	}
-	return suite.tsoServer.ClusterID()
-}
-
 func (suite *tsoConsistencyTestSuite) request(ctx context.Context, count uint32) *pdpb.Timestamp {
 	re := suite.Require()
-	clusterID := suite.getClusterID()
+	clusterID := keypath.ClusterID()
 	if suite.legacy {
 		req := &pdpb.TsoRequest{
 			Header:     &pdpb.RequestHeader{ClusterId: clusterID},
@@ -156,7 +152,7 @@ func (suite *tsoConsistencyTestSuite) requestTSOConcurrently() {
 
 	var wg sync.WaitGroup
 	wg.Add(tsoRequestConcurrencyNumber)
-	for i := 0; i < tsoRequestConcurrencyNumber; i++ {
+	for range tsoRequestConcurrencyNumber {
 		go func() {
 			defer wg.Done()
 			last := &pdpb.Timestamp{
@@ -164,7 +160,7 @@ func (suite *tsoConsistencyTestSuite) requestTSOConcurrently() {
 				Logical:  0,
 			}
 			var ts *pdpb.Timestamp
-			for j := 0; j < tsoRequestRound; j++ {
+			for range tsoRequestRound {
 				ts = suite.request(ctx, tsoCount)
 				// Check whether the TSO fallbacks
 				re.Equal(1, tsoutil.CompareTimestamp(ts, last))
@@ -191,7 +187,7 @@ func (suite *tsoConsistencyTestSuite) TestFallbackTSOConsistency() {
 	defer cancel()
 	var wg sync.WaitGroup
 	wg.Add(tsoRequestConcurrencyNumber)
-	for i := 0; i < tsoRequestConcurrencyNumber; i++ {
+	for range tsoRequestConcurrencyNumber {
 		go func() {
 			defer wg.Done()
 			last := &pdpb.Timestamp{
@@ -199,7 +195,7 @@ func (suite *tsoConsistencyTestSuite) TestFallbackTSOConsistency() {
 				Logical:  0,
 			}
 			var ts *pdpb.Timestamp
-			for j := 0; j < tsoRequestRound; j++ {
+			for range tsoRequestRound {
 				ts = suite.request(ctx, tsoCount)
 				re.Equal(1, tsoutil.CompareTimestamp(ts, last))
 				last = ts

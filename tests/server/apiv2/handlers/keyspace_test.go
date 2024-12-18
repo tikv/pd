@@ -19,15 +19,17 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/pingcap/failpoint"
-	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+	"go.uber.org/goleak"
+
+	"github.com/pingcap/failpoint"
+	"github.com/pingcap/kvproto/pkg/keyspacepb"
+
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server/apiv2/handlers"
 	"github.com/tikv/pd/tests"
-	"go.uber.org/goleak"
 )
 
 func TestMain(m *testing.M) {
@@ -149,7 +151,7 @@ func mustMakeTestKeyspaces(re *require.Assertions, server *tests.TestServer, cou
 		"config2": "200",
 	}
 	resultMeta := make([]*keyspacepb.KeyspaceMeta, count)
-	for i := 0; i < count; i++ {
+	for i := range count {
 		createRequest := &handlers.CreateKeyspaceParams{
 			Name:   fmt.Sprintf("test_keyspace_%d", i),
 			Config: testConfig,

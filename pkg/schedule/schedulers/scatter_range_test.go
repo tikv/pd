@@ -19,8 +19,10 @@ import (
 	"math/rand"
 	"testing"
 
-	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/require"
+
+	"github.com/pingcap/kvproto/pkg/metapb"
+
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/storage"
@@ -51,7 +53,7 @@ func checkScatterRangeBalance(re *require.Assertions, enablePlacementRules bool)
 		id      uint64
 		regions []*metapb.Region
 	)
-	for i := 0; i < 50; i++ {
+	for i := range 50 {
 		peers := []*metapb.Peer{
 			{Id: id + 1, StoreId: 1},
 			{Id: id + 2, StoreId: 2},
@@ -78,7 +80,7 @@ func checkScatterRangeBalance(re *require.Assertions, enablePlacementRules bool)
 		origin, overlaps, rangeChanged := tc.SetRegion(regionInfo)
 		tc.UpdateSubTree(regionInfo, origin, overlaps, rangeChanged)
 	}
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		_, err := tc.AllocPeer(1)
 		re.NoError(err)
 	}

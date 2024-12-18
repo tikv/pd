@@ -17,8 +17,10 @@ package operator
 import (
 	"testing"
 
-	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/require"
+
+	"github.com/pingcap/kvproto/pkg/metapb"
+
 	"github.com/tikv/pd/pkg/core/constant"
 )
 
@@ -26,7 +28,7 @@ func TestRandBuckets(t *testing.T) {
 	re := require.New(t)
 	rb := newRandBuckets()
 	addOperators(rb)
-	for i := 0; i < len(priorityWeight); i++ {
+	for range priorityWeight {
 		op := rb.GetOperator()
 		re.NotNil(op)
 	}
@@ -67,7 +69,7 @@ func TestRandomBucketsWithMergeRegion(t *testing.T) {
 	re := require.New(t)
 	rb := newRandBuckets()
 	descs := []string{"merge-region", "admin-merge-region", "random-merge"}
-	for j := 0; j < 100; j++ {
+	for j := range 100 {
 		// adds operators
 		desc := descs[j%3]
 		op := NewTestOperator(uint64(1), &metapb.RegionEpoch{}, OpRegion|OpMerge, []OpStep{
@@ -109,7 +111,7 @@ func TestRandomBucketsWithMergeRegion(t *testing.T) {
 		op.SetPriorityLevel(constant.High)
 		rb.PutOperator(op)
 
-		for i := 0; i < 2; i++ {
+		for range 2 {
 			op := rb.GetOperator()
 			re.NotNil(op)
 		}

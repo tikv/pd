@@ -15,8 +15,9 @@
 package tso
 
 import (
-	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/require"
+
+	"github.com/pingcap/kvproto/pkg/pdpb"
 )
 
 const (
@@ -35,6 +36,6 @@ func checkAndReturnTimestampResponse[T tsoResponse](re *require.Assertions, resp
 	re.Equal(uint32(tsoCount), resp.GetCount())
 	timestamp := resp.GetTimestamp()
 	re.Positive(timestamp.GetPhysical())
-	re.GreaterOrEqual(uint32(timestamp.GetLogical())>>timestamp.GetSuffixBits(), uint32(tsoCount))
+	re.GreaterOrEqual(uint32(timestamp.GetLogical()), uint32(tsoCount))
 	return timestamp
 }

@@ -24,8 +24,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pingcap/failpoint"
 	"github.com/stretchr/testify/require"
+
+	"github.com/pingcap/failpoint"
+
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/storage/endpoint"
@@ -290,7 +292,7 @@ func expectSameRegionLabels(re *require.Assertions, r1, r2 *RegionLabel) {
 
 func expectSameRules(re *require.Assertions, r1, r2 *LabelRule) {
 	re.Len(r1.Labels, len(r2.Labels))
-	for id := 0; id < len(r1.Labels); id++ {
+	for id := range r1.Labels {
 		expectSameRegionLabels(re, &r1.Labels[id], &r2.Labels[id])
 	}
 

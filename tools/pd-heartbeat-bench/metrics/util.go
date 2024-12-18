@@ -22,12 +22,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pingcap/log"
 	"github.com/prometheus/client_golang/api"
 	v1 "github.com/prometheus/client_golang/api/prometheus/v1"
 	"github.com/prometheus/common/model"
 	"go.etcd.io/etcd/pkg/v3/report"
 	"go.uber.org/zap"
+
+	"github.com/pingcap/log"
 )
 
 var (
@@ -133,7 +134,7 @@ func CollectMetrics(curRound int, wait time.Duration) {
 		sum   float64
 		count int
 	}, len(metrics2Collect))
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		for j, m := range metrics2Collect {
 			r, err := getMetric(prometheusCli, m.promSQL, time.Now())
 			if err != nil {
@@ -151,7 +152,7 @@ func CollectMetrics(curRound int, wait time.Duration) {
 		}
 		return res[index].sum / float64(res[index].count)
 	}
-	for i := 0; i < len(metrics2Collect); i++ {
+	for i := range metrics2Collect {
 		metrics2Collect[i].value = getRes(i)
 		if metrics2Collect[i].max {
 			finalMetrics2Collect[i].value = max(finalMetrics2Collect[i].value, metrics2Collect[i].value)

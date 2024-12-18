@@ -21,12 +21,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pingcap/failpoint"
 	"github.com/stretchr/testify/require"
-	"github.com/tikv/pd/pkg/utils/etcdutil"
-	"github.com/tikv/pd/pkg/utils/testutil"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.etcd.io/etcd/server/v3/embed"
+
+	"github.com/pingcap/failpoint"
+
+	"github.com/tikv/pd/pkg/utils/etcdutil"
+	"github.com/tikv/pd/pkg/utils/testutil"
 )
 
 const defaultLeaseTimeout = 1
@@ -274,7 +276,7 @@ func TestCampaignTimes(t *testing.T) {
 	defer func() {
 		campaignTimesRecordTimeout = 5 * time.Minute
 	}()
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		leadership.AddCampaignTimes()
 		time.Sleep(100 * time.Millisecond)
 	}
@@ -282,7 +284,7 @@ func TestCampaignTimes(t *testing.T) {
 
 	// only the last 2 records are valid.
 	campaignTimesRecordTimeout = 200 * time.Millisecond
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		leadership.AddCampaignTimes()
 		time.Sleep(100 * time.Millisecond)
 	}

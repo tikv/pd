@@ -24,8 +24,6 @@ This section describes how to benchmark the GetTS performance.
   the number of pd clients involved in each benchmark (default 1)
 -count int
   the count number that the test will run (default 1)
--dc string
-  which dc-location this bench will request (default "global")
 -duration duration
   how many seconds the test will last (default 1m0s)
 -interval duration

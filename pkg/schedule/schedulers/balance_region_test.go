@@ -18,8 +18,10 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/require"
+
+	"github.com/pingcap/kvproto/pkg/metapb"
+
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/mock/mockcluster"
@@ -682,7 +684,7 @@ func TestConcurrencyUpdateConfig(t *testing.T) {
 			re.NoError(sche.config.persist())
 		}
 	}()
-	for i := 0; i < 1000; i++ {
+	for range 1000 {
 		sche.Schedule(tc, false)
 	}
 	ch <- struct{}{}
@@ -700,7 +702,7 @@ func TestBalanceWhenRegionNotHeartbeat(t *testing.T) {
 		id      uint64
 		regions []*metapb.Region
 	)
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		peers := []*metapb.Peer{
 			{Id: id + 1, StoreId: 1},
 			{Id: id + 2, StoreId: 2},

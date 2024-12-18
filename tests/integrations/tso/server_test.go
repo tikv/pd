@@ -20,15 +20,18 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/suite"
+	"google.golang.org/grpc"
+
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/tsopb"
-	"github.com/stretchr/testify/suite"
+
 	tso "github.com/tikv/pd/pkg/mcs/tso/server"
 	tsopkg "github.com/tikv/pd/pkg/tso"
+	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/tempurl"
 	tu "github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/tests"
-	"google.golang.org/grpc"
 )
 
 type tsoServerTestSuite struct {
@@ -98,13 +101,6 @@ func (suite *tsoServerTestSuite) TearDownSuite() {
 	suite.cluster.Destroy()
 }
 
-func (suite *tsoServerTestSuite) getClusterID() uint64 {
-	if suite.legacy {
-		return suite.pdLeaderServer.GetServer().ClusterID()
-	}
-	return suite.tsoServer.ClusterID()
-}
-
 func (suite *tsoServerTestSuite) resetTS(ts uint64, ignoreSmaller, skipUpperBoundCheck bool) {
 	var err error
 	if suite.legacy {
@@ -120,7 +116,7 @@ func (suite *tsoServerTestSuite) resetTS(ts uint64, ignoreSmaller, skipUpperBoun
 
 func (suite *tsoServerTestSuite) request(ctx context.Context, count uint32) (err error) {
 	re := suite.Require()
-	clusterID := suite.getClusterID()
+	clusterID := keypath.ClusterID()
 	if suite.legacy {
 		req := &pdpb.TsoRequest{
 			Header:     &pdpb.RequestHeader{ClusterId: clusterID},
@@ -151,7 +147,7 @@ func (suite *tsoServerTestSuite) TestConcurrentlyReset() {
 	var wg sync.WaitGroup
 	wg.Add(2)
 	now := time.Now()
-	for i := 0; i < 2; i++ {
+	for range 2 {
 		go func() {
 			defer wg.Done()
 			for j := 0; j <= 50; j++ {

@@ -20,6 +20,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
 	"github.com/tikv/pd/pkg/versioninfo"
 )
 
@@ -35,6 +36,7 @@ func TestStatus(t *testing.T) {
 	re := require.New(t)
 	cfgs, _, clean := mustNewCluster(re, 1)
 	defer clean()
+
 	for _, cfg := range cfgs {
 		addr := cfg.ClientUrls + apiPrefix + "/api/v1/status"
 		resp, err := testDialClient.Get(addr)

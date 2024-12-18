@@ -20,9 +20,11 @@ import (
 	"math"
 	"time"
 
-	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/smallnest/chanx"
+
+	"github.com/pingcap/kvproto/pkg/metapb"
+
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/statistics/utils"
@@ -60,6 +62,7 @@ type thresholds struct {
 // HotPeerCache saves the hot peer's statistics.
 type HotPeerCache struct {
 	kind              utils.RWType
+	cluster           *core.BasicCluster
 	peersOfStore      map[uint64]*utils.TopN         // storeID -> hot peers
 	storesOfRegion    map[uint64]map[uint64]struct{} // regionID -> storeIDs
 	regionsOfStore    map[uint64]map[uint64]struct{} // storeID -> regionIDs
@@ -67,13 +70,14 @@ type HotPeerCache struct {
 	taskQueue         *chanx.UnboundedChan[func(*HotPeerCache)]
 	thresholdsOfStore map[uint64]*thresholds                           // storeID -> thresholds
 	metrics           map[uint64][utils.ActionTypeLen]prometheus.Gauge // storeID -> metrics
-	// TODO: consider to remove store info when store is offline.
+	lastGCTime        time.Time
 }
 
 // NewHotPeerCache creates a HotPeerCache
-func NewHotPeerCache(ctx context.Context, kind utils.RWType) *HotPeerCache {
+func NewHotPeerCache(ctx context.Context, cluster *core.BasicCluster, kind utils.RWType) *HotPeerCache {
 	return &HotPeerCache{
 		kind:              kind,
+		cluster:           cluster,
 		peersOfStore:      make(map[uint64]*utils.TopN),
 		storesOfRegion:    make(map[uint64]map[uint64]struct{}),
 		regionsOfStore:    make(map[uint64]map[uint64]struct{}),
@@ -115,6 +119,7 @@ func (f *HotPeerCache) UpdateStat(item *HotPeerStat) {
 		return
 	}
 	f.incMetrics(item.actionType, item.StoreID)
+	f.gc()
 }
 
 func (f *HotPeerCache) incMetrics(action utils.ActionType, storeID uint64) {
@@ -545,6 +550,36 @@ func (f *HotPeerCache) removeItem(item *HotPeerStat) {
 	}
 	if regions, ok := f.regionsOfStore[item.StoreID]; ok {
 		delete(regions, item.RegionID)
+	}
+}
+
+func (f *HotPeerCache) gc() {
+	if time.Since(f.lastGCTime) < f.topNTTL {
+		return
+	}
+	f.lastGCTime = time.Now()
+	// remove tombstone stores
+	stores := make(map[uint64]struct{})
+	for _, storeID := range f.cluster.GetStores() {
+		stores[storeID.GetID()] = struct{}{}
+	}
+	for storeID := range f.peersOfStore {
+		if _, ok := stores[storeID]; !ok {
+			delete(f.peersOfStore, storeID)
+			delete(f.regionsOfStore, storeID)
+			delete(f.thresholdsOfStore, storeID)
+			delete(f.metrics, storeID)
+		}
+	}
+	// remove expired items
+	for _, peers := range f.peersOfStore {
+		regions := peers.RemoveExpired()
+		for _, regionID := range regions {
+			delete(f.storesOfRegion, regionID)
+			for storeID := range f.regionsOfStore {
+				delete(f.regionsOfStore[storeID], regionID)
+			}
+		}
 	}
 }
 
