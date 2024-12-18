@@ -17,6 +17,7 @@ package api
 import (
 	"net/http"
 
+	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/cluster"
 	"github.com/unrolled/render"
@@ -76,3 +77,36 @@ func (h *healthHandler) GetHealthStatus(w http.ResponseWriter, _ *http.Request) 
 // @Summary  Ping PD servers.
 // @Router   /ping [get]
 func (*healthHandler) Ping(http.ResponseWriter, *http.Request) {}
+
+// ReadyStatus reflects the cluster's ready status.
+// NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
+type ReadyStatus struct {
+	RegionLoaded bool `json:"region_loaded"`
+}
+
+// @Summary  It will return whether pd follower is ready to became leader.
+// @Router   /ready [get]
+// @Param    verbose query  bool    false  "Whether to return details."
+// @Success  200
+// @Failure  500
+func (h *healthHandler) Ready(w http.ResponseWriter, r *http.Request) {
+	s := h.svr.GetStorage()
+	regionLoaded := storage.AreRegionsLoaded(s)
+	if regionLoaded {
+		w.WriteHeader(http.StatusOK)
+	} else {
+		w.WriteHeader(http.StatusInternalServerError)
+	}
+
+	if _, ok := r.URL.Query()["verbose"]; !ok {
+		return
+	}
+	resp := &ReadyStatus{
+		RegionLoaded: regionLoaded,
+	}
+	if regionLoaded {
+		h.rd.JSON(w, http.StatusOK, resp)
+	} else {
+		h.rd.JSON(w, http.StatusInternalServerError, resp)
+	}
+}

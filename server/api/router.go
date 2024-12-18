@@ -333,6 +333,7 @@ func createRouter(prefix string, svr *server.Server) *mux.Router {
 	healthHandler := newHealthHandler(svr, rd)
 	registerFunc(apiRouter, "/health", healthHandler.GetHealthStatus, setMethods(http.MethodGet), setAuditBackend(prometheus))
 	registerFunc(apiRouter, "/ping", healthHandler.Ping, setMethods(http.MethodGet), setAuditBackend(prometheus))
+	registerFunc(apiRouter, "/ready", healthHandler.Ready, setMethods(http.MethodGet), setAuditBackend(prometheus))
 
 	// metric query use to query metric data, the protocol is compatible with prometheus.
 	registerFunc(apiRouter, "/metric/query", newqueryMetric(svr).queryMetric, setMethods(http.MethodGet, http.MethodPost), setAuditBackend(prometheus))

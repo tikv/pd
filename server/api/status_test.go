@@ -23,18 +23,18 @@ import (
 	"github.com/tikv/pd/pkg/versioninfo"
 )
 
-type oldStatus struct {
-	BuildTS        string `json:"build_ts"`
-	Version        string `json:"version"`
-	GitHash        string `json:"git_hash"`
-	StartTimestamp int64  `json:"start_timestamp"`
+func checkStatusResponse(re *require.Assertions, body []byte) {
+	got := versioninfo.Status{}
+	re.NoError(json.Unmarshal(body, &got))
+	re.Equal(versioninfo.PDBuildTS, got.BuildTS)
+	re.Equal(versioninfo.PDGitHash, got.GitHash)
+	re.Equal(versioninfo.PDReleaseVersion, got.Version)
 }
 
 func TestStatus(t *testing.T) {
 	re := require.New(t)
 	cfgs, _, clean := mustNewCluster(re, 1)
 	defer clean()
-
 	for _, cfg := range cfgs {
 		addr := cfg.ClientUrls + apiPrefix + "/api/v1/status"
 		resp, err := testDialClient.Get(addr)
@@ -44,18 +44,4 @@ func TestStatus(t *testing.T) {
 		checkStatusResponse(re, buf)
 		resp.Body.Close()
 	}
-}
-
-func checkStatusResponse(re *require.Assertions, body []byte) {
-	got := versioninfo.Status{}
-	re.NoError(json.Unmarshal(body, &got))
-	re.Equal(versioninfo.PDBuildTS, got.BuildTS)
-	re.Equal(versioninfo.PDGitHash, got.GitHash)
-	re.Equal(versioninfo.PDReleaseVersion, got.Version)
-	re.False(got.RegionLoaded)
-	gotWithOldStatus := oldStatus{}
-	re.NoError(json.Unmarshal(body, &gotWithOldStatus))
-	re.Equal(versioninfo.PDBuildTS, gotWithOldStatus.BuildTS)
-	re.Equal(versioninfo.PDGitHash, gotWithOldStatus.GitHash)
-	re.Equal(versioninfo.PDReleaseVersion, gotWithOldStatus.Version)
 }
