@@ -2070,28 +2070,30 @@ func TestCircuitBreaker(t *testing.T) {
 	}
 
 	endpoints := runServer(re, cluster)
-	cli := setupCli(ctx, re, endpoints, opt.WithRegionMetaCircuitBreaker(circuitBreakerSettings))
+	cli := setupCli(ctx, re, endpoints)
 	defer cli.Close()
 
+	circuitBreaker := cb.NewCircuitBreaker[*pdpb.GetRegionResponse]("region_meta", circuitBreakerSettings)
+	ctx = cb.WithCircuitBreaker(ctx, circuitBreaker)
 	for range 10 {
-		region, err := cli.GetRegion(context.TODO(), []byte("a"))
+		region, err := cli.GetRegion(ctx, []byte("a"))
 		re.NoError(err)
 		re.NotNil(region)
 	}
 
-	re.NoError(failpoint.Enable("github.com/tikv/pd/client/triggerCircuitBreaker", "return(true)"))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/pkg/utils/grpcutil/triggerCircuitBreaker", "return(true)"))
 
 	for range 100 {
-		_, err := cli.GetRegion(context.TODO(), []byte("a"))
+		_, err := cli.GetRegion(ctx, []byte("a"))
 		re.Error(err)
 	}
 
-	_, err = cli.GetRegion(context.TODO(), []byte("a"))
+	_, err = cli.GetRegion(ctx, []byte("a"))
 	re.Error(err)
 	re.Contains(err.Error(), "circuit breaker is open")
-	re.NoError(failpoint.Disable("github.com/tikv/pd/client/triggerCircuitBreaker"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/pkg/utils/grpcutil/triggerCircuitBreaker"))
 
-	_, err = cli.GetRegion(context.TODO(), []byte("a"))
+	_, err = cli.GetRegion(ctx, []byte("a"))
 	re.Error(err)
 	re.Contains(err.Error(), "circuit breaker is open")
 
@@ -2099,7 +2101,7 @@ func TestCircuitBreaker(t *testing.T) {
 	time.Sleep(time.Second)
 
 	for range 10 {
-		region, err := cli.GetRegion(context.TODO(), []byte("a"))
+		region, err := cli.GetRegion(ctx, []byte("a"))
 		re.NoError(err)
 		re.NotNil(region)
 	}
@@ -2123,34 +2125,35 @@ func TestCircuitBreakerOpenAndChangeSettings(t *testing.T) {
 	}
 
 	endpoints := runServer(re, cluster)
-	cli := setupCli(ctx, re, endpoints, opt.WithRegionMetaCircuitBreaker(circuitBreakerSettings))
+	cli := setupCli(ctx, re, endpoints)
 	defer cli.Close()
 
+	circuitBreaker := cb.NewCircuitBreaker[*pdpb.GetRegionResponse]("region_meta", circuitBreakerSettings)
+	ctx = cb.WithCircuitBreaker(ctx, circuitBreaker)
 	for range 10 {
-		region, err := cli.GetRegion(context.TODO(), []byte("a"))
+		region, err := cli.GetRegion(ctx, []byte("a"))
 		re.NoError(err)
 		re.NotNil(region)
 	}
 
-	re.NoError(failpoint.Enable("github.com/tikv/pd/client/triggerCircuitBreaker", "return(true)"))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/pkg/utils/grpcutil/triggerCircuitBreaker", "return(true)"))
 
 	for range 100 {
-		_, err := cli.GetRegion(context.TODO(), []byte("a"))
+		_, err := cli.GetRegion(ctx, []byte("a"))
 		re.Error(err)
 	}
 
-	_, err = cli.GetRegion(context.TODO(), []byte("a"))
+	_, err = cli.GetRegion(ctx, []byte("a"))
 	re.Error(err)
 	re.Contains(err.Error(), "circuit breaker is open")
 
-	cli.UpdateOption(opt.RegionMetadataCircuitBreakerSettings, func(config *cb.Settings) {
+	circuitBreaker.ChangeSettings(func(config *cb.Settings) {
 		*config = cb.AlwaysClosedSettings
 	})
-
-	_, err = cli.GetRegion(context.TODO(), []byte("a"))
+	_, err = cli.GetRegion(ctx, []byte("a"))
 	re.Error(err)
 	re.Contains(err.Error(), "ResourceExhausted")
-	re.NoError(failpoint.Disable("github.com/tikv/pd/client/triggerCircuitBreaker"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/pkg/utils/grpcutil/triggerCircuitBreaker"))
 }
 
 func TestCircuitBreakerHalfOpenAndChangeSettings(t *testing.T) {
@@ -2171,23 +2174,26 @@ func TestCircuitBreakerHalfOpenAndChangeSettings(t *testing.T) {
 	}
 
 	endpoints := runServer(re, cluster)
-	cli := setupCli(ctx, re, endpoints, opt.WithRegionMetaCircuitBreaker(circuitBreakerSettings))
+
+	cli := setupCli(ctx, re, endpoints)
 	defer cli.Close()
 
+	circuitBreaker := cb.NewCircuitBreaker[*pdpb.GetRegionResponse]("region_meta", circuitBreakerSettings)
+	ctx = cb.WithCircuitBreaker(ctx, circuitBreaker)
 	for range 10 {
-		region, err := cli.GetRegion(context.TODO(), []byte("a"))
+		region, err := cli.GetRegion(ctx, []byte("a"))
 		re.NoError(err)
 		re.NotNil(region)
 	}
 
-	re.NoError(failpoint.Enable("github.com/tikv/pd/client/triggerCircuitBreaker", "return(true)"))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/pkg/utils/grpcutil/triggerCircuitBreaker", "return(true)"))
 
 	for range 100 {
-		_, err := cli.GetRegion(context.TODO(), []byte("a"))
+		_, err := cli.GetRegion(ctx, []byte("a"))
 		re.Error(err)
 	}
 
-	_, err = cli.GetRegion(context.TODO(), []byte("a"))
+	_, err = cli.GetRegion(ctx, []byte("a"))
 	re.Error(err)
 	re.Contains(err.Error(), "circuit breaker is open")
 
@@ -2195,9 +2201,9 @@ func TestCircuitBreakerHalfOpenAndChangeSettings(t *testing.T) {
 	defer os.RemoveAll(fname)
 	// wait for cooldown
 	time.Sleep(time.Second)
-	re.NoError(failpoint.Disable("github.com/tikv/pd/client/triggerCircuitBreaker"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/pkg/utils/grpcutil/triggerCircuitBreaker"))
 	// trigger circuit breaker state to be half open
-	_, err = cli.GetRegion(context.TODO(), []byte("a"))
+	_, err = cli.GetRegion(ctx, []byte("a"))
 	re.NoError(err)
 	testutil.Eventually(re, func() bool {
 		b, _ := os.ReadFile(fname)
@@ -2207,17 +2213,16 @@ func TestCircuitBreakerHalfOpenAndChangeSettings(t *testing.T) {
 	})
 
 	// The state is half open
-	re.NoError(failpoint.Enable("github.com/tikv/pd/client/triggerCircuitBreaker", "return(true)"))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/pkg/utils/grpcutil/triggerCircuitBreaker", "return(true)"))
 	// change settings to always closed
-	cli.UpdateOption(opt.RegionMetadataCircuitBreakerSettings, func(config *cb.Settings) {
+	circuitBreaker.ChangeSettings(func(config *cb.Settings) {
 		*config = cb.AlwaysClosedSettings
 	})
-
 	// It won't be changed to open state.
 	for range 100 {
-		_, err := cli.GetRegion(context.TODO(), []byte("a"))
+		_, err := cli.GetRegion(ctx, []byte("a"))
 		re.Error(err)
 		re.NotContains(err.Error(), "circuit breaker is open")
 	}
-	re.NoError(failpoint.Disable("github.com/tikv/pd/client/triggerCircuitBreaker"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/pkg/utils/grpcutil/triggerCircuitBreaker"))
 }

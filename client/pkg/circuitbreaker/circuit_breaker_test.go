@@ -43,18 +43,16 @@ func TestCircuitBreakerExecuteWrapperReturnValues(t *testing.T) {
 	cb := NewCircuitBreaker[int]("test_cb", settings)
 	originalError := errors.New("circuit breaker is open")
 
-	result, err := cb.Execute(func() (int, Overloading, error) {
-		return 42, No, originalError
+	err := cb.Execute(func() (Overloading, error) {
+		return No, originalError
 	})
 	re.Equal(err, originalError)
-	re.Equal(42, result)
 
 	// same by interpret the result as overloading error
-	result, err = cb.Execute(func() (int, Overloading, error) {
-		return 42, Yes, originalError
+	err = cb.Execute(func() (Overloading, error) {
+		return Yes, originalError
 	})
 	re.Equal(err, originalError)
-	re.Equal(42, result)
 }
 
 func TestCircuitBreakerOpenState(t *testing.T) {
@@ -118,8 +116,8 @@ func TestCircuitBreakerHalfOpenToOpen(t *testing.T) {
 	cb.advance(settings.CoolDownInterval)
 	assertSucceeds(cb, re)
 	re.Equal(StateHalfOpen, cb.state.stateType)
-	_, err := cb.Execute(func() (int, Overloading, error) {
-		return 42, Yes, nil // this trip circuit breaker again
+	err := cb.Execute(func() (Overloading, error) {
+		return Yes, nil // this trip circuit breaker again
 	})
 	re.NoError(err)
 	re.Equal(StateHalfOpen, cb.state.stateType)
@@ -149,10 +147,10 @@ func TestCircuitBreakerHalfOpenFailOverPendingCount(t *testing.T) {
 			defer func() {
 				end <- true
 			}()
-			_, err := cb.Execute(func() (int, Overloading, error) {
+			err := cb.Execute(func() (Overloading, error) {
 				start <- true
 				<-wait
-				return 42, No, nil
+				return No, nil
 			})
 			re.NoError(err)
 		}()
@@ -188,10 +186,10 @@ func TestCircuitBreakerCountOnlyRequestsInSameWindow(t *testing.T) {
 		defer func() {
 			end <- true
 		}()
-		_, err := cb.Execute(func() (int, Overloading, error) {
+		err := cb.Execute(func() (Overloading, error) {
 			start <- true
 			<-wait
-			return 42, No, nil
+			return No, nil
 		})
 		re.NoError(err)
 	}()
@@ -244,8 +242,8 @@ func newCircuitBreakerMovedToHalfOpenState(re *require.Assertions) *CircuitBreak
 
 func driveQPS(cb *CircuitBreaker[int], count int, overload Overloading, re *require.Assertions) {
 	for range count {
-		_, err := cb.Execute(func() (int, Overloading, error) {
-			return 42, overload, nil
+		err := cb.Execute(func() (Overloading, error) {
+			return overload, nil
 		})
 		re.NoError(err)
 	}
@@ -253,18 +251,17 @@ func driveQPS(cb *CircuitBreaker[int], count int, overload Overloading, re *requ
 
 func assertFastFail(cb *CircuitBreaker[int], re *require.Assertions) {
 	var executed = false
-	_, err := cb.Execute(func() (int, Overloading, error) {
+	err := cb.Execute(func() (Overloading, error) {
 		executed = true
-		return 42, No, nil
+		return No, nil
 	})
 	re.Equal(err, errs.ErrCircuitBreakerOpen)
 	re.False(executed)
 }
 
 func assertSucceeds(cb *CircuitBreaker[int], re *require.Assertions) {
-	result, err := cb.Execute(func() (int, Overloading, error) {
-		return 42, No, nil
+	err := cb.Execute(func() (Overloading, error) {
+		return No, nil
 	})
 	re.NoError(err)
-	re.Equal(42, result)
 }
