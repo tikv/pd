@@ -345,6 +345,7 @@ func (s *balanceKeyrangeScheduler) IsTimeout() bool {
 	}
 }
 
+// Generate a json that returns scheduling status.
 func (s *balanceKeyrangeScheduler) GetStatus() any {
 	s.mu.Lock()
 	defer s.mu.Unlock()
