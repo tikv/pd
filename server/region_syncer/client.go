@@ -168,6 +168,7 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 				select {
 				case <-ctx.Done():
 					log.Info("stop synchronizing with leader due to context canceled")
+					timer.Stop()
 					return
 				case <-timer.C:
 					timer.Stop()
@@ -187,6 +188,7 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 					select {
 					case <-ctx.Done():
 						log.Info("stop synchronizing with leader due to context canceled")
+						timer.Stop()
 						return
 					case <-timer.C:
 						timer.Stop()
