@@ -19,6 +19,7 @@ import (
 	"cmp"
 	"fmt"
 	"slices"
+	"sync"
 	"time"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -163,6 +164,7 @@ type MigrationPlan struct {
 	Operators  []*OperatorWrapper `json:"operators"`
 	Running    []*OperatorWrapper `json:"running"`
 	TotalCount int                `json:"total"`
+	StartTime  time.Time
 }
 
 func computeCandidateStores(requiredLabels []*metapb.StoreLabel, stores []*metapb.Store, regions []*core.RegionInfo) []*StoreRegionSet {
@@ -279,10 +281,10 @@ type balanceKeyrangeSchedulerConfig struct {
 type balanceKeyrangeScheduler struct {
 	*BaseScheduler
 	*retryQuota
+	mu            sync.Mutex // Protect migrationPlan
 	name          string
 	conf          *balanceKeyrangeSchedulerConfig
 	migrationPlan *MigrationPlan
-	StartTime     time.Time
 }
 
 // newBalanceKeyrangeScheduler creates a scheduler that tends to keep key-range on
@@ -326,33 +328,45 @@ func (s *balanceKeyrangeScheduler) IsScheduleAllowed(cluster sche.SchedulerClust
 
 // IsFinished is true if the former schedule is finished, or there is no former schedule at all.
 func (s *balanceKeyrangeScheduler) IsFinished() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	return s.migrationPlan == nil || (len(s.migrationPlan.Operators) == 0 && len(s.migrationPlan.Running) == 0)
 }
 
 // IsTimeout is true if the schedule took too much time and needs to be canceled.
 func (s *balanceKeyrangeScheduler) IsTimeout() bool {
-	return time.Since(s.StartTime).Milliseconds() > s.conf.MaxRunMillis
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.migrationPlan == nil {
+		// Should not be called in this case, however, could be considered as a timeout case, and then delete the scheduler.
+		return true
+	} else {
+		return time.Since(s.migrationPlan.StartTime).Milliseconds() > s.conf.MaxRunMillis
+	}
 }
 
 func (s *balanceKeyrangeScheduler) GetStatus() any {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	scheduling := false
-	// running := make([]*OperatorWrapper, 0)
-	// pending := make([]*OperatorWrapper, 0)
+	running := make([]*OperatorWrapper, 0)
+	pending := make([]*OperatorWrapper, 0)
 	total := 0
 	if s.migrationPlan != nil {
 		scheduling = true
-		// running = s.migrationPlan.Running
-		// pending = s.migrationPlan.Operators
+		running = s.migrationPlan.Running
+		pending = s.migrationPlan.Operators
 		total = s.migrationPlan.TotalCount
 		j := struct {
-			Scheduling bool `json:"scheduling"`
-			// RunningOps []*OperatorWrapper `json:"running"`
-			// Pending    []*OperatorWrapper `json:"pending"`
-			TotalCount int `json:"total"`
+			Scheduling bool               `json:"scheduling"`
+			RunningOps []*OperatorWrapper `json:"running"`
+			Pending    []*OperatorWrapper `json:"pending"`
+			TotalCount int                `json:"total"`
 		}{
 			Scheduling: scheduling,
-			// RunningOps: running,
-			// Pending:    pending,
+			RunningOps: running,
+			Pending:    pending,
 			TotalCount: total,
 		}
 		return j
@@ -362,8 +376,9 @@ func (s *balanceKeyrangeScheduler) GetStatus() any {
 
 // Schedule implements the Scheduler interface.
 func (s *balanceKeyrangeScheduler) Schedule(cluster sche.SchedulerCluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	balanceKeyrangeScheduleCounter.Inc()
-	log.Info("!!!! balanceKeyrangeScheduler called", zap.Any("StartTime", s.StartTime), zap.Any("MaxRunMillis", s.conf.MaxRunMillis), zap.Any("Since", time.Since(s.StartTime).Milliseconds()))
 
 	doShutdown := func() {
 		s.migrationPlan = nil
@@ -375,7 +390,7 @@ func (s *balanceKeyrangeScheduler) Schedule(cluster sche.SchedulerCluster, dryRu
 	// When a pd cluster is bootstrapping, it should not create this scheduler.
 	// However, in order to prevent a wrong operation which could also be from outside pd, we reject a schedule of a universal key-range.
 	if len(s.conf.Range.StartKey) == 0 && len(s.conf.Range.EndKey) == 0 {
-		log.Debug("Invalid keyrange", zap.ByteString("startKey", s.conf.Range.StartKey), zap.ByteString("endtartKey", s.conf.Range.EndKey), zap.Any("StartTime", s.StartTime))
+		log.Debug("Invalid keyrange", zap.ByteString("startKey", s.conf.Range.StartKey), zap.ByteString("endStartKey", s.conf.Range.EndKey), zap.Any("plan", s.migrationPlan))
 		doShutdown()
 		return []*operator.Operator{}, []plan.Plan{}
 	}
@@ -386,7 +401,7 @@ func (s *balanceKeyrangeScheduler) Schedule(cluster sche.SchedulerCluster, dryRu
 		// If there is a ongoing schedule,
 		// - If it is timeout, then return.
 		if s.IsTimeout() {
-			log.Info("balance keyrange range timeout", zap.ByteString("planStartKey", s.migrationPlan.StartKey), zap.ByteString("planStartKey", s.migrationPlan.EndKey), zap.Any("StartTime", s.StartTime), zap.Any("timeout", s.conf.MaxRunMillis))
+			log.Info("balance keyrange range timeout", zap.ByteString("planStartKey", s.migrationPlan.StartKey), zap.ByteString("planStartKey", s.migrationPlan.EndKey), zap.Any("StartTime", s.migrationPlan.StartTime), zap.Any("timeout", s.conf.MaxRunMillis))
 			doShutdown()
 			return []*operator.Operator{}, make([]plan.Plan, 0)
 		}
@@ -428,7 +443,7 @@ func (s *balanceKeyrangeScheduler) Schedule(cluster sche.SchedulerCluster, dryRu
 				log.Error("balance keyrange can't generate plan", zap.Error(err))
 			}
 			s.migrationPlan = p
-			s.StartTime = time.Now()
+			s.migrationPlan.StartTime = time.Now()
 		} else {
 			// Otherwise, just shutdown.
 			log.Info("shutdown balance keyrange", zap.Any("conf", s.conf))
