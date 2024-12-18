@@ -24,12 +24,6 @@ import (
 	"github.com/tikv/pd/server/apiv2/middlewares"
 )
 
-// RegisterMicroService registers ready group handlers to the server.
-func RegisterReadyRouter(r *gin.RouterGroup) {
-	router := r.Group("ready")
-	router.GET("", Ready)
-}
-
 // ReadyStatus reflects the cluster's ready status.
 // NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
 type ReadyStatus struct {
