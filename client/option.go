@@ -21,6 +21,14 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/prometheus/client_golang/prometheus"
 	"google.golang.org/grpc"
+<<<<<<< HEAD:client/option.go
+=======
+
+	"github.com/pingcap/errors"
+
+	cb "github.com/tikv/pd/client/pkg/circuitbreaker"
+	"github.com/tikv/pd/client/pkg/retry"
+>>>>>>> ecb31de2bc (client: move circuit breaker to `pkg` (#8932)):client/opt/option.go
 )
 
 const (

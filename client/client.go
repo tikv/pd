@@ -35,10 +35,24 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 
+<<<<<<< HEAD
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/metrics"
 	"github.com/tikv/pd/client/tlsutil"
 	"github.com/tikv/pd/client/tsoutil"
+=======
+	"github.com/tikv/pd/client/clients/metastorage"
+	"github.com/tikv/pd/client/clients/router"
+	"github.com/tikv/pd/client/clients/tso"
+	"github.com/tikv/pd/client/constants"
+	"github.com/tikv/pd/client/errs"
+	"github.com/tikv/pd/client/metrics"
+	"github.com/tikv/pd/client/opt"
+	"github.com/tikv/pd/client/pkg/caller"
+	cb "github.com/tikv/pd/client/pkg/circuitbreaker"
+	"github.com/tikv/pd/client/pkg/utils/tlsutil"
+	sd "github.com/tikv/pd/client/servicediscovery"
+>>>>>>> ecb31de2bc (client: move circuit breaker to `pkg` (#8932))
 )
 
 const (

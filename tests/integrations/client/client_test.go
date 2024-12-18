@@ -41,9 +41,18 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	pd "github.com/tikv/pd/client"
+<<<<<<< HEAD
 	cb "github.com/tikv/pd/client/circuitbreaker"
 	clierrs "github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/retry"
+=======
+	"github.com/tikv/pd/client/clients/router"
+	"github.com/tikv/pd/client/opt"
+	"github.com/tikv/pd/client/pkg/caller"
+	cb "github.com/tikv/pd/client/pkg/circuitbreaker"
+	"github.com/tikv/pd/client/pkg/retry"
+	sd "github.com/tikv/pd/client/servicediscovery"
+>>>>>>> ecb31de2bc (client: move circuit breaker to `pkg` (#8932))
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
