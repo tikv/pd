@@ -35,6 +35,7 @@ import (
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/schedule/config"
+	"github.com/tikv/pd/pkg/schedule/rangelist"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
@@ -56,9 +57,10 @@ type RuleManager struct {
 	ctx     context.Context
 	storage endpoint.RuleStorage
 	syncutil.RWMutex
-	initialized bool
-	ruleConfig  *ruleConfig
-	ruleList    ruleList
+	initialized    bool
+	inMicroService bool
+	ruleConfig     *ruleConfig
+	ruleList       ruleList
 
 	// used for rule validation
 	keyType          string
@@ -85,6 +87,15 @@ func (m *RuleManager) Initialize(maxReplica int, locationLabels []string, isolat
 	m.Lock()
 	defer m.Unlock()
 	if m.initialized {
+		return nil
+	}
+	// If RuleManager is initialized in micro service,
+	// it will load from etcd watcher and do not modify rule directly.
+	if m.inMicroService {
+		m.ruleList = ruleList{
+			rangeList: rangelist.List{},
+		}
+		m.initialized = true
 		return nil
 	}
 
@@ -829,6 +840,13 @@ func (m *RuleManager) SetKeyType(h string) *RuleManager {
 	defer m.Unlock()
 	m.keyType = h
 	return m
+}
+
+// SetInMicroService set whether rule manager is in micro service.
+func (m *RuleManager) SetInMicroService(v bool) {
+	m.Lock()
+	defer m.Unlock()
+	m.inMicroService = v
 }
 
 func getStoresByRegion(storeSet StoreSet, region *core.RegionInfo) []*core.StoreInfo {
