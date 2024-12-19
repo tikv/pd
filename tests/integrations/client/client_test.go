@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"os"
 	"path"
 	"reflect"
 	"sort"
@@ -31,15 +32,23 @@ import (
 	"time"
 
 	"github.com/docker/go-units"
+	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/suite"
+	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.uber.org/goleak"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/meta_storagepb"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/stretchr/testify/require"
-	"github.com/stretchr/testify/suite"
+
 	pd "github.com/tikv/pd/client"
+	"github.com/tikv/pd/client/clients/router"
 	"github.com/tikv/pd/client/opt"
 	"github.com/tikv/pd/client/pkg/caller"
+	cb "github.com/tikv/pd/client/pkg/circuitbreaker"
 	"github.com/tikv/pd/client/pkg/retry"
 	sd "github.com/tikv/pd/client/servicediscovery"
 	"github.com/tikv/pd/pkg/core"
@@ -55,8 +64,6 @@ import (
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
 	"github.com/tikv/pd/tests/integrations/mcs"
-	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.uber.org/goleak"
 )
 
 const (
@@ -537,11 +544,11 @@ func (suite *followerForwardAndHandleTestSuite) TestGetTsoByFollowerForwarding1(
 	checkTS(re, cli, lastTS)
 
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/responseNil", "return(true)"))
-	regions, err := cli.BatchScanRegions(ctx, []pd.KeyRange{{StartKey: []byte(""), EndKey: []byte("")}}, 100)
+	regions, err := cli.BatchScanRegions(ctx, []router.KeyRange{{StartKey: []byte(""), EndKey: []byte("")}}, 100)
 	re.NoError(err)
 	re.Empty(regions)
 	re.NoError(failpoint.Disable("github.com/tikv/pd/client/responseNil"))
-	regions, err = cli.BatchScanRegions(ctx, []pd.KeyRange{{StartKey: []byte(""), EndKey: []byte("")}}, 100)
+	regions, err = cli.BatchScanRegions(ctx, []router.KeyRange{{StartKey: []byte(""), EndKey: []byte("")}}, 100)
 	re.NoError(err)
 	re.Len(regions, 1)
 }
@@ -1214,7 +1221,7 @@ func (suite *clientTestSuite) TestScanRegions() {
 
 	// Wait for region heartbeats.
 	testutil.Eventually(re, func() bool {
-		scanRegions, err := suite.client.BatchScanRegions(context.Background(), []pd.KeyRange{{StartKey: []byte{0}, EndKey: nil}}, 10)
+		scanRegions, err := suite.client.BatchScanRegions(context.Background(), []router.KeyRange{{StartKey: []byte{0}, EndKey: nil}}, 10)
 		return err == nil && len(scanRegions) == 10
 	})
 
@@ -1232,7 +1239,7 @@ func (suite *clientTestSuite) TestScanRegions() {
 
 	t := suite.T()
 	check := func(start, end []byte, limit int, expect []*metapb.Region) {
-		scanRegions, err := suite.client.BatchScanRegions(context.Background(), []pd.KeyRange{{StartKey: start, EndKey: end}}, limit)
+		scanRegions, err := suite.client.BatchScanRegions(context.Background(), []router.KeyRange{{StartKey: start, EndKey: end}}, limit)
 		re.NoError(err)
 		re.Len(scanRegions, len(expect))
 		t.Log("scanRegions", scanRegions)
@@ -1847,7 +1854,7 @@ func (suite *clientTestSuite) TestBatchScanRegions() {
 
 	// Wait for region heartbeats.
 	testutil.Eventually(re, func() bool {
-		scanRegions, err := suite.client.BatchScanRegions(ctx, []pd.KeyRange{{StartKey: []byte{0}, EndKey: nil}}, 10)
+		scanRegions, err := suite.client.BatchScanRegions(ctx, []router.KeyRange{{StartKey: []byte{0}, EndKey: nil}}, 10)
 		return err == nil && len(scanRegions) == 10
 	})
 
@@ -1869,7 +1876,7 @@ func (suite *clientTestSuite) TestBatchScanRegions() {
 
 	t := suite.T()
 	var outputMustContainAllKeyRangeOptions []bool
-	check := func(ranges []pd.KeyRange, limit int, expect []*metapb.Region) {
+	check := func(ranges []router.KeyRange, limit int, expect []*metapb.Region) {
 		for _, bucket := range []bool{false, true} {
 			for _, outputMustContainAllKeyRange := range outputMustContainAllKeyRangeOptions {
 				var opts []opt.GetRegionOption
@@ -1915,16 +1922,16 @@ func (suite *clientTestSuite) TestBatchScanRegions() {
 
 	// valid ranges
 	outputMustContainAllKeyRangeOptions = []bool{false, true}
-	check([]pd.KeyRange{{StartKey: []byte{0}, EndKey: nil}}, 10, regions)
-	check([]pd.KeyRange{{StartKey: []byte{1}, EndKey: nil}}, 5, regions[1:6])
-	check([]pd.KeyRange{
+	check([]router.KeyRange{{StartKey: []byte{0}, EndKey: nil}}, 10, regions)
+	check([]router.KeyRange{{StartKey: []byte{1}, EndKey: nil}}, 5, regions[1:6])
+	check([]router.KeyRange{
 		{StartKey: []byte{0}, EndKey: []byte{1}},
 		{StartKey: []byte{2}, EndKey: []byte{3}},
 		{StartKey: []byte{4}, EndKey: []byte{5}},
 		{StartKey: []byte{6}, EndKey: []byte{7}},
 		{StartKey: []byte{8}, EndKey: []byte{9}},
 	}, 10, []*metapb.Region{regions[0], regions[2], regions[4], regions[6], regions[8]})
-	check([]pd.KeyRange{
+	check([]router.KeyRange{
 		{StartKey: []byte{0}, EndKey: []byte{1}},
 		{StartKey: []byte{2}, EndKey: []byte{3}},
 		{StartKey: []byte{4}, EndKey: []byte{5}},
@@ -1933,7 +1940,7 @@ func (suite *clientTestSuite) TestBatchScanRegions() {
 	}, 3, []*metapb.Region{regions[0], regions[2], regions[4]})
 
 	outputMustContainAllKeyRangeOptions = []bool{false}
-	check([]pd.KeyRange{
+	check([]router.KeyRange{
 		{StartKey: []byte{0}, EndKey: []byte{0, 1}}, // non-continuous ranges in a region
 		{StartKey: []byte{0, 2}, EndKey: []byte{0, 3}},
 		{StartKey: []byte{0, 3}, EndKey: []byte{0, 4}},
@@ -1942,26 +1949,26 @@ func (suite *clientTestSuite) TestBatchScanRegions() {
 		{StartKey: []byte{4}, EndKey: []byte{5}},
 	}, 10, []*metapb.Region{regions[0], regions[1], regions[2], regions[4]})
 	outputMustContainAllKeyRangeOptions = []bool{false}
-	check([]pd.KeyRange{
+	check([]router.KeyRange{
 		{StartKey: []byte{9}, EndKey: []byte{10, 1}},
 	}, 10, []*metapb.Region{regions[9]})
 
 	// invalid ranges
 	_, err := suite.client.BatchScanRegions(
 		ctx,
-		[]pd.KeyRange{{StartKey: []byte{1}, EndKey: []byte{0}}},
+		[]router.KeyRange{{StartKey: []byte{1}, EndKey: []byte{0}}},
 		10,
 		opt.WithOutputMustContainAllKeyRange(),
 	)
 	re.ErrorContains(err, "invalid key range, start key > end key")
-	_, err = suite.client.BatchScanRegions(ctx, []pd.KeyRange{
+	_, err = suite.client.BatchScanRegions(ctx, []router.KeyRange{
 		{StartKey: []byte{0}, EndKey: []byte{2}},
 		{StartKey: []byte{1}, EndKey: []byte{3}},
 	}, 10)
 	re.ErrorContains(err, "invalid key range, ranges overlapped")
 	_, err = suite.client.BatchScanRegions(
 		ctx,
-		[]pd.KeyRange{{StartKey: []byte{9}, EndKey: []byte{10, 1}}},
+		[]router.KeyRange{{StartKey: []byte{9}, EndKey: []byte{10, 1}}},
 		10,
 		opt.WithOutputMustContainAllKeyRange(),
 	)
@@ -1986,10 +1993,231 @@ func (suite *clientTestSuite) TestBatchScanRegions() {
 	testutil.Eventually(re, func() bool {
 		_, err = suite.client.BatchScanRegions(
 			ctx,
-			[]pd.KeyRange{{StartKey: []byte{9}, EndKey: []byte{101}}},
+			[]router.KeyRange{{StartKey: []byte{9}, EndKey: []byte{101}}},
 			10,
 			opt.WithOutputMustContainAllKeyRange(),
 		)
 		return err != nil && strings.Contains(err.Error(), "found a hole region between")
 	})
+}
+
+func TestGetRegionWithBackoff(t *testing.T) {
+	re := require.New(t)
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/rateLimit", "return(true)"))
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	cluster, err := tests.NewTestCluster(ctx, 1)
+	re.NoError(err)
+	defer cluster.Destroy()
+	endpoints := runServer(re, cluster)
+
+	// Define the backoff parameters
+	base := 100 * time.Millisecond
+	max := 500 * time.Millisecond
+	total := 3 * time.Second
+
+	// Create a backoff strategy
+	bo := retry.InitialBackoffer(base, max, total)
+	bo.SetRetryableChecker(needRetry, true)
+
+	// Initialize the client with context and backoff
+	client, err := pd.NewClientWithContext(ctx, caller.TestComponent, endpoints, pd.SecurityOption{})
+	re.NoError(err)
+
+	// Record the start time
+	start := time.Now()
+
+	ctx = retry.WithBackoffer(ctx, bo)
+	// Call GetRegion and expect it to handle backoff internally
+	_, err = client.GetRegion(ctx, []byte("key"))
+	re.Error(err)
+	// Calculate the elapsed time
+	elapsed := time.Since(start)
+	// Verify that some backoff occurred by checking if the elapsed time is greater than the base backoff
+	re.Greater(elapsed, total, "Expected some backoff to have occurred")
+
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/rateLimit"))
+	// Call GetRegion again and expect it to succeed
+	region, err := client.GetRegion(ctx, []byte("key"))
+	re.NoError(err)
+	re.Equal(uint64(2), region.Meta.Id) // Adjust this based on expected region
+}
+
+func needRetry(err error) bool {
+	st, ok := status.FromError(err)
+	if !ok {
+		return false
+	}
+	return st.Code() == codes.ResourceExhausted
+}
+
+func TestCircuitBreaker(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	cluster, err := tests.NewTestCluster(ctx, 1)
+	re.NoError(err)
+	defer cluster.Destroy()
+
+	circuitBreakerSettings := cb.Settings{
+		ErrorRateThresholdPct: 60,
+		MinQPSForOpen:         10,
+		ErrorRateWindow:       time.Millisecond,
+		CoolDownInterval:      time.Second,
+		HalfOpenSuccessCount:  1,
+	}
+
+	endpoints := runServer(re, cluster)
+	cli := setupCli(ctx, re, endpoints, opt.WithRegionMetaCircuitBreaker(circuitBreakerSettings))
+	defer cli.Close()
+
+	for range 10 {
+		region, err := cli.GetRegion(context.TODO(), []byte("a"))
+		re.NoError(err)
+		re.NotNil(region)
+	}
+
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/triggerCircuitBreaker", "return(true)"))
+
+	for range 100 {
+		_, err := cli.GetRegion(context.TODO(), []byte("a"))
+		re.Error(err)
+	}
+
+	_, err = cli.GetRegion(context.TODO(), []byte("a"))
+	re.Error(err)
+	re.Contains(err.Error(), "circuit breaker is open")
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/triggerCircuitBreaker"))
+
+	_, err = cli.GetRegion(context.TODO(), []byte("a"))
+	re.Error(err)
+	re.Contains(err.Error(), "circuit breaker is open")
+
+	// wait cooldown
+	time.Sleep(time.Second)
+
+	for range 10 {
+		region, err := cli.GetRegion(context.TODO(), []byte("a"))
+		re.NoError(err)
+		re.NotNil(region)
+	}
+}
+
+func TestCircuitBreakerOpenAndChangeSettings(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	cluster, err := tests.NewTestCluster(ctx, 1)
+	re.NoError(err)
+	defer cluster.Destroy()
+
+	circuitBreakerSettings := cb.Settings{
+		ErrorRateThresholdPct: 60,
+		MinQPSForOpen:         10,
+		ErrorRateWindow:       time.Millisecond,
+		CoolDownInterval:      time.Second,
+		HalfOpenSuccessCount:  1,
+	}
+
+	endpoints := runServer(re, cluster)
+	cli := setupCli(ctx, re, endpoints, opt.WithRegionMetaCircuitBreaker(circuitBreakerSettings))
+	defer cli.Close()
+
+	for range 10 {
+		region, err := cli.GetRegion(context.TODO(), []byte("a"))
+		re.NoError(err)
+		re.NotNil(region)
+	}
+
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/triggerCircuitBreaker", "return(true)"))
+
+	for range 100 {
+		_, err := cli.GetRegion(context.TODO(), []byte("a"))
+		re.Error(err)
+	}
+
+	_, err = cli.GetRegion(context.TODO(), []byte("a"))
+	re.Error(err)
+	re.Contains(err.Error(), "circuit breaker is open")
+
+	cli.UpdateOption(opt.RegionMetadataCircuitBreakerSettings, func(config *cb.Settings) {
+		*config = cb.AlwaysClosedSettings
+	})
+
+	_, err = cli.GetRegion(context.TODO(), []byte("a"))
+	re.Error(err)
+	re.Contains(err.Error(), "ResourceExhausted")
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/triggerCircuitBreaker"))
+}
+
+func TestCircuitBreakerHalfOpenAndChangeSettings(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	cluster, err := tests.NewTestCluster(ctx, 1)
+	re.NoError(err)
+	defer cluster.Destroy()
+
+	circuitBreakerSettings := cb.Settings{
+		ErrorRateThresholdPct: 60,
+		MinQPSForOpen:         10,
+		ErrorRateWindow:       time.Millisecond,
+		CoolDownInterval:      time.Second,
+		HalfOpenSuccessCount:  20,
+	}
+
+	endpoints := runServer(re, cluster)
+	cli := setupCli(ctx, re, endpoints, opt.WithRegionMetaCircuitBreaker(circuitBreakerSettings))
+	defer cli.Close()
+
+	for range 10 {
+		region, err := cli.GetRegion(context.TODO(), []byte("a"))
+		re.NoError(err)
+		re.NotNil(region)
+	}
+
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/triggerCircuitBreaker", "return(true)"))
+
+	for range 100 {
+		_, err := cli.GetRegion(context.TODO(), []byte("a"))
+		re.Error(err)
+	}
+
+	_, err = cli.GetRegion(context.TODO(), []byte("a"))
+	re.Error(err)
+	re.Contains(err.Error(), "circuit breaker is open")
+
+	fname := testutil.InitTempFileLogger("info")
+	defer os.RemoveAll(fname)
+	// wait for cooldown
+	time.Sleep(time.Second)
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/triggerCircuitBreaker"))
+	// trigger circuit breaker state to be half open
+	_, err = cli.GetRegion(context.TODO(), []byte("a"))
+	re.NoError(err)
+	testutil.Eventually(re, func() bool {
+		b, _ := os.ReadFile(fname)
+		l := string(b)
+		// We need to check the log to see if the circuit breaker is half open
+		return strings.Contains(l, "Transitioning to half-open state to test the service")
+	})
+
+	// The state is half open
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/triggerCircuitBreaker", "return(true)"))
+	// change settings to always closed
+	cli.UpdateOption(opt.RegionMetadataCircuitBreakerSettings, func(config *cb.Settings) {
+		*config = cb.AlwaysClosedSettings
+	})
+
+	// It won't be changed to open state.
+	for range 100 {
+		_, err := cli.GetRegion(context.TODO(), []byte("a"))
+		re.Error(err)
+		re.NotContains(err.Error(), "circuit breaker is open")
+	}
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/triggerCircuitBreaker"))
 }

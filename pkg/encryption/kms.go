@@ -22,7 +22,9 @@ import (
 	"github.com/aws/aws-sdk-go-v2/credentials/stscreds"
 	"github.com/aws/aws-sdk-go-v2/service/kms"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
+
 	"github.com/pingcap/kvproto/pkg/encryptionpb"
+
 	"github.com/tikv/pd/pkg/errs"
 )
 

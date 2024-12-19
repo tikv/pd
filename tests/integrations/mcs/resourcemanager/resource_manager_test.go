@@ -26,11 +26,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/suite"
+	"go.uber.org/goleak"
+	"go.uber.org/zap"
+
 	"github.com/pingcap/failpoint"
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 	"github.com/pingcap/log"
-	"github.com/stretchr/testify/require"
-	"github.com/stretchr/testify/suite"
+
 	pd "github.com/tikv/pd/client"
 	"github.com/tikv/pd/client/pkg/caller"
 	"github.com/tikv/pd/client/resource_group/controller"
@@ -39,8 +43,6 @@ import (
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/tests"
-	"go.uber.org/goleak"
-	"go.uber.org/zap"
 
 	// Register Service
 	_ "github.com/tikv/pd/pkg/mcs/registry"

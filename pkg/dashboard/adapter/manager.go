@@ -23,6 +23,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/pingcap/tidb-dashboard/pkg/apiserver"
+
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/server"

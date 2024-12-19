@@ -20,11 +20,12 @@ import (
 
 	"github.com/DATA-DOG/go-sqlmock"
 	mysqldriver "github.com/go-sql-driver/mysql"
-	"github.com/pingcap/log"
 	"github.com/stretchr/testify/require"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 	"moul.io/zapgorm2"
+
+	"github.com/pingcap/log"
 )
 
 // TestDB is a test database

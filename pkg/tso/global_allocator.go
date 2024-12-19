@@ -24,9 +24,12 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+	"go.uber.org/zap"
+
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
-	"github.com/prometheus/client_golang/prometheus"
+
 	"github.com/tikv/pd/pkg/election"
 	"github.com/tikv/pd/pkg/errs"
 	mcsutils "github.com/tikv/pd/pkg/mcs/utils"
@@ -34,7 +37,6 @@ import (
 	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/logutil"
-	"go.uber.org/zap"
 )
 
 // Allocator is a Timestamp Oracle allocator.
@@ -47,14 +49,6 @@ type Allocator interface {
 	IsInitialize() bool
 	// UpdateTSO is used to update the TSO in memory and the time window in etcd.
 	UpdateTSO() error
-	// GetTimestampPath returns the timestamp path in etcd, which is:
-	// 1. for the default keyspace group:
-	//     a. timestamp in /pd/{cluster_id}/timestamp
-	//     b. lta/{dc-location}/timestamp in /pd/{cluster_id}/lta/{dc-location}/timestamp
-	// 1. for the non-default keyspace groups:
-	//     a. {group}/gts/timestamp in /ms/{cluster_id}/tso/{group}/gta/timestamp
-	//     b. {group}/lts/{dc-location}/timestamp in /ms/{cluster_id}/tso/{group}/lta/{dc-location}/timestamp
-	GetTimestampPath() string
 	// SetTSO sets the physical part with given TSO. It's mainly used for BR restore.
 	// Cannot set the TSO smaller than now in any case.
 	// if ignoreSmaller=true, if input ts is smaller than current, ignore silently, else return error
@@ -68,6 +62,8 @@ type Allocator interface {
 }
 
 // GlobalTSOAllocator is the global single point TSO allocator.
+// TODO: Local TSO allocator is deprecated now, we can update the name to
+// TSOAllocator and remove the `Global` concept.
 type GlobalTSOAllocator struct {
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -111,7 +107,6 @@ func newGlobalTimestampOracle(am *AllocatorManager) *timestampOracle {
 		saveInterval:           am.saveInterval,
 		updatePhysicalInterval: am.updatePhysicalInterval,
 		maxResetTSGap:          am.maxResetTSGap,
-		dcLocation:             GlobalDCLocation,
 		tsoMux:                 &tsoObject{},
 		metrics:                newTSOMetrics(am.getGroupIDStr(), GlobalDCLocation),
 	}
@@ -133,19 +128,9 @@ func (gta *GlobalTSOAllocator) getGroupID() uint32 {
 	return gta.am.getGroupID()
 }
 
-// GetTimestampPath returns the timestamp path in etcd.
-func (gta *GlobalTSOAllocator) GetTimestampPath() string {
-	if gta == nil || gta.timestampOracle == nil {
-		return ""
-	}
-	return gta.timestampOracle.GetTimestampPath()
-}
-
 // Initialize will initialize the created global TSO allocator.
 func (gta *GlobalTSOAllocator) Initialize(int) error {
 	gta.tsoAllocatorRoleGauge.Set(1)
-	// The suffix of a Global TSO should always be 0.
-	gta.timestampOracle.suffix = 0
 	return gta.timestampOracle.SyncTimestamp()
 }
 
@@ -161,7 +146,7 @@ func (gta *GlobalTSOAllocator) UpdateTSO() error {
 
 // SetTSO sets the physical part with given TSO.
 func (gta *GlobalTSOAllocator) SetTSO(tso uint64, ignoreSmaller, skipUpperBoundCheck bool) error {
-	return gta.timestampOracle.resetUserTimestampInner(gta.member.GetLeadership(), tso, ignoreSmaller, skipUpperBoundCheck)
+	return gta.timestampOracle.resetUserTimestamp(gta.member.GetLeadership(), tso, ignoreSmaller, skipUpperBoundCheck)
 }
 
 // GenerateTSO is used to generate the given number of TSOs.
@@ -176,7 +161,7 @@ func (gta *GlobalTSOAllocator) GenerateTSO(ctx context.Context, count uint32) (p
 		return pdpb.Timestamp{}, errs.ErrGenerateTimestamp.FastGenByArgs(fmt.Sprintf("requested pd %s of cluster", errs.NotLeaderErr))
 	}
 
-	return gta.timestampOracle.getTS(ctx, gta.member.GetLeadership(), count, 0)
+	return gta.timestampOracle.getTS(ctx, gta.member.GetLeadership(), count)
 }
 
 // Reset is used to reset the TSO allocator.
@@ -216,7 +201,10 @@ func (gta *GlobalTSOAllocator) primaryElectionLoop() {
 		}
 
 		// To make sure the expected primary(if existed) and new primary are on the same server.
-		expectedPrimary := mcsutils.GetExpectedPrimaryFlag(gta.member.Client(), gta.member.GetLeaderPath())
+		expectedPrimary := mcsutils.GetExpectedPrimaryFlag(gta.member.Client(), &keypath.MsParam{
+			ServiceName: constant.TSOServiceName,
+			GroupID:     gta.getGroupID(),
+		})
 		// skip campaign the primary if the expected primary is not empty and not equal to the current memberValue.
 		// expected primary ONLY SET BY `{service}/primary/transfer` API.
 		if len(expectedPrimary) > 0 && !strings.Contains(gta.member.MemberValue(), expectedPrimary) {
@@ -271,28 +259,24 @@ func (gta *GlobalTSOAllocator) campaignLeader() {
 		logutil.CondUint32("keyspace-group-id", gta.getGroupID(), gta.getGroupID() > 0),
 		zap.String("campaign-tso-primary-name", gta.member.Name()))
 
-	allocator, err := gta.am.GetAllocator(GlobalDCLocation)
-	if err != nil {
-		log.Error("failed to get the global tso allocator",
-			logutil.CondUint32("keyspace-group-id", gta.getGroupID(), gta.getGroupID() > 0),
-			errs.ZapError(err))
-		return
-	}
 	log.Info("initializing the global tso allocator")
-	if err := allocator.Initialize(0); err != nil {
+	if err := gta.am.GetAllocator().Initialize(0); err != nil {
 		log.Error("failed to initialize the global tso allocator",
 			logutil.CondUint32("keyspace-group-id", gta.getGroupID(), gta.getGroupID() > 0),
 			errs.ZapError(err))
 		return
 	}
 	defer func() {
-		gta.am.ResetAllocatorGroup(GlobalDCLocation, false)
+		gta.am.ResetAllocatorGroup(false)
 	}()
 
 	// check expected primary and watch the primary.
 	exitPrimary := make(chan struct{})
 	lease, err := mcsutils.KeepExpectedPrimaryAlive(ctx, gta.member.Client(), exitPrimary,
-		gta.am.leaderLease, gta.member.GetLeaderPath(), gta.member.MemberValue(), constant.TSOServiceName)
+		gta.am.leaderLease, &keypath.MsParam{
+			ServiceName: constant.TSOServiceName,
+			GroupID:     gta.getGroupID(),
+		}, gta.member.MemberValue())
 	if err != nil {
 		log.Error("prepare tso primary watch error", errs.ZapError(err))
 		return
@@ -308,8 +292,6 @@ func (gta *GlobalTSOAllocator) campaignLeader() {
 		member.ServiceMemberGauge.WithLabelValues(tsoLabel).Set(0)
 	})
 
-	// TODO: if enable-local-tso is true, check the cluster dc-location after the primary is elected
-	// go gta.tsoAllocatorManager.ClusterDCLocationChecker()
 	log.Info("tso primary is ready to serve",
 		logutil.CondUint32("keyspace-group-id", gta.getGroupID(), gta.getGroupID() > 0),
 		zap.String("tso-primary-name", gta.member.Name()))

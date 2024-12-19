@@ -21,8 +21,10 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/stretchr/testify/require"
+
+	"github.com/pingcap/kvproto/pkg/keyspacepb"
+
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server/apiv2/handlers"

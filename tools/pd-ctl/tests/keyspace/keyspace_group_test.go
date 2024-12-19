@@ -22,8 +22,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/pingcap/failpoint"
 	"github.com/stretchr/testify/require"
+
+	"github.com/pingcap/failpoint"
+
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/testutil"

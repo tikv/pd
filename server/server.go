@@ -32,6 +32,13 @@ import (
 	"github.com/coreos/go-semver/semver"
 	"github.com/gogo/protobuf/proto"
 	"github.com/gorilla/mux"
+	"go.etcd.io/etcd/api/v3/mvccpb"
+	etcdtypes "go.etcd.io/etcd/client/pkg/v3/types"
+	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.etcd.io/etcd/server/v3/embed"
+	"go.uber.org/zap"
+	"google.golang.org/grpc"
+
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/diagnosticspb"
@@ -41,6 +48,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/tsopb"
 	"github.com/pingcap/log"
 	"github.com/pingcap/sysutil"
+
 	"github.com/tikv/pd/pkg/audit"
 	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/cgroup"
@@ -53,8 +61,6 @@ import (
 	ms_server "github.com/tikv/pd/pkg/mcs/metastorage/server"
 	"github.com/tikv/pd/pkg/mcs/registry"
 	rm_server "github.com/tikv/pd/pkg/mcs/resourcemanager/server"
-	_ "github.com/tikv/pd/pkg/mcs/resourcemanager/server/apis/v1" // init API group
-	_ "github.com/tikv/pd/pkg/mcs/tso/server/apis/v1"             // init tso API group
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/ratelimit"
@@ -80,12 +86,9 @@ import (
 	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/server/config"
-	"go.etcd.io/etcd/api/v3/mvccpb"
-	etcdtypes "go.etcd.io/etcd/client/pkg/v3/types"
-	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.etcd.io/etcd/server/v3/embed"
-	"go.uber.org/zap"
-	"google.golang.org/grpc"
+
+	_ "github.com/tikv/pd/pkg/mcs/resourcemanager/server/apis/v1" // init API group
+	_ "github.com/tikv/pd/pkg/mcs/tso/server/apis/v1"             // init tso API group
 )
 
 const (
@@ -432,7 +435,7 @@ func (s *Server) startServer(ctx context.Context) error {
 	bs.ServerInfoGauge.WithLabelValues(versioninfo.PDReleaseVersion, versioninfo.PDGitHash).Set(float64(time.Now().Unix()))
 
 	s.rootPath = keypath.PDRootPath()
-	s.member.InitMemberInfo(s.cfg.AdvertiseClientUrls, s.cfg.AdvertisePeerUrls, s.Name(), s.rootPath)
+	s.member.InitMemberInfo(s.cfg.AdvertiseClientUrls, s.cfg.AdvertisePeerUrls, s.Name())
 	if err := s.member.SetMemberDeployPath(s.member.ID()); err != nil {
 		return err
 	}
@@ -758,7 +761,7 @@ func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.BootstrapRe
 		log.Warn("flush the bootstrap region failed", errs.ZapError(err))
 	}
 
-	if err := s.cluster.Start(s); err != nil {
+	if err := s.cluster.Start(s, true); err != nil {
 		return nil, err
 	}
 
@@ -776,7 +779,7 @@ func (s *Server) createRaftCluster() error {
 		return nil
 	}
 
-	return s.cluster.Start(s)
+	return s.cluster.Start(s, false)
 }
 
 func (s *Server) stopRaftCluster() {
@@ -934,11 +937,6 @@ func (s *Server) GetServiceMiddlewareConfig() *config.ServiceMiddlewareConfig {
 	cfg.RateLimitConfig = *s.serviceMiddlewarePersistOptions.GetRateLimitConfig().Clone()
 	cfg.GRPCRateLimitConfig = *s.serviceMiddlewarePersistOptions.GetGRPCRateLimitConfig().Clone()
 	return cfg
-}
-
-// SetEnableLocalTSO sets enable-local-tso flag of Server. This function only for test.
-func (s *Server) SetEnableLocalTSO(enableLocalTSO bool) {
-	s.cfg.EnableLocalTSO = enableLocalTSO
 }
 
 // GetConfig gets the config information.
@@ -1970,15 +1968,19 @@ func (s *Server) SetServicePrimaryAddr(serviceName, addr string) {
 
 func (s *Server) initTSOPrimaryWatcher() {
 	serviceName := constant.TSOServiceName
-	tsoRootPath := keypath.TSOSvcRootPath()
-	tsoServicePrimaryKey := keypath.KeyspaceGroupPrimaryPath(tsoRootPath, constant.DefaultKeyspaceGroupID)
+	tsoServicePrimaryKey := keypath.LeaderPath(&keypath.MsParam{
+		ServiceName: constant.TSOServiceName,
+		GroupID:     constant.DefaultKeyspaceGroupID,
+	})
 	s.tsoPrimaryWatcher = s.initServicePrimaryWatcher(serviceName, tsoServicePrimaryKey)
 	s.tsoPrimaryWatcher.StartWatchLoop()
 }
 
 func (s *Server) initSchedulingPrimaryWatcher() {
 	serviceName := constant.SchedulingServiceName
-	primaryKey := keypath.SchedulingPrimaryPath()
+	primaryKey := keypath.LeaderPath(&keypath.MsParam{
+		ServiceName: constant.SchedulingServiceName,
+	})
 	s.schedulingPrimaryWatcher = s.initServicePrimaryWatcher(serviceName, primaryKey)
 	s.schedulingPrimaryWatcher.StartWatchLoop()
 }
@@ -2057,11 +2059,6 @@ func (s *Server) SetExternalTS(externalTS, globalTS uint64) error {
 	return c.SetExternalTS(externalTS)
 }
 
-// IsLocalTSOEnabled returns if the local TSO is enabled.
-func (s *Server) IsLocalTSOEnabled() bool {
-	return s.cfg.IsLocalTSOEnabled()
-}
-
 // GetMaxConcurrentTSOProxyStreamings returns the max concurrent TSO proxy streamings.
 // If the value is negative, there is no limit.
 func (s *Server) GetMaxConcurrentTSOProxyStreamings() int {
@@ -2097,4 +2094,10 @@ func (s *Server) GetMaxResetTSGap() time.Duration {
 // Notes: it is only used for test.
 func (s *Server) SetClient(client *clientv3.Client) {
 	s.client = client
+}
+
+// GetGlobalTSOAllocator return global tso allocator
+// It only is used for test.
+func (s *Server) GetGlobalTSOAllocator() tso.Allocator {
+	return s.cluster.GetGlobalTSOAllocator()
 }

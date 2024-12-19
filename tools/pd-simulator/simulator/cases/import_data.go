@@ -21,14 +21,16 @@ import (
 
 	"github.com/docker/go-units"
 	"github.com/go-echarts/go-echarts/charts"
+	"go.uber.org/zap"
+
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
+
 	"github.com/tikv/pd/pkg/codec"
 	"github.com/tikv/pd/pkg/core"
 	sc "github.com/tikv/pd/tools/pd-simulator/simulator/config"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/info"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/simutil"
-	"go.uber.org/zap"
 )
 
 func newImportData(config *sc.SimConfig) *Case {

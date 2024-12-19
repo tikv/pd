@@ -20,13 +20,15 @@ import (
 	"strings"
 	"time"
 
+	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.uber.org/zap"
+
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
+
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
-	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.uber.org/zap"
 )
 
 const (

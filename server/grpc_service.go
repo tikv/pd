@@ -28,6 +28,13 @@ import (
 	"sync/atomic"
 	"time"
 
+	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.uber.org/multierr"
+	"go.uber.org/zap"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -35,12 +42,12 @@ import (
 	"github.com/pingcap/kvproto/pkg/schedulingpb"
 	"github.com/pingcap/kvproto/pkg/tsopb"
 	"github.com/pingcap/log"
+
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
-	"github.com/tikv/pd/pkg/tso"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/logutil"
@@ -48,12 +55,6 @@ import (
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/server/cluster"
-	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.uber.org/multierr"
-	"go.uber.org/zap"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 )
 
 const (
@@ -318,10 +319,10 @@ func (s *GrpcServer) GetMinTS(
 		err   error
 	)
 	if s.IsServiceIndependent(constant.TSOServiceName) {
-		minTS, err = s.GetMinTSFromTSOService(tso.GlobalDCLocation)
+		minTS, err = s.GetMinTSFromTSOService()
 	} else {
 		start := time.Now()
-		ts, internalErr := s.tsoAllocatorManager.HandleRequest(ctx, tso.GlobalDCLocation, 1)
+		ts, internalErr := s.tsoAllocatorManager.HandleRequest(ctx, 1)
 		if internalErr == nil {
 			tsoHandleDuration.Observe(time.Since(start).Seconds())
 		}
@@ -342,7 +343,7 @@ func (s *GrpcServer) GetMinTS(
 
 // GetMinTSFromTSOService queries all tso servers and gets the minimum timestamp across
 // all keyspace groups.
-func (s *GrpcServer) GetMinTSFromTSOService(dcLocation string) (*pdpb.Timestamp, error) {
+func (s *GrpcServer) GetMinTSFromTSOService() (*pdpb.Timestamp, error) {
 	addrs := s.keyspaceGroupManager.GetTSOServiceAddrs()
 	if len(addrs) == 0 {
 		return &pdpb.Timestamp{}, errs.ErrGetMinTS.FastGenByArgs("no tso servers/pods discovered")
@@ -356,7 +357,7 @@ func (s *GrpcServer) GetMinTSFromTSOService(dcLocation string) (*pdpb.Timestamp,
 	for _, addr := range addrs {
 		go func(addr string) {
 			defer wg.Done()
-			resp, err := s.getMinTSFromSingleServer(s.ctx, dcLocation, addr)
+			resp, err := s.getMinTSFromSingleServer(s.ctx, addr)
 			if err != nil || resp == nil {
 				log.Warn("failed to get min ts from tso server",
 					zap.String("address", addr), zap.Error(err))
@@ -411,7 +412,7 @@ func (s *GrpcServer) GetMinTSFromTSOService(dcLocation string) (*pdpb.Timestamp,
 }
 
 func (s *GrpcServer) getMinTSFromSingleServer(
-	ctx context.Context, dcLocation, tsoSrvAddr string,
+	ctx context.Context, tsoSrvAddr string,
 ) (*tsopb.GetMinTSResponse, error) {
 	cc, err := s.getDelegateClient(s.ctx, tsoSrvAddr)
 	if err != nil {
@@ -427,7 +428,6 @@ func (s *GrpcServer) getMinTSFromSingleServer(
 			Header: &tsopb.RequestHeader{
 				ClusterId: keypath.ClusterID(),
 			},
-			DcLocation: dcLocation,
 		})
 	if err != nil {
 		attachErr := errors.Errorf("error:%s target:%s status:%s",
@@ -482,17 +482,6 @@ func (s *GrpcServer) GetMembers(context.Context, *pdpb.GetMembersRequest) (*pdpb
 		}
 	}
 
-	tsoAllocatorLeaders := make(map[string]*pdpb.Member)
-	if !s.IsServiceIndependent(constant.TSOServiceName) {
-		tsoAllocatorManager := s.GetTSOAllocatorManager()
-		tsoAllocatorLeaders, err = tsoAllocatorManager.GetLocalAllocatorLeaders()
-	}
-	if err != nil {
-		return &pdpb.GetMembersResponse{
-			Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
-		}, nil
-	}
-
 	leader := s.member.GetLeader()
 	for _, m := range members {
 		if m.MemberId == leader.GetMemberId() {
@@ -502,11 +491,10 @@ func (s *GrpcServer) GetMembers(context.Context, *pdpb.GetMembersRequest) (*pdpb
 	}
 
 	return &pdpb.GetMembersResponse{
-		Header:              wrapHeader(),
-		Members:             members,
-		Leader:              pdLeader,
-		EtcdLeader:          etcdLeader,
-		TsoAllocatorLeaders: tsoAllocatorLeaders,
+		Header:     wrapHeader(),
+		Members:    members,
+		Leader:     pdLeader,
+		EtcdLeader: etcdLeader,
 	}, nil
 }
 
@@ -611,7 +599,7 @@ func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
 		}
 		count := request.GetCount()
 		ctx, task := trace.NewTask(ctx, "tso")
-		ts, err := s.tsoAllocatorManager.HandleRequest(ctx, request.GetDcLocation(), count)
+		ts, err := s.tsoAllocatorManager.HandleRequest(ctx, count)
 		task.End()
 		tsoHandleDuration.Observe(time.Since(start).Seconds())
 		if err != nil {
@@ -1409,6 +1397,9 @@ func (s *GrpcServer) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error
 
 // GetRegion implements gRPC PDServer.
 func (s *GrpcServer) GetRegion(ctx context.Context, request *pdpb.GetRegionRequest) (*pdpb.GetRegionResponse, error) {
+	failpoint.Inject("rateLimit", func() {
+		failpoint.Return(nil, status.Error(codes.ResourceExhausted, errs.ErrRateLimitExceeded.Error()))
+	})
 	if s.GetServiceMiddlewarePersistOptions().IsGRPCRateLimitEnabled() {
 		fName := currentFunction()
 		limiter := s.GetGRPCRateLimiter()
@@ -2467,114 +2458,10 @@ func convertAskSplitResponse(resp *schedulingpb.AskBatchSplitResponse) *pdpb.Ask
 	}
 }
 
-// Only used for the TestLocalAllocatorLeaderChange.
-var mockLocalAllocatorLeaderChangeFlag = false
-
-// SyncMaxTS will check whether MaxTS is the biggest one among all Local TSOs this PD is holding when skipCheck is set,
-// and write it into all Local TSO Allocators then if it's indeed the biggest one.
-func (s *GrpcServer) SyncMaxTS(_ context.Context, request *pdpb.SyncMaxTSRequest) (*pdpb.SyncMaxTSResponse, error) {
-	// TODO: support local tso forward in api service mode in the future.
-	if err := s.validateInternalRequest(request.GetHeader(), true); err != nil {
-		return nil, err
-	}
-	if s.GetServiceMiddlewarePersistOptions().IsGRPCRateLimitEnabled() {
-		fName := currentFunction()
-		limiter := s.GetGRPCRateLimiter()
-		if done, err := limiter.Allow(fName); err == nil {
-			defer done()
-		} else {
-			return nil, status.Error(codes.ResourceExhausted, err.Error())
-		}
-	}
-	tsoAllocatorManager := s.GetTSOAllocatorManager()
-	// There is no dc-location found in this server, return err.
-	if tsoAllocatorManager.GetClusterDCLocationsNumber() == 0 {
-		return &pdpb.SyncMaxTSResponse{
-			Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN,
-				"empty cluster dc-location found, checker may not work properly"),
-		}, nil
-	}
-	// Get all Local TSO Allocator leaders
-	allocatorLeaders, err := tsoAllocatorManager.GetHoldingLocalAllocatorLeaders()
-	if err != nil {
-		return &pdpb.SyncMaxTSResponse{
-			Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
-		}, nil
-	}
-	if !request.GetSkipCheck() {
-		var maxLocalTS *pdpb.Timestamp
-		syncedDCs := make([]string, 0, len(allocatorLeaders))
-		for _, allocator := range allocatorLeaders {
-			// No longer leader, just skip here because
-			// the global allocator will check if all DCs are handled.
-			if !allocator.IsAllocatorLeader() {
-				continue
-			}
-			currentLocalTSO, err := allocator.GetCurrentTSO()
-			if err != nil {
-				return &pdpb.SyncMaxTSResponse{
-					Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
-				}, nil
-			}
-			if tsoutil.CompareTimestamp(currentLocalTSO, maxLocalTS) > 0 {
-				maxLocalTS = currentLocalTSO
-			}
-			syncedDCs = append(syncedDCs, allocator.GetDCLocation())
-		}
-
-		failpoint.Inject("mockLocalAllocatorLeaderChange", func() {
-			if !mockLocalAllocatorLeaderChangeFlag {
-				maxLocalTS = nil
-				request.MaxTs = nil
-				mockLocalAllocatorLeaderChangeFlag = true
-			}
-		})
-
-		if maxLocalTS == nil {
-			return &pdpb.SyncMaxTSResponse{
-				Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN,
-					"local tso allocator leaders have changed during the sync, should retry"),
-			}, nil
-		}
-		if request.GetMaxTs() == nil {
-			return &pdpb.SyncMaxTSResponse{
-				Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN,
-					"empty maxTS in the request, should retry"),
-			}, nil
-		}
-		// Found a bigger or equal maxLocalTS, return it directly.
-		cmpResult := tsoutil.CompareTimestamp(maxLocalTS, request.GetMaxTs())
-		if cmpResult >= 0 {
-			// Found an equal maxLocalTS, plus 1 to logical part before returning it.
-			// For example, we have a Global TSO t1 and a Local TSO t2, they have the
-			// same physical and logical parts. After being differentiating with suffix,
-			// there will be (t1.logical << suffixNum + 0) < (t2.logical << suffixNum + N),
-			// where N is bigger than 0, which will cause a Global TSO fallback than the previous Local TSO.
-			if cmpResult == 0 {
-				maxLocalTS.Logical += 1
-			}
-			return &pdpb.SyncMaxTSResponse{
-				Header:     wrapHeader(),
-				MaxLocalTs: maxLocalTS,
-				SyncedDcs:  syncedDCs,
-			}, nil
-		}
-	}
-	syncedDCs := make([]string, 0, len(allocatorLeaders))
-	for _, allocator := range allocatorLeaders {
-		if !allocator.IsAllocatorLeader() {
-			continue
-		}
-		if err := allocator.WriteTSO(request.GetMaxTs()); err != nil {
-			return &pdpb.SyncMaxTSResponse{
-				Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
-			}, nil
-		}
-		syncedDCs = append(syncedDCs, allocator.GetDCLocation())
-	}
+// Deprecated.
+func (*GrpcServer) SyncMaxTS(_ context.Context, _ *pdpb.SyncMaxTSRequest) (*pdpb.SyncMaxTSResponse, error) {
 	return &pdpb.SyncMaxTSResponse{
-		Header:    wrapHeader(),
-		SyncedDcs: syncedDCs,
+		Header: wrapHeader(),
 	}, nil
 }
 
@@ -2703,22 +2590,6 @@ func (*GrpcServer) GetDCLocationInfo(_ context.Context, _ *pdpb.GetDCLocationInf
 	return &pdpb.GetDCLocationInfoResponse{
 		Header: wrapHeader(),
 	}, nil
-}
-
-// validateInternalRequest checks if server is closed, which is used to validate
-// the gRPC communication between PD servers internally.
-func (s *GrpcServer) validateInternalRequest(header *pdpb.RequestHeader, onlyAllowLeader bool) error {
-	if s.IsClosed() {
-		return ErrNotStarted
-	}
-	// If onlyAllowLeader is true, check whether the sender is PD leader.
-	if onlyAllowLeader {
-		leaderID := s.GetLeader().GetMemberId()
-		if leaderID != header.GetSenderId() {
-			return status.Errorf(codes.FailedPrecondition, "%s, need %d but got %d", errs.MismatchLeaderErr, leaderID, header.GetSenderId())
-		}
-	}
-	return nil
 }
 
 // for CDC compatibility, we need to initialize config path to `globalConfigPath`

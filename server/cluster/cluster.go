@@ -30,11 +30,15 @@ import (
 	"time"
 
 	"github.com/coreos/go-semver/semver"
+	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.uber.org/zap"
+
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+
 	"github.com/tikv/pd/pkg/cluster"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/storelimit"
@@ -69,8 +73,6 @@ import (
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/server/config"
-	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.uber.org/zap"
 )
 
 var (
@@ -315,7 +317,7 @@ func (c *RaftCluster) InitCluster(
 }
 
 // Start starts a cluster.
-func (c *RaftCluster) Start(s Server) error {
+func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 	c.Lock()
 	defer c.Unlock()
 
@@ -324,11 +326,29 @@ func (c *RaftCluster) Start(s Server) error {
 		return nil
 	}
 	c.isAPIServiceMode = s.IsAPIServiceMode()
-	err := c.InitCluster(s.GetAllocator(), s.GetPersistOptions(), s.GetHBStreams(), s.GetKeyspaceGroupManager())
+	err = c.InitCluster(s.GetAllocator(), s.GetPersistOptions(), s.GetHBStreams(), s.GetKeyspaceGroupManager())
 	if err != nil {
 		return err
 	}
-	c.checkTSOService()
+	// We should not manage tso service when bootstrap try to start raft cluster.
+	// It only is controlled by leader election.
+	// Ref: https://github.com/tikv/pd/issues/8836
+	if !bootstrap {
+		c.checkTSOService()
+	}
+	defer func() {
+		if !bootstrap && err != nil {
+			c.stopTSOJobsIfNeeded()
+		}
+	}()
+	failpoint.Inject("raftClusterReturn", func(val failpoint.Value) {
+		if val, ok := val.(bool); (ok && val) || !ok {
+			err = errors.New("raftClusterReturn")
+		} else {
+			err = nil
+		}
+		failpoint.Return(err)
+	})
 	cluster, err := c.LoadClusterInfo()
 	if err != nil {
 		return err
@@ -418,10 +438,7 @@ func (c *RaftCluster) checkTSOService() {
 					c.UnsetServiceIndependent(constant.TSOServiceName)
 				}
 			} else {
-				if err := c.stopTSOJobsIfNeeded(); err != nil {
-					log.Error("failed to stop TSO jobs", errs.ZapError(err))
-					return
-				}
+				c.stopTSOJobsIfNeeded()
 				if !c.IsServiceIndependent(constant.TSOServiceName) {
 					log.Info("TSO is provided by TSO server")
 					c.SetServiceIndependent(constant.TSOServiceName)
@@ -476,11 +493,7 @@ func (c *RaftCluster) runServiceCheckJob() {
 }
 
 func (c *RaftCluster) startTSOJobsIfNeeded() error {
-	allocator, err := c.tsoAllocator.GetAllocator(tso.GlobalDCLocation)
-	if err != nil {
-		log.Error("failed to get global TSO allocator", errs.ZapError(err))
-		return err
-	}
+	allocator := c.tsoAllocator.GetAllocator()
 	if !allocator.IsInitialize() {
 		log.Info("initializing the global TSO allocator")
 		if err := allocator.Initialize(0); err != nil {
@@ -495,27 +508,22 @@ func (c *RaftCluster) startTSOJobsIfNeeded() error {
 	return nil
 }
 
-func (c *RaftCluster) stopTSOJobsIfNeeded() error {
-	allocator, err := c.tsoAllocator.GetAllocator(tso.GlobalDCLocation)
-	if err != nil {
-		log.Error("failed to get global TSO allocator", errs.ZapError(err))
-		return err
+func (c *RaftCluster) stopTSOJobsIfNeeded() {
+	allocator := c.tsoAllocator.GetAllocator()
+	if !allocator.IsInitialize() {
+		return
 	}
-	if allocator.IsInitialize() {
-		log.Info("closing the global TSO allocator")
-		c.tsoAllocator.ResetAllocatorGroup(tso.GlobalDCLocation, true)
-		failpoint.Inject("updateAfterResetTSO", func() {
-			allocator, _ := c.tsoAllocator.GetAllocator(tso.GlobalDCLocation)
-			if err := allocator.UpdateTSO(); !errorspkg.Is(err, errs.ErrUpdateTimestamp) {
-				log.Panic("the tso update after reset should return ErrUpdateTimestamp as expected", zap.Error(err))
-			}
-			if allocator.IsInitialize() {
-				log.Panic("the allocator should be uninitialized after reset")
-			}
-		})
-	}
-
-	return nil
+	log.Info("closing the global TSO allocator")
+	c.tsoAllocator.ResetAllocatorGroup(true)
+	failpoint.Inject("updateAfterResetTSO", func() {
+		allocator := c.tsoAllocator.GetAllocator()
+		if err := allocator.UpdateTSO(); !errorspkg.Is(err, errs.ErrUpdateTimestamp) {
+			log.Panic("the tso update after reset should return ErrUpdateTimestamp as expected", zap.Error(err))
+		}
+		if allocator.IsInitialize() {
+			log.Panic("the allocator should be uninitialized after reset")
+		}
+	})
 }
 
 // startGCTuner
@@ -861,9 +869,7 @@ func (c *RaftCluster) Stop() {
 	// For example, the cluster meets an error when starting, such as cluster is not bootstrapped.
 	// In this case, the `running` in `RaftCluster` is false, but the tso job has been started.
 	// Ref: https://github.com/tikv/pd/issues/8836
-	if err := c.stopTSOJobsIfNeeded(); err != nil {
-		log.Error("failed to stop tso jobs", errs.ZapError(err))
-	}
+	c.stopTSOJobsIfNeeded()
 	if !c.running {
 		c.Unlock()
 		return
@@ -2567,4 +2573,10 @@ func (c *RaftCluster) SetServiceIndependent(name string) {
 // UnsetServiceIndependent unsets the service to be independent.
 func (c *RaftCluster) UnsetServiceIndependent(name string) {
 	c.independentServices.Delete(name)
+}
+
+// GetGlobalTSOAllocator return global tso allocator
+// It only is used for test.
+func (c *RaftCluster) GetGlobalTSOAllocator() tso.Allocator {
+	return c.tsoAllocator.GetAllocator()
 }

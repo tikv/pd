@@ -19,16 +19,18 @@ import (
 	"sync/atomic"
 	"time"
 
+	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.uber.org/zap"
+
 	"github.com/pingcap/kvproto/pkg/schedulingpb"
 	"github.com/pingcap/kvproto/pkg/tsopb"
 	"github.com/pingcap/log"
+
 	"github.com/tikv/pd/pkg/election"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
-	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.uber.org/zap"
 )
 
 type leadershipCheckFunc func(*election.Leadership) bool
@@ -50,10 +52,9 @@ type Participant struct {
 	keypath.MsParam
 	leadership *election.Leadership
 	// stored as member type
-	leader   atomic.Value
-	client   *clientv3.Client
-	rootPath string
-	member   participant
+	leader atomic.Value
+	client *clientv3.Client
+	member participant
 	// memberValue is the serialized string of `member`. It will be saved in the
 	// leader key when this participant is successfully elected as the leader of
 	// the group. Every write will use it to check the leadership.
@@ -76,7 +77,7 @@ func NewParticipant(client *clientv3.Client, msParam keypath.MsParam) *Participa
 }
 
 // InitInfo initializes the member info.
-func (m *Participant) InitInfo(p participant, rootPath string, purpose string) {
+func (m *Participant) InitInfo(p participant, purpose string) {
 	data, err := p.Marshal()
 	if err != nil {
 		// can't fail, so panic here.
@@ -84,7 +85,6 @@ func (m *Participant) InitInfo(p participant, rootPath string, purpose string) {
 	}
 	m.member = p
 	m.memberValue = string(data)
-	m.rootPath = rootPath
 	m.leadership = election.NewLeadership(m.client, m.GetLeaderPath(), purpose)
 	m.lastLeaderUpdatedTime.Store(time.Now())
 	log.Info("participant joining election", zap.String("participant-info", p.String()), zap.String("leader-path", m.GetLeaderPath()))
@@ -274,16 +274,6 @@ func (m *Participant) ResetLeader() {
 // IsSameLeader checks whether a server is the leader itself.
 func (m *Participant) IsSameLeader(leader participant) bool {
 	return leader.GetId() == m.ID()
-}
-
-// GetDCLocationPathPrefix returns the dc-location path prefix of the cluster.
-func (m *Participant) GetDCLocationPathPrefix() string {
-	return keypath.Prefix(keypath.DCLocationPath(&m.MsParam, 0))
-}
-
-// GetDCLocationPath returns the dc-location path of a member with the given member ID.
-func (m *Participant) GetDCLocationPath(id uint64) string {
-	return keypath.DCLocationPath(&m.MsParam, id)
 }
 
 func (m *Participant) campaignCheck() bool {

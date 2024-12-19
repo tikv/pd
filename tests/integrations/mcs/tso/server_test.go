@@ -24,10 +24,16 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pingcap/failpoint"
-	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.uber.org/goleak"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
+
+	"github.com/pingcap/failpoint"
+	"github.com/pingcap/kvproto/pkg/metapb"
+
 	pd "github.com/tikv/pd/client"
 	"github.com/tikv/pd/client/opt"
 	"github.com/tikv/pd/client/pkg/caller"
@@ -37,7 +43,6 @@ import (
 	tsoapi "github.com/tikv/pd/pkg/mcs/tso/server/apis/v1"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/storage/endpoint"
-	tsopkg "github.com/tikv/pd/pkg/tso"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/tempurl"
@@ -46,10 +51,6 @@ import (
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
 	"github.com/tikv/pd/tests/integrations/mcs"
-	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.uber.org/goleak"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
 )
 
 func TestMain(m *testing.M) {
@@ -629,10 +630,7 @@ func TestTSOServiceSwitch(t *testing.T) {
 
 	// Verify PD is not providing TSO service
 	testutil.Eventually(re, func() bool {
-		allocator, err := pdLeader.GetServer().GetTSOAllocatorManager().GetAllocator(tsopkg.GlobalDCLocation)
-		if err != nil {
-			return false
-		}
+		allocator := pdLeader.GetServer().GetTSOAllocatorManager().GetAllocator()
 		return !allocator.IsInitialize()
 	})
 

@@ -27,12 +27,18 @@ import (
 	"time"
 
 	grpcprometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
+	"github.com/spf13/cobra"
+	"go.uber.org/zap"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/diagnosticspb"
 	"github.com/pingcap/kvproto/pkg/tsopb"
 	"github.com/pingcap/log"
 	"github.com/pingcap/sysutil"
-	"github.com/spf13/cobra"
+
 	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/discovery"
@@ -49,10 +55,6 @@ import (
 	"github.com/tikv/pd/pkg/utils/metricutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/versioninfo"
-	"go.uber.org/zap"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 )
 
 var _ bs.Server = (*Server)(nil)
@@ -272,15 +274,6 @@ func (s *Server) GetTSOAllocatorManager(keyspaceGroupID uint32) (*tso.AllocatorM
 	return s.keyspaceGroupManager.GetAllocatorManager(keyspaceGroupID)
 }
 
-// IsLocalRequest checks if the forwarded host is the current host
-func (*Server) IsLocalRequest(forwardedHost string) bool {
-	// TODO: Check if the forwarded host is the current host.
-	// The logic is depending on etcd service mode -- if the TSO service
-	// uses the embedded etcd, check against ClientUrls; otherwise check
-	// against the cluster membership.
-	return forwardedHost == ""
-}
-
 // ValidateInternalRequest checks if server is closed, which is used to validate
 // the gRPC communication between TSO servers internally.
 // TODO: Check if the sender is from the global TSO allocator
@@ -328,10 +321,7 @@ func (s *Server) ResetTS(ts uint64, ignoreSmaller, skipUpperBoundCheck bool, key
 		log.Error("failed to get allocator manager", errs.ZapError(err))
 		return err
 	}
-	tsoAllocator, err := tsoAllocatorManager.GetAllocator(tso.GlobalDCLocation)
-	if err != nil {
-		return err
-	}
+	tsoAllocator := tsoAllocatorManager.GetAllocator()
 	if tsoAllocator == nil {
 		return errs.ErrServerNotStarted
 	}

@@ -24,8 +24,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/require"
+	"go.etcd.io/etcd/client/pkg/v3/transport"
+
+	"github.com/pingcap/kvproto/pkg/metapb"
+
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/response"
@@ -35,7 +38,6 @@ import (
 	pdTests "github.com/tikv/pd/tests"
 	ctl "github.com/tikv/pd/tools/pd-ctl/pdctl"
 	"github.com/tikv/pd/tools/pd-ctl/tests"
-	"go.etcd.io/etcd/client/pkg/v3/transport"
 )
 
 func TestStoreLimitV2(t *testing.T) {

@@ -21,6 +21,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
 )

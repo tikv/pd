@@ -28,9 +28,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pingcap/failpoint"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+	"go.etcd.io/etcd/api/v3/mvccpb"
+	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.uber.org/goleak"
+
+	"github.com/pingcap/failpoint"
+
 	"github.com/tikv/pd/pkg/mcs/discovery"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/storage/endpoint"
@@ -41,9 +46,6 @@ import (
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
-	"go.etcd.io/etcd/api/v3/mvccpb"
-	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.uber.org/goleak"
 )
 
 func TestMain(m *testing.M) {
@@ -87,7 +89,6 @@ func (suite *keyspaceGroupManagerTestSuite) createConfig() *TestServiceConfig {
 		ListenAddr:                addr,
 		AdvertiseListenAddr:       addr,
 		LeaderLease:               constant.DefaultLeaderLease,
-		LocalTSOEnabled:           false,
 		TSOUpdatePhysicalInterval: 50 * time.Millisecond,
 		TSOSaveInterval:           time.Duration(constant.DefaultLeaderLease) * time.Second,
 		MaxResetTSGap:             time.Hour * 24,
@@ -177,7 +178,6 @@ func (suite *keyspaceGroupManagerTestSuite) TestNewKeyspaceGroupManager() {
 
 	am, err := kgm.GetAllocatorManager(constant.DefaultKeyspaceGroupID)
 	re.NoError(err)
-	re.False(am.enableLocalTSO)
 	re.Equal(constant.DefaultKeyspaceGroupID, am.kgID)
 	re.Equal(constant.DefaultLeaderLease, am.leaderLease)
 	re.Equal(time.Hour*24, am.maxResetTSGap())
@@ -647,19 +647,19 @@ func (suite *keyspaceGroupManagerTestSuite) TestHandleTSORequestWithWrongMembers
 	// Should succeed because keyspace 0 is actually in keyspace group 0, which is served
 	// by the current keyspace group manager, instead of keyspace group 1 in ask, and
 	// keyspace group 0 is returned in the response.
-	_, keyspaceGroupBelongTo, err := mgr.HandleTSORequest(suite.ctx, 0, 1, GlobalDCLocation, 1)
+	_, keyspaceGroupBelongTo, err := mgr.HandleTSORequest(suite.ctx, 0, 1, 1)
 	re.NoError(err)
 	re.Equal(uint32(0), keyspaceGroupBelongTo)
 
 	// Should succeed because keyspace 100 doesn't belong to any keyspace group, so it will
 	// be served by the default keyspace group 0, and keyspace group 0 is returned in the response.
-	_, keyspaceGroupBelongTo, err = mgr.HandleTSORequest(suite.ctx, 100, 0, GlobalDCLocation, 1)
+	_, keyspaceGroupBelongTo, err = mgr.HandleTSORequest(suite.ctx, 100, 0, 1)
 	re.NoError(err)
 	re.Equal(uint32(0), keyspaceGroupBelongTo)
 
 	// Should fail because keyspace 100 doesn't belong to any keyspace group, and the keyspace group
 	// 1 in ask doesn't exist.
-	_, keyspaceGroupBelongTo, err = mgr.HandleTSORequest(suite.ctx, 100, 1, GlobalDCLocation, 1)
+	_, keyspaceGroupBelongTo, err = mgr.HandleTSORequest(suite.ctx, 100, 1, 1)
 	re.Error(err)
 	re.Equal(uint32(1), keyspaceGroupBelongTo)
 }
@@ -1092,7 +1092,7 @@ func (suite *keyspaceGroupManagerTestSuite) TestPrimaryPriorityChange() {
 	// And the primaries on TSO Server 1 should continue to serve TSO requests without any failures.
 	for range 100 {
 		for _, id := range ids {
-			_, keyspaceGroupBelongTo, err := mgr1.HandleTSORequest(suite.ctx, id, id, GlobalDCLocation, 1)
+			_, keyspaceGroupBelongTo, err := mgr1.HandleTSORequest(suite.ctx, id, id, 1)
 			re.NoError(err)
 			re.Equal(id, keyspaceGroupBelongTo)
 		}
@@ -1188,7 +1188,7 @@ func checkTSO(
 					return
 				default:
 				}
-				respTS, respGroupID, err := mgr.HandleTSORequest(ctx, id, id, GlobalDCLocation, 1)
+				respTS, respGroupID, err := mgr.HandleTSORequest(ctx, id, id, 1)
 				// omit the error check since there are many kinds of errors during primaries movement
 				if err != nil {
 					continue
@@ -1210,7 +1210,7 @@ func waitForPrimariesServing(
 			if member, err := mgrs[j].GetElectionMember(id, id); err != nil || member == nil || !member.IsLeader() {
 				return false
 			}
-			if _, _, err := mgrs[j].HandleTSORequest(mgrs[j].ctx, id, id, GlobalDCLocation, 1); err != nil {
+			if _, _, err := mgrs[j].HandleTSORequest(mgrs[j].ctx, id, id, 1); err != nil {
 				return false
 			}
 		}

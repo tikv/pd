@@ -21,12 +21,14 @@ import (
 	"strconv"
 	"time"
 
+	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.uber.org/zap"
+
 	"github.com/pingcap/log"
+
 	pd "github.com/tikv/pd/client"
 	pdHttp "github.com/tikv/pd/client/http"
 	"github.com/tikv/pd/client/opt"
-	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.uber.org/zap"
 )
 
 var (

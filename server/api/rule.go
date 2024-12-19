@@ -22,11 +22,12 @@ import (
 	"net/url"
 
 	"github.com/gorilla/mux"
+	"github.com/unrolled/render"
+
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/server"
-	"github.com/unrolled/render"
 )
 
 type ruleHandler struct {
