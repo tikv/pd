@@ -38,60 +38,6 @@ const (
 )
 
 var (
-	// ErrKeyspaceNotFound is used to indicate target keyspace does not exist.
-	ErrKeyspaceNotFound = errors.New("keyspace does not exist")
-	// ErrRegionSplitTimeout indices to split region timeout
-	ErrRegionSplitTimeout = errors.New("region split timeout")
-	// ErrRegionSplitFailed indices to split region failed
-	ErrRegionSplitFailed = errors.New("region split failed")
-	// ErrKeyspaceExists indicates target keyspace already exists.
-	// It's used when creating a new keyspace.
-	ErrKeyspaceExists = errors.New("keyspace already exists")
-	// ErrKeyspaceGroupExists indicates target keyspace group already exists.
-	ErrKeyspaceGroupExists = errors.New("keyspace group already exists")
-	// ErrKeyspaceGroupNotExists is used to indicate target keyspace group does not exist.
-	ErrKeyspaceGroupNotExists = func(groupID uint32) error {
-		return errors.Errorf("keyspace group %v does not exist", groupID)
-	}
-	// ErrKeyspaceGroupInSplit is used to indicate target keyspace group is in split state.
-	ErrKeyspaceGroupInSplit = func(groupID uint32) error {
-		return errors.Errorf("keyspace group %v is in split state", groupID)
-	}
-	// ErrKeyspaceGroupNotInSplit is used to indicate target keyspace group is not in split state.
-	ErrKeyspaceGroupNotInSplit = func(groupID uint32) error {
-		return errors.Errorf("keyspace group %v is not in split state", groupID)
-	}
-	// ErrKeyspaceGroupInMerging is used to indicate target keyspace group is in merging state.
-	ErrKeyspaceGroupInMerging = func(groupID uint32) error {
-		return errors.Errorf("keyspace group %v is in merging state", groupID)
-	}
-	// ErrKeyspaceGroupNotInMerging is used to indicate target keyspace group is not in merging state.
-	ErrKeyspaceGroupNotInMerging = func(groupID uint32) error {
-		return errors.Errorf("keyspace group %v is not in merging state", groupID)
-	}
-	// ErrKeyspaceNotInKeyspaceGroup is used to indicate target keyspace is not in this keyspace group.
-	ErrKeyspaceNotInKeyspaceGroup = errors.New("keyspace is not in this keyspace group")
-	// ErrKeyspaceNotInAnyKeyspaceGroup is used to indicate target keyspace is not in any keyspace group.
-	ErrKeyspaceNotInAnyKeyspaceGroup = errors.New("keyspace is not in any keyspace group")
-	// ErrNodeNotInKeyspaceGroup is used to indicate the tso node is not in this keyspace group.
-	ErrNodeNotInKeyspaceGroup = errors.New("the tso node is not in this keyspace group")
-	// ErrKeyspaceGroupNotEnoughReplicas is used to indicate not enough replicas in the keyspace group.
-	ErrKeyspaceGroupNotEnoughReplicas = errors.New("not enough replicas in the keyspace group")
-	// ErrKeyspaceGroupWithEmptyKeyspace is used to indicate keyspace group with empty keyspace.
-	ErrKeyspaceGroupWithEmptyKeyspace = errors.New("keyspace group with empty keyspace")
-	// ErrModifyDefaultKeyspaceGroup is used to indicate that default keyspace group cannot be modified.
-	ErrModifyDefaultKeyspaceGroup = errors.New("default keyspace group cannot be modified")
-	// ErrNoAvailableNode is used to indicate no available node in the keyspace group.
-	ErrNoAvailableNode = errors.New("no available node")
-	// ErrExceedMaxEtcdTxnOps is used to indicate the number of etcd txn operations exceeds the limit.
-	ErrExceedMaxEtcdTxnOps = errors.New("exceed max etcd txn operations")
-	// ErrModifyDefaultKeyspace is used to indicate that default keyspace cannot be modified.
-	ErrModifyDefaultKeyspace = errors.New("cannot modify default keyspace's state")
-	errIllegalOperation      = errors.New("unknown operation")
-
-	// ErrUnsupportedOperationInKeyspace is used to indicate this is an unsupported operation.
-	ErrUnsupportedOperationInKeyspace = errors.New("it's a unsupported operation")
-
 	// stateTransitionTable lists all allowed next state for the given current state.
 	// Note that transit from any state to itself is allowed for idempotence.
 	stateTransitionTable = map[keyspacepb.KeyspaceState][]keyspacepb.KeyspaceState{
@@ -102,9 +48,6 @@ var (
 	}
 	// Only keyspaces in the state specified by allowChangeConfig are allowed to change their config.
 	allowChangeConfig = []keyspacepb.KeyspaceState{keyspacepb.KeyspaceState_ENABLED, keyspacepb.KeyspaceState_DISABLED}
-
-	// ErrKeyspaceGroupPrimaryNotFound is used to indicate primary of target keyspace group does not exist.
-	ErrKeyspaceGroupPrimaryNotFound = errors.New("primary of keyspace group does not exist")
 )
 
 // validateID check if keyspace falls within the acceptable range.

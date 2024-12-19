@@ -27,6 +27,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/pingcap/log"
 
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/id"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/schedule/core"
@@ -153,7 +154,7 @@ func (manager *Manager) Bootstrap() error {
 	err = manager.saveNewKeyspace(defaultKeyspaceMeta)
 	// It's possible that default keyspace already exists in the storage (e.g. PD restart/recover),
 	// so we ignore the keyspaceExists error.
-	if err != nil && err != ErrKeyspaceExists {
+	if err != nil && err != errs.ErrKeyspaceExists {
 		return err
 	}
 	if err := manager.kgm.UpdateKeyspaceForGroup(endpoint.Basic, config[TSOKeyspaceGroupIDKey], defaultKeyspaceMeta.GetId(), opAdd); err != nil {
@@ -174,7 +175,7 @@ func (manager *Manager) Bootstrap() error {
 		}
 		keyspace, err := manager.CreateKeyspace(req)
 		// Ignore the keyspaceExists error for the same reason as saving default keyspace.
-		if err != nil && err != ErrKeyspaceExists {
+		if err != nil && err != errs.ErrKeyspaceExists {
 			return err
 		}
 		if err := manager.kgm.UpdateKeyspaceForGroup(endpoint.Basic, config[TSOKeyspaceGroupIDKey], keyspace.GetId(), opAdd); err != nil {
@@ -288,7 +289,7 @@ func (manager *Manager) saveNewKeyspace(keyspace *keyspacepb.KeyspaceMeta) error
 			return err
 		}
 		if nameExists {
-			return ErrKeyspaceExists
+			return errs.ErrKeyspaceExists
 		}
 		err = manager.store.SaveKeyspaceID(txn, keyspace.Id, keyspace.Name)
 		if err != nil {
@@ -301,7 +302,7 @@ func (manager *Manager) saveNewKeyspace(keyspace *keyspacepb.KeyspaceMeta) error
 			return err
 		}
 		if loadedMeta != nil {
-			return ErrKeyspaceExists
+			return errs.ErrKeyspaceExists
 		}
 		return manager.store.SaveKeyspaceMeta(txn, keyspace)
 	})
@@ -343,7 +344,7 @@ func (manager *Manager) splitKeyspaceRegion(id uint32, waitRegionSplit bool) (er
 		ranges := keyspaceRule.Data.([]*labeler.KeyRangeRule)
 		if len(ranges) < 2 {
 			log.Warn("[keyspace] failed to split keyspace region with insufficient range", logutil.ZapRedactString("label-rule", keyspaceRule.String()))
-			return ErrRegionSplitFailed
+			return errs.ErrRegionSplitFailed
 		}
 		rawLeftBound, rawRightBound := ranges[0].StartKey, ranges[0].EndKey
 		txnLeftBound, txnRightBound := ranges[1].StartKey, ranges[1].EndKey
@@ -381,7 +382,7 @@ func (manager *Manager) splitKeyspaceRegion(id uint32, waitRegionSplit bool) (er
 					zap.Uint32("keyspace-id", id),
 					zap.Error(err),
 				)
-				err = ErrRegionSplitTimeout
+				err = errs.ErrRegionSplitTimeout
 				return
 			}
 			log.Info("[keyspace] wait region split successfully", zap.Uint32("keyspace-id", id))
@@ -407,14 +408,14 @@ func (manager *Manager) LoadKeyspace(name string) (*keyspacepb.KeyspaceMeta, err
 			return err
 		}
 		if !loaded {
-			return ErrKeyspaceNotFound
+			return errs.ErrKeyspaceNotFound
 		}
 		meta, err = manager.store.LoadKeyspaceMeta(txn, id)
 		if err != nil {
 			return err
 		}
 		if meta == nil {
-			return ErrKeyspaceNotFound
+			return errs.ErrKeyspaceNotFound
 		}
 		return nil
 	})
@@ -434,7 +435,7 @@ func (manager *Manager) LoadKeyspaceByID(spaceID uint32) (*keyspacepb.KeyspaceMe
 			return err
 		}
 		if meta == nil {
-			return ErrKeyspaceNotFound
+			return errs.ErrKeyspaceNotFound
 		}
 		return nil
 	})
@@ -474,7 +475,7 @@ func (manager *Manager) UpdateKeyspaceConfig(name string, mutations []*Mutation)
 			return err
 		}
 		if !loaded {
-			return ErrKeyspaceNotFound
+			return errs.ErrKeyspaceNotFound
 		}
 		manager.metaLock.Lock(id)
 		defer manager.metaLock.Unlock(id)
@@ -484,7 +485,7 @@ func (manager *Manager) UpdateKeyspaceConfig(name string, mutations []*Mutation)
 			return err
 		}
 		if meta == nil {
-			return ErrKeyspaceNotFound
+			return errs.ErrKeyspaceNotFound
 		}
 		// Only keyspace with state listed in allowChangeConfig are allowed to change their config.
 		if !slice.Contains(allowChangeConfig, meta.GetState()) {
@@ -505,7 +506,7 @@ func (manager *Manager) UpdateKeyspaceConfig(name string, mutations []*Mutation)
 			case OpDel:
 				delete(meta.Config, mutation.Key)
 			default:
-				return errIllegalOperation
+				return errs.ErrIllegalOperation
 			}
 		}
 		newConfig := meta.GetConfig()
@@ -553,9 +554,9 @@ func (manager *Manager) UpdateKeyspaceState(name string, newState keyspacepb.Key
 	// Changing the state of default keyspace is not allowed.
 	if name == constant.DefaultKeyspaceName {
 		log.Warn("[keyspace] failed to update keyspace config",
-			zap.Error(ErrModifyDefaultKeyspace),
+			errs.ZapError(errs.ErrModifyDefaultKeyspace),
 		)
-		return nil, ErrModifyDefaultKeyspace
+		return nil, errs.ErrModifyDefaultKeyspace
 	}
 	var meta *keyspacepb.KeyspaceMeta
 	err := manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
@@ -565,7 +566,7 @@ func (manager *Manager) UpdateKeyspaceState(name string, newState keyspacepb.Key
 			return err
 		}
 		if !loaded {
-			return ErrKeyspaceNotFound
+			return errs.ErrKeyspaceNotFound
 		}
 		manager.metaLock.Lock(id)
 		defer manager.metaLock.Unlock(id)
@@ -575,7 +576,7 @@ func (manager *Manager) UpdateKeyspaceState(name string, newState keyspacepb.Key
 			return err
 		}
 		if meta == nil {
-			return ErrKeyspaceNotFound
+			return errs.ErrKeyspaceNotFound
 		}
 		// Update keyspace meta.
 		if err = updateKeyspaceState(meta, newState, now); err != nil {
@@ -605,9 +606,9 @@ func (manager *Manager) UpdateKeyspaceStateByID(id uint32, newState keyspacepb.K
 	// Changing the state of default keyspace is not allowed.
 	if id == constant.DefaultKeyspaceID {
 		log.Warn("[keyspace] failed to update keyspace config",
-			zap.Error(ErrModifyDefaultKeyspace),
+			errs.ZapError(errs.ErrModifyDefaultKeyspace),
 		)
-		return nil, ErrModifyDefaultKeyspace
+		return nil, errs.ErrModifyDefaultKeyspace
 	}
 	var meta *keyspacepb.KeyspaceMeta
 	var err error
@@ -620,7 +621,7 @@ func (manager *Manager) UpdateKeyspaceStateByID(id uint32, newState keyspacepb.K
 			return err
 		}
 		if meta == nil {
-			return ErrKeyspaceNotFound
+			return errs.ErrKeyspaceNotFound
 		}
 		// Update keyspace meta.
 		if err = updateKeyspaceState(meta, newState, now); err != nil {
@@ -740,10 +741,10 @@ func (manager *Manager) PatrolKeyspaceAssignment(startKeyspaceID, endKeyspaceID 
 				return errors.Errorf("default keyspace group %d not found", constant.DefaultKeyspaceGroupID)
 			}
 			if defaultKeyspaceGroup.IsSplitting() {
-				return ErrKeyspaceGroupInSplit(constant.DefaultKeyspaceGroupID)
+				return errs.ErrKeyspaceGroupInSplit.FastGenByArgs(constant.DefaultKeyspaceGroupID)
 			}
 			if defaultKeyspaceGroup.IsMerging() {
-				return ErrKeyspaceGroupInMerging(constant.DefaultKeyspaceGroupID)
+				return errs.ErrKeyspaceGroupInMerging.FastGenByArgs(constant.DefaultKeyspaceGroupID)
 			}
 			keyspaces, err := manager.store.LoadRangeKeyspace(txn, manager.nextPatrolStartID, etcdutil.MaxEtcdTxnOps)
 			if err != nil {
