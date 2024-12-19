@@ -29,7 +29,7 @@ type ServiceMiddlewareStorage interface {
 
 var _ ServiceMiddlewareStorage = (*StorageEndpoint)(nil)
 
-// LoadServiceMiddlewareConfig loads service middleware config from keypath.KeyspaceGroupLocalTSPath then unmarshal it to cfg.
+// LoadServiceMiddlewareConfig loads service middleware config from ServiceMiddlewarePath then unmarshal it to cfg.
 func (se *StorageEndpoint) LoadServiceMiddlewareConfig(cfg any) (bool, error) {
 	value, err := se.Load(keypath.ServiceMiddlewarePath)
 	if err != nil || value == "" {
@@ -42,7 +42,7 @@ func (se *StorageEndpoint) LoadServiceMiddlewareConfig(cfg any) (bool, error) {
 	return true, nil
 }
 
-// SaveServiceMiddlewareConfig stores marshallable cfg to the keypath.KeyspaceGroupLocalTSPath.
+// SaveServiceMiddlewareConfig stores marshallable cfg to the ServiceMiddlewarePath.
 func (se *StorageEndpoint) SaveServiceMiddlewareConfig(cfg any) error {
 	return se.saveJSON(keypath.ServiceMiddlewarePath, cfg)
 }

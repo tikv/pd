@@ -18,12 +18,13 @@ import (
 	"net/http"
 
 	"github.com/gorilla/mux"
+	"github.com/unrolled/render"
+
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
-	"github.com/unrolled/render"
 )
 
 const (

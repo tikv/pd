@@ -19,6 +19,7 @@ import (
 
 	"github.com/docker/go-units"
 	"github.com/stretchr/testify/require"
+
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/statistics/utils"

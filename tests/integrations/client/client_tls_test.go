@@ -27,6 +27,9 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"go.etcd.io/etcd/client/pkg/v3/transport"
+	"google.golang.org/grpc"
+
 	pd "github.com/tikv/pd/client"
 	"github.com/tikv/pd/client/opt"
 	"github.com/tikv/pd/client/pkg/caller"
@@ -34,8 +37,6 @@ import (
 	"github.com/tikv/pd/pkg/utils/netutil"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
-	"go.etcd.io/etcd/client/pkg/v3/transport"
-	"google.golang.org/grpc"
 )
 
 var certScript = strings.Join([]string{".", "cert_opt.sh"}, string(filepath.Separator))

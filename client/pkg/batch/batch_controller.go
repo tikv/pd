@@ -60,13 +60,18 @@ func NewController[T any](maxBatchSize int, finisher FinisherFunc[T], bestBatchO
 // It returns nil error if everything goes well, otherwise a non-nil error which means we should stop the service.
 // It's guaranteed that if this function failed after collecting some requests, then these requests will be cancelled
 // when the function returns, so the caller don't need to clear them manually.
+// `tokenCh` is an optional parameter:
+//   - If it's nil, the batching process will not wait for the token to arrive to continue.
+//   - If it's not nil, the batching process will wait for a token to arrive before continuing.
+//     The token will be given back if any error occurs, otherwise it's the caller's responsibility
+//     to decide when to recycle the signal.
 func (bc *Controller[T]) FetchPendingRequests(ctx context.Context, requestCh <-chan T, tokenCh chan struct{}, maxBatchWaitInterval time.Duration) (errRet error) {
 	var tokenAcquired bool
 	defer func() {
 		if errRet != nil {
 			// Something went wrong when collecting a batch of requests. Release the token and cancel collected requests
 			// if any.
-			if tokenAcquired {
+			if tokenAcquired && tokenCh != nil {
 				tokenCh <- struct{}{}
 			}
 			bc.FinishCollectedRequests(bc.finisher, errRet)
@@ -80,6 +85,9 @@ func (bc *Controller[T]) FetchPendingRequests(ctx context.Context, requestCh <-c
 		// If the batch size reaches the maxBatchSize limit but the token haven't arrived yet, don't receive more
 		// requests, and return when token is ready.
 		if bc.collectedRequestCount >= bc.maxBatchSize && !tokenAcquired {
+			if tokenCh == nil {
+				return nil
+			}
 			select {
 			case <-ctx.Done():
 				return ctx.Err()
@@ -88,20 +96,23 @@ func (bc *Controller[T]) FetchPendingRequests(ctx context.Context, requestCh <-c
 			}
 		}
 
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case req := <-requestCh:
-			// Start to batch when the first request arrives.
-			bc.pushRequest(req)
-			// A request arrives but the token is not ready yet. Continue waiting, and also allowing collecting the next
-			// request if it arrives.
-			continue
-		case <-tokenCh:
-			tokenAcquired = true
+		if tokenCh != nil {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case req := <-requestCh:
+				// Start to batch when the first request arrives.
+				bc.pushRequest(req)
+				// A request arrives but the token is not ready yet. Continue waiting, and also allowing collecting the next
+				// request if it arrives.
+				continue
+			case <-tokenCh:
+				tokenAcquired = true
+			}
 		}
 
-		// The token is ready. If the first request didn't arrive, wait for it.
+		// After the token is ready or it's working without token,
+		// wait for the first request to arrive.
 		if bc.collectedRequestCount == 0 {
 			select {
 			case <-ctx.Done():

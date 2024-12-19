@@ -12,7 +12,7 @@ require (
 	github.com/BurntSushi/toml v0.3.1
 	github.com/aws/aws-sdk-go-v2/config v1.25.12
 	github.com/aws/aws-sdk-go-v2/credentials v1.16.10
-	github.com/aws/aws-sdk-go-v2/service/kms v1.20.8
+	github.com/aws/aws-sdk-go-v2/service/kms v1.26.5
 	github.com/aws/aws-sdk-go-v2/service/sts v1.26.3
 	github.com/axw/gocov v1.0.0
 	github.com/brianvoe/gofakeit/v6 v6.26.3

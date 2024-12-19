@@ -23,8 +23,9 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/tikv/pd/pkg/utils/syncutil"
 	"go.uber.org/zap"
+
+	"github.com/tikv/pd/pkg/utils/syncutil"
 )
 
 // TransferCounter is to count transfer schedule for judging whether redundant

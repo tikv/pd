@@ -18,13 +18,14 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/unrolled/render"
+
 	"github.com/tikv/pd/pkg/response"
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/statistics/utils"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/server"
-	"github.com/unrolled/render"
 )
 
 // Trend describes the cluster's schedule trend.

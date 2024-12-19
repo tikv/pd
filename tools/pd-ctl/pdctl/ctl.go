@@ -24,6 +24,7 @@ import (
 	shellwords "github.com/mattn/go-shellwords"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
+
 	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/tools/pd-ctl/pdctl/command"
 )

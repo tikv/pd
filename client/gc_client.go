@@ -19,11 +19,13 @@ import (
 	"time"
 
 	"github.com/opentracing/opentracing-go"
+	"go.uber.org/zap"
+
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/metrics"
-	"go.uber.org/zap"
 )
 
 // GCClient is a client for doing GC

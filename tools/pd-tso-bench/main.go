@@ -29,15 +29,17 @@ import (
 	"time"
 
 	"github.com/influxdata/tdigest"
-	"github.com/pingcap/errors"
-	"github.com/pingcap/log"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-	pd "github.com/tikv/pd/client"
-	"github.com/tikv/pd/client/opt"
-	"github.com/tikv/pd/client/pkg/caller"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/keepalive"
+
+	"github.com/pingcap/errors"
+	"github.com/pingcap/log"
+
+	pd "github.com/tikv/pd/client"
+	"github.com/tikv/pd/client/opt"
+	"github.com/tikv/pd/client/pkg/caller"
 )
 
 const (

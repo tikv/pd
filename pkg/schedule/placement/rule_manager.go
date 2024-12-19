@@ -24,8 +24,12 @@ import (
 	"sort"
 	"strings"
 
+	"go.uber.org/zap"
+	"golang.org/x/exp/slices"
+
 	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
+
 	"github.com/tikv/pd/pkg/codec"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
@@ -35,8 +39,6 @@ import (
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/syncutil"
-	"go.uber.org/zap"
-	"golang.org/x/exp/slices"
 )
 
 const (

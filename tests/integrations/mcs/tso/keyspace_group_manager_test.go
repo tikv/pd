@@ -25,10 +25,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pingcap/failpoint"
-	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+
+	"github.com/pingcap/failpoint"
+	"github.com/pingcap/kvproto/pkg/pdpb"
+
 	pd "github.com/tikv/pd/client"
 	clierrs "github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/pkg/caller"
@@ -223,8 +225,6 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestKeyspacesServedByNonDefaultKe
 							ServiceName: constant.TSOServiceName,
 							GroupID:     param.keyspaceGroupID,
 						})
-						timestampPath := keypath.FullTimestampPath(param.keyspaceGroupID)
-						re.Equal(timestampPath, am.GetTimestampPath())
 						re.Equal(primaryPath, am.GetMember().GetLeaderPath())
 
 						served = true

@@ -23,11 +23,13 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/spf13/cobra"
-	"github.com/tikv/pd/pkg/response"
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
+
+	"github.com/pingcap/kvproto/pkg/metapb"
+
+	"github.com/tikv/pd/pkg/response"
 )
 
 var (

@@ -17,10 +17,12 @@ package tsoutil
 import (
 	"context"
 
+	"google.golang.org/grpc"
+
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/tsopb"
+
 	"github.com/tikv/pd/pkg/utils/grpcutil"
-	"google.golang.org/grpc"
 )
 
 // ProtoFactory is the abstract factory for creating tso related data structures defined in the grpc service

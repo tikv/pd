@@ -19,6 +19,7 @@ import (
 	"sync/atomic"
 
 	"github.com/pingcap/failpoint"
+
 	"github.com/tikv/pd/pkg/storage/endpoint"
 )
 
