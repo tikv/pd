@@ -57,10 +57,9 @@ type RuleManager struct {
 	ctx     context.Context
 	storage endpoint.RuleStorage
 	syncutil.RWMutex
-	initialized    bool
-	inMicroService bool
-	ruleConfig     *ruleConfig
-	ruleList       ruleList
+	initialized bool
+	ruleConfig  *ruleConfig
+	ruleList    ruleList
 
 	// used for rule validation
 	keyType          string
@@ -83,7 +82,7 @@ func NewRuleManager(ctx context.Context, storage endpoint.RuleStorage, storeSetI
 
 // Initialize loads rules from storage. If Placement Rules feature is never enabled, it creates default rule that is
 // compatible with previous configuration.
-func (m *RuleManager) Initialize(maxReplica int, locationLabels []string, isolationLevel string) error {
+func (m *RuleManager) Initialize(maxReplica int, locationLabels []string, isolationLevel string, skipLoadRules bool) error {
 	m.Lock()
 	defer m.Unlock()
 	if m.initialized {
@@ -91,7 +90,7 @@ func (m *RuleManager) Initialize(maxReplica int, locationLabels []string, isolat
 	}
 	// If RuleManager is initialized in micro service,
 	// it will load from etcd watcher and do not modify rule directly.
-	if m.inMicroService {
+	if skipLoadRules {
 		m.ruleList = ruleList{
 			rangeList: rangelist.List{},
 		}
@@ -840,13 +839,6 @@ func (m *RuleManager) SetKeyType(h string) *RuleManager {
 	defer m.Unlock()
 	m.keyType = h
 	return m
-}
-
-// SetInMicroService set whether rule manager is in micro service.
-func (m *RuleManager) SetInMicroService(v bool) {
-	m.Lock()
-	defer m.Unlock()
-	m.inMicroService = v
 }
 
 func getStoresByRegion(storeSet StoreSet, region *core.RegionInfo) []*core.StoreInfo {
