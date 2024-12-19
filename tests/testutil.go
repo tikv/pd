@@ -178,7 +178,7 @@ func NewSchedulingTestServer(ctx context.Context, cfg *sc.Config) (*scheduling.S
 }
 
 // WaitForPrimaryServing waits for one of servers being elected to be the primary/leader
-func WaitForPrimaryServing(re *require.Assertions, serverMap map[string]bs.Server) string {
+func WaitForPrimaryServing(re *require.Assertions, serverMap map[string]bs.Server, pd *TestCluster) string {
 	var primary string
 	testutil.Eventually(re, func() bool {
 		for name, s := range serverMap {
@@ -189,7 +189,9 @@ func WaitForPrimaryServing(re *require.Assertions, serverMap map[string]bs.Serve
 		}
 		return false
 	}, testutil.WithWaitFor(10*time.Second), testutil.WithTickInterval(50*time.Millisecond))
-
+	testutil.Eventually(re, func() bool {
+		return pd.GetLeaderServer().GetRaftCluster().IsServiceIndependent(constant.TSOServiceName)
+	})
 	return primary
 }
 
@@ -389,7 +391,7 @@ func (s *SchedulingTestEnvironment) startCluster(m SchedulerMode) {
 		re.NoError(leaderServer.BootstrapCluster())
 		leaderServer.GetRaftCluster().SetPrepared()
 		// start scheduling cluster
-		tc, err := NewTestSchedulingCluster(ctx, 1, leaderServer.GetAddr())
+		tc, err := NewTestSchedulingCluster(ctx, 1, cluster)
 		re.NoError(err)
 		tc.WaitForPrimaryServing(re)
 		tc.GetPrimaryServer().GetCluster().SetPrepared()

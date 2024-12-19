@@ -113,7 +113,7 @@ func (suite *tsoClientTestSuite) SetupSuite() {
 	suite.keyspaceIDs = make([]uint32, 0)
 
 	if !suite.legacy {
-		suite.tsoCluster, err = tests.NewTestTSOCluster(suite.ctx, 3, suite.backendEndpoints)
+		suite.tsoCluster, err = tests.NewTestTSOCluster(suite.ctx, 3, suite.cluster)
 		re.NoError(err)
 
 		suite.keyspaceGroups = []struct {
@@ -517,7 +517,7 @@ func TestMixedTSODeployment(t *testing.T) {
 
 	s, cleanup := tests.StartSingleTSOTestServer(ctx, re, backendEndpoints, tempurl.Alloc())
 	defer cleanup()
-	tests.WaitForPrimaryServing(re, map[string]bs.Server{s.GetAddr(): s})
+	tests.WaitForPrimaryServing(re, map[string]bs.Server{s.GetAddr(): s}, cluster)
 
 	ctx1, cancel1 := context.WithCancel(context.Background())
 	var wg sync.WaitGroup
@@ -562,7 +562,7 @@ func TestUpgradingAPIandTSOClusters(t *testing.T) {
 	defer pdClient.Close()
 
 	// Create a TSO cluster which has 2 servers
-	tsoCluster, err := tests.NewTestTSOCluster(ctx, 2, backendEndpoints)
+	tsoCluster, err := tests.NewTestTSOCluster(ctx, 2, apiCluster)
 	re.NoError(err)
 	tsoCluster.WaitForDefaultPrimaryServing(re)
 	// The TSO service should be eventually healthy

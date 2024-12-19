@@ -84,7 +84,7 @@ func (suite *memberTestSuite) SetupTest() {
 			cleanup()
 		})
 	}
-	primary := tests.WaitForPrimaryServing(re, nodes)
+	primary := tests.WaitForPrimaryServing(re, nodes, suite.cluster)
 	members := mustGetKeyspaceGroupMembers(re, nodes[primary].(*tso.Server))
 	// Get the tso nodes
 	suite.tsoNodes = nodes
@@ -104,7 +104,7 @@ func (suite *memberTestSuite) SetupTest() {
 			cleanup()
 		})
 	}
-	tests.WaitForPrimaryServing(re, nodes)
+	tests.WaitForPrimaryServing(re, nodes, suite.cluster)
 	suite.schedulingNodes = nodes
 
 	suite.cleanupFunc = append(suite.cleanupFunc, func() {
@@ -171,7 +171,7 @@ func (suite *memberTestSuite) TestPrimaryWorkWhileOtherServerClose() {
 				nodes[member.Name()].Close()
 			}
 		}
-		tests.WaitForPrimaryServing(re, nodes)
+		tests.WaitForPrimaryServing(re, nodes, suite.cluster)
 
 		// primary should be same with before.
 		curPrimary, err := suite.pdClient.GetMicroServicePrimary(suite.ctx, service)
@@ -291,14 +291,14 @@ func (suite *memberTestSuite) TestCampaignPrimaryAfterTransfer() {
 		re.Equal(http.StatusOK, resp.StatusCode)
 		resp.Body.Close()
 
-		tests.WaitForPrimaryServing(re, nodes)
+		tests.WaitForPrimaryServing(re, nodes, suite.cluster)
 		newPrimary, err = suite.pdClient.GetMicroServicePrimary(suite.ctx, service)
 		re.NoError(err)
 		re.NotEqual(primary, newPrimary)
 
 		// Close primary to push other nodes campaign primary
 		nodes[newPrimary].Close()
-		tests.WaitForPrimaryServing(re, nodes)
+		tests.WaitForPrimaryServing(re, nodes, suite.cluster)
 		// Primary should be different with before
 		anotherPrimary, err := suite.pdClient.GetMicroServicePrimary(suite.ctx, service)
 		re.NoError(err)
@@ -356,7 +356,7 @@ func (suite *memberTestSuite) TestTransferPrimaryWhileLeaseExpired() {
 		// TODO: Add campaign times check in mcs to avoid frequent campaign
 		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/election/skipGrantLeader"))
 		// Can still work after lease expired
-		tests.WaitForPrimaryServing(re, nodes)
+		tests.WaitForPrimaryServing(re, nodes, suite.cluster)
 	}
 }
 
@@ -413,7 +413,7 @@ func (suite *memberTestSuite) TestTransferPrimaryWhileLeaseExpiredAndServerDown(
 		nodes[newPrimary].Close()
 		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/election/skipGrantLeader"))
 
-		tests.WaitForPrimaryServing(re, nodes)
+		tests.WaitForPrimaryServing(re, nodes, suite.cluster)
 		// Primary should be different with before
 		onlyPrimary, err := suite.pdClient.GetMicroServicePrimary(suite.ctx, service)
 		re.NoError(err)

@@ -35,16 +35,17 @@ import (
 type TestTSOCluster struct {
 	ctx context.Context
 
+	pd               *TestCluster
 	backendEndpoints string
 	servers          map[string]*tso.Server
 	cleanupFuncs     map[string]testutil.CleanupFunc
 }
 
 // NewTestTSOCluster creates a new TSO test cluster.
-func NewTestTSOCluster(ctx context.Context, initialServerCount int, backendEndpoints string) (tc *TestTSOCluster, err error) {
+func NewTestTSOCluster(ctx context.Context, initialServerCount int, pd *TestCluster) (tc *TestTSOCluster, err error) {
 	tc = &TestTSOCluster{
 		ctx:              ctx,
-		backendEndpoints: backendEndpoints,
+		backendEndpoints: pd.GetLeaderServer().GetAddr(),
 		servers:          make(map[string]*tso.Server, initialServerCount),
 		cleanupFuncs:     make(map[string]testutil.CleanupFunc, initialServerCount),
 	}
@@ -177,7 +178,9 @@ func (tc *TestTSOCluster) WaitForPrimaryServing(re *require.Assertions, keyspace
 		}
 		return false
 	}, testutil.WithWaitFor(30*time.Second), testutil.WithTickInterval(100*time.Millisecond))
-
+	testutil.Eventually(re, func() bool {
+		return tc.pd.GetLeaderServer().GetRaftCluster().IsServiceIndependent(constant.TSOServiceName)
+	})
 	return primary
 }
 

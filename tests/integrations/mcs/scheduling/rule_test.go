@@ -21,6 +21,8 @@ import (
 
 	"github.com/stretchr/testify/suite"
 
+	"github.com/pingcap/failpoint"
+
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/utils/testutil"
@@ -46,6 +48,7 @@ func TestRule(t *testing.T) {
 
 func (suite *ruleTestSuite) SetupSuite() {
 	re := suite.Require()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs", `return(true)`))
 
 	var err error
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
@@ -63,12 +66,14 @@ func (suite *ruleTestSuite) SetupSuite() {
 func (suite *ruleTestSuite) TearDownSuite() {
 	suite.cancel()
 	suite.cluster.Destroy()
+	re := suite.Require()
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs"))
 }
 
 func (suite *ruleTestSuite) TestRuleWatch() {
 	re := suite.Require()
 
-	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.backendEndpoint)
+	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.cluster)
 	re.NoError(err)
 	defer tc.Destroy()
 

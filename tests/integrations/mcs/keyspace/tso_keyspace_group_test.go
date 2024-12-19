@@ -95,7 +95,7 @@ func (suite *keyspaceGroupTestSuite) TestAllocNodesUpdate() {
 		cleanups = append(cleanups, cleanup)
 		nodes[s.GetAddr()] = s
 	}
-	tests.WaitForPrimaryServing(re, nodes)
+	tests.WaitForPrimaryServing(re, nodes, suite.cluster)
 
 	// create a keyspace group.
 	kgs := &handlers.CreateKeyspaceGroupParams{KeyspaceGroups: []*endpoint.KeyspaceGroup{
@@ -151,7 +151,7 @@ func (suite *keyspaceGroupTestSuite) TestAllocReplica() {
 		cleanups = append(cleanups, cleanup)
 		nodes[s.GetAddr()] = s
 	}
-	tests.WaitForPrimaryServing(re, nodes)
+	tests.WaitForPrimaryServing(re, nodes, suite.cluster)
 
 	// miss replica.
 	id := 1
@@ -203,7 +203,7 @@ func (suite *keyspaceGroupTestSuite) TestAllocReplica() {
 	s2, cleanup2 := tests.StartSingleTSOTestServer(suite.ctx, re, suite.backendEndpoints, tempurl.Alloc())
 	defer cleanup2()
 	nodes[s2.GetAddr()] = s2
-	tests.WaitForPrimaryServing(re, nodes)
+	tests.WaitForPrimaryServing(re, nodes, suite.cluster)
 	params = &handlers.AllocNodesForKeyspaceGroupParams{
 		Replica: constant.DefaultKeyspaceGroupReplicaCount + 1,
 	}
@@ -252,7 +252,7 @@ func (suite *keyspaceGroupTestSuite) TestSetNodes() {
 		nodes[s.GetAddr()] = s
 		nodesList = append(nodesList, s.GetAddr())
 	}
-	tests.WaitForPrimaryServing(re, nodes)
+	tests.WaitForPrimaryServing(re, nodes, suite.cluster)
 
 	// the keyspace group is not exist.
 	id := 1
@@ -318,7 +318,7 @@ func (suite *keyspaceGroupTestSuite) TestDefaultKeyspaceGroup() {
 		cleanups = append(cleanups, cleanup)
 		nodes[s.GetAddr()] = s
 	}
-	tests.WaitForPrimaryServing(re, nodes)
+	tests.WaitForPrimaryServing(re, nodes, suite.cluster)
 
 	// the default keyspace group is exist.
 	var kg *endpoint.KeyspaceGroup
@@ -352,7 +352,7 @@ func (suite *keyspaceGroupTestSuite) TestAllocNodes() {
 		cleanups = append(cleanups, cleanup)
 		nodes[s.GetAddr()] = s
 	}
-	tests.WaitForPrimaryServing(re, nodes)
+	tests.WaitForPrimaryServing(re, nodes, suite.cluster)
 
 	// create a keyspace group.
 	kgs := &handlers.CreateKeyspaceGroupParams{KeyspaceGroups: []*endpoint.KeyspaceGroup{
@@ -394,7 +394,7 @@ func (suite *keyspaceGroupTestSuite) TestAllocOneNode() {
 	defer cleanupOldTSOserver()
 	nodes[oldTSOServer.GetAddr()] = oldTSOServer
 
-	tests.WaitForPrimaryServing(re, nodes)
+	tests.WaitForPrimaryServing(re, nodes, suite.cluster)
 
 	// create a keyspace group.
 	kgs := &handlers.CreateKeyspaceGroupParams{KeyspaceGroups: []*endpoint.KeyspaceGroup{
@@ -421,7 +421,7 @@ func (suite *keyspaceGroupTestSuite) TestAllocOneNode() {
 	defer cleanupNewTSOServer()
 	nodes[newTSOServer.GetAddr()] = newTSOServer
 
-	tests.WaitForPrimaryServing(re, nodes)
+	tests.WaitForPrimaryServing(re, nodes, suite.cluster)
 
 	// the member list will be updated
 	testutil.Eventually(re, func() bool {

@@ -73,7 +73,7 @@ func (s *tsoProxyTestSuite) SetupSuite() {
 	re.NoError(s.apiLeader.BootstrapCluster())
 
 	// Create a TSO cluster with 2 servers
-	s.tsoCluster, err = tests.NewTestTSOCluster(s.ctx, 2, s.backendEndpoints)
+	s.tsoCluster, err = tests.NewTestTSOCluster(s.ctx, 2, s.apiCluster)
 	re.NoError(err)
 	s.tsoCluster.WaitForDefaultPrimaryServing(re)
 

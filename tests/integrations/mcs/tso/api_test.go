@@ -71,7 +71,7 @@ func (suite *tsoAPITestSuite) SetupTest() {
 	pdLeaderServer := suite.pdCluster.GetServer(leaderName)
 	re.NoError(pdLeaderServer.BootstrapCluster())
 	suite.backendEndpoints = pdLeaderServer.GetAddr()
-	suite.tsoCluster, err = tests.NewTestTSOCluster(suite.ctx, 1, suite.backendEndpoints)
+	suite.tsoCluster, err = tests.NewTestTSOCluster(suite.ctx, 1, suite.pdCluster)
 	re.NoError(err)
 }
 
@@ -148,7 +148,7 @@ func TestTSOServerStartFirst(t *testing.T) {
 	clusterCh := make(chan *tests.TestTSOCluster)
 	defer close(clusterCh)
 	go func() {
-		tsoCluster, err := tests.NewTestTSOCluster(ctx, 2, addr)
+		tsoCluster, err := tests.NewTestTSOCluster(ctx, 2, apiCluster)
 		re.NoError(err)
 		primary := tsoCluster.WaitForDefaultPrimaryServing(re)
 		re.NotNil(primary)
@@ -206,7 +206,7 @@ func TestForwardOnlyTSONoScheduling(t *testing.T) {
 	err = tc.RunInitialServers()
 	re.NoError(err)
 	pdAddr := tc.GetConfig().GetClientURL()
-	ttc, err := tests.NewTestTSOCluster(ctx, 2, pdAddr)
+	ttc, err := tests.NewTestTSOCluster(ctx, 2, tc)
 	re.NoError(err)
 	tc.WaitLeader()
 	leaderServer := tc.GetLeaderServer()

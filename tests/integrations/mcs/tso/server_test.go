@@ -281,7 +281,7 @@ func TestForwardTSORelated(t *testing.T) {
 	leaderServer.SetMicroServiceConfig(*cfg)
 	// Unable to use the tso-related interface without tso server
 	suite.checkUnavailableTSO(re)
-	tc, err := tests.NewTestTSOCluster(suite.ctx, 1, suite.backendEndpoints)
+	tc, err := tests.NewTestTSOCluster(suite.ctx, 1, suite.cluster)
 	re.NoError(err)
 	defer tc.Destroy()
 	tc.WaitForDefaultPrimaryServing(re)
@@ -293,7 +293,7 @@ func TestForwardTSOWhenPrimaryChanged(t *testing.T) {
 	suite := NewAPIServerForward(re)
 	defer suite.ShutDown()
 
-	tc, err := tests.NewTestTSOCluster(suite.ctx, 2, suite.backendEndpoints)
+	tc, err := tests.NewTestTSOCluster(suite.ctx, 2, suite.cluster)
 	re.NoError(err)
 	defer tc.Destroy()
 	tc.WaitForDefaultPrimaryServing(re)
@@ -333,7 +333,7 @@ func TestResignTSOPrimaryForward(t *testing.T) {
 	suite := NewAPIServerForward(re)
 	defer suite.ShutDown()
 	// TODO: test random kill primary with 3 nodes
-	tc, err := tests.NewTestTSOCluster(suite.ctx, 2, suite.backendEndpoints)
+	tc, err := tests.NewTestTSOCluster(suite.ctx, 2, suite.cluster)
 	re.NoError(err)
 	defer tc.Destroy()
 	tc.WaitForDefaultPrimaryServing(re)
@@ -359,7 +359,7 @@ func TestResignAPIPrimaryForward(t *testing.T) {
 	suite := NewAPIServerForward(re)
 	defer suite.ShutDown()
 
-	tc, err := tests.NewTestTSOCluster(suite.ctx, 2, suite.backendEndpoints)
+	tc, err := tests.NewTestTSOCluster(suite.ctx, 2, suite.cluster)
 	re.NoError(err)
 	defer tc.Destroy()
 	tc.WaitForDefaultPrimaryServing(re)
@@ -417,7 +417,7 @@ func TestForwardTSOUnexpectedToFollower3(t *testing.T) {
 
 func (suite *APIServerForward) checkForwardTSOUnexpectedToFollower(checkTSO func()) {
 	re := suite.re
-	tc, err := tests.NewTestTSOCluster(suite.ctx, 2, suite.backendEndpoints)
+	tc, err := tests.NewTestTSOCluster(suite.ctx, 2, suite.cluster)
 	re.NoError(err)
 	tc.WaitForDefaultPrimaryServing(re)
 
@@ -524,7 +524,7 @@ func (suite *CommonTestSuite) SetupSuite() {
 	suite.backendEndpoints = suite.pdLeader.GetAddr()
 	re.NoError(suite.pdLeader.BootstrapCluster())
 
-	suite.tsoCluster, err = tests.NewTestTSOCluster(suite.ctx, 1, suite.backendEndpoints)
+	suite.tsoCluster, err = tests.NewTestTSOCluster(suite.ctx, 1, suite.cluster)
 	re.NoError(err)
 	suite.tsoCluster.WaitForDefaultPrimaryServing(re)
 	suite.tsoDefaultPrimaryServer = suite.tsoCluster.GetPrimaryServer(constant.DefaultKeyspaceID, constant.DefaultKeyspaceGroupID)
@@ -624,7 +624,7 @@ func TestTSOServiceSwitch(t *testing.T) {
 	re.NoError(checkTSOMonotonic(ctx, pdClient, &globalLastTS, 10))
 
 	// Start TSO server
-	tsoCluster, err := tests.NewTestTSOCluster(ctx, 1, pdLeader.GetAddr())
+	tsoCluster, err := tests.NewTestTSOCluster(ctx, 1, tc)
 	re.NoError(err)
 	tsoCluster.WaitForDefaultPrimaryServing(re)
 

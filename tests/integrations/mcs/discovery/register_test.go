@@ -93,7 +93,7 @@ func (suite *serverRegisterTestSuite) checkServerRegister(serviceName string) {
 	re.Equal(addr, returnedEntry.ServiceAddr)
 
 	// test primary when only one server
-	expectedPrimary := tests.WaitForPrimaryServing(re, map[string]bs.Server{addr: s})
+	expectedPrimary := tests.WaitForPrimaryServing(re, map[string]bs.Server{addr: s}, suite.cluster)
 	primary, exist := suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx, serviceName)
 	re.True(exist)
 	re.Equal(expectedPrimary, primary)
@@ -131,7 +131,7 @@ func (suite *serverRegisterTestSuite) checkServerPrimaryChange(serviceName strin
 		serverMap[s.GetAddr()] = s
 	}
 
-	expectedPrimary := tests.WaitForPrimaryServing(re, serverMap)
+	expectedPrimary := tests.WaitForPrimaryServing(re, serverMap, suite.cluster)
 	primary, exist = suite.pdLeader.GetServer().GetServicePrimaryAddr(suite.ctx, serviceName)
 	re.True(exist)
 	re.Equal(expectedPrimary, primary)
@@ -139,7 +139,7 @@ func (suite *serverRegisterTestSuite) checkServerPrimaryChange(serviceName strin
 	serverMap[primary].Close()
 	delete(serverMap, primary)
 
-	expectedPrimary = tests.WaitForPrimaryServing(re, serverMap)
+	expectedPrimary = tests.WaitForPrimaryServing(re, serverMap, suite.cluster)
 	// test API server discovery
 	client := suite.pdLeader.GetEtcdClient()
 	endpoints, err := discovery.Discover(client, serviceName)

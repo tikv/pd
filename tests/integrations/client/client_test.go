@@ -344,7 +344,7 @@ func TestTSOFollowerProxyWithTSOService(t *testing.T) {
 	pdLeaderServer := cluster.GetServer(leaderName)
 	re.NoError(pdLeaderServer.BootstrapCluster())
 	backendEndpoints := pdLeaderServer.GetAddr()
-	tsoCluster, err := tests.NewTestTSOCluster(ctx, 2, backendEndpoints)
+	tsoCluster, err := tests.NewTestTSOCluster(ctx, 2, cluster)
 	re.NoError(err)
 	defer tsoCluster.Destroy()
 	time.Sleep(100 * time.Millisecond)

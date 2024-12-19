@@ -111,7 +111,7 @@ func TestSplitKeyspaceGroup(t *testing.T) {
 	re.NoError(err)
 	pdAddr := tc.GetConfig().GetClientURL()
 
-	ttc, err := pdTests.NewTestTSOCluster(ctx, 2, pdAddr)
+	ttc, err := pdTests.NewTestTSOCluster(ctx, 2, tc)
 	re.NoError(err)
 	defer ttc.Destroy()
 	cmd := ctl.GetRootCmd()
@@ -206,7 +206,7 @@ func TestSetNodeAndPriorityKeyspaceGroup(t *testing.T) {
 	re.NoError(err)
 	pdAddr := tc.GetConfig().GetClientURL()
 
-	ttc, err := pdTests.NewTestTSOCluster(ctx, 2, pdAddr)
+	ttc, err := pdTests.NewTestTSOCluster(ctx, 2, tc)
 	re.NoError(err)
 	defer ttc.Destroy()
 	tsoAddrs := ttc.GetAddrs()
@@ -310,7 +310,7 @@ func TestMergeKeyspaceGroup(t *testing.T) {
 	re.NoError(err)
 	pdAddr := tc.GetConfig().GetClientURL()
 
-	ttc, err := pdTests.NewTestTSOCluster(ctx, 2, pdAddr)
+	ttc, err := pdTests.NewTestTSOCluster(ctx, 2, tc)
 	re.NoError(err)
 	defer ttc.Destroy()
 	cmd := ctl.GetRootCmd()
@@ -429,7 +429,7 @@ func TestKeyspaceGroupState(t *testing.T) {
 	re.NoError(err)
 	pdAddr := tc.GetConfig().GetClientURL()
 
-	ttc, err := pdTests.NewTestTSOCluster(ctx, 2, pdAddr)
+	ttc, err := pdTests.NewTestTSOCluster(ctx, 2, tc)
 	re.NoError(err)
 	defer ttc.Destroy()
 	cmd := ctl.GetRootCmd()
@@ -520,7 +520,7 @@ func TestShowKeyspaceGroupPrimary(t *testing.T) {
 	re.NoError(err)
 	pdAddr := tc.GetConfig().GetClientURL()
 
-	ttc, err := pdTests.NewTestTSOCluster(ctx, 2, pdAddr)
+	ttc, err := pdTests.NewTestTSOCluster(ctx, 2, tc)
 	re.NoError(err)
 	defer ttc.Destroy()
 	tsoAddrs := ttc.GetAddrs()

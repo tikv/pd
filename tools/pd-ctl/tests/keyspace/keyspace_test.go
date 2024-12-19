@@ -58,7 +58,7 @@ func TestKeyspace(t *testing.T) {
 	re.NoError(err)
 	pdAddr := tc.GetConfig().GetClientURL()
 
-	ttc, err := pdTests.NewTestTSOCluster(ctx, 2, pdAddr)
+	ttc, err := pdTests.NewTestTSOCluster(ctx, 2, tc)
 	re.NoError(err)
 	defer ttc.Destroy()
 	cmd := ctl.GetRootCmd()
