@@ -17,8 +17,9 @@ package http
 import (
 	"fmt"
 
-	"github.com/tikv/pd/client/pkg/retry"
 	"go.uber.org/zap"
+
+	"github.com/tikv/pd/client/pkg/retry"
 )
 
 // The following constants are the names of the requests.

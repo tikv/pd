@@ -22,10 +22,13 @@ import (
 	"sync"
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
+
 	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
@@ -36,7 +39,6 @@ import (
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
-	"go.uber.org/zap"
 )
 
 const regionScatterName = "region-scatter"
@@ -53,8 +55,6 @@ var (
 	scatterUnnecessaryCounter       = scatterCounter.WithLabelValues("unnecessary", "")
 	scatterFailCounter              = scatterCounter.WithLabelValues("fail", "")
 	scatterSuccessCounter           = scatterCounter.WithLabelValues("success", "")
-	errRegionNotFound               = errors.New("region not found")
-	errEmptyRegion                  = errors.New("empty region")
 )
 
 const (
@@ -167,7 +167,7 @@ func (r *RegionScatterer) ScatterRegionsByRange(startKey, endKey []byte, group s
 	regions := r.cluster.ScanRegions(startKey, endKey, -1)
 	if len(regions) < 1 {
 		scatterSkipEmptyRegionCounter.Inc()
-		return 0, nil, errEmptyRegion
+		return 0, nil, errs.ErrEmptyRegion
 	}
 	failures := make(map[uint64]error, len(regions))
 	regionMap := make(map[uint64]*core.RegionInfo, len(regions))
@@ -186,13 +186,13 @@ func (r *RegionScatterer) ScatterRegionsByRange(startKey, endKey []byte, group s
 func (r *RegionScatterer) ScatterRegionsByID(regionsID []uint64, group string, retryLimit int, skipStoreLimit bool) (int, map[uint64]error, error) {
 	if len(regionsID) < 1 {
 		scatterSkipEmptyRegionCounter.Inc()
-		return 0, nil, errEmptyRegion
+		return 0, nil, errs.ErrEmptyRegion
 	}
 	if len(regionsID) == 1 {
 		region := r.cluster.GetRegion(regionsID[0])
 		if region == nil {
 			scatterSkipNoRegionCounter.Inc()
-			return 0, nil, errRegionNotFound
+			return 0, nil, errs.ErrRegionNotFound
 		}
 	}
 	failures := make(map[uint64]error, len(regionsID))
@@ -228,7 +228,7 @@ func (r *RegionScatterer) ScatterRegionsByID(regionsID []uint64, group string, r
 func (r *RegionScatterer) scatterRegions(regions map[uint64]*core.RegionInfo, failures map[uint64]error, group string, retryLimit int, skipStoreLimit bool) (int, error) {
 	if len(regions) < 1 {
 		scatterSkipEmptyRegionCounter.Inc()
-		return 0, errEmptyRegion
+		return 0, errs.ErrEmptyRegion
 	}
 	if retryLimit > maxRetryLimit {
 		retryLimit = maxRetryLimit

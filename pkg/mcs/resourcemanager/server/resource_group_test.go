@@ -5,8 +5,9 @@ import (
 	"testing"
 
 	"github.com/brianvoe/gofakeit/v6"
-	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 	"github.com/stretchr/testify/require"
+
+	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 )
 
 func TestPatchResourceGroup(t *testing.T) {

@@ -22,13 +22,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pingcap/failpoint"
-	"github.com/pingcap/log"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+	"go.uber.org/zap/zapcore"
+
+	"github.com/pingcap/failpoint"
+	"github.com/pingcap/log"
+
 	"github.com/tikv/pd/client/opt"
 	sd "github.com/tikv/pd/client/servicediscovery"
-	"go.uber.org/zap/zapcore"
 )
 
 type mockTSOServiceProvider struct {

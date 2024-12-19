@@ -23,10 +23,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pingcap/log"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/zap"
+
+	"github.com/pingcap/log"
 )
 
 type clusterSuite struct {

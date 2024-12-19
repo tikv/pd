@@ -17,8 +17,9 @@ package api
 import (
 	"net/http"
 
-	"github.com/tikv/pd/server"
 	"github.com/unrolled/render"
+
+	"github.com/tikv/pd/server"
 )
 
 type clusterHandler struct {

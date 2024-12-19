@@ -23,10 +23,12 @@ import (
 	"strings"
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
+
 	"github.com/tikv/pd/pkg/errs"
-	"go.uber.org/zap"
 )
 
 // RegionLabel is the label of a region.

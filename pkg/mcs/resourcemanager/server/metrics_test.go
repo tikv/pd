@@ -18,8 +18,9 @@ import (
 	"fmt"
 	"testing"
 
-	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 	"github.com/stretchr/testify/require"
+
+	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 )
 
 func TestMaxPerSecCostTracker(t *testing.T) {

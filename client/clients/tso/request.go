@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/pingcap/errors"
+
 	"github.com/tikv/pd/client/metrics"
 )
 

@@ -23,12 +23,17 @@ import (
 	"time"
 
 	"github.com/opentracing/opentracing-go"
+	"github.com/prometheus/client_golang/prometheus"
+	"go.uber.org/zap"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
-	"github.com/prometheus/client_golang/prometheus"
+
 	"github.com/tikv/pd/client/clients/metastorage"
 	"github.com/tikv/pd/client/clients/router"
 	"github.com/tikv/pd/client/clients/tso"
@@ -37,9 +42,9 @@ import (
 	"github.com/tikv/pd/client/metrics"
 	"github.com/tikv/pd/client/opt"
 	"github.com/tikv/pd/client/pkg/caller"
+	cb "github.com/tikv/pd/client/pkg/circuitbreaker"
 	"github.com/tikv/pd/client/pkg/utils/tlsutil"
 	sd "github.com/tikv/pd/client/servicediscovery"
-	"go.uber.org/zap"
 )
 
 // GlobalConfigItem standard format of KV pair in GlobalConfig client
@@ -456,6 +461,12 @@ func (c *client) UpdateOption(option opt.DynamicOption, value any) error {
 			return errors.New("[pd] invalid value type for TSOClientRPCConcurrency option, it should be int")
 		}
 		c.inner.option.SetTSOClientRPCConcurrency(value)
+	case opt.RegionMetadataCircuitBreakerSettings:
+		applySettingsChange, ok := value.(func(config *cb.Settings))
+		if !ok {
+			return errors.New("[pd] invalid value type for RegionMetadataCircuitBreakerSettings option, it should be pd.Settings")
+		}
+		c.inner.regionMetaCircuitBreaker.ChangeSettings(applySettingsChange)
 	default:
 		return errors.New("[pd] unsupported client option")
 	}
@@ -501,10 +512,10 @@ func (c *client) GetTSAsync(ctx context.Context) tso.TSFuture {
 	return c.inner.dispatchTSORequestWithRetry(ctx)
 }
 
-// GetLocalTSAsync implements the TSOClient interface.
-//
-// Deprecated: Local TSO will be completely removed in the future. Currently, regardless of the
-// parameters passed in, this method will default to returning the global TSO.
+// Deprecated: the Local TSO feature has been deprecated. Regardless of the
+// parameters passed, the behavior of this interface will be equivalent to
+// `GetTSAsync`. If you want to use a separately deployed TSO service,
+// please refer to the deployment of the TSO microservice.
 func (c *client) GetLocalTSAsync(ctx context.Context, _ string) tso.TSFuture {
 	return c.GetTSAsync(ctx)
 }
@@ -515,10 +526,10 @@ func (c *client) GetTS(ctx context.Context) (physical int64, logical int64, err 
 	return resp.Wait()
 }
 
-// GetLocalTS implements the TSOClient interface.
-//
-// Deprecated: Local TSO will be completely removed in the future. Currently, regardless of the
-// parameters passed in, this method will default to returning the global TSO.
+// Deprecated: the Local TSO feature has been deprecated. Regardless of the
+// parameters passed, the behavior of this interface will be equivalent to
+// `GetTS`. If you want to use a separately deployed TSO service,
+// please refer to the deployment of the TSO microservice.
 func (c *client) GetLocalTS(ctx context.Context, _ string) (physical int64, logical int64, err error) {
 	return c.GetTS(ctx)
 }
@@ -650,7 +661,13 @@ func (c *client) GetRegion(ctx context.Context, key []byte, opts ...opt.GetRegio
 	if serviceClient == nil {
 		return nil, errs.ErrClientGetProtoClient
 	}
-	resp, err := pdpb.NewPDClient(serviceClient.GetClientConn()).GetRegion(cctx, req)
+	resp, err := c.inner.regionMetaCircuitBreaker.Execute(func() (*pdpb.GetRegionResponse, cb.Overloading, error) {
+		region, err := pdpb.NewPDClient(serviceClient.GetClientConn()).GetRegion(cctx, req)
+		failpoint.Inject("triggerCircuitBreaker", func() {
+			err = status.Error(codes.ResourceExhausted, "resource exhausted")
+		})
+		return region, isOverloaded(err), err
+	})
 	if serviceClient.NeedRetry(resp.GetHeader().GetError(), err) {
 		protoClient, cctx := c.getClientAndContext(ctx)
 		if protoClient == nil {
@@ -690,7 +707,10 @@ func (c *client) GetPrevRegion(ctx context.Context, key []byte, opts ...opt.GetR
 	if serviceClient == nil {
 		return nil, errs.ErrClientGetProtoClient
 	}
-	resp, err := pdpb.NewPDClient(serviceClient.GetClientConn()).GetPrevRegion(cctx, req)
+	resp, err := c.inner.regionMetaCircuitBreaker.Execute(func() (*pdpb.GetRegionResponse, cb.Overloading, error) {
+		resp, err := pdpb.NewPDClient(serviceClient.GetClientConn()).GetPrevRegion(cctx, req)
+		return resp, isOverloaded(err), err
+	})
 	if serviceClient.NeedRetry(resp.GetHeader().GetError(), err) {
 		protoClient, cctx := c.getClientAndContext(ctx)
 		if protoClient == nil {
@@ -730,7 +750,10 @@ func (c *client) GetRegionByID(ctx context.Context, regionID uint64, opts ...opt
 	if serviceClient == nil {
 		return nil, errs.ErrClientGetProtoClient
 	}
-	resp, err := pdpb.NewPDClient(serviceClient.GetClientConn()).GetRegionByID(cctx, req)
+	resp, err := c.inner.regionMetaCircuitBreaker.Execute(func() (*pdpb.GetRegionResponse, cb.Overloading, error) {
+		resp, err := pdpb.NewPDClient(serviceClient.GetClientConn()).GetRegionByID(cctx, req)
+		return resp, isOverloaded(err), err
+	})
 	if serviceClient.NeedRetry(resp.GetHeader().GetError(), err) {
 		protoClient, cctx := c.getClientAndContext(ctx)
 		if protoClient == nil {

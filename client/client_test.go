@@ -20,11 +20,12 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"go.uber.org/goleak"
+
 	"github.com/tikv/pd/client/opt"
 	"github.com/tikv/pd/client/pkg/caller"
 	"github.com/tikv/pd/client/pkg/utils/testutil"
 	"github.com/tikv/pd/client/pkg/utils/tsoutil"
-	"go.uber.org/goleak"
 )
 
 func TestMain(m *testing.M) {

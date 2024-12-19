@@ -25,9 +25,12 @@ import (
 	"time"
 
 	"github.com/opentracing/opentracing-go"
+	"go.uber.org/zap"
+
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
+
 	"github.com/tikv/pd/client/constants"
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/metrics"
@@ -37,7 +40,6 @@ import (
 	"github.com/tikv/pd/client/pkg/utils/timerutil"
 	"github.com/tikv/pd/client/pkg/utils/tsoutil"
 	sd "github.com/tikv/pd/client/servicediscovery"
-	"go.uber.org/zap"
 )
 
 // deadline is used to control the TS request timeout manually,
