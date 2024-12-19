@@ -111,8 +111,8 @@ func NewClient(
 		},
 	}
 
-	eventSrc := svcDiscovery.(sd.TSOEventSource)
-	eventSrc.SetTSOLeaderURLUpdatedCallback(c.updateTSOLeaderURL)
+	eventSrc := svcDiscovery.(sd.EventSource)
+	eventSrc.SetLeaderURLUpdatedCallback(c.updateTSOLeaderURL)
 	c.svcDiscovery.AddServiceURLsSwitchedCallback(c.scheduleUpdateTSOConnectionCtxs)
 
 	return c
