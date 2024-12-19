@@ -394,17 +394,17 @@ func (c *serviceBalancer) get() (ret ServiceClient) {
 
 // UpdateKeyspaceIDFunc is the function type for updating the keyspace ID.
 type UpdateKeyspaceIDFunc func() error
-type tsoLeaderURLUpdatedFunc func(string) error
+type leaderURLUpdatedFunc func(string) error
 
-// TSOEventSource subscribes to events related to changes in the TSO leader/primary from the service discovery.
-type TSOEventSource interface {
-	// SetTSOLeaderURLUpdatedCallback adds a callback which will be called when the TSO leader/primary is updated.
-	SetTSOLeaderURLUpdatedCallback(callback tsoLeaderURLUpdatedFunc)
+// EventSource subscribes to events related to changes in the leader/primary from the service discovery.
+type EventSource interface {
+	// SetLeaderURLUpdatedCallback adds a callback which will be called when the leader/primary is updated.
+	SetLeaderURLUpdatedCallback(callback leaderURLUpdatedFunc)
 }
 
 var (
 	_ ServiceDiscovery = (*serviceDiscovery)(nil)
-	_ TSOEventSource   = (*serviceDiscovery)(nil)
+	_ EventSource      = (*serviceDiscovery)(nil)
 )
 
 // serviceDiscovery is the service discovery client of PD/PD service which is quorum based
@@ -433,8 +433,8 @@ type serviceDiscovery struct {
 	// membersChangedCbs will be called after there is any membership change in the
 	// leader and followers
 	membersChangedCbs []func()
-	// tsoLeaderUpdatedCb will be called when the TSO leader is updated.
-	tsoLeaderUpdatedCb tsoLeaderURLUpdatedFunc
+	// leaderUpdatedCb will be called when the leader/primary is updated.
+	leaderUpdatedCb atomic.Value // Store as []leaderURLUpdatedFunc
 
 	checkMembershipCh chan struct{}
 
@@ -483,6 +483,25 @@ func NewServiceDiscovery(
 	urls = tlsutil.AddrsToURLs(urls, tlsCfg)
 	pdsd.urls.Store(urls)
 	return pdsd
+}
+
+func (c *serviceDiscovery) addLeaderUpdatedCb(cb leaderURLUpdatedFunc) {
+	if c.leaderUpdatedCb.Load() == nil {
+		c.leaderUpdatedCb.Store(make([]leaderURLUpdatedFunc, 0, 2))
+	}
+	c.leaderUpdatedCb.Store(append(c.leaderUpdatedCb.Load().([]leaderURLUpdatedFunc), cb))
+}
+
+func (c *serviceDiscovery) callLeaderUpdatedCb(url string) (err error) {
+	for _, cb := range c.leaderUpdatedCb.Load().([]leaderURLUpdatedFunc) {
+		if cb == nil {
+			continue
+		}
+		if err = cb(url); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // Init initializes the service discovery.
@@ -803,15 +822,15 @@ func (c *serviceDiscovery) AddServiceURLsSwitchedCallback(callbacks ...func()) {
 	c.membersChangedCbs = append(c.membersChangedCbs, callbacks...)
 }
 
-// SetTSOLeaderURLUpdatedCallback adds a callback which will be called when the TSO leader is updated.
-func (c *serviceDiscovery) SetTSOLeaderURLUpdatedCallback(callback tsoLeaderURLUpdatedFunc) {
+// SetLeaderURLUpdatedCallback adds a callback which will be called when the PD leader is updated.
+func (c *serviceDiscovery) SetLeaderURLUpdatedCallback(callback leaderURLUpdatedFunc) {
 	url := c.getLeaderURL()
 	if len(url) > 0 {
 		if err := callback(url); err != nil {
-			log.Error("[tso] failed to call back when tso leader url update", zap.String("url", url), errs.ZapError(err))
+			log.Error("[pd] failed to call back when pd leader url update", zap.String("url", url), errs.ZapError(err))
 		}
 	}
-	c.tsoLeaderUpdatedCb = callback
+	c.addLeaderUpdatedCb(callback)
 }
 
 // getLeaderURL returns the leader URL.
@@ -980,23 +999,21 @@ func (c *serviceDiscovery) switchLeader(url string) (bool, error) {
 		return false, nil
 	}
 
-	newConn, err := c.GetOrCreateGRPCConn(url)
+	newConn, _ := c.GetOrCreateGRPCConn(url)
 	// If gRPC connect is created successfully or leader is new, still saves.
 	if url != oldLeader.GetURL() || newConn != nil {
 		leaderClient := newPDServiceClient(url, url, newConn, true)
 		c.leader.Store(leaderClient)
 	}
 	// Run callbacks
-	if c.tsoLeaderUpdatedCb != nil {
-		if err := c.tsoLeaderUpdatedCb(url); err != nil {
-			return true, err
-		}
+	if err := c.callLeaderUpdatedCb(url); err != nil {
+		return true, err
 	}
 	for _, cb := range c.leaderSwitchedCbs {
 		cb()
 	}
 	log.Info("[pd] switch leader", zap.String("new-leader", url), zap.String("old-leader", oldLeader.GetURL()))
-	return true, err
+	return true, nil
 }
 
 func (c *serviceDiscovery) updateFollowers(members []*pdpb.Member, leaderID uint64, leaderURL string) (changed bool) {

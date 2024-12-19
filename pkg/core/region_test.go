@@ -1203,3 +1203,91 @@ func TestScanRegion(t *testing.T) {
 	re.Len(scanNoError([]byte("a"), []byte("e"), 0), 3)
 	re.Len(scanNoError([]byte("c"), []byte("e"), 0), 1)
 }
+
+func TestQueryRegions(t *testing.T) {
+	re := require.New(t)
+	regions := NewRegionsInfo()
+	regions.CheckAndPutRegion(NewTestRegionInfo(1, 1, []byte("a"), []byte("b")))
+	regions.CheckAndPutRegion(NewTestRegionInfo(2, 1, []byte("b"), []byte("c")))
+	regions.CheckAndPutRegion(NewTestRegionInfo(3, 1, []byte("d"), []byte("e")))
+	// Query regions by keys.
+	keyIDMap, prevKeyIDMap, regionsByID := regions.QueryRegions(
+		[][]byte{[]byte("a"), []byte("b"), []byte("c")},
+		nil,
+		nil,
+		false,
+	)
+	re.Len(keyIDMap, 3)
+	re.Empty(prevKeyIDMap)
+	re.Equal(uint64(1), keyIDMap[0])
+	re.Equal(uint64(2), keyIDMap[1])
+	re.Zero(keyIDMap[2]) // The key is not in the region tree, so its ID should be 0.
+	re.Len(regionsByID, 2)
+	re.Equal(uint64(1), regionsByID[1].GetRegion().GetId())
+	re.Equal(uint64(2), regionsByID[2].GetRegion().GetId())
+	// Query regions by IDs.
+	keyIDMap, prevKeyIDMap, regionsByID = regions.QueryRegions(
+		nil,
+		nil,
+		[]uint64{1, 2, 3},
+		false,
+	)
+	re.Empty(keyIDMap)
+	re.Empty(prevKeyIDMap)
+	re.Len(regionsByID, 3)
+	re.Equal(uint64(1), regionsByID[1].GetRegion().GetId())
+	re.Equal(uint64(2), regionsByID[2].GetRegion().GetId())
+	re.Equal(uint64(3), regionsByID[3].GetRegion().GetId())
+	// Query the region that does not exist.
+	keyIDMap, prevKeyIDMap, regionsByID = regions.QueryRegions(
+		nil,
+		nil,
+		[]uint64{4},
+		false,
+	)
+	re.Empty(keyIDMap)
+	re.Empty(prevKeyIDMap)
+	re.Len(regionsByID, 1)
+	re.Nil(regionsByID[4])
+	keyIDMap, prevKeyIDMap, regionsByID = regions.QueryRegions(
+		[][]byte{[]byte("c")},
+		nil,
+		nil,
+		false,
+	)
+	re.Len(keyIDMap, 1)
+	re.Empty(prevKeyIDMap)
+	re.Zero(keyIDMap[0])
+	re.Empty(regionsByID)
+	keyIDMap, prevKeyIDMap, regionsByID = regions.QueryRegions(
+		[][]byte{[]byte("c")},
+		nil,
+		[]uint64{4},
+		false,
+	)
+	re.Len(keyIDMap, 1)
+	re.Empty(prevKeyIDMap)
+	re.Zero(keyIDMap[0])
+	re.Nil(regionsByID[4])
+	// Query regions by keys, previous keys and IDs.
+	keyIDMap, prevKeyIDMap, regionsByID = regions.QueryRegions(
+		[][]byte{[]byte("b"), []byte("c")},
+		[][]byte{[]byte("a"), []byte("b"), []byte("c"), []byte("d"), []byte("e"), []byte("f")},
+		[]uint64{1, 3},
+		false,
+	)
+	re.Len(keyIDMap, 2)
+	re.Len(prevKeyIDMap, 6)
+	re.Equal(uint64(2), keyIDMap[0])
+	re.Zero(keyIDMap[1])
+	re.Zero(prevKeyIDMap[0])
+	re.Equal(uint64(1), prevKeyIDMap[1])
+	re.Zero(prevKeyIDMap[2])
+	re.Zero(prevKeyIDMap[3])
+	re.Zero(prevKeyIDMap[4])
+	re.Zero(prevKeyIDMap[5])
+	re.Len(regionsByID, 3)
+	re.Equal(uint64(1), regionsByID[1].GetRegion().GetId())
+	re.Equal(uint64(2), regionsByID[2].GetRegion().GetId())
+	re.Equal(uint64(3), regionsByID[3].GetRegion().GetId())
+}
