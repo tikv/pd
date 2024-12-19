@@ -57,7 +57,6 @@ func pickRegions(n int, fromStore *StoreRegionSet, toStore *StoreRegionSet) *Mig
 		Regions:     make(map[uint64]bool),
 	}
 
-	log.Info("!!!!! gem", zap.Any("from", fromStore.ID), zap.Any("to", toStore.ID), zap.Any("c", n))
 	for i := 0; i < n; i++ {
 		for r, fromHasRegion := range fromStore.RegionIDSet {
 			if !fromHasRegion {
@@ -140,7 +139,6 @@ func buildMigrationPlan(stores []*StoreRegionSet) ([]int, []int, []*MigrationOp,
 					sendersVolume[i] -= n
 					op := pickRegions(n, fromStore, toStore)
 					movements += len(op.Regions)
-					log.Info("!!!!!! pick result", zap.Any("from", fromStore.ID), zap.Any("to", toStore.ID), zap.Any("region", op.Regions))
 					ops = append(ops, op)
 				}
 			}
@@ -233,10 +231,7 @@ func RedistibuteRegions(c sche.SchedulerCluster, startKey, endKey []byte, requir
 
 	senders, receivers, ops, movements := buildMigrationPlan(candidates)
 
-	log.Info("Migration plan details", zap.Any("startKey", startKey), zap.Any("endKey", endKey), zap.Any("senders", senders), zap.Any("receivers", receivers), zap.Any("movements", movements), zap.Any("ops", ops), zap.Any("stores", stores), zap.Any("candidates", len(candidates)))
-	for _, m := range ops {
-		log.Info("!!!! Migration", zap.Any("ops", m))
-	}
+	log.Info("balance keyrange plan details", zap.Any("startKey", startKey), zap.Any("endKey", endKey), zap.Any("senders", senders), zap.Any("receivers", receivers), zap.Any("movements", movements), zap.Any("ops", ops), zap.Any("stores", stores), zap.Any("candidates", len(candidates)))
 
 	operators := make([]*OperatorWrapper, 0)
 	for _, op := range ops {
@@ -414,13 +409,6 @@ func (s *balanceKeyrangeScheduler) Schedule(cluster sche.SchedulerCluster, dryRu
 		for _, opw := range s.migrationPlan.Running {
 			op := opw.Operator
 			canceledByStoreLimit := op.Status() == operator.CANCELED && op.GetAdditionalInfo("cancel-reason") == string(operator.ExceedStoreLimit)
-			if op.Status() == operator.CANCELED {
-				if op.GetAdditionalInfo("cancel-reason") == string(operator.ExceedStoreLimit) {
-					log.Info("!!!!! Readd", zap.Any("op", op))
-				} else {
-					log.Info("!!!!! Do not Readd", zap.Any("why", op.GetAdditionalInfo("cancel-reason")), zap.Any("op", op))
-				}
-			}
 
 			if canceledByStoreLimit {
 				o, err := operator.CreateMovePeerOperator("balance-keyrange", cluster, opw.Region, operator.OpReplica, opw.FromStore, opw.Peer)
@@ -487,6 +475,5 @@ func (s *balanceKeyrangeScheduler) Schedule(cluster sche.SchedulerCluster, dryRu
 		s.migrationPlan.Running = append(s.migrationPlan.Running, s.migrationPlan.Operators...)
 		s.migrationPlan.Operators = make([]*OperatorWrapper, 0)
 	}
-	log.Info("!!!!! balance keyrange issue operators", zap.Any("count", len(part)), zap.Any("conf", s.conf.BatchSize), zap.Any("GetSchedulerMaxWaitingOperator", limit), zap.Any("queued", queued), zap.Any("batchSize", batchSize), zap.Any("f", s.IsFinished()))
 	return part, make([]plan.Plan, 0)
 }
