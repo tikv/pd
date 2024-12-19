@@ -32,7 +32,6 @@ import (
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
-	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/client/errs"
@@ -75,9 +74,10 @@ func UnaryBackofferInterceptor() grpc.UnaryClientInterceptor {
 	}
 }
 
-func UnaryCircuitBreakerInterceptor[T any]() grpc.UnaryClientInterceptor {
+// UnaryCircuitBreakerInterceptor is a gRPC interceptor that adds a circuit breaker to the call.
+func UnaryCircuitBreakerInterceptor() grpc.UnaryClientInterceptor {
 	return func(ctx context.Context, method string, req, reply any, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
-		cb := circuitbreaker.FromContext[*pdpb.GetRegionResponse](ctx)
+		cb := circuitbreaker.FromContext(ctx)
 		if cb == nil {
 			return invoker(ctx, method, req, reply, cc, opts...)
 		}
@@ -132,7 +132,7 @@ func GetClientConn(ctx context.Context, addr string, tlsCfg *tls.Config, do ...g
 	retryOpt := grpc.WithChainUnaryInterceptor(UnaryBackofferInterceptor())
 
 	// Add circuit breaker interceptor
-	cbOpt := grpc.WithChainUnaryInterceptor(UnaryCircuitBreakerInterceptor[any]())
+	cbOpt := grpc.WithChainUnaryInterceptor(UnaryCircuitBreakerInterceptor())
 
 	// Add retry related connection parameters
 	backoffOpts := grpc.WithConnectParams(grpc.ConnectParams{

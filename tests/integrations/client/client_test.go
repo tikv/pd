@@ -2073,7 +2073,7 @@ func TestCircuitBreaker(t *testing.T) {
 	cli := setupCli(ctx, re, endpoints)
 	defer cli.Close()
 
-	circuitBreaker := cb.NewCircuitBreaker[*pdpb.GetRegionResponse]("region_meta", circuitBreakerSettings)
+	circuitBreaker := cb.NewCircuitBreaker("region_meta", circuitBreakerSettings)
 	ctx = cb.WithCircuitBreaker(ctx, circuitBreaker)
 	for range 10 {
 		region, err := cli.GetRegion(ctx, []byte("a"))
@@ -2128,7 +2128,7 @@ func TestCircuitBreakerOpenAndChangeSettings(t *testing.T) {
 	cli := setupCli(ctx, re, endpoints)
 	defer cli.Close()
 
-	circuitBreaker := cb.NewCircuitBreaker[*pdpb.GetRegionResponse]("region_meta", circuitBreakerSettings)
+	circuitBreaker := cb.NewCircuitBreaker("region_meta", circuitBreakerSettings)
 	ctx = cb.WithCircuitBreaker(ctx, circuitBreaker)
 	for range 10 {
 		region, err := cli.GetRegion(ctx, []byte("a"))
@@ -2178,7 +2178,7 @@ func TestCircuitBreakerHalfOpenAndChangeSettings(t *testing.T) {
 	cli := setupCli(ctx, re, endpoints)
 	defer cli.Close()
 
-	circuitBreaker := cb.NewCircuitBreaker[*pdpb.GetRegionResponse]("region_meta", circuitBreakerSettings)
+	circuitBreaker := cb.NewCircuitBreaker("region_meta", circuitBreakerSettings)
 	ctx = cb.WithCircuitBreaker(ctx, circuitBreaker)
 	for range 10 {
 		region, err := cli.GetRegion(ctx, []byte("a"))

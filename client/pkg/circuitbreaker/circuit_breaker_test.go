@@ -24,7 +24,7 @@ import (
 )
 
 // advance emulate the state machine clock moves forward by the given duration
-func (cb *CircuitBreaker[T]) advance(duration time.Duration) {
+func (cb *CircuitBreaker) advance(duration time.Duration) {
 	cb.state.end = cb.state.end.Add(-duration - 1)
 }
 
@@ -40,7 +40,7 @@ var minCountToOpen = int(settings.MinQPSForOpen * uint32(settings.ErrorRateWindo
 
 func TestCircuitBreakerExecuteWrapperReturnValues(t *testing.T) {
 	re := require.New(t)
-	cb := NewCircuitBreaker[int]("test_cb", settings)
+	cb := NewCircuitBreaker("test_cb", settings)
 	originalError := errors.New("circuit breaker is open")
 
 	err := cb.Execute(func() (Overloading, error) {
@@ -57,7 +57,7 @@ func TestCircuitBreakerExecuteWrapperReturnValues(t *testing.T) {
 
 func TestCircuitBreakerOpenState(t *testing.T) {
 	re := require.New(t)
-	cb := NewCircuitBreaker[int]("test_cb", settings)
+	cb := NewCircuitBreaker("test_cb", settings)
 	driveQPS(cb, minCountToOpen, Yes, re)
 	re.Equal(StateClosed, cb.state.stateType)
 	assertSucceeds(cb, re) // no error till ErrorRateWindow is finished
@@ -68,7 +68,7 @@ func TestCircuitBreakerOpenState(t *testing.T) {
 
 func TestCircuitBreakerCloseStateNotEnoughQPS(t *testing.T) {
 	re := require.New(t)
-	cb := NewCircuitBreaker[int]("test_cb", settings)
+	cb := NewCircuitBreaker("test_cb", settings)
 	re.Equal(StateClosed, cb.state.stateType)
 	driveQPS(cb, minCountToOpen/2, Yes, re)
 	cb.advance(settings.ErrorRateWindow)
@@ -78,7 +78,7 @@ func TestCircuitBreakerCloseStateNotEnoughQPS(t *testing.T) {
 
 func TestCircuitBreakerCloseStateNotEnoughErrorRate(t *testing.T) {
 	re := require.New(t)
-	cb := NewCircuitBreaker[int]("test_cb", settings)
+	cb := NewCircuitBreaker("test_cb", settings)
 	re.Equal(StateClosed, cb.state.stateType)
 	driveQPS(cb, minCountToOpen/4, Yes, re)
 	driveQPS(cb, minCountToOpen, No, re)
@@ -89,7 +89,7 @@ func TestCircuitBreakerCloseStateNotEnoughErrorRate(t *testing.T) {
 
 func TestCircuitBreakerHalfOpenToClosed(t *testing.T) {
 	re := require.New(t)
-	cb := NewCircuitBreaker[int]("test_cb", settings)
+	cb := NewCircuitBreaker("test_cb", settings)
 	re.Equal(StateClosed, cb.state.stateType)
 	driveQPS(cb, minCountToOpen, Yes, re)
 	cb.advance(settings.ErrorRateWindow)
@@ -107,7 +107,7 @@ func TestCircuitBreakerHalfOpenToClosed(t *testing.T) {
 
 func TestCircuitBreakerHalfOpenToOpen(t *testing.T) {
 	re := require.New(t)
-	cb := NewCircuitBreaker[int]("test_cb", settings)
+	cb := NewCircuitBreaker("test_cb", settings)
 	re.Equal(StateClosed, cb.state.stateType)
 	driveQPS(cb, minCountToOpen, Yes, re)
 	cb.advance(settings.ErrorRateWindow)
@@ -176,7 +176,7 @@ func TestCircuitBreakerHalfOpenFailOverPendingCount(t *testing.T) {
 
 func TestCircuitBreakerCountOnlyRequestsInSameWindow(t *testing.T) {
 	re := require.New(t)
-	cb := NewCircuitBreaker[int]("test_cb", settings)
+	cb := NewCircuitBreaker("test_cb", settings)
 	re.Equal(StateClosed, cb.state.stateType)
 
 	start := make(chan bool)
@@ -212,7 +212,7 @@ func TestCircuitBreakerCountOnlyRequestsInSameWindow(t *testing.T) {
 func TestCircuitBreakerChangeSettings(t *testing.T) {
 	re := require.New(t)
 
-	cb := NewCircuitBreaker[int]("test_cb", AlwaysClosedSettings)
+	cb := NewCircuitBreaker("test_cb", AlwaysClosedSettings)
 	driveQPS(cb, int(AlwaysClosedSettings.MinQPSForOpen*uint32(AlwaysClosedSettings.ErrorRateWindow.Seconds())), Yes, re)
 	cb.advance(AlwaysClosedSettings.ErrorRateWindow)
 	assertSucceeds(cb, re)
@@ -229,8 +229,8 @@ func TestCircuitBreakerChangeSettings(t *testing.T) {
 	re.Equal(StateOpen, cb.state.stateType)
 }
 
-func newCircuitBreakerMovedToHalfOpenState(re *require.Assertions) *CircuitBreaker[int] {
-	cb := NewCircuitBreaker[int]("test_cb", settings)
+func newCircuitBreakerMovedToHalfOpenState(re *require.Assertions) *CircuitBreaker {
+	cb := NewCircuitBreaker("test_cb", settings)
 	re.Equal(StateClosed, cb.state.stateType)
 	driveQPS(cb, minCountToOpen, Yes, re)
 	cb.advance(settings.ErrorRateWindow)
@@ -240,7 +240,7 @@ func newCircuitBreakerMovedToHalfOpenState(re *require.Assertions) *CircuitBreak
 	return cb
 }
 
-func driveQPS(cb *CircuitBreaker[int], count int, overload Overloading, re *require.Assertions) {
+func driveQPS(cb *CircuitBreaker, count int, overload Overloading, re *require.Assertions) {
 	for range count {
 		err := cb.Execute(func() (Overloading, error) {
 			return overload, nil
@@ -249,7 +249,7 @@ func driveQPS(cb *CircuitBreaker[int], count int, overload Overloading, re *requ
 	}
 }
 
-func assertFastFail(cb *CircuitBreaker[int], re *require.Assertions) {
+func assertFastFail(cb *CircuitBreaker, re *require.Assertions) {
 	var executed = false
 	err := cb.Execute(func() (Overloading, error) {
 		executed = true
@@ -259,7 +259,7 @@ func assertFastFail(cb *CircuitBreaker[int], re *require.Assertions) {
 	re.False(executed)
 }
 
-func assertSucceeds(cb *CircuitBreaker[int], re *require.Assertions) {
+func assertSucceeds(cb *CircuitBreaker, re *require.Assertions) {
 	err := cb.Execute(func() (Overloading, error) {
 		return No, nil
 	})
