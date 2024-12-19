@@ -206,9 +206,9 @@ func TestForwardOnlyTSONoScheduling(t *testing.T) {
 	err = tc.RunInitialServers()
 	re.NoError(err)
 	pdAddr := tc.GetConfig().GetClientURL()
+	tc.WaitLeader()
 	ttc, err := tests.NewTestTSOCluster(ctx, 2, tc)
 	re.NoError(err)
-	tc.WaitLeader()
 	leaderServer := tc.GetLeaderServer()
 	re.NoError(leaderServer.BootstrapCluster())
 
