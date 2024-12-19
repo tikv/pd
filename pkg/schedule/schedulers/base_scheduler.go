@@ -146,3 +146,8 @@ func (s *BaseScheduler) IsDefault() bool {
 	}
 	return false
 }
+
+// IsFinished implements the Scheduler interface.
+func (s *BaseScheduler) IsFinished() bool {
+	return false
+}

@@ -45,6 +45,7 @@ import (
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/statistics/buckets"
 	"github.com/tikv/pd/pkg/statistics/utils"
+	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 )
 
@@ -1301,6 +1302,52 @@ func (h *Handler) CheckRegionsReplicated(rawStartKey, rawEndKey string) (string,
 		}
 	})
 	return state, nil
+}
+
+// BalanceKeyrange create a new balance key-range scheduler according to API request.
+func (h *Handler) BalanceKeyrange(data string) (string, error) {
+	sc, err := h.GetSchedulersController()
+	if err != nil {
+		return "", err
+	}
+
+	exist, err := sc.IsSchedulerExisted(types.BalanceKeyrangeScheduler.String())
+	if exist {
+		return "Already existed", errs.ErrSchedulerExisted.FastGenByArgs()
+	}
+	oc := h.GetCoordinator().GetOperatorController()
+	controller := h.GetCoordinator().GetSchedulersController()
+	cb := func(s string) error {
+		return controller.RemoveScheduler(s)
+	}
+	s, err := schedulers.CreateScheduler(types.BalanceKeyrangeScheduler, oc, storage.NewStorageWithMemoryBackend(), schedulers.ConfigSliceDecoder(types.BalanceKeyrangeScheduler, []string{data}), cb)
+	if err != nil {
+		return "Created scheduler failed", err
+	}
+	if err = controller.AddScheduler(s); err != nil {
+		return "Add scheduler failed", err
+	}
+	return "Scheduler added successfully", nil
+}
+
+// CheckBalanceKeyrangeStatus returns the status of the balance-keyrange scheduler.
+func (h *Handler) CheckBalanceKeyrangeStatus() (any, error) {
+	sc, err := h.GetSchedulersController()
+	if err != nil {
+		return "", err
+	}
+	s := sc.GetScheduler(types.BalanceKeyrangeScheduler.String())
+	if s == nil {
+		return "", nil
+	}
+	if s.IsDisable() {
+		return "", nil
+	}
+	st := sc.GetSchedulerStatus(types.BalanceKeyrangeScheduler.String())
+	if st == nil {
+		return "", nil
+	}
+	return st, nil
 }
 
 // GetRuleManager returns the rule manager.

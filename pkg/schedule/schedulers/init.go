@@ -15,10 +15,13 @@
 package schedulers
 
 import (
+	"encoding/hex"
+	"encoding/json"
 	"strconv"
 	"strings"
 	"sync"
 
+	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/schedule/operator"
@@ -127,6 +130,64 @@ func schedulersRegister() {
 			conf.Batch = balanceWitnessBatchSize
 		}
 		sche := newBalanceWitnessScheduler(opController, conf)
+		conf.init(sche.GetName(), storage, conf)
+		return sche, nil
+	})
+
+	// balance keyrange
+	RegisterSliceDecoderBuilder(types.BalanceKeyrangeScheduler, func(args []string) ConfigDecoder {
+		return func(v any) error {
+			conf, ok := v.(*balanceKeyrangeSchedulerConfig)
+			if !ok {
+				return errs.ErrScheduleConfigNotExist.FastGenByArgs()
+			}
+			if len(args) != 1 {
+				return errs.ErrSchedulerConfig.FastGenByArgs("Invalid arguments number")
+			}
+			customerJson := struct {
+				StartKey       string               `json:"start_key"`
+				EndKey         string               `json:"end_key"`
+				BatchSize      uint64               `json:"batch_size,omitempty"`
+				Timeout        int64                `json:"timeout,omitempty"`
+				RequiredLabels []*metapb.StoreLabel `json:"required_labels,omitempty"`
+			}{
+				RequiredLabels: make([]*metapb.StoreLabel, 0),
+				Timeout:        5 * 60 * 1000,
+				BatchSize:      5,
+			}
+			err := json.Unmarshal([]byte(args[0]), &customerJson)
+			if err != nil {
+				return errs.ErrSchedulerConfig.FastGenByArgs("Invalid arguments", err.Error())
+			}
+
+			conf.BatchSize = customerJson.BatchSize
+			conf.RequiredLabels = customerJson.RequiredLabels
+			conf.MaxRunMillis = customerJson.Timeout
+			startKey, err := hex.DecodeString(customerJson.StartKey)
+			if err != nil {
+				return errs.ErrSchedulerConfig.FastGenByArgs("Invalid arguments(start_key)", err.Error())
+			}
+			endKey, err := hex.DecodeString(customerJson.EndKey)
+			if err != nil {
+				return errs.ErrSchedulerConfig.FastGenByArgs("Invalid arguments(end_key)", err.Error())
+			}
+			conf.Range = core.KeyRange{StartKey: startKey, EndKey: endKey}
+			return nil
+		}
+	})
+
+	RegisterScheduler(types.BalanceKeyrangeScheduler, func(opController *operator.Controller,
+		storage endpoint.ConfigStorage, decoder ConfigDecoder, removeSchedulerCb ...func(string) error) (Scheduler, error) {
+		conf := &balanceKeyrangeSchedulerConfig{
+			baseDefaultSchedulerConfig: newBaseDefaultSchedulerConfig(),
+		}
+		if err := decoder(conf); err != nil {
+			return nil, err
+		}
+		if len(removeSchedulerCb) > 0 {
+			conf.removeSchedulerCb = removeSchedulerCb[0]
+		}
+		sche := newBalanceKeyrangeScheduler(opController, conf)
 		conf.init(sche.GetName(), storage, conf)
 		return sche, nil
 	})
