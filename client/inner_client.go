@@ -27,6 +27,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 
+	"github.com/tikv/pd/client/clients/router"
 	"github.com/tikv/pd/client/clients/tso"
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/metrics"
@@ -45,6 +46,7 @@ type innerClient struct {
 	serviceDiscovery sd.ServiceDiscovery
 	tokenDispatcher  *tokenDispatcher
 
+	routerClient *router.Cli
 	// For service mode switching.
 	serviceModeKeeper
 
@@ -69,6 +71,7 @@ func (c *innerClient) init(updateKeyspaceIDCb sd.UpdateKeyspaceIDFunc) error {
 		}
 		return err
 	}
+	c.routerClient = router.NewClient(c.ctx, c.serviceDiscovery, c.option)
 
 	return nil
 }
