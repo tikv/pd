@@ -179,6 +179,9 @@ func (tc *TestTSOCluster) WaitForPrimaryServing(re *require.Assertions, keyspace
 		return false
 	}, testutil.WithWaitFor(30*time.Second), testutil.WithTickInterval(100*time.Millisecond))
 	testutil.Eventually(re, func() bool {
+		if tc.pd.GetLeaderServer() == nil {
+			return false
+		}
 		return tc.pd.GetLeaderServer().GetRaftCluster().IsServiceIndependent(constant.TSOServiceName)
 	})
 	return primary
