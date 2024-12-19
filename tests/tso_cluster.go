@@ -45,6 +45,7 @@ type TestTSOCluster struct {
 func NewTestTSOCluster(ctx context.Context, initialServerCount int, pd *TestCluster) (tc *TestTSOCluster, err error) {
 	tc = &TestTSOCluster{
 		ctx:              ctx,
+		pd:               pd,
 		backendEndpoints: pd.GetLeaderServer().GetAddr(),
 		servers:          make(map[string]*tso.Server, initialServerCount),
 		cleanupFuncs:     make(map[string]testutil.CleanupFunc, initialServerCount),
