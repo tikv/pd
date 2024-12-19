@@ -91,7 +91,7 @@ func (suite *serverTestSuite) TearDownSuite() {
 func (suite *serverTestSuite) TestAllocID() {
 	re := suite.Require()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/mcs/scheduling/server/fastUpdateMember", `return(true)`))
-	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.backendEndpoints)
+	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.cluster)
 	re.NoError(err)
 	defer tc.Destroy()
 	tc.WaitForPrimaryServing(re)
@@ -110,7 +110,7 @@ func (suite *serverTestSuite) TestAllocIDAfterLeaderChange() {
 	err = pd2.Run()
 	re.NotEmpty(suite.cluster.WaitLeader())
 	re.NoError(err)
-	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.backendEndpoints)
+	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.cluster)
 	re.NoError(err)
 	defer tc.Destroy()
 	tc.WaitForPrimaryServing(re)
@@ -138,7 +138,7 @@ func (suite *serverTestSuite) TestAllocIDAfterLeaderChange() {
 
 func (suite *serverTestSuite) TestPrimaryChange() {
 	re := suite.Require()
-	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 2, suite.backendEndpoints)
+	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 2, suite.cluster)
 	re.NoError(err)
 	defer tc.Destroy()
 	tc.WaitForPrimaryServing(re)
@@ -164,7 +164,7 @@ func (suite *serverTestSuite) TestPrimaryChange() {
 
 func (suite *serverTestSuite) TestForwardStoreHeartbeat() {
 	re := suite.Require()
-	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.backendEndpoints)
+	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.cluster)
 	re.NoError(err)
 	defer tc.Destroy()
 	tc.WaitForPrimaryServing(re)
@@ -225,7 +225,7 @@ func (suite *serverTestSuite) TestSchedulingServiceFallback() {
 		return suite.pdLeader.GetServer().GetRaftCluster().IsSchedulingControllerRunning()
 	})
 
-	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.backendEndpoints)
+	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.cluster)
 	re.NoError(err)
 	defer tc.Destroy()
 	tc.WaitForPrimaryServing(re)
@@ -242,7 +242,7 @@ func (suite *serverTestSuite) TestSchedulingServiceFallback() {
 	testutil.Eventually(re, func() bool {
 		return suite.pdLeader.GetServer().GetRaftCluster().IsSchedulingControllerRunning()
 	})
-	tc1, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.backendEndpoints)
+	tc1, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.cluster)
 	re.NoError(err)
 	defer tc1.Destroy()
 	tc1.WaitForPrimaryServing(re)
@@ -278,7 +278,7 @@ func (suite *serverTestSuite) TestDisableSchedulingServiceFallback() {
 		return suite.pdLeader.GetServer().GetRaftCluster().IsSchedulingControllerRunning()
 	})
 
-	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.backendEndpoints)
+	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.cluster)
 	re.NoError(err)
 	defer tc.Destroy()
 	tc.WaitForPrimaryServing(re)
@@ -302,7 +302,7 @@ func (suite *serverTestSuite) TestDisableSchedulingServiceFallback() {
 
 func (suite *serverTestSuite) TestSchedulerSync() {
 	re := suite.Require()
-	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.backendEndpoints)
+	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.cluster)
 	re.NoError(err)
 	defer tc.Destroy()
 	tc.WaitForPrimaryServing(re)
@@ -422,7 +422,7 @@ func checkEvictLeaderStoreIDs(re *require.Assertions, sc *schedulers.Controller,
 
 func (suite *serverTestSuite) TestForwardRegionHeartbeat() {
 	re := suite.Require()
-	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.backendEndpoints)
+	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.cluster)
 	re.NoError(err)
 	defer tc.Destroy()
 	tc.WaitForPrimaryServing(re)
@@ -499,7 +499,7 @@ func (suite *serverTestSuite) TestForwardRegionHeartbeat() {
 
 func (suite *serverTestSuite) TestStoreLimit() {
 	re := suite.Require()
-	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.backendEndpoints)
+	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.cluster)
 	re.NoError(err)
 	defer tc.Destroy()
 	tc.WaitForPrimaryServing(re)
@@ -660,7 +660,7 @@ func (suite *multipleServerTestSuite) TestReElectLeader() {
 	defer func() {
 		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/member/skipCampaignLeaderCheck"))
 	}()
-	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.backendEndpoints)
+	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.cluster)
 	re.NoError(err)
 	defer tc.Destroy()
 	tc.WaitForPrimaryServing(re)
@@ -692,7 +692,7 @@ func (suite *multipleServerTestSuite) TestReElectLeader() {
 
 func (suite *serverTestSuite) TestOnlineProgress() {
 	re := suite.Require()
-	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.backendEndpoints)
+	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.cluster)
 	re.NoError(err)
 	defer tc.Destroy()
 	tc.WaitForPrimaryServing(re)

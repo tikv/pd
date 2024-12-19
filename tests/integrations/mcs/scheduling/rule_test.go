@@ -16,10 +16,14 @@ package scheduling
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"sort"
 	"testing"
 
 	"github.com/stretchr/testify/suite"
+
+	"github.com/pingcap/failpoint"
 
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/placement"
@@ -46,6 +50,7 @@ func TestRule(t *testing.T) {
 
 func (suite *ruleTestSuite) SetupSuite() {
 	re := suite.Require()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs", `return(true)`))
 
 	var err error
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
@@ -63,12 +68,14 @@ func (suite *ruleTestSuite) SetupSuite() {
 func (suite *ruleTestSuite) TearDownSuite() {
 	suite.cancel()
 	suite.cluster.Destroy()
+	re := suite.Require()
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs"))
 }
 
 func (suite *ruleTestSuite) TestRuleWatch() {
 	re := suite.Require()
 
-	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.backendEndpoint)
+	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.cluster)
 	re.NoError(err)
 	defer tc.Destroy()
 
@@ -204,4 +211,55 @@ func (suite *ruleTestSuite) TestRuleWatch() {
 	re.Equal(labelRule.ID, labelRules[1].ID)
 	re.Equal(labelRule.Labels, labelRules[1].Labels)
 	re.Equal(labelRule.RuleType, labelRules[1].RuleType)
+}
+
+func (suite *ruleTestSuite) TestSchedulingSwitch() {
+	re := suite.Require()
+
+	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 2, suite.cluster)
+	re.NoError(err)
+	defer tc.Destroy()
+	tc.WaitForPrimaryServing(re)
+
+	// Add a new rule from "" to ""
+	url := fmt.Sprintf("%s/pd/api/v1/config/placement-rule", suite.pdLeaderServer.GetAddr())
+	respBundle := make([]placement.GroupBundle, 0)
+	testutil.Eventually(re, func() bool {
+		err = testutil.CheckGetJSON(tests.TestDialClient, url, nil,
+			testutil.StatusOK(re), testutil.ExtractJSON(re, &respBundle))
+		re.NoError(err)
+		return len(respBundle) == 1 && len(respBundle[0].Rules) == 1
+	})
+
+	b2 := placement.GroupBundle{
+		ID:    "pd",
+		Index: 1,
+		Rules: []*placement.Rule{
+			{GroupID: "pd", ID: "rule0", Index: 1, Role: placement.Voter, Count: 3},
+		},
+	}
+	data, err := json.Marshal(b2)
+	re.NoError(err)
+
+	err = testutil.CheckPostJSON(tests.TestDialClient, url+"/pd", data, testutil.StatusOK(re))
+	re.NoError(err)
+	testutil.Eventually(re, func() bool {
+		err = testutil.CheckGetJSON(tests.TestDialClient, url, nil,
+			testutil.StatusOK(re), testutil.ExtractJSON(re, &respBundle))
+		re.NoError(err)
+		return len(respBundle) == 1 && len(respBundle[0].Rules) == 1
+	})
+
+	// Switch another server
+	oldPrimary := tc.GetPrimaryServer()
+	oldPrimary.Close()
+	tc.WaitForPrimaryServing(re)
+	newPrimary := tc.GetPrimaryServer()
+	re.NotEqual(oldPrimary.GetAddr(), newPrimary.GetAddr())
+	testutil.Eventually(re, func() bool {
+		err = testutil.CheckGetJSON(tests.TestDialClient, url, nil,
+			testutil.StatusOK(re), testutil.ExtractJSON(re, &respBundle))
+		re.NoError(err)
+		return len(respBundle) == 1 && len(respBundle[0].Rules) == 1
+	})
 }

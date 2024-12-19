@@ -472,7 +472,7 @@ func (suite *operatorTestSuite) checkTransferRegionWithPlacementRule(cluster *te
 				svr.GetRaftCluster().GetOpts().GetMaxReplicas(),
 				svr.GetRaftCluster().GetOpts().GetLocationLabels(),
 				svr.GetRaftCluster().GetOpts().GetIsolationLevel(),
-			)
+				false)
 			re.NoError(err)
 		}
 		if len(testCase.rules) > 0 {
