@@ -174,7 +174,7 @@ func (c *StoreConfig) CheckRegionSize(size, mergeSize uint64) error {
 	if regionSplitSize == 0 {
 		return nil
 	}
-	// the smallest of the split regions can not be merge again, so it's size should less merge size.
+	// the smallest of the split regions can not be merge again, so it's size should be less than merge size.
 	if smallSize := size % regionSplitSize; smallSize <= mergeSize && smallSize != 0 {
 		log.Debug("region size is too small", zap.Uint64("size", size), zap.Uint64("merge-size", mergeSize), zap.Uint64("small-size", smallSize))
 		return errs.ErrCheckerMergeAgain.FastGenByArgs("the smallest region of the split regions is less than max-merge-region-size, " +
