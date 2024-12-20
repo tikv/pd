@@ -17,7 +17,6 @@ package schedulers
 import (
 	"bytes"
 	"cmp"
-	"fmt"
 	"slices"
 	"sync"
 	"time"
@@ -83,13 +82,6 @@ func buildMigrationPlan(stores []*StoreRegionSet) ([]int, []int, []*MigrationOp,
 	}
 	for _, store := range stores {
 		totalPeersCount += len(store.RegionIDSet)
-	}
-	for _, store := range stores {
-		percentage := 100 * float64(len(store.RegionIDSet)) / float64(totalPeersCount)
-		log.Info("!!! store region dist",
-			zap.Uint64("store-id", store.ID),
-			zap.Int("num-region", len(store.RegionIDSet)),
-			zap.String("percentage", fmt.Sprintf("%.2f%%", percentage)))
 	}
 	avr := totalPeersCount / len(stores)
 	remainder := totalPeersCount % len(stores)
@@ -321,23 +313,31 @@ func (s *balanceKeyrangeScheduler) IsScheduleAllowed(cluster sche.SchedulerClust
 	return allowed
 }
 
+func (s *balanceKeyrangeScheduler) isFinished() bool {
+	return s.migrationPlan == nil || (len(s.migrationPlan.Operators) == 0 && len(s.migrationPlan.Running) == 0)
+}
+
 // IsFinished is true if the former schedule is finished, or there is no former schedule at all.
 func (s *balanceKeyrangeScheduler) IsFinished() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.migrationPlan == nil || (len(s.migrationPlan.Operators) == 0 && len(s.migrationPlan.Running) == 0)
+	return s.isFinished()
 }
 
-// IsTimeout is true if the schedule took too much time and needs to be canceled.
-func (s *balanceKeyrangeScheduler) IsTimeout() bool {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+func (s *balanceKeyrangeScheduler) isTimeout() bool {
 	if s.migrationPlan == nil {
 		// Should not be called in this case, however, could be considered as a timeout case, and then delete the scheduler.
 		return true
 	} else {
 		return time.Since(s.migrationPlan.StartTime).Milliseconds() > s.conf.MaxRunMillis
 	}
+}
+
+// IsTimeout is true if the schedule took too much time and needs to be canceled.
+func (s *balanceKeyrangeScheduler) IsTimeout() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.isTimeout()
 }
 
 // Generate a json that returns scheduling status.
@@ -398,7 +398,7 @@ func (s *balanceKeyrangeScheduler) Schedule(cluster sche.SchedulerCluster, dryRu
 	if s.migrationPlan != nil {
 		// If there is a ongoing schedule,
 		// - If it is timeout, then return.
-		if s.IsTimeout() {
+		if s.isTimeout() {
 			log.Info("balance keyrange range timeout", zap.ByteString("planStartKey", s.migrationPlan.StartKey), zap.ByteString("planStartKey", s.migrationPlan.EndKey), zap.Any("StartTime", s.migrationPlan.StartTime), zap.Any("timeout", s.conf.MaxRunMillis))
 			doShutdown()
 			return []*operator.Operator{}, make([]plan.Plan, 0)
@@ -425,7 +425,7 @@ func (s *balanceKeyrangeScheduler) Schedule(cluster sche.SchedulerCluster, dryRu
 		s.migrationPlan.Running = running
 		s.migrationPlan.Operators = append(s.migrationPlan.Operators, rerun...)
 	}
-	if s.IsFinished() {
+	if s.isFinished() {
 		// If the current schedule is finished.
 		if rangeChanged {
 			// If there comes a new schedule task, generate a new schedule.

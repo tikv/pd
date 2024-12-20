@@ -27,6 +27,7 @@ import (
 	"github.com/stretchr/testify/suite"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/schedule/operator"
@@ -662,7 +663,7 @@ type regionStoresPair struct {
 	StorePos []uint64
 }
 
-func buildRedistributeRegionsTestCases(storeIDs []uint64, regionDist []regionStoresPair) ([]*metapb.Store, []*core.RegionInfo) {
+func buildBalanceKeyRegionsTestCases(storeIDs []uint64, regionDist []regionStoresPair) ([]*metapb.Store, []*core.RegionInfo) {
 	stores := []*metapb.Store{}
 	regions := []*core.RegionInfo{}
 	for _, i := range storeIDs {
@@ -695,13 +696,13 @@ func buildRedistributeRegionsTestCases(storeIDs []uint64, regionDist []regionSto
 	return stores, regions
 }
 
-func (suite *operatorTestSuite) checkRedistributeRegions(cluster *tests.TestCluster) {
+func (suite *operatorTestSuite) checkBalanceKeyrangeRegions(cluster *tests.TestCluster) {
 	re := suite.Require()
 
 	// 1: 10 20 30 40 50 60 70 80 90
 	// 2: 100
 	// 4:
-	stores, regions := buildRedistributeRegionsTestCases([]uint64{1, 2, 4}, []regionStoresPair{
+	stores, regions := buildBalanceKeyRegionsTestCases([]uint64{1, 2, 4}, []regionStoresPair{
 		{10, []uint64{0}},
 		{20, []uint64{0}},
 		{30, []uint64{0}},
@@ -725,28 +726,29 @@ func (suite *operatorTestSuite) checkRedistributeRegions(cluster *tests.TestClus
 	}
 
 	urlPrefix := fmt.Sprintf("%s/pd/api/v1", cluster.GetLeaderServer().GetAddr())
-	e := tu.CheckPostJSON(tests.TestDialClient, fmt.Sprintf("%s/regions/balance", urlPrefix), []byte(`{"start_key":"", "end_key":"748000000005F5E0FFFF00000000000000F8"}`), tu.StatusOK(re))
+	e := tu.CheckPostJSON(tests.TestDialClient, fmt.Sprintf("%s/regions/balance-keyrange", urlPrefix), []byte(`{"start_key":"", "end_key":"748000000005F5E0FFFF00000000000000F8"}`), tu.StatusOK(re))
 	re.NoError(e)
 	j := struct {
 		Scheduling bool `json:"scheduling"`
 		TotalCount int  `json:"total"`
 	}{}
 	time.Sleep(time.Millisecond * 500)
-	ec := tu.CheckGetJSON(tests.TestDialClient, fmt.Sprintf("%s/regions/balance", urlPrefix), []byte(``), tu.StatusOK(re), tu.ExtractJSON(re, &j))
+	ec := tu.CheckGetJSON(tests.TestDialClient, fmt.Sprintf("%s/regions/balance-keyrange", urlPrefix), []byte(``), tu.StatusOK(re), tu.ExtractJSON(re, &j))
 	re.Equal(5, j.TotalCount)
 	re.NoError(ec)
 	ed := tu.CheckDelete(tests.TestDialClient, fmt.Sprintf("%s/schedulers/%s", urlPrefix, types.BalanceKeyrangeScheduler.String()), tu.StatusOK(re), tu.StringEqual(re, "The scheduler is removed."))
 	re.NoError(ed)
-	econfig := tu.CheckPostJSON(tests.TestDialClient, fmt.Sprintf("%s/regions/balance/", urlPrefix), []byte(`{"start_key":"7480000000000000FF785F720000000000FA", "end_key":"7480000000000000FF785F72FFFFFFFFFFFFFFFFFF0000000000FB", "required_labels":[{"key":"engine","value":"tiflash"}]}`), tu.StatusOK(re))
+	log.Info("!!!!! XXXXX")
+	econfig := tu.CheckPostJSON(tests.TestDialClient, fmt.Sprintf("%s/regions/balance-keyrange", urlPrefix), []byte(`{"start_key":"7480000000000000FF785F720000000000FA", "end_key":"7480000000000000FF785F72FFFFFFFFFFFFFFFFFF0000000000FB", "required_labels":[{"key":"engine","value":"tiflash"}]}`), tu.StatusOK(re))
 	re.NoError(econfig)
 }
 
-func (suite *operatorTestSuite) TestRedistributeRegions() {
+func (suite *operatorTestSuite) TestBalanceKeyrangeRegions() {
 	env := tests.NewSchedulingTestEnvironment(suite.T(),
 		func(conf *config.Config, _ string) {
 			conf.Replication.MaxReplicas = 1
 		})
 	env.RunMode = 1
-	env.RunTestBasedOnMode(suite.checkRedistributeRegions)
+	env.RunTestBasedOnMode(suite.checkBalanceKeyrangeRegions)
 	env.Cleanup()
 }
