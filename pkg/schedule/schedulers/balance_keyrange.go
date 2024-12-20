@@ -359,11 +359,13 @@ func (s *balanceKeyrangeScheduler) GetStatus() any {
 			RunningOps []*OperatorWrapper `json:"running"`
 			Pending    []*OperatorWrapper `json:"pending"`
 			TotalCount int                `json:"total"`
+			ErrMsg     string             `json:"err_msg"`
 		}{
 			Scheduling: scheduling,
 			RunningOps: running,
 			Pending:    pending,
 			TotalCount: total,
+			ErrMsg:     "",
 		}
 		return j
 	}

@@ -133,7 +133,6 @@ func (h *regionsHandler) CheckRegionsReplicated(w http.ResponseWriter, r *http.R
 
 // @Tags     region
 // @Summary
-// @Accept   json
 // @Param    start_key  body  string  true  "Regions start key, hex encoded"
 // @Param    end_key    body  string  true  "Regions end key, hex encoded"
 // @Param    batch_size  body  string  true  "Maximum operators scheduled in one"

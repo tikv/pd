@@ -247,7 +247,7 @@ func assertValidateMigrationPlan(re *require.Assertions, ops []*MigrationOp, sto
 		storesIn[op.ToStore] += len(op.Regions)
 		storesOut[op.FromStore] += len(op.Regions)
 		// For each region in migration plan, it no longer exists in FromStore, and exists in ToStore
-		for rid, _ := range op.Regions {
+		for rid := range op.Regions {
 			inTo := false
 			inFr := false
 			r, ok := regionMap[rid]
@@ -281,7 +281,7 @@ type regionStoresPair struct {
 
 func buildRedistributeRegionsTestCases(storeIDs []uint64, regionDist []regionStoresPair) ([]*metapb.Store, []*core.RegionInfo) {
 	storeIdLabels := []uint64{}
-	for _ = range storeIDs {
+	for range storeIDs {
 		storeIdLabels = append(storeIdLabels, 0)
 	}
 	return buildRedistributeRegionsTestCasesWithLabel(storeIDs, storeIdLabels, regionDist)
