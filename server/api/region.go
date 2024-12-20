@@ -133,11 +133,12 @@ func (h *regionsHandler) CheckRegionsReplicated(w http.ResponseWriter, r *http.R
 
 // @Tags     region
 // @Summary
+// @Accept   json
 // @Param    start_key  body  string  true  "Regions start key, hex encoded"
 // @Param    end_key    body  string  true  "Regions end key, hex encoded"
 // @Param    batch_size  body  string  true  "Maximum operators scheduled in one"
 // @Param    timeout    body  string  true  "Timeout time in milliseconds"
-// @Param    required_labels    body  json  true  "Only the stores with these labels would be scheduled"
+// @Param    required_labels    body  array  true  "Only the stores with these labels would be scheduled"
 // @Produce  plain
 // @Success  200  {string}  string  "Scheduler added successfully"
 // @Failure  400  {string}  string  Error
