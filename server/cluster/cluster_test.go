@@ -4037,7 +4037,7 @@ func TestAddKeyrangeScheduler(t *testing.T) {
 	re.NoError(controller.AddScheduler(s2))
 	re.NoError(controller.RemoveScheduler(types.BalanceKeyrangeScheduler.String()))
 	n := controller.GetScheduler(types.BalanceKeyrangeScheduler.String())
-	re.Equal(n, (*schedulers.ScheduleController)(nil))
+	re.Equal((*schedulers.ScheduleController)(nil), n)
 
 	/// Test if this scheduler is singular.
 	s3, err := schedulers.CreateScheduler(types.BalanceKeyrangeScheduler, oc, storage.NewStorageWithMemoryBackend(), schedulers.ConfigSliceDecoder(types.BalanceKeyrangeScheduler, makeConfigJSON(1, "", 1000, "", VeryBigEndKey)), cb)

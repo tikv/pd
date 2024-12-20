@@ -163,7 +163,7 @@ func (h *regionsHandler) BalanceKeyrange(w http.ResponseWriter, r *http.Request)
 // @Success  200  {string}  json
 // @Failure  400  {string}  string  Error
 // @Router   /regions/balance-keyrange [get]
-func (h *regionsHandler) CheckBalanceKeyrangeStatus(w http.ResponseWriter, r *http.Request) {
+func (h *regionsHandler) CheckBalanceKeyrangeStatus(w http.ResponseWriter, _ *http.Request) {
 	result, err := h.Handler.CheckBalanceKeyrangeStatus()
 	if err != nil {
 		h.rd.JSON(w, http.StatusBadRequest, err.Error())
