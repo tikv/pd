@@ -228,7 +228,7 @@ func (suite *balanceKeyrangeSchedulerTestSuite) TestBalanceKeyrangeConfTimeout()
 	re.True(sb.IsFinished())
 }
 
-func assertValidateMigrationPlan(re *require.Assertions, ops []*MigrationOp, storeIDs []uint64, regions []*core.RegionInfo, storeCounts []int) {
+func assertValidateMigrationPlan(re *require.Assertions, ops []*migrationOp, storeIDs []uint64, regions []*core.RegionInfo, storeCounts []int) {
 	storesIn := make(map[uint64]int)
 	storesOut := make(map[uint64]int)
 	regionMap := make(map[uint64]*core.RegionInfo)
@@ -316,7 +316,7 @@ func buildRedistributeRegionsTestCasesWithLabel(storeIDs []uint64, storeIDLabels
 	var peerIDAllocator uint64
 	peerIDAllocator = 10000
 	for _, p := range regionDist {
-		regionId := p.RegionId
+		regionId := p.RegionID
 		holdingStores := p.StorePos
 		var peers []*metapb.Peer
 		for _, storePos := range holdingStores {
