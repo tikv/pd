@@ -32,7 +32,7 @@ import (
 	"go.uber.org/zap"
 )
 
-type StoreRegionSet struct {
+type storeRegionSet struct {
 	ID   uint64
 	Info *metapb.Store
 	// If the region still exists durgin migration
@@ -48,7 +48,7 @@ type migrationOp struct {
 	Regions      map[uint64]bool `json:"regions"`
 }
 
-func pickRegions(n int, fromStore *StoreRegionSet, toStore *StoreRegionSet) *migrationOp {
+func pickRegions(n int, fromStore *storeRegionSet, toStore *storeRegionSet) *migrationOp {
 	o := migrationOp{
 		FromStore:   fromStore.ID,
 		ToStore:     toStore.ID,
@@ -74,7 +74,7 @@ func pickRegions(n int, fromStore *StoreRegionSet, toStore *StoreRegionSet) *mig
 	return &o
 }
 
-func buildMigrationPlan(stores []*StoreRegionSet) ([]int, []int, []*migrationOp, int) {
+func buildMigrationPlan(stores []*storeRegionSet) ([]int, []int, []*migrationOp, int) {
 	totalPeersCount := 0
 	if len(stores) == 0 {
 		log.Info("no stores for migration")
@@ -86,7 +86,7 @@ func buildMigrationPlan(stores []*StoreRegionSet) ([]int, []int, []*migrationOp,
 	avr := totalPeersCount / len(stores)
 	remainder := totalPeersCount % len(stores)
 	// sort TiFlash stores by region count in descending order
-	slices.SortStableFunc(stores, func(lhs, rhs *StoreRegionSet) int {
+	slices.SortStableFunc(stores, func(lhs, rhs *storeRegionSet) int {
 		return -cmp.Compare(len(lhs.RegionIDSet), len(rhs.RegionIDSet))
 	})
 	expectedCount := []int{}
@@ -157,8 +157,8 @@ type migrationPlan struct {
 	StartTime  time.Time
 }
 
-func computeCandidateStores(requiredLabels []*metapb.StoreLabel, stores []*metapb.Store, regions []*core.RegionInfo) []*StoreRegionSet {
-	candidates := make([]*StoreRegionSet, 0)
+func computeCandidateStores(requiredLabels []*metapb.StoreLabel, stores []*metapb.Store, regions []*core.RegionInfo) []*storeRegionSet {
+	candidates := make([]*storeRegionSet, 0)
 	for _, s := range stores {
 		storeLabelMap := make(map[string]*metapb.StoreLabel)
 		for _, l := range s.GetLabels() {
@@ -180,7 +180,7 @@ func computeCandidateStores(requiredLabels []*metapb.StoreLabel, stores []*metap
 		if !gotLabels {
 			continue
 		}
-		candidate := &StoreRegionSet{
+		candidate := &storeRegionSet{
 			ID:           s.GetId(),
 			Info:         s,
 			RegionIDSet:  make(map[uint64]bool),
@@ -305,7 +305,7 @@ func (s *balanceKeyrangeScheduler) EncodeConfig() ([]byte, error) {
 }
 
 // IsScheduleAllowed implements the Scheduler interface.
-func (s *balanceKeyrangeScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) bool {
+func (s *balanceKeyrangeScheduler) IsScheduleAllowed(_ sche.SchedulerCluster) bool {
 	allowed := s.OpController.OperatorCount(operator.OpKeyrange) < 1
 	if !allowed {
 		operator.IncOperatorLimitCounter(s.GetType(), operator.OpKeyrange)
@@ -328,9 +328,8 @@ func (s *balanceKeyrangeScheduler) checkTimeout() bool {
 	if s.migrationPlan == nil {
 		// Should not be called in this case, however, could be considered as a timeout case, and then delete the scheduler.
 		return true
-	} else {
-		return time.Since(s.migrationPlan.StartTime).Milliseconds() > s.conf.MaxRunMillis
 	}
+	return time.Since(s.migrationPlan.StartTime).Milliseconds() > s.conf.MaxRunMillis
 }
 
 // IsTimeout is true if the schedule took too much time and needs to be canceled.
