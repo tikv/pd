@@ -140,7 +140,7 @@ func buildMigrationPlan(stores []*storeRegionSet) ([]int, []int, []*migrationOp,
 	return senders, receivers, ops, movements
 }
 
-type OperatorWrapper struct {
+type operatorWrapper struct {
 	Operator  *operator.Operator `json:"operators"`
 	Region    *core.RegionInfo
 	FromStore uint64
@@ -151,8 +151,8 @@ type migrationPlan struct {
 	StartKey   []byte             `json:"start_key"`
 	EndKey     []byte             `json:"end_key"`
 	Ops        []*migrationOp     `json:"ops"`
-	Operators  []*OperatorWrapper `json:"operators"`
-	Running    []*OperatorWrapper `json:"running"`
+	Operators  []*operatorWrapper `json:"operators"`
+	Running    []*operatorWrapper `json:"running"`
 	TotalCount int                `json:"total"`
 	StartTime  time.Time
 }
@@ -225,7 +225,7 @@ func RedistibuteRegions(c sche.SchedulerCluster, startKey, endKey []byte, requir
 
 	log.Info("balance keyrange plan details", zap.Any("startKey", startKey), zap.Any("endKey", endKey), zap.Any("senders", senders), zap.Any("receivers", receivers), zap.Any("movements", movements), zap.Any("ops", ops), zap.Any("stores", stores), zap.Any("candidates", len(candidates)))
 
-	operators := make([]*OperatorWrapper, 0)
+	operators := make([]*operatorWrapper, 0)
 	for _, op := range ops {
 		for rid := range op.Regions {
 			newPeer := &metapb.Peer{StoreId: op.ToStore, Role: op.OriginalPeer.Role, IsWitness: op.OriginalPeer.IsWitness}
@@ -235,7 +235,7 @@ func RedistibuteRegions(c sche.SchedulerCluster, startKey, endKey []byte, requir
 				log.Info("Failed to create operator", zap.Any("startKey", startKey), zap.Any("endKey", endKey), zap.Any("op", o), zap.Error(err))
 				return buildErrorMigrationPlan(), err
 			}
-			operators = append(operators, &OperatorWrapper{
+			operators = append(operators, &operatorWrapper{
 				Operator:  o,
 				Region:    regionIDMap[rid],
 				FromStore: op.FromStore,
@@ -250,7 +250,7 @@ func RedistibuteRegions(c sche.SchedulerCluster, startKey, endKey []byte, requir
 		EndKey:     endKey,
 		Ops:        ops,
 		Operators:  operators,
-		Running:    make([]*OperatorWrapper, 0),
+		Running:    make([]*operatorWrapper, 0),
 		TotalCount: len(operators),
 	}, nil
 }
@@ -345,8 +345,8 @@ func (s *balanceKeyrangeScheduler) GetStatus() any {
 	defer s.mu.Unlock()
 
 	scheduling := false
-	var running []*OperatorWrapper
-	var pending []*OperatorWrapper
+	var running []*operatorWrapper
+	var pending []*operatorWrapper
 	total := 0
 	if s.migrationPlan != nil {
 		scheduling = true
@@ -355,8 +355,8 @@ func (s *balanceKeyrangeScheduler) GetStatus() any {
 		total = s.migrationPlan.TotalCount
 		j := struct {
 			Scheduling bool               `json:"scheduling"`
-			RunningOps []*OperatorWrapper `json:"running"`
-			Pending    []*OperatorWrapper `json:"pending"`
+			RunningOps []*operatorWrapper `json:"running"`
+			Pending    []*operatorWrapper `json:"pending"`
 			TotalCount int                `json:"total"`
 			ErrMsg     string             `json:"err_msg"`
 		}{
@@ -407,8 +407,8 @@ func (s *balanceKeyrangeScheduler) Schedule(cluster sche.SchedulerCluster, dryRu
 		// - Then check if there comes a new schedule
 		rangeChanged = !bytes.Equal(s.conf.Range.StartKey, s.migrationPlan.StartKey) || !bytes.Equal(s.conf.Range.EndKey, s.migrationPlan.EndKey)
 
-		running := make([]*OperatorWrapper, 0)
-		rerun := make([]*OperatorWrapper, 0)
+		running := make([]*operatorWrapper, 0)
+		rerun := make([]*operatorWrapper, 0)
 		for _, opw := range s.migrationPlan.Running {
 			op := opw.Operator
 			canceledByStoreLimit := op.Status() == operator.CANCELED && op.GetAdditionalInfo("cancel-reason") == string(operator.ExceedStoreLimit)
@@ -480,7 +480,7 @@ func (s *balanceKeyrangeScheduler) Schedule(cluster sche.SchedulerCluster, dryRu
 			part = append(part, opw.Operator)
 		}
 		s.migrationPlan.Running = append(s.migrationPlan.Running, s.migrationPlan.Operators...)
-		s.migrationPlan.Operators = make([]*OperatorWrapper, 0)
+		s.migrationPlan.Operators = make([]*operatorWrapper, 0)
 	}
 	return part, make([]plan.Plan, 0)
 }

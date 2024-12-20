@@ -323,7 +323,7 @@ func buildRedistributeRegionsTestCasesWithLabel(storeIDs []uint64, storeIDLabels
 	var peerIDAllocator uint64
 	peerIDAllocator = 10000
 	for _, p := range regionDist {
-		regionId := p.RegionID
+		regionID := p.RegionID
 		holdingStores := p.StorePos
 		var peers []*metapb.Peer
 		for _, storePos := range holdingStores {
@@ -334,7 +334,7 @@ func buildRedistributeRegionsTestCasesWithLabel(storeIDs []uint64, storeIDLabels
 				Id:      peerIDAllocator,
 			})
 		}
-		region := core.NewTestRegionInfo(regionId, stores[holdingStores[0]].GetId(), []byte(fmt.Sprintf("r%v", regionId)), []byte(fmt.Sprintf("r%v", regionId+1)), core.SetWrittenBytes(1000), core.SetReadBytes(1000), core.SetRegionConfVer(1), core.SetRegionVersion(1), core.SetPeers(peers))
+		region := core.NewTestRegionInfo(regionID, stores[holdingStores[0]].GetId(), []byte(fmt.Sprintf("r%v", regionID)), []byte(fmt.Sprintf("r%v", regionID+1)), core.SetWrittenBytes(1000), core.SetReadBytes(1000), core.SetRegionConfVer(1), core.SetRegionVersion(1), core.SetPeers(peers))
 		regions = append(regions, region)
 	}
 
@@ -350,32 +350,32 @@ func TestBalanceKeyrangeAlgorithm(t *testing.T) {
 	// 10: 1 2 3
 	// 11:
 	// 12:
-	storeIds := []uint64{10, 11, 12}
-	stores, regions := buildRedistributeRegionsTestCases(storeIds, []regionStoresPair{
+	storeIDs := []uint64{10, 11, 12}
+	stores, regions := buildRedistributeRegionsTestCases(storeIDs, []regionStoresPair{
 		{1, []uint64{0}},
 		{2, []uint64{0}},
 		{3, []uint64{0}},
 	})
 	s := computeCandidateStores([]*metapb.StoreLabel{}, stores, regions)
 	_, _, ops, _ := buildMigrationPlan(s)
-	assertValidateMigrationPlan(re, ops, storeIds, regions, []int{-2, 1, 1})
+	assertValidateMigrationPlan(re, ops, storeIDs, regions, []int{-2, 1, 1})
 
 	// Same case which requires TiFlash label
-	storeIds = []uint64{10, 11, 12}
-	stores, regions = buildRedistributeRegionsTestCasesWithLabel(storeIds, []uint64{0, 1, 1}, []regionStoresPair{
+	storeIDs = []uint64{10, 11, 12}
+	stores, regions = buildRedistributeRegionsTestCasesWithLabel(storeIDs, []uint64{0, 1, 1}, []regionStoresPair{
 		{1, []uint64{0}},
 		{2, []uint64{0}},
 		{3, []uint64{0}},
 	})
 	s = computeCandidateStores([]*metapb.StoreLabel{&tiflashLabel}, stores, regions)
 	_, _, ops, _ = buildMigrationPlan(s)
-	assertValidateMigrationPlan(re, ops, storeIds, regions, []int{0, 0, 0})
+	assertValidateMigrationPlan(re, ops, storeIDs, regions, []int{0, 0, 0})
 
 	// 10: 1 2 3 4 5 6
 	// 11: 1 2 3 4 5
 	// 12: 6
-	storeIds = []uint64{10, 11, 12}
-	stores, regions = buildRedistributeRegionsTestCases(storeIds, []regionStoresPair{
+	storeIDs = []uint64{10, 11, 12}
+	stores, regions = buildRedistributeRegionsTestCases(storeIDs, []regionStoresPair{
 		{1, []uint64{0, 1}},
 		{2, []uint64{0, 1}},
 		{3, []uint64{0, 1}},
@@ -385,11 +385,11 @@ func TestBalanceKeyrangeAlgorithm(t *testing.T) {
 	})
 	s = computeCandidateStores([]*metapb.StoreLabel{}, stores, regions)
 	_, _, ops, _ = buildMigrationPlan(s)
-	assertValidateMigrationPlan(re, ops, storeIds, regions, []int{-2, -1, 3})
+	assertValidateMigrationPlan(re, ops, storeIDs, regions, []int{-2, -1, 3})
 
 	// Same case which requires TiFlash label
-	storeIds = []uint64{10, 11, 12}
-	stores, regions = buildRedistributeRegionsTestCasesWithLabel(storeIds, []uint64{0, 1, 1}, []regionStoresPair{
+	storeIDs = []uint64{10, 11, 12}
+	stores, regions = buildRedistributeRegionsTestCasesWithLabel(storeIDs, []uint64{0, 1, 1}, []regionStoresPair{
 		{1, []uint64{0, 1}},
 		{2, []uint64{0, 1}},
 		{3, []uint64{0, 1}},
@@ -399,11 +399,11 @@ func TestBalanceKeyrangeAlgorithm(t *testing.T) {
 	})
 	s = computeCandidateStores([]*metapb.StoreLabel{&tiflashLabel}, stores, regions)
 	_, _, ops, _ = buildMigrationPlan(s)
-	assertValidateMigrationPlan(re, ops, storeIds, regions, []int{0, -2, 2})
+	assertValidateMigrationPlan(re, ops, storeIDs, regions, []int{0, -2, 2})
 
 	// Same case which requires TiFlash label
-	storeIds = []uint64{10, 11, 12}
-	stores, regions = buildRedistributeRegionsTestCasesWithLabel(storeIds, []uint64{3, 1, 1}, []regionStoresPair{
+	storeIDs = []uint64{10, 11, 12}
+	stores, regions = buildRedistributeRegionsTestCasesWithLabel(storeIDs, []uint64{3, 1, 1}, []regionStoresPair{
 		{1, []uint64{0, 1}},
 		{2, []uint64{0, 1}},
 		{3, []uint64{0, 1}},
@@ -413,58 +413,58 @@ func TestBalanceKeyrangeAlgorithm(t *testing.T) {
 	})
 	s = computeCandidateStores([]*metapb.StoreLabel{&tiflashLabel}, stores, regions)
 	_, _, ops, _ = buildMigrationPlan(s)
-	assertValidateMigrationPlan(re, ops, storeIds, regions, []int{-2, -1, 3})
+	assertValidateMigrationPlan(re, ops, storeIDs, regions, []int{-2, -1, 3})
 
 	// 10: 1 2
 	// 11: 2 3
 	// 12: 1 3
-	storeIds = []uint64{10, 11, 12}
-	stores, regions = buildRedistributeRegionsTestCases(storeIds, []regionStoresPair{
+	storeIDs = []uint64{10, 11, 12}
+	stores, regions = buildRedistributeRegionsTestCases(storeIDs, []regionStoresPair{
 		{1, []uint64{0, 1}},
 		{2, []uint64{1, 2}},
 		{3, []uint64{2, 0}},
 	})
 	s = computeCandidateStores([]*metapb.StoreLabel{}, stores, regions)
 	_, _, ops, _ = buildMigrationPlan(s)
-	assertValidateMigrationPlan(re, ops, storeIds, regions, []int{0, 0, 0})
+	assertValidateMigrationPlan(re, ops, storeIDs, regions, []int{0, 0, 0})
 
 	// 10: 1 2
 	// 11: 3
-	storeIds = []uint64{10, 11}
-	stores, regions = buildRedistributeRegionsTestCases(storeIds, []regionStoresPair{
+	storeIDs = []uint64{10, 11}
+	stores, regions = buildRedistributeRegionsTestCases(storeIDs, []regionStoresPair{
 		{1, []uint64{0}},
 		{2, []uint64{0}},
 		{3, []uint64{1}},
 	})
 	s = computeCandidateStores([]*metapb.StoreLabel{}, stores, regions)
 	_, _, ops, _ = buildMigrationPlan(s)
-	assertValidateMigrationPlan(re, ops, storeIds, regions, []int{0, 0})
+	assertValidateMigrationPlan(re, ops, storeIDs, regions, []int{0, 0})
 
 	// 10: 1
 	// 11:
 	// 12:
-	storeIds = []uint64{10, 11, 12}
-	stores, regions = buildRedistributeRegionsTestCases(storeIds, []regionStoresPair{
+	storeIDs = []uint64{10, 11, 12}
+	stores, regions = buildRedistributeRegionsTestCases(storeIDs, []regionStoresPair{
 		{1, []uint64{0}},
 	})
 	s = computeCandidateStores([]*metapb.StoreLabel{}, stores, regions)
 	_, _, ops, _ = buildMigrationPlan(s)
-	assertValidateMigrationPlan(re, ops, storeIds, regions, []int{0, 0, 0})
+	assertValidateMigrationPlan(re, ops, storeIDs, regions, []int{0, 0, 0})
 
 	// 10:
 	// 11:
 	// 12:
-	storeIds = []uint64{10, 11, 12}
-	stores, regions = buildRedistributeRegionsTestCases(storeIds, []regionStoresPair{})
+	storeIDs = []uint64{10, 11, 12}
+	stores, regions = buildRedistributeRegionsTestCases(storeIDs, []regionStoresPair{})
 	s = computeCandidateStores([]*metapb.StoreLabel{}, stores, regions)
 	_, _, ops, _ = buildMigrationPlan(s)
-	assertValidateMigrationPlan(re, ops, storeIds, regions, []int{0, 0, 0})
+	assertValidateMigrationPlan(re, ops, storeIDs, regions, []int{0, 0, 0})
 
 	// 10: 1 2 3 4 5
 	// 11: 1 2 3 4 5
 	// 12:
-	storeIds = []uint64{10, 11, 12}
-	stores, regions = buildRedistributeRegionsTestCases(storeIds, []regionStoresPair{
+	storeIDs = []uint64{10, 11, 12}
+	stores, regions = buildRedistributeRegionsTestCases(storeIDs, []regionStoresPair{
 		{1, []uint64{0, 1}},
 		{2, []uint64{0, 1}},
 		{3, []uint64{0, 1}},
@@ -473,11 +473,11 @@ func TestBalanceKeyrangeAlgorithm(t *testing.T) {
 	})
 	s = computeCandidateStores([]*metapb.StoreLabel{}, stores, regions)
 	_, _, ops, _ = buildMigrationPlan(s)
-	assertValidateMigrationPlan(re, ops, storeIds, regions, []int{-1, -2, 3})
+	assertValidateMigrationPlan(re, ops, storeIDs, regions, []int{-1, -2, 3})
 
 	// Same case which requires TiFlash label
-	storeIds = []uint64{10, 11, 12}
-	stores, regions = buildRedistributeRegionsTestCasesWithLabel(storeIds, []uint64{0, 1, 1}, []regionStoresPair{
+	storeIDs = []uint64{10, 11, 12}
+	stores, regions = buildRedistributeRegionsTestCasesWithLabel(storeIDs, []uint64{0, 1, 1}, []regionStoresPair{
 		{1, []uint64{0, 1}},
 		{2, []uint64{0, 1}},
 		{3, []uint64{0, 1}},
@@ -487,11 +487,11 @@ func TestBalanceKeyrangeAlgorithm(t *testing.T) {
 	})
 	s = computeCandidateStores([]*metapb.StoreLabel{&tiflashLabel}, stores, regions)
 	_, _, ops, _ = buildMigrationPlan(s)
-	assertValidateMigrationPlan(re, ops, storeIds, regions, []int{0, -2, 2})
+	assertValidateMigrationPlan(re, ops, storeIDs, regions, []int{0, -2, 2})
 
 	// Same case which requires TiFlash label
-	storeIds = []uint64{10, 11, 12}
-	stores, regions = buildRedistributeRegionsTestCasesWithLabel(storeIds, []uint64{3, 1, 1}, []regionStoresPair{
+	storeIDs = []uint64{10, 11, 12}
+	stores, regions = buildRedistributeRegionsTestCasesWithLabel(storeIDs, []uint64{3, 1, 1}, []regionStoresPair{
 		{1, []uint64{0, 1}},
 		{2, []uint64{0, 1}},
 		{3, []uint64{0, 1}},
@@ -501,12 +501,12 @@ func TestBalanceKeyrangeAlgorithm(t *testing.T) {
 	})
 	s = computeCandidateStores([]*metapb.StoreLabel{&tiflashLabel}, stores, regions)
 	_, _, ops, _ = buildMigrationPlan(s)
-	assertValidateMigrationPlan(re, ops, storeIds, regions, []int{-2, -1, 3})
+	assertValidateMigrationPlan(re, ops, storeIDs, regions, []int{-2, -1, 3})
 
 	// 10: 1 2 3 4 5
 	// 11: 1 2 3 4 5
-	storeIds = []uint64{10, 11}
-	stores, regions = buildRedistributeRegionsTestCases(storeIds, []regionStoresPair{
+	storeIDs = []uint64{10, 11}
+	stores, regions = buildRedistributeRegionsTestCases(storeIDs, []regionStoresPair{
 		{1, []uint64{0, 1}},
 		{2, []uint64{0, 1}},
 		{3, []uint64{0, 1}},
@@ -515,14 +515,14 @@ func TestBalanceKeyrangeAlgorithm(t *testing.T) {
 	})
 	s = computeCandidateStores([]*metapb.StoreLabel{}, stores, regions)
 	_, _, ops, _ = buildMigrationPlan(s)
-	assertValidateMigrationPlan(re, ops, storeIds, regions, []int{0, 0})
+	assertValidateMigrationPlan(re, ops, storeIDs, regions, []int{0, 0})
 
 	// 10:
 	// 11: 1 2 3 4 5 6 7 8 9
 	// 12:
 	// 13: 1 2 3 4 5 6 7 8 9
-	storeIds = []uint64{10, 11, 12, 13}
-	stores, regions = buildRedistributeRegionsTestCases(storeIds, []regionStoresPair{
+	storeIDs = []uint64{10, 11, 12, 13}
+	stores, regions = buildRedistributeRegionsTestCases(storeIDs, []regionStoresPair{
 		{1, []uint64{3, 1}},
 		{2, []uint64{3, 1}},
 		{3, []uint64{3, 1}},
@@ -535,14 +535,14 @@ func TestBalanceKeyrangeAlgorithm(t *testing.T) {
 	})
 	s = computeCandidateStores([]*metapb.StoreLabel{}, stores, regions)
 	_, _, ops, _ = buildMigrationPlan(s)
-	assertValidateMigrationPlan(re, ops, storeIds, regions, []int{4, -4, 4, -4})
+	assertValidateMigrationPlan(re, ops, storeIDs, regions, []int{4, -4, 4, -4})
 
 	// Won't happen, since regions with in a table have the same replica count, however, test it in case.
 	// 10: 1 2 3 4 5
 	// 11: 1 2 3
 	// 12:
-	storeIds = []uint64{10, 11, 12}
-	stores, regions = buildRedistributeRegionsTestCases(storeIds, []regionStoresPair{
+	storeIDs = []uint64{10, 11, 12}
+	stores, regions = buildRedistributeRegionsTestCases(storeIDs, []regionStoresPair{
 		{1, []uint64{0, 1}},
 		{2, []uint64{0, 1}},
 		{3, []uint64{0, 1}},
@@ -551,14 +551,14 @@ func TestBalanceKeyrangeAlgorithm(t *testing.T) {
 	})
 	s = computeCandidateStores([]*metapb.StoreLabel{}, stores, regions)
 	_, _, ops, _ = buildMigrationPlan(s)
-	assertValidateMigrationPlan(re, ops, storeIds, regions, []int{-2, 0, 2})
+	assertValidateMigrationPlan(re, ops, storeIDs, regions, []int{-2, 0, 2})
 
 	// Won't happen
 	// 10: 1 2 3
 	// 11: 3 4 5 6
 	// 12:
-	storeIds = []uint64{10, 11, 12}
-	stores, regions = buildRedistributeRegionsTestCases(storeIds, []regionStoresPair{
+	storeIDs = []uint64{10, 11, 12}
+	stores, regions = buildRedistributeRegionsTestCases(storeIDs, []regionStoresPair{
 		{1, []uint64{0}},
 		{2, []uint64{0}},
 		{3, []uint64{0, 1}},
@@ -568,18 +568,18 @@ func TestBalanceKeyrangeAlgorithm(t *testing.T) {
 	})
 	s = computeCandidateStores([]*metapb.StoreLabel{}, stores, regions)
 	_, _, ops, _ = buildMigrationPlan(s)
-	assertValidateMigrationPlan(re, ops, storeIds, regions, []int{-1, -1, 2})
+	assertValidateMigrationPlan(re, ops, storeIDs, regions, []int{-1, -1, 2})
 
 	// Won't happen because a region can't have two peers in a store.
 	// 10: 1 1
 	// 11: 2
 	// 12:
-	storeIds = []uint64{10, 11, 12}
-	stores, regions = buildRedistributeRegionsTestCases(storeIds, []regionStoresPair{
+	storeIDs = []uint64{10, 11, 12}
+	stores, regions = buildRedistributeRegionsTestCases(storeIDs, []regionStoresPair{
 		{1, []uint64{0, 0}},
 		{2, []uint64{1}},
 	})
 	s = computeCandidateStores([]*metapb.StoreLabel{}, stores, regions)
 	_, _, ops, _ = buildMigrationPlan(s)
-	assertValidateMigrationPlan(re, ops, storeIds, regions, []int{0, 0, 0})
+	assertValidateMigrationPlan(re, ops, storeIDs, regions, []int{0, 0, 0})
 }
