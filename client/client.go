@@ -99,16 +99,6 @@ type RPCClient interface {
 	// SetExternalTimestamp sets external timestamp
 	SetExternalTimestamp(ctx context.Context, timestamp uint64) error
 
-	// WithCallerComponent returns a new RPCClient with the specified caller
-	// component. Caller component refers to the specific part or module within
-	// the process. You can set the component in two ways:
-	//   * Define it manually, like `caller.Component("DDL")`.
-	//   * Use the provided helper function, `caller.GetComponent(upperLayer)`.
-	//     The upperLayer parameter specifies the depth of the caller stack,
-	//     where 0 means the current function. Adjust the upperLayer value based
-	//     on your needs.
-	WithCallerComponent(callerComponent caller.Component) RPCClient
-
 	router.Client
 	tso.Client
 	metastorage.Client
@@ -135,6 +125,15 @@ type Client interface {
 
 	// UpdateOption updates the client option.
 	UpdateOption(option opt.DynamicOption, value any) error
+	// WithCallerComponent returns a new RPCClient with the specified caller
+	// component. Caller component refers to the specific part or module within
+	// the process. You can set the component in two ways:
+	//   * Define it manually, like `caller.Component("DDL")`.
+	//   * Use the provided helper function, `caller.GetComponent(upperLayer)`.
+	//     The upperLayer parameter specifies the depth of the caller stack,
+	//     where 0 means the current function. Adjust the upperLayer value based
+	//     on your needs.
+	WithCallerComponent(callerComponent caller.Component) RPCClient
 
 	// Close closes the client.
 	Close()
