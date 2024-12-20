@@ -22,8 +22,11 @@ import (
 	"syscall"
 
 	grpcprometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
-	"github.com/pingcap/log"
 	"github.com/spf13/cobra"
+	"go.uber.org/zap"
+
+	"github.com/pingcap/log"
+
 	"github.com/tikv/pd/pkg/autoscaling"
 	"github.com/tikv/pd/pkg/dashboard"
 	"github.com/tikv/pd/pkg/errs"
@@ -41,7 +44,6 @@ import (
 	"github.com/tikv/pd/server/apiv2"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/join"
-	"go.uber.org/zap"
 
 	// register microservice API
 	_ "github.com/tikv/pd/pkg/mcs/resourcemanager/server/install"

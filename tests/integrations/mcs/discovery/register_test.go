@@ -21,13 +21,14 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/suite"
+	"go.uber.org/goleak"
+
 	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/mcs/discovery"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/tests"
-	"go.uber.org/goleak"
 )
 
 func TestMain(m *testing.M) {

@@ -21,16 +21,18 @@ import (
 	"strconv"
 
 	"github.com/gorilla/mux"
+	"github.com/unrolled/render"
+	"go.uber.org/zap"
+
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/server"
-	"github.com/unrolled/render"
-	"go.uber.org/zap"
 )
 
 type memberHandler struct {

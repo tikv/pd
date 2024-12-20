@@ -24,6 +24,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"go.etcd.io/etcd/client/pkg/v3/transport"
+
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/server/api"
 	"github.com/tikv/pd/server/cluster"
@@ -31,7 +33,6 @@ import (
 	pdTests "github.com/tikv/pd/tests"
 	ctl "github.com/tikv/pd/tools/pd-ctl/pdctl"
 	"github.com/tikv/pd/tools/pd-ctl/tests"
-	"go.etcd.io/etcd/client/pkg/v3/transport"
 )
 
 func TestHealth(t *testing.T) {

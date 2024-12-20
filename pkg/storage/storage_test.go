@@ -25,13 +25,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
+	clientv3 "go.etcd.io/etcd/client/v3"
+
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/stretchr/testify/require"
+
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/keypath"
-	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
 func TestBasic(t *testing.T) {

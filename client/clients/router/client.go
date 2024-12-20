@@ -20,6 +20,7 @@ import (
 	"net/url"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
+
 	"github.com/tikv/pd/client/opt"
 )
 

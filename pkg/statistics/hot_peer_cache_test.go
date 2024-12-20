@@ -23,9 +23,11 @@ import (
 	"time"
 
 	"github.com/docker/go-units"
+	"github.com/stretchr/testify/require"
+
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/stretchr/testify/require"
+
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/mock/mockid"
 	"github.com/tikv/pd/pkg/movingaverage"

@@ -17,14 +17,16 @@ package memory
 import (
 	"time"
 
+	"github.com/shirou/gopsutil/v3/mem"
+	"go.uber.org/zap"
+	"golang.org/x/exp/constraints"
+
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
 	"github.com/pingcap/sysutil"
-	"github.com/shirou/gopsutil/v3/mem"
+
 	"github.com/tikv/pd/pkg/cgroup"
 	"github.com/tikv/pd/pkg/utils/syncutil"
-	"go.uber.org/zap"
-	"golang.org/x/exp/constraints"
 )
 
 // MemTotal returns the total amount of RAM on this system

@@ -23,8 +23,12 @@ import (
 	"github.com/gin-contrib/gzip"
 	"github.com/gin-contrib/pprof"
 	"github.com/gin-gonic/gin"
+	"github.com/unrolled/render"
+	"go.uber.org/zap"
+
 	"github.com/pingcap/kvproto/pkg/tsopb"
 	"github.com/pingcap/log"
+
 	"github.com/tikv/pd/pkg/errs"
 	tsoserver "github.com/tikv/pd/pkg/mcs/tso/server"
 	"github.com/tikv/pd/pkg/mcs/utils"
@@ -34,8 +38,6 @@ import (
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/apiutil/multiservicesapi"
 	"github.com/tikv/pd/pkg/utils/logutil"
-	"github.com/unrolled/render"
-	"go.uber.org/zap"
 )
 
 const (

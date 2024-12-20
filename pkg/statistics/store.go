@@ -17,13 +17,15 @@ package statistics
 import (
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/movingaverage"
 	"github.com/tikv/pd/pkg/statistics/utils"
 	"github.com/tikv/pd/pkg/utils/syncutil"
-	"go.uber.org/zap"
 )
 
 const (

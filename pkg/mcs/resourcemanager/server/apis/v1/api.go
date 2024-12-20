@@ -25,7 +25,9 @@ import (
 	"github.com/gin-contrib/gzip"
 	"github.com/gin-contrib/pprof"
 	"github.com/gin-gonic/gin"
+
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
+
 	rmserver "github.com/tikv/pd/pkg/mcs/resourcemanager/server"
 	"github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/utils/apiutil"

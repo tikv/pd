@@ -24,9 +24,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pingcap/failpoint"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+
+	"github.com/pingcap/failpoint"
+
 	tso "github.com/tikv/pd/pkg/mcs/tso/server"
 	apis "github.com/tikv/pd/pkg/mcs/tso/server/apis/v1"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"

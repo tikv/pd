@@ -24,12 +24,14 @@ import (
 	"os"
 	"strings"
 
+	"github.com/spf13/cobra"
+	"go.etcd.io/etcd/client/pkg/v3/transport"
+
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/spf13/cobra"
+
 	pd "github.com/tikv/pd/client/http"
 	"github.com/tikv/pd/pkg/utils/apiutil"
-	"go.etcd.io/etcd/client/pkg/v3/transport"
 )
 
 const (

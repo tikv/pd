@@ -18,8 +18,10 @@ import (
 	"context"
 	"testing"
 
-	"github.com/pingcap/failpoint"
 	"github.com/stretchr/testify/require"
+
+	"github.com/pingcap/failpoint"
+
 	"github.com/tikv/pd/tests"
 )
 

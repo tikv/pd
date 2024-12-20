@@ -22,8 +22,11 @@ import (
 	"path/filepath"
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
+
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/encryption"
@@ -42,7 +45,6 @@ import (
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/server/config"
-	"go.uber.org/zap"
 )
 
 // SchedulerConfigHandlerPath is the api router path of the schedule config handler.

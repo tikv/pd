@@ -28,9 +28,14 @@ import (
 	"github.com/BurntSushi/toml"
 	"github.com/coreos/go-semver/semver"
 	"github.com/docker/go-units"
+	"github.com/spf13/pflag"
+	"go.etcd.io/etcd/client/pkg/v3/transport"
+	"go.etcd.io/etcd/server/v3/embed"
+	"go.uber.org/zap"
+
 	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
-	"github.com/spf13/pflag"
+
 	"github.com/tikv/pd/pkg/errs"
 	rm "github.com/tikv/pd/pkg/mcs/resourcemanager/server"
 	sc "github.com/tikv/pd/pkg/schedule/config"
@@ -39,9 +44,6 @@ import (
 	"github.com/tikv/pd/pkg/utils/metricutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/pkg/versioninfo"
-	"go.etcd.io/etcd/client/pkg/v3/transport"
-	"go.etcd.io/etcd/server/v3/embed"
-	"go.uber.org/zap"
 )
 
 // Config is the pd server configuration.

@@ -15,10 +15,12 @@
 package tsoutil
 
 import (
+	"google.golang.org/grpc"
+
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/tsopb"
+
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
-	"google.golang.org/grpc"
 )
 
 // Request is an interface wrapping tsopb.TsoRequest and pdpb.TsoRequest so

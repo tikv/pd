@@ -22,10 +22,13 @@ import (
 	"time"
 
 	"github.com/coreos/go-semver/semver"
+	clientv3 "go.etcd.io/etcd/client/v3"
+
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+
 	"github.com/tikv/pd/pkg/autoscaling"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/dashboard"
@@ -46,7 +49,6 @@ import (
 	"github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/join"
-	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
 // TestServer states.

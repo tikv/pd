@@ -15,12 +15,14 @@
 package config
 
 import (
+	flag "github.com/spf13/pflag"
+	"go.uber.org/zap"
+
 	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
-	flag "github.com/spf13/pflag"
+
 	"github.com/tikv/pd/pkg/utils/configutil"
 	"github.com/tikv/pd/tools/pd-api-bench/cases"
-	"go.uber.org/zap"
 )
 
 // Config is the heartbeat-bench configuration.

@@ -22,8 +22,11 @@ import (
 	"sync/atomic"
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
+
 	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
@@ -34,7 +37,6 @@ import (
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
-	"go.uber.org/zap"
 )
 
 const (

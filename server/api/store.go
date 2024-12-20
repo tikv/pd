@@ -23,10 +23,13 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
+	"github.com/unrolled/render"
+
 	"github.com/pingcap/errcode"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
+
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/response"
@@ -34,7 +37,6 @@ import (
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/server"
-	"github.com/unrolled/render"
 )
 
 type storeHandler struct {

@@ -22,10 +22,12 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/pingcap/failpoint"
-	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+
+	"github.com/pingcap/failpoint"
+	"github.com/pingcap/kvproto/pkg/metapb"
+
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	tu "github.com/tikv/pd/pkg/utils/testutil"

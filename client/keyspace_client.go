@@ -19,8 +19,10 @@ import (
 	"time"
 
 	"github.com/opentracing/opentracing-go"
+
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
+
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/metrics"
 )
