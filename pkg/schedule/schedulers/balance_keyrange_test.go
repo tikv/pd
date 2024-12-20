@@ -16,6 +16,7 @@ package schedulers
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"testing"
@@ -94,24 +95,27 @@ func (suite *balanceKeyrangeSchedulerTestSuite) TestBalanceKeyrangeNormal() {
 	tc.AddLeaderRegion(3, 10, 12)
 
 	// See MockRegionInfo.
-	r1StartKey := string(tc.GetRegion(1).GetMeta().GetStartKey())
-	r2StartKey := string(tc.GetRegion(2).GetMeta().GetStartKey())
-	r3EndKey := string(tc.GetRegion(3).GetMeta().GetEndKey())
+	r1StartKey := hex.EncodeToString(tc.GetRegion(1).GetMeta().GetStartKey())
+	r2StartKey := hex.EncodeToString(tc.GetRegion(2).GetMeta().GetStartKey())
+	r3EndKey := hex.EncodeToString(tc.GetRegion(3).GetMeta().GetEndKey())
 	sb, err := CreateScheduler(types.BalanceKeyrangeScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.BalanceKeyrangeScheduler, MakeConfigJson(1, "", 100000, r1StartKey, r3EndKey)))
 	re.NoError(err)
 
 	ops, _ := sb.Schedule(tc, false)
-	re.True(sb.IsFinished())
+	// Scheduled, and running
+	re.False(sb.IsFinished())
 	re.NotEmpty(ops)
 	op := ops[0]
 	operatorutil.CheckTransferPeer(re, op, operator.OpKind(0), 10, 12)
 
+	// Nothing to schedule
 	sb, err = CreateScheduler(types.BalanceKeyrangeScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.BalanceKeyrangeScheduler, MakeConfigJson(1, "", 100000, r2StartKey, r3EndKey)))
 	re.NoError(err)
 	ops, _ = sb.Schedule(tc, false)
 	re.True(sb.IsFinished())
 	re.Empty(ops)
 
+	// Nothing to schedule
 	sb, err = CreateScheduler(types.BalanceKeyrangeScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.BalanceKeyrangeScheduler, MakeConfigJson(1, "[{\"key\":\"engine\",\"value\":\"tiflash\"}]", 100000, r1StartKey, r3EndKey)))
 	re.NoError(err)
 	ops, _ = sb.Schedule(tc, false)
