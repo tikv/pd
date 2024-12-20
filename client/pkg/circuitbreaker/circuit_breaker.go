@@ -14,6 +14,7 @@
 package circuitbreaker
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"sync"
@@ -129,12 +130,11 @@ func (cb *CircuitBreaker[T]) ChangeSettings(apply func(config *Settings)) {
 // Execute calls the given function if the CircuitBreaker is closed and returns the result of execution.
 // Execute returns an error instantly if the CircuitBreaker is open.
 // https://github.com/tikv/rfcs/blob/master/text/0115-circuit-breaker.md
-func (cb *CircuitBreaker[T]) Execute(call func() (T, Overloading, error)) (T, error) {
+func (cb *CircuitBreaker[T]) Execute(call func() (Overloading, error)) error {
 	state, err := cb.onRequest()
 	if err != nil {
 		cb.fastFailCounter.Inc()
-		var defaultValue T
-		return defaultValue, err
+		return err
 	}
 
 	defer func() {
@@ -146,10 +146,10 @@ func (cb *CircuitBreaker[T]) Execute(call func() (T, Overloading, error)) (T, er
 		}
 	}()
 
-	result, overloaded, err := call()
+	overloaded, err := call()
 	cb.emitMetric(overloaded, err)
 	cb.onResult(state, overloaded)
-	return result, err
+	return err
 }
 
 func (cb *CircuitBreaker[T]) onRequest() (*State[T], error) {
@@ -308,4 +308,26 @@ func (s *State[T]) onResult(overloaded Overloading) {
 	default:
 		panic("unknown state")
 	}
+}
+
+// Define context key type
+type cbCtxKey struct{}
+
+// Key used to store circuit breaker
+var CircuitBreakerKey = cbCtxKey{}
+
+// FromContext retrieves the circuit breaker from the context
+func FromContext[T any](ctx context.Context) *CircuitBreaker[T] {
+	if ctx == nil {
+		return nil
+	}
+	if cb, ok := ctx.Value(CircuitBreakerKey).(*CircuitBreaker[T]); ok {
+		return cb
+	}
+	return nil
+}
+
+// WithCircuitBreaker stores the circuit breaker into a new context
+func WithCircuitBreaker[T any](ctx context.Context, cb *CircuitBreaker[T]) context.Context {
+	return context.WithValue(ctx, CircuitBreakerKey, cb)
 }

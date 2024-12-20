@@ -25,8 +25,6 @@ import (
 	"github.com/opentracing/opentracing-go"
 	"github.com/prometheus/client_golang/prometheus"
 	"go.uber.org/zap"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
@@ -42,7 +40,6 @@ import (
 	"github.com/tikv/pd/client/metrics"
 	"github.com/tikv/pd/client/opt"
 	"github.com/tikv/pd/client/pkg/caller"
-	cb "github.com/tikv/pd/client/pkg/circuitbreaker"
 	"github.com/tikv/pd/client/pkg/utils/tlsutil"
 	sd "github.com/tikv/pd/client/servicediscovery"
 )
@@ -460,12 +457,6 @@ func (c *client) UpdateOption(option opt.DynamicOption, value any) error {
 			return errors.New("[pd] invalid value type for TSOClientRPCConcurrency option, it should be int")
 		}
 		c.inner.option.SetTSOClientRPCConcurrency(value)
-	case opt.RegionMetadataCircuitBreakerSettings:
-		applySettingsChange, ok := value.(func(config *cb.Settings))
-		if !ok {
-			return errors.New("[pd] invalid value type for RegionMetadataCircuitBreakerSettings option, it should be pd.Settings")
-		}
-		c.inner.regionMetaCircuitBreaker.ChangeSettings(applySettingsChange)
 	default:
 		return errors.New("[pd] unsupported client option")
 	}
@@ -660,13 +651,7 @@ func (c *client) GetRegion(ctx context.Context, key []byte, opts ...opt.GetRegio
 	if serviceClient == nil {
 		return nil, errs.ErrClientGetProtoClient
 	}
-	resp, err := c.inner.regionMetaCircuitBreaker.Execute(func() (*pdpb.GetRegionResponse, cb.Overloading, error) {
-		region, err := pdpb.NewPDClient(serviceClient.GetClientConn()).GetRegion(cctx, req)
-		failpoint.Inject("triggerCircuitBreaker", func() {
-			err = status.Error(codes.ResourceExhausted, "resource exhausted")
-		})
-		return region, isOverloaded(err), err
-	})
+	resp, err := pdpb.NewPDClient(serviceClient.GetClientConn()).GetRegion(cctx, req)
 	if serviceClient.NeedRetry(resp.GetHeader().GetError(), err) {
 		protoClient, cctx := c.getClientAndContext(ctx)
 		if protoClient == nil {
@@ -706,10 +691,7 @@ func (c *client) GetPrevRegion(ctx context.Context, key []byte, opts ...opt.GetR
 	if serviceClient == nil {
 		return nil, errs.ErrClientGetProtoClient
 	}
-	resp, err := c.inner.regionMetaCircuitBreaker.Execute(func() (*pdpb.GetRegionResponse, cb.Overloading, error) {
-		resp, err := pdpb.NewPDClient(serviceClient.GetClientConn()).GetPrevRegion(cctx, req)
-		return resp, isOverloaded(err), err
-	})
+	resp, err := pdpb.NewPDClient(serviceClient.GetClientConn()).GetPrevRegion(cctx, req)
 	if serviceClient.NeedRetry(resp.GetHeader().GetError(), err) {
 		protoClient, cctx := c.getClientAndContext(ctx)
 		if protoClient == nil {
@@ -749,10 +731,8 @@ func (c *client) GetRegionByID(ctx context.Context, regionID uint64, opts ...opt
 	if serviceClient == nil {
 		return nil, errs.ErrClientGetProtoClient
 	}
-	resp, err := c.inner.regionMetaCircuitBreaker.Execute(func() (*pdpb.GetRegionResponse, cb.Overloading, error) {
-		resp, err := pdpb.NewPDClient(serviceClient.GetClientConn()).GetRegionByID(cctx, req)
-		return resp, isOverloaded(err), err
-	})
+
+	resp, err := pdpb.NewPDClient(serviceClient.GetClientConn()).GetRegionByID(cctx, req)
 	if serviceClient.NeedRetry(resp.GetHeader().GetError(), err) {
 		protoClient, cctx := c.getClientAndContext(ctx)
 		if protoClient == nil {
