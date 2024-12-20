@@ -27,7 +27,6 @@ import (
 	"github.com/stretchr/testify/suite"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/schedule/operator"
@@ -738,7 +737,6 @@ func (suite *operatorTestSuite) checkBalanceKeyrangeRegions(cluster *tests.TestC
 	re.NoError(ec)
 	ed := tu.CheckDelete(tests.TestDialClient, fmt.Sprintf("%s/schedulers/%s", urlPrefix, types.BalanceKeyrangeScheduler.String()), tu.StatusOK(re), tu.StringEqual(re, "The scheduler is removed."))
 	re.NoError(ed)
-	log.Info("!!!!! XXXXX")
 	econfig := tu.CheckPostJSON(tests.TestDialClient, fmt.Sprintf("%s/regions/balance-keyrange", urlPrefix), []byte(`{"start_key":"7480000000000000FF785F720000000000FA", "end_key":"7480000000000000FF785F72FFFFFFFFFFFFFFFFFF0000000000FB", "required_labels":[{"key":"engine","value":"tiflash"}]}`), tu.StatusOK(re))
 	re.NoError(econfig)
 }

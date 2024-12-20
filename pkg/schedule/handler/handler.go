@@ -1310,11 +1310,7 @@ func (h *Handler) BalanceKeyrange(data string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-
-	exist, err := sc.IsSchedulerExisted(types.BalanceKeyrangeScheduler.String())
-	if err != nil {
-		return "", err
-	}
+	exist, _ := sc.IsSchedulerExisted(types.BalanceKeyrangeScheduler.String())
 	if exist {
 		return "Already existed", errs.ErrSchedulerExisted.FastGenByArgs()
 	}
