@@ -362,9 +362,11 @@ func (s *Server) startGRPCServer(l net.Listener) {
 		gs.GracefulStop()
 		close(done)
 	}()
+	timer := time.NewTimer(mcsutils.DefaultGRPCGracefulStopTimeout)
+	defer timer.Stop()
 	select {
 	case <-done:
-	case <-time.After(mcsutils.DefaultGRPCGracefulStopTimeout):
+	case <-timer.C:
 		log.Info("stopping grpc gracefully is taking longer than expected and force stopping now")
 		gs.Stop()
 	}
