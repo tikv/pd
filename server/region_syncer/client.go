@@ -164,11 +164,14 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 					}
 				}
 				log.Error("server failed to establish sync stream with leader", zap.String("server", s.server.Name()), zap.String("leader", s.server.GetLeader().GetName()), errs.ZapError(err))
+				timer := time.NewTimer(retryInterval)
 				select {
 				case <-ctx.Done():
 					log.Info("stop synchronizing with leader due to context canceled")
+					timer.Stop()
 					return
-				case <-time.After(retryInterval):
+				case <-timer.C:
+					timer.Stop()
 				}
 				continue
 			}
@@ -181,11 +184,14 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 					if err = stream.CloseSend(); err != nil {
 						log.Error("failed to terminate client stream", errs.ZapError(errs.ErrGRPCCloseSend, err))
 					}
+					timer := time.NewTimer(retryInterval)
 					select {
 					case <-ctx.Done():
 						log.Info("stop synchronizing with leader due to context canceled")
+						timer.Stop()
 						return
-					case <-time.After(retryInterval):
+					case <-timer.C:
+						timer.Stop()
 					}
 					break
 				}
