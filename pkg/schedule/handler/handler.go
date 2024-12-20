@@ -1333,7 +1333,7 @@ func (h *Handler) BalanceKeyrange(data string) (string, error) {
 // CheckBalanceKeyrangeStatus returns the status of the balance-keyrange scheduler.
 func (h *Handler) CheckBalanceKeyrangeStatus() (any, error) {
 	sc, err := h.GetSchedulersController()
-	makeJsonResp := func(s string) any {
+	makeJSONResp := func(s string) any {
 		return struct {
 			Scheduling bool   `json:"scheduling"`
 			ErrMsg     string `json:"err_msg"`
@@ -1343,18 +1343,18 @@ func (h *Handler) CheckBalanceKeyrangeStatus() (any, error) {
 		}
 	}
 	if err != nil {
-		return makeJsonResp("Get scheduler control error"), err
+		return makeJSONResp("Get scheduler control error"), err
 	}
 	s := sc.GetScheduler(types.BalanceKeyrangeScheduler.String())
 	if s == nil {
-		return makeJsonResp("No scheduler found"), nil
+		return makeJSONResp("No scheduler found"), nil
 	}
 	if s.IsDisable() {
-		return makeJsonResp("Scheduler disabled"), nil
+		return makeJSONResp("Scheduler disabled"), nil
 	}
 	st := sc.GetSchedulerStatus(types.BalanceKeyrangeScheduler.String())
 	if st == nil {
-		return makeJsonResp("can't get scheduler status"), nil
+		return makeJSONResp("can't get scheduler status"), nil
 	}
 	return st, nil
 }

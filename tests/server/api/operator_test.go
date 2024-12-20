@@ -659,7 +659,7 @@ func (suite *operatorTestSuite) checkRemoveOperators(cluster *tests.TestCluster)
 }
 
 type regionStoresPair struct {
-	RegionId uint64
+	RegionID uint64
 	StorePos []uint64
 }
 
@@ -675,18 +675,18 @@ func buildBalanceKeyRegionsTestCases(storeIDs []uint64, regionDist []regionStore
 		})
 	}
 
-	var peerIdAllocator uint64
-	peerIdAllocator = 10000
+	var peerIDAllocator uint64
+	peerIDAllocator = 10000
 	for _, p := range regionDist {
-		regionId := p.RegionId
+		regionId := p.RegionID
 		holdingStores := p.StorePos
 		var peers []*metapb.Peer
 		for _, storePos := range holdingStores {
 			s := stores[storePos]
-			peerIdAllocator += 1
+			peerIDAllocator += 1
 			peers = append(peers, &metapb.Peer{
 				StoreId: s.GetId(),
-				Id:      peerIdAllocator,
+				Id:      peerIDAllocator,
 			})
 		}
 		region := core.NewTestRegionInfo(regionId, stores[holdingStores[0]].GetId(), []byte(fmt.Sprintf("r%v", regionId)), []byte(fmt.Sprintf("r%v", regionId+1)), core.SetWrittenBytes(1000), core.SetReadBytes(1000), core.SetRegionConfVer(1), core.SetRegionVersion(1), core.SetPeers(peers))

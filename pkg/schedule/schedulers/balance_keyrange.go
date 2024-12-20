@@ -40,7 +40,7 @@ type StoreRegionSet struct {
 	OriginalPeer map[uint64]*metapb.Peer
 }
 
-type MigrationOp struct {
+type migrationOp struct {
 	FromStore    uint64          `json:"from_store"`
 	ToStore      uint64          `json:"to_store"`
 	ToStoreInfo  *metapb.Store   `json:"to_store_info"`
@@ -48,8 +48,8 @@ type MigrationOp struct {
 	Regions      map[uint64]bool `json:"regions"`
 }
 
-func pickRegions(n int, fromStore *StoreRegionSet, toStore *StoreRegionSet) *MigrationOp {
-	o := MigrationOp{
+func pickRegions(n int, fromStore *StoreRegionSet, toStore *StoreRegionSet) *migrationOp {
+	o := migrationOp{
 		FromStore:   fromStore.ID,
 		ToStore:     toStore.ID,
 		ToStoreInfo: toStore.Info,
@@ -74,11 +74,11 @@ func pickRegions(n int, fromStore *StoreRegionSet, toStore *StoreRegionSet) *Mig
 	return &o
 }
 
-func buildMigrationPlan(stores []*StoreRegionSet) ([]int, []int, []*MigrationOp, int) {
+func buildMigrationPlan(stores []*StoreRegionSet) ([]int, []int, []*migrationOp, int) {
 	totalPeersCount := 0
 	if len(stores) == 0 {
 		log.Info("no stores for migration")
-		return []int{}, []int{}, []*MigrationOp{}, 0
+		return []int{}, []int{}, []*migrationOp{}, 0
 	}
 	for _, store := range stores {
 		totalPeersCount += len(store.RegionIDSet)
@@ -112,7 +112,7 @@ func buildMigrationPlan(stores []*StoreRegionSet) ([]int, []int, []*MigrationOp,
 		}
 	}
 
-	ops := []*MigrationOp{}
+	ops := []*migrationOp{}
 	movements := 0
 	for i, senderIndex := range senders {
 		fromStore := stores[senderIndex]
@@ -146,11 +146,11 @@ type OperatorWrapper struct {
 	FromStore uint64
 	Peer      *metapb.Peer
 }
-type MigrationPlan struct {
+type migrationPlan struct {
 	ErrorCode  uint64             `json:"error_code"`
 	StartKey   []byte             `json:"start_key"`
 	EndKey     []byte             `json:"end_key"`
-	Ops        []*MigrationOp     `json:"ops"`
+	Ops        []*migrationOp     `json:"ops"`
 	Operators  []*OperatorWrapper `json:"operators"`
 	Running    []*OperatorWrapper `json:"running"`
 	TotalCount int                `json:"total"`
@@ -199,12 +199,12 @@ func computeCandidateStores(requiredLabels []*metapb.StoreLabel, stores []*metap
 	return candidates
 }
 
-func buildErrorMigrationPlan() *MigrationPlan {
-	return &MigrationPlan{ErrorCode: 1, Ops: nil, Operators: nil}
+func buildErrorMigrationPlan() *migrationPlan {
+	return &migrationPlan{ErrorCode: 1, Ops: nil, Operators: nil}
 }
 
 // RedistibuteRegions checks if regions are imbalanced and rebalance them.
-func RedistibuteRegions(c sche.SchedulerCluster, startKey, endKey []byte, requiredLabels []*metapb.StoreLabel) (*MigrationPlan, error) {
+func RedistibuteRegions(c sche.SchedulerCluster, startKey, endKey []byte, requiredLabels []*metapb.StoreLabel) (*migrationPlan, error) {
 	if c == nil {
 		return buildErrorMigrationPlan(), errs.ErrNotBootstrapped.GenWithStackByArgs()
 	}
@@ -244,7 +244,7 @@ func RedistibuteRegions(c sche.SchedulerCluster, startKey, endKey []byte, requir
 		}
 	}
 
-	return &MigrationPlan{
+	return &migrationPlan{
 		ErrorCode:  0,
 		StartKey:   startKey,
 		EndKey:     endKey,
@@ -271,7 +271,7 @@ type balanceKeyrangeScheduler struct {
 	mu            sync.Mutex // Protect migrationPlan
 	name          string
 	conf          *balanceKeyrangeSchedulerConfig
-	migrationPlan *MigrationPlan
+	migrationPlan *migrationPlan
 }
 
 // newBalanceKeyrangeScheduler creates a scheduler that tends to keep key-range on
@@ -313,7 +313,7 @@ func (s *balanceKeyrangeScheduler) IsScheduleAllowed(cluster sche.SchedulerClust
 	return allowed
 }
 
-func (s *balanceKeyrangeScheduler) isFinished() bool {
+func (s *balanceKeyrangeScheduler) checkFinished() bool {
 	return s.migrationPlan == nil || (len(s.migrationPlan.Operators) == 0 && len(s.migrationPlan.Running) == 0)
 }
 
@@ -321,10 +321,10 @@ func (s *balanceKeyrangeScheduler) isFinished() bool {
 func (s *balanceKeyrangeScheduler) IsFinished() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.isFinished()
+	return s.checkFinished()
 }
 
-func (s *balanceKeyrangeScheduler) isTimeout() bool {
+func (s *balanceKeyrangeScheduler) checkTimeout() bool {
 	if s.migrationPlan == nil {
 		// Should not be called in this case, however, could be considered as a timeout case, and then delete the scheduler.
 		return true
@@ -337,7 +337,7 @@ func (s *balanceKeyrangeScheduler) isTimeout() bool {
 func (s *balanceKeyrangeScheduler) IsTimeout() bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.isTimeout()
+	return s.checkTimeout()
 }
 
 // Generate a json that returns scheduling status.
@@ -346,8 +346,8 @@ func (s *balanceKeyrangeScheduler) GetStatus() any {
 	defer s.mu.Unlock()
 
 	scheduling := false
-	running := make([]*OperatorWrapper, 0)
-	pending := make([]*OperatorWrapper, 0)
+	var running []*OperatorWrapper
+	var pending []*OperatorWrapper
 	total := 0
 	if s.migrationPlan != nil {
 		scheduling = true
@@ -381,7 +381,9 @@ func (s *balanceKeyrangeScheduler) Schedule(cluster sche.SchedulerCluster, dryRu
 	doShutdown := func() {
 		s.migrationPlan = nil
 		if s.conf.removeSchedulerCb != nil {
-			s.conf.removeSchedulerCb(types.BalanceKeyrangeScheduler.String())
+			if err := s.conf.removeSchedulerCb(types.BalanceKeyrangeScheduler.String()); err != nil {
+				log.Error("remove scheduler failed", zap.Error(err))
+			}
 		}
 	}
 
@@ -398,7 +400,7 @@ func (s *balanceKeyrangeScheduler) Schedule(cluster sche.SchedulerCluster, dryRu
 	if s.migrationPlan != nil {
 		// If there is a ongoing schedule,
 		// - If it is timeout, then return.
-		if s.isTimeout() {
+		if s.checkTimeout() {
 			log.Info("balance keyrange range timeout", zap.ByteString("planStartKey", s.migrationPlan.StartKey), zap.ByteString("planStartKey", s.migrationPlan.EndKey), zap.Any("StartTime", s.migrationPlan.StartTime), zap.Any("timeout", s.conf.MaxRunMillis))
 			doShutdown()
 			return []*operator.Operator{}, make([]plan.Plan, 0)
@@ -425,7 +427,7 @@ func (s *balanceKeyrangeScheduler) Schedule(cluster sche.SchedulerCluster, dryRu
 		s.migrationPlan.Running = running
 		s.migrationPlan.Operators = append(s.migrationPlan.Operators, rerun...)
 	}
-	if s.isFinished() {
+	if s.checkFinished() {
 		// If the current schedule is finished.
 		if rangeChanged {
 			// If there comes a new schedule task, generate a new schedule.
@@ -452,15 +454,19 @@ func (s *balanceKeyrangeScheduler) Schedule(cluster sche.SchedulerCluster, dryRu
 		// This is the normal branch that the current schedule is ongoing.
 	}
 
+	if dryRun {
+		log.Info("finished dry run")
+		doShutdown()
+		return []*operator.Operator{}, make([]plan.Plan, 0)
+	}
+
 	batchSize := s.conf.BatchSize
 	limit := oc.GetSchedulerMaxWaitingOperator()
 	queued := oc.GetWopCount(types.BalanceKeyrangeScheduler.String())
 	if queued >= limit {
 		batchSize = 0
-	} else {
-		if batchSize > limit-queued {
-			batchSize = limit - queued
-		}
+	} else if batchSize > limit-queued {
+		batchSize = limit - queued
 	}
 	var part []*operator.Operator
 	scheduleSize := int(batchSize)

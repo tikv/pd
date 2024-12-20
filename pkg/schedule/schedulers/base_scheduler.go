@@ -148,6 +148,8 @@ func (s *BaseScheduler) IsDefault() bool {
 }
 
 // IsFinished implements the Scheduler interface.
-func (s *BaseScheduler) IsFinished() bool {
+func (_ *BaseScheduler) IsFinished() bool {
+	// We always returns false here because most of the schedulers serve as background services, they don't finish.
+	// Only those adhoc schedulers such as balance-keyrange could return true in this method.
 	return false
 }

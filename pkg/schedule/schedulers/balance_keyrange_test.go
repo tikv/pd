@@ -65,7 +65,7 @@ func MakeConfigJson(batch uint64, labelsStr string, timeout int64, start, end st
 		Timeout        int64                `json:"timeout,omitempty"`
 		RequiredLabels []*metapb.StoreLabel `json:"required_labels,omitempty"`
 	}{
-		Timeout:   5 * 60 * 1000,
+		Timeout:   timeout,
 		BatchSize: batch,
 		StartKey:  start,
 		EndKey:    end,
@@ -138,7 +138,7 @@ func (suite *balanceKeyrangeSchedulerTestSuite) TestBalanceKeyrangeLabel() {
 	re.NoError(err)
 
 	ops, _ := sb.Schedule(tc, false)
-	re.Equal(2, len(ops))
+	re.Len(ops, 2)
 
 	sb, err = CreateScheduler(types.BalanceKeyrangeScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.BalanceKeyrangeScheduler, MakeConfigJson(5, "[{\"key\":\"engine\",\"value\":\"tiflash\"},{\"label1\": \"value1\"}]", 100000, "", VeryBigEndKey)))
 	re.NoError(err)
@@ -178,17 +178,17 @@ func (suite *balanceKeyrangeSchedulerTestSuite) TestBalanceKeyrangeFinish() {
 
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/operator/forceSucess", "return(true)"))
 	ops, _ := sb.Schedule(tc, false)
-	re.Equal(len(ops), 1)
+	re.Len(ops, 1)
 	ops[0].Start()
 	re.True(ops[0].CheckSuccess())
 	re.False(sb.IsFinished())
 	ops, _ = sb.Schedule(tc, false)
-	re.Equal(len(ops), 1)
+	re.Len(ops, 1)
 	ops[0].Start()
 	re.True(ops[0].CheckSuccess())
 	re.False(sb.IsFinished())
 	ops, _ = sb.Schedule(tc, false)
-	re.Equal(len(ops), 1)
+	re.Len(ops, 1)
 	ops[0].Start()
 	re.True(ops[0].CheckSuccess())
 	re.True(ops[0].IsEnd())
@@ -198,10 +198,6 @@ func (suite *balanceKeyrangeSchedulerTestSuite) TestBalanceKeyrangeFinish() {
 	sb.Schedule(tc, false)
 	sb.Schedule(tc, false)
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/operator/forceSucess"))
-}
-
-func (suite *balanceKeyrangeSchedulerTestSuite) TestBalanceKeyrangeConfChanged() {
-	// TODO
 }
 
 func (suite *balanceKeyrangeSchedulerTestSuite) TestBalanceKeyrangeConfTimeout() {
@@ -236,9 +232,9 @@ func assertValidateMigrationPlan(re *require.Assertions, ops []*MigrationOp, sto
 	storesIn := make(map[uint64]int)
 	storesOut := make(map[uint64]int)
 	regionMap := make(map[uint64]*core.RegionInfo)
-	for _, storeId := range storeIDs {
-		storesIn[storeId] = 0
-		storesOut[storeId] = 0
+	for _, storeID := range storeIDs {
+		storesIn[storeID] = 0
+		storesOut[storeID] = 0
 	}
 	for _, r := range regions {
 		regionMap[r.GetID()] = r
@@ -265,9 +261,9 @@ func assertValidateMigrationPlan(re *require.Assertions, ops []*MigrationOp, sto
 		}
 	}
 	storeList := []int{}
-	for _, storeId := range storeIDs {
-		in := storesIn[storeId]
-		out := storesOut[storeId]
+	for _, storeID := range storeIDs {
+		in := storesIn[storeID]
+		out := storesOut[storeID]
 		re.True(in == 0 || out == 0)
 		storeList = append(storeList, in-out)
 	}
@@ -275,19 +271,19 @@ func assertValidateMigrationPlan(re *require.Assertions, ops []*MigrationOp, sto
 }
 
 type regionStoresPair struct {
-	RegionId uint64
+	RegionID uint64
 	StorePos []uint64
 }
 
 func buildRedistributeRegionsTestCases(storeIDs []uint64, regionDist []regionStoresPair) ([]*metapb.Store, []*core.RegionInfo) {
-	storeIdLabels := []uint64{}
+	storeIDLabels := []uint64{}
 	for range storeIDs {
-		storeIdLabels = append(storeIdLabels, 0)
+		storeIDLabels = append(storeIDLabels, 0)
 	}
-	return buildRedistributeRegionsTestCasesWithLabel(storeIDs, storeIdLabels, regionDist)
+	return buildRedistributeRegionsTestCasesWithLabel(storeIDs, storeIDLabels, regionDist)
 }
 
-func buildRedistributeRegionsTestCasesWithLabel(storeIDs []uint64, storeIdLabels []uint64, regionDist []regionStoresPair) ([]*metapb.Store, []*core.RegionInfo) {
+func buildRedistributeRegionsTestCasesWithLabel(storeIDs []uint64, storeIDLabels []uint64, regionDist []regionStoresPair) ([]*metapb.Store, []*core.RegionInfo) {
 	tiflashLabel := metapb.StoreLabel{
 		Key:   "engine",
 		Value: "tiflash",
@@ -300,11 +296,11 @@ func buildRedistributeRegionsTestCasesWithLabel(storeIDs []uint64, storeIdLabels
 	regions := []*core.RegionInfo{}
 	for index, i := range storeIDs {
 		labels := []*metapb.StoreLabel{}
-		if storeIdLabels[index] == 1 {
+		if storeIDLabels[index] == 1 {
 			labels = append(labels, &tiflashLabel)
-		} else if storeIdLabels[index] == 2 {
+		} else if storeIDLabels[index] == 2 {
 			labels = append(labels, &someOtherLabel)
-		} else if storeIdLabels[index] == 3 {
+		} else if storeIDLabels[index] == 3 {
 			labels = append(labels, &tiflashLabel)
 			labels = append(labels, &someOtherLabel)
 		}
@@ -317,18 +313,18 @@ func buildRedistributeRegionsTestCasesWithLabel(storeIDs []uint64, storeIdLabels
 		})
 	}
 
-	var peerIdAllocator uint64
-	peerIdAllocator = 10000
+	var peerIDAllocator uint64
+	peerIDAllocator = 10000
 	for _, p := range regionDist {
 		regionId := p.RegionId
 		holdingStores := p.StorePos
 		var peers []*metapb.Peer
 		for _, storePos := range holdingStores {
 			s := stores[storePos]
-			peerIdAllocator += 1
+			peerIDAllocator += 1
 			peers = append(peers, &metapb.Peer{
 				StoreId: s.GetId(),
-				Id:      peerIdAllocator,
+				Id:      peerIDAllocator,
 			})
 		}
 		region := core.NewTestRegionInfo(regionId, stores[holdingStores[0]].GetId(), []byte(fmt.Sprintf("r%v", regionId)), []byte(fmt.Sprintf("r%v", regionId+1)), core.SetWrittenBytes(1000), core.SetReadBytes(1000), core.SetRegionConfVer(1), core.SetRegionVersion(1), core.SetPeers(peers))

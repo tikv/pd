@@ -144,7 +144,7 @@ func schedulersRegister() {
 			if len(args) != 1 {
 				return errs.ErrSchedulerConfig.FastGenByArgs("Invalid arguments number")
 			}
-			customerJson := struct {
+			inputJSON := struct {
 				StartKey       string               `json:"start_key"`
 				EndKey         string               `json:"end_key"`
 				BatchSize      uint64               `json:"batch_size,omitempty"`
@@ -155,19 +155,19 @@ func schedulersRegister() {
 				Timeout:        5 * 60 * 1000,
 				BatchSize:      5,
 			}
-			err := json.Unmarshal([]byte(args[0]), &customerJson)
+			err := json.Unmarshal([]byte(args[0]), &inputJSON)
 			if err != nil {
 				return errs.ErrSchedulerConfig.FastGenByArgs("Invalid arguments", err.Error())
 			}
 
-			conf.BatchSize = customerJson.BatchSize
-			conf.RequiredLabels = customerJson.RequiredLabels
-			conf.MaxRunMillis = customerJson.Timeout
-			startKey, err := hex.DecodeString(customerJson.StartKey)
+			conf.BatchSize = inputJSON.BatchSize
+			conf.RequiredLabels = inputJSON.RequiredLabels
+			conf.MaxRunMillis = inputJSON.Timeout
+			startKey, err := hex.DecodeString(inputJSON.StartKey)
 			if err != nil {
 				return errs.ErrSchedulerConfig.FastGenByArgs("Invalid arguments(start_key)", err.Error())
 			}
-			endKey, err := hex.DecodeString(customerJson.EndKey)
+			endKey, err := hex.DecodeString(inputJSON.EndKey)
 			if err != nil {
 				return errs.ErrSchedulerConfig.FastGenByArgs("Invalid arguments(end_key)", err.Error())
 			}
