@@ -58,7 +58,7 @@ func (suite *balanceKeyrangeSchedulerTestSuite) TearDownTest() {
 const VeryBigEndKey = "748000000005F5E0FFFF00000000000000F8"
 
 func MakeConfigJson(batch uint64, labelsStr string, timeout int64, start, end string) []string {
-	customerJson := struct {
+	inputJSON := struct {
 		StartKey       string               `json:"start_key"`
 		EndKey         string               `json:"end_key"`
 		BatchSize      uint64               `json:"batch_size,omitempty"`
@@ -70,8 +70,8 @@ func MakeConfigJson(batch uint64, labelsStr string, timeout int64, start, end st
 		StartKey:  start,
 		EndKey:    end,
 	}
-	json.Unmarshal([]byte(labelsStr), &customerJson.RequiredLabels)
-	s, _ := json.Marshal(customerJson)
+	json.Unmarshal([]byte(labelsStr), &inputJSON.RequiredLabels)
+	s, _ := json.Marshal(inputJSON)
 	return []string{string(s)}
 }
 
@@ -107,11 +107,13 @@ func (suite *balanceKeyrangeSchedulerTestSuite) TestBalanceKeyrangeNormal() {
 	operatorutil.CheckTransferPeer(re, op, operator.OpKind(0), 10, 12)
 
 	sb, err = CreateScheduler(types.BalanceKeyrangeScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.BalanceKeyrangeScheduler, MakeConfigJson(1, "", 100000, r2StartKey, r3EndKey)))
+	re.NoError(err)
 	ops, _ = sb.Schedule(tc, false)
 	re.True(sb.IsFinished())
 	re.Empty(ops)
 
 	sb, err = CreateScheduler(types.BalanceKeyrangeScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.BalanceKeyrangeScheduler, MakeConfigJson(1, "[{\"key\":\"engine\",\"value\":\"tiflash\"}]", 100000, r1StartKey, r3EndKey)))
+	re.NoError(err)
 	ops, _ = sb.Schedule(tc, false)
 	re.True(sb.IsFinished())
 	re.Empty(ops)

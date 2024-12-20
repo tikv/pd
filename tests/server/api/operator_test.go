@@ -678,7 +678,7 @@ func buildBalanceKeyRegionsTestCases(storeIDs []uint64, regionDist []regionStore
 	var peerIDAllocator uint64
 	peerIDAllocator = 10000
 	for _, p := range regionDist {
-		regionId := p.RegionID
+		regionID := p.RegionID
 		holdingStores := p.StorePos
 		var peers []*metapb.Peer
 		for _, storePos := range holdingStores {
@@ -689,7 +689,7 @@ func buildBalanceKeyRegionsTestCases(storeIDs []uint64, regionDist []regionStore
 				Id:      peerIDAllocator,
 			})
 		}
-		region := core.NewTestRegionInfo(regionId, stores[holdingStores[0]].GetId(), []byte(fmt.Sprintf("r%v", regionId)), []byte(fmt.Sprintf("r%v", regionId+1)), core.SetWrittenBytes(1000), core.SetReadBytes(1000), core.SetRegionConfVer(1), core.SetRegionVersion(1), core.SetPeers(peers))
+		region := core.NewTestRegionInfo(regionID, stores[holdingStores[0]].GetId(), []byte(fmt.Sprintf("r%v", regionID)), []byte(fmt.Sprintf("r%v", regionID+1)), core.SetWrittenBytes(1000), core.SetReadBytes(1000), core.SetRegionConfVer(1), core.SetRegionVersion(1), core.SetPeers(peers))
 		regions = append(regions, region)
 	}
 

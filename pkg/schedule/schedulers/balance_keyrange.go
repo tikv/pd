@@ -56,7 +56,7 @@ func pickRegions(n int, fromStore *StoreRegionSet, toStore *StoreRegionSet) *mig
 		Regions:     make(map[uint64]bool),
 	}
 
-	for i := 0; i < n; i++ {
+	for range n {
 		for r, fromHasRegion := range fromStore.RegionIDSet {
 			if !fromHasRegion {
 				continue
@@ -90,7 +90,7 @@ func buildMigrationPlan(stores []*StoreRegionSet) ([]int, []int, []*migrationOp,
 		return -cmp.Compare(len(lhs.RegionIDSet), len(rhs.RegionIDSet))
 	})
 	expectedCount := []int{}
-	for i := 0; i < remainder; i++ {
+	for range remainder {
 		expectedCount = append(expectedCount, avr+1)
 	}
 	for i := remainder; i < len(stores); i++ {
