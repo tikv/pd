@@ -66,7 +66,8 @@ func NewController[T any](maxBatchSize int, finisher FinisherFunc[T], bestBatchO
 //     The token will be given back if any error occurs, otherwise it's the caller's responsibility
 //     to decide when to recycle the signal.
 func (bc *Controller[T]) FetchPendingRequests(ctx context.Context, requestCh <-chan T, tokenCh chan struct{}, maxBatchWaitInterval time.Duration) (errRet error) {
-	var tokenAcquired bool
+	// If `tokenCh` is nil, it means that the token is always ready.
+	tokenAcquired := tokenCh == nil
 	defer func() {
 		if errRet != nil {
 			// Something went wrong when collecting a batch of requests. Release the token and cancel collected requests

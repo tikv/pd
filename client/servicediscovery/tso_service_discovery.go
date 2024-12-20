@@ -57,7 +57,7 @@ const (
 
 var (
 	_ ServiceDiscovery = (*tsoServiceDiscovery)(nil)
-	_ TSOEventSource   = (*tsoServiceDiscovery)(nil)
+	_ EventSource      = (*tsoServiceDiscovery)(nil)
 )
 
 // keyspaceGroupSvcDiscovery is used for discovering the serving endpoints of the keyspace
@@ -144,7 +144,7 @@ type tsoServiceDiscovery struct {
 	clientConns sync.Map // Store as map[string]*grpc.ClientConn
 
 	// tsoLeaderUpdatedCb will be called when the TSO leader is updated.
-	tsoLeaderUpdatedCb tsoLeaderURLUpdatedFunc
+	tsoLeaderUpdatedCb leaderURLUpdatedFunc
 
 	checkMembershipCh chan struct{}
 
@@ -369,8 +369,8 @@ func (*tsoServiceDiscovery) AddServingURLSwitchedCallback(...func()) {}
 // in a primary/secondary configured cluster is changed.
 func (*tsoServiceDiscovery) AddServiceURLsSwitchedCallback(...func()) {}
 
-// SetTSOLeaderURLUpdatedCallback adds a callback which will be called when the TSO leader is updated.
-func (c *tsoServiceDiscovery) SetTSOLeaderURLUpdatedCallback(callback tsoLeaderURLUpdatedFunc) {
+// SetLeaderURLUpdatedCallback adds a callback which will be called when the TSO leader is updated.
+func (c *tsoServiceDiscovery) SetLeaderURLUpdatedCallback(callback leaderURLUpdatedFunc) {
 	url := c.getPrimaryURL()
 	if len(url) > 0 {
 		if err := callback(url); err != nil {
