@@ -125,7 +125,7 @@ type Client interface {
 
 	// UpdateOption updates the client option.
 	UpdateOption(option opt.DynamicOption, value any) error
-	// WithCallerComponent returns a new RPCClient with the specified caller
+	// WithCallerComponent returns a new Client with the specified caller
 	// component. Caller component refers to the specific part or module within
 	// the process. You can set the component in two ways:
 	//   * Define it manually, like `caller.Component("DDL")`.
@@ -133,7 +133,7 @@ type Client interface {
 	//     The upperLayer parameter specifies the depth of the caller stack,
 	//     where 0 means the current function. Adjust the upperLayer value based
 	//     on your needs.
-	WithCallerComponent(callerComponent caller.Component) RPCClient
+	WithCallerComponent(callerComponent caller.Component) Client
 
 	// Close closes the client.
 	Close()
@@ -1357,7 +1357,7 @@ func (c *client) respForErr(observer prometheus.Observer, start time.Time, err e
 }
 
 // WithCallerComponent implements the RPCClient interface.
-func (c *client) WithCallerComponent(callerComponent caller.Component) RPCClient {
+func (c *client) WithCallerComponent(callerComponent caller.Component) Client {
 	newClient := *c
 	newClient.callerComponent = callerComponent
 	return &newClient
