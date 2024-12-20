@@ -50,22 +50,22 @@ func TestHealthSlice(t *testing.T) {
 	re := require.New(t)
 	cfgs, svrs, clean := mustNewCluster(re, 3)
 	defer clean()
-	var leader, follow *server.Server
+	var leader, follower *server.Server
 
 	for _, svr := range svrs {
 		if !svr.IsClosed() && svr.GetMember().IsLeader() {
 			leader = svr
 		} else {
-			follow = svr
+			follower = svr
 		}
 	}
 	mustBootstrapCluster(re, leader)
 	addr := leader.GetConfig().ClientUrls + apiPrefix + "/api/v1/health"
-	follow.Close()
+	follower.Close()
 	resp, err := testDialClient.Get(addr)
 	re.NoError(err)
 	defer resp.Body.Close()
 	buf, err := io.ReadAll(resp.Body)
 	re.NoError(err)
-	checkSliceResponse(re, buf, cfgs, follow.GetConfig().Name)
+	checkSliceResponse(re, buf, cfgs, follower.GetConfig().Name)
 }

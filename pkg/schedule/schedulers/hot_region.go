@@ -1352,7 +1352,7 @@ func (bs *balanceSolver) splitBucketsOperator(region *core.RegionInfo, keys [][]
 
 	op, err := operator.CreateSplitRegionOperator(desc, region, operator.OpSplit, pdpb.CheckPolicy_USEKEY, splitKeys)
 	if err != nil {
-		log.Error("fail to create split operator",
+		log.Debug("fail to create split operator",
 			zap.Stringer("resource-type", bs.resourceTy),
 			errs.ZapError(err))
 		return nil

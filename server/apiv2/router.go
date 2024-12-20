@@ -53,6 +53,7 @@ func NewV2Handler(_ context.Context, svr *server.Server) (http.Handler, apiutil.
 	})
 	router.Use(middlewares.Redirector())
 	root := router.Group(apiV2Prefix)
+	root.GET("ready", handlers.Ready)
 	handlers.RegisterKeyspace(root)
 	handlers.RegisterTSOKeyspaceGroup(root)
 	handlers.RegisterMicroService(root)
