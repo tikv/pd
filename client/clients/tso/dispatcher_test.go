@@ -70,7 +70,7 @@ func (m *mockTSOServiceProvider) updateConnectionCtxs(ctx context.Context) bool 
 	} else {
 		stream = m.createStream(ctx)
 	}
-	m.conCtxMgr.StoreIfNotExist(ctx, mockStreamURL, stream)
+	m.conCtxMgr.Store(ctx, mockStreamURL, stream)
 	return true
 }
 

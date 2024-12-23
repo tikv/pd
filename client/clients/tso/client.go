@@ -485,7 +485,7 @@ func (c *Cli) tryConnectToTSOWithProxy(ctx context.Context) error {
 				addrTrim := tlsutil.TrimHTTPPrefix(addr)
 				metrics.RequestForwarded.WithLabelValues(forwardedHostTrim, addrTrim).Set(1)
 			}
-			c.conCtxMgr.StoreIfNotExist(ctx, addr, stream)
+			c.conCtxMgr.Store(ctx, addr, stream)
 			continue
 		}
 		log.Error("[tso] create the tso stream failed",
