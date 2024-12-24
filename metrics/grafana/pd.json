@@ -8978,7 +8978,7 @@
           "spaceLength": 10,
           "targets": [
             {
-              "expr": "sum(rate(grpc_server_started_total{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\"}[1m])) by (instance, grpc_method)",
+              "expr": "sum(rate(grpc_server_msg_received_total{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\"}[1m])) by (instance, grpc_method)",
               "legendFormat": "{{instance}}-{{grpc_method}}",
               "interval": "",
               "exemplar": true,
