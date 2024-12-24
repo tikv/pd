@@ -9051,7 +9051,7 @@
           "aliasColors": {},
           "dashLength": 10,
           "datasource": "${DS_TEST-CLUSTER}",
-          "description": "The error rate of handled gRPC commands",
+          "description": "The error rate of handled gRPC commands.Note: It can't catch the error hide in the header, like this https://github.com/tikv/pd/blob/2d970a619a8917c35d306f401326141481c133e0/server/grpc_service.go#L2071",
           "editable": true,
           "fieldConfig": {
             "defaults": {},
