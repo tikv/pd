@@ -261,12 +261,8 @@ func (suite *serverTestSuite) TestDisableSchedulingServiceFallback() {
 
 	// API server will execute scheduling jobs since there is no scheduling server.
 	testutil.Eventually(re, func() bool {
-		if suite.pdLeader.GetServer() == nil {
-			println("server is nil")
-		}
-		if suite.pdLeader.GetServer().GetRaftCluster() == nil {
-			println("raft cluster is nil")
-		}
+		re.NotNil(suite.pdLeader.GetServer())
+		re.NotNil(suite.pdLeader.GetServer().GetRaftCluster())
 		return suite.pdLeader.GetServer().GetRaftCluster().IsSchedulingControllerRunning()
 	})
 	leaderServer := suite.pdLeader.GetServer()
