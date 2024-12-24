@@ -456,11 +456,11 @@ func (c *Cli) tryConnectToTSOWithProxy(ctx context.Context) error {
 		return errors.Errorf("cannot find the tso leader")
 	}
 	// GC the stale one.
-	c.conCtxMgr.GC(func(url string) bool {
-		_, ok := tsoStreamBuilders[url]
+	c.conCtxMgr.GC(func(addr string) bool {
+		_, ok := tsoStreamBuilders[addr]
 		if !ok {
 			log.Info("[tso] remove the stale tso stream",
-				zap.String("addr", url))
+				zap.String("addr", addr))
 		}
 		return !ok
 	})
