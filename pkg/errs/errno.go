@@ -544,6 +544,6 @@ var (
 
 // Micro service errors
 var (
-	ErrNotFoundSchedulingPrimary = errors.Normalize("cannot find scheduling primary address", errors.RFCCodeText("PD:mcs:ErrNotFoundSchedulingPrimary"))
+	ErrNotFoundSchedulingPrimary = errors.Normalize("cannot find scheduling primary", errors.RFCCodeText("PD:mcs:ErrNotFoundSchedulingPrimary"))
 	ErrSchedulingServer          = errors.Normalize("scheduling server meets %v", errors.RFCCodeText("PD:mcs:ErrSchedulingServer"))
 )
