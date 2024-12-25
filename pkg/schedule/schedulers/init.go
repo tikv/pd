@@ -149,11 +149,11 @@ func schedulersRegister() {
 				StartKey       string               `json:"start_key"`
 				EndKey         string               `json:"end_key"`
 				BatchSize      uint64               `json:"batch_size,omitempty"`
-				Timeout        int64                `json:"timeout,omitempty"`
+				Timeout        float64              `json:"timeout,omitempty"`
 				RequiredLabels []*metapb.StoreLabel `json:"required_labels,omitempty"`
 			}{
 				RequiredLabels: make([]*metapb.StoreLabel, 0),
-				Timeout:        5 * 60 * 1000,
+				Timeout:        5 * 60,
 				BatchSize:      5,
 			}
 			err := json.Unmarshal([]byte(args[0]), &inputJSON)
@@ -163,7 +163,7 @@ func schedulersRegister() {
 
 			conf.BatchSize = inputJSON.BatchSize
 			conf.RequiredLabels = inputJSON.RequiredLabels
-			conf.MaxRunMillis = inputJSON.Timeout
+			conf.MaxRunMillis = int64(inputJSON.Timeout * 1000)
 			startKey, err := hex.DecodeString(inputJSON.StartKey)
 			if err != nil {
 				return errs.ErrSchedulerConfig.FastGenByArgs("Invalid arguments(start_key)", err.Error())

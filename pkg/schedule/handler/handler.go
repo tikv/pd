@@ -1304,7 +1304,7 @@ func (h *Handler) CheckRegionsReplicated(rawStartKey, rawEndKey string) (string,
 	return state, nil
 }
 
-// BalanceKeyrange create a new balance key-range scheduler according to API request.
+// BalanceKeyrange create a new balance-keyrange scheduler according to API request.
 func (h *Handler) BalanceKeyrange(data string) (string, error) {
 	sc, err := h.GetSchedulersController()
 	if err != nil {
@@ -1342,14 +1342,14 @@ func (h *Handler) CheckBalanceKeyrangeStatus() (any, error) {
 		}
 	}
 	if err != nil {
-		return makeJSONResp("Get scheduler control error"), err
+		return makeJSONResp("get scheduler control error"), err
 	}
 	s := sc.GetScheduler(types.BalanceKeyrangeScheduler.String())
 	if s == nil {
-		return makeJSONResp("No scheduler found"), nil
+		return makeJSONResp("no scheduler found"), nil
 	}
 	if s.IsDisable() {
-		return makeJSONResp("Scheduler disabled"), nil
+		return makeJSONResp("scheduler disabled"), nil
 	}
 	st := sc.GetSchedulerStatus(types.BalanceKeyrangeScheduler.String())
 	if st == nil {

@@ -159,7 +159,7 @@ type migrationPlan struct {
 	StartTime  time.Time
 }
 
-func computeCandidateStores(requiredLabels []*metapb.StoreLabel, stores []*metapb.Store, regions []*core.RegionInfo) []*storeRegionSet {
+func computeCandidateStores(requiredLabels []*metapb.StoreLabel, excludedLabels []*metapb.StoreLabel, stores []*metapb.Store, regions []*core.RegionInfo) []*storeRegionSet {
 	candidates := make([]*storeRegionSet, 0)
 	for _, s := range stores {
 		storeLabelMap := make(map[string]*metapb.StoreLabel)
@@ -178,10 +178,23 @@ func computeCandidateStores(requiredLabels []*metapb.StoreLabel, stores []*metap
 				break
 			}
 		}
-
 		if !gotLabels {
 			continue
 		}
+
+		gotLabels = false
+		for _, larg := range excludedLabels {
+			if l, ok := storeLabelMap[larg.Key]; ok {
+				if larg.Value == l.Value {
+					gotLabels = true
+					break
+				}
+			}
+		}
+		if gotLabels {
+			continue
+		}
+
 		candidate := &storeRegionSet{
 			ID:           s.GetId(),
 			Info:         s,
@@ -206,7 +219,7 @@ func buildErrorMigrationPlan() *migrationPlan {
 }
 
 // RedistibuteRegions checks if regions are imbalanced and rebalance them.
-func RedistibuteRegions(c sche.SchedulerCluster, startKey, endKey []byte, requiredLabels []*metapb.StoreLabel) (*migrationPlan, error) {
+func RedistibuteRegions(c sche.SchedulerCluster, startKey, endKey []byte, requiredLabels []*metapb.StoreLabel, excludedLabels []*metapb.StoreLabel) (*migrationPlan, error) {
 	if c == nil {
 		return buildErrorMigrationPlan(), errs.ErrNotBootstrapped.GenWithStackByArgs()
 	}
@@ -221,7 +234,7 @@ func RedistibuteRegions(c sche.SchedulerCluster, startKey, endKey []byte, requir
 	for _, s := range c.GetStores() {
 		stores = append(stores, s.GetMeta())
 	}
-	candidates := computeCandidateStores(requiredLabels, stores, regions)
+	candidates := computeCandidateStores(requiredLabels, excludedLabels, stores, regions)
 
 	senders, receivers, ops, movements := buildMigrationPlan(candidates)
 
@@ -231,10 +244,10 @@ func RedistibuteRegions(c sche.SchedulerCluster, startKey, endKey []byte, requir
 	for _, op := range ops {
 		for rid := range op.Regions {
 			newPeer := &metapb.Peer{StoreId: op.ToStore, Role: op.OriginalPeer.Role, IsWitness: op.OriginalPeer.IsWitness}
-			log.Debug("Create balace region op", zap.Uint64("from", op.FromStore), zap.Uint64("to", op.ToStore), zap.Uint64("region_id", rid))
+			log.Debug("create balace region operator", zap.Uint64("from", op.FromStore), zap.Uint64("to", op.ToStore), zap.Uint64("region_id", rid))
 			o, err := operator.CreateMovePeerOperator("balance-keyrange", c, regionIDMap[rid], operator.OpReplica, op.FromStore, newPeer)
 			if err != nil {
-				log.Info("Failed to create operator", zap.Any("startKey", startKey), zap.Any("endKey", endKey), zap.Any("op", o), zap.Error(err))
+				log.Info("failed to create operator", zap.Any("startKey", startKey), zap.Any("endKey", endKey), zap.Any("op", o), zap.Error(err))
 				return buildErrorMigrationPlan(), err
 			}
 			operators = append(operators, &operatorWrapper{
@@ -262,6 +275,7 @@ type balanceKeyrangeSchedulerConfig struct {
 
 	Range             core.KeyRange
 	RequiredLabels    []*metapb.StoreLabel
+	ExcludedLabels    []*metapb.StoreLabel
 	BatchSize         uint64
 	MaxRunMillis      int64
 	removeSchedulerCb func(string) error
@@ -432,7 +446,7 @@ func (s *balanceKeyrangeScheduler) Schedule(cluster sche.SchedulerCluster, dryRu
 		// If the current schedule is finished.
 		if rangeChanged {
 			// If there comes a new schedule task, generate a new schedule.
-			p, err := RedistibuteRegions(cluster, s.conf.Range.StartKey, s.conf.Range.EndKey, s.conf.RequiredLabels)
+			p, err := RedistibuteRegions(cluster, s.conf.Range.StartKey, s.conf.Range.EndKey, s.conf.RequiredLabels, s.conf.ExcludedLabels)
 			if err != nil {
 				log.Error("balance keyrange can't generate plan", zap.Error(err))
 			}
