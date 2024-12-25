@@ -21,9 +21,9 @@ import (
 
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/mock/mockserver"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"google.golang.org/grpc/codes"
@@ -37,11 +37,13 @@ func TestLoadRegion(t *testing.T) {
 	rs, err := storage.NewRegionStorageWithLevelDBBackend(context.Background(), tempDir, nil)
 	re.NoError(err)
 
-	server := &mockServer{
-		ctx:     context.Background(),
-		storage: storage.NewCoreStorage(storage.NewStorageWithMemoryBackend(), rs),
-		bc:      core.NewBasicCluster(),
-	}
+	server := mockserver.NewMockServer(
+		context.Background(),
+		nil,
+		nil,
+		storage.NewCoreStorage(storage.NewStorageWithMemoryBackend(), rs),
+		core.NewBasicCluster(),
+	)
 	for i := range 30 {
 		rs.SaveRegion(&metapb.Region{Id: uint64(i) + 1})
 	}
@@ -64,11 +66,13 @@ func TestErrorCode(t *testing.T) {
 	tempDir := t.TempDir()
 	rs, err := storage.NewRegionStorageWithLevelDBBackend(context.Background(), tempDir, nil)
 	re.NoError(err)
-	server := &mockServer{
-		ctx:     context.Background(),
-		storage: storage.NewCoreStorage(storage.NewStorageWithMemoryBackend(), rs),
-		bc:      core.NewBasicCluster(),
-	}
+	server := mockserver.NewMockServer(
+		context.Background(),
+		nil,
+		nil,
+		storage.NewCoreStorage(storage.NewStorageWithMemoryBackend(), rs),
+		core.NewBasicCluster(),
+	)
 	ctx, cancel := context.WithCancel(context.TODO())
 	rc := NewRegionSyncer(server)
 	conn, err := grpcutil.GetClientConn(ctx, "http://127.0.0.1", nil)
@@ -78,47 +82,4 @@ func TestErrorCode(t *testing.T) {
 	ev, ok := status.FromError(err)
 	re.True(ok)
 	re.Equal(codes.Canceled, ev.Code())
-}
-
-type mockServer struct {
-	ctx            context.Context
-	member, leader *pdpb.Member
-	storage        storage.Storage
-	bc             *core.BasicCluster
-}
-
-func (s *mockServer) LoopContext() context.Context {
-	return s.ctx
-}
-
-func (*mockServer) ClusterID() uint64 {
-	return 1
-}
-
-func (s *mockServer) GetMemberInfo() *pdpb.Member {
-	return s.member
-}
-
-func (s *mockServer) GetLeader() *pdpb.Member {
-	return s.leader
-}
-
-func (s *mockServer) GetStorage() storage.Storage {
-	return s.storage
-}
-
-func (*mockServer) Name() string {
-	return "mock-server"
-}
-
-func (s *mockServer) GetRegions() []*core.RegionInfo {
-	return s.bc.GetRegions()
-}
-
-func (*mockServer) GetTLSConfig() *grpcutil.TLSConfig {
-	return &grpcutil.TLSConfig{}
-}
-
-func (s *mockServer) GetBasicCluster() *core.BasicCluster {
-	return s.bc
 }

@@ -37,6 +37,7 @@ import (
 	"github.com/tikv/pd/pkg/dashboard"
 	"github.com/tikv/pd/pkg/id"
 	"github.com/tikv/pd/pkg/mock/mockid"
+	"github.com/tikv/pd/pkg/mock/mockserver"
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/schedulers"
@@ -45,6 +46,7 @@ import (
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/syncer"
 	"github.com/tikv/pd/pkg/tso"
+	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
@@ -576,7 +578,7 @@ func TestRaftClusterRestart(t *testing.T) {
 	re.NotNil(rc)
 	rc.Stop()
 
-	err = rc.Start(leaderServer.GetServer())
+	err = rc.Start(leaderServer.GetServer(), false)
 	re.NoError(err)
 
 	rc = leaderServer.GetRaftCluster()
@@ -617,12 +619,103 @@ func TestRaftClusterMultipleRestart(t *testing.T) {
 	for range 100 {
 		// See https://github.com/tikv/pd/issues/8543
 		rc.Wait()
-		err = rc.Start(leaderServer.GetServer())
+		err = rc.Start(leaderServer.GetServer(), false)
 		re.NoError(err)
 		time.Sleep(time.Millisecond)
 		rc.Stop()
 	}
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs"))
+}
+
+// TestRaftClusterStartTSOJob is used to test whether tso job service is normally closed
+// when raft cluster is stopped ahead of time.
+// Ref: https://github.com/tikv/pd/issues/8836
+func TestRaftClusterStartTSOJob(t *testing.T) {
+	re := require.New(t)
+	name := "pd1"
+	// case 1: normal start
+	ctx, cancel := context.WithCancel(context.Background())
+	tc, err := tests.NewTestCluster(ctx, 1, func(conf *config.Config, _ string) {
+		conf.LeaderLease = 300
+	})
+	re.NoError(err)
+	re.NoError(tc.RunInitialServers())
+	re.NotEmpty(tc.WaitLeader())
+	leaderServer := tc.GetLeaderServer()
+	re.NotNil(leaderServer)
+	leaderServer.BootstrapCluster()
+	testutil.Eventually(re, func() bool {
+		allocator := tc.GetServer(name).GetServer().GetGlobalTSOAllocator()
+		return allocator.IsInitialize()
+	})
+	tc.Destroy()
+	cancel()
+	// case 2: return ahead of time but no error when start raft cluster
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/raftClusterReturn", `return(false)`))
+	ctx, cancel = context.WithCancel(context.Background())
+	tc, err = tests.NewTestCluster(ctx, 1, func(conf *config.Config, _ string) {
+		conf.LeaderLease = 300
+	})
+	re.NoError(err)
+	err = tc.RunInitialServers()
+	re.NoError(err)
+	tc.WaitLeader()
+	testutil.Eventually(re, func() bool {
+		allocator := tc.GetServer(name).GetServer().GetGlobalTSOAllocator()
+		return allocator.IsInitialize()
+	})
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/raftClusterReturn"))
+	tc.Destroy()
+	cancel()
+	// case 3: meet error when start raft cluster
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/raftClusterReturn", `return(true)`))
+	ctx, cancel = context.WithCancel(context.Background())
+	tc, err = tests.NewTestCluster(ctx, 1, func(conf *config.Config, _ string) {
+		conf.LeaderLease = 300
+	})
+	re.NoError(err)
+	err = tc.RunInitialServers()
+	re.NoError(err)
+	tc.WaitLeader()
+	testutil.Eventually(re, func() bool {
+		allocator := tc.GetServer(name).GetServer().GetGlobalTSOAllocator()
+		return !allocator.IsInitialize()
+	})
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/raftClusterReturn"))
+	tc.Destroy()
+	cancel()
+	// case 4: multiple bootstrap in 3 pd cluster
+	ctx, cancel = context.WithCancel(context.Background())
+	tc, err = tests.NewTestCluster(ctx, 3, func(conf *config.Config, _ string) {
+		conf.LeaderLease = 300
+	})
+	re.NoError(err)
+	re.NoError(tc.RunInitialServers())
+	re.NotEmpty(tc.WaitLeader())
+	leaderServer = tc.GetLeaderServer()
+	re.NotNil(leaderServer)
+	name = leaderServer.GetLeader().GetName()
+	wg := sync.WaitGroup{}
+	for range 3 {
+		wg.Add(1)
+		go func() {
+			leaderServer.BootstrapCluster()
+			wg.Done()
+		}()
+	}
+	wg.Wait()
+	testutil.Eventually(re, func() bool {
+		allocator := leaderServer.GetServer().GetGlobalTSOAllocator()
+		return allocator.IsInitialize()
+	})
+	re.NoError(tc.ResignLeader())
+	re.NotEmpty(tc.WaitLeader())
+	testutil.Eventually(re, func() bool {
+		allocator := tc.GetServer(name).GetServer().GetGlobalTSOAllocator()
+		return !allocator.IsInitialize()
+	})
+	tc.Destroy()
+	cancel()
 }
 
 func newMetaStore(storeID uint64, addr, version string, state metapb.StoreState, deployPath string) *metapb.Store {
@@ -1433,7 +1526,7 @@ func TestTransferLeaderForScheduler(t *testing.T) {
 	tc.WaitLeader()
 	leaderServer = tc.GetLeaderServer()
 	rc1 := leaderServer.GetServer().GetRaftCluster()
-	rc1.Start(leaderServer.GetServer())
+	rc1.Start(leaderServer.GetServer(), false)
 	re.NoError(err)
 	re.NotNil(rc1)
 	// region heartbeat
@@ -1453,7 +1546,7 @@ func TestTransferLeaderForScheduler(t *testing.T) {
 	tc.WaitLeader()
 	leaderServer = tc.GetLeaderServer()
 	rc = leaderServer.GetServer().GetRaftCluster()
-	rc.Start(leaderServer.GetServer())
+	rc.Start(leaderServer.GetServer(), false)
 	re.NotNil(rc)
 	// region heartbeat
 	id = leaderServer.GetAllocator()
@@ -1884,4 +1977,46 @@ func checkLog(re *require.Assertions, fname, expect string) {
 		return strings.Contains(l, expect)
 	})
 	os.Truncate(fname, 0)
+}
+
+func TestFollowerExitSyncTime(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	tc, err := tests.NewTestCluster(ctx, 1)
+	defer tc.Destroy()
+	re.NoError(err)
+	err = tc.RunInitialServers()
+	re.NoError(err)
+	tc.WaitLeader()
+	leaderServer := tc.GetLeaderServer()
+	re.NoError(leaderServer.BootstrapCluster())
+
+	tempDir := t.TempDir()
+	rs, err := storage.NewRegionStorageWithLevelDBBackend(context.Background(), tempDir, nil)
+	re.NoError(err)
+
+	server := mockserver.NewMockServer(
+		context.Background(),
+		&pdpb.Member{MemberId: 1, Name: "test", ClientUrls: []string{tempurl.Alloc()}},
+		nil,
+		storage.NewCoreStorage(storage.NewStorageWithMemoryBackend(), rs),
+		core.NewBasicCluster(),
+	)
+	s := syncer.NewRegionSyncer(server)
+	s.StartSyncWithLeader(leaderServer.GetAddr())
+	time.Sleep(time.Second)
+
+	// Record the time when exiting sync
+	startTime := time.Now()
+
+	// Simulate leader change scenario
+	// Directly call StopSyncWithLeader to simulate exit
+	s.StopSyncWithLeader()
+
+	// Calculate time difference
+	elapsedTime := time.Since(startTime)
+
+	// Assert that the sync exit time is within expected range
+	re.Less(elapsedTime, time.Second)
 }
