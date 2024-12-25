@@ -663,7 +663,7 @@ init file log error, %s
 
 ["PD:mcs:ErrNotFoundSchedulingPrimary"]
 error = '''
-cannot find scheduling primary address
+cannot find scheduling primary
 '''
 
 ["PD:mcs:ErrSchedulingServer"]
