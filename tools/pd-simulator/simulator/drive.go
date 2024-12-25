@@ -26,20 +26,22 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.uber.org/zap"
+
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
-	pd "github.com/tikv/pd/client"
+
 	pdHttp "github.com/tikv/pd/client/http"
+	sd "github.com/tikv/pd/client/servicediscovery"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/cases"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/config"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/info"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/simutil"
-	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.uber.org/zap"
 )
 
 // Driver promotes the cluster status change.
@@ -163,7 +165,7 @@ func (d *Driver) allocID() error {
 func (d *Driver) updateNodesClient() error {
 	urls := strings.Split(d.pdAddr, ",")
 	ctx, cancel := context.WithCancel(context.Background())
-	SD = pd.NewDefaultPDServiceDiscovery(ctx, cancel, urls, nil)
+	SD = sd.NewDefaultPDServiceDiscovery(ctx, cancel, urls, nil)
 	if err := SD.Init(); err != nil {
 		return err
 	}

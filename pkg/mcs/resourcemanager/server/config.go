@@ -22,16 +22,18 @@ import (
 	"time"
 
 	"github.com/BurntSushi/toml"
+	"github.com/spf13/pflag"
+	"go.uber.org/zap"
+
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
-	"github.com/spf13/pflag"
+
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/utils/configutil"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/metricutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
-	"go.uber.org/zap"
 )
 
 const (

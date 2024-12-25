@@ -17,8 +17,10 @@ package statistics
 import (
 	"context"
 
-	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/smallnest/chanx"
+
+	"github.com/pingcap/kvproto/pkg/metapb"
+
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/statistics/utils"
 	"github.com/tikv/pd/pkg/utils/logutil"

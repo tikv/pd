@@ -14,7 +14,12 @@
 
 package errs
 
-import "github.com/pingcap/errors"
+import (
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
+	"github.com/pingcap/errors"
+)
 
 const (
 	// NotLeaderErr indicates the non-leader member received the requests which should be received by leader.
@@ -31,6 +36,62 @@ const (
 	NotServedErr = "is not served"
 )
 
+// gRPC errors
+var (
+	// Canceled indicates the operation was canceled (typically by the caller).
+	ErrStreamClosed = status.Error(codes.Canceled, "stream is closed")
+
+	// Unknown error. An example of where this error may be returned is
+	// if a Status value received from another address space belongs to
+	// an error-space that is not known in this address space. Also
+	// errors raised by APIs that do not return enough error information
+	// may be converted to this error.
+	ErrUnknown = func(err error) error {
+		return status.Error(codes.Unknown, err.Error())
+	}
+
+	// DeadlineExceeded means operation expired before completion.
+	// For operations that change the state of the system, this error may be
+	// returned even if the operation has completed successfully. For
+	// example, a successful response from a server could have been delayed
+	// long enough for the deadline to expire.
+	ErrForwardTSOTimeout             = status.Error(codes.DeadlineExceeded, "forward tso request timeout")
+	ErrTSOProxyRecvFromClientTimeout = status.Error(codes.DeadlineExceeded, "tso proxy timeout when receiving from client; stream closed by server")
+	ErrSendHeartbeatTimeout          = status.Error(codes.DeadlineExceeded, "send heartbeat timeout")
+
+	// NotFound means some requested entity (e.g., file or directory) was
+	// not found.
+	ErrNotFoundTSOAddr        = status.Error(codes.NotFound, "not found tso address")
+	ErrNotFoundSchedulingAddr = status.Error(codes.NotFound, "not found scheduling address")
+	ErrNotFoundService        = status.Error(codes.NotFound, "not found service")
+
+	// ResourceExhausted indicates some resource has been exhausted, perhaps
+	// a per-user quota, or perhaps the entire file system is out of space.
+	ErrMaxCountTSOProxyRoutinesExceeded = status.Error(codes.ResourceExhausted, "max count of concurrent tso proxy routines exceeded")
+	ErrGRPCRateLimitExceeded            = func(err error) error {
+		return status.Error(codes.ResourceExhausted, err.Error())
+	}
+
+	// FailedPrecondition indicates operation was rejected because the
+	// system is not in a state required for the operation's execution.
+	// For example, directory to be deleted may be non-empty, an rmdir
+	// operation is applied to a non-directory, etc.
+	ErrMismatchClusterID = func(clusterID, requestClusterID uint64) error {
+		return status.Errorf(codes.FailedPrecondition, "mismatch cluster id, need %d but got %d", clusterID, requestClusterID)
+	}
+
+	// Unavailable indicates the service is currently unavailable.
+	// This is a most likely a transient condition and may be corrected
+	// by retrying with a backoff. Note that it is not always safe to retry
+	// non-idempotent operations.
+	// ErrNotLeader is returned when current server is not the leader and not possible to process request.
+	// TODO: work as proxy.
+	ErrNotLeader                  = status.Error(codes.Unavailable, "not leader")
+	ErrNotStarted                 = status.Error(codes.Unavailable, "server not started")
+	ErrEtcdNotStarted             = status.Error(codes.Unavailable, "server is started, but etcd not started")
+	ErrFollowerHandlingNotAllowed = status.Error(codes.Unavailable, "not leader and follower handling not allowed")
+)
+
 // common error in multiple packages
 var (
 	ErrGetSourceStore      = errors.Normalize("failed to get the source store", errors.RFCCodeText("PD:common:ErrGetSourceStore"))
@@ -40,10 +101,7 @@ var (
 
 // tso errors
 var (
-	ErrSetLocalTSOConfig                = errors.Normalize("set local tso config failed, %s", errors.RFCCodeText("PD:tso:ErrSetLocalTSOConfig"))
 	ErrGetAllocator                     = errors.Normalize("get allocator failed, %s", errors.RFCCodeText("PD:tso:ErrGetAllocator"))
-	ErrGetLocalAllocator                = errors.Normalize("get local allocator failed, %s", errors.RFCCodeText("PD:tso:ErrGetLocalAllocator"))
-	ErrSyncMaxTS                        = errors.Normalize("sync max ts failed, %s", errors.RFCCodeText("PD:tso:ErrSyncMaxTS"))
 	ErrResetUserTimestamp               = errors.Normalize("reset user timestamp failed, %s", errors.RFCCodeText("PD:tso:ErrResetUserTimestamp"))
 	ErrGenerateTimestamp                = errors.Normalize("generate timestamp failed, %s", errors.RFCCodeText("PD:tso:ErrGenerateTimestamp"))
 	ErrUpdateTimestamp                  = errors.Normalize("update timestamp failed, %s", errors.RFCCodeText("PD:tso:ErrUpdateTimestamp"))
@@ -142,8 +200,69 @@ var (
 
 // checker errors
 var (
-	ErrCheckerNotFound   = errors.Normalize("checker not found", errors.RFCCodeText("PD:checker:ErrCheckerNotFound"))
-	ErrCheckerMergeAgain = errors.Normalize("region will be merged again, %s", errors.RFCCodeText("PD:checker:ErrCheckerMergeAgain"))
+	ErrCheckerNotFound     = errors.Normalize("checker not found", errors.RFCCodeText("PD:checker:ErrCheckerNotFound"))
+	ErrCheckerMergeAgain   = errors.Normalize("region will be merged again, %s", errors.RFCCodeText("PD:checker:ErrCheckerMergeAgain"))
+	ErrNoStoreToAdd        = errors.Normalize("no store to add peer", errors.RFCCodeText("PD:checker:ErrNoStoreToAdd"))
+	ErrNoStoreToReplace    = errors.Normalize("no store to replace peer", errors.RFCCodeText("PD:checker:ErrNoStoreToReplace"))
+	ErrPeerCannotBeLeader  = errors.Normalize("peer cannot be leader", errors.RFCCodeText("PD:checker:ErrPeerCannotBeLeader"))
+	ErrPeerCannotBeWitness = errors.Normalize("peer cannot be witness", errors.RFCCodeText("PD:checker:ErrPeerCannotBeWitness"))
+	ErrNoNewLeader         = errors.Normalize("no new leader", errors.RFCCodeText("PD:checker:ErrNoNewLeader"))
+	ErrRegionNoLeader      = errors.Normalize("region no leader", errors.RFCCodeText("PD:checker:ErrRegionNoLeader"))
+)
+
+// scatter errors
+var (
+	ErrEmptyRegion = errors.Normalize("empty region", errors.RFCCodeText("PD:scatter:ErrEmptyRegion"))
+)
+
+// keyspace errors
+var (
+	// ErrKeyspaceNotFound is used to indicate target keyspace does not exist.
+	ErrKeyspaceNotFound = errors.Normalize("keyspace does not exist", errors.RFCCodeText("PD:keyspace:ErrKeyspaceNotFound"))
+	// ErrRegionSplitTimeout indices to split region timeout
+	ErrRegionSplitTimeout = errors.Normalize("region split timeout", errors.RFCCodeText("PD:keyspace:ErrRegionSplitTimeout"))
+	// ErrRegionSplitFailed indices to split region failed
+	ErrRegionSplitFailed = errors.Normalize("region split failed", errors.RFCCodeText("PD:keyspace:ErrRegionSplitFailed"))
+	// ErrKeyspaceExists indicates target keyspace already exists.
+	// It's used when creating a new keyspace.
+	ErrKeyspaceExists = errors.Normalize("keyspace already exists", errors.RFCCodeText("PD:keyspace:ErrKeyspaceExists"))
+	// ErrKeyspaceGroupExists indicates target keyspace group already exists.
+	ErrKeyspaceGroupExists = errors.Normalize("keyspace group already exists", errors.RFCCodeText("PD:keyspace:ErrKeyspaceGroupExists"))
+	// ErrKeyspaceNotInKeyspaceGroup is used to indicate target keyspace is not in this keyspace group.
+	ErrKeyspaceNotInKeyspaceGroup = errors.Normalize("keyspace is not in this keyspace group", errors.RFCCodeText("PD:keyspace:ErrKeyspaceNotInKeyspaceGroup"))
+	// ErrKeyspaceNotInAnyKeyspaceGroup is used to indicate target keyspace is not in any keyspace group.
+	ErrKeyspaceNotInAnyKeyspaceGroup = errors.Normalize("keyspace is not in any keyspace group", errors.RFCCodeText("PD:keyspace:ErrKeyspaceNotInAnyKeyspaceGroup"))
+	// ErrNodeNotInKeyspaceGroup is used to indicate the tso node is not in this keyspace group.
+	ErrNodeNotInKeyspaceGroup = errors.Normalize("the tso node is not in this keyspace group", errors.RFCCodeText("PD:keyspace:ErrNodeNotInKeyspaceGroup"))
+	// ErrKeyspaceGroupNotEnoughReplicas is used to indicate not enough replicas in the keyspace group.
+	ErrKeyspaceGroupNotEnoughReplicas = errors.Normalize("not enough replicas in the keyspace group", errors.RFCCodeText("PD:keyspace:ErrKeyspaceGroupNotEnoughReplicas"))
+	// ErrKeyspaceGroupWithEmptyKeyspace is used to indicate keyspace group with empty keyspace.
+	ErrKeyspaceGroupWithEmptyKeyspace = errors.Normalize("keyspace group with empty keyspace", errors.RFCCodeText("PD:keyspace:ErrKeyspaceGroupWithEmptyKeyspace"))
+	// ErrModifyDefaultKeyspaceGroup is used to indicate that default keyspace group cannot be modified.
+	ErrModifyDefaultKeyspaceGroup = errors.Normalize("default keyspace group cannot be modified", errors.RFCCodeText("PD:keyspace:ErrModifyDefaultKeyspaceGroup"))
+	// ErrNoAvailableNode is used to indicate no available node in the keyspace group.
+	ErrNoAvailableNode = errors.Normalize("no available node", errors.RFCCodeText("PD:keyspace:ErrNoAvailableNode"))
+	// ErrExceedMaxEtcdTxnOps is used to indicate the number of etcd txn operations exceeds the limit.
+	ErrExceedMaxEtcdTxnOps = errors.Normalize("exceed max etcd txn operations", errors.RFCCodeText("PD:keyspace:ErrExceedMaxEtcdTxnOps"))
+	// ErrModifyDefaultKeyspace is used to indicate that default keyspace cannot be modified.
+	ErrModifyDefaultKeyspace = errors.Normalize("cannot modify default keyspace's state", errors.RFCCodeText("PD:keyspace:ErrModifyDefaultKeyspace"))
+	// ErrIllegalOperation is used to indicate this is an illegal operation.
+	ErrIllegalOperation = errors.Normalize("unknown operation", errors.RFCCodeText("PD:keyspace:ErrIllegalOperation"))
+	// ErrUnsupportedOperationInKeyspace is used to indicate this is an unsupported operation.
+	ErrUnsupportedOperationInKeyspace = errors.Normalize("it's a unsupported operation", errors.RFCCodeText("PD:keyspace:ErrUnsupportedOperationInKeyspace"))
+	// ErrKeyspaceGroupPrimaryNotFound is used to indicate primary of target keyspace group does not exist.
+	ErrKeyspaceGroupPrimaryNotFound = errors.Normalize("primary of keyspace group does not exist", errors.RFCCodeText("PD:keyspace:ErrKeyspaceGroupPrimaryNotFound"))
+	// ErrKeyspaceGroupNotExists is used to indicate target keyspace group does not exist.
+	ErrKeyspaceGroupNotExists = errors.Normalize("keyspace group %v does not exist", errors.RFCCodeText("PD:keyspace:ErrKeyspaceGroupNotExists"))
+	// ErrKeyspaceGroupInSplit is used to indicate target keyspace group is in split state.
+	ErrKeyspaceGroupInSplit = errors.Normalize("keyspace group %v is in split state", errors.RFCCodeText("PD:keyspace:ErrKeyspaceGroupInSplit"))
+	// ErrKeyspaceGroupNotInSplit is used to indicate target keyspace group is not in split state.
+	ErrKeyspaceGroupNotInSplit = errors.Normalize("keyspace group %v is not in split state", errors.RFCCodeText("PD:keyspace:ErrKeyspaceGroupNotInSplit"))
+	// ErrKeyspaceGroupInMerging is used to indicate target keyspace group is in merging state.
+	ErrKeyspaceGroupInMerging = errors.Normalize("keyspace group %v is in merging state", errors.RFCCodeText("PD:keyspace:ErrKeyspaceGroupInMerging"))
+	// ErrKeyspaceGroupNotInMerging is used to indicate target keyspace group is not in merging state.
+	ErrKeyspaceGroupNotInMerging = errors.Normalize("keyspace group %v is not in merging state", errors.RFCCodeText("PD:keyspace:ErrKeyspaceGroupNotInMerging"))
+	// errKeyspaceGroupNotInMerging is used to indicate target keyspace group is not in merging state.
 )
 
 // diagnostic errors
@@ -229,6 +348,16 @@ var (
 // typeutil errors
 var (
 	ErrBytesToUint64 = errors.Normalize("invalid data, must 8 bytes, but %d", errors.RFCCodeText("PD:typeutil:ErrBytesToUint64"))
+)
+
+// cgroup errors
+var (
+	ErrNoCPUControllerDetected = errors.Normalize("no cpu controller detected", errors.RFCCodeText("PD:cgroup:ErrNoCPUControllerDetected"))
+)
+
+// ratelimit errors
+var (
+	ErrMaxWaitingTasksExceeded = errors.Normalize("max waiting tasks exceeded", errors.RFCCodeText("PD:ratelimit:ErrMaxWaitingTasksExceeded"))
 )
 
 // The third-party project error.
@@ -416,6 +545,6 @@ var (
 
 // Micro service errors
 var (
-	ErrNotFoundSchedulingAddr = errors.Normalize("cannot find scheduling address", errors.RFCCodeText("PD:mcs:ErrNotFoundSchedulingAddr"))
-	ErrSchedulingServer       = errors.Normalize("scheduling server meets %v", errors.RFCCodeText("PD:mcs:ErrSchedulingServer"))
+	ErrNotFoundSchedulingPrimary = errors.Normalize("cannot find scheduling primary", errors.RFCCodeText("PD:mcs:ErrNotFoundSchedulingPrimary"))
+	ErrSchedulingServer          = errors.Normalize("scheduling server meets %v", errors.RFCCodeText("PD:mcs:ErrSchedulingServer"))
 )

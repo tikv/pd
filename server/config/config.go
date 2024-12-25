@@ -28,9 +28,14 @@ import (
 	"github.com/BurntSushi/toml"
 	"github.com/coreos/go-semver/semver"
 	"github.com/docker/go-units"
+	"github.com/spf13/pflag"
+	"go.etcd.io/etcd/client/pkg/v3/transport"
+	"go.etcd.io/etcd/server/v3/embed"
+	"go.uber.org/zap"
+
 	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
-	"github.com/spf13/pflag"
+
 	"github.com/tikv/pd/pkg/errs"
 	rm "github.com/tikv/pd/pkg/mcs/resourcemanager/server"
 	sc "github.com/tikv/pd/pkg/schedule/config"
@@ -39,9 +44,6 @@ import (
 	"github.com/tikv/pd/pkg/utils/metricutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/pkg/versioninfo"
-	"go.etcd.io/etcd/client/pkg/v3/transport"
-	"go.etcd.io/etcd/server/v3/embed"
-	"go.uber.org/zap"
 )
 
 // Config is the pd server configuration.
@@ -96,10 +98,7 @@ type Config struct {
 	// be automatically clamped to the range.
 	TSOUpdatePhysicalInterval typeutil.Duration `toml:"tso-update-physical-interval" json:"tso-update-physical-interval"`
 
-	// EnableLocalTSO is used to enable the Local TSO Allocator feature,
-	// which allows the PD server to generate Local TSO for certain DC-level transactions.
-	// To make this feature meaningful, user has to set the "zone" label for the PD server
-	// to indicate which DC this PD belongs to.
+	// Deprecated
 	EnableLocalTSO bool `toml:"enable-local-tso" json:"enable-local-tso"`
 
 	Metric metricutil.MetricConfig `toml:"metric" json:"metric"`
@@ -115,8 +114,6 @@ type Config struct {
 	// Labels indicates the labels set for **this** PD server. The labels describe some specific properties
 	// like `zone`/`rack`/`host`. Currently, labels won't affect the PD server except for some special
 	// label keys. Now we have following special keys:
-	// 1. 'zone' is a special key that indicates the DC location of this PD server. If it is set, the value for this
-	// will be used to determine which DC's Local TSO service this PD will provide with if EnableLocalTSO is true.
 	Labels map[string]string `toml:"labels" json:"labels"`
 
 	// QuotaBackendBytes Raise alarms when backend size exceeds the given quota. 0 means use the default quota.
@@ -254,12 +251,6 @@ const (
 
 	defaultEnableSchedulingFallback  = true
 	defaultEnableTSODynamicSwitching = false
-)
-
-// Special keys for Labels
-const (
-	// ZoneLabel is the name of the key which indicates DC location of this PD server.
-	ZoneLabel = "zone"
 )
 
 var (
@@ -675,11 +666,6 @@ func (c LabelPropertyConfig) Clone() LabelPropertyConfig {
 // GetLeaderLease returns the leader lease.
 func (c *Config) GetLeaderLease() int64 {
 	return c.LeaderLease
-}
-
-// IsLocalTSOEnabled returns if the local TSO is enabled.
-func (c *Config) IsLocalTSOEnabled() bool {
-	return c.EnableLocalTSO
 }
 
 // GetMaxConcurrentTSOProxyStreamings returns the max concurrent TSO proxy streamings.

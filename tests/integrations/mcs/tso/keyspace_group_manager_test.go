@@ -25,20 +25,21 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pingcap/failpoint"
-	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+
+	"github.com/pingcap/failpoint"
+	"github.com/pingcap/kvproto/pkg/pdpb"
+
 	pd "github.com/tikv/pd/client"
-	"github.com/tikv/pd/client/caller"
 	clierrs "github.com/tikv/pd/client/errs"
+	"github.com/tikv/pd/client/pkg/caller"
 	"github.com/tikv/pd/pkg/election"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/mock/mockid"
 	"github.com/tikv/pd/pkg/storage/endpoint"
-	tsopkg "github.com/tikv/pd/pkg/tso"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/testutil"
@@ -220,10 +221,10 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestKeyspacesServedByNonDefaultKe
 						// Make sure every keyspace group is using the right timestamp path
 						// for loading/saving timestamp from/to etcd and the right primary path
 						// for primary election.
-						rootPath := keypath.TSOSvcRootPath()
-						primaryPath := keypath.KeyspaceGroupPrimaryPath(rootPath, param.keyspaceGroupID)
-						timestampPath := keypath.FullTimestampPath(param.keyspaceGroupID)
-						re.Equal(timestampPath, am.GetTimestampPath(tsopkg.GlobalDCLocation))
+						primaryPath := keypath.LeaderPath(&keypath.MsParam{
+							ServiceName: constant.TSOServiceName,
+							GroupID:     param.keyspaceGroupID,
+						})
 						re.Equal(primaryPath, am.GetMember().GetLeaderPath())
 
 						served = true
@@ -315,7 +316,7 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) requestTSO(
 	primary := suite.tsoCluster.WaitForPrimaryServing(re, keyspaceID, keyspaceGroupID)
 	kgm := primary.GetKeyspaceGroupManager()
 	re.NotNil(kgm)
-	ts, _, err := kgm.HandleTSORequest(suite.ctx, keyspaceID, keyspaceGroupID, tsopkg.GlobalDCLocation, 1)
+	ts, _, err := kgm.HandleTSORequest(suite.ctx, keyspaceID, keyspaceGroupID, 1)
 	return ts, err
 }
 

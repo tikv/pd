@@ -27,11 +27,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/suite"
+	"go.uber.org/goleak"
+
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/stretchr/testify/require"
-	"github.com/stretchr/testify/suite"
+
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
@@ -40,7 +43,6 @@ import (
 	"github.com/tikv/pd/server/api"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
-	"go.uber.org/goleak"
 )
 
 func TestMain(m *testing.M) {
@@ -925,7 +927,7 @@ func TestSendApiWhenRestartRaftCluster(t *testing.T) {
 	output := sendRequest(re, leader.GetAddr()+"/pd/api/v1/min-resolved-ts", http.MethodGet, http.StatusInternalServerError)
 	re.Contains(string(output), "TiKV cluster not bootstrapped, please start TiKV first")
 
-	err = rc.Start(leader.GetServer())
+	err = rc.Start(leader.GetServer(), false)
 	re.NoError(err)
 	rc = leader.GetRaftCluster()
 	re.NotNil(rc)

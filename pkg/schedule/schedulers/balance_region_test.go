@@ -18,8 +18,10 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/require"
+
+	"github.com/pingcap/kvproto/pkg/metapb"
+
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/mock/mockcluster"

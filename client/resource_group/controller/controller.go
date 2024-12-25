@@ -7,7 +7,7 @@
 //     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,g
+// distributed under the License is distributed on an "AS IS" BASIS,
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
@@ -24,18 +24,20 @@ import (
 	"time"
 
 	"github.com/gogo/protobuf/proto"
+	"github.com/prometheus/client_golang/prometheus"
+	"go.uber.org/zap"
+	"golang.org/x/exp/slices"
+
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/meta_storagepb"
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 	"github.com/pingcap/log"
-	"github.com/prometheus/client_golang/prometheus"
+
 	pd "github.com/tikv/pd/client"
 	"github.com/tikv/pd/client/clients/metastorage"
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/opt"
-	"go.uber.org/zap"
-	"golang.org/x/exp/slices"
 )
 
 const (

@@ -19,12 +19,14 @@ import (
 	"context"
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
+
 	"github.com/tikv/pd/pkg/core/rangetree"
 	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
-	"go.uber.org/zap"
 )
 
 type status int

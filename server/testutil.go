@@ -23,8 +23,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pingcap/log"
 	"github.com/stretchr/testify/require"
+	"go.etcd.io/etcd/server/v3/embed"
+
+	"github.com/pingcap/log"
+
 	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/assertutil"
@@ -33,7 +36,6 @@ import (
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/server/config"
-	"go.etcd.io/etcd/server/v3/embed"
 )
 
 // NewTestServer creates a pd server for testing.

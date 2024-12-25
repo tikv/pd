@@ -20,13 +20,14 @@ import (
 	"strings"
 
 	"github.com/gorilla/mux"
+	"github.com/urfave/negroni"
+
 	scheapi "github.com/tikv/pd/pkg/mcs/scheduling/server/apis/v1"
 	tsoapi "github.com/tikv/pd/pkg/mcs/tso/server/apis/v1"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/apiutil/serverapi"
 	"github.com/tikv/pd/server"
-	"github.com/urfave/negroni"
 )
 
 const apiPrefix = "/pd"

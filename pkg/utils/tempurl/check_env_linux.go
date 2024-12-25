@@ -18,7 +18,9 @@ package tempurl
 
 import (
 	"github.com/cakturk/go-netstat/netstat"
+
 	"github.com/pingcap/log"
+
 	"github.com/tikv/pd/pkg/errs"
 )
 

@@ -34,22 +34,24 @@ import (
 	"github.com/gin-contrib/gzip"
 	"github.com/gin-contrib/pprof"
 	"github.com/gin-gonic/gin"
+	"github.com/spf13/pflag"
+	"go.etcd.io/etcd/pkg/v3/report"
+	"go.uber.org/zap"
+
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
-	"github.com/spf13/pflag"
+
 	pdHttp "github.com/tikv/pd/client/http"
-	"github.com/tikv/pd/client/utils/grpcutil"
-	"github.com/tikv/pd/client/utils/tlsutil"
+	"github.com/tikv/pd/client/pkg/utils/grpcutil"
+	"github.com/tikv/pd/client/pkg/utils/tlsutil"
 	"github.com/tikv/pd/pkg/codec"
 	"github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/tools/pd-heartbeat-bench/config"
 	"github.com/tikv/pd/tools/pd-heartbeat-bench/metrics"
-	"go.etcd.io/etcd/pkg/v3/report"
-	"go.uber.org/zap"
 )
 
 const (

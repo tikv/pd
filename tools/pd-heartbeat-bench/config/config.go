@@ -4,11 +4,13 @@ import (
 	"sync/atomic"
 
 	"github.com/BurntSushi/toml"
+	flag "github.com/spf13/pflag"
+	"go.uber.org/zap"
+
 	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
-	flag "github.com/spf13/pflag"
+
 	"github.com/tikv/pd/pkg/utils/configutil"
-	"go.uber.org/zap"
 )
 
 const (

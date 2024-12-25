@@ -19,13 +19,16 @@ import (
 	"time"
 
 	"github.com/opentracing/opentracing-go"
+	"github.com/prometheus/client_golang/prometheus"
+
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/meta_storagepb"
-	"github.com/prometheus/client_golang/prometheus"
+
 	"github.com/tikv/pd/client/errs"
+	"github.com/tikv/pd/client/metrics"
 	"github.com/tikv/pd/client/opt"
-	"github.com/tikv/pd/client/utils/grpcutil"
+	"github.com/tikv/pd/client/pkg/utils/grpcutil"
 )
 
 // metaStorageClient gets the meta storage client from current PD leader.
@@ -62,7 +65,7 @@ func (c *innerClient) Put(ctx context.Context, key, value []byte, opts ...opt.Me
 		defer span.Finish()
 	}
 	start := time.Now()
-	defer func() { cmdDurationPut.Observe(time.Since(start).Seconds()) }()
+	defer func() { metrics.CmdDurationPut.Observe(time.Since(start).Seconds()) }()
 
 	ctx, cancel := context.WithTimeout(ctx, c.option.Timeout)
 	req := &meta_storagepb.PutRequest{
@@ -80,7 +83,7 @@ func (c *innerClient) Put(ctx context.Context, key, value []byte, opts ...opt.Me
 	resp, err := cli.Put(ctx, req)
 	cancel()
 
-	if err = c.respForMetaStorageErr(cmdFailedDurationPut, start, err, resp.GetHeader()); err != nil {
+	if err = c.respForMetaStorageErr(metrics.CmdFailedDurationPut, start, err, resp.GetHeader()); err != nil {
 		return nil, err
 	}
 	return resp, nil
@@ -101,7 +104,7 @@ func (c *innerClient) Get(ctx context.Context, key []byte, opts ...opt.MetaStora
 		defer span.Finish()
 	}
 	start := time.Now()
-	defer func() { cmdDurationGet.Observe(time.Since(start).Seconds()) }()
+	defer func() { metrics.CmdDurationGet.Observe(time.Since(start).Seconds()) }()
 
 	ctx, cancel := context.WithTimeout(ctx, c.option.Timeout)
 	req := &meta_storagepb.GetRequest{
@@ -119,7 +122,7 @@ func (c *innerClient) Get(ctx context.Context, key []byte, opts ...opt.MetaStora
 	resp, err := cli.Get(ctx, req)
 	cancel()
 
-	if err = c.respForMetaStorageErr(cmdFailedDurationGet, start, err, resp.GetHeader()); err != nil {
+	if err = c.respForMetaStorageErr(metrics.CmdFailedDurationGet, start, err, resp.GetHeader()); err != nil {
 		return nil, err
 	}
 	return resp, nil

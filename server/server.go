@@ -32,6 +32,13 @@ import (
 	"github.com/coreos/go-semver/semver"
 	"github.com/gogo/protobuf/proto"
 	"github.com/gorilla/mux"
+	"go.etcd.io/etcd/api/v3/mvccpb"
+	etcdtypes "go.etcd.io/etcd/client/pkg/v3/types"
+	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.etcd.io/etcd/server/v3/embed"
+	"go.uber.org/zap"
+	"google.golang.org/grpc"
+
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/diagnosticspb"
@@ -41,6 +48,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/tsopb"
 	"github.com/pingcap/log"
 	"github.com/pingcap/sysutil"
+
 	"github.com/tikv/pd/pkg/audit"
 	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/cgroup"
@@ -53,8 +61,6 @@ import (
 	ms_server "github.com/tikv/pd/pkg/mcs/metastorage/server"
 	"github.com/tikv/pd/pkg/mcs/registry"
 	rm_server "github.com/tikv/pd/pkg/mcs/resourcemanager/server"
-	_ "github.com/tikv/pd/pkg/mcs/resourcemanager/server/apis/v1" // init API group
-	_ "github.com/tikv/pd/pkg/mcs/tso/server/apis/v1"             // init tso API group
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/ratelimit"
@@ -80,12 +86,9 @@ import (
 	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/server/config"
-	"go.etcd.io/etcd/api/v3/mvccpb"
-	etcdtypes "go.etcd.io/etcd/client/pkg/v3/types"
-	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.etcd.io/etcd/server/v3/embed"
-	"go.uber.org/zap"
-	"google.golang.org/grpc"
+
+	_ "github.com/tikv/pd/pkg/mcs/resourcemanager/server/apis/v1" // init API group
+	_ "github.com/tikv/pd/pkg/mcs/tso/server/apis/v1"             // init tso API group
 )
 
 const (
@@ -93,9 +96,6 @@ const (
 	// pdRootPath for all pd servers.
 	pdRootPath  = "/pd"
 	pdAPIPrefix = "/pd/"
-	// idAllocPath for idAllocator to save persistent window's end.
-	idAllocPath  = "alloc_id"
-	idAllocLabel = "idalloc"
 
 	recoveringMarkPath = "cluster/markers/snapshot-recovering"
 
@@ -435,7 +435,7 @@ func (s *Server) startServer(ctx context.Context) error {
 	bs.ServerInfoGauge.WithLabelValues(versioninfo.PDReleaseVersion, versioninfo.PDGitHash).Set(float64(time.Now().Unix()))
 
 	s.rootPath = keypath.PDRootPath()
-	s.member.InitMemberInfo(s.cfg.AdvertiseClientUrls, s.cfg.AdvertisePeerUrls, s.Name(), s.rootPath)
+	s.member.InitMemberInfo(s.cfg.AdvertiseClientUrls, s.cfg.AdvertisePeerUrls, s.Name())
 	if err := s.member.SetMemberDeployPath(s.member.ID()); err != nil {
 		return err
 	}
@@ -446,11 +446,9 @@ func (s *Server) startServer(ctx context.Context) error {
 		return err
 	}
 	s.idAllocator = id.NewAllocator(&id.AllocatorParams{
-		Client:    s.client,
-		RootPath:  s.rootPath,
-		AllocPath: idAllocPath,
-		Label:     idAllocLabel,
-		Member:    s.member.MemberValue(),
+		Client: s.client,
+		Label:  id.DefaultLabel,
+		Member: s.member.MemberValue(),
 	})
 	s.encryptionKeyManager, err = encryption.NewManager(s.client, &s.cfg.Security.Encryption)
 	if err != nil {
@@ -471,28 +469,14 @@ func (s *Server) startServer(ctx context.Context) error {
 	s.tsoProtoFactory = &tsoutil.TSOProtoFactory{}
 	s.pdProtoFactory = &tsoutil.PDProtoFactory{}
 	s.tsoAllocatorManager = tso.NewAllocatorManager(s.ctx, constant.DefaultKeyspaceGroupID, s.member, s.rootPath, s.storage, s)
-	// When disabled the Local TSO, we should clean up the Local TSO Allocator's meta info written in etcd if it exists.
-	if !s.cfg.EnableLocalTSO {
-		if err = s.tsoAllocatorManager.CleanUpDCLocation(); err != nil {
-			return err
-		}
-	}
-	if zone, exist := s.cfg.Labels[config.ZoneLabel]; exist && zone != "" && s.cfg.EnableLocalTSO {
-		if err = s.tsoAllocatorManager.SetLocalTSOConfig(zone); err != nil {
-			return err
-		}
-	}
-
 	s.gcSafePointManager = gc.NewSafePointManager(s.storage, s.cfg.PDServerCfg)
 	s.basicCluster = core.NewBasicCluster()
 	s.cluster = cluster.NewRaftCluster(ctx, s.GetMember(), s.GetBasicCluster(), s.GetStorage(), syncer.NewRegionSyncer(s), s.client, s.httpClient, s.tsoAllocatorManager)
 	keyspaceIDAllocator := id.NewAllocator(&id.AllocatorParams{
-		Client:    s.client,
-		RootPath:  s.rootPath,
-		AllocPath: keypath.KeyspaceIDAlloc(),
-		Label:     keyspace.AllocLabel,
-		Member:    s.member.MemberValue(),
-		Step:      keyspace.AllocStep,
+		Client: s.client,
+		Label:  id.KeyspaceLabel,
+		Member: s.member.MemberValue(),
+		Step:   keyspace.AllocStep,
 	})
 	if s.IsAPIServiceMode() {
 		s.keyspaceGroupManager = keyspace.NewKeyspaceGroupManager(s.ctx, s.storage, s.client)
@@ -777,7 +761,7 @@ func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.BootstrapRe
 		log.Warn("flush the bootstrap region failed", errs.ZapError(err))
 	}
 
-	if err := s.cluster.Start(s); err != nil {
+	if err := s.cluster.Start(s, true); err != nil {
 		return nil, err
 	}
 
@@ -795,7 +779,7 @@ func (s *Server) createRaftCluster() error {
 		return nil
 	}
 
-	return s.cluster.Start(s)
+	return s.cluster.Start(s, false)
 }
 
 func (s *Server) stopRaftCluster() {
@@ -955,11 +939,6 @@ func (s *Server) GetServiceMiddlewareConfig() *config.ServiceMiddlewareConfig {
 	return cfg
 }
 
-// SetEnableLocalTSO sets enable-local-tso flag of Server. This function only for test.
-func (s *Server) SetEnableLocalTSO(enableLocalTSO bool) {
-	s.cfg.EnableLocalTSO = enableLocalTSO
-}
-
 // GetConfig gets the config information.
 func (s *Server) GetConfig() *config.Config {
 	cfg := s.cfg.Clone()
@@ -1068,7 +1047,7 @@ func (s *Server) SetReplicationConfig(cfg sc.ReplicationConfig) error {
 		}
 		if cfg.EnablePlacementRules {
 			// initialize rule manager.
-			if err := rc.GetRuleManager().Initialize(int(cfg.MaxReplicas), cfg.LocationLabels, cfg.IsolationLevel); err != nil {
+			if err := rc.GetRuleManager().Initialize(int(cfg.MaxReplicas), cfg.LocationLabels, cfg.IsolationLevel, false); err != nil {
 				return err
 			}
 		} else {
@@ -1637,10 +1616,6 @@ func (s *Server) leaderLoop() {
 				log.Error("reload config failed", errs.ZapError(err))
 				continue
 			}
-			if !s.IsAPIServiceMode() {
-				// Check the cluster dc-location after the PD leader is elected
-				go s.tsoAllocatorManager.ClusterDCLocationChecker()
-			}
 			syncer := s.cluster.GetRegionSyncer()
 			if s.persistOptions.IsUseRegionStorage() {
 				syncer.StartSyncWithLeader(leader.GetListenUrls()[0])
@@ -1752,10 +1727,6 @@ func (s *Server) campaignLeader() {
 	// EnableLeader to accept the remaining service, such as GetStore, GetRegion.
 	s.member.EnableLeader()
 	member.ServiceMemberGauge.WithLabelValues(s.mode).Set(1)
-	if !s.IsAPIServiceMode() {
-		// Check the cluster dc-location after the PD leader is elected.
-		go s.tsoAllocatorManager.ClusterDCLocationChecker()
-	}
 	defer resetLeaderOnce.Do(func() {
 		// as soon as cancel the leadership keepalive, then other member have chance
 		// to be new leader.
@@ -1997,15 +1968,19 @@ func (s *Server) SetServicePrimaryAddr(serviceName, addr string) {
 
 func (s *Server) initTSOPrimaryWatcher() {
 	serviceName := constant.TSOServiceName
-	tsoRootPath := keypath.TSOSvcRootPath()
-	tsoServicePrimaryKey := keypath.KeyspaceGroupPrimaryPath(tsoRootPath, constant.DefaultKeyspaceGroupID)
+	tsoServicePrimaryKey := keypath.LeaderPath(&keypath.MsParam{
+		ServiceName: constant.TSOServiceName,
+		GroupID:     constant.DefaultKeyspaceGroupID,
+	})
 	s.tsoPrimaryWatcher = s.initServicePrimaryWatcher(serviceName, tsoServicePrimaryKey)
 	s.tsoPrimaryWatcher.StartWatchLoop()
 }
 
 func (s *Server) initSchedulingPrimaryWatcher() {
 	serviceName := constant.SchedulingServiceName
-	primaryKey := keypath.SchedulingPrimaryPath()
+	primaryKey := keypath.LeaderPath(&keypath.MsParam{
+		ServiceName: constant.SchedulingServiceName,
+	})
 	s.schedulingPrimaryWatcher = s.initServicePrimaryWatcher(serviceName, primaryKey)
 	s.schedulingPrimaryWatcher.StartWatchLoop()
 }
@@ -2084,11 +2059,6 @@ func (s *Server) SetExternalTS(externalTS, globalTS uint64) error {
 	return c.SetExternalTS(externalTS)
 }
 
-// IsLocalTSOEnabled returns if the local TSO is enabled.
-func (s *Server) IsLocalTSOEnabled() bool {
-	return s.cfg.IsLocalTSOEnabled()
-}
-
 // GetMaxConcurrentTSOProxyStreamings returns the max concurrent TSO proxy streamings.
 // If the value is negative, there is no limit.
 func (s *Server) GetMaxConcurrentTSOProxyStreamings() int {
@@ -2124,4 +2094,10 @@ func (s *Server) GetMaxResetTSGap() time.Duration {
 // Notes: it is only used for test.
 func (s *Server) SetClient(client *clientv3.Client) {
 	s.client = client
+}
+
+// GetGlobalTSOAllocator return global tso allocator
+// It only is used for test.
+func (s *Server) GetGlobalTSOAllocator() tso.Allocator {
+	return s.cluster.GetGlobalTSOAllocator()
 }

@@ -16,6 +16,7 @@ package operator
 
 import (
 	"github.com/prometheus/client_golang/prometheus"
+
 	"github.com/tikv/pd/pkg/schedule/types"
 )
 

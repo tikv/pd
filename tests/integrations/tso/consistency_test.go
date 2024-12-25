@@ -20,10 +20,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/suite"
+	"google.golang.org/grpc"
+
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/tsopb"
-	"github.com/stretchr/testify/suite"
+
 	tso "github.com/tikv/pd/pkg/mcs/tso/server"
 	tsopkg "github.com/tikv/pd/pkg/tso"
 	"github.com/tikv/pd/pkg/utils/keypath"
@@ -31,7 +34,6 @@ import (
 	tu "github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/tests"
-	"google.golang.org/grpc"
 )
 
 type tsoConsistencyTestSuite struct {

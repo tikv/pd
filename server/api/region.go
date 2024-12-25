@@ -24,7 +24,10 @@ import (
 	"strings"
 
 	"github.com/gorilla/mux"
+	"github.com/unrolled/render"
+
 	"github.com/pingcap/errors"
+
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/keyspace"
@@ -33,7 +36,6 @@ import (
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/server"
-	"github.com/unrolled/render"
 )
 
 type regionHandler struct {

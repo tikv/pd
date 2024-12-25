@@ -16,6 +16,7 @@ package endpoint
 
 import (
 	"github.com/gogo/protobuf/proto"
+
 	"github.com/tikv/pd/pkg/utils/keypath"
 )
 

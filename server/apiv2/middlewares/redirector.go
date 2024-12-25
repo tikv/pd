@@ -19,11 +19,13 @@ import (
 	"net/url"
 
 	"github.com/gin-gonic/gin"
+	"go.uber.org/zap"
+
 	"github.com/pingcap/log"
+
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/server"
-	"go.uber.org/zap"
 )
 
 // Redirector is a middleware to redirect the request to the right place.

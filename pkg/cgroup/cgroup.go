@@ -26,9 +26,10 @@ import (
 	"strconv"
 	"strings"
 
+	"go.uber.org/zap"
+
 	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
-	"go.uber.org/zap"
 )
 
 // CPUQuotaStatus presents the status of how CPU quota is used
