@@ -79,6 +79,8 @@ func (suite *regionTestSuite) TestRegion() {
 	re := suite.Require()
 	mustRegionHeartbeat(re, suite.svr, r)
 	url := fmt.Sprintf("%s/region/id/%d", suite.urlPrefix, 0)
+	re.NoError(tu.CheckGetJSON(testDialClient, url, nil, tu.Status(re, http.StatusBadRequest)))
+	url = fmt.Sprintf("%s/region/id/%d", suite.urlPrefix, 2333)
 	re.NoError(tu.CheckGetJSON(testDialClient, url, nil, tu.Status(re, http.StatusNotFound)))
 	url = fmt.Sprintf("%s/region/id/%d", suite.urlPrefix, r.GetID())
 	r1 := &response.RegionInfo{}

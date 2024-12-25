@@ -65,6 +65,10 @@ func (h *regionHandler) GetRegionByID(w http.ResponseWriter, r *http.Request) {
 		h.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	if regionID == 0 {
+		h.rd.JSON(w, http.StatusBadRequest, errs.ErrRegionInvalidID.FastGenByArgs())
+		return
+	}
 
 	regionInfo := rc.GetRegion(regionID)
 	if regionInfo == nil {
