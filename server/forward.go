@@ -22,8 +22,6 @@ import (
 
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
@@ -107,7 +105,7 @@ func (s *GrpcServer) forwardTSO(stream pdpb.PD_TsoServer) error {
 	maxConcurrentTSOProxyStreamings := int32(s.GetMaxConcurrentTSOProxyStreamings())
 	if maxConcurrentTSOProxyStreamings >= 0 {
 		if newCount := s.concurrentTSOProxyStreamings.Add(1); newCount > maxConcurrentTSOProxyStreamings {
-			return errors.WithStack(ErrMaxCountTSOProxyRoutinesExceeded)
+			return errors.WithStack(errs.ErrMaxCountTSOProxyRoutinesExceeded)
 		}
 	}
 
@@ -132,7 +130,7 @@ func (s *GrpcServer) forwardTSO(stream pdpb.PD_TsoServer) error {
 		}
 		if request.GetCount() == 0 {
 			err = errs.ErrGenerateTimestamp.FastGenByArgs("tso count should be positive")
-			return status.Error(codes.Unknown, err.Error())
+			return errs.ErrUnknown(err)
 		}
 		forwardCtx, cancelForward, forwardStream, lastForwardedHost, tsoStreamErr, err = s.handleTSOForwarding(forwardCtx, forwardStream, stream, server, request, tsDeadlineCh, lastForwardedHost, cancelForward)
 		if tsoStreamErr != nil {
@@ -155,7 +153,7 @@ func (s *GrpcServer) handleTSOForwarding(forwardCtx context.Context, forwardStre
 ) {
 	forwardedHost, ok := s.GetServicePrimaryAddr(stream.Context(), constant.TSOServiceName)
 	if !ok || len(forwardedHost) == 0 {
-		return forwardCtx, cancelForward, forwardStream, lastForwardedHost, errors.WithStack(ErrNotFoundTSOAddr), nil
+		return forwardCtx, cancelForward, forwardStream, lastForwardedHost, errors.WithStack(errs.ErrNotFoundTSOAddr), nil
 	}
 	if forwardStream == nil || lastForwardedHost != forwardedHost {
 		if cancelForward != nil {
@@ -458,7 +456,7 @@ func (s *GrpcServer) getGlobalTSO(ctx context.Context) (pdpb.Timestamp, error) {
 		}
 		forwardedHost, ok = s.GetServicePrimaryAddr(ctx, constant.TSOServiceName)
 		if !ok || forwardedHost == "" {
-			return pdpb.Timestamp{}, ErrNotFoundTSOAddr
+			return pdpb.Timestamp{}, errs.ErrNotFoundTSOAddr
 		}
 		forwardStream, err = s.getTSOForwardStream(forwardedHost)
 		if err != nil {

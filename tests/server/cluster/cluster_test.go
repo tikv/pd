@@ -39,6 +39,7 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/dashboard"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/id"
 	"github.com/tikv/pd/pkg/mock/mockid"
 	"github.com/tikv/pd/pkg/mock/mockserver"
@@ -767,7 +768,7 @@ func TestNotLeader(t *testing.T) {
 	grpcStatus, ok := status.FromError(err)
 	re.True(ok)
 	re.Equal(codes.Unavailable, grpcStatus.Code())
-	re.ErrorContains(server.ErrNotLeader, grpcStatus.Message())
+	re.ErrorContains(errs.ErrNotLeader, grpcStatus.Message())
 }
 
 func TestStoreVersionChange(t *testing.T) {

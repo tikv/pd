@@ -566,7 +566,7 @@ func (h *confHandler) GetPDServerConfig(w http.ResponseWriter, _ *http.Request) 
 func (h *confHandler) getSchedulingServerConfig() (*config.Config, error) {
 	addr, ok := h.svr.GetServicePrimaryAddr(h.svr.Context(), constant.SchedulingServiceName)
 	if !ok {
-		return nil, errs.ErrNotFoundSchedulingAddr.FastGenByArgs()
+		return nil, errs.ErrNotFoundSchedulingPrimary.FastGenByArgs()
 	}
 	url := fmt.Sprintf("%s/scheduling/api/v1/config", addr)
 	req, err := http.NewRequest(http.MethodGet, url, http.NoBody)

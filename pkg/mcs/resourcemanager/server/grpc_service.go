@@ -22,8 +22,6 @@ import (
 
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
@@ -31,13 +29,9 @@ import (
 	"github.com/pingcap/log"
 
 	bs "github.com/tikv/pd/pkg/basicserver"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/registry"
 	"github.com/tikv/pd/pkg/utils/apiutil"
-)
-
-var (
-	// errNotLeader is returned when current server is not the leader.
-	errNotLeader = status.Errorf(codes.Unavailable, "not leader")
 )
 
 var _ rmpb.ResourceManagerServer = (*Service)(nil)
@@ -89,7 +83,7 @@ func (s *Service) GetManager() *Manager {
 
 func (s *Service) checkServing() error {
 	if s.manager == nil || s.manager.srv == nil || !s.manager.srv.IsServing() {
-		return errNotLeader
+		return errs.ErrNotLeader
 	}
 	return nil
 }

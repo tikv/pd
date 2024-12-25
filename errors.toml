@@ -661,9 +661,9 @@ error = '''
 init file log error, %s
 '''
 
-["PD:mcs:ErrNotFoundSchedulingAddr"]
+["PD:mcs:ErrNotFoundSchedulingPrimary"]
 error = '''
-cannot find scheduling address
+cannot find scheduling primary
 '''
 
 ["PD:mcs:ErrSchedulingServer"]

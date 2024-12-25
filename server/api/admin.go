@@ -231,7 +231,7 @@ func (h *adminHandler) recoverAllocID(w http.ResponseWriter, r *http.Request) {
 func (h *adminHandler) deleteRegionCacheInSchedulingServer(id ...uint64) error {
 	addr, ok := h.svr.GetServicePrimaryAddr(h.svr.Context(), constant.SchedulingServiceName)
 	if !ok {
-		return errs.ErrNotFoundSchedulingAddr.FastGenByArgs()
+		return errs.ErrNotFoundSchedulingPrimary.FastGenByArgs()
 	}
 	var idStr string
 	if len(id) > 0 {
