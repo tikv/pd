@@ -67,8 +67,16 @@ func (h *regionHandler) GetRegionByID(w http.ResponseWriter, r *http.Request) {
 		h.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	if regionID == 0 {
+		h.rd.JSON(w, http.StatusBadRequest, errs.ErrRegionInvalidID.FastGenByArgs())
+		return
+	}
 
 	regionInfo := rc.GetRegion(regionID)
+	if regionInfo == nil {
+		h.rd.JSON(w, http.StatusNotFound, errs.ErrRegionNotFound.FastGenByArgs(regionID).Error())
+		return
+	}
 	b, err := response.MarshalRegionInfoJSON(r.Context(), regionInfo)
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
@@ -101,6 +109,10 @@ func (h *regionHandler) GetRegion(w http.ResponseWriter, r *http.Request) {
 	}
 
 	regionInfo := rc.GetRegionByKey(paramsByte[0])
+	if regionInfo == nil {
+		h.rd.JSON(w, http.StatusNotFound, errs.ErrRegionNotFound.FastGenByArgs().Error())
+		return
+	}
 	b, err := response.MarshalRegionInfoJSON(r.Context(), regionInfo)
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())

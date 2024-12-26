@@ -1476,6 +1476,10 @@ func getRegionByID(c *gin.Context) {
 		c.String(http.StatusBadRequest, err.Error())
 		return
 	}
+	if regionID == 0 {
+		c.String(http.StatusBadRequest, errs.ErrRegionInvalidID.FastGenByArgs().Error())
+		return
+	}
 	regionInfo := svr.GetBasicCluster().GetRegion(regionID)
 	if regionInfo == nil {
 		c.String(http.StatusNotFound, errs.ErrRegionNotFound.FastGenByArgs(regionID).Error())

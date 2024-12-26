@@ -80,7 +80,11 @@ func (suite *regionTestSuite) TestRegion() {
 	r.UpdateBuckets(buckets, r.GetBuckets())
 	re := suite.Require()
 	mustRegionHeartbeat(re, suite.svr, r)
-	url := fmt.Sprintf("%s/region/id/%d", suite.urlPrefix, r.GetID())
+	url := fmt.Sprintf("%s/region/id/%d", suite.urlPrefix, 0)
+	re.NoError(tu.CheckGetJSON(testDialClient, url, nil, tu.Status(re, http.StatusBadRequest)))
+	url = fmt.Sprintf("%s/region/id/%d", suite.urlPrefix, 2333)
+	re.NoError(tu.CheckGetJSON(testDialClient, url, nil, tu.Status(re, http.StatusNotFound)))
+	url = fmt.Sprintf("%s/region/id/%d", suite.urlPrefix, r.GetID())
 	r1 := &response.RegionInfo{}
 	r1m := make(map[string]any)
 	re.NoError(tu.ReadGetJSON(re, testDialClient, url, r1))
@@ -96,6 +100,8 @@ func (suite *regionTestSuite) TestRegion() {
 	re.Equal(core.HexRegionKeyStr([]byte("a")), keys[0].(string))
 	re.Equal(core.HexRegionKeyStr([]byte("b")), keys[1].(string))
 
+	url = fmt.Sprintf("%s/region/key/%s", suite.urlPrefix, "c")
+	re.NoError(tu.CheckGetJSON(testDialClient, url, nil, tu.Status(re, http.StatusNotFound)))
 	url = fmt.Sprintf("%s/region/key/%s", suite.urlPrefix, "a")
 	r2 := &response.RegionInfo{}
 	re.NoError(tu.ReadGetJSON(re, testDialClient, url, r2))

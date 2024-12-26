@@ -32,8 +32,6 @@ import (
 	"go.uber.org/multierr"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
@@ -65,23 +63,6 @@ const (
 	defaultGRPCDialTimeout        = 3 * time.Second
 
 	gRPCServiceName = "pdpb.PD"
-)
-
-// gRPC errors
-var (
-	// ErrNotLeader is returned when current server is not the leader and not possible to process request.
-	// TODO: work as proxy.
-	ErrNotLeader                        = status.Errorf(codes.Unavailable, "not leader")
-	ErrNotStarted                       = status.Errorf(codes.Unavailable, "server not started")
-	ErrSendHeartbeatTimeout             = status.Errorf(codes.DeadlineExceeded, "send heartbeat timeout")
-	ErrNotFoundTSOAddr                  = status.Errorf(codes.NotFound, "not found tso address")
-	ErrNotFoundSchedulingAddr           = status.Errorf(codes.NotFound, "not found scheduling address")
-	ErrNotFoundService                  = status.Errorf(codes.NotFound, "not found service")
-	ErrForwardTSOTimeout                = status.Errorf(codes.DeadlineExceeded, "forward tso request timeout")
-	ErrMaxCountTSOProxyRoutinesExceeded = status.Errorf(codes.ResourceExhausted, "max count of concurrent tso proxy routines exceeded")
-	ErrTSOProxyRecvFromClientTimeout    = status.Errorf(codes.DeadlineExceeded, "tso proxy timeout when receiving from client; stream closed by server")
-	ErrEtcdNotStarted                   = status.Errorf(codes.Unavailable, "server is started, but etcd not started")
-	ErrFollowerHandlingNotAllowed       = status.Errorf(codes.Unavailable, "not leader and follower handling not allowed")
 )
 
 var (
@@ -137,7 +118,7 @@ func (s *tsoServer) send(m *pdpb.TsoResponse) error {
 		return errors.WithStack(err)
 	case <-timer.C:
 		atomic.StoreInt32(&s.closed, 1)
-		return ErrForwardTSOTimeout
+		return errs.ErrForwardTSOTimeout
 	}
 }
 
@@ -167,7 +148,7 @@ func (s *tsoServer) recv(timeout time.Duration) (*pdpb.TsoRequest, error) {
 		return req.request, nil
 	case <-timer.C:
 		atomic.StoreInt32(&s.closed, 1)
-		return nil, ErrTSOProxyRecvFromClientTimeout
+		return nil, errs.ErrTSOProxyRecvFromClientTimeout
 	}
 }
 
@@ -198,7 +179,7 @@ func (s *heartbeatServer) Send(m core.RegionHeartbeatResponse) error {
 		return errors.WithStack(err)
 	case <-timer.C:
 		atomic.StoreInt32(&s.closed, 1)
-		return ErrSendHeartbeatTimeout
+		return errs.ErrSendHeartbeatTimeout
 	}
 }
 
@@ -302,7 +283,7 @@ func (s *GrpcServer) GetMinTS(
 		if done, err := limiter.Allow(fName); err == nil {
 			defer done()
 		} else {
-			return nil, status.Error(codes.ResourceExhausted, err.Error())
+			return nil, errs.ErrGRPCRateLimitExceeded(err)
 		}
 	}
 	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
@@ -456,7 +437,7 @@ func (s *GrpcServer) GetMembers(context.Context, *pdpb.GetMembersRequest) (*pdpb
 		if done, err := limiter.Allow(fName); err == nil {
 			defer done()
 		} else {
-			return nil, status.Error(codes.ResourceExhausted, err.Error())
+			return nil, errs.ErrGRPCRateLimitExceeded(err)
 		}
 	}
 	// Here we purposely do not check the cluster ID because the client does not know the correct cluster ID
@@ -506,7 +487,7 @@ func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
 		if done, err := limiter.Allow(fName); err == nil {
 			defer done()
 		} else {
-			return status.Error(codes.ResourceExhausted, err.Error())
+			return errs.ErrGRPCRateLimitExceeded(err)
 		}
 	}
 	if s.IsServiceIndependent(constant.TSOServiceName) {
@@ -576,7 +557,7 @@ func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
 		if s.IsServiceIndependent(constant.TSOServiceName) {
 			if request.GetCount() == 0 {
 				err = errs.ErrGenerateTimestamp.FastGenByArgs("tso count should be positive")
-				return status.Error(codes.Unknown, err.Error())
+				return errs.ErrUnknown(err)
 			}
 			forwardCtx, cancelForward, forwardStream, lastForwardedHost, tsoStreamErr, err = s.handleTSOForwarding(forwardCtx, forwardStream, stream, nil, request, tsDeadlineCh, lastForwardedHost, cancelForward)
 			if tsoStreamErr != nil {
@@ -591,11 +572,10 @@ func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
 		start := time.Now()
 		// TSO uses leader lease to determine validity. No need to check leader here.
 		if s.IsClosed() {
-			return status.Errorf(codes.Unknown, "server not started")
+			return errs.ErrNotStarted
 		}
 		if clusterID := keypath.ClusterID(); request.GetHeader().GetClusterId() != clusterID {
-			return status.Errorf(codes.FailedPrecondition,
-				"mismatch cluster id, need %d but got %d", clusterID, request.GetHeader().GetClusterId())
+			return errs.ErrMismatchClusterID(clusterID, request.GetHeader().GetClusterId())
 		}
 		count := request.GetCount()
 		ctx, task := trace.NewTask(ctx, "tso")
@@ -603,7 +583,7 @@ func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
 		task.End()
 		tsoHandleDuration.Observe(time.Since(start).Seconds())
 		if err != nil {
-			return status.Error(codes.Unknown, err.Error())
+			return errs.ErrUnknown(err)
 		}
 		response := &pdpb.TsoResponse{
 			Header:    wrapHeader(),
@@ -624,7 +604,7 @@ func (s *GrpcServer) Bootstrap(ctx context.Context, request *pdpb.BootstrapReque
 		if done, err := limiter.Allow(fName); err == nil {
 			defer done()
 		} else {
-			return nil, status.Error(codes.ResourceExhausted, err.Error())
+			return nil, errs.ErrGRPCRateLimitExceeded(err)
 		}
 	}
 	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
@@ -666,7 +646,7 @@ func (s *GrpcServer) IsBootstrapped(ctx context.Context, request *pdpb.IsBootstr
 		if done, err := limiter.Allow(fName); err == nil {
 			defer done()
 		} else {
-			return nil, status.Error(codes.ResourceExhausted, err.Error())
+			return nil, errs.ErrGRPCRateLimitExceeded(err)
 		}
 	}
 	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
@@ -693,7 +673,7 @@ func (s *GrpcServer) AllocID(ctx context.Context, request *pdpb.AllocIDRequest) 
 		if done, err := limiter.Allow(fName); err == nil {
 			defer done()
 		} else {
-			return nil, status.Error(codes.ResourceExhausted, err.Error())
+			return nil, errs.ErrGRPCRateLimitExceeded(err)
 		}
 	}
 	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
@@ -727,7 +707,7 @@ func (s *GrpcServer) IsSnapshotRecovering(ctx context.Context, _ *pdpb.IsSnapsho
 		if done, err := limiter.Allow(fName); err == nil {
 			defer done()
 		} else {
-			return nil, status.Error(codes.ResourceExhausted, err.Error())
+			return nil, errs.ErrGRPCRateLimitExceeded(err)
 		}
 	}
 	// recovering mark is stored in etcd directly, there's no need to forward.
@@ -751,7 +731,7 @@ func (s *GrpcServer) GetStore(ctx context.Context, request *pdpb.GetStoreRequest
 		if done, err := limiter.Allow(fName); err == nil {
 			defer done()
 		} else {
-			return nil, status.Error(codes.ResourceExhausted, err.Error())
+			return nil, errs.ErrGRPCRateLimitExceeded(err)
 		}
 	}
 	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
@@ -805,7 +785,7 @@ func (s *GrpcServer) PutStore(ctx context.Context, request *pdpb.PutStoreRequest
 		if done, err := limiter.Allow(fName); err == nil {
 			defer done()
 		} else {
-			return nil, status.Error(codes.ResourceExhausted, err.Error())
+			return nil, errs.ErrGRPCRateLimitExceeded(err)
 		}
 	}
 	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
@@ -860,7 +840,7 @@ func (s *GrpcServer) GetAllStores(ctx context.Context, request *pdpb.GetAllStore
 		if done, err := limiter.Allow(fName); err == nil {
 			defer done()
 		} else {
-			return nil, status.Error(codes.ResourceExhausted, err.Error())
+			return nil, errs.ErrGRPCRateLimitExceeded(err)
 		}
 	}
 	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
@@ -903,7 +883,7 @@ func (s *GrpcServer) StoreHeartbeat(ctx context.Context, request *pdpb.StoreHear
 		if done, err := limiter.Allow(fName); err == nil {
 			defer done()
 		} else {
-			return nil, status.Error(codes.ResourceExhausted, err.Error())
+			return nil, errs.ErrGRPCRateLimitExceeded(err)
 		}
 	}
 	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
@@ -992,7 +972,7 @@ func (s *GrpcServer) StoreHeartbeat(ctx context.Context, request *pdpb.StoreHear
 func (s *GrpcServer) updateSchedulingClient(ctx context.Context) (*schedulingClient, error) {
 	forwardedHost, _ := s.GetServicePrimaryAddr(ctx, constant.SchedulingServiceName)
 	if forwardedHost == "" {
-		return nil, ErrNotFoundSchedulingAddr
+		return nil, errs.ErrNotFoundSchedulingAddr
 	}
 
 	pre := s.schedulingClient.Load()
@@ -1029,7 +1009,7 @@ type bucketHeartbeatServer struct {
 
 func (b *bucketHeartbeatServer) send(bucket *pdpb.ReportBucketsResponse) error {
 	if atomic.LoadInt32(&b.closed) == 1 {
-		return status.Errorf(codes.Canceled, "stream is closed")
+		return errs.ErrStreamClosed
 	}
 	done := make(chan error, 1)
 	go func() {
@@ -1046,7 +1026,7 @@ func (b *bucketHeartbeatServer) send(bucket *pdpb.ReportBucketsResponse) error {
 		return err
 	case <-timer.C:
 		atomic.StoreInt32(&b.closed, 1)
-		return ErrSendHeartbeatTimeout
+		return errs.ErrSendHeartbeatTimeout
 	}
 }
 
@@ -1082,13 +1062,13 @@ func (s *GrpcServer) ReportBuckets(stream pdpb.PD_ReportBucketsServer) error {
 		if done, err := limiter.Allow(fName); err == nil {
 			defer done()
 		} else {
-			return status.Error(codes.ResourceExhausted, err.Error())
+			return errs.ErrGRPCRateLimitExceeded(err)
 		}
 	}
 	for {
 		request, err := server.recv()
 		failpoint.Inject("grpcClientClosed", func() {
-			err = status.Error(codes.Canceled, "grpc client closed")
+			err = errs.ErrStreamClosed
 			request = nil
 		})
 		if err == io.EOF {
@@ -1198,7 +1178,7 @@ func (s *GrpcServer) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error
 		if done, err := limiter.Allow(fName); err == nil {
 			defer done()
 		} else {
-			return status.Error(codes.ResourceExhausted, err.Error())
+			return errs.ErrGRPCRateLimitExceeded(err)
 		}
 	}
 	for {
@@ -1398,7 +1378,7 @@ func (s *GrpcServer) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error
 // GetRegion implements gRPC PDServer.
 func (s *GrpcServer) GetRegion(ctx context.Context, request *pdpb.GetRegionRequest) (*pdpb.GetRegionResponse, error) {
 	failpoint.Inject("rateLimit", func() {
-		failpoint.Return(nil, status.Error(codes.ResourceExhausted, errs.ErrRateLimitExceeded.Error()))
+		failpoint.Return(nil, errs.ErrGRPCRateLimitExceeded(errs.ErrRateLimitExceeded))
 	})
 	if s.GetServiceMiddlewarePersistOptions().IsGRPCRateLimitEnabled() {
 		fName := currentFunction()
@@ -1406,7 +1386,7 @@ func (s *GrpcServer) GetRegion(ctx context.Context, request *pdpb.GetRegionReque
 		if done, err := limiter.Allow(fName); err == nil {
 			defer done()
 		} else {
-			return nil, status.Error(codes.ResourceExhausted, err.Error())
+			return nil, errs.ErrGRPCRateLimitExceeded(err)
 		}
 	}
 	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
@@ -1468,7 +1448,7 @@ func (s *GrpcServer) GetPrevRegion(ctx context.Context, request *pdpb.GetRegionR
 		if done, err := limiter.Allow(fName); err == nil {
 			defer done()
 		} else {
-			return nil, status.Error(codes.ResourceExhausted, err.Error())
+			return nil, errs.ErrGRPCRateLimitExceeded(err)
 		}
 	}
 	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
@@ -1525,7 +1505,7 @@ func (s *GrpcServer) GetRegionByID(ctx context.Context, request *pdpb.GetRegionB
 		if done, err := limiter.Allow(fName); err == nil {
 			defer done()
 		} else {
-			return nil, status.Error(codes.ResourceExhausted, err.Error())
+			return nil, errs.ErrGRPCRateLimitExceeded(err)
 		}
 	}
 	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
@@ -1585,7 +1565,7 @@ func (s *GrpcServer) ScanRegions(ctx context.Context, request *pdpb.ScanRegionsR
 		if done, err := limiter.Allow(fName); err == nil {
 			defer done()
 		} else {
-			return nil, status.Error(codes.ResourceExhausted, err.Error())
+			return nil, errs.ErrGRPCRateLimitExceeded(err)
 		}
 	}
 	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
@@ -1641,7 +1621,7 @@ func (s *GrpcServer) BatchScanRegions(ctx context.Context, request *pdpb.BatchSc
 		if done, err := limiter.Allow(fName); err == nil {
 			defer done()
 		} else {
-			return nil, status.Error(codes.ResourceExhausted, err.Error())
+			return nil, errs.ErrGRPCRateLimitExceeded(err)
 		}
 	}
 	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
@@ -1731,7 +1711,7 @@ func (s *GrpcServer) AskSplit(ctx context.Context, request *pdpb.AskSplitRequest
 		if done, err := limiter.Allow(fName); err == nil {
 			defer done()
 		} else {
-			return nil, status.Error(codes.ResourceExhausted, err.Error())
+			return nil, errs.ErrGRPCRateLimitExceeded(err)
 		}
 	}
 	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
@@ -1775,7 +1755,7 @@ func (s *GrpcServer) AskBatchSplit(ctx context.Context, request *pdpb.AskBatchSp
 		if done, err := limiter.Allow(fName); err == nil {
 			defer done()
 		} else {
-			return nil, status.Error(codes.ResourceExhausted, err.Error())
+			return nil, errs.ErrGRPCRateLimitExceeded(err)
 		}
 	}
 
@@ -1849,7 +1829,7 @@ func (s *GrpcServer) ReportSplit(ctx context.Context, request *pdpb.ReportSplitR
 		if done, err := limiter.Allow(fName); err == nil {
 			defer done()
 		} else {
-			return nil, status.Error(codes.ResourceExhausted, err.Error())
+			return nil, errs.ErrGRPCRateLimitExceeded(err)
 		}
 	}
 	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
@@ -1885,7 +1865,7 @@ func (s *GrpcServer) ReportBatchSplit(ctx context.Context, request *pdpb.ReportB
 		if done, err := limiter.Allow(fName); err == nil {
 			defer done()
 		} else {
-			return nil, status.Error(codes.ResourceExhausted, err.Error())
+			return nil, errs.ErrGRPCRateLimitExceeded(err)
 		}
 	}
 	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
@@ -1922,7 +1902,7 @@ func (s *GrpcServer) GetClusterConfig(ctx context.Context, request *pdpb.GetClus
 		if done, err := limiter.Allow(fName); err == nil {
 			defer done()
 		} else {
-			return nil, status.Error(codes.ResourceExhausted, err.Error())
+			return nil, errs.ErrGRPCRateLimitExceeded(err)
 		}
 	}
 	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
@@ -1952,7 +1932,7 @@ func (s *GrpcServer) PutClusterConfig(ctx context.Context, request *pdpb.PutClus
 		if done, err := limiter.Allow(fName); err == nil {
 			defer done()
 		} else {
-			return nil, status.Error(codes.ResourceExhausted, err.Error())
+			return nil, errs.ErrGRPCRateLimitExceeded(err)
 		}
 	}
 	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
@@ -1991,7 +1971,7 @@ func (s *GrpcServer) ScatterRegion(ctx context.Context, request *pdpb.ScatterReg
 		if done, err := limiter.Allow(fName); err == nil {
 			defer done()
 		} else {
-			return nil, status.Error(codes.ResourceExhausted, err.Error())
+			return nil, errs.ErrGRPCRateLimitExceeded(err)
 		}
 	}
 
@@ -2103,7 +2083,7 @@ func (s *GrpcServer) GetGCSafePoint(ctx context.Context, request *pdpb.GetGCSafe
 		if done, err := limiter.Allow(fName); err == nil {
 			defer done()
 		} else {
-			return nil, status.Error(codes.ResourceExhausted, err.Error())
+			return nil, errs.ErrGRPCRateLimitExceeded(err)
 		}
 	}
 	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
@@ -2134,7 +2114,7 @@ func (s *GrpcServer) GetGCSafePoint(ctx context.Context, request *pdpb.GetGCSafe
 // SyncRegions syncs the regions.
 func (s *GrpcServer) SyncRegions(stream pdpb.PD_SyncRegionsServer) error {
 	if s.IsClosed() || s.cluster == nil {
-		return ErrNotStarted
+		return errs.ErrNotStarted
 	}
 	if s.GetServiceMiddlewarePersistOptions().IsGRPCRateLimitEnabled() {
 		fName := currentFunction()
@@ -2142,12 +2122,12 @@ func (s *GrpcServer) SyncRegions(stream pdpb.PD_SyncRegionsServer) error {
 		if done, err := limiter.Allow(fName); err == nil {
 			defer done()
 		} else {
-			return status.Error(codes.ResourceExhausted, err.Error())
+			return errs.ErrGRPCRateLimitExceeded(err)
 		}
 	}
 	ctx := s.cluster.Context()
 	if ctx == nil {
-		return ErrNotStarted
+		return errs.ErrNotStarted
 	}
 	return s.cluster.GetRegionSyncer().Sync(ctx, stream)
 }
@@ -2160,7 +2140,7 @@ func (s *GrpcServer) UpdateGCSafePoint(ctx context.Context, request *pdpb.Update
 		if done, err := limiter.Allow(fName); err == nil {
 			defer done()
 		} else {
-			return nil, status.Error(codes.ResourceExhausted, err.Error())
+			return nil, errs.ErrGRPCRateLimitExceeded(err)
 		}
 	}
 	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
@@ -2207,7 +2187,7 @@ func (s *GrpcServer) UpdateServiceGCSafePoint(ctx context.Context, request *pdpb
 		if done, err := limiter.Allow(fName); err == nil {
 			defer done()
 		} else {
-			return nil, status.Error(codes.ResourceExhausted, err.Error())
+			return nil, errs.ErrGRPCRateLimitExceeded(err)
 		}
 	}
 	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
@@ -2261,7 +2241,7 @@ func (s *GrpcServer) GetOperator(ctx context.Context, request *pdpb.GetOperatorR
 		if done, err := limiter.Allow(fName); err == nil {
 			defer done()
 		} else {
-			return nil, status.Error(codes.ResourceExhausted, err.Error())
+			return nil, errs.ErrGRPCRateLimitExceeded(err)
 		}
 	}
 
@@ -2334,20 +2314,20 @@ func (s *GrpcServer) validateRequest(header *pdpb.RequestHeader) error {
 // TODO: Call it in gRPC interceptor.
 func (s *GrpcServer) validateRoleInRequest(ctx context.Context, header *pdpb.RequestHeader, allowFollower *bool) error {
 	if s.IsClosed() {
-		return ErrNotStarted
+		return errs.ErrNotStarted
 	}
 	if !s.member.IsLeader() {
 		if allowFollower == nil {
-			return ErrNotLeader
+			return errs.ErrNotLeader
 		}
 		if !grpcutil.IsFollowerHandleEnabled(ctx) {
 			// TODO: change the error code
-			return ErrFollowerHandlingNotAllowed
+			return errs.ErrFollowerHandlingNotAllowed
 		}
 		*allowFollower = true
 	}
 	if clusterID := keypath.ClusterID(); header.GetClusterId() != clusterID {
-		return status.Errorf(codes.FailedPrecondition, "mismatch cluster id, need %d but got %d", clusterID, header.GetClusterId())
+		return errs.ErrMismatchClusterID(clusterID, header.GetClusterId())
 	}
 	return nil
 }
@@ -2473,7 +2453,7 @@ func (s *GrpcServer) SplitRegions(ctx context.Context, request *pdpb.SplitRegion
 		if done, err := limiter.Allow(fName); err == nil {
 			defer done()
 		} else {
-			return nil, status.Error(codes.ResourceExhausted, err.Error())
+			return nil, errs.ErrGRPCRateLimitExceeded(err)
 		}
 	}
 
@@ -2537,7 +2517,7 @@ func (s *GrpcServer) SplitAndScatterRegions(ctx context.Context, request *pdpb.S
 		if done, err := limiter.Allow(fName); err == nil {
 			defer done()
 		} else {
-			return nil, status.Error(codes.ResourceExhausted, err.Error())
+			return nil, errs.ErrGRPCRateLimitExceeded(err)
 		}
 	}
 	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
@@ -2600,7 +2580,7 @@ const globalConfigPath = "/global/config/"
 // it should be set to `Payload bytes` instead of `Value string`
 func (s *GrpcServer) StoreGlobalConfig(_ context.Context, request *pdpb.StoreGlobalConfigRequest) (*pdpb.StoreGlobalConfigResponse, error) {
 	if s.client == nil {
-		return nil, ErrEtcdNotStarted
+		return nil, errs.ErrEtcdNotStarted
 	}
 	if s.GetServiceMiddlewarePersistOptions().IsGRPCRateLimitEnabled() {
 		fName := currentFunction()
@@ -2608,7 +2588,7 @@ func (s *GrpcServer) StoreGlobalConfig(_ context.Context, request *pdpb.StoreGlo
 		if done, err := limiter.Allow(fName); err == nil {
 			defer done()
 		} else {
-			return nil, status.Error(codes.ResourceExhausted, err.Error())
+			return nil, errs.ErrGRPCRateLimitExceeded(err)
 		}
 	}
 	configPath := request.GetConfigPath()
@@ -2646,7 +2626,7 @@ func (s *GrpcServer) StoreGlobalConfig(_ context.Context, request *pdpb.StoreGlo
 // - `ConfigPath` if `Names` is nil can get all values and revision of current path
 func (s *GrpcServer) LoadGlobalConfig(ctx context.Context, request *pdpb.LoadGlobalConfigRequest) (*pdpb.LoadGlobalConfigResponse, error) {
 	if s.client == nil {
-		return nil, ErrEtcdNotStarted
+		return nil, errs.ErrEtcdNotStarted
 	}
 	if s.GetServiceMiddlewarePersistOptions().IsGRPCRateLimitEnabled() {
 		fName := currentFunction()
@@ -2654,7 +2634,7 @@ func (s *GrpcServer) LoadGlobalConfig(ctx context.Context, request *pdpb.LoadGlo
 		if done, err := limiter.Allow(fName); err == nil {
 			defer done()
 		} else {
-			return nil, status.Error(codes.ResourceExhausted, err.Error())
+			return nil, errs.ErrGRPCRateLimitExceeded(err)
 		}
 	}
 	configPath := request.GetConfigPath()
@@ -2694,7 +2674,7 @@ func (s *GrpcServer) LoadGlobalConfig(ctx context.Context, request *pdpb.LoadGlo
 // Watch on revision which greater than or equal to the required revision.
 func (s *GrpcServer) WatchGlobalConfig(req *pdpb.WatchGlobalConfigRequest, server pdpb.PD_WatchGlobalConfigServer) error {
 	if s.client == nil {
-		return ErrEtcdNotStarted
+		return errs.ErrEtcdNotStarted
 	}
 	if s.GetServiceMiddlewarePersistOptions().IsGRPCRateLimitEnabled() {
 		fName := currentFunction()
@@ -2702,7 +2682,7 @@ func (s *GrpcServer) WatchGlobalConfig(req *pdpb.WatchGlobalConfigRequest, serve
 		if done, err := limiter.Allow(fName); err == nil {
 			defer done()
 		} else {
-			return status.Error(codes.ResourceExhausted, err.Error())
+			return errs.ErrGRPCRateLimitExceeded(err)
 		}
 	}
 	ctx, cancel := context.WithCancel(server.Context())
@@ -2799,7 +2779,7 @@ func (s *GrpcServer) ReportMinResolvedTS(ctx context.Context, request *pdpb.Repo
 		if done, err := limiter.Allow(fName); err == nil {
 			defer done()
 		} else {
-			return nil, status.Error(codes.ResourceExhausted, err.Error())
+			return nil, errs.ErrGRPCRateLimitExceeded(err)
 		}
 	}
 	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
@@ -2837,7 +2817,7 @@ func (s *GrpcServer) SetExternalTimestamp(ctx context.Context, request *pdpb.Set
 		if done, err := limiter.Allow(fName); err == nil {
 			defer done()
 		} else {
-			return nil, status.Error(codes.ResourceExhausted, err.Error())
+			return nil, errs.ErrGRPCRateLimitExceeded(err)
 		}
 	}
 	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
@@ -2873,7 +2853,7 @@ func (s *GrpcServer) GetExternalTimestamp(ctx context.Context, request *pdpb.Get
 		if done, err := limiter.Allow(fName); err == nil {
 			defer done()
 		} else {
-			return nil, status.Error(codes.ResourceExhausted, err.Error())
+			return nil, errs.ErrGRPCRateLimitExceeded(err)
 		}
 	}
 	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
