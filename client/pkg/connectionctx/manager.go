@@ -73,10 +73,10 @@ func (c *Manager[T]) storeLocked(ctx context.Context, url string, stream T) {
 	c.connectionCtxs[url] = &connectionCtx[T]{cctx, cancel, url, stream}
 }
 
-// ExclusivelyStore is used to store the connection context exclusively. It will release
+// CleanAllAndStore is used to store the connection context exclusively. It will release
 // all other connection contexts. `stream` is optional, if it is not provided, all
 // connection contexts other than the given `url` will be released.
-func (c *Manager[T]) ExclusivelyStore(ctx context.Context, url string, stream ...T) {
+func (c *Manager[T]) CleanAllAndStore(ctx context.Context, url string, stream ...T) {
 	c.Lock()
 	defer c.Unlock()
 	// Remove all other `connectionCtx`s.
@@ -125,9 +125,9 @@ func (c *Manager[T]) releaseLocked(url string) {
 	delete(c.connectionCtxs, url)
 }
 
-// Choose is used to choose a connection context from the connection context map.
-// It uses the reservoir sampling algorithm to randomly choose a connection context.
-func (c *Manager[T]) Choose() *connectionCtx[T] {
+// GetConnectionCtx is used to get a connection context from the connection context map.
+// It uses the reservoir sampling algorithm to randomly pick one connection context.
+func (c *Manager[T]) GetConnectionCtx() *connectionCtx[T] {
 	c.RLock()
 	defer c.RUnlock()
 	idx := 0
