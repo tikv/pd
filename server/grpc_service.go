@@ -536,6 +536,11 @@ func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
 			return errors.WithStack(err)
 		}
 
+		// TSO uses leader lease to determine validity. No need to check leader here.
+		if s.IsClosed() {
+			return errs.ErrNotStarted
+		}
+
 		forwardedHost := grpcutil.GetForwardedHost(stream.Context())
 		if !s.isLocalRequest(forwardedHost) {
 			clientConn, err := s.getDelegateClient(s.ctx, forwardedHost)
@@ -570,10 +575,6 @@ func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
 		}
 
 		start := time.Now()
-		// TSO uses leader lease to determine validity. No need to check leader here.
-		if s.IsClosed() {
-			return errs.ErrNotStarted
-		}
 		if clusterID := keypath.ClusterID(); request.GetHeader().GetClusterId() != clusterID {
 			return errs.ErrMismatchClusterID(clusterID, request.GetHeader().GetClusterId())
 		}
