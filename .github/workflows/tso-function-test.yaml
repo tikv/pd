@@ -6,14 +6,14 @@ on:
       - release-5.*
       - release-6.*
       - release-7.*
-      - feature/release-.*
+      - feature/**
   pull_request:
     branches:
       - master
       - release-5.*
       - release-6.*
       - release-7.*
-      - feature/release-.*
+      - feature/**
 concurrency:
   group: ${{ github.ref }}-${{ github.workflow }}
   cancel-in-progress: true
