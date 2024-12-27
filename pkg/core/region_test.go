@@ -985,10 +985,10 @@ func TestUpdateRegionEquivalence(t *testing.T) {
 		checkRegions(re, regionsNew)
 
 		for _, r := range regionsOld.GetRegions() {
-			re.Equal(int32(2), r.GetRef(), fmt.Sprintf("inconsistent region %d", r.GetID()))
+			re.Equalf(int32(2), r.GetRef(), "inconsistent region %d", r.GetID())
 		}
 		for _, r := range regionsNew.GetRegions() {
-			re.Equal(int32(2), r.GetRef(), fmt.Sprintf("inconsistent region %d", r.GetID()))
+			re.Equalf(int32(2), r.GetRef(), "inconsistent region %d", r.GetID())
 		}
 
 		for i := 1; i <= storeNums; i++ {
