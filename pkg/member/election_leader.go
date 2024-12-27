@@ -21,7 +21,7 @@ import (
 )
 
 // ElectionLeader defines the common interface of the leader, which is the pdpb.Member
-// for in PD/API service or the tsopb.Participant in the micro services.
+// for in PD/PD service or the tsopb.Participant in the micro services.
 type ElectionLeader interface {
 	// GetListenUrls returns the listen urls
 	GetListenUrls() []string

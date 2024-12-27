@@ -79,13 +79,8 @@ type TestServer struct {
 var zapLogOnce sync.Once
 
 // NewTestServer creates a new TestServer.
-func NewTestServer(ctx context.Context, cfg *config.Config) (*TestServer, error) {
-	return createTestServer(ctx, cfg, nil)
-}
-
-// NewTestAPIServer creates a new TestServer.
-func NewTestAPIServer(ctx context.Context, cfg *config.Config) (*TestServer, error) {
-	return createTestServer(ctx, cfg, []string{constant.APIServiceName})
+func NewTestServer(ctx context.Context, cfg *config.Config, services []string) (*TestServer, error) {
+	return createTestServer(ctx, cfg, services)
 }
 
 func createTestServer(ctx context.Context, cfg *config.Config, services []string) (*TestServer, error) {
@@ -435,15 +430,15 @@ type ConfigOption func(conf *config.Config, serverName string)
 
 // NewTestCluster creates a new TestCluster.
 func NewTestCluster(ctx context.Context, initialServerCount int, opts ...ConfigOption) (*TestCluster, error) {
-	return createTestCluster(ctx, initialServerCount, false, opts...)
+	return createTestCluster(ctx, initialServerCount, nil, opts...)
 }
 
-// NewTestAPICluster creates a new TestCluster with API service.
-func NewTestAPICluster(ctx context.Context, initialServerCount int, opts ...ConfigOption) (*TestCluster, error) {
-	return createTestCluster(ctx, initialServerCount, true, opts...)
+// NewTestMSCluster creates a new TestCluster with PD service.
+func NewTestMSCluster(ctx context.Context, initialServerCount int, opts ...ConfigOption) (*TestCluster, error) {
+	return createTestCluster(ctx, initialServerCount, []string{constant.PDServiceName}, opts...)
 }
 
-func createTestCluster(ctx context.Context, initialServerCount int, isAPIServiceMode bool, opts ...ConfigOption) (*TestCluster, error) {
+func createTestCluster(ctx context.Context, initialServerCount int, services []string, opts ...ConfigOption) (*TestCluster, error) {
 	schedulers.Register()
 	config := newClusterConfig(initialServerCount)
 	servers := make(map[string]*TestServer)
@@ -452,12 +447,7 @@ func createTestCluster(ctx context.Context, initialServerCount int, isAPIService
 		if err != nil {
 			return nil, err
 		}
-		var s *TestServer
-		if isAPIServiceMode {
-			s, err = NewTestAPIServer(ctx, serverConf)
-		} else {
-			s, err = NewTestServer(ctx, serverConf)
-		}
+		s, err := NewTestServer(ctx, serverConf, services)
 		if err != nil {
 			return nil, err
 		}
@@ -481,7 +471,7 @@ func RestartTestAPICluster(ctx context.Context, cluster *TestCluster) (*TestClus
 }
 
 func restartTestCluster(
-	ctx context.Context, cluster *TestCluster, isAPIServiceMode bool,
+	ctx context.Context, cluster *TestCluster, isPDServiceMode bool,
 ) (newTestCluster *TestCluster, err error) {
 	schedulers.Register()
 	newTestCluster = &TestCluster{
@@ -508,10 +498,10 @@ func restartTestCluster(
 				newServer *TestServer
 				serverErr error
 			)
-			if isAPIServiceMode {
-				newServer, serverErr = NewTestAPIServer(ctx, serverCfg)
+			if isPDServiceMode {
+				newServer, serverErr = NewTestServer(ctx, serverCfg, []string{constant.PDServiceName})
 			} else {
-				newServer, serverErr = NewTestServer(ctx, serverCfg)
+				newServer, serverErr = NewTestServer(ctx, serverCfg, nil)
 			}
 			serverMap.Store(serverName, newServer)
 			errorMap.Store(serverName, serverErr)
@@ -735,7 +725,7 @@ func (c *TestCluster) Join(ctx context.Context, opts ...ConfigOption) (*TestServ
 	if err != nil {
 		return nil, err
 	}
-	s, err := NewTestServer(ctx, conf)
+	s, err := NewTestServer(ctx, conf, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -743,13 +733,13 @@ func (c *TestCluster) Join(ctx context.Context, opts ...ConfigOption) (*TestServ
 	return s, nil
 }
 
-// JoinAPIServer is used to add a new TestAPIServer into the cluster.
-func (c *TestCluster) JoinAPIServer(ctx context.Context, opts ...ConfigOption) (*TestServer, error) {
+// JoinPDServer is used to add a new TestServer into the cluster.
+func (c *TestCluster) JoinPDServer(ctx context.Context, opts ...ConfigOption) (*TestServer, error) {
 	conf, err := c.config.join().Generate(opts...)
 	if err != nil {
 		return nil, err
 	}
-	s, err := NewTestAPIServer(ctx, conf)
+	s, err := NewTestServer(ctx, conf, []string{constant.PDServiceName})
 	if err != nil {
 		return nil, err
 	}

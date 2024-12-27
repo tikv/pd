@@ -361,7 +361,7 @@ func TestTSOFollowerProxyWithTSOService(t *testing.T) {
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/servicediscovery/fastUpdateServiceMode", `return(true)`))
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	cluster, err := tests.NewTestAPICluster(ctx, 1)
+	cluster, err := tests.NewTestMSCluster(ctx, 1)
 	re.NoError(err)
 	defer cluster.Destroy()
 	err = cluster.RunInitialServers()
@@ -486,7 +486,7 @@ func (suite *followerForwardAndHandleTestSuite) SetupSuite() {
 	re := suite.Require()
 	suite.ctx, suite.clean = context.WithCancel(context.Background())
 	sd.MemberHealthCheckInterval = 100 * time.Millisecond
-	cluster, err := tests.NewTestCluster(suite.ctx, 3)
+	cluster, err := tests.NewTestCluster(suite.ctx, 3, nil)
 	re.NoError(err)
 	suite.cluster = cluster
 	suite.endpoints = runServer(re, cluster)

@@ -407,7 +407,7 @@ var (
 	_ TSOEventSource   = (*pdServiceDiscovery)(nil)
 )
 
-// pdServiceDiscovery is the service discovery client of PD/API service which is quorum based
+// pdServiceDiscovery is the service discovery client of PD/PD service which is quorum based
 type pdServiceDiscovery struct {
 	isInitialized bool
 
@@ -671,7 +671,7 @@ func (c *pdServiceDiscovery) SetKeyspaceID(keyspaceID uint32) {
 
 // GetKeyspaceGroupID returns the ID of the keyspace group
 func (*pdServiceDiscovery) GetKeyspaceGroupID() uint32 {
-	// PD/API service only supports the default keyspace group
+	// PD/PD service only supports the default keyspace group
 	return constants.DefaultKeyspaceGroupID
 }
 

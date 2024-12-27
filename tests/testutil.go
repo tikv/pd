@@ -279,8 +279,8 @@ const (
 	Both SchedulerMode = iota
 	// PDMode represents PD mode.
 	PDMode
-	// APIMode represents API mode.
-	APIMode
+	// PDServiceMode represents API mode.
+	PDServiceMode
 )
 
 // SchedulingTestEnvironment is used for test purpose.
@@ -308,11 +308,11 @@ func (s *SchedulingTestEnvironment) RunTestBasedOnMode(test func(*TestCluster)) 
 	switch s.RunMode {
 	case PDMode:
 		s.RunTestInPDMode(test)
-	case APIMode:
-		s.RunTestInAPIMode(test)
+	case PDServiceMode:
+		s.RunTestInPDServiceMode(test)
 	default:
 		s.RunTestInPDMode(test)
-		s.RunTestInAPIMode(test)
+		s.RunTestInPDServiceMode(test)
 	}
 }
 
@@ -339,8 +339,8 @@ func getTestName() string {
 	return ""
 }
 
-// RunTestInAPIMode is to run test in api mode.
-func (s *SchedulingTestEnvironment) RunTestInAPIMode(test func(*TestCluster)) {
+// RunTestInPDServiceMode is to run test in pd service mode.
+func (s *SchedulingTestEnvironment) RunTestInPDServiceMode(test func(*TestCluster)) {
 	re := require.New(s.t)
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs", `return(true)`))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/mcs/scheduling/server/fastUpdateMember", `return(true)`))
@@ -348,11 +348,11 @@ func (s *SchedulingTestEnvironment) RunTestInAPIMode(test func(*TestCluster)) {
 		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/scheduling/server/fastUpdateMember"))
 		re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs"))
 	}()
-	s.t.Logf("start test %s in api mode", getTestName())
-	if _, ok := s.clusters[APIMode]; !ok {
-		s.startCluster(APIMode)
+	s.t.Logf("start test %s in pd service mode", getTestName())
+	if _, ok := s.clusters[PDServiceMode]; !ok {
+		s.startCluster(PDServiceMode)
 	}
-	test(s.clusters[APIMode])
+	test(s.clusters[PDServiceMode])
 }
 
 // Cleanup is to cleanup the environment.
@@ -379,8 +379,8 @@ func (s *SchedulingTestEnvironment) startCluster(m SchedulerMode) {
 		leaderServer := cluster.GetServer(cluster.GetLeader())
 		re.NoError(leaderServer.BootstrapCluster())
 		s.clusters[PDMode] = cluster
-	case APIMode:
-		cluster, err := NewTestAPICluster(ctx, 1, s.opts...)
+	case PDServiceMode:
+		cluster, err := NewTestCluster(ctx, 1, s.opts...)
 		re.NoError(err)
 		err = cluster.RunInitialServers()
 		re.NoError(err)
@@ -398,7 +398,7 @@ func (s *SchedulingTestEnvironment) startCluster(m SchedulerMode) {
 		testutil.Eventually(re, func() bool {
 			return cluster.GetLeaderServer().GetServer().IsServiceIndependent(constant.SchedulingServiceName)
 		})
-		s.clusters[APIMode] = cluster
+		s.clusters[PDServiceMode] = cluster
 	}
 }
 

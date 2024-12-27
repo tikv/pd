@@ -62,7 +62,7 @@ func (s *tsoProxyTestSuite) SetupSuite() {
 	var err error
 	s.ctx, s.cancel = context.WithCancel(context.Background())
 	// Create an API cluster with 1 server
-	s.apiCluster, err = tests.NewTestAPICluster(s.ctx, 1)
+	s.apiCluster, err = tests.NewTestMSCluster(s.ctx, 1)
 	re.NoError(err)
 	err = s.apiCluster.RunInitialServers()
 	re.NoError(err)

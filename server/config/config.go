@@ -860,7 +860,7 @@ func (c *MicroServiceConfig) Clone() *MicroServiceConfig {
 	return &cfg
 }
 
-// IsSchedulingFallbackEnabled returns whether to enable scheduling service fallback to api service.
+// IsSchedulingFallbackEnabled returns whether to enable scheduling service fallback to PD service.
 func (c *MicroServiceConfig) IsSchedulingFallbackEnabled() bool {
 	return c.EnableSchedulingFallback
 }

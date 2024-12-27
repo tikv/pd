@@ -55,7 +55,7 @@ type Controller struct {
 	// and used in the PD leader service mode now.
 	schedulers map[string]*ScheduleController
 	// schedulerHandlers is used to manage the HTTP handlers of schedulers,
-	// which will only be initialized and used in the API service mode now.
+	// which will only be initialized and used in the PD service mode now.
 	schedulerHandlers map[string]http.Handler
 	opController      *operator.Controller
 }

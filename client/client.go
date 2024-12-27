@@ -526,7 +526,7 @@ func (c *client) GetLocalTS(ctx context.Context, _ string) (physical int64, logi
 
 // GetMinTS implements the TSOClient interface.
 func (c *client) GetMinTS(ctx context.Context) (physical int64, logical int64, err error) {
-	// Handle compatibility issue in case of PD/API server doesn't support GetMinTS API.
+	// Handle compatibility issue in case of PD/PD service doesn't support GetMinTS API.
 	serviceMode := c.inner.getServiceMode()
 	switch serviceMode {
 	case pdpb.ServiceMode_UNKNOWN_SVC_MODE:

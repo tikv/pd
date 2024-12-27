@@ -55,7 +55,7 @@ type Cluster struct {
 	storage           storage.Storage
 	coordinator       *schedule.Coordinator
 	checkMembershipCh chan struct{}
-	apiServerLeader   atomic.Value
+	pdLeader          atomic.Value
 	running           atomic.Bool
 
 	// heartbeatRunner is used to process the subtree update task asynchronously.
@@ -227,7 +227,7 @@ func (c *Cluster) GetStoreConfig() sc.StoreConfigProvider { return c.persistConf
 
 // AllocID allocates a new ID.
 func (c *Cluster) AllocID() (uint64, error) {
-	client, err := c.getAPIServerLeaderClient()
+	client, err := c.getPDLeaderClient()
 	if err != nil {
 		return 0, err
 	}
@@ -241,11 +241,11 @@ func (c *Cluster) AllocID() (uint64, error) {
 	return resp.GetId(), nil
 }
 
-func (c *Cluster) getAPIServerLeaderClient() (pdpb.PDClient, error) {
-	cli := c.apiServerLeader.Load()
+func (c *Cluster) getPDLeaderClient() (pdpb.PDClient, error) {
+	cli := c.pdLeader.Load()
 	if cli == nil {
 		c.triggerMembershipCheck()
-		return nil, errors.New("API server leader is not found")
+		return nil, errors.New("PD leader is not found")
 	}
 	return cli.(pdpb.PDClient), nil
 }
@@ -257,10 +257,10 @@ func (c *Cluster) triggerMembershipCheck() {
 	}
 }
 
-// SwitchAPIServerLeader switches the API server leader.
-func (c *Cluster) SwitchAPIServerLeader(new pdpb.PDClient) bool {
-	old := c.apiServerLeader.Load()
-	return c.apiServerLeader.CompareAndSwap(old, new)
+// SwitchPDLeader switches the PD server leader.
+func (c *Cluster) SwitchPDLeader(new pdpb.PDClient) bool {
+	old := c.pdLeader.Load()
+	return c.pdLeader.CompareAndSwap(old, new)
 }
 
 func trySend(notifier chan struct{}) {

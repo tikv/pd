@@ -75,7 +75,7 @@ func (suite *tsoServerTestSuite) SetupSuite() {
 	re := suite.Require()
 
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
-	suite.cluster, err = tests.NewTestAPICluster(suite.ctx, 1)
+	suite.cluster, err = tests.NewTestMSCluster(suite.ctx, 1)
 	re.NoError(err)
 
 	err = suite.cluster.RunInitialServers()
@@ -156,19 +156,19 @@ func (suite *tsoServerTestSuite) TestParticipantStartWithAdvertiseListenAddr() {
 
 func TestTSOPath(t *testing.T) {
 	re := require.New(t)
-	checkTSOPath(re, true /*isAPIServiceMode*/)
-	checkTSOPath(re, false /*isAPIServiceMode*/)
+	checkTSOPath(re, true /*isPDServiceMode*/)
+	checkTSOPath(re, false /*isPDServiceMode*/)
 }
 
-func checkTSOPath(re *require.Assertions, isAPIServiceMode bool) {
+func checkTSOPath(re *require.Assertions, isPDServiceMode bool) {
 	var (
 		cluster *tests.TestCluster
 		err     error
 	)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	if isAPIServiceMode {
-		cluster, err = tests.NewTestAPICluster(ctx, 1, func(conf *config.Config, _ string) {
+	if isPDServiceMode {
+		cluster, err = tests.NewTestMSCluster(ctx, 1, func(conf *config.Config, _ string) {
 			conf.MicroService.EnableTSODynamicSwitching = false
 		})
 	} else {
@@ -184,7 +184,7 @@ func checkTSOPath(re *require.Assertions, isAPIServiceMode bool) {
 	re.NoError(pdLeader.BootstrapCluster())
 	backendEndpoints := pdLeader.GetAddr()
 	client := pdLeader.GetEtcdClient()
-	if isAPIServiceMode {
+	if isPDServiceMode {
 		re.Equal(0, getEtcdTimestampKeyNum(re, client))
 	} else {
 		re.Equal(1, getEtcdTimestampKeyNum(re, client))
@@ -217,7 +217,7 @@ func getEtcdTimestampKeyNum(re *require.Assertions, client *clientv3.Client) int
 	return count
 }
 
-type APIServerForward struct {
+type PDServiceForward struct {
 	re               *require.Assertions
 	ctx              context.Context
 	cancel           context.CancelFunc
@@ -227,13 +227,13 @@ type APIServerForward struct {
 	pdClient         pd.Client
 }
 
-func NewAPIServerForward(re *require.Assertions) APIServerForward {
-	suite := APIServerForward{
+func NewPDServiceForward(re *require.Assertions) PDServiceForward {
+	suite := PDServiceForward{
 		re: re,
 	}
 	var err error
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
-	suite.cluster, err = tests.NewTestAPICluster(suite.ctx, 3)
+	suite.cluster, err = tests.NewTestMSCluster(suite.ctx, 3)
 	re.NoError(err)
 
 	err = suite.cluster.RunInitialServers()
@@ -254,7 +254,7 @@ func NewAPIServerForward(re *require.Assertions) APIServerForward {
 	return suite
 }
 
-func (suite *APIServerForward) ShutDown() {
+func (suite *PDServiceForward) ShutDown() {
 	suite.pdClient.Close()
 	re := suite.re
 
@@ -273,7 +273,7 @@ func (suite *APIServerForward) ShutDown() {
 
 func TestForwardTSORelated(t *testing.T) {
 	re := require.New(t)
-	suite := NewAPIServerForward(re)
+	suite := NewPDServiceForward(re)
 	defer suite.ShutDown()
 	leaderServer := suite.cluster.GetLeaderServer().GetServer()
 	cfg := leaderServer.GetMicroServiceConfig().Clone()
@@ -290,7 +290,7 @@ func TestForwardTSORelated(t *testing.T) {
 
 func TestForwardTSOWhenPrimaryChanged(t *testing.T) {
 	re := require.New(t)
-	suite := NewAPIServerForward(re)
+	suite := NewPDServiceForward(re)
 	defer suite.ShutDown()
 
 	tc, err := tests.NewTestTSOCluster(suite.ctx, 2, suite.backendEndpoints)
@@ -330,7 +330,7 @@ func TestForwardTSOWhenPrimaryChanged(t *testing.T) {
 
 func TestResignTSOPrimaryForward(t *testing.T) {
 	re := require.New(t)
-	suite := NewAPIServerForward(re)
+	suite := NewPDServiceForward(re)
 	defer suite.ShutDown()
 	// TODO: test random kill primary with 3 nodes
 	tc, err := tests.NewTestTSOCluster(suite.ctx, 2, suite.backendEndpoints)
@@ -356,7 +356,7 @@ func TestResignTSOPrimaryForward(t *testing.T) {
 
 func TestResignAPIPrimaryForward(t *testing.T) {
 	re := require.New(t)
-	suite := NewAPIServerForward(re)
+	suite := NewPDServiceForward(re)
 	defer suite.ShutDown()
 
 	tc, err := tests.NewTestTSOCluster(suite.ctx, 2, suite.backendEndpoints)
@@ -380,7 +380,7 @@ func TestResignAPIPrimaryForward(t *testing.T) {
 
 func TestForwardTSOUnexpectedToFollower1(t *testing.T) {
 	re := require.New(t)
-	suite := NewAPIServerForward(re)
+	suite := NewPDServiceForward(re)
 	defer suite.ShutDown()
 	suite.checkForwardTSOUnexpectedToFollower(func() {
 		// unary call will retry internally
@@ -393,7 +393,7 @@ func TestForwardTSOUnexpectedToFollower1(t *testing.T) {
 
 func TestForwardTSOUnexpectedToFollower2(t *testing.T) {
 	re := require.New(t)
-	suite := NewAPIServerForward(re)
+	suite := NewPDServiceForward(re)
 	defer suite.ShutDown()
 	suite.checkForwardTSOUnexpectedToFollower(func() {
 		// unary call will retry internally
@@ -407,7 +407,7 @@ func TestForwardTSOUnexpectedToFollower2(t *testing.T) {
 
 func TestForwardTSOUnexpectedToFollower3(t *testing.T) {
 	re := require.New(t)
-	suite := NewAPIServerForward(re)
+	suite := NewPDServiceForward(re)
 	defer suite.ShutDown()
 	suite.checkForwardTSOUnexpectedToFollower(func() {
 		_, _, err := suite.pdClient.GetTS(suite.ctx)
@@ -415,7 +415,7 @@ func TestForwardTSOUnexpectedToFollower3(t *testing.T) {
 	})
 }
 
-func (suite *APIServerForward) checkForwardTSOUnexpectedToFollower(checkTSO func()) {
+func (suite *PDServiceForward) checkForwardTSOUnexpectedToFollower(checkTSO func()) {
 	re := suite.re
 	tc, err := tests.NewTestTSOCluster(suite.ctx, 2, suite.backendEndpoints)
 	re.NoError(err)
@@ -451,7 +451,7 @@ func (suite *APIServerForward) checkForwardTSOUnexpectedToFollower(checkTSO func
 	tc.Destroy()
 }
 
-func (suite *APIServerForward) addRegions() {
+func (suite *PDServiceForward) addRegions() {
 	leader := suite.cluster.GetServer(suite.cluster.WaitLeader())
 	rc := leader.GetServer().GetRaftCluster()
 	for i := range 3 {
@@ -465,7 +465,7 @@ func (suite *APIServerForward) addRegions() {
 	}
 }
 
-func (suite *APIServerForward) checkUnavailableTSO(re *require.Assertions) {
+func (suite *PDServiceForward) checkUnavailableTSO(re *require.Assertions) {
 	_, _, err := suite.pdClient.GetTS(suite.ctx)
 	re.Error(err)
 	// try to update gc safe point
@@ -476,7 +476,7 @@ func (suite *APIServerForward) checkUnavailableTSO(re *require.Assertions) {
 	re.Error(err)
 }
 
-func (suite *APIServerForward) checkAvailableTSO(re *require.Assertions) {
+func (suite *PDServiceForward) checkAvailableTSO(re *require.Assertions) {
 	mcs.WaitForTSOServiceAvailable(suite.ctx, re, suite.pdClient)
 	// try to get ts
 	_, _, err := suite.pdClient.GetTS(suite.ctx)
@@ -512,7 +512,7 @@ func (suite *CommonTestSuite) SetupSuite() {
 	var err error
 	re := suite.Require()
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
-	suite.cluster, err = tests.NewTestAPICluster(suite.ctx, 1)
+	suite.cluster, err = tests.NewTestMSCluster(suite.ctx, 1)
 	re.NoError(err)
 
 	err = suite.cluster.RunInitialServers()
@@ -576,7 +576,7 @@ func (suite *CommonTestSuite) TestBootstrapDefaultKeyspaceGroup() {
 	}
 	check()
 
-	s, err := suite.cluster.JoinAPIServer(suite.ctx)
+	s, err := suite.cluster.JoinPDServer(suite.ctx)
 	re.NoError(err)
 	re.NoError(s.Run())
 
@@ -598,7 +598,7 @@ func TestTSOServiceSwitch(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	tc, err := tests.NewTestAPICluster(ctx, 1,
+	tc, err := tests.NewTestMSCluster(ctx, 1,
 		func(conf *config.Config, _ string) {
 			conf.MicroService.EnableTSODynamicSwitching = true
 		},

@@ -62,7 +62,7 @@ func (suite *tsoAPITestSuite) SetupTest() {
 
 	var err error
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
-	suite.pdCluster, err = tests.NewTestAPICluster(suite.ctx, 1)
+	suite.pdCluster, err = tests.NewTestMSCluster(suite.ctx, 1)
 	re.NoError(err)
 	err = suite.pdCluster.RunInitialServers()
 	re.NoError(err)
@@ -137,7 +137,7 @@ func TestTSOServerStartFirst(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	apiCluster, err := tests.NewTestAPICluster(ctx, 1, func(conf *config.Config, _ string) {
+	apiCluster, err := tests.NewTestMSCluster(ctx, 1, func(conf *config.Config, _ string) {
 		conf.Keyspace.PreAlloc = []string{"k1", "k2"}
 	})
 	defer apiCluster.Destroy()
@@ -200,7 +200,7 @@ func TestForwardOnlyTSONoScheduling(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	tc, err := tests.NewTestAPICluster(ctx, 1)
+	tc, err := tests.NewTestMSCluster(ctx, 1)
 	defer tc.Destroy()
 	re.NoError(err)
 	err = tc.RunInitialServers()
@@ -227,7 +227,7 @@ func TestForwardOnlyTSONoScheduling(t *testing.T) {
 		testutil.StatusOK(re), testutil.StringContain(re, "Reset ts successfully"), testutil.WithHeader(re, apiutil.XForwardedToMicroServiceHeader, "true"))
 	re.NoError(err)
 
-	// If close tso server, it should try forward to tso server, but return error in api mode.
+	// If close tso server, it should try forward to tso server, but return error in pd service mode.
 	ttc.Destroy()
 	err = testutil.CheckPostJSON(tests.TestDialClient, fmt.Sprintf("%s/%s", urlPrefix, "admin/reset-ts"), input,
 		testutil.Status(re, http.StatusInternalServerError), testutil.StringContain(re, "[PD:apiutil:ErrRedirect]redirect failed"))
