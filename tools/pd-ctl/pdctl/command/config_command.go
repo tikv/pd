@@ -49,8 +49,8 @@ const (
 	ruleBundlePrefix              = "pd/api/v1/config/placement-rule"
 	pdServerPrefix                = "pd/api/v1/config/pd-server"
 	serviceMiddlewareConfigPrefix = "pd/api/v1/service-middleware/config"
-	// flagFromAPIServer has no influence for pd mode, but it is useful for us to debug in api mode.
-	flagFromAPIServer = "from_api_server"
+	// flagFromPDService has no influence for pd mode, but it is useful for us to debug in pd service mode.
+	flagFromPDService = "from_api_server"
 )
 
 // NewConfigCommand return a config subcommand of rootCmd
@@ -81,7 +81,7 @@ func NewShowConfigCommand() *cobra.Command {
 	sc.AddCommand(newShowReplicationModeCommand())
 	sc.AddCommand(NewShowServerConfigCommand())
 	sc.AddCommand(NewShowServiceMiddlewareConfigCommand())
-	sc.Flags().Bool(flagFromAPIServer, false, "read data from api server rather than micro service")
+	sc.Flags().Bool(flagFromPDService, false, "read data from PD service rather than micro service")
 	return sc
 }
 
@@ -92,7 +92,7 @@ func NewShowAllConfigCommand() *cobra.Command {
 		Short: "show all config of PD",
 		Run:   showAllConfigCommandFunc,
 	}
-	sc.Flags().Bool(flagFromAPIServer, false, "read data from api server rather than micro service")
+	sc.Flags().Bool(flagFromPDService, false, "read data from PD service rather than micro service")
 	return sc
 }
 
@@ -103,7 +103,7 @@ func NewShowScheduleConfigCommand() *cobra.Command {
 		Short: "show schedule config of PD",
 		Run:   showScheduleConfigCommandFunc,
 	}
-	sc.Flags().Bool(flagFromAPIServer, false, "read data from api server rather than micro service")
+	sc.Flags().Bool(flagFromPDService, false, "read data from PD service rather than micro service")
 	return sc
 }
 
@@ -114,7 +114,7 @@ func NewShowReplicationConfigCommand() *cobra.Command {
 		Short: "show replication config of PD",
 		Run:   showReplicationConfigCommandFunc,
 	}
-	sc.Flags().Bool(flagFromAPIServer, false, "read data from api server rather than micro service")
+	sc.Flags().Bool(flagFromPDService, false, "read data from PD service rather than micro service")
 	return sc
 }
 
@@ -528,7 +528,7 @@ func NewPlacementRulesCommand() *cobra.Command {
 	show.Flags().String("id", "", "rule id")
 	show.Flags().String("region", "", "region id")
 	show.Flags().Bool("detail", false, "detailed match info for region")
-	show.Flags().Bool(flagFromAPIServer, false, "read data from api server rather than micro service")
+	show.Flags().Bool(flagFromPDService, false, "read data from PD server rather than micro service")
 	load := &cobra.Command{
 		Use:   "load",
 		Short: "load placement rules to a file",
@@ -538,7 +538,7 @@ func NewPlacementRulesCommand() *cobra.Command {
 	load.Flags().String("id", "", "rule id")
 	load.Flags().String("region", "", "region id")
 	load.Flags().String("out", "rules.json", "the filename contains rules")
-	load.Flags().Bool(flagFromAPIServer, false, "read data from api server rather than micro service")
+	load.Flags().Bool(flagFromPDService, false, "read data from PD server rather than micro service")
 	save := &cobra.Command{
 		Use:   "save",
 		Short: "save rules from file",
@@ -554,7 +554,7 @@ func NewPlacementRulesCommand() *cobra.Command {
 		Short: "show rule group configuration(s)",
 		Run:   showRuleGroupFunc,
 	}
-	ruleGroupShow.Flags().Bool(flagFromAPIServer, false, "read data from api server rather than micro service")
+	ruleGroupShow.Flags().Bool(flagFromPDService, false, "read data from PD server rather than micro service")
 	ruleGroupSet := &cobra.Command{
 		Use:   "set <id> <index> <override>",
 		Short: "update rule group configuration",
@@ -577,7 +577,7 @@ func NewPlacementRulesCommand() *cobra.Command {
 		Run:   getRuleBundle,
 	}
 	ruleBundleGet.Flags().String("out", "", "the output file")
-	ruleBundleGet.Flags().Bool(flagFromAPIServer, false, "read data from api server rather than micro service")
+	ruleBundleGet.Flags().Bool(flagFromPDService, false, "read data from PD server rather than micro service")
 	ruleBundleSet := &cobra.Command{
 		Use:   "set",
 		Short: "set rule group config and its rules from file",
@@ -596,7 +596,7 @@ func NewPlacementRulesCommand() *cobra.Command {
 		Run:   loadRuleBundle,
 	}
 	ruleBundleLoad.Flags().String("out", "rules.json", "the output file")
-	ruleBundleLoad.Flags().Bool(flagFromAPIServer, false, "read data from api server rather than micro service")
+	ruleBundleLoad.Flags().Bool(flagFromPDService, false, "read data from PD server rather than micro service")
 	ruleBundleSave := &cobra.Command{
 		Use:   "save",
 		Short: "save all group configs and rules from file",
@@ -895,7 +895,7 @@ func saveRuleBundle(cmd *cobra.Command, _ []string) {
 
 func buildHeader(cmd *cobra.Command) http.Header {
 	header := http.Header{}
-	forbiddenRedirectToMicroService, err := cmd.Flags().GetBool(flagFromAPIServer)
+	forbiddenRedirectToMicroService, err := cmd.Flags().GetBool(flagFromPDService)
 	if err == nil && forbiddenRedirectToMicroService {
 		header.Add(apiutil.XForbiddenForwardToMicroServiceHeader, "true")
 	}

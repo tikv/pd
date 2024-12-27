@@ -54,7 +54,7 @@ func (suite *serverRegisterTestSuite) SetupSuite() {
 	re := suite.Require()
 
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
-	suite.cluster, err = tests.NewTestAPICluster(suite.ctx, 1)
+	suite.cluster, err = tests.NewTestMSCluster(suite.ctx, 1)
 	re.NoError(err)
 
 	err = suite.cluster.RunInitialServers()
@@ -84,7 +84,7 @@ func (suite *serverRegisterTestSuite) checkServerRegister(serviceName string) {
 
 	addr := s.GetAddr()
 	client := suite.pdLeader.GetEtcdClient()
-	// test API server discovery
+	// test PD service discovery
 
 	endpoints, err := discovery.Discover(client, serviceName)
 	re.NoError(err)
@@ -98,7 +98,7 @@ func (suite *serverRegisterTestSuite) checkServerRegister(serviceName string) {
 	re.True(exist)
 	re.Equal(expectedPrimary, primary)
 
-	// test API server discovery after unregister
+	// test PD service discovery after unregister
 	cleanup()
 	endpoints, err = discovery.Discover(client, serviceName)
 	re.NoError(err)
@@ -140,7 +140,7 @@ func (suite *serverRegisterTestSuite) checkServerPrimaryChange(serviceName strin
 	delete(serverMap, primary)
 
 	expectedPrimary = tests.WaitForPrimaryServing(re, serverMap)
-	// test API server discovery
+	// test PD service discovery
 	client := suite.pdLeader.GetEtcdClient()
 	endpoints, err := discovery.Discover(client, serviceName)
 	re.NoError(err)

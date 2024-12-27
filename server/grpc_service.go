@@ -272,7 +272,7 @@ func (s *GrpcServer) GetClusterInfo(context.Context, *pdpb.GetClusterInfoRequest
 }
 
 // GetMinTS implements gRPC PDServer. In PD service mode, it simply returns a timestamp.
-// In API service mode, it queries all tso servers and gets the minimum timestamp across
+// In PD service mode, it queries all tso servers and gets the minimum timestamp across
 // all keyspace groups.
 func (s *GrpcServer) GetMinTS(
 	ctx context.Context, request *pdpb.GetMinTSRequest,
