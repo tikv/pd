@@ -394,17 +394,17 @@ func (c *pdServiceBalancer) get() (ret ServiceClient) {
 
 // UpdateKeyspaceIDFunc is the function type for updating the keyspace ID.
 type UpdateKeyspaceIDFunc func() error
-type tsoLeaderURLUpdatedFunc func(string) error
+type leaderURLUpdatedFunc func(string) error
 
-// TSOEventSource subscribes to events related to changes in the TSO leader/primary from the service discovery.
-type TSOEventSource interface {
-	// SetTSOLeaderURLUpdatedCallback adds a callback which will be called when the TSO leader/primary is updated.
-	SetTSOLeaderURLUpdatedCallback(callback tsoLeaderURLUpdatedFunc)
+// EventSource subscribes to events related to changes in the leader/primary from the service discovery.
+type EventSource interface {
+	// SetLeaderURLUpdatedCallback adds a callback which will be called when the leader/primary is updated.
+	SetLeaderURLUpdatedCallback(callback leaderURLUpdatedFunc)
 }
 
 var (
 	_ ServiceDiscovery = (*pdServiceDiscovery)(nil)
-	_ TSOEventSource   = (*pdServiceDiscovery)(nil)
+	_ EventSource      = (*pdServiceDiscovery)(nil)
 )
 
 // pdServiceDiscovery is the service discovery client of PD/API service which is quorum based
@@ -433,8 +433,8 @@ type pdServiceDiscovery struct {
 	// membersChangedCbs will be called after there is any membership change in the
 	// leader and followers
 	membersChangedCbs []func()
-	// tsoLeaderUpdatedCb will be called when the TSO leader is updated.
-	tsoLeaderUpdatedCb tsoLeaderURLUpdatedFunc
+	// leaderUpdatedCb will be called when the leader/primary is updated.
+	leaderUpdatedCb []leaderURLUpdatedFunc
 
 	checkMembershipCh chan struct{}
 
@@ -802,15 +802,15 @@ func (c *pdServiceDiscovery) AddServiceURLsSwitchedCallback(callbacks ...func())
 	c.membersChangedCbs = append(c.membersChangedCbs, callbacks...)
 }
 
-// SetTSOLeaderURLUpdatedCallback adds a callback which will be called when the TSO leader is updated.
-func (c *pdServiceDiscovery) SetTSOLeaderURLUpdatedCallback(callback tsoLeaderURLUpdatedFunc) {
+// SetLeaderURLUpdatedCallback adds a callback which will be called when the TSO leader is updated.
+func (c *pdServiceDiscovery) SetLeaderURLUpdatedCallback(callback leaderURLUpdatedFunc) {
 	url := c.getLeaderURL()
 	if len(url) > 0 {
 		if err := callback(url); err != nil {
 			log.Error("[tso] failed to call back when tso leader url update", zap.String("url", url), errs.ZapError(err))
 		}
 	}
-	c.tsoLeaderUpdatedCb = callback
+	c.leaderUpdatedCb = append(c.leaderUpdatedCb, callback)
 }
 
 // getLeaderURL returns the leader URL.
@@ -986,8 +986,11 @@ func (c *pdServiceDiscovery) switchLeader(url string) (bool, error) {
 		c.leader.Store(leaderClient)
 	}
 	// Run callbacks
-	if c.tsoLeaderUpdatedCb != nil {
-		if err := c.tsoLeaderUpdatedCb(url); err != nil {
+	for _, cb := range c.leaderUpdatedCb {
+		if cb == nil {
+			continue
+		}
+		if err := cb(url); err != nil {
 			return true, err
 		}
 	}
