@@ -16,6 +16,7 @@ package deadline
 
 import (
 	"context"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -28,30 +29,30 @@ func TestWatcher(t *testing.T) {
 	defer cancel()
 
 	watcher := NewWatcher(ctx, 10, "test")
-	deadlineReached := false
+	var deadlineReached atomic.Bool
 	done := watcher.Start(ctx, time.Millisecond, func() {
-		deadlineReached = true
+		deadlineReached.Store(true)
 	})
 	re.NotNil(done)
 	time.Sleep(5 * time.Millisecond)
-	re.True(deadlineReached)
+	re.True(deadlineReached.Load())
 
-	deadlineReached = false
+	deadlineReached.Store(false)
 	done = watcher.Start(ctx, 500*time.Millisecond, func() {
-		deadlineReached = true
+		deadlineReached.Store(true)
 	})
 	re.NotNil(done)
 	done <- struct{}{}
 	time.Sleep(time.Second)
-	re.False(deadlineReached)
+	re.False(deadlineReached.Load())
 
 	deadCtx, deadCancel := context.WithCancel(ctx)
 	deadCancel()
-	deadlineReached = false
+	deadlineReached.Store(false)
 	done = watcher.Start(deadCtx, time.Millisecond, func() {
-		deadlineReached = true
+		deadlineReached.Store(true)
 	})
 	re.Nil(done)
 	time.Sleep(5 * time.Millisecond)
-	re.False(deadlineReached)
+	re.False(deadlineReached.Load())
 }

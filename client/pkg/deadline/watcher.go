@@ -82,12 +82,22 @@ func (w *Watcher) Start(
 	timeout time.Duration,
 	cancel context.CancelFunc,
 ) chan struct{} {
+	// Check if the watcher is already canceled.
+	select {
+	case <-w.ctx.Done():
+		return nil
+	case <-ctx.Done():
+		return nil
+	default:
+	}
+	// Initialize the deadline.
 	timer := timerutil.GlobalTimerPool.Get(timeout)
 	d := &deadline{
 		timer:  timer,
 		done:   make(chan struct{}),
 		cancel: cancel,
 	}
+	// Send the deadline to the watcher.
 	select {
 	case <-w.ctx.Done():
 		timerutil.GlobalTimerPool.Put(timer)
