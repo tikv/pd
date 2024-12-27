@@ -27,18 +27,29 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/zap/zapcore"
+<<<<<<< HEAD:client/tso_dispatcher_test.go
+=======
+
+	"github.com/pingcap/failpoint"
+	"github.com/pingcap/log"
+
+	"github.com/tikv/pd/client/opt"
+	cctx "github.com/tikv/pd/client/pkg/connectionctx"
+	sd "github.com/tikv/pd/client/servicediscovery"
+>>>>>>> 8cd72333f1 (client: introduce the connection ctx manager (#8940)):client/clients/tso/dispatcher_test.go
 )
 
 type mockTSOServiceProvider struct {
 	option       *option
 	createStream func(ctx context.Context) *tsoStream
-	updateConnMu sync.Mutex
+	conCtxMgr    *cctx.Manager[*tsoStream]
 }
 
 func newMockTSOServiceProvider(option *option, createStream func(ctx context.Context) *tsoStream) *mockTSOServiceProvider {
 	return &mockTSOServiceProvider{
 		option:       option,
 		createStream: createStream,
+		conCtxMgr:    cctx.NewManager[*tsoStream](),
 	}
 }
 
@@ -50,24 +61,29 @@ func (*mockTSOServiceProvider) getServiceDiscovery() ServiceDiscovery {
 	return NewMockPDServiceDiscovery([]string{mockStreamURL}, nil)
 }
 
+<<<<<<< HEAD:client/tso_dispatcher_test.go
 func (m *mockTSOServiceProvider) updateConnectionCtxs(ctx context.Context, _dc string, connectionCtxs *sync.Map) bool {
 	// Avoid concurrent updating in the background updating goroutine and active updating in the dispatcher loop when
 	// stream is missing.
 	m.updateConnMu.Lock()
 	defer m.updateConnMu.Unlock()
+=======
+func (m *mockTSOServiceProvider) getConnectionCtxMgr() *cctx.Manager[*tsoStream] {
+	return m.conCtxMgr
+}
+>>>>>>> 8cd72333f1 (client: introduce the connection ctx manager (#8940)):client/clients/tso/dispatcher_test.go
 
-	_, ok := connectionCtxs.Load(mockStreamURL)
-	if ok {
+func (m *mockTSOServiceProvider) updateConnectionCtxs(ctx context.Context) bool {
+	if m.conCtxMgr.Exist(mockStreamURL) {
 		return true
 	}
-	ctx, cancel := context.WithCancel(ctx)
 	var stream *tsoStream
 	if m.createStream == nil {
 		stream = newTSOStream(ctx, mockStreamURL, newMockTSOStreamImpl(ctx, resultModeGenerated))
 	} else {
 		stream = m.createStream(ctx)
 	}
-	connectionCtxs.LoadOrStore(mockStreamURL, &tsoConnectionContext{ctx, cancel, mockStreamURL, stream})
+	m.conCtxMgr.Store(ctx, mockStreamURL, stream)
 	return true
 }
 
