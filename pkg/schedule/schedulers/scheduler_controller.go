@@ -452,6 +452,8 @@ func (s *ScheduleController) Stop() {
 
 // Schedule tries to create some operators.
 func (s *ScheduleController) Schedule(diagnosable bool) []*operator.Operator {
+	_, isEvictLeaderScheduler := s.Scheduler.(*evictLeaderScheduler)
+retry:
 	for i := 0; i < maxScheduleRetries; i++ {
 		// no need to retry if schedule should stop to speed exit
 		select {
@@ -466,29 +468,29 @@ func (s *ScheduleController) Schedule(diagnosable bool) []*operator.Operator {
 		if diagnosable {
 			s.diagnosticRecorder.SetResultFromPlans(ops, plans)
 		}
-		foundDisabled := false
-		for _, op := range ops {
-			if labelMgr := s.cluster.GetRegionLabeler(); labelMgr != nil {
-				region := s.cluster.GetRegion(op.RegionID())
-				if region == nil {
-					continue
-				}
-				if labelMgr.ScheduleDisabled(region) {
-					denySchedulersByLabelerCounter.Inc()
-					foundDisabled = true
-					break
-				}
-			}
+		if len(ops) == 0 {
+			continue
 		}
-		if len(ops) > 0 {
-			// If we have schedule, reset interval to the minimal interval.
-			s.nextInterval = s.Scheduler.GetMinInterval()
-			// try regenerating operators
-			if foundDisabled {
+		// If we have schedule, reset interval to the minimal interval.
+		s.nextInterval = s.Scheduler.GetMinInterval()
+		for _, op := range ops {
+			region := s.cluster.GetRegion(op.RegionID())
+			if region == nil {
+				continue retry
+			}
+			labelMgr := s.cluster.GetRegionLabeler()
+			if labelMgr == nil {
 				continue
 			}
-			return ops
+
+			// If the evict-leader-scheduler is disabled, it will obstruct the restart operation of tikv by the operator.
+			// Refer: https://docs.pingcap.com/tidb-in-kubernetes/stable/restart-a-tidb-cluster#perform-a-graceful-restart-to-a-single-tikv-pod
+			if labelMgr.ScheduleDisabled(region) && !isEvictLeaderScheduler {
+				denySchedulersByLabelerCounter.Inc()
+				continue retry
+			}
 		}
+		return ops
 	}
 	s.nextInterval = s.Scheduler.GetNextInterval(s.nextInterval)
 	return nil
