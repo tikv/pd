@@ -212,7 +212,7 @@ func (gta *GlobalTSOAllocator) primaryElectionLoop() {
 				zap.String("server-name", gta.member.Name()),
 				zap.String("expected-primary-id", expectedPrimary),
 				zap.Uint64("member-id", gta.member.ID()),
-				zap.String("cur-memberValue", gta.member.MemberValue()))
+				zap.String("cur-member-value", gta.member.MemberValue()))
 			time.Sleep(200 * time.Millisecond)
 			continue
 		}

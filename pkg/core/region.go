@@ -1885,7 +1885,7 @@ func scanRegion(regionTree *regionTree, keyRange *KeyRange, limit int, outputMus
 				keyRange.StartKey, keyRange.EndKey,
 				lastRegion.GetStartKey(), lastRegion.GetEndKey(),
 				region.GetStartKey(), region.GetEndKey())
-			log.Warn("scan regions failed", zap.Bool("outputMustContainAllKeyRange",
+			log.Warn("scan regions failed", zap.Bool("contain-all-key-range",
 				outputMustContainAllKeyRange), zap.Error(err))
 			if outputMustContainAllKeyRange {
 				return false
@@ -1907,7 +1907,7 @@ func scanRegion(regionTree *regionTree, keyRange *KeyRange, limit int, outputMus
 			keyRange.StartKey, keyRange.EndKey,
 			lastRegion.GetStartKey(), lastRegion.GetEndKey(),
 			lastRegion.GetEndKey(), keyRange.EndKey)
-		log.Warn("scan regions failed", zap.Bool("outputMustContainAllKeyRange",
+		log.Warn("scan regions failed", zap.Bool("contain-all-key-range",
 			outputMustContainAllKeyRange), zap.Error(err))
 		if outputMustContainAllKeyRange {
 			return nil, err
