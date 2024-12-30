@@ -101,6 +101,8 @@ require (
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/gorilla/mux v1.7.4 // indirect
 	github.com/gorilla/websocket v1.5.1 // indirect
+	github.com/grafana/pyroscope-go v1.2.0 // indirect
+	github.com/grafana/pyroscope-go/godeltaprof v0.1.8 // indirect
 	github.com/grpc-ecosystem/go-grpc-middleware v1.4.0 // indirect
 	github.com/grpc-ecosystem/go-grpc-prometheus v1.2.0 // indirect
 	github.com/grpc-ecosystem/grpc-gateway v1.16.0 // indirect

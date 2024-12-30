@@ -15,15 +15,15 @@
 package metricutil
 
 import (
-	"github.com/grafana/pyroscope-go"
-	"go.uber.org/zap"
 	"os"
 	"runtime"
 	"time"
 	"unicode"
 
+	"github.com/grafana/pyroscope-go"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/push"
+	"go.uber.org/zap"
 
 	"github.com/pingcap/log"
 
