@@ -63,6 +63,7 @@ require (
 	golang.org/x/tools v0.21.1-0.20240508182429-e35e4ccd0d2d
 	google.golang.org/grpc v1.62.1
 	gotest.tools/gotestsum v1.7.0
+	github.com/grafana/pyroscope-go v1.2.0
 )
 
 require (
