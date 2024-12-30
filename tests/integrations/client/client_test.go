@@ -486,7 +486,7 @@ func (suite *followerForwardAndHandleTestSuite) SetupSuite() {
 	re := suite.Require()
 	suite.ctx, suite.clean = context.WithCancel(context.Background())
 	sd.MemberHealthCheckInterval = 100 * time.Millisecond
-	cluster, err := tests.NewTestCluster(suite.ctx, 3, nil)
+	cluster, err := tests.NewTestCluster(suite.ctx, 3)
 	re.NoError(err)
 	suite.cluster = cluster
 	suite.endpoints = runServer(re, cluster)
