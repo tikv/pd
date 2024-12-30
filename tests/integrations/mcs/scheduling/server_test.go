@@ -220,7 +220,7 @@ func (suite *serverTestSuite) TestSchedulingServiceFallback() {
 	// Change back to the default value.
 	conf.EnableSchedulingFallback = true
 	leaderServer.SetMicroServiceConfig(*conf)
-	// PD server will execute scheduling jobs since there is no scheduling server.
+	// PD service will execute scheduling jobs since there is no scheduling server.
 	testutil.Eventually(re, func() bool {
 		return suite.pdLeader.GetServer().GetRaftCluster().IsSchedulingControllerRunning()
 	})
@@ -229,7 +229,7 @@ func (suite *serverTestSuite) TestSchedulingServiceFallback() {
 	re.NoError(err)
 	defer tc.Destroy()
 	tc.WaitForPrimaryServing(re)
-	// After scheduling server is started, PD server will not execute scheduling jobs.
+	// After scheduling server is started, PD service will not execute scheduling jobs.
 	testutil.Eventually(re, func() bool {
 		return !suite.pdLeader.GetServer().GetRaftCluster().IsSchedulingControllerRunning()
 	})
@@ -238,7 +238,7 @@ func (suite *serverTestSuite) TestSchedulingServiceFallback() {
 		return tc.GetPrimaryServer().GetCluster().IsBackgroundJobsRunning()
 	})
 	tc.GetPrimaryServer().Close()
-	// Stop scheduling server. PD server will execute scheduling jobs again.
+	// Stop scheduling server. PD service will execute scheduling jobs again.
 	testutil.Eventually(re, func() bool {
 		return suite.pdLeader.GetServer().GetRaftCluster().IsSchedulingControllerRunning()
 	})
@@ -246,7 +246,7 @@ func (suite *serverTestSuite) TestSchedulingServiceFallback() {
 	re.NoError(err)
 	defer tc1.Destroy()
 	tc1.WaitForPrimaryServing(re)
-	// After scheduling server is started, PD server will not execute scheduling jobs.
+	// After scheduling server is started, PD service will not execute scheduling jobs.
 	testutil.Eventually(re, func() bool {
 		return !suite.pdLeader.GetServer().GetRaftCluster().IsSchedulingControllerRunning()
 	})
@@ -259,21 +259,21 @@ func (suite *serverTestSuite) TestSchedulingServiceFallback() {
 func (suite *serverTestSuite) TestDisableSchedulingServiceFallback() {
 	re := suite.Require()
 
-	// PD server will execute scheduling jobs since there is no scheduling server.
+	// PD service will execute scheduling jobs since there is no scheduling server.
 	testutil.Eventually(re, func() bool {
 		re.NotNil(suite.pdLeader.GetServer())
 		re.NotNil(suite.pdLeader.GetServer().GetRaftCluster())
 		return suite.pdLeader.GetServer().GetRaftCluster().IsSchedulingControllerRunning()
 	})
 	leaderServer := suite.pdLeader.GetServer()
-	// After Disabling scheduling service fallback, the PD server will stop scheduling.
+	// After Disabling scheduling service fallback, the PD service will stop scheduling.
 	conf := leaderServer.GetMicroServiceConfig().Clone()
 	conf.EnableSchedulingFallback = false
 	leaderServer.SetMicroServiceConfig(*conf)
 	testutil.Eventually(re, func() bool {
 		return !suite.pdLeader.GetServer().GetRaftCluster().IsSchedulingControllerRunning()
 	})
-	// Enable scheduling service fallback again, the PD server will restart scheduling.
+	// Enable scheduling service fallback again, the PD service will restart scheduling.
 	conf.EnableSchedulingFallback = true
 	leaderServer.SetMicroServiceConfig(*conf)
 	testutil.Eventually(re, func() bool {
@@ -284,7 +284,7 @@ func (suite *serverTestSuite) TestDisableSchedulingServiceFallback() {
 	re.NoError(err)
 	defer tc.Destroy()
 	tc.WaitForPrimaryServing(re)
-	// After scheduling server is started, PD server will not execute scheduling jobs.
+	// After scheduling server is started, PD service will not execute scheduling jobs.
 	testutil.Eventually(re, func() bool {
 		return !suite.pdLeader.GetServer().GetRaftCluster().IsSchedulingControllerRunning()
 	})
@@ -292,7 +292,7 @@ func (suite *serverTestSuite) TestDisableSchedulingServiceFallback() {
 	testutil.Eventually(re, func() bool {
 		return tc.GetPrimaryServer().GetCluster().IsBackgroundJobsRunning()
 	})
-	// Disable scheduling service fallback and stop scheduling server. PD server won't execute scheduling jobs again.
+	// Disable scheduling service fallback and stop scheduling server. PD service won't execute scheduling jobs again.
 	conf.EnableSchedulingFallback = false
 	leaderServer.SetMicroServiceConfig(*conf)
 	tc.GetPrimaryServer().Close()
@@ -310,14 +310,14 @@ func (suite *serverTestSuite) TestSchedulerSync() {
 	tc.WaitForPrimaryServing(re)
 	schedulersController := tc.GetPrimaryServer().GetCluster().GetCoordinator().GetSchedulersController()
 	checkEvictLeaderSchedulerExist(re, schedulersController, false)
-	// Add a new evict-leader-scheduler through the PD server.
+	// Add a new evict-leader-scheduler through the PD service.
 	api.MustAddScheduler(re, suite.backendEndpoints, types.EvictLeaderScheduler.String(), map[string]any{
 		"store_id": 1,
 	})
 	// Check if the evict-leader-scheduler is added.
 	checkEvictLeaderSchedulerExist(re, schedulersController, true)
 	checkEvictLeaderStoreIDs(re, schedulersController, []uint64{1})
-	// Add a store_id to the evict-leader-scheduler through the PD server.
+	// Add a store_id to the evict-leader-scheduler through the PD service.
 	err = suite.pdLeader.GetServer().GetRaftCluster().PutMetaStore(
 		&metapb.Store{
 			Id:            2,
@@ -334,18 +334,18 @@ func (suite *serverTestSuite) TestSchedulerSync() {
 	})
 	checkEvictLeaderSchedulerExist(re, schedulersController, true)
 	checkEvictLeaderStoreIDs(re, schedulersController, []uint64{1, 2})
-	// Delete a store_id from the evict-leader-scheduler through the PD server.
+	// Delete a store_id from the evict-leader-scheduler through the PD service.
 	api.MustDeleteScheduler(re, suite.backendEndpoints, fmt.Sprintf("%s-%d", types.EvictLeaderScheduler.String(), 1))
 	checkEvictLeaderSchedulerExist(re, schedulersController, true)
 	checkEvictLeaderStoreIDs(re, schedulersController, []uint64{2})
-	// Add a store_id to the evict-leader-scheduler through the PD server by the scheduler handler.
+	// Add a store_id to the evict-leader-scheduler through the PD service by the scheduler handler.
 	api.MustCallSchedulerConfigAPI(re, http.MethodPost, suite.backendEndpoints, types.EvictLeaderScheduler.String(), []string{"config"}, map[string]any{
 		"name":     types.EvictLeaderScheduler.String(),
 		"store_id": 1,
 	})
 	checkEvictLeaderSchedulerExist(re, schedulersController, true)
 	checkEvictLeaderStoreIDs(re, schedulersController, []uint64{1, 2})
-	// Delete a store_id from the evict-leader-scheduler through the PD server by the scheduler handler.
+	// Delete a store_id from the evict-leader-scheduler through the PD service by the scheduler handler.
 	api.MustCallSchedulerConfigAPI(re, http.MethodDelete, suite.backendEndpoints, types.EvictLeaderScheduler.String(), []string{"delete", "2"}, nil)
 	checkEvictLeaderSchedulerExist(re, schedulersController, true)
 	checkEvictLeaderStoreIDs(re, schedulersController, []uint64{1})
@@ -354,7 +354,7 @@ func (suite *serverTestSuite) TestSchedulerSync() {
 	// Check if the scheduler is removed.
 	checkEvictLeaderSchedulerExist(re, schedulersController, false)
 
-	// Delete the evict-leader-scheduler through the PD server by removing the last store_id.
+	// Delete the evict-leader-scheduler through the PD service by removing the last store_id.
 	api.MustAddScheduler(re, suite.backendEndpoints, types.EvictLeaderScheduler.String(), map[string]any{
 		"store_id": 1,
 	})
@@ -363,7 +363,7 @@ func (suite *serverTestSuite) TestSchedulerSync() {
 	api.MustDeleteScheduler(re, suite.backendEndpoints, fmt.Sprintf("%s-%d", types.EvictLeaderScheduler.String(), 1))
 	checkEvictLeaderSchedulerExist(re, schedulersController, false)
 
-	// Delete the evict-leader-scheduler through the PD server.
+	// Delete the evict-leader-scheduler through the PD service.
 	api.MustAddScheduler(re, suite.backendEndpoints, types.EvictLeaderScheduler.String(), map[string]any{
 		"store_id": 1,
 	})

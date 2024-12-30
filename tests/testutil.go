@@ -380,7 +380,7 @@ func (s *SchedulingTestEnvironment) startCluster(m SchedulerMode) {
 		re.NoError(leaderServer.BootstrapCluster())
 		s.clusters[PDMode] = cluster
 	case PDServiceMode:
-		cluster, err := NewTestCluster(ctx, 1, s.opts...)
+		cluster, err := NewTestMSCluster(ctx, 1, s.opts...)
 		re.NoError(err)
 		err = cluster.RunInitialServers()
 		re.NoError(err)

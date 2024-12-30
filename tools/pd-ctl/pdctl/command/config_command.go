@@ -528,7 +528,7 @@ func NewPlacementRulesCommand() *cobra.Command {
 	show.Flags().String("id", "", "rule id")
 	show.Flags().String("region", "", "region id")
 	show.Flags().Bool("detail", false, "detailed match info for region")
-	show.Flags().Bool(flagFromPDService, false, "read data from PD server rather than micro service")
+	show.Flags().Bool(flagFromPDService, false, "read data from PD service rather than micro service")
 	load := &cobra.Command{
 		Use:   "load",
 		Short: "load placement rules to a file",
@@ -538,7 +538,7 @@ func NewPlacementRulesCommand() *cobra.Command {
 	load.Flags().String("id", "", "rule id")
 	load.Flags().String("region", "", "region id")
 	load.Flags().String("out", "rules.json", "the filename contains rules")
-	load.Flags().Bool(flagFromPDService, false, "read data from PD server rather than micro service")
+	load.Flags().Bool(flagFromPDService, false, "read data from PD service rather than micro service")
 	save := &cobra.Command{
 		Use:   "save",
 		Short: "save rules from file",
@@ -554,7 +554,7 @@ func NewPlacementRulesCommand() *cobra.Command {
 		Short: "show rule group configuration(s)",
 		Run:   showRuleGroupFunc,
 	}
-	ruleGroupShow.Flags().Bool(flagFromPDService, false, "read data from PD server rather than micro service")
+	ruleGroupShow.Flags().Bool(flagFromPDService, false, "read data from PD service rather than micro service")
 	ruleGroupSet := &cobra.Command{
 		Use:   "set <id> <index> <override>",
 		Short: "update rule group configuration",
@@ -577,7 +577,7 @@ func NewPlacementRulesCommand() *cobra.Command {
 		Run:   getRuleBundle,
 	}
 	ruleBundleGet.Flags().String("out", "", "the output file")
-	ruleBundleGet.Flags().Bool(flagFromPDService, false, "read data from PD server rather than micro service")
+	ruleBundleGet.Flags().Bool(flagFromPDService, false, "read data from PD service rather than micro service")
 	ruleBundleSet := &cobra.Command{
 		Use:   "set",
 		Short: "set rule group config and its rules from file",
@@ -596,7 +596,7 @@ func NewPlacementRulesCommand() *cobra.Command {
 		Run:   loadRuleBundle,
 	}
 	ruleBundleLoad.Flags().String("out", "rules.json", "the output file")
-	ruleBundleLoad.Flags().Bool(flagFromPDService, false, "read data from PD server rather than micro service")
+	ruleBundleLoad.Flags().Bool(flagFromPDService, false, "read data from PD service rather than micro service")
 	ruleBundleSave := &cobra.Command{
 		Use:   "save",
 		Short: "save all group configs and rules from file",
