@@ -80,10 +80,6 @@ var zapLogOnce sync.Once
 
 // NewTestServer creates a new TestServer.
 func NewTestServer(ctx context.Context, cfg *config.Config, services []string) (*TestServer, error) {
-	return createTestServer(ctx, cfg, services)
-}
-
-func createTestServer(ctx context.Context, cfg *config.Config, services []string) (*TestServer, error) {
 	//  disable the heartbeat async runner in test
 	cfg.Schedule.EnableHeartbeatConcurrentRunner = false
 	err := logutil.SetupLogger(cfg.Log, &cfg.Logger, &cfg.LogProps, cfg.Security.RedactInfoLog)
