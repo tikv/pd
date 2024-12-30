@@ -24,11 +24,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
+
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/meta_storagepb"
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
-	"github.com/stretchr/testify/mock"
-	"github.com/stretchr/testify/require"
+
 	pd "github.com/tikv/pd/client"
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/opt"

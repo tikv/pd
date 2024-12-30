@@ -28,6 +28,7 @@ linters:
     - protogetter
     - reassign
     - intrange
+    - gci
 linters-settings:
   gocritic:
     # Which checks should be disabled; can't be combined with 'enabled-checks'; default is empty
@@ -233,6 +234,13 @@ linters-settings:
             desc: "Use 'sync/atomic' instead of 'go.uber.org/atomic'"
           - pkg: github.com/pkg/errors
             desc: "Use 'github.com/pingcap/errors' instead of 'github.com/pkg/errors'"
+  gci:
+    sections:
+      - standard
+      - default
+      - prefix(github.com/pingcap)
+      - prefix(github.com/tikv/pd)
+      - blank
 issues:
   exclude-rules:
     - path: (_test\.go|pkg/mock/.*\.go|tests/.*\.go)

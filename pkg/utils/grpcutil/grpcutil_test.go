@@ -7,10 +7,12 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/pingcap/errors"
 	"github.com/stretchr/testify/require"
-	"github.com/tikv/pd/pkg/errs"
 	"google.golang.org/grpc/metadata"
+
+	"github.com/pingcap/errors"
+
+	"github.com/tikv/pd/pkg/errs"
 )
 
 var (

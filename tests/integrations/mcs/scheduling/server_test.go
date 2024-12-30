@@ -23,11 +23,14 @@ import (
 	"time"
 
 	"github.com/docker/go-units"
+	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/suite"
+	"go.uber.org/goleak"
+
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/stretchr/testify/require"
-	"github.com/stretchr/testify/suite"
+
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/schedule/operator"
@@ -37,7 +40,6 @@ import (
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/tests"
 	"github.com/tikv/pd/tests/server/api"
-	"go.uber.org/goleak"
 )
 
 func TestMain(m *testing.M) {
@@ -89,7 +91,7 @@ func (suite *serverTestSuite) TearDownSuite() {
 func (suite *serverTestSuite) TestAllocID() {
 	re := suite.Require()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/mcs/scheduling/server/fastUpdateMember", `return(true)`))
-	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.backendEndpoints)
+	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.cluster)
 	re.NoError(err)
 	defer tc.Destroy()
 	tc.WaitForPrimaryServing(re)
@@ -104,11 +106,11 @@ func (suite *serverTestSuite) TestAllocIDAfterLeaderChange() {
 	re := suite.Require()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/mcs/scheduling/server/fastUpdateMember", `return(true)`))
 	pd2, err := suite.cluster.Join(suite.ctx)
-	re.NoError(err)
+	re.NoError(err, "error: %v", err)
 	err = pd2.Run()
 	re.NotEmpty(suite.cluster.WaitLeader())
 	re.NoError(err)
-	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.backendEndpoints)
+	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.cluster)
 	re.NoError(err)
 	defer tc.Destroy()
 	tc.WaitForPrimaryServing(re)
@@ -136,7 +138,7 @@ func (suite *serverTestSuite) TestAllocIDAfterLeaderChange() {
 
 func (suite *serverTestSuite) TestPrimaryChange() {
 	re := suite.Require()
-	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 2, suite.backendEndpoints)
+	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 2, suite.cluster)
 	re.NoError(err)
 	defer tc.Destroy()
 	tc.WaitForPrimaryServing(re)
@@ -162,7 +164,7 @@ func (suite *serverTestSuite) TestPrimaryChange() {
 
 func (suite *serverTestSuite) TestForwardStoreHeartbeat() {
 	re := suite.Require()
-	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.backendEndpoints)
+	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.cluster)
 	re.NoError(err)
 	defer tc.Destroy()
 	tc.WaitForPrimaryServing(re)
@@ -223,7 +225,7 @@ func (suite *serverTestSuite) TestSchedulingServiceFallback() {
 		return suite.pdLeader.GetServer().GetRaftCluster().IsSchedulingControllerRunning()
 	})
 
-	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.backendEndpoints)
+	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.cluster)
 	re.NoError(err)
 	defer tc.Destroy()
 	tc.WaitForPrimaryServing(re)
@@ -240,7 +242,7 @@ func (suite *serverTestSuite) TestSchedulingServiceFallback() {
 	testutil.Eventually(re, func() bool {
 		return suite.pdLeader.GetServer().GetRaftCluster().IsSchedulingControllerRunning()
 	})
-	tc1, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.backendEndpoints)
+	tc1, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.cluster)
 	re.NoError(err)
 	defer tc1.Destroy()
 	tc1.WaitForPrimaryServing(re)
@@ -259,6 +261,8 @@ func (suite *serverTestSuite) TestDisableSchedulingServiceFallback() {
 
 	// API server will execute scheduling jobs since there is no scheduling server.
 	testutil.Eventually(re, func() bool {
+		re.NotNil(suite.pdLeader.GetServer())
+		re.NotNil(suite.pdLeader.GetServer().GetRaftCluster())
 		return suite.pdLeader.GetServer().GetRaftCluster().IsSchedulingControllerRunning()
 	})
 	leaderServer := suite.pdLeader.GetServer()
@@ -276,7 +280,7 @@ func (suite *serverTestSuite) TestDisableSchedulingServiceFallback() {
 		return suite.pdLeader.GetServer().GetRaftCluster().IsSchedulingControllerRunning()
 	})
 
-	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.backendEndpoints)
+	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.cluster)
 	re.NoError(err)
 	defer tc.Destroy()
 	tc.WaitForPrimaryServing(re)
@@ -300,7 +304,7 @@ func (suite *serverTestSuite) TestDisableSchedulingServiceFallback() {
 
 func (suite *serverTestSuite) TestSchedulerSync() {
 	re := suite.Require()
-	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.backendEndpoints)
+	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.cluster)
 	re.NoError(err)
 	defer tc.Destroy()
 	tc.WaitForPrimaryServing(re)
@@ -420,7 +424,7 @@ func checkEvictLeaderStoreIDs(re *require.Assertions, sc *schedulers.Controller,
 
 func (suite *serverTestSuite) TestForwardRegionHeartbeat() {
 	re := suite.Require()
-	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.backendEndpoints)
+	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.cluster)
 	re.NoError(err)
 	defer tc.Destroy()
 	tc.WaitForPrimaryServing(re)
@@ -497,7 +501,7 @@ func (suite *serverTestSuite) TestForwardRegionHeartbeat() {
 
 func (suite *serverTestSuite) TestStoreLimit() {
 	re := suite.Require()
-	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.backendEndpoints)
+	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.cluster)
 	re.NoError(err)
 	defer tc.Destroy()
 	tc.WaitForPrimaryServing(re)
@@ -658,7 +662,7 @@ func (suite *multipleServerTestSuite) TestReElectLeader() {
 	defer func() {
 		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/member/skipCampaignLeaderCheck"))
 	}()
-	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.backendEndpoints)
+	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.cluster)
 	re.NoError(err)
 	defer tc.Destroy()
 	tc.WaitForPrimaryServing(re)
@@ -690,7 +694,7 @@ func (suite *multipleServerTestSuite) TestReElectLeader() {
 
 func (suite *serverTestSuite) TestOnlineProgress() {
 	re := suite.Require()
-	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.backendEndpoints)
+	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.cluster)
 	re.NoError(err)
 	defer tc.Destroy()
 	tc.WaitForPrimaryServing(re)

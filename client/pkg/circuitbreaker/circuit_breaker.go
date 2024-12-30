@@ -19,13 +19,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/tikv/pd/client/errs"
-
 	"github.com/prometheus/client_golang/prometheus"
-	m "github.com/tikv/pd/client/metrics"
 	"go.uber.org/zap"
 
 	"github.com/pingcap/log"
+
+	"github.com/tikv/pd/client/errs"
+	m "github.com/tikv/pd/client/metrics"
 )
 
 // Overloading is a type describing service return value
@@ -123,6 +123,7 @@ func (cb *CircuitBreaker[T]) ChangeSettings(apply func(config *Settings)) {
 	defer cb.mutex.Unlock()
 
 	apply(cb.config)
+	log.Info("circuit breaker settings changed", zap.Any("config", cb.config))
 }
 
 // Execute calls the given function if the CircuitBreaker is closed and returns the result of execution.
@@ -238,10 +239,10 @@ func (s *State[T]) onRequest(cb *CircuitBreaker[T]) (*State[T], error) {
 					observedErrorRatePct := s.failureCount * 100 / total
 					if total >= uint32(s.cb.config.ErrorRateWindow.Seconds())*s.cb.config.MinQPSForOpen && observedErrorRatePct >= s.cb.config.ErrorRateThresholdPct {
 						// the error threshold is breached, let's move to open state and start failing all requests
-						log.Error("Circuit breaker tripped. Starting to fail all requests",
+						log.Error("circuit breaker tripped and starting to fail all requests",
 							zap.String("name", cb.name),
-							zap.Uint32("observedErrorRatePct", observedErrorRatePct),
-							zap.String("config", fmt.Sprintf("%+v", cb.config)))
+							zap.Uint32("observed-err-rate-pct", observedErrorRatePct),
+							zap.Any("config", cb.config))
 						return cb.newState(now, StateOpen), errs.ErrCircuitBreakerOpen
 					}
 				}
@@ -253,29 +254,37 @@ func (s *State[T]) onRequest(cb *CircuitBreaker[T]) (*State[T], error) {
 		// continue in closed state till ErrorRateWindow is over
 		return s, nil
 	case StateOpen:
+		if s.cb.config.ErrorRateThresholdPct == 0 {
+			return cb.newState(now, StateClosed), nil
+		}
+
 		if now.After(s.end) {
 			// CoolDownInterval is over, it is time to transition to half-open state
-			log.Info("Circuit breaker cooldown period is over. Transitioning to half-open state to test the service",
+			log.Info("circuit breaker cooldown period is over. Transitioning to half-open state to test the service",
 				zap.String("name", cb.name),
-				zap.String("config", fmt.Sprintf("%+v", cb.config)))
+				zap.Any("config", cb.config))
 			return cb.newState(now, StateHalfOpen), nil
 		} else {
 			// continue in the open state till CoolDownInterval is over
 			return s, errs.ErrCircuitBreakerOpen
 		}
 	case StateHalfOpen:
+		if s.cb.config.ErrorRateThresholdPct == 0 {
+			return cb.newState(now, StateClosed), nil
+		}
+
 		// do we need some expire time here in case of one of pending requests is stuck forever?
 		if s.failureCount > 0 {
 			// there were some failures during half-open state, let's go back to open state to wait a bit longer
-			log.Error("Circuit breaker goes from half-open to open again as errors persist and continue to fail all requests",
+			log.Error("circuit breaker goes from half-open to open again as errors persist and continue to fail all requests",
 				zap.String("name", cb.name),
-				zap.String("config", fmt.Sprintf("%+v", cb.config)))
+				zap.Any("config", cb.config))
 			return cb.newState(now, StateOpen), errs.ErrCircuitBreakerOpen
 		} else if s.successCount == s.cb.config.HalfOpenSuccessCount {
 			// all probe requests are succeeded, we can move to closed state and allow all requests
-			log.Info("Circuit breaker is closed. Start allowing all requests",
+			log.Info("circuit breaker is closed and start allowing all requests",
 				zap.String("name", cb.name),
-				zap.String("config", fmt.Sprintf("%+v", cb.config)))
+				zap.Any("config", cb.config))
 			return cb.newState(now, StateClosed), nil
 		} else if s.pendingCount < s.cb.config.HalfOpenSuccessCount {
 			// allow more probe requests and continue in half-open state

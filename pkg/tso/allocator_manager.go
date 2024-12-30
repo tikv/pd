@@ -16,16 +16,18 @@ package tso
 
 import (
 	"context"
-	"math"
-	"path"
 	"runtime/trace"
 	"strconv"
 	"sync"
 	"time"
 
+	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.uber.org/zap"
+
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+
 	"github.com/tikv/pd/pkg/election"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/member"
@@ -33,8 +35,6 @@ import (
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
-	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.uber.org/zap"
 )
 
 const (
@@ -43,8 +43,6 @@ const (
 	checkStep                   = time.Minute
 	patrolStep                  = time.Second
 	defaultAllocatorLeaderLease = 3
-	localTSOAllocatorEtcdPrefix = "lta"
-	localTSOSuffixEtcdPrefix    = "lts"
 )
 
 var (
@@ -217,17 +215,6 @@ func (am *AllocatorManager) getGroupIDStr() string {
 	return strconv.FormatUint(uint64(am.kgID), 10)
 }
 
-// GetTimestampPath returns the timestamp path in etcd.
-func (am *AllocatorManager) GetTimestampPath() string {
-	if am == nil {
-		return ""
-	}
-
-	am.mu.RLock()
-	defer am.mu.RUnlock()
-	return path.Join(am.rootPath, am.mu.allocatorGroup.allocator.GetTimestampPath())
-}
-
 // tsoAllocatorLoop is used to run the TSO Allocator updating daemon.
 func (am *AllocatorManager) tsoAllocatorLoop() {
 	defer logutil.LogPanic()
@@ -252,21 +239,6 @@ func (am *AllocatorManager) close() {
 // GetMember returns the ElectionMember of this AllocatorManager.
 func (am *AllocatorManager) GetMember() ElectionMember {
 	return am.member
-}
-
-// GetSuffixBits calculates the bits of suffix sign
-// by the max number of suffix so far,
-// which will be used in the TSO logical part.
-func (am *AllocatorManager) GetSuffixBits() int {
-	am.mu.RLock()
-	defer am.mu.RUnlock()
-	return CalSuffixBits(am.mu.maxSuffix)
-}
-
-// CalSuffixBits calculates the bits of suffix by the max suffix sign.
-func CalSuffixBits(maxSuffix int32) int {
-	// maxSuffix + 1 because we have the Global TSO holds 0 as the suffix sign
-	return int(math.Ceil(math.Log2(float64(maxSuffix + 1))))
 }
 
 // AllocatorDaemon is used to update every allocator's TSO and check whether we have

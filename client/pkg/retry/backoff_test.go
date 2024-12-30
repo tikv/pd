@@ -22,9 +22,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pingcap/log"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
+
+	"github.com/pingcap/log"
 )
 
 func TestBackoffer(t *testing.T) {

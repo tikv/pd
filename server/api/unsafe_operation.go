@@ -17,10 +17,11 @@ package api
 import (
 	"net/http"
 
+	"github.com/unrolled/render"
+
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/server"
-	"github.com/unrolled/render"
 )
 
 type unsafeOperationHandler struct {
