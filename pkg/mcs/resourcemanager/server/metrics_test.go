@@ -15,7 +15,6 @@
 package server
 
 import (
-	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -43,8 +42,8 @@ func TestMaxPerSecCostTracker(t *testing.T) {
 		// Check the max values at the end of each flushPeriod
 		if (i+1)%20 == 0 {
 			period := i / 20
-			re.Equal(tracker.maxPerSecRRU, expectedMaxRU[period], fmt.Sprintf("maxPerSecRRU in period %d is incorrect", period+1))
-			re.Equal(tracker.maxPerSecWRU, expectedMaxRU[period], fmt.Sprintf("maxPerSecWRU in period %d is incorrect", period+1))
+			re.Equalf(tracker.maxPerSecRRU, expectedMaxRU[period], "maxPerSecRRU in period %d is incorrect", period+1)
+			re.Equalf(tracker.maxPerSecWRU, expectedMaxRU[period], "maxPerSecWRU in period %d is incorrect", period+1)
 			re.Equal(tracker.rruSum, expectedSum[period])
 			re.Equal(tracker.rruSum, expectedSum[period])
 		}
