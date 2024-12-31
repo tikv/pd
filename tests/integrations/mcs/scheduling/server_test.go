@@ -106,7 +106,7 @@ func (suite *serverTestSuite) TestAllocIDAfterLeaderChange() {
 	re := suite.Require()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/mcs/scheduling/server/fastUpdateMember", `return(true)`))
 	pd2, err := suite.cluster.Join(suite.ctx)
-	re.NoError(err)
+	re.NoError(err, "error: %v", err)
 	err = pd2.Run()
 	re.NotEmpty(suite.cluster.WaitLeader())
 	re.NoError(err)
@@ -261,6 +261,8 @@ func (suite *serverTestSuite) TestDisableSchedulingServiceFallback() {
 
 	// API server will execute scheduling jobs since there is no scheduling server.
 	testutil.Eventually(re, func() bool {
+		re.NotNil(suite.pdLeader.GetServer())
+		re.NotNil(suite.pdLeader.GetServer().GetRaftCluster())
 		return suite.pdLeader.GetServer().GetRaftCluster().IsSchedulingControllerRunning()
 	})
 	leaderServer := suite.pdLeader.GetServer()

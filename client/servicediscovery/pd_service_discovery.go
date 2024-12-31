@@ -966,12 +966,9 @@ func (c *pdServiceDiscovery) updateURLs(members []*pdpb.Member) {
 		return
 	}
 	c.urls.Store(urls)
-	// Update the connection contexts when member changes if TSO Follower Proxy is enabled.
-	if c.option.GetEnableTSOFollowerProxy() {
-		// Run callbacks to reflect the membership changes in the leader and followers.
-		for _, cb := range c.membersChangedCbs {
-			cb()
-		}
+	// Run callbacks to reflect the membership changes in the leader and followers.
+	for _, cb := range c.membersChangedCbs {
+		cb()
 	}
 	log.Info("[pd] update member urls", zap.Strings("old-urls", oldURLs), zap.Strings("new-urls", urls))
 }

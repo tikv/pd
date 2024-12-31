@@ -17,7 +17,6 @@
 package cgroup
 
 import (
-	"fmt"
 	"regexp"
 	"runtime"
 	"strconv"
@@ -45,10 +44,10 @@ func checkKernelVersionNewerThan(re *require.Assertions, t *testing.T, major, mi
 	t.Log("kernel release string:", releaseStr)
 	versionInfoRE := regexp.MustCompile(`[0-9]+\.[0-9]+\.[0-9]+`)
 	kernelVersion := versionInfoRE.FindAllString(releaseStr, 1)
-	re.Len(kernelVersion, 1, fmt.Sprintf("release str is %s", releaseStr))
+	re.Lenf(kernelVersion, 1, "release str is %s", releaseStr)
 	kernelVersionPartRE := regexp.MustCompile(`[0-9]+`)
 	kernelVersionParts := kernelVersionPartRE.FindAllString(kernelVersion[0], -1)
-	re.Len(kernelVersionParts, 3, fmt.Sprintf("kernel version str is %s", kernelVersion[0]))
+	re.Lenf(kernelVersionParts, 3, "kernel version str is %s", kernelVersion[0])
 	t.Logf("parsed kernel version parts: major %s, minor %s, patch %s",
 		kernelVersionParts[0], kernelVersionParts[1], kernelVersionParts[2])
 	mustConvInt := func(s string) int {

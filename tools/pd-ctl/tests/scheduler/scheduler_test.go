@@ -186,18 +186,18 @@ func (suite *schedulerTestSuite) checkScheduler(cluster *pdTests.TestCluster) {
 				case "grant-leader-scheduler":
 					return "paused", !storeInfo.AllowLeaderTransferOut()
 				default:
-					re.Fail(fmt.Sprintf("unknown scheduler %s", schedulerName))
+					re.Failf("unknown scheduler %s", schedulerName)
 					return "", false
 				}
 			}()
 			if slice.AnyOf(changedStores, func(i int) bool {
 				return store.GetId() == changedStores[i]
 			}) {
-				re.True(isStorePaused,
-					fmt.Sprintf("store %d should be %s with %s", store.GetId(), status, schedulerName))
+				re.Truef(isStorePaused,
+					"store %d should be %s with %s", store.GetId(), status, schedulerName)
 			} else {
-				re.False(isStorePaused,
-					fmt.Sprintf("store %d should not be %s with %s", store.GetId(), status, schedulerName))
+				re.Falsef(isStorePaused,
+					"store %d should not be %s with %s", store.GetId(), status, schedulerName)
 			}
 			if sche := cluster.GetSchedulingPrimaryServer(); sche != nil {
 				switch schedulerName {
@@ -206,7 +206,7 @@ func (suite *schedulerTestSuite) checkScheduler(cluster *pdTests.TestCluster) {
 				case "grant-leader-scheduler":
 					re.Equal(isStorePaused, !sche.GetCluster().GetStore(store.GetId()).AllowLeaderTransferOut())
 				default:
-					re.Fail(fmt.Sprintf("unknown scheduler %s", schedulerName))
+					re.Failf("unknown scheduler %s", schedulerName)
 				}
 			}
 		}

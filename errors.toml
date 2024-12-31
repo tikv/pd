@@ -131,11 +131,6 @@ error = '''
 get TSO failed
 '''
 
-["PD:client:ErrClientGetTSOTimeout"]
-error = '''
-get TSO timeout
-'''
-
 ["PD:cluster:ErrInvalidStoreID"]
 error = '''
 invalid store id %d, not found
