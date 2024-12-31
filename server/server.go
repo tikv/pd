@@ -506,6 +506,7 @@ func (s *Server) startServer(ctx context.Context) error {
 		s.grpcServiceRateLimiter.Update(service, ratelimit.InitLimiter())
 	}
 
+	failpoint.InjectCall("delayStartServer")
 	// Server has started.
 	atomic.StoreInt64(&s.isRunning, 1)
 	bs.ServerMaxProcsGauge.Set(float64(runtime.GOMAXPROCS(0)))
