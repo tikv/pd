@@ -509,8 +509,8 @@ func (c *pdServiceDiscovery) Init() error {
 		}
 	}
 
-	if err := c.checkServiceModeChanged(); err != nil {
-		log.Warn("[pd] failed to check service mode and will check later", zap.Error(err))
+	if err := c.initRetry(c.checkServiceModeChanged); err != nil {
+		return err
 	}
 
 	c.wg.Add(3)
