@@ -29,6 +29,7 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/client/errs"
+<<<<<<< HEAD:client/tso_dispatcher.go
 	"github.com/tikv/pd/client/retry"
 	"github.com/tikv/pd/client/timerpool"
 	"github.com/tikv/pd/client/tsoutil"
@@ -56,6 +57,18 @@ func newTSDeadline(
 	}
 }
 
+=======
+	"github.com/tikv/pd/client/metrics"
+	"github.com/tikv/pd/client/opt"
+	"github.com/tikv/pd/client/pkg/batch"
+	cctx "github.com/tikv/pd/client/pkg/connectionctx"
+	"github.com/tikv/pd/client/pkg/deadline"
+	"github.com/tikv/pd/client/pkg/retry"
+	"github.com/tikv/pd/client/pkg/utils/tsoutil"
+	sd "github.com/tikv/pd/client/servicediscovery"
+)
+
+>>>>>>> 5ad4301b7a (client/pkg: introduce the deadline watcher (#8955)):client/clients/tso/dispatcher.go
 type tsoInfo struct {
 	tsoServer           string
 	reqKeyspaceGroupID  uint32
@@ -79,6 +92,7 @@ type tsoDispatcher struct {
 	cancel context.CancelFunc
 	dc     string
 
+<<<<<<< HEAD:client/tso_dispatcher.go
 	provider tsoServiceProvider
 	// URL -> *connectionContext
 	connectionCtxs *sync.Map
@@ -86,6 +100,13 @@ type tsoDispatcher struct {
 	tsDeadlineCh   chan *deadline
 	latestTSOInfo  atomic.Pointer[tsoInfo]
 	// For reusing tsoBatchController objects
+=======
+	provider        tsoServiceProvider
+	tsoRequestCh    chan *Request
+	deadlineWatcher *deadline.Watcher
+	latestTSOInfo   atomic.Pointer[tsoInfo]
+	// For reusing `*batchController` objects
+>>>>>>> 5ad4301b7a (client/pkg: introduce the deadline watcher (#8955)):client/clients/tso/dispatcher.go
 	batchBufferPool *sync.Pool
 
 	// For controlling amount of concurrently processing RPC requests.
@@ -117,6 +138,7 @@ func newTSODispatcher(
 	tokenCh := make(chan struct{}, tokenChCapacity)
 
 	td := &tsoDispatcher{
+<<<<<<< HEAD:client/tso_dispatcher.go
 		ctx:            dispatcherCtx,
 		cancel:         dispatcherCancel,
 		dc:             dc,
@@ -124,6 +146,13 @@ func newTSODispatcher(
 		connectionCtxs: &sync.Map{},
 		tsoRequestCh:   tsoRequestCh,
 		tsDeadlineCh:   make(chan *deadline, tokenChCapacity),
+=======
+		ctx:             dispatcherCtx,
+		cancel:          dispatcherCancel,
+		provider:        provider,
+		tsoRequestCh:    tsoRequestCh,
+		deadlineWatcher: deadline.NewWatcher(dispatcherCtx, tokenChCapacity, "tso"),
+>>>>>>> 5ad4301b7a (client/pkg: introduce the deadline watcher (#8955)):client/clients/tso/dispatcher.go
 		batchBufferPool: &sync.Pool{
 			New: func() any {
 				return newTSOBatchController(maxBatchSize * 2)
@@ -132,10 +161,10 @@ func newTSODispatcher(
 		tokenCh:                tokenCh,
 		updateConnectionCtxsCh: make(chan struct{}, 1),
 	}
-	go td.watchTSDeadline()
 	return td
 }
 
+<<<<<<< HEAD:client/tso_dispatcher.go
 func (td *tsoDispatcher) watchTSDeadline() {
 	log.Info("[tso] start tso deadline watcher", zap.String("dc-location", td.dc))
 	defer log.Info("[tso] exit tso deadline watcher", zap.String("dc-location", td.dc))
@@ -167,6 +196,8 @@ func (td *tsoDispatcher) scheduleUpdateConnectionCtxs() {
 	}
 }
 
+=======
+>>>>>>> 5ad4301b7a (client/pkg: introduce the deadline watcher (#8955)):client/clients/tso/dispatcher.go
 func (td *tsoDispatcher) revokePendingRequests(err error) {
 	for range len(td.tsoRequestCh) {
 		req := <-td.tsoRequestCh
@@ -391,14 +422,18 @@ tsoBatchLoop:
 			}
 		}
 
+<<<<<<< HEAD:client/tso_dispatcher.go
 		done := make(chan struct{})
 		dl := newTSDeadline(option.timeout, done, cancel)
 		select {
 		case <-ctx.Done():
+=======
+		done := td.deadlineWatcher.Start(ctx, option.Timeout, cancel)
+		if done == nil {
+>>>>>>> 5ad4301b7a (client/pkg: introduce the deadline watcher (#8955)):client/clients/tso/dispatcher.go
 			// Finish the collected requests if the context is canceled.
 			td.cancelCollectedRequests(batchController, invalidStreamID, errors.WithStack(ctx.Err()))
 			return
-		case td.tsDeadlineCh <- dl:
 		}
 		// processRequests guarantees that the collected requests could be finished properly.
 		err = td.processRequests(stream, dc, batchController, done)
