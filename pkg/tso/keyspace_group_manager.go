@@ -1297,7 +1297,7 @@ func (kgm *KeyspaceGroupManager) mergingChecker(ctx context.Context, mergeTarget
 	log.Info("start to merge the keyspace group",
 		zap.String("member", kgm.tsoServiceID.ServiceAddr),
 		zap.Uint32("merge-target-id", mergeTargetID),
-		zap.Any("merge-list", mergeList))
+		zap.Uint32s("merge-list", mergeList))
 	defer logutil.LogPanic()
 	defer kgm.wg.Done()
 
@@ -1316,7 +1316,7 @@ mergeLoop:
 			log.Info("merging checker is closed",
 				zap.String("member", kgm.tsoServiceID.ServiceAddr),
 				zap.Uint32("merge-target-id", mergeTargetID),
-				zap.Any("merge-list", mergeList))
+				zap.Uint32s("merge-list", mergeList))
 			return
 		case <-checkTicker.C:
 		}
@@ -1326,7 +1326,7 @@ mergeLoop:
 			log.Warn("unable to get the merge target allocator manager",
 				zap.String("member", kgm.tsoServiceID.ServiceAddr),
 				zap.Uint32("keyspace-group-id", mergeTargetID),
-				zap.Any("merge-list", mergeList),
+				zap.Uint32s("merge-list", mergeList),
 				zap.Error(err))
 			continue
 		}
@@ -1336,7 +1336,7 @@ mergeLoop:
 			log.Debug("current tso node is not the merge target primary",
 				zap.String("member", kgm.tsoServiceID.ServiceAddr),
 				zap.Uint32("merge-target-id", mergeTargetID),
-				zap.Any("merge-list", mergeList))
+				zap.Uint32s("merge-list", mergeList))
 			continue
 		}
 		// Check if the keyspace group primaries in the merge map are all gone.
@@ -1351,7 +1351,7 @@ mergeLoop:
 					log.Error("failed to check if the keyspace group primary in the merge list has gone",
 						zap.String("member", kgm.tsoServiceID.ServiceAddr),
 						zap.Uint32("merge-target-id", mergeTargetID),
-						zap.Any("merge-list", mergeList),
+						zap.Uint32s("merge-list", mergeList),
 						zap.Uint32("merge-id", id),
 						zap.Any("remaining", mergeMap),
 						zap.Error(err))
@@ -1370,7 +1370,7 @@ mergeLoop:
 			"start to calculate the newly merged TSO",
 			zap.String("member", kgm.tsoServiceID.ServiceAddr),
 			zap.Uint32("merge-target-id", mergeTargetID),
-			zap.Any("merge-list", mergeList))
+			zap.Uint32s("merge-list", mergeList))
 		// All the keyspace group primaries in the merge list are gone,
 		// calculate the newly merged TSO to make sure it is greater than the original ones.
 		var mergedTS time.Time
@@ -1380,7 +1380,7 @@ mergeLoop:
 				log.Error("failed to load the keyspace group TSO",
 					zap.String("member", kgm.tsoServiceID.ServiceAddr),
 					zap.Uint32("merge-target-id", mergeTargetID),
-					zap.Any("merge-list", mergeList),
+					zap.Uint32s("merge-list", mergeList),
 					zap.Uint32("merge-id", id),
 					zap.Time("ts", ts),
 					zap.Error(err))
@@ -1396,7 +1396,7 @@ mergeLoop:
 			log.Info("start to set the newly merged TSO",
 				zap.String("member", kgm.tsoServiceID.ServiceAddr),
 				zap.Uint32("merge-target-id", mergeTargetID),
-				zap.Any("merge-list", mergeList),
+				zap.Uint32s("merge-list", mergeList),
 				zap.Time("merged-ts", mergedTS))
 			err = am.GetAllocator().SetTSO(
 				tsoutil.GenerateTS(tsoutil.GenerateTimestamp(mergedTS, 1)),
@@ -1405,7 +1405,7 @@ mergeLoop:
 				log.Error("failed to update the newly merged TSO",
 					zap.String("member", kgm.tsoServiceID.ServiceAddr),
 					zap.Uint32("merge-target-id", mergeTargetID),
-					zap.Any("merge-list", mergeList),
+					zap.Uint32s("merge-list", mergeList),
 					zap.Time("merged-ts", mergedTS),
 					zap.Error(err))
 				continue
@@ -1417,7 +1417,7 @@ mergeLoop:
 			log.Error("failed to finish the merge",
 				zap.String("member", kgm.tsoServiceID.ServiceAddr),
 				zap.Uint32("merge-target-id", mergeTargetID),
-				zap.Any("merge-list", mergeList),
+				zap.Uint32s("merge-list", mergeList),
 				zap.Error(err))
 			continue
 		}
@@ -1425,7 +1425,7 @@ mergeLoop:
 		log.Info("finished merging keyspace group",
 			zap.String("member", kgm.tsoServiceID.ServiceAddr),
 			zap.Uint32("merge-target-id", mergeTargetID),
-			zap.Any("merge-list", mergeList),
+			zap.Uint32s("merge-list", mergeList),
 			zap.Time("merged-ts", mergedTS))
 		return
 	}
