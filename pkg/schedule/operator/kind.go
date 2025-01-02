@@ -49,6 +49,8 @@ const (
 	OpWitnessLeader
 	// Include witness transfer.
 	OpWitness
+	// Include keyrange balancer
+	OpKeyrange
 	opMax
 )
 
