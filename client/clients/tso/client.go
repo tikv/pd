@@ -281,6 +281,9 @@ func (c *Cli) connectionCtxsUpdater() {
 				// Because the TSO Follower Proxy is enabled,
 				// the periodic check needs to be performed.
 				setNewUpdateTicker(sd.MemberUpdateInterval)
+				failpoint.Inject("speedUpTsoDispatcherUpdateInterval", func() {
+					setNewUpdateTicker(10 * time.Millisecond)
+				})
 			} else if !enableTSOFollowerProxy && updateTicker.C != nil {
 				// Because the TSO Follower Proxy is disabled,
 				// the periodic check needs to be turned off.
