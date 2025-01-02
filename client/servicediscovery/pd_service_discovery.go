@@ -510,6 +510,7 @@ func (c *pdServiceDiscovery) Init() error {
 	}
 
 	if err := c.initRetry(c.checkServiceModeChanged); err != nil {
+		c.cancel()
 		return err
 	}
 
