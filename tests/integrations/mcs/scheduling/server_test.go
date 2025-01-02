@@ -84,8 +84,8 @@ func (suite *serverTestSuite) TearDownSuite() {
 	suite.cluster.Destroy()
 	suite.cancel()
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs"))
-	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/changeCoordinatorTicker"))
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/scheduling/server/changeRunCollectWaitTime"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/changeCoordinatorTicker"))
 }
 
 func (suite *serverTestSuite) TestAllocID() {
@@ -505,12 +505,14 @@ func (suite *serverTestSuite) TestStoreLimit() {
 	re.NoError(err)
 	defer tc.Destroy()
 	tc.WaitForPrimaryServing(re)
-
 	oc := tc.GetPrimaryServer().GetCluster().GetCoordinator().GetOperatorController()
 	leaderServer := suite.pdLeader.GetServer()
 	conf := leaderServer.GetReplicationConfig().Clone()
 	conf.MaxReplicas = 1
 	leaderServer.SetReplicationConfig(*conf)
+	conf1 := leaderServer.GetScheduleConfig().Clone()
+	conf1.RegionScheduleLimit = 0
+	leaderServer.SetScheduleConfig(*conf1)
 	grpcPDClient := testutil.MustNewGrpcClient(re, suite.pdLeader.GetServer().GetAddr())
 	for i := uint64(1); i <= 2; i++ {
 		resp, err := grpcPDClient.PutStore(
