@@ -24,15 +24,18 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/backoff"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/client/errs"
+	"github.com/tikv/pd/client/pkg/circuitbreaker"
 	"github.com/tikv/pd/client/pkg/retry"
 )
 
@@ -71,6 +74,36 @@ func UnaryBackofferInterceptor() grpc.UnaryClientInterceptor {
 	}
 }
 
+// UnaryCircuitBreakerInterceptor is a gRPC interceptor that adds a circuit breaker to the call.
+func UnaryCircuitBreakerInterceptor() grpc.UnaryClientInterceptor {
+	return func(ctx context.Context, method string, req, reply any, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
+		cb := circuitbreaker.FromContext(ctx)
+		if cb == nil {
+			return invoker(ctx, method, req, reply, cc, opts...)
+		}
+		err := cb.Execute(func() (circuitbreaker.Overloading, error) {
+			err := invoker(ctx, method, req, reply, cc, opts...)
+			failpoint.Inject("triggerCircuitBreaker", func() {
+				err = status.Error(codes.ResourceExhausted, "resource exhausted")
+			})
+			return isOverloaded(err), err
+		})
+		if err != nil {
+			return err
+		}
+		return nil
+	}
+}
+
+func isOverloaded(err error) circuitbreaker.Overloading {
+	switch status.Code(errors.Cause(err)) {
+	case codes.DeadlineExceeded, codes.Unavailable, codes.ResourceExhausted:
+		return circuitbreaker.Yes
+	default:
+		return circuitbreaker.No
+	}
+}
+
 // GetClientConn returns a gRPC client connection.
 // creates a client connection to the given target. By default, it's
 // a non-blocking dial (the function won't wait for connections to be
@@ -96,7 +129,10 @@ func GetClientConn(ctx context.Context, addr string, tlsCfg *tls.Config, do ...g
 	}
 
 	// Add backoffer interceptor
-	retryOpt := grpc.WithUnaryInterceptor(UnaryBackofferInterceptor())
+	retryOpt := grpc.WithChainUnaryInterceptor(UnaryBackofferInterceptor())
+
+	// Add circuit breaker interceptor
+	cbOpt := grpc.WithChainUnaryInterceptor(UnaryCircuitBreakerInterceptor())
 
 	// Add retry related connection parameters
 	backoffOpts := grpc.WithConnectParams(grpc.ConnectParams{
@@ -108,7 +144,7 @@ func GetClientConn(ctx context.Context, addr string, tlsCfg *tls.Config, do ...g
 		},
 	})
 
-	do = append(do, opt, retryOpt, backoffOpts)
+	do = append(do, opt, retryOpt, cbOpt, backoffOpts)
 	cc, err := grpc.DialContext(ctx, u.Host, do...)
 	if err != nil {
 		return nil, errs.ErrGRPCDial.Wrap(err).GenWithStackByCause()
