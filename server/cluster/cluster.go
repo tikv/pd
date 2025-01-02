@@ -2283,7 +2283,8 @@ func (c *RaftCluster) CheckAndUpdateMinResolvedTS() (uint64, bool) {
 			newMinResolvedTS = s.GetMinResolvedTS()
 		}
 	}
-	oldMinResolvedTS := c.minResolvedTS.Load().(uint64)
+	// Avoid panic when minResolvedTS is not initialized.
+	oldMinResolvedTS, _ := c.minResolvedTS.Load().(uint64)
 	if newMinResolvedTS == math.MaxUint64 || newMinResolvedTS <= oldMinResolvedTS {
 		return oldMinResolvedTS, false
 	}
