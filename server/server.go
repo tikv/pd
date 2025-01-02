@@ -101,8 +101,8 @@ const (
 
 	// PDMode represents that server is in PD mode.
 	PDMode = "PD"
-	// APIServiceMode represents that server is in API service mode.
-	APIServiceMode = "API Service"
+	// PDServiceMode represents that server is in PD service mode which is in microservice architecture.
+	PDServiceMode = "PD Service"
 
 	// maxRetryTimesGetServicePrimary is the max retry times for getting primary addr.
 	// Note: it need to be less than client.defaultPDTimeout
@@ -243,7 +243,7 @@ type HandlerBuilder func(context.Context, *Server) (http.Handler, apiutil.APISer
 func CreateServer(ctx context.Context, cfg *config.Config, services []string, legacyServiceBuilders ...HandlerBuilder) (*Server, error) {
 	var mode string
 	if len(services) != 0 {
-		mode = APIServiceMode
+		mode = PDServiceMode
 	} else {
 		mode = PDMode
 	}
@@ -478,7 +478,7 @@ func (s *Server) startServer(ctx context.Context) error {
 		Member: s.member.MemberValue(),
 		Step:   keyspace.AllocStep,
 	})
-	if s.IsAPIServiceMode() {
+	if s.IsPDServiceMode() {
 		s.keyspaceGroupManager = keyspace.NewKeyspaceGroupManager(s.ctx, s.storage, s.client)
 	}
 	s.keyspaceManager = keyspace.NewKeyspaceManager(s.ctx, s.storage, s.cluster, keyspaceIDAllocator, &s.cfg.Keyspace, s.keyspaceGroupManager)
@@ -530,7 +530,7 @@ func (s *Server) Close() {
 	s.cgMonitor.StopMonitor()
 
 	s.stopServerLoop()
-	if s.IsAPIServiceMode() {
+	if s.IsPDServiceMode() {
 		s.keyspaceGroupManager.Close()
 	}
 
@@ -641,7 +641,7 @@ func (s *Server) startServerLoop(ctx context.Context) {
 	go s.etcdLeaderLoop()
 	go s.serverMetricsLoop()
 	go s.encryptionKeyManagerLoop()
-	if s.IsAPIServiceMode() {
+	if s.IsPDServiceMode() {
 		s.initTSOPrimaryWatcher()
 		s.initSchedulingPrimaryWatcher()
 	}
@@ -788,9 +788,9 @@ func (s *Server) stopRaftCluster() {
 	s.cluster.Stop()
 }
 
-// IsAPIServiceMode return whether the server is in API service mode.
-func (s *Server) IsAPIServiceMode() bool {
-	return s.mode == APIServiceMode
+// IsPDServiceMode return whether the server is in PD service mode.
+func (s *Server) IsPDServiceMode() bool {
+	return s.mode == PDServiceMode
 }
 
 // GetAddr returns the server urls for clients.
@@ -1390,7 +1390,7 @@ func (s *Server) GetRaftCluster() *cluster.RaftCluster {
 
 // IsServiceIndependent returns whether the service is independent.
 func (s *Server) IsServiceIndependent(name string) bool {
-	if s.mode == APIServiceMode && !s.IsClosed() {
+	if s.mode == PDServiceMode && !s.IsClosed() {
 		if name == constant.TSOServiceName && !s.GetMicroServiceConfig().IsTSODynamicSwitchingEnabled() {
 			return true
 		}
@@ -1667,7 +1667,7 @@ func (s *Server) campaignLeader() {
 	log.Info(fmt.Sprintf("start to campaign %s leader", s.mode), zap.String("campaign-leader-name", s.Name()))
 	if err := s.member.CampaignLeader(s.ctx, s.cfg.LeaderLease); err != nil {
 		if err.Error() == errs.ErrEtcdTxnConflict.Error() {
-			log.Info(fmt.Sprintf("campaign %s leader meets error due to txn conflict, another PD/API server may campaign successfully", s.mode),
+			log.Info(fmt.Sprintf("campaign %s leader meets error due to txn conflict, another PD/PD service may campaign successfully", s.mode),
 				zap.String("campaign-leader-name", s.Name()))
 		} else {
 			log.Error(fmt.Sprintf("campaign %s leader meets error due to etcd error", s.mode),

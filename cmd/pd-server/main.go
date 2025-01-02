@@ -82,7 +82,7 @@ func NewServiceCommand() *cobra.Command {
 	}
 	cmd.AddCommand(NewTSOServiceCommand())
 	cmd.AddCommand(NewSchedulingServiceCommand())
-	cmd.AddCommand(NewAPIServiceCommand())
+	cmd.AddCommand(NewPDServiceCommand())
 	return cmd
 }
 
@@ -128,12 +128,12 @@ func NewSchedulingServiceCommand() *cobra.Command {
 	return cmd
 }
 
-// NewAPIServiceCommand returns the API service command.
-func NewAPIServiceCommand() *cobra.Command {
+// NewPDServiceCommand returns the PD service command.
+func NewPDServiceCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   apiMode,
-		Short: "Run the API service",
-		Run:   createAPIServerWrapper,
+		Short: "Run the PD service",
+		Run:   createPDServiceWrapper,
 	}
 	addFlags(cmd)
 	return cmd
@@ -160,7 +160,7 @@ func addFlags(cmd *cobra.Command) {
 	cmd.Flags().BoolP("force-new-cluster", "", false, "force to create a new one-member cluster")
 }
 
-func createAPIServerWrapper(cmd *cobra.Command, args []string) {
+func createPDServiceWrapper(cmd *cobra.Command, args []string) {
 	start(cmd, args, cmd.CalledAs())
 }
 
@@ -219,7 +219,7 @@ func start(cmd *cobra.Command, args []string, services ...string) {
 	defer log.Sync()
 	memory.InitMemoryHook()
 	if len(services) != 0 {
-		versioninfo.Log(server.APIServiceMode)
+		versioninfo.Log(server.PDServiceMode)
 	} else {
 		versioninfo.Log(server.PDMode)
 	}

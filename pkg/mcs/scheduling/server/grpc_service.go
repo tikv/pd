@@ -159,7 +159,7 @@ func (s *Service) RegionHeartbeat(stream schedulingpb.Scheduling_RegionHeartbeat
 		region := core.RegionFromHeartbeat(request, 0)
 		err = c.HandleRegionHeartbeat(region)
 		if err != nil {
-			// TODO: if we need to send the error back to API server.
+			// TODO: if we need to send the error back to PD service.
 			log.Error("failed handle region heartbeat", zap.Error(err))
 			continue
 		}

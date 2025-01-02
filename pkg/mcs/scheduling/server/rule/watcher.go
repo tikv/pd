@@ -34,7 +34,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/keypath"
 )
 
-// Watcher is used to watch the PD API server for any Placement Rule changes.
+// Watcher is used to watch the PD service for any Placement Rule changes.
 type Watcher struct {
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -74,7 +74,7 @@ type Watcher struct {
 	patch *placement.RuleConfigPatch
 }
 
-// NewWatcher creates a new watcher to watch the Placement Rule change from PD API server.
+// NewWatcher creates a new watcher to watch the Placement Rule change from PD service.
 func NewWatcher(
 	ctx context.Context,
 	etcdClient *clientv3.Client,

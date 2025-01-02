@@ -266,13 +266,13 @@ func TestAPIService(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	mockHandler := CreateMockHandler(re, "127.0.0.1")
-	svr, err := CreateServer(ctx, cfg, []string{constant.APIServiceName}, mockHandler)
+	svr, err := CreateServer(ctx, cfg, []string{constant.PDServiceName}, mockHandler)
 	re.NoError(err)
 	defer svr.Close()
 	err = svr.Run()
 	re.NoError(err)
 	MustWaitLeader(re, []*Server{svr})
-	re.True(svr.IsAPIServiceMode())
+	re.True(svr.IsPDServiceMode())
 }
 
 func TestIsPathInDirectory(t *testing.T) {
