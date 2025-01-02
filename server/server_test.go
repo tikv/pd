@@ -272,7 +272,7 @@ func TestAPIService(t *testing.T) {
 	err = svr.Run()
 	re.NoError(err)
 	MustWaitLeader(re, []*Server{svr})
-	re.True(svr.IsAPIServiceMode())
+	re.True(svr.IsKeyspaceEnabled())
 }
 
 func TestIsPathInDirectory(t *testing.T) {

@@ -52,7 +52,7 @@ import (
 )
 
 const (
-	apiMode        = "api"
+	keyspaceMode   = "api"
 	tsoMode        = "tso"
 	serviceModeEnv = "PD_SERVICE_MODE"
 )
@@ -82,7 +82,7 @@ func NewServiceCommand() *cobra.Command {
 	}
 	cmd.AddCommand(NewTSOServiceCommand())
 	cmd.AddCommand(NewSchedulingServiceCommand())
-	cmd.AddCommand(NewAPIServiceCommand())
+	cmd.AddCommand(NewPDWithKeyspaceCommand())
 	return cmd
 }
 
@@ -128,12 +128,12 @@ func NewSchedulingServiceCommand() *cobra.Command {
 	return cmd
 }
 
-// NewAPIServiceCommand returns the API service command.
-func NewAPIServiceCommand() *cobra.Command {
+// NewPDWithKeyspaceCommand returns the PD with keyspace command.
+func NewPDWithKeyspaceCommand() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   apiMode,
-		Short: "Run the API service",
-		Run:   createAPIServerWrapper,
+		Use:   keyspaceMode,
+		Short: "Placement Driver server with keyspace",
+		Run:   createServerWrapperWithKeyspace,
 	}
 	addFlags(cmd)
 	return cmd
@@ -160,14 +160,14 @@ func addFlags(cmd *cobra.Command) {
 	cmd.Flags().BoolP("force-new-cluster", "", false, "force to create a new one-member cluster")
 }
 
-func createAPIServerWrapper(cmd *cobra.Command, args []string) {
+func createServerWrapperWithKeyspace(cmd *cobra.Command, args []string) {
 	start(cmd, args, cmd.CalledAs())
 }
 
 func createServerWrapper(cmd *cobra.Command, args []string) {
 	mode := os.Getenv(serviceModeEnv)
-	if len(mode) != 0 && strings.ToLower(mode) == apiMode {
-		start(cmd, args, apiMode)
+	if len(mode) != 0 && strings.ToLower(mode) == keyspaceMode {
+		start(cmd, args, keyspaceMode)
 	} else {
 		start(cmd, args)
 	}
@@ -218,12 +218,7 @@ func start(cmd *cobra.Command, args []string, services ...string) {
 	// Flushing any buffered log entries
 	defer log.Sync()
 	memory.InitMemoryHook()
-	if len(services) != 0 {
-		versioninfo.Log(server.APIServiceMode)
-	} else {
-		versioninfo.Log(server.PDMode)
-	}
-
+	versioninfo.Log(server.PD)
 	for _, msg := range cfg.WarningMsgs {
 		log.Warn(msg)
 	}

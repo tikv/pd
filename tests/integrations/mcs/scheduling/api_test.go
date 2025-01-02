@@ -56,7 +56,7 @@ func (suite *apiTestSuite) TearDownSuite() {
 }
 
 func (suite *apiTestSuite) TestGetCheckerByName() {
-	suite.env.RunTestInAPIMode(suite.checkGetCheckerByName)
+	suite.env.RunTestInKeyspaceMode(suite.checkGetCheckerByName)
 }
 
 func (suite *apiTestSuite) checkGetCheckerByName(cluster *tests.TestCluster) {
@@ -102,7 +102,7 @@ func (suite *apiTestSuite) checkGetCheckerByName(cluster *tests.TestCluster) {
 }
 
 func (suite *apiTestSuite) TestAPIForward() {
-	suite.env.RunTestInAPIMode(suite.checkAPIForward)
+	suite.env.RunTestInKeyspaceMode(suite.checkAPIForward)
 }
 
 func (suite *apiTestSuite) checkAPIForward(cluster *tests.TestCluster) {
@@ -378,7 +378,7 @@ func (suite *apiTestSuite) checkAPIForward(cluster *tests.TestCluster) {
 }
 
 func (suite *apiTestSuite) TestConfig() {
-	suite.env.RunTestInAPIMode(suite.checkConfig)
+	suite.env.RunTestInKeyspaceMode(suite.checkConfig)
 }
 
 func (suite *apiTestSuite) checkConfig(cluster *tests.TestCluster) {
@@ -401,7 +401,7 @@ func (suite *apiTestSuite) checkConfig(cluster *tests.TestCluster) {
 }
 
 func (suite *apiTestSuite) TestConfigForward() {
-	suite.env.RunTestInAPIMode(suite.checkConfigForward)
+	suite.env.RunTestInKeyspaceMode(suite.checkConfigForward)
 }
 
 func (suite *apiTestSuite) checkConfigForward(cluster *tests.TestCluster) {
@@ -452,7 +452,7 @@ func (suite *apiTestSuite) checkConfigForward(cluster *tests.TestCluster) {
 }
 
 func (suite *apiTestSuite) TestAdminRegionCache() {
-	suite.env.RunTestInAPIMode(suite.checkAdminRegionCache)
+	suite.env.RunTestInKeyspaceMode(suite.checkAdminRegionCache)
 }
 
 func (suite *apiTestSuite) checkAdminRegionCache(cluster *tests.TestCluster) {
@@ -479,7 +479,7 @@ func (suite *apiTestSuite) checkAdminRegionCache(cluster *tests.TestCluster) {
 }
 
 func (suite *apiTestSuite) TestAdminRegionCacheForward() {
-	suite.env.RunTestInAPIMode(suite.checkAdminRegionCacheForward)
+	suite.env.RunTestInKeyspaceMode(suite.checkAdminRegionCacheForward)
 }
 
 func (suite *apiTestSuite) checkAdminRegionCacheForward(cluster *tests.TestCluster) {
@@ -520,7 +520,7 @@ func (suite *apiTestSuite) checkFollowerForward(cluster *tests.TestCluster) {
 	leaderAddr := cluster.GetLeaderServer().GetAddr()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	follower, err := cluster.JoinAPIServer(ctx)
+	follower, err := cluster.JoinServerWithKeyspace(ctx)
 	re.NoError(err)
 	re.NoError(follower.Run())
 	re.NotEmpty(cluster.WaitLeader())
@@ -558,7 +558,7 @@ func (suite *apiTestSuite) checkFollowerForward(cluster *tests.TestCluster) {
 }
 
 func (suite *apiTestSuite) TestMetrics() {
-	suite.env.RunTestInAPIMode(suite.checkMetrics)
+	suite.env.RunTestInKeyspaceMode(suite.checkMetrics)
 }
 
 func (suite *apiTestSuite) checkMetrics(cluster *tests.TestCluster) {
@@ -577,7 +577,7 @@ func (suite *apiTestSuite) checkMetrics(cluster *tests.TestCluster) {
 }
 
 func (suite *apiTestSuite) TestStatus() {
-	suite.env.RunTestInAPIMode(suite.checkStatus)
+	suite.env.RunTestInKeyspaceMode(suite.checkStatus)
 }
 
 func (suite *apiTestSuite) checkStatus(cluster *tests.TestCluster) {
@@ -600,7 +600,7 @@ func (suite *apiTestSuite) checkStatus(cluster *tests.TestCluster) {
 }
 
 func (suite *apiTestSuite) TestStores() {
-	suite.env.RunTestInAPIMode(suite.checkStores)
+	suite.env.RunTestInKeyspaceMode(suite.checkStores)
 }
 
 func (suite *apiTestSuite) checkStores(cluster *tests.TestCluster) {
@@ -682,7 +682,7 @@ func (suite *apiTestSuite) checkStores(cluster *tests.TestCluster) {
 }
 
 func (suite *apiTestSuite) TestRegions() {
-	suite.env.RunTestInAPIMode(suite.checkRegions)
+	suite.env.RunTestInKeyspaceMode(suite.checkRegions)
 }
 
 func (suite *apiTestSuite) checkRegions(cluster *tests.TestCluster) {
