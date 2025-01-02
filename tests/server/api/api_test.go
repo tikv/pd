@@ -1094,8 +1094,22 @@ func TestPreparingProgress(t *testing.T) {
 
 func sendRequest(re *require.Assertions, url string, method string, statusCode int) []byte {
 	req, _ := http.NewRequest(method, url, http.NoBody)
-	resp, err := tests.TestDialClient.Do(req)
-	re.NoError(err)
+	var (
+		err  error
+		resp *http.Response
+	)
+	testutil.Eventually(re, func() bool {
+		resp, err = tests.TestDialClient.Do(req)
+		re.NoError(err)
+		// Due to service unavailability caused by environmental issues,
+		// we will retry it.
+		if resp.StatusCode == http.StatusServiceUnavailable {
+			resp.Body.Close()
+			return false
+		}
+		return true
+	})
+
 	re.Equal(statusCode, resp.StatusCode)
 	output, err := io.ReadAll(resp.Body)
 	re.NoError(err)
