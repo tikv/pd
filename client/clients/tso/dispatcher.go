@@ -36,32 +36,11 @@ import (
 	"github.com/tikv/pd/client/opt"
 	"github.com/tikv/pd/client/pkg/batch"
 	cctx "github.com/tikv/pd/client/pkg/connectionctx"
+	"github.com/tikv/pd/client/pkg/deadline"
 	"github.com/tikv/pd/client/pkg/retry"
-	"github.com/tikv/pd/client/pkg/utils/timerutil"
 	"github.com/tikv/pd/client/pkg/utils/tsoutil"
 	sd "github.com/tikv/pd/client/servicediscovery"
 )
-
-// deadline is used to control the TS request timeout manually,
-// it will be sent to the `tsDeadlineCh` to be handled by the `watchTSDeadline` goroutine.
-type deadline struct {
-	timer  *time.Timer
-	done   chan struct{}
-	cancel context.CancelFunc
-}
-
-func newTSDeadline(
-	timeout time.Duration,
-	done chan struct{},
-	cancel context.CancelFunc,
-) *deadline {
-	timer := timerutil.GlobalTimerPool.Get(timeout)
-	return &deadline{
-		timer:  timer,
-		done:   done,
-		cancel: cancel,
-	}
-}
 
 type tsoInfo struct {
 	tsoServer           string
@@ -86,10 +65,10 @@ type tsoDispatcher struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	provider      tsoServiceProvider
-	tsoRequestCh  chan *Request
-	tsDeadlineCh  chan *deadline
-	latestTSOInfo atomic.Pointer[tsoInfo]
+	provider        tsoServiceProvider
+	tsoRequestCh    chan *Request
+	deadlineWatcher *deadline.Watcher
+	latestTSOInfo   atomic.Pointer[tsoInfo]
 	// For reusing `*batchController` objects
 	batchBufferPool *sync.Pool
 
@@ -119,11 +98,11 @@ func newTSODispatcher(
 	tokenCh := make(chan struct{}, tokenChCapacity)
 
 	td := &tsoDispatcher{
-		ctx:          dispatcherCtx,
-		cancel:       dispatcherCancel,
-		provider:     provider,
-		tsoRequestCh: tsoRequestCh,
-		tsDeadlineCh: make(chan *deadline, tokenChCapacity),
+		ctx:             dispatcherCtx,
+		cancel:          dispatcherCancel,
+		provider:        provider,
+		tsoRequestCh:    tsoRequestCh,
+		deadlineWatcher: deadline.NewWatcher(dispatcherCtx, tokenChCapacity, "tso"),
 		batchBufferPool: &sync.Pool{
 			New: func() any {
 				return batch.NewController[*Request](
@@ -135,32 +114,7 @@ func newTSODispatcher(
 		},
 		tokenCh: tokenCh,
 	}
-	go td.watchTSDeadline()
 	return td
-}
-
-func (td *tsoDispatcher) watchTSDeadline() {
-	log.Info("[tso] start tso deadline watcher")
-	defer log.Info("[tso] exit tso deadline watcher")
-	for {
-		select {
-		case d := <-td.tsDeadlineCh:
-			select {
-			case <-d.timer.C:
-				log.Error("[tso] tso request is canceled due to timeout",
-					errs.ZapError(errs.ErrClientGetTSOTimeout))
-				d.cancel()
-				timerutil.GlobalTimerPool.Put(d.timer)
-			case <-d.done:
-				timerutil.GlobalTimerPool.Put(d.timer)
-			case <-td.ctx.Done():
-				timerutil.GlobalTimerPool.Put(d.timer)
-				return
-			}
-		case <-td.ctx.Done():
-			return
-		}
-	}
 }
 
 func (td *tsoDispatcher) revokePendingRequests(err error) {
@@ -378,14 +332,11 @@ tsoBatchLoop:
 			}
 		}
 
-		done := make(chan struct{})
-		dl := newTSDeadline(option.Timeout, done, cancel)
-		select {
-		case <-ctx.Done():
+		done := td.deadlineWatcher.Start(ctx, option.Timeout, cancel)
+		if done == nil {
 			// Finish the collected requests if the context is canceled.
 			td.cancelCollectedRequests(tsoBatchController, invalidStreamID, errors.WithStack(ctx.Err()))
 			return
-		case td.tsDeadlineCh <- dl:
 		}
 		// processRequests guarantees that the collected requests could be finished properly.
 		err = td.processRequests(stream, tsoBatchController, done)

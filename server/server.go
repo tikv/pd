@@ -2042,7 +2042,7 @@ func (s *Server) GetExternalTS() uint64 {
 func (s *Server) SetExternalTS(externalTS, globalTS uint64) error {
 	if tsoutil.CompareTimestampUint64(externalTS, globalTS) == 1 {
 		desc := "the external timestamp should not be larger than global ts"
-		log.Error(desc, zap.Uint64("request timestamp", externalTS), zap.Uint64("global ts", globalTS))
+		log.Error(desc, zap.Uint64("request-timestamp", externalTS), zap.Uint64("global-ts", globalTS))
 		return errors.New(desc)
 	}
 	c := s.GetRaftCluster()
