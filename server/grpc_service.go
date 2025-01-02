@@ -325,6 +325,9 @@ func (s *GrpcServer) GetMinTS(
 // GetMinTSFromTSOService queries all tso servers and gets the minimum timestamp across
 // all keyspace groups.
 func (s *GrpcServer) GetMinTSFromTSOService() (*pdpb.Timestamp, error) {
+	if s.IsClosed() {
+		return nil, errs.ErrNotStarted
+	}
 	addrs := s.keyspaceGroupManager.GetTSOServiceAddrs()
 	if len(addrs) == 0 {
 		return &pdpb.Timestamp{}, errs.ErrGetMinTS.FastGenByArgs("no tso servers/pods discovered")
@@ -536,6 +539,11 @@ func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
 			return errors.WithStack(err)
 		}
 
+		// TSO uses leader lease to determine validity. No need to check leader here.
+		if s.IsClosed() {
+			return errs.ErrNotStarted
+		}
+
 		forwardedHost := grpcutil.GetForwardedHost(stream.Context())
 		if !s.isLocalRequest(forwardedHost) {
 			clientConn, err := s.getDelegateClient(s.ctx, forwardedHost)
@@ -570,10 +578,6 @@ func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
 		}
 
 		start := time.Now()
-		// TSO uses leader lease to determine validity. No need to check leader here.
-		if s.IsClosed() {
-			return errs.ErrNotStarted
-		}
 		if clusterID := keypath.ClusterID(); request.GetHeader().GetClusterId() != clusterID {
 			return errs.ErrMismatchClusterID(clusterID, request.GetHeader().GetClusterId())
 		}
@@ -709,6 +713,9 @@ func (s *GrpcServer) IsSnapshotRecovering(ctx context.Context, _ *pdpb.IsSnapsho
 		} else {
 			return nil, errs.ErrGRPCRateLimitExceeded(err)
 		}
+	}
+	if s.IsClosed() {
+		return nil, errs.ErrNotStarted
 	}
 	// recovering mark is stored in etcd directly, there's no need to forward.
 	marked, err := s.Server.IsSnapshotRecovering(ctx)
