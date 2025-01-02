@@ -1099,6 +1099,7 @@ func sendRequest(re *require.Assertions, url string, method string, statusCode i
 		resp *http.Response
 	)
 	testutil.Eventually(re, func() bool {
+		//nolint:bodyclose
 		resp, err = tests.TestDialClient.Do(req)
 		re.NoError(err)
 		// Due to service unavailability caused by environmental issues,
