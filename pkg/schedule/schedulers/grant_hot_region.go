@@ -262,7 +262,7 @@ func (s *grantHotRegionScheduler) randomSchedule(cluster sche.SchedulerCluster, 
 			op, err := s.transfer(cluster, peer.RegionID, srcStoreID, isLeader)
 			if err != nil {
 				log.Debug("fail to create grant hot region operator", zap.Uint64("region-id", peer.RegionID),
-					zap.Uint64("src store id", srcStoreID), errs.ZapError(err))
+					zap.Uint64("src-store-id", srcStoreID), errs.ZapError(err))
 				continue
 			}
 			return []*operator.Operator{op}

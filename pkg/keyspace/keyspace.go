@@ -593,7 +593,7 @@ func (manager *Manager) UpdateKeyspaceState(name string, newState keyspacepb.Key
 		return nil, err
 	}
 	log.Info("[keyspace] keyspace state updated",
-		zap.Uint32("ID", meta.GetId()),
+		zap.Uint32("id", meta.GetId()),
 		zap.String("keyspace-id", meta.GetName()),
 		zap.String("new-state", newState.String()),
 	)

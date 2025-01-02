@@ -2810,7 +2810,7 @@ func (s *GrpcServer) ReportMinResolvedTS(ctx context.Context, request *pdpb.Repo
 	}
 	log.Debug("updated min resolved-ts",
 		zap.Uint64("store", storeID),
-		zap.Uint64("min resolved-ts", minResolvedTS))
+		zap.Uint64("min-resolved-ts", minResolvedTS))
 	return &pdpb.ReportMinResolvedTsResponse{
 		Header: wrapHeader(),
 	}, nil
