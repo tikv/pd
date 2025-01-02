@@ -1110,9 +1110,9 @@ func sendRequest(re *require.Assertions, url string, method string, statusCode i
 		return true
 	})
 
+	defer resp.Body.Close()
 	re.Equal(statusCode, resp.StatusCode)
 	output, err := io.ReadAll(resp.Body)
 	re.NoError(err)
-	resp.Body.Close()
 	return output
 }
