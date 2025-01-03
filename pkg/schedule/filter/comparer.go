@@ -40,6 +40,24 @@ func RegionScoreComparer(conf config.SharedConfigProvider) StoreComparer {
 	}
 }
 
+// LeaderScoreComparer creates a StoreComparer to sort store by leader
+// score.
+func LeaderScoreComparer(conf config.SchedulerConfigProvider) StoreComparer {
+	leaderSchedulePolicy := conf.GetLeaderSchedulePolicy()
+	return func(a, b *core.StoreInfo) int {
+		sa := a.LeaderScore(leaderSchedulePolicy, 0)
+		sb := b.LeaderScore(leaderSchedulePolicy, 0)
+		switch {
+		case sa > sb:
+			return 1
+		case sa < sb:
+			return -1
+		default:
+			return 0
+		}
+	}
+}
+
 // IsolationComparer creates a StoreComparer to sort store by isolation score.
 func IsolationComparer(locationLabels []string, regionStores []*core.StoreInfo) StoreComparer {
 	return func(a, b *core.StoreInfo) int {

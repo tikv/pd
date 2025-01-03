@@ -1475,7 +1475,6 @@ func (bs *balanceSolver) createOperator(region *core.RegionInfo, srcStoreID, dst
 			bs,
 			region,
 			dstStoreID,
-			[]uint64{},
 			operator.OpHotRegion)
 	} else {
 		srcPeer := region.GetStorePeer(srcStoreID) // checked in `filterHotPeers`

@@ -67,7 +67,6 @@ type SchedulerConfigProvider interface {
 	IsTraceRegionFlow() bool
 
 	GetTolerantSizeRatio() float64
-	GetLeaderSchedulePolicy() constant.SchedulePolicy
 
 	IsDebugMetricsEnabled() bool
 	IsDiagnosticAllowed() bool
@@ -114,6 +113,7 @@ type SharedConfigProvider interface {
 	IsCrossTableMergeEnabled() bool
 	IsOneWayMergeEnabled() bool
 	GetMergeScheduleLimit() uint64
+	GetLeaderSchedulePolicy() constant.SchedulePolicy
 	GetRegionScoreFormulaVersion() string
 	GetSchedulerMaxWaitingOperator() uint64
 	GetStoreLimitByType(uint64, storelimit.Type) float64
