@@ -382,3 +382,72 @@ func TestTryGetController(t *testing.T) {
 	re.NoError(err)
 	re.NotEmpty(consumption)
 }
+
+func BenchmarkRequestAndResponseConsumptionLockVer(b *testing.B) {
+	gc := createTestGroupCostController(require.New(b))
+	testCases := []struct {
+		req  *TestRequestInfo
+		resp *TestResponseInfo
+	}{
+		{
+			req: &TestRequestInfo{
+				isWrite:    false,
+				writeBytes: 0,
+			},
+			resp: &TestResponseInfo{
+				readBytes: 100,
+				kvCPU:     100 * time.Millisecond,
+				succeed:   true,
+			},
+		},
+	}
+	// exclude the token bucket locks
+	gc.burstable.Store(true)
+
+	// Use b.RunParallel to simulate concurrent scenarios
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			for idx, testCase := range testCases {
+				_, _, err := gc.onResponseWaitImpl(context.TODO(), testCase.req, testCase.resp)
+				if err != nil {
+					b.Fatalf("onResponseImpl failed: %v (%d)", err, idx)
+				}
+			}
+		}
+	})
+}
+
+func BenchmarkRequestAndResponseConsumptionAtomicVer(b *testing.B) {
+	gc := createTestGroupCostController(require.New(b))
+	testCases := []struct {
+		req  *TestRequestInfo
+		resp *TestResponseInfo
+	}{
+		{
+			req: &TestRequestInfo{
+				isWrite:    false,
+				writeBytes: 0,
+			},
+			resp: &TestResponseInfo{
+				readBytes: 100,
+				kvCPU:     100 * time.Millisecond,
+				succeed:   true,
+			},
+		},
+	}
+
+	// exclude the token bucket locks
+	gc.burstable.Store(true)
+
+	// Use b.RunParallel to simulate concurrent scenarios
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			for idx, testCase := range testCases {
+				_, _, err := gc.onResponseWaitAtomicImpl(context.TODO(), testCase.req, testCase.resp)
+				if err != nil {
+					b.Fatalf("onResponseImpl failed: %v (%d)", err, idx)
+				}
+			}
+		}
+	})
+}
