@@ -563,7 +563,7 @@ func (c *Cli) DispatchRequest(request *Request) (bool, error) {
 		// Client is closed, no need to retry.
 		return false, request.clientCtx.Err()
 	case <-c.ctx.Done():
-		// tsoClient is closed due to the PD service mode switch, which is retryable.
+		// tsoClient is closed due to the service mode switch, which is retryable.
 		return true, c.ctx.Err()
 	default:
 		// This failpoint will increase the possibility that the request is sent to a closed dispatcher.

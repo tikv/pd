@@ -75,7 +75,7 @@ func (suite *tsoServerTestSuite) SetupSuite() {
 	re := suite.Require()
 
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
-	suite.cluster, err = tests.NewTestMSCluster(suite.ctx, 1)
+	suite.cluster, err = tests.NewTestPDServiceCluster(suite.ctx, 1)
 	re.NoError(err)
 
 	err = suite.cluster.RunInitialServers()
@@ -168,7 +168,7 @@ func checkTSOPath(re *require.Assertions, isPDServiceMode bool) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	if isPDServiceMode {
-		cluster, err = tests.NewTestMSCluster(ctx, 1, func(conf *config.Config, _ string) {
+		cluster, err = tests.NewTestPDServiceCluster(ctx, 1, func(conf *config.Config, _ string) {
 			conf.MicroService.EnableTSODynamicSwitching = false
 		})
 	} else {
@@ -233,7 +233,7 @@ func NewPDServiceForward(re *require.Assertions) PDServiceForward {
 	}
 	var err error
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
-	suite.cluster, err = tests.NewTestMSCluster(suite.ctx, 3)
+	suite.cluster, err = tests.NewTestPDServiceCluster(suite.ctx, 3)
 	re.NoError(err)
 
 	err = suite.cluster.RunInitialServers()
@@ -512,7 +512,7 @@ func (suite *CommonTestSuite) SetupSuite() {
 	var err error
 	re := suite.Require()
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
-	suite.cluster, err = tests.NewTestMSCluster(suite.ctx, 1)
+	suite.cluster, err = tests.NewTestPDServiceCluster(suite.ctx, 1)
 	re.NoError(err)
 
 	err = suite.cluster.RunInitialServers()
@@ -598,7 +598,7 @@ func TestTSOServiceSwitch(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	tc, err := tests.NewTestMSCluster(ctx, 1,
+	tc, err := tests.NewTestPDServiceCluster(ctx, 1,
 		func(conf *config.Config, _ string) {
 			conf.MicroService.EnableTSODynamicSwitching = true
 		},

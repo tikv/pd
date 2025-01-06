@@ -98,7 +98,7 @@ func (suite *tsoClientTestSuite) SetupSuite() {
 	if suite.legacy {
 		suite.cluster, err = tests.NewTestCluster(suite.ctx, serverCount)
 	} else {
-		suite.cluster, err = tests.NewTestMSCluster(suite.ctx, serverCount, func(conf *config.Config, _ string) {
+		suite.cluster, err = tests.NewTestPDServiceCluster(suite.ctx, serverCount, func(conf *config.Config, _ string) {
 			conf.MicroService.EnableTSODynamicSwitching = false
 		})
 	}
@@ -544,7 +544,7 @@ func TestUpgradingAPIandTSOClusters(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	// Create an API cluster which has 3 servers
-	apiCluster, err := tests.NewTestMSCluster(ctx, 3)
+	apiCluster, err := tests.NewTestPDServiceCluster(ctx, 3)
 	re.NoError(err)
 	err = apiCluster.RunInitialServers()
 	re.NoError(err)

@@ -126,10 +126,10 @@ func (t *tsoServerDiscovery) resetFailure() {
 // tsoServiceDiscovery is the service discovery client of the independent TSO service
 
 type tsoServiceDiscovery struct {
-	metacli         metastorage.Client
-	apiSvcDiscovery ServiceDiscovery
-	clusterID       uint64
-	keyspaceID      atomic.Uint32
+	metacli          metastorage.Client
+	serviceDiscovery ServiceDiscovery
+	clusterID        uint64
+	keyspaceID       atomic.Uint32
 
 	// defaultDiscoveryKey is the etcd path used for discovering the serving endpoints of
 	// the default keyspace group
@@ -161,7 +161,7 @@ type tsoServiceDiscovery struct {
 
 // NewTSOServiceDiscovery returns a new client-side service discovery for the independent TSO service.
 func NewTSOServiceDiscovery(
-	ctx context.Context, metacli metastorage.Client, apiSvcDiscovery ServiceDiscovery,
+	ctx context.Context, metacli metastorage.Client, serviceDiscovery ServiceDiscovery,
 	keyspaceID uint32, tlsCfg *tls.Config, option *opt.Option,
 ) ServiceDiscovery {
 	ctx, cancel := context.WithCancel(ctx)
@@ -169,8 +169,8 @@ func NewTSOServiceDiscovery(
 		ctx:               ctx,
 		cancel:            cancel,
 		metacli:           metacli,
-		apiSvcDiscovery:   apiSvcDiscovery,
-		clusterID:         apiSvcDiscovery.GetClusterID(),
+		serviceDiscovery:  serviceDiscovery,
+		clusterID:         serviceDiscovery.GetClusterID(),
 		tlsCfg:            tlsCfg,
 		option:            option,
 		checkMembershipCh: make(chan struct{}, 1),
@@ -351,7 +351,7 @@ func (c *tsoServiceDiscovery) ScheduleCheckMemberChanged() {
 // CheckMemberChanged Immediately check if there is any membership change among the primary/secondaries in
 // a primary/secondary configured cluster.
 func (c *tsoServiceDiscovery) CheckMemberChanged() error {
-	if err := c.apiSvcDiscovery.CheckMemberChanged(); err != nil {
+	if err := c.serviceDiscovery.CheckMemberChanged(); err != nil {
 		log.Warn("[tso] failed to check member changed", errs.ZapError(err))
 	}
 	if err := c.retry(tsoQueryRetryMaxTimes, tsoQueryRetryInterval, c.updateMember); err != nil {
@@ -382,17 +382,17 @@ func (c *tsoServiceDiscovery) SetTSOLeaderURLUpdatedCallback(callback tsoLeaderU
 
 // GetServiceClient implements ServiceDiscovery
 func (c *tsoServiceDiscovery) GetServiceClient() ServiceClient {
-	return c.apiSvcDiscovery.GetServiceClient()
+	return c.serviceDiscovery.GetServiceClient()
 }
 
 // GetServiceClientByKind implements ServiceDiscovery
 func (c *tsoServiceDiscovery) GetServiceClientByKind(kind APIKind) ServiceClient {
-	return c.apiSvcDiscovery.GetServiceClientByKind(kind)
+	return c.serviceDiscovery.GetServiceClientByKind(kind)
 }
 
 // GetAllServiceClients implements ServiceDiscovery
 func (c *tsoServiceDiscovery) GetAllServiceClients() []ServiceClient {
-	return c.apiSvcDiscovery.GetAllServiceClients()
+	return c.serviceDiscovery.GetAllServiceClients()
 }
 
 // getPrimaryURL returns the primary URL.
@@ -425,7 +425,7 @@ func (c *tsoServiceDiscovery) afterPrimarySwitched(oldPrimary, newPrimary string
 func (c *tsoServiceDiscovery) updateMember() error {
 	// The keyspace membership or the primary serving URL of the keyspace group, to which this
 	// keyspace belongs, might have been changed. We need to query tso servers to get the latest info.
-	tsoServerURL, err := c.getTSOServer(c.apiSvcDiscovery)
+	tsoServerURL, err := c.getTSOServer(c.serviceDiscovery)
 	if err != nil {
 		log.Error("[tso] failed to get tso server", errs.ZapError(err))
 		return err
@@ -589,7 +589,7 @@ func (c *tsoServiceDiscovery) getTSOServer(sd ServiceDiscovery) (string, error) 
 	)
 	t := c.tsoServerDiscovery
 	if len(t.urls) == 0 || t.failureCount == len(t.urls) {
-		urls, err = sd.(*pdServiceDiscovery).discoverMicroservice(tsoService)
+		urls, err = sd.(*serviceDiscovery).discoverMicroservice(tsoService)
 		if err != nil {
 			return "", err
 		}

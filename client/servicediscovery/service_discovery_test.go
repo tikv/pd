@@ -193,14 +193,14 @@ func (suite *serviceClientTestSuite) TestServiceClient() {
 	re.True(leader.IsConnectedToLeader())
 
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/servicediscovery/unreachableNetwork1", "return(true)"))
-	follower.(*pdServiceClient).checkNetworkAvailable(suite.ctx)
-	leader.(*pdServiceClient).checkNetworkAvailable(suite.ctx)
+	follower.(*serviceClient).checkNetworkAvailable(suite.ctx)
+	leader.(*serviceClient).checkNetworkAvailable(suite.ctx)
 	re.False(follower.Available())
 	re.False(leader.Available())
 	re.NoError(failpoint.Disable("github.com/tikv/pd/client/servicediscovery/unreachableNetwork1"))
 
-	follower.(*pdServiceClient).checkNetworkAvailable(suite.ctx)
-	leader.(*pdServiceClient).checkNetworkAvailable(suite.ctx)
+	follower.(*serviceClient).checkNetworkAvailable(suite.ctx)
+	leader.(*serviceClient).checkNetworkAvailable(suite.ctx)
 	re.True(follower.Available())
 	re.True(leader.Available())
 
@@ -259,11 +259,11 @@ func (suite *serviceClientTestSuite) TestServiceClient() {
 	re.False(leaderAPIClient.NeedRetry(pdErr2, nil))
 	re.False(followerAPIClient.Available())
 	re.True(leaderAPIClient.Available())
-	followerAPIClient.(*pdServiceAPIClient).markAsAvailable()
-	leaderAPIClient.(*pdServiceAPIClient).markAsAvailable()
+	followerAPIClient.(*serviceAPIClient).markAsAvailable()
+	leaderAPIClient.(*serviceAPIClient).markAsAvailable()
 	re.False(followerAPIClient.Available())
 	time.Sleep(time.Millisecond * 100)
-	followerAPIClient.(*pdServiceAPIClient).markAsAvailable()
+	followerAPIClient.(*serviceAPIClient).markAsAvailable()
 	re.True(followerAPIClient.Available())
 
 	re.True(followerAPIClient.NeedRetry(nil, err))
@@ -278,7 +278,7 @@ func (suite *serviceClientTestSuite) TestServiceClientBalancer() {
 	re := suite.Require()
 	follower := suite.followerClient
 	leader := suite.leaderClient
-	b := &pdServiceBalancer{}
+	b := &serviceBalancer{}
 	b.set([]ServiceClient{leader, follower})
 	re.Equal(2, b.totalNode)
 
@@ -400,7 +400,7 @@ func TestUpdateURLs(t *testing.T) {
 		}
 		return
 	}
-	cli := &pdServiceDiscovery{option: opt.NewOption()}
+	cli := &serviceDiscovery{option: opt.NewOption()}
 	cli.urls.Store([]string{})
 	cli.updateURLs(members[1:])
 	re.Equal(getURLs([]*pdpb.Member{members[1], members[3], members[2]}), cli.GetServiceURLs())
@@ -421,7 +421,7 @@ func TestGRPCDialOption(t *testing.T) {
 	start := time.Now()
 	ctx, cancel := context.WithTimeout(context.TODO(), 500*time.Millisecond)
 	defer cancel()
-	cli := &pdServiceDiscovery{
+	cli := &serviceDiscovery{
 		checkMembershipCh: make(chan struct{}, 1),
 		ctx:               ctx,
 		cancel:            cancel,

@@ -429,8 +429,8 @@ func NewTestCluster(ctx context.Context, initialServerCount int, opts ...ConfigO
 	return createTestCluster(ctx, initialServerCount, nil, opts...)
 }
 
-// NewTestMSCluster creates a new TestCluster with PD service.
-func NewTestMSCluster(ctx context.Context, initialServerCount int, opts ...ConfigOption) (*TestCluster, error) {
+// NewTestPDServiceCluster creates a new TestCluster with PD service.
+func NewTestPDServiceCluster(ctx context.Context, initialServerCount int, opts ...ConfigOption) (*TestCluster, error) {
 	return createTestCluster(ctx, initialServerCount, []string{constant.PDServiceName}, opts...)
 }
 

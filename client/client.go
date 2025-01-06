@@ -360,8 +360,8 @@ func newClientWithKeyspaceName(
 	c := &client{
 		callerComponent: adjustCallerComponent(callerComponent),
 		inner: &innerClient{
-			// Create a PD service discovery with null keyspace id, then query the real id with the keyspace name,
-			// finally update the keyspace id to the PD service discovery for the following interactions.
+			// Create a service discovery with null keyspace id, then query the real id with the keyspace name,
+			// finally update the keyspace id to the service discovery for the following interactions.
 			keyspaceID:              constants.NullKeyspaceID,
 			updateTokenConnectionCh: make(chan struct{}, 1),
 			ctx:                     clientCtx,
@@ -384,7 +384,7 @@ func newClientWithKeyspaceName(
 		}
 		c.inner.keyspaceID = keyspaceMeta.GetId()
 		// c.keyspaceID is the source of truth for keyspace id.
-		c.inner.pdSvcDiscovery.SetKeyspaceID(c.inner.keyspaceID)
+		c.inner.serviceDiscovery.SetKeyspaceID(c.inner.keyspaceID)
 		return nil
 	}
 
@@ -412,17 +412,17 @@ func (c *client) ResetTSOClient() {
 
 // GetClusterID returns the ClusterID.
 func (c *client) GetClusterID(context.Context) uint64 {
-	return c.inner.pdSvcDiscovery.GetClusterID()
+	return c.inner.serviceDiscovery.GetClusterID()
 }
 
 // GetLeaderURL returns the leader URL.
 func (c *client) GetLeaderURL() string {
-	return c.inner.pdSvcDiscovery.GetServingURL()
+	return c.inner.serviceDiscovery.GetServingURL()
 }
 
 // GetServiceDiscovery returns the client-side service discovery object
 func (c *client) GetServiceDiscovery() sd.ServiceDiscovery {
-	return c.inner.pdSvcDiscovery
+	return c.inner.serviceDiscovery
 }
 
 // UpdateOption updates the client option.
@@ -438,7 +438,7 @@ func (c *client) UpdateOption(option opt.DynamicOption, value any) error {
 		}
 	case opt.EnableTSOFollowerProxy:
 		if c.inner.getServiceMode() != pdpb.ServiceMode_PD_SVC_MODE {
-			return errors.New("[pd] tso follower proxy is only supported in PD service mode")
+			return errors.New("[pd] tso follower proxy is only supported in PD mode")
 		}
 		enable, ok := value.(bool)
 		if !ok {
@@ -485,7 +485,7 @@ func (c *client) GetAllMembers(ctx context.Context) ([]*pdpb.Member, error) {
 // getClientAndContext returns the leader pd client and the original context. If leader is unhealthy, it returns
 // follower pd client and the context which holds forward information.
 func (c *client) getClientAndContext(ctx context.Context) (pdpb.PDClient, context.Context) {
-	serviceClient := c.inner.pdSvcDiscovery.GetServiceClient()
+	serviceClient := c.inner.serviceDiscovery.GetServiceClient()
 	if serviceClient == nil || serviceClient.GetClientConn() == nil {
 		return nil, ctx
 	}
@@ -598,7 +598,7 @@ func (c *client) GetRegionFromMember(ctx context.Context, key []byte, memberURLs
 
 	var resp *pdpb.GetRegionResponse
 	for _, url := range memberURLs {
-		conn, err := c.inner.pdSvcDiscovery.GetOrCreateGRPCConn(url)
+		conn, err := c.inner.serviceDiscovery.GetOrCreateGRPCConn(url)
 		if err != nil {
 			log.Error("[pd] can't get grpc connection", zap.String("member-URL", url), errs.ZapError(err))
 			continue
@@ -619,7 +619,7 @@ func (c *client) GetRegionFromMember(ctx context.Context, key []byte, memberURLs
 
 	if resp == nil {
 		metrics.CmdFailedDurationGetRegion.Observe(time.Since(start).Seconds())
-		c.inner.pdSvcDiscovery.ScheduleCheckMemberChanged()
+		c.inner.serviceDiscovery.ScheduleCheckMemberChanged()
 		errorMsg := fmt.Sprintf("[pd] can't get region info from member URLs: %+v", memberURLs)
 		return nil, errors.WithStack(errors.New(errorMsg))
 	}
@@ -1150,7 +1150,7 @@ func (c *client) SplitRegions(ctx context.Context, splitKeys [][]byte, opts ...o
 
 func (c *client) requestHeader() *pdpb.RequestHeader {
 	return &pdpb.RequestHeader{
-		ClusterId:       c.inner.pdSvcDiscovery.GetClusterID(),
+		ClusterId:       c.inner.serviceDiscovery.GetClusterID(),
 		CallerId:        string(caller.GetCallerID()),
 		CallerComponent: string(c.callerComponent),
 	}
@@ -1334,7 +1334,7 @@ func (c *client) respForErr(observer prometheus.Observer, start time.Time, err e
 	if err != nil || header.GetError() != nil {
 		observer.Observe(time.Since(start).Seconds())
 		if err != nil {
-			c.inner.pdSvcDiscovery.ScheduleCheckMemberChanged()
+			c.inner.serviceDiscovery.ScheduleCheckMemberChanged()
 			return errors.WithStack(err)
 		}
 		return errors.WithStack(errors.New(header.GetError().String()))

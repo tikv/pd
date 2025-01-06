@@ -26,10 +26,10 @@ const (
 )
 
 type innerClient struct {
-	keyspaceID      uint32
-	svrUrls         []string
-	pdSvcDiscovery  sd.ServiceDiscovery
-	tokenDispatcher *tokenDispatcher
+	keyspaceID       uint32
+	svrUrls          []string
+	serviceDiscovery sd.ServiceDiscovery
+	tokenDispatcher  *tokenDispatcher
 
 	// For service mode switching.
 	serviceModeKeeper
@@ -45,13 +45,13 @@ type innerClient struct {
 }
 
 func (c *innerClient) init(updateKeyspaceIDCb sd.UpdateKeyspaceIDFunc) error {
-	c.pdSvcDiscovery = sd.NewPDServiceDiscovery(
+	c.serviceDiscovery = sd.NewServiceDiscovery(
 		c.ctx, c.cancel, &c.wg, c.setServiceMode,
 		updateKeyspaceIDCb, c.keyspaceID, c.svrUrls, c.tlsCfg, c.option)
 	if err := c.setup(); err != nil {
 		c.cancel()
-		if c.pdSvcDiscovery != nil {
-			c.pdSvcDiscovery.Close()
+		if c.serviceDiscovery != nil {
+			c.serviceDiscovery.Close()
 		}
 		return err
 	}
@@ -92,10 +92,10 @@ func (c *innerClient) resetTSOClientLocked(mode pdpb.ServiceMode) {
 	switch mode {
 	case pdpb.ServiceMode_PD_SVC_MODE:
 		newTSOCli = tso.NewClient(c.ctx, c.option,
-			c.pdSvcDiscovery, &tso.PDStreamBuilderFactory{})
+			c.serviceDiscovery, &tso.PDStreamBuilderFactory{})
 	case pdpb.ServiceMode_API_SVC_MODE:
 		newTSOSvcDiscovery = sd.NewTSOServiceDiscovery(
-			c.ctx, c, c.pdSvcDiscovery,
+			c.ctx, c, c.serviceDiscovery,
 			c.keyspaceID, c.tlsCfg, c.option)
 		// At this point, the keyspace group isn't known yet. Starts from the default keyspace group,
 		// and will be updated later.
@@ -119,7 +119,7 @@ func (c *innerClient) resetTSOClientLocked(mode pdpb.ServiceMode) {
 	oldTSOClient.Close()
 	// Replace the old TSO service discovery if needed.
 	oldTSOSvcDiscovery := c.tsoSvcDiscovery
-	// If newTSOSvcDiscovery is nil, that's expected, as it means we are switching to PD service mode and
+	// If newTSOSvcDiscovery is nil, that's expected, as it means we are switching to PD mode and
 	// no tso microservice discovery is needed.
 	c.tsoSvcDiscovery = newTSOSvcDiscovery
 	// Close the old TSO service discovery safely after both the old client and service discovery are replaced.
@@ -153,7 +153,7 @@ func (c *innerClient) close() {
 	c.wg.Wait()
 
 	c.serviceModeKeeper.close()
-	c.pdSvcDiscovery.Close()
+	c.serviceDiscovery.Close()
 
 	if c.tokenDispatcher != nil {
 		tokenErr := errors.WithStack(errs.ErrClosing)
@@ -169,12 +169,12 @@ func (c *innerClient) setup() error {
 	}
 
 	// Init the client base.
-	if err := c.pdSvcDiscovery.Init(); err != nil {
+	if err := c.serviceDiscovery.Init(); err != nil {
 		return err
 	}
 
 	// Register callbacks
-	c.pdSvcDiscovery.AddServingURLSwitchedCallback(c.scheduleUpdateTokenConnection)
+	c.serviceDiscovery.AddServingURLSwitchedCallback(c.scheduleUpdateTokenConnection)
 
 	// Create dispatchers
 	c.createTokenDispatcher()
@@ -186,12 +186,12 @@ func (c *innerClient) setup() error {
 func (c *innerClient) getRegionAPIClientAndContext(ctx context.Context, allowFollower bool) (sd.ServiceClient, context.Context) {
 	var serviceClient sd.ServiceClient
 	if allowFollower {
-		serviceClient = c.pdSvcDiscovery.GetServiceClientByKind(sd.UniversalAPIKind)
+		serviceClient = c.serviceDiscovery.GetServiceClientByKind(sd.UniversalAPIKind)
 		if serviceClient != nil {
 			return serviceClient, serviceClient.BuildGRPCTargetContext(ctx, !allowFollower)
 		}
 	}
-	serviceClient = c.pdSvcDiscovery.GetServiceClient()
+	serviceClient = c.serviceDiscovery.GetServiceClient()
 	if serviceClient == nil || serviceClient.GetClientConn() == nil {
 		return nil, ctx
 	}
@@ -201,12 +201,12 @@ func (c *innerClient) getRegionAPIClientAndContext(ctx context.Context, allowFol
 // gRPCErrorHandler is used to handle the gRPC error returned by the resource manager service.
 func (c *innerClient) gRPCErrorHandler(err error) {
 	if errs.IsLeaderChange(err) {
-		c.pdSvcDiscovery.ScheduleCheckMemberChanged()
+		c.serviceDiscovery.ScheduleCheckMemberChanged()
 	}
 }
 
 func (c *innerClient) getOrCreateGRPCConn() (*grpc.ClientConn, error) {
-	cc, err := c.pdSvcDiscovery.GetOrCreateGRPCConn(c.pdSvcDiscovery.GetServingURL())
+	cc, err := c.serviceDiscovery.GetOrCreateGRPCConn(c.serviceDiscovery.GetServingURL())
 	if err != nil {
 		return nil, err
 	}
