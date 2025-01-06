@@ -705,6 +705,7 @@ func (s *GrpcServer) IsSnapshotRecovering(ctx context.Context, _ *pdpb.IsSnapsho
 	if s.IsClosed() {
 		return nil, errs.ErrNotStarted
 	}
+
 	// recovering mark is stored in etcd directly, there's no need to forward.
 	marked, err := s.Server.IsSnapshotRecovering(ctx)
 	if err != nil {
