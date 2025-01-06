@@ -220,7 +220,7 @@ func (s *Server) updatePDServiceMemberLoop() {
 					// double check
 					break
 				}
-				if s.cluster.SwitchPDLeader(pdpb.NewPDClient(cc)) {
+				if s.cluster.SwitchPDServiceLeader(pdpb.NewPDClient(cc)) {
 					if status.Leader != curLeader {
 						log.Info("switch leader", zap.String("leader-id", fmt.Sprintf("%x", ep.ID)), zap.String("endpoint", ep.ClientURLs[0]))
 					}

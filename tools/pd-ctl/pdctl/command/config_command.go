@@ -50,7 +50,7 @@ const (
 	pdServerPrefix                = "pd/api/v1/config/pd-server"
 	serviceMiddlewareConfigPrefix = "pd/api/v1/service-middleware/config"
 	// flagFromPDService has no influence for pd mode, but it is useful for us to debug in pd service mode.
-	flagFromPDService = "from_api_server"
+	flagFromPDService = "from_pd_service"
 )
 
 // NewConfigCommand return a config subcommand of rootCmd

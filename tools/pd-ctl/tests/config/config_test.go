@@ -449,7 +449,7 @@ func (suite *configTestSuite) checkConfigForwardControl(cluster *pdTests.TestClu
 			args := []string{"-u", pdAddr, "config", "show"}
 			args = append(args, options...)
 			if isFromPDService {
-				args = append(args, "--from_api_server")
+				args = append(args, "--from_pd_service")
 			}
 			output, err := tests.ExecuteCommand(cmd, args...)
 			re.NoError(err)
@@ -478,7 +478,7 @@ func (suite *configTestSuite) checkConfigForwardControl(cluster *pdTests.TestClu
 			args := []string{"-u", pdAddr, "config", "placement-rules"}
 			args = append(args, options...)
 			if isFromPDService {
-				args = append(args, "--from_api_server")
+				args = append(args, "--from_pd_service")
 			}
 			output, err := tests.ExecuteCommand(cmd, args...)
 			re.NoError(err)
