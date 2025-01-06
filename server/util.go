@@ -54,7 +54,7 @@ func CheckPDVersionWithClusterVersion(opt *config.PersistOptions) {
 	if pdVersion.LessThan(clusterVersion) {
 		log.Warn(
 			"PD version less than cluster version, please upgrade PD",
-			zap.String("PD-version", pdVersion.String()),
+			zap.String("pd-version", pdVersion.String()),
 			zap.String("cluster-version", clusterVersion.String()))
 	}
 }

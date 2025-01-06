@@ -1092,13 +1092,24 @@ func TestPreparingProgress(t *testing.T) {
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs"))
 }
 
-func sendRequest(re *require.Assertions, url string, method string, statusCode int) []byte {
+func sendRequest(re *require.Assertions, url string, method string, statusCode int) (output []byte) {
 	req, _ := http.NewRequest(method, url, http.NoBody)
-	resp, err := tests.TestDialClient.Do(req)
-	re.NoError(err)
-	re.Equal(statusCode, resp.StatusCode)
-	output, err := io.ReadAll(resp.Body)
-	re.NoError(err)
-	resp.Body.Close()
+
+	testutil.Eventually(re, func() bool {
+		resp, err := tests.TestDialClient.Do(req)
+		re.NoError(err)
+		defer resp.Body.Close()
+
+		// Due to service unavailability caused by environmental issues,
+		// we will retry it.
+		if resp.StatusCode == http.StatusServiceUnavailable {
+			return false
+		}
+		re.Equal(statusCode, resp.StatusCode)
+		output, err = io.ReadAll(resp.Body)
+		re.NoError(err)
+		return true
+	})
+
 	return output
 }

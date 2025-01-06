@@ -413,7 +413,7 @@ func (m *Manager) rotateKeyIfNeeded(forceUpdate bool) error {
 					keys.Keys[keyID] = key
 					keys.CurrentKeyId = keyID
 					rotated = true
-					log.Info("ready to create or rotate data encryption key", zap.Uint64("keyID", keyID))
+					log.Info("ready to create or rotate data encryption key", zap.Uint64("key-id", keyID))
 					break
 				}
 				// Duplicated key id. retry.
