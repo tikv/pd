@@ -725,8 +725,6 @@ func TestAddScheduler(t *testing.T) {
 	re.NoError(co.removeScheduler(schedulers.BalanceLeaderName))
 	re.NoError(co.removeScheduler(schedulers.BalanceRegionName))
 	re.NoError(co.removeScheduler(schedulers.HotRegionName))
-	re.NoError(co.removeScheduler(schedulers.BalanceWitnessName))
-	re.NoError(co.removeScheduler(schedulers.TransferWitnessLeaderName))
 	re.Empty(co.schedulers)
 
 	stream := mockhbstream.NewHeartbeatStream()
@@ -817,13 +815,11 @@ func TestPersistScheduler(t *testing.T) {
 	re.NoError(err)
 	re.Len(sches, defaultCount+2)
 
-	// remove 5 schedulers
+	// remove 3 schedulers
 	re.NoError(co.removeScheduler(schedulers.BalanceLeaderName))
 	re.NoError(co.removeScheduler(schedulers.BalanceRegionName))
 	re.NoError(co.removeScheduler(schedulers.HotRegionName))
-	re.NoError(co.removeScheduler(schedulers.BalanceWitnessName))
-	re.NoError(co.removeScheduler(schedulers.TransferWitnessLeaderName))
-	re.Len(co.schedulers, defaultCount-3)
+	re.Len(co.schedulers, 2)
 	re.NoError(co.cluster.opt.Persist(storage))
 	co.stop()
 	co.wg.Wait()
@@ -870,7 +866,7 @@ func TestPersistScheduler(t *testing.T) {
 	brs, err := schedule.CreateScheduler(schedulers.BalanceRegionType, oc, storage, schedule.ConfigSliceDecoder(schedulers.BalanceRegionType, []string{"", ""}))
 	re.NoError(err)
 	re.NoError(co.addScheduler(brs))
-	re.Len(co.schedulers, defaultCount)
+	re.Len(co.schedulers, 5)
 
 	// the scheduler option should contain 6 items
 	// the `hot scheduler` are disabled
@@ -889,9 +885,9 @@ func TestPersistScheduler(t *testing.T) {
 	co = newCoordinator(ctx, tc.RaftCluster, hbStreams)
 
 	co.run()
-	re.Len(co.schedulers, defaultCount-1)
+	re.Len(co.schedulers, 4)
 	re.NoError(co.removeScheduler(schedulers.EvictLeaderName))
-	re.Len(co.schedulers, defaultCount-2)
+	re.Len(co.schedulers, 3)
 }
 
 func TestDenyScheduler(t *testing.T) {
@@ -966,8 +962,6 @@ func TestRemoveScheduler(t *testing.T) {
 	re.NoError(co.removeScheduler(schedulers.BalanceRegionName))
 	re.NoError(co.removeScheduler(schedulers.HotRegionName))
 	re.NoError(co.removeScheduler(schedulers.GrantLeaderName))
-	re.NoError(co.removeScheduler(schedulers.BalanceWitnessName))
-	re.NoError(co.removeScheduler(schedulers.TransferWitnessLeaderName))
 	// all removed
 	sches, _, err = storage.LoadAllScheduleConfig()
 	re.NoError(err)
