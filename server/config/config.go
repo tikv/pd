@@ -38,6 +38,7 @@ import (
 
 	"github.com/tikv/pd/pkg/errs"
 	rm "github.com/tikv/pd/pkg/mcs/resourcemanager/server"
+	"github.com/tikv/pd/pkg/memory"
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/utils/configutil"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
@@ -243,6 +244,9 @@ const (
 	defaultGCTunerThreshold           = 0.6
 	minGCTunerThreshold               = 0
 	maxGCTunerThreshold               = 0.9
+	// If concurrentStreams reaches 600k, the memory usage is about 40GB. To
+	// protect the server from OOM, we set the default concurrency to 10k per GB.
+	defaultConcurrencyPerGB = 10000
 
 	defaultWaitRegionSplitTimeout   = 30 * time.Second
 	defaultCheckRegionSplitInterval = 50 * time.Millisecond
@@ -731,7 +735,13 @@ func (c *Config) GenEmbedEtcdConfig() (*embed.Config, error) {
 	cfg.ZapLoggerBuilder = embed.NewZapCoreLoggerBuilder(c.Logger, c.Logger.Core(), c.LogProps.Syncer)
 	cfg.EnableGRPCGateway = c.EnableGRPCGateway
 	cfg.Logger = "zap"
-	var err error
+
+	totalMem, err := memory.MemTotal()
+	if err != nil {
+		log.Warn("fail to get total memory", zap.Error(err))
+	} else {
+		cfg.MaxConcurrentStreams = uint32(defaultConcurrencyPerGB * (totalMem/uint64(units.GiB) + 1))
+	}
 
 	cfg.ListenPeerUrls, err = parseUrls(c.PeerUrls)
 	if err != nil {
