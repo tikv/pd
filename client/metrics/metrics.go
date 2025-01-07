@@ -28,7 +28,6 @@ func init() {
 	initCmdDurations()
 }
 
-// InitAndRegisterMetrics initializes and registers the metrics manually.
 func InitAndRegisterMetrics(constLabels prometheus.Labels) {
 	if atomic.CompareAndSwapInt32(&initialized, 0, 1) {
 		// init metrics with constLabels
@@ -40,22 +39,15 @@ func InitAndRegisterMetrics(constLabels prometheus.Labels) {
 }
 
 var (
-	cmdDuration       *prometheus.HistogramVec
-	cmdFailedDuration *prometheus.HistogramVec
-	requestDuration   *prometheus.HistogramVec
-
-	// TSOBestBatchSize is the histogram of the best batch size of TSO requests.
-	TSOBestBatchSize prometheus.Histogram
-	// TSOBatchSize is the histogram of the batch size of TSO requests.
-	TSOBatchSize prometheus.Histogram
-	// TSOBatchSendLatency is the histogram of the latency of sending TSO requests.
-	TSOBatchSendLatency prometheus.Histogram
-	// RequestForwarded is the gauge to indicate if the request is forwarded.
-	RequestForwarded *prometheus.GaugeVec
-	// OngoingRequestCountGauge is the gauge to indicate the count of ongoing TSO requests.
+	cmdDuration              *prometheus.HistogramVec
+	cmdFailedDuration        *prometheus.HistogramVec
+	requestDuration          *prometheus.HistogramVec
+	TSOBestBatchSize         prometheus.Histogram
+	TSOBatchSize             prometheus.Histogram
+	TSOBatchSendLatency      prometheus.Histogram
+	RequestForwarded         *prometheus.GaugeVec
 	OngoingRequestCountGauge *prometheus.GaugeVec
-	// EstimateTSOLatencyGauge is the gauge to indicate the estimated latency of TSO requests.
-	EstimateTSOLatencyGauge *prometheus.GaugeVec
+	EstimateTSOLatencyGauge  *prometheus.GaugeVec
 	// CircuitBreakerCounters is a vector for different circuit breaker counters
 	CircuitBreakerCounters *prometheus.CounterVec
 )
@@ -157,9 +149,8 @@ func initMetrics(constLabels prometheus.Labels) {
 		}, []string{"name", "success"})
 }
 
-// CmdDurationXXX and CmdFailedDurationXXX are the durations of the client commands.
 var (
-	CmdDurationTSOWait                  prometheus.Observer
+	CmdDurationWait                     prometheus.Observer
 	CmdDurationTSO                      prometheus.Observer
 	CmdDurationTSOAsyncWait             prometheus.Observer
 	CmdDurationGetRegion                prometheus.Observer
@@ -185,11 +176,10 @@ var (
 	CmdDurationUpdateGCSafePointV2      prometheus.Observer
 	CmdDurationUpdateServiceSafePointV2 prometheus.Observer
 
-	CmdFailedDurationGetRegion                prometheus.Observer
-	CmdFailedDurationTSOWait                  prometheus.Observer
-	CmdFailedDurationTSO                      prometheus.Observer
-	CmdFailedDurationGetAllMembers            prometheus.Observer
-	CmdFailedDurationGetPrevRegion            prometheus.Observer
+	CmdFailDurationGetRegion                  prometheus.Observer
+	CmdFailDurationTSO                        prometheus.Observer
+	CmdFailDurationGetAllMembers              prometheus.Observer
+	CmdFailDurationGetPrevRegion              prometheus.Observer
 	CmdFailedDurationGetRegionByID            prometheus.Observer
 	CmdFailedDurationScanRegions              prometheus.Observer
 	CmdFailedDurationBatchScanRegions         prometheus.Observer
@@ -203,16 +193,15 @@ var (
 	CmdFailedDurationPut                      prometheus.Observer
 	CmdFailedDurationUpdateGCSafePointV2      prometheus.Observer
 	CmdFailedDurationUpdateServiceSafePointV2 prometheus.Observer
+	CmdFailedDurationGetAllKeyspaces          prometheus.Observer
 
-	// RequestDurationTSO records the durations of the successful TSO requests.
-	RequestDurationTSO prometheus.Observer
-	// RequestFailedDurationTSO records the durations of the failed TSO requests.
+	RequestDurationTSO       prometheus.Observer
 	RequestFailedDurationTSO prometheus.Observer
 )
 
 func initCmdDurations() {
 	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
-	CmdDurationTSOWait = cmdDuration.WithLabelValues("wait")
+	CmdDurationWait = cmdDuration.WithLabelValues("wait")
 	CmdDurationTSO = cmdDuration.WithLabelValues("tso")
 	CmdDurationTSOAsyncWait = cmdDuration.WithLabelValues("tso_async_wait")
 	CmdDurationGetRegion = cmdDuration.WithLabelValues("get_region")
@@ -238,11 +227,10 @@ func initCmdDurations() {
 	CmdDurationUpdateGCSafePointV2 = cmdDuration.WithLabelValues("update_gc_safe_point_v2")
 	CmdDurationUpdateServiceSafePointV2 = cmdDuration.WithLabelValues("update_service_safe_point_v2")
 
-	CmdFailedDurationGetRegion = cmdFailedDuration.WithLabelValues("get_region")
-	CmdFailedDurationTSOWait = cmdFailedDuration.WithLabelValues("wait")
-	CmdFailedDurationTSO = cmdFailedDuration.WithLabelValues("tso")
-	CmdFailedDurationGetAllMembers = cmdFailedDuration.WithLabelValues("get_member_info")
-	CmdFailedDurationGetPrevRegion = cmdFailedDuration.WithLabelValues("get_prev_region")
+	CmdFailDurationGetRegion = cmdFailedDuration.WithLabelValues("get_region")
+	CmdFailDurationTSO = cmdFailedDuration.WithLabelValues("tso")
+	CmdFailDurationGetAllMembers = cmdFailedDuration.WithLabelValues("get_member_info")
+	CmdFailDurationGetPrevRegion = cmdFailedDuration.WithLabelValues("get_prev_region")
 	CmdFailedDurationGetRegionByID = cmdFailedDuration.WithLabelValues("get_region_byid")
 	CmdFailedDurationScanRegions = cmdFailedDuration.WithLabelValues("scan_regions")
 	CmdFailedDurationBatchScanRegions = cmdFailedDuration.WithLabelValues("batch_scan_regions")
@@ -256,6 +244,7 @@ func initCmdDurations() {
 	CmdFailedDurationPut = cmdFailedDuration.WithLabelValues("put")
 	CmdFailedDurationUpdateGCSafePointV2 = cmdFailedDuration.WithLabelValues("update_gc_safe_point_v2")
 	CmdFailedDurationUpdateServiceSafePointV2 = cmdFailedDuration.WithLabelValues("update_service_safe_point_v2")
+	CmdFailedDurationGetAllKeyspaces = cmdFailedDuration.WithLabelValues("get_all_keyspaces")
 
 	RequestDurationTSO = requestDuration.WithLabelValues("tso")
 	RequestFailedDurationTSO = requestDuration.WithLabelValues("tso-failed")

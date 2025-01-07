@@ -18,8 +18,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	cb "github.com/tikv/pd/client/circuitbreaker"
-
 	"github.com/pingcap/errors"
 	"github.com/prometheus/client_golang/prometheus"
 	"google.golang.org/grpc"
@@ -48,8 +46,6 @@ const (
 	EnableFollowerHandle
 	// TSOClientRPCConcurrency controls the amount of ongoing TSO RPC requests at the same time in a single TSO client.
 	TSOClientRPCConcurrency
-	// RegionMetadataCircuitBreakerSettings controls settings for circuit breaker for region metadata requests.
-	RegionMetadataCircuitBreakerSettings
 
 	dynamicOptionCount
 )
@@ -69,8 +65,7 @@ type option struct {
 	// Dynamic options.
 	dynamicOptions [dynamicOptionCount]atomic.Value
 
-	enableTSOFollowerProxyCh         chan struct{}
-	regionMetaCircuitBreakerSettings cb.Settings
+	enableTSOFollowerProxyCh chan struct{}
 }
 
 // newOption creates a new PD client option with the default values set.
@@ -146,11 +141,6 @@ func (o *option) setTSOClientRPCConcurrency(value int) {
 
 func (o *option) getTSOClientRPCConcurrency() int {
 	return o.dynamicOptions[TSOClientRPCConcurrency].Load().(int)
-}
-
-// GetRegionMetadataCircuitBreakerSettings gets circuit breaker settings for PD region metadata calls.
-func (o *option) GetRegionMetadataCircuitBreakerSettings() cb.Settings {
-	return o.dynamicOptions[RegionMetadataCircuitBreakerSettings].Load().(cb.Settings)
 }
 
 // GetStoreOp represents available options when getting stores.

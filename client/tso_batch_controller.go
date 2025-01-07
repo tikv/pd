@@ -19,6 +19,7 @@ import (
 	"runtime/trace"
 	"time"
 
+	"github.com/tikv/pd/client/metrics"
 	"github.com/tikv/pd/client/tsoutil"
 )
 
@@ -199,7 +200,7 @@ func (tbc *tsoBatchController) getCollectedRequests() []*tsoRequest {
 
 // adjustBestBatchSize stabilizes the latency with the AIAD algorithm.
 func (tbc *tsoBatchController) adjustBestBatchSize() {
-	tsoBestBatchSize.Observe(float64(tbc.bestBatchSize))
+	metrics.TSOBestBatchSize.Observe(float64(tbc.bestBatchSize))
 	length := tbc.collectedRequestCount
 	if length < tbc.bestBatchSize && tbc.bestBatchSize > 1 {
 		// Waits too long to collect requests, reduce the target batch size.

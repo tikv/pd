@@ -14,15 +14,16 @@
 package circuitbreaker
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/tikv/pd/client/errs"
+	m "github.com/tikv/pd/client/metrics"
 
 	"github.com/prometheus/client_golang/prometheus"
-	m "github.com/tikv/pd/client/metrics"
 	"go.uber.org/zap"
 
 	"github.com/pingcap/log"
@@ -62,12 +63,12 @@ var AlwaysClosedSettings = Settings{
 }
 
 // CircuitBreaker is a state machine to prevent sending requests that are likely to fail.
-type CircuitBreaker[T any] struct {
+type CircuitBreaker struct {
 	config *Settings
 	name   string
 
 	mutex sync.Mutex
-	state *State[T]
+	state *State
 
 	successCounter  prometheus.Counter
 	errorCounter    prometheus.Counter
@@ -102,8 +103,8 @@ func (s StateType) String() string {
 var replacer = strings.NewReplacer(" ", "_", "-", "_")
 
 // NewCircuitBreaker returns a new CircuitBreaker configured with the given Settings.
-func NewCircuitBreaker[T any](name string, st Settings) *CircuitBreaker[T] {
-	cb := new(CircuitBreaker[T])
+func NewCircuitBreaker(name string, st Settings) *CircuitBreaker {
+	cb := new(CircuitBreaker)
 	cb.name = name
 	cb.config = &st
 	cb.state = cb.newState(time.Now(), StateClosed)
@@ -118,7 +119,7 @@ func NewCircuitBreaker[T any](name string, st Settings) *CircuitBreaker[T] {
 
 // ChangeSettings changes the CircuitBreaker settings.
 // The changes will be reflected only in the next evaluation window.
-func (cb *CircuitBreaker[T]) ChangeSettings(apply func(config *Settings)) {
+func (cb *CircuitBreaker) ChangeSettings(apply func(config *Settings)) {
 	cb.mutex.Lock()
 	defer cb.mutex.Unlock()
 
@@ -128,12 +129,11 @@ func (cb *CircuitBreaker[T]) ChangeSettings(apply func(config *Settings)) {
 // Execute calls the given function if the CircuitBreaker is closed and returns the result of execution.
 // Execute returns an error instantly if the CircuitBreaker is open.
 // https://github.com/tikv/rfcs/blob/master/text/0115-circuit-breaker.md
-func (cb *CircuitBreaker[T]) Execute(call func() (T, Overloading, error)) (T, error) {
+func (cb *CircuitBreaker) Execute(call func() (Overloading, error)) error {
 	state, err := cb.onRequest()
 	if err != nil {
 		cb.fastFailCounter.Inc()
-		var defaultValue T
-		return defaultValue, err
+		return err
 	}
 
 	defer func() {
@@ -145,13 +145,13 @@ func (cb *CircuitBreaker[T]) Execute(call func() (T, Overloading, error)) (T, er
 		}
 	}()
 
-	result, overloaded, err := call()
+	overloaded, err := call()
 	cb.emitMetric(overloaded, err)
 	cb.onResult(state, overloaded)
-	return result, err
+	return err
 }
 
-func (cb *CircuitBreaker[T]) onRequest() (*State[T], error) {
+func (cb *CircuitBreaker) onRequest() (*State, error) {
 	cb.mutex.Lock()
 	defer cb.mutex.Unlock()
 
@@ -160,7 +160,7 @@ func (cb *CircuitBreaker[T]) onRequest() (*State[T], error) {
 	return state, err
 }
 
-func (cb *CircuitBreaker[T]) onResult(state *State[T], overloaded Overloading) {
+func (cb *CircuitBreaker) onResult(state *State, overloaded Overloading) {
 	cb.mutex.Lock()
 	defer cb.mutex.Unlock()
 
@@ -169,7 +169,7 @@ func (cb *CircuitBreaker[T]) onResult(state *State[T], overloaded Overloading) {
 	state.onResult(overloaded)
 }
 
-func (cb *CircuitBreaker[T]) emitMetric(overloaded Overloading, err error) {
+func (cb *CircuitBreaker) emitMetric(overloaded Overloading, err error) {
 	switch overloaded {
 	case No:
 		cb.successCounter.Inc()
@@ -184,9 +184,9 @@ func (cb *CircuitBreaker[T]) emitMetric(overloaded Overloading, err error) {
 }
 
 // State represents the state of CircuitBreaker.
-type State[T any] struct {
+type State struct {
 	stateType StateType
-	cb        *CircuitBreaker[T]
+	cb        *CircuitBreaker
 	end       time.Time
 
 	pendingCount uint32
@@ -195,7 +195,7 @@ type State[T any] struct {
 }
 
 // newState creates a new State with the given configuration and reset all success/failure counters.
-func (cb *CircuitBreaker[T]) newState(now time.Time, stateType StateType) *State[T] {
+func (cb *CircuitBreaker) newState(now time.Time, stateType StateType) *State {
 	var end time.Time
 	var pendingCount uint32
 	switch stateType {
@@ -210,7 +210,7 @@ func (cb *CircuitBreaker[T]) newState(now time.Time, stateType StateType) *State
 	default:
 		panic("unknown state")
 	}
-	return &State[T]{
+	return &State{
 		cb:           cb,
 		stateType:    stateType,
 		pendingCount: pendingCount,
@@ -226,7 +226,7 @@ func (cb *CircuitBreaker[T]) newState(now time.Time, stateType StateType) *State
 // Open state fails all request, it has a fixed duration of `Settings.CoolDownInterval` and always moves to HalfOpen state at the end of the interval.
 // HalfOpen state does not have a fixed duration and lasts till `Settings.HalfOpenSuccessCount` are evaluated.
 // If any of `Settings.HalfOpenSuccessCount` fails then it moves back to Open state, otherwise it moves to Closed state.
-func (s *State[T]) onRequest(cb *CircuitBreaker[T]) (*State[T], error) {
+func (s *State) onRequest(cb *CircuitBreaker) (*State, error) {
 	var now = time.Now()
 	switch s.stateType {
 	case StateClosed:
@@ -290,7 +290,7 @@ func (s *State[T]) onRequest(cb *CircuitBreaker[T]) (*State[T], error) {
 	}
 }
 
-func (s *State[T]) onResult(overloaded Overloading) {
+func (s *State) onResult(overloaded Overloading) {
 	switch overloaded {
 	case No:
 		s.successCount++
@@ -299,4 +299,26 @@ func (s *State[T]) onResult(overloaded Overloading) {
 	default:
 		panic("unknown state")
 	}
+}
+
+// Define context key type
+type cbCtxKey struct{}
+
+// Key used to store circuit breaker
+var CircuitBreakerKey = cbCtxKey{}
+
+// FromContext retrieves the circuit breaker from the context
+func FromContext(ctx context.Context) *CircuitBreaker {
+	if ctx == nil {
+		return nil
+	}
+	if cb, ok := ctx.Value(CircuitBreakerKey).(*CircuitBreaker); ok {
+		return cb
+	}
+	return nil
+}
+
+// WithCircuitBreaker stores the circuit breaker into a new context
+func WithCircuitBreaker(ctx context.Context, cb *CircuitBreaker) context.Context {
+	return context.WithValue(ctx, CircuitBreakerKey, cb)
 }
