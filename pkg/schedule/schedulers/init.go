@@ -545,4 +545,29 @@ func schedulersRegister() {
 		conf.init(sche.GetName(), storage, conf)
 		return sche, nil
 	})
+
+	// balance key range scheduler
+	RegisterSliceDecoderBuilder(types.BalanceKeyRangeScheduler, func(args []string) ConfigDecoder {
+		return func(v any) error {
+			conf, ok := v.(*balanceKeyRangeSchedulerConfig)
+			if !ok {
+				return errs.ErrScheduleConfigNotExist.FastGenByArgs()
+			}
+			return parseBalanceKeyRangeParamArgs(args, conf)
+		}
+	})
+
+	RegisterScheduler(types.BalanceKeyRangeScheduler, func(opController *operator.Controller,
+		storage endpoint.ConfigStorage, decoder ConfigDecoder, _ ...func(string) error) (Scheduler, error) {
+		conf := &balanceKeyRangeSchedulerConfig{
+			baseDefaultSchedulerConfig: newBaseDefaultSchedulerConfig(),
+		}
+		if err := decoder(conf); err != nil {
+			return nil, err
+		}
+		sche := newBalanceKeyRangeScheduler(opController, conf)
+		conf.init(sche.GetName(), storage, conf)
+		return sche, nil
+	})
+
 }
