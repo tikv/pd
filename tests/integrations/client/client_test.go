@@ -270,6 +270,7 @@ func TestTSOFollowerProxy(t *testing.T) {
 	defer cli1.Close()
 	cli2 := setupCli(ctx, re, endpoints)
 	defer cli2.Close()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/clients/tso/speedUpTsoDispatcherUpdateInterval", "return(true)"))
 	err = cli2.UpdateOption(opt.EnableTSOFollowerProxy, true)
 	re.NoError(err)
 
@@ -294,6 +295,31 @@ func TestTSOFollowerProxy(t *testing.T) {
 			}
 		}()
 	}
+	wg.Wait()
+
+	followerServer := cluster.GetServer(cluster.GetFollower())
+	re.NoError(followerServer.Stop())
+	ch := make(chan struct{})
+	re.NoError(failpoint.EnableCall("github.com/tikv/pd/server/delayStartServer", func() {
+		// Server is not in `Running` state, so the follower proxy should return
+		// error while create stream.
+		ch <- struct{}{}
+	}))
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		re.NoError(followerServer.Run())
+	}()
+	re.Eventually(func() bool {
+		_, _, err := cli2.GetTS(context.Background())
+		if err == nil {
+			return false
+		}
+		return strings.Contains(err.Error(), "server not started")
+	}, 3*time.Second, 10*time.Millisecond)
+	<-ch
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/delayStartServer"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/clients/tso/speedUpTsoDispatcherUpdateInterval"))
 	wg.Wait()
 
 	// Disable the follower proxy and check if the stream is updated.

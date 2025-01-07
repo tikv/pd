@@ -32,6 +32,7 @@ import (
 )
 
 const (
+	v2Prefix             = "/pd/api/v2"
 	keyspacesPrefix      = "/pd/api/v2/keyspaces"
 	keyspaceGroupsPrefix = "/pd/api/v2/tso/keyspace-groups"
 )

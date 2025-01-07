@@ -131,11 +131,6 @@ error = '''
 get TSO failed
 '''
 
-["PD:client:ErrClientGetTSOTimeout"]
-error = '''
-get TSO timeout
-'''
-
 ["PD:cluster:ErrInvalidStoreID"]
 error = '''
 invalid store id %d, not found
@@ -661,9 +656,9 @@ error = '''
 init file log error, %s
 '''
 
-["PD:mcs:ErrNotFoundSchedulingAddr"]
+["PD:mcs:ErrNotFoundSchedulingPrimary"]
 error = '''
-cannot find scheduling address
+cannot find scheduling primary
 '''
 
 ["PD:mcs:ErrSchedulingServer"]

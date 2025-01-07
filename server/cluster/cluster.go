@@ -307,7 +307,7 @@ func (c *RaftCluster) InitCluster(
 	c.hbstreams = hbstreams
 	c.ruleManager = placement.NewRuleManager(c.ctx, c.storage, c, c.GetOpts())
 	if c.opt.IsPlacementRulesEnabled() {
-		err := c.ruleManager.Initialize(c.opt.GetMaxReplicas(), c.opt.GetLocationLabels(), c.opt.GetIsolationLevel())
+		err := c.ruleManager.Initialize(c.opt.GetMaxReplicas(), c.opt.GetLocationLabels(), c.opt.GetIsolationLevel(), false)
 		if err != nil {
 			return err
 		}
@@ -2283,7 +2283,8 @@ func (c *RaftCluster) CheckAndUpdateMinResolvedTS() (uint64, bool) {
 			newMinResolvedTS = s.GetMinResolvedTS()
 		}
 	}
-	oldMinResolvedTS := c.minResolvedTS.Load().(uint64)
+	// Avoid panic when minResolvedTS is not initialized.
+	oldMinResolvedTS, _ := c.minResolvedTS.Load().(uint64)
 	if newMinResolvedTS == math.MaxUint64 || newMinResolvedTS <= oldMinResolvedTS {
 		return oldMinResolvedTS, false
 	}

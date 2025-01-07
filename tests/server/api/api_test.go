@@ -173,8 +173,8 @@ func (suite *middlewareTestSuite) TestRequestInfoMiddleware() {
 	re.Equal(http.StatusOK, resp.StatusCode)
 
 	re.Equal("Profile", resp.Header.Get("service-label"))
-	re.Equal("{\"seconds\":[\"1\"]}", resp.Header.Get("url-param"))
-	re.Equal("{\"testkey\":\"testvalue\"}", resp.Header.Get("body-param"))
+	re.JSONEq("{\"seconds\":[\"1\"]}", resp.Header.Get("url-param"))
+	re.JSONEq("{\"testkey\":\"testvalue\"}", resp.Header.Get("body-param"))
 	re.Equal("HTTP/1.1/POST:/pd/api/v1/debug/pprof/profile", resp.Header.Get("method"))
 	re.Equal("anonymous", resp.Header.Get("caller-id"))
 	re.Equal("127.0.0.1", resp.Header.Get("ip"))
@@ -1092,13 +1092,24 @@ func TestPreparingProgress(t *testing.T) {
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs"))
 }
 
-func sendRequest(re *require.Assertions, url string, method string, statusCode int) []byte {
+func sendRequest(re *require.Assertions, url string, method string, statusCode int) (output []byte) {
 	req, _ := http.NewRequest(method, url, http.NoBody)
-	resp, err := tests.TestDialClient.Do(req)
-	re.NoError(err)
-	re.Equal(statusCode, resp.StatusCode)
-	output, err := io.ReadAll(resp.Body)
-	re.NoError(err)
-	resp.Body.Close()
+
+	testutil.Eventually(re, func() bool {
+		resp, err := tests.TestDialClient.Do(req)
+		re.NoError(err)
+		defer resp.Body.Close()
+
+		// Due to service unavailability caused by environmental issues,
+		// we will retry it.
+		if resp.StatusCode == http.StatusServiceUnavailable {
+			return false
+		}
+		re.Equal(statusCode, resp.StatusCode)
+		output, err = io.ReadAll(resp.Body)
+		re.NoError(err)
+		return true
+	})
+
 	return output
 }

@@ -484,13 +484,13 @@ func TestStore(t *testing.T) {
 	args = []string{"-u", pdAddr, "store", "limit", "all", "201"}
 	output, err = tests.ExecuteCommand(cmd, args...)
 	re.NoError(err)
-	re.Contains(string(output), "rate should less than")
+	re.Contains(string(output), "rate should be less than")
 
 	// store limit all 201 is invalid for label
 	args = []string{"-u", pdAddr, "store", "limit", "all", "engine", "key", "201", "add-peer"}
 	output, err = tests.ExecuteCommand(cmd, args...)
 	re.NoError(err)
-	re.Contains(string(output), "rate should less than")
+	re.Contains(string(output), "rate should be less than")
 }
 
 // https://github.com/tikv/pd/issues/5024

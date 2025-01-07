@@ -23,8 +23,6 @@ import (
 
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/pdpb"
@@ -39,12 +37,6 @@ import (
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/versioninfo"
-)
-
-// gRPC errors
-var (
-	ErrNotStarted        = status.Errorf(codes.Unavailable, "server not started")
-	ErrClusterMismatched = status.Errorf(codes.Unavailable, "cluster mismatched")
 )
 
 // SetUpRestHandler is a hook to sets up the REST service.
@@ -107,7 +99,7 @@ func (s *heartbeatServer) Send(m core.RegionHeartbeatResponse) error {
 		return errors.WithStack(err)
 	case <-timer.C:
 		atomic.StoreInt32(&s.closed, 1)
-		return status.Errorf(codes.DeadlineExceeded, "send heartbeat timeout")
+		return errs.ErrSendHeartbeatTimeout
 	}
 }
 

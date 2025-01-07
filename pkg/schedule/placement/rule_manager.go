@@ -35,6 +35,7 @@ import (
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/schedule/config"
+	"github.com/tikv/pd/pkg/schedule/rangelist"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
@@ -81,10 +82,19 @@ func NewRuleManager(ctx context.Context, storage endpoint.RuleStorage, storeSetI
 
 // Initialize loads rules from storage. If Placement Rules feature is never enabled, it creates default rule that is
 // compatible with previous configuration.
-func (m *RuleManager) Initialize(maxReplica int, locationLabels []string, isolationLevel string) error {
+func (m *RuleManager) Initialize(maxReplica int, locationLabels []string, isolationLevel string, skipLoadRules bool) error {
 	m.Lock()
 	defer m.Unlock()
 	if m.initialized {
+		return nil
+	}
+	// If RuleManager is initialized in micro service,
+	// it will load from etcd watcher and do not modify rule directly.
+	if skipLoadRules {
+		m.ruleList = ruleList{
+			rangeList: rangelist.List{},
+		}
+		m.initialized = true
 		return nil
 	}
 

@@ -740,7 +740,9 @@ func (suite *configTestSuite) checkPlacementRuleBundle(cluster *pdTests.TestClus
 	output, err = tests.ExecuteCommand(cmd, "-u", pdAddr, "config", "placement-rules", "rule-bundle", "get", placement.DefaultGroupID)
 	re.NoError(err)
 	re.NoError(json.Unmarshal(output, &bundle))
-	re.Equal(placement.GroupBundle{ID: placement.DefaultGroupID, Index: 0, Override: false, Rules: []*placement.Rule{{GroupID: placement.DefaultGroupID, ID: placement.DefaultRuleID, Role: placement.Voter, Count: 3}}}, bundle)
+	expect := placement.GroupBundle{ID: placement.DefaultGroupID, Index: 0, Override: false, Rules: []*placement.Rule{{GroupID: placement.DefaultGroupID, ID: placement.DefaultRuleID, Role: placement.Voter, Count: 3}}}
+	expect.Rules[0].CreateTimestamp = bundle.Rules[0].CreateTimestamp // skip create timestamp in mcs
+	re.Equal(expect, bundle)
 
 	f, err := os.CreateTemp("", "pd_tests")
 	re.NoError(err)

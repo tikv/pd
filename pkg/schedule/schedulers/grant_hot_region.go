@@ -262,7 +262,7 @@ func (s *grantHotRegionScheduler) randomSchedule(cluster sche.SchedulerCluster, 
 			op, err := s.transfer(cluster, peer.RegionID, srcStoreID, isLeader)
 			if err != nil {
 				log.Debug("fail to create grant hot region operator", zap.Uint64("region-id", peer.RegionID),
-					zap.Uint64("src store id", srcStoreID), errs.ZapError(err))
+					zap.Uint64("src-store-id", srcStoreID), errs.ZapError(err))
 				continue
 			}
 			return []*operator.Operator{op}
@@ -319,6 +319,10 @@ func (s *grantHotRegionScheduler) transfer(cluster sche.SchedulerCluster, region
 		op, err = operator.CreateTransferLeaderOperator(s.GetName()+"-leader", cluster, srcRegion, dstStore.StoreId, []uint64{}, operator.OpLeader)
 	} else {
 		op, err = operator.CreateMovePeerOperator(s.GetName()+"-move", cluster, srcRegion, operator.OpRegion|operator.OpLeader, srcStore.GetID(), dstStore)
+	}
+	if err != nil {
+		log.Debug("fail to create grant hot leader operator", errs.ZapError(err))
+		return
 	}
 	op.SetPriorityLevel(constant.High)
 	return

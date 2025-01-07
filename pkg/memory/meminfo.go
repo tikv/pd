@@ -210,9 +210,9 @@ func InitMemoryHook() {
 		MemTotal = MemTotalCGroup
 		MemUsed = MemUsedCGroup
 		sysutil.RegisterGetMemoryCapacity(MemTotalCGroup)
-		log.Info("use cgroup memory hook", zap.Int64("cgroupMemorySize", int64(cgroupValue)), zap.Int64("physicalMemorySize", int64(physicalValue)))
+		log.Info("use cgroup memory hook", zap.Int64("cgroup-memory-size", int64(cgroupValue)), zap.Int64("physical-memory-size", int64(physicalValue)))
 	} else {
-		log.Info("use physical memory hook", zap.Int64("cgroupMemorySize", int64(cgroupValue)), zap.Int64("physicalMemorySize", int64(physicalValue)))
+		log.Info("use physical memory hook", zap.Int64("cgroup-memory-size", int64(cgroupValue)), zap.Int64("physical-memory-size", int64(physicalValue)))
 	}
 	_, err = MemTotal()
 	mustNil(err)

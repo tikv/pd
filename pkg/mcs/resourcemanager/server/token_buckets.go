@@ -174,7 +174,7 @@ func (gts *GroupTokenBucketState) balanceSlotTokens(
 			if time.Since(slot.lastReqTime) >= slotExpireTimeout {
 				delete(gts.tokenSlots, clientUniqueID)
 				log.Info("delete resource group slot because expire", zap.Time("last-req-time", slot.lastReqTime),
-					zap.Any("expire timeout", slotExpireTimeout), zap.Any("del client id", clientUniqueID), zap.Any("len", len(gts.tokenSlots)))
+					zap.Duration("expire-timeout", slotExpireTimeout), zap.Uint64("del-client-id", clientUniqueID), zap.Int("len", len(gts.tokenSlots)))
 			}
 		}
 	}

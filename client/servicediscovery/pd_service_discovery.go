@@ -509,8 +509,9 @@ func (c *pdServiceDiscovery) Init() error {
 		}
 	}
 
-	if err := c.checkServiceModeChanged(); err != nil {
-		log.Warn("[pd] failed to check service mode and will check later", zap.Error(err))
+	if err := c.initRetry(c.checkServiceModeChanged); err != nil {
+		c.cancel()
+		return err
 	}
 
 	c.wg.Add(3)
@@ -966,12 +967,9 @@ func (c *pdServiceDiscovery) updateURLs(members []*pdpb.Member) {
 		return
 	}
 	c.urls.Store(urls)
-	// Update the connection contexts when member changes if TSO Follower Proxy is enabled.
-	if c.option.GetEnableTSOFollowerProxy() {
-		// Run callbacks to reflect the membership changes in the leader and followers.
-		for _, cb := range c.membersChangedCbs {
-			cb()
-		}
+	// Run callbacks to reflect the membership changes in the leader and followers.
+	for _, cb := range c.membersChangedCbs {
+		cb()
 	}
 	log.Info("[pd] update member urls", zap.Strings("old-urls", oldURLs), zap.Strings("new-urls", urls))
 }
