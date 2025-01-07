@@ -5,7 +5,7 @@ go 1.23
 // When you modify PD cooperatively with kvproto, this will be useful to submit the PR to PD and the PR to
 // kvproto at the same time. You can run `go mod tidy` to make it replaced with go-mod style specification.
 // After the PR to kvproto is merged, remember to comment this out and run `go mod tidy`.
-// replace github.com/pingcap/kvproto => github.com/$YourPrivateRepo $YourPrivateBranch
+replace github.com/pingcap/kvproto => github.com/JmPotato/kvproto v0.0.0-20250107061039-28ba77c8a2bc
 
 require (
 	github.com/AlekSi/gocov-xml v1.0.0
