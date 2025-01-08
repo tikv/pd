@@ -817,7 +817,6 @@ func (o *PersistOptions) Reload(storage endpoint.ConfigStorage) error {
 	adjustScheduleCfg(&cfg.Schedule)
 	// Some fields may not be stored in the storage, we need to calculate them manually.
 	cfg.StoreConfig.Adjust()
-	cfg.PDServerCfg.MigrateDeprecatedFlags()
 	if isExist {
 		o.schedule.Store(&cfg.Schedule)
 		o.replication.Store(&cfg.Replication)
