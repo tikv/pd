@@ -577,7 +577,7 @@ func (c *PDServerConfig) adjust(meta *configutil.ConfigMetaData) error {
 
 func migrateConfigurationFromFile(meta *configutil.ConfigMetaData) error {
 	oldName, newName := "trace-region-flow", "flow-round-by-digit"
-	defineOld, _ := meta.IsDefined(oldName), meta.IsDefined(newName)
+	defineOld := meta.IsDefined(oldName)
 	switch {
 	case defineOld:
 		return errors.Errorf("config item %s and %s(deprecated) are conflict", newName, oldName)

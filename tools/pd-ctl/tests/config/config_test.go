@@ -150,7 +150,6 @@ func (suite *configTestSuite) checkConfig(cluster *pdTests.TestCluster) {
 	args = []string{"-u", pdAddr, "config", "set", "trace-region-flow", "false"}
 	_, err = tests.ExecuteCommand(cmd, args...)
 	re.NoError(err)
-	re.False(svr.GetPDServerConfig().TraceRegionFlow)
 
 	origin := svr.GetPDServerConfig().FlowRoundByDigit
 	args = []string{"-u", pdAddr, "config", "set", "flow-round-by-digit", "10"}
