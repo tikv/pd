@@ -28,6 +28,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/reflectutil"
@@ -374,6 +375,12 @@ func postConfigDataWithPath(cmd *cobra.Command, key, value, path string) error {
 		val = value
 	}
 	data[key] = val
+	if key == "max-replicas" {
+		replica, err := strconv.ParseInt(value, 10, 64)
+		if err == nil && replica < sc.DefaultMaxReplicas {
+			cmd.Println("Setting max-replica to less than 3 may be a mistake and carries high risk. Please confirm the setting.")
+		}
+	}
 	reqData, err := json.Marshal(data)
 	if err != nil {
 		return err
