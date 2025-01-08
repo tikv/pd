@@ -380,7 +380,7 @@ func scheduleEvictLeaderOnce(r *rand.Rand, name string, cluster sche.SchedulerCl
 
 func createOperatorWithSort(name string, cluster sche.SchedulerCluster, candidates *filter.StoreCandidates, region *core.RegionInfo) (*operator.Operator, error) {
 	// we will pick low leader score store firstly.
-	candidates.Sort(filter.RegionScoreComparer(cluster.GetSharedConfig()))
+	candidates.Sort(filter.LeaderScoreComparer(cluster.GetSharedConfig()))
 	var (
 		op  *operator.Operator
 		err error

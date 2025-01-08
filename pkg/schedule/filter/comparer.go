@@ -27,6 +27,7 @@ type StoreComparer func(a, b *core.StoreInfo) int
 // score.
 func RegionScoreComparer(conf config.SharedConfigProvider) StoreComparer {
 	return func(a, b *core.StoreInfo) int {
+		// TODO: we should use the real time delta data to calculate the score.
 		sa := a.RegionScore(conf.GetRegionScoreFormulaVersion(), conf.GetHighSpaceRatio(), conf.GetLowSpaceRatio(), 0)
 		sb := b.RegionScore(conf.GetRegionScoreFormulaVersion(), conf.GetHighSpaceRatio(), conf.GetLowSpaceRatio(), 0)
 		switch {
@@ -42,9 +43,10 @@ func RegionScoreComparer(conf config.SharedConfigProvider) StoreComparer {
 
 // LeaderScoreComparer creates a StoreComparer to sort store by leader
 // score.
-func LeaderScoreComparer(conf config.SchedulerConfigProvider) StoreComparer {
+func LeaderScoreComparer(conf config.SharedConfigProvider) StoreComparer {
 	leaderSchedulePolicy := conf.GetLeaderSchedulePolicy()
 	return func(a, b *core.StoreInfo) int {
+		// TODO: we should use the real time delta data to calculate the score.
 		sa := a.LeaderScore(leaderSchedulePolicy, 0)
 		sb := b.LeaderScore(leaderSchedulePolicy, 0)
 		switch {
