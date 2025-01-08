@@ -27,12 +27,16 @@ import (
 	"time"
 
 	grpcprometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
+	"github.com/spf13/cobra"
+	"go.uber.org/zap"
+	"google.golang.org/grpc"
+
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/diagnosticspb"
 	"github.com/pingcap/kvproto/pkg/tsopb"
 	"github.com/pingcap/log"
 	"github.com/pingcap/sysutil"
-	"github.com/spf13/cobra"
+
 	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/discovery"
@@ -49,10 +53,6 @@ import (
 	"github.com/tikv/pd/pkg/utils/metricutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/versioninfo"
-	"go.uber.org/zap"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 )
 
 var _ bs.Server = (*Server)(nil)
@@ -272,21 +272,12 @@ func (s *Server) GetTSOAllocatorManager(keyspaceGroupID uint32) (*tso.AllocatorM
 	return s.keyspaceGroupManager.GetAllocatorManager(keyspaceGroupID)
 }
 
-// IsLocalRequest checks if the forwarded host is the current host
-func (*Server) IsLocalRequest(forwardedHost string) bool {
-	// TODO: Check if the forwarded host is the current host.
-	// The logic is depending on etcd service mode -- if the TSO service
-	// uses the embedded etcd, check against ClientUrls; otherwise check
-	// against the cluster membership.
-	return forwardedHost == ""
-}
-
 // ValidateInternalRequest checks if server is closed, which is used to validate
 // the gRPC communication between TSO servers internally.
 // TODO: Check if the sender is from the global TSO allocator
 func (s *Server) ValidateInternalRequest(_ *tsopb.RequestHeader, _ bool) error {
 	if s.IsClosed() {
-		return ErrNotStarted
+		return errs.ErrNotStarted
 	}
 	return nil
 }
@@ -295,11 +286,10 @@ func (s *Server) ValidateInternalRequest(_ *tsopb.RequestHeader, _ bool) error {
 // TODO: Check if the keyspace replica is the primary
 func (s *Server) ValidateRequest(header *tsopb.RequestHeader) error {
 	if s.IsClosed() {
-		return ErrNotStarted
+		return errs.ErrNotStarted
 	}
 	if header.GetClusterId() != keypath.ClusterID() {
-		return status.Errorf(codes.FailedPrecondition, "mismatch cluster id, need %d but got %d",
-			keypath.ClusterID(), header.GetClusterId())
+		return errs.ErrMismatchClusterID(keypath.ClusterID(), header.GetClusterId())
 	}
 	return nil
 }

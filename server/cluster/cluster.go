@@ -30,11 +30,15 @@ import (
 	"time"
 
 	"github.com/coreos/go-semver/semver"
+	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.uber.org/zap"
+
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+
 	"github.com/tikv/pd/pkg/cluster"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/storelimit"
@@ -69,8 +73,6 @@ import (
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/server/config"
-	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.uber.org/zap"
 )
 
 var (
@@ -129,7 +131,7 @@ type Server interface {
 	GetMembers() ([]*pdpb.Member, error)
 	ReplicateFileToMember(ctx context.Context, member *pdpb.Member, name string, data []byte) error
 	GetKeyspaceGroupManager() *keyspace.GroupManager
-	IsAPIServiceMode() bool
+	IsPDServiceMode() bool
 	GetSafePointV2Manager() *gc.SafePointV2Manager
 }
 
@@ -154,12 +156,12 @@ type RaftCluster struct {
 	etcdClient *clientv3.Client
 	httpClient *http.Client
 
-	running          bool
-	isAPIServiceMode bool
-	meta             *metapb.Cluster
-	storage          storage.Storage
-	minResolvedTS    atomic.Value // Store as uint64
-	externalTS       atomic.Value // Store as uint64
+	running         bool
+	isPDServiceMode bool
+	meta            *metapb.Cluster
+	storage         storage.Storage
+	minResolvedTS   atomic.Value // Store as uint64
+	externalTS      atomic.Value // Store as uint64
 
 	// Keep the previous store limit settings when removing a store.
 	prevStoreLimit map[uint64]map[storelimit.Type]float64
@@ -305,7 +307,7 @@ func (c *RaftCluster) InitCluster(
 	c.hbstreams = hbstreams
 	c.ruleManager = placement.NewRuleManager(c.ctx, c.storage, c, c.GetOpts())
 	if c.opt.IsPlacementRulesEnabled() {
-		err := c.ruleManager.Initialize(c.opt.GetMaxReplicas(), c.opt.GetLocationLabels(), c.opt.GetIsolationLevel())
+		err := c.ruleManager.Initialize(c.opt.GetMaxReplicas(), c.opt.GetLocationLabels(), c.opt.GetIsolationLevel(), false)
 		if err != nil {
 			return err
 		}
@@ -315,7 +317,7 @@ func (c *RaftCluster) InitCluster(
 }
 
 // Start starts a cluster.
-func (c *RaftCluster) Start(s Server) error {
+func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 	c.Lock()
 	defer c.Unlock()
 
@@ -323,12 +325,30 @@ func (c *RaftCluster) Start(s Server) error {
 		log.Warn("raft cluster has already been started")
 		return nil
 	}
-	c.isAPIServiceMode = s.IsAPIServiceMode()
-	err := c.InitCluster(s.GetAllocator(), s.GetPersistOptions(), s.GetHBStreams(), s.GetKeyspaceGroupManager())
+	c.isPDServiceMode = s.IsPDServiceMode()
+	err = c.InitCluster(s.GetAllocator(), s.GetPersistOptions(), s.GetHBStreams(), s.GetKeyspaceGroupManager())
 	if err != nil {
 		return err
 	}
-	c.checkTSOService()
+	// We should not manage tso service when bootstrap try to start raft cluster.
+	// It only is controlled by leader election.
+	// Ref: https://github.com/tikv/pd/issues/8836
+	if !bootstrap {
+		c.checkTSOService()
+	}
+	defer func() {
+		if !bootstrap && err != nil {
+			c.stopTSOJobsIfNeeded()
+		}
+	}()
+	failpoint.Inject("raftClusterReturn", func(val failpoint.Value) {
+		if val, ok := val.(bool); (ok && val) || !ok {
+			err = errors.New("raftClusterReturn")
+		} else {
+			err = nil
+		}
+		failpoint.Return(err)
+	})
 	cluster, err := c.LoadClusterInfo()
 	if err != nil {
 		return err
@@ -356,7 +376,7 @@ func (c *RaftCluster) Start(s Server) error {
 	c.loadExternalTS()
 	c.loadMinResolvedTS()
 
-	if c.isAPIServiceMode {
+	if c.isPDServiceMode {
 		// bootstrap keyspace group manager after starting other parts successfully.
 		// This order avoids a stuck goroutine in keyspaceGroupManager when it fails to create raftcluster.
 		err = c.keyspaceGroupManager.Bootstrap(c.ctx)
@@ -384,9 +404,9 @@ func (c *RaftCluster) Start(s Server) error {
 }
 
 func (c *RaftCluster) checkSchedulingService() {
-	if c.isAPIServiceMode {
+	if c.isPDServiceMode {
 		servers, err := discovery.Discover(c.etcdClient, constant.SchedulingServiceName)
-		if c.opt.GetMicroServiceConfig().IsSchedulingFallbackEnabled() && (err != nil || len(servers) == 0) {
+		if c.opt.GetMicroserviceConfig().IsSchedulingFallbackEnabled() && (err != nil || len(servers) == 0) {
 			c.startSchedulingJobs(c, c.hbstreams)
 			c.UnsetServiceIndependent(constant.SchedulingServiceName)
 		} else {
@@ -405,8 +425,8 @@ func (c *RaftCluster) checkSchedulingService() {
 
 // checkTSOService checks the TSO service.
 func (c *RaftCluster) checkTSOService() {
-	if c.isAPIServiceMode {
-		if c.opt.GetMicroServiceConfig().IsTSODynamicSwitchingEnabled() {
+	if c.isPDServiceMode {
+		if c.opt.GetMicroserviceConfig().IsTSODynamicSwitchingEnabled() {
 			servers, err := discovery.Discover(c.etcdClient, constant.TSOServiceName)
 			if err != nil || len(servers) == 0 {
 				if err := c.startTSOJobsIfNeeded(); err != nil {
@@ -2263,7 +2283,8 @@ func (c *RaftCluster) CheckAndUpdateMinResolvedTS() (uint64, bool) {
 			newMinResolvedTS = s.GetMinResolvedTS()
 		}
 	}
-	oldMinResolvedTS := c.minResolvedTS.Load().(uint64)
+	// Avoid panic when minResolvedTS is not initialized.
+	oldMinResolvedTS, _ := c.minResolvedTS.Load().(uint64)
 	if newMinResolvedTS == math.MaxUint64 || newMinResolvedTS <= oldMinResolvedTS {
 		return oldMinResolvedTS, false
 	}
@@ -2553,4 +2574,10 @@ func (c *RaftCluster) SetServiceIndependent(name string) {
 // UnsetServiceIndependent unsets the service to be independent.
 func (c *RaftCluster) UnsetServiceIndependent(name string) {
 	c.independentServices.Delete(name)
+}
+
+// GetGlobalTSOAllocator return global tso allocator
+// It only is used for test.
+func (c *RaftCluster) GetGlobalTSOAllocator() tso.Allocator {
+	return c.tsoAllocator.GetAllocator()
 }

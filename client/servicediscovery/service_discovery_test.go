@@ -25,21 +25,23 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pingcap/failpoint"
-	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
-	"github.com/tikv/pd/client/errs"
-	"github.com/tikv/pd/client/opt"
-	"github.com/tikv/pd/client/pkg/utils/grpcutil"
-	"github.com/tikv/pd/client/pkg/utils/testutil"
-	"github.com/tikv/pd/client/pkg/utils/tlsutil"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	pb "google.golang.org/grpc/examples/helloworld/helloworld"
 	"google.golang.org/grpc/health"
 	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/grpc/metadata"
+
+	"github.com/pingcap/failpoint"
+	"github.com/pingcap/kvproto/pkg/pdpb"
+
+	"github.com/tikv/pd/client/errs"
+	"github.com/tikv/pd/client/opt"
+	"github.com/tikv/pd/client/pkg/utils/grpcutil"
+	"github.com/tikv/pd/client/pkg/utils/testutil"
+	"github.com/tikv/pd/client/pkg/utils/tlsutil"
 )
 
 type testGRPCServer struct {
@@ -191,14 +193,14 @@ func (suite *serviceClientTestSuite) TestServiceClient() {
 	re.True(leader.IsConnectedToLeader())
 
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/servicediscovery/unreachableNetwork1", "return(true)"))
-	follower.(*pdServiceClient).checkNetworkAvailable(suite.ctx)
-	leader.(*pdServiceClient).checkNetworkAvailable(suite.ctx)
+	follower.(*serviceClient).checkNetworkAvailable(suite.ctx)
+	leader.(*serviceClient).checkNetworkAvailable(suite.ctx)
 	re.False(follower.Available())
 	re.False(leader.Available())
 	re.NoError(failpoint.Disable("github.com/tikv/pd/client/servicediscovery/unreachableNetwork1"))
 
-	follower.(*pdServiceClient).checkNetworkAvailable(suite.ctx)
-	leader.(*pdServiceClient).checkNetworkAvailable(suite.ctx)
+	follower.(*serviceClient).checkNetworkAvailable(suite.ctx)
+	leader.(*serviceClient).checkNetworkAvailable(suite.ctx)
 	re.True(follower.Available())
 	re.True(leader.Available())
 
@@ -257,11 +259,11 @@ func (suite *serviceClientTestSuite) TestServiceClient() {
 	re.False(leaderAPIClient.NeedRetry(pdErr2, nil))
 	re.False(followerAPIClient.Available())
 	re.True(leaderAPIClient.Available())
-	followerAPIClient.(*pdServiceAPIClient).markAsAvailable()
-	leaderAPIClient.(*pdServiceAPIClient).markAsAvailable()
+	followerAPIClient.(*serviceAPIClient).markAsAvailable()
+	leaderAPIClient.(*serviceAPIClient).markAsAvailable()
 	re.False(followerAPIClient.Available())
 	time.Sleep(time.Millisecond * 100)
-	followerAPIClient.(*pdServiceAPIClient).markAsAvailable()
+	followerAPIClient.(*serviceAPIClient).markAsAvailable()
 	re.True(followerAPIClient.Available())
 
 	re.True(followerAPIClient.NeedRetry(nil, err))
@@ -276,7 +278,7 @@ func (suite *serviceClientTestSuite) TestServiceClientBalancer() {
 	re := suite.Require()
 	follower := suite.followerClient
 	leader := suite.leaderClient
-	b := &pdServiceBalancer{}
+	b := &serviceBalancer{}
 	b.set([]ServiceClient{leader, follower})
 	re.Equal(2, b.totalNode)
 
@@ -398,7 +400,7 @@ func TestUpdateURLs(t *testing.T) {
 		}
 		return
 	}
-	cli := &pdServiceDiscovery{option: opt.NewOption()}
+	cli := &serviceDiscovery{option: opt.NewOption()}
 	cli.urls.Store([]string{})
 	cli.updateURLs(members[1:])
 	re.Equal(getURLs([]*pdpb.Member{members[1], members[3], members[2]}), cli.GetServiceURLs())
@@ -419,7 +421,7 @@ func TestGRPCDialOption(t *testing.T) {
 	start := time.Now()
 	ctx, cancel := context.WithTimeout(context.TODO(), 500*time.Millisecond)
 	defer cancel()
-	cli := &pdServiceDiscovery{
+	cli := &serviceDiscovery{
 		checkMembershipCh: make(chan struct{}, 1),
 		ctx:               ctx,
 		cancel:            cancel,

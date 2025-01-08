@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/join"

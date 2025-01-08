@@ -21,14 +21,16 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pingcap/log"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+	"go.uber.org/zap"
+
+	"github.com/pingcap/log"
+
 	"github.com/tikv/pd/client/http"
 	"github.com/tikv/pd/client/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/types"
-	"go.uber.org/zap"
 )
 
 type schedulerSuite struct {

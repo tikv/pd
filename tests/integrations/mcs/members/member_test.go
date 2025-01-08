@@ -24,9 +24,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pingcap/failpoint"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+
+	"github.com/pingcap/failpoint"
+
 	pdClient "github.com/tikv/pd/client/http"
 	bs "github.com/tikv/pd/pkg/basicserver"
 	tso "github.com/tikv/pd/pkg/mcs/tso/server"
@@ -62,7 +64,7 @@ func (suite *memberTestSuite) SetupTest() {
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/acceleratedAllocNodes", `return(true)`))
 	ctx, cancel := context.WithCancel(context.Background())
 	suite.ctx = ctx
-	cluster, err := tests.NewTestAPICluster(suite.ctx, 1)
+	cluster, err := tests.NewTestPDServiceCluster(suite.ctx, 1)
 	suite.cluster = cluster
 	re.NoError(err)
 	re.NoError(cluster.RunInitialServers())
@@ -124,29 +126,29 @@ func (suite *memberTestSuite) TearDownTest() {
 
 func (suite *memberTestSuite) TestMembers() {
 	re := suite.Require()
-	members, err := suite.pdClient.GetMicroServiceMembers(suite.ctx, "tso")
+	members, err := suite.pdClient.GetMicroserviceMembers(suite.ctx, "tso")
 	re.NoError(err)
 	re.Len(members, 3)
 
-	members, err = suite.pdClient.GetMicroServiceMembers(suite.ctx, "scheduling")
+	members, err = suite.pdClient.GetMicroserviceMembers(suite.ctx, "scheduling")
 	re.NoError(err)
 	re.Len(members, 3)
 }
 
 func (suite *memberTestSuite) TestPrimary() {
 	re := suite.Require()
-	primary, err := suite.pdClient.GetMicroServicePrimary(suite.ctx, "tso")
+	primary, err := suite.pdClient.GetMicroservicePrimary(suite.ctx, "tso")
 	re.NoError(err)
 	re.NotEmpty(primary)
 
-	primary, err = suite.pdClient.GetMicroServicePrimary(suite.ctx, "scheduling")
+	primary, err = suite.pdClient.GetMicroservicePrimary(suite.ctx, "scheduling")
 	re.NoError(err)
 	re.NotEmpty(primary)
 }
 
 func (suite *memberTestSuite) TestPrimaryWorkWhileOtherServerClose() {
 	re := suite.Require()
-	primary, err := suite.pdClient.GetMicroServicePrimary(suite.ctx, "tso")
+	primary, err := suite.pdClient.GetMicroservicePrimary(suite.ctx, "tso")
 	re.NoError(err)
 	re.NotEmpty(primary)
 
@@ -160,7 +162,7 @@ func (suite *memberTestSuite) TestPrimaryWorkWhileOtherServerClose() {
 			nodes = suite.schedulingNodes
 		}
 
-		primary, err := suite.pdClient.GetMicroServicePrimary(suite.ctx, service)
+		primary, err := suite.pdClient.GetMicroservicePrimary(suite.ctx, service)
 		re.NoError(err)
 
 		// Close non-primary node.
@@ -172,7 +174,7 @@ func (suite *memberTestSuite) TestPrimaryWorkWhileOtherServerClose() {
 		tests.WaitForPrimaryServing(re, nodes)
 
 		// primary should be same with before.
-		curPrimary, err := suite.pdClient.GetMicroServicePrimary(suite.ctx, service)
+		curPrimary, err := suite.pdClient.GetMicroservicePrimary(suite.ctx, service)
 		re.NoError(err)
 		re.Equal(primary, curPrimary)
 	}
@@ -191,7 +193,7 @@ func (suite *memberTestSuite) TestTransferPrimary() {
 		}
 
 		// Test resign primary by random
-		primary, err := suite.pdClient.GetMicroServicePrimary(suite.ctx, service)
+		primary, err := suite.pdClient.GetMicroservicePrimary(suite.ctx, service)
 		re.NoError(err)
 
 		newPrimaryData := make(map[string]any)
@@ -212,7 +214,7 @@ func (suite *memberTestSuite) TestTransferPrimary() {
 			return false
 		}, testutil.WithWaitFor(5*time.Second), testutil.WithTickInterval(50*time.Millisecond))
 
-		primary, err = suite.pdClient.GetMicroServicePrimary(suite.ctx, service)
+		primary, err = suite.pdClient.GetMicroservicePrimary(suite.ctx, service)
 		re.NoError(err)
 
 		// Test transfer primary to a specific node
@@ -238,7 +240,7 @@ func (suite *memberTestSuite) TestTransferPrimary() {
 			return nodes[newPrimary].IsServing()
 		}, testutil.WithWaitFor(5*time.Second), testutil.WithTickInterval(50*time.Millisecond))
 
-		primary, err = suite.pdClient.GetMicroServicePrimary(suite.ctx, service)
+		primary, err = suite.pdClient.GetMicroservicePrimary(suite.ctx, service)
 		re.NoError(err)
 		re.Equal(primary, newPrimary)
 
@@ -266,7 +268,7 @@ func (suite *memberTestSuite) TestCampaignPrimaryAfterTransfer() {
 			nodes = suite.schedulingNodes
 		}
 
-		primary, err := suite.pdClient.GetMicroServicePrimary(suite.ctx, service)
+		primary, err := suite.pdClient.GetMicroservicePrimary(suite.ctx, service)
 		re.NoError(err)
 
 		// Test transfer primary to a specific node
@@ -290,7 +292,7 @@ func (suite *memberTestSuite) TestCampaignPrimaryAfterTransfer() {
 		resp.Body.Close()
 
 		tests.WaitForPrimaryServing(re, nodes)
-		newPrimary, err = suite.pdClient.GetMicroServicePrimary(suite.ctx, service)
+		newPrimary, err = suite.pdClient.GetMicroservicePrimary(suite.ctx, service)
 		re.NoError(err)
 		re.NotEqual(primary, newPrimary)
 
@@ -298,7 +300,7 @@ func (suite *memberTestSuite) TestCampaignPrimaryAfterTransfer() {
 		nodes[newPrimary].Close()
 		tests.WaitForPrimaryServing(re, nodes)
 		// Primary should be different with before
-		anotherPrimary, err := suite.pdClient.GetMicroServicePrimary(suite.ctx, service)
+		anotherPrimary, err := suite.pdClient.GetMicroservicePrimary(suite.ctx, service)
 		re.NoError(err)
 		re.NotEqual(newPrimary, anotherPrimary)
 	}
@@ -306,7 +308,7 @@ func (suite *memberTestSuite) TestCampaignPrimaryAfterTransfer() {
 
 func (suite *memberTestSuite) TestTransferPrimaryWhileLeaseExpired() {
 	re := suite.Require()
-	primary, err := suite.pdClient.GetMicroServicePrimary(suite.ctx, "tso")
+	primary, err := suite.pdClient.GetMicroservicePrimary(suite.ctx, "tso")
 	re.NoError(err)
 	re.NotEmpty(primary)
 
@@ -320,7 +322,7 @@ func (suite *memberTestSuite) TestTransferPrimaryWhileLeaseExpired() {
 			nodes = suite.schedulingNodes
 		}
 
-		primary, err := suite.pdClient.GetMicroServicePrimary(suite.ctx, service)
+		primary, err := suite.pdClient.GetMicroservicePrimary(suite.ctx, service)
 		re.NoError(err)
 
 		// Test transfer primary to a specific node
@@ -361,7 +363,7 @@ func (suite *memberTestSuite) TestTransferPrimaryWhileLeaseExpired() {
 // TestTransferPrimaryWhileLeaseExpiredAndServerDown tests transfer primary while lease expired and server down
 func (suite *memberTestSuite) TestTransferPrimaryWhileLeaseExpiredAndServerDown() {
 	re := suite.Require()
-	primary, err := suite.pdClient.GetMicroServicePrimary(suite.ctx, "tso")
+	primary, err := suite.pdClient.GetMicroservicePrimary(suite.ctx, "tso")
 	re.NoError(err)
 	re.NotEmpty(primary)
 
@@ -375,7 +377,7 @@ func (suite *memberTestSuite) TestTransferPrimaryWhileLeaseExpiredAndServerDown(
 			nodes = suite.schedulingNodes
 		}
 
-		primary, err := suite.pdClient.GetMicroServicePrimary(suite.ctx, service)
+		primary, err := suite.pdClient.GetMicroservicePrimary(suite.ctx, service)
 		re.NoError(err)
 
 		// Test transfer primary to a specific node
@@ -413,7 +415,7 @@ func (suite *memberTestSuite) TestTransferPrimaryWhileLeaseExpiredAndServerDown(
 
 		tests.WaitForPrimaryServing(re, nodes)
 		// Primary should be different with before
-		onlyPrimary, err := suite.pdClient.GetMicroServicePrimary(suite.ctx, service)
+		onlyPrimary, err := suite.pdClient.GetMicroservicePrimary(suite.ctx, service)
 		re.NoError(err)
 		re.NotEqual(newPrimary, onlyPrimary)
 	}

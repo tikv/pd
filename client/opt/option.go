@@ -18,10 +18,12 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/pingcap/errors"
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/tikv/pd/client/pkg/retry"
 	"google.golang.org/grpc"
+
+	"github.com/pingcap/errors"
+
+	"github.com/tikv/pd/client/pkg/retry"
 )
 
 const (

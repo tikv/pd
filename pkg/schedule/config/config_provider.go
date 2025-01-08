@@ -19,7 +19,9 @@ import (
 	"time"
 
 	"github.com/coreos/go-semver/semver"
+
 	"github.com/pingcap/kvproto/pkg/metapb"
+
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/schedule/types"

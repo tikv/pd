@@ -23,10 +23,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/stretchr/testify/require"
+
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/id"
 	"github.com/tikv/pd/pkg/mock/mockid"
@@ -983,10 +985,10 @@ func TestUpdateRegionEquivalence(t *testing.T) {
 		checkRegions(re, regionsNew)
 
 		for _, r := range regionsOld.GetRegions() {
-			re.Equal(int32(2), r.GetRef(), fmt.Sprintf("inconsistent region %d", r.GetID()))
+			re.Equalf(int32(2), r.GetRef(), "inconsistent region %d", r.GetID())
 		}
 		for _, r := range regionsNew.GetRegions() {
-			re.Equal(int32(2), r.GetRef(), fmt.Sprintf("inconsistent region %d", r.GetID()))
+			re.Equalf(int32(2), r.GetRef(), "inconsistent region %d", r.GetID())
 		}
 
 		for i := 1; i <= storeNums; i++ {

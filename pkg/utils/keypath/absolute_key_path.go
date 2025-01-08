@@ -44,7 +44,7 @@ const (
 	msTsoKespaceExpectedLeaderPathFormat = "/ms/%d/tso/keyspace_groups/election/%05d/primary/expected_primary" // "/ms/{cluster_id}/tso/keyspace_groups/election/{group_id}/primary"
 )
 
-// MsParam is the parameter of micro service.
+// MsParam is the parameter of microservice.
 type MsParam struct {
 	ServiceName string
 	GroupID     uint32 // only used for tso keyspace group

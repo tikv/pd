@@ -24,17 +24,19 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pingcap/failpoint"
-	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/pingcap/log"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
-	"github.com/tikv/pd/client/pkg/utils/tsoutil"
-	"github.com/tikv/pd/pkg/utils/testutil"
-	"github.com/tikv/pd/tests"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+
+	"github.com/pingcap/failpoint"
+	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/log"
+
+	"github.com/tikv/pd/client/pkg/utils/tsoutil"
+	"github.com/tikv/pd/pkg/utils/testutil"
+	"github.com/tikv/pd/tests"
 )
 
 type tsoProxyTestSuite struct {
@@ -60,7 +62,7 @@ func (s *tsoProxyTestSuite) SetupSuite() {
 	var err error
 	s.ctx, s.cancel = context.WithCancel(context.Background())
 	// Create an API cluster with 1 server
-	s.apiCluster, err = tests.NewTestAPICluster(s.ctx, 1)
+	s.apiCluster, err = tests.NewTestPDServiceCluster(s.ctx, 1)
 	re.NoError(err)
 	err = s.apiCluster.RunInitialServers()
 	re.NoError(err)

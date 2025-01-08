@@ -23,18 +23,20 @@ import (
 	"time"
 
 	"github.com/coreos/go-semver/semver"
+	"go.etcd.io/etcd/api/v3/mvccpb"
+	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.uber.org/zap"
+
 	"github.com/pingcap/log"
+
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
-	"go.etcd.io/etcd/api/v3/mvccpb"
-	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.uber.org/zap"
 )
 
-// Watcher is used to watch the PD API server for any configuration changes.
+// Watcher is used to watch the PD service for any configuration changes.
 type Watcher struct {
 	wg     sync.WaitGroup
 	ctx    context.Context
@@ -74,7 +76,7 @@ type persistedConfig struct {
 	Store          sc.StoreConfig       `json:"store"`
 }
 
-// NewWatcher creates a new watcher to watch the config meta change from PD API server.
+// NewWatcher creates a new watcher to watch the config meta change from PD service.
 func NewWatcher(
 	ctx context.Context,
 	etcdClient *clientv3.Client,

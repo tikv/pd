@@ -25,11 +25,12 @@ import (
 	"path"
 	"strconv"
 
+	clientv3 "go.etcd.io/etcd/client/v3"
+
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/server/config"
-	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
 const (

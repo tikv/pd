@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"os"
 	"path"
 	"reflect"
 	"sort"
@@ -31,16 +32,23 @@ import (
 	"time"
 
 	"github.com/docker/go-units"
+	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/suite"
+	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.uber.org/goleak"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/meta_storagepb"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/stretchr/testify/require"
-	"github.com/stretchr/testify/suite"
+
 	pd "github.com/tikv/pd/client"
 	"github.com/tikv/pd/client/clients/router"
 	"github.com/tikv/pd/client/opt"
 	"github.com/tikv/pd/client/pkg/caller"
+	cb "github.com/tikv/pd/client/pkg/circuitbreaker"
 	"github.com/tikv/pd/client/pkg/retry"
 	sd "github.com/tikv/pd/client/servicediscovery"
 	"github.com/tikv/pd/pkg/core"
@@ -56,10 +64,6 @@ import (
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
 	"github.com/tikv/pd/tests/integrations/mcs"
-	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.uber.org/goleak"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 )
 
 const (
@@ -266,6 +270,7 @@ func TestTSOFollowerProxy(t *testing.T) {
 	defer cli1.Close()
 	cli2 := setupCli(ctx, re, endpoints)
 	defer cli2.Close()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/clients/tso/speedUpTsoDispatcherUpdateInterval", "return(true)"))
 	err = cli2.UpdateOption(opt.EnableTSOFollowerProxy, true)
 	re.NoError(err)
 
@@ -290,6 +295,31 @@ func TestTSOFollowerProxy(t *testing.T) {
 			}
 		}()
 	}
+	wg.Wait()
+
+	followerServer := cluster.GetServer(cluster.GetFollower())
+	re.NoError(followerServer.Stop())
+	ch := make(chan struct{})
+	re.NoError(failpoint.EnableCall("github.com/tikv/pd/server/delayStartServer", func() {
+		// Server is not in `Running` state, so the follower proxy should return
+		// error while create stream.
+		ch <- struct{}{}
+	}))
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		re.NoError(followerServer.Run())
+	}()
+	re.Eventually(func() bool {
+		_, _, err := cli2.GetTS(context.Background())
+		if err == nil {
+			return false
+		}
+		return strings.Contains(err.Error(), "server not started")
+	}, 3*time.Second, 10*time.Millisecond)
+	<-ch
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/delayStartServer"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/clients/tso/speedUpTsoDispatcherUpdateInterval"))
 	wg.Wait()
 
 	// Disable the follower proxy and check if the stream is updated.
@@ -331,7 +361,7 @@ func TestTSOFollowerProxyWithTSOService(t *testing.T) {
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/servicediscovery/fastUpdateServiceMode", `return(true)`))
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	cluster, err := tests.NewTestAPICluster(ctx, 1)
+	cluster, err := tests.NewTestPDServiceCluster(ctx, 1)
 	re.NoError(err)
 	defer cluster.Destroy()
 	err = cluster.RunInitialServers()
@@ -2046,4 +2076,179 @@ func needRetry(err error) bool {
 		return false
 	}
 	return st.Code() == codes.ResourceExhausted
+}
+
+func TestCircuitBreaker(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	cluster, err := tests.NewTestCluster(ctx, 1)
+	re.NoError(err)
+	defer cluster.Destroy()
+
+	circuitBreakerSettings := cb.Settings{
+		ErrorRateThresholdPct: 60,
+		MinQPSForOpen:         10,
+		ErrorRateWindow:       time.Millisecond,
+		CoolDownInterval:      time.Second,
+		HalfOpenSuccessCount:  1,
+	}
+
+	endpoints := runServer(re, cluster)
+	cli := setupCli(ctx, re, endpoints)
+	defer cli.Close()
+
+	circuitBreaker := cb.NewCircuitBreaker("region_meta", circuitBreakerSettings)
+	ctx = cb.WithCircuitBreaker(ctx, circuitBreaker)
+	for range 10 {
+		region, err := cli.GetRegion(ctx, []byte("a"))
+		re.NoError(err)
+		re.NotNil(region)
+	}
+
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/pkg/utils/grpcutil/triggerCircuitBreaker", "return(true)"))
+
+	for range 100 {
+		_, err := cli.GetRegion(ctx, []byte("a"))
+		re.Error(err)
+	}
+
+	_, err = cli.GetRegion(ctx, []byte("a"))
+	re.Error(err)
+	re.Contains(err.Error(), "circuit breaker is open")
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/pkg/utils/grpcutil/triggerCircuitBreaker"))
+
+	_, err = cli.GetRegion(ctx, []byte("a"))
+	re.Error(err)
+	re.Contains(err.Error(), "circuit breaker is open")
+
+	// wait cooldown
+	time.Sleep(time.Second)
+
+	for range 10 {
+		region, err := cli.GetRegion(ctx, []byte("a"))
+		re.NoError(err)
+		re.NotNil(region)
+	}
+}
+
+func TestCircuitBreakerOpenAndChangeSettings(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	cluster, err := tests.NewTestCluster(ctx, 1)
+	re.NoError(err)
+	defer cluster.Destroy()
+
+	circuitBreakerSettings := cb.Settings{
+		ErrorRateThresholdPct: 60,
+		MinQPSForOpen:         10,
+		ErrorRateWindow:       time.Millisecond,
+		CoolDownInterval:      time.Second,
+		HalfOpenSuccessCount:  1,
+	}
+
+	endpoints := runServer(re, cluster)
+	cli := setupCli(ctx, re, endpoints)
+	defer cli.Close()
+
+	circuitBreaker := cb.NewCircuitBreaker("region_meta", circuitBreakerSettings)
+	ctx = cb.WithCircuitBreaker(ctx, circuitBreaker)
+	for range 10 {
+		region, err := cli.GetRegion(ctx, []byte("a"))
+		re.NoError(err)
+		re.NotNil(region)
+	}
+
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/pkg/utils/grpcutil/triggerCircuitBreaker", "return(true)"))
+
+	for range 100 {
+		_, err := cli.GetRegion(ctx, []byte("a"))
+		re.Error(err)
+	}
+
+	_, err = cli.GetRegion(ctx, []byte("a"))
+	re.Error(err)
+	re.Contains(err.Error(), "circuit breaker is open")
+
+	circuitBreaker.ChangeSettings(func(config *cb.Settings) {
+		*config = cb.AlwaysClosedSettings
+	})
+	_, err = cli.GetRegion(ctx, []byte("a"))
+	re.Error(err)
+	re.Contains(err.Error(), "ResourceExhausted")
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/pkg/utils/grpcutil/triggerCircuitBreaker"))
+}
+
+func TestCircuitBreakerHalfOpenAndChangeSettings(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	cluster, err := tests.NewTestCluster(ctx, 1)
+	re.NoError(err)
+	defer cluster.Destroy()
+
+	circuitBreakerSettings := cb.Settings{
+		ErrorRateThresholdPct: 60,
+		MinQPSForOpen:         10,
+		ErrorRateWindow:       time.Millisecond,
+		CoolDownInterval:      time.Second,
+		HalfOpenSuccessCount:  20,
+	}
+
+	endpoints := runServer(re, cluster)
+
+	cli := setupCli(ctx, re, endpoints)
+	defer cli.Close()
+
+	circuitBreaker := cb.NewCircuitBreaker("region_meta", circuitBreakerSettings)
+	ctx = cb.WithCircuitBreaker(ctx, circuitBreaker)
+	for range 10 {
+		region, err := cli.GetRegion(ctx, []byte("a"))
+		re.NoError(err)
+		re.NotNil(region)
+	}
+
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/pkg/utils/grpcutil/triggerCircuitBreaker", "return(true)"))
+
+	for range 100 {
+		_, err := cli.GetRegion(ctx, []byte("a"))
+		re.Error(err)
+	}
+
+	_, err = cli.GetRegion(ctx, []byte("a"))
+	re.Error(err)
+	re.Contains(err.Error(), "circuit breaker is open")
+
+	fname := testutil.InitTempFileLogger("info")
+	defer os.RemoveAll(fname)
+	// wait for cooldown
+	time.Sleep(time.Second)
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/pkg/utils/grpcutil/triggerCircuitBreaker"))
+	// trigger circuit breaker state to be half open
+	_, err = cli.GetRegion(ctx, []byte("a"))
+	re.NoError(err)
+	testutil.Eventually(re, func() bool {
+		b, _ := os.ReadFile(fname)
+		l := string(b)
+		// We need to check the log to see if the circuit breaker is half open
+		return strings.Contains(l, "Transitioning to half-open state to test the service")
+	})
+
+	// The state is half open
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/pkg/utils/grpcutil/triggerCircuitBreaker", "return(true)"))
+	// change settings to always closed
+	circuitBreaker.ChangeSettings(func(config *cb.Settings) {
+		*config = cb.AlwaysClosedSettings
+	})
+	// It won't be changed to open state.
+	for range 100 {
+		_, err := cli.GetRegion(ctx, []byte("a"))
+		re.Error(err)
+		re.NotContains(err.Error(), "circuit breaker is open")
+	}
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/pkg/utils/grpcutil/triggerCircuitBreaker"))
 }

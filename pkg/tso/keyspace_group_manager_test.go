@@ -28,9 +28,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pingcap/failpoint"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+	"go.etcd.io/etcd/api/v3/mvccpb"
+	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.uber.org/goleak"
+
+	"github.com/pingcap/failpoint"
+
 	"github.com/tikv/pd/pkg/mcs/discovery"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/storage/endpoint"
@@ -41,9 +46,6 @@ import (
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
-	"go.etcd.io/etcd/api/v3/mvccpb"
-	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.uber.org/goleak"
 )
 
 func TestMain(m *testing.M) {
@@ -87,7 +89,6 @@ func (suite *keyspaceGroupManagerTestSuite) createConfig() *TestServiceConfig {
 		ListenAddr:                addr,
 		AdvertiseListenAddr:       addr,
 		LeaderLease:               constant.DefaultLeaderLease,
-		LocalTSOEnabled:           false,
 		TSOUpdatePhysicalInterval: 50 * time.Millisecond,
 		TSOSaveInterval:           time.Duration(constant.DefaultLeaderLease) * time.Second,
 		MaxResetTSGap:             time.Hour * 24,
@@ -885,7 +886,7 @@ func collectAssignedKeyspaceGroupIDs(re *require.Assertions, kgm *KeyspaceGroupM
 	for i := range kgm.kgs {
 		kg := kgm.kgs[i]
 		if kg == nil {
-			re.Nil(kgm.ams[i], fmt.Sprintf("ksg is nil but am is not nil for id %d", i))
+			re.Nilf(kgm.ams[i], "ksg is nil but am is not nil for id %d", i)
 		} else {
 			am := kgm.ams[i]
 			if am != nil {
@@ -975,8 +976,8 @@ func (suite *keyspaceGroupManagerTestSuite) TestUpdateKeyspaceGroupMembership() 
 func verifyLocalKeyspaceLookupTable(
 	re *require.Assertions, keyspaceLookupTable map[uint32]struct{}, newKeyspaces []uint32,
 ) {
-	re.Equal(len(newKeyspaces), len(keyspaceLookupTable),
-		fmt.Sprintf("%v %v", newKeyspaces, keyspaceLookupTable))
+	re.Equalf(len(newKeyspaces), len(keyspaceLookupTable),
+		"%v %v", newKeyspaces, keyspaceLookupTable)
 	for _, keyspace := range newKeyspaces {
 		_, ok := keyspaceLookupTable[keyspace]
 		re.True(ok)

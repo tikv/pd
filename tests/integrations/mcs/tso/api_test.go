@@ -24,9 +24,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pingcap/failpoint"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+
+	"github.com/pingcap/failpoint"
+
 	tso "github.com/tikv/pd/pkg/mcs/tso/server"
 	apis "github.com/tikv/pd/pkg/mcs/tso/server/apis/v1"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
@@ -60,7 +62,7 @@ func (suite *tsoAPITestSuite) SetupTest() {
 
 	var err error
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
-	suite.pdCluster, err = tests.NewTestAPICluster(suite.ctx, 1)
+	suite.pdCluster, err = tests.NewTestPDServiceCluster(suite.ctx, 1)
 	re.NoError(err)
 	err = suite.pdCluster.RunInitialServers()
 	re.NoError(err)
@@ -105,13 +107,13 @@ func (suite *tsoAPITestSuite) TestForwardResetTS() {
 	// Test reset ts
 	input := []byte(`{"tso":"121312", "force-use-larger":true}`)
 	err := testutil.CheckPostJSON(tests.TestDialClient, url, input,
-		testutil.StatusOK(re), testutil.StringContain(re, "Reset ts successfully"), testutil.WithHeader(re, apiutil.XForwardedToMicroServiceHeader, "true"))
+		testutil.StatusOK(re), testutil.StringContain(re, "Reset ts successfully"), testutil.WithHeader(re, apiutil.XForwardedToMicroserviceHeader, "true"))
 	re.NoError(err)
 
 	// Test reset ts with invalid tso
 	input = []byte(`{}`)
 	err = testutil.CheckPostJSON(tests.TestDialClient, url, input,
-		testutil.StatusNotOK(re), testutil.StringContain(re, "invalid tso value"), testutil.WithHeader(re, apiutil.XForwardedToMicroServiceHeader, "true"))
+		testutil.StatusNotOK(re), testutil.StringContain(re, "invalid tso value"), testutil.WithHeader(re, apiutil.XForwardedToMicroserviceHeader, "true"))
 	re.NoError(err)
 }
 
@@ -135,7 +137,7 @@ func TestTSOServerStartFirst(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	apiCluster, err := tests.NewTestAPICluster(ctx, 1, func(conf *config.Config, _ string) {
+	apiCluster, err := tests.NewTestPDServiceCluster(ctx, 1, func(conf *config.Config, _ string) {
 		conf.Keyspace.PreAlloc = []string{"k1", "k2"}
 	})
 	defer apiCluster.Destroy()
@@ -198,7 +200,7 @@ func TestForwardOnlyTSONoScheduling(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	tc, err := tests.NewTestAPICluster(ctx, 1)
+	tc, err := tests.NewTestPDServiceCluster(ctx, 1)
 	defer tc.Destroy()
 	re.NoError(err)
 	err = tc.RunInitialServers()
@@ -215,17 +217,17 @@ func TestForwardOnlyTSONoScheduling(t *testing.T) {
 	// Test /operators, it should not forward when there is no scheduling server.
 	var slice []string
 	err = testutil.ReadGetJSON(re, tests.TestDialClient, fmt.Sprintf("%s/%s", urlPrefix, "operators"), &slice,
-		testutil.WithoutHeader(re, apiutil.XForwardedToMicroServiceHeader))
+		testutil.WithoutHeader(re, apiutil.XForwardedToMicroserviceHeader))
 	re.NoError(err)
 	re.Empty(slice)
 
 	// Test admin/reset-ts, it should forward to tso server.
 	input := []byte(`{"tso":"121312", "force-use-larger":true}`)
 	err = testutil.CheckPostJSON(tests.TestDialClient, fmt.Sprintf("%s/%s", urlPrefix, "admin/reset-ts"), input,
-		testutil.StatusOK(re), testutil.StringContain(re, "Reset ts successfully"), testutil.WithHeader(re, apiutil.XForwardedToMicroServiceHeader, "true"))
+		testutil.StatusOK(re), testutil.StringContain(re, "Reset ts successfully"), testutil.WithHeader(re, apiutil.XForwardedToMicroserviceHeader, "true"))
 	re.NoError(err)
 
-	// If close tso server, it should try forward to tso server, but return error in api mode.
+	// If close tso server, it should try forward to tso server, but return error in pd service mode.
 	ttc.Destroy()
 	err = testutil.CheckPostJSON(tests.TestDialClient, fmt.Sprintf("%s/%s", urlPrefix, "admin/reset-ts"), input,
 		testutil.Status(re, http.StatusInternalServerError), testutil.StringContain(re, "[PD:apiutil:ErrRedirect]redirect failed"))

@@ -21,12 +21,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pingcap/errors"
-	"github.com/pingcap/log"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
-	"github.com/tikv/pd/client/errs"
 	"go.uber.org/zap/zapcore"
+
+	"github.com/pingcap/errors"
+	"github.com/pingcap/log"
+
+	"github.com/tikv/pd/client/errs"
 )
 
 const mockStreamURL = "mock:///"

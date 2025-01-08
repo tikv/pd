@@ -23,11 +23,13 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/spf13/cobra"
-	"github.com/tikv/pd/pkg/response"
 	"golang.org/x/text/cases"
 	"golang.org/x/text/language"
+
+	"github.com/pingcap/kvproto/pkg/metapb"
+
+	"github.com/tikv/pd/pkg/response"
 )
 
 var (
@@ -564,7 +566,7 @@ func storeLimitCommandFunc(cmd *cobra.Command, args []string) {
 		if args[0] == "all" {
 			prefix = storesLimitPrefix
 			if rate > maxStoreLimit {
-				cmd.Printf("rate should less than %f for all\n", maxStoreLimit)
+				cmd.Printf("rate should be less than %.1f for all\n", maxStoreLimit)
 				return
 			}
 		} else {
@@ -594,7 +596,7 @@ func storeLimitCommandFunc(cmd *cobra.Command, args []string) {
 				return
 			}
 			if rate > maxStoreLimit {
-				cmd.Printf("rate should less than %f for all\n", maxStoreLimit)
+				cmd.Printf("rate should be less than %.1f for all\n", maxStoreLimit)
 				return
 			}
 			postInput["rate"] = rate

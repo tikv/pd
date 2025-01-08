@@ -22,6 +22,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/encryptionpb"
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+
 	pd "github.com/tikv/pd/client/clients/router"
 )
 
@@ -604,8 +605,8 @@ type MembersInfo struct {
 	EtcdLeader *pdpb.Member         `json:"etcd_leader,omitempty"`
 }
 
-// MicroServiceMember is the member info of a micro service.
-type MicroServiceMember struct {
+// MicroserviceMember is the member info of a microservice.
+type MicroserviceMember struct {
 	ServiceAddr    string `json:"service-addr"`
 	Version        string `json:"version"`
 	GitHash        string `json:"git-hash"`

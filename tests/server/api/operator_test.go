@@ -24,8 +24,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/suite"
+
+	"github.com/pingcap/kvproto/pkg/metapb"
+
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
@@ -470,7 +472,7 @@ func (suite *operatorTestSuite) checkTransferRegionWithPlacementRule(cluster *te
 				svr.GetRaftCluster().GetOpts().GetMaxReplicas(),
 				svr.GetRaftCluster().GetOpts().GetLocationLabels(),
 				svr.GetRaftCluster().GetOpts().GetIsolationLevel(),
-			)
+				false)
 			re.NoError(err)
 		}
 		if len(testCase.rules) > 0 {

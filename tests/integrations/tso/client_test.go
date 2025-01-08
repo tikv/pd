@@ -25,9 +25,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pingcap/failpoint"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+
+	"github.com/pingcap/failpoint"
+
 	pd "github.com/tikv/pd/client"
 	"github.com/tikv/pd/client/clients/tso"
 	"github.com/tikv/pd/client/opt"
@@ -96,8 +98,8 @@ func (suite *tsoClientTestSuite) SetupSuite() {
 	if suite.legacy {
 		suite.cluster, err = tests.NewTestCluster(suite.ctx, serverCount)
 	} else {
-		suite.cluster, err = tests.NewTestAPICluster(suite.ctx, serverCount, func(conf *config.Config, _ string) {
-			conf.MicroService.EnableTSODynamicSwitching = false
+		suite.cluster, err = tests.NewTestPDServiceCluster(suite.ctx, serverCount, func(conf *config.Config, _ string) {
+			conf.Microservice.EnableTSODynamicSwitching = false
 		})
 	}
 	re.NoError(err)
@@ -508,7 +510,7 @@ func TestMixedTSODeployment(t *testing.T) {
 	re.NotNil(leaderServer)
 	backendEndpoints := leaderServer.GetAddr()
 
-	apiSvr, err := cluster.JoinAPIServer(ctx)
+	apiSvr, err := cluster.JoinPDServer(ctx)
 	re.NoError(err)
 	err = apiSvr.Run()
 	re.NoError(err)
@@ -542,7 +544,7 @@ func TestUpgradingAPIandTSOClusters(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	// Create an API cluster which has 3 servers
-	apiCluster, err := tests.NewTestAPICluster(ctx, 3)
+	apiCluster, err := tests.NewTestPDServiceCluster(ctx, 3)
 	re.NoError(err)
 	err = apiCluster.RunInitialServers()
 	re.NoError(err)

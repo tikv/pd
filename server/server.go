@@ -32,6 +32,13 @@ import (
 	"github.com/coreos/go-semver/semver"
 	"github.com/gogo/protobuf/proto"
 	"github.com/gorilla/mux"
+	"go.etcd.io/etcd/api/v3/mvccpb"
+	etcdtypes "go.etcd.io/etcd/client/pkg/v3/types"
+	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.etcd.io/etcd/server/v3/embed"
+	"go.uber.org/zap"
+	"google.golang.org/grpc"
+
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/diagnosticspb"
@@ -41,6 +48,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/tsopb"
 	"github.com/pingcap/log"
 	"github.com/pingcap/sysutil"
+
 	"github.com/tikv/pd/pkg/audit"
 	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/cgroup"
@@ -53,8 +61,6 @@ import (
 	ms_server "github.com/tikv/pd/pkg/mcs/metastorage/server"
 	"github.com/tikv/pd/pkg/mcs/registry"
 	rm_server "github.com/tikv/pd/pkg/mcs/resourcemanager/server"
-	_ "github.com/tikv/pd/pkg/mcs/resourcemanager/server/apis/v1" // init API group
-	_ "github.com/tikv/pd/pkg/mcs/tso/server/apis/v1"             // init tso API group
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/ratelimit"
@@ -80,12 +86,9 @@ import (
 	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/server/config"
-	"go.etcd.io/etcd/api/v3/mvccpb"
-	etcdtypes "go.etcd.io/etcd/client/pkg/v3/types"
-	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.etcd.io/etcd/server/v3/embed"
-	"go.uber.org/zap"
-	"google.golang.org/grpc"
+
+	_ "github.com/tikv/pd/pkg/mcs/resourcemanager/server/apis/v1" // init API group
+	_ "github.com/tikv/pd/pkg/mcs/tso/server/apis/v1"             // init tso API group
 )
 
 const (
@@ -98,8 +101,8 @@ const (
 
 	// PDMode represents that server is in PD mode.
 	PDMode = "PD"
-	// APIServiceMode represents that server is in API service mode.
-	APIServiceMode = "API Service"
+	// PDServiceMode represents that server is in PD service mode which is in microservice architecture.
+	PDServiceMode = "PD Service"
 
 	// maxRetryTimesGetServicePrimary is the max retry times for getting primary addr.
 	// Note: it need to be less than client.defaultPDTimeout
@@ -240,7 +243,7 @@ type HandlerBuilder func(context.Context, *Server) (http.Handler, apiutil.APISer
 func CreateServer(ctx context.Context, cfg *config.Config, services []string, legacyServiceBuilders ...HandlerBuilder) (*Server, error) {
 	var mode string
 	if len(services) != 0 {
-		mode = APIServiceMode
+		mode = PDServiceMode
 	} else {
 		mode = PDMode
 	}
@@ -297,7 +300,7 @@ func CreateServer(ctx context.Context, cfg *config.Config, services []string, le
 	})
 	s.registry.RegisterService("MetaStorage", ms_server.NewService)
 	s.registry.RegisterService("ResourceManager", rm_server.NewService[*Server])
-	// Register the micro services REST path.
+	// Register the microservices REST path.
 	s.registry.InstallAllRESTHandler(s, etcdCfg.UserHandlers)
 
 	etcdCfg.ServiceRegister = func(gs *grpc.Server) {
@@ -305,7 +308,7 @@ func CreateServer(ctx context.Context, cfg *config.Config, services []string, le
 		pdpb.RegisterPDServer(gs, grpcServer)
 		keyspacepb.RegisterKeyspaceServer(gs, &KeyspaceServer{GrpcServer: grpcServer})
 		diagnosticspb.RegisterDiagnosticsServer(gs, s)
-		// Register the micro services GRPC service.
+		// Register the microservices GRPC service.
 		s.registry.InstallAllGRPCServices(s, gs)
 		s.grpcServer = gs
 	}
@@ -475,7 +478,7 @@ func (s *Server) startServer(ctx context.Context) error {
 		Member: s.member.MemberValue(),
 		Step:   keyspace.AllocStep,
 	})
-	if s.IsAPIServiceMode() {
+	if s.IsPDServiceMode() {
 		s.keyspaceGroupManager = keyspace.NewKeyspaceGroupManager(s.ctx, s.storage, s.client)
 	}
 	s.keyspaceManager = keyspace.NewKeyspaceManager(s.ctx, s.storage, s.cluster, keyspaceIDAllocator, &s.cfg.Keyspace, s.keyspaceGroupManager)
@@ -503,6 +506,7 @@ func (s *Server) startServer(ctx context.Context) error {
 		s.grpcServiceRateLimiter.Update(service, ratelimit.InitLimiter())
 	}
 
+	failpoint.InjectCall("delayStartServer")
 	// Server has started.
 	atomic.StoreInt64(&s.isRunning, 1)
 	bs.ServerMaxProcsGauge.Set(float64(runtime.GOMAXPROCS(0)))
@@ -526,7 +530,7 @@ func (s *Server) Close() {
 	s.cgMonitor.StopMonitor()
 
 	s.stopServerLoop()
-	if s.IsAPIServiceMode() {
+	if s.IsPDServiceMode() {
 		s.keyspaceGroupManager.Close()
 	}
 
@@ -637,7 +641,7 @@ func (s *Server) startServerLoop(ctx context.Context) {
 	go s.etcdLeaderLoop()
 	go s.serverMetricsLoop()
 	go s.encryptionKeyManagerLoop()
-	if s.IsAPIServiceMode() {
+	if s.IsPDServiceMode() {
 		s.initTSOPrimaryWatcher()
 		s.initSchedulingPrimaryWatcher()
 	}
@@ -758,7 +762,7 @@ func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.BootstrapRe
 		log.Warn("flush the bootstrap region failed", errs.ZapError(err))
 	}
 
-	if err := s.cluster.Start(s); err != nil {
+	if err := s.cluster.Start(s, true); err != nil {
 		return nil, err
 	}
 
@@ -776,7 +780,7 @@ func (s *Server) createRaftCluster() error {
 		return nil
 	}
 
-	return s.cluster.Start(s)
+	return s.cluster.Start(s, false)
 }
 
 func (s *Server) stopRaftCluster() {
@@ -784,9 +788,9 @@ func (s *Server) stopRaftCluster() {
 	s.cluster.Stop()
 }
 
-// IsAPIServiceMode return whether the server is in API service mode.
-func (s *Server) IsAPIServiceMode() bool {
-	return s.mode == APIServiceMode
+// IsPDServiceMode return whether the server is in PD service mode.
+func (s *Server) IsPDServiceMode() bool {
+	return s.mode == PDServiceMode
 }
 
 // GetAddr returns the server urls for clients.
@@ -936,11 +940,6 @@ func (s *Server) GetServiceMiddlewareConfig() *config.ServiceMiddlewareConfig {
 	return cfg
 }
 
-// SetEnableLocalTSO sets enable-local-tso flag of Server. This function only for test.
-func (s *Server) SetEnableLocalTSO(enableLocalTSO bool) {
-	s.cfg.EnableLocalTSO = enableLocalTSO
-}
-
 // GetConfig gets the config information.
 func (s *Server) GetConfig() *config.Config {
 	cfg := s.cfg.Clone()
@@ -949,7 +948,7 @@ func (s *Server) GetConfig() *config.Config {
 	cfg.PDServerCfg = *s.persistOptions.GetPDServerConfig().Clone()
 	cfg.ReplicationMode = *s.persistOptions.GetReplicationModeConfig()
 	cfg.Keyspace = *s.persistOptions.GetKeyspaceConfig().Clone()
-	cfg.MicroService = *s.persistOptions.GetMicroServiceConfig().Clone()
+	cfg.Microservice = *s.persistOptions.GetMicroserviceConfig().Clone()
 	cfg.LabelProperty = s.persistOptions.GetLabelPropertyConfig().Clone()
 	cfg.ClusterVersion = *s.persistOptions.GetClusterVersion()
 	return cfg
@@ -980,24 +979,24 @@ func (s *Server) SetKeyspaceConfig(cfg config.KeyspaceConfig) error {
 	return nil
 }
 
-// GetMicroServiceConfig gets the micro service config information.
-func (s *Server) GetMicroServiceConfig() *config.MicroServiceConfig {
-	return s.persistOptions.GetMicroServiceConfig().Clone()
+// GetMicroserviceConfig gets the microservice config information.
+func (s *Server) GetMicroserviceConfig() *config.MicroserviceConfig {
+	return s.persistOptions.GetMicroserviceConfig().Clone()
 }
 
-// SetMicroServiceConfig sets the micro service config information.
-func (s *Server) SetMicroServiceConfig(cfg config.MicroServiceConfig) error {
-	old := s.persistOptions.GetMicroServiceConfig()
-	s.persistOptions.SetMicroServiceConfig(&cfg)
+// SetMicroserviceConfig sets the microservice config information.
+func (s *Server) SetMicroserviceConfig(cfg config.MicroserviceConfig) error {
+	old := s.persistOptions.GetMicroserviceConfig()
+	s.persistOptions.SetMicroserviceConfig(&cfg)
 	if err := s.persistOptions.Persist(s.storage); err != nil {
-		s.persistOptions.SetMicroServiceConfig(old)
-		log.Error("failed to update micro service config",
+		s.persistOptions.SetMicroserviceConfig(old)
+		log.Error("failed to update microservice config",
 			zap.Reflect("new", cfg),
 			zap.Reflect("old", old),
 			errs.ZapError(err))
 		return err
 	}
-	log.Info("micro service config is updated", zap.Reflect("new", cfg), zap.Reflect("old", old))
+	log.Info("microservice config is updated", zap.Reflect("new", cfg), zap.Reflect("old", old))
 	return nil
 }
 
@@ -1049,7 +1048,7 @@ func (s *Server) SetReplicationConfig(cfg sc.ReplicationConfig) error {
 		}
 		if cfg.EnablePlacementRules {
 			// initialize rule manager.
-			if err := rc.GetRuleManager().Initialize(int(cfg.MaxReplicas), cfg.LocationLabels, cfg.IsolationLevel); err != nil {
+			if err := rc.GetRuleManager().Initialize(int(cfg.MaxReplicas), cfg.LocationLabels, cfg.IsolationLevel, false); err != nil {
 				return err
 			}
 		} else {
@@ -1391,8 +1390,8 @@ func (s *Server) GetRaftCluster() *cluster.RaftCluster {
 
 // IsServiceIndependent returns whether the service is independent.
 func (s *Server) IsServiceIndependent(name string) bool {
-	if s.mode == APIServiceMode && !s.IsClosed() {
-		if name == constant.TSOServiceName && !s.GetMicroServiceConfig().IsTSODynamicSwitchingEnabled() {
+	if s.mode == PDServiceMode && !s.IsClosed() {
+		if name == constant.TSOServiceName && !s.GetMicroserviceConfig().IsTSODynamicSwitchingEnabled() {
 			return true
 		}
 		return s.cluster.IsServiceIndependent(name)
@@ -1668,7 +1667,7 @@ func (s *Server) campaignLeader() {
 	log.Info(fmt.Sprintf("start to campaign %s leader", s.mode), zap.String("campaign-leader-name", s.Name()))
 	if err := s.member.CampaignLeader(s.ctx, s.cfg.LeaderLease); err != nil {
 		if err.Error() == errs.ErrEtcdTxnConflict.Error() {
-			log.Info(fmt.Sprintf("campaign %s leader meets error due to txn conflict, another PD/API server may campaign successfully", s.mode),
+			log.Info(fmt.Sprintf("campaign %s leader meets error due to txn conflict, another PD/PD service may campaign successfully", s.mode),
 				zap.String("campaign-leader-name", s.Name()))
 		} else {
 			log.Error(fmt.Sprintf("campaign %s leader meets error due to etcd error", s.mode),
@@ -2044,7 +2043,7 @@ func (s *Server) GetExternalTS() uint64 {
 func (s *Server) SetExternalTS(externalTS, globalTS uint64) error {
 	if tsoutil.CompareTimestampUint64(externalTS, globalTS) == 1 {
 		desc := "the external timestamp should not be larger than global ts"
-		log.Error(desc, zap.Uint64("request timestamp", externalTS), zap.Uint64("global ts", globalTS))
+		log.Error(desc, zap.Uint64("request-timestamp", externalTS), zap.Uint64("global-ts", globalTS))
 		return errors.New(desc)
 	}
 	c := s.GetRaftCluster()
@@ -2096,4 +2095,10 @@ func (s *Server) GetMaxResetTSGap() time.Duration {
 // Notes: it is only used for test.
 func (s *Server) SetClient(client *clientv3.Client) {
 	s.client = client
+}
+
+// GetGlobalTSOAllocator return global tso allocator
+// It only is used for test.
+func (s *Server) GetGlobalTSOAllocator() tso.Allocator {
+	return s.cluster.GetGlobalTSOAllocator()
 }

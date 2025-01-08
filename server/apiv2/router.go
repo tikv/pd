@@ -19,6 +19,7 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/apiv2/handlers"
@@ -52,8 +53,9 @@ func NewV2Handler(_ context.Context, svr *server.Server) (http.Handler, apiutil.
 	})
 	router.Use(middlewares.Redirector())
 	root := router.Group(apiV2Prefix)
+	root.GET("ready", handlers.Ready)
 	handlers.RegisterKeyspace(root)
 	handlers.RegisterTSOKeyspaceGroup(root)
-	handlers.RegisterMicroService(root)
+	handlers.RegisterMicroservice(root)
 	return router, group, nil
 }

@@ -25,21 +25,23 @@ import (
 	"sync/atomic"
 	"time"
 
+	"go.uber.org/zap"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	healthpb "google.golang.org/grpc/health/grpc_health_v1"
+	"google.golang.org/grpc/status"
+
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+
 	"github.com/tikv/pd/client/constants"
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/opt"
 	"github.com/tikv/pd/client/pkg/retry"
 	"github.com/tikv/pd/client/pkg/utils/grpcutil"
 	"github.com/tikv/pd/client/pkg/utils/tlsutil"
-	"go.uber.org/zap"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
-	healthpb "google.golang.org/grpc/health/grpc_health_v1"
-	"google.golang.org/grpc/status"
 )
 
 const (
@@ -155,11 +157,11 @@ type ServiceClient interface {
 }
 
 var (
-	_ ServiceClient = (*pdServiceClient)(nil)
-	_ ServiceClient = (*pdServiceAPIClient)(nil)
+	_ ServiceClient = (*serviceClient)(nil)
+	_ ServiceClient = (*serviceAPIClient)(nil)
 )
 
-type pdServiceClient struct {
+type serviceClient struct {
 	url       string
 	conn      *grpc.ClientConn
 	isLeader  bool
@@ -169,10 +171,10 @@ type pdServiceClient struct {
 }
 
 // NOTE: In the current implementation, the URL passed in is bound to have a scheme,
-// because it is processed in `newPDServiceDiscovery`, and the url returned by etcd member owns the scheme.
+// because it is processed in `newServiceDiscovery`, and the url returned by etcd member owns the scheme.
 // When testing, the URL is also bound to have a scheme.
 func newPDServiceClient(url, leaderURL string, conn *grpc.ClientConn, isLeader bool) ServiceClient {
-	cli := &pdServiceClient{
+	cli := &serviceClient{
 		url:       url,
 		conn:      conn,
 		isLeader:  isLeader,
@@ -185,7 +187,7 @@ func newPDServiceClient(url, leaderURL string, conn *grpc.ClientConn, isLeader b
 }
 
 // GetURL implements ServiceClient.
-func (c *pdServiceClient) GetURL() string {
+func (c *serviceClient) GetURL() string {
 	if c == nil {
 		return ""
 	}
@@ -193,7 +195,7 @@ func (c *pdServiceClient) GetURL() string {
 }
 
 // BuildGRPCTargetContext implements ServiceClient.
-func (c *pdServiceClient) BuildGRPCTargetContext(ctx context.Context, toLeader bool) context.Context {
+func (c *serviceClient) BuildGRPCTargetContext(ctx context.Context, toLeader bool) context.Context {
 	if c == nil || c.isLeader {
 		return ctx
 	}
@@ -204,7 +206,7 @@ func (c *pdServiceClient) BuildGRPCTargetContext(ctx context.Context, toLeader b
 }
 
 // IsConnectedToLeader implements ServiceClient.
-func (c *pdServiceClient) IsConnectedToLeader() bool {
+func (c *serviceClient) IsConnectedToLeader() bool {
 	if c == nil {
 		return false
 	}
@@ -212,14 +214,14 @@ func (c *pdServiceClient) IsConnectedToLeader() bool {
 }
 
 // Available implements ServiceClient.
-func (c *pdServiceClient) Available() bool {
+func (c *serviceClient) Available() bool {
 	if c == nil {
 		return false
 	}
 	return !c.networkFailure.Load()
 }
 
-func (c *pdServiceClient) checkNetworkAvailable(ctx context.Context) {
+func (c *serviceClient) checkNetworkAvailable(ctx context.Context) {
 	if c == nil || c.conn == nil {
 		return
 	}
@@ -240,7 +242,7 @@ func (c *pdServiceClient) checkNetworkAvailable(ctx context.Context) {
 }
 
 // GetClientConn implements ServiceClient.
-func (c *pdServiceClient) GetClientConn() *grpc.ClientConn {
+func (c *serviceClient) GetClientConn() *grpc.ClientConn {
 	if c == nil {
 		return nil
 	}
@@ -248,7 +250,7 @@ func (c *pdServiceClient) GetClientConn() *grpc.ClientConn {
 }
 
 // NeedRetry implements ServiceClient.
-func (c *pdServiceClient) NeedRetry(pdErr *pdpb.Error, err error) bool {
+func (c *serviceClient) NeedRetry(pdErr *pdpb.Error, err error) bool {
 	if c.IsConnectedToLeader() {
 		return false
 	}
@@ -265,9 +267,9 @@ func regionAPIErrorFn(pdErr *pdpb.Error) bool {
 	return pdErr.GetType() == pdpb.ErrorType_REGION_NOT_FOUND
 }
 
-// pdServiceAPIClient is a specific API client for PD service.
-// It extends the pdServiceClient and adds additional fields for managing availability
-type pdServiceAPIClient struct {
+// serviceAPIClient is a specific API client for service.
+// It extends the serviceClient and adds additional fields for managing availability
+type serviceAPIClient struct {
 	ServiceClient
 	fn errFn
 
@@ -276,19 +278,19 @@ type pdServiceAPIClient struct {
 }
 
 func newPDServiceAPIClient(client ServiceClient, f errFn) ServiceClient {
-	return &pdServiceAPIClient{
+	return &serviceAPIClient{
 		ServiceClient: client,
 		fn:            f,
 	}
 }
 
 // Available implements ServiceClient.
-func (c *pdServiceAPIClient) Available() bool {
+func (c *serviceAPIClient) Available() bool {
 	return c.ServiceClient.Available() && !c.unavailable.Load()
 }
 
 // markAsAvailable is used to try to mark the client as available if unavailable status is expired.
-func (c *pdServiceAPIClient) markAsAvailable() {
+func (c *serviceAPIClient) markAsAvailable() {
 	if !c.unavailable.Load() {
 		return
 	}
@@ -299,7 +301,7 @@ func (c *pdServiceAPIClient) markAsAvailable() {
 }
 
 // NeedRetry implements ServiceClient.
-func (c *pdServiceAPIClient) NeedRetry(pdErr *pdpb.Error, err error) bool {
+func (c *serviceAPIClient) NeedRetry(pdErr *pdpb.Error, err error) bool {
 	if c.IsConnectedToLeader() {
 		return false
 	}
@@ -315,43 +317,43 @@ func (c *pdServiceAPIClient) NeedRetry(pdErr *pdpb.Error, err error) bool {
 	return true
 }
 
-// pdServiceBalancerNode is a balancer node for PD service.
-// It extends the pdServiceClient and adds additional fields for the next polling client in the chain.
-type pdServiceBalancerNode struct {
-	*pdServiceAPIClient
-	next *pdServiceBalancerNode
+// serviceBalancerNode is a balancer node for PD.
+// It extends the serviceClient and adds additional fields for the next polling client in the chain.
+type serviceBalancerNode struct {
+	*serviceAPIClient
+	next *serviceBalancerNode
 }
 
-// pdServiceBalancer is a load balancer for PD service clients.
-// It is used to balance the request to all servers and manage the connections to multiple PD service nodes.
-type pdServiceBalancer struct {
+// serviceBalancer is a load balancer for clients.
+// It is used to balance the request to all servers and manage the connections to multiple nodes.
+type serviceBalancer struct {
 	mu        sync.Mutex
-	now       *pdServiceBalancerNode
+	now       *serviceBalancerNode
 	totalNode int
 	errFn     errFn
 }
 
-func newPDServiceBalancer(fn errFn) *pdServiceBalancer {
-	return &pdServiceBalancer{
+func newServiceBalancer(fn errFn) *serviceBalancer {
+	return &serviceBalancer{
 		errFn: fn,
 	}
 }
-func (c *pdServiceBalancer) set(clients []ServiceClient) {
+func (c *serviceBalancer) set(clients []ServiceClient) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if len(clients) == 0 {
 		return
 	}
 	c.totalNode = len(clients)
-	head := &pdServiceBalancerNode{
-		pdServiceAPIClient: newPDServiceAPIClient(clients[c.totalNode-1], c.errFn).(*pdServiceAPIClient),
+	head := &serviceBalancerNode{
+		serviceAPIClient: newPDServiceAPIClient(clients[c.totalNode-1], c.errFn).(*serviceAPIClient),
 	}
 	head.next = head
 	last := head
 	for i := c.totalNode - 2; i >= 0; i-- {
-		next := &pdServiceBalancerNode{
-			pdServiceAPIClient: newPDServiceAPIClient(clients[i], c.errFn).(*pdServiceAPIClient),
-			next:               head,
+		next := &serviceBalancerNode{
+			serviceAPIClient: newPDServiceAPIClient(clients[i], c.errFn).(*serviceAPIClient),
+			next:             head,
 		}
 		head = next
 		last.next = head
@@ -359,7 +361,7 @@ func (c *pdServiceBalancer) set(clients []ServiceClient) {
 	c.now = head
 }
 
-func (c *pdServiceBalancer) check() {
+func (c *serviceBalancer) check() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	for range c.totalNode {
@@ -368,11 +370,11 @@ func (c *pdServiceBalancer) check() {
 	}
 }
 
-func (c *pdServiceBalancer) next() {
+func (c *serviceBalancer) next() {
 	c.now = c.now.next
 }
 
-func (c *pdServiceBalancer) get() (ret ServiceClient) {
+func (c *serviceBalancer) get() (ret ServiceClient) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	i := 0
@@ -401,22 +403,22 @@ type TSOEventSource interface {
 }
 
 var (
-	_ ServiceDiscovery = (*pdServiceDiscovery)(nil)
-	_ TSOEventSource   = (*pdServiceDiscovery)(nil)
+	_ ServiceDiscovery = (*serviceDiscovery)(nil)
+	_ TSOEventSource   = (*serviceDiscovery)(nil)
 )
 
-// pdServiceDiscovery is the service discovery client of PD/API service which is quorum based
-type pdServiceDiscovery struct {
+// serviceDiscovery is the service discovery client of PD/PD service which is quorum based
+type serviceDiscovery struct {
 	isInitialized bool
 
 	urls atomic.Value // Store as []string
 	// PD leader
-	leader atomic.Value // Store as pdServiceClient
+	leader atomic.Value // Store as serviceClient
 	// PD follower
-	followers sync.Map // Store as map[string]pdServiceClient
+	followers sync.Map // Store as map[string]serviceClient
 	// PD leader and PD followers
-	all               atomic.Value // Store as []pdServiceClient
-	apiCandidateNodes [apiKindCount]*pdServiceBalancer
+	all               atomic.Value // Store as []serviceClient
+	apiCandidateNodes [apiKindCount]*serviceBalancer
 	// PD follower URLs. Only for tso.
 	followerURLs atomic.Value // Store as []string
 
@@ -448,17 +450,17 @@ type pdServiceDiscovery struct {
 	option *opt.Option
 }
 
-// NewDefaultPDServiceDiscovery returns a new default PD service discovery-based client.
-func NewDefaultPDServiceDiscovery(
+// NewDefaultServiceDiscovery returns a new default service discovery-based client.
+func NewDefaultServiceDiscovery(
 	ctx context.Context, cancel context.CancelFunc,
 	urls []string, tlsCfg *tls.Config,
 ) ServiceDiscovery {
 	var wg sync.WaitGroup
-	return NewPDServiceDiscovery(ctx, cancel, &wg, nil, nil, constants.DefaultKeyspaceID, urls, tlsCfg, opt.NewOption())
+	return NewServiceDiscovery(ctx, cancel, &wg, nil, nil, constants.DefaultKeyspaceID, urls, tlsCfg, opt.NewOption())
 }
 
-// NewPDServiceDiscovery returns a new PD service discovery-based client.
-func NewPDServiceDiscovery(
+// NewServiceDiscovery returns a new service discovery-based client.
+func NewServiceDiscovery(
 	ctx context.Context, cancel context.CancelFunc,
 	wg *sync.WaitGroup,
 	serviceModeUpdateCb func(pdpb.ServiceMode),
@@ -466,12 +468,12 @@ func NewPDServiceDiscovery(
 	keyspaceID uint32,
 	urls []string, tlsCfg *tls.Config, option *opt.Option,
 ) ServiceDiscovery {
-	pdsd := &pdServiceDiscovery{
+	pdsd := &serviceDiscovery{
 		checkMembershipCh:    make(chan struct{}, 1),
 		ctx:                  ctx,
 		cancel:               cancel,
 		wg:                   wg,
-		apiCandidateNodes:    [apiKindCount]*pdServiceBalancer{newPDServiceBalancer(emptyErrorFn), newPDServiceBalancer(regionAPIErrorFn)},
+		apiCandidateNodes:    [apiKindCount]*serviceBalancer{newServiceBalancer(emptyErrorFn), newServiceBalancer(regionAPIErrorFn)},
 		serviceModeUpdateCb:  serviceModeUpdateCb,
 		updateKeyspaceIDFunc: updateKeyspaceIDFunc,
 		keyspaceID:           keyspaceID,
@@ -483,8 +485,8 @@ func NewPDServiceDiscovery(
 	return pdsd
 }
 
-// Init initializes the PD service discovery.
-func (c *pdServiceDiscovery) Init() error {
+// Init initializes the service discovery.
+func (c *serviceDiscovery) Init() error {
 	if c.isInitialized {
 		return nil
 	}
@@ -507,8 +509,9 @@ func (c *pdServiceDiscovery) Init() error {
 		}
 	}
 
-	if err := c.checkServiceModeChanged(); err != nil {
-		log.Warn("[pd] failed to check service mode and will check later", zap.Error(err))
+	if err := c.initRetry(c.checkServiceModeChanged); err != nil {
+		c.cancel()
+		return err
 	}
 
 	c.wg.Add(3)
@@ -520,7 +523,7 @@ func (c *pdServiceDiscovery) Init() error {
 	return nil
 }
 
-func (c *pdServiceDiscovery) initRetry(f func() error) error {
+func (c *serviceDiscovery) initRetry(f func() error) error {
 	var err error
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
@@ -537,7 +540,7 @@ func (c *pdServiceDiscovery) initRetry(f func() error) error {
 	return errors.WithStack(err)
 }
 
-func (c *pdServiceDiscovery) updateMemberLoop() {
+func (c *serviceDiscovery) updateMemberLoop() {
 	defer c.wg.Done()
 
 	ctx, cancel := context.WithCancel(c.ctx)
@@ -561,7 +564,7 @@ func (c *pdServiceDiscovery) updateMemberLoop() {
 	}
 }
 
-func (c *pdServiceDiscovery) updateServiceModeLoop() {
+func (c *serviceDiscovery) updateServiceModeLoop() {
 	defer c.wg.Done()
 	failpoint.Inject("skipUpdateServiceMode", func() {
 		failpoint.Return()
@@ -593,7 +596,7 @@ func (c *pdServiceDiscovery) updateServiceModeLoop() {
 	}
 }
 
-func (c *pdServiceDiscovery) memberHealthCheckLoop() {
+func (c *serviceDiscovery) memberHealthCheckLoop() {
 	defer c.wg.Done()
 
 	memberCheckLoopCtx, memberCheckLoopCancel := context.WithCancel(c.ctx)
@@ -613,19 +616,19 @@ func (c *pdServiceDiscovery) memberHealthCheckLoop() {
 	}
 }
 
-func (c *pdServiceDiscovery) checkLeaderHealth(ctx context.Context) {
+func (c *serviceDiscovery) checkLeaderHealth(ctx context.Context) {
 	ctx, cancel := context.WithTimeout(ctx, c.option.Timeout)
 	defer cancel()
 	leader := c.getLeaderServiceClient()
 	leader.checkNetworkAvailable(ctx)
 }
 
-func (c *pdServiceDiscovery) checkFollowerHealth(ctx context.Context) {
+func (c *serviceDiscovery) checkFollowerHealth(ctx context.Context) {
 	c.followers.Range(func(_, value any) bool {
 		// To ensure that the leader's healthy check is not delayed, shorten the duration.
 		ctx, cancel := context.WithTimeout(ctx, MemberHealthCheckInterval/3)
 		defer cancel()
-		serviceClient := value.(*pdServiceClient)
+		serviceClient := value.(*serviceClient)
 		serviceClient.checkNetworkAvailable(ctx)
 		return true
 	})
@@ -635,12 +638,12 @@ func (c *pdServiceDiscovery) checkFollowerHealth(ctx context.Context) {
 }
 
 // Close releases all resources.
-func (c *pdServiceDiscovery) Close() {
+func (c *serviceDiscovery) Close() {
 	if c == nil {
 		return
 	}
 	c.closeOnce.Do(func() {
-		log.Info("[pd] close pd service discovery client")
+		log.Info("[pd] close service discovery client")
 		c.clientConns.Range(func(key, cc any) bool {
 			if err := cc.(*grpc.ClientConn).Close(); err != nil {
 				log.Error("[pd] failed to close grpc clientConn", errs.ZapError(errs.ErrCloseGRPCConn, err))
@@ -652,28 +655,28 @@ func (c *pdServiceDiscovery) Close() {
 }
 
 // GetClusterID returns the ClusterID.
-func (c *pdServiceDiscovery) GetClusterID() uint64 {
+func (c *serviceDiscovery) GetClusterID() uint64 {
 	return c.clusterID
 }
 
 // GetKeyspaceID returns the ID of the keyspace
-func (c *pdServiceDiscovery) GetKeyspaceID() uint32 {
+func (c *serviceDiscovery) GetKeyspaceID() uint32 {
 	return c.keyspaceID
 }
 
 // SetKeyspaceID sets the ID of the keyspace
-func (c *pdServiceDiscovery) SetKeyspaceID(keyspaceID uint32) {
+func (c *serviceDiscovery) SetKeyspaceID(keyspaceID uint32) {
 	c.keyspaceID = keyspaceID
 }
 
 // GetKeyspaceGroupID returns the ID of the keyspace group
-func (*pdServiceDiscovery) GetKeyspaceGroupID() uint32 {
-	// PD/API service only supports the default keyspace group
+func (*serviceDiscovery) GetKeyspaceGroupID() uint32 {
+	// PD only supports the default keyspace group
 	return constants.DefaultKeyspaceGroupID
 }
 
 // DiscoverMicroservice discovers the microservice with the specified type and returns the server urls.
-func (c *pdServiceDiscovery) discoverMicroservice(svcType serviceType) (urls []string, err error) {
+func (c *serviceDiscovery) discoverMicroservice(svcType serviceType) (urls []string, err error) {
 	switch svcType {
 	case apiService:
 		urls = c.GetServiceURLs()
@@ -700,14 +703,14 @@ func (c *pdServiceDiscovery) discoverMicroservice(svcType serviceType) (urls []s
 
 // GetServiceURLs returns the URLs of the servers.
 // For testing use. It should only be called when the client is closed.
-func (c *pdServiceDiscovery) GetServiceURLs() []string {
+func (c *serviceDiscovery) GetServiceURLs() []string {
 	return c.urls.Load().([]string)
 }
 
 // GetServingEndpointClientConn returns the grpc client connection of the serving endpoint
 // which is the leader in a quorum-based cluster or the primary in a primary/secondary
 // configured cluster.
-func (c *pdServiceDiscovery) GetServingEndpointClientConn() *grpc.ClientConn {
+func (c *serviceDiscovery) GetServingEndpointClientConn() *grpc.ClientConn {
 	if cc, ok := c.clientConns.Load(c.getLeaderURL()); ok {
 		return cc.(*grpc.ClientConn)
 	}
@@ -715,32 +718,32 @@ func (c *pdServiceDiscovery) GetServingEndpointClientConn() *grpc.ClientConn {
 }
 
 // GetClientConns returns the mapping {URL -> a gRPC connection}
-func (c *pdServiceDiscovery) GetClientConns() *sync.Map {
+func (c *serviceDiscovery) GetClientConns() *sync.Map {
 	return &c.clientConns
 }
 
 // GetServingURL returns the leader url
-func (c *pdServiceDiscovery) GetServingURL() string {
+func (c *serviceDiscovery) GetServingURL() string {
 	return c.getLeaderURL()
 }
 
 // GetBackupURLs gets the URLs of the current reachable followers
 // in a quorum-based cluster. Used for tso currently.
-func (c *pdServiceDiscovery) GetBackupURLs() []string {
+func (c *serviceDiscovery) GetBackupURLs() []string {
 	return c.getFollowerURLs()
 }
 
 // getLeaderServiceClient returns the leader ServiceClient.
-func (c *pdServiceDiscovery) getLeaderServiceClient() *pdServiceClient {
+func (c *serviceDiscovery) getLeaderServiceClient() *serviceClient {
 	leader := c.leader.Load()
 	if leader == nil {
 		return nil
 	}
-	return leader.(*pdServiceClient)
+	return leader.(*serviceClient)
 }
 
 // GetServiceClientByKind returns ServiceClient of the specific kind.
-func (c *pdServiceDiscovery) GetServiceClientByKind(kind APIKind) ServiceClient {
+func (c *serviceDiscovery) GetServiceClientByKind(kind APIKind) ServiceClient {
 	client := c.apiCandidateNodes[kind].get()
 	if client == nil {
 		return nil
@@ -749,7 +752,7 @@ func (c *pdServiceDiscovery) GetServiceClientByKind(kind APIKind) ServiceClient 
 }
 
 // GetServiceClient returns the leader/primary ServiceClient if it is healthy.
-func (c *pdServiceDiscovery) GetServiceClient() ServiceClient {
+func (c *serviceDiscovery) GetServiceClient() ServiceClient {
 	leaderClient := c.getLeaderServiceClient()
 	if c.option.EnableForwarding && !leaderClient.Available() {
 		if followerClient := c.GetServiceClientByKind(ForwardAPIKind); followerClient != nil {
@@ -764,7 +767,7 @@ func (c *pdServiceDiscovery) GetServiceClient() ServiceClient {
 }
 
 // GetAllServiceClients implements ServiceDiscovery
-func (c *pdServiceDiscovery) GetAllServiceClients() []ServiceClient {
+func (c *serviceDiscovery) GetAllServiceClients() []ServiceClient {
 	all := c.all.Load()
 	if all == nil {
 		return nil
@@ -775,7 +778,7 @@ func (c *pdServiceDiscovery) GetAllServiceClients() []ServiceClient {
 
 // ScheduleCheckMemberChanged is used to check if there is any membership
 // change among the leader and the followers.
-func (c *pdServiceDiscovery) ScheduleCheckMemberChanged() {
+func (c *serviceDiscovery) ScheduleCheckMemberChanged() {
 	select {
 	case c.checkMembershipCh <- struct{}{}:
 	default:
@@ -784,24 +787,24 @@ func (c *pdServiceDiscovery) ScheduleCheckMemberChanged() {
 
 // CheckMemberChanged Immediately check if there is any membership change among the leader/followers in a
 // quorum-based cluster or among the primary/secondaries in a primary/secondary configured cluster.
-func (c *pdServiceDiscovery) CheckMemberChanged() error {
+func (c *serviceDiscovery) CheckMemberChanged() error {
 	return c.updateMember()
 }
 
 // AddServingURLSwitchedCallback adds callbacks which will be called
 // when the leader is switched.
-func (c *pdServiceDiscovery) AddServingURLSwitchedCallback(callbacks ...func()) {
+func (c *serviceDiscovery) AddServingURLSwitchedCallback(callbacks ...func()) {
 	c.leaderSwitchedCbs = append(c.leaderSwitchedCbs, callbacks...)
 }
 
 // AddServiceURLsSwitchedCallback adds callbacks which will be called when
 // any leader/follower is changed.
-func (c *pdServiceDiscovery) AddServiceURLsSwitchedCallback(callbacks ...func()) {
+func (c *serviceDiscovery) AddServiceURLsSwitchedCallback(callbacks ...func()) {
 	c.membersChangedCbs = append(c.membersChangedCbs, callbacks...)
 }
 
 // SetTSOLeaderURLUpdatedCallback adds a callback which will be called when the TSO leader is updated.
-func (c *pdServiceDiscovery) SetTSOLeaderURLUpdatedCallback(callback tsoLeaderURLUpdatedFunc) {
+func (c *serviceDiscovery) SetTSOLeaderURLUpdatedCallback(callback tsoLeaderURLUpdatedFunc) {
 	url := c.getLeaderURL()
 	if len(url) > 0 {
 		if err := callback(url); err != nil {
@@ -812,12 +815,12 @@ func (c *pdServiceDiscovery) SetTSOLeaderURLUpdatedCallback(callback tsoLeaderUR
 }
 
 // getLeaderURL returns the leader URL.
-func (c *pdServiceDiscovery) getLeaderURL() string {
+func (c *serviceDiscovery) getLeaderURL() string {
 	return c.getLeaderServiceClient().GetURL()
 }
 
 // getFollowerURLs returns the follower URLs.
-func (c *pdServiceDiscovery) getFollowerURLs() []string {
+func (c *serviceDiscovery) getFollowerURLs() []string {
 	followerURLs := c.followerURLs.Load()
 	if followerURLs == nil {
 		return []string{}
@@ -825,7 +828,7 @@ func (c *pdServiceDiscovery) getFollowerURLs() []string {
 	return followerURLs.([]string)
 }
 
-func (c *pdServiceDiscovery) initClusterID() error {
+func (c *serviceDiscovery) initClusterID() error {
 	ctx, cancel := context.WithCancel(c.ctx)
 	defer cancel()
 	clusterID := uint64(0)
@@ -852,7 +855,7 @@ func (c *pdServiceDiscovery) initClusterID() error {
 	return nil
 }
 
-func (c *pdServiceDiscovery) checkServiceModeChanged() error {
+func (c *serviceDiscovery) checkServiceModeChanged() error {
 	leaderURL := c.getLeaderURL()
 	if len(leaderURL) == 0 {
 		return errors.New("no leader found")
@@ -880,7 +883,7 @@ func (c *pdServiceDiscovery) checkServiceModeChanged() error {
 	return nil
 }
 
-func (c *pdServiceDiscovery) updateMember() error {
+func (c *serviceDiscovery) updateMember() error {
 	for _, url := range c.GetServiceURLs() {
 		members, err := c.getMembers(c.ctx, url, UpdateMemberTimeout)
 		// Check the cluster ID.
@@ -913,7 +916,7 @@ func (c *pdServiceDiscovery) updateMember() error {
 	return errs.ErrClientGetMember.FastGenByArgs()
 }
 
-func (c *pdServiceDiscovery) getClusterInfo(ctx context.Context, url string, timeout time.Duration) (*pdpb.GetClusterInfoResponse, error) {
+func (c *serviceDiscovery) getClusterInfo(ctx context.Context, url string, timeout time.Duration) (*pdpb.GetClusterInfoResponse, error) {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	cc, err := c.GetOrCreateGRPCConn(url)
@@ -932,7 +935,7 @@ func (c *pdServiceDiscovery) getClusterInfo(ctx context.Context, url string, tim
 	return clusterInfo, nil
 }
 
-func (c *pdServiceDiscovery) getMembers(ctx context.Context, url string, timeout time.Duration) (*pdpb.GetMembersResponse, error) {
+func (c *serviceDiscovery) getMembers(ctx context.Context, url string, timeout time.Duration) (*pdpb.GetMembersResponse, error) {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	cc, err := c.GetOrCreateGRPCConn(url)
@@ -951,7 +954,7 @@ func (c *pdServiceDiscovery) getMembers(ctx context.Context, url string, timeout
 	return members, nil
 }
 
-func (c *pdServiceDiscovery) updateURLs(members []*pdpb.Member) {
+func (c *serviceDiscovery) updateURLs(members []*pdpb.Member) {
 	urls := make([]string, 0, len(members))
 	for _, m := range members {
 		urls = append(urls, m.GetClientUrls()...)
@@ -964,17 +967,14 @@ func (c *pdServiceDiscovery) updateURLs(members []*pdpb.Member) {
 		return
 	}
 	c.urls.Store(urls)
-	// Update the connection contexts when member changes if TSO Follower Proxy is enabled.
-	if c.option.GetEnableTSOFollowerProxy() {
-		// Run callbacks to reflect the membership changes in the leader and followers.
-		for _, cb := range c.membersChangedCbs {
-			cb()
-		}
+	// Run callbacks to reflect the membership changes in the leader and followers.
+	for _, cb := range c.membersChangedCbs {
+		cb()
 	}
 	log.Info("[pd] update member urls", zap.Strings("old-urls", oldURLs), zap.Strings("new-urls", urls))
 }
 
-func (c *pdServiceDiscovery) switchLeader(url string) (bool, error) {
+func (c *serviceDiscovery) switchLeader(url string) (bool, error) {
 	oldLeader := c.getLeaderServiceClient()
 	if url == oldLeader.GetURL() && oldLeader.GetClientConn() != nil {
 		return false, nil
@@ -999,10 +999,10 @@ func (c *pdServiceDiscovery) switchLeader(url string) (bool, error) {
 	return true, err
 }
 
-func (c *pdServiceDiscovery) updateFollowers(members []*pdpb.Member, leaderID uint64, leaderURL string) (changed bool) {
-	followers := make(map[string]*pdServiceClient)
+func (c *serviceDiscovery) updateFollowers(members []*pdpb.Member, leaderID uint64, leaderURL string) (changed bool) {
+	followers := make(map[string]*serviceClient)
 	c.followers.Range(func(key, value any) bool {
-		followers[key.(string)] = value.(*pdServiceClient)
+		followers[key.(string)] = value.(*serviceClient)
 		return true
 	})
 	var followerURLs []string
@@ -1015,7 +1015,7 @@ func (c *pdServiceDiscovery) updateFollowers(members []*pdpb.Member, leaderID ui
 				// FIXME: How to safely compare urls(also for leader)? For now, only allows one client url.
 				url := tlsutil.PickMatchedURL(member.GetClientUrls(), c.tlsCfg)
 				if client, ok := c.followers.Load(url); ok {
-					if client.(*pdServiceClient).GetClientConn() == nil {
+					if client.(*serviceClient).GetClientConn() == nil {
 						conn, err := c.GetOrCreateGRPCConn(url)
 						if err != nil || conn == nil {
 							log.Warn("[pd] failed to connect follower", zap.String("follower", url), errs.ZapError(err))
@@ -1048,7 +1048,7 @@ func (c *pdServiceDiscovery) updateFollowers(members []*pdpb.Member, leaderID ui
 	return
 }
 
-func (c *pdServiceDiscovery) updateServiceClient(members []*pdpb.Member, leader *pdpb.Member) error {
+func (c *serviceDiscovery) updateServiceClient(members []*pdpb.Member, leader *pdpb.Member) error {
 	// FIXME: How to safely compare leader urls? For now, only allows one client url.
 	leaderURL := tlsutil.PickMatchedURL(leader.GetClientUrls(), c.tlsCfg)
 	leaderChanged, err := c.switchLeader(leaderURL)
@@ -1064,7 +1064,7 @@ func (c *pdServiceDiscovery) updateServiceClient(members []*pdpb.Member, leader 
 		clients = append(clients, leaderClient)
 	}
 	c.followers.Range(func(_, value any) bool {
-		clients = append(clients, value.(*pdServiceClient))
+		clients = append(clients, value.(*serviceClient))
 		return true
 	})
 	c.all.Store(clients)
@@ -1076,6 +1076,6 @@ func (c *pdServiceDiscovery) updateServiceClient(members []*pdpb.Member, leader 
 }
 
 // GetOrCreateGRPCConn returns the corresponding grpc client connection of the given URL.
-func (c *pdServiceDiscovery) GetOrCreateGRPCConn(url string) (*grpc.ClientConn, error) {
+func (c *serviceDiscovery) GetOrCreateGRPCConn(url string) (*grpc.ClientConn, error) {
 	return grpcutil.GetOrCreateGRPCConn(c.ctx, &c.clientConns, url, c.tlsCfg, c.option.GRPCDialOptions...)
 }

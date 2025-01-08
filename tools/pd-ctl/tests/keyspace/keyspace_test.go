@@ -22,10 +22,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/pingcap/failpoint"
-	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+
+	"github.com/pingcap/failpoint"
+	"github.com/pingcap/kvproto/pkg/keyspacepb"
+
 	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/utils/testutil"
@@ -47,7 +49,7 @@ func TestKeyspace(t *testing.T) {
 	for i := 1; i < 10; i++ {
 		keyspaces = append(keyspaces, fmt.Sprintf("keyspace_%d", i))
 	}
-	tc, err := pdTests.NewTestAPICluster(ctx, 3, func(conf *config.Config, _ string) {
+	tc, err := pdTests.NewTestPDServiceCluster(ctx, 3, func(conf *config.Config, _ string) {
 		conf.Keyspace.PreAlloc = keyspaces
 	})
 	re.NoError(err)
@@ -153,7 +155,7 @@ func (suite *keyspaceTestSuite) SetupTest() {
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/delayStartServerLoop", `return(true)`))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion", "return(true)"))
-	tc, err := pdTests.NewTestAPICluster(suite.ctx, 1)
+	tc, err := pdTests.NewTestPDServiceCluster(suite.ctx, 1)
 	re.NoError(err)
 	re.NoError(tc.RunInitialServers())
 	tc.WaitLeader()

@@ -18,13 +18,14 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+
 	"github.com/tikv/pd/pkg/mcs/discovery"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/apiv2/middlewares"
 )
 
-// RegisterMicroService registers microservice handler to the router.
-func RegisterMicroService(r *gin.RouterGroup) {
+// RegisterMicroservice registers microservice handler to the router.
+func RegisterMicroservice(r *gin.RouterGroup) {
 	router := r.Group("ms")
 	router.GET("members/:service", GetMembers)
 	router.GET("primary/:service", GetPrimary)
@@ -38,8 +39,8 @@ func RegisterMicroService(r *gin.RouterGroup) {
 // @Router   /ms/members/{service} [get]
 func GetMembers(c *gin.Context) {
 	svr := c.MustGet(middlewares.ServerContextKey).(*server.Server)
-	if !svr.IsAPIServiceMode() {
-		c.AbortWithStatusJSON(http.StatusNotFound, "not support micro service")
+	if !svr.IsPDServiceMode() {
+		c.AbortWithStatusJSON(http.StatusNotFound, "not support microservice")
 		return
 	}
 
@@ -64,8 +65,8 @@ func GetMembers(c *gin.Context) {
 // @Router   /ms/primary/{service} [get]
 func GetPrimary(c *gin.Context) {
 	svr := c.MustGet(middlewares.ServerContextKey).(*server.Server)
-	if !svr.IsAPIServiceMode() {
-		c.AbortWithStatusJSON(http.StatusNotFound, "not support micro service")
+	if !svr.IsPDServiceMode() {
+		c.AbortWithStatusJSON(http.StatusNotFound, "not support microservice")
 		return
 	}
 

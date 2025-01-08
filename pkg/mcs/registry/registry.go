@@ -20,10 +20,12 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/pingcap/log"
-	bs "github.com/tikv/pd/pkg/basicserver"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
+
+	"github.com/pingcap/log"
+
+	bs "github.com/tikv/pd/pkg/basicserver"
 )
 
 var (
@@ -83,18 +85,18 @@ func (r *ServiceRegistry) InstallAllRESTHandler(srv bs.Server, h map[string]http
 		serviceName := createServiceName(prefix, name)
 		if l, ok := r.services[serviceName]; ok {
 			if err := l.RegisterRESTHandler(h); err != nil {
-				log.Error("register restful API service failed", zap.String("prefix", prefix), zap.String("service-name", name), zap.Error(err))
+				log.Error("register restful PD service failed", zap.String("prefix", prefix), zap.String("service-name", name), zap.Error(err))
 			} else {
-				log.Info("restful API service already registered", zap.String("prefix", prefix), zap.String("service-name", name))
+				log.Info("restful PD service already registered", zap.String("prefix", prefix), zap.String("service-name", name))
 			}
 			continue
 		}
 		l := builder(srv)
 		r.services[serviceName] = l
 		if err := l.RegisterRESTHandler(h); err != nil {
-			log.Error("register restful API service failed", zap.String("prefix", prefix), zap.String("service-name", name), zap.Error(err))
+			log.Error("register restful PD service failed", zap.String("prefix", prefix), zap.String("service-name", name), zap.Error(err))
 		} else {
-			log.Info("restful API service registered successfully", zap.String("prefix", prefix), zap.String("service-name", name))
+			log.Info("restful PD service registered successfully", zap.String("prefix", prefix), zap.String("service-name", name))
 		}
 	}
 }

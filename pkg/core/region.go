@@ -29,17 +29,19 @@ import (
 
 	"github.com/docker/go-units"
 	"github.com/gogo/protobuf/proto"
+	"go.uber.org/zap"
+
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/replication_modepb"
 	"github.com/pingcap/log"
+
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
-	"go.uber.org/zap"
 )
 
 const (
@@ -1883,7 +1885,7 @@ func scanRegion(regionTree *regionTree, keyRange *KeyRange, limit int, outputMus
 				keyRange.StartKey, keyRange.EndKey,
 				lastRegion.GetStartKey(), lastRegion.GetEndKey(),
 				region.GetStartKey(), region.GetEndKey())
-			log.Warn("scan regions failed", zap.Bool("outputMustContainAllKeyRange",
+			log.Warn("scan regions failed", zap.Bool("contain-all-key-range",
 				outputMustContainAllKeyRange), zap.Error(err))
 			if outputMustContainAllKeyRange {
 				return false
@@ -1905,7 +1907,7 @@ func scanRegion(regionTree *regionTree, keyRange *KeyRange, limit int, outputMus
 			keyRange.StartKey, keyRange.EndKey,
 			lastRegion.GetStartKey(), lastRegion.GetEndKey(),
 			lastRegion.GetEndKey(), keyRange.EndKey)
-		log.Warn("scan regions failed", zap.Bool("outputMustContainAllKeyRange",
+		log.Warn("scan regions failed", zap.Bool("contain-all-key-range",
 			outputMustContainAllKeyRange), zap.Error(err))
 		if outputMustContainAllKeyRange {
 			return nil, err

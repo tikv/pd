@@ -43,9 +43,9 @@ jobs:
           - worker_id: 8
             name: 'TSO Integration Test'
           - worker_id: 9
-            name: 'MicroService Integration(!TSO)'
+            name: 'Microservice Integration(!TSO)'
           - worker_id: 10
-            name: 'MicroService Integration(TSO)'
+            name: 'Microservice Integration(TSO)'
     outputs:
       job-total: 10
     steps:

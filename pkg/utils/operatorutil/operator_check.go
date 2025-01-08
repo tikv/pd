@@ -16,6 +16,7 @@ package operatorutil
 
 import (
 	"github.com/stretchr/testify/require"
+
 	"github.com/tikv/pd/pkg/schedule/operator"
 )
 

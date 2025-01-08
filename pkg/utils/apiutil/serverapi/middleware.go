@@ -20,15 +20,17 @@ import (
 	"strings"
 	"time"
 
+	"github.com/urfave/negroni"
+	"go.uber.org/zap"
+
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/server"
-	"github.com/urfave/negroni"
-	"go.uber.org/zap"
 )
 
 type runtimeServiceValidator struct {
@@ -113,14 +115,14 @@ func MicroserviceRedirectRule(matchPath, targetPath, targetServiceName string,
 	}
 }
 
-func (h *redirector) matchMicroServiceRedirectRules(r *http.Request) (bool, string) {
-	if !h.s.IsAPIServiceMode() {
+func (h *redirector) matchMicroserviceRedirectRules(r *http.Request) (bool, string) {
+	if !h.s.IsPDServiceMode() {
 		return false, ""
 	}
 	if len(h.microserviceRedirectRules) == 0 {
 		return false, ""
 	}
-	if r.Header.Get(apiutil.XForbiddenForwardToMicroServiceHeader) == "true" {
+	if r.Header.Get(apiutil.XForbiddenForwardToMicroserviceHeader) == "true" {
 		return false, ""
 	}
 	// Remove trailing '/' from the URL path
@@ -164,7 +166,7 @@ func (h *redirector) matchMicroServiceRedirectRules(r *http.Request) (bool, stri
 			} else {
 				r.URL.Path = rule.targetPath
 			}
-			log.Debug("redirect to micro service", zap.String("path", r.URL.Path), zap.String("origin-path", origin),
+			log.Debug("redirect to microservice", zap.String("path", r.URL.Path), zap.String("origin-path", origin),
 				zap.String("target", addr), zap.String("method", r.Method))
 			return true, addr
 		}
@@ -173,7 +175,7 @@ func (h *redirector) matchMicroServiceRedirectRules(r *http.Request) (bool, stri
 }
 
 func (h *redirector) ServeHTTP(w http.ResponseWriter, r *http.Request, next http.HandlerFunc) {
-	redirectToMicroService, targetAddr := h.matchMicroServiceRedirectRules(r)
+	redirectToMicroservice, targetAddr := h.matchMicroserviceRedirectRules(r)
 	allowFollowerHandle := len(r.Header.Get(apiutil.PDAllowFollowerHandleHeader)) > 0
 
 	if h.s.IsClosed() {
@@ -181,7 +183,7 @@ func (h *redirector) ServeHTTP(w http.ResponseWriter, r *http.Request, next http
 		return
 	}
 
-	if (allowFollowerHandle || h.s.GetMember().IsLeader()) && !redirectToMicroService {
+	if (allowFollowerHandle || h.s.GetMember().IsLeader()) && !redirectToMicroservice {
 		next(w, r)
 		return
 	}
@@ -198,14 +200,14 @@ func (h *redirector) ServeHTTP(w http.ResponseWriter, r *http.Request, next http
 	}
 
 	var clientUrls []string
-	if redirectToMicroService {
+	if redirectToMicroservice {
 		if len(targetAddr) == 0 {
 			http.Error(w, errs.ErrRedirect.FastGenByArgs().Error(), http.StatusInternalServerError)
 			return
 		}
 		clientUrls = append(clientUrls, targetAddr)
-		// Add a header to the response, it is used to mark whether the request has been forwarded to the micro service.
-		w.Header().Add(apiutil.XForwardedToMicroServiceHeader, "true")
+		// Add a header to the response, it is used to mark whether the request has been forwarded to the microservice.
+		w.Header().Add(apiutil.XForwardedToMicroserviceHeader, "true")
 	} else if name := r.Header.Get(apiutil.PDRedirectorHeader); len(name) == 0 {
 		leader := h.waitForLeader(r)
 		// The leader has not been elected yet.
@@ -221,7 +223,7 @@ func (h *redirector) ServeHTTP(w http.ResponseWriter, r *http.Request, next http
 		clientUrls = leader.GetClientUrls()
 		r.Header.Set(apiutil.PDRedirectorHeader, h.s.Name())
 	} else {
-		// Prevent more than one redirection among PD/API servers.
+		// Prevent more than one redirection among PD/PD service.
 		log.Error("redirect but server is not leader", zap.String("from", name), zap.String("server", h.s.Name()), errs.ZapError(errs.ErrRedirectToNotLeader))
 		http.Error(w, errs.ErrRedirectToNotLeader.FastGenByArgs().Error(), http.StatusInternalServerError)
 		return

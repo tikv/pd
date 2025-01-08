@@ -21,24 +21,24 @@ import (
 	"google.golang.org/grpc"
 )
 
-var _ ServiceDiscovery = (*mockPDServiceDiscovery)(nil)
+var _ ServiceDiscovery = (*mockServiceDiscovery)(nil)
 
-type mockPDServiceDiscovery struct {
+type mockServiceDiscovery struct {
 	urls    []string
 	tlsCfg  *tls.Config
 	clients []ServiceClient
 }
 
-// NewMockPDServiceDiscovery creates a mock PD service discovery.
-func NewMockPDServiceDiscovery(urls []string, tlsCfg *tls.Config) *mockPDServiceDiscovery {
-	return &mockPDServiceDiscovery{
+// NewMockServiceDiscovery creates a mock service discovery.
+func NewMockServiceDiscovery(urls []string, tlsCfg *tls.Config) *mockServiceDiscovery {
+	return &mockServiceDiscovery{
 		urls:   urls,
 		tlsCfg: tlsCfg,
 	}
 }
 
 // Init directly creates the service clients with the given URLs.
-func (m *mockPDServiceDiscovery) Init() error {
+func (m *mockServiceDiscovery) Init() error {
 	m.clients = make([]ServiceClient, 0, len(m.urls))
 	for _, url := range m.urls {
 		m.clients = append(m.clients, newPDServiceClient(url, m.urls[0], nil, false))
@@ -47,61 +47,61 @@ func (m *mockPDServiceDiscovery) Init() error {
 }
 
 // Close clears the service clients.
-func (m *mockPDServiceDiscovery) Close() {
+func (m *mockServiceDiscovery) Close() {
 	clear(m.clients)
 }
 
-// GetAllServiceClients returns all service clients init in the mock PD service discovery.
-func (m *mockPDServiceDiscovery) GetAllServiceClients() []ServiceClient {
+// GetAllServiceClients returns all service clients init in the mock service discovery.
+func (m *mockServiceDiscovery) GetAllServiceClients() []ServiceClient {
 	return m.clients
 }
 
 // GetClusterID implements the ServiceDiscovery interface.
-func (*mockPDServiceDiscovery) GetClusterID() uint64 { return 0 }
+func (*mockServiceDiscovery) GetClusterID() uint64 { return 0 }
 
 // GetKeyspaceID implements the ServiceDiscovery interface.
-func (*mockPDServiceDiscovery) GetKeyspaceID() uint32 { return 0 }
+func (*mockServiceDiscovery) GetKeyspaceID() uint32 { return 0 }
 
 // SetKeyspaceID implements the ServiceDiscovery interface.
-func (*mockPDServiceDiscovery) SetKeyspaceID(uint32) {}
+func (*mockServiceDiscovery) SetKeyspaceID(uint32) {}
 
 // GetKeyspaceGroupID implements the ServiceDiscovery interface.
-func (*mockPDServiceDiscovery) GetKeyspaceGroupID() uint32 { return 0 }
+func (*mockServiceDiscovery) GetKeyspaceGroupID() uint32 { return 0 }
 
 // GetServiceURLs implements the ServiceDiscovery interface.
-func (*mockPDServiceDiscovery) GetServiceURLs() []string { return nil }
+func (*mockServiceDiscovery) GetServiceURLs() []string { return nil }
 
 // GetServingEndpointClientConn implements the ServiceDiscovery interface.
-func (*mockPDServiceDiscovery) GetServingEndpointClientConn() *grpc.ClientConn { return nil }
+func (*mockServiceDiscovery) GetServingEndpointClientConn() *grpc.ClientConn { return nil }
 
 // GetClientConns implements the ServiceDiscovery interface.
-func (*mockPDServiceDiscovery) GetClientConns() *sync.Map { return nil }
+func (*mockServiceDiscovery) GetClientConns() *sync.Map { return nil }
 
 // GetServingURL implements the ServiceDiscovery interface.
-func (*mockPDServiceDiscovery) GetServingURL() string { return "" }
+func (*mockServiceDiscovery) GetServingURL() string { return "" }
 
 // GetBackupURLs implements the ServiceDiscovery interface.
-func (*mockPDServiceDiscovery) GetBackupURLs() []string { return nil }
+func (*mockServiceDiscovery) GetBackupURLs() []string { return nil }
 
 // GetServiceClient implements the ServiceDiscovery interface.
-func (*mockPDServiceDiscovery) GetServiceClient() ServiceClient { return nil }
+func (*mockServiceDiscovery) GetServiceClient() ServiceClient { return nil }
 
 // GetServiceClientByKind implements the ServiceDiscovery interface.
-func (*mockPDServiceDiscovery) GetServiceClientByKind(APIKind) ServiceClient { return nil }
+func (*mockServiceDiscovery) GetServiceClientByKind(APIKind) ServiceClient { return nil }
 
 // GetOrCreateGRPCConn implements the ServiceDiscovery interface.
-func (*mockPDServiceDiscovery) GetOrCreateGRPCConn(string) (*grpc.ClientConn, error) {
+func (*mockServiceDiscovery) GetOrCreateGRPCConn(string) (*grpc.ClientConn, error) {
 	return nil, nil
 }
 
 // ScheduleCheckMemberChanged implements the ServiceDiscovery interface.
-func (*mockPDServiceDiscovery) ScheduleCheckMemberChanged() {}
+func (*mockServiceDiscovery) ScheduleCheckMemberChanged() {}
 
 // CheckMemberChanged implements the ServiceDiscovery interface.
-func (*mockPDServiceDiscovery) CheckMemberChanged() error { return nil }
+func (*mockServiceDiscovery) CheckMemberChanged() error { return nil }
 
 // AddServingURLSwitchedCallback implements the ServiceDiscovery interface.
-func (*mockPDServiceDiscovery) AddServingURLSwitchedCallback(...func()) {}
+func (*mockServiceDiscovery) AddServingURLSwitchedCallback(...func()) {}
 
 // AddServiceURLsSwitchedCallback implements the ServiceDiscovery interface.
-func (*mockPDServiceDiscovery) AddServiceURLsSwitchedCallback(...func()) {}
+func (*mockServiceDiscovery) AddServiceURLsSwitchedCallback(...func()) {}

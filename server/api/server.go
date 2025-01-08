@@ -20,13 +20,14 @@ import (
 	"strings"
 
 	"github.com/gorilla/mux"
+	"github.com/urfave/negroni"
+
 	scheapi "github.com/tikv/pd/pkg/mcs/scheduling/server/apis/v1"
 	tsoapi "github.com/tikv/pd/pkg/mcs/tso/server/apis/v1"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/apiutil/serverapi"
 	"github.com/tikv/pd/server"
-	"github.com/urfave/negroni"
 )
 
 const apiPrefix = "/pd"
@@ -62,7 +63,7 @@ func NewHandler(_ context.Context, svr *server.Server) (http.Handler, apiutil.AP
 	// Following requests are **not** redirected:
 	//	"/schedulers", http.MethodPost
 	//	"/schedulers/{name}", http.MethodDelete
-	//  Because the writing of all the config of the scheduling service is in the API server,
+	//  Because the writing of all the config of the scheduling service is in the PD service,
 	// 	we should not post and delete the scheduler directly in the scheduling service.
 	router.PathPrefix(apiPrefix).Handler(negroni.New(
 		serverapi.NewRuntimeServiceValidator(svr, group),
@@ -152,7 +153,7 @@ func NewHandler(_ context.Context, svr *server.Server) (http.Handler, apiutil.AP
 				scheapi.APIPathPrefix+"/config/placement-rule",
 				constant.SchedulingServiceName,
 				[]string{http.MethodGet}),
-			// because the writing of all the meta information of the scheduling service is in the API server,
+			// because the writing of all the meta information of the scheduling service is in the PD service,
 			// we should not post and delete the scheduler directly in the scheduling service.
 			serverapi.MicroserviceRedirectRule(
 				prefix+"/schedulers",

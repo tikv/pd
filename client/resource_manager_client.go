@@ -19,14 +19,16 @@ import (
 	"time"
 
 	"github.com/gogo/protobuf/proto"
+	"go.uber.org/zap"
+
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/meta_storagepb"
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 	"github.com/pingcap/log"
+
 	"github.com/tikv/pd/client/constants"
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/opt"
-	"go.uber.org/zap"
 )
 
 type actionType int
@@ -329,7 +331,7 @@ func (c *innerClient) handleResourceTokenDispatcher(dispatcherCtx context.Contex
 		// If the stream is still nil, return an error.
 		if stream == nil {
 			firstRequest.done <- errors.Errorf("failed to get the stream connection")
-			c.pdSvcDiscovery.ScheduleCheckMemberChanged()
+			c.serviceDiscovery.ScheduleCheckMemberChanged()
 			connection.reset()
 			continue
 		}
@@ -341,7 +343,7 @@ func (c *innerClient) handleResourceTokenDispatcher(dispatcherCtx context.Contex
 		default:
 		}
 		if err = c.processTokenRequests(stream, firstRequest); err != nil {
-			c.pdSvcDiscovery.ScheduleCheckMemberChanged()
+			c.serviceDiscovery.ScheduleCheckMemberChanged()
 			connection.reset()
 			log.Info("[resource_manager] token request error", zap.Error(err))
 		}
