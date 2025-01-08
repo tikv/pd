@@ -162,7 +162,7 @@ type Config struct {
 
 	Keyspace KeyspaceConfig `toml:"keyspace" json:"keyspace"`
 
-	MicroService MicroServiceConfig `toml:"micro-service" json:"micro-service"`
+	Microservice MicroserviceConfig `toml:"micro-service" json:"micro-service"`
 
 	Controller rm.ControllerConfig `toml:"controller" json:"controller"`
 }
@@ -457,7 +457,7 @@ func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
 
 	c.Keyspace.adjust(configMetaData.Child("keyspace"))
 
-	c.MicroService.adjust(configMetaData.Child("micro-service"))
+	c.Microservice.adjust(configMetaData.Child("micro-service"))
 
 	if err := c.Security.Encryption.Adjust(); err != nil {
 		return err
@@ -839,13 +839,13 @@ func (c *DRAutoSyncReplicationConfig) adjust(meta *configutil.ConfigMetaData) {
 	}
 }
 
-// MicroServiceConfig is the configuration for micro service.
-type MicroServiceConfig struct {
+// MicroserviceConfig is the configuration for microservice.
+type MicroserviceConfig struct {
 	EnableSchedulingFallback  bool `toml:"enable-scheduling-fallback" json:"enable-scheduling-fallback,string"`
 	EnableTSODynamicSwitching bool `toml:"enable-tso-dynamic-switching" json:"enable-tso-dynamic-switching,string"`
 }
 
-func (c *MicroServiceConfig) adjust(meta *configutil.ConfigMetaData) {
+func (c *MicroserviceConfig) adjust(meta *configutil.ConfigMetaData) {
 	if !meta.IsDefined("enable-scheduling-fallback") {
 		c.EnableSchedulingFallback = defaultEnableSchedulingFallback
 	}
@@ -854,19 +854,19 @@ func (c *MicroServiceConfig) adjust(meta *configutil.ConfigMetaData) {
 	}
 }
 
-// Clone returns a copy of micro service config.
-func (c *MicroServiceConfig) Clone() *MicroServiceConfig {
+// Clone returns a copy of microservice config.
+func (c *MicroserviceConfig) Clone() *MicroserviceConfig {
 	cfg := *c
 	return &cfg
 }
 
 // IsSchedulingFallbackEnabled returns whether to enable scheduling service fallback to PD service.
-func (c *MicroServiceConfig) IsSchedulingFallbackEnabled() bool {
+func (c *MicroserviceConfig) IsSchedulingFallbackEnabled() bool {
 	return c.EnableSchedulingFallback
 }
 
 // IsTSODynamicSwitchingEnabled returns whether to enable TSO dynamic switching.
-func (c *MicroServiceConfig) IsTSODynamicSwitchingEnabled() bool {
+func (c *MicroserviceConfig) IsTSODynamicSwitchingEnabled() bool {
 	return c.EnableTSODynamicSwitching
 }
 

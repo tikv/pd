@@ -55,7 +55,7 @@ type PersistOptions struct {
 	replicationMode atomic.Value
 	labelProperty   atomic.Value
 	keyspace        atomic.Value
-	microService    atomic.Value
+	microservice    atomic.Value
 	storeConfig     atomic.Value
 	clusterVersion  unsafe.Pointer
 }
@@ -69,7 +69,7 @@ func NewPersistOptions(cfg *Config) *PersistOptions {
 	o.replicationMode.Store(&cfg.ReplicationMode)
 	o.labelProperty.Store(cfg.LabelProperty)
 	o.keyspace.Store(&cfg.Keyspace)
-	o.microService.Store(&cfg.MicroService)
+	o.microservice.Store(&cfg.Microservice)
 	// storeConfig will be fetched from TiKV later,
 	// set it to an empty config here first.
 	o.storeConfig.Store(&sc.StoreConfig{})
@@ -138,14 +138,14 @@ func (o *PersistOptions) SetKeyspaceConfig(cfg *KeyspaceConfig) {
 	o.keyspace.Store(cfg)
 }
 
-// GetMicroServiceConfig returns the micro service configuration.
-func (o *PersistOptions) GetMicroServiceConfig() *MicroServiceConfig {
-	return o.microService.Load().(*MicroServiceConfig)
+// GetMicroserviceConfig returns the microservice configuration.
+func (o *PersistOptions) GetMicroserviceConfig() *MicroserviceConfig {
+	return o.microservice.Load().(*MicroserviceConfig)
 }
 
-// SetMicroServiceConfig sets the micro service configuration.
-func (o *PersistOptions) SetMicroServiceConfig(cfg *MicroServiceConfig) {
-	o.microService.Store(cfg)
+// SetMicroserviceConfig sets the microservice configuration.
+func (o *PersistOptions) SetMicroserviceConfig(cfg *MicroserviceConfig) {
+	o.microservice.Store(cfg)
 }
 
 // GetStoreConfig returns the store config.
@@ -791,7 +791,7 @@ func (o *PersistOptions) Persist(storage endpoint.ConfigStorage) error {
 			ReplicationMode: *o.GetReplicationModeConfig(),
 			LabelProperty:   o.GetLabelPropertyConfig(),
 			Keyspace:        *o.GetKeyspaceConfig(),
-			MicroService:    *o.GetMicroServiceConfig(),
+			Microservice:    *o.GetMicroserviceConfig(),
 			ClusterVersion:  *o.GetClusterVersion(),
 		},
 		StoreConfig: *o.GetStoreConfig(),
@@ -825,7 +825,7 @@ func (o *PersistOptions) Reload(storage endpoint.ConfigStorage) error {
 		o.replicationMode.Store(&cfg.ReplicationMode)
 		o.labelProperty.Store(cfg.LabelProperty)
 		o.keyspace.Store(&cfg.Keyspace)
-		o.microService.Store(&cfg.MicroService)
+		o.microservice.Store(&cfg.Microservice)
 		o.storeConfig.Store(&cfg.StoreConfig)
 		o.SetClusterVersion(&cfg.ClusterVersion)
 	}

@@ -300,7 +300,7 @@ func CreateServer(ctx context.Context, cfg *config.Config, services []string, le
 	})
 	s.registry.RegisterService("MetaStorage", ms_server.NewService)
 	s.registry.RegisterService("ResourceManager", rm_server.NewService[*Server])
-	// Register the micro services REST path.
+	// Register the microservices REST path.
 	s.registry.InstallAllRESTHandler(s, etcdCfg.UserHandlers)
 
 	etcdCfg.ServiceRegister = func(gs *grpc.Server) {
@@ -308,7 +308,7 @@ func CreateServer(ctx context.Context, cfg *config.Config, services []string, le
 		pdpb.RegisterPDServer(gs, grpcServer)
 		keyspacepb.RegisterKeyspaceServer(gs, &KeyspaceServer{GrpcServer: grpcServer})
 		diagnosticspb.RegisterDiagnosticsServer(gs, s)
-		// Register the micro services GRPC service.
+		// Register the microservices GRPC service.
 		s.registry.InstallAllGRPCServices(s, gs)
 		s.grpcServer = gs
 	}
@@ -948,7 +948,7 @@ func (s *Server) GetConfig() *config.Config {
 	cfg.PDServerCfg = *s.persistOptions.GetPDServerConfig().Clone()
 	cfg.ReplicationMode = *s.persistOptions.GetReplicationModeConfig()
 	cfg.Keyspace = *s.persistOptions.GetKeyspaceConfig().Clone()
-	cfg.MicroService = *s.persistOptions.GetMicroServiceConfig().Clone()
+	cfg.Microservice = *s.persistOptions.GetMicroserviceConfig().Clone()
 	cfg.LabelProperty = s.persistOptions.GetLabelPropertyConfig().Clone()
 	cfg.ClusterVersion = *s.persistOptions.GetClusterVersion()
 	return cfg
@@ -979,24 +979,24 @@ func (s *Server) SetKeyspaceConfig(cfg config.KeyspaceConfig) error {
 	return nil
 }
 
-// GetMicroServiceConfig gets the micro service config information.
-func (s *Server) GetMicroServiceConfig() *config.MicroServiceConfig {
-	return s.persistOptions.GetMicroServiceConfig().Clone()
+// GetMicroserviceConfig gets the microservice config information.
+func (s *Server) GetMicroserviceConfig() *config.MicroserviceConfig {
+	return s.persistOptions.GetMicroserviceConfig().Clone()
 }
 
-// SetMicroServiceConfig sets the micro service config information.
-func (s *Server) SetMicroServiceConfig(cfg config.MicroServiceConfig) error {
-	old := s.persistOptions.GetMicroServiceConfig()
-	s.persistOptions.SetMicroServiceConfig(&cfg)
+// SetMicroserviceConfig sets the microservice config information.
+func (s *Server) SetMicroserviceConfig(cfg config.MicroserviceConfig) error {
+	old := s.persistOptions.GetMicroserviceConfig()
+	s.persistOptions.SetMicroserviceConfig(&cfg)
 	if err := s.persistOptions.Persist(s.storage); err != nil {
-		s.persistOptions.SetMicroServiceConfig(old)
-		log.Error("failed to update micro service config",
+		s.persistOptions.SetMicroserviceConfig(old)
+		log.Error("failed to update microservice config",
 			zap.Reflect("new", cfg),
 			zap.Reflect("old", old),
 			errs.ZapError(err))
 		return err
 	}
-	log.Info("micro service config is updated", zap.Reflect("new", cfg), zap.Reflect("old", old))
+	log.Info("microservice config is updated", zap.Reflect("new", cfg), zap.Reflect("old", old))
 	return nil
 }
 
@@ -1391,7 +1391,7 @@ func (s *Server) GetRaftCluster() *cluster.RaftCluster {
 // IsServiceIndependent returns whether the service is independent.
 func (s *Server) IsServiceIndependent(name string) bool {
 	if s.mode == PDServiceMode && !s.IsClosed() {
-		if name == constant.TSOServiceName && !s.GetMicroServiceConfig().IsTSODynamicSwitchingEnabled() {
+		if name == constant.TSOServiceName && !s.GetMicroserviceConfig().IsTSODynamicSwitchingEnabled() {
 			return true
 		}
 		return s.cluster.IsServiceIndependent(name)

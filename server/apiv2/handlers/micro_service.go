@@ -24,8 +24,8 @@ import (
 	"github.com/tikv/pd/server/apiv2/middlewares"
 )
 
-// RegisterMicroService registers microservice handler to the router.
-func RegisterMicroService(r *gin.RouterGroup) {
+// RegisterMicroservice registers microservice handler to the router.
+func RegisterMicroservice(r *gin.RouterGroup) {
 	router := r.Group("ms")
 	router.GET("members/:service", GetMembers)
 	router.GET("primary/:service", GetPrimary)
@@ -40,7 +40,7 @@ func RegisterMicroService(r *gin.RouterGroup) {
 func GetMembers(c *gin.Context) {
 	svr := c.MustGet(middlewares.ServerContextKey).(*server.Server)
 	if !svr.IsPDServiceMode() {
-		c.AbortWithStatusJSON(http.StatusNotFound, "not support micro service")
+		c.AbortWithStatusJSON(http.StatusNotFound, "not support microservice")
 		return
 	}
 
@@ -66,7 +66,7 @@ func GetMembers(c *gin.Context) {
 func GetPrimary(c *gin.Context) {
 	svr := c.MustGet(middlewares.ServerContextKey).(*server.Server)
 	if !svr.IsPDServiceMode() {
-		c.AbortWithStatusJSON(http.StatusNotFound, "not support micro service")
+		c.AbortWithStatusJSON(http.StatusNotFound, "not support microservice")
 		return
 	}
 

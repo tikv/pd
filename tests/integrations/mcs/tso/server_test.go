@@ -169,7 +169,7 @@ func checkTSOPath(re *require.Assertions, isPDServiceMode bool) {
 	defer cancel()
 	if isPDServiceMode {
 		cluster, err = tests.NewTestPDServiceCluster(ctx, 1, func(conf *config.Config, _ string) {
-			conf.MicroService.EnableTSODynamicSwitching = false
+			conf.Microservice.EnableTSODynamicSwitching = false
 		})
 	} else {
 		cluster, err = tests.NewTestCluster(ctx, 1)
@@ -276,9 +276,9 @@ func TestForwardTSORelated(t *testing.T) {
 	suite := NewPDServiceForward(re)
 	defer suite.ShutDown()
 	leaderServer := suite.cluster.GetLeaderServer().GetServer()
-	cfg := leaderServer.GetMicroServiceConfig().Clone()
+	cfg := leaderServer.GetMicroserviceConfig().Clone()
 	cfg.EnableTSODynamicSwitching = false
-	leaderServer.SetMicroServiceConfig(*cfg)
+	leaderServer.SetMicroserviceConfig(*cfg)
 	// Unable to use the tso-related interface without tso server
 	suite.checkUnavailableTSO(re)
 	tc, err := tests.NewTestTSOCluster(suite.ctx, 1, suite.backendEndpoints)
@@ -600,7 +600,7 @@ func TestTSOServiceSwitch(t *testing.T) {
 
 	tc, err := tests.NewTestPDServiceCluster(ctx, 1,
 		func(conf *config.Config, _ string) {
-			conf.MicroService.EnableTSODynamicSwitching = true
+			conf.Microservice.EnableTSODynamicSwitching = true
 		},
 	)
 	re.NoError(err)
@@ -638,9 +638,9 @@ func TestTSOServiceSwitch(t *testing.T) {
 	re.NoError(err)
 
 	// Disable TSO switching
-	cfg := pdLeader.GetServer().GetMicroServiceConfig().Clone()
+	cfg := pdLeader.GetServer().GetMicroserviceConfig().Clone()
 	cfg.EnableTSODynamicSwitching = false
-	pdLeader.GetServer().SetMicroServiceConfig(*cfg)
+	pdLeader.GetServer().SetMicroserviceConfig(*cfg)
 
 	tsoCluster.Destroy()
 
@@ -654,10 +654,10 @@ func TestTSOServiceSwitch(t *testing.T) {
 	}
 
 	// Now enable TSO switching
-	cfg = pdLeader.GetServer().GetMicroServiceConfig().Clone()
+	cfg = pdLeader.GetServer().GetMicroserviceConfig().Clone()
 
 	cfg.EnableTSODynamicSwitching = true
-	pdLeader.GetServer().SetMicroServiceConfig(*cfg)
+	pdLeader.GetServer().SetMicroserviceConfig(*cfg)
 
 	// Wait for PD to detect the change
 	time.Sleep(300 * time.Millisecond)

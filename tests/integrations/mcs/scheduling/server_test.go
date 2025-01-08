@@ -216,10 +216,10 @@ func (suite *serverTestSuite) TestForwardStoreHeartbeat() {
 func (suite *serverTestSuite) TestSchedulingServiceFallback() {
 	re := suite.Require()
 	leaderServer := suite.pdLeader.GetServer()
-	conf := leaderServer.GetMicroServiceConfig().Clone()
+	conf := leaderServer.GetMicroserviceConfig().Clone()
 	// Change back to the default value.
 	conf.EnableSchedulingFallback = true
-	leaderServer.SetMicroServiceConfig(*conf)
+	leaderServer.SetMicroserviceConfig(*conf)
 	// PD service will execute scheduling jobs since there is no scheduling server.
 	testutil.Eventually(re, func() bool {
 		return suite.pdLeader.GetServer().GetRaftCluster().IsSchedulingControllerRunning()
@@ -267,15 +267,15 @@ func (suite *serverTestSuite) TestDisableSchedulingServiceFallback() {
 	})
 	leaderServer := suite.pdLeader.GetServer()
 	// After Disabling scheduling service fallback, the PD service will stop scheduling.
-	conf := leaderServer.GetMicroServiceConfig().Clone()
+	conf := leaderServer.GetMicroserviceConfig().Clone()
 	conf.EnableSchedulingFallback = false
-	leaderServer.SetMicroServiceConfig(*conf)
+	leaderServer.SetMicroserviceConfig(*conf)
 	testutil.Eventually(re, func() bool {
 		return !suite.pdLeader.GetServer().GetRaftCluster().IsSchedulingControllerRunning()
 	})
 	// Enable scheduling service fallback again, the PD service will restart scheduling.
 	conf.EnableSchedulingFallback = true
-	leaderServer.SetMicroServiceConfig(*conf)
+	leaderServer.SetMicroserviceConfig(*conf)
 	testutil.Eventually(re, func() bool {
 		return suite.pdLeader.GetServer().GetRaftCluster().IsSchedulingControllerRunning()
 	})
@@ -294,7 +294,7 @@ func (suite *serverTestSuite) TestDisableSchedulingServiceFallback() {
 	})
 	// Disable scheduling service fallback and stop scheduling server. PD service won't execute scheduling jobs again.
 	conf.EnableSchedulingFallback = false
-	leaderServer.SetMicroServiceConfig(*conf)
+	leaderServer.SetMicroserviceConfig(*conf)
 	tc.GetPrimaryServer().Close()
 	time.Sleep(time.Second)
 	testutil.Eventually(re, func() bool {

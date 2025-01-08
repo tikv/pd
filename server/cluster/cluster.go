@@ -406,7 +406,7 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 func (c *RaftCluster) checkSchedulingService() {
 	if c.isPDServiceMode {
 		servers, err := discovery.Discover(c.etcdClient, constant.SchedulingServiceName)
-		if c.opt.GetMicroServiceConfig().IsSchedulingFallbackEnabled() && (err != nil || len(servers) == 0) {
+		if c.opt.GetMicroserviceConfig().IsSchedulingFallbackEnabled() && (err != nil || len(servers) == 0) {
 			c.startSchedulingJobs(c, c.hbstreams)
 			c.UnsetServiceIndependent(constant.SchedulingServiceName)
 		} else {
@@ -426,7 +426,7 @@ func (c *RaftCluster) checkSchedulingService() {
 // checkTSOService checks the TSO service.
 func (c *RaftCluster) checkTSOService() {
 	if c.isPDServiceMode {
-		if c.opt.GetMicroServiceConfig().IsTSODynamicSwitchingEnabled() {
+		if c.opt.GetMicroserviceConfig().IsTSODynamicSwitchingEnabled() {
 			servers, err := discovery.Discover(c.etcdClient, constant.TSOServiceName)
 			if err != nil || len(servers) == 0 {
 				if err := c.startTSOJobsIfNeeded(); err != nil {

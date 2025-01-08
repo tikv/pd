@@ -107,13 +107,13 @@ func (suite *tsoAPITestSuite) TestForwardResetTS() {
 	// Test reset ts
 	input := []byte(`{"tso":"121312", "force-use-larger":true}`)
 	err := testutil.CheckPostJSON(tests.TestDialClient, url, input,
-		testutil.StatusOK(re), testutil.StringContain(re, "Reset ts successfully"), testutil.WithHeader(re, apiutil.XForwardedToMicroServiceHeader, "true"))
+		testutil.StatusOK(re), testutil.StringContain(re, "Reset ts successfully"), testutil.WithHeader(re, apiutil.XForwardedToMicroserviceHeader, "true"))
 	re.NoError(err)
 
 	// Test reset ts with invalid tso
 	input = []byte(`{}`)
 	err = testutil.CheckPostJSON(tests.TestDialClient, url, input,
-		testutil.StatusNotOK(re), testutil.StringContain(re, "invalid tso value"), testutil.WithHeader(re, apiutil.XForwardedToMicroServiceHeader, "true"))
+		testutil.StatusNotOK(re), testutil.StringContain(re, "invalid tso value"), testutil.WithHeader(re, apiutil.XForwardedToMicroserviceHeader, "true"))
 	re.NoError(err)
 }
 
@@ -217,14 +217,14 @@ func TestForwardOnlyTSONoScheduling(t *testing.T) {
 	// Test /operators, it should not forward when there is no scheduling server.
 	var slice []string
 	err = testutil.ReadGetJSON(re, tests.TestDialClient, fmt.Sprintf("%s/%s", urlPrefix, "operators"), &slice,
-		testutil.WithoutHeader(re, apiutil.XForwardedToMicroServiceHeader))
+		testutil.WithoutHeader(re, apiutil.XForwardedToMicroserviceHeader))
 	re.NoError(err)
 	re.Empty(slice)
 
 	// Test admin/reset-ts, it should forward to tso server.
 	input := []byte(`{"tso":"121312", "force-use-larger":true}`)
 	err = testutil.CheckPostJSON(tests.TestDialClient, fmt.Sprintf("%s/%s", urlPrefix, "admin/reset-ts"), input,
-		testutil.StatusOK(re), testutil.StringContain(re, "Reset ts successfully"), testutil.WithHeader(re, apiutil.XForwardedToMicroServiceHeader, "true"))
+		testutil.StatusOK(re), testutil.StringContain(re, "Reset ts successfully"), testutil.WithHeader(re, apiutil.XForwardedToMicroserviceHeader, "true"))
 	re.NoError(err)
 
 	// If close tso server, it should try forward to tso server, but return error in pd service mode.

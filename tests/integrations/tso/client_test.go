@@ -99,7 +99,7 @@ func (suite *tsoClientTestSuite) SetupSuite() {
 		suite.cluster, err = tests.NewTestCluster(suite.ctx, serverCount)
 	} else {
 		suite.cluster, err = tests.NewTestPDServiceCluster(suite.ctx, serverCount, func(conf *config.Config, _ string) {
-			conf.MicroService.EnableTSODynamicSwitching = false
+			conf.Microservice.EnableTSODynamicSwitching = false
 		})
 	}
 	re.NoError(err)

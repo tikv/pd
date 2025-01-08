@@ -1233,11 +1233,11 @@ func (suite *configTestSuite) checkPDServerConfig(cluster *pdTests.TestCluster) 
 	re.Equal(int(3), conf.FlowRoundByDigit)
 }
 
-func (suite *configTestSuite) TestMicroServiceConfig() {
-	suite.env.RunTestBasedOnMode(suite.checkMicroServiceConfig)
+func (suite *configTestSuite) TestMicroserviceConfig() {
+	suite.env.RunTestBasedOnMode(suite.checkMicroserviceConfig)
 }
 
-func (suite *configTestSuite) checkMicroServiceConfig(cluster *pdTests.TestCluster) {
+func (suite *configTestSuite) checkMicroserviceConfig(cluster *pdTests.TestCluster) {
 	re := suite.Require()
 	leaderServer := cluster.GetLeaderServer()
 	pdAddr := leaderServer.GetAddr()
@@ -1254,13 +1254,13 @@ func (suite *configTestSuite) checkMicroServiceConfig(cluster *pdTests.TestClust
 	re.NoError(err)
 	cfg := config.Config{}
 	re.NoError(json.Unmarshal(output, &cfg))
-	re.True(svr.GetMicroServiceConfig().EnableSchedulingFallback)
-	re.True(cfg.MicroService.EnableSchedulingFallback)
+	re.True(svr.GetMicroserviceConfig().EnableSchedulingFallback)
+	re.True(cfg.Microservice.EnableSchedulingFallback)
 	// config set enable-scheduling-fallback <value>
 	args := []string{"-u", pdAddr, "config", "set", "enable-scheduling-fallback", "false"}
 	_, err = tests.ExecuteCommand(cmd, args...)
 	re.NoError(err)
-	re.False(svr.GetMicroServiceConfig().EnableSchedulingFallback)
+	re.False(svr.GetMicroserviceConfig().EnableSchedulingFallback)
 }
 
 func (suite *configTestSuite) TestRegionRules() {
