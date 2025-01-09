@@ -271,9 +271,9 @@ func (s *GrpcServer) GetClusterInfo(context.Context, *pdpb.GetClusterInfoRequest
 	}, nil
 }
 
-// GetMinTS implements gRPC PDServer. In normal PD, it simply returns a timestamp.
-// If the tso server exist, it queries all tso servers and gets the minimum timestamp across
-// all keyspace groups.
+// GetMinTS implements gRPC PDServer. In non-microservice env, it simply returns a timestamp.
+// In microservice env, if the tso server exist, it queries all tso servers and gets the minimum timestamp across
+// all keyspace groups. Otherwise, it generates a timestamp locally.
 func (s *GrpcServer) GetMinTS(
 	ctx context.Context, request *pdpb.GetMinTSRequest,
 ) (*pdpb.GetMinTSResponse, error) {
