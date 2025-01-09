@@ -17,6 +17,7 @@ package schedulers
 import (
 	"math/rand"
 	"net/http"
+	"sort"
 	"strconv"
 
 	"github.com/gorilla/mux"
@@ -288,7 +289,7 @@ func (s *evictLeaderScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) 
 // Schedule implements the Scheduler interface.
 func (s *evictLeaderScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) ([]*operator.Operator, []plan.Plan) {
 	evictLeaderCounter.Inc()
-	return scheduleEvictLeaderBatch(s.R, s.GetName(), cluster, s.conf), nil
+	return scheduleEvictLeaderBatch(s.R, s.GetName(), cluster, s.conf, s.OpController), nil
 }
 
 func uniqueAppendOperator(dst []*operator.Operator, src ...*operator.Operator) []*operator.Operator {
@@ -312,11 +313,11 @@ type evictLeaderStoresConf interface {
 	getBatch() int
 }
 
-func scheduleEvictLeaderBatch(r *rand.Rand, name string, cluster sche.SchedulerCluster, conf evictLeaderStoresConf) []*operator.Operator {
+func scheduleEvictLeaderBatch(r *rand.Rand, name string, cluster sche.SchedulerCluster, conf evictLeaderStoresConf, opController *operator.Controller) []*operator.Operator {
 	var ops []*operator.Operator
 	batchSize := conf.getBatch()
 	for range batchSize {
-		once := scheduleEvictLeaderOnce(r, name, cluster, conf)
+		once := scheduleEvictLeaderOnce(r, name, cluster, conf, opController)
 		// no more regions
 		if len(once) == 0 {
 			break
@@ -330,7 +331,7 @@ func scheduleEvictLeaderBatch(r *rand.Rand, name string, cluster sche.SchedulerC
 	return ops
 }
 
-func scheduleEvictLeaderOnce(r *rand.Rand, name string, cluster sche.SchedulerCluster, conf evictLeaderStoresConf) []*operator.Operator {
+func scheduleEvictLeaderOnce(r *rand.Rand, name string, cluster sche.SchedulerCluster, conf evictLeaderStoresConf, opController *operator.Controller) []*operator.Operator {
 	stores := conf.getStores()
 	ops := make([]*operator.Operator, 0, len(stores))
 	for _, storeID := range stores {
@@ -368,7 +369,7 @@ func scheduleEvictLeaderOnce(r *rand.Rand, name string, cluster sche.SchedulerCl
 			evictLeaderNoTargetStoreCounter.Inc()
 			continue
 		}
-		op, err := createOperatorWithSort(name, cluster, candidates, region)
+		op, err := createOperatorWithSort(name, cluster, candidates, region, opController)
 		if err != nil {
 			log.Debug("fail to create evict leader operator", errs.ZapError(err))
 			continue
@@ -380,14 +381,23 @@ func scheduleEvictLeaderOnce(r *rand.Rand, name string, cluster sche.SchedulerCl
 	return ops
 }
 
-func createOperatorWithSort(name string, cluster sche.SchedulerCluster, candidates *filter.StoreCandidates, region *core.RegionInfo) (*operator.Operator, error) {
+func createOperatorWithSort(name string, cluster sche.SchedulerCluster, candidates *filter.StoreCandidates, region *core.RegionInfo, opController *operator.Controller) (*operator.Operator, error) {
 	// we will pick low leader score store firstly.
-	candidates.Sort(filter.LeaderScoreComparer(cluster.GetSharedConfig()))
+	targets := candidates.Stores
+	sort.Slice(targets, func(i, j int) bool {
+		leaderSchedulePolicy := cluster.GetSchedulerConfig().GetLeaderSchedulePolicy()
+		opInfluence := opController.GetOpInfluence(cluster.GetBasicCluster())
+		kind := constant.NewScheduleKind(constant.LeaderKind, leaderSchedulePolicy)
+		iOp := opInfluence.GetStoreInfluence(targets[i].GetID()).ResourceProperty(kind)
+		jOp := opInfluence.GetStoreInfluence(targets[j].GetID()).ResourceProperty(kind)
+		return targets[i].LeaderScore(leaderSchedulePolicy, iOp) <
+			targets[j].LeaderScore(leaderSchedulePolicy, jOp)
+	})
 	var (
 		op  *operator.Operator
 		err error
 	)
-	for _, target := range candidates.Stores {
+	for _, target := range targets {
 		op, err = operator.CreateTransferLeaderOperator(name, cluster, region, target.GetID(), operator.OpLeader)
 		if op != nil && err == nil {
 			return op, err

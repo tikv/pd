@@ -43,20 +43,3 @@ func TestRegionCompare(t *testing.T) {
 	cs.Sort(RegionScoreComparer(cfg))
 	re.Equal(uint64(5), cs.PickFirst().GetID())
 }
-
-func TestLeaderCompare(t *testing.T) {
-	re := require.New(t)
-	ids := []uint64{1, 2, 3, 4, 5}
-	stores := make([]*core.StoreInfo, 0, len(ids))
-	for _, id := range ids {
-		stores = append(stores, core.NewStoreInfo(
-			&metapb.Store{Id: id},
-			core.SetLeaderCount(int(6-id)*1000),
-		))
-	}
-	cs := NewCandidates(rand.New(rand.NewSource(time.Now().UnixNano())), stores)
-	cfg := mockconfig.NewTestOptions()
-	re.Equal(uint64(1), cs.PickFirst().GetID())
-	cs.Sort(LeaderScoreComparer(cfg))
-	re.Equal(uint64(5), cs.PickFirst().GetID())
-}

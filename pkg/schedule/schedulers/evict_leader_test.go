@@ -137,3 +137,33 @@ func TestBatchEvict(t *testing.T) {
 		return len(ops) == 5
 	})
 }
+
+func TestEvictLeaderSelectsLowScoreStore(t *testing.T) {
+	re := require.New(t)
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+
+	// Add stores with different scores
+	tc.AddLeaderStore(1, 30) // store 1
+	tc.AddLeaderStore(2, 20) // store 2
+	tc.AddLeaderStore(3, 10) // store 3
+
+	// Add regions 1, 2, 3 with leaders in stores 1, 2, 3
+	tc.AddLeaderRegion(1, 1, 2, 3)
+
+	// Create EvictLeader scheduler
+	sl, err := CreateScheduler(types.EvictLeaderScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.EvictLeaderScheduler, []string{"1"}), func(string) error { return nil })
+	re.NoError(err)
+	re.True(sl.IsScheduleAllowed(tc))
+
+	// Schedule the operator and it should select store 3 to evict the leader, because it has the lowest score with 10.
+	ops, _ := sl.Schedule(tc, false)
+	re.Len(ops, 1)
+	operatorutil.CheckMultiTargetTransferLeader(re, ops[0], operator.OpLeader, 1, []uint64{3})
+
+	// Schedule the operator and it should select store 2 to evict the leader, because it has the lowest score with 5.
+	tc.AddLeaderStore(2, 5)
+	ops, _ = sl.Schedule(tc, false)
+	re.Len(ops, 1)
+	operatorutil.CheckMultiTargetTransferLeader(re, ops[0], operator.OpLeader, 1, []uint64{2})
+}

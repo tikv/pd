@@ -244,7 +244,7 @@ func (s *evictSlowStoreScheduler) cleanupEvictLeader(cluster sche.SchedulerClust
 }
 
 func (s *evictSlowStoreScheduler) schedulerEvictLeader(cluster sche.SchedulerCluster) []*operator.Operator {
-	return scheduleEvictLeaderBatch(s.R, s.GetName(), cluster, s.conf)
+	return scheduleEvictLeaderBatch(s.R, s.GetName(), cluster, s.conf, s.OpController)
 }
 
 // IsScheduleAllowed implements the Scheduler interface.
