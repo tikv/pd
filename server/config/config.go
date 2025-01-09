@@ -19,7 +19,6 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"math"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -1159,9 +1158,6 @@ type PDServerConfig struct {
 	MetricStorage string `toml:"metric-storage" json:"metric-storage"`
 	// There are some values supported: "auto", "none", or a specific address, default: "auto"
 	DashboardAddress string `toml:"dashboard-address" json:"dashboard-address"`
-	// TraceRegionFlow the option to update flow information of regions.
-	// WARN: TraceRegionFlow is deprecated.
-	TraceRegionFlow bool `toml:"trace-region-flow" json:"trace-region-flow,string,omitempty"`
 	// FlowRoundByDigit used to discretization processing flow information.
 	FlowRoundByDigit int `toml:"flow-round-by-digit" json:"flow-round-by-digit"`
 	// MinResolvedTSPersistenceInterval is the interval to save the min resolved ts.
@@ -1186,35 +1182,59 @@ func (c *PDServerConfig) adjust(meta *configMetaData) error {
 		adjustInt(&c.FlowRoundByDigit, defaultFlowRoundByDigit)
 	}
 	if !meta.IsDefined("min-resolved-ts-persistence-interval") {
+<<<<<<< HEAD
 		adjustDuration(&c.MinResolvedTSPersistenceInterval, DefaultMinResolvedTSPersistenceInterval)
+=======
+		configutil.AdjustDuration(&c.MinResolvedTSPersistenceInterval, DefaultMinResolvedTSPersistenceInterval)
+	}
+	if !meta.IsDefined("server-memory-limit") {
+		configutil.AdjustFloat64(&c.ServerMemoryLimit, defaultServerMemoryLimit)
+	}
+	if c.ServerMemoryLimit < minServerMemoryLimit {
+		c.ServerMemoryLimit = minServerMemoryLimit
+	} else if c.ServerMemoryLimit > maxServerMemoryLimit {
+		c.ServerMemoryLimit = maxServerMemoryLimit
+	}
+	if !meta.IsDefined("server-memory-limit-gc-trigger") {
+		configutil.AdjustFloat64(&c.ServerMemoryLimitGCTrigger, defaultServerMemoryLimitGCTrigger)
+	}
+	if c.ServerMemoryLimitGCTrigger < minServerMemoryLimitGCTrigger {
+		c.ServerMemoryLimitGCTrigger = minServerMemoryLimitGCTrigger
+	} else if c.ServerMemoryLimitGCTrigger > maxServerMemoryLimitGCTrigger {
+		c.ServerMemoryLimitGCTrigger = maxServerMemoryLimitGCTrigger
+	}
+	if !meta.IsDefined("enable-gogc-tuner") {
+		c.EnableGOGCTuner = defaultEnableGOGCTuner
+	}
+	if !meta.IsDefined("gc-tuner-threshold") {
+		configutil.AdjustFloat64(&c.GCTunerThreshold, defaultGCTunerThreshold)
+	}
+	if c.GCTunerThreshold < minGCTunerThreshold {
+		c.GCTunerThreshold = minGCTunerThreshold
+	} else if c.GCTunerThreshold > maxGCTunerThreshold {
+		c.GCTunerThreshold = maxGCTunerThreshold
+	}
+	if err := migrateConfigurationFromFile(meta); err != nil {
+		return err
+>>>>>>> 31a0ad6b2 (config: completely remove the deprecated field from the PD server config (#8981))
 	}
 	c.migrateConfigurationFromFile(meta)
 	return c.Validate()
 }
 
+<<<<<<< HEAD
 func (c *PDServerConfig) migrateConfigurationFromFile(meta *configMetaData) error {
+=======
+func migrateConfigurationFromFile(meta *configutil.ConfigMetaData) error {
+>>>>>>> 31a0ad6b2 (config: completely remove the deprecated field from the PD server config (#8981))
 	oldName, newName := "trace-region-flow", "flow-round-by-digit"
-	defineOld, defineNew := meta.IsDefined(oldName), meta.IsDefined(newName)
+	defineOld := meta.IsDefined(oldName)
 	switch {
-	case defineOld && defineNew:
-		if c.TraceRegionFlow && (c.FlowRoundByDigit == defaultFlowRoundByDigit) {
-			return errors.Errorf("config item %s and %s(deprecated) are conflict", newName, oldName)
-		}
-	case defineOld && !defineNew:
-		if !c.TraceRegionFlow {
-			c.FlowRoundByDigit = math.MaxInt8
-		}
+	case defineOld:
+		return errors.Errorf("config item %s and %s(deprecated) are conflict", newName, oldName)
+	default:
 	}
 	return nil
-}
-
-// MigrateDeprecatedFlags updates new flags according to deprecated flags.
-func (c *PDServerConfig) MigrateDeprecatedFlags() {
-	if !c.TraceRegionFlow {
-		c.FlowRoundByDigit = math.MaxInt8
-	}
-	// json omity the false. next time will not persist to the kv.
-	c.TraceRegionFlow = false
 }
 
 // Clone returns a cloned PD server config.
