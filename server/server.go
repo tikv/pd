@@ -239,6 +239,14 @@ type HandlerBuilder func(context.Context, *Server) (http.Handler, apiutil.APISer
 
 // CreateServer creates the UNINITIALIZED pd server with given configuration.
 func CreateServer(ctx context.Context, cfg *config.Config, services []string, legacyServiceBuilders ...HandlerBuilder) (*Server, error) {
+	// TODO: Currently, whether we enable microservice or not is determined by the service list.
+	// It's equal to whether we enable the keyspace group or not.
+	// But indeed the keyspace group is independent of the microservice.
+	// There could be the following scenarios:
+	// 1. Enable microservice but disable keyspace group. (non-serverless scenario)
+	// 2. Enable microservice and enable keyspace group. (serverless scenario)
+	// 3. Disable microservice and disable keyspace group. (both serverless scenario and non-serverless scenario)
+	// We should separate the keyspace group from the microservice later.
 	isKeyspaceGroupEnabled := len(services) != 0
 	log.Info("PD config", zap.Bool("enable-keyspace-group", isKeyspaceGroupEnabled), zap.Reflect("config", cfg))
 	serviceMiddlewareCfg := config.NewServiceMiddlewareConfig()
