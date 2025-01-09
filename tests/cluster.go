@@ -429,8 +429,8 @@ func NewTestCluster(ctx context.Context, initialServerCount int, opts ...ConfigO
 	return createTestCluster(ctx, initialServerCount, nil, opts...)
 }
 
-// NewTestPDServiceCluster creates a new TestCluster with PD service.
-func NewTestPDServiceCluster(ctx context.Context, initialServerCount int, opts ...ConfigOption) (*TestCluster, error) {
+// NewTestClusterWithKeyspaceGroup creates a new TestCluster with PD.
+func NewTestClusterWithKeyspaceGroup(ctx context.Context, initialServerCount int, opts ...ConfigOption) (*TestCluster, error) {
 	return createTestCluster(ctx, initialServerCount, []string{constant.PDServiceName}, opts...)
 }
 
@@ -461,13 +461,13 @@ func createTestCluster(ctx context.Context, initialServerCount int, services []s
 	}, nil
 }
 
-// RestartTestAPICluster restarts the API test cluster.
-func RestartTestAPICluster(ctx context.Context, cluster *TestCluster) (*TestCluster, error) {
+// RestartTestPDCluster restarts the PD test cluster.
+func RestartTestPDCluster(ctx context.Context, cluster *TestCluster) (*TestCluster, error) {
 	return restartTestCluster(ctx, cluster, true)
 }
 
 func restartTestCluster(
-	ctx context.Context, cluster *TestCluster, isPDServiceMode bool,
+	ctx context.Context, cluster *TestCluster, isKeyspaceGroupEnabled bool,
 ) (newTestCluster *TestCluster, err error) {
 	schedulers.Register()
 	newTestCluster = &TestCluster{
@@ -494,7 +494,7 @@ func restartTestCluster(
 				newServer *TestServer
 				serverErr error
 			)
-			if isPDServiceMode {
+			if isKeyspaceGroupEnabled {
 				newServer, serverErr = NewTestServer(ctx, serverCfg, []string{constant.PDServiceName})
 			} else {
 				newServer, serverErr = NewTestServer(ctx, serverCfg, nil)
@@ -729,8 +729,8 @@ func (c *TestCluster) Join(ctx context.Context, opts ...ConfigOption) (*TestServ
 	return s, nil
 }
 
-// JoinPDServer is used to add a new TestServer into the cluster.
-func (c *TestCluster) JoinPDServer(ctx context.Context, opts ...ConfigOption) (*TestServer, error) {
+// JoinWithKeyspaceGroup is used to add a new TestServer into the cluster with keyspace group enabled.
+func (c *TestCluster) JoinWithKeyspaceGroup(ctx context.Context, opts ...ConfigOption) (*TestServer, error) {
 	conf, err := c.config.join().Generate(opts...)
 	if err != nil {
 		return nil, err

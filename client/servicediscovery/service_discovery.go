@@ -74,7 +74,7 @@ const (
 type serviceType int
 
 const (
-	apiService serviceType = iota
+	pdService serviceType = iota
 	tsoService
 )
 
@@ -678,7 +678,7 @@ func (*serviceDiscovery) GetKeyspaceGroupID() uint32 {
 // DiscoverMicroservice discovers the microservice with the specified type and returns the server urls.
 func (c *serviceDiscovery) discoverMicroservice(svcType serviceType) (urls []string, err error) {
 	switch svcType {
-	case apiService:
+	case pdService:
 		urls = c.GetServiceURLs()
 	case tsoService:
 		leaderURL := c.getLeaderURL()

@@ -82,7 +82,7 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) SetupSuite() {
 
 	var err error
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
-	suite.cluster, err = tests.NewTestPDServiceCluster(suite.ctx, 1)
+	suite.cluster, err = tests.NewTestClusterWithKeyspaceGroup(suite.ctx, 1)
 	re.NoError(err)
 	err = suite.cluster.RunInitialServers()
 	re.NoError(err)
@@ -537,8 +537,8 @@ func TestTwiceSplitKeyspaceGroup(t *testing.T) {
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/acceleratedAllocNodes", `return(true)`))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/fastGroupSplitPatroller", `return(true)`))
 
-	// Init PD service config but not start.
-	tc, err := tests.NewTestPDServiceCluster(ctx, 1, func(conf *config.Config, _ string) {
+	// Init PD config but not start.
+	tc, err := tests.NewTestClusterWithKeyspaceGroup(ctx, 1, func(conf *config.Config, _ string) {
 		conf.Keyspace.PreAlloc = []string{
 			"keyspace_a", "keyspace_b",
 		}
@@ -546,7 +546,7 @@ func TestTwiceSplitKeyspaceGroup(t *testing.T) {
 	re.NoError(err)
 	pdAddr := tc.GetConfig().GetClientURL()
 
-	// Start PD service and tso server.
+	// Start PD and tso server.
 	err = tc.RunInitialServers()
 	re.NoError(err)
 	defer tc.Destroy()
@@ -734,8 +734,8 @@ func TestGetTSOImmediately(t *testing.T) {
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/acceleratedAllocNodes", `return(true)`))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/fastGroupSplitPatroller", `return(true)`))
 
-	// Init PD service config but not start.
-	tc, err := tests.NewTestPDServiceCluster(ctx, 1, func(conf *config.Config, _ string) {
+	// Init PD config but not start.
+	tc, err := tests.NewTestClusterWithKeyspaceGroup(ctx, 1, func(conf *config.Config, _ string) {
 		conf.Keyspace.PreAlloc = []string{
 			"keyspace_a", "keyspace_b",
 		}
@@ -743,7 +743,7 @@ func TestGetTSOImmediately(t *testing.T) {
 	re.NoError(err)
 	pdAddr := tc.GetConfig().GetClientURL()
 
-	// Start PD service and tso server.
+	// Start PD and tso server.
 	err = tc.RunInitialServers()
 	re.NoError(err)
 	defer tc.Destroy()

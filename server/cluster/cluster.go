@@ -131,7 +131,7 @@ type Server interface {
 	GetMembers() ([]*pdpb.Member, error)
 	ReplicateFileToMember(ctx context.Context, member *pdpb.Member, name string, data []byte) error
 	GetKeyspaceGroupManager() *keyspace.GroupManager
-	IsPDServiceMode() bool
+	IsKeyspaceGroupEnabled() bool
 	GetSafePointV2Manager() *gc.SafePointV2Manager
 }
 
@@ -156,12 +156,12 @@ type RaftCluster struct {
 	etcdClient *clientv3.Client
 	httpClient *http.Client
 
-	running         bool
-	isPDServiceMode bool
-	meta            *metapb.Cluster
-	storage         storage.Storage
-	minResolvedTS   atomic.Value // Store as uint64
-	externalTS      atomic.Value // Store as uint64
+	running                bool
+	isKeyspaceGroupEnabled bool
+	meta                   *metapb.Cluster
+	storage                storage.Storage
+	minResolvedTS          atomic.Value // Store as uint64
+	externalTS             atomic.Value // Store as uint64
 
 	// Keep the previous store limit settings when removing a store.
 	prevStoreLimit map[uint64]map[storelimit.Type]float64
@@ -325,7 +325,7 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 		log.Warn("raft cluster has already been started")
 		return nil
 	}
-	c.isPDServiceMode = s.IsPDServiceMode()
+	c.isKeyspaceGroupEnabled = s.IsKeyspaceGroupEnabled()
 	err = c.InitCluster(s.GetAllocator(), s.GetPersistOptions(), s.GetHBStreams(), s.GetKeyspaceGroupManager())
 	if err != nil {
 		return err
@@ -376,7 +376,7 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 	c.loadExternalTS()
 	c.loadMinResolvedTS()
 
-	if c.isPDServiceMode {
+	if c.isKeyspaceGroupEnabled {
 		// bootstrap keyspace group manager after starting other parts successfully.
 		// This order avoids a stuck goroutine in keyspaceGroupManager when it fails to create raftcluster.
 		err = c.keyspaceGroupManager.Bootstrap(c.ctx)
@@ -404,7 +404,7 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 }
 
 func (c *RaftCluster) checkSchedulingService() {
-	if c.isPDServiceMode {
+	if c.isKeyspaceGroupEnabled {
 		servers, err := discovery.Discover(c.etcdClient, constant.SchedulingServiceName)
 		if c.opt.GetMicroserviceConfig().IsSchedulingFallbackEnabled() && (err != nil || len(servers) == 0) {
 			c.startSchedulingJobs(c, c.hbstreams)
@@ -425,7 +425,7 @@ func (c *RaftCluster) checkSchedulingService() {
 
 // checkTSOService checks the TSO service.
 func (c *RaftCluster) checkTSOService() {
-	if c.isPDServiceMode {
+	if c.isKeyspaceGroupEnabled {
 		if c.opt.GetMicroserviceConfig().IsTSODynamicSwitchingEnabled() {
 			servers, err := discovery.Discover(c.etcdClient, constant.TSOServiceName)
 			if err != nil || len(servers) == 0 {

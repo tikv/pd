@@ -49,8 +49,8 @@ const (
 	ruleBundlePrefix              = "pd/api/v1/config/placement-rule"
 	pdServerPrefix                = "pd/api/v1/config/pd-server"
 	serviceMiddlewareConfigPrefix = "pd/api/v1/service-middleware/config"
-	// flagFromPDService has no influence for pd mode, but it is useful for us to debug in pd service mode.
-	flagFromPDService = "from_pd_service"
+	// flagFromPD has no influence for pd mode, but it is useful for us to debug in pd service mode.
+	flagFromPD = "from_pd"
 )
 
 // NewConfigCommand return a config subcommand of rootCmd
@@ -81,7 +81,7 @@ func NewShowConfigCommand() *cobra.Command {
 	sc.AddCommand(newShowReplicationModeCommand())
 	sc.AddCommand(NewShowServerConfigCommand())
 	sc.AddCommand(NewShowServiceMiddlewareConfigCommand())
-	sc.Flags().Bool(flagFromPDService, false, "read data from PD service rather than microservice")
+	sc.Flags().Bool(flagFromPD, false, "read data from PD rather than microservice")
 	return sc
 }
 
@@ -92,7 +92,7 @@ func NewShowAllConfigCommand() *cobra.Command {
 		Short: "show all config of PD",
 		Run:   showAllConfigCommandFunc,
 	}
-	sc.Flags().Bool(flagFromPDService, false, "read data from PD service rather than microservice")
+	sc.Flags().Bool(flagFromPD, false, "read data from PD rather than microservice")
 	return sc
 }
 
@@ -103,7 +103,7 @@ func NewShowScheduleConfigCommand() *cobra.Command {
 		Short: "show schedule config of PD",
 		Run:   showScheduleConfigCommandFunc,
 	}
-	sc.Flags().Bool(flagFromPDService, false, "read data from PD service rather than microservice")
+	sc.Flags().Bool(flagFromPD, false, "read data from PD rather than microservice")
 	return sc
 }
 
@@ -114,7 +114,7 @@ func NewShowReplicationConfigCommand() *cobra.Command {
 		Short: "show replication config of PD",
 		Run:   showReplicationConfigCommandFunc,
 	}
-	sc.Flags().Bool(flagFromPDService, false, "read data from PD service rather than microservice")
+	sc.Flags().Bool(flagFromPD, false, "read data from PD rather than microservice")
 	return sc
 }
 
@@ -528,7 +528,7 @@ func NewPlacementRulesCommand() *cobra.Command {
 	show.Flags().String("id", "", "rule id")
 	show.Flags().String("region", "", "region id")
 	show.Flags().Bool("detail", false, "detailed match info for region")
-	show.Flags().Bool(flagFromPDService, false, "read data from PD service rather than microservice")
+	show.Flags().Bool(flagFromPD, false, "read data from PD rather than microservice")
 	load := &cobra.Command{
 		Use:   "load",
 		Short: "load placement rules to a file",
@@ -538,7 +538,7 @@ func NewPlacementRulesCommand() *cobra.Command {
 	load.Flags().String("id", "", "rule id")
 	load.Flags().String("region", "", "region id")
 	load.Flags().String("out", "rules.json", "the filename contains rules")
-	load.Flags().Bool(flagFromPDService, false, "read data from PD service rather than microservice")
+	load.Flags().Bool(flagFromPD, false, "read data from PD rather than microservice")
 	save := &cobra.Command{
 		Use:   "save",
 		Short: "save rules from file",
@@ -554,7 +554,7 @@ func NewPlacementRulesCommand() *cobra.Command {
 		Short: "show rule group configuration(s)",
 		Run:   showRuleGroupFunc,
 	}
-	ruleGroupShow.Flags().Bool(flagFromPDService, false, "read data from PD service rather than microservice")
+	ruleGroupShow.Flags().Bool(flagFromPD, false, "read data from PD rather than microservice")
 	ruleGroupSet := &cobra.Command{
 		Use:   "set <id> <index> <override>",
 		Short: "update rule group configuration",
@@ -577,7 +577,7 @@ func NewPlacementRulesCommand() *cobra.Command {
 		Run:   getRuleBundle,
 	}
 	ruleBundleGet.Flags().String("out", "", "the output file")
-	ruleBundleGet.Flags().Bool(flagFromPDService, false, "read data from PD service rather than microservice")
+	ruleBundleGet.Flags().Bool(flagFromPD, false, "read data from PD rather than microservice")
 	ruleBundleSet := &cobra.Command{
 		Use:   "set",
 		Short: "set rule group config and its rules from file",
@@ -596,7 +596,7 @@ func NewPlacementRulesCommand() *cobra.Command {
 		Run:   loadRuleBundle,
 	}
 	ruleBundleLoad.Flags().String("out", "rules.json", "the output file")
-	ruleBundleLoad.Flags().Bool(flagFromPDService, false, "read data from PD service rather than microservice")
+	ruleBundleLoad.Flags().Bool(flagFromPD, false, "read data from PD rather than microservice")
 	ruleBundleSave := &cobra.Command{
 		Use:   "save",
 		Short: "save all group configs and rules from file",
@@ -895,7 +895,7 @@ func saveRuleBundle(cmd *cobra.Command, _ []string) {
 
 func buildHeader(cmd *cobra.Command) http.Header {
 	header := http.Header{}
-	forbiddenRedirectToMicroservice, err := cmd.Flags().GetBool(flagFromPDService)
+	forbiddenRedirectToMicroservice, err := cmd.Flags().GetBool(flagFromPD)
 	if err == nil && forbiddenRedirectToMicroservice {
 		header.Add(apiutil.XForbiddenForwardToMicroserviceHeader, "true")
 	}

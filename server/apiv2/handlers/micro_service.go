@@ -39,7 +39,7 @@ func RegisterMicroservice(r *gin.RouterGroup) {
 // @Router   /ms/members/{service} [get]
 func GetMembers(c *gin.Context) {
 	svr := c.MustGet(middlewares.ServerContextKey).(*server.Server)
-	if !svr.IsPDServiceMode() {
+	if !svr.IsKeyspaceGroupEnabled() {
 		c.AbortWithStatusJSON(http.StatusNotFound, "not support microservice")
 		return
 	}
@@ -65,7 +65,7 @@ func GetMembers(c *gin.Context) {
 // @Router   /ms/primary/{service} [get]
 func GetPrimary(c *gin.Context) {
 	svr := c.MustGet(middlewares.ServerContextKey).(*server.Server)
-	if !svr.IsPDServiceMode() {
+	if !svr.IsKeyspaceGroupEnabled() {
 		c.AbortWithStatusJSON(http.StatusNotFound, "not support microservice")
 		return
 	}

@@ -45,7 +45,7 @@ func (o *ServiceMiddlewarePersistOptions) GetAuditConfig() *AuditConfig {
 	return o.audit.Load().(*AuditConfig)
 }
 
-// SetAuditConfig sets the PD service middleware configuration.
+// SetAuditConfig sets the PD middleware configuration.
 func (o *ServiceMiddlewarePersistOptions) SetAuditConfig(cfg *AuditConfig) {
 	o.audit.Store(cfg)
 }
@@ -55,12 +55,12 @@ func (o *ServiceMiddlewarePersistOptions) IsAuditEnabled() bool {
 	return o.GetAuditConfig().EnableAudit
 }
 
-// GetRateLimitConfig returns pd service middleware configurations.
+// GetRateLimitConfig returns PD middleware configurations.
 func (o *ServiceMiddlewarePersistOptions) GetRateLimitConfig() *RateLimitConfig {
 	return o.rateLimit.Load().(*RateLimitConfig)
 }
 
-// SetRateLimitConfig sets the PD service middleware configuration.
+// SetRateLimitConfig sets the PD middleware configuration.
 func (o *ServiceMiddlewarePersistOptions) SetRateLimitConfig(cfg *RateLimitConfig) {
 	o.rateLimit.Store(cfg)
 }
@@ -70,12 +70,12 @@ func (o *ServiceMiddlewarePersistOptions) IsRateLimitEnabled() bool {
 	return o.GetRateLimitConfig().EnableRateLimit
 }
 
-// GetGRPCRateLimitConfig returns pd service middleware configurations.
+// GetGRPCRateLimitConfig returns PD middleware configurations.
 func (o *ServiceMiddlewarePersistOptions) GetGRPCRateLimitConfig() *GRPCRateLimitConfig {
 	return o.grpcRateLimit.Load().(*GRPCRateLimitConfig)
 }
 
-// SetGRPCRateLimitConfig sets the PD service middleware configuration.
+// SetGRPCRateLimitConfig sets the PD middleware configuration.
 func (o *ServiceMiddlewarePersistOptions) SetGRPCRateLimitConfig(cfg *GRPCRateLimitConfig) {
 	o.grpcRateLimit.Store(cfg)
 }
