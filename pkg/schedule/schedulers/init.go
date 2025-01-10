@@ -15,6 +15,7 @@
 package schedulers
 
 import (
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -547,13 +548,33 @@ func schedulersRegister() {
 	})
 
 	// balance key range scheduler
+	// args: [role, engine, range1, range2, ...]
 	RegisterSliceDecoderBuilder(types.BalanceKeyRangeScheduler, func(args []string) ConfigDecoder {
 		return func(v any) error {
 			conf, ok := v.(*balanceKeyRangeSchedulerConfig)
 			if !ok {
 				return errs.ErrScheduleConfigNotExist.FastGenByArgs()
 			}
-			return parseBalanceKeyRangeParamArgs(args, conf)
+			if len(args) < 4 {
+				return errs.ErrSchedulerConfig.FastGenByArgs("args length must be greater than 3")
+			}
+			role, err := url.QueryUnescape(args[0])
+			if err != nil {
+				return errs.ErrQueryUnescape.Wrap(err)
+			}
+			engine, err := url.QueryUnescape(args[1])
+			if err != nil {
+				return errs.ErrQueryUnescape.Wrap(err)
+			}
+			ranges, err := getKeyRanges(args[2:])
+			if err != nil {
+				return err
+			}
+			conf.Ranges = ranges
+			conf.Engine = engine
+			conf.Role = role
+			conf.Timeout = DefaultTimeout
+			return nil
 		}
 	})
 

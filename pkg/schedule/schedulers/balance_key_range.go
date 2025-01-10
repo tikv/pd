@@ -2,12 +2,13 @@ package schedulers
 
 import (
 	"net/http"
-	"net/url"
 	"time"
 
 	"github.com/gorilla/mux"
 	"github.com/pingcap/log"
-	_ "github.com/tikv/pd/pkg/core"
+	"github.com/unrolled/render"
+
+	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/errs"
 	sche "github.com/tikv/pd/pkg/schedule/core"
@@ -15,7 +16,6 @@ import (
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
 	"github.com/tikv/pd/pkg/schedule/types"
-	"github.com/unrolled/render"
 )
 
 const (
@@ -44,7 +44,9 @@ func (handler *balanceKeyRangeSchedulerHandler) updateConfig(w http.ResponseWrit
 
 func (handler *balanceKeyRangeSchedulerHandler) listConfig(w http.ResponseWriter, _ *http.Request) {
 	conf := handler.config.clone()
-	handler.rd.JSON(w, http.StatusOK, conf)
+	if err := handler.rd.JSON(w, http.StatusOK, conf); err != nil {
+		log.Error("failed to marshal balance key range scheduler config", errs.ZapError(err))
+	}
 }
 
 type balanceKeyRangeSchedulerConfig struct {
@@ -53,11 +55,10 @@ type balanceKeyRangeSchedulerConfig struct {
 }
 
 type balanceKeyRangeSchedulerParam struct {
-	Role     string        `json:"role"`
-	Engine   string        `json:"engine"`
-	StartKey string        `json:"start_key"`
-	EndKey   string        `json:"end_key"`
-	Timeout  time.Duration `json:"timeout"`
+	Role    string          `json:"role"`
+	Engine  string          `json:"engine"`
+	Timeout time.Duration   `json:"timeout"`
+	Ranges  []core.KeyRange `json:"ranges"`
 }
 
 func (conf *balanceKeyRangeSchedulerConfig) encodeConfig() ([]byte, error) {
@@ -69,52 +70,14 @@ func (conf *balanceKeyRangeSchedulerConfig) encodeConfig() ([]byte, error) {
 func (conf *balanceKeyRangeSchedulerConfig) clone() *balanceKeyRangeSchedulerParam {
 	conf.RLock()
 	defer conf.RUnlock()
+	ranges := make([]core.KeyRange, len(conf.Ranges))
+	copy(ranges, conf.Ranges)
 	return &balanceKeyRangeSchedulerParam{
-		Role:     conf.Role,
-		Engine:   conf.Engine,
-		StartKey: conf.StartKey,
-		EndKey:   conf.EndKey,
+		Ranges:  ranges,
+		Role:    conf.Role,
+		Engine:  conf.Engine,
+		Timeout: conf.Timeout,
 	}
-}
-
-func (conf *balanceKeyRangeSchedulerConfig) parseFromArgs(args []string) error {
-	if len(args) < 4 {
-		return errs.ErrSchedulerConfig.FastGenByArgs("args length should be greater than 4")
-	}
-	newConf := &balanceKeyRangeSchedulerConfig{}
-	var err error
-	newConf.StartKey, err = url.QueryUnescape(args[0])
-	if err != nil {
-		return errs.ErrQueryUnescape.Wrap(err)
-	}
-	newConf.EndKey, err = url.QueryUnescape(args[1])
-	if err != nil {
-		return errs.ErrQueryUnescape.Wrap(err)
-	}
-
-	newConf.Role, err = url.QueryUnescape(args[2])
-	if err != nil {
-		return errs.ErrQueryUnescape.Wrap(err)
-	}
-
-	newConf.Engine, err = url.QueryUnescape(args[3])
-	if err != nil {
-		return errs.ErrQueryUnescape.Wrap(err)
-	}
-	if len(args) >= 5 {
-		timeout, err := url.QueryUnescape(args[4])
-		if err != nil {
-			return errs.ErrQueryUnescape.Wrap(err)
-		}
-		conf.Timeout, err = time.ParseDuration(timeout)
-		if err != nil {
-			return errs.ErrQueryUnescape.Wrap(err)
-		}
-	} else {
-		conf.Timeout = DefaultTimeout
-	}
-	*newConf = *newConf
-	return nil
 }
 
 func (s *balanceKeyRangeScheduler) EncodeConfig() ([]byte, error) {
@@ -133,8 +96,13 @@ type balanceKeyRangeScheduler struct {
 	filterCounter *filter.Counter
 }
 
-func (s *balanceKeyRangeScheduler) Schedule(cluster sche.SchedulerCluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
-	log.Info("balance key range scheduler is scheduling, need to implement")
+// ServeHTTP implements the http.Handler interface.
+func (s *balanceKeyRangeScheduler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	s.handler.ServeHTTP(w, r)
+}
+
+func (s *balanceKeyRangeScheduler) Schedule(_cluster sche.SchedulerCluster, _dryRun bool) ([]*operator.Operator, []plan.Plan) {
+	log.Debug("balance key range scheduler is scheduling, need to implement")
 	return nil, nil
 }
 
@@ -152,7 +120,7 @@ type BalanceKeyRangeCreateOption func(s *balanceKeyRangeScheduler)
 // special store balanced.
 func newBalanceKeyRangeScheduler(opController *operator.Controller, conf *balanceKeyRangeSchedulerConfig, options ...BalanceKeyRangeCreateOption) Scheduler {
 	s := &balanceKeyRangeScheduler{
-		BaseScheduler: NewBaseScheduler(opController, types.BalanceLeaderScheduler, conf),
+		BaseScheduler: NewBaseScheduler(opController, types.BalanceKeyRangeScheduler, conf),
 		conf:          conf,
 		handler:       newBalanceKeyRangeHandler(conf),
 	}

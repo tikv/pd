@@ -15,6 +15,7 @@
 package scheduler_test
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"reflect"
@@ -84,7 +85,7 @@ func (suite *schedulerTestSuite) TearDownTest() {
 				return currentSchedulers[i] == scheduler
 			}) {
 				echo := mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "add", scheduler}, nil)
-				re.Contains(echo, "Success!")
+				re.Contains(echo, "Success!", scheduler)
 			}
 		}
 		for _, scheduler := range currentSchedulers {
@@ -540,6 +541,25 @@ func (suite *schedulerTestSuite) checkSchedulerConfig(cluster *pdTests.TestClust
 		echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "show"}, nil)
 		return !strings.Contains(echo, "evict-leader-scheduler")
 	})
+
+	// test balance key range scheduler
+	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "add", "balance-key-range-scheduler"}, nil)
+	re.NotContains(echo, "Success!")
+	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "add", "balance-key-range-scheduler", "--format=raw", "tiflash", "learner", "a", "b"}, nil)
+	re.Contains(echo, "Success!")
+	conf = make(map[string]any)
+	mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "balance-key-range-scheduler", "show"}, &conf)
+	re.Equal("learner", conf["role"])
+	re.Equal("tiflash", conf["engine"])
+	ranges := conf["ranges"].([]interface{})[0].(map[string]interface{})
+	re.Equal(base64.StdEncoding.EncodeToString([]byte("a")), ranges["start-key"])
+	re.Equal(base64.StdEncoding.EncodeToString([]byte("b")), ranges["end-key"])
+
+	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "add", "balance-key-range-scheduler", "--format=raw", "tiflash", "learner", "a", "b"}, nil)
+	re.Contains(echo, "400")
+	re.Contains(echo, "scheduler already exists")
+	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "remove", "balance-key-range-scheduler"}, nil)
+	re.Contains(echo, "Success!")
 
 	// test balance leader config
 	conf = make(map[string]any)

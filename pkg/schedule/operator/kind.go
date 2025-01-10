@@ -76,6 +76,7 @@ var nameToFlag = map[string]OpKind{
 	"replica":        OpReplica,
 	"merge":          OpMerge,
 	"range":          OpRange,
+	"key-range":      OpKeyRange,
 	"witness-leader": OpWitnessLeader,
 }
 
