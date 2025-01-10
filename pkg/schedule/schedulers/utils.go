@@ -177,6 +177,10 @@ func (p *solver) getTolerantResource() int64 {
 		p.tolerantSource = int64(p.tolerantSizeRatio)
 	} else {
 		regionSize := p.GetAverageRegionSize()
+		minRegionSize := int64(p.GetSchedulerConfig().GetScheduleConfig().MaxMergeRegionSize)
+		if regionSize < minRegionSize {
+			regionSize = minRegionSize
+		}
 		p.tolerantSource = int64(float64(regionSize) * p.tolerantSizeRatio)
 	}
 	return p.tolerantSource
