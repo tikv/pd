@@ -22,6 +22,7 @@ import (
 	"path"
 	"strings"
 
+	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -259,4 +260,111 @@ func (s *GrpcServer) loadRangeFromEtcd(startKey, endKey string) ([]string, []str
 		values = append(values, string(item.Value))
 	}
 	return keys, values, resp.Header.Revision, nil
+}
+
+// UpdateGCSafePoint implements gRPC PDServer.
+func (s *GrpcServer) UpdateGCSafePoint(ctx context.Context, request *pdpb.UpdateGCSafePointRequest) (*pdpb.UpdateGCSafePointResponse, error) {
+	if s.GetServiceMiddlewarePersistOptions().IsGRPCRateLimitEnabled() {
+		fName := currentFunction()
+		limiter := s.GetGRPCRateLimiter()
+		if done, err := limiter.Allow(fName); err == nil {
+			defer done()
+		} else {
+			return nil, errs.ErrGRPCRateLimitExceeded(err)
+		}
+	}
+	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
+		return pdpb.NewPDClient(client).UpdateGCSafePoint(ctx, request)
+	}
+	if rsp, err := s.unaryMiddleware(ctx, request, fn); err != nil {
+		return nil, err
+	} else if rsp != nil {
+		return rsp.(*pdpb.UpdateGCSafePointResponse), err
+	}
+
+	rc := s.GetRaftCluster()
+	if rc == nil {
+		return &pdpb.UpdateGCSafePointResponse{Header: notBootstrappedHeader()}, nil
+	}
+
+	newSafePoint := request.GetTarget()
+	keyspaceID := getKeyspaceIDFromReq(request)
+	oldSafePoint, err := s.gcStateManager.UpdateGCSafePoint(keyspaceID, newSafePoint)
+	if err != nil {
+		return nil, err
+	}
+
+	if newSafePoint > oldSafePoint {
+		log.Info("updated gc safe point",
+			zap.Uint64("safe-point", newSafePoint))
+	} else if newSafePoint < oldSafePoint {
+		log.Warn("trying to update gc safe point",
+			zap.Uint64("old-safe-point", oldSafePoint),
+			zap.Uint64("new-safe-point", newSafePoint))
+		newSafePoint = oldSafePoint
+	}
+
+	return &pdpb.UpdateGCSafePointResponse{
+		Header:         wrapHeader(),
+		NewGcSafePoint: newSafePoint,
+	}, nil
+}
+
+func (s *GrpcServer) UpdateTxnSafePoint(ctx context.Context, request *pdpb.UpdateTxnSafePointRequest) (*pdpb.UpdateTxnSafePointResponse, error) {
+	if s.GetServiceMiddlewarePersistOptions().IsGRPCRateLimitEnabled() {
+		fName := currentFunction()
+		limiter := s.GetGRPCRateLimiter()
+		if done, err := limiter.Allow(fName); err == nil {
+			defer done()
+		} else {
+			return nil, errs.ErrGRPCRateLimitExceeded(err)
+		}
+	}
+	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
+		return pdpb.NewPDClient(client).UpdateTxnSafePoint(ctx, request)
+	}
+	if rsp, err := s.unaryMiddleware(ctx, request, fn); err != nil {
+		return nil, err
+	} else if rsp != nil {
+		return rsp.(*pdpb.UpdateTxnSafePointResponse), err
+	}
+
+	rc := s.GetRaftCluster()
+	if rc == nil {
+		return &pdpb.UpdateTxnSafePointResponse{Header: notBootstrappedHeader()}, nil
+	}
+
+	target := request.GetTarget()
+	keyspaceID := getKeyspaceIDFromReq(request)
+	newTxnSafePoint, err := s.gcStateManager.UpdateTxnSafePoint(keyspaceID, target)
+	if err != nil {
+		return nil, err
+	}
+
+	return &pdpb.UpdateTxnSafePointResponse{
+		Header:          wrapHeader(),
+		NewTxnSafePoint: newTxnSafePoint,
+	}, nil
+}
+
+func (s *GrpcServer) SetGCBarrier(ctx context.Context, request *pdpb.SetGCBarrierRequest) (*pdpb.SetGCBarrierResponse, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (s *GrpcServer) DeleteGCBarrier(ctx context.Context, request *pdpb.DeleteGCBarrierRequest) (*pdpb.DeleteGCBarrierResponse, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (s *GrpcServer) GetGCState(ctx context.Context, request *pdpb.GetGCStateRequest) (*pdpb.GetGCStateResponse, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func getKeyspaceIDFromReq(req interface{ GetKeyspaceScope() *pdpb.KeyspaceScope }) uint32 {
+	if req.GetKeyspaceScope() == nil {
+		return constant.NullKeyspaceID
+	}
+	return req.GetKeyspaceScope().GetKeyspaceId()
 }

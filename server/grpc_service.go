@@ -2107,7 +2107,7 @@ func (s *GrpcServer) GetGCSafePoint(ctx context.Context, request *pdpb.GetGCSafe
 		return &pdpb.GetGCSafePointResponse{Header: notBootstrappedHeader()}, nil
 	}
 
-	safePoint, err := s.gcSafePointManager.LoadGCSafePoint()
+	safePoint, err := s.gcStateManager.LoadGCSafePoint(constant.NullKeyspaceID)
 	if err != nil {
 		return nil, err
 	}
@@ -2139,53 +2139,6 @@ func (s *GrpcServer) SyncRegions(stream pdpb.PD_SyncRegionsServer) error {
 	return s.cluster.GetRegionSyncer().Sync(ctx, stream)
 }
 
-// UpdateGCSafePoint implements gRPC PDServer.
-func (s *GrpcServer) UpdateGCSafePoint(ctx context.Context, request *pdpb.UpdateGCSafePointRequest) (*pdpb.UpdateGCSafePointResponse, error) {
-	if s.GetServiceMiddlewarePersistOptions().IsGRPCRateLimitEnabled() {
-		fName := currentFunction()
-		limiter := s.GetGRPCRateLimiter()
-		if done, err := limiter.Allow(fName); err == nil {
-			defer done()
-		} else {
-			return nil, errs.ErrGRPCRateLimitExceeded(err)
-		}
-	}
-	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
-		return pdpb.NewPDClient(client).UpdateGCSafePoint(ctx, request)
-	}
-	if rsp, err := s.unaryMiddleware(ctx, request, fn); err != nil {
-		return nil, err
-	} else if rsp != nil {
-		return rsp.(*pdpb.UpdateGCSafePointResponse), err
-	}
-
-	rc := s.GetRaftCluster()
-	if rc == nil {
-		return &pdpb.UpdateGCSafePointResponse{Header: notBootstrappedHeader()}, nil
-	}
-
-	newSafePoint := request.GetSafePoint()
-	oldSafePoint, err := s.gcSafePointManager.UpdateGCSafePoint(newSafePoint)
-	if err != nil {
-		return nil, err
-	}
-
-	if newSafePoint > oldSafePoint {
-		log.Info("updated gc safe point",
-			zap.Uint64("safe-point", newSafePoint))
-	} else if newSafePoint < oldSafePoint {
-		log.Warn("trying to update gc safe point",
-			zap.Uint64("old-safe-point", oldSafePoint),
-			zap.Uint64("new-safe-point", newSafePoint))
-		newSafePoint = oldSafePoint
-	}
-
-	return &pdpb.UpdateGCSafePointResponse{
-		Header:       wrapHeader(),
-		NewSafePoint: newSafePoint,
-	}, nil
-}
-
 // UpdateServiceGCSafePoint update the safepoint for specific service
 func (s *GrpcServer) UpdateServiceGCSafePoint(ctx context.Context, request *pdpb.UpdateServiceGCSafePointRequest) (*pdpb.UpdateServiceGCSafePointResponse, error) {
 	if s.GetServiceMiddlewarePersistOptions().IsGRPCRateLimitEnabled() {
@@ -2210,7 +2163,7 @@ func (s *GrpcServer) UpdateServiceGCSafePoint(ctx context.Context, request *pdpb
 	if rc == nil {
 		return &pdpb.UpdateServiceGCSafePointResponse{Header: notBootstrappedHeader()}, nil
 	}
-	var storage endpoint.GCSafePointStorage = s.storage
+	var storage endpoint.GCStateStorage = s.storage
 	if request.TTL <= 0 {
 		if err := storage.RemoveServiceGCSafePoint(string(request.ServiceId)); err != nil {
 			return nil, err
@@ -2222,7 +2175,7 @@ func (s *GrpcServer) UpdateServiceGCSafePoint(ctx context.Context, request *pdpb
 	}
 	now, _ := tsoutil.ParseTimestamp(nowTSO)
 	serviceID := string(request.ServiceId)
-	min, updated, err := s.gcSafePointManager.UpdateServiceGCSafePoint(serviceID, request.GetSafePoint(), request.GetTTL(), now)
+	min, updated, err := s.gcStateManager.UpdateServiceGCSafePoint(serviceID, request.GetSafePoint(), request.GetTTL(), now)
 	if err != nil {
 		return nil, err
 	}

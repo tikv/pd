@@ -27,12 +27,12 @@ import (
 	"github.com/tikv/pd/server/config"
 )
 
-func newGCStorage() endpoint.GCSafePointStorage {
+func newGCStorage() endpoint.GCStateStorage {
 	return endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
 }
 
 func TestGCSafePointUpdateSequentially(t *testing.T) {
-	gcSafePointManager := NewSafePointManager(newGCStorage(), config.PDServerConfig{})
+	gcSafePointManager := NewGCStateManager(newGCStorage(), config.PDServerConfig{})
 	re := require.New(t)
 	curSafePoint := uint64(0)
 	// update gc safePoint with asc value.
@@ -61,7 +61,7 @@ func TestGCSafePointUpdateSequentially(t *testing.T) {
 }
 
 func TestGCSafePointUpdateCurrently(t *testing.T) {
-	gcSafePointManager := NewSafePointManager(newGCStorage(), config.PDServerConfig{})
+	gcSafePointManager := NewGCStateManager(newGCStorage(), config.PDServerConfig{})
 	maxSafePoint := uint64(1000)
 	wg := sync.WaitGroup{}
 	re := require.New(t)
@@ -85,7 +85,7 @@ func TestGCSafePointUpdateCurrently(t *testing.T) {
 
 func TestServiceGCSafePointUpdate(t *testing.T) {
 	re := require.New(t)
-	manager := NewSafePointManager(newGCStorage(), config.PDServerConfig{})
+	manager := NewGCStateManager(newGCStorage(), config.PDServerConfig{})
 	gcWorkerServiceID := "gc_worker"
 	cdcServiceID := "cdc"
 	brServiceID := "br"
@@ -167,7 +167,7 @@ func TestServiceGCSafePointUpdate(t *testing.T) {
 
 func TestBlockUpdateSafePointV1(t *testing.T) {
 	re := require.New(t)
-	manager := NewSafePointManager(newGCStorage(), config.PDServerConfig{BlockSafePointV1: true})
+	manager := NewGCStateManager(newGCStorage(), config.PDServerConfig{BlockSafePointV1: true})
 	gcworkerServiceID := "gc_worker"
 	gcWorkerSafePoint := uint64(8)
 

@@ -32,23 +32,34 @@ import (
 // ServiceSafePoint is the safepoint for a specific service
 // NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
 // This type is in sync with `client/http/types.go`.
+// ServiceSafePoint is also directly used for storing GC barriers in order to make GC barriers in new versions
+// can be backward-compatible with service safe points in old versions.
 type ServiceSafePoint struct {
 	ServiceID string `json:"service_id"`
 	ExpiredAt int64  `json:"expired_at"`
 	SafePoint uint64 `json:"safe_point"`
 }
 
-// GCSafePointStorage defines the storage operations on the GC safe point.
-type GCSafePointStorage interface {
-	LoadGCSafePoint() (uint64, error)
-	SaveGCSafePoint(safePoint uint64) error
-	LoadMinServiceGCSafePoint(now time.Time) (*ServiceSafePoint, error)
-	LoadAllServiceGCSafePoints() ([]*ServiceSafePoint, error)
-	SaveServiceGCSafePoint(ssp *ServiceSafePoint) error
-	RemoveServiceGCSafePoint(serviceID string) error
+type GCBarrier struct {
+	BarrierID      string `json:"barrier_id"`
+	BarrierTS      uint64 `json:"barrier_ts"`
+	ExpirationTime string `json:"expiration_time"`
 }
 
-var _ GCSafePointStorage = (*StorageEndpoint)(nil)
+// GCStateStorage defines the storage operations on the GC safe point.
+type GCStateStorage interface {
+	LoadGCSafePoint(keyspaceID uint32) (uint64, error)
+	SaveGCSafePoint(keyspaceID uint32, target uint64) error
+	//LoadMinServiceGCSafePoint(now time.Time) (*ServiceSafePoint, error)
+	//LoadAllServiceGCSafePoints() ([]*ServiceSafePoint, error)
+	//SaveServiceGCSafePoint(ssp *ServiceSafePoint) error
+	//RemoveServiceGCSafePoint(serviceID string) error
+
+	UpdateTxnSafePoint(keyspaceID, target uint64) (newTxnSafePoint uint64, err error)
+	SetGCBarrier(keyspaceID uint32, barrierID string, barrierTS uint64, ttl time.Duration) error
+}
+
+var _ GCStateStorage = (*StorageEndpoint)(nil)
 
 // LoadGCSafePoint loads current GC safe point from storage.
 func (se *StorageEndpoint) LoadGCSafePoint() (uint64, error) {
@@ -185,4 +196,8 @@ func (se *StorageEndpoint) RemoveServiceGCSafePoint(serviceID string) error {
 	}
 	key := keypath.GCSafePointServicePath(serviceID)
 	return se.Remove(key)
+}
+
+func (se *StorageEndpoint) SetGCBarrier(keyspaceID uint32, barrierID string, barrierTS uint64, ttl time.Duration) error {
+
 }
