@@ -372,9 +372,8 @@ func postConfigDataWithPath(cmd *cobra.Command, key, value, path string) error {
 	val, err := strconv.ParseFloat(value, 64)
 	if err != nil {
 		val = value
-	}
-	if key == "max-replicas" {
-		checkMaxReplicas(cmd, val)
+	} else if key == "max-replicas" {
+		checkMaxReplicas(cmd, val.(float64))
 	}
 	data[key] = val
 	reqData, err := json.Marshal(data)
@@ -389,12 +388,7 @@ func postConfigDataWithPath(cmd *cobra.Command, key, value, path string) error {
 	return nil
 }
 
-func checkMaxReplicas(cmd *cobra.Command, value any) {
-	newReplica, ok := value.(float64)
-	if !ok {
-		// If the type is not float64, it will be handled elsewhere
-		return
-	}
+func checkMaxReplicas(cmd *cobra.Command, newReplica float64) {
 	header := buildHeader(cmd)
 	r, err := doRequest(cmd, replicatePrefix, http.MethodGet, header)
 	if err != nil {
