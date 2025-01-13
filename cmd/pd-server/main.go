@@ -228,6 +228,7 @@ func start(cmd *cobra.Command, args []string, services ...string) {
 	grpcprometheus.EnableHandlingTimeHistogram()
 
 	metricutil.Push(&cfg.Metric)
+	metricutil.EnablePyroscope()
 
 	err = join.PrepareJoinCluster(cfg)
 	if err != nil {
