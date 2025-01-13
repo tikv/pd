@@ -24,6 +24,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 
 	"github.com/tikv/pd/pkg/core"
@@ -292,6 +293,9 @@ func (o *Operator) IsEnd() bool {
 
 // CheckSuccess checks if all steps are finished, and update the status.
 func (o *Operator) CheckSuccess() bool {
+	failpoint.Inject("forceSucess", func() {
+		atomic.StoreInt32(&o.currentStep, int32(len(o.steps)))
+	})
 	if atomic.LoadInt32(&o.currentStep) >= int32(len(o.steps)) {
 		return o.status.To(SUCCESS) || o.Status() == SUCCESS
 	}

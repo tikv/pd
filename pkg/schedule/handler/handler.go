@@ -45,6 +45,7 @@ import (
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/statistics/buckets"
 	"github.com/tikv/pd/pkg/statistics/utils"
+	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 )
 
@@ -1301,6 +1302,60 @@ func (h *Handler) CheckRegionsReplicated(rawStartKey, rawEndKey string) (string,
 		}
 	})
 	return state, nil
+}
+
+// BalanceKeyrange create a new balance-keyrange scheduler according to API request.
+func (h *Handler) BalanceKeyrange(data string) (string, error) {
+	sc, err := h.GetSchedulersController()
+	if err != nil {
+		return "", err
+	}
+	exist, _ := sc.IsSchedulerExisted(types.BalanceKeyrangeScheduler.String())
+	if exist {
+		return "Already existed", errs.ErrSchedulerExisted.FastGenByArgs()
+	}
+	oc := h.GetCoordinator().GetOperatorController()
+	controller := h.GetCoordinator().GetSchedulersController()
+	cb := func(s string) error {
+		return controller.RemoveScheduler(s)
+	}
+	s, err := schedulers.CreateScheduler(types.BalanceKeyrangeScheduler, oc, storage.NewStorageWithMemoryBackend(), schedulers.ConfigSliceDecoder(types.BalanceKeyrangeScheduler, []string{data}), cb)
+	if err != nil {
+		return "Created scheduler failed", err
+	}
+	if err = controller.AddScheduler(s); err != nil {
+		return "Add scheduler failed", err
+	}
+	return "Scheduler added successfully", nil
+}
+
+// CheckBalanceKeyrangeStatus returns the status of the balance-keyrange scheduler.
+func (h *Handler) CheckBalanceKeyrangeStatus() (any, error) {
+	sc, err := h.GetSchedulersController()
+	makeJSONResp := func(s string) any {
+		return struct {
+			Scheduling bool   `json:"scheduling"`
+			ErrMsg     string `json:"err_msg"`
+		}{
+			Scheduling: false,
+			ErrMsg:     s,
+		}
+	}
+	if err != nil {
+		return makeJSONResp("get scheduler control error"), err
+	}
+	s := sc.GetScheduler(types.BalanceKeyrangeScheduler.String())
+	if s == nil {
+		return makeJSONResp("no scheduler found"), nil
+	}
+	if s.IsDisable() {
+		return makeJSONResp("scheduler disabled"), nil
+	}
+	st := sc.GetSchedulerStatus(types.BalanceKeyrangeScheduler.String())
+	if st == nil {
+		return makeJSONResp("can't get scheduler status"), nil
+	}
+	return st, nil
 }
 
 // GetRuleManager returns the rule manager.
