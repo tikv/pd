@@ -453,7 +453,6 @@ func (rc *retryClient) Close() {
 }
 
 // Bootstrap bootstraps the cluster and using the given PD address firstly.
-// because before bootstrapping the cluster, PDServiceDiscovery can not been started.
 func Bootstrap(ctx context.Context, pdAddrs string, store *metapb.Store, region *metapb.Region) (
 	leaderURL string, pdCli pdpb.PDClient, err error) {
 	urls := strings.Split(pdAddrs, ",")

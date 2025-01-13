@@ -62,7 +62,9 @@ func (suite *tsoAPITestSuite) SetupTest() {
 
 	var err error
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
-	suite.pdCluster, err = tests.NewTestClusterWithKeyspaceGroup(suite.ctx, 1)
+	suite.pdCluster, err = tests.NewTestCluster(suite.ctx, 1, func(conf *config.Config, _ string) {
+		conf.Microservice.EnableMultiTimelines = true
+	})
 	re.NoError(err)
 	err = suite.pdCluster.RunInitialServers()
 	re.NoError(err)
@@ -137,12 +139,12 @@ func TestTSOServerStartFirst(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	apiCluster, err := tests.NewTestClusterWithKeyspaceGroup(ctx, 1, func(conf *config.Config, _ string) {
+	pdCluster, err := tests.NewTestCluster(ctx, 1, func(conf *config.Config, _ string) {
 		conf.Keyspace.PreAlloc = []string{"k1", "k2"}
 	})
-	defer apiCluster.Destroy()
+	defer pdCluster.Destroy()
 	re.NoError(err)
-	addr := apiCluster.GetConfig().GetClientURL()
+	addr := pdCluster.GetConfig().GetClientURL()
 	ch := make(chan struct{})
 	defer close(ch)
 	clusterCh := make(chan *tests.TestTSOCluster)
@@ -155,11 +157,11 @@ func TestTSOServerStartFirst(t *testing.T) {
 		clusterCh <- tsoCluster
 		ch <- struct{}{}
 	}()
-	err = apiCluster.RunInitialServers()
+	err = pdCluster.RunInitialServers()
 	re.NoError(err)
-	leaderName := apiCluster.WaitLeader()
+	leaderName := pdCluster.WaitLeader()
 	re.NotEmpty(leaderName)
-	pdLeaderServer := apiCluster.GetServer(leaderName)
+	pdLeaderServer := pdCluster.GetServer(leaderName)
 	re.NoError(pdLeaderServer.BootstrapCluster())
 	re.NoError(err)
 	tsoCluster := <-clusterCh
@@ -200,7 +202,9 @@ func TestForwardOnlyTSONoScheduling(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	tc, err := tests.NewTestClusterWithKeyspaceGroup(ctx, 1)
+	tc, err := tests.NewTestCluster(ctx, 1, func(conf *config.Config, _ string) {
+		conf.Microservice.EnableMultiTimelines = true
+	})
 	defer tc.Destroy()
 	re.NoError(err)
 	err = tc.RunInitialServers()
@@ -227,7 +231,6 @@ func TestForwardOnlyTSONoScheduling(t *testing.T) {
 		testutil.StatusOK(re), testutil.StringContain(re, "Reset ts successfully"), testutil.WithHeader(re, apiutil.XForwardedToMicroserviceHeader, "true"))
 	re.NoError(err)
 
-	// If close tso server, it should try forward to tso server, but return error in pd service mode.
 	ttc.Destroy()
 	err = testutil.CheckPostJSON(tests.TestDialClient, fmt.Sprintf("%s/%s", urlPrefix, "admin/reset-ts"), input,
 		testutil.Status(re, http.StatusInternalServerError), testutil.StringContain(re, "[PD:apiutil:ErrRedirect]redirect failed"))

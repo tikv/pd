@@ -62,7 +62,7 @@ func (suite *configTestSuite) SetupSuite() {
 	schedulers.Register()
 	var err error
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
-	suite.cluster, err = tests.NewTestClusterWithKeyspaceGroup(suite.ctx, 1)
+	suite.cluster, err = tests.NewTestCluster(suite.ctx, 1)
 	re.NoError(err)
 	err = suite.cluster.RunInitialServers()
 	re.NoError(err)
@@ -152,19 +152,19 @@ func (suite *configTestSuite) TestSchedulerConfigWatch() {
 	)
 	re.NoError(err)
 	// Get all default scheduler names.
-	var namesFromPDService []string
+	var namesFromPD []string
 	testutil.Eventually(re, func() bool {
-		namesFromPDService, _, _ = suite.pdLeaderServer.GetRaftCluster().GetStorage().LoadAllSchedulerConfigs()
-		return len(namesFromPDService) == len(sc.DefaultSchedulers)
+		namesFromPD, _, _ = suite.pdLeaderServer.GetRaftCluster().GetStorage().LoadAllSchedulerConfigs()
+		return len(namesFromPD) == len(sc.DefaultSchedulers)
 	})
 	// Check all default schedulers' configs.
 	var namesFromSchedulingServer []string
 	testutil.Eventually(re, func() bool {
 		namesFromSchedulingServer, _, err = storage.LoadAllSchedulerConfigs()
 		re.NoError(err)
-		return len(namesFromSchedulingServer) == len(namesFromPDService)
+		return len(namesFromSchedulingServer) == len(namesFromPD)
 	})
-	re.Equal(namesFromPDService, namesFromSchedulingServer)
+	re.Equal(namesFromPD, namesFromSchedulingServer)
 	// Add a new scheduler.
 	api.MustAddScheduler(re, suite.pdLeaderServer.GetAddr(), types.EvictLeaderScheduler.String(), map[string]any{
 		"store_id": 1,

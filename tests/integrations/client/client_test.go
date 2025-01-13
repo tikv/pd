@@ -361,7 +361,9 @@ func TestTSOFollowerProxyWithTSOService(t *testing.T) {
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/servicediscovery/fastUpdateServiceMode", `return(true)`))
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	cluster, err := tests.NewTestClusterWithKeyspaceGroup(ctx, 1)
+	cluster, err := tests.NewTestCluster(ctx, 1, func(conf *config.Config, _ string) {
+		conf.Microservice.EnableMultiTimelines = true
+	})
 	re.NoError(err)
 	defer cluster.Destroy()
 	err = cluster.RunInitialServers()

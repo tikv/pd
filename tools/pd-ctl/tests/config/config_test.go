@@ -382,9 +382,9 @@ func (suite *configTestSuite) checkConfigForwardControl(cluster *pdTests.TestClu
 	f.Close()
 	defer os.RemoveAll(fname)
 
-	checkScheduleConfig := func(scheduleCfg *sc.ScheduleConfig, isFromPDService bool) {
+	checkScheduleConfig := func(scheduleCfg *sc.ScheduleConfig, isFromPD bool) {
 		if schedulingServer := cluster.GetSchedulingPrimaryServer(); schedulingServer != nil {
-			if isFromPDService {
+			if isFromPD {
 				re.Equal(scheduleCfg.LeaderScheduleLimit, leaderServer.GetPersistOptions().GetLeaderScheduleLimit())
 				re.NotEqual(scheduleCfg.LeaderScheduleLimit, schedulingServer.GetPersistConfig().GetLeaderScheduleLimit())
 			} else {
@@ -396,9 +396,9 @@ func (suite *configTestSuite) checkConfigForwardControl(cluster *pdTests.TestClu
 		}
 	}
 
-	checkReplicateConfig := func(replicationCfg *sc.ReplicationConfig, isFromPDService bool) {
+	checkReplicateConfig := func(replicationCfg *sc.ReplicationConfig, isFromPD bool) {
 		if schedulingServer := cluster.GetSchedulingPrimaryServer(); schedulingServer != nil {
-			if isFromPDService {
+			if isFromPD {
 				re.Equal(replicationCfg.MaxReplicas, uint64(leaderServer.GetPersistOptions().GetMaxReplicas()))
 				re.NotEqual(int(replicationCfg.MaxReplicas), schedulingServer.GetPersistConfig().GetMaxReplicas())
 			} else {
@@ -410,11 +410,11 @@ func (suite *configTestSuite) checkConfigForwardControl(cluster *pdTests.TestClu
 		}
 	}
 
-	checkRules := func(rules []*placement.Rule, isFromPDService bool) {
+	checkRules := func(rules []*placement.Rule, isFromPD bool) {
 		apiRules := leaderServer.GetRaftCluster().GetRuleManager().GetAllRules()
 		if schedulingServer := cluster.GetSchedulingPrimaryServer(); schedulingServer != nil {
 			schedulingRules := schedulingServer.GetCluster().GetRuleManager().GetAllRules()
-			if isFromPDService {
+			if isFromPD {
 				re.Len(apiRules, len(rules))
 				re.NotEqual(len(schedulingRules), len(rules))
 			} else {
@@ -426,11 +426,11 @@ func (suite *configTestSuite) checkConfigForwardControl(cluster *pdTests.TestClu
 		}
 	}
 
-	checkGroup := func(group placement.RuleGroup, isFromPDService bool) {
+	checkGroup := func(group placement.RuleGroup, isFromPD bool) {
 		apiGroup := leaderServer.GetRaftCluster().GetRuleManager().GetRuleGroup(placement.DefaultGroupID)
 		if schedulingServer := cluster.GetSchedulingPrimaryServer(); schedulingServer != nil {
 			schedulingGroup := schedulingServer.GetCluster().GetRuleManager().GetRuleGroup(placement.DefaultGroupID)
-			if isFromPDService {
+			if isFromPD {
 				re.Equal(apiGroup.Index, group.Index)
 				re.NotEqual(schedulingGroup.Index, group.Index)
 			} else {
@@ -443,11 +443,11 @@ func (suite *configTestSuite) checkConfigForwardControl(cluster *pdTests.TestClu
 	}
 
 	testConfig := func(options ...string) {
-		for _, isFromPDService := range []bool{true, false} {
+		for _, isFromPD := range []bool{true, false} {
 			cmd := ctl.GetRootCmd()
 			args := []string{"-u", pdAddr, "config", "show"}
 			args = append(args, options...)
-			if isFromPDService {
+			if isFromPD {
 				args = append(args, "--from_pd")
 			}
 			output, err := tests.ExecuteCommand(cmd, args...)
@@ -455,16 +455,16 @@ func (suite *configTestSuite) checkConfigForwardControl(cluster *pdTests.TestClu
 			if len(options) == 0 || options[0] == "all" {
 				cfg := config.Config{}
 				re.NoError(json.Unmarshal(output, &cfg))
-				checkReplicateConfig(&cfg.Replication, isFromPDService)
-				checkScheduleConfig(&cfg.Schedule, isFromPDService)
+				checkReplicateConfig(&cfg.Replication, isFromPD)
+				checkScheduleConfig(&cfg.Schedule, isFromPD)
 			} else if options[0] == "replication" {
 				replicationCfg := &sc.ReplicationConfig{}
 				re.NoError(json.Unmarshal(output, replicationCfg))
-				checkReplicateConfig(replicationCfg, isFromPDService)
+				checkReplicateConfig(replicationCfg, isFromPD)
 			} else if options[0] == "schedule" {
 				scheduleCfg := &sc.ScheduleConfig{}
 				re.NoError(json.Unmarshal(output, scheduleCfg))
-				checkScheduleConfig(scheduleCfg, isFromPDService)
+				checkScheduleConfig(scheduleCfg, isFromPD)
 			} else {
 				re.Fail("no implement")
 			}
@@ -472,11 +472,11 @@ func (suite *configTestSuite) checkConfigForwardControl(cluster *pdTests.TestClu
 	}
 
 	testRules := func(options ...string) {
-		for _, isFromPDService := range []bool{true, false} {
+		for _, isFromPD := range []bool{true, false} {
 			cmd := ctl.GetRootCmd()
 			args := []string{"-u", pdAddr, "config", "placement-rules"}
 			args = append(args, options...)
-			if isFromPDService {
+			if isFromPD {
 				args = append(args, "--from_pd")
 			}
 			output, err := tests.ExecuteCommand(cmd, args...)
@@ -484,25 +484,25 @@ func (suite *configTestSuite) checkConfigForwardControl(cluster *pdTests.TestClu
 			if options[0] == "show" {
 				var rules []*placement.Rule
 				re.NoError(json.Unmarshal(output, &rules))
-				checkRules(rules, isFromPDService)
+				checkRules(rules, isFromPD)
 			} else if options[0] == "load" {
 				var rules []*placement.Rule
 				b, _ := os.ReadFile(fname)
 				re.NoError(json.Unmarshal(b, &rules))
-				checkRules(rules, isFromPDService)
+				checkRules(rules, isFromPD)
 			} else if options[0] == "rule-group" {
 				var group placement.RuleGroup
 				re.NoError(json.Unmarshal(output, &group), string(output))
-				checkGroup(group, isFromPDService)
+				checkGroup(group, isFromPD)
 			} else if options[0] == "rule-bundle" && options[1] == "get" {
 				var bundle placement.GroupBundle
 				re.NoError(json.Unmarshal(output, &bundle), string(output))
-				checkRules(bundle.Rules, isFromPDService)
+				checkRules(bundle.Rules, isFromPD)
 			} else if options[0] == "rule-bundle" && options[1] == "load" {
 				var bundles []placement.GroupBundle
 				b, _ := os.ReadFile(fname)
 				re.NoError(json.Unmarshal(b, &bundles), string(output))
-				checkRules(bundles[0].Rules, isFromPDService)
+				checkRules(bundles[0].Rules, isFromPD)
 			} else {
 				re.Fail("no implement")
 			}

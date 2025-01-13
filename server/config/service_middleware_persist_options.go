@@ -40,7 +40,7 @@ func NewServiceMiddlewarePersistOptions(cfg *ServiceMiddlewareConfig) *ServiceMi
 	return o
 }
 
-// GetAuditConfig returns pd service middleware configurations.
+// GetAuditConfig returns PD middleware configurations.
 func (o *ServiceMiddlewarePersistOptions) GetAuditConfig() *AuditConfig {
 	return o.audit.Load().(*AuditConfig)
 }

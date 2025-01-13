@@ -119,7 +119,7 @@ func combineBuilderServerHTTPService(ctx context.Context, svr *Server, serviceBu
 		}
 	}
 
-	// Combine the pd service to the router. the extension service will be added to the userHandlers.
+	// Combine the pd to the router. the extension service will be added to the userHandlers.
 	for pathPrefix, handler := range registerMap {
 		if strings.Contains(pathPrefix, apiutil.CorePath) || strings.Contains(pathPrefix, apiutil.ExtensionsPath) {
 			router.PathPrefix(pathPrefix).Handler(handler)
