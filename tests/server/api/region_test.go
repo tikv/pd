@@ -93,13 +93,13 @@ func (suite *regionTestSuite) TearDownTest() {
 			return true
 		})
 	}
-	suite.env.RunTestBasedOnMode(cleanFunc)
+	suite.env.RunTest(cleanFunc)
 }
 
 func (suite *regionTestSuite) TestSplitRegions() {
 	// use a new environment to avoid affecting other tests
 	env := tests.NewSchedulingTestEnvironment(suite.T())
-	env.RunTestBasedOnMode(suite.checkSplitRegions)
+	env.RunTest(suite.checkSplitRegions)
 	env.Cleanup()
 }
 
@@ -142,7 +142,7 @@ func (suite *regionTestSuite) checkSplitRegions(cluster *tests.TestCluster) {
 func (suite *regionTestSuite) TestAccelerateRegionsScheduleInRange() {
 	re := suite.Require()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/checker/skipCheckSuspectRanges", "return(true)"))
-	suite.env.RunTestBasedOnMode(suite.checkAccelerateRegionsScheduleInRange)
+	suite.env.RunTest(suite.checkAccelerateRegionsScheduleInRange)
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/checker/skipCheckSuspectRanges"))
 }
 
@@ -180,7 +180,7 @@ func (suite *regionTestSuite) checkAccelerateRegionsScheduleInRange(cluster *tes
 func (suite *regionTestSuite) TestAccelerateRegionsScheduleInRanges() {
 	re := suite.Require()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/checker/skipCheckSuspectRanges", "return(true)"))
-	suite.env.RunTestBasedOnMode(suite.checkAccelerateRegionsScheduleInRanges)
+	suite.env.RunTest(suite.checkAccelerateRegionsScheduleInRanges)
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/checker/skipCheckSuspectRanges"))
 }
 
@@ -219,7 +219,7 @@ func (suite *regionTestSuite) checkAccelerateRegionsScheduleInRanges(cluster *te
 func (suite *regionTestSuite) TestScatterRegions() {
 	// use a new environment to avoid affecting other tests
 	env := tests.NewSchedulingTestEnvironment(suite.T())
-	env.RunTestBasedOnMode(suite.checkScatterRegions)
+	env.RunTest(suite.checkScatterRegions)
 	env.Cleanup()
 }
 
@@ -266,7 +266,7 @@ func (suite *regionTestSuite) checkScatterRegions(cluster *tests.TestCluster) {
 }
 
 func (suite *regionTestSuite) TestCheckRegionsReplicated() {
-	suite.env.RunTestBasedOnMode(suite.checkRegionsReplicated)
+	suite.env.RunTest(suite.checkRegionsReplicated)
 }
 
 func (suite *regionTestSuite) checkRegionsReplicated(cluster *tests.TestCluster) {

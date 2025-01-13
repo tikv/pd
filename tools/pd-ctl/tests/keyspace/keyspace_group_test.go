@@ -41,7 +41,7 @@ func TestKeyspaceGroup(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	tc, err := pdTests.NewTestPDServiceCluster(ctx, 1)
+	tc, err := pdTests.NewTestClusterWithKeyspaceGroup(ctx, 1)
 	re.NoError(err)
 	defer tc.Destroy()
 	err = tc.RunInitialServers()
@@ -102,7 +102,7 @@ func TestSplitKeyspaceGroup(t *testing.T) {
 	for i := range 129 {
 		keyspaces = append(keyspaces, fmt.Sprintf("keyspace_%d", i))
 	}
-	tc, err := pdTests.NewTestPDServiceCluster(ctx, 3, func(conf *config.Config, _ string) {
+	tc, err := pdTests.NewTestClusterWithKeyspaceGroup(ctx, 3, func(conf *config.Config, _ string) {
 		conf.Keyspace.PreAlloc = keyspaces
 	})
 	re.NoError(err)
@@ -157,7 +157,7 @@ func TestExternalAllocNodeWhenStart(t *testing.T) {
 	for i := range 10 {
 		keyspaces = append(keyspaces, fmt.Sprintf("keyspace_%d", i))
 	}
-	tc, err := pdTests.NewTestPDServiceCluster(ctx, 1, func(conf *config.Config, _ string) {
+	tc, err := pdTests.NewTestClusterWithKeyspaceGroup(ctx, 1, func(conf *config.Config, _ string) {
 		conf.Keyspace.PreAlloc = keyspaces
 	})
 	re.NoError(err)
@@ -197,7 +197,7 @@ func TestSetNodeAndPriorityKeyspaceGroup(t *testing.T) {
 	for i := range 10 {
 		keyspaces = append(keyspaces, fmt.Sprintf("keyspace_%d", i))
 	}
-	tc, err := pdTests.NewTestPDServiceCluster(ctx, 3, func(conf *config.Config, _ string) {
+	tc, err := pdTests.NewTestClusterWithKeyspaceGroup(ctx, 3, func(conf *config.Config, _ string) {
 		conf.Keyspace.PreAlloc = keyspaces
 	})
 	re.NoError(err)
@@ -301,7 +301,7 @@ func TestMergeKeyspaceGroup(t *testing.T) {
 	for i := range 129 {
 		keyspaces = append(keyspaces, fmt.Sprintf("keyspace_%d", i))
 	}
-	tc, err := pdTests.NewTestPDServiceCluster(ctx, 1, func(conf *config.Config, _ string) {
+	tc, err := pdTests.NewTestClusterWithKeyspaceGroup(ctx, 1, func(conf *config.Config, _ string) {
 		conf.Keyspace.PreAlloc = keyspaces
 	})
 	re.NoError(err)
@@ -420,7 +420,7 @@ func TestKeyspaceGroupState(t *testing.T) {
 	for i := range 10 {
 		keyspaces = append(keyspaces, fmt.Sprintf("keyspace_%d", i))
 	}
-	tc, err := pdTests.NewTestPDServiceCluster(ctx, 1, func(conf *config.Config, _ string) {
+	tc, err := pdTests.NewTestClusterWithKeyspaceGroup(ctx, 1, func(conf *config.Config, _ string) {
 		conf.Keyspace.PreAlloc = keyspaces
 	})
 	re.NoError(err)
@@ -511,7 +511,7 @@ func TestShowKeyspaceGroupPrimary(t *testing.T) {
 	for i := range 10 {
 		keyspaces = append(keyspaces, fmt.Sprintf("keyspace_%d", i))
 	}
-	tc, err := pdTests.NewTestPDServiceCluster(ctx, 1, func(conf *config.Config, _ string) {
+	tc, err := pdTests.NewTestClusterWithKeyspaceGroup(ctx, 1, func(conf *config.Config, _ string) {
 		conf.Keyspace.PreAlloc = keyspaces
 	})
 	re.NoError(err)

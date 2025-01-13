@@ -271,25 +271,25 @@ func MustReportBuckets(re *require.Assertions, cluster *TestCluster, regionID ui
 	return buckets
 }
 
-// SchedulerMode is used for test purpose.
-type SchedulerMode int
+// Env is used for test purpose.
+type Env int
 
 const (
-	// Both represents both PD mode and API mode.
-	Both SchedulerMode = iota
-	// PDMode represents PD mode.
-	PDMode
-	// PDServiceMode represents API mode.
-	PDServiceMode
+	// Both represents both scheduler environments.
+	Both Env = iota
+	// NonMicroserviceEnv represents non-microservice env.
+	NonMicroserviceEnv
+	// MicroserviceEnv represents microservice env.
+	MicroserviceEnv
 )
 
 // SchedulingTestEnvironment is used for test purpose.
 type SchedulingTestEnvironment struct {
 	t        *testing.T
 	opts     []ConfigOption
-	clusters map[SchedulerMode]*TestCluster
+	clusters map[Env]*TestCluster
 	cancels  []context.CancelFunc
-	RunMode  SchedulerMode
+	Env      Env
 }
 
 // NewSchedulingTestEnvironment is to create a new SchedulingTestEnvironment.
@@ -297,38 +297,38 @@ func NewSchedulingTestEnvironment(t *testing.T, opts ...ConfigOption) *Schedulin
 	return &SchedulingTestEnvironment{
 		t:        t,
 		opts:     opts,
-		clusters: make(map[SchedulerMode]*TestCluster),
+		clusters: make(map[Env]*TestCluster),
 		cancels:  make([]context.CancelFunc, 0),
 	}
 }
 
-// RunTestBasedOnMode runs test based on mode.
-// If mode not set, it will run test in both PD mode and API mode.
-func (s *SchedulingTestEnvironment) RunTestBasedOnMode(test func(*TestCluster)) {
-	switch s.RunMode {
-	case PDMode:
-		s.RunTestInPDMode(test)
-	case PDServiceMode:
-		s.RunTestInPDServiceMode(test)
+// RunTest is to run test based on the environment.
+// If env not set, it will run test in both non-microservice env and microservice env.
+func (s *SchedulingTestEnvironment) RunTest(test func(*TestCluster)) {
+	switch s.Env {
+	case NonMicroserviceEnv:
+		s.RunTestInNonMicroserviceEnv(test)
+	case MicroserviceEnv:
+		s.RunTestInMicroserviceEnv(test)
 	default:
-		s.RunTestInPDMode(test)
-		s.RunTestInPDServiceMode(test)
+		s.RunTestInNonMicroserviceEnv(test)
+		s.RunTestInMicroserviceEnv(test)
 	}
 }
 
-// RunTestInPDMode is to run test in pd mode.
-func (s *SchedulingTestEnvironment) RunTestInPDMode(test func(*TestCluster)) {
-	s.t.Logf("start test %s in pd mode", getTestName())
-	if _, ok := s.clusters[PDMode]; !ok {
-		s.startCluster(PDMode)
+// RunTestInNonMicroserviceMode is to run test in non-microservice environment.
+func (s *SchedulingTestEnvironment) RunTestInNonMicroserviceEnv(test func(*TestCluster)) {
+	s.t.Logf("start test %s in non-microservice environment", getTestName())
+	if _, ok := s.clusters[NonMicroserviceEnv]; !ok {
+		s.startCluster(NonMicroserviceEnv)
 	}
-	test(s.clusters[PDMode])
+	test(s.clusters[NonMicroserviceEnv])
 }
 
 func getTestName() string {
 	pc, _, _, _ := runtime.Caller(2)
 	caller := runtime.FuncForPC(pc)
-	if caller == nil || strings.Contains(caller.Name(), "RunTestBasedOnMode") {
+	if caller == nil || strings.Contains(caller.Name(), "RunTest") {
 		pc, _, _, _ = runtime.Caller(3)
 		caller = runtime.FuncForPC(pc)
 	}
@@ -339,8 +339,8 @@ func getTestName() string {
 	return ""
 }
 
-// RunTestInPDServiceMode is to run test in pd service mode.
-func (s *SchedulingTestEnvironment) RunTestInPDServiceMode(test func(*TestCluster)) {
+// RunTestInMicroserviceMode is to run test in microservice environment.
+func (s *SchedulingTestEnvironment) RunTestInMicroserviceEnv(test func(*TestCluster)) {
 	re := require.New(s.t)
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs", `return(true)`))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/mcs/scheduling/server/fastUpdateMember", `return(true)`))
@@ -348,11 +348,11 @@ func (s *SchedulingTestEnvironment) RunTestInPDServiceMode(test func(*TestCluste
 		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/scheduling/server/fastUpdateMember"))
 		re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs"))
 	}()
-	s.t.Logf("start test %s in pd service mode", getTestName())
-	if _, ok := s.clusters[PDServiceMode]; !ok {
-		s.startCluster(PDServiceMode)
+	s.t.Logf("start test %s in microservice environment", getTestName())
+	if _, ok := s.clusters[MicroserviceEnv]; !ok {
+		s.startCluster(MicroserviceEnv)
 	}
-	test(s.clusters[PDServiceMode])
+	test(s.clusters[MicroserviceEnv])
 }
 
 // Cleanup is to cleanup the environment.
@@ -365,12 +365,12 @@ func (s *SchedulingTestEnvironment) Cleanup() {
 	}
 }
 
-func (s *SchedulingTestEnvironment) startCluster(m SchedulerMode) {
+func (s *SchedulingTestEnvironment) startCluster(m Env) {
 	re := require.New(s.t)
 	ctx, cancel := context.WithCancel(context.Background())
 	s.cancels = append(s.cancels, cancel)
 	switch m {
-	case PDMode:
+	case NonMicroserviceEnv:
 		cluster, err := NewTestCluster(ctx, 1, s.opts...)
 		re.NoError(err)
 		err = cluster.RunInitialServers()
@@ -378,9 +378,9 @@ func (s *SchedulingTestEnvironment) startCluster(m SchedulerMode) {
 		re.NotEmpty(cluster.WaitLeader())
 		leaderServer := cluster.GetServer(cluster.GetLeader())
 		re.NoError(leaderServer.BootstrapCluster())
-		s.clusters[PDMode] = cluster
-	case PDServiceMode:
-		cluster, err := NewTestPDServiceCluster(ctx, 1, s.opts...)
+		s.clusters[NonMicroserviceEnv] = cluster
+	case MicroserviceEnv:
+		cluster, err := NewTestClusterWithKeyspaceGroup(ctx, 1, s.opts...)
 		re.NoError(err)
 		err = cluster.RunInitialServers()
 		re.NoError(err)
@@ -398,7 +398,7 @@ func (s *SchedulingTestEnvironment) startCluster(m SchedulerMode) {
 		testutil.Eventually(re, func() bool {
 			return cluster.GetLeaderServer().GetServer().IsServiceIndependent(constant.SchedulingServiceName)
 		})
-		s.clusters[PDServiceMode] = cluster
+		s.clusters[MicroserviceEnv] = cluster
 	}
 }
 

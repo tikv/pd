@@ -257,8 +257,8 @@ func (c *Cluster) triggerMembershipCheck() {
 	}
 }
 
-// SwitchPDServiceLeader switches the PD service leader.
-func (c *Cluster) SwitchPDServiceLeader(new pdpb.PDClient) bool {
+// SwitchPDLeader switches the PD leader.
+func (c *Cluster) SwitchPDLeader(new pdpb.PDClient) bool {
 	old := c.pdLeader.Load()
 	return c.pdLeader.CompareAndSwap(old, new)
 }

@@ -98,7 +98,7 @@ func (suite *tsoClientTestSuite) SetupSuite() {
 	if suite.legacy {
 		suite.cluster, err = tests.NewTestCluster(suite.ctx, serverCount)
 	} else {
-		suite.cluster, err = tests.NewTestPDServiceCluster(suite.ctx, serverCount, func(conf *config.Config, _ string) {
+		suite.cluster, err = tests.NewTestClusterWithKeyspaceGroup(suite.ctx, serverCount, func(conf *config.Config, _ string) {
 			conf.Microservice.EnableTSODynamicSwitching = false
 		})
 	}
@@ -510,9 +510,9 @@ func TestMixedTSODeployment(t *testing.T) {
 	re.NotNil(leaderServer)
 	backendEndpoints := leaderServer.GetAddr()
 
-	apiSvr, err := cluster.JoinPDServer(ctx)
+	pdSvr, err := cluster.Join(ctx)
 	re.NoError(err)
-	err = apiSvr.Run()
+	err = pdSvr.Run()
 	re.NoError(err)
 
 	s, cleanup := tests.StartSingleTSOTestServer(ctx, re, backendEndpoints, tempurl.Alloc())
@@ -537,20 +537,20 @@ func TestMixedTSODeployment(t *testing.T) {
 	wg.Wait()
 }
 
-// TestUpgradingAPIandTSOClusters tests the scenario that after we restart the API cluster
+// TestUpgradingPDAndTSOClusters tests the scenario that after we restart the PD cluster
 // then restart the TSO cluster, the TSO service can still serve TSO requests normally.
-func TestUpgradingAPIandTSOClusters(t *testing.T) {
+func TestUpgradingPDAndTSOClusters(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 
-	// Create an API cluster which has 3 servers
-	apiCluster, err := tests.NewTestPDServiceCluster(ctx, 3)
+	// Create an PD cluster which has 3 servers
+	pdCluster, err := tests.NewTestClusterWithKeyspaceGroup(ctx, 3)
 	re.NoError(err)
-	err = apiCluster.RunInitialServers()
+	err = pdCluster.RunInitialServers()
 	re.NoError(err)
-	leaderName := apiCluster.WaitLeader()
+	leaderName := pdCluster.WaitLeader()
 	re.NotEmpty(leaderName)
-	pdLeader := apiCluster.GetServer(leaderName)
+	pdLeader := pdCluster.GetServer(leaderName)
 	backendEndpoints := pdLeader.GetAddr()
 
 	// Create a pd client in PD mode to let the API leader to forward requests to the TSO cluster.
@@ -569,7 +569,7 @@ func TestUpgradingAPIandTSOClusters(t *testing.T) {
 	mcs.WaitForTSOServiceAvailable(ctx, re, pdClient)
 
 	// Restart the API cluster
-	apiCluster, err = tests.RestartTestAPICluster(ctx, apiCluster)
+	pdCluster, err = tests.RestartTestPDCluster(ctx, pdCluster)
 	re.NoError(err)
 	// The TSO service should be eventually healthy
 	mcs.WaitForTSOServiceAvailable(ctx, re, pdClient)
@@ -581,7 +581,7 @@ func TestUpgradingAPIandTSOClusters(t *testing.T) {
 	mcs.WaitForTSOServiceAvailable(ctx, re, pdClient)
 
 	tsoCluster.Destroy()
-	apiCluster.Destroy()
+	pdCluster.Destroy()
 	cancel()
 	re.NoError(failpoint.Disable("github.com/tikv/pd/client/servicediscovery/usePDServiceMode"))
 }

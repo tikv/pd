@@ -277,7 +277,7 @@ func TestMigrateFlags(t *testing.T) {
 	}
 	cfg, err := load(`
 [pd-server]
-trace-region-flow = false
+flow-round-by-digit = 127
 [schedule]
 disable-remove-down-replica = true
 enable-make-up-replica = false

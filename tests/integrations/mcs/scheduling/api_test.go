@@ -56,7 +56,7 @@ func (suite *apiTestSuite) TearDownSuite() {
 }
 
 func (suite *apiTestSuite) TestGetCheckerByName() {
-	suite.env.RunTestInPDServiceMode(suite.checkGetCheckerByName)
+	suite.env.RunTestInMicroserviceEnv(suite.checkGetCheckerByName)
 }
 
 func (suite *apiTestSuite) checkGetCheckerByName(cluster *tests.TestCluster) {
@@ -102,7 +102,7 @@ func (suite *apiTestSuite) checkGetCheckerByName(cluster *tests.TestCluster) {
 }
 
 func (suite *apiTestSuite) TestAPIForward() {
-	suite.env.RunTestInPDServiceMode(suite.checkAPIForward)
+	suite.env.RunTestInMicroserviceEnv(suite.checkAPIForward)
 }
 
 func (suite *apiTestSuite) checkAPIForward(cluster *tests.TestCluster) {
@@ -378,7 +378,7 @@ func (suite *apiTestSuite) checkAPIForward(cluster *tests.TestCluster) {
 }
 
 func (suite *apiTestSuite) TestConfig() {
-	suite.env.RunTestInPDServiceMode(suite.checkConfig)
+	suite.env.RunTestInMicroserviceEnv(suite.checkConfig)
 }
 
 func (suite *apiTestSuite) checkConfig(cluster *tests.TestCluster) {
@@ -401,7 +401,7 @@ func (suite *apiTestSuite) checkConfig(cluster *tests.TestCluster) {
 }
 
 func (suite *apiTestSuite) TestConfigForward() {
-	suite.env.RunTestInPDServiceMode(suite.checkConfigForward)
+	suite.env.RunTestInMicroserviceEnv(suite.checkConfigForward)
 }
 
 func (suite *apiTestSuite) checkConfigForward(cluster *tests.TestCluster) {
@@ -413,7 +413,7 @@ func (suite *apiTestSuite) checkConfigForward(cluster *tests.TestCluster) {
 	urlPrefix := fmt.Sprintf("%s/pd/api/v1/config", addr)
 
 	// Test config forward
-	// Expect to get same config in scheduling server and PD service
+	// Expect to get same config in scheduling server and PD
 	testutil.Eventually(re, func() bool {
 		testutil.ReadGetJSON(re, tests.TestDialClient, urlPrefix, &cfg)
 		re.Equal(cfg["schedule"].(map[string]any)["leader-schedule-limit"],
@@ -421,8 +421,8 @@ func (suite *apiTestSuite) checkConfigForward(cluster *tests.TestCluster) {
 		return cfg["replication"].(map[string]any)["max-replicas"] == float64(opts.GetReplicationConfig().MaxReplicas)
 	})
 
-	// Test to change config in PD service
-	// Expect to get new config in scheduling server and PD service
+	// Test to change config in PD
+	// Expect to get new config in scheduling server and PD
 	reqData, err := json.Marshal(map[string]any{
 		"max-replicas": 4,
 	})
@@ -436,7 +436,7 @@ func (suite *apiTestSuite) checkConfigForward(cluster *tests.TestCluster) {
 	})
 
 	// Test to change config only in scheduling server
-	// Expect to get new config in scheduling server but not old config in PD service
+	// Expect to get new config in scheduling server but not old config in PD
 	scheCfg := opts.GetScheduleConfig().Clone()
 	scheCfg.LeaderScheduleLimit = 100
 	opts.SetScheduleConfig(scheCfg)
@@ -452,7 +452,7 @@ func (suite *apiTestSuite) checkConfigForward(cluster *tests.TestCluster) {
 }
 
 func (suite *apiTestSuite) TestAdminRegionCache() {
-	suite.env.RunTestInPDServiceMode(suite.checkAdminRegionCache)
+	suite.env.RunTestInMicroserviceEnv(suite.checkAdminRegionCache)
 }
 
 func (suite *apiTestSuite) checkAdminRegionCache(cluster *tests.TestCluster) {
@@ -479,7 +479,7 @@ func (suite *apiTestSuite) checkAdminRegionCache(cluster *tests.TestCluster) {
 }
 
 func (suite *apiTestSuite) TestAdminRegionCacheForward() {
-	suite.env.RunTestInPDServiceMode(suite.checkAdminRegionCacheForward)
+	suite.env.RunTestInMicroserviceEnv(suite.checkAdminRegionCacheForward)
 }
 
 func (suite *apiTestSuite) checkAdminRegionCacheForward(cluster *tests.TestCluster) {
@@ -510,7 +510,7 @@ func (suite *apiTestSuite) checkAdminRegionCacheForward(cluster *tests.TestClust
 }
 
 func (suite *apiTestSuite) TestFollowerForward() {
-	suite.env.RunTestBasedOnMode(suite.checkFollowerForward)
+	suite.env.RunTest(suite.checkFollowerForward)
 	suite.TearDownSuite()
 	suite.SetupSuite()
 }
@@ -520,7 +520,7 @@ func (suite *apiTestSuite) checkFollowerForward(cluster *tests.TestCluster) {
 	leaderAddr := cluster.GetLeaderServer().GetAddr()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	follower, err := cluster.JoinPDServer(ctx)
+	follower, err := cluster.Join(ctx)
 	re.NoError(err)
 	re.NoError(follower.Run())
 	re.NotEmpty(cluster.WaitLeader())
@@ -558,7 +558,7 @@ func (suite *apiTestSuite) checkFollowerForward(cluster *tests.TestCluster) {
 }
 
 func (suite *apiTestSuite) TestMetrics() {
-	suite.env.RunTestInPDServiceMode(suite.checkMetrics)
+	suite.env.RunTestInMicroserviceEnv(suite.checkMetrics)
 }
 
 func (suite *apiTestSuite) checkMetrics(cluster *tests.TestCluster) {
@@ -577,7 +577,7 @@ func (suite *apiTestSuite) checkMetrics(cluster *tests.TestCluster) {
 }
 
 func (suite *apiTestSuite) TestStatus() {
-	suite.env.RunTestInPDServiceMode(suite.checkStatus)
+	suite.env.RunTestInMicroserviceEnv(suite.checkStatus)
 }
 
 func (suite *apiTestSuite) checkStatus(cluster *tests.TestCluster) {
@@ -600,7 +600,7 @@ func (suite *apiTestSuite) checkStatus(cluster *tests.TestCluster) {
 }
 
 func (suite *apiTestSuite) TestStores() {
-	suite.env.RunTestInPDServiceMode(suite.checkStores)
+	suite.env.RunTestInMicroserviceEnv(suite.checkStores)
 }
 
 func (suite *apiTestSuite) checkStores(cluster *tests.TestCluster) {
@@ -647,8 +647,8 @@ func (suite *apiTestSuite) checkStores(cluster *tests.TestCluster) {
 		tests.MustPutStore(re, cluster, store)
 	}
 	// Test /stores
-	pdServiceAddr := cluster.GetLeaderServer().GetAddr()
-	urlPrefix := fmt.Sprintf("%s/pd/api/v1/stores", pdServiceAddr)
+	pdAddr := cluster.GetLeaderServer().GetAddr()
+	urlPrefix := fmt.Sprintf("%s/pd/api/v1/stores", pdAddr)
 	var resp map[string]any
 	err := testutil.ReadGetJSON(re, tests.TestDialClient, urlPrefix, &resp)
 	re.NoError(err)
@@ -682,7 +682,7 @@ func (suite *apiTestSuite) checkStores(cluster *tests.TestCluster) {
 }
 
 func (suite *apiTestSuite) TestRegions() {
-	suite.env.RunTestInPDServiceMode(suite.checkRegions)
+	suite.env.RunTestInMicroserviceEnv(suite.checkRegions)
 }
 
 func (suite *apiTestSuite) checkRegions(cluster *tests.TestCluster) {
@@ -691,8 +691,8 @@ func (suite *apiTestSuite) checkRegions(cluster *tests.TestCluster) {
 	tests.MustPutRegion(re, cluster, 2, 2, []byte("c"), []byte("d"))
 	tests.MustPutRegion(re, cluster, 3, 1, []byte("e"), []byte("f"))
 	// Test /regions
-	pdServiceAddr := cluster.GetLeaderServer().GetAddr()
-	urlPrefix := fmt.Sprintf("%s/pd/api/v1/regions", pdServiceAddr)
+	pdAddr := cluster.GetLeaderServer().GetAddr()
+	urlPrefix := fmt.Sprintf("%s/pd/api/v1/regions", pdAddr)
 	var resp map[string]any
 	err := testutil.ReadGetJSON(re, tests.TestDialClient, urlPrefix, &resp)
 	re.NoError(err)

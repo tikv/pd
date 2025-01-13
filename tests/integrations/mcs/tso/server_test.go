@@ -75,7 +75,7 @@ func (suite *tsoServerTestSuite) SetupSuite() {
 	re := suite.Require()
 
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
-	suite.cluster, err = tests.NewTestPDServiceCluster(suite.ctx, 1)
+	suite.cluster, err = tests.NewTestClusterWithKeyspaceGroup(suite.ctx, 1)
 	re.NoError(err)
 
 	err = suite.cluster.RunInitialServers()
@@ -156,19 +156,19 @@ func (suite *tsoServerTestSuite) TestParticipantStartWithAdvertiseListenAddr() {
 
 func TestTSOPath(t *testing.T) {
 	re := require.New(t)
-	checkTSOPath(re, true /*isPDServiceMode*/)
-	checkTSOPath(re, false /*isPDServiceMode*/)
+	checkTSOPath(re, true /*isKeyspaceGroupEnabled*/)
+	checkTSOPath(re, false /*isKeyspaceGroupEnabled*/)
 }
 
-func checkTSOPath(re *require.Assertions, isPDServiceMode bool) {
+func checkTSOPath(re *require.Assertions, isKeyspaceGroupEnabled bool) {
 	var (
 		cluster *tests.TestCluster
 		err     error
 	)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	if isPDServiceMode {
-		cluster, err = tests.NewTestPDServiceCluster(ctx, 1, func(conf *config.Config, _ string) {
+	if isKeyspaceGroupEnabled {
+		cluster, err = tests.NewTestClusterWithKeyspaceGroup(ctx, 1, func(conf *config.Config, _ string) {
 			conf.Microservice.EnableTSODynamicSwitching = false
 		})
 	} else {
@@ -184,7 +184,7 @@ func checkTSOPath(re *require.Assertions, isPDServiceMode bool) {
 	re.NoError(pdLeader.BootstrapCluster())
 	backendEndpoints := pdLeader.GetAddr()
 	client := pdLeader.GetEtcdClient()
-	if isPDServiceMode {
+	if isKeyspaceGroupEnabled {
 		re.Equal(0, getEtcdTimestampKeyNum(re, client))
 	} else {
 		re.Equal(1, getEtcdTimestampKeyNum(re, client))
@@ -233,7 +233,7 @@ func NewPDServiceForward(re *require.Assertions) PDServiceForward {
 	}
 	var err error
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
-	suite.cluster, err = tests.NewTestPDServiceCluster(suite.ctx, 3)
+	suite.cluster, err = tests.NewTestClusterWithKeyspaceGroup(suite.ctx, 3)
 	re.NoError(err)
 
 	err = suite.cluster.RunInitialServers()
@@ -512,7 +512,7 @@ func (suite *CommonTestSuite) SetupSuite() {
 	var err error
 	re := suite.Require()
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
-	suite.cluster, err = tests.NewTestPDServiceCluster(suite.ctx, 1)
+	suite.cluster, err = tests.NewTestClusterWithKeyspaceGroup(suite.ctx, 1)
 	re.NoError(err)
 
 	err = suite.cluster.RunInitialServers()
@@ -576,7 +576,7 @@ func (suite *CommonTestSuite) TestBootstrapDefaultKeyspaceGroup() {
 	}
 	check()
 
-	s, err := suite.cluster.JoinPDServer(suite.ctx)
+	s, err := suite.cluster.JoinWithKeyspaceGroup(suite.ctx)
 	re.NoError(err)
 	re.NoError(s.Run())
 
@@ -598,7 +598,7 @@ func TestTSOServiceSwitch(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	tc, err := tests.NewTestPDServiceCluster(ctx, 1,
+	tc, err := tests.NewTestClusterWithKeyspaceGroup(ctx, 1,
 		func(conf *config.Config, _ string) {
 			conf.Microservice.EnableTSODynamicSwitching = true
 		},

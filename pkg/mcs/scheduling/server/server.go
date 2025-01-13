@@ -110,7 +110,7 @@ type Server struct {
 	hbStreams *hbstream.HeartbeatStreams
 	storage   *endpoint.StorageEndpoint
 
-	// for watching the PD service meta info updates that are related to the scheduling.
+	// for watching the PD meta info updates that are related to the scheduling.
 	configWatcher *config.Watcher
 	ruleWatcher   *rule.Watcher
 	metaWatcher   *meta.Watcher
@@ -169,10 +169,10 @@ func (s *Server) startServerLoop() {
 	s.serverLoopCtx, s.serverLoopCancel = context.WithCancel(s.Context())
 	s.serverLoopWg.Add(2)
 	go s.primaryElectionLoop()
-	go s.updatePDServiceMemberLoop()
+	go s.updatePDMemberLoop()
 }
 
-func (s *Server) updatePDServiceMemberLoop() {
+func (s *Server) updatePDMemberLoop() {
 	defer logutil.LogPanic()
 	defer s.serverLoopWg.Done()
 
@@ -220,7 +220,7 @@ func (s *Server) updatePDServiceMemberLoop() {
 					// double check
 					break
 				}
-				if s.cluster.SwitchPDServiceLeader(pdpb.NewPDClient(cc)) {
+				if s.cluster.SwitchPDLeader(pdpb.NewPDClient(cc)) {
 					if status.Leader != curLeader {
 						log.Info("switch leader", zap.String("leader-id", fmt.Sprintf("%x", ep.ID)), zap.String("endpoint", ep.ClientURLs[0]))
 					}
