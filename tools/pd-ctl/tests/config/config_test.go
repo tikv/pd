@@ -1136,6 +1136,7 @@ func (suite *configTestSuite) checkUpdateDefaultReplicaConfig(cluster *pdTests.T
 	output, err := tests.ExecuteCommand(cmd, "-u", pdAddr, "config", "set", "max-replicas", "2")
 	re.NoError(err)
 	re.Contains(string(output), "Success!")
+	re.Contains(string(output), "Setting max-replica to less than 3 may be a mistake and carries high risk. Please confirm the setting.")
 	checkMaxReplicas(2)
 	output, err = tests.ExecuteCommand(cmd, "-u", pdAddr, "config", "set", "location-labels", "zone,host")
 	re.NoError(err)
@@ -1156,6 +1157,7 @@ func (suite *configTestSuite) checkUpdateDefaultReplicaConfig(cluster *pdTests.T
 	output, err = tests.ExecuteCommand(cmd, "-u", pdAddr, "config", "set", "max-replicas", "3")
 	re.NoError(err)
 	re.Contains(string(output), "Success!")
+	re.NotContains(string(output), "Setting max-replica to less than 3 may be a mistake and carries high risk. Please confirm the setting.")
 	checkMaxReplicas(3)
 	checkRuleCount(3)
 
