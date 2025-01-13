@@ -3209,7 +3209,7 @@ func TestAddScheduler(t *testing.T) {
 	re.NoError(err)
 	re.NoError(controller.AddScheduler(gls))
 
-	gls, err = schedulers.CreateScheduler(types.BalanceKeyRangeScheduler, oc, storage.NewStorageWithMemoryBackend(), schedulers.ConfigSliceDecoder(types.BalanceKeyRangeScheduler, []string{}), controller.RemoveScheduler)
+	_, err = schedulers.CreateScheduler(types.BalanceKeyRangeScheduler, oc, storage.NewStorageWithMemoryBackend(), schedulers.ConfigSliceDecoder(types.BalanceKeyRangeScheduler, []string{}), controller.RemoveScheduler)
 	re.Error(err)
 
 	gls, err = schedulers.CreateScheduler(types.BalanceKeyRangeScheduler, oc, storage.NewStorageWithMemoryBackend(), schedulers.ConfigSliceDecoder(types.BalanceKeyRangeScheduler, []string{"leaner", "tiflash", "100", "200"}), controller.RemoveScheduler)

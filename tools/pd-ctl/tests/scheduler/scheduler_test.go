@@ -551,7 +551,7 @@ func (suite *schedulerTestSuite) checkSchedulerConfig(cluster *pdTests.TestClust
 	mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "balance-key-range-scheduler", "show"}, &conf)
 	re.Equal("learner", conf["role"])
 	re.Equal("tiflash", conf["engine"])
-	ranges := conf["ranges"].([]interface{})[0].(map[string]interface{})
+	ranges := conf["ranges"].([]any)[0].(map[string]any)
 	re.Equal(base64.StdEncoding.EncodeToString([]byte("a")), ranges["start-key"])
 	re.Equal(base64.StdEncoding.EncodeToString([]byte("b")), ranges["end-key"])
 

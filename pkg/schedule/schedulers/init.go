@@ -590,5 +590,4 @@ func schedulersRegister() {
 		conf.init(sche.GetName(), storage, conf)
 		return sche, nil
 	})
-
 }

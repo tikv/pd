@@ -375,6 +375,7 @@ func NewBalanceWitnessSchedulerCommand() *cobra.Command {
 	return c
 }
 
+// NewBalanceKeyRangeSchedulerCommand returns a command to add a balance-key-range-scheduler.
 func NewBalanceKeyRangeSchedulerCommand() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "balance-key-range-scheduler [--format=raw|encode|hex] <engine> <role> <start_key> <end_key>",
