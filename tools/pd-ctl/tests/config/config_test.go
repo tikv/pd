@@ -1200,7 +1200,7 @@ func (suite *configTestSuite) checkUpdateDefaultReplicaConfig(cluster *pdTests.T
 }
 
 func (suite *configTestSuite) TestMaxReplicaChanged() {
-	suite.env.RunTestInPDMode(suite.checkMaxReplicaChanged)
+	suite.env.RunTest(suite.checkMaxReplicaChanged)
 }
 
 func (suite *configTestSuite) checkMaxReplicaChanged(cluster *pdTests.TestCluster) {
