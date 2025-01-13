@@ -476,6 +476,9 @@ func (suite *operatorTestSuite) TestSchedulerKind() {
 		}, {
 			op:     NewTestOperator(1, &metapb.RegionEpoch{}, OpLeader),
 			expect: OpLeader,
+		}, {
+			op:     NewTestOperator(1, &metapb.RegionEpoch{}, OpKeyRange|OpLeader),
+			expect: OpKeyRange,
 		},
 	}
 	for _, v := range testData {

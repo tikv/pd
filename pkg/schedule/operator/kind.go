@@ -35,6 +35,8 @@ const (
 	OpMerge
 	// Initiated by range scheduler.
 	OpRange
+	// Initiated by key range scheduler.
+	OpKeyRange
 	// Initiated by replica checker.
 	OpReplica
 	// Include region split. Initiated by rule checker if `kind & OpAdmin == 0`.
@@ -74,6 +76,7 @@ var nameToFlag = map[string]OpKind{
 	"replica":        OpReplica,
 	"merge":          OpMerge,
 	"range":          OpRange,
+	"key-range":      OpKeyRange,
 	"witness-leader": OpWitnessLeader,
 }
 
