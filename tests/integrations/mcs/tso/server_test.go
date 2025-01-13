@@ -75,7 +75,7 @@ func (suite *tsoServerTestSuite) SetupSuite() {
 	re := suite.Require()
 
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
-	suite.cluster, err = tests.NewTestClusterWithKeyspaceGroup(suite.ctx, 1)
+	suite.cluster, err = tests.NewTestCluster(suite.ctx, 1)
 	re.NoError(err)
 
 	err = suite.cluster.RunInitialServers()
@@ -156,19 +156,19 @@ func (suite *tsoServerTestSuite) TestParticipantStartWithAdvertiseListenAddr() {
 
 func TestTSOPath(t *testing.T) {
 	re := require.New(t)
-	checkTSOPath(re, true /*isKeyspaceGroupEnabled*/)
-	checkTSOPath(re, false /*isKeyspaceGroupEnabled*/)
+	checkTSOPath(re, true /*isTSODynamicSwitchingEnabled*/)
+	checkTSOPath(re, false /*isTSODynamicSwitchingEnabled*/)
 }
 
-func checkTSOPath(re *require.Assertions, isKeyspaceGroupEnabled bool) {
+func checkTSOPath(re *require.Assertions, isTSODynamicSwitchingEnabled bool) {
 	var (
 		cluster *tests.TestCluster
 		err     error
 	)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	if isKeyspaceGroupEnabled {
-		cluster, err = tests.NewTestClusterWithKeyspaceGroup(ctx, 1, func(conf *config.Config, _ string) {
+	if isTSODynamicSwitchingEnabled {
+		cluster, err = tests.NewTestCluster(ctx, 1, func(conf *config.Config, _ string) {
 			conf.Microservice.EnableTSODynamicSwitching = false
 		})
 	} else {
@@ -184,7 +184,7 @@ func checkTSOPath(re *require.Assertions, isKeyspaceGroupEnabled bool) {
 	re.NoError(pdLeader.BootstrapCluster())
 	backendEndpoints := pdLeader.GetAddr()
 	client := pdLeader.GetEtcdClient()
-	if isKeyspaceGroupEnabled {
+	if isTSODynamicSwitchingEnabled {
 		re.Equal(0, getEtcdTimestampKeyNum(re, client))
 	} else {
 		re.Equal(1, getEtcdTimestampKeyNum(re, client))
@@ -227,17 +227,13 @@ type pdForward struct {
 	pdClient         pd.Client
 }
 
-func NewPDForward(re *require.Assertions, isKeyspaceGroupEnabled bool) pdForward {
+func NewPDForward(re *require.Assertions) pdForward {
 	suite := pdForward{
 		re: re,
 	}
 	var err error
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
-	if isKeyspaceGroupEnabled {
-		suite.cluster, err = tests.NewTestClusterWithKeyspaceGroup(suite.ctx, 3)
-	} else {
-		suite.cluster, err = tests.NewTestCluster(suite.ctx, 3)
-	}
+	suite.cluster, err = tests.NewTestCluster(suite.ctx, 3)
 	re.NoError(err)
 
 	err = suite.cluster.RunInitialServers()
@@ -277,7 +273,7 @@ func (suite *pdForward) ShutDown() {
 
 func TestForwardTSO(t *testing.T) {
 	re := require.New(t)
-	suite := NewPDForward(re, false)
+	suite := NewPDForward(re)
 	defer suite.ShutDown()
 	// If EnableTSODynamicSwitching is false, the tso server will be provided by PD.
 	// The tso server won't affect the PD.
@@ -296,9 +292,9 @@ func TestForwardTSO(t *testing.T) {
 	suite.checkAvailableTSO(re)
 }
 
-func TestForwardTSOWithKeyspaceGroupEnabled(t *testing.T) {
+func TestForwardTSOWithKeyspaceGroup(t *testing.T) {
 	re := require.New(t)
-	suite := NewPDForward(re, true)
+	suite := NewPDForward(re)
 	defer suite.ShutDown()
 	// Unable to use the tso-related interface without tso server
 	suite.checkUnavailableTSO(re)
@@ -311,7 +307,7 @@ func TestForwardTSOWithKeyspaceGroupEnabled(t *testing.T) {
 
 func TestForwardTSOWhenPrimaryChanged(t *testing.T) {
 	re := require.New(t)
-	suite := NewPDForward(re, true)
+	suite := NewPDForward(re)
 	defer suite.ShutDown()
 
 	tc, err := tests.NewTestTSOCluster(suite.ctx, 2, suite.backendEndpoints)
@@ -351,7 +347,7 @@ func TestForwardTSOWhenPrimaryChanged(t *testing.T) {
 
 func TestResignTSOPrimaryForward(t *testing.T) {
 	re := require.New(t)
-	suite := NewPDForward(re, true)
+	suite := NewPDForward(re)
 	defer suite.ShutDown()
 	// TODO: test random kill primary with 3 nodes
 	tc, err := tests.NewTestTSOCluster(suite.ctx, 2, suite.backendEndpoints)
@@ -377,7 +373,7 @@ func TestResignTSOPrimaryForward(t *testing.T) {
 
 func TestResignAPIPrimaryForward(t *testing.T) {
 	re := require.New(t)
-	suite := NewPDForward(re, true)
+	suite := NewPDForward(re)
 	defer suite.ShutDown()
 
 	tc, err := tests.NewTestTSOCluster(suite.ctx, 2, suite.backendEndpoints)
@@ -401,7 +397,7 @@ func TestResignAPIPrimaryForward(t *testing.T) {
 
 func TestForwardTSOUnexpectedToFollower1(t *testing.T) {
 	re := require.New(t)
-	suite := NewPDForward(re, true)
+	suite := NewPDForward(re)
 	defer suite.ShutDown()
 	suite.checkForwardTSOUnexpectedToFollower(func() {
 		// unary call will retry internally
@@ -414,7 +410,7 @@ func TestForwardTSOUnexpectedToFollower1(t *testing.T) {
 
 func TestForwardTSOUnexpectedToFollower2(t *testing.T) {
 	re := require.New(t)
-	suite := NewPDForward(re, true)
+	suite := NewPDForward(re)
 	defer suite.ShutDown()
 	suite.checkForwardTSOUnexpectedToFollower(func() {
 		// unary call will retry internally
@@ -428,7 +424,7 @@ func TestForwardTSOUnexpectedToFollower2(t *testing.T) {
 
 func TestForwardTSOUnexpectedToFollower3(t *testing.T) {
 	re := require.New(t)
-	suite := NewPDForward(re, true)
+	suite := NewPDForward(re)
 	defer suite.ShutDown()
 	suite.checkForwardTSOUnexpectedToFollower(func() {
 		_, _, err := suite.pdClient.GetTS(suite.ctx)
@@ -533,7 +529,7 @@ func (suite *CommonTestSuite) SetupSuite() {
 	var err error
 	re := suite.Require()
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
-	suite.cluster, err = tests.NewTestClusterWithKeyspaceGroup(suite.ctx, 1)
+	suite.cluster, err = tests.NewTestCluster(suite.ctx, 1)
 	re.NoError(err)
 
 	err = suite.cluster.RunInitialServers()
@@ -597,7 +593,7 @@ func (suite *CommonTestSuite) TestBootstrapDefaultKeyspaceGroup() {
 	}
 	check()
 
-	s, err := suite.cluster.JoinWithKeyspaceGroup(suite.ctx)
+	s, err := suite.cluster.Join(suite.ctx)
 	re.NoError(err)
 	re.NoError(s.Run())
 
@@ -619,7 +615,7 @@ func TestTSOServiceSwitch(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	tc, err := tests.NewTestClusterWithKeyspaceGroup(ctx, 1,
+	tc, err := tests.NewTestCluster(ctx, 1,
 		func(conf *config.Config, _ string) {
 			conf.Microservice.EnableTSODynamicSwitching = true
 		},

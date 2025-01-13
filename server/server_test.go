@@ -271,7 +271,7 @@ func TestMode(t *testing.T) {
 	err = svr.Run()
 	re.NoError(err)
 	MustWaitLeader(re, []*Server{svr})
-	re.True(svr.IsKeyspaceGroupEnabled())
+	re.True(svr.IsMultiTimelinesEnabled())
 }
 
 func TestIsPathInDirectory(t *testing.T) {

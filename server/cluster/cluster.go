@@ -131,7 +131,7 @@ type Server interface {
 	GetMembers() ([]*pdpb.Member, error)
 	ReplicateFileToMember(ctx context.Context, member *pdpb.Member, name string, data []byte) error
 	GetKeyspaceGroupManager() *keyspace.GroupManager
-	IsKeyspaceGroupEnabled() bool
+	IsMultiTimelinesEnabled() bool
 	GetSafePointV2Manager() *gc.SafePointV2Manager
 }
 
@@ -156,12 +156,12 @@ type RaftCluster struct {
 	etcdClient *clientv3.Client
 	httpClient *http.Client
 
-	running                bool
-	isKeyspaceGroupEnabled bool
-	meta                   *metapb.Cluster
-	storage                storage.Storage
-	minResolvedTS          atomic.Value // Store as uint64
-	externalTS             atomic.Value // Store as uint64
+	running                 bool
+	isMultiTimelinesEnabled bool
+	meta                    *metapb.Cluster
+	storage                 storage.Storage
+	minResolvedTS           atomic.Value // Store as uint64
+	externalTS              atomic.Value // Store as uint64
 
 	// Keep the previous store limit settings when removing a store.
 	prevStoreLimit map[uint64]map[storelimit.Type]float64
@@ -325,7 +325,7 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 		log.Warn("raft cluster has already been started")
 		return nil
 	}
-	c.isKeyspaceGroupEnabled = s.IsKeyspaceGroupEnabled()
+	c.isMultiTimelinesEnabled = s.IsMultiTimelinesEnabled()
 	err = c.InitCluster(s.GetAllocator(), s.GetPersistOptions(), s.GetHBStreams(), s.GetKeyspaceGroupManager())
 	if err != nil {
 		return err
@@ -376,14 +376,13 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 	c.loadExternalTS()
 	c.loadMinResolvedTS()
 
-	if c.isKeyspaceGroupEnabled {
-		// bootstrap keyspace group manager after starting other parts successfully.
-		// This order avoids a stuck goroutine in keyspaceGroupManager when it fails to create raftcluster.
-		err = c.keyspaceGroupManager.Bootstrap(c.ctx)
-		if err != nil {
-			return err
-		}
+	// bootstrap keyspace group manager after starting other parts successfully.
+	// This order avoids a stuck goroutine in keyspaceGroupManager when it fails to create raftcluster.
+	err = c.keyspaceGroupManager.Bootstrap(c.ctx)
+	if err != nil {
+		return err
 	}
+
 	c.checkSchedulingService()
 	c.wg.Add(9)
 	go c.runServiceCheckJob()
@@ -426,9 +425,9 @@ func (c *RaftCluster) checkSchedulingService() {
 //     If the external TSO service is unavailable, it will switch to the internal TSO service.
 //
 // In serverless env, we don't allow dynamic switching.
-// Whether we use the internal TSO service or the external TSO service is determined by the `isKeyspaceGroupEnabled`.
+// Whether we use the internal TSO service or the external TSO service is determined by the `isMultiTimelinesEnabled`.
 func (c *RaftCluster) checkTSOService() {
-	if c.isKeyspaceGroupEnabled {
+	if c.isMultiTimelinesEnabled {
 		return
 	}
 	if !c.opt.GetMicroserviceConfig().IsTSODynamicSwitchingEnabled() {

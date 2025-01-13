@@ -98,7 +98,7 @@ func (suite *tsoClientTestSuite) SetupSuite() {
 	if suite.legacy {
 		suite.cluster, err = tests.NewTestCluster(suite.ctx, serverCount)
 	} else {
-		suite.cluster, err = tests.NewTestClusterWithKeyspaceGroup(suite.ctx, serverCount, func(conf *config.Config, _ string) {
+		suite.cluster, err = tests.NewTestCluster(suite.ctx, serverCount, func(conf *config.Config, _ string) {
 			conf.Microservice.EnableTSODynamicSwitching = false
 		})
 	}
@@ -544,7 +544,7 @@ func TestUpgradingPDAndTSOClusters(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	// Create an PD cluster which has 3 servers
-	pdCluster, err := tests.NewTestClusterWithKeyspaceGroup(ctx, 3)
+	pdCluster, err := tests.NewTestCluster(ctx, 3)
 	re.NoError(err)
 	err = pdCluster.RunInitialServers()
 	re.NoError(err)

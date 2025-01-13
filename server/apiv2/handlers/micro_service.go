@@ -65,12 +65,8 @@ func GetMembers(c *gin.Context) {
 func GetPrimary(c *gin.Context) {
 	svr := c.MustGet(middlewares.ServerContextKey).(*server.Server)
 	if service := c.Param("service"); len(service) > 0 {
-		addr, err := svr.GetServicePrimaryAddr(c.Request.Context(), service)
-		if err != nil {
-			c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
-			return
-		}
-		if len(addr) == 0 {
+		addr, exist := svr.GetServicePrimaryAddr(c.Request.Context(), service)
+		if !exist {
 			c.AbortWithStatusJSON(http.StatusNotFound, "no primary found")
 			return
 		}

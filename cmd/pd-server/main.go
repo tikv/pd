@@ -18,6 +18,7 @@ import (
 	"context"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	grpcprometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
@@ -161,11 +162,15 @@ func addFlags(cmd *cobra.Command) {
 }
 
 func createServerWrapper(cmd *cobra.Command, args []string) {
-	isKeyspaceGroupEnabled := os.Getenv(serviceModeEnv) != ""
-	start(cmd, args, isKeyspaceGroupEnabled)
+	mode := os.Getenv(serviceModeEnv)
+	if len(mode) != 0 && strings.ToLower(mode) == "api" {
+		start(cmd, args, true)
+	} else {
+		start(cmd, args, false)
+	}
 }
 
-func start(cmd *cobra.Command, args []string, isKeyspaceGroupEnabled bool) {
+func start(cmd *cobra.Command, args []string, isMultiTimelinesEnabled bool) {
 	schedulers.Register()
 	cfg := config.NewConfig()
 	flagSet := cmd.Flags()
@@ -233,7 +238,7 @@ func start(cmd *cobra.Command, args []string, isKeyspaceGroupEnabled bool) {
 		serviceBuilders = append(serviceBuilders, swaggerserver.NewHandler)
 	}
 	serviceBuilders = append(serviceBuilders, dashboard.GetServiceBuilders()...)
-	svr, err := server.CreateServer(ctx, cfg, isKeyspaceGroupEnabled, serviceBuilders...)
+	svr, err := server.CreateServer(ctx, cfg, isMultiTimelinesEnabled, serviceBuilders...)
 	if err != nil {
 		log.Fatal("create server failed", errs.ZapError(err))
 	}

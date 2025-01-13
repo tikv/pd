@@ -62,7 +62,7 @@ func (s *tsoProxyTestSuite) SetupSuite() {
 	var err error
 	s.ctx, s.cancel = context.WithCancel(context.Background())
 	// Create an PD cluster with 1 server
-	s.pdCluster, err = tests.NewTestClusterWithKeyspaceGroup(s.ctx, 1)
+	s.pdCluster, err = tests.NewTestCluster(s.ctx, 1)
 	re.NoError(err)
 	err = s.pdCluster.RunInitialServers()
 	re.NoError(err)
