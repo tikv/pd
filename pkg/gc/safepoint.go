@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/pingcap/errors"
+	"github.com/tikv/pd/pkg/mcs/utils/constant"
 
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/syncutil"
@@ -28,31 +29,31 @@ import (
 var blockGCSafePointErrmsg = "don't allow update gc safe point v1."
 var blockServiceSafepointErrmsg = "don't allow update service safe point v1."
 
-// SafePointManager is the manager for safePoint of GC and services.
-type SafePointManager struct {
-	gcLock        syncutil.Mutex
-	serviceGCLock syncutil.Mutex
-	store         endpoint.GCSafePointStorage
-	cfg           config.PDServerConfig
+// GCStateManager is the manager for safePoint of GC and services.
+type GCStateManager struct {
+	lock  *syncutil.RWLockGroup
+	store endpoint.GCStateStorage
+	cfg   config.PDServerConfig
 }
 
-// NewSafePointManager creates a SafePointManager of GC and services.
-func NewSafePointManager(store endpoint.GCSafePointStorage, cfg config.PDServerConfig) *SafePointManager {
-	return &SafePointManager{store: store, cfg: cfg}
+// NewGCStateManager creates a GCStateManager of GC and services.
+func NewGCStateManager(store endpoint.GCStateStorage, cfg config.PDServerConfig) *GCStateManager {
+	return &GCStateManager{store: store, cfg: cfg}
 }
 
 // LoadGCSafePoint loads current GC safe point from storage.
-func (manager *SafePointManager) LoadGCSafePoint() (uint64, error) {
-	return manager.store.LoadGCSafePoint()
+func (manager *GCStateManager) LoadGCSafePoint(keyspaceID uint32) (uint64, error) {
+	// No need to acquire the lock as a single read operation is inherently atomic.
+	return manager.store.LoadGCSafePoint(keyspaceID)
 }
 
 // UpdateGCSafePoint updates the safepoint if it is greater than the previous one
 // it returns the old safepoint in the storage.
-func (manager *SafePointManager) UpdateGCSafePoint(newSafePoint uint64) (oldSafePoint uint64, err error) {
-	manager.gcLock.Lock()
-	defer manager.gcLock.Unlock()
+func (manager *GCStateManager) UpdateGCSafePoint(keyspaceID uint32, newSafePoint uint64) (oldSafePoint uint64, err error) {
+	manager.lock.Lock(keyspaceID)
+	defer manager.lock.Unlock(keyspaceID)
 	// TODO: cache the safepoint in the storage.
-	oldSafePoint, err = manager.store.LoadGCSafePoint()
+	oldSafePoint, err = manager.store.LoadGCSafePoint(keyspaceID)
 	if err != nil {
 		return
 	}
@@ -64,20 +65,21 @@ func (manager *SafePointManager) UpdateGCSafePoint(newSafePoint uint64) (oldSafe
 	if oldSafePoint >= newSafePoint {
 		return
 	}
-	err = manager.store.SaveGCSafePoint(newSafePoint)
-	if err == nil {
+	err = manager.store.SaveGCSafePoint(keyspaceID, newSafePoint)
+	if err == nil && keyspaceID == constant.NullKeyspaceID {
 		gcSafePointGauge.WithLabelValues("gc_safepoint").Set(float64(newSafePoint))
 	}
 	return
 }
 
 // UpdateServiceGCSafePoint update the safepoint for a specific service.
-func (manager *SafePointManager) UpdateServiceGCSafePoint(serviceID string, newSafePoint uint64, ttl int64, now time.Time) (minServiceSafePoint *endpoint.ServiceSafePoint, updated bool, err error) {
+func (manager *GCStateManager) UpdateServiceGCSafePoint(serviceID string, newSafePoint uint64, ttl int64, now time.Time) (minServiceSafePoint *endpoint.ServiceSafePoint, updated bool, err error) {
 	if manager.cfg.BlockSafePointV1 {
 		return nil, false, errors.New(blockServiceSafepointErrmsg)
 	}
-	manager.serviceGCLock.Lock()
-	defer manager.serviceGCLock.Unlock()
+	// This function won't support keyspace as it's being deprecated.
+	manager.lock.Lock(constant.NullKeyspaceID)
+	defer manager.lock.Unlock(constant.NullKeyspaceID)
 	minServiceSafePoint, err = manager.store.LoadMinServiceGCSafePoint(now)
 	if err != nil || ttl <= 0 || newSafePoint < minServiceSafePoint.SafePoint {
 		return minServiceSafePoint, false, err
@@ -100,4 +102,11 @@ func (manager *SafePointManager) UpdateServiceGCSafePoint(serviceID string, newS
 		minServiceSafePoint, err = manager.store.LoadMinServiceGCSafePoint(now)
 	}
 	return minServiceSafePoint, true, err
+}
+
+// UpdateTxnSafePoint updates the txn safe point.
+func (manager *GCStateManager) UpdateTxnSafePoint(keyspaceID uint32, target uint64) (uint64, error) {
+	manager.lock.Lock(keyspaceID)
+	defer manager.lock.Unlock(keyspaceID)
+
 }

@@ -16,72 +16,99 @@ package syncutil
 
 import "fmt"
 
-type lockEntry struct {
-	mu       *Mutex
+type mutexPointer[M any] interface {
+	Lock()
+	Unlock()
+	*M
+}
+
+type lockEntry[M any, PM mutexPointer[M]] struct {
+	mu       PM
 	refCount int
 }
 
-// LockGroup is a map of mutex that locks entries with different id separately.
+// lockGroup is a map of mutex that locks entries with different id separately.
 // It's used levitate lock contentions of using a global lock.
-type LockGroup struct {
-	groupLock           Mutex                 // protects group.
-	removeEntryOnUnlock bool                  // if remove entry from entries on Unlock().
-	entries             map[uint32]*lockEntry // map of locks with id as key.
+type lockGroup[M any, PM mutexPointer[M]] struct {
+	groupLock           Mutex                        // protects group.
+	removeEntryOnUnlock bool                         // if remove entry from entries on Unlock().
+	entries             map[uint32]*lockEntry[M, PM] // map of locks with id as key.
 	// hashFn hashes id to map key, it's main purpose is to limit the total
 	// number of mutexes in the group, as using a mutex for every id is too memory heavy.
 	hashFn func(id uint32) uint32
 }
 
+type LockGroup = lockGroup[Mutex, *Mutex]
+
+type lockGroupOptions struct {
+	hashFn              func(id uint32) uint32
+	removeEntryOnUnlock bool
+}
+
 // LockGroupOption configures the lock group.
-type LockGroupOption func(lg *LockGroup)
+type LockGroupOption func(lg *lockGroupOptions)
 
 // WithHash sets the lockGroup's hash function to provided hashFn.
 func WithHash(hashFn func(id uint32) uint32) LockGroupOption {
-	return func(lg *LockGroup) {
+	return func(lg *lockGroupOptions) {
 		lg.hashFn = hashFn
 	}
 }
 
 // WithRemoveEntryOnUnlock sets the lockGroup's removeEntryOnUnlock to provided value.
 func WithRemoveEntryOnUnlock(removeEntryOnUnlock bool) LockGroupOption {
-	return func(lg *LockGroup) {
+	return func(lg *lockGroupOptions) {
 		lg.removeEntryOnUnlock = removeEntryOnUnlock
 	}
 }
 
-// NewLockGroup create and return an empty lockGroup.
-func NewLockGroup(options ...LockGroupOption) *LockGroup {
-	lockGroup := &LockGroup{
-		entries: make(map[uint32]*lockEntry),
+func newLockGroupImpl[M any, PM mutexPointer[M]](options ...LockGroupOption) *lockGroup[M, PM] {
+	mergedOptions := lockGroupOptions{
 		// If no custom hash function provided, use identity hash.
 		hashFn: func(id uint32) uint32 { return id },
 	}
 	for _, op := range options {
-		op(lockGroup)
+		op(&mergedOptions)
 	}
-	return lockGroup
+	lg := &lockGroup[M, PM]{
+		entries:             make(map[uint32]*lockEntry[M, PM]),
+		hashFn:              mergedOptions.hashFn,
+		removeEntryOnUnlock: mergedOptions.removeEntryOnUnlock,
+	}
+	return lg
+}
+
+// NewLockGroup create and return an empty lockGroup.
+func NewLockGroup(options ...LockGroupOption) *LockGroup {
+	return newLockGroupImpl[Mutex, *Mutex](options...)
 }
 
 // Lock locks the target mutex base on the hash of id.
-func (g *LockGroup) Lock(id uint32) {
+func (g *lockGroup[M, PM]) lockImpl(id uint32, lockFn func(PM)) {
 	g.groupLock.Lock()
 	hashedID := g.hashFn(id)
 	e, ok := g.entries[hashedID]
 	// If target id's lock has not been initialized, create a new lock.
 	if !ok {
-		e = &lockEntry{
-			mu:       &Mutex{},
+		e = &lockEntry[M, PM]{
+			mu:       new(M),
 			refCount: 0,
 		}
 		g.entries[hashedID] = e
 	}
 	e.refCount++
 	g.groupLock.Unlock()
-	e.mu.Lock()
+	lockFn(e.mu)
 }
 
-// Unlock unlocks the target mutex based on the hash of the id.
-func (g *LockGroup) Unlock(id uint32) {
+// Lock locks the target mutex base on the hash of id.
+func (g *lockGroup[M, PM]) Lock(id uint32) {
+	g.lockImpl(id, func(mu PM) {
+		mu.Lock()
+	})
+}
+
+func (g *lockGroup[M, PM]) unlockImpl(id uint32, unlockFn func(PM)) {
 	g.groupLock.Lock()
 	hashedID := g.hashFn(id)
 	e, ok := g.entries[hashedID]
@@ -100,5 +127,38 @@ func (g *LockGroup) Unlock(id uint32) {
 		delete(g.entries, hashedID)
 	}
 	g.groupLock.Unlock()
-	e.mu.Unlock()
+	unlockFn(e.mu)
+}
+
+// Unlock unlocks the target mutex based on the hash of the id.
+func (g *lockGroup[M, PM]) Unlock(id uint32) {
+	g.unlockImpl(id, func(mu PM) {
+		mu.Unlock()
+	})
+}
+
+type RWLockGroup lockGroup[RWMutex, *RWMutex]
+
+func NewRWLockGroup(options ...LockGroupOption) *RWLockGroup {
+	return (*RWLockGroup)(newLockGroupImpl[RWMutex, *RWMutex](options...))
+}
+
+func (g *RWLockGroup) Lock(id uint32) {
+	(*lockGroup[RWMutex, *RWMutex])(g).Lock(id)
+}
+
+func (g *RWLockGroup) Unlock(id uint32) {
+	(*lockGroup[RWMutex, *RWMutex])(g).Unlock(id)
+}
+
+func (g *RWLockGroup) RLock(id uint32) {
+	(*lockGroup[RWMutex, *RWMutex])(g).lockImpl(id, func(mu *RWMutex) {
+		mu.RLock()
+	})
+}
+
+func (g *RWLockGroup) RUnlock(id uint32) {
+	(*lockGroup[RWMutex, *RWMutex])(g).unlockImpl(id, func(mu *RWMutex) {
+		mu.RUnlock()
+	})
 }
