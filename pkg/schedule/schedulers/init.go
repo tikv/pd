@@ -19,6 +19,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
@@ -548,7 +549,7 @@ func schedulersRegister() {
 	})
 
 	// balance key range scheduler
-	// args: [role, engine, range1, range2, ...]
+	// args: [role, engine, timeout, range1, range2, ...]
 	RegisterSliceDecoderBuilder(types.BalanceKeyRangeScheduler, func(args []string) ConfigDecoder {
 		return func(v any) error {
 			conf, ok := v.(*balanceKeyRangeSchedulerConfig)
@@ -566,14 +567,22 @@ func schedulersRegister() {
 			if err != nil {
 				return errs.ErrQueryUnescape.Wrap(err)
 			}
-			ranges, err := getKeyRanges(args[2:])
+			timeout, err := url.QueryUnescape(args[2])
+			if err != nil {
+				return errs.ErrQueryUnescape.Wrap(err)
+			}
+			duration, err := time.ParseDuration(timeout)
+			if err != nil {
+				return errs.ErrURLParse.Wrap(err)
+			}
+			ranges, err := getKeyRanges(args[3:])
 			if err != nil {
 				return err
 			}
 			conf.Ranges = ranges
 			conf.Engine = engine
 			conf.Role = role
-			conf.Timeout = DefaultTimeout
+			conf.Timeout = duration
 			return nil
 		}
 	})
@@ -581,7 +590,7 @@ func schedulersRegister() {
 	RegisterScheduler(types.BalanceKeyRangeScheduler, func(opController *operator.Controller,
 		storage endpoint.ConfigStorage, decoder ConfigDecoder, _ ...func(string) error) (Scheduler, error) {
 		conf := &balanceKeyRangeSchedulerConfig{
-			baseDefaultSchedulerConfig: newBaseDefaultSchedulerConfig(),
+			schedulerConfig: newBaseDefaultSchedulerConfig(),
 		}
 		if err := decoder(conf); err != nil {
 			return nil, err

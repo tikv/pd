@@ -157,9 +157,7 @@ func CreateScheduler(
 	removeSchedulerCb ...func(string) error,
 ) (Scheduler, error) {
 	fn, ok := schedulerMap[typ]
-	log.Info("create scheduler", zap.Any("typ", typ))
 	if !ok {
-		log.Warn("create scheduler not found", zap.Any("typ", typ))
 		return nil, errs.ErrSchedulerCreateFuncNotRegistered.FastGenByArgs(typ)
 	}
 

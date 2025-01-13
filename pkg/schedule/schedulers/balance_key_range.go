@@ -17,11 +17,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
 	"github.com/tikv/pd/pkg/schedule/types"
-)
-
-const (
-	// DefaultTimeout is the default balance key range scheduler timeout.
-	DefaultTimeout = 1 * time.Hour
+	"github.com/tikv/pd/pkg/utils/syncutil"
 )
 
 type balanceKeyRangeSchedulerHandler struct {
@@ -52,7 +48,8 @@ func (handler *balanceKeyRangeSchedulerHandler) listConfig(w http.ResponseWriter
 }
 
 type balanceKeyRangeSchedulerConfig struct {
-	baseDefaultSchedulerConfig
+	syncutil.RWMutex
+	schedulerConfig
 	balanceKeyRangeSchedulerParam
 }
 

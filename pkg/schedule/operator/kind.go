@@ -62,6 +62,7 @@ var flagToName = map[OpKind]string{
 	OpHotRegion:     "hot-region",
 	OpReplica:       "replica",
 	OpMerge:         "merge",
+	OpKeyRange:      "key-range",
 	OpRange:         "range",
 	OpWitness:       "witness",
 	OpWitnessLeader: "witness-leader",

@@ -548,9 +548,11 @@ func (suite *schedulerTestSuite) checkSchedulerConfig(cluster *pdTests.TestClust
 	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "add", "balance-key-range-scheduler", "--format=raw", "tiflash", "learner", "a", "b"}, nil)
 	re.Contains(echo, "Success!")
 	conf = make(map[string]any)
-	mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "balance-key-range-scheduler", "show"}, &conf)
-	re.Equal("learner", conf["role"])
-	re.Equal("tiflash", conf["engine"])
+	testutil.Eventually(re, func() bool {
+		mightExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "balance-key-range-scheduler"}, &conf)
+		return conf["role"] == "learner" && conf["engine"] == "tiflash"
+	})
+	re.Equal(float64(time.Hour.Nanoseconds()), conf["timeout"])
 	ranges := conf["ranges"].([]any)[0].(map[string]any)
 	re.Equal(base64.StdEncoding.EncodeToString([]byte("a")), ranges["start-key"])
 	re.Equal(base64.StdEncoding.EncodeToString([]byte("b")), ranges["end-key"])
