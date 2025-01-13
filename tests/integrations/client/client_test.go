@@ -1205,7 +1205,6 @@ func (suite *clientTestSuite) TestGetPrevRegion() {
 		err := suite.regionHeartbeat.Send(req)
 		re.NoError(err)
 	}
-	time.Sleep(500 * time.Millisecond)
 	for i := range 20 {
 		testutil.Eventually(re, func() bool {
 			r, err := suite.client.GetPrevRegion(context.Background(), []byte{byte(i)})
