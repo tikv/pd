@@ -162,15 +162,6 @@ func addFlags(cmd *cobra.Command) {
 }
 
 func createServerWrapper(cmd *cobra.Command, args []string) {
-	mode := os.Getenv(serviceModeEnv)
-	if len(mode) != 0 && strings.ToLower(mode) == "api" {
-		start(cmd, args, true)
-	} else {
-		start(cmd, args, false)
-	}
-}
-
-func start(cmd *cobra.Command, args []string, isMultiTimelinesEnabled bool) {
 	schedulers.Register()
 	cfg := config.NewConfig()
 	flagSet := cmd.Flags()
@@ -180,6 +171,10 @@ func start(cmd *cobra.Command, args []string, isMultiTimelinesEnabled bool) {
 		return
 	}
 	err = cfg.Parse(flagSet)
+	mode := os.Getenv(serviceModeEnv)
+	if len(mode) != 0 && strings.ToLower(mode) == "api" {
+		cfg.Microservice.EnableMultiTimelines = true
+	}
 	defer logutil.LogPanic()
 
 	if err != nil {
@@ -238,7 +233,7 @@ func start(cmd *cobra.Command, args []string, isMultiTimelinesEnabled bool) {
 		serviceBuilders = append(serviceBuilders, swaggerserver.NewHandler)
 	}
 	serviceBuilders = append(serviceBuilders, dashboard.GetServiceBuilders()...)
-	svr, err := server.CreateServer(ctx, cfg, isMultiTimelinesEnabled, serviceBuilders...)
+	svr, err := server.CreateServer(ctx, cfg, serviceBuilders...)
 	if err != nil {
 		log.Fatal("create server failed", errs.ZapError(err))
 	}

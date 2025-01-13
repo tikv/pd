@@ -225,7 +225,6 @@ type Server struct {
 	auditBackends []audit.Backend
 
 	registry                 *registry.ServiceRegistry
-	isMultiTimelinesEnabled  bool
 	servicePrimaryMap        sync.Map /* Store as map[string]string */
 	tsoPrimaryWatcher        *etcdutil.LoopWatcher
 	schedulingPrimaryWatcher *etcdutil.LoopWatcher
@@ -238,7 +237,7 @@ type Server struct {
 type HandlerBuilder func(context.Context, *Server) (http.Handler, apiutil.APIServiceGroup, error)
 
 // CreateServer creates the UNINITIALIZED pd server with given configuration.
-func CreateServer(ctx context.Context, cfg *config.Config, isMultiTimelinesEnabled bool, legacyServiceBuilders ...HandlerBuilder) (*Server, error) {
+func CreateServer(ctx context.Context, cfg *config.Config, legacyServiceBuilders ...HandlerBuilder) (*Server, error) {
 	// TODO: Currently, whether we enable microservice or not is determined by the service list.
 	// It's equal to whether we enable the keyspace group or not.
 	// There could be the following scenarios:
@@ -248,7 +247,7 @@ func CreateServer(ctx context.Context, cfg *config.Config, isMultiTimelinesEnabl
 	// But for case 1, we enable keyspace group which is misleading because non-serverless don't have keyspace related concept.
 	// The keyspace group should be independent of the microservice.
 	// We should separate the keyspace group from the microservice later.
-	log.Info("PD config", zap.Bool("is-multi-timelines-enabled", isMultiTimelinesEnabled), zap.Reflect("config", cfg))
+	log.Info("PD config", zap.Reflect("config", cfg))
 	serviceMiddlewareCfg := config.NewServiceMiddlewareConfig()
 
 	s := &Server{
@@ -260,7 +259,6 @@ func CreateServer(ctx context.Context, cfg *config.Config, isMultiTimelinesEnabl
 		ctx:                             ctx,
 		startTimestamp:                  time.Now().Unix(),
 		DiagnosticsServer:               sysutil.NewDiagnosticsServer(cfg.Log.File.Filename),
-		isMultiTimelinesEnabled:         isMultiTimelinesEnabled,
 		tsoClientPool: struct {
 			syncutil.RWMutex
 			clients map[string]tsopb.TSO_TsoClient
@@ -781,11 +779,6 @@ func (s *Server) createRaftCluster() error {
 func (s *Server) stopRaftCluster() {
 	failpoint.Inject("raftclusterIsBusy", func() {})
 	s.cluster.Stop()
-}
-
-// IsMultiTimelinesEnabled returns whether the multi-timelines feature is enabled.
-func (s *Server) IsMultiTimelinesEnabled() bool {
-	return s.isMultiTimelinesEnabled
 }
 
 // GetAddr returns the server urls for clients.
@@ -1388,8 +1381,8 @@ func (s *Server) IsServiceIndependent(name string) bool {
 	if name == constant.TSOServiceName {
 		// TSO service is always independent when multi-timelines is enabled.
 		// Otherwise, it depends on the dynamic switching feature.
-		// Only serverless env, isMultiTimelinesEnabled is true.
-		if s.isMultiTimelinesEnabled {
+		// Only serverless env, `IsMultiTimelinesEnabled`` is true.
+		if s.GetMicroserviceConfig().IsMultiTimelinesEnabled() {
 			return true
 		}
 		if !s.IsClosed() {

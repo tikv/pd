@@ -36,6 +36,7 @@ import (
 
 	"github.com/tikv/pd/client/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
+	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
 )
 
@@ -62,7 +63,9 @@ func (s *tsoProxyTestSuite) SetupSuite() {
 	var err error
 	s.ctx, s.cancel = context.WithCancel(context.Background())
 	// Create an PD cluster with 1 server
-	s.pdCluster, err = tests.NewTestCluster(s.ctx, 1)
+	s.pdCluster, err = tests.NewTestCluster(s.ctx, 3, func(conf *config.Config, _ string) {
+		conf.Microservice.EnableMultiTimelines = true
+	})
 	re.NoError(err)
 	err = s.pdCluster.RunInitialServers()
 	re.NoError(err)

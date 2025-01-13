@@ -156,20 +156,20 @@ func (suite *tsoServerTestSuite) TestParticipantStartWithAdvertiseListenAddr() {
 
 func TestTSOPath(t *testing.T) {
 	re := require.New(t)
-	checkTSOPath(re, true /*isTSODynamicSwitchingEnabled*/)
-	checkTSOPath(re, false /*isTSODynamicSwitchingEnabled*/)
+	checkTSOPath(re, true /*isMultiTimelinesEnabled*/)
+	checkTSOPath(re, false /*isMultiTimelinesEnabled*/)
 }
 
-func checkTSOPath(re *require.Assertions, isTSODynamicSwitchingEnabled bool) {
+func checkTSOPath(re *require.Assertions, isMultiTimelinesEnabled bool) {
 	var (
 		cluster *tests.TestCluster
 		err     error
 	)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	if isTSODynamicSwitchingEnabled {
+	if isMultiTimelinesEnabled {
 		cluster, err = tests.NewTestCluster(ctx, 1, func(conf *config.Config, _ string) {
-			conf.Microservice.EnableTSODynamicSwitching = false
+			conf.Microservice.EnableMultiTimelines = true
 		})
 	} else {
 		cluster, err = tests.NewTestCluster(ctx, 1)
@@ -184,7 +184,7 @@ func checkTSOPath(re *require.Assertions, isTSODynamicSwitchingEnabled bool) {
 	re.NoError(pdLeader.BootstrapCluster())
 	backendEndpoints := pdLeader.GetAddr()
 	client := pdLeader.GetEtcdClient()
-	if isTSODynamicSwitchingEnabled {
+	if isMultiTimelinesEnabled {
 		re.Equal(0, getEtcdTimestampKeyNum(re, client))
 	} else {
 		re.Equal(1, getEtcdTimestampKeyNum(re, client))
@@ -233,7 +233,9 @@ func NewPDForward(re *require.Assertions) pdForward {
 	}
 	var err error
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
-	suite.cluster, err = tests.NewTestCluster(suite.ctx, 3)
+	suite.cluster, err = tests.NewTestCluster(suite.ctx, 3, func(conf *config.Config, _ string) {
+		conf.Microservice.EnableMultiTimelines = true
+	})
 	re.NoError(err)
 
 	err = suite.cluster.RunInitialServers()

@@ -66,7 +66,7 @@ func (suite *leaderServerTestSuite) SetupSuite() {
 
 		go func() {
 			mockHandler := CreateMockHandler(re, "127.0.0.1")
-			svr, err := CreateServer(suite.ctx, cfg, false, mockHandler)
+			svr, err := CreateServer(suite.ctx, cfg, mockHandler)
 			re.NoError(err)
 			err = svr.Run()
 			re.NoError(err)
@@ -100,7 +100,7 @@ func newTestServersWithCfgs(
 	for _, cfg := range cfgs {
 		go func(cfg *config.Config) {
 			mockHandler := CreateMockHandler(re, "127.0.0.1")
-			svr, err := CreateServer(ctx, cfg, false, mockHandler)
+			svr, err := CreateServer(ctx, cfg, mockHandler)
 			// prevent blocking if Asserts fails
 			failed := true
 			defer func() {
@@ -141,9 +141,9 @@ func (suite *leaderServerTestSuite) TestRegisterServerHandler() {
 	cfg := NewTestSingleConfig(assertutil.CheckerWithNilAssert(re))
 	ctx, cancel := context.WithCancel(context.Background())
 	mockHandler := CreateMockHandler(re, "127.0.0.1")
-	svr, err := CreateServer(ctx, cfg, false, mockHandler)
+	svr, err := CreateServer(ctx, cfg, mockHandler)
 	re.NoError(err)
-	_, err = CreateServer(ctx, cfg, false, mockHandler, mockHandler)
+	_, err = CreateServer(ctx, cfg, mockHandler, mockHandler)
 	// Repeat register.
 	re.Error(err)
 	defer func() {
@@ -168,9 +168,9 @@ func (suite *leaderServerTestSuite) TestSourceIpForHeaderForwarded() {
 	mockHandler := CreateMockHandler(re, "127.0.0.2")
 	cfg := NewTestSingleConfig(assertutil.CheckerWithNilAssert(re))
 	ctx, cancel := context.WithCancel(context.Background())
-	svr, err := CreateServer(ctx, cfg, false, mockHandler)
+	svr, err := CreateServer(ctx, cfg, mockHandler)
 	re.NoError(err)
-	_, err = CreateServer(ctx, cfg, false, mockHandler, mockHandler)
+	_, err = CreateServer(ctx, cfg, mockHandler, mockHandler)
 	// Repeat register.
 	re.Error(err)
 	defer func() {
@@ -199,10 +199,8 @@ func (suite *leaderServerTestSuite) TestSourceIpForHeaderXReal() {
 	mockHandler := CreateMockHandler(re, "127.0.0.2")
 	cfg := NewTestSingleConfig(assertutil.CheckerWithNilAssert(re))
 	ctx, cancel := context.WithCancel(context.Background())
-	svr, err := CreateServer(ctx, cfg, false, mockHandler)
+	svr, err := CreateServer(ctx, cfg, mockHandler)
 	re.NoError(err)
-	_, err = CreateServer(ctx, cfg, false, mockHandler, mockHandler)
-	// Repeat register.
 	re.Error(err)
 	defer func() {
 		cancel()
@@ -230,11 +228,8 @@ func (suite *leaderServerTestSuite) TestSourceIpForHeaderBoth() {
 	mockHandler := CreateMockHandler(re, "127.0.0.2")
 	cfg := NewTestSingleConfig(assertutil.CheckerWithNilAssert(re))
 	ctx, cancel := context.WithCancel(context.Background())
-	svr, err := CreateServer(ctx, cfg, false, mockHandler)
+	svr, err := CreateServer(ctx, cfg, mockHandler)
 	re.NoError(err)
-	_, err = CreateServer(ctx, cfg, false, mockHandler, mockHandler)
-	// Repeat register.
-	re.Error(err)
 	defer func() {
 		cancel()
 		svr.Close()
@@ -255,23 +250,6 @@ func (suite *leaderServerTestSuite) TestSourceIpForHeaderBoth() {
 	re.NoError(err)
 	bodyString := string(bodyBytes)
 	re.Equal("Hello World\n", bodyString)
-}
-
-func TestMode(t *testing.T) {
-	re := require.New(t)
-
-	cfg := NewTestSingleConfig(assertutil.CheckerWithNilAssert(re))
-	defer testutil.CleanServer(cfg.DataDir)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	mockHandler := CreateMockHandler(re, "127.0.0.1")
-	svr, err := CreateServer(ctx, cfg, true, mockHandler)
-	re.NoError(err)
-	defer svr.Close()
-	err = svr.Run()
-	re.NoError(err)
-	MustWaitLeader(re, []*Server{svr})
-	re.True(svr.IsMultiTimelinesEnabled())
 }
 
 func TestIsPathInDirectory(t *testing.T) {
@@ -317,7 +295,7 @@ func TestCheckClusterID(t *testing.T) {
 	// Start previous cluster, expect an error.
 	cfgA.InitialCluster = originInitial
 	mockHandler := CreateMockHandler(re, "127.0.0.1")
-	svr, err := CreateServer(ctx, cfgA, false, mockHandler)
+	svr, err := CreateServer(ctx, cfgA, mockHandler)
 	re.NoError(err)
 
 	etcd, err := embed.StartEtcd(svr.etcdCfg)

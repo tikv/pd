@@ -826,6 +826,8 @@ func (c *DRAutoSyncReplicationConfig) adjust(meta *configutil.ConfigMetaData) {
 type MicroserviceConfig struct {
 	EnableSchedulingFallback  bool `toml:"enable-scheduling-fallback" json:"enable-scheduling-fallback,string"`
 	EnableTSODynamicSwitching bool `toml:"enable-tso-dynamic-switching" json:"enable-tso-dynamic-switching,string"`
+	// TODO: use it to replace system variable.
+	EnableMultiTimelines bool
 }
 
 func (c *MicroserviceConfig) adjust(meta *configutil.ConfigMetaData) {
@@ -851,6 +853,13 @@ func (c *MicroserviceConfig) IsSchedulingFallbackEnabled() bool {
 // IsTSODynamicSwitchingEnabled returns whether to enable TSO dynamic switching.
 func (c *MicroserviceConfig) IsTSODynamicSwitchingEnabled() bool {
 	return c.EnableTSODynamicSwitching
+}
+
+// IsMultiTimelinesEnabled returns whether to enable multi-timelines.
+// for testing purpose.
+// TODO: use it to replace system variable.
+func (c *MicroserviceConfig) IsMultiTimelinesEnabled() bool {
+	return c.EnableMultiTimelines
 }
 
 // KeyspaceConfig is the configuration for keyspace management.
