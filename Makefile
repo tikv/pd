@@ -108,13 +108,16 @@ pd-server-basic:
 .PHONY: pre-build build tools pd-server pd-server-basic
 
 # Tools
-pd-ctl:
+pre-build-for-tools:
+	@ cd tools
+	@ go mod tidy
+pd-ctl: pre-build-for-tools
 	cd tools && GOEXPERIMENT=$(BUILD_GOEXPERIMENT) CGO_ENABLED=$(BUILD_TOOL_CGO_ENABLED) go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o $(BUILD_BIN_PATH)/pd-ctl pd-ctl/main.go
 pd-tso-bench:
 	cd tools && CGO_ENABLED=0 go build -o $(BUILD_BIN_PATH)/pd-tso-bench pd-tso-bench/main.go
 pd-api-bench:
 	cd tools && CGO_ENABLED=0 go build -o $(BUILD_BIN_PATH)/pd-api-bench pd-api-bench/main.go
-pd-recover:
+pd-recover: pre-build-for-tools
 	cd tools && GOEXPERIMENT=$(BUILD_GOEXPERIMENT) CGO_ENABLED=$(BUILD_TOOL_CGO_ENABLED) go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o $(BUILD_BIN_PATH)/pd-recover pd-recover/main.go
 pd-analysis:
 	cd tools && CGO_ENABLED=0 go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o $(BUILD_BIN_PATH)/pd-analysis pd-analysis/main.go
