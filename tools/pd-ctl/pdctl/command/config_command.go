@@ -28,7 +28,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/reflectutil"
@@ -374,13 +373,10 @@ func postConfigDataWithPath(cmd *cobra.Command, key, value, path string) error {
 	if err != nil {
 		val = value
 	}
-	data[key] = val
 	if key == "max-replicas" {
-		replica, err := strconv.ParseInt(value, 10, 64)
-		if err == nil && replica < sc.DefaultMaxReplicas {
-			cmd.Println("Setting max-replica to less than 3 may be a mistake and carries high risk. Please confirm the setting.")
-		}
+		checkMaxReplicas(cmd, val)
 	}
+	data[key] = val
 	reqData, err := json.Marshal(data)
 	if err != nil {
 		return err
@@ -391,6 +387,30 @@ func postConfigDataWithPath(cmd *cobra.Command, key, value, path string) error {
 		return err
 	}
 	return nil
+}
+
+func checkMaxReplicas(cmd *cobra.Command, value any) {
+	newReplica, ok := value.(float64)
+	if !ok {
+		// If the type is not float64, it will be handled elsewhere
+		return
+	}
+	header := buildHeader(cmd)
+	r, err := doRequest(cmd, replicatePrefix, http.MethodGet, header)
+	if err != nil {
+		cmd.Printf("Failed to get config when checking config: %s\n", err)
+		return
+	}
+	oldConfig := make(map[string]any)
+	err = json.Unmarshal([]byte(r), &oldConfig)
+	if err != nil {
+		cmd.Printf("Failed to unmarshal config when checking config: %s\n", err)
+		return
+	}
+	oldReplica, ok := oldConfig["max-replicas"].(float64)
+	if ok && newReplica < oldReplica {
+		cmd.Printf("Setting max-replica to %v which is less than the current replicas (%v). This may pose a risk. Please confirm the setting.\n", newReplica, oldReplica)
+	}
 }
 
 func setConfigCommandFunc(cmd *cobra.Command, args []string) {
