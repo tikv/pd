@@ -227,14 +227,18 @@ type pdForward struct {
 	pdClient         pd.Client
 }
 
-func NewPDForward(re *require.Assertions) pdForward {
+func NewPDForward(re *require.Assertions, enableMultiTimelines ...bool) pdForward {
 	suite := pdForward{
 		re: re,
+	}
+	isMultiTimelinesEnabled := true
+	if len(enableMultiTimelines) > 0 {
+		isMultiTimelinesEnabled = enableMultiTimelines[0]
 	}
 	var err error
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
 	suite.cluster, err = tests.NewTestCluster(suite.ctx, 3, func(conf *config.Config, _ string) {
-		conf.Microservice.EnableMultiTimelines = true
+		conf.Microservice.EnableMultiTimelines = isMultiTimelinesEnabled
 	})
 	re.NoError(err)
 
@@ -273,9 +277,11 @@ func (suite *pdForward) ShutDown() {
 	re.NoError(failpoint.Disable("github.com/tikv/pd/client/servicediscovery/usePDServiceMode"))
 }
 
+// TestForwardTSO tests the behavior of forwarding TSO requests to the TSO server in non-serverless env.
 func TestForwardTSO(t *testing.T) {
 	re := require.New(t)
-	suite := NewPDForward(re)
+	// non-serverless env should disable multi-timelines
+	suite := NewPDForward(re, false)
 	defer suite.ShutDown()
 	// If EnableTSODynamicSwitching is false, the tso server will be provided by PD.
 	// The tso server won't affect the PD.
@@ -294,7 +300,8 @@ func TestForwardTSO(t *testing.T) {
 	suite.checkAvailableTSO(re)
 }
 
-func TestForwardTSOWithKeyspaceGroup(t *testing.T) {
+// TestForwardTSOWithMultipleTimelines tests the behavior of forwarding TSO requests to the TSO server in serverless env.
+func TestForwardTSOWithMultipleTimelines(t *testing.T) {
 	re := require.New(t)
 	suite := NewPDForward(re)
 	defer suite.ShutDown()

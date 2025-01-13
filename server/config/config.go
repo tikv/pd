@@ -249,7 +249,7 @@ const (
 	maxCheckRegionSplitInterval     = 100 * time.Millisecond
 
 	defaultEnableSchedulingFallback = true
-	// In serverless environment, the default value of `enable-scheduling` is always false.
+	// In serverless environment, the default value of `enable-tso-dynamic-switching` is always false.
 	defaultEnableTSODynamicSwitching = false
 )
 
@@ -856,7 +856,6 @@ func (c *MicroserviceConfig) IsTSODynamicSwitchingEnabled() bool {
 }
 
 // IsMultiTimelinesEnabled returns whether to enable multi-timelines.
-// for testing purpose.
 // TODO: use it to replace system variable.
 func (c *MicroserviceConfig) IsMultiTimelinesEnabled() bool {
 	return c.EnableMultiTimelines

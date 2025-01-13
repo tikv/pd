@@ -62,7 +62,9 @@ func (suite *tsoAPITestSuite) SetupTest() {
 
 	var err error
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
-	suite.pdCluster, err = tests.NewTestCluster(suite.ctx, 1)
+	suite.pdCluster, err = tests.NewTestCluster(suite.ctx, 1, func(conf *config.Config, _ string) {
+		conf.Microservice.EnableMultiTimelines = true
+	})
 	re.NoError(err)
 	err = suite.pdCluster.RunInitialServers()
 	re.NoError(err)

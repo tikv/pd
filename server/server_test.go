@@ -201,7 +201,6 @@ func (suite *leaderServerTestSuite) TestSourceIpForHeaderXReal() {
 	ctx, cancel := context.WithCancel(context.Background())
 	svr, err := CreateServer(ctx, cfg, mockHandler)
 	re.NoError(err)
-	re.Error(err)
 	defer func() {
 		cancel()
 		svr.Close()

@@ -52,7 +52,7 @@ import (
 )
 
 const (
-	// Only serverless use this variable, we can use it to determine whether the PD is running in keyspace mode.
+	// Only serverless use this variable, we can use it to determine whether the PD supports multiple timelines.
 	// The name is a little misleading, but it's kept for backward compatibility.
 	serviceModeEnv = "PD_SERVICE_MODE"
 )

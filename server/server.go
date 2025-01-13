@@ -238,14 +238,22 @@ type HandlerBuilder func(context.Context, *Server) (http.Handler, apiutil.APISer
 
 // CreateServer creates the UNINITIALIZED pd server with given configuration.
 func CreateServer(ctx context.Context, cfg *config.Config, legacyServiceBuilders ...HandlerBuilder) (*Server, error) {
-	// TODO: Currently, whether we enable microservice or not is determined by the service list.
-	// It's equal to whether we enable the keyspace group or not.
-	// There could be the following scenarios:
-	// 1. Enable microservice but disable keyspace group. (non-serverless scenario)
-	// 2. Enable microservice and enable keyspace group. (serverless scenario)
-	// 3. Disable microservice and disable keyspace group. (both serverless scenario and non-serverless scenario)
-	// But for case 1, we enable keyspace group which is misleading because non-serverless don't have keyspace related concept.
-	// The keyspace group should be independent of the microservice.
+	// TODO: Currently, we have following combinations:
+	//
+	// There could be the following scenarios for non-serverless:
+	// 1. microservice + single timelines
+	// 2. non-microservice
+	// we use `enable-tso-dynamic-switch` to control whether we enable microservice or not.
+	// non-serverless doesn't support multiple timelines but support dynamic switch.
+	//
+	// There could be the following scenarios for serverless:
+	// 1. microservice + single timelines
+	// 2. microservice + multiple timelines
+	// 3. non-microservice
+	// we use `enable-multi-timelines` to control whether we enable microservice or not.
+	// serverless supports multiple timelines but doesn't support dynamic switch.
+	//
+	// Besides, the current implementation for both serverless and non-serverless rely on keyspace group which should be independent of the microservice.
 	// We should separate the keyspace group from the microservice later.
 	log.Info("PD config", zap.Reflect("config", cfg))
 	serviceMiddlewareCfg := config.NewServiceMiddlewareConfig()
