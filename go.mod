@@ -1,6 +1,6 @@
 module github.com/tikv/pd
 
-go 1.23
+go 1.23.0
 
 // When you modify PD cooperatively with kvproto, this will be useful to submit the PR to PD and the PR to
 // kvproto at the same time. You can run `go mod tidy` to make it replaced with go-mod style specification.
@@ -219,3 +219,5 @@ require (
 	moul.io/zapgorm2 v1.1.0 // indirect
 	sigs.k8s.io/yaml v1.4.0 // indirect
 )
+
+replace github.com/pingcap/kvproto => github.com/LykxSassinator/kvproto v0.0.0-20250109105336-7099a32e318c
