@@ -28,6 +28,7 @@ import (
 
 	"github.com/pingcap/errcode"
 	"github.com/pingcap/errors"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/errs"
@@ -411,6 +412,10 @@ func (h *confHandler) SetScheduleConfig(w http.ResponseWriter, r *http.Request) 
 // @Success  200  {object}  sc.ReplicationConfig
 // @Router   /config/replicate [get]
 func (h *confHandler) GetReplicationConfig(w http.ResponseWriter, r *http.Request) {
+	failpoint.Inject("getReplicationConfigFailed", func(v failpoint.Value) {
+		code := v.(int)
+		h.rd.JSON(w, code, "get config failed")
+	})
 	if h.svr.IsServiceIndependent(constant.SchedulingServiceName) &&
 		r.Header.Get(apiutil.XForbiddenForwardToMicroserviceHeader) != "true" {
 		cfg, err := h.getSchedulingServerConfig()

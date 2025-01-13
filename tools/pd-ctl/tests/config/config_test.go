@@ -1136,7 +1136,6 @@ func (suite *configTestSuite) checkUpdateDefaultReplicaConfig(cluster *pdTests.T
 	output, err := tests.ExecuteCommand(cmd, "-u", pdAddr, "config", "set", "max-replicas", "2")
 	re.NoError(err)
 	re.Contains(string(output), "Success!")
-	re.Contains(string(output), "which is less than the current replicas")
 	checkMaxReplicas(2)
 	output, err = tests.ExecuteCommand(cmd, "-u", pdAddr, "config", "set", "location-labels", "zone,host")
 	re.NoError(err)
@@ -1157,7 +1156,6 @@ func (suite *configTestSuite) checkUpdateDefaultReplicaConfig(cluster *pdTests.T
 	output, err = tests.ExecuteCommand(cmd, "-u", pdAddr, "config", "set", "max-replicas", "3")
 	re.NoError(err)
 	re.Contains(string(output), "Success!")
-	re.NotContains(string(output), "which is less than the current replicas")
 	checkMaxReplicas(3)
 	checkRuleCount(3)
 
@@ -1200,6 +1198,51 @@ func (suite *configTestSuite) checkUpdateDefaultReplicaConfig(cluster *pdTests.T
 	checkRuleLocationLabels(1)
 	checkIsolationLevel("host")
 	checkRuleIsolationLevel("host")
+}
+
+func (suite *configTestSuite) TestMaxReplicaChanged() {
+	suite.env.RunTestInPDMode(suite.checkMaxReplicaChanged)
+}
+
+func (suite *configTestSuite) checkMaxReplicaChanged(cluster *pdTests.TestCluster) {
+	re := suite.Require()
+	leaderServer := cluster.GetLeaderServer()
+	pdAddr := leaderServer.GetAddr()
+	cmd := ctl.GetRootCmd()
+
+	store := &metapb.Store{
+		Id:    1,
+		State: metapb.StoreState_Up,
+	}
+	pdTests.MustPutStore(re, cluster, store)
+
+	// test set max-replicas with invalid value
+	output, err := tests.ExecuteCommand(cmd, "-u", pdAddr, "config", "set", "max-replicas", "z")
+	re.NoError(err)
+	re.NotContains(string(output), "Success!")
+	// test set max-replicas with less value
+	output, err = tests.ExecuteCommand(cmd, "-u", pdAddr, "config", "set", "max-replicas", "2")
+	re.NoError(err)
+	re.Contains(string(output), "Success!")
+	re.Contains(string(output), "which is less than the current replicas")
+	// test set max-replicas with greater value
+	output, err = tests.ExecuteCommand(cmd, "-u", pdAddr, "config", "set", "max-replicas", "3")
+	re.NoError(err)
+	re.Contains(string(output), "Success!")
+	re.NotContains(string(output), "which is less than the current replicas")
+	// test meet error when get config failed
+	failpoint.Enable("github.com/tikv/pd/server/api/getReplicationConfigFailed", `return(200)`)
+	output, err = tests.ExecuteCommand(cmd, "-u", pdAddr, "config", "set", "max-replicas", "3")
+	re.NoError(err)
+	re.Contains(string(output), "Success!")
+	re.Contains(string(output), "Failed to unmarshal config when checking config")
+	failpoint.Disable("github.com/tikv/pd/server/api/getReplicationConfigFailed")
+	failpoint.Enable("github.com/tikv/pd/server/api/getReplicationConfigFailed", `return(500)`)
+	output, err = tests.ExecuteCommand(cmd, "-u", pdAddr, "config", "set", "max-replicas", "3")
+	re.NoError(err)
+	re.Contains(string(output), "Success!")
+	re.Contains(string(output), "Failed to get config when checking config")
+	failpoint.Disable("github.com/tikv/pd/server/api/getReplicationConfigFailed")
 }
 
 func (suite *configTestSuite) TestPDServerConfig() {
