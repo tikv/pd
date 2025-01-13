@@ -17,6 +17,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
 	"github.com/tikv/pd/pkg/schedule/types"
+	"github.com/tikv/pd/pkg/utils/syncutil"
 )
 
 const (
@@ -52,7 +53,8 @@ func (handler *balanceKeyRangeSchedulerHandler) listConfig(w http.ResponseWriter
 }
 
 type balanceKeyRangeSchedulerConfig struct {
-	baseDefaultSchedulerConfig
+	syncutil.RWMutex
+	schedulerConfig
 	balanceKeyRangeSchedulerParam
 }
 

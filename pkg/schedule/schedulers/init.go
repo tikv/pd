@@ -581,7 +581,7 @@ func schedulersRegister() {
 	RegisterScheduler(types.BalanceKeyRangeScheduler, func(opController *operator.Controller,
 		storage endpoint.ConfigStorage, decoder ConfigDecoder, _ ...func(string) error) (Scheduler, error) {
 		conf := &balanceKeyRangeSchedulerConfig{
-			baseDefaultSchedulerConfig: newBaseDefaultSchedulerConfig(),
+			schedulerConfig: newBaseDefaultSchedulerConfig(),
 		}
 		if err := decoder(conf); err != nil {
 			return nil, err
