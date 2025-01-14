@@ -147,8 +147,10 @@ func (suite *keyspaceTestSuite) TestLoadRangeKeyspace() {
 
 func mustMakeTestKeyspaces(re *require.Assertions, server *tests.TestServer, count int) []*keyspacepb.KeyspaceMeta {
 	testConfig := map[string]string{
-		"config1": "100",
-		"config2": "200",
+		"config1":               "100",
+		"config2":               "200",
+		"tso_keyspace_group_id": "0",
+		"user_kind":             "basic",
 	}
 	resultMeta := make([]*keyspacepb.KeyspaceMeta, count)
 	for i := range count {
