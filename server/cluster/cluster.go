@@ -375,9 +375,11 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 
 	// bootstrap keyspace group manager after starting other parts successfully.
 	// This order avoids a stuck goroutine in keyspaceGroupManager when it fails to create raftcluster.
-	err = c.keyspaceGroupManager.Bootstrap(c.ctx)
-	if err != nil {
-		return err
+	if c.keyspaceGroupManager != nil {
+		err = c.keyspaceGroupManager.Bootstrap(c.ctx)
+		if err != nil {
+			return err
+		}
 	}
 
 	c.checkSchedulingService()

@@ -238,7 +238,7 @@ type HandlerBuilder func(context.Context, *Server) (http.Handler, apiutil.APISer
 
 // CreateServer creates the UNINITIALIZED pd server with given configuration.
 func CreateServer(ctx context.Context, cfg *config.Config, legacyServiceBuilders ...HandlerBuilder) (*Server, error) {
-	// TODO: Currently, we have following combinations:
+	// TODO: Currently, we have following combinations for tso:
 	//
 	// There could be the following scenarios for non-serverless:
 	// 1. microservice + single timelines
@@ -535,7 +535,9 @@ func (s *Server) Close() {
 	s.cgMonitor.StopMonitor()
 
 	s.stopServerLoop()
-	s.keyspaceGroupManager.Close()
+	if s.keyspaceGroupManager != nil {
+		s.keyspaceGroupManager.Close()
+	}
 
 	if s.client != nil {
 		if err := s.client.Close(); err != nil {
