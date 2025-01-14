@@ -407,7 +407,7 @@ var (
 	_ TSOEventSource   = (*serviceDiscovery)(nil)
 )
 
-// serviceDiscovery is the service discovery client of PD/PD service which is quorum based
+// serviceDiscovery is the service discovery client of PD which is quorum based
 type serviceDiscovery struct {
 	isInitialized bool
 
@@ -502,7 +502,7 @@ func (c *serviceDiscovery) Init() error {
 	log.Info("[pd] init cluster id", zap.Uint64("cluster-id", c.clusterID))
 
 	// We need to update the keyspace ID before we discover and update the service mode
-	// so that TSO in API mode can be initialized with the correct keyspace ID.
+	// so that TSO in PD can be initialized with the correct keyspace ID.
 	if c.keyspaceID == constants.NullKeyspaceID && c.updateKeyspaceIDFunc != nil {
 		if err := c.initRetry(c.updateKeyspaceIDFunc); err != nil {
 			return err
@@ -864,7 +864,7 @@ func (c *serviceDiscovery) checkServiceModeChanged() error {
 	clusterInfo, err := c.getClusterInfo(c.ctx, leaderURL, c.option.Timeout)
 	if err != nil {
 		if strings.Contains(err.Error(), "Unimplemented") {
-			// If the method is not supported, we set it to pd mode.
+			// If the method is not supported, we fallback to non-microservice env.
 			// TODO: it's a hack way to solve the compatibility issue.
 			// we need to remove this after all maintained version supports the method.
 			if c.serviceModeUpdateCb != nil {

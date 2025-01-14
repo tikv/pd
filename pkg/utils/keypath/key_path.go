@@ -321,7 +321,7 @@ func svcRootPath(svcName string) string {
 	return path.Join(constant.MicroserviceRootPath, c, svcName)
 }
 
-// LegacyRootPath returns the root path of legacy pd service.
+// LegacyRootPath returns the root path of legacy PD.
 // Path: /pd/{cluster_id}
 func LegacyRootPath() string {
 	return path.Join(pdRootPath, strconv.FormatUint(ClusterID(), 10))

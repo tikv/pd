@@ -227,7 +227,7 @@ func TestForwardOnlyTSONoScheduling(t *testing.T) {
 		testutil.StatusOK(re), testutil.StringContain(re, "Reset ts successfully"), testutil.WithHeader(re, apiutil.XForwardedToMicroserviceHeader, "true"))
 	re.NoError(err)
 
-	// If close tso server, it should try forward to tso server, but return error in pd service mode.
+	// If close tso server, it should try forward to tso server, but return error in non-serverless env.
 	ttc.Destroy()
 	err = testutil.CheckPostJSON(tests.TestDialClient, fmt.Sprintf("%s/%s", urlPrefix, "admin/reset-ts"), input,
 		testutil.Status(re, http.StatusInternalServerError), testutil.StringContain(re, "[PD:apiutil:ErrRedirect]redirect failed"))

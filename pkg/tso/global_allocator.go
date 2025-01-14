@@ -171,7 +171,7 @@ func (gta *GlobalTSOAllocator) Reset() {
 }
 
 // primaryElectionLoop is used to maintain the TSO primary election and TSO's
-// running allocator. It is only used in API mode.
+// running allocator. It is only used in microservice env.
 func (gta *GlobalTSOAllocator) primaryElectionLoop() {
 	defer logutil.LogPanic()
 	defer gta.wg.Done()

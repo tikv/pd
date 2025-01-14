@@ -119,12 +119,12 @@ func (c *innerClient) resetTSOClientLocked(mode pdpb.ServiceMode) {
 	oldTSOClient.Close()
 	// Replace the old TSO service discovery if needed.
 	oldTSOSvcDiscovery := c.tsoSvcDiscovery
-	// If newTSOSvcDiscovery is nil, that's expected, as it means we are switching to PD mode and
+	// If newTSOSvcDiscovery is nil, that's expected, as it means we are switching to non-microservice env and
 	// no tso microservice discovery is needed.
 	c.tsoSvcDiscovery = newTSOSvcDiscovery
 	// Close the old TSO service discovery safely after both the old client and service discovery are replaced.
 	if oldTSOSvcDiscovery != nil {
-		// We are switching from PD service mode to PD mode, so delete the old tso microservice discovery.
+		// We are switching from microservice env to non-microservice env, so delete the old tso microservice discovery.
 		oldTSOSvcDiscovery.Close()
 	}
 }
