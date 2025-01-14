@@ -71,15 +71,8 @@ func (c *innerClient) setServiceMode(newMode pdpb.ServiceMode) {
 	if newMode == c.serviceMode {
 		return
 	}
-	log.Info("[pd] changing service mode",
-		zap.String("old-mode", c.serviceMode.String()),
-		zap.String("new-mode", newMode.String()))
 	c.resetTSOClientLocked(newMode)
-	oldMode := c.serviceMode
 	c.serviceMode = newMode
-	log.Info("[pd] service mode changed",
-		zap.String("old-mode", oldMode.String()),
-		zap.String("new-mode", newMode.String()))
 }
 
 // Reset a new TSO client.
@@ -91,9 +84,11 @@ func (c *innerClient) resetTSOClientLocked(mode pdpb.ServiceMode) {
 	)
 	switch mode {
 	case pdpb.ServiceMode_PD_SVC_MODE:
+		log.Info("[pd] use PD service discovery for tso")
 		newTSOCli = tso.NewClient(c.ctx, c.option,
 			c.serviceDiscovery, &tso.PDStreamBuilderFactory{})
 	case pdpb.ServiceMode_API_SVC_MODE:
+		log.Info("[pd] use independent tso service discovery for tso")
 		newTSOSvcDiscovery = sd.NewTSOServiceDiscovery(
 			c.ctx, c, c.serviceDiscovery,
 			c.keyspaceID, c.tlsCfg, c.option)
@@ -102,9 +97,8 @@ func (c *innerClient) resetTSOClientLocked(mode pdpb.ServiceMode) {
 		newTSOCli = tso.NewClient(c.ctx, c.option,
 			newTSOSvcDiscovery, &tso.MSStreamBuilderFactory{})
 		if err := newTSOSvcDiscovery.Init(); err != nil {
-			log.Error("[pd] failed to initialize tso service discovery. keep the current service mode",
+			log.Error("[pd] failed to initialize tso service discovery",
 				zap.Strings("svr-urls", c.svrUrls),
-				zap.String("current-mode", c.serviceMode.String()),
 				zap.Error(err))
 			return
 		}
