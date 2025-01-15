@@ -222,6 +222,10 @@ func transferWitnessLeaderCounterWithEvent(event string) prometheus.Counter {
 	return schedulerCounter.WithLabelValues(types.TransferWitnessLeaderScheduler.String(), event)
 }
 
+func balanceKeyRangeCounterWithEvent(event string) prometheus.Counter {
+	return schedulerCounter.WithLabelValues(types.BalanceKeyRangeScheduler.String(), event)
+}
+
 // WithLabelValues is a heavy operation, define variable to avoid call it every time.
 var (
 	balanceLeaderScheduleCounter         = balanceLeaderCounterWithEvent("schedule")
@@ -329,7 +333,7 @@ var (
 	shuffleRegionNoSourceStoreCounter      = shuffleRegionCounterWithEvent("no-source-store")
 
 	splitBucketDisableCounter            = splitBucketCounterWithEvent("bucket-disable")
-	splitBuckerSplitLimitCounter         = splitBucketCounterWithEvent("split-limit")
+	splitBucketSplitLimitCounter         = splitBucketCounterWithEvent("split-limit")
 	splitBucketScheduleCounter           = splitBucketCounterWithEvent("schedule")
 	splitBucketNoRegionCounter           = splitBucketCounterWithEvent("no-region")
 	splitBucketRegionTooSmallCounter     = splitBucketCounterWithEvent("region-too-small")
@@ -342,4 +346,8 @@ var (
 	transferWitnessLeaderCounter              = transferWitnessLeaderCounterWithEvent("schedule")
 	transferWitnessLeaderNewOperatorCounter   = transferWitnessLeaderCounterWithEvent("new-operator")
 	transferWitnessLeaderNoTargetStoreCounter = transferWitnessLeaderCounterWithEvent("no-target-store")
+
+	balanceKeyRangeCounter            = balanceKeyRangeCounterWithEvent("schedule")
+	balanceKeyRangeNewOperatorCounter = balanceKeyRangeCounterWithEvent("new-operator")
+	balanceExpiredCounter             = balanceKeyRangeCounterWithEvent("expired")
 )

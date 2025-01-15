@@ -66,7 +66,6 @@ const (
 	RegionKind
 	// WitnessKind indicates the witness kind resource
 	WitnessKind
-
 	// ResourceKindLen represents the ResourceKind count
 	ResourceKindLen
 )
@@ -79,6 +78,10 @@ func (k ResourceKind) String() string {
 		return "region"
 	case WitnessKind:
 		return "witness"
+	case LearnerKind:
+		return `learner`
+	case unKnownKind:
+		return "unknown"
 	default:
 		return "unknown"
 	}
