@@ -99,7 +99,7 @@ func (h *schedulerHandler) CreateScheduler(w http.ResponseWriter, r *http.Reques
 	}
 
 	switch tp {
-	case types.BalanceKeyRangeScheduler:
+	case types.BalanceRangeScheduler:
 		exist, _ := h.IsSchedulerExisted(name)
 		if exist {
 			h.r.JSON(w, http.StatusBadRequest, "The scheduler already exists, pls remove the exist scheduler first.")

@@ -162,7 +162,7 @@ func NewAddSchedulerCommand() *cobra.Command {
 	c.AddCommand(NewSlowTrendEvictLeaderSchedulerCommand())
 	c.AddCommand(NewBalanceWitnessSchedulerCommand())
 	c.AddCommand(NewTransferWitnessLeaderSchedulerCommand())
-	c.AddCommand(NewBalanceKeyRangeSchedulerCommand())
+	c.AddCommand(NewBalanceRangeSchedulerCommand())
 	return c
 }
 
@@ -375,12 +375,12 @@ func NewBalanceWitnessSchedulerCommand() *cobra.Command {
 	return c
 }
 
-// NewBalanceKeyRangeSchedulerCommand returns a command to add a balance-key-range-scheduler.
-func NewBalanceKeyRangeSchedulerCommand() *cobra.Command {
+// NewBalanceRangeSchedulerCommand returns a command to add a balance-key-range-scheduler.
+func NewBalanceRangeSchedulerCommand() *cobra.Command {
 	c := &cobra.Command{
-		Use:   "balance-key-range-scheduler [--format=raw|encode|hex] <engine> <role> <start_key> <end_key>",
-		Short: "add a scheduler to balance region for given key range",
-		Run:   addSchedulerForBalanceKeyRangeCommandFunc,
+		Use:   "balance-range-scheduler [--format=raw|encode|hex] <engine> <role> <start_key> <end_key>",
+		Short: "add a scheduler to balance region for given range",
+		Run:   addSchedulerForBalanceRangeCommandFunc,
 	}
 	c.Flags().String("format", "hex", "the key format")
 	return c
@@ -424,7 +424,7 @@ func addSchedulerForGrantHotRegionCommandFunc(cmd *cobra.Command, args []string)
 	postJSON(cmd, schedulersPrefix, input)
 }
 
-func addSchedulerForBalanceKeyRangeCommandFunc(cmd *cobra.Command, args []string) {
+func addSchedulerForBalanceRangeCommandFunc(cmd *cobra.Command, args []string) {
 	if len(args) != 4 {
 		cmd.Println(cmd.UsageString())
 		return
@@ -588,8 +588,8 @@ func newConfigBalanceLeaderCommand() *cobra.Command {
 
 func newConfigBalanceKeyRangeCommand() *cobra.Command {
 	c := &cobra.Command{
-		Use:   "balance-key-range-scheduler",
-		Short: "balance-key-range-scheduler config",
+		Use:   "balance-range-scheduler",
+		Short: "balance-range-scheduler config",
 		Run:   listSchedulerConfigCommandFunc,
 	}
 

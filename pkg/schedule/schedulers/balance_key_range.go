@@ -121,9 +121,9 @@ func (*balanceKeyRangeScheduler) Schedule(_cluster sche.SchedulerCluster, _dryRu
 
 // IsScheduleAllowed checks if the scheduler is allowed to schedule new operators.
 func (s *balanceKeyRangeScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) bool {
-	allowed := s.OpController.OperatorCount(operator.OpKeyRange) < cluster.GetSchedulerConfig().GetRegionScheduleLimit()
+	allowed := s.OpController.OperatorCount(operator.OpRange) < cluster.GetSchedulerConfig().GetRegionScheduleLimit()
 	if !allowed {
-		operator.IncOperatorLimitCounter(s.GetType(), operator.OpKeyRange)
+		operator.IncOperatorLimitCounter(s.GetType(), operator.OpRange)
 	}
 	return allowed
 }
@@ -135,7 +135,7 @@ type BalanceKeyRangeCreateOption func(s *balanceKeyRangeScheduler)
 // special store balanced.
 func newBalanceKeyRangeScheduler(opController *operator.Controller, conf *balanceKeyRangeSchedulerConfig, options ...BalanceKeyRangeCreateOption) Scheduler {
 	s := &balanceKeyRangeScheduler{
-		BaseScheduler: NewBaseScheduler(opController, types.BalanceKeyRangeScheduler, conf),
+		BaseScheduler: NewBaseScheduler(opController, types.BalanceRangeScheduler, conf),
 		conf:          conf,
 		handler:       newBalanceKeyRangeHandler(conf),
 	}

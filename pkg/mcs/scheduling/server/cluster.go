@@ -316,7 +316,7 @@ func (c *Cluster) updateScheduler() {
 		for _, scheduler := range latestSchedulersConfig {
 			schedulerType, ok := types.ConvertOldStrToType[scheduler.Type]
 			if !ok {
-				log.Error("scheduler not found  ", zap.String("type", scheduler.Type))
+				log.Error("scheduler not found", zap.String("type", scheduler.Type))
 				continue
 			}
 			s, err := schedulers.CreateScheduler(
