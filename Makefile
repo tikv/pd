@@ -109,8 +109,7 @@ pd-server-basic:
 
 # Tools
 pre-build-for-tools:
-	@ cd tools
-	@ go mod tidy
+	@make tidy
 pd-ctl: pre-build-for-tools
 	cd tools && GOEXPERIMENT=$(BUILD_GOEXPERIMENT) CGO_ENABLED=$(BUILD_TOOL_CGO_ENABLED) go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o $(BUILD_BIN_PATH)/pd-ctl pd-ctl/main.go
 pd-tso-bench:
