@@ -2,7 +2,10 @@ package schedulers
 
 import (
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/tikv/pd/pkg/schedule/placement"
+	"go.uber.org/zap"
 	"net/http"
+	"sort"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -25,10 +28,10 @@ const balanceKeyRangeName = "balance-key-ranges"
 
 type balanceKeyRangeSchedulerHandler struct {
 	rd     *render.Render
-	config *balanceKeyRangeSchedulerConfig
+	config *balanceRangeSchedulerConfig
 }
 
-func newBalanceKeyRangeHandler(conf *balanceKeyRangeSchedulerConfig) http.Handler {
+func newBalanceKeyRangeHandler(conf *balanceRangeSchedulerConfig) http.Handler {
 	handler := &balanceKeyRangeSchedulerHandler{
 		config: conf,
 		rd:     render.New(render.Options{IndentJSON: true}),
@@ -50,31 +53,31 @@ func (handler *balanceKeyRangeSchedulerHandler) listConfig(w http.ResponseWriter
 	}
 }
 
-type balanceKeyRangeSchedulerConfig struct {
+type balanceRangeSchedulerConfig struct {
 	syncutil.RWMutex
 	schedulerConfig
-	balanceKeyRangeSchedulerParam
+	balanceRangeSchedulerParam
 }
 
-type balanceKeyRangeSchedulerParam struct {
+type balanceRangeSchedulerParam struct {
 	Role    string          `json:"role"`
 	Engine  string          `json:"engine"`
 	Timeout time.Duration   `json:"timeout"`
 	Ranges  []core.KeyRange `json:"ranges"`
 }
 
-func (conf *balanceKeyRangeSchedulerConfig) encodeConfig() ([]byte, error) {
+func (conf *balanceRangeSchedulerConfig) encodeConfig() ([]byte, error) {
 	conf.RLock()
 	defer conf.RUnlock()
 	return EncodeConfig(conf)
 }
 
-func (conf *balanceKeyRangeSchedulerConfig) clone() *balanceKeyRangeSchedulerParam {
+func (conf *balanceRangeSchedulerConfig) clone() *balanceRangeSchedulerParam {
 	conf.RLock()
 	defer conf.RUnlock()
 	ranges := make([]core.KeyRange, len(conf.Ranges))
 	copy(ranges, conf.Ranges)
-	return &balanceKeyRangeSchedulerParam{
+	return &balanceRangeSchedulerParam{
 		Ranges:  ranges,
 		Role:    conf.Role,
 		Engine:  conf.Engine,
@@ -83,16 +86,16 @@ func (conf *balanceKeyRangeSchedulerConfig) clone() *balanceKeyRangeSchedulerPar
 }
 
 // EncodeConfig serializes the config.
-func (s *balanceKeyRangeScheduler) EncodeConfig() ([]byte, error) {
+func (s *balanceRangeScheduler) EncodeConfig() ([]byte, error) {
 	return s.conf.encodeConfig()
 }
 
 // ReloadConfig reloads the config.
-func (s *balanceKeyRangeScheduler) ReloadConfig() error {
+func (s *balanceRangeScheduler) ReloadConfig() error {
 	s.conf.Lock()
 	defer s.conf.Unlock()
 
-	newCfg := &balanceKeyRangeSchedulerConfig{}
+	newCfg := &balanceRangeSchedulerConfig{}
 	if err := s.conf.load(newCfg); err != nil {
 		return err
 	}
@@ -103,9 +106,9 @@ func (s *balanceKeyRangeScheduler) ReloadConfig() error {
 	return nil
 }
 
-type balanceKeyRangeScheduler struct {
+type balanceRangeScheduler struct {
 	*BaseScheduler
-	conf          *balanceKeyRangeSchedulerConfig
+	conf          *balanceRangeSchedulerConfig
 	handler       http.Handler
 	start         time.Time
 	role          Role
@@ -114,31 +117,31 @@ type balanceKeyRangeScheduler struct {
 }
 
 // ServeHTTP implements the http.Handler interface.
-func (s *balanceKeyRangeScheduler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (s *balanceRangeScheduler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.handler.ServeHTTP(w, r)
 }
 
 // IsScheduleAllowed checks if the scheduler is allowed to schedule new operators.
-func (s *balanceKeyRangeScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) bool {
-	allowed := s.OpController.OperatorCount(operator.OpKeyRange) < cluster.GetSchedulerConfig().GetRegionScheduleLimit()
+func (s *balanceRangeScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) bool {
+	allowed := s.OpController.OperatorCount(operator.OpRange) < cluster.GetSchedulerConfig().GetRegionScheduleLimit()
 	if !allowed {
-		operator.IncOperatorLimitCounter(s.GetType(), operator.OpKeyRange)
+		operator.IncOperatorLimitCounter(s.GetType(), operator.OpRange)
 	}
 	if time.Now().Sub(s.start) > s.conf.Timeout {
 		allowed = false
-		balanceExpiredCounter.Inc()
+		balanceRangeExpiredCounter.Inc()
 	}
 	return allowed
 }
 
 // BalanceKeyRangeCreateOption is used to create a scheduler with an option.
-type BalanceKeyRangeCreateOption func(s *balanceKeyRangeScheduler)
+type BalanceKeyRangeCreateOption func(s *balanceRangeScheduler)
 
 // newBalanceKeyRangeScheduler creates a scheduler that tends to keep given peer role on
 // special store balanced.
-func newBalanceKeyRangeScheduler(opController *operator.Controller, conf *balanceKeyRangeSchedulerConfig, options ...BalanceKeyRangeCreateOption) Scheduler {
-	s := &balanceKeyRangeScheduler{
-		BaseScheduler: NewBaseScheduler(opController, types.BalanceKeyRangeScheduler, conf),
+func newBalanceKeyRangeScheduler(opController *operator.Controller, conf *balanceRangeSchedulerConfig, options ...BalanceKeyRangeCreateOption) Scheduler {
+	s := &balanceRangeScheduler{
+		BaseScheduler: NewBaseScheduler(opController, types.BalanceRangeScheduler, conf),
 		conf:          conf,
 		handler:       newBalanceKeyRangeHandler(conf),
 		start:         time.Now(),
@@ -160,9 +163,48 @@ func newBalanceKeyRangeScheduler(opController *operator.Controller, conf *balanc
 }
 
 // Schedule schedules the balance key range operator.
-func (s *balanceKeyRangeScheduler) Schedule(cluster sche.SchedulerCluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
-	balanceKeyRangeCounter.Inc()
+func (s *balanceRangeScheduler) Schedule(cluster sche.SchedulerCluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
+	balanceRangeCounter.Inc()
 	plan,err:=s.prepare(cluster)
+	downFilter := filter.NewRegionDownFilter()
+	replicaFilter := filter.NewRegionReplicatedFilter(cluster)
+	snapshotFilter := filter.NewSnapshotSendFilter(plan.stores, constant.Medium)
+	baseRegionFilters := []filter.RegionFilter{downFilter, replicaFilter, snapshotFilter}
+
+	for sourceIndex,sourceStore:=range plan.stores{
+		plan.source=sourceStore
+		switch s.role{
+		case Leader:
+			plan.region=filter.SelectOneRegion(cluster.RandLeaderRegions(plan.sourceStoreID(), s.conf.Ranges), nil,baseRegionFilters...)
+		case Learner:
+			plan.region=filter.SelectOneRegion(cluster.RandLearnerRegions(plan.sourceStoreID(), s.conf.Ranges), nil,baseRegionFilters...)
+		case Follower:
+			plan.region=filter.SelectOneRegion(cluster.RandFollowerRegions(plan.sourceStoreID(), s.conf.Ranges), nil,baseRegionFilters...)
+		}
+		if plan.region == nil {
+			balanceRangeNoRegionCounter.Inc()
+			continue
+		}
+		log.Debug("select region", zap.String("scheduler", s.GetName()), zap.Uint64("region-id", plan.region.GetID()))
+		// Skip hot regions.
+		if cluster.IsRegionHot(plan.region) {
+			log.Debug("region is hot", zap.String("scheduler", s.GetName()), zap.Uint64("region-id", plan.region.GetID()))
+			balanceRangeHotCounter.Inc()
+			continue
+		}
+		// Check region leader
+		if plan.region.GetLeader() == nil {
+			log.Warn("region have no leader", zap.String("scheduler", s.GetName()), zap.Uint64("region-id", solver.Region.GetID()))
+			balanceRangeNoLeaderCounter.Inc()
+			continue
+		}
+		plan.fit = replicaFilter.(*filter.RegionReplicatedFilter).GetFit()
+		if op := s.transferPeer(plan, plan.stores[sourceIndex+1:]); op != nil {
+			op.Counters = append(op.Counters, balanceRegionNewOpCounter)
+			return []*operator.Operator{op}, nil
+		}
+	}
+
 	if err != nil {
 		log.Error("failed to prepare balance key range scheduler", errs.ZapError(err))
 		return nil,nil
@@ -170,36 +212,68 @@ func (s *balanceKeyRangeScheduler) Schedule(cluster sche.SchedulerCluster, dryRu
 	}
 }
 
-// BalanceKeyRangeSchedulerPlan is used to record the plan of balance key range scheduler.
-type BalanceKeyRangeSchedulerPlan struct {
-	source []*core.StoreInfo
-	// store_id -> score
-	scores map[uint64]uint64
-	// store_id -> peer
-	regions map[uint64]*metapb.Peer
+// transferPeer selects the best store to create a new peer to replace the old peer.
+func (s *balanceRangeScheduler) transferPeer(plan *balanceRangeSchedulerPlan, dstStores []*storeInfo) *operator.Operator {
+	excludeTargets := plan.region.GetStoreIDs()
+	if s.role!=Leader{
+		excludeTargets = append(excludeTargets, plan.sourceStoreID())
+	}
+	return nil
 }
 
-func (s *balanceKeyRangeScheduler) prepare(cluster sche.SchedulerCluster)(*BalanceKeyRangeSchedulerPlan,error) {
+// balanceRangeSchedulerPlan is used to record the plan of balance key range scheduler.
+type balanceRangeSchedulerPlan struct {
+	// stores is sorted by score desc
+	stores []*storeInfo
+	source *storeInfo
+	target *storeInfo
+	region *core.RegionInfo
+	fit *placement.RegionFit
+}
+
+type storeInfo struct {
+	store *core.StoreInfo
+	score uint64
+}
+
+func (s *balanceRangeScheduler) prepare(cluster sche.SchedulerCluster)(*balanceRangeSchedulerPlan,error) {
 	krs := core.NewKeyRanges(s.conf.Ranges)
 	scanRegions, err := cluster.BatchScanRegions(krs)
 	if err != nil {
 		return nil,err
 	}
-	stores := cluster.GetStores()
-	sources := filter.SelectSourceStores(stores, s.filters, cluster.GetSchedulerConfig(), nil, nil)
-	scores := make(map[uint64]uint64, len(sources))
-	regions:=make(map[uint64]*metapb.Peer,len(scanRegions))
+	sources := filter.SelectSourceStores(cluster.GetStores(), s.filters, cluster.GetSchedulerConfig(), nil, nil)
+	storeInfos:=make(map[uint64]*storeInfo,len(sources))
+	for _, source := range sources {
+		storeInfos[source.GetID()] = &storeInfo{store: source}
+	}
 	for _, region := range scanRegions {
 		for _, peer := range s.role.getPeers(region) {
-			scores[peer.GetStoreId()] += 1
-			regions[peer.GetStoreId()] = peer
+			storeInfos[peer.GetStoreId()].score += 1
 		}
 	}
-	return &BalanceKeyRangeSchedulerPlan{
-		source: sources,
-		scores: scores,
-		regions: regions,
+
+	stores:=make([]*storeInfo,0,len(storeInfos))
+	for _, store := range storeInfos {
+		stores = append(stores, store)
+	}
+	sort.Slice(stores, func(i, j int) bool {
+		return stores[i].score > stores[j].score
+	})
+	return &balanceRangeSchedulerPlan{
+		stores:stores,
+		source: nil,
+		target: nil,
+		region: nil,
 	},nil
+}
+
+func (p *balanceRangeSchedulerPlan) sourceStoreID() uint64 {
+	return p.source.store.GetID()
+}
+
+func (p *balanceRangeSchedulerPlan) targetStoreID() uint64 {
+	return p.target.store.GetID()
 }
 
 
@@ -208,7 +282,7 @@ type Role int
 
 const (
 	Leader Role = iota
-	Voter
+	Follower
 	Learner
 	Unknown
 	RoleLen
@@ -218,7 +292,7 @@ func (r Role) String() string {
 	switch r {
 	case Leader:
 		return "leader"
-	case Voter:
+	case Follower:
 		return "voter"
 	case Learner:
 		return "learner"
@@ -231,8 +305,8 @@ func NewRole(role string) Role {
 	switch role {
 	case "leader":
 		return Leader
-	case "voter":
-		return Voter
+	case "follower":
+		return Follower
 	case "learner":
 		return Learner
 	default:
@@ -244,8 +318,13 @@ func (r Role) getPeers(region *core.RegionInfo) []*metapb.Peer {{
 	switch r {
 	case Leader:
 		return []*metapb.Peer{region.GetLeader()}
-	case Voter:
-		return region.GetVoters()
+	case Follower:
+		 followers:=region.GetFollowers()
+		 ret:=make([]*metapb.Peer,len(followers))
+		 for _,peer:=range followers{
+		 	ret=append(ret,peer)
+		 }
+		 return ret
 	case Learner:
 		return region.GetLearners()
 	default:

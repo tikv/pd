@@ -16,6 +16,7 @@ package core
 
 import (
 	"bytes"
+	"encoding/json"
 
 	"github.com/tikv/pd/pkg/core/constant"
 )
@@ -154,6 +155,15 @@ type StoreSetController interface {
 type KeyRange struct {
 	StartKey []byte `json:"start-key"`
 	EndKey   []byte `json:"end-key"`
+}
+
+// MarshalJSON marshals to json.
+func (kr KeyRange) MarshalJSON() ([]byte, error) {
+	m := map[string]string{
+		"start-key": HexRegionKeyStr(kr.StartKey),
+		"end-key":   HexRegionKeyStr(kr.EndKey),
+	}
+	return json.Marshal(m)
 }
 
 // NewKeyRange create a KeyRange with the given start key and end key.

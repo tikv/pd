@@ -15,7 +15,6 @@
 package scheduler_test
 
 import (
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"reflect"
@@ -543,24 +542,24 @@ func (suite *schedulerTestSuite) checkSchedulerConfig(cluster *pdTests.TestClust
 	})
 
 	// test balance key range scheduler
-	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "add", "balance-key-range-scheduler"}, nil)
+	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "add", "balance-range-scheduler"}, nil)
 	re.NotContains(echo, "Success!")
-	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "add", "balance-key-range-scheduler", "--format=raw", "tiflash", "learner", "a", "b"}, nil)
+	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "add", "balance-range-scheduler", "--format=raw", "tiflash", "learner", "a", "b"}, nil)
 	re.Contains(echo, "Success!")
 	conf = make(map[string]any)
 	testutil.Eventually(re, func() bool {
-		mightExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "balance-key-range-scheduler"}, &conf)
+		mightExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "balance-range-scheduler"}, &conf)
 		return conf["role"] == "learner" && conf["engine"] == "tiflash"
 	})
 	re.Equal(float64(time.Hour.Nanoseconds()), conf["timeout"])
 	ranges := conf["ranges"].([]any)[0].(map[string]any)
-	re.Equal(base64.StdEncoding.EncodeToString([]byte("a")), ranges["start-key"])
-	re.Equal(base64.StdEncoding.EncodeToString([]byte("b")), ranges["end-key"])
+	re.Equal(core.HexRegionKeyStr([]byte("a")), ranges["start-key"])
+	re.Equal(core.HexRegionKeyStr([]byte("b")), ranges["end-key"])
 
-	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "add", "balance-key-range-scheduler", "--format=raw", "tiflash", "learner", "a", "b"}, nil)
+	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "add", "balance-range-scheduler", "--format=raw", "tiflash", "learner", "a", "b"}, nil)
 	re.Contains(echo, "400")
 	re.Contains(echo, "scheduler already exists")
-	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "remove", "balance-key-range-scheduler"}, nil)
+	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "remove", "balance-range-scheduler"}, nil)
 	re.Contains(echo, "Success!")
 
 	// test balance leader config
