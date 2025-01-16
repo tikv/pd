@@ -16,24 +16,111 @@ package kv
 
 import "context"
 
-// Txn bundles multiple operations into a single executable unit.
-// It enables kv to atomically apply a set of updates.
-type Txn interface {
+type BaseReadWrite interface {
 	Save(key, value string) error
 	Remove(key string) error
 	Load(key string) (string, error)
 	LoadRange(key, endKey string, limit int) (keys []string, values []string, err error)
 }
 
+// Txn bundles multiple operations into a single executable unit.
+// It enables kv to atomically apply a set of updates.
+type Txn interface {
+	BaseReadWrite
+}
+
+type LowLevelTxnCmpType int
+type LowLevelTxnOpType int
+
+const (
+	LowLevelCmpEqual LowLevelTxnCmpType = iota
+	LowLevelCmpNotEqual
+	LowLevelCmpLess
+	LowLevelCmpGreater
+	LowLevelCmpExists
+	LowLevelCmpNotExists
+)
+
+const (
+	LowLevelOpPut LowLevelTxnOpType = iota
+	LowLevelOpDelete
+	LowLevelOpGet
+	LowLevelOpGetRange
+)
+
+type LowLevelTxnCondition struct {
+	Key     string
+	CmpType LowLevelTxnCmpType
+	Value   string
+}
+
+type LowLevelTxnOp struct {
+	Key    string
+	OpType LowLevelTxnOpType
+	Value  string
+	// The end key when the OpType is LowLevelOpGetRange.
+	EndKey string
+	// The limit of the keys to get when the OpType is LowLevelOpGetRange.
+	Limit int
+}
+
+type KeyValuePair struct {
+	Key   string
+	Value string
+}
+
+// LowLevelTxnResultItem represents a single result of a read operation in a LowLevelTxn.
+type LowLevelTxnResultItem struct {
+	KeyValuePairs []KeyValuePair
+	More          bool
+}
+
+// LowLevelTxnResult represents the result of a LowLevelTxn. The results of operations in `Then` or `Else` branches
+// will be listed in `Items` in the same order as the operations are added.
+// For Put or Delete operations, its corresponding result is the previous value before writing.
+type LowLevelTxnResult struct {
+	Succeeded bool
+	Items     []LowLevelTxnResultItem
+}
+
+// LowLevelTxn is a low-level transaction interface. It follows the same pattern of etcd's transaction
+// API. When the backend is etcd, it simply calls etcd's equivalent APIs internally. Otherwise, the
+// behavior is simulated.
+// Considering that in different backends, the kv pairs may not have equivalent property of etcd's
+// version, create-time, etc., the abstracted LowLevelTxn interface does not support comparing on them.
+// It only supports checking the value or whether the key exists.
+// Avoid reading/writing the same key multiple times in a single transaction, otherwise the behavior
+// would be undefined.
+type LowLevelTxn interface {
+	If(conditions ...LowLevelTxnCondition) LowLevelTxn
+	Then(ops ...LowLevelTxnOp) LowLevelTxn
+	Else(ops ...LowLevelTxnOp) LowLevelTxn
+	Commit(ctx context.Context) (LowLevelTxnResult, error)
+	Rollback(ctx context.Context) error
+}
+
 // Base is an abstract interface for load/save pd cluster data.
 type Base interface {
-	Txn
+	BaseReadWrite
 	// RunInTxn runs the user provided function in a Transaction.
 	// If user provided function f returns a non-nil error, then
 	// transaction will not be committed, the same error will be
 	// returned by RunInTxn.
 	// Otherwise, it returns the error occurred during the
 	// transaction.
+	//
+	// This is a highly-simplified transaction interface. As
+	// etcd's transaction API is quite limited, it's hard to use it
+	// to provide a complete transaction model as how a normal database
+	// does. So when this API is running on etcd backend, each read on
+	// `txn` implicitly constructs a condition.
+	// (ref: https://etcd.io/docs/v3.5/learning/api/#transaction)
+	// When reading a range using `LoadRange`, for each key found in the
+	// range there will be a condition constructed. Be aware of the
+	// possibility of causing phantom read.
+	// RunInTxn may not suit all use cases. When RunInTxn is found not
+	// improper to use, consider using CreateLowLevelTxn instead.
+	//
 	// Note that transaction are not committed until RunInTxn returns nil.
 	// Note:
 	// 1. Load and LoadRange operations provides only stale read.
@@ -42,4 +129,11 @@ type Base interface {
 	// 2. Only when storage is etcd, does RunInTxn checks that
 	// values loaded during transaction has not been modified before commit.
 	RunInTxn(ctx context.Context, f func(txn Txn) error) error
+
+	// CreateLowLevelTxn creates a transaction that provides the if-then-else
+	// API pattern which is the same as how etcd does, makes it possible
+	// to precisely control how etcd's transaction API is used when the
+	// backend is etcd. When there's other backend types, the behavior will be
+	// simulated.
+	CreateLowLevelTxn() LowLevelTxn
 }

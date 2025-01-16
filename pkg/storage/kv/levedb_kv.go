@@ -80,6 +80,10 @@ func (kv *LevelDBKV) Remove(key string) error {
 	return errors.WithStack(kv.Delete([]byte(key), nil))
 }
 
+func (kv *LevelDBKV) CreateLowLevelTxn() LowLevelTxn {
+	panic("unimplemented")
+}
+
 // levelDBTxn implements kv.Txn.
 // It utilizes leveldb.Batch to batch user operations to an atomic execution unit.
 type levelDBTxn struct {

@@ -99,6 +99,10 @@ func (kv *memoryKV) Remove(key string) error {
 	return nil
 }
 
+func (kv *memoryKV) CreateLowLevelTxn() LowLevelTxn {
+	panic("unimplemented")
+}
+
 // memTxn implements kv.Txn.
 type memTxn struct {
 	kv  *memoryKV

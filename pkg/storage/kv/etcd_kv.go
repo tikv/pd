@@ -16,6 +16,7 @@ package kv
 
 import (
 	"context"
+	"fmt"
 	"path"
 	"strings"
 	"time"
@@ -137,6 +138,13 @@ func (kv *etcdKVBase) Remove(key string) error {
 		return errs.ErrEtcdTxnConflict.FastGenByArgs()
 	}
 	return nil
+}
+
+func (kv *etcdKVBase) CreateLowLevelTxn() LowLevelTxn {
+	return &lowLevelTxnWrapper{
+		inner:    NewSlowLogTxn(kv.client),
+		rootPath: kv.rootPath,
+	}
 }
 
 // SlowLogTxn wraps etcd transaction and log slow one.
@@ -294,5 +302,125 @@ func (txn *etcdTxn) commit() error {
 	if !resp.Succeeded {
 		return errs.ErrEtcdTxnConflict.FastGenByArgs()
 	}
+	return nil
+}
+
+type lowLevelTxnWrapper struct {
+	inner    clientv3.Txn
+	rootPath string
+}
+
+func (l *lowLevelTxnWrapper) If(conditions ...LowLevelTxnCondition) LowLevelTxn {
+	cmpList := make([]clientv3.Cmp, 0, len(conditions))
+	for _, c := range conditions {
+		key := strings.Join([]string{l.rootPath, c.Key}, "/")
+		if c.CmpType == LowLevelCmpExists {
+			cmpList = append(cmpList, clientv3.Compare(clientv3.CreateRevision(key), ">", 0))
+		} else if c.CmpType == LowLevelCmpNotExists {
+			cmpList = append(cmpList, clientv3.Compare(clientv3.CreateRevision(key), "=", 0))
+		} else {
+			var cmpOp string
+			switch c.CmpType {
+			case LowLevelCmpEqual:
+				cmpOp = "="
+			case LowLevelCmpNotEqual:
+				cmpOp = "!="
+			case LowLevelCmpGreater:
+				cmpOp = ">"
+			case LowLevelCmpLess:
+				cmpOp = "<"
+			default:
+				panic(fmt.Sprintf("unknown cmp type %v", c.CmpType))
+			}
+			cmpList = append(cmpList, clientv3.Compare(clientv3.Value(key), cmpOp, c.Value))
+		}
+	}
+	l.inner = l.inner.If(cmpList...)
+	return l
+}
+
+func (l *lowLevelTxnWrapper) convertOps(ops []LowLevelTxnOp) []clientv3.Op {
+	opsList := make([]clientv3.Op, 0, len(ops))
+	for _, op := range ops {
+		key := strings.Join([]string{l.rootPath, op.Key}, "/")
+		switch op.OpType {
+		case LowLevelOpPut:
+			opsList = append(opsList, clientv3.OpPut(key, op.Value))
+		case LowLevelOpDelete:
+			opsList = append(opsList, clientv3.OpDelete(key))
+		case LowLevelOpGet:
+			opsList = append(opsList, clientv3.OpGet(key))
+		case LowLevelOpGetRange:
+			if op.EndKey == "\x00" {
+				opsList = append(opsList, clientv3.OpGet(key, clientv3.WithPrefix(), clientv3.WithLimit(int64(op.Limit))))
+			} else {
+				endKey := strings.Join([]string{l.rootPath, op.EndKey}, "/")
+				opsList = append(opsList, clientv3.OpGet(key, clientv3.WithRange(endKey), clientv3.WithLimit(int64(op.Limit))))
+			}
+		default:
+			panic(fmt.Sprintf("unknown op type %v", op.OpType))
+		}
+	}
+	return opsList
+}
+
+func (l *lowLevelTxnWrapper) Then(ops ...LowLevelTxnOp) LowLevelTxn {
+	l.inner = l.inner.Then(l.convertOps(ops)...)
+	return l
+}
+
+func (l *lowLevelTxnWrapper) Else(ops ...LowLevelTxnOp) LowLevelTxn {
+	l.inner = l.inner.Else(l.convertOps(ops)...)
+	return l
+}
+
+func (l *lowLevelTxnWrapper) Commit(_ctx context.Context) (LowLevelTxnResult, error) {
+	resp, err := l.inner.Commit()
+	if err != nil {
+		return LowLevelTxnResult{}, err
+	}
+	items := make([]LowLevelTxnResultItem, 0, len(resp.Responses))
+	for i, respItem := range resp.Responses {
+		var resultItem LowLevelTxnResultItem
+		if put := respItem.GetResponsePut(); put != nil {
+			// Put and delete operations of etcd's transaction won't return any previous data. Skip handling it.
+			resultItem = LowLevelTxnResultItem{}
+			if put.PrevKv != nil {
+				key := strings.TrimPrefix(strings.TrimPrefix(string(put.PrevKv.Key), l.rootPath), "/")
+				resultItem.KeyValuePairs = []KeyValuePair{{
+					Key:   key,
+					Value: string(put.PrevKv.Value),
+				}}
+			}
+		} else if del := respItem.GetResponseDeleteRange(); del != nil {
+			// Put and delete operations of etcd's transaction won't return any previous data. Skip handling it.
+			resultItem = LowLevelTxnResultItem{}
+		} else if rangeResp := respItem.GetResponseRange(); rangeResp != nil {
+			kvs := make([]KeyValuePair, 0, len(rangeResp.Kvs))
+			for _, kv := range rangeResp.Kvs {
+				key := strings.TrimPrefix(strings.TrimPrefix(string(kv.Key), l.rootPath), "/")
+				kvs = append(kvs, KeyValuePair{
+					Key:   key,
+					Value: string(kv.Value),
+				})
+			}
+			resultItem = LowLevelTxnResultItem{
+				KeyValuePairs: kvs,
+			}
+		} else {
+			return LowLevelTxnResult{}, errs.ErrEtcdTxnResponse.GenWithStackByArgs(
+				fmt.Sprintf("succeeded: %v, index: %v, response: %v", resp.Succeeded, i, respItem),
+			)
+		}
+		items = append(items, resultItem)
+	}
+	return LowLevelTxnResult{
+		Succeeded: resp.Succeeded,
+		Items:     items,
+	}, nil
+}
+
+func (l *lowLevelTxnWrapper) Rollback(_ctx context.Context) error {
+	// Nothing to do.
 	return nil
 }
