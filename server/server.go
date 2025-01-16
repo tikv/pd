@@ -225,7 +225,6 @@ type Server struct {
 	auditBackends []audit.Backend
 
 	registry                 *registry.ServiceRegistry
-	isKeyspaceGroupEnabled   bool
 	servicePrimaryMap        sync.Map /* Store as map[string]string */
 	tsoPrimaryWatcher        *etcdutil.LoopWatcher
 	schedulingPrimaryWatcher *etcdutil.LoopWatcher
@@ -238,17 +237,8 @@ type Server struct {
 type HandlerBuilder func(context.Context, *Server) (http.Handler, apiutil.APIServiceGroup, error)
 
 // CreateServer creates the UNINITIALIZED pd server with given configuration.
-func CreateServer(ctx context.Context, cfg *config.Config, services []string, legacyServiceBuilders ...HandlerBuilder) (*Server, error) {
-	// TODO: Currently, whether we enable microservice or not is determined by the service list.
-	// It's equal to whether we enable the keyspace group or not.
-	// But indeed the keyspace group is independent of the microservice.
-	// There could be the following scenarios:
-	// 1. Enable microservice but disable keyspace group. (non-serverless scenario)
-	// 2. Enable microservice and enable keyspace group. (serverless scenario)
-	// 3. Disable microservice and disable keyspace group. (both serverless scenario and non-serverless scenario)
-	// We should separate the keyspace group from the microservice later.
-	isKeyspaceGroupEnabled := len(services) != 0
-	log.Info("PD config", zap.Bool("enable-keyspace-group", isKeyspaceGroupEnabled), zap.Reflect("config", cfg))
+func CreateServer(ctx context.Context, cfg *config.Config, legacyServiceBuilders ...HandlerBuilder) (*Server, error) {
+	log.Info("PD config", zap.Reflect("config", cfg))
 	serviceMiddlewareCfg := config.NewServiceMiddlewareConfig()
 
 	s := &Server{
@@ -260,7 +250,6 @@ func CreateServer(ctx context.Context, cfg *config.Config, services []string, le
 		ctx:                             ctx,
 		startTimestamp:                  time.Now().Unix(),
 		DiagnosticsServer:               sysutil.NewDiagnosticsServer(cfg.Log.File.Filename),
-		isKeyspaceGroupEnabled:          isKeyspaceGroupEnabled,
 		tsoClientPool: struct {
 			syncutil.RWMutex
 			clients map[string]tsopb.TSO_TsoClient
@@ -479,9 +468,7 @@ func (s *Server) startServer(ctx context.Context) error {
 		Member: s.member.MemberValue(),
 		Step:   keyspace.AllocStep,
 	})
-	if s.IsKeyspaceGroupEnabled() {
-		s.keyspaceGroupManager = keyspace.NewKeyspaceGroupManager(s.ctx, s.storage, s.client)
-	}
+	s.keyspaceGroupManager = keyspace.NewKeyspaceGroupManager(s.ctx, s.storage, s.client)
 	s.keyspaceManager = keyspace.NewKeyspaceManager(s.ctx, s.storage, s.cluster, keyspaceIDAllocator, &s.cfg.Keyspace, s.keyspaceGroupManager)
 	s.safePointV2Manager = gc.NewSafePointManagerV2(s.ctx, s.storage, s.storage, s.storage)
 	s.hbStreams = hbstream.NewHeartbeatStreams(ctx, "", s.cluster)
@@ -531,7 +518,7 @@ func (s *Server) Close() {
 	s.cgMonitor.StopMonitor()
 
 	s.stopServerLoop()
-	if s.IsKeyspaceGroupEnabled() {
+	if s.keyspaceGroupManager != nil {
 		s.keyspaceGroupManager.Close()
 	}
 
@@ -642,10 +629,8 @@ func (s *Server) startServerLoop(ctx context.Context) {
 	go s.etcdLeaderLoop()
 	go s.serverMetricsLoop()
 	go s.encryptionKeyManagerLoop()
-	if s.IsKeyspaceGroupEnabled() {
-		s.initTSOPrimaryWatcher()
-		s.initSchedulingPrimaryWatcher()
-	}
+	s.initTSOPrimaryWatcher()
+	s.initSchedulingPrimaryWatcher()
 }
 
 func (s *Server) stopServerLoop() {
@@ -787,11 +772,6 @@ func (s *Server) createRaftCluster() error {
 func (s *Server) stopRaftCluster() {
 	failpoint.Inject("raftclusterIsBusy", func() {})
 	s.cluster.Stop()
-}
-
-// IsKeyspaceGroupEnabled return whether the server is in PD.
-func (s *Server) IsKeyspaceGroupEnabled() bool {
-	return s.isKeyspaceGroupEnabled
 }
 
 // GetAddr returns the server urls for clients.
@@ -1391,13 +1371,28 @@ func (s *Server) GetRaftCluster() *cluster.RaftCluster {
 
 // IsServiceIndependent returns whether the service is independent.
 func (s *Server) IsServiceIndependent(name string) bool {
-	if s.isKeyspaceGroupEnabled && !s.IsClosed() {
-		if name == constant.TSOServiceName && !s.GetMicroserviceConfig().IsTSODynamicSwitchingEnabled() {
+	if name == constant.TSOServiceName {
+		// TSO service is always independent when multi-timelines is enabled.
+		// Otherwise, it depends on the dynamic switching feature.
+		// Only serverless env, `IsMultiTimelinesEnabled`` is true.
+		if s.GetMicroserviceConfig().IsMultiTimelinesEnabled() {
 			return true
 		}
-		return s.cluster.IsServiceIndependent(name)
+		if !s.IsClosed() {
+			if s.GetMicroserviceConfig().IsTSODynamicSwitchingEnabled() {
+				// If the raft cluster is running, the service check is not executed.
+				// We return false temporarily.
+				if s.GetRaftCluster() == nil {
+					return false
+				}
+				return s.cluster.IsServiceIndependent(name)
+			}
+			// If the dynamic switching feature is disabled, we only use internal TSO service.
+			return false
+		}
 	}
-	return false
+	// Other services relies on service discovery.
+	return s.cluster.IsServiceIndependent(name)
 }
 
 // DirectlyGetRaftCluster returns raft cluster directly.

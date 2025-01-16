@@ -41,7 +41,7 @@ func TestKeyspaceGroup(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	tc, err := pdTests.NewTestClusterWithKeyspaceGroup(ctx, 1)
+	tc, err := pdTests.NewTestCluster(ctx, 1)
 	re.NoError(err)
 	defer tc.Destroy()
 	err = tc.RunInitialServers()
@@ -102,7 +102,7 @@ func TestSplitKeyspaceGroup(t *testing.T) {
 	for i := range 129 {
 		keyspaces = append(keyspaces, fmt.Sprintf("keyspace_%d", i))
 	}
-	tc, err := pdTests.NewTestClusterWithKeyspaceGroup(ctx, 3, func(conf *config.Config, _ string) {
+	tc, err := pdTests.NewTestCluster(ctx, 3, func(conf *config.Config, _ string) {
 		conf.Keyspace.PreAlloc = keyspaces
 	})
 	re.NoError(err)
@@ -157,7 +157,7 @@ func TestExternalAllocNodeWhenStart(t *testing.T) {
 	for i := range 10 {
 		keyspaces = append(keyspaces, fmt.Sprintf("keyspace_%d", i))
 	}
-	tc, err := pdTests.NewTestClusterWithKeyspaceGroup(ctx, 1, func(conf *config.Config, _ string) {
+	tc, err := pdTests.NewTestCluster(ctx, 1, func(conf *config.Config, _ string) {
 		conf.Keyspace.PreAlloc = keyspaces
 	})
 	re.NoError(err)
@@ -197,7 +197,7 @@ func TestSetNodeAndPriorityKeyspaceGroup(t *testing.T) {
 	for i := range 10 {
 		keyspaces = append(keyspaces, fmt.Sprintf("keyspace_%d", i))
 	}
-	tc, err := pdTests.NewTestClusterWithKeyspaceGroup(ctx, 3, func(conf *config.Config, _ string) {
+	tc, err := pdTests.NewTestCluster(ctx, 3, func(conf *config.Config, _ string) {
 		conf.Keyspace.PreAlloc = keyspaces
 	})
 	re.NoError(err)
@@ -301,7 +301,7 @@ func TestMergeKeyspaceGroup(t *testing.T) {
 	for i := range 129 {
 		keyspaces = append(keyspaces, fmt.Sprintf("keyspace_%d", i))
 	}
-	tc, err := pdTests.NewTestClusterWithKeyspaceGroup(ctx, 1, func(conf *config.Config, _ string) {
+	tc, err := pdTests.NewTestCluster(ctx, 1, func(conf *config.Config, _ string) {
 		conf.Keyspace.PreAlloc = keyspaces
 	})
 	re.NoError(err)
@@ -420,7 +420,7 @@ func TestKeyspaceGroupState(t *testing.T) {
 	for i := range 10 {
 		keyspaces = append(keyspaces, fmt.Sprintf("keyspace_%d", i))
 	}
-	tc, err := pdTests.NewTestClusterWithKeyspaceGroup(ctx, 1, func(conf *config.Config, _ string) {
+	tc, err := pdTests.NewTestCluster(ctx, 1, func(conf *config.Config, _ string) {
 		conf.Keyspace.PreAlloc = keyspaces
 	})
 	re.NoError(err)
@@ -511,7 +511,7 @@ func TestShowKeyspaceGroupPrimary(t *testing.T) {
 	for i := range 10 {
 		keyspaces = append(keyspaces, fmt.Sprintf("keyspace_%d", i))
 	}
-	tc, err := pdTests.NewTestClusterWithKeyspaceGroup(ctx, 1, func(conf *config.Config, _ string) {
+	tc, err := pdTests.NewTestCluster(ctx, 1, func(conf *config.Config, _ string) {
 		conf.Keyspace.PreAlloc = keyspaces
 	})
 	re.NoError(err)
@@ -595,51 +595,4 @@ func TestShowKeyspaceGroupPrimary(t *testing.T) {
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/acceleratedAllocNodes"))
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/tso/fastGroupSplitPatroller"))
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/delayStartServerLoop"))
-}
-
-func TestInPDMode(t *testing.T) {
-	re := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	tc, err := pdTests.NewTestCluster(ctx, 1)
-	re.NoError(err)
-	defer tc.Destroy()
-	err = tc.RunInitialServers()
-	re.NoError(err)
-	pdAddr := tc.GetConfig().GetClientURL()
-	cmd := ctl.GetRootCmd()
-	tc.WaitLeader()
-	leaderServer := tc.GetLeaderServer()
-	re.NoError(leaderServer.BootstrapCluster())
-
-	argsList := [][]string{
-		{"-u", pdAddr, "keyspace-group"},
-		{"-u", pdAddr, "keyspace-group", "0"},
-		{"-u", pdAddr, "keyspace-group", "split", "0", "1", "2"},
-		{"-u", pdAddr, "keyspace-group", "split-range", "1", "2", "3", "4"},
-		{"-u", pdAddr, "keyspace-group", "finish-split", "1"},
-		{"-u", pdAddr, "keyspace-group", "merge", "1", "2"},
-		{"-u", pdAddr, "keyspace-group", "merge", "0", "--all"},
-		{"-u", pdAddr, "keyspace-group", "finish-merge", "1"},
-		{"-u", pdAddr, "keyspace-group", "set-node", "0", "http://127.0.0.1:2379"},
-		{"-u", pdAddr, "keyspace-group", "set-priority", "0", "http://127.0.0.1:2379", "200"},
-		{"-u", pdAddr, "keyspace-group", "primary", "0"},
-	}
-	for _, args := range argsList {
-		output, err := tests.ExecuteCommand(cmd, args...)
-		re.NoError(err)
-		re.Contains(string(output), "Failed",
-			"args: %v, output: %v", args, string(output))
-		re.Contains(string(output), "keyspace group manager is not initialized",
-			"args: %v, output: %v", args, string(output))
-	}
-
-	leaderServer.SetKeyspaceManager(nil)
-	args := []string{"-u", pdAddr, "keyspace-group", "split", "0", "1", "2"}
-	output, err := tests.ExecuteCommand(cmd, args...)
-	re.NoError(err)
-	re.Contains(string(output), "Failed",
-		"args: %v, output: %v", args, string(output))
-	re.Contains(string(output), "keyspace manager is not initialized",
-		"args: %v, output: %v", args, string(output))
 }

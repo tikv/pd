@@ -72,7 +72,6 @@ func getMembers(svr *server.Server) (*pdpb.GetMembersResponse, error) {
 	if members.GetHeader().GetError() != nil {
 		return nil, errors.WithStack(errors.New(members.GetHeader().GetError().String()))
 	}
-
 	for _, m := range members.GetMembers() {
 		var e error
 		m.BinaryVersion, e = svr.GetMember().GetMemberBinaryVersion(m.GetMemberId())

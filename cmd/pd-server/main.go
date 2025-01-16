@@ -52,8 +52,8 @@ import (
 )
 
 const (
-	apiMode        = "api"
-	tsoMode        = "tso"
+	// Only serverless use this variable, we can use it to determine whether the PD supports multiple timelines.
+	// The name is a little misleading, but it's kept for backward compatibility.
 	serviceModeEnv = "PD_SERVICE_MODE"
 )
 
@@ -89,7 +89,7 @@ func NewServiceCommand() *cobra.Command {
 // NewTSOServiceCommand returns the tso service command.
 func NewTSOServiceCommand() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   tsoMode,
+		Use:   "tso",
 		Short: "Run the TSO service",
 		Run:   tso.CreateServerWrapper,
 	}
@@ -129,11 +129,12 @@ func NewSchedulingServiceCommand() *cobra.Command {
 }
 
 // NewPDServiceCommand returns the PD service command.
+// We can use pd directly. This command is kept for backward compatibility.
 func NewPDServiceCommand() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   apiMode,
+		Use:   "api",
 		Short: "Run the PD service",
-		Run:   createPDServiceWrapper,
+		Run:   createServerWrapper,
 	}
 	addFlags(cmd)
 	return cmd
@@ -160,20 +161,7 @@ func addFlags(cmd *cobra.Command) {
 	cmd.Flags().BoolP("force-new-cluster", "", false, "force to create a new one-member cluster")
 }
 
-func createPDServiceWrapper(cmd *cobra.Command, args []string) {
-	start(cmd, args, cmd.CalledAs())
-}
-
 func createServerWrapper(cmd *cobra.Command, args []string) {
-	mode := os.Getenv(serviceModeEnv)
-	if len(mode) != 0 && strings.ToLower(mode) == apiMode {
-		start(cmd, args, apiMode)
-	} else {
-		start(cmd, args)
-	}
-}
-
-func start(cmd *cobra.Command, args []string, services ...string) {
 	schedulers.Register()
 	cfg := config.NewConfig()
 	flagSet := cmd.Flags()
@@ -183,6 +171,10 @@ func start(cmd *cobra.Command, args []string, services ...string) {
 		return
 	}
 	err = cfg.Parse(flagSet)
+	mode := os.Getenv(serviceModeEnv)
+	if len(mode) != 0 && strings.ToLower(mode) == "api" {
+		cfg.Microservice.EnableMultiTimelines = true
+	}
 	defer logutil.LogPanic()
 
 	if err != nil {
@@ -241,7 +233,7 @@ func start(cmd *cobra.Command, args []string, services ...string) {
 		serviceBuilders = append(serviceBuilders, swaggerserver.NewHandler)
 	}
 	serviceBuilders = append(serviceBuilders, dashboard.GetServiceBuilders()...)
-	svr, err := server.CreateServer(ctx, cfg, services, serviceBuilders...)
+	svr, err := server.CreateServer(ctx, cfg, serviceBuilders...)
 	if err != nil {
 		log.Fatal("create server failed", errs.ZapError(err))
 	}

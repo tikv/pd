@@ -380,7 +380,7 @@ func (s *SchedulingTestEnvironment) startCluster(m Env) {
 		re.NoError(leaderServer.BootstrapCluster())
 		s.clusters[NonMicroserviceEnv] = cluster
 	case MicroserviceEnv:
-		cluster, err := NewTestClusterWithKeyspaceGroup(ctx, 1, s.opts...)
+		cluster, err := NewTestCluster(ctx, 1, s.opts...)
 		re.NoError(err)
 		err = cluster.RunInitialServers()
 		re.NoError(err)

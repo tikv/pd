@@ -39,15 +39,14 @@ func RegisterMicroservice(r *gin.RouterGroup) {
 // @Router   /ms/members/{service} [get]
 func GetMembers(c *gin.Context) {
 	svr := c.MustGet(middlewares.ServerContextKey).(*server.Server)
-	if !svr.IsKeyspaceGroupEnabled() {
-		c.AbortWithStatusJSON(http.StatusNotFound, "not support microservice")
-		return
-	}
-
 	if service := c.Param("service"); len(service) > 0 {
 		entries, err := discovery.GetMSMembers(service, svr.GetClient())
 		if err != nil {
 			c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
+			return
+		}
+		if len(entries) == 0 {
+			c.AbortWithStatusJSON(http.StatusNotFound, "no members found")
 			return
 		}
 		c.IndentedJSON(http.StatusOK, entries)
@@ -65,13 +64,12 @@ func GetMembers(c *gin.Context) {
 // @Router   /ms/primary/{service} [get]
 func GetPrimary(c *gin.Context) {
 	svr := c.MustGet(middlewares.ServerContextKey).(*server.Server)
-	if !svr.IsKeyspaceGroupEnabled() {
-		c.AbortWithStatusJSON(http.StatusNotFound, "not support microservice")
-		return
-	}
-
 	if service := c.Param("service"); len(service) > 0 {
-		addr, _ := svr.GetServicePrimaryAddr(c.Request.Context(), service)
+		addr, exist := svr.GetServicePrimaryAddr(c.Request.Context(), service)
+		if !exist {
+			c.AbortWithStatusJSON(http.StatusNotFound, "no primary found")
+			return
+		}
 		c.IndentedJSON(http.StatusOK, addr)
 		return
 	}

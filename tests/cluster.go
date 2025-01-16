@@ -36,7 +36,6 @@ import (
 	"github.com/tikv/pd/pkg/id"
 	"github.com/tikv/pd/pkg/keyspace"
 	scheduling "github.com/tikv/pd/pkg/mcs/scheduling/server"
-	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/swaggerserver"
 	"github.com/tikv/pd/pkg/tso"
@@ -79,7 +78,7 @@ type TestServer struct {
 var zapLogOnce sync.Once
 
 // NewTestServer creates a new TestServer.
-func NewTestServer(ctx context.Context, cfg *config.Config, services []string) (*TestServer, error) {
+func NewTestServer(ctx context.Context, cfg *config.Config) (*TestServer, error) {
 	//  disable the heartbeat async runner in test
 	cfg.Schedule.EnableHeartbeatConcurrentRunner = false
 	err := logutil.SetupLogger(cfg.Log, &cfg.Logger, &cfg.LogProps, cfg.Security.RedactInfoLog)
@@ -98,7 +97,7 @@ func NewTestServer(ctx context.Context, cfg *config.Config, services []string) (
 		serviceBuilders = append(serviceBuilders, swaggerserver.NewHandler)
 	}
 	serviceBuilders = append(serviceBuilders, dashboard.GetServiceBuilders()...)
-	svr, err := server.CreateServer(ctx, cfg, services, serviceBuilders...)
+	svr, err := server.CreateServer(ctx, cfg, serviceBuilders...)
 	if err != nil {
 		return nil, err
 	}
@@ -426,15 +425,6 @@ type ConfigOption func(conf *config.Config, serverName string)
 
 // NewTestCluster creates a new TestCluster.
 func NewTestCluster(ctx context.Context, initialServerCount int, opts ...ConfigOption) (*TestCluster, error) {
-	return createTestCluster(ctx, initialServerCount, nil, opts...)
-}
-
-// NewTestClusterWithKeyspaceGroup creates a new TestCluster with PD.
-func NewTestClusterWithKeyspaceGroup(ctx context.Context, initialServerCount int, opts ...ConfigOption) (*TestCluster, error) {
-	return createTestCluster(ctx, initialServerCount, []string{constant.PDServiceName}, opts...)
-}
-
-func createTestCluster(ctx context.Context, initialServerCount int, services []string, opts ...ConfigOption) (*TestCluster, error) {
 	schedulers.Register()
 	config := newClusterConfig(initialServerCount)
 	servers := make(map[string]*TestServer)
@@ -443,7 +433,7 @@ func createTestCluster(ctx context.Context, initialServerCount int, services []s
 		if err != nil {
 			return nil, err
 		}
-		s, err := NewTestServer(ctx, serverConf, services)
+		s, err := NewTestServer(ctx, serverConf)
 		if err != nil {
 			return nil, err
 		}
@@ -463,11 +453,11 @@ func createTestCluster(ctx context.Context, initialServerCount int, services []s
 
 // RestartTestPDCluster restarts the PD test cluster.
 func RestartTestPDCluster(ctx context.Context, cluster *TestCluster) (*TestCluster, error) {
-	return restartTestCluster(ctx, cluster, true)
+	return restartTestCluster(ctx, cluster)
 }
 
 func restartTestCluster(
-	ctx context.Context, cluster *TestCluster, isKeyspaceGroupEnabled bool,
+	ctx context.Context, cluster *TestCluster,
 ) (newTestCluster *TestCluster, err error) {
 	schedulers.Register()
 	newTestCluster = &TestCluster{
@@ -494,11 +484,7 @@ func restartTestCluster(
 				newServer *TestServer
 				serverErr error
 			)
-			if isKeyspaceGroupEnabled {
-				newServer, serverErr = NewTestServer(ctx, serverCfg, []string{constant.PDServiceName})
-			} else {
-				newServer, serverErr = NewTestServer(ctx, serverCfg, nil)
-			}
+			newServer, serverErr = NewTestServer(ctx, serverCfg)
 			serverMap.Store(serverName, newServer)
 			errorMap.Store(serverName, serverErr)
 		}(serverName, server)
@@ -721,21 +707,7 @@ func (c *TestCluster) Join(ctx context.Context, opts ...ConfigOption) (*TestServ
 	if err != nil {
 		return nil, err
 	}
-	s, err := NewTestServer(ctx, conf, nil)
-	if err != nil {
-		return nil, err
-	}
-	c.servers[conf.Name] = s
-	return s, nil
-}
-
-// JoinWithKeyspaceGroup is used to add a new TestServer into the cluster with keyspace group enabled.
-func (c *TestCluster) JoinWithKeyspaceGroup(ctx context.Context, opts ...ConfigOption) (*TestServer, error) {
-	conf, err := c.config.join().Generate(opts...)
-	if err != nil {
-		return nil, err
-	}
-	s, err := NewTestServer(ctx, conf, []string{constant.PDServiceName})
+	s, err := NewTestServer(ctx, conf)
 	if err != nil {
 		return nil, err
 	}

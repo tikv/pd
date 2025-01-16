@@ -36,6 +36,7 @@ import (
 
 	"github.com/tikv/pd/client/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
+	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
 )
 
@@ -43,8 +44,8 @@ type tsoProxyTestSuite struct {
 	suite.Suite
 	ctx              context.Context
 	cancel           context.CancelFunc
-	apiCluster       *tests.TestCluster
-	apiLeader        *tests.TestServer
+	pdCluster        *tests.TestCluster
+	pdLeader         *tests.TestServer
 	backendEndpoints string
 	tsoCluster       *tests.TestTSOCluster
 	defaultReq       *pdpb.TsoRequest
@@ -61,16 +62,18 @@ func (s *tsoProxyTestSuite) SetupSuite() {
 
 	var err error
 	s.ctx, s.cancel = context.WithCancel(context.Background())
-	// Create an API cluster with 1 server
-	s.apiCluster, err = tests.NewTestClusterWithKeyspaceGroup(s.ctx, 1)
+	// Create an PD cluster with 1 server
+	s.pdCluster, err = tests.NewTestCluster(s.ctx, 3, func(conf *config.Config, _ string) {
+		conf.Microservice.EnableMultiTimelines = true
+	})
 	re.NoError(err)
-	err = s.apiCluster.RunInitialServers()
+	err = s.pdCluster.RunInitialServers()
 	re.NoError(err)
-	leaderName := s.apiCluster.WaitLeader()
+	leaderName := s.pdCluster.WaitLeader()
 	re.NotEmpty(leaderName)
-	s.apiLeader = s.apiCluster.GetServer(leaderName)
-	s.backendEndpoints = s.apiLeader.GetAddr()
-	re.NoError(s.apiLeader.BootstrapCluster())
+	s.pdLeader = s.pdCluster.GetServer(leaderName)
+	s.backendEndpoints = s.pdLeader.GetAddr()
+	re.NoError(s.pdLeader.BootstrapCluster())
 
 	// Create a TSO cluster with 2 servers
 	s.tsoCluster, err = tests.NewTestTSOCluster(s.ctx, 2, s.backendEndpoints)
@@ -78,7 +81,7 @@ func (s *tsoProxyTestSuite) SetupSuite() {
 	s.tsoCluster.WaitForDefaultPrimaryServing(re)
 
 	s.defaultReq = &pdpb.TsoRequest{
-		Header: &pdpb.RequestHeader{ClusterId: s.apiLeader.GetClusterID()},
+		Header: &pdpb.RequestHeader{ClusterId: s.pdLeader.GetClusterID()},
 		Count:  1,
 	}
 
@@ -89,7 +92,7 @@ func (s *tsoProxyTestSuite) SetupSuite() {
 func (s *tsoProxyTestSuite) TearDownSuite() {
 	cleanupGRPCStreams(s.cleanupFuncs)
 	s.tsoCluster.Destroy()
-	s.apiCluster.Destroy()
+	s.pdCluster.Destroy()
 	s.cancel()
 }
 
@@ -362,7 +365,7 @@ func (s *tsoProxyTestSuite) generateRequests(requestsPerClient int) []*pdpb.TsoR
 	reqs := make([]*pdpb.TsoRequest, requestsPerClient)
 	for i := range requestsPerClient {
 		reqs[i] = &pdpb.TsoRequest{
-			Header: &pdpb.RequestHeader{ClusterId: s.apiLeader.GetClusterID()},
+			Header: &pdpb.RequestHeader{ClusterId: s.pdLeader.GetClusterID()},
 			Count:  uint32(i) + 1, // Make sure the count is positive.
 		}
 	}

@@ -248,7 +248,8 @@ const (
 	minCheckRegionSplitInterval     = 1 * time.Millisecond
 	maxCheckRegionSplitInterval     = 100 * time.Millisecond
 
-	defaultEnableSchedulingFallback  = true
+	defaultEnableSchedulingFallback = true
+	// In serverless environment, the default value of `enable-tso-dynamic-switching` is always false.
 	defaultEnableTSODynamicSwitching = false
 )
 
@@ -823,8 +824,27 @@ func (c *DRAutoSyncReplicationConfig) adjust(meta *configutil.ConfigMetaData) {
 
 // MicroserviceConfig is the configuration for microservice.
 type MicroserviceConfig struct {
-	EnableSchedulingFallback  bool `toml:"enable-scheduling-fallback" json:"enable-scheduling-fallback,string"`
+	EnableSchedulingFallback bool `toml:"enable-scheduling-fallback" json:"enable-scheduling-fallback,string"`
+	// TODO: Currently, we have following combinations for tso:
+	//
+	// There could be the following scenarios for non-serverless:
+	// 1. microservice + single timelines
+	// 2. non-microservice
+	// we use `enable-tso-dynamic-switch` to control whether we enable microservice or not.
+	// non-serverless doesn't support multiple timelines but support dynamic switch.
+	//
+	// There could be the following scenarios for serverless:
+	// 1. microservice + single timelines
+	// 2. microservice + multiple timelines
+	// 3. non-microservice
+	// we use `enable-multi-timelines` to control whether we enable microservice or not.
+	// serverless supports multiple timelines but doesn't support dynamic switch.
+	//
+	// Besides, the current implementation for both serverless and non-serverless rely on keyspace group which should be independent of the microservice.
+	// We should separate the keyspace group from the microservice later.
 	EnableTSODynamicSwitching bool `toml:"enable-tso-dynamic-switching" json:"enable-tso-dynamic-switching,string"`
+	// TODO: use it to replace system variable.
+	EnableMultiTimelines bool
 }
 
 func (c *MicroserviceConfig) adjust(meta *configutil.ConfigMetaData) {
@@ -850,6 +870,12 @@ func (c *MicroserviceConfig) IsSchedulingFallbackEnabled() bool {
 // IsTSODynamicSwitchingEnabled returns whether to enable TSO dynamic switching.
 func (c *MicroserviceConfig) IsTSODynamicSwitchingEnabled() bool {
 	return c.EnableTSODynamicSwitching
+}
+
+// IsMultiTimelinesEnabled returns whether to enable multi-timelines.
+// TODO: use it to replace system variable.
+func (c *MicroserviceConfig) IsMultiTimelinesEnabled() bool {
+	return c.EnableMultiTimelines
 }
 
 // KeyspaceConfig is the configuration for keyspace management.
