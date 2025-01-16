@@ -375,12 +375,13 @@ func NewBalanceWitnessSchedulerCommand() *cobra.Command {
 	return c
 }
 
-// NewBalanceRangeSchedulerCommand returns a command to add a balance-key-range-scheduler.
+// NewBalanceRangeSchedulerCommand returns a command to add a balance-range-scheduler.
 func NewBalanceRangeSchedulerCommand() *cobra.Command {
 	c := &cobra.Command{
-		Use:   "balance-range-scheduler [--format=raw|encode|hex] <engine> <role> <start_key> <end_key>",
-		Short: "add a scheduler to balance region for given range",
-		Run:   addSchedulerForBalanceRangeCommandFunc,
+		Use:        "balance-range-scheduler [--format=raw|encode|hex] <engine> <role> <start_key> <end_key>",
+		Short:      "add a scheduler to balance region for given range",
+		Run:        addSchedulerForBalanceRangeCommandFunc,
+		Deprecated: "balance-range will be deprecated in the future, please use sql instead",
 	}
 	c.Flags().String("format", "hex", "the key format")
 	return c
