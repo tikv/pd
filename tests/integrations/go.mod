@@ -207,3 +207,5 @@ require (
 	gorm.io/driver/sqlite v1.4.3 // indirect
 	sigs.k8s.io/yaml v1.4.0 // indirect
 )
+
+replace github.com/pingcap/kvproto => github.com/LykxSassinator/kvproto v0.0.0-20250109105336-7099a32e318c
