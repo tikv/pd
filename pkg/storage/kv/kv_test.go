@@ -334,5 +334,52 @@ func testLowLevelTxn(re *require.Assertions, kv Base) {
 	mustHaveKeys(re, kv, "txn-")
 
 	// The following tests only check the correctness of the conditions.
+	check := func(conditions []LowLevelTxnCondition, shouldSuccess bool) {
 
+		res, err := kv.CreateLowLevelTxn().If(conditions...).Commit(context.Background())
+		re.NoError(err)
+		re.Equal(shouldSuccess, res.Succeeded)
+	}
+
+	// "txn-k1" doesn't exist at this point.
+	check([]LowLevelTxnCondition{{Key: "txn-k1", CmpType: LowLevelCmpExists}}, false)
+	check([]LowLevelTxnCondition{{Key: "txn-k1", CmpType: LowLevelCmpNotExists}}, true)
+
+	err = kv.Save("txn-k1", "v1")
+	re.NoError(err)
+	check([]LowLevelTxnCondition{{Key: "txn-k1", CmpType: LowLevelCmpExists}}, true)
+	check([]LowLevelTxnCondition{{Key: "txn-k1", CmpType: LowLevelCmpNotExists}}, false)
+
+	check([]LowLevelTxnCondition{{Key: "txn-k1", CmpType: LowLevelCmpEqual, Value: "v1"}}, true)
+	check([]LowLevelTxnCondition{{Key: "txn-k1", CmpType: LowLevelCmpNotEqual, Value: "v1"}}, false)
+	check([]LowLevelTxnCondition{{Key: "txn-k1", CmpType: LowLevelCmpEqual, Value: "v2"}}, false)
+	check([]LowLevelTxnCondition{{Key: "txn-k1", CmpType: LowLevelCmpNotEqual, Value: "v2"}}, true)
+
+	check([]LowLevelTxnCondition{{Key: "txn-k1", CmpType: LowLevelCmpLess, Value: "v1"}}, false)
+	check([]LowLevelTxnCondition{{Key: "txn-k1", CmpType: LowLevelCmpLess, Value: "v0"}}, false)
+	check([]LowLevelTxnCondition{{Key: "txn-k1", CmpType: LowLevelCmpLess, Value: "v2"}}, true)
+
+	check([]LowLevelTxnCondition{{Key: "txn-k1", CmpType: LowLevelCmpGreater, Value: "v1"}}, false)
+	check([]LowLevelTxnCondition{{Key: "txn-k1", CmpType: LowLevelCmpGreater, Value: "v2"}}, false)
+	check([]LowLevelTxnCondition{{Key: "txn-k1", CmpType: LowLevelCmpGreater, Value: "v0"}}, true)
+
+	// Test the conditions are conjunctions.
+	err = kv.Save("txn-k2", "v2")
+	re.NoError(err)
+	check([]LowLevelTxnCondition{
+		{Key: "txn-k1", CmpType: LowLevelCmpEqual, Value: "v1"},
+		{Key: "txn-k2", CmpType: LowLevelCmpEqual, Value: "v2"},
+	}, true)
+	check([]LowLevelTxnCondition{
+		{Key: "txn-k1", CmpType: LowLevelCmpEqual, Value: "v1"},
+		{Key: "txn-k2", CmpType: LowLevelCmpEqual, Value: "v0"},
+	}, false)
+	check([]LowLevelTxnCondition{
+		{Key: "txn-k1", CmpType: LowLevelCmpEqual, Value: "v0"},
+		{Key: "txn-k2", CmpType: LowLevelCmpEqual, Value: "v2"},
+	}, false)
+	check([]LowLevelTxnCondition{
+		{Key: "txn-k1", CmpType: LowLevelCmpEqual, Value: "v0"},
+		{Key: "txn-k2", CmpType: LowLevelCmpEqual, Value: "v0"},
+	}, false)
 }
