@@ -1554,10 +1554,20 @@ func (s *GrpcServer) QueryRegion(stream pdpb.PD_QueryRegionServer) error {
 		if clusterID := keypath.ClusterID(); request.GetHeader().GetClusterId() != clusterID {
 			return errs.ErrMismatchClusterID(clusterID, request.GetHeader().GetClusterId())
 		}
-		needBuckets := s.GetRaftCluster().GetStoreConfig().IsEnableRegionBucket() && request.GetNeedBuckets()
+		rc := s.GetRaftCluster()
+		if rc == nil {
+			resp := &pdpb.QueryRegionResponse{
+				Header: notBootstrappedHeader(),
+			}
+			if err = stream.Send(resp); err != nil {
+				return errors.WithStack(err)
+			}
+			continue
+		}
+		needBuckets := rc.GetStoreConfig().IsEnableRegionBucket() && request.GetNeedBuckets()
 
 		start := time.Now()
-		keyIDMap, prevKeyIDMap, regionsByID := s.GetRaftCluster().QueryRegions(
+		keyIDMap, prevKeyIDMap, regionsByID := rc.QueryRegions(
 			request.GetKeys(),
 			request.GetPrevKeys(),
 			request.GetIds(),
