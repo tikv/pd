@@ -1636,12 +1636,64 @@ func (s *GrpcServer) GetRegionByID(ctx context.Context, request *pdpb.GetRegionB
 	}, nil
 }
 
-// QueryRegion implements gRPC PDServer.
-//
-// release-8.5 has not backported the QueryRegion feature. Keep the new
-// kvproto RPC explicitly unimplemented instead of pulling in unrelated logic.
-func (*GrpcServer) QueryRegion(_ pdpb.PD_QueryRegionServer) error {
-	return status.Error(codes.Unimplemented, "query region is not supported in release-8.5")
+// QueryRegion provides a stream processing of the region query.
+func (s *GrpcServer) QueryRegion(stream pdpb.PD_QueryRegionServer) error {
+	if s.GetServiceMiddlewarePersistOptions().IsGRPCRateLimitEnabled() {
+		fName := currentFunction()
+		limiter := s.GetGRPCRateLimiter()
+		if done, err := limiter.Allow(fName); err == nil {
+			defer done()
+		} else {
+			return err
+		}
+	}
+
+	for {
+		request, err := stream.Recv()
+		if err == io.EOF {
+			return nil
+		}
+		if err != nil {
+			return errors.WithStack(err)
+		}
+
+		// TODO: add forwarding logic.
+
+		if clusterID := keypath.ClusterID(); request.GetHeader().GetClusterId() != clusterID {
+			return status.Errorf(codes.FailedPrecondition,
+				"mismatch cluster id, need %d but got %d", clusterID, request.GetHeader().GetClusterId())
+		}
+		rc := s.GetRaftCluster()
+		if rc == nil {
+			resp := &pdpb.QueryRegionResponse{
+				Header: notBootstrappedHeader(),
+			}
+			if err = stream.Send(resp); err != nil {
+				return errors.WithStack(err)
+			}
+			continue
+		}
+		needBuckets := rc.GetStoreConfig().IsEnableRegionBucket() && request.GetNeedBuckets()
+
+		start := time.Now()
+		keyIDMap, prevKeyIDMap, regionsByID := rc.QueryRegions(
+			request.GetKeys(),
+			request.GetPrevKeys(),
+			request.GetIds(),
+			needBuckets,
+		)
+		regionQueryDuration.Observe(time.Since(start).Seconds())
+		// Build the response and send it to the client.
+		response := &pdpb.QueryRegionResponse{
+			Header:       wrapHeader(),
+			KeyIdMap:     keyIDMap,
+			PrevKeyIdMap: prevKeyIDMap,
+			RegionsById:  regionsByID,
+		}
+		if err := stream.Send(response); err != nil {
+			return errors.WithStack(err)
+		}
+	}
 }
 
 // Deprecated: use BatchScanRegions instead.
