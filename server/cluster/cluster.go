@@ -1040,7 +1040,6 @@ func (c *RaftCluster) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest
 			newStore = newStore.Clone(core.SetLastPersistTime(nowTime))
 		}
 	}
-	statistics.UpdateStoreHeartbeatMetrics(store)
 	// Supply NodeState in the response to help the store handle special cases
 	// more conveniently, such as avoiding calling `remove_peer` redundantly under
 	// NodeState_Removing.
