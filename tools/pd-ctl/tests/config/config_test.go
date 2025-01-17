@@ -1199,6 +1199,51 @@ func (suite *configTestSuite) checkUpdateDefaultReplicaConfig(cluster *pdTests.T
 	checkRuleIsolationLevel("host")
 }
 
+func (suite *configTestSuite) TestMaxReplicaChanged() {
+	suite.env.RunTest(suite.checkMaxReplicaChanged)
+}
+
+func (suite *configTestSuite) checkMaxReplicaChanged(cluster *pdTests.TestCluster) {
+	re := suite.Require()
+	leaderServer := cluster.GetLeaderServer()
+	pdAddr := leaderServer.GetAddr()
+	cmd := ctl.GetRootCmd()
+
+	store := &metapb.Store{
+		Id:    1,
+		State: metapb.StoreState_Up,
+	}
+	pdTests.MustPutStore(re, cluster, store)
+
+	// test set max-replicas with invalid value
+	output, err := tests.ExecuteCommand(cmd, "-u", pdAddr, "config", "set", "max-replicas", "z")
+	re.NoError(err)
+	re.NotContains(string(output), "Success!")
+	// test set max-replicas with less value
+	output, err = tests.ExecuteCommand(cmd, "-u", pdAddr, "config", "set", "max-replicas", "2")
+	re.NoError(err)
+	re.Contains(string(output), "Success!")
+	re.Contains(string(output), "which is less than the current replicas")
+	// test set max-replicas with greater value
+	output, err = tests.ExecuteCommand(cmd, "-u", pdAddr, "config", "set", "max-replicas", "3")
+	re.NoError(err)
+	re.Contains(string(output), "Success!")
+	re.NotContains(string(output), "which is less than the current replicas")
+	// test meet error when get config failed
+	failpoint.Enable("github.com/tikv/pd/server/api/getReplicationConfigFailed", `return(200)`)
+	output, err = tests.ExecuteCommand(cmd, "-u", pdAddr, "config", "set", "max-replicas", "3")
+	re.NoError(err)
+	re.Contains(string(output), "Success!")
+	re.Contains(string(output), "Failed to unmarshal config when checking config")
+	failpoint.Disable("github.com/tikv/pd/server/api/getReplicationConfigFailed")
+	failpoint.Enable("github.com/tikv/pd/server/api/getReplicationConfigFailed", `return(500)`)
+	output, err = tests.ExecuteCommand(cmd, "-u", pdAddr, "config", "set", "max-replicas", "3")
+	re.NoError(err)
+	re.Contains(string(output), "Success!")
+	re.Contains(string(output), "Failed to get config when checking config")
+	failpoint.Disable("github.com/tikv/pd/server/api/getReplicationConfigFailed")
+}
+
 func (suite *configTestSuite) TestPDServerConfig() {
 	suite.env.RunTest(suite.checkPDServerConfig)
 }

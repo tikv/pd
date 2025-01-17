@@ -229,10 +229,10 @@ func TestGetTSAfterTransferLeader(t *testing.T) {
 	defer cancel()
 	cluster, err := tests.NewTestCluster(ctx, 2)
 	re.NoError(err)
+	defer cluster.Destroy()
 	endpoints := runServer(re, cluster)
 	leader := cluster.WaitLeader()
 	re.NotEmpty(leader)
-	defer cluster.Destroy()
 
 	cli := setupCli(ctx, re, endpoints, opt.WithCustomTimeoutOption(10*time.Second))
 	defer cli.Close()
@@ -516,8 +516,6 @@ func (suite *followerForwardAndHandleTestSuite) SetupSuite() {
 		return err == nil
 	})
 }
-
-func (*followerForwardAndHandleTestSuite) TearDownTest() {}
 
 func (suite *followerForwardAndHandleTestSuite) TearDownSuite() {
 	suite.cluster.Destroy()

@@ -498,9 +498,9 @@ func TestMixedTSODeployment(t *testing.T) {
 	}()
 
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	cluster, err := tests.NewTestCluster(ctx, 1)
 	re.NoError(err)
-	defer cancel()
 	defer cluster.Destroy()
 
 	err = cluster.RunInitialServers()
@@ -542,10 +542,12 @@ func TestMixedTSODeployment(t *testing.T) {
 func TestUpgradingPDAndTSOClusters(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
 	// Create an PD cluster which has 3 servers
 	pdCluster, err := tests.NewTestClusterWithKeyspaceGroup(ctx, 3)
 	re.NoError(err)
+	defer pdCluster.Destroy()
 	err = pdCluster.RunInitialServers()
 	re.NoError(err)
 	leaderName := pdCluster.WaitLeader()
@@ -569,7 +571,7 @@ func TestUpgradingPDAndTSOClusters(t *testing.T) {
 	mcs.WaitForTSOServiceAvailable(ctx, re, pdClient)
 
 	// Restart the API cluster
-	pdCluster, err = tests.RestartTestPDCluster(ctx, pdCluster)
+	_, err = tests.RestartTestPDCluster(ctx, pdCluster)
 	re.NoError(err)
 	// The TSO service should be eventually healthy
 	mcs.WaitForTSOServiceAvailable(ctx, re, pdClient)
@@ -577,12 +579,10 @@ func TestUpgradingPDAndTSOClusters(t *testing.T) {
 	// Restart the TSO cluster
 	tsoCluster, err = tests.RestartTestTSOCluster(ctx, tsoCluster)
 	re.NoError(err)
+	defer tsoCluster.Destroy()
 	// The TSO service should be eventually healthy
 	mcs.WaitForTSOServiceAvailable(ctx, re, pdClient)
 
-	tsoCluster.Destroy()
-	pdCluster.Destroy()
-	cancel()
 	re.NoError(failpoint.Disable("github.com/tikv/pd/client/servicediscovery/usePDServiceMode"))
 }
 
