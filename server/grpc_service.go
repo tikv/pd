@@ -1532,14 +1532,12 @@ func (s *GrpcServer) GetRegionByID(ctx context.Context, request *pdpb.GetRegionB
 
 // QueryRegion provides a stream processing of the region query.
 func (s *GrpcServer) QueryRegion(stream pdpb.PD_QueryRegionServer) error {
-	if s.GetServiceMiddlewarePersistOptions().IsGRPCRateLimitEnabled() {
-		fName := currentFunction()
-		limiter := s.GetGRPCRateLimiter()
-		if done, err := limiter.Allow(fName); err == nil {
-			defer done()
-		} else {
-			return err
-		}
+	done, err := s.rateLimitCheck()
+	if err != nil {
+		return err
+	}
+	if done != nil {
+		defer done()
 	}
 
 	for {
@@ -1553,9 +1551,6 @@ func (s *GrpcServer) QueryRegion(stream pdpb.PD_QueryRegionServer) error {
 
 		// TODO: add forwarding logic.
 
-		if s.IsClosed() {
-			return errs.ErrNotStarted
-		}
 		if clusterID := keypath.ClusterID(); request.GetHeader().GetClusterId() != clusterID {
 			return errs.ErrMismatchClusterID(clusterID, request.GetHeader().GetClusterId())
 		}
