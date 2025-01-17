@@ -1636,12 +1636,70 @@ func (s *GrpcServer) GetRegionByID(ctx context.Context, request *pdpb.GetRegionB
 	}, nil
 }
 
+<<<<<<< HEAD
 // QueryRegion implements gRPC PDServer.
 //
 // release-8.5 has not backported the QueryRegion feature. Keep the new
 // kvproto RPC explicitly unimplemented instead of pulling in unrelated logic.
 func (*GrpcServer) QueryRegion(_ pdpb.PD_QueryRegionServer) error {
 	return status.Error(codes.Unimplemented, "query region is not supported in release-8.5")
+=======
+// QueryRegion provides a stream processing of the region query.
+func (s *GrpcServer) QueryRegion(stream pdpb.PD_QueryRegionServer) error {
+	done, err := s.rateLimitCheck()
+	if err != nil {
+		return err
+	}
+	if done != nil {
+		defer done()
+	}
+
+	for {
+		request, err := stream.Recv()
+		if err == io.EOF {
+			return nil
+		}
+		if err != nil {
+			return errors.WithStack(err)
+		}
+
+		// TODO: add forwarding logic.
+
+		if clusterID := keypath.ClusterID(); request.GetHeader().GetClusterId() != clusterID {
+			return errs.ErrMismatchClusterID(clusterID, request.GetHeader().GetClusterId())
+		}
+		rc := s.GetRaftCluster()
+		if rc == nil {
+			resp := &pdpb.QueryRegionResponse{
+				Header: notBootstrappedHeader(),
+			}
+			if err = stream.Send(resp); err != nil {
+				return errors.WithStack(err)
+			}
+			continue
+		}
+		needBuckets := rc.GetStoreConfig().IsEnableRegionBucket() && request.GetNeedBuckets()
+
+		start := time.Now()
+		keyIDMap, prevKeyIDMap, regionsByID := rc.QueryRegions(
+			request.GetKeys(),
+			request.GetPrevKeys(),
+			request.GetIds(),
+			needBuckets,
+		)
+		regionQueryDuration.Observe(time.Since(start).Seconds())
+		// Build the response and send it to the client.
+		response := &pdpb.QueryRegionResponse{
+			Header:       wrapHeader(),
+			KeyIdMap:     keyIDMap,
+			PrevKeyIdMap: prevKeyIDMap,
+			RegionsById:  regionsByID,
+		}
+		if err := stream.Send(response); err != nil {
+			return errors.WithStack(err)
+		}
+	}
+>>>>>>> a69ee01287 (server, core: implement the query region gRPC server (#8979))
 }
 
 // Deprecated: use BatchScanRegions instead.
