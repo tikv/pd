@@ -49,7 +49,9 @@ type evictSlowStoreSchedulerConfig struct {
 	// Duration gap for recovering the candidate, unit: s.
 	RecoveryDurationGap uint64   `json:"recovery-duration"`
 	EvictedStores       []uint64 `json:"evict-stores"`
-	Batch               int      `json:"batch"`
+	// TODO: We only add batch for evict-slow-store-scheduler now.
+	// If necessary, we also need to support evict-slow-trend-scheduler.
+	Batch int `json:"batch"`
 }
 
 func initEvictSlowStoreSchedulerConfig() *evictSlowStoreSchedulerConfig {
