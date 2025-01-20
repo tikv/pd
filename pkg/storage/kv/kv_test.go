@@ -50,6 +50,7 @@ func TestLevelDB(t *testing.T) {
 	testReadWrite(re, kv)
 	testRange(re, kv)
 	testSaveMultiple(re, kv, 20)
+	testLowLevelTxn(re, kv)
 }
 
 func TestMemKV(t *testing.T) {
@@ -58,6 +59,7 @@ func TestMemKV(t *testing.T) {
 	testReadWrite(re, kv)
 	testRange(re, kv)
 	testSaveMultiple(re, kv, 20)
+	testLowLevelTxn(re, kv)
 }
 
 func testReadWrite(re *require.Assertions, kv Base) {
@@ -363,7 +365,17 @@ func testLowLevelTxn(re *require.Assertions, kv Base) {
 	check([]LowLevelTxnCondition{{Key: "txn-k1", CmpType: LowLevelCmpGreater, Value: "v2"}}, false)
 	check([]LowLevelTxnCondition{{Key: "txn-k1", CmpType: LowLevelCmpGreater, Value: "v0"}}, true)
 
+	// Test comparing with not-existing key.
+	err = kv.Remove("txn-k1")
+	re.NoError(err)
+	check([]LowLevelTxnCondition{{Key: "txn-k1", CmpType: LowLevelCmpEqual, Value: "v1"}}, false)
+	check([]LowLevelTxnCondition{{Key: "txn-k1", CmpType: LowLevelCmpNotEqual, Value: "v1"}}, false)
+	check([]LowLevelTxnCondition{{Key: "txn-k1", CmpType: LowLevelCmpLess, Value: "v1"}}, false)
+	check([]LowLevelTxnCondition{{Key: "txn-k1", CmpType: LowLevelCmpGreater, Value: "v1"}}, false)
+
 	// Test the conditions are conjunctions.
+	err = kv.Save("txn-k1", "v1")
+	re.NoError(err)
 	err = kv.Save("txn-k2", "v2")
 	re.NoError(err)
 	check([]LowLevelTxnCondition{

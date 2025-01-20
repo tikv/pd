@@ -419,8 +419,3 @@ func (l *lowLevelTxnWrapper) Commit(_ctx context.Context) (LowLevelTxnResult, er
 		Items:     items,
 	}, nil
 }
-
-func (l *lowLevelTxnWrapper) Rollback(_ctx context.Context) error {
-	// Nothing to do.
-	return nil
-}

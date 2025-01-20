@@ -54,6 +54,38 @@ type LowLevelTxnCondition struct {
 	Value   string
 }
 
+func (c *LowLevelTxnCondition) CheckOnValue(value string, exists bool) bool {
+	switch c.CmpType {
+	case LowLevelCmpEqual:
+		if exists && value == c.Value {
+			return true
+		}
+	case LowLevelCmpNotEqual:
+		if exists && value != c.Value {
+			return true
+		}
+	case LowLevelCmpLess:
+		if exists && value < c.Value {
+			return true
+		}
+	case LowLevelCmpGreater:
+		if exists && value > c.Value {
+			return true
+		}
+	case LowLevelCmpExists:
+		if exists {
+			return true
+		}
+	case LowLevelCmpNotExists:
+		if !exists {
+			return true
+		}
+	default:
+		panic("unreachable")
+	}
+	return false
+}
+
 type LowLevelTxnOp struct {
 	Key    string
 	OpType LowLevelTxnOpType
@@ -96,7 +128,6 @@ type LowLevelTxn interface {
 	Then(ops ...LowLevelTxnOp) LowLevelTxn
 	Else(ops ...LowLevelTxnOp) LowLevelTxn
 	Commit(ctx context.Context) (LowLevelTxnResult, error)
-	Rollback(ctx context.Context) error
 }
 
 // Base is an abstract interface for load/save pd cluster data.
