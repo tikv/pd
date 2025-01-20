@@ -67,12 +67,31 @@ func (c *innerClient) setServiceMode(newMode pdpb.ServiceMode) {
 		// If we are using TSO server proxy, we always use PD_SVC_MODE.
 		newMode = pdpb.ServiceMode_PD_SVC_MODE
 	}
-
 	if newMode == c.serviceMode {
 		return
 	}
+	log.Info("[pd] changing TSO provider",
+		zap.String("old", convertToString(c.serviceMode)),
+		zap.String("new", convertToString(newMode)))
 	c.resetTSOClientLocked(newMode)
+	oldMode := c.serviceMode
 	c.serviceMode = newMode
+	log.Info("[pd] TSO provider changed",
+		zap.String("old", convertToString(oldMode)),
+		zap.String("new", convertToString(newMode)))
+}
+
+func convertToString(mode pdpb.ServiceMode) string {
+	switch mode {
+	case pdpb.ServiceMode_PD_SVC_MODE:
+		return "pd"
+	case pdpb.ServiceMode_API_SVC_MODE:
+		return "tso server"
+	case pdpb.ServiceMode_UNKNOWN_SVC_MODE:
+		return "unknown"
+	default:
+		return "invalid"
+	}
 }
 
 // Reset a new TSO client.
@@ -84,11 +103,9 @@ func (c *innerClient) resetTSOClientLocked(mode pdpb.ServiceMode) {
 	)
 	switch mode {
 	case pdpb.ServiceMode_PD_SVC_MODE:
-		log.Info("[pd] use PD service discovery for tso")
 		newTSOCli = tso.NewClient(c.ctx, c.option,
 			c.serviceDiscovery, &tso.PDStreamBuilderFactory{})
 	case pdpb.ServiceMode_API_SVC_MODE:
-		log.Info("[pd] use independent tso service discovery for tso")
 		newTSOSvcDiscovery = sd.NewTSOServiceDiscovery(
 			c.ctx, c, c.serviceDiscovery,
 			c.keyspaceID, c.tlsCfg, c.option)
