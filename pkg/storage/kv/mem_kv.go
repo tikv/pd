@@ -16,6 +16,7 @@ package kv
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/google/btree"
 
@@ -52,6 +53,10 @@ func (s *memoryKVItem) Less(than *memoryKVItem) bool {
 func (kv *memoryKV) Load(key string) (string, error) {
 	kv.RLock()
 	defer kv.RUnlock()
+	return kv.load(key)
+}
+
+func (kv *memoryKV) load(key string) (string, error) {
 	item, ok := kv.tree.Get(memoryKVItem{key, ""})
 	if !ok {
 		return "", nil
@@ -69,6 +74,10 @@ func (kv *memoryKV) LoadRange(key, endKey string, limit int) ([]string, []string
 	})
 	kv.RLock()
 	defer kv.RUnlock()
+	return kv.loadRange(key, endKey, limit)
+}
+
+func (kv *memoryKV) loadRange(key, endKey string, limit int) ([]string, []string, error) {
 	keys := make([]string, 0, limit)
 	values := make([]string, 0, limit)
 	kv.tree.AscendRange(memoryKVItem{key, ""}, memoryKVItem{endKey, ""}, func(item memoryKVItem) bool {
@@ -86,6 +95,10 @@ func (kv *memoryKV) LoadRange(key, endKey string, limit int) ([]string, []string
 func (kv *memoryKV) Save(key, value string) error {
 	kv.Lock()
 	defer kv.Unlock()
+	return kv.save(key, value)
+}
+
+func (kv *memoryKV) save(key, value string) error {
 	kv.tree.ReplaceOrInsert(memoryKVItem{key, value})
 	return nil
 }
@@ -94,9 +107,18 @@ func (kv *memoryKV) Save(key, value string) error {
 func (kv *memoryKV) Remove(key string) error {
 	kv.Lock()
 	defer kv.Unlock()
+	return kv.remove(key)
+}
 
+func (kv *memoryKV) remove(key string) error {
 	kv.tree.Delete(memoryKVItem{key, ""})
 	return nil
+}
+
+func (kv *memoryKV) CreateLowLevelTxn() LowLevelTxn {
+	return &memKvLowLevelTxnSimulator{
+		kv: kv,
+	}
 }
 
 // memTxn implements kv.Txn.
@@ -197,4 +219,103 @@ func (txn *memTxn) commit() error {
 		}
 	}
 	return nil
+}
+
+type memKvLowLevelTxnSimulator struct {
+	kv           *memoryKV
+	conditions   []LowLevelTxnCondition
+	onSuccessOps []LowLevelTxnOp
+	onFailureOps []LowLevelTxnOp
+}
+
+func (t *memKvLowLevelTxnSimulator) If(conditions ...LowLevelTxnCondition) LowLevelTxn {
+	t.conditions = append(t.conditions, conditions...)
+	return t
+}
+
+func (t *memKvLowLevelTxnSimulator) Then(ops ...LowLevelTxnOp) LowLevelTxn {
+	t.onSuccessOps = append(t.onSuccessOps, ops...)
+	return t
+}
+
+func (t *memKvLowLevelTxnSimulator) Else(ops ...LowLevelTxnOp) LowLevelTxn {
+	t.onFailureOps = append(t.onFailureOps, ops...)
+	return t
+}
+
+func (t *memKvLowLevelTxnSimulator) Commit(_ctx context.Context) (LowLevelTxnResult, error) {
+	t.kv.Lock()
+	defer t.kv.Unlock()
+
+	succeeds := true
+	for _, condition := range t.conditions {
+		value, err := t.kv.load(condition.Key)
+		if err != nil {
+			return LowLevelTxnResult{}, err
+		}
+		// There's a convention to represent not-existing key with empty value.
+		exists := value != ""
+
+		if !condition.CheckOnValue(value, exists) {
+			succeeds = false
+			break
+		}
+	}
+
+	ops := t.onSuccessOps
+	if !succeeds {
+		ops = t.onFailureOps
+	}
+
+	results := make([]LowLevelTxnResultItem, 0, len(ops))
+
+	for _, operation := range ops {
+		switch operation.OpType {
+		case LowLevelOpPut:
+			err := t.kv.save(operation.Key, operation.Value)
+			if err != nil {
+				panic(fmt.Sprintf("unexpected error when operating memoryKV: %v", err))
+			}
+			results = append(results, LowLevelTxnResultItem{})
+		case LowLevelOpDelete:
+			err := t.kv.remove(operation.Key)
+			if err != nil {
+				panic(fmt.Sprintf("unexpected error when operating memoryKV: %v", err))
+			}
+			results = append(results, LowLevelTxnResultItem{})
+		case LowLevelOpGet:
+			value, err := t.kv.load(operation.Key)
+			if err != nil {
+				panic(fmt.Sprintf("unexpected error when operating memoryKV: %v", err))
+			}
+			result := LowLevelTxnResultItem{}
+			if len(value) > 0 {
+				result.KeyValuePairs = append(result.KeyValuePairs, KeyValuePair{
+					Key:   operation.Key,
+					Value: value,
+				})
+			}
+			results = append(results, result)
+		case LowLevelOpGetRange:
+			keys, values, err := t.kv.loadRange(operation.Key, operation.EndKey, operation.Limit)
+			if err != nil {
+				panic(fmt.Sprintf("unexpected error when operating memoryKV: %v", err))
+			}
+			result := LowLevelTxnResultItem{}
+			for i := range keys {
+				result.KeyValuePairs = append(result.KeyValuePairs, KeyValuePair{
+					Key:   keys[i],
+					Value: values[i],
+				})
+			}
+			results = append(results, result)
+		default:
+			panic(fmt.Sprintf("unknown operation type %v", operation.OpType))
+		}
+	}
+
+	return LowLevelTxnResult{
+		Succeeded: succeeds,
+		Items:     results,
+	}, nil
 }

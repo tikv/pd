@@ -38,6 +38,7 @@ func TestEtcd(t *testing.T) {
 	testRange(re, kv)
 	testSaveMultiple(re, kv, 20)
 	testLoadConflict(re, kv)
+	testLowLevelTxn(re, kv)
 }
 
 func TestLevelDB(t *testing.T) {
@@ -49,6 +50,7 @@ func TestLevelDB(t *testing.T) {
 	testReadWrite(re, kv)
 	testRange(re, kv)
 	testSaveMultiple(re, kv, 20)
+	testLowLevelTxn(re, kv)
 }
 
 func TestMemKV(t *testing.T) {
@@ -57,6 +59,7 @@ func TestMemKV(t *testing.T) {
 	testReadWrite(re, kv)
 	testRange(re, kv)
 	testSaveMultiple(re, kv, 20)
+	testLowLevelTxn(re, kv)
 }
 
 func testReadWrite(re *require.Assertions, kv Base) {
@@ -158,4 +161,237 @@ func testLoadConflict(re *require.Assertions, kv Base) {
 	}
 	// When other writer exists, loader must error.
 	re.Error(kv.RunInTxn(context.Background(), conflictLoader))
+}
+
+func mustHaveKeys(re *require.Assertions, kv Base, prefix string, expected ...KeyValuePair) {
+	keys, values, err := kv.LoadRange(prefix, clientv3.GetPrefixRangeEnd(prefix), 0)
+	re.NoError(err)
+	re.Equal(len(expected), len(keys))
+	for i, key := range keys {
+		re.Equal(expected[i].Key, key)
+		re.Equal(expected[i].Value, values[i])
+	}
+}
+
+func testLowLevelTxn(re *require.Assertions, kv Base) {
+	// Test NotExists condition, putting in transaction.
+	res, err := kv.CreateLowLevelTxn().If(
+		LowLevelTxnCondition{
+			Key:     "txn-k1",
+			CmpType: LowLevelCmpNotExists,
+		},
+	).Then(
+		LowLevelTxnOp{
+			Key:    "txn-k1",
+			OpType: LowLevelOpPut,
+			Value:  "v1",
+		},
+		LowLevelTxnOp{
+			Key:    "txn-k2",
+			OpType: LowLevelOpPut,
+			Value:  "v2",
+		},
+	).Else(
+		LowLevelTxnOp{
+			Key:    "txn-unexpected",
+			OpType: LowLevelOpPut,
+			Value:  "unexpected",
+		},
+	).Commit(context.Background())
+
+	re.NoError(err)
+	re.True(res.Succeeded)
+	re.Len(res.Items, 2)
+	re.Len(res.Items[0].KeyValuePairs, 0)
+	re.Len(res.Items[1].KeyValuePairs, 0)
+
+	mustHaveKeys(re, kv, "txn-", KeyValuePair{Key: "txn-k1", Value: "v1"}, KeyValuePair{Key: "txn-k2", Value: "v2"})
+
+	// Test Equal condition; reading in transaction.
+	res, err = kv.CreateLowLevelTxn().If(
+		LowLevelTxnCondition{
+			Key:     "txn-k1",
+			CmpType: LowLevelCmpEqual,
+			Value:   "v1",
+		},
+	).Then(
+		LowLevelTxnOp{
+			Key:    "txn-k2",
+			OpType: LowLevelOpGet,
+		},
+	).Else(
+		LowLevelTxnOp{
+			Key:    "txn-unexpected",
+			OpType: LowLevelOpPut,
+			Value:  "unexpected",
+		},
+	).Commit(context.Background())
+
+	re.NoError(err)
+	re.True(res.Succeeded)
+	re.Len(res.Items, 1)
+	re.Len(res.Items[0].KeyValuePairs, 1)
+	re.Equal("v2", res.Items[0].KeyValuePairs[0].Value)
+	mustHaveKeys(re, kv, "txn-", KeyValuePair{Key: "txn-k1", Value: "v1"}, KeyValuePair{Key: "txn-k2", Value: "v2"})
+
+	// Test NotEqual condition, else branch, reading range in transaction, reading & writing mixed.
+	res, err = kv.CreateLowLevelTxn().If(
+		LowLevelTxnCondition{
+			Key:     "txn-k1",
+			CmpType: LowLevelCmpNotEqual,
+			Value:   "v1",
+		},
+	).Then(
+		LowLevelTxnOp{
+			Key:    "txn-unexpected",
+			OpType: LowLevelOpPut,
+			Value:  "unexpected",
+		},
+	).Else(
+		LowLevelTxnOp{
+			Key:    "txn-k1",
+			OpType: LowLevelOpGetRange,
+			EndKey: "txn-k2\x00",
+		},
+		LowLevelTxnOp{
+			Key:    "txn-k3",
+			OpType: LowLevelOpPut,
+			Value:  "k3",
+		},
+	).Commit(context.Background())
+
+	re.NoError(err)
+	re.False(res.Succeeded)
+	re.Len(res.Items, 2)
+	re.Len(res.Items[0].KeyValuePairs, 2)
+	re.Equal([]KeyValuePair{{Key: "txn-k1", Value: "v1"}, {Key: "txn-k2", Value: "v2"}}, res.Items[0].KeyValuePairs)
+	re.Len(res.Items[1].KeyValuePairs, 0)
+
+	mustHaveKeys(re, kv, "txn-",
+		KeyValuePair{Key: "txn-k1", Value: "v1"},
+		KeyValuePair{Key: "txn-k2", Value: "v2"},
+		KeyValuePair{Key: "txn-k3", Value: "k3"})
+
+	// Test Exists condition, deleting, overwriting.
+	res, err = kv.CreateLowLevelTxn().If(
+		LowLevelTxnCondition{
+			Key:     "txn-k1",
+			CmpType: LowLevelCmpExists,
+		},
+	).Then(
+		LowLevelTxnOp{
+			Key:    "txn-k1",
+			OpType: LowLevelOpDelete,
+		},
+		LowLevelTxnOp{
+			Key:    "txn-k2",
+			OpType: LowLevelOpPut,
+			Value:  "v22",
+		},
+		// Delete not existing key.
+		LowLevelTxnOp{
+			Key:    "txn-k4",
+			OpType: LowLevelOpDelete,
+		},
+	).Else(
+		LowLevelTxnOp{
+			Key:    "txn-unexpected",
+			OpType: LowLevelOpPut,
+			Value:  "unexpected",
+		},
+	).Commit(context.Background())
+
+	re.NoError(err)
+	re.True(res.Succeeded)
+	re.Len(res.Items, 3)
+	for _, item := range res.Items {
+		re.Len(item.KeyValuePairs, 0)
+	}
+
+	mustHaveKeys(re, kv, "txn-", KeyValuePair{Key: "txn-k2", Value: "v22"}, KeyValuePair{Key: "txn-k3", Value: "k3"})
+
+	// Deleted keys can be regarded as not existing correctly.
+	res, err = kv.CreateLowLevelTxn().If(
+		LowLevelTxnCondition{
+			Key:     "txn-k1",
+			CmpType: LowLevelCmpNotExists,
+		},
+	).Then(
+		LowLevelTxnOp{
+			Key:    "txn-k2",
+			OpType: LowLevelOpDelete,
+		},
+		LowLevelTxnOp{
+			Key:    "txn-k3",
+			OpType: LowLevelOpDelete,
+		},
+	).Commit(context.Background())
+
+	re.NoError(err)
+	re.True(res.Succeeded)
+	re.Len(res.Items, 2)
+	for _, item := range res.Items {
+		re.Len(item.KeyValuePairs, 0)
+	}
+	mustHaveKeys(re, kv, "txn-")
+
+	// The following tests only check the correctness of the conditions.
+	check := func(conditions []LowLevelTxnCondition, shouldSuccess bool) {
+
+		res, err := kv.CreateLowLevelTxn().If(conditions...).Commit(context.Background())
+		re.NoError(err)
+		re.Equal(shouldSuccess, res.Succeeded)
+	}
+
+	// "txn-k1" doesn't exist at this point.
+	check([]LowLevelTxnCondition{{Key: "txn-k1", CmpType: LowLevelCmpExists}}, false)
+	check([]LowLevelTxnCondition{{Key: "txn-k1", CmpType: LowLevelCmpNotExists}}, true)
+
+	err = kv.Save("txn-k1", "v1")
+	re.NoError(err)
+	check([]LowLevelTxnCondition{{Key: "txn-k1", CmpType: LowLevelCmpExists}}, true)
+	check([]LowLevelTxnCondition{{Key: "txn-k1", CmpType: LowLevelCmpNotExists}}, false)
+
+	check([]LowLevelTxnCondition{{Key: "txn-k1", CmpType: LowLevelCmpEqual, Value: "v1"}}, true)
+	check([]LowLevelTxnCondition{{Key: "txn-k1", CmpType: LowLevelCmpNotEqual, Value: "v1"}}, false)
+	check([]LowLevelTxnCondition{{Key: "txn-k1", CmpType: LowLevelCmpEqual, Value: "v2"}}, false)
+	check([]LowLevelTxnCondition{{Key: "txn-k1", CmpType: LowLevelCmpNotEqual, Value: "v2"}}, true)
+
+	check([]LowLevelTxnCondition{{Key: "txn-k1", CmpType: LowLevelCmpLess, Value: "v1"}}, false)
+	check([]LowLevelTxnCondition{{Key: "txn-k1", CmpType: LowLevelCmpLess, Value: "v0"}}, false)
+	check([]LowLevelTxnCondition{{Key: "txn-k1", CmpType: LowLevelCmpLess, Value: "v2"}}, true)
+
+	check([]LowLevelTxnCondition{{Key: "txn-k1", CmpType: LowLevelCmpGreater, Value: "v1"}}, false)
+	check([]LowLevelTxnCondition{{Key: "txn-k1", CmpType: LowLevelCmpGreater, Value: "v2"}}, false)
+	check([]LowLevelTxnCondition{{Key: "txn-k1", CmpType: LowLevelCmpGreater, Value: "v0"}}, true)
+
+	// Test comparing with not-existing key.
+	err = kv.Remove("txn-k1")
+	re.NoError(err)
+	check([]LowLevelTxnCondition{{Key: "txn-k1", CmpType: LowLevelCmpEqual, Value: "v1"}}, false)
+	check([]LowLevelTxnCondition{{Key: "txn-k1", CmpType: LowLevelCmpNotEqual, Value: "v1"}}, false)
+	check([]LowLevelTxnCondition{{Key: "txn-k1", CmpType: LowLevelCmpLess, Value: "v1"}}, false)
+	check([]LowLevelTxnCondition{{Key: "txn-k1", CmpType: LowLevelCmpGreater, Value: "v1"}}, false)
+
+	// Test the conditions are conjunctions.
+	err = kv.Save("txn-k1", "v1")
+	re.NoError(err)
+	err = kv.Save("txn-k2", "v2")
+	re.NoError(err)
+	check([]LowLevelTxnCondition{
+		{Key: "txn-k1", CmpType: LowLevelCmpEqual, Value: "v1"},
+		{Key: "txn-k2", CmpType: LowLevelCmpEqual, Value: "v2"},
+	}, true)
+	check([]LowLevelTxnCondition{
+		{Key: "txn-k1", CmpType: LowLevelCmpEqual, Value: "v1"},
+		{Key: "txn-k2", CmpType: LowLevelCmpEqual, Value: "v0"},
+	}, false)
+	check([]LowLevelTxnCondition{
+		{Key: "txn-k1", CmpType: LowLevelCmpEqual, Value: "v0"},
+		{Key: "txn-k2", CmpType: LowLevelCmpEqual, Value: "v2"},
+	}, false)
+	check([]LowLevelTxnCondition{
+		{Key: "txn-k1", CmpType: LowLevelCmpEqual, Value: "v0"},
+		{Key: "txn-k2", CmpType: LowLevelCmpEqual, Value: "v0"},
+	}, false)
 }
