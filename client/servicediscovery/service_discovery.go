@@ -47,11 +47,14 @@ import (
 const (
 	// MemberUpdateInterval is the interval to update the member list.
 	MemberUpdateInterval = time.Minute
+	// UpdateMemberMaxBackoffTime is the max time to back off when updating the member list.
+	UpdateMemberMaxBackoffTime = 100 * time.Millisecond
+	// UpdateMemberBackOffBaseTime is the base time to back off when updating the member list.
+	// Here we use 20ms is because getting timestamp will print a warning log if the time exceeds 30ms.
+	UpdateMemberBackOffBaseTime = 20 * time.Millisecond
 	// UpdateMemberTimeout is the timeout to update the member list.
 	// Use a shorter timeout to recover faster from network isolation.
 	UpdateMemberTimeout = time.Second
-	// UpdateMemberBackOffBaseTime is the base time to back off when updating the member list.
-	UpdateMemberBackOffBaseTime = 100 * time.Millisecond
 
 	serviceModeUpdateInterval = 3 * time.Second
 )
@@ -548,7 +551,7 @@ func (c *serviceDiscovery) updateMemberLoop() {
 	ticker := time.NewTicker(MemberUpdateInterval)
 	defer ticker.Stop()
 
-	bo := retry.InitialBackoffer(UpdateMemberBackOffBaseTime, UpdateMemberTimeout, UpdateMemberBackOffBaseTime)
+	bo := retry.InitialBackoffer(UpdateMemberBackOffBaseTime, UpdateMemberMaxBackoffTime, UpdateMemberTimeout)
 	for {
 		select {
 		case <-ctx.Done():
