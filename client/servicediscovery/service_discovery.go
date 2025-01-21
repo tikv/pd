@@ -555,7 +555,7 @@ func (c *serviceDiscovery) updateServiceModeLoop() {
 		failpoint.Return()
 	})
 	failpoint.Inject("usePDServiceMode", func() {
-		c.callbacks.callServiceModeUpdateCallback(pdpb.ServiceMode_PD_SVC_MODE)
+		c.callbacks.onServiceModeUpdate(pdpb.ServiceMode_PD_SVC_MODE)
 		failpoint.Return()
 	})
 
@@ -854,7 +854,7 @@ func (c *serviceDiscovery) checkServiceModeChanged() error {
 			// If the method is not supported, we set it to pd mode.
 			// TODO: it's a hack way to solve the compatibility issue.
 			// we need to remove this after all maintained version supports the method.
-			c.callbacks.callServiceModeUpdateCallback(pdpb.ServiceMode_PD_SVC_MODE)
+			c.callbacks.onServiceModeUpdate(pdpb.ServiceMode_PD_SVC_MODE)
 			return nil
 		}
 		return err
@@ -862,7 +862,7 @@ func (c *serviceDiscovery) checkServiceModeChanged() error {
 	if clusterInfo == nil || len(clusterInfo.ServiceModes) == 0 {
 		return errors.WithStack(errs.ErrNoServiceModeReturned)
 	}
-	c.callbacks.callServiceModeUpdateCallback(clusterInfo.ServiceModes[0])
+	c.callbacks.onServiceModeUpdate(clusterInfo.ServiceModes[0])
 	return nil
 }
 
@@ -951,7 +951,7 @@ func (c *serviceDiscovery) updateURLs(members []*pdpb.Member) {
 	}
 	c.urls.Store(urls)
 	// Run callbacks to reflect the membership changes in the leader and followers.
-	c.callbacks.callMembersChangedCallbacks()
+	c.callbacks.onMembersChanged()
 	log.Info("[pd] update member urls", zap.Strings("old-urls", oldURLs), zap.Strings("new-urls", urls))
 }
 
@@ -961,18 +961,18 @@ func (c *serviceDiscovery) switchLeader(url string) (bool, error) {
 		return false, nil
 	}
 
-	newConn, _ := c.GetOrCreateGRPCConn(url)
+	newConn, err := c.GetOrCreateGRPCConn(url)
 	// If gRPC connect is created successfully or leader is new, still saves.
 	if url != oldLeader.GetURL() || newConn != nil {
 		leaderClient := newPDServiceClient(url, url, newConn, true)
 		c.leader.Store(leaderClient)
 	}
 	// Run callbacks
-	if err := c.callbacks.callLeaderSwitchedCallbacks(url); err != nil {
+	if err := c.callbacks.onLeaderSwitched(url); err != nil {
 		return true, err
 	}
 	log.Info("[pd] switch leader", zap.String("new-leader", url), zap.String("old-leader", oldLeader.GetURL()))
-	return true, nil
+	return true, err
 }
 
 func (c *serviceDiscovery) updateFollowers(members []*pdpb.Member, leaderID uint64, leaderURL string) (changed bool) {

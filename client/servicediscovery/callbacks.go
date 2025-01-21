@@ -59,7 +59,7 @@ func (c *serviceCallbacks) addServiceURLsSwitchedCallback(cb func()) {
 	c.membersChangedCbs = append(c.membersChangedCbs, cb)
 }
 
-func (c *serviceCallbacks) callServiceModeUpdateCallback(mode pdpb.ServiceMode) {
+func (c *serviceCallbacks) onServiceModeUpdate(mode pdpb.ServiceMode) {
 	c.RLock()
 	cb := c.serviceModeUpdateCb
 	c.RUnlock()
@@ -70,7 +70,7 @@ func (c *serviceCallbacks) callServiceModeUpdateCallback(mode pdpb.ServiceMode) 
 	cb(mode)
 }
 
-func (c *serviceCallbacks) callLeaderSwitchedCallbacks(leader string) error {
+func (c *serviceCallbacks) onLeaderSwitched(leader string) error {
 	c.RLock()
 	cbs := make([]leaderSwitchedCallbackFunc, len(c.leaderSwitchedCbs))
 	copy(cbs, c.leaderSwitchedCbs)
@@ -89,7 +89,7 @@ func (c *serviceCallbacks) callLeaderSwitchedCallbacks(leader string) error {
 	return nil
 }
 
-func (c *serviceCallbacks) callMembersChangedCallbacks() {
+func (c *serviceCallbacks) onMembersChanged() {
 	c.RLock()
 	cbs := make([]func(), len(c.membersChangedCbs))
 	copy(cbs, c.membersChangedCbs)
