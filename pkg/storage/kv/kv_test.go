@@ -163,6 +163,7 @@ func testLoadConflict(re *require.Assertions, kv Base) {
 	re.Error(kv.RunInTxn(context.Background(), conflictLoader))
 }
 
+// nolint:unparam
 func mustHaveKeys(re *require.Assertions, kv Base, prefix string, expected ...KeyValuePair) {
 	keys, values, err := kv.LoadRange(prefix, clientv3.GetPrefixRangeEnd(prefix), 0)
 	re.NoError(err)
@@ -201,9 +202,9 @@ func testLowLevelTxn(re *require.Assertions, kv Base) {
 
 	re.NoError(err)
 	re.True(res.Succeeded)
-	re.Len(res.Items, 2)
-	re.Len(res.Items[0].KeyValuePairs, 0)
-	re.Len(res.Items[1].KeyValuePairs, 0)
+	re.Len(res.ResultItems, 2)
+	re.Empty(res.ResultItems[0].KeyValuePairs)
+	re.Empty(res.ResultItems[1].KeyValuePairs)
 
 	mustHaveKeys(re, kv, "txn-", KeyValuePair{Key: "txn-k1", Value: "v1"}, KeyValuePair{Key: "txn-k2", Value: "v2"})
 
@@ -229,9 +230,9 @@ func testLowLevelTxn(re *require.Assertions, kv Base) {
 
 	re.NoError(err)
 	re.True(res.Succeeded)
-	re.Len(res.Items, 1)
-	re.Len(res.Items[0].KeyValuePairs, 1)
-	re.Equal("v2", res.Items[0].KeyValuePairs[0].Value)
+	re.Len(res.ResultItems, 1)
+	re.Len(res.ResultItems[0].KeyValuePairs, 1)
+	re.Equal("v2", res.ResultItems[0].KeyValuePairs[0].Value)
 	mustHaveKeys(re, kv, "txn-", KeyValuePair{Key: "txn-k1", Value: "v1"}, KeyValuePair{Key: "txn-k2", Value: "v2"})
 
 	// Test NotEqual condition, else branch, reading range in transaction, reading & writing mixed.
@@ -262,10 +263,10 @@ func testLowLevelTxn(re *require.Assertions, kv Base) {
 
 	re.NoError(err)
 	re.False(res.Succeeded)
-	re.Len(res.Items, 2)
-	re.Len(res.Items[0].KeyValuePairs, 2)
-	re.Equal([]KeyValuePair{{Key: "txn-k1", Value: "v1"}, {Key: "txn-k2", Value: "v2"}}, res.Items[0].KeyValuePairs)
-	re.Len(res.Items[1].KeyValuePairs, 0)
+	re.Len(res.ResultItems, 2)
+	re.Len(res.ResultItems[0].KeyValuePairs, 2)
+	re.Equal([]KeyValuePair{{Key: "txn-k1", Value: "v1"}, {Key: "txn-k2", Value: "v2"}}, res.ResultItems[0].KeyValuePairs)
+	re.Empty(res.ResultItems[1].KeyValuePairs)
 
 	mustHaveKeys(re, kv, "txn-",
 		KeyValuePair{Key: "txn-k1", Value: "v1"},
@@ -303,9 +304,9 @@ func testLowLevelTxn(re *require.Assertions, kv Base) {
 
 	re.NoError(err)
 	re.True(res.Succeeded)
-	re.Len(res.Items, 3)
-	for _, item := range res.Items {
-		re.Len(item.KeyValuePairs, 0)
+	re.Len(res.ResultItems, 3)
+	for _, item := range res.ResultItems {
+		re.Empty(item.KeyValuePairs)
 	}
 
 	mustHaveKeys(re, kv, "txn-", KeyValuePair{Key: "txn-k2", Value: "v22"}, KeyValuePair{Key: "txn-k3", Value: "k3"})
@@ -329,15 +330,14 @@ func testLowLevelTxn(re *require.Assertions, kv Base) {
 
 	re.NoError(err)
 	re.True(res.Succeeded)
-	re.Len(res.Items, 2)
-	for _, item := range res.Items {
-		re.Len(item.KeyValuePairs, 0)
+	re.Len(res.ResultItems, 2)
+	for _, item := range res.ResultItems {
+		re.Empty(item.KeyValuePairs)
 	}
 	mustHaveKeys(re, kv, "txn-")
 
 	// The following tests only check the correctness of the conditions.
 	check := func(conditions []LowLevelTxnCondition, shouldSuccess bool) {
-
 		res, err := kv.CreateLowLevelTxn().If(conditions...).Commit(context.Background())
 		re.NoError(err)
 		re.Equal(shouldSuccess, res.Succeeded)

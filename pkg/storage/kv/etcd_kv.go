@@ -140,6 +140,7 @@ func (kv *etcdKVBase) Remove(key string) error {
 	return nil
 }
 
+// CreateLowLevelTxn creates a transaction that provides interface in if-then-else pattern.
 func (kv *etcdKVBase) CreateLowLevelTxn() LowLevelTxn {
 	return &lowLevelTxnWrapper{
 		inner:    NewSlowLogTxn(kv.client),
@@ -310,6 +311,7 @@ type lowLevelTxnWrapper struct {
 	rootPath string
 }
 
+// If implements LowLevelTxn interface for adding conditions to the transaction.
 func (l *lowLevelTxnWrapper) If(conditions ...LowLevelTxnCondition) LowLevelTxn {
 	cmpList := make([]clientv3.Cmp, 0, len(conditions))
 	for _, c := range conditions {
@@ -364,16 +366,21 @@ func (l *lowLevelTxnWrapper) convertOps(ops []LowLevelTxnOp) []clientv3.Op {
 	return opsList
 }
 
+// Then implements LowLevelTxn interface for adding operations that need to be executed when the condition passes to
+// the transaction.
 func (l *lowLevelTxnWrapper) Then(ops ...LowLevelTxnOp) LowLevelTxn {
 	l.inner = l.inner.Then(l.convertOps(ops)...)
 	return l
 }
 
+// Else implements LowLevelTxn interface for adding operations that need to be executed when the condition doesn't pass
+// to the transaction.
 func (l *lowLevelTxnWrapper) Else(ops ...LowLevelTxnOp) LowLevelTxn {
 	l.inner = l.inner.Else(l.convertOps(ops)...)
 	return l
 }
 
+// Commit implements LowLevelTxn interface for committing the transaction.
 func (l *lowLevelTxnWrapper) Commit(_ctx context.Context) (LowLevelTxnResult, error) {
 	resp, err := l.inner.Commit()
 	if err != nil {
@@ -415,7 +422,7 @@ func (l *lowLevelTxnWrapper) Commit(_ctx context.Context) (LowLevelTxnResult, er
 		items = append(items, resultItem)
 	}
 	return LowLevelTxnResult{
-		Succeeded: resp.Succeeded,
-		Items:     items,
+		Succeeded:   resp.Succeeded,
+		ResultItems: items,
 	}, nil
 }
