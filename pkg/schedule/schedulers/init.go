@@ -595,7 +595,7 @@ func schedulersRegister() {
 		if err := decoder(conf); err != nil {
 			return nil, err
 		}
-		sche := newBalanceKeyRangeScheduler(opController, conf)
+		sche := newBalanceRangeScheduler(opController, conf)
 		conf.init(sche.GetName(), storage, conf)
 		return sche, nil
 	})

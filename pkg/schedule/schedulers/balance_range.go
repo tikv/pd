@@ -1,8 +1,20 @@
+// Copyright 2025 TiKV Project Authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package schedulers
 
 import (
-	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/tikv/pd/pkg/schedule/placement"
 	"go.uber.org/zap"
 	"net/http"
 	"sort"
@@ -12,7 +24,9 @@ import (
 	"github.com/unrolled/render"
 
 	"github.com/pingcap/log"
+	"github.com/pingcap/kvproto/pkg/metapb"
 
+	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/errs"
@@ -24,15 +38,15 @@ import (
 	"github.com/tikv/pd/pkg/utils/syncutil"
 )
 
-const balanceKeyRangeName = "balance-key-ranges"
+const balanceRangeName ="balance-range-scheduler"
 
-type balanceKeyRangeSchedulerHandler struct {
+type balanceRangeSchedulerHandler struct {
 	rd     *render.Render
 	config *balanceRangeSchedulerConfig
 }
 
-func newBalanceKeyRangeHandler(conf *balanceRangeSchedulerConfig) http.Handler {
-	handler := &balanceKeyRangeSchedulerHandler{
+func newBalanceRangeHandler(conf *balanceRangeSchedulerConfig) http.Handler {
+	handler := &balanceRangeSchedulerHandler{
 		config: conf,
 		rd:     render.New(render.Options{IndentJSON: true}),
 	}
@@ -42,11 +56,11 @@ func newBalanceKeyRangeHandler(conf *balanceRangeSchedulerConfig) http.Handler {
 	return router
 }
 
-func (handler *balanceKeyRangeSchedulerHandler) updateConfig(w http.ResponseWriter, _ *http.Request) {
+func (handler *balanceRangeSchedulerHandler) updateConfig(w http.ResponseWriter, _ *http.Request) {
 	handler.rd.JSON(w, http.StatusBadRequest, "update config is not supported")
 }
 
-func (handler *balanceKeyRangeSchedulerHandler) listConfig(w http.ResponseWriter, _ *http.Request) {
+func (handler *balanceRangeSchedulerHandler) listConfig(w http.ResponseWriter, _ *http.Request) {
 	conf := handler.config.clone()
 	if err := handler.rd.JSON(w, http.StatusOK, conf); err != nil {
 		log.Error("failed to marshal balance key range scheduler config", errs.ZapError(err))
@@ -66,12 +80,6 @@ type balanceRangeSchedulerParam struct {
 	Ranges  []core.KeyRange `json:"ranges"`
 }
 
-func (conf *balanceRangeSchedulerConfig) encodeConfig() ([]byte, error) {
-	conf.RLock()
-	defer conf.RUnlock()
-	return EncodeConfig(conf)
-}
-
 func (conf *balanceRangeSchedulerConfig) clone() *balanceRangeSchedulerParam {
 	conf.RLock()
 	defer conf.RUnlock()
@@ -87,7 +95,9 @@ func (conf *balanceRangeSchedulerConfig) clone() *balanceRangeSchedulerParam {
 
 // EncodeConfig serializes the config.
 func (s *balanceRangeScheduler) EncodeConfig() ([]byte, error) {
-	return s.conf.encodeConfig()
+	s.conf.RLock()
+	defer s.conf.RUnlock()
+	return EncodeConfig(s.conf)
 }
 
 // ReloadConfig reloads the config.
@@ -134,18 +144,17 @@ func (s *balanceRangeScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster)
 	return allowed
 }
 
-// BalanceKeyRangeCreateOption is used to create a scheduler with an option.
-type BalanceKeyRangeCreateOption func(s *balanceRangeScheduler)
 
-// newBalanceKeyRangeScheduler creates a scheduler that tends to keep given peer role on
+// BalanceRangeCreateOption is used to create a scheduler with an option.
+type BalanceRangeCreateOption func(s *balanceRangeScheduler)
+
+// newBalanceRangeScheduler creates a scheduler that tends to keep given peer role on
 // special store balanced.
-func newBalanceKeyRangeScheduler(opController *operator.Controller, conf *balanceRangeSchedulerConfig, options ...BalanceKeyRangeCreateOption) Scheduler {
+func newBalanceRangeScheduler(opController *operator.Controller, conf *balanceRangeSchedulerConfig, options ...BalanceRangeCreateOption) Scheduler {
 	s := &balanceRangeScheduler{
 		BaseScheduler: NewBaseScheduler(opController, types.BalanceRangeScheduler, conf),
 		conf:          conf,
-		handler:       newBalanceKeyRangeHandler(conf),
-		start:         time.Now(),
-		role:          NewRole(conf.Role),
+		handler:       newBalanceRangeHandler(conf),
 	}
 	for _, option := range options {
 		option(s)
@@ -155,7 +164,7 @@ func newBalanceKeyRangeScheduler(opController *operator.Controller, conf *balanc
 		f = filter.TiFlashEngineConstraint
 	}
 	s.filters = []filter.Filter{
-		filter.NewEngineFilter(balanceKeyRangeName, f),
+		filter.NewEngineFilter(balanceRangeName, f),
 	}
 
 	s.filterCounter = filter.NewCounter(s.GetName())

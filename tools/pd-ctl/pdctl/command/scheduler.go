@@ -562,7 +562,7 @@ func NewConfigSchedulerCommand() *cobra.Command {
 		newConfigEvictSlowStoreCommand(),
 		newConfigShuffleHotRegionSchedulerCommand(),
 		newConfigEvictSlowTrendCommand(),
-		newConfigBalanceKeyRangeCommand(),
+		newConfigBalanceRangeCommand(),
 	)
 	return c
 }
@@ -587,7 +587,7 @@ func newConfigBalanceLeaderCommand() *cobra.Command {
 	return c
 }
 
-func newConfigBalanceKeyRangeCommand() *cobra.Command {
+func newConfigBalanceRangeCommand() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "balance-range-scheduler",
 		Short: "balance-range-scheduler config",
