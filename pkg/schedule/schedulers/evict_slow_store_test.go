@@ -17,7 +17,13 @@ package schedulers
 import (
 	"context"
 	"testing"
+<<<<<<< HEAD
 	"time"
+=======
+
+	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/suite"
+>>>>>>> b66703c26 (scheduler: support changing batch for slow score scheduler (#8888))
 
 	"github.com/pingcap/failpoint"
 	"github.com/stretchr/testify/require"
@@ -147,11 +153,16 @@ func (suite *evictSlowStoreTestSuite) TestEvictSlowStorePersistFail() {
 	re.NotEmpty(ops)
 }
 
+<<<<<<< HEAD
 func TestRecoveryTime(t *testing.T) {
+=======
+func TestEvictSlowStoreBatch(t *testing.T) {
+>>>>>>> b66703c26 (scheduler: support changing batch for slow score scheduler (#8888))
 	re := require.New(t)
 	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
 
+<<<<<<< HEAD
 	// Add stores 1, 2, 3 with different leader counts
 	tc.AddLeaderStore(1, 10)
 	tc.AddLeaderStore(2, 0)
@@ -250,4 +261,59 @@ func TestRecoveryTime(t *testing.T) {
 	re.NoError(err)
 	re.Zero(persistValue.evictStore())
 	re.True(persistValue.readyForRecovery())
+=======
+	// Add stores
+	tc.AddLeaderStore(1, 0)
+	tc.AddLeaderStore(2, 0)
+	tc.AddLeaderStore(3, 0)
+	// Add regions with leader in store 1
+	for i := range 10000 {
+		tc.AddLeaderRegion(uint64(i), 1, 2)
+	}
+
+	storage := storage.NewStorageWithMemoryBackend()
+	es, err := CreateScheduler(types.EvictSlowStoreScheduler, oc, storage, ConfigSliceDecoder(types.EvictSlowStoreScheduler, []string{}), nil)
+	re.NoError(err)
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/schedulers/transientRecoveryGap", "return(true)"))
+	storeInfo := tc.GetStore(1)
+	newStoreInfo := storeInfo.Clone(func(store *core.StoreInfo) {
+		store.GetStoreStats().SlowScore = 100
+	})
+	tc.PutStore(newStoreInfo)
+	re.True(es.IsScheduleAllowed(tc))
+	// Add evict leader scheduler to store 1
+	ops, _ := es.Schedule(tc, false)
+	re.Len(ops, 3)
+	operatorutil.CheckMultiTargetTransferLeader(re, ops[0], operator.OpLeader, 1, []uint64{2})
+	re.Equal(types.EvictSlowStoreScheduler.String(), ops[0].Desc())
+
+	es.(*evictSlowStoreScheduler).conf.Batch = 5
+	re.NoError(es.(*evictSlowStoreScheduler).conf.save())
+	ops, _ = es.Schedule(tc, false)
+	re.Len(ops, 5)
+
+	newStoreInfo = storeInfo.Clone(func(store *core.StoreInfo) {
+		store.GetStoreStats().SlowScore = 0
+	})
+
+	tc.PutStore(newStoreInfo)
+	// no slow store need to evict.
+	ops, _ = es.Schedule(tc, false)
+	re.Empty(ops)
+
+	es2, ok := es.(*evictSlowStoreScheduler)
+	re.True(ok)
+	re.Zero(es2.conf.evictStore())
+
+	// check the value from storage.
+	var persistValue evictSlowStoreSchedulerConfig
+	err = es2.conf.load(&persistValue)
+	re.NoError(err)
+
+	re.Equal(es2.conf.EvictedStores, persistValue.EvictedStores)
+	re.Zero(persistValue.evictStore())
+	re.True(persistValue.readyForRecovery())
+	re.Equal(5, persistValue.Batch)
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/schedulers/transientRecoveryGap"))
+>>>>>>> b66703c26 (scheduler: support changing batch for slow score scheduler (#8888))
 }
