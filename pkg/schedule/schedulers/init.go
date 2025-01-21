@@ -552,7 +552,7 @@ func schedulersRegister() {
 	// args: [role, engine, timeout, range1, range2, ...]
 	RegisterSliceDecoderBuilder(types.BalanceRangeScheduler, func(args []string) ConfigDecoder {
 		return func(v any) error {
-			conf, ok := v.(*balanceKeyRangeSchedulerConfig)
+			conf, ok := v.(*balanceRangeSchedulerConfig)
 			if !ok {
 				return errs.ErrScheduleConfigNotExist.FastGenByArgs()
 			}
@@ -589,13 +589,13 @@ func schedulersRegister() {
 
 	RegisterScheduler(types.BalanceRangeScheduler, func(opController *operator.Controller,
 		storage endpoint.ConfigStorage, decoder ConfigDecoder, _ ...func(string) error) (Scheduler, error) {
-		conf := &balanceKeyRangeSchedulerConfig{
+		conf := &balanceRangeSchedulerConfig{
 			schedulerConfig: newBaseDefaultSchedulerConfig(),
 		}
 		if err := decoder(conf); err != nil {
 			return nil, err
 		}
-		sche := newBalanceKeyRangeScheduler(opController, conf)
+		sche := newBalanceRangeScheduler(opController, conf)
 		conf.init(sche.GetName(), storage, conf)
 		return sche, nil
 	})
