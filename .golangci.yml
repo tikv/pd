@@ -29,6 +29,7 @@ linters:
     - reassign
     - intrange
     - gci
+    - goheader
 linters-settings:
   gocritic:
     # Which checks should be disabled; can't be combined with 'enabled-checks'; default is empty
@@ -241,6 +242,24 @@ linters-settings:
       - prefix(github.com/pingcap)
       - prefix(github.com/tikv/pd)
       - blank
+  goheader:
+    values:
+      regexp:
+        COPYRIGHT-HEADER: Copyright \d{4} TiKV Project Authors.
+    template: |-
+      {{ COPYRIGHT-HEADER }}
+
+      Licensed under the Apache License, Version 2.0 (the "License");
+      you may not use this file except in compliance with the License.
+      You may obtain a copy of the License at
+
+          http://www.apache.org/licenses/LICENSE-2.0
+
+      Unless required by applicable law or agreed to in writing, software
+      distributed under the License is distributed on an "AS IS" BASIS,
+      WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+      See the License for the specific language governing permissions and
+      limitations under the License.
 issues:
   exclude-rules:
     - path: (_test\.go|pkg/mock/.*\.go|tests/.*\.go)
