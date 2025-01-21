@@ -78,10 +78,6 @@ func (k ResourceKind) String() string {
 		return "region"
 	case WitnessKind:
 		return "witness"
-	case LearnerKind:
-		return `learner`
-	case unKnownKind:
-		return "unknown"
 	default:
 		return "unknown"
 	}
