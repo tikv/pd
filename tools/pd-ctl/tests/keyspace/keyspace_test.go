@@ -167,13 +167,10 @@ func (suite *keyspaceTestSuite) SetupTest() {
 
 func (suite *keyspaceTestSuite) TearDownTest() {
 	re := suite.Require()
-	re.NoError(failpoint.Disable("github.com/tikv/pd/server/delayStartServerLoop"))
-	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion"))
-}
-
-func (suite *keyspaceTestSuite) TearDownSuite() {
 	suite.cancel()
 	suite.cluster.Destroy()
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/delayStartServerLoop"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion"))
 }
 
 func (suite *keyspaceTestSuite) TestShowKeyspace() {

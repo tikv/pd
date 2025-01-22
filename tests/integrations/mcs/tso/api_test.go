@@ -137,12 +137,12 @@ func TestTSOServerStartFirst(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	apiCluster, err := tests.NewTestClusterWithKeyspaceGroup(ctx, 1, func(conf *config.Config, _ string) {
+	cluster, err := tests.NewTestClusterWithKeyspaceGroup(ctx, 1, func(conf *config.Config, _ string) {
 		conf.Keyspace.PreAlloc = []string{"k1", "k2"}
 	})
-	defer apiCluster.Destroy()
+	defer cluster.Destroy()
 	re.NoError(err)
-	addr := apiCluster.GetConfig().GetClientURL()
+	addr := cluster.GetConfig().GetClientURL()
 	ch := make(chan struct{})
 	defer close(ch)
 	clusterCh := make(chan *tests.TestTSOCluster)
@@ -155,11 +155,11 @@ func TestTSOServerStartFirst(t *testing.T) {
 		clusterCh <- tsoCluster
 		ch <- struct{}{}
 	}()
-	err = apiCluster.RunInitialServers()
+	err = cluster.RunInitialServers()
 	re.NoError(err)
-	leaderName := apiCluster.WaitLeader()
+	leaderName := cluster.WaitLeader()
 	re.NotEmpty(leaderName)
-	pdLeaderServer := apiCluster.GetServer(leaderName)
+	pdLeaderServer := cluster.GetServer(leaderName)
 	re.NoError(pdLeaderServer.BootstrapCluster())
 	re.NoError(err)
 	tsoCluster := <-clusterCh
