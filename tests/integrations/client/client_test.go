@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"math"
 	"os"
-	"path"
 	"reflect"
 	"sort"
 	"strconv"
@@ -1553,7 +1552,7 @@ func (suite *clientTestSuite) TestUpdateServiceGCSafePoint() {
 	re.NoError(err)
 
 	// Force set invalid ttl to gc_worker
-	gcWorkerKey := path.Join("gc", "safe_point", "service", "gc_worker")
+	gcWorkerKey := keypath.GCSafePointServicePath("gc_worker")
 	{
 		gcWorkerSsp := &endpoint.ServiceSafePoint{
 			ServiceID: "gc_worker",
