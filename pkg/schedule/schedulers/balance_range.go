@@ -75,10 +75,11 @@ type balanceRangeSchedulerConfig struct {
 }
 
 type balanceRangeSchedulerParam struct {
-	Role    string          `json:"role"`
-	Engine  string          `json:"engine"`
-	Timeout time.Duration   `json:"timeout"`
-	Ranges  []core.KeyRange `json:"ranges"`
+	Role      string          `json:"role"`
+	Engine    string          `json:"engine"`
+	Timeout   time.Duration   `json:"timeout"`
+	Ranges    []core.KeyRange `json:"ranges"`
+	TableName string          `json:"table-name"`
 }
 
 func (conf *balanceRangeSchedulerConfig) clone() *balanceRangeSchedulerParam {
@@ -87,10 +88,11 @@ func (conf *balanceRangeSchedulerConfig) clone() *balanceRangeSchedulerParam {
 	ranges := make([]core.KeyRange, len(conf.Ranges))
 	copy(ranges, conf.Ranges)
 	return &balanceRangeSchedulerParam{
-		Ranges:  ranges,
-		Role:    conf.Role,
-		Engine:  conf.Engine,
-		Timeout: conf.Timeout,
+		Ranges:    ranges,
+		Role:      conf.Role,
+		Engine:    conf.Engine,
+		Timeout:   conf.Timeout,
+		TableName: conf.TableName,
 	}
 }
 

@@ -113,6 +113,7 @@ func (h *schedulerHandler) CreateScheduler(w http.ResponseWriter, r *http.Reques
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
+
 		defaultTimeout := "1h"
 		if err := apiutil.CollectStringOption("timeout", input, collector); err != nil {
 			if errors.ErrorEqual(err, errs.ErrOptionNotExist) {
@@ -123,12 +124,17 @@ func (h *schedulerHandler) CreateScheduler(w http.ResponseWriter, r *http.Reques
 			}
 		}
 
-		if err := apiutil.CollectEscapeStringOption("start_key", input, collector); err != nil {
+		if err := apiutil.CollectStringOption("table-name", input, collector); err != nil {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 
-		if err := apiutil.CollectEscapeStringOption("end_key", input, collector); err != nil {
+		if err := apiutil.CollectEscapeStringOption("start-key", input, collector); err != nil {
+			h.r.JSON(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+
+		if err := apiutil.CollectEscapeStringOption("end-key", input, collector); err != nil {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
