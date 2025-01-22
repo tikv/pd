@@ -15,9 +15,11 @@
 package schedulers
 
 import (
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
@@ -542,6 +544,58 @@ func schedulersRegister() {
 		}
 
 		sche := newEvictSlowTrendScheduler(opController, conf)
+		conf.init(sche.GetName(), storage, conf)
+		return sche, nil
+	})
+
+	// balance key range scheduler
+	// args: [role, engine, timeout, range1, range2, ...]
+	RegisterSliceDecoderBuilder(types.BalanceRangeScheduler, func(args []string) ConfigDecoder {
+		return func(v any) error {
+			conf, ok := v.(*balanceRangeSchedulerConfig)
+			if !ok {
+				return errs.ErrScheduleConfigNotExist.FastGenByArgs()
+			}
+			if len(args) < 4 {
+				return errs.ErrSchedulerConfig.FastGenByArgs("args length must be greater than 3")
+			}
+			role, err := url.QueryUnescape(args[0])
+			if err != nil {
+				return errs.ErrQueryUnescape.Wrap(err)
+			}
+			engine, err := url.QueryUnescape(args[1])
+			if err != nil {
+				return errs.ErrQueryUnescape.Wrap(err)
+			}
+			timeout, err := url.QueryUnescape(args[2])
+			if err != nil {
+				return errs.ErrQueryUnescape.Wrap(err)
+			}
+			duration, err := time.ParseDuration(timeout)
+			if err != nil {
+				return errs.ErrURLParse.Wrap(err)
+			}
+			ranges, err := getKeyRanges(args[3:])
+			if err != nil {
+				return err
+			}
+			conf.Ranges = ranges
+			conf.Engine = engine
+			conf.Role = role
+			conf.Timeout = duration
+			return nil
+		}
+	})
+
+	RegisterScheduler(types.BalanceRangeScheduler, func(opController *operator.Controller,
+		storage endpoint.ConfigStorage, decoder ConfigDecoder, _ ...func(string) error) (Scheduler, error) {
+		conf := &balanceRangeSchedulerConfig{
+			schedulerConfig: newBaseDefaultSchedulerConfig(),
+		}
+		if err := decoder(conf); err != nil {
+			return nil, err
+		}
+		sche := newBalanceRangeScheduler(opController, conf)
 		conf.init(sche.GetName(), storage, conf)
 		return sche, nil
 	})
