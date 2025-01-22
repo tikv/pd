@@ -412,7 +412,7 @@ func (c *client) setup() error {
 	}
 
 	// Register callbacks
-	c.pdSvcDiscovery.AddServingURLSwitchedCallback(c.scheduleUpdateTokenConnection)
+	c.pdSvcDiscovery.AddLeaderSwitchedCallback(c.scheduleUpdateTokenConnection)
 
 	// Create dispatchers
 	c.createTokenDispatcher()
@@ -523,11 +523,12 @@ func (c *client) getServiceMode() pdpb.ServiceMode {
 	return c.serviceMode
 }
 
-func (c *client) scheduleUpdateTokenConnection() {
+func (c *client) scheduleUpdateTokenConnection(string) error {
 	select {
 	case c.updateTokenConnectionCh <- struct{}{}:
 	default:
 	}
+	return nil
 }
 
 // GetClusterID returns the ClusterID.
