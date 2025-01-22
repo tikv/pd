@@ -16,22 +16,14 @@ package kv
 
 import "context"
 
-type BaseReadWrite interface {
-	Save(key, value string) error
-	Remove(key string) error
-	Load(key string) (string, error)
-	LoadRange(key, endKey string, limit int) (keys []string, values []string, err error)
-}
-
-// Txn bundles multiple operations into a single executable unit.
-// It enables kv to atomically apply a set of updates.
-type Txn interface {
-	BaseReadWrite
-}
-
+// LowLevelTxnCmpType represents the comparison type that is used in the condition of LowLevelTxn.
 type LowLevelTxnCmpType int
+
+// LowLevelTxnOpType represents the operation type that is used in the operations (either `Then` branch or `Else`
+// branch) of LowLevelTxn.
 type LowLevelTxnOpType int
 
+// nolint:revive
 const (
 	LowLevelCmpEqual LowLevelTxnCmpType = iota
 	LowLevelCmpNotEqual
@@ -41,6 +33,7 @@ const (
 	LowLevelCmpNotExists
 )
 
+// nolint:revive
 const (
 	LowLevelOpPut LowLevelTxnOpType = iota
 	LowLevelOpDelete
@@ -48,12 +41,15 @@ const (
 	LowLevelOpGetRange
 )
 
+// LowLevelTxnCondition represents a condition in a LowLevelTxn.
 type LowLevelTxnCondition struct {
 	Key     string
 	CmpType LowLevelTxnCmpType
-	Value   string
+	// The value to compare with. It's not used when CmpType is LowLevelCmpExists or LowLevelCmpNotExists.
+	Value string
 }
 
+// CheckOnValue checks whether the condition is satisfied on the given value.
 func (c *LowLevelTxnCondition) CheckOnValue(value string, exists bool) bool {
 	switch c.CmpType {
 	case LowLevelCmpEqual:
@@ -86,6 +82,8 @@ func (c *LowLevelTxnCondition) CheckOnValue(value string, exists bool) bool {
 	return false
 }
 
+// LowLevelTxnOp represents an operation in a LowLevelTxn's `Then` or `Else` branch and will be executed according to
+// the result of checking conditions.
 type LowLevelTxnOp struct {
 	Key    string
 	OpType LowLevelTxnOpType
@@ -96,6 +94,7 @@ type LowLevelTxnOp struct {
 	Limit int
 }
 
+// KeyValuePair represents a pair of key and value.
 type KeyValuePair struct {
 	Key   string
 	Value string
@@ -104,15 +103,20 @@ type KeyValuePair struct {
 // LowLevelTxnResultItem represents a single result of a read operation in a LowLevelTxn.
 type LowLevelTxnResultItem struct {
 	KeyValuePairs []KeyValuePair
-	More          bool
 }
 
 // LowLevelTxnResult represents the result of a LowLevelTxn. The results of operations in `Then` or `Else` branches
-// will be listed in `Items` in the same order as the operations are added.
+// will be listed in `ResultItems` in the same order as the operations are added.
 // For Put or Delete operations, its corresponding result is the previous value before writing.
 type LowLevelTxnResult struct {
 	Succeeded bool
-	Items     []LowLevelTxnResultItem
+	// The results of each operation in the `Then` branch or the `Else` branch of a transaction, depending on
+	// whether `Succeeded`. The i-th result belongs to the i-th operation added to the executed branch.
+	// * For Put or Delete operations, the result is empty.
+	// * For Get operations, the result contains a key-value pair representing the get result. In case the key
+	//   does not exist, its `KeyValuePairs` field will be empty.
+	// * For GetRange operations, the result is a list of key-value pairs containing key-value paris that are scanned.
+	ResultItems []LowLevelTxnResultItem
 }
 
 // LowLevelTxn is a low-level transaction interface. It follows the same pattern of etcd's transaction
@@ -128,6 +132,20 @@ type LowLevelTxn interface {
 	Then(ops ...LowLevelTxnOp) LowLevelTxn
 	Else(ops ...LowLevelTxnOp) LowLevelTxn
 	Commit(ctx context.Context) (LowLevelTxnResult, error)
+}
+
+// BaseReadWrite is the API set, shared by Base and Txn interfaces, that provides basic KV read and write operations.
+type BaseReadWrite interface {
+	Save(key, value string) error
+	Remove(key string) error
+	Load(key string) (string, error)
+	LoadRange(key, endKey string, limit int) (keys []string, values []string, err error)
+}
+
+// Txn bundles multiple operations into a single executable unit.
+// It enables kv to atomically apply a set of updates.
+type Txn interface {
+	BaseReadWrite
 }
 
 // Base is an abstract interface for load/save pd cluster data.

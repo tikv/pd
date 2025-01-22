@@ -53,15 +53,15 @@ func (s *memoryKVItem) Less(than *memoryKVItem) bool {
 func (kv *memoryKV) Load(key string) (string, error) {
 	kv.RLock()
 	defer kv.RUnlock()
-	return kv.load(key)
+	return kv.loadNoLock(key), nil
 }
 
-func (kv *memoryKV) load(key string) (string, error) {
+func (kv *memoryKV) loadNoLock(key string) string {
 	item, ok := kv.tree.Get(memoryKVItem{key, ""})
 	if !ok {
-		return "", nil
+		return ""
 	}
-	return item.value, nil
+	return item.value
 }
 
 // LoadRange loads the keys in the range of [key, endKey).
@@ -74,10 +74,11 @@ func (kv *memoryKV) LoadRange(key, endKey string, limit int) ([]string, []string
 	})
 	kv.RLock()
 	defer kv.RUnlock()
-	return kv.loadRange(key, endKey, limit)
+	keys, values := kv.loadRangeNoLock(key, endKey, limit)
+	return keys, values, nil
 }
 
-func (kv *memoryKV) loadRange(key, endKey string, limit int) ([]string, []string, error) {
+func (kv *memoryKV) loadRangeNoLock(key, endKey string, limit int) ([]string, []string) {
 	keys := make([]string, 0, limit)
 	values := make([]string, 0, limit)
 	kv.tree.AscendRange(memoryKVItem{key, ""}, memoryKVItem{endKey, ""}, func(item memoryKVItem) bool {
@@ -88,33 +89,34 @@ func (kv *memoryKV) loadRange(key, endKey string, limit int) ([]string, []string
 		}
 		return true
 	})
-	return keys, values, nil
+	return keys, values
 }
 
 // Save saves the key-value pair.
 func (kv *memoryKV) Save(key, value string) error {
 	kv.Lock()
 	defer kv.Unlock()
-	return kv.save(key, value)
+	kv.saveNoLock(key, value)
+	return nil
 }
 
-func (kv *memoryKV) save(key, value string) error {
+func (kv *memoryKV) saveNoLock(key, value string) {
 	kv.tree.ReplaceOrInsert(memoryKVItem{key, value})
-	return nil
 }
 
 // Remove removes the key.
 func (kv *memoryKV) Remove(key string) error {
 	kv.Lock()
 	defer kv.Unlock()
-	return kv.remove(key)
-}
-
-func (kv *memoryKV) remove(key string) error {
-	kv.tree.Delete(memoryKVItem{key, ""})
+	kv.removeNoLock(key)
 	return nil
 }
 
+func (kv *memoryKV) removeNoLock(key string) {
+	kv.tree.Delete(memoryKVItem{key, ""})
+}
+
+// CreateLowLevelTxn creates a transaction that provides interface in if-then-else pattern.
 func (kv *memoryKV) CreateLowLevelTxn() LowLevelTxn {
 	return &memKvLowLevelTxnSimulator{
 		kv: kv,
@@ -228,31 +230,34 @@ type memKvLowLevelTxnSimulator struct {
 	onFailureOps []LowLevelTxnOp
 }
 
+// If implements LowLevelTxn interface for adding conditions to the transaction.
 func (t *memKvLowLevelTxnSimulator) If(conditions ...LowLevelTxnCondition) LowLevelTxn {
 	t.conditions = append(t.conditions, conditions...)
 	return t
 }
 
+// Then implements LowLevelTxn interface for adding operations that need to be executed when the condition passes to
+// the transaction.
 func (t *memKvLowLevelTxnSimulator) Then(ops ...LowLevelTxnOp) LowLevelTxn {
 	t.onSuccessOps = append(t.onSuccessOps, ops...)
 	return t
 }
 
+// Else implements LowLevelTxn interface for adding operations that need to be executed when the condition doesn't pass
+// to the transaction.
 func (t *memKvLowLevelTxnSimulator) Else(ops ...LowLevelTxnOp) LowLevelTxn {
 	t.onFailureOps = append(t.onFailureOps, ops...)
 	return t
 }
 
+// Commit implements LowLevelTxn interface for committing the transaction.
 func (t *memKvLowLevelTxnSimulator) Commit(_ctx context.Context) (LowLevelTxnResult, error) {
 	t.kv.Lock()
 	defer t.kv.Unlock()
 
 	succeeds := true
 	for _, condition := range t.conditions {
-		value, err := t.kv.load(condition.Key)
-		if err != nil {
-			return LowLevelTxnResult{}, err
-		}
+		value := t.kv.loadNoLock(condition.Key)
 		// There's a convention to represent not-existing key with empty value.
 		exists := value != ""
 
@@ -272,22 +277,13 @@ func (t *memKvLowLevelTxnSimulator) Commit(_ctx context.Context) (LowLevelTxnRes
 	for _, operation := range ops {
 		switch operation.OpType {
 		case LowLevelOpPut:
-			err := t.kv.save(operation.Key, operation.Value)
-			if err != nil {
-				panic(fmt.Sprintf("unexpected error when operating memoryKV: %v", err))
-			}
+			t.kv.saveNoLock(operation.Key, operation.Value)
 			results = append(results, LowLevelTxnResultItem{})
 		case LowLevelOpDelete:
-			err := t.kv.remove(operation.Key)
-			if err != nil {
-				panic(fmt.Sprintf("unexpected error when operating memoryKV: %v", err))
-			}
+			t.kv.removeNoLock(operation.Key)
 			results = append(results, LowLevelTxnResultItem{})
 		case LowLevelOpGet:
-			value, err := t.kv.load(operation.Key)
-			if err != nil {
-				panic(fmt.Sprintf("unexpected error when operating memoryKV: %v", err))
-			}
+			value := t.kv.loadNoLock(operation.Key)
 			result := LowLevelTxnResultItem{}
 			if len(value) > 0 {
 				result.KeyValuePairs = append(result.KeyValuePairs, KeyValuePair{
@@ -297,10 +293,7 @@ func (t *memKvLowLevelTxnSimulator) Commit(_ctx context.Context) (LowLevelTxnRes
 			}
 			results = append(results, result)
 		case LowLevelOpGetRange:
-			keys, values, err := t.kv.loadRange(operation.Key, operation.EndKey, operation.Limit)
-			if err != nil {
-				panic(fmt.Sprintf("unexpected error when operating memoryKV: %v", err))
-			}
+			keys, values := t.kv.loadRangeNoLock(operation.Key, operation.EndKey, operation.Limit)
 			result := LowLevelTxnResultItem{}
 			for i := range keys {
 				result.KeyValuePairs = append(result.KeyValuePairs, KeyValuePair{
@@ -315,7 +308,7 @@ func (t *memKvLowLevelTxnSimulator) Commit(_ctx context.Context) (LowLevelTxnRes
 	}
 
 	return LowLevelTxnResult{
-		Succeeded: succeeds,
-		Items:     results,
+		Succeeded:   succeeds,
+		ResultItems: results,
 	}, nil
 }

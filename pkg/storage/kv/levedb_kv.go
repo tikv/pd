@@ -18,9 +18,10 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/pingcap/errors"
 	"github.com/syndtr/goleveldb/leveldb"
 	"github.com/syndtr/goleveldb/leveldb/util"
+
+	"github.com/pingcap/errors"
 
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/syncutil"
@@ -80,6 +81,7 @@ func (kv *LevelDBKV) Remove(key string) error {
 	return errors.WithStack(kv.Delete([]byte(key), nil))
 }
 
+// CreateLowLevelTxn creates a transaction that provides interface in if-then-else pattern.
 func (kv *LevelDBKV) CreateLowLevelTxn() LowLevelTxn {
 	return &levelDBLowLevelTxnSimulator{
 		kv: kv,
@@ -161,21 +163,27 @@ type levelDBLowLevelTxnSimulator struct {
 	onFailureOps []LowLevelTxnOp
 }
 
+// If implements LowLevelTxn interface for adding conditions to the transaction.
 func (t *levelDBLowLevelTxnSimulator) If(conditions ...LowLevelTxnCondition) LowLevelTxn {
 	t.condition = append(t.condition, conditions...)
 	return t
 }
 
+// Then implements LowLevelTxn interface for adding operations that need to be executed when the condition passes to
+// the transaction.
 func (t *levelDBLowLevelTxnSimulator) Then(ops ...LowLevelTxnOp) LowLevelTxn {
 	t.onSuccessOps = append(t.onSuccessOps, ops...)
 	return t
 }
 
+// Else implements LowLevelTxn interface for adding operations that need to be executed when the condition doesn't pass
+// to the transaction.
 func (t *levelDBLowLevelTxnSimulator) Else(ops ...LowLevelTxnOp) LowLevelTxn {
 	t.onFailureOps = append(t.onFailureOps, ops...)
 	return t
 }
 
+// Commit implements LowLevelTxn interface for committing the transaction.
 func (t *levelDBLowLevelTxnSimulator) Commit(_ctx context.Context) (res LowLevelTxnResult, err error) {
 	txn, err := t.kv.DB.OpenTransaction()
 	if err != nil {
@@ -272,7 +280,7 @@ func (t *levelDBLowLevelTxnSimulator) Commit(_ctx context.Context) (res LowLevel
 	txn = nil
 
 	return LowLevelTxnResult{
-		Succeeded: succeeds,
-		Items:     results,
+		Succeeded:   succeeds,
+		ResultItems: results,
 	}, nil
 }
