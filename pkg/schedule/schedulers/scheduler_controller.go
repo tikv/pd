@@ -22,7 +22,10 @@ import (
 	"sync/atomic"
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/pingcap/log"
+
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
 	sche "github.com/tikv/pd/pkg/schedule/core"
@@ -33,7 +36,6 @@ import (
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
-	"go.uber.org/zap"
 )
 
 const maxScheduleRetries = 10
@@ -50,10 +52,10 @@ type Controller struct {
 	cluster sche.SchedulerCluster
 	storage endpoint.ConfigStorage
 	// schedulers are used to manage all schedulers, which will only be initialized
-	// and used in the PD leader service mode now.
+	// and used in the non-microservice env now.
 	schedulers map[string]*ScheduleController
 	// schedulerHandlers is used to manage the HTTP handlers of schedulers,
-	// which will only be initialized and used in the API service mode now.
+	// which will only be initialized and used in the microservice env now.
 	schedulerHandlers map[string]http.Handler
 	opController      *operator.Controller
 }

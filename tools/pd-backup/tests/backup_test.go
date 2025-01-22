@@ -23,9 +23,10 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	clientv3 "go.etcd.io/etcd/client/v3"
+
 	"github.com/tikv/pd/tests"
 	"github.com/tikv/pd/tools/pd-backup/pdbackup"
-	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
 func TestBackup(t *testing.T) {
@@ -34,6 +35,7 @@ func TestBackup(t *testing.T) {
 	defer cancel()
 	cluster, err := tests.NewTestCluster(ctx, 1)
 	re.NoError(err)
+	defer cluster.Destroy()
 	err = cluster.RunInitialServers()
 	re.NoError(err)
 	re.NotEmpty(cluster.WaitLeader())
@@ -41,7 +43,6 @@ func TestBackup(t *testing.T) {
 	leaderServer.BootstrapCluster()
 	pdAddr := cluster.GetConfig().GetClientURL()
 	urls := strings.Split(pdAddr, ",")
-	defer cluster.Destroy()
 	client, err := clientv3.New(clientv3.Config{
 		Endpoints:   urls,
 		DialTimeout: 3 * time.Second,

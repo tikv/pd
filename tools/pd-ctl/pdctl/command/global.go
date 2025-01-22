@@ -24,12 +24,14 @@ import (
 	"os"
 	"strings"
 
+	"github.com/spf13/cobra"
+	"go.etcd.io/etcd/client/pkg/v3/transport"
+
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
-	"github.com/spf13/cobra"
+
 	pd "github.com/tikv/pd/client/http"
 	"github.com/tikv/pd/pkg/utils/apiutil"
-	"go.etcd.io/etcd/client/pkg/v3/transport"
 )
 
 const (
@@ -205,9 +207,9 @@ func dial(req *http.Request) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if req.Header.Get(apiutil.XForbiddenForwardToMicroServiceHeader) == "true" {
-		if resp.Header.Get(apiutil.XForwardedToMicroServiceHeader) == "true" {
-			return string(content), errors.Errorf("the request is forwarded to micro service unexpectedly")
+	if req.Header.Get(apiutil.XForbiddenForwardToMicroserviceHeader) == "true" {
+		if resp.Header.Get(apiutil.XForwardedToMicroserviceHeader) == "true" {
+			return string(content), errors.Errorf("the request is forwarded to microservice unexpectedly")
 		}
 	}
 	return string(content), nil

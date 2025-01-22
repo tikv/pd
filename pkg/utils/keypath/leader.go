@@ -20,12 +20,6 @@ import (
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 )
 
-// MsParam is the parameter of micro service.
-type MsParam struct {
-	ServiceName string
-	GroupID     uint32 // only used for tso keyspace group
-}
-
 // LeaderPath returns the leader path.
 func LeaderPath(p *MsParam) string {
 	if p == nil || p.ServiceName == "" {

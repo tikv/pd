@@ -19,14 +19,16 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/unrolled/render"
+	"github.com/urfave/negroni"
+
 	"github.com/pingcap/failpoint"
+
 	"github.com/tikv/pd/pkg/audit"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/requestutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/cluster"
-	"github.com/unrolled/render"
-	"github.com/urfave/negroni"
 )
 
 // serviceMiddlewareBuilder is used to build service middleware for HTTP api

@@ -17,10 +17,11 @@ package errs
 import (
 	"strings"
 
-	"github.com/pingcap/errors"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"google.golang.org/grpc/codes"
+
+	"github.com/pingcap/errors"
 )
 
 // IsLeaderChange will determine whether there is a leader/primary change.

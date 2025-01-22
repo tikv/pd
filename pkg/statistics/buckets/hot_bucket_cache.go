@@ -19,12 +19,14 @@ import (
 	"context"
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
+
 	"github.com/tikv/pd/pkg/core/rangetree"
 	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
-	"go.uber.org/zap"
 )
 
 type status int
@@ -199,7 +201,6 @@ func (h *HotBucketCache) checkBucketsFlow(buckets *metapb.Buckets) (newItem *Buc
 	}
 	newItem.inherit(overlaps)
 	newItem.calculateHotDegree()
-	newItem.collectBucketsMetrics()
 	return newItem, overlaps
 }
 

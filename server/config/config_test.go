@@ -26,6 +26,7 @@ import (
 	"github.com/BurntSushi/toml"
 	"github.com/spf13/pflag"
 	"github.com/stretchr/testify/require"
+
 	"github.com/tikv/pd/pkg/ratelimit"
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/storage"
@@ -276,7 +277,7 @@ func TestMigrateFlags(t *testing.T) {
 	}
 	cfg, err := load(`
 [pd-server]
-trace-region-flow = false
+flow-round-by-digit = 127
 [schedule]
 disable-remove-down-replica = true
 enable-make-up-replica = false

@@ -25,17 +25,19 @@ import (
 	"time"
 
 	"github.com/gogo/protobuf/proto"
+	"go.uber.org/zap"
+	"google.golang.org/grpc"
+
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/tsopb"
 	"github.com/pingcap/log"
+
 	"github.com/tikv/pd/client/clients/metastorage"
 	"github.com/tikv/pd/client/constants"
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/opt"
 	"github.com/tikv/pd/client/pkg/utils/grpcutil"
-	"go.uber.org/zap"
-	"google.golang.org/grpc"
 )
 
 const (
@@ -51,10 +53,7 @@ const (
 	tsoQueryRetryInterval = 500 * time.Millisecond
 )
 
-var (
-	_ ServiceDiscovery = (*tsoServiceDiscovery)(nil)
-	_ TSOEventSource   = (*tsoServiceDiscovery)(nil)
-)
+var _ ServiceDiscovery = (*tsoServiceDiscovery)(nil)
 
 // keyspaceGroupSvcDiscovery is used for discovering the serving endpoints of the keyspace
 // group to which the keyspace belongs
@@ -122,10 +121,10 @@ func (t *tsoServerDiscovery) resetFailure() {
 // tsoServiceDiscovery is the service discovery client of the independent TSO service
 
 type tsoServiceDiscovery struct {
-	metacli         metastorage.Client
-	apiSvcDiscovery ServiceDiscovery
-	clusterID       uint64
-	keyspaceID      atomic.Uint32
+	metacli          metastorage.Client
+	serviceDiscovery ServiceDiscovery
+	clusterID        uint64
+	keyspaceID       atomic.Uint32
 
 	// defaultDiscoveryKey is the etcd path used for discovering the serving endpoints of
 	// the default keyspace group
@@ -140,7 +139,7 @@ type tsoServiceDiscovery struct {
 	clientConns sync.Map // Store as map[string]*grpc.ClientConn
 
 	// tsoLeaderUpdatedCb will be called when the TSO leader is updated.
-	tsoLeaderUpdatedCb tsoLeaderURLUpdatedFunc
+	tsoLeaderUpdatedCb leaderSwitchedCallbackFunc
 
 	checkMembershipCh chan struct{}
 
@@ -157,7 +156,7 @@ type tsoServiceDiscovery struct {
 
 // NewTSOServiceDiscovery returns a new client-side service discovery for the independent TSO service.
 func NewTSOServiceDiscovery(
-	ctx context.Context, metacli metastorage.Client, apiSvcDiscovery ServiceDiscovery,
+	ctx context.Context, metacli metastorage.Client, serviceDiscovery ServiceDiscovery,
 	keyspaceID uint32, tlsCfg *tls.Config, option *opt.Option,
 ) ServiceDiscovery {
 	ctx, cancel := context.WithCancel(ctx)
@@ -165,8 +164,8 @@ func NewTSOServiceDiscovery(
 		ctx:               ctx,
 		cancel:            cancel,
 		metacli:           metacli,
-		apiSvcDiscovery:   apiSvcDiscovery,
-		clusterID:         apiSvcDiscovery.GetClusterID(),
+		serviceDiscovery:  serviceDiscovery,
+		clusterID:         serviceDiscovery.GetClusterID(),
 		tlsCfg:            tlsCfg,
 		option:            option,
 		checkMembershipCh: make(chan struct{}, 1),
@@ -347,7 +346,7 @@ func (c *tsoServiceDiscovery) ScheduleCheckMemberChanged() {
 // CheckMemberChanged Immediately check if there is any membership change among the primary/secondaries in
 // a primary/secondary configured cluster.
 func (c *tsoServiceDiscovery) CheckMemberChanged() error {
-	if err := c.apiSvcDiscovery.CheckMemberChanged(); err != nil {
+	if err := c.serviceDiscovery.CheckMemberChanged(); err != nil {
 		log.Warn("[tso] failed to check member changed", errs.ZapError(err))
 	}
 	if err := c.retry(tsoQueryRetryMaxTimes, tsoQueryRetryInterval, c.updateMember); err != nil {
@@ -357,16 +356,8 @@ func (c *tsoServiceDiscovery) CheckMemberChanged() error {
 	return nil
 }
 
-// AddServingURLSwitchedCallback adds callbacks which will be called when the primary in
-// a primary/secondary configured cluster is switched.
-func (*tsoServiceDiscovery) AddServingURLSwitchedCallback(...func()) {}
-
-// AddServiceURLsSwitchedCallback adds callbacks which will be called when any primary/secondary
-// in a primary/secondary configured cluster is changed.
-func (*tsoServiceDiscovery) AddServiceURLsSwitchedCallback(...func()) {}
-
-// SetTSOLeaderURLUpdatedCallback adds a callback which will be called when the TSO leader is updated.
-func (c *tsoServiceDiscovery) SetTSOLeaderURLUpdatedCallback(callback tsoLeaderURLUpdatedFunc) {
+// ExecAndAddLeaderSwitchedCallback executes the callback once and adds it to the callback list then.
+func (c *tsoServiceDiscovery) ExecAndAddLeaderSwitchedCallback(callback leaderSwitchedCallbackFunc) {
 	url := c.getPrimaryURL()
 	if len(url) > 0 {
 		if err := callback(url); err != nil {
@@ -376,19 +367,27 @@ func (c *tsoServiceDiscovery) SetTSOLeaderURLUpdatedCallback(callback tsoLeaderU
 	c.tsoLeaderUpdatedCb = callback
 }
 
+// AddLeaderSwitchedCallback adds callbacks which will be called when the primary in
+// a primary/secondary configured cluster is switched.
+func (*tsoServiceDiscovery) AddLeaderSwitchedCallback(leaderSwitchedCallbackFunc) {}
+
+// AddMembersChangedCallback adds callbacks which will be called when any primary/secondary
+// in a primary/secondary configured cluster is changed.
+func (*tsoServiceDiscovery) AddMembersChangedCallback(func()) {}
+
 // GetServiceClient implements ServiceDiscovery
 func (c *tsoServiceDiscovery) GetServiceClient() ServiceClient {
-	return c.apiSvcDiscovery.GetServiceClient()
+	return c.serviceDiscovery.GetServiceClient()
 }
 
 // GetServiceClientByKind implements ServiceDiscovery
 func (c *tsoServiceDiscovery) GetServiceClientByKind(kind APIKind) ServiceClient {
-	return c.apiSvcDiscovery.GetServiceClientByKind(kind)
+	return c.serviceDiscovery.GetServiceClientByKind(kind)
 }
 
 // GetAllServiceClients implements ServiceDiscovery
 func (c *tsoServiceDiscovery) GetAllServiceClients() []ServiceClient {
-	return c.apiSvcDiscovery.GetAllServiceClients()
+	return c.serviceDiscovery.GetAllServiceClients()
 }
 
 // getPrimaryURL returns the primary URL.
@@ -421,7 +420,7 @@ func (c *tsoServiceDiscovery) afterPrimarySwitched(oldPrimary, newPrimary string
 func (c *tsoServiceDiscovery) updateMember() error {
 	// The keyspace membership or the primary serving URL of the keyspace group, to which this
 	// keyspace belongs, might have been changed. We need to query tso servers to get the latest info.
-	tsoServerURL, err := c.getTSOServer(c.apiSvcDiscovery)
+	tsoServerURL, err := c.getTSOServer(c.serviceDiscovery)
 	if err != nil {
 		log.Error("[tso] failed to get tso server", errs.ZapError(err))
 		return err
@@ -585,7 +584,7 @@ func (c *tsoServiceDiscovery) getTSOServer(sd ServiceDiscovery) (string, error) 
 	)
 	t := c.tsoServerDiscovery
 	if len(t.urls) == 0 || t.failureCount == len(t.urls) {
-		urls, err = sd.(*pdServiceDiscovery).discoverMicroservice(tsoService)
+		urls, err = sd.(*serviceDiscovery).discoverMicroservice(tsoService)
 		if err != nil {
 			return "", err
 		}

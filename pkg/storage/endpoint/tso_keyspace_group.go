@@ -18,11 +18,12 @@ import (
 	"context"
 	"encoding/json"
 
+	clientv3 "go.etcd.io/etcd/client/v3"
+
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/typeutil"
-	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
 // UserKind represents the user kind.

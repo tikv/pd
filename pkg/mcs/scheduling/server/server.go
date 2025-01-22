@@ -28,6 +28,10 @@ import (
 	"time"
 
 	grpcprometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
+	"github.com/spf13/cobra"
+	"go.uber.org/zap"
+	"google.golang.org/grpc"
+
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/diagnosticspb"
@@ -35,7 +39,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/schedulingpb"
 	"github.com/pingcap/log"
 	"github.com/pingcap/sysutil"
-	"github.com/spf13/cobra"
+
 	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/pkg/core"
@@ -62,8 +66,6 @@ import (
 	"github.com/tikv/pd/pkg/utils/memberutil"
 	"github.com/tikv/pd/pkg/utils/metricutil"
 	"github.com/tikv/pd/pkg/versioninfo"
-	"go.uber.org/zap"
-	"google.golang.org/grpc"
 )
 
 var _ bs.Server = (*Server)(nil)
@@ -108,7 +110,7 @@ type Server struct {
 	hbStreams *hbstream.HeartbeatStreams
 	storage   *endpoint.StorageEndpoint
 
-	// for watching the PD API server meta info updates that are related to the scheduling.
+	// for watching the PD meta info updates that are related to the scheduling.
 	configWatcher *config.Watcher
 	ruleWatcher   *rule.Watcher
 	metaWatcher   *meta.Watcher
@@ -167,10 +169,10 @@ func (s *Server) startServerLoop() {
 	s.serverLoopCtx, s.serverLoopCancel = context.WithCancel(s.Context())
 	s.serverLoopWg.Add(2)
 	go s.primaryElectionLoop()
-	go s.updateAPIServerMemberLoop()
+	go s.updatePDMemberLoop()
 }
 
-func (s *Server) updateAPIServerMemberLoop() {
+func (s *Server) updatePDMemberLoop() {
 	defer logutil.LogPanic()
 	defer s.serverLoopWg.Done()
 
@@ -218,7 +220,7 @@ func (s *Server) updateAPIServerMemberLoop() {
 					// double check
 					break
 				}
-				if s.cluster.SwitchAPIServerLeader(pdpb.NewPDClient(cc)) {
+				if s.cluster.SwitchPDLeader(pdpb.NewPDClient(cc)) {
 					if status.Leader != curLeader {
 						log.Info("switch leader", zap.String("leader-id", fmt.Sprintf("%x", ep.ID)), zap.String("endpoint", ep.ClientURLs[0]))
 					}

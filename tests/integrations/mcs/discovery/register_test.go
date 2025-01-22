@@ -4,7 +4,7 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//	http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -21,13 +21,14 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/suite"
+	"go.uber.org/goleak"
+
 	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/mcs/discovery"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/tests"
-	"go.uber.org/goleak"
 )
 
 func TestMain(m *testing.M) {
@@ -53,7 +54,7 @@ func (suite *serverRegisterTestSuite) SetupSuite() {
 	re := suite.Require()
 
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
-	suite.cluster, err = tests.NewTestAPICluster(suite.ctx, 1)
+	suite.cluster, err = tests.NewTestClusterWithKeyspaceGroup(suite.ctx, 1)
 	re.NoError(err)
 
 	err = suite.cluster.RunInitialServers()
@@ -83,8 +84,7 @@ func (suite *serverRegisterTestSuite) checkServerRegister(serviceName string) {
 
 	addr := s.GetAddr()
 	client := suite.pdLeader.GetEtcdClient()
-	// test API server discovery
-
+	// test PD discovery
 	endpoints, err := discovery.Discover(client, serviceName)
 	re.NoError(err)
 	returnedEntry := &discovery.ServiceRegistryEntry{}
@@ -97,7 +97,7 @@ func (suite *serverRegisterTestSuite) checkServerRegister(serviceName string) {
 	re.True(exist)
 	re.Equal(expectedPrimary, primary)
 
-	// test API server discovery after unregister
+	// test PD discovery after unregister
 	cleanup()
 	endpoints, err = discovery.Discover(client, serviceName)
 	re.NoError(err)
@@ -139,7 +139,7 @@ func (suite *serverRegisterTestSuite) checkServerPrimaryChange(serviceName strin
 	delete(serverMap, primary)
 
 	expectedPrimary = tests.WaitForPrimaryServing(re, serverMap)
-	// test API server discovery
+	// test PD discovery
 	client := suite.pdLeader.GetEtcdClient()
 	endpoints, err := discovery.Discover(client, serviceName)
 	re.NoError(err)

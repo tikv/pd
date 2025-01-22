@@ -22,8 +22,11 @@ import (
 	"syscall"
 
 	grpcprometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
-	"github.com/pingcap/log"
 	"github.com/spf13/cobra"
+	"go.uber.org/zap"
+
+	"github.com/pingcap/log"
+
 	"github.com/tikv/pd/pkg/autoscaling"
 	"github.com/tikv/pd/pkg/dashboard"
 	"github.com/tikv/pd/pkg/errs"
@@ -41,7 +44,6 @@ import (
 	"github.com/tikv/pd/server/apiv2"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/server/join"
-	"go.uber.org/zap"
 
 	// register microservice API
 	_ "github.com/tikv/pd/pkg/mcs/resourcemanager/server/install"
@@ -80,7 +82,7 @@ func NewServiceCommand() *cobra.Command {
 	}
 	cmd.AddCommand(NewTSOServiceCommand())
 	cmd.AddCommand(NewSchedulingServiceCommand())
-	cmd.AddCommand(NewAPIServiceCommand())
+	cmd.AddCommand(NewPDServiceCommand())
 	return cmd
 }
 
@@ -126,12 +128,12 @@ func NewSchedulingServiceCommand() *cobra.Command {
 	return cmd
 }
 
-// NewAPIServiceCommand returns the API service command.
-func NewAPIServiceCommand() *cobra.Command {
+// NewPDServiceCommand returns the PD service command.
+func NewPDServiceCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   apiMode,
-		Short: "Run the API service",
-		Run:   createAPIServerWrapper,
+		Short: "Run the PD service",
+		Run:   createPDServiceWrapper,
 	}
 	addFlags(cmd)
 	return cmd
@@ -158,7 +160,7 @@ func addFlags(cmd *cobra.Command) {
 	cmd.Flags().BoolP("force-new-cluster", "", false, "force to create a new one-member cluster")
 }
 
-func createAPIServerWrapper(cmd *cobra.Command, args []string) {
+func createPDServiceWrapper(cmd *cobra.Command, args []string) {
 	start(cmd, args, cmd.CalledAs())
 }
 
@@ -216,11 +218,7 @@ func start(cmd *cobra.Command, args []string, services ...string) {
 	// Flushing any buffered log entries
 	defer log.Sync()
 	memory.InitMemoryHook()
-	if len(services) != 0 {
-		versioninfo.Log(server.APIServiceMode)
-	} else {
-		versioninfo.Log(server.PDMode)
-	}
+	versioninfo.Log(server.PD)
 
 	for _, msg := range cfg.WarningMsgs {
 		log.Warn(msg)

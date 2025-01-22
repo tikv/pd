@@ -15,10 +15,12 @@
 package server
 
 import (
-	"github.com/pingcap/log"
-	bs "github.com/tikv/pd/pkg/basicserver"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
+
+	"github.com/pingcap/log"
+
+	bs "github.com/tikv/pd/pkg/basicserver"
 )
 
 // Manager is the manager of meta storage.

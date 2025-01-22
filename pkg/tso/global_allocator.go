@@ -24,9 +24,12 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+	"go.uber.org/zap"
+
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
-	"github.com/prometheus/client_golang/prometheus"
+
 	"github.com/tikv/pd/pkg/election"
 	"github.com/tikv/pd/pkg/errs"
 	mcsutils "github.com/tikv/pd/pkg/mcs/utils"
@@ -34,7 +37,6 @@ import (
 	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/logutil"
-	"go.uber.org/zap"
 )
 
 // Allocator is a Timestamp Oracle allocator.
@@ -168,7 +170,7 @@ func (gta *GlobalTSOAllocator) Reset() {
 }
 
 // primaryElectionLoop is used to maintain the TSO primary election and TSO's
-// running allocator. It is only used in API mode.
+// running allocator. It is only used in microservice env.
 func (gta *GlobalTSOAllocator) primaryElectionLoop() {
 	defer logutil.LogPanic()
 	defer gta.wg.Done()
@@ -209,7 +211,7 @@ func (gta *GlobalTSOAllocator) primaryElectionLoop() {
 				zap.String("server-name", gta.member.Name()),
 				zap.String("expected-primary-id", expectedPrimary),
 				zap.Uint64("member-id", gta.member.ID()),
-				zap.String("cur-memberValue", gta.member.MemberValue()))
+				zap.String("cur-member-value", gta.member.MemberValue()))
 			time.Sleep(200 * time.Millisecond)
 			continue
 		}

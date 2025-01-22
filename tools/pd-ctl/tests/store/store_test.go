@@ -24,8 +24,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/require"
+	"go.etcd.io/etcd/client/pkg/v3/transport"
+
+	"github.com/pingcap/kvproto/pkg/metapb"
+
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/response"
@@ -35,7 +38,6 @@ import (
 	pdTests "github.com/tikv/pd/tests"
 	ctl "github.com/tikv/pd/tools/pd-ctl/pdctl"
 	"github.com/tikv/pd/tools/pd-ctl/tests"
-	"go.etcd.io/etcd/client/pkg/v3/transport"
 )
 
 func TestStoreLimitV2(t *testing.T) {
@@ -44,6 +46,7 @@ func TestStoreLimitV2(t *testing.T) {
 	defer cancel()
 	cluster, err := pdTests.NewTestCluster(ctx, 1)
 	re.NoError(err)
+	defer cluster.Destroy()
 	err = cluster.RunInitialServers()
 	re.NoError(err)
 	re.NotEmpty(cluster.WaitLeader())
@@ -52,7 +55,6 @@ func TestStoreLimitV2(t *testing.T) {
 
 	leaderServer := cluster.GetLeaderServer()
 	re.NoError(leaderServer.BootstrapCluster())
-	defer cluster.Destroy()
 
 	// store command
 	args := []string{"-u", pdAddr, "config", "set", "store-limit-version", "v2"}
@@ -482,13 +484,13 @@ func TestStore(t *testing.T) {
 	args = []string{"-u", pdAddr, "store", "limit", "all", "201"}
 	output, err = tests.ExecuteCommand(cmd, args...)
 	re.NoError(err)
-	re.Contains(string(output), "rate should less than")
+	re.Contains(string(output), "rate should be less than")
 
 	// store limit all 201 is invalid for label
 	args = []string{"-u", pdAddr, "store", "limit", "all", "engine", "key", "201", "add-peer"}
 	output, err = tests.ExecuteCommand(cmd, args...)
 	re.NoError(err)
-	re.Contains(string(output), "rate should less than")
+	re.Contains(string(output), "rate should be less than")
 }
 
 // https://github.com/tikv/pd/issues/5024

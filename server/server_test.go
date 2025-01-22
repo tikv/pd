@@ -25,15 +25,16 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+	etcdtypes "go.etcd.io/etcd/client/pkg/v3/types"
+	"go.etcd.io/etcd/server/v3/embed"
+	"go.uber.org/goleak"
+
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/assertutil"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server/config"
-	etcdtypes "go.etcd.io/etcd/client/pkg/v3/types"
-	"go.etcd.io/etcd/server/v3/embed"
-	"go.uber.org/goleak"
 )
 
 func TestMain(m *testing.M) {
@@ -265,13 +266,13 @@ func TestAPIService(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	mockHandler := CreateMockHandler(re, "127.0.0.1")
-	svr, err := CreateServer(ctx, cfg, []string{constant.APIServiceName}, mockHandler)
+	svr, err := CreateServer(ctx, cfg, []string{constant.PDServiceName}, mockHandler)
 	re.NoError(err)
 	defer svr.Close()
 	err = svr.Run()
 	re.NoError(err)
 	MustWaitLeader(re, []*Server{svr})
-	re.True(svr.IsAPIServiceMode())
+	re.True(svr.IsKeyspaceGroupEnabled())
 }
 
 func TestIsPathInDirectory(t *testing.T) {

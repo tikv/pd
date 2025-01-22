@@ -20,9 +20,11 @@ import (
 	"math"
 	"time"
 
-	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/smallnest/chanx"
+
+	"github.com/pingcap/kvproto/pkg/metapb"
+
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/statistics/utils"
@@ -133,30 +135,6 @@ func (f *HotPeerCache) incMetrics(action utils.ActionType, storeID uint64) {
 	f.metrics[storeID][action].Inc()
 }
 
-func (f *HotPeerCache) collectPeerMetrics(loads []float64, interval uint64) {
-	regionHeartbeatIntervalHist.Observe(float64(interval))
-	if interval == 0 {
-		return
-	}
-	// TODO: use unified metrics. (keep backward compatibility at the same time)
-	for _, k := range f.kind.RegionStats() {
-		switch k {
-		case utils.RegionReadBytes:
-			readByteHist.Observe(loads[int(k)])
-		case utils.RegionReadKeys:
-			readKeyHist.Observe(loads[int(k)])
-		case utils.RegionWriteBytes:
-			writeByteHist.Observe(loads[int(k)])
-		case utils.RegionWriteKeys:
-			writeKeyHist.Observe(loads[int(k)])
-		case utils.RegionWriteQueryNum:
-			writeQueryHist.Observe(loads[int(k)])
-		case utils.RegionReadQueryNum:
-			readQueryHist.Observe(loads[int(k)])
-		}
-	}
-}
-
 // CollectExpiredItems collects expired items, mark them as needDelete and puts them into inherit items
 func (f *HotPeerCache) CollectExpiredItems(region *core.RegionInfo) []*HotPeerStat {
 	regionID := region.GetID()
@@ -183,7 +161,6 @@ func (f *HotPeerCache) CheckPeerFlow(region *core.RegionInfo, peers []*metapb.Pe
 		return nil
 	}
 
-	f.collectPeerMetrics(deltaLoads, interval) // update metrics
 	regionID := region.GetID()
 
 	regionPeers := region.GetPeers()

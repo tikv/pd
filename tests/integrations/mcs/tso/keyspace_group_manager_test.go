@@ -25,10 +25,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pingcap/failpoint"
-	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+
+	"github.com/pingcap/failpoint"
+	"github.com/pingcap/kvproto/pkg/pdpb"
+
 	pd "github.com/tikv/pd/client"
 	clierrs "github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/pkg/caller"
@@ -80,7 +82,7 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) SetupSuite() {
 
 	var err error
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
-	suite.cluster, err = tests.NewTestAPICluster(suite.ctx, 1)
+	suite.cluster, err = tests.NewTestClusterWithKeyspaceGroup(suite.ctx, 1)
 	re.NoError(err)
 	err = suite.cluster.RunInitialServers()
 	re.NoError(err)
@@ -535,19 +537,19 @@ func TestTwiceSplitKeyspaceGroup(t *testing.T) {
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/acceleratedAllocNodes", `return(true)`))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/fastGroupSplitPatroller", `return(true)`))
 
-	// Init api server config but not start.
-	tc, err := tests.NewTestAPICluster(ctx, 1, func(conf *config.Config, _ string) {
+	// Init PD config but not start.
+	tc, err := tests.NewTestClusterWithKeyspaceGroup(ctx, 1, func(conf *config.Config, _ string) {
 		conf.Keyspace.PreAlloc = []string{
 			"keyspace_a", "keyspace_b",
 		}
 	})
 	re.NoError(err)
+	defer tc.Destroy()
 	pdAddr := tc.GetConfig().GetClientURL()
 
-	// Start api server and tso server.
+	// Start PD and tso server.
 	err = tc.RunInitialServers()
 	re.NoError(err)
-	defer tc.Destroy()
 	tc.WaitLeader()
 	leaderServer := tc.GetLeaderServer()
 	re.NoError(leaderServer.BootstrapCluster())
@@ -732,19 +734,19 @@ func TestGetTSOImmediately(t *testing.T) {
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/acceleratedAllocNodes", `return(true)`))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/fastGroupSplitPatroller", `return(true)`))
 
-	// Init api server config but not start.
-	tc, err := tests.NewTestAPICluster(ctx, 1, func(conf *config.Config, _ string) {
+	// Init PD config but not start.
+	tc, err := tests.NewTestClusterWithKeyspaceGroup(ctx, 1, func(conf *config.Config, _ string) {
 		conf.Keyspace.PreAlloc = []string{
 			"keyspace_a", "keyspace_b",
 		}
 	})
 	re.NoError(err)
+	defer tc.Destroy()
 	pdAddr := tc.GetConfig().GetClientURL()
 
-	// Start api server and tso server.
+	// Start PD and tso server.
 	err = tc.RunInitialServers()
 	re.NoError(err)
-	defer tc.Destroy()
 	tc.WaitLeader()
 	leaderServer := tc.GetLeaderServer()
 	re.NoError(leaderServer.BootstrapCluster())

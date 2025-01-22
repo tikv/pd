@@ -22,15 +22,16 @@ import (
 	"sync"
 	"time"
 
-	cb "github.com/tikv/pd/client/circuitbreaker"
-
 	"github.com/opentracing/opentracing-go"
+	"github.com/prometheus/client_golang/prometheus"
+	"go.uber.org/zap"
+
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
-	"github.com/prometheus/client_golang/prometheus"
+
 	"github.com/tikv/pd/client/clients/metastorage"
 	"github.com/tikv/pd/client/clients/router"
 	"github.com/tikv/pd/client/clients/tso"
@@ -41,7 +42,6 @@ import (
 	"github.com/tikv/pd/client/pkg/caller"
 	"github.com/tikv/pd/client/pkg/utils/tlsutil"
 	sd "github.com/tikv/pd/client/servicediscovery"
-	"go.uber.org/zap"
 )
 
 // GlobalConfigItem standard format of KV pair in GlobalConfig client
@@ -99,16 +99,6 @@ type RPCClient interface {
 	// SetExternalTimestamp sets external timestamp
 	SetExternalTimestamp(ctx context.Context, timestamp uint64) error
 
-	// WithCallerComponent returns a new RPCClient with the specified caller
-	// component. Caller component refers to the specific part or module within
-	// the process. You can set the component in two ways:
-	//   * Define it manually, like `caller.Component("DDL")`.
-	//   * Use the provided helper function, `caller.GetComponent(upperLayer)`.
-	//     The upperLayer parameter specifies the depth of the caller stack,
-	//     where 0 means the current function. Adjust the upperLayer value based
-	//     on your needs.
-	WithCallerComponent(callerComponent caller.Component) RPCClient
-
 	router.Client
 	tso.Client
 	metastorage.Client
@@ -135,6 +125,15 @@ type Client interface {
 
 	// UpdateOption updates the client option.
 	UpdateOption(option opt.DynamicOption, value any) error
+	// WithCallerComponent returns a new Client with the specified caller
+	// component. Caller component refers to the specific part or module within
+	// the process. You can set the component in two ways:
+	//   * Define it manually, like `caller.Component("DDL")`.
+	//   * Use the provided helper function, `caller.GetComponent(upperLayer)`.
+	//     The upperLayer parameter specifies the depth of the caller stack,
+	//     where 0 means the current function. Adjust the upperLayer value based
+	//     on your needs.
+	WithCallerComponent(callerComponent caller.Component) Client
 
 	// Close closes the client.
 	Close()
@@ -361,8 +360,8 @@ func newClientWithKeyspaceName(
 	c := &client{
 		callerComponent: adjustCallerComponent(callerComponent),
 		inner: &innerClient{
-			// Create a PD service discovery with null keyspace id, then query the real id with the keyspace name,
-			// finally update the keyspace id to the PD service discovery for the following interactions.
+			// Create a service discovery with null keyspace id, then query the real id with the keyspace name,
+			// finally update the keyspace id to the service discovery for the following interactions.
 			keyspaceID:              constants.NullKeyspaceID,
 			updateTokenConnectionCh: make(chan struct{}, 1),
 			ctx:                     clientCtx,
@@ -385,7 +384,7 @@ func newClientWithKeyspaceName(
 		}
 		c.inner.keyspaceID = keyspaceMeta.GetId()
 		// c.keyspaceID is the source of truth for keyspace id.
-		c.inner.pdSvcDiscovery.SetKeyspaceID(c.inner.keyspaceID)
+		c.inner.serviceDiscovery.SetKeyspaceID(c.inner.keyspaceID)
 		return nil
 	}
 
@@ -413,17 +412,17 @@ func (c *client) ResetTSOClient() {
 
 // GetClusterID returns the ClusterID.
 func (c *client) GetClusterID(context.Context) uint64 {
-	return c.inner.pdSvcDiscovery.GetClusterID()
+	return c.inner.serviceDiscovery.GetClusterID()
 }
 
 // GetLeaderURL returns the leader URL.
 func (c *client) GetLeaderURL() string {
-	return c.inner.pdSvcDiscovery.GetServingURL()
+	return c.inner.serviceDiscovery.GetServingURL()
 }
 
 // GetServiceDiscovery returns the client-side service discovery object
 func (c *client) GetServiceDiscovery() sd.ServiceDiscovery {
-	return c.inner.pdSvcDiscovery
+	return c.inner.serviceDiscovery
 }
 
 // UpdateOption updates the client option.
@@ -439,7 +438,7 @@ func (c *client) UpdateOption(option opt.DynamicOption, value any) error {
 		}
 	case opt.EnableTSOFollowerProxy:
 		if c.inner.getServiceMode() != pdpb.ServiceMode_PD_SVC_MODE {
-			return errors.New("[pd] tso follower proxy is only supported in PD service mode")
+			return errors.New("[pd] tso follower proxy is only supported when PD provides TSO")
 		}
 		enable, ok := value.(bool)
 		if !ok {
@@ -458,12 +457,6 @@ func (c *client) UpdateOption(option opt.DynamicOption, value any) error {
 			return errors.New("[pd] invalid value type for TSOClientRPCConcurrency option, it should be int")
 		}
 		c.inner.option.SetTSOClientRPCConcurrency(value)
-	case opt.RegionMetadataCircuitBreakerSettings:
-		applySettingsChange, ok := value.(func(config *cb.Settings))
-		if !ok {
-			return errors.New("[pd] invalid value type for RegionMetadataCircuitBreakerSettings option, it should be pd.Settings")
-		}
-		c.inner.regionMetaCircuitBreaker.ChangeSettings(applySettingsChange)
 	default:
 		return errors.New("[pd] unsupported client option")
 	}
@@ -492,7 +485,7 @@ func (c *client) GetAllMembers(ctx context.Context) ([]*pdpb.Member, error) {
 // getClientAndContext returns the leader pd client and the original context. If leader is unhealthy, it returns
 // follower pd client and the context which holds forward information.
 func (c *client) getClientAndContext(ctx context.Context) (pdpb.PDClient, context.Context) {
-	serviceClient := c.inner.pdSvcDiscovery.GetServiceClient()
+	serviceClient := c.inner.serviceDiscovery.GetServiceClient()
 	if serviceClient == nil || serviceClient.GetClientConn() == nil {
 		return nil, ctx
 	}
@@ -533,7 +526,7 @@ func (c *client) GetLocalTS(ctx context.Context, _ string) (physical int64, logi
 
 // GetMinTS implements the TSOClient interface.
 func (c *client) GetMinTS(ctx context.Context) (physical int64, logical int64, err error) {
-	// Handle compatibility issue in case of PD/API server doesn't support GetMinTS API.
+	// Handle compatibility issue in case of PD doesn't support GetMinTS API.
 	serviceMode := c.inner.getServiceMode()
 	switch serviceMode {
 	case pdpb.ServiceMode_UNKNOWN_SVC_MODE:
@@ -605,7 +598,7 @@ func (c *client) GetRegionFromMember(ctx context.Context, key []byte, memberURLs
 
 	var resp *pdpb.GetRegionResponse
 	for _, url := range memberURLs {
-		conn, err := c.inner.pdSvcDiscovery.GetOrCreateGRPCConn(url)
+		conn, err := c.inner.serviceDiscovery.GetOrCreateGRPCConn(url)
 		if err != nil {
 			log.Error("[pd] can't get grpc connection", zap.String("member-URL", url), errs.ZapError(err))
 			continue
@@ -626,7 +619,7 @@ func (c *client) GetRegionFromMember(ctx context.Context, key []byte, memberURLs
 
 	if resp == nil {
 		metrics.CmdFailedDurationGetRegion.Observe(time.Since(start).Seconds())
-		c.inner.pdSvcDiscovery.ScheduleCheckMemberChanged()
+		c.inner.serviceDiscovery.ScheduleCheckMemberChanged()
 		errorMsg := fmt.Sprintf("[pd] can't get region info from member URLs: %+v", memberURLs)
 		return nil, errors.WithStack(errors.New(errorMsg))
 	}
@@ -658,10 +651,7 @@ func (c *client) GetRegion(ctx context.Context, key []byte, opts ...opt.GetRegio
 	if serviceClient == nil {
 		return nil, errs.ErrClientGetProtoClient
 	}
-	resp, err := c.inner.regionMetaCircuitBreaker.Execute(func() (*pdpb.GetRegionResponse, cb.Overloading, error) {
-		region, err := pdpb.NewPDClient(serviceClient.GetClientConn()).GetRegion(cctx, req)
-		return region, isOverloaded(err), err
-	})
+	resp, err := pdpb.NewPDClient(serviceClient.GetClientConn()).GetRegion(cctx, req)
 	if serviceClient.NeedRetry(resp.GetHeader().GetError(), err) {
 		protoClient, cctx := c.getClientAndContext(ctx)
 		if protoClient == nil {
@@ -701,10 +691,7 @@ func (c *client) GetPrevRegion(ctx context.Context, key []byte, opts ...opt.GetR
 	if serviceClient == nil {
 		return nil, errs.ErrClientGetProtoClient
 	}
-	resp, err := c.inner.regionMetaCircuitBreaker.Execute(func() (*pdpb.GetRegionResponse, cb.Overloading, error) {
-		resp, err := pdpb.NewPDClient(serviceClient.GetClientConn()).GetPrevRegion(cctx, req)
-		return resp, isOverloaded(err), err
-	})
+	resp, err := pdpb.NewPDClient(serviceClient.GetClientConn()).GetPrevRegion(cctx, req)
 	if serviceClient.NeedRetry(resp.GetHeader().GetError(), err) {
 		protoClient, cctx := c.getClientAndContext(ctx)
 		if protoClient == nil {
@@ -744,10 +731,8 @@ func (c *client) GetRegionByID(ctx context.Context, regionID uint64, opts ...opt
 	if serviceClient == nil {
 		return nil, errs.ErrClientGetProtoClient
 	}
-	resp, err := c.inner.regionMetaCircuitBreaker.Execute(func() (*pdpb.GetRegionResponse, cb.Overloading, error) {
-		resp, err := pdpb.NewPDClient(serviceClient.GetClientConn()).GetRegionByID(cctx, req)
-		return resp, isOverloaded(err), err
-	})
+
+	resp, err := pdpb.NewPDClient(serviceClient.GetClientConn()).GetRegionByID(cctx, req)
 	if serviceClient.NeedRetry(resp.GetHeader().GetError(), err) {
 		protoClient, cctx := c.getClientAndContext(ctx)
 		if protoClient == nil {
@@ -1165,7 +1150,7 @@ func (c *client) SplitRegions(ctx context.Context, splitKeys [][]byte, opts ...o
 
 func (c *client) requestHeader() *pdpb.RequestHeader {
 	return &pdpb.RequestHeader{
-		ClusterId:       c.inner.pdSvcDiscovery.GetClusterID(),
+		ClusterId:       c.inner.serviceDiscovery.GetClusterID(),
 		CallerId:        string(caller.GetCallerID()),
 		CallerComponent: string(c.callerComponent),
 	}
@@ -1349,7 +1334,7 @@ func (c *client) respForErr(observer prometheus.Observer, start time.Time, err e
 	if err != nil || header.GetError() != nil {
 		observer.Observe(time.Since(start).Seconds())
 		if err != nil {
-			c.inner.pdSvcDiscovery.ScheduleCheckMemberChanged()
+			c.inner.serviceDiscovery.ScheduleCheckMemberChanged()
 			return errors.WithStack(err)
 		}
 		return errors.WithStack(errors.New(header.GetError().String()))
@@ -1358,7 +1343,7 @@ func (c *client) respForErr(observer prometheus.Observer, start time.Time, err e
 }
 
 // WithCallerComponent implements the RPCClient interface.
-func (c *client) WithCallerComponent(callerComponent caller.Component) RPCClient {
+func (c *client) WithCallerComponent(callerComponent caller.Component) Client {
 	newClient := *c
 	newClient.callerComponent = callerComponent
 	return &newClient

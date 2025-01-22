@@ -18,12 +18,14 @@ import (
 	"bytes"
 	"math/rand"
 
+	"go.uber.org/zap"
+
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
+
 	"github.com/tikv/pd/pkg/btree"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/logutil"
-	"go.uber.org/zap"
 )
 
 type regionItem struct {
@@ -251,6 +253,26 @@ func (t *regionTree) searchPrev(regionKey []byte) *RegionInfo {
 		return nil
 	}
 	return prevRegionItem.RegionInfo
+}
+
+// searchByKeys searches the regions by keys and return a slice of `*RegionInfo` whose order is the same as the input keys.
+func (t *regionTree) searchByKeys(keys [][]byte) []*RegionInfo {
+	regions := make([]*RegionInfo, len(keys))
+	// TODO: do we need to deduplicate the input keys?
+	for idx, key := range keys {
+		regions[idx] = t.search(key)
+	}
+	return regions
+}
+
+// searchByPrevKeys searches the regions by prevKeys and return a slice of `*RegionInfo` whose order is the same as the input keys.
+func (t *regionTree) searchByPrevKeys(prevKeys [][]byte) []*RegionInfo {
+	regions := make([]*RegionInfo, len(prevKeys))
+	// TODO: do we need to deduplicate the input keys?
+	for idx, key := range prevKeys {
+		regions[idx] = t.searchPrev(key)
+	}
+	return regions
 }
 
 // find returns the range item contains the start key.

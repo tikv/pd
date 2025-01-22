@@ -24,25 +24,27 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pingcap/failpoint"
-	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/pingcap/log"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
-	"github.com/tikv/pd/client/pkg/utils/tsoutil"
-	"github.com/tikv/pd/pkg/utils/testutil"
-	"github.com/tikv/pd/tests"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+
+	"github.com/pingcap/failpoint"
+	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/log"
+
+	"github.com/tikv/pd/client/pkg/utils/tsoutil"
+	"github.com/tikv/pd/pkg/utils/testutil"
+	"github.com/tikv/pd/tests"
 )
 
 type tsoProxyTestSuite struct {
 	suite.Suite
 	ctx              context.Context
 	cancel           context.CancelFunc
-	apiCluster       *tests.TestCluster
-	apiLeader        *tests.TestServer
+	cluster          *tests.TestCluster
+	leader           *tests.TestServer
 	backendEndpoints string
 	tsoCluster       *tests.TestTSOCluster
 	defaultReq       *pdpb.TsoRequest
@@ -60,15 +62,15 @@ func (s *tsoProxyTestSuite) SetupSuite() {
 	var err error
 	s.ctx, s.cancel = context.WithCancel(context.Background())
 	// Create an API cluster with 1 server
-	s.apiCluster, err = tests.NewTestAPICluster(s.ctx, 1)
+	s.cluster, err = tests.NewTestClusterWithKeyspaceGroup(s.ctx, 1)
 	re.NoError(err)
-	err = s.apiCluster.RunInitialServers()
+	err = s.cluster.RunInitialServers()
 	re.NoError(err)
-	leaderName := s.apiCluster.WaitLeader()
+	leaderName := s.cluster.WaitLeader()
 	re.NotEmpty(leaderName)
-	s.apiLeader = s.apiCluster.GetServer(leaderName)
-	s.backendEndpoints = s.apiLeader.GetAddr()
-	re.NoError(s.apiLeader.BootstrapCluster())
+	s.leader = s.cluster.GetServer(leaderName)
+	s.backendEndpoints = s.leader.GetAddr()
+	re.NoError(s.leader.BootstrapCluster())
 
 	// Create a TSO cluster with 2 servers
 	s.tsoCluster, err = tests.NewTestTSOCluster(s.ctx, 2, s.backendEndpoints)
@@ -76,7 +78,7 @@ func (s *tsoProxyTestSuite) SetupSuite() {
 	s.tsoCluster.WaitForDefaultPrimaryServing(re)
 
 	s.defaultReq = &pdpb.TsoRequest{
-		Header: &pdpb.RequestHeader{ClusterId: s.apiLeader.GetClusterID()},
+		Header: &pdpb.RequestHeader{ClusterId: s.leader.GetClusterID()},
 		Count:  1,
 	}
 
@@ -87,7 +89,7 @@ func (s *tsoProxyTestSuite) SetupSuite() {
 func (s *tsoProxyTestSuite) TearDownSuite() {
 	cleanupGRPCStreams(s.cleanupFuncs)
 	s.tsoCluster.Destroy()
-	s.apiCluster.Destroy()
+	s.cluster.Destroy()
 	s.cancel()
 }
 
@@ -360,7 +362,7 @@ func (s *tsoProxyTestSuite) generateRequests(requestsPerClient int) []*pdpb.TsoR
 	reqs := make([]*pdpb.TsoRequest, requestsPerClient)
 	for i := range requestsPerClient {
 		reqs[i] = &pdpb.TsoRequest{
-			Header: &pdpb.RequestHeader{ClusterId: s.apiLeader.GetClusterID()},
+			Header: &pdpb.RequestHeader{ClusterId: s.leader.GetClusterID()},
 			Count:  uint32(i) + 1, // Make sure the count is positive.
 		}
 	}

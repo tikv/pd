@@ -24,10 +24,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pingcap/failpoint"
-	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+
+	"github.com/pingcap/failpoint"
+	"github.com/pingcap/kvproto/pkg/metapb"
+
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/slice"
@@ -39,19 +41,19 @@ import (
 
 type scheduleTestSuite struct {
 	suite.Suite
-	env     *tests.SchedulingTestEnvironment
-	runMode tests.SchedulerMode
+	te  *tests.SchedulingTestEnvironment
+	env tests.Env
 }
 
-func TestPDSchedulingTestSuite(t *testing.T) {
+func TestNonMicroserviceSchedulingTestSuite(t *testing.T) {
 	suite.Run(t, &scheduleTestSuite{
-		runMode: tests.PDMode,
+		env: tests.NonMicroserviceEnv,
 	})
 }
 
-func TestAPISchedulingTestSuite(t *testing.T) {
+func TestMicroserviceSchedulingTestSuite(t *testing.T) {
 	suite.Run(t, &scheduleTestSuite{
-		runMode: tests.APIMode,
+		env: tests.MicroserviceEnv,
 	})
 }
 
@@ -59,19 +61,19 @@ func (suite *scheduleTestSuite) SetupSuite() {
 	re := suite.Require()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/changeCoordinatorTicker", `return(true)`))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/skipStoreConfigSync", `return(true)`))
-	suite.env = tests.NewSchedulingTestEnvironment(suite.T())
-	suite.env.RunMode = suite.runMode
+	suite.te = tests.NewSchedulingTestEnvironment(suite.T())
+	suite.te.Env = suite.env
 }
 
 func (suite *scheduleTestSuite) TearDownSuite() {
 	re := suite.Require()
-	suite.env.Cleanup()
+	suite.te.Cleanup()
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/skipStoreConfigSync"))
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/changeCoordinatorTicker"))
 }
 
 func (suite *scheduleTestSuite) TestOriginAPI() {
-	suite.env.RunTestBasedOnMode(suite.checkOriginAPI)
+	suite.te.RunTest(suite.checkOriginAPI)
 }
 
 func (suite *scheduleTestSuite) checkOriginAPI(cluster *tests.TestCluster) {
@@ -153,7 +155,7 @@ func (suite *scheduleTestSuite) checkOriginAPI(cluster *tests.TestCluster) {
 }
 
 func (suite *scheduleTestSuite) TestAPI() {
-	suite.env.RunTestBasedOnMode(suite.checkAPI)
+	suite.te.RunTest(suite.checkAPI)
 }
 
 func (suite *scheduleTestSuite) checkAPI(cluster *tests.TestCluster) {
@@ -650,7 +652,7 @@ func (suite *scheduleTestSuite) checkAPI(cluster *tests.TestCluster) {
 }
 
 func (suite *scheduleTestSuite) TestDisable() {
-	suite.env.RunTestBasedOnMode(suite.checkDisable)
+	suite.te.RunTest(suite.checkDisable)
 }
 
 func (suite *scheduleTestSuite) checkDisable(cluster *tests.TestCluster) {
@@ -761,7 +763,7 @@ func (suite *scheduleTestSuite) testPauseOrResume(re *require.Assertions, urlPre
 }
 
 func (suite *scheduleTestSuite) TestEmptySchedulers() {
-	suite.env.RunTestBasedOnMode(suite.checkEmptySchedulers)
+	suite.te.RunTest(suite.checkEmptySchedulers)
 }
 
 func (suite *scheduleTestSuite) checkEmptySchedulers(cluster *tests.TestCluster) {

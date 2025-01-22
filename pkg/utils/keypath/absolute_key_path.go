@@ -102,6 +102,12 @@ const (
 	msTimestampPathFormat = "/ms/%d/tso/%05d/gta/timestamp" // "/ms/{cluster_id}/tso/{group_id}/gta/timestamp"
 )
 
+// MsParam is the parameter of microservice.
+type MsParam struct {
+	ServiceName string
+	GroupID     uint32 // only used for tso keyspace group
+}
+
 // Prefix returns the parent directory of the given path.
 func Prefix(str string) string {
 	return path.Dir(str)

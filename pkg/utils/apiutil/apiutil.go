@@ -33,13 +33,15 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/mux"
 	"github.com/joho/godotenv"
+	"github.com/unrolled/render"
+	"go.uber.org/zap"
+
 	"github.com/pingcap/errcode"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
+
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/slice"
-	"github.com/unrolled/render"
-	"go.uber.org/zap"
 )
 
 const (
@@ -62,10 +64,10 @@ const (
 	XRealIPHeader = "X-Real-Ip"
 	// XCallerIDHeader is used to mark the caller ID.
 	XCallerIDHeader = "X-Caller-ID"
-	// XForbiddenForwardToMicroServiceHeader is used to indicate that forwarding the request to a microservice is explicitly disallowed.
-	XForbiddenForwardToMicroServiceHeader = "X-Forbidden-Forward-To-MicroService"
-	// XForwardedToMicroServiceHeader is used to signal that the request has already been forwarded to a microservice.
-	XForwardedToMicroServiceHeader = "X-Forwarded-To-MicroService"
+	// XForbiddenForwardToMicroserviceHeader is used to indicate that forwarding the request to a microservice is explicitly disallowed.
+	XForbiddenForwardToMicroserviceHeader = "X-Forbidden-Forward-To-Microservice"
+	// XForwardedToMicroserviceHeader is used to signal that the request has already been forwarded to a microservice.
+	XForwardedToMicroserviceHeader = "X-Forwarded-To-Microservice"
 
 	chunkSize = 4096
 )

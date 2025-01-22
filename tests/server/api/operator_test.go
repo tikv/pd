@@ -24,8 +24,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/suite"
+
+	"github.com/pingcap/kvproto/pkg/metapb"
+
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
@@ -55,7 +57,7 @@ func (suite *operatorTestSuite) TearDownSuite() {
 }
 
 func (suite *operatorTestSuite) TestAddRemovePeer() {
-	suite.env.RunTestBasedOnMode(suite.checkAddRemovePeer)
+	suite.env.RunTest(suite.checkAddRemovePeer)
 }
 
 func (suite *operatorTestSuite) checkAddRemovePeer(cluster *tests.TestCluster) {
@@ -165,7 +167,7 @@ func (suite *operatorTestSuite) checkAddRemovePeer(cluster *tests.TestCluster) {
 }
 
 func (suite *operatorTestSuite) TestMergeRegionOperator() {
-	suite.env.RunTestBasedOnMode(suite.checkMergeRegionOperator)
+	suite.env.RunTest(suite.checkMergeRegionOperator)
 }
 
 func (suite *operatorTestSuite) checkMergeRegionOperator(cluster *tests.TestCluster) {
@@ -225,7 +227,7 @@ func (suite *operatorTestSuite) TestTransferRegionWithPlacementRule() {
 		func(conf *config.Config, _ string) {
 			conf.Replication.MaxReplicas = 3
 		})
-	env.RunTestBasedOnMode(suite.checkTransferRegionWithPlacementRule)
+	env.RunTest(suite.checkTransferRegionWithPlacementRule)
 	env.Cleanup()
 }
 
@@ -470,7 +472,7 @@ func (suite *operatorTestSuite) checkTransferRegionWithPlacementRule(cluster *te
 				svr.GetRaftCluster().GetOpts().GetMaxReplicas(),
 				svr.GetRaftCluster().GetOpts().GetLocationLabels(),
 				svr.GetRaftCluster().GetOpts().GetIsolationLevel(),
-			)
+				false)
 			re.NoError(err)
 		}
 		if len(testCase.rules) > 0 {
@@ -505,7 +507,7 @@ func (suite *operatorTestSuite) TestGetOperatorsAsObject() {
 		func(conf *config.Config, _ string) {
 			conf.Replication.MaxReplicas = 1
 		})
-	env.RunTestBasedOnMode(suite.checkGetOperatorsAsObject)
+	env.RunTest(suite.checkGetOperatorsAsObject)
 	env.Cleanup()
 }
 
@@ -602,7 +604,7 @@ func (suite *operatorTestSuite) checkGetOperatorsAsObject(cluster *tests.TestClu
 }
 
 func (suite *operatorTestSuite) TestRemoveOperators() {
-	suite.env.RunTestBasedOnMode(suite.checkRemoveOperators)
+	suite.env.RunTest(suite.checkRemoveOperators)
 }
 
 func (suite *operatorTestSuite) checkRemoveOperators(cluster *tests.TestCluster) {

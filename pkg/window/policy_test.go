@@ -1,6 +1,3 @@
-// The MIT License (MIT)
-// Copyright (c) 2022 go-kratos Project Authors.
-//
 // Copyright 2023 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -15,10 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// The MIT License (MIT)
+// Copyright (c) 2022 go-kratos Project Authors.
+
 package window
 
 import (
-	"fmt"
 	"math"
 	"testing"
 	"time"
@@ -79,11 +78,11 @@ func TestRollingPolicy_Add(t *testing.T) {
 					asExpected = false
 				}
 				if asExpected {
-					re.Less(math.Abs(point-policy.window.buckets[offset].Points[0]), 1e-6,
-						fmt.Sprintf("error, time since last append: %vms, last offset: %v", totalTS, lastOffset))
+					re.Lessf(math.Abs(point-policy.window.buckets[offset].Points[0]), 1e-6,
+						"error, time since last append: %vms, last offset: %v", totalTS, lastOffset)
 				}
-				re.Less(math.Abs(points[i]-policy.window.buckets[offset].Points[0]), 1e-6,
-					fmt.Sprintf("error, time since last append: %vms, last offset: %v", totalTS, lastOffset))
+				re.Lessf(math.Abs(points[i]-policy.window.buckets[offset].Points[0]), 1e-6,
+					"error, time since last append: %vms, last offset: %v", totalTS, lastOffset)
 				lastOffset = offset
 			}
 		})
