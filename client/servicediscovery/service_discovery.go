@@ -126,16 +126,16 @@ type ServiceDiscovery interface {
 	// CheckMemberChanged immediately check if there is any membership change among the leader/followers
 	// in a quorum-based cluster or among the primary/secondaries in a primary/secondary configured cluster.
 	CheckMemberChanged() error
-	// ExecuteAndAddServingURLSwitchedCallback executes the callback once and adds it to the callback list then.
-	ExecuteAndAddServingURLSwitchedCallback(cb leaderSwitchedCallbackFunc)
-	// AddServingURLSwitchedCallback adds callbacks which will be called when the leader
+	// ExecAndAddLeaderSwitchedCallback executes the callback once and adds it to the callback list then.
+	ExecAndAddLeaderSwitchedCallback(cb leaderSwitchedCallbackFunc)
+	// AddLeaderSwitchedCallback adds callbacks which will be called when the leader
 	// in a quorum-based cluster or the primary in a primary/secondary configured cluster
 	// is switched.
-	AddServingURLSwitchedCallback(cb leaderSwitchedCallbackFunc)
-	// AddServiceURLsSwitchedCallback adds callbacks which will be called when any leader/follower
+	AddLeaderSwitchedCallback(cb leaderSwitchedCallbackFunc)
+	// AddMembersChangedCallback adds callbacks which will be called when any leader/follower
 	// in a quorum-based cluster or any primary/secondary in a primary/secondary configured cluster
 	// is changed.
-	AddServiceURLsSwitchedCallback(cb func())
+	AddMembersChangedCallback(cb func())
 }
 
 // ServiceClient is an interface that defines a set of operations for a raw PD gRPC client to specific PD server.
@@ -776,8 +776,8 @@ func (c *serviceDiscovery) CheckMemberChanged() error {
 	return c.updateMember()
 }
 
-// ExecuteAndAddServingURLSwitchedCallback executes the callback once and adds it to the callback list then.
-func (c *serviceDiscovery) ExecuteAndAddServingURLSwitchedCallback(callback leaderSwitchedCallbackFunc) {
+// ExecAndAddLeaderSwitchedCallback executes the callback once and adds it to the callback list then.
+func (c *serviceDiscovery) ExecAndAddLeaderSwitchedCallback(callback leaderSwitchedCallbackFunc) {
 	url := c.getLeaderURL()
 	if len(url) > 0 {
 		if err := callback(url); err != nil {
@@ -785,20 +785,20 @@ func (c *serviceDiscovery) ExecuteAndAddServingURLSwitchedCallback(callback lead
 				zap.String("url", url), errs.ZapError(err))
 		}
 	}
-	c.AddServingURLSwitchedCallback(callback)
+	c.AddLeaderSwitchedCallback(callback)
 }
 
-// AddServingURLSwitchedCallback adds callbacks which will be called when the leader
+// AddLeaderSwitchedCallback adds callbacks which will be called when the leader
 // in a quorum-based cluster or the primary in a primary/secondary configured cluster
 // is switched.
-func (c *serviceDiscovery) AddServingURLSwitchedCallback(callback leaderSwitchedCallbackFunc) {
-	c.callbacks.addServingURLSwitchedCallback(callback)
+func (c *serviceDiscovery) AddLeaderSwitchedCallback(callback leaderSwitchedCallbackFunc) {
+	c.callbacks.addLeaderSwitchedCallback(callback)
 }
 
-// AddServiceURLsSwitchedCallback adds callbacks which will be called when any primary/secondary
+// AddMembersChangedCallback adds callbacks which will be called when any primary/secondary
 // in a primary/secondary configured cluster is changed.
-func (c *serviceDiscovery) AddServiceURLsSwitchedCallback(callback func()) {
-	c.callbacks.addServiceURLsSwitchedCallback(callback)
+func (c *serviceDiscovery) AddMembersChangedCallback(callback func()) {
+	c.callbacks.addMembersChangedCallback(callback)
 }
 
 // getLeaderURL returns the leader URL.

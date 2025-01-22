@@ -238,7 +238,7 @@ func TestGetTSAfterTransferLeader(t *testing.T) {
 	defer cli.Close()
 
 	var leaderSwitched atomic.Bool
-	cli.GetServiceDiscovery().AddServingURLSwitchedCallback(func(string) error {
+	cli.GetServiceDiscovery().AddLeaderSwitchedCallback(func(string) error {
 		leaderSwitched.Store(true)
 		return nil
 	})

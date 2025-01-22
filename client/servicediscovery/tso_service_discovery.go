@@ -358,8 +358,8 @@ func (c *tsoServiceDiscovery) CheckMemberChanged() error {
 	return nil
 }
 
-// ExecuteAndAddServingURLSwitchedCallback executes the callback once and adds it to the callback list then.
-func (c *tsoServiceDiscovery) ExecuteAndAddServingURLSwitchedCallback(callback leaderSwitchedCallbackFunc) {
+// ExecAndAddLeaderSwitchedCallback executes the callback once and adds it to the callback list then.
+func (c *tsoServiceDiscovery) ExecAndAddLeaderSwitchedCallback(callback leaderSwitchedCallbackFunc) {
 	url := c.getPrimaryURL()
 	if len(url) > 0 {
 		if err := callback(url); err != nil {
@@ -369,13 +369,13 @@ func (c *tsoServiceDiscovery) ExecuteAndAddServingURLSwitchedCallback(callback l
 	c.tsoLeaderUpdatedCb = callback
 }
 
-// AddServingURLSwitchedCallback adds callbacks which will be called when the primary in
+// AddLeaderSwitchedCallback adds callbacks which will be called when the primary in
 // a primary/secondary configured cluster is switched.
-func (*tsoServiceDiscovery) AddServingURLSwitchedCallback(leaderSwitchedCallbackFunc) {}
+func (*tsoServiceDiscovery) AddLeaderSwitchedCallback(leaderSwitchedCallbackFunc) {}
 
-// AddServiceURLsSwitchedCallback adds callbacks which will be called when any primary/secondary
+// AddMembersChangedCallback adds callbacks which will be called when any primary/secondary
 // in a primary/secondary configured cluster is changed.
-func (*tsoServiceDiscovery) AddServiceURLsSwitchedCallback(func()) {}
+func (*tsoServiceDiscovery) AddMembersChangedCallback(func()) {}
 
 // GetServiceClient implements ServiceDiscovery
 func (c *tsoServiceDiscovery) GetServiceClient() ServiceClient {

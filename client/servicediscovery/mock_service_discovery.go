@@ -100,11 +100,11 @@ func (*mockServiceDiscovery) ScheduleCheckMemberChanged() {}
 // CheckMemberChanged implements the ServiceDiscovery interface.
 func (*mockServiceDiscovery) CheckMemberChanged() error { return nil }
 
-// ExecuteAndAddServingURLSwitchedCallback implements the ServiceDiscovery interface.
-func (*mockServiceDiscovery) ExecuteAndAddServingURLSwitchedCallback(leaderSwitchedCallbackFunc) {}
+// ExecAndAddLeaderSwitchedCallback implements the ServiceDiscovery interface.
+func (*mockServiceDiscovery) ExecAndAddLeaderSwitchedCallback(leaderSwitchedCallbackFunc) {}
 
-// AddServingURLSwitchedCallback implements the ServiceDiscovery interface.
-func (*mockServiceDiscovery) AddServingURLSwitchedCallback(leaderSwitchedCallbackFunc) {}
+// AddLeaderSwitchedCallback implements the ServiceDiscovery interface.
+func (*mockServiceDiscovery) AddLeaderSwitchedCallback(leaderSwitchedCallbackFunc) {}
 
-// AddServiceURLsSwitchedCallback implements the ServiceDiscovery interface.
-func (*mockServiceDiscovery) AddServiceURLsSwitchedCallback(func()) {}
+// AddMembersChangedCallback implements the ServiceDiscovery interface.
+func (*mockServiceDiscovery) AddMembersChangedCallback(func()) {}

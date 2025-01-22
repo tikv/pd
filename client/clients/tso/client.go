@@ -116,8 +116,8 @@ func NewClient(
 		},
 	}
 
-	c.svcDiscovery.ExecuteAndAddServingURLSwitchedCallback(c.updateTSOLeaderURL)
-	c.svcDiscovery.AddServiceURLsSwitchedCallback(c.scheduleUpdateTSOConnectionCtxs)
+	c.svcDiscovery.ExecAndAddLeaderSwitchedCallback(c.updateTSOLeaderURL)
+	c.svcDiscovery.AddMembersChangedCallback(c.scheduleUpdateTSOConnectionCtxs)
 
 	return c
 }

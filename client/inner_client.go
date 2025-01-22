@@ -189,7 +189,7 @@ func (c *innerClient) setup() error {
 	}
 
 	// Register callbacks
-	c.serviceDiscovery.AddServingURLSwitchedCallback(c.scheduleUpdateTokenConnection)
+	c.serviceDiscovery.AddLeaderSwitchedCallback(c.scheduleUpdateTokenConnection)
 
 	// Create dispatchers
 	c.createTokenDispatcher()

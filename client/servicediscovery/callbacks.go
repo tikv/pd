@@ -47,13 +47,13 @@ func (c *serviceCallbacks) setServiceModeUpdateCallback(cb func(pdpb.ServiceMode
 	c.serviceModeUpdateCb = cb
 }
 
-func (c *serviceCallbacks) addServingURLSwitchedCallback(cb leaderSwitchedCallbackFunc) {
+func (c *serviceCallbacks) addLeaderSwitchedCallback(cb leaderSwitchedCallbackFunc) {
 	c.Lock()
 	defer c.Unlock()
 	c.leaderSwitchedCbs = append(c.leaderSwitchedCbs, cb)
 }
 
-func (c *serviceCallbacks) addServiceURLsSwitchedCallback(cb func()) {
+func (c *serviceCallbacks) addMembersChangedCallback(cb func()) {
 	c.Lock()
 	defer c.Unlock()
 	c.membersChangedCbs = append(c.membersChangedCbs, cb)
