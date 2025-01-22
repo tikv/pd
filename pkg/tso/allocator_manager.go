@@ -136,7 +136,6 @@ type AllocatorManager struct {
 	// member is for election use
 	member ElectionMember
 	// TSO config
-	rootPath               string
 	storage                endpoint.TSOStorage
 	saveInterval           time.Duration
 	updatePhysicalInterval time.Duration

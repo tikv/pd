@@ -169,6 +169,7 @@ func ExternalTimestampPath() string {
 	return fmt.Sprintf(externalTimestampPathFormat, ClusterID())
 }
 
+// RecoveringMarkPath returns the path to save the recovering mark.
 func RecoveringMarkPath() string {
 	return fmt.Sprintf(recoveringMarkPathFormat, ClusterID())
 }
