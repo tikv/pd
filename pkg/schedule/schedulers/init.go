@@ -575,7 +575,11 @@ func schedulersRegister() {
 			if err != nil {
 				return errs.ErrURLParse.Wrap(err)
 			}
-			ranges, err := getKeyRanges(args[3:])
+			tableName, err := url.QueryUnescape(args[3])
+			if err != nil {
+				return errs.ErrURLParse.Wrap(err)
+			}
+			ranges, err := getKeyRanges(args[4:])
 			if err != nil {
 				return err
 			}
@@ -583,6 +587,7 @@ func schedulersRegister() {
 			conf.Engine = engine
 			conf.Role = role
 			conf.Timeout = duration
+			conf.TableName = tableName
 			return nil
 		}
 	})
