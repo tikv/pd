@@ -265,9 +265,10 @@ func (c *Cli) getLeaderURL() string {
 
 func (c *Cli) updateLeaderURL(url string) error {
 	oldURL := c.getLeaderURL()
-	if !c.leaderURL.CompareAndSwap(oldURL, url) {
+	if oldURL == url {
 		return nil
 	}
+	c.leaderURL.Store(url)
 	c.scheduleUpdateConnection()
 
 	log.Info("[router] switch the router leader serving url",

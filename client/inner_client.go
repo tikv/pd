@@ -18,7 +18,6 @@ import (
 	"context"
 	"crypto/tls"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"go.uber.org/zap"
@@ -47,12 +46,6 @@ type innerClient struct {
 	serviceDiscovery sd.ServiceDiscovery
 	tokenDispatcher  *tokenDispatcher
 
-	// The router client is used to get the region info via the streaming gRPC,
-	// this flag is used to control whether to enable it, currently only used
-	// in the test.
-	enableRouterClient atomic.Bool
-	routerClient       *router.Cli
-
 	// For service mode switching.
 	serviceModeKeeper
 
@@ -77,9 +70,17 @@ func (c *innerClient) init(updateKeyspaceIDCb sd.UpdateKeyspaceIDFunc) error {
 		}
 		return err
 	}
-	c.routerClient = router.NewClient(c.ctx, c.serviceDiscovery, c.option)
 
 	return nil
+}
+
+func (c *innerClient) initRouterClient() {
+	c.Lock()
+	defer c.Unlock()
+	if c.routerClient != nil {
+		return
+	}
+	c.routerClient = router.NewClient(c.ctx, c.serviceDiscovery, c.option)
 }
 
 func (c *innerClient) setServiceMode(newMode pdpb.ServiceMode) {

@@ -143,12 +143,11 @@ var _ Client = (*client)(nil)
 
 // serviceModeKeeper is for service mode switching.
 type serviceModeKeeper struct {
-	// RMutex here is for the future usage that there might be multiple goroutines
-	// triggering service mode switching concurrently.
 	sync.RWMutex
 	serviceMode     pdpb.ServiceMode
 	tsoClient       *tso.Cli
 	tsoSvcDiscovery sd.ServiceDiscovery
+	routerClient    *router.Cli
 }
 
 func (k *serviceModeKeeper) close() {
@@ -573,11 +572,13 @@ func (c *client) GetMinTS(ctx context.Context) (physical int64, logical int64, e
 // EnableRouterClient enables the router client.
 // This is only for test currently.
 func (c *client) EnableRouterClient() {
-	c.inner.enableRouterClient.Store(true)
+	c.inner.initRouterClient()
 }
 
-func (c *client) isRouterClientEnabled() bool {
-	return c.inner.enableRouterClient.Load()
+func (c *client) getRouterClient() *router.Cli {
+	c.inner.RLock()
+	defer c.inner.RUnlock()
+	return c.inner.routerClient
 }
 
 // GetRegionFromMember implements the RPCClient interface.
@@ -630,8 +631,8 @@ func (c *client) GetRegion(ctx context.Context, key []byte, opts ...opt.GetRegio
 	ctx, cancel := context.WithTimeout(ctx, c.inner.option.Timeout)
 	defer cancel()
 
-	if c.isRouterClientEnabled() {
-		return c.inner.routerClient.GetRegion(ctx, key, opts...)
+	if routerClient := c.getRouterClient(); routerClient != nil {
+		return routerClient.GetRegion(ctx, key, opts...)
 	}
 
 	options := &opt.GetRegionOp{}
@@ -674,8 +675,8 @@ func (c *client) GetPrevRegion(ctx context.Context, key []byte, opts ...opt.GetR
 	ctx, cancel := context.WithTimeout(ctx, c.inner.option.Timeout)
 	defer cancel()
 
-	if c.isRouterClientEnabled() {
-		return c.inner.routerClient.GetPrevRegion(ctx, key, opts...)
+	if routerClient := c.getRouterClient(); routerClient != nil {
+		return routerClient.GetPrevRegion(ctx, key, opts...)
 	}
 
 	options := &opt.GetRegionOp{}
@@ -718,8 +719,8 @@ func (c *client) GetRegionByID(ctx context.Context, regionID uint64, opts ...opt
 	ctx, cancel := context.WithTimeout(ctx, c.inner.option.Timeout)
 	defer cancel()
 
-	if c.isRouterClientEnabled() {
-		return c.inner.routerClient.GetRegionByID(ctx, regionID, opts...)
+	if routerClient := c.getRouterClient(); routerClient != nil {
+		return routerClient.GetRegionByID(ctx, regionID, opts...)
 	}
 
 	options := &opt.GetRegionOp{}
