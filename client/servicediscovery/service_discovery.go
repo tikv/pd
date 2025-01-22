@@ -129,14 +129,16 @@ type ServiceDiscovery interface {
 	// CheckMemberChanged immediately check if there is any membership change among the leader/followers
 	// in a quorum-based cluster or among the primary/secondaries in a primary/secondary configured cluster.
 	CheckMemberChanged() error
-	// AddServingURLSwitchedCallback adds callbacks which will be called when the leader
+	// ExecAndAddLeaderSwitchedCallback executes the callback once and adds it to the callback list then.
+	ExecAndAddLeaderSwitchedCallback(cb leaderSwitchedCallbackFunc)
+	// AddLeaderSwitchedCallback adds callbacks which will be called when the leader
 	// in a quorum-based cluster or the primary in a primary/secondary configured cluster
 	// is switched.
-	AddServingURLSwitchedCallback(callbacks ...func())
-	// AddServiceURLsSwitchedCallback adds callbacks which will be called when any leader/follower
+	AddLeaderSwitchedCallback(cb leaderSwitchedCallbackFunc)
+	// AddMembersChangedCallback adds callbacks which will be called when any leader/follower
 	// in a quorum-based cluster or any primary/secondary in a primary/secondary configured cluster
 	// is changed.
-	AddServiceURLsSwitchedCallback(callbacks ...func())
+	AddMembersChangedCallback(cb func())
 }
 
 // ServiceClient is an interface that defines a set of operations for a raw PD gRPC client to specific PD server.
@@ -397,18 +399,8 @@ func (c *serviceBalancer) get() (ret ServiceClient) {
 
 // UpdateKeyspaceIDFunc is the function type for updating the keyspace ID.
 type UpdateKeyspaceIDFunc func() error
-type tsoLeaderURLUpdatedFunc func(string) error
 
-// TSOEventSource subscribes to events related to changes in the TSO leader/primary from the service discovery.
-type TSOEventSource interface {
-	// SetTSOLeaderURLUpdatedCallback adds a callback which will be called when the TSO leader/primary is updated.
-	SetTSOLeaderURLUpdatedCallback(callback tsoLeaderURLUpdatedFunc)
-}
-
-var (
-	_ ServiceDiscovery = (*serviceDiscovery)(nil)
-	_ TSOEventSource   = (*serviceDiscovery)(nil)
-)
+var _ ServiceDiscovery = (*serviceDiscovery)(nil)
 
 // serviceDiscovery is the service discovery client of PD/PD service which is quorum based
 type serviceDiscovery struct {
@@ -429,15 +421,7 @@ type serviceDiscovery struct {
 	// url -> a gRPC connection
 	clientConns sync.Map // Store as map[string]*grpc.ClientConn
 
-	// serviceModeUpdateCb will be called when the service mode gets updated
-	serviceModeUpdateCb func(pdpb.ServiceMode)
-	// leaderSwitchedCbs will be called after the leader switched
-	leaderSwitchedCbs []func()
-	// membersChangedCbs will be called after there is any membership change in the
-	// leader and followers
-	membersChangedCbs []func()
-	// tsoLeaderUpdatedCb will be called when the TSO leader is updated.
-	tsoLeaderUpdatedCb tsoLeaderURLUpdatedFunc
+	callbacks *serviceCallbacks
 
 	checkMembershipCh chan struct{}
 
@@ -477,12 +461,13 @@ func NewServiceDiscovery(
 		cancel:               cancel,
 		wg:                   wg,
 		apiCandidateNodes:    [apiKindCount]*serviceBalancer{newServiceBalancer(emptyErrorFn), newServiceBalancer(regionAPIErrorFn)},
-		serviceModeUpdateCb:  serviceModeUpdateCb,
+		callbacks:            newServiceCallbacks(),
 		updateKeyspaceIDFunc: updateKeyspaceIDFunc,
 		keyspaceID:           keyspaceID,
 		tlsCfg:               tlsCfg,
 		option:               option,
 	}
+	pdsd.callbacks.setServiceModeUpdateCallback(serviceModeUpdateCb)
 	urls = tlsutil.AddrsToURLs(urls, tlsCfg)
 	pdsd.urls.Store(urls)
 	return pdsd
@@ -573,7 +558,7 @@ func (c *serviceDiscovery) updateServiceModeLoop() {
 		failpoint.Return()
 	})
 	failpoint.Inject("usePDServiceMode", func() {
-		c.serviceModeUpdateCb(pdpb.ServiceMode_PD_SVC_MODE)
+		c.callbacks.onServiceModeUpdate(pdpb.ServiceMode_PD_SVC_MODE)
 		failpoint.Return()
 	})
 
@@ -794,27 +779,29 @@ func (c *serviceDiscovery) CheckMemberChanged() error {
 	return c.updateMember()
 }
 
-// AddServingURLSwitchedCallback adds callbacks which will be called
-// when the leader is switched.
-func (c *serviceDiscovery) AddServingURLSwitchedCallback(callbacks ...func()) {
-	c.leaderSwitchedCbs = append(c.leaderSwitchedCbs, callbacks...)
-}
-
-// AddServiceURLsSwitchedCallback adds callbacks which will be called when
-// any leader/follower is changed.
-func (c *serviceDiscovery) AddServiceURLsSwitchedCallback(callbacks ...func()) {
-	c.membersChangedCbs = append(c.membersChangedCbs, callbacks...)
-}
-
-// SetTSOLeaderURLUpdatedCallback adds a callback which will be called when the TSO leader is updated.
-func (c *serviceDiscovery) SetTSOLeaderURLUpdatedCallback(callback tsoLeaderURLUpdatedFunc) {
+// ExecAndAddLeaderSwitchedCallback executes the callback once and adds it to the callback list then.
+func (c *serviceDiscovery) ExecAndAddLeaderSwitchedCallback(callback leaderSwitchedCallbackFunc) {
 	url := c.getLeaderURL()
 	if len(url) > 0 {
 		if err := callback(url); err != nil {
-			log.Error("[tso] failed to call back when tso leader url update", zap.String("url", url), errs.ZapError(err))
+			log.Error("[pd] failed to run a callback with the current leader url",
+				zap.String("url", url), errs.ZapError(err))
 		}
 	}
-	c.tsoLeaderUpdatedCb = callback
+	c.AddLeaderSwitchedCallback(callback)
+}
+
+// AddLeaderSwitchedCallback adds callbacks which will be called when the leader
+// in a quorum-based cluster or the primary in a primary/secondary configured cluster
+// is switched.
+func (c *serviceDiscovery) AddLeaderSwitchedCallback(callback leaderSwitchedCallbackFunc) {
+	c.callbacks.addLeaderSwitchedCallback(callback)
+}
+
+// AddMembersChangedCallback adds callbacks which will be called when any primary/secondary
+// in a primary/secondary configured cluster is changed.
+func (c *serviceDiscovery) AddMembersChangedCallback(callback func()) {
+	c.callbacks.addMembersChangedCallback(callback)
 }
 
 // getLeaderURL returns the leader URL.
@@ -870,9 +857,7 @@ func (c *serviceDiscovery) checkServiceModeChanged() error {
 			// If the method is not supported, we set it to pd mode.
 			// TODO: it's a hack way to solve the compatibility issue.
 			// we need to remove this after all maintained version supports the method.
-			if c.serviceModeUpdateCb != nil {
-				c.serviceModeUpdateCb(pdpb.ServiceMode_PD_SVC_MODE)
-			}
+			c.callbacks.onServiceModeUpdate(pdpb.ServiceMode_PD_SVC_MODE)
 			return nil
 		}
 		return err
@@ -880,9 +865,7 @@ func (c *serviceDiscovery) checkServiceModeChanged() error {
 	if clusterInfo == nil || len(clusterInfo.ServiceModes) == 0 {
 		return errors.WithStack(errs.ErrNoServiceModeReturned)
 	}
-	if c.serviceModeUpdateCb != nil {
-		c.serviceModeUpdateCb(clusterInfo.ServiceModes[0])
-	}
+	c.callbacks.onServiceModeUpdate(clusterInfo.ServiceModes[0])
 	return nil
 }
 
@@ -971,9 +954,7 @@ func (c *serviceDiscovery) updateURLs(members []*pdpb.Member) {
 	}
 	c.urls.Store(urls)
 	// Run callbacks to reflect the membership changes in the leader and followers.
-	for _, cb := range c.membersChangedCbs {
-		cb()
-	}
+	c.callbacks.onMembersChanged()
 	log.Info("[pd] update member urls", zap.Strings("old-urls", oldURLs), zap.Strings("new-urls", urls))
 }
 
@@ -990,13 +971,8 @@ func (c *serviceDiscovery) switchLeader(url string) (bool, error) {
 		c.leader.Store(leaderClient)
 	}
 	// Run callbacks
-	if c.tsoLeaderUpdatedCb != nil {
-		if err := c.tsoLeaderUpdatedCb(url); err != nil {
-			return true, err
-		}
-	}
-	for _, cb := range c.leaderSwitchedCbs {
-		cb()
+	if err := c.callbacks.onLeaderSwitched(url); err != nil {
+		return true, err
 	}
 	log.Info("[pd] switch leader", zap.String("new-leader", url), zap.String("old-leader", oldLeader.GetURL()))
 	return true, err
