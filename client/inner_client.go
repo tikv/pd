@@ -18,6 +18,7 @@ import (
 	"context"
 	"crypto/tls"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"go.uber.org/zap"
@@ -46,7 +47,12 @@ type innerClient struct {
 	serviceDiscovery sd.ServiceDiscovery
 	tokenDispatcher  *tokenDispatcher
 
-	routerClient *router.Cli
+	// The router client is used to get the region info via the streaming gRPC,
+	// this flag is used to control whether to enable it, currently only used
+	// in the test.
+	enableRouterClient atomic.Bool
+	routerClient       *router.Cli
+
 	// For service mode switching.
 	serviceModeKeeper
 

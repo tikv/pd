@@ -227,10 +227,7 @@ func requestFinisher(resp *pdpb.QueryRegionResponse) batch.FinisherFunc[*Request
 		} else if req.id != 0 {
 			id = req.id
 		}
-		region, ok := resp.RegionsById[id]
-		if !ok {
-			err = errs.ErrClientRegionNotFound.FastGenByArgs(id)
-		} else {
+		if region, ok := resp.RegionsById[id]; ok {
 			req.region = ConvertToRegion(region)
 		}
 		req.tryDone(err)

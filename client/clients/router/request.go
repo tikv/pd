@@ -80,12 +80,6 @@ func (c *Cli) GetRegion(ctx context.Context, key []byte, opts ...opt.GetRegionOp
 	return req.wait()
 }
 
-// GetRegionFromMember implements the Client interface.
-func (c *Cli) GetRegionFromMember(ctx context.Context, key []byte, _ []string, opts ...opt.GetRegionOption) (*Region, error) {
-	// Before we support the follower stream connection, this method is equivalent to `GetRegion`.
-	return c.GetRegion(ctx, key, opts...)
-}
-
 // GetPrevRegion implements the Client interface.
 func (c *Cli) GetPrevRegion(ctx context.Context, key []byte, opts ...opt.GetRegionOption) (*Region, error) {
 	req := c.newRequest(ctx)

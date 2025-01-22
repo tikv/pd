@@ -70,7 +70,6 @@ var (
 	ErrClientFindGroupByKeyspaceID    = errors.Normalize("can't find keyspace group by keyspace id", errors.RFCCodeText("PD:client:ErrClientFindGroupByKeyspaceID"))
 	ErrClientWatchGCSafePointV2Stream = errors.Normalize("watch gc safe point v2 stream failed", errors.RFCCodeText("PD:client:ErrClientWatchGCSafePointV2Stream"))
 	ErrCircuitBreakerOpen             = errors.Normalize("circuit breaker is open", errors.RFCCodeText("PD:client:ErrCircuitBreakerOpen"))
-	ErrClientRegionNotFound           = errors.Normalize("region %d not found", errors.RFCCodeText("PD:client:ErrClientRegionNotFound"))
 )
 
 // grpcutil errors

@@ -570,6 +570,16 @@ func (c *client) GetMinTS(ctx context.Context) (physical int64, logical int64, e
 	return minTS.Physical, minTS.Logical, nil
 }
 
+// EnableRouterClient enables the router client.
+// This is only for test currently.
+func (c *client) EnableRouterClient() {
+	c.inner.enableRouterClient.Store(true)
+}
+
+func (c *client) isRouterClientEnabled() bool {
+	return c.inner.enableRouterClient.Load()
+}
+
 // GetRegionFromMember implements the RPCClient interface.
 func (c *client) GetRegionFromMember(ctx context.Context, key []byte, memberURLs []string, _ ...opt.GetRegionOption) (*router.Region, error) {
 	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
@@ -620,6 +630,10 @@ func (c *client) GetRegion(ctx context.Context, key []byte, opts ...opt.GetRegio
 	ctx, cancel := context.WithTimeout(ctx, c.inner.option.Timeout)
 	defer cancel()
 
+	if c.isRouterClientEnabled() {
+		return c.inner.routerClient.GetRegion(ctx, key, opts...)
+	}
+
 	options := &opt.GetRegionOp{}
 	for _, opt := range opts {
 		opt(options)
@@ -660,6 +674,10 @@ func (c *client) GetPrevRegion(ctx context.Context, key []byte, opts ...opt.GetR
 	ctx, cancel := context.WithTimeout(ctx, c.inner.option.Timeout)
 	defer cancel()
 
+	if c.isRouterClientEnabled() {
+		return c.inner.routerClient.GetPrevRegion(ctx, key, opts...)
+	}
+
 	options := &opt.GetRegionOp{}
 	for _, opt := range opts {
 		opt(options)
@@ -699,6 +717,10 @@ func (c *client) GetRegionByID(ctx context.Context, regionID uint64, opts ...opt
 	defer func() { metrics.CmdDurationGetRegionByID.Observe(time.Since(start).Seconds()) }()
 	ctx, cancel := context.WithTimeout(ctx, c.inner.option.Timeout)
 	defer cancel()
+
+	if c.isRouterClientEnabled() {
+		return c.inner.routerClient.GetRegionByID(ctx, regionID, opts...)
+	}
 
 	options := &opt.GetRegionOp{}
 	for _, opt := range opts {
