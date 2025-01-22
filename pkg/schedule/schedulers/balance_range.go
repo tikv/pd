@@ -15,7 +15,6 @@
 package schedulers
 
 import (
-	"go.uber.org/zap"
 	"net/http"
 	"sort"
 	"strconv"
@@ -26,6 +25,7 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
+	"go.uber.org/zap"
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
@@ -168,6 +168,7 @@ func newBalanceRangeScheduler(opController *operator.Controller, conf *balanceRa
 	s.filters = []filter.Filter{
 		filter.NewEngineFilter(balanceRangeName, f),
 	}
+	s.role = newRole(s.conf.Role)
 
 	s.filterCounter = filter.NewCounter(s.GetName())
 	return s
@@ -405,19 +406,33 @@ func (r Role) String() string {
 	}
 }
 
+func newRole(role string) Role {
+	switch role {
+	case "leader":
+		return Leader
+	case "follower":
+		return Follower
+	case "learner":
+		return Learner
+	default:
+		return Unknown
+	}
+}
+
 func (r Role) getPeers(region *core.RegionInfo) []*metapb.Peer {
 	switch r {
 	case Leader:
 		return []*metapb.Peer{region.GetLeader()}
 	case Follower:
 		followers := region.GetFollowers()
-		ret := make([]*metapb.Peer, len(followers))
+		ret := make([]*metapb.Peer, 0, len(followers))
 		for _, peer := range followers {
 			ret = append(ret, peer)
 		}
 		return ret
 	case Learner:
-		return region.GetLearners()
+		learners := region.GetLearners()
+		return learners
 	default:
 		return nil
 	}
