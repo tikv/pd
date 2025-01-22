@@ -40,11 +40,24 @@ import (
 )
 
 const (
+<<<<<<< HEAD:client/pd_service_discovery.go
 	globalDCLocation            = "global"
 	memberUpdateInterval        = time.Minute
 	serviceModeUpdateInterval   = 3 * time.Second
 	updateMemberTimeout         = time.Second // Use a shorter timeout to recover faster from network isolation.
 	updateMemberBackOffBaseTime = 100 * time.Millisecond
+=======
+	// MemberUpdateInterval is the interval to update the member list.
+	MemberUpdateInterval = time.Minute
+	// UpdateMemberMaxBackoffTime is the max time to back off when updating the member list.
+	UpdateMemberMaxBackoffTime = 100 * time.Millisecond
+	// UpdateMemberBackOffBaseTime is the base time to back off when updating the member list.
+	// Here we use 20ms is because getting timestamp will print a warning log if the time exceeds 30ms.
+	UpdateMemberBackOffBaseTime = 20 * time.Millisecond
+	// UpdateMemberTimeout is the timeout to update the member list.
+	// Use a shorter timeout to recover faster from network isolation.
+	UpdateMemberTimeout = time.Second
+>>>>>>> 5a5c07efa (client: fix backoffer initialization (#9012)):client/servicediscovery/service_discovery.go
 
 	httpScheme  = "http"
 	httpsScheme = "https"
@@ -545,7 +558,11 @@ func (c *pdServiceDiscovery) updateMemberLoop() {
 	ticker := time.NewTicker(memberUpdateInterval)
 	defer ticker.Stop()
 
+<<<<<<< HEAD:client/pd_service_discovery.go
 	bo := retry.InitialBackoffer(updateMemberBackOffBaseTime, updateMemberTimeout, updateMemberBackOffBaseTime)
+=======
+	bo := retry.InitialBackoffer(UpdateMemberBackOffBaseTime, UpdateMemberMaxBackoffTime, UpdateMemberTimeout)
+>>>>>>> 5a5c07efa (client: fix backoffer initialization (#9012)):client/servicediscovery/service_discovery.go
 	for {
 		select {
 		case <-ctx.Done():
