@@ -438,7 +438,7 @@ func (c *client) UpdateOption(option opt.DynamicOption, value any) error {
 		}
 	case opt.EnableTSOFollowerProxy:
 		if c.inner.getServiceMode() != pdpb.ServiceMode_PD_SVC_MODE {
-			return errors.New("[pd] tso follower proxy is only supported in PD mode")
+			return errors.New("[pd] tso follower proxy is only supported when PD provides TSO")
 		}
 		enable, ok := value.(bool)
 		if !ok {
@@ -526,7 +526,7 @@ func (c *client) GetLocalTS(ctx context.Context, _ string) (physical int64, logi
 
 // GetMinTS implements the TSOClient interface.
 func (c *client) GetMinTS(ctx context.Context) (physical int64, logical int64, err error) {
-	// Handle compatibility issue in case of PD/PD service doesn't support GetMinTS API.
+	// Handle compatibility issue in case of PD doesn't support GetMinTS API.
 	serviceMode := c.inner.getServiceMode()
 	switch serviceMode {
 	case pdpb.ServiceMode_UNKNOWN_SVC_MODE:

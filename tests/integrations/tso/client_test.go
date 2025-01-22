@@ -555,7 +555,7 @@ func TestUpgradingPDAndTSOClusters(t *testing.T) {
 	pdLeader := pdCluster.GetServer(leaderName)
 	backendEndpoints := pdLeader.GetAddr()
 
-	// Create a pd client in PD mode to let the API leader to forward requests to the TSO cluster.
+	// Create a PD client in microservice env to let the PD leader to forward requests to the TSO cluster.
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/servicediscovery/usePDServiceMode", "return(true)"))
 	pdClient, err := pd.NewClientWithContext(context.Background(),
 		caller.TestComponent,

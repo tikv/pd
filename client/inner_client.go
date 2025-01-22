@@ -81,19 +81,31 @@ func (c *innerClient) setServiceMode(newMode pdpb.ServiceMode) {
 		// If we are using TSO server proxy, we always use PD_SVC_MODE.
 		newMode = pdpb.ServiceMode_PD_SVC_MODE
 	}
-
 	if newMode == c.serviceMode {
 		return
 	}
-	log.Info("[pd] changing service mode",
-		zap.String("old-mode", c.serviceMode.String()),
-		zap.String("new-mode", newMode.String()))
+	log.Info("[pd] changing TSO provider",
+		zap.String("old", convertToString(c.serviceMode)),
+		zap.String("new", convertToString(newMode)))
 	c.resetTSOClientLocked(newMode)
 	oldMode := c.serviceMode
 	c.serviceMode = newMode
-	log.Info("[pd] service mode changed",
-		zap.String("old-mode", oldMode.String()),
-		zap.String("new-mode", newMode.String()))
+	log.Info("[pd] TSO provider changed",
+		zap.String("old", convertToString(oldMode)),
+		zap.String("new", convertToString(newMode)))
+}
+
+func convertToString(mode pdpb.ServiceMode) string {
+	switch mode {
+	case pdpb.ServiceMode_PD_SVC_MODE:
+		return "pd"
+	case pdpb.ServiceMode_API_SVC_MODE:
+		return "tso server"
+	case pdpb.ServiceMode_UNKNOWN_SVC_MODE:
+		return "unknown"
+	default:
+		return "invalid"
+	}
 }
 
 // Reset a new TSO client.
@@ -116,9 +128,8 @@ func (c *innerClient) resetTSOClientLocked(mode pdpb.ServiceMode) {
 		newTSOCli = tso.NewClient(c.ctx, c.option,
 			newTSOSvcDiscovery, &tso.MSStreamBuilderFactory{})
 		if err := newTSOSvcDiscovery.Init(); err != nil {
-			log.Error("[pd] failed to initialize tso service discovery. keep the current service mode",
+			log.Error("[pd] failed to initialize tso service discovery",
 				zap.Strings("svr-urls", c.svrUrls),
-				zap.String("current-mode", c.serviceMode.String()),
 				zap.Error(err))
 			return
 		}
@@ -133,12 +144,12 @@ func (c *innerClient) resetTSOClientLocked(mode pdpb.ServiceMode) {
 	oldTSOClient.Close()
 	// Replace the old TSO service discovery if needed.
 	oldTSOSvcDiscovery := c.tsoSvcDiscovery
-	// If newTSOSvcDiscovery is nil, that's expected, as it means we are switching to PD mode and
+	// If newTSOSvcDiscovery is nil, that's expected, as it means we are switching to non-microservice env and
 	// no tso microservice discovery is needed.
 	c.tsoSvcDiscovery = newTSOSvcDiscovery
 	// Close the old TSO service discovery safely after both the old client and service discovery are replaced.
 	if oldTSOSvcDiscovery != nil {
-		// We are switching from PD service mode to PD mode, so delete the old tso microservice discovery.
+		// We are switching from microservice env to non-microservice env, so delete the old tso microservice discovery.
 		oldTSOSvcDiscovery.Close()
 	}
 }
