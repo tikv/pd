@@ -20,7 +20,7 @@ import (
 
 // RulesPathPrefix returns the path prefix to save the placement rules.
 func RulesPathPrefix() string {
-	return Prefix(RuleKeyPath(""))
+	return RuleKeyPath("")
 }
 
 // RuleKeyPath returns the path to save the placement rule with the given rule key.
@@ -45,10 +45,10 @@ func RegionLabelKeyPath(ruleKey string) string {
 
 // RuleGroupPathPrefix returns the path prefix to save the placement rule groups.
 func RuleGroupPathPrefix() string {
-	return Prefix(RuleGroupIDPath(""))
+	return RuleGroupIDPath("")
 }
 
 // RegionLabelPathPrefix returns the path prefix to save the region label.
 func RegionLabelPathPrefix() string {
-	return Prefix(RegionLabelKeyPath(""))
+	return RegionLabelKeyPath("")
 }

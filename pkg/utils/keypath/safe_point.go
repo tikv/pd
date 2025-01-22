@@ -25,7 +25,7 @@ func GCSafePointPath() string {
 
 // GCSafePointServicePrefixPath returns the GC safe point service key path prefix.
 func GCSafePointServicePrefixPath() string {
-	return Prefix(GCSafePointServicePath(""))
+	return GCSafePointServicePath("")
 }
 
 // GCSafePointServicePath returns the GC safe point service key path with the given service ID.
@@ -46,7 +46,7 @@ func ServiceSafePointV2Path(keyspaceID uint32, serviceID string) string {
 // ServiceSafePointV2Prefix is the path prefix of all service safe point that belongs to a specific keyspace.
 // Can be used to retrieve keyspace's service safe point at once.
 func ServiceSafePointV2Prefix(keyspaceID uint32) string {
-	return Prefix(ServiceSafePointV2Path(keyspaceID, ""))
+	return ServiceSafePointV2Path(keyspaceID, "")
 }
 
 // GCSafePointV2Prefix is the path prefix to all gc safe point v2.

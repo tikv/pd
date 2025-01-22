@@ -23,7 +23,7 @@ func ConfigPath() string {
 
 // SchedulerConfigPathPrefix returns the path prefix to save the scheduler config.
 func SchedulerConfigPathPrefix() string {
-	return Prefix(SchedulerConfigPath(""))
+	return SchedulerConfigPath("")
 }
 
 // SchedulerConfigPath returns the path to save the scheduler config.

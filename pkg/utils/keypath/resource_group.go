@@ -33,10 +33,10 @@ func ResourceGroupStatePath(groupName string) string {
 
 // ResourceGroupSettingPrefix returns the prefix of the resource group settings.
 func ResourceGroupSettingPrefix() string {
-	return Prefix(ResourceGroupSettingPath(""))
+	return ResourceGroupSettingPath("")
 }
 
 // ResourceGroupStatePrefix returns the prefix of the resource group states.
 func ResourceGroupStatePrefix() string {
-	return Prefix(ResourceGroupStatePath(""))
+	return ResourceGroupStatePath("")
 }
