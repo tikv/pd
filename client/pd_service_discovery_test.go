@@ -379,5 +379,59 @@ func TestSchemeFunction(t *testing.T) {
 	urls = []string{
 		"https://127.0.0.1:2379",
 	}
+<<<<<<< HEAD:client/pd_service_discovery_test.go
 	re.Equal("http://127.0.0.1:2379", pickMatchedURL(urls, nil))
+=======
+	re.Equal("http://127.0.0.1:2379", tlsutil.PickMatchedURL(urls, nil))
+}
+
+func TestUpdateURLs(t *testing.T) {
+	re := require.New(t)
+	members := []*pdpb.Member{
+		{Name: "pd4", ClientUrls: []string{"tmp://pd4"}},
+		{Name: "pd1", ClientUrls: []string{"tmp://pd1"}},
+		{Name: "pd3", ClientUrls: []string{"tmp://pd3"}},
+		{Name: "pd2", ClientUrls: []string{"tmp://pd2"}},
+	}
+	getURLs := func(ms []*pdpb.Member) (urls []string) {
+		for _, m := range ms {
+			urls = append(urls, m.GetClientUrls()[0])
+		}
+		return
+	}
+	cli := &serviceDiscovery{callbacks: newServiceCallbacks(), option: opt.NewOption()}
+	cli.urls.Store([]string{})
+	cli.updateURLs(members[1:])
+	re.Equal(getURLs([]*pdpb.Member{members[1], members[3], members[2]}), cli.GetServiceURLs())
+	cli.updateURLs(members[1:])
+	re.Equal(getURLs([]*pdpb.Member{members[1], members[3], members[2]}), cli.GetServiceURLs())
+	cli.updateURLs(members)
+	re.Equal(getURLs([]*pdpb.Member{members[1], members[3], members[2], members[0]}), cli.GetServiceURLs())
+	cli.updateURLs(members[1:])
+	re.Equal(getURLs([]*pdpb.Member{members[1], members[3], members[2]}), cli.GetServiceURLs())
+	cli.updateURLs(members[2:])
+	re.Equal(getURLs([]*pdpb.Member{members[3], members[2]}), cli.GetServiceURLs())
+	cli.updateURLs(members[3:])
+	re.Equal(getURLs([]*pdpb.Member{members[3]}), cli.GetServiceURLs())
+}
+
+func TestGRPCDialOption(t *testing.T) {
+	re := require.New(t)
+	start := time.Now()
+	ctx, cancel := context.WithTimeout(context.TODO(), 500*time.Millisecond)
+	defer cancel()
+	cli := &serviceDiscovery{
+		callbacks:         newServiceCallbacks(),
+		checkMembershipCh: make(chan struct{}, 1),
+		ctx:               ctx,
+		cancel:            cancel,
+		tlsCfg:            nil,
+		option:            opt.NewOption(),
+	}
+	cli.urls.Store([]string{"tmp://test.url:5255"})
+	cli.option.GRPCDialOptions = []grpc.DialOption{grpc.WithBlock()}
+	err := cli.updateMember()
+	re.Error(err)
+	re.Greater(time.Since(start), 500*time.Millisecond)
+>>>>>>> ae6df14874 (client/sd: unify the service discovery callbacks within a struct (#9014)):client/servicediscovery/service_discovery_test.go
 }

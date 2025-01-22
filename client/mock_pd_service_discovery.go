@@ -94,8 +94,19 @@ func (*mockPDServiceDiscovery) ScheduleCheckMemberChanged() {}
 // CheckMemberChanged implements the ServiceDiscovery interface.
 func (*mockPDServiceDiscovery) CheckMemberChanged() error { return nil }
 
+<<<<<<< HEAD:client/mock_pd_service_discovery.go
 // AddServingURLSwitchedCallback implements the ServiceDiscovery interface.
 func (*mockPDServiceDiscovery) AddServingURLSwitchedCallback(...func()) {}
 
 // AddServiceURLsSwitchedCallback implements the ServiceDiscovery interface.
 func (*mockPDServiceDiscovery) AddServiceURLsSwitchedCallback(...func()) {}
+=======
+// ExecAndAddLeaderSwitchedCallback implements the ServiceDiscovery interface.
+func (*mockServiceDiscovery) ExecAndAddLeaderSwitchedCallback(leaderSwitchedCallbackFunc) {}
+
+// AddLeaderSwitchedCallback implements the ServiceDiscovery interface.
+func (*mockServiceDiscovery) AddLeaderSwitchedCallback(leaderSwitchedCallbackFunc) {}
+
+// AddMembersChangedCallback implements the ServiceDiscovery interface.
+func (*mockServiceDiscovery) AddMembersChangedCallback(func()) {}
+>>>>>>> ae6df14874 (client/sd: unify the service discovery callbacks within a struct (#9014)):client/servicediscovery/mock_service_discovery.go
