@@ -200,7 +200,7 @@ func KeyspaceGroupIDPath(id uint32) string {
 
 // GetCompiledKeyspaceGroupIDRegexp returns the compiled regular expression for matching keyspace group id.
 func GetCompiledKeyspaceGroupIDRegexp() *regexp.Regexp {
-	pattern := strings.Join([]string{KeyspaceGroupIDPrefix(), `(\d{5})$`}, "/")
+	pattern := KeyspaceGroupIDPrefix() + `(\d{5})$`
 	return regexp.MustCompile(pattern)
 }
 
