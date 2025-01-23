@@ -30,21 +30,23 @@ func init() {
 	initRegisteredConsumers()
 }
 
-var mutex sync.Mutex
-var consumersInitializers []func()
+var consumersInitializers = struct {
+	sync.Mutex
+	value []func()
+}{}
 
 // RegisterConsumer registers a consumer to be initialized when the metrics are (re)initialized.
 func RegisterConsumer(initConsumer func()) {
-	mutex.Lock()
-	defer mutex.Unlock()
-	consumersInitializers = append(consumersInitializers, initConsumer)
+	consumersInitializers.Lock()
+	defer consumersInitializers.Unlock()
+	consumersInitializers.value = append(consumersInitializers.value, initConsumer)
 	initConsumer()
 }
 
 func initRegisteredConsumers() {
-	mutex.Lock()
-	defer mutex.Unlock()
-	for _, initConsumer := range consumersInitializers {
+	consumersInitializers.Lock()
+	defer consumersInitializers.Unlock()
+	for _, initConsumer := range consumersInitializers.value {
 		initConsumer()
 	}
 }
