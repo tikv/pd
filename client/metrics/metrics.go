@@ -35,7 +35,7 @@ var consumersInitializers = struct {
 	value []func()
 }{}
 
-// RegisterConsumer registers a consumer to be initialized when the metrics are (re)initialized.
+// RegisterConsumer registers a consumer to be initialized when the metrics are (re)initialized
 func RegisterConsumer(initConsumer func()) {
 	consumersInitializers.Lock()
 	defer consumersInitializers.Unlock()
