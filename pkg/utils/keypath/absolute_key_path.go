@@ -77,6 +77,7 @@ const (
 	keyspaceIDPathFormat        = "/pd/%d/keyspaces/id/%s"                     // "/pd/{cluster_id}/keyspaces/id/{keyspace_name}"
 	keyspaceGroupIDPrefixFormat = "/pd/%d/tso/keyspace_groups/membership/"     // "/pd/{cluster_id}/tso/keyspace_groups/membership/"
 	keyspaceGroupIDPathFormat   = "/pd/%d/tso/keyspace_groups/membership/%05d" // "/pd/{cluster_id}/tso/keyspace_groups/membership/{group_id}"
+	keyspaceGroupIDPattern      = `tso/keyspace_groups/membership/(\d{5})$`
 
 	servicePathFormat  = "/ms/%d/%s/registry"    // "/ms/{cluster_id}/{service_name}/registry"
 	registryPathFormat = "/ms/%d/%s/registry/%s" // "/ms/{cluster_id}/{service_name}/registry/{service_addr}"
@@ -201,8 +202,7 @@ func KeyspaceGroupIDPath(id uint32) string {
 
 // GetCompiledKeyspaceGroupIDRegexp returns the compiled regular expression for matching keyspace group id.
 func GetCompiledKeyspaceGroupIDRegexp() *regexp.Regexp {
-	pattern := KeyspaceGroupIDPrefix() + `(\d{5})$`
-	return regexp.MustCompile(pattern)
+	return regexp.MustCompile(keyspaceGroupIDPattern)
 }
 
 // ServiceMiddlewarePath is the path to save the service middleware config.
