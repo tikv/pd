@@ -29,9 +29,14 @@ type Request struct {
 	requestCtx context.Context
 	clientCtx  context.Context
 
-	key         []byte
-	prevKey     []byte
-	id          uint64
+	// Key field represents this is a `GetRegion` request.
+	key []byte
+	// PrevKey field represents this is a `GetPrevRegion` request.
+	prevKey []byte
+	// ID field represents this is a `GetRegionByID` request.
+	id uint64
+
+	// NeedBuckets field represents whether the request needs to get the region buckets.
 	needBuckets bool
 
 	done chan error

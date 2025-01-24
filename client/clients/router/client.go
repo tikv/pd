@@ -36,7 +36,6 @@ import (
 	"github.com/tikv/pd/client/pkg/batch"
 	cctx "github.com/tikv/pd/client/pkg/connectionctx"
 	"github.com/tikv/pd/client/pkg/retry"
-	"github.com/tikv/pd/client/pkg/utils/timerutil"
 	sd "github.com/tikv/pd/client/servicediscovery"
 )
 
@@ -176,7 +175,10 @@ func NewClient(
 		conCtxMgr:          cctx.NewManager[pdpb.PD_QueryRegionClient](),
 		updateConnectionCh: make(chan struct{}, 1),
 		bo: retry.InitialBackoffer(
-			sd.UpdateMemberBackOffBaseTime, sd.UpdateMemberTimeout, sd.UpdateMemberBackOffBaseTime),
+			sd.UpdateMemberBackOffBaseTime,
+			sd.UpdateMemberMaxBackoffTime,
+			sd.UpdateMemberTimeout,
+		),
 		reqPool: &sync.Pool{
 			New: func() any {
 				return &Request{
@@ -189,6 +191,7 @@ func NewClient(
 	}
 	c.leaderURL.Store(svcDiscovery.GetServingURL())
 	c.svcDiscovery.ExecAndAddLeaderSwitchedCallback(c.updateLeaderURL)
+	c.svcDiscovery.AddMembersChangedCallback(c.scheduleUpdateConnection)
 
 	c.wg.Add(2)
 	go c.connectionDaemon()
@@ -353,7 +356,7 @@ func (c *Cli) dispatcher() {
 			if timeoutTimer == nil {
 				timeoutTimer = time.NewTimer(c.option.Timeout)
 			} else {
-				timerutil.SafeResetTimer(timeoutTimer, c.option.Timeout)
+				timeoutTimer.Reset(c.option.Timeout)
 			}
 		}
 		ctx, cancel = context.WithCancel(c.ctx)
@@ -406,7 +409,7 @@ batchLoop:
 			connectionCtx := c.conCtxMgr.GetConnectionCtx()
 			if connectionCtx == nil {
 				log.Info("[router] router stream connection is not ready")
-				c.scheduleUpdateConnection()
+				c.updateConnection(ctx)
 				continue connectionCtxChoosingLoop
 			}
 			streamCtx, streamURL, stream = connectionCtx.Ctx, connectionCtx.StreamURL, connectionCtx.Stream
