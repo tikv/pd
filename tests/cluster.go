@@ -416,10 +416,10 @@ func (s *TestServer) waitPreAllocKeyspaces() error {
 	manager := s.GetKeyspaceManager()
 	idx := 0
 Outer:
-	for i := 0; i < WaitPreAllocKeyspacesRetryTimes; i++ {
+	for range WaitPreAllocKeyspacesRetryTimes {
 		for idx < len(keyspaces) {
 			_, err := manager.LoadKeyspace(keyspaces[idx])
-			if errors.ErrorEqual(err, keyspace.ErrKeyspaceNotFound) {
+			if errors.ErrorEqual(err, errs.ErrKeyspaceNotFound) {
 				time.Sleep(WaitPreAllocKeyspacesInterval)
 				continue Outer
 			}
