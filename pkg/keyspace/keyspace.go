@@ -161,7 +161,6 @@ func (manager *Manager) Bootstrap() error {
 	// Initialize pre-alloc keyspace.
 	preAlloc := manager.config.GetPreAlloc()
 	for _, keyspaceName := range preAlloc {
-		keyspaceName := keyspaceName
 		go func() {
 			config, err := manager.kgm.GetKeyspaceConfigByKind(endpoint.Basic)
 			if err != nil {
