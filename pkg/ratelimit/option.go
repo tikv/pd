@@ -45,15 +45,9 @@ type Option func(string, *Limiter) UpdateStatus
 // AddLabelAllowList adds a label into allow list.
 // It means the given label will not be limited
 func AddLabelAllowList() Option {
-<<<<<<< HEAD
 	return func(label string, l *Limiter) UpdateStatus {
 		l.labelAllowList[label] = struct{}{}
 		return 0
-=======
-	return func(label string, c *Controller) UpdateStatus {
-		c.labelAllowList[label] = struct{}{}
-		return InAllowList
->>>>>>> 604b0d6d4 (pkg: avoid make channel every time (#9009))
 	}
 }
 
@@ -91,51 +85,26 @@ func updateQPSConfig(l *Limiter, label string, limit float64, burst int) UpdateS
 
 // UpdateConcurrencyLimiter creates a concurrency limiter for a given label if it doesn't exist.
 func UpdateConcurrencyLimiter(limit uint64) Option {
-<<<<<<< HEAD
 	return func(label string, l *Limiter) UpdateStatus {
 		if _, allow := l.labelAllowList[label]; allow {
 			return InAllowList
 		}
 		return updateConcurrencyConfig(l, label, limit)
-=======
-	return func(label string, c *Controller) UpdateStatus {
-		if _, allow := c.labelAllowList[label]; allow {
-			return InAllowList
-		}
-		lim, loaded := c.limiters.Load(label)
-		if !loaded {
-			lim, _ = c.limiters.LoadOrStore(label, newLimiter())
-		}
-		return lim.(*limiter).updateConcurrencyConfig(limit)
->>>>>>> 604b0d6d4 (pkg: avoid make channel every time (#9009))
 	}
 }
 
 // UpdateQPSLimiter creates a QPS limiter for a given label if it doesn't exist.
 func UpdateQPSLimiter(limit float64, burst int) Option {
-<<<<<<< HEAD
 	return func(label string, l *Limiter) UpdateStatus {
 		if _, allow := l.labelAllowList[label]; allow {
 			return InAllowList
 		}
 		return updateQPSConfig(l, label, limit, burst)
-=======
-	return func(label string, c *Controller) UpdateStatus {
-		if _, allow := c.labelAllowList[label]; allow {
-			return InAllowList
-		}
-		lim, loaded := c.limiters.Load(label)
-		if !loaded {
-			lim, _ = c.limiters.LoadOrStore(label, newLimiter())
-		}
-		return lim.(*limiter).updateQPSConfig(limit, burst)
->>>>>>> 604b0d6d4 (pkg: avoid make channel every time (#9009))
 	}
 }
 
 // UpdateDimensionConfig creates QPS limiter and concurrency limiter for a given label by config if it doesn't exist.
 func UpdateDimensionConfig(cfg *DimensionConfig) Option {
-<<<<<<< HEAD
 	return func(label string, l *Limiter) UpdateStatus {
 		if _, allow := l.labelAllowList[label]; allow {
 			return InAllowList
@@ -143,30 +112,5 @@ func UpdateDimensionConfig(cfg *DimensionConfig) Option {
 		status := updateQPSConfig(l, label, cfg.QPS, cfg.QPSBurst)
 		status |= updateConcurrencyConfig(l, label, cfg.ConcurrencyLimit)
 		return status
-=======
-	return func(label string, c *Controller) UpdateStatus {
-		if _, allow := c.labelAllowList[label]; allow {
-			return InAllowList
-		}
-		lim, loaded := c.limiters.Load(label)
-		if !loaded {
-			lim, _ = c.limiters.LoadOrStore(label, newLimiter())
-		}
-		return lim.(*limiter).updateDimensionConfig(cfg)
-	}
-}
-
-// InitLimiter creates empty concurrency limiter for a given label by config if it doesn't exist.
-func InitLimiter() Option {
-	return func(label string, c *Controller) UpdateStatus {
-		if _, allow := c.labelAllowList[label]; allow {
-			return InAllowList
-		}
-		_, loaded := c.limiters.Load(label)
-		if !loaded {
-			c.limiters.LoadOrStore(label, newLimiter())
-		}
-		return LimiterNotChanged
->>>>>>> 604b0d6d4 (pkg: avoid make channel every time (#9009))
 	}
 }
