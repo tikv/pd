@@ -143,7 +143,8 @@ func (gta *GlobalTSOAllocator) IsInitialize() bool {
 func (gta *GlobalTSOAllocator) UpdateTSO() (err error) {
 	// When meet network partition, we need to manually retry to update the global tso,
 	// next request succeeds with the new endpoint, according to https://github.com/etcd-io/etcd/issues/8711
-	for i := 0; i < 3; i++ {
+	maxRetryCount := 3
+	for range maxRetryCount {
 		err = gta.timestampOracle.UpdateTimestamp()
 		if err == nil {
 			return nil
