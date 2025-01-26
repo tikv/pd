@@ -195,8 +195,18 @@ func (gta *GlobalTSOAllocator) IsInitialize() bool {
 }
 
 // UpdateTSO is used to update the TSO in memory and the time window in etcd.
-func (gta *GlobalTSOAllocator) UpdateTSO() error {
-	return gta.timestampOracle.UpdateTimestamp()
+func (gta *GlobalTSOAllocator) UpdateTSO() (err error) {
+	// When meet network partition, we need to manually retry to update the global tso,
+	// next request succeeds with the new endpoint, according to https://github.com/etcd-io/etcd/issues/8711
+	for i := 0; i < 3; i++ {
+		err = gta.timestampOracle.UpdateTimestamp()
+		if err == nil {
+			return nil
+		}
+		log.Warn("try to update the global tso but failed", errs.ZapError(err))
+		time.Sleep(gta.am.updatePhysicalInterval)
+	}
+	return
 }
 
 // SetTSO sets the physical part with given TSO.
