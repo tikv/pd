@@ -549,19 +549,23 @@ func schedulersRegister() {
 	})
 
 	// balance key range scheduler
-	// args: [role, engine, timeout, range1, range2, ...]
+	// args: [role, engine, timeout, table-name, range1, range2, ...]
 	RegisterSliceDecoderBuilder(types.BalanceRangeScheduler, func(args []string) ConfigDecoder {
 		return func(v any) error {
 			conf, ok := v.(*balanceRangeSchedulerConfig)
 			if !ok {
 				return errs.ErrScheduleConfigNotExist.FastGenByArgs()
 			}
-			if len(args) < 4 {
-				return errs.ErrSchedulerConfig.FastGenByArgs("args length must be greater than 3")
+			if len(args) < 5 {
+				return errs.ErrSchedulerConfig.FastGenByArgs("args length must be greater than 4")
 			}
 			role, err := url.QueryUnescape(args[0])
 			if err != nil {
 				return errs.ErrQueryUnescape.Wrap(err)
+			}
+			jobRole := NewRole(role)
+			if jobRole == unknown {
+				return errs.ErrQueryUnescape.FastGenByArgs("role")
 			}
 			engine, err := url.QueryUnescape(args[1])
 			if err != nil {
@@ -583,11 +587,22 @@ func schedulersRegister() {
 			if err != nil {
 				return err
 			}
-			conf.Ranges = ranges
-			conf.Engine = engine
-			conf.Role = role
-			conf.Timeout = duration
-			conf.TableName = tableName
+
+			jobId := uint64(0)
+			if len(conf.jobs) > 0 {
+				jobId = conf.jobs[len(conf.jobs)-1].JobID + 1
+			}
+
+			job := &balanceRangeSchedulerJob{
+				Role:      jobRole,
+				Engine:    engine,
+				Timeout:   duration,
+				TableName: tableName,
+				Ranges:    ranges,
+				Status:    pending,
+				JobID:     jobId,
+			}
+			conf.jobs = append(conf.jobs, job)
 			return nil
 		}
 	})

@@ -64,29 +64,37 @@ func (handler *balanceRangeSchedulerHandler) listConfig(w http.ResponseWriter, _
 type balanceRangeSchedulerConfig struct {
 	syncutil.RWMutex
 	schedulerConfig
-	balanceRangeSchedulerParam
+	jobs []*balanceRangeSchedulerJob
 }
 
-type balanceRangeSchedulerParam struct {
-	Role      string          `json:"role"`
+type balanceRangeSchedulerJob struct {
+	JobID     uint64          `json:"job-id"`
+	Role      Role            `json:"role"`
 	Engine    string          `json:"engine"`
 	Timeout   time.Duration   `json:"timeout"`
 	Ranges    []core.KeyRange `json:"ranges"`
 	TableName string          `json:"table-name"`
+	Status    JobStatus       `json:"status"`
 }
 
-func (conf *balanceRangeSchedulerConfig) clone() *balanceRangeSchedulerParam {
+func (conf *balanceRangeSchedulerConfig) clone() []*balanceRangeSchedulerJob {
 	conf.RLock()
 	defer conf.RUnlock()
-	ranges := make([]core.KeyRange, len(conf.Ranges))
-	copy(ranges, conf.Ranges)
-	return &balanceRangeSchedulerParam{
-		Ranges:    ranges,
-		Role:      conf.Role,
-		Engine:    conf.Engine,
-		Timeout:   conf.Timeout,
-		TableName: conf.TableName,
+	jobs := make([]*balanceRangeSchedulerJob, 0, len(conf.jobs))
+	for _, job := range conf.jobs {
+		ranges := make([]core.KeyRange, len(job.Ranges))
+		copy(ranges, job.Ranges)
+		jobs = append(jobs, &balanceRangeSchedulerJob{
+			Ranges:    ranges,
+			Role:      job.Role,
+			Engine:    job.Engine,
+			Timeout:   job.Timeout,
+			TableName: job.TableName,
+			JobID:     job.JobID,
+		})
 	}
+
+	return jobs
 }
 
 // EncodeConfig serializes the config.
@@ -101,14 +109,11 @@ func (s *balanceRangeScheduler) ReloadConfig() error {
 	s.conf.Lock()
 	defer s.conf.Unlock()
 
-	newCfg := &balanceRangeSchedulerConfig{}
-	if err := s.conf.load(newCfg); err != nil {
+	jobs := make([]*balanceRangeSchedulerJob, 0, len(s.conf.jobs))
+	if err := s.conf.load(jobs); err != nil {
 		return err
 	}
-	s.conf.Ranges = newCfg.Ranges
-	s.conf.Timeout = newCfg.Timeout
-	s.conf.Role = newCfg.Role
-	s.conf.Engine = newCfg.Engine
+	s.conf.jobs = jobs
 	return nil
 }
 
@@ -143,7 +148,7 @@ func (s *balanceRangeScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster)
 // BalanceRangeCreateOption is used to create a scheduler with an option.
 type BalanceRangeCreateOption func(s *balanceRangeScheduler)
 
-// newBalanceRangeScheduler creates a scheduler that tends to keep given peer role on
+// newBalanceRangeScheduler creates a scheduler that tends to keep given peer Role on
 // special store balanced.
 func newBalanceRangeScheduler(opController *operator.Controller, conf *balanceRangeSchedulerConfig, options ...BalanceRangeCreateOption) Scheduler {
 	s := &balanceRangeScheduler{
@@ -160,4 +165,68 @@ func newBalanceRangeScheduler(opController *operator.Controller, conf *balanceRa
 	}
 	s.filterCounter = filter.NewCounter(s.GetName())
 	return s
+}
+
+type JobStatus int
+
+const (
+	pending JobStatus = iota
+	running
+	finished
+)
+
+func (s JobStatus) String() string {
+	switch s {
+	case pending:
+		return "pending"
+	case running:
+		return "running"
+	case finished:
+		return "finished"
+	}
+	return "unknown"
+}
+
+// MarshalJSON marshals to json.
+func (s JobStatus) MarshalJSON() ([]byte, error) {
+	return []byte(`"` + s.String() + `"`), nil
+}
+
+type Role int
+
+const (
+	leader Role = iota
+	// include leader + voter
+	follower
+	learner
+	unknown
+)
+
+func NewRole(role string) Role {
+	switch role {
+	case "leader":
+		return leader
+	case "follower":
+		return follower
+	case "learner":
+		return learner
+	}
+	return unknown
+}
+
+func (r Role) String() string {
+	switch r {
+	case leader:
+		return "leader"
+	case follower:
+		return "follower"
+	case learner:
+		return "learner"
+	}
+	return "unknown"
+}
+
+// MarshalJSON marshals to json.
+func (r Role) MarshalJSON() ([]byte, error) {
+	return []byte(`"` + r.String() + `"`), nil
 }
