@@ -456,7 +456,7 @@ func TestSetRegionConcurrence(t *testing.T) {
 	re := require.New(t)
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/core/UpdateSubTree", `return()`))
 	regions := NewRegionsInfo()
-	region := NewTestRegionInfo(1, 1, []byte("a"), []byte("b"))
+	region := NewTestRegionInfo([]byte("a"), []byte("b"))
 	go func() {
 		regions.AtomicCheckAndPutRegion(region)
 	}()

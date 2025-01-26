@@ -887,16 +887,12 @@ func (r *RegionsInfo) setRegionLocked(region *RegionInfo) (*RegionInfo, []*Regio
 }
 
 // UpdateSubTree updates the subtree.
-<<<<<<< HEAD:server/core/region.go
 func (r *RegionsInfo) UpdateSubTree(region, origin *RegionInfo, toRemove []*RegionInfo, rangeChanged bool) {
-=======
-func (r *RegionsInfo) UpdateSubTree(region, origin *RegionInfo, overlaps []*RegionInfo, rangeChanged bool) {
 	failpoint.Inject("UpdateSubTree", func() {
 		if origin == nil {
 			time.Sleep(time.Second)
 		}
 	})
->>>>>>> 54219d649 (region: fix the potential panic .  (#7143)):pkg/core/region.go
 	r.st.Lock()
 	defer r.st.Unlock()
 	if origin != nil {
