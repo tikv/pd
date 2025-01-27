@@ -703,8 +703,14 @@ func (o *PersistOptions) Reload(storage endpoint.ConfigStorage) error {
 	if err != nil {
 		return err
 	}
+<<<<<<< HEAD
 	o.adjustScheduleCfg(&cfg.Schedule)
 	cfg.PDServerCfg.MigrateDeprecatedFlags()
+=======
+	adjustScheduleCfg(&cfg.Schedule)
+	// Some fields may not be stored in the storage, we need to calculate them manually.
+	cfg.StoreConfig.Adjust()
+>>>>>>> 31a0ad6b2 (config: completely remove the deprecated field from the PD server config (#8981))
 	if isExist {
 		o.schedule.Store(&cfg.Schedule)
 		o.replication.Store(&cfg.Replication)
