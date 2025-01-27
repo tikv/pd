@@ -16,9 +16,8 @@ package connectionctx
 
 import (
 	"context"
+	"math/rand"
 	"sync"
-
-	"golang.org/x/exp/rand"
 )
 
 type connectionCtx[T any] struct {
