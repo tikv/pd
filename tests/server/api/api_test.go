@@ -36,6 +36,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/response"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
@@ -798,6 +799,24 @@ func TestRemovingProgress(t *testing.T) {
 	output = sendRequest(re, leader.GetAddr()+"/pd/api/v1/stores/progress?id=2", http.MethodGet, http.StatusNotFound)
 	re.Contains(string(output), "no progress found for the given store ID")
 
+	// wait that stores are up
+	testutil.Eventually(re, func() bool {
+		output = sendRequest(re, leader.GetAddr()+"/pd/api/v1/stores", http.MethodGet, http.StatusOK)
+		var storesInfo response.StoresInfo
+		if err := json.Unmarshal(output, &storesInfo); err != nil {
+			return false
+		}
+		if len(storesInfo.Stores) != 3 {
+			return false
+		}
+		for _, store := range storesInfo.Stores {
+			if store.Store.GetNodeState() != metapb.NodeState_Serving {
+				return false
+			}
+		}
+		return true
+	})
+
 	// remove store 1 and store 2
 	_ = sendRequest(re, leader.GetAddr()+"/pd/api/v1/store/1", http.MethodDelete, http.StatusOK)
 	_ = sendRequest(re, leader.GetAddr()+"/pd/api/v1/store/2", http.MethodDelete, http.StatusOK)
@@ -840,6 +859,9 @@ func TestRemovingProgress(t *testing.T) {
 
 	testutil.Eventually(re, func() bool {
 		// wait for cluster prepare
+		if leader.GetRaftCluster() == nil {
+			return false
+		}
 		if !leader.GetRaftCluster().IsPrepared() {
 			leader.GetRaftCluster().SetPrepared()
 			return false
@@ -866,7 +888,7 @@ func TestRemovingProgress(t *testing.T) {
 		}
 		// store 1: 40/10s = 4
 		// store 2: 20/10s = 2
-		// average speed = (2+4)/2 = 33
+		// average speed = (2+4)/2 = 3.0
 		if p.CurrentSpeed != 3.0 {
 			return false
 		}
@@ -1097,7 +1119,9 @@ func sendRequest(re *require.Assertions, url string, method string, statusCode i
 
 	testutil.Eventually(re, func() bool {
 		resp, err := tests.TestDialClient.Do(req)
-		re.NoError(err)
+		if err != nil {
+			return false
+		}
 		defer resp.Body.Close()
 
 		// Due to service unavailability caused by environmental issues,
@@ -1105,7 +1129,9 @@ func sendRequest(re *require.Assertions, url string, method string, statusCode i
 		if resp.StatusCode == http.StatusServiceUnavailable {
 			return false
 		}
-		re.Equal(statusCode, resp.StatusCode)
+		if resp.StatusCode != statusCode {
+			return false
+		}
 		output, err = io.ReadAll(resp.Body)
 		re.NoError(err)
 		return true

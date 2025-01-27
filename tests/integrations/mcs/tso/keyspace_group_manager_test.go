@@ -544,12 +544,12 @@ func TestTwiceSplitKeyspaceGroup(t *testing.T) {
 		}
 	})
 	re.NoError(err)
+	defer tc.Destroy()
 	pdAddr := tc.GetConfig().GetClientURL()
 
 	// Start PD and tso server.
 	err = tc.RunInitialServers()
 	re.NoError(err)
-	defer tc.Destroy()
 	tc.WaitLeader()
 	leaderServer := tc.GetLeaderServer()
 	re.NoError(leaderServer.BootstrapCluster())
@@ -741,12 +741,12 @@ func TestGetTSOImmediately(t *testing.T) {
 		}
 	})
 	re.NoError(err)
+	defer tc.Destroy()
 	pdAddr := tc.GetConfig().GetClientURL()
 
 	// Start PD and tso server.
 	err = tc.RunInitialServers()
 	re.NoError(err)
-	defer tc.Destroy()
 	tc.WaitLeader()
 	leaderServer := tc.GetLeaderServer()
 	re.NoError(leaderServer.BootstrapCluster())

@@ -1040,9 +1040,10 @@ func (c *RaftCluster) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest
 			newStore = newStore.Clone(core.SetLastPersistTime(nowTime))
 		}
 	}
-	if store := c.GetStore(storeID); store != nil {
-		statistics.UpdateStoreHeartbeatMetrics(store)
-	}
+	// Supply NodeState in the response to help the store handle special cases
+	// more conveniently, such as avoiding calling `remove_peer` redundantly under
+	// NodeState_Removing.
+	resp.State = store.GetNodeState()
 	c.PutStore(newStore)
 	var (
 		regions  map[uint64]*core.RegionInfo
@@ -1179,7 +1180,7 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 		// Due to some config changes need to update the region stats as well,
 		// so we do some extra checks here.
 		// TODO: Due to the accuracy requirements of the API "/regions/check/xxx",
-		// region stats needs to be collected in API mode.
+		// region stats needs to be collected in microservice env.
 		// We need to think of a better way to reduce this part of the cost in the future.
 		if hasRegionStats && c.regionStats.RegionStatsNeedUpdate(region) {
 			ctx.MiscRunner.RunTask(
@@ -1250,7 +1251,7 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 			ratelimit.CollectRegionStatsAsync,
 			func(ctx context.Context) {
 				// TODO: Due to the accuracy requirements of the API "/regions/check/xxx",
-				// region stats needs to be collected in API mode.
+				// region stats needs to be collected in microservice env.
 				// We need to think of a better way to reduce this part of the cost in the future.
 				cluster.Collect(ctx, c, region)
 			},

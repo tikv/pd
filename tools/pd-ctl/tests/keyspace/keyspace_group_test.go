@@ -597,7 +597,7 @@ func TestShowKeyspaceGroupPrimary(t *testing.T) {
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/delayStartServerLoop"))
 }
 
-func TestInPDMode(t *testing.T) {
+func TestCmdWithoutKeyspaceGroupInitialized(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
