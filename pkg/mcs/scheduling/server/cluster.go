@@ -328,7 +328,11 @@ func (c *Cluster) updateScheduler() {
 		)
 		// Create the newly added schedulers.
 		for _, scheduler := range latestSchedulersConfig {
-			schedulerType := types.ConvertOldStrToType[scheduler.Type]
+			schedulerType, ok := types.ConvertOldStrToType[scheduler.Type]
+			if !ok {
+				log.Error("scheduler not found", zap.String("type", scheduler.Type))
+				continue
+			}
 			s, err := schedulers.CreateScheduler(
 				schedulerType,
 				c.coordinator.GetOperatorController(),
