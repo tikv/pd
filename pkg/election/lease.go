@@ -150,7 +150,6 @@ func (l *Lease) KeepAlive(ctx context.Context) {
 			timer.Reset(l.leaseTimeout)
 		case <-timer.C:
 			log.Info("keep alive lease too slow", zap.Duration("timeout-duration", l.leaseTimeout), zap.Time("actual-expire", l.expireTime.Load().(time.Time)), zap.String("purpose", l.Purpose))
-			return
 		case <-ctx.Done():
 			return
 		}
