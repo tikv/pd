@@ -31,7 +31,7 @@ var _ ServiceMiddlewareStorage = (*StorageEndpoint)(nil)
 
 // LoadServiceMiddlewareConfig loads service middleware config from ServiceMiddlewarePath then unmarshal it to cfg.
 func (se *StorageEndpoint) LoadServiceMiddlewareConfig(cfg any) (bool, error) {
-	value, err := se.Load(keypath.ServiceMiddlewarePath)
+	value, err := se.Load(keypath.ServiceMiddlewarePath())
 	if err != nil || value == "" {
 		return false, err
 	}
@@ -44,5 +44,5 @@ func (se *StorageEndpoint) LoadServiceMiddlewareConfig(cfg any) (bool, error) {
 
 // SaveServiceMiddlewareConfig stores marshallable cfg to the ServiceMiddlewarePath.
 func (se *StorageEndpoint) SaveServiceMiddlewareConfig(cfg any) error {
-	return se.saveJSON(keypath.ServiceMiddlewarePath, cfg)
+	return se.saveJSON(keypath.ServiceMiddlewarePath(), cfg)
 }

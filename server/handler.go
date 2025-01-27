@@ -48,7 +48,7 @@ import (
 )
 
 // SchedulerConfigHandlerPath is the api router path of the schedule config handler.
-var SchedulerConfigHandlerPath = "/api/v1/scheduler-config"
+var SchedulerConfigHandlerPath = "/pd/api/v1/scheduler-config"
 
 type server struct {
 	*Server
@@ -311,7 +311,7 @@ func (h *Handler) GetSchedulerConfigHandler() (http.Handler, error) {
 	}
 	mux := http.NewServeMux()
 	for name, handler := range c.GetSchedulerHandlers() {
-		prefix := path.Join(pdRootPath, SchedulerConfigHandlerPath, name)
+		prefix := path.Join(SchedulerConfigHandlerPath, name)
 		urlPath := prefix + "/"
 		mux.Handle(urlPath, http.StripPrefix(prefix, handler))
 	}
@@ -457,7 +457,7 @@ func (h *Handler) RedirectSchedulerUpdate(name string, storeID float64) error {
 	input := make(map[string]any)
 	input["name"] = name
 	input["store_id"] = storeID
-	updateURL, err := url.JoinPath(h.GetAddr(), "pd", SchedulerConfigHandlerPath, name, "config")
+	updateURL, err := url.JoinPath(h.GetAddr(), SchedulerConfigHandlerPath, name, "config")
 	if err != nil {
 		return err
 	}

@@ -149,7 +149,7 @@ func TestTxnWithEtcd(t *testing.T) {
 	re := require.New(t)
 	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1)
 	defer clean()
-	store := storage.NewStorageWithEtcdBackend(client, "")
+	store := storage.NewStorageWithEtcdBackend(client)
 	labeler, err := NewRegionLabeler(context.Background(), store, time.Millisecond*10)
 	re.NoError(err)
 	// test patch rules in batch

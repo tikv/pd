@@ -219,7 +219,7 @@ func (m *GroupManager) allocNodesToAllKeyspaceGroups(ctx context.Context) {
 }
 
 func (m *GroupManager) initTSONodesWatcher(client *clientv3.Client) {
-	tsoServiceKey := keypath.TSOPath()
+	tsoServiceKey := keypath.ServicePath(constant.TSOServiceName)
 
 	putFn := func(kv *mvccpb.KeyValue) error {
 		s := &discovery.ServiceRegistryEntry{}
