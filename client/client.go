@@ -196,12 +196,16 @@ var _ Client = (*client)(nil)
 
 // serviceModeKeeper is for service mode switching.
 type serviceModeKeeper struct {
-	// RMutex here is for the future usage that there might be multiple goroutines
-	// triggering service mode switching concurrently.
 	sync.RWMutex
 	serviceMode     pdpb.ServiceMode
+<<<<<<< HEAD
 	tsoClient       *tsoClient
 	tsoSvcDiscovery ServiceDiscovery
+=======
+	tsoClient       *tso.Cli
+	tsoSvcDiscovery sd.ServiceDiscovery
+	routerClient    *router.Cli
+>>>>>>> debceaf3c7 (client/router: implement the query region gRPC client (#8939))
 }
 
 func (k *serviceModeKeeper) close() {
@@ -832,6 +836,7 @@ func (c *client) GetMinTS(ctx context.Context) (physical int64, logical int64, e
 	return minTS.Physical, tsoutil.AddLogical(minTS.Logical, 0, minTS.SuffixBits), nil
 }
 
+<<<<<<< HEAD
 func handleRegionResponse(res *pdpb.GetRegionResponse) *Region {
 	if res.Region == nil {
 		return nil
@@ -847,6 +852,18 @@ func handleRegionResponse(res *pdpb.GetRegionResponse) *Region {
 		r.DownPeers = append(r.DownPeers, s.Peer)
 	}
 	return r
+=======
+// EnableRouterClient enables the router client.
+// This is only for test currently.
+func (c *client) EnableRouterClient() {
+	c.inner.initRouterClient()
+}
+
+func (c *client) getRouterClient() *router.Cli {
+	c.inner.RLock()
+	defer c.inner.RUnlock()
+	return c.inner.routerClient
+>>>>>>> debceaf3c7 (client/router: implement the query region gRPC client (#8939))
 }
 
 // GetRegionFromMember implements the RPCClient interface.
@@ -885,7 +902,7 @@ func (c *client) GetRegionFromMember(ctx context.Context, key []byte, memberURLs
 		errorMsg := fmt.Sprintf("[pd] can't get region info from member URLs: %+v", memberURLs)
 		return nil, errors.WithStack(errors.New(errorMsg))
 	}
-	return handleRegionResponse(resp), nil
+	return router.ConvertToRegion(resp), nil
 }
 
 // GetRegion implements the RPCClient interface.
@@ -899,7 +916,15 @@ func (c *client) GetRegion(ctx context.Context, key []byte, opts ...GetRegionOpt
 	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
 	defer cancel()
 
+<<<<<<< HEAD
 	options := &GetRegionOp{}
+=======
+	if routerClient := c.getRouterClient(); routerClient != nil {
+		return routerClient.GetRegion(ctx, key, opts...)
+	}
+
+	options := &opt.GetRegionOp{}
+>>>>>>> debceaf3c7 (client/router: implement the query region gRPC client (#8939))
 	for _, opt := range opts {
 		opt(options)
 	}
@@ -923,7 +948,7 @@ func (c *client) GetRegion(ctx context.Context, key []byte, opts ...GetRegionOpt
 	if err = c.respForErr(metrics.CmdFailDurationGetRegion, start, err, resp.GetHeader()); err != nil {
 		return nil, err
 	}
-	return handleRegionResponse(resp), nil
+	return router.ConvertToRegion(resp), nil
 }
 
 // GetPrevRegion implements the RPCClient interface.
@@ -937,7 +962,15 @@ func (c *client) GetPrevRegion(ctx context.Context, key []byte, opts ...GetRegio
 	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
 	defer cancel()
 
+<<<<<<< HEAD
 	options := &GetRegionOp{}
+=======
+	if routerClient := c.getRouterClient(); routerClient != nil {
+		return routerClient.GetPrevRegion(ctx, key, opts...)
+	}
+
+	options := &opt.GetRegionOp{}
+>>>>>>> debceaf3c7 (client/router: implement the query region gRPC client (#8939))
 	for _, opt := range opts {
 		opt(options)
 	}
@@ -962,7 +995,7 @@ func (c *client) GetPrevRegion(ctx context.Context, key []byte, opts ...GetRegio
 	if err = c.respForErr(metrics.CmdFailDurationGetPrevRegion, start, err, resp.GetHeader()); err != nil {
 		return nil, err
 	}
-	return handleRegionResponse(resp), nil
+	return router.ConvertToRegion(resp), nil
 }
 
 // GetRegionByID implements the RPCClient interface.
@@ -976,7 +1009,15 @@ func (c *client) GetRegionByID(ctx context.Context, regionID uint64, opts ...Get
 	ctx, cancel := context.WithTimeout(ctx, c.option.timeout)
 	defer cancel()
 
+<<<<<<< HEAD
 	options := &GetRegionOp{}
+=======
+	if routerClient := c.getRouterClient(); routerClient != nil {
+		return routerClient.GetRegionByID(ctx, regionID, opts...)
+	}
+
+	options := &opt.GetRegionOp{}
+>>>>>>> debceaf3c7 (client/router: implement the query region gRPC client (#8939))
 	for _, opt := range opts {
 		opt(options)
 	}
@@ -1002,7 +1043,7 @@ func (c *client) GetRegionByID(ctx context.Context, regionID uint64, opts ...Get
 	if err = c.respForErr(metrics.CmdFailedDurationGetRegionByID, start, err, resp.GetHeader()); err != nil {
 		return nil, err
 	}
-	return handleRegionResponse(resp), nil
+	return router.ConvertToRegion(resp), nil
 }
 
 // ScanRegions implements the RPCClient interface.
