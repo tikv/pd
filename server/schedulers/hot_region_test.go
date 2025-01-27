@@ -1391,6 +1391,9 @@ func TestHotCacheUpdateCache(t *testing.T) {
 	defer cancel()
 	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
+	for i := 0; i < 3; i++ {
+		tc.PutStore(core.NewStoreInfo(&metapb.Store{Id: uint64(i + 1)}))
+	}
 	tc.SetHotRegionCacheHitsThreshold(0)
 
 	// For read flow
@@ -1460,6 +1463,9 @@ func TestHotCacheKeyThresholds(t *testing.T) {
 	}()
 	{ // only a few regions
 		tc := mockcluster.NewCluster(ctx, opt)
+		for i := 0; i < 6; i++ {
+			tc.PutStore(core.NewStoreInfo(&metapb.Store{Id: uint64(i + 1)}))
+		}
 		tc.SetHotRegionCacheHitsThreshold(0)
 		addRegionInfo(tc, statistics.Read, []testRegionInfo{
 			{1, []uint64{1, 2, 3}, 0, 1, 0},
@@ -1478,6 +1484,9 @@ func TestHotCacheKeyThresholds(t *testing.T) {
 	}
 	{ // many regions
 		tc := mockcluster.NewCluster(ctx, opt)
+		for i := 0; i < 3; i++ {
+			tc.PutStore(core.NewStoreInfo(&metapb.Store{Id: uint64(i + 1)}))
+		}
 		regions := []testRegionInfo{}
 		for i := 1; i <= 1000; i += 2 {
 			regions = append(regions,
@@ -1533,6 +1542,9 @@ func TestHotCacheByteAndKey(t *testing.T) {
 	defer cancel()
 	opt := config.NewTestOptions()
 	tc := mockcluster.NewCluster(ctx, opt)
+	for i := 0; i < 3; i++ {
+		tc.PutStore(core.NewStoreInfo(&metapb.Store{Id: uint64(i + 1)}))
+	}
 	tc.SetHotRegionCacheHitsThreshold(0)
 	statistics.ThresholdsUpdateInterval = 0
 	defer func() {
@@ -1656,6 +1668,9 @@ func TestHotCacheCheckRegionFlow(t *testing.T) {
 		tc.SetMaxReplicas(3)
 		tc.SetLocationLabels([]string{"zone", "host"})
 		tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
+		for i := 0; i < 3; i++ {
+			tc.PutStore(core.NewStoreInfo(&metapb.Store{Id: uint64(i + 1)}))
+		}
 		sche, err := schedule.CreateScheduler(HotRegionType, schedule.NewOperatorController(ctx, tc, nil), storage.NewStorageWithMemoryBackend(), schedule.ConfigJSONDecoder([]byte("null")))
 		re.NoError(err)
 		hb := sche.(*hotScheduler)
@@ -1728,6 +1743,9 @@ func TestHotCacheCheckRegionFlowWithDifferentThreshold(t *testing.T) {
 	tc := mockcluster.NewCluster(ctx, opt)
 	tc.SetMaxReplicas(3)
 	tc.SetLocationLabels([]string{"zone", "host"})
+	for i := 0; i < 3; i++ {
+		tc.PutStore(core.NewStoreInfo(&metapb.Store{Id: uint64(i + 1)}))
+	}
 	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.Version4_0))
 	statistics.ThresholdsUpdateInterval = 0
 	defer func() {

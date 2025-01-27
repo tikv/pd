@@ -61,10 +61,11 @@ type Cluster struct {
 
 // NewCluster creates a new Cluster
 func NewCluster(ctx context.Context, opts *config.PersistOptions) *Cluster {
+	basicCluster := core.NewBasicCluster()
 	clus := &Cluster{
-		BasicCluster:       core.NewBasicCluster(),
+		BasicCluster:       basicCluster,
 		IDAllocator:        mockid.NewIDAllocator(),
-		HotStat:            statistics.NewHotStat(ctx),
+		HotStat:            statistics.NewHotStat(ctx, basicCluster),
 		HotBucketCache:     buckets.NewBucketsCache(ctx),
 		PersistOptions:     opts,
 		suspectRegions:     map[uint64]struct{}{},
