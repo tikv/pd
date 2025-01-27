@@ -893,6 +893,7 @@ func (s *GrpcServer) StoreHeartbeat(ctx context.Context, request *pdpb.StoreHear
 		}, nil
 	}
 	storeID := request.GetStats().GetStoreId()
+	log.Info("Receive store heartbeat", zap.Uint64("store-id", storeID))
 	store := rc.GetStore(storeID)
 	if store == nil {
 		return &pdpb.StoreHeartbeatResponse{
