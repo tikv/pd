@@ -374,7 +374,6 @@ func (m *GroupManager) saveKeyspaceGroups(keyspaceGroups []*endpoint.KeyspaceGro
 
 // GetKeyspaceConfigByKind returns the keyspace config for the given user kind.
 func (m *GroupManager) GetKeyspaceConfigByKind(userKind endpoint.UserKind) (map[string]string, error) {
-	// when server is not in API mode, we don't need to return the keyspace config
 	if m == nil {
 		return map[string]string{}, nil
 	}
@@ -418,7 +417,6 @@ var failpointOnce sync.Once
 
 // UpdateKeyspaceForGroup updates the keyspace field for the keyspace group.
 func (m *GroupManager) UpdateKeyspaceForGroup(userKind endpoint.UserKind, groupID string, keyspaceID uint32, mutation int) error {
-	// when server is not in API mode, we don't need to update the keyspace for keyspace group
 	if m == nil {
 		return nil
 	}
@@ -477,7 +475,6 @@ func (m *GroupManager) updateKeyspaceForGroupLocked(userKind endpoint.UserKind, 
 
 // UpdateKeyspaceGroup updates the keyspace group.
 func (m *GroupManager) UpdateKeyspaceGroup(oldGroupID, newGroupID string, oldUserKind, newUserKind endpoint.UserKind, keyspaceID uint32) error {
-	// when server is not in API mode, we don't need to update the keyspace group
 	if m == nil {
 		return nil
 	}

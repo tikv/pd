@@ -110,12 +110,18 @@ func NewCircuitBreaker(name string, st Settings) *CircuitBreaker {
 	cb.config = &st
 	cb.state = cb.newState(time.Now(), StateClosed)
 
-	metricName := replacer.Replace(name)
+	m.RegisterConsumer(func() {
+		registerMetrics(cb)
+	})
+	return cb
+}
+
+func registerMetrics(cb *CircuitBreaker) {
+	metricName := replacer.Replace(cb.name)
 	cb.successCounter = m.CircuitBreakerCounters.WithLabelValues(metricName, "success")
 	cb.errorCounter = m.CircuitBreakerCounters.WithLabelValues(metricName, "error")
 	cb.overloadCounter = m.CircuitBreakerCounters.WithLabelValues(metricName, "overload")
 	cb.fastFailCounter = m.CircuitBreakerCounters.WithLabelValues(metricName, "fast_fail")
-	return cb
 }
 
 // ChangeSettings changes the CircuitBreaker settings.

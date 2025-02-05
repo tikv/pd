@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"math/rand"
 	"os"
 	"path"
 	"reflect"
@@ -1105,6 +1106,10 @@ func bootstrapServer(re *require.Assertions, header *pdpb.RequestHeader, client 
 	re.Equal(pdpb.ErrorType_OK, resp.GetHeader().GetError().GetType())
 }
 
+func (suite *clientTestSuite) SetupTest() {
+	suite.grpcSvr.DirectlyGetRaftCluster().ResetRegionCache()
+}
+
 func (suite *clientTestSuite) TestGetRegion() {
 	re := suite.Require()
 	regionID := regionIDAllocator.alloc()
@@ -1204,7 +1209,6 @@ func (suite *clientTestSuite) TestGetPrevRegion() {
 		err := suite.regionHeartbeat.Send(req)
 		re.NoError(err)
 	}
-	time.Sleep(500 * time.Millisecond)
 	for i := range 20 {
 		testutil.Eventually(re, func() bool {
 			r, err := suite.client.GetPrevRegion(context.Background(), []byte{byte(i)})
@@ -1336,6 +1340,83 @@ func (suite *clientTestSuite) TestGetRegionByID() {
 		return reflect.DeepEqual(region, r.Meta) &&
 			reflect.DeepEqual(peers[0], r.Leader)
 	})
+}
+
+func (suite *clientTestSuite) TestGetRegionConcurrently() {
+	suite.client.(interface{ EnableRouterClient() }).EnableRouterClient()
+
+	re := suite.Require()
+	ctx, cancel := context.WithCancel(suite.ctx)
+	defer cancel()
+
+	regions := make([]*metapb.Region, 0, 2)
+	for i := range 2 {
+		regionID := regionIDAllocator.alloc()
+		region := &metapb.Region{
+			Id: regionID,
+			RegionEpoch: &metapb.RegionEpoch{
+				ConfVer: 1,
+				Version: 1,
+			},
+			StartKey: []byte{byte(i)},
+			EndKey:   []byte{byte(i + 1)},
+			Peers:    peers,
+		}
+		re.NoError(suite.regionHeartbeat.Send(&pdpb.RegionHeartbeatRequest{
+			Header: newHeader(),
+			Region: region,
+			Leader: peers[0],
+		}))
+		regions = append(regions, region)
+	}
+
+	const concurrency = 1000
+
+	wg := sync.WaitGroup{}
+	wg.Add(concurrency)
+	for range concurrency {
+		go func() {
+			defer wg.Done()
+			switch rand.Intn(3) {
+			case 0:
+				region := regions[0]
+				testutil.Eventually(re, func() bool {
+					r, err := suite.client.GetRegion(ctx, region.GetStartKey())
+					re.NoError(err)
+					if r == nil {
+						return false
+					}
+					return reflect.DeepEqual(region, r.Meta) &&
+						reflect.DeepEqual(peers[0], r.Leader) &&
+						r.Buckets == nil
+				})
+			case 1:
+				testutil.Eventually(re, func() bool {
+					r, err := suite.client.GetPrevRegion(ctx, regions[1].GetStartKey())
+					re.NoError(err)
+					if r == nil {
+						return false
+					}
+					return reflect.DeepEqual(regions[0], r.Meta) &&
+						reflect.DeepEqual(peers[0], r.Leader) &&
+						r.Buckets == nil
+				})
+			case 2:
+				region := regions[0]
+				testutil.Eventually(re, func() bool {
+					r, err := suite.client.GetRegionByID(ctx, region.GetId())
+					re.NoError(err)
+					if r == nil {
+						return false
+					}
+					return reflect.DeepEqual(region, r.Meta) &&
+						reflect.DeepEqual(peers[0], r.Leader) &&
+						r.Buckets == nil
+				})
+			}
+		}()
+	}
+	wg.Wait()
 }
 
 func (suite *clientTestSuite) TestGetStore() {
