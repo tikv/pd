@@ -130,11 +130,11 @@ type ServiceDiscovery interface {
 	// in a quorum-based cluster or among the primary/secondaries in a primary/secondary configured cluster.
 	CheckMemberChanged() error
 	// ExecAndAddLeaderSwitchedCallback executes the callback once and adds it to the callback list then.
-	ExecAndAddLeaderSwitchedCallback(cb leaderSwitchedCallbackFunc)
+	ExecAndAddLeaderSwitchedCallback(cb LeaderSwitchedCallbackFunc)
 	// AddLeaderSwitchedCallback adds callbacks which will be called when the leader
 	// in a quorum-based cluster or the primary in a primary/secondary configured cluster
 	// is switched.
-	AddLeaderSwitchedCallback(cb leaderSwitchedCallbackFunc)
+	AddLeaderSwitchedCallback(cb LeaderSwitchedCallbackFunc)
 	// AddMembersChangedCallback adds callbacks which will be called when any leader/follower
 	// in a quorum-based cluster or any primary/secondary in a primary/secondary configured cluster
 	// is changed.
@@ -780,7 +780,7 @@ func (c *serviceDiscovery) CheckMemberChanged() error {
 }
 
 // ExecAndAddLeaderSwitchedCallback executes the callback once and adds it to the callback list then.
-func (c *serviceDiscovery) ExecAndAddLeaderSwitchedCallback(callback leaderSwitchedCallbackFunc) {
+func (c *serviceDiscovery) ExecAndAddLeaderSwitchedCallback(callback LeaderSwitchedCallbackFunc) {
 	url := c.getLeaderURL()
 	if len(url) > 0 {
 		if err := callback(url); err != nil {
@@ -794,7 +794,7 @@ func (c *serviceDiscovery) ExecAndAddLeaderSwitchedCallback(callback leaderSwitc
 // AddLeaderSwitchedCallback adds callbacks which will be called when the leader
 // in a quorum-based cluster or the primary in a primary/secondary configured cluster
 // is switched.
-func (c *serviceDiscovery) AddLeaderSwitchedCallback(callback leaderSwitchedCallbackFunc) {
+func (c *serviceDiscovery) AddLeaderSwitchedCallback(callback LeaderSwitchedCallbackFunc) {
 	c.callbacks.addLeaderSwitchedCallback(callback)
 }
 
