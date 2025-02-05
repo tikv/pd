@@ -150,7 +150,9 @@ func (gta *GlobalTSOAllocator) UpdateTSO() (err error) {
 			return nil
 		}
 		log.Warn("try to update the global tso but failed", errs.ZapError(err))
-		time.Sleep(gta.am.updatePhysicalInterval)
+		// Etcd client retry with roundRobinQuorumBackoff https://github.com/etcd-io/etcd/blob/d62cdeee4863001b09e772ed013eb1342a1d0f89/client/v3/client.go#L488
+		// And its default interval is 25ms, so we sleep 50ms here. https://github.com/etcd-io/etcd/blob/d62cdeee4863001b09e772ed013eb1342a1d0f89/client/v3/options.go#L53
+		time.Sleep(50 * time.Millisecond)
 	}
 	return
 }
