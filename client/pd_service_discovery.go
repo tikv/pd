@@ -113,11 +113,21 @@ type ServiceDiscovery interface {
 	// CheckMemberChanged immediately check if there is any membership change among the leader/followers
 	// in a quorum-based cluster or among the primary/secondaries in a primary/secondary configured cluster.
 	CheckMemberChanged() error
+<<<<<<< HEAD:client/pd_service_discovery.go
 	// AddServingURLSwitchedCallback adds callbacks which will be called when the leader
 	// in a quorum-based cluster or the primary in a primary/secondary configured cluster
 	// is switched.
 	AddServingURLSwitchedCallback(callbacks ...func())
 	// AddServiceURLsSwitchedCallback adds callbacks which will be called when any leader/follower
+=======
+	// ExecAndAddLeaderSwitchedCallback executes the callback once and adds it to the callback list then.
+	ExecAndAddLeaderSwitchedCallback(cb LeaderSwitchedCallbackFunc)
+	// AddLeaderSwitchedCallback adds callbacks which will be called when the leader
+	// in a quorum-based cluster or the primary in a primary/secondary configured cluster
+	// is switched.
+	AddLeaderSwitchedCallback(cb LeaderSwitchedCallbackFunc)
+	// AddMembersChangedCallback adds callbacks which will be called when any leader/follower
+>>>>>>> f6d4ca57ef (client: expose callback function (#9032)):client/servicediscovery/service_discovery.go
 	// in a quorum-based cluster or any primary/secondary in a primary/secondary configured cluster
 	// is changed.
 	AddServiceURLsSwitchedCallback(callbacks ...func())
@@ -788,6 +798,7 @@ func (c *pdServiceDiscovery) CheckMemberChanged() error {
 	return c.updateMember()
 }
 
+<<<<<<< HEAD:client/pd_service_discovery.go
 // AddServingURLSwitchedCallback adds callbacks which will be called
 // when the leader is switched.
 func (c *pdServiceDiscovery) AddServingURLSwitchedCallback(callbacks ...func()) {
@@ -809,13 +820,34 @@ func (c *pdServiceDiscovery) SetTSOLocalServURLsUpdatedCallback(callback tsoLoca
 // SetTSOGlobalServURLUpdatedCallback adds a callback which will be called when the global tso
 // allocator leader is updated.
 func (c *pdServiceDiscovery) SetTSOGlobalServURLUpdatedCallback(callback tsoGlobalServURLUpdatedFunc) {
+=======
+// ExecAndAddLeaderSwitchedCallback executes the callback once and adds it to the callback list then.
+func (c *serviceDiscovery) ExecAndAddLeaderSwitchedCallback(callback LeaderSwitchedCallbackFunc) {
+>>>>>>> f6d4ca57ef (client: expose callback function (#9032)):client/servicediscovery/service_discovery.go
 	url := c.getLeaderURL()
 	if len(url) > 0 {
 		if err := callback(url); err != nil {
 			log.Error("[tso] failed to call back when tso global service url update", zap.String("url", url), errs.ZapError(err))
 		}
 	}
+<<<<<<< HEAD:client/pd_service_discovery.go
 	c.tsoGlobalAllocLeaderUpdatedCb = callback
+=======
+	c.AddLeaderSwitchedCallback(callback)
+}
+
+// AddLeaderSwitchedCallback adds callbacks which will be called when the leader
+// in a quorum-based cluster or the primary in a primary/secondary configured cluster
+// is switched.
+func (c *serviceDiscovery) AddLeaderSwitchedCallback(callback LeaderSwitchedCallbackFunc) {
+	c.callbacks.addLeaderSwitchedCallback(callback)
+}
+
+// AddMembersChangedCallback adds callbacks which will be called when any primary/secondary
+// in a primary/secondary configured cluster is changed.
+func (c *serviceDiscovery) AddMembersChangedCallback(callback func()) {
+	c.callbacks.addMembersChangedCallback(callback)
+>>>>>>> f6d4ca57ef (client: expose callback function (#9032)):client/servicediscovery/service_discovery.go
 }
 
 // getLeaderURL returns the leader URL.
