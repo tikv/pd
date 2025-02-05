@@ -15,6 +15,7 @@
 package metrics
 
 import (
+	"sync"
 	"sync/atomic"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -26,6 +27,28 @@ var initialized int32
 func init() {
 	initMetrics(prometheus.Labels{})
 	initCmdDurations()
+	initRegisteredConsumers()
+}
+
+var consumersInitializers = struct {
+	sync.Mutex
+	value []func()
+}{}
+
+// RegisterConsumer registers a consumer to be initialized when the metrics are (re)initialized
+func RegisterConsumer(initConsumer func()) {
+	consumersInitializers.Lock()
+	defer consumersInitializers.Unlock()
+	consumersInitializers.value = append(consumersInitializers.value, initConsumer)
+	initConsumer()
+}
+
+func initRegisteredConsumers() {
+	consumersInitializers.Lock()
+	defer consumersInitializers.Unlock()
+	for _, initConsumer := range consumersInitializers.value {
+		initConsumer()
+	}
 }
 
 // InitAndRegisterMetrics initializes and registers the metrics manually.
@@ -34,6 +57,7 @@ func InitAndRegisterMetrics(constLabels prometheus.Labels) {
 		// init metrics with constLabels
 		initMetrics(constLabels)
 		initCmdDurations()
+		initRegisteredConsumers()
 		// register metrics
 		registerMetrics()
 	}
