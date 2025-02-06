@@ -227,13 +227,18 @@ type tsoRequest struct {
 }
 
 func (s *GrpcServer) dispatchTSORequest(ctx context.Context, request *tsoRequest, forwardedHost string, doneCh <-chan struct{}, errCh chan<- error) {
-	tsoRequestChInterface, loaded := s.tsoDispatcher.LoadOrStore(forwardedHost, make(chan *tsoRequest, maxMergeTSORequests))
+	val, loaded := s.tsoDispatcher.Load(forwardedHost)
+	if !loaded {
+		val = make(chan *tsoRequest, maxMergeTSORequests)
+		val, loaded = s.tsoDispatcher.LoadOrStore(forwardedHost, val)
+	}
+	reqCh := val.(chan *tsoRequest)
 	if !loaded {
 		tsDeadlineCh := make(chan deadline, 1)
-		go s.handleDispatcher(ctx, forwardedHost, tsoRequestChInterface.(chan *tsoRequest), tsDeadlineCh, doneCh, errCh)
+		go s.handleDispatcher(ctx, forwardedHost, reqCh, tsDeadlineCh, doneCh, errCh)
 		go watchTSDeadline(ctx, tsDeadlineCh)
 	}
-	tsoRequestChInterface.(chan *tsoRequest) <- request
+	reqCh <- request
 }
 
 func (s *GrpcServer) handleDispatcher(ctx context.Context, forwardedHost string, tsoRequestCh <-chan *tsoRequest, tsDeadlineCh chan<- deadline, doneCh <-chan struct{}, errCh chan<- error) {
