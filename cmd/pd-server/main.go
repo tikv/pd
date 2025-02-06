@@ -209,7 +209,7 @@ func start(cmd *cobra.Command, args []string, services ...string) {
 	// Check the PD version first before running.
 	server.CheckAndGetPDVersion()
 	// New zap logger
-	err = logutil.SetupLogger(cfg.Log, &cfg.Logger, &cfg.LogProps, cfg.Security.RedactInfoLog)
+	err = logutil.SetupLogger(&cfg.Log, &cfg.Logger, &cfg.LogProps, cfg.Security.RedactInfoLog)
 	if err == nil {
 		log.ReplaceGlobals(cfg.Logger, cfg.LogProps)
 	} else {
@@ -223,7 +223,6 @@ func start(cmd *cobra.Command, args []string, services ...string) {
 	for _, msg := range cfg.WarningMsgs {
 		log.Warn(msg)
 	}
-
 	// TODO: Make it configurable if it has big impact on performance.
 	grpcprometheus.EnableHandlingTimeHistogram()
 
