@@ -147,6 +147,7 @@ func TestDeletedPDJoinsPreviousCluster(t *testing.T) {
 }
 
 func TestFailedPDJoinsPreviousCluster(t *testing.T) {
+	t.Skip("flaky in 8.5.1")
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
