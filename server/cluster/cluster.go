@@ -889,7 +889,7 @@ func (c *RaftCluster) processRegionHeartbeat(region *core.RegionInfo) error {
 			if c.regionStats != nil {
 				c.regionStats.ClearDefunctRegion(item.GetID())
 			}
-			c.labelLevelStats.ClearDefunctRegion(item.GetID())
+			c.labelLevelStats.MarkDefunctRegion(item.GetID())
 		}
 		regionUpdateCacheEventCounter.Inc()
 	}
@@ -1969,6 +1969,7 @@ func (c *RaftCluster) updateRegionsLabelLevelStats(regions []*core.RegionInfo) {
 	for _, region := range regions {
 		c.labelLevelStats.Observe(region, c.getStoresWithoutLabelLocked(region, core.EngineKey, core.EngineTiFlash), c.opt.GetLocationLabels())
 	}
+	c.labelLevelStats.ClearDefunctRegions()
 }
 
 func (c *RaftCluster) getRegionStoresLocked(region *core.RegionInfo) []*core.StoreInfo {
