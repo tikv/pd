@@ -33,7 +33,6 @@ const (
 	// ServiceMiddlewarePath is the path to save the service middleware config.
 	ServiceMiddlewarePath = "service_middleware"
 	schedulePath          = "schedule"
-	gcPath                = "gc"
 	ruleCommonPath        = "rule"
 	// RulesPath is the path to save the placement rules.
 	RulesPath = "rules"
@@ -48,8 +47,6 @@ const (
 	GCWorkerServiceSafePointID = "gc_worker"
 	minResolvedTS              = "min_resolved_ts"
 	externalTimeStamp          = "external_timestamp"
-	keyspaceSafePointPrefix    = "keyspaces/gc_safepoint"
-	keyspaceGCSafePointSuffix  = "gc"
 	keyspacePrefix             = "keyspaces"
 	keyspaceMetaInfix          = "meta"
 	keyspaceIDInfix            = "id"
@@ -72,6 +69,20 @@ const (
 	tsoKeyspaceGroupPrefix      = tsoServiceKey + "/" + constant.KeyspaceGroupsKey
 	keyspaceGroupsMembershipKey = "membership"
 	keyspaceGroupsElectionKey   = "election"
+
+	gcPath                 = "gc"
+	gcMetaRevisionKey      = gcPath + "/gc_meta_revision"
+	gcSafePointKey         = gcPath + "/safe_point"
+	keyspaceGCSafePointKey = "keyspaces/gc_safe_point/%s"
+	// Compatible with old data that was directly written to etcd by TiDB.
+	txnSafePointAbsolutePath         = "/tidb/store/gcworker/saved_safe_point"
+	keyspaceTxnSafePointAbsolutePath = "/keyspaces/tidb/%s/tidb/store/gcworker/saved_safe_point"
+	// Compatible with service safe point.
+	gcBarrierPrefix         = gcPath + "/safe_point/service"
+	keyspaceGcBarrierPrefix = "keyspaces/service_safe_point/%s"
+	// Compatible with `minstartts` written to etcd directly to etcd by TiDB.
+	tidbMinStartTSAbsolutePrefix         = "/tidb/server/minstartts"
+	keyspaceTiDBMinStartTSAbsolutePrefix = "/keyspaces/tidb/%s/tidb/server/minstartts"
 
 	// we use uint64 to represent ID, the max length of uint64 is 20.
 	keyLen = 20
@@ -215,19 +226,41 @@ func ReplicationModePath(mode string) string {
 	return path.Join(replicationPath, mode)
 }
 
+func GCMetaRevisionPath() string {
+	return path.Join(gcPath, gcMetaRevisionKey)
+}
+
 // GCSafePointPath returns the GC safe point key path.
 func GCSafePointPath() string {
-	return path.Join(gcPath, "safe_point")
+	return gcSafePointKey
 }
 
-// GCSafePointServicePrefixPath returns the GC safe point service key path prefix.
-func GCSafePointServicePrefixPath() string {
-	return path.Join(GCSafePointPath(), "service") + "/"
+func KeyspaceGCSafePointPath(keyspaceID uint32) string {
+	return fmt.Sprintf(keyspaceGCSafePointKey, EncodeKeyspaceID(keyspaceID))
 }
 
-// GCSafePointServicePath returns the GC safe point service key path with the given service ID.
-func GCSafePointServicePath(serviceID string) string {
-	return path.Join(GCSafePointPath(), "service", serviceID)
+func TxnSafePointAbsolutePath() string {
+	return txnSafePointAbsolutePath
+}
+
+func KeyspaceTxnSafePointAbsolutePath(keyspaceID uint32) string {
+	return fmt.Sprintf(keyspaceTxnSafePointAbsolutePath, EncodeKeyspaceID(keyspaceID))
+}
+
+func GCBarrierPrefix() string {
+	return gcBarrierPrefix
+}
+
+func KeyspaceGCBarrierPrefix(keyspaceID uint32) string {
+	return fmt.Sprintf(keyspaceGcBarrierPrefix, EncodeKeyspaceID(keyspaceID))
+}
+
+func CompatibleTiDBMinStartTSAbsolutePath() string {
+	return tidbMinStartTSAbsolutePrefix
+}
+
+func CompatibleKeyspaceTiDBMinStartTSAbsolutePath(keyspaceID uint32) string {
+	return fmt.Sprintf(keyspaceTiDBMinStartTSAbsolutePrefix, EncodeKeyspaceID(keyspaceID))
 }
 
 // MinResolvedTSPath returns the min resolved ts path.
@@ -240,11 +273,11 @@ func ExternalTimestampPath() string {
 	return path.Join(ClusterPath, externalTimeStamp)
 }
 
-// GCSafePointV2Path is the storage path of gc safe point v2.
-// Path: keyspaces/gc_safe_point/{keyspaceID}
-func GCSafePointV2Path(keyspaceID uint32) string {
-	return buildPath(false, keyspacePrefix, gcSafePointInfix, EncodeKeyspaceID(keyspaceID))
-}
+//// KeyspaceGCSafePointPath is the storage path of gc safe point v2.
+//// Path: keyspaces/gc_safe_point/{keyspaceID}
+//func KeyspaceGCSafePointPath(keyspaceID uint32) string {
+//	return buildPath(false, keyspacePrefix, gcSafePointInfix, EncodeKeyspaceID(keyspaceID))
+//}
 
 // GCSafePointV2Prefix is the path prefix to all gc safe point v2.
 // Prefix: keyspaces/gc_safe_point/

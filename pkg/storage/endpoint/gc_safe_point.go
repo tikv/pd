@@ -15,17 +15,19 @@
 package endpoint
 
 import (
+	"context"
 	"encoding/json"
-	"math"
+	"fmt"
+	"path"
 	"strconv"
 	"time"
 
+	"github.com/pingcap/errors"
 	clientv3 "go.etcd.io/etcd/client/v3"
 
-	"github.com/pingcap/errors"
-	"github.com/pingcap/log"
-
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/mcs/utils/constant"
+	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/keypath"
 )
 
@@ -38,166 +40,438 @@ type ServiceSafePoint struct {
 	ServiceID string `json:"service_id"`
 	ExpiredAt int64  `json:"expired_at"`
 	SafePoint uint64 `json:"safe_point"`
+
+	KeyspaceID uint32 `json:"keyspace_id"`
 }
 
 type GCBarrier struct {
-	BarrierID      string `json:"barrier_id"`
-	BarrierTS      uint64 `json:"barrier_ts"`
-	ExpirationTime string `json:"expiration_time"`
+	BarrierID      string
+	BarrierTS      uint64
+	ExpirationTime time.Time
+
+	KeyspaceID uint32
 }
 
-// GCStateStorage defines the storage operations on the GC safe point.
-type GCStateStorage interface {
-	LoadGCSafePoint(keyspaceID uint32) (uint64, error)
-	SaveGCSafePoint(keyspaceID uint32, target uint64) error
-	//LoadMinServiceGCSafePoint(now time.Time) (*ServiceSafePoint, error)
-	//LoadAllServiceGCSafePoints() ([]*ServiceSafePoint, error)
-	//SaveServiceGCSafePoint(ssp *ServiceSafePoint) error
-	//RemoveServiceGCSafePoint(serviceID string) error
-
-	UpdateTxnSafePoint(keyspaceID, target uint64) (newTxnSafePoint uint64, err error)
-	SetGCBarrier(keyspaceID uint32, barrierID string, barrierTS uint64, ttl time.Duration) error
+func gcBarrierFromServiceSafePoint(s *ServiceSafePoint) *GCBarrier {
+	return &GCBarrier{
+		BarrierID:      s.ServiceID,
+		BarrierTS:      s.SafePoint,
+		ExpirationTime: time.Unix(s.ExpiredAt, 0),
+		KeyspaceID:     s.KeyspaceID,
+	}
 }
 
-var _ GCStateStorage = (*StorageEndpoint)(nil)
+func (b *GCBarrier) toServiceSafePoint() *ServiceSafePoint {
+	return &ServiceSafePoint{
+		ServiceID:  b.BarrierID,
+		ExpiredAt:  b.ExpirationTime.Unix(),
+		SafePoint:  b.BarrierTS,
+		KeyspaceID: b.KeyspaceID,
+	}
+}
+
+type GCStateStorage struct {
+	storage *StorageEndpoint
+}
+
+type GCStateWriteBatch struct {
+	ops []kv.LowLevelTxnOp
+}
 
 // LoadGCSafePoint loads current GC safe point from storage.
-func (se *StorageEndpoint) LoadGCSafePoint() (uint64, error) {
-	value, err := se.Load(keypath.GCSafePointPath())
+func (s *GCStateStorage) LoadGCSafePoint(keyspaceID uint32) (uint64, error) {
+	if keyspaceID == constant.NullKeyspaceID {
+		return s.loadGlobalGCSafePoint()
+	}
+	return s.loadKeyspaceGCSafePoint(keyspaceID)
+}
+
+func (s *GCStateStorage) loadGlobalGCSafePoint() (uint64, error) {
+	value, err := s.storage.Load(keypath.GCSafePointPath())
 	if err != nil || value == "" {
 		return 0, err
 	}
-	safePoint, err := strconv.ParseUint(value, 16, 64)
+	gcSafePoint, err := strconv.ParseUint(value, 16, 64)
 	if err != nil {
 		return 0, errs.ErrStrconvParseUint.Wrap(err).GenWithStackByArgs()
 	}
-	return safePoint, nil
+	return gcSafePoint, nil
 }
 
-// SaveGCSafePoint saves new GC safe point to storage.
-func (se *StorageEndpoint) SaveGCSafePoint(safePoint uint64) error {
-	value := strconv.FormatUint(safePoint, 16)
-	return se.Save(keypath.GCSafePointPath(), value)
+type keyspaceGCSafePoint struct {
+	KeyspaceID uint32 `json:"keyspace_id"`
+	SafePoint  uint64 `json:"safe_point"`
 }
 
-// LoadMinServiceGCSafePoint returns the minimum safepoint across all services
-func (se *StorageEndpoint) LoadMinServiceGCSafePoint(now time.Time) (*ServiceSafePoint, error) {
-	prefix := keypath.GCSafePointServicePrefixPath()
-	prefixEnd := clientv3.GetPrefixRangeEnd(prefix)
-	keys, values, err := se.LoadRange(prefix, prefixEnd, 0)
+func (s *GCStateStorage) loadKeyspaceGCSafePoint(keyspaceID uint32) (uint64, error) {
+	key := keypath.KeyspaceGCSafePointPath(keyspaceID)
+	value, err := s.storage.Load(key)
+	if err != nil {
+		return 0, err
+	}
+	// GC safe point has not been set for the given keyspace
+	if value == "" {
+		return 0, nil
+	}
+
+	gcSafePoint := &keyspaceGCSafePoint{}
+	if err = json.Unmarshal([]byte(value), gcSafePoint); err != nil {
+		return 0, errs.ErrJSONUnmarshal.Wrap(err).GenWithStackByCause()
+	}
+	return gcSafePoint.SafePoint, nil
+}
+
+func (s *GCStateStorage) LoadTxnSafePoint(keyspaceID uint32) (uint64, error) {
+	key := keypath.TxnSafePointAbsolutePath()
+	if keyspaceID != constant.NullKeyspaceID {
+		key = keypath.KeyspaceTxnSafePointAbsolutePath(keyspaceID)
+	}
+
+	value, err := /* load raw key from s.storage */ s.storage.Load(key)
+	if err != nil || value == "" {
+		return 0, err
+	}
+	txnSafePoint, err := strconv.ParseUint(value, 10, 64)
+	if err != nil {
+		return 0, errs.ErrStrconvParseUint.Wrap(err).GenWithStackByArgs()
+	}
+	return txnSafePoint, err
+}
+
+func loadJSON[T any](se *StorageEndpoint, key string) (*T, error) {
+	value, err := se.Load(key)
 	if err != nil {
 		return nil, err
 	}
-	if len(keys) == 0 {
-		// There's no service safepoint. It may be a new cluster, or upgraded from an older version where all service
-		// safepoints are missing. For the second case, we have no way to recover it. Store an initial value 0 for
-		// gc_worker.
-		return se.initServiceGCSafePointForGCWorker(0)
+	if value == "" {
+		return nil, nil
 	}
-
-	hasGCWorker := false
-	min := &ServiceSafePoint{SafePoint: math.MaxUint64}
-	for i, key := range keys {
-		ssp := &ServiceSafePoint{}
-		if err := json.Unmarshal([]byte(values[i]), ssp); err != nil {
-			return nil, err
-		}
-		if ssp.ServiceID == keypath.GCWorkerServiceSafePointID {
-			hasGCWorker = true
-			// If gc_worker's expire time is incorrectly set, fix it.
-			if ssp.ExpiredAt != math.MaxInt64 {
-				ssp.ExpiredAt = math.MaxInt64
-				err = se.SaveServiceGCSafePoint(ssp)
-				if err != nil {
-					return nil, errors.Trace(err)
-				}
-			}
-		}
-
-		if ssp.ExpiredAt < now.Unix() {
-			if err := se.Remove(key); err != nil {
-				log.Error("failed to remove expired service safepoint", errs.ZapError(err))
-			}
-			continue
-		}
-		if ssp.SafePoint < min.SafePoint {
-			min = ssp
-		}
+	var data T
+	if err = json.Unmarshal([]byte(value), &data); err != nil {
+		return nil, errs.ErrJSONUnmarshal.Wrap(err).GenWithStackByArgs()
 	}
-
-	if min.SafePoint == math.MaxUint64 {
-		// There's no valid safepoints and we have no way to recover it. Just set gc_worker to 0.
-		log.Info("there are no valid service safepoints. init gc_worker's service safepoint to 0")
-		return se.initServiceGCSafePointForGCWorker(0)
-	}
-
-	if !hasGCWorker {
-		// If there exists some service safepoints but gc_worker is missing, init it with the min value among all
-		// safepoints (including expired ones)
-		return se.initServiceGCSafePointForGCWorker(min.SafePoint)
-	}
-
-	return min, nil
+	return &data, nil
 }
 
-func (se *StorageEndpoint) initServiceGCSafePointForGCWorker(initialValue uint64) (*ServiceSafePoint, error) {
-	ssp := &ServiceSafePoint{
-		ServiceID: keypath.GCWorkerServiceSafePointID,
-		SafePoint: initialValue,
-		ExpiredAt: math.MaxInt64,
-	}
-	if err := se.SaveServiceGCSafePoint(ssp); err != nil {
-		return nil, err
-	}
-	return ssp, nil
-}
-
-// LoadAllServiceGCSafePoints returns all services GC safepoints
-func (se *StorageEndpoint) LoadAllServiceGCSafePoints() ([]*ServiceSafePoint, error) {
-	prefix := keypath.GCSafePointServicePrefixPath()
+func loadJSONByPrefix[T any](se *StorageEndpoint, prefix string, limit int) ([]string, []*T, error) {
 	prefixEnd := clientv3.GetPrefixRangeEnd(prefix)
-	keys, values, err := se.LoadRange(prefix, prefixEnd, 0)
+	keys, values, err := se.LoadRange(prefix, prefixEnd, limit)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if len(keys) == 0 {
-		return []*ServiceSafePoint{}, nil
+		return nil, nil, nil
 	}
 
-	ssps := make([]*ServiceSafePoint, 0, len(keys))
+	data := make([]*T, 0, len(keys))
 	for i := range keys {
-		ssp := &ServiceSafePoint{}
-		if err := json.Unmarshal([]byte(values[i]), ssp); err != nil {
-			return nil, err
+		var item T
+		if err := json.Unmarshal([]byte(values[i]), &item); err != nil {
+			return nil, nil, errs.ErrJSONUnmarshal.Wrap(err).GenWithStackByArgs()
 		}
-		ssps = append(ssps, ssp)
+		data = append(data, &item)
 	}
-
-	return ssps, nil
+	return keys, data, nil
 }
 
-// SaveServiceGCSafePoint saves a GC safepoint for the service
-func (se *StorageEndpoint) SaveServiceGCSafePoint(ssp *ServiceSafePoint) error {
-	if ssp.ServiceID == "" {
-		return errors.New("service id of service safepoint cannot be empty")
+func (s *GCStateStorage) LoadGCBarrier(keyspaceID uint32, barrierID string) (*GCBarrier, error) {
+	prefix := keypath.GCBarrierPrefix()
+	if keyspaceID != constant.NullKeyspaceID {
+		prefix = keypath.KeyspaceGCBarrierPrefix(keyspaceID)
 	}
-
-	if ssp.ServiceID == keypath.GCWorkerServiceSafePointID && ssp.ExpiredAt != math.MaxInt64 {
-		return errors.New("TTL of gc_worker's service safe point must be infinity")
+	key := path.Join(prefix, barrierID)
+	// GCBarrier is stored in ServiceSafePoint format for compatibility.
+	serviceSafePoint, err := loadJSON[ServiceSafePoint](s.storage, key)
+	if err != nil {
+		return nil, err
 	}
-
-	return se.saveJSON(keypath.GCSafePointServicePath(ssp.ServiceID), ssp)
+	return gcBarrierFromServiceSafePoint(serviceSafePoint), nil
 }
 
-// RemoveServiceGCSafePoint removes a GC safepoint for the service
-func (se *StorageEndpoint) RemoveServiceGCSafePoint(serviceID string) error {
-	if serviceID == keypath.GCWorkerServiceSafePointID {
-		return errors.New("cannot remove service safe point of gc_worker")
+func (s *GCStateStorage) LoadAllGCBarriers(keyspaceID uint32) ([]*GCBarrier, error) {
+	prefix := keypath.GCBarrierPrefix() + "/"
+	if keyspaceID != constant.NullKeyspaceID {
+		prefix = keypath.KeyspaceGCBarrierPrefix(keyspaceID) + "/"
 	}
-	key := keypath.GCSafePointServicePath(serviceID)
-	return se.Remove(key)
+	// TODO: Limit the count for each call.
+	_, serviceSafePoints, err := loadJSONByPrefix[ServiceSafePoint](s.storage, prefix, 0)
+	if err != nil {
+		return nil, err
+	}
+	if len(serviceSafePoints) == 0 {
+		return nil, nil
+	}
+	barriers := make([]*GCBarrier, 0, len(serviceSafePoints))
+	for _, serviceSafePoint := range serviceSafePoints {
+		barriers = append(barriers, gcBarrierFromServiceSafePoint(serviceSafePoint))
+	}
+	return barriers, nil
 }
 
-func (se *StorageEndpoint) SetGCBarrier(keyspaceID uint32, barrierID string, barrierTS uint64, ttl time.Duration) error {
+func (s *GCStateStorage) LoadTiDBMinStartTS(keyspaceID uint32) (string, uint64, error) {
+	prefix := keypath.CompatibleTiDBMinStartTSAbsolutePath() + "/"
+	if keyspaceID != constant.NullKeyspaceID {
+		prefix = keypath.CompatibleKeyspaceTiDBMinStartTSAbsolutePath(keyspaceID) + "/"
+	}
+	prefixEnd := clientv3.GetPrefixRangeEnd(prefix)
 
+	// TODO: Limit the count for each call.
+	keys, values, err := s.storage.LoadRange(prefix, prefixEnd, 0)
+	if err != nil {
+		return "", 0, err
+	}
+
+	var minKey string
+	var minMinStartTS uint64
+
+	for i, valueStr := range values {
+		minStartTS, err := strconv.ParseUint(valueStr, 10, 64)
+		if err != nil {
+			return "", 0, errs.ErrStrconvParseUint.Wrap(err).GenWithStackByArgs()
+		}
+		if len(minKey) == 0 || minStartTS < minMinStartTS {
+			minMinStartTS = minStartTS
+			minKey = keys[i]
+		}
+	}
+
+	// Remove prefix from the key and only keep the identifier written by TiDB.
+	minKey = minKey[len(prefix):]
+	return minKey, minMinStartTS, nil
+}
+
+func (s *GCStateStorage) RunInGCMetaTransaction(f func(wb *GCStateWriteBatch) error) error {
+	revisionKey := keypath.GCMetaRevisionPath()
+	currentRevision, err := s.storage.Load(revisionKey)
+	if err != nil {
+		return err
+	}
+	condition := kv.LowLevelTxnCondition{
+		Key:     revisionKey,
+		CmpType: kv.LowLevelCmpNotExists,
+	}
+	if currentRevision == "" {
+		condition.CmpType = kv.LowLevelCmpEqual
+		condition.Value = currentRevision
+	}
+
+	currentRevisionValue, err := strconv.ParseUint(currentRevision, 10, 64)
+	if err != nil {
+		return err
+	}
+	nextRevision := fmt.Sprintf("%d", currentRevisionValue+1)
+
+	wb := GCStateWriteBatch{}
+	err = f(&wb)
+	if err != nil {
+		return err
+	}
+
+	ops := wb.ops
+	ops = append(ops, kv.LowLevelTxnOp{
+		Key:    revisionKey,
+		OpType: kv.LowLevelOpPut,
+		Value:  nextRevision,
+	})
+
+	txn := s.storage.CreateLowLevelTxn()
+	result, err := txn.If(condition).Then(ops...).Commit(context.Background())
+	if err != nil {
+		return err
+	}
+	if !result.Succeeded {
+		return errs.ErrEtcdTxnConflict.GenWithStackByArgs()
+	}
+
+	if len(ops) != len(result.ResultItems) {
+		return errors.Errorf("unexpected number of results: %d != %d", len(ops), len(result.ResultItems))
+	}
+	return nil
+}
+
+//
+//// LoadMinServiceGCSafePoint returns the minimum safepoint across all services
+//func (se *StorageEndpoint) LoadMinServiceGCSafePoint(now time.Time) (*ServiceSafePoint, error) {
+//	prefix := keypath.GCSafePointServicePrefixPath()
+//	prefixEnd := clientv3.GetPrefixRangeEnd(prefix)
+//	keys, values, err := se.LoadRange(prefix, prefixEnd, 0)
+//	if err != nil {
+//		return nil, err
+//	}
+//	if len(keys) == 0 {
+//		// There's no service safepoint. It may be a new cluster, or upgraded from an older version where all service
+//		// safepoints are missing. For the second case, we have no way to recover it. Store an initial value 0 for
+//		// gc_worker.
+//		return se.initServiceGCSafePointForGCWorker(0)
+//	}
+//
+//	hasGCWorker := false
+//	min := &ServiceSafePoint{SafePoint: math.MaxUint64}
+//	for i, key := range keys {
+//		ssp := &ServiceSafePoint{}
+//		if err := json.Unmarshal([]byte(values[i]), ssp); err != nil {
+//			return nil, err
+//		}
+//		if ssp.ServiceID == keypath.GCWorkerServiceSafePointID {
+//			hasGCWorker = true
+//			// If gc_worker's expire time is incorrectly set, fix it.
+//			if ssp.ExpiredAt != math.MaxInt64 {
+//				ssp.ExpiredAt = math.MaxInt64
+//				err = se.SaveServiceGCSafePoint(ssp)
+//				if err != nil {
+//					return nil, errors.Trace(err)
+//				}
+//			}
+//		}
+//
+//		if ssp.ExpiredAt < now.Unix() {
+//			if err := se.Remove(key); err != nil {
+//				log.Error("failed to remove expired service safepoint", errs.ZapError(err))
+//			}
+//			continue
+//		}
+//		if ssp.SafePoint < min.SafePoint {
+//			min = ssp
+//		}
+//	}
+//
+//	if min.SafePoint == math.MaxUint64 {
+//		// There's no valid safepoints and we have no way to recover it. Just set gc_worker to 0.
+//		log.Info("there are no valid service safepoints. init gc_worker's service safepoint to 0")
+//		return se.initServiceGCSafePointForGCWorker(0)
+//	}
+//
+//	if !hasGCWorker {
+//		// If there exists some service safepoints but gc_worker is missing, init it with the min value among all
+//		// safepoints (including expired ones)
+//		return se.initServiceGCSafePointForGCWorker(min.SafePoint)
+//	}
+//
+//	return min, nil
+//}
+//
+//func (se *StorageEndpoint) initServiceGCSafePointForGCWorker(initialValue uint64) (*ServiceSafePoint, error) {
+//	ssp := &ServiceSafePoint{
+//		ServiceID: keypath.GCWorkerServiceSafePointID,
+//		SafePoint: initialValue,
+//		ExpiredAt: math.MaxInt64,
+//	}
+//	if err := se.SaveServiceGCSafePoint(ssp); err != nil {
+//		return nil, err
+//	}
+//	return ssp, nil
+//}
+//
+//// LoadAllServiceGCSafePoints returns all services GC safepoints
+//func (se *StorageEndpoint) LoadAllServiceGCSafePoints() ([]*ServiceSafePoint, error) {
+//	prefix := keypath.GCSafePointServicePrefixPath()
+//	prefixEnd := clientv3.GetPrefixRangeEnd(prefix)
+//	keys, values, err := se.LoadRange(prefix, prefixEnd, 0)
+//	if err != nil {
+//		return nil, err
+//	}
+//	if len(keys) == 0 {
+//		return []*ServiceSafePoint{}, nil
+//	}
+//
+//	ssps := make([]*ServiceSafePoint, 0, len(keys))
+//	for i := range keys {
+//		ssp := &ServiceSafePoint{}
+//		if err := json.Unmarshal([]byte(values[i]), ssp); err != nil {
+//			return nil, err
+//		}
+//		ssps = append(ssps, ssp)
+//	}
+//
+//	return ssps, nil
+//}
+//
+//// SaveServiceGCSafePoint saves a GC safepoint for the service
+//func (se *StorageEndpoint) SaveServiceGCSafePoint(ssp *ServiceSafePoint) error {
+//	if ssp.ServiceID == "" {
+//		return errors.New("service id of service safepoint cannot be empty")
+//	}
+//
+//	if ssp.ServiceID == keypath.GCWorkerServiceSafePointID && ssp.ExpiredAt != math.MaxInt64 {
+//		return errors.New("TTL of gc_worker's service safe point must be infinity")
+//	}
+//
+//	return se.saveJSON(keypath.GCSafePointServicePath(ssp.ServiceID), ssp)
+//}
+//
+//// RemoveServiceGCSafePoint removes a GC safepoint for the service
+//func (se *StorageEndpoint) RemoveServiceGCSafePoint(serviceID string) error {
+//	if serviceID == keypath.GCWorkerServiceSafePointID {
+//		return errors.New("cannot remove service safe point of gc_worker")
+//	}
+//	key := keypath.GCSafePointServicePath(serviceID)
+//	return se.Remove(key)
+//}
+
+func (wb *GCStateWriteBatch) writeJson(key string, data any) error {
+	value, err := json.Marshal(data)
+	if err != nil {
+		return errs.ErrJSONMarshal.Wrap(err).GenWithStackByArgs()
+	}
+	wb.ops = append(wb.ops, kv.LowLevelTxnOp{
+		Key:    key,
+		OpType: kv.LowLevelOpPut,
+		Value:  string(value),
+	})
+	return nil
+}
+
+func (wb *GCStateWriteBatch) SetGCSafePoint(keyspaceID uint32, gcSafePoint uint64) error {
+	if keyspaceID == constant.NullKeyspaceID {
+		return wb.setGlobalGCSafePoint(gcSafePoint)
+	}
+	return wb.setKeyspaceGCSafePoint(keyspaceID, gcSafePoint)
+}
+
+func (wb *GCStateWriteBatch) setGlobalGCSafePoint(gcSafePoint uint64) error {
+	value := strconv.FormatUint(gcSafePoint, 16)
+	wb.ops = append(wb.ops, kv.LowLevelTxnOp{
+		Key:    keypath.GCSafePointPath(),
+		OpType: kv.LowLevelOpPut,
+		Value:  value,
+	})
+	return nil
+}
+
+func (wb *GCStateWriteBatch) setKeyspaceGCSafePoint(keyspaceID uint32, gcSafePoint uint64) error {
+	key := keypath.KeyspaceGCSafePointPath(keyspaceID)
+	return wb.writeJson(key, keyspaceGCSafePoint{
+		KeyspaceID: keyspaceID,
+		SafePoint:  gcSafePoint,
+	})
+}
+
+func (wb *GCStateWriteBatch) SetTxnSafePoint(keyspaceID uint32, txnSafePoint uint64) error {
+	key := keypath.TxnSafePointAbsolutePath()
+	if keyspaceID != constant.NullKeyspaceID {
+		key = keypath.KeyspaceTxnSafePointAbsolutePath(keyspaceID)
+	}
+	value := strconv.FormatUint(txnSafePoint, 10)
+	wb.ops = append(wb.ops, kv.LowLevelTxnOp{
+		Key:/* raw key without prefix */ key,
+		OpType: kv.LowLevelOpPut,
+		Value:  value,
+	})
+	return nil
+}
+
+func (wb *GCStateWriteBatch) SetGCBarrier(keyspaceID uint32, barrierID string, barrierTS uint64, ttl time.Duration) error {
+	prefix := keypath.GCBarrierPrefix()
+	if keyspaceID != constant.NullKeyspaceID {
+		prefix = keypath.KeyspaceGCBarrierPrefix(keyspaceID)
+	}
+	key := path.Join(prefix, barrierID)
+	expirationTime := time.Now().Add(ttl)
+	barrier := GCBarrier{
+		BarrierID:      barrierID,
+		BarrierTS:      barrierTS,
+		ExpirationTime: expirationTime,
+		KeyspaceID:     keyspaceID,
+	}
+	return wb.writeJson(key, barrier.toServiceSafePoint())
 }
