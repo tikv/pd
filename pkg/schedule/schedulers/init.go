@@ -579,7 +579,7 @@ func schedulersRegister() {
 			if err != nil {
 				return errs.ErrURLParse.Wrap(err)
 			}
-			tableName, err := url.QueryUnescape(args[3])
+			alias, err := url.QueryUnescape(args[3])
 			if err != nil {
 				return errs.ErrURLParse.Wrap(err)
 			}
@@ -588,19 +588,19 @@ func schedulersRegister() {
 				return err
 			}
 
-			jobId := uint64(0)
+			id := uint64(0)
 			if len(conf.jobs) > 0 {
-				jobId = conf.jobs[len(conf.jobs)-1].JobID + 1
+				id = conf.jobs[len(conf.jobs)-1].JobID + 1
 			}
 
 			job := &balanceRangeSchedulerJob{
-				Role:      jobRole,
-				Engine:    engine,
-				Timeout:   duration,
-				TableName: tableName,
-				Ranges:    ranges,
-				Status:    pending,
-				JobID:     jobId,
+				Role:    jobRole,
+				Engine:  engine,
+				Timeout: duration,
+				Alias:   alias,
+				Ranges:  ranges,
+				Status:  pending,
+				JobID:   id,
 			}
 			conf.jobs = append(conf.jobs, job)
 			return nil

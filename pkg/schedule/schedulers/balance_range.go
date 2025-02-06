@@ -68,13 +68,13 @@ type balanceRangeSchedulerConfig struct {
 }
 
 type balanceRangeSchedulerJob struct {
-	JobID     uint64          `json:"job-id"`
-	Role      Role            `json:"role"`
-	Engine    string          `json:"engine"`
-	Timeout   time.Duration   `json:"timeout"`
-	Ranges    []core.KeyRange `json:"ranges"`
-	TableName string          `json:"table-name"`
-	Status    JobStatus       `json:"status"`
+	JobID   uint64          `json:"job-id"`
+	Role    Role            `json:"role"`
+	Engine  string          `json:"engine"`
+	Timeout time.Duration   `json:"timeout"`
+	Ranges  []core.KeyRange `json:"ranges"`
+	Alias   string          `json:"alias"`
+	Status  JobStatus       `json:"status"`
 }
 
 func (conf *balanceRangeSchedulerConfig) clone() []*balanceRangeSchedulerJob {
@@ -85,12 +85,12 @@ func (conf *balanceRangeSchedulerConfig) clone() []*balanceRangeSchedulerJob {
 		ranges := make([]core.KeyRange, len(job.Ranges))
 		copy(ranges, job.Ranges)
 		jobs = append(jobs, &balanceRangeSchedulerJob{
-			Ranges:    ranges,
-			Role:      job.Role,
-			Engine:    job.Engine,
-			Timeout:   job.Timeout,
-			TableName: job.TableName,
-			JobID:     job.JobID,
+			Ranges:  ranges,
+			Role:    job.Role,
+			Engine:  job.Engine,
+			Timeout: job.Timeout,
+			Alias:   job.Alias,
+			JobID:   job.JobID,
 		})
 	}
 
@@ -167,6 +167,7 @@ func newBalanceRangeScheduler(opController *operator.Controller, conf *balanceRa
 	return s
 }
 
+// JobStatus is the status of the job.
 type JobStatus int
 
 const (
@@ -192,6 +193,7 @@ func (s JobStatus) MarshalJSON() ([]byte, error) {
 	return []byte(`"` + s.String() + `"`), nil
 }
 
+// Role is the role of the region.
 type Role int
 
 const (
@@ -202,6 +204,7 @@ const (
 	unknown
 )
 
+// NewRole creates a new role.
 func NewRole(role string) Role {
 	switch role {
 	case "leader":
@@ -210,8 +213,9 @@ func NewRole(role string) Role {
 		return follower
 	case "learner":
 		return learner
+	default:
+		return unknown
 	}
-	return unknown
 }
 
 func (r Role) String() string {
@@ -222,8 +226,9 @@ func (r Role) String() string {
 		return "follower"
 	case learner:
 		return "learner"
+	default:
+		return "unknown"
 	}
-	return "unknown"
 }
 
 // MarshalJSON marshals to json.
