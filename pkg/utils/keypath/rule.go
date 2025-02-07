@@ -30,7 +30,7 @@ func RuleKeyPath(ruleKey string) string {
 
 // RuleCommonPathPrefix returns the path prefix to save the placement rule common config.
 func RuleCommonPathPrefix() string {
-	return fmt.Sprintf(ruleConfigPrefixFormat, ClusterID())
+	return fmt.Sprintf(ruleCommonPrefixFormat, ClusterID())
 }
 
 // RuleGroupIDPath returns the path to save the placement rule group with the given group ID.

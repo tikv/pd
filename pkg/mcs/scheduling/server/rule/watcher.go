@@ -174,7 +174,7 @@ func (rw *Watcher) initializeRuleWatcher() error {
 			return err
 		} else if strings.HasPrefix(key, rw.ruleGroupPathPrefix) {
 			log.Info("delete placement rule group", zap.String("key", key))
-			trimmedKey := strings.TrimPrefix(key, rw.ruleGroupPathPrefix+"/")
+			trimmedKey := strings.TrimPrefix(key, rw.ruleGroupPathPrefix)
 			// Try to add the rule group change to the patch.
 			rw.patch.DeleteGroup(trimmedKey)
 			// Update the suspect key ranges

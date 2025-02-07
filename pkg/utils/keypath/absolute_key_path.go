@@ -51,8 +51,9 @@ const (
 	memberBinaryVersionPathFormat  = "/pd/%d/member/%d/binary_version"  // "/pd/{cluster_id}/member/{member_id}/binary_version"
 	memberLeaderPriorityPathFormat = "/pd/%d/member/%d/leader_priority" // "/pd/{cluster_id}/member/{member_id}/leader_priority"
 
-	rulePathFormat          = "/pd/%d/rules/%s"        // "/pd/{cluster_id}/rules/{rule_id}"
-	ruleConfigPrefixFormat  = "/pd/%d/rule/"           // "/pd/{cluster_id}/rule/"
+	rulePathFormat = "/pd/%d/rules/%s" // "/pd/{cluster_id}/rules/{rule_id}"
+	// ruleConfigPrefixFormat is used to watch rulePathFormat and ruleGroupPathFormat, so it should be the parent directory of them.
+	ruleCommonPrefixFormat  = "/pd/%d/rule"            // "/pd/{cluster_id}/rule"
 	ruleGroupPathFormat     = "/pd/%d/rule_group/%s"   // "/pd/{cluster_id}/rule_group/{group_id}"
 	regionLablePathFormat   = "/pd/%d/region_label/%s" // "/pd/{cluster_id}/region_label/{label_id}"
 	regionLabelPrefixFormat = "/pd/%d/region_label/"   // "/pd/{cluster_id}/region_label/"
