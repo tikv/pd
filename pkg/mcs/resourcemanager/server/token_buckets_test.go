@@ -177,7 +177,6 @@ func TestGroupTokenBucketRequestBurstLimit(t *testing.T) {
 			BurstLimit: -2,
 		},
 	}, 2000*defaultBurstLimitFactor, 2000*defaultBurstLimitFactor)
-
 }
 
 func TestGroupTokenBucketRequestLoop(t *testing.T) {
