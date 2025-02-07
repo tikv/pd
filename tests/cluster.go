@@ -78,6 +78,7 @@ type TestServer struct {
 var zapLogOnce sync.Once
 
 // NewTestServer creates a new TestServer.
+<<<<<<< HEAD
 func NewTestServer(ctx context.Context, cfg *config.Config) (*TestServer, error) {
 	return createTestServer(ctx, cfg, nil)
 }
@@ -89,6 +90,12 @@ func NewTestAPIServer(ctx context.Context, cfg *config.Config) (*TestServer, err
 
 func createTestServer(ctx context.Context, cfg *config.Config, services []string) (*TestServer, error) {
 	err := logutil.SetupLogger(cfg.Log, &cfg.Logger, &cfg.LogProps, cfg.Security.RedactInfoLog)
+=======
+func NewTestServer(ctx context.Context, cfg *config.Config, services []string) (*TestServer, error) {
+	//  disable the heartbeat async runner in test
+	cfg.Schedule.EnableHeartbeatConcurrentRunner = false
+	err := logutil.SetupLogger(&cfg.Log, &cfg.Logger, &cfg.LogProps, cfg.Security.RedactInfoLog)
+>>>>>>> 0c43ce53a (*: fix default log file size (#9038))
 	if err != nil {
 		return nil, err
 	}

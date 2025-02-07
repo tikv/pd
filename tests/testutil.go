@@ -47,7 +47,11 @@ var once sync.Once
 func InitLogger(logConfig log.Config, logger *zap.Logger, logProps *log.ZapProperties, isRedactInfoLogEnabled bool) (err error) {
 	once.Do(func() {
 		// Setup the logger.
+<<<<<<< HEAD
 		err = logutil.SetupLogger(logConfig, &logger, &logProps, isRedactInfoLogEnabled)
+=======
+		err = logutil.SetupLogger(&logConfig, &logger, &logProps, redactInfoLog)
+>>>>>>> 0c43ce53a (*: fix default log file size (#9038))
 		if err != nil {
 			return
 		}

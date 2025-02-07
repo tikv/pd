@@ -409,7 +409,11 @@ func main() {
 	}
 
 	// New zap logger
+<<<<<<< HEAD
 	err = logutil.SetupLogger(cfg.Log, &cfg.Logger, &cfg.LogProps)
+=======
+	err = logutil.SetupLogger(&cfg.Log, &cfg.Logger, &cfg.LogProps, logutil.RedactInfoLogOFF)
+>>>>>>> 0c43ce53a (*: fix default log file size (#9038))
 	if err == nil {
 		log.ReplaceGlobals(cfg.Logger, cfg.LogProps)
 	} else {

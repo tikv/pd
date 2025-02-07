@@ -63,6 +63,22 @@ func main() {
 	flag.Parse()
 	ctx, cancel := context.WithCancel(context.Background())
 
+<<<<<<< HEAD
+=======
+	switch errors.Cause(err) {
+	case nil:
+	case flag.ErrHelp:
+		exit(0)
+	default:
+		log.Fatal("parse cmd flags error", zap.Error(err))
+	}
+	err = logutil.SetupLogger(&cfg.Log, &cfg.Logger, &cfg.LogProps, logutil.RedactInfoLogOFF)
+	if err == nil {
+		log.ReplaceGlobals(cfg.Logger, cfg.LogProps)
+	} else {
+		log.Fatal("initialize logger error", zap.Error(err))
+	}
+>>>>>>> 0c43ce53a (*: fix default log file size (#9038))
 	sc := make(chan os.Signal, 1)
 	signal.Notify(sc,
 		syscall.SIGHUP,
