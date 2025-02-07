@@ -94,12 +94,7 @@ func TestConfig(t *testing.T) {
 	re.Equal(scheduleConfig, &cfg.Schedule)
 	re.Equal(svr.GetReplicationConfig(), &cfg.Replication)
 
-	// config set trace-region-flow <value>
-	args = []string{"-u", pdAddr, "config", "set", "trace-region-flow", "false"}
-	_, err = pdctl.ExecuteCommand(cmd, args...)
-	re.NoError(err)
-	re.False(svr.GetPDServerConfig().TraceRegionFlow)
-
+	// config set flow-round-by-digit
 	args = []string{"-u", pdAddr, "config", "set", "flow-round-by-digit", "10"}
 	_, err = pdctl.ExecuteCommand(cmd, args...)
 	re.NoError(err)
