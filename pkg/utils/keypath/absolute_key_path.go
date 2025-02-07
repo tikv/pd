@@ -96,9 +96,9 @@ const (
 	msTsoKespaceExpectedLeaderPathFormat = "/ms/%d/tso/keyspace_groups/election/%05d/primary/expected_primary" // "/ms/{cluster_id}/tso/keyspace_groups/election/{group_id}/primary"
 
 	// resource group path
-	resourceGroupSettingsPathFormat = "/resource_group/settings/%s" // "/resource_group/settings/{group_name}"
-	resourceGroupStatesPathFormat   = "/resource_group/states/%s"   // "/resource_group/states/{group_name}"
-	controllerConfigPath            = "/resource_group/controller"  // "/resource_group/controller"
+	resourceGroupSettingsPathFormat = "resource_group/settings/%s" // "resource_group/settings/{group_name}"
+	resourceGroupStatesPathFormat   = "resource_group/states/%s"   // "resource_group/states/{group_name}"
+	controllerConfigPath            = "resource_group/controller"  // "resource_group/controller"
 
 	timestampPathFormat   = "/pd/%d/timestamp"              // "/pd/{cluster_id}/timestamp"
 	msTimestampPathFormat = "/ms/%d/tso/%05d/gta/timestamp" // "/ms/{cluster_id}/tso/{group_id}/gta/timestamp"
