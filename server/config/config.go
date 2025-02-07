@@ -1182,51 +1182,13 @@ func (c *PDServerConfig) adjust(meta *configMetaData) error {
 		adjustInt(&c.FlowRoundByDigit, defaultFlowRoundByDigit)
 	}
 	if !meta.IsDefined("min-resolved-ts-persistence-interval") {
-<<<<<<< HEAD
 		adjustDuration(&c.MinResolvedTSPersistenceInterval, DefaultMinResolvedTSPersistenceInterval)
-=======
-		configutil.AdjustDuration(&c.MinResolvedTSPersistenceInterval, DefaultMinResolvedTSPersistenceInterval)
 	}
-	if !meta.IsDefined("server-memory-limit") {
-		configutil.AdjustFloat64(&c.ServerMemoryLimit, defaultServerMemoryLimit)
-	}
-	if c.ServerMemoryLimit < minServerMemoryLimit {
-		c.ServerMemoryLimit = minServerMemoryLimit
-	} else if c.ServerMemoryLimit > maxServerMemoryLimit {
-		c.ServerMemoryLimit = maxServerMemoryLimit
-	}
-	if !meta.IsDefined("server-memory-limit-gc-trigger") {
-		configutil.AdjustFloat64(&c.ServerMemoryLimitGCTrigger, defaultServerMemoryLimitGCTrigger)
-	}
-	if c.ServerMemoryLimitGCTrigger < minServerMemoryLimitGCTrigger {
-		c.ServerMemoryLimitGCTrigger = minServerMemoryLimitGCTrigger
-	} else if c.ServerMemoryLimitGCTrigger > maxServerMemoryLimitGCTrigger {
-		c.ServerMemoryLimitGCTrigger = maxServerMemoryLimitGCTrigger
-	}
-	if !meta.IsDefined("enable-gogc-tuner") {
-		c.EnableGOGCTuner = defaultEnableGOGCTuner
-	}
-	if !meta.IsDefined("gc-tuner-threshold") {
-		configutil.AdjustFloat64(&c.GCTunerThreshold, defaultGCTunerThreshold)
-	}
-	if c.GCTunerThreshold < minGCTunerThreshold {
-		c.GCTunerThreshold = minGCTunerThreshold
-	} else if c.GCTunerThreshold > maxGCTunerThreshold {
-		c.GCTunerThreshold = maxGCTunerThreshold
-	}
-	if err := migrateConfigurationFromFile(meta); err != nil {
-		return err
->>>>>>> 31a0ad6b2 (config: completely remove the deprecated field from the PD server config (#8981))
-	}
-	c.migrateConfigurationFromFile(meta)
+	migrateConfigurationFromFile(meta)
 	return c.Validate()
 }
 
-<<<<<<< HEAD
-func (c *PDServerConfig) migrateConfigurationFromFile(meta *configMetaData) error {
-=======
-func migrateConfigurationFromFile(meta *configutil.ConfigMetaData) error {
->>>>>>> 31a0ad6b2 (config: completely remove the deprecated field from the PD server config (#8981))
+func migrateConfigurationFromFile(meta *configMetaData) error {
 	oldName, newName := "trace-region-flow", "flow-round-by-digit"
 	defineOld := meta.IsDefined(oldName)
 	switch {
