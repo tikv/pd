@@ -72,6 +72,7 @@ func (gtb *GroupTokenBucket) setState(state *GroupTokenBucketState) {
 	gtb.Tokens = state.Tokens
 	gtb.LastUpdate = state.LastUpdate
 	gtb.Initialized = state.Initialized
+	gtb.BurstLimitFactor = state.BurstLimitFactor
 }
 
 // TokenSlot is used to split a token bucket into multiple slots to

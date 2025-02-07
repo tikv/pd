@@ -125,6 +125,61 @@ func TestGroupTokenBucketRequest(t *testing.T) {
 	re.Equal(int64(time.Second)*10/int64(time.Millisecond), trickle)
 }
 
+func TestGroupTokenBucketRequestBurstLimit(t *testing.T) {
+	re := require.New(t)
+	testGroupSetting := func(tbSetting *rmpb.TokenBucket, expectedBurstLimit, expectedFillRate int64) {
+		gtb := NewGroupTokenBucket(tbSetting)
+		time1 := time.Now()
+		clientUniqueID := uint64(0)
+		gtb.request(time1, 190000, uint64(time.Second)*10/uint64(time.Millisecond), clientUniqueID)
+		re.Contains(gtb.tokenSlots, clientUniqueID)
+		groupSetting := gtb.tokenSlots[clientUniqueID]
+		re.Equal(expectedBurstLimit, groupSetting.settings.BurstLimit)
+		re.Equal(uint64(expectedFillRate), groupSetting.settings.FillRate)
+	}
+
+	testGroupSetting(&rmpb.TokenBucket{
+		Tokens: 200000,
+		Settings: &rmpb.TokenLimitSettings{
+			FillRate:   2000,
+			BurstLimit: 20000000,
+		},
+	}, 20000000, 2000)
+
+	testGroupSetting(&rmpb.TokenBucket{
+		Tokens: 200000,
+		Settings: &rmpb.TokenLimitSettings{
+			FillRate:   2000,
+			BurstLimit: 0,
+		},
+	}, 0, 2000)
+
+	testGroupSetting(&rmpb.TokenBucket{
+		Tokens: 200000,
+		Settings: &rmpb.TokenLimitSettings{
+			FillRate:   2000,
+			BurstLimit: unlimitedBurstLimit,
+		},
+	}, unlimitedBurstLimit, unlimitedRate)
+
+	testGroupSetting(&rmpb.TokenBucket{
+		Tokens: 200000,
+		Settings: &rmpb.TokenLimitSettings{
+			FillRate:   unlimitedRate,
+			BurstLimit: 233,
+		},
+	}, unlimitedBurstLimit, unlimitedRate)
+
+	testGroupSetting(&rmpb.TokenBucket{
+		Tokens: 200000,
+		Settings: &rmpb.TokenLimitSettings{
+			FillRate:   2000,
+			BurstLimit: -2,
+		},
+	}, 2000*defaultBurstLimitFactor, 2000*defaultBurstLimitFactor)
+
+}
+
 func TestGroupTokenBucketRequestLoop(t *testing.T) {
 	re := require.New(t)
 	tbSetting := &rmpb.TokenBucket{
