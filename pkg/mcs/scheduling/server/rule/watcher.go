@@ -159,7 +159,7 @@ func (rw *Watcher) initializeRuleWatcher() error {
 		key := string(kv.Key)
 		if strings.HasPrefix(key, rw.rulesPathPrefix) {
 			log.Info("delete placement rule", zap.String("key", key))
-			ruleJSON, err := rw.ruleStorage.LoadRule(strings.TrimPrefix(key, rw.rulesPathPrefix+"/"))
+			ruleJSON, err := rw.ruleStorage.LoadRule(strings.TrimPrefix(key, rw.rulesPathPrefix))
 			if err != nil {
 				return err
 			}
