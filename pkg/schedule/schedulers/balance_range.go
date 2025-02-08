@@ -101,7 +101,7 @@ func (conf *balanceRangeSchedulerConfig) clone() []*balanceRangeSchedulerJob {
 func (s *balanceRangeScheduler) EncodeConfig() ([]byte, error) {
 	s.conf.RLock()
 	defer s.conf.RUnlock()
-	return EncodeConfig(s.conf)
+	return EncodeConfig(s.conf.jobs)
 }
 
 // ReloadConfig reloads the config.
