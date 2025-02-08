@@ -206,7 +206,7 @@ func (s *GrpcServer) GetAllGCSafePointV2(ctx context.Context, request *pdpb.GetA
 
 	startkey := keypath.GCSafePointV2Prefix()
 	endkey := clientv3.GetPrefixRangeEnd(startkey)
-	_, values, revision, err := s.loadRangeFromEtcd(startkey, endkey)
+	values, revision, err := s.loadRangeFromEtcd(startkey, endkey)
 
 	gcSafePoints := make([]*pdpb.GCSafePointV2, 0, len(values))
 	for _, value := range values {
@@ -237,7 +237,7 @@ func (s *GrpcServer) GetAllGCSafePointV2(ctx context.Context, request *pdpb.GetA
 	}, nil
 }
 
-func (s *GrpcServer) loadRangeFromEtcd(startKey, endKey string) ([]string, []string, int64, error) {
+func (s *GrpcServer) loadRangeFromEtcd(startKey, endKey string) ([]string, int64, error) {
 	var opOption []clientv3.OpOption
 	if endKey == "\x00" {
 		opOption = append(opOption, clientv3.WithPrefix())
@@ -246,13 +246,11 @@ func (s *GrpcServer) loadRangeFromEtcd(startKey, endKey string) ([]string, []str
 	}
 	resp, err := etcdutil.EtcdKVGet(s.client, startKey, opOption...)
 	if err != nil {
-		return nil, nil, 0, err
+		return nil, 0, err
 	}
-	keys := make([]string, 0, len(resp.Kvs))
 	values := make([]string, 0, len(resp.Kvs))
 	for _, item := range resp.Kvs {
-		keys = append(keys, string(item.Key), "/")
 		values = append(values, string(item.Value))
 	}
-	return keys, values, resp.Header.Revision, nil
+	return values, resp.Header.Revision, nil
 }
