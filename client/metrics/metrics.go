@@ -64,9 +64,11 @@ func InitAndRegisterMetrics(constLabels prometheus.Labels) {
 }
 
 var (
-	cmdDuration       *prometheus.HistogramVec
-	cmdFailedDuration *prometheus.HistogramVec
-	requestDuration   *prometheus.HistogramVec
+	cmdDuration               *prometheus.HistogramVec
+	cmdFailedDuration         *prometheus.HistogramVec
+	internalCmdDuration       *prometheus.HistogramVec
+	internalCmdFailedDuration *prometheus.HistogramVec
+	requestDuration           *prometheus.HistogramVec
 
 	// TSOBestBatchSize is the histogram of the best batch size of TSO requests.
 	TSOBestBatchSize prometheus.Histogram
@@ -101,6 +103,26 @@ func initMetrics(constLabels prometheus.Labels) {
 			Subsystem:   "cmd",
 			Name:        "handle_failed_cmds_duration_seconds",
 			Help:        "Bucketed histogram of processing time (s) of failed handled cmds.",
+			ConstLabels: constLabels,
+			Buckets:     prometheus.ExponentialBuckets(0.0005, 2, 13),
+		}, []string{"type"})
+
+	internalCmdDuration = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace:   "pd_client",
+			Subsystem:   "internal_cmd",
+			Name:        "handle_cmds_duration_seconds",
+			Help:        "Bucketed histogram of processing time (s) of handled success internal cmds.",
+			ConstLabels: constLabels,
+			Buckets:     prometheus.ExponentialBuckets(0.0005, 2, 13),
+		}, []string{"type"})
+
+	internalCmdFailedDuration = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace:   "pd_client",
+			Subsystem:   "internal_cmd",
+			Name:        "handle_failed_cmds_duration_seconds",
+			Help:        "Bucketed histogram of processing time (s) of failed handled internal cmds.",
 			ConstLabels: constLabels,
 			Buckets:     prometheus.ExponentialBuckets(0.0005, 2, 13),
 		}, []string{"type"})
@@ -228,6 +250,12 @@ var (
 	CmdFailedDurationUpdateGCSafePointV2      prometheus.Observer
 	CmdFailedDurationUpdateServiceSafePointV2 prometheus.Observer
 
+	InternalCmdDurationGetClusterInfo prometheus.Observer
+	InternalCmdDurationGetMembers     prometheus.Observer
+
+	InternalCmdFailedDurationGetClusterInfo prometheus.Observer
+	InternalCmdFailedDurationGetMembers     prometheus.Observer
+
 	// RequestDurationTSO records the durations of the successful TSO requests.
 	RequestDurationTSO prometheus.Observer
 	// RequestFailedDurationTSO records the durations of the failed TSO requests.
@@ -281,6 +309,12 @@ func initCmdDurations() {
 	CmdFailedDurationUpdateGCSafePointV2 = cmdFailedDuration.WithLabelValues("update_gc_safe_point_v2")
 	CmdFailedDurationUpdateServiceSafePointV2 = cmdFailedDuration.WithLabelValues("update_service_safe_point_v2")
 
+	InternalCmdDurationGetClusterInfo = internalCmdDuration.WithLabelValues("get_cluster_info")
+	InternalCmdDurationGetMembers = internalCmdDuration.WithLabelValues("get_members")
+
+	InternalCmdFailedDurationGetClusterInfo = internalCmdFailedDuration.WithLabelValues("get_cluster_info")
+	InternalCmdFailedDurationGetMembers = internalCmdFailedDuration.WithLabelValues("get_members")
+
 	RequestDurationTSO = requestDuration.WithLabelValues("tso")
 	RequestFailedDurationTSO = requestDuration.WithLabelValues("tso-failed")
 }
@@ -288,6 +322,8 @@ func initCmdDurations() {
 func registerMetrics() {
 	prometheus.MustRegister(cmdDuration)
 	prometheus.MustRegister(cmdFailedDuration)
+	prometheus.MustRegister(internalCmdDuration)
+	prometheus.MustRegister(internalCmdFailedDuration)
 	prometheus.MustRegister(requestDuration)
 	prometheus.MustRegister(TSOBestBatchSize)
 	prometheus.MustRegister(TSOBatchSize)

@@ -38,6 +38,7 @@ import (
 
 	"github.com/tikv/pd/client/constants"
 	"github.com/tikv/pd/client/errs"
+	"github.com/tikv/pd/client/metrics"
 	"github.com/tikv/pd/client/opt"
 	"github.com/tikv/pd/client/pkg/retry"
 	"github.com/tikv/pd/client/pkg/utils/grpcutil"
@@ -909,12 +910,16 @@ func (c *serviceDiscovery) getClusterInfo(ctx context.Context, url string, timeo
 	if err != nil {
 		return nil, err
 	}
+	start := time.Now()
+	defer func() { metrics.InternalCmdDurationGetClusterInfo.Observe(time.Since(start).Seconds()) }()
 	clusterInfo, err := pdpb.NewPDClient(cc).GetClusterInfo(ctx, &pdpb.GetClusterInfoRequest{})
 	if err != nil {
+		metrics.InternalCmdFailedDurationGetClusterInfo.Observe(time.Since(start).Seconds())
 		attachErr := errors.Errorf("error:%s target:%s status:%s", err, cc.Target(), cc.GetState().String())
 		return nil, errs.ErrClientGetClusterInfo.Wrap(attachErr).GenWithStackByCause()
 	}
 	if clusterInfo.GetHeader().GetError() != nil {
+		metrics.InternalCmdFailedDurationGetClusterInfo.Observe(time.Since(start).Seconds())
 		attachErr := errors.Errorf("error:%s target:%s status:%s", clusterInfo.GetHeader().GetError().String(), cc.Target(), cc.GetState().String())
 		return nil, errs.ErrClientGetClusterInfo.Wrap(attachErr).GenWithStackByCause()
 	}
@@ -928,12 +933,16 @@ func (c *serviceDiscovery) getMembers(ctx context.Context, url string, timeout t
 	if err != nil {
 		return nil, err
 	}
+	start := time.Now()
+	defer func() { metrics.InternalCmdDurationGetMembers.Observe(time.Since(start).Seconds()) }()
 	members, err := pdpb.NewPDClient(cc).GetMembers(ctx, &pdpb.GetMembersRequest{})
 	if err != nil {
+		metrics.InternalCmdFailedDurationGetMembers.Observe(time.Since(start).Seconds())
 		attachErr := errors.Errorf("error:%s target:%s status:%s", err, cc.Target(), cc.GetState().String())
 		return nil, errs.ErrClientGetMember.Wrap(attachErr).GenWithStackByCause()
 	}
 	if members.GetHeader().GetError() != nil {
+		metrics.InternalCmdFailedDurationGetMembers.Observe(time.Since(start).Seconds())
 		attachErr := errors.Errorf("error:%s target:%s status:%s", members.GetHeader().GetError().String(), cc.Target(), cc.GetState().String())
 		return nil, errs.ErrClientGetMember.Wrap(attachErr).GenWithStackByCause()
 	}
