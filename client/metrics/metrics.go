@@ -178,7 +178,7 @@ func initMetrics(constLabels prometheus.Labels) {
 			Name:        "circuit_breaker_count",
 			Help:        "Circuit breaker counters",
 			ConstLabels: constLabels,
-		}, []string{"name", "success"})
+		}, []string{"name", "event"})
 }
 
 // CmdDurationXXX and CmdFailedDurationXXX are the durations of the client commands.
