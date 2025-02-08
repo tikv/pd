@@ -165,7 +165,7 @@ func (d *Driver) allocID() error {
 func (d *Driver) updateNodesClient() error {
 	urls := strings.Split(d.pdAddr, ",")
 	ctx, cancel := context.WithCancel(context.Background())
-	SD = sd.NewDefaultPDServiceDiscovery(ctx, cancel, urls, nil)
+	SD = sd.NewDefaultServiceDiscovery(ctx, cancel, urls, nil)
 	if err := SD.Init(); err != nil {
 		return err
 	}

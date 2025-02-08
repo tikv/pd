@@ -1,3 +1,17 @@
+// Copyright 2023 TiKV Project Authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package server
 
 import (
@@ -55,7 +69,7 @@ type Cluster struct {
 	storage           storage.Storage
 	coordinator       *schedule.Coordinator
 	checkMembershipCh chan struct{}
-	apiServerLeader   atomic.Value
+	pdLeader          atomic.Value
 	running           atomic.Bool
 
 	// heartbeatRunner is used to process the subtree update task asynchronously.
@@ -227,7 +241,7 @@ func (c *Cluster) GetStoreConfig() sc.StoreConfigProvider { return c.persistConf
 
 // AllocID allocates a new ID.
 func (c *Cluster) AllocID() (uint64, error) {
-	client, err := c.getAPIServerLeaderClient()
+	client, err := c.getPDLeaderClient()
 	if err != nil {
 		return 0, err
 	}
@@ -241,11 +255,11 @@ func (c *Cluster) AllocID() (uint64, error) {
 	return resp.GetId(), nil
 }
 
-func (c *Cluster) getAPIServerLeaderClient() (pdpb.PDClient, error) {
-	cli := c.apiServerLeader.Load()
+func (c *Cluster) getPDLeaderClient() (pdpb.PDClient, error) {
+	cli := c.pdLeader.Load()
 	if cli == nil {
 		c.triggerMembershipCheck()
-		return nil, errors.New("API server leader is not found")
+		return nil, errors.New("PD leader is not found")
 	}
 	return cli.(pdpb.PDClient), nil
 }
@@ -257,10 +271,10 @@ func (c *Cluster) triggerMembershipCheck() {
 	}
 }
 
-// SwitchAPIServerLeader switches the API server leader.
-func (c *Cluster) SwitchAPIServerLeader(new pdpb.PDClient) bool {
-	old := c.apiServerLeader.Load()
-	return c.apiServerLeader.CompareAndSwap(old, new)
+// SwitchPDLeader switches the PD leader.
+func (c *Cluster) SwitchPDLeader(new pdpb.PDClient) bool {
+	old := c.pdLeader.Load()
+	return c.pdLeader.CompareAndSwap(old, new)
 }
 
 func trySend(notifier chan struct{}) {
@@ -414,9 +428,6 @@ func (c *Cluster) HandleStoreHeartbeat(heartbeat *schedulingpb.StoreHeartbeatReq
 	nowTime := time.Now()
 	newStore := store.Clone(core.SetStoreStats(stats), core.SetLastHeartbeatTS(nowTime))
 
-	if store := c.GetStore(storeID); store != nil {
-		statistics.UpdateStoreHeartbeatMetrics(store)
-	}
 	c.PutStore(newStore)
 	c.hotStat.Observe(storeID, newStore.GetStoreStats())
 	c.hotStat.FilterUnhealthyStore(c)

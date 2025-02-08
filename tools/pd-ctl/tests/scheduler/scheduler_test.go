@@ -96,7 +96,7 @@ func (suite *schedulerTestSuite) TearDownTest() {
 			}
 		}
 	}
-	suite.env.RunTestBasedOnMode(cleanFunc)
+	suite.env.RunTest(cleanFunc)
 	suite.env.Cleanup()
 }
 
@@ -109,7 +109,7 @@ func (suite *schedulerTestSuite) checkDefaultSchedulers(re *require.Assertions, 
 }
 
 func (suite *schedulerTestSuite) TestScheduler() {
-	suite.env.RunTestBasedOnMode(suite.checkScheduler)
+	suite.env.RunTest(suite.checkScheduler)
 }
 
 func (suite *schedulerTestSuite) checkScheduler(cluster *pdTests.TestCluster) {
@@ -408,7 +408,7 @@ func (suite *schedulerTestSuite) checkScheduler(cluster *pdTests.TestCluster) {
 }
 
 func (suite *schedulerTestSuite) TestSchedulerConfig() {
-	suite.env.RunTestBasedOnMode(suite.checkSchedulerConfig)
+	suite.env.RunTest(suite.checkSchedulerConfig)
 }
 
 func (suite *schedulerTestSuite) checkSchedulerConfig(cluster *pdTests.TestCluster) {
@@ -566,10 +566,26 @@ func (suite *schedulerTestSuite) checkSchedulerConfig(cluster *pdTests.TestClust
 	})
 	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "add", "balance-leader-scheduler"}, nil)
 	re.Contains(echo, "Success!")
+
+	// test evict slow store scheduler
+	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "add", "evict-slow-store-scheduler"}, nil)
+	re.Contains(echo, "Success!")
+	conf = make(map[string]any)
+	conf1 = make(map[string]any)
+	testutil.Eventually(re, func() bool {
+		mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "evict-slow-store-scheduler", "show"}, &conf)
+		return conf["batch"] == 3.
+	})
+	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "evict-slow-store-scheduler", "set", "batch", "10"}, nil)
+	re.Contains(echo, "Success!")
+	testutil.Eventually(re, func() bool {
+		mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "evict-slow-store-scheduler"}, &conf1)
+		return conf1["batch"] == 10.
+	})
 }
 
 func (suite *schedulerTestSuite) TestGrantHotRegionScheduler() {
-	suite.env.RunTestBasedOnMode(suite.checkGrantHotRegionScheduler)
+	suite.env.RunTest(suite.checkGrantHotRegionScheduler)
 }
 
 func (suite *schedulerTestSuite) checkGrantHotRegionScheduler(cluster *pdTests.TestCluster) {
@@ -685,7 +701,7 @@ func (suite *schedulerTestSuite) checkGrantHotRegionScheduler(cluster *pdTests.T
 }
 
 func (suite *schedulerTestSuite) TestHotRegionSchedulerConfig() {
-	suite.env.RunTestBasedOnMode(suite.checkHotRegionSchedulerConfig)
+	suite.env.RunTest(suite.checkHotRegionSchedulerConfig)
 }
 
 func (suite *schedulerTestSuite) checkHotRegionSchedulerConfig(cluster *pdTests.TestCluster) {
@@ -849,7 +865,7 @@ func (suite *schedulerTestSuite) checkHotRegionSchedulerConfig(cluster *pdTests.
 }
 
 func (suite *schedulerTestSuite) TestSchedulerDiagnostic() {
-	suite.env.RunTestBasedOnMode(suite.checkSchedulerDiagnostic)
+	suite.env.RunTest(suite.checkSchedulerDiagnostic)
 }
 
 func (suite *schedulerTestSuite) checkSchedulerDiagnostic(cluster *pdTests.TestCluster) {
@@ -913,7 +929,7 @@ func (suite *schedulerTestSuite) checkSchedulerDiagnostic(cluster *pdTests.TestC
 }
 
 func (suite *schedulerTestSuite) TestEvictLeaderScheduler() {
-	suite.env.RunTestBasedOnMode(suite.checkEvictLeaderScheduler)
+	suite.env.RunTest(suite.checkEvictLeaderScheduler)
 }
 
 func (suite *schedulerTestSuite) checkEvictLeaderScheduler(cluster *pdTests.TestCluster) {

@@ -33,7 +33,7 @@ import (
 
 // metaStorageClient gets the meta storage client from current PD leader.
 func (c *innerClient) metaStorageClient() meta_storagepb.MetaStorageClient {
-	if client := c.pdSvcDiscovery.GetServingEndpointClientConn(); client != nil {
+	if client := c.serviceDiscovery.GetServingEndpointClientConn(); client != nil {
 		return meta_storagepb.NewMetaStorageClient(client)
 	}
 	return nil
@@ -74,7 +74,7 @@ func (c *innerClient) Put(ctx context.Context, key, value []byte, opts ...opt.Me
 		Lease:  options.Lease,
 		PrevKv: options.PrevKv,
 	}
-	ctx = grpcutil.BuildForwardContext(ctx, c.pdSvcDiscovery.GetServingURL())
+	ctx = grpcutil.BuildForwardContext(ctx, c.serviceDiscovery.GetServingURL())
 	cli := c.metaStorageClient()
 	if cli == nil {
 		cancel()
@@ -113,7 +113,7 @@ func (c *innerClient) Get(ctx context.Context, key []byte, opts ...opt.MetaStora
 		Limit:    options.Limit,
 		Revision: options.Revision,
 	}
-	ctx = grpcutil.BuildForwardContext(ctx, c.pdSvcDiscovery.GetServingURL())
+	ctx = grpcutil.BuildForwardContext(ctx, c.serviceDiscovery.GetServingURL())
 	cli := c.metaStorageClient()
 	if cli == nil {
 		cancel()
@@ -179,7 +179,7 @@ func (c *innerClient) respForMetaStorageErr(observer prometheus.Observer, start 
 	if err != nil || header.GetError() != nil {
 		observer.Observe(time.Since(start).Seconds())
 		if err != nil {
-			c.pdSvcDiscovery.ScheduleCheckMemberChanged()
+			c.serviceDiscovery.ScheduleCheckMemberChanged()
 			return errors.WithStack(err)
 		}
 		return errors.WithStack(errors.New(header.GetError().String()))

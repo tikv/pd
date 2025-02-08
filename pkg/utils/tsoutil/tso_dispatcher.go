@@ -69,7 +69,12 @@ func (s *TSODispatcher) DispatchRequest(
 	doneCh <-chan struct{},
 	errCh chan<- error,
 	tsoPrimaryWatchers ...*etcdutil.LoopWatcher) {
-	val, loaded := s.dispatchChs.LoadOrStore(req.getForwardedHost(), make(chan Request, maxMergeRequests))
+	key := req.getForwardedHost()
+	val, loaded := s.dispatchChs.Load(key)
+	if !loaded {
+		val = make(chan Request, maxMergeRequests)
+		val, loaded = s.dispatchChs.LoadOrStore(key, val)
+	}
 	reqCh := val.(chan Request)
 	if !loaded {
 		tsDeadlineCh := make(chan *TSDeadline, 1)

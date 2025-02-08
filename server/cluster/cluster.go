@@ -131,7 +131,7 @@ type Server interface {
 	GetMembers() ([]*pdpb.Member, error)
 	ReplicateFileToMember(ctx context.Context, member *pdpb.Member, name string, data []byte) error
 	GetKeyspaceGroupManager() *keyspace.GroupManager
-	IsAPIServiceMode() bool
+	IsKeyspaceGroupEnabled() bool
 	GetSafePointV2Manager() *gc.SafePointV2Manager
 }
 
@@ -156,12 +156,12 @@ type RaftCluster struct {
 	etcdClient *clientv3.Client
 	httpClient *http.Client
 
-	running          bool
-	isAPIServiceMode bool
-	meta             *metapb.Cluster
-	storage          storage.Storage
-	minResolvedTS    atomic.Value // Store as uint64
-	externalTS       atomic.Value // Store as uint64
+	running                bool
+	isKeyspaceGroupEnabled bool
+	meta                   *metapb.Cluster
+	storage                storage.Storage
+	minResolvedTS          atomic.Value // Store as uint64
+	externalTS             atomic.Value // Store as uint64
 
 	// Keep the previous store limit settings when removing a store.
 	prevStoreLimit map[uint64]map[storelimit.Type]float64
@@ -325,7 +325,7 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 		log.Warn("raft cluster has already been started")
 		return nil
 	}
-	c.isAPIServiceMode = s.IsAPIServiceMode()
+	c.isKeyspaceGroupEnabled = s.IsKeyspaceGroupEnabled()
 	err = c.InitCluster(s.GetAllocator(), s.GetPersistOptions(), s.GetHBStreams(), s.GetKeyspaceGroupManager())
 	if err != nil {
 		return err
@@ -376,7 +376,7 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 	c.loadExternalTS()
 	c.loadMinResolvedTS()
 
-	if c.isAPIServiceMode {
+	if c.isKeyspaceGroupEnabled {
 		// bootstrap keyspace group manager after starting other parts successfully.
 		// This order avoids a stuck goroutine in keyspaceGroupManager when it fails to create raftcluster.
 		err = c.keyspaceGroupManager.Bootstrap(c.ctx)
@@ -404,9 +404,9 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 }
 
 func (c *RaftCluster) checkSchedulingService() {
-	if c.isAPIServiceMode {
+	if c.isKeyspaceGroupEnabled {
 		servers, err := discovery.Discover(c.etcdClient, constant.SchedulingServiceName)
-		if c.opt.GetMicroServiceConfig().IsSchedulingFallbackEnabled() && (err != nil || len(servers) == 0) {
+		if c.opt.GetMicroserviceConfig().IsSchedulingFallbackEnabled() && (err != nil || len(servers) == 0) {
 			c.startSchedulingJobs(c, c.hbstreams)
 			c.UnsetServiceIndependent(constant.SchedulingServiceName)
 		} else {
@@ -425,8 +425,8 @@ func (c *RaftCluster) checkSchedulingService() {
 
 // checkTSOService checks the TSO service.
 func (c *RaftCluster) checkTSOService() {
-	if c.isAPIServiceMode {
-		if c.opt.GetMicroServiceConfig().IsTSODynamicSwitchingEnabled() {
+	if c.isKeyspaceGroupEnabled {
+		if c.opt.GetMicroserviceConfig().IsTSODynamicSwitchingEnabled() {
 			servers, err := discovery.Discover(c.etcdClient, constant.TSOServiceName)
 			if err != nil || len(servers) == 0 {
 				if err := c.startTSOJobsIfNeeded(); err != nil {
@@ -1040,9 +1040,10 @@ func (c *RaftCluster) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest
 			newStore = newStore.Clone(core.SetLastPersistTime(nowTime))
 		}
 	}
-	if store := c.GetStore(storeID); store != nil {
-		statistics.UpdateStoreHeartbeatMetrics(store)
-	}
+	// Supply NodeState in the response to help the store handle special cases
+	// more conveniently, such as avoiding calling `remove_peer` redundantly under
+	// NodeState_Removing.
+	resp.State = store.GetNodeState()
 	c.PutStore(newStore)
 	var (
 		regions  map[uint64]*core.RegionInfo
@@ -1179,7 +1180,7 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 		// Due to some config changes need to update the region stats as well,
 		// so we do some extra checks here.
 		// TODO: Due to the accuracy requirements of the API "/regions/check/xxx",
-		// region stats needs to be collected in API mode.
+		// region stats needs to be collected in microservice env.
 		// We need to think of a better way to reduce this part of the cost in the future.
 		if hasRegionStats && c.regionStats.RegionStatsNeedUpdate(region) {
 			ctx.MiscRunner.RunTask(
@@ -1250,7 +1251,7 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 			ratelimit.CollectRegionStatsAsync,
 			func(ctx context.Context) {
 				// TODO: Due to the accuracy requirements of the API "/regions/check/xxx",
-				// region stats needs to be collected in API mode.
+				// region stats needs to be collected in microservice env.
 				// We need to think of a better way to reduce this part of the cost in the future.
 				cluster.Collect(ctx, c, region)
 			},
@@ -2283,7 +2284,8 @@ func (c *RaftCluster) CheckAndUpdateMinResolvedTS() (uint64, bool) {
 			newMinResolvedTS = s.GetMinResolvedTS()
 		}
 	}
-	oldMinResolvedTS := c.minResolvedTS.Load().(uint64)
+	// Avoid panic when minResolvedTS is not initialized.
+	oldMinResolvedTS, _ := c.minResolvedTS.Load().(uint64)
 	if newMinResolvedTS == math.MaxUint64 || newMinResolvedTS <= oldMinResolvedTS {
 		return oldMinResolvedTS, false
 	}

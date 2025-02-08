@@ -140,8 +140,21 @@ func (gta *GlobalTSOAllocator) IsInitialize() bool {
 }
 
 // UpdateTSO is used to update the TSO in memory and the time window in etcd.
-func (gta *GlobalTSOAllocator) UpdateTSO() error {
-	return gta.timestampOracle.UpdateTimestamp()
+func (gta *GlobalTSOAllocator) UpdateTSO() (err error) {
+	// When meet network partition, we need to manually retry to update the global tso,
+	// next request succeeds with the new endpoint, according to https://github.com/etcd-io/etcd/issues/8711
+	maxRetryCount := 3
+	for range maxRetryCount {
+		err = gta.timestampOracle.UpdateTimestamp()
+		if err == nil {
+			return nil
+		}
+		log.Warn("try to update the global tso but failed", errs.ZapError(err))
+		// Etcd client retry with roundRobinQuorumBackoff https://github.com/etcd-io/etcd/blob/d62cdeee4863001b09e772ed013eb1342a1d0f89/client/v3/client.go#L488
+		// And its default interval is 25ms, so we sleep 50ms here. https://github.com/etcd-io/etcd/blob/d62cdeee4863001b09e772ed013eb1342a1d0f89/client/v3/options.go#L53
+		time.Sleep(50 * time.Millisecond)
+	}
+	return
 }
 
 // SetTSO sets the physical part with given TSO.
@@ -171,7 +184,7 @@ func (gta *GlobalTSOAllocator) Reset() {
 }
 
 // primaryElectionLoop is used to maintain the TSO primary election and TSO's
-// running allocator. It is only used in API mode.
+// running allocator. It is only used in microservice env.
 func (gta *GlobalTSOAllocator) primaryElectionLoop() {
 	defer logutil.LogPanic()
 	defer gta.wg.Done()
@@ -212,7 +225,7 @@ func (gta *GlobalTSOAllocator) primaryElectionLoop() {
 				zap.String("server-name", gta.member.Name()),
 				zap.String("expected-primary-id", expectedPrimary),
 				zap.Uint64("member-id", gta.member.ID()),
-				zap.String("cur-memberValue", gta.member.MemberValue()))
+				zap.String("cur-member-value", gta.member.MemberValue()))
 			time.Sleep(200 * time.Millisecond)
 			continue
 		}

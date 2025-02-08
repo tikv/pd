@@ -25,8 +25,6 @@ import (
 	"github.com/opentracing/opentracing-go"
 	"github.com/prometheus/client_golang/prometheus"
 	"go.uber.org/zap"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
@@ -42,7 +40,6 @@ import (
 	"github.com/tikv/pd/client/metrics"
 	"github.com/tikv/pd/client/opt"
 	"github.com/tikv/pd/client/pkg/caller"
-	cb "github.com/tikv/pd/client/pkg/circuitbreaker"
 	"github.com/tikv/pd/client/pkg/utils/tlsutil"
 	sd "github.com/tikv/pd/client/servicediscovery"
 )
@@ -146,12 +143,11 @@ var _ Client = (*client)(nil)
 
 // serviceModeKeeper is for service mode switching.
 type serviceModeKeeper struct {
-	// RMutex here is for the future usage that there might be multiple goroutines
-	// triggering service mode switching concurrently.
 	sync.RWMutex
 	serviceMode     pdpb.ServiceMode
 	tsoClient       *tso.Cli
 	tsoSvcDiscovery sd.ServiceDiscovery
+	routerClient    *router.Cli
 }
 
 func (k *serviceModeKeeper) close() {
@@ -363,8 +359,8 @@ func newClientWithKeyspaceName(
 	c := &client{
 		callerComponent: adjustCallerComponent(callerComponent),
 		inner: &innerClient{
-			// Create a PD service discovery with null keyspace id, then query the real id with the keyspace name,
-			// finally update the keyspace id to the PD service discovery for the following interactions.
+			// Create a service discovery with null keyspace id, then query the real id with the keyspace name,
+			// finally update the keyspace id to the service discovery for the following interactions.
 			keyspaceID:              constants.NullKeyspaceID,
 			updateTokenConnectionCh: make(chan struct{}, 1),
 			ctx:                     clientCtx,
@@ -387,7 +383,7 @@ func newClientWithKeyspaceName(
 		}
 		c.inner.keyspaceID = keyspaceMeta.GetId()
 		// c.keyspaceID is the source of truth for keyspace id.
-		c.inner.pdSvcDiscovery.SetKeyspaceID(c.inner.keyspaceID)
+		c.inner.serviceDiscovery.SetKeyspaceID(c.inner.keyspaceID)
 		return nil
 	}
 
@@ -415,17 +411,17 @@ func (c *client) ResetTSOClient() {
 
 // GetClusterID returns the ClusterID.
 func (c *client) GetClusterID(context.Context) uint64 {
-	return c.inner.pdSvcDiscovery.GetClusterID()
+	return c.inner.serviceDiscovery.GetClusterID()
 }
 
 // GetLeaderURL returns the leader URL.
 func (c *client) GetLeaderURL() string {
-	return c.inner.pdSvcDiscovery.GetServingURL()
+	return c.inner.serviceDiscovery.GetServingURL()
 }
 
 // GetServiceDiscovery returns the client-side service discovery object
 func (c *client) GetServiceDiscovery() sd.ServiceDiscovery {
-	return c.inner.pdSvcDiscovery
+	return c.inner.serviceDiscovery
 }
 
 // UpdateOption updates the client option.
@@ -441,7 +437,7 @@ func (c *client) UpdateOption(option opt.DynamicOption, value any) error {
 		}
 	case opt.EnableTSOFollowerProxy:
 		if c.inner.getServiceMode() != pdpb.ServiceMode_PD_SVC_MODE {
-			return errors.New("[pd] tso follower proxy is only supported in PD service mode")
+			return errors.New("[pd] tso follower proxy is only supported when PD provides TSO")
 		}
 		enable, ok := value.(bool)
 		if !ok {
@@ -460,12 +456,6 @@ func (c *client) UpdateOption(option opt.DynamicOption, value any) error {
 			return errors.New("[pd] invalid value type for TSOClientRPCConcurrency option, it should be int")
 		}
 		c.inner.option.SetTSOClientRPCConcurrency(value)
-	case opt.RegionMetadataCircuitBreakerSettings:
-		applySettingsChange, ok := value.(func(config *cb.Settings))
-		if !ok {
-			return errors.New("[pd] invalid value type for RegionMetadataCircuitBreakerSettings option, it should be pd.Settings")
-		}
-		c.inner.regionMetaCircuitBreaker.ChangeSettings(applySettingsChange)
 	default:
 		return errors.New("[pd] unsupported client option")
 	}
@@ -494,7 +484,7 @@ func (c *client) GetAllMembers(ctx context.Context) ([]*pdpb.Member, error) {
 // getClientAndContext returns the leader pd client and the original context. If leader is unhealthy, it returns
 // follower pd client and the context which holds forward information.
 func (c *client) getClientAndContext(ctx context.Context) (pdpb.PDClient, context.Context) {
-	serviceClient := c.inner.pdSvcDiscovery.GetServiceClient()
+	serviceClient := c.inner.serviceDiscovery.GetServiceClient()
 	if serviceClient == nil || serviceClient.GetClientConn() == nil {
 		return nil, ctx
 	}
@@ -535,7 +525,7 @@ func (c *client) GetLocalTS(ctx context.Context, _ string) (physical int64, logi
 
 // GetMinTS implements the TSOClient interface.
 func (c *client) GetMinTS(ctx context.Context) (physical int64, logical int64, err error) {
-	// Handle compatibility issue in case of PD/API server doesn't support GetMinTS API.
+	// Handle compatibility issue in case of PD doesn't support GetMinTS API.
 	serviceMode := c.inner.getServiceMode()
 	switch serviceMode {
 	case pdpb.ServiceMode_UNKNOWN_SVC_MODE:
@@ -579,21 +569,16 @@ func (c *client) GetMinTS(ctx context.Context) (physical int64, logical int64, e
 	return minTS.Physical, minTS.Logical, nil
 }
 
-func handleRegionResponse(res *pdpb.GetRegionResponse) *router.Region {
-	if res.Region == nil {
-		return nil
-	}
+// EnableRouterClient enables the router client.
+// This is only for test currently.
+func (c *client) EnableRouterClient() {
+	c.inner.initRouterClient()
+}
 
-	r := &router.Region{
-		Meta:         res.Region,
-		Leader:       res.Leader,
-		PendingPeers: res.PendingPeers,
-		Buckets:      res.Buckets,
-	}
-	for _, s := range res.DownPeers {
-		r.DownPeers = append(r.DownPeers, s.Peer)
-	}
-	return r
+func (c *client) getRouterClient() *router.Cli {
+	c.inner.RLock()
+	defer c.inner.RUnlock()
+	return c.inner.routerClient
 }
 
 // GetRegionFromMember implements the RPCClient interface.
@@ -607,7 +592,7 @@ func (c *client) GetRegionFromMember(ctx context.Context, key []byte, memberURLs
 
 	var resp *pdpb.GetRegionResponse
 	for _, url := range memberURLs {
-		conn, err := c.inner.pdSvcDiscovery.GetOrCreateGRPCConn(url)
+		conn, err := c.inner.serviceDiscovery.GetOrCreateGRPCConn(url)
 		if err != nil {
 			log.Error("[pd] can't get grpc connection", zap.String("member-URL", url), errs.ZapError(err))
 			continue
@@ -628,11 +613,11 @@ func (c *client) GetRegionFromMember(ctx context.Context, key []byte, memberURLs
 
 	if resp == nil {
 		metrics.CmdFailedDurationGetRegion.Observe(time.Since(start).Seconds())
-		c.inner.pdSvcDiscovery.ScheduleCheckMemberChanged()
+		c.inner.serviceDiscovery.ScheduleCheckMemberChanged()
 		errorMsg := fmt.Sprintf("[pd] can't get region info from member URLs: %+v", memberURLs)
 		return nil, errors.WithStack(errors.New(errorMsg))
 	}
-	return handleRegionResponse(resp), nil
+	return router.ConvertToRegion(resp), nil
 }
 
 // GetRegion implements the RPCClient interface.
@@ -646,6 +631,10 @@ func (c *client) GetRegion(ctx context.Context, key []byte, opts ...opt.GetRegio
 	ctx, cancel := context.WithTimeout(ctx, c.inner.option.Timeout)
 	defer cancel()
 
+	if routerClient := c.getRouterClient(); routerClient != nil {
+		return routerClient.GetRegion(ctx, key, opts...)
+	}
+
 	options := &opt.GetRegionOp{}
 	for _, opt := range opts {
 		opt(options)
@@ -660,13 +649,7 @@ func (c *client) GetRegion(ctx context.Context, key []byte, opts ...opt.GetRegio
 	if serviceClient == nil {
 		return nil, errs.ErrClientGetProtoClient
 	}
-	resp, err := c.inner.regionMetaCircuitBreaker.Execute(func() (*pdpb.GetRegionResponse, cb.Overloading, error) {
-		region, err := pdpb.NewPDClient(serviceClient.GetClientConn()).GetRegion(cctx, req)
-		failpoint.Inject("triggerCircuitBreaker", func() {
-			err = status.Error(codes.ResourceExhausted, "resource exhausted")
-		})
-		return region, isOverloaded(err), err
-	})
+	resp, err := pdpb.NewPDClient(serviceClient.GetClientConn()).GetRegion(cctx, req)
 	if serviceClient.NeedRetry(resp.GetHeader().GetError(), err) {
 		protoClient, cctx := c.getClientAndContext(ctx)
 		if protoClient == nil {
@@ -678,7 +661,7 @@ func (c *client) GetRegion(ctx context.Context, key []byte, opts ...opt.GetRegio
 	if err = c.respForErr(metrics.CmdFailedDurationGetRegion, start, err, resp.GetHeader()); err != nil {
 		return nil, err
 	}
-	return handleRegionResponse(resp), nil
+	return router.ConvertToRegion(resp), nil
 }
 
 // GetPrevRegion implements the RPCClient interface.
@@ -692,6 +675,10 @@ func (c *client) GetPrevRegion(ctx context.Context, key []byte, opts ...opt.GetR
 	ctx, cancel := context.WithTimeout(ctx, c.inner.option.Timeout)
 	defer cancel()
 
+	if routerClient := c.getRouterClient(); routerClient != nil {
+		return routerClient.GetPrevRegion(ctx, key, opts...)
+	}
+
 	options := &opt.GetRegionOp{}
 	for _, opt := range opts {
 		opt(options)
@@ -706,10 +693,7 @@ func (c *client) GetPrevRegion(ctx context.Context, key []byte, opts ...opt.GetR
 	if serviceClient == nil {
 		return nil, errs.ErrClientGetProtoClient
 	}
-	resp, err := c.inner.regionMetaCircuitBreaker.Execute(func() (*pdpb.GetRegionResponse, cb.Overloading, error) {
-		resp, err := pdpb.NewPDClient(serviceClient.GetClientConn()).GetPrevRegion(cctx, req)
-		return resp, isOverloaded(err), err
-	})
+	resp, err := pdpb.NewPDClient(serviceClient.GetClientConn()).GetPrevRegion(cctx, req)
 	if serviceClient.NeedRetry(resp.GetHeader().GetError(), err) {
 		protoClient, cctx := c.getClientAndContext(ctx)
 		if protoClient == nil {
@@ -721,7 +705,7 @@ func (c *client) GetPrevRegion(ctx context.Context, key []byte, opts ...opt.GetR
 	if err = c.respForErr(metrics.CmdFailedDurationGetPrevRegion, start, err, resp.GetHeader()); err != nil {
 		return nil, err
 	}
-	return handleRegionResponse(resp), nil
+	return router.ConvertToRegion(resp), nil
 }
 
 // GetRegionByID implements the RPCClient interface.
@@ -734,6 +718,10 @@ func (c *client) GetRegionByID(ctx context.Context, regionID uint64, opts ...opt
 	defer func() { metrics.CmdDurationGetRegionByID.Observe(time.Since(start).Seconds()) }()
 	ctx, cancel := context.WithTimeout(ctx, c.inner.option.Timeout)
 	defer cancel()
+
+	if routerClient := c.getRouterClient(); routerClient != nil {
+		return routerClient.GetRegionByID(ctx, regionID, opts...)
+	}
 
 	options := &opt.GetRegionOp{}
 	for _, opt := range opts {
@@ -749,10 +737,8 @@ func (c *client) GetRegionByID(ctx context.Context, regionID uint64, opts ...opt
 	if serviceClient == nil {
 		return nil, errs.ErrClientGetProtoClient
 	}
-	resp, err := c.inner.regionMetaCircuitBreaker.Execute(func() (*pdpb.GetRegionResponse, cb.Overloading, error) {
-		resp, err := pdpb.NewPDClient(serviceClient.GetClientConn()).GetRegionByID(cctx, req)
-		return resp, isOverloaded(err), err
-	})
+
+	resp, err := pdpb.NewPDClient(serviceClient.GetClientConn()).GetRegionByID(cctx, req)
 	if serviceClient.NeedRetry(resp.GetHeader().GetError(), err) {
 		protoClient, cctx := c.getClientAndContext(ctx)
 		if protoClient == nil {
@@ -764,7 +750,7 @@ func (c *client) GetRegionByID(ctx context.Context, regionID uint64, opts ...opt
 	if err = c.respForErr(metrics.CmdFailedDurationGetRegionByID, start, err, resp.GetHeader()); err != nil {
 		return nil, err
 	}
-	return handleRegionResponse(resp), nil
+	return router.ConvertToRegion(resp), nil
 }
 
 // ScanRegions implements the RPCClient interface.
@@ -1170,7 +1156,7 @@ func (c *client) SplitRegions(ctx context.Context, splitKeys [][]byte, opts ...o
 
 func (c *client) requestHeader() *pdpb.RequestHeader {
 	return &pdpb.RequestHeader{
-		ClusterId:       c.inner.pdSvcDiscovery.GetClusterID(),
+		ClusterId:       c.inner.serviceDiscovery.GetClusterID(),
 		CallerId:        string(caller.GetCallerID()),
 		CallerComponent: string(c.callerComponent),
 	}
@@ -1354,7 +1340,7 @@ func (c *client) respForErr(observer prometheus.Observer, start time.Time, err e
 	if err != nil || header.GetError() != nil {
 		observer.Observe(time.Since(start).Seconds())
 		if err != nil {
-			c.inner.pdSvcDiscovery.ScheduleCheckMemberChanged()
+			c.inner.serviceDiscovery.ScheduleCheckMemberChanged()
 			return errors.WithStack(err)
 		}
 		return errors.WithStack(errors.New(header.GetError().String()))

@@ -53,7 +53,7 @@ func (m *mockTSOServiceProvider) getOption() *opt.Option {
 }
 
 func (*mockTSOServiceProvider) getServiceDiscovery() sd.ServiceDiscovery {
-	return sd.NewMockPDServiceDiscovery([]string{mockStreamURL}, nil)
+	return sd.NewMockServiceDiscovery([]string{mockStreamURL}, nil)
 }
 
 func (m *mockTSOServiceProvider) getConnectionCtxMgr() *cctx.Manager[*tsoStream] {

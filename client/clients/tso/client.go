@@ -116,9 +116,8 @@ func NewClient(
 		},
 	}
 
-	eventSrc := svcDiscovery.(sd.TSOEventSource)
-	eventSrc.SetTSOLeaderURLUpdatedCallback(c.updateTSOLeaderURL)
-	c.svcDiscovery.AddServiceURLsSwitchedCallback(c.scheduleUpdateTSOConnectionCtxs)
+	c.svcDiscovery.ExecAndAddLeaderSwitchedCallback(c.updateTSOLeaderURL)
+	c.svcDiscovery.AddMembersChangedCallback(c.scheduleUpdateTSOConnectionCtxs)
 
 	return c
 }
@@ -281,6 +280,9 @@ func (c *Cli) connectionCtxsUpdater() {
 				// Because the TSO Follower Proxy is enabled,
 				// the periodic check needs to be performed.
 				setNewUpdateTicker(sd.MemberUpdateInterval)
+				failpoint.Inject("speedUpTsoDispatcherUpdateInterval", func() {
+					setNewUpdateTicker(10 * time.Millisecond)
+				})
 			} else if !enableTSOFollowerProxy && updateTicker.C != nil {
 				// Because the TSO Follower Proxy is disabled,
 				// the periodic check needs to be turned off.
@@ -560,7 +562,7 @@ func (c *Cli) DispatchRequest(request *Request) (bool, error) {
 		// Client is closed, no need to retry.
 		return false, request.clientCtx.Err()
 	case <-c.ctx.Done():
-		// tsoClient is closed due to the PD service mode switch, which is retryable.
+		// tsoClient is closed due to the service mode switch, which is retryable.
 		return true, c.ctx.Err()
 	default:
 		// This failpoint will increase the possibility that the request is sent to a closed dispatcher.

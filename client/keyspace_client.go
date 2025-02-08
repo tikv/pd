@@ -41,7 +41,7 @@ type KeyspaceClient interface {
 
 // keyspaceClient returns the KeyspaceClient from current PD leader.
 func (c *client) keyspaceClient() keyspacepb.KeyspaceClient {
-	if client := c.inner.pdSvcDiscovery.GetServingEndpointClientConn(); client != nil {
+	if client := c.inner.serviceDiscovery.GetServingEndpointClientConn(); client != nil {
 		return keyspacepb.NewKeyspaceClient(client)
 	}
 	return nil
@@ -70,7 +70,7 @@ func (c *client) LoadKeyspace(ctx context.Context, name string) (*keyspacepb.Key
 
 	if err != nil {
 		metrics.CmdFailedDurationLoadKeyspace.Observe(time.Since(start).Seconds())
-		c.inner.pdSvcDiscovery.ScheduleCheckMemberChanged()
+		c.inner.serviceDiscovery.ScheduleCheckMemberChanged()
 		return nil, err
 	}
 
@@ -115,7 +115,7 @@ func (c *client) UpdateKeyspaceState(ctx context.Context, id uint32, state keysp
 
 	if err != nil {
 		metrics.CmdFailedDurationUpdateKeyspaceState.Observe(time.Since(start).Seconds())
-		c.inner.pdSvcDiscovery.ScheduleCheckMemberChanged()
+		c.inner.serviceDiscovery.ScheduleCheckMemberChanged()
 		return nil, err
 	}
 
@@ -159,7 +159,7 @@ func (c *client) GetAllKeyspaces(ctx context.Context, startID uint32, limit uint
 
 	if err != nil {
 		metrics.CmdDurationGetAllKeyspaces.Observe(time.Since(start).Seconds())
-		c.inner.pdSvcDiscovery.ScheduleCheckMemberChanged()
+		c.inner.serviceDiscovery.ScheduleCheckMemberChanged()
 		return nil, err
 	}
 

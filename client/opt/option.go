@@ -23,7 +23,6 @@ import (
 
 	"github.com/pingcap/errors"
 
-	cb "github.com/tikv/pd/client/pkg/circuitbreaker"
 	"github.com/tikv/pd/client/pkg/retry"
 )
 
@@ -50,8 +49,6 @@ const (
 	EnableFollowerHandle
 	// TSOClientRPCConcurrency controls the amount of ongoing TSO RPC requests at the same time in a single TSO client.
 	TSOClientRPCConcurrency
-	// RegionMetadataCircuitBreakerSettings controls settings for circuit breaker for region metadata requests.
-	RegionMetadataCircuitBreakerSettings
 
 	dynamicOptionCount
 )
@@ -72,18 +69,16 @@ type Option struct {
 	// Dynamic options.
 	dynamicOptions [dynamicOptionCount]atomic.Value
 
-	EnableTSOFollowerProxyCh         chan struct{}
-	RegionMetaCircuitBreakerSettings cb.Settings
+	EnableTSOFollowerProxyCh chan struct{}
 }
 
 // NewOption creates a new PD client option with the default values set.
 func NewOption() *Option {
 	co := &Option{
-		Timeout:                          defaultPDTimeout,
-		MaxRetryTimes:                    maxInitClusterRetries,
-		EnableTSOFollowerProxyCh:         make(chan struct{}, 1),
-		InitMetrics:                      true,
-		RegionMetaCircuitBreakerSettings: cb.AlwaysClosedSettings,
+		Timeout:                  defaultPDTimeout,
+		MaxRetryTimes:            maxInitClusterRetries,
+		EnableTSOFollowerProxyCh: make(chan struct{}, 1),
+		InitMetrics:              true,
 	}
 
 	co.dynamicOptions[MaxTSOBatchWaitInterval].Store(defaultMaxTSOBatchWaitInterval)
@@ -154,11 +149,6 @@ func (o *Option) GetTSOClientRPCConcurrency() int {
 	return o.dynamicOptions[TSOClientRPCConcurrency].Load().(int)
 }
 
-// GetRegionMetadataCircuitBreakerSettings gets circuit breaker settings for PD region metadata calls.
-func (o *Option) GetRegionMetadataCircuitBreakerSettings() cb.Settings {
-	return o.dynamicOptions[RegionMetadataCircuitBreakerSettings].Load().(cb.Settings)
-}
-
 // ClientOption configures client.
 type ClientOption func(*Option)
 
@@ -210,13 +200,6 @@ func WithMetricsLabels(labels prometheus.Labels) ClientOption {
 func WithInitMetricsOption(initMetrics bool) ClientOption {
 	return func(op *Option) {
 		op.InitMetrics = initMetrics
-	}
-}
-
-// WithRegionMetaCircuitBreaker configures the client with circuit breaker for region meta calls
-func WithRegionMetaCircuitBreaker(config cb.Settings) ClientOption {
-	return func(op *Option) {
-		op.RegionMetaCircuitBreakerSettings = config
 	}
 }
 

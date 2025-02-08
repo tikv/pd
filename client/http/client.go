@@ -245,7 +245,7 @@ func (ci *clientInner) doRequest(
 		if readErr != nil {
 			logFields = append(logFields, zap.NamedError("read-body-error", err))
 		} else {
-			// API server will return a JSON body containing the detailed error message
+			// PD will return a JSON body containing the detailed error message
 			// when the status code is not `http.StatusOK` 200.
 			bs = bytes.TrimSpace(bs)
 			logFields = append(logFields, zap.ByteString("body", bs))
@@ -304,7 +304,7 @@ func WithMetrics(
 	}
 }
 
-// NewClientWithServiceDiscovery creates a PD HTTP client with the given PD service discovery.
+// NewClientWithServiceDiscovery creates a PD HTTP client with the given service discovery.
 func NewClientWithServiceDiscovery(
 	source string,
 	sd sd.ServiceDiscovery,
@@ -332,7 +332,7 @@ func NewClient(
 	for _, opt := range opts {
 		opt(c)
 	}
-	sd := sd.NewDefaultPDServiceDiscovery(ctx, cancel, pdAddrs, c.inner.tlsConf)
+	sd := sd.NewDefaultServiceDiscovery(ctx, cancel, pdAddrs, c.inner.tlsConf)
 	if err := sd.Init(); err != nil {
 		log.Error("[pd] init service discovery failed",
 			zap.String("source", source), zap.Strings("pd-addrs", pdAddrs), zap.Error(err))
@@ -420,7 +420,7 @@ func NewHTTPClientWithRequestChecker(checker requestChecker) *http.Client {
 	}
 }
 
-// newClientWithMockServiceDiscovery creates a new PD HTTP client with a mock PD service discovery.
+// newClientWithMockServiceDiscovery creates a new PD HTTP client with a mock service discovery.
 func newClientWithMockServiceDiscovery(
 	source string,
 	pdAddrs []string,
@@ -432,7 +432,7 @@ func newClientWithMockServiceDiscovery(
 	for _, opt := range opts {
 		opt(c)
 	}
-	sd := sd.NewMockPDServiceDiscovery(pdAddrs, c.inner.tlsConf)
+	sd := sd.NewMockServiceDiscovery(pdAddrs, c.inner.tlsConf)
 	if err := sd.Init(); err != nil {
 		log.Error("[pd] init mock service discovery failed",
 			zap.String("source", source), zap.Strings("pd-addrs", pdAddrs), zap.Error(err))

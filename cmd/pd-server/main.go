@@ -82,7 +82,7 @@ func NewServiceCommand() *cobra.Command {
 	}
 	cmd.AddCommand(NewTSOServiceCommand())
 	cmd.AddCommand(NewSchedulingServiceCommand())
-	cmd.AddCommand(NewAPIServiceCommand())
+	cmd.AddCommand(NewPDServiceCommand())
 	return cmd
 }
 
@@ -128,12 +128,12 @@ func NewSchedulingServiceCommand() *cobra.Command {
 	return cmd
 }
 
-// NewAPIServiceCommand returns the API service command.
-func NewAPIServiceCommand() *cobra.Command {
+// NewPDServiceCommand returns the PD service command.
+func NewPDServiceCommand() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   apiMode,
-		Short: "Run the API service",
-		Run:   createAPIServerWrapper,
+		Short: "Run the PD service",
+		Run:   createPDServiceWrapper,
 	}
 	addFlags(cmd)
 	return cmd
@@ -160,7 +160,7 @@ func addFlags(cmd *cobra.Command) {
 	cmd.Flags().BoolP("force-new-cluster", "", false, "force to create a new one-member cluster")
 }
 
-func createAPIServerWrapper(cmd *cobra.Command, args []string) {
+func createPDServiceWrapper(cmd *cobra.Command, args []string) {
 	start(cmd, args, cmd.CalledAs())
 }
 
@@ -209,7 +209,7 @@ func start(cmd *cobra.Command, args []string, services ...string) {
 	// Check the PD version first before running.
 	server.CheckAndGetPDVersion()
 	// New zap logger
-	err = logutil.SetupLogger(cfg.Log, &cfg.Logger, &cfg.LogProps, cfg.Security.RedactInfoLog)
+	err = logutil.SetupLogger(&cfg.Log, &cfg.Logger, &cfg.LogProps, cfg.Security.RedactInfoLog)
 	if err == nil {
 		log.ReplaceGlobals(cfg.Logger, cfg.LogProps)
 	} else {
@@ -218,16 +218,11 @@ func start(cmd *cobra.Command, args []string, services ...string) {
 	// Flushing any buffered log entries
 	defer log.Sync()
 	memory.InitMemoryHook()
-	if len(services) != 0 {
-		versioninfo.Log(server.APIServiceMode)
-	} else {
-		versioninfo.Log(server.PDMode)
-	}
+	versioninfo.Log(server.PD)
 
 	for _, msg := range cfg.WarningMsgs {
 		log.Warn(msg)
 	}
-
 	// TODO: Make it configurable if it has big impact on performance.
 	grpcprometheus.EnableHandlingTimeHistogram()
 

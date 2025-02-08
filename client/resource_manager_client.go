@@ -331,7 +331,7 @@ func (c *innerClient) handleResourceTokenDispatcher(dispatcherCtx context.Contex
 		// If the stream is still nil, return an error.
 		if stream == nil {
 			firstRequest.done <- errors.Errorf("failed to get the stream connection")
-			c.pdSvcDiscovery.ScheduleCheckMemberChanged()
+			c.serviceDiscovery.ScheduleCheckMemberChanged()
 			connection.reset()
 			continue
 		}
@@ -343,7 +343,7 @@ func (c *innerClient) handleResourceTokenDispatcher(dispatcherCtx context.Contex
 		default:
 		}
 		if err = c.processTokenRequests(stream, firstRequest); err != nil {
-			c.pdSvcDiscovery.ScheduleCheckMemberChanged()
+			c.serviceDiscovery.ScheduleCheckMemberChanged()
 			connection.reset()
 			log.Info("[resource_manager] token request error", zap.Error(err))
 		}

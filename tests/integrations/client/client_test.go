@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"math/rand"
 	"os"
 	"path"
 	"reflect"
@@ -229,17 +230,18 @@ func TestGetTSAfterTransferLeader(t *testing.T) {
 	defer cancel()
 	cluster, err := tests.NewTestCluster(ctx, 2)
 	re.NoError(err)
+	defer cluster.Destroy()
 	endpoints := runServer(re, cluster)
 	leader := cluster.WaitLeader()
 	re.NotEmpty(leader)
-	defer cluster.Destroy()
 
 	cli := setupCli(ctx, re, endpoints, opt.WithCustomTimeoutOption(10*time.Second))
 	defer cli.Close()
 
 	var leaderSwitched atomic.Bool
-	cli.GetServiceDiscovery().AddServingURLSwitchedCallback(func() {
+	cli.GetServiceDiscovery().AddLeaderSwitchedCallback(func(string) error {
 		leaderSwitched.Store(true)
+		return nil
 	})
 	err = cluster.GetServer(leader).ResignLeader()
 	re.NoError(err)
@@ -270,6 +272,7 @@ func TestTSOFollowerProxy(t *testing.T) {
 	defer cli1.Close()
 	cli2 := setupCli(ctx, re, endpoints)
 	defer cli2.Close()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/clients/tso/speedUpTsoDispatcherUpdateInterval", "return(true)"))
 	err = cli2.UpdateOption(opt.EnableTSOFollowerProxy, true)
 	re.NoError(err)
 
@@ -294,6 +297,31 @@ func TestTSOFollowerProxy(t *testing.T) {
 			}
 		}()
 	}
+	wg.Wait()
+
+	followerServer := cluster.GetServer(cluster.GetFollower())
+	re.NoError(followerServer.Stop())
+	ch := make(chan struct{})
+	re.NoError(failpoint.EnableCall("github.com/tikv/pd/server/delayStartServer", func() {
+		// Server is not in `Running` state, so the follower proxy should return
+		// error while create stream.
+		ch <- struct{}{}
+	}))
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		re.NoError(followerServer.Run())
+	}()
+	re.Eventually(func() bool {
+		_, _, err := cli2.GetTS(context.Background())
+		if err == nil {
+			return false
+		}
+		return strings.Contains(err.Error(), "server not started")
+	}, 3*time.Second, 10*time.Millisecond)
+	<-ch
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/delayStartServer"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/clients/tso/speedUpTsoDispatcherUpdateInterval"))
 	wg.Wait()
 
 	// Disable the follower proxy and check if the stream is updated.
@@ -335,7 +363,7 @@ func TestTSOFollowerProxyWithTSOService(t *testing.T) {
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/servicediscovery/fastUpdateServiceMode", `return(true)`))
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	cluster, err := tests.NewTestAPICluster(ctx, 1)
+	cluster, err := tests.NewTestClusterWithKeyspaceGroup(ctx, 1)
 	re.NoError(err)
 	defer cluster.Destroy()
 	err = cluster.RunInitialServers()
@@ -490,8 +518,6 @@ func (suite *followerForwardAndHandleTestSuite) SetupSuite() {
 		return err == nil
 	})
 }
-
-func (*followerForwardAndHandleTestSuite) TearDownTest() {}
 
 func (suite *followerForwardAndHandleTestSuite) TearDownSuite() {
 	suite.cluster.Destroy()
@@ -1080,6 +1106,10 @@ func bootstrapServer(re *require.Assertions, header *pdpb.RequestHeader, client 
 	re.Equal(pdpb.ErrorType_OK, resp.GetHeader().GetError().GetType())
 }
 
+func (suite *clientTestSuite) SetupTest() {
+	suite.grpcSvr.DirectlyGetRaftCluster().ResetRegionCache()
+}
+
 func (suite *clientTestSuite) TestGetRegion() {
 	re := suite.Require()
 	regionID := regionIDAllocator.alloc()
@@ -1179,7 +1209,6 @@ func (suite *clientTestSuite) TestGetPrevRegion() {
 		err := suite.regionHeartbeat.Send(req)
 		re.NoError(err)
 	}
-	time.Sleep(500 * time.Millisecond)
 	for i := range 20 {
 		testutil.Eventually(re, func() bool {
 			r, err := suite.client.GetPrevRegion(context.Background(), []byte{byte(i)})
@@ -1311,6 +1340,83 @@ func (suite *clientTestSuite) TestGetRegionByID() {
 		return reflect.DeepEqual(region, r.Meta) &&
 			reflect.DeepEqual(peers[0], r.Leader)
 	})
+}
+
+func (suite *clientTestSuite) TestGetRegionConcurrently() {
+	suite.client.(interface{ EnableRouterClient() }).EnableRouterClient()
+
+	re := suite.Require()
+	ctx, cancel := context.WithCancel(suite.ctx)
+	defer cancel()
+
+	regions := make([]*metapb.Region, 0, 2)
+	for i := range 2 {
+		regionID := regionIDAllocator.alloc()
+		region := &metapb.Region{
+			Id: regionID,
+			RegionEpoch: &metapb.RegionEpoch{
+				ConfVer: 1,
+				Version: 1,
+			},
+			StartKey: []byte{byte(i)},
+			EndKey:   []byte{byte(i + 1)},
+			Peers:    peers,
+		}
+		re.NoError(suite.regionHeartbeat.Send(&pdpb.RegionHeartbeatRequest{
+			Header: newHeader(),
+			Region: region,
+			Leader: peers[0],
+		}))
+		regions = append(regions, region)
+	}
+
+	const concurrency = 1000
+
+	wg := sync.WaitGroup{}
+	wg.Add(concurrency)
+	for range concurrency {
+		go func() {
+			defer wg.Done()
+			switch rand.Intn(3) {
+			case 0:
+				region := regions[0]
+				testutil.Eventually(re, func() bool {
+					r, err := suite.client.GetRegion(ctx, region.GetStartKey())
+					re.NoError(err)
+					if r == nil {
+						return false
+					}
+					return reflect.DeepEqual(region, r.Meta) &&
+						reflect.DeepEqual(peers[0], r.Leader) &&
+						r.Buckets == nil
+				})
+			case 1:
+				testutil.Eventually(re, func() bool {
+					r, err := suite.client.GetPrevRegion(ctx, regions[1].GetStartKey())
+					re.NoError(err)
+					if r == nil {
+						return false
+					}
+					return reflect.DeepEqual(regions[0], r.Meta) &&
+						reflect.DeepEqual(peers[0], r.Leader) &&
+						r.Buckets == nil
+				})
+			case 2:
+				region := regions[0]
+				testutil.Eventually(re, func() bool {
+					r, err := suite.client.GetRegionByID(ctx, region.GetId())
+					re.NoError(err)
+					if r == nil {
+						return false
+					}
+					return reflect.DeepEqual(region, r.Meta) &&
+						reflect.DeepEqual(peers[0], r.Leader) &&
+						r.Buckets == nil
+				})
+			}
+		}()
+	}
+	wg.Wait()
 }
 
 func (suite *clientTestSuite) TestGetStore() {
@@ -2070,28 +2176,30 @@ func TestCircuitBreaker(t *testing.T) {
 	}
 
 	endpoints := runServer(re, cluster)
-	cli := setupCli(ctx, re, endpoints, opt.WithRegionMetaCircuitBreaker(circuitBreakerSettings))
+	cli := setupCli(ctx, re, endpoints)
 	defer cli.Close()
 
+	circuitBreaker := cb.NewCircuitBreaker("region_meta", circuitBreakerSettings)
+	ctx = cb.WithCircuitBreaker(ctx, circuitBreaker)
 	for range 10 {
-		region, err := cli.GetRegion(context.TODO(), []byte("a"))
+		region, err := cli.GetRegion(ctx, []byte("a"))
 		re.NoError(err)
 		re.NotNil(region)
 	}
 
-	re.NoError(failpoint.Enable("github.com/tikv/pd/client/triggerCircuitBreaker", "return(true)"))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/pkg/utils/grpcutil/triggerCircuitBreaker", "return(true)"))
 
 	for range 100 {
-		_, err := cli.GetRegion(context.TODO(), []byte("a"))
+		_, err := cli.GetRegion(ctx, []byte("a"))
 		re.Error(err)
 	}
 
-	_, err = cli.GetRegion(context.TODO(), []byte("a"))
+	_, err = cli.GetRegion(ctx, []byte("a"))
 	re.Error(err)
 	re.Contains(err.Error(), "circuit breaker is open")
-	re.NoError(failpoint.Disable("github.com/tikv/pd/client/triggerCircuitBreaker"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/pkg/utils/grpcutil/triggerCircuitBreaker"))
 
-	_, err = cli.GetRegion(context.TODO(), []byte("a"))
+	_, err = cli.GetRegion(ctx, []byte("a"))
 	re.Error(err)
 	re.Contains(err.Error(), "circuit breaker is open")
 
@@ -2099,7 +2207,7 @@ func TestCircuitBreaker(t *testing.T) {
 	time.Sleep(time.Second)
 
 	for range 10 {
-		region, err := cli.GetRegion(context.TODO(), []byte("a"))
+		region, err := cli.GetRegion(ctx, []byte("a"))
 		re.NoError(err)
 		re.NotNil(region)
 	}
@@ -2123,34 +2231,35 @@ func TestCircuitBreakerOpenAndChangeSettings(t *testing.T) {
 	}
 
 	endpoints := runServer(re, cluster)
-	cli := setupCli(ctx, re, endpoints, opt.WithRegionMetaCircuitBreaker(circuitBreakerSettings))
+	cli := setupCli(ctx, re, endpoints)
 	defer cli.Close()
 
+	circuitBreaker := cb.NewCircuitBreaker("region_meta", circuitBreakerSettings)
+	ctx = cb.WithCircuitBreaker(ctx, circuitBreaker)
 	for range 10 {
-		region, err := cli.GetRegion(context.TODO(), []byte("a"))
+		region, err := cli.GetRegion(ctx, []byte("a"))
 		re.NoError(err)
 		re.NotNil(region)
 	}
 
-	re.NoError(failpoint.Enable("github.com/tikv/pd/client/triggerCircuitBreaker", "return(true)"))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/pkg/utils/grpcutil/triggerCircuitBreaker", "return(true)"))
 
 	for range 100 {
-		_, err := cli.GetRegion(context.TODO(), []byte("a"))
+		_, err := cli.GetRegion(ctx, []byte("a"))
 		re.Error(err)
 	}
 
-	_, err = cli.GetRegion(context.TODO(), []byte("a"))
+	_, err = cli.GetRegion(ctx, []byte("a"))
 	re.Error(err)
 	re.Contains(err.Error(), "circuit breaker is open")
 
-	cli.UpdateOption(opt.RegionMetadataCircuitBreakerSettings, func(config *cb.Settings) {
+	circuitBreaker.ChangeSettings(func(config *cb.Settings) {
 		*config = cb.AlwaysClosedSettings
 	})
-
-	_, err = cli.GetRegion(context.TODO(), []byte("a"))
+	_, err = cli.GetRegion(ctx, []byte("a"))
 	re.Error(err)
 	re.Contains(err.Error(), "ResourceExhausted")
-	re.NoError(failpoint.Disable("github.com/tikv/pd/client/triggerCircuitBreaker"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/pkg/utils/grpcutil/triggerCircuitBreaker"))
 }
 
 func TestCircuitBreakerHalfOpenAndChangeSettings(t *testing.T) {
@@ -2171,23 +2280,26 @@ func TestCircuitBreakerHalfOpenAndChangeSettings(t *testing.T) {
 	}
 
 	endpoints := runServer(re, cluster)
-	cli := setupCli(ctx, re, endpoints, opt.WithRegionMetaCircuitBreaker(circuitBreakerSettings))
+
+	cli := setupCli(ctx, re, endpoints)
 	defer cli.Close()
 
+	circuitBreaker := cb.NewCircuitBreaker("region_meta", circuitBreakerSettings)
+	ctx = cb.WithCircuitBreaker(ctx, circuitBreaker)
 	for range 10 {
-		region, err := cli.GetRegion(context.TODO(), []byte("a"))
+		region, err := cli.GetRegion(ctx, []byte("a"))
 		re.NoError(err)
 		re.NotNil(region)
 	}
 
-	re.NoError(failpoint.Enable("github.com/tikv/pd/client/triggerCircuitBreaker", "return(true)"))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/pkg/utils/grpcutil/triggerCircuitBreaker", "return(true)"))
 
 	for range 100 {
-		_, err := cli.GetRegion(context.TODO(), []byte("a"))
+		_, err := cli.GetRegion(ctx, []byte("a"))
 		re.Error(err)
 	}
 
-	_, err = cli.GetRegion(context.TODO(), []byte("a"))
+	_, err = cli.GetRegion(ctx, []byte("a"))
 	re.Error(err)
 	re.Contains(err.Error(), "circuit breaker is open")
 
@@ -2195,9 +2307,9 @@ func TestCircuitBreakerHalfOpenAndChangeSettings(t *testing.T) {
 	defer os.RemoveAll(fname)
 	// wait for cooldown
 	time.Sleep(time.Second)
-	re.NoError(failpoint.Disable("github.com/tikv/pd/client/triggerCircuitBreaker"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/pkg/utils/grpcutil/triggerCircuitBreaker"))
 	// trigger circuit breaker state to be half open
-	_, err = cli.GetRegion(context.TODO(), []byte("a"))
+	_, err = cli.GetRegion(ctx, []byte("a"))
 	re.NoError(err)
 	testutil.Eventually(re, func() bool {
 		b, _ := os.ReadFile(fname)
@@ -2207,17 +2319,16 @@ func TestCircuitBreakerHalfOpenAndChangeSettings(t *testing.T) {
 	})
 
 	// The state is half open
-	re.NoError(failpoint.Enable("github.com/tikv/pd/client/triggerCircuitBreaker", "return(true)"))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/pkg/utils/grpcutil/triggerCircuitBreaker", "return(true)"))
 	// change settings to always closed
-	cli.UpdateOption(opt.RegionMetadataCircuitBreakerSettings, func(config *cb.Settings) {
+	circuitBreaker.ChangeSettings(func(config *cb.Settings) {
 		*config = cb.AlwaysClosedSettings
 	})
-
 	// It won't be changed to open state.
 	for range 100 {
-		_, err := cli.GetRegion(context.TODO(), []byte("a"))
+		_, err := cli.GetRegion(ctx, []byte("a"))
 		re.Error(err)
 		re.NotContains(err.Error(), "circuit breaker is open")
 	}
-	re.NoError(failpoint.Disable("github.com/tikv/pd/client/triggerCircuitBreaker"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/pkg/utils/grpcutil/triggerCircuitBreaker"))
 }

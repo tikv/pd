@@ -201,7 +201,6 @@ func (h *HotBucketCache) checkBucketsFlow(buckets *metapb.Buckets) (newItem *Buc
 	}
 	newItem.inherit(overlaps)
 	newItem.calculateHotDegree()
-	newItem.collectBucketsMetrics()
 	return newItem, overlaps
 }
 
