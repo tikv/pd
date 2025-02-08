@@ -170,7 +170,7 @@ func initMetrics(constLabels prometheus.Labels) {
 			Name:        "circuit_breaker_count",
 			Help:        "Circuit Breaker counters",
 			ConstLabels: constLabels,
-		}, []string{"name", "success"})
+		}, []string{"name", "event"})
 }
 
 var (
