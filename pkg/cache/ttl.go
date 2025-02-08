@@ -49,8 +49,6 @@ func newTTL(ctx context.Context, gcInterval time.Duration, duration time.Duratio
 		ttl:        duration,
 		gcInterval: gcInterval,
 	}
-
-	go c.doGC()
 	return c
 }
 
@@ -63,7 +61,9 @@ func (c *ttlCache) put(key any, value any) {
 func (c *ttlCache) putWithTTL(key any, value any, ttl time.Duration) {
 	c.Lock()
 	defer c.Unlock()
-
+	if len(c.items) == 0 {
+		go c.doGC()
+	}
 	c.items[key] = ttlCacheItem{
 		value:  value,
 		expire: time.Now().Add(ttl),
@@ -162,6 +162,11 @@ func (c *ttlCache) doGC() {
 						delete(c.items, key)
 					}
 				}
+			}
+			if len(c.items) == 0 {
+				c.Unlock()
+				log.Debug("TTL GC items is empty exit")
+				return
 			}
 			c.Unlock()
 			log.Debug("TTL GC items", zap.Int("count", count))
