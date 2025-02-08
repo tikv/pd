@@ -54,7 +54,6 @@ type keyspaceGroupManagerTestSuite struct {
 	suite.Suite
 	ctx              context.Context
 	cancel           context.CancelFunc
-	ClusterID        uint64
 	backendEndpoints string
 	etcdClient       *clientv3.Client
 	clean            func()
@@ -68,7 +67,6 @@ func TestKeyspaceGroupManagerTestSuite(t *testing.T) {
 func (suite *keyspaceGroupManagerTestSuite) SetupSuite() {
 	t := suite.T()
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
-	suite.ClusterID = rand.Uint64()
 	servers, client, clean := etcdutil.NewTestEtcdCluster(t, 1)
 	suite.backendEndpoints, suite.etcdClient, suite.clean = servers[0].Config().ListenClientUrls[0].String(), client, clean
 	suite.cfg = suite.createConfig()
@@ -151,12 +149,8 @@ func (suite *keyspaceGroupManagerTestSuite) TestNewKeyspaceGroupManager() {
 	re := suite.Require()
 
 	tsoServiceID := &discovery.ServiceRegistryEntry{ServiceAddr: suite.cfg.AdvertiseListenAddr}
-	clusterID, err := endpoint.InitClusterID(suite.etcdClient)
-	re.NoError(err)
-	clusterIDStr := strconv.FormatUint(clusterID, 10)
-	keypath.SetClusterID(clusterID)
-
-	electionNamePrefix := "tso-server-" + clusterIDStr
+	keypath.SetClusterID(rand.Uint64())
+	electionNamePrefix := "tso-server-" + strconv.FormatUint(keypath.ClusterID(), 10)
 
 	kgm := NewKeyspaceGroupManager(suite.ctx, tsoServiceID, suite.etcdClient,
 		nil, electionNamePrefix, suite.cfg)
@@ -776,6 +770,7 @@ func (suite *keyspaceGroupManagerTestSuite) runTestLoadKeyspaceGroupsAssignment(
 func (suite *keyspaceGroupManagerTestSuite) newUniqueKeyspaceGroupManager(
 	loadKeyspaceGroupsBatchSize int64, // set to 0 to use the default value
 ) *KeyspaceGroupManager {
+	keypath.SetClusterID(rand.Uint64())
 	return suite.newKeyspaceGroupManager(loadKeyspaceGroupsBatchSize, suite.cfg)
 }
 
@@ -1037,9 +1032,9 @@ func (suite *keyspaceGroupManagerTestSuite) TestPrimaryPriorityChange() {
 	// Create three keyspace groups on two TSO servers with default replica priority.
 	ids := []uint32{0, constant.MaxKeyspaceGroupCountInUse / 2, constant.MaxKeyspaceGroupCountInUse - 1}
 	for _, id := range ids {
-		addKeyspaceGroupAssignment(
+		re.NoError(addKeyspaceGroupAssignment(
 			suite.ctx, suite.etcdClient, id,
-			[]string{svcAddr1, svcAddr2}, []int{defaultPriority, defaultPriority}, []uint32{id})
+			[]string{svcAddr1, svcAddr2}, []int{defaultPriority, defaultPriority}, []uint32{id}))
 	}
 
 	// Create the first TSO server which loads all three keyspace groups created above.
