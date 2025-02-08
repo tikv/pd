@@ -230,6 +230,16 @@ func TestCircuitBreakerChangeSettings(t *testing.T) {
 	re.Equal(StateOpen, cb.state.stateType)
 }
 
+func TestCircuitBreakerEnabled(t *testing.T) {
+	re := require.New(t)
+	cb := NewCircuitBreaker("test_cb", AlwaysClosedSettings)
+	re.False(cb.IsEnabled())
+	cb.ChangeSettings(func(config *Settings) {
+		config.ErrorRateThresholdPct = settings.ErrorRateThresholdPct
+	})
+	re.True(cb.IsEnabled())
+}
+
 func newCircuitBreakerMovedToHalfOpenState(re *require.Assertions) *CircuitBreaker {
 	cb := NewCircuitBreaker("test_cb", settings)
 	re.Equal(StateClosed, cb.state.stateType)
