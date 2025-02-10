@@ -125,9 +125,8 @@ type GroupTokenBucketState struct {
 	clientConsumptionTokensSum float64
 	lastBurstTokens            float64
 
-	LastUpdate       *time.Time `json:"last_update,omitempty"`
-	Initialized      bool       `json:"initialized"`
-	BurstLimitFactor uint64     `json:"burst_limit_factor,omitempty"`
+	LastUpdate  *time.Time `json:"last_update,omitempty"`
+	Initialized bool       `json:"initialized"`
 	// settingChanged is used to avoid that the number of tokens returned is jitter because of changing fill rate.
 	settingChanged      bool
 	lastCheckExpireSlot time.Time
