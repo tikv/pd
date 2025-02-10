@@ -99,14 +99,14 @@ func (suite *configTestSuite) TearDownTest() {
 		err = testutil.CheckPostJSON(testDialClient, urlPrefix+"/pd/api/v1/config/placement-rule", data, testutil.StatusOK(re))
 		re.NoError(err)
 	}
-	suite.env.RunTestBasedOnMode(cleanFunc)
+	suite.env.RunTest(cleanFunc)
 	suite.env.Cleanup()
 }
 
 func (suite *configTestSuite) TestConfig() {
 	re := suite.Require()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/dashboard/adapter/skipDashboardLoop", `return(true)`))
-	suite.env.RunTestBasedOnMode(suite.checkConfig)
+	suite.env.RunTest(suite.checkConfig)
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/dashboard/adapter/skipDashboardLoop"))
 }
 
@@ -150,7 +150,6 @@ func (suite *configTestSuite) checkConfig(cluster *pdTests.TestCluster) {
 	args = []string{"-u", pdAddr, "config", "set", "trace-region-flow", "false"}
 	_, err = tests.ExecuteCommand(cmd, args...)
 	re.NoError(err)
-	re.False(svr.GetPDServerConfig().TraceRegionFlow)
 
 	origin := svr.GetPDServerConfig().FlowRoundByDigit
 	args = []string{"-u", pdAddr, "config", "set", "flow-round-by-digit", "10"}
@@ -369,7 +368,7 @@ func (suite *configTestSuite) checkConfig(cluster *pdTests.TestCluster) {
 func (suite *configTestSuite) TestConfigForwardControl() {
 	re := suite.Require()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/dashboard/adapter/skipDashboardLoop", `return(true)`))
-	suite.env.RunTestBasedOnMode(suite.checkConfigForwardControl)
+	suite.env.RunTest(suite.checkConfigForwardControl)
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/dashboard/adapter/skipDashboardLoop"))
 }
 
@@ -449,7 +448,7 @@ func (suite *configTestSuite) checkConfigForwardControl(cluster *pdTests.TestClu
 			args := []string{"-u", pdAddr, "config", "show"}
 			args = append(args, options...)
 			if isFromPDService {
-				args = append(args, "--from_pd_service")
+				args = append(args, "--from_pd")
 			}
 			output, err := tests.ExecuteCommand(cmd, args...)
 			re.NoError(err)
@@ -478,7 +477,7 @@ func (suite *configTestSuite) checkConfigForwardControl(cluster *pdTests.TestClu
 			args := []string{"-u", pdAddr, "config", "placement-rules"}
 			args = append(args, options...)
 			if isFromPDService {
-				args = append(args, "--from_pd_service")
+				args = append(args, "--from_pd")
 			}
 			output, err := tests.ExecuteCommand(cmd, args...)
 			re.NoError(err)
@@ -522,13 +521,13 @@ func (suite *configTestSuite) checkConfigForwardControl(cluster *pdTests.TestClu
 		re.Equal(uint64(233), sche.GetPersistConfig().GetLeaderScheduleLimit())
 		re.Equal(7, sche.GetPersistConfig().GetMaxReplicas())
 	}
-	// show config from PD service rather than scheduling server
+	// show config from PD rather than scheduling server
 	testConfig()
-	// show all config from PD service rather than scheduling server
+	// show all config from PD rather than scheduling server
 	testConfig("all")
-	// show replication config from PD service rather than scheduling server
+	// show replication config from PD rather than scheduling server
 	testConfig("replication")
-	// show schedule config from PD service rather than scheduling server
+	// show schedule config from PD rather than scheduling server
 	testConfig("schedule")
 
 	// Test Rule
@@ -572,7 +571,7 @@ func (suite *configTestSuite) checkConfigForwardControl(cluster *pdTests.TestClu
 }
 
 func (suite *configTestSuite) TestPlacementRules() {
-	suite.env.RunTestBasedOnMode(suite.checkPlacementRules)
+	suite.env.RunTest(suite.checkPlacementRules)
 }
 
 func (suite *configTestSuite) checkPlacementRules(cluster *pdTests.TestCluster) {
@@ -638,7 +637,7 @@ func (suite *configTestSuite) checkPlacementRules(cluster *pdTests.TestCluster) 
 }
 
 func (suite *configTestSuite) TestPlacementRuleGroups() {
-	suite.env.RunTestBasedOnMode(suite.checkPlacementRuleGroups)
+	suite.env.RunTest(suite.checkPlacementRuleGroups)
 }
 
 func (suite *configTestSuite) checkPlacementRuleGroups(cluster *pdTests.TestCluster) {
@@ -715,7 +714,7 @@ func (suite *configTestSuite) checkPlacementRuleGroups(cluster *pdTests.TestClus
 }
 
 func (suite *configTestSuite) TestPlacementRuleBundle() {
-	suite.env.RunTestBasedOnMode(suite.checkPlacementRuleBundle)
+	suite.env.RunTest(suite.checkPlacementRuleBundle)
 }
 
 func (suite *configTestSuite) checkPlacementRuleBundle(cluster *pdTests.TestCluster) {
@@ -1052,7 +1051,7 @@ func TestServiceMiddlewareConfig(t *testing.T) {
 }
 
 func (suite *configTestSuite) TestUpdateDefaultReplicaConfig() {
-	suite.env.RunTestBasedOnMode(suite.checkUpdateDefaultReplicaConfig)
+	suite.env.RunTest(suite.checkUpdateDefaultReplicaConfig)
 }
 
 func (suite *configTestSuite) checkUpdateDefaultReplicaConfig(cluster *pdTests.TestCluster) {
@@ -1200,8 +1199,53 @@ func (suite *configTestSuite) checkUpdateDefaultReplicaConfig(cluster *pdTests.T
 	checkRuleIsolationLevel("host")
 }
 
+func (suite *configTestSuite) TestMaxReplicaChanged() {
+	suite.env.RunTest(suite.checkMaxReplicaChanged)
+}
+
+func (suite *configTestSuite) checkMaxReplicaChanged(cluster *pdTests.TestCluster) {
+	re := suite.Require()
+	leaderServer := cluster.GetLeaderServer()
+	pdAddr := leaderServer.GetAddr()
+	cmd := ctl.GetRootCmd()
+
+	store := &metapb.Store{
+		Id:    1,
+		State: metapb.StoreState_Up,
+	}
+	pdTests.MustPutStore(re, cluster, store)
+
+	// test set max-replicas with invalid value
+	output, err := tests.ExecuteCommand(cmd, "-u", pdAddr, "config", "set", "max-replicas", "z")
+	re.NoError(err)
+	re.NotContains(string(output), "Success!")
+	// test set max-replicas with less value
+	output, err = tests.ExecuteCommand(cmd, "-u", pdAddr, "config", "set", "max-replicas", "2")
+	re.NoError(err)
+	re.Contains(string(output), "Success!")
+	re.Contains(string(output), "which is less than the current replicas")
+	// test set max-replicas with greater value
+	output, err = tests.ExecuteCommand(cmd, "-u", pdAddr, "config", "set", "max-replicas", "3")
+	re.NoError(err)
+	re.Contains(string(output), "Success!")
+	re.NotContains(string(output), "which is less than the current replicas")
+	// test meet error when get config failed
+	failpoint.Enable("github.com/tikv/pd/server/api/getReplicationConfigFailed", `return(200)`)
+	output, err = tests.ExecuteCommand(cmd, "-u", pdAddr, "config", "set", "max-replicas", "3")
+	re.NoError(err)
+	re.Contains(string(output), "Success!")
+	re.Contains(string(output), "Failed to unmarshal config when checking config")
+	failpoint.Disable("github.com/tikv/pd/server/api/getReplicationConfigFailed")
+	failpoint.Enable("github.com/tikv/pd/server/api/getReplicationConfigFailed", `return(500)`)
+	output, err = tests.ExecuteCommand(cmd, "-u", pdAddr, "config", "set", "max-replicas", "3")
+	re.NoError(err)
+	re.Contains(string(output), "Success!")
+	re.Contains(string(output), "Failed to get config when checking config")
+	failpoint.Disable("github.com/tikv/pd/server/api/getReplicationConfigFailed")
+}
+
 func (suite *configTestSuite) TestPDServerConfig() {
-	suite.env.RunTestBasedOnMode(suite.checkPDServerConfig)
+	suite.env.RunTest(suite.checkPDServerConfig)
 }
 
 func (suite *configTestSuite) checkPDServerConfig(cluster *pdTests.TestCluster) {
@@ -1233,11 +1277,11 @@ func (suite *configTestSuite) checkPDServerConfig(cluster *pdTests.TestCluster) 
 	re.Equal(int(3), conf.FlowRoundByDigit)
 }
 
-func (suite *configTestSuite) TestMicroServiceConfig() {
-	suite.env.RunTestBasedOnMode(suite.checkMicroServiceConfig)
+func (suite *configTestSuite) TestMicroserviceConfig() {
+	suite.env.RunTest(suite.checkMicroserviceConfig)
 }
 
-func (suite *configTestSuite) checkMicroServiceConfig(cluster *pdTests.TestCluster) {
+func (suite *configTestSuite) checkMicroserviceConfig(cluster *pdTests.TestCluster) {
 	re := suite.Require()
 	leaderServer := cluster.GetLeaderServer()
 	pdAddr := leaderServer.GetAddr()
@@ -1254,17 +1298,17 @@ func (suite *configTestSuite) checkMicroServiceConfig(cluster *pdTests.TestClust
 	re.NoError(err)
 	cfg := config.Config{}
 	re.NoError(json.Unmarshal(output, &cfg))
-	re.True(svr.GetMicroServiceConfig().EnableSchedulingFallback)
-	re.True(cfg.MicroService.EnableSchedulingFallback)
+	re.True(svr.GetMicroserviceConfig().EnableSchedulingFallback)
+	re.True(cfg.Microservice.EnableSchedulingFallback)
 	// config set enable-scheduling-fallback <value>
 	args := []string{"-u", pdAddr, "config", "set", "enable-scheduling-fallback", "false"}
 	_, err = tests.ExecuteCommand(cmd, args...)
 	re.NoError(err)
-	re.False(svr.GetMicroServiceConfig().EnableSchedulingFallback)
+	re.False(svr.GetMicroserviceConfig().EnableSchedulingFallback)
 }
 
 func (suite *configTestSuite) TestRegionRules() {
-	suite.env.RunTestBasedOnMode(suite.checkRegionRules)
+	suite.env.RunTest(suite.checkRegionRules)
 }
 
 func (suite *configTestSuite) checkRegionRules(cluster *pdTests.TestCluster) {

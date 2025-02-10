@@ -49,6 +49,9 @@ type evictSlowStoreSchedulerConfig struct {
 	// Duration gap for recovering the candidate, unit: s.
 	RecoveryDurationGap uint64   `json:"recovery-duration"`
 	EvictedStores       []uint64 `json:"evict-stores"`
+	// TODO: We only add batch for evict-slow-store-scheduler now.
+	// If necessary, we also need to support evict-slow-trend-scheduler.
+	Batch int `json:"batch"`
 }
 
 func initEvictSlowStoreSchedulerConfig() *evictSlowStoreSchedulerConfig {
@@ -57,6 +60,7 @@ func initEvictSlowStoreSchedulerConfig() *evictSlowStoreSchedulerConfig {
 		lastSlowStoreCaptureTS:     time.Time{},
 		RecoveryDurationGap:        defaultRecoveryDurationGap,
 		EvictedStores:              make([]uint64, 0),
+		Batch:                      EvictLeaderBatchSize,
 	}
 }
 
@@ -65,6 +69,7 @@ func (conf *evictSlowStoreSchedulerConfig) clone() *evictSlowStoreSchedulerConfi
 	defer conf.RUnlock()
 	return &evictSlowStoreSchedulerConfig{
 		RecoveryDurationGap: conf.RecoveryDurationGap,
+		Batch:               conf.Batch,
 	}
 }
 
@@ -81,8 +86,10 @@ func (conf *evictSlowStoreSchedulerConfig) getKeyRangesByID(id uint64) []core.Ke
 	return []core.KeyRange{core.NewKeyRange("", "")}
 }
 
-func (*evictSlowStoreSchedulerConfig) getBatch() int {
-	return EvictLeaderBatchSize
+func (conf *evictSlowStoreSchedulerConfig) getBatch() int {
+	conf.RLock()
+	defer conf.RUnlock()
+	return conf.Batch
 }
 
 func (conf *evictSlowStoreSchedulerConfig) evictStore() uint64 {
@@ -145,22 +152,39 @@ func (handler *evictSlowStoreHandler) updateConfig(w http.ResponseWriter, r *htt
 		return
 	}
 	recoveryDurationGapFloat, ok := input["recovery-duration"].(float64)
-	if !ok {
+	if input["recovery-duration"] != nil && !ok {
 		handler.rd.JSON(w, http.StatusInternalServerError, errors.New("invalid argument for 'recovery-duration'").Error())
 		return
+	}
+
+	batch := handler.config.getBatch()
+	batchFloat, ok := input["batch"].(float64)
+	if input["batch"] != nil && !ok {
+		handler.rd.JSON(w, http.StatusInternalServerError, errors.New("invalid argument for 'batch'").Error())
+		return
+	}
+	if ok {
+		if batchFloat < 1 || batchFloat > 10 {
+			handler.rd.JSON(w, http.StatusBadRequest, "batch is invalid, it should be in [1, 10]")
+			return
+		}
+		batch = (int)(batchFloat)
 	}
 
 	handler.config.Lock()
 	defer handler.config.Unlock()
 	prevRecoveryDurationGap := handler.config.RecoveryDurationGap
+	prevBatch := handler.config.Batch
 	recoveryDurationGap := uint64(recoveryDurationGapFloat)
 	handler.config.RecoveryDurationGap = recoveryDurationGap
+	handler.config.Batch = batch
 	if err := handler.config.save(); err != nil {
 		handler.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		handler.config.RecoveryDurationGap = prevRecoveryDurationGap
+		handler.config.Batch = prevBatch
 		return
 	}
-	log.Info("evict-slow-store-scheduler update 'recovery-duration' - unit: s", zap.Uint64("prev", prevRecoveryDurationGap), zap.Uint64("cur", recoveryDurationGap))
+	log.Info("evict-slow-store-scheduler update config", zap.Uint64("prev-recovery-duration", prevRecoveryDurationGap), zap.Uint64("cur-recovery-duration", recoveryDurationGap), zap.Int("prev-batch", prevBatch), zap.Int("cur-batch", batch))
 	handler.rd.JSON(w, http.StatusOK, "Config updated.")
 }
 
@@ -194,6 +218,9 @@ func (s *evictSlowStoreScheduler) ReloadConfig() error {
 	if err := s.conf.load(newCfg); err != nil {
 		return err
 	}
+	if newCfg.Batch == 0 {
+		newCfg.Batch = EvictLeaderBatchSize
+	}
 	old := make(map[uint64]struct{})
 	for _, id := range s.conf.EvictedStores {
 		old[id] = struct{}{}
@@ -205,6 +232,7 @@ func (s *evictSlowStoreScheduler) ReloadConfig() error {
 	pauseAndResumeLeaderTransfer(s.conf.cluster, constant.In, old, new)
 	s.conf.RecoveryDurationGap = newCfg.RecoveryDurationGap
 	s.conf.EvictedStores = newCfg.EvictedStores
+	s.conf.Batch = newCfg.Batch
 	return nil
 }
 

@@ -640,9 +640,11 @@ func TestRaftClusterStartTSOJob(t *testing.T) {
 	name := "pd1"
 	// case 1: normal start
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	tc, err := tests.NewTestCluster(ctx, 1, func(conf *config.Config, _ string) {
 		conf.LeaderLease = 300
 	})
+	defer tc.Destroy()
 	re.NoError(err)
 	re.NoError(tc.RunInitialServers())
 	re.NotEmpty(tc.WaitLeader())

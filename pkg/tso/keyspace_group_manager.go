@@ -334,7 +334,7 @@ type KeyspaceGroupManager struct {
 	// Value: discover.ServiceRegistryEntry
 	tsoServiceKey string
 	// legacySvcRootPath defines the legacy root path for all etcd paths which derives from
-	// the PD/PD service. It's in the format of "/pd/{cluster_id}".
+	// the PD. It's in the format of "/pd/{cluster_id}".
 	// The main paths for different usages include:
 	// 1. The path, used by the default keyspace group, for LoadTimestamp/SaveTimestamp in the
 	//    storage endpoint.

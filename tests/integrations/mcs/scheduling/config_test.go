@@ -62,7 +62,7 @@ func (suite *configTestSuite) SetupSuite() {
 	schedulers.Register()
 	var err error
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
-	suite.cluster, err = tests.NewTestPDServiceCluster(suite.ctx, 1)
+	suite.cluster, err = tests.NewTestClusterWithKeyspaceGroup(suite.ctx, 1)
 	re.NoError(err)
 	err = suite.cluster.RunInitialServers()
 	re.NoError(err)
@@ -132,7 +132,7 @@ func (suite *configTestSuite) TestConfigWatch() {
 	watcher.Close()
 }
 
-// Manually trigger the config persistence in the PD service side.
+// Manually trigger the config persistence in the PD side.
 func persistConfig(re *require.Assertions, pdLeaderServer *tests.TestServer) {
 	err := pdLeaderServer.GetPersistOptions().Persist(pdLeaderServer.GetServer().GetStorage())
 	re.NoError(err)

@@ -80,8 +80,8 @@ const (
 	Version             = "/pd/api/v1/version"
 	operators           = "/pd/api/v1/operators"
 	safepoint           = "/pd/api/v1/gc/safepoint"
-	// Micro Service
-	microServicePrefix = "/pd/api/v2/ms"
+	// Microservice
+	microservicePrefix = "/pd/api/v2/ms"
 	// Keyspace
 	KeyspaceConfig        = "/pd/api/v2/keyspaces/%s/config"
 	GetKeyspaceMetaByName = "/pd/api/v2/keyspaces/%s"
@@ -198,14 +198,14 @@ func PProfGoroutineWithDebugLevel(level int) string {
 	return fmt.Sprintf("%s?debug=%d", PProfGoroutine, level)
 }
 
-// MicroServiceMembers returns the path of PD HTTP API to get the members of microservice.
-func MicroServiceMembers(service string) string {
-	return fmt.Sprintf("%s/members/%s", microServicePrefix, service)
+// MicroserviceMembers returns the path of PD HTTP API to get the members of microservice.
+func MicroserviceMembers(service string) string {
+	return fmt.Sprintf("%s/members/%s", microservicePrefix, service)
 }
 
-// MicroServicePrimary returns the path of PD HTTP API to get the primary of microservice.
-func MicroServicePrimary(service string) string {
-	return fmt.Sprintf("%s/primary/%s", microServicePrefix, service)
+// MicroservicePrimary returns the path of PD HTTP API to get the primary of microservice.
+func MicroservicePrimary(service string) string {
+	return fmt.Sprintf("%s/primary/%s", microservicePrefix, service)
 }
 
 // GetUpdateKeyspaceConfigURL returns the path of PD HTTP API to update keyspace config.

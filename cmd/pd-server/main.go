@@ -209,7 +209,7 @@ func start(cmd *cobra.Command, args []string, services ...string) {
 	// Check the PD version first before running.
 	server.CheckAndGetPDVersion()
 	// New zap logger
-	err = logutil.SetupLogger(cfg.Log, &cfg.Logger, &cfg.LogProps, cfg.Security.RedactInfoLog)
+	err = logutil.SetupLogger(&cfg.Log, &cfg.Logger, &cfg.LogProps, cfg.Security.RedactInfoLog)
 	if err == nil {
 		log.ReplaceGlobals(cfg.Logger, cfg.LogProps)
 	} else {
@@ -218,16 +218,11 @@ func start(cmd *cobra.Command, args []string, services ...string) {
 	// Flushing any buffered log entries
 	defer log.Sync()
 	memory.InitMemoryHook()
-	if len(services) != 0 {
-		versioninfo.Log(server.PDServiceMode)
-	} else {
-		versioninfo.Log(server.PDMode)
-	}
+	versioninfo.Log(server.PD)
 
 	for _, msg := range cfg.WarningMsgs {
 		log.Warn(msg)
 	}
-
 	// TODO: Make it configurable if it has big impact on performance.
 	grpcprometheus.EnableHandlingTimeHistogram()
 
