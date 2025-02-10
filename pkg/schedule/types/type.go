@@ -70,6 +70,8 @@ const (
 	TransferWitnessLeaderScheduler CheckerSchedulerType = "transfer-witness-leader-scheduler"
 	// LabelScheduler is label scheduler name.
 	LabelScheduler CheckerSchedulerType = "label-scheduler"
+	// BalanceKeyrangeScheduler is key-range scheduler name.
+	BalanceKeyrangeScheduler CheckerSchedulerType = "balance-keyrange-scheduler"
 )
 
 // TODO: SchedulerTypeCompatibleMap and ConvertOldStrToType should be removed after

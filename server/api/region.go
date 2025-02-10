@@ -17,6 +17,7 @@ package api
 import (
 	"container/heap"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"sort"
@@ -140,6 +141,47 @@ func (h *regionsHandler) CheckRegionsReplicated(w http.ResponseWriter, r *http.R
 		return
 	}
 	h.rd.JSON(w, http.StatusOK, state)
+}
+
+// @Tags     region
+// @Summary Add a scheduler that try best to balance the region peer distribution among store for a given range [startKey, endKey]
+// @Accept   json
+// @Param    start_key  body  string  true  "Regions start key, hex encoded"
+// @Param    end_key    body  string  true  "Regions end key, hex encoded"
+// @Param    batch_size  body  string  true  "Maximum operators scheduled in one"
+// @Param    timeout    body  string  true  "Timeout time in milliseconds"
+// @Param    required_labels    body  array  true  "Only the stores with these labels would be scheduled"
+// @Produce  plain
+// @Success  200  {string}  string  "Scheduler added successfully"
+// @Failure  400  {string}  string  Error
+// @Router   /regions/balance-keyrange [post]
+func (h *regionsHandler) BalanceKeyrange(w http.ResponseWriter, r *http.Request) {
+	data, err := io.ReadAll(r.Body)
+	if err != nil {
+		h.rd.JSON(w, http.StatusBadRequest, err.Error())
+	}
+
+	result, err := h.Handler.BalanceKeyrange(string(data))
+	if err != nil {
+		h.rd.JSON(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	h.rd.JSON(w, http.StatusOK, result)
+}
+
+// @Tags     region
+// @Summary  Get the status of currently running scheduler, if any.
+// @Produce  json
+// @Success  200  {string}  json
+// @Failure  400  {string}  string  Error
+// @Router   /regions/balance-keyrange [get]
+func (h *regionsHandler) CheckBalanceKeyrangeStatus(w http.ResponseWriter, _ *http.Request) {
+	result, err := h.Handler.CheckBalanceKeyrangeStatus()
+	if err != nil {
+		h.rd.JSON(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	h.rd.JSON(w, http.StatusOK, result)
 }
 
 type regionsHandler struct {

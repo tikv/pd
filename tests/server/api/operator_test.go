@@ -31,6 +31,7 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
+	"github.com/tikv/pd/pkg/schedule/types"
 	tu "github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
@@ -654,4 +655,98 @@ func (suite *operatorTestSuite) checkRemoveOperators(cluster *tests.TestCluster)
 	re.NoError(err)
 	err = tu.CheckGetJSON(tests.TestDialClient, url, nil, tu.StatusOK(re), tu.StringNotContain(re, "merge: region 10 to 20"), tu.StringNotContain(re, "add peer: store [4]"))
 	re.NoError(err)
+}
+
+type regionStoresPair struct {
+	RegionID uint64
+	StorePos []uint64
+}
+
+func buildBalanceKeyRegionsTestCases(storeIDs []uint64, regionDist []regionStoresPair) ([]*metapb.Store, []*core.RegionInfo) {
+	stores := []*metapb.Store{}
+	regions := []*core.RegionInfo{}
+	for _, i := range storeIDs {
+		stores = append(stores, &metapb.Store{
+			Id:            i,
+			State:         metapb.StoreState_Up,
+			NodeState:     metapb.NodeState_Serving,
+			LastHeartbeat: time.Now().UnixNano(),
+		})
+	}
+
+	var peerIDAllocator uint64
+	peerIDAllocator = 10000
+	for _, p := range regionDist {
+		regionID := p.RegionID
+		holdingStores := p.StorePos
+		var peers []*metapb.Peer
+		for _, storePos := range holdingStores {
+			s := stores[storePos]
+			peerIDAllocator += 1
+			peers = append(peers, &metapb.Peer{
+				StoreId: s.GetId(),
+				Id:      peerIDAllocator,
+			})
+		}
+		region := core.NewTestRegionInfo(regionID, stores[holdingStores[0]].GetId(), []byte(fmt.Sprintf("r%v", regionID)), []byte(fmt.Sprintf("r%v", regionID+1)), core.SetWrittenBytes(1000), core.SetReadBytes(1000), core.SetRegionConfVer(1), core.SetRegionVersion(1), core.SetPeers(peers))
+		regions = append(regions, region)
+	}
+
+	return stores, regions
+}
+
+func (suite *operatorTestSuite) checkBalanceKeyrangeRegions(cluster *tests.TestCluster) {
+	re := suite.Require()
+
+	// 1: 10 20 30 40 50 60 70 80 90
+	// 2: 100
+	// 4:
+	stores, regions := buildBalanceKeyRegionsTestCases([]uint64{1, 2, 4}, []regionStoresPair{
+		{10, []uint64{0}},
+		{20, []uint64{0}},
+		{30, []uint64{0}},
+		{40, []uint64{0}},
+		{50, []uint64{0}},
+		{60, []uint64{0}},
+		{60, []uint64{0}},
+		{70, []uint64{0}},
+		{80, []uint64{0}},
+		{90, []uint64{0}},
+		{100, []uint64{1}},
+	})
+
+	for _, store := range stores {
+		tests.MustPutStore(re, cluster, store)
+	}
+
+	pauseAllCheckers(re, cluster)
+	for _, r := range regions {
+		tests.MustPutRegionInfo(re, cluster, r)
+	}
+
+	urlPrefix := fmt.Sprintf("%s/pd/api/v1", cluster.GetLeaderServer().GetAddr())
+	e := tu.CheckPostJSON(tests.TestDialClient, fmt.Sprintf("%s/regions/balance-keyrange", urlPrefix), []byte(`{"start_key":"", "end_key":"748000000005F5E0FFFF00000000000000F8"}`), tu.StatusOK(re))
+	re.NoError(e)
+	j := struct {
+		Scheduling bool `json:"scheduling"`
+		TotalCount int  `json:"total"`
+	}{}
+	time.Sleep(time.Millisecond * 500)
+	ec := tu.CheckGetJSON(tests.TestDialClient, fmt.Sprintf("%s/regions/balance-keyrange", urlPrefix), []byte(``), tu.StatusOK(re), tu.ExtractJSON(re, &j))
+	re.Equal(5, j.TotalCount)
+	re.NoError(ec)
+	ed := tu.CheckDelete(tests.TestDialClient, fmt.Sprintf("%s/schedulers/%s", urlPrefix, types.BalanceKeyrangeScheduler.String()), tu.StatusOK(re), tu.StringEqual(re, "The scheduler is removed."))
+	re.NoError(ed)
+	econfig := tu.CheckPostJSON(tests.TestDialClient, fmt.Sprintf("%s/regions/balance-keyrange", urlPrefix), []byte(`{"start_key":"7480000000000000FF785F720000000000FA", "end_key":"7480000000000000FF785F72FFFFFFFFFFFFFFFFFF0000000000FB", "required_labels":[{"key":"engine","value":"tiflash"}]}`), tu.StatusOK(re))
+	re.NoError(econfig)
+}
+
+func (suite *operatorTestSuite) TestBalanceKeyrangeRegions() {
+	env := tests.NewSchedulingTestEnvironment(suite.T(),
+		func(conf *config.Config, _ string) {
+			conf.Replication.MaxReplicas = 1
+		})
+	env.RunMode = 1
+	env.RunTestBasedOnMode(suite.checkBalanceKeyrangeRegions)
+	env.Cleanup()
 }
