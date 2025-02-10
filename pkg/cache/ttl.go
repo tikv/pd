@@ -45,18 +45,11 @@ type ttlCache struct {
 // NewTTL returns a new TTL cache.
 func newTTL(ctx context.Context, gcInterval time.Duration, duration time.Duration) *ttlCache {
 	c := &ttlCache{
-<<<<<<< HEAD
-		ctx:        ctx,
-		items:      make(map[interface{}]ttlCacheItem),
-		ttl:        duration,
-		gcInterval: gcInterval,
-=======
 		ctx:         ctx,
 		items:       make(map[any]ttlCacheItem),
 		ttl:         duration,
 		gcInterval:  gcInterval,
 		isGCRunning: atomic.Bool{},
->>>>>>> c92da8364 (cache: lazy gc in ttl (#9048))
 	}
 	return c
 }
@@ -174,7 +167,7 @@ func (c *ttlCache) doGC() {
 			}
 			if len(c.items) == 0 && c.isGCRunning.CompareAndSwap(true, false) {
 				c.Unlock()
-				log.Debug("TTL GC items is empty exit")
+				log.Debug("TTL GC items are empty, exit")
 				return
 			}
 			c.Unlock()
