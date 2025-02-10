@@ -702,9 +702,10 @@ func (suite *redirectorTestSuite) TestPing() {
 	re.NoError(err)
 	for _, svr := range suite.cluster.GetServers() {
 		if svr.GetServer() != follower {
-			svr.Run()
+			re.NoError(svr.Run())
 		}
 	}
+	re.NotEmpty(suite.cluster.WaitLeader())
 }
 
 func (suite *redirectorTestSuite) TestNotLeader() {
