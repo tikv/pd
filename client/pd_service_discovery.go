@@ -430,7 +430,7 @@ func (c *pdServiceDiscovery) updateMember() error {
 		var errTSO error
 		if err == nil {
 			if members.GetLeader() == nil || len(members.GetLeader().GetClientUrls()) == 0 {
-				err = errs.ErrClientGetLeader.FastGenByArgs("leader address don't exist")
+				err = errs.ErrClientGetLeader.FastGenByArgs("leader address doesn't exist")
 			}
 			// Still need to update TsoAllocatorLeaders, even if there is no PD leader
 			errTSO = c.switchTSOAllocatorLeaders(members.GetTsoAllocatorLeaders())
