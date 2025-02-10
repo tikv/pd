@@ -67,18 +67,8 @@ func StringToZapLogLevel(level string) zapcore.Level {
 }
 
 // SetupLogger setup the logger.
-<<<<<<< HEAD
-func SetupLogger(logConfig log.Config, logger **zap.Logger, logProps **log.ZapProperties, enabled ...bool) error {
-	lg, p, err := log.InitLogger(&logConfig, zap.AddStacktrace(zapcore.FatalLevel))
-=======
-func SetupLogger(
-	logConfig *log.Config,
-	logger **zap.Logger,
-	logProps **log.ZapProperties,
-	redactInfoLogType RedactInfoLogType,
-) error {
+func SetupLogger(logConfig *log.Config, logger **zap.Logger, logProps **log.ZapProperties, enabled ...bool) error {
 	lg, p, err := log.InitLogger(logConfig, zap.AddStacktrace(zapcore.FatalLevel))
->>>>>>> 0c43ce53a (*: fix default log file size (#9038))
 	if err != nil {
 		return errs.ErrInitLogger.Wrap(err)
 	}
