@@ -445,7 +445,7 @@ func addSchedulerForBalanceRangeCommandFunc(cmd *cobra.Command, args []string) {
 	input["name"] = cmd.Name()
 	input["engine"] = args[0]
 	input["role"] = args[1]
-	input["table-name"] = args[2]
+	input["alias"] = args[2]
 	input["start-key"] = url.QueryEscape(startKey)
 	input["end-key"] = url.QueryEscape(endKey)
 

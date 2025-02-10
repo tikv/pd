@@ -549,7 +549,7 @@ func schedulersRegister() {
 	})
 
 	// balance key range scheduler
-	// args: [role, engine, timeout, table-name, range1, range2, ...]
+	// args: [role, engine, timeout, alias, range1, range2, ...]
 	RegisterSliceDecoderBuilder(types.BalanceRangeScheduler, func(args []string) ConfigDecoder {
 		return func(v any) error {
 			conf, ok := v.(*balanceRangeSchedulerConfig)
