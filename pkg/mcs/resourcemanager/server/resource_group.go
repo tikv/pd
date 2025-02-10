@@ -99,6 +99,11 @@ func (rg *ResourceGroup) Clone(withStats bool) *ResourceGroup {
 
 	if withStats && rg.RUConsumption != nil {
 		newRG.RUConsumption = proto.Clone(rg.RUConsumption).(*rmpb.Consumption)
+		// only show the burst limit factor when the burst limit is -2, otherwise, it is meaningless
+		// when the burst limit is -2, the burst mode is moderated by the burst limit factor
+		if rg.getBurstLimit() == -2 {
+			newRG.RUSettings.RU.BurstLimitFactor = defaultBurstLimitFactor
+		}
 	}
 
 	return newRG
