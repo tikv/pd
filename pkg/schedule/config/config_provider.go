@@ -39,12 +39,6 @@ func RegisterScheduler(typ types.CheckerSchedulerType) {
 	schedulerMap.Store(typ, struct{}{})
 }
 
-// IsSchedulerRegistered checks if the named scheduler type is registered.
-func IsSchedulerRegistered(typ types.CheckerSchedulerType) bool {
-	_, ok := schedulerMap.Load(typ)
-	return ok
-}
-
 // SchedulerConfigProvider is the interface for scheduler configurations.
 type SchedulerConfigProvider interface {
 	SharedConfigProvider

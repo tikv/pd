@@ -84,7 +84,7 @@ func (suite *schedulerTestSuite) TearDownTest() {
 				return currentSchedulers[i] == scheduler
 			}) {
 				echo := mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "add", scheduler}, nil)
-				re.Contains(echo, "Success!")
+				re.Contains(echo, "Success!", scheduler)
 			}
 		}
 		for _, scheduler := range currentSchedulers {
@@ -540,6 +540,30 @@ func (suite *schedulerTestSuite) checkSchedulerConfig(cluster *pdTests.TestClust
 		echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "show"}, nil)
 		return !strings.Contains(echo, "evict-leader-scheduler")
 	})
+
+	// test balance key range scheduler
+	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "add", "balance-range-scheduler"}, nil)
+	re.NotContains(echo, "Success!")
+	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "add", "balance-range-scheduler", "--format=raw", "tiflash", "learner", "test", "a", "b"}, nil)
+	re.Contains(echo, "Success!")
+	var rangeConf []map[string]any
+	var jobConf map[string]any
+	testutil.Eventually(re, func() bool {
+		mightExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "balance-range-scheduler"}, &rangeConf)
+		jobConf = rangeConf[0]
+		return jobConf["role"] == "learner" && jobConf["engine"] == "tiflash" && jobConf["alias"] == "test"
+	})
+	re.Equal(float64(time.Hour.Nanoseconds()), jobConf["timeout"])
+	re.Equal("pending", jobConf["status"])
+	ranges := jobConf["ranges"].([]any)[0].(map[string]any)
+	re.Equal(core.HexRegionKeyStr([]byte("a")), ranges["start-key"])
+	re.Equal(core.HexRegionKeyStr([]byte("b")), ranges["end-key"])
+
+	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "add", "balance-range-scheduler", "--format=raw", "tiflash", "learner", "learner", "a", "b"}, nil)
+	re.Contains(echo, "400")
+	re.Contains(echo, "scheduler already exists")
+	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "remove", "balance-range-scheduler"}, nil)
+	re.Contains(echo, "Success!")
 
 	// test balance leader config
 	conf = make(map[string]any)
