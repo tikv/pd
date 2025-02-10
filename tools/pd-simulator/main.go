@@ -134,7 +134,7 @@ func runHTTPServer() {
 
 // NewSingleServer creates a pd server for simulator.
 func NewSingleServer(ctx context.Context, simConfig *simulator.SimConfig) (*server.Server, testutil.CleanupFunc) {
-	err := logutil.SetupLogger(simConfig.ServerConfig.Log, &simConfig.ServerConfig.Logger, &simConfig.ServerConfig.LogProps)
+	err := logutil.SetupLogger(&simConfig.ServerConfig.Log, &simConfig.ServerConfig.Logger, &simConfig.ServerConfig.LogProps)
 	if err == nil {
 		log.ReplaceGlobals(simConfig.ServerConfig.Logger, simConfig.ServerConfig.LogProps)
 	} else {

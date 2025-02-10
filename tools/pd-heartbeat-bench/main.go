@@ -409,7 +409,7 @@ func main() {
 	}
 
 	// New zap logger
-	err = logutil.SetupLogger(cfg.Log, &cfg.Logger, &cfg.LogProps)
+	err = logutil.SetupLogger(&cfg.Log, &cfg.Logger, &cfg.LogProps)
 	if err == nil {
 		log.ReplaceGlobals(cfg.Logger, cfg.LogProps)
 	} else {
