@@ -133,9 +133,13 @@ func TestGroupTokenBucketRequestBurstLimit(t *testing.T) {
 		clientUniqueID := uint64(0)
 		gtb.request(time1, 190000, uint64(time.Second)*10/uint64(time.Millisecond), clientUniqueID)
 		re.Contains(gtb.tokenSlots, clientUniqueID)
+		// it should not be able to change group settings
 		groupSetting := gtb.tokenSlots[clientUniqueID]
 		re.Equal(expectedBurstLimit, groupSetting.settings.BurstLimit)
 		re.Equal(uint64(expectedFillRate), groupSetting.settings.FillRate)
+		// it should not be able to change gtb settings
+		re.Equal(tbSetting.GetSettings().BurstLimit, gtb.Settings.BurstLimit)
+		re.Equal(tbSetting.GetSettings().FillRate, gtb.Settings.FillRate)
 	}
 
 	// case 1: fillrate = 2000, burstLimit = 2000,0,-1,-2
