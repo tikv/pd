@@ -1675,32 +1675,26 @@ func (suite *clientTestSuite) TestUpdateServiceGCSafePoint() {
 
 func (suite *clientTestSuite) TestScatterRegion() {
 	re := suite.Require()
-	CreateRegion := func() uint64 {
-		regionID := regionIDAllocator.alloc()
-		region := &metapb.Region{
-			Id: regionID,
-			RegionEpoch: &metapb.RegionEpoch{
-				ConfVer: 1,
-				Version: 1,
-			},
-			Peers:    peers,
-			StartKey: []byte("fff"),
-			EndKey:   []byte("ggg"),
-		}
-		req := &pdpb.RegionHeartbeatRequest{
-			Header: newHeader(),
-			Region: region,
-			Leader: peers[0],
-		}
-		err := suite.regionHeartbeat.Send(req)
-		re.NoError(err)
-		return regionID
-	}
-	var regionID = CreateRegion()
-	regionsID := []uint64{regionID}
-	// Test interface `ScatterRegions`.
+	regionID := regionIDAllocator.alloc()
 	testutil.Eventually(re, func() bool {
-		scatterResp, err := suite.client.ScatterRegions(context.Background(), regionsID, opt.WithGroup("test"), opt.WithRetry(1))
+		err := suite.regionHeartbeat.Send(&pdpb.RegionHeartbeatRequest{
+			Header: newHeader(),
+			Region: &metapb.Region{
+				Id: regionID,
+				RegionEpoch: &metapb.RegionEpoch{
+					ConfVer: 1,
+					Version: 1,
+				},
+				Peers:    peers,
+				StartKey: []byte("fff"),
+				EndKey:   []byte("ggg"),
+			},
+			Leader: peers[0],
+		})
+		if err != nil {
+			return false
+		}
+		scatterResp, err := suite.client.ScatterRegions(context.Background(), []uint64{regionID}, opt.WithGroup("test"), opt.WithRetry(1))
 		if err != nil {
 			return false
 		}
@@ -1714,15 +1708,31 @@ func (suite *clientTestSuite) TestScatterRegion() {
 		return resp.GetRegionId() == regionID &&
 			string(resp.GetDesc()) == "scatter-region" &&
 			resp.GetStatus() == pdpb.OperatorStatus_RUNNING
-	}, testutil.WithTickInterval(time.Second))
+	})
 
 	// Test interface `ScatterRegion`.
 	// TODO: Deprecate interface `ScatterRegion`.
 	// create a new region as scatter operation from previous test might be running
-
-	regionID = CreateRegion()
+	regionID = regionIDAllocator.alloc()
 	testutil.Eventually(re, func() bool {
-		err := suite.client.ScatterRegion(context.Background(), regionID)
+		err := suite.regionHeartbeat.Send(&pdpb.RegionHeartbeatRequest{
+			Header: newHeader(),
+			Region: &metapb.Region{
+				Id: regionID,
+				RegionEpoch: &metapb.RegionEpoch{
+					ConfVer: 1,
+					Version: 1,
+				},
+				Peers:    peers,
+				StartKey: []byte("ggg"),
+				EndKey:   []byte("hhh"),
+			},
+			Leader: peers[0],
+		})
+		if err != nil {
+			return false
+		}
+		err = suite.client.ScatterRegion(context.Background(), regionID)
 		if err != nil {
 			return false
 		}
@@ -1733,7 +1743,7 @@ func (suite *clientTestSuite) TestScatterRegion() {
 		return resp.GetRegionId() == regionID &&
 			string(resp.GetDesc()) == "scatter-region" &&
 			resp.GetStatus() == pdpb.OperatorStatus_RUNNING
-	}, testutil.WithTickInterval(time.Second))
+	})
 }
 
 func TestWatch(t *testing.T) {
