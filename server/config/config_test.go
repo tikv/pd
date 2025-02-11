@@ -166,6 +166,7 @@ leader-schedule-limit = 0
 
 	flagSet := pflag.NewFlagSet("test", pflag.ContinueOnError)
 	flagSet.StringP("log-level", "L", "info", "log level: debug, info, warn, error, fatal (default 'info')")
+	flagSet.StringP("log-file", "", "pd.log", "log file path")
 	flagSet.Parse(nil)
 	cfg := NewConfig()
 	err := cfg.Parse(flagSet)
@@ -173,6 +174,8 @@ leader-schedule-limit = 0
 	meta, err := toml.Decode(cfgData, &cfg)
 	re.NoError(err)
 	err = cfg.Adjust(&meta, false)
+	re.NoError(err)
+	err = logutil.SetupLogger(&cfg.Log, &cfg.Logger, &cfg.LogProps, cfg.Security.RedactInfoLog)
 	re.NoError(err)
 
 	// When invalid, use default values.
@@ -189,6 +192,9 @@ leader-schedule-limit = 0
 	// When undefined, use default values.
 	re.True(cfg.PreVote)
 	re.Equal("info", cfg.Log.Level)
+	re.Equal(300, cfg.Log.File.MaxSize)
+	re.Equal(0, cfg.Log.File.MaxDays)
+	re.Equal(0, cfg.Log.File.MaxBackups)
 	re.Equal(uint64(0), cfg.Schedule.MaxMergeRegionKeys)
 	re.Equal("http://127.0.0.1:9090", cfg.PDServerCfg.MetricStorage)
 
@@ -252,9 +258,15 @@ tso-update-physical-interval = "15s"
 	cfgData = `
 [log]
 level = "debug"
+
+[log.file]
+max-size = 100
+max-days = 10
+max-backups = 5
 `
 	flagSet = pflag.NewFlagSet("testlog", pflag.ContinueOnError)
 	flagSet.StringP("log-level", "L", "info", "log level: debug, info, warn, error, fatal (default 'info')")
+	flagSet.StringP("log-file", "", "pd.log", "log file path")
 	flagSet.Parse(nil)
 	cfg = NewConfig()
 	err = cfg.Parse(flagSet)
@@ -264,6 +276,9 @@ level = "debug"
 	err = cfg.Adjust(&meta, false)
 	re.NoError(err)
 	re.Equal("debug", cfg.Log.Level)
+	re.Equal(100, cfg.Log.File.MaxSize)
+	re.Equal(10, cfg.Log.File.MaxDays)
+	re.Equal(5, cfg.Log.File.MaxBackups)
 }
 
 func TestMigrateFlags(t *testing.T) {
