@@ -88,21 +88,8 @@ func (lta *LocalTSOAllocator) IsInitialize() bool {
 
 // UpdateTSO is used to update the TSO in memory and the time window in etcd
 // for all local TSO allocators this PD server hold.
-func (lta *LocalTSOAllocator) UpdateTSO() (err error) {
-	// When meet network partition, we need to manually retry to update the global tso,
-	// next request succeeds with the new endpoint, according to https://github.com/etcd-io/etcd/issues/8711
-	maxRetryCount := 3
-	for i := 0; i < maxRetryCount; i++ {
-		err = lta.timestampOracle.UpdateTimestamp(lta.leadership)
-		if err == nil {
-			return nil
-		}
-		log.Warn("try to update the global tso but failed", errs.ZapError(err))
-		// Etcd client retry with roundRobinQuorumBackoff https://github.com/etcd-io/etcd/blob/d62cdeee4863001b09e772ed013eb1342a1d0f89/client/v3/client.go#L488
-		// And its default interval is 25ms, so we sleep 50ms here. https://github.com/etcd-io/etcd/blob/d62cdeee4863001b09e772ed013eb1342a1d0f89/client/v3/options.go#L53
-		time.Sleep(50 * time.Millisecond)
-	}
-	return
+func (lta *LocalTSOAllocator) UpdateTSO() error {
+	return lta.timestampOracle.UpdateTimestamp(lta.leadership)
 }
 
 // SetTSO sets the physical part with given TSO.
