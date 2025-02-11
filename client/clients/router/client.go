@@ -23,6 +23,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/gogo/protobuf/proto"
 	"github.com/opentracing/opentracing-go"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -66,15 +67,21 @@ func ConvertToRegion(res regionResponse) *Region {
 		return nil
 	}
 
+	// Deep-copy here is necessary since the data inside the protobuf message can be reused,
+	// such like that if a []byte field in the protobuf message is reused, which might be changed
+	// by the follow-up requests, leading to the unexpected region key range results.
 	r := &Region{
-		Meta:         region,
-		Leader:       res.GetLeader(),
-		PendingPeers: res.GetPendingPeers(),
-		Buckets:      res.GetBuckets(),
+		Meta:    proto.Clone(region).(*metapb.Region),
+		Leader:  proto.Clone(res.GetLeader()).(*metapb.Peer),
+		Buckets: proto.Clone(res.GetBuckets()).(*metapb.Buckets),
 	}
 	for _, s := range res.GetDownPeers() {
-		r.DownPeers = append(r.DownPeers, s.Peer)
+		r.DownPeers = append(r.DownPeers, proto.Clone(s.Peer).(*metapb.Peer))
 	}
+	for _, p := range res.GetPendingPeers() {
+		r.PendingPeers = append(r.PendingPeers, proto.Clone(p).(*metapb.Peer))
+	}
+
 	return r
 }
 
@@ -204,6 +211,13 @@ func (c *Cli) newRequest(ctx context.Context) *Request {
 	req := c.reqPool.Get().(*Request)
 	req.requestCtx = ctx
 	req.clientCtx = c.ctx
+	// Reset the request fields before using it.
+	req.key = nil
+	req.prevKey = nil
+	req.id = 0
+	req.needBuckets = false
+	req.region = nil
+	// Initialize the runtime fields.
 	req.pool = c.reqPool
 
 	return req
@@ -339,7 +353,10 @@ func (c *Cli) updateConnection(ctx context.Context) {
 	if err != nil {
 		log.Error("[router] failed to create the router stream connection", errs.ZapError(err))
 	}
-	c.conCtxMgr.Store(ctx, url, stream)
+	// Store the stream connection context if it is successfully created.
+	if stream != nil {
+		c.conCtxMgr.Store(ctx, url, stream)
+	}
 	// TODO: support the forwarding mechanism for the router client.
 	// TODO: support sending the router requests to the follower nodes.
 }
