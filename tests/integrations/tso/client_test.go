@@ -408,6 +408,82 @@ func (suite *tsoClientTestSuite) TestRandomShutdown() {
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/tso/fastUpdatePhysicalInterval"))
 }
 
+<<<<<<< HEAD
+=======
+func (suite *tsoClientTestSuite) TestGetTSWhileResettingTSOClient() {
+	re := suite.Require()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/clients/tso/delayDispatchTSORequest", "return(true)"))
+	var (
+		stopSignal atomic.Bool
+		wg         sync.WaitGroup
+	)
+
+	wg.Add(tsoRequestConcurrencyNumber * len(suite.clients))
+	for range tsoRequestConcurrencyNumber {
+		for _, client := range suite.clients {
+			go func(client pd.Client) {
+				defer wg.Done()
+				var lastTS uint64
+				for !stopSignal.Load() {
+					physical, logical, err := client.GetTS(suite.ctx)
+					if err != nil {
+						re.ErrorContains(err, context.Canceled.Error())
+					} else {
+						ts := tsoutil.ComposeTS(physical, logical)
+						re.Less(lastTS, ts)
+						lastTS = ts
+					}
+				}
+			}(client)
+		}
+	}
+	// Reset the TSO clients while requesting TSO concurrently.
+	for range tsoRequestConcurrencyNumber {
+		for _, client := range suite.clients {
+			client.(interface{ ResetTSOClient() }).ResetTSOClient()
+		}
+	}
+	stopSignal.Store(true)
+	wg.Wait()
+	re.NoError(failpoint.Disable("github.com/tikv/pd/client/clients/tso/delayDispatchTSORequest"))
+}
+
+func TestTSONotLeader(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	pdCluster, err := tests.NewTestCluster(ctx, 3)
+	re.NoError(err)
+	defer pdCluster.Destroy()
+	err = pdCluster.RunInitialServers()
+	re.NoError(err)
+	leaderName := pdCluster.WaitLeader()
+	re.NotEmpty(leaderName)
+	pdLeader := pdCluster.GetServer(leaderName)
+	backendEndpoints := pdLeader.GetAddr()
+	pdClient, err := pd.NewClientWithContext(context.Background(),
+		caller.TestComponent,
+		[]string{backendEndpoints}, pd.SecurityOption{}, opt.WithMaxErrorRetry(1))
+	re.NoError(err)
+	defer pdClient.Close()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/rebaseErr", "return(true)"))
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func(client pd.Client) {
+		defer wg.Done()
+		pdLeader.ResignLeader()
+		for range 10 {
+			_, _, err := client.GetTS(ctx)
+			re.ErrorContains(err, "not leader")
+		}
+	}(pdClient)
+
+	wg.Wait()
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/rebaseErr"))
+}
+
+>>>>>>> aa7a4c6e4 (pkg: fix tso is generated even if the member is not leader (#9056))
 // When we upgrade the PD cluster, there may be a period of time that the old and new PDs are running at the same time.
 func TestMixedTSODeployment(t *testing.T) {
 	re := require.New(t)
