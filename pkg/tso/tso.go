@@ -349,7 +349,7 @@ func (t *timestampOracle) UpdateTimestamp() error {
 var maxRetryCount = 10
 
 // getTS is used to get a timestamp.
-func (t *timestampOracle) getTS(ctx context.Context, leadership *election.Leadership, count uint32) (pdpb.Timestamp, error) {
+func (t *timestampOracle) getTS(ctx context.Context, member ElectionMember, count uint32) (pdpb.Timestamp, error) {
 	defer trace.StartRegion(ctx, "timestampOracle.getTS").End()
 	var resp pdpb.Timestamp
 	if count == 0 {
@@ -359,7 +359,7 @@ func (t *timestampOracle) getTS(ctx context.Context, leadership *election.Leader
 		currentPhysical, _ := t.getTSO()
 		if currentPhysical == typeutil.ZeroTime {
 			// If it's leader, maybe SyncTimestamp hasn't completed yet
-			if leadership.Check() {
+			if member.IsLeader() {
 				time.Sleep(200 * time.Millisecond)
 				continue
 			}
@@ -381,7 +381,7 @@ func (t *timestampOracle) getTS(ctx context.Context, leadership *election.Leader
 			continue
 		}
 		// In case lease expired after the first check.
-		if !leadership.Check() {
+		if !member.IsLeader() {
 			return pdpb.Timestamp{}, errs.ErrGenerateTimestamp.FastGenByArgs(fmt.Sprintf("requested %s anymore", errs.NotLeaderErr))
 		}
 		return resp, nil

@@ -1722,6 +1722,9 @@ func (s *Server) campaignLeader() {
 		return
 	}
 	defer s.stopRaftCluster()
+	failpoint.Inject("rebaseErr", func() {
+		failpoint.Return()
+	})
 	if err := s.idAllocator.Rebase(); err != nil {
 		log.Error("failed to sync id from etcd", errs.ZapError(err))
 		return
