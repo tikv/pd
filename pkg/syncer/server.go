@@ -352,6 +352,13 @@ func (s *RegionSyncer) broadcast(ctx context.Context, regions *pdpb.SyncRegionRe
 		var failed []string
 		s.mu.RLock()
 		for name, sender := range s.mu.streams {
+			select {
+			case <-ctx.Done():
+				s.mu.RUnlock()
+				close(broadcastDone)
+				return
+			default:
+			}
 			err := sender.Send(regions)
 			if err != nil {
 				log.Error("region syncer send data meet error", errs.ZapError(errs.ErrGRPCSend, err))
