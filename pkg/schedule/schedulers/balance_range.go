@@ -341,7 +341,10 @@ func (s *balanceRangeScheduler) prepare(cluster sche.SchedulerCluster, opInfluen
 	for _, store := range storeList {
 		stores = append(stores, store.store)
 	}
-	averageScore := totalScore / int64(len(storeList))
+	averageScore := int64(0)
+	if len(storeList) != 0 {
+		averageScore = totalScore / int64(len(storeList))
+	}
 	return &balanceRangeSchedulerPlan{
 		SchedulerCluster: cluster,
 		stores:           stores,
@@ -366,9 +369,7 @@ func (p *balanceRangeSchedulerPlan) score(storeID uint64) int64 {
 }
 
 func (p *balanceRangeSchedulerPlan) shouldBalance(scheduler string) bool {
-	sourceScore := p.score(p.sourceStoreID())
-	targetScore := p.score(p.targetStoreID())
-	shouldBalance := sourceScore > targetScore
+	shouldBalance := p.sourceScore > p.targetScore
 	if !shouldBalance && log.GetLevel() <= zap.DebugLevel {
 		log.Debug("skip balance ",
 			zap.String("scheduler", scheduler),
