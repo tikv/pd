@@ -90,7 +90,7 @@ func mustNewCluster(re *require.Assertions, num int, opts ...func(cfg *config.Co
 	ch := make(chan *server.Server, num)
 	for _, cfg := range cfgs {
 		go func(cfg *config.Config) {
-			err := logutil.SetupLogger(cfg.Log, &cfg.Logger, &cfg.LogProps, cfg.Security.RedactInfoLog)
+			err := logutil.SetupLogger(&cfg.Log, &cfg.Logger, &cfg.LogProps, cfg.Security.RedactInfoLog)
 			re.NoError(err)
 			zapLogOnce.Do(func() {
 				log.ReplaceGlobals(cfg.Logger, cfg.LogProps)

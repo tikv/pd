@@ -76,11 +76,11 @@ func (suite *ruleTestSuite) TearDownTest() {
 		err = tu.CheckPostJSON(tests.TestDialClient, urlPrefix+"/pd/api/v1/config/placement-rule", data, tu.StatusOK(re))
 		re.NoError(err)
 	}
-	suite.env.RunTestBasedOnMode(cleanFunc)
+	suite.env.RunTest(cleanFunc)
 }
 
 func (suite *ruleTestSuite) TestSet() {
-	suite.env.RunTestBasedOnMode(suite.checkSet)
+	suite.env.RunTest(suite.checkSet)
 }
 
 func (suite *ruleTestSuite) checkSet(cluster *tests.TestCluster) {
@@ -196,7 +196,7 @@ func (suite *ruleTestSuite) checkSet(cluster *tests.TestCluster) {
 }
 
 func (suite *ruleTestSuite) TestGet() {
-	suite.env.RunTestBasedOnMode(suite.checkGet)
+	suite.env.RunTest(suite.checkGet)
 }
 
 func (suite *ruleTestSuite) checkGet(cluster *tests.TestCluster) {
@@ -247,7 +247,7 @@ func (suite *ruleTestSuite) checkGet(cluster *tests.TestCluster) {
 }
 
 func (suite *ruleTestSuite) TestGetAll() {
-	suite.env.RunTestBasedOnMode(suite.checkGetAll)
+	suite.env.RunTest(suite.checkGetAll)
 }
 
 func (suite *ruleTestSuite) checkGetAll(cluster *tests.TestCluster) {
@@ -269,7 +269,7 @@ func (suite *ruleTestSuite) checkGetAll(cluster *tests.TestCluster) {
 }
 
 func (suite *ruleTestSuite) TestSetAll() {
-	suite.env.RunTestBasedOnMode(suite.checkSetAll)
+	suite.env.RunTest(suite.checkSetAll)
 }
 
 func (suite *ruleTestSuite) checkSetAll(cluster *tests.TestCluster) {
@@ -385,7 +385,7 @@ func (suite *ruleTestSuite) checkSetAll(cluster *tests.TestCluster) {
 }
 
 func (suite *ruleTestSuite) TestGetAllByGroup() {
-	suite.env.RunTestBasedOnMode(suite.checkGetAllByGroup)
+	suite.env.RunTest(suite.checkGetAllByGroup)
 }
 
 func (suite *ruleTestSuite) checkGetAllByGroup(cluster *tests.TestCluster) {
@@ -442,7 +442,7 @@ func (suite *ruleTestSuite) checkGetAllByGroup(cluster *tests.TestCluster) {
 }
 
 func (suite *ruleTestSuite) TestGetAllByRegion() {
-	suite.env.RunTestBasedOnMode(suite.checkGetAllByRegion)
+	suite.env.RunTest(suite.checkGetAllByRegion)
 }
 
 func (suite *ruleTestSuite) checkGetAllByRegion(cluster *tests.TestCluster) {
@@ -507,7 +507,7 @@ func (suite *ruleTestSuite) checkGetAllByRegion(cluster *tests.TestCluster) {
 }
 
 func (suite *ruleTestSuite) TestGetAllByKey() {
-	suite.env.RunTestBasedOnMode(suite.checkGetAllByKey)
+	suite.env.RunTest(suite.checkGetAllByKey)
 }
 
 func (suite *ruleTestSuite) checkGetAllByKey(cluster *tests.TestCluster) {
@@ -566,7 +566,7 @@ func (suite *ruleTestSuite) checkGetAllByKey(cluster *tests.TestCluster) {
 }
 
 func (suite *ruleTestSuite) TestDelete() {
-	suite.env.RunTestBasedOnMode(suite.checkDelete)
+	suite.env.RunTest(suite.checkDelete)
 }
 
 func (suite *ruleTestSuite) checkDelete(cluster *tests.TestCluster) {
@@ -632,7 +632,7 @@ func (suite *ruleTestSuite) checkDelete(cluster *tests.TestCluster) {
 }
 
 func (suite *ruleTestSuite) TestBatch() {
-	suite.env.RunTestBasedOnMode(suite.checkBatch)
+	suite.env.RunTest(suite.checkBatch)
 }
 
 func (suite *ruleTestSuite) checkBatch(cluster *tests.TestCluster) {
@@ -761,7 +761,7 @@ func (suite *ruleTestSuite) checkBatch(cluster *tests.TestCluster) {
 }
 
 func (suite *ruleTestSuite) TestBundle() {
-	suite.env.RunTestBasedOnMode(suite.checkBundle)
+	suite.env.RunTest(suite.checkBundle)
 }
 
 func (suite *ruleTestSuite) checkBundle(cluster *tests.TestCluster) {
@@ -871,7 +871,7 @@ func (suite *ruleTestSuite) checkBundle(cluster *tests.TestCluster) {
 }
 
 func (suite *ruleTestSuite) TestBundleBadRequest() {
-	suite.env.RunTestBasedOnMode(suite.checkBundleBadRequest)
+	suite.env.RunTest(suite.checkBundleBadRequest)
 }
 
 func (suite *ruleTestSuite) checkBundleBadRequest(cluster *tests.TestCluster) {
@@ -902,7 +902,7 @@ func (suite *ruleTestSuite) checkBundleBadRequest(cluster *tests.TestCluster) {
 }
 
 func (suite *ruleTestSuite) TestLeaderAndVoter() {
-	suite.env.RunTestBasedOnMode(suite.checkLeaderAndVoter)
+	suite.env.RunTest(suite.checkLeaderAndVoter)
 }
 
 func (suite *ruleTestSuite) checkLeaderAndVoter(cluster *tests.TestCluster) {
@@ -993,7 +993,7 @@ func (suite *ruleTestSuite) checkLeaderAndVoter(cluster *tests.TestCluster) {
 }
 
 func (suite *ruleTestSuite) TestDeleteAndUpdate() {
-	suite.env.RunTestBasedOnMode(suite.checkDeleteAndUpdate)
+	suite.env.RunTest(suite.checkDeleteAndUpdate)
 }
 
 func (suite *ruleTestSuite) checkDeleteAndUpdate(cluster *tests.TestCluster) {
@@ -1074,7 +1074,7 @@ func (suite *ruleTestSuite) checkDeleteAndUpdate(cluster *tests.TestCluster) {
 }
 
 func (suite *ruleTestSuite) TestConcurrency() {
-	suite.env.RunTestBasedOnMode(suite.checkConcurrency)
+	suite.env.RunTest(suite.checkConcurrency)
 }
 
 func (suite *ruleTestSuite) checkConcurrency(cluster *tests.TestCluster) {
@@ -1163,7 +1163,7 @@ func (suite *ruleTestSuite) checkConcurrencyWith(cluster *tests.TestCluster,
 }
 
 func (suite *ruleTestSuite) TestLargeRules() {
-	suite.env.RunTestBasedOnMode(suite.checkLargeRules)
+	suite.env.RunTest(suite.checkLargeRules)
 }
 
 func (suite *ruleTestSuite) checkLargeRules(cluster *tests.TestCluster) {
@@ -1292,7 +1292,7 @@ func (suite *regionRuleTestSuite) TearDownSuite() {
 }
 
 func (suite *regionRuleTestSuite) TestRegionPlacementRule() {
-	suite.env.RunTestBasedOnMode(suite.checkRegionPlacementRule)
+	suite.env.RunTest(suite.checkRegionPlacementRule)
 }
 
 func (suite *regionRuleTestSuite) checkRegionPlacementRule(cluster *tests.TestCluster) {

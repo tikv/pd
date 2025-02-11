@@ -38,6 +38,7 @@ import (
 
 	"github.com/tikv/pd/client/constants"
 	"github.com/tikv/pd/client/errs"
+	"github.com/tikv/pd/client/metrics"
 	"github.com/tikv/pd/client/opt"
 	"github.com/tikv/pd/client/pkg/retry"
 	"github.com/tikv/pd/client/pkg/utils/grpcutil"
@@ -47,11 +48,14 @@ import (
 const (
 	// MemberUpdateInterval is the interval to update the member list.
 	MemberUpdateInterval = time.Minute
+	// UpdateMemberMaxBackoffTime is the max time to back off when updating the member list.
+	UpdateMemberMaxBackoffTime = 100 * time.Millisecond
+	// UpdateMemberBackOffBaseTime is the base time to back off when updating the member list.
+	// Here we use 20ms is because getting timestamp will print a warning log if the time exceeds 30ms.
+	UpdateMemberBackOffBaseTime = 20 * time.Millisecond
 	// UpdateMemberTimeout is the timeout to update the member list.
 	// Use a shorter timeout to recover faster from network isolation.
 	UpdateMemberTimeout = time.Second
-	// UpdateMemberBackOffBaseTime is the base time to back off when updating the member list.
-	UpdateMemberBackOffBaseTime = 100 * time.Millisecond
 
 	serviceModeUpdateInterval = 3 * time.Second
 )
@@ -74,7 +78,7 @@ const (
 type serviceType int
 
 const (
-	apiService serviceType = iota
+	pdService serviceType = iota
 	tsoService
 )
 
@@ -126,14 +130,16 @@ type ServiceDiscovery interface {
 	// CheckMemberChanged immediately check if there is any membership change among the leader/followers
 	// in a quorum-based cluster or among the primary/secondaries in a primary/secondary configured cluster.
 	CheckMemberChanged() error
-	// AddServingURLSwitchedCallback adds callbacks which will be called when the leader
+	// ExecAndAddLeaderSwitchedCallback executes the callback once and adds it to the callback list then.
+	ExecAndAddLeaderSwitchedCallback(cb LeaderSwitchedCallbackFunc)
+	// AddLeaderSwitchedCallback adds callbacks which will be called when the leader
 	// in a quorum-based cluster or the primary in a primary/secondary configured cluster
 	// is switched.
-	AddServingURLSwitchedCallback(callbacks ...func())
-	// AddServiceURLsSwitchedCallback adds callbacks which will be called when any leader/follower
+	AddLeaderSwitchedCallback(cb LeaderSwitchedCallbackFunc)
+	// AddMembersChangedCallback adds callbacks which will be called when any leader/follower
 	// in a quorum-based cluster or any primary/secondary in a primary/secondary configured cluster
 	// is changed.
-	AddServiceURLsSwitchedCallback(callbacks ...func())
+	AddMembersChangedCallback(cb func())
 }
 
 // ServiceClient is an interface that defines a set of operations for a raw PD gRPC client to specific PD server.
@@ -394,20 +400,10 @@ func (c *serviceBalancer) get() (ret ServiceClient) {
 
 // UpdateKeyspaceIDFunc is the function type for updating the keyspace ID.
 type UpdateKeyspaceIDFunc func() error
-type tsoLeaderURLUpdatedFunc func(string) error
 
-// TSOEventSource subscribes to events related to changes in the TSO leader/primary from the service discovery.
-type TSOEventSource interface {
-	// SetTSOLeaderURLUpdatedCallback adds a callback which will be called when the TSO leader/primary is updated.
-	SetTSOLeaderURLUpdatedCallback(callback tsoLeaderURLUpdatedFunc)
-}
+var _ ServiceDiscovery = (*serviceDiscovery)(nil)
 
-var (
-	_ ServiceDiscovery = (*serviceDiscovery)(nil)
-	_ TSOEventSource   = (*serviceDiscovery)(nil)
-)
-
-// serviceDiscovery is the service discovery client of PD/PD service which is quorum based
+// serviceDiscovery is the service discovery client of PD which is quorum based
 type serviceDiscovery struct {
 	isInitialized bool
 
@@ -426,15 +422,7 @@ type serviceDiscovery struct {
 	// url -> a gRPC connection
 	clientConns sync.Map // Store as map[string]*grpc.ClientConn
 
-	// serviceModeUpdateCb will be called when the service mode gets updated
-	serviceModeUpdateCb func(pdpb.ServiceMode)
-	// leaderSwitchedCbs will be called after the leader switched
-	leaderSwitchedCbs []func()
-	// membersChangedCbs will be called after there is any membership change in the
-	// leader and followers
-	membersChangedCbs []func()
-	// tsoLeaderUpdatedCb will be called when the TSO leader is updated.
-	tsoLeaderUpdatedCb tsoLeaderURLUpdatedFunc
+	callbacks *serviceCallbacks
 
 	checkMembershipCh chan struct{}
 
@@ -474,12 +462,13 @@ func NewServiceDiscovery(
 		cancel:               cancel,
 		wg:                   wg,
 		apiCandidateNodes:    [apiKindCount]*serviceBalancer{newServiceBalancer(emptyErrorFn), newServiceBalancer(regionAPIErrorFn)},
-		serviceModeUpdateCb:  serviceModeUpdateCb,
+		callbacks:            newServiceCallbacks(),
 		updateKeyspaceIDFunc: updateKeyspaceIDFunc,
 		keyspaceID:           keyspaceID,
 		tlsCfg:               tlsCfg,
 		option:               option,
 	}
+	pdsd.callbacks.setServiceModeUpdateCallback(serviceModeUpdateCb)
 	urls = tlsutil.AddrsToURLs(urls, tlsCfg)
 	pdsd.urls.Store(urls)
 	return pdsd
@@ -502,7 +491,7 @@ func (c *serviceDiscovery) Init() error {
 	log.Info("[pd] init cluster id", zap.Uint64("cluster-id", c.clusterID))
 
 	// We need to update the keyspace ID before we discover and update the service mode
-	// so that TSO in API mode can be initialized with the correct keyspace ID.
+	// so that TSO in PD can be initialized with the correct keyspace ID.
 	if c.keyspaceID == constants.NullKeyspaceID && c.updateKeyspaceIDFunc != nil {
 		if err := c.initRetry(c.updateKeyspaceIDFunc); err != nil {
 			return err
@@ -548,7 +537,7 @@ func (c *serviceDiscovery) updateMemberLoop() {
 	ticker := time.NewTicker(MemberUpdateInterval)
 	defer ticker.Stop()
 
-	bo := retry.InitialBackoffer(UpdateMemberBackOffBaseTime, UpdateMemberTimeout, UpdateMemberBackOffBaseTime)
+	bo := retry.InitialBackoffer(UpdateMemberBackOffBaseTime, UpdateMemberMaxBackoffTime, UpdateMemberTimeout)
 	for {
 		select {
 		case <-ctx.Done():
@@ -570,7 +559,7 @@ func (c *serviceDiscovery) updateServiceModeLoop() {
 		failpoint.Return()
 	})
 	failpoint.Inject("usePDServiceMode", func() {
-		c.serviceModeUpdateCb(pdpb.ServiceMode_PD_SVC_MODE)
+		c.callbacks.onServiceModeUpdate(pdpb.ServiceMode_PD_SVC_MODE)
 		failpoint.Return()
 	})
 
@@ -678,7 +667,7 @@ func (*serviceDiscovery) GetKeyspaceGroupID() uint32 {
 // DiscoverMicroservice discovers the microservice with the specified type and returns the server urls.
 func (c *serviceDiscovery) discoverMicroservice(svcType serviceType) (urls []string, err error) {
 	switch svcType {
-	case apiService:
+	case pdService:
 		urls = c.GetServiceURLs()
 	case tsoService:
 		leaderURL := c.getLeaderURL()
@@ -791,27 +780,29 @@ func (c *serviceDiscovery) CheckMemberChanged() error {
 	return c.updateMember()
 }
 
-// AddServingURLSwitchedCallback adds callbacks which will be called
-// when the leader is switched.
-func (c *serviceDiscovery) AddServingURLSwitchedCallback(callbacks ...func()) {
-	c.leaderSwitchedCbs = append(c.leaderSwitchedCbs, callbacks...)
-}
-
-// AddServiceURLsSwitchedCallback adds callbacks which will be called when
-// any leader/follower is changed.
-func (c *serviceDiscovery) AddServiceURLsSwitchedCallback(callbacks ...func()) {
-	c.membersChangedCbs = append(c.membersChangedCbs, callbacks...)
-}
-
-// SetTSOLeaderURLUpdatedCallback adds a callback which will be called when the TSO leader is updated.
-func (c *serviceDiscovery) SetTSOLeaderURLUpdatedCallback(callback tsoLeaderURLUpdatedFunc) {
+// ExecAndAddLeaderSwitchedCallback executes the callback once and adds it to the callback list then.
+func (c *serviceDiscovery) ExecAndAddLeaderSwitchedCallback(callback LeaderSwitchedCallbackFunc) {
 	url := c.getLeaderURL()
 	if len(url) > 0 {
 		if err := callback(url); err != nil {
-			log.Error("[tso] failed to call back when tso leader url update", zap.String("url", url), errs.ZapError(err))
+			log.Error("[pd] failed to run a callback with the current leader url",
+				zap.String("url", url), errs.ZapError(err))
 		}
 	}
-	c.tsoLeaderUpdatedCb = callback
+	c.AddLeaderSwitchedCallback(callback)
+}
+
+// AddLeaderSwitchedCallback adds callbacks which will be called when the leader
+// in a quorum-based cluster or the primary in a primary/secondary configured cluster
+// is switched.
+func (c *serviceDiscovery) AddLeaderSwitchedCallback(callback LeaderSwitchedCallbackFunc) {
+	c.callbacks.addLeaderSwitchedCallback(callback)
+}
+
+// AddMembersChangedCallback adds callbacks which will be called when any primary/secondary
+// in a primary/secondary configured cluster is changed.
+func (c *serviceDiscovery) AddMembersChangedCallback(callback func()) {
+	c.callbacks.addMembersChangedCallback(callback)
 }
 
 // getLeaderURL returns the leader URL.
@@ -864,12 +855,10 @@ func (c *serviceDiscovery) checkServiceModeChanged() error {
 	clusterInfo, err := c.getClusterInfo(c.ctx, leaderURL, c.option.Timeout)
 	if err != nil {
 		if strings.Contains(err.Error(), "Unimplemented") {
-			// If the method is not supported, we set it to pd mode.
+			// If the method is not supported, we fallback to non-microservice env.
 			// TODO: it's a hack way to solve the compatibility issue.
 			// we need to remove this after all maintained version supports the method.
-			if c.serviceModeUpdateCb != nil {
-				c.serviceModeUpdateCb(pdpb.ServiceMode_PD_SVC_MODE)
-			}
+			c.callbacks.onServiceModeUpdate(pdpb.ServiceMode_PD_SVC_MODE)
 			return nil
 		}
 		return err
@@ -877,9 +866,7 @@ func (c *serviceDiscovery) checkServiceModeChanged() error {
 	if clusterInfo == nil || len(clusterInfo.ServiceModes) == 0 {
 		return errors.WithStack(errs.ErrNoServiceModeReturned)
 	}
-	if c.serviceModeUpdateCb != nil {
-		c.serviceModeUpdateCb(clusterInfo.ServiceModes[0])
-	}
+	c.callbacks.onServiceModeUpdate(clusterInfo.ServiceModes[0])
 	return nil
 }
 
@@ -923,12 +910,16 @@ func (c *serviceDiscovery) getClusterInfo(ctx context.Context, url string, timeo
 	if err != nil {
 		return nil, err
 	}
+	start := time.Now()
+	defer func() { metrics.InternalCmdDurationGetClusterInfo.Observe(time.Since(start).Seconds()) }()
 	clusterInfo, err := pdpb.NewPDClient(cc).GetClusterInfo(ctx, &pdpb.GetClusterInfoRequest{})
 	if err != nil {
+		metrics.InternalCmdFailedDurationGetClusterInfo.Observe(time.Since(start).Seconds())
 		attachErr := errors.Errorf("error:%s target:%s status:%s", err, cc.Target(), cc.GetState().String())
 		return nil, errs.ErrClientGetClusterInfo.Wrap(attachErr).GenWithStackByCause()
 	}
 	if clusterInfo.GetHeader().GetError() != nil {
+		metrics.InternalCmdFailedDurationGetClusterInfo.Observe(time.Since(start).Seconds())
 		attachErr := errors.Errorf("error:%s target:%s status:%s", clusterInfo.GetHeader().GetError().String(), cc.Target(), cc.GetState().String())
 		return nil, errs.ErrClientGetClusterInfo.Wrap(attachErr).GenWithStackByCause()
 	}
@@ -942,12 +933,16 @@ func (c *serviceDiscovery) getMembers(ctx context.Context, url string, timeout t
 	if err != nil {
 		return nil, err
 	}
+	start := time.Now()
+	defer func() { metrics.InternalCmdDurationGetMembers.Observe(time.Since(start).Seconds()) }()
 	members, err := pdpb.NewPDClient(cc).GetMembers(ctx, &pdpb.GetMembersRequest{})
 	if err != nil {
+		metrics.InternalCmdFailedDurationGetMembers.Observe(time.Since(start).Seconds())
 		attachErr := errors.Errorf("error:%s target:%s status:%s", err, cc.Target(), cc.GetState().String())
 		return nil, errs.ErrClientGetMember.Wrap(attachErr).GenWithStackByCause()
 	}
 	if members.GetHeader().GetError() != nil {
+		metrics.InternalCmdFailedDurationGetMembers.Observe(time.Since(start).Seconds())
 		attachErr := errors.Errorf("error:%s target:%s status:%s", members.GetHeader().GetError().String(), cc.Target(), cc.GetState().String())
 		return nil, errs.ErrClientGetMember.Wrap(attachErr).GenWithStackByCause()
 	}
@@ -968,9 +963,7 @@ func (c *serviceDiscovery) updateURLs(members []*pdpb.Member) {
 	}
 	c.urls.Store(urls)
 	// Run callbacks to reflect the membership changes in the leader and followers.
-	for _, cb := range c.membersChangedCbs {
-		cb()
-	}
+	c.callbacks.onMembersChanged()
 	log.Info("[pd] update member urls", zap.Strings("old-urls", oldURLs), zap.Strings("new-urls", urls))
 }
 
@@ -987,13 +980,8 @@ func (c *serviceDiscovery) switchLeader(url string) (bool, error) {
 		c.leader.Store(leaderClient)
 	}
 	// Run callbacks
-	if c.tsoLeaderUpdatedCb != nil {
-		if err := c.tsoLeaderUpdatedCb(url); err != nil {
-			return true, err
-		}
-	}
-	for _, cb := range c.leaderSwitchedCbs {
-		cb()
+	if err := c.callbacks.onLeaderSwitched(url); err != nil {
+		return true, err
 	}
 	log.Info("[pd] switch leader", zap.String("new-leader", url), zap.String("old-leader", oldLeader.GetURL()))
 	return true, err

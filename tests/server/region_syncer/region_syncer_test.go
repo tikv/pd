@@ -38,15 +38,13 @@ func TestMain(m *testing.M) {
 func TestRegionSyncer(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/storage/levelDBStorageFastFlush", `return(true)`))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/syncer/noFastExitSync", `return(true)`))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/syncer/disableClientStreaming", `return(true)`))
 
 	cluster, err := tests.NewTestCluster(ctx, 3, func(conf *config.Config, _ string) { conf.PDServerCfg.UseRegionStorage = true })
-	defer func() {
-		cluster.Destroy()
-		cancel()
-	}()
+	defer cluster.Destroy()
 	re.NoError(err)
 
 	re.NoError(cluster.RunInitialServers())

@@ -53,7 +53,7 @@ func (suite *metaTestSuite) SetupSuite() {
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs", `return(true)`))
 	var err error
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
-	suite.cluster, err = tests.NewTestPDServiceCluster(suite.ctx, 1)
+	suite.cluster, err = tests.NewTestClusterWithKeyspaceGroup(suite.ctx, 1)
 	re.NoError(err)
 	err = suite.cluster.RunInitialServers()
 	re.NoError(err)
