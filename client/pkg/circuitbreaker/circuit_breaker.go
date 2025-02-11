@@ -68,7 +68,7 @@ type CircuitBreaker struct {
 	config *Settings
 	name   string
 
-	mutex sync.Mutex
+	sync.RWMutex
 	state *State
 
 	successCounter  prometheus.Counter
@@ -124,11 +124,18 @@ func registerMetrics(cb *CircuitBreaker) {
 	cb.fastFailCounter = m.CircuitBreakerCounters.WithLabelValues(metricName, "fast_fail")
 }
 
+// IsEnabled returns true if the circuit breaker is enabled.
+func (cb *CircuitBreaker) IsEnabled() bool {
+	cb.RLock()
+	defer cb.RUnlock()
+	return cb.config.ErrorRateThresholdPct > 0
+}
+
 // ChangeSettings changes the CircuitBreaker settings.
 // The changes will be reflected only in the next evaluation window.
 func (cb *CircuitBreaker) ChangeSettings(apply func(config *Settings)) {
-	cb.mutex.Lock()
-	defer cb.mutex.Unlock()
+	cb.Lock()
+	defer cb.Unlock()
 
 	apply(cb.config)
 	log.Info("circuit breaker settings changed", zap.Any("config", cb.config))
@@ -160,8 +167,8 @@ func (cb *CircuitBreaker) Execute(call func() (Overloading, error)) error {
 }
 
 func (cb *CircuitBreaker) onRequest() (*State, error) {
-	cb.mutex.Lock()
-	defer cb.mutex.Unlock()
+	cb.Lock()
+	defer cb.Unlock()
 
 	state, err := cb.state.onRequest(cb)
 	cb.state = state
@@ -169,8 +176,8 @@ func (cb *CircuitBreaker) onRequest() (*State, error) {
 }
 
 func (cb *CircuitBreaker) onResult(state *State, overloaded Overloading) {
-	cb.mutex.Lock()
-	defer cb.mutex.Unlock()
+	cb.Lock()
+	defer cb.Unlock()
 
 	// even if the circuit breaker already moved to a new state while the request was in progress,
 	// it is still ok to update the old state, but it is not relevant anymore
