@@ -3213,16 +3213,30 @@ func TestAddScheduler(t *testing.T) {
 	_, err = schedulers.CreateScheduler(types.BalanceRangeScheduler, oc, storage.NewStorageWithMemoryBackend(), schedulers.ConfigSliceDecoder(types.BalanceRangeScheduler, []string{}), controller.RemoveScheduler)
 	re.Error(err)
 
+<<<<<<< HEAD
 	gls, err = schedulers.CreateScheduler(types.BalanceRangeScheduler, oc, storage.NewStorageWithMemoryBackend(), schedulers.ConfigSliceDecoder(types.BalanceRangeScheduler, []string{"learner", "tiflash", "1h", "100", "200"}), controller.RemoveScheduler)
+=======
+	gls, err = schedulers.CreateScheduler(types.BalanceRangeScheduler, oc, storage.NewStorageWithMemoryBackend(), schedulers.ConfigSliceDecoder(types.BalanceRangeScheduler, []string{"learner", "tiflash", "1h", "test", "100", "200"}), controller.RemoveScheduler)
+>>>>>>> 4eb7235c629747692b6d336bf626cb86d31ec023
 	re.NoError(err)
 	re.NoError(controller.AddScheduler(gls))
 	conf, err = gls.EncodeConfig()
 	re.NoError(err)
+<<<<<<< HEAD
 	data = make(map[string]any)
 	re.NoError(json.Unmarshal(conf, &data))
 	re.Equal("learner", data["role"])
 	re.Equal("tiflash", data["engine"])
 	re.Equal(float64(time.Hour.Nanoseconds()), data["timeout"])
+=======
+	var cfg []map[string]any
+
+	re.NoError(json.Unmarshal(conf, &cfg))
+	re.Equal("learner", cfg[0]["role"])
+	re.Equal("tiflash", cfg[0]["engine"])
+	re.Equal("test", cfg[0]["alias"])
+	re.Equal(float64(time.Hour.Nanoseconds()), cfg[0]["timeout"])
+>>>>>>> 4eb7235c629747692b6d336bf626cb86d31ec023
 
 	hb, err := schedulers.CreateScheduler(types.BalanceHotRegionScheduler, oc, storage.NewStorageWithMemoryBackend(), schedulers.ConfigJSONDecoder([]byte("{}")))
 	re.NoError(err)

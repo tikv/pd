@@ -169,12 +169,12 @@ func (gta *GlobalTSOAllocator) SetTSO(tso uint64, ignoreSmaller, skipUpperBoundC
 //  2. Deprecated: The new way to generate a Global TSO by synchronizing with all other Local TSO Allocators.
 func (gta *GlobalTSOAllocator) GenerateTSO(ctx context.Context, count uint32) (pdpb.Timestamp, error) {
 	defer trace.StartRegion(ctx, "GlobalTSOAllocator.GenerateTSO").End()
-	if !gta.member.GetLeadership().Check() {
+	if !gta.member.IsLeader() {
 		gta.getMetrics().notLeaderEvent.Inc()
 		return pdpb.Timestamp{}, errs.ErrGenerateTimestamp.FastGenByArgs(fmt.Sprintf("requested pd %s of cluster", errs.NotLeaderErr))
 	}
 
-	return gta.timestampOracle.getTS(ctx, gta.member.GetLeadership(), count)
+	return gta.timestampOracle.getTS(ctx, gta.member, count)
 }
 
 // Reset is used to reset the TSO allocator.

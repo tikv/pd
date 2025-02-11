@@ -75,7 +75,7 @@ func TestGetPeers(t *testing.T) {
 			peers: []*metapb.Peer{learner},
 		},
 	} {
-		role := newRole(v.role)
+		role := NewRole(v.role)
 		re.Equal(v.peers, role.getPeers(region))
 	}
 }

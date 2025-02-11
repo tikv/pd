@@ -71,36 +71,83 @@ func (handler *balanceRangeSchedulerHandler) listConfig(w http.ResponseWriter, _
 type balanceRangeSchedulerConfig struct {
 	syncutil.RWMutex
 	schedulerConfig
-	balanceRangeSchedulerParam
+	jobs []*balanceRangeSchedulerJob
 }
 
-type balanceRangeSchedulerParam struct {
-	Role      string          `json:"role"`
-	Engine    string          `json:"engine"`
-	Timeout   time.Duration   `json:"timeout"`
-	Ranges    []core.KeyRange `json:"ranges"`
-	TableName string          `json:"table-name"`
+type balanceRangeSchedulerJob struct {
+	JobID   uint64          `json:"job-id"`
+	Role    Role            `json:"role"`
+	Engine  string          `json:"engine"`
+	Timeout time.Duration   `json:"timeout"`
+	Ranges  []core.KeyRange `json:"ranges"`
+	Alias   string          `json:"alias"`
+	Start   *time.Time      `json:"start,omitempty"`
+	Finish  *time.Time      `json:"finish,omitempty"`
+	Create  time.Time       `json:"create"`
+	Status  JobStatus       `json:"status"`
 }
 
-func (conf *balanceRangeSchedulerConfig) clone() *balanceRangeSchedulerParam {
+func (conf *balanceRangeSchedulerConfig) begin(job *balanceRangeSchedulerJob) bool {
+	conf.Lock()
+	defer conf.Unlock()
+	if job.Status != pending {
+		return false
+	}
+	now := time.Now()
+	job.Start = &now
+	job.Status = running
+	return true
+}
+
+func (conf *balanceRangeSchedulerConfig) finish(job *balanceRangeSchedulerJob) bool {
+	conf.Lock()
+	defer conf.Unlock()
+	if job.Status != running {
+		return false
+	}
+	now := time.Now()
+	job.Finish = &now
+	return true
+}
+
+func (conf *balanceRangeSchedulerConfig) pop() *balanceRangeSchedulerJob {
+	conf.RLock()
+	defer conf.RLock()
+	for _, job := range conf.jobs {
+		if job.Status == finished {
+			continue
+		}
+		return job
+	}
+	return nil
+}
+
+func (conf *balanceRangeSchedulerConfig) clone() []*balanceRangeSchedulerJob {
 	conf.RLock()
 	defer conf.RUnlock()
-	ranges := make([]core.KeyRange, len(conf.Ranges))
-	copy(ranges, conf.Ranges)
-	return &balanceRangeSchedulerParam{
-		Ranges:    ranges,
-		Role:      conf.Role,
-		Engine:    conf.Engine,
-		Timeout:   conf.Timeout,
-		TableName: conf.TableName,
+	jobs := make([]*balanceRangeSchedulerJob, 0, len(conf.jobs))
+	for _, job := range conf.jobs {
+		ranges := make([]core.KeyRange, len(job.Ranges))
+		copy(ranges, job.Ranges)
+		jobs = append(jobs, &balanceRangeSchedulerJob{
+			Ranges:  ranges,
+			Role:    job.Role,
+			Engine:  job.Engine,
+			Timeout: job.Timeout,
+			Alias:   job.Alias,
+			JobID:   job.JobID,
+			Start:   job.Start,
+		})
 	}
+
+	return jobs
 }
 
 // EncodeConfig serializes the config.
 func (s *balanceRangeScheduler) EncodeConfig() ([]byte, error) {
 	s.conf.RLock()
 	defer s.conf.RUnlock()
-	return EncodeConfig(s.conf)
+	return EncodeConfig(s.conf.jobs)
 }
 
 // ReloadConfig reloads the config.
@@ -108,14 +155,11 @@ func (s *balanceRangeScheduler) ReloadConfig() error {
 	s.conf.Lock()
 	defer s.conf.Unlock()
 
-	newCfg := &balanceRangeSchedulerConfig{}
-	if err := s.conf.load(newCfg); err != nil {
+	jobs := make([]*balanceRangeSchedulerJob, 0, len(s.conf.jobs))
+	if err := s.conf.load(jobs); err != nil {
 		return err
 	}
-	s.conf.Ranges = newCfg.Ranges
-	s.conf.Timeout = newCfg.Timeout
-	s.conf.Role = newCfg.Role
-	s.conf.Engine = newCfg.Engine
+	s.conf.jobs = jobs
 	return nil
 }
 
@@ -123,8 +167,6 @@ type balanceRangeScheduler struct {
 	*BaseScheduler
 	conf          *balanceRangeSchedulerConfig
 	handler       http.Handler
-	start         time.Time
-	role          Role
 	filters       []filter.Filter
 	filterCounter *filter.Counter
 }
@@ -140,17 +182,24 @@ func (s *balanceRangeScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster)
 	if !allowed {
 		operator.IncOperatorLimitCounter(s.GetType(), operator.OpRange)
 	}
-	if time.Now().Sub(s.start) > s.conf.Timeout {
-		allowed = false
-		balanceRangeExpiredCounter.Inc()
+	job := s.conf.pop()
+	if job != nil {
+		if job.Status == pending {
+			s.conf.begin(job)
+		}
+		if time.Now().Sub(*job.Start) > job.Timeout {
+			s.conf.finish(job)
+			balanceRangeExpiredCounter.Inc()
+		}
 	}
+
 	return allowed
 }
 
 // BalanceRangeCreateOption is used to create a scheduler with an option.
 type BalanceRangeCreateOption func(s *balanceRangeScheduler)
 
-// newBalanceRangeScheduler creates a scheduler that tends to keep given peer role on
+// newBalanceRangeScheduler creates a scheduler that tends to keep given peer Role on
 // special store balanced.
 func newBalanceRangeScheduler(opController *operator.Controller, conf *balanceRangeSchedulerConfig, options ...BalanceRangeCreateOption) Scheduler {
 	s := &balanceRangeScheduler{
@@ -161,15 +210,11 @@ func newBalanceRangeScheduler(opController *operator.Controller, conf *balanceRa
 	for _, option := range options {
 		option(s)
 	}
-	f := filter.NotSpecialEngines
-	if conf.Engine == core.EngineTiFlash {
-		f = filter.TiFlashEngineConstraint
-	}
-	s.filters = []filter.Filter{
-		filter.NewEngineFilter(balanceRangeName, f),
-	}
-	s.role = newRole(s.conf.Role)
 
+	s.filters = []filter.Filter{
+		&filter.StoreStateFilter{ActionScope: s.GetName(), TransferLeader: true, OperatorLevel: constant.Medium},
+		filter.NewSpecialUseFilter(s.GetName()),
+	}
 	s.filterCounter = filter.NewCounter(s.GetName())
 	return s
 }
@@ -177,8 +222,12 @@ func newBalanceRangeScheduler(opController *operator.Controller, conf *balanceRa
 // Schedule schedules the balance key range operator.
 func (s *balanceRangeScheduler) Schedule(cluster sche.SchedulerCluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
 	balanceRangeCounter.Inc()
-	opInfluence := s.OpController.GetOpInfluence(cluster.GetBasicCluster(), operator.WithRangeOption(s.conf.Ranges))
-	plan, err := s.prepare(cluster, opInfluence)
+	job := s.conf.pop()
+	if job == nil {
+		return nil, nil
+	}
+	opInfluence := s.OpController.GetOpInfluence(cluster.GetBasicCluster(), operator.WithRangeOption(job.Ranges))
+	plan, err := s.prepare(cluster, opInfluence, job)
 	if err != nil {
 		log.Error("failed to prepare balance key range scheduler", errs.ZapError(err))
 		return nil, nil
@@ -196,13 +245,13 @@ func (s *balanceRangeScheduler) Schedule(cluster sche.SchedulerCluster, dryRun b
 		if plan.sourceScore < plan.averageScore {
 			break
 		}
-		switch s.role {
-		case Leader:
-			plan.region = filter.SelectOneRegion(cluster.RandLeaderRegions(plan.sourceStoreID(), s.conf.Ranges), nil, baseRegionFilters...)
-		case Learner:
-			plan.region = filter.SelectOneRegion(cluster.RandLearnerRegions(plan.sourceStoreID(), s.conf.Ranges), nil, baseRegionFilters...)
-		case Follower:
-			plan.region = filter.SelectOneRegion(cluster.RandFollowerRegions(plan.sourceStoreID(), s.conf.Ranges), nil, baseRegionFilters...)
+		switch job.Role {
+		case leader:
+			plan.region = filter.SelectOneRegion(cluster.RandLeaderRegions(plan.sourceStoreID(), job.Ranges), nil, baseRegionFilters...)
+		case learner:
+			plan.region = filter.SelectOneRegion(cluster.RandLearnerRegions(plan.sourceStoreID(), job.Ranges), nil, baseRegionFilters...)
+		case follower:
+			plan.region = filter.SelectOneRegion(cluster.RandFollowerRegions(plan.sourceStoreID(), job.Ranges), nil, baseRegionFilters...)
 		}
 		if plan.region == nil {
 			balanceRangeNoRegionCounter.Inc()
@@ -239,7 +288,7 @@ func (s *balanceRangeScheduler) Schedule(cluster sche.SchedulerCluster, dryRun b
 // transferPeer selects the best store to create a new peer to replace the old peer.
 func (s *balanceRangeScheduler) transferPeer(plan *balanceRangeSchedulerPlan, dstStores []*core.StoreInfo) *operator.Operator {
 	excludeTargets := plan.region.GetStoreIDs()
-	if s.role != Leader {
+	if plan.job.Role != leader {
 		excludeTargets = make(map[uint64]struct{})
 	}
 	conf := plan.GetSchedulerConfig()
@@ -296,6 +345,7 @@ type balanceRangeSchedulerPlan struct {
 	region       *core.RegionInfo
 	fit          *placement.RegionFit
 	averageScore int64
+	job          *balanceRangeSchedulerJob
 }
 
 type storeInfo struct {
@@ -303,8 +353,8 @@ type storeInfo struct {
 	score int64
 }
 
-func (s *balanceRangeScheduler) prepare(cluster sche.SchedulerCluster, opInfluence operator.OpInfluence) (*balanceRangeSchedulerPlan, error) {
-	krs := core.NewKeyRanges(s.conf.Ranges)
+func (s *balanceRangeScheduler) prepare(cluster sche.SchedulerCluster, opInfluence operator.OpInfluence, job *balanceRangeSchedulerJob) (*balanceRangeSchedulerPlan, error) {
+	krs := core.NewKeyRanges(job.Ranges)
 	scanRegions, err := cluster.BatchScanRegions(krs)
 	if err != nil {
 		return nil, err
@@ -316,7 +366,7 @@ func (s *balanceRangeScheduler) prepare(cluster sche.SchedulerCluster, opInfluen
 	}
 	totalScore := int64(0)
 	for _, region := range scanRegions {
-		for _, peer := range s.role.getPeers(region) {
+		for _, peer := range job.Role.getPeers(region) {
 			storeInfos[peer.GetStoreId()].score += 1
 			totalScore += 1
 		}
@@ -325,7 +375,7 @@ func (s *balanceRangeScheduler) prepare(cluster sche.SchedulerCluster, opInfluen
 	storeList := make([]*storeInfo, 0, len(storeInfos))
 	for storeID, store := range storeInfos {
 		if influence := opInfluence.GetStoreInfluence(storeID); influence != nil {
-			store.score += s.role.getStoreInfluence(influence)
+			store.score += job.Role.getStoreInfluence(influence)
 		}
 		storeList = append(storeList, store)
 	}
@@ -353,6 +403,7 @@ func (s *balanceRangeScheduler) prepare(cluster sche.SchedulerCluster, opInfluen
 		target:           nil,
 		region:           nil,
 		averageScore:     averageScore,
+		job:              job,
 	}, nil
 }
 
@@ -384,54 +435,82 @@ func (p *balanceRangeSchedulerPlan) shouldBalance(scheduler string) bool {
 	return shouldBalance
 }
 
+// Role is the role of the region.
 type Role int
 
 const (
-	Leader Role = iota
-	Follower
-	Learner
-	Unknown
-	RoleLen
+	leader Role = iota
+	// include leader + voter
+	follower
+	learner
+	unknown
 )
 
 func (r Role) String() string {
 	switch r {
-	case Leader:
+	case leader:
 		return "leader"
-	case Follower:
+	case follower:
 		return "voter"
-	case Learner:
+	case learner:
 		return "learner"
 	default:
 		return "unknown"
 	}
 }
 
-func newRole(role string) Role {
+// JobStatus is the status of the job.
+type JobStatus int
+
+const (
+	pending JobStatus = iota
+	running
+	finished
+)
+
+func (s JobStatus) String() string {
+	switch s {
+	case pending:
+		return "pending"
+	case running:
+		return "running"
+	case finished:
+		return "finished"
+	}
+	return "unknown"
+}
+
+// MarshalJSON marshals to json.
+func (s JobStatus) MarshalJSON() ([]byte, error) {
+	return []byte(`"` + s.String() + `"`), nil
+}
+
+// NewRole creates a new role.
+func NewRole(role string) Role {
 	switch role {
 	case "leader":
-		return Leader
+		return learner
 	case "follower":
-		return Follower
+		return follower
 	case "learner":
-		return Learner
+		return leader
 	default:
-		return Unknown
+		return unknown
 	}
 }
 
 func (r Role) getPeers(region *core.RegionInfo) []*metapb.Peer {
 	switch r {
-	case Leader:
+	case leader:
 		return []*metapb.Peer{region.GetLeader()}
-	case Follower:
+	case follower:
 		followers := region.GetFollowers()
 		ret := make([]*metapb.Peer, 0, len(followers))
 		for _, peer := range followers {
 			ret = append(ret, peer)
 		}
 		return ret
-	case Learner:
+	case learner:
 		learners := region.GetLearners()
 		return learners
 	default:
@@ -441,13 +520,18 @@ func (r Role) getPeers(region *core.RegionInfo) []*metapb.Peer {
 
 func (r Role) getStoreInfluence(influence *operator.StoreInfluence) int64 {
 	switch r {
-	case Leader:
+	case leader:
 		return influence.LeaderCount
-	case Follower:
+	case follower:
 		return influence.RegionCount
-	case Learner:
+	case learner:
 		return influence.RegionCount
 	default:
 		return 0
 	}
+}
+
+// MarshalJSON marshals to json.
+func (r Role) MarshalJSON() ([]byte, error) {
+	return []byte(`"` + r.String() + `"`), nil
 }

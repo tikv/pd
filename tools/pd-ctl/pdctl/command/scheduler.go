@@ -377,11 +377,19 @@ func NewBalanceWitnessSchedulerCommand() *cobra.Command {
 
 // NewBalanceRangeSchedulerCommand returns a command to add a balance-range-scheduler.
 func NewBalanceRangeSchedulerCommand() *cobra.Command {
+<<<<<<< HEAD
 	c := &cobra.Command{
 		Use:        "balance-range-scheduler [--format=raw|encode|hex] <engine> <role> <table-name> <start_key> <end_key>",
 		Short:      "add a scheduler to balance region for given range",
 		Run:        addSchedulerForBalanceRangeCommandFunc,
 		Deprecated: "balance-range will be deprecated in the future, please use sql instead",
+=======
+	// todo: add deprecated warning if sql support
+	c := &cobra.Command{
+		Use:   "balance-range-scheduler [--format=raw|encode|hex] <engine> <role> <alias> <start_key> <end_key>",
+		Short: "add a scheduler to balance region for given range",
+		Run:   addSchedulerForBalanceRangeCommandFunc,
+>>>>>>> 4eb7235c629747692b6d336bf626cb86d31ec023
 	}
 	c.Flags().String("format", "hex", "the key format")
 	return c
@@ -445,7 +453,11 @@ func addSchedulerForBalanceRangeCommandFunc(cmd *cobra.Command, args []string) {
 	input["name"] = cmd.Name()
 	input["engine"] = args[0]
 	input["role"] = args[1]
+<<<<<<< HEAD
 	input["table-name"] = args[2]
+=======
+	input["alias"] = args[2]
+>>>>>>> 4eb7235c629747692b6d336bf626cb86d31ec023
 	input["start-key"] = url.QueryEscape(startKey)
 	input["end-key"] = url.QueryEscape(endKey)
 
