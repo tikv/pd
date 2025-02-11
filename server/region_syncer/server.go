@@ -29,6 +29,7 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/grpcutil"
 	"github.com/tikv/pd/pkg/ratelimit"
+<<<<<<< HEAD:server/region_syncer/server.go
 	"github.com/tikv/pd/pkg/syncutil"
 	"github.com/tikv/pd/server/core"
 	"github.com/tikv/pd/server/storage"
@@ -36,6 +37,14 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
+=======
+	"github.com/tikv/pd/pkg/storage"
+	"github.com/tikv/pd/pkg/storage/kv"
+	"github.com/tikv/pd/pkg/utils/grpcutil"
+	"github.com/tikv/pd/pkg/utils/keypath"
+	"github.com/tikv/pd/pkg/utils/logutil"
+	"github.com/tikv/pd/pkg/utils/syncutil"
+>>>>>>> cbb4dfeb7 (syncer: exit broadcast as soon as possible (#9018)):pkg/syncer/server.go
 )
 
 const (
@@ -161,13 +170,13 @@ func (s *RegionSyncer) RunServer(ctx context.Context, regionNotifier <-chan *cor
 				RegionLeaders: leaders,
 				Buckets:       buckets,
 			}
-			s.broadcast(regions)
+			s.broadcast(ctx, regions)
 		case <-ticker.C:
 			alive := &pdpb.SyncRegionResponse{
 				Header:     &pdpb.ResponseHeader{ClusterId: s.server.ClusterID()},
 				StartIndex: s.history.GetNextIndex(),
 			}
-			s.broadcast(alive)
+			s.broadcast(ctx, alive)
 		}
 		requests = requests[:0]
 		stats = stats[:0]
@@ -333,23 +342,39 @@ func (s *RegionSyncer) bindStream(name string, stream ServerStream) {
 	s.mu.streams[name] = stream
 }
 
-func (s *RegionSyncer) broadcast(regions *pdpb.SyncRegionResponse) {
-	var failed []string
-	s.mu.RLock()
-	for name, sender := range s.mu.streams {
-		err := sender.Send(regions)
-		if err != nil {
-			log.Error("region syncer send data meet error", errs.ZapError(errs.ErrGRPCSend, err))
-			failed = append(failed, name)
+func (s *RegionSyncer) broadcast(ctx context.Context, regions *pdpb.SyncRegionResponse) {
+	broadcastDone := make(chan struct{}, 1)
+	go func() {
+		defer logutil.LogPanic()
+		var failed []string
+		s.mu.RLock()
+		for name, sender := range s.mu.streams {
+			select {
+			case <-ctx.Done():
+				s.mu.RUnlock()
+				close(broadcastDone)
+				return
+			default:
+			}
+			err := sender.Send(regions)
+			if err != nil {
+				log.Error("region syncer send data meet error", errs.ZapError(errs.ErrGRPCSend, err))
+				failed = append(failed, name)
+			}
 		}
-	}
-	s.mu.RUnlock()
-	if len(failed) > 0 {
-		s.mu.Lock()
-		for _, name := range failed {
-			delete(s.mu.streams, name)
-			log.Info("region syncer delete the stream", zap.String("stream", name))
+		s.mu.RUnlock()
+		if len(failed) > 0 {
+			s.mu.Lock()
+			for _, name := range failed {
+				delete(s.mu.streams, name)
+				log.Info("region syncer delete the stream", zap.String("stream", name))
+			}
+			s.mu.Unlock()
 		}
-		s.mu.Unlock()
+		close(broadcastDone)
+	}()
+	select {
+	case <-broadcastDone:
+	case <-ctx.Done():
 	}
 }
