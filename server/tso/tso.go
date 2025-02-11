@@ -369,7 +369,12 @@ func (t *timestampOracle) UpdateTimestamp(leadership *election.Leadership) error
 var maxRetryCount = 10
 
 // getTS is used to get a timestamp.
+<<<<<<< HEAD:server/tso/tso.go
 func (t *timestampOracle) getTS(leadership *election.Leadership, count uint32, suffixBits int) (pdpb.Timestamp, error) {
+=======
+func (t *timestampOracle) getTS(ctx context.Context, member ElectionMember, count uint32) (pdpb.Timestamp, error) {
+	defer trace.StartRegion(ctx, "timestampOracle.getTS").End()
+>>>>>>> aa7a4c6e4 (pkg: fix tso is generated even if the member is not leader (#9056)):pkg/tso/tso.go
 	var resp pdpb.Timestamp
 	if count == 0 {
 		return resp, errs.ErrGenerateTimestamp.FastGenByArgs("tso count should be positive")
@@ -378,7 +383,7 @@ func (t *timestampOracle) getTS(leadership *election.Leadership, count uint32, s
 		currentPhysical, _ := t.getTSO()
 		if currentPhysical == typeutil.ZeroTime {
 			// If it's leader, maybe SyncTimestamp hasn't completed yet
-			if leadership.Check() {
+			if member.IsLeader() {
 				time.Sleep(200 * time.Millisecond)
 				continue
 			}
@@ -399,8 +404,13 @@ func (t *timestampOracle) getTS(leadership *election.Leadership, count uint32, s
 			continue
 		}
 		// In case lease expired after the first check.
+<<<<<<< HEAD:server/tso/tso.go
 		if !leadership.Check() {
 			return pdpb.Timestamp{}, errs.ErrGenerateTimestamp.FastGenByArgs("not the pd or local tso allocator leader anymore")
+=======
+		if !member.IsLeader() {
+			return pdpb.Timestamp{}, errs.ErrGenerateTimestamp.FastGenByArgs(fmt.Sprintf("requested %s anymore", errs.NotLeaderErr))
+>>>>>>> aa7a4c6e4 (pkg: fix tso is generated even if the member is not leader (#9056)):pkg/tso/tso.go
 		}
 		resp.SuffixBits = uint32(suffixBits)
 		return resp, nil
