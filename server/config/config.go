@@ -569,13 +569,7 @@ func (c *PDServerConfig) adjust(meta *configutil.ConfigMetaData) error {
 	} else if c.GCTunerThreshold > maxGCTunerThreshold {
 		c.GCTunerThreshold = maxGCTunerThreshold
 	}
-<<<<<<< HEAD
-	c.migrateConfigurationFromFile(meta)
-=======
-	if err := migrateConfigurationFromFile(meta); err != nil {
-		return err
-	}
->>>>>>> 31a0ad6b2 (config: completely remove the deprecated field from the PD server config (#8981))
+	migrateConfigurationFromFile(meta)
 	return c.Validate()
 }
 
