@@ -1471,22 +1471,33 @@ func (r *RegionsInfo) QueryRegions(
 	keys, prevKeys [][]byte, ids []uint64, needBuckets bool,
 ) ([]uint64, []uint64, map[uint64]*pdpb.RegionResponse) {
 	// Iterate the region keys to find the regions.
+	queryRegionKeysCount.Add(float64(len(keys)))
+	start := time.Now()
 	regions := r.getRegionsByKeys(keys)
+	queryRegionByKeysDuration.Observe(time.Since(start).Seconds())
 	// Assert the returned regions count matches the input keys.
 	if len(regions) != len(keys) {
 		panic("returned regions count mismatch with the input keys")
 	}
+
 	// Iterate the prevKeys to find the regions.
+	queryRegionPrevKeysCount.Add(float64(len(prevKeys)))
+	start = time.Now()
 	prevRegions := r.getRegionsByPrevKeys(prevKeys)
+	queryRegionByPrevKeysDuration.Observe(time.Since(start).Seconds())
 	// Assert the returned regions count matches the input keys.
 	if len(prevRegions) != len(prevKeys) {
 		panic("returned prev regions count mismatch with the input keys")
 	}
+
 	// Build the key -> ID map for the final results.
 	regionsByID := make(map[uint64]*pdpb.RegionResponse, len(regions)+len(prevRegions)+len(ids))
 	keyIDMap := sortOutKeyIDMap(regionsByID, regions, needBuckets)
 	prevKeyIDMap := sortOutKeyIDMap(regionsByID, prevRegions, needBuckets)
+
 	// Iterate the region IDs to find the regions.
+	queryRegionIDsCount.Add(float64(len(ids)))
+	start = time.Now()
 	for _, id := range ids {
 		// Check if the region has been found.
 		if regionFound, ok := regionsByID[id]; (ok && regionFound != nil) || id == 0 {
@@ -1508,6 +1519,8 @@ func (r *RegionsInfo) QueryRegions(
 			regionsByID[id] = regionResp
 		}
 	}
+	queryRegionByIDsDuration.Observe(time.Since(start).Seconds())
+
 	return keyIDMap, prevKeyIDMap, regionsByID
 }
 
