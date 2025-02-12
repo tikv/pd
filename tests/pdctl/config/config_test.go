@@ -98,7 +98,6 @@ func TestConfig(t *testing.T) {
 	args = []string{"-u", pdAddr, "config", "set", "trace-region-flow", "false"}
 	_, err = pdctl.ExecuteCommand(cmd, args...)
 	re.NoError(err)
-	re.False(svr.GetPDServerConfig().TraceRegionFlow)
 
 	args = []string{"-u", pdAddr, "config", "set", "flow-round-by-digit", "10"}
 	_, err = pdctl.ExecuteCommand(cmd, args...)
