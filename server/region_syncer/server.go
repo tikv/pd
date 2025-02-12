@@ -32,11 +32,7 @@ import (
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
-<<<<<<< HEAD:server/region_syncer/server.go
-=======
-	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/logutil"
->>>>>>> cbb4dfeb7 (syncer: exit broadcast as soon as possible (#9018)):pkg/syncer/server.go
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
