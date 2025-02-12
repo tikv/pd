@@ -322,7 +322,7 @@ func (am *AllocatorManager) SetUpAllocator(parentCtx context.Context, dcLocation
 	}
 	var allocator Allocator
 	if dcLocation == GlobalDCLocation {
-		allocator = NewGlobalTSOAllocator(am, leadership)
+		allocator = NewGlobalTSOAllocator(am, am.member)
 	} else {
 		allocator = NewLocalTSOAllocator(am, leadership, dcLocation)
 	}

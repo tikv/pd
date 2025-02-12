@@ -30,7 +30,7 @@ import (
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/tsoutil"
 	"github.com/tikv/pd/pkg/typeutil"
-	"github.com/tikv/pd/server/election"
+	"github.com/tikv/pd/server/member"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 )
@@ -61,9 +61,9 @@ type Allocator interface {
 type GlobalTSOAllocator struct {
 	// for global TSO synchronization
 	allocatorManager *AllocatorManager
-	// leadership is used to check the current PD server's leadership
+	// member is used to check the current PD server is the leader
 	// to determine whether a TSO request could be processed.
-	leadership      *election.Leadership
+	member          *member.Member
 	timestampOracle *timestampOracle
 	// syncRTT is the RTT duration a SyncMaxTS RPC call will cost,
 	// which is used to estimate the MaxTS in a Global TSO generation
@@ -74,13 +74,13 @@ type GlobalTSOAllocator struct {
 // NewGlobalTSOAllocator creates a new global TSO allocator.
 func NewGlobalTSOAllocator(
 	am *AllocatorManager,
-	leadership *election.Leadership,
+	member *member.Member,
 ) Allocator {
 	gta := &GlobalTSOAllocator{
 		allocatorManager: am,
-		leadership:       leadership,
+		member:           member,
 		timestampOracle: &timestampOracle{
-			client:                 leadership.GetClient(),
+			client:                 member.GetLeadership().GetClient(),
 			rootPath:               am.rootPath,
 			saveInterval:           am.saveInterval,
 			updatePhysicalInterval: am.updatePhysicalInterval,
@@ -128,7 +128,7 @@ func (gta *GlobalTSOAllocator) Initialize(int) error {
 	tsoAllocatorRole.WithLabelValues(gta.timestampOracle.dcLocation).Set(1)
 	// The suffix of a Global TSO should always be 0.
 	gta.timestampOracle.suffix = 0
-	return gta.timestampOracle.SyncTimestamp(gta.leadership)
+	return gta.timestampOracle.SyncTimestamp(gta.member.GetLeadership())
 }
 
 // IsInitialize is used to indicates whether this allocator is initialized.
@@ -138,12 +138,12 @@ func (gta *GlobalTSOAllocator) IsInitialize() bool {
 
 // UpdateTSO is used to update the TSO in memory and the time window in etcd.
 func (gta *GlobalTSOAllocator) UpdateTSO() error {
-	return gta.timestampOracle.UpdateTimestamp(gta.leadership)
+	return gta.timestampOracle.UpdateTimestamp(gta.member.GetLeadership())
 }
 
 // SetTSO sets the physical part with given TSO.
 func (gta *GlobalTSOAllocator) SetTSO(tso uint64, ignoreSmaller, skipUpperBoundCheck bool) error {
-	return gta.timestampOracle.resetUserTimestampInner(gta.leadership, tso, ignoreSmaller, skipUpperBoundCheck)
+	return gta.timestampOracle.resetUserTimestampInner(gta.member.GetLeadership(), tso, ignoreSmaller, skipUpperBoundCheck)
 }
 
 // GenerateTSO is used to generate the given number of TSOs.
@@ -157,7 +157,7 @@ func (gta *GlobalTSOAllocator) SetTSO(tso uint64, ignoreSmaller, skipUpperBoundC
 //  2. Estimate a MaxTS and try to write it to all Local TSO Allocator leaders directly to reduce the RTT.
 //     During the process, if the estimated MaxTS is not accurate, it will fallback to the collecting way.
 func (gta *GlobalTSOAllocator) GenerateTSO(count uint32) (pdpb.Timestamp, error) {
-	if !gta.leadership.Check() {
+	if !gta.member.IsLeader() {
 		tsoCounter.WithLabelValues("not_leader", gta.timestampOracle.dcLocation).Inc()
 		return pdpb.Timestamp{}, errs.ErrGenerateTimestamp.FastGenByArgs(fmt.Sprintf("requested pd %s of cluster", errs.NotLeaderErr))
 	}
@@ -166,7 +166,7 @@ func (gta *GlobalTSOAllocator) GenerateTSO(count uint32) (pdpb.Timestamp, error)
 	// No dc-locations configured in the cluster, use the normal Global TSO generation way.
 	// (without synchronization with other Local TSO Allocators)
 	if len(dcLocationMap) == 0 {
-		return gta.timestampOracle.getTS(gta.leadership, count, 0)
+		return gta.timestampOracle.getTS(gta.member.GetLeadership(), count, 0)
 	}
 
 	// Have dc-locations configured in the cluster, use the Global TSO generation way.
@@ -228,14 +228,14 @@ func (gta *GlobalTSOAllocator) GenerateTSO(count uint32) (pdpb.Timestamp, error)
 		if tsoutil.CompareTimestamp(currentGlobalTSO, &globalTSOResp) < 0 {
 			tsoCounter.WithLabelValues("global_tso_persist", gta.timestampOracle.dcLocation).Inc()
 			// Update the Global TSO in memory
-			if err = gta.timestampOracle.resetUserTimestamp(gta.leadership, tsoutil.GenerateTS(&globalTSOResp), true); err != nil {
+			if err = gta.timestampOracle.resetUserTimestamp(gta.member.GetLeadership(), tsoutil.GenerateTS(&globalTSOResp), true); err != nil {
 				tsoCounter.WithLabelValues("global_tso_persist_err", gta.timestampOracle.dcLocation).Inc()
 				log.Error("global tso allocator update the global tso in memory failed", errs.ZapError(err))
 				continue
 			}
 		}
 		// 5. Check leadership again before we returning the response.
-		if !gta.leadership.Check() {
+		if !gta.member.IsLeader() {
 			tsoCounter.WithLabelValues("not_leader_anymore", gta.timestampOracle.dcLocation).Inc()
 			return pdpb.Timestamp{}, errs.ErrGenerateTimestamp.FastGenByArgs("not the pd leader anymore")
 		}
