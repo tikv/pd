@@ -1516,14 +1516,11 @@ func (r *RegionsInfo) getRegionsByKeys(keys [][]byte) []*RegionInfo {
 	regions := make([]*RegionInfo, 0, len(keys))
 	// Split the keys into multiple batches, and search each batch separately.
 	// This is to avoid the lock contention on the `regionTree`.
-	var results []*RegionInfo
 	for _, batch := range splitKeysIntoBatches(keys) {
 		r.t.RLock()
-		results = r.tree.searchByKeys(batch)
-		for _, region := range results {
-			regions = append(regions, r.getRegionLocked(region.GetMeta().GetId()))
-		}
+		results := r.tree.searchByKeys(batch)
 		r.t.RUnlock()
+		regions = append(regions, results...)
 	}
 	return regions
 }
@@ -1543,14 +1540,11 @@ func splitKeysIntoBatches(keys [][]byte) [][][]byte {
 
 func (r *RegionsInfo) getRegionsByPrevKeys(prevKeys [][]byte) []*RegionInfo {
 	regions := make([]*RegionInfo, 0, len(prevKeys))
-	var results []*RegionInfo
 	for _, batch := range splitKeysIntoBatches(prevKeys) {
 		r.t.RLock()
-		results = r.tree.searchByPrevKeys(batch)
-		for _, region := range results {
-			regions = append(regions, r.getRegionLocked(region.GetMeta().GetId()))
-		}
+		results := r.tree.searchByPrevKeys(batch)
 		r.t.RUnlock()
+		regions = append(regions, results...)
 	}
 	return regions
 }

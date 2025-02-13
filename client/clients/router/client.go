@@ -67,9 +67,25 @@ func ConvertToRegion(res regionResponse) *Region {
 		return nil
 	}
 
-	// Deep-copy here is necessary since the data inside the protobuf message can be reused,
-	// such like that if a []byte field in the protobuf message is reused, which might be changed
-	// by the follow-up requests, leading to the unexpected region key range results.
+	r := &Region{
+		Meta:         region,
+		Leader:       res.GetLeader(),
+		PendingPeers: res.GetPendingPeers(),
+		Buckets:      res.GetBuckets(),
+	}
+	for _, s := range res.GetDownPeers() {
+		r.DownPeers = append(r.DownPeers, s.Peer)
+	}
+	return r
+}
+
+// convertToRegionCopy converts and deep-copies the region response to a new region.
+func convertToRegionCopy(res regionResponse) *Region {
+	region := res.GetRegion()
+	if region == nil {
+		return nil
+	}
+
 	r := &Region{
 		Meta:    proto.Clone(region).(*metapb.Region),
 		Leader:  proto.Clone(res.GetLeader()).(*metapb.Peer),
@@ -224,7 +240,11 @@ func (c *Cli) newRequest(ctx context.Context) *Request {
 }
 
 func requestFinisher(resp *pdpb.QueryRegionResponse) batch.FinisherFunc[*Request] {
-	var keyIdx, prevKeyIdx int
+	var (
+		keyIdx, prevKeyIdx int
+		// regionUsed is used to record whether the region has been used.
+		regionUsed = make(map[uint64]struct{})
+	)
 	return func(_ int, req *Request, err error) {
 		requestCtx := req.requestCtx
 		defer trace.StartRegion(requestCtx, "pdclient.regionReqDone").End()
@@ -244,8 +264,15 @@ func requestFinisher(resp *pdpb.QueryRegionResponse) batch.FinisherFunc[*Request
 		} else if req.id != 0 {
 			id = req.id
 		}
-		if region, ok := resp.RegionsById[id]; ok {
-			req.region = ConvertToRegion(region)
+		if regionResp, ok := resp.RegionsById[id]; ok {
+			// Since the region results may be modified by the requester,
+			// we need to ensure each region result returned is unique.
+			if _, used := regionUsed[id]; used {
+				req.region = convertToRegionCopy(regionResp)
+			} else {
+				req.region = ConvertToRegion(regionResp)
+				regionUsed[id] = struct{}{}
+			}
 		}
 		req.tryDone(err)
 	}
