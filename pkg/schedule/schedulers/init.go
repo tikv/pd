@@ -572,7 +572,7 @@ func schedulersRegister() {
 				return errs.ErrQueryUnescape.Wrap(err)
 			}
 			engine := NewEngine(engineString)
-			if engine == Unknown {
+			if engine == notSupported {
 				return errs.ErrQueryUnescape.FastGenByArgs("engine")
 			}
 			timeout, err := url.QueryUnescape(args[2])
@@ -596,7 +596,7 @@ func schedulersRegister() {
 				id = conf.jobs[len(conf.jobs)-1].JobID + 1
 			}
 
-			if engine == TiFlash && role != learner {
+			if engine == tiflash && role != learner {
 				return errs.ErrURLParse.FastGenByArgs("TiFlash only support learner role")
 			}
 

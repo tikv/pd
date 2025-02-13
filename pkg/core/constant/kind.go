@@ -66,6 +66,7 @@ const (
 	RegionKind
 	// WitnessKind indicates the witness kind resource
 	WitnessKind
+
 	// ResourceKindLen represents the ResourceKind count
 	ResourceKindLen
 )
