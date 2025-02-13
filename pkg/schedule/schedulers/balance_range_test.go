@@ -15,39 +15,19 @@
 package schedulers
 
 import (
-	"context"
-	"github.com/tikv/pd/pkg/schedule/types"
-	"github.com/tikv/pd/pkg/storage"
+	"fmt"
+	"github.com/tikv/pd/pkg/schedule/operator"
+
 	"testing"
 
-	"github.com/stretchr/testify/require"
-	"github.com/stretchr/testify/suite"
-
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/stretchr/testify/require"
 
 	"github.com/tikv/pd/pkg/core"
-	"github.com/tikv/pd/pkg/mock/mockcluster"
-	"github.com/tikv/pd/pkg/schedule/operator"
+	"github.com/tikv/pd/pkg/schedule/placement"
+	"github.com/tikv/pd/pkg/schedule/types"
+	"github.com/tikv/pd/pkg/storage"
 )
-
-type balanceRangeSchedulerTestSuite struct {
-	suite.Suite
-	cancel context.CancelFunc
-	tc     *mockcluster.Cluster
-	oc     *operator.Controller
-}
-
-func TestBalanceRangeSchedulerTestSuite(t *testing.T) {
-	suite.Run(t, new(balanceRangeSchedulerTestSuite))
-}
-
-func (suite *balanceRangeSchedulerTestSuite) SetupTest() {
-	suite.cancel, _, suite.tc, suite.oc = prepareSchedulersTest()
-}
-
-func (suite *balanceRangeSchedulerTestSuite) TearDownTest() {
-	suite.cancel()
-}
 
 func TestGetPeers(t *testing.T) {
 	re := require.New(t)
@@ -80,6 +60,39 @@ func TestGetPeers(t *testing.T) {
 	}
 }
 
+func TestJobStatus(t *testing.T) {
+	re := require.New(t)
+	conf := balanceRangeSchedulerConfig{}
+	for _, v := range []struct {
+		jobStatus JobStatus
+		begin     bool
+		finish    bool
+	}{
+		{
+			pending,
+			true,
+			false,
+		},
+		{
+			running,
+			false,
+			true,
+		},
+		{
+			finished,
+			false,
+			false,
+		},
+	} {
+		job := &balanceRangeSchedulerJob{
+			Status: v.jobStatus,
+		}
+		re.Equal(v.begin, conf.begin(job))
+		job.Status = v.jobStatus
+		re.Equal(v.finish, conf.finish(job))
+	}
+}
+
 func TestBalanceRangeShouldBalance(t *testing.T) {
 	re := require.New(t)
 	for _, v := range []struct {
@@ -106,27 +119,100 @@ func TestBalanceRangeShouldBalance(t *testing.T) {
 	}
 }
 
-//func TestBalanceRangePrepare(t *testing.T) {
-//	re := require.New(t)
-//	cancel, _, tc, oc := prepareSchedulersTest()
-//	defer cancel()
-//	// args: [role, engine, timeout, range1, range2, ...]
-//}
-
-func TestBalanceRangeSchedule(t *testing.T) {
+func TestBalanceRangePlan(t *testing.T) {
 	re := require.New(t)
 	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
-	// args: [role, engine, timeout, range1, range2, ...]
-	scheduler, err := CreateScheduler(types.BalanceRangeScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.BalanceRangeScheduler, []string{"leader", "tikv", "1h", "100", "200"}))
-	re.Nil(err)
-	op, _ := scheduler.Schedule(tc, true)
-	re.Empty(op)
-	for i := 0; i <= 4; i++ {
-		tc.AddLeaderStore(uint64(int64(i)), i*10)
+	sc := newBalanceRangeScheduler(oc, &balanceRangeSchedulerConfig{}).(*balanceRangeScheduler)
+	for i := 1; i <= 3; i++ {
+		tc.AddLeaderStore(uint64(i), 0)
 	}
-	tc.AddLeaderRegionWithRange(1, "100", "100", 1, 2, 3, 4)
-	tc.AddLeaderRegionWithRange(2, "110", "120", 1, 2, 3, 4)
-	op, _ = scheduler.Schedule(tc, true)
-	re.NotEmpty(op)
+	tc.AddLeaderRegionWithRange(1, "100", "110", 1, 2, 3)
+	job := &balanceRangeSchedulerJob{
+		Engine: TiKV,
+		Role:   leader,
+		Ranges: []core.KeyRange{core.NewKeyRange("100", "110")},
+	}
+	plan, err := sc.prepare(tc, *operator.NewOpInfluence(), job)
+	re.NoError(err)
+	re.NotNil(plan)
+	re.Len(plan.stores, 3)
+	re.Len(plan.scoreMap, 3)
+	re.Equal(plan.scoreMap[1], int64(1))
+}
+
+func TestTIKVEngine(t *testing.T) {
+	re := require.New(t)
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+	scheduler, err := CreateScheduler(types.BalanceRangeScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.BalanceRangeScheduler, []string{"leader", "tikv", "1h", "test", "100", "200"}))
+	re.Nil(err)
+	ops, _ := scheduler.Schedule(tc, true)
+	re.Empty(ops)
+	for i := 1; i <= 3; i++ {
+		tc.AddLeaderStore(uint64(i), 0)
+	}
+	// add regions:
+	// store-1: 3 leader regions
+	// store-2: 2 leader regions
+	// store-3: 1 leader regions
+	tc.AddLeaderRegionWithRange(1, "100", "110", 1, 2, 3)
+	tc.AddLeaderRegionWithRange(2, "110", "120", 1, 2, 3)
+	tc.AddLeaderRegionWithRange(3, "120", "140", 1, 2, 3)
+	tc.AddLeaderRegionWithRange(4, "140", "160", 2, 1, 3)
+	tc.AddLeaderRegionWithRange(5, "160", "180", 2, 1, 3)
+	tc.AddLeaderRegionWithRange(5, "180", "200", 3, 1, 2)
+	// case1: transfer leader from store 1 to store 3
+	ops, _ = scheduler.Schedule(tc, true)
+	re.NotEmpty(ops)
+	op := ops[0]
+	re.Equal(op.GetAdditionalInfo("sourceScore"), "3")
+	re.Equal(op.GetAdditionalInfo("targetScore"), "1")
+	re.Contains(op.Brief(), "transfer leader: store 1 to 3")
+	tc.AddLeaderStore(4, 0)
+
+	// case2: move peer from store 1 to store 4
+	ops, _ = scheduler.Schedule(tc, true)
+	re.NotEmpty(ops)
+	op = ops[0]
+	re.Equal(op.GetAdditionalInfo("sourceScore"), "3")
+	re.Equal(op.GetAdditionalInfo("targetScore"), "0")
+	re.Contains(op.Brief(), "mv peer: store [1] to [4]")
+}
+
+func TestTIFLASHEngine(t *testing.T) {
+	re := require.New(t)
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+	tikvCount := 3
+	for i := 1; i <= tikvCount; i++ {
+		tc.AddLeaderStore(uint64(i), 0)
+	}
+	for i := tikvCount + 1; i <= tikvCount+3; i++ {
+		tc.AddLabelsStore(uint64(i), 0, map[string]string{"engine": "tiflash"})
+	}
+	for i := 1; i <= 3; i++ {
+		tc.AddRegionWithLearner(uint64(i), 1, []uint64{2, 3}, []uint64{4})
+	}
+	startKey := fmt.Sprintf("%20d0", 1)
+	endKey := fmt.Sprintf("%20d0", 10)
+	tc.RuleManager.SetRule(&placement.Rule{
+		GroupID:  "tiflash",
+		ID:       "1",
+		Role:     placement.Learner,
+		Count:    1,
+		StartKey: []byte(startKey),
+		EndKey:   []byte(endKey),
+		LabelConstraints: []placement.LabelConstraint{
+			{Key: "engine", Op: "in", Values: []string{"tiflash"}},
+		},
+	})
+
+	scheduler, err := CreateScheduler(types.BalanceRangeScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.BalanceRangeScheduler, []string{"learner", "tiflash", "1h", "test", startKey, endKey}))
+	re.NoError(err)
+	ops, _ := scheduler.Schedule(tc, false)
+	re.NotEmpty(ops)
+	op := ops[0]
+	re.Equal(op.GetAdditionalInfo("sourceScore"), "3")
+	re.Contains(op.Brief(), "mv peer: store [4] to")
 }

@@ -559,17 +559,21 @@ func schedulersRegister() {
 			if len(args) < 5 {
 				return errs.ErrSchedulerConfig.FastGenByArgs("args length must be greater than 4")
 			}
-			role, err := url.QueryUnescape(args[0])
+			roleString, err := url.QueryUnescape(args[0])
 			if err != nil {
 				return errs.ErrQueryUnescape.Wrap(err)
 			}
-			jobRole := NewRole(role)
-			if jobRole == unknown {
+			role := NewRole(roleString)
+			if role == unknown {
 				return errs.ErrQueryUnescape.FastGenByArgs("role")
 			}
-			engine, err := url.QueryUnescape(args[1])
+			engineString, err := url.QueryUnescape(args[1])
 			if err != nil {
 				return errs.ErrQueryUnescape.Wrap(err)
+			}
+			engine := NewEngine(engineString)
+			if engine == Unknown {
+				return errs.ErrQueryUnescape.FastGenByArgs("engine")
 			}
 			timeout, err := url.QueryUnescape(args[2])
 			if err != nil {
@@ -592,8 +596,12 @@ func schedulersRegister() {
 				id = conf.jobs[len(conf.jobs)-1].JobID + 1
 			}
 
+			if engine == TiFlash && role != learner {
+				return errs.ErrURLParse.FastGenByArgs("TiFlash only support learner role")
+			}
+
 			job := &balanceRangeSchedulerJob{
-				Role:    jobRole,
+				Role:    role,
 				Engine:  engine,
 				Timeout: duration,
 				Alias:   alias,

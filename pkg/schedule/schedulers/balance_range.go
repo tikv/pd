@@ -77,7 +77,7 @@ type balanceRangeSchedulerConfig struct {
 type balanceRangeSchedulerJob struct {
 	JobID   uint64          `json:"job-id"`
 	Role    Role            `json:"role"`
-	Engine  string          `json:"engine"`
+	Engine  Engine          `json:"engine"`
 	Timeout time.Duration   `json:"timeout"`
 	Ranges  []core.KeyRange `json:"ranges"`
 	Alias   string          `json:"alias"`
@@ -235,7 +235,7 @@ func (s *balanceRangeScheduler) Schedule(cluster sche.SchedulerCluster, dryRun b
 
 	downFilter := filter.NewRegionDownFilter()
 	replicaFilter := filter.NewRegionReplicatedFilter(cluster)
-	snapshotFilter := filter.NewSnapshotSendFilter(plan.stores, constant.Medium)
+	snapshotFilter := filter.NewSnapshotSendFilter(cluster.GetStores(), constant.Medium)
 	pendingFilter := filter.NewRegionPendingFilter()
 	baseRegionFilters := []filter.RegionFilter{downFilter, replicaFilter, snapshotFilter, pendingFilter}
 
@@ -276,19 +276,13 @@ func (s *balanceRangeScheduler) Schedule(cluster sche.SchedulerCluster, dryRun b
 			return []*operator.Operator{op}, nil
 		}
 	}
-
-	if err != nil {
-		log.Error("failed to prepare balance key range scheduler", errs.ZapError(err))
-		return nil, nil
-
-	}
 	return nil, nil
 }
 
 // transferPeer selects the best store to create a new peer to replace the old peer.
 func (s *balanceRangeScheduler) transferPeer(plan *balanceRangeSchedulerPlan, dstStores []*core.StoreInfo) *operator.Operator {
 	excludeTargets := plan.region.GetStoreIDs()
-	if plan.job.Role != leader {
+	if plan.job.Role == leader {
 		excludeTargets = make(map[uint64]struct{})
 	}
 	conf := plan.GetSchedulerConfig()
@@ -312,8 +306,25 @@ func (s *balanceRangeScheduler) transferPeer(plan *balanceRangeSchedulerPlan, ds
 		log.Debug("candidate store", zap.Uint64("region-id", regionID), zap.Uint64("source-store", sourceID), zap.Uint64("target-store", targetID))
 
 		oldPeer := plan.region.GetStorePeer(sourceID)
-		newPeer := &metapb.Peer{StoreId: plan.target.GetID(), Role: oldPeer.Role}
-		op, err := operator.CreateMovePeerOperator(s.GetName(), plan, plan.region, operator.OpRange, oldPeer.GetStoreId(), newPeer)
+		exist := false
+		if plan.job.Role == leader {
+			peers := plan.region.GetPeers()
+			for _, peer := range peers {
+				if peer.GetStoreId() == targetID {
+					exist = true
+					break
+				}
+			}
+		}
+		var op *operator.Operator
+		var err error
+		if exist {
+			op, err = operator.CreateTransferLeaderOperator(s.GetName(), plan, plan.region, plan.targetStoreID(), []uint64{}, operator.OpRange)
+		} else {
+			newPeer := &metapb.Peer{StoreId: plan.target.GetID(), Role: oldPeer.Role}
+			op, err = operator.CreateMovePeerOperator(s.GetName(), plan, plan.region, operator.OpRange, oldPeer.GetStoreId(), newPeer)
+		}
+
 		if err != nil {
 			balanceRangeCreateOpFailCounter.Inc()
 			return nil
@@ -336,8 +347,8 @@ type balanceRangeSchedulerPlan struct {
 	sche.SchedulerCluster
 	// stores is sorted by score desc
 	stores []*core.StoreInfo
-	// sourceMap records the storeID -> score
-	sourceMap    map[uint64]int64
+	// scoreMap records the storeID -> score
+	scoreMap     map[uint64]int64
 	source       *core.StoreInfo
 	sourceScore  int64
 	target       *core.StoreInfo
@@ -359,7 +370,14 @@ func (s *balanceRangeScheduler) prepare(cluster sche.SchedulerCluster, opInfluen
 	if err != nil {
 		return nil, err
 	}
-	sources := filter.SelectSourceStores(cluster.GetStores(), s.filters, cluster.GetSchedulerConfig(), nil, nil)
+	filters := s.filters
+	if job.Engine == TiFlash {
+		filters = append(filters, filter.NewEngineFilter(balanceRangeName, filter.TiFlashEngineConstraint))
+	}
+	sources := filter.SelectSourceStores(cluster.GetStores(), filters, cluster.GetSchedulerConfig(), nil, nil)
+	if sources == nil {
+		return nil, errs.ErrStoresNotEnough.FastGenByArgs("no store to select")
+	}
 	storeInfos := make(map[uint64]*storeInfo, len(sources))
 	for _, source := range sources {
 		storeInfos[source.GetID()] = &storeInfo{store: source}
@@ -380,7 +398,10 @@ func (s *balanceRangeScheduler) prepare(cluster sche.SchedulerCluster, opInfluen
 		storeList = append(storeList, store)
 	}
 	sort.Slice(storeList, func(i, j int) bool {
-		return storeList[i].score > storeList[j].score
+		role := job.Role
+		iop := role.getStoreInfluence(opInfluence.GetStoreInfluence(storeList[i].store.GetID()))
+		jop := role.getStoreInfluence(opInfluence.GetStoreInfluence(storeList[j].store.GetID()))
+		return storeList[i].score+iop > storeList[j].score+jop
 	})
 	sourceMap := make(map[uint64]int64)
 	for _, store := range storeList {
@@ -398,7 +419,7 @@ func (s *balanceRangeScheduler) prepare(cluster sche.SchedulerCluster, opInfluen
 	return &balanceRangeSchedulerPlan{
 		SchedulerCluster: cluster,
 		stores:           stores,
-		sourceMap:        sourceMap,
+		scoreMap:         sourceMap,
 		source:           nil,
 		target:           nil,
 		region:           nil,
@@ -416,7 +437,7 @@ func (p *balanceRangeSchedulerPlan) targetStoreID() uint64 {
 }
 
 func (p *balanceRangeSchedulerPlan) score(storeID uint64) int64 {
-	return p.sourceMap[storeID]
+	return p.scoreMap[storeID]
 }
 
 func (p *balanceRangeSchedulerPlan) shouldBalance(scheduler string) bool {
@@ -459,6 +480,41 @@ func (r Role) String() string {
 	}
 }
 
+type Engine int
+
+const (
+	TiKV Engine = iota
+	TiFlash
+	Unknown
+)
+
+func (e Engine) String() string {
+	switch e {
+	case TiKV:
+		return "tikv"
+	case TiFlash:
+		return "tiflash"
+	default:
+		return "unknown"
+	}
+}
+
+func (e Engine) MarshalJSON() ([]byte, error) {
+	return []byte(`"` + e.String() + `"`), nil
+}
+
+// NewEngine creates a new engine.
+func NewEngine(role string) Engine {
+	switch role {
+	case "tikv":
+		return TiKV
+	case "tiflash":
+		return TiFlash
+	default:
+		return Unknown
+	}
+}
+
 // JobStatus is the status of the job.
 type JobStatus int
 
@@ -489,11 +545,11 @@ func (s JobStatus) MarshalJSON() ([]byte, error) {
 func NewRole(role string) Role {
 	switch role {
 	case "leader":
-		return learner
+		return leader
 	case "follower":
 		return follower
 	case "learner":
-		return leader
+		return learner
 	default:
 		return unknown
 	}
