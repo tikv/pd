@@ -50,7 +50,7 @@ const (
 func UnaryCircuitBreakerInterceptor() grpc.UnaryClientInterceptor {
 	return func(ctx context.Context, method string, req, reply any, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
 		cb := circuitbreaker.FromContext(ctx)
-		if cb == nil {
+		if cb == nil || !cb.IsEnabled() {
 			return invoker(ctx, method, req, reply, cc, opts...)
 		}
 		err := cb.Execute(func() (circuitbreaker.Overloading, error) {

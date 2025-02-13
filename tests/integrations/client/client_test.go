@@ -2281,8 +2281,7 @@ func TestCircuitBreakerOpenAndChangeSettings(t *testing.T) {
 		*config = cb.AlwaysClosedSettings
 	})
 	_, err = cli.GetRegion(ctx, []byte("a"))
-	re.Error(err)
-	re.Contains(err.Error(), "ResourceExhausted")
+	re.NoError(err)
 	re.NoError(failpoint.Disable("github.com/tikv/pd/client/pkg/utils/grpcutil/triggerCircuitBreaker"))
 }
 
@@ -2351,8 +2350,7 @@ func TestCircuitBreakerHalfOpenAndChangeSettings(t *testing.T) {
 	// It won't be changed to open state.
 	for range 100 {
 		_, err := cli.GetRegion(ctx, []byte("a"))
-		re.Error(err)
-		re.NotContains(err.Error(), "circuit breaker is open")
+		re.NoError(err)
 	}
 	re.NoError(failpoint.Disable("github.com/tikv/pd/client/pkg/utils/grpcutil/triggerCircuitBreaker"))
 }
