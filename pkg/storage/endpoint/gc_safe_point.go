@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"path"
 	"strconv"
 	"time"
@@ -45,29 +46,53 @@ type ServiceSafePoint struct {
 }
 
 type GCBarrier struct {
-	BarrierID      string
-	BarrierTS      uint64
-	ExpirationTime time.Time
+	BarrierID string
+	BarrierTS uint64
+	// Nil means never expiring.
+	ExpirationTime *time.Time
 
 	KeyspaceID uint32
 }
 
 func gcBarrierFromServiceSafePoint(s *ServiceSafePoint) *GCBarrier {
-	return &GCBarrier{
+	res := &GCBarrier{
 		BarrierID:      s.ServiceID,
 		BarrierTS:      s.SafePoint,
-		ExpirationTime: time.Unix(s.ExpiredAt, 0),
+		ExpirationTime: nil,
 		KeyspaceID:     s.KeyspaceID,
 	}
+	if s.ExpiredAt < math.MaxInt64 && s.ExpiredAt > 0 {
+		expirationTime := new(time.Time)
+		*expirationTime = time.Unix(s.ExpiredAt, 0)
+		res.ExpirationTime = expirationTime
+	}
+	return res
 }
 
 func (b *GCBarrier) toServiceSafePoint() *ServiceSafePoint {
-	return &ServiceSafePoint{
+	res := &ServiceSafePoint{
 		ServiceID:  b.BarrierID,
-		ExpiredAt:  b.ExpirationTime.Unix(),
+		ExpiredAt:  math.MaxInt64,
 		SafePoint:  b.BarrierTS,
 		KeyspaceID: b.KeyspaceID,
 	}
+	if b.ExpirationTime != nil {
+		res.ExpiredAt = b.ExpirationTime.Unix()
+	}
+	return res
+}
+
+func (b *GCBarrier) IsExpired(now time.Time) bool {
+	return b.ExpirationTime != nil && now.After(*b.ExpirationTime)
+}
+
+func (b *GCBarrier) String() string {
+	expirationTime := "<nil>"
+	if b.ExpirationTime != nil {
+		expirationTime = b.ExpirationTime.String()
+	}
+	return fmt.Sprintf("GCBarrier { BarrierID: %s, BarrierTS: %d, ExpirationTime: %v, KeyspaceID: %d }",
+		b.BarrierID, b.BarrierTS, expirationTime, b.KeyspaceID)
 }
 
 type GCStateStorage struct {
@@ -460,18 +485,24 @@ func (wb *GCStateWriteBatch) SetTxnSafePoint(keyspaceID uint32, txnSafePoint uin
 	return nil
 }
 
-func (wb *GCStateWriteBatch) SetGCBarrier(keyspaceID uint32, barrierID string, barrierTS uint64, ttl time.Duration) error {
+func (wb *GCStateWriteBatch) SetGCBarrier(keyspaceID uint32, newGCBarrier GCBarrier) error {
+	prefix := keypath.GCBarrierPrefix()
+	if keyspaceID != constant.NullKeyspaceID {
+		prefix = keypath.KeyspaceGCBarrierPrefix(keyspaceID)
+	}
+	key := path.Join(prefix, newGCBarrier.BarrierID)
+	return wb.writeJson(key, newGCBarrier.toServiceSafePoint())
+}
+
+func (wb *GCStateWriteBatch) DeleteGCBarrier(keyspaceID uint32, barrierID string) error {
 	prefix := keypath.GCBarrierPrefix()
 	if keyspaceID != constant.NullKeyspaceID {
 		prefix = keypath.KeyspaceGCBarrierPrefix(keyspaceID)
 	}
 	key := path.Join(prefix, barrierID)
-	expirationTime := time.Now().Add(ttl)
-	barrier := GCBarrier{
-		BarrierID:      barrierID,
-		BarrierTS:      barrierTS,
-		ExpirationTime: expirationTime,
-		KeyspaceID:     keyspaceID,
-	}
-	return wb.writeJson(key, barrier.toServiceSafePoint())
+	wb.ops = append(wb.ops, kv.LowLevelTxnOp{
+		Key:    key,
+		OpType: kv.LowLevelOpDelete,
+	})
+	return nil
 }

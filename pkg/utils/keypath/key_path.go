@@ -82,7 +82,7 @@ const (
 	keyspaceGcBarrierPrefix = "keyspaces/service_safe_point/%s"
 	// Compatible with `minstartts` written to etcd directly to etcd by TiDB.
 	tidbMinStartTSAbsolutePrefix         = "/tidb/server/minstartts"
-	keyspaceTiDBMinStartTSAbsolutePrefix = "/keyspaces/tidb/%s/tidb/server/minstartts"
+	keyspaceTiDBMinStartTSAbsolutePrefix = "/keyspaces/tidb/%d/tidb/server/minstartts"
 
 	// we use uint64 to represent ID, the max length of uint64 is 20.
 	keyLen = 20
@@ -260,7 +260,9 @@ func CompatibleTiDBMinStartTSAbsolutePath() string {
 }
 
 func CompatibleKeyspaceTiDBMinStartTSAbsolutePath(keyspaceID uint32) string {
-	return fmt.Sprintf(keyspaceTiDBMinStartTSAbsolutePrefix, EncodeKeyspaceID(keyspaceID))
+	// Note that when TiDB writes min start ts, it doesn't add leading zeroes to the keyspace ID.
+	// So use %d to format it, instead of EncodeKeyspaceID.
+	return fmt.Sprintf(keyspaceTiDBMinStartTSAbsolutePrefix, keyspaceID)
 }
 
 // MinResolvedTSPath returns the min resolved ts path.

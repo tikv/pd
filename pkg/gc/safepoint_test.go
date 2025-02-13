@@ -37,24 +37,24 @@ func TestGCSafePointUpdateSequentially(t *testing.T) {
 	curSafePoint := uint64(0)
 	// update gc safePoint with asc value.
 	for id := 10; id < 20; id++ {
-		safePoint, err := gcSafePointManager.LoadGCSafePoint()
+		safePoint, err := gcSafePointManager.CompatibleLoadGCSafePoint()
 		re.NoError(err)
 		re.Equal(curSafePoint, safePoint)
 		previousSafePoint := curSafePoint
 		curSafePoint = uint64(id)
-		oldSafePoint, err := gcSafePointManager.UpdateGCSafePoint(curSafePoint)
+		oldSafePoint, err := gcSafePointManager.AdvanceGCSafePoint(curSafePoint)
 		re.NoError(err)
 		re.Equal(previousSafePoint, oldSafePoint)
 	}
 
-	safePoint, err := gcSafePointManager.LoadGCSafePoint()
+	safePoint, err := gcSafePointManager.CompatibleLoadGCSafePoint()
 	re.NoError(err)
 	re.Equal(curSafePoint, safePoint)
 	// update with smaller value should be failed.
-	oldSafePoint, err := gcSafePointManager.UpdateGCSafePoint(safePoint - 5)
+	oldSafePoint, err := gcSafePointManager.AdvanceGCSafePoint(safePoint - 5)
 	re.NoError(err)
 	re.Equal(safePoint, oldSafePoint)
-	curSafePoint, err = gcSafePointManager.LoadGCSafePoint()
+	curSafePoint, err = gcSafePointManager.CompatibleLoadGCSafePoint()
 	re.NoError(err)
 	// current safePoint should not change since the update value was smaller
 	re.Equal(safePoint, curSafePoint)
@@ -71,14 +71,14 @@ func TestGCSafePointUpdateCurrently(t *testing.T) {
 		wg.Add(1)
 		go func(step uint64) {
 			for safePoint := step; safePoint <= maxSafePoint; safePoint += step {
-				_, err := gcSafePointManager.UpdateGCSafePoint(safePoint)
+				_, err := gcSafePointManager.AdvanceGCSafePoint(safePoint)
 				re.NoError(err)
 			}
 			wg.Done()
 		}(uint64(id + 1))
 	}
 	wg.Wait()
-	safePoint, err := gcSafePointManager.LoadGCSafePoint()
+	safePoint, err := gcSafePointManager.CompatibleLoadGCSafePoint()
 	re.NoError(err)
 	re.Equal(maxSafePoint, safePoint)
 }
@@ -177,7 +177,7 @@ func TestBlockUpdateSafePointV1(t *testing.T) {
 	re.False(updated)
 	re.Nil(min)
 
-	oldSafePoint, err := manager.UpdateGCSafePoint(gcWorkerSafePoint)
+	oldSafePoint, err := manager.AdvanceGCSafePoint(gcWorkerSafePoint)
 	re.Error(err)
 	re.Equal(err.Error(), blockGCSafePointErrmsg)
 

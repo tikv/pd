@@ -451,6 +451,11 @@ error = '''
 failed to convert a path to absolute path
 '''
 
+["PD:gc:ErrGCOnInvalidKeyspace"]
+error = '''
+trying to manage GC in keyspace %v where keyspace level GC is not enabled
+'''
+
 ["PD:gin:ErrBindJSON"]
 error = '''
 bind JSON error

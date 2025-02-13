@@ -22,10 +22,11 @@ import (
 	"path"
 	"strings"
 
-	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
+
+	"github.com/tikv/pd/pkg/mcs/utils/constant"
 
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
@@ -289,7 +290,7 @@ func (s *GrpcServer) UpdateGCSafePoint(ctx context.Context, request *pdpb.Update
 
 	newSafePoint := request.GetTarget()
 	keyspaceID := getKeyspaceIDFromReq(request)
-	oldSafePoint, err := s.gcStateManager.UpdateGCSafePoint(keyspaceID, newSafePoint)
+	oldSafePoint, err := s.gcStateManager.AdvanceGCSafePoint(keyspaceID, newSafePoint)
 	if err != nil {
 		return nil, err
 	}
