@@ -167,7 +167,7 @@ type Base interface {
 	// When reading a range using `LoadRange`, for each key found in the
 	// range there will be a condition constructed. Be aware of the
 	// possibility of causing phantom read.
-	// RunInTxn may not suit all use cases. When RunInTxn is found not
+	// RunInTxn may not suit all use cases. When RunInTxn is found
 	// improper to use, consider using CreateLowLevelTxn instead.
 	//
 	// Note that transaction are not committed until RunInTxn returns nil.
