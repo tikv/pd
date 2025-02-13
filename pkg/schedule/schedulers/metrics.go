@@ -355,4 +355,5 @@ var (
 	balanceRangeNoLeaderCounter      = balanceRangeCounterWithEvent("no-leader")
 	balanceRangeCreateOpFailCounter  = balanceRangeCounterWithEvent("create-operator-fail")
 	balanceRangeNoReplacementCounter = balanceRangeCounterWithEvent("no-replacement")
+	balanceRangeNoJobCounter         = balanceRangeCounterWithEvent("no-job")
 )

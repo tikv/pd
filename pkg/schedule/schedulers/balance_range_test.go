@@ -16,14 +16,14 @@ package schedulers
 
 import (
 	"fmt"
-	"github.com/tikv/pd/pkg/schedule/operator"
-
 	"testing"
 
-	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/require"
 
+	"github.com/pingcap/kvproto/pkg/metapb"
+
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/storage"
@@ -61,8 +61,12 @@ func TestGetPeers(t *testing.T) {
 }
 
 func TestJobStatus(t *testing.T) {
+	s := storage.NewStorageWithMemoryBackend()
 	re := require.New(t)
-	conf := balanceRangeSchedulerConfig{}
+	conf := &balanceRangeSchedulerConfig{
+		schedulerConfig: &baseSchedulerConfig{},
+	}
+	conf.init(balanceRangeName, s, conf)
 	for _, v := range []struct {
 		jobStatus JobStatus
 		begin     bool
@@ -93,32 +97,6 @@ func TestJobStatus(t *testing.T) {
 	}
 }
 
-func TestBalanceRangeShouldBalance(t *testing.T) {
-	re := require.New(t)
-	for _, v := range []struct {
-		sourceScore   int64
-		targetScore   int64
-		shouldBalance bool
-	}{
-		{
-			100,
-			10,
-			true,
-		},
-		{
-			10,
-			10,
-			false,
-		},
-	} {
-		plan := balanceRangeSchedulerPlan{
-			sourceScore: v.sourceScore,
-			targetScore: v.targetScore,
-		}
-		re.Equal(plan.shouldBalance(balanceRangeName), v.shouldBalance)
-	}
-}
-
 func TestBalanceRangePlan(t *testing.T) {
 	re := require.New(t)
 	cancel, _, tc, oc := prepareSchedulersTest()
@@ -129,7 +107,7 @@ func TestBalanceRangePlan(t *testing.T) {
 	}
 	tc.AddLeaderRegionWithRange(1, "100", "110", 1, 2, 3)
 	job := &balanceRangeSchedulerJob{
-		Engine: TiKV,
+		Engine: tiKV,
 		Role:   leader,
 		Ranges: []core.KeyRange{core.NewKeyRange("100", "110")},
 	}
@@ -138,7 +116,8 @@ func TestBalanceRangePlan(t *testing.T) {
 	re.NotNil(plan)
 	re.Len(plan.stores, 3)
 	re.Len(plan.scoreMap, 3)
-	re.Equal(plan.scoreMap[1], int64(1))
+	re.Equal(int64(1), plan.scoreMap[1])
+	re.Equal(int64(1), plan.tolerate)
 }
 
 func TestTIKVEngine(t *testing.T) {
@@ -146,7 +125,7 @@ func TestTIKVEngine(t *testing.T) {
 	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
 	scheduler, err := CreateScheduler(types.BalanceRangeScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.BalanceRangeScheduler, []string{"leader", "tikv", "1h", "test", "100", "200"}))
-	re.Nil(err)
+	re.NoError(err)
 	ops, _ := scheduler.Schedule(tc, true)
 	re.Empty(ops)
 	for i := 1; i <= 3; i++ {
@@ -166,8 +145,8 @@ func TestTIKVEngine(t *testing.T) {
 	ops, _ = scheduler.Schedule(tc, true)
 	re.NotEmpty(ops)
 	op := ops[0]
-	re.Equal(op.GetAdditionalInfo("sourceScore"), "3")
-	re.Equal(op.GetAdditionalInfo("targetScore"), "1")
+	re.Equal("3", op.GetAdditionalInfo("sourceScore"))
+	re.Equal("1", op.GetAdditionalInfo("targetScore"))
 	re.Contains(op.Brief(), "transfer leader: store 1 to 3")
 	tc.AddLeaderStore(4, 0)
 
@@ -175,8 +154,8 @@ func TestTIKVEngine(t *testing.T) {
 	ops, _ = scheduler.Schedule(tc, true)
 	re.NotEmpty(ops)
 	op = ops[0]
-	re.Equal(op.GetAdditionalInfo("sourceScore"), "3")
-	re.Equal(op.GetAdditionalInfo("targetScore"), "0")
+	re.Equal("3", op.GetAdditionalInfo("sourceScore"))
+	re.Equal("0", op.GetAdditionalInfo("targetScore"))
 	re.Contains(op.Brief(), "mv peer: store [1] to [4]")
 }
 
@@ -185,15 +164,15 @@ func TestTIFLASHEngine(t *testing.T) {
 	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
 	tikvCount := 3
+	// 3 tikv and 3 tiflash
 	for i := 1; i <= tikvCount; i++ {
 		tc.AddLeaderStore(uint64(i), 0)
 	}
 	for i := tikvCount + 1; i <= tikvCount+3; i++ {
 		tc.AddLabelsStore(uint64(i), 0, map[string]string{"engine": "tiflash"})
 	}
-	for i := 1; i <= 3; i++ {
-		tc.AddRegionWithLearner(uint64(i), 1, []uint64{2, 3}, []uint64{4})
-	}
+	tc.AddRegionWithLearner(uint64(1), 1, []uint64{2, 3}, []uint64{4})
+
 	startKey := fmt.Sprintf("%20d0", 1)
 	endKey := fmt.Sprintf("%20d0", 10)
 	tc.RuleManager.SetRule(&placement.Rule{
@@ -208,11 +187,22 @@ func TestTIFLASHEngine(t *testing.T) {
 		},
 	})
 
+	// generate a balance range scheduler with tiflash engine
 	scheduler, err := CreateScheduler(types.BalanceRangeScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.BalanceRangeScheduler, []string{"learner", "tiflash", "1h", "test", startKey, endKey}))
 	re.NoError(err)
+	// tiflash-4 only has 1 region, so it doesn't need to balance
 	ops, _ := scheduler.Schedule(tc, false)
+	re.Empty(ops)
+
+	// add 2 learner on tiflash-4
+	for i := 2; i <= 3; i++ {
+		tc.AddRegionWithLearner(uint64(i), 1, []uint64{2, 3}, []uint64{4})
+	}
+	ops, _ = scheduler.Schedule(tc, false)
 	re.NotEmpty(ops)
 	op := ops[0]
-	re.Equal(op.GetAdditionalInfo("sourceScore"), "3")
+	re.Equal("3", op.GetAdditionalInfo("sourceScore"))
+	re.Equal("0", op.GetAdditionalInfo("targetScore"))
+	re.Equal("1", op.GetAdditionalInfo("tolerate"))
 	re.Contains(op.Brief(), "mv peer: store [4] to")
 }

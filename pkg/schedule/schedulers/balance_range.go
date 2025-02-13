@@ -22,10 +22,10 @@ import (
 
 	"github.com/gorilla/mux"
 	"github.com/unrolled/render"
+	"go.uber.org/zap"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
-	"go.uber.org/zap"
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
@@ -77,7 +77,7 @@ type balanceRangeSchedulerConfig struct {
 type balanceRangeSchedulerJob struct {
 	JobID   uint64          `json:"job-id"`
 	Role    Role            `json:"role"`
-	Engine  Engine          `json:"engine"`
+	Engine  engine          `json:"engine"`
 	Timeout time.Duration   `json:"timeout"`
 	Ranges  []core.KeyRange `json:"ranges"`
 	Alias   string          `json:"alias"`
@@ -96,6 +96,10 @@ func (conf *balanceRangeSchedulerConfig) begin(job *balanceRangeSchedulerJob) bo
 	now := time.Now()
 	job.Start = &now
 	job.Status = running
+	if err := conf.save(); err != nil {
+		log.Warn("failed to persist config", zap.Error(err), zap.Uint64("job-id", job.JobID))
+		return false
+	}
 	return true
 }
 
@@ -107,10 +111,14 @@ func (conf *balanceRangeSchedulerConfig) finish(job *balanceRangeSchedulerJob) b
 	}
 	now := time.Now()
 	job.Finish = &now
+	if err := conf.save(); err != nil {
+		log.Warn("failed to persist config", zap.Error(err), zap.Uint64("job-id", job.JobID))
+		return false
+	}
 	return true
 }
 
-func (conf *balanceRangeSchedulerConfig) pop() *balanceRangeSchedulerJob {
+func (conf *balanceRangeSchedulerConfig) peek() *balanceRangeSchedulerJob {
 	conf.RLock()
 	defer conf.RLock()
 	for _, job := range conf.jobs {
@@ -182,12 +190,12 @@ func (s *balanceRangeScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster)
 	if !allowed {
 		operator.IncOperatorLimitCounter(s.GetType(), operator.OpRange)
 	}
-	job := s.conf.pop()
+	job := s.conf.peek()
 	if job != nil {
 		if job.Status == pending {
 			s.conf.begin(job)
 		}
-		if time.Now().Sub(*job.Start) > job.Timeout {
+		if time.Since(*job.Start) > job.Timeout {
 			s.conf.finish(job)
 			balanceRangeExpiredCounter.Inc()
 		}
@@ -220,12 +228,14 @@ func newBalanceRangeScheduler(opController *operator.Controller, conf *balanceRa
 }
 
 // Schedule schedules the balance key range operator.
-func (s *balanceRangeScheduler) Schedule(cluster sche.SchedulerCluster, dryRun bool) ([]*operator.Operator, []plan.Plan) {
+func (s *balanceRangeScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) ([]*operator.Operator, []plan.Plan) {
 	balanceRangeCounter.Inc()
-	job := s.conf.pop()
+	job := s.conf.peek()
 	if job == nil {
+		balanceRangeNoJobCounter.Inc()
 		return nil, nil
 	}
+
 	opInfluence := s.OpController.GetOpInfluence(cluster.GetBasicCluster(), operator.WithRangeOption(job.Ranges))
 	plan, err := s.prepare(cluster, opInfluence, job)
 	if err != nil {
@@ -336,6 +346,7 @@ func (s *balanceRangeScheduler) transferPeer(plan *balanceRangeSchedulerPlan, ds
 		)
 		op.SetAdditionalInfo("sourceScore", strconv.FormatInt(plan.sourceScore, 10))
 		op.SetAdditionalInfo("targetScore", strconv.FormatInt(plan.targetScore, 10))
+		op.SetAdditionalInfo("tolerate", strconv.FormatInt(plan.tolerate, 10))
 		return op
 	}
 	balanceRangeNoReplacementCounter.Inc()
@@ -357,6 +368,8 @@ type balanceRangeSchedulerPlan struct {
 	fit          *placement.RegionFit
 	averageScore int64
 	job          *balanceRangeSchedulerJob
+	opInfluence  operator.OpInfluence
+	tolerate     int64
 }
 
 type storeInfo struct {
@@ -371,8 +384,8 @@ func (s *balanceRangeScheduler) prepare(cluster sche.SchedulerCluster, opInfluen
 		return nil, err
 	}
 	filters := s.filters
-	if job.Engine == TiFlash {
-		filters = append(filters, filter.NewEngineFilter(balanceRangeName, filter.TiFlashEngineConstraint))
+	if job.Engine == tiflash {
+		filters = append(filters, filter.NewEngineFilter(balanceRangeName, filter.SpecialEngines))
 	}
 	sources := filter.SelectSourceStores(cluster.GetStores(), filters, cluster.GetSchedulerConfig(), nil, nil)
 	if sources == nil {
@@ -388,6 +401,10 @@ func (s *balanceRangeScheduler) prepare(cluster sche.SchedulerCluster, opInfluen
 			storeInfos[peer.GetStoreId()].score += 1
 			totalScore += 1
 		}
+	}
+	tolerate := int64(float64(len(scanRegions)) * adjustRatio)
+	if tolerate < 1 {
+		tolerate = 1
 	}
 
 	storeList := make([]*storeInfo, 0, len(storeInfos))
@@ -425,6 +442,8 @@ func (s *balanceRangeScheduler) prepare(cluster sche.SchedulerCluster, opInfluen
 		region:           nil,
 		averageScore:     averageScore,
 		job:              job,
+		opInfluence:      opInfluence,
+		tolerate:         tolerate,
 	}, nil
 }
 
@@ -441,16 +460,33 @@ func (p *balanceRangeSchedulerPlan) score(storeID uint64) int64 {
 }
 
 func (p *balanceRangeSchedulerPlan) shouldBalance(scheduler string) bool {
-	shouldBalance := p.sourceScore > p.targetScore
+	sourceInfluence := p.opInfluence.GetStoreInfluence(p.sourceStoreID())
+	sourceInf := p.job.Role.getStoreInfluence(sourceInfluence)
+	if sourceInf < 0 {
+		sourceInf = -sourceInf
+	}
+	sourceScore := p.sourceScore - sourceInf - p.tolerate
+
+	targetInfluence := p.opInfluence.GetStoreInfluence(p.targetStoreID())
+	targetInf := p.job.Role.getStoreInfluence(targetInfluence)
+	if targetInf < 0 {
+		targetInf = -targetInf
+	}
+	targetScore := p.targetScore + targetInf + p.tolerate
+
+	shouldBalance := sourceScore >= targetScore
 	if !shouldBalance && log.GetLevel() <= zap.DebugLevel {
 		log.Debug("skip balance ",
 			zap.String("scheduler", scheduler),
 			zap.Uint64("region-id", p.region.GetID()),
 			zap.Uint64("source-store", p.sourceStoreID()),
 			zap.Uint64("target-store", p.targetStoreID()),
-			zap.Int64("source-score", p.sourceScore),
-			zap.Int64("target-score", p.targetScore),
+			zap.Int64("origin-source-score", p.sourceScore),
+			zap.Int64("origin-target-score", p.targetScore),
+			zap.Int64("influence-source-score", sourceScore),
+			zap.Int64("influence-target-score", targetScore),
 			zap.Int64("average-region-size", p.averageScore),
+			zap.Int64("tolerate", p.tolerate),
 		)
 	}
 	return shouldBalance
@@ -480,38 +516,40 @@ func (r Role) String() string {
 	}
 }
 
-type Engine int
+// engine is the engine of the store.
+type engine int
 
 const (
-	TiKV Engine = iota
-	TiFlash
-	Unknown
+	tiKV engine = iota
+	tiflash
+	notSupported
 )
 
-func (e Engine) String() string {
+func (e engine) String() string {
 	switch e {
-	case TiKV:
+	case tiKV:
 		return "tikv"
-	case TiFlash:
+	case tiflash:
 		return "tiflash"
 	default:
-		return "unknown"
+		return "not-supported"
 	}
 }
 
-func (e Engine) MarshalJSON() ([]byte, error) {
+// MarshalJSON marshals to json.
+func (e engine) MarshalJSON() ([]byte, error) {
 	return []byte(`"` + e.String() + `"`), nil
 }
 
 // NewEngine creates a new engine.
-func NewEngine(role string) Engine {
+func NewEngine(role string) engine {
 	switch role {
 	case "tikv":
-		return TiKV
+		return tiKV
 	case "tiflash":
-		return TiFlash
+		return tiflash
 	default:
-		return Unknown
+		return notSupported
 	}
 }
 

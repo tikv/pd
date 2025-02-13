@@ -124,11 +124,7 @@ func (h *schedulerHandler) CreateScheduler(w http.ResponseWriter, r *http.Reques
 			}
 		}
 
-<<<<<<< HEAD
-		if err := apiutil.CollectStringOption("table-name", input, collector); err != nil {
-=======
 		if err := apiutil.CollectStringOption("alias", input, collector); err != nil {
->>>>>>> 4eb7235c629747692b6d336bf626cb86d31ec023
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}

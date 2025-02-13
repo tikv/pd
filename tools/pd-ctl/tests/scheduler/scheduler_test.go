@@ -546,15 +546,6 @@ func (suite *schedulerTestSuite) checkSchedulerConfig(cluster *pdTests.TestClust
 	re.NotContains(echo, "Success!")
 	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "add", "balance-range-scheduler", "--format=raw", "tiflash", "learner", "test", "a", "b"}, nil)
 	re.Contains(echo, "Success!")
-<<<<<<< HEAD
-	conf = make(map[string]any)
-	testutil.Eventually(re, func() bool {
-		mightExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "balance-range-scheduler"}, &conf)
-		return conf["role"] == "learner" && conf["engine"] == "tiflash" && conf["table-name"] == "test"
-	})
-	re.Equal(float64(time.Hour.Nanoseconds()), conf["timeout"])
-	ranges := conf["ranges"].([]any)[0].(map[string]any)
-=======
 	var rangeConf []map[string]any
 	var jobConf map[string]any
 	testutil.Eventually(re, func() bool {
@@ -565,7 +556,6 @@ func (suite *schedulerTestSuite) checkSchedulerConfig(cluster *pdTests.TestClust
 	re.Equal(float64(time.Hour.Nanoseconds()), jobConf["timeout"])
 	re.Equal("pending", jobConf["status"])
 	ranges := jobConf["ranges"].([]any)[0].(map[string]any)
->>>>>>> 4eb7235c629747692b6d336bf626cb86d31ec023
 	re.Equal(core.HexRegionKeyStr([]byte("a")), ranges["start-key"])
 	re.Equal(core.HexRegionKeyStr([]byte("b")), ranges["end-key"])
 
