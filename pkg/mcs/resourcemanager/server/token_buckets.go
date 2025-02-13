@@ -26,16 +26,13 @@ import (
 )
 
 const (
-	defaultRefillRate    = 10000
-	defaultInitialTokens = 10 * 10000
-)
-
-const (
-	defaultBurstLimitFactor = 8.0
-	defaultReserveRatio     = 0.5
-	defaultLoanCoefficient  = 2
-	maxAssignTokens         = math.MaxFloat64 / 1024 // assume max client connect is 1024
-	slotExpireTimeout       = 10 * time.Minute
+	defaultRefillRate         = 10000
+	defaultModeratedBurstRate = 10000
+	defaultInitialTokens      = 10 * 10000
+	defaultReserveRatio       = 0.5
+	defaultLoanCoefficient    = 2
+	maxAssignTokens           = math.MaxFloat64 / 1024 // assume max client connect is 1024
+	slotExpireTimeout         = 10 * time.Minute
 )
 
 type burstableMode int
@@ -287,7 +284,7 @@ func (gts *GroupTokenBucketState) balanceSlotTokens(
 
 func calcRateAndBurstLimit(settings *rmpb.TokenLimitSettings, ratio float64) (fillRate, burstLimit float64) {
 	if getBurstableMode(settings) == moderated {
-		fillRate = float64(settings.GetFillRate()) * ratio * float64(defaultBurstLimitFactor)
+		fillRate = (float64(settings.GetFillRate()) + defaultModeratedBurstRate) * ratio
 		burstLimit = fillRate
 		return
 	}

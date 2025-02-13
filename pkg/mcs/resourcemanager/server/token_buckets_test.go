@@ -173,7 +173,7 @@ func TestGroupTokenBucketRequestBurstLimit(t *testing.T) {
 			FillRate:   2000,
 			BurstLimit: -2,
 		},
-	}, 2000*defaultBurstLimitFactor, 2000*defaultBurstLimitFactor)
+	}, 2000+defaultModeratedBurstRate, 2000+defaultModeratedBurstRate)
 
 	// case 2: fillrate = unlimited, burstLimit = 2000,0,-1,-2
 	testGroupSetting(&rmpb.TokenBucket{
