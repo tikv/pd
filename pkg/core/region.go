@@ -1418,22 +1418,14 @@ func SortedPeersStatsEqual(peersA, peersB []*pdpb.PeerStats) bool {
 func (r *RegionsInfo) GetRegionByKey(regionKey []byte) *RegionInfo {
 	r.t.RLock()
 	defer r.t.RUnlock()
-	region := r.tree.search(regionKey)
-	if region == nil {
-		return nil
-	}
-	return r.getRegionLocked(region.GetID())
+	return r.tree.search(regionKey)
 }
 
 // GetPrevRegionByKey searches previous RegionInfo from regionTree
 func (r *RegionsInfo) GetPrevRegionByKey(regionKey []byte) *RegionInfo {
 	r.t.RLock()
 	defer r.t.RUnlock()
-	region := r.tree.searchPrev(regionKey)
-	if region == nil {
-		return nil
-	}
-	return r.getRegionLocked(region.GetID())
+	return r.tree.searchPrev(regionKey)
 }
 
 // GetRegions gets all RegionInfo from regionMap
@@ -2116,10 +2108,10 @@ func (r *RegionsInfo) GetAdjacentRegions(region *RegionInfo) (*RegionInfo, *Regi
 	var prev, next *RegionInfo
 	// check key to avoid key range hole
 	if p != nil && bytes.Equal(p.GetEndKey(), region.GetStartKey()) {
-		prev = r.getRegionLocked(p.GetID())
+		prev = p.RegionInfo
 	}
 	if n != nil && bytes.Equal(region.GetEndKey(), n.GetStartKey()) {
-		next = r.getRegionLocked(n.GetID())
+		next = n.RegionInfo
 	}
 	return prev, next
 }
