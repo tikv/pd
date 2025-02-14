@@ -23,6 +23,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/gogo/protobuf/proto"
 	"github.com/opentracing/opentracing-go"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -75,6 +76,28 @@ func ConvertToRegion(res regionResponse) *Region {
 	for _, s := range res.GetDownPeers() {
 		r.DownPeers = append(r.DownPeers, s.Peer)
 	}
+	return r
+}
+
+// convertToRegionCopy converts and deep-copies the region response to a new region.
+func convertToRegionCopy(res regionResponse) *Region {
+	region := res.GetRegion()
+	if region == nil {
+		return nil
+	}
+
+	r := &Region{
+		Meta:    proto.Clone(region).(*metapb.Region),
+		Leader:  proto.Clone(res.GetLeader()).(*metapb.Peer),
+		Buckets: proto.Clone(res.GetBuckets()).(*metapb.Buckets),
+	}
+	for _, s := range res.GetDownPeers() {
+		r.DownPeers = append(r.DownPeers, proto.Clone(s.Peer).(*metapb.Peer))
+	}
+	for _, p := range res.GetPendingPeers() {
+		r.PendingPeers = append(r.PendingPeers, proto.Clone(p).(*metapb.Peer))
+	}
+
 	return r
 }
 
@@ -204,13 +227,24 @@ func (c *Cli) newRequest(ctx context.Context) *Request {
 	req := c.reqPool.Get().(*Request)
 	req.requestCtx = ctx
 	req.clientCtx = c.ctx
+	// Reset the request fields before using it.
+	req.key = nil
+	req.prevKey = nil
+	req.id = 0
+	req.needBuckets = false
+	req.region = nil
+	// Initialize the runtime fields.
 	req.pool = c.reqPool
 
 	return req
 }
 
 func requestFinisher(resp *pdpb.QueryRegionResponse) batch.FinisherFunc[*Request] {
-	var keyIdx, prevKeyIdx int
+	var (
+		keyIdx, prevKeyIdx int
+		// regionUsed is used to record whether the region has been used.
+		regionUsed = make(map[uint64]struct{})
+	)
 	return func(_ int, req *Request, err error) {
 		requestCtx := req.requestCtx
 		defer trace.StartRegion(requestCtx, "pdclient.regionReqDone").End()
@@ -230,8 +264,15 @@ func requestFinisher(resp *pdpb.QueryRegionResponse) batch.FinisherFunc[*Request
 		} else if req.id != 0 {
 			id = req.id
 		}
-		if region, ok := resp.RegionsById[id]; ok {
-			req.region = ConvertToRegion(region)
+		if regionResp, ok := resp.RegionsById[id]; ok {
+			// Since the region results may be modified by the requester,
+			// we need to ensure each region result returned is unique.
+			if _, used := regionUsed[id]; used {
+				req.region = convertToRegionCopy(regionResp)
+			} else {
+				req.region = ConvertToRegion(regionResp)
+				regionUsed[id] = struct{}{}
+			}
 		}
 		req.tryDone(err)
 	}
@@ -339,7 +380,10 @@ func (c *Cli) updateConnection(ctx context.Context) {
 	if err != nil {
 		log.Error("[router] failed to create the router stream connection", errs.ZapError(err))
 	}
-	c.conCtxMgr.Store(ctx, url, stream)
+	// Store the stream connection context if it is successfully created.
+	if stream != nil {
+		c.conCtxMgr.Store(ctx, url, stream)
+	}
 	// TODO: support the forwarding mechanism for the router client.
 	// TODO: support sending the router requests to the follower nodes.
 }
