@@ -18,9 +18,11 @@ import (
 	"context"
 	"runtime/trace"
 	"sync"
+	"time"
 
 	"github.com/pingcap/errors"
 
+	"github.com/tikv/pd/client/metrics"
 	"github.com/tikv/pd/client/opt"
 )
 
@@ -44,7 +46,8 @@ type Request struct {
 	region *Region
 
 	// Runtime fields.
-	pool *sync.Pool
+	start time.Time
+	pool  *sync.Pool
 }
 
 func (req *Request) tryDone(err error) {
@@ -55,14 +58,20 @@ func (req *Request) tryDone(err error) {
 }
 
 func (req *Request) wait() (*Region, error) {
-	// TODO: introduce the metrics.
+	start := time.Now()
+	metrics.CmdDurationQueryRegionAsyncWait.Observe(start.Sub(req.start).Seconds())
 	select {
 	case err := <-req.done:
 		defer req.pool.Put(req)
 		defer trace.StartRegion(req.requestCtx, "pdclient.regionReqDone").End()
+		now := time.Now()
 		if err != nil {
+			metrics.CmdFailedDurationQueryRegionWait.Observe(now.Sub(start).Seconds())
+			metrics.CmdFailedDurationQueryRegion.Observe(now.Sub(req.start).Seconds())
 			return nil, errors.WithStack(err)
 		}
+		metrics.CmdDurationQueryRegionWait.Observe(now.Sub(start).Seconds())
+		metrics.CmdDurationQueryRegion.Observe(now.Sub(req.start).Seconds())
 		return req.region, nil
 	case <-req.requestCtx.Done():
 		return nil, errors.WithStack(req.requestCtx.Err())

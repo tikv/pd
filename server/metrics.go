@@ -99,11 +99,11 @@ var (
 			Buckets:   prometheus.ExponentialBuckets(0.0005, 2, 13),
 		})
 
-	regionQueryDuration = prometheus.NewHistogram(
+	queryRegionDuration = prometheus.NewHistogram(
 		prometheus.HistogramOpts{
 			Namespace: "pd",
 			Subsystem: "server",
-			Name:      "region_query_duration_seconds",
+			Name:      "query_region_duration_seconds",
 			Help:      "Bucketed histogram of processing time (s) of region query requests.",
 			Buckets:   prometheus.ExponentialBuckets(0.0005, 2, 13),
 		})
@@ -181,7 +181,7 @@ func init() {
 	prometheus.MustRegister(tsoProxyBatchSize)
 	prometheus.MustRegister(tsoProxyForwardTimeoutCounter)
 	prometheus.MustRegister(tsoHandleDuration)
-	prometheus.MustRegister(regionQueryDuration)
+	prometheus.MustRegister(queryRegionDuration)
 	prometheus.MustRegister(regionHeartbeatHandleDuration)
 	prometheus.MustRegister(storeHeartbeatHandleDuration)
 	prometheus.MustRegister(bucketReportCounter)
