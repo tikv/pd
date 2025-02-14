@@ -240,11 +240,7 @@ func (c *Cli) newRequest(ctx context.Context) *Request {
 }
 
 func requestFinisher(resp *pdpb.QueryRegionResponse) batch.FinisherFunc[*Request] {
-	var (
-		keyIdx, prevKeyIdx int
-		// regionUsed is used to record whether the region has been used.
-		regionUsed = make(map[uint64]struct{})
-	)
+	var keyIdx, prevKeyIdx int
 	return func(_ int, req *Request, err error) {
 		requestCtx := req.requestCtx
 		defer trace.StartRegion(requestCtx, "pdclient.regionReqDone").End()
@@ -267,12 +263,7 @@ func requestFinisher(resp *pdpb.QueryRegionResponse) batch.FinisherFunc[*Request
 		if regionResp, ok := resp.RegionsById[id]; ok {
 			// Since the region results may be modified by the requester,
 			// we need to ensure each region result returned is unique.
-			if _, used := regionUsed[id]; used {
-				req.region = convertToRegionCopy(regionResp)
-			} else {
-				req.region = ConvertToRegion(regionResp)
-				regionUsed[id] = struct{}{}
-			}
+			req.region = convertToRegionCopy(regionResp)
 		}
 		req.tryDone(err)
 	}
