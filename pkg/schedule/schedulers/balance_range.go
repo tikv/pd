@@ -16,11 +16,15 @@ package schedulers
 
 import (
 	"net/http"
+	"sort"
+	"strconv"
 	"time"
 
 	"github.com/gorilla/mux"
 	"github.com/unrolled/render"
+	"go.uber.org/zap"
 
+	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/core"
@@ -29,10 +33,13 @@ import (
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/operator"
+	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/schedule/plan"
 	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 )
+
+const balanceRangeName = "balance-range-scheduler"
 
 type balanceRangeSchedulerHandler struct {
 	rd     *render.Render
@@ -70,11 +77,57 @@ type balanceRangeSchedulerConfig struct {
 type balanceRangeSchedulerJob struct {
 	JobID   uint64          `json:"job-id"`
 	Role    Role            `json:"role"`
-	Engine  string          `json:"engine"`
+	Engine  engine          `json:"engine"`
 	Timeout time.Duration   `json:"timeout"`
 	Ranges  []core.KeyRange `json:"ranges"`
 	Alias   string          `json:"alias"`
+	Start   *time.Time      `json:"start,omitempty"`
+	Finish  *time.Time      `json:"finish,omitempty"`
+	Create  time.Time       `json:"create"`
 	Status  JobStatus       `json:"status"`
+}
+
+func (conf *balanceRangeSchedulerConfig) begin(job *balanceRangeSchedulerJob) bool {
+	conf.Lock()
+	defer conf.Unlock()
+	if job.Status != pending {
+		return false
+	}
+	now := time.Now()
+	job.Start = &now
+	job.Status = running
+	if err := conf.save(); err != nil {
+		log.Warn("failed to persist config", zap.Error(err), zap.Uint64("job-id", job.JobID))
+		return false
+	}
+	return true
+}
+
+func (conf *balanceRangeSchedulerConfig) finish(job *balanceRangeSchedulerJob) bool {
+	conf.Lock()
+	defer conf.Unlock()
+	if job.Status != running {
+		return false
+	}
+	now := time.Now()
+	job.Finish = &now
+	if err := conf.save(); err != nil {
+		log.Warn("failed to persist config", zap.Error(err), zap.Uint64("job-id", job.JobID))
+		return false
+	}
+	return true
+}
+
+func (conf *balanceRangeSchedulerConfig) peek() *balanceRangeSchedulerJob {
+	conf.RLock()
+	defer conf.RUnlock()
+	for _, job := range conf.jobs {
+		if job.Status == finished {
+			continue
+		}
+		return job
+	}
+	return nil
 }
 
 func (conf *balanceRangeSchedulerConfig) clone() []*balanceRangeSchedulerJob {
@@ -91,6 +144,7 @@ func (conf *balanceRangeSchedulerConfig) clone() []*balanceRangeSchedulerJob {
 			Timeout: job.Timeout,
 			Alias:   job.Alias,
 			JobID:   job.JobID,
+			Start:   job.Start,
 		})
 	}
 
@@ -130,18 +184,23 @@ func (s *balanceRangeScheduler) ServeHTTP(w http.ResponseWriter, r *http.Request
 	s.handler.ServeHTTP(w, r)
 }
 
-// Schedule schedules the balance key range operator.
-func (*balanceRangeScheduler) Schedule(_cluster sche.SchedulerCluster, _dryRun bool) ([]*operator.Operator, []plan.Plan) {
-	log.Debug("balance key range scheduler is scheduling, need to implement")
-	return nil, nil
-}
-
 // IsScheduleAllowed checks if the scheduler is allowed to schedule new operators.
 func (s *balanceRangeScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) bool {
 	allowed := s.OpController.OperatorCount(operator.OpRange) < cluster.GetSchedulerConfig().GetRegionScheduleLimit()
 	if !allowed {
 		operator.IncOperatorLimitCounter(s.GetType(), operator.OpRange)
 	}
+	job := s.conf.peek()
+	if job != nil {
+		if job.Status == pending {
+			s.conf.begin(job)
+		}
+		if time.Since(*job.Start) > job.Timeout {
+			s.conf.finish(job)
+			balanceRangeExpiredCounter.Inc()
+		}
+	}
+
 	return allowed
 }
 
@@ -159,12 +218,337 @@ func newBalanceRangeScheduler(opController *operator.Controller, conf *balanceRa
 	for _, option := range options {
 		option(s)
 	}
+
 	s.filters = []filter.Filter{
 		&filter.StoreStateFilter{ActionScope: s.GetName(), TransferLeader: true, OperatorLevel: constant.Medium},
 		filter.NewSpecialUseFilter(s.GetName()),
 	}
 	s.filterCounter = filter.NewCounter(s.GetName())
 	return s
+}
+
+// Schedule schedules the balance key range operator.
+func (s *balanceRangeScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) ([]*operator.Operator, []plan.Plan) {
+	balanceRangeCounter.Inc()
+	job := s.conf.peek()
+	if job == nil {
+		return nil, nil
+	}
+	opInfluence := s.OpController.GetOpInfluence(cluster.GetBasicCluster(), operator.WithRangeOption(job.Ranges))
+	plan, err := s.prepare(cluster, opInfluence, job)
+	if err != nil {
+		log.Error("failed to prepare balance key range scheduler", errs.ZapError(err))
+		return nil, nil
+	}
+
+	downFilter := filter.NewRegionDownFilter()
+	replicaFilter := filter.NewRegionReplicatedFilter(cluster)
+	snapshotFilter := filter.NewSnapshotSendFilter(cluster.GetStores(), constant.Medium)
+	pendingFilter := filter.NewRegionPendingFilter()
+	baseRegionFilters := []filter.RegionFilter{downFilter, replicaFilter, snapshotFilter, pendingFilter}
+
+	for sourceIndex, sourceStore := range plan.stores {
+		plan.source = sourceStore
+		plan.sourceScore = plan.score(plan.source.GetID())
+		if plan.sourceScore < plan.averageScore {
+			break
+		}
+		switch job.Role {
+		case leader:
+			plan.region = filter.SelectOneRegion(cluster.RandLeaderRegions(plan.sourceStoreID(), job.Ranges), nil, baseRegionFilters...)
+		case learner:
+			plan.region = filter.SelectOneRegion(cluster.RandLearnerRegions(plan.sourceStoreID(), job.Ranges), nil, baseRegionFilters...)
+		case follower:
+			plan.region = filter.SelectOneRegion(cluster.RandFollowerRegions(plan.sourceStoreID(), job.Ranges), nil, baseRegionFilters...)
+		}
+		if plan.region == nil {
+			balanceRangeNoRegionCounter.Inc()
+			continue
+		}
+		log.Debug("select region", zap.String("scheduler", s.GetName()), zap.Uint64("region-id", plan.region.GetID()))
+		// Skip hot regions.
+		if cluster.IsRegionHot(plan.region) {
+			log.Debug("region is hot", zap.String("scheduler", s.GetName()), zap.Uint64("region-id", plan.region.GetID()))
+			balanceRangeHotCounter.Inc()
+			continue
+		}
+		// Check region leader
+		if plan.region.GetLeader() == nil {
+			log.Warn("region have no leader", zap.String("scheduler", s.GetName()), zap.Uint64("region-id", plan.region.GetID()))
+			balanceRangeNoLeaderCounter.Inc()
+			continue
+		}
+		plan.fit = replicaFilter.(*filter.RegionReplicatedFilter).GetFit()
+		if op := s.transferPeer(plan, plan.stores[sourceIndex+1:]); op != nil {
+			op.Counters = append(op.Counters, balanceRangeNewOperatorCounter)
+			return []*operator.Operator{op}, nil
+		}
+	}
+	return nil, nil
+}
+
+// transferPeer selects the best store to create a new peer to replace the old peer.
+func (s *balanceRangeScheduler) transferPeer(plan *balanceRangeSchedulerPlan, dstStores []*core.StoreInfo) *operator.Operator {
+	excludeTargets := plan.region.GetStoreIDs()
+	if plan.job.Role == leader {
+		excludeTargets = make(map[uint64]struct{})
+	}
+	conf := plan.GetSchedulerConfig()
+	filters := []filter.Filter{
+		filter.NewExcludedFilter(s.GetName(), nil, excludeTargets),
+		filter.NewPlacementSafeguard(s.GetName(), conf, plan.GetBasicCluster(), plan.GetRuleManager(), plan.region, plan.source, plan.fit),
+	}
+	candidates := filter.NewCandidates(s.R, dstStores).FilterTarget(conf, nil, s.filterCounter, filters...)
+	for i := range candidates.Stores {
+		plan.target = candidates.Stores[len(candidates.Stores)-i-1]
+		plan.targetScore = plan.score(plan.target.GetID())
+		if plan.targetScore > plan.averageScore {
+			break
+		}
+		regionID := plan.region.GetID()
+		sourceID := plan.source.GetID()
+		targetID := plan.target.GetID()
+		if !plan.shouldBalance(s.GetName()) {
+			continue
+		}
+		log.Debug("candidate store", zap.Uint64("region-id", regionID), zap.Uint64("source-store", sourceID), zap.Uint64("target-store", targetID))
+
+		oldPeer := plan.region.GetStorePeer(sourceID)
+		exist := false
+		if plan.job.Role == leader {
+			peers := plan.region.GetPeers()
+			for _, peer := range peers {
+				if peer.GetStoreId() == targetID {
+					exist = true
+					break
+				}
+			}
+		}
+		var op *operator.Operator
+		var err error
+		if exist {
+			op, err = operator.CreateTransferLeaderOperator(s.GetName(), plan, plan.region, plan.targetStoreID(), []uint64{}, operator.OpRange)
+		} else {
+			newPeer := &metapb.Peer{StoreId: plan.target.GetID(), Role: oldPeer.Role}
+			op, err = operator.CreateMovePeerOperator(s.GetName(), plan, plan.region, operator.OpRange, oldPeer.GetStoreId(), newPeer)
+		}
+
+		if err != nil {
+			balanceRangeCreateOpFailCounter.Inc()
+			return nil
+		}
+		sourceLabel := strconv.FormatUint(sourceID, 10)
+		targetLabel := strconv.FormatUint(targetID, 10)
+		op.FinishedCounters = append(op.FinishedCounters,
+			balanceDirectionCounter.WithLabelValues(s.GetName(), sourceLabel, targetLabel),
+		)
+		op.SetAdditionalInfo("sourceScore", strconv.FormatInt(plan.sourceScore, 10))
+		op.SetAdditionalInfo("targetScore", strconv.FormatInt(plan.targetScore, 10))
+		op.SetAdditionalInfo("tolerate", strconv.FormatInt(plan.tolerate, 10))
+		return op
+	}
+	balanceRangeNoReplacementCounter.Inc()
+	return nil
+}
+
+// balanceRangeSchedulerPlan is used to record the plan of balance key range scheduler.
+type balanceRangeSchedulerPlan struct {
+	sche.SchedulerCluster
+	// stores is sorted by score desc
+	stores []*core.StoreInfo
+	// scoreMap records the storeID -> score
+	scoreMap     map[uint64]int64
+	source       *core.StoreInfo
+	sourceScore  int64
+	target       *core.StoreInfo
+	targetScore  int64
+	region       *core.RegionInfo
+	fit          *placement.RegionFit
+	averageScore int64
+	job          *balanceRangeSchedulerJob
+	opInfluence  operator.OpInfluence
+	tolerate     int64
+}
+
+type storeInfo struct {
+	store *core.StoreInfo
+	score int64
+}
+
+func (s *balanceRangeScheduler) prepare(cluster sche.SchedulerCluster, opInfluence operator.OpInfluence, job *balanceRangeSchedulerJob) (*balanceRangeSchedulerPlan, error) {
+	krs := core.NewKeyRanges(job.Ranges)
+	scanRegions, err := cluster.BatchScanRegions(krs)
+	if err != nil {
+		return nil, err
+	}
+	filters := s.filters
+	if job.Engine == tiflash {
+		filters = append(filters, filter.NewEngineFilter(balanceRangeName, filter.SpecialEngines))
+	}
+	sources := filter.SelectSourceStores(cluster.GetStores(), filters, cluster.GetSchedulerConfig(), nil, nil)
+	if sources == nil {
+		return nil, errs.ErrStoresNotEnough.FastGenByArgs("no store to select")
+	}
+	storeInfos := make(map[uint64]*storeInfo, len(sources))
+	for _, source := range sources {
+		storeInfos[source.GetID()] = &storeInfo{store: source}
+	}
+	totalScore := int64(0)
+	for _, region := range scanRegions {
+		for _, peer := range job.Role.getPeers(region) {
+			storeInfos[peer.GetStoreId()].score += 1
+			totalScore += 1
+		}
+	}
+	tolerate := int64(float64(len(scanRegions)) * adjustRatio)
+	if tolerate < 1 {
+		tolerate = 1
+	}
+
+	storeList := make([]*storeInfo, 0, len(storeInfos))
+	for storeID, store := range storeInfos {
+		if influence := opInfluence.GetStoreInfluence(storeID); influence != nil {
+			store.score += job.Role.getStoreInfluence(influence)
+		}
+		storeList = append(storeList, store)
+	}
+	sort.Slice(storeList, func(i, j int) bool {
+		role := job.Role
+		iop := role.getStoreInfluence(opInfluence.GetStoreInfluence(storeList[i].store.GetID()))
+		jop := role.getStoreInfluence(opInfluence.GetStoreInfluence(storeList[j].store.GetID()))
+		return storeList[i].score+iop > storeList[j].score+jop
+	})
+	sourceMap := make(map[uint64]int64)
+	for _, store := range storeList {
+		sourceMap[store.store.GetID()] = store.score
+	}
+
+	stores := make([]*core.StoreInfo, 0, len(storeList))
+	for _, store := range storeList {
+		stores = append(stores, store.store)
+	}
+	averageScore := int64(0)
+	if len(storeList) != 0 {
+		averageScore = totalScore / int64(len(storeList))
+	}
+	return &balanceRangeSchedulerPlan{
+		SchedulerCluster: cluster,
+		stores:           stores,
+		scoreMap:         sourceMap,
+		source:           nil,
+		target:           nil,
+		region:           nil,
+		averageScore:     averageScore,
+		job:              job,
+		opInfluence:      opInfluence,
+		tolerate:         tolerate,
+	}, nil
+}
+
+func (p *balanceRangeSchedulerPlan) sourceStoreID() uint64 {
+	return p.source.GetID()
+}
+
+func (p *balanceRangeSchedulerPlan) targetStoreID() uint64 {
+	return p.target.GetID()
+}
+
+func (p *balanceRangeSchedulerPlan) score(storeID uint64) int64 {
+	return p.scoreMap[storeID]
+}
+
+func (p *balanceRangeSchedulerPlan) shouldBalance(scheduler string) bool {
+	sourceInfluence := p.opInfluence.GetStoreInfluence(p.sourceStoreID())
+	sourceInf := p.job.Role.getStoreInfluence(sourceInfluence)
+	if sourceInf < 0 {
+		sourceInf = -sourceInf
+	}
+	sourceScore := p.sourceScore - sourceInf - p.tolerate
+
+	targetInfluence := p.opInfluence.GetStoreInfluence(p.targetStoreID())
+	targetInf := p.job.Role.getStoreInfluence(targetInfluence)
+	if targetInf < 0 {
+		targetInf = -targetInf
+	}
+	targetScore := p.targetScore + targetInf + p.tolerate
+
+	shouldBalance := sourceScore >= targetScore
+	if !shouldBalance && log.GetLevel() <= zap.DebugLevel {
+		log.Debug("skip balance ",
+			zap.String("scheduler", scheduler),
+			zap.Uint64("region-id", p.region.GetID()),
+			zap.Uint64("source-store", p.sourceStoreID()),
+			zap.Uint64("target-store", p.targetStoreID()),
+			zap.Int64("origin-source-score", p.sourceScore),
+			zap.Int64("origin-target-score", p.targetScore),
+			zap.Int64("influence-source-score", sourceScore),
+			zap.Int64("influence-target-score", targetScore),
+			zap.Int64("average-region-size", p.averageScore),
+			zap.Int64("tolerate", p.tolerate),
+		)
+	}
+	return shouldBalance
+}
+
+// Role is the role of the region.
+type Role int
+
+const (
+	leader Role = iota
+	// include leader + voter
+	follower
+	learner
+	unknown
+)
+
+func (r Role) String() string {
+	switch r {
+	case leader:
+		return "leader"
+	case follower:
+		return "voter"
+	case learner:
+		return "learner"
+	default:
+		return "unknown"
+	}
+}
+
+// engine is the engine of the store.
+type engine int
+
+const (
+	tiKV engine = iota
+	tiflash
+	notSupported
+)
+
+func (e engine) String() string {
+	switch e {
+	case tiKV:
+		return "tikv"
+	case tiflash:
+		return "tiflash"
+	default:
+		return "not-supported"
+	}
+}
+
+// MarshalJSON marshals to json.
+func (e engine) MarshalJSON() ([]byte, error) {
+	return []byte(`"` + e.String() + `"`), nil
+}
+
+// NewEngine creates a new engine.
+func NewEngine(role string) engine {
+	switch role {
+	case "tikv":
+		return tiKV
+	case "tiflash":
+		return tiflash
+	default:
+		return notSupported
+	}
 }
 
 // JobStatus is the status of the job.
@@ -193,17 +577,6 @@ func (s JobStatus) MarshalJSON() ([]byte, error) {
 	return []byte(`"` + s.String() + `"`), nil
 }
 
-// Role is the role of the region.
-type Role int
-
-const (
-	leader Role = iota
-	// include leader + voter
-	follower
-	learner
-	unknown
-)
-
 // NewRole creates a new role.
 func NewRole(role string) Role {
 	switch role {
@@ -218,16 +591,35 @@ func NewRole(role string) Role {
 	}
 }
 
-func (r Role) String() string {
+func (r Role) getPeers(region *core.RegionInfo) []*metapb.Peer {
 	switch r {
 	case leader:
-		return "leader"
+		return []*metapb.Peer{region.GetLeader()}
 	case follower:
-		return "follower"
+		followers := region.GetFollowers()
+		ret := make([]*metapb.Peer, 0, len(followers))
+		for _, peer := range followers {
+			ret = append(ret, peer)
+		}
+		return ret
 	case learner:
-		return "learner"
+		learners := region.GetLearners()
+		return learners
 	default:
-		return "unknown"
+		return nil
+	}
+}
+
+func (r Role) getStoreInfluence(influence *operator.StoreInfluence) int64 {
+	switch r {
+	case leader:
+		return influence.LeaderCount
+	case follower:
+		return influence.RegionCount
+	case learner:
+		return influence.RegionCount
+	default:
+		return 0
 	}
 }
 
