@@ -56,8 +56,8 @@ func NewStorageWithMemoryBackend() Storage {
 }
 
 // NewStorageWithEtcdBackend creates a new storage with etcd backend.
-func NewStorageWithEtcdBackend(client *clientv3.Client, rootPath string) Storage {
-	return newEtcdBackend(client, rootPath)
+func NewStorageWithEtcdBackend(client *clientv3.Client) Storage {
+	return newEtcdBackend(client)
 }
 
 // NewRegionStorageWithLevelDBBackend will create a specialized storage to

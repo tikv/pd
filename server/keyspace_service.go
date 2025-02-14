@@ -16,7 +16,6 @@ package server
 
 import (
 	"context"
-	"path"
 	"time"
 
 	"github.com/gogo/protobuf/proto"
@@ -76,7 +75,7 @@ func (s *KeyspaceServer) WatchKeyspaces(request *keyspacepb.WatchKeyspacesReques
 	}
 	ctx, cancel := context.WithCancel(s.Context())
 	defer cancel()
-	startKey := path.Join(s.rootPath, keypath.KeyspaceMetaPrefix()) + "/"
+	startKey := keypath.KeyspaceMetaPrefix()
 
 	keyspaces := make([]*keyspacepb.KeyspaceMeta, 0)
 	putFn := func(kv *mvccpb.KeyValue) error {
