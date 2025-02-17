@@ -537,9 +537,15 @@ func (c *Cli) processRequests(stream pdpb.PD_QueryRegionClient) error {
 	}
 	metrics.RequestDurationQueryRegion.Observe(time.Since(start).Seconds())
 	metrics.QueryRegionBatchSizeTotal.Observe(float64(len(requests)))
-	metrics.QueryRegionBatchSizeByKeys.Observe(float64(len(queryReq.Keys)))
-	metrics.QueryRegionBatchSizeByPrevKeys.Observe(float64(len(queryReq.PrevKeys)))
-	metrics.QueryRegionBatchSizeByIDs.Observe(float64(len(queryReq.Ids)))
+	if keysLen := len(queryReq.Keys); keysLen > 0 {
+		metrics.QueryRegionBatchSizeByKeys.Observe(float64(keysLen))
+	}
+	if prevKeysLen := len(queryReq.PrevKeys); prevKeysLen > 0 {
+		metrics.QueryRegionBatchSizeByPrevKeys.Observe(float64(prevKeysLen))
+	}
+	if idsLen := len(queryReq.Ids); idsLen > 0 {
+		metrics.QueryRegionBatchSizeByIDs.Observe(float64(idsLen))
+	}
 	c.doneCollectedRequests(resp)
 	return nil
 }
