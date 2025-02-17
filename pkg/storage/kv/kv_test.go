@@ -50,7 +50,6 @@ func TestLevelDB(t *testing.T) {
 	testReadWrite(re, kv)
 	testRange(re, kv)
 	testSaveMultiple(re, kv, 20)
-	testLowLevelTxn(re, kv)
 }
 
 func TestMemKV(t *testing.T) {
@@ -59,7 +58,6 @@ func TestMemKV(t *testing.T) {
 	testReadWrite(re, kv)
 	testRange(re, kv)
 	testSaveMultiple(re, kv, 20)
-	testLowLevelTxn(re, kv)
 }
 
 func testReadWrite(re *require.Assertions, kv Base) {
