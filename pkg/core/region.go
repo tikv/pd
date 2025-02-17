@@ -1475,7 +1475,7 @@ func (r *RegionsInfo) QueryRegions(
 		panic("returned prev regions count mismatch with the input keys")
 	}
 	// Build the key -> ID map for the final results.
-	regionsByID := make(map[uint64]*pdpb.RegionResponse, len(regions))
+	regionsByID := make(map[uint64]*pdpb.RegionResponse, len(regions)+len(prevRegions)+len(ids))
 	keyIDMap := sortOutKeyIDMap(regionsByID, regions, needBuckets)
 	prevKeyIDMap := sortOutKeyIDMap(regionsByID, prevRegions, needBuckets)
 	// Iterate the region IDs to find the regions.
