@@ -88,7 +88,7 @@ func (m *RuleManager) Initialize(maxReplica int, locationLabels []string, isolat
 	if m.initialized {
 		return nil
 	}
-	// If RuleManager is initialized in micro service,
+	// If RuleManager is initialized in microservice,
 	// it will load from etcd watcher and do not modify rule directly.
 	if skipLoadRules {
 		m.ruleList = ruleList{

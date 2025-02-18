@@ -140,9 +140,9 @@ func (kv *etcdKVBase) Remove(key string) error {
 	return nil
 }
 
-// CreateLowLevelTxn creates a transaction that provides interface in if-then-else pattern.
-func (kv *etcdKVBase) CreateLowLevelTxn() LowLevelTxn {
-	return &lowLevelTxnWrapper{
+// CreateRawEtcdTxn creates a transaction that provides interface in if-then-else pattern.
+func (kv *etcdKVBase) CreateRawEtcdTxn() RawEtcdTxn {
+	return &rawTxnWrapper{
 		inner:    NewSlowLogTxn(kv.client),
 		rootPath: kv.rootPath,
 	}
@@ -306,30 +306,30 @@ func (txn *etcdTxn) commit() error {
 	return nil
 }
 
-type lowLevelTxnWrapper struct {
+type rawTxnWrapper struct {
 	inner    clientv3.Txn
 	rootPath string
 }
 
-// If implements LowLevelTxn interface for adding conditions to the transaction.
-func (l *lowLevelTxnWrapper) If(conditions ...LowLevelTxnCondition) LowLevelTxn {
+// If implements RawEtcdTxn interface for adding conditions to the transaction.
+func (l *rawTxnWrapper) If(conditions ...RawEtcdTxnCondition) RawEtcdTxn {
 	cmpList := make([]clientv3.Cmp, 0, len(conditions))
 	for _, c := range conditions {
 		key := strings.Join([]string{l.rootPath, c.Key}, "/")
-		if c.CmpType == LowLevelCmpExists {
+		if c.CmpType == EtcdTxnCmpExists {
 			cmpList = append(cmpList, clientv3.Compare(clientv3.CreateRevision(key), ">", 0))
-		} else if c.CmpType == LowLevelCmpNotExists {
+		} else if c.CmpType == EtcdTxnCmpNotExists {
 			cmpList = append(cmpList, clientv3.Compare(clientv3.CreateRevision(key), "=", 0))
 		} else {
 			var cmpOp string
 			switch c.CmpType {
-			case LowLevelCmpEqual:
+			case EtcdTxnCmpEqual:
 				cmpOp = "="
-			case LowLevelCmpNotEqual:
+			case EtcdTxnCmpNotEqual:
 				cmpOp = "!="
-			case LowLevelCmpGreater:
+			case EtcdTxnCmpGreater:
 				cmpOp = ">"
-			case LowLevelCmpLess:
+			case EtcdTxnCmpLess:
 				cmpOp = "<"
 			default:
 				panic(fmt.Sprintf("unknown cmp type %v", c.CmpType))
@@ -341,18 +341,18 @@ func (l *lowLevelTxnWrapper) If(conditions ...LowLevelTxnCondition) LowLevelTxn 
 	return l
 }
 
-func (l *lowLevelTxnWrapper) convertOps(ops []LowLevelTxnOp) []clientv3.Op {
+func (l *rawTxnWrapper) convertOps(ops []RawEtcdTxnOp) []clientv3.Op {
 	opsList := make([]clientv3.Op, 0, len(ops))
 	for _, op := range ops {
 		key := strings.Join([]string{l.rootPath, op.Key}, "/")
 		switch op.OpType {
-		case LowLevelOpPut:
+		case EtcdTxnOpPut:
 			opsList = append(opsList, clientv3.OpPut(key, op.Value))
-		case LowLevelOpDelete:
+		case EtcdTxnOpDelete:
 			opsList = append(opsList, clientv3.OpDelete(key))
-		case LowLevelOpGet:
+		case EtcdTxnOpGet:
 			opsList = append(opsList, clientv3.OpGet(key))
-		case LowLevelOpGetRange:
+		case EtcdTxnOpGetRange:
 			if op.EndKey == "\x00" {
 				opsList = append(opsList, clientv3.OpGet(key, clientv3.WithPrefix(), clientv3.WithLimit(int64(op.Limit))))
 			} else {
@@ -366,32 +366,32 @@ func (l *lowLevelTxnWrapper) convertOps(ops []LowLevelTxnOp) []clientv3.Op {
 	return opsList
 }
 
-// Then implements LowLevelTxn interface for adding operations that need to be executed when the condition passes to
+// Then implements RawEtcdTxn interface for adding operations that need to be executed when the condition passes to
 // the transaction.
-func (l *lowLevelTxnWrapper) Then(ops ...LowLevelTxnOp) LowLevelTxn {
+func (l *rawTxnWrapper) Then(ops ...RawEtcdTxnOp) RawEtcdTxn {
 	l.inner = l.inner.Then(l.convertOps(ops)...)
 	return l
 }
 
-// Else implements LowLevelTxn interface for adding operations that need to be executed when the condition doesn't pass
+// Else implements RawEtcdTxn interface for adding operations that need to be executed when the condition doesn't pass
 // to the transaction.
-func (l *lowLevelTxnWrapper) Else(ops ...LowLevelTxnOp) LowLevelTxn {
+func (l *rawTxnWrapper) Else(ops ...RawEtcdTxnOp) RawEtcdTxn {
 	l.inner = l.inner.Else(l.convertOps(ops)...)
 	return l
 }
 
-// Commit implements LowLevelTxn interface for committing the transaction.
-func (l *lowLevelTxnWrapper) Commit(_ctx context.Context) (LowLevelTxnResult, error) {
+// Commit implements RawEtcdTxn interface for committing the transaction.
+func (l *rawTxnWrapper) Commit() (RawEtcdTxnResult, error) {
 	resp, err := l.inner.Commit()
 	if err != nil {
-		return LowLevelTxnResult{}, err
+		return RawEtcdTxnResult{}, err
 	}
-	items := make([]LowLevelTxnResultItem, 0, len(resp.Responses))
+	items := make([]RawEtcdTxnResultItem, 0, len(resp.Responses))
 	for i, respItem := range resp.Responses {
-		var resultItem LowLevelTxnResultItem
+		var resultItem RawEtcdTxnResultItem
 		if put := respItem.GetResponsePut(); put != nil {
 			// Put and delete operations of etcd's transaction won't return any previous data. Skip handling it.
-			resultItem = LowLevelTxnResultItem{}
+			resultItem = RawEtcdTxnResultItem{}
 			if put.PrevKv != nil {
 				key := strings.TrimPrefix(strings.TrimPrefix(string(put.PrevKv.Key), l.rootPath), "/")
 				resultItem.KeyValuePairs = []KeyValuePair{{
@@ -401,7 +401,7 @@ func (l *lowLevelTxnWrapper) Commit(_ctx context.Context) (LowLevelTxnResult, er
 			}
 		} else if del := respItem.GetResponseDeleteRange(); del != nil {
 			// Put and delete operations of etcd's transaction won't return any previous data. Skip handling it.
-			resultItem = LowLevelTxnResultItem{}
+			resultItem = RawEtcdTxnResultItem{}
 		} else if rangeResp := respItem.GetResponseRange(); rangeResp != nil {
 			kvs := make([]KeyValuePair, 0, len(rangeResp.Kvs))
 			for _, kv := range rangeResp.Kvs {
@@ -411,17 +411,17 @@ func (l *lowLevelTxnWrapper) Commit(_ctx context.Context) (LowLevelTxnResult, er
 					Value: string(kv.Value),
 				})
 			}
-			resultItem = LowLevelTxnResultItem{
+			resultItem = RawEtcdTxnResultItem{
 				KeyValuePairs: kvs,
 			}
 		} else {
-			return LowLevelTxnResult{}, errs.ErrEtcdTxnResponse.GenWithStackByArgs(
+			return RawEtcdTxnResult{}, errs.ErrEtcdTxnResponse.GenWithStackByArgs(
 				fmt.Sprintf("succeeded: %v, index: %v, response: %v", resp.Succeeded, i, respItem),
 			)
 		}
 		items = append(items, resultItem)
 	}
-	return LowLevelTxnResult{
+	return RawEtcdTxnResult{
 		Succeeded:   resp.Succeeded,
 		ResultItems: items,
 	}, nil

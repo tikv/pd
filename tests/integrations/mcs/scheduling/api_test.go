@@ -1,3 +1,17 @@
+// Copyright 2023 TiKV Project Authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package scheduling_test
 
 import (
@@ -56,7 +70,7 @@ func (suite *apiTestSuite) TearDownSuite() {
 }
 
 func (suite *apiTestSuite) TestGetCheckerByName() {
-	suite.env.RunTestInPDServiceMode(suite.checkGetCheckerByName)
+	suite.env.RunTestInMicroserviceEnv(suite.checkGetCheckerByName)
 }
 
 func (suite *apiTestSuite) checkGetCheckerByName(cluster *tests.TestCluster) {
@@ -102,7 +116,7 @@ func (suite *apiTestSuite) checkGetCheckerByName(cluster *tests.TestCluster) {
 }
 
 func (suite *apiTestSuite) TestAPIForward() {
-	suite.env.RunTestInPDServiceMode(suite.checkAPIForward)
+	suite.env.RunTestInMicroserviceEnv(suite.checkAPIForward)
 }
 
 func (suite *apiTestSuite) checkAPIForward(cluster *tests.TestCluster) {
@@ -118,29 +132,29 @@ func (suite *apiTestSuite) checkAPIForward(cluster *tests.TestCluster) {
 
 	// Test operators
 	err := testutil.ReadGetJSON(re, tests.TestDialClient, fmt.Sprintf("%s/%s", urlPrefix, "operators"), &respSlice,
-		testutil.WithHeader(re, apiutil.XForwardedToMicroServiceHeader, "true"))
+		testutil.WithHeader(re, apiutil.XForwardedToMicroserviceHeader, "true"))
 	re.NoError(err)
 	re.Empty(respSlice)
 
 	err = testutil.CheckPostJSON(tests.TestDialClient, fmt.Sprintf("%s/%s", urlPrefix, "operators"), []byte(``),
-		testutil.StatusNotOK(re), testutil.WithHeader(re, apiutil.XForwardedToMicroServiceHeader, "true"))
+		testutil.StatusNotOK(re), testutil.WithHeader(re, apiutil.XForwardedToMicroserviceHeader, "true"))
 	re.NoError(err)
 
 	err = testutil.CheckGetJSON(tests.TestDialClient, fmt.Sprintf("%s/%s", urlPrefix, "operators/2"), nil,
-		testutil.StatusNotOK(re), testutil.WithHeader(re, apiutil.XForwardedToMicroServiceHeader, "true"))
+		testutil.StatusNotOK(re), testutil.WithHeader(re, apiutil.XForwardedToMicroserviceHeader, "true"))
 	re.NoError(err)
 
 	err = testutil.CheckDelete(tests.TestDialClient, fmt.Sprintf("%s/%s", urlPrefix, "operators/2"),
-		testutil.StatusNotOK(re), testutil.WithHeader(re, apiutil.XForwardedToMicroServiceHeader, "true"))
+		testutil.StatusNotOK(re), testutil.WithHeader(re, apiutil.XForwardedToMicroserviceHeader, "true"))
 	re.NoError(err)
 
 	err = testutil.CheckGetJSON(tests.TestDialClient, fmt.Sprintf("%s/%s", urlPrefix, "operators/records"), nil,
-		testutil.StatusNotOK(re), testutil.WithHeader(re, apiutil.XForwardedToMicroServiceHeader, "true"))
+		testutil.StatusNotOK(re), testutil.WithHeader(re, apiutil.XForwardedToMicroserviceHeader, "true"))
 	re.NoError(err)
 
 	// Test checker
 	err = testutil.ReadGetJSON(re, tests.TestDialClient, fmt.Sprintf("%s/%s", urlPrefix, "checker/merge"), &resp,
-		testutil.WithHeader(re, apiutil.XForwardedToMicroServiceHeader, "true"))
+		testutil.WithHeader(re, apiutil.XForwardedToMicroserviceHeader, "true"))
 	re.NoError(err)
 	re.False(resp["paused"].(bool))
 
@@ -151,7 +165,7 @@ func (suite *apiTestSuite) checkAPIForward(cluster *tests.TestCluster) {
 		pauseArgs, err := json.Marshal(input)
 		re.NoError(err)
 		err = testutil.CheckPostJSON(tests.TestDialClient, fmt.Sprintf("%s/%s", urlPrefix, "checker/merge"), pauseArgs,
-			testutil.StatusOK(re), testutil.WithHeader(re, apiutil.XForwardedToMicroServiceHeader, "true"))
+			testutil.StatusOK(re), testutil.WithHeader(re, apiutil.XForwardedToMicroserviceHeader, "true"))
 		re.NoError(err)
 	}
 	postChecker(30)
@@ -170,7 +184,7 @@ func (suite *apiTestSuite) checkAPIForward(cluster *tests.TestCluster) {
 	//	"/schedulers/{name}", http.MethodDelete
 	testutil.Eventually(re, func() bool {
 		err = testutil.ReadGetJSON(re, tests.TestDialClient, fmt.Sprintf("%s/%s", urlPrefix, "schedulers"), &respSlice,
-			testutil.WithHeader(re, apiutil.XForwardedToMicroServiceHeader, "true"))
+			testutil.WithHeader(re, apiutil.XForwardedToMicroserviceHeader, "true"))
 		re.NoError(err)
 		return slice.Contains(respSlice, "balance-leader-scheduler")
 	})
@@ -181,18 +195,18 @@ func (suite *apiTestSuite) checkAPIForward(cluster *tests.TestCluster) {
 		pauseArgs, err := json.Marshal(input)
 		re.NoError(err)
 		err = testutil.CheckPostJSON(tests.TestDialClient, fmt.Sprintf("%s/%s", urlPrefix, "schedulers/balance-leader-scheduler"), pauseArgs,
-			testutil.WithHeader(re, apiutil.XForwardedToMicroServiceHeader, "true"))
+			testutil.WithHeader(re, apiutil.XForwardedToMicroserviceHeader, "true"))
 		re.NoError(err)
 	}
 	postScheduler(30)
 	postScheduler(0)
 
 	err = testutil.ReadGetJSON(re, tests.TestDialClient, fmt.Sprintf("%s/%s", urlPrefix, "schedulers/diagnostic/balance-leader-scheduler"), &resp,
-		testutil.WithHeader(re, apiutil.XForwardedToMicroServiceHeader, "true"))
+		testutil.WithHeader(re, apiutil.XForwardedToMicroserviceHeader, "true"))
 	re.NoError(err)
 
 	err = testutil.ReadGetJSON(re, tests.TestDialClient, fmt.Sprintf("%s/%s", urlPrefix, "scheduler-config"), &resp,
-		testutil.WithHeader(re, apiutil.XForwardedToMicroServiceHeader, "true"))
+		testutil.WithHeader(re, apiutil.XForwardedToMicroserviceHeader, "true"))
 	re.NoError(err)
 	re.Contains(resp, "balance-leader-scheduler")
 	re.Contains(resp, "balance-hot-region-scheduler")
@@ -203,16 +217,16 @@ func (suite *apiTestSuite) checkAPIForward(cluster *tests.TestCluster) {
 	}
 	for _, schedulerName := range schedulers {
 		err = testutil.ReadGetJSON(re, tests.TestDialClient, fmt.Sprintf("%s/%s/%s/%s", urlPrefix, "scheduler-config", schedulerName, "list"), &resp,
-			testutil.WithHeader(re, apiutil.XForwardedToMicroServiceHeader, "true"))
+			testutil.WithHeader(re, apiutil.XForwardedToMicroserviceHeader, "true"))
 		re.NoError(err)
 	}
 
 	err = testutil.CheckPostJSON(tests.TestDialClient, fmt.Sprintf("%s/%s", urlPrefix, "schedulers"), nil,
-		testutil.WithoutHeader(re, apiutil.XForwardedToMicroServiceHeader))
+		testutil.WithoutHeader(re, apiutil.XForwardedToMicroserviceHeader))
 	re.NoError(err)
 
 	err = testutil.CheckDelete(tests.TestDialClient, fmt.Sprintf("%s/%s", urlPrefix, "schedulers/balance-leader-scheduler"),
-		testutil.WithoutHeader(re, apiutil.XForwardedToMicroServiceHeader))
+		testutil.WithoutHeader(re, apiutil.XForwardedToMicroserviceHeader))
 	re.NoError(err)
 
 	input := make(map[string]any)
@@ -220,74 +234,74 @@ func (suite *apiTestSuite) checkAPIForward(cluster *tests.TestCluster) {
 	b, err := json.Marshal(input)
 	re.NoError(err)
 	err = testutil.CheckPostJSON(tests.TestDialClient, fmt.Sprintf("%s/%s", urlPrefix, "schedulers"), b,
-		testutil.WithoutHeader(re, apiutil.XForwardedToMicroServiceHeader))
+		testutil.WithoutHeader(re, apiutil.XForwardedToMicroserviceHeader))
 	re.NoError(err)
 
 	// Test hotspot
 	var hotRegions statistics.StoreHotPeersInfos
 	err = testutil.ReadGetJSON(re, tests.TestDialClient, fmt.Sprintf("%s/%s", urlPrefix, "hotspot/regions/write"), &hotRegions,
-		testutil.WithHeader(re, apiutil.XForwardedToMicroServiceHeader, "true"))
+		testutil.WithHeader(re, apiutil.XForwardedToMicroserviceHeader, "true"))
 	re.NoError(err)
 	err = testutil.ReadGetJSON(re, tests.TestDialClient, fmt.Sprintf("%s/%s", urlPrefix, "hotspot/regions/read"), &hotRegions,
-		testutil.WithHeader(re, apiutil.XForwardedToMicroServiceHeader, "true"))
+		testutil.WithHeader(re, apiutil.XForwardedToMicroserviceHeader, "true"))
 	re.NoError(err)
 	var stores handler.HotStoreStats
 	err = testutil.ReadGetJSON(re, tests.TestDialClient, fmt.Sprintf("%s/%s", urlPrefix, "hotspot/stores"), &stores,
-		testutil.WithHeader(re, apiutil.XForwardedToMicroServiceHeader, "true"))
+		testutil.WithHeader(re, apiutil.XForwardedToMicroserviceHeader, "true"))
 	re.NoError(err)
 	var buckets handler.HotBucketsResponse
 	err = testutil.ReadGetJSON(re, tests.TestDialClient, fmt.Sprintf("%s/%s", urlPrefix, "hotspot/buckets"), &buckets,
-		testutil.WithHeader(re, apiutil.XForwardedToMicroServiceHeader, "true"))
+		testutil.WithHeader(re, apiutil.XForwardedToMicroserviceHeader, "true"))
 	re.NoError(err)
 	var history storage.HistoryHotRegions
 	err = testutil.ReadGetJSON(re, tests.TestDialClient, fmt.Sprintf("%s/%s", urlPrefix, "hotspot/regions/history"), &history,
-		testutil.WithHeader(re, apiutil.XForwardedToMicroServiceHeader, "true"))
+		testutil.WithHeader(re, apiutil.XForwardedToMicroserviceHeader, "true"))
 	re.NoError(err)
 
 	// Test region label
 	var labelRules []*labeler.LabelRule
 	err = testutil.ReadGetJSON(re, tests.TestDialClient, fmt.Sprintf("%s/%s", urlPrefix, "config/region-label/rules"), &labelRules,
-		testutil.WithHeader(re, apiutil.XForwardedToMicroServiceHeader, "true"))
+		testutil.WithHeader(re, apiutil.XForwardedToMicroserviceHeader, "true"))
 	re.NoError(err)
 	err = testutil.ReadGetJSONWithBody(re, tests.TestDialClient, fmt.Sprintf("%s/%s", urlPrefix, "config/region-label/rules/ids"), []byte(`["rule1", "rule3"]`),
-		&labelRules, testutil.WithHeader(re, apiutil.XForwardedToMicroServiceHeader, "true"))
+		&labelRules, testutil.WithHeader(re, apiutil.XForwardedToMicroserviceHeader, "true"))
 	re.NoError(err)
 	err = testutil.CheckGetJSON(tests.TestDialClient, fmt.Sprintf("%s/%s", urlPrefix, "config/region-label/rule/rule1"), nil,
-		testutil.StatusNotOK(re), testutil.WithHeader(re, apiutil.XForwardedToMicroServiceHeader, "true"))
+		testutil.StatusNotOK(re), testutil.WithHeader(re, apiutil.XForwardedToMicroserviceHeader, "true"))
 	re.NoError(err)
 
 	err = testutil.CheckGetJSON(tests.TestDialClient, fmt.Sprintf("%s/%s", urlPrefix, "region/id/1"), nil,
-		testutil.WithoutHeader(re, apiutil.XForwardedToMicroServiceHeader))
+		testutil.WithoutHeader(re, apiutil.XForwardedToMicroserviceHeader))
 	re.NoError(err)
 	err = testutil.CheckGetJSON(tests.TestDialClient, fmt.Sprintf("%s/%s", urlPrefix, "region/id/1/label/key"), nil,
-		testutil.WithHeader(re, apiutil.XForwardedToMicroServiceHeader, "true"))
+		testutil.WithHeader(re, apiutil.XForwardedToMicroserviceHeader, "true"))
 	re.NoError(err)
 	err = testutil.CheckGetJSON(tests.TestDialClient, fmt.Sprintf("%s/%s", urlPrefix, "region/id/1/labels"), nil,
-		testutil.WithHeader(re, apiutil.XForwardedToMicroServiceHeader, "true"))
+		testutil.WithHeader(re, apiutil.XForwardedToMicroserviceHeader, "true"))
 	re.NoError(err)
 
 	// Test Region
 	body := fmt.Sprintf(`{"start_key":"%s", "end_key": "%s"}`, hex.EncodeToString([]byte("a1")), hex.EncodeToString([]byte("a3")))
 	err = testutil.CheckPostJSON(tests.TestDialClient, fmt.Sprintf("%s/%s", urlPrefix, "regions/accelerate-schedule"), []byte(body),
-		testutil.StatusOK(re), testutil.WithHeader(re, apiutil.XForwardedToMicroServiceHeader, "true"))
+		testutil.StatusOK(re), testutil.WithHeader(re, apiutil.XForwardedToMicroserviceHeader, "true"))
 	re.NoError(err)
 	body = fmt.Sprintf(`[{"start_key":"%s", "end_key": "%s"}, {"start_key":"%s", "end_key": "%s"}]`, hex.EncodeToString([]byte("a1")), hex.EncodeToString([]byte("a3")), hex.EncodeToString([]byte("a4")), hex.EncodeToString([]byte("a6")))
 	err = testutil.CheckPostJSON(tests.TestDialClient, fmt.Sprintf("%s/%s", urlPrefix, "regions/accelerate-schedule/batch"), []byte(body),
-		testutil.StatusOK(re), testutil.WithHeader(re, apiutil.XForwardedToMicroServiceHeader, "true"))
+		testutil.StatusOK(re), testutil.WithHeader(re, apiutil.XForwardedToMicroserviceHeader, "true"))
 	re.NoError(err)
 	body = fmt.Sprintf(`{"start_key":"%s", "end_key": "%s"}`, hex.EncodeToString([]byte("b1")), hex.EncodeToString([]byte("b3")))
 	err = testutil.CheckPostJSON(tests.TestDialClient, fmt.Sprintf("%s/%s", urlPrefix, "regions/scatter"), []byte(body),
-		testutil.WithHeader(re, apiutil.XForwardedToMicroServiceHeader, "true"))
+		testutil.WithHeader(re, apiutil.XForwardedToMicroserviceHeader, "true"))
 	re.NoError(err)
 	body = fmt.Sprintf(`{"retry_limit":%v, "split_keys": ["%s","%s","%s"]}`, 3,
 		hex.EncodeToString([]byte("bbb")),
 		hex.EncodeToString([]byte("ccc")),
 		hex.EncodeToString([]byte("ddd")))
 	err = testutil.CheckPostJSON(tests.TestDialClient, fmt.Sprintf("%s/%s", urlPrefix, "regions/split"), []byte(body),
-		testutil.StatusOK(re), testutil.WithHeader(re, apiutil.XForwardedToMicroServiceHeader, "true"))
+		testutil.StatusOK(re), testutil.WithHeader(re, apiutil.XForwardedToMicroserviceHeader, "true"))
 	re.NoError(err)
 	err = testutil.CheckGetJSON(tests.TestDialClient, fmt.Sprintf(`%s/regions/replicated?startKey=%s&endKey=%s`, urlPrefix, hex.EncodeToString([]byte("a1")), hex.EncodeToString([]byte("a2"))), nil,
-		testutil.StatusOK(re), testutil.WithHeader(re, apiutil.XForwardedToMicroServiceHeader, "true"))
+		testutil.StatusOK(re), testutil.WithHeader(re, apiutil.XForwardedToMicroserviceHeader, "true"))
 	re.NoError(err)
 	// Test rules: only forward `GET` request
 	var rules []*placement.Rule
@@ -305,80 +319,80 @@ func (suite *apiTestSuite) checkAPIForward(cluster *tests.TestCluster) {
 	re.NoError(err)
 
 	err = testutil.ReadGetJSON(re, tests.TestDialClient, fmt.Sprintf("%s/%s", urlPrefix, "config/rules"), &rules,
-		testutil.WithHeader(re, apiutil.XForwardedToMicroServiceHeader, "true"))
+		testutil.WithHeader(re, apiutil.XForwardedToMicroserviceHeader, "true"))
 	re.NoError(err)
 	err = testutil.CheckPostJSON(tests.TestDialClient, fmt.Sprintf("%s/%s", urlPrefix, "config/rules"), rulesArgs,
-		testutil.WithoutHeader(re, apiutil.XForwardedToMicroServiceHeader))
+		testutil.WithoutHeader(re, apiutil.XForwardedToMicroserviceHeader))
 	re.NoError(err)
 	err = testutil.CheckPostJSON(tests.TestDialClient, fmt.Sprintf("%s/%s", urlPrefix, "config/rules/batch"), rulesArgs,
-		testutil.WithoutHeader(re, apiutil.XForwardedToMicroServiceHeader))
+		testutil.WithoutHeader(re, apiutil.XForwardedToMicroserviceHeader))
 	re.NoError(err)
 	err = testutil.ReadGetJSON(re, tests.TestDialClient, fmt.Sprintf("%s/%s", urlPrefix, "config/rules/group/pd"), &rules,
-		testutil.WithHeader(re, apiutil.XForwardedToMicroServiceHeader, "true"))
+		testutil.WithHeader(re, apiutil.XForwardedToMicroserviceHeader, "true"))
 	re.NoError(err)
 	err = testutil.ReadGetJSON(re, tests.TestDialClient, fmt.Sprintf("%s/%s", urlPrefix, "config/rules/region/2"), &rules,
-		testutil.WithHeader(re, apiutil.XForwardedToMicroServiceHeader, "true"))
+		testutil.WithHeader(re, apiutil.XForwardedToMicroserviceHeader, "true"))
 	re.NoError(err)
 	var fit placement.RegionFit
 	err = testutil.ReadGetJSON(re, tests.TestDialClient, fmt.Sprintf("%s/%s", urlPrefix, "config/rules/region/2/detail"), &fit,
-		testutil.WithHeader(re, apiutil.XForwardedToMicroServiceHeader, "true"))
+		testutil.WithHeader(re, apiutil.XForwardedToMicroserviceHeader, "true"))
 	re.NoError(err)
 	err = testutil.ReadGetJSON(re, tests.TestDialClient, fmt.Sprintf("%s/%s", urlPrefix, "config/rules/key/0000000000000001"), &rules,
-		testutil.WithHeader(re, apiutil.XForwardedToMicroServiceHeader, "true"))
+		testutil.WithHeader(re, apiutil.XForwardedToMicroserviceHeader, "true"))
 	re.NoError(err)
 	err = testutil.CheckGetJSON(tests.TestDialClient, fmt.Sprintf("%s/%s", urlPrefix, "config/rule/pd/2"), nil,
-		testutil.WithHeader(re, apiutil.XForwardedToMicroServiceHeader, "true"))
+		testutil.WithHeader(re, apiutil.XForwardedToMicroserviceHeader, "true"))
 	re.NoError(err)
 	err = testutil.CheckDelete(tests.TestDialClient, fmt.Sprintf("%s/%s", urlPrefix, "config/rule/pd/2"),
-		testutil.WithoutHeader(re, apiutil.XForwardedToMicroServiceHeader))
+		testutil.WithoutHeader(re, apiutil.XForwardedToMicroserviceHeader))
 	re.NoError(err)
 	err = testutil.CheckPostJSON(tests.TestDialClient, fmt.Sprintf("%s/%s", urlPrefix, "config/rule"), rulesArgs,
-		testutil.WithoutHeader(re, apiutil.XForwardedToMicroServiceHeader))
+		testutil.WithoutHeader(re, apiutil.XForwardedToMicroserviceHeader))
 	re.NoError(err)
 	err = testutil.CheckGetJSON(tests.TestDialClient, fmt.Sprintf("%s/%s", urlPrefix, "config/rule_group/pd"), nil,
-		testutil.WithHeader(re, apiutil.XForwardedToMicroServiceHeader, "true"))
+		testutil.WithHeader(re, apiutil.XForwardedToMicroserviceHeader, "true"))
 	re.NoError(err)
 	err = testutil.CheckDelete(tests.TestDialClient, fmt.Sprintf("%s/%s", urlPrefix, "config/rule_group/pd"),
-		testutil.WithoutHeader(re, apiutil.XForwardedToMicroServiceHeader))
+		testutil.WithoutHeader(re, apiutil.XForwardedToMicroserviceHeader))
 	re.NoError(err)
 	err = testutil.CheckPostJSON(tests.TestDialClient, fmt.Sprintf("%s/%s", urlPrefix, "config/rule_group"), rulesArgs,
-		testutil.WithoutHeader(re, apiutil.XForwardedToMicroServiceHeader))
+		testutil.WithoutHeader(re, apiutil.XForwardedToMicroserviceHeader))
 	re.NoError(err)
 	err = testutil.CheckGetJSON(tests.TestDialClient, fmt.Sprintf("%s/%s", urlPrefix, "config/rule_groups"), nil,
-		testutil.WithHeader(re, apiutil.XForwardedToMicroServiceHeader, "true"))
+		testutil.WithHeader(re, apiutil.XForwardedToMicroserviceHeader, "true"))
 	re.NoError(err)
 	err = testutil.CheckGetJSON(tests.TestDialClient, fmt.Sprintf("%s/%s", urlPrefix, "config/placement-rule"), nil,
-		testutil.WithHeader(re, apiutil.XForwardedToMicroServiceHeader, "true"))
+		testutil.WithHeader(re, apiutil.XForwardedToMicroserviceHeader, "true"))
 	re.NoError(err)
 	err = testutil.CheckPostJSON(tests.TestDialClient, fmt.Sprintf("%s/%s", urlPrefix, "config/placement-rule"), rulesArgs,
-		testutil.WithoutHeader(re, apiutil.XForwardedToMicroServiceHeader))
+		testutil.WithoutHeader(re, apiutil.XForwardedToMicroserviceHeader))
 	re.NoError(err)
 	err = testutil.CheckGetJSON(tests.TestDialClient, fmt.Sprintf("%s/%s", urlPrefix, "config/placement-rule/pd"), nil,
-		testutil.WithHeader(re, apiutil.XForwardedToMicroServiceHeader, "true"))
+		testutil.WithHeader(re, apiutil.XForwardedToMicroserviceHeader, "true"))
 	re.NoError(err)
 	err = testutil.CheckDelete(tests.TestDialClient, fmt.Sprintf("%s/%s", urlPrefix, "config/placement-rule/pd"),
-		testutil.WithoutHeader(re, apiutil.XForwardedToMicroServiceHeader))
+		testutil.WithoutHeader(re, apiutil.XForwardedToMicroserviceHeader))
 	re.NoError(err)
 	err = testutil.CheckPostJSON(tests.TestDialClient, fmt.Sprintf("%s/%s", urlPrefix, "config/placement-rule/pd"), rulesArgs,
-		testutil.WithoutHeader(re, apiutil.XForwardedToMicroServiceHeader))
+		testutil.WithoutHeader(re, apiutil.XForwardedToMicroserviceHeader))
 	re.NoError(err)
 
 	// test redirect is disabled
 	err = testutil.CheckGetJSON(tests.TestDialClient, fmt.Sprintf("%s/%s", urlPrefix, "config/placement-rule/pd"), nil,
-		testutil.WithHeader(re, apiutil.XForwardedToMicroServiceHeader, "true"))
+		testutil.WithHeader(re, apiutil.XForwardedToMicroserviceHeader, "true"))
 	re.NoError(err)
 	req, err := http.NewRequest(http.MethodGet, fmt.Sprintf("%s/%s", urlPrefix, "config/placement-rule/pd"), http.NoBody)
 	re.NoError(err)
-	req.Header.Set(apiutil.XForbiddenForwardToMicroServiceHeader, "true")
+	req.Header.Set(apiutil.XForbiddenForwardToMicroserviceHeader, "true")
 	httpResp, err := tests.TestDialClient.Do(req)
 	re.NoError(err)
 	re.Equal(http.StatusOK, httpResp.StatusCode)
 	defer httpResp.Body.Close()
-	re.Empty(httpResp.Header.Get(apiutil.XForwardedToMicroServiceHeader))
+	re.Empty(httpResp.Header.Get(apiutil.XForwardedToMicroserviceHeader))
 }
 
 func (suite *apiTestSuite) TestConfig() {
-	suite.env.RunTestInPDServiceMode(suite.checkConfig)
+	suite.env.RunTestInMicroserviceEnv(suite.checkConfig)
 }
 
 func (suite *apiTestSuite) checkConfig(cluster *tests.TestCluster) {
@@ -401,7 +415,7 @@ func (suite *apiTestSuite) checkConfig(cluster *tests.TestCluster) {
 }
 
 func (suite *apiTestSuite) TestConfigForward() {
-	suite.env.RunTestInPDServiceMode(suite.checkConfigForward)
+	suite.env.RunTestInMicroserviceEnv(suite.checkConfigForward)
 }
 
 func (suite *apiTestSuite) checkConfigForward(cluster *tests.TestCluster) {
@@ -413,7 +427,7 @@ func (suite *apiTestSuite) checkConfigForward(cluster *tests.TestCluster) {
 	urlPrefix := fmt.Sprintf("%s/pd/api/v1/config", addr)
 
 	// Test config forward
-	// Expect to get same config in scheduling server and PD service
+	// Expect to get same config in scheduling server and PD
 	testutil.Eventually(re, func() bool {
 		testutil.ReadGetJSON(re, tests.TestDialClient, urlPrefix, &cfg)
 		re.Equal(cfg["schedule"].(map[string]any)["leader-schedule-limit"],
@@ -421,8 +435,8 @@ func (suite *apiTestSuite) checkConfigForward(cluster *tests.TestCluster) {
 		return cfg["replication"].(map[string]any)["max-replicas"] == float64(opts.GetReplicationConfig().MaxReplicas)
 	})
 
-	// Test to change config in PD service
-	// Expect to get new config in scheduling server and PD service
+	// Test to change config in PD
+	// Expect to get new config in scheduling server and PD
 	reqData, err := json.Marshal(map[string]any{
 		"max-replicas": 4,
 	})
@@ -436,7 +450,7 @@ func (suite *apiTestSuite) checkConfigForward(cluster *tests.TestCluster) {
 	})
 
 	// Test to change config only in scheduling server
-	// Expect to get new config in scheduling server but not old config in PD service
+	// Expect to get new config in scheduling server but not old config in PD
 	scheCfg := opts.GetScheduleConfig().Clone()
 	scheCfg.LeaderScheduleLimit = 100
 	opts.SetScheduleConfig(scheCfg)
@@ -452,7 +466,7 @@ func (suite *apiTestSuite) checkConfigForward(cluster *tests.TestCluster) {
 }
 
 func (suite *apiTestSuite) TestAdminRegionCache() {
-	suite.env.RunTestInPDServiceMode(suite.checkAdminRegionCache)
+	suite.env.RunTestInMicroserviceEnv(suite.checkAdminRegionCache)
 }
 
 func (suite *apiTestSuite) checkAdminRegionCache(cluster *tests.TestCluster) {
@@ -479,7 +493,7 @@ func (suite *apiTestSuite) checkAdminRegionCache(cluster *tests.TestCluster) {
 }
 
 func (suite *apiTestSuite) TestAdminRegionCacheForward() {
-	suite.env.RunTestInPDServiceMode(suite.checkAdminRegionCacheForward)
+	suite.env.RunTestInMicroserviceEnv(suite.checkAdminRegionCacheForward)
 }
 
 func (suite *apiTestSuite) checkAdminRegionCacheForward(cluster *tests.TestCluster) {
@@ -510,7 +524,7 @@ func (suite *apiTestSuite) checkAdminRegionCacheForward(cluster *tests.TestClust
 }
 
 func (suite *apiTestSuite) TestFollowerForward() {
-	suite.env.RunTestBasedOnMode(suite.checkFollowerForward)
+	suite.env.RunTest(suite.checkFollowerForward)
 	suite.TearDownSuite()
 	suite.SetupSuite()
 }
@@ -520,7 +534,7 @@ func (suite *apiTestSuite) checkFollowerForward(cluster *tests.TestCluster) {
 	leaderAddr := cluster.GetLeaderServer().GetAddr()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	follower, err := cluster.JoinPDServer(ctx)
+	follower, err := cluster.Join(ctx)
 	re.NoError(err)
 	re.NoError(follower.Run())
 	re.NotEmpty(cluster.WaitLeader())
@@ -536,14 +550,14 @@ func (suite *apiTestSuite) checkFollowerForward(cluster *tests.TestCluster) {
 		// follower will forward to scheduling server directly
 		re.NotEqual(cluster.GetLeaderServer().GetAddr(), followerAddr)
 		err = testutil.ReadGetJSON(re, tests.TestDialClient, fmt.Sprintf("%s/%s", urlPrefix, "config/rules"), &rules,
-			testutil.WithHeader(re, apiutil.XForwardedToMicroServiceHeader, "true"),
+			testutil.WithHeader(re, apiutil.XForwardedToMicroserviceHeader, "true"),
 		)
 		re.NoError(err)
 	} else {
 		// follower will forward to leader server
 		re.NotEqual(cluster.GetLeaderServer().GetAddr(), followerAddr)
 		err = testutil.ReadGetJSON(re, tests.TestDialClient, fmt.Sprintf("%s/%s", urlPrefix, "config/rules"), &rules,
-			testutil.WithoutHeader(re, apiutil.XForwardedToMicroServiceHeader),
+			testutil.WithoutHeader(re, apiutil.XForwardedToMicroserviceHeader),
 		)
 		re.NoError(err)
 	}
@@ -552,13 +566,13 @@ func (suite *apiTestSuite) checkFollowerForward(cluster *tests.TestCluster) {
 	re.NotEqual(cluster.GetLeaderServer().GetAddr(), followerAddr)
 	results := make(map[string]any)
 	err = testutil.ReadGetJSON(re, tests.TestDialClient, fmt.Sprintf("%s/%s", urlPrefix, "config"), &results,
-		testutil.WithoutHeader(re, apiutil.XForwardedToMicroServiceHeader),
+		testutil.WithoutHeader(re, apiutil.XForwardedToMicroserviceHeader),
 	)
 	re.NoError(err)
 }
 
 func (suite *apiTestSuite) TestMetrics() {
-	suite.env.RunTestInPDServiceMode(suite.checkMetrics)
+	suite.env.RunTestInMicroserviceEnv(suite.checkMetrics)
 }
 
 func (suite *apiTestSuite) checkMetrics(cluster *tests.TestCluster) {
@@ -577,7 +591,7 @@ func (suite *apiTestSuite) checkMetrics(cluster *tests.TestCluster) {
 }
 
 func (suite *apiTestSuite) TestStatus() {
-	suite.env.RunTestInPDServiceMode(suite.checkStatus)
+	suite.env.RunTestInMicroserviceEnv(suite.checkStatus)
 }
 
 func (suite *apiTestSuite) checkStatus(cluster *tests.TestCluster) {
@@ -600,7 +614,7 @@ func (suite *apiTestSuite) checkStatus(cluster *tests.TestCluster) {
 }
 
 func (suite *apiTestSuite) TestStores() {
-	suite.env.RunTestInPDServiceMode(suite.checkStores)
+	suite.env.RunTestInMicroserviceEnv(suite.checkStores)
 }
 
 func (suite *apiTestSuite) checkStores(cluster *tests.TestCluster) {
@@ -647,8 +661,8 @@ func (suite *apiTestSuite) checkStores(cluster *tests.TestCluster) {
 		tests.MustPutStore(re, cluster, store)
 	}
 	// Test /stores
-	pdServiceAddr := cluster.GetLeaderServer().GetAddr()
-	urlPrefix := fmt.Sprintf("%s/pd/api/v1/stores", pdServiceAddr)
+	pdAddr := cluster.GetLeaderServer().GetAddr()
+	urlPrefix := fmt.Sprintf("%s/pd/api/v1/stores", pdAddr)
 	var resp map[string]any
 	err := testutil.ReadGetJSON(re, tests.TestDialClient, urlPrefix, &resp)
 	re.NoError(err)
@@ -682,7 +696,7 @@ func (suite *apiTestSuite) checkStores(cluster *tests.TestCluster) {
 }
 
 func (suite *apiTestSuite) TestRegions() {
-	suite.env.RunTestInPDServiceMode(suite.checkRegions)
+	suite.env.RunTestInMicroserviceEnv(suite.checkRegions)
 }
 
 func (suite *apiTestSuite) checkRegions(cluster *tests.TestCluster) {
@@ -691,8 +705,8 @@ func (suite *apiTestSuite) checkRegions(cluster *tests.TestCluster) {
 	tests.MustPutRegion(re, cluster, 2, 2, []byte("c"), []byte("d"))
 	tests.MustPutRegion(re, cluster, 3, 1, []byte("e"), []byte("f"))
 	// Test /regions
-	pdServiceAddr := cluster.GetLeaderServer().GetAddr()
-	urlPrefix := fmt.Sprintf("%s/pd/api/v1/regions", pdServiceAddr)
+	pdAddr := cluster.GetLeaderServer().GetAddr()
+	urlPrefix := fmt.Sprintf("%s/pd/api/v1/regions", pdAddr)
 	var resp map[string]any
 	err := testutil.ReadGetJSON(re, tests.TestDialClient, urlPrefix, &resp)
 	re.NoError(err)

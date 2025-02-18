@@ -16,7 +16,6 @@ package kv
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/syndtr/goleveldb/leveldb"
 	"github.com/syndtr/goleveldb/leveldb/util"
@@ -81,11 +80,9 @@ func (kv *LevelDBKV) Remove(key string) error {
 	return errors.WithStack(kv.Delete([]byte(key), nil))
 }
 
-// CreateLowLevelTxn creates a transaction that provides interface in if-then-else pattern.
-func (kv *LevelDBKV) CreateLowLevelTxn() LowLevelTxn {
-	return &levelDBLowLevelTxnSimulator{
-		kv: kv,
-	}
+// CreateRawEtcdTxn implements kv.Base interface.
+func (*LevelDBKV) CreateRawEtcdTxn() RawEtcdTxn {
+	panic("unimplemented")
 }
 
 // levelDBTxn implements kv.Txn.
@@ -154,133 +151,4 @@ func (txn *levelDBTxn) commit() error {
 	defer txn.mu.Unlock()
 
 	return txn.kv.Write(txn.batch, nil)
-}
-
-type levelDBLowLevelTxnSimulator struct {
-	kv           *LevelDBKV
-	condition    []LowLevelTxnCondition
-	onSuccessOps []LowLevelTxnOp
-	onFailureOps []LowLevelTxnOp
-}
-
-// If implements LowLevelTxn interface for adding conditions to the transaction.
-func (t *levelDBLowLevelTxnSimulator) If(conditions ...LowLevelTxnCondition) LowLevelTxn {
-	t.condition = append(t.condition, conditions...)
-	return t
-}
-
-// Then implements LowLevelTxn interface for adding operations that need to be executed when the condition passes to
-// the transaction.
-func (t *levelDBLowLevelTxnSimulator) Then(ops ...LowLevelTxnOp) LowLevelTxn {
-	t.onSuccessOps = append(t.onSuccessOps, ops...)
-	return t
-}
-
-// Else implements LowLevelTxn interface for adding operations that need to be executed when the condition doesn't pass
-// to the transaction.
-func (t *levelDBLowLevelTxnSimulator) Else(ops ...LowLevelTxnOp) LowLevelTxn {
-	t.onFailureOps = append(t.onFailureOps, ops...)
-	return t
-}
-
-// Commit implements LowLevelTxn interface for committing the transaction.
-func (t *levelDBLowLevelTxnSimulator) Commit(_ctx context.Context) (res LowLevelTxnResult, err error) {
-	txn, err := t.kv.DB.OpenTransaction()
-	if err != nil {
-		return LowLevelTxnResult{}, err
-	}
-	defer func() {
-		// Set txn to nil when the function finished normally.
-		// When the function encounters any error and returns early, the transaction will be discarded here.
-		if txn != nil {
-			txn.Discard()
-		}
-	}()
-
-	succeeds := true
-	for _, condition := range t.condition {
-		value, err := t.kv.DB.Get([]byte(condition.Key), nil)
-		valueStr := string(value)
-		exists := true
-		if err != nil {
-			if err == leveldb.ErrNotFound {
-				exists = false
-			} else {
-				return res, errors.WithStack(err)
-			}
-		}
-
-		if !condition.CheckOnValue(valueStr, exists) {
-			succeeds = false
-			break
-		}
-	}
-
-	ops := t.onSuccessOps
-	if !succeeds {
-		ops = t.onFailureOps
-	}
-
-	results := make([]LowLevelTxnResultItem, 0, len(ops))
-
-	for _, operation := range ops {
-		switch operation.OpType {
-		case LowLevelOpPut:
-			err = txn.Put([]byte(operation.Key), []byte(operation.Value), nil)
-			if err != nil {
-				return res, errors.WithStack(err)
-			}
-			results = append(results, LowLevelTxnResultItem{})
-		case LowLevelOpDelete:
-			err = txn.Delete([]byte(operation.Key), nil)
-			if err != nil {
-				return res, errors.WithStack(err)
-			}
-			results = append(results, LowLevelTxnResultItem{})
-		case LowLevelOpGet:
-			value, err := txn.Get([]byte(operation.Key), nil)
-			result := LowLevelTxnResultItem{}
-			if err != nil {
-				if err != leveldb.ErrNotFound {
-					return res, errors.WithStack(err)
-				}
-			} else {
-				result.KeyValuePairs = append(result.KeyValuePairs, KeyValuePair{
-					Key:   operation.Key,
-					Value: string(value),
-				})
-			}
-			results = append(results, result)
-		case LowLevelOpGetRange:
-			iter := txn.NewIterator(&util.Range{Start: []byte(operation.Key), Limit: []byte(operation.EndKey)}, nil)
-			result := LowLevelTxnResultItem{}
-			count := 0
-			for iter.Next() {
-				if operation.Limit > 0 && count >= operation.Limit {
-					break
-				}
-				result.KeyValuePairs = append(result.KeyValuePairs, KeyValuePair{
-					Key:   string(iter.Key()),
-					Value: string(iter.Value()),
-				})
-				count++
-			}
-			iter.Release()
-			results = append(results, result)
-		default:
-			panic(fmt.Sprintf("unknown operation type %v", operation.OpType))
-		}
-	}
-
-	err = txn.Commit()
-	if err != nil {
-		return res, errors.WithStack(err)
-	}
-	// Avoid being discarded again in the defer block.
-	txn = nil
-
-	return LowLevelTxnResult{
-		Succeeded:   succeeds,
-		ResultItems: results,
-	}, nil
 }

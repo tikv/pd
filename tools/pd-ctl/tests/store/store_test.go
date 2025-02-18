@@ -46,6 +46,7 @@ func TestStoreLimitV2(t *testing.T) {
 	defer cancel()
 	cluster, err := pdTests.NewTestCluster(ctx, 1)
 	re.NoError(err)
+	defer cluster.Destroy()
 	err = cluster.RunInitialServers()
 	re.NoError(err)
 	re.NotEmpty(cluster.WaitLeader())
@@ -54,7 +55,6 @@ func TestStoreLimitV2(t *testing.T) {
 
 	leaderServer := cluster.GetLeaderServer()
 	re.NoError(leaderServer.BootstrapCluster())
-	defer cluster.Destroy()
 
 	// store command
 	args := []string{"-u", pdAddr, "config", "set", "store-limit-version", "v2"}

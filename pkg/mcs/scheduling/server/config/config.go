@@ -243,7 +243,7 @@ func NewPersistConfig(cfg *Config, ttl *cache.TTLString) *PersistConfig {
 	o.SetClusterVersion(&cfg.ClusterVersion)
 	o.schedule.Store(&cfg.Schedule)
 	o.replication.Store(&cfg.Replication)
-	// storeConfig will be fetched from TiKV by PD service,
+	// storeConfig will be fetched from TiKV by PD,
 	// so we just set an empty value here first.
 	o.storeConfig.Store(&sc.StoreConfig{})
 	o.ttl = ttl
@@ -748,11 +748,11 @@ func (o *PersistConfig) IsRaftKV2() bool {
 // TODO: implement the following methods
 
 // AddSchedulerCfg adds the scheduler configurations.
-// This method is a no-op since we only use configurations derived from one-way synchronization from PD service now.
+// This method is a no-op since we only use configurations derived from one-way synchronization from PD now.
 func (*PersistConfig) AddSchedulerCfg(types.CheckerSchedulerType, []string) {}
 
 // RemoveSchedulerCfg removes the scheduler configurations.
-// This method is a no-op since we only use configurations derived from one-way synchronization from PD service now.
+// This method is a no-op since we only use configurations derived from one-way synchronization from PD now.
 func (*PersistConfig) RemoveSchedulerCfg(types.CheckerSchedulerType) {}
 
 // CheckLabelProperty checks if the label property is satisfied.

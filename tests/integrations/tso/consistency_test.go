@@ -76,7 +76,7 @@ func (suite *tsoConsistencyTestSuite) SetupSuite() {
 	if suite.legacy {
 		suite.cluster, err = tests.NewTestCluster(suite.ctx, serverCount)
 	} else {
-		suite.cluster, err = tests.NewTestPDServiceCluster(suite.ctx, serverCount)
+		suite.cluster, err = tests.NewTestClusterWithKeyspaceGroup(suite.ctx, serverCount)
 	}
 	re.NoError(err)
 	err = suite.cluster.RunInitialServers()

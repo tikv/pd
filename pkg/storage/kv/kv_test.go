@@ -38,7 +38,7 @@ func TestEtcd(t *testing.T) {
 	testRange(re, kv)
 	testSaveMultiple(re, kv, 20)
 	testLoadConflict(re, kv)
-	testLowLevelTxn(re, kv)
+	testRawEtcdTxn(re, kv)
 }
 
 func TestLevelDB(t *testing.T) {
@@ -50,7 +50,6 @@ func TestLevelDB(t *testing.T) {
 	testReadWrite(re, kv)
 	testRange(re, kv)
 	testSaveMultiple(re, kv, 20)
-	testLowLevelTxn(re, kv)
 }
 
 func TestMemKV(t *testing.T) {
@@ -59,7 +58,6 @@ func TestMemKV(t *testing.T) {
 	testReadWrite(re, kv)
 	testRange(re, kv)
 	testSaveMultiple(re, kv, 20)
-	testLowLevelTxn(re, kv)
 }
 
 func testReadWrite(re *require.Assertions, kv Base) {
@@ -174,31 +172,31 @@ func mustHaveKeys(re *require.Assertions, kv Base, prefix string, expected ...Ke
 	}
 }
 
-func testLowLevelTxn(re *require.Assertions, kv Base) {
+func testRawEtcdTxn(re *require.Assertions, kv Base) {
 	// Test NotExists condition, putting in transaction.
-	res, err := kv.CreateLowLevelTxn().If(
-		LowLevelTxnCondition{
+	res, err := kv.CreateRawEtcdTxn().If(
+		RawEtcdTxnCondition{
 			Key:     "txn-k1",
-			CmpType: LowLevelCmpNotExists,
+			CmpType: EtcdTxnCmpNotExists,
 		},
 	).Then(
-		LowLevelTxnOp{
+		RawEtcdTxnOp{
 			Key:    "txn-k1",
-			OpType: LowLevelOpPut,
+			OpType: EtcdTxnOpPut,
 			Value:  "v1",
 		},
-		LowLevelTxnOp{
+		RawEtcdTxnOp{
 			Key:    "txn-k2",
-			OpType: LowLevelOpPut,
+			OpType: EtcdTxnOpPut,
 			Value:  "v2",
 		},
 	).Else(
-		LowLevelTxnOp{
+		RawEtcdTxnOp{
 			Key:    "txn-unexpected",
-			OpType: LowLevelOpPut,
+			OpType: EtcdTxnOpPut,
 			Value:  "unexpected",
 		},
-	).Commit(context.Background())
+	).Commit()
 
 	re.NoError(err)
 	re.True(res.Succeeded)
@@ -209,24 +207,24 @@ func testLowLevelTxn(re *require.Assertions, kv Base) {
 	mustHaveKeys(re, kv, "txn-", KeyValuePair{Key: "txn-k1", Value: "v1"}, KeyValuePair{Key: "txn-k2", Value: "v2"})
 
 	// Test Equal condition; reading in transaction.
-	res, err = kv.CreateLowLevelTxn().If(
-		LowLevelTxnCondition{
+	res, err = kv.CreateRawEtcdTxn().If(
+		RawEtcdTxnCondition{
 			Key:     "txn-k1",
-			CmpType: LowLevelCmpEqual,
+			CmpType: EtcdTxnCmpEqual,
 			Value:   "v1",
 		},
 	).Then(
-		LowLevelTxnOp{
+		RawEtcdTxnOp{
 			Key:    "txn-k2",
-			OpType: LowLevelOpGet,
+			OpType: EtcdTxnOpGet,
 		},
 	).Else(
-		LowLevelTxnOp{
+		RawEtcdTxnOp{
 			Key:    "txn-unexpected",
-			OpType: LowLevelOpPut,
+			OpType: EtcdTxnOpPut,
 			Value:  "unexpected",
 		},
-	).Commit(context.Background())
+	).Commit()
 
 	re.NoError(err)
 	re.True(res.Succeeded)
@@ -236,30 +234,30 @@ func testLowLevelTxn(re *require.Assertions, kv Base) {
 	mustHaveKeys(re, kv, "txn-", KeyValuePair{Key: "txn-k1", Value: "v1"}, KeyValuePair{Key: "txn-k2", Value: "v2"})
 
 	// Test NotEqual condition, else branch, reading range in transaction, reading & writing mixed.
-	res, err = kv.CreateLowLevelTxn().If(
-		LowLevelTxnCondition{
+	res, err = kv.CreateRawEtcdTxn().If(
+		RawEtcdTxnCondition{
 			Key:     "txn-k1",
-			CmpType: LowLevelCmpNotEqual,
+			CmpType: EtcdTxnCmpNotEqual,
 			Value:   "v1",
 		},
 	).Then(
-		LowLevelTxnOp{
+		RawEtcdTxnOp{
 			Key:    "txn-unexpected",
-			OpType: LowLevelOpPut,
+			OpType: EtcdTxnOpPut,
 			Value:  "unexpected",
 		},
 	).Else(
-		LowLevelTxnOp{
+		RawEtcdTxnOp{
 			Key:    "txn-k1",
-			OpType: LowLevelOpGetRange,
+			OpType: EtcdTxnOpGetRange,
 			EndKey: "txn-k2\x00",
 		},
-		LowLevelTxnOp{
+		RawEtcdTxnOp{
 			Key:    "txn-k3",
-			OpType: LowLevelOpPut,
+			OpType: EtcdTxnOpPut,
 			Value:  "k3",
 		},
-	).Commit(context.Background())
+	).Commit()
 
 	re.NoError(err)
 	re.False(res.Succeeded)
@@ -274,33 +272,33 @@ func testLowLevelTxn(re *require.Assertions, kv Base) {
 		KeyValuePair{Key: "txn-k3", Value: "k3"})
 
 	// Test Exists condition, deleting, overwriting.
-	res, err = kv.CreateLowLevelTxn().If(
-		LowLevelTxnCondition{
+	res, err = kv.CreateRawEtcdTxn().If(
+		RawEtcdTxnCondition{
 			Key:     "txn-k1",
-			CmpType: LowLevelCmpExists,
+			CmpType: EtcdTxnCmpExists,
 		},
 	).Then(
-		LowLevelTxnOp{
+		RawEtcdTxnOp{
 			Key:    "txn-k1",
-			OpType: LowLevelOpDelete,
+			OpType: EtcdTxnOpDelete,
 		},
-		LowLevelTxnOp{
+		RawEtcdTxnOp{
 			Key:    "txn-k2",
-			OpType: LowLevelOpPut,
+			OpType: EtcdTxnOpPut,
 			Value:  "v22",
 		},
 		// Delete not existing key.
-		LowLevelTxnOp{
+		RawEtcdTxnOp{
 			Key:    "txn-k4",
-			OpType: LowLevelOpDelete,
+			OpType: EtcdTxnOpDelete,
 		},
 	).Else(
-		LowLevelTxnOp{
+		RawEtcdTxnOp{
 			Key:    "txn-unexpected",
-			OpType: LowLevelOpPut,
+			OpType: EtcdTxnOpPut,
 			Value:  "unexpected",
 		},
-	).Commit(context.Background())
+	).Commit()
 
 	re.NoError(err)
 	re.True(res.Succeeded)
@@ -312,21 +310,21 @@ func testLowLevelTxn(re *require.Assertions, kv Base) {
 	mustHaveKeys(re, kv, "txn-", KeyValuePair{Key: "txn-k2", Value: "v22"}, KeyValuePair{Key: "txn-k3", Value: "k3"})
 
 	// Deleted keys can be regarded as not existing correctly.
-	res, err = kv.CreateLowLevelTxn().If(
-		LowLevelTxnCondition{
+	res, err = kv.CreateRawEtcdTxn().If(
+		RawEtcdTxnCondition{
 			Key:     "txn-k1",
-			CmpType: LowLevelCmpNotExists,
+			CmpType: EtcdTxnCmpNotExists,
 		},
 	).Then(
-		LowLevelTxnOp{
+		RawEtcdTxnOp{
 			Key:    "txn-k2",
-			OpType: LowLevelOpDelete,
+			OpType: EtcdTxnOpDelete,
 		},
-		LowLevelTxnOp{
+		RawEtcdTxnOp{
 			Key:    "txn-k3",
-			OpType: LowLevelOpDelete,
+			OpType: EtcdTxnOpDelete,
 		},
-	).Commit(context.Background())
+	).Commit()
 
 	re.NoError(err)
 	re.True(res.Succeeded)
@@ -337,61 +335,61 @@ func testLowLevelTxn(re *require.Assertions, kv Base) {
 	mustHaveKeys(re, kv, "txn-")
 
 	// The following tests only check the correctness of the conditions.
-	check := func(conditions []LowLevelTxnCondition, shouldSuccess bool) {
-		res, err := kv.CreateLowLevelTxn().If(conditions...).Commit(context.Background())
+	check := func(conditions []RawEtcdTxnCondition, shouldSuccess bool) {
+		res, err := kv.CreateRawEtcdTxn().If(conditions...).Commit()
 		re.NoError(err)
 		re.Equal(shouldSuccess, res.Succeeded)
 	}
 
 	// "txn-k1" doesn't exist at this point.
-	check([]LowLevelTxnCondition{{Key: "txn-k1", CmpType: LowLevelCmpExists}}, false)
-	check([]LowLevelTxnCondition{{Key: "txn-k1", CmpType: LowLevelCmpNotExists}}, true)
+	check([]RawEtcdTxnCondition{{Key: "txn-k1", CmpType: EtcdTxnCmpExists}}, false)
+	check([]RawEtcdTxnCondition{{Key: "txn-k1", CmpType: EtcdTxnCmpNotExists}}, true)
 
 	err = kv.Save("txn-k1", "v1")
 	re.NoError(err)
-	check([]LowLevelTxnCondition{{Key: "txn-k1", CmpType: LowLevelCmpExists}}, true)
-	check([]LowLevelTxnCondition{{Key: "txn-k1", CmpType: LowLevelCmpNotExists}}, false)
+	check([]RawEtcdTxnCondition{{Key: "txn-k1", CmpType: EtcdTxnCmpExists}}, true)
+	check([]RawEtcdTxnCondition{{Key: "txn-k1", CmpType: EtcdTxnCmpNotExists}}, false)
 
-	check([]LowLevelTxnCondition{{Key: "txn-k1", CmpType: LowLevelCmpEqual, Value: "v1"}}, true)
-	check([]LowLevelTxnCondition{{Key: "txn-k1", CmpType: LowLevelCmpNotEqual, Value: "v1"}}, false)
-	check([]LowLevelTxnCondition{{Key: "txn-k1", CmpType: LowLevelCmpEqual, Value: "v2"}}, false)
-	check([]LowLevelTxnCondition{{Key: "txn-k1", CmpType: LowLevelCmpNotEqual, Value: "v2"}}, true)
+	check([]RawEtcdTxnCondition{{Key: "txn-k1", CmpType: EtcdTxnCmpEqual, Value: "v1"}}, true)
+	check([]RawEtcdTxnCondition{{Key: "txn-k1", CmpType: EtcdTxnCmpNotEqual, Value: "v1"}}, false)
+	check([]RawEtcdTxnCondition{{Key: "txn-k1", CmpType: EtcdTxnCmpEqual, Value: "v2"}}, false)
+	check([]RawEtcdTxnCondition{{Key: "txn-k1", CmpType: EtcdTxnCmpNotEqual, Value: "v2"}}, true)
 
-	check([]LowLevelTxnCondition{{Key: "txn-k1", CmpType: LowLevelCmpLess, Value: "v1"}}, false)
-	check([]LowLevelTxnCondition{{Key: "txn-k1", CmpType: LowLevelCmpLess, Value: "v0"}}, false)
-	check([]LowLevelTxnCondition{{Key: "txn-k1", CmpType: LowLevelCmpLess, Value: "v2"}}, true)
+	check([]RawEtcdTxnCondition{{Key: "txn-k1", CmpType: EtcdTxnCmpLess, Value: "v1"}}, false)
+	check([]RawEtcdTxnCondition{{Key: "txn-k1", CmpType: EtcdTxnCmpLess, Value: "v0"}}, false)
+	check([]RawEtcdTxnCondition{{Key: "txn-k1", CmpType: EtcdTxnCmpLess, Value: "v2"}}, true)
 
-	check([]LowLevelTxnCondition{{Key: "txn-k1", CmpType: LowLevelCmpGreater, Value: "v1"}}, false)
-	check([]LowLevelTxnCondition{{Key: "txn-k1", CmpType: LowLevelCmpGreater, Value: "v2"}}, false)
-	check([]LowLevelTxnCondition{{Key: "txn-k1", CmpType: LowLevelCmpGreater, Value: "v0"}}, true)
+	check([]RawEtcdTxnCondition{{Key: "txn-k1", CmpType: EtcdTxnCmpGreater, Value: "v1"}}, false)
+	check([]RawEtcdTxnCondition{{Key: "txn-k1", CmpType: EtcdTxnCmpGreater, Value: "v2"}}, false)
+	check([]RawEtcdTxnCondition{{Key: "txn-k1", CmpType: EtcdTxnCmpGreater, Value: "v0"}}, true)
 
 	// Test comparing with not-existing key.
 	err = kv.Remove("txn-k1")
 	re.NoError(err)
-	check([]LowLevelTxnCondition{{Key: "txn-k1", CmpType: LowLevelCmpEqual, Value: "v1"}}, false)
-	check([]LowLevelTxnCondition{{Key: "txn-k1", CmpType: LowLevelCmpNotEqual, Value: "v1"}}, false)
-	check([]LowLevelTxnCondition{{Key: "txn-k1", CmpType: LowLevelCmpLess, Value: "v1"}}, false)
-	check([]LowLevelTxnCondition{{Key: "txn-k1", CmpType: LowLevelCmpGreater, Value: "v1"}}, false)
+	check([]RawEtcdTxnCondition{{Key: "txn-k1", CmpType: EtcdTxnCmpEqual, Value: "v1"}}, false)
+	check([]RawEtcdTxnCondition{{Key: "txn-k1", CmpType: EtcdTxnCmpNotEqual, Value: "v1"}}, false)
+	check([]RawEtcdTxnCondition{{Key: "txn-k1", CmpType: EtcdTxnCmpLess, Value: "v1"}}, false)
+	check([]RawEtcdTxnCondition{{Key: "txn-k1", CmpType: EtcdTxnCmpGreater, Value: "v1"}}, false)
 
 	// Test the conditions are conjunctions.
 	err = kv.Save("txn-k1", "v1")
 	re.NoError(err)
 	err = kv.Save("txn-k2", "v2")
 	re.NoError(err)
-	check([]LowLevelTxnCondition{
-		{Key: "txn-k1", CmpType: LowLevelCmpEqual, Value: "v1"},
-		{Key: "txn-k2", CmpType: LowLevelCmpEqual, Value: "v2"},
+	check([]RawEtcdTxnCondition{
+		{Key: "txn-k1", CmpType: EtcdTxnCmpEqual, Value: "v1"},
+		{Key: "txn-k2", CmpType: EtcdTxnCmpEqual, Value: "v2"},
 	}, true)
-	check([]LowLevelTxnCondition{
-		{Key: "txn-k1", CmpType: LowLevelCmpEqual, Value: "v1"},
-		{Key: "txn-k2", CmpType: LowLevelCmpEqual, Value: "v0"},
+	check([]RawEtcdTxnCondition{
+		{Key: "txn-k1", CmpType: EtcdTxnCmpEqual, Value: "v1"},
+		{Key: "txn-k2", CmpType: EtcdTxnCmpEqual, Value: "v0"},
 	}, false)
-	check([]LowLevelTxnCondition{
-		{Key: "txn-k1", CmpType: LowLevelCmpEqual, Value: "v0"},
-		{Key: "txn-k2", CmpType: LowLevelCmpEqual, Value: "v2"},
+	check([]RawEtcdTxnCondition{
+		{Key: "txn-k1", CmpType: EtcdTxnCmpEqual, Value: "v0"},
+		{Key: "txn-k2", CmpType: EtcdTxnCmpEqual, Value: "v2"},
 	}, false)
-	check([]LowLevelTxnCondition{
-		{Key: "txn-k1", CmpType: LowLevelCmpEqual, Value: "v0"},
-		{Key: "txn-k2", CmpType: LowLevelCmpEqual, Value: "v0"},
+	check([]RawEtcdTxnCondition{
+		{Key: "txn-k1", CmpType: EtcdTxnCmpEqual, Value: "v0"},
+		{Key: "txn-k2", CmpType: EtcdTxnCmpEqual, Value: "v0"},
 	}, false)
 }

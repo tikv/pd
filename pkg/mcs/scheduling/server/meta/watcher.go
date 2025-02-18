@@ -33,7 +33,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/keypath"
 )
 
-// Watcher is used to watch the PD service for any meta changes.
+// Watcher is used to watch the PD for any meta changes.
 type Watcher struct {
 	wg     sync.WaitGroup
 	ctx    context.Context
@@ -48,7 +48,7 @@ type Watcher struct {
 	storeWatcher *etcdutil.LoopWatcher
 }
 
-// NewWatcher creates a new watcher to watch the meta change from PD service.
+// NewWatcher creates a new watcher to watch the meta change from PD.
 func NewWatcher(
 	ctx context.Context,
 	etcdClient *clientv3.Client,

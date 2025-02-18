@@ -18,7 +18,6 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
-	"math"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -162,7 +161,7 @@ type Config struct {
 
 	Keyspace KeyspaceConfig `toml:"keyspace" json:"keyspace"`
 
-	MicroService MicroServiceConfig `toml:"micro-service" json:"micro-service"`
+	Microservice MicroserviceConfig `toml:"micro-service" json:"micro-service"`
 
 	Controller rm.ControllerConfig `toml:"controller" json:"controller"`
 }
@@ -457,7 +456,7 @@ func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
 
 	c.Keyspace.adjust(configMetaData.Child("keyspace"))
 
-	c.MicroService.adjust(configMetaData.Child("micro-service"))
+	c.Microservice.adjust(configMetaData.Child("micro-service"))
 
 	if err := c.Security.Encryption.Adjust(); err != nil {
 		return err
@@ -507,9 +506,6 @@ type PDServerConfig struct {
 	MetricStorage string `toml:"metric-storage" json:"metric-storage"`
 	// There are some values supported: "auto", "none", or a specific address, default: "auto"
 	DashboardAddress string `toml:"dashboard-address" json:"dashboard-address"`
-	// TraceRegionFlow the option to update flow information of regions.
-	// WARN: TraceRegionFlow is deprecated.
-	TraceRegionFlow bool `toml:"trace-region-flow" json:"trace-region-flow,string,omitempty"`
 	// FlowRoundByDigit used to discretization processing flow information.
 	FlowRoundByDigit int `toml:"flow-round-by-digit" json:"flow-round-by-digit"`
 	// MinResolvedTSPersistenceInterval is the interval to save the min resolved ts.
@@ -573,35 +569,21 @@ func (c *PDServerConfig) adjust(meta *configutil.ConfigMetaData) error {
 	} else if c.GCTunerThreshold > maxGCTunerThreshold {
 		c.GCTunerThreshold = maxGCTunerThreshold
 	}
-	if err := c.migrateConfigurationFromFile(meta); err != nil {
+	if err := migrateConfigurationFromFile(meta); err != nil {
 		return err
 	}
 	return c.Validate()
 }
 
-func (c *PDServerConfig) migrateConfigurationFromFile(meta *configutil.ConfigMetaData) error {
+func migrateConfigurationFromFile(meta *configutil.ConfigMetaData) error {
 	oldName, newName := "trace-region-flow", "flow-round-by-digit"
-	defineOld, defineNew := meta.IsDefined(oldName), meta.IsDefined(newName)
+	defineOld := meta.IsDefined(oldName)
 	switch {
-	case defineOld && defineNew:
-		if c.TraceRegionFlow && (c.FlowRoundByDigit == defaultFlowRoundByDigit) {
-			return errors.Errorf("config item %s and %s(deprecated) are conflict", newName, oldName)
-		}
-	case defineOld && !defineNew:
-		if !c.TraceRegionFlow {
-			c.FlowRoundByDigit = math.MaxInt8
-		}
+	case defineOld:
+		return errors.Errorf("config item %s and %s(deprecated) are conflict", newName, oldName)
+	default:
 	}
 	return nil
-}
-
-// MigrateDeprecatedFlags updates new flags according to deprecated flags.
-func (c *PDServerConfig) MigrateDeprecatedFlags() {
-	if !c.TraceRegionFlow {
-		c.FlowRoundByDigit = math.MaxInt8
-	}
-	// json omity the false. next time will not persist to the kv.
-	c.TraceRegionFlow = false
 }
 
 // Clone returns a cloned PD server config.
@@ -839,13 +821,13 @@ func (c *DRAutoSyncReplicationConfig) adjust(meta *configutil.ConfigMetaData) {
 	}
 }
 
-// MicroServiceConfig is the configuration for micro service.
-type MicroServiceConfig struct {
+// MicroserviceConfig is the configuration for microservice.
+type MicroserviceConfig struct {
 	EnableSchedulingFallback  bool `toml:"enable-scheduling-fallback" json:"enable-scheduling-fallback,string"`
 	EnableTSODynamicSwitching bool `toml:"enable-tso-dynamic-switching" json:"enable-tso-dynamic-switching,string"`
 }
 
-func (c *MicroServiceConfig) adjust(meta *configutil.ConfigMetaData) {
+func (c *MicroserviceConfig) adjust(meta *configutil.ConfigMetaData) {
 	if !meta.IsDefined("enable-scheduling-fallback") {
 		c.EnableSchedulingFallback = defaultEnableSchedulingFallback
 	}
@@ -854,19 +836,19 @@ func (c *MicroServiceConfig) adjust(meta *configutil.ConfigMetaData) {
 	}
 }
 
-// Clone returns a copy of micro service config.
-func (c *MicroServiceConfig) Clone() *MicroServiceConfig {
+// Clone returns a copy of microservice config.
+func (c *MicroserviceConfig) Clone() *MicroserviceConfig {
 	cfg := *c
 	return &cfg
 }
 
-// IsSchedulingFallbackEnabled returns whether to enable scheduling service fallback to PD service.
-func (c *MicroServiceConfig) IsSchedulingFallbackEnabled() bool {
+// IsSchedulingFallbackEnabled returns whether to enable scheduling service fallback to PD.
+func (c *MicroserviceConfig) IsSchedulingFallbackEnabled() bool {
 	return c.EnableSchedulingFallback
 }
 
 // IsTSODynamicSwitchingEnabled returns whether to enable TSO dynamic switching.
-func (c *MicroServiceConfig) IsTSODynamicSwitchingEnabled() bool {
+func (c *MicroserviceConfig) IsTSODynamicSwitchingEnabled() bool {
 	return c.EnableTSODynamicSwitching
 }
 

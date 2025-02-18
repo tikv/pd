@@ -36,7 +36,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/keypath"
 )
 
-// Watcher is used to watch the PD service for any configuration changes.
+// Watcher is used to watch the PD for any configuration changes.
 type Watcher struct {
 	wg     sync.WaitGroup
 	ctx    context.Context
@@ -76,7 +76,7 @@ type persistedConfig struct {
 	Store          sc.StoreConfig       `json:"store"`
 }
 
-// NewWatcher creates a new watcher to watch the config meta change from PD service.
+// NewWatcher creates a new watcher to watch the config meta change from PD.
 func NewWatcher(
 	ctx context.Context,
 	etcdClient *clientv3.Client,

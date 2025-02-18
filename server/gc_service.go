@@ -265,14 +265,12 @@ func (s *GrpcServer) loadRangeFromEtcd(startKey, endKey string) ([]string, []str
 
 // UpdateGCSafePoint implements gRPC PDServer.
 func (s *GrpcServer) UpdateGCSafePoint(ctx context.Context, request *pdpb.UpdateGCSafePointRequest) (*pdpb.UpdateGCSafePointResponse, error) {
-	if s.GetServiceMiddlewarePersistOptions().IsGRPCRateLimitEnabled() {
-		fName := currentFunction()
-		limiter := s.GetGRPCRateLimiter()
-		if done, err := limiter.Allow(fName); err == nil {
-			defer done()
-		} else {
-			return nil, errs.ErrGRPCRateLimitExceeded(err)
-		}
+	done, err := s.rateLimitCheck()
+	if err != nil {
+		return nil, err
+	}
+	if done != nil {
+		defer done()
 	}
 	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
 		return pdpb.NewPDClient(client).UpdateGCSafePoint(ctx, request)
