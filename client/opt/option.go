@@ -33,6 +33,7 @@ const (
 	defaultEnableTSOFollowerProxy                = false
 	defaultEnableFollowerHandle                  = false
 	defaultTSOClientRPCConcurrency               = 1
+	defaultEnableRouterClient                    = false
 )
 
 // DynamicOption is used to distinguish the dynamic option type.
@@ -49,6 +50,9 @@ const (
 	EnableFollowerHandle
 	// TSOClientRPCConcurrency controls the amount of ongoing TSO RPC requests at the same time in a single TSO client.
 	TSOClientRPCConcurrency
+	// EnableRouterClient is the router client option.
+	// It is stored as bool.
+	EnableRouterClient
 
 	dynamicOptionCount
 )
@@ -70,6 +74,7 @@ type Option struct {
 	dynamicOptions [dynamicOptionCount]atomic.Value
 
 	EnableTSOFollowerProxyCh chan struct{}
+	EnableRouterClientCh     chan struct{}
 }
 
 // NewOption creates a new PD client option with the default values set.
@@ -78,6 +83,7 @@ func NewOption() *Option {
 		Timeout:                  defaultPDTimeout,
 		MaxRetryTimes:            maxInitClusterRetries,
 		EnableTSOFollowerProxyCh: make(chan struct{}, 1),
+		EnableRouterClientCh:     make(chan struct{}, 1),
 		InitMetrics:              true,
 	}
 
@@ -85,6 +91,7 @@ func NewOption() *Option {
 	co.dynamicOptions[EnableTSOFollowerProxy].Store(defaultEnableTSOFollowerProxy)
 	co.dynamicOptions[EnableFollowerHandle].Store(defaultEnableFollowerHandle)
 	co.dynamicOptions[TSOClientRPCConcurrency].Store(defaultTSOClientRPCConcurrency)
+	co.dynamicOptions[EnableRouterClient].Store(defaultEnableRouterClient)
 	return co
 }
 
@@ -149,6 +156,23 @@ func (o *Option) GetTSOClientRPCConcurrency() int {
 	return o.dynamicOptions[TSOClientRPCConcurrency].Load().(int)
 }
 
+// SetEnableRouterClient sets the router client option.
+func (o *Option) SetEnableRouterClient(enable bool) {
+	old := o.GetEnableRouterClient()
+	if enable != old {
+		o.dynamicOptions[EnableRouterClient].Store(enable)
+		select {
+		case o.EnableRouterClientCh <- struct{}{}:
+		default:
+		}
+	}
+}
+
+// GetEnableRouterClient gets the router client option.
+func (o *Option) GetEnableRouterClient() bool {
+	return o.dynamicOptions[EnableRouterClient].Load().(bool)
+}
+
 // ClientOption configures client.
 type ClientOption func(*Option)
 
@@ -207,6 +231,13 @@ func WithInitMetricsOption(initMetrics bool) ClientOption {
 func WithBackoffer(bo *retry.Backoffer) ClientOption {
 	return func(op *Option) {
 		op.Backoffer = bo
+	}
+}
+
+// WithEnableRouterClient configures the client with router client option.
+func WithEnableRouterClient(enable bool) ClientOption {
+	return func(op *Option) {
+		op.SetEnableRouterClient(enable)
 	}
 }
 

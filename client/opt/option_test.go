@@ -64,4 +64,16 @@ func TestDynamicOptionChange(t *testing.T) {
 	expectBool = false
 	o.SetEnableFollowerHandle(expectBool)
 	re.Equal(expectBool, o.GetEnableFollowerHandle())
+
+	expectBool = true
+	o.SetEnableRouterClient(expectBool)
+	// Check the value changing notification.
+	testutil.Eventually(re, func() bool {
+		<-o.EnableRouterClientCh
+		return true
+	})
+	re.Equal(expectBool, o.GetEnableRouterClient())
+	expectBool = false
+	o.SetEnableRouterClient(expectBool)
+	re.Equal(expectBool, o.GetEnableRouterClient())
 }

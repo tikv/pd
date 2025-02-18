@@ -1343,7 +1343,8 @@ func (suite *clientTestSuite) TestGetRegionByID() {
 }
 
 func (suite *clientTestSuite) TestGetRegionConcurrently() {
-	suite.client.(interface{ EnableRouterClient() }).EnableRouterClient()
+	suite.client.UpdateOption(opt.EnableRouterClient, true)
+	defer suite.client.UpdateOption(opt.EnableRouterClient, false)
 
 	re := suite.Require()
 	ctx, cancel := context.WithCancel(suite.ctx)
