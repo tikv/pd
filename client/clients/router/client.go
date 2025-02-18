@@ -33,6 +33,7 @@ import (
 	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/client/errs"
+	"github.com/tikv/pd/client/metrics"
 	"github.com/tikv/pd/client/opt"
 	"github.com/tikv/pd/client/pkg/batch"
 	cctx "github.com/tikv/pd/client/pkg/connectionctx"
@@ -209,8 +210,12 @@ func NewClient(
 				}
 			},
 		},
-		requestCh:       make(chan *Request, defaultMaxRouterRequestBatchSize*2),
-		batchController: batch.NewController(defaultMaxRouterRequestBatchSize, requestFinisher(nil), nil),
+		requestCh: make(chan *Request, defaultMaxRouterRequestBatchSize*2),
+		batchController: batch.NewController(
+			defaultMaxRouterRequestBatchSize,
+			requestFinisher(nil),
+			metrics.QueryRegionBestBatchSize,
+		),
 	}
 	c.leaderURL.Store(svcDiscovery.GetServingURL())
 	c.svcDiscovery.ExecAndAddLeaderSwitchedCallback(c.updateLeaderURL)
@@ -234,6 +239,7 @@ func (c *Cli) newRequest(ctx context.Context) *Request {
 	req.needBuckets = false
 	req.region = nil
 	// Initialize the runtime fields.
+	req.start = time.Now()
 	req.pool = c.reqPool
 
 	return req
@@ -514,13 +520,31 @@ func (c *Cli) processRequests(stream pdpb.PD_QueryRegionClient) error {
 			panic("invalid region query request received")
 		}
 	}
+	start := time.Now()
 	err := stream.Send(queryReq)
 	if err != nil {
 		return err
 	}
+	metrics.QueryRegionBatchSendLatency.Observe(
+		time.Since(
+			c.batchController.GetExtraBatchingStartTime(),
+		).Seconds(),
+	)
 	resp, err := stream.Recv()
 	if err != nil {
+		metrics.RequestFailedDurationQueryRegion.Observe(time.Since(start).Seconds())
 		return err
+	}
+	metrics.RequestDurationQueryRegion.Observe(time.Since(start).Seconds())
+	metrics.QueryRegionBatchSizeTotal.Observe(float64(len(requests)))
+	if keysLen := len(queryReq.Keys); keysLen > 0 {
+		metrics.QueryRegionBatchSizeByKeys.Observe(float64(keysLen))
+	}
+	if prevKeysLen := len(queryReq.PrevKeys); prevKeysLen > 0 {
+		metrics.QueryRegionBatchSizeByPrevKeys.Observe(float64(prevKeysLen))
+	}
+	if idsLen := len(queryReq.Ids); idsLen > 0 {
+		metrics.QueryRegionBatchSizeByIDs.Observe(float64(idsLen))
 	}
 	c.doneCollectedRequests(resp)
 	return nil
