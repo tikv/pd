@@ -140,8 +140,8 @@ func (kv *etcdKVBase) Remove(key string) error {
 	return nil
 }
 
-// CreateRawEtcdTxn creates a transaction that provides interface in if-then-else pattern.
-func (kv *etcdKVBase) CreateRawEtcdTxn() RawEtcdTxn {
+// CreateRawTxn creates a transaction that provides interface in if-then-else pattern.
+func (kv *etcdKVBase) CreateRawTxn() RawTxn {
 	return &rawTxnWrapper{
 		inner:    NewSlowLogTxn(kv.client),
 		rootPath: kv.rootPath,
@@ -311,25 +311,25 @@ type rawTxnWrapper struct {
 	rootPath string
 }
 
-// If implements RawEtcdTxn interface for adding conditions to the transaction.
-func (l *rawTxnWrapper) If(conditions ...RawEtcdTxnCondition) RawEtcdTxn {
+// If implements RawTxn interface for adding conditions to the transaction.
+func (l *rawTxnWrapper) If(conditions ...RawTxnCondition) RawTxn {
 	cmpList := make([]clientv3.Cmp, 0, len(conditions))
 	for _, c := range conditions {
 		key := strings.Join([]string{l.rootPath, c.Key}, "/")
-		if c.CmpType == EtcdTxnCmpExists {
+		if c.CmpType == RawTxnCmpExists {
 			cmpList = append(cmpList, clientv3.Compare(clientv3.CreateRevision(key), ">", 0))
-		} else if c.CmpType == EtcdTxnCmpNotExists {
+		} else if c.CmpType == RawTxnCmpNotExists {
 			cmpList = append(cmpList, clientv3.Compare(clientv3.CreateRevision(key), "=", 0))
 		} else {
 			var cmpOp string
 			switch c.CmpType {
-			case EtcdTxnCmpEqual:
+			case RawTxnCmpEqual:
 				cmpOp = "="
-			case EtcdTxnCmpNotEqual:
+			case RawTxnCmpNotEqual:
 				cmpOp = "!="
-			case EtcdTxnCmpGreater:
+			case RawTxnCmpGreater:
 				cmpOp = ">"
-			case EtcdTxnCmpLess:
+			case RawTxnCmpLess:
 				cmpOp = "<"
 			default:
 				panic(fmt.Sprintf("unknown cmp type %v", c.CmpType))
@@ -341,18 +341,18 @@ func (l *rawTxnWrapper) If(conditions ...RawEtcdTxnCondition) RawEtcdTxn {
 	return l
 }
 
-func (l *rawTxnWrapper) convertOps(ops []RawEtcdTxnOp) []clientv3.Op {
+func (l *rawTxnWrapper) convertOps(ops []RawTxnOp) []clientv3.Op {
 	opsList := make([]clientv3.Op, 0, len(ops))
 	for _, op := range ops {
 		key := strings.Join([]string{l.rootPath, op.Key}, "/")
 		switch op.OpType {
-		case EtcdTxnOpPut:
+		case RawTxnOpPut:
 			opsList = append(opsList, clientv3.OpPut(key, op.Value))
-		case EtcdTxnOpDelete:
+		case RawTxnOpDelete:
 			opsList = append(opsList, clientv3.OpDelete(key))
-		case EtcdTxnOpGet:
+		case RawTxnOpGet:
 			opsList = append(opsList, clientv3.OpGet(key))
-		case EtcdTxnOpGetRange:
+		case RawTxnOpGetRange:
 			if op.EndKey == "\x00" {
 				opsList = append(opsList, clientv3.OpGet(key, clientv3.WithPrefix(), clientv3.WithLimit(int64(op.Limit))))
 			} else {
@@ -366,35 +366,35 @@ func (l *rawTxnWrapper) convertOps(ops []RawEtcdTxnOp) []clientv3.Op {
 	return opsList
 }
 
-// Then implements RawEtcdTxn interface for adding operations that need to be executed when the condition passes to
+// Then implements RawTxn interface for adding operations that need to be executed when the condition passes to
 // the transaction.
-func (l *rawTxnWrapper) Then(ops ...RawEtcdTxnOp) RawEtcdTxn {
+func (l *rawTxnWrapper) Then(ops ...RawTxnOp) RawTxn {
 	l.inner = l.inner.Then(l.convertOps(ops)...)
 	return l
 }
 
-// Else implements RawEtcdTxn interface for adding operations that need to be executed when the condition doesn't pass
+// Else implements RawTxn interface for adding operations that need to be executed when the condition doesn't pass
 // to the transaction.
-func (l *rawTxnWrapper) Else(ops ...RawEtcdTxnOp) RawEtcdTxn {
+func (l *rawTxnWrapper) Else(ops ...RawTxnOp) RawTxn {
 	l.inner = l.inner.Else(l.convertOps(ops)...)
 	return l
 }
 
-// Commit implements RawEtcdTxn interface for committing the transaction.
-func (l *rawTxnWrapper) Commit() (RawEtcdTxnResponse, error) {
+// Commit implements RawTxn interface for committing the transaction.
+func (l *rawTxnWrapper) Commit() (RawTxnResponse, error) {
 	resp, err := l.inner.Commit()
 	if err != nil {
-		return RawEtcdTxnResponse{}, err
+		return RawTxnResponse{}, err
 	}
-	items := make([]RawEtcdTxnResponseItem, 0, len(resp.Responses))
+	items := make([]RawTxnResponseItem, 0, len(resp.Responses))
 	for i, rpcRespItem := range resp.Responses {
-		var respItem RawEtcdTxnResponseItem
+		var respItem RawTxnResponseItem
 		if put := rpcRespItem.GetResponsePut(); put != nil {
 			// Put and delete operations of etcd's transaction won't return any previous data. Skip handling it.
-			respItem = RawEtcdTxnResponseItem{}
+			respItem = RawTxnResponseItem{}
 		} else if del := rpcRespItem.GetResponseDeleteRange(); del != nil {
 			// Put and delete operations of etcd's transaction won't return any previous data. Skip handling it.
-			respItem = RawEtcdTxnResponseItem{}
+			respItem = RawTxnResponseItem{}
 		} else if rangeResp := rpcRespItem.GetResponseRange(); rangeResp != nil {
 			kvs := make([]KeyValuePair, 0, len(rangeResp.Kvs))
 			for _, kv := range rangeResp.Kvs {
@@ -404,17 +404,17 @@ func (l *rawTxnWrapper) Commit() (RawEtcdTxnResponse, error) {
 					Value: string(kv.Value),
 				})
 			}
-			respItem = RawEtcdTxnResponseItem{
+			respItem = RawTxnResponseItem{
 				KeyValuePairs: kvs,
 			}
 		} else {
-			return RawEtcdTxnResponse{}, errs.ErrEtcdTxnResponse.GenWithStackByArgs(
+			return RawTxnResponse{}, errs.ErrEtcdTxnResponse.GenWithStackByArgs(
 				fmt.Sprintf("succeeded: %v, index: %v, response: %v", resp.Succeeded, i, rpcRespItem),
 			)
 		}
 		items = append(items, respItem)
 	}
-	return RawEtcdTxnResponse{
+	return RawTxnResponse{
 		Succeeded: resp.Succeeded,
 		Responses: items,
 	}, nil

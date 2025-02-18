@@ -16,48 +16,48 @@ package kv
 
 import "context"
 
-// EtcdTxnCmpType represents the comparison type that is used in the condition of RawEtcdTxn.
-type EtcdTxnCmpType int
+// RawTxnCmpType represents the comparison type that is used in the condition of RawTxn.
+type RawTxnCmpType int
 
-// EtcdTxnOpType represents the operation type that is used in the operations (either `Then` branch or `Else`
-// branch) of RawEtcdTxn.
-type EtcdTxnOpType int
+// RawTxnOpType represents the operation type that is used in the operations (either `Then` branch or `Else`
+// branch) of RawTxn.
+type RawTxnOpType int
 
 // nolint:revive
 const (
-	EtcdTxnCmpEqual EtcdTxnCmpType = iota
-	EtcdTxnCmpNotEqual
-	EtcdTxnCmpLess
-	EtcdTxnCmpGreater
-	EtcdTxnCmpExists
-	EtcdTxnCmpNotExists
+	RawTxnCmpEqual RawTxnCmpType = iota
+	RawTxnCmpNotEqual
+	RawTxnCmpLess
+	RawTxnCmpGreater
+	RawTxnCmpExists
+	RawTxnCmpNotExists
 )
 
 // nolint:revive
 const (
-	EtcdTxnOpPut EtcdTxnOpType = iota
-	EtcdTxnOpDelete
-	EtcdTxnOpGet
-	EtcdTxnOpGetRange
+	RawTxnOpPut RawTxnOpType = iota
+	RawTxnOpDelete
+	RawTxnOpGet
+	RawTxnOpGetRange
 )
 
-// RawEtcdTxnCondition represents a condition in a RawEtcdTxn.
-type RawEtcdTxnCondition struct {
+// RawTxnCondition represents a condition in a RawTxn.
+type RawTxnCondition struct {
 	Key     string
-	CmpType EtcdTxnCmpType
-	// The value to compare with. It's not used when CmpType is EtcdTxnCmpExists or EtcdTxnCmpNotExists.
+	CmpType RawTxnCmpType
+	// The value to compare with. It's not used when CmpType is RawTxnCmpExists or RawTxnCmpNotExists.
 	Value string
 }
 
-// RawEtcdTxnOp represents an operation in a RawEtcdTxn's `Then` or `Else` branch and will be executed according to
+// RawTxnOp represents an operation in a RawTxn's `Then` or `Else` branch and will be executed according to
 // the result of checking conditions.
-type RawEtcdTxnOp struct {
+type RawTxnOp struct {
 	Key    string
-	OpType EtcdTxnOpType
+	OpType RawTxnOpType
 	Value  string
-	// The end key when the OpType is EtcdTxnOpGetRange.
+	// The end key when the OpType is RawTxnOpGetRange.
 	EndKey string
-	// The limit of the keys to get when the OpType is EtcdTxnOpGetRange.
+	// The limit of the keys to get when the OpType is RawTxnOpGetRange.
 	Limit int
 }
 
@@ -67,15 +67,15 @@ type KeyValuePair struct {
 	Value string
 }
 
-// RawEtcdTxnResponseItem represents a single result of a read operation in a RawEtcdTxn.
-type RawEtcdTxnResponseItem struct {
+// RawTxnResponseItem represents a single result of a read operation in a RawTxn.
+type RawTxnResponseItem struct {
 	KeyValuePairs []KeyValuePair
 }
 
-// RawEtcdTxnResponse represents the result of a RawEtcdTxn. The results of operations in `Then` or `Else` branches
+// RawTxnResponse represents the result of a RawTxn. The results of operations in `Then` or `Else` branches
 // will be listed in `Responses` in the same order as the operations are added.
 // For Put or Delete operations, its corresponding result is the previous value before writing.
-type RawEtcdTxnResponse struct {
+type RawTxnResponse struct {
 	Succeeded bool
 	// The results of each operation in the `Then` branch or the `Else` branch of a transaction, depending on
 	// whether `Succeeded`. The i-th result belongs to the i-th operation added to the executed branch.
@@ -83,19 +83,19 @@ type RawEtcdTxnResponse struct {
 	// * For Get operations, the result contains a key-value pair representing the get result. In case the key
 	//   does not exist, its `KeyValuePairs` field will be empty.
 	// * For GetRange operations, the result is a list of key-value pairs containing key-value paris that are scanned.
-	Responses []RawEtcdTxnResponseItem
+	Responses []RawTxnResponseItem
 }
 
-// RawEtcdTxn is a low-level transaction interface. It follows the same pattern of etcd's transaction
+// RawTxn is a low-level transaction interface. It follows the same pattern of etcd's transaction
 // API. When the backend is etcd, it simply calls etcd's equivalent APIs internally. Otherwise, the
 // behavior is simulated.
 // Avoid reading/writing the same key multiple times in a single transaction, otherwise the behavior
 // would be undefined.
-type RawEtcdTxn interface {
-	If(conditions ...RawEtcdTxnCondition) RawEtcdTxn
-	Then(ops ...RawEtcdTxnOp) RawEtcdTxn
-	Else(ops ...RawEtcdTxnOp) RawEtcdTxn
-	Commit() (RawEtcdTxnResponse, error)
+type RawTxn interface {
+	If(conditions ...RawTxnCondition) RawTxn
+	Then(ops ...RawTxnOp) RawTxn
+	Else(ops ...RawTxnOp) RawTxn
+	Commit() (RawTxnResponse, error)
 }
 
 // BaseReadWrite is the API set, shared by Base and Txn interfaces, that provides basic KV read and write operations.
@@ -132,7 +132,7 @@ type Base interface {
 	// range there will be a condition constructed. Be aware of the
 	// possibility of causing phantom read.
 	// RunInTxn may not suit all use cases. When RunInTxn is found
-	// improper to use, consider using CreateRawEtcdTxn instead, which
+	// improper to use, consider using CreateRawTxn instead, which
 	// is available when the backend is etcd.
 	//
 	// Note that transaction are not committed until RunInTxn returns nil.
@@ -144,9 +144,9 @@ type Base interface {
 	// values loaded during transaction has not been modified before commit.
 	RunInTxn(ctx context.Context, f func(txn Txn) error) error
 
-	// CreateRawEtcdTxn creates a transaction that provides the if-then-else
+	// CreateRawTxn creates a transaction that provides the if-then-else
 	// API pattern when the backend is etcd, makes it possible
 	// to precisely control how etcd's transaction API is used. When the
 	// backend is not etcd, it panics.
-	CreateRawEtcdTxn() RawEtcdTxn
+	CreateRawTxn() RawTxn
 }

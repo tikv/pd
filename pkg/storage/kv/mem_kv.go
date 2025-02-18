@@ -99,8 +99,8 @@ func (kv *memoryKV) Remove(key string) error {
 	return nil
 }
 
-// CreateRawEtcdTxn implements kv.Base interface.
-func (*memoryKV) CreateRawEtcdTxn() RawEtcdTxn {
+// CreateRawTxn implements kv.Base interface.
+func (*memoryKV) CreateRawTxn() RawTxn {
 	panic("unimplemented")
 }
 
