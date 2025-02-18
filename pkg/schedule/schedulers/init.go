@@ -567,13 +567,12 @@ func schedulersRegister() {
 			if role == unknown {
 				return errs.ErrQueryUnescape.FastGenByArgs("role")
 			}
-			engineString, err := url.QueryUnescape(args[1])
+			engine, err := url.QueryUnescape(args[1])
 			if err != nil {
 				return errs.ErrQueryUnescape.Wrap(err)
 			}
-			engine := NewEngine(engineString)
-			if engine == notSupported {
-				return errs.ErrQueryUnescape.FastGenByArgs("engine")
+			if engine != core.EngineTiFlash && engine != core.EngineTiKV {
+				return errs.ErrQueryUnescape.FastGenByArgs("engine must be tikv or tiflash ")
 			}
 			timeout, err := url.QueryUnescape(args[2])
 			if err != nil {
@@ -594,10 +593,6 @@ func schedulersRegister() {
 			id := uint64(0)
 			if len(conf.jobs) > 0 {
 				id = conf.jobs[len(conf.jobs)-1].JobID + 1
-			}
-
-			if engine == tiflash && role != learner {
-				return errs.ErrURLParse.FastGenByArgs("TiFlash only support learner role")
 			}
 
 			job := &balanceRangeSchedulerJob{

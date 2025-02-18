@@ -66,7 +66,7 @@ func TestJobStatus(t *testing.T) {
 	conf := &balanceRangeSchedulerConfig{
 		schedulerConfig: &baseSchedulerConfig{},
 	}
-	conf.init(balanceRangeName, s, conf)
+	conf.init(string(types.BalanceRangeScheduler), s, conf)
 	for _, v := range []struct {
 		jobStatus JobStatus
 		begin     bool
@@ -107,7 +107,7 @@ func TestBalanceRangePlan(t *testing.T) {
 	}
 	tc.AddLeaderRegionWithRange(1, "100", "110", 1, 2, 3)
 	job := &balanceRangeSchedulerJob{
-		Engine: tiKV,
+		Engine: core.EngineTiKV,
 		Role:   leader,
 		Ranges: []core.KeyRange{core.NewKeyRange("100", "110")},
 	}

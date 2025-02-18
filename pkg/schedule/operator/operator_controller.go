@@ -834,7 +834,7 @@ func (oc *Controller) GetHistory(start time.Time) []OpHistory {
 // returns false if the region does not meet the condition, it will calculate the influence of this region.
 type OpInfluenceOption func(region *core.RegionInfo) bool
 
-// WithRangeOption returns an OpInfluenceOption that filters the region by the label.
+// WithRangeOption returns an OpInfluenceOption that filters the region by the key ranges.
 func WithRangeOption(ranges []core.KeyRange) OpInfluenceOption {
 	return func(region *core.RegionInfo) bool {
 		for _, r := range ranges {
