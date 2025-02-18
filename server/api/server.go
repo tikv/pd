@@ -63,7 +63,7 @@ func NewHandler(_ context.Context, svr *server.Server) (http.Handler, apiutil.AP
 	// Following requests are **not** redirected:
 	//	"/schedulers", http.MethodPost
 	//	"/schedulers/{name}", http.MethodDelete
-	//  Because the writing of all the config of the scheduling service is in the PD service,
+	//  Because the writing of all the config of the scheduling service is in the PD,
 	// 	we should not post and delete the scheduler directly in the scheduling service.
 	router.PathPrefix(apiPrefix).Handler(negroni.New(
 		serverapi.NewRuntimeServiceValidator(svr, group),
@@ -153,7 +153,7 @@ func NewHandler(_ context.Context, svr *server.Server) (http.Handler, apiutil.AP
 				scheapi.APIPathPrefix+"/config/placement-rule",
 				constant.SchedulingServiceName,
 				[]string{http.MethodGet}),
-			// because the writing of all the meta information of the scheduling service is in the PD service,
+			// because the writing of all the meta information of the scheduling service is in the PD,
 			// we should not post and delete the scheduler directly in the scheduling service.
 			serverapi.MicroserviceRedirectRule(
 				prefix+"/schedulers",

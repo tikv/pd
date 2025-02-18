@@ -54,7 +54,7 @@ func (suite *ruleTestSuite) SetupSuite() {
 
 	var err error
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
-	suite.cluster, err = tests.NewTestPDServiceCluster(suite.ctx, 1)
+	suite.cluster, err = tests.NewTestClusterWithKeyspaceGroup(suite.ctx, 1)
 	re.NoError(err)
 	err = suite.cluster.RunInitialServers()
 	re.NoError(err)
@@ -97,7 +97,7 @@ func (suite *ruleTestSuite) TestRuleWatch() {
 	re.Equal(placement.DefaultGroupID, ruleGroups[0].ID)
 	re.Equal(0, ruleGroups[0].Index)
 	re.False(ruleGroups[0].Override)
-	// Set a new rule via the PD service.
+	// Set a new rule via the PD.
 	apiRuleManager := suite.pdLeaderServer.GetRaftCluster().GetRuleManager()
 	rule := &placement.Rule{
 		GroupID:     "2",

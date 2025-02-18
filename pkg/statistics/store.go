@@ -129,11 +129,6 @@ func (s *StoresStats) FilterUnhealthyStore(cluster core.StoreSetInformer) {
 	}
 }
 
-// UpdateStoreHeartbeatMetrics is used to update store heartbeat interval metrics
-func UpdateStoreHeartbeatMetrics(store *core.StoreInfo) {
-	storeHeartbeatIntervalHist.Observe(time.Since(store.GetLastHeartbeatTS()).Seconds())
-}
-
 // RollingStoreStats are multiple sets of recent historical records with specified windows size.
 type RollingStoreStats struct {
 	syncutil.RWMutex

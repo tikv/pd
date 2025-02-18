@@ -4,7 +4,7 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//	http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -75,7 +75,7 @@ func (suite *tsoServerTestSuite) SetupSuite() {
 	re := suite.Require()
 
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
-	suite.cluster, err = tests.NewTestPDServiceCluster(suite.ctx, 1)
+	suite.cluster, err = tests.NewTestClusterWithKeyspaceGroup(suite.ctx, 1)
 	re.NoError(err)
 
 	err = suite.cluster.RunInitialServers()
@@ -156,20 +156,20 @@ func (suite *tsoServerTestSuite) TestParticipantStartWithAdvertiseListenAddr() {
 
 func TestTSOPath(t *testing.T) {
 	re := require.New(t)
-	checkTSOPath(re, true /*isPDServiceMode*/)
-	checkTSOPath(re, false /*isPDServiceMode*/)
+	checkTSOPath(re, true /*isKeyspaceGroupEnabled*/)
+	checkTSOPath(re, false /*isKeyspaceGroupEnabled*/)
 }
 
-func checkTSOPath(re *require.Assertions, isPDServiceMode bool) {
+func checkTSOPath(re *require.Assertions, isKeyspaceGroupEnabled bool) {
 	var (
 		cluster *tests.TestCluster
 		err     error
 	)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	if isPDServiceMode {
-		cluster, err = tests.NewTestPDServiceCluster(ctx, 1, func(conf *config.Config, _ string) {
-			conf.MicroService.EnableTSODynamicSwitching = false
+	if isKeyspaceGroupEnabled {
+		cluster, err = tests.NewTestClusterWithKeyspaceGroup(ctx, 1, func(conf *config.Config, _ string) {
+			conf.Microservice.EnableTSODynamicSwitching = false
 		})
 	} else {
 		cluster, err = tests.NewTestCluster(ctx, 1)
@@ -184,7 +184,7 @@ func checkTSOPath(re *require.Assertions, isPDServiceMode bool) {
 	re.NoError(pdLeader.BootstrapCluster())
 	backendEndpoints := pdLeader.GetAddr()
 	client := pdLeader.GetEtcdClient()
-	if isPDServiceMode {
+	if isKeyspaceGroupEnabled {
 		re.Equal(0, getEtcdTimestampKeyNum(re, client))
 	} else {
 		re.Equal(1, getEtcdTimestampKeyNum(re, client))
@@ -233,7 +233,7 @@ func NewPDServiceForward(re *require.Assertions) PDServiceForward {
 	}
 	var err error
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
-	suite.cluster, err = tests.NewTestPDServiceCluster(suite.ctx, 3)
+	suite.cluster, err = tests.NewTestClusterWithKeyspaceGroup(suite.ctx, 3)
 	re.NoError(err)
 
 	err = suite.cluster.RunInitialServers()
@@ -276,9 +276,9 @@ func TestForwardTSORelated(t *testing.T) {
 	suite := NewPDServiceForward(re)
 	defer suite.ShutDown()
 	leaderServer := suite.cluster.GetLeaderServer().GetServer()
-	cfg := leaderServer.GetMicroServiceConfig().Clone()
+	cfg := leaderServer.GetMicroserviceConfig().Clone()
 	cfg.EnableTSODynamicSwitching = false
-	leaderServer.SetMicroServiceConfig(*cfg)
+	leaderServer.SetMicroserviceConfig(*cfg)
 	// Unable to use the tso-related interface without tso server
 	suite.checkUnavailableTSO(re)
 	tc, err := tests.NewTestTSOCluster(suite.ctx, 1, suite.backendEndpoints)
@@ -512,7 +512,7 @@ func (suite *CommonTestSuite) SetupSuite() {
 	var err error
 	re := suite.Require()
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
-	suite.cluster, err = tests.NewTestPDServiceCluster(suite.ctx, 1)
+	suite.cluster, err = tests.NewTestClusterWithKeyspaceGroup(suite.ctx, 1)
 	re.NoError(err)
 
 	err = suite.cluster.RunInitialServers()
@@ -576,7 +576,7 @@ func (suite *CommonTestSuite) TestBootstrapDefaultKeyspaceGroup() {
 	}
 	check()
 
-	s, err := suite.cluster.JoinPDServer(suite.ctx)
+	s, err := suite.cluster.JoinWithKeyspaceGroup(suite.ctx)
 	re.NoError(err)
 	re.NoError(s.Run())
 
@@ -598,9 +598,9 @@ func TestTSOServiceSwitch(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	tc, err := tests.NewTestPDServiceCluster(ctx, 1,
+	tc, err := tests.NewTestClusterWithKeyspaceGroup(ctx, 1,
 		func(conf *config.Config, _ string) {
-			conf.MicroService.EnableTSODynamicSwitching = true
+			conf.Microservice.EnableTSODynamicSwitching = true
 		},
 	)
 	re.NoError(err)
@@ -638,9 +638,9 @@ func TestTSOServiceSwitch(t *testing.T) {
 	re.NoError(err)
 
 	// Disable TSO switching
-	cfg := pdLeader.GetServer().GetMicroServiceConfig().Clone()
+	cfg := pdLeader.GetServer().GetMicroserviceConfig().Clone()
 	cfg.EnableTSODynamicSwitching = false
-	pdLeader.GetServer().SetMicroServiceConfig(*cfg)
+	pdLeader.GetServer().SetMicroserviceConfig(*cfg)
 
 	tsoCluster.Destroy()
 
@@ -654,10 +654,10 @@ func TestTSOServiceSwitch(t *testing.T) {
 	}
 
 	// Now enable TSO switching
-	cfg = pdLeader.GetServer().GetMicroServiceConfig().Clone()
+	cfg = pdLeader.GetServer().GetMicroserviceConfig().Clone()
 
 	cfg.EnableTSODynamicSwitching = true
-	pdLeader.GetServer().SetMicroServiceConfig(*cfg)
+	pdLeader.GetServer().SetMicroserviceConfig(*cfg)
 
 	// Wait for PD to detect the change
 	time.Sleep(300 * time.Millisecond)
