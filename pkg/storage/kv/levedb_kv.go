@@ -81,7 +81,7 @@ func (kv *LevelDBKV) Remove(key string) error {
 }
 
 // CreateRawEtcdTxn implements kv.Base interface.
-func (kv *LevelDBKV) CreateRawEtcdTxn() RawEtcdTxn {
+func (*LevelDBKV) CreateRawEtcdTxn() RawEtcdTxn {
 	panic("unimplemented")
 }
 
