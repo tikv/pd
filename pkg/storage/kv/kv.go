@@ -122,9 +122,6 @@ type RawEtcdTxnResult struct {
 // RawEtcdTxn is a low-level transaction interface. It follows the same pattern of etcd's transaction
 // API. When the backend is etcd, it simply calls etcd's equivalent APIs internally. Otherwise, the
 // behavior is simulated.
-// Considering that in different backends, the kv pairs may not have equivalent property of etcd's
-// version, create-time, etc., the abstracted RawEtcdTxn interface does not support comparing on them.
-// It only supports checking the value or whether the key exists.
 // Avoid reading/writing the same key multiple times in a single transaction, otherwise the behavior
 // would be undefined.
 type RawEtcdTxn interface {
@@ -161,14 +158,15 @@ type Base interface {
 	// This is a highly-simplified transaction interface. As
 	// etcd's transaction API is quite limited, it's hard to use it
 	// to provide a complete transaction model as how a normal database
-	// does. So when this API is running on etcd backend, each read on
+	// does. When this API is running on etcd backend, each read on
 	// `txn` implicitly constructs a condition.
 	// (ref: https://etcd.io/docs/v3.5/learning/api/#transaction)
 	// When reading a range using `LoadRange`, for each key found in the
 	// range there will be a condition constructed. Be aware of the
 	// possibility of causing phantom read.
 	// RunInTxn may not suit all use cases. When RunInTxn is found
-	// improper to use, consider using CreateRawEtcdTxn instead.
+	// improper to use, consider using CreateRawEtcdTxn instead, which
+	// is available when the backend is etcd.
 	//
 	// Note that transaction are not committed until RunInTxn returns nil.
 	// Note:
@@ -180,9 +178,8 @@ type Base interface {
 	RunInTxn(ctx context.Context, f func(txn Txn) error) error
 
 	// CreateRawEtcdTxn creates a transaction that provides the if-then-else
-	// API pattern which is the same as how etcd does, makes it possible
-	// to precisely control how etcd's transaction API is used when the
-	// backend is etcd. When there's other backend types, the behavior will be
-	// simulated.
+	// API pattern when the backend is etcd, makes it possible
+	// to precisely control how etcd's transaction API is used. When the
+	// backend is not etcd, it panics.
 	CreateRawEtcdTxn() RawEtcdTxn
 }
