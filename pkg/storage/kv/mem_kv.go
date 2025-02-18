@@ -115,8 +115,8 @@ func (kv *memoryKV) removeNoLock(key string) {
 	kv.tree.Delete(memoryKVItem{key, ""})
 }
 
-// CreateLowLevelTxn creates a transaction that provides interface in if-then-else pattern.
-func (kv *memoryKV) CreateLowLevelTxn() LowLevelTxn {
+// CreateRawEtcdTxn creates a transaction that provides interface in if-then-else pattern.
+func (kv *memoryKV) CreateRawEtcdTxn() RawEtcdTxn {
 	panic("unimplemented")
 }
 

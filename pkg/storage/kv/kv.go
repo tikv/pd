@@ -16,63 +16,63 @@ package kv
 
 import "context"
 
-// LowLevelTxnCmpType represents the comparison type that is used in the condition of LowLevelTxn.
-type LowLevelTxnCmpType int
+// EtcdTxnCmpType represents the comparison type that is used in the condition of RawEtcdTxn.
+type EtcdTxnCmpType int
 
-// LowLevelTxnOpType represents the operation type that is used in the operations (either `Then` branch or `Else`
-// branch) of LowLevelTxn.
-type LowLevelTxnOpType int
+// EtcdTxnOpType represents the operation type that is used in the operations (either `Then` branch or `Else`
+// branch) of RawEtcdTxn.
+type EtcdTxnOpType int
 
 // nolint:revive
 const (
-	LowLevelCmpEqual LowLevelTxnCmpType = iota
-	LowLevelCmpNotEqual
-	LowLevelCmpLess
-	LowLevelCmpGreater
-	LowLevelCmpExists
-	LowLevelCmpNotExists
+	EtcdTxnCmpEqual EtcdTxnCmpType = iota
+	EtcdTxnCmpNotEqual
+	EtcdTxnCmpLess
+	EtcdTxnCmpGreater
+	EtcdTxnCmpExists
+	EtcdTxnCmpNotExists
 )
 
 // nolint:revive
 const (
-	LowLevelOpPut LowLevelTxnOpType = iota
-	LowLevelOpDelete
-	LowLevelOpGet
-	LowLevelOpGetRange
+	EtcdTxnOpPut EtcdTxnOpType = iota
+	EtcdTxnOpDelete
+	EtcdTxnOpGet
+	EtcdTxnOpGetRange
 )
 
-// LowLevelTxnCondition represents a condition in a LowLevelTxn.
-type LowLevelTxnCondition struct {
+// RawEtcdTxnCondition represents a condition in a RawEtcdTxn.
+type RawEtcdTxnCondition struct {
 	Key     string
-	CmpType LowLevelTxnCmpType
-	// The value to compare with. It's not used when CmpType is LowLevelCmpExists or LowLevelCmpNotExists.
+	CmpType EtcdTxnCmpType
+	// The value to compare with. It's not used when CmpType is EtcdTxnCmpExists or EtcdTxnCmpNotExists.
 	Value string
 }
 
 // CheckOnValue checks whether the condition is satisfied on the given value.
-func (c *LowLevelTxnCondition) CheckOnValue(value string, exists bool) bool {
+func (c *RawEtcdTxnCondition) CheckOnValue(value string, exists bool) bool {
 	switch c.CmpType {
-	case LowLevelCmpEqual:
+	case EtcdTxnCmpEqual:
 		if exists && value == c.Value {
 			return true
 		}
-	case LowLevelCmpNotEqual:
+	case EtcdTxnCmpNotEqual:
 		if exists && value != c.Value {
 			return true
 		}
-	case LowLevelCmpLess:
+	case EtcdTxnCmpLess:
 		if exists && value < c.Value {
 			return true
 		}
-	case LowLevelCmpGreater:
+	case EtcdTxnCmpGreater:
 		if exists && value > c.Value {
 			return true
 		}
-	case LowLevelCmpExists:
+	case EtcdTxnCmpExists:
 		if exists {
 			return true
 		}
-	case LowLevelCmpNotExists:
+	case EtcdTxnCmpNotExists:
 		if !exists {
 			return true
 		}
@@ -82,15 +82,15 @@ func (c *LowLevelTxnCondition) CheckOnValue(value string, exists bool) bool {
 	return false
 }
 
-// LowLevelTxnOp represents an operation in a LowLevelTxn's `Then` or `Else` branch and will be executed according to
+// RawEtcdTxnOp represents an operation in a RawEtcdTxn's `Then` or `Else` branch and will be executed according to
 // the result of checking conditions.
-type LowLevelTxnOp struct {
+type RawEtcdTxnOp struct {
 	Key    string
-	OpType LowLevelTxnOpType
+	OpType EtcdTxnOpType
 	Value  string
-	// The end key when the OpType is LowLevelOpGetRange.
+	// The end key when the OpType is EtcdTxnOpGetRange.
 	EndKey string
-	// The limit of the keys to get when the OpType is LowLevelOpGetRange.
+	// The limit of the keys to get when the OpType is EtcdTxnOpGetRange.
 	Limit int
 }
 
@@ -100,15 +100,15 @@ type KeyValuePair struct {
 	Value string
 }
 
-// LowLevelTxnResultItem represents a single result of a read operation in a LowLevelTxn.
-type LowLevelTxnResultItem struct {
+// RawEtcdTxnResultItem represents a single result of a read operation in a RawEtcdTxn.
+type RawEtcdTxnResultItem struct {
 	KeyValuePairs []KeyValuePair
 }
 
-// LowLevelTxnResult represents the result of a LowLevelTxn. The results of operations in `Then` or `Else` branches
+// RawEtcdTxnResult represents the result of a RawEtcdTxn. The results of operations in `Then` or `Else` branches
 // will be listed in `ResultItems` in the same order as the operations are added.
 // For Put or Delete operations, its corresponding result is the previous value before writing.
-type LowLevelTxnResult struct {
+type RawEtcdTxnResult struct {
 	Succeeded bool
 	// The results of each operation in the `Then` branch or the `Else` branch of a transaction, depending on
 	// whether `Succeeded`. The i-th result belongs to the i-th operation added to the executed branch.
@@ -116,22 +116,22 @@ type LowLevelTxnResult struct {
 	// * For Get operations, the result contains a key-value pair representing the get result. In case the key
 	//   does not exist, its `KeyValuePairs` field will be empty.
 	// * For GetRange operations, the result is a list of key-value pairs containing key-value paris that are scanned.
-	ResultItems []LowLevelTxnResultItem
+	ResultItems []RawEtcdTxnResultItem
 }
 
-// LowLevelTxn is a low-level transaction interface. It follows the same pattern of etcd's transaction
+// RawEtcdTxn is a low-level transaction interface. It follows the same pattern of etcd's transaction
 // API. When the backend is etcd, it simply calls etcd's equivalent APIs internally. Otherwise, the
 // behavior is simulated.
 // Considering that in different backends, the kv pairs may not have equivalent property of etcd's
-// version, create-time, etc., the abstracted LowLevelTxn interface does not support comparing on them.
+// version, create-time, etc., the abstracted RawEtcdTxn interface does not support comparing on them.
 // It only supports checking the value or whether the key exists.
 // Avoid reading/writing the same key multiple times in a single transaction, otherwise the behavior
 // would be undefined.
-type LowLevelTxn interface {
-	If(conditions ...LowLevelTxnCondition) LowLevelTxn
-	Then(ops ...LowLevelTxnOp) LowLevelTxn
-	Else(ops ...LowLevelTxnOp) LowLevelTxn
-	Commit(ctx context.Context) (LowLevelTxnResult, error)
+type RawEtcdTxn interface {
+	If(conditions ...RawEtcdTxnCondition) RawEtcdTxn
+	Then(ops ...RawEtcdTxnOp) RawEtcdTxn
+	Else(ops ...RawEtcdTxnOp) RawEtcdTxn
+	Commit() (RawEtcdTxnResult, error)
 }
 
 // BaseReadWrite is the API set, shared by Base and Txn interfaces, that provides basic KV read and write operations.
@@ -168,7 +168,7 @@ type Base interface {
 	// range there will be a condition constructed. Be aware of the
 	// possibility of causing phantom read.
 	// RunInTxn may not suit all use cases. When RunInTxn is found
-	// improper to use, consider using CreateLowLevelTxn instead.
+	// improper to use, consider using CreateRawEtcdTxn instead.
 	//
 	// Note that transaction are not committed until RunInTxn returns nil.
 	// Note:
@@ -179,10 +179,10 @@ type Base interface {
 	// values loaded during transaction has not been modified before commit.
 	RunInTxn(ctx context.Context, f func(txn Txn) error) error
 
-	// CreateLowLevelTxn creates a transaction that provides the if-then-else
+	// CreateRawEtcdTxn creates a transaction that provides the if-then-else
 	// API pattern which is the same as how etcd does, makes it possible
 	// to precisely control how etcd's transaction API is used when the
 	// backend is etcd. When there's other backend types, the behavior will be
 	// simulated.
-	CreateLowLevelTxn() LowLevelTxn
+	CreateRawEtcdTxn() RawEtcdTxn
 }

@@ -80,8 +80,8 @@ func (kv *LevelDBKV) Remove(key string) error {
 	return errors.WithStack(kv.Delete([]byte(key), nil))
 }
 
-// CreateLowLevelTxn creates a transaction that provides interface in if-then-else pattern.
-func (kv *LevelDBKV) CreateLowLevelTxn() LowLevelTxn {
+// CreateRawEtcdTxn creates a transaction that provides interface in if-then-else pattern.
+func (kv *LevelDBKV) CreateRawEtcdTxn() RawEtcdTxn {
 	panic("unimplemented")
 }
 
