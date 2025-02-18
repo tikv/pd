@@ -470,7 +470,12 @@ func (m *GCStateManager) CompatibleUpdateServiceGCSafePoint(serviceID string, ne
 			}
 		}
 	} else {
-		_, err := m.SetGCBarrier(keyspaceID, serviceID, newServiceSafePoint, saturatingDuration(ttl, time.Second), now)
+		if ttl > 0 {
+			_, err = m.SetGCBarrier(keyspaceID, serviceID, newServiceSafePoint, saturatingDuration(ttl, time.Second), now)
+		} else {
+			_, err = m.DeleteGCBarrier(keyspaceID, serviceID)
+		}
+
 		if err != nil {
 			return nil, false, err
 		}
