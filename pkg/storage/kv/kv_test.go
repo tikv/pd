@@ -200,9 +200,9 @@ func testRawEtcdTxn(re *require.Assertions, kv Base) {
 
 	re.NoError(err)
 	re.True(res.Succeeded)
-	re.Len(res.ResultItems, 2)
-	re.Empty(res.ResultItems[0].KeyValuePairs)
-	re.Empty(res.ResultItems[1].KeyValuePairs)
+	re.Len(res.Responses, 2)
+	re.Empty(res.Responses[0].KeyValuePairs)
+	re.Empty(res.Responses[1].KeyValuePairs)
 
 	mustHaveKeys(re, kv, "txn-", KeyValuePair{Key: "txn-k1", Value: "v1"}, KeyValuePair{Key: "txn-k2", Value: "v2"})
 
@@ -228,9 +228,9 @@ func testRawEtcdTxn(re *require.Assertions, kv Base) {
 
 	re.NoError(err)
 	re.True(res.Succeeded)
-	re.Len(res.ResultItems, 1)
-	re.Len(res.ResultItems[0].KeyValuePairs, 1)
-	re.Equal("v2", res.ResultItems[0].KeyValuePairs[0].Value)
+	re.Len(res.Responses, 1)
+	re.Len(res.Responses[0].KeyValuePairs, 1)
+	re.Equal("v2", res.Responses[0].KeyValuePairs[0].Value)
 	mustHaveKeys(re, kv, "txn-", KeyValuePair{Key: "txn-k1", Value: "v1"}, KeyValuePair{Key: "txn-k2", Value: "v2"})
 
 	// Test NotEqual condition, else branch, reading range in transaction, reading & writing mixed.
@@ -261,10 +261,10 @@ func testRawEtcdTxn(re *require.Assertions, kv Base) {
 
 	re.NoError(err)
 	re.False(res.Succeeded)
-	re.Len(res.ResultItems, 2)
-	re.Len(res.ResultItems[0].KeyValuePairs, 2)
-	re.Equal([]KeyValuePair{{Key: "txn-k1", Value: "v1"}, {Key: "txn-k2", Value: "v2"}}, res.ResultItems[0].KeyValuePairs)
-	re.Empty(res.ResultItems[1].KeyValuePairs)
+	re.Len(res.Responses, 2)
+	re.Len(res.Responses[0].KeyValuePairs, 2)
+	re.Equal([]KeyValuePair{{Key: "txn-k1", Value: "v1"}, {Key: "txn-k2", Value: "v2"}}, res.Responses[0].KeyValuePairs)
+	re.Empty(res.Responses[1].KeyValuePairs)
 
 	mustHaveKeys(re, kv, "txn-",
 		KeyValuePair{Key: "txn-k1", Value: "v1"},
@@ -302,8 +302,8 @@ func testRawEtcdTxn(re *require.Assertions, kv Base) {
 
 	re.NoError(err)
 	re.True(res.Succeeded)
-	re.Len(res.ResultItems, 3)
-	for _, item := range res.ResultItems {
+	re.Len(res.Responses, 3)
+	for _, item := range res.Responses {
 		re.Empty(item.KeyValuePairs)
 	}
 
@@ -328,8 +328,8 @@ func testRawEtcdTxn(re *require.Assertions, kv Base) {
 
 	re.NoError(err)
 	re.True(res.Succeeded)
-	re.Len(res.ResultItems, 2)
-	for _, item := range res.ResultItems {
+	re.Len(res.Responses, 2)
+	for _, item := range res.Responses {
 		re.Empty(item.KeyValuePairs)
 	}
 	mustHaveKeys(re, kv, "txn-")

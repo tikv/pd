@@ -381,48 +381,41 @@ func (l *rawTxnWrapper) Else(ops ...RawEtcdTxnOp) RawEtcdTxn {
 }
 
 // Commit implements RawEtcdTxn interface for committing the transaction.
-func (l *rawTxnWrapper) Commit() (RawEtcdTxnResult, error) {
+func (l *rawTxnWrapper) Commit() (RawEtcdTxnResponse, error) {
 	resp, err := l.inner.Commit()
 	if err != nil {
-		return RawEtcdTxnResult{}, err
+		return RawEtcdTxnResponse{}, err
 	}
-	items := make([]RawEtcdTxnResultItem, 0, len(resp.Responses))
-	for i, respItem := range resp.Responses {
-		var resultItem RawEtcdTxnResultItem
-		if put := respItem.GetResponsePut(); put != nil {
+	items := make([]RawEtcdTxnResponseItem, 0, len(resp.Responses))
+	for i, rpcRespItem := range resp.Responses {
+		var respItem RawEtcdTxnResponseItem
+		if put := rpcRespItem.GetResponsePut(); put != nil {
 			// Put and delete operations of etcd's transaction won't return any previous data. Skip handling it.
-			resultItem = RawEtcdTxnResultItem{}
-			if put.PrevKv != nil {
-				key := strings.TrimPrefix(strings.TrimPrefix(string(put.PrevKv.Key), l.rootPath), "/")
-				resultItem.KeyValuePairs = []KeyValuePair{{
-					Key:   key,
-					Value: string(put.PrevKv.Value),
-				}}
-			}
-		} else if del := respItem.GetResponseDeleteRange(); del != nil {
+			respItem = RawEtcdTxnResponseItem{}
+		} else if del := rpcRespItem.GetResponseDeleteRange(); del != nil {
 			// Put and delete operations of etcd's transaction won't return any previous data. Skip handling it.
-			resultItem = RawEtcdTxnResultItem{}
-		} else if rangeResp := respItem.GetResponseRange(); rangeResp != nil {
+			respItem = RawEtcdTxnResponseItem{}
+		} else if rangeResp := rpcRespItem.GetResponseRange(); rangeResp != nil {
 			kvs := make([]KeyValuePair, 0, len(rangeResp.Kvs))
 			for _, kv := range rangeResp.Kvs {
-				key := strings.TrimPrefix(strings.TrimPrefix(string(kv.Key), l.rootPath), "/")
+				key := strings.TrimPrefix(string(kv.Key), l.rootPath+"/")
 				kvs = append(kvs, KeyValuePair{
 					Key:   key,
 					Value: string(kv.Value),
 				})
 			}
-			resultItem = RawEtcdTxnResultItem{
+			respItem = RawEtcdTxnResponseItem{
 				KeyValuePairs: kvs,
 			}
 		} else {
-			return RawEtcdTxnResult{}, errs.ErrEtcdTxnResponse.GenWithStackByArgs(
-				fmt.Sprintf("succeeded: %v, index: %v, response: %v", resp.Succeeded, i, respItem),
+			return RawEtcdTxnResponse{}, errs.ErrEtcdTxnResponse.GenWithStackByArgs(
+				fmt.Sprintf("succeeded: %v, index: %v, response: %v", resp.Succeeded, i, rpcRespItem),
 			)
 		}
-		items = append(items, resultItem)
+		items = append(items, respItem)
 	}
-	return RawEtcdTxnResult{
-		Succeeded:   resp.Succeeded,
-		ResultItems: items,
+	return RawEtcdTxnResponse{
+		Succeeded: resp.Succeeded,
+		Responses: items,
 	}, nil
 }

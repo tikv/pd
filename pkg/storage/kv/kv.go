@@ -49,39 +49,6 @@ type RawEtcdTxnCondition struct {
 	Value string
 }
 
-// CheckOnValue checks whether the condition is satisfied on the given value.
-func (c *RawEtcdTxnCondition) CheckOnValue(value string, exists bool) bool {
-	switch c.CmpType {
-	case EtcdTxnCmpEqual:
-		if exists && value == c.Value {
-			return true
-		}
-	case EtcdTxnCmpNotEqual:
-		if exists && value != c.Value {
-			return true
-		}
-	case EtcdTxnCmpLess:
-		if exists && value < c.Value {
-			return true
-		}
-	case EtcdTxnCmpGreater:
-		if exists && value > c.Value {
-			return true
-		}
-	case EtcdTxnCmpExists:
-		if exists {
-			return true
-		}
-	case EtcdTxnCmpNotExists:
-		if !exists {
-			return true
-		}
-	default:
-		panic("unreachable")
-	}
-	return false
-}
-
 // RawEtcdTxnOp represents an operation in a RawEtcdTxn's `Then` or `Else` branch and will be executed according to
 // the result of checking conditions.
 type RawEtcdTxnOp struct {
@@ -100,15 +67,15 @@ type KeyValuePair struct {
 	Value string
 }
 
-// RawEtcdTxnResultItem represents a single result of a read operation in a RawEtcdTxn.
-type RawEtcdTxnResultItem struct {
+// RawEtcdTxnResponseItem represents a single result of a read operation in a RawEtcdTxn.
+type RawEtcdTxnResponseItem struct {
 	KeyValuePairs []KeyValuePair
 }
 
-// RawEtcdTxnResult represents the result of a RawEtcdTxn. The results of operations in `Then` or `Else` branches
-// will be listed in `ResultItems` in the same order as the operations are added.
+// RawEtcdTxnResponse represents the result of a RawEtcdTxn. The results of operations in `Then` or `Else` branches
+// will be listed in `Responses` in the same order as the operations are added.
 // For Put or Delete operations, its corresponding result is the previous value before writing.
-type RawEtcdTxnResult struct {
+type RawEtcdTxnResponse struct {
 	Succeeded bool
 	// The results of each operation in the `Then` branch or the `Else` branch of a transaction, depending on
 	// whether `Succeeded`. The i-th result belongs to the i-th operation added to the executed branch.
@@ -116,7 +83,7 @@ type RawEtcdTxnResult struct {
 	// * For Get operations, the result contains a key-value pair representing the get result. In case the key
 	//   does not exist, its `KeyValuePairs` field will be empty.
 	// * For GetRange operations, the result is a list of key-value pairs containing key-value paris that are scanned.
-	ResultItems []RawEtcdTxnResultItem
+	Responses []RawEtcdTxnResponseItem
 }
 
 // RawEtcdTxn is a low-level transaction interface. It follows the same pattern of etcd's transaction
@@ -128,7 +95,7 @@ type RawEtcdTxn interface {
 	If(conditions ...RawEtcdTxnCondition) RawEtcdTxn
 	Then(ops ...RawEtcdTxnOp) RawEtcdTxn
 	Else(ops ...RawEtcdTxnOp) RawEtcdTxn
-	Commit() (RawEtcdTxnResult, error)
+	Commit() (RawEtcdTxnResponse, error)
 }
 
 // BaseReadWrite is the API set, shared by Base and Txn interfaces, that provides basic KV read and write operations.
