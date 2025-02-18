@@ -71,6 +71,10 @@ func (c *innerClient) init(updateKeyspaceIDCb sd.UpdateKeyspaceIDFunc) error {
 		return err
 	}
 
+	// Check if the router client has been enabled.
+	if c.option.GetEnableRouterClient() {
+		c.enableRouterClient()
+	}
 	c.wg.Add(1)
 	go c.routerClientInitializer()
 
@@ -78,12 +82,7 @@ func (c *innerClient) init(updateKeyspaceIDCb sd.UpdateKeyspaceIDFunc) error {
 }
 
 func (c *innerClient) routerClientInitializer() {
-	// Check if the router client has been enabled.
-	if c.option.GetEnableRouterClient() {
-		c.enableRouterClient()
-		log.Info("[pd] router client enabled")
-	}
-
+	log.Info("[pd] start router client initializer")
 	defer c.wg.Done()
 	for {
 		select {
@@ -92,11 +91,11 @@ func (c *innerClient) routerClientInitializer() {
 			return
 		case <-c.option.EnableRouterClientCh:
 			if c.option.GetEnableRouterClient() {
+				log.Info("[pd] notified to enable the router client")
 				c.enableRouterClient()
-				log.Info("[pd] router client enabled")
 			} else {
+				log.Info("[pd] notified to disable the router client")
 				c.disableRouterClient()
-				log.Info("[pd] router client disabled")
 			}
 		}
 	}

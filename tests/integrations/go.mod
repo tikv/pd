@@ -25,6 +25,7 @@ require (
 	go.etcd.io/etcd/client/v3 v3.5.15
 	go.uber.org/goleak v1.3.0
 	go.uber.org/zap v1.27.0
+	golang.org/x/exp v0.0.0-20230711005742-c3f37128e5a4
 	google.golang.org/grpc v1.62.1
 	gorm.io/driver/mysql v1.4.5
 	gorm.io/gorm v1.24.3
@@ -187,7 +188,6 @@ require (
 	go.uber.org/multierr v1.11.0 // indirect
 	golang.org/x/arch v0.8.0 // indirect
 	golang.org/x/crypto v0.31.0 // indirect
-	golang.org/x/exp v0.0.0-20230711005742-c3f37128e5a4 // indirect
 	golang.org/x/image v0.18.0 // indirect
 	golang.org/x/net v0.33.0 // indirect
 	golang.org/x/oauth2 v0.21.0 // indirect
