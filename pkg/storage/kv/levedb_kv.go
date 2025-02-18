@@ -80,7 +80,7 @@ func (kv *LevelDBKV) Remove(key string) error {
 	return errors.WithStack(kv.Delete([]byte(key), nil))
 }
 
-// CreateRawEtcdTxn creates a transaction that provides interface in if-then-else pattern.
+// CreateRawEtcdTxn implements kv.Base interface.
 func (kv *LevelDBKV) CreateRawEtcdTxn() RawEtcdTxn {
 	panic("unimplemented")
 }

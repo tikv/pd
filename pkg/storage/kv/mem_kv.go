@@ -52,15 +52,11 @@ func (s *memoryKVItem) Less(than *memoryKVItem) bool {
 func (kv *memoryKV) Load(key string) (string, error) {
 	kv.RLock()
 	defer kv.RUnlock()
-	return kv.loadNoLock(key), nil
-}
-
-func (kv *memoryKV) loadNoLock(key string) string {
 	item, ok := kv.tree.Get(memoryKVItem{key, ""})
 	if !ok {
-		return ""
+		return "", nil
 	}
-	return item.value
+	return item.value, nil
 }
 
 // LoadRange loads the keys in the range of [key, endKey).
@@ -73,11 +69,6 @@ func (kv *memoryKV) LoadRange(key, endKey string, limit int) ([]string, []string
 	})
 	kv.RLock()
 	defer kv.RUnlock()
-	keys, values := kv.loadRangeNoLock(key, endKey, limit)
-	return keys, values, nil
-}
-
-func (kv *memoryKV) loadRangeNoLock(key, endKey string, limit int) ([]string, []string) {
 	keys := make([]string, 0, limit)
 	values := make([]string, 0, limit)
 	kv.tree.AscendRange(memoryKVItem{key, ""}, memoryKVItem{endKey, ""}, func(item memoryKVItem) bool {
@@ -88,34 +79,27 @@ func (kv *memoryKV) loadRangeNoLock(key, endKey string, limit int) ([]string, []
 		}
 		return true
 	})
-	return keys, values
+	return keys, values, nil
 }
 
 // Save saves the key-value pair.
 func (kv *memoryKV) Save(key, value string) error {
 	kv.Lock()
 	defer kv.Unlock()
-	kv.saveNoLock(key, value)
-	return nil
-}
-
-func (kv *memoryKV) saveNoLock(key, value string) {
 	kv.tree.ReplaceOrInsert(memoryKVItem{key, value})
+	return nil
 }
 
 // Remove removes the key.
 func (kv *memoryKV) Remove(key string) error {
 	kv.Lock()
 	defer kv.Unlock()
-	kv.removeNoLock(key)
+
+	kv.tree.Delete(memoryKVItem{key, ""})
 	return nil
 }
 
-func (kv *memoryKV) removeNoLock(key string) {
-	kv.tree.Delete(memoryKVItem{key, ""})
-}
-
-// CreateRawEtcdTxn creates a transaction that provides interface in if-then-else pattern.
+// CreateRawEtcdTxn implements kv.Base interface.
 func (kv *memoryKV) CreateRawEtcdTxn() RawEtcdTxn {
 	panic("unimplemented")
 }
