@@ -489,8 +489,7 @@ func (m *GCStateManager) CompatibleUpdateServiceGCSafePoint(serviceID string, ne
 			SafePoint: minTxnSafePoint,
 		}
 	}
-
-	return
+	return minServiceSafePoint, true, nil
 }
 
 type AdvanceTxnSafePointResult struct {

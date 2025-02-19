@@ -263,8 +263,7 @@ func (s *GrpcServer) loadRangeFromEtcd(startKey, endKey string) ([]string, []str
 	return keys, values, resp.Header.Revision, nil
 }
 
-// UpdateGCSafePoint implements gRPC PDServer.
-func (s *GrpcServer) UpdateGCSafePoint(ctx context.Context, request *pdpb.UpdateGCSafePointRequest) (*pdpb.UpdateGCSafePointResponse, error) {
+func (s *GrpcServer) AdvanceTxnSafePoint(ctx context.Context, request *pdpb.AdvanceTxnSafePointRequest) (*pdpb.AdvanceTxnSafePointResponse, error) {
 	done, err := s.rateLimitCheck()
 	if err != nil {
 		return nil, err
@@ -273,76 +272,30 @@ func (s *GrpcServer) UpdateGCSafePoint(ctx context.Context, request *pdpb.Update
 		defer done()
 	}
 	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
-		return pdpb.NewPDClient(client).UpdateGCSafePoint(ctx, request)
+		return pdpb.NewPDClient(client).AdvanceTxnSafePoint(ctx, request)
 	}
 	if rsp, err := s.unaryMiddleware(ctx, request, fn); err != nil {
 		return nil, err
 	} else if rsp != nil {
-		return rsp.(*pdpb.UpdateGCSafePointResponse), err
+		return rsp.(*pdpb.AdvanceTxnSafePointResponse), err
 	}
 
 	rc := s.GetRaftCluster()
 	if rc == nil {
-		return &pdpb.UpdateGCSafePointResponse{Header: notBootstrappedHeader()}, nil
-	}
-
-	newSafePoint := request.GetTarget()
-	keyspaceID := getKeyspaceIDFromReq(request)
-	oldSafePoint, err := s.gcStateManager.AdvanceGCSafePoint(keyspaceID, newSafePoint)
-	if err != nil {
-		return nil, err
-	}
-
-	if newSafePoint > oldSafePoint {
-		log.Info("updated gc safe point",
-			zap.Uint64("safe-point", newSafePoint))
-	} else if newSafePoint < oldSafePoint {
-		log.Warn("trying to update gc safe point",
-			zap.Uint64("old-safe-point", oldSafePoint),
-			zap.Uint64("new-safe-point", newSafePoint))
-		newSafePoint = oldSafePoint
-	}
-
-	return &pdpb.UpdateGCSafePointResponse{
-		Header:         wrapHeader(),
-		NewGcSafePoint: newSafePoint,
-	}, nil
-}
-
-func (s *GrpcServer) UpdateTxnSafePoint(ctx context.Context, request *pdpb.UpdateTxnSafePointRequest) (*pdpb.UpdateTxnSafePointResponse, error) {
-	if s.GetServiceMiddlewarePersistOptions().IsGRPCRateLimitEnabled() {
-		fName := currentFunction()
-		limiter := s.GetGRPCRateLimiter()
-		if done, err := limiter.Allow(fName); err == nil {
-			defer done()
-		} else {
-			return nil, errs.ErrGRPCRateLimitExceeded(err)
-		}
-	}
-	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
-		return pdpb.NewPDClient(client).UpdateTxnSafePoint(ctx, request)
-	}
-	if rsp, err := s.unaryMiddleware(ctx, request, fn); err != nil {
-		return nil, err
-	} else if rsp != nil {
-		return rsp.(*pdpb.UpdateTxnSafePointResponse), err
-	}
-
-	rc := s.GetRaftCluster()
-	if rc == nil {
-		return &pdpb.UpdateTxnSafePointResponse{Header: notBootstrappedHeader()}, nil
+		return &pdpb.AdvanceTxnSafePointResponse{Header: notBootstrappedHeader()}, nil
 	}
 
 	target := request.GetTarget()
 	keyspaceID := getKeyspaceIDFromReq(request)
-	newTxnSafePoint, err := s.gcStateManager.UpdateTxnSafePoint(keyspaceID, target)
+	res, err := s.gcStateManager.AdvanceTxnSafePoint(keyspaceID, target)
 	if err != nil {
 		return nil, err
 	}
 
-	return &pdpb.UpdateTxnSafePointResponse{
+	return &pdpb.AdvanceTxnSafePointResponse{
 		Header:          wrapHeader(),
-		NewTxnSafePoint: newTxnSafePoint,
+		NewTxnSafePoint: res.NewTxnSafePoint,
+		// TODO: Return description of the blocker.
 	}, nil
 }
 
