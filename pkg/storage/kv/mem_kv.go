@@ -97,6 +97,11 @@ func (kv *memoryKV) Remove(key string) error {
 	return nil
 }
 
+// CreateRawTxn implements kv.Base interface.
+func (*memoryKV) CreateRawTxn() RawTxn {
+	panic("unimplemented")
+}
+
 // memTxn implements kv.Txn.
 type memTxn struct {
 	kv  *memoryKV
