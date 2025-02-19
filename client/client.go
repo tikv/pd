@@ -415,6 +415,14 @@ func (c *client) setup() error {
 
 	// Create dispatchers
 	c.createTokenDispatcher()
+
+	// Check if the router client has been enabled.
+	if c.option.GetEnableRouterClient() {
+		c.enableRouterClient()
+	}
+	c.wg.Add(1)
+	go c.routerClientInitializer()
+
 	return nil
 }
 
@@ -582,6 +590,12 @@ func (c *client) UpdateOption(option opt.DynamicOption, value any) error {
 			return errors.New("[pd] invalid value type for TSOClientRPCConcurrency option, it should be int")
 		}
 		c.option.SetTSOClientRPCConcurrency(value)
+	case opt.EnableRouterClient:
+		enable, ok := value.(bool)
+		if !ok {
+			return errors.New("[pd] invalid value type for EnableRouterClient option, it should be bool")
+		}
+		c.option.SetEnableRouterClient(enable)
 	default:
 		return errors.New("[pd] unsupported client option")
 	}
@@ -747,19 +761,59 @@ func (c *client) GetMinTS(ctx context.Context) (physical int64, logical int64, e
 	return minTS.Physical, minTS.Logical, nil
 }
 
-// EnableRouterClient enables the router client.
-// This is only for test currently.
-func (c *client) EnableRouterClient() {
-	c.initRouterClient()
+func (c *client) routerClientInitializer() {
+	log.Info("[pd] start router client initializer")
+	defer c.wg.Done()
+	for {
+		select {
+		case <-c.ctx.Done():
+			log.Info("[pd] exit router client initializer")
+			return
+		case <-c.option.EnableRouterClientCh:
+			if c.option.GetEnableRouterClient() {
+				log.Info("[pd] notified to enable the router client")
+				c.enableRouterClient()
+			} else {
+				log.Info("[pd] notified to disable the router client")
+				c.disableRouterClient()
+			}
+		}
+	}
 }
 
-func (c *client) initRouterClient() {
-	c.Lock()
-	defer c.Unlock()
+func (c *client) enableRouterClient() {
+	// Check if the router client has been enabled.
+	c.RLock()
 	if c.routerClient != nil {
+		c.RUnlock()
 		return
 	}
-	c.routerClient = router.NewClient(c.ctx, c.pdSvcDiscovery, c.option)
+	c.RUnlock()
+	// Create a new router client first before acquiring the lock.
+	routerClient := router.NewClient(c.ctx, c.pdSvcDiscovery, c.option)
+	c.Lock()
+	// Double check if the router client has been enabled.
+	if c.routerClient != nil {
+		// Release the lock and close the router client.
+		c.Unlock()
+		routerClient.Close()
+		return
+	}
+	c.routerClient = routerClient
+	c.Unlock()
+}
+
+func (c *client) disableRouterClient() {
+	c.Lock()
+	if c.routerClient == nil {
+		c.Unlock()
+		return
+	}
+	routerClient := c.routerClient
+	c.routerClient = nil
+	c.Unlock()
+	// Close the router client after the lock is released.
+	routerClient.Close()
 }
 
 func (c *client) getRouterClient() *router.Cli {
