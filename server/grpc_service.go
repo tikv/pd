@@ -1573,7 +1573,7 @@ func (s *GrpcServer) QueryRegion(stream pdpb.PD_QueryRegionServer) error {
 			request.GetIds(),
 			needBuckets,
 		)
-		regionQueryDuration.Observe(time.Since(start).Seconds())
+		queryRegionDuration.Observe(time.Since(start).Seconds())
 		// Build the response and send it to the client.
 		response := &pdpb.QueryRegionResponse{
 			Header:       wrapHeader(),
