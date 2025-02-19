@@ -15,7 +15,6 @@
 package endpoint
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -100,7 +99,7 @@ type GCStateStorage struct {
 }
 
 type GCStateWriteBatch struct {
-	ops []kv.LowLevelTxnOp
+	ops []kv.RawTxnOp
 }
 
 // LoadGCSafePoint loads current GC safe point from storage.
@@ -271,12 +270,12 @@ func (s *GCStateStorage) RunInGCMetaTransaction(f func(wb *GCStateWriteBatch) er
 	if err != nil {
 		return err
 	}
-	condition := kv.LowLevelTxnCondition{
+	condition := kv.RawTxnCondition{
 		Key:     revisionKey,
-		CmpType: kv.LowLevelCmpNotExists,
+		CmpType: kv.RawTxnCmpNotExists,
 	}
 	if currentRevision == "" {
-		condition.CmpType = kv.LowLevelCmpEqual
+		condition.CmpType = kv.RawTxnCmpEqual
 		condition.Value = currentRevision
 	}
 
@@ -293,14 +292,14 @@ func (s *GCStateStorage) RunInGCMetaTransaction(f func(wb *GCStateWriteBatch) er
 	}
 
 	ops := wb.ops
-	ops = append(ops, kv.LowLevelTxnOp{
+	ops = append(ops, kv.RawTxnOp{
 		Key:    revisionKey,
-		OpType: kv.LowLevelOpPut,
+		OpType: kv.RawTxnOpPut,
 		Value:  nextRevision,
 	})
 
-	txn := s.storage.CreateLowLevelTxn()
-	result, err := txn.If(condition).Then(ops...).Commit(context.Background())
+	txn := s.storage.CreateRawTxn()
+	result, err := txn.If(condition).Then(ops...).Commit()
 	if err != nil {
 		return err
 	}
@@ -308,8 +307,8 @@ func (s *GCStateStorage) RunInGCMetaTransaction(f func(wb *GCStateWriteBatch) er
 		return errs.ErrEtcdTxnConflict.GenWithStackByArgs()
 	}
 
-	if len(ops) != len(result.ResultItems) {
-		return errors.Errorf("unexpected number of results: %d != %d", len(ops), len(result.ResultItems))
+	if len(ops) != len(result.Responses) {
+		return errors.Errorf("unexpected number of results: %d != %d", len(ops), len(result.Responses))
 	}
 	return nil
 }
@@ -438,9 +437,9 @@ func (wb *GCStateWriteBatch) writeJson(key string, data any) error {
 	if err != nil {
 		return errs.ErrJSONMarshal.Wrap(err).GenWithStackByArgs()
 	}
-	wb.ops = append(wb.ops, kv.LowLevelTxnOp{
+	wb.ops = append(wb.ops, kv.RawTxnOp{
 		Key:    key,
-		OpType: kv.LowLevelOpPut,
+		OpType: kv.RawTxnOpPut,
 		Value:  string(value),
 	})
 	return nil
@@ -455,9 +454,9 @@ func (wb *GCStateWriteBatch) SetGCSafePoint(keyspaceID uint32, gcSafePoint uint6
 
 func (wb *GCStateWriteBatch) setGlobalGCSafePoint(gcSafePoint uint64) error {
 	value := strconv.FormatUint(gcSafePoint, 16)
-	wb.ops = append(wb.ops, kv.LowLevelTxnOp{
+	wb.ops = append(wb.ops, kv.RawTxnOp{
 		Key:    keypath.GCSafePointPath(),
-		OpType: kv.LowLevelOpPut,
+		OpType: kv.RawTxnOpPut,
 		Value:  value,
 	})
 	return nil
@@ -477,9 +476,9 @@ func (wb *GCStateWriteBatch) SetTxnSafePoint(keyspaceID uint32, txnSafePoint uin
 		key = keypath.KeyspaceTxnSafePointAbsolutePath(keyspaceID)
 	}
 	value := strconv.FormatUint(txnSafePoint, 10)
-	wb.ops = append(wb.ops, kv.LowLevelTxnOp{
+	wb.ops = append(wb.ops, kv.RawTxnOp{
 		Key:/* raw key without prefix */ key,
-		OpType: kv.LowLevelOpPut,
+		OpType: kv.RawTxnOpPut,
 		Value:  value,
 	})
 	return nil
@@ -500,9 +499,9 @@ func (wb *GCStateWriteBatch) DeleteGCBarrier(keyspaceID uint32, barrierID string
 		prefix = keypath.KeyspaceGCBarrierPrefix(keyspaceID)
 	}
 	key := path.Join(prefix, barrierID)
-	wb.ops = append(wb.ops, kv.LowLevelTxnOp{
+	wb.ops = append(wb.ops, kv.RawTxnOp{
 		Key:    key,
-		OpType: kv.LowLevelOpDelete,
+		OpType: kv.RawTxnOpDelete,
 	})
 	return nil
 }
