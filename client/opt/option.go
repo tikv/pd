@@ -103,17 +103,14 @@ func (o *Option) SetMaxTSOBatchWaitInterval(interval time.Duration) error {
 	}
 	old := o.GetMaxTSOBatchWaitInterval()
 	if interval != old {
-		o.dynamicOptions[MaxTSOBatchWaitInterval].Store(interval)
+		o.dynamicOptions[MaxTSOBatchWaitInterval].CompareAndSwap(old, interval)
 	}
 	return nil
 }
 
 // SetEnableFollowerHandle set the Follower Handle option.
 func (o *Option) SetEnableFollowerHandle(enable bool) {
-	old := o.GetEnableFollowerHandle()
-	if enable != old {
-		o.dynamicOptions[EnableFollowerHandle].Store(enable)
-	}
+	o.dynamicOptions[EnableFollowerHandle].CompareAndSwap(!enable, enable)
 }
 
 // GetEnableFollowerHandle gets the Follower Handle enable option.
@@ -128,9 +125,7 @@ func (o *Option) GetMaxTSOBatchWaitInterval() time.Duration {
 
 // SetEnableTSOFollowerProxy sets the TSO Follower Proxy option.
 func (o *Option) SetEnableTSOFollowerProxy(enable bool) {
-	old := o.GetEnableTSOFollowerProxy()
-	if enable != old {
-		o.dynamicOptions[EnableTSOFollowerProxy].Store(enable)
+	if o.dynamicOptions[EnableTSOFollowerProxy].CompareAndSwap(!enable, enable) {
 		select {
 		case o.EnableTSOFollowerProxyCh <- struct{}{}:
 		default:
@@ -147,7 +142,7 @@ func (o *Option) GetEnableTSOFollowerProxy() bool {
 func (o *Option) SetTSOClientRPCConcurrency(value int) {
 	old := o.GetTSOClientRPCConcurrency()
 	if value != old {
-		o.dynamicOptions[TSOClientRPCConcurrency].Store(value)
+		o.dynamicOptions[TSOClientRPCConcurrency].CompareAndSwap(old, value)
 	}
 }
 
@@ -158,9 +153,7 @@ func (o *Option) GetTSOClientRPCConcurrency() int {
 
 // SetEnableRouterClient sets the router client option.
 func (o *Option) SetEnableRouterClient(enable bool) {
-	old := o.GetEnableRouterClient()
-	if enable != old {
-		o.dynamicOptions[EnableRouterClient].Store(enable)
+	if o.dynamicOptions[EnableRouterClient].CompareAndSwap(!enable, enable) {
 		select {
 		case o.EnableRouterClientCh <- struct{}{}:
 		default:
