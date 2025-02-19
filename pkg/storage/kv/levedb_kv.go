@@ -80,8 +80,8 @@ func (kv *LevelDBKV) Remove(key string) error {
 	return errors.WithStack(kv.Delete([]byte(key), nil))
 }
 
-// CreateRawEtcdTxn implements kv.Base interface.
-func (*LevelDBKV) CreateRawEtcdTxn() RawEtcdTxn {
+// CreateRawTxn implements kv.Base interface.
+func (*LevelDBKV) CreateRawTxn() RawTxn {
 	panic("unimplemented")
 }
 
