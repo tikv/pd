@@ -43,7 +43,7 @@ func (s *clusterIDSuite) TestClientClusterID() {
 	re := require.New(s.T())
 	ctx := context.Background()
 	// deploy second cluster
-	s.startCluster(s.T())
+	s.startCluster()
 	defer s.stopCluster()
 
 	pdEndpoints := getPDEndpoints(s.T())
@@ -57,10 +57,10 @@ func (s *clusterIDSuite) TestClientClusterID() {
 }
 
 func getPDEndpoints(t *testing.T) []string {
-	pdAddrsForEachTikv, err := runCommandWithOutput("ps -ef | grep tikv-server | awk -F '--pd-endpoints=' '{print $2}' | awk '{print $1}'")
+	output, err := runCommandWithOutput("ps -ef | grep tikv-server | awk -F '--pd-endpoints=' '{print $2}' | awk '{print $1}'")
 	require.NoError(t, err)
 	var pdAddrs []string
-	for _, addr := range pdAddrsForEachTikv {
+	for _, addr := range strings.Split(strings.TrimSpace(output), "\n") {
 		// length of addr is less than 5 means it must not be a valid address
 		if len(addr) < 5 {
 			continue

@@ -17,6 +17,7 @@ package realcluster
 import (
 	"fmt"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -130,7 +131,12 @@ func getEtcdKey(endpoints, prefix string) ([]string, error) {
 	// `sed 's/[0-9]*//g'` is used to remove the number in the etcd key, such as the cluster id.
 	etcdCmd := fmt.Sprintf("etcdctl --endpoints=%s get %s --prefix --keys-only | sed 's/[0-9]*//g' | sort | uniq",
 		endpoints, prefix)
-	return runCommandWithOutput(etcdCmd)
+	output, err := runCommandWithOutput(etcdCmd)
+	if err != nil {
+		return nil, err
+	}
+	return strings.Split(strings.TrimSpace(output), "\n"), nil
+
 }
 
 func checkEtcdKey(t *testing.T, keys, expectedKeys []string) bool {

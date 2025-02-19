@@ -17,15 +17,12 @@ package realcluster
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
-	"testing"
 	"time"
 
-	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/zap"
 
@@ -68,13 +65,12 @@ func NewProcessManager(tag string) *ProcessManager {
 
 // CollectPids will collect the pids of the processes.
 func (pm *ProcessManager) CollectPids() error {
-	cmd := exec.Command("pgrep", "-f", pm.tag)
-	output, err := cmd.Output()
+	output, err := runCommandWithOutput(fmt.Sprintf("pgrep -f %s", pm.tag))
 	if err != nil {
 		return fmt.Errorf("failed to collect pids: %v", err)
 	}
 
-	for _, pidStr := range strings.Split(strings.TrimSpace(string(output)), "\n") {
+	for _, pidStr := range strings.Split(strings.TrimSpace(output), "\n") {
 		if pid, err := strconv.Atoi(pidStr); err == nil {
 			pm.pids = append(pm.pids, pid)
 		}
@@ -109,20 +105,17 @@ func isProcessRunning(pid int) bool {
 
 // SetupSuite will run before the tests in the suite are run.
 func (s *clusterSuite) SetupSuite() {
-	t := s.T()
+	re := s.Require()
 
 	// Clean the data dir. It is the default data dir of TiUP.
 	dataDir := filepath.Join(os.Getenv("HOME"), ".tiup", "data", "pd_real_cluster_test_"+s.suiteName+"_*")
 	matches, err := filepath.Glob(dataDir)
-	require.NoError(t, err)
+	re.NoError(err)
 
 	for _, match := range matches {
-		require.NoError(t, runCommand("rm", "-rf", match))
+		re.NoError(runCommand("rm", "-rf", match))
 	}
-	s.startCluster(t)
-	t.Cleanup(func() {
-		s.stopCluster()
-	})
+	s.startCluster()
 }
 
 // TearDownSuite will run after all the tests in the suite have been run.
@@ -134,10 +127,10 @@ func (s *clusterSuite) TearDownSuite() {
 	s.stopCluster()
 }
 
-func (s *clusterSuite) startCluster(t *testing.T) {
+func (s *clusterSuite) startCluster() {
 	log.Info("start to deploy a cluster", zap.Bool("ms", s.ms))
-	s.deployTiupPlayground(t)
-	require.NoError(t, s.waitTiupReady())
+	s.deploy()
+	s.waitReady()
 	s.clusterCnt++
 }
 
@@ -166,28 +159,29 @@ func (s *clusterSuite) restart() {
 	tag := s.tag()
 	log.Info("start to restart", zap.String("tag", tag))
 	s.stopCluster()
-	s.startCluster(s.T())
+	s.startCluster()
 	log.Info("TiUP restart success")
 }
 
-func (s *clusterSuite) deployTiupPlayground(t *testing.T) {
+func (s *clusterSuite) deploy() {
+	re := s.Require()
 	curPath, err := os.Getwd()
-	require.NoError(t, err)
-	require.NoError(t, os.Chdir("../../.."))
+	re.NoError(err)
+	re.NoError(os.Chdir("../../.."))
 
 	if !fileExists("third_bin") || !fileExists("third_bin/tikv-server") || !fileExists("third_bin/tidb-server") || !fileExists("third_bin/tiflash") {
 		log.Info("downloading binaries...")
 		log.Info("this may take a few minutes, you can also download them manually and put them in the bin directory.")
-		require.NoError(t, runCommand("sh",
+		re.NoError(runCommand("sh",
 			"./tests/integrations/realcluster/download_integration_test_binaries.sh"))
 	}
 	if !fileExists("bin") || !fileExists("bin/pd-server") {
 		log.Info("complie pd binaries...")
-		require.NoError(t, runCommand("make", "pd-server"))
+		re.NoError(runCommand("make", "pd-server"))
 	}
 
 	if !fileExists(playgroundLogDir) {
-		require.NoError(t, os.MkdirAll(playgroundLogDir, 0755))
+		re.NoError(os.MkdirAll(playgroundLogDir, 0755))
 	}
 
 	// nolint:errcheck
@@ -221,7 +215,7 @@ func (s *clusterSuite) deployTiupPlayground(t *testing.T) {
 
 	// Avoid to change the dir before execute `tiup playground`.
 	time.Sleep(10 * time.Second)
-	require.NoError(t, os.Chdir(curPath))
+	re.NoError(os.Chdir(curPath))
 }
 
 func buildBinPathsOpts(ms bool) string {
@@ -242,7 +236,8 @@ func buildBinPathsOpts(ms bool) string {
 	return strings.Join(opts, " ")
 }
 
-func (s *clusterSuite) waitTiupReady() error {
+func (s *clusterSuite) waitReady() {
+	re := s.Require()
 	const (
 		interval = 5
 		maxTimes = 20
@@ -255,16 +250,19 @@ func (s *clusterSuite) waitTiupReady() error {
 	for i := 0; i < maxTimes; i++ {
 		select {
 		case <-timeout:
-			return fmt.Errorf("TiUP is not ready after timeout, tag: %s", s.tag())
+			re.FailNowf("TiUP is not ready after timeout, tag: %s", s.tag())
 		case <-ticker.C:
-			err := runCommand(tiupBin, "playground", "display", "--tag", s.tag())
+			log.Info("check TiUP ready", zap.String("tag", s.tag()))
+			cmd := fmt.Sprintf(`%s playground display --tag %s`, tiupBin, s.tag())
+			output, err := runCommandWithOutput(cmd)
 			if err == nil {
 				log.Info("TiUP is ready", zap.String("tag", s.tag()))
-				return nil
+				return
 			}
+			log.Info(output)
 			log.Info("TiUP is not ready, will retry", zap.Int("retry times", i),
 				zap.String("tag", s.tag()), zap.Error(err))
 		}
 	}
-	return fmt.Errorf("TiUP is not ready after max retries, tag: %s", s.tag())
+	re.FailNowf("TiUP is not ready after max retries, tag: %s", s.tag())
 }
