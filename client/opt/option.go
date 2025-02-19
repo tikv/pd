@@ -101,10 +101,7 @@ func (o *Option) SetMaxTSOBatchWaitInterval(interval time.Duration) error {
 	if interval < 0 || interval > 10*time.Millisecond {
 		return errors.New("[pd] invalid max TSO batch wait interval, should be between 0 and 10ms")
 	}
-	old := o.GetMaxTSOBatchWaitInterval()
-	if interval != old {
-		o.dynamicOptions[MaxTSOBatchWaitInterval].CompareAndSwap(old, interval)
-	}
+	o.dynamicOptions[MaxTSOBatchWaitInterval].CompareAndSwap(o.GetMaxTSOBatchWaitInterval(), interval)
 	return nil
 }
 
@@ -140,10 +137,7 @@ func (o *Option) GetEnableTSOFollowerProxy() bool {
 
 // SetTSOClientRPCConcurrency sets the TSO client RPC concurrency option.
 func (o *Option) SetTSOClientRPCConcurrency(value int) {
-	old := o.GetTSOClientRPCConcurrency()
-	if value != old {
-		o.dynamicOptions[TSOClientRPCConcurrency].CompareAndSwap(old, value)
-	}
+	o.dynamicOptions[TSOClientRPCConcurrency].CompareAndSwap(o.GetTSOClientRPCConcurrency(), value)
 }
 
 // GetTSOClientRPCConcurrency gets the TSO client RPC concurrency option.

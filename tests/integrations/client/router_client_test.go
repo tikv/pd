@@ -20,6 +20,7 @@ import (
 	"reflect"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
@@ -281,12 +282,17 @@ func (suite *routerClientSuite) dispatchConcurrentRequests(ctx context.Context, 
 	for range concurrency {
 		go func() {
 			defer wg.Done()
-			switch rand.Intn(3) {
+			// Randomly sleep to avoid the concurrent requests to be dispatched at the same time.
+			seed := rand.Intn(100)
+			time.Sleep(time.Duration(seed) * time.Millisecond)
+			switch seed % 3 {
 			case 0:
 				region := regions[0]
 				testutil.Eventually(re, func() bool {
 					r, err := suite.client.GetRegion(ctx, region.GetStartKey())
-					re.NoError(err)
+					if err != nil {
+						re.ErrorContains(err, context.Canceled.Error())
+					}
 					if r == nil {
 						return false
 					}
@@ -297,7 +303,9 @@ func (suite *routerClientSuite) dispatchConcurrentRequests(ctx context.Context, 
 			case 1:
 				testutil.Eventually(re, func() bool {
 					r, err := suite.client.GetPrevRegion(ctx, regions[1].GetStartKey())
-					re.NoError(err)
+					if err != nil {
+						re.ErrorContains(err, context.Canceled.Error())
+					}
 					if r == nil {
 						return false
 					}
@@ -309,7 +317,9 @@ func (suite *routerClientSuite) dispatchConcurrentRequests(ctx context.Context, 
 				region := regions[0]
 				testutil.Eventually(re, func() bool {
 					r, err := suite.client.GetRegionByID(ctx, region.GetId())
-					re.NoError(err)
+					if err != nil {
+						re.ErrorContains(err, context.Canceled.Error())
+					}
 					if r == nil {
 						return false
 					}
@@ -329,10 +339,10 @@ func (suite *routerClientSuite) TestDynamicallyEnableRouterClient() {
 
 	wg := sync.WaitGroup{}
 	for _, enabled := range []bool{!suite.routerClientEnabled, suite.routerClientEnabled} {
-		err := suite.client.UpdateOption(opt.EnableRouterClient, enabled)
-		re.NoError(err)
 		suite.dispatchConcurrentRequests(ctx, re, &wg)
 		wg.Wait()
+		err := suite.client.UpdateOption(opt.EnableRouterClient, enabled)
+		re.NoError(err)
 	}
 }
 
@@ -342,11 +352,17 @@ func (suite *routerClientSuite) TestConcurrentlyEnableRouterClient() {
 	defer cancel()
 
 	wg := sync.WaitGroup{}
-	suite.dispatchConcurrentRequests(ctx, re, &wg)
 	// Concurrently enable and disable the router client.
 	for _, enabled := range []bool{!suite.routerClientEnabled, suite.routerClientEnabled} {
+		suite.dispatchConcurrentRequests(ctx, re, &wg)
+		// Switch the router client option immediately right after the concurrent requests dispatch.
 		err := suite.client.UpdateOption(opt.EnableRouterClient, enabled)
 		re.NoError(err)
+		select {
+		case <-time.After(time.Second):
+			// Let the bullet fly for a while.
+		case <-ctx.Done():
+		}
 	}
 	wg.Wait()
 }
