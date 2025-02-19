@@ -23,6 +23,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/gogo/protobuf/proto"
 	"github.com/opentracing/opentracing-go"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -32,6 +33,7 @@ import (
 	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/client/errs"
+	"github.com/tikv/pd/client/metrics"
 	"github.com/tikv/pd/client/opt"
 	"github.com/tikv/pd/client/pkg/batch"
 	cctx "github.com/tikv/pd/client/pkg/connectionctx"
@@ -75,6 +77,28 @@ func ConvertToRegion(res regionResponse) *Region {
 	for _, s := range res.GetDownPeers() {
 		r.DownPeers = append(r.DownPeers, s.Peer)
 	}
+	return r
+}
+
+// convertToRegionCopy converts and deep-copies the region response to a new region.
+func convertToRegionCopy(res regionResponse) *Region {
+	region := res.GetRegion()
+	if region == nil {
+		return nil
+	}
+
+	r := &Region{
+		Meta:    proto.Clone(region).(*metapb.Region),
+		Leader:  proto.Clone(res.GetLeader()).(*metapb.Peer),
+		Buckets: proto.Clone(res.GetBuckets()).(*metapb.Buckets),
+	}
+	for _, s := range res.GetDownPeers() {
+		r.DownPeers = append(r.DownPeers, proto.Clone(s.Peer).(*metapb.Peer))
+	}
+	for _, p := range res.GetPendingPeers() {
+		r.PendingPeers = append(r.PendingPeers, proto.Clone(p).(*metapb.Peer))
+	}
+
 	return r
 }
 
@@ -186,8 +210,12 @@ func NewClient(
 				}
 			},
 		},
-		requestCh:       make(chan *Request, defaultMaxRouterRequestBatchSize*2),
-		batchController: batch.NewController(defaultMaxRouterRequestBatchSize, requestFinisher(nil), nil),
+		requestCh: make(chan *Request, defaultMaxRouterRequestBatchSize*2),
+		batchController: batch.NewController(
+			defaultMaxRouterRequestBatchSize,
+			requestFinisher(nil),
+			metrics.QueryRegionBestBatchSize,
+		),
 	}
 	c.leaderURL.Store(svcDiscovery.GetServingURL())
 	c.svcDiscovery.ExecAndAddLeaderSwitchedCallback(c.updateLeaderURL)
@@ -204,6 +232,14 @@ func (c *Cli) newRequest(ctx context.Context) *Request {
 	req := c.reqPool.Get().(*Request)
 	req.requestCtx = ctx
 	req.clientCtx = c.ctx
+	// Reset the request fields before using it.
+	req.key = nil
+	req.prevKey = nil
+	req.id = 0
+	req.needBuckets = false
+	req.region = nil
+	// Initialize the runtime fields.
+	req.start = time.Now()
 	req.pool = c.reqPool
 
 	return req
@@ -230,8 +266,10 @@ func requestFinisher(resp *pdpb.QueryRegionResponse) batch.FinisherFunc[*Request
 		} else if req.id != 0 {
 			id = req.id
 		}
-		if region, ok := resp.RegionsById[id]; ok {
-			req.region = ConvertToRegion(region)
+		if regionResp, ok := resp.RegionsById[id]; ok {
+			// Since the region results may be modified by the requester,
+			// we need to ensure each region result returned is unique.
+			req.region = convertToRegionCopy(regionResp)
 		}
 		req.tryDone(err)
 	}
@@ -339,7 +377,10 @@ func (c *Cli) updateConnection(ctx context.Context) {
 	if err != nil {
 		log.Error("[router] failed to create the router stream connection", errs.ZapError(err))
 	}
-	c.conCtxMgr.Store(ctx, url, stream)
+	// Store the stream connection context if it is successfully created.
+	if stream != nil {
+		c.conCtxMgr.Store(ctx, url, stream)
+	}
 	// TODO: support the forwarding mechanism for the router client.
 	// TODO: support sending the router requests to the follower nodes.
 }
@@ -479,13 +520,31 @@ func (c *Cli) processRequests(stream pdpb.PD_QueryRegionClient) error {
 			panic("invalid region query request received")
 		}
 	}
+	start := time.Now()
 	err := stream.Send(queryReq)
 	if err != nil {
 		return err
 	}
+	metrics.QueryRegionBatchSendLatency.Observe(
+		time.Since(
+			c.batchController.GetExtraBatchingStartTime(),
+		).Seconds(),
+	)
 	resp, err := stream.Recv()
 	if err != nil {
+		metrics.RequestFailedDurationQueryRegion.Observe(time.Since(start).Seconds())
 		return err
+	}
+	metrics.RequestDurationQueryRegion.Observe(time.Since(start).Seconds())
+	metrics.QueryRegionBatchSizeTotal.Observe(float64(len(requests)))
+	if keysLen := len(queryReq.Keys); keysLen > 0 {
+		metrics.QueryRegionBatchSizeByKeys.Observe(float64(keysLen))
+	}
+	if prevKeysLen := len(queryReq.PrevKeys); prevKeysLen > 0 {
+		metrics.QueryRegionBatchSizeByPrevKeys.Observe(float64(prevKeysLen))
+	}
+	if idsLen := len(queryReq.Ids); idsLen > 0 {
+		metrics.QueryRegionBatchSizeByIDs.Observe(float64(idsLen))
 	}
 	c.doneCollectedRequests(resp)
 	return nil
