@@ -16,13 +16,13 @@ package client_test
 
 import (
 	"context"
+	"math/rand"
 	"reflect"
 	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
-	"golang.org/x/exp/rand"
 
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
