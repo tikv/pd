@@ -59,11 +59,11 @@ kill_cluster:
 
 test:
 	CGO_ENABLED=1 go test ./... -v -tags deadlock -race -cover || (\
-	echo "follow is pd-0 log\n" ; \
+	echo "follow is pd-0 log" ; \
 	cat ~/.tiup/data/pd_real_cluster_test/pd-0/pd.log ; \
-	echo "follow is pd-1 log\n" ; \
+	echo "follow is pd-1 log" ; \
 	cat ~/.tiup/data/pd_real_cluster_test/pd-1/pd.log ; \
-	echo "follow is pd-2 log\n" ; \
+	echo "follow is pd-2 log" ; \
 	cat ~/.tiup/data/pd_real_cluster_test/pd-2/pd.log ; \
 	exit 1)
 

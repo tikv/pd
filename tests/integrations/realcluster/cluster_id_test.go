@@ -44,7 +44,7 @@ func (s *clusterIDSuite) TestClientClusterID() {
 	ctx := context.Background()
 	// deploy second cluster
 	s.startCluster(s.T())
-	defer s.stopCluster(s.T())
+	defer s.stopCluster()
 
 	pdEndpoints := getPDEndpoints(s.T())
 	// Try to create a client with the mixed endpoints.
