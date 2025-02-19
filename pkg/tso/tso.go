@@ -387,11 +387,7 @@ func (t *timestampOracle) UpdateTimestamp(leadership *election.Leadership) error
 var maxRetryCount = 10
 
 // getTS is used to get a timestamp.
-<<<<<<< HEAD
 func (t *timestampOracle) getTS(ctx context.Context, leadership *election.Leadership, count uint32, suffixBits int) (pdpb.Timestamp, error) {
-=======
-func (t *timestampOracle) getTS(ctx context.Context, member ElectionMember, count uint32) (pdpb.Timestamp, error) {
->>>>>>> aa7a4c6e4 (pkg: fix tso is generated even if the member is not leader (#9056))
 	defer trace.StartRegion(ctx, "timestampOracle.getTS").End()
 	var resp pdpb.Timestamp
 	if count == 0 {
@@ -401,7 +397,7 @@ func (t *timestampOracle) getTS(ctx context.Context, member ElectionMember, coun
 		currentPhysical, _ := t.getTSO()
 		if currentPhysical == typeutil.ZeroTime {
 			// If it's leader, maybe SyncTimestamp hasn't completed yet
-			if member.IsLeader() {
+			if leadership.Check() {
 				time.Sleep(200 * time.Millisecond)
 				continue
 			}
@@ -423,7 +419,7 @@ func (t *timestampOracle) getTS(ctx context.Context, member ElectionMember, coun
 			continue
 		}
 		// In case lease expired after the first check.
-		if !member.IsLeader() {
+		if !leadership.Check() {
 			return pdpb.Timestamp{}, errs.ErrGenerateTimestamp.FastGenByArgs(fmt.Sprintf("requested %s anymore", errs.NotLeaderErr))
 		}
 		resp.SuffixBits = uint32(suffixBits)

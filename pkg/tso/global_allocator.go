@@ -243,7 +243,6 @@ func (gta *GlobalTSOAllocator) GenerateTSO(ctx context.Context, count uint32) (p
 	}
 	ctx1 := ctx
 
-<<<<<<< HEAD
 	// Have dc-locations configured in the cluster, use the Global TSO generation way.
 	// (whit synchronization with other Local TSO Allocators)
 	ctx, cancel := context.WithCancel(gta.ctx)
@@ -538,9 +537,6 @@ func (gta *GlobalTSOAllocator) getCurrentTSO(ctx context.Context) (*pdpb.Timesta
 		return &pdpb.Timestamp{}, errs.ErrGenerateTimestamp.FastGenByArgs("timestamp in memory isn't initialized")
 	}
 	return tsoutil.GenerateTimestamp(currentPhysical, uint64(currentLogical)), nil
-=======
-	return gta.timestampOracle.getTS(ctx, gta.member, count)
->>>>>>> aa7a4c6e4 (pkg: fix tso is generated even if the member is not leader (#9056))
 }
 
 // Reset is used to reset the TSO allocator.
