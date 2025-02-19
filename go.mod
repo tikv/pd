@@ -42,7 +42,11 @@ require (
 	github.com/pingcap/kvproto v0.0.0-20250526075340-5030ed622c15
 	github.com/pingcap/log v1.1.1-0.20221110025148-ca232912c9f3
 	github.com/pingcap/sysutil v1.0.1-0.20230407040306-fb007c5aff21
+<<<<<<< HEAD
 	github.com/pingcap/tidb-dashboard v0.0.0-20241212093248-834dbcafa291
+=======
+	github.com/pingcap/tidb-dashboard v0.0.0-20250219061340-d62018124ae2
+>>>>>>> b757cbe8f (chore(dashboard): update TiDB Dashboard to v9.0.0-d6201812 [master] (#9084))
 	github.com/prometheus/client_golang v1.20.5
 	github.com/prometheus/common v0.55.0
 	github.com/sasha-s/go-deadlock v0.2.0
@@ -145,9 +149,13 @@ require (
 	github.com/lufia/plan9stats v0.0.0-20230326075908-cb1d2100619a // indirect
 	github.com/mattn/go-colorable v0.1.8 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
+<<<<<<< HEAD
 	github.com/mattn/go-runewidth v0.0.8 // indirect
 	github.com/mattn/go-sqlite3 v1.14.24 // indirect
 	github.com/mgechev/dots v0.0.0-20190921121421-c36f7dcfbb81 // indirect
+=======
+	github.com/mattn/go-sqlite3 v1.14.24 // indirect
+>>>>>>> b757cbe8f (chore(dashboard): update TiDB Dashboard to v9.0.0-d6201812 [master] (#9084))
 	github.com/minio/sio v0.3.0 // indirect
 	github.com/mitchellh/go-homedir v1.1.0 // indirect
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect

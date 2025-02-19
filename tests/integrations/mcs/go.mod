@@ -17,10 +17,21 @@ require (
 	github.com/stretchr/testify v1.9.0
 	github.com/tikv/pd v0.0.0-00010101000000-000000000000
 	github.com/tikv/pd/client v0.0.0-00010101000000-000000000000
+<<<<<<< HEAD:tests/integrations/mcs/go.mod
 	go.etcd.io/etcd v0.5.0-alpha.5.0.20240320135013-950cd5fbe6ca
 	go.uber.org/goleak v1.1.12
 	go.uber.org/zap v1.24.0
 	google.golang.org/grpc v1.59.0
+=======
+	go.etcd.io/etcd/client/pkg/v3 v3.5.15
+	go.etcd.io/etcd/client/v3 v3.5.15
+	go.uber.org/goleak v1.3.0
+	go.uber.org/zap v1.27.0
+	google.golang.org/grpc v1.62.1
+	gorm.io/driver/mysql v1.4.5
+	gorm.io/gorm v1.25.12
+	moul.io/zapgorm2 v1.1.0
+>>>>>>> b757cbe8f (chore(dashboard): update TiDB Dashboard to v9.0.0-d6201812 [master] (#9084)):tests/integrations/go.mod
 )
 
 require (
@@ -124,7 +135,11 @@ require (
 	github.com/pingcap/errcode v0.3.0 // indirect
 	github.com/pingcap/errors v0.11.5-0.20211224045212-9687c2b0f87c // indirect
 	github.com/pingcap/sysutil v1.0.1-0.20230407040306-fb007c5aff21 // indirect
+<<<<<<< HEAD:tests/integrations/mcs/go.mod
 	github.com/pingcap/tidb-dashboard v0.0.0-20241212093248-834dbcafa291 // indirect
+=======
+	github.com/pingcap/tidb-dashboard v0.0.0-20250219061340-d62018124ae2 // indirect
+>>>>>>> b757cbe8f (chore(dashboard): update TiDB Dashboard to v9.0.0-d6201812 [master] (#9084)):tests/integrations/go.mod
 	github.com/pingcap/tipb v0.0.0-20220718022156-3e2483c20a9e // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
@@ -184,9 +199,14 @@ require (
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 	gorm.io/datatypes v1.1.0 // indirect
+<<<<<<< HEAD:tests/integrations/mcs/go.mod
 	gorm.io/driver/mysql v1.4.5 // indirect
 	gorm.io/driver/sqlite v1.5.7 // indirect
 	gorm.io/gorm v1.25.12 // indirect
 	moul.io/zapgorm2 v1.1.0 // indirect
 	sigs.k8s.io/yaml v1.2.0 // indirect
+=======
+	gorm.io/driver/sqlite v1.5.7 // indirect
+	sigs.k8s.io/yaml v1.4.0 // indirect
+>>>>>>> b757cbe8f (chore(dashboard): update TiDB Dashboard to v9.0.0-d6201812 [master] (#9084)):tests/integrations/go.mod
 )
