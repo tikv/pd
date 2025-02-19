@@ -80,6 +80,11 @@ func (kv *LevelDBKV) Remove(key string) error {
 	return errors.WithStack(kv.Delete([]byte(key), nil))
 }
 
+// CreateRawTxn implements kv.Base interface.
+func (*LevelDBKV) CreateRawTxn() RawTxn {
+	panic("unimplemented")
+}
+
 // levelDBTxn implements kv.Txn.
 // It utilizes leveldb.Batch to batch user operations to an atomic execution unit.
 type levelDBTxn struct {
