@@ -94,8 +94,14 @@ func (b *GCBarrier) String() string {
 		b.BarrierID, b.BarrierTS, expirationTime, b.KeyspaceID)
 }
 
+// GCStateStorage is a stateless wrapper over StorageEndpoint that provides methods for reading/writing GC state.
+// As a explicit wrapper, it avoids misuse on GC related methods on StorageEndpoint.
 type GCStateStorage struct {
 	storage *StorageEndpoint
+}
+
+func NewGCStateStorage(storage *StorageEndpoint) GCStateStorage {
+	return GCStateStorage{storage: storage}
 }
 
 type GCStateWriteBatch struct {
@@ -103,14 +109,14 @@ type GCStateWriteBatch struct {
 }
 
 // LoadGCSafePoint loads current GC safe point from storage.
-func (s *GCStateStorage) LoadGCSafePoint(keyspaceID uint32) (uint64, error) {
+func (s GCStateStorage) LoadGCSafePoint(keyspaceID uint32) (uint64, error) {
 	if keyspaceID == constant.NullKeyspaceID {
 		return s.loadGlobalGCSafePoint()
 	}
 	return s.loadKeyspaceGCSafePoint(keyspaceID)
 }
 
-func (s *GCStateStorage) loadGlobalGCSafePoint() (uint64, error) {
+func (s GCStateStorage) loadGlobalGCSafePoint() (uint64, error) {
 	value, err := s.storage.Load(keypath.GCSafePointPath())
 	if err != nil || value == "" {
 		return 0, err
@@ -127,7 +133,7 @@ type keyspaceGCSafePoint struct {
 	SafePoint  uint64 `json:"safe_point"`
 }
 
-func (s *GCStateStorage) loadKeyspaceGCSafePoint(keyspaceID uint32) (uint64, error) {
+func (s GCStateStorage) loadKeyspaceGCSafePoint(keyspaceID uint32) (uint64, error) {
 	key := keypath.KeyspaceGCSafePointPath(keyspaceID)
 	value, err := s.storage.Load(key)
 	if err != nil {
@@ -145,7 +151,7 @@ func (s *GCStateStorage) loadKeyspaceGCSafePoint(keyspaceID uint32) (uint64, err
 	return gcSafePoint.SafePoint, nil
 }
 
-func (s *GCStateStorage) LoadTxnSafePoint(keyspaceID uint32) (uint64, error) {
+func (s GCStateStorage) LoadTxnSafePoint(keyspaceID uint32) (uint64, error) {
 	key := keypath.TxnSafePointAbsolutePath()
 	if keyspaceID != constant.NullKeyspaceID {
 		key = keypath.KeyspaceTxnSafePointAbsolutePath(keyspaceID)
@@ -162,7 +168,7 @@ func (s *GCStateStorage) LoadTxnSafePoint(keyspaceID uint32) (uint64, error) {
 	return txnSafePoint, err
 }
 
-func loadJSON[T any](se *StorageEndpoint, key string) (*T, error) {
+func loadJSON[T any](se StorageEndpoint, key string) (*T, error) {
 	value, err := se.Load(key)
 	if err != nil {
 		return nil, err
@@ -177,7 +183,7 @@ func loadJSON[T any](se *StorageEndpoint, key string) (*T, error) {
 	return &data, nil
 }
 
-func loadJSONByPrefix[T any](se *StorageEndpoint, prefix string, limit int) ([]string, []*T, error) {
+func loadJSONByPrefix[T any](se StorageEndpoint, prefix string, limit int) ([]string, []*T, error) {
 	prefixEnd := clientv3.GetPrefixRangeEnd(prefix)
 	keys, values, err := se.LoadRange(prefix, prefixEnd, limit)
 	if err != nil {
@@ -198,7 +204,7 @@ func loadJSONByPrefix[T any](se *StorageEndpoint, prefix string, limit int) ([]s
 	return keys, data, nil
 }
 
-func (s *GCStateStorage) LoadGCBarrier(keyspaceID uint32, barrierID string) (*GCBarrier, error) {
+func (s GCStateStorage) LoadGCBarrier(keyspaceID uint32, barrierID string) (*GCBarrier, error) {
 	prefix := keypath.GCBarrierPrefix()
 	if keyspaceID != constant.NullKeyspaceID {
 		prefix = keypath.KeyspaceGCBarrierPrefix(keyspaceID)
@@ -212,7 +218,7 @@ func (s *GCStateStorage) LoadGCBarrier(keyspaceID uint32, barrierID string) (*GC
 	return gcBarrierFromServiceSafePoint(serviceSafePoint), nil
 }
 
-func (s *GCStateStorage) LoadAllGCBarriers(keyspaceID uint32) ([]*GCBarrier, error) {
+func (s GCStateStorage) LoadAllGCBarriers(keyspaceID uint32) ([]*GCBarrier, error) {
 	prefix := keypath.GCBarrierPrefix() + "/"
 	if keyspaceID != constant.NullKeyspaceID {
 		prefix = keypath.KeyspaceGCBarrierPrefix(keyspaceID) + "/"
@@ -232,7 +238,7 @@ func (s *GCStateStorage) LoadAllGCBarriers(keyspaceID uint32) ([]*GCBarrier, err
 	return barriers, nil
 }
 
-func (s *GCStateStorage) LoadTiDBMinStartTS(keyspaceID uint32) (string, uint64, error) {
+func (s GCStateStorage) LoadTiDBMinStartTS(keyspaceID uint32) (string, uint64, error) {
 	prefix := keypath.CompatibleTiDBMinStartTSAbsolutePath() + "/"
 	if keyspaceID != constant.NullKeyspaceID {
 		prefix = keypath.CompatibleKeyspaceTiDBMinStartTSAbsolutePath(keyspaceID) + "/"
@@ -264,7 +270,7 @@ func (s *GCStateStorage) LoadTiDBMinStartTS(keyspaceID uint32) (string, uint64, 
 	return minKey, minMinStartTS, nil
 }
 
-func (s *GCStateStorage) RunInGCMetaTransaction(f func(wb *GCStateWriteBatch) error) error {
+func (s GCStateStorage) RunInGCMetaTransaction(f func(wb *GCStateWriteBatch) error) error {
 	revisionKey := keypath.GCMetaRevisionPath()
 	currentRevision, err := s.storage.Load(revisionKey)
 	if err != nil {

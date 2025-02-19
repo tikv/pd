@@ -2155,7 +2155,7 @@ func (s *GrpcServer) GetGCSafePoint(ctx context.Context, request *pdpb.GetGCSafe
 		return &pdpb.GetGCSafePointResponse{Header: notBootstrappedHeader()}, nil
 	}
 
-	safePoint, err := s.gcStateManager.CompatibleLoadGCSafePoint(constant.NullKeyspaceID)
+	safePoint, err := s.gcStateManager.CompatibleLoadGCSafePoint()
 	if err != nil {
 		return nil, err
 	}

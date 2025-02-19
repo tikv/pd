@@ -27,6 +27,7 @@ import (
 
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/keyspace"
+	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
@@ -127,7 +128,7 @@ func (manager *SafePointV2Manager) getGCSafePoint(keyspaceID uint32) (*endpoint.
 	}
 	// If failed to find a valid safe point, check if a safe point exist in v1 storage, and use it.
 	if v2SafePoint.SafePoint == 0 {
-		v1SafePoint, err := manager.v1Storage.LoadGCSafePoint()
+		v1SafePoint, err := manager.v1Storage.LoadGCSafePoint(constant.NullKeyspaceID)
 		if err != nil {
 			return nil, err
 		}

@@ -73,8 +73,8 @@ func (m *GCStateManager) redirectKeyspace(keyspaceID uint32, isUserAPI bool) (ui
 }
 
 // CompatibleLoadGCSafePoint loads current GC safe point from storage.
-func (m *GCStateManager) CompatibleLoadGCSafePoint(keyspaceID uint32) (uint64, error) {
-	keyspaceID, err := m.redirectKeyspace(keyspaceID, false)
+func (m *GCStateManager) CompatibleLoadGCSafePoint() (uint64, error) {
+	keyspaceID, err := m.redirectKeyspace(constant.NullKeyspaceID, false)
 	if err != nil {
 		return 0, err
 	}
