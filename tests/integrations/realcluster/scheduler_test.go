@@ -21,7 +21,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/zap"
 
@@ -48,11 +47,11 @@ func TestScheduler(t *testing.T) {
 // https://github.com/tikv/pd/issues/6988#issuecomment-1694924611
 // https://github.com/tikv/pd/issues/6897
 func (s *schedulerSuite) TestTransferLeader() {
-	re := require.New(s.T())
+	re := s.Require()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	pdHTTPCli := http.NewClient("pd-real-cluster-test", getPDEndpoints(s.T()))
+	pdHTTPCli := http.NewClient("pd-real-cluster-test", getPDEndpoints(re))
 	resp, err := pdHTTPCli.GetLeader(ctx)
 	re.NoError(err)
 	oldLeader := resp.Name
@@ -98,11 +97,11 @@ func (s *schedulerSuite) TestTransferLeader() {
 }
 
 func (s *schedulerSuite) TestRegionLabelDenyScheduler() {
-	re := require.New(s.T())
+	re := s.Require()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	pdHTTPCli := http.NewClient("pd-real-cluster-test", getPDEndpoints(s.T()))
+	pdHTTPCli := http.NewClient("pd-real-cluster-test", getPDEndpoints(re))
 	regions, err := pdHTTPCli.GetRegions(ctx)
 	re.NoError(err)
 	re.NotEmpty(regions.Regions)
@@ -207,11 +206,11 @@ func (s *schedulerSuite) TestRegionLabelDenyScheduler() {
 }
 
 func (s *schedulerSuite) TestGrantOrEvictLeaderTwice() {
-	re := require.New(s.T())
+	re := s.Require()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	pdHTTPCli := http.NewClient("pd-real-cluster-test", getPDEndpoints(s.T()))
+	pdHTTPCli := http.NewClient("pd-real-cluster-test", getPDEndpoints(re))
 	regions, err := pdHTTPCli.GetRegions(ctx)
 	re.NoError(err)
 	re.NotEmpty(regions.Regions)

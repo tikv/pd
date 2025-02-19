@@ -40,13 +40,14 @@ func TestClusterID(t *testing.T) {
 }
 
 func (s *clusterIDSuite) TestClientClusterID() {
-	re := require.New(s.T())
+	re := s.Require()
 	ctx := context.Background()
 	// deploy second cluster
-	s.startCluster()
-	defer s.stopCluster()
+	cluster2 := newCluster(re, s.tag(), s.dataDir(), s.mode)
+	cluster2.start()
+	defer cluster2.stop()
 
-	pdEndpoints := getPDEndpoints(s.T())
+	pdEndpoints := getPDEndpoints(re)
 	// Try to create a client with the mixed endpoints.
 	_, err := pd.NewClientWithContext(
 		ctx, caller.TestComponent, pdEndpoints,
@@ -56,9 +57,9 @@ func (s *clusterIDSuite) TestClientClusterID() {
 	re.Contains(err.Error(), "unmatched cluster id")
 }
 
-func getPDEndpoints(t *testing.T) []string {
+func getPDEndpoints(re *require.Assertions) []string {
 	output, err := runCommandWithOutput("ps -ef | grep tikv-server | awk -F '--pd-endpoints=' '{print $2}' | awk '{print $1}'")
-	require.NoError(t, err)
+	re.NoError(err)
 	var pdAddrs []string
 	for _, addr := range strings.Split(strings.TrimSpace(output), "\n") {
 		// length of addr is less than 5 means it must not be a valid address
