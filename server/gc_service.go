@@ -263,6 +263,11 @@ func (s *GrpcServer) loadRangeFromEtcd(startKey, endKey string) ([]string, []str
 	return keys, values, resp.Header.Revision, nil
 }
 
+func (s *GrpcServer) AdvanceGCSafePoint(ctx context.Context, pointRequest *pdpb.AdvanceGCSafePointRequest) (*pdpb.AdvanceGCSafePointResponse, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
 func (s *GrpcServer) AdvanceTxnSafePoint(ctx context.Context, request *pdpb.AdvanceTxnSafePointRequest) (*pdpb.AdvanceTxnSafePointResponse, error) {
 	done, err := s.rateLimitCheck()
 	if err != nil {
@@ -310,6 +315,11 @@ func (s *GrpcServer) DeleteGCBarrier(ctx context.Context, request *pdpb.DeleteGC
 }
 
 func (s *GrpcServer) GetGCState(ctx context.Context, request *pdpb.GetGCStateRequest) (*pdpb.GetGCStateResponse, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (s *GrpcServer) GetGlobalGCState(ctx context.Context, stateRequest *pdpb.GetGlobalGCStateRequest) (*pdpb.GetGlobalGCStateResponse, error) {
 	//TODO implement me
 	panic("implement me")
 }

@@ -168,7 +168,7 @@ func (s GCStateStorage) LoadTxnSafePoint(keyspaceID uint32) (uint64, error) {
 	return txnSafePoint, err
 }
 
-func loadJSON[T any](se StorageEndpoint, key string) (*T, error) {
+func loadJSON[T any](se *StorageEndpoint, key string) (*T, error) {
 	value, err := se.Load(key)
 	if err != nil {
 		return nil, err
@@ -183,7 +183,7 @@ func loadJSON[T any](se StorageEndpoint, key string) (*T, error) {
 	return &data, nil
 }
 
-func loadJSONByPrefix[T any](se StorageEndpoint, prefix string, limit int) ([]string, []*T, error) {
+func loadJSONByPrefix[T any](se *StorageEndpoint, prefix string, limit int) ([]string, []*T, error) {
 	prefixEnd := clientv3.GetPrefixRangeEnd(prefix)
 	keys, values, err := se.LoadRange(prefix, prefixEnd, limit)
 	if err != nil {
