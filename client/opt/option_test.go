@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+
 	"github.com/tikv/pd/client/pkg/utils/testutil"
 )
 
@@ -49,11 +50,9 @@ func TestDynamicOptionChange(t *testing.T) {
 	}
 	for _, interval := range validIntervals {
 		// Use a subtest for each valid interval.
-		t.Run("interval_"+interval.String(), func(t *testing.T) {
-			err := o.SetMaxTSOBatchWaitInterval(interval)
-			re.NoError(err, "expected interval %v to be set without error", interval)
-			re.Equal(interval, o.GetMaxTSOBatchWaitInterval(), "max TSO batch wait interval should be updated to %v", interval)
-		})
+		err := o.SetMaxTSOBatchWaitInterval(interval)
+		re.NoError(err, "expected interval %v to be set without error", interval)
+		re.Equal(interval, o.GetMaxTSOBatchWaitInterval(), "max TSO batch wait interval should be updated to %v", interval)
 	}
 
 	clearChannel(o.EnableTSOFollowerProxyCh)
