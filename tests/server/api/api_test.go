@@ -672,6 +672,42 @@ func (suite *redirectorTestSuite) TestAllowFollowerHandle() {
 	re.NoError(err)
 }
 
+func (suite *redirectorTestSuite) TestPing() {
+	re := suite.Require()
+	// Find a follower.
+	var follower *server.Server
+	leader := suite.cluster.GetLeaderServer()
+	for _, svr := range suite.cluster.GetServers() {
+		if svr != leader {
+			follower = svr.GetServer()
+			break
+		}
+	}
+
+	for _, svr := range suite.cluster.GetServers() {
+		if svr.GetServer() != follower {
+			svr.Stop()
+		}
+	}
+	addr := follower.GetAddr() + "/pd/api/v1/ping"
+	request, err := http.NewRequest(http.MethodGet, addr, http.NoBody)
+	// ping request should not be redirected.
+	request.Header.Add(apiutil.PDAllowFollowerHandleHeader, "true")
+	re.NoError(err)
+	resp, err := tests.TestDialClient.Do(request)
+	re.NoError(err)
+	defer resp.Body.Close()
+	re.Equal(http.StatusOK, resp.StatusCode)
+	_, err = io.ReadAll(resp.Body)
+	re.NoError(err)
+	for _, svr := range suite.cluster.GetServers() {
+		if svr.GetServer() != follower {
+			re.NoError(svr.Run())
+		}
+	}
+	re.NotEmpty(suite.cluster.WaitLeader())
+}
+
 func (suite *redirectorTestSuite) TestNotLeader() {
 	re := suite.Require()
 	// Find a follower.
