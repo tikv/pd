@@ -670,7 +670,17 @@ func (c *client) UpdateOption(option DynamicOption, value any) error {
 		if !ok {
 			return errors.New("[pd] invalid value type for TSOClientRPCConcurrency option, it should be int")
 		}
+<<<<<<< HEAD
 		c.option.setTSOClientRPCConcurrency(value)
+=======
+		c.inner.option.SetTSOClientRPCConcurrency(value)
+	case opt.EnableRouterClient:
+		enable, ok := value.(bool)
+		if !ok {
+			return errors.New("[pd] invalid value type for EnableRouterClient option, it should be bool")
+		}
+		c.inner.option.SetEnableRouterClient(enable)
+>>>>>>> 2bbeb9c971 (client: support dynamic start/stop of the router client (#9082))
 	default:
 		return errors.New("[pd] unsupported client option")
 	}
@@ -832,6 +842,7 @@ func (c *client) GetMinTS(ctx context.Context) (physical int64, logical int64, e
 	return minTS.Physical, tsoutil.AddLogical(minTS.Logical, 0, minTS.SuffixBits), nil
 }
 
+<<<<<<< HEAD
 func handleRegionResponse(res *pdpb.GetRegionResponse) *Region {
 	if res.Region == nil {
 		return nil
@@ -847,6 +858,12 @@ func handleRegionResponse(res *pdpb.GetRegionResponse) *Region {
 		r.DownPeers = append(r.DownPeers, s.Peer)
 	}
 	return r
+=======
+func (c *client) getRouterClient() *router.Cli {
+	c.inner.RLock()
+	defer c.inner.RUnlock()
+	return c.inner.routerClient
+>>>>>>> 2bbeb9c971 (client: support dynamic start/stop of the router client (#9082))
 }
 
 // GetRegionFromMember implements the RPCClient interface.

@@ -30,6 +30,7 @@ const (
 	defaultEnableTSOFollowerProxy                = false
 	defaultEnableFollowerHandle                  = false
 	defaultTSOClientRPCConcurrency               = 1
+	defaultEnableRouterClient                    = false
 )
 
 // DynamicOption is used to distinguish the dynamic option type.
@@ -46,6 +47,9 @@ const (
 	EnableFollowerHandle
 	// TSOClientRPCConcurrency controls the amount of ongoing TSO RPC requests at the same time in a single TSO client.
 	TSOClientRPCConcurrency
+	// EnableRouterClient is the router client option.
+	// It is stored as bool.
+	EnableRouterClient
 
 	dynamicOptionCount
 )
@@ -65,6 +69,7 @@ type option struct {
 	// Dynamic options.
 	dynamicOptions [dynamicOptionCount]atomic.Value
 
+<<<<<<< HEAD:client/option.go
 	enableTSOFollowerProxyCh chan struct{}
 }
 
@@ -75,12 +80,27 @@ func newOption() *option {
 		maxRetryTimes:            maxInitClusterRetries,
 		enableTSOFollowerProxyCh: make(chan struct{}, 1),
 		initMetrics:              true,
+=======
+	EnableTSOFollowerProxyCh chan struct{}
+	EnableRouterClientCh     chan struct{}
+}
+
+// NewOption creates a new PD client option with the default values set.
+func NewOption() *Option {
+	co := &Option{
+		Timeout:                  defaultPDTimeout,
+		MaxRetryTimes:            maxInitClusterRetries,
+		EnableTSOFollowerProxyCh: make(chan struct{}, 1),
+		EnableRouterClientCh:     make(chan struct{}, 1),
+		InitMetrics:              true,
+>>>>>>> 2bbeb9c971 (client: support dynamic start/stop of the router client (#9082)):client/opt/option.go
 	}
 
 	co.dynamicOptions[MaxTSOBatchWaitInterval].Store(defaultMaxTSOBatchWaitInterval)
 	co.dynamicOptions[EnableTSOFollowerProxy].Store(defaultEnableTSOFollowerProxy)
 	co.dynamicOptions[EnableFollowerHandle].Store(defaultEnableFollowerHandle)
 	co.dynamicOptions[TSOClientRPCConcurrency].Store(defaultTSOClientRPCConcurrency)
+	co.dynamicOptions[EnableRouterClient].Store(defaultEnableRouterClient)
 	return co
 }
 
@@ -90,6 +110,7 @@ func (o *option) setMaxTSOBatchWaitInterval(interval time.Duration) error {
 	if interval < 0 || interval > 10*time.Millisecond {
 		return errors.New("[pd] invalid max TSO batch wait interval, should be between 0 and 10ms")
 	}
+<<<<<<< HEAD:client/option.go
 	old := o.getMaxTSOBatchWaitInterval()
 	if interval != old {
 		o.dynamicOptions[MaxTSOBatchWaitInterval].Store(interval)
@@ -103,6 +124,15 @@ func (o *option) setEnableFollowerHandle(enable bool) {
 	if enable != old {
 		o.dynamicOptions[EnableFollowerHandle].Store(enable)
 	}
+=======
+	o.dynamicOptions[MaxTSOBatchWaitInterval].CompareAndSwap(o.GetMaxTSOBatchWaitInterval(), interval)
+	return nil
+}
+
+// SetEnableFollowerHandle set the Follower Handle option.
+func (o *Option) SetEnableFollowerHandle(enable bool) {
+	o.dynamicOptions[EnableFollowerHandle].CompareAndSwap(!enable, enable)
+>>>>>>> 2bbeb9c971 (client: support dynamic start/stop of the router client (#9082)):client/opt/option.go
 }
 
 // getMaxTSOBatchWaitInterval gets the Follower Handle enable option.
@@ -115,11 +145,17 @@ func (o *option) getMaxTSOBatchWaitInterval() time.Duration {
 	return o.dynamicOptions[MaxTSOBatchWaitInterval].Load().(time.Duration)
 }
 
+<<<<<<< HEAD:client/option.go
 // setEnableTSOFollowerProxy sets the TSO Follower Proxy option.
 func (o *option) setEnableTSOFollowerProxy(enable bool) {
 	old := o.getEnableTSOFollowerProxy()
 	if enable != old {
 		o.dynamicOptions[EnableTSOFollowerProxy].Store(enable)
+=======
+// SetEnableTSOFollowerProxy sets the TSO Follower Proxy option.
+func (o *Option) SetEnableTSOFollowerProxy(enable bool) {
+	if o.dynamicOptions[EnableTSOFollowerProxy].CompareAndSwap(!enable, enable) {
+>>>>>>> 2bbeb9c971 (client: support dynamic start/stop of the router client (#9082)):client/opt/option.go
 		select {
 		case o.enableTSOFollowerProxyCh <- struct{}{}:
 		default:
@@ -132,17 +168,109 @@ func (o *option) getEnableTSOFollowerProxy() bool {
 	return o.dynamicOptions[EnableTSOFollowerProxy].Load().(bool)
 }
 
+<<<<<<< HEAD:client/option.go
 func (o *option) setTSOClientRPCConcurrency(value int) {
 	old := o.getTSOClientRPCConcurrency()
 	if value != old {
 		o.dynamicOptions[TSOClientRPCConcurrency].Store(value)
 	}
+=======
+// SetTSOClientRPCConcurrency sets the TSO client RPC concurrency option.
+func (o *Option) SetTSOClientRPCConcurrency(value int) {
+	o.dynamicOptions[TSOClientRPCConcurrency].CompareAndSwap(o.GetTSOClientRPCConcurrency(), value)
+>>>>>>> 2bbeb9c971 (client: support dynamic start/stop of the router client (#9082)):client/opt/option.go
 }
 
 func (o *option) getTSOClientRPCConcurrency() int {
 	return o.dynamicOptions[TSOClientRPCConcurrency].Load().(int)
 }
 
+<<<<<<< HEAD:client/option.go
+=======
+// SetEnableRouterClient sets the router client option.
+func (o *Option) SetEnableRouterClient(enable bool) {
+	if o.dynamicOptions[EnableRouterClient].CompareAndSwap(!enable, enable) {
+		select {
+		case o.EnableRouterClientCh <- struct{}{}:
+		default:
+		}
+	}
+}
+
+// GetEnableRouterClient gets the router client option.
+func (o *Option) GetEnableRouterClient() bool {
+	return o.dynamicOptions[EnableRouterClient].Load().(bool)
+}
+
+// ClientOption configures client.
+type ClientOption func(*Option)
+
+// WithGRPCDialOptions configures the client with gRPC dial options.
+func WithGRPCDialOptions(opts ...grpc.DialOption) ClientOption {
+	return func(op *Option) {
+		op.GRPCDialOptions = append(op.GRPCDialOptions, opts...)
+	}
+}
+
+// WithCustomTimeoutOption configures the client with timeout option.
+func WithCustomTimeoutOption(timeout time.Duration) ClientOption {
+	return func(op *Option) {
+		op.Timeout = timeout
+	}
+}
+
+// WithForwardingOption configures the client with forwarding option.
+func WithForwardingOption(enableForwarding bool) ClientOption {
+	return func(op *Option) {
+		op.EnableForwarding = enableForwarding
+	}
+}
+
+// WithTSOServerProxyOption configures the client to use TSO server proxy,
+// i.e., the client will send TSO requests to the API leader (the TSO server
+// proxy) which will forward the requests to the TSO servers.
+func WithTSOServerProxyOption(useTSOServerProxy bool) ClientOption {
+	return func(op *Option) {
+		op.UseTSOServerProxy = useTSOServerProxy
+	}
+}
+
+// WithMaxErrorRetry configures the client max retry times when connect meets error.
+func WithMaxErrorRetry(count int) ClientOption {
+	return func(op *Option) {
+		op.MaxRetryTimes = count
+	}
+}
+
+// WithMetricsLabels configures the client with metrics labels.
+func WithMetricsLabels(labels prometheus.Labels) ClientOption {
+	return func(op *Option) {
+		op.MetricsLabels = labels
+	}
+}
+
+// WithInitMetricsOption configures the client with metrics labels.
+func WithInitMetricsOption(initMetrics bool) ClientOption {
+	return func(op *Option) {
+		op.InitMetrics = initMetrics
+	}
+}
+
+// WithBackoffer configures the client with backoffer.
+func WithBackoffer(bo *retry.Backoffer) ClientOption {
+	return func(op *Option) {
+		op.Backoffer = bo
+	}
+}
+
+// WithEnableRouterClient configures the client with router client option.
+func WithEnableRouterClient(enable bool) ClientOption {
+	return func(op *Option) {
+		op.SetEnableRouterClient(enable)
+	}
+}
+
+>>>>>>> 2bbeb9c971 (client: support dynamic start/stop of the router client (#9082)):client/opt/option.go
 // GetStoreOp represents available options when getting stores.
 type GetStoreOp struct {
 	excludeTombstone bool

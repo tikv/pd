@@ -22,7 +22,6 @@ import (
 	"math"
 	"os"
 	"path"
-	"reflect"
 	"sort"
 	"strconv"
 	"strings"
@@ -1275,6 +1274,7 @@ func bootstrapServer(re *require.Assertions, header *pdpb.RequestHeader, client 
 	re.Equal(pdpb.ErrorType_OK, resp.GetHeader().GetError().GetType())
 }
 
+<<<<<<< HEAD
 func (suite *clientTestSuite) TestGetRegion() {
 	re := suite.Require()
 	regionID := regionIDAllocator.alloc()
@@ -1386,6 +1386,10 @@ func (suite *clientTestSuite) TestGetPrevRegion() {
 			return r == nil
 		})
 	}
+=======
+func (suite *clientTestSuite) SetupTest() {
+	suite.grpcSvr.DirectlyGetRaftCluster().ResetRegionCache()
+>>>>>>> 2bbeb9c971 (client: support dynamic start/stop of the router client (#9082))
 }
 
 func (suite *clientTestSuite) TestScanRegions() {
@@ -1475,6 +1479,7 @@ func (suite *clientTestSuite) TestScanRegions() {
 	check([]byte{1}, []byte{6}, 2, regions[1:3])
 }
 
+<<<<<<< HEAD
 func (suite *clientTestSuite) TestGetRegionByID() {
 	re := suite.Require()
 	regionID := regionIDAllocator.alloc()
@@ -1505,6 +1510,8 @@ func (suite *clientTestSuite) TestGetRegionByID() {
 	})
 }
 
+=======
+>>>>>>> 2bbeb9c971 (client: support dynamic start/stop of the router client (#9082))
 func (suite *clientTestSuite) TestGetStore() {
 	re := suite.Require()
 	cluster := suite.srv.GetRaftCluster()
