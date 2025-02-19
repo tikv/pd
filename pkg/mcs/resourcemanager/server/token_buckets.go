@@ -213,20 +213,11 @@ func (gts *GroupTokenBucketState) balanceSlotTokens(
 		return
 	}
 	evenRatio := 1 / float64(len(gts.tokenSlots))
-	if getBurstableMode(settings) == rateControlled {
+	if getBurstableMode(settings) == rateControlled || getBurstableMode(settings) == unlimited {
 		for _, slot := range gts.tokenSlots {
 			slot.settings = &rmpb.TokenLimitSettings{
 				FillRate:   uint64(float64(settings.GetFillRate()) * evenRatio),
 				BurstLimit: settings.GetBurstLimit(),
-			}
-		}
-		return
-	}
-	if getBurstableMode(settings) == unlimited {
-		for _, slot := range gts.tokenSlots {
-			slot.settings = &rmpb.TokenLimitSettings{
-				FillRate:   unlimitedRate,
-				BurstLimit: unlimitedBurstLimit,
 			}
 		}
 		return
