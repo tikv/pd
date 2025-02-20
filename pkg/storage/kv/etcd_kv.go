@@ -331,7 +331,7 @@ func convertOps(ops []RawTxnOp) []clientv3.Op {
 			if op.EndKey == "\x00" {
 				opsList = append(opsList, clientv3.OpGet(op.Key, clientv3.WithPrefix(), clientv3.WithLimit(int64(op.Limit))))
 			} else {
-				opsList = append(opsList, clientv3.OpGet(op.EndKey, clientv3.WithRange(op.EndKey), clientv3.WithLimit(int64(op.Limit))))
+				opsList = append(opsList, clientv3.OpGet(op.Key, clientv3.WithRange(op.EndKey), clientv3.WithLimit(int64(op.Limit))))
 			}
 		default:
 			panic(fmt.Sprintf("unknown op type %v", op.OpType))
