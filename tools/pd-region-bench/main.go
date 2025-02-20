@@ -36,7 +36,7 @@ import (
 	pd "github.com/tikv/pd/client"
 	"github.com/tikv/pd/client/opt"
 	"github.com/tikv/pd/client/pkg/caller"
-	"github.com/tikv/pd/pkg/codec"
+	"github.com/tikv/pd/tools/utils"
 )
 
 const (
@@ -90,7 +90,7 @@ type benchmarkSuite struct {
 	ctx       context.Context
 	cancel    context.CancelFunc
 	clusterID uint64
-	regions   []*pdpb.RegionHeartbeatRequest
+	regions   *utils.Regions
 	wg        sync.WaitGroup
 	pdClients []pd.Client
 }
@@ -147,6 +147,16 @@ func version() string {
 }
 
 func (s *benchmarkSuite) prepare() {
+	pdCli := s.getPDClient()
+	log.Info("bootstrap cluster")
+	s.bootstrapCluster(s.ctx, pdCli)
+	log.Info("prepare stores")
+	s.prepareStores(s.ctx, pdCli)
+	log.Info("prepare regions")
+	s.prepareRegions(s.ctx, pdCli)
+}
+
+func (s *benchmarkSuite) getPDClient() pdpb.PDClient {
 	if len(s.pdClients) == 0 {
 		log.Fatal("no pd client initialized to prepare heartbeat stream")
 	}
@@ -158,129 +168,35 @@ func (s *benchmarkSuite) prepare() {
 	if conn == nil {
 		log.Fatal("got a nil grpc connection before creating heartbeat stream")
 	}
-	pdCli := pdpb.NewPDClient(conn)
-	log.Info("bootstrap cluster")
-	s.bootstrapCluster(s.ctx, pdCli)
-	log.Info("prepare stores")
-	s.prepareStores(s.ctx, pdCli)
-	log.Info("prepare regions")
-	s.prepareRegions(s.ctx, pdCli)
+	return pdpb.NewPDClient(conn)
 }
 
 func (s *benchmarkSuite) bootstrapCluster(ctx context.Context, cli pdpb.PDClient) {
-	cctx, cancel := context.WithCancel(ctx)
-	isBootstrapped, err := cli.IsBootstrapped(cctx, &pdpb.IsBootstrappedRequest{Header: s.header()})
-	cancel()
-	if err != nil {
-		log.Fatal("check if cluster has already bootstrapped failed", zap.Error(err))
-	}
-	if isBootstrapped.GetBootstrapped() {
-		log.Info("already bootstrapped")
-		return
-	}
-
-	store := &metapb.Store{
-		Id:      1,
-		Address: fmt.Sprintf("localhost:%d", 2),
-		Version: version(),
-	}
-	region := &metapb.Region{
-		Id:          1,
-		Peers:       []*metapb.Peer{{StoreId: 1, Id: 1}},
-		RegionEpoch: &metapb.RegionEpoch{ConfVer: 1, Version: 1},
-	}
-	req := &pdpb.BootstrapRequest{
-		Header: s.header(),
-		Store:  store,
-		Region: region,
-	}
-	cctx, cancel = context.WithCancel(ctx)
-	resp, err := cli.Bootstrap(cctx, req)
-	cancel()
-	if err != nil {
-		log.Fatal("failed to bootstrap the cluster", zap.Error(err))
-	}
-	if resp.GetHeader().GetError() != nil {
-		log.Fatal("failed to bootstrap the cluster", zap.String("err", resp.GetHeader().GetError().String()))
-	}
+	utils.BootstrapCluster(ctx, cli, s.header(), version())
 }
 
 func (s *benchmarkSuite) prepareStores(ctx context.Context, cli pdpb.PDClient) {
+	var stores []*metapb.Store
 	for i := 1; i <= 3; i++ {
 		storeID := uint64(i)
-		store := &metapb.Store{
+		stores = append(stores, &metapb.Store{
 			Id:      storeID,
 			Address: fmt.Sprintf("localhost:%d", storeID),
 			Version: version(),
-		}
-		cctx, cancel := context.WithCancel(ctx)
-		resp, err := cli.PutStore(cctx, &pdpb.PutStoreRequest{Header: s.header(), Store: store})
-		cancel()
-		if err != nil {
-			log.Fatal("failed to put store", zap.Uint64("store-id", storeID), zap.Error(err))
-		}
-		if resp.GetHeader().GetError() != nil {
-			log.Fatal("failed to put store", zap.Uint64("store-id", storeID), zap.String("err", resp.GetHeader().GetError().String()))
-		}
-
-		go func(ctx context.Context, storeID uint64) {
-			heartbeatTicker := time.NewTicker(10 * time.Second)
-			defer heartbeatTicker.Stop()
-			for {
-				select {
-				case <-heartbeatTicker.C:
-					cctx, cancel := context.WithCancel(ctx)
-					defer cancel()
-					cli.StoreHeartbeat(cctx, &pdpb.StoreHeartbeatRequest{
-						Header: s.header(),
-						Stats: &pdpb.StoreStats{
-							StoreId: storeID,
-						},
-					})
-				case <-ctx.Done():
-					return
-				}
-			}
-		}(ctx, storeID)
+		})
 	}
+	utils.PutStores(ctx, cli, s.header(), stores)
 }
 
 func (s *benchmarkSuite) prepareRegions(ctx context.Context, cli pdpb.PDClient) {
 	cctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	heartbeatStream := s.createHeartbeatStream(cctx, cli)
 	// Generate the regions info first.
-	s.regions = make([]*pdpb.RegionHeartbeatRequest, 0, *regionCount)
-	id := uint64(1)
-	for i := range *regionCount {
-		region := &pdpb.RegionHeartbeatRequest{
-			Header: s.header(),
-			Region: &metapb.Region{
-				Id:          id,
-				StartKey:    codec.GenerateTableKey(int64(i)),
-				EndKey:      codec.GenerateTableKey(int64(i + 1)),
-				RegionEpoch: &metapb.RegionEpoch{ConfVer: 2, Version: 2},
-			},
-		}
-		id += 1
-		// Specially handle the first and last region.
-		if i == 0 {
-			region.Region.StartKey = []byte("")
-		}
-		if i == *regionCount-1 {
-			region.Region.EndKey = []byte("")
-		}
-		peers := make([]*metapb.Peer, 0, 3)
-		for j := 1; j <= 3; j++ {
-			peers = append(peers, &metapb.Peer{Id: id, StoreId: uint64((i+j)%3 + 1)})
-			id += 1
-		}
-
-		region.Region.Peers = peers
-		region.Leader = peers[0]
-		s.regions = append(s.regions, region)
-		// Heartbeat the region.
+	s.regions = utils.NewRegions(*regionCount, 3, s.header())
+	// Heartbeat the region.
+	heartbeatStream := s.createHeartbeatStream(cctx, cli)
+	for _, region := range s.regions.Regions {
 		err := heartbeatStream.Send(region)
 		if err != nil {
 			log.Fatal("send region heartbeat request error", zap.Error(err))
@@ -343,7 +259,7 @@ func (s *benchmarkSuite) reqWorker(ctx context.Context, clientIdx int) {
 		}
 		durationSeed := r.Intn(100)
 		regionSeed := r.Intn(*regionCount)
-		regionReq := s.regions[regionSeed]
+		regionReq := s.regions.Regions[regionSeed]
 
 		// Wait for a random delay.
 		select {
