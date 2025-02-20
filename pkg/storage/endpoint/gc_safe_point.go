@@ -53,6 +53,23 @@ type GCBarrier struct {
 	KeyspaceID uint32
 }
 
+func NewGCBarrier(keyspaceID uint32, barrierID string, barrierTS uint64, expirationTime *time.Time) *GCBarrier {
+	// Round up the expirationTime.
+	if expirationTime != nil {
+		rounded := expirationTime.Truncate(time.Second)
+		if rounded.Before(*expirationTime) {
+			rounded = rounded.Add(time.Second)
+		}
+		*expirationTime = rounded
+	}
+	return &GCBarrier{
+		BarrierID:      barrierID,
+		BarrierTS:      barrierTS,
+		ExpirationTime: expirationTime,
+		KeyspaceID:     keyspaceID,
+	}
+}
+
 func gcBarrierFromServiceSafePoint(s *ServiceSafePoint) *GCBarrier {
 	res := &GCBarrier{
 		BarrierID:      s.ServiceID,
@@ -94,14 +111,24 @@ func (b *GCBarrier) String() string {
 		b.BarrierID, b.BarrierTS, expirationTime, b.KeyspaceID)
 }
 
-// GCStateStorage is a stateless wrapper over StorageEndpoint that provides methods for reading/writing GC state.
-// As a explicit wrapper, it avoids misuse on GC related methods on StorageEndpoint.
-type GCStateStorage struct {
+type GCStateStorage interface {
+	GetGCStateProvider() GCStateProvider
+}
+
+func (se *StorageEndpoint) GetGCStateProvider() GCStateProvider {
+	return newGCStateProvider(se)
+}
+
+// GCStateProvider is a stateless wrapper over StorageEndpoint that provides methods for reading/writing GC states.
+// It can be dangerous to misuse GC related operations. As an explicit wrapper, it hides the GC related methods away
+// from the StorageEndpoint type and the Storage interface, making it less likely to be misused unintentionally when
+// the Storage or StorageEndpoint is used in other context.
+type GCStateProvider struct {
 	storage *StorageEndpoint
 }
 
-func NewGCStateStorage(storage *StorageEndpoint) GCStateStorage {
-	return GCStateStorage{storage: storage}
+func newGCStateProvider(storage *StorageEndpoint) GCStateProvider {
+	return GCStateProvider{storage: storage}
 }
 
 type GCStateWriteBatch struct {
@@ -109,15 +136,15 @@ type GCStateWriteBatch struct {
 }
 
 // LoadGCSafePoint loads current GC safe point from storage.
-func (s GCStateStorage) LoadGCSafePoint(keyspaceID uint32) (uint64, error) {
+func (p GCStateProvider) LoadGCSafePoint(keyspaceID uint32) (uint64, error) {
 	if keyspaceID == constant.NullKeyspaceID {
-		return s.loadGlobalGCSafePoint()
+		return p.loadGlobalGCSafePoint()
 	}
-	return s.loadKeyspaceGCSafePoint(keyspaceID)
+	return p.loadKeyspaceGCSafePoint(keyspaceID)
 }
 
-func (s GCStateStorage) loadGlobalGCSafePoint() (uint64, error) {
-	value, err := s.storage.Load(keypath.GCSafePointPath())
+func (p GCStateProvider) loadGlobalGCSafePoint() (uint64, error) {
+	value, err := p.storage.Load(keypath.GCSafePointPath())
 	if err != nil || value == "" {
 		return 0, err
 	}
@@ -133,9 +160,9 @@ type keyspaceGCSafePoint struct {
 	SafePoint  uint64 `json:"safe_point"`
 }
 
-func (s GCStateStorage) loadKeyspaceGCSafePoint(keyspaceID uint32) (uint64, error) {
+func (p GCStateProvider) loadKeyspaceGCSafePoint(keyspaceID uint32) (uint64, error) {
 	key := keypath.KeyspaceGCSafePointPath(keyspaceID)
-	value, err := s.storage.Load(key)
+	value, err := p.storage.Load(key)
 	if err != nil {
 		return 0, err
 	}
@@ -151,13 +178,13 @@ func (s GCStateStorage) loadKeyspaceGCSafePoint(keyspaceID uint32) (uint64, erro
 	return gcSafePoint.SafePoint, nil
 }
 
-func (s GCStateStorage) LoadTxnSafePoint(keyspaceID uint32) (uint64, error) {
+func (p GCStateProvider) LoadTxnSafePoint(keyspaceID uint32) (uint64, error) {
 	key := keypath.TxnSafePointAbsolutePath()
 	if keyspaceID != constant.NullKeyspaceID {
 		key = keypath.KeyspaceTxnSafePointAbsolutePath(keyspaceID)
 	}
 
-	value, err := /* load raw key from s.storage */ s.storage.Load(key)
+	value, err := /* load raw key from p.storage */ p.storage.Load(key)
 	if err != nil || value == "" {
 		return 0, err
 	}
@@ -168,22 +195,24 @@ func (s GCStateStorage) LoadTxnSafePoint(keyspaceID uint32) (uint64, error) {
 	return txnSafePoint, err
 }
 
-func loadJSON[T any](se *StorageEndpoint, key string) (*T, error) {
+func loadJSON[T any](se *StorageEndpoint, key string) (T, error) {
 	value, err := se.Load(key)
 	if err != nil {
-		return nil, err
+		var empty T
+		return empty, err
 	}
 	if value == "" {
-		return nil, nil
+		var empty T
+		return empty, nil
 	}
 	var data T
 	if err = json.Unmarshal([]byte(value), &data); err != nil {
-		return nil, errs.ErrJSONUnmarshal.Wrap(err).GenWithStackByArgs()
+		return data, errs.ErrJSONUnmarshal.Wrap(err).GenWithStackByArgs()
 	}
-	return &data, nil
+	return data, nil
 }
 
-func loadJSONByPrefix[T any](se *StorageEndpoint, prefix string, limit int) ([]string, []*T, error) {
+func loadJSONByPrefix[T any](se *StorageEndpoint, prefix string, limit int) ([]string, []T, error) {
 	prefixEnd := clientv3.GetPrefixRangeEnd(prefix)
 	keys, values, err := se.LoadRange(prefix, prefixEnd, limit)
 	if err != nil {
@@ -193,38 +222,38 @@ func loadJSONByPrefix[T any](se *StorageEndpoint, prefix string, limit int) ([]s
 		return nil, nil, nil
 	}
 
-	data := make([]*T, 0, len(keys))
+	data := make([]T, 0, len(keys))
 	for i := range keys {
 		var item T
 		if err := json.Unmarshal([]byte(values[i]), &item); err != nil {
 			return nil, nil, errs.ErrJSONUnmarshal.Wrap(err).GenWithStackByArgs()
 		}
-		data = append(data, &item)
+		data = append(data, item)
 	}
 	return keys, data, nil
 }
 
-func (s GCStateStorage) LoadGCBarrier(keyspaceID uint32, barrierID string) (*GCBarrier, error) {
+func (p GCStateProvider) LoadGCBarrier(keyspaceID uint32, barrierID string) (*GCBarrier, error) {
 	prefix := keypath.GCBarrierPrefix()
 	if keyspaceID != constant.NullKeyspaceID {
 		prefix = keypath.KeyspaceGCBarrierPrefix(keyspaceID)
 	}
 	key := path.Join(prefix, barrierID)
 	// GCBarrier is stored in ServiceSafePoint format for compatibility.
-	serviceSafePoint, err := loadJSON[ServiceSafePoint](s.storage, key)
+	serviceSafePoint, err := loadJSON[*ServiceSafePoint](p.storage, key)
 	if err != nil {
 		return nil, err
 	}
 	return gcBarrierFromServiceSafePoint(serviceSafePoint), nil
 }
 
-func (s GCStateStorage) LoadAllGCBarriers(keyspaceID uint32) ([]*GCBarrier, error) {
+func (p GCStateProvider) LoadAllGCBarriers(keyspaceID uint32) ([]*GCBarrier, error) {
 	prefix := keypath.GCBarrierPrefix() + "/"
 	if keyspaceID != constant.NullKeyspaceID {
 		prefix = keypath.KeyspaceGCBarrierPrefix(keyspaceID) + "/"
 	}
 	// TODO: Limit the count for each call.
-	_, serviceSafePoints, err := loadJSONByPrefix[ServiceSafePoint](s.storage, prefix, 0)
+	_, serviceSafePoints, err := loadJSONByPrefix[*ServiceSafePoint](p.storage, prefix, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -238,7 +267,7 @@ func (s GCStateStorage) LoadAllGCBarriers(keyspaceID uint32) ([]*GCBarrier, erro
 	return barriers, nil
 }
 
-func (s GCStateStorage) LoadTiDBMinStartTS(keyspaceID uint32) (string, uint64, error) {
+func (p GCStateProvider) LoadTiDBMinStartTS(keyspaceID uint32) (string, uint64, error) {
 	prefix := keypath.CompatibleTiDBMinStartTSAbsolutePath() + "/"
 	if keyspaceID != constant.NullKeyspaceID {
 		prefix = keypath.CompatibleKeyspaceTiDBMinStartTSAbsolutePath(keyspaceID) + "/"
@@ -246,7 +275,7 @@ func (s GCStateStorage) LoadTiDBMinStartTS(keyspaceID uint32) (string, uint64, e
 	prefixEnd := clientv3.GetPrefixRangeEnd(prefix)
 
 	// TODO: Limit the count for each call.
-	keys, values, err := s.storage.LoadRange(prefix, prefixEnd, 0)
+	keys, values, err := p.storage.LoadRange(prefix, prefixEnd, 0)
 	if err != nil {
 		return "", 0, err
 	}
@@ -270,31 +299,32 @@ func (s GCStateStorage) LoadTiDBMinStartTS(keyspaceID uint32) (string, uint64, e
 	return minKey, minMinStartTS, nil
 }
 
-func (s GCStateStorage) RunInGCMetaTransaction(f func(wb *GCStateWriteBatch) error) error {
+func (p GCStateProvider) RunInGCMetaTransaction(f func(wb *GCStateWriteBatch) error) error {
 	revisionKey := keypath.GCMetaRevisionPath()
-	currentRevision, err := s.storage.Load(revisionKey)
+	currentRevision, err := p.storage.Load(revisionKey)
 	if err != nil {
-		return err
+		return errors.AddStack(err)
 	}
 	condition := kv.RawTxnCondition{
 		Key:     revisionKey,
 		CmpType: kv.RawTxnCmpNotExists,
 	}
-	if currentRevision == "" {
+	var currentRevisionValue uint64
+	if currentRevision != "" {
 		condition.CmpType = kv.RawTxnCmpEqual
 		condition.Value = currentRevision
+		currentRevisionValue, err = strconv.ParseUint(currentRevision, 10, 64)
 	}
 
-	currentRevisionValue, err := strconv.ParseUint(currentRevision, 10, 64)
 	if err != nil {
-		return err
+		return errors.AddStack(err)
 	}
 	nextRevision := fmt.Sprintf("%d", currentRevisionValue+1)
 
 	wb := GCStateWriteBatch{}
 	err = f(&wb)
 	if err != nil {
-		return err
+		return errors.AddStack(err)
 	}
 
 	ops := wb.ops
@@ -304,10 +334,10 @@ func (s GCStateStorage) RunInGCMetaTransaction(f func(wb *GCStateWriteBatch) err
 		Value:  nextRevision,
 	})
 
-	txn := s.storage.CreateRawTxn()
+	txn := p.storage.CreateRawTxn()
 	result, err := txn.If(condition).Then(ops...).Commit()
 	if err != nil {
-		return err
+		return errors.AddStack(err)
 	}
 	if !result.Succeeded {
 		return errs.ErrEtcdTxnConflict.GenWithStackByArgs()
@@ -391,31 +421,21 @@ func (s GCStateStorage) RunInGCMetaTransaction(f func(wb *GCStateWriteBatch) err
 //	}
 //	return ssp, nil
 //}
-//
-//// LoadAllServiceGCSafePoints returns all services GC safepoints
-//func (se *StorageEndpoint) LoadAllServiceGCSafePoints() ([]*ServiceSafePoint, error) {
-//	prefix := keypath.GCSafePointServicePrefixPath()
-//	prefixEnd := clientv3.GetPrefixRangeEnd(prefix)
-//	keys, values, err := se.LoadRange(prefix, prefixEnd, 0)
-//	if err != nil {
-//		return nil, err
-//	}
-//	if len(keys) == 0 {
-//		return []*ServiceSafePoint{}, nil
-//	}
-//
-//	ssps := make([]*ServiceSafePoint, 0, len(keys))
-//	for i := range keys {
-//		ssp := &ServiceSafePoint{}
-//		if err := json.Unmarshal([]byte(values[i]), ssp); err != nil {
-//			return nil, err
-//		}
-//		ssps = append(ssps, ssp)
-//	}
-//
-//	return ssps, nil
-//}
-//
+
+// CompatibleLoadAllServiceGCSafePoints returns all services GC safe points with their etcd key.
+func (p GCStateProvider) CompatibleLoadAllServiceGCSafePoints() ([]string, []*ServiceSafePoint, error) {
+	prefix := keypath.GCBarrierPrefix()
+	keys, ssps, err := loadJSONByPrefix[*ServiceSafePoint](p.storage, prefix, 0)
+	if err != nil {
+		return nil, nil, err
+	}
+	if len(keys) == 0 {
+		return []string{}, []*ServiceSafePoint{}, nil
+	}
+
+	return keys, ssps, nil
+}
+
 //// SaveServiceGCSafePoint saves a GC safepoint for the service
 //func (se *StorageEndpoint) SaveServiceGCSafePoint(ssp *ServiceSafePoint) error {
 //	if ssp.ServiceID == "" {

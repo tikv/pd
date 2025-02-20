@@ -251,6 +251,11 @@ func GCBarrierPrefix() string {
 	return gcBarrierPrefix
 }
 
+func ServiceGCSafePointPrefix() string {
+	// The service safe points (which is deprecated and replaced by GC barriers) shares the same data with GC barriers.
+	return GCBarrierPrefix()
+}
+
 func KeyspaceGCBarrierPrefix(keyspaceID uint32) string {
 	return fmt.Sprintf(keyspaceGcBarrierPrefix, EncodeKeyspaceID(keyspaceID))
 }

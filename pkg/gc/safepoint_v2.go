@@ -51,7 +51,7 @@ type SafePointV2Manager struct {
 	// v2Storage is the storage GCSafePointV2 and ServiceSafePointV2.
 	v2Storage endpoint.SafePointV2Storage
 	// v1Storage is the storage for v1 format GCSafePoint and ServiceGCSafePoint, it's used during pd update.
-	v1Storage endpoint.GCStateStorage
+	v1Storage endpoint.GCStateProvider
 }
 
 // NewSafePointManagerV2 returns a new SafePointV2Manager.
@@ -59,7 +59,7 @@ func NewSafePointManagerV2(
 	ctx context.Context,
 	keyspaceStore endpoint.KeyspaceStorage,
 	v2Storage endpoint.SafePointV2Storage,
-	v1Storage endpoint.GCStateStorage,
+	v1Storage endpoint.GCStateProvider,
 ) *SafePointV2Manager {
 	return &SafePointV2Manager{
 		ctx:             ctx,

@@ -38,13 +38,13 @@ var blockServiceSafepointErrmsg = "don't allow update service safe point v1."
 // GCStateManager is the manager for safePoint of GC and services.
 type GCStateManager struct {
 	lock            syncutil.RWMutex
-	gcMetaStorage   endpoint.GCStateStorage
+	gcMetaStorage   endpoint.GCStateProvider
 	cfg             config.PDServerConfig
 	keyspaceManager keyspace.Manager
 }
 
 // NewGCStateManager creates a GCStateManager of GC and services.
-func NewGCStateManager(store endpoint.GCStateStorage, cfg config.PDServerConfig) *GCStateManager {
+func NewGCStateManager(store endpoint.GCStateProvider, cfg config.PDServerConfig) *GCStateManager {
 	return &GCStateManager{gcMetaStorage: store, cfg: cfg}
 }
 

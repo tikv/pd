@@ -21,6 +21,7 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/unrolled/render"
 
+	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/server"
 )
@@ -53,13 +54,13 @@ type ListServiceGCSafepoint struct {
 // @Failure  500  {string}  string  "PD server failed to proceed the request."
 // @Router   /gc/safepoint [get]
 func (h *serviceGCSafepointHandler) GetGCSafePoint(w http.ResponseWriter, _ *http.Request) {
-	storage := h.svr.GetStorage()
-	gcSafepoint, err := storage.LoadGCSafePoint()
+	provider := h.svr.GetStorage().GetGCStateProvider()
+	gcSafePoint, err := provider.LoadGCSafePoint(constant.NullKeyspaceID)
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	ssps, err := storage.LoadAllServiceGCSafePoints()
+	_, ssps, err := provider.CompatibleLoadAllServiceGCSafePoints()
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
@@ -76,7 +77,7 @@ func (h *serviceGCSafepointHandler) GetGCSafePoint(w http.ResponseWriter, _ *htt
 		minServiceGcSafepoint = minSSp.SafePoint
 	}
 	list := ListServiceGCSafepoint{
-		GCSafePoint:           gcSafepoint,
+		GCSafePoint:           gcSafePoint,
 		ServiceGCSafepoints:   ssps,
 		MinServiceGcSafepoint: minServiceGcSafepoint,
 	}
@@ -92,9 +93,14 @@ func (h *serviceGCSafepointHandler) GetGCSafePoint(w http.ResponseWriter, _ *htt
 // @Router   /gc/safepoint/{service_id} [delete]
 // @Tags     rule
 func (h *serviceGCSafepointHandler) DeleteGCSafePoint(w http.ResponseWriter, r *http.Request) {
-	storage := h.svr.GetStorage()
+	provider := h.svr.GetStorage().GetGCStateProvider()
 	serviceID := mux.Vars(r)["service_id"]
-	err := storage.RemoveServiceGCSafePoint(serviceID)
+	err := provider.RunInGCMetaTransaction(func(wb *endpoint.GCStateWriteBatch) error {
+		// As GC barriers and service safe points shares the same data, deleting GC barriers acts the same as deleting
+		// service safe points.
+		err := wb.DeleteGCBarrier(constant.NullKeyspaceID, serviceID)
+		return err
+	})
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return

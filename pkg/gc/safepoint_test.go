@@ -31,21 +31,21 @@ import (
 	"github.com/tikv/pd/server/config"
 )
 
-func newGCStorage(t *testing.T) (storage endpoint.GCStateStorage, clean func()) {
+func newGCStateProvider(t *testing.T) (provider endpoint.GCStateProvider, clean func()) {
 	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1)
 	rootPath := path.Join("/pd", strconv.FormatUint(100, 10))
 	kvBase := kv.NewEtcdKVBase(client, rootPath)
 
 	s := endpoint.NewStorageEndpoint(kvBase, nil)
 
-	return endpoint.NewGCStateStorage(s), clean
+	return s.GetGCStateProvider(), clean
 }
 
 func testGCSafePointUpdateSequentiallyImpl(t *testing.T,
 	loadFunc func(m *GCStateManager) (uint64, error),
 	advanceFunc func(m *GCStateManager, target uint64) (uint64, uint64, error)) {
 
-	storage, clean := newGCStorage(t)
+	storage, clean := newGCStateProvider(t)
 	defer clean()
 	gcStateManager := NewGCStateManager(storage, config.PDServerConfig{})
 	re := require.New(t)
@@ -101,7 +101,7 @@ func TestGCSafePointUpdateSequentially(t *testing.T) {
 }
 
 func TestGCSafePointUpdateConcurrently(t *testing.T) {
-	storage, clean := newGCStorage(t)
+	storage, clean := newGCStateProvider(t)
 	defer clean()
 	gcSafePointManager := NewGCStateManager(storage, config.PDServerConfig{})
 	maxSafePoint := uint64(1000)
@@ -132,7 +132,7 @@ func TestGCSafePointUpdateConcurrently(t *testing.T) {
 }
 
 func TestServiceGCSafePointUpdate(t *testing.T) {
-	storage, clean := newGCStorage(t)
+	storage, clean := newGCStateProvider(t)
 	defer clean()
 	manager := NewGCStateManager(storage, config.PDServerConfig{})
 

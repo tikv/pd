@@ -40,6 +40,7 @@ type Storage interface {
 	endpoint.MetaStorage
 	endpoint.RuleStorage
 	endpoint.ReplicationStatusStorage
+	endpoint.GCStateStorage
 	endpoint.MinResolvedTSStorage
 	endpoint.ExternalTSStorage
 	endpoint.SafePointV2Storage
