@@ -19,6 +19,9 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+
+	"github.com/pingcap/log"
+	"go.uber.org/zap"
 )
 
 const physicalShiftBits = 18
@@ -35,6 +38,7 @@ func ExtractPhysical(ts uint64) int64 {
 }
 
 func runCommand(name string, args ...string) error {
+	log.Info("Run command", zap.String("command", name), zap.Strings("args", args))
 	cmd := exec.Command(name, args...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
