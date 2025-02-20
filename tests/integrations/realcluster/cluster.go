@@ -25,6 +25,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+	"github.com/tikv/pd/pkg/utils/logutil"
 	"go.uber.org/zap"
 
 	"github.com/pingcap/log"
@@ -86,9 +87,6 @@ const (
 	defaultTiDBCount    = 1
 	defaultPDCount      = 3
 	defaultTiFlashCount = 1
-	maxRetries          = 3
-	retryInterval       = 5 * time.Second
-	deployTimeout       = 5 * time.Minute
 )
 
 func isProcessRunning(pid int) bool {
@@ -149,7 +147,6 @@ func (c *cluster) stop() {
 func (c *cluster) deploy() {
 	re := c.re
 	curPath, err := os.Getwd()
-	log.Info(curPath)
 	re.NoError(err)
 	re.NoError(os.Chdir("../../.."))
 
@@ -160,7 +157,7 @@ func (c *cluster) deploy() {
 			"./tests/integrations/realcluster/download_integration_test_binaries.sh"))
 	}
 	if !fileExists("bin") || !fileExists("bin/pd-server") {
-		log.Info("complie pd binaries...")
+		log.Info("compile pd binaries...")
 		re.NoError(runCommand("make", "pd-server"))
 	}
 
@@ -170,6 +167,7 @@ func (c *cluster) deploy() {
 
 	// nolint:errcheck
 	go func() {
+		defer logutil.LogPanic()
 		playgroundOpts := []string{
 			fmt.Sprintf("--kv %d", defaultTiKVCount),
 			fmt.Sprintf("--tiflash %d", defaultTiFlashCount),
