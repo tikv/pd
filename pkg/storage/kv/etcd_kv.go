@@ -317,7 +317,7 @@ func (l *rawTxnWrapper) If(conditions ...RawTxnCondition) RawTxn {
 	return l
 }
 
-func (l *rawTxnWrapper) convertOps(ops []RawTxnOp) []clientv3.Op {
+func convertOps(ops []RawTxnOp) []clientv3.Op {
 	opsList := make([]clientv3.Op, 0, len(ops))
 	for _, op := range ops {
 		switch op.OpType {
@@ -343,14 +343,14 @@ func (l *rawTxnWrapper) convertOps(ops []RawTxnOp) []clientv3.Op {
 // Then implements RawTxn interface for adding operations that need to be executed when the condition passes to
 // the transaction.
 func (l *rawTxnWrapper) Then(ops ...RawTxnOp) RawTxn {
-	l.inner = l.inner.Then(l.convertOps(ops)...)
+	l.inner = l.inner.Then(convertOps(ops)...)
 	return l
 }
 
 // Else implements RawTxn interface for adding operations that need to be executed when the condition doesn't pass
 // to the transaction.
 func (l *rawTxnWrapper) Else(ops ...RawTxnOp) RawTxn {
-	l.inner = l.inner.Else(l.convertOps(ops)...)
+	l.inner = l.inner.Else(convertOps(ops)...)
 	return l
 }
 
