@@ -143,12 +143,13 @@ func (c *cluster) stop() {
 			_ = syscall.Kill(pid, syscall.SIGKILL)
 		}
 	}
-	log.Info("cluster destroyed", zap.String("tag", c.tag))
+	log.Info("cluster stopped", zap.String("tag", c.tag))
 }
 
 func (c *cluster) deploy() {
 	re := c.re
 	curPath, err := os.Getwd()
+	log.Info(curPath)
 	re.NoError(err)
 	re.NoError(os.Chdir("../../.."))
 
@@ -218,18 +219,13 @@ func (c *cluster) collectPids() error {
 
 func (c *cluster) waitReady() {
 	re := c.re
-	const (
-		interval = 5
-		maxTimes = 20
-	)
 	log.Info("start to wait TiUP ready", zap.String("tag", c.tag))
-	timeout := time.After(time.Duration(maxTimes*interval) * time.Second)
-	ticker := time.NewTicker(time.Duration(interval) * time.Second)
+	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 
-	for i := range maxTimes {
+	for {
 		select {
-		case <-timeout:
+		case <-time.After(100 * time.Second):
 			re.FailNowf("TiUP is not ready after timeout, tag: %s", c.tag)
 		case <-ticker.C:
 			log.Info("check TiUP ready", zap.String("tag", c.tag))
@@ -240,11 +236,9 @@ func (c *cluster) waitReady() {
 				return
 			}
 			log.Info(output)
-			log.Info("TiUP is not ready, will retry", zap.Int("retry times", i),
-				zap.String("tag", c.tag), zap.Error(err))
+			log.Info("TiUP is not ready, will retry", zap.String("tag", c.tag), zap.Error(err))
 		}
 	}
-	re.FailNowf("TiUP is not ready after max retries, tag: %s", c.tag)
 }
 
 func buildBinPathsOpts(ms bool) string {
