@@ -48,7 +48,8 @@ func (s *clusterSuite) SetupSuite() {
 	re.NoError(err)
 
 	for _, match := range matches {
-		re.NoError(runCommand("rm", "-rf", match))
+		_, err := runCommandWithOutput(fmt.Sprintf("rm -rf %s", match))
+		re.NoError(err)
 	}
 
 	s.cluster = newCluster(re, s.tag(), dataDir, s.mode)
@@ -153,12 +154,13 @@ func (c *cluster) deploy() {
 	if !fileExists("third_bin") || !fileExists("third_bin/tikv-server") || !fileExists("third_bin/tidb-server") || !fileExists("third_bin/tiflash") {
 		log.Info("downloading binaries...")
 		log.Info("this may take a few minutes, you can also download them manually and put them in the bin directory.")
-		re.NoError(runCommand("sh",
-			"./tests/integrations/realcluster/download_integration_test_binaries.sh"))
+		_, err := runCommandWithOutput("./tests/integrations/realcluster/download_integration_test_binaries.sh")
+		re.NoError(err)
 	}
 	if !fileExists("bin") || !fileExists("bin/pd-server") {
 		log.Info("compile pd binaries...")
-		re.NoError(runCommand("make", "pd-server"))
+		_, err := runCommandWithOutput("make pd-server")
+		re.NoError(err)
 	}
 
 	if !fileExists(playgroundLogDir) {
@@ -191,8 +193,8 @@ func (c *cluster) deploy() {
 			buildBinPathsOpts(c.mode == "ms"),
 			filepath.Join(playgroundLogDir, c.tag+".log"),
 		)
-
-		re.NoError(runCommand("sh", "-c", cmd))
+		_, err := runCommandWithOutput(cmd)
+		re.NoError(err)
 	}()
 
 	// Avoid to change the dir before execute `tiup playground`.
