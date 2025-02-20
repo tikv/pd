@@ -20,8 +20,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pingcap/log"
 	"go.uber.org/zap"
+
+	"github.com/pingcap/log"
 )
 
 const physicalShiftBits = 18
