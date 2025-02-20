@@ -421,6 +421,11 @@ error = '''
 internal etcd transaction error occurred
 '''
 
+["PD:etcd:ErrEtcdTxnResponse"]
+error = '''
+etcd transaction returned invalid response: %v
+'''
+
 ["PD:etcd:ErrEtcdURLMap"]
 error = '''
 etcd url map error
