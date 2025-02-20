@@ -62,7 +62,7 @@ kill_cluster:
 	fi
 
 test:
-	CGO_ENABLED=1 go test ./... -v -tags deadlock -race -cover || (\
+	CGO_ENABLED=1 go test ./... -v -tags deadlock -race -cover -timeout 20m || (\
 	echo "The following is pd-0 log" ; \
 	cat ~/.tiup/data/pd_real_cluster_test/pd-0/pd.log ; \
 	echo "The following is pd-1 log" ; \
