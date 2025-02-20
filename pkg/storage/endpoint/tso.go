@@ -82,7 +82,7 @@ func (se *StorageEndpoint) SaveTimestamp(groupID uint32, ts time.Time) error {
 		if value != "" {
 			previousTS, err = typeutil.ParseTimestamp([]byte(value))
 			if err != nil {
-				log.Error("parse timestamp failed", zap.Uint32("group id", groupID), zap.String("value", value), zap.Error(err))
+				log.Error("parse timestamp failed", zap.Uint32("group-id", groupID), zap.String("value", value), zap.Error(err))
 				return err
 			}
 		}
