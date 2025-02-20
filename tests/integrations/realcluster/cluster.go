@@ -25,8 +25,9 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
-	"github.com/tikv/pd/pkg/utils/logutil"
 	"go.uber.org/zap"
+
+	"github.com/tikv/pd/pkg/utils/logutil"
 
 	"github.com/pingcap/log"
 )

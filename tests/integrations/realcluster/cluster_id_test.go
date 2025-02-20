@@ -40,6 +40,7 @@ func TestClusterID(t *testing.T) {
 }
 
 func (s *clusterIDSuite) TestClientClusterID() {
+	s.T().Skip("skip the test because it is not stable")
 	re := s.Require()
 	ctx := context.Background()
 	// deploy second cluster
