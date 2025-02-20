@@ -35,36 +35,6 @@ func TestRegionPath(t *testing.T) {
 	}
 }
 
-// func regionPath(regionID uint64) string {
-// 	var buf strings.Builder
-// 	buf.Grow(len(regionPathPrefix) + 1 + keyLen) // Preallocate memory
-
-// 	buf.WriteString(regionPathPrefix)
-// 	buf.WriteString("/")
-// 	s := strconv.FormatUint(regionID, 10)
-// 	b := make([]byte, keyLen)
-// 	copy(b, s)
-// 	if len(s) < keyLen {
-// 		diff := keyLen - len(s)
-// 		copy(b[diff:], s)
-// 		for i := range diff {
-// 			b[i] = '0'
-// 		}
-// 	} else if len(s) > keyLen {
-// 		copy(b, s[len(s)-keyLen:])
-// 	}
-// 	buf.Write(b)
-
-// 	return buf.String()
-// }
-// func BenchmarkRegionPathOld(b *testing.B) {
-// 	for i := 0; i < b.N; i++ {
-// 		_ = path.Join("/pd/cluster_id", regionPath(uint64(i)))
-// 	}
-// }
-// BenchmarkRegionPathOld-8   	  499732	      2281 ns/op	     143 B/op	       3 allocs/op
-// BenchmarkRegionPath-8      	  507408	      2244 ns/op	     111 B/op	       2 allocs/op
-
 func BenchmarkRegionPath(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		_ = RegionPath(uint64(i))
