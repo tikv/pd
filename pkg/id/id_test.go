@@ -65,10 +65,10 @@ func TestMultipleAllocator(t *testing.T) {
 
 // testAllocator sequentially updates given allocator and check if values are expected.
 func testAllocator(re *require.Assertions, allocator Allocator) {
-	startID, err := allocator.Alloc()
+	startID, _, err := allocator.Alloc(1)
 	re.NoError(err)
 	for i := startID + 1; i < startID+step*20; i++ {
-		id, err := allocator.Alloc()
+		id, _, err := allocator.Alloc(1)
 		re.NoError(err)
 		re.Equal(i, id)
 	}

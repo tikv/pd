@@ -683,7 +683,7 @@ func (manager *Manager) LoadRangeKeyspace(startID uint32, limit int) ([]*keyspac
 
 // allocID allocate a new keyspace id.
 func (manager *Manager) allocID() (uint32, error) {
-	id64, err := manager.idAllocator.Alloc()
+	id64, _, err := manager.idAllocator.Alloc(1)
 	if err != nil {
 		return 0, err
 	}

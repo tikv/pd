@@ -675,18 +675,26 @@ func (s *GrpcServer) AllocID(ctx context.Context, request *pdpb.AllocIDRequest) 
 		return rsp.(*pdpb.AllocIDResponse), err
 	}
 
+	reqCount := uint32(1)
+	if request.GetCount() != 0 {
+		reqCount = request.GetCount()
+	}
 	// We can use an allocator for all types ID allocation.
-	id, err := s.idAllocator.Alloc()
+	id, count, err := s.idAllocator.Alloc(reqCount)
 	if err != nil {
 		return &pdpb.AllocIDResponse{
 			Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
 		}, nil
 	}
 
-	return &pdpb.AllocIDResponse{
+	resp := &pdpb.AllocIDResponse{
 		Header: wrapHeader(),
 		Id:     id,
-	}, nil
+	}
+	if count > 1 {
+		resp.Count = count
+	}
+	return resp, nil
 }
 
 // IsSnapshotRecovering implements gRPC PDServer.

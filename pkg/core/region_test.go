@@ -839,7 +839,7 @@ func newRegionInfoIDRandom(idAllocator id.Allocator) *RegionInfo {
 	// Randomly select a peer as the leader.
 	leaderIdx := mrand.Intn(peerNum)
 	for i := range peerNum {
-		id, _ := idAllocator.Alloc()
+		id, _, _ := idAllocator.Alloc(1)
 		// Randomly distribute the peers to different stores.
 		p := &metapb.Peer{Id: id, StoreId: uint64(mrand.Intn(storeNum) + 1)}
 		if i == leaderIdx {
@@ -847,7 +847,7 @@ func newRegionInfoIDRandom(idAllocator id.Allocator) *RegionInfo {
 		}
 		peers = append(peers, p)
 	}
-	regionID, _ := idAllocator.Alloc()
+	regionID, _, _ := idAllocator.Alloc(1)
 	return NewRegionInfo(
 		&metapb.Region{
 			Id:       regionID,

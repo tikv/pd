@@ -89,14 +89,14 @@ func (c *RaftCluster) HandleAskSplit(request *pdpb.AskSplitRequest) (*pdpb.AskSp
 		return nil, errors.New("region split is paused by replication mode")
 	}
 
-	newRegionID, err := c.id.Alloc()
+	newRegionID, _, err := c.id.Alloc(1)
 	if err != nil {
 		return nil, err
 	}
 
 	peerIDs := make([]uint64, len(request.Region.Peers))
 	for i := 0; i < len(peerIDs); i++ {
-		if peerIDs[i], err = c.id.Alloc(); err != nil {
+		if peerIDs[i], _, err = c.id.Alloc(1); err != nil {
 			return nil, err
 		}
 	}
@@ -136,15 +136,15 @@ func (c *RaftCluster) HandleAskBatchSplit(request *pdpb.AskBatchSplitRequest) (*
 	splitIDs := make([]*pdpb.SplitID, 0, splitCount)
 	recordRegions := make([]uint64, 0, splitCount+1)
 
-	for i := 0; i < int(splitCount); i++ {
-		newRegionID, err := c.id.Alloc()
+	for range splitCount {
+		newRegionID, _, err := c.id.Alloc(1)
 		if err != nil {
 			return nil, errs.ErrSchedulerNotFound.FastGenByArgs()
 		}
 
 		peerIDs := make([]uint64, len(request.Region.Peers))
 		for i := 0; i < len(peerIDs); i++ {
-			if peerIDs[i], err = c.id.Alloc(); err != nil {
+			if peerIDs[i], _, err = c.id.Alloc(1); err != nil {
 				return nil, err
 			}
 		}

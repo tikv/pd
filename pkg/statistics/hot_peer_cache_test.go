@@ -248,14 +248,14 @@ func getIDAllocator() *mockid.IDAllocator {
 func buildRegion(cluster *core.BasicCluster, kind utils.RWType, peerCount int, interval uint64) (region *core.RegionInfo) {
 	peers := make([]*metapb.Peer, 0, peerCount)
 	for range peerCount {
-		id, _ := getIDAllocator().Alloc()
-		storeID, _ := getIDAllocator().Alloc()
+		id, _, _ := getIDAllocator().Alloc(1)
+		storeID, _, _ := getIDAllocator().Alloc(1)
 		peers = append(peers, &metapb.Peer{
 			Id:      id,
 			StoreId: storeID,
 		})
 	}
-	id, _ := getIDAllocator().Alloc()
+	id, _, _ := getIDAllocator().Alloc(1)
 	meta := &metapb.Region{
 		Id:          id,
 		Peers:       peers,
