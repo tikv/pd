@@ -60,6 +60,14 @@ func (h *statsHandler) GetRegionStatus(w http.ResponseWriter, r *http.Request) {
 	h.rd.JSON(w, http.StatusOK, stats)
 }
 
+// @Tags	 distribution
+// @Summary  Get region distribution of a specified range.
+// @Param    start_key  query  string  true   "Start key"
+// @Param    end_key    query  string  true   "End key"
+// @Param    engine     query  string  false  "Engine type such as  tikv or tiflash"
+// @Produce  json
+// @Success  200  {object}  RegionDistributions
+// @Router   /distribution/region [get]
 func (h *statsHandler) GetRegionDistribution(w http.ResponseWriter, r *http.Request) {
 	rc := getCluster(r)
 	startKey, endKey, engine := r.URL.Query().Get("start_key"), r.URL.Query().Get("end_key"), r.URL.Query().Get("engine")
@@ -75,12 +83,12 @@ func (h *statsHandler) GetRegionDistribution(w http.ResponseWriter, r *http.Requ
 	default:
 	}
 
-	distributions := make([]RegionDistribution, len(stores))
-	for _, store := range stores {
-		distributions = append(distributions, RegionDistribution{
+	distributions := make([]*RegionDistribution, len(stores))
+	for idx, store := range stores {
+		distributions[idx] = &RegionDistribution{
 			StoreID:    store.GetID(),
 			EngineType: store.GetLabelValue(core.EngineKey),
-		})
+		}
 	}
 	for _, dis := range distributions {
 		if _, ok := stats.StoreLeaderKeys[dis.StoreID]; ok {
@@ -98,7 +106,11 @@ func (h *statsHandler) GetRegionDistribution(w http.ResponseWriter, r *http.Requ
 		}
 	}
 
-	if err := h.rd.JSON(w, http.StatusOK, stats); err != nil {
+	resp := &RegionDistributions{
+		RegionDistributions: distributions,
+	}
+
+	if err := h.rd.JSON(w, http.StatusOK, resp); err != nil {
 		log.Error("json data error", zap.Error(err))
 	}
 }
@@ -111,17 +123,22 @@ type RegionDistributions struct {
 // RegionDistribution wraps region distribution info
 // it is storage format of region_distribution_storage
 type RegionDistribution struct {
-	StoreID               uint64 `json:"store_id"`
-	EngineType            string `json:"engine_type"`
-	RegionLeaderCount     int    `json:"region_leader_count"`
-	RegionPeerCount       int    `json:"region_peer_count"`
-	ApproximateSize       int64  `json:"approximate_size"`
-	ApproximateKeys       int64  `json:"approximate_keys"`
-	RegionWriteBytes      uint64 `json:"region_write_bytes"`
-	RegionWriteKeys       uint64 `json:"region_write_keys"`
+	StoreID           uint64 `json:"store_id"`
+	EngineType        string `json:"engine_type"`
+	RegionLeaderCount int    `json:"region_leader_count"`
+	RegionPeerCount   int    `json:"region_peer_count"`
+	ApproximateSize   int64  `json:"approximate_size"`
+	ApproximateKeys   int64  `json:"approximate_keys"`
+	// write
+	RegionWriteBytes uint64 `json:"region_write_bytes"`
+	RegionWriteKeys  uint64 `json:"region_write_keys"`
+	RegionWriteQuery uint64 `json:"region_write_query"`
+	// leader read
 	RegionLeaderReadBytes uint64 `json:"region_leader_read_bytes"`
 	RegionLeaderReadKeys  uint64 `json:"region_leader_read_keys"`
-	RegionPeerReadBytes   uint64 `json:"region_peer_read_bytes"`
-	RegionPeerReadKeys    uint64 `json:"region_peer_read_keys"`
-	RegionPeerReadQuery   uint64 `json:"region_peer_read_query"`
+	RegionLeaderReadQuery uint64 `json:"region_leader_read_query"`
+	// peer read
+	RegionPeerReadBytes uint64 `json:"region_peer_read_bytes"`
+	RegionPeerReadKeys  uint64 `json:"region_peer_read_keys"`
+	RegionPeerReadQuery uint64 `json:"region_peer_read_query"`
 }

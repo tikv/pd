@@ -34,8 +34,10 @@ type RegionStats struct {
 	StorePeerKeys        map[uint64]int64  `json:"store_peer_keys"`
 	StoreWriteBytes      map[uint64]uint64 `json:"store_write_bytes"`
 	StoreWriteKeys       map[uint64]uint64 `json:"store_write_keys"`
+	StoreWriteQuery      map[uint64]uint64 `json:"store_write_query"`
 	StoreLeaderReadBytes map[uint64]uint64 `json:"store_leader_read_bytes"`
 	StoreLeaderReadKeys  map[uint64]uint64 `json:"store_leader_read_keys"`
+	StoreLeaderReadQuery map[uint64]uint64 `json:"store_leader_read_query"`
 	StorePeerReadBytes   map[uint64]uint64 `json:"store_peer_read_bytes"`
 	StorePeerReadKeys    map[uint64]uint64 `json:"store_peer_read_keys"`
 	StorePeerReadQuery   map[uint64]uint64 `json:"store_peer_read_query"`
@@ -52,12 +54,21 @@ func GetRegionStats(regions []*core.RegionInfo, cluster RegionStatInformer) *Reg
 
 func newRegionStats() *RegionStats {
 	return &RegionStats{
-		StoreLeaderCount: make(map[uint64]int),
-		StorePeerCount:   make(map[uint64]int),
-		StoreLeaderSize:  make(map[uint64]int64),
-		StoreLeaderKeys:  make(map[uint64]int64),
-		StorePeerSize:    make(map[uint64]int64),
-		StorePeerKeys:    make(map[uint64]int64),
+		StoreLeaderCount:     make(map[uint64]int),
+		StorePeerCount:       make(map[uint64]int),
+		StoreLeaderSize:      make(map[uint64]int64),
+		StoreLeaderKeys:      make(map[uint64]int64),
+		StorePeerSize:        make(map[uint64]int64),
+		StorePeerKeys:        make(map[uint64]int64),
+		StoreWriteBytes:      make(map[uint64]uint64),
+		StoreWriteKeys:       make(map[uint64]uint64),
+		StoreWriteQuery:      make(map[uint64]uint64),
+		StoreLeaderReadBytes: make(map[uint64]uint64),
+		StoreLeaderReadKeys:  make(map[uint64]uint64),
+		StoreLeaderReadQuery: make(map[uint64]uint64),
+		StorePeerReadBytes:   make(map[uint64]uint64),
+		StorePeerReadKeys:    make(map[uint64]uint64),
+		StorePeerReadQuery:   make(map[uint64]uint64),
 	}
 }
 
@@ -79,8 +90,19 @@ func (s *RegionStats) Observe(r *core.RegionInfo, cluster RegionStatInformer) {
 		s.StoreLeaderCount[storeID]++
 		s.StoreLeaderSize[storeID] += approximateSize
 		s.StoreLeaderKeys[storeID] += approximateKeys
-		s.StoreLeaderReadBytes[storeID] += r.GetBytesRead()
-		s.StoreLeaderReadKeys[storeID] += r.GetKeysRead()
+		if cluster != nil {
+			{
+				stat := cluster.GetHotPeerStat(utils.Read, r.GetID(), storeID)
+				if stat != nil {
+					bytes := stat.GetLoad(utils.ByteDim)
+					s.StoreLeaderReadBytes[storeID] = uint64(bytes)
+					keys := stat.GetLoad(utils.KeyDim)
+					s.StoreLeaderReadKeys[storeID] = uint64(keys)
+					qps := stat.GetLoad(utils.QueryDim)
+					s.StoreLeaderReadQuery[storeID] = uint64(qps)
+				}
+			}
+		}
 	}
 	peers := r.GetMeta().GetPeers()
 	for _, p := range peers {
@@ -91,13 +113,30 @@ func (s *RegionStats) Observe(r *core.RegionInfo, cluster RegionStatInformer) {
 		s.StoreWriteKeys[storeID] += r.GetKeysWritten()
 		s.StoreWriteBytes[storeID] += r.GetBytesWritten()
 		if cluster != nil {
-			stat := cluster.GetHotPeerStat(utils.Read, r.GetID(), p.GetStoreId())
-			bytes := stat.GetLoad(utils.ByteDim)
-			s.StorePeerReadBytes[storeID] = uint64(bytes)
-			keys := stat.GetLoad(utils.KeyDim)
-			s.StorePeerReadKeys[storeID] = uint64(keys)
-			qps := stat.GetLoad(utils.QueryDim)
-			s.StorePeerReadQuery[storeID] = uint64(qps)
+			// peer read statistics
+			{
+				stat := cluster.GetHotPeerStat(utils.Read, r.GetID(), p.GetStoreId())
+				if stat != nil {
+					bytes := stat.GetLoad(utils.ByteDim)
+					s.StorePeerReadBytes[storeID] = uint64(bytes)
+					keys := stat.GetLoad(utils.KeyDim)
+					s.StorePeerReadKeys[storeID] = uint64(keys)
+					qps := stat.GetLoad(utils.QueryDim)
+					s.StorePeerReadQuery[storeID] = uint64(qps)
+				}
+			}
+			// peer write statistics
+			{
+				stat := cluster.GetHotPeerStat(utils.Write, r.GetID(), p.GetStoreId())
+				if stat != nil {
+					bytes := stat.GetLoad(utils.ByteDim)
+					s.StoreWriteBytes[storeID] = uint64(bytes)
+					keys := stat.GetLoad(utils.KeyDim)
+					s.StoreWriteKeys[storeID] = uint64(keys)
+					qps := stat.GetLoad(utils.QueryDim)
+					s.StoreWriteQuery[storeID] = uint64(qps)
+				}
+			}
 		}
 	}
 }
