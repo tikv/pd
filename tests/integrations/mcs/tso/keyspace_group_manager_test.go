@@ -68,7 +68,7 @@ type tsoKeyspaceGroupManagerTestSuite struct {
 }
 
 func (suite *tsoKeyspaceGroupManagerTestSuite) allocID() uint32 {
-	id, _ := suite.allocator.Alloc()
+	id, _, _ := suite.allocator.Alloc(1)
 	return uint32(id)
 }
 

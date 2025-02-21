@@ -2336,7 +2336,7 @@ func checkStaleRegion(origin *metapb.Region, region *metapb.Region) error {
 }
 
 func (c *testCluster) AllocPeer(storeID uint64) (*metapb.Peer, error) {
-	id, err := c.AllocID()
+	id, _, err := c.AllocID(1)
 	if err != nil {
 		return nil, err
 	}

@@ -916,8 +916,8 @@ func (c *RaftCluster) GetHeartbeatStreams() *hbstream.HeartbeatStreams {
 }
 
 // AllocID returns a global unique ID.
-func (c *RaftCluster) AllocID() (uint64, error) {
-	return c.id.Alloc()
+func (c *RaftCluster) AllocID(uint32) (uint64, uint32, error) {
+	return c.id.Alloc(1)
 }
 
 // GetRegionSyncer returns the region syncer.
