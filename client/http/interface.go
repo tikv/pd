@@ -48,6 +48,7 @@ type Client interface {
 	GetHotWriteRegions(context.Context) (*StoreHotPeersInfos, error)
 	GetHistoryHotRegions(context.Context, *HistoryHotRegionsRequest) (*HistoryHotRegions, error)
 	GetRegionStatusByKeyRange(context.Context, *KeyRange, bool) (*RegionStats, error)
+	GetRegionDistribution(ctx context.Context, keyRange *KeyRange, engine string) (*RegionDistributions, error)
 	GetStores(context.Context) (*StoresInfo, error)
 	GetStore(context.Context, uint64) (*StoreInfo, error)
 	DeleteStore(context.Context, uint64) error
@@ -317,6 +318,19 @@ func (c *client) GetHistoryHotRegions(ctx context.Context, req *HistoryHotRegion
 		return nil, err
 	}
 	return &historyHotRegions, nil
+}
+
+func (c *client) GetRegionDistribution(ctx context.Context, keyRange *KeyRange, engine string) (*RegionDistributions, error) {
+	var regionDistributions RegionDistributions
+	err := c.request(ctx, newRequestInfo().
+		WithName(getRegionDistributionByKeyRangeName).
+		WithURI(RegionDistributionByKeyRange(keyRange, engine)).
+		WithMethod(http.MethodGet).
+		WithResp(&regionDistributions))
+	if err != nil {
+		return nil, err
+	}
+	return &regionDistributions, nil
 }
 
 // GetRegionStatusByKeyRange gets the region status by key range.

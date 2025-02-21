@@ -2169,8 +2169,12 @@ func (c *RaftCluster) PutMetaCluster(meta *metapb.Cluster) error {
 }
 
 // GetRegionStatsByRange returns region statistics from cluster.
-func (c *RaftCluster) GetRegionStatsByRange(startKey, endKey []byte) *statistics.RegionStats {
-	return statistics.GetRegionStats(c.ScanRegions(startKey, endKey, -1))
+func (c *RaftCluster) GetRegionStatsByRange(startKey, endKey []byte, useHotFlow bool) *statistics.RegionStats {
+	if useHotFlow {
+		return statistics.GetRegionStats(c.ScanRegions(startKey, endKey, -1), c)
+	} else {
+		return statistics.GetRegionStats(c.ScanRegions(startKey, endKey, -1), nil)
+	}
 }
 
 // GetRegionStatsCount returns the number of regions in the range.

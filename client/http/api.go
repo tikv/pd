@@ -38,6 +38,7 @@ const (
 	store                     = "/pd/api/v1/store"
 	Stores                    = "/pd/api/v1/stores"
 	StatsRegion               = "/pd/api/v1/stats/region"
+	DistributionRegion        = "/pd/api/v1/distribution/region"
 	membersPrefix             = "/pd/api/v1/members"
 	leaderPrefix              = "/pd/api/v1/leader"
 	transferLeader            = "/pd/api/v1/leader/transfer"
@@ -125,6 +126,12 @@ func RegionStatsByKeyRange(keyRange *KeyRange, onlyCount bool) string {
 	}
 	return fmt.Sprintf("%s?start_key=%s&end_key=%s",
 		StatsRegion, startKeyStr, endKeyStr)
+}
+
+func RegionDistributionByKeyRange(keyRange *KeyRange, engine string) string {
+	startKeyStr, endKeyStr := keyRange.EscapeAsUTF8Str()
+	return fmt.Sprintf("%s?start_key=%s&end_key=%s&engine=%s",
+		DistributionRegion, startKeyStr, endKeyStr, engine)
 }
 
 // StoreByID returns the store API with store ID parameter.
