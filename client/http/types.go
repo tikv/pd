@@ -201,6 +201,28 @@ type HistoryHotRegionsRequest struct {
 	HotRegionTypes []string `json:"hot_region_type,omitempty"`
 }
 
+type RegionDistributions struct {
+	RegionDistributions []*RegionDistribution `json:"region_distribution"`
+}
+
+// RegionDistribution wraps region distribution info
+// it is storage format of region_distribution_storage
+type RegionDistribution struct {
+	StoreID               uint64 `json:"store_id"`
+	EngineType            string `json:"engine_type"`
+	RegionLeaderCount     int    `json:"region_leader_count"`
+	RegionPeerCount       int    `json:"region_peer_count"`
+	ApproximateSize       int64  `json:"approximate_size"`
+	ApproximateKeys       int64  `json:"approximate_keys"`
+	RegionWriteBytes      uint64 `json:"region_write_bytes"`
+	RegionWriteKeys       uint64 `json:"region_write_keys"`
+	RegionLeaderReadBytes uint64 `json:"region_leader_read_bytes"`
+	RegionLeaderReadKeys  uint64 `json:"region_leader_read_keys"`
+	RegionPeerReadBytes   uint64 `json:"region_peer_read_bytes"`
+	RegionPeerReadKeys    uint64 `json:"region_peer_read_keys"`
+	RegionPeerReadQuery   uint64 `json:"region_peer_read_query"`
+}
+
 // HistoryHotRegions wraps historyHotRegion
 type HistoryHotRegions struct {
 	HistoryHotRegion []*HistoryHotRegion `json:"history_hot_region"`

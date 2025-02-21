@@ -16,28 +16,36 @@ package statistics
 
 import (
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/statistics/utils"
 )
 
 // RegionStats records a list of regions' statistics and distribution status.
 type RegionStats struct {
-	Count            int              `json:"count"`
-	EmptyCount       int              `json:"empty_count"`
-	StorageSize      int64            `json:"storage_size"`
-	UserStorageSize  int64            `json:"user_storage_size"`
-	StorageKeys      int64            `json:"storage_keys"`
-	StoreLeaderCount map[uint64]int   `json:"store_leader_count"`
-	StorePeerCount   map[uint64]int   `json:"store_peer_count"`
-	StoreLeaderSize  map[uint64]int64 `json:"store_leader_size"`
-	StoreLeaderKeys  map[uint64]int64 `json:"store_leader_keys"`
-	StorePeerSize    map[uint64]int64 `json:"store_peer_size"`
-	StorePeerKeys    map[uint64]int64 `json:"store_peer_keys"`
+	Count                int               `json:"count"`
+	EmptyCount           int               `json:"empty_count"`
+	StorageSize          int64             `json:"storage_size"`
+	UserStorageSize      int64             `json:"user_storage_size"`
+	StorageKeys          int64             `json:"storage_keys"`
+	StoreLeaderCount     map[uint64]int    `json:"store_leader_count"`
+	StorePeerCount       map[uint64]int    `json:"store_peer_count"`
+	StoreLeaderSize      map[uint64]int64  `json:"store_leader_size"`
+	StoreLeaderKeys      map[uint64]int64  `json:"store_leader_keys"`
+	StorePeerSize        map[uint64]int64  `json:"store_peer_size"`
+	StorePeerKeys        map[uint64]int64  `json:"store_peer_keys"`
+	StoreWriteBytes      map[uint64]uint64 `json:"store_write_bytes"`
+	StoreWriteKeys       map[uint64]uint64 `json:"store_write_keys"`
+	StoreLeaderReadBytes map[uint64]uint64 `json:"store_leader_read_bytes"`
+	StoreLeaderReadKeys  map[uint64]uint64 `json:"store_leader_read_keys"`
+	StorePeerReadBytes   map[uint64]uint64 `json:"store_peer_read_bytes"`
+	StorePeerReadKeys    map[uint64]uint64 `json:"store_peer_read_keys"`
+	StorePeerReadQuery   map[uint64]uint64 `json:"store_peer_read_query"`
 }
 
 // GetRegionStats sums regions' statistics.
-func GetRegionStats(regions []*core.RegionInfo) *RegionStats {
+func GetRegionStats(regions []*core.RegionInfo, cluster RegionStatInformer) *RegionStats {
 	stats := newRegionStats()
 	for _, region := range regions {
-		stats.Observe(region)
+		stats.Observe(region, cluster)
 	}
 	return stats
 }
@@ -54,7 +62,7 @@ func newRegionStats() *RegionStats {
 }
 
 // Observe adds a region's statistics into RegionStats.
-func (s *RegionStats) Observe(r *core.RegionInfo) {
+func (s *RegionStats) Observe(r *core.RegionInfo, cluster RegionStatInformer) {
 	s.Count++
 	approximateKeys := r.GetApproximateKeys()
 	approximateSize := r.GetApproximateSize()
@@ -71,6 +79,8 @@ func (s *RegionStats) Observe(r *core.RegionInfo) {
 		s.StoreLeaderCount[storeID]++
 		s.StoreLeaderSize[storeID] += approximateSize
 		s.StoreLeaderKeys[storeID] += approximateKeys
+		s.StoreLeaderReadBytes[storeID] += r.GetBytesRead()
+		s.StoreLeaderReadKeys[storeID] += r.GetKeysRead()
 	}
 	peers := r.GetMeta().GetPeers()
 	for _, p := range peers {
@@ -78,5 +88,16 @@ func (s *RegionStats) Observe(r *core.RegionInfo) {
 		s.StorePeerCount[storeID]++
 		s.StorePeerSize[storeID] += r.GetStorePeerApproximateSize(storeID)
 		s.StorePeerKeys[storeID] += r.GetStorePeerApproximateKeys(storeID)
+		s.StoreWriteKeys[storeID] += r.GetKeysWritten()
+		s.StoreWriteBytes[storeID] += r.GetBytesWritten()
+		if cluster != nil {
+			stat := cluster.GetHotPeerStat(utils.Read, r.GetID(), p.GetStoreId())
+			bytes := stat.GetLoad(utils.ByteDim)
+			s.StorePeerReadBytes[storeID] = uint64(bytes)
+			keys := stat.GetLoad(utils.KeyDim)
+			s.StorePeerReadKeys[storeID] = uint64(keys)
+			qps := stat.GetLoad(utils.QueryDim)
+			s.StorePeerReadQuery[storeID] = uint64(qps)
+		}
 	}
 }

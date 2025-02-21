@@ -38,6 +38,7 @@ const (
 	getHotWriteRegionsName                  = "GetHotWriteRegions"
 	getHistoryHotRegionsName                = "GetHistoryHotRegions"
 	getRegionStatusByKeyRangeName           = "GetRegionStatusByKeyRange"
+	getRegionDistributionByKeyRangeName     = "GetRegionDistributionByKeyRange"
 	getStoresName                           = "GetStores"
 	getStoreName                            = "GetStore"
 	deleteStoreName                         = "DeleteStore"
