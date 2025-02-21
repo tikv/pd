@@ -346,11 +346,9 @@ func (s *Server) startServer() (err error) {
 
 	// Initialize the TSO service.
 	s.serverLoopCtx, s.serverLoopCancel = context.WithCancel(s.Context())
-	legacySvcRootPath := keypath.LegacyRootPath()
-	tsoSvcRootPath := keypath.TSOSvcRootPath()
 	s.keyspaceGroupManager = tso.NewKeyspaceGroupManager(
 		s.serverLoopCtx, s.serviceID, s.GetClient(), s.GetHTTPClient(),
-		s.cfg.AdvertiseListenAddr, legacySvcRootPath, tsoSvcRootPath, s.cfg)
+		s.cfg.AdvertiseListenAddr, s.cfg)
 	if err := s.keyspaceGroupManager.Initialize(); err != nil {
 		return err
 	}

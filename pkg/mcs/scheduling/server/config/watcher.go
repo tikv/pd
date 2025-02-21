@@ -186,10 +186,9 @@ func (cw *Watcher) initializeTTLConfigWatcher() error {
 }
 
 func (cw *Watcher) initializeSchedulerConfigWatcher() error {
-	prefixToTrim := cw.schedulerConfigPathPrefix + "/"
 	putFn := func(kv *mvccpb.KeyValue) error {
 		key := string(kv.Key)
-		name := strings.TrimPrefix(key, prefixToTrim)
+		name := strings.TrimPrefix(key, cw.schedulerConfigPathPrefix)
 		log.Info("update scheduler config", zap.String("name", name),
 			zap.String("value", string(kv.Value)))
 		err := cw.storage.SaveSchedulerConfig(name, kv.Value)
@@ -210,7 +209,7 @@ func (cw *Watcher) initializeSchedulerConfigWatcher() error {
 		key := string(kv.Key)
 		log.Info("remove scheduler config", zap.String("key", key))
 		return cw.storage.RemoveSchedulerConfig(
-			strings.TrimPrefix(key, prefixToTrim),
+			strings.TrimPrefix(key, cw.schedulerConfigPathPrefix),
 		)
 	}
 	cw.schedulerConfigWatcher = etcdutil.NewLoopWatcher(

@@ -140,24 +140,22 @@ func deployTiupPlayground(t *testing.T, tag string, ms bool) {
 	go func() {
 		if ms {
 			runCommand("sh", "-c",
-				tiupBin+` playground nightly --pd.mode ms --kv 3 --tiflash 1 --db 1 --pd 3 --tso 1 --scheduling 1 \
+				tiupBin+` playground nightly --pd.mode ms --kv 3 --db 1 --pd 3 --tso 1 --scheduling 1 \
 			--without-monitor --tag `+tag+` \ 
 			--pd.binpath ./bin/pd-server \
 			--kv.binpath ./third_bin/tikv-server \
 			--db.binpath ./third_bin/tidb-server \ 
-			--tiflash.binpath ./third_bin/tiflash \
 			--tso.binpath ./bin/pd-server \
 			--scheduling.binpath ./bin/pd-server \
 			--pd.config ./tests/integrations/realcluster/pd.toml \
 			> `+filepath.Join(playgroundLogDir, tag+".log")+` 2>&1 & `)
 		} else {
 			runCommand("sh", "-c",
-				tiupBin+` playground nightly --kv 3 --tiflash 1 --db 1 --pd 3 \
+				tiupBin+` playground nightly --kv 3 --db 1 --pd 3 \
 			--without-monitor --tag `+tag+` \
 			--pd.binpath ./bin/pd-server \
 			--kv.binpath ./third_bin/tikv-server \
 			--db.binpath ./third_bin/tidb-server \
-			--tiflash.binpath ./third_bin/tiflash \
 			--pd.config ./tests/integrations/realcluster/pd.toml \
 			> `+filepath.Join(playgroundLogDir, tag+".log")+` 2>&1 & `)
 		}

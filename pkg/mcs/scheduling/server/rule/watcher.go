@@ -159,7 +159,7 @@ func (rw *Watcher) initializeRuleWatcher() error {
 		key := string(kv.Key)
 		if strings.HasPrefix(key, rw.rulesPathPrefix) {
 			log.Info("delete placement rule", zap.String("key", key))
-			ruleJSON, err := rw.ruleStorage.LoadRule(strings.TrimPrefix(key, rw.rulesPathPrefix+"/"))
+			ruleJSON, err := rw.ruleStorage.LoadRule(strings.TrimPrefix(key, rw.rulesPathPrefix))
 			if err != nil {
 				return err
 			}
@@ -174,7 +174,7 @@ func (rw *Watcher) initializeRuleWatcher() error {
 			return err
 		} else if strings.HasPrefix(key, rw.ruleGroupPathPrefix) {
 			log.Info("delete placement rule group", zap.String("key", key))
-			trimmedKey := strings.TrimPrefix(key, rw.ruleGroupPathPrefix+"/")
+			trimmedKey := strings.TrimPrefix(key, rw.ruleGroupPathPrefix)
 			// Try to add the rule group change to the patch.
 			rw.patch.DeleteGroup(trimmedKey)
 			// Update the suspect key ranges
@@ -211,7 +211,6 @@ func (rw *Watcher) initializeRuleWatcher() error {
 }
 
 func (rw *Watcher) initializeRegionLabelWatcher() error {
-	prefixToTrim := rw.regionLabelPathPrefix + "/"
 	// TODO: use txn in region labeler.
 	preEventsFn := func([]*clientv3.Event) error {
 		// It will be locked until the postEventsFn is finished.
@@ -229,7 +228,7 @@ func (rw *Watcher) initializeRegionLabelWatcher() error {
 	deleteFn := func(kv *mvccpb.KeyValue) error {
 		key := string(kv.Key)
 		log.Info("delete region label rule", zap.String("key", key))
-		return rw.regionLabeler.DeleteLabelRuleLocked(strings.TrimPrefix(key, prefixToTrim))
+		return rw.regionLabeler.DeleteLabelRuleLocked(strings.TrimPrefix(key, rw.regionLabelPathPrefix))
 	}
 	postEventsFn := func([]*clientv3.Event) error {
 		defer rw.regionLabeler.Unlock()

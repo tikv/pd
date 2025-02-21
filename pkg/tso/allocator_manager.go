@@ -136,7 +136,6 @@ type AllocatorManager struct {
 	// member is for election use
 	member ElectionMember
 	// TSO config
-	rootPath               string
 	storage                endpoint.TSOStorage
 	saveInterval           time.Duration
 	updatePhysicalInterval time.Duration
@@ -153,7 +152,6 @@ func NewAllocatorManager(
 	ctx context.Context,
 	keyspaceGroupID uint32,
 	member ElectionMember,
-	rootPath string,
 	storage endpoint.TSOStorage,
 	cfg Config,
 ) *AllocatorManager {
@@ -163,7 +161,6 @@ func NewAllocatorManager(
 		cancel:                 cancel,
 		kgID:                   keyspaceGroupID,
 		member:                 member,
-		rootPath:               rootPath,
 		storage:                storage,
 		saveInterval:           cfg.GetTSOSaveInterval(),
 		updatePhysicalInterval: cfg.GetTSOUpdatePhysicalInterval(),

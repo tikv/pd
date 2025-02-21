@@ -333,38 +333,7 @@ type KeyspaceGroupManager struct {
 	// Key: /ms/{cluster_id}/tso/registry/{tsoServerAddress}
 	// Value: discover.ServiceRegistryEntry
 	tsoServiceKey string
-	// legacySvcRootPath defines the legacy root path for all etcd paths which derives from
-	// the PD. It's in the format of "/pd/{cluster_id}".
-	// The main paths for different usages include:
-	// 1. The path, used by the default keyspace group, for LoadTimestamp/SaveTimestamp in the
-	//    storage endpoint.
-	//    Key: /pd/{cluster_id}/timestamp
-	//    Value: ts(time.Time)
-	//    Key: /pd/{cluster_id}/lta/{dc-location}/timestamp
-	//    Value: ts(time.Time)
-	// 2. The path for storing keyspace group membership/distribution metadata.
-	//    Key: /pd/{cluster_id}/tso/keyspace_groups/membership/{group}
-	//    Value: endpoint.KeyspaceGroup
-	// Note: The {group} is 5 digits integer with leading zeros.
-	legacySvcRootPath string
-	// tsoSvcRootPath defines the root path for all etcd paths used in the tso microservices.
-	// It is in the format of "/ms/<cluster-id>/tso".
-	// The main paths for different usages include:
-	// 1. The path for keyspace group primary election.
-	//    default keyspace group: "/ms/{cluster_id}/tso/00000/primary".
-	//    non-default keyspace group: "/ms/{cluster_id}/tso/keyspace_groups/election/{group}/primary".
-	// 2. The path for LoadTimestamp/SaveTimestamp in the storage endpoint for all the non-default
-	//    keyspace groups.
-	//    Key: /ms/{cluster_id}/tso/{group}/gta/timestamp
-	//    Value: ts(time.Time)
-	//    Key: /ms/{cluster_id}/tso/{group}/lta/{dc-location}/timestamp
-	//    Value: ts(time.Time)
-	// Note: The {group} is 5 digits integer with leading zeros.
-	tsoSvcRootPath string
-	// legacySvcStorage is storage with legacySvcRootPath.
-	legacySvcStorage *endpoint.StorageEndpoint
-	// tsoSvcStorage is storage with tsoSvcRootPath.
-	tsoSvcStorage *endpoint.StorageEndpoint
+	storage       *endpoint.StorageEndpoint
 	// cfg is the TSO config
 	cfg ServiceConfig
 
@@ -402,8 +371,6 @@ func NewKeyspaceGroupManager(
 	etcdClient *clientv3.Client,
 	httpClient *http.Client,
 	electionNamePrefix string,
-	legacySvcRootPath string,
-	tsoSvcRootPath string,
 	cfg ServiceConfig,
 ) *KeyspaceGroupManager {
 	if constant.MaxKeyspaceGroupCountInUse > constant.MaxKeyspaceGroupCount {
@@ -420,19 +387,15 @@ func NewKeyspaceGroupManager(
 		etcdClient:                   etcdClient,
 		httpClient:                   httpClient,
 		electionNamePrefix:           electionNamePrefix,
-		tsoServiceKey:                keypath.TSOPath(),
-		legacySvcRootPath:            legacySvcRootPath,
-		tsoSvcRootPath:               tsoSvcRootPath,
+		tsoServiceKey:                keypath.ServicePath(constant.TSOServiceName),
 		primaryPriorityCheckInterval: defaultPrimaryPriorityCheckInterval,
 		cfg:                          cfg,
 		groupUpdateRetryList:         make(map[uint32]*endpoint.KeyspaceGroup),
 		serviceRegistryMap:           make(map[string]string),
 		metrics:                      newKeyspaceGroupMetrics(),
 	}
-	kgm.legacySvcStorage = endpoint.NewStorageEndpoint(
-		kv.NewEtcdKVBase(kgm.etcdClient, kgm.legacySvcRootPath), nil)
-	kgm.tsoSvcStorage = endpoint.NewStorageEndpoint(
-		kv.NewEtcdKVBase(kgm.etcdClient, kgm.tsoSvcRootPath), nil)
+	kgm.storage = endpoint.NewStorageEndpoint(
+		kv.NewEtcdKVBase(kgm.etcdClient), nil)
 	kgm.compiledKGMembershipIDRegexp = keypath.GetCompiledKeyspaceGroupIDRegexp()
 	kgm.state.initialize()
 	return kgm
@@ -532,8 +495,7 @@ func (kgm *KeyspaceGroupManager) InitializeTSOServerWatchLoop() error {
 // Key: /pd/{cluster_id}/tso/keyspace_groups/membership/{group}
 // Value: endpoint.KeyspaceGroup
 func (kgm *KeyspaceGroupManager) InitializeGroupWatchLoop() error {
-	rootPath := kgm.legacySvcRootPath
-	startKey := rootPath + "/" + keypath.KeyspaceGroupIDPrefix()
+	startKey := keypath.KeyspaceGroupIDPrefix()
 
 	defaultKGConfigured := false
 	putFn := func(kv *mvccpb.KeyValue) error {
@@ -776,20 +738,8 @@ func (kgm *KeyspaceGroupManager) updateKeyspaceGroup(group *endpoint.KeyspaceGro
 			return splitSourceAM.GetMember().IsLeader()
 		})
 	}
-	// Only the default keyspace group uses the legacy service root path for LoadTimestamp/SyncTimestamp.
-	var (
-		tsRootPath string
-		storage    *endpoint.StorageEndpoint
-	)
-	if group.ID == constant.DefaultKeyspaceGroupID {
-		tsRootPath = kgm.legacySvcRootPath
-		storage = kgm.legacySvcStorage
-	} else {
-		tsRootPath = kgm.tsoSvcRootPath
-		storage = kgm.tsoSvcStorage
-	}
 	// Initialize all kinds of maps.
-	am := NewAllocatorManager(kgm.ctx, group.ID, participant, tsRootPath, storage, kgm.cfg)
+	am := NewAllocatorManager(kgm.ctx, group.ID, participant, kgm.storage, kgm.cfg)
 	am.startGlobalAllocatorLoop()
 	log.Info("created allocator manager",
 		zap.Uint32("keyspace-group-id", group.ID))
@@ -1346,7 +1296,7 @@ mergeLoop:
 					ServiceName: constant.TSOServiceName,
 					GroupID:     id,
 				})
-				val, err := kgm.tsoSvcStorage.Load(leaderPath)
+				val, err := kgm.storage.Load(leaderPath)
 				if err != nil {
 					log.Error("failed to check if the keyspace group primary in the merge list has gone",
 						zap.String("member", kgm.tsoServiceID.ServiceAddr),
@@ -1375,7 +1325,8 @@ mergeLoop:
 		// calculate the newly merged TSO to make sure it is greater than the original ones.
 		var mergedTS time.Time
 		for _, id := range mergeList {
-			ts, err := kgm.tsoSvcStorage.LoadTimestamp(keypath.KeyspaceGroupGlobalTSPath(id))
+			ts, err := kgm.storage.LoadTimestamp(
+				keypath.Prefix(keypath.TimestampPath(id)))
 			if err != nil {
 				log.Error("failed to load the keyspace group TSO",
 					zap.String("member", kgm.tsoServiceID.ServiceAddr),
@@ -1518,11 +1469,7 @@ func (kgm *KeyspaceGroupManager) deletedGroupCleaner() {
 			log.Info("delete the keyspace group tso key",
 				zap.Uint32("keyspace-group-id", groupID))
 			// Clean up the remaining TSO keys.
-			err := kgm.tsoSvcStorage.DeleteTimestamp(
-				keypath.TimestampPath(
-					keypath.KeyspaceGroupGlobalTSPath(groupID),
-				),
-			)
+			err := kgm.storage.DeleteTimestamp(groupID)
 			if err != nil {
 				log.Warn("failed to delete the keyspace group tso key",
 					zap.Uint32("keyspace-group-id", groupID),

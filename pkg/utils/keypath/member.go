@@ -14,30 +14,19 @@
 
 package keypath
 
-import (
-	"fmt"
-	"math/rand"
-	"path"
-	"testing"
-	"time"
+import "fmt"
 
-	"github.com/stretchr/testify/require"
-)
-
-func TestRegionPath(t *testing.T) {
-	re := require.New(t)
-	f := func(id uint64) string {
-		return path.Join(regionPathPrefix, fmt.Sprintf("%020d", id))
-	}
-	rand.New(rand.NewSource(time.Now().Unix()))
-	for range 1000 {
-		id := rand.Uint64()
-		re.Equal(f(id), RegionPath(id))
-	}
+// MemberBinaryDeployPath returns the member binary deploy path.
+func MemberBinaryDeployPath(id uint64) string {
+	return fmt.Sprintf(memberBinaryDeployPathFormat, ClusterID(), id)
 }
 
-func BenchmarkRegionPath(b *testing.B) {
-	for i := 0; i < b.N; i++ {
-		_ = RegionPath(uint64(i))
-	}
+// MemberGitHashPath returns the member git hash path.
+func MemberGitHashPath(id uint64) string {
+	return fmt.Sprintf(memberGitHashPath, ClusterID(), id)
+}
+
+// MemberBinaryVersionPath returns the member binary version path.
+func MemberBinaryVersionPath(id uint64) string {
+	return fmt.Sprintf(memberBinaryVersionPathFormat, ClusterID(), id)
 }
