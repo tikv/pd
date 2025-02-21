@@ -191,3 +191,53 @@ func TestPDRestart(t *testing.T) {
 		last = id
 	}
 }
+
+func TestBatchAllocID(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster, err := tests.NewTestCluster(ctx, 1)
+	re.NoError(err)
+	defer cluster.Destroy()
+
+	err = cluster.RunInitialServers()
+	re.NoError(err)
+	re.NotEmpty(cluster.WaitLeader())
+
+	leaderServer := cluster.GetLeaderServer()
+	var last uint64
+	for range allocStep {
+		id, _, err := leaderServer.GetAllocator().Alloc(1)
+		re.NoError(err)
+		re.Greater(id, last)
+		last = id
+	}
+
+	var wg sync.WaitGroup
+
+	var m syncutil.Mutex
+	ids := make(map[uint64]struct{})
+
+	for range 10 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+
+			for range 200 {
+				id, count, err := leaderServer.GetAllocator().Alloc(10)
+				curID := id - uint64(count)
+				re.NoError(err)
+				m.Lock()
+				for range count {
+					_, ok := ids[curID]
+					ids[curID] = struct{}{}
+					curID++
+					re.False(ok, curID)
+				}
+				m.Unlock()
+			}
+		}()
+	}
+
+	wg.Wait()
+}
