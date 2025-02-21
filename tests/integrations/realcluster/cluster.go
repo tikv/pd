@@ -27,9 +27,9 @@ import (
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/zap"
 
-	"github.com/tikv/pd/pkg/utils/logutil"
-
 	"github.com/pingcap/log"
+
+	"github.com/tikv/pd/pkg/utils/logutil"
 )
 
 type clusterSuite struct {
