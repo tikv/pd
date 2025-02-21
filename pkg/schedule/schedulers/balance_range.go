@@ -15,6 +15,7 @@
 package schedulers
 
 import (
+	"bytes"
 	"net/http"
 	"sort"
 	"strconv"
@@ -85,11 +86,12 @@ type balanceRangeSchedulerJob struct {
 	Status  JobStatus       `json:"status"`
 }
 
-func (conf *balanceRangeSchedulerConfig) begin(job *balanceRangeSchedulerJob) bool {
+func (conf *balanceRangeSchedulerConfig) begin(index int) *balanceRangeSchedulerJob {
 	conf.Lock()
 	defer conf.Unlock()
+	job := conf.jobs[index]
 	if job.Status != pending {
-		return false
+		return nil
 	}
 	now := time.Now()
 	job.Start = &now
@@ -98,16 +100,16 @@ func (conf *balanceRangeSchedulerConfig) begin(job *balanceRangeSchedulerJob) bo
 		log.Warn("failed to persist config", zap.Error(err), zap.Uint64("job-id", job.JobID))
 		job.Status = pending
 		job.Start = nil
-		return false
 	}
-	return true
+	return job
 }
 
-func (conf *balanceRangeSchedulerConfig) finish(job *balanceRangeSchedulerJob) bool {
+func (conf *balanceRangeSchedulerConfig) finish(index int) *balanceRangeSchedulerJob {
 	conf.Lock()
 	defer conf.Unlock()
+	job := conf.jobs[index]
 	if job.Status != running {
-		return false
+		return nil
 	}
 	now := time.Now()
 	job.Finish = &now
@@ -116,21 +118,20 @@ func (conf *balanceRangeSchedulerConfig) finish(job *balanceRangeSchedulerJob) b
 		log.Warn("failed to persist config", zap.Error(err), zap.Uint64("job-id", job.JobID))
 		job.Status = running
 		job.Finish = nil
-		return false
 	}
-	return true
+	return job
 }
 
-func (conf *balanceRangeSchedulerConfig) peek() *balanceRangeSchedulerJob {
+func (conf *balanceRangeSchedulerConfig) peek() (int, *balanceRangeSchedulerJob) {
 	conf.RLock()
 	defer conf.RUnlock()
-	for _, job := range conf.jobs {
+	for index, job := range conf.jobs {
 		if job.Status == finished {
 			continue
 		}
-		return job
+		return index, job
 	}
-	return nil
+	return 0, nil
 }
 
 func (conf *balanceRangeSchedulerConfig) clone() []*balanceRangeSchedulerJob {
@@ -193,13 +194,14 @@ func (s *balanceRangeScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster)
 	if !allowed {
 		operator.IncOperatorLimitCounter(s.GetType(), operator.OpRange)
 	}
-	job := s.conf.peek()
+	index, job := s.conf.peek()
 	if job != nil {
 		if job.Status == pending {
-			s.conf.begin(job)
+			job = s.conf.begin(index)
 		}
+		// todo: add other conditions such as the diff of the score between the source and target store.
 		if time.Since(*job.Start) > job.Timeout {
-			s.conf.finish(job)
+			s.conf.finish(index)
 			balanceRangeExpiredCounter.Inc()
 		}
 	}
@@ -233,13 +235,14 @@ func newBalanceRangeScheduler(opController *operator.Controller, conf *balanceRa
 // Schedule schedules the balance key range operator.
 func (s *balanceRangeScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) ([]*operator.Operator, []plan.Plan) {
 	balanceRangeCounter.Inc()
-	job := s.conf.peek()
+	_, job := s.conf.peek()
 	if job == nil {
 		balanceRangeNoJobCounter.Inc()
 		return nil, nil
 	}
 
 	opInfluence := s.OpController.GetOpInfluence(cluster.GetBasicCluster(), operator.WithRangeOption(job.Ranges))
+	// todo: don't prepare every times, the prepare information can be reused.
 	plan, err := s.prepare(cluster, opInfluence, job)
 	if err != nil {
 		log.Error("failed to prepare balance key range scheduler", errs.ZapError(err))
@@ -376,6 +379,30 @@ type balanceRangeSchedulerPlan struct {
 	tolerate     int64
 }
 
+func fetchAllRegions(cluster sche.SchedulerCluster, ranges *core.KeyRanges) []*core.RegionInfo {
+	scanLimit := 32
+	regions := make([]*core.RegionInfo, 0)
+	krs := ranges.Ranges()
+
+	for _, kr := range krs {
+		for {
+			region := cluster.ScanRegions(kr.StartKey, kr.EndKey, scanLimit)
+			if len(region) == 0 {
+				break
+			}
+			regions = append(regions, region...)
+			if len(region) < scanLimit {
+				break
+			}
+			kr.StartKey = region[len(region)-1].GetEndKey()
+			if bytes.Equal(kr.StartKey, kr.EndKey) {
+				break
+			}
+		}
+	}
+	return regions
+}
+
 func (s *balanceRangeScheduler) prepare(cluster sche.SchedulerCluster, opInfluence operator.OpInfluence, job *balanceRangeSchedulerJob) (*balanceRangeSchedulerPlan, error) {
 	filters := s.filters
 	switch job.Engine {
@@ -387,14 +414,14 @@ func (s *balanceRangeScheduler) prepare(cluster sche.SchedulerCluster, opInfluen
 		return nil, errs.ErrGetSourceStore.FastGenByArgs(job.Engine)
 	}
 	sources := filter.SelectSourceStores(cluster.GetStores(), filters, cluster.GetSchedulerConfig(), nil, nil)
-	if sources == nil {
+	if len(sources) <= 1 {
 		return nil, errs.ErrStoresNotEnough.FastGenByArgs("no store to select")
 	}
 
 	krs := core.NewKeyRanges(job.Ranges)
-	scanRegions, err := cluster.BatchScanRegions(krs)
-	if err != nil {
-		return nil, err
+	scanRegions := fetchAllRegions(cluster, krs)
+	if len(scanRegions) == 0 {
+		return nil, errs.ErrRegionNotFound.FastGenByArgs("no region found")
 	}
 
 	// storeID <--> score mapping
@@ -420,9 +447,7 @@ func (s *balanceRangeScheduler) prepare(cluster sche.SchedulerCluster, opInfluen
 	})
 
 	averageScore := int64(0)
-	if len(sources) != 0 {
-		averageScore = totalScore / int64(len(sources))
-	}
+	averageScore = totalScore / int64(len(sources))
 
 	tolerate := int64(float64(len(scanRegions)) * adjustRatio)
 	if tolerate < 1 {
@@ -457,18 +482,23 @@ func (p *balanceRangeSchedulerPlan) score(storeID uint64) int64 {
 func (p *balanceRangeSchedulerPlan) shouldBalance(scheduler string) bool {
 	sourceInfluence := p.opInfluence.GetStoreInfluence(p.sourceStoreID())
 	sourceInf := p.job.Role.getStoreInfluence(sourceInfluence)
+	// Sometimes, there are many remove-peer operators in the source store, we don't want to pick this store as source.
 	if sourceInf < 0 {
 		sourceInf = -sourceInf
 	}
+	// to avoid schedule too much, if A's core greater than B and C a little
+	// we want that A should be moved out one region not two
 	sourceScore := p.sourceScore - sourceInf - p.tolerate
 
 	targetInfluence := p.opInfluence.GetStoreInfluence(p.targetStoreID())
 	targetInf := p.job.Role.getStoreInfluence(targetInfluence)
+	// Sometimes, there are many add-peer operators in the target store, we don't want to pick this store as target.
 	if targetInf < 0 {
 		targetInf = -targetInf
 	}
 	targetScore := p.targetScore + targetInf + p.tolerate
 
+	// the source score must be greater than the target score
 	shouldBalance := sourceScore >= targetScore
 	if !shouldBalance && log.GetLevel() <= zap.DebugLevel {
 		log.Debug("skip balance",

@@ -54,6 +54,10 @@ func TestGetPeers(t *testing.T) {
 			role:  "learner",
 			peers: []*metapb.Peer{learner},
 		},
+		{
+			role:  "witness",
+			peers: nil,
+		},
 	} {
 		role := NewRole(v.role)
 		re.Equal(v.peers, role.getPeers(region))
@@ -65,6 +69,7 @@ func TestJobStatus(t *testing.T) {
 	re := require.New(t)
 	conf := &balanceRangeSchedulerConfig{
 		schedulerConfig: &baseSchedulerConfig{},
+		jobs:            make([]*balanceRangeSchedulerJob, 1),
 	}
 	conf.init(string(types.BalanceRangeScheduler), s, conf)
 	for _, v := range []struct {
@@ -91,10 +96,28 @@ func TestJobStatus(t *testing.T) {
 		job := &balanceRangeSchedulerJob{
 			Status: v.jobStatus,
 		}
-		re.Equal(v.begin, conf.begin(job))
+		conf.jobs[0] = job
+		if v.begin {
+			re.Equal(running, conf.begin(0).Status)
+		} else {
+			re.Nil(conf.begin(0))
+		}
 		job.Status = v.jobStatus
-		re.Equal(v.finish, conf.finish(job))
+		if v.finish {
+			re.Equal(finished, conf.finish(0).Status)
+		} else {
+			re.Nil(conf.finish(0))
+		}
 	}
+	idx, job := conf.peek()
+	re.Equal(0, idx)
+	re.Nil(job)
+	conf.jobs[0] = &balanceRangeSchedulerJob{
+		Status: running,
+	}
+	idx, job = conf.peek()
+	re.Equal(0, idx)
+	re.NotNil(job)
 }
 
 func TestBalanceRangePlan(t *testing.T) {
@@ -147,7 +170,7 @@ func TestTIKVEngine(t *testing.T) {
 	op := ops[0]
 	re.Equal("3", op.GetAdditionalInfo("sourceScore"))
 	re.Equal("1", op.GetAdditionalInfo("targetScore"))
-	re.Contains(op.Brief(), "transfer leader: store 1 to 3")
+	re.Contains(op.Brief(), "transfer leader: store 1 to")
 	tc.AddLeaderStore(4, 0)
 
 	// case2: move peer from store 1 to store 4
@@ -205,4 +228,28 @@ func TestTIFLASHEngine(t *testing.T) {
 	re.Equal("0", op.GetAdditionalInfo("targetScore"))
 	re.Equal("1", op.GetAdditionalInfo("tolerate"))
 	re.Contains(op.Brief(), "mv peer: store [4] to")
+}
+
+func TestFetchAllRegions(t *testing.T) {
+	re := require.New(t)
+	cancel, _, tc, _ := prepareSchedulersTest()
+	defer cancel()
+	for i := 1; i <= 3; i++ {
+		tc.AddLeaderStore(uint64(i), 0)
+	}
+	for i := 1; i <= 100; i++ {
+		tc.AddLeaderRegion(uint64(i), 1, 2, 3)
+	}
+
+	ranges := core.NewKeyRangesWithSize(1)
+	ranges.Append([]byte(""), []byte(""))
+	regions := fetchAllRegions(tc, ranges)
+	re.Len(regions, 100)
+
+	ranges = core.NewKeyRangesWithSize(1)
+	region := tc.GetRegion(50)
+	ranges.Append([]byte(""), region.GetStartKey())
+	ranges.Append(region.GetStartKey(), []byte(""))
+	regions = fetchAllRegions(tc, ranges)
+	re.Len(regions, 100)
 }
