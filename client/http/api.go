@@ -128,6 +128,7 @@ func RegionStatsByKeyRange(keyRange *KeyRange, onlyCount bool) string {
 		StatsRegion, startKeyStr, endKeyStr)
 }
 
+// RegionDistributionByKeyRange returns the path of PD HTTP API to get region distribution by start key and end key.
 func RegionDistributionByKeyRange(keyRange *KeyRange, engine string) string {
 	startKeyStr, endKeyStr := keyRange.EscapeAsUTF8Str()
 	return fmt.Sprintf("%s?start_key=%s&end_key=%s&engine=%s",

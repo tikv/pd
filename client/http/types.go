@@ -208,19 +208,24 @@ type RegionDistributions struct {
 // RegionDistribution wraps region distribution info
 // it is storage format of region_distribution_storage
 type RegionDistribution struct {
-	StoreID               uint64 `json:"store_id"`
-	EngineType            string `json:"engine_type"`
-	RegionLeaderCount     int    `json:"region_leader_count"`
-	RegionPeerCount       int    `json:"region_peer_count"`
-	ApproximateSize       int64  `json:"approximate_size"`
-	ApproximateKeys       int64  `json:"approximate_keys"`
-	RegionWriteBytes      uint64 `json:"region_write_bytes"`
-	RegionWriteKeys       uint64 `json:"region_write_keys"`
+	StoreID           uint64 `json:"store_id"`
+	EngineType        string `json:"engine_type"`
+	RegionLeaderCount int    `json:"region_leader_count"`
+	RegionPeerCount   int    `json:"region_peer_count"`
+	ApproximateSize   int64  `json:"approximate_size"`
+	ApproximateKeys   int64  `json:"approximate_keys"`
+	// write
+	RegionWriteBytes uint64 `json:"region_write_bytes"`
+	RegionWriteKeys  uint64 `json:"region_write_keys"`
+	RegionWriteQuery uint64 `json:"region_write_query"`
+	// leader read
 	RegionLeaderReadBytes uint64 `json:"region_leader_read_bytes"`
 	RegionLeaderReadKeys  uint64 `json:"region_leader_read_keys"`
-	RegionPeerReadBytes   uint64 `json:"region_peer_read_bytes"`
-	RegionPeerReadKeys    uint64 `json:"region_peer_read_keys"`
-	RegionPeerReadQuery   uint64 `json:"region_peer_read_query"`
+	RegionLeaderReadQuery uint64 `json:"region_leader_read_query"`
+	// peer read
+	RegionPeerReadBytes uint64 `json:"region_peer_read_bytes"`
+	RegionPeerReadKeys  uint64 `json:"region_peer_read_keys"`
+	RegionPeerReadQuery uint64 `json:"region_peer_read_query"`
 }
 
 // HistoryHotRegions wraps historyHotRegion
@@ -301,12 +306,24 @@ type StoreStatus struct {
 
 // RegionStats stores the statistics of regions.
 type RegionStats struct {
-	Count            int            `json:"count"`
-	EmptyCount       int            `json:"empty_count"`
-	StorageSize      int64          `json:"storage_size"`
-	StorageKeys      int64          `json:"storage_keys"`
-	StoreLeaderCount map[uint64]int `json:"store_leader_count"`
-	StorePeerCount   map[uint64]int `json:"store_peer_count"`
+	Count                int               `json:"count"`
+	EmptyCount           int               `json:"empty_count"`
+	StorageSize          int64             `json:"storage_size"`
+	StorageKeys          int64             `json:"storage_keys"`
+	StoreLeaderCount     map[uint64]int    `json:"store_leader_count"`
+	StorePeerCount       map[uint64]int    `json:"store_peer_count"`
+	StorePeerSize        map[uint64]int64  `json:"store_peer_size,omitempty"`
+	StorePeerKeys        map[uint64]int64  `json:"store_peer_keys,omitempty"`
+	StoreWriteBytes      map[uint64]uint64 `json:"store_write_bytes,omitempty"`
+	StoreWriteKeys       map[uint64]uint64 `json:"store_write_keys,omitempty"`
+	StoreWriteQuery      map[uint64]uint64 `json:"store_write_query,omitempty"`
+	StoreLeaderReadBytes map[uint64]uint64 `json:"store_leader_read_bytes,omitempty"`
+	StoreLeaderReadKeys  map[uint64]uint64 `json:"store_leader_read_keys,omitempty"`
+	StoreLeaderReadQuery map[uint64]uint64 `json:"store_leader_read_query,omitempty"`
+	StorePeerReadBytes   map[uint64]uint64 `json:"store_peer_read_bytes,omitempty"`
+	StorePeerReadKeys    map[uint64]uint64 `json:"store_peer_read_keys,omitempty"`
+	StorePeerReadQuery   map[uint64]uint64 `json:"store_peer_read_query,omitempty"`
+	StoreEngine          map[uint64]string `json:"store_engine,omitempty"`
 }
 
 // PeerRoleType is the expected peer type of the placement rule.

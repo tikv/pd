@@ -60,6 +60,14 @@ func (h *statsHandler) GetRegionStatus(w http.ResponseWriter, r *http.Request) {
 	h.rd.JSON(w, http.StatusOK, stats)
 }
 
+// @Tags	 distribution
+// @Summary  Get region stats and hot flow statistics of a specified range.
+// @Param    start_key  query  string  true   "Start key"
+// @Param    end_key    query  string  true   "End key"
+// @Param    engine     query  string  false  "Engine type such as  tikv or tiflash"
+// @Produce  json
+// @Success  200  {object}  statistics.RegionStats
+// @Router   /distribution/region [get]
 func (h *statsHandler) GetRegionDistribution(w http.ResponseWriter, r *http.Request) {
 	rc := getCluster(r)
 	startKey, endKey, engine := r.URL.Query().Get("start_key"), r.URL.Query().Get("end_key"), r.URL.Query().Get("engine")
@@ -75,53 +83,19 @@ func (h *statsHandler) GetRegionDistribution(w http.ResponseWriter, r *http.Requ
 	default:
 	}
 
-	distributions := make([]RegionDistribution, len(stores))
+	storeMap := make(map[uint64]string, len(stores))
 	for _, store := range stores {
-		distributions = append(distributions, RegionDistribution{
-			StoreID:    store.GetID(),
-			EngineType: store.GetLabelValue(core.EngineKey),
-		})
+		storeMap[store.GetID()] = store.GetLabelValue(core.EngineKey)
 	}
-	for _, dis := range distributions {
-		if _, ok := stats.StoreLeaderKeys[dis.StoreID]; ok {
-			dis.RegionLeaderCount = stats.StoreLeaderCount[dis.StoreID]
-			dis.RegionPeerCount = stats.StorePeerCount[dis.StoreID]
-			dis.ApproximateSize = stats.StorePeerSize[dis.StoreID]
-			dis.ApproximateKeys = stats.StorePeerKeys[dis.StoreID]
-			dis.RegionWriteKeys = stats.StoreWriteKeys[dis.StoreID]
-			dis.RegionWriteBytes = stats.StoreWriteBytes[dis.StoreID]
-			dis.RegionLeaderReadBytes = stats.StoreLeaderReadBytes[dis.StoreID]
-			dis.RegionLeaderReadKeys = stats.StoreLeaderReadKeys[dis.StoreID]
-			dis.RegionPeerReadKeys = stats.StorePeerReadKeys[dis.StoreID]
-			dis.RegionPeerReadBytes = stats.StorePeerReadBytes[dis.StoreID]
-			dis.RegionPeerReadQuery = stats.StorePeerReadQuery[dis.StoreID]
+	for storeID := range stats.StorePeerCount {
+		if engineLabel, ok := storeMap[storeID]; ok {
+			stats.StoreEngine[storeID] = engineLabel
+		} else {
+			stats.RemoveStore(storeID)
 		}
 	}
 
 	if err := h.rd.JSON(w, http.StatusOK, stats); err != nil {
 		log.Error("json data error", zap.Error(err))
 	}
-}
-
-// RegionDistributions is the response for the region distribution request
-type RegionDistributions struct {
-	RegionDistributions []*RegionDistribution `json:"region_distribution"`
-}
-
-// RegionDistribution wraps region distribution info
-// it is storage format of region_distribution_storage
-type RegionDistribution struct {
-	StoreID               uint64 `json:"store_id"`
-	EngineType            string `json:"engine_type"`
-	RegionLeaderCount     int    `json:"region_leader_count"`
-	RegionPeerCount       int    `json:"region_peer_count"`
-	ApproximateSize       int64  `json:"approximate_size"`
-	ApproximateKeys       int64  `json:"approximate_keys"`
-	RegionWriteBytes      uint64 `json:"region_write_bytes"`
-	RegionWriteKeys       uint64 `json:"region_write_keys"`
-	RegionLeaderReadBytes uint64 `json:"region_leader_read_bytes"`
-	RegionLeaderReadKeys  uint64 `json:"region_leader_read_keys"`
-	RegionPeerReadBytes   uint64 `json:"region_peer_read_bytes"`
-	RegionPeerReadKeys    uint64 `json:"region_peer_read_keys"`
-	RegionPeerReadQuery   uint64 `json:"region_peer_read_query"`
 }

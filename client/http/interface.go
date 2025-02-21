@@ -320,17 +320,42 @@ func (c *client) GetHistoryHotRegions(ctx context.Context, req *HistoryHotRegion
 	return &historyHotRegions, nil
 }
 
+// GetRegionDistribution gets the region distribution by key range.
 func (c *client) GetRegionDistribution(ctx context.Context, keyRange *KeyRange, engine string) (*RegionDistributions, error) {
-	var regionDistributions RegionDistributions
+	var regionStats RegionStats
 	err := c.request(ctx, newRequestInfo().
 		WithName(getRegionDistributionByKeyRangeName).
 		WithURI(RegionDistributionByKeyRange(keyRange, engine)).
 		WithMethod(http.MethodGet).
-		WithResp(&regionDistributions))
+		WithResp(&regionStats))
 	if err != nil {
 		return nil, err
 	}
-	return &regionDistributions, nil
+	distributions := make([]*RegionDistribution, 0, len(regionStats.StorePeerCount))
+	for storeID, region := range regionStats.StorePeerCount {
+		distribution := &RegionDistribution{
+			StoreID:               storeID,
+			EngineType:            regionStats.StoreEngine[storeID],
+			RegionLeaderCount:     regionStats.StoreLeaderCount[storeID],
+			RegionPeerCount:       region,
+			ApproximateSize:       regionStats.StorePeerSize[storeID],
+			ApproximateKeys:       regionStats.StorePeerKeys[storeID],
+			RegionWriteBytes:      regionStats.StoreWriteBytes[storeID],
+			RegionWriteKeys:       regionStats.StoreWriteKeys[storeID],
+			RegionWriteQuery:      regionStats.StoreWriteQuery[storeID],
+			RegionLeaderReadBytes: regionStats.StoreLeaderReadBytes[storeID],
+			RegionLeaderReadKeys:  regionStats.StoreLeaderReadKeys[storeID],
+			RegionLeaderReadQuery: regionStats.StoreLeaderReadQuery[storeID],
+			RegionPeerReadBytes:   regionStats.StorePeerReadBytes[storeID],
+			RegionPeerReadKeys:    regionStats.StorePeerReadKeys[storeID],
+			RegionPeerReadQuery:   regionStats.StorePeerReadQuery[storeID],
+		}
+		distributions = append(distributions, distribution)
+	}
+	regionDistributions := &RegionDistributions{
+		RegionDistributions: distributions,
+	}
+	return regionDistributions, nil
 }
 
 // GetRegionStatusByKeyRange gets the region status by key range.

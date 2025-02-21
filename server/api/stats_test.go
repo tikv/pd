@@ -169,6 +169,23 @@ func (suite *statsTestSuite) TestRegionStats() {
 		StorePeerKeys:    map[uint64]int64{1: 151, 4: 150, 5: 151},
 	}
 
+	stats11 := &statistics.RegionStats{
+		Count:            4,
+		EmptyCount:       1,
+		StorageSize:      351,
+		UserStorageSize:  291,
+		StorageKeys:      221,
+		StoreLeaderCount: map[uint64]int{1: 1},
+		StorePeerCount:   map[uint64]int{1: 3},
+		StoreLeaderSize:  map[uint64]int64{1: 100},
+		StoreLeaderKeys:  map[uint64]int64{1: 50},
+		StorePeerSize:    map[uint64]int64{1: 301},
+		StorePeerKeys:    map[uint64]int64{1: 201},
+		StoreWriteKeys:   map[uint64]uint64{1: 0},
+		StoreWriteBytes:  map[uint64]uint64{1: 0},
+		StoreEngine:      map[uint64]string{1: ""},
+	}
+
 	testdata := []struct {
 		startKey string
 		endKey   string
@@ -197,7 +214,7 @@ func (suite *statsTestSuite) TestRegionStats() {
 			re.NoError(err)
 			stats := &statistics.RegionStats{}
 			err = apiutil.ReadJSON(res.Body, stats)
-			res.Body.Close()
+			re.NoError(res.Body.Close())
 			re.NoError(err)
 			re.Equal(data.expect.Count, stats.Count)
 			if query != "count" {
@@ -205,4 +222,13 @@ func (suite *statsTestSuite) TestRegionStats() {
 			}
 		}
 	}
+	distributionURL := suite.urlPrefix + "/distribution/region"
+	args := fmt.Sprintf("?start_key=%s&end_key=%s&", "", "")
+	res, err := testDialClient.Get(distributionURL + args)
+	re.NoError(err)
+	stats := &statistics.RegionStats{}
+	err = apiutil.ReadJSON(res.Body, stats)
+	re.NoError(res.Body.Close())
+	re.NoError(err)
+	re.Equal(stats11, stats)
 }
