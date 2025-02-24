@@ -288,17 +288,19 @@ func (s *Service) AskBatchSplit(_ context.Context, request *schedulingpb.AskBatc
 	splitIDs := make([]*pdpb.SplitID, 0, splitCount)
 	recordRegions := make([]uint64, 0, splitCount+1)
 
-	for i := 0; i < int(splitCount); i++ {
-		newRegionID, err := c.AllocID()
-		if err != nil {
-			return nil, errs.ErrSchedulerNotFound.FastGenByArgs()
-		}
+	id, count, err := c.AllocID(splitCount * (1 + uint32(len(request.Region.Peers))))
+	if err != nil {
+		return nil, err
+	}
+	curID := id - uint64(count)
+	for range splitCount {
+		newRegionID := curID
+		curID++
 
 		peerIDs := make([]uint64, len(request.Region.Peers))
-		for i := 0; i < len(peerIDs); i++ {
-			if peerIDs[i], err = c.AllocID(); err != nil {
-				return nil, err
-			}
+		for j := 0; j < len(peerIDs); j++ {
+			peerIDs[j] = curID
+			curID++
 		}
 
 		recordRegions = append(recordRegions, newRegionID)

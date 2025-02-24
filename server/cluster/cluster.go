@@ -65,6 +65,7 @@ import (
 	"github.com/tikv/pd/pkg/syncer"
 	"github.com/tikv/pd/pkg/tso"
 	"github.com/tikv/pd/pkg/unsaferecovery"
+	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/logutil"
@@ -916,8 +917,8 @@ func (c *RaftCluster) GetHeartbeatStreams() *hbstream.HeartbeatStreams {
 }
 
 // AllocID returns a global unique ID.
-func (c *RaftCluster) AllocID() (uint64, error) {
-	return c.id.Alloc()
+func (c *RaftCluster) AllocID(uint32) (uint64, uint32, error) {
+	return c.id.Alloc(1)
 }
 
 // GetRegionSyncer returns the region syncer.
@@ -2504,6 +2505,7 @@ func CheckHealth(client *http.Client, members []*pdpb.Member) map[uint64]*pdpb.M
 		for _, cURL := range member.ClientUrls {
 			ctx, cancel := context.WithTimeout(context.Background(), clientTimeout)
 			req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("%s%s", cURL, healthURL), http.NoBody)
+			req.Header.Set(apiutil.PDAllowFollowerHandleHeader, "true")
 			if err != nil {
 				log.Error("failed to new request", errs.ZapError(errs.ErrNewHTTPRequest, err))
 				cancel()
