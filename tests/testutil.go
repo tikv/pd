@@ -407,7 +407,7 @@ type idAllocator struct {
 }
 
 func (i *idAllocator) alloc() uint64 {
-	v, _ := i.allocator.Alloc()
+	v, _, _ := i.allocator.Alloc(1)
 	return v
 }
 

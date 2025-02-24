@@ -402,15 +402,15 @@ func testPutStore(re *require.Assertions, clusterID uint64, rc *cluster.RaftClus
 	re.NoError(err)
 	re.Equal(pdpb.ErrorType_OK, resp.GetHeader().GetError().GetType())
 
-	rc.AllocID()
-	id, err := rc.AllocID()
+	rc.AllocID(1)
+	id, _, err := rc.AllocID(1)
 	re.NoError(err)
 	// Put new store with a duplicated address when old store is up will fail.
 	resp, err = putStore(grpcPDClient, clusterID, newMetaStore(id, store.GetAddress(), "2.1.0", metapb.StoreState_Up, getTestDeployPath(id)))
 	re.NoError(err)
 	re.Equal(pdpb.ErrorType_UNKNOWN, resp.GetHeader().GetError().GetType())
 
-	id, err = rc.AllocID()
+	id, _, err = rc.AllocID(1)
 	re.NoError(err)
 	// Put new store with a duplicated address when old store is offline will fail.
 	resetStoreState(re, rc, store.GetId(), metapb.StoreState_Offline)
@@ -418,7 +418,7 @@ func testPutStore(re *require.Assertions, clusterID uint64, rc *cluster.RaftClus
 	re.NoError(err)
 	re.Equal(pdpb.ErrorType_UNKNOWN, resp.GetHeader().GetError().GetType())
 
-	id, err = rc.AllocID()
+	id, _, err = rc.AllocID(1)
 	re.NoError(err)
 	// Put new store with a duplicated address when old store is tombstone is OK.
 	resetStoreState(re, rc, store.GetId(), metapb.StoreState_Tombstone)
@@ -427,7 +427,7 @@ func testPutStore(re *require.Assertions, clusterID uint64, rc *cluster.RaftClus
 	re.NoError(err)
 	re.Equal(pdpb.ErrorType_OK, resp.GetHeader().GetError().GetType())
 
-	id, err = rc.AllocID()
+	id, _, err = rc.AllocID(1)
 	re.NoError(err)
 	deployPath := getTestDeployPath(id)
 	// Put a new store.
@@ -609,7 +609,7 @@ func TestRaftClusterMultipleRestart(t *testing.T) {
 	clusterID := leaderServer.GetClusterID()
 	bootstrapCluster(re, clusterID, grpcPDClient)
 	// add an offline store
-	storeID, err := leaderServer.GetAllocator().Alloc()
+	storeID, _, err := leaderServer.GetAllocator().Alloc(1)
 	re.NoError(err)
 	store := newMetaStore(storeID, "127.0.0.1:4", "2.1.0", metapb.StoreState_Offline, getTestDeployPath(storeID))
 	rc := leaderServer.GetRaftCluster()
@@ -791,7 +791,7 @@ func TestStoreVersionChange(t *testing.T) {
 	bootstrapCluster(re, clusterID, grpcPDClient)
 	svr := leaderServer.GetServer()
 	svr.SetClusterVersion("2.0.0")
-	storeID, err := leaderServer.GetAllocator().Alloc()
+	storeID, _, err := leaderServer.GetAllocator().Alloc(1)
 	re.NoError(err)
 	store := newMetaStore(storeID, "127.0.0.1:4", "2.1.0", metapb.StoreState_Up, getTestDeployPath(storeID))
 	var wg sync.WaitGroup
@@ -833,7 +833,7 @@ func TestConcurrentHandleRegion(t *testing.T) {
 	stores := make([]*metapb.Store, 0, len(storeAddrs))
 	id := leaderServer.GetAllocator()
 	for _, addr := range storeAddrs {
-		storeID, err := id.Alloc()
+		storeID, _, err := id.Alloc(1)
 		re.NoError(err)
 		store := newMetaStore(storeID, addr, "2.1.0", metapb.StoreState_Up, getTestDeployPath(storeID))
 		stores = append(stores, store)
@@ -859,7 +859,7 @@ func TestConcurrentHandleRegion(t *testing.T) {
 		re.Equal(pdpb.ErrorType_OK, resp.GetHeader().GetError().GetType())
 		stream, err := grpcPDClient.RegionHeartbeat(ctx)
 		re.NoError(err)
-		peerID, err := id.Alloc()
+		peerID, _, err := id.Alloc(1)
 		re.NoError(err)
 		peer := &metapb.Peer{Id: peerID, StoreId: store.GetId()}
 		regionReq := &pdpb.RegionHeartbeatRequest{
@@ -896,9 +896,9 @@ func TestConcurrentHandleRegion(t *testing.T) {
 
 	concurrent := 1000
 	for i := range concurrent {
-		peerID, err := id.Alloc()
+		peerID, _, err := id.Alloc(1)
 		re.NoError(err)
-		regionID, err := id.Alloc()
+		regionID, _, err := id.Alloc(1)
 		re.NoError(err)
 		region := &metapb.Region{
 			Id:       regionID,
@@ -1261,7 +1261,7 @@ func TestOfflineStoreLimit(t *testing.T) {
 	re.NotNil(rc)
 	id := leaderServer.GetAllocator()
 	for _, addr := range storeAddrs {
-		storeID, err := id.Alloc()
+		storeID, _, err := id.Alloc(1)
 		re.NoError(err)
 		store := newMetaStore(storeID, addr, "4.0.0", metapb.StoreState_Up, getTestDeployPath(storeID))
 		resp, err := putStore(grpcPDClient, clusterID, store)
@@ -1412,9 +1412,9 @@ func TestStaleTermHeartbeat(t *testing.T) {
 	peers := make([]*metapb.Peer, 0, len(storeAddrs))
 	id := leaderServer.GetAllocator()
 	for _, addr := range storeAddrs {
-		storeID, err := id.Alloc()
+		storeID, _, err := id.Alloc(1)
 		re.NoError(err)
-		peerID, err := id.Alloc()
+		peerID, _, err := id.Alloc(1)
 		re.NoError(err)
 		store := newMetaStore(storeID, addr, "3.0.0", metapb.StoreState_Up, getTestDeployPath(storeID))
 		resp, err := putStore(grpcPDClient, clusterID, store)
@@ -1595,9 +1595,9 @@ func checkEvictLeaderStoreIDs(re *require.Assertions, sc *schedulers.Controller,
 
 func putRegionWithLeader(re *require.Assertions, rc *cluster.RaftCluster, id id.Allocator, storeID uint64) {
 	for i := range 3 {
-		regionID, err := id.Alloc()
+		regionID, _, err := id.Alloc(1)
 		re.NoError(err)
-		peerID, err := id.Alloc()
+		peerID, _, err := id.Alloc(1)
 		re.NoError(err)
 		region := &metapb.Region{
 			Id:       regionID,
@@ -1661,7 +1661,7 @@ func TestMinResolvedTS(t *testing.T) {
 	re.NotNil(rc)
 	svr := leaderServer.GetServer()
 	addStoreAndCheckMinResolvedTS := func(re *require.Assertions, isTiflash bool, minResolvedTS, expect uint64) uint64 {
-		storeID, err := id.Alloc()
+		storeID, _, err := id.Alloc(1)
 		re.NoError(err)
 		store := &metapb.Store{
 			Id:      storeID,

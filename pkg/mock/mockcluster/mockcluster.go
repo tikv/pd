@@ -121,8 +121,8 @@ func (mc *Cluster) GetStorage() storage.Storage {
 }
 
 // AllocID returns a new unique ID.
-func (mc *Cluster) AllocID() (uint64, error) {
-	return mc.IDAllocator.Alloc()
+func (mc *Cluster) AllocID(uint32) (uint64, uint32, error) {
+	return mc.IDAllocator.Alloc(1)
 }
 
 // UpdateRegionsLabelLevelStats updates the label level stats for the regions.
@@ -190,7 +190,7 @@ func hotRegionsFromStore(w *statistics.HotCache, storeID uint64, kind utils.RWTy
 
 // AllocPeer allocs a new peer on a store.
 func (mc *Cluster) AllocPeer(storeID uint64) (*metapb.Peer, error) {
-	peerID, err := mc.AllocID()
+	peerID, _, err := mc.AllocID(1)
 	if err != nil {
 		log.Error("failed to alloc peer", errs.ZapError(err))
 		return nil, err
@@ -363,7 +363,7 @@ func (mc *Cluster) AddRegionStoreWithLeader(storeID uint64, regionCount int, lea
 	}
 	mc.AddRegionStore(storeID, regionCount)
 	for range leaderCount {
-		id, _ := mc.AllocID()
+		id, _, _ := mc.AllocID(1)
 		mc.AddLeaderRegion(id, storeID)
 	}
 }
