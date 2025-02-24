@@ -39,51 +39,6 @@ import (
 	"github.com/tikv/pd/server/cluster"
 )
 
-// forwardTSORequest sends the TSO request with the given forward stream.
-func forwardTSORequest(
-	ctx context.Context,
-	request *pdpb.TsoRequest,
-	forwardStream tsopb.TSO_TsoClient,
-) (*tsopb.TsoResponse, error) {
-	tsopbReq := &tsopb.TsoRequest{
-		Header: &tsopb.RequestHeader{
-			ClusterId:       request.GetHeader().GetClusterId(),
-			SenderId:        request.GetHeader().GetSenderId(),
-			KeyspaceId:      constant.DefaultKeyspaceID,
-			KeyspaceGroupId: constant.DefaultKeyspaceGroupID,
-		},
-		Count: request.GetCount(),
-	}
-
-	failpoint.Inject("tsoProxySendToTSOTimeout", func() {
-		// block until watchDeadline routine cancels the context.
-		<-ctx.Done()
-	})
-
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	default:
-	}
-
-	if err := forwardStream.Send(tsopbReq); err != nil {
-		return nil, err
-	}
-
-	failpoint.Inject("tsoProxyRecvFromTSOTimeout", func() {
-		// block until watchDeadline routine cancels the context.
-		<-ctx.Done()
-	})
-
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	default:
-	}
-
-	return forwardStream.Recv()
-}
-
 // forwardTSO forward the TSO requests to the TSO service.
 func (s *GrpcServer) forwardTSO(stream pdpb.PD_TsoServer) error {
 	var (
@@ -164,6 +119,49 @@ func (f *tsoForwarder) cancel() {
 	}
 }
 
+// forwardTSORequest sends the TSO request with the current forward stream.
+func (f *tsoForwarder) forwardTSORequest(
+	request *pdpb.TsoRequest,
+) (*tsopb.TsoResponse, error) {
+	tsopbReq := &tsopb.TsoRequest{
+		Header: &tsopb.RequestHeader{
+			ClusterId:       request.GetHeader().GetClusterId(),
+			SenderId:        request.GetHeader().GetSenderId(),
+			KeyspaceId:      constant.DefaultKeyspaceID,
+			KeyspaceGroupId: constant.DefaultKeyspaceGroupID,
+		},
+		Count: request.GetCount(),
+	}
+
+	failpoint.Inject("tsoProxySendToTSOTimeout", func() {
+		// block until watchDeadline routine cancels the context.
+		<-f.ctx.Done()
+	})
+
+	select {
+	case <-f.ctx.Done():
+		return nil, f.ctx.Err()
+	default:
+	}
+
+	if err := f.stream.Send(tsopbReq); err != nil {
+		return nil, err
+	}
+
+	failpoint.Inject("tsoProxyRecvFromTSOTimeout", func() {
+		// block until watchDeadline routine cancels the context.
+		<-f.ctx.Done()
+	})
+
+	select {
+	case <-f.ctx.Done():
+		return nil, f.ctx.Err()
+	default:
+	}
+
+	return f.stream.Recv()
+}
+
 func (s *GrpcServer) handleTSOForwarding(
 	ctx context.Context,
 	forwarder *tsoForwarder,
@@ -235,7 +233,6 @@ func (s *GrpcServer) forwardTSORequestWithDeadLine(
 	var (
 		forwardCtx    = forwarder.ctx
 		forwardCancel = forwarder.canceller
-		forwardStream = forwarder.stream
 		done          = make(chan struct{})
 		dl            = tsoutil.NewTSDeadline(tsoutil.DefaultTSOProxyTimeout, done, forwardCancel)
 	)
@@ -246,7 +243,7 @@ func (s *GrpcServer) forwardTSORequestWithDeadLine(
 	}
 
 	start := time.Now()
-	resp, err := forwardTSORequest(forwardCtx, request, forwardStream)
+	resp, err := forwarder.forwardTSORequest(request)
 	close(done)
 	if err != nil {
 		if strings.Contains(err.Error(), errs.NotLeaderErr) {
