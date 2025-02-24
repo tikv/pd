@@ -506,8 +506,9 @@ func (s *GrpcServer) getTSOForwardStream(forwardedHost string) (*streamWrapper, 
 	if err != nil {
 		return nil, err
 	}
-	s.tsoClientPool.clients[forwardedHost] = &streamWrapper{
+	forwardStream = &streamWrapper{
 		TSO_TsoClient: tsoClient,
 	}
+	s.tsoClientPool.clients[forwardedHost] = forwardStream
 	return forwardStream, nil
 }
