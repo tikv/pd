@@ -76,7 +76,7 @@ const (
 	keyspaceGCSafePointKey = "keyspaces/gc_safe_point/%s"
 	// Compatible with old data that was directly written to etcd by TiDB.
 	txnSafePointAbsolutePath         = "/tidb/store/gcworker/saved_safe_point"
-	keyspaceTxnSafePointAbsolutePath = "/keyspaces/tidb/%s/tidb/store/gcworker/saved_safe_point"
+	keyspaceTxnSafePointAbsolutePath = "/keyspaces/tidb/%d/tidb/store/gcworker/saved_safe_point"
 	// Compatible with service safe point.
 	gcBarrierPrefix         = gcPath + "/safe_point/service"
 	keyspaceGcBarrierPrefix = "keyspaces/service_safe_point/%s"
@@ -244,7 +244,7 @@ func TxnSafePointAbsolutePath() string {
 }
 
 func KeyspaceTxnSafePointAbsolutePath(keyspaceID uint32) string {
-	return fmt.Sprintf(keyspaceTxnSafePointAbsolutePath, EncodeKeyspaceID(keyspaceID))
+	return fmt.Sprintf(keyspaceTxnSafePointAbsolutePath, keyspaceID)
 }
 
 func GCBarrierPrefix() string {

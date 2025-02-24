@@ -28,6 +28,7 @@ import (
 
 	"github.com/pingcap/errors"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/exp/slices"
 
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
@@ -373,7 +374,7 @@ func TestGCStateTransactionACID(t *testing.T) {
 	re.Equal(fmt.Sprintf("%d", addCount.Load()+transferCount.Load()+1), revision)
 }
 
-func TestLoadGCSafePoint(t *testing.T) {
+func TestGCSafePoint(t *testing.T) {
 	re := require.New(t)
 	se, clean := newEtcdStorageEndpoint(t)
 	defer clean()
@@ -382,9 +383,9 @@ func TestLoadGCSafePoint(t *testing.T) {
 	keyspaceIDs := []uint32{constant.NullKeyspaceID, 0, 1000}
 
 	for _, keyspaceID := range keyspaceIDs {
-		r, e := provider.LoadGCSafePoint(keyspaceID)
-		re.Equal(uint64(0), r)
-		re.NoError(e)
+		res, err := provider.LoadGCSafePoint(keyspaceID)
+		re.NoError(err)
+		re.Equal(uint64(0), res)
 		for _, gcSafePoint := range testData {
 			// For checking physical data representation.
 			expectedKey := "gc/safe_point"
@@ -397,7 +398,7 @@ func TestLoadGCSafePoint(t *testing.T) {
 			// Check data representation before updating (to ensure not incorrectly updated when updating other keyspaces).
 			re.NotEqual(expectedValue, loadValue(re, se, expectedKey))
 
-			err := provider.RunInGCStateTransaction(func(wb *GCStateWriteBatch) error {
+			err = provider.RunInGCStateTransaction(func(wb *GCStateWriteBatch) error {
 				return wb.SetGCSafePoint(keyspaceID, gcSafePoint)
 			})
 			re.NoError(err)
@@ -412,7 +413,7 @@ func TestLoadGCSafePoint(t *testing.T) {
 	}
 }
 
-func TestSetDeleteGCBarrier(t *testing.T) {
+func TestGCBarrier(t *testing.T) {
 	re := require.New(t)
 	se, clean := newEtcdStorageEndpoint(t)
 	defer clean()
@@ -424,7 +425,7 @@ func TestSetDeleteGCBarrier(t *testing.T) {
 	// mismatches the keyspace to store it. Its responsibility is just to store and read it as is.
 	// Also note that for the NullKeyspace, the old data from previous version may not contain the keyspaceID field,
 	// which means it is actually possible that the KeyspaceID field mismatches the actual keyspace it belongs to.
-	gcBarriers := []GCBarrier{
+	gcBarriers := []*GCBarrier{
 		{BarrierID: "1", BarrierTS: 1, ExpirationTime: &expirationTime, KeyspaceID: constant.NullKeyspaceID},
 		{BarrierID: "2", BarrierTS: 2, ExpirationTime: nil, KeyspaceID: 1000},
 		{BarrierID: "3", BarrierTS: 3, ExpirationTime: &expirationTime, KeyspaceID: 0},
@@ -553,3 +554,236 @@ func TestSetDeleteGCBarrier(t *testing.T) {
 //	re.Equal(expireAt, ssp.ExpiredAt)
 //	re.Equal(uint64(2), ssp.SafePoint)
 //}
+
+func TestTxnSafePoint(t *testing.T) {
+	re := require.New(t)
+	se, clean := newEtcdStorageEndpoint(t)
+	defer clean()
+	provider := se.GetGCStateProvider()
+
+	testData := []uint64{0, 1, 2, 233, 2333, 23333333333, math.MaxUint64}
+	keyspaceIDs := []uint32{constant.NullKeyspaceID, 0, 1000}
+
+	for _, keyspaceID := range keyspaceIDs {
+		res, err := provider.LoadTxnSafePoint(keyspaceID)
+		re.NoError(err)
+		re.Equal(uint64(0), res)
+
+		for _, txnSafePoint := range testData {
+			// For checking physical data representation.
+			expectedKey := "/tidb/store/gcworker/saved_safe_point"
+			expectedValue := fmt.Sprintf("%d", txnSafePoint)
+			if keyspaceID != constant.NullKeyspaceID {
+				expectedKey = fmt.Sprintf("/keyspaces/tidb/%d/tidb/store/gcworker/saved_safe_point", keyspaceID)
+			}
+
+			// Check data representation before updating (to ensure not incorrectly updated when updating other keyspaces).
+			re.NotEqual(expectedValue, loadValue(re, se, expectedKey))
+
+			err = provider.RunInGCStateTransaction(func(wb *GCStateWriteBatch) error {
+				return wb.SetTxnSafePoint(keyspaceID, txnSafePoint)
+			})
+			re.NoError(err)
+
+			// Check data representation after updating.
+			re.Equal(expectedValue, loadValue(re, se, expectedKey))
+
+			newTxnSafePoint, err := provider.LoadGCSafePoint(keyspaceID)
+			re.NoError(err)
+			re.Equal(newTxnSafePoint, txnSafePoint)
+		}
+	}
+}
+
+func mustSaveKey(re *require.Assertions, se *StorageEndpoint, key string, value string) {
+	err := se.Save(key, value)
+	re.NoError(err)
+}
+
+func mustRemoveKey(re *require.Assertions, se *StorageEndpoint, key string) {
+	err := se.Remove(key)
+	re.NoError(err)
+}
+
+func TestTiDBMinStartTS(t *testing.T) {
+	re := require.New(t)
+	se, clean := newEtcdStorageEndpoint(t)
+	defer clean()
+	provider := se.GetGCStateProvider()
+
+	genKey := func(keyspaceID uint32, instanceIdentifier string) string {
+		if keyspaceID == constant.NullKeyspaceID {
+			return "/tidb/server/minstartts/" + instanceIdentifier
+		}
+		return fmt.Sprintf("/keyspaces/tidb/%d/tidb/server/minstartts/%s", keyspaceID, instanceIdentifier)
+	}
+
+	keyspaceIDs := []uint32{constant.NullKeyspaceID, 0, 1000}
+
+	checkResult := func(keyspaceID uint32, expectedInstanceKey string, expectedValue uint64) {
+		key, res, err := provider.CompatibleLoadTiDBMinStartTS(keyspaceID)
+		re.NoError(err)
+		re.Equal(expectedInstanceKey, key)
+		re.Equal(expectedValue, res)
+	}
+
+	for _, keyspaceID := range keyspaceIDs {
+		checkResult(keyspaceID, "", 0)
+
+		mustSaveKey(re, se, genKey(keyspaceID, "instance1"), "10")
+		checkResult(keyspaceID, genKey(keyspaceID, "instance1"), 10)
+
+		mustSaveKey(re, se, genKey(keyspaceID, "instance1"), "15")
+		checkResult(keyspaceID, genKey(keyspaceID, "instance1"), 15)
+
+		mustSaveKey(re, se, genKey(keyspaceID, "instance2"), "20")
+		checkResult(keyspaceID, genKey(keyspaceID, "instance1"), 15)
+
+		mustSaveKey(re, se, genKey(keyspaceID, "instance2"), "14")
+		checkResult(keyspaceID, genKey(keyspaceID, "instance2"), 14)
+
+		mustSaveKey(re, se, genKey(keyspaceID, "instance1"), strconv.FormatUint(math.MaxUint64, 10))
+		checkResult(keyspaceID, genKey(keyspaceID, "instance2"), 14)
+
+		mustRemoveKey(re, se, genKey(keyspaceID, "instance2"))
+		checkResult(keyspaceID, genKey(keyspaceID, "instance1"), math.MaxUint64)
+
+		mustRemoveKey(re, se, genKey(keyspaceID, "instance1"))
+		checkResult(keyspaceID, "", 0)
+	}
+}
+
+func TestDataPhysicalRepresentation(t *testing.T) {
+	re := require.New(t)
+
+	// The following data is possible to be stored by current version of PD. Test storing on them.
+	// Note that newEtcdStorageEndpoint uses 100 as the cluster ID.
+	writableKvPairs := []kv.KeyValuePair{
+		{"/pd/100/gc/safepoint", "654882009e40000" /* 456139133457530880 */},
+		{"/pd/100/keyspaces/gc_safe_point/00001111", `{"keyspace_id":1111,"safe_point":456139133457530881}`},
+		{"/tidb/store/gcworker/saved_safe_point", "456139133457530882"},
+		{"/keyspaces/tidb/2222/tidb/store/gcworker/saved_safe_point", "456139133457530883"},
+		{"/pd/100/gc/safepoint/service/gc_worker", `{"service_id":"gc_worker","expired_at":9223372036854775807,"safe_point":456139133457530884,"keyspace_id":4294967295}`},
+		{"/pd/100/gc/safepoint/service/svc1", `{"service_id":"svc1","expired_at":1740127928,"safe_point":456139133457530885,"keyspace_id":4294967295}`},
+		{"/pd/100/keyspaces/service_safe_point/00003333/svc2", `{"service_id":"svc2","expired_at":1740127928,"safe_point":456139133457530886,"keyspace_id":2222}`},
+	}
+
+	slices.SortFunc(writableKvPairs, func(lhs, rhs kv.KeyValuePair) bool {
+		return lhs.Key < rhs.Key
+	})
+
+	// Test storing
+	func() {
+		se, clean := newEtcdStorageEndpoint(t)
+		defer clean()
+		provider := se.GetGCStateProvider()
+		err := provider.RunInGCStateTransaction(func(wb *GCStateWriteBatch) error {
+			re.NoError(wb.SetGCSafePoint(constant.NullKeyspaceID, 456139133457530880))
+			re.NoError(wb.SetGCSafePoint(1111, 456139133457530881))
+			re.NoError(wb.SetTxnSafePoint(constant.NullKeyspaceID, 456139133457530882))
+			re.NoError(wb.SetTxnSafePoint(2222, 456139133457530883))
+			re.NoError(wb.SetGCBarrier(constant.NullKeyspaceID, NewGCBarrier(constant.NullKeyspaceID, "gc_worker", 456139133457530884, nil)))
+			expirationTime := time.Unix(1740127928, 0)
+			re.NoError(wb.SetGCBarrier(constant.NullKeyspaceID, NewGCBarrier(constant.NullKeyspaceID, "svc1", 456139133457530885, &expirationTime)))
+			re.NoError(wb.SetGCBarrier(3333, NewGCBarrier(3333, "svc2", 456139133457530886, &expirationTime)))
+			return nil
+		})
+		re.NoError(err)
+
+		keys, values, err := se.LoadRange("", "", 0)
+		re.NoError(err)
+		re.Len(keys, len(writableKvPairs), fmt.Sprintf("data length mismatches, expected kvpairs: %v, actual keys: %v, acutal values: %v", writableKvPairs, keys, values))
+		for i, key := range keys {
+			value := values[i]
+			re.Equal(writableKvPairs[i].Key, key)
+			re.Equal(writableKvPairs[i].Value, value)
+		}
+	}()
+
+	// The following data is only possible to be read by the current version, and might be written by old versions PD or
+	// other components (e.g., tidb).
+	readableKvPairs := []kv.KeyValuePair{
+		// MinStartTS reported by TiDB
+		{"/tidb/server/minstartts/instance1", "456139133457530887"},
+		{"/keyspaces/tidb/4444/tidb/server/minstartts/instance2", "456139133457530888"},
+		// Service safe points written by old PDs that doesn't have the keyspaceID field.
+		{"/pd/100/gc/safepoint/service/svc3", `{"service_id":"svc1","expired_at":1740127928,"safe_point":456139133457530889}`},
+	}
+
+	func() {
+		se, clean := newEtcdStorageEndpoint(t)
+		defer clean()
+		provider := se.GetGCStateProvider()
+
+		var allKvPairs []kv.KeyValuePair
+		allKvPairs = append(allKvPairs, writableKvPairs...)
+		allKvPairs = append(allKvPairs, readableKvPairs...)
+		for _, kvPair := range allKvPairs {
+			err := se.Save(kvPair.Key, kvPair.Value)
+			re.NoError(err)
+		}
+
+		gcSafePoint, err := provider.LoadGCSafePoint(constant.NullKeyspaceID)
+		re.NoError(err)
+		re.Equal(uint64(456139133457530880), gcSafePoint)
+		gcSafePoint, err = provider.LoadGCSafePoint(1111)
+		re.NoError(err)
+		re.Equal(uint64(456139133457530881), gcSafePoint)
+		txnSafePoint, err := provider.LoadTxnSafePoint(constant.NullKeyspaceID)
+		re.NoError(err)
+		re.Equal(uint64(456139133457530882), txnSafePoint)
+		txnSafePoint, err = provider.LoadTxnSafePoint(2222)
+		re.NoError(err)
+		re.Equal(uint64(456139133457530883), txnSafePoint)
+		gcBarrier, err := provider.LoadGCBarrier(constant.NullKeyspaceID, "gc_worker")
+		re.NoError(err)
+		re.Equal(NewGCBarrier(constant.NullKeyspaceID, "gc_worker", 456139133457530884, nil), gcBarrier)
+		gcBarrier, err = provider.LoadGCBarrier(constant.NullKeyspaceID, "svc1")
+		re.NoError(err)
+		expirationTime := time.Unix(1740127928, 0)
+		re.Equal(NewGCBarrier(constant.NullKeyspaceID, "svc1", 456139133457530885, &expirationTime), gcBarrier)
+		gcBarrier, err = provider.LoadGCBarrier(3333, "svc2")
+		re.NoError(err)
+		re.Equal(NewGCBarrier(3333, "svc2", 456139133457530886, &expirationTime), gcBarrier)
+
+		key, minStartTS, err := provider.CompatibleLoadTiDBMinStartTS(constant.NullKeyspaceID)
+		re.NoError(err)
+		re.Equal("/tidb/server/minstartts/instance1", key)
+		re.Equal(uint64(456139133457530887), minStartTS)
+		key, minStartTS, err = provider.CompatibleLoadTiDBMinStartTS(4444)
+		re.NoError(err)
+		re.Equal("/keyspaces/tidb/4444/tidb/server/minstartts/instance2", key)
+		re.Equal(uint64(456139133457530888), minStartTS)
+		gcBarrier, err = provider.LoadGCBarrier(constant.NullKeyspaceID, "svc3")
+		re.NoError(err)
+		re.Equal(NewGCBarrier(constant.NullKeyspaceID, "svc1", 456139133457530889, &expirationTime), gcBarrier)
+
+		keys, ssps, err := provider.CompatibleLoadAllServiceGCSafePoints()
+		re.NoError(err)
+		re.Equal([]string{
+			"/pd/100/gc/safepoint/service/gc_worker",
+			"/pd/100/gc/safepoint/service/svc1",
+			"/pd/100/gc/safepoint/service/svc3",
+		}, keys)
+		re.Equal([]*ServiceSafePoint{
+			{
+				ServiceID:  "gc_worker",
+				ExpiredAt:  math.MaxInt64,
+				SafePoint:  456139133457530884,
+				KeyspaceID: constant.NullKeyspaceID,
+			},
+			{
+				ServiceID:  "svc1",
+				ExpiredAt:  1740127928,
+				SafePoint:  456139133457530885,
+				KeyspaceID: constant.NullKeyspaceID,
+			},
+			{
+				ServiceID: "svc3",
+				ExpiredAt: 1740127928,
+				SafePoint: 456139133457530889,
+				// The storage layer is not responsible for fixing this field.
+			},
+		}, ssps)
+	}()
+}

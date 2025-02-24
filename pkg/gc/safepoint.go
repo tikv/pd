@@ -168,7 +168,7 @@ func (m *GCStateManager) AdvanceTxnSafePoint(keyspaceID uint32, target uint64) (
 		sspAsGCBarrier.BarrierTS = target
 		// Ensure service safe point of "gc_worker" should never expire.
 		sspAsGCBarrier.ExpirationTime = nil
-		return wb.SetGCBarrier(keyspaceID, *sspAsGCBarrier)
+		return wb.SetGCBarrier(keyspaceID, sspAsGCBarrier)
 	}
 
 	m.lock.Lock()
@@ -228,12 +228,12 @@ func (m *GCStateManager) AdvanceTxnSafePoint(keyspaceID uint32, target uint64) (
 		}
 
 		// Compatible with old TiDB nodes that use TiDBMinStartTS to block GC.
-		ownerKey, minStartTS, err1 := m.gcMetaStorage.LoadTiDBMinStartTS(keyspaceID)
+		ownerKey, minStartTS, err1 := m.gcMetaStorage.CompatibleLoadTiDBMinStartTS(keyspaceID)
 		if err1 != nil {
 			return err1
 		}
 
-		if minStartTS < newTxnSafePoint {
+		if minStartTS != 0 && len(ownerKey) != 0 && minStartTS < newTxnSafePoint {
 			// Note that txn safe point is defined inclusive: snapshots that exactly equals to the txn safe point are
 			// considered valid.
 			newTxnSafePoint = minStartTS
@@ -289,16 +289,12 @@ func (m *GCStateManager) SetGCBarrier(keyspaceID uint32, barrierID string, barri
 	m.lock.Lock()
 	defer m.lock.Unlock()
 
-	newBarrier := endpoint.GCBarrier{
-		BarrierID:      barrierID,
-		BarrierTS:      barrierTS,
-		ExpirationTime: nil,
-		KeyspaceID:     keyspaceID,
-	}
+	var expirationTime *time.Time = nil
 	if ttl < time.Duration(math.MaxInt64) {
-		expirationTime := now.Add(ttl)
-		newBarrier.ExpirationTime = &expirationTime
+		t := now.Add(ttl)
+		expirationTime = &t
 	}
+	newBarrier := endpoint.NewGCBarrier(keyspaceID, barrierID, barrierTS, expirationTime)
 
 	err = m.gcMetaStorage.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
 		txnSafePoint, err1 := m.gcMetaStorage.LoadTxnSafePoint(keyspaceID)
@@ -315,7 +311,7 @@ func (m *GCStateManager) SetGCBarrier(keyspaceID uint32, barrierID string, barri
 		return nil, err
 	}
 
-	return &newBarrier, nil
+	return newBarrier, nil
 }
 
 func (m *GCStateManager) DeleteGCBarrier(keyspaceID uint32, barrierID string) (*endpoint.GCBarrier, error) {

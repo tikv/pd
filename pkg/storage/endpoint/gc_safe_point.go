@@ -271,7 +271,7 @@ func (p GCStateProvider) LoadAllGCBarriers(keyspaceID uint32) ([]*GCBarrier, err
 	return barriers, nil
 }
 
-func (p GCStateProvider) LoadTiDBMinStartTS(keyspaceID uint32) (string, uint64, error) {
+func (p GCStateProvider) CompatibleLoadTiDBMinStartTS(keyspaceID uint32) (string, uint64, error) {
 	prefix := keypath.CompatibleTiDBMinStartTSAbsolutePath() + "/"
 	if keyspaceID != constant.NullKeyspaceID {
 		prefix = keypath.CompatibleKeyspaceTiDBMinStartTSAbsolutePath(keyspaceID) + "/"
@@ -524,7 +524,7 @@ func (wb *GCStateWriteBatch) SetTxnSafePoint(keyspaceID uint32, txnSafePoint uin
 	return nil
 }
 
-func (wb *GCStateWriteBatch) SetGCBarrier(keyspaceID uint32, newGCBarrier GCBarrier) error {
+func (wb *GCStateWriteBatch) SetGCBarrier(keyspaceID uint32, newGCBarrier *GCBarrier) error {
 	prefix := keypath.GCBarrierPrefix()
 	if keyspaceID != constant.NullKeyspaceID {
 		prefix = keypath.KeyspaceGCBarrierPrefix(keyspaceID)
