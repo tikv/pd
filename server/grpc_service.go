@@ -96,7 +96,8 @@ type pdpbTSORequest struct {
 	err     error
 }
 
-func (s *tsoServer) send(m *pdpb.TsoResponse) error {
+// Send wraps Send() of PD_TsoServer.
+func (s *tsoServer) Send(m *pdpb.TsoResponse) error {
 	if atomic.LoadInt32(&s.closed) == 1 {
 		return io.EOF
 	}
@@ -493,22 +494,16 @@ func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
 	go tsoutil.WatchTSDeadline(stream.Context(), tsDeadlineCh)
 
 	var (
-		doneCh chan struct{}
-		errCh  chan error
-		// The following are tso forward stream related variables.
-		forwardStream     tsopb.TSO_TsoClient
-		cancelForward     context.CancelFunc
-		forwardCtx        context.Context
-		tsoStreamErr      error
-		lastForwardedHost string
+		doneCh       chan struct{}
+		errCh        chan error
+		forwarder    = newTSOForwarder(stream)
+		tsoStreamErr error
 	)
 
 	defer func() {
-		if cancelForward != nil {
-			cancelForward()
-		}
+		forwarder.cancel()
 		if grpcutil.NeedRebuildConnection(tsoStreamErr) {
-			s.closeDelegateClient(lastForwardedHost)
+			s.closeDelegateClient(forwarder.host)
 		}
 	}()
 
@@ -559,7 +554,7 @@ func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
 				err = errs.ErrGenerateTimestamp.FastGenByArgs("tso count should be positive")
 				return errs.ErrUnknown(err)
 			}
-			forwardCtx, cancelForward, forwardStream, lastForwardedHost, tsoStreamErr, err = s.handleTSOForwarding(forwardCtx, forwardStream, stream, nil, request, tsDeadlineCh, lastForwardedHost, cancelForward)
+			tsoStreamErr, err = s.handleTSOForwarding(stream.Context(), forwarder, request, tsDeadlineCh)
 			if tsoStreamErr != nil {
 				return tsoStreamErr
 			}
