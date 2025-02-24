@@ -645,7 +645,7 @@ func (suite *redirectorTestSuite) TestPing() {
 	// ping request should not be redirected.
 	request.Header.Add(apiutil.PDAllowFollowerHandleHeader, "true")
 	re.NoError(err)
-	resp, err := tests.TestDialClient.Do(request)
+	resp, err := dialClient.Do(request)
 	re.NoError(err)
 	defer resp.Body.Close()
 	re.Equal(http.StatusOK, resp.StatusCode)
