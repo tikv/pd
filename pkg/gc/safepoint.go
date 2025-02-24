@@ -108,7 +108,7 @@ func (m *GCStateManager) advanceGCSafePointImpl(keyspaceID uint32, target uint64
 
 	newGCSafePoint = target
 
-	err = m.gcMetaStorage.RunInGCMetaTransaction(func(wb *endpoint.GCStateWriteBatch) error {
+	err = m.gcMetaStorage.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
 		var err1 error
 		oldGCSafePoint, err1 = m.gcMetaStorage.LoadGCSafePoint(keyspaceID)
 		if err1 != nil {
@@ -179,7 +179,7 @@ func (m *GCStateManager) AdvanceTxnSafePoint(keyspaceID uint32, target uint64) (
 	var blockingBarrier *endpoint.GCBarrier
 	var blockingMinStartTSOwner *string
 
-	err = m.gcMetaStorage.RunInGCMetaTransaction(func(wb *endpoint.GCStateWriteBatch) error {
+	err = m.gcMetaStorage.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
 		var err1 error
 		oldTxnSafePoint, err1 = m.gcMetaStorage.LoadTxnSafePoint(keyspaceID)
 		if err1 != nil {
@@ -300,7 +300,7 @@ func (m *GCStateManager) SetGCBarrier(keyspaceID uint32, barrierID string, barri
 		newBarrier.ExpirationTime = &expirationTime
 	}
 
-	err = m.gcMetaStorage.RunInGCMetaTransaction(func(wb *endpoint.GCStateWriteBatch) error {
+	err = m.gcMetaStorage.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
 		txnSafePoint, err1 := m.gcMetaStorage.LoadTxnSafePoint(keyspaceID)
 		if err1 != nil {
 			return err1
@@ -328,7 +328,7 @@ func (m *GCStateManager) DeleteGCBarrier(keyspaceID uint32, barrierID string) (*
 	defer m.lock.Unlock()
 
 	var deletedBarrier *endpoint.GCBarrier
-	err = m.gcMetaStorage.RunInGCMetaTransaction(func(wb *endpoint.GCStateWriteBatch) error {
+	err = m.gcMetaStorage.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
 		var err1 error
 		deletedBarrier, err1 = m.gcMetaStorage.LoadGCBarrier(keyspaceID, barrierID)
 		if err1 != nil {
@@ -373,7 +373,7 @@ func (m *GCStateManager) GetGCState(keyspaceID uint32) (GCState, error) {
 	}
 
 	var result GCState
-	err = m.gcMetaStorage.RunInGCMetaTransaction(func(wb *endpoint.GCStateWriteBatch) error {
+	err = m.gcMetaStorage.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
 		var err1 error
 		result, err1 = m.getGCStateInTransaction(keyspaceID, wb)
 		return err1
@@ -395,7 +395,7 @@ func (m *GCStateManager) GetGlobalGCState() (map[uint32]GCState, error) {
 
 	// Do not guarantee atomicity among different keyspaces here.
 	results := make(map[uint32]GCState)
-	err = m.gcMetaStorage.RunInGCMetaTransaction(func(wb *endpoint.GCStateWriteBatch) error {
+	err = m.gcMetaStorage.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
 		nullKeyspaceState, err1 := m.getGCStateInTransaction(constant.NullKeyspaceID, wb)
 		if err1 != nil {
 			return err1
@@ -416,7 +416,7 @@ func (m *GCStateManager) GetGlobalGCState() (map[uint32]GCState, error) {
 			continue
 		}
 
-		err = m.gcMetaStorage.RunInGCMetaTransaction(func(wb *endpoint.GCStateWriteBatch) error {
+		err = m.gcMetaStorage.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
 			state, err1 := m.getGCStateInTransaction(keyspaceMeta.Id, wb)
 			if err1 != nil {
 				return err1

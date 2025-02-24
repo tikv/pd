@@ -299,7 +299,12 @@ func (p GCStateProvider) LoadTiDBMinStartTS(keyspaceID uint32) (string, uint64, 
 	return minKey, minMinStartTS, nil
 }
 
-func (p GCStateProvider) RunInGCMetaTransaction(f func(wb *GCStateWriteBatch) error) error {
+// RunInGCStateTransaction runs a transaction for updating GC states or read a batch of GC states.
+// The atomicity is guaranteed by a "revision" key. Any non-empty write caused by the transaction will increase the
+// revision.
+// In the transaction, reads can be performed on the GCStateProvider as usual, while writes should only be performed
+// through the GCStateWriteBatch.
+func (p GCStateProvider) RunInGCStateTransaction(f func(wb *GCStateWriteBatch) error) error {
 	revisionKey := keypath.GCMetaRevisionPath()
 	currentRevision, err := p.storage.Load(revisionKey)
 	if err != nil {
@@ -328,11 +333,16 @@ func (p GCStateProvider) RunInGCMetaTransaction(f func(wb *GCStateWriteBatch) er
 	}
 
 	ops := wb.ops
-	ops = append(ops, kv.RawTxnOp{
-		Key:    revisionKey,
-		OpType: kv.RawTxnOpPut,
-		Value:  nextRevision,
-	})
+
+	// No need to increase the revision if there's no write (so that it acts like an RLock and concurrent reads won't
+	// conflict with each other).
+	if len(ops) > 0 {
+		ops = append(ops, kv.RawTxnOp{
+			Key:    revisionKey,
+			OpType: kv.RawTxnOpPut,
+			Value:  nextRevision,
+		})
+	}
 
 	txn := p.storage.CreateRawTxn()
 	result, err := txn.If(condition).Then(ops...).Commit()

@@ -95,7 +95,7 @@ func (h *serviceGCSafepointHandler) GetGCSafePoint(w http.ResponseWriter, _ *htt
 func (h *serviceGCSafepointHandler) DeleteGCSafePoint(w http.ResponseWriter, r *http.Request) {
 	provider := h.svr.GetStorage().GetGCStateProvider()
 	serviceID := mux.Vars(r)["service_id"]
-	err := provider.RunInGCMetaTransaction(func(wb *endpoint.GCStateWriteBatch) error {
+	err := provider.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
 		// As GC barriers and service safe points shares the same data, deleting GC barriers acts the same as deleting
 		// service safe points.
 		err := wb.DeleteGCBarrier(constant.NullKeyspaceID, serviceID)
