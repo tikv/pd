@@ -16,6 +16,7 @@ package cache
 
 import (
 	"context"
+	"sync/atomic"
 	"time"
 
 	"go.uber.org/zap"
@@ -39,18 +40,19 @@ type ttlCache struct {
 	items      map[any]ttlCacheItem
 	ttl        time.Duration
 	gcInterval time.Duration
+	// isGCRunning is used to avoid running GC multiple times.
+	isGCRunning atomic.Bool
 }
 
 // NewTTL returns a new TTL cache.
 func newTTL(ctx context.Context, gcInterval time.Duration, duration time.Duration) *ttlCache {
 	c := &ttlCache{
-		ctx:        ctx,
-		items:      make(map[any]ttlCacheItem),
-		ttl:        duration,
-		gcInterval: gcInterval,
+		ctx:         ctx,
+		items:       make(map[any]ttlCacheItem),
+		ttl:         duration,
+		gcInterval:  gcInterval,
+		isGCRunning: atomic.Bool{},
 	}
-
-	go c.doGC()
 	return c
 }
 
@@ -63,7 +65,9 @@ func (c *ttlCache) put(key any, value any) {
 func (c *ttlCache) putWithTTL(key any, value any, ttl time.Duration) {
 	c.Lock()
 	defer c.Unlock()
-
+	if len(c.items) == 0 && c.isGCRunning.CompareAndSwap(false, true) {
+		go c.doGC()
+	}
 	c.items[key] = ttlCacheItem{
 		value:  value,
 		expire: time.Now().Add(ttl),
@@ -162,6 +166,11 @@ func (c *ttlCache) doGC() {
 						delete(c.items, key)
 					}
 				}
+			}
+			if len(c.items) == 0 && c.isGCRunning.CompareAndSwap(true, false) {
+				c.Unlock()
+				log.Debug("TTL GC items is empty exit")
+				return
 			}
 			c.Unlock()
 			log.Debug("TTL GC items", zap.Int("count", count))
