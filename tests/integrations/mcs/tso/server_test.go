@@ -524,7 +524,7 @@ func TestForwardTsoConcurrently(t *testing.T) {
 	suite := NewPDServiceForward(re)
 	defer suite.ShutDown()
 
-	tc, err := tests.NewTestTSOCluster(suite.ctx, 2, suite.backendEndpoints)
+	tc, err := tests.NewTestTSOCluster(suite.ctx, 1, suite.backendEndpoints)
 	re.NoError(err)
 	defer tc.Destroy()
 	tc.WaitForDefaultPrimaryServing(re)
@@ -549,6 +549,41 @@ func TestForwardTsoConcurrently(t *testing.T) {
 		}()
 	}
 	wg.Wait()
+}
+
+func BenchmarkForwardTsoConcurrently(b *testing.B) {
+	re := require.New(b)
+	suite := NewPDServiceForward(re)
+	defer suite.ShutDown()
+
+	tc, err := tests.NewTestTSOCluster(suite.ctx, 1, suite.backendEndpoints)
+	re.NoError(err)
+	defer tc.Destroy()
+	tc.WaitForDefaultPrimaryServing(re)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		var (
+			wg = sync.WaitGroup{}
+		)
+		for i := range 3 {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				pdClient, err := pd.NewClientWithContext(context.Background(),
+					caller.TestComponent,
+					[]string{suite.backendEndpoints}, pd.SecurityOption{}, opt.WithMaxErrorRetry(1))
+				re.NoError(err)
+				re.NotNil(pdClient)
+				defer pdClient.Close()
+				for range 100 {
+					min, err := pdClient.UpdateServiceGCSafePoint(context.Background(), fmt.Sprintf("service-%d", i), 1000, 1)
+					re.NoError(err)
+					re.Equal(uint64(0), min)
+				}
+			}()
+		}
+		wg.Wait()
+	}
 }
 
 type CommonTestSuite struct {
