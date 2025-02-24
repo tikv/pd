@@ -412,7 +412,7 @@ func TestLoadGCSafePoint(t *testing.T) {
 	}
 }
 
-func TestSetGCBarrier(t *testing.T) {
+func TestSetDeleteGCBarrier(t *testing.T) {
 	re := require.New(t)
 	se, clean := newEtcdStorageEndpoint(t)
 	defer clean()
@@ -431,6 +431,18 @@ func TestSetGCBarrier(t *testing.T) {
 	}
 
 	for _, keyspaceID := range []uint32{constant.NullKeyspaceID, 0, 1000} {
+		// Empty.
+		loadedBarriers, err := provider.LoadAllGCBarriers(keyspaceID)
+		re.NoError(err)
+		re.Empty(loadedBarriers)
+
+		// Loading not existing GC barrier results in nils.
+		for _, gcBarrier := range gcBarriers {
+			loadedBarrier, err := provider.LoadGCBarrier(keyspaceID, gcBarrier.BarrierID)
+			re.NoError(err)
+			re.Nil(loadedBarrier)
+		}
+
 		for _, gcBarrier := range gcBarriers {
 			err := provider.RunInGCStateTransaction(func(wb *GCStateWriteBatch) error {
 				return wb.SetGCBarrier(keyspaceID, gcBarrier)
@@ -451,10 +463,10 @@ func TestSetGCBarrier(t *testing.T) {
 			loadValue(re, se, pathPrefix+"/3"))
 
 		// Check with the GC barrier API.
-		barriers, err := provider.LoadAllGCBarriers(keyspaceID)
+		loadedBarriers, err = provider.LoadAllGCBarriers(keyspaceID)
 		re.NoError(err)
-		re.Len(barriers, 3)
-		for i, barrier := range barriers {
+		re.Len(loadedBarriers, 3)
+		for i, barrier := range loadedBarriers {
 			re.Equal(gcBarriers[i].BarrierID, barrier.BarrierID)
 			re.Equal(gcBarriers[i].BarrierTS, barrier.BarrierTS)
 			re.Equal(gcBarriers[i].ExpirationTime, barrier.ExpirationTime)
@@ -466,25 +478,45 @@ func TestSetGCBarrier(t *testing.T) {
 			re.Equal(barrier.BarrierID, b.BarrierID)
 		}
 
-		// Check by the legacy service safe point API.
-		keys, ssps, err := provider.CompatibleLoadAllServiceGCSafePoints()
-		re.NoError(err)
-		re.Len(keys, 3)
-		re.Len(ssps, 3)
+		if keyspaceID == constant.NullKeyspaceID {
+			// Check by the legacy service safe point API for null keyspace.
+			keys, ssps, err := provider.CompatibleLoadAllServiceGCSafePoints()
+			re.NoError(err)
+			re.Len(keys, 3)
+			re.Len(ssps, 3)
 
-		for i, key := range keys {
-			re.True(strings.HasSuffix(key, gcBarriers[i].BarrierID))
+			for i, key := range keys {
+				re.True(strings.HasSuffix(key, gcBarriers[i].BarrierID))
 
-			ssp := ssps[i]
-			re.Equal(gcBarriers[i].BarrierID, ssp.ServiceID)
-			if gcBarriers[i].ExpirationTime == nil {
-				re.Equal(int64(math.MaxInt64), ssp.ExpiredAt)
-			} else {
-				re.Equal(gcBarriers[i].ExpirationTime.Unix(), ssp.ExpiredAt)
+				ssp := ssps[i]
+				re.Equal(gcBarriers[i].BarrierID, ssp.ServiceID)
+				if gcBarriers[i].ExpirationTime == nil {
+					re.Equal(int64(math.MaxInt64), ssp.ExpiredAt)
+				} else {
+					re.Equal(gcBarriers[i].ExpirationTime.Unix(), ssp.ExpiredAt)
+				}
+				re.Equal(gcBarriers[i].BarrierTS, ssp.SafePoint)
+				re.Equal(gcBarriers[i].KeyspaceID, ssp.KeyspaceID)
 			}
-			re.Equal(gcBarriers[i].BarrierTS, ssp.SafePoint)
-			re.Equal(gcBarriers[i].KeyspaceID, ssp.KeyspaceID)
 		}
+
+		// Test deletion
+		for _, gcBarrier := range gcBarriers {
+			err = provider.RunInGCStateTransaction(func(wb *GCStateWriteBatch) error {
+				return wb.DeleteGCBarrier(keyspaceID, gcBarrier.BarrierID)
+			})
+			re.NoError(err)
+
+			// Not exist anymore.
+			loadedBarrier, err := provider.LoadGCBarrier(keyspaceID, gcBarrier.BarrierID)
+			re.NoError(err)
+			re.Nil(loadedBarrier)
+		}
+
+		// After deletion, reading range returns empty again.
+		loadedBarriers, err = provider.LoadAllGCBarriers(keyspaceID)
+		re.NoError(err)
+		re.Empty(loadedBarriers)
 	}
 }
 

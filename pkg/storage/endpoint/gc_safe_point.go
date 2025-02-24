@@ -71,6 +71,10 @@ func NewGCBarrier(keyspaceID uint32, barrierID string, barrierTS uint64, expirat
 }
 
 func gcBarrierFromServiceSafePoint(s *ServiceSafePoint) *GCBarrier {
+	if s == nil {
+		return nil
+	}
+
 	res := &GCBarrier{
 		BarrierID:      s.ServiceID,
 		BarrierTS:      s.SafePoint,
