@@ -16,6 +16,7 @@ package kv
 
 import (
 	"context"
+	"fmt"
 	"path"
 	"strings"
 	"time"
@@ -137,6 +138,14 @@ func (kv *etcdKVBase) Remove(key string) error {
 		return errs.ErrEtcdTxnConflict.FastGenByArgs()
 	}
 	return nil
+}
+
+// CreateRawTxn creates a transaction that provides interface in if-then-else pattern.
+func (kv *etcdKVBase) CreateRawTxn() RawTxn {
+	return &rawTxnWrapper{
+		inner:    NewSlowLogTxn(kv.client),
+		rootPath: kv.rootPath,
+	}
 }
 
 // SlowLogTxn wraps etcd transaction and log slow one.
@@ -295,4 +304,118 @@ func (txn *etcdTxn) commit() error {
 		return errs.ErrEtcdTxnConflict.FastGenByArgs()
 	}
 	return nil
+}
+
+type rawTxnWrapper struct {
+	inner    clientv3.Txn
+	rootPath string
+}
+
+// If implements RawTxn interface for adding conditions to the transaction.
+func (l *rawTxnWrapper) If(conditions ...RawTxnCondition) RawTxn {
+	cmpList := make([]clientv3.Cmp, 0, len(conditions))
+	for _, c := range conditions {
+		key := strings.Join([]string{l.rootPath, c.Key}, "/")
+		if c.CmpType == RawTxnCmpExists {
+			cmpList = append(cmpList, clientv3.Compare(clientv3.CreateRevision(key), ">", 0))
+		} else if c.CmpType == RawTxnCmpNotExists {
+			cmpList = append(cmpList, clientv3.Compare(clientv3.CreateRevision(key), "=", 0))
+		} else {
+			var cmpOp string
+			switch c.CmpType {
+			case RawTxnCmpEqual:
+				cmpOp = "="
+			case RawTxnCmpNotEqual:
+				cmpOp = "!="
+			case RawTxnCmpGreater:
+				cmpOp = ">"
+			case RawTxnCmpLess:
+				cmpOp = "<"
+			default:
+				panic(fmt.Sprintf("unknown cmp type %v", c.CmpType))
+			}
+			cmpList = append(cmpList, clientv3.Compare(clientv3.Value(key), cmpOp, c.Value))
+		}
+	}
+	l.inner = l.inner.If(cmpList...)
+	return l
+}
+
+func (l *rawTxnWrapper) convertOps(ops []RawTxnOp) []clientv3.Op {
+	opsList := make([]clientv3.Op, 0, len(ops))
+	for _, op := range ops {
+		key := strings.Join([]string{l.rootPath, op.Key}, "/")
+		switch op.OpType {
+		case RawTxnOpPut:
+			opsList = append(opsList, clientv3.OpPut(key, op.Value))
+		case RawTxnOpDelete:
+			opsList = append(opsList, clientv3.OpDelete(key))
+		case RawTxnOpGet:
+			opsList = append(opsList, clientv3.OpGet(key))
+		case RawTxnOpGetRange:
+			if op.EndKey == "\x00" {
+				opsList = append(opsList, clientv3.OpGet(key, clientv3.WithPrefix(), clientv3.WithLimit(int64(op.Limit))))
+			} else {
+				endKey := strings.Join([]string{l.rootPath, op.EndKey}, "/")
+				opsList = append(opsList, clientv3.OpGet(key, clientv3.WithRange(endKey), clientv3.WithLimit(int64(op.Limit))))
+			}
+		default:
+			panic(fmt.Sprintf("unknown op type %v", op.OpType))
+		}
+	}
+	return opsList
+}
+
+// Then implements RawTxn interface for adding operations that need to be executed when the condition passes to
+// the transaction.
+func (l *rawTxnWrapper) Then(ops ...RawTxnOp) RawTxn {
+	l.inner = l.inner.Then(l.convertOps(ops)...)
+	return l
+}
+
+// Else implements RawTxn interface for adding operations that need to be executed when the condition doesn't pass
+// to the transaction.
+func (l *rawTxnWrapper) Else(ops ...RawTxnOp) RawTxn {
+	l.inner = l.inner.Else(l.convertOps(ops)...)
+	return l
+}
+
+// Commit implements RawTxn interface for committing the transaction.
+func (l *rawTxnWrapper) Commit() (RawTxnResponse, error) {
+	resp, err := l.inner.Commit()
+	if err != nil {
+		return RawTxnResponse{}, err
+	}
+	items := make([]RawTxnResponseItem, 0, len(resp.Responses))
+	for i, rpcRespItem := range resp.Responses {
+		var respItem RawTxnResponseItem
+		if put := rpcRespItem.GetResponsePut(); put != nil {
+			// Put and delete operations of etcd's transaction won't return any previous data. Skip handling it.
+			respItem = RawTxnResponseItem{}
+		} else if del := rpcRespItem.GetResponseDeleteRange(); del != nil {
+			// Put and delete operations of etcd's transaction won't return any previous data. Skip handling it.
+			respItem = RawTxnResponseItem{}
+		} else if rangeResp := rpcRespItem.GetResponseRange(); rangeResp != nil {
+			kvs := make([]KeyValuePair, 0, len(rangeResp.Kvs))
+			for _, kv := range rangeResp.Kvs {
+				key := strings.TrimPrefix(string(kv.Key), l.rootPath+"/")
+				kvs = append(kvs, KeyValuePair{
+					Key:   key,
+					Value: string(kv.Value),
+				})
+			}
+			respItem = RawTxnResponseItem{
+				KeyValuePairs: kvs,
+			}
+		} else {
+			return RawTxnResponse{}, errs.ErrEtcdTxnResponse.GenWithStackByArgs(
+				fmt.Sprintf("succeeded: %v, index: %v, response: %v", resp.Succeeded, i, rpcRespItem),
+			)
+		}
+		items = append(items, respItem)
+	}
+	return RawTxnResponse{
+		Succeeded: resp.Succeeded,
+		Responses: items,
+	}, nil
 }

@@ -456,6 +456,12 @@ func (c *client) UpdateOption(option opt.DynamicOption, value any) error {
 			return errors.New("[pd] invalid value type for TSOClientRPCConcurrency option, it should be int")
 		}
 		c.inner.option.SetTSOClientRPCConcurrency(value)
+	case opt.EnableRouterClient:
+		enable, ok := value.(bool)
+		if !ok {
+			return errors.New("[pd] invalid value type for EnableRouterClient option, it should be bool")
+		}
+		c.inner.option.SetEnableRouterClient(enable)
 	default:
 		return errors.New("[pd] unsupported client option")
 	}
@@ -567,12 +573,6 @@ func (c *client) GetMinTS(ctx context.Context) (physical int64, logical int64, e
 
 	minTS := resp.GetTimestamp()
 	return minTS.Physical, minTS.Logical, nil
-}
-
-// EnableRouterClient enables the router client.
-// This is only for test currently.
-func (c *client) EnableRouterClient() {
-	c.inner.initRouterClient()
 }
 
 func (c *client) getRouterClient() *router.Cli {
