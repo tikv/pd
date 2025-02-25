@@ -487,7 +487,7 @@ func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
 		defer done()
 	}
 	if s.IsServiceIndependent(constant.TSOServiceName) {
-		return s.forwardTSO(stream)
+		return s.forwardToTSOService(stream)
 	}
 
 	tsDeadlineCh := make(chan *tsoutil.TSDeadline, 1)

@@ -39,8 +39,8 @@ import (
 	"github.com/tikv/pd/server/cluster"
 )
 
-// forwardTSO forward the TSO requests to the TSO service.
-func (s *GrpcServer) forwardTSO(stream pdpb.PD_TsoServer) error {
+// forwardToTSOService forwards the TSO requests to the TSO service.
+func (s *GrpcServer) forwardToTSOService(stream pdpb.PD_TsoServer) error {
 	var (
 		server       = &tsoServer{stream: stream}
 		forwarder    = newTSOForwarder(server)
