@@ -560,29 +560,44 @@ func BenchmarkForwardTsoConcurrently(b *testing.B) {
 	re.NoError(err)
 	defer tc.Destroy()
 	tc.WaitForDefaultPrimaryServing(re)
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		var (
-			wg = sync.WaitGroup{}
-		)
-		for i := range 3 {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				pdClient, err := pd.NewClientWithContext(context.Background(),
-					caller.TestComponent,
-					[]string{suite.backendEndpoints}, pd.SecurityOption{}, opt.WithMaxErrorRetry(1))
-				re.NoError(err)
-				re.NotNil(pdClient)
-				defer pdClient.Close()
-				for range 100 {
-					min, err := pdClient.UpdateServiceGCSafePoint(context.Background(), fmt.Sprintf("service-%d", i), 1000, 1)
-					re.NoError(err)
-					re.Equal(uint64(0), min)
-				}
-			}()
+
+	initClients := func(num int) []pd.Client {
+		var clients []pd.Client
+		for i := 0; i < num; i++ {
+			pdClient, err := pd.NewClientWithContext(context.Background(),
+				caller.TestComponent,
+				[]string{suite.backendEndpoints}, pd.SecurityOption{}, opt.WithMaxErrorRetry(1))
+			re.NoError(err)
+			re.NotNil(pdClient)
+			clients = append(clients, pdClient)
 		}
-		wg.Wait()
+		return clients
+	}
+
+	concurrencyLevels := []int{1, 2, 5, 10, 20}
+	for _, clientsNum := range concurrencyLevels {
+		clients := initClients(clientsNum)
+		b.Run(fmt.Sprintf("clients_%d", clientsNum), func(b *testing.B) {
+			wg := sync.WaitGroup{}
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				for i, client := range clients {
+					wg.Add(1)
+					go func() {
+						defer wg.Done()
+						for range 1000 {
+							min, err := client.UpdateServiceGCSafePoint(context.Background(), fmt.Sprintf("service-%d", i), 1000, 1)
+							re.NoError(err)
+							re.Equal(uint64(0), min)
+						}
+					}()
+				}
+			}
+			wg.Wait()
+		})
+		for _, c := range clients {
+			c.Close()
+		}
 	}
 }
 
