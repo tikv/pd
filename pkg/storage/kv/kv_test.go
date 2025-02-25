@@ -94,6 +94,7 @@ func testRange(re *require.Assertions, kv Base) {
 		limit      int
 		expect     []string
 	}{
+		{start: "", end: "\x00", limit: 100, expect: []string{}},
 		{start: "a", end: "z", limit: 100, expect: sortedKeys},
 		{start: "a", end: "z", limit: 3, expect: sortedKeys[:3]},
 		{start: "testa", end: "z", limit: 3, expect: []string{"testa", "testa/a", "testa/ab"}},

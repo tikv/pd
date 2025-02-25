@@ -21,6 +21,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/tikv/pd/pkg/utils/etcdutil"
+	"github.com/tikv/pd/pkg/utils/keypath"
 )
 
 const testGroupID = uint32(1)
@@ -32,7 +33,7 @@ func TestSaveLoadTimestamp(t *testing.T) {
 	expectedTS := time.Now().Round(0)
 	err := storage.SaveTimestamp(testGroupID, expectedTS)
 	re.NoError(err)
-	ts, err := storage.LoadTimestamp("")
+	ts, err := storage.LoadTimestamp(keypath.Prefix(keypath.TimestampPath(testGroupID)))
 	re.NoError(err)
 	re.Equal(expectedTS, ts)
 }
@@ -49,7 +50,7 @@ func TestTimestampTxn(t *testing.T) {
 	err = storage.SaveTimestamp(testGroupID, globalTS2)
 	re.Error(err)
 
-	ts, err := storage.LoadTimestamp("")
+	ts, err := storage.LoadTimestamp(keypath.Prefix(keypath.TimestampPath(testGroupID)))
 	re.NoError(err)
 	re.Equal(globalTS1, ts)
 }
