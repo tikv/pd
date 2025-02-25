@@ -70,7 +70,7 @@ func (kv *etcdKVBase) Load(key string) (string, error) {
 func (kv *etcdKVBase) LoadRange(key, endKey string, limit int) ([]string, []string, error) {
 	var OpOption []clientv3.OpOption
 	// If endKey is "\x00", it means to scan with prefix.
-	// If the prefix is empty, it means to scan all keys.
+	// If the key is empty and endKey is "\x00", it means to scan all keys.
 	if endKey == "\x00" {
 		OpOption = append(OpOption, clientv3.WithPrefix())
 	} else {
