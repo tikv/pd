@@ -55,12 +55,14 @@ func TestGCBarriersConversions(t *testing.T) {
 	t4 := t1.Add(time.Millisecond * 999)
 
 	gcBarriers := []*GCBarrier{
-		NewGCBarrier(constant.NullKeyspaceID, "a", 1, nil),
-		NewGCBarrier(0, "b", 2, &t1),
-		NewGCBarrier(1000, "c", uint64(t1.UnixMilli())<<18, &t2),
-		NewGCBarrier(1000, "d", math.MaxUint64-1, &t3),
-		NewGCBarrier(constant.NullKeyspaceID, "e", 456139133457530881, &t4),
+		NewGCBarrier("a", 1, nil),
+		NewGCBarrier("b", 2, &t1),
+		NewGCBarrier("c", uint64(t1.UnixMilli())<<18, &t2),
+		NewGCBarrier("d", math.MaxUint64-1, &t3),
+		NewGCBarrier("e", 456139133457530881, &t4),
 	}
+
+	keyspaces := []uint32{constant.NullKeyspaceID, 0, 1, 1000, constant.NullKeyspaceID}
 
 	// Check t3 & t4 are rounded
 	t3Rounded := time.Date(2025, 2, 20, 15, 30, 01, 0, time.Local)
@@ -70,7 +72,7 @@ func TestGCBarriersConversions(t *testing.T) {
 	serviceSafePoints := []*ServiceSafePoint{
 		{ServiceID: "a", ExpiredAt: math.MaxInt64, SafePoint: 1, KeyspaceID: constant.NullKeyspaceID},
 		{ServiceID: "b", ExpiredAt: t1.Unix(), SafePoint: 2, KeyspaceID: 0},
-		{ServiceID: "c", ExpiredAt: t2.Unix(), SafePoint: uint64(t1.UnixMilli()) << 18, KeyspaceID: 1000},
+		{ServiceID: "c", ExpiredAt: t2.Unix(), SafePoint: uint64(t1.UnixMilli()) << 18, KeyspaceID: 1},
 		{ServiceID: "d", ExpiredAt: t3Rounded.Unix(), SafePoint: math.MaxUint64 - 1, KeyspaceID: 1000},
 		{ServiceID: "e", ExpiredAt: t3Rounded.Unix(), SafePoint: 456139133457530881, KeyspaceID: constant.NullKeyspaceID},
 	}
@@ -78,7 +80,7 @@ func TestGCBarriersConversions(t *testing.T) {
 	// Test representing GC barriers by service safe points.
 	for i, gcBarrier := range gcBarriers {
 		expectedServiceSafePoint := serviceSafePoints[i]
-		serviceSafePoint := gcBarrier.toServiceSafePoint()
+		serviceSafePoint := gcBarrier.toServiceSafePoint(keyspaces[i])
 		re.Equal(expectedServiceSafePoint, serviceSafePoint)
 	}
 
@@ -154,10 +156,9 @@ func TestGCStateJSONUtil(t *testing.T) {
 	re.Equal([]*int64{new(int64), nil}, vpints)
 
 	ssp := &ServiceSafePoint{
-		ServiceID:  "testsvc",
-		ExpiredAt:  math.MaxInt64,
-		SafePoint:  456139133457530881,
-		KeyspaceID: constant.NullKeyspaceID,
+		ServiceID: "testsvc",
+		ExpiredAt: math.MaxInt64,
+		SafePoint: 456139133457530881,
 	}
 	writeJSON("dir4/k1", ssp)
 	re.Equal(`{"service_id":"testsvc","expired_at":9223372036854775807,"safe_point":456139133457530881,"keyspace_id":4294967295}`, loadValue("dir4/k1"))
@@ -420,15 +421,10 @@ func TestGCBarrier(t *testing.T) {
 	provider := se.GetGCStateProvider()
 	expirationTime := time.Unix(1740127928, 0)
 
-	// GCStateProvider is only a storage layer and should not manipulate the internal data, while the detailed logic
-	// (e.g. maintaining invariants between different data) should be done in outer modules. So it allows the keyspaceID
-	// mismatches the keyspace to store it. Its responsibility is just to store and read it as is.
-	// Also note that for the NullKeyspace, the old data from previous version may not contain the keyspaceID field,
-	// which means it is actually possible that the KeyspaceID field mismatches the actual keyspace it belongs to.
 	gcBarriers := []*GCBarrier{
-		{BarrierID: "1", BarrierTS: 1, ExpirationTime: &expirationTime, KeyspaceID: constant.NullKeyspaceID},
-		{BarrierID: "2", BarrierTS: 2, ExpirationTime: nil, KeyspaceID: 1000},
-		{BarrierID: "3", BarrierTS: 3, ExpirationTime: &expirationTime, KeyspaceID: 0},
+		{BarrierID: "1", BarrierTS: 1, ExpirationTime: &expirationTime},
+		{BarrierID: "2", BarrierTS: 2, ExpirationTime: nil},
+		{BarrierID: "3", BarrierTS: 3, ExpirationTime: &expirationTime},
 	}
 
 	for _, keyspaceID := range []uint32{constant.NullKeyspaceID, 0, 1000} {
@@ -456,11 +452,15 @@ func TestGCBarrier(t *testing.T) {
 		if keyspaceID != constant.NullKeyspaceID {
 			pathPrefix = fmt.Sprintf("keyspaces/service_safe_point/%08d", keyspaceID)
 		}
-		re.Equal(`{"service_id":"1","expired_at":1740127928,"safe_point":1,"keyspace_id":4294967295}`,
+		keyspaceIDField := ""
+		if keyspaceID != constant.NullKeyspaceID {
+			keyspaceIDField = fmt.Sprintf(`,"keyspace_id":%d`, keyspaceID)
+		}
+		re.Equal(`{"service_id":"1","expired_at":1740127928,"safe_point":1`+keyspaceIDField+`}`,
 			loadValue(re, se, pathPrefix+"/1"))
-		re.Equal(`{"service_id":"2","expired_at":9223372036854775807,"safe_point":2,"keyspace_id":1000}`,
+		re.Equal(`{"service_id":"2","expired_at":9223372036854775807,"safe_point":2`+keyspaceIDField+`}`,
 			loadValue(re, se, pathPrefix+"/2"))
-		re.Equal(`{"service_id":"3","expired_at":1740127928,"safe_point":3,"keyspace_id":0}`,
+		re.Equal(`{"service_id":"3","expired_at":1740127928,"safe_point":3`+keyspaceIDField+`}`,
 			loadValue(re, se, pathPrefix+"/3"))
 
 		// Check with the GC barrier API.
@@ -471,7 +471,6 @@ func TestGCBarrier(t *testing.T) {
 			re.Equal(gcBarriers[i].BarrierID, barrier.BarrierID)
 			re.Equal(gcBarriers[i].BarrierTS, barrier.BarrierTS)
 			re.Equal(gcBarriers[i].ExpirationTime, barrier.ExpirationTime)
-			re.Equal(gcBarriers[i].KeyspaceID, barrier.KeyspaceID)
 
 			// Check key matches.
 			b, err := provider.LoadGCBarrier(keyspaceID, barrier.BarrierID)
@@ -497,7 +496,6 @@ func TestGCBarrier(t *testing.T) {
 					re.Equal(gcBarriers[i].ExpirationTime.Unix(), ssp.ExpiredAt)
 				}
 				re.Equal(gcBarriers[i].BarrierTS, ssp.SafePoint)
-				re.Equal(gcBarriers[i].KeyspaceID, ssp.KeyspaceID)
 			}
 		}
 
@@ -663,8 +661,8 @@ func TestDataPhysicalRepresentation(t *testing.T) {
 		{"/pd/100/keyspaces/gc_safe_point/00001111", `{"keyspace_id":1111,"safe_point":456139133457530881}`},
 		{"/tidb/store/gcworker/saved_safe_point", "456139133457530882"},
 		{"/keyspaces/tidb/2222/tidb/store/gcworker/saved_safe_point", "456139133457530883"},
-		{"/pd/100/gc/safepoint/service/gc_worker", `{"service_id":"gc_worker","expired_at":9223372036854775807,"safe_point":456139133457530884,"keyspace_id":4294967295}`},
-		{"/pd/100/gc/safepoint/service/svc1", `{"service_id":"svc1","expired_at":1740127928,"safe_point":456139133457530885,"keyspace_id":4294967295}`},
+		{"/pd/100/gc/safepoint/service/gc_worker", `{"service_id":"gc_worker","expired_at":9223372036854775807,"safe_point":456139133457530884}`},
+		{"/pd/100/gc/safepoint/service/svc1", `{"service_id":"svc1","expired_at":1740127928,"safe_point":456139133457530885}`},
 		{"/pd/100/keyspaces/service_safe_point/00003333/svc2", `{"service_id":"svc2","expired_at":1740127928,"safe_point":456139133457530886,"keyspace_id":2222}`},
 	}
 
@@ -682,10 +680,10 @@ func TestDataPhysicalRepresentation(t *testing.T) {
 			re.NoError(wb.SetGCSafePoint(1111, 456139133457530881))
 			re.NoError(wb.SetTxnSafePoint(constant.NullKeyspaceID, 456139133457530882))
 			re.NoError(wb.SetTxnSafePoint(2222, 456139133457530883))
-			re.NoError(wb.SetGCBarrier(constant.NullKeyspaceID, NewGCBarrier(constant.NullKeyspaceID, "gc_worker", 456139133457530884, nil)))
+			re.NoError(wb.SetGCBarrier(constant.NullKeyspaceID, NewGCBarrier("gc_worker", 456139133457530884, nil)))
 			expirationTime := time.Unix(1740127928, 0)
-			re.NoError(wb.SetGCBarrier(constant.NullKeyspaceID, NewGCBarrier(constant.NullKeyspaceID, "svc1", 456139133457530885, &expirationTime)))
-			re.NoError(wb.SetGCBarrier(3333, NewGCBarrier(3333, "svc2", 456139133457530886, &expirationTime)))
+			re.NoError(wb.SetGCBarrier(constant.NullKeyspaceID, NewGCBarrier("svc1", 456139133457530885, &expirationTime)))
+			re.NoError(wb.SetGCBarrier(3333, NewGCBarrier("svc2", 456139133457530886, &expirationTime)))
 			return nil
 		})
 		re.NoError(err)
@@ -706,8 +704,6 @@ func TestDataPhysicalRepresentation(t *testing.T) {
 		// MinStartTS reported by TiDB
 		{"/tidb/server/minstartts/instance1", "456139133457530887"},
 		{"/keyspaces/tidb/4444/tidb/server/minstartts/instance2", "456139133457530888"},
-		// Service safe points written by old PDs that doesn't have the keyspaceID field.
-		{"/pd/100/gc/safepoint/service/svc3", `{"service_id":"svc1","expired_at":1740127928,"safe_point":456139133457530889}`},
 	}
 
 	func() {
@@ -737,14 +733,14 @@ func TestDataPhysicalRepresentation(t *testing.T) {
 		re.Equal(uint64(456139133457530883), txnSafePoint)
 		gcBarrier, err := provider.LoadGCBarrier(constant.NullKeyspaceID, "gc_worker")
 		re.NoError(err)
-		re.Equal(NewGCBarrier(constant.NullKeyspaceID, "gc_worker", 456139133457530884, nil), gcBarrier)
+		re.Equal(NewGCBarrier("gc_worker", 456139133457530884, nil), gcBarrier)
 		gcBarrier, err = provider.LoadGCBarrier(constant.NullKeyspaceID, "svc1")
 		re.NoError(err)
 		expirationTime := time.Unix(1740127928, 0)
-		re.Equal(NewGCBarrier(constant.NullKeyspaceID, "svc1", 456139133457530885, &expirationTime), gcBarrier)
+		re.Equal(NewGCBarrier("svc1", 456139133457530885, &expirationTime), gcBarrier)
 		gcBarrier, err = provider.LoadGCBarrier(3333, "svc2")
 		re.NoError(err)
-		re.Equal(NewGCBarrier(3333, "svc2", 456139133457530886, &expirationTime), gcBarrier)
+		re.Equal(NewGCBarrier("svc2", 456139133457530886, &expirationTime), gcBarrier)
 
 		key, minStartTS, err := provider.CompatibleLoadTiDBMinStartTS(constant.NullKeyspaceID)
 		re.NoError(err)
@@ -754,16 +750,12 @@ func TestDataPhysicalRepresentation(t *testing.T) {
 		re.NoError(err)
 		re.Equal("/keyspaces/tidb/4444/tidb/server/minstartts/instance2", key)
 		re.Equal(uint64(456139133457530888), minStartTS)
-		gcBarrier, err = provider.LoadGCBarrier(constant.NullKeyspaceID, "svc3")
-		re.NoError(err)
-		re.Equal(NewGCBarrier(constant.NullKeyspaceID, "svc1", 456139133457530889, &expirationTime), gcBarrier)
 
 		keys, ssps, err := provider.CompatibleLoadAllServiceGCSafePoints()
 		re.NoError(err)
 		re.Equal([]string{
 			"/pd/100/gc/safepoint/service/gc_worker",
 			"/pd/100/gc/safepoint/service/svc1",
-			"/pd/100/gc/safepoint/service/svc3",
 		}, keys)
 		re.Equal([]*ServiceSafePoint{
 			{
@@ -777,12 +769,6 @@ func TestDataPhysicalRepresentation(t *testing.T) {
 				ExpiredAt:  1740127928,
 				SafePoint:  456139133457530885,
 				KeyspaceID: constant.NullKeyspaceID,
-			},
-			{
-				ServiceID: "svc3",
-				ExpiredAt: 1740127928,
-				SafePoint: 456139133457530889,
-				// The storage layer is not responsible for fixing this field.
 			},
 		}, ssps)
 	}()

@@ -37,23 +37,82 @@ import (
 // ServiceSafePoint is also directly used for storing GC barriers in order to make GC barriers in new versions
 // can be backward-compatible with service safe points in old versions.
 type ServiceSafePoint struct {
-	ServiceID string `json:"service_id"`
-	ExpiredAt int64  `json:"expired_at"`
-	SafePoint uint64 `json:"safe_point"`
+	ServiceID string
+	ExpiredAt int64
+	SafePoint uint64
 
-	KeyspaceID uint32 `json:"keyspace_id"`
+	// Note than when marshalled into JSON, omitting KeyspaceID stands for the NullKeyspace (0xffffffff),
+	// rather than KeyspaceID = 0 which is the ID of the default keyspace.
+	// Special marshalling / unmarshalling methods are given for handling this field in a non-default way.
+	//
+	// The purpose is to make the code (for keyspaced and non-keyspaced/global GC) unified while keeping the
+	// data format compatible with the old versions. In old versions, the global GC (or synonymously the GC
+	// of the NullKeyspace, represented by KeyspaceID=0xffffffff) saves service safe points without the
+	// KeyspaceID field; but for GC API V2 (deprecated), it attaches the KeyspaceID which is possibly zero
+	// (representing the default keyspace).
+	//
+	// Avoid creating and using a new ServiceSafePoint outside this package. When you must do so, assign
+	// constant.NullKeyspaceID to the KeyspaceID field as the default, instead of leaving it zero.
+	KeyspaceID uint32
 }
+
+func (s *ServiceSafePoint) MarshalJSON() ([]byte, error) {
+	if s.KeyspaceID == constant.NullKeyspaceID {
+		return json.Marshal(struct {
+			ServiceID string `json:"service_id"`
+			ExpiredAt int64  `json:"expired_at"`
+			SafePoint uint64 `json:"safe_point"`
+		}{
+			ServiceID: s.ServiceID,
+			ExpiredAt: s.ExpiredAt,
+			SafePoint: s.SafePoint,
+		})
+	}
+	return json.Marshal(struct {
+		ServiceID  string `json:"service_id"`
+		ExpiredAt  int64  `json:"expired_at"`
+		SafePoint  uint64 `json:"safe_point"`
+		KeyspaceID uint32 `json:"keyspace_id"`
+	}{
+		ServiceID:  s.ServiceID,
+		ExpiredAt:  s.ExpiredAt,
+		SafePoint:  s.SafePoint,
+		KeyspaceID: s.KeyspaceID,
+	})
+}
+
+func (s *ServiceSafePoint) UnmarshalJSON(data []byte) error {
+	var repr struct {
+		ServiceID  string  `json:"service_id"`
+		ExpiredAt  int64   `json:"expired_at"`
+		SafePoint  uint64  `json:"safe_point"`
+		KeyspaceID *uint32 `json:"keyspace_id"`
+	}
+	if err := json.Unmarshal(data, &repr); err != nil {
+		return errs.ErrJSONUnmarshal.Wrap(err).GenWithStackByArgs()
+	}
+	s.ServiceID = repr.ServiceID
+	s.ExpiredAt = repr.ExpiredAt
+	s.SafePoint = repr.SafePoint
+	if repr.KeyspaceID != nil {
+		s.KeyspaceID = *repr.KeyspaceID
+	} else {
+		s.KeyspaceID = constant.NullKeyspaceID
+	}
+	return nil
+}
+
+var _ json.Marshaler = &ServiceSafePoint{}
+var _ json.Unmarshaler = &ServiceSafePoint{}
 
 type GCBarrier struct {
 	BarrierID string
 	BarrierTS uint64
 	// Nil means never expiring.
 	ExpirationTime *time.Time
-
-	KeyspaceID uint32
 }
 
-func NewGCBarrier(keyspaceID uint32, barrierID string, barrierTS uint64, expirationTime *time.Time) *GCBarrier {
+func NewGCBarrier(barrierID string, barrierTS uint64, expirationTime *time.Time) *GCBarrier {
 	// Round up the expirationTime.
 	if expirationTime != nil {
 		rounded := expirationTime.Truncate(time.Second)
@@ -66,7 +125,6 @@ func NewGCBarrier(keyspaceID uint32, barrierID string, barrierTS uint64, expirat
 		BarrierID:      barrierID,
 		BarrierTS:      barrierTS,
 		ExpirationTime: expirationTime,
-		KeyspaceID:     keyspaceID,
 	}
 }
 
@@ -79,7 +137,6 @@ func gcBarrierFromServiceSafePoint(s *ServiceSafePoint) *GCBarrier {
 		BarrierID:      s.ServiceID,
 		BarrierTS:      s.SafePoint,
 		ExpirationTime: nil,
-		KeyspaceID:     s.KeyspaceID,
 	}
 	if s.ExpiredAt < math.MaxInt64 && s.ExpiredAt > 0 {
 		expirationTime := new(time.Time)
@@ -89,12 +146,12 @@ func gcBarrierFromServiceSafePoint(s *ServiceSafePoint) *GCBarrier {
 	return res
 }
 
-func (b *GCBarrier) toServiceSafePoint() *ServiceSafePoint {
+func (b *GCBarrier) toServiceSafePoint(keyspaceID uint32) *ServiceSafePoint {
 	res := &ServiceSafePoint{
 		ServiceID:  b.BarrierID,
 		ExpiredAt:  math.MaxInt64,
 		SafePoint:  b.BarrierTS,
-		KeyspaceID: b.KeyspaceID,
+		KeyspaceID: keyspaceID,
 	}
 	if b.ExpirationTime != nil {
 		res.ExpiredAt = b.ExpirationTime.Unix()
@@ -111,8 +168,8 @@ func (b *GCBarrier) String() string {
 	if b.ExpirationTime != nil {
 		expirationTime = b.ExpirationTime.String()
 	}
-	return fmt.Sprintf("GCBarrier { BarrierID: %s, BarrierTS: %d, ExpirationTime: %v, KeyspaceID: %d }",
-		b.BarrierID, b.BarrierTS, expirationTime, b.KeyspaceID)
+	return fmt.Sprintf("GCBarrier { BarrierID: %s, BarrierTS: %d, ExpirationTime: %v }",
+		b.BarrierID, b.BarrierTS, expirationTime)
 }
 
 type GCStateStorage interface {
@@ -530,7 +587,7 @@ func (wb *GCStateWriteBatch) SetGCBarrier(keyspaceID uint32, newGCBarrier *GCBar
 		prefix = keypath.KeyspaceGCBarrierPrefix(keyspaceID)
 	}
 	key := path.Join(prefix, newGCBarrier.BarrierID)
-	return wb.writeJson(key, newGCBarrier.toServiceSafePoint())
+	return wb.writeJson(key, newGCBarrier.toServiceSafePoint(keyspaceID))
 }
 
 func (wb *GCStateWriteBatch) DeleteGCBarrier(keyspaceID uint32, barrierID string) error {
