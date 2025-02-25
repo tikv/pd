@@ -70,11 +70,8 @@ func (kv *etcdKVBase) Load(key string) (string, error) {
 func (kv *etcdKVBase) LoadRange(key, endKey string, limit int) ([]string, []string, error) {
 	var OpOption []clientv3.OpOption
 	// If endKey is "\x00", it means to scan with prefix.
+	// If the prefix is empty, it means to scan all keys.
 	if endKey == "\x00" {
-		if key == "" {
-			log.Warn("we didn't allow empty start key. To keep consistent with lebedb_kv and mem_kv, we will return an empty result")
-			return []string{}, []string{}, nil
-		}
 		OpOption = append(OpOption, clientv3.WithPrefix())
 	} else {
 		OpOption = append(OpOption, clientv3.WithRange(endKey))

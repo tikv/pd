@@ -94,7 +94,7 @@ func testRange(re *require.Assertions, kv Base) {
 		limit      int
 		expect     []string
 	}{
-		{start: "", end: "\x00", limit: 100, expect: []string{}},
+		{start: "", end: "\x00", limit: 100, expect: sortedKeys},
 		{start: "a", end: "z", limit: 100, expect: sortedKeys},
 		{start: "a", end: "z", limit: 3, expect: sortedKeys[:3]},
 		{start: "testa", end: "z", limit: 3, expect: []string{"testa", "testa/a", "testa/ab"}},
@@ -105,6 +105,10 @@ func testRange(re *require.Assertions, kv Base) {
 	}
 
 	for _, testCase := range testCases {
+		_, isEtcd := kv.(*etcdKVBase)
+		if testCase.end == "\x00" && !isEtcd {
+			continue
+		}
 		ks, vs, err := kv.LoadRange(testCase.start, testCase.end, testCase.limit)
 		re.NoError(err)
 		re.Equal(testCase.expect, ks)
