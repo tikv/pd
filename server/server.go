@@ -124,6 +124,11 @@ var (
 	etcdCommittedIndexGauge = etcdStateGauge.WithLabelValues("committedIndex")
 )
 
+type streamWrapper struct {
+	tsopb.TSO_TsoClient
+	syncutil.Mutex
+}
+
 // Server is the pd server. It implements bs.Server
 // nolint
 type Server struct {
@@ -203,7 +208,7 @@ type Server struct {
 
 	tsoClientPool struct {
 		syncutil.RWMutex
-		clients map[string]tsopb.TSO_TsoClient
+		clients map[string]*streamWrapper
 	}
 
 	// tsoDispatcher is used to dispatch different TSO requests to
@@ -261,9 +266,9 @@ func CreateServer(ctx context.Context, cfg *config.Config, services []string, le
 		mode:                            mode,
 		tsoClientPool: struct {
 			syncutil.RWMutex
-			clients map[string]tsopb.TSO_TsoClient
+			clients map[string]*streamWrapper
 		}{
-			clients: make(map[string]tsopb.TSO_TsoClient),
+			clients: make(map[string]*streamWrapper),
 		},
 	}
 	s.handler = newHandler(s)
