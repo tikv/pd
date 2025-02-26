@@ -212,7 +212,7 @@ func BenchmarkDoRequestWithServiceMiddleware(b *testing.B) {
 	resp, _ := tests.TestDialClient.Do(req)
 	resp.Body.Close()
 	b.StartTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		doTestRequestWithLogAudit(leader)
 	}
 	cancel()
@@ -519,7 +519,7 @@ func BenchmarkDoRequestWithLocalLogAudit(b *testing.B) {
 	resp, _ := tests.TestDialClient.Do(req)
 	resp.Body.Close()
 	b.StartTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		doTestRequestWithLogAudit(leader)
 	}
 	cancel()
@@ -541,7 +541,7 @@ func BenchmarkDoRequestWithPrometheusAudit(b *testing.B) {
 	resp, _ := tests.TestDialClient.Do(req)
 	resp.Body.Close()
 	b.StartTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		doTestRequestWithPrometheus(leader)
 	}
 	cancel()
@@ -563,7 +563,7 @@ func BenchmarkDoRequestWithoutServiceMiddleware(b *testing.B) {
 	resp, _ := tests.TestDialClient.Do(req)
 	resp.Body.Close()
 	b.StartTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		doTestRequestWithLogAudit(leader)
 	}
 	cancel()
