@@ -93,11 +93,7 @@ import (
 
 const (
 	serverMetricsInterval = time.Minute
-	// pdRootPath for all pd servers.
-	pdRootPath  = "/pd"
-	pdAPIPrefix = "/pd/"
-
-	recoveringMarkPath = "cluster/markers/snapshot-recovering"
+	pdAPIPrefix           = "/pd/"
 
 	// PD is name of member.
 	PD = "PD"
@@ -158,7 +154,6 @@ type Server struct {
 	electionClient *clientv3.Client
 	// http client
 	httpClient *http.Client
-	rootPath   string
 
 	// Server services.
 	// for id allocator, we can use one allocator for
@@ -440,7 +435,6 @@ func (s *Server) startServer(ctx context.Context) error {
 	metadataGauge.WithLabelValues(fmt.Sprintf("cluster%d", clusterID)).Set(0)
 	bs.ServerInfoGauge.WithLabelValues(versioninfo.PDReleaseVersion, versioninfo.PDGitHash).Set(float64(time.Now().Unix()))
 
-	s.rootPath = keypath.PDRootPath()
 	s.member.InitMemberInfo(s.cfg.AdvertiseClientUrls, s.cfg.AdvertisePeerUrls, s.Name())
 	if err := s.member.SetMemberDeployPath(s.member.ID()); err != nil {
 		return err
@@ -461,7 +455,7 @@ func (s *Server) startServer(ctx context.Context) error {
 		return err
 	}
 	// Initialize an etcd storage as the default storage.
-	defaultStorage := storage.NewStorageWithEtcdBackend(s.client, s.rootPath)
+	defaultStorage := storage.NewStorageWithEtcdBackend(s.client)
 	// Initialize a specialized LevelDB storage to store the region-related meta info independently.
 	regionStorage, err := storage.NewRegionStorageWithLevelDBBackend(
 		ctx,
@@ -474,7 +468,7 @@ func (s *Server) startServer(ctx context.Context) error {
 	s.tsoDispatcher = tsoutil.NewTSODispatcher(tsoProxyHandleDuration, tsoProxyBatchSize)
 	s.tsoProtoFactory = &tsoutil.TSOProtoFactory{}
 	s.pdProtoFactory = &tsoutil.PDProtoFactory{}
-	s.tsoAllocatorManager = tso.NewAllocatorManager(s.ctx, constant.DefaultKeyspaceGroupID, s.member, s.rootPath, s.storage, s)
+	s.tsoAllocatorManager = tso.NewAllocatorManager(s.ctx, constant.DefaultKeyspaceGroupID, s.member, s.storage, s)
 	s.gcSafePointManager = gc.NewSafePointManager(s.storage, s.cfg.PDServerCfg)
 	s.basicCluster = core.NewBasicCluster()
 	s.cluster = cluster.NewRaftCluster(ctx, s.GetMember(), s.GetBasicCluster(), s.GetStorage(), syncer.NewRegionSyncer(s), s.client, s.httpClient, s.tsoAllocatorManager)
@@ -715,28 +709,23 @@ func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.BootstrapRe
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}
-	clusterRootPath := keypath.ClusterRootPath(s.rootPath)
 
 	var ops []clientv3.Op
-	ops = append(ops, clientv3.OpPut(clusterRootPath, string(clusterValue)))
+	ops = append(ops, clientv3.OpPut(keypath.ClusterPath(), string(clusterValue)))
 
 	// Set bootstrap time
 	// Because we will write the cluster meta into etcd directly,
 	// so we need to handle the root key path manually here.
-	bootstrapKey := keypath.AppendToRootPath(s.rootPath, keypath.ClusterBootstrapTimeKey())
-	nano := time.Now().UnixNano()
-
-	timeData := typeutil.Uint64ToBytes(uint64(nano))
-	ops = append(ops, clientv3.OpPut(bootstrapKey, string(timeData)))
+	timeData := typeutil.Uint64ToBytes(uint64(time.Now().UnixNano()))
+	ops = append(ops, clientv3.OpPut(keypath.ClusterBootstrapTimePath(), string(timeData)))
 
 	// Set store meta
 	storeMeta := req.GetStore()
-	storePath := keypath.AppendToRootPath(s.rootPath, keypath.StorePath(storeMeta.GetId()))
 	storeValue, err := storeMeta.Marshal()
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}
-	ops = append(ops, clientv3.OpPut(storePath, string(storeValue)))
+	ops = append(ops, clientv3.OpPut(keypath.StorePath(storeMeta.GetId()), string(storeValue)))
 
 	regionValue, err := req.GetRegion().Marshal()
 	if err != nil {
@@ -744,11 +733,10 @@ func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.BootstrapRe
 	}
 
 	// Set region meta with region id.
-	regionPath := keypath.AppendToRootPath(s.rootPath, keypath.RegionPath(req.GetRegion().GetId()))
-	ops = append(ops, clientv3.OpPut(regionPath, string(regionValue)))
+	ops = append(ops, clientv3.OpPut(keypath.RegionPath(req.GetRegion().GetId()), string(regionValue)))
 
 	// TODO: we must figure out a better way to handle bootstrap failed, maybe intervene manually.
-	bootstrapCmp := clientv3.Compare(clientv3.CreateRevision(clusterRootPath), "=", 0)
+	bootstrapCmp := clientv3.Compare(clientv3.CreateRevision(keypath.ClusterPath()), "=", 0)
 	resp, err := kv.NewSlowLogTxn(s.client).If(bootstrapCmp).Then(ops...).Commit()
 	if err != nil {
 		return nil, errs.ErrEtcdTxnInternal.Wrap(err).GenWithStackByCause()
@@ -1921,7 +1909,7 @@ func (s *Server) IsTTLConfigExist(key string) bool {
 // and is deleted after BR EBS restore is done.
 func (s *Server) MarkSnapshotRecovering() error {
 	log.Info("mark snapshot recovering")
-	markPath := keypath.AppendToRootPath(s.rootPath, recoveringMarkPath)
+	markPath := keypath.RecoveringMarkPath()
 	// the value doesn't matter, set to a static string
 	_, err := kv.NewSlowLogTxn(s.client).
 		If(clientv3.Compare(clientv3.CreateRevision(markPath), "=", 0)).
@@ -1933,8 +1921,7 @@ func (s *Server) MarkSnapshotRecovering() error {
 
 // IsSnapshotRecovering check whether recovering-mark marked
 func (s *Server) IsSnapshotRecovering(ctx context.Context) (bool, error) {
-	markPath := keypath.AppendToRootPath(s.rootPath, recoveringMarkPath)
-	resp, err := s.client.Get(ctx, markPath)
+	resp, err := s.client.Get(ctx, keypath.RecoveringMarkPath())
 	if err != nil {
 		return false, err
 	}
@@ -1944,8 +1931,7 @@ func (s *Server) IsSnapshotRecovering(ctx context.Context) (bool, error) {
 // UnmarkSnapshotRecovering unmark recovering mark
 func (s *Server) UnmarkSnapshotRecovering(ctx context.Context) error {
 	log.Info("unmark snapshot recovering")
-	markPath := keypath.AppendToRootPath(s.rootPath, recoveringMarkPath)
-	_, err := s.client.Delete(ctx, markPath)
+	_, err := s.client.Delete(ctx, keypath.RecoveringMarkPath())
 	// if other client already unmarked, return success too
 	return err
 }
