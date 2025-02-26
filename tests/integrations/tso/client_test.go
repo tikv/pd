@@ -27,6 +27,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+	"go.uber.org/goleak"
 
 	"github.com/pingcap/failpoint"
 
@@ -48,6 +49,10 @@ import (
 	"github.com/tikv/pd/tests/integrations/mcs"
 	handlersutil "github.com/tikv/pd/tests/server/apiv2/handlers"
 )
+
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+}
 
 var r = rand.New(rand.NewSource(time.Now().UnixNano()))
 

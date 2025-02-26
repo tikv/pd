@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"go.uber.org/goleak"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
@@ -32,6 +33,10 @@ import (
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
 )
+
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+}
 
 func TestHotRegionStorage(t *testing.T) {
 	re := require.New(t)

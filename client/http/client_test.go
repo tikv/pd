@@ -23,10 +23,16 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"go.uber.org/goleak"
 
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/pkg/retry"
+	"github.com/tikv/pd/client/pkg/utils/testutil"
 )
+
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+}
 
 func TestPDAllowFollowerHandleHeader(t *testing.T) {
 	re := require.New(t)

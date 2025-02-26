@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"go.uber.org/goleak"
 
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -35,8 +36,13 @@ import (
 	"github.com/tikv/pd/pkg/schedule/hbstream"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
+	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/versioninfo"
 )
+
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+}
 
 type sequencer struct {
 	minID uint64

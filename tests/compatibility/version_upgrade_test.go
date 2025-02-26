@@ -20,14 +20,20 @@ import (
 
 	"github.com/coreos/go-semver/semver"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/goleak"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 
+	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/tests"
 )
+
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+}
 
 func TestStoreRegister(t *testing.T) {
 	re := require.New(t)

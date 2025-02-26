@@ -20,13 +20,19 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"go.uber.org/goleak"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/plan"
+	"github.com/tikv/pd/pkg/utils/testutil"
 )
+
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+}
 
 // A dummy comparer for testing.
 func idComparer(a, b *core.StoreInfo) int {

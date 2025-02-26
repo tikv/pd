@@ -19,11 +19,17 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"go.uber.org/goleak"
 
 	"github.com/pingcap/failpoint"
 
+	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/tests"
 )
+
+func TestMain(m *testing.M) {
+	goleak.VerifyTestMain(m, testutil.LeakOptions...)
+}
 
 func TestFailedPDJoinInStep1(t *testing.T) {
 	re := require.New(t)
