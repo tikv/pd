@@ -222,7 +222,7 @@ func (suite *statsTestSuite) TestRegionStats() {
 			}
 		}
 	}
-	distributionURL := suite.urlPrefix + "/distribution/region"
+	distributionURL := suite.urlPrefix + "/distributions/region"
 	args := fmt.Sprintf("?start_key=%s&end_key=%s&", "", "")
 	res, err := testDialClient.Get(distributionURL + args)
 	re.NoError(err)

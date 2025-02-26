@@ -324,8 +324,8 @@ func (c *client) GetHistoryHotRegions(ctx context.Context, req *HistoryHotRegion
 func (c *client) GetRegionDistribution(ctx context.Context, keyRange *KeyRange, engine string) (*RegionDistributions, error) {
 	var regionStats RegionStats
 	err := c.request(ctx, newRequestInfo().
-		WithName(getRegionDistributionByKeyRangeName).
-		WithURI(RegionDistributionByKeyRange(keyRange, engine)).
+		WithName(getRegionDistributionsByKeyRangeName).
+		WithURI(RegionDistributionsByKeyRange(keyRange, engine)).
 		WithMethod(http.MethodGet).
 		WithResp(&regionStats))
 	if err != nil {

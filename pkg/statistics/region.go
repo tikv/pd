@@ -15,6 +15,8 @@
 package statistics
 
 import (
+	"github.com/pingcap/kvproto/pkg/metapb"
+
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/statistics/utils"
 )
@@ -44,31 +46,22 @@ type RegionStats struct {
 	StoreEngine          map[uint64]string `json:"store_engine,omitempty"`
 }
 
-// RemoveStore removes one store statistics from the RegionStats.
-func (s *RegionStats) RemoveStore(storeID uint64) {
-	delete(s.StoreLeaderCount, storeID)
-	delete(s.StorePeerCount, storeID)
-	delete(s.StoreLeaderSize, storeID)
-	delete(s.StoreLeaderKeys, storeID)
-	delete(s.StorePeerSize, storeID)
-	delete(s.StorePeerKeys, storeID)
-	delete(s.StoreWriteBytes, storeID)
-	delete(s.StoreWriteKeys, storeID)
-	delete(s.StoreWriteQuery, storeID)
-	delete(s.StoreLeaderReadBytes, storeID)
-	delete(s.StoreLeaderReadKeys, storeID)
-	delete(s.StoreLeaderReadQuery, storeID)
-	delete(s.StorePeerReadBytes, storeID)
-	delete(s.StorePeerReadKeys, storeID)
-	delete(s.StorePeerReadQuery, storeID)
-	delete(s.StoreEngine, storeID)
+// GetRegionStatsOption is used to filter the peer statistics.
+type GetRegionStatsOption func(peer *metapb.Peer) bool
+
+// WithStoreMapOption returns a GetRegionStatsOption that filters the peer by store map.
+func WithStoreMapOption(storeMap map[uint64]string) GetRegionStatsOption {
+	return func(peer *metapb.Peer) bool {
+		_, exist := storeMap[peer.GetStoreId()]
+		return exist
+	}
 }
 
 // GetRegionStats sums regions' statistics.
-func GetRegionStats(regions []*core.RegionInfo, cluster RegionStatInformer) *RegionStats {
+func GetRegionStats(regions []*core.RegionInfo, cluster RegionStatInformer, opts ...GetRegionStatsOption) *RegionStats {
 	stats := newRegionStats()
 	for _, region := range regions {
-		stats.Observe(region, cluster)
+		stats.Observe(region, cluster, opts...)
 	}
 	return stats
 }
@@ -95,7 +88,7 @@ func newRegionStats() *RegionStats {
 }
 
 // Observe adds a region's statistics into RegionStats.
-func (s *RegionStats) Observe(r *core.RegionInfo, cluster RegionStatInformer) {
+func (s *RegionStats) Observe(r *core.RegionInfo, cluster RegionStatInformer, opts ...GetRegionStatsOption) {
 	s.Count++
 	approximateKeys := r.GetApproximateKeys()
 	approximateSize := r.GetApproximateSize()
@@ -107,7 +100,15 @@ func (s *RegionStats) Observe(r *core.RegionInfo, cluster RegionStatInformer) {
 	s.UserStorageSize += approximateKvSize
 	s.StorageKeys += approximateKeys
 	leader := r.GetLeader()
-	if leader != nil {
+	checkFn := func(p *metapb.Peer) bool {
+		for _, opt := range opts {
+			if !opt(p) {
+				return false
+			}
+		}
+		return true
+	}
+	if leader != nil && checkFn(leader) {
 		storeID := leader.GetStoreId()
 		s.StoreLeaderCount[storeID]++
 		s.StoreLeaderSize[storeID] += approximateSize
@@ -128,6 +129,9 @@ func (s *RegionStats) Observe(r *core.RegionInfo, cluster RegionStatInformer) {
 	}
 	peers := r.GetMeta().GetPeers()
 	for _, p := range peers {
+		if !checkFn(p) {
+			continue
+		}
 		storeID := p.GetStoreId()
 		s.StorePeerCount[storeID]++
 		s.StorePeerSize[storeID] += r.GetStorePeerApproximateSize(storeID)

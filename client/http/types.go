@@ -201,6 +201,7 @@ type HistoryHotRegionsRequest struct {
 	HotRegionTypes []string `json:"hot_region_type,omitempty"`
 }
 
+// RegionDistributions wraps region distribution info
 type RegionDistributions struct {
 	RegionDistributions []*RegionDistribution `json:"region_distribution"`
 }

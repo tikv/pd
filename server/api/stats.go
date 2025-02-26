@@ -17,10 +17,10 @@ package api
 import (
 	"net/http"
 
-	"github.com/pingcap/log"
+	"github.com/unrolled/render"
 	"go.uber.org/zap"
 
-	"github.com/unrolled/render"
+	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/schedule/filter"
@@ -60,18 +60,18 @@ func (h *statsHandler) GetRegionStatus(w http.ResponseWriter, r *http.Request) {
 	h.rd.JSON(w, http.StatusOK, stats)
 }
 
-// @Tags	 distribution
+// @Tags	 distributions
 // @Summary  Get region stats and hot flow statistics of a specified range.
 // @Param    start_key  query  string  true   "Start key"
 // @Param    end_key    query  string  true   "End key"
 // @Param    engine     query  string  false  "Engine type such as  tikv or tiflash"
 // @Produce  json
 // @Success  200  {object}  statistics.RegionStats
-// @Router   /distribution/region [get]
-func (h *statsHandler) GetRegionDistribution(w http.ResponseWriter, r *http.Request) {
+// @Router   /distributions/region [get]
+func (h *statsHandler) GetRegionDistributions(w http.ResponseWriter, r *http.Request) {
 	rc := getCluster(r)
 	startKey, endKey, engine := r.URL.Query().Get("start_key"), r.URL.Query().Get("end_key"), r.URL.Query().Get("engine")
-	stats := rc.GetRegionStatsByRange([]byte(startKey), []byte(endKey), true)
+
 	stores := rc.GetStores()
 	switch engine {
 	case core.EngineTiKV:
@@ -87,14 +87,10 @@ func (h *statsHandler) GetRegionDistribution(w http.ResponseWriter, r *http.Requ
 	for _, store := range stores {
 		storeMap[store.GetID()] = store.GetLabelValue(core.EngineKey)
 	}
-	for storeID := range stats.StorePeerCount {
-		if engineLabel, ok := storeMap[storeID]; ok {
-			stats.StoreEngine[storeID] = engineLabel
-		} else {
-			stats.RemoveStore(storeID)
-		}
-	}
+	opt := statistics.WithStoreMapOption(storeMap)
+	stats := rc.GetRegionStatsByRange([]byte(startKey), []byte(endKey), true, opt)
 
+	stats.StoreEngine = storeMap
 	if err := h.rd.JSON(w, http.StatusOK, stats); err != nil {
 		log.Error("json data error", zap.Error(err))
 	}
