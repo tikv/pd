@@ -293,7 +293,7 @@ func TestSetOfflineStore(t *testing.T) {
 		re.True(cluster.GetStore(storeID).IsRemoved())
 	}
 	// test bury store
-	for storeID := uint64(0); storeID <= 4; storeID++ {
+	for storeID := range uint64(5) {
 		store := cluster.GetStore(storeID)
 		if store == nil || store.IsUp() {
 			re.Error(cluster.BuryStore(storeID, false))
@@ -2336,7 +2336,7 @@ func checkStaleRegion(origin *metapb.Region, region *metapb.Region) error {
 }
 
 func (c *testCluster) AllocPeer(storeID uint64) (*metapb.Peer, error) {
-	id, err := c.AllocID()
+	id, _, err := c.AllocID(1)
 	if err != nil {
 		return nil, err
 	}
@@ -3210,6 +3210,22 @@ func TestAddScheduler(t *testing.T) {
 	re.NoError(err)
 	re.NoError(controller.AddScheduler(gls))
 
+	_, err = schedulers.CreateScheduler(types.BalanceRangeScheduler, oc, storage.NewStorageWithMemoryBackend(), schedulers.ConfigSliceDecoder(types.BalanceRangeScheduler, []string{}), controller.RemoveScheduler)
+	re.Error(err)
+
+	gls, err = schedulers.CreateScheduler(types.BalanceRangeScheduler, oc, storage.NewStorageWithMemoryBackend(), schedulers.ConfigSliceDecoder(types.BalanceRangeScheduler, []string{"learner", "tiflash", "1h", "test", "100", "200"}), controller.RemoveScheduler)
+	re.NoError(err)
+	re.NoError(controller.AddScheduler(gls))
+	conf, err = gls.EncodeConfig()
+	re.NoError(err)
+	var cfg []map[string]any
+
+	re.NoError(json.Unmarshal(conf, &cfg))
+	re.Equal("learner", cfg[0]["role"])
+	re.Equal("tiflash", cfg[0]["engine"])
+	re.Equal("test", cfg[0]["alias"])
+	re.Equal(float64(time.Hour.Nanoseconds()), cfg[0]["timeout"])
+
 	hb, err := schedulers.CreateScheduler(types.BalanceHotRegionScheduler, oc, storage.NewStorageWithMemoryBackend(), schedulers.ConfigJSONDecoder([]byte("{}")))
 	re.NoError(err)
 	conf, err = hb.EncodeConfig()
@@ -3906,7 +3922,7 @@ func BenchmarkHandleStatsAsync(b *testing.B) {
 	// Reset timer after setup
 	b.ResetTimer()
 	// Run HandleStatsAsync b.N times
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		cluster.HandleStatsAsync(c, region)
 	}
 }
@@ -3967,7 +3983,7 @@ func BenchmarkHandleRegionHeartbeat(b *testing.B) {
 	// Reset timer after setup
 	b.ResetTimer()
 	// Run HandleRegionHeartbeat b.N times
-	for i := 0; i < b.N; i++ {
+	for i := range b.N {
 		region := core.RegionFromHeartbeat(requests[i], flowRoundDivisor)
 		c.HandleRegionHeartbeat(region)
 	}

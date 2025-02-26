@@ -434,7 +434,7 @@ func (c *Controller) CheckTransferWitnessLeader(region *core.RegionInfo) {
 }
 
 // GetAllSchedulerConfigs returns all scheduler configs.
-func (c *Controller) GetAllSchedulerConfigs() ([]string, []string, error) {
+func (c *Controller) GetAllSchedulerConfigs() (sches, configs []string, err error) {
 	return c.storage.LoadAllSchedulerConfigs()
 }
 

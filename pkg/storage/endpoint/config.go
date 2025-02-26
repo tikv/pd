@@ -57,9 +57,9 @@ func (se *StorageEndpoint) SaveConfig(cfg any) error {
 }
 
 // LoadAllSchedulerConfigs loads all schedulers' config.
-func (se *StorageEndpoint) LoadAllSchedulerConfigs() ([]string, []string, error) {
+func (se *StorageEndpoint) LoadAllSchedulerConfigs() (keys, values []string, err error) {
 	prefix := keypath.CustomSchedulerConfigPath + "/"
-	keys, values, err := se.LoadRange(prefix, clientv3.GetPrefixRangeEnd(prefix), MinKVRangeLimit)
+	keys, values, err = se.LoadRange(prefix, clientv3.GetPrefixRangeEnd(prefix), MinKVRangeLimit)
 	for i, key := range keys {
 		keys[i] = strings.TrimPrefix(key, prefix)
 	}

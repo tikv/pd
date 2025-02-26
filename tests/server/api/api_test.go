@@ -212,7 +212,7 @@ func BenchmarkDoRequestWithServiceMiddleware(b *testing.B) {
 	resp, _ := tests.TestDialClient.Do(req)
 	resp.Body.Close()
 	b.StartTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		doTestRequestWithLogAudit(leader)
 	}
 	cancel()
@@ -519,7 +519,7 @@ func BenchmarkDoRequestWithLocalLogAudit(b *testing.B) {
 	resp, _ := tests.TestDialClient.Do(req)
 	resp.Body.Close()
 	b.StartTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		doTestRequestWithLogAudit(leader)
 	}
 	cancel()
@@ -541,7 +541,7 @@ func BenchmarkDoRequestWithPrometheusAudit(b *testing.B) {
 	resp, _ := tests.TestDialClient.Do(req)
 	resp.Body.Close()
 	b.StartTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		doTestRequestWithPrometheus(leader)
 	}
 	cancel()
@@ -563,7 +563,7 @@ func BenchmarkDoRequestWithoutServiceMiddleware(b *testing.B) {
 	resp, _ := tests.TestDialClient.Do(req)
 	resp.Body.Close()
 	b.StartTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		doTestRequestWithLogAudit(leader)
 	}
 	cancel()
@@ -670,6 +670,42 @@ func (suite *redirectorTestSuite) TestAllowFollowerHandle() {
 	re.Equal(http.StatusOK, resp.StatusCode)
 	_, err = io.ReadAll(resp.Body)
 	re.NoError(err)
+}
+
+func (suite *redirectorTestSuite) TestPing() {
+	re := suite.Require()
+	// Find a follower.
+	var follower *server.Server
+	leader := suite.cluster.GetLeaderServer()
+	for _, svr := range suite.cluster.GetServers() {
+		if svr != leader {
+			follower = svr.GetServer()
+			break
+		}
+	}
+
+	for _, svr := range suite.cluster.GetServers() {
+		if svr.GetServer() != follower {
+			svr.Stop()
+		}
+	}
+	addr := follower.GetAddr() + "/pd/api/v1/ping"
+	request, err := http.NewRequest(http.MethodGet, addr, http.NoBody)
+	// ping request should not be redirected.
+	request.Header.Add(apiutil.PDAllowFollowerHandleHeader, "true")
+	re.NoError(err)
+	resp, err := tests.TestDialClient.Do(request)
+	re.NoError(err)
+	defer resp.Body.Close()
+	re.Equal(http.StatusOK, resp.StatusCode)
+	_, err = io.ReadAll(resp.Body)
+	re.NoError(err)
+	for _, svr := range suite.cluster.GetServers() {
+		if svr.GetServer() != follower {
+			re.NoError(svr.Run())
+		}
+	}
+	re.NotEmpty(suite.cluster.WaitLeader())
 }
 
 func (suite *redirectorTestSuite) TestNotLeader() {
