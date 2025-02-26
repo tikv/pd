@@ -237,7 +237,7 @@ func (s *GrpcServer) GetAllGCSafePointV2(ctx context.Context, request *pdpb.GetA
 	}, nil
 }
 
-func (s *GrpcServer) loadRangeFromEtcd(startKey, endKey string) ([]string, int64, error) {
+func (s *GrpcServer) loadRangeFromEtcd(startKey, endKey string) (values []string, revision int64, err error) {
 	var opOption []clientv3.OpOption
 	if endKey == "\x00" {
 		opOption = append(opOption, clientv3.WithPrefix())
@@ -248,7 +248,7 @@ func (s *GrpcServer) loadRangeFromEtcd(startKey, endKey string) ([]string, int64
 	if err != nil {
 		return nil, 0, err
 	}
-	values := make([]string, 0, len(resp.Kvs))
+	values = make([]string, 0, len(resp.Kvs))
 	for _, item := range resp.Kvs {
 		values = append(values, string(item.Value))
 	}

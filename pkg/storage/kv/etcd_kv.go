@@ -67,7 +67,7 @@ func (kv *etcdKVBase) Load(key string) (string, error) {
 }
 
 // LoadRange loads a range of keys [key, endKey) from etcd.
-func (kv *etcdKVBase) LoadRange(key, endKey string, limit int) ([]string, []string, error) {
+func (kv *etcdKVBase) LoadRange(key, endKey string, limit int) (keys, values []string, err error) {
 	var OpOption []clientv3.OpOption
 	// If endKey is "\x00", it means to scan with prefix.
 	// If the key is empty and endKey is "\x00", it means to scan all keys.
@@ -82,8 +82,8 @@ func (kv *etcdKVBase) LoadRange(key, endKey string, limit int) ([]string, []stri
 	if err != nil {
 		return nil, nil, err
 	}
-	keys := make([]string, 0, len(resp.Kvs))
-	values := make([]string, 0, len(resp.Kvs))
+	keys = make([]string, 0, len(resp.Kvs))
+	values = make([]string, 0, len(resp.Kvs))
 	for _, item := range resp.Kvs {
 		keys = append(keys, string(item.Key))
 		values = append(values, string(item.Value))

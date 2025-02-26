@@ -278,10 +278,9 @@ func (s *State) onRequest(cb *CircuitBreaker) (*State, error) {
 				zap.String("name", cb.name),
 				zap.Any("config", cb.config))
 			return cb.newState(now, StateHalfOpen), nil
-		} else {
-			// continue in the open state till CoolDownInterval is over
-			return s, errs.ErrCircuitBreakerOpen
 		}
+		// continue in the open state till CoolDownInterval is over
+		return s, errs.ErrCircuitBreakerOpen
 	case StateHalfOpen:
 		if s.cb.config.ErrorRateThresholdPct == 0 {
 			return cb.newState(now, StateClosed), nil
@@ -304,10 +303,9 @@ func (s *State) onRequest(cb *CircuitBreaker) (*State, error) {
 			// allow more probe requests and continue in half-open state
 			s.pendingCount++
 			return s, nil
-		} else {
-			// continue in half-open state till all probe requests are done and fail all other requests for now
-			return s, errs.ErrCircuitBreakerOpen
 		}
+		// continue in half-open state till all probe requests are done and fail all other requests for now
+		return s, errs.ErrCircuitBreakerOpen
 	default:
 		panic("unknown state")
 	}

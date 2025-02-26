@@ -192,7 +192,7 @@ func TestTxnWithEtcd(t *testing.T) {
 	// test patch rules in batch with duplicated rule id
 	patch.SetRules = patch.SetRules[:0]
 	patch.DeleteRules = patch.DeleteRules[:0]
-	for i := 0; i <= 3; i++ {
+	for i := range 4 {
 		patch.SetRules = append(patch.SetRules, &LabelRule{
 			ID: "rule_1",
 			Labels: []RegionLabel{
