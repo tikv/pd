@@ -181,9 +181,7 @@ func (gts *GroupTokenBucketState) balanceSlotTokens(
 		// Only slots that require a positive number will be considered alive,
 		// but still need to allocate the elapsed tokens as well.
 		if requiredToken != 0 {
-			slot = &TokenSlot{
-				lastReqTime: now,
-			}
+			slot = &TokenSlot{lastReqTime: now}
 			gts.tokenSlots[clientUniqueID] = slot
 			gts.clientConsumptionTokensSum = 0
 		}
@@ -213,7 +211,7 @@ func (gts *GroupTokenBucketState) balanceSlotTokens(
 		return
 	}
 	evenRatio := 1 / float64(len(gts.tokenSlots))
-	if getBurstableMode(settings) == rateControlled || getBurstableMode(settings) == unlimited {
+	if mode := getBurstableMode(settings); mode == rateControlled || mode == unlimited {
 		for _, slot := range gts.tokenSlots {
 			slot.settings = &rmpb.TokenLimitSettings{
 				FillRate:   uint64(float64(settings.GetFillRate()) * evenRatio),
