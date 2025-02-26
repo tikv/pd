@@ -320,13 +320,13 @@ func (suite *adminTestSuite) TestRecoverAllocID() {
 		tu.StatusOK(re)))
 	re.NoError(tu.CheckPostJSON(testDialClient, url, []byte(`{"id": "1000000"}`),
 		tu.StatusOK(re)))
-	id, err2 := suite.svr.GetAllocator().Alloc()
+	id, _, err2 := suite.svr.GetAllocator().Alloc(1)
 	re.NoError(err2)
 	re.Equal(uint64(1000001), id)
 	// recover alloc id again
 	re.NoError(tu.CheckPostJSON(testDialClient, url, []byte(`{"id": "99000000"}`),
 		tu.StatusOK(re)))
-	id, err2 = suite.svr.GetAllocator().Alloc()
+	id, _, err2 = suite.svr.GetAllocator().Alloc(1)
 	re.NoError(err2)
 	re.Equal(uint64(99000001), id)
 	// unmark

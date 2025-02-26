@@ -490,7 +490,7 @@ func (b *Builder) prepareBuild() (string, error) {
 		if o == nil || (!b.useJointConsensus && !core.IsLearner(o) && core.IsLearner(n)) {
 			if n.GetId() == 0 {
 				// Allocate peer ID if need.
-				id, err := b.AllocID()
+				id, _, err := b.AllocID(1)
 				if err != nil {
 					return "", err
 				}
