@@ -1461,7 +1461,7 @@ func (r *RegionsInfo) GetStoreRegions(storeID uint64) []*RegionInfo {
 // QueryRegions searches RegionInfo from regionTree by keys and IDs in batch.
 func (r *RegionsInfo) QueryRegions(
 	keys, prevKeys [][]byte, ids []uint64, needBuckets bool,
-) ([]uint64, []uint64, map[uint64]*pdpb.RegionResponse) {
+) (keyIDMap, prevKeyIDMap []uint64, regionsByID map[uint64]*pdpb.RegionResponse) {
 	var (
 		start                time.Time
 		regions, prevRegions []*RegionInfo
@@ -1492,9 +1492,9 @@ func (r *RegionsInfo) QueryRegions(
 	}
 
 	// Build the key -> ID map for the final results.
-	regionsByID := make(map[uint64]*pdpb.RegionResponse, len(regions)+len(prevRegions)+len(ids))
-	keyIDMap := sortOutKeyIDMap(regionsByID, regions, needBuckets)
-	prevKeyIDMap := sortOutKeyIDMap(regionsByID, prevRegions, needBuckets)
+	regionsByID = make(map[uint64]*pdpb.RegionResponse, len(regions)+len(prevRegions)+len(ids))
+	keyIDMap = sortOutKeyIDMap(regionsByID, regions, needBuckets)
+	prevKeyIDMap = sortOutKeyIDMap(regionsByID, prevRegions, needBuckets)
 
 	// Iterate the region IDs to find the regions.
 	if len(ids) > 0 {
@@ -2125,11 +2125,10 @@ func (r *RegionsInfo) CollectWaitLockMetrics() {
 }
 
 // GetAdjacentRegions returns region's info that is adjacent with specific region
-func (r *RegionsInfo) GetAdjacentRegions(region *RegionInfo) (*RegionInfo, *RegionInfo) {
+func (r *RegionsInfo) GetAdjacentRegions(region *RegionInfo) (prev, next *RegionInfo) {
 	r.t.RLock()
 	defer r.t.RUnlock()
 	p, n := r.tree.getAdjacentRegions(region)
-	var prev, next *RegionInfo
 	// check key to avoid key range hole
 	if p != nil && bytes.Equal(p.GetEndKey(), region.GetStartKey()) {
 		prev = p.RegionInfo

@@ -760,7 +760,7 @@ func BenchmarkCheckRegionFlow(b *testing.B) {
 	cache := NewHotPeerCache(context.Background(), cluster, utils.Read)
 	region := buildRegion(cluster, utils.Read, 3, 10)
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		stats := cache.CheckPeerFlow(region, region.GetPeers(), region.GetLoads(), 10)
 		for _, stat := range stats {
 			cache.UpdateStat(stat)
