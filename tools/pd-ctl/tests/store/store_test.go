@@ -195,7 +195,7 @@ func TestStore(t *testing.T) {
 			expectValues:      []string{""},
 		},
 	}
-	for i := 0; i <= 1; i++ {
+	for i := range 2 {
 		for _, testcase := range labelTestCases {
 			switch {
 			case i == 0: // old way
