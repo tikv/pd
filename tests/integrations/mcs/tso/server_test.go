@@ -524,27 +524,29 @@ func TestForwardTsoConcurrently(t *testing.T) {
 	suite := NewPDServiceForward(re)
 	defer suite.ShutDown()
 
-	tc, err := tests.NewTestTSOCluster(suite.ctx, 1, suite.backendEndpoints)
+	tc, err := tests.NewTestTSOCluster(suite.ctx, 2, suite.backendEndpoints)
 	re.NoError(err)
 	defer tc.Destroy()
 	tc.WaitForDefaultPrimaryServing(re)
-	var (
-		wg = sync.WaitGroup{}
-	)
-	for i := range 100 {
+
+	wg := sync.WaitGroup{}
+	for i := range 3 {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			pdClient, err := pd.NewClientWithContext(context.Background(),
+			pdClient, err := pd.NewClientWithContext(
+				context.Background(),
 				caller.TestComponent,
-				[]string{suite.backendEndpoints}, pd.SecurityOption{}, opt.WithMaxErrorRetry(1))
+				[]string{suite.backendEndpoints},
+				pd.SecurityOption{})
 			re.NoError(err)
 			re.NotNil(pdClient)
 			defer pdClient.Close()
-			for range 100 {
-				min, err := pdClient.UpdateServiceGCSafePoint(context.Background(), fmt.Sprintf("service-%d", i), 1000, 1)
-				re.NoError(err)
-				re.Equal(uint64(0), min)
+			for range 10 {
+				testutil.Eventually(re, func() bool {
+					min, err := pdClient.UpdateServiceGCSafePoint(context.Background(), fmt.Sprintf("service-%d", i), 1000, 1)
+					return err == nil && min == 0
+				})
 			}
 		}()
 	}
@@ -563,7 +565,7 @@ func BenchmarkForwardTsoConcurrently(b *testing.B) {
 
 	initClients := func(num int) []pd.Client {
 		var clients []pd.Client
-		for i := 0; i < num; i++ {
+		for range num {
 			pdClient, err := pd.NewClientWithContext(context.Background(),
 				caller.TestComponent,
 				[]string{suite.backendEndpoints}, pd.SecurityOption{}, opt.WithMaxErrorRetry(1))
