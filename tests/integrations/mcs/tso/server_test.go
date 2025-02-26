@@ -23,6 +23,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -319,7 +320,195 @@ func (suite *APIServerForwardTestSuite) checkAvailableTSO() {
 	suite.NoError(err)
 }
 
+<<<<<<< HEAD
 func TestAdvertiseAddr(t *testing.T) {
+=======
+func TestForwardTsoConcurrently(t *testing.T) {
+	re := require.New(t)
+	suite := NewPDServiceForward(re)
+	defer suite.ShutDown()
+
+	tc, err := tests.NewTestTSOCluster(suite.ctx, 2, suite.backendEndpoints)
+	re.NoError(err)
+	defer tc.Destroy()
+	tc.WaitForDefaultPrimaryServing(re)
+
+	wg := sync.WaitGroup{}
+	for i := range 3 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			pdClient, err := pd.NewClientWithContext(
+				context.Background(),
+				caller.TestComponent,
+				[]string{suite.backendEndpoints},
+				pd.SecurityOption{})
+			re.NoError(err)
+			re.NotNil(pdClient)
+			defer pdClient.Close()
+			for range 10 {
+				testutil.Eventually(re, func() bool {
+					min, err := pdClient.UpdateServiceGCSafePoint(context.Background(), fmt.Sprintf("service-%d", i), 1000, 1)
+					return err == nil && min == 0
+				})
+			}
+		}()
+	}
+	wg.Wait()
+}
+
+func BenchmarkForwardTsoConcurrently(b *testing.B) {
+	re := require.New(b)
+	suite := NewPDServiceForward(re)
+	defer suite.ShutDown()
+
+	tc, err := tests.NewTestTSOCluster(suite.ctx, 1, suite.backendEndpoints)
+	re.NoError(err)
+	defer tc.Destroy()
+	tc.WaitForDefaultPrimaryServing(re)
+
+	initClients := func(num int) []pd.Client {
+		var clients []pd.Client
+		for range num {
+			pdClient, err := pd.NewClientWithContext(context.Background(),
+				caller.TestComponent,
+				[]string{suite.backendEndpoints}, pd.SecurityOption{}, opt.WithMaxErrorRetry(1))
+			re.NoError(err)
+			re.NotNil(pdClient)
+			clients = append(clients, pdClient)
+		}
+		return clients
+	}
+
+	concurrencyLevels := []int{1, 2, 5, 10, 20}
+	for _, clientsNum := range concurrencyLevels {
+		clients := initClients(clientsNum)
+		b.Run(fmt.Sprintf("clients_%d", clientsNum), func(b *testing.B) {
+			wg := sync.WaitGroup{}
+			b.ResetTimer()
+			for range b.N {
+				for i, client := range clients {
+					wg.Add(1)
+					go func() {
+						defer wg.Done()
+						for range 1000 {
+							min, err := client.UpdateServiceGCSafePoint(context.Background(), fmt.Sprintf("service-%d", i), 1000, 1)
+							re.NoError(err)
+							re.Equal(uint64(0), min)
+						}
+					}()
+				}
+			}
+			wg.Wait()
+		})
+		for _, c := range clients {
+			c.Close()
+		}
+	}
+}
+
+type CommonTestSuite struct {
+	suite.Suite
+	ctx        context.Context
+	cancel     context.CancelFunc
+	cluster    *tests.TestCluster
+	tsoCluster *tests.TestTSOCluster
+	pdLeader   *tests.TestServer
+	// tsoDefaultPrimaryServer is the primary server of the default keyspace group
+	tsoDefaultPrimaryServer *tso.Server
+	backendEndpoints        string
+}
+
+func TestCommonTestSuite(t *testing.T) {
+	suite.Run(t, new(CommonTestSuite))
+}
+
+func (suite *CommonTestSuite) SetupSuite() {
+	var err error
+	re := suite.Require()
+	suite.ctx, suite.cancel = context.WithCancel(context.Background())
+	suite.cluster, err = tests.NewTestClusterWithKeyspaceGroup(suite.ctx, 1)
+	re.NoError(err)
+
+	err = suite.cluster.RunInitialServers()
+	re.NoError(err)
+
+	leaderName := suite.cluster.WaitLeader()
+	re.NotEmpty(leaderName)
+	suite.pdLeader = suite.cluster.GetServer(leaderName)
+	suite.backendEndpoints = suite.pdLeader.GetAddr()
+	re.NoError(suite.pdLeader.BootstrapCluster())
+
+	suite.tsoCluster, err = tests.NewTestTSOCluster(suite.ctx, 1, suite.backendEndpoints)
+	re.NoError(err)
+	suite.tsoCluster.WaitForDefaultPrimaryServing(re)
+	suite.tsoDefaultPrimaryServer = suite.tsoCluster.GetPrimaryServer(constant.DefaultKeyspaceID, constant.DefaultKeyspaceGroupID)
+}
+
+func (suite *CommonTestSuite) TearDownSuite() {
+	re := suite.Require()
+	suite.tsoCluster.Destroy()
+	etcdClient := suite.pdLeader.GetEtcdClient()
+	endpoints, err := discovery.Discover(etcdClient, constant.TSOServiceName)
+	re.NoError(err)
+	if len(endpoints) != 0 {
+		endpoints, err = discovery.Discover(etcdClient, constant.TSOServiceName)
+		re.NoError(err)
+		re.Empty(endpoints)
+	}
+	suite.cluster.Destroy()
+	suite.cancel()
+}
+
+func (suite *CommonTestSuite) TestAdvertiseAddr() {
+	re := suite.Require()
+
+	conf := suite.tsoDefaultPrimaryServer.GetConfig()
+	re.Equal(conf.GetListenAddr(), conf.GetAdvertiseListenAddr())
+}
+
+func (suite *CommonTestSuite) TestBootstrapDefaultKeyspaceGroup() {
+	re := suite.Require()
+
+	// check the default keyspace group and wait for alloc tso nodes for the default keyspace group
+	check := func() {
+		testutil.Eventually(re, func() bool {
+			resp, err := tests.TestDialClient.Get(suite.pdLeader.GetServer().GetConfig().AdvertiseClientUrls + "/pd/api/v2/tso/keyspace-groups")
+			re.NoError(err)
+			defer resp.Body.Close()
+			re.Equal(http.StatusOK, resp.StatusCode)
+			respString, err := io.ReadAll(resp.Body)
+			re.NoError(err)
+			var kgs []*endpoint.KeyspaceGroup
+			re.NoError(json.Unmarshal(respString, &kgs))
+			re.Len(kgs, 1)
+			re.Equal(constant.DefaultKeyspaceGroupID, kgs[0].ID)
+			re.Equal(endpoint.Basic.String(), kgs[0].UserKind)
+			re.Empty(kgs[0].SplitState)
+			re.Empty(kgs[0].KeyspaceLookupTable)
+			return len(kgs[0].Members) == 1
+		})
+	}
+	check()
+
+	s, err := suite.cluster.JoinWithKeyspaceGroup(suite.ctx)
+	re.NoError(err)
+	re.NoError(s.Run())
+
+	// transfer leader to the new server
+	suite.pdLeader.ResignLeader()
+	suite.pdLeader = suite.cluster.GetServer(suite.cluster.WaitLeader())
+	check()
+	suite.pdLeader.ResignLeader()
+	suite.pdLeader = suite.cluster.GetServer(suite.cluster.WaitLeader())
+}
+
+// TestTSOServiceSwitch tests the behavior of TSO service switching when `EnableTSODynamicSwitching` is enabled.
+// Initially, the TSO service should be provided by PD. After starting a TSO server, the service should switch to the TSO server.
+// When the TSO server is stopped, the PD should resume providing the TSO service if `EnableTSODynamicSwitching` is enabled.
+// If `EnableTSODynamicSwitching` is disabled, the PD should not provide TSO service after the TSO server is stopped.
+func TestTSOServiceSwitch(t *testing.T) {
+>>>>>>> 0c13897bf (mcs: add lock for forward tso stream  (#9095))
 	re := require.New(t)
 
 	ctx, cancel := context.WithCancel(context.Background())

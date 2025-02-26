@@ -147,9 +147,31 @@ var (
 	serverMaxProcs = prometheus.NewGauge(
 		prometheus.GaugeOpts{
 			Namespace: "pd",
+<<<<<<< HEAD
 			Subsystem: "service",
 			Name:      "maxprocs",
 			Help:      "The value of GOMAXPROCS.",
+=======
+			Subsystem: "server",
+			Name:      "api_concurrency",
+			Help:      "Concurrency number of the api.",
+		}, []string{"kind", "api"})
+
+	forwardFailCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "pd",
+			Subsystem: "server",
+			Name:      "forward_fail_total",
+			Help:      "Counter of forward fail.",
+		}, []string{"request", "type"})
+	forwardTsoDuration = prometheus.NewHistogram(
+		prometheus.HistogramOpts{
+			Namespace: "pd",
+			Subsystem: "server",
+			Name:      "forward_tso_duration_seconds",
+			Help:      "Bucketed histogram of processing time (s) of handled forward tso requests.",
+			Buckets:   prometheus.ExponentialBuckets(0.0005, 2, 13),
+>>>>>>> 0c13897bf (mcs: add lock for forward tso stream  (#9095))
 		})
 )
 
@@ -169,5 +191,11 @@ func init() {
 	prometheus.MustRegister(bucketReportLatency)
 	prometheus.MustRegister(serviceAuditHistogram)
 	prometheus.MustRegister(bucketReportInterval)
+<<<<<<< HEAD
 	prometheus.MustRegister(serverMaxProcs)
+=======
+	prometheus.MustRegister(apiConcurrencyGauge)
+	prometheus.MustRegister(forwardFailCounter)
+	prometheus.MustRegister(forwardTsoDuration)
+>>>>>>> 0c13897bf (mcs: add lock for forward tso stream  (#9095))
 }

@@ -123,6 +123,11 @@ var (
 	etcdCommittedIndexGauge = etcdStateGauge.WithLabelValues("committedIndex")
 )
 
+type streamWrapper struct {
+	tsopb.TSO_TsoClient
+	syncutil.Mutex
+}
+
 // Server is the pd server. It implements bs.Server
 // nolint
 type Server struct {
@@ -199,8 +204,13 @@ type Server struct {
 	clientConns sync.Map
 
 	tsoClientPool struct {
+<<<<<<< HEAD
 		sync.RWMutex
 		clients map[string]tsopb.TSO_TsoClient
+=======
+		syncutil.RWMutex
+		clients map[string]*streamWrapper
+>>>>>>> 0c13897bf (mcs: add lock for forward tso stream  (#9095))
 	}
 
 	// tsoDispatcher is used to dispatch different TSO requests to
@@ -254,10 +264,15 @@ func CreateServer(ctx context.Context, cfg *config.Config, services []string, le
 		DiagnosticsServer:               sysutil.NewDiagnosticsServer(cfg.Log.File.Filename),
 		mode:                            mode,
 		tsoClientPool: struct {
+<<<<<<< HEAD
 			sync.RWMutex
 			clients map[string]tsopb.TSO_TsoClient
+=======
+			syncutil.RWMutex
+			clients map[string]*streamWrapper
+>>>>>>> 0c13897bf (mcs: add lock for forward tso stream  (#9095))
 		}{
-			clients: make(map[string]tsopb.TSO_TsoClient),
+			clients: make(map[string]*streamWrapper),
 		},
 	}
 	s.handler = newHandler(s)
