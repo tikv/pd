@@ -544,7 +544,7 @@ func BenchmarkForwardTsoConcurrently(b *testing.B) {
 		b.Run(fmt.Sprintf("clients_%d", clientsNum), func(b *testing.B) {
 			wg := sync.WaitGroup{}
 			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
+			for range b.N {
 				for i, client := range clients {
 					wg.Add(1)
 					go func() {
