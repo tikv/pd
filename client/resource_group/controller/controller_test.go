@@ -281,7 +281,11 @@ func TestControllerWithTwoGroupRequestConcurrency(t *testing.T) {
 		for _, req := range request.Requests {
 			if req.ResourceGroupName == defaultResourceGroupName {
 				// no response the default group request, that's mean `len(c.run.currentRequests) != 0` always.
-				time.Sleep(100 * time.Second)
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(100 * time.Second):
+				}
 				responses = append(responses, &rmpb.TokenBucketResponse{
 					ResourceGroupName: defaultResourceGroupName,
 					GrantedRUTokens: []*rmpb.GrantedRUTokenBucket{
