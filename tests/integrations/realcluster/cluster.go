@@ -91,25 +91,29 @@ const (
 	defaultTiFlashCount = 1
 )
 
-func isProcessRunning(pid int) bool {
-	process, err := os.FindProcess(pid)
-	if err != nil {
-		return false
-	}
-	err = process.Signal(syscall.Signal(0))
-	return err == nil
-}
-
 type cluster struct {
-	re      *require.Assertions
-	tag     string
-	datadir string
-	mode    string
-	pids    []int
+	re        *require.Assertions
+	tag       string
+	datadir   string
+	mode      string
+	instances map[string]int
+	pids      []int
 }
 
-func newCluster(re *require.Assertions, tag, datadir, mode string) *cluster {
-	return &cluster{re: re, datadir: datadir, tag: tag, mode: mode}
+func newCluster(re *require.Assertions, tag, datadir, mode string, ins ...map[string]int) *cluster {
+	var instances map[string]int
+	if len(ins) == 0 {
+		instances = map[string]int{
+			"kv":      defaultTiKVCount,
+			"db":      defaultTiDBCount,
+			"pd":      defaultPDCount,
+			"tiflash": defaultTiFlashCount,
+		}
+	} else {
+		instances = ins[0]
+	}
+
+	return &cluster{re: re, datadir: datadir, tag: tag, mode: mode, instances: instances}
 }
 
 func (c *cluster) start() {
@@ -168,14 +172,31 @@ func (c *cluster) deploy() {
 		re.NoError(os.MkdirAll(playgroundLogDir, 0755))
 	}
 
+	kvCount, exist := c.instances["kv"]
+	if !exist {
+		kvCount = defaultTiKVCount
+	}
+	dbCount, exist := c.instances["db"]
+	if !exist {
+		dbCount = defaultTiDBCount
+	}
+	pdCount, exist := c.instances["pd"]
+	if !exist {
+		pdCount = defaultPDCount
+	}
+	tiflashCount, exist := c.instances["tiflash"]
+	if !exist {
+		tiflashCount = defaultTiFlashCount
+	}
+
 	// nolint:errcheck
 	go func() {
 		defer logutil.LogPanic()
 		playgroundOpts := []string{
-			fmt.Sprintf("--kv %d", defaultTiKVCount),
-			fmt.Sprintf("--tiflash %d", defaultTiFlashCount),
-			fmt.Sprintf("--db %d", defaultTiDBCount),
-			fmt.Sprintf("--pd %d", defaultPDCount),
+			fmt.Sprintf("--kv %d", kvCount),
+			fmt.Sprintf("--tiflash %d", tiflashCount),
+			fmt.Sprintf("--db %d", dbCount),
+			fmt.Sprintf("--pd %d", pdCount),
 			"--without-monitor",
 			fmt.Sprintf("--tag %s", c.tag),
 		}

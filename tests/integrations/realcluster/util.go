@@ -17,7 +17,10 @@ package realcluster
 import (
 	"os"
 	"os/exec"
+	"syscall"
 	"time"
+
+	"github.com/pingcap/log"
 )
 
 const physicalShiftBits = 18
@@ -35,9 +38,10 @@ func ExtractPhysical(ts uint64) int64 {
 
 func runCommandWithOutput(cmdStr string) (string, error) {
 	cmd := exec.Command("sh", "-c", cmdStr)
+	log.Info(cmd.String())
 	bytes, err := cmd.Output()
 	if err != nil {
-		return "", err
+		return string(bytes), err
 	}
 	return string(bytes), nil
 }
@@ -45,4 +49,13 @@ func runCommandWithOutput(cmdStr string) (string, error) {
 func fileExists(path string) bool {
 	_, err := os.Stat(path)
 	return !os.IsNotExist(err)
+}
+
+func isProcessRunning(pid int) bool {
+	process, err := os.FindProcess(pid)
+	if err != nil {
+		return false
+	}
+	err = process.Signal(syscall.Signal(0))
+	return err == nil
 }

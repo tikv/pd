@@ -40,11 +40,16 @@ func TestClusterID(t *testing.T) {
 }
 
 func (s *clusterIDSuite) TestClientClusterID() {
-	s.T().Skip("skip the test because it is not stable")
+	// create clusters manually
+	s.TearDownSuite()
 	re := s.Require()
 	ctx := context.Background()
+	// deploy first cluster
+	cluster1 := newCluster(re, s.tag(), s.dataDir(), s.mode, map[string]int{"pd": 1, "tikv": 3, "tidb": 1, "tiflash": 0})
+	cluster1.start()
+	defer cluster1.stop()
 	// deploy second cluster
-	cluster2 := newCluster(re, s.tag(), s.dataDir(), s.mode)
+	cluster2 := newCluster(re, s.tag(), s.dataDir(), s.mode, map[string]int{"pd": 1, "tikv": 3, "tidb": 1, "tiflash": 0})
 	cluster2.start()
 	defer cluster2.stop()
 
