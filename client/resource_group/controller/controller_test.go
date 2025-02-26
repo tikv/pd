@@ -26,6 +26,7 @@ import (
 
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/goleak"
 
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/meta_storagepb"
@@ -35,7 +36,6 @@ import (
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/opt"
 	"github.com/tikv/pd/client/pkg/utils/testutil"
-	"go.uber.org/goleak"
 )
 
 func TestMain(m *testing.M) {

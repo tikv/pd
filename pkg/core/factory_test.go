@@ -18,12 +18,12 @@ import (
 	"testing"
 
 	"github.com/gogo/protobuf/proto"
+	"go.uber.org/goleak"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
-	"go.uber.org/goleak"
 )
 
 func TestMain(m *testing.M) {

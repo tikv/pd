@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"go.uber.org/goleak"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 
@@ -27,7 +28,6 @@ import (
 	"github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/plan"
 	"github.com/tikv/pd/pkg/utils/testutil"
-	"go.uber.org/goleak"
 )
 
 func TestMain(m *testing.M) {

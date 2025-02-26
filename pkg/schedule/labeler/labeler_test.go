@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"go.uber.org/goleak"
 
 	"github.com/pingcap/failpoint"
 
@@ -34,7 +35,6 @@ import (
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
-	"go.uber.org/goleak"
 )
 
 func TestMain(m *testing.M) {
