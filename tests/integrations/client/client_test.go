@@ -1399,7 +1399,7 @@ func (suite *clientTestSuite) TestUpdateServiceGCSafePoint() {
 	re.NoError(err)
 
 	// Force set invalid ttl to gc_worker
-	gcWorkerKey := keypath.GCSafePointServicePath("gc_worker")
+	gcWorkerKey := keypath.ServiceGCSafePointPath("gc_worker")
 	{
 		gcWorkerSsp := &endpoint.ServiceSafePoint{
 			ServiceID: "gc_worker",

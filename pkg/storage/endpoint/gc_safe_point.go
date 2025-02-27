@@ -71,7 +71,7 @@ func (se *StorageEndpoint) SaveGCSafePoint(safePoint uint64) error {
 
 // LoadMinServiceGCSafePoint returns the minimum safepoint across all services
 func (se *StorageEndpoint) LoadMinServiceGCSafePoint(now time.Time) (*ServiceSafePoint, error) {
-	prefix := keypath.GCSafePointServicePrefixPath()
+	prefix := keypath.ServiceGCSafePointPrefix()
 	prefixEnd := clientv3.GetPrefixRangeEnd(prefix)
 	keys, values, err := se.LoadRange(prefix, prefixEnd, 0)
 	if err != nil {
@@ -143,7 +143,7 @@ func (se *StorageEndpoint) initServiceGCSafePointForGCWorker(initialValue uint64
 
 // LoadAllServiceGCSafePoints returns all services GC safepoints
 func (se *StorageEndpoint) LoadAllServiceGCSafePoints() ([]*ServiceSafePoint, error) {
-	prefix := keypath.GCSafePointServicePrefixPath()
+	prefix := keypath.ServiceGCSafePointPrefix()
 	prefixEnd := clientv3.GetPrefixRangeEnd(prefix)
 	keys, values, err := se.LoadRange(prefix, prefixEnd, 0)
 	if err != nil {
@@ -175,7 +175,7 @@ func (se *StorageEndpoint) SaveServiceGCSafePoint(ssp *ServiceSafePoint) error {
 		return errors.New("TTL of gc_worker's service safe point must be infinity")
 	}
 
-	return se.saveJSON(keypath.GCSafePointServicePath(ssp.ServiceID), ssp)
+	return se.saveJSON(keypath.ServiceGCSafePointPath(ssp.ServiceID), ssp)
 }
 
 // RemoveServiceGCSafePoint removes a GC safepoint for the service
@@ -183,6 +183,6 @@ func (se *StorageEndpoint) RemoveServiceGCSafePoint(serviceID string) error {
 	if serviceID == keypath.GCWorkerServiceSafePointID {
 		return errors.New("cannot remove service safe point of gc_worker")
 	}
-	key := keypath.GCSafePointServicePath(serviceID)
+	key := keypath.ServiceGCSafePointPath(serviceID)
 	return se.Remove(key)
 }

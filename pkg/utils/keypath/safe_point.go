@@ -18,19 +18,58 @@ import (
 	"fmt"
 )
 
+func GCStateRevisionPath() string {
+	return fmt.Sprintf(gcStateRevisionPathFormat, ClusterID())
+}
+
 // GCSafePointPath returns the GC safe point key path.
 func GCSafePointPath() string {
 	return fmt.Sprintf(gcSafePointPathFormat, ClusterID())
 }
 
-// GCSafePointServicePrefixPath returns the GC safe point service key path prefix.
-func GCSafePointServicePrefixPath() string {
-	return GCSafePointServicePath("")
+func KeyspaceGCSafePointPath(keyspaceID uint32) string {
+	return fmt.Sprintf(keyspaceGCSafePointPathFormat, ClusterID(), keyspaceID)
 }
 
-// GCSafePointServicePath returns the GC safe point service key path with the given service ID.
-func GCSafePointServicePath(serviceID string) string {
-	return fmt.Sprintf(gcSafePointServicePathFormat, ClusterID(), serviceID)
+func TxnSafePointPath() string {
+	return txnSafePointPath
+}
+
+func KeyspaceTxnSafePointPath(keyspaceID uint32) string {
+	return fmt.Sprintf(keyspaceTxnSafePointPath, keyspaceID)
+}
+
+func GCBarrierPrefix() string {
+	return GCBarrierPath("")
+}
+
+func GCBarrierPath(barrierID string) string {
+	return fmt.Sprintf(gcBarrierPathFormat, ClusterID(), barrierID)
+}
+
+func KeyspaceGCBarrierPrefix(keyspaceID uint32) string {
+	return KeyspaceGCBarrierPath(keyspaceID, "")
+}
+
+func KeyspaceGCBarrierPath(keyspaceID uint32, barrierID string) string {
+	return fmt.Sprintf(keyspaceGCBarrierPathFormat, ClusterID(), keyspaceID, barrierID)
+}
+
+func ServiceGCSafePointPrefix() string {
+	// The service safe points (which is deprecated and replaced by GC barriers) shares the same data with GC barriers.
+	return GCBarrierPrefix()
+}
+
+func ServiceGCSafePointPath(serviceID string) string {
+	return GCBarrierPath(serviceID)
+}
+
+func CompatibleTiDBMinStartTSPrefix() string {
+	return tidbMinStartTSPrefix
+}
+
+func CompatibleKeyspaceTiDBMinStartTSPrefixFormat(keyspaceID uint32) string {
+	return fmt.Sprintf(keyspaceTiDBMinStartTSPrefix, keyspaceID)
 }
 
 // GCSafePointV2Path is the storage path of gc safe point v2.
