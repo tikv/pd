@@ -179,6 +179,17 @@ type KeyRanges struct {
 	krs []*KeyRange
 }
 
+// NewKeyRanges creates a KeyRanges.
+func NewKeyRanges(ranges []KeyRange) *KeyRanges {
+	krs := make([]*KeyRange, 0, len(ranges))
+	for _, kr := range ranges {
+		krs = append(krs, &kr)
+	}
+	return &KeyRanges{
+		krs,
+	}
+}
+
 // NewKeyRangesWithSize creates a KeyRanges with the hint size.
 func NewKeyRangesWithSize(size int) *KeyRanges {
 	return &KeyRanges{
