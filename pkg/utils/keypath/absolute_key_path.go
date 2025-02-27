@@ -61,6 +61,7 @@ const (
 	// "%08d" adds extra padding to make encoded ID ordered.
 	// Encoded ID can be decoded directly with strconv.ParseUint. Width of the
 	// padded keyspaceID is 8 (decimal representation of uint24max is 16777215).
+	gcStateRevisionPathFormat     = "/pd/%d/gc/gc_state_revision"         // "/pd/{cluster_id}/gc/gc_state_revision"
 	gcSafePointPathFormat         = "/pd/%d/gc/safe_point"                // "/pd/{cluster_id}/gc/safe_point"
 	keyspaceGCSafePointPathFormat = "/pd/%d/keyspaces/gc_safe_point/%08d" // "/pd/{cluster_id}/keyspaces/gc_safe_point/{keyspace_id}"
 	// Compatible with old data that was directly written to etcd by TiDB.
@@ -68,8 +69,8 @@ const (
 	keyspaceTxnSafePointPath     = "/keyspaces/tidb/%d/tidb/store/gcworker/saved_safe_point" // "/keyspaces/tidb/{keyspace_id}/tidb/store/gcworker/saved_safe_point"
 	gcBarrierPathFormat          = "/pd/%d/gc/safe_point/service/%s"                         // "/pd/{cluster_id}/gc/safe_point/service/{barrier_id}"
 	keyspaceGCBarrierPathFormat  = "/pd/%d/keyspaces/service_safe_point/%08d/%s"             // "/pd/{cluster_id}/keyspaces/service_safe_point/{keyspace_id}/{barrier_id}"
-	tidbMinStartTSPrefix         = "/tidb/server/minstartts"
-	keyspaceTiDBMinStartTSPrefix = "/keyspaces/tidb/%d/tidb/server/minstartts" // "/keyspaces/tidb/{keyspace_id}/tidb/server/minstartts"
+	tidbMinStartTSPrefix         = "/tidb/server/minstartts/"
+	keyspaceTiDBMinStartTSPrefix = "/keyspaces/tidb/%d/tidb/server/minstartts/" // "/keyspaces/tidb/{keyspace_id}/tidb/server/minstartts"
 	gcSafePointV2PathFormat      = keyspaceGCSafePointPathFormat
 	serviceSafePointV2PathFormat = keyspaceGCBarrierPathFormat
 

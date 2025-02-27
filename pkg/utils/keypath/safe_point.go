@@ -18,6 +18,10 @@ import (
 	"fmt"
 )
 
+func GCStateRevisionPath() string {
+	return fmt.Sprintf(gcStateRevisionPathFormat, ClusterID())
+}
+
 // GCSafePointPath returns the GC safe point key path.
 func GCSafePointPath() string {
 	return fmt.Sprintf(gcSafePointPathFormat, ClusterID())
@@ -32,7 +36,7 @@ func TxnSafePointPath() string {
 }
 
 func KeyspaceTxnSafePointPath(keyspaceID uint32) string {
-	return fmt.Sprintf(keyspaceTxnSafePointPath, keyspaceIDPathFormat)
+	return fmt.Sprintf(keyspaceTxnSafePointPath, keyspaceID)
 }
 
 func GCBarrierPrefix() string {
@@ -41,6 +45,14 @@ func GCBarrierPrefix() string {
 
 func GCBarrierPath(barrierID string) string {
 	return fmt.Sprintf(gcBarrierPathFormat, ClusterID(), barrierID)
+}
+
+func KeyspaceGCBarrierPrefix(keyspaceID uint32) string {
+	return KeyspaceGCBarrierPath(keyspaceID, "")
+}
+
+func KeyspaceGCBarrierPath(keyspaceID uint32, barrierID string) string {
+	return fmt.Sprintf(keyspaceGCBarrierPathFormat, ClusterID(), keyspaceID, barrierID)
 }
 
 func ServiceGCSafePointPrefix() string {
@@ -52,11 +64,11 @@ func ServiceGCSafePointPath(serviceID string) string {
 	return GCBarrierPath(serviceID)
 }
 
-func CompatibleTiDBMinStartTSPath() string {
+func CompatibleTiDBMinStartTSPrefix() string {
 	return tidbMinStartTSPrefix
 }
 
-func CompatibleKeyspaceTiDBMinStartTSPath(keyspaceID uint32) string {
+func CompatibleKeyspaceTiDBMinStartTSPrefixFormat(keyspaceID uint32) string {
 	return fmt.Sprintf(keyspaceTiDBMinStartTSPrefix, keyspaceID)
 }
 

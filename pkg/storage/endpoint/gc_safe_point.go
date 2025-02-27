@@ -240,12 +240,12 @@ func (p GCStateProvider) loadKeyspaceGCSafePoint(keyspaceID uint32) (uint64, err
 }
 
 func (p GCStateProvider) LoadTxnSafePoint(keyspaceID uint32) (uint64, error) {
-	key := keypath.TxnSafePointAbsolutePath()
+	key := keypath.TxnSafePointPath()
 	if keyspaceID != constant.NullKeyspaceID {
-		key = keypath.KeyspaceTxnSafePointAbsolutePath(keyspaceID)
+		key = keypath.KeyspaceTxnSafePointPath(keyspaceID)
 	}
 
-	value, err := /* load raw key from p.storage */ p.storage.Load(key)
+	value, err := p.storage.Load(key)
 	if err != nil || value == "" {
 		return 0, err
 	}
@@ -309,9 +309,9 @@ func (p GCStateProvider) LoadGCBarrier(keyspaceID uint32, barrierID string) (*GC
 }
 
 func (p GCStateProvider) LoadAllGCBarriers(keyspaceID uint32) ([]*GCBarrier, error) {
-	prefix := keypath.GCBarrierPrefix() + "/"
+	prefix := keypath.GCBarrierPrefix()
 	if keyspaceID != constant.NullKeyspaceID {
-		prefix = keypath.KeyspaceGCBarrierPrefix(keyspaceID) + "/"
+		prefix = keypath.KeyspaceGCBarrierPrefix(keyspaceID)
 	}
 	// TODO: Limit the count for each call.
 	_, serviceSafePoints, err := loadJSONByPrefix[*ServiceSafePoint](p.storage, prefix, 0)
@@ -329,9 +329,9 @@ func (p GCStateProvider) LoadAllGCBarriers(keyspaceID uint32) ([]*GCBarrier, err
 }
 
 func (p GCStateProvider) CompatibleLoadTiDBMinStartTS(keyspaceID uint32) (string, uint64, error) {
-	prefix := keypath.CompatibleTiDBMinStartTSAbsolutePath() + "/"
+	prefix := keypath.CompatibleTiDBMinStartTSPrefix()
 	if keyspaceID != constant.NullKeyspaceID {
-		prefix = keypath.CompatibleKeyspaceTiDBMinStartTSAbsolutePath(keyspaceID) + "/"
+		prefix = keypath.CompatibleKeyspaceTiDBMinStartTSPrefixFormat(keyspaceID)
 	}
 	prefixEnd := clientv3.GetPrefixRangeEnd(prefix)
 
@@ -339,6 +339,10 @@ func (p GCStateProvider) CompatibleLoadTiDBMinStartTS(keyspaceID uint32) (string
 	keys, values, err := p.storage.LoadRange(prefix, prefixEnd, 0)
 	if err != nil {
 		return "", 0, err
+	}
+
+	if len(keys) == 0 {
+		return "", 0, nil
 	}
 
 	var minKey string
@@ -356,6 +360,10 @@ func (p GCStateProvider) CompatibleLoadTiDBMinStartTS(keyspaceID uint32) (string
 	}
 
 	// Remove prefix from the key and only keep the identifier written by TiDB.
+	if len(minKey) < len(prefix) || minKey[:len(prefix)] != prefix {
+		// This is expected to be unreachable.
+		return "", 0, errors.Errorf("unexpected internal error: loading TiDB min start ts but got mismatching key prefix, expected prefix: %s, got key: %s", prefix, minKey)
+	}
 	minKey = minKey[len(prefix):]
 	return minKey, minMinStartTS, nil
 }
@@ -366,7 +374,7 @@ func (p GCStateProvider) CompatibleLoadTiDBMinStartTS(keyspaceID uint32) (string
 // In the transaction, reads can be performed on the GCStateProvider as usual, while writes should only be performed
 // through the GCStateWriteBatch.
 func (p GCStateProvider) RunInGCStateTransaction(f func(wb *GCStateWriteBatch) error) error {
-	revisionKey := keypath.GCMetaRevisionPath()
+	revisionKey := keypath.GCStateRevisionPath()
 	currentRevision, err := p.storage.Load(revisionKey)
 	if err != nil {
 		return errors.AddStack(err)
@@ -568,13 +576,13 @@ func (wb *GCStateWriteBatch) setKeyspaceGCSafePoint(keyspaceID uint32, gcSafePoi
 }
 
 func (wb *GCStateWriteBatch) SetTxnSafePoint(keyspaceID uint32, txnSafePoint uint64) error {
-	key := keypath.TxnSafePointAbsolutePath()
+	key := keypath.TxnSafePointPath()
 	if keyspaceID != constant.NullKeyspaceID {
-		key = keypath.KeyspaceTxnSafePointAbsolutePath(keyspaceID)
+		key = keypath.KeyspaceTxnSafePointPath(keyspaceID)
 	}
 	value := strconv.FormatUint(txnSafePoint, 10)
 	wb.ops = append(wb.ops, kv.RawTxnOp{
-		Key:/* raw key without prefix */ key,
+		Key:    key,
 		OpType: kv.RawTxnOpPut,
 		Value:  value,
 	})

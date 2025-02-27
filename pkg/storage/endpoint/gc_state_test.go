@@ -19,7 +19,6 @@ import (
 	"fmt"
 	"math"
 	"math/rand"
-	"path"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -28,6 +27,7 @@ import (
 
 	"github.com/pingcap/errors"
 	"github.com/stretchr/testify/require"
+	clientv3 "go.etcd.io/etcd/client/v3"
 	"golang.org/x/exp/slices"
 
 	"github.com/tikv/pd/pkg/errs"
@@ -39,8 +39,7 @@ import (
 
 func newEtcdStorageEndpoint(t *testing.T) (se *StorageEndpoint, clean func()) {
 	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1)
-	rootPath := path.Join("/pd", strconv.FormatUint(100, 10))
-	kvBase := kv.NewEtcdKVBase(client, rootPath)
+	kvBase := kv.NewEtcdKVBase(client)
 
 	s := NewStorageEndpoint(kvBase, nil)
 	return s, clean
@@ -156,12 +155,13 @@ func TestGCStateJSONUtil(t *testing.T) {
 	re.Equal([]*int64{new(int64), nil}, vpints)
 
 	ssp := &ServiceSafePoint{
-		ServiceID: "testsvc",
-		ExpiredAt: math.MaxInt64,
-		SafePoint: 456139133457530881,
+		ServiceID:  "testsvc",
+		ExpiredAt:  math.MaxInt64,
+		SafePoint:  456139133457530881,
+		KeyspaceID: constant.NullKeyspaceID,
 	}
 	writeJSON("dir4/k1", ssp)
-	re.Equal(`{"service_id":"testsvc","expired_at":9223372036854775807,"safe_point":456139133457530881,"keyspace_id":4294967295}`, loadValue("dir4/k1"))
+	re.Equal(`{"service_id":"testsvc","expired_at":9223372036854775807,"safe_point":456139133457530881}`, loadValue("dir4/k1"))
 	loadedSsp, err := loadJSON[*ServiceSafePoint](se, "dir4/k1")
 	re.NoError(err)
 	re.Equal(ssp, loadedSsp)
@@ -371,7 +371,7 @@ func TestGCStateTransactionACID(t *testing.T) {
 	// Check revision: All transactions (except readonly ones) increases the revision.
 	// The non-readonly transactions we have performed are: adder, transferrer, and the initialization of the initial
 	// data at the beginning of the test.
-	revision := loadValue(re, se, keypath.GCMetaRevisionPath())
+	revision := loadValue(re, se, keypath.GCStateRevisionPath())
 	re.Equal(fmt.Sprintf("%d", addCount.Load()+transferCount.Load()+1), revision)
 }
 
@@ -389,10 +389,10 @@ func TestGCSafePoint(t *testing.T) {
 		re.Equal(uint64(0), res)
 		for _, gcSafePoint := range testData {
 			// For checking physical data representation.
-			expectedKey := "gc/safe_point"
+			expectedKey := "/pd/0/gc/safe_point"
 			expectedValue := fmt.Sprintf("%x", gcSafePoint)
 			if keyspaceID != constant.NullKeyspaceID {
-				expectedKey = fmt.Sprintf("keyspaces/gc_safe_point/%08d", keyspaceID)
+				expectedKey = fmt.Sprintf("/pd/0/keyspaces/gc_safe_point/%08d", keyspaceID)
 				expectedValue = fmt.Sprintf(`{"keyspace_id":%d,"safe_point":%d}`, keyspaceID, gcSafePoint)
 			}
 
@@ -448,9 +448,9 @@ func TestGCBarrier(t *testing.T) {
 		}
 
 		// Check the raw data.
-		pathPrefix := "gc/safe_point/service"
+		pathPrefix := "/pd/0/gc/safe_point/service"
 		if keyspaceID != constant.NullKeyspaceID {
-			pathPrefix = fmt.Sprintf("keyspaces/service_safe_point/%08d", keyspaceID)
+			pathPrefix = fmt.Sprintf("/pd/0/keyspaces/service_safe_point/%08d", keyspaceID)
 		}
 		keyspaceIDField := ""
 		if keyspaceID != constant.NullKeyspaceID {
@@ -629,22 +629,22 @@ func TestTiDBMinStartTS(t *testing.T) {
 		checkResult(keyspaceID, "", 0)
 
 		mustSaveKey(re, se, genKey(keyspaceID, "instance1"), "10")
-		checkResult(keyspaceID, genKey(keyspaceID, "instance1"), 10)
+		checkResult(keyspaceID, "instance1", 10)
 
 		mustSaveKey(re, se, genKey(keyspaceID, "instance1"), "15")
-		checkResult(keyspaceID, genKey(keyspaceID, "instance1"), 15)
+		checkResult(keyspaceID, "instance1", 15)
 
 		mustSaveKey(re, se, genKey(keyspaceID, "instance2"), "20")
-		checkResult(keyspaceID, genKey(keyspaceID, "instance1"), 15)
+		checkResult(keyspaceID, "instance1", 15)
 
 		mustSaveKey(re, se, genKey(keyspaceID, "instance2"), "14")
-		checkResult(keyspaceID, genKey(keyspaceID, "instance2"), 14)
+		checkResult(keyspaceID, "instance2", 14)
 
 		mustSaveKey(re, se, genKey(keyspaceID, "instance1"), strconv.FormatUint(math.MaxUint64, 10))
-		checkResult(keyspaceID, genKey(keyspaceID, "instance2"), 14)
+		checkResult(keyspaceID, "instance2", 14)
 
 		mustRemoveKey(re, se, genKey(keyspaceID, "instance2"))
-		checkResult(keyspaceID, genKey(keyspaceID, "instance1"), math.MaxUint64)
+		checkResult(keyspaceID, "instance1", math.MaxUint64)
 
 		mustRemoveKey(re, se, genKey(keyspaceID, "instance1"))
 		checkResult(keyspaceID, "", 0)
@@ -655,20 +655,15 @@ func TestDataPhysicalRepresentation(t *testing.T) {
 	re := require.New(t)
 
 	// The following data is possible to be stored by current version of PD. Test storing on them.
-	// Note that newEtcdStorageEndpoint uses 100 as the cluster ID.
 	writableKvPairs := []kv.KeyValuePair{
-		{"/pd/100/gc/safepoint", "654882009e40000" /* 456139133457530880 */},
-		{"/pd/100/keyspaces/gc_safe_point/00001111", `{"keyspace_id":1111,"safe_point":456139133457530881}`},
+		{"/pd/0/gc/safe_point", "654882009e40000" /* 456139133457530880 */},
+		{"/pd/0/keyspaces/gc_safe_point/00001111", `{"keyspace_id":1111,"safe_point":456139133457530881}`},
 		{"/tidb/store/gcworker/saved_safe_point", "456139133457530882"},
 		{"/keyspaces/tidb/2222/tidb/store/gcworker/saved_safe_point", "456139133457530883"},
-		{"/pd/100/gc/safepoint/service/gc_worker", `{"service_id":"gc_worker","expired_at":9223372036854775807,"safe_point":456139133457530884}`},
-		{"/pd/100/gc/safepoint/service/svc1", `{"service_id":"svc1","expired_at":1740127928,"safe_point":456139133457530885}`},
-		{"/pd/100/keyspaces/service_safe_point/00003333/svc2", `{"service_id":"svc2","expired_at":1740127928,"safe_point":456139133457530886,"keyspace_id":2222}`},
+		{"/pd/0/gc/safe_point/service/gc_worker", `{"service_id":"gc_worker","expired_at":9223372036854775807,"safe_point":456139133457530884}`},
+		{"/pd/0/gc/safe_point/service/svc1", `{"service_id":"svc1","expired_at":1740127928,"safe_point":456139133457530885}`},
+		{"/pd/0/keyspaces/service_safe_point/00003333/svc2", `{"service_id":"svc2","expired_at":1740127928,"safe_point":456139133457530886,"keyspace_id":3333}`},
 	}
-
-	slices.SortFunc(writableKvPairs, func(lhs, rhs kv.KeyValuePair) bool {
-		return lhs.Key < rhs.Key
-	})
 
 	// Test storing
 	func() {
@@ -688,13 +683,24 @@ func TestDataPhysicalRepresentation(t *testing.T) {
 		})
 		re.NoError(err)
 
-		keys, values, err := se.LoadRange("", "", 0)
+		// A `RunInGCStateTransaction` operation will also cause an update to the revision key.
+		expectedKeys := append([]kv.KeyValuePair{}, writableKvPairs...)
+		expectedKeys = append(expectedKeys, kv.KeyValuePair{
+			Key:   "/pd/0/gc/gc_state_revision",
+			Value: "1",
+		})
+
+		slices.SortFunc(expectedKeys, func(lhs, rhs kv.KeyValuePair) bool {
+			return lhs.Key < rhs.Key
+		})
+
+		keys, values, err := se.LoadRange("/", clientv3.GetPrefixRangeEnd("/"), 0)
 		re.NoError(err)
-		re.Len(keys, len(writableKvPairs), fmt.Sprintf("data length mismatches, expected kvpairs: %v, actual keys: %v, acutal values: %v", writableKvPairs, keys, values))
+		re.Len(keys, len(expectedKeys), fmt.Sprintf("data length mismatches, expected kvpairs: %v, actual keys: %v, acutal values: %v", expectedKeys, keys, values))
 		for i, key := range keys {
 			value := values[i]
-			re.Equal(writableKvPairs[i].Key, key)
-			re.Equal(writableKvPairs[i].Value, value)
+			re.Equal(expectedKeys[i].Key, key, "index: %d", i)
+			re.Equal(expectedKeys[i].Value, value, "index: %d", i)
 		}
 	}()
 
@@ -706,6 +712,7 @@ func TestDataPhysicalRepresentation(t *testing.T) {
 		{"/keyspaces/tidb/4444/tidb/server/minstartts/instance2", "456139133457530888"},
 	}
 
+	// Test reading
 	func() {
 		se, clean := newEtcdStorageEndpoint(t)
 		defer clean()
@@ -744,18 +751,18 @@ func TestDataPhysicalRepresentation(t *testing.T) {
 
 		key, minStartTS, err := provider.CompatibleLoadTiDBMinStartTS(constant.NullKeyspaceID)
 		re.NoError(err)
-		re.Equal("/tidb/server/minstartts/instance1", key)
+		re.Equal("instance1", key)
 		re.Equal(uint64(456139133457530887), minStartTS)
 		key, minStartTS, err = provider.CompatibleLoadTiDBMinStartTS(4444)
 		re.NoError(err)
-		re.Equal("/keyspaces/tidb/4444/tidb/server/minstartts/instance2", key)
+		re.Equal("instance2", key)
 		re.Equal(uint64(456139133457530888), minStartTS)
 
 		keys, ssps, err := provider.CompatibleLoadAllServiceGCSafePoints()
 		re.NoError(err)
 		re.Equal([]string{
-			"/pd/100/gc/safepoint/service/gc_worker",
-			"/pd/100/gc/safepoint/service/svc1",
+			"/pd/0/gc/safe_point/service/gc_worker",
+			"/pd/0/gc/safe_point/service/svc1",
 		}, keys)
 		re.Equal([]*ServiceSafePoint{
 			{
