@@ -516,54 +516,106 @@ func (suite *APIServerForwardTestSuite) checkAvailableTSO() {
 
 func TestForwardTsoConcurrently(t *testing.T) {
 	re := require.New(t)
-	suite := NewPDServiceForward(re)
-	defer suite.ShutDown()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster, err := tests.NewTestAPICluster(ctx, 3)
+	re.NoError(err)
+	defer cluster.Destroy()
 
-	tc, err := tests.NewTestTSOCluster(suite.ctx, 2, suite.backendEndpoints)
+	err = cluster.RunInitialServers()
+	re.NoError(err)
+
+	leaderName := cluster.WaitLeader()
+	pdLeader := cluster.GetServer(leaderName)
+	backendEndpoints := pdLeader.GetAddr()
+	re.NoError(pdLeader.BootstrapCluster())
+	leader := cluster.GetServer(cluster.WaitLeader())
+	rc := leader.GetServer().GetRaftCluster()
+	for i := 0; i < 3; i++ {
+		region := &metapb.Region{
+			Id:       uint64(i*4 + 1),
+			Peers:    []*metapb.Peer{{Id: uint64(i*4 + 2), StoreId: uint64(i*4 + 3)}},
+			StartKey: []byte{byte(i)},
+			EndKey:   []byte{byte(i + 1)},
+		}
+		rc.HandleRegionHeartbeat(core.NewRegionInfo(region, region.Peers[0]))
+	}
+
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/usePDServiceMode", "return(true)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/client/usePDServiceMode"))
+	}()
+
+	tc, err := tests.NewTestTSOCluster(ctx, 2, backendEndpoints)
 	re.NoError(err)
 	defer tc.Destroy()
 	tc.WaitForDefaultPrimaryServing(re)
 
 	wg := sync.WaitGroup{}
-	for i := range 3 {
+	for i := 0; i < 3; i++ {
 		wg.Add(1)
-		go func() {
+		go func(i int) {
 			defer wg.Done()
 			pdClient, err := pd.NewClientWithContext(
 				context.Background(),
-				caller.TestComponent,
-				[]string{suite.backendEndpoints},
+				[]string{backendEndpoints},
 				pd.SecurityOption{})
 			re.NoError(err)
 			re.NotNil(pdClient)
 			defer pdClient.Close()
-			for range 10 {
+			for j := 0; j < 10; j++ {
 				testutil.Eventually(re, func() bool {
 					min, err := pdClient.UpdateServiceGCSafePoint(context.Background(), fmt.Sprintf("service-%d", i), 1000, 1)
 					return err == nil && min == 0
 				})
 			}
-		}()
+		}(i)
 	}
 	wg.Wait()
 }
 
 func BenchmarkForwardTsoConcurrently(b *testing.B) {
 	re := require.New(b)
-	suite := NewPDServiceForward(re)
-	defer suite.ShutDown()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster, err := tests.NewTestAPICluster(ctx, 3)
+	re.NoError(err)
+	defer cluster.Destroy()
 
-	tc, err := tests.NewTestTSOCluster(suite.ctx, 1, suite.backendEndpoints)
+	err = cluster.RunInitialServers()
+	re.NoError(err)
+
+	leaderName := cluster.WaitLeader()
+	pdLeader := cluster.GetServer(leaderName)
+	backendEndpoints := pdLeader.GetAddr()
+	re.NoError(pdLeader.BootstrapCluster())
+	leader := cluster.GetServer(cluster.WaitLeader())
+	rc := leader.GetServer().GetRaftCluster()
+	for i := 0; i < 3; i++ {
+		region := &metapb.Region{
+			Id:       uint64(i*4 + 1),
+			Peers:    []*metapb.Peer{{Id: uint64(i*4 + 2), StoreId: uint64(i*4 + 3)}},
+			StartKey: []byte{byte(i)},
+			EndKey:   []byte{byte(i + 1)},
+		}
+		rc.HandleRegionHeartbeat(core.NewRegionInfo(region, region.Peers[0]))
+	}
+
+	re.NoError(failpoint.Enable("github.com/tikv/pd/client/usePDServiceMode", "return(true)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/client/usePDServiceMode"))
+	}()
+
+	tc, err := tests.NewTestTSOCluster(ctx, 1, backendEndpoints)
 	re.NoError(err)
 	defer tc.Destroy()
 	tc.WaitForDefaultPrimaryServing(re)
 
 	initClients := func(num int) []pd.Client {
 		var clients []pd.Client
-		for range num {
+		for i := 0; i < num; i++ {
 			pdClient, err := pd.NewClientWithContext(context.Background(),
-				caller.TestComponent,
-				[]string{suite.backendEndpoints}, pd.SecurityOption{}, opt.WithMaxErrorRetry(1))
+				[]string{backendEndpoints}, pd.SecurityOption{}, pd.WithMaxErrorRetry(1))
 			re.NoError(err)
 			re.NotNil(pdClient)
 			clients = append(clients, pdClient)
@@ -577,17 +629,17 @@ func BenchmarkForwardTsoConcurrently(b *testing.B) {
 		b.Run(fmt.Sprintf("clients_%d", clientsNum), func(b *testing.B) {
 			wg := sync.WaitGroup{}
 			b.ResetTimer()
-			for range b.N {
-				for i, client := range clients {
+			for i := 0; i < b.N; i++ {
+				for j, client := range clients {
 					wg.Add(1)
-					go func() {
+					go func(j int, client pd.Client) {
 						defer wg.Done()
-						for range 1000 {
-							min, err := client.UpdateServiceGCSafePoint(context.Background(), fmt.Sprintf("service-%d", i), 1000, 1)
+						for k := 0; k < 1000; k++ {
+							min, err := client.UpdateServiceGCSafePoint(context.Background(), fmt.Sprintf("service-%d", j), 1000, 1)
 							re.NoError(err)
 							re.Equal(uint64(0), min)
 						}
-					}()
+					}(j, client)
 				}
 			}
 			wg.Wait()
