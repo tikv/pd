@@ -498,7 +498,7 @@ func TestForwardTsoConcurrently(t *testing.T) {
 	re.NoError(pdLeader.BootstrapCluster())
 	leader := cluster.GetServer(cluster.WaitLeader())
 	rc := leader.GetServer().GetRaftCluster()
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		region := &metapb.Region{
 			Id:       uint64(i*4 + 1),
 			Peers:    []*metapb.Peer{{Id: uint64(i*4 + 2), StoreId: uint64(i*4 + 3)}},
@@ -519,7 +519,7 @@ func TestForwardTsoConcurrently(t *testing.T) {
 	tc.WaitForDefaultPrimaryServing(re)
 
 	wg := sync.WaitGroup{}
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
@@ -530,7 +530,7 @@ func TestForwardTsoConcurrently(t *testing.T) {
 			re.NoError(err)
 			re.NotNil(pdClient)
 			defer pdClient.Close()
-			for j := 0; j < 10; j++ {
+			for range 10 {
 				testutil.Eventually(re, func() bool {
 					min, err := pdClient.UpdateServiceGCSafePoint(context.Background(), fmt.Sprintf("service-%d", i), 1000, 1)
 					return err == nil && min == 0
@@ -558,7 +558,7 @@ func BenchmarkForwardTsoConcurrently(b *testing.B) {
 	re.NoError(pdLeader.BootstrapCluster())
 	leader := cluster.GetServer(cluster.WaitLeader())
 	rc := leader.GetServer().GetRaftCluster()
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		region := &metapb.Region{
 			Id:       uint64(i*4 + 1),
 			Peers:    []*metapb.Peer{{Id: uint64(i*4 + 2), StoreId: uint64(i*4 + 3)}},
@@ -580,7 +580,7 @@ func BenchmarkForwardTsoConcurrently(b *testing.B) {
 
 	initClients := func(num int) []pd.Client {
 		var clients []pd.Client
-		for i := 0; i < num; i++ {
+		for range num {
 			pdClient, err := pd.NewClientWithContext(context.Background(),
 				[]string{backendEndpoints}, pd.SecurityOption{}, pd.WithMaxErrorRetry(1))
 			re.NoError(err)
@@ -596,12 +596,12 @@ func BenchmarkForwardTsoConcurrently(b *testing.B) {
 		b.Run(fmt.Sprintf("clients_%d", clientsNum), func(b *testing.B) {
 			wg := sync.WaitGroup{}
 			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
+			for range b.N {
 				for j, client := range clients {
 					wg.Add(1)
 					go func(j int, client pd.Client) {
 						defer wg.Done()
-						for k := 0; k < 1000; k++ {
+						for range 1000 {
 							min, err := client.UpdateServiceGCSafePoint(context.Background(), fmt.Sprintf("service-%d", j), 1000, 1)
 							re.NoError(err)
 							re.Equal(uint64(0), min)
