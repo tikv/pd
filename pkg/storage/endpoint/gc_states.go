@@ -56,6 +56,7 @@ type ServiceSafePoint struct {
 	KeyspaceID uint32
 }
 
+// MarshalJSON customizes marshalling of ServiceSafePoint and handles `KeyspaceID` field specially.
 func (s *ServiceSafePoint) MarshalJSON() ([]byte, error) {
 	if s.KeyspaceID == constant.NullKeyspaceID {
 		return json.Marshal(struct {
@@ -81,6 +82,7 @@ func (s *ServiceSafePoint) MarshalJSON() ([]byte, error) {
 	})
 }
 
+// UnmarshalJSON customizes unmarshalling of ServiceSafePoint and handles `KeyspaceID` field specially.
 func (s *ServiceSafePoint) UnmarshalJSON(data []byte) error {
 	var repr struct {
 		ServiceID  string  `json:"service_id"`
@@ -105,6 +107,9 @@ func (s *ServiceSafePoint) UnmarshalJSON(data []byte) error {
 var _ json.Marshaler = &ServiceSafePoint{}
 var _ json.Unmarshaler = &ServiceSafePoint{}
 
+// GCBarrier represents a GC barrier that's used to block GC from advancing to keep snapshots not earlier than the
+// barrier to be safe to read. The concept *GC barrier* is replacing the *service safe points*, but it reuses the
+// same physical persistent data as the service safe points for backward compatibility.
 type GCBarrier struct {
 	BarrierID string
 	BarrierTS uint64
@@ -112,6 +117,9 @@ type GCBarrier struct {
 	ExpirationTime *time.Time
 }
 
+// NewGCBarrier creates a new GCBarrier. The given expirationTime will be rounded up to the next second if it's
+// not in integral seconds.
+// Passing nil to `expirationTime` means the barrier never expires.
 func NewGCBarrier(barrierID string, barrierTS uint64, expirationTime *time.Time) *GCBarrier {
 	// Round up the expirationTime.
 	if expirationTime != nil {
@@ -128,6 +136,7 @@ func NewGCBarrier(barrierID string, barrierTS uint64, expirationTime *time.Time)
 	}
 }
 
+// gcBarrierFromServiceSafePoint returns the GCBarrier that's synonymous to the given service safe point.
 func gcBarrierFromServiceSafePoint(s *ServiceSafePoint) *GCBarrier {
 	if s == nil {
 		return nil
@@ -146,6 +155,7 @@ func gcBarrierFromServiceSafePoint(s *ServiceSafePoint) *GCBarrier {
 	return res
 }
 
+// toServiceSafePoint converts the GCBarrier to a synonymous ServiceSafePoint for storing physically.
 func (b *GCBarrier) toServiceSafePoint(keyspaceID uint32) *ServiceSafePoint {
 	res := &ServiceSafePoint{
 		ServiceID:  b.BarrierID,
@@ -159,10 +169,12 @@ func (b *GCBarrier) toServiceSafePoint(keyspaceID uint32) *ServiceSafePoint {
 	return res
 }
 
+// IsExpired checks whether the GCBarrier is expired at the given time.
 func (b *GCBarrier) IsExpired(now time.Time) bool {
 	return b.ExpirationTime != nil && now.After(*b.ExpirationTime)
 }
 
+// String implements fmt.Stringer.
 func (b *GCBarrier) String() string {
 	expirationTime := "<nil>"
 	if b.ExpirationTime != nil {
@@ -172,10 +184,15 @@ func (b *GCBarrier) String() string {
 		b.BarrierID, b.BarrierTS, expirationTime)
 }
 
+// GCStateStorage is the interface for providing the ability to store and retrieve GC state data.
+// The GC state data is not available to access via the GCStateStorage interface; instead, it should be
+// accessed by the GCStateProvider indirectly, which can be retrieved by calling GetGCStateProvider.
 type GCStateStorage interface {
+	// GetGCStateProvider returns an GCStateProvider for reading and writing GC state data.
 	GetGCStateProvider() GCStateProvider
 }
 
+// GetGCStateProvider returns an GCStateProvider for reading and writing GC state data.
 func (se *StorageEndpoint) GetGCStateProvider() GCStateProvider {
 	return newGCStateProvider(se)
 }
@@ -188,15 +205,18 @@ type GCStateProvider struct {
 	storage *StorageEndpoint
 }
 
+// newGCStateProvider creates a new GCStateProvider.
 func newGCStateProvider(storage *StorageEndpoint) GCStateProvider {
 	return GCStateProvider{storage: storage}
 }
 
+// GCStateWriteBatch is the batch of write operations within a GCStateTransaction, which can be started by calling
+// GCStateProvider.RunInGCStateTransaction.
 type GCStateWriteBatch struct {
 	ops []kv.RawTxnOp
 }
 
-// LoadGCSafePoint loads current GC safe point from storage.
+// LoadGCSafePoint loads current GC safe point of the given keyspaceID from storage.
 func (p GCStateProvider) LoadGCSafePoint(keyspaceID uint32) (uint64, error) {
 	if keyspaceID == constant.NullKeyspaceID {
 		return p.loadGlobalGCSafePoint()
@@ -204,6 +224,7 @@ func (p GCStateProvider) LoadGCSafePoint(keyspaceID uint32) (uint64, error) {
 	return p.loadKeyspaceGCSafePoint(keyspaceID)
 }
 
+// loadGlobalGCSafePoint loads the GC safe point of the global GC.
 func (p GCStateProvider) loadGlobalGCSafePoint() (uint64, error) {
 	value, err := p.storage.Load(keypath.GCSafePointPath())
 	if err != nil || value == "" {
@@ -221,6 +242,7 @@ type keyspaceGCSafePoint struct {
 	SafePoint  uint64 `json:"safe_point"`
 }
 
+// loadKeyspaceGCSafePoint loads the GC safe point of keyspace-level GC of a specific keyspace from storage.
 func (p GCStateProvider) loadKeyspaceGCSafePoint(keyspaceID uint32) (uint64, error) {
 	key := keypath.KeyspaceGCSafePointPath(keyspaceID)
 	value, err := p.storage.Load(key)
@@ -239,6 +261,7 @@ func (p GCStateProvider) loadKeyspaceGCSafePoint(keyspaceID uint32) (uint64, err
 	return gcSafePoint.SafePoint, nil
 }
 
+// LoadTxnSafePoint loads the current transaction safe point of the given keyspaceID from storage.
 func (p GCStateProvider) LoadTxnSafePoint(keyspaceID uint32) (uint64, error) {
 	key := keypath.TxnSafePointPath()
 	if keyspaceID != constant.NullKeyspaceID {
@@ -294,6 +317,7 @@ func loadJSONByPrefix[T any](se *StorageEndpoint, prefix string, limit int) ([]s
 	return keys, data, nil
 }
 
+// LoadGCBarrier loads the GCBarrier of the given barrierID from storage.
 func (p GCStateProvider) LoadGCBarrier(keyspaceID uint32, barrierID string) (*GCBarrier, error) {
 	prefix := keypath.GCBarrierPrefix()
 	if keyspaceID != constant.NullKeyspaceID {
@@ -308,6 +332,7 @@ func (p GCStateProvider) LoadGCBarrier(keyspaceID uint32, barrierID string) (*GC
 	return gcBarrierFromServiceSafePoint(serviceSafePoint), nil
 }
 
+// LoadAllGCBarriers loads all GC barriers of the given keyspace.
 func (p GCStateProvider) LoadAllGCBarriers(keyspaceID uint32) ([]*GCBarrier, error) {
 	prefix := keypath.GCBarrierPrefix()
 	if keyspaceID != constant.NullKeyspaceID {
@@ -328,10 +353,11 @@ func (p GCStateProvider) LoadAllGCBarriers(keyspaceID uint32) ([]*GCBarrier, err
 	return barriers, nil
 }
 
+// CompatibleLoadTiDBMinStartTS loads the minStartTS reported to etcd directly by TiDB.
 func (p GCStateProvider) CompatibleLoadTiDBMinStartTS(keyspaceID uint32) (string, uint64, error) {
 	prefix := keypath.CompatibleTiDBMinStartTSPrefix()
 	if keyspaceID != constant.NullKeyspaceID {
-		prefix = keypath.CompatibleKeyspaceTiDBMinStartTSPrefixFormat(keyspaceID)
+		prefix = keypath.CompatibleKeyspaceTiDBMinStartTSPrefix(keyspaceID)
 	}
 	prefixEnd := clientv3.GetPrefixRangeEnd(prefix)
 
@@ -442,7 +468,7 @@ func (p GCStateProvider) CompatibleLoadAllServiceGCSafePoints() ([]string, []*Se
 	return keys, ssps, nil
 }
 
-func (wb *GCStateWriteBatch) writeJson(key string, data any) error {
+func (wb *GCStateWriteBatch) writeJSON(key string, data any) error {
 	value, err := json.Marshal(data)
 	if err != nil {
 		return errs.ErrJSONMarshal.Wrap(err).GenWithStackByArgs()
@@ -455,6 +481,7 @@ func (wb *GCStateWriteBatch) writeJson(key string, data any) error {
 	return nil
 }
 
+// SetGCSafePoint sets the GC safe point for the given keyspace.
 func (wb *GCStateWriteBatch) SetGCSafePoint(keyspaceID uint32, gcSafePoint uint64) error {
 	if keyspaceID == constant.NullKeyspaceID {
 		return wb.setGlobalGCSafePoint(gcSafePoint)
@@ -474,12 +501,13 @@ func (wb *GCStateWriteBatch) setGlobalGCSafePoint(gcSafePoint uint64) error {
 
 func (wb *GCStateWriteBatch) setKeyspaceGCSafePoint(keyspaceID uint32, gcSafePoint uint64) error {
 	key := keypath.KeyspaceGCSafePointPath(keyspaceID)
-	return wb.writeJson(key, keyspaceGCSafePoint{
+	return wb.writeJSON(key, keyspaceGCSafePoint{
 		KeyspaceID: keyspaceID,
 		SafePoint:  gcSafePoint,
 	})
 }
 
+// SetTxnSafePoint sets the transaction safe point for the given keyspace.
 func (wb *GCStateWriteBatch) SetTxnSafePoint(keyspaceID uint32, txnSafePoint uint64) error {
 	key := keypath.TxnSafePointPath()
 	if keyspaceID != constant.NullKeyspaceID {
@@ -494,15 +522,17 @@ func (wb *GCStateWriteBatch) SetTxnSafePoint(keyspaceID uint32, txnSafePoint uin
 	return nil
 }
 
+// SetGCBarrier sets a GCBarrier with the given barrierID for a specific keyspace.
 func (wb *GCStateWriteBatch) SetGCBarrier(keyspaceID uint32, newGCBarrier *GCBarrier) error {
 	prefix := keypath.GCBarrierPrefix()
 	if keyspaceID != constant.NullKeyspaceID {
 		prefix = keypath.KeyspaceGCBarrierPrefix(keyspaceID)
 	}
 	key := path.Join(prefix, newGCBarrier.BarrierID)
-	return wb.writeJson(key, newGCBarrier.toServiceSafePoint(keyspaceID))
+	return wb.writeJSON(key, newGCBarrier.toServiceSafePoint(keyspaceID))
 }
 
+// DeleteGCBarrier deletes the GCBarrier with the given barrierID from a specific keyspace.
 func (wb *GCStateWriteBatch) DeleteGCBarrier(keyspaceID uint32, barrierID string) error {
 	prefix := keypath.GCBarrierPrefix()
 	if keyspaceID != constant.NullKeyspaceID {

@@ -104,7 +104,7 @@ func TestGCStateJSONUtil(t *testing.T) {
 
 	writeJSON := func(key string, value any) {
 		err := p.RunInGCStateTransaction(func(wb *GCStateWriteBatch) error {
-			return wb.writeJson(key, value)
+			return wb.writeJSON(key, value)
 		})
 		re.NoError(err)
 	}
@@ -183,7 +183,7 @@ func TestGCStateTransactionACID(t *testing.T) {
 	// Set initial values
 	re.NoError(provider.RunInGCStateTransaction(func(wb *GCStateWriteBatch) error {
 		for _, key := range allKeys {
-			err := wb.writeJson(key, 0)
+			err := wb.writeJSON(key, 0)
 			if err != nil {
 				return err
 			}
@@ -206,7 +206,7 @@ func TestGCStateTransactionACID(t *testing.T) {
 					return err1
 				}
 				for i, key := range allKeys {
-					err1 = wb.writeJson(key, values[i]+1)
+					err1 = wb.writeJSON(key, values[i]+1)
 					if err1 != nil {
 						return err1
 					}
@@ -246,11 +246,11 @@ func TestGCStateTransactionACID(t *testing.T) {
 				if err1 != nil {
 					return err1
 				}
-				err1 = wb.writeJson(allKeys[from], v1-1)
+				err1 = wb.writeJSON(allKeys[from], v1-1)
 				if err1 != nil {
 					return err1
 				}
-				err1 = wb.writeJson(allKeys[to], v2+1)
+				err1 = wb.writeJSON(allKeys[to], v2+1)
 				if err1 != nil {
 					return err1
 				}
