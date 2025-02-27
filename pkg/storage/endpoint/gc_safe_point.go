@@ -29,14 +29,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/keypath"
 )
 
-// ServiceSafePoint is the safepoint for a specific service
-// NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
-// This type is in sync with `client/http/types.go`.
-type ServiceSafePoint struct {
-	ServiceID string `json:"service_id"`
-	ExpiredAt int64  `json:"expired_at"`
-	SafePoint uint64 `json:"safe_point"`
-}
+// WARNING: The content of this file is going to be deprecated and replaced by `gc_states.go`.
 
 // GCSafePointStorage defines the storage operations on the GC safe point.
 type GCSafePointStorage interface {
