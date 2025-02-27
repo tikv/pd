@@ -69,6 +69,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/jsonutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
+	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/pkg/versioninfo"
@@ -204,13 +205,8 @@ type Server struct {
 	clientConns sync.Map
 
 	tsoClientPool struct {
-<<<<<<< HEAD
-		sync.RWMutex
-		clients map[string]tsopb.TSO_TsoClient
-=======
 		syncutil.RWMutex
 		clients map[string]*streamWrapper
->>>>>>> 0c13897bf (mcs: add lock for forward tso stream  (#9095))
 	}
 
 	// tsoDispatcher is used to dispatch different TSO requests to
@@ -264,13 +260,8 @@ func CreateServer(ctx context.Context, cfg *config.Config, services []string, le
 		DiagnosticsServer:               sysutil.NewDiagnosticsServer(cfg.Log.File.Filename),
 		mode:                            mode,
 		tsoClientPool: struct {
-<<<<<<< HEAD
-			sync.RWMutex
-			clients map[string]tsopb.TSO_TsoClient
-=======
 			syncutil.RWMutex
 			clients map[string]*streamWrapper
->>>>>>> 0c13897bf (mcs: add lock for forward tso stream  (#9095))
 		}{
 			clients: make(map[string]*streamWrapper),
 		},
