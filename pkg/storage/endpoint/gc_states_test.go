@@ -586,9 +586,9 @@ func TestTxnSafePoint(t *testing.T) {
 			// Check data representation after updating.
 			re.Equal(expectedValue, loadValue(re, se, expectedKey))
 
-			newTxnSafePoint, err := provider.LoadGCSafePoint(keyspaceID)
+			newTxnSafePoint, err := provider.LoadTxnSafePoint(keyspaceID)
 			re.NoError(err)
-			re.Equal(newTxnSafePoint, txnSafePoint)
+			re.Equal(newTxnSafePoint, txnSafePoint, "keyspaceID: %d, testData: %d", keyspaceID, txnSafePoint)
 		}
 	}
 }
