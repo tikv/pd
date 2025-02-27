@@ -917,7 +917,7 @@ func TestRemovingProgress(t *testing.T) {
 			return false
 		}
 		// store 1: (60-20)/(60+50) ~= 0.36
-		// store 2: (30-10)/(30+40) ~= 0.28 110-40 70-20
+		// store 2: (30-10)/(30+40) ~= 0.28
 		// average progress ~= (0.36+0.28)/2 = 0.32
 		if fmt.Sprintf("%.2f", p.Progress) != "0.32" {
 			return false
