@@ -102,7 +102,7 @@ func NewManager[T ConfigProvider](srv bs.Server) *Manager {
 	srv.AddStartCallback(func() {
 		log.Info("resource group manager starts to initialize", zap.String("name", srv.Name()))
 		m.storage = endpoint.NewStorageEndpoint(
-			kv.NewEtcdKVBase(srv.GetClient(), "resource_group"),
+			kv.NewEtcdKVBase(srv.GetClient()),
 			nil,
 		)
 		m.srv = srv

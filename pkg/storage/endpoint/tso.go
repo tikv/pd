@@ -33,8 +33,8 @@ import (
 // TSOStorage is the interface for timestamp storage.
 type TSOStorage interface {
 	LoadTimestamp(prefix string) (time.Time, error)
-	SaveTimestamp(key string, ts time.Time) error
-	DeleteTimestamp(key string) error
+	SaveTimestamp(groupID uint32, ts time.Time) error
+	DeleteTimestamp(groupID uint32) error
 }
 
 var _ TSOStorage = (*StorageEndpoint)(nil)
@@ -55,7 +55,7 @@ func (se *StorageEndpoint) LoadTimestamp(prefix string) (time.Time, error) {
 	maxTSWindow := typeutil.ZeroTime
 	for i, key := range keys {
 		key := strings.TrimSpace(key)
-		if !strings.HasSuffix(key, keypath.TimestampKey) {
+		if !strings.HasSuffix(key, "timestamp") {
 			continue
 		}
 		tsWindow, err := typeutil.ParseTimestamp([]byte(values[i]))
@@ -71,9 +71,9 @@ func (se *StorageEndpoint) LoadTimestamp(prefix string) (time.Time, error) {
 }
 
 // SaveTimestamp saves the timestamp to the storage.
-func (se *StorageEndpoint) SaveTimestamp(key string, ts time.Time) error {
+func (se *StorageEndpoint) SaveTimestamp(groupID uint32, ts time.Time) error {
 	return se.RunInTxn(context.Background(), func(txn kv.Txn) error {
-		value, err := txn.Load(key)
+		value, err := txn.Load(keypath.TimestampPath(groupID))
 		if err != nil {
 			return err
 		}
@@ -82,7 +82,7 @@ func (se *StorageEndpoint) SaveTimestamp(key string, ts time.Time) error {
 		if value != "" {
 			previousTS, err = typeutil.ParseTimestamp([]byte(value))
 			if err != nil {
-				log.Error("parse timestamp failed", zap.String("key", key), zap.String("value", value), zap.Error(err))
+				log.Error("parse timestamp failed", zap.Uint32("group-id", groupID), zap.String("value", value), zap.Error(err))
 				return err
 			}
 		}
@@ -90,13 +90,13 @@ func (se *StorageEndpoint) SaveTimestamp(key string, ts time.Time) error {
 			return errors.Errorf("saving timestamp %d is less than or equal to the previous one %d", ts.UnixNano(), previousTS.UnixNano())
 		}
 		data := typeutil.Uint64ToBytes(uint64(ts.UnixNano()))
-		return txn.Save(key, string(data))
+		return txn.Save(keypath.TimestampPath(groupID), string(data))
 	})
 }
 
 // DeleteTimestamp deletes the timestamp from the storage.
-func (se *StorageEndpoint) DeleteTimestamp(key string) error {
+func (se *StorageEndpoint) DeleteTimestamp(groupID uint32) error {
 	return se.RunInTxn(context.Background(), func(txn kv.Txn) error {
-		return txn.Remove(key)
+		return txn.Remove(keypath.TimestampPath(groupID))
 	})
 }

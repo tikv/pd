@@ -102,7 +102,7 @@ func prepare(t require.TestingT) (context.Context, *clientv3.Client, func()) {
 		}
 		value, err := json.Marshal(rule)
 		re.NoError(err)
-		key := keypath.RegionLabelPathPrefix() + "/" + rule.ID
+		key := keypath.RegionLabelKeyPath(rule.ID)
 		_, err = clientv3.NewKV(client).Put(ctx, key, string(value))
 		re.NoError(err)
 	}

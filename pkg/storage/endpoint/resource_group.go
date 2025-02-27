@@ -36,40 +36,40 @@ var _ ResourceGroupStorage = (*StorageEndpoint)(nil)
 
 // SaveResourceGroupSetting stores a resource group to storage.
 func (se *StorageEndpoint) SaveResourceGroupSetting(name string, msg proto.Message) error {
-	return se.saveProto(keypath.ResourceGroupSettingKeyPath(name), msg)
+	return se.saveProto(keypath.ResourceGroupSettingPath(name), msg)
 }
 
 // DeleteResourceGroupSetting removes a resource group from storage.
 func (se *StorageEndpoint) DeleteResourceGroupSetting(name string) error {
-	return se.Remove(keypath.ResourceGroupSettingKeyPath(name))
+	return se.Remove(keypath.ResourceGroupSettingPath(name))
 }
 
 // LoadResourceGroupSettings loads all resource groups from storage.
 func (se *StorageEndpoint) LoadResourceGroupSettings(f func(k, v string)) error {
-	return se.loadRangeByPrefix(keypath.ResourceGroupSettingsPath+"/", f)
+	return se.loadRangeByPrefix(keypath.ResourceGroupSettingPrefix(), f)
 }
 
 // SaveResourceGroupStates stores a resource group to storage.
 func (se *StorageEndpoint) SaveResourceGroupStates(name string, obj any) error {
-	return se.saveJSON(keypath.ResourceGroupStateKeyPath(name), obj)
+	return se.saveJSON(keypath.ResourceGroupStatePath(name), obj)
 }
 
 // DeleteResourceGroupStates removes a resource group from storage.
 func (se *StorageEndpoint) DeleteResourceGroupStates(name string) error {
-	return se.Remove(keypath.ResourceGroupStateKeyPath(name))
+	return se.Remove(keypath.ResourceGroupStatePath(name))
 }
 
 // LoadResourceGroupStates loads all resource groups from storage.
 func (se *StorageEndpoint) LoadResourceGroupStates(f func(k, v string)) error {
-	return se.loadRangeByPrefix(keypath.ResourceGroupStatesPath+"/", f)
+	return se.loadRangeByPrefix(keypath.ResourceGroupStatePrefix(), f)
 }
 
 // SaveControllerConfig stores the resource controller config to storage.
 func (se *StorageEndpoint) SaveControllerConfig(config any) error {
-	return se.saveJSON(keypath.ControllerConfigPath, config)
+	return se.saveJSON(keypath.ControllerConfigPath(), config)
 }
 
 // LoadControllerConfig loads the resource controller config from storage.
 func (se *StorageEndpoint) LoadControllerConfig() (string, error) {
-	return se.Load(keypath.ControllerConfigPath)
+	return se.Load(keypath.ControllerConfigPath())
 }

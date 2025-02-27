@@ -1,4 +1,4 @@
-// Copyright 2022 TiKV Project Authors.
+// Copyright 2024 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,27 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package storage
+package keypath
 
-import (
-	clientv3 "go.etcd.io/etcd/client/v3"
+import "fmt"
 
-	"github.com/tikv/pd/pkg/storage/endpoint"
-	"github.com/tikv/pd/pkg/storage/kv"
-)
-
-// etcdBackend is a storage backend that stores data in etcd,
-// which is mainly used by the PD server.
-type etcdBackend struct {
-	*endpoint.StorageEndpoint
+// ConfigPath returns the path to save the PD config.
+func ConfigPath() string {
+	return fmt.Sprintf(configPathFormat, ClusterID())
 }
 
-// newEtcdBackend is used to create a new etcd backend.
-func newEtcdBackend(client *clientv3.Client) *etcdBackend {
-	return &etcdBackend{
-		endpoint.NewStorageEndpoint(
-			kv.NewEtcdKVBase(client),
-			nil,
-		),
-	}
+// SchedulerConfigPathPrefix returns the path prefix to save the scheduler config.
+func SchedulerConfigPathPrefix() string {
+	return SchedulerConfigPath("")
+}
+
+// SchedulerConfigPath returns the path to save the scheduler config.
+func SchedulerConfigPath(schedulerName string) string {
+	return fmt.Sprintf(schedulerConfigPathFormat, ClusterID(), schedulerName)
 }

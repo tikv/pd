@@ -19,8 +19,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
-	"path"
-	"strings"
 
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
@@ -153,7 +151,7 @@ func (s *GrpcServer) WatchGCSafePointV2(request *pdpb.WatchGCSafePointV2Request,
 	// - If required revision < CompactRevision, we need to reload all configs to avoid losing data.
 	// - If required revision >= CompactRevision, just keep watching.
 	// Use WithPrevKV() to get the previous key-value pair when get Delete Event.
-	watchChan := s.client.Watch(ctx, path.Join(s.rootPath, keypath.GCSafePointV2Prefix()), clientv3.WithRev(revision), clientv3.WithPrefix())
+	watchChan := s.client.Watch(ctx, keypath.GCSafePointV2Prefix(), clientv3.WithRev(revision), clientv3.WithPrefix())
 	for {
 		select {
 		case <-ctx.Done():
@@ -210,7 +208,7 @@ func (s *GrpcServer) GetAllGCSafePointV2(ctx context.Context, request *pdpb.GetA
 
 	startkey := keypath.GCSafePointV2Prefix()
 	endkey := clientv3.GetPrefixRangeEnd(startkey)
-	_, values, revision, err := s.loadRangeFromEtcd(startkey, endkey)
+	values, revision, err := s.loadRangeFromEtcd(startkey, endkey)
 
 	gcSafePoints := make([]*pdpb.GCSafePointV2, 0, len(values))
 	for _, value := range values {
@@ -241,26 +239,22 @@ func (s *GrpcServer) GetAllGCSafePointV2(ctx context.Context, request *pdpb.GetA
 	}, nil
 }
 
-func (s *GrpcServer) loadRangeFromEtcd(startKey, endKey string) (keys, values []string, revision int64, err error) {
-	startKey = strings.Join([]string{s.rootPath, startKey}, "/")
+func (s *GrpcServer) loadRangeFromEtcd(startKey, endKey string) (values []string, revision int64, err error) {
 	var opOption []clientv3.OpOption
 	if endKey == "\x00" {
 		opOption = append(opOption, clientv3.WithPrefix())
 	} else {
-		endKey = strings.Join([]string{s.rootPath, endKey}, "/")
 		opOption = append(opOption, clientv3.WithRange(endKey))
 	}
 	resp, err := etcdutil.EtcdKVGet(s.client, startKey, opOption...)
 	if err != nil {
-		return nil, nil, 0, err
+		return nil, 0, err
 	}
-	keys = make([]string, 0, len(resp.Kvs))
 	values = make([]string, 0, len(resp.Kvs))
 	for _, item := range resp.Kvs {
-		keys = append(keys, strings.TrimPrefix(strings.TrimPrefix(string(item.Key), s.rootPath), "/"))
 		values = append(values, string(item.Value))
 	}
-	return keys, values, resp.Header.Revision, nil
+	return values, resp.Header.Revision, nil
 }
 
 func (s *GrpcServer) AdvanceGCSafePoint(ctx context.Context, pointRequest *pdpb.AdvanceGCSafePointRequest) (*pdpb.AdvanceGCSafePointResponse, error) {
