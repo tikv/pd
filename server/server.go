@@ -69,6 +69,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/jsonutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
+	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/pkg/versioninfo"
@@ -122,6 +123,11 @@ var (
 	etcdAppliedIndexGauge   = etcdStateGauge.WithLabelValues("appliedIndex")
 	etcdCommittedIndexGauge = etcdStateGauge.WithLabelValues("committedIndex")
 )
+
+type streamWrapper struct {
+	tsopb.TSO_TsoClient
+	syncutil.Mutex
+}
 
 // Server is the pd server. It implements bs.Server
 // nolint
@@ -199,8 +205,8 @@ type Server struct {
 	clientConns sync.Map
 
 	tsoClientPool struct {
-		sync.RWMutex
-		clients map[string]tsopb.TSO_TsoClient
+		syncutil.RWMutex
+		clients map[string]*streamWrapper
 	}
 
 	// tsoDispatcher is used to dispatch different TSO requests to
@@ -254,10 +260,10 @@ func CreateServer(ctx context.Context, cfg *config.Config, services []string, le
 		DiagnosticsServer:               sysutil.NewDiagnosticsServer(cfg.Log.File.Filename),
 		mode:                            mode,
 		tsoClientPool: struct {
-			sync.RWMutex
-			clients map[string]tsopb.TSO_TsoClient
+			syncutil.RWMutex
+			clients map[string]*streamWrapper
 		}{
-			clients: make(map[string]tsopb.TSO_TsoClient),
+			clients: make(map[string]*streamWrapper),
 		},
 	}
 	s.handler = newHandler(s)
