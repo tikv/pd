@@ -75,7 +75,7 @@ func (kv *etcdKVBase) Load(key string) (string, error) {
 }
 
 // LoadRange loads a range of keys [key, endKey) from etcd.
-func (kv *etcdKVBase) LoadRange(key, endKey string, limit int) ([]string, []string, error) {
+func (kv *etcdKVBase) LoadRange(key, endKey string, limit int) (keys, values []string, err error) {
 	// Note: reason to use `strings.Join` instead of `path.Join` is that the latter will
 	// removes suffix '/' of the joined string.
 	// As a result, when we try to scan from "foo/", it ends up scanning from "/pd/foo"
@@ -95,8 +95,8 @@ func (kv *etcdKVBase) LoadRange(key, endKey string, limit int) ([]string, []stri
 	if err != nil {
 		return nil, nil, err
 	}
-	keys := make([]string, 0, len(resp.Kvs))
-	values := make([]string, 0, len(resp.Kvs))
+	keys = make([]string, 0, len(resp.Kvs))
+	values = make([]string, 0, len(resp.Kvs))
 	for _, item := range resp.Kvs {
 		keys = append(keys, strings.TrimPrefix(strings.TrimPrefix(string(item.Key), kv.rootPath), "/"))
 		values = append(values, string(item.Value))

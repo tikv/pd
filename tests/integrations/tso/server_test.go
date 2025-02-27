@@ -150,7 +150,7 @@ func (suite *tsoServerTestSuite) TestConcurrentlyReset() {
 	for range 2 {
 		go func() {
 			defer wg.Done()
-			for j := 0; j <= 50; j++ {
+			for j := range 51 {
 				// Get a copy of now then call base.add, because now is shared by all goroutines
 				// and now.add() will add to itself which isn't atomic and multi-goroutine safe.
 				base := now

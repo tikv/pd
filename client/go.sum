@@ -1,7 +1,7 @@
 github.com/BurntSushi/toml v0.3.1 h1:WXkYYl6Yr3qBf1K79EBnL4mak0OimBfB0XUf9Vl28OQ=
 github.com/BurntSushi/toml v0.3.1/go.mod h1:xHWCNGjB5oqiDr8zfno3MHue2Ht5sIBksp03qcyfWMU=
-github.com/MyonKeminta/kvproto v0.0.0-20250218095657-5289f49f4e3d h1:nZtyc4MSxDjPFPRFGBGMeze+ITp8vhrjtFtJ7Bg3p/M=
-github.com/MyonKeminta/kvproto v0.0.0-20250218095657-5289f49f4e3d/go.mod h1:rXxWk2UnwfUhLXha1jxRWPADw9eMZGWEWCg92Tgmb/8=
+github.com/MyonKeminta/kvproto v0.0.0-20250227065230-984e1b47ae67 h1:PSK05hcHzHbfcOg8E3hYSCNi/tfgW7w5aXM9WRdA+ow=
+github.com/MyonKeminta/kvproto v0.0.0-20250227065230-984e1b47ae67/go.mod h1:rXxWk2UnwfUhLXha1jxRWPADw9eMZGWEWCg92Tgmb/8=
 github.com/benbjohnson/clock v1.1.0/go.mod h1:J11/hYXuz8f4ySSvYwY0FKfm+ezbsZBKZxNJlLklBHA=
 github.com/benbjohnson/clock v1.3.0 h1:ip6w0uFQkncKQ979AypyG0ER7mqUSBdKLOgAle/AT8A=
 github.com/benbjohnson/clock v1.3.0/go.mod h1:J11/hYXuz8f4ySSvYwY0FKfm+ezbsZBKZxNJlLklBHA=

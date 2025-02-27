@@ -40,13 +40,20 @@ func TestClusterID(t *testing.T) {
 }
 
 func (s *clusterIDSuite) TestClientClusterID() {
-	re := require.New(s.T())
+	// create clusters manually
+	s.TearDownSuite()
+	re := s.Require()
 	ctx := context.Background()
+	// deploy first cluster
+	cluster1 := newCluster(re, s.tag(), s.dataDir(), s.mode, map[string]int{"pd": 1, "tikv": 3, "tidb": 1, "tiflash": 0})
+	cluster1.start()
+	defer cluster1.stop()
 	// deploy second cluster
-	s.startCluster(s.T())
-	defer s.stopCluster(s.T())
+	cluster2 := newCluster(re, s.tag(), s.dataDir(), s.mode, map[string]int{"pd": 1, "tikv": 3, "tidb": 1, "tiflash": 0})
+	cluster2.start()
+	defer cluster2.stop()
 
-	pdEndpoints := getPDEndpoints(s.T())
+	pdEndpoints := getPDEndpoints(re)
 	// Try to create a client with the mixed endpoints.
 	_, err := pd.NewClientWithContext(
 		ctx, caller.TestComponent, pdEndpoints,
@@ -56,11 +63,11 @@ func (s *clusterIDSuite) TestClientClusterID() {
 	re.Contains(err.Error(), "unmatched cluster id")
 }
 
-func getPDEndpoints(t *testing.T) []string {
-	pdAddrsForEachTikv, err := runCommandWithOutput("ps -ef | grep tikv-server | awk -F '--pd-endpoints=' '{print $2}' | awk '{print $1}'")
-	require.NoError(t, err)
+func getPDEndpoints(re *require.Assertions) []string {
+	output, err := runCommandWithOutput("ps -ef | grep tikv-server | awk -F '--pd-endpoints=' '{print $2}' | awk '{print $1}'")
+	re.NoError(err)
 	var pdAddrs []string
-	for _, addr := range pdAddrsForEachTikv {
+	for _, addr := range strings.Split(strings.TrimSpace(output), "\n") {
 		// length of addr is less than 5 means it must not be a valid address
 		if len(addr) < 5 {
 			continue

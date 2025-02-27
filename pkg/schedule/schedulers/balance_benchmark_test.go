@@ -162,7 +162,7 @@ func BenchmarkPlacementRule(b *testing.B) {
 	b.ResetTimer()
 	var ops []*operator.Operator
 	var plans []plan.Plan
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		ops, plans = sc.Schedule(tc, false)
 	}
 	b.StopTimer()
@@ -176,7 +176,7 @@ func BenchmarkLabel(b *testing.B) {
 	defer cancel()
 	sc := newBalanceRegionScheduler(oc, &balanceRegionSchedulerConfig{})
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		sc.Schedule(tc, false)
 	}
 }
@@ -186,7 +186,7 @@ func BenchmarkNoLabel(b *testing.B) {
 	defer cancel()
 	sc := newBalanceRegionScheduler(oc, &balanceRegionSchedulerConfig{})
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		sc.Schedule(tc, false)
 	}
 }
@@ -196,7 +196,7 @@ func BenchmarkDiagnosticNoLabel1(b *testing.B) {
 	defer cancel()
 	sc := newBalanceRegionScheduler(oc, &balanceRegionSchedulerConfig{})
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		sc.Schedule(tc, true)
 	}
 }
@@ -206,7 +206,7 @@ func BenchmarkDiagnosticNoLabel2(b *testing.B) {
 	defer cancel()
 	sc := newBalanceRegionScheduler(oc, &balanceRegionSchedulerConfig{})
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		sc.Schedule(tc, true)
 	}
 }
@@ -216,7 +216,7 @@ func BenchmarkNoLabel2(b *testing.B) {
 	defer cancel()
 	sc := newBalanceRegionScheduler(oc, &balanceRegionSchedulerConfig{})
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		sc.Schedule(tc, false)
 	}
 }
@@ -226,7 +226,7 @@ func BenchmarkTombStore(b *testing.B) {
 	defer cancel()
 	sc := newBalanceRegionScheduler(oc, &balanceRegionSchedulerConfig{})
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		sc.Schedule(tc, false)
 	}
 }

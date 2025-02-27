@@ -248,14 +248,14 @@ func getIDAllocator() *mockid.IDAllocator {
 func buildRegion(cluster *core.BasicCluster, kind utils.RWType, peerCount int, interval uint64) (region *core.RegionInfo) {
 	peers := make([]*metapb.Peer, 0, peerCount)
 	for range peerCount {
-		id, _ := getIDAllocator().Alloc()
-		storeID, _ := getIDAllocator().Alloc()
+		id, _, _ := getIDAllocator().Alloc(1)
+		storeID, _, _ := getIDAllocator().Alloc(1)
 		peers = append(peers, &metapb.Peer{
 			Id:      id,
 			StoreId: storeID,
 		})
 	}
-	id, _ := getIDAllocator().Alloc()
+	id, _, _ := getIDAllocator().Alloc(1)
 	meta := &metapb.Region{
 		Id:          id,
 		Peers:       peers,
@@ -760,7 +760,7 @@ func BenchmarkCheckRegionFlow(b *testing.B) {
 	cache := NewHotPeerCache(context.Background(), cluster, utils.Read)
 	region := buildRegion(cluster, utils.Read, 3, 10)
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		stats := cache.CheckPeerFlow(region, region.GetPeers(), region.GetLoads(), 10)
 		for _, stat := range stats {
 			cache.UpdateStat(stat)

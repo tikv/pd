@@ -17,9 +17,9 @@ package realcluster
 import (
 	"fmt"
 	"slices"
+	"strings"
 	"testing"
 
-	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/tikv/pd/client/pkg/utils/testutil"
@@ -41,7 +41,7 @@ func TestMSEtcdKey(t *testing.T) {
 	suite.Run(t, &etcdKeySuite{
 		clusterSuite: clusterSuite{
 			suiteName: "etcd_key",
-			ms:        true,
+			mode:      "ms",
 		},
 	})
 }
@@ -94,8 +94,9 @@ var (
 )
 
 func (s *etcdKeySuite) TestEtcdKey() {
+	re := s.Require()
 	var keysBackup []string
-	if !s.ms {
+	if s.mode != "ms" {
 		keysBackup = pdKeys
 		pdKeys = slices.DeleteFunc(pdKeys, func(s string) bool {
 			return slices.Contains(pdMSKeys, s)
@@ -105,9 +106,9 @@ func (s *etcdKeySuite) TestEtcdKey() {
 		}()
 	}
 	t := s.T()
-	endpoints := getPDEndpoints(t)
+	endpoints := getPDEndpoints(re)
 
-	testutil.Eventually(require.New(t), func() bool {
+	testutil.Eventually(re, func() bool {
 		keys, err := getEtcdKey(endpoints[0], "/pd")
 		if err != nil {
 			return false
@@ -115,8 +116,8 @@ func (s *etcdKeySuite) TestEtcdKey() {
 		return checkEtcdKey(t, keys, pdKeys)
 	})
 
-	if s.ms {
-		testutil.Eventually(require.New(t), func() bool {
+	if s.mode == "ms" {
+		testutil.Eventually(re, func() bool {
 			keys, err := getEtcdKey(endpoints[0], "/ms")
 			if err != nil {
 				return false
@@ -130,7 +131,11 @@ func getEtcdKey(endpoints, prefix string) ([]string, error) {
 	// `sed 's/[0-9]*//g'` is used to remove the number in the etcd key, such as the cluster id.
 	etcdCmd := fmt.Sprintf("etcdctl --endpoints=%s get %s --prefix --keys-only | sed 's/[0-9]*//g' | sort | uniq",
 		endpoints, prefix)
-	return runCommandWithOutput(etcdCmd)
+	output, err := runCommandWithOutput(etcdCmd)
+	if err != nil {
+		return nil, err
+	}
+	return strings.Split(strings.TrimSpace(output), "\n"), nil
 }
 
 func checkEtcdKey(t *testing.T, keys, expectedKeys []string) bool {

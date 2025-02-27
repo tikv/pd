@@ -121,7 +121,7 @@ func loadStores(client *clientv3.Client, f *os.File) error {
 	}
 }
 
-func loadRange(client *clientv3.Client, key, endKey string, limit int) ([]string, []string, error) {
+func loadRange(client *clientv3.Client, key, endKey string, limit int) (keys, values []string, err error) {
 	key = path.Join(rootPath, key)
 	endKey = path.Join(rootPath, endKey)
 
@@ -131,8 +131,8 @@ func loadRange(client *clientv3.Client, key, endKey string, limit int) ([]string
 	if err != nil {
 		return nil, nil, err
 	}
-	keys := make([]string, 0, len(resp.Kvs))
-	values := make([]string, 0, len(resp.Kvs))
+	keys = make([]string, 0, len(resp.Kvs))
+	values = make([]string, 0, len(resp.Kvs))
 	for _, item := range resp.Kvs {
 		keys = append(keys, strings.TrimPrefix(strings.TrimPrefix(string(item.Key), rootPath), "/"))
 		values = append(values, string(item.Value))

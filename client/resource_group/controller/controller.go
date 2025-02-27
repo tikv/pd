@@ -640,7 +640,7 @@ func (c *ResourceGroupsController) sendTokenBucketRequests(ctx context.Context, 
 // OnRequestWait is used to check whether resource group has enough tokens. It maybe needs to wait some time.
 func (c *ResourceGroupsController) OnRequestWait(
 	ctx context.Context, resourceGroupName string, info RequestInfo,
-) (*rmpb.Consumption, *rmpb.Consumption, time.Duration, uint32, error) {
+) (delta, penalty *rmpb.Consumption, waitDuration time.Duration, priority uint32, err error) {
 	gc, err := c.tryGetResourceGroupController(ctx, resourceGroupName, true)
 	if err != nil {
 		return nil, nil, time.Duration(0), 0, err
@@ -1391,8 +1391,8 @@ retryLoop:
 
 func (gc *groupCostController) onRequestWaitImpl(
 	ctx context.Context, info RequestInfo,
-) (*rmpb.Consumption, *rmpb.Consumption, time.Duration, uint32, error) {
-	delta := &rmpb.Consumption{}
+) (delta, penalty *rmpb.Consumption, waitDuration time.Duration, priority uint32, err error) {
+	delta = &rmpb.Consumption{}
 	for _, calc := range gc.calculators {
 		calc.BeforeKVRequest(delta, info)
 	}
@@ -1400,7 +1400,6 @@ func (gc *groupCostController) onRequestWaitImpl(
 	gc.mu.Lock()
 	add(gc.mu.consumption, delta)
 	gc.mu.Unlock()
-	var waitDuration time.Duration
 
 	if !gc.burstable.Load() {
 		d, err := gc.acquireTokens(ctx, delta, &waitDuration, false)
@@ -1425,7 +1424,7 @@ func (gc *groupCostController) onRequestWaitImpl(
 
 	gc.mu.Lock()
 	// Calculate the penalty of the store
-	penalty := &rmpb.Consumption{}
+	penalty = &rmpb.Consumption{}
 	if storeCounter, exist := gc.mu.storeCounter[info.StoreID()]; exist {
 		*penalty = *gc.mu.globalCounter
 		sub(penalty, storeCounter)

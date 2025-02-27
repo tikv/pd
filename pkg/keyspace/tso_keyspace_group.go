@@ -616,7 +616,7 @@ func buildSplitKeyspaces(
 	// `new` is the keyspace list which will be split from the old keyspace list.
 	old, new []uint32,
 	startKeyspaceID, endKeyspaceID uint32,
-) ([]uint32, []uint32, error) {
+) (oldSplit, newSplit []uint32, err error) {
 	oldNum, newNum := len(old), len(new)
 	// Split according to the new keyspace list.
 	if newNum != 0 {
@@ -640,7 +640,7 @@ func buildSplitKeyspaces(
 			newKeyspaceMap[keyspace] = struct{}{}
 		}
 		// Get the split keyspace list for the old keyspace group.
-		oldSplit := make([]uint32, 0, oldNum-newNum)
+		oldSplit = make([]uint32, 0, oldNum-newNum)
 		for _, keyspace := range old {
 			if _, ok := newKeyspaceMap[keyspace]; !ok {
 				oldSplit = append(oldSplit, keyspace)
@@ -652,7 +652,7 @@ func buildSplitKeyspaces(
 		if newNum == len(newKeyspaceMap) {
 			return oldSplit, new, nil
 		}
-		newSplit := make([]uint32, 0, len(newKeyspaceMap))
+		newSplit = make([]uint32, 0, len(newKeyspaceMap))
 		for keyspace := range newKeyspaceMap {
 			newSplit = append(newSplit, keyspace)
 		}
@@ -662,10 +662,8 @@ func buildSplitKeyspaces(
 	if startKeyspaceID == 0 && endKeyspaceID == 0 {
 		return nil, nil, errs.ErrKeyspaceNotInKeyspaceGroup
 	}
-	var (
-		newSplit       = make([]uint32, 0, oldNum)
-		newKeyspaceMap = make(map[uint32]struct{}, newNum)
-	)
+	newSplit = make([]uint32, 0, oldNum)
+	newKeyspaceMap := make(map[uint32]struct{}, newNum)
 	for _, keyspace := range old {
 		if keyspace == constant.DefaultKeyspaceID {
 			// The source keyspace group must be the default keyspace group and we always keep the default
@@ -682,7 +680,7 @@ func buildSplitKeyspaces(
 		return nil, nil, errs.ErrKeyspaceGroupWithEmptyKeyspace
 	}
 	// Get the split keyspace list for the old keyspace group.
-	oldSplit := make([]uint32, 0, oldNum-len(newSplit))
+	oldSplit = make([]uint32, 0, oldNum-len(newSplit))
 	for _, keyspace := range old {
 		if _, ok := newKeyspaceMap[keyspace]; !ok {
 			oldSplit = append(oldSplit, keyspace)
