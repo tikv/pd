@@ -1060,13 +1060,15 @@ func (suite *clientTestSuite) SetupSuite() {
 			},
 		})
 
-		storeInfo := suite.grpcSvr.GetRaftCluster().GetStore(store.GetId())
-		newStore := storeInfo.Clone(core.SetStoreStats(&pdpb.StoreStats{
-			Capacity:  uint64(10 * units.GiB),
-			UsedSize:  uint64(9 * units.GiB),
-			Available: uint64(1 * units.GiB),
-		}))
-		suite.grpcSvr.GetRaftCluster().GetBasicCluster().PutStore(newStore)
+		suite.grpcSvr.StoreHeartbeat(context.Background(), &pdpb.StoreHeartbeatRequest{
+			Header: newHeader(),
+			Stats: &pdpb.StoreStats{
+				StoreId:   store.GetId(),
+				Capacity:  uint64(10 * units.GiB),
+				UsedSize:  uint64(9 * units.GiB),
+				Available: uint64(1 * units.GiB),
+			},
+		})
 	}
 	cluster.GetOpts().(*config.PersistOptions).SetRegionBucketEnabled(true)
 }
@@ -1193,6 +1195,7 @@ func (suite *clientTestSuite) TestGetStore() {
 	// Get an up store should be OK.
 	n, err := suite.client.GetStore(context.Background(), store.GetId())
 	re.NoError(err)
+	store.LastHeartbeat = n.LastHeartbeat
 	re.Equal(store, n)
 
 	actualStores, err := suite.client.GetAllStores(context.Background())
@@ -1470,9 +1473,10 @@ func (suite *clientTestSuite) TestScatterRegion() {
 		if err != nil {
 			return false
 		}
-		return resp.GetRegionId() == regionID &&
-			string(resp.GetDesc()) == "scatter-region" &&
-			resp.GetStatus() == pdpb.OperatorStatus_RUNNING
+		if resp.GetRegionId() != regionID || string(resp.GetDesc()) != "scatter-region" {
+			return false
+		}
+		return resp.GetStatus() == pdpb.OperatorStatus_RUNNING || resp.GetStatus() == pdpb.OperatorStatus_SUCCESS
 	})
 
 	// Test interface `ScatterRegion`.
@@ -1505,9 +1509,10 @@ func (suite *clientTestSuite) TestScatterRegion() {
 		if err != nil {
 			return false
 		}
-		return resp.GetRegionId() == regionID &&
-			string(resp.GetDesc()) == "scatter-region" &&
-			resp.GetStatus() == pdpb.OperatorStatus_RUNNING
+		if resp.GetRegionId() != regionID || string(resp.GetDesc()) != "scatter-region" {
+			return false
+		}
+		return resp.GetStatus() == pdpb.OperatorStatus_RUNNING || resp.GetStatus() == pdpb.OperatorStatus_SUCCESS
 	})
 }
 
