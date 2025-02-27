@@ -286,6 +286,11 @@ func (m *GCStateManager) SetGCBarrier(keyspaceID uint32, barrierID string, barri
 		return nil, err
 	}
 
+	// The barrier ID (or service ID or the service safe points) is reserved for keeping backward compatibility.
+	if keyspaceID == constant.NullKeyspaceID && barrierID == keypath.GCWorkerServiceSafePointID {
+		return nil, errs.ErrReservedGCBarrierID.GenWithStackByArgs(barrierID)
+	}
+
 	m.lock.Lock()
 	defer m.lock.Unlock()
 
@@ -294,7 +299,7 @@ func (m *GCStateManager) SetGCBarrier(keyspaceID uint32, barrierID string, barri
 		t := now.Add(ttl)
 		expirationTime = &t
 	}
-	newBarrier := endpoint.NewGCBarrier(keyspaceID, barrierID, barrierTS, expirationTime)
+	newBarrier := endpoint.NewGCBarrier(barrierID, barrierTS, expirationTime)
 
 	err = m.gcMetaStorage.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
 		txnSafePoint, err1 := m.gcMetaStorage.LoadTxnSafePoint(keyspaceID)

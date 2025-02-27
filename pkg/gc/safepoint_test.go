@@ -131,7 +131,7 @@ func TestGCSafePointUpdateConcurrently(t *testing.T) {
 	re.Equal(maxSafePoint, gcSafePoint)
 }
 
-func TestServiceGCSafePointUpdate(t *testing.T) {
+func TestLegacyServiceGCSafePointUpdate(t *testing.T) {
 	storage, clean := newGCStateProvider(t)
 	defer clean()
 	manager := NewGCStateManager(storage, config.PDServerConfig{})
