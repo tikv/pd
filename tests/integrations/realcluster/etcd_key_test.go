@@ -52,7 +52,7 @@ var (
 		"",
 		"/pd//alloc_id",
 		"/pd//config",
-		// If not call `UpdateGCSafePoint`, this key will not exist.
+		// If not call `AdvanceGCSafePoint`, this key will not exist.
 		// "/pd//gc/safe_point",
 		"/pd//gc/safe_point/service/gc_worker",
 		"/pd//keyspaces/id/DEFAULT",

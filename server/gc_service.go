@@ -24,6 +24,8 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
+	"github.com/tikv/pd/pkg/mcs/utils/constant"
+
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 
@@ -253,4 +255,72 @@ func (s *GrpcServer) loadRangeFromEtcd(startKey, endKey string) (values []string
 		values = append(values, string(item.Value))
 	}
 	return values, resp.Header.Revision, nil
+}
+
+func (s *GrpcServer) AdvanceGCSafePoint(ctx context.Context, pointRequest *pdpb.AdvanceGCSafePointRequest) (*pdpb.AdvanceGCSafePointResponse, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (s *GrpcServer) AdvanceTxnSafePoint(ctx context.Context, request *pdpb.AdvanceTxnSafePointRequest) (*pdpb.AdvanceTxnSafePointResponse, error) {
+	done, err := s.rateLimitCheck()
+	if err != nil {
+		return nil, err
+	}
+	if done != nil {
+		defer done()
+	}
+	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
+		return pdpb.NewPDClient(client).AdvanceTxnSafePoint(ctx, request)
+	}
+	if rsp, err := s.unaryMiddleware(ctx, request, fn); err != nil {
+		return nil, err
+	} else if rsp != nil {
+		return rsp.(*pdpb.AdvanceTxnSafePointResponse), err
+	}
+
+	rc := s.GetRaftCluster()
+	if rc == nil {
+		return &pdpb.AdvanceTxnSafePointResponse{Header: notBootstrappedHeader()}, nil
+	}
+
+	target := request.GetTarget()
+	keyspaceID := getKeyspaceIDFromReq(request)
+	res, err := s.gcStateManager.AdvanceTxnSafePoint(keyspaceID, target)
+	if err != nil {
+		return nil, err
+	}
+
+	return &pdpb.AdvanceTxnSafePointResponse{
+		Header:          wrapHeader(),
+		NewTxnSafePoint: res.NewTxnSafePoint,
+		// TODO: Return description of the blocker.
+	}, nil
+}
+
+func (s *GrpcServer) SetGCBarrier(ctx context.Context, request *pdpb.SetGCBarrierRequest) (*pdpb.SetGCBarrierResponse, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (s *GrpcServer) DeleteGCBarrier(ctx context.Context, request *pdpb.DeleteGCBarrierRequest) (*pdpb.DeleteGCBarrierResponse, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (s *GrpcServer) GetGCState(ctx context.Context, request *pdpb.GetGCStateRequest) (*pdpb.GetGCStateResponse, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func (s *GrpcServer) GetGlobalGCState(ctx context.Context, stateRequest *pdpb.GetGlobalGCStateRequest) (*pdpb.GetGlobalGCStateResponse, error) {
+	//TODO implement me
+	panic("implement me")
+}
+
+func getKeyspaceIDFromReq(req interface{ GetKeyspaceScope() *pdpb.KeyspaceScope }) uint32 {
+	if req.GetKeyspaceScope() == nil {
+		return constant.NullKeyspaceID
+	}
+	return req.GetKeyspaceScope().GetKeyspaceId()
 }
