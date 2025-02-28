@@ -25,10 +25,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pingcap/errors"
 	"github.com/stretchr/testify/require"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"golang.org/x/exp/slices"
+
+	"github.com/pingcap/errors"
 
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
@@ -161,7 +162,7 @@ func TestGCStateJSONUtil(t *testing.T) {
 		KeyspaceID: constant.NullKeyspaceID,
 	}
 	writeJSON("dir4/k1", ssp)
-	re.Equal(`{"service_id":"testsvc","expired_at":9223372036854775807,"safe_point":456139133457530881}`, loadValue("dir4/k1"))
+	re.JSONEq(`{"service_id":"testsvc","expired_at":9223372036854775807,"safe_point":456139133457530881}`, loadValue("dir4/k1"))
 	loadedSsp, err := loadJSON[*ServiceSafePoint](se, "dir4/k1")
 	re.NoError(err)
 	re.Equal(ssp, loadedSsp)
@@ -276,7 +277,7 @@ func TestGCStateTransactionACID(t *testing.T) {
 			default:
 			}
 			// Check by range read
-			err := provider.RunInGCStateTransaction(func(wb *GCStateWriteBatch) error {
+			err := provider.RunInGCStateTransaction(func(_ *GCStateWriteBatch) error {
 				_, values, err1 := loadJSONByPrefix[int](se, prefix, 0)
 				if err1 != nil {
 					return err1
@@ -297,7 +298,7 @@ func TestGCStateTransactionACID(t *testing.T) {
 			}
 			// Check by single-key reads
 			checkBySingleKeySum := 0
-			err = provider.RunInGCStateTransaction(func(wb *GCStateWriteBatch) error {
+			err = provider.RunInGCStateTransaction(func(_ *GCStateWriteBatch) error {
 				for _, key := range allKeys {
 					v, err1 := loadJSON[int](se, key)
 					if err1 != nil {
@@ -313,7 +314,6 @@ func TestGCStateTransactionACID(t *testing.T) {
 				}
 			} else if checkBySingleKeySum%5 != 0 {
 				return errors.Errorf("invariant check: unexpected sum %v", checkBySingleKeySum)
-
 			}
 			// A single range read that's out of transaction should also read atomically.
 			_, values, err := loadJSONByPrefix[int](se, prefix, 0)
@@ -456,11 +456,11 @@ func TestGCBarrier(t *testing.T) {
 		if keyspaceID != constant.NullKeyspaceID {
 			keyspaceIDField = fmt.Sprintf(`,"keyspace_id":%d`, keyspaceID)
 		}
-		re.Equal(`{"service_id":"1","expired_at":1740127928,"safe_point":1`+keyspaceIDField+`}`,
+		re.JSONEq(`{"service_id":"1","expired_at":1740127928,"safe_point":1`+keyspaceIDField+`}`,
 			loadValue(re, se, pathPrefix+"/1"))
-		re.Equal(`{"service_id":"2","expired_at":9223372036854775807,"safe_point":2`+keyspaceIDField+`}`,
+		re.JSONEq(`{"service_id":"2","expired_at":9223372036854775807,"safe_point":2`+keyspaceIDField+`}`,
 			loadValue(re, se, pathPrefix+"/2"))
-		re.Equal(`{"service_id":"3","expired_at":1740127928,"safe_point":3`+keyspaceIDField+`}`,
+		re.JSONEq(`{"service_id":"3","expired_at":1740127928,"safe_point":3`+keyspaceIDField+`}`,
 			loadValue(re, se, pathPrefix+"/3"))
 
 		// Check with the GC barrier API.
@@ -656,13 +656,13 @@ func TestDataPhysicalRepresentation(t *testing.T) {
 
 	// The following data is possible to be stored by current version of PD. Test storing on them.
 	writableKvPairs := []kv.KeyValuePair{
-		{"/pd/0/gc/safe_point", "654882009e40000" /* 456139133457530880 */},
-		{"/pd/0/keyspaces/gc_safe_point/00001111", `{"keyspace_id":1111,"safe_point":456139133457530881}`},
-		{"/tidb/store/gcworker/saved_safe_point", "456139133457530882"},
-		{"/keyspaces/tidb/2222/tidb/store/gcworker/saved_safe_point", "456139133457530883"},
-		{"/pd/0/gc/safe_point/service/gc_worker", `{"service_id":"gc_worker","expired_at":9223372036854775807,"safe_point":456139133457530884}`},
-		{"/pd/0/gc/safe_point/service/svc1", `{"service_id":"svc1","expired_at":1740127928,"safe_point":456139133457530885}`},
-		{"/pd/0/keyspaces/service_safe_point/00003333/svc2", `{"service_id":"svc2","expired_at":1740127928,"safe_point":456139133457530886,"keyspace_id":3333}`},
+		{Key: "/pd/0/gc/safe_point", Value: "654882009e40000" /* 456139133457530880 */},
+		{Key: "/pd/0/keyspaces/gc_safe_point/00001111", Value: `{"keyspace_id":1111,"safe_point":456139133457530881}`},
+		{Key: "/tidb/store/gcworker/saved_safe_point", Value: "456139133457530882"},
+		{Key: "/keyspaces/tidb/2222/tidb/store/gcworker/saved_safe_point", Value: "456139133457530883"},
+		{Key: "/pd/0/gc/safe_point/service/gc_worker", Value: `{"service_id":"gc_worker","expired_at":9223372036854775807,"safe_point":456139133457530884}`},
+		{Key: "/pd/0/gc/safe_point/service/svc1", Value: `{"service_id":"svc1","expired_at":1740127928,"safe_point":456139133457530885}`},
+		{Key: "/pd/0/keyspaces/service_safe_point/00003333/svc2", Value: `{"service_id":"svc2","expired_at":1740127928,"safe_point":456139133457530886,"keyspace_id":3333}`},
 	}
 
 	// Test storing
@@ -696,7 +696,7 @@ func TestDataPhysicalRepresentation(t *testing.T) {
 
 		keys, values, err := se.LoadRange("/", clientv3.GetPrefixRangeEnd("/"), 0)
 		re.NoError(err)
-		re.Len(keys, len(expectedKeys), fmt.Sprintf("data length mismatches, expected kvpairs: %v, actual keys: %v, acutal values: %v", expectedKeys, keys, values))
+		re.Len(keys, len(expectedKeys), "data length mismatches, expected kvpairs: %v, actual keys: %v, acutal values: %v", expectedKeys, keys, values)
 		for i, key := range keys {
 			value := values[i]
 			re.Equal(expectedKeys[i].Key, key, "index: %d", i)
@@ -708,8 +708,8 @@ func TestDataPhysicalRepresentation(t *testing.T) {
 	// other components (e.g., tidb).
 	readableKvPairs := []kv.KeyValuePair{
 		// MinStartTS reported by TiDB
-		{"/tidb/server/minstartts/instance1", "456139133457530887"},
-		{"/keyspaces/tidb/4444/tidb/server/minstartts/instance2", "456139133457530888"},
+		{Key: "/tidb/server/minstartts/instance1", Value: "456139133457530887"},
+		{Key: "/keyspaces/tidb/4444/tidb/server/minstartts/instance2", Value: "456139133457530888"},
 	}
 
 	// Test reading
