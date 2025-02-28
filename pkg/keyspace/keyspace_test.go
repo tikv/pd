@@ -113,7 +113,6 @@ func makeCreateKeyspaceRequests(count int) []*CreateKeyspaceRequest {
 				testConfig2: "200",
 			},
 			CreateTime: now,
-			IsPreAlloc: true, // skip wait region split
 		}
 	}
 	return requests
