@@ -86,18 +86,6 @@ func (m *GCStateManager) CompatibleLoadGCSafePoint() (uint64, error) {
 // AdvanceGCSafePoint tries to advance the GC safe point to the given target. If the target is less than the current
 // value or greater than the txn safe point, it returns an error.
 func (m *GCStateManager) AdvanceGCSafePoint(keyspaceID uint32, target uint64) (oldGCSafePoint uint64, newGCSafePoint uint64, err error) {
-	return m.advanceGCSafePointImpl(keyspaceID, target, false)
-}
-
-// CompatibleUpdateGCSafePoint tries to advance the GC safe point to the given target. If the target is less than the
-// current value, it returns the current value without updating it.
-// This is provided for compatibility purpose, making the existing uses of the deprecated API `UpdateGCSafePoint`
-// still work.
-func (m *GCStateManager) CompatibleUpdateGCSafePoint(target uint64) (oldGCSafePoint uint64, newGCSafePoint uint64, err error) {
-	return m.advanceGCSafePointImpl(constant.NullKeyspaceID, target, true)
-}
-
-func (m *GCStateManager) advanceGCSafePointImpl(keyspaceID uint32, target uint64, compatible bool) (oldGCSafePoint uint64, newGCSafePoint uint64, err error) {
 	keyspaceID, err = m.redirectKeyspace(keyspaceID, false)
 	if err != nil {
 		return
@@ -106,6 +94,21 @@ func (m *GCStateManager) advanceGCSafePointImpl(keyspaceID uint32, target uint64
 	m.lock.Lock()
 	defer m.lock.Unlock()
 
+	return m.advanceGCSafePointImpl(keyspaceID, target, false)
+}
+
+// CompatibleUpdateGCSafePoint tries to advance the GC safe point to the given target. If the target is less than the
+// current value, it returns the current value without updating it.
+// This is provided for compatibility purpose, making the existing uses of the deprecated API `UpdateGCSafePoint`
+// still work.
+func (m *GCStateManager) CompatibleUpdateGCSafePoint(target uint64) (oldGCSafePoint uint64, newGCSafePoint uint64, err error) {
+	m.lock.Lock()
+	defer m.lock.Unlock()
+
+	return m.advanceGCSafePointImpl(constant.NullKeyspaceID, target, true)
+}
+
+func (m *GCStateManager) advanceGCSafePointImpl(keyspaceID uint32, target uint64, compatible bool) (oldGCSafePoint uint64, newGCSafePoint uint64, err error) {
 	newGCSafePoint = target
 
 	err = m.gcMetaStorage.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
@@ -152,7 +155,15 @@ func (m *GCStateManager) AdvanceTxnSafePoint(keyspaceID uint32, target uint64) (
 	if err != nil {
 		return AdvanceTxnSafePointResult{}, err
 	}
+	m.lock.Lock()
+	m.lock.Unlock()
 
+	return m.advanceTxnSafePointImpl(keyspaceID, target)
+}
+
+// advanceTxnSafePointImpl is the internal implementation of AdvanceTxnSafePoint, assuming keyspaceID has been checked
+// and the mutex has been acquired.
+func (m *GCStateManager) advanceTxnSafePointImpl(keyspaceID uint32, target uint64) (AdvanceTxnSafePointResult, error) {
 	isCompatibleMode := false
 
 	// A helper function for handling the compatibility of the service safe point of "gc_worker", which is needed
@@ -171,15 +182,12 @@ func (m *GCStateManager) AdvanceTxnSafePoint(keyspaceID uint32, target uint64) (
 		return wb.SetGCBarrier(keyspaceID, sspAsGCBarrier)
 	}
 
-	m.lock.Lock()
-	m.lock.Unlock()
-
 	var oldTxnSafePoint uint64
 	newTxnSafePoint := target
 	var blockingBarrier *endpoint.GCBarrier
 	var blockingMinStartTSOwner *string
 
-	err = m.gcMetaStorage.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
+	err := m.gcMetaStorage.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
 		var err1 error
 		oldTxnSafePoint, err1 = m.gcMetaStorage.LoadTxnSafePoint(keyspaceID)
 		if err1 != nil {
@@ -286,13 +294,17 @@ func (m *GCStateManager) SetGCBarrier(keyspaceID uint32, barrierID string, barri
 		return nil, err
 	}
 
+	m.lock.Lock()
+	defer m.lock.Unlock()
+
+	return m.setGCBarrierImpl(keyspaceID, barrierID, barrierTS, ttl, now)
+}
+
+func (m *GCStateManager) setGCBarrierImpl(keyspaceID uint32, barrierID string, barrierTS uint64, ttl time.Duration, now time.Time) (*endpoint.GCBarrier, error) {
 	// The barrier ID (or service ID or the service safe points) is reserved for keeping backward compatibility.
 	if keyspaceID == constant.NullKeyspaceID && barrierID == keypath.GCWorkerServiceSafePointID {
 		return nil, errs.ErrReservedGCBarrierID.GenWithStackByArgs(barrierID)
 	}
-
-	m.lock.Lock()
-	defer m.lock.Unlock()
 
 	var expirationTime *time.Time = nil
 	if ttl < time.Duration(math.MaxInt64) {
@@ -301,7 +313,7 @@ func (m *GCStateManager) SetGCBarrier(keyspaceID uint32, barrierID string, barri
 	}
 	newBarrier := endpoint.NewGCBarrier(barrierID, barrierTS, expirationTime)
 
-	err = m.gcMetaStorage.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
+	err := m.gcMetaStorage.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
 		txnSafePoint, err1 := m.gcMetaStorage.LoadTxnSafePoint(keyspaceID)
 		if err1 != nil {
 			return err1
@@ -328,8 +340,12 @@ func (m *GCStateManager) DeleteGCBarrier(keyspaceID uint32, barrierID string) (*
 	m.lock.Lock()
 	defer m.lock.Unlock()
 
+	return m.deleteGCBarrierImpl(keyspaceID, barrierID)
+}
+
+func (m *GCStateManager) deleteGCBarrierImpl(keyspaceID uint32, barrierID string) (*endpoint.GCBarrier, error) {
 	var deletedBarrier *endpoint.GCBarrier
-	err = m.gcMetaStorage.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
+	err := m.gcMetaStorage.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
 		var err1 error
 		deletedBarrier, err1 = m.gcMetaStorage.LoadGCBarrier(keyspaceID, barrierID)
 		if err1 != nil {
@@ -453,7 +469,7 @@ func (m *GCStateManager) CompatibleUpdateServiceGCSafePoint(serviceID string, ne
 
 	// TODO: After implementing the global GC barrier, redirect the invocation on "native_br" to `SetGlobalGCBarrier`.
 	if serviceID == keypath.GCWorkerServiceSafePointID {
-		res, err := m.AdvanceTxnSafePoint(keyspaceID, newServiceSafePoint)
+		res, err := m.advanceTxnSafePointImpl(keyspaceID, newServiceSafePoint)
 		if err != nil {
 			return nil, false, err
 		}
@@ -472,14 +488,17 @@ func (m *GCStateManager) CompatibleUpdateServiceGCSafePoint(serviceID string, ne
 		}
 	} else {
 		if ttl > 0 {
-			_, err = m.SetGCBarrier(keyspaceID, serviceID, newServiceSafePoint, saturatingDuration(ttl, time.Second), now)
+			_, err = m.setGCBarrierImpl(keyspaceID, serviceID, newServiceSafePoint, saturatingDuration(ttl, time.Second), now)
 		} else {
-			_, err = m.DeleteGCBarrier(keyspaceID, serviceID)
+			_, err = m.deleteGCBarrierImpl(keyspaceID, serviceID)
 		}
 
 		if err != nil {
 			return nil, false, err
 		}
+		// The atomicity between setting/deleting GC barrier and loading the txn safe point is not guaranteed here.
+		// It doesn't matter much whether it's atomic, but it's important to ensure LoadTxnSafePoint happens *AFTER*
+		// setting/deleting GC barrier.
 		minTxnSafePoint, err := m.gcMetaStorage.LoadTxnSafePoint(keyspaceID)
 		if err != nil {
 			return nil, false, err

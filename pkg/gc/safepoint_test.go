@@ -16,8 +16,6 @@ package gc
 
 import (
 	"math"
-	"path"
-	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -33,8 +31,7 @@ import (
 
 func newGCStateProvider(t *testing.T) (provider endpoint.GCStateProvider, clean func()) {
 	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1)
-	rootPath := path.Join("/pd", strconv.FormatUint(100, 10))
-	kvBase := kv.NewEtcdKVBase(client, rootPath)
+	kvBase := kv.NewEtcdKVBase(client)
 
 	s := endpoint.NewStorageEndpoint(kvBase, nil)
 
@@ -132,9 +129,9 @@ func TestGCSafePointUpdateConcurrently(t *testing.T) {
 }
 
 func TestLegacyServiceGCSafePointUpdate(t *testing.T) {
-	storage, clean := newGCStateProvider(t)
+	provider, clean := newGCStateProvider(t)
 	defer clean()
-	manager := NewGCStateManager(storage, config.PDServerConfig{})
+	manager := NewGCStateManager(provider, config.PDServerConfig{})
 
 	re := require.New(t)
 	gcWorkerServiceID := "gc_worker"
@@ -146,17 +143,17 @@ func TestLegacyServiceGCSafePointUpdate(t *testing.T) {
 
 	wg := sync.WaitGroup{}
 	wg.Add(5)
-	// update the safepoint for cdc to 10 should success
+	// Updating the service safe point for cdc to 10 should success
 	go func() {
 		defer wg.Done()
 		min, updated, err := manager.CompatibleUpdateServiceGCSafePoint(cdcServiceID, cdcServiceSafePoint, 10000, time.Now())
 		re.NoError(err)
 		re.True(updated)
-		// the service will init the service safepoint to 0(<10 for cdc) for gc_worker.
+		// The service will init the service safepoint to 0(<10 for cdc) for gc_worker.
 		re.Equal(gcWorkerServiceID, min.ServiceID)
 	}()
 
-	// update the safepoint for br to 15 should success
+	// Updating the service safe point for br to 15 should success
 	go func() {
 		defer wg.Done()
 		min, updated, err := manager.CompatibleUpdateServiceGCSafePoint(brServiceID, brSafePoint, 10000, time.Now())
@@ -166,7 +163,7 @@ func TestLegacyServiceGCSafePointUpdate(t *testing.T) {
 		re.Equal(gcWorkerServiceID, min.ServiceID)
 	}()
 
-	// update safepoint to 8 for gc_worker should be success
+	// Updating the service safe point to 8 for gc_worker should be success
 	go func() {
 		defer wg.Done()
 		// update with valid ttl for gc_worker should be success.
@@ -179,13 +176,13 @@ func TestLegacyServiceGCSafePointUpdate(t *testing.T) {
 
 	go func() {
 		defer wg.Done()
-		// update safepoint of gc_worker's service with ttl not infinity should be failed.
+		// Updating the service safe point of gc_worker's service with ttl not infinity should be failed.
 		_, updated, err := manager.CompatibleUpdateServiceGCSafePoint(gcWorkerServiceID, 10000, 10, time.Now())
 		re.Error(err)
 		re.False(updated)
 	}()
 
-	// update safepoint with negative ttl should be failed.
+	// Updating the service safe point with negative ttl should be failed.
 	go func() {
 		defer wg.Done()
 		brTTL := int64(-100)
@@ -195,7 +192,7 @@ func TestLegacyServiceGCSafePointUpdate(t *testing.T) {
 	}()
 
 	wg.Wait()
-	// update safepoint to 15(>10 for cdc) for gc_worker
+	// Updating the service safe point to 15(>10 for cdc) for gc_worker
 	gcWorkerSafePoint = uint64(15)
 	min, updated, err := manager.CompatibleUpdateServiceGCSafePoint(gcWorkerServiceID, gcWorkerSafePoint, math.MaxInt64, time.Now())
 	re.NoError(err)
@@ -203,7 +200,7 @@ func TestLegacyServiceGCSafePointUpdate(t *testing.T) {
 	re.Equal(cdcServiceID, min.ServiceID)
 	re.Equal(cdcServiceSafePoint, min.SafePoint)
 
-	// the value shouldn't be updated with current safepoint smaller than the min safepoint.
+	// The value shouldn't be updated with current service safe point smaller than the min safe point.
 	brTTL := int64(100)
 	brSafePoint = min.SafePoint - 5
 	min, updated, err = manager.CompatibleUpdateServiceGCSafePoint(brServiceID, brSafePoint, brTTL, time.Now())
@@ -214,4 +211,38 @@ func TestLegacyServiceGCSafePointUpdate(t *testing.T) {
 	_, updated, err = manager.CompatibleUpdateServiceGCSafePoint(brServiceID, brSafePoint, brTTL, time.Now())
 	re.NoError(err)
 	re.True(updated)
+}
+
+func TestLegacyServiceGCSafePointRoundingTTL(t *testing.T) {
+	provider, clean := newGCStateProvider(t)
+	defer clean()
+	manager := NewGCStateManager(provider, config.PDServerConfig{})
+
+	re := require.New(t)
+
+	var maxTTL int64 = 9223372036
+
+	_, updated, err := manager.CompatibleUpdateServiceGCSafePoint("svc1", 10, maxTTL, time.Now())
+	re.NoError(err)
+	re.True(updated)
+
+	state, err := manager.GetGCState(constant.NullKeyspaceID)
+	re.NoError(err)
+	re.Len(state.GCBarriers, 1)
+	re.Equal("svc1", state.GCBarriers[0].BarrierID)
+	re.NotNil(state.GCBarriers[0].ExpirationTime)
+	// The given `maxTTL` is valid but super large.
+	re.True(state.GCBarriers[0].ExpirationTime.After(time.Now().Add(time.Hour*24*365*10)), state.GCBarriers[0].ExpirationTime)
+
+	_, updated, err = manager.CompatibleUpdateServiceGCSafePoint("svc1", 10, maxTTL+1, time.Now())
+	re.NoError(err)
+	re.True(updated)
+
+	state, err = manager.GetGCState(constant.NullKeyspaceID)
+	re.NoError(err)
+	re.Len(state.GCBarriers, 1)
+	re.Equal("svc1", state.GCBarriers[0].BarrierID)
+	re.Nil(state.GCBarriers[0].ExpirationTime)
+	// Nil in GCBarrier.ExpirationTime represents never expires.
+	re.False(state.GCBarriers[0].IsExpired(time.Now().Add(time.Hour*24*365*10)), state.GCBarriers[0])
 }
