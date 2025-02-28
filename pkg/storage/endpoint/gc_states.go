@@ -238,6 +238,7 @@ func (p GCStateProvider) loadGlobalGCSafePoint() (uint64, error) {
 	return gcSafePoint, nil
 }
 
+// keyspaceGCSafePoint is the data structure when writing
 type keyspaceGCSafePoint struct {
 	KeyspaceID uint32 `json:"keyspace_id"`
 	SafePoint  uint64 `json:"safe_point"`
@@ -280,6 +281,7 @@ func (p GCStateProvider) LoadTxnSafePoint(keyspaceID uint32) (uint64, error) {
 	return txnSafePoint, err
 }
 
+// loadJSON loads a specific key from the StorageEndpoint, and parses it as JSON into type T.
 func loadJSON[T any](se *StorageEndpoint, key string) (T, error) {
 	value, err := se.Load(key)
 	if err != nil {
@@ -297,6 +299,9 @@ func loadJSON[T any](se *StorageEndpoint, key string) (T, error) {
 	return data, nil
 }
 
+// loadJSON loads keys with the given prefix from the StorageEndpoint, and parses them as JSON into type T.
+// Returns the loaded keys and the parsed values as type T.
+// If `limit` is non-zero, it at most returns `limit` items.
 func loadJSONByPrefix[T any](se *StorageEndpoint, prefix string, limit int) ([]string, []T, error) {
 	prefixEnd := clientv3.GetPrefixRangeEnd(prefix)
 	keys, values, err := se.LoadRange(prefix, prefixEnd, limit)
@@ -469,6 +474,7 @@ func (p GCStateProvider) CompatibleLoadAllServiceGCSafePoints() ([]string, []*Se
 	return keys, ssps, nil
 }
 
+// writeJSON marshals the given data into JSON and writes it to the given key.
 func (wb *GCStateWriteBatch) writeJSON(key string, data any) error {
 	value, err := json.Marshal(data)
 	if err != nil {
@@ -490,6 +496,7 @@ func (wb *GCStateWriteBatch) SetGCSafePoint(keyspaceID uint32, gcSafePoint uint6
 	return wb.setKeyspaceGCSafePoint(keyspaceID, gcSafePoint)
 }
 
+// setGlobalGCSafePoint sets the GC safe point for global GC (NullKeyspace).
 func (wb *GCStateWriteBatch) setGlobalGCSafePoint(gcSafePoint uint64) error {
 	value := strconv.FormatUint(gcSafePoint, 16)
 	wb.ops = append(wb.ops, kv.RawTxnOp{
@@ -500,6 +507,7 @@ func (wb *GCStateWriteBatch) setGlobalGCSafePoint(gcSafePoint uint64) error {
 	return nil
 }
 
+// setKeyspaceGCSafePoint sets the GC safe point for keyspace-level GC for the specific keyspace.
 func (wb *GCStateWriteBatch) setKeyspaceGCSafePoint(keyspaceID uint32, gcSafePoint uint64) error {
 	key := keypath.KeyspaceGCSafePointPath(keyspaceID)
 	return wb.writeJSON(key, keyspaceGCSafePoint{
