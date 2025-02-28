@@ -519,40 +519,6 @@ func TestGCBarrier(t *testing.T) {
 	}
 }
 
-//func TestLoadMinServiceGCSafePoint(t *testing.T) {
-//	re := require.New(t)
-//	storage := NewStorageWithMemoryBackend()
-//	expireAt := time.Now().Add(1000 * time.Second).Unix()
-//	serviceSafePoints := []*endpoint.ServiceSafePoint{
-//		{ServiceID: "1", ExpiredAt: 0, SafePoint: 1},
-//		{ServiceID: "2", ExpiredAt: expireAt, SafePoint: 2},
-//		{ServiceID: "3", ExpiredAt: expireAt, SafePoint: 3},
-//	}
-//
-//	for _, ssp := range serviceSafePoints {
-//		re.NoError(storage.SaveServiceGCSafePoint(ssp))
-//	}
-//
-//	// gc_worker's safepoint will be automatically inserted when loading service safepoints. Here the returned
-//	// safepoint can be either of "gc_worker" or "2".
-//	ssp, err := storage.LoadMinServiceGCSafePoint(time.Now())
-//	re.NoError(err)
-//	re.Equal(uint64(2), ssp.SafePoint)
-//
-//	// Advance gc_worker's safepoint
-//	re.NoError(storage.SaveServiceGCSafePoint(&endpoint.ServiceSafePoint{
-//		ServiceID: "gc_worker",
-//		ExpiredAt: math.MaxInt64,
-//		SafePoint: 10,
-//	}))
-//
-//	ssp, err = storage.LoadMinServiceGCSafePoint(time.Now())
-//	re.NoError(err)
-//	re.Equal("2", ssp.ServiceID)
-//	re.Equal(expireAt, ssp.ExpiredAt)
-//	re.Equal(uint64(2), ssp.SafePoint)
-//}
-
 func TestTxnSafePoint(t *testing.T) {
 	re := require.New(t)
 	se, clean := newEtcdStorageEndpoint(t)
