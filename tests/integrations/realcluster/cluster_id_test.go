@@ -16,10 +16,8 @@ package realcluster
 
 import (
 	"context"
-	"strings"
 	"testing"
 
-	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
 	pd "github.com/tikv/pd/client"
@@ -61,32 +59,4 @@ func (s *clusterIDSuite) TestClientClusterID() {
 	)
 	re.Error(err)
 	re.Contains(err.Error(), "unmatched cluster id")
-}
-
-func getPDEndpoints(re *require.Assertions) []string {
-	output, err := runCommandWithOutput("ps -ef | grep tikv-server | awk -F '--pd-endpoints=' '{print $2}' | awk '{print $1}'")
-	re.NoError(err)
-	var pdAddrs []string
-	for _, addr := range strings.Split(strings.TrimSpace(output), "\n") {
-		// length of addr is less than 5 means it must not be a valid address
-		if len(addr) < 5 {
-			continue
-		}
-		pdAddrs = append(pdAddrs, strings.Split(addr, ",")...)
-	}
-	return removeDuplicates(pdAddrs)
-}
-
-func removeDuplicates(arr []string) []string {
-	uniqueMap := make(map[string]bool)
-	var result []string
-
-	for _, item := range arr {
-		if _, exists := uniqueMap[item]; !exists {
-			uniqueMap[item] = true
-			result = append(result, item)
-		}
-	}
-
-	return result
 }
