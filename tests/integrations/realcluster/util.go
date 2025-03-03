@@ -22,8 +22,10 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/pingcap/log"
 	"github.com/stretchr/testify/require"
+
+	"github.com/pingcap/log"
+
 	pd "github.com/tikv/pd/client"
 	"github.com/tikv/pd/client/opt"
 	"github.com/tikv/pd/client/pkg/caller"
