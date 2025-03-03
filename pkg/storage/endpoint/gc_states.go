@@ -32,11 +32,33 @@ import (
 	"github.com/tikv/pd/pkg/utils/keypath"
 )
 
-// ServiceSafePoint is the safepoint for a specific service
-// NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
-// This type is in sync with `client/http/types.go`.
-// ServiceSafePoint is also directly used for storing GC barriers in order to make GC barriers in new versions
-// can be backward-compatible with service safe points in old versions.
+// This file contains the definition of GCStateProvider. It provides methods for reading and writing GC states,
+// which controls how TiKV's GC for MVCC data should work.
+// Note that this file is only the storage layer of the GC related metadata and doesn't do anything else such as
+// performing calculations or ensuring invariants among properties in GC states. This means that this module is NOT
+// designed for arbitrary use, but restricted for upper layers of GC state management modules only.
+//
+// Explanations of concepts mentioned in this file (here the term `snapshots` means snapshots of TiKV's MVCC data,
+// represented by a timestamp):
+//   - GC Safe Point: A timestamp, the snapshots before which can be safely discarded by GC. Written by the GCWorker
+//     to control the GC procedure.
+//   - Txn Safe Point / Transaction Safe Point: A timestamp, the snapshots equal to or after which can be safely read.
+//     Written by the GCWorker to control the GC procedure.
+//   - GC Barriers: Blocks GC from advancing the txn safe point over some specific timestamps (the barrierTS of these
+//     barriers), ensures snapshots equal to or after which to be safe to read. GC barriers can be set by any components
+//     in the cluster.
+//   - Service Safe Points / Service GC Safe Points: Another mechanism that has the same purpose as GC barriers, but
+//     is planned to be deprecated in favor of GC barriers. However, in order to keep the backward compatibility of the
+//     persistent data, the data structure of service safe points is still used internally to represent GC barriers.
+//     Service safe points can also be set by any components in the cluster.
+
+// ServiceSafePoint is the service safe point for a specific service.
+// NOTE:
+//   - This type is exported by HTTP API. Please pay more attention when modifying it.
+//   - This type is in sync with `client/http/types.go`.
+//   - ServiceSafePoint is also directly used for storing GC barriers in order to make GC barriers in new versions
+//     backward-compatible with service safe points in old versions.
+//   - The concept "service safe point" is planned to be deprecated once GC barriers are ready to use.
 type ServiceSafePoint struct {
 	ServiceID string
 	ExpiredAt int64
@@ -194,6 +216,8 @@ type GCStateStorage interface {
 }
 
 // GetGCStateProvider returns an GCStateProvider for reading and writing GC state data.
+// GCStateProvider provides direct read/write to GC related metadata without maintaining the consistency or invariants.
+// It's only designed for internal use of GC. Avoid using it for other purposes.
 func (se *StorageEndpoint) GetGCStateProvider() GCStateProvider {
 	return newGCStateProvider(se)
 }
@@ -238,7 +262,10 @@ func (p GCStateProvider) loadGlobalGCSafePoint() (uint64, error) {
 	return gcSafePoint, nil
 }
 
-// keyspaceGCSafePoint is the data structure when writing
+// keyspaceGCSafePoint is the data structure in which we should persist GC safe points for keyspace-level GC.
+// The `KeyspaceID` field is redundant, but it's currently included in the data format of the "GC API V2" (which
+// we will deprecate), so it's kept for providing backward compatibility for the data already written by the GC API
+// V2.
 type keyspaceGCSafePoint struct {
 	KeyspaceID uint32 `json:"keyspace_id"`
 	SafePoint  uint64 `json:"safe_point"`
