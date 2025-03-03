@@ -197,7 +197,7 @@ func TestLegacyServiceGCSafePointUpdate(t *testing.T) {
 	min, updated, err := manager.CompatibleUpdateServiceGCSafePoint(gcWorkerServiceID, gcWorkerSafePoint, math.MaxInt64, time.Now())
 	re.NoError(err)
 	re.True(updated)
-	re.Equal(cdcServiceID, min.ServiceID)
+	re.Contains(min.ServiceID, "BarrierID: \""+cdcServiceID+"\"")
 	re.Equal(cdcServiceSafePoint, min.SafePoint)
 
 	// The value shouldn't be updated with current service safe point smaller than the min safe point.

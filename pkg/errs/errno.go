@@ -556,6 +556,6 @@ var (
 	ErrDecreasingGCSafePoint          = errors.Normalize("trying to update GC safe point to a smaller value, current value: %v, given: %v", errors.RFCCodeText("PD:gc:ErrDecreasingGCSafePoint"))
 	ErrGCSafePointExceedsTxnSafePoint = errors.Normalize("trying to update GC safe point to a too large value that exceeds the txn safe point, current value: %v, given: %v, current txn safe point: %v", errors.RFCCodeText("PD:gc:ErrGCSafePointExceedsTxnSafePoint"))
 	ErrDecreasingTxnSafePoint         = errors.Normalize("trying to update txn safe point to a smaller value, current value: %v, given: %v", errors.RFCCodeText("PD:gc:ErrDecreasingTxnSafePoint"))
-	ErrInvalidGCBarrier               = errors.Normalize("trying to set a GC barrier on ts %d which is already behind the txn safe point %d", errors.RFCCodeText("PD:gc:ErrInvalidGCBarrier"))
+	ErrGCBarrierTSBehindTxnSafePoint  = errors.Normalize("trying to set a GC barrier on ts %d which is already behind the txn safe point %d", errors.RFCCodeText("PD:gc:ErrGCBarrierTSBehindTxnSafePoint"))
 	ErrReservedGCBarrierID            = errors.Normalize("trying to set a GC barrier with a barrier ID that is reserved: %v", errors.RFCCodeText("PD:gc:ErrReservedGCBarrierID"))
 )

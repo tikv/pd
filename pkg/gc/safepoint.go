@@ -15,6 +15,7 @@
 package gc
 
 import (
+	"errors"
 	"fmt"
 	"math"
 	"math/bits"
@@ -259,7 +260,7 @@ func (m *GCStateManager) advanceTxnSafePointImpl(keyspaceID uint32, target uint6
 	if blockingBarrier != nil {
 		blockerDesc = blockingBarrier.String()
 	} else if blockingMinStartTSOwner != nil {
-		blockerDesc = fmt.Sprintf("TiDBMinStartTS { Key: %s, MinStartTS: %d }", *blockingMinStartTSOwner, newTxnSafePoint)
+		blockerDesc = fmt.Sprintf("TiDBMinStartTS { Key: %+q, MinStartTS: %d }", *blockingMinStartTSOwner, newTxnSafePoint)
 	}
 
 	if newTxnSafePoint != target {
@@ -319,7 +320,7 @@ func (m *GCStateManager) setGCBarrierImpl(keyspaceID uint32, barrierID string, b
 			return err1
 		}
 		if barrierTS < txnSafePoint {
-			return errs.ErrInvalidGCBarrier.GenWithStackByArgs(barrierTS, txnSafePoint)
+			return errs.ErrGCBarrierTSBehindTxnSafePoint.GenWithStackByArgs(barrierTS, txnSafePoint)
 		}
 		err1 = wb.SetGCBarrier(keyspaceID, newBarrier)
 		return err1
@@ -462,6 +463,35 @@ func saturatingDuration(ratio int64, base time.Duration) time.Duration {
 	return time.Duration(l)
 }
 
+// CompatibleUpdateServiceGCSafePoint updates the service safe point of the given serviceID. Service safe points are
+// being deprecated, and this method provides compatibility for components that are still using service safe point API.
+// This method simulates the behavior of the service safe points in old versions, by internally using txn safe points
+// and GC barriers. The behaviors are mapped as follows:
+//
+//   - The service safe point with service ID "gc_worker" is mapped to the txn safe point.
+//   - The service safe point with other service IDs are mapped to GC barriers with barrier IDs equal to the given
+//     service IDs.
+//
+// Note that the behavior of the service safe point of "gc_worker" is not perfectly the same as before: it can no longer
+// be advanced over other service safe points, but will be blocked by the minimal one; and if the cluster was running
+// with TiDB node that haven't migrated to the new GC APIs, it can also be blocked by the *TiDB min start ts* written by
+// those TiDB nodes.
+//
+// Therefore, the method's behavior is as follows:
+//   - If the given serviceID is "gc_worker", it internally calls AdvanceTxnSafePoint.
+//   - If the advancing result is the same as newServiceSafePoint, it's the case that the updated service safe
+//     point of "gc_worker" is exactly the minimal one. Returns a simulated service safe point with the service ID
+//     equals to "gc_worker".
+//   - Otherwise, it's the case that the service safe point of "gc_worker" is successfully updated, but it's not
+//     the minimal service safe point. Returns a simulated service safe point whose serviceID starts with
+//     "__pseudo_service:" to simulate the minimal service safe point. It may actually be either a GC barrier or
+//     a *TiDB min start ts*.
+//   - If the given serviceID is anything else, it internally calls SetGCBarrier or DeleteGCBarrier, depending on
+//     whether the `ttl` is positive or not. As the txn safe point is always less or equal to any GC barriers, we
+//     simulate the case that the service safe point of "gc_worker" is the minimal one, and return a service safe point
+//     with the service ID equals to "gc_worker".
+//
+// This function only works on the NullKeyspace.
 func (m *GCStateManager) CompatibleUpdateServiceGCSafePoint(serviceID string, newServiceSafePoint uint64, ttl int64, now time.Time) (minServiceSafePoint *endpoint.ServiceSafePoint, updated bool, err error) {
 	keyspaceID := constant.NullKeyspaceID
 	m.lock.Lock()
@@ -469,6 +499,10 @@ func (m *GCStateManager) CompatibleUpdateServiceGCSafePoint(serviceID string, ne
 
 	// TODO: After implementing the global GC barrier, redirect the invocation on "native_br" to `SetGlobalGCBarrier`.
 	if serviceID == keypath.GCWorkerServiceSafePointID {
+		if ttl != math.MaxInt64 {
+			return nil, false, errors.New("TTL of gc_worker's service safe point must be infinity")
+		}
+
 		res, err := m.advanceTxnSafePointImpl(keyspaceID, newServiceSafePoint)
 		if err != nil {
 			return nil, false, err
@@ -486,6 +520,7 @@ func (m *GCStateManager) CompatibleUpdateServiceGCSafePoint(serviceID string, ne
 				SafePoint: newServiceSafePoint,
 			}
 		}
+		updated = res.OldTxnSafePoint != res.NewTxnSafePoint
 	} else {
 		if ttl > 0 {
 			_, err = m.setGCBarrierImpl(keyspaceID, serviceID, newServiceSafePoint, saturatingDuration(ttl, time.Second), now)
@@ -493,23 +528,24 @@ func (m *GCStateManager) CompatibleUpdateServiceGCSafePoint(serviceID string, ne
 			_, err = m.deleteGCBarrierImpl(keyspaceID, serviceID)
 		}
 
-		if err != nil {
+		if err != nil && !errors.Is(err, errs.ErrGCBarrierTSBehindTxnSafePoint) {
 			return nil, false, err
 		}
 		// The atomicity between setting/deleting GC barrier and loading the txn safe point is not guaranteed here.
 		// It doesn't matter much whether it's atomic, but it's important to ensure LoadTxnSafePoint happens *AFTER*
 		// setting/deleting GC barrier.
-		minTxnSafePoint, err := m.gcMetaStorage.LoadTxnSafePoint(keyspaceID)
+		txnSafePoint, err := m.gcMetaStorage.LoadTxnSafePoint(keyspaceID)
 		if err != nil {
 			return nil, false, err
 		}
 		minServiceSafePoint = &endpoint.ServiceSafePoint{
-			ServiceID: "<unknown>",
+			ServiceID: keypath.GCWorkerServiceSafePointID,
 			ExpiredAt: math.MaxInt64,
-			SafePoint: minTxnSafePoint,
+			SafePoint: txnSafePoint,
 		}
+		updated = ttl > 0 && txnSafePoint <= newServiceSafePoint
 	}
-	return minServiceSafePoint, true, nil
+	return minServiceSafePoint, updated, nil
 }
 
 type AdvanceTxnSafePointResult struct {
