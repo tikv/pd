@@ -44,7 +44,6 @@ import (
 	tso "github.com/tikv/pd/pkg/mcs/tso/server"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/mock/mockid"
-	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/versioninfo"
@@ -199,19 +198,23 @@ func MustPutStore(re *require.Assertions, cluster *TestCluster, store *metapb.St
 	if len(store.Version) == 0 {
 		store.Version = versioninfo.MinSupportedVersion(versioninfo.Version2_0).String()
 	}
-	svr := cluster.GetLeaderServer().GetServer()
-	grpcServer := &server.GrpcServer{Server: svr}
-	_, err := grpcServer.PutStore(context.Background(), &pdpb.PutStoreRequest{
-		Header: &pdpb.RequestHeader{ClusterId: keypath.ClusterID()},
-		Store:  store,
+	var svr *server.Server
+	// Make sure the raft cluster is ready, no matter if the leader is changed.
+	testutil.Eventually(re, func() bool {
+		leader := cluster.GetLeaderServer()
+		if leader == nil {
+			return false
+		}
+		svr = leader.GetServer()
+		return svr != nil
 	})
-	re.NoError(err)
-
+	re.NoError(svr.GetRaftCluster().PutMetaStore(store))
 	ts := store.GetLastHeartbeat()
 	if ts == 0 {
 		ts = time.Now().UnixNano()
 	}
-	storeInfo := grpcServer.GetRaftCluster().GetStore(store.GetId())
+
+	storeInfo := svr.GetRaftCluster().GetStore(store.GetId())
 	newStore := storeInfo.Clone(
 		core.SetStoreStats(&pdpb.StoreStats{
 			Capacity:  uint64(10 * units.GiB),
@@ -220,7 +223,7 @@ func MustPutStore(re *require.Assertions, cluster *TestCluster, store *metapb.St
 		}),
 		core.SetLastHeartbeatTS(time.Unix(ts/1e9, ts%1e9)),
 	)
-	grpcServer.GetRaftCluster().GetBasicCluster().PutStore(newStore)
+	svr.GetRaftCluster().GetBasicCluster().PutStore(newStore)
 	if cluster.GetSchedulingPrimaryServer() != nil {
 		cluster.GetSchedulingPrimaryServer().GetCluster().PutStore(newStore)
 	}

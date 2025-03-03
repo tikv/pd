@@ -1060,13 +1060,15 @@ func (suite *clientTestSuite) SetupSuite() {
 			},
 		})
 
-		storeInfo := suite.grpcSvr.GetRaftCluster().GetStore(store.GetId())
-		newStore := storeInfo.Clone(core.SetStoreStats(&pdpb.StoreStats{
-			Capacity:  uint64(10 * units.GiB),
-			UsedSize:  uint64(9 * units.GiB),
-			Available: uint64(1 * units.GiB),
-		}))
-		suite.grpcSvr.GetRaftCluster().GetBasicCluster().PutStore(newStore)
+		suite.grpcSvr.StoreHeartbeat(context.Background(), &pdpb.StoreHeartbeatRequest{
+			Header: newHeader(),
+			Stats: &pdpb.StoreStats{
+				StoreId:   store.GetId(),
+				Capacity:  uint64(10 * units.GiB),
+				UsedSize:  uint64(9 * units.GiB),
+				Available: uint64(1 * units.GiB),
+			},
+		})
 	}
 	cluster.GetOpts().(*config.PersistOptions).SetRegionBucketEnabled(true)
 }
