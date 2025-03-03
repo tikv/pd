@@ -151,6 +151,14 @@ var (
 			Name:      "maxprocs",
 			Help:      "The value of GOMAXPROCS.",
 		})
+	forwardTsoDuration = prometheus.NewHistogram(
+		prometheus.HistogramOpts{
+			Namespace: "pd",
+			Subsystem: "server",
+			Name:      "forward_tso_duration_seconds",
+			Help:      "Bucketed histogram of processing time (s) of handled forward tso requests.",
+			Buckets:   prometheus.ExponentialBuckets(0.0005, 2, 13),
+		})
 )
 
 func init() {
@@ -170,4 +178,5 @@ func init() {
 	prometheus.MustRegister(serviceAuditHistogram)
 	prometheus.MustRegister(bucketReportInterval)
 	prometheus.MustRegister(serverMaxProcs)
+	prometheus.MustRegister(forwardTsoDuration)
 }

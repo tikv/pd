@@ -20,6 +20,7 @@ import (
 	"io"
 	"path"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -48,7 +49,9 @@ import (
 )
 
 const (
-	heartbeatSendTimeout = 5 * time.Second
+	heartbeatSendTimeout          = 5 * time.Second
+	maxRetryTimesRequestTSOServer = 3
+	retryIntervalRequestTSOServer = 500 * time.Millisecond
 )
 
 // gRPC errors
@@ -1781,31 +1784,77 @@ func checkStream(streamCtx context.Context, cancel context.CancelFunc, done chan
 }
 
 func (s *GrpcServer) getGlobalTSOFromTSOServer(ctx context.Context) (pdpb.Timestamp, error) {
-	forwardedHost, ok := s.GetServicePrimaryAddr(ctx, utils.TSOServiceName)
-	if !ok || forwardedHost == "" {
-		return pdpb.Timestamp{}, ErrNotFoundTSOAddr
-	}
-	forwardStream, err := s.getTSOForwardStream(forwardedHost)
-	if err != nil {
-		return pdpb.Timestamp{}, err
-	}
-	forwardStream.Send(&tsopb.TsoRequest{
+	request := &tsopb.TsoRequest{
 		Header: &tsopb.RequestHeader{
 			ClusterId:       s.clusterID,
 			KeyspaceId:      utils.DefaultKeyspaceID,
 			KeyspaceGroupId: utils.DefaultKeyspaceGroupID,
 		},
 		Count: 1,
-	})
-	ts, err := forwardStream.Recv()
-	if err != nil {
-		log.Error("get global tso from tso server failed", zap.Error(err))
-		return pdpb.Timestamp{}, err
 	}
-	return *ts.GetTimestamp(), nil
+	var (
+		forwardedHost string
+		forwardStream *streamWrapper
+		ts            *tsopb.TsoResponse
+		err           error
+		ok            bool
+	)
+	handleStreamError := func(err error) (needRetry bool) {
+		if strings.Contains(err.Error(), errs.NotLeaderErr) {
+			s.updateServicePrimaryAddr(utils.TSOServiceName)
+			log.Warn("force to load tso primary address due to error", zap.Error(err), zap.String("tso-addr", forwardedHost))
+			return true
+		}
+		if grpcutil.NeedRebuildConnection(err) {
+			s.tsoClientPool.Lock()
+			delete(s.tsoClientPool.clients, forwardedHost)
+			s.tsoClientPool.Unlock()
+			log.Warn("client connection removed due to error", zap.Error(err), zap.String("tso-addr", forwardedHost))
+			return true
+		}
+		return false
+	}
+	for i := 0; i < maxRetryTimesRequestTSOServer; i++ {
+		if i > 0 {
+			time.Sleep(retryIntervalRequestTSOServer)
+		}
+		forwardedHost, ok = s.GetServicePrimaryAddr(ctx, utils.TSOServiceName)
+		if !ok || forwardedHost == "" {
+			return pdpb.Timestamp{}, ErrNotFoundTSOAddr
+		}
+		forwardStream, err = s.getTSOForwardStream(forwardedHost)
+		if err != nil {
+			return pdpb.Timestamp{}, err
+		}
+		start := time.Now()
+		forwardStream.Lock()
+		err = forwardStream.Send(request)
+		if err != nil {
+			if needRetry := handleStreamError(err); needRetry {
+				forwardStream.Unlock()
+				continue
+			}
+			log.Error("send request to tso primary server failed", zap.Error(err), zap.String("tso-addr", forwardedHost))
+			forwardStream.Unlock()
+			return pdpb.Timestamp{}, err
+		}
+		ts, err = forwardStream.Recv()
+		forwardStream.Unlock()
+		forwardTsoDuration.Observe(time.Since(start).Seconds())
+		if err != nil {
+			if needRetry := handleStreamError(err); needRetry {
+				continue
+			}
+			log.Error("receive response from tso primary server failed", zap.Error(err), zap.String("tso-addr", forwardedHost))
+			return pdpb.Timestamp{}, err
+		}
+		return *ts.GetTimestamp(), nil
+	}
+	log.Error("get global tso from tso primary server failed after retry", zap.Error(err), zap.String("tso-addr", forwardedHost))
+	return pdpb.Timestamp{}, err
 }
 
-func (s *GrpcServer) getTSOForwardStream(forwardedHost string) (tsopb.TSO_TsoClient, error) {
+func (s *GrpcServer) getTSOForwardStream(forwardedHost string) (*streamWrapper, error) {
 	s.tsoClientPool.RLock()
 	forwardStream, ok := s.tsoClientPool.clients[forwardedHost]
 	s.tsoClientPool.RUnlock()
@@ -1831,10 +1880,13 @@ func (s *GrpcServer) getTSOForwardStream(forwardedHost string) (tsopb.TSO_TsoCli
 	done := make(chan struct{})
 	ctx, cancel := context.WithCancel(s.ctx)
 	go checkStream(ctx, cancel, done)
-	forwardStream, err = tsopb.NewTSOClient(client).Tso(ctx)
+	tsoClient, err := tsopb.NewTSOClient(client).Tso(ctx)
 	done <- struct{}{}
 	if err != nil {
 		return nil, err
+	}
+	forwardStream = &streamWrapper{
+		TSO_TsoClient: tsoClient,
 	}
 	s.tsoClientPool.clients[forwardedHost] = forwardStream
 	return forwardStream, nil

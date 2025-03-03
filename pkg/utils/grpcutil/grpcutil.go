@@ -18,12 +18,15 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"io"
 	"net/url"
+	"strings"
 
 	"github.com/pingcap/log"
 	"github.com/tikv/pd/pkg/errs"
 	"go.etcd.io/etcd/pkg/transport"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
@@ -171,4 +174,15 @@ func GetForwardedHost(ctx context.Context) string {
 		return t[0]
 	}
 	return ""
+}
+
+// NeedRebuildConnection checks if the error is a connection error.
+func NeedRebuildConnection(err error) bool {
+	return err == io.EOF ||
+		strings.Contains(err.Error(), codes.Unavailable.String()) || // Unavailable indicates the service is currently unavailable. This is a most likely a transient condition.
+		strings.Contains(err.Error(), codes.DeadlineExceeded.String()) || // DeadlineExceeded means operation expired before completion.
+		strings.Contains(err.Error(), codes.Internal.String()) || // Internal errors.
+		strings.Contains(err.Error(), codes.Unknown.String()) || // Unknown error.
+		strings.Contains(err.Error(), codes.ResourceExhausted.String()) // ResourceExhausted is returned when either the client or the server has exhausted their resources.
+	// Besides, we don't need to rebuild the connection if the code is Canceled, which means the client cancelled the request.
 }
