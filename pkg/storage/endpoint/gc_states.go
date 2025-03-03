@@ -308,48 +308,6 @@ func (p GCStateProvider) LoadTxnSafePoint(keyspaceID uint32) (uint64, error) {
 	return txnSafePoint, err
 }
 
-// loadJSON loads a specific key from the StorageEndpoint, and parses it as JSON into type T.
-func loadJSON[T any](se *StorageEndpoint, key string) (T, error) {
-	value, err := se.Load(key)
-	if err != nil {
-		var empty T
-		return empty, err
-	}
-	if value == "" {
-		var empty T
-		return empty, nil
-	}
-	var data T
-	if err = json.Unmarshal([]byte(value), &data); err != nil {
-		return data, errs.ErrJSONUnmarshal.Wrap(err).GenWithStackByArgs()
-	}
-	return data, nil
-}
-
-// loadJSON loads keys with the given prefix from the StorageEndpoint, and parses them as JSON into type T.
-// Returns the loaded keys and the parsed values as type T.
-// If `limit` is non-zero, it at most returns `limit` items.
-func loadJSONByPrefix[T any](se *StorageEndpoint, prefix string, limit int) ([]string, []T, error) {
-	prefixEnd := clientv3.GetPrefixRangeEnd(prefix)
-	keys, values, err := se.LoadRange(prefix, prefixEnd, limit)
-	if err != nil {
-		return nil, nil, err
-	}
-	if len(keys) == 0 {
-		return nil, nil, nil
-	}
-
-	data := make([]T, 0, len(keys))
-	for i := range keys {
-		var item T
-		if err := json.Unmarshal([]byte(values[i]), &item); err != nil {
-			return nil, nil, errs.ErrJSONUnmarshal.Wrap(err).GenWithStackByArgs()
-		}
-		data = append(data, item)
-	}
-	return keys, data, nil
-}
-
 // LoadGCBarrier loads the GCBarrier of the given barrierID from storage.
 func (p GCStateProvider) LoadGCBarrier(keyspaceID uint32, barrierID string) (*GCBarrier, error) {
 	prefix := keypath.GCBarrierPrefix()
@@ -475,7 +433,7 @@ func (p GCStateProvider) RunInGCStateTransaction(f func(wb *GCStateWriteBatch) e
 	txn := p.storage.CreateRawTxn()
 	result, err := txn.If(condition).Then(ops...).Commit()
 	if err != nil {
-		return errors.AddStack(err)
+		return errs.ErrEtcdTxnInternal.Wrap(err).GenWithStackByArgs()
 	}
 	if !result.Succeeded {
 		return errs.ErrEtcdTxnConflict.GenWithStackByArgs()
