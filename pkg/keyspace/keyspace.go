@@ -199,12 +199,12 @@ func (manager *Manager) CreateKeyspace(request *CreateKeyspaceRequest) (*keyspac
 	// Allocate new keyspaceID.
 	newID, err := manager.allocID()
 	if err != nil {
-		return nil, err
+		return nil, errors.AddStack(err)
 	}
 	userKind := endpoint.StringUserKind(request.Config[UserKindKey])
 	config, err := manager.kgm.GetKeyspaceConfigByKind(userKind)
 	if err != nil {
-		return nil, err
+		return nil, errors.AddStack(err)
 	}
 	if len(config) != 0 {
 		if request.Config == nil {

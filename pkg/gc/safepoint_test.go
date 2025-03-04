@@ -15,6 +15,7 @@
 package gc
 
 import (
+	"context"
 	"math"
 	"sync"
 	"testing"
@@ -22,29 +23,85 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/id"
+	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
+	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
+	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/server/config"
 )
 
-func newGCStateProvider(t *testing.T) (provider endpoint.GCStateProvider, clean func()) {
+func newGCStateManager(t *testing.T) (provider endpoint.GCStateProvider, gccStateManager *GCStateManager, clean func()) {
+	cfg := config.NewConfig()
+	re := require.New(t)
+
 	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1)
 	kvBase := kv.NewEtcdKVBase(client)
 
-	s := endpoint.NewStorageEndpoint(kvBase, nil)
+	// Simulate a member which id.Allocator may need to check.
+	err := kvBase.Save(keypath.LeaderPath(nil), "member1")
+	re.NoError(err)
 
-	return s.GetGCStateProvider(), clean
+	s := endpoint.NewStorageEndpoint(kvBase, nil)
+	allocator := id.NewAllocator(&id.AllocatorParams{
+		Client: client,
+		Label:  id.KeyspaceLabel,
+		Member: "member1",
+		Step:   keyspace.AllocStep,
+	})
+	kgm := keyspace.NewKeyspaceGroupManager(context.Background(), s, client)
+	keyspaceManager := keyspace.NewKeyspaceManager(context.Background(), s, mockcluster.NewCluster(context.Background(), config.NewPersistOptions(cfg)), allocator, &config.KeyspaceConfig{}, kgm)
+	gcStateManager := NewGCStateManager(s.GetGCStateProvider(), cfg.PDServerCfg, keyspaceManager)
+
+	err = kgm.Bootstrap(context.Background())
+	re.NoError(err)
+	err = keyspaceManager.Bootstrap()
+	re.NoError(err)
+
+	ks1, err := keyspaceManager.CreateKeyspace(&keyspace.CreateKeyspaceRequest{
+		Name:       "ks1",
+		Config:     map[string]string{"gc_management_type": "global_gc"},
+		CreateTime: time.Now().Unix(),
+		IsPreAlloc: false,
+	})
+	re.NoError(err)
+	re.Equal(uint32(1), ks1.Id)
+
+	ks2, err := keyspaceManager.CreateKeyspace(&keyspace.CreateKeyspaceRequest{
+		Name:       "ks2",
+		Config:     map[string]string{"gc_management_type": "keyspace_level_gc"},
+		CreateTime: time.Now().Unix(),
+		IsPreAlloc: false,
+	})
+	re.NoError(err)
+	re.Equal(uint32(2), ks2.Id)
+
+	ks3, err := keyspaceManager.CreateKeyspace(&keyspace.CreateKeyspaceRequest{
+		Name:       "ks3",
+		Config:     map[string]string{},
+		CreateTime: time.Now().Unix(),
+		IsPreAlloc: false,
+	})
+	re.NoError(err)
+	re.Equal(uint32(3), ks3.Id)
+
+	return s.GetGCStateProvider(), gcStateManager, clean
+}
+
+func TestAdvanceGCSafePointBasic(t *testing.T) {
+
 }
 
 func testGCSafePointUpdateSequentiallyImpl(t *testing.T,
 	loadFunc func(m *GCStateManager) (uint64, error),
 	advanceFunc func(m *GCStateManager, target uint64) (uint64, uint64, error)) {
 
-	storage, clean := newGCStateProvider(t)
+	_, gcStateManager, clean := newGCStateManager(t)
 	defer clean()
-	gcStateManager := NewGCStateManager(storage, config.PDServerConfig{})
 	re := require.New(t)
 	curGCSafePoint := uint64(0)
 	// Update GC safe point with asc value.
@@ -98,9 +155,8 @@ func TestGCSafePointUpdateSequentially(t *testing.T) {
 }
 
 func TestGCSafePointUpdateConcurrently(t *testing.T) {
-	storage, clean := newGCStateProvider(t)
+	_, manager, clean := newGCStateManager(t)
 	defer clean()
-	gcSafePointManager := NewGCStateManager(storage, config.PDServerConfig{})
 	maxSafePoint := uint64(1000)
 	wg := sync.WaitGroup{}
 	re := require.New(t)
@@ -113,9 +169,9 @@ func TestGCSafePointUpdateConcurrently(t *testing.T) {
 				// Mix using new and legacy API
 				var err error
 				if (gcSafePoint/step)%2 == 0 {
-					_, _, err = gcSafePointManager.AdvanceGCSafePoint(constant.NullKeyspaceID, gcSafePoint)
+					_, _, err = manager.AdvanceGCSafePoint(constant.NullKeyspaceID, gcSafePoint)
 				} else {
-					_, _, err = gcSafePointManager.CompatibleUpdateGCSafePoint(gcSafePoint)
+					_, _, err = manager.CompatibleUpdateGCSafePoint(gcSafePoint)
 				}
 				re.NoError(err)
 			}
@@ -123,15 +179,14 @@ func TestGCSafePointUpdateConcurrently(t *testing.T) {
 		}(uint64(id + 1))
 	}
 	wg.Wait()
-	gcSafePoint, err := gcSafePointManager.CompatibleLoadGCSafePoint()
+	gcSafePoint, err := manager.CompatibleLoadGCSafePoint()
 	re.NoError(err)
 	re.Equal(maxSafePoint, gcSafePoint)
 }
 
 func TestLegacyServiceGCSafePointUpdate(t *testing.T) {
-	provider, clean := newGCStateProvider(t)
+	_, manager, clean := newGCStateManager(t)
 	defer clean()
-	manager := NewGCStateManager(provider, config.PDServerConfig{})
 
 	re := require.New(t)
 	gcWorkerServiceID := "gc_worker"
@@ -214,9 +269,8 @@ func TestLegacyServiceGCSafePointUpdate(t *testing.T) {
 }
 
 func TestLegacyServiceGCSafePointRoundingTTL(t *testing.T) {
-	provider, clean := newGCStateProvider(t)
+	_, manager, clean := newGCStateManager(t)
 	defer clean()
-	manager := NewGCStateManager(provider, config.PDServerConfig{})
 
 	re := require.New(t)
 
@@ -245,4 +299,119 @@ func TestLegacyServiceGCSafePointRoundingTTL(t *testing.T) {
 	re.Nil(state.GCBarriers[0].ExpirationTime)
 	// Nil in GCBarrier.ExpirationTime represents never expires.
 	re.False(state.GCBarriers[0].IsExpired(time.Now().Add(time.Hour*24*365*10)), state.GCBarriers[0])
+}
+
+func TestAdvanceTxnSafePoint(t *testing.T) {
+	//_, manager, clean := newGCStateManager(t)
+	//defer clean()
+	//
+	//re := require.New(t)
+	//
+	//checkTxnSafePoint := func(keyspaceID uint32, expectedTxnSafePoint uint64) {
+	//	state, err := manager.GetGCState(keyspaceID)
+	//	re.NoError(err)
+	//	re.Equal(expectedTxnSafePoint, state.TxnSafePoint)
+	//}
+
+}
+
+func TestGCBarriers(t *testing.T) {
+
+}
+
+func TestGCStateConstraints(t *testing.T) {
+
+}
+
+func TestServiceGCSafePointCompatibility(t *testing.T) {
+	//_, manager, clean := newGCStateManager(t)
+	//defer clean()
+	//
+	//re := require.New(t)
+
+}
+
+func TestRedirectKeyspace(t *testing.T) {
+	_, manager, clean := newGCStateManager(t)
+	defer clean()
+
+	re := require.New(t)
+
+	keyspaces := []uint32{constant.NullKeyspaceID, 1, 2, 3, 0x1000000, 0xffffff}
+	expectError := []error{nil, nil, nil, nil, nil, errs.ErrKeyspaceNotFound}
+	redirectTarget := []uint32{constant.NullKeyspaceID, constant.NullKeyspaceID, 2, constant.NullKeyspaceID, constant.NullKeyspaceID, 0}
+	systemAPIAllowed := []bool{true, false, true, false, true, false}
+
+	for i, keyspaceID := range keyspaces {
+		target, err := manager.redirectKeyspace(keyspaceID, true)
+		if expectError[i] != nil {
+			re.Error(err, "index: %d", i)
+			re.ErrorIs(err, expectError[i], "index: %d", i)
+		} else {
+			re.NoError(err, "index: %d", i)
+			re.Equal(redirectTarget[i], target, "index: %d", i)
+		}
+
+		target, err = manager.redirectKeyspace(keyspaceID, false)
+		if expectError[i] != nil {
+			re.Error(err, "index: %d", i)
+			re.ErrorIs(err, expectError[i], "index: %d", i)
+		} else if systemAPIAllowed[i] {
+			re.NoError(err, "index: %d", i)
+			re.Equal(redirectTarget[i], target, "index: %d", i)
+		} else {
+			re.Error(err, "index: %d", i)
+			re.ErrorIs(err, errs.ErrGCOnInvalidKeyspace, "index: %d", i)
+		}
+	}
+
+	// Non-null but not existing keyspace id.
+	_, err := manager.redirectKeyspace(0xffffff, true)
+	re.Error(err)
+	re.ErrorIs(err, errs.ErrKeyspaceNotFound)
+
+	// Check all public methods that accepts keyspaceID is correctly redirected.
+	testedFunc := []func(keyspaceID uint32) error{
+		func(keyspaceID uint32) error {
+			_, err1 := manager.GetGCState(keyspaceID)
+			return err1
+		},
+		func(keyspaceID uint32) error {
+			_, err1 := manager.AdvanceTxnSafePoint(keyspaceID, 10)
+			return err1
+		},
+		func(keyspaceID uint32) error {
+			_, _, err1 := manager.AdvanceGCSafePoint(keyspaceID, 10)
+			return err1
+		},
+		func(keyspaceID uint32) error {
+			_, err1 := manager.SetGCBarrier(keyspaceID, "b", 15, time.Hour, time.Now())
+			return err1
+		},
+		func(keyspaceID uint32) error {
+			_, err1 := manager.DeleteGCBarrier(keyspaceID, "b")
+			return err1
+		},
+	}
+	isUserAPI := []bool{true, false, false, true, true}
+	for keyspaceIndex, keyspaceID := range keyspaces {
+		for funcIndex, f := range testedFunc {
+			err = f(keyspaceID)
+			if expectError[keyspaceIndex] != nil {
+				// Report error no matter it is user API or not.
+				re.Error(err)
+				re.ErrorIs(err, expectError[keyspaceIndex])
+			} else if isUserAPI[funcIndex] {
+				// User API is always redirected.
+				re.NoError(err)
+			} else if systemAPIAllowed[keyspaceIndex] {
+				// It's not a user API, and the current keyspace allows running system API.
+				re.NoError(err)
+			} else {
+				// It's not a user API and the current keyspace doesn't allow running system API.
+				re.Error(err)
+				re.ErrorIs(err, errs.ErrGCOnInvalidKeyspace)
+			}
+		}
+	}
 }
