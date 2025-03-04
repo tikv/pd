@@ -52,6 +52,7 @@ func (s *schedulerSuite) TestTransferLeader() {
 	defer cancel()
 
 	pdHTTPCli := http.NewClient("pd-real-cluster-test", getPDEndpoints(re))
+	defer pdHTTPCli.Close()
 	resp, err := pdHTTPCli.GetLeader(ctx)
 	re.NoError(err)
 	oldLeader := resp.Name
@@ -102,6 +103,7 @@ func (s *schedulerSuite) TestRegionLabelDenyScheduler() {
 	defer cancel()
 
 	pdHTTPCli := http.NewClient("pd-real-cluster-test", getPDEndpoints(re))
+	defer pdHTTPCli.Close()
 	regions, err := pdHTTPCli.GetRegions(ctx)
 	re.NoError(err)
 	re.NotEmpty(regions.Regions)
@@ -211,6 +213,7 @@ func (s *schedulerSuite) TestGrantOrEvictLeaderTwice() {
 	defer cancel()
 
 	pdHTTPCli := http.NewClient("pd-real-cluster-test", getPDEndpoints(re))
+	defer pdHTTPCli.Close()
 	regions, err := pdHTTPCli.GetRegions(ctx)
 	re.NoError(err)
 	re.NotEmpty(regions.Regions)
