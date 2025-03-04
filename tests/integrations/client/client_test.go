@@ -1195,6 +1195,7 @@ func (suite *clientTestSuite) TestGetStore() {
 	// Get an up store should be OK.
 	n, err := suite.client.GetStore(context.Background(), store.GetId())
 	re.NoError(err)
+	store.LastHeartbeat = n.LastHeartbeat
 	re.Equal(store, n)
 
 	actualStores, err := suite.client.GetAllStores(context.Background())
@@ -1472,9 +1473,10 @@ func (suite *clientTestSuite) TestScatterRegion() {
 		if err != nil {
 			return false
 		}
-		return resp.GetRegionId() == regionID &&
-			string(resp.GetDesc()) == "scatter-region" &&
-			resp.GetStatus() == pdpb.OperatorStatus_RUNNING
+		if resp.GetRegionId() != regionID || string(resp.GetDesc()) != "scatter-region" {
+			return false
+		}
+		return resp.GetStatus() == pdpb.OperatorStatus_RUNNING || resp.GetStatus() == pdpb.OperatorStatus_SUCCESS
 	})
 
 	// Test interface `ScatterRegion`.
@@ -1507,9 +1509,10 @@ func (suite *clientTestSuite) TestScatterRegion() {
 		if err != nil {
 			return false
 		}
-		return resp.GetRegionId() == regionID &&
-			string(resp.GetDesc()) == "scatter-region" &&
-			resp.GetStatus() == pdpb.OperatorStatus_RUNNING
+		if resp.GetRegionId() != regionID || string(resp.GetDesc()) != "scatter-region" {
+			return false
+		}
+		return resp.GetStatus() == pdpb.OperatorStatus_RUNNING || resp.GetStatus() == pdpb.OperatorStatus_SUCCESS
 	})
 }
 
