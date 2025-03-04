@@ -41,12 +41,12 @@ type GCStateManager struct {
 	lock            syncutil.RWMutex
 	gcMetaStorage   endpoint.GCStateProvider
 	cfg             config.PDServerConfig
-	keyspaceManager keyspace.Manager
+	keyspaceManager *keyspace.Manager
 }
 
 // NewGCStateManager creates a GCStateManager of GC and services.
-func NewGCStateManager(store endpoint.GCStateProvider, cfg config.PDServerConfig) *GCStateManager {
-	return &GCStateManager{gcMetaStorage: store, cfg: cfg}
+func NewGCStateManager(store endpoint.GCStateProvider, cfg config.PDServerConfig, keyspaceManager *keyspace.Manager) *GCStateManager {
+	return &GCStateManager{gcMetaStorage: store, cfg: cfg, keyspaceManager: keyspaceManager}
 }
 
 func (m *GCStateManager) redirectKeyspace(keyspaceID uint32, isUserAPI bool) (uint32, error) {
