@@ -15,6 +15,7 @@
 package gc
 
 import (
+	"context"
 	"math"
 	"sync"
 	"testing"
@@ -22,70 +23,172 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/id"
+	"github.com/tikv/pd/pkg/keyspace"
+	"github.com/tikv/pd/pkg/mcs/utils/constant"
+	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
+	"github.com/tikv/pd/pkg/utils/etcdutil"
+	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/server/config"
 )
 
-func newGCStorage() endpoint.GCSafePointStorage {
-	return endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
+func newGCStateManager(t *testing.T) (provider endpoint.GCStateProvider, gccStateManager *GCStateManager, clean func()) {
+	cfg := config.NewConfig()
+	re := require.New(t)
+
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1)
+	kvBase := kv.NewEtcdKVBase(client)
+
+	// Simulate a member which id.Allocator may need to check.
+	err := kvBase.Save(keypath.LeaderPath(nil), "member1")
+	re.NoError(err)
+
+	s := endpoint.NewStorageEndpoint(kvBase, nil)
+	allocator := id.NewAllocator(&id.AllocatorParams{
+		Client: client,
+		Label:  id.KeyspaceLabel,
+		Member: "member1",
+		Step:   keyspace.AllocStep,
+	})
+	kgm := keyspace.NewKeyspaceGroupManager(context.Background(), s, client)
+	keyspaceManager := keyspace.NewKeyspaceManager(context.Background(), s, mockcluster.NewCluster(context.Background(), config.NewPersistOptions(cfg)), allocator, &config.KeyspaceConfig{}, kgm)
+	gcStateManager := NewGCStateManager(s.GetGCStateProvider(), cfg.PDServerCfg, keyspaceManager)
+
+	err = kgm.Bootstrap(context.Background())
+	re.NoError(err)
+	err = keyspaceManager.Bootstrap()
+	re.NoError(err)
+
+	ks1, err := keyspaceManager.CreateKeyspace(&keyspace.CreateKeyspaceRequest{
+		Name:       "ks1",
+		Config:     map[string]string{"gc_management_type": "global_gc"},
+		CreateTime: time.Now().Unix(),
+		IsPreAlloc: false,
+	})
+	re.NoError(err)
+	re.Equal(uint32(1), ks1.Id)
+
+	ks2, err := keyspaceManager.CreateKeyspace(&keyspace.CreateKeyspaceRequest{
+		Name:       "ks2",
+		Config:     map[string]string{"gc_management_type": "keyspace_level_gc"},
+		CreateTime: time.Now().Unix(),
+		IsPreAlloc: false,
+	})
+	re.NoError(err)
+	re.Equal(uint32(2), ks2.Id)
+
+	ks3, err := keyspaceManager.CreateKeyspace(&keyspace.CreateKeyspaceRequest{
+		Name:       "ks3",
+		Config:     map[string]string{},
+		CreateTime: time.Now().Unix(),
+		IsPreAlloc: false,
+	})
+	re.NoError(err)
+	re.Equal(uint32(3), ks3.Id)
+
+	return s.GetGCStateProvider(), gcStateManager, clean
+}
+
+func TestAdvanceGCSafePointBasic(t *testing.T) {
+
+}
+
+func testGCSafePointUpdateSequentiallyImpl(t *testing.T,
+	loadFunc func(m *GCStateManager) (uint64, error),
+	advanceFunc func(m *GCStateManager, target uint64) (uint64, uint64, error)) {
+
+	_, gcStateManager, clean := newGCStateManager(t)
+	defer clean()
+	re := require.New(t)
+	curGCSafePoint := uint64(0)
+	// Update GC safe point with asc value.
+	for id := 10; id < 20; id++ {
+		safePoint, err := loadFunc(gcStateManager)
+		re.NoError(err)
+		re.Equal(curGCSafePoint, safePoint)
+		previousGCSafePoint := curGCSafePoint
+		curGCSafePoint = uint64(id)
+		oldGCSafePoint, newGCSafePoint, err := advanceFunc(gcStateManager, curGCSafePoint)
+		re.NoError(err)
+		re.Equal(previousGCSafePoint, oldGCSafePoint)
+		re.Equal(curGCSafePoint, newGCSafePoint)
+	}
+
+	gcSafePoint, err := gcStateManager.CompatibleLoadGCSafePoint()
+	re.NoError(err)
+	re.Equal(curGCSafePoint, gcSafePoint)
+	// Update with smaller value should be failed.
+	oldGCSafePoint, newGCSafePoint, err := advanceFunc(gcStateManager, gcSafePoint-5)
+	re.NoError(err)
+	re.Equal(gcSafePoint, oldGCSafePoint)
+	re.Equal(gcSafePoint, newGCSafePoint)
+	curGCSafePoint, err = gcStateManager.CompatibleLoadGCSafePoint()
+	re.NoError(err)
+	// Current GC safe point should not change since the update value was smaller
+	re.Equal(gcSafePoint, curGCSafePoint)
 }
 
 func TestGCSafePointUpdateSequentially(t *testing.T) {
-	gcSafePointManager := NewSafePointManager(newGCStorage(), config.PDServerConfig{})
-	re := require.New(t)
-	curSafePoint := uint64(0)
-	// update gc safePoint with asc value.
-	for id := 10; id < 20; id++ {
-		safePoint, err := gcSafePointManager.LoadGCSafePoint()
-		re.NoError(err)
-		re.Equal(curSafePoint, safePoint)
-		previousSafePoint := curSafePoint
-		curSafePoint = uint64(id)
-		oldSafePoint, err := gcSafePointManager.UpdateGCSafePoint(curSafePoint)
-		re.NoError(err)
-		re.Equal(previousSafePoint, oldSafePoint)
+	legacyLoad := func(m *GCStateManager) (uint64, error) {
+		return m.CompatibleLoadGCSafePoint()
 	}
-
-	safePoint, err := gcSafePointManager.LoadGCSafePoint()
-	re.NoError(err)
-	re.Equal(curSafePoint, safePoint)
-	// update with smaller value should be failed.
-	oldSafePoint, err := gcSafePointManager.UpdateGCSafePoint(safePoint - 5)
-	re.NoError(err)
-	re.Equal(safePoint, oldSafePoint)
-	curSafePoint, err = gcSafePointManager.LoadGCSafePoint()
-	re.NoError(err)
-	// current safePoint should not change since the update value was smaller
-	re.Equal(safePoint, curSafePoint)
+	legacyAdvance := func(m *GCStateManager, target uint64) (uint64, uint64, error) {
+		return m.CompatibleUpdateGCSafePoint(target)
+	}
+	newLoad := func(m *GCStateManager) (uint64, error) {
+		state, err := m.GetGCState(constant.NullKeyspaceID)
+		if err != nil {
+			return 0, err
+		}
+		return state.GCSafePoint, nil
+	}
+	newAdvance := func(m *GCStateManager, target uint64) (uint64, uint64, error) {
+		return m.AdvanceGCSafePoint(constant.NullKeyspaceID, target)
+	}
+	testGCSafePointUpdateSequentiallyImpl(t, legacyLoad, legacyAdvance)
+	testGCSafePointUpdateSequentiallyImpl(t, legacyLoad, newAdvance)
+	testGCSafePointUpdateSequentiallyImpl(t, newLoad, legacyAdvance)
+	testGCSafePointUpdateSequentiallyImpl(t, newLoad, newAdvance)
 }
 
-func TestGCSafePointUpdateCurrently(t *testing.T) {
-	gcSafePointManager := NewSafePointManager(newGCStorage(), config.PDServerConfig{})
+func TestGCSafePointUpdateConcurrently(t *testing.T) {
+	_, manager, clean := newGCStateManager(t)
+	defer clean()
 	maxSafePoint := uint64(1000)
 	wg := sync.WaitGroup{}
 	re := require.New(t)
 
-	// update gc safePoint concurrently
+	// Update GC safe point concurrently
 	for id := range 20 {
 		wg.Add(1)
 		go func(step uint64) {
-			for safePoint := step; safePoint <= maxSafePoint; safePoint += step {
-				_, err := gcSafePointManager.UpdateGCSafePoint(safePoint)
+			for gcSafePoint := step; gcSafePoint <= maxSafePoint; gcSafePoint += step {
+				// Mix using new and legacy API
+				var err error
+				if (gcSafePoint/step)%2 == 0 {
+					_, _, err = manager.AdvanceGCSafePoint(constant.NullKeyspaceID, gcSafePoint)
+				} else {
+					_, _, err = manager.CompatibleUpdateGCSafePoint(gcSafePoint)
+				}
 				re.NoError(err)
 			}
 			wg.Done()
 		}(uint64(id + 1))
 	}
 	wg.Wait()
-	safePoint, err := gcSafePointManager.LoadGCSafePoint()
+	gcSafePoint, err := manager.CompatibleLoadGCSafePoint()
 	re.NoError(err)
-	re.Equal(maxSafePoint, safePoint)
+	re.Equal(maxSafePoint, gcSafePoint)
 }
 
-func TestServiceGCSafePointUpdate(t *testing.T) {
+func TestLegacyServiceGCSafePointUpdate(t *testing.T) {
+	_, manager, clean := newGCStateManager(t)
+	defer clean()
+
 	re := require.New(t)
-	manager := NewSafePointManager(newGCStorage(), config.PDServerConfig{})
 	gcWorkerServiceID := "gc_worker"
 	cdcServiceID := "cdc"
 	brServiceID := "br"
@@ -95,31 +198,31 @@ func TestServiceGCSafePointUpdate(t *testing.T) {
 
 	wg := sync.WaitGroup{}
 	wg.Add(5)
-	// update the safepoint for cdc to 10 should success
+	// Updating the service safe point for cdc to 10 should success
 	go func() {
 		defer wg.Done()
-		min, updated, err := manager.UpdateServiceGCSafePoint(cdcServiceID, cdcServiceSafePoint, 10000, time.Now())
+		min, updated, err := manager.CompatibleUpdateServiceGCSafePoint(cdcServiceID, cdcServiceSafePoint, 10000, time.Now())
+		re.NoError(err)
+		re.True(updated)
+		// The service will init the service safepoint to 0(<10 for cdc) for gc_worker.
+		re.Equal(gcWorkerServiceID, min.ServiceID)
+	}()
+
+	// Updating the service safe point for br to 15 should success
+	go func() {
+		defer wg.Done()
+		min, updated, err := manager.CompatibleUpdateServiceGCSafePoint(brServiceID, brSafePoint, 10000, time.Now())
 		re.NoError(err)
 		re.True(updated)
 		// the service will init the service safepoint to 0(<10 for cdc) for gc_worker.
 		re.Equal(gcWorkerServiceID, min.ServiceID)
 	}()
 
-	// update the safepoint for br to 15 should success
-	go func() {
-		defer wg.Done()
-		min, updated, err := manager.UpdateServiceGCSafePoint(brServiceID, brSafePoint, 10000, time.Now())
-		re.NoError(err)
-		re.True(updated)
-		// the service will init the service safepoint to 0(<10 for cdc) for gc_worker.
-		re.Equal(gcWorkerServiceID, min.ServiceID)
-	}()
-
-	// update safepoint to 8 for gc_worker should be success
+	// Updating the service safe point to 8 for gc_worker should be success
 	go func() {
 		defer wg.Done()
 		// update with valid ttl for gc_worker should be success.
-		min, updated, _ := manager.UpdateServiceGCSafePoint(gcWorkerServiceID, gcWorkerSafePoint, math.MaxInt64, time.Now())
+		min, updated, _ := manager.CompatibleUpdateServiceGCSafePoint(gcWorkerServiceID, gcWorkerSafePoint, math.MaxInt64, time.Now())
 		re.True(updated)
 		// the current min safepoint should be 8 for gc_worker(cdc 10)
 		re.Equal(gcWorkerSafePoint, min.SafePoint)
@@ -128,58 +231,132 @@ func TestServiceGCSafePointUpdate(t *testing.T) {
 
 	go func() {
 		defer wg.Done()
-		// update safepoint of gc_worker's service with ttl not infinity should be failed.
-		_, updated, err := manager.UpdateServiceGCSafePoint(gcWorkerServiceID, 10000, 10, time.Now())
+		// Updating the service safe point of gc_worker's service with ttl not infinity should be failed.
+		_, updated, err := manager.CompatibleUpdateServiceGCSafePoint(gcWorkerServiceID, 10000, 10, time.Now())
 		re.Error(err)
 		re.False(updated)
 	}()
 
-	// update safepoint with negative ttl should be failed.
+	// Updating the service safe point with negative ttl should be failed.
 	go func() {
 		defer wg.Done()
 		brTTL := int64(-100)
-		_, updated, err := manager.UpdateServiceGCSafePoint(brServiceID, uint64(10000), brTTL, time.Now())
+		_, updated, err := manager.CompatibleUpdateServiceGCSafePoint(brServiceID, uint64(10000), brTTL, time.Now())
 		re.NoError(err)
 		re.False(updated)
 	}()
 
 	wg.Wait()
-	// update safepoint to 15(>10 for cdc) for gc_worker
+	// Updating the service safe point to 15(>10 for cdc) for gc_worker
 	gcWorkerSafePoint = uint64(15)
-	min, updated, err := manager.UpdateServiceGCSafePoint(gcWorkerServiceID, gcWorkerSafePoint, math.MaxInt64, time.Now())
+	min, updated, err := manager.CompatibleUpdateServiceGCSafePoint(gcWorkerServiceID, gcWorkerSafePoint, math.MaxInt64, time.Now())
 	re.NoError(err)
 	re.True(updated)
-	re.Equal(cdcServiceID, min.ServiceID)
+	re.Contains(min.ServiceID, "BarrierID: \""+cdcServiceID+"\"")
 	re.Equal(cdcServiceSafePoint, min.SafePoint)
 
-	// the value shouldn't be updated with current safepoint smaller than the min safepoint.
+	// The value shouldn't be updated with current service safe point smaller than the min safe point.
 	brTTL := int64(100)
 	brSafePoint = min.SafePoint - 5
-	min, updated, err = manager.UpdateServiceGCSafePoint(brServiceID, brSafePoint, brTTL, time.Now())
+	min, updated, err = manager.CompatibleUpdateServiceGCSafePoint(brServiceID, brSafePoint, brTTL, time.Now())
 	re.NoError(err)
 	re.False(updated)
 
 	brSafePoint = min.SafePoint + 10
-	_, updated, err = manager.UpdateServiceGCSafePoint(brServiceID, brSafePoint, brTTL, time.Now())
+	_, updated, err = manager.CompatibleUpdateServiceGCSafePoint(brServiceID, brSafePoint, brTTL, time.Now())
 	re.NoError(err)
 	re.True(updated)
 }
 
-func TestBlockUpdateSafePointV1(t *testing.T) {
+func TestLegacyServiceGCSafePointRoundingTTL(t *testing.T) {
+	_, manager, clean := newGCStateManager(t)
+	defer clean()
+
 	re := require.New(t)
-	manager := NewSafePointManager(newGCStorage(), config.PDServerConfig{BlockSafePointV1: true})
-	gcworkerServiceID := "gc_worker"
-	gcWorkerSafePoint := uint64(8)
 
-	min, updated, err := manager.UpdateServiceGCSafePoint(gcworkerServiceID, gcWorkerSafePoint, math.MaxInt64, time.Now())
-	re.Error(err, blockServiceSafepointErrmsg)
-	re.Equal(err.Error(), blockServiceSafepointErrmsg)
-	re.False(updated)
-	re.Nil(min)
+	var maxTTL int64 = 9223372036
 
-	oldSafePoint, err := manager.UpdateGCSafePoint(gcWorkerSafePoint)
+	_, updated, err := manager.CompatibleUpdateServiceGCSafePoint("svc1", 10, maxTTL, time.Now())
+	re.NoError(err)
+	re.True(updated)
+
+	state, err := manager.GetGCState(constant.NullKeyspaceID)
+	re.NoError(err)
+	re.Len(state.GCBarriers, 1)
+	re.Equal("svc1", state.GCBarriers[0].BarrierID)
+	re.NotNil(state.GCBarriers[0].ExpirationTime)
+	// The given `maxTTL` is valid but super large.
+	re.True(state.GCBarriers[0].ExpirationTime.After(time.Now().Add(time.Hour*24*365*10)), state.GCBarriers[0].ExpirationTime)
+
+	_, updated, err = manager.CompatibleUpdateServiceGCSafePoint("svc1", 10, maxTTL+1, time.Now())
+	re.NoError(err)
+	re.True(updated)
+
+	state, err = manager.GetGCState(constant.NullKeyspaceID)
+	re.NoError(err)
+	re.Len(state.GCBarriers, 1)
+	re.Equal("svc1", state.GCBarriers[0].BarrierID)
+	re.Nil(state.GCBarriers[0].ExpirationTime)
+	// Nil in GCBarrier.ExpirationTime represents never expires.
+	re.False(state.GCBarriers[0].IsExpired(time.Now().Add(time.Hour*24*365*10)), state.GCBarriers[0])
+}
+
+func TestAdvanceTxnSafePoint(t *testing.T) {
+	//_, manager, clean := newGCStateManager(t)
+	//defer clean()
+	//
+	//re := require.New(t)
+	//
+	//checkTxnSafePoint := func(keyspaceID uint32, expectedTxnSafePoint uint64) {
+	//	state, err := manager.GetGCState(keyspaceID)
+	//	re.NoError(err)
+	//	re.Equal(expectedTxnSafePoint, state.TxnSafePoint)
+	//}
+
+}
+
+func TestGCBarriers(t *testing.T) {
+
+}
+
+func TestGCStateConstraints(t *testing.T) {
+
+}
+
+func TestServiceGCSafePointCompatibility(t *testing.T) {
+	//_, manager, clean := newGCStateManager(t)
+	//defer clean()
+	//
+	//re := require.New(t)
+
+}
+
+func TestRedirectKeyspace(t *testing.T) {
+	_, manager, clean := newGCStateManager(t)
+	defer clean()
+
+	re := require.New(t)
+
+	keyspaces := []uint32{constant.NullKeyspaceID, 1, 2, 3, 0x1000000}
+	redirectTarget := []uint32{constant.NullKeyspaceID, constant.NullKeyspaceID, 2, constant.NullKeyspaceID, constant.NullKeyspaceID}
+	systemAPIAllowed := []bool{true, false, true, false, true}
+	for i, keyspaceID := range keyspaces {
+		target, err := manager.redirectKeyspace(keyspaceID, true)
+		re.NoError(err, "index: %d", i)
+		re.Equal(redirectTarget[i], target, "index: %d", i)
+
+		target, err = manager.redirectKeyspace(keyspaceID, false)
+		if systemAPIAllowed[i] {
+			re.NoError(err, "index: %d", i)
+			re.Equal(redirectTarget[i], target, "index: %d", i)
+		} else {
+			re.Error(err, "index: %d", i)
+			re.ErrorIs(err, errs.ErrGCOnInvalidKeyspace, "index: %d", i)
+		}
+	}
+
+	// Non-null but not existing keyspace id.
+	_, err := manager.redirectKeyspace(0xffffff, true)
 	re.Error(err)
-	re.Equal(err.Error(), blockGCSafePointErrmsg)
-
-	re.Equal(uint64(0), oldSafePoint)
+	re.ErrorIs(err, errs.ErrKeyspaceNotFound)
 }

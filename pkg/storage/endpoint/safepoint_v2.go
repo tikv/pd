@@ -61,7 +61,7 @@ var _ SafePointV2Storage = (*StorageEndpoint)(nil)
 
 // LoadGCSafePointV2 loads gc safe point for the given keyspace.
 func (se *StorageEndpoint) LoadGCSafePointV2(keyspaceID uint32) (*GCSafePointV2, error) {
-	key := keypath.GCSafePointV2Path(keyspaceID)
+	key := keypath.KeyspaceGCSafePointPath(keyspaceID)
 	value, err := se.Load(key)
 	if err != nil {
 		return nil, err
@@ -82,7 +82,7 @@ func (se *StorageEndpoint) LoadGCSafePointV2(keyspaceID uint32) (*GCSafePointV2,
 
 // SaveGCSafePointV2 saves gc safe point for the given keyspace.
 func (se *StorageEndpoint) SaveGCSafePointV2(gcSafePoint *GCSafePointV2) error {
-	return se.saveJSON(keypath.GCSafePointV2Path(gcSafePoint.KeyspaceID), gcSafePoint)
+	return se.saveJSON(keypath.KeyspaceGCSafePointPath(gcSafePoint.KeyspaceID), gcSafePoint)
 }
 
 // LoadAllGCSafePoints returns gc safe point for all keyspaces
