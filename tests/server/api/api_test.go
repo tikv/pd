@@ -945,9 +945,9 @@ func TestRemovingProgress(t *testing.T) {
 	// store 2: (30-10)/(30+40) ~= 0.285
 	re.Equal("0.29", fmt.Sprintf("%.2f", p.Progress))
 	// store 2: 20/10s = 2
-	re.Equal(2.0, p.CurrentSpeed)
+	re.LessOrEqual(2.0, p.CurrentSpeed)
 	// store 2: (10+40)/2 = 25s
-	re.Equal(25.0, p.LeftSeconds)
+	re.GreaterOrEqual(25.0, p.LeftSeconds)
 
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs"))
 }
@@ -1128,16 +1128,19 @@ func TestPreparingProgress(t *testing.T) {
 		if fmt.Sprintf("%.2f", p.Progress) != "0.13" {
 			return false
 		}
+
 		// store 4: 10/10s = 1
 		// store 5: 40/10s = 4
 		// average speed = (1+4)/2 = 2.5
-		if p.CurrentSpeed != 2.5 {
+		// If checkStore is executed multiple times, the time windows will increase
+		// which is 10s, 20s, 30s ..., the corresponding speed will be 2.5, 1.5, 1 ...
+		if p.CurrentSpeed > 2.5 {
 			return false
 		}
 		// store 4: 179/1 ~= 179
 		// store 5: 149/4 ~= 37.25
 		// average time ~= (179+37.25)/2 = 108.125
-		if p.LeftSeconds != 108.125 {
+		if p.LeftSeconds < 108.125 {
 			return false
 		}
 		return true
@@ -1147,8 +1150,8 @@ func TestPreparingProgress(t *testing.T) {
 	re.NoError(json.Unmarshal(output, &p))
 	re.Equal("preparing", p.Action)
 	re.Equal("0.05", fmt.Sprintf("%.2f", p.Progress))
-	re.Equal(1.0, p.CurrentSpeed)
-	re.Equal(179.0, p.LeftSeconds)
+	re.LessOrEqual(1.0, p.CurrentSpeed)
+	re.GreaterOrEqual(179.0, p.LeftSeconds)
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs"))
 }
 
