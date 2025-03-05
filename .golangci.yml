@@ -30,7 +30,17 @@ linters:
     - intrange
     - gci
     - goheader
+    - exptostd
+    - nilnesserr
+    - recvcheck
+    - usetesting
+    - perfsprint
+    - gocheckcompilerdirectives
 linters-settings:
+  perfsprint:
+    # Enable/disable optimization of string formatting.
+    # Default: true
+    string-format: false
   gocritic:
     # Which checks should be disabled; can't be combined with 'enabled-checks'; default is empty
     disabled-checks:

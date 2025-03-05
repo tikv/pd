@@ -40,7 +40,7 @@ func (m *OpInfluence) Add(other *OpInfluence) {
 }
 
 // GetStoreInfluence get storeInfluence of specific store.
-func (m OpInfluence) GetStoreInfluence(id uint64) *StoreInfluence {
+func (m *OpInfluence) GetStoreInfluence(id uint64) *StoreInfluence {
 	storeInfluence, ok := m.StoresInfluence[id]
 	if !ok {
 		storeInfluence = &StoreInfluence{}

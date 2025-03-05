@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -80,7 +81,7 @@ func NewTestSingleConfig(c *assertutil.Checker) *config.Config {
 
 	cfg.AdvertiseClientUrls = cfg.ClientUrls
 	cfg.AdvertisePeerUrls = cfg.PeerUrls
-	cfg.DataDir, _ = os.MkdirTemp("", "pd_tests")
+	cfg.DataDir = filepath.Join(os.TempDir(), "/pd_tests")
 	cfg.InitialCluster = fmt.Sprintf("pd=%s", cfg.PeerUrls)
 	cfg.DisableStrictReconfigCheck = true
 	cfg.TickInterval = typeutil.NewDuration(100 * time.Millisecond)

@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"testing"
 	"time"
 
@@ -120,7 +121,7 @@ func (suite *adminTestSuite) TestDropRegions() {
 			peers = append(peers, peer)
 		}
 		// initialize region's epoch to (100, 100).
-		region := cluster.GetRegionByKey([]byte(fmt.Sprintf("%d", i))).Clone(
+		region := cluster.GetRegionByKey([]byte(strconv.FormatUint(i, 10))).Clone(
 			core.SetPeers(peers),
 			core.SetRegionConfVer(100),
 			core.SetRegionVersion(100),
@@ -143,7 +144,7 @@ func (suite *adminTestSuite) TestDropRegions() {
 	}
 
 	for i := range n {
-		region := cluster.GetRegionByKey([]byte(fmt.Sprintf("%d", i)))
+		region := cluster.GetRegionByKey([]byte(strconv.FormatUint(i, 10)))
 
 		re.Equal(uint64(100), region.GetRegionEpoch().ConfVer)
 		re.Equal(uint64(100), region.GetRegionEpoch().Version)
@@ -164,7 +165,7 @@ func (suite *adminTestSuite) TestDropRegions() {
 	}
 
 	for i := range n {
-		region := cluster.GetRegionByKey([]byte(fmt.Sprintf("%d", i)))
+		region := cluster.GetRegionByKey([]byte(strconv.FormatUint(i, 10)))
 
 		re.Equal(uint64(50), region.GetRegionEpoch().ConfVer)
 		re.Equal(uint64(50), region.GetRegionEpoch().Version)
@@ -191,7 +192,7 @@ func (suite *adminTestSuite) TestResetTS() {
 	args := make(map[string]any)
 	t1 := makeTS(time.Hour)
 	url := fmt.Sprintf("%s/admin/reset-ts", suite.urlPrefix)
-	args["tso"] = fmt.Sprintf("%d", t1)
+	args["tso"] = strconv.FormatUint(t1, 10)
 	values, err := json.Marshal(args)
 	re.NoError(err)
 	tu.Eventually(re, func() bool {
@@ -214,7 +215,7 @@ func (suite *adminTestSuite) TestResetTS() {
 	})
 	re.NoError(err)
 	t2 := makeTS(32 * time.Hour)
-	args["tso"] = fmt.Sprintf("%d", t2)
+	args["tso"] = strconv.FormatUint(t2, 10)
 	values, err = json.Marshal(args)
 	re.NoError(err)
 	err = tu.CheckPostJSON(testDialClient, url, values,
@@ -223,7 +224,7 @@ func (suite *adminTestSuite) TestResetTS() {
 	re.NoError(err)
 
 	t3 := makeTS(-2 * time.Hour)
-	args["tso"] = fmt.Sprintf("%d", t3)
+	args["tso"] = strconv.FormatUint(t3, 10)
 	values, err = json.Marshal(args)
 	re.NoError(err)
 	err = tu.CheckPostJSON(testDialClient, url, values,
@@ -248,7 +249,7 @@ func (suite *adminTestSuite) TestResetTS() {
 	re.NoError(err)
 
 	t4 := makeTS(32 * time.Hour)
-	args["tso"] = fmt.Sprintf("%d", t4)
+	args["tso"] = strconv.FormatUint(t4, 10)
 	args["force-use-larger"] = "xxx"
 	values, err = json.Marshal(args)
 	re.NoError(err)

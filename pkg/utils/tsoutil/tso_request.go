@@ -39,11 +39,6 @@ type Request interface {
 	postProcess(countSum, physical, firstLogical int64) (int64, error)
 }
 
-// response is an interface wrapping tsopb.TsoResponse and pdpb.TsoResponse
-type response interface {
-	GetTimestamp() *pdpb.Timestamp
-}
-
 // TSOProtoRequest wraps the request and stream channel in the TSO grpc service
 type TSOProtoRequest struct {
 	forwardedHost string
