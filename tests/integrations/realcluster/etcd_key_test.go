@@ -15,6 +15,7 @@
 package realcluster
 
 import (
+	"context"
 	"fmt"
 	"slices"
 	"strings"
@@ -53,7 +54,7 @@ var (
 		"/pd//alloc_id",
 		"/pd//config",
 		// If not call `UpdateGCSafePoint`, this key will not exist.
-		// "/pd//gc/safe_point",
+		"/pd//gc/safe_point",
 		"/pd//gc/safe_point/service/gc_worker",
 		"/pd//keyspaces/id/DEFAULT",
 		"/pd//keyspaces/meta/",
@@ -106,6 +107,9 @@ func (s *etcdKeySuite) TestEtcdKey() {
 		}()
 	}
 	t := s.T()
+	//  call `UpdateGCSafePoint` to create the key `/pd//gc/safe_point`.
+	_, err := s.cli.UpdateGCSafePoint(context.Background(), 1)
+	re.NoError(err)
 	endpoints := getPDEndpoints(re)
 
 	testutil.Eventually(re, func() bool {

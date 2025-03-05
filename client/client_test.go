@@ -48,17 +48,19 @@ func TestClientCtx(t *testing.T) {
 	start := time.Now()
 	ctx, cancel := context.WithTimeout(context.TODO(), time.Second*3)
 	defer cancel()
-	_, err := NewClientWithContext(ctx, caller.TestComponent,
+	cli, err := NewClientWithContext(ctx, caller.TestComponent,
 		[]string{testClientURL}, SecurityOption{})
 	re.Error(err)
+	defer cli.Close()
 	re.Less(time.Since(start), time.Second*5)
 }
 
 func TestClientWithRetry(t *testing.T) {
 	re := require.New(t)
 	start := time.Now()
-	_, err := NewClientWithContext(context.TODO(), caller.TestComponent,
+	cli, err := NewClientWithContext(context.TODO(), caller.TestComponent,
 		[]string{testClientURL}, SecurityOption{}, opt.WithMaxErrorRetry(5))
 	re.Error(err)
+	defer cli.Close()
 	re.Less(time.Since(start), time.Second*10)
 }

@@ -29,6 +29,7 @@ import (
 
 	"github.com/pingcap/log"
 
+	pd "github.com/tikv/pd/client"
 	"github.com/tikv/pd/pkg/utils/logutil"
 )
 
@@ -38,6 +39,7 @@ type clusterSuite struct {
 	suiteName string
 	mode      string
 	cluster   *cluster
+	cli       pd.Client
 }
 
 // SetupSuite will run before the tests in the suite are run.
@@ -55,10 +57,14 @@ func (s *clusterSuite) SetupSuite() {
 
 	s.cluster = newCluster(re, s.tag(), dataDir, s.mode)
 	s.cluster.start()
+	s.cli = newPDClient(re)
 }
 
 // TearDownSuite will run after all the tests in the suite have been run.
 func (s *clusterSuite) TearDownSuite() {
+	if s.cli != nil {
+		s.cli.Close()
+	}
 	// Even if the cluster deployment fails, we still need to destroy the cluster.
 	// If the cluster does not fail to deploy, the cluster will be destroyed in
 	// the cleanup function. And these code will not work.
