@@ -26,6 +26,7 @@ import (
 	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/utils/keypath"
 )
 
@@ -45,7 +46,7 @@ var _ GCSafePointStorage = (*StorageEndpoint)(nil)
 
 // LoadGCSafePoint loads current GC safe point from storage.
 func (se *StorageEndpoint) LoadGCSafePoint() (uint64, error) {
-	value, err := se.Load(keypath.GCSafePointPath())
+	value, err := se.Load(keypath.GCSafePointPath(constant.NullKeyspaceID))
 	if err != nil || value == "" {
 		return 0, err
 	}
@@ -59,7 +60,7 @@ func (se *StorageEndpoint) LoadGCSafePoint() (uint64, error) {
 // SaveGCSafePoint saves new GC safe point to storage.
 func (se *StorageEndpoint) SaveGCSafePoint(safePoint uint64) error {
 	value := strconv.FormatUint(safePoint, 16)
-	return se.Save(keypath.GCSafePointPath(), value)
+	return se.Save(keypath.GCSafePointPath(constant.NullKeyspaceID), value)
 }
 
 // LoadMinServiceGCSafePoint returns the minimum safepoint across all services
