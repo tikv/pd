@@ -563,8 +563,8 @@ func schedulersRegister() {
 			if err != nil {
 				return errs.ErrQueryUnescape.Wrap(err)
 			}
-			role := NewRole(roleString)
-			if role == unknown {
+			role := core.NewRole(roleString)
+			if role == core.Unknown {
 				return errs.ErrQueryUnescape.FastGenByArgs("role")
 			}
 			engine, err := url.QueryUnescape(args[1])

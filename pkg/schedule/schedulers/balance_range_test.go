@@ -20,105 +20,12 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/pingcap/kvproto/pkg/metapb"
-
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/storage"
 )
-
-func TestGetPeers(t *testing.T) {
-	re := require.New(t)
-	learner := &metapb.Peer{StoreId: 1, Id: 1, Role: metapb.PeerRole_Learner}
-	leader := &metapb.Peer{StoreId: 2, Id: 2}
-	follower1 := &metapb.Peer{StoreId: 3, Id: 3}
-	follower2 := &metapb.Peer{StoreId: 4, Id: 4}
-	region := core.NewRegionInfo(&metapb.Region{Id: 100, Peers: []*metapb.Peer{
-		leader, follower1, follower2, learner,
-	}}, leader, core.WithLearners([]*metapb.Peer{learner}))
-	for _, v := range []struct {
-		role  string
-		peers []*metapb.Peer
-	}{
-		{
-			role:  "leader",
-			peers: []*metapb.Peer{leader},
-		},
-		{
-			role:  "follower",
-			peers: []*metapb.Peer{follower1, follower2},
-		},
-		{
-			role:  "learner",
-			peers: []*metapb.Peer{learner},
-		},
-		{
-			role:  "witness",
-			peers: nil,
-		},
-	} {
-		role := NewRole(v.role)
-		re.Equal(v.peers, role.getPeers(region))
-	}
-}
-
-func TestJobStatus(t *testing.T) {
-	s := storage.NewStorageWithMemoryBackend()
-	re := require.New(t)
-	conf := &balanceRangeSchedulerConfig{
-		schedulerConfig: &baseSchedulerConfig{},
-		jobs:            make([]*balanceRangeSchedulerJob, 1),
-	}
-	conf.init(string(types.BalanceRangeScheduler), s, conf)
-	for _, v := range []struct {
-		jobStatus JobStatus
-		begin     bool
-		finish    bool
-	}{
-		{
-			pending,
-			true,
-			false,
-		},
-		{
-			running,
-			false,
-			true,
-		},
-		{
-			finished,
-			false,
-			false,
-		},
-	} {
-		job := &balanceRangeSchedulerJob{
-			Status: v.jobStatus,
-		}
-		conf.jobs[0] = job
-		if v.begin {
-			re.Equal(running, conf.begin(0).Status)
-		} else {
-			re.Nil(conf.begin(0))
-		}
-		job.Status = v.jobStatus
-		if v.finish {
-			re.Equal(finished, conf.finish(0).Status)
-		} else {
-			re.Nil(conf.finish(0))
-		}
-	}
-	idx, job := conf.peek()
-	re.Equal(0, idx)
-	re.Nil(job)
-	conf.jobs[0] = &balanceRangeSchedulerJob{
-		Status: running,
-	}
-	idx, job = conf.peek()
-	re.Equal(0, idx)
-	re.NotNil(job)
-}
 
 func TestBalanceRangePlan(t *testing.T) {
 	re := require.New(t)
@@ -131,7 +38,7 @@ func TestBalanceRangePlan(t *testing.T) {
 	tc.AddLeaderRegionWithRange(1, "100", "110", 1, 2, 3)
 	job := &balanceRangeSchedulerJob{
 		Engine: core.EngineTiKV,
-		Role:   leader,
+		Role:   core.Leader,
 		Ranges: []core.KeyRange{core.NewKeyRange("100", "110")},
 	}
 	plan, err := sc.prepare(tc, *operator.NewOpInfluence(), job)

@@ -75,7 +75,7 @@ type balanceRangeSchedulerConfig struct {
 
 type balanceRangeSchedulerJob struct {
 	JobID   uint64          `json:"job-id"`
-	Role    Role            `json:"role"`
+	Role    core.Role       `json:"role"`
 	Engine  string          `json:"engine"`
 	Timeout time.Duration   `json:"timeout"`
 	Ranges  []core.KeyRange `json:"ranges"`
@@ -262,11 +262,11 @@ func (s *balanceRangeScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) 
 			break
 		}
 		switch job.Role {
-		case leader:
+		case core.Leader:
 			plan.region = filter.SelectOneRegion(cluster.RandLeaderRegions(plan.sourceStoreID(), job.Ranges), nil, baseRegionFilters...)
-		case learner:
+		case core.Learner:
 			plan.region = filter.SelectOneRegion(cluster.RandLearnerRegions(plan.sourceStoreID(), job.Ranges), nil, baseRegionFilters...)
-		case follower:
+		case core.Follower:
 			plan.region = filter.SelectOneRegion(cluster.RandFollowerRegions(plan.sourceStoreID(), job.Ranges), nil, baseRegionFilters...)
 		}
 		if plan.region == nil {
@@ -298,7 +298,7 @@ func (s *balanceRangeScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) 
 // transferPeer selects the best store to create a new peer to replace the old peer.
 func (s *balanceRangeScheduler) transferPeer(plan *balanceRangeSchedulerPlan, dstStores []*core.StoreInfo) *operator.Operator {
 	excludeTargets := plan.region.GetStoreIDs()
-	if plan.job.Role == leader {
+	if plan.job.Role == core.Leader {
 		excludeTargets = make(map[uint64]struct{})
 		excludeTargets[plan.region.GetLeader().GetStoreId()] = struct{}{}
 	}
@@ -324,7 +324,7 @@ func (s *balanceRangeScheduler) transferPeer(plan *balanceRangeSchedulerPlan, ds
 
 		oldPeer := plan.region.GetStorePeer(sourceID)
 		exist := false
-		if plan.job.Role == leader {
+		if plan.job.Role == core.Leader {
 			peers := plan.region.GetPeers()
 			for _, peer := range peers {
 				if peer.GetStoreId() == targetID {
@@ -431,7 +431,7 @@ func (s *balanceRangeScheduler) prepare(cluster sche.SchedulerCluster, opInfluen
 	}
 	totalScore := int64(0)
 	for _, region := range scanRegions {
-		for _, peer := range job.Role.getPeers(region) {
+		for _, peer := range region.GetPeersByRole(job.Role) {
 			scoreMap[peer.GetStoreId()] += 1
 			totalScore += 1
 		}
@@ -439,8 +439,8 @@ func (s *balanceRangeScheduler) prepare(cluster sche.SchedulerCluster, opInfluen
 
 	sort.Slice(sources, func(i, j int) bool {
 		role := job.Role
-		iop := role.getStoreInfluence(opInfluence.GetStoreInfluence(sources[i].GetID()))
-		jop := role.getStoreInfluence(opInfluence.GetStoreInfluence(sources[j].GetID()))
+		iop := opInfluence.GetStoreInfluence(sources[i].GetID()).GetStoreInfluenceByRole(role)
+		jop := opInfluence.GetStoreInfluence(sources[j].GetID()).GetStoreInfluenceByRole(role)
 		iScore := scoreMap[sources[i].GetID()]
 		jScore := scoreMap[sources[j].GetID()]
 		return iScore+iop > jScore+jop
@@ -449,9 +449,9 @@ func (s *balanceRangeScheduler) prepare(cluster sche.SchedulerCluster, opInfluen
 	averageScore := int64(0)
 	averageScore = totalScore / int64(len(sources))
 
-	tolerate := int64(float64(len(scanRegions)) * adjustRatio)
-	if tolerate < 1 {
-		tolerate = 1
+	tolerantSizeRatio := int64(float64(len(scanRegions)) * adjustRatio)
+	if tolerantSizeRatio < 1 {
+		tolerantSizeRatio = 1
 	}
 	return &balanceRangeSchedulerPlan{
 		SchedulerCluster: cluster,
@@ -463,7 +463,7 @@ func (s *balanceRangeScheduler) prepare(cluster sche.SchedulerCluster, opInfluen
 		averageScore:     averageScore,
 		job:              job,
 		opInfluence:      opInfluence,
-		tolerate:         tolerate,
+		tolerate:         tolerantSizeRatio,
 	}, nil
 }
 
@@ -481,7 +481,7 @@ func (p *balanceRangeSchedulerPlan) score(storeID uint64) int64 {
 
 func (p *balanceRangeSchedulerPlan) shouldBalance(scheduler string) bool {
 	sourceInfluence := p.opInfluence.GetStoreInfluence(p.sourceStoreID())
-	sourceInf := p.job.Role.getStoreInfluence(sourceInfluence)
+	sourceInf := sourceInfluence.GetStoreInfluenceByRole(p.job.Role)
 	// Sometimes, there are many remove-peer operators in the source store, we don't want to pick this store as source.
 	if sourceInf < 0 {
 		sourceInf = -sourceInf
@@ -491,7 +491,7 @@ func (p *balanceRangeSchedulerPlan) shouldBalance(scheduler string) bool {
 	sourceScore := p.sourceScore - sourceInf - p.tolerate
 
 	targetInfluence := p.opInfluence.GetStoreInfluence(p.targetStoreID())
-	targetInf := p.job.Role.getStoreInfluence(targetInfluence)
+	targetInf := targetInfluence.GetStoreInfluenceByRole(p.job.Role)
 	// Sometimes, there are many add-peer operators in the target store, we don't want to pick this store as target.
 	if targetInf < 0 {
 		targetInf = -targetInf
@@ -510,34 +510,11 @@ func (p *balanceRangeSchedulerPlan) shouldBalance(scheduler string) bool {
 			zap.Int64("origin-target-score", p.targetScore),
 			zap.Int64("influence-source-score", sourceScore),
 			zap.Int64("influence-target-score", targetScore),
-			zap.Int64("average-region-size", p.averageScore),
+			zap.Int64("average-region-score", p.averageScore),
 			zap.Int64("tolerate", p.tolerate),
 		)
 	}
 	return shouldBalance
-}
-
-// Role is the role of the region.
-type Role int
-
-const (
-	leader Role = iota
-	follower
-	learner
-	unknown
-)
-
-func (r Role) String() string {
-	switch r {
-	case leader:
-		return "leader"
-	case follower:
-		return "voter"
-	case learner:
-		return "learner"
-	default:
-		return "unknown"
-	}
 }
 
 // JobStatus is the status of the job.
@@ -564,55 +541,4 @@ func (s JobStatus) String() string {
 // MarshalJSON marshals to json.
 func (s JobStatus) MarshalJSON() ([]byte, error) {
 	return []byte(`"` + s.String() + `"`), nil
-}
-
-// NewRole creates a new role.
-func NewRole(role string) Role {
-	switch role {
-	case "leader":
-		return leader
-	case "follower":
-		return follower
-	case "learner":
-		return learner
-	default:
-		return unknown
-	}
-}
-
-func (r Role) getPeers(region *core.RegionInfo) []*metapb.Peer {
-	switch r {
-	case leader:
-		return []*metapb.Peer{region.GetLeader()}
-	case follower:
-		followers := region.GetFollowers()
-		ret := make([]*metapb.Peer, 0, len(followers))
-		for _, peer := range followers {
-			ret = append(ret, peer)
-		}
-		return ret
-	case learner:
-		learners := region.GetLearners()
-		return learners
-	default:
-		return nil
-	}
-}
-
-func (r Role) getStoreInfluence(influence *operator.StoreInfluence) int64 {
-	switch r {
-	case leader:
-		return influence.LeaderCount
-	case follower:
-		return influence.RegionCount
-	case learner:
-		return influence.RegionCount
-	default:
-		return 0
-	}
-}
-
-// MarshalJSON marshals to json.
-func (r Role) MarshalJSON() ([]byte, error) {
-	return []byte(`"` + r.String() + `"`), nil
 }
