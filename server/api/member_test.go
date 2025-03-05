@@ -18,7 +18,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
-	"math/rand"
+	"math/rand/v2"
 	"net/http"
 	"sort"
 	"strings"
@@ -95,7 +95,7 @@ func (suite *memberTestSuite) TestMemberList() {
 func (suite *memberTestSuite) TestMemberLeader() {
 	re := suite.Require()
 	leader := suite.servers[0].GetLeader()
-	addr := suite.cfgs[rand.Intn(len(suite.cfgs))].ClientUrls + apiPrefix + "/api/v1/leader"
+	addr := suite.cfgs[rand.IntN(len(suite.cfgs))].ClientUrls + apiPrefix + "/api/v1/leader"
 	resp, err := testDialClient.Get(addr)
 	re.NoError(err)
 	defer resp.Body.Close()
@@ -111,7 +111,7 @@ func (suite *memberTestSuite) TestMemberLeader() {
 func (suite *memberTestSuite) TestChangeLeaderPeerUrls() {
 	re := suite.Require()
 	leader := suite.servers[0].GetLeader()
-	addr := suite.cfgs[rand.Intn(len(suite.cfgs))].ClientUrls + apiPrefix + "/api/v1/leader"
+	addr := suite.cfgs[rand.IntN(len(suite.cfgs))].ClientUrls + apiPrefix + "/api/v1/leader"
 	resp, err := testDialClient.Get(addr)
 	re.NoError(err)
 	defer resp.Body.Close()
@@ -124,7 +124,7 @@ func (suite *memberTestSuite) TestChangeLeaderPeerUrls() {
 
 	newPeerUrls := []string{"http://127.0.0.1:1111"}
 	suite.changeLeaderPeerUrls(leader, newPeerUrls)
-	addr = suite.cfgs[rand.Intn(len(suite.cfgs))].ClientUrls + apiPrefix + "/api/v1/members"
+	addr = suite.cfgs[rand.IntN(len(suite.cfgs))].ClientUrls + apiPrefix + "/api/v1/members"
 	resp, err = testDialClient.Get(addr)
 	re.NoError(err)
 	buf, err = io.ReadAll(resp.Body)

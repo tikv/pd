@@ -235,6 +235,8 @@ linters-settings:
             desc: "Use 'sync/atomic' instead of 'go.uber.org/atomic'"
           - pkg: github.com/pkg/errors
             desc: "Use 'github.com/pingcap/errors' instead of 'github.com/pkg/errors'"
+          - pkg: "math/rand$"
+            desc: "Use 'math/rand/v2' instead of 'math/rand'"
   gci:
     sections:
       - standard

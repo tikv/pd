@@ -16,7 +16,7 @@ package operator
 
 import (
 	"fmt"
-	"math/rand"
+	"math/rand/v2"
 
 	"go.uber.org/zap"
 
@@ -246,7 +246,7 @@ func CreateScatterRegionOperator(desc string, ci sche.SharedCluster, origin *cor
 	}
 	var leader uint64
 	if len(ids) > 0 {
-		leader = ids[rand.Intn(len(ids))]
+		leader = ids[rand.IntN(len(ids))]
 	}
 	if targetLeader != 0 {
 		leader = targetLeader

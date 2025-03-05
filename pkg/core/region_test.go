@@ -18,7 +18,7 @@ import (
 	"crypto/rand"
 	"fmt"
 	"math"
-	mrand "math/rand"
+	mrand "math/rand/v2"
 	"strconv"
 	"testing"
 	"time"
@@ -816,7 +816,7 @@ func BenchmarkRandomSetRegionWithGetRegionSizeByRangeParallel(b *testing.B) {
 	b.RunParallel(
 		func(pb *testing.PB) {
 			for pb.Next() {
-				item := items[mrand.Intn(len(items))]
+				item := items[mrand.IntN(len(items))]
 				n := item.Clone(SetApproximateSize(20))
 				origin, overlaps, rangeChanged := regions.SetRegion(n)
 				regions.UpdateSubTree(item, origin, overlaps, rangeChanged)
@@ -837,11 +837,11 @@ func newRegionInfoIDRandom(idAllocator id.Allocator) *RegionInfo {
 		leader *metapb.Peer
 	)
 	// Randomly select a peer as the leader.
-	leaderIdx := mrand.Intn(peerNum)
+	leaderIdx := mrand.IntN(peerNum)
 	for i := range peerNum {
 		id, _, _ := idAllocator.Alloc(1)
 		// Randomly distribute the peers to different stores.
-		p := &metapb.Peer{Id: id, StoreId: uint64(mrand.Intn(storeNum) + 1)}
+		p := &metapb.Peer{Id: id, StoreId: uint64(mrand.IntN(storeNum) + 1)}
 		if i == leaderIdx {
 			leader = p
 		}
