@@ -33,7 +33,6 @@ linters:
     - exptostd
     - nilnesserr
     - recvcheck
-    - usetesting
     - perfsprint
     - gocheckcompilerdirectives
 linters-settings:

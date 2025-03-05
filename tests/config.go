@@ -17,7 +17,6 @@ package tests
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/spf13/pflag"
@@ -38,9 +37,10 @@ type serverConfig struct {
 }
 
 func newServerConfig(name string, cc *clusterConfig, join bool) *serverConfig {
+	tempDir, _ := os.MkdirTemp("", "pd_tests")
 	return &serverConfig{
 		Name:          name,
-		DataDir:       filepath.Join(os.TempDir(), "/pd_tests"),
+		DataDir:       tempDir,
 		ClientURLs:    tempurl.Alloc(),
 		PeerURLs:      tempurl.Alloc(),
 		ClusterConfig: cc,
