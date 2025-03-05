@@ -16,7 +16,6 @@ require (
 	github.com/stretchr/testify v1.9.0
 	go.uber.org/goleak v1.1.11
 	go.uber.org/zap v1.24.0
-	golang.org/x/exp v0.0.0-20230711005742-c3f37128e5a4
 	google.golang.org/grpc v1.62.1
 	google.golang.org/grpc/examples v0.0.0-20231221225426-4f03f3ff32c9
 )

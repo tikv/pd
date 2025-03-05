@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/json"
 	"math"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -26,7 +27,6 @@ import (
 	"github.com/gogo/protobuf/proto"
 	"github.com/prometheus/client_golang/prometheus"
 	"go.uber.org/zap"
-	"golang.org/x/exp/slices"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"

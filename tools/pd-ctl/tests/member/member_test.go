@@ -17,7 +17,7 @@ package member_test
 import (
 	"context"
 	"encoding/json"
-	"fmt"
+	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -103,7 +103,7 @@ func TestMember(t *testing.T) {
 	})
 
 	// member delete id <member_id>
-	args = []string{"-u", pdAddr, "member", "delete", "id", fmt.Sprint(id)}
+	args = []string{"-u", pdAddr, "member", "delete", "id", strconv.FormatUint(id, 10)}
 	_, err = tests.ExecuteCommand(cmd, args...)
 	re.NoError(err)
 	testutil.Eventually(re, func() bool {

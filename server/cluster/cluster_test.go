@@ -22,6 +22,7 @@ import (
 	"math/rand"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -334,7 +335,7 @@ func TestSetOfflineWithReplica(t *testing.T) {
 }
 
 func addEvictLeaderScheduler(cluster *RaftCluster, storeID uint64) (evictScheduler schedulers.Scheduler, err error) {
-	args := []string{fmt.Sprintf("%d", storeID)}
+	args := []string{strconv.FormatUint(storeID, 10)}
 	evictScheduler, err = schedulers.CreateScheduler(types.EvictLeaderScheduler, cluster.GetOperatorController(), cluster.storage, schedulers.ConfigSliceDecoder(types.EvictLeaderScheduler, args), cluster.GetCoordinator().GetSchedulersController().RemoveScheduler)
 	if err != nil {
 		return
@@ -1136,9 +1137,9 @@ func TestRegionLabelIsolationLevel(t *testing.T) {
 	for i := uint64(1); i <= 4; i++ {
 		var labels []*metapb.StoreLabel
 		if i == 4 {
-			labels = []*metapb.StoreLabel{{Key: "zone", Value: fmt.Sprintf("%d", 3)}, {Key: "engine", Value: "tiflash"}}
+			labels = []*metapb.StoreLabel{{Key: "zone", Value: strconv.Itoa(3)}, {Key: "engine", Value: "tiflash"}}
 		} else {
-			labels = []*metapb.StoreLabel{{Key: "zone", Value: fmt.Sprintf("%d", i)}}
+			labels = []*metapb.StoreLabel{{Key: "zone", Value: strconv.FormatUint(i, 10)}}
 		}
 		store := &metapb.Store{
 			Id:      i,
