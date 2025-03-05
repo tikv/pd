@@ -41,6 +41,7 @@ func (s *rebootPDSuite) TestReloadLabel() {
 	ctx := context.Background()
 
 	pdHTTPCli := http.NewClient("pd-real-cluster-test", getPDEndpoints(re))
+	defer pdHTTPCli.Close()
 	resp, err := pdHTTPCli.GetStores(ctx)
 	re.NoError(err)
 	re.NotEmpty(resp.Stores)

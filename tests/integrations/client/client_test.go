@@ -1910,6 +1910,7 @@ func TestGetRegionWithBackoff(t *testing.T) {
 	// Initialize the client with context and backoff
 	client, err := pd.NewClientWithContext(ctx, caller.TestComponent, endpoints, pd.SecurityOption{})
 	re.NoError(err)
+	defer client.Close()
 
 	// Record the start time
 	start := time.Now()

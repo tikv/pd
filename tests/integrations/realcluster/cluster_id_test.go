@@ -53,10 +53,11 @@ func (s *clusterIDSuite) TestClientClusterID() {
 
 	pdEndpoints := getPDEndpoints(re)
 	// Try to create a client with the mixed endpoints.
-	_, err := pd.NewClientWithContext(
+	cli, err := pd.NewClientWithContext(
 		ctx, caller.TestComponent, pdEndpoints,
 		pd.SecurityOption{}, opt.WithMaxErrorRetry(1),
 	)
 	re.Error(err)
+	defer cli.Close()
 	re.Contains(err.Error(), "unmatched cluster id")
 }

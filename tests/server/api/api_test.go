@@ -945,9 +945,9 @@ func TestRemovingProgress(t *testing.T) {
 	// store 2: (30-10)/(30+40) ~= 0.285
 	re.Equal("0.29", fmt.Sprintf("%.2f", p.Progress))
 	// store 2: 20/10s = 2
-	re.LessOrEqual(2.0, p.CurrentSpeed)
+	re.LessOrEqual(p.CurrentSpeed, 2.0)
 	// store 2: (10+40)/2 = 25s
-	re.GreaterOrEqual(25.0, p.LeftSeconds)
+	re.GreaterOrEqual(p.LeftSeconds, 25.0)
 
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs"))
 }
@@ -1150,8 +1150,8 @@ func TestPreparingProgress(t *testing.T) {
 	re.NoError(json.Unmarshal(output, &p))
 	re.Equal("preparing", p.Action)
 	re.Equal("0.05", fmt.Sprintf("%.2f", p.Progress))
-	re.LessOrEqual(1.0, p.CurrentSpeed)
-	re.GreaterOrEqual(179.0, p.LeftSeconds)
+	re.LessOrEqual(p.CurrentSpeed, 1.0)
+	re.GreaterOrEqual(p.LeftSeconds, 179.0)
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs"))
 }
 
