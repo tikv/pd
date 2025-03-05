@@ -16,6 +16,8 @@ package keypath
 
 import (
 	"fmt"
+
+	"github.com/tikv/pd/pkg/mcs/utils/constant"
 )
 
 // GCStateRevisionPath returns the key path for storing the revision of GC state data.
@@ -23,68 +25,53 @@ func GCStateRevisionPath() string {
 	return fmt.Sprintf(gcStateRevisionPathFormat, ClusterID())
 }
 
-// GCSafePointPath returns the key path of the global (NullKeyspace) GC safe point.
-func GCSafePointPath() string {
-	return fmt.Sprintf(unifiedGCSafePointPathFormat, ClusterID())
-}
-
-// KeyspaceGCSafePointPath returns the keyspace-level GC safe point.
-func KeyspaceGCSafePointPath(keyspaceID uint32) string {
+// GCSafePointPath returns the key path of the GC safe point.
+// Please note that the value format differs between the NullKeyspace and other keyspaces.
+func GCSafePointPath(keyspaceID uint32) string {
+	if keyspaceID == constant.NullKeyspaceID {
+		return fmt.Sprintf(unifiedGCSafePointPathFormat, ClusterID())
+	}
 	return fmt.Sprintf(keyspaceLevelGCSafePointPathFormat, ClusterID(), keyspaceID)
 }
 
-// TxnSafePointPath returns the key path of the global (NullKeyspace) txn safe point.
-func TxnSafePointPath() string {
-	return unifiedTxnSafePointPath
-}
-
-// KeyspaceTxnSafePointPath returns the keyspace-level txn safe point.
-func KeyspaceTxnSafePointPath(keyspaceID uint32) string {
+// TxnSafePointPath returns the key path of the  txn safe point.
+func TxnSafePointPath(keyspaceID uint32) string {
+	if keyspaceID == constant.NullKeyspaceID {
+		return unifiedTxnSafePointPath
+	}
 	return fmt.Sprintf(keyspaceLevelTxnSafePointPath, keyspaceID)
 }
 
-// GCBarrierPrefix returns the prefix of the paths of GC barriers of the global GC (NullKeyspace).
-func GCBarrierPrefix() string {
-	return GCBarrierPath("")
+// GCBarrierPrefix returns the prefix of the paths of GC barriers.
+func GCBarrierPrefix(keyspaceID uint32) string {
+	return GCBarrierPath(keyspaceID, "")
 }
 
-// GCBarrierPath returns the key path of the GC barriers of the global GC (NullKeyspace).
-func GCBarrierPath(barrierID string) string {
-	return fmt.Sprintf(unifiedGCBarrierPathFormat, ClusterID(), barrierID)
-}
-
-// KeyspaceGCBarrierPrefix returns the prefix of the paths of the GC barriers of keyspace-level GC for the given
-// keyspaceID.
-func KeyspaceGCBarrierPrefix(keyspaceID uint32) string {
-	return KeyspaceGCBarrierPath(keyspaceID, "")
-}
-
-// KeyspaceGCBarrierPath returns the key path of the GC barriers of keyspace-level GC for the given keyspaceID.
-func KeyspaceGCBarrierPath(keyspaceID uint32, barrierID string) string {
+// GCBarrierPath returns the key path of the GC barrier with given barrierID.
+func GCBarrierPath(keyspaceID uint32, barrierID string) string {
+	if keyspaceID == constant.NullKeyspaceID {
+		return fmt.Sprintf(unifiedGCBarrierPathFormat, ClusterID(), barrierID)
+	}
 	return fmt.Sprintf(keyspaceLevelGCBarrierPathFormat, ClusterID(), keyspaceID, barrierID)
 }
 
 // ServiceGCSafePointPrefix returns the prefix of the paths of service safe points. It internally shares the same data
-// with GC barriers.
+// with GC barriers and only works for NullKeyspace.
 func ServiceGCSafePointPrefix() string {
 	// The service safe points (which is deprecated and replaced by GC barriers) shares the same data with GC barriers.
-	return GCBarrierPrefix()
+	return GCBarrierPrefix(constant.NullKeyspaceID)
 }
 
 // ServiceGCSafePointPath returns the key path of the service safe point with the given service ID.
 func ServiceGCSafePointPath(serviceID string) string {
-	return GCBarrierPath(serviceID)
+	return GCBarrierPath(constant.NullKeyspaceID, serviceID)
 }
 
-// CompatibleTiDBMinStartTSPrefix returns the prefix of the paths where TiDB reports its min start ts for NullKeyspace
-// (no keyspace is specified).
-func CompatibleTiDBMinStartTSPrefix() string {
-	return unifiedTiDBMinStartTSPrefix
-}
-
-// CompatibleKeyspaceTiDBMinStartTSPrefix returns the prefix of the paths where TiDB reports its min start ts for the
-// given keyspace.
-func CompatibleKeyspaceTiDBMinStartTSPrefix(keyspaceID uint32) string {
+// CompatibleTiDBMinStartTSPrefix returns the prefix of the paths where TiDB reports its min start ts.
+func CompatibleTiDBMinStartTSPrefix(keyspaceID uint32) string {
+	if keyspaceID == constant.NullKeyspaceID {
+		return unifiedTiDBMinStartTSPrefix
+	}
 	return fmt.Sprintf(keyspaceLevelTiDBMinStartTSPrefix, keyspaceID)
 }
 

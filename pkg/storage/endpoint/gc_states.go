@@ -18,7 +18,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
-	"path"
 	"strconv"
 	"time"
 
@@ -244,14 +243,14 @@ type GCStateWriteBatch struct {
 // LoadGCSafePoint loads current GC safe point of the given keyspaceID from storage.
 func (p GCStateProvider) LoadGCSafePoint(keyspaceID uint32) (uint64, error) {
 	if keyspaceID == constant.NullKeyspaceID {
-		return p.loadGlobalGCSafePoint()
+		return p.loadGCSafePointForUnifiedGC()
 	}
-	return p.loadKeyspaceGCSafePoint(keyspaceID)
+	return p.loadGCSafePointForKeyspaceLevelGC(keyspaceID)
 }
 
-// loadGlobalGCSafePoint loads the GC safe point of the global GC.
-func (p GCStateProvider) loadGlobalGCSafePoint() (uint64, error) {
-	value, err := p.storage.Load(keypath.GCSafePointPath())
+// loadGCSafePointForUnifiedGC loads the GC safe point of the global GC.
+func (p GCStateProvider) loadGCSafePointForUnifiedGC() (uint64, error) {
+	value, err := p.storage.Load(keypath.GCSafePointPath(constant.NullKeyspaceID))
 	if err != nil || value == "" {
 		return 0, err
 	}
@@ -271,9 +270,9 @@ type keyspaceGCSafePoint struct {
 	SafePoint  uint64 `json:"safe_point"`
 }
 
-// loadKeyspaceGCSafePoint loads the GC safe point of keyspace-level GC of a specific keyspace from storage.
-func (p GCStateProvider) loadKeyspaceGCSafePoint(keyspaceID uint32) (uint64, error) {
-	key := keypath.KeyspaceGCSafePointPath(keyspaceID)
+// loadGCSafePointForKeyspaceLevelGC loads the GC safe point of keyspace-level GC of a specific keyspace from storage.
+func (p GCStateProvider) loadGCSafePointForKeyspaceLevelGC(keyspaceID uint32) (uint64, error) {
+	key := keypath.GCSafePointPath(keyspaceID)
 	value, err := p.storage.Load(key)
 	if err != nil {
 		return 0, err
@@ -292,11 +291,7 @@ func (p GCStateProvider) loadKeyspaceGCSafePoint(keyspaceID uint32) (uint64, err
 
 // LoadTxnSafePoint loads the current transaction safe point of the given keyspaceID from storage.
 func (p GCStateProvider) LoadTxnSafePoint(keyspaceID uint32) (uint64, error) {
-	key := keypath.TxnSafePointPath()
-	if keyspaceID != constant.NullKeyspaceID {
-		key = keypath.KeyspaceTxnSafePointPath(keyspaceID)
-	}
-
+	key := keypath.TxnSafePointPath(keyspaceID)
 	value, err := p.storage.Load(key)
 	if err != nil || value == "" {
 		return 0, err
@@ -310,11 +305,7 @@ func (p GCStateProvider) LoadTxnSafePoint(keyspaceID uint32) (uint64, error) {
 
 // LoadGCBarrier loads the GCBarrier of the given barrierID from storage.
 func (p GCStateProvider) LoadGCBarrier(keyspaceID uint32, barrierID string) (*GCBarrier, error) {
-	prefix := keypath.GCBarrierPrefix()
-	if keyspaceID != constant.NullKeyspaceID {
-		prefix = keypath.KeyspaceGCBarrierPrefix(keyspaceID)
-	}
-	key := path.Join(prefix, barrierID)
+	key := keypath.GCBarrierPath(keyspaceID, barrierID)
 	// GCBarrier is stored in ServiceSafePoint format for compatibility.
 	serviceSafePoint, err := loadJSON[*ServiceSafePoint](p.storage, key)
 	if err != nil {
@@ -325,10 +316,7 @@ func (p GCStateProvider) LoadGCBarrier(keyspaceID uint32, barrierID string) (*GC
 
 // LoadAllGCBarriers loads all GC barriers of the given keyspace.
 func (p GCStateProvider) LoadAllGCBarriers(keyspaceID uint32) ([]*GCBarrier, error) {
-	prefix := keypath.GCBarrierPrefix()
-	if keyspaceID != constant.NullKeyspaceID {
-		prefix = keypath.KeyspaceGCBarrierPrefix(keyspaceID)
-	}
+	prefix := keypath.GCBarrierPrefix(keyspaceID)
 	// TODO: Limit the count for each call.
 	_, serviceSafePoints, err := loadJSONByPrefix[*ServiceSafePoint](p.storage, prefix, 0)
 	if err != nil {
@@ -346,10 +334,7 @@ func (p GCStateProvider) LoadAllGCBarriers(keyspaceID uint32) ([]*GCBarrier, err
 
 // CompatibleLoadTiDBMinStartTS loads the minStartTS reported to etcd directly by TiDB.
 func (p GCStateProvider) CompatibleLoadTiDBMinStartTS(keyspaceID uint32) (string, uint64, error) {
-	prefix := keypath.CompatibleTiDBMinStartTSPrefix()
-	if keyspaceID != constant.NullKeyspaceID {
-		prefix = keypath.CompatibleKeyspaceTiDBMinStartTSPrefix(keyspaceID)
-	}
+	prefix := keypath.CompatibleTiDBMinStartTSPrefix(keyspaceID)
 	prefixEnd := clientv3.GetPrefixRangeEnd(prefix)
 
 	// TODO: Limit the count for each call.
@@ -447,7 +432,7 @@ func (p GCStateProvider) RunInGCStateTransaction(f func(wb *GCStateWriteBatch) e
 
 // CompatibleLoadAllServiceGCSafePoints returns all services GC safe points with their etcd key.
 func (p GCStateProvider) CompatibleLoadAllServiceGCSafePoints() ([]string, []*ServiceSafePoint, error) {
-	prefix := keypath.GCBarrierPrefix()
+	prefix := keypath.GCBarrierPrefix(constant.NullKeyspaceID)
 	keys, ssps, err := loadJSONByPrefix[*ServiceSafePoint](p.storage, prefix, 0)
 	if err != nil {
 		return nil, nil, err
@@ -476,25 +461,25 @@ func (wb *GCStateWriteBatch) writeJSON(key string, data any) error {
 // SetGCSafePoint sets the GC safe point for the given keyspace.
 func (wb *GCStateWriteBatch) SetGCSafePoint(keyspaceID uint32, gcSafePoint uint64) error {
 	if keyspaceID == constant.NullKeyspaceID {
-		return wb.setGlobalGCSafePoint(gcSafePoint)
+		return wb.setGCSafePointForUnifiedGC(gcSafePoint)
 	}
-	return wb.setKeyspaceGCSafePoint(keyspaceID, gcSafePoint)
+	return wb.setGCSafePointForKeyspaceLevelGC(keyspaceID, gcSafePoint)
 }
 
-// setGlobalGCSafePoint sets the GC safe point for global GC (NullKeyspace).
-func (wb *GCStateWriteBatch) setGlobalGCSafePoint(gcSafePoint uint64) error {
+// setGCSafePointForUnifiedGC sets the GC safe point for global GC (NullKeyspace).
+func (wb *GCStateWriteBatch) setGCSafePointForUnifiedGC(gcSafePoint uint64) error {
 	value := strconv.FormatUint(gcSafePoint, 16)
 	wb.ops = append(wb.ops, kv.RawTxnOp{
-		Key:    keypath.GCSafePointPath(),
+		Key:    keypath.GCSafePointPath(constant.NullKeyspaceID),
 		OpType: kv.RawTxnOpPut,
 		Value:  value,
 	})
 	return nil
 }
 
-// setKeyspaceGCSafePoint sets the GC safe point for keyspace-level GC for the specific keyspace.
-func (wb *GCStateWriteBatch) setKeyspaceGCSafePoint(keyspaceID uint32, gcSafePoint uint64) error {
-	key := keypath.KeyspaceGCSafePointPath(keyspaceID)
+// setGCSafePointForKeyspaceLevelGC sets the GC safe point for keyspace-level GC for the specific keyspace.
+func (wb *GCStateWriteBatch) setGCSafePointForKeyspaceLevelGC(keyspaceID uint32, gcSafePoint uint64) error {
+	key := keypath.GCSafePointPath(keyspaceID)
 	return wb.writeJSON(key, keyspaceGCSafePoint{
 		KeyspaceID: keyspaceID,
 		SafePoint:  gcSafePoint,
@@ -503,10 +488,7 @@ func (wb *GCStateWriteBatch) setKeyspaceGCSafePoint(keyspaceID uint32, gcSafePoi
 
 // SetTxnSafePoint sets the transaction safe point for the given keyspace.
 func (wb *GCStateWriteBatch) SetTxnSafePoint(keyspaceID uint32, txnSafePoint uint64) error {
-	key := keypath.TxnSafePointPath()
-	if keyspaceID != constant.NullKeyspaceID {
-		key = keypath.KeyspaceTxnSafePointPath(keyspaceID)
-	}
+	key := keypath.TxnSafePointPath(keyspaceID)
 	value := strconv.FormatUint(txnSafePoint, 10)
 	wb.ops = append(wb.ops, kv.RawTxnOp{
 		Key:    key,
@@ -518,21 +500,13 @@ func (wb *GCStateWriteBatch) SetTxnSafePoint(keyspaceID uint32, txnSafePoint uin
 
 // SetGCBarrier sets a GCBarrier with the given barrierID for a specific keyspace.
 func (wb *GCStateWriteBatch) SetGCBarrier(keyspaceID uint32, newGCBarrier *GCBarrier) error {
-	prefix := keypath.GCBarrierPrefix()
-	if keyspaceID != constant.NullKeyspaceID {
-		prefix = keypath.KeyspaceGCBarrierPrefix(keyspaceID)
-	}
-	key := path.Join(prefix, newGCBarrier.BarrierID)
+	key := keypath.GCBarrierPath(keyspaceID, newGCBarrier.BarrierID)
 	return wb.writeJSON(key, newGCBarrier.toServiceSafePoint(keyspaceID))
 }
 
 // DeleteGCBarrier deletes the GCBarrier with the given barrierID from a specific keyspace.
 func (wb *GCStateWriteBatch) DeleteGCBarrier(keyspaceID uint32, barrierID string) error {
-	prefix := keypath.GCBarrierPrefix()
-	if keyspaceID != constant.NullKeyspaceID {
-		prefix = keypath.KeyspaceGCBarrierPrefix(keyspaceID)
-	}
-	key := path.Join(prefix, barrierID)
+	key := keypath.GCBarrierPath(keyspaceID, barrierID)
 	wb.ops = append(wb.ops, kv.RawTxnOp{
 		Key:    key,
 		OpType: kv.RawTxnOpDelete,
