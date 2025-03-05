@@ -17,7 +17,7 @@ package simulator
 import (
 	"context"
 	"fmt"
-	"math/rand"
+	"math/rand/v2"
 	"sync"
 	"time"
 
@@ -90,7 +90,7 @@ func NewNode(s *cases.Store, config *sc.SimConfig) (*Node, error) {
 		cancel:            cancel,
 		tasks:             make(map[uint64]*Task),
 		limiter:           ratelimit.NewRateLimiter(float64(speed), int(speed)),
-		tick:              uint64(rand.Intn(storeHeartBeatPeriod)),
+		tick:              uint64(rand.IntN(storeHeartBeatPeriod)),
 		hasExtraUsedSpace: s.HasExtraUsedSpace,
 		snapStats:         make([]*pdpb.SnapshotStat, 0),
 	}, nil

@@ -18,7 +18,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"math/rand"
+	"math/rand/v2"
 	"net/http/httptest"
 	"os"
 	"os/signal"
@@ -186,7 +186,7 @@ func reqWorker(ctx context.Context, pdClients []pd.Client, clientIdx int, durCh 
 		for ; i < maxRetryTime; i++ {
 			var ticker *time.Ticker
 			if *maxTSOSendIntervalMilliseconds > 0 {
-				sleepBeforeGetTS := time.Duration(rand.Intn(*maxTSOSendIntervalMilliseconds)) * time.Millisecond
+				sleepBeforeGetTS := time.Duration(rand.IntN(*maxTSOSendIntervalMilliseconds)) * time.Millisecond
 				if sleepBeforeGetTS > 0 {
 					ticker = time.NewTicker(sleepBeforeGetTS)
 					select {
@@ -272,5 +272,5 @@ func createPDClient(ctx context.Context) (pd.Client, error) {
 }
 
 func shouldInjectFault() bool {
-	return rand.Intn(10000) < int(*faultInjectionRate*10000)
+	return rand.IntN(10000) < int(*faultInjectionRate*10000)
 }
