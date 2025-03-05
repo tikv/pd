@@ -16,9 +16,8 @@ package core
 
 import (
 	"math"
-	"math/rand"
+	"math/rand/v2"
 	"sort"
-	"time"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
@@ -401,8 +400,7 @@ func SetSource(source RegionSource) RegionCreateOption {
 
 // RandomKindReadQuery returns query stat with random query kind, only used for unit test.
 func RandomKindReadQuery(queryRead uint64) *pdpb.QueryStats {
-	r := rand.New(rand.NewSource(time.Now().UnixNano()))
-	switch r.Intn(3) {
+	switch rand.IntN(3) {
 	case 0:
 		return &pdpb.QueryStats{
 			Coprocessor: queryRead,
@@ -422,8 +420,7 @@ func RandomKindReadQuery(queryRead uint64) *pdpb.QueryStats {
 
 // RandomKindWriteQuery returns query stat with random query kind, only used for unit test.
 func RandomKindWriteQuery(queryWrite uint64) *pdpb.QueryStats {
-	r := rand.New(rand.NewSource(time.Now().UnixNano()))
-	switch r.Intn(7) {
+	switch rand.IntN(7) {
 	case 0:
 		return &pdpb.QueryStats{
 			Put: queryWrite,

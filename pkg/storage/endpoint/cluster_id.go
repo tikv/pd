@@ -16,7 +16,7 @@ package endpoint
 
 import (
 	"context"
-	"math/rand"
+	"math/rand/v2"
 	"time"
 
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -86,9 +86,8 @@ func initOrGetClusterID(c *clientv3.Client) (uint64, error) {
 
 	var (
 		// Generate a random cluster ID.
-		r         = rand.New(rand.NewSource(time.Now().UnixNano()))
 		ts        = uint64(time.Now().Unix())
-		clusterID = (ts << 32) + uint64(r.Uint32())
+		clusterID = (ts << 32) + uint64(rand.Uint32())
 		value     = typeutil.Uint64ToBytes(clusterID)
 		key       = keypath.ClusterIDPath
 	)

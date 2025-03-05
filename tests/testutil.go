@@ -20,7 +20,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"math/rand"
+	"math/rand/v2"
 	"net"
 	"net/http"
 	"os"
@@ -87,13 +87,13 @@ func SetRangePort(start, end int) {
 	portRange := []int{start, end}
 	dialContext := func(ctx context.Context, network, addr string) (net.Conn, error) {
 		dialer := &net.Dialer{}
-		randomPort := strconv.Itoa(rand.Intn(portRange[1]-portRange[0]) + portRange[0])
+		randomPort := strconv.Itoa(rand.IntN(portRange[1]-portRange[0]) + portRange[0])
 		testPortMutex.Lock()
 		for range 10 {
 			if _, ok := testPortMap[randomPort]; !ok {
 				break
 			}
-			randomPort = strconv.Itoa(rand.Intn(portRange[1]-portRange[0]) + portRange[0])
+			randomPort = strconv.Itoa(rand.IntN(portRange[1]-portRange[0]) + portRange[0])
 		}
 		testPortMutex.Unlock()
 		localAddr, err := net.ResolveTCPAddr(network, "0.0.0.0:"+randomPort)

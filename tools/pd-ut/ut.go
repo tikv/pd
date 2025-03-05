@@ -22,7 +22,7 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"math/rand"
+	"math/rand/v2"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -892,7 +892,7 @@ func filter(input []string, f func(string) bool) []string {
 
 func shuffle(tasks []task) {
 	for i := 0; i < len(tasks); i++ {
-		pos := rand.Intn(len(tasks))
+		pos := rand.IntN(len(tasks))
 		tasks[i], tasks[pos] = tasks[pos], tasks[i]
 	}
 }

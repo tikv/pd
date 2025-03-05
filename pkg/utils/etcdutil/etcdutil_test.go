@@ -19,7 +19,7 @@ import (
 	"crypto/tls"
 	"fmt"
 	"io"
-	"math/rand"
+	"math/rand/v2"
 	"net"
 	"os"
 	"strings"
@@ -261,7 +261,7 @@ func TestRandomKillEtcd(t *testing.T) {
 	// Randomly kill an etcd server and restart it
 	cfgs := []embed.Config{etcds[0].Config(), etcds[1].Config(), etcds[2].Config()}
 	for range len(cfgs) * 2 {
-		killIndex := rand.Intn(len(etcds))
+		killIndex := rand.IntN(len(etcds))
 		etcds[killIndex].Close()
 		checkEtcdEndpointNum(re, client1, 2)
 		checkEtcdClientHealth(re, client1)

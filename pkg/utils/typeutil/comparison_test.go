@@ -15,7 +15,7 @@
 package typeutil
 
 import (
-	"math/rand"
+	"math/rand/v2"
 	"testing"
 	"time"
 
