@@ -61,18 +61,19 @@ const (
 	// "%08d" adds extra padding to make encoded ID ordered.
 	// Encoded ID can be decoded directly with strconv.ParseUint. Width of the
 	// padded keyspaceID is 8 (decimal representation of uint24max is 16777215).
-	gcStateRevisionPathFormat     = "/pd/%d/gc/gc_state_revision"         // "/pd/{cluster_id}/gc/gc_state_revision"
-	gcSafePointPathFormat         = "/pd/%d/gc/safe_point"                // "/pd/{cluster_id}/gc/safe_point"
-	keyspaceGCSafePointPathFormat = "/pd/%d/keyspaces/gc_safe_point/%08d" // "/pd/{cluster_id}/keyspaces/gc_safe_point/{keyspace_id}"
+	gcStateRevisionPathFormat          = "/pd/%d/gc/gc_state_revision"         // "/pd/{cluster_id}/gc/gc_state_revision"
+	unifiedGCSafePointPathFormat       = "/pd/%d/gc/safe_point"                // "/pd/{cluster_id}/gc/safe_point"
+	keyspaceLevelGCSafePointPathFormat = "/pd/%d/keyspaces/gc_safe_point/%08d" // "/pd/{cluster_id}/keyspaces/gc_safe_point/{keyspace_id}"
 	// Compatible with old data that was directly written to etcd by TiDB.
-	txnSafePointPath             = "/tidb/store/gcworker/saved_safe_point"
-	keyspaceTxnSafePointPath     = "/keyspaces/tidb/%d/tidb/store/gcworker/saved_safe_point" // "/keyspaces/tidb/{keyspace_id}/tidb/store/gcworker/saved_safe_point"
-	gcBarrierPathFormat          = "/pd/%d/gc/safe_point/service/%s"                         // "/pd/{cluster_id}/gc/safe_point/service/{barrier_id}"
-	keyspaceGCBarrierPathFormat  = "/pd/%d/keyspaces/service_safe_point/%08d/%s"             // "/pd/{cluster_id}/keyspaces/service_safe_point/{keyspace_id}/{barrier_id}"
-	tidbMinStartTSPrefix         = "/tidb/server/minstartts/"
-	keyspaceTiDBMinStartTSPrefix = "/keyspaces/tidb/%d/tidb/server/minstartts/" // "/keyspaces/tidb/{keyspace_id}/tidb/server/minstartts"
-	gcSafePointV2PathFormat      = keyspaceGCSafePointPathFormat
-	serviceSafePointV2PathFormat = keyspaceGCBarrierPathFormat
+	unifiedTxnSafePointPath = "/tidb/store/gcworker/saved_safe_point"
+	// Note that keyspace-level keys written directly from TiDB doesn't pad the keyspace ID with zeroes.
+	keyspaceLevelTxnSafePointPath     = "/keyspaces/tidb/%d/tidb/store/gcworker/saved_safe_point" // "/keyspaces/tidb/{keyspace_id}/tidb/store/gcworker/saved_safe_point"
+	unifiedGCBarrierPathFormat        = "/pd/%d/gc/safe_point/service/%s"                         // "/pd/{cluster_id}/gc/safe_point/service/{barrier_id}"
+	keyspaceLevelGCBarrierPathFormat  = "/pd/%d/keyspaces/service_safe_point/%08d/%s"             // "/pd/{cluster_id}/keyspaces/service_safe_point/{keyspace_id}/{barrier_id}"
+	unifiedTiDBMinStartTSPrefix       = "/tidb/server/minstartts/"
+	keyspaceLevelTiDBMinStartTSPrefix = "/keyspaces/tidb/%d/tidb/server/minstartts/" // "/keyspaces/tidb/{keyspace_id}/tidb/server/minstartts"
+	gcSafePointV2PathFormat           = keyspaceLevelGCSafePointPathFormat
+	serviceSafePointV2PathFormat      = keyspaceLevelGCBarrierPathFormat
 
 	clusterPathFormat              = "/pd/%d/raft"                            // "/pd/{cluster_id}/raft"
 	clusterBootstrapTimePathFormat = "/pd/%d/raft/status/raft_bootstrap_time" // "/pd/{cluster_id}/raft/status/raft_bootstrap_time"

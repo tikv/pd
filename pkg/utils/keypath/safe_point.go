@@ -25,22 +25,22 @@ func GCStateRevisionPath() string {
 
 // GCSafePointPath returns the key path of the global (NullKeyspace) GC safe point.
 func GCSafePointPath() string {
-	return fmt.Sprintf(gcSafePointPathFormat, ClusterID())
+	return fmt.Sprintf(unifiedGCSafePointPathFormat, ClusterID())
 }
 
 // KeyspaceGCSafePointPath returns the keyspace-level GC safe point.
 func KeyspaceGCSafePointPath(keyspaceID uint32) string {
-	return fmt.Sprintf(keyspaceGCSafePointPathFormat, ClusterID(), keyspaceID)
+	return fmt.Sprintf(keyspaceLevelGCSafePointPathFormat, ClusterID(), keyspaceID)
 }
 
 // TxnSafePointPath returns the key path of the global (NullKeyspace) txn safe point.
 func TxnSafePointPath() string {
-	return txnSafePointPath
+	return unifiedTxnSafePointPath
 }
 
 // KeyspaceTxnSafePointPath returns the keyspace-level txn safe point.
 func KeyspaceTxnSafePointPath(keyspaceID uint32) string {
-	return fmt.Sprintf(keyspaceTxnSafePointPath, keyspaceID)
+	return fmt.Sprintf(keyspaceLevelTxnSafePointPath, keyspaceID)
 }
 
 // GCBarrierPrefix returns the prefix of the paths of GC barriers of the global GC (NullKeyspace).
@@ -50,7 +50,7 @@ func GCBarrierPrefix() string {
 
 // GCBarrierPath returns the key path of the GC barriers of the global GC (NullKeyspace).
 func GCBarrierPath(barrierID string) string {
-	return fmt.Sprintf(gcBarrierPathFormat, ClusterID(), barrierID)
+	return fmt.Sprintf(unifiedGCBarrierPathFormat, ClusterID(), barrierID)
 }
 
 // KeyspaceGCBarrierPrefix returns the prefix of the paths of the GC barriers of keyspace-level GC for the given
@@ -61,7 +61,7 @@ func KeyspaceGCBarrierPrefix(keyspaceID uint32) string {
 
 // KeyspaceGCBarrierPath returns the key path of the GC barriers of keyspace-level GC for the given keyspaceID.
 func KeyspaceGCBarrierPath(keyspaceID uint32, barrierID string) string {
-	return fmt.Sprintf(keyspaceGCBarrierPathFormat, ClusterID(), keyspaceID, barrierID)
+	return fmt.Sprintf(keyspaceLevelGCBarrierPathFormat, ClusterID(), keyspaceID, barrierID)
 }
 
 // ServiceGCSafePointPrefix returns the prefix of the paths of service safe points. It internally shares the same data
@@ -79,13 +79,13 @@ func ServiceGCSafePointPath(serviceID string) string {
 // CompatibleTiDBMinStartTSPrefix returns the prefix of the paths where TiDB reports its min start ts for NullKeyspace
 // (no keyspace is specified).
 func CompatibleTiDBMinStartTSPrefix() string {
-	return tidbMinStartTSPrefix
+	return unifiedTiDBMinStartTSPrefix
 }
 
 // CompatibleKeyspaceTiDBMinStartTSPrefix returns the prefix of the paths where TiDB reports its min start ts for the
 // given keyspace.
 func CompatibleKeyspaceTiDBMinStartTSPrefix(keyspaceID uint32) string {
-	return fmt.Sprintf(keyspaceTiDBMinStartTSPrefix, keyspaceID)
+	return fmt.Sprintf(keyspaceLevelTiDBMinStartTSPrefix, keyspaceID)
 }
 
 // GCSafePointV2Path is the storage path of gc safe point v2.
