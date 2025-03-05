@@ -62,6 +62,9 @@ func (s *clusterSuite) SetupSuite() {
 
 // TearDownSuite will run after all the tests in the suite have been run.
 func (s *clusterSuite) TearDownSuite() {
+	if s.cli != nil {
+		s.cli.Close()
+	}
 	// Even if the cluster deployment fails, we still need to destroy the cluster.
 	// If the cluster does not fail to deploy, the cluster will be destroyed in
 	// the cleanup function. And these code will not work.
