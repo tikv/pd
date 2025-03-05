@@ -39,6 +39,7 @@ import (
 //
 // Explanations of concepts mentioned in this file (here the term `snapshots` means snapshots of TiKV's MVCC data,
 // represented by a timestamp):
+//
 //   - GC Safe Point: A timestamp, the snapshots before which can be safely discarded by GC. Written by the GCWorker
 //     to control the GC procedure.
 //   - Txn Safe Point / Transaction Safe Point: A timestamp, the snapshots equal to or after which can be safely read.
@@ -50,6 +51,14 @@ import (
 //     is planned to be deprecated in favor of GC barriers. However, in order to keep the backward compatibility of the
 //     persistent data, the data structure of service safe points is still used internally to represent GC barriers.
 //     Service safe points can also be set by any components in the cluster.
+//
+// GC management may differ between different keyspaces. There are two kinds of GC management, each of which has
+// different paths to write its metadata in etcd:
+//
+//   - Keyspace-level: A keyspace manages its GC by itself, and have independent GC states from other keyspaces.
+//   - Unified: Keyspaces not configured to use keyspace-level GC are running unified GC. The NullKeyspace (which is
+//     used when a TiDB node are not configured to use any keyspace) is always running unified GC. For all keyspaces
+//     running unified GC, the GC states are shared and uniformly managed by the NullKeyspace.
 
 // ServiceSafePoint is the service safe point for a specific service.
 // NOTE:
