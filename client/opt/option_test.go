@@ -26,42 +26,101 @@ import (
 func TestDynamicOptionChange(t *testing.T) {
 	re := require.New(t)
 	o := NewOption()
-	// Check the default value setting.
-	re.Equal(defaultMaxTSOBatchWaitInterval, o.GetMaxTSOBatchWaitInterval())
-	re.Equal(defaultEnableTSOFollowerProxy, o.GetEnableTSOFollowerProxy())
-	re.Equal(defaultEnableFollowerHandle, o.GetEnableFollowerHandle())
 
-	// Check the invalid value setting.
-	re.Error(o.SetMaxTSOBatchWaitInterval(time.Second))
-	re.Equal(defaultMaxTSOBatchWaitInterval, o.GetMaxTSOBatchWaitInterval())
-	expectInterval := time.Millisecond
-	o.SetMaxTSOBatchWaitInterval(expectInterval)
-	re.Equal(expectInterval, o.GetMaxTSOBatchWaitInterval())
-	expectInterval = time.Duration(float64(time.Millisecond) * 0.5)
-	o.SetMaxTSOBatchWaitInterval(expectInterval)
-	re.Equal(expectInterval, o.GetMaxTSOBatchWaitInterval())
-	expectInterval = time.Duration(float64(time.Millisecond) * 1.5)
-	o.SetMaxTSOBatchWaitInterval(expectInterval)
-	re.Equal(expectInterval, o.GetMaxTSOBatchWaitInterval())
+	// Test default values.
+	re.Equal(defaultMaxTSOBatchWaitInterval, o.GetMaxTSOBatchWaitInterval(), "default max TSO batch wait interval")
+	re.Equal(defaultEnableTSOFollowerProxy, o.GetEnableTSOFollowerProxy(), "default enable TSO follower proxy")
+	re.Equal(defaultEnableFollowerHandle, o.GetEnableFollowerHandle(), "default enable follower handle")
+	re.Equal(defaultTSOClientRPCConcurrency, o.GetTSOClientRPCConcurrency(), "default TSO client RPC concurrency")
+	re.Equal(defaultEnableRouterClient, o.GetEnableRouterClient(), "default enable router client")
 
-	expectBool := true
+	// Test invalid setting.
+	err := o.SetMaxTSOBatchWaitInterval(time.Second)
+	re.Error(err, "expect error for invalid high interval")
+	// Value remains unchanged.
+	re.Equal(defaultMaxTSOBatchWaitInterval, o.GetMaxTSOBatchWaitInterval(), "max TSO batch wait interval should not change to an invalid value")
+
+	// Define a list of valid intervals.
+	validIntervals := []time.Duration{
+		time.Millisecond,
+		time.Duration(float64(time.Millisecond) * 0.5),
+		time.Duration(float64(time.Millisecond) * 1.5),
+		10 * time.Millisecond,
+		0,
+	}
+	for _, interval := range validIntervals {
+		// Use a subtest for each valid interval.
+		err := o.SetMaxTSOBatchWaitInterval(interval)
+		re.NoError(err, "expected interval %v to be set without error", interval)
+		re.Equal(interval, o.GetMaxTSOBatchWaitInterval(), "max TSO batch wait interval should be updated to %v", interval)
+	}
+
+	clearChannel(o.EnableTSOFollowerProxyCh)
+
+	// Testing that the setting is effective and a notification is sent.
+	var expectBool bool
+	for _, expectBool = range []bool{true, false} {
+		o.SetEnableTSOFollowerProxy(expectBool)
+		testutil.Eventually(re, func() bool {
+			select {
+			case <-o.EnableTSOFollowerProxyCh:
+			default:
+				return false
+			}
+			return o.GetEnableTSOFollowerProxy() == expectBool
+		})
+	}
+
+	// Testing that setting the same value should not trigger a notification.
 	o.SetEnableTSOFollowerProxy(expectBool)
-	// Check the value changing notification.
-	testutil.Eventually(re, func() bool {
-		<-o.EnableTSOFollowerProxyCh
-		return true
-	})
-	re.Equal(expectBool, o.GetEnableTSOFollowerProxy())
-	// Check whether any data will be sent to the channel.
-	// It will panic if the test fails.
-	close(o.EnableTSOFollowerProxyCh)
-	// Setting the same value should not notify the channel.
-	o.SetEnableTSOFollowerProxy(expectBool)
+	ensureNoNotification(t, o.EnableTSOFollowerProxyCh)
 
+	// This option does not use a notification channel.
 	expectBool = true
 	o.SetEnableFollowerHandle(expectBool)
-	re.Equal(expectBool, o.GetEnableFollowerHandle())
+	re.Equal(expectBool, o.GetEnableFollowerHandle(), "EnableFollowerHandle should be set to true")
 	expectBool = false
 	o.SetEnableFollowerHandle(expectBool)
-	re.Equal(expectBool, o.GetEnableFollowerHandle())
+	re.Equal(expectBool, o.GetEnableFollowerHandle(), "EnableFollowerHandle should be set to false")
+
+	expectInt := 10
+	o.SetTSOClientRPCConcurrency(expectInt)
+	re.Equal(expectInt, o.GetTSOClientRPCConcurrency(), "TSOClientRPCConcurrency should update accordingly")
+
+	clearChannel(o.EnableRouterClientCh)
+
+	// Testing that the setting is effective and a notification is sent.
+	for _, expectBool = range []bool{true, false} {
+		o.SetEnableRouterClient(expectBool)
+		testutil.Eventually(re, func() bool {
+			select {
+			case <-o.EnableRouterClientCh:
+			default:
+				return false
+			}
+			return o.GetEnableRouterClient() == expectBool
+		})
+	}
+
+	// Testing that setting the same value should not trigger a notification.
+	o.SetEnableRouterClient(expectBool)
+	ensureNoNotification(t, o.EnableRouterClientCh)
+}
+
+// clearChannel drains any pending events from the channel.
+func clearChannel(ch chan struct{}) {
+	select {
+	case <-ch:
+	default:
+	}
+}
+
+// ensureNoNotification checks that no notification is sent on the channel within a short timeout.
+func ensureNoNotification(t *testing.T, ch chan struct{}) {
+	select {
+	case v := <-ch:
+		t.Fatalf("unexpected notification received: %v", v)
+	case <-time.After(100 * time.Millisecond):
+		// No notification received as expected.
+	}
 }

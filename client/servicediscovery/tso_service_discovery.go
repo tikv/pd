@@ -41,12 +41,10 @@ import (
 )
 
 const (
-	msServiceRootPath = "/ms"
-	tsoServiceName    = "tso"
 	// tsoSvcDiscoveryFormat defines the key prefix for keyspace group primary election.
 	// The entire key is in the format of "/ms/<cluster-id>/tso/<group-id>/primary".
 	// The <group-id> is 5 digits integer with leading zeros.
-	tsoSvcDiscoveryFormat = msServiceRootPath + "/%d/" + tsoServiceName + "/%05d/primary"
+	tsoSvcDiscoveryFormat = "/ms/%d/tso/%05d/primary"
 	// initRetryInterval is the rpc retry interval during the initialization phase.
 	initRetryInterval = time.Second
 	// tsoQueryRetryMaxTimes is the max retry times for querying TSO.

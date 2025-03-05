@@ -504,7 +504,7 @@ func BenchmarkCloneRegionTest(b *testing.B) {
 		core.SetApproximateKeys(20),
 	)
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		_ = createRegionForRuleFit(region.GetStartKey(), region.GetEndKey(), region.GetPeers(), region.GetLeader())
 	}
 }

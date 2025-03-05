@@ -50,6 +50,8 @@ const (
 
 	reservedDefaultGroupName = "default"
 	middlePriority           = 8
+	unlimitedRate            = math.MaxInt32
+	unlimitedBurstLimit      = -1
 )
 
 // Manager is the manager of resource group.
@@ -100,7 +102,7 @@ func NewManager[T ConfigProvider](srv bs.Server) *Manager {
 	srv.AddStartCallback(func() {
 		log.Info("resource group manager starts to initialize", zap.String("name", srv.Name()))
 		m.storage = endpoint.NewStorageEndpoint(
-			kv.NewEtcdKVBase(srv.GetClient(), "resource_group"),
+			kv.NewEtcdKVBase(srv.GetClient()),
 			nil,
 		)
 		m.srv = srv
@@ -168,8 +170,8 @@ func (m *Manager) Init(ctx context.Context) error {
 			RUSettings: &RequestUnitSettings{
 				RU: &GroupTokenBucket{
 					Settings: &rmpb.TokenLimitSettings{
-						FillRate:   math.MaxInt32,
-						BurstLimit: -1,
+						FillRate:   unlimitedRate,
+						BurstLimit: unlimitedBurstLimit,
 					},
 				},
 			},

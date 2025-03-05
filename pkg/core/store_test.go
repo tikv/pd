@@ -109,7 +109,7 @@ func BenchmarkStoreClone(b *testing.B) {
 		Labels:  []*metapb.StoreLabel{{Key: "zone", Value: "z1"}, {Key: "host", Value: "h1"}}}
 	store := NewStoreInfo(meta)
 	b.ResetTimer()
-	for t := 0; t < b.N; t++ {
+	for t := range b.N {
 		store.Clone(SetLeaderCount(t))
 	}
 }

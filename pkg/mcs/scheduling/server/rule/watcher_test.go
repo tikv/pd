@@ -54,7 +54,7 @@ func BenchmarkLoadLargeRules(b *testing.B) {
 
 	b.ResetTimer() // Resets the timer to ignore initialization time in the benchmark
 
-	for n := 0; n < b.N; n++ {
+	for range b.N {
 		runWatcherLoadLabelRule(ctx, re, client)
 	}
 }
@@ -102,7 +102,7 @@ func prepare(t require.TestingT) (context.Context, *clientv3.Client, func()) {
 		}
 		value, err := json.Marshal(rule)
 		re.NoError(err)
-		key := keypath.RegionLabelPathPrefix() + "/" + rule.ID
+		key := keypath.RegionLabelKeyPath(rule.ID)
 		_, err = clientv3.NewKV(client).Put(ctx, key, string(value))
 		re.NoError(err)
 	}

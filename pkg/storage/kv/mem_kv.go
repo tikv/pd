@@ -60,7 +60,7 @@ func (kv *memoryKV) Load(key string) (string, error) {
 }
 
 // LoadRange loads the keys in the range of [key, endKey).
-func (kv *memoryKV) LoadRange(key, endKey string, limit int) ([]string, []string, error) {
+func (kv *memoryKV) LoadRange(key, endKey string, limit int) (keys, values []string, err error) {
 	failpoint.Inject("withRangeLimit", func(val failpoint.Value) {
 		rangeLimit, ok := val.(int)
 		if ok && limit > rangeLimit {
@@ -69,8 +69,8 @@ func (kv *memoryKV) LoadRange(key, endKey string, limit int) ([]string, []string
 	})
 	kv.RLock()
 	defer kv.RUnlock()
-	keys := make([]string, 0, limit)
-	values := make([]string, 0, limit)
+	keys = make([]string, 0, limit)
+	values = make([]string, 0, limit)
 	kv.tree.AscendRange(memoryKVItem{key, ""}, memoryKVItem{endKey, ""}, func(item memoryKVItem) bool {
 		keys = append(keys, item.key)
 		values = append(values, item.value)
@@ -97,6 +97,11 @@ func (kv *memoryKV) Remove(key string) error {
 
 	kv.tree.Delete(memoryKVItem{key, ""})
 	return nil
+}
+
+// CreateRawTxn implements kv.Base interface.
+func (*memoryKV) CreateRawTxn() RawTxn {
+	panic("unimplemented")
 }
 
 // memTxn implements kv.Txn.
