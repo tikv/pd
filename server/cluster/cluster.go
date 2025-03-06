@@ -2171,11 +2171,13 @@ func (c *RaftCluster) PutMetaCluster(meta *metapb.Cluster) error {
 
 // GetRegionStatsByRange returns region statistics from cluster.
 // if useHotFlow is true, the hot region statistics will be returned.
-func (c *RaftCluster) GetRegionStatsByRange(startKey, endKey []byte, useHotFlow bool, opts ...statistics.GetRegionStatsOption) *statistics.RegionStats {
+func (c *RaftCluster) GetRegionStatsByRange(startKey, endKey []byte, useHotFlow bool,
+	opts ...statistics.GetRegionStatsOption) *statistics.RegionStats {
 	if useHotFlow {
 		return statistics.GetRegionStats(c.ScanRegions(startKey, endKey, -1), c, opts...)
 	}
-	return statistics.GetRegionStats(c.ScanRegions(startKey, endKey, -1), nil, opts...)
+	return statistics.GetRegionStats(c.ScanRegions(startKey, endKey, -1),
+		nil, opts...)
 }
 
 // GetRegionStatsCount returns the number of regions in the range.
