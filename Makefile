@@ -80,7 +80,7 @@ BUILD_BIN_PATH := $(ROOT_PATH)/bin
 
 build: pd-server pd-ctl pd-recover
 
-tools: pd-tso-bench pd-heartbeat-bench regions-dump stores-dump pd-api-bench pd-ut
+tools: pd-tso-bench pd-heartbeat-bench pd-region-bench regions-dump stores-dump pd-api-bench pd-ut
 
 PD_SERVER_DEP :=
 ifeq ($(SWAGGER), 1)
@@ -114,6 +114,8 @@ pd-tso-bench:
 	cd tools && CGO_ENABLED=0 go build -o $(BUILD_BIN_PATH)/pd-tso-bench pd-tso-bench/main.go
 pd-api-bench:
 	cd tools && CGO_ENABLED=0 go build -o $(BUILD_BIN_PATH)/pd-api-bench pd-api-bench/main.go
+pd-region-bench:
+	cd tools && CGO_ENABLED=0 go build -o $(BUILD_BIN_PATH)/pd-region-bench pd-region-bench/main.go
 pd-recover:
 	cd tools && GOEXPERIMENT=$(BUILD_GOEXPERIMENT) CGO_ENABLED=$(BUILD_TOOL_CGO_ENABLED) go build -gcflags '$(GCFLAGS)' -ldflags '$(LDFLAGS)' -o $(BUILD_BIN_PATH)/pd-recover pd-recover/main.go
 pd-analysis:
