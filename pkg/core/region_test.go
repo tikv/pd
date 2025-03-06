@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"math"
 	mrand "math/rand"
+	"sort"
 	"strconv"
 	"testing"
 	"time"
@@ -1323,6 +1324,10 @@ func TestGetPeers(t *testing.T) {
 		},
 	} {
 		role := NewRole(v.role)
-		re.Equal(v.peers, region.GetPeersByRole(role))
+		peers := region.GetPeersByRole(role)
+		sort.Slice(peers, func(i, j int) bool {
+			return peers[i].Id <= peers[j].Id
+		})
+		re.Equal(v.peers, peers, role)
 	}
 }
