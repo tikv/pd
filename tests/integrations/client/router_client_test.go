@@ -16,7 +16,7 @@ package client_test
 
 import (
 	"context"
-	"math/rand"
+	"math/rand/v2"
 	"reflect"
 	"sync"
 	"testing"
@@ -283,7 +283,7 @@ func (suite *routerClientSuite) dispatchConcurrentRequests(ctx context.Context, 
 		go func() {
 			defer wg.Done()
 			// Randomly sleep to avoid the concurrent requests to be dispatched at the same time.
-			seed := rand.Intn(100)
+			seed := rand.IntN(100)
 			time.Sleep(time.Duration(seed) * time.Millisecond)
 			switch seed % 3 {
 			case 0:

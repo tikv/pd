@@ -18,7 +18,7 @@ import (
 	"context"
 	"fmt"
 	"math"
-	"math/rand"
+	"math/rand/v2"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -48,8 +48,6 @@ import (
 	"github.com/tikv/pd/tests/integrations/mcs"
 	handlersutil "github.com/tikv/pd/tests/server/apiv2/handlers"
 )
-
-var r = rand.New(rand.NewSource(time.Now().UnixNano()))
 
 type tsoClientTestSuite struct {
 	suite.Suite
@@ -390,7 +388,7 @@ func (suite *tsoClientTestSuite) TestRandomResignLeader() {
 		// After https://github.com/tikv/pd/issues/6376 is fixed, we can use a smaller number here.
 		// currently, the time to discover tso service is usually a little longer than 1s, compared
 		// to the previous time taken < 1s.
-		n := r.Intn(2) + 3
+		n := rand.IntN(2) + 3
 		time.Sleep(time.Duration(n) * time.Second)
 		if !suite.legacy {
 			wg := sync.WaitGroup{}
@@ -432,7 +430,7 @@ func (suite *tsoClientTestSuite) TestRandomShutdown() {
 		// After https://github.com/tikv/pd/issues/6376 is fixed, we can use a smaller number here.
 		// currently, the time to discover tso service is usually a little longer than 1s, compared
 		// to the previous time taken < 1s.
-		n := r.Intn(2) + 3
+		n := rand.IntN(2) + 3
 		time.Sleep(time.Duration(n) * time.Second)
 		if !suite.legacy {
 			suite.tsoCluster.WaitForDefaultPrimaryServing(re).Close()
@@ -561,7 +559,7 @@ func TestMixedTSODeployment(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		for range 2 {
-			n := r.Intn(2) + 1
+			n := rand.IntN(2) + 1
 			time.Sleep(time.Duration(n) * time.Second)
 			leaderServer.ResignLeader()
 			leaderServer = cluster.GetServer(cluster.WaitLeader())
