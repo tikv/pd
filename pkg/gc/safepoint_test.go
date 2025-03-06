@@ -546,6 +546,10 @@ func (s *gcManagerTestSuite) TestGCBarriers() {
 		re.Len(getAllGCBarriers(keyspaceID), 1)
 		re.Equal(expected, getGCBarrier(keyspaceID, "b1"))
 
+		// Empty barrierID is forbidden.
+		_, err = s.manager.SetGCBarrier(keyspaceID, "", 10, time.Hour, now)
+		re.Error(err)
+
 		// Updating the value of the existing GC barrier
 		b, err = s.manager.SetGCBarrier(keyspaceID, "b1", 15, time.Hour, now)
 		re.NoError(err)
@@ -719,7 +723,61 @@ func (s *gcManagerTestSuite) TestGCBarriers() {
 		checkTxnSafePoint(keyspaceID, 60)
 
 		re.Empty(getAllGCBarriers(keyspaceID))
+
+		// Disallows setting GC barrier before txn safe point.
+		_, err = s.manager.SetGCBarrier(keyspaceID, "b6", 50, time.Hour, now)
+		re.Error(err)
+		re.ErrorIs(err, errs.ErrGCBarrierTSBehindTxnSafePoint)
+		re.Empty(getAllGCBarriers(keyspaceID))
+		// BarrierTS exactly equals to txn safe point is allowed.
+		b, err = s.manager.SetGCBarrier(keyspaceID, "b6", 60, time.Hour, now)
+		re.NoError(err)
+		expected = endpoint.NewGCBarrier("b6", 60, ptime(now.Add(time.Hour)))
+		re.Equal(expected, b)
+		re.Len(getAllGCBarriers(keyspaceID), 1)
+		re.Equal(expected, getGCBarrier(keyspaceID, "b6"))
+
+		// Clear.
+		_, err = s.manager.DeleteGCBarrier(keyspaceID, "b6")
+		re.NoError(err)
 	}
+
+	// As a user API, it's allowed to be called in keyspaces without enabling keyspace-level GC, and it actually takes
+	// effect to the NullKeyspace.
+	for _, keyspaceID := range slices.Concat(s.keyspacePresets.unifiedGC, s.keyspacePresets.nullSynonyms) {
+		b, err := s.manager.SetGCBarrier(keyspaceID, "b1", 100, time.Hour, now)
+		re.NoError(err)
+		expected := endpoint.NewGCBarrier("b1", 100, ptime(now.Add(time.Hour)))
+		re.Equal(expected, b)
+		for _, checkingKeyspaceID := range slices.Concat(s.keyspacePresets.unifiedGC, s.keyspacePresets.nullSynonyms) {
+			re.Len(getAllGCBarriers(checkingKeyspaceID), 1)
+			re.Equal(expected, getGCBarrier(checkingKeyspaceID, "b1"))
+		}
+
+		_, err = s.manager.DeleteGCBarrier(keyspaceID, "b1")
+		re.NoError(err)
+		re.Len(getAllGCBarriers(keyspaceID), 0)
+	}
+
+	// Fail when trying to set not-existing keyspace.
+	for _, keyspaceID := range s.keyspacePresets.notExisting {
+		_, err := s.manager.SetGCBarrier(keyspaceID, "b1", 100, time.Hour, now)
+		re.Error(err)
+		re.ErrorIs(err, errs.ErrKeyspaceNotFound)
+	}
+
+	// Isolated between different keyspaces.
+	ks1 := s.keyspacePresets.manageable[0]
+	ks2 := s.keyspacePresets.manageable[1]
+	_, err := s.manager.SetGCBarrier(ks1, "b1", 200, time.Hour, now)
+	re.NoError(err)
+	expected := endpoint.NewGCBarrier("b1", 200, ptime(now.Add(time.Hour)))
+	re.Equal(expected, getGCBarrier(ks1, "b1"))
+	re.Nil(getGCBarrier(ks2, "b1"))
+	res, err := s.manager.AdvanceTxnSafePoint(ks2, 300, now)
+	re.NoError(err)
+	re.Equal(uint64(300), res.NewTxnSafePoint)
+	re.Empty(res.BlockerDescription)
 }
 
 func TestGCStateConstraints(t *testing.T) {
