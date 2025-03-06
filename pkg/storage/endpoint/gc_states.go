@@ -76,11 +76,11 @@ type ServiceSafePoint struct {
 	// rather than KeyspaceID = 0 which is the ID of the default keyspace.
 	// Special marshalling / unmarshalling methods are given for handling this field in a non-default way.
 	//
-	// The purpose is to make the code (for keyspaced and non-keyspaced/global GC) unified while keeping the
-	// data format compatible with the old versions. In old versions, the global GC (or synonymously the GC
+	// The purpose is to make the code (for keyspace-level GC and unified GC) unified while keeping the
+	// data format compatible with the old versions. In old versions, the unified GC (or synonymously the GC
 	// of the NullKeyspace, represented by KeyspaceID=0xffffffff) saves service safe points without the
-	// KeyspaceID field; but for GC API V2 (deprecated), it attaches the KeyspaceID which is possibly zero
-	// (representing the default keyspace).
+	// KeyspaceID field; but for GC API V2 (which is going to be deprecated), it attaches the KeyspaceID which
+	// is possibly zero (representing the default keyspace).
 	//
 	// Avoid creating and using a new ServiceSafePoint outside this package. When you must do so, assign
 	// constant.NullKeyspaceID to the KeyspaceID field as the default, instead of leaving it zero.
@@ -257,7 +257,7 @@ func (p GCStateProvider) LoadGCSafePoint(keyspaceID uint32) (uint64, error) {
 	return p.loadGCSafePointForKeyspaceLevelGC(keyspaceID)
 }
 
-// loadGCSafePointForUnifiedGC loads the GC safe point of the global GC.
+// loadGCSafePointForUnifiedGC loads the GC safe point of the unified GC.
 func (p GCStateProvider) loadGCSafePointForUnifiedGC() (uint64, error) {
 	value, err := p.storage.Load(keypath.GCSafePointPath(constant.NullKeyspaceID))
 	if err != nil || value == "" {
@@ -475,7 +475,7 @@ func (wb *GCStateWriteBatch) SetGCSafePoint(keyspaceID uint32, gcSafePoint uint6
 	return wb.setGCSafePointForKeyspaceLevelGC(keyspaceID, gcSafePoint)
 }
 
-// setGCSafePointForUnifiedGC sets the GC safe point for global GC (NullKeyspace).
+// setGCSafePointForUnifiedGC sets the GC safe point for unified GC (NullKeyspace).
 func (wb *GCStateWriteBatch) setGCSafePointForUnifiedGC(gcSafePoint uint64) error {
 	value := strconv.FormatUint(gcSafePoint, 16)
 	wb.ops = append(wb.ops, kv.RawTxnOp{
