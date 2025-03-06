@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"math"
 	"math/rand"
+	"slices"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -27,7 +28,6 @@ import (
 
 	"github.com/stretchr/testify/require"
 	clientv3 "go.etcd.io/etcd/client/v3"
-	"golang.org/x/exp/slices"
 
 	"github.com/pingcap/errors"
 
@@ -656,8 +656,14 @@ func TestDataPhysicalRepresentation(t *testing.T) {
 			Value: "1",
 		})
 
-		slices.SortFunc(expectedKeys, func(lhs, rhs kv.KeyValuePair) bool {
-			return lhs.Key < rhs.Key
+		slices.SortFunc(expectedKeys, func(lhs, rhs kv.KeyValuePair) int {
+			if lhs.Key < rhs.Key {
+				return -1
+			}
+			if lhs.Key == rhs.Key {
+				return 0
+			}
+			return 1
 		})
 
 		keys, values, err := se.LoadRange("/", clientv3.GetPrefixRangeEnd("/"), 0)
