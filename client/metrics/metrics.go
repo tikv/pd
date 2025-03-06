@@ -51,6 +51,7 @@ func initRegisteredConsumers() {
 	}
 }
 
+// InitAndRegisterMetrics initializes and registers the metrics manually.
 func InitAndRegisterMetrics(constLabels prometheus.Labels) {
 	if atomic.CompareAndSwapInt32(&initialized, 0, 1) {
 		// init metrics with constLabels
@@ -63,15 +64,21 @@ func InitAndRegisterMetrics(constLabels prometheus.Labels) {
 }
 
 var (
-	cmdDuration              *prometheus.HistogramVec
-	cmdFailedDuration        *prometheus.HistogramVec
-	requestDuration          *prometheus.HistogramVec
-	TSOBestBatchSize         prometheus.Histogram
-	TSOBatchSize             prometheus.Histogram
-	TSOBatchSendLatency      prometheus.Histogram
-	RequestForwarded         *prometheus.GaugeVec
+	cmdDuration       *prometheus.HistogramVec
+	cmdFailedDuration *prometheus.HistogramVec
+	requestDuration   *prometheus.HistogramVec
+	// TSOBestBatchSize is the histogram of the best batch size of TSO requests.
+	TSOBestBatchSize prometheus.Histogram
+	// TSOBatchSize is the histogram of the batch size of TSO requests.
+	TSOBatchSize prometheus.Histogram
+	// TSOBatchSendLatency is the histogram of the latency of sending TSO requests.
+	TSOBatchSendLatency prometheus.Histogram
+	// RequestForwarded is the gauge to indicate if the request is forwarded.
+	RequestForwarded *prometheus.GaugeVec
+	// OngoingRequestCountGauge is the gauge to indicate the count of ongoing TSO requests.
 	OngoingRequestCountGauge *prometheus.GaugeVec
-	EstimateTSOLatencyGauge  *prometheus.GaugeVec
+	// EstimateTSOLatencyGauge is the gauge to indicate the estimated latency of TSO requests.
+	EstimateTSOLatencyGauge *prometheus.GaugeVec
 	// CircuitBreakerCounters is a vector for different circuit breaker counters
 	CircuitBreakerCounters *prometheus.CounterVec
 )
@@ -173,6 +180,7 @@ func initMetrics(constLabels prometheus.Labels) {
 		}, []string{"name", "event"})
 }
 
+// CmdDurationXXX and CmdFailedDurationXXX are the durations of the client commands.
 var (
 	CmdDurationWait                     prometheus.Observer
 	CmdDurationTSO                      prometheus.Observer
@@ -219,7 +227,9 @@ var (
 	CmdFailedDurationUpdateServiceSafePointV2 prometheus.Observer
 	CmdFailedDurationGetAllKeyspaces          prometheus.Observer
 
-	RequestDurationTSO       prometheus.Observer
+	// RequestDurationTSO records the durations of the successful TSO requests.
+	RequestDurationTSO prometheus.Observer
+	// RequestFailedDurationTSO records the durations of the failed TSO requests.
 	RequestFailedDurationTSO prometheus.Observer
 )
 
