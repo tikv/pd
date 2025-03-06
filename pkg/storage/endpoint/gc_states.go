@@ -404,7 +404,7 @@ func (p GCStateProvider) RunInGCStateTransaction(f func(wb *GCStateWriteBatch) e
 	if err != nil {
 		return errors.AddStack(err)
 	}
-	nextRevision := fmt.Sprintf("%d", currentRevisionValue+1)
+	nextRevision := strconv.FormatUint(currentRevisionValue+1, 10)
 
 	wb := GCStateWriteBatch{}
 	err = f(&wb)

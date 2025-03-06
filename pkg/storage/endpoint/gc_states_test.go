@@ -372,7 +372,7 @@ func TestGCStateTransactionACID(t *testing.T) {
 	// The non-readonly transactions we have performed are: adder, transferrer, and the initialization of the initial
 	// data at the beginning of the test.
 	revision := loadValue(re, se, keypath.GCStateRevisionPath())
-	re.Equal(fmt.Sprintf("%d", addCount.Load()+transferCount.Load()+1), revision)
+	re.Equal(strconv.FormatInt(addCount.Load()+transferCount.Load()+1, 10), revision)
 }
 
 func TestGCSafePoint(t *testing.T) {
@@ -390,7 +390,7 @@ func TestGCSafePoint(t *testing.T) {
 		for _, gcSafePoint := range testData {
 			// For checking physical data representation.
 			expectedKey := "/pd/0/gc/safe_point"
-			expectedValue := fmt.Sprintf("%x", gcSafePoint)
+			expectedValue := strconv.FormatUint(gcSafePoint, 16)
 			if keyspaceID != constant.NullKeyspaceID {
 				expectedKey = fmt.Sprintf("/pd/0/keyspaces/gc_safe_point/%08d", keyspaceID)
 				expectedValue = fmt.Sprintf(`{"keyspace_id":%d,"safe_point":%d}`, keyspaceID, gcSafePoint)
@@ -536,7 +536,7 @@ func TestTxnSafePoint(t *testing.T) {
 		for _, txnSafePoint := range testData {
 			// For checking physical data representation.
 			expectedKey := "/tidb/store/gcworker/saved_safe_point"
-			expectedValue := fmt.Sprintf("%d", txnSafePoint)
+			expectedValue := strconv.FormatUint(txnSafePoint, 10)
 			if keyspaceID != constant.NullKeyspaceID {
 				expectedKey = fmt.Sprintf("/keyspaces/tidb/%d/tidb/store/gcworker/saved_safe_point", keyspaceID)
 			}
