@@ -52,7 +52,7 @@ func TestPatchResourceGroup(t *testing.T) {
 }
 
 func TestClone(t *testing.T) {
-	for i := 0; i <= 10; i++ {
+	for range 11 {
 		var rg ResourceGroup
 		gofakeit.Struct(&rg)
 		rgClone := rg.Clone(true)

@@ -684,7 +684,7 @@ func (*numa) testCommand(pkg string, fn string) *exec.Cmd {
 		args = append(args, "-test.coverprofile", tmpFile)
 	}
 	if strings.Contains(fn, "Suite") {
-		args = append(args, "-test.cpu", fmt.Sprint(parallel/2))
+		args = append(args, "-test.cpu", strconv.Itoa(parallel/2))
 	} else {
 		args = append(args, "-test.cpu", "1")
 	}

@@ -636,7 +636,7 @@ func checkRegions(re *require.Assertions, regions *RegionsInfo) {
 func BenchmarkUpdateBuckets(b *testing.B) {
 	region := NewTestRegionInfo(1, 1, []byte{}, []byte{})
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for i := range b.N {
 		buckets := &metapb.Buckets{RegionId: 0, Version: uint64(i)}
 		region.UpdateBuckets(buckets, region.GetBuckets())
 	}
@@ -661,13 +661,13 @@ func BenchmarkRandomRegion(b *testing.B) {
 		}
 		b.Run(fmt.Sprintf("random region whole range with size %d", size), func(b *testing.B) {
 			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
+			for range b.N {
 				regions.randLeaderRegion(1, nil)
 			}
 		})
 		b.Run(fmt.Sprintf("random regions whole range with size %d", size), func(b *testing.B) {
 			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
+			for range b.N {
 				regions.RandLeaderRegions(1, nil)
 			}
 		})
@@ -676,13 +676,13 @@ func BenchmarkRandomRegion(b *testing.B) {
 		}
 		b.Run(fmt.Sprintf("random region single range with size %d", size), func(b *testing.B) {
 			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
+			for range b.N {
 				regions.randLeaderRegion(1, ranges)
 			}
 		})
 		b.Run(fmt.Sprintf("random regions single range with size %d", size), func(b *testing.B) {
 			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
+			for range b.N {
 				regions.RandLeaderRegions(1, ranges)
 			}
 		})
@@ -694,13 +694,13 @@ func BenchmarkRandomRegion(b *testing.B) {
 		}
 		b.Run(fmt.Sprintf("random region multiple ranges with size %d", size), func(b *testing.B) {
 			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
+			for range b.N {
 				regions.randLeaderRegion(1, ranges)
 			}
 		})
 		b.Run(fmt.Sprintf("random regions multiple ranges with size %d", size), func(b *testing.B) {
 			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
+			for range b.N {
 				regions.RandLeaderRegions(1, ranges)
 			}
 		})
@@ -723,7 +723,7 @@ func BenchmarkRandomSetRegion(b *testing.B) {
 		items = append(items, region)
 	}
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for i := range b.N {
 		item := items[i%len(items)]
 		item.approximateKeys = int64(200000)
 		item.approximateSize = int64(20)
@@ -782,7 +782,7 @@ func BenchmarkRandomSetRegionWithGetRegionSizeByRange(b *testing.B) {
 			time.Sleep(time.Millisecond)
 		}
 	}()
-	for i := 0; i < b.N; i++ {
+	for i := range b.N {
 		item := items[i%len(items)]
 		item.approximateKeys = int64(200000)
 		origin, overlaps, rangeChanged := regions.SetRegion(item)
@@ -839,7 +839,7 @@ func newRegionInfoIDRandom(idAllocator id.Allocator) *RegionInfo {
 	// Randomly select a peer as the leader.
 	leaderIdx := mrand.Intn(peerNum)
 	for i := range peerNum {
-		id, _ := idAllocator.Alloc()
+		id, _, _ := idAllocator.Alloc(1)
 		// Randomly distribute the peers to different stores.
 		p := &metapb.Peer{Id: id, StoreId: uint64(mrand.Intn(storeNum) + 1)}
 		if i == leaderIdx {
@@ -847,7 +847,7 @@ func newRegionInfoIDRandom(idAllocator id.Allocator) *RegionInfo {
 		}
 		peers = append(peers, p)
 	}
-	regionID, _ := idAllocator.Alloc()
+	regionID, _, _ := idAllocator.Alloc(1)
 	return NewRegionInfo(
 		&metapb.Region{
 			Id:       regionID,
@@ -875,7 +875,7 @@ func BenchmarkAddRegion(b *testing.B) {
 	idAllocator := mockid.NewIDAllocator()
 	items := generateRegionItems(idAllocator, 10000000)
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for i := range b.N {
 		origin, overlaps, rangeChanged := regions.SetRegion(items[i])
 		regions.UpdateSubTree(items[i], origin, overlaps, rangeChanged)
 	}
@@ -889,7 +889,7 @@ func BenchmarkUpdateSubTreeOrderInsensitive(b *testing.B) {
 		// Update the subtrees from an empty `*RegionsInfo`.
 		b.Run(fmt.Sprintf("from empty with size %d", size), func(b *testing.B) {
 			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
+			for range b.N {
 				for idx := range items {
 					regions.UpdateSubTreeOrderInsensitive(items[idx])
 				}
@@ -900,7 +900,7 @@ func BenchmarkUpdateSubTreeOrderInsensitive(b *testing.B) {
 		// which means the regions are completely non-overlapped.
 		b.Run(fmt.Sprintf("from non-overlapped regions with size %d", size), func(b *testing.B) {
 			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
+			for range b.N {
 				for idx := range items {
 					regions.UpdateSubTreeOrderInsensitive(items[idx])
 				}
@@ -912,7 +912,7 @@ func BenchmarkUpdateSubTreeOrderInsensitive(b *testing.B) {
 		b.Run(fmt.Sprintf("from overlapped regions with size %d", size), func(b *testing.B) {
 			items = generateRegionItems(idAllocator, size)
 			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
+			for range b.N {
 				for idx := range items {
 					regions.UpdateSubTreeOrderInsensitive(items[idx])
 				}
@@ -956,7 +956,7 @@ func BenchmarkRegionFromHeartbeat(b *testing.B) {
 	}
 	flowRoundDivisor := 3
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		RegionFromHeartbeat(regionReq, flowRoundDivisor)
 	}
 }
@@ -1290,4 +1290,39 @@ func TestQueryRegions(t *testing.T) {
 	re.Equal(uint64(1), regionsByID[1].GetRegion().GetId())
 	re.Equal(uint64(2), regionsByID[2].GetRegion().GetId())
 	re.Equal(uint64(3), regionsByID[3].GetRegion().GetId())
+}
+
+func TestGetPeers(t *testing.T) {
+	re := require.New(t)
+	learner := &metapb.Peer{StoreId: 1, Id: 1, Role: metapb.PeerRole_Learner}
+	leader := &metapb.Peer{StoreId: 2, Id: 2}
+	follower1 := &metapb.Peer{StoreId: 3, Id: 3}
+	follower2 := &metapb.Peer{StoreId: 4, Id: 4}
+	region := NewRegionInfo(&metapb.Region{Id: 100, Peers: []*metapb.Peer{
+		leader, follower1, follower2, learner,
+	}}, leader, WithLearners([]*metapb.Peer{learner}))
+	for _, v := range []struct {
+		role  string
+		peers []*metapb.Peer
+	}{
+		{
+			role:  "leader",
+			peers: []*metapb.Peer{leader},
+		},
+		{
+			role:  "follower",
+			peers: []*metapb.Peer{follower1, follower2},
+		},
+		{
+			role:  "learner",
+			peers: []*metapb.Peer{learner},
+		},
+		{
+			role:  "witness",
+			peers: nil,
+		},
+	} {
+		role := NewRole(v.role)
+		re.Equal(v.peers, region.GetPeersByRole(role))
+	}
 }

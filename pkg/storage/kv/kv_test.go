@@ -16,7 +16,6 @@ package kv
 
 import (
 	"context"
-	"path"
 	"sort"
 	"strconv"
 	"testing"
@@ -31,9 +30,8 @@ func TestEtcd(t *testing.T) {
 	re := require.New(t)
 	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1)
 	defer clean()
-	rootPath := path.Join("/pd", strconv.FormatUint(100, 10))
 
-	kv := NewEtcdKVBase(client, rootPath)
+	kv := NewEtcdKVBase(client)
 	testReadWrite(re, kv)
 	testRange(re, kv)
 	testSaveMultiple(re, kv, 20)
@@ -96,8 +94,9 @@ func testRange(re *require.Assertions, kv Base) {
 		limit      int
 		expect     []string
 	}{
-		{start: "", end: "z", limit: 100, expect: sortedKeys},
-		{start: "", end: "z", limit: 3, expect: sortedKeys[:3]},
+		{start: "", end: "\x00", limit: 100, expect: sortedKeys},
+		{start: "a", end: "z", limit: 100, expect: sortedKeys},
+		{start: "a", end: "z", limit: 3, expect: sortedKeys[:3]},
 		{start: "testa", end: "z", limit: 3, expect: []string{"testa", "testa/a", "testa/ab"}},
 		{start: "test/", end: clientv3.GetPrefixRangeEnd("test/"), limit: 100, expect: []string{"test/a", "test/ab"}},
 		{start: "test-a/", end: clientv3.GetPrefixRangeEnd("test-a/"), limit: 100, expect: []string{"test-a/a", "test-a/ab"}},
@@ -106,6 +105,10 @@ func testRange(re *require.Assertions, kv Base) {
 	}
 
 	for _, testCase := range testCases {
+		_, isEtcd := kv.(*etcdKVBase)
+		if testCase.end == "\x00" && !isEtcd {
+			continue
+		}
 		ks, vs, err := kv.LoadRange(testCase.start, testCase.end, testCase.limit)
 		re.NoError(err)
 		re.Equal(testCase.expect, ks)

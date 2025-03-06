@@ -10,13 +10,12 @@ require (
 	github.com/opentracing/opentracing-go v1.2.0
 	github.com/pingcap/errors v0.11.5-0.20211224045212-9687c2b0f87c
 	github.com/pingcap/failpoint v0.0.0-20240528011301-b51a646c7c86
-	github.com/pingcap/kvproto v0.0.0-20250117122752-2b87602a94a1
+	github.com/pingcap/kvproto v0.0.0-20250224053625-b6a98c6bf02d
 	github.com/pingcap/log v1.1.1-0.20221110025148-ca232912c9f3
 	github.com/prometheus/client_golang v1.20.5
 	github.com/stretchr/testify v1.9.0
 	go.uber.org/goleak v1.1.11
 	go.uber.org/zap v1.24.0
-	golang.org/x/exp v0.0.0-20230711005742-c3f37128e5a4
 	google.golang.org/grpc v1.62.1
 	google.golang.org/grpc/examples v0.0.0-20231221225426-4f03f3ff32c9
 )

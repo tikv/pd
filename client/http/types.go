@@ -500,7 +500,7 @@ type RuleOp struct {
 	DeleteByIDPrefix bool       `json:"delete_by_id_prefix"` // if action == delete, delete by the prefix of id
 }
 
-func (r RuleOp) String() string {
+func (r *RuleOp) String() string {
 	b, _ := json.Marshal(r)
 	return string(b)
 }

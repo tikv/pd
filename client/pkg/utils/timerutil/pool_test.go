@@ -52,13 +52,13 @@ const timeout = 10 * time.Millisecond
 
 func BenchmarkTimerUtilization(b *testing.B) {
 	b.Run("TimerWithPool", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
+		for range b.N {
 			t := GlobalTimerPool.Get(timeout)
 			GlobalTimerPool.Put(t)
 		}
 	})
 	b.Run("TimerWithoutPool", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
+		for range b.N {
 			t := time.NewTimer(timeout)
 			t.Stop()
 		}

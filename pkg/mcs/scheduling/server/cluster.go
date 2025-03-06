@@ -239,20 +239,20 @@ func (c *Cluster) GetSchedulerConfig() sc.SchedulerConfigProvider { return c.per
 // GetStoreConfig returns the store config.
 func (c *Cluster) GetStoreConfig() sc.StoreConfigProvider { return c.persistConfig }
 
-// AllocID allocates a new ID.
-func (c *Cluster) AllocID() (uint64, error) {
+// AllocID allocates new IDs.
+func (c *Cluster) AllocID(count uint32) (uint64, uint32, error) {
 	client, err := c.getPDLeaderClient()
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
 	ctx, cancel := context.WithTimeout(c.ctx, requestTimeout)
 	defer cancel()
-	resp, err := client.AllocID(ctx, &pdpb.AllocIDRequest{Header: &pdpb.RequestHeader{ClusterId: keypath.ClusterID()}})
+	resp, err := client.AllocID(ctx, &pdpb.AllocIDRequest{Header: &pdpb.RequestHeader{ClusterId: keypath.ClusterID()}, Count: count})
 	if err != nil {
 		c.triggerMembershipCheck()
-		return 0, err
+		return 0, 0, err
 	}
-	return resp.GetId(), nil
+	return resp.GetId(), resp.GetCount(), nil
 }
 
 func (c *Cluster) getPDLeaderClient() (pdpb.PDClient, error) {

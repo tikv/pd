@@ -932,7 +932,7 @@ var (
 	allSpecialEngines = []string{core.EngineTiFlash}
 	// NotSpecialEngines is used to filter the special engine.
 	NotSpecialEngines = placement.LabelConstraint{Key: core.EngineKey, Op: placement.NotIn, Values: allSpecialEngines}
-	// SpecialEngines is used to filter the normal engine.
+	// SpecialEngines is used to filter the TiFlash engine.
 	SpecialEngines = placement.LabelConstraint{Key: core.EngineKey, Op: placement.In, Values: allSpecialEngines}
 )
 

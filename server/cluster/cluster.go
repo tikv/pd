@@ -65,6 +65,7 @@ import (
 	"github.com/tikv/pd/pkg/syncer"
 	"github.com/tikv/pd/pkg/tso"
 	"github.com/tikv/pd/pkg/unsaferecovery"
+	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/logutil"
@@ -281,7 +282,7 @@ func (c *RaftCluster) isInitialized() bool {
 // value of time.Time when there is error or the cluster is not bootstrapped yet.
 func (c *RaftCluster) loadBootstrapTime() (time.Time, error) {
 	var t time.Time
-	data, err := c.storage.Load(keypath.ClusterBootstrapTimeKey())
+	data, err := c.storage.Load(keypath.ClusterBootstrapTimePath())
 	if err != nil {
 		return t, err
 	}
@@ -535,7 +536,7 @@ func (c *RaftCluster) startGCTuner() {
 	defer tick.Stop()
 	totalMem, err := memory.MemTotal()
 	if err != nil {
-		log.Fatal("fail to get total memory:%s", zap.Error(err))
+		log.Fatal("fail to get total memory", zap.Error(err))
 	}
 	log.Info("memory info", zap.Uint64("total-mem", totalMem))
 	cfg := c.opt.GetPDServerConfig()
@@ -717,7 +718,7 @@ func (c *RaftCluster) fetchStoreConfigFromTiKV(ctx context.Context, statusAddres
 		failpoint.Return(cfg, nil)
 	})
 	if c.httpClient == nil {
-		return nil, fmt.Errorf("failed to get store config due to nil client")
+		return nil, errors.New("failed to get store config due to nil client")
 	}
 	var url string
 	if netutil.IsEnableHTTPS(c.httpClient) {
@@ -916,8 +917,8 @@ func (c *RaftCluster) GetHeartbeatStreams() *hbstream.HeartbeatStreams {
 }
 
 // AllocID returns a global unique ID.
-func (c *RaftCluster) AllocID() (uint64, error) {
-	return c.id.Alloc()
+func (c *RaftCluster) AllocID(uint32) (uint64, uint32, error) {
+	return c.id.Alloc(1)
 }
 
 // GetRegionSyncer returns the region syncer.
@@ -2055,7 +2056,7 @@ func (c *RaftCluster) RemoveTombStoneRecords() error {
 	var stores string
 	if len(failedStores) != 0 {
 		for i, storeID := range failedStores {
-			stores += fmt.Sprintf("%d", storeID)
+			stores += strconv.FormatUint(storeID, 10)
 			if i != len(failedStores)-1 {
 				stores += ", "
 			}
@@ -2508,6 +2509,7 @@ func CheckHealth(client *http.Client, members []*pdpb.Member) map[uint64]*pdpb.M
 		for _, cURL := range member.ClientUrls {
 			ctx, cancel := context.WithTimeout(context.Background(), clientTimeout)
 			req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("%s%s", cURL, healthURL), http.NoBody)
+			req.Header.Set(apiutil.PDAllowFollowerHandleHeader, "true")
 			if err != nil {
 				log.Error("failed to new request", errs.ZapError(errs.ErrNewHTTPRequest, err))
 				cancel()
