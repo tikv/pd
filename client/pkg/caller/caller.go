@@ -31,8 +31,27 @@ type (
 const (
 	// TestID is used for test.
 	TestID ID = "test"
+
 	// TestComponent is used for test.
 	TestComponent Component = "test"
+
+	// client-go component
+	CodecPDClient       Component = "codec-pd-client"
+	RegionCache         Component = "region-cache"
+	StoreCache          Component = "store-cache"
+	Oracles             Component = "oracle"
+	Rawkv               Component = "rawkv"
+	KvStore             Component = "kv-store"
+	InterceptedPDClient Component = "intercepted-pd-client"
+
+	// TiDB component
+	Pitr             Component = "pitr"
+	Ddl              Component = "ddl"
+	ImportInto       Component = "import-into"
+	TikvHandler      Component = "tikv-handler"
+	GcWorker         Component = "gc-worker"
+	GcJob            Component = "gc-job"
+	DistributedGcJob Component = "distributed-gc-job"
 )
 
 var processName ID
