@@ -151,7 +151,7 @@ func (m *GCStateManager) advanceGCSafePointImpl(keyspaceID uint32, target uint64
 	return
 }
 
-func (m *GCStateManager) AdvanceTxnSafePoint(keyspaceID uint32, target uint64) (AdvanceTxnSafePointResult, error) {
+func (m *GCStateManager) AdvanceTxnSafePoint(keyspaceID uint32, target uint64, now time.Time) (AdvanceTxnSafePointResult, error) {
 	keyspaceID, err := m.redirectKeyspace(keyspaceID, false)
 	if err != nil {
 		return AdvanceTxnSafePointResult{}, err
@@ -159,12 +159,12 @@ func (m *GCStateManager) AdvanceTxnSafePoint(keyspaceID uint32, target uint64) (
 	m.lock.Lock()
 	m.lock.Unlock()
 
-	return m.advanceTxnSafePointImpl(keyspaceID, target)
+	return m.advanceTxnSafePointImpl(keyspaceID, target, now)
 }
 
 // advanceTxnSafePointImpl is the internal implementation of AdvanceTxnSafePoint, assuming keyspaceID has been checked
 // and the mutex has been acquired.
-func (m *GCStateManager) advanceTxnSafePointImpl(keyspaceID uint32, target uint64) (AdvanceTxnSafePointResult, error) {
+func (m *GCStateManager) advanceTxnSafePointImpl(keyspaceID uint32, target uint64, now time.Time) (AdvanceTxnSafePointResult, error) {
 	isCompatibleMode := false
 
 	// A helper function for handling the compatibility of the service safe point of "gc_worker", which is needed
@@ -204,7 +204,6 @@ func (m *GCStateManager) advanceTxnSafePointImpl(keyspaceID uint32, target uint6
 			return err1
 		}
 
-		now := time.Now()
 		for _, barrier := range barriers {
 			if barrier.BarrierID == keypath.GCWorkerServiceSafePointID {
 				err1 = keepGCWorkerServiceSafePointCompatible(wb, barrier)
@@ -503,7 +502,7 @@ func (m *GCStateManager) CompatibleUpdateServiceGCSafePoint(serviceID string, ne
 			return nil, false, errors.New("TTL of gc_worker's service safe point must be infinity")
 		}
 
-		res, err := m.advanceTxnSafePointImpl(keyspaceID, newServiceSafePoint)
+		res, err := m.advanceTxnSafePointImpl(keyspaceID, newServiceSafePoint, now)
 		if err != nil {
 			return nil, false, err
 		}

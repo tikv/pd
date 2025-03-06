@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"time"
 
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
@@ -286,7 +287,7 @@ func (s *GrpcServer) AdvanceTxnSafePoint(ctx context.Context, request *pdpb.Adva
 
 	target := request.GetTarget()
 	keyspaceID := getKeyspaceIDFromReq(request)
-	res, err := s.gcStateManager.AdvanceTxnSafePoint(keyspaceID, target)
+	res, err := s.gcStateManager.AdvanceTxnSafePoint(keyspaceID, target, time.Now())
 	if err != nil {
 		return nil, err
 	}
