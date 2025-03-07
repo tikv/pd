@@ -332,6 +332,8 @@ func cmdRun(args ...string) bool {
 
 		etcdKeyTestFile = fmt.Sprintf("%d.key", h)
 		tmpEtcdKeyFile = filepath.Join(etcdKeyTestFilePath, fmt.Sprintf("tmp.%s", etcdKeyTestFile))
+		pwd, _ := os.Getwd()
+		tmpEtcdKeyFile = filepath.Join(pwd, tmpEtcdKeyFile)
 		// write task into file to identify the file
 		err = os.WriteFile(tmpEtcdKeyFile, []byte(tasksStr2), 0644)
 		if err != nil {
@@ -339,8 +341,7 @@ func cmdRun(args ...string) bool {
 			return false
 		}
 
-		os.Setenv("GO_FAILPOINTS", fmt.Sprintf("github.com/tikv/pd/pkg/utils/etcdutil/CollectEtcdKey=return(\"%s\")",
-			filepath.Join(workDir, tmpEtcdKeyFile)))
+		os.Setenv("GO_FAILPOINTS", fmt.Sprintf("github.com/tikv/pd/pkg/utils/etcdutil/CollectEtcdKey=return(\"%s\")", tmpEtcdKeyFile))
 		defer func() {
 			os.Setenv("GO_FAILPOINTS", "github.com/tikv/pd/pkg/utils/etcdutil/CollectEtcdKey=return(\"\")")
 		}()
