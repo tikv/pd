@@ -219,6 +219,10 @@ func (t *timestampOracle) resetUserTimestamp(leadership *election.Leadership, ts
 		logicalDifference         = int64(nextLogical) - t.tsoMux.logical
 		physicalDifference        = typeutil.SubTSOPhysicalByWallClock(nextPhysical, t.tsoMux.physical)
 	)
+	// check if the TSO is initialized.
+	if t.tsoMux.physical == typeutil.ZeroTime {
+		return errs.ErrResetUserTimestamp.FastGenByArgs("timestamp in memory has not been initialized")
+	}
 	// do not update if next physical time is less/before than prev
 	if physicalDifference < 0 {
 		t.metrics.errResetSmallPhysicalTSEvent.Inc()
