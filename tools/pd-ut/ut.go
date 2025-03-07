@@ -28,16 +28,20 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/pmezard/go-difflib/difflib"
 	"go.uber.org/zap"
 
+	"github.com/tikv/pd/pkg/utils/memberutil"
 	"github.com/tikv/pd/tools/pd-ut/alloc"
 
 	// Set the correct value when it runs inside docker.
+
 	_ "go.uber.org/automaxprocs"
 )
 
@@ -95,6 +99,8 @@ go tool cover --func=xxx`
 var (
 	modulePath           = filepath.Join("github.com", "tikv", "pd")
 	integrationsTestPath = filepath.Join("tests", "integrations")
+	etcdKeyTestFilePath  = filepath.Join("tools", "pd-ut")
+	etcdKeyTestFile      string
 )
 
 var (
@@ -292,36 +298,53 @@ func cmdRun(args ...string) bool {
 	}
 	tasks := make([]task, 0, 5000)
 	start := time.Now()
-	// run all tests
-	if len(args) == 0 {
+	var tmpEtcdKeyFile string
+
+	switch len(args) {
+	case 0, 1: // 0: run all tests, 1: run tests for a single package
+		if len(args) == 1 {
+			dirs := strings.Split(args[0], ",")
+			var dirPkgs []string
+			for _, pkg := range pkgs {
+				for _, dir := range dirs {
+					if strings.Contains(pkg, dir) {
+						dirPkgs = append(dirPkgs, pkg)
+					}
+				}
+			}
+			pkgs = dirPkgs
+		}
 		tasks, err = runExistingTestCases(pkgs)
 		if err != nil {
 			fmt.Println("run existing test cases error", err)
 			return false
 		}
-	}
 
-	// run tests for a single package
-	if len(args) == 1 {
-		dirs := strings.Split(args[0], ",")
-		var dirPkgs []string
-		for _, pkg := range pkgs {
-			for _, dir := range dirs {
-				if strings.Contains(pkg, dir) {
-					dirPkgs = append(dirPkgs, pkg)
-				}
-			}
+		tasksStr := make([]string, 0, len(tasks))
+		for _, t := range tasks {
+			// Add "#" to keep their prefix same.
+			tasksStr = append(tasksStr, "# "+t.String())
 		}
+		sort.Strings(tasksStr)
 
-		tasks, err = runExistingTestCases(dirPkgs)
+		tasksStr2 := strings.Join(tasksStr, "\n") + "\n"
+		h := memberutil.GenerateUniqueID(tasksStr2)
+
+		etcdKeyTestFile = fmt.Sprintf("%d.key", h)
+		tmpEtcdKeyFile = filepath.Join(etcdKeyTestFilePath, fmt.Sprintf("tmp.%s", etcdKeyTestFile))
+		// write task into file to identify the file
+		err = os.WriteFile(tmpEtcdKeyFile, []byte(tasksStr2), 0644)
 		if err != nil {
-			fmt.Println("run existing test cases error", err)
+			fmt.Println("write tmp etcd key file error", err)
 			return false
 		}
-	}
 
-	// run a single test
-	if len(args) == 2 {
+		os.Setenv("GO_FAILPOINTS", fmt.Sprintf("github.com/tikv/pd/pkg/utils/etcdutil/CollectEtcdKey=return(\"%s\")",
+			filepath.Join(workDir, tmpEtcdKeyFile)))
+		defer func() {
+			os.Setenv("GO_FAILPOINTS", "github.com/tikv/pd/pkg/utils/etcdutil/CollectEtcdKey=return(\"\")")
+		}()
+	case 2:
 		pkg := args[0]
 		err := buildTestBinary(pkg)
 		if err != nil {
@@ -366,6 +389,46 @@ func cmdRun(args ...string) bool {
 	wg.Wait()
 	fmt.Println("run all tasks takes", time.Since(start))
 
+	if len(args) != 2 {
+		etcdKeyFile := filepath.Join(etcdKeyTestFilePath, etcdKeyTestFile)
+		fmt.Printf("check the etcd key compatibility: \n%s\n%s\n", etcdKeyFile, tmpEtcdKeyFile)
+
+		// compare the etcd key file with the tmpEtcdKeyFile
+		// if they are the same, then the etcd key is compatible
+		etcdKeyFileContent, err := os.ReadFile(etcdKeyFile)
+		if err != nil {
+			fmt.Println("read etcd key file error", err)
+			etcdKeyFileContent = []byte{}
+		}
+		tmpEtcdKeyFileContent, err := os.ReadFile(tmpEtcdKeyFile)
+		if err != nil {
+			fmt.Println("read tmp etcd key file error", err)
+			tmpEtcdKeyFileContent = []byte{}
+		}
+
+		// remove the duplicate rows
+		etcdKey := string(etcdKeyFileContent)
+		tmpEtcdKey := removeDuplicate(tmpEtcdKeyFileContent)
+		os.WriteFile(tmpEtcdKeyFile, []byte(tmpEtcdKey), 0644)
+		// If the content is too long, maybe we can not print them.
+		fmt.Printf("etcd key: %s\ntest etcd key: %s\n", etcdKey, tmpEtcdKey)
+
+		diff := difflib.UnifiedDiff{
+			A:        difflib.SplitLines(etcdKey),
+			B:        difflib.SplitLines(tmpEtcdKey),
+			FromFile: etcdKeyFile,
+			ToFile:   tmpEtcdKeyFile,
+			Context:  3,
+		}
+		diffText, _ := difflib.GetUnifiedDiffString(diff)
+
+		if len(diffText) != 0 {
+			// print the diff
+			fmt.Println("etcd key is not compatible:")
+			fmt.Println(diffText)
+			return false
+		}
+	}
 	if junitFile != "" {
 		out := collectTestResults(works)
 		f, err := os.Create(junitFile)
@@ -985,4 +1048,20 @@ type JUnitFailure struct {
 	Message  string `xml:"message,attr"`
 	Type     string `xml:"type,attr"`
 	Contents string `xml:",chardata"`
+}
+
+func removeDuplicate(content []byte) string {
+	lines := strings.Split(string(content), "\n")
+	unique := make(map[string]struct{})
+	for _, line := range lines {
+		unique[line] = struct{}{}
+	}
+	var res []string
+	for k := range unique {
+		res = append(res, k)
+	}
+
+	// sort the result
+	sort.Strings(res)
+	return strings.Join(res, "\n")
 }
