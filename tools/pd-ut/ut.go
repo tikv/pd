@@ -99,7 +99,7 @@ go tool cover --func=xxx`
 var (
 	modulePath           = filepath.Join("github.com", "tikv", "pd")
 	integrationsTestPath = filepath.Join("tests", "integrations")
-	etcdKeyTestFilePath  = filepath.Join("tools", "pd-ut")
+	etcdKeyTestFilePath  = filepath.Join("tools", "pd-ut", "testdata")
 	etcdKeyTestFile      string
 )
 
