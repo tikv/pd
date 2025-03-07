@@ -782,3 +782,48 @@ func (suite *loopWatcherTestSuite) put(re *require.Assertions, key, value string
 	re.NoError(err)
 	re.Equal(value, string(resp.Kvs[0].Value))
 }
+
+func TestWriteKeyToFile(t *testing.T) {
+	re := require.New(t)
+	tempFile, err := os.CreateTemp("", "testfile")
+	re.NoError(err)
+	defer os.Remove(tempFile.Name())
+
+	key := "test/key123"
+	op := "get"
+	err = writeKeyToFile(tempFile.Name(), key, op)
+	re.NoError(err)
+
+	content, err := os.ReadFile(tempFile.Name())
+	re.NoError(err)
+	expectedContent := "test/key get\n"
+	re.Equal(expectedContent, string(content))
+}
+
+func TestWriteKeyToFileMultipleKeys(t *testing.T) {
+	re := require.New(t)
+	tempFile, err := os.CreateTemp("", "testfile")
+	re.NoError(err)
+	defer os.Remove(tempFile.Name())
+
+	keys := []string{"test/key123", "another/key456", "key789"}
+	op := "put"
+	for _, key := range keys {
+		err = writeKeyToFile(tempFile.Name(), key, op)
+		re.NoError(err)
+	}
+
+	content, err := os.ReadFile(tempFile.Name())
+	re.NoError(err)
+	expectedContent := "test/key put\nanother/key put\nkey put\n"
+	re.Equal(expectedContent, string(content))
+}
+
+func TestWriteKeyToFileError(t *testing.T) {
+	re := require.New(t)
+	invalidFilePath := "/invalid/path/testfile"
+	key := "test/key123"
+	op := "get"
+	err := writeKeyToFile(invalidFilePath, key, op)
+	re.Error(err)
+}

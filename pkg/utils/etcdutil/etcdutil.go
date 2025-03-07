@@ -17,8 +17,10 @@ package etcdutil
 import (
 	"context"
 	"crypto/tls"
+	"fmt"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -152,6 +154,7 @@ func EtcdKVGet(c *clientv3.Client, key string, opts ...clientv3.OpOption) (*clie
 		d := val.(int)
 		time.Sleep(time.Duration(d) * time.Second)
 	})
+	InjectFailToCollectTestEtcdKey(key, "get")
 	resp, err := clientv3.NewKV(c).Get(ctx, key, opts...)
 	if cost := time.Since(start); cost > DefaultSlowRequestTime {
 		log.Warn("kv gets too slow", zap.String("request-key", key), zap.Duration("cost", cost), errs.ZapError(err))
@@ -163,6 +166,44 @@ func EtcdKVGet(c *clientv3.Client, key string, opts ...clientv3.OpOption) (*clie
 		return resp, e
 	}
 	return resp, nil
+}
+
+// InjectFailToCollectTestEtcdKey injects the failpoint to collect the key for testing.
+func InjectFailToCollectTestEtcdKey(key, op string) {
+	failpoint.Inject("CollectEtcdKey", func(val failpoint.Value) {
+		file := val.(string)
+		fmt.Println("collect etcd key", file, key, op)
+
+		if len(file) != 0 {
+			err := writeKeyToFile(file, key, "get")
+			if err != nil {
+				pwd, _ := os.Getwd()
+				log.Error("write key to file failed", zap.String("pwd", pwd), zap.String("file", file), zap.Error(err))
+				panic(err)
+			}
+		}
+	})
+}
+
+// WriteKeyToFile writes the key to the file. It is only used for testing.
+func writeKeyToFile(file, key, op string) error {
+	f, err := os.OpenFile(file, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	// remove all number in the key to avoid the random number affect.
+	key = strings.Map(func(r rune) rune {
+		if r >= '0' && r <= '9' {
+			return -1
+		}
+		return r
+	}, key)
+
+	if _, err = f.WriteString(key + " " + op + "\n"); err != nil {
+		return err
+	}
+	return nil
 }
 
 // IsHealthy checks if the etcd is healthy.
