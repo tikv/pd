@@ -1054,6 +1054,9 @@ func removeDuplicate(content []byte) string {
 	lines := strings.Split(string(content), "\n")
 	unique := make(map[string]struct{})
 	for _, line := range lines {
+		if len(line) == 0 {
+			continue
+		}
 		unique[line] = struct{}{}
 	}
 	var res []string
