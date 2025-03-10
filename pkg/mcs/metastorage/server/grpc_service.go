@@ -24,6 +24,7 @@ import (
 	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/mcs/registry"
 	"github.com/tikv/pd/pkg/utils/apiutil"
+	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
@@ -105,7 +106,7 @@ func (s *Service) Watch(req *meta_storagepb.WatchRequest, server meta_storagepb.
 		options = append(options, clientv3.WithPrevKV())
 	}
 	cli := s.manager.GetClient()
-	watchChan := cli.Watch(ctx, key, options...)
+	watchChan := etcdutil.Watch(cli, ctx, key, options...)
 	for {
 		select {
 		case <-ctx.Done():

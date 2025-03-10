@@ -531,7 +531,7 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 		}
 		done := make(chan struct{})
 		go grpcutil.CheckStream(watcherCtx, watcherCancel, done)
-		watchChan := watcher.Watch(watcherCtx, lw.key, opts...)
+		watchChan := Watch(watcher, watcherCtx, lw.key, opts...)
 		done <- struct{}{}
 		if err := watcherCtx.Err(); err != nil {
 			log.Warn("error occurred while creating watch channel and retry it", zap.Error(err),
@@ -768,4 +768,9 @@ func (lw *LoopWatcher) SetLoadRetryTimes(times int) {
 // SetLoadBatchSize sets the batch size when loading data from etcd.
 func (lw *LoopWatcher) SetLoadBatchSize(size int64) {
 	lw.loadBatchSize = size
+}
+
+func Watch(watcher clientv3.Watcher, ctx context.Context, key string, opts ...clientv3.OpOption) clientv3.WatchChan {
+	InjectFailToCollectTestEtcdKey(key, "watch")
+	return watcher.Watch(ctx, key, opts...)
 }
