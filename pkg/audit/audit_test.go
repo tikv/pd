@@ -27,6 +27,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/stretchr/testify/require"
+
 	"github.com/tikv/pd/pkg/utils/requestutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 )
@@ -112,7 +113,7 @@ func BenchmarkLocalLogAuditUsingTerminal(b *testing.B) {
 	backend := NewLocalLogBackend(true)
 	req, _ := http.NewRequest(http.MethodGet, "http://127.0.0.1:2379/test?test=test", strings.NewReader("testBody"))
 	b.StartTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		info := requestutil.GetRequestInfo(req)
 		req = req.WithContext(requestutil.WithRequestInfo(req.Context(), info))
 		backend.ProcessHTTPRequest(req)
@@ -126,7 +127,7 @@ func BenchmarkLocalLogAuditUsingFile(b *testing.B) {
 	defer os.RemoveAll(fname)
 	req, _ := http.NewRequest(http.MethodGet, "http://127.0.0.1:2379/test?test=test", strings.NewReader("testBody"))
 	b.StartTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		info := requestutil.GetRequestInfo(req)
 		req = req.WithContext(requestutil.WithRequestInfo(req.Context(), info))
 		backend.ProcessHTTPRequest(req)

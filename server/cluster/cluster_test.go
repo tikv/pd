@@ -27,13 +27,15 @@ import (
 	"time"
 
 	"github.com/docker/go-units"
+	"github.com/stretchr/testify/require"
+
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/eraftpb"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
-	"github.com/stretchr/testify/require"
+
 	"github.com/tikv/pd/pkg/cluster"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
@@ -108,6 +110,7 @@ func TestStoreHeartbeat(t *testing.T) {
 		re.NotEqual(int64(0), s.GetLastHeartbeatTS().UnixNano())
 		re.Equal(req.GetStats(), s.GetStoreStats())
 		re.Equal("v2", cluster.GetStore(1).GetStoreLimit().Version())
+		re.Equal(s.GetMeta().GetNodeState(), resp.GetState())
 
 		storeMetasAfterHeartbeat = append(storeMetasAfterHeartbeat, s.GetMeta())
 	}
@@ -251,7 +254,7 @@ func TestSetOfflineStore(t *testing.T) {
 	cluster.coordinator = schedule.NewCoordinator(ctx, cluster, nil)
 	cluster.ruleManager = placement.NewRuleManager(ctx, storage.NewStorageWithMemoryBackend(), cluster, cluster.GetOpts())
 	if opt.IsPlacementRulesEnabled() {
-		err := cluster.ruleManager.Initialize(opt.GetMaxReplicas(), opt.GetLocationLabels(), opt.GetIsolationLevel())
+		err := cluster.ruleManager.Initialize(opt.GetMaxReplicas(), opt.GetLocationLabels(), opt.GetIsolationLevel(), false)
 		if err != nil {
 			panic(err)
 		}
@@ -290,7 +293,7 @@ func TestSetOfflineStore(t *testing.T) {
 		re.True(cluster.GetStore(storeID).IsRemoved())
 	}
 	// test bury store
-	for storeID := uint64(0); storeID <= 4; storeID++ {
+	for storeID := range uint64(5) {
 		store := cluster.GetStore(storeID)
 		if store == nil || store.IsUp() {
 			re.Error(cluster.BuryStore(storeID, false))
@@ -448,7 +451,7 @@ func TestUpStore(t *testing.T) {
 	cluster.coordinator = schedule.NewCoordinator(ctx, cluster, nil)
 	cluster.ruleManager = placement.NewRuleManager(ctx, storage.NewStorageWithMemoryBackend(), cluster, cluster.GetOpts())
 	if opt.IsPlacementRulesEnabled() {
-		err := cluster.ruleManager.Initialize(opt.GetMaxReplicas(), opt.GetLocationLabels(), opt.GetIsolationLevel())
+		err := cluster.ruleManager.Initialize(opt.GetMaxReplicas(), opt.GetLocationLabels(), opt.GetIsolationLevel(), false)
 		if err != nil {
 			panic(err)
 		}
@@ -551,7 +554,7 @@ func TestDeleteStoreUpdatesClusterVersion(t *testing.T) {
 	cluster.coordinator = schedule.NewCoordinator(ctx, cluster, nil)
 	cluster.ruleManager = placement.NewRuleManager(ctx, storage.NewStorageWithMemoryBackend(), cluster, cluster.GetOpts())
 	if opt.IsPlacementRulesEnabled() {
-		err := cluster.ruleManager.Initialize(opt.GetMaxReplicas(), opt.GetLocationLabels(), opt.GetIsolationLevel())
+		err := cluster.ruleManager.Initialize(opt.GetMaxReplicas(), opt.GetLocationLabels(), opt.GetIsolationLevel(), false)
 		if err != nil {
 			panic(err)
 		}
@@ -1322,7 +1325,7 @@ func TestOfflineAndMerge(t *testing.T) {
 	cluster.coordinator = schedule.NewCoordinator(ctx, cluster, nil)
 	cluster.ruleManager = placement.NewRuleManager(ctx, storage.NewStorageWithMemoryBackend(), cluster, cluster.GetOpts())
 	if opt.IsPlacementRulesEnabled() {
-		err := cluster.ruleManager.Initialize(opt.GetMaxReplicas(), opt.GetLocationLabels(), opt.GetIsolationLevel())
+		err := cluster.ruleManager.Initialize(opt.GetMaxReplicas(), opt.GetLocationLabels(), opt.GetIsolationLevel(), false)
 		if err != nil {
 			panic(err)
 		}
@@ -1850,15 +1853,15 @@ func TestStores(t *testing.T) {
 	for i, store := range stores {
 		id := store.GetID()
 		re.Nil(cache.GetStore(id))
-		re.Error(cache.PauseLeaderTransfer(id))
+		re.Error(cache.PauseLeaderTransfer(id, constant.In))
 		cache.PutStore(store)
 		re.Equal(store, cache.GetStore(id))
 		re.Equal(i+1, cache.GetStoreCount())
-		re.NoError(cache.PauseLeaderTransfer(id))
-		re.False(cache.GetStore(id).AllowLeaderTransfer())
-		re.Error(cache.PauseLeaderTransfer(id))
-		cache.ResumeLeaderTransfer(id)
-		re.True(cache.GetStore(id).AllowLeaderTransfer())
+		re.NoError(cache.PauseLeaderTransfer(id, constant.In))
+		re.False(cache.GetStore(id).AllowLeaderTransferIn())
+		re.Error(cache.PauseLeaderTransfer(id, constant.In))
+		cache.ResumeLeaderTransfer(id, constant.In)
+		re.True(cache.GetStore(id).AllowLeaderTransferIn())
 	}
 	re.Equal(int(n), cache.GetStoreCount())
 
@@ -2185,7 +2188,7 @@ func newTestRaftCluster(
 	rc.InitCluster(id, opt, nil, nil)
 	rc.ruleManager = placement.NewRuleManager(ctx, storage.NewStorageWithMemoryBackend(), rc, opt)
 	if opt.IsPlacementRulesEnabled() {
-		err := rc.ruleManager.Initialize(opt.GetMaxReplicas(), opt.GetLocationLabels(), opt.GetIsolationLevel())
+		err := rc.ruleManager.Initialize(opt.GetMaxReplicas(), opt.GetLocationLabels(), opt.GetIsolationLevel(), false)
 		if err != nil {
 			panic(err)
 		}
@@ -2333,7 +2336,7 @@ func checkStaleRegion(origin *metapb.Region, region *metapb.Region) error {
 }
 
 func (c *testCluster) AllocPeer(storeID uint64) (*metapb.Peer, error) {
-	id, err := c.AllocID()
+	id, _, err := c.AllocID(1)
 	if err != nil {
 		return nil, err
 	}
@@ -3207,6 +3210,22 @@ func TestAddScheduler(t *testing.T) {
 	re.NoError(err)
 	re.NoError(controller.AddScheduler(gls))
 
+	_, err = schedulers.CreateScheduler(types.BalanceRangeScheduler, oc, storage.NewStorageWithMemoryBackend(), schedulers.ConfigSliceDecoder(types.BalanceRangeScheduler, []string{}), controller.RemoveScheduler)
+	re.Error(err)
+
+	gls, err = schedulers.CreateScheduler(types.BalanceRangeScheduler, oc, storage.NewStorageWithMemoryBackend(), schedulers.ConfigSliceDecoder(types.BalanceRangeScheduler, []string{"learner", "tiflash", "1h", "test", "100", "200"}), controller.RemoveScheduler)
+	re.NoError(err)
+	re.NoError(controller.AddScheduler(gls))
+	conf, err = gls.EncodeConfig()
+	re.NoError(err)
+	var cfg []map[string]any
+
+	re.NoError(json.Unmarshal(conf, &cfg))
+	re.Equal("learner", cfg[0]["role"])
+	re.Equal("tiflash", cfg[0]["engine"])
+	re.Equal("test", cfg[0]["alias"])
+	re.Equal(float64(time.Hour.Nanoseconds()), cfg[0]["timeout"])
+
 	hb, err := schedulers.CreateScheduler(types.BalanceHotRegionScheduler, oc, storage.NewStorageWithMemoryBackend(), schedulers.ConfigJSONDecoder([]byte("{}")))
 	re.NoError(err)
 	conf, err = hb.EncodeConfig()
@@ -3903,7 +3922,7 @@ func BenchmarkHandleStatsAsync(b *testing.B) {
 	// Reset timer after setup
 	b.ResetTimer()
 	// Run HandleStatsAsync b.N times
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		cluster.HandleStatsAsync(c, region)
 	}
 }
@@ -3964,7 +3983,7 @@ func BenchmarkHandleRegionHeartbeat(b *testing.B) {
 	// Reset timer after setup
 	b.ResetTimer()
 	// Run HandleRegionHeartbeat b.N times
-	for i := 0; i < b.N; i++ {
+	for i := range b.N {
 		region := core.RegionFromHeartbeat(requests[i], flowRoundDivisor)
 		c.HandleRegionHeartbeat(region)
 	}

@@ -25,11 +25,16 @@ import (
 	"sync"
 	"time"
 
+	"go.etcd.io/etcd/api/v3/mvccpb"
+	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.uber.org/zap"
+
 	perrors "github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/tsopb"
 	"github.com/pingcap/log"
+
 	"github.com/tikv/pd/pkg/election"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/discovery"
@@ -47,9 +52,6 @@ import (
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
-	"go.etcd.io/etcd/api/v3/mvccpb"
-	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.uber.org/zap"
 )
 
 const (
@@ -66,7 +68,7 @@ const (
 type state struct {
 	syncutil.RWMutex
 	// ams stores the allocator managers of the keyspace groups. Each keyspace group is
-	// assigned with an allocator manager managing its global/local tso allocators.
+	// assigned with an allocator manager managing its global tso allocators.
 	// Use a fixed size array to maximize the efficiency of concurrent access to
 	// different keyspace groups for tso service.
 	ams [constant.MaxKeyspaceGroupCountInUse]*AllocatorManager
@@ -331,38 +333,7 @@ type KeyspaceGroupManager struct {
 	// Key: /ms/{cluster_id}/tso/registry/{tsoServerAddress}
 	// Value: discover.ServiceRegistryEntry
 	tsoServiceKey string
-	// legacySvcRootPath defines the legacy root path for all etcd paths which derives from
-	// the PD/API service. It's in the format of "/pd/{cluster_id}".
-	// The main paths for different usages include:
-	// 1. The path, used by the default keyspace group, for LoadTimestamp/SaveTimestamp in the
-	//    storage endpoint.
-	//    Key: /pd/{cluster_id}/timestamp
-	//    Value: ts(time.Time)
-	//    Key: /pd/{cluster_id}/lta/{dc-location}/timestamp
-	//    Value: ts(time.Time)
-	// 2. The path for storing keyspace group membership/distribution metadata.
-	//    Key: /pd/{cluster_id}/tso/keyspace_groups/membership/{group}
-	//    Value: endpoint.KeyspaceGroup
-	// Note: The {group} is 5 digits integer with leading zeros.
-	legacySvcRootPath string
-	// tsoSvcRootPath defines the root path for all etcd paths used in the tso microservices.
-	// It is in the format of "/ms/<cluster-id>/tso".
-	// The main paths for different usages include:
-	// 1. The path for keyspace group primary election.
-	//    default keyspace group: "/ms/{cluster_id}/tso/00000/primary".
-	//    non-default keyspace group: "/ms/{cluster_id}/tso/keyspace_groups/election/{group}/primary".
-	// 2. The path for LoadTimestamp/SaveTimestamp in the storage endpoint for all the non-default
-	//    keyspace groups.
-	//    Key: /ms/{cluster_id}/tso/{group}/gta/timestamp
-	//    Value: ts(time.Time)
-	//    Key: /ms/{cluster_id}/tso/{group}/lta/{dc-location}/timestamp
-	//    Value: ts(time.Time)
-	// Note: The {group} is 5 digits integer with leading zeros.
-	tsoSvcRootPath string
-	// legacySvcStorage is storage with legacySvcRootPath.
-	legacySvcStorage *endpoint.StorageEndpoint
-	// tsoSvcStorage is storage with tsoSvcRootPath.
-	tsoSvcStorage *endpoint.StorageEndpoint
+	storage       *endpoint.StorageEndpoint
 	// cfg is the TSO config
 	cfg ServiceConfig
 
@@ -400,8 +371,6 @@ func NewKeyspaceGroupManager(
 	etcdClient *clientv3.Client,
 	httpClient *http.Client,
 	electionNamePrefix string,
-	legacySvcRootPath string,
-	tsoSvcRootPath string,
 	cfg ServiceConfig,
 ) *KeyspaceGroupManager {
 	if constant.MaxKeyspaceGroupCountInUse > constant.MaxKeyspaceGroupCount {
@@ -418,19 +387,15 @@ func NewKeyspaceGroupManager(
 		etcdClient:                   etcdClient,
 		httpClient:                   httpClient,
 		electionNamePrefix:           electionNamePrefix,
-		tsoServiceKey:                keypath.TSOPath(),
-		legacySvcRootPath:            legacySvcRootPath,
-		tsoSvcRootPath:               tsoSvcRootPath,
+		tsoServiceKey:                keypath.ServicePath(constant.TSOServiceName),
 		primaryPriorityCheckInterval: defaultPrimaryPriorityCheckInterval,
 		cfg:                          cfg,
 		groupUpdateRetryList:         make(map[uint32]*endpoint.KeyspaceGroup),
 		serviceRegistryMap:           make(map[string]string),
 		metrics:                      newKeyspaceGroupMetrics(),
 	}
-	kgm.legacySvcStorage = endpoint.NewStorageEndpoint(
-		kv.NewEtcdKVBase(kgm.etcdClient, kgm.legacySvcRootPath), nil)
-	kgm.tsoSvcStorage = endpoint.NewStorageEndpoint(
-		kv.NewEtcdKVBase(kgm.etcdClient, kgm.tsoSvcRootPath), nil)
+	kgm.storage = endpoint.NewStorageEndpoint(
+		kv.NewEtcdKVBase(kgm.etcdClient), nil)
 	kgm.compiledKGMembershipIDRegexp = keypath.GetCompiledKeyspaceGroupIDRegexp()
 	kgm.state.initialize()
 	return kgm
@@ -530,8 +495,7 @@ func (kgm *KeyspaceGroupManager) InitializeTSOServerWatchLoop() error {
 // Key: /pd/{cluster_id}/tso/keyspace_groups/membership/{group}
 // Value: endpoint.KeyspaceGroup
 func (kgm *KeyspaceGroupManager) InitializeGroupWatchLoop() error {
-	rootPath := kgm.legacySvcRootPath
-	startKey := rootPath + "/" + keypath.KeyspaceGroupIDPrefix()
+	startKey := keypath.KeyspaceGroupIDPrefix()
 
 	defaultKGConfigured := false
 	putFn := func(kv *mvccpb.KeyValue) error {
@@ -653,11 +617,6 @@ func (kgm *KeyspaceGroupManager) primaryPriorityCheckLoop() {
 							log.Error("failed to get allocator manager", zap.Error(err))
 							continue
 						}
-						globalAllocator, err := allocator.GetAllocator(GlobalDCLocation)
-						if err != nil {
-							log.Error("failed to get global allocator", zap.Error(err))
-							continue
-						}
 						// only members of specific group are valid primary candidates.
 						group := kgm.GetKeyspaceGroups()[kg.ID]
 						memberMap := make(map[string]bool, len(group.Members))
@@ -668,7 +627,7 @@ func (kgm *KeyspaceGroupManager) primaryPriorityCheckLoop() {
 							zap.String("local-address", kgm.tsoServiceID.ServiceAddr),
 							zap.Uint32("keyspace-group-id", kg.ID),
 							zap.Int("local-priority", localPriority))
-						if err := utils.TransferPrimary(kgm.etcdClient, globalAllocator.(*GlobalTSOAllocator).GetExpectedPrimaryLease(),
+						if err := utils.TransferPrimary(kgm.etcdClient, allocator.GetAllocator().(*GlobalTSOAllocator).GetExpectedPrimaryLease(),
 							constant.TSOServiceName, kgm.GetServiceConfig().GetName(), "", kg.ID, memberMap); err != nil {
 							log.Error("failed to transfer primary", zap.Error(err))
 							continue
@@ -751,13 +710,16 @@ func (kgm *KeyspaceGroupManager) updateKeyspaceGroup(group *endpoint.KeyspaceGro
 		zap.String("participant-name", uniqueName),
 		zap.Uint64("participant-id", uniqueID))
 	// Initialize the participant info to join the primary election.
-	participant := member.NewParticipant(kgm.etcdClient, constant.TSOServiceName)
+	participant := member.NewParticipant(kgm.etcdClient, keypath.MsParam{
+		ServiceName: constant.TSOServiceName,
+		GroupID:     group.ID,
+	})
 	p := &tsopb.Participant{
 		Name:       uniqueName,
 		Id:         uniqueID, // id is unique among all participants
 		ListenUrls: []string{kgm.cfg.GetAdvertiseListenAddr()},
 	}
-	participant.InitInfo(p, keypath.KeyspaceGroupsElectionPath(kgm.tsoSvcRootPath, group.ID), constant.PrimaryKey, "keyspace group primary election")
+	participant.InitInfo(p, "keyspace group primary election")
 	// If the keyspace group is in split, we should ensure that the primary elected by the new keyspace group
 	// is always on the same TSO Server node as the primary of the old keyspace group, and this constraint cannot
 	// be broken until the entire split process is completed.
@@ -776,24 +738,11 @@ func (kgm *KeyspaceGroupManager) updateKeyspaceGroup(group *endpoint.KeyspaceGro
 			return splitSourceAM.GetMember().IsLeader()
 		})
 	}
-	// Only the default keyspace group uses the legacy service root path for LoadTimestamp/SyncTimestamp.
-	var (
-		tsRootPath string
-		storage    *endpoint.StorageEndpoint
-	)
-	if group.ID == constant.DefaultKeyspaceGroupID {
-		tsRootPath = kgm.legacySvcRootPath
-		storage = kgm.legacySvcStorage
-	} else {
-		tsRootPath = kgm.tsoSvcRootPath
-		storage = kgm.tsoSvcStorage
-	}
 	// Initialize all kinds of maps.
-	am := NewAllocatorManager(kgm.ctx, group.ID, participant, tsRootPath, storage, kgm.cfg)
+	am := NewAllocatorManager(kgm.ctx, group.ID, participant, kgm.storage, kgm.cfg)
 	am.startGlobalAllocatorLoop()
 	log.Info("created allocator manager",
-		zap.Uint32("keyspace-group-id", group.ID),
-		zap.String("timestamp-path", am.GetTimestampPath("")))
+		zap.Uint32("keyspace-group-id", group.ID))
 	kgm.Lock()
 	group.KeyspaceLookupTable = make(map[uint32]struct{})
 	for _, kid := range group.Keyspaces {
@@ -1072,7 +1021,7 @@ func (kgm *KeyspaceGroupManager) GetKeyspaceGroups() map[uint32]*endpoint.Keyspa
 func (kgm *KeyspaceGroupManager) HandleTSORequest(
 	ctx context.Context,
 	keyspaceID, keyspaceGroupID uint32,
-	dcLocation string, count uint32,
+	count uint32,
 ) (ts pdpb.Timestamp, curKeyspaceGroupID uint32, err error) {
 	if err := checkKeySpaceGroupID(keyspaceGroupID); err != nil {
 		return pdpb.Timestamp{}, keyspaceGroupID, err
@@ -1081,7 +1030,7 @@ func (kgm *KeyspaceGroupManager) HandleTSORequest(
 	if err != nil {
 		return pdpb.Timestamp{}, curKeyspaceGroupID, err
 	}
-	err = kgm.checkTSOSplit(curKeyspaceGroupID, dcLocation)
+	err = kgm.checkTSOSplit(curKeyspaceGroupID)
 	if err != nil {
 		return pdpb.Timestamp{}, curKeyspaceGroupID, err
 	}
@@ -1094,17 +1043,12 @@ func (kgm *KeyspaceGroupManager) HandleTSORequest(
 	// TSO is the latest one from the storage, which could prevent the potential
 	// fallback caused by the rolling update of the mixed old PD and TSO service deployment.
 	err = kgm.markGroupRequested(curKeyspaceGroupID, func() error {
-		allocator, err := am.GetAllocator(dcLocation)
-		if err != nil {
-			return err
-		}
-		// TODO: support the Local TSO Allocator.
-		return allocator.Initialize(0)
+		return am.GetAllocator().Initialize(0)
 	})
 	if err != nil {
 		return pdpb.Timestamp{}, curKeyspaceGroupID, err
 	}
-	ts, err = am.HandleRequest(ctx, dcLocation, count)
+	ts, err = am.HandleRequest(ctx, count)
 	return ts, curKeyspaceGroupID, err
 }
 
@@ -1117,9 +1061,7 @@ func checkKeySpaceGroupID(id uint32) error {
 }
 
 // GetMinTS returns the minimum timestamp across all keyspace groups served by this TSO server/pod.
-func (kgm *KeyspaceGroupManager) GetMinTS(
-	dcLocation string,
-) (_ pdpb.Timestamp, kgAskedCount, kgTotalCount uint32, err error) {
+func (kgm *KeyspaceGroupManager) GetMinTS() (_ pdpb.Timestamp, kgAskedCount, kgTotalCount uint32, err error) {
 	kgm.RLock()
 	defer kgm.RUnlock()
 
@@ -1143,7 +1085,7 @@ func (kgm *KeyspaceGroupManager) GetMinTS(
 		if kgm.kgs[i] != nil && kgm.kgs[i].IsSplitTarget() {
 			continue
 		}
-		ts, err := am.HandleRequest(context.Background(), dcLocation, 1)
+		ts, err := am.HandleRequest(context.Background(), 1)
 		if err != nil {
 			return pdpb.Timestamp{}, kgAskedCount, kgTotalCount, err
 		}
@@ -1173,20 +1115,13 @@ func genNotServedErr(perr *perrors.Error, keyspaceGroupID uint32) error {
 // newly split TSO keep consistent with the original one.
 func (kgm *KeyspaceGroupManager) checkTSOSplit(
 	keyspaceGroupID uint32,
-	dcLocation string,
 ) error {
 	splitTargetAM, splitSourceAM, err := kgm.state.checkGroupSplit(keyspaceGroupID)
 	if err != nil || splitTargetAM == nil {
 		return err
 	}
-	splitTargetAllocator, err := splitTargetAM.GetAllocator(dcLocation)
-	if err != nil {
-		return err
-	}
-	splitSourceAllocator, err := splitSourceAM.GetAllocator(dcLocation)
-	if err != nil {
-		return err
-	}
+	splitTargetAllocator := splitTargetAM.GetAllocator()
+	splitSourceAllocator := splitSourceAM.GetAllocator()
 	splitTargetTSO, err := splitTargetAllocator.GenerateTSO(context.Background(), 1)
 	if err != nil {
 		return err
@@ -1312,7 +1247,7 @@ func (kgm *KeyspaceGroupManager) mergingChecker(ctx context.Context, mergeTarget
 	log.Info("start to merge the keyspace group",
 		zap.String("member", kgm.tsoServiceID.ServiceAddr),
 		zap.Uint32("merge-target-id", mergeTargetID),
-		zap.Any("merge-list", mergeList))
+		zap.Uint32s("merge-list", mergeList))
 	defer logutil.LogPanic()
 	defer kgm.wg.Done()
 
@@ -1331,7 +1266,7 @@ mergeLoop:
 			log.Info("merging checker is closed",
 				zap.String("member", kgm.tsoServiceID.ServiceAddr),
 				zap.Uint32("merge-target-id", mergeTargetID),
-				zap.Any("merge-list", mergeList))
+				zap.Uint32s("merge-list", mergeList))
 			return
 		case <-checkTicker.C:
 		}
@@ -1341,7 +1276,7 @@ mergeLoop:
 			log.Warn("unable to get the merge target allocator manager",
 				zap.String("member", kgm.tsoServiceID.ServiceAddr),
 				zap.Uint32("keyspace-group-id", mergeTargetID),
-				zap.Any("merge-list", mergeList),
+				zap.Uint32s("merge-list", mergeList),
 				zap.Error(err))
 			continue
 		}
@@ -1351,19 +1286,22 @@ mergeLoop:
 			log.Debug("current tso node is not the merge target primary",
 				zap.String("member", kgm.tsoServiceID.ServiceAddr),
 				zap.Uint32("merge-target-id", mergeTargetID),
-				zap.Any("merge-list", mergeList))
+				zap.Uint32s("merge-list", mergeList))
 			continue
 		}
 		// Check if the keyspace group primaries in the merge map are all gone.
 		if len(mergeMap) != 0 {
 			for id := range mergeMap {
-				leaderPath := keypath.KeyspaceGroupPrimaryPath(kgm.tsoSvcRootPath, id)
-				val, err := kgm.tsoSvcStorage.Load(leaderPath)
+				leaderPath := keypath.LeaderPath(&keypath.MsParam{
+					ServiceName: constant.TSOServiceName,
+					GroupID:     id,
+				})
+				val, err := kgm.storage.Load(leaderPath)
 				if err != nil {
 					log.Error("failed to check if the keyspace group primary in the merge list has gone",
 						zap.String("member", kgm.tsoServiceID.ServiceAddr),
 						zap.Uint32("merge-target-id", mergeTargetID),
-						zap.Any("merge-list", mergeList),
+						zap.Uint32s("merge-list", mergeList),
 						zap.Uint32("merge-id", id),
 						zap.Any("remaining", mergeMap),
 						zap.Error(err))
@@ -1382,17 +1320,18 @@ mergeLoop:
 			"start to calculate the newly merged TSO",
 			zap.String("member", kgm.tsoServiceID.ServiceAddr),
 			zap.Uint32("merge-target-id", mergeTargetID),
-			zap.Any("merge-list", mergeList))
+			zap.Uint32s("merge-list", mergeList))
 		// All the keyspace group primaries in the merge list are gone,
 		// calculate the newly merged TSO to make sure it is greater than the original ones.
 		var mergedTS time.Time
 		for _, id := range mergeList {
-			ts, err := kgm.tsoSvcStorage.LoadTimestamp(keypath.KeyspaceGroupGlobalTSPath(id))
+			ts, err := kgm.storage.LoadTimestamp(
+				keypath.Prefix(keypath.TimestampPath(id)))
 			if err != nil {
 				log.Error("failed to load the keyspace group TSO",
 					zap.String("member", kgm.tsoServiceID.ServiceAddr),
 					zap.Uint32("merge-target-id", mergeTargetID),
-					zap.Any("merge-list", mergeList),
+					zap.Uint32s("merge-list", mergeList),
 					zap.Uint32("merge-id", id),
 					zap.Time("ts", ts),
 					zap.Error(err))
@@ -1408,26 +1347,16 @@ mergeLoop:
 			log.Info("start to set the newly merged TSO",
 				zap.String("member", kgm.tsoServiceID.ServiceAddr),
 				zap.Uint32("merge-target-id", mergeTargetID),
-				zap.Any("merge-list", mergeList),
+				zap.Uint32s("merge-list", mergeList),
 				zap.Time("merged-ts", mergedTS))
-			// TODO: support the Local TSO Allocator.
-			allocator, err := am.GetAllocator(GlobalDCLocation)
-			if err != nil {
-				log.Error("failed to get the allocator",
-					zap.String("member", kgm.tsoServiceID.ServiceAddr),
-					zap.Uint32("merge-target-id", mergeTargetID),
-					zap.Any("merge-list", mergeList),
-					zap.Error(err))
-				continue
-			}
-			err = allocator.SetTSO(
+			err = am.GetAllocator().SetTSO(
 				tsoutil.GenerateTS(tsoutil.GenerateTimestamp(mergedTS, 1)),
 				true, true)
 			if err != nil {
 				log.Error("failed to update the newly merged TSO",
 					zap.String("member", kgm.tsoServiceID.ServiceAddr),
 					zap.Uint32("merge-target-id", mergeTargetID),
-					zap.Any("merge-list", mergeList),
+					zap.Uint32s("merge-list", mergeList),
 					zap.Time("merged-ts", mergedTS),
 					zap.Error(err))
 				continue
@@ -1439,7 +1368,7 @@ mergeLoop:
 			log.Error("failed to finish the merge",
 				zap.String("member", kgm.tsoServiceID.ServiceAddr),
 				zap.Uint32("merge-target-id", mergeTargetID),
-				zap.Any("merge-list", mergeList),
+				zap.Uint32s("merge-list", mergeList),
 				zap.Error(err))
 			continue
 		}
@@ -1447,7 +1376,7 @@ mergeLoop:
 		log.Info("finished merging keyspace group",
 			zap.String("member", kgm.tsoServiceID.ServiceAddr),
 			zap.Uint32("merge-target-id", mergeTargetID),
-			zap.Any("merge-list", mergeList),
+			zap.Uint32s("merge-list", mergeList),
 			zap.Time("merged-ts", mergedTS))
 		return
 	}
@@ -1487,7 +1416,7 @@ func (kgm *KeyspaceGroupManager) groupSplitPatroller() {
 				zap.Uint32("keyspace-group-id", groupID),
 				zap.Uint32("keyspace-id", group.Keyspaces[0]))
 			// Request the TSO manually to speed up the split process.
-			_, _, err := kgm.HandleTSORequest(kgm.ctx, group.Keyspaces[0], groupID, GlobalDCLocation, 1)
+			_, _, err := kgm.HandleTSORequest(kgm.ctx, group.Keyspaces[0], groupID, 1)
 			if err != nil {
 				log.Warn("failed to request tso for the splitting keyspace group",
 					zap.Uint32("keyspace-group-id", groupID),
@@ -1540,12 +1469,7 @@ func (kgm *KeyspaceGroupManager) deletedGroupCleaner() {
 			log.Info("delete the keyspace group tso key",
 				zap.Uint32("keyspace-group-id", groupID))
 			// Clean up the remaining TSO keys.
-			// TODO: support the Local TSO Allocator clean up.
-			err := kgm.tsoSvcStorage.DeleteTimestamp(
-				keypath.TimestampPath(
-					keypath.KeyspaceGroupGlobalTSPath(groupID),
-				),
-			)
+			err := kgm.storage.DeleteTimestamp(groupID)
 			if err != nil {
 				log.Warn("failed to delete the keyspace group tso key",
 					zap.Uint32("keyspace-group-id", groupID),

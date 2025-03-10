@@ -28,18 +28,20 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pingcap/failpoint"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
-	"github.com/tikv/pd/pkg/utils/syncutil"
-	"github.com/tikv/pd/pkg/utils/tempurl"
-	"github.com/tikv/pd/pkg/utils/testutil"
 	"go.etcd.io/etcd/api/v3/etcdserverpb"
 	"go.etcd.io/etcd/api/v3/mvccpb"
 	etcdtypes "go.etcd.io/etcd/client/pkg/v3/types"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.etcd.io/etcd/server/v3/embed"
 	"go.uber.org/goleak"
+
+	"github.com/pingcap/failpoint"
+
+	"github.com/tikv/pd/pkg/utils/syncutil"
+	"github.com/tikv/pd/pkg/utils/tempurl"
+	"github.com/tikv/pd/pkg/utils/testutil"
 )
 
 func TestMain(m *testing.M) {
@@ -781,4 +783,49 @@ func (suite *loopWatcherTestSuite) put(re *require.Assertions, key, value string
 	resp, err := kv.Get(suite.ctx, key)
 	re.NoError(err)
 	re.Equal(value, string(resp.Kvs[0].Value))
+}
+
+func TestWriteKeyToFile(t *testing.T) {
+	re := require.New(t)
+	tempFile, err := os.CreateTemp("", "testfile")
+	re.NoError(err)
+	defer os.Remove(tempFile.Name())
+
+	key := "test/key123"
+	op := "get"
+	err = writeKeyToFile(tempFile.Name(), key, op)
+	re.NoError(err)
+
+	content, err := os.ReadFile(tempFile.Name())
+	re.NoError(err)
+	expectedContent := "test/key get\n"
+	re.Equal(expectedContent, string(content))
+}
+
+func TestWriteKeyToFileMultipleKeys(t *testing.T) {
+	re := require.New(t)
+	tempFile, err := os.CreateTemp("", "testfile")
+	re.NoError(err)
+	defer os.Remove(tempFile.Name())
+
+	keys := []string{"test/key123", "another/key456", "key789"}
+	op := "put"
+	for _, key := range keys {
+		err = writeKeyToFile(tempFile.Name(), key, op)
+		re.NoError(err)
+	}
+
+	content, err := os.ReadFile(tempFile.Name())
+	re.NoError(err)
+	expectedContent := "test/key put\nanother/key put\nkey put\n"
+	re.Equal(expectedContent, string(content))
+}
+
+func TestWriteKeyToFileError(t *testing.T) {
+	re := require.New(t)
+	invalidFilePath := "/invalid/path/testfile"
+	key := "test/key123"
+	op := "get"
+	err := writeKeyToFile(invalidFilePath, key, op)
+	re.Error(err)
 }

@@ -19,9 +19,10 @@ import (
 	"io"
 	"net/http"
 
+	"github.com/unrolled/render"
+
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/server"
-	"github.com/unrolled/render"
 )
 
 // HTTPHandler is a handler to handle the auto scaling HTTP request.

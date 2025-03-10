@@ -27,12 +27,16 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/suite"
+	"go.uber.org/goleak"
+
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/stretchr/testify/require"
-	"github.com/stretchr/testify/suite"
+
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/response"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
@@ -40,7 +44,6 @@ import (
 	"github.com/tikv/pd/server/api"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
-	"go.uber.org/goleak"
 )
 
 func TestMain(m *testing.M) {
@@ -171,8 +174,8 @@ func (suite *middlewareTestSuite) TestRequestInfoMiddleware() {
 	re.Equal(http.StatusOK, resp.StatusCode)
 
 	re.Equal("Profile", resp.Header.Get("service-label"))
-	re.Equal("{\"seconds\":[\"1\"]}", resp.Header.Get("url-param"))
-	re.Equal("{\"testkey\":\"testvalue\"}", resp.Header.Get("body-param"))
+	re.JSONEq("{\"seconds\":[\"1\"]}", resp.Header.Get("url-param"))
+	re.JSONEq("{\"testkey\":\"testvalue\"}", resp.Header.Get("body-param"))
 	re.Equal("HTTP/1.1/POST:/pd/api/v1/debug/pprof/profile", resp.Header.Get("method"))
 	re.Equal("anonymous", resp.Header.Get("caller-id"))
 	re.Equal("127.0.0.1", resp.Header.Get("ip"))
@@ -209,7 +212,7 @@ func BenchmarkDoRequestWithServiceMiddleware(b *testing.B) {
 	resp, _ := tests.TestDialClient.Do(req)
 	resp.Body.Close()
 	b.StartTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		doTestRequestWithLogAudit(leader)
 	}
 	cancel()
@@ -516,7 +519,7 @@ func BenchmarkDoRequestWithLocalLogAudit(b *testing.B) {
 	resp, _ := tests.TestDialClient.Do(req)
 	resp.Body.Close()
 	b.StartTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		doTestRequestWithLogAudit(leader)
 	}
 	cancel()
@@ -538,7 +541,7 @@ func BenchmarkDoRequestWithPrometheusAudit(b *testing.B) {
 	resp, _ := tests.TestDialClient.Do(req)
 	resp.Body.Close()
 	b.StartTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		doTestRequestWithPrometheus(leader)
 	}
 	cancel()
@@ -560,7 +563,7 @@ func BenchmarkDoRequestWithoutServiceMiddleware(b *testing.B) {
 	resp, _ := tests.TestDialClient.Do(req)
 	resp.Body.Close()
 	b.StartTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		doTestRequestWithLogAudit(leader)
 	}
 	cancel()
@@ -667,6 +670,42 @@ func (suite *redirectorTestSuite) TestAllowFollowerHandle() {
 	re.Equal(http.StatusOK, resp.StatusCode)
 	_, err = io.ReadAll(resp.Body)
 	re.NoError(err)
+}
+
+func (suite *redirectorTestSuite) TestPing() {
+	re := suite.Require()
+	// Find a follower.
+	var follower *server.Server
+	leader := suite.cluster.GetLeaderServer()
+	for _, svr := range suite.cluster.GetServers() {
+		if svr != leader {
+			follower = svr.GetServer()
+			break
+		}
+	}
+
+	for _, svr := range suite.cluster.GetServers() {
+		if svr.GetServer() != follower {
+			svr.Stop()
+		}
+	}
+	addr := follower.GetAddr() + "/pd/api/v1/ping"
+	request, err := http.NewRequest(http.MethodGet, addr, http.NoBody)
+	// ping request should not be redirected.
+	request.Header.Add(apiutil.PDAllowFollowerHandleHeader, "true")
+	re.NoError(err)
+	resp, err := tests.TestDialClient.Do(request)
+	re.NoError(err)
+	defer resp.Body.Close()
+	re.Equal(http.StatusOK, resp.StatusCode)
+	_, err = io.ReadAll(resp.Body)
+	re.NoError(err)
+	for _, svr := range suite.cluster.GetServers() {
+		if svr.GetServer() != follower {
+			re.NoError(svr.Run())
+		}
+	}
+	re.NotEmpty(suite.cluster.WaitLeader())
 }
 
 func (suite *redirectorTestSuite) TestNotLeader() {
@@ -796,6 +835,24 @@ func TestRemovingProgress(t *testing.T) {
 	output = sendRequest(re, leader.GetAddr()+"/pd/api/v1/stores/progress?id=2", http.MethodGet, http.StatusNotFound)
 	re.Contains(string(output), "no progress found for the given store ID")
 
+	// wait that stores are up
+	testutil.Eventually(re, func() bool {
+		output = sendRequest(re, leader.GetAddr()+"/pd/api/v1/stores", http.MethodGet, http.StatusOK)
+		var storesInfo response.StoresInfo
+		if err := json.Unmarshal(output, &storesInfo); err != nil {
+			return false
+		}
+		if len(storesInfo.Stores) != 3 {
+			return false
+		}
+		for _, store := range storesInfo.Stores {
+			if store.Store.GetNodeState() != metapb.NodeState_Serving {
+				return false
+			}
+		}
+		return true
+	})
+
 	// remove store 1 and store 2
 	_ = sendRequest(re, leader.GetAddr()+"/pd/api/v1/store/1", http.MethodDelete, http.StatusOK)
 	_ = sendRequest(re, leader.GetAddr()+"/pd/api/v1/store/2", http.MethodDelete, http.StatusOK)
@@ -838,6 +895,9 @@ func TestRemovingProgress(t *testing.T) {
 
 	testutil.Eventually(re, func() bool {
 		// wait for cluster prepare
+		if leader.GetRaftCluster() == nil {
+			return false
+		}
 		if !leader.GetRaftCluster().IsPrepared() {
 			leader.GetRaftCluster().SetPrepared()
 			return false
@@ -864,7 +924,7 @@ func TestRemovingProgress(t *testing.T) {
 		}
 		// store 1: 40/10s = 4
 		// store 2: 20/10s = 2
-		// average speed = (2+4)/2 = 33
+		// average speed = (2+4)/2 = 3.0
 		if p.CurrentSpeed != 3.0 {
 			return false
 		}
@@ -938,6 +998,8 @@ func TestPreparingProgress(t *testing.T) {
 	defer cancel()
 	cluster, err := tests.NewTestCluster(ctx, 1, func(conf *config.Config, _ string) {
 		conf.Replication.MaxReplicas = 1
+		// prevent scheduling
+		conf.Schedule.RegionScheduleLimit = 0
 	})
 	re.NoError(err)
 	defer cluster.Destroy()
@@ -1008,28 +1070,15 @@ func TestPreparingProgress(t *testing.T) {
 	for _, store := range stores[2:] {
 		tests.MustPutStore(re, cluster, store)
 	}
-	// no store preparing
-	output := sendRequest(re, leader.GetAddr()+"/pd/api/v1/stores/progress?action=preparing", http.MethodGet, http.StatusNotFound)
-	re.Contains(string(output), "no progress found for the action")
-	output = sendRequest(re, leader.GetAddr()+"/pd/api/v1/stores/progress?id=4", http.MethodGet, http.StatusNotFound)
-	re.Contains(string(output), "no progress found for the given store ID")
 
 	if !leader.GetRaftCluster().IsPrepared() {
 		testutil.Eventually(re, func() bool {
 			if leader.GetRaftCluster().IsPrepared() {
 				return true
 			}
-			url := leader.GetAddr() + "/pd/api/v1/stores/progress?action=preparing"
-			req, _ := http.NewRequest(http.MethodGet, url, http.NoBody)
-			resp, err := tests.TestDialClient.Do(req)
-			re.NoError(err)
-			defer resp.Body.Close()
-			if resp.StatusCode != http.StatusNotFound {
-				return false
-			}
-			// is not prepared
-			output, err := io.ReadAll(resp.Body)
-			re.NoError(err)
+
+			// no store preparing
+			output := sendRequest(re, leader.GetAddr()+"/pd/api/v1/stores/progress?action=preparing", http.MethodGet, http.StatusNotFound)
 			re.Contains(string(output), "no progress found for the action")
 			output = sendRequest(re, leader.GetAddr()+"/pd/api/v1/stores/progress?id=4", http.MethodGet, http.StatusNotFound)
 			re.Contains(string(output), "no progress found for the given store ID")
@@ -1092,7 +1141,7 @@ func TestPreparingProgress(t *testing.T) {
 		return true
 	})
 
-	output = sendRequest(re, leader.GetAddr()+"/pd/api/v1/stores/progress?id=4", http.MethodGet, http.StatusOK)
+	output := sendRequest(re, leader.GetAddr()+"/pd/api/v1/stores/progress?id=4", http.MethodGet, http.StatusOK)
 	re.NoError(json.Unmarshal(output, &p))
 	re.Equal("preparing", p.Action)
 	re.Equal("0.05", fmt.Sprintf("%.2f", p.Progress))
@@ -1101,13 +1150,28 @@ func TestPreparingProgress(t *testing.T) {
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs"))
 }
 
-func sendRequest(re *require.Assertions, url string, method string, statusCode int) []byte {
+func sendRequest(re *require.Assertions, url string, method string, statusCode int) (output []byte) {
 	req, _ := http.NewRequest(method, url, http.NoBody)
-	resp, err := tests.TestDialClient.Do(req)
-	re.NoError(err)
-	re.Equal(statusCode, resp.StatusCode)
-	output, err := io.ReadAll(resp.Body)
-	re.NoError(err)
-	resp.Body.Close()
+
+	testutil.Eventually(re, func() bool {
+		resp, err := tests.TestDialClient.Do(req)
+		if err != nil {
+			return false
+		}
+		defer resp.Body.Close()
+
+		// Due to service unavailability caused by environmental issues,
+		// we will retry it.
+		if resp.StatusCode == http.StatusServiceUnavailable {
+			return false
+		}
+		if resp.StatusCode != statusCode {
+			return false
+		}
+		output, err = io.ReadAll(resp.Body)
+		re.NoError(err)
+		return true
+	})
+
 	return output
 }

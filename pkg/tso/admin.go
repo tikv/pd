@@ -19,9 +19,10 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/unrolled/render"
+
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/apiutil"
-	"github.com/unrolled/render"
 )
 
 // Handler defines the common behaviors of a basic tso handler.

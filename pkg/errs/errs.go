@@ -15,9 +15,10 @@
 package errs
 
 import (
-	"github.com/pingcap/errors"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
+
+	"github.com/pingcap/errors"
 )
 
 // ZapError is used to make the log output easier.

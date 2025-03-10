@@ -15,8 +15,9 @@
 package simutil
 
 import (
-	"github.com/pingcap/log"
 	"go.uber.org/zap"
+
+	"github.com/pingcap/log"
 )
 
 // Logger is the global logger used for simulator.

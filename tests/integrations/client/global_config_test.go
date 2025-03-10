@@ -21,18 +21,20 @@ import (
 	"testing"
 	"time"
 
-	pd "github.com/tikv/pd/client"
+	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/suite"
+	"go.uber.org/zap"
+	"google.golang.org/grpc"
 
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
-	"github.com/stretchr/testify/require"
-	"github.com/stretchr/testify/suite"
+
+	pd "github.com/tikv/pd/client"
+	"github.com/tikv/pd/client/pkg/caller"
 	"github.com/tikv/pd/pkg/utils/assertutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server"
-	"go.uber.org/zap"
-	"google.golang.org/grpc"
 )
 
 const globalConfigPath = "/global/config/"
@@ -79,7 +81,10 @@ func (suite *globalConfigTestSuite) SetupSuite() {
 	suite.server = &server.GrpcServer{Server: gsi}
 	re.NoError(err)
 	addr := suite.server.GetAddr()
-	suite.client, err = pd.NewClientWithContext(suite.server.Context(), []string{addr}, pd.SecurityOption{})
+	suite.client, err = pd.NewClientWithContext(suite.server.Context(),
+		caller.TestComponent,
+		[]string{addr}, pd.SecurityOption{},
+	)
 	re.NoError(err)
 }
 

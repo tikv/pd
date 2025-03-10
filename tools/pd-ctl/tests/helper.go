@@ -20,6 +20,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
+
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/response"
 	"github.com/tikv/pd/pkg/utils/typeutil"

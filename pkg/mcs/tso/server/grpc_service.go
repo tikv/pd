@@ -21,22 +21,17 @@ import (
 	"strconv"
 	"time"
 
+	"google.golang.org/grpc"
+
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/tsopb"
 	"github.com/pingcap/log"
+
 	bs "github.com/tikv/pd/pkg/basicserver"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/registry"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
-)
-
-// gRPC errors
-var (
-	ErrNotStarted        = status.Errorf(codes.Unavailable, "server not started")
-	ErrClusterMismatched = status.Errorf(codes.Unavailable, "cluster mismatched")
 )
 
 var _ tsopb.TSOServer = (*Service)(nil)
@@ -100,25 +95,22 @@ func (s *Service) Tso(stream tsopb.TSO_TsoServer) error {
 		start := time.Now()
 		// TSO uses leader lease to determine validity. No need to check leader here.
 		if s.IsClosed() {
-			return status.Errorf(codes.Unknown, "server not started")
+			return errs.ErrNotStarted
 		}
 		header := request.GetHeader()
 		clusterID := header.GetClusterId()
 		if clusterID != keypath.ClusterID() {
-			return status.Errorf(
-				codes.FailedPrecondition, "mismatch cluster id, need %d but got %d",
-				keypath.ClusterID(), clusterID)
+			return errs.ErrMismatchClusterID(keypath.ClusterID(), clusterID)
 		}
 		keyspaceID := header.GetKeyspaceId()
 		keyspaceGroupID := header.GetKeyspaceGroupId()
-		dcLocation := request.GetDcLocation()
 		count := request.GetCount()
 		ts, keyspaceGroupBelongTo, err := s.keyspaceGroupManager.HandleTSORequest(
 			ctx,
 			keyspaceID, keyspaceGroupID,
-			dcLocation, count)
+			count)
 		if err != nil {
-			return status.Error(codes.Unknown, err.Error())
+			return errs.ErrUnknown(err)
 		}
 		keyspaceGroupIDStr := strconv.FormatUint(uint64(keyspaceGroupID), 10)
 		tsoHandleDuration.WithLabelValues(keyspaceGroupIDStr).Observe(time.Since(start).Seconds())
@@ -198,7 +190,7 @@ func (s *Service) GetMinTS(
 		}, nil
 	}
 
-	minTS, kgAskedCount, kgTotalCount, err := s.keyspaceGroupManager.GetMinTS(request.GetDcLocation())
+	minTS, kgAskedCount, kgTotalCount, err := s.keyspaceGroupManager.GetMinTS()
 	if err != nil {
 		return &tsopb.GetMinTSResponse{
 			Header: wrapErrorToHeader(
@@ -219,10 +211,10 @@ func (s *Service) GetMinTS(
 
 func (s *Service) validRequest(header *tsopb.RequestHeader) (tsopb.ErrorType, error) {
 	if s.IsClosed() || s.keyspaceGroupManager == nil {
-		return tsopb.ErrorType_NOT_BOOTSTRAPPED, ErrNotStarted
+		return tsopb.ErrorType_NOT_BOOTSTRAPPED, errs.ErrNotStarted
 	}
 	if header == nil || header.GetClusterId() != keypath.ClusterID() {
-		return tsopb.ErrorType_CLUSTER_MISMATCHED, ErrClusterMismatched
+		return tsopb.ErrorType_CLUSTER_MISMATCHED, errs.ErrMismatchClusterID(keypath.ClusterID(), header.GetClusterId())
 	}
 	return tsopb.ErrorType_OK, nil
 }

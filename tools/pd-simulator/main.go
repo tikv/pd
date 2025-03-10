@@ -23,8 +23,11 @@ import (
 	"time"
 
 	"github.com/BurntSushi/toml"
-	"github.com/pingcap/log"
 	flag "github.com/spf13/pflag"
+	"go.uber.org/zap"
+
+	"github.com/pingcap/log"
+
 	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/utils/logutil"
@@ -37,7 +40,6 @@ import (
 	"github.com/tikv/pd/tools/pd-simulator/simulator/cases"
 	sc "github.com/tikv/pd/tools/pd-simulator/simulator/config"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/simutil"
-	"go.uber.org/zap"
 )
 
 var (
@@ -112,7 +114,7 @@ func run(simCase string, simConfig *sc.SimConfig) {
 
 // NewSingleServer creates a pd server for simulator.
 func NewSingleServer(ctx context.Context, simConfig *sc.SimConfig) (*server.Server, testutil.CleanupFunc) {
-	err := logutil.SetupLogger(simConfig.ServerConfig.Log, &simConfig.ServerConfig.Logger, &simConfig.ServerConfig.LogProps, simConfig.ServerConfig.Security.RedactInfoLog)
+	err := logutil.SetupLogger(&simConfig.ServerConfig.Log, &simConfig.ServerConfig.Logger, &simConfig.ServerConfig.LogProps, simConfig.ServerConfig.Security.RedactInfoLog)
 	if err == nil {
 		log.ReplaceGlobals(simConfig.ServerConfig.Logger, simConfig.ServerConfig.LogProps)
 	} else {

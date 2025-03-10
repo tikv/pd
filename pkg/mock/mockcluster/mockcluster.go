@@ -21,11 +21,14 @@ import (
 	"time"
 
 	"github.com/docker/go-units"
+
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mock/mockid"
@@ -118,8 +121,8 @@ func (mc *Cluster) GetStorage() storage.Storage {
 }
 
 // AllocID returns a new unique ID.
-func (mc *Cluster) AllocID() (uint64, error) {
-	return mc.IDAllocator.Alloc()
+func (mc *Cluster) AllocID(uint32) (uint64, uint32, error) {
+	return mc.IDAllocator.Alloc(1)
 }
 
 // UpdateRegionsLabelLevelStats updates the label level stats for the regions.
@@ -187,7 +190,7 @@ func hotRegionsFromStore(w *statistics.HotCache, storeID uint64, kind utils.RWTy
 
 // AllocPeer allocs a new peer on a store.
 func (mc *Cluster) AllocPeer(storeID uint64) (*metapb.Peer, error) {
-	peerID, err := mc.AllocID()
+	peerID, _, err := mc.AllocID(1)
 	if err != nil {
 		log.Error("failed to alloc peer", errs.ZapError(err))
 		return nil, err
@@ -202,7 +205,7 @@ func (mc *Cluster) AllocPeer(storeID uint64) (*metapb.Peer, error) {
 func (mc *Cluster) initRuleManager() {
 	if mc.RuleManager == nil {
 		mc.RuleManager = placement.NewRuleManager(mc.ctx, mc.GetStorage(), mc, mc.GetSharedConfig())
-		mc.RuleManager.Initialize(int(mc.GetReplicationConfig().MaxReplicas), mc.GetReplicationConfig().LocationLabels, mc.GetReplicationConfig().IsolationLevel)
+		mc.RuleManager.Initialize(int(mc.GetReplicationConfig().MaxReplicas), mc.GetReplicationConfig().LocationLabels, mc.GetReplicationConfig().IsolationLevel, false)
 	}
 }
 
@@ -360,7 +363,7 @@ func (mc *Cluster) AddRegionStoreWithLeader(storeID uint64, regionCount int, lea
 	}
 	mc.AddRegionStore(storeID, regionCount)
 	for range leaderCount {
-		id, _ := mc.AllocID()
+		id, _, _ := mc.AllocID(1)
 		mc.AddLeaderRegion(id, storeID)
 	}
 }
@@ -561,9 +564,9 @@ func (mc *Cluster) UpdateStoreLeaderWeight(storeID uint64, weight float64) {
 func (mc *Cluster) SetStoreEvictLeader(storeID uint64, enableEvictLeader bool) {
 	store := mc.GetStore(storeID)
 	if enableEvictLeader {
-		mc.PutStore(store.Clone(core.PauseLeaderTransfer()))
+		mc.PutStore(store.Clone(core.PauseLeaderTransfer(constant.In)))
 	} else {
-		mc.PutStore(store.Clone(core.ResumeLeaderTransfer()))
+		mc.PutStore(store.Clone(core.ResumeLeaderTransfer(constant.In)))
 	}
 }
 

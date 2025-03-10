@@ -23,10 +23,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pingcap/errors"
-	"github.com/pingcap/log"
-	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/utils/logutil"
 	"go.etcd.io/etcd/client/pkg/v3/transport"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -35,6 +31,12 @@ import (
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
+
+	"github.com/pingcap/errors"
+	"github.com/pingcap/log"
+
+	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/utils/logutil"
 )
 
 const (

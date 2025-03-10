@@ -24,13 +24,15 @@ import (
 	"time"
 
 	"github.com/gogo/protobuf/proto"
-	"github.com/pingcap/kvproto/pkg/encryptionpb"
 	"github.com/stretchr/testify/require"
+	clientv3 "go.etcd.io/etcd/client/v3"
+
+	"github.com/pingcap/kvproto/pkg/encryptionpb"
+
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/election"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
-	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
 // #nosec G101
@@ -329,8 +331,7 @@ func TestWatcher(t *testing.T) {
 	// Listen on watcher event
 	reloadEvent := make(chan struct{}, 10)
 	helper.eventAfterReloadByWatcher = func() {
-		var e struct{}
-		reloadEvent <- e
+		reloadEvent <- struct{}{}
 	}
 	// Use default config.
 	config := &Config{}
@@ -357,6 +358,8 @@ func TestWatcher(t *testing.T) {
 			},
 		},
 	}
+	// wait watch to start
+	time.Sleep(time.Second)
 	err = saveKeys(leadership, masterKeyMeta, keys, defaultKeyManagerHelper())
 	re.NoError(err)
 	<-reloadEvent

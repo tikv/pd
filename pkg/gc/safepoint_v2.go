@@ -4,7 +4,7 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//	http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -18,16 +18,19 @@ import (
 	"context"
 	"time"
 
+	"go.uber.org/zap"
+
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/pingcap/log"
+
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/syncutil"
-	"go.uber.org/zap"
 )
 
 var (
@@ -99,7 +102,7 @@ func (manager *SafePointV2Manager) checkKeyspace(keyspaceID uint32, updateReques
 		}
 		// If a keyspace does not exist, then loading its gc safe point is prohibited.
 		if meta == nil {
-			return keyspace.ErrKeyspaceNotFound
+			return errs.ErrKeyspaceNotFound
 		}
 		// If keyspace's state does not permit updating safe point, we return error.
 		if updateRequest && !slice.Contains(allowUpdateSafePoint, meta.GetState()) {

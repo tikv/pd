@@ -20,18 +20,20 @@ import (
 	"sync"
 
 	"github.com/gogo/protobuf/proto"
+	"go.etcd.io/etcd/api/v3/mvccpb"
+	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.uber.org/zap"
+
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
+
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
-	"go.etcd.io/etcd/api/v3/mvccpb"
-	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.uber.org/zap"
 )
 
-// Watcher is used to watch the PD API server for any meta changes.
+// Watcher is used to watch the PD for any meta changes.
 type Watcher struct {
 	wg     sync.WaitGroup
 	ctx    context.Context
@@ -46,7 +48,7 @@ type Watcher struct {
 	storeWatcher *etcdutil.LoopWatcher
 }
 
-// NewWatcher creates a new watcher to watch the meta change from PD API server.
+// NewWatcher creates a new watcher to watch the meta change from PD.
 func NewWatcher(
 	ctx context.Context,
 	etcdClient *clientv3.Client,

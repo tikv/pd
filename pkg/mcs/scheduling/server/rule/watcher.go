@@ -19,7 +19,12 @@ import (
 	"strings"
 	"sync"
 
+	"go.etcd.io/etcd/api/v3/mvccpb"
+	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.uber.org/zap"
+
 	"github.com/pingcap/log"
+
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/schedule/checker"
 	"github.com/tikv/pd/pkg/schedule/labeler"
@@ -27,12 +32,9 @@ import (
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
-	"go.etcd.io/etcd/api/v3/mvccpb"
-	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.uber.org/zap"
 )
 
-// Watcher is used to watch the PD API server for any Placement Rule changes.
+// Watcher is used to watch the PD for any Placement Rule changes.
 type Watcher struct {
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -72,7 +74,7 @@ type Watcher struct {
 	patch *placement.RuleConfigPatch
 }
 
-// NewWatcher creates a new watcher to watch the Placement Rule change from PD API server.
+// NewWatcher creates a new watcher to watch the Placement Rule change from PD.
 func NewWatcher(
 	ctx context.Context,
 	etcdClient *clientv3.Client,
@@ -157,7 +159,7 @@ func (rw *Watcher) initializeRuleWatcher() error {
 		key := string(kv.Key)
 		if strings.HasPrefix(key, rw.rulesPathPrefix) {
 			log.Info("delete placement rule", zap.String("key", key))
-			ruleJSON, err := rw.ruleStorage.LoadRule(strings.TrimPrefix(key, rw.rulesPathPrefix+"/"))
+			ruleJSON, err := rw.ruleStorage.LoadRule(strings.TrimPrefix(key, rw.rulesPathPrefix))
 			if err != nil {
 				return err
 			}
@@ -172,7 +174,7 @@ func (rw *Watcher) initializeRuleWatcher() error {
 			return err
 		} else if strings.HasPrefix(key, rw.ruleGroupPathPrefix) {
 			log.Info("delete placement rule group", zap.String("key", key))
-			trimmedKey := strings.TrimPrefix(key, rw.ruleGroupPathPrefix+"/")
+			trimmedKey := strings.TrimPrefix(key, rw.ruleGroupPathPrefix)
 			// Try to add the rule group change to the patch.
 			rw.patch.DeleteGroup(trimmedKey)
 			// Update the suspect key ranges
@@ -209,7 +211,6 @@ func (rw *Watcher) initializeRuleWatcher() error {
 }
 
 func (rw *Watcher) initializeRegionLabelWatcher() error {
-	prefixToTrim := rw.regionLabelPathPrefix + "/"
 	// TODO: use txn in region labeler.
 	preEventsFn := func([]*clientv3.Event) error {
 		// It will be locked until the postEventsFn is finished.
@@ -227,7 +228,7 @@ func (rw *Watcher) initializeRegionLabelWatcher() error {
 	deleteFn := func(kv *mvccpb.KeyValue) error {
 		key := string(kv.Key)
 		log.Info("delete region label rule", zap.String("key", key))
-		return rw.regionLabeler.DeleteLabelRuleLocked(strings.TrimPrefix(key, prefixToTrim))
+		return rw.regionLabeler.DeleteLabelRuleLocked(strings.TrimPrefix(key, rw.regionLabelPathPrefix))
 	}
 	postEventsFn := func([]*clientv3.Event) error {
 		defer rw.regionLabeler.Unlock()

@@ -19,12 +19,14 @@ import (
 	"math"
 	"time"
 
-	"github.com/pingcap/errors"
-	"github.com/pingcap/log"
-	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/utils/keypath"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
+
+	"github.com/pingcap/errors"
+	"github.com/pingcap/log"
+
+	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/utils/keypath"
 )
 
 // GCSafePointV2 represents the overall safe point for a specific keyspace.

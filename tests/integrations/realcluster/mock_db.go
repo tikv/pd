@@ -1,4 +1,4 @@
-// Copyright 2023 TiKV Authors
+// Copyright 2023 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,11 +20,12 @@ import (
 
 	"github.com/DATA-DOG/go-sqlmock"
 	mysqldriver "github.com/go-sql-driver/mysql"
-	"github.com/pingcap/log"
 	"github.com/stretchr/testify/require"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 	"moul.io/zapgorm2"
+
+	"github.com/pingcap/log"
 )
 
 // TestDB is a test database

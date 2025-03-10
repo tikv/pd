@@ -17,8 +17,9 @@ package config
 import (
 	"testing"
 
-	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/require"
+
+	"github.com/pingcap/kvproto/pkg/metapb"
 )
 
 func TestValidateLabels(t *testing.T) {

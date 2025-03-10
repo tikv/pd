@@ -23,11 +23,14 @@ import (
 	"time"
 
 	"github.com/gogo/protobuf/proto"
+	"github.com/prometheus/client_golang/prometheus"
+	"go.uber.org/zap"
+
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 	"github.com/pingcap/log"
-	"github.com/prometheus/client_golang/prometheus"
+
 	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/storage/endpoint"
@@ -35,7 +38,6 @@ import (
 	"github.com/tikv/pd/pkg/utils/jsonutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
-	"go.uber.org/zap"
 )
 
 const (
@@ -48,6 +50,8 @@ const (
 
 	reservedDefaultGroupName = "default"
 	middlePriority           = 8
+	unlimitedRate            = math.MaxInt32
+	unlimitedBurstLimit      = -1
 )
 
 // Manager is the manager of resource group.
@@ -98,7 +102,7 @@ func NewManager[T ConfigProvider](srv bs.Server) *Manager {
 	srv.AddStartCallback(func() {
 		log.Info("resource group manager starts to initialize", zap.String("name", srv.Name()))
 		m.storage = endpoint.NewStorageEndpoint(
-			kv.NewEtcdKVBase(srv.GetClient(), "resource_group"),
+			kv.NewEtcdKVBase(srv.GetClient()),
 			nil,
 		)
 		m.srv = srv
@@ -166,8 +170,8 @@ func (m *Manager) Init(ctx context.Context) error {
 			RUSettings: &RequestUnitSettings{
 				RU: &GroupTokenBucket{
 					Settings: &rmpb.TokenLimitSettings{
-						FillRate:   math.MaxInt32,
-						BurstLimit: -1,
+						FillRate:   unlimitedRate,
+						BurstLimit: unlimitedBurstLimit,
 					},
 				},
 			},

@@ -18,9 +18,11 @@ import (
 	"context"
 
 	"github.com/mailru/easyjson/jwriter"
+
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/replication_modepb"
+
 	"github.com/tikv/pd/pkg/core"
 )
 

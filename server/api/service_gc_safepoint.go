@@ -19,9 +19,10 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
+	"github.com/unrolled/render"
+
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/server"
-	"github.com/unrolled/render"
 )
 
 type serviceGCSafepointHandler struct {

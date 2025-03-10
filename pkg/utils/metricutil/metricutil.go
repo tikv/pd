@@ -16,12 +16,17 @@ package metricutil
 
 import (
 	"os"
+	"runtime"
 	"time"
 	"unicode"
 
-	"github.com/pingcap/log"
+	"github.com/grafana/pyroscope-go"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/push"
+	"go.uber.org/zap"
+
+	"github.com/pingcap/log"
+
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
@@ -99,4 +104,29 @@ func instanceName() string {
 		return "unknown"
 	}
 	return hostname
+}
+
+// EnablePyroscope enables pyroscope if pyroscope is enabled.
+func EnablePyroscope() {
+	if os.Getenv("PYROSCOPE_SERVER_ADDRESS") != "" {
+		runtime.SetMutexProfileFraction(5)
+		runtime.SetBlockProfileRate(5)
+		_, err := pyroscope.Start(pyroscope.Config{
+			ApplicationName:   "pd",
+			ServerAddress:     os.Getenv("PYROSCOPE_SERVER_ADDRESS"),
+			Logger:            pyroscope.StandardLogger,
+			AuthToken:         os.Getenv("PYROSCOPE_AUTH_TOKEN"),
+			TenantID:          os.Getenv("PYROSCOPE_TENANT_ID"),
+			BasicAuthUser:     os.Getenv("PYROSCOPE_BASIC_AUTH_USER"),
+			BasicAuthPassword: os.Getenv("PYROSCOPE_BASIC_AUTH_PASSWORD"),
+			ProfileTypes: []pyroscope.ProfileType{
+				pyroscope.ProfileCPU,
+				pyroscope.ProfileAllocSpace,
+			},
+			UploadRate: 30 * time.Second,
+		})
+		if err != nil {
+			log.Fatal("fail to start pyroscope", zap.Error(err))
+		}
+	}
 }

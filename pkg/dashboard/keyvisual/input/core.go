@@ -15,11 +15,13 @@
 package input
 
 import (
+	"go.uber.org/zap"
+
 	"github.com/pingcap/log"
 	regionpkg "github.com/pingcap/tidb-dashboard/pkg/keyvisual/region"
+
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/server"
-	"go.uber.org/zap"
 )
 
 const limit = 1024

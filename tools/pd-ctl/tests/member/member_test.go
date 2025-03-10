@@ -20,8 +20,10 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/require"
+
+	"github.com/pingcap/kvproto/pkg/pdpb"
+
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	pdTests "github.com/tikv/pd/tests"

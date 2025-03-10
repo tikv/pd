@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/pingcap/log"
+
 	"github.com/tikv/pd/pkg/errs"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/operator"

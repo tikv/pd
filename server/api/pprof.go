@@ -26,11 +26,13 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/pingcap/log"
-	"github.com/tikv/pd/pkg/versioninfo"
-	"github.com/tikv/pd/server"
 	"github.com/unrolled/render"
 	"go.uber.org/zap"
+
+	"github.com/pingcap/log"
+
+	"github.com/tikv/pd/pkg/versioninfo"
+	"github.com/tikv/pd/server"
 )
 
 // pprofHandler pprof handler

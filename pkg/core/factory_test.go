@@ -18,12 +18,14 @@ import (
 	"testing"
 
 	"github.com/gogo/protobuf/proto"
+
 	"github.com/pingcap/kvproto/pkg/metapb"
+
 	"github.com/tikv/pd/pkg/utils/typeutil"
 )
 
 func BenchmarkDeepClone(b *testing.B) {
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		src := &metapb.Region{Id: 1}
 		dst := typeutil.DeepClone(src, RegionFactory)
 		dst.Id = 1
@@ -35,7 +37,7 @@ func BenchmarkProtoClone(b *testing.B) {
 		dst := proto.Clone(src).(*metapb.Region)
 		return dst
 	}
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		src := &metapb.Region{Id: 1}
 		dst := clone(src)
 		dst.Id = 1

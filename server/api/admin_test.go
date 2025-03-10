@@ -23,9 +23,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/suite"
+
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/stretchr/testify/suite"
+
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/replication"
 	"github.com/tikv/pd/pkg/utils/apiutil"
@@ -318,13 +320,13 @@ func (suite *adminTestSuite) TestRecoverAllocID() {
 		tu.StatusOK(re)))
 	re.NoError(tu.CheckPostJSON(testDialClient, url, []byte(`{"id": "1000000"}`),
 		tu.StatusOK(re)))
-	id, err2 := suite.svr.GetAllocator().Alloc()
+	id, _, err2 := suite.svr.GetAllocator().Alloc(1)
 	re.NoError(err2)
 	re.Equal(uint64(1000001), id)
 	// recover alloc id again
 	re.NoError(tu.CheckPostJSON(testDialClient, url, []byte(`{"id": "99000000"}`),
 		tu.StatusOK(re)))
-	id, err2 = suite.svr.GetAllocator().Alloc()
+	id, _, err2 = suite.svr.GetAllocator().Alloc(1)
 	re.NoError(err2)
 	re.Equal(uint64(99000001), id)
 	// unmark

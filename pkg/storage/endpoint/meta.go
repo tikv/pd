@@ -21,8 +21,10 @@ import (
 	"time"
 
 	"github.com/gogo/protobuf/proto"
+
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
+
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/encryption"
 	"github.com/tikv/pd/pkg/errs"
@@ -63,13 +65,13 @@ const (
 // LoadMeta loads cluster meta from the storage. This method will only
 // be used by the PD server, so we should only implement it for the etcd storage.
 func (se *StorageEndpoint) LoadMeta(meta *metapb.Cluster) (bool, error) {
-	return se.loadProto(keypath.ClusterPath, meta)
+	return se.loadProto(keypath.ClusterPath(), meta)
 }
 
 // SaveMeta save cluster meta to the storage. This method will only
 // be used by the PD server, so we should only implement it for the etcd storage.
 func (se *StorageEndpoint) SaveMeta(meta *metapb.Cluster) error {
-	return se.saveProto(keypath.ClusterPath, meta)
+	return se.saveProto(keypath.ClusterPath(), meta)
 }
 
 // LoadStoreMeta loads one store from storage.
