@@ -33,7 +33,7 @@ func TestSaveLoadTimestamp(t *testing.T) {
 	expectedTS := time.Now().Round(0)
 	err := storage.SaveTimestamp(testGroupID, expectedTS)
 	re.NoError(err)
-	ts, err := storage.LoadTimestamp(keypath.Prefix(keypath.TimestampPath(testGroupID)))
+	ts, err := storage.LoadTimestamp(keypath.TimestampPath(testGroupID))
 	re.NoError(err)
 	re.Equal(expectedTS, ts)
 }
@@ -50,7 +50,7 @@ func TestTimestampTxn(t *testing.T) {
 	err = storage.SaveTimestamp(testGroupID, globalTS2)
 	re.Error(err)
 
-	ts, err := storage.LoadTimestamp(keypath.Prefix(keypath.TimestampPath(testGroupID)))
+	ts, err := storage.LoadTimestamp(keypath.TimestampPath(testGroupID))
 	re.NoError(err)
 	re.Equal(globalTS1, ts)
 }
