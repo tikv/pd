@@ -24,9 +24,9 @@ require (
 	github.com/pingcap/failpoint v0.0.0-20210918120811-547c13e3eb00
 	github.com/pingcap/kvproto v0.0.0-20240910154453-b242104f8d31
 	github.com/pingcap/log v1.1.1-0.20221110025148-ca232912c9f3
+	github.com/pmezard/go-difflib v1.0.0
 	github.com/prometheus/client_golang v1.19.0
 	github.com/prometheus/common v0.51.1
-	github.com/sergi/go-diff v1.1.0
 	github.com/spf13/cobra v1.8.0
 	github.com/spf13/pflag v1.0.5
 	github.com/stretchr/testify v1.9.0
@@ -139,7 +139,6 @@ require (
 	github.com/pingcap/tidb-dashboard v0.0.0-20241104061623-bce95733dad7 // indirect
 	github.com/pingcap/tipb v0.0.0-20220718022156-3e2483c20a9e // indirect
 	github.com/pkg/errors v0.9.1 // indirect
-	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/power-devops/perfstat v0.0.0-20221212215047-62379fc7944b // indirect
 	github.com/prometheus/client_model v0.6.0 // indirect
 	github.com/prometheus/procfs v0.13.0 // indirect
