@@ -227,7 +227,7 @@ func (m *Manager) StartBackgroundLoop(ctx context.Context) {
 			resp clientv3.WatchResponse
 			ok   bool
 		)
-		rch := watcher.Watch(ctx, EncryptionKeysPath, clientv3.WithRev(m.keysRevision()))
+		rch := etcdutil.Watch(watcher, ctx, EncryptionKeysPath, clientv3.WithRev(m.keysRevision()))
 
 	keyWatchLoop:
 		for {
