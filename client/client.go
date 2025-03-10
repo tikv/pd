@@ -436,12 +436,12 @@ func (c *client) UpdateOption(option opt.DynamicOption, value any) error {
 			return err
 		}
 	case opt.EnableTSOFollowerProxy:
-		if c.inner.getServiceMode() != pdpb.ServiceMode_PD_SVC_MODE {
-			return errors.New("[pd] tso follower proxy is only supported when PD provides TSO")
-		}
 		enable, ok := value.(bool)
 		if !ok {
 			return errors.New("[pd] invalid value type for EnableTSOFollowerProxy option, it should be bool")
+		}
+		if c.inner.getServiceMode() != pdpb.ServiceMode_PD_SVC_MODE && enable {
+			return errors.New("[pd] tso follower proxy is only supported when PD provides TSO")
 		}
 		c.inner.option.SetEnableTSOFollowerProxy(enable)
 	case opt.EnableFollowerHandle:
