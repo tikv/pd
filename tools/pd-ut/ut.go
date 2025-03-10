@@ -334,7 +334,7 @@ func cmdRun(args ...string) bool {
 		pwd, _ := os.Getwd()
 		tmpEtcdKeyFile = filepath.Join(pwd, tmpEtcdKeyFile)
 		// write task into file to identify the file
-		err = os.WriteFile(tmpEtcdKeyFile, []byte(tasksStr2), 0644)
+		err = os.WriteFile(tmpEtcdKeyFile, []byte(tasksStr2), 0600)
 		if err != nil {
 			fmt.Println("write tmp etcd key file error", err)
 			return false
@@ -416,7 +416,7 @@ func cmdRun(args ...string) bool {
 
 		etcdKey := string(etcdKeyFileContent)
 		tmpEtcdKey := removeDuplicate(tmpEtcdKeyFileContent)
-		os.WriteFile(tmpEtcdKeyFile, []byte(tmpEtcdKey), 0644)
+		os.WriteFile(tmpEtcdKeyFile, []byte(tmpEtcdKey), 0600)
 		// If the content is too long, maybe we can not print them.
 		fmt.Printf("etcd key: %s\ntest etcd key: %s\n", etcdKey, tmpEtcdKey)
 
