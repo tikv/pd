@@ -389,7 +389,15 @@ func cmdRun(args ...string) bool {
 	wg.Wait()
 	fmt.Println("run all tasks takes", time.Since(start))
 
-	if len(args) != 2 {
+	success := true
+	for _, work := range works {
+		if work.Fail {
+			success = false
+			break
+		}
+	}
+
+	if len(args) != 2 && success {
 		etcdKeyFile := filepath.Join(etcdKeyTestFilePath, etcdKeyTestFile)
 		fmt.Printf("check the etcd key compatibility: \n%s\n%s\n", etcdKeyFile, tmpEtcdKeyFile)
 
@@ -406,7 +414,6 @@ func cmdRun(args ...string) bool {
 			tmpEtcdKeyFileContent = []byte{}
 		}
 
-		// remove the duplicate rows
 		etcdKey := string(etcdKeyFileContent)
 		tmpEtcdKey := removeDuplicate(tmpEtcdKeyFileContent)
 		os.WriteFile(tmpEtcdKeyFile, []byte(tmpEtcdKey), 0644)
@@ -446,12 +453,7 @@ func cmdRun(args ...string) bool {
 		collectCoverProfileFile()
 	}
 
-	for _, work := range works {
-		if work.Fail {
-			return false
-		}
-	}
-	return true
+	return success
 }
 
 func runExistingTestCases(pkgs []string) (tasks []task, err error) {
