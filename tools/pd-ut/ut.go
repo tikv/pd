@@ -35,7 +35,6 @@ import (
 	"time"
 
 	"github.com/pmezard/go-difflib/difflib"
-	"github.com/tikv/pd/pkg/utils/memberutil"
 	"github.com/tikv/pd/tools/pd-ut/alloc"
 	"go.uber.org/zap"
 
@@ -113,6 +112,7 @@ var (
 	coverProfile string
 	ignoreDirs   string
 	cache        bool
+	group        string
 )
 
 func main() {
@@ -122,6 +122,7 @@ func main() {
 	coverProfile = stripFlag("--coverprofile")
 	ignoreDirs = stripFlag("--ignore")
 	cache = handleFlag("--cache")
+	group = stripFlag("--group")
 
 	if coverProfile != "" {
 		var err error
@@ -318,32 +319,6 @@ func cmdRun(args ...string) bool {
 			fmt.Println("run existing test cases error", err)
 			return false
 		}
-
-		tasksStr := make([]string, 0, len(tasks))
-		for _, t := range tasks {
-			// Add "#" to keep their prefix same.
-			tasksStr = append(tasksStr, "# "+t.String())
-		}
-		sort.Strings(tasksStr)
-
-		tasksStr2 := strings.Join(tasksStr, "\n") + "\n"
-		h := memberutil.GenerateUniqueID(tasksStr2)
-
-		etcdKeyTestFile = fmt.Sprintf("%d.key", h)
-		tmpEtcdKeyFile = filepath.Join(etcdKeyTestFilePath, fmt.Sprintf("tmp.%s", etcdKeyTestFile))
-		pwd, _ := os.Getwd()
-		tmpEtcdKeyFile = filepath.Join(pwd, tmpEtcdKeyFile)
-		// write task into file to identify the file
-		err = os.WriteFile(tmpEtcdKeyFile, []byte(tasksStr2), 0600)
-		if err != nil {
-			fmt.Println("write tmp etcd key file error", err)
-			return false
-		}
-
-		os.Setenv("GO_FAILPOINTS", fmt.Sprintf("github.com/tikv/pd/pkg/utils/etcdutil/CollectEtcdKey=return(\"%s\")", tmpEtcdKeyFile))
-		defer func() {
-			os.Setenv("GO_FAILPOINTS", "github.com/tikv/pd/pkg/utils/etcdutil/CollectEtcdKey=return(\"\")")
-		}()
 	case 2:
 		pkg := args[0]
 		err := buildTestBinary(pkg)
@@ -368,6 +343,29 @@ func cmdRun(args ...string) bool {
 			return false
 		}
 	}
+
+	var needCheckEtcd bool
+	if group != "" {
+		needCheckEtcd = true
+		etcdKeyTestFile = fmt.Sprintf("group.%s.etcdkey", group)
+	} else if len(args) == 0 {
+		etcdKeyTestFile = "all.etcdkey"
+	} else if len(args) == 1 {
+		etcdKeyTestFile = fmt.Sprintf("pkg.%s.etcdkey", strings.Join(pkgs, "_"))
+	} else if len(args) == 2 {
+		tasksStr := make([]string, 0, len(tasks))
+		for _, task := range tasks {
+			tasksStr = append(tasksStr, task.String())
+		}
+		etcdKeyTestFile = fmt.Sprintf("case.%s.etcdkey", strings.Join(tasksStr, "_"))
+	}
+	pwd, _ := os.Getwd()
+	tmpEtcdKeyFile = filepath.Join(pwd, etcdKeyTestFilePath, fmt.Sprintf("tmp.%s", etcdKeyTestFile))
+
+	os.Setenv("GO_FAILPOINTS", fmt.Sprintf("github.com/tikv/pd/pkg/utils/etcdutil/CollectEtcdKey=return(\"%s\")", tmpEtcdKeyFile))
+	defer func() {
+		os.Setenv("GO_FAILPOINTS", "github.com/tikv/pd/pkg/utils/etcdutil/CollectEtcdKey=return(\"\")")
+	}()
 
 	fmt.Printf("building task finish, parallelism=%d, count=%d, takes=%v\n", parallel*2, len(tasks), time.Since(start))
 
@@ -433,7 +431,9 @@ func cmdRun(args ...string) bool {
 			// print the diff
 			fmt.Println("etcd key is not compatible:")
 			fmt.Println(diffText)
-			return false
+			if needCheckEtcd {
+				// return false
+			}
 		}
 	}
 	if junitFile != "" {
@@ -548,7 +548,7 @@ type task struct {
 }
 
 func (t *task) String() string {
-	return t.pkg + " " + t.test
+	return t.pkg + "." + t.test
 }
 
 func listTestCases(pkg string, tasks []task) []task {

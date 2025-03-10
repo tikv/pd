@@ -1,11 +1,3 @@
-# tso TestLegacyTSOClientSuite
-# tso TestLegacyTSOConsistencySuite
-# tso TestLegacyTSOServer
-# tso TestMicroserviceTSOClientSuite
-# tso TestMicroserviceTSOConsistencySuite
-# tso TestMicroserviceTSOServer
-# tso TestMixedTSODeployment
-# tso TestUpgradingAPIandTSOClusters
 /config/ttl get
 /gta/timestamp get
 /ms//scheduling/primary get

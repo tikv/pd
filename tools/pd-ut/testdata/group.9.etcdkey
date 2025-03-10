@@ -1,14 +1,3 @@
-# mcs/discovery TestServerRegisterTestSuite
-# mcs/keyspace TestKeyspaceGroupTestSuite
-# mcs/members TestMemberTestSuite
-# mcs/resourcemanager TestResourceManagerClientTestSuite
-# mcs/resourcemanager TestResourceManagerServer
-# mcs/scheduling TestAPI
-# mcs/scheduling TestConfig
-# mcs/scheduling TestMeta
-# mcs/scheduling TestMultipleServerTestSuite
-# mcs/scheduling TestRule
-# mcs/scheduling TestServerTestSuite
 /config/ttl get
 /gta/timestamp get
 /ms//resource_manager/primary get
