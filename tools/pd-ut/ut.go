@@ -34,12 +34,13 @@ import (
 	"sync"
 	"time"
 
-	// Set the correct value when it runs inside docker.
 	"github.com/pmezard/go-difflib/difflib"
-	_ "go.uber.org/automaxprocs"
 	"go.uber.org/zap"
 
 	"github.com/tikv/pd/tools/pd-ut/alloc"
+
+	// Set the correct value when it runs inside docker.
+	_ "go.uber.org/automaxprocs"
 )
 
 func usage() bool {
@@ -430,7 +431,7 @@ func cmdRun(args ...string) bool {
 			// print the diff
 			fmt.Println("etcd key is not compatible:")
 			fmt.Println(diffText)
-			//nolint: revive
+			//nolint: revive,staticcheck
 			if needCheckEtcd {
 				// TODO: remove comment after the compatibility is fixed.
 				// return false
