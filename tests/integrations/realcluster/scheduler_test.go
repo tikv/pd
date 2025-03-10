@@ -30,6 +30,7 @@ import (
 	"github.com/tikv/pd/client/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/types"
+	"go.uber.org/zap"
 )
 
 type schedulerSuite struct {
