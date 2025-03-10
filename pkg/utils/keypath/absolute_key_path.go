@@ -63,6 +63,7 @@ const (
 	// padded keyspaceID is 8 (decimal representation of uint24max is 16777215).
 	gcSafePointPathFormat        = "/pd/%d/gc/safe_point"                        // "/pd/{cluster_id}/gc/safe_point"
 	gcSafePointServicePathFormat = "/pd/%d/gc/safe_point/service/%s"             // "/pd/{cluster_id}/gc/safe_point/service/{service_id}"
+	gcSafePointV2PrefixFormat    = "/pd/%d/keyspaces/gc_safe_point/"             // "/pd/{cluster_id}/keyspaces/gc_safe_point/"
 	gcSafePointV2PathFormat      = "/pd/%d/keyspaces/gc_safe_point/%08d"         // "/pd/{cluster_id}/keyspaces/gc_safe_point/{keyspace_id}"
 	serviceSafePointV2PathFormat = "/pd/%d/keyspaces/service_safe_point/%08d/%s" // "/pd/{cluster_id}/keyspaces/service_safe_point/{keyspace_id}/{service_id}"
 
