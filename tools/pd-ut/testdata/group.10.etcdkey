@@ -1,22 +1,3 @@
-# mcs/tso TestCommonTestSuite
-# mcs/tso TestForwardOnlyTSONoScheduling
-# mcs/tso TestForwardTSORelated
-# mcs/tso TestForwardTSOUnexpectedToFollower1
-# mcs/tso TestForwardTSOUnexpectedToFollower2
-# mcs/tso TestForwardTSOUnexpectedToFollower3
-# mcs/tso TestForwardTSOWhenPrimaryChanged
-# mcs/tso TestForwardTsoConcurrently
-# mcs/tso TestGetTSOImmediately
-# mcs/tso TestResignAPIPrimaryForward
-# mcs/tso TestResignTSOPrimaryForward
-# mcs/tso TestTSOAPI
-# mcs/tso TestTSOKeyspaceGroupManagerSuite
-# mcs/tso TestTSOPath
-# mcs/tso TestTSOProxyStress
-# mcs/tso TestTSOProxyTestSuite
-# mcs/tso TestTSOServerStartFirst
-# mcs/tso TestTSOServerTestSuite
-# mcs/tso TestTwiceSplitKeyspaceGroup
 / get
 /config/ttl get
 /gta/timestamp get

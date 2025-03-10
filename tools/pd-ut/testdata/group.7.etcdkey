@@ -1,25 +1,3 @@
-# client TestClientLeaderChange
-# client TestClientTestSuite
-# client TestClientWatchWithRevision
-# client TestCloseClient
-# client TestConfigTTLAfterTransferLeader
-# client TestCustomTimeout
-# client TestFollowerForwardAndHandleTestSuite
-# client TestGcClientTestSuite
-# client TestGetTSAfterTransferLeader
-# client TestGlobalAndLocalTSO
-# client TestGlobalConfigTestSuite
-# client TestHTTPClientTestSuite
-# client TestHTTPClientTestSuiteWithServiceDiscovery
-# client TestLeaderTransferAndMoveCluster
-# client TestMultiCN
-# client TestPutGet
-# client TestTLSReloadAtomicReplace
-# client TestTSOAllocatorLeader
-# client TestTSOFollowerProxy
-# client TestTSOFollowerProxyWithTSOService
-# client TestUnavailableTimeAfterLeaderIsReady
-# client TestWatch
 /config/ttl get
 /ms//scheduling/primary get
 /ms//scheduling/registry/ get
