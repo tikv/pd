@@ -185,6 +185,7 @@ func (m *GCStateManager) advanceTxnSafePointImpl(keyspaceID uint32, target uint6
 
 	var oldTxnSafePoint uint64
 	newTxnSafePoint := target
+	minBlocker := target
 	var blockingBarrier *endpoint.GCBarrier
 	var blockingMinStartTSOwner *string
 
@@ -229,8 +230,8 @@ func (m *GCStateManager) advanceTxnSafePointImpl(keyspaceID uint32, target uint6
 				continue
 			}
 
-			if barrier.BarrierTS < newTxnSafePoint {
-				newTxnSafePoint = barrier.BarrierTS
+			if barrier.BarrierTS < minBlocker {
+				minBlocker = barrier.BarrierTS
 				blockingBarrier = barrier
 			}
 		}
@@ -241,13 +242,16 @@ func (m *GCStateManager) advanceTxnSafePointImpl(keyspaceID uint32, target uint6
 			return err1
 		}
 
-		if minStartTS != 0 && len(ownerKey) != 0 && minStartTS < newTxnSafePoint {
+		if minStartTS != 0 && len(ownerKey) != 0 && minStartTS < minBlocker {
 			// Note that txn safe point is defined inclusive: snapshots that exactly equals to the txn safe point are
 			// considered valid.
-			newTxnSafePoint = minStartTS
+			minBlocker = minStartTS
 			blockingBarrier = nil
 			blockingMinStartTSOwner = &ownerKey
 		}
+
+		// Txn safe point never decreases.
+		newTxnSafePoint = max(oldTxnSafePoint, minBlocker)
 
 		return wb.SetTxnSafePoint(keyspaceID, newTxnSafePoint)
 	})
@@ -266,13 +270,25 @@ func (m *GCStateManager) advanceTxnSafePointImpl(keyspaceID uint32, target uint6
 		if blockingBarrier == nil && blockingMinStartTSOwner == nil {
 			panic("unreachable")
 		}
-		log.Info("txn safe point advancement is being blocked",
-			zap.Uint64("oldTxnSafePoint", oldTxnSafePoint), zap.Uint64("target", target),
-			zap.Uint64("newTxnSafePoint", newTxnSafePoint), zap.String("blocker", blockerDesc),
-			zap.Bool("isCompatibleMode", isCompatibleMode))
-	} else {
+		if newTxnSafePoint == minBlocker {
+			log.Info("txn safe point advancement is being blocked",
+				zap.Uint64("oldTxnSafePoint", oldTxnSafePoint), zap.Uint64("target", target),
+				zap.Uint64("newTxnSafePoint", newTxnSafePoint), zap.String("blocker", blockerDesc),
+				zap.Bool("isCompatibleMode", isCompatibleMode))
+		} else {
+			log.Info("txn safe point advancement unable to be blocked by the minimum blocker",
+				zap.Uint64("oldTxnSafePoint", oldTxnSafePoint), zap.Uint64("target", target),
+				zap.Uint64("newTxnSafePoint", newTxnSafePoint), zap.String("blocker", blockerDesc),
+				zap.Uint64("minBlockerTS", minBlocker), zap.Bool("isCompatibleMode", isCompatibleMode))
+		}
+	} else if newTxnSafePoint > oldTxnSafePoint {
 		log.Info("txn safe point advanced",
 			zap.Uint64("oldTxnSafePoint", oldTxnSafePoint), zap.Uint64("newTxnSafePoint", newTxnSafePoint),
+			zap.Bool("isCompatibleMode", isCompatibleMode))
+	} else {
+		log.Info("txn safe point is remaining unchanged",
+			zap.Uint64("oldTxnSafePoint", oldTxnSafePoint), zap.Uint64("newTxnSafePoint", newTxnSafePoint),
+			zap.Uint64("target", target),
 			zap.Bool("isCompatibleMode", isCompatibleMode))
 	}
 
