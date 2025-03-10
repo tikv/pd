@@ -175,7 +175,7 @@ func InjectFailToCollectTestEtcdKey(key, op string) {
 		fmt.Println("collect etcd key", file, key, op)
 
 		if len(file) != 0 {
-			err := writeKeyToFile(file, key, "get")
+			err := writeKeyToFile(file, key, op)
 			if err != nil {
 				pwd, _ := os.Getwd()
 				log.Error("write key to file failed", zap.String("pwd", pwd), zap.String("file", file), zap.Error(err))
