@@ -1,6 +1,5 @@
 /config/ttl get
 /gta/timestamp get
-/ms//resource_manager/primary get
 /ms//scheduling/primary get
 /ms//scheduling/primary/expected_primary get
 /ms//scheduling/registry/ get
@@ -14,11 +13,9 @@
 /pd// get
 /pd//alloc_id get
 /pd//config get
-/pd//dc-location get
 /pd//keyspaces/id/DEFAULT get
 /pd//keyspaces/meta/ get
 /pd//leader get
-/pd//lts get
 /pd//raft get
 /pd//raft/external_timestamp get
 /pd//raft/min_resolved_ts get
@@ -49,6 +46,7 @@ resource_group/controller get
 resource_group/settings/ get
 resource_group/states/ get
 rule_group/ get
+rule_group/pd get
 rules/- get
 rules/-c get
 scheduler_config/balance-hot-region-scheduler get
@@ -66,7 +64,6 @@ settings/failover_test get
 settings/keyspace_test get
 settings/mode_test get
 settings/penalty_test get
-settings/pingcap get
 settings/stale_test get
 settings/test get
 settings/test_ru_consumption get
@@ -82,7 +79,6 @@ states/failover_test get
 states/keyspace_test get
 states/mode_test get
 states/penalty_test get
-states/pingcap get
 states/stale_test get
 states/test get
 states/test_ru_consumption get

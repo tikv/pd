@@ -3,7 +3,6 @@
 /gta/timestamp get
 /ms//scheduling/primary get
 /ms//scheduling/registry/ get
-/ms//tso//dc-location get
 /ms//tso//gta get
 /ms//tso//gta/timestamp get
 /ms//tso//primary get
@@ -15,7 +14,6 @@
 /pd// get
 /pd//alloc_id get
 /pd//config get
-/pd//dc-location get
 /pd//gc/safe_point/service/ get
 /pd//keyspaces/alloc_id get
 /pd//keyspaces/id/DEFAULT get
@@ -25,7 +23,6 @@
 /pd//keyspaces/id/test_keyspace get
 /pd//keyspaces/meta/ get
 /pd//leader get
-/pd//lts get
 /pd//raft get
 /pd//raft/external_timestamp get
 /pd//raft/min_resolved_ts get

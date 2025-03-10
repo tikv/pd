@@ -5,16 +5,11 @@
 /pd// get
 /pd//alloc_id get
 /pd//config get
-/pd//dc-location get
 /pd//gc/safe_point get
 /pd//gc/safe_point/service/ get
 /pd//keyspaces/id/DEFAULT get
 /pd//keyspaces/meta/ get
 /pd//leader get
-/pd//lta/dc- get
-/pd//lta/dc-/next-leader get
-/pd//lta/dc-/timestamp get
-/pd//lts get
 /pd//member//binary_version get
 /pd//member//deploy_path get
 /pd//member//git_hash get
@@ -50,7 +45,6 @@ gc/safe_point/service/b get
 gc/safe_point/service/c get
 keyspaces/id/DEFAULT get
 keyspaces/meta/ get
-lta/dc-/timestamp get
 raft/min_resolved_ts get
 raft/s/ get
 region_label/keyspaces/ get
