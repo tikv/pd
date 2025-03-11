@@ -34,8 +34,112 @@ import (
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 )
 
+// UpdateGCSafePoint implements gRPC PDServer.
+func (s *GrpcServer) UpdateGCSafePoint(ctx context.Context, request *pdpb.UpdateGCSafePointRequest) (*pdpb.UpdateGCSafePointResponse, error) {
+	done, err := s.rateLimitCheck()
+	if err != nil {
+		return nil, err
+	}
+	if done != nil {
+		defer done()
+	}
+	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
+		return pdpb.NewPDClient(client).UpdateGCSafePoint(ctx, request)
+	}
+	if rsp, err := s.unaryMiddleware(ctx, request, fn); err != nil {
+		return nil, err
+	} else if rsp != nil {
+		return rsp.(*pdpb.UpdateGCSafePointResponse), err
+	}
+
+	rc := s.GetRaftCluster()
+	if rc == nil {
+		return &pdpb.UpdateGCSafePointResponse{Header: notBootstrappedHeader()}, nil
+	}
+
+	newSafePoint := request.GetSafePoint()
+	oldSafePoint, err := s.gcSafePointManager.UpdateGCSafePoint(newSafePoint)
+	if err != nil {
+		return nil, err
+	}
+
+	if newSafePoint > oldSafePoint {
+		log.Info("updated gc safe point",
+			zap.Uint64("safe-point", newSafePoint))
+	} else if newSafePoint < oldSafePoint {
+		log.Warn("trying to update gc safe point",
+			zap.Uint64("old-safe-point", oldSafePoint),
+			zap.Uint64("new-safe-point", newSafePoint))
+		newSafePoint = oldSafePoint
+	}
+
+	return &pdpb.UpdateGCSafePointResponse{
+		Header:       wrapHeader(),
+		NewSafePoint: newSafePoint,
+	}, nil
+}
+
+// UpdateServiceGCSafePoint update the safepoint for specific service
+func (s *GrpcServer) UpdateServiceGCSafePoint(ctx context.Context, request *pdpb.UpdateServiceGCSafePointRequest) (*pdpb.UpdateServiceGCSafePointResponse, error) {
+	done, err := s.rateLimitCheck()
+	if err != nil {
+		return nil, err
+	}
+	if done != nil {
+		defer done()
+	}
+	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
+		return pdpb.NewPDClient(client).UpdateServiceGCSafePoint(ctx, request)
+	}
+	if rsp, err := s.unaryMiddleware(ctx, request, fn); err != nil {
+		return nil, err
+	} else if rsp != nil {
+		return rsp.(*pdpb.UpdateServiceGCSafePointResponse), err
+	}
+
+	rc := s.GetRaftCluster()
+	if rc == nil {
+		return &pdpb.UpdateServiceGCSafePointResponse{Header: notBootstrappedHeader()}, nil
+	}
+	var storage endpoint.GCSafePointStorage = s.storage
+	if request.TTL <= 0 {
+		if err := storage.RemoveServiceGCSafePoint(string(request.ServiceId)); err != nil {
+			return nil, err
+		}
+	}
+	nowTSO, err := s.getGlobalTSO(ctx)
+	if err != nil {
+		return nil, err
+	}
+	now, _ := tsoutil.ParseTimestamp(nowTSO)
+	serviceID := string(request.ServiceId)
+	min, updated, err := s.gcSafePointManager.UpdateServiceGCSafePoint(serviceID, request.GetSafePoint(), request.GetTTL(), now)
+	if err != nil {
+		return nil, err
+	}
+	if updated {
+		log.Info("update service GC safe point",
+			zap.String("service-id", serviceID),
+			zap.Int64("expire-at", now.Unix()+request.GetTTL()),
+			zap.Uint64("safepoint", request.GetSafePoint()))
+	}
+	return &pdpb.UpdateServiceGCSafePointResponse{
+		Header:       wrapHeader(),
+		ServiceId:    []byte(min.ServiceID),
+		TTL:          min.ExpiredAt - now.Unix(),
+		MinSafePoint: min.SafePoint,
+	}, nil
+}
+
 // GetGCSafePointV2 return gc safe point for the given keyspace.
 func (s *GrpcServer) GetGCSafePointV2(ctx context.Context, request *pdpb.GetGCSafePointV2Request) (*pdpb.GetGCSafePointV2Response, error) {
+	done, err := s.rateLimitCheck()
+	if err != nil {
+		return nil, err
+	}
+	if done != nil {
+		defer done()
+	}
 	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
 		return pdpb.NewPDClient(client).GetGCSafePointV2(ctx, request)
 	}
@@ -61,6 +165,13 @@ func (s *GrpcServer) GetGCSafePointV2(ctx context.Context, request *pdpb.GetGCSa
 
 // UpdateGCSafePointV2 update gc safe point for the given keyspace.
 func (s *GrpcServer) UpdateGCSafePointV2(ctx context.Context, request *pdpb.UpdateGCSafePointV2Request) (*pdpb.UpdateGCSafePointV2Response, error) {
+	done, err := s.rateLimitCheck()
+	if err != nil {
+		return nil, err
+	}
+	if done != nil {
+		defer done()
+	}
 	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
 		return pdpb.NewPDClient(client).UpdateGCSafePointV2(ctx, request)
 	}
@@ -98,6 +209,13 @@ func (s *GrpcServer) UpdateGCSafePointV2(ctx context.Context, request *pdpb.Upda
 
 // UpdateServiceSafePointV2 update service safe point for the given keyspace.
 func (s *GrpcServer) UpdateServiceSafePointV2(ctx context.Context, request *pdpb.UpdateServiceSafePointV2Request) (*pdpb.UpdateServiceSafePointV2Response, error) {
+	done, err := s.rateLimitCheck()
+	if err != nil {
+		return nil, err
+	}
+	if done != nil {
+		defer done()
+	}
 	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
 		return pdpb.NewPDClient(client).UpdateServiceSafePointV2(ctx, request)
 	}
@@ -195,6 +313,13 @@ func (s *GrpcServer) WatchGCSafePointV2(request *pdpb.WatchGCSafePointV2Request,
 
 // GetAllGCSafePointV2 return all gc safe point v2.
 func (s *GrpcServer) GetAllGCSafePointV2(ctx context.Context, request *pdpb.GetAllGCSafePointV2Request) (*pdpb.GetAllGCSafePointV2Response, error) {
+	done, err := s.rateLimitCheck()
+	if err != nil {
+		return nil, err
+	}
+	if done != nil {
+		defer done()
+	}
 	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
 		return pdpb.NewPDClient(client).GetAllGCSafePointV2(ctx, request)
 	}
