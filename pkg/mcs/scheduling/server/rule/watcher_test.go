@@ -67,7 +67,6 @@ func runWatcherLoadLabelRule(ctx context.Context, re *require.Assertions, client
 		ctx:                   ctx,
 		cancel:                cancel,
 		rulesPathPrefix:       keypath.RulesPathPrefix(),
-		ruleCommonPathPrefix:  keypath.RuleCommonPathPrefix(),
 		ruleGroupPathPrefix:   keypath.RuleGroupPathPrefix(),
 		regionLabelPathPrefix: keypath.RegionLabelPathPrefix(),
 		etcdClient:            client,
