@@ -38,7 +38,7 @@ const (
 	allocIDPathFormat           = "/pd/%d/alloc_id"                           // "/pd/{cluster_id}/alloc_id"
 	keyspaceAllocIDPathFormat   = "/pd/%d/keyspaces/alloc_id"                 // "/pd/{cluster_id}/keyspaces/alloc_id"
 	configPathFormat            = "/pd/%d/config"                             // "/pd/{cluster_id}/config"
-	schedulerConfigPathFormat   = "/pd/%d/scheduler_config/%s"                // "/pd/{cluster_id}/schedule/{scheduler_name}"
+	schedulerConfigPathFormat   = "/pd/%d/scheduler_config/%s"                // "/pd/{cluster_id}/scheduler_config/{scheduler_name}"
 	storeLeaderWeightPathFormat = "/pd/%d/schedule/store_weight/%020d/leader" // "/pd/{cluster_id}/schedule/store_weight/{store_id}/leader"
 	storeRegionWeightPathFormat = "/pd/%d/schedule/store_weight/%020d/region" // "/pd/{cluster_id}/schedule/store_weight/{store_id}/region"
 

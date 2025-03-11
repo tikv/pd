@@ -22,6 +22,7 @@ import (
 	"net/http"
 	"regexp"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -329,11 +330,7 @@ type KeyspaceGroupManager struct {
 	// which participate in the election of its keyspace group's primary, in the format of
 	// "electionNamePrefix:keyspace-group-id"
 	electionNamePrefix string
-	// tsoServiceKey is the path for storing the registered tso servers.
-	// Key: /ms/{cluster_id}/tso/registry/{tsoServerAddress}
-	// Value: discover.ServiceRegistryEntry
-	tsoServiceKey string
-	storage       *endpoint.StorageEndpoint
+	storage            *endpoint.StorageEndpoint
 	// cfg is the TSO config
 	cfg ServiceConfig
 
@@ -387,7 +384,6 @@ func NewKeyspaceGroupManager(
 		etcdClient:                   etcdClient,
 		httpClient:                   httpClient,
 		electionNamePrefix:           electionNamePrefix,
-		tsoServiceKey:                keypath.ServicePath(constant.TSOServiceName),
 		primaryPriorityCheckInterval: defaultPrimaryPriorityCheckInterval,
 		cfg:                          cfg,
 		groupUpdateRetryList:         make(map[uint32]*endpoint.KeyspaceGroup),
@@ -474,7 +470,8 @@ func (kgm *KeyspaceGroupManager) InitializeTSOServerWatchLoop() error {
 		&kgm.wg,
 		kgm.etcdClient,
 		"tso-nodes-watcher",
-		kgm.tsoServiceKey,
+		// Watch discover.ServiceRegistryEntry
+		keypath.ServicePath(constant.TSOServiceName),
 		func([]*clientv3.Event) error { return nil },
 		putFn,
 		deleteFn,
@@ -528,10 +525,8 @@ func (kgm *KeyspaceGroupManager) InitializeGroupWatchLoop() error {
 		&kgm.wg,
 		kgm.etcdClient,
 		"keyspace-watcher",
-		// NOTE: keyspaceGroupMembershipPath is "/pd/{cluster_id}/tso/keyspace_groups/membership" before.
-		// Now it is "/pd/{cluster_id}/tso/keyspace_groups/membership/". I think This has no impact.
-		// If it needs to be fixed, I can update it.
-		keypath.KeyspaceGroupIDPrefix(),
+		// To keep the consistency with the previous code, we should trim the suffix `/`.
+		strings.TrimSuffix(keypath.KeyspaceGroupIDPrefix(), "/"),
 		func([]*clientv3.Event) error { return nil },
 		putFn,
 		deleteFn,
