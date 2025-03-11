@@ -19,7 +19,7 @@ import (
 	"crypto/tls"
 	"fmt"
 	"io"
-	"math/rand"
+	"math/rand/v2"
 	"net/http"
 	"os"
 	"os/signal"
@@ -464,7 +464,7 @@ func pick(slice []int, total int, ratio float64) []int {
 }
 
 func main() {
-	rand.New(rand.NewSource(0)) // Ensure consistent behavior multiple times
+	rand.New(rand.NewPCG(0, 0)) // Ensure consistent behavior multiple times
 	statistics.Denoising = false
 	cfg := config.NewConfig()
 	err := cfg.Parse(os.Args[1:])

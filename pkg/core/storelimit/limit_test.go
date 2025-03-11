@@ -17,7 +17,7 @@ package storelimit
 import (
 	"container/list"
 	"context"
-	"math/rand"
+	"math/rand/v2"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -136,7 +136,7 @@ func TestFeedback(t *testing.T) {
 		for {
 			if s.Available(regionSize, SendSnapshot, constant.Low) && iter.Load() > 0 {
 				iter.Add(-1)
-				size := regionSize - rand.Int63n(regionSize/10)
+				size := regionSize - rand.Int64N(regionSize/10)
 				s.Take(size, SendSnapshot, constant.Low)
 				ops <- size
 			}
