@@ -131,7 +131,7 @@ func (t *timestampOracle) SyncTimestamp() error {
 		time.Sleep(time.Second)
 	})
 
-	last, err := t.storage.LoadTimestamp(keypath.Prefix(keypath.TimestampPath(t.keyspaceGroupID)))
+	last, err := t.storage.LoadTimestamp(keypath.TimestampPath(t.keyspaceGroupID))
 	if err != nil {
 		return err
 	}

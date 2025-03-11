@@ -51,5 +51,5 @@ func ServiceSafePointV2Prefix(keyspaceID uint32) string {
 
 // GCSafePointV2Prefix is the path prefix to all gc safe point v2.
 func GCSafePointV2Prefix() string {
-	return Prefix(GCSafePointV2Path(0))
+	return fmt.Sprintf(gcSafePointV2PrefixFormat, ClusterID())
 }
