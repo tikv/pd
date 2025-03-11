@@ -215,6 +215,9 @@ func (cw *Watcher) initializeSchedulerConfigWatcher() error {
 	cw.schedulerConfigWatcher = etcdutil.NewLoopWatcher(
 		cw.ctx, &cw.wg,
 		cw.etcdClient,
+		// NOTE: schedulerConfigPathPrefix is "/pd/{cluster_id}/scheduler_config" before.
+		// Now it is "/pd/{cluster_id}/scheduler_config/". I think This has no impact.
+		// If it needs to be fixed, I can update it.
 		"scheduling-scheduler-config-watcher", cw.schedulerConfigPathPrefix,
 		func([]*clientv3.Event) error { return nil },
 		putFn, deleteFn,

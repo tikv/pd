@@ -238,6 +238,9 @@ func (rw *Watcher) initializeRegionLabelWatcher() error {
 	rw.labelWatcher = etcdutil.NewLoopWatcher(
 		rw.ctx, &rw.wg,
 		rw.etcdClient,
+		// NOTE: regionLabelPathPrefix is "/pd/{cluster_id}/region_label" before.
+		// Now it is "/pd/{cluster_id}/region_label/". I think This has no impact.
+		// If it needs to be fixed, I can update it.
 		"scheduling-region-label-watcher", rw.regionLabelPathPrefix,
 		preEventsFn,
 		putFn, deleteFn,

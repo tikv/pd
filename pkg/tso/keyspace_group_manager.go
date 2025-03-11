@@ -495,8 +495,6 @@ func (kgm *KeyspaceGroupManager) InitializeTSOServerWatchLoop() error {
 // Key: /pd/{cluster_id}/tso/keyspace_groups/membership/{group}
 // Value: endpoint.KeyspaceGroup
 func (kgm *KeyspaceGroupManager) InitializeGroupWatchLoop() error {
-	startKey := keypath.KeyspaceGroupIDPrefix()
-
 	defaultKGConfigured := false
 	putFn := func(kv *mvccpb.KeyValue) error {
 		group := &endpoint.KeyspaceGroup{}
@@ -530,7 +528,10 @@ func (kgm *KeyspaceGroupManager) InitializeGroupWatchLoop() error {
 		&kgm.wg,
 		kgm.etcdClient,
 		"keyspace-watcher",
-		startKey,
+		// NOTE: keyspaceGroupMembershipPath is "/pd/{cluster_id}/tso/keyspace_groups/membership" before.
+		// Now it is "/pd/{cluster_id}/tso/keyspace_groups/membership/". I think This has no impact.
+		// If it needs to be fixed, I can update it.
+		keypath.KeyspaceGroupIDPrefix(),
 		func([]*clientv3.Event) error { return nil },
 		putFn,
 		deleteFn,
@@ -1325,8 +1326,7 @@ mergeLoop:
 		// calculate the newly merged TSO to make sure it is greater than the original ones.
 		var mergedTS time.Time
 		for _, id := range mergeList {
-			ts, err := kgm.storage.LoadTimestamp(
-				keypath.Prefix(keypath.TimestampPath(id)))
+			ts, err := kgm.storage.LoadTimestamp(keypath.TimestampPath(id))
 			if err != nil {
 				log.Error("failed to load the keyspace group TSO",
 					zap.String("member", kgm.tsoServiceID.ServiceAddr),
