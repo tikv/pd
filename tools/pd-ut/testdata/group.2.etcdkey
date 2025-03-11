@@ -1,0 +1,5 @@
+/region_label/ get
+encryption_keys get
+encryption_keys watch
+region_label/rule_ remove
+region_label/rule_ save
