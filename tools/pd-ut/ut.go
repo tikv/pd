@@ -416,7 +416,7 @@ func cmdRun(args ...string) bool {
 		tmpEtcdKey := removeDuplicate(tmpEtcdKeyFileContent)
 		os.WriteFile(tmpEtcdKeyFile, []byte(tmpEtcdKey), 0600)
 		// If the content is too long, maybe we can not print them.
-		fmt.Printf("etcd key: %s\ntest etcd key: %s\n", etcdKey, tmpEtcdKey)
+		fmt.Printf("etcd key: %s\n\ntest etcd key: %s\n", etcdKey, tmpEtcdKey)
 
 		diff := difflib.UnifiedDiff{
 			A:        difflib.SplitLines(etcdKey),
