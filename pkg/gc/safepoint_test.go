@@ -562,6 +562,10 @@ func (s *gcStateManagerTestSuite) TestGCBarriers() {
 		// Empty barrierID is forbidden.
 		_, err = s.manager.SetGCBarrier(keyspaceID, "", 10, time.Hour, now)
 		re.Error(err)
+		re.ErrorIs(err, errs.ErrInvalidArgument)
+		_, err = s.manager.DeleteGCBarrier(keyspaceID, "")
+		re.Error(err)
+		re.ErrorIs(err, errs.ErrInvalidArgument)
 
 		// Updating the value of the existing GC barrier
 		b, err = s.manager.SetGCBarrier(keyspaceID, "b1", 15, time.Hour, now)

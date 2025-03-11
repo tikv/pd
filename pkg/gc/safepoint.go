@@ -383,6 +383,11 @@ func (m *GCStateManager) deleteGCBarrierImpl(keyspaceID uint32, barrierID string
 	if keyspaceID == constant.NullKeyspaceID && barrierID == keypath.GCWorkerServiceSafePointID {
 		return nil, errs.ErrReservedGCBarrierID.GenWithStackByArgs(barrierID)
 	}
+	// Disallow empty barrierID
+	if len(barrierID) == 0 {
+		return nil, errs.ErrInvalidArgument.GenWithStackByArgs("barrierID", barrierID)
+	}
+
 	var deletedBarrier *endpoint.GCBarrier
 	err := m.gcMetaStorage.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
 		var err1 error
