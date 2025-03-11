@@ -211,7 +211,7 @@ func (b *GCBarrier) String() string {
 	if b.ExpirationTime != nil {
 		expirationTime = b.ExpirationTime.String()
 	}
-	return fmt.Sprintf("GCBarrier { BarrierID: %s, BarrierTS: %d, ExpirationTime: %v }",
+	return fmt.Sprintf("GCBarrier { BarrierID: %+q, BarrierTS: %d, ExpirationTime: %+q }",
 		b.BarrierID, b.BarrierTS, expirationTime)
 }
 
