@@ -15,12 +15,14 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"flag"
 	"fmt"
 	"math/rand"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -34,6 +36,7 @@ import (
 	"github.com/pingcap/log"
 
 	pd "github.com/tikv/pd/client"
+	"github.com/tikv/pd/client/clients/router"
 	"github.com/tikv/pd/client/opt"
 	"github.com/tikv/pd/client/pkg/caller"
 	"github.com/tikv/pd/tools/utils"
@@ -206,12 +209,14 @@ func (s *benchmarkSuite) prepareRegions(ctx context.Context, cli pdpb.PDClient) 
 
 	// Generate the regions info first.
 	s.regions = utils.NewRegions(*regionCount, 3, s.header())
-	// Heartbeat the region.
+	// Heartbeat the regions with two rounds to ensure all regions are fulfilled.
 	heartbeatStream := s.createHeartbeatStream(cctx, cli)
-	for _, region := range s.regions.Regions {
-		err := heartbeatStream.Send(region)
-		if err != nil {
-			log.Fatal("send region heartbeat request error", zap.Error(err))
+	for range 2 {
+		for _, region := range s.regions.Regions {
+			err := heartbeatStream.Send(region)
+			if err != nil {
+				log.Fatal("send region heartbeat request error", zap.Error(err))
+			}
 		}
 	}
 }
@@ -261,6 +266,27 @@ func (s *benchmarkSuite) bench() {
 	benchCancel()
 }
 
+type regionReqType int
+
+const (
+	regionReqTypeGetRegion regionReqType = iota
+	regionReqTypeGetPrevRegion
+	regionReqTypeGetRegionByID
+)
+
+func (r regionReqType) String() string {
+	switch r {
+	case regionReqTypeGetRegion:
+		return "get-region"
+	case regionReqTypeGetPrevRegion:
+		return "get-prev-region"
+	case regionReqTypeGetRegionByID:
+		return "get-region-by-id"
+	default:
+		return fmt.Sprintf("unknown-region-req-type-%d", r)
+	}
+}
+
 func (s *benchmarkSuite) reqWorker(ctx context.Context, clientIdx int, durCh chan<- time.Duration) {
 	defer s.wg.Done()
 	pdCli := s.pdClients[clientIdx]
@@ -278,7 +304,7 @@ func (s *benchmarkSuite) reqWorker(ctx context.Context, clientIdx int, durCh cha
 		}
 		durationSeed := r.Intn(100)
 		regionSeed := r.Intn(*regionCount)
-		regionReq := s.regions.Regions[regionSeed]
+		reqType := regionReqType(durationSeed % 3)
 
 		// Wait for a random delay.
 		select {
@@ -287,23 +313,69 @@ func (s *benchmarkSuite) reqWorker(ctx context.Context, clientIdx int, durCh cha
 		case <-time.After(time.Duration(durationSeed) * time.Millisecond):
 		}
 
+		var (
+			expectedRegion *metapb.Region
+			region         *router.Region
+			err            error
+		)
 		start = time.Now()
-		// Invoke one of three PD client calls.
-		switch durationSeed % 3 {
-		case 0:
-			_, _ = pdCli.GetRegion(ctx, regionReq.Region.GetStartKey())
-		case 1:
-			_, _ = pdCli.GetPrevRegion(ctx, regionReq.Region.GetStartKey())
-		case 2:
-			_, _ = pdCli.GetRegionByID(ctx, regionReq.Region.GetId())
+		// Invoke one of three PD client calls randomly.
+		switch reqType {
+		case regionReqTypeGetRegion:
+			expectedRegion = s.regions.Regions[regionSeed].Region
+			region, err = pdCli.GetRegion(ctx, expectedRegion.GetStartKey())
+		case regionReqTypeGetPrevRegion:
+			key := s.regions.Regions[regionSeed].Region.GetStartKey()
+			if regionSeed == 0 {
+				expectedRegion = nil
+			} else {
+				expectedRegion = s.regions.Regions[regionSeed-1].Region
+			}
+			region, err = pdCli.GetPrevRegion(ctx, key)
+		case regionReqTypeGetRegionByID:
+			expectedRegion = s.regions.Regions[regionSeed].Region
+			region, err = pdCli.GetRegionByID(ctx, expectedRegion.GetId())
 		}
 		dur := time.Since(start)
+		// Check if the context is done to avoid unexpected result.
 		select {
 		case <-ctx.Done():
 			return
 		case durCh <- dur:
 		}
-		// TODO: Optionally verify that the returned region is correct.
+		// Prepare some common log fields.
+		logFields := []zap.Field{
+			zap.Int("client-idx", clientIdx),
+			zap.Int("region-idx", regionSeed),
+			zap.String("req-type", reqType.String()),
+			zap.Duration("duration", dur),
+			zap.String("expected", fmt.Sprintf("%+v", expectedRegion)),
+			zap.String("got", fmt.Sprintf("%+v", region)),
+			zap.Error(err),
+		}
+		// Ignore the error that is caused by the context cancellation.
+		if err != nil {
+			if !strings.Contains(err.Error(), context.Canceled.Error()) {
+				log.Error("get region error", logFields...)
+			}
+			continue
+		}
+		// Check if the result is consistent with the expected region.
+		if region == nil && expectedRegion == nil {
+			continue
+		}
+		if (region == nil && expectedRegion != nil) || (region != nil && expectedRegion == nil) {
+			log.Fatal("unmatched nil region", logFields...)
+		}
+		if region.Meta.GetId() != expectedRegion.GetId() {
+			log.Fatal("unmatched region id", logFields...)
+		}
+		if !bytes.Equal(region.Meta.GetStartKey(), expectedRegion.GetStartKey()) {
+			log.Fatal("unmatched region start key", logFields...)
+		}
+		if !bytes.Equal(region.Meta.GetEndKey(), expectedRegion.GetEndKey()) {
+			log.Fatal("unmatched region end key", logFields...)
+		}
 	}
 }
 
