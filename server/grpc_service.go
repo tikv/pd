@@ -2090,40 +2090,6 @@ func (s *GrpcServer) ScatterRegion(ctx context.Context, request *pdpb.ScatterReg
 	}, nil
 }
 
-// GetGCSafePoint implements gRPC PDServer.
-func (s *GrpcServer) GetGCSafePoint(ctx context.Context, request *pdpb.GetGCSafePointRequest) (*pdpb.GetGCSafePointResponse, error) {
-	done, err := s.rateLimitCheck()
-	if err != nil {
-		return nil, err
-	}
-	if done != nil {
-		defer done()
-	}
-	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
-		return pdpb.NewPDClient(client).GetGCSafePoint(ctx, request)
-	}
-	if rsp, err := s.unaryMiddleware(ctx, request, fn); err != nil {
-		return nil, err
-	} else if rsp != nil {
-		return rsp.(*pdpb.GetGCSafePointResponse), err
-	}
-
-	rc := s.GetRaftCluster()
-	if rc == nil {
-		return &pdpb.GetGCSafePointResponse{Header: notBootstrappedHeader()}, nil
-	}
-
-	safePoint, err := s.gcSafePointManager.LoadGCSafePoint()
-	if err != nil {
-		return nil, err
-	}
-
-	return &pdpb.GetGCSafePointResponse{
-		Header:    wrapHeader(),
-		SafePoint: safePoint,
-	}, nil
-}
-
 // SyncRegions syncs the regions.
 func (s *GrpcServer) SyncRegions(stream pdpb.PD_SyncRegionsServer) error {
 	if s.IsClosed() || s.cluster == nil {
