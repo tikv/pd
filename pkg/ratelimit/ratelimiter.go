@@ -18,8 +18,9 @@ import (
 	"context"
 	"time"
 
-	"github.com/tikv/pd/pkg/utils/syncutil"
 	"golang.org/x/time/rate"
+
+	"github.com/tikv/pd/pkg/utils/syncutil"
 )
 
 // RateLimiter is a rate limiter based on `golang.org/x/time/rate`.

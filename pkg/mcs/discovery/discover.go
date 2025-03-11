@@ -15,15 +15,17 @@
 package discovery
 
 import (
+	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.uber.org/zap"
+
 	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
+
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
-	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.uber.org/zap"
 )
 
 // Discover is used to get all the service instances of the specified service name.
@@ -46,7 +48,7 @@ func Discover(cli *clientv3.Client, serviceName string) ([]string, error) {
 // GetMSMembers returns all the members of the specified service name.
 func GetMSMembers(serviceName string, client *clientv3.Client) ([]ServiceRegistryEntry, error) {
 	switch serviceName {
-	case constant.TSOServiceName, constant.SchedulingServiceName, constant.ResourceManagerServiceName:
+	case constant.TSOServiceName, constant.SchedulingServiceName:
 		servicePath := keypath.ServicePath(serviceName)
 		resps, err := kv.NewSlowLogTxn(client).Then(clientv3.OpGet(servicePath, clientv3.WithPrefix())).Commit()
 		if err != nil {

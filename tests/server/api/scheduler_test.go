@@ -24,10 +24,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pingcap/failpoint"
-	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+
+	"github.com/pingcap/failpoint"
+	"github.com/pingcap/kvproto/pkg/metapb"
+
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/slice"
@@ -37,23 +39,21 @@ import (
 	"github.com/tikv/pd/tests"
 )
 
-const apiPrefix = "/pd"
-
 type scheduleTestSuite struct {
 	suite.Suite
-	env     *tests.SchedulingTestEnvironment
-	runMode tests.SchedulerMode
+	te  *tests.SchedulingTestEnvironment
+	env tests.Env
 }
 
-func TestPDSchedulingTestSuite(t *testing.T) {
+func TestNonMicroserviceSchedulingTestSuite(t *testing.T) {
 	suite.Run(t, &scheduleTestSuite{
-		runMode: tests.PDMode,
+		env: tests.NonMicroserviceEnv,
 	})
 }
 
-func TestAPISchedulingTestSuite(t *testing.T) {
+func TestMicroserviceSchedulingTestSuite(t *testing.T) {
 	suite.Run(t, &scheduleTestSuite{
-		runMode: tests.APIMode,
+		env: tests.MicroserviceEnv,
 	})
 }
 
@@ -61,19 +61,19 @@ func (suite *scheduleTestSuite) SetupSuite() {
 	re := suite.Require()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/changeCoordinatorTicker", `return(true)`))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/skipStoreConfigSync", `return(true)`))
-	suite.env = tests.NewSchedulingTestEnvironment(suite.T())
-	suite.env.RunMode = suite.runMode
+	suite.te = tests.NewSchedulingTestEnvironment(suite.T())
+	suite.te.Env = suite.env
 }
 
 func (suite *scheduleTestSuite) TearDownSuite() {
 	re := suite.Require()
-	suite.env.Cleanup()
+	suite.te.Cleanup()
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/skipStoreConfigSync"))
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/changeCoordinatorTicker"))
 }
 
 func (suite *scheduleTestSuite) TestOriginAPI() {
-	suite.env.RunTestBasedOnMode(suite.checkOriginAPI)
+	suite.te.RunTest(suite.checkOriginAPI)
 }
 
 func (suite *scheduleTestSuite) checkOriginAPI(cluster *tests.TestCluster) {
@@ -92,14 +92,28 @@ func (suite *scheduleTestSuite) checkOriginAPI(cluster *tests.TestCluster) {
 
 	input := make(map[string]any)
 	input["name"] = "evict-leader-scheduler"
-	input["store_id"] = 1
 	body, err := json.Marshal(input)
-	re.NoError(err)
-	re.NoError(tu.CheckPostJSON(tests.TestDialClient, urlPrefix, body, tu.StatusOK(re)))
+	suite.NoError(err)
+	suite.NoError(tu.CheckPostJSON(tests.TestDialClient, urlPrefix, body,
+		tu.Status(re, http.StatusBadRequest),
+		tu.StringEqual(re, "missing store id")),
+	)
+	input["store_id"] = "abc" // bad case
+	body, err = json.Marshal(input)
+	suite.NoError(err)
+	suite.NoError(tu.CheckPostJSON(tests.TestDialClient, urlPrefix, body,
+		tu.Status(re, http.StatusBadRequest),
+		tu.StringEqual(re, "please input a right store id")),
+	)
+
+	input["store_id"] = 1
+	body, err = json.Marshal(input)
+	suite.NoError(err)
+	suite.NoError(tu.CheckPostJSON(tests.TestDialClient, urlPrefix, body, tu.StatusOK(re)))
 
 	suite.assertSchedulerExists(urlPrefix, "evict-leader-scheduler")
 	resp := make(map[string]any)
-	listURL := fmt.Sprintf("%s%s%s/%s/list", leaderAddr, apiPrefix, server.SchedulerConfigHandlerPath, "evict-leader-scheduler")
+	listURL := fmt.Sprintf("%s%s/%s/list", leaderAddr, server.SchedulerConfigHandlerPath, "evict-leader-scheduler")
 	re.NoError(tu.ReadGetJSON(re, tests.TestDialClient, listURL, &resp))
 	re.Len(resp["store-id-ranges"], 1)
 	input1 := make(map[string]any)
@@ -141,7 +155,7 @@ func (suite *scheduleTestSuite) checkOriginAPI(cluster *tests.TestCluster) {
 }
 
 func (suite *scheduleTestSuite) TestAPI() {
-	suite.env.RunTestBasedOnMode(suite.checkAPI)
+	suite.te.RunTest(suite.checkAPI)
 }
 
 func (suite *scheduleTestSuite) checkAPI(cluster *tests.TestCluster) {
@@ -172,7 +186,7 @@ func (suite *scheduleTestSuite) checkAPI(cluster *tests.TestCluster) {
 			name:        "balance-leader-scheduler",
 			createdName: "balance-leader-scheduler",
 			extraTestFunc: func(name string) {
-				listURL := fmt.Sprintf("%s%s%s/%s/list", leaderAddr, apiPrefix, server.SchedulerConfigHandlerPath, name)
+				listURL := fmt.Sprintf("%s%s/%s/list", leaderAddr, server.SchedulerConfigHandlerPath, name)
 				resp := make(map[string]any)
 				tu.Eventually(re, func() bool {
 					re.NoError(tu.ReadGetJSON(re, tests.TestDialClient, listURL, &resp))
@@ -180,7 +194,7 @@ func (suite *scheduleTestSuite) checkAPI(cluster *tests.TestCluster) {
 				})
 				dataMap := make(map[string]any)
 				dataMap["batch"] = 3
-				updateURL := fmt.Sprintf("%s%s%s/%s/config", leaderAddr, apiPrefix, server.SchedulerConfigHandlerPath, name)
+				updateURL := fmt.Sprintf("%s%s/%s/config", leaderAddr, server.SchedulerConfigHandlerPath, name)
 				body, err := json.Marshal(dataMap)
 				re.NoError(err)
 				re.NoError(tu.CheckPostJSON(tests.TestDialClient, updateURL, body, tu.StatusOK(re)))
@@ -230,7 +244,7 @@ func (suite *scheduleTestSuite) checkAPI(cluster *tests.TestCluster) {
 			createdName: "balance-hot-region-scheduler",
 			extraTestFunc: func(name string) {
 				resp := make(map[string]any)
-				listURL := fmt.Sprintf("%s%s%s/%s/list", leaderAddr, apiPrefix, server.SchedulerConfigHandlerPath, name)
+				listURL := fmt.Sprintf("%s%s/%s/list", leaderAddr, server.SchedulerConfigHandlerPath, name)
 				expectMap := map[string]any{
 					"min-hot-byte-rate":          100.0,
 					"min-hot-key-rate":           10.0,
@@ -269,7 +283,7 @@ func (suite *scheduleTestSuite) checkAPI(cluster *tests.TestCluster) {
 				dataMap := make(map[string]any)
 				dataMap["max-zombie-rounds"] = 5.0
 				expectMap["max-zombie-rounds"] = 5.0
-				updateURL := fmt.Sprintf("%s%s%s/%s/config", leaderAddr, apiPrefix, server.SchedulerConfigHandlerPath, name)
+				updateURL := fmt.Sprintf("%s%s/%s/config", leaderAddr, server.SchedulerConfigHandlerPath, name)
 				body, err := json.Marshal(dataMap)
 				re.NoError(err)
 				re.NoError(tu.CheckPostJSON(tests.TestDialClient, updateURL, body, tu.StatusOK(re)))
@@ -304,7 +318,7 @@ func (suite *scheduleTestSuite) checkAPI(cluster *tests.TestCluster) {
 			name:        "split-bucket-scheduler",
 			createdName: "split-bucket-scheduler",
 			extraTestFunc: func(name string) {
-				listURL := fmt.Sprintf("%s%s%s/%s/list", leaderAddr, apiPrefix, server.SchedulerConfigHandlerPath, name)
+				listURL := fmt.Sprintf("%s%s/%s/list", leaderAddr, server.SchedulerConfigHandlerPath, name)
 				resp := make(map[string]any)
 				tu.Eventually(re, func() bool {
 					re.NoError(tu.ReadGetJSON(re, tests.TestDialClient, listURL, &resp))
@@ -312,7 +326,7 @@ func (suite *scheduleTestSuite) checkAPI(cluster *tests.TestCluster) {
 				})
 				dataMap := make(map[string]any)
 				dataMap["degree"] = 4
-				updateURL := fmt.Sprintf("%s%s%s/%s/config", leaderAddr, apiPrefix, server.SchedulerConfigHandlerPath, name)
+				updateURL := fmt.Sprintf("%s%s/%s/config", leaderAddr, server.SchedulerConfigHandlerPath, name)
 				body, err := json.Marshal(dataMap)
 				re.NoError(err)
 				re.NoError(tu.CheckPostJSON(tests.TestDialClient, updateURL, body, tu.StatusOK(re)))
@@ -363,14 +377,14 @@ func (suite *scheduleTestSuite) checkAPI(cluster *tests.TestCluster) {
 			createdName: "balance-witness-scheduler",
 			extraTestFunc: func(name string) {
 				resp := make(map[string]any)
-				listURL := fmt.Sprintf("%s%s%s/%s/list", leaderAddr, apiPrefix, server.SchedulerConfigHandlerPath, name)
+				listURL := fmt.Sprintf("%s%s/%s/list", leaderAddr, server.SchedulerConfigHandlerPath, name)
 				tu.Eventually(re, func() bool {
 					re.NoError(tu.ReadGetJSON(re, tests.TestDialClient, listURL, &resp))
 					return resp["batch"] == 4.0
 				})
 				dataMap := make(map[string]any)
 				dataMap["batch"] = 3
-				updateURL := fmt.Sprintf("%s%s%s/%s/config", leaderAddr, apiPrefix, server.SchedulerConfigHandlerPath, name)
+				updateURL := fmt.Sprintf("%s%s/%s/config", leaderAddr, server.SchedulerConfigHandlerPath, name)
 				body, err := json.Marshal(dataMap)
 				re.NoError(err)
 				re.NoError(tu.CheckPostJSON(tests.TestDialClient, updateURL, body, tu.StatusOK(re)))
@@ -420,7 +434,7 @@ func (suite *scheduleTestSuite) checkAPI(cluster *tests.TestCluster) {
 			args:        []arg{{"store_id", 1}},
 			extraTestFunc: func(name string) {
 				resp := make(map[string]any)
-				listURL := fmt.Sprintf("%s%s%s/%s/list", leaderAddr, apiPrefix, server.SchedulerConfigHandlerPath, name)
+				listURL := fmt.Sprintf("%s%s/%s/list", leaderAddr, server.SchedulerConfigHandlerPath, name)
 				expectedMap := make(map[string]any)
 				expectedMap["1"] = []any{map[string]any{"end-key": "", "start-key": ""}}
 				tu.Eventually(re, func() bool {
@@ -432,7 +446,7 @@ func (suite *scheduleTestSuite) checkAPI(cluster *tests.TestCluster) {
 				input := make(map[string]any)
 				input["name"] = "grant-leader-scheduler"
 				input["store_id"] = 2
-				updateURL := fmt.Sprintf("%s%s%s/%s/config", leaderAddr, apiPrefix, server.SchedulerConfigHandlerPath, name)
+				updateURL := fmt.Sprintf("%s%s/%s/config", leaderAddr, server.SchedulerConfigHandlerPath, name)
 				body, err := json.Marshal(input)
 				re.NoError(err)
 				re.NoError(tu.CheckPostJSON(tests.TestDialClient, updateURL, body, tu.StatusOK(re)))
@@ -444,7 +458,7 @@ func (suite *scheduleTestSuite) checkAPI(cluster *tests.TestCluster) {
 				})
 
 				// using /pd/v1/schedule-config/grant-leader-scheduler/config to delete exists store from grant-leader-scheduler
-				deleteURL := fmt.Sprintf("%s%s%s/%s/delete/%s", leaderAddr, apiPrefix, server.SchedulerConfigHandlerPath, name, "2")
+				deleteURL := fmt.Sprintf("%s%s/%s/delete/%s", leaderAddr, server.SchedulerConfigHandlerPath, name, "2")
 				err = tu.CheckDelete(tests.TestDialClient, deleteURL, tu.StatusOK(re))
 				re.NoError(err)
 				delete(expectedMap, "2")
@@ -464,14 +478,14 @@ func (suite *scheduleTestSuite) checkAPI(cluster *tests.TestCluster) {
 			// Test the scheduler config handler.
 			extraTestFunc: func(name string) {
 				resp := make(map[string]any)
-				listURL := fmt.Sprintf("%s%s%s/%s/list", leaderAddr, apiPrefix, server.SchedulerConfigHandlerPath, name)
+				listURL := fmt.Sprintf("%s%s/%s/list", leaderAddr, server.SchedulerConfigHandlerPath, name)
 				tu.Eventually(re, func() bool {
 					re.NoError(tu.ReadGetJSON(re, tests.TestDialClient, listURL, &resp))
 					return resp["start-key"] == "" && resp["end-key"] == "" && resp["range-name"] == "test"
 				})
 				resp["start-key"] = "a_00"
 				resp["end-key"] = "a_99"
-				updateURL := fmt.Sprintf("%s%s%s/%s/config", leaderAddr, apiPrefix, server.SchedulerConfigHandlerPath, name)
+				updateURL := fmt.Sprintf("%s%s/%s/config", leaderAddr, server.SchedulerConfigHandlerPath, name)
 				body, err := json.Marshal(resp)
 				re.NoError(err)
 				re.NoError(tu.CheckPostJSON(tests.TestDialClient, updateURL, body, tu.StatusOK(re)))
@@ -489,7 +503,7 @@ func (suite *scheduleTestSuite) checkAPI(cluster *tests.TestCluster) {
 			// Test the scheduler config handler.
 			extraTestFunc: func(name string) {
 				resp := make(map[string]any)
-				listURL := fmt.Sprintf("%s%s%s/%s/list", leaderAddr, apiPrefix, server.SchedulerConfigHandlerPath, name)
+				listURL := fmt.Sprintf("%s%s/%s/list", leaderAddr, server.SchedulerConfigHandlerPath, name)
 				expectedMap := make(map[string]any)
 				expectedMap["3"] = []any{map[string]any{"end-key": "", "start-key": ""}}
 				tu.Eventually(re, func() bool {
@@ -501,7 +515,7 @@ func (suite *scheduleTestSuite) checkAPI(cluster *tests.TestCluster) {
 				input := make(map[string]any)
 				input["name"] = "evict-leader-scheduler"
 				input["store_id"] = 4
-				updateURL := fmt.Sprintf("%s%s%s/%s/config", leaderAddr, apiPrefix, server.SchedulerConfigHandlerPath, name)
+				updateURL := fmt.Sprintf("%s%s/%s/config", leaderAddr, server.SchedulerConfigHandlerPath, name)
 				body, err := json.Marshal(input)
 				re.NoError(err)
 				re.NoError(tu.CheckPostJSON(tests.TestDialClient, updateURL, body, tu.StatusOK(re)))
@@ -513,7 +527,7 @@ func (suite *scheduleTestSuite) checkAPI(cluster *tests.TestCluster) {
 				})
 
 				// using /pd/v1/schedule-config/evict-leader-scheduler/config to delete exist store from evict-leader-scheduler
-				deleteURL := fmt.Sprintf("%s%s%s/%s/delete/%s", leaderAddr, apiPrefix, server.SchedulerConfigHandlerPath, name, "4")
+				deleteURL := fmt.Sprintf("%s%s/%s/delete/%s", leaderAddr, server.SchedulerConfigHandlerPath, name, "4")
 				err = tu.CheckDelete(tests.TestDialClient, deleteURL, tu.StatusOK(re))
 				re.NoError(err)
 				delete(expectedMap, "4")
@@ -638,7 +652,7 @@ func (suite *scheduleTestSuite) checkAPI(cluster *tests.TestCluster) {
 }
 
 func (suite *scheduleTestSuite) TestDisable() {
-	suite.env.RunTestBasedOnMode(suite.checkDisable)
+	suite.te.RunTest(suite.checkDisable)
 }
 
 func (suite *scheduleTestSuite) checkDisable(cluster *tests.TestCluster) {
@@ -662,7 +676,7 @@ func (suite *scheduleTestSuite) checkDisable(cluster *tests.TestCluster) {
 	re.NoError(err)
 	addScheduler(re, urlPrefix, body)
 
-	u := fmt.Sprintf("%s%s/api/v1/config/schedule", leaderAddr, apiPrefix)
+	u := fmt.Sprintf("%s/pd/api/v1/config/schedule", leaderAddr)
 	var scheduleConfig sc.ScheduleConfig
 	err = tu.ReadGetJSON(re, tests.TestDialClient, u, &scheduleConfig)
 	re.NoError(err)
@@ -749,7 +763,7 @@ func (suite *scheduleTestSuite) testPauseOrResume(re *require.Assertions, urlPre
 }
 
 func (suite *scheduleTestSuite) TestEmptySchedulers() {
-	suite.env.RunTestBasedOnMode(suite.checkEmptySchedulers)
+	suite.te.RunTest(suite.checkEmptySchedulers)
 }
 
 func (suite *scheduleTestSuite) checkEmptySchedulers(cluster *tests.TestCluster) {

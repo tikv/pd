@@ -25,18 +25,19 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
+	"go.uber.org/goleak"
+
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/stretchr/testify/require"
+
 	"github.com/tikv/pd/pkg/utils/assertutil"
-	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
-	"go.uber.org/goleak"
 )
 
 func TestMain(m *testing.M) {
@@ -47,16 +48,7 @@ func TestMemberDelete(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	dcLocationConfig := map[string]string{
-		"pd1": "dc-1",
-		"pd2": "dc-2",
-		"pd3": "dc-3",
-	}
-	dcLocationNum := len(dcLocationConfig)
-	cluster, err := tests.NewTestCluster(ctx, dcLocationNum, func(conf *config.Config, serverName string) {
-		conf.EnableLocalTSO = true
-		conf.Labels[config.ZoneLabel] = dcLocationConfig[serverName]
-	})
+	cluster, err := tests.NewTestCluster(ctx, 3)
 	defer cluster.Destroy()
 	re.NoError(err)
 
@@ -110,13 +102,6 @@ func TestMemberDelete(t *testing.T) {
 			}
 			return true
 		})
-	}
-	// Check whether the dc-location info of the corresponding member is deleted.
-	for _, member := range members {
-		key := member.GetServer().GetMember().GetDCLocationPath(member.GetServerID())
-		resp, err := etcdutil.EtcdKVGet(leader.GetEtcdClient(), key)
-		re.NoError(err)
-		re.Empty(resp.Kvs)
 	}
 }
 

@@ -22,6 +22,7 @@ import (
 
 	"github.com/pingcap/tidb-dashboard/pkg/config"
 	"github.com/pingcap/tidb-dashboard/pkg/uiserver"
+
 	"github.com/tikv/pd/pkg/dashboard/distroutil"
 )
 

@@ -23,8 +23,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pingcap/log"
 	"github.com/stretchr/testify/require"
+	"go.etcd.io/etcd/server/v3/embed"
+
+	"github.com/pingcap/log"
+
 	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/assertutil"
@@ -33,7 +36,6 @@ import (
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/server/config"
-	"go.etcd.io/etcd/server/v3/embed"
 )
 
 // NewTestServer creates a pd server for testing.
@@ -84,7 +86,7 @@ func NewTestSingleConfig(c *assertutil.Checker) *config.Config {
 	cfg.TickInterval = typeutil.NewDuration(100 * time.Millisecond)
 	cfg.ElectionInterval = typeutil.NewDuration(3 * time.Second)
 	cfg.LeaderPriorityCheckInterval = typeutil.NewDuration(100 * time.Millisecond)
-	err := logutil.SetupLogger(cfg.Log, &cfg.Logger, &cfg.LogProps, cfg.Security.RedactInfoLog)
+	err := logutil.SetupLogger(&cfg.Log, &cfg.Logger, &cfg.LogProps, cfg.Security.RedactInfoLog)
 	c.AssertNil(err)
 	zapLogOnce.Do(func() {
 		log.ReplaceGlobals(cfg.Logger, cfg.LogProps)

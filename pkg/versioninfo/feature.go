@@ -16,9 +16,11 @@ package versioninfo
 
 import (
 	"github.com/coreos/go-semver/semver"
-	"github.com/pingcap/log"
-	"github.com/tikv/pd/pkg/errs"
 	"go.uber.org/zap"
+
+	"github.com/pingcap/log"
+
+	"github.com/tikv/pd/pkg/errs"
 )
 
 // Feature supported features.

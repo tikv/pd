@@ -1,4 +1,4 @@
-// Copyright 2023 TiKV Authors
+// Copyright 2023 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,7 +17,10 @@ package realcluster
 import (
 	"os"
 	"os/exec"
+	"syscall"
 	"time"
+
+	"github.com/pingcap/log"
 )
 
 const physicalShiftBits = 18
@@ -33,14 +36,26 @@ func ExtractPhysical(ts uint64) int64 {
 	return int64(ts >> physicalShiftBits)
 }
 
-func runCommand(name string, args ...string) error {
-	cmd := exec.Command(name, args...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	return cmd.Run()
+func runCommandWithOutput(cmdStr string) (string, error) {
+	cmd := exec.Command("sh", "-c", cmdStr)
+	log.Info(cmd.String())
+	bytes, err := cmd.Output()
+	if err != nil {
+		return string(bytes), err
+	}
+	return string(bytes), nil
 }
 
 func fileExists(path string) bool {
 	_, err := os.Stat(path)
 	return !os.IsNotExist(err)
+}
+
+func isProcessRunning(pid int) bool {
+	process, err := os.FindProcess(pid)
+	if err != nil {
+		return false
+	}
+	err = process.Signal(syscall.Signal(0))
+	return err == nil
 }

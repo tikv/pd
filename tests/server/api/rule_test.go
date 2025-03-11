@@ -25,9 +25,11 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+
+	"github.com/pingcap/kvproto/pkg/metapb"
+
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/schedule/labeler"
@@ -74,18 +76,18 @@ func (suite *ruleTestSuite) TearDownTest() {
 		err = tu.CheckPostJSON(tests.TestDialClient, urlPrefix+"/pd/api/v1/config/placement-rule", data, tu.StatusOK(re))
 		re.NoError(err)
 	}
-	suite.env.RunTestBasedOnMode(cleanFunc)
+	suite.env.RunTest(cleanFunc)
 }
 
 func (suite *ruleTestSuite) TestSet() {
-	suite.env.RunTestBasedOnMode(suite.checkSet)
+	suite.env.RunTest(suite.checkSet)
 }
 
 func (suite *ruleTestSuite) checkSet(cluster *tests.TestCluster) {
 	re := suite.Require()
 	leaderServer := cluster.GetLeaderServer()
 	pdAddr := leaderServer.GetAddr()
-	urlPrefix := fmt.Sprintf("%s%s/api/v1/config", pdAddr, apiPrefix)
+	urlPrefix := fmt.Sprintf("%s/pd/api/v1/config", pdAddr)
 
 	rule := placement.Rule{GroupID: "a", ID: "10", StartKeyHex: "1111", EndKeyHex: "3333", Role: placement.Voter, Count: 1}
 	successData, err := json.Marshal(rule)
@@ -194,14 +196,14 @@ func (suite *ruleTestSuite) checkSet(cluster *tests.TestCluster) {
 }
 
 func (suite *ruleTestSuite) TestGet() {
-	suite.env.RunTestBasedOnMode(suite.checkGet)
+	suite.env.RunTest(suite.checkGet)
 }
 
 func (suite *ruleTestSuite) checkGet(cluster *tests.TestCluster) {
 	re := suite.Require()
 	leaderServer := cluster.GetLeaderServer()
 	pdAddr := leaderServer.GetAddr()
-	urlPrefix := fmt.Sprintf("%s%s/api/v1/config", pdAddr, apiPrefix)
+	urlPrefix := fmt.Sprintf("%s/pd/api/v1/config", pdAddr)
 
 	rule := placement.Rule{GroupID: "a", ID: "20", StartKeyHex: "1111", EndKeyHex: "3333", Role: placement.Voter, Count: 1}
 	data, err := json.Marshal(rule)
@@ -245,14 +247,14 @@ func (suite *ruleTestSuite) checkGet(cluster *tests.TestCluster) {
 }
 
 func (suite *ruleTestSuite) TestGetAll() {
-	suite.env.RunTestBasedOnMode(suite.checkGetAll)
+	suite.env.RunTest(suite.checkGetAll)
 }
 
 func (suite *ruleTestSuite) checkGetAll(cluster *tests.TestCluster) {
 	re := suite.Require()
 	leaderServer := cluster.GetLeaderServer()
 	pdAddr := leaderServer.GetAddr()
-	urlPrefix := fmt.Sprintf("%s%s/api/v1/config", pdAddr, apiPrefix)
+	urlPrefix := fmt.Sprintf("%s/pd/api/v1/config", pdAddr)
 
 	rule := placement.Rule{GroupID: "b", ID: "20", StartKeyHex: "1111", EndKeyHex: "3333", Role: placement.Voter, Count: 1}
 	data, err := json.Marshal(rule)
@@ -267,14 +269,14 @@ func (suite *ruleTestSuite) checkGetAll(cluster *tests.TestCluster) {
 }
 
 func (suite *ruleTestSuite) TestSetAll() {
-	suite.env.RunTestBasedOnMode(suite.checkSetAll)
+	suite.env.RunTest(suite.checkSetAll)
 }
 
 func (suite *ruleTestSuite) checkSetAll(cluster *tests.TestCluster) {
 	re := suite.Require()
 	leaderServer := cluster.GetLeaderServer()
 	pdAddr := leaderServer.GetAddr()
-	urlPrefix := fmt.Sprintf("%s%s/api/v1/config", pdAddr, apiPrefix)
+	urlPrefix := fmt.Sprintf("%s/pd/api/v1/config", pdAddr)
 
 	rule1 := placement.Rule{GroupID: "a", ID: "12", StartKeyHex: "1111", EndKeyHex: "3333", Role: placement.Voter, Count: 1}
 	rule2 := placement.Rule{GroupID: "b", ID: "12", StartKeyHex: "1111", EndKeyHex: "3333", Role: placement.Voter, Count: 1}
@@ -383,14 +385,14 @@ func (suite *ruleTestSuite) checkSetAll(cluster *tests.TestCluster) {
 }
 
 func (suite *ruleTestSuite) TestGetAllByGroup() {
-	suite.env.RunTestBasedOnMode(suite.checkGetAllByGroup)
+	suite.env.RunTest(suite.checkGetAllByGroup)
 }
 
 func (suite *ruleTestSuite) checkGetAllByGroup(cluster *tests.TestCluster) {
 	re := suite.Require()
 	leaderServer := cluster.GetLeaderServer()
 	pdAddr := leaderServer.GetAddr()
-	urlPrefix := fmt.Sprintf("%s%s/api/v1/config", pdAddr, apiPrefix)
+	urlPrefix := fmt.Sprintf("%s/pd/api/v1/config", pdAddr)
 
 	rule := placement.Rule{GroupID: "c", ID: "20", StartKeyHex: "1111", EndKeyHex: "3333", Role: placement.Voter, Count: 1}
 	data, err := json.Marshal(rule)
@@ -440,14 +442,14 @@ func (suite *ruleTestSuite) checkGetAllByGroup(cluster *tests.TestCluster) {
 }
 
 func (suite *ruleTestSuite) TestGetAllByRegion() {
-	suite.env.RunTestBasedOnMode(suite.checkGetAllByRegion)
+	suite.env.RunTest(suite.checkGetAllByRegion)
 }
 
 func (suite *ruleTestSuite) checkGetAllByRegion(cluster *tests.TestCluster) {
 	re := suite.Require()
 	leaderServer := cluster.GetLeaderServer()
 	pdAddr := leaderServer.GetAddr()
-	urlPrefix := fmt.Sprintf("%s%s/api/v1/config", pdAddr, apiPrefix)
+	urlPrefix := fmt.Sprintf("%s/pd/api/v1/config", pdAddr)
 
 	rule := placement.Rule{GroupID: "e", ID: "20", StartKeyHex: "1111", EndKeyHex: "3333", Role: placement.Voter, Count: 1}
 	data, err := json.Marshal(rule)
@@ -505,14 +507,14 @@ func (suite *ruleTestSuite) checkGetAllByRegion(cluster *tests.TestCluster) {
 }
 
 func (suite *ruleTestSuite) TestGetAllByKey() {
-	suite.env.RunTestBasedOnMode(suite.checkGetAllByKey)
+	suite.env.RunTest(suite.checkGetAllByKey)
 }
 
 func (suite *ruleTestSuite) checkGetAllByKey(cluster *tests.TestCluster) {
 	re := suite.Require()
 	leaderServer := cluster.GetLeaderServer()
 	pdAddr := leaderServer.GetAddr()
-	urlPrefix := fmt.Sprintf("%s%s/api/v1/config", pdAddr, apiPrefix)
+	urlPrefix := fmt.Sprintf("%s/pd/api/v1/config", pdAddr)
 
 	rule := placement.Rule{GroupID: "f", ID: "40", StartKeyHex: "8888", EndKeyHex: "9111", Role: placement.Voter, Count: 1}
 	data, err := json.Marshal(rule)
@@ -564,14 +566,14 @@ func (suite *ruleTestSuite) checkGetAllByKey(cluster *tests.TestCluster) {
 }
 
 func (suite *ruleTestSuite) TestDelete() {
-	suite.env.RunTestBasedOnMode(suite.checkDelete)
+	suite.env.RunTest(suite.checkDelete)
 }
 
 func (suite *ruleTestSuite) checkDelete(cluster *tests.TestCluster) {
 	re := suite.Require()
 	leaderServer := cluster.GetLeaderServer()
 	pdAddr := leaderServer.GetAddr()
-	urlPrefix := fmt.Sprintf("%s%s/api/v1/config", pdAddr, apiPrefix)
+	urlPrefix := fmt.Sprintf("%s/pd/api/v1/config", pdAddr)
 
 	rule := placement.Rule{GroupID: "g", ID: "10", StartKeyHex: "8888", EndKeyHex: "9111", Role: placement.Voter, Count: 1}
 	data, err := json.Marshal(rule)
@@ -630,14 +632,14 @@ func (suite *ruleTestSuite) checkDelete(cluster *tests.TestCluster) {
 }
 
 func (suite *ruleTestSuite) TestBatch() {
-	suite.env.RunTestBasedOnMode(suite.checkBatch)
+	suite.env.RunTest(suite.checkBatch)
 }
 
 func (suite *ruleTestSuite) checkBatch(cluster *tests.TestCluster) {
 	re := suite.Require()
 	leaderServer := cluster.GetLeaderServer()
 	pdAddr := leaderServer.GetAddr()
-	urlPrefix := fmt.Sprintf("%s%s/api/v1/config", pdAddr, apiPrefix)
+	urlPrefix := fmt.Sprintf("%s/pd/api/v1/config", pdAddr)
 
 	opt1 := placement.RuleOp{
 		Action: placement.RuleOpAdd,
@@ -759,13 +761,13 @@ func (suite *ruleTestSuite) checkBatch(cluster *tests.TestCluster) {
 }
 
 func (suite *ruleTestSuite) TestBundle() {
-	suite.env.RunTestBasedOnMode(suite.checkBundle)
+	suite.env.RunTest(suite.checkBundle)
 }
 
 func (suite *ruleTestSuite) checkBundle(cluster *tests.TestCluster) {
 	leaderServer := cluster.GetLeaderServer()
 	pdAddr := leaderServer.GetAddr()
-	urlPrefix := fmt.Sprintf("%s%s/api/v1/config", pdAddr, apiPrefix)
+	urlPrefix := fmt.Sprintf("%s/pd/api/v1/config", pdAddr)
 
 	re := suite.Require()
 	// GetAll
@@ -869,14 +871,14 @@ func (suite *ruleTestSuite) checkBundle(cluster *tests.TestCluster) {
 }
 
 func (suite *ruleTestSuite) TestBundleBadRequest() {
-	suite.env.RunTestBasedOnMode(suite.checkBundleBadRequest)
+	suite.env.RunTest(suite.checkBundleBadRequest)
 }
 
 func (suite *ruleTestSuite) checkBundleBadRequest(cluster *tests.TestCluster) {
 	re := suite.Require()
 	leaderServer := cluster.GetLeaderServer()
 	pdAddr := leaderServer.GetAddr()
-	urlPrefix := fmt.Sprintf("%s%s/api/v1/config", pdAddr, apiPrefix)
+	urlPrefix := fmt.Sprintf("%s/pd/api/v1/config", pdAddr)
 
 	testCases := []struct {
 		uri  string
@@ -900,14 +902,14 @@ func (suite *ruleTestSuite) checkBundleBadRequest(cluster *tests.TestCluster) {
 }
 
 func (suite *ruleTestSuite) TestLeaderAndVoter() {
-	suite.env.RunTestBasedOnMode(suite.checkLeaderAndVoter)
+	suite.env.RunTest(suite.checkLeaderAndVoter)
 }
 
 func (suite *ruleTestSuite) checkLeaderAndVoter(cluster *tests.TestCluster) {
 	re := suite.Require()
 	leaderServer := cluster.GetLeaderServer()
 	pdAddr := leaderServer.GetAddr()
-	urlPrefix := fmt.Sprintf("%s%s/api/v1", pdAddr, apiPrefix)
+	urlPrefix := fmt.Sprintf("%s/pd/api/v1", pdAddr)
 
 	stores := []*metapb.Store{
 		{
@@ -991,13 +993,13 @@ func (suite *ruleTestSuite) checkLeaderAndVoter(cluster *tests.TestCluster) {
 }
 
 func (suite *ruleTestSuite) TestDeleteAndUpdate() {
-	suite.env.RunTestBasedOnMode(suite.checkDeleteAndUpdate)
+	suite.env.RunTest(suite.checkDeleteAndUpdate)
 }
 
 func (suite *ruleTestSuite) checkDeleteAndUpdate(cluster *tests.TestCluster) {
 	leaderServer := cluster.GetLeaderServer()
 	pdAddr := leaderServer.GetAddr()
-	urlPrefix := fmt.Sprintf("%s%s/api/v1", pdAddr, apiPrefix)
+	urlPrefix := fmt.Sprintf("%s/pd/api/v1", pdAddr)
 
 	bundles := [][]placement.GroupBundle{
 		// 1 rule group with 1 rule
@@ -1072,7 +1074,7 @@ func (suite *ruleTestSuite) checkDeleteAndUpdate(cluster *tests.TestCluster) {
 }
 
 func (suite *ruleTestSuite) TestConcurrency() {
-	suite.env.RunTestBasedOnMode(suite.checkConcurrency)
+	suite.env.RunTest(suite.checkConcurrency)
 }
 
 func (suite *ruleTestSuite) checkConcurrency(cluster *tests.TestCluster) {
@@ -1122,7 +1124,7 @@ func (suite *ruleTestSuite) checkConcurrencyWith(cluster *tests.TestCluster,
 	re := suite.Require()
 	leaderServer := cluster.GetLeaderServer()
 	pdAddr := leaderServer.GetAddr()
-	urlPrefix := fmt.Sprintf("%s%s/api/v1", pdAddr, apiPrefix)
+	urlPrefix := fmt.Sprintf("%s/pd/api/v1", pdAddr)
 	expectResult := struct {
 		syncutil.RWMutex
 		val int
@@ -1161,13 +1163,13 @@ func (suite *ruleTestSuite) checkConcurrencyWith(cluster *tests.TestCluster,
 }
 
 func (suite *ruleTestSuite) TestLargeRules() {
-	suite.env.RunTestBasedOnMode(suite.checkLargeRules)
+	suite.env.RunTest(suite.checkLargeRules)
 }
 
 func (suite *ruleTestSuite) checkLargeRules(cluster *tests.TestCluster) {
 	leaderServer := cluster.GetLeaderServer()
 	pdAddr := leaderServer.GetAddr()
-	urlPrefix := fmt.Sprintf("%s%s/api/v1", pdAddr, apiPrefix)
+	urlPrefix := fmt.Sprintf("%s/pd/api/v1", pdAddr)
 	genBundlesWithRulesNum := func(num int) []placement.GroupBundle {
 		bundle := []placement.GroupBundle{
 			{
@@ -1290,14 +1292,14 @@ func (suite *regionRuleTestSuite) TearDownSuite() {
 }
 
 func (suite *regionRuleTestSuite) TestRegionPlacementRule() {
-	suite.env.RunTestBasedOnMode(suite.checkRegionPlacementRule)
+	suite.env.RunTest(suite.checkRegionPlacementRule)
 }
 
 func (suite *regionRuleTestSuite) checkRegionPlacementRule(cluster *tests.TestCluster) {
 	re := suite.Require()
 	leaderServer := cluster.GetLeaderServer()
 	pdAddr := leaderServer.GetAddr()
-	urlPrefix := fmt.Sprintf("%s%s/api/v1", pdAddr, apiPrefix)
+	urlPrefix := fmt.Sprintf("%s/pd/api/v1", pdAddr)
 
 	stores := []*metapb.Store{
 		{

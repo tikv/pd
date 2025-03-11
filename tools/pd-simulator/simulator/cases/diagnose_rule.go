@@ -18,14 +18,16 @@ import (
 	"time"
 
 	"github.com/docker/go-units"
+	"go.uber.org/zap"
+
 	"github.com/pingcap/kvproto/pkg/metapb"
+
 	pdHttp "github.com/tikv/pd/client/http"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	sc "github.com/tikv/pd/tools/pd-simulator/simulator/config"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/info"
 	"github.com/tikv/pd/tools/pd-simulator/simulator/simutil"
-	"go.uber.org/zap"
 )
 
 func newRule1(_ *sc.SimConfig) *Case {

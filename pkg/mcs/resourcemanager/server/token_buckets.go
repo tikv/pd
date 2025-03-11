@@ -7,7 +7,7 @@
 //     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,g
+// distributed under the License is distributed on an "AS IS" BASIS,
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
@@ -19,31 +19,61 @@ import (
 	"time"
 
 	"github.com/gogo/protobuf/proto"
+	"go.uber.org/zap"
+
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 	"github.com/pingcap/log"
-	"go.uber.org/zap"
 )
 
 const (
-	defaultRefillRate    = 10000
-	defaultInitialTokens = 10 * 10000
+	defaultRefillRate         = 10000
+	defaultModeratedBurstRate = 10000
+	defaultInitialTokens      = 10 * 10000
+	defaultReserveRatio       = 0.5
+	defaultLoanCoefficient    = 2
+	maxAssignTokens           = math.MaxFloat64 / 1024 // assume max client connect is 1024
+	slotExpireTimeout         = 10 * time.Minute
 )
 
+type burstableMode int
+
 const (
-	defaultReserveRatio    = 0.5
-	defaultLoanCoefficient = 2
-	maxAssignTokens        = math.MaxFloat64 / 1024 // assume max client connect is 1024
-	slotExpireTimeout      = 10 * time.Minute
+	limited        burstableMode = iota // burstlimit is greater than 0
+	rateControlled                      // burstlimit is 0
+	unlimited                           // burstlimit is -1
+	moderated                           // burstlimit is -2
 )
+
+func getBurstableMode(settings *rmpb.TokenLimitSettings) burstableMode {
+	if settings == nil {
+		return limited
+	}
+	// BurstLimit is used as below:
+	//   - If b == 0, that means the limiter is unlimited capacity. default use in resource controller (burst with a rate within an unlimited capacity).
+	//   - If b == -1, that means the limiter is unlimited capacity and fillrate(r) is ignored, can be seen as r == Inf (burst within an unlimited capacity).
+	//   - If b == -2, that means the limiter is limited capacity and fillrate(r) is ignored, can be seen as r == defaultBurstLimitFactor * fillrate (burst within a limited capacity).
+	//   - If b > 0, that means the limiter is limited capacity.
+	burst := settings.GetBurstLimit()
+	switch {
+	case burst == -1:
+		return unlimited
+	case burst == -2:
+		return moderated
+	case burst == 0:
+		return rateControlled
+	case burst > 0:
+		return limited
+	default:
+		log.Warn("invalid burst limit, fallback to limited mode",
+			zap.Int64("burst-limit", burst))
+		return limited
+	}
+}
 
 // GroupTokenBucket is a token bucket for a resource group.
 // Now we don't save consumption in `GroupTokenBucket`, only statistics it in prometheus.
 type GroupTokenBucket struct {
 	// Settings is the setting of TokenBucket.
-	// BurstLimit is used as below:
-	//   - If b == 0, that means the limiter is unlimited capacity. default use in resource controller (burst with a rate within an unlimited capacity).
-	//   - If b < 0, that means the limiter is unlimited capacity and fillrate(r) is ignored, can be seen as r == Inf (burst within an unlimited capacity).
-	//   - If b > 0, that means the limiter is limited capacity.
 	// MaxTokens limits the number of tokens that can be accumulated
 	Settings              *rmpb.TokenLimitSettings `json:"settings,omitempty"`
 	GroupTokenBucketState `json:"state,omitempty"`
@@ -173,7 +203,7 @@ func (gts *GroupTokenBucketState) balanceSlotTokens(
 			if time.Since(slot.lastReqTime) >= slotExpireTimeout {
 				delete(gts.tokenSlots, clientUniqueID)
 				log.Info("delete resource group slot because expire", zap.Time("last-req-time", slot.lastReqTime),
-					zap.Any("expire timeout", slotExpireTimeout), zap.Any("del client id", clientUniqueID), zap.Any("len", len(gts.tokenSlots)))
+					zap.Duration("expire-timeout", slotExpireTimeout), zap.Uint64("del-client-id", clientUniqueID), zap.Int("len", len(gts.tokenSlots)))
 			}
 		}
 	}
@@ -181,7 +211,7 @@ func (gts *GroupTokenBucketState) balanceSlotTokens(
 		return
 	}
 	evenRatio := 1 / float64(len(gts.tokenSlots))
-	if settings.GetBurstLimit() <= 0 {
+	if mode := getBurstableMode(settings); mode == rateControlled || mode == unlimited {
 		for _, slot := range gts.tokenSlots {
 			slot.settings = &rmpb.TokenLimitSettings{
 				FillRate:   uint64(float64(settings.GetFillRate()) * evenRatio),
@@ -199,11 +229,7 @@ func (gts *GroupTokenBucketState) balanceSlotTokens(
 			slot.requireTokensSum = 0
 			gts.clientConsumptionTokensSum = 0
 
-			var (
-				fillRate   = float64(settings.GetFillRate()) * evenRatio
-				burstLimit = float64(settings.GetBurstLimit()) * evenRatio
-			)
-
+			fillRate, burstLimit := calcRateAndBurstLimit(settings, evenRatio)
 			slot.settings = &rmpb.TokenLimitSettings{
 				FillRate:   uint64(fillRate),
 				BurstLimit: int64(burstLimit),
@@ -219,11 +245,8 @@ func (gts *GroupTokenBucketState) balanceSlotTokens(
 			// 		(N - (a+b+...+n)/N +1) * 1/N => (N - 1 + 1) * 1/N => 1
 			ratio := (1 - slot.requireTokensSum/gts.clientConsumptionTokensSum + evenRatio) * evenRatio
 
-			var (
-				fillRate    = float64(settings.GetFillRate()) * ratio
-				burstLimit  = float64(settings.GetBurstLimit()) * ratio
-				assignToken = elapseTokens * ratio
-			)
+			assignToken := elapseTokens * ratio
+			fillRate, burstLimit := calcRateAndBurstLimit(settings, ratio)
 
 			// Need to reserve burst limit to next balance.
 			if burstLimit > 0 && slot.tokenCapacity > burstLimit {
@@ -246,6 +269,17 @@ func (gts *GroupTokenBucketState) balanceSlotTokens(
 		slot.requireTokensSum += requiredToken
 		gts.clientConsumptionTokensSum += requiredToken
 	}
+}
+
+func calcRateAndBurstLimit(settings *rmpb.TokenLimitSettings, ratio float64) (fillRate, burstLimit float64) {
+	if getBurstableMode(settings) == moderated {
+		fillRate = math.Min(float64(settings.GetFillRate())+defaultModeratedBurstRate, unlimitedRate) * ratio
+		burstLimit = fillRate
+		return
+	}
+	fillRate = float64(settings.GetFillRate()) * ratio
+	burstLimit = float64(settings.GetBurstLimit()) * ratio
+	return
 }
 
 // NewGroupTokenBucket returns a new GroupTokenBucket
@@ -355,8 +389,7 @@ func (ts *TokenSlot) assignSlotTokens(requiredToken float64, targetPeriodMs uint
 	var res rmpb.TokenBucket
 	burstLimit := ts.settings.GetBurstLimit()
 	res.Settings = &rmpb.TokenLimitSettings{BurstLimit: burstLimit}
-	// If BurstLimit < 0, just return.
-	if burstLimit < 0 {
+	if getBurstableMode(res.Settings) == unlimited {
 		res.Tokens = requiredToken
 		return &res, 0
 	}

@@ -21,9 +21,11 @@ import (
 	"time"
 
 	"github.com/docker/go-units"
+	"github.com/stretchr/testify/require"
+
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/stretchr/testify/require"
+
 	"github.com/tikv/pd/pkg/utils/typeutil"
 )
 
@@ -107,7 +109,7 @@ func BenchmarkStoreClone(b *testing.B) {
 		Labels:  []*metapb.StoreLabel{{Key: "zone", Value: "z1"}, {Key: "host", Value: "h1"}}}
 	store := NewStoreInfo(meta)
 	b.ResetTimer()
-	for t := 0; t < b.N; t++ {
+	for t := range b.N {
 		store.Clone(SetLeaderCount(t))
 	}
 }

@@ -26,19 +26,23 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/suite"
+	"go.uber.org/goleak"
+	"go.uber.org/zap"
+
 	"github.com/pingcap/failpoint"
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 	"github.com/pingcap/log"
-	"github.com/stretchr/testify/require"
-	"github.com/stretchr/testify/suite"
+
 	pd "github.com/tikv/pd/client"
+	"github.com/tikv/pd/client/pkg/caller"
 	"github.com/tikv/pd/client/resource_group/controller"
+	sd "github.com/tikv/pd/client/servicediscovery"
 	"github.com/tikv/pd/pkg/mcs/resourcemanager/server"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/tests"
-	"go.uber.org/goleak"
-	"go.uber.org/zap"
 
 	// Register Service
 	_ "github.com/tikv/pd/pkg/mcs/registry"
@@ -77,7 +81,9 @@ func (suite *resourceManagerClientTestSuite) SetupSuite() {
 	err = suite.cluster.RunInitialServers()
 	re.NoError(err)
 
-	suite.client, err = pd.NewClientWithContext(suite.ctx, suite.cluster.GetConfig().GetClientURLs(), pd.SecurityOption{})
+	suite.client, err = pd.NewClientWithContext(suite.ctx,
+		caller.TestComponent,
+		suite.cluster.GetConfig().GetClientURLs(), pd.SecurityOption{})
 	re.NoError(err)
 	leader := suite.cluster.GetServer(suite.cluster.WaitLeader())
 	re.NotNil(leader)
@@ -139,7 +145,7 @@ func (suite *resourceManagerClientTestSuite) SetupSuite() {
 }
 
 func waitLeader(re *require.Assertions, cli pd.Client, leaderAddr string) {
-	innerCli, ok := cli.(interface{ GetServiceDiscovery() pd.ServiceDiscovery })
+	innerCli, ok := cli.(interface{ GetServiceDiscovery() sd.ServiceDiscovery })
 	re.True(ok)
 	re.NotNil(innerCli)
 	testutil.Eventually(re, func() bool {
@@ -1076,7 +1082,9 @@ func (suite *resourceManagerClientTestSuite) TestBasicResourceGroupCURD() {
 	re.NoError(tests.RunServers(serverList))
 	re.NotEmpty(suite.cluster.WaitLeader())
 	// re-connect client as well
-	suite.client, err = pd.NewClientWithContext(suite.ctx, suite.cluster.GetConfig().GetClientURLs(), pd.SecurityOption{})
+	suite.client, err = pd.NewClientWithContext(suite.ctx,
+		caller.TestComponent,
+		suite.cluster.GetConfig().GetClientURLs(), pd.SecurityOption{})
 	re.NoError(err)
 	cli = suite.client
 	var newGroups []*rmpb.ResourceGroup
@@ -1150,7 +1158,9 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupRUConsumption() {
 	suite.cluster.WaitLeader()
 	// re-connect client as
 	cli.Close()
-	suite.client, err = pd.NewClientWithContext(suite.ctx, suite.cluster.GetConfig().GetClientURLs(), pd.SecurityOption{})
+	suite.client, err = pd.NewClientWithContext(suite.ctx,
+		caller.TestComponent,
+		suite.cluster.GetConfig().GetClientURLs(), pd.SecurityOption{})
 	re.NoError(err)
 	cli = suite.client
 	// check ru stats not loss after restart

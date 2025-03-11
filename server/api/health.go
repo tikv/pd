@@ -17,9 +17,10 @@ package api
 import (
 	"net/http"
 
+	"github.com/unrolled/render"
+
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/cluster"
-	"github.com/unrolled/render"
 )
 
 type healthHandler struct {

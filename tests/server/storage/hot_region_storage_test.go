@@ -19,9 +19,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/stretchr/testify/require"
+
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/statistics/utils"
@@ -44,6 +46,7 @@ func TestHotRegionStorage(t *testing.T) {
 		},
 	)
 	re.NoError(err)
+	defer cluster.Destroy()
 	err = cluster.RunInitialServers()
 	re.NoError(err)
 	re.NotEmpty(cluster.WaitLeader())
@@ -65,7 +68,7 @@ func TestHotRegionStorage(t *testing.T) {
 	for _, store := range stores {
 		tests.MustPutStore(re, cluster, store)
 	}
-	defer cluster.Destroy()
+
 	startTime := time.Now().Unix()
 	tests.MustPutRegion(re, cluster, 1, 1, []byte("a"), []byte("b"), core.SetWrittenBytes(3000000000),
 		core.SetReportInterval(uint64(startTime-utils.RegionHeartBeatReportInterval), uint64(startTime)))
@@ -152,6 +155,7 @@ func TestHotRegionStorageReservedDayConfigChange(t *testing.T) {
 		},
 	)
 	re.NoError(err)
+	defer cluster.Destroy()
 	err = cluster.RunInitialServers()
 	re.NoError(err)
 	re.NotEmpty(cluster.WaitLeader())
@@ -173,7 +177,7 @@ func TestHotRegionStorageReservedDayConfigChange(t *testing.T) {
 	for _, store := range stores {
 		tests.MustPutStore(re, cluster, store)
 	}
-	defer cluster.Destroy()
+
 	startTime := time.Now().Unix()
 	tests.MustPutRegion(re, cluster, 1, 1, []byte("a"), []byte("b"), core.SetWrittenBytes(3000000000),
 		core.SetReportInterval(uint64(startTime-utils.RegionHeartBeatReportInterval), uint64(startTime)))
@@ -244,6 +248,7 @@ func TestHotRegionStorageWriteIntervalConfigChange(t *testing.T) {
 		},
 	)
 	re.NoError(err)
+	defer cluster.Destroy()
 	err = cluster.RunInitialServers()
 	re.NoError(err)
 	re.NotEmpty(cluster.WaitLeader())
@@ -265,7 +270,6 @@ func TestHotRegionStorageWriteIntervalConfigChange(t *testing.T) {
 	for _, store := range stores {
 		tests.MustPutStore(re, cluster, store)
 	}
-	defer cluster.Destroy()
 	startTime := time.Now().Unix()
 	tests.MustPutRegion(re, cluster, 1, 1, []byte("a"), []byte("b"),
 		core.SetWrittenBytes(3000000000),

@@ -23,18 +23,20 @@ import (
 	"time"
 
 	"github.com/coreos/go-semver/semver"
+	"go.etcd.io/etcd/api/v3/mvccpb"
+	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.uber.org/zap"
+
 	"github.com/pingcap/log"
+
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
-	"go.etcd.io/etcd/api/v3/mvccpb"
-	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.uber.org/zap"
 )
 
-// Watcher is used to watch the PD API server for any configuration changes.
+// Watcher is used to watch the PD for any configuration changes.
 type Watcher struct {
 	wg     sync.WaitGroup
 	ctx    context.Context
@@ -74,7 +76,7 @@ type persistedConfig struct {
 	Store          sc.StoreConfig       `json:"store"`
 }
 
-// NewWatcher creates a new watcher to watch the config meta change from PD API server.
+// NewWatcher creates a new watcher to watch the config meta change from PD.
 func NewWatcher(
 	ctx context.Context,
 	etcdClient *clientv3.Client,
@@ -184,10 +186,9 @@ func (cw *Watcher) initializeTTLConfigWatcher() error {
 }
 
 func (cw *Watcher) initializeSchedulerConfigWatcher() error {
-	prefixToTrim := cw.schedulerConfigPathPrefix + "/"
 	putFn := func(kv *mvccpb.KeyValue) error {
 		key := string(kv.Key)
-		name := strings.TrimPrefix(key, prefixToTrim)
+		name := strings.TrimPrefix(key, cw.schedulerConfigPathPrefix)
 		log.Info("update scheduler config", zap.String("name", name),
 			zap.String("value", string(kv.Value)))
 		err := cw.storage.SaveSchedulerConfig(name, kv.Value)
@@ -208,12 +209,15 @@ func (cw *Watcher) initializeSchedulerConfigWatcher() error {
 		key := string(kv.Key)
 		log.Info("remove scheduler config", zap.String("key", key))
 		return cw.storage.RemoveSchedulerConfig(
-			strings.TrimPrefix(key, prefixToTrim),
+			strings.TrimPrefix(key, cw.schedulerConfigPathPrefix),
 		)
 	}
 	cw.schedulerConfigWatcher = etcdutil.NewLoopWatcher(
 		cw.ctx, &cw.wg,
 		cw.etcdClient,
+		// NOTE: schedulerConfigPathPrefix is "/pd/{cluster_id}/scheduler_config" before.
+		// Now it is "/pd/{cluster_id}/scheduler_config/". I think This has no impact.
+		// If it needs to be fixed, I can update it.
 		"scheduling-scheduler-config-watcher", cw.schedulerConfigPathPrefix,
 		func([]*clientv3.Event) error { return nil },
 		putFn, deleteFn,

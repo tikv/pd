@@ -19,12 +19,14 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pingcap/errors"
-	"github.com/pingcap/log"
-	pd "github.com/tikv/pd/client"
-	pdHttp "github.com/tikv/pd/client/http"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
+
+	"github.com/pingcap/errors"
+	"github.com/pingcap/log"
+
+	pd "github.com/tikv/pd/client"
+	pdHttp "github.com/tikv/pd/client/http"
 )
 
 var base = int64(time.Second) / int64(time.Microsecond)

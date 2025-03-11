@@ -21,10 +21,14 @@ import (
 	"sync/atomic"
 	"time"
 
+	"go.uber.org/zap"
+	"google.golang.org/grpc"
+
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/schedulingpb"
 	"github.com/pingcap/log"
+
 	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
@@ -33,16 +37,6 @@ import (
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/versioninfo"
-	"go.uber.org/zap"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
-)
-
-// gRPC errors
-var (
-	ErrNotStarted        = status.Errorf(codes.Unavailable, "server not started")
-	ErrClusterMismatched = status.Errorf(codes.Unavailable, "cluster mismatched")
 )
 
 // SetUpRestHandler is a hook to sets up the REST service.
@@ -105,7 +99,7 @@ func (s *heartbeatServer) Send(m core.RegionHeartbeatResponse) error {
 		return errors.WithStack(err)
 	case <-timer.C:
 		atomic.StoreInt32(&s.closed, 1)
-		return status.Errorf(codes.DeadlineExceeded, "send heartbeat timeout")
+		return errs.ErrSendHeartbeatTimeout
 	}
 }
 
@@ -165,7 +159,7 @@ func (s *Service) RegionHeartbeat(stream schedulingpb.Scheduling_RegionHeartbeat
 		region := core.RegionFromHeartbeat(request, 0)
 		err = c.HandleRegionHeartbeat(region)
 		if err != nil {
-			// TODO: if we need to send the error back to API server.
+			// TODO: if we need to send the error back to PD.
 			log.Error("failed handle region heartbeat", zap.Error(err))
 			continue
 		}
@@ -294,17 +288,19 @@ func (s *Service) AskBatchSplit(_ context.Context, request *schedulingpb.AskBatc
 	splitIDs := make([]*pdpb.SplitID, 0, splitCount)
 	recordRegions := make([]uint64, 0, splitCount+1)
 
-	for i := 0; i < int(splitCount); i++ {
-		newRegionID, err := c.AllocID()
-		if err != nil {
-			return nil, errs.ErrSchedulerNotFound.FastGenByArgs()
-		}
+	id, count, err := c.AllocID(splitCount * (1 + uint32(len(request.Region.Peers))))
+	if err != nil {
+		return nil, err
+	}
+	curID := id - uint64(count)
+	for range splitCount {
+		newRegionID := curID
+		curID++
 
 		peerIDs := make([]uint64, len(request.Region.Peers))
-		for i := 0; i < len(peerIDs); i++ {
-			if peerIDs[i], err = c.AllocID(); err != nil {
-				return nil, err
-			}
+		for j := 0; j < len(peerIDs); j++ {
+			peerIDs[j] = curID
+			curID++
 		}
 
 		recordRegions = append(recordRegions, newRegionID)

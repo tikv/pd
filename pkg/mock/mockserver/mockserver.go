@@ -18,6 +18,7 @@ import (
 	"context"
 
 	"github.com/pingcap/kvproto/pkg/pdpb"
+
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/utils/grpcutil"

@@ -70,6 +70,8 @@ const (
 	TransferWitnessLeaderScheduler CheckerSchedulerType = "transfer-witness-leader-scheduler"
 	// LabelScheduler is label scheduler name.
 	LabelScheduler CheckerSchedulerType = "label-scheduler"
+	// BalanceRangeScheduler is balance key range scheduler name.
+	BalanceRangeScheduler CheckerSchedulerType = "balance-range-scheduler"
 )
 
 // TODO: SchedulerTypeCompatibleMap and ConvertOldStrToType should be removed after
@@ -97,6 +99,7 @@ var (
 		SplitBucketScheduler:           "split-bucket",
 		TransferWitnessLeaderScheduler: "transfer-witness-leader",
 		LabelScheduler:                 "label",
+		BalanceRangeScheduler:          "balance-range",
 	}
 
 	// ConvertOldStrToType exists for compatibility.
@@ -120,6 +123,7 @@ var (
 		"split-bucket":            SplitBucketScheduler,
 		"transfer-witness-leader": TransferWitnessLeaderScheduler,
 		"label":                   LabelScheduler,
+		"balance-range":           BalanceRangeScheduler,
 	}
 
 	// StringToSchedulerType is a map to convert the scheduler string to the CheckerSchedulerType.
@@ -143,6 +147,7 @@ var (
 		"split-bucket-scheduler":            SplitBucketScheduler,
 		"transfer-witness-leader-scheduler": TransferWitnessLeaderScheduler,
 		"label-scheduler":                   LabelScheduler,
+		"balance-range-scheduler":           BalanceRangeScheduler,
 	}
 
 	// DefaultSchedulers is the default scheduler types.

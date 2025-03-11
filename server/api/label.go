@@ -19,12 +19,14 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/unrolled/render"
+
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
+
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/response"
 	"github.com/tikv/pd/server"
-	"github.com/unrolled/render"
 )
 
 type labelsHandler struct {

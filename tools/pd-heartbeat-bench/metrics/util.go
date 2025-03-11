@@ -22,12 +22,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pingcap/log"
 	"github.com/prometheus/client_golang/api"
 	v1 "github.com/prometheus/client_golang/api/prometheus/v1"
 	"github.com/prometheus/common/model"
 	"go.etcd.io/etcd/pkg/v3/report"
 	"go.uber.org/zap"
+
+	"github.com/pingcap/log"
 )
 
 var (

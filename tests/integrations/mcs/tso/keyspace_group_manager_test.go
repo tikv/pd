@@ -25,19 +25,21 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pingcap/failpoint"
-	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+
+	"github.com/pingcap/failpoint"
+	"github.com/pingcap/kvproto/pkg/pdpb"
+
 	pd "github.com/tikv/pd/client"
 	clierrs "github.com/tikv/pd/client/errs"
+	"github.com/tikv/pd/client/pkg/caller"
 	"github.com/tikv/pd/pkg/election"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/mock/mockid"
 	"github.com/tikv/pd/pkg/storage/endpoint"
-	tsopkg "github.com/tikv/pd/pkg/tso"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/testutil"
@@ -66,7 +68,7 @@ type tsoKeyspaceGroupManagerTestSuite struct {
 }
 
 func (suite *tsoKeyspaceGroupManagerTestSuite) allocID() uint32 {
-	id, _ := suite.allocator.Alloc()
+	id, _, _ := suite.allocator.Alloc(1)
 	return uint32(id)
 }
 
@@ -80,7 +82,7 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) SetupSuite() {
 
 	var err error
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
-	suite.cluster, err = tests.NewTestAPICluster(suite.ctx, 1)
+	suite.cluster, err = tests.NewTestClusterWithKeyspaceGroup(suite.ctx, 1)
 	re.NoError(err)
 	err = suite.cluster.RunInitialServers()
 	re.NoError(err)
@@ -219,10 +221,10 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestKeyspacesServedByNonDefaultKe
 						// Make sure every keyspace group is using the right timestamp path
 						// for loading/saving timestamp from/to etcd and the right primary path
 						// for primary election.
-						rootPath := keypath.TSOSvcRootPath()
-						primaryPath := keypath.KeyspaceGroupPrimaryPath(rootPath, param.keyspaceGroupID)
-						timestampPath := keypath.FullTimestampPath(param.keyspaceGroupID)
-						re.Equal(timestampPath, am.GetTimestampPath(tsopkg.GlobalDCLocation))
+						primaryPath := keypath.LeaderPath(&keypath.MsParam{
+							ServiceName: constant.TSOServiceName,
+							GroupID:     param.keyspaceGroupID,
+						})
 						re.Equal(primaryPath, am.GetMember().GetLeaderPath())
 
 						served = true
@@ -314,7 +316,7 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) requestTSO(
 	primary := suite.tsoCluster.WaitForPrimaryServing(re, keyspaceID, keyspaceGroupID)
 	kgm := primary.GetKeyspaceGroupManager()
 	re.NotNil(kgm)
-	ts, _, err := kgm.HandleTSORequest(suite.ctx, keyspaceID, keyspaceGroupID, tsopkg.GlobalDCLocation, 1)
+	ts, _, err := kgm.HandleTSORequest(suite.ctx, keyspaceID, keyspaceGroupID, 1)
 	return ts, err
 }
 
@@ -449,7 +451,9 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) dispatchClient(
 	re.NoError(err)
 	re.NotNil(member)
 	// Prepare the client for keyspace.
-	tsoClient, err := pd.NewClientWithKeyspace(suite.ctx, keyspaceID, []string{suite.pdLeaderServer.GetAddr()}, pd.SecurityOption{})
+	tsoClient, err := pd.NewClientWithKeyspace(suite.ctx,
+		caller.TestComponent,
+		keyspaceID, []string{suite.pdLeaderServer.GetAddr()}, pd.SecurityOption{})
 	re.NoError(err)
 	re.NotNil(tsoClient)
 	var (
@@ -533,19 +537,19 @@ func TestTwiceSplitKeyspaceGroup(t *testing.T) {
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/acceleratedAllocNodes", `return(true)`))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/fastGroupSplitPatroller", `return(true)`))
 
-	// Init api server config but not start.
-	tc, err := tests.NewTestAPICluster(ctx, 1, func(conf *config.Config, _ string) {
+	// Init PD config but not start.
+	tc, err := tests.NewTestClusterWithKeyspaceGroup(ctx, 1, func(conf *config.Config, _ string) {
 		conf.Keyspace.PreAlloc = []string{
 			"keyspace_a", "keyspace_b",
 		}
 	})
 	re.NoError(err)
+	defer tc.Destroy()
 	pdAddr := tc.GetConfig().GetClientURL()
 
-	// Start api server and tso server.
+	// Start PD and tso server.
 	err = tc.RunInitialServers()
 	re.NoError(err)
-	defer tc.Destroy()
 	tc.WaitLeader()
 	leaderServer := tc.GetLeaderServer()
 	re.NoError(leaderServer.BootstrapCluster())
@@ -730,19 +734,19 @@ func TestGetTSOImmediately(t *testing.T) {
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/acceleratedAllocNodes", `return(true)`))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/fastGroupSplitPatroller", `return(true)`))
 
-	// Init api server config but not start.
-	tc, err := tests.NewTestAPICluster(ctx, 1, func(conf *config.Config, _ string) {
+	// Init PD config but not start.
+	tc, err := tests.NewTestClusterWithKeyspaceGroup(ctx, 1, func(conf *config.Config, _ string) {
 		conf.Keyspace.PreAlloc = []string{
 			"keyspace_a", "keyspace_b",
 		}
 	})
 	re.NoError(err)
+	defer tc.Destroy()
 	pdAddr := tc.GetConfig().GetClientURL()
 
-	// Start api server and tso server.
+	// Start PD and tso server.
 	err = tc.RunInitialServers()
 	re.NoError(err)
-	defer tc.Destroy()
 	tc.WaitLeader()
 	leaderServer := tc.GetLeaderServer()
 	re.NoError(leaderServer.BootstrapCluster())
@@ -779,7 +783,9 @@ func TestGetTSOImmediately(t *testing.T) {
 	}, testutil.WithWaitFor(5*time.Second), testutil.WithTickInterval(50*time.Millisecond))
 
 	apiCtx := pd.NewAPIContextV2("keyspace_b") // its keyspace id is 2.
-	cli, err := pd.NewClientWithAPIContext(ctx, apiCtx, []string{pdAddr}, pd.SecurityOption{})
+	cli, err := pd.NewClientWithAPIContext(ctx, apiCtx,
+		caller.TestComponent,
+		[]string{pdAddr}, pd.SecurityOption{})
 	re.NoError(err)
 	_, _, err = cli.GetTS(ctx)
 	re.NoError(err)

@@ -21,13 +21,15 @@ import (
 	"sync"
 	"time"
 
-	"github.com/pingcap/log"
 	"github.com/prometheus/client_golang/prometheus"
+	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.uber.org/zap"
+
+	"github.com/pingcap/log"
+
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
-	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.uber.org/zap"
 )
 
 const pickedCountThreshold = 3
@@ -166,7 +168,7 @@ type healthProbe struct {
 }
 
 // See https://github.com/etcd-io/etcd/blob/85b640cee793e25f3837c47200089d14a8392dc7/etcdctl/ctlv3/command/ep_command.go#L105-L145
-func (checker *healthChecker) patrol(ctx context.Context) ([]string, []string, bool) {
+func (checker *healthChecker) patrol(ctx context.Context) (lastEps, pickedEps []string, changed bool) {
 	var (
 		count   = checker.clientCount()
 		probeCh = make(chan healthProbe, count)
@@ -207,10 +209,8 @@ func (checker *healthChecker) patrol(ctx context.Context) ([]string, []string, b
 	})
 	wg.Wait()
 	close(probeCh)
-	var (
-		lastEps   = checker.client.Endpoints()
-		pickedEps = checker.pickEps(probeCh)
-	)
+	lastEps = checker.client.Endpoints()
+	pickedEps = checker.pickEps(probeCh)
 	if len(pickedEps) > 0 {
 		checker.updateEvictedEps(lastEps, pickedEps)
 		pickedEps = checker.filterEps(pickedEps)

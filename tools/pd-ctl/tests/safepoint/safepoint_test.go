@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/server/api"
 	pdTests "github.com/tikv/pd/tests"

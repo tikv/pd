@@ -7,7 +7,7 @@
 //     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,g
+// distributed under the License is distributed on an "AS IS" BASIS,
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
@@ -15,13 +15,13 @@
 package server
 
 import (
-	"fmt"
 	"math"
 	"testing"
 	"time"
 
-	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 	"github.com/stretchr/testify/require"
+
+	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 )
 
 func TestGroupTokenBucketUpdateAndPatch(t *testing.T) {
@@ -125,6 +125,90 @@ func TestGroupTokenBucketRequest(t *testing.T) {
 	re.Equal(int64(time.Second)*10/int64(time.Millisecond), trickle)
 }
 
+func TestGroupTokenBucketRequestBurstLimit(t *testing.T) {
+	re := require.New(t)
+	testGroupSetting := func(tbSetting *rmpb.TokenBucket, expectedFillRate, expectedBurstLimit int64) {
+		gtb := NewGroupTokenBucket(tbSetting)
+		time1 := time.Now()
+		clientUniqueID := uint64(0)
+		gtb.request(time1, 190000, uint64(time.Second)*10/uint64(time.Millisecond), clientUniqueID)
+		re.Contains(gtb.tokenSlots, clientUniqueID)
+		// it should not be able to change group settings
+		groupSetting := gtb.tokenSlots[clientUniqueID]
+		re.Equal(expectedBurstLimit, groupSetting.settings.BurstLimit)
+		re.Equal(uint64(expectedFillRate), groupSetting.settings.FillRate)
+		// it should not be able to change gtb settings
+		re.Equal(tbSetting.GetSettings().BurstLimit, gtb.Settings.BurstLimit)
+		re.Equal(tbSetting.GetSettings().FillRate, gtb.Settings.FillRate)
+	}
+
+	// case 1: fillrate = 2000, burstLimit = 2000,0,-1,-2
+	testGroupSetting(&rmpb.TokenBucket{
+		Tokens: 200000,
+		Settings: &rmpb.TokenLimitSettings{
+			FillRate:   2000,
+			BurstLimit: 2000,
+		},
+	}, 2000, 2000)
+
+	testGroupSetting(&rmpb.TokenBucket{
+		Tokens: 200000,
+		Settings: &rmpb.TokenLimitSettings{
+			FillRate:   2000,
+			BurstLimit: 0,
+		},
+	}, 2000, 0)
+
+	testGroupSetting(&rmpb.TokenBucket{
+		Tokens: 200000,
+		Settings: &rmpb.TokenLimitSettings{
+			FillRate:   2000,
+			BurstLimit: unlimitedBurstLimit,
+		},
+	}, 2000, unlimitedBurstLimit)
+
+	testGroupSetting(&rmpb.TokenBucket{
+		Tokens: 200000,
+		Settings: &rmpb.TokenLimitSettings{
+			FillRate:   2000,
+			BurstLimit: -2,
+		},
+	}, 2000+defaultModeratedBurstRate, 2000+defaultModeratedBurstRate)
+
+	// case 2: fillrate = unlimited, burstLimit = 2000,0,-1,-2
+	testGroupSetting(&rmpb.TokenBucket{
+		Tokens: 200000,
+		Settings: &rmpb.TokenLimitSettings{
+			FillRate:   unlimitedRate,
+			BurstLimit: 2000,
+		},
+	}, unlimitedRate, 2000)
+
+	testGroupSetting(&rmpb.TokenBucket{
+		Tokens: 200000,
+		Settings: &rmpb.TokenLimitSettings{
+			FillRate:   unlimitedRate,
+			BurstLimit: 0,
+		},
+	}, unlimitedRate, 0) // burstLimit = 0 is a special case
+
+	testGroupSetting(&rmpb.TokenBucket{
+		Tokens: 200000,
+		Settings: &rmpb.TokenLimitSettings{
+			FillRate:   unlimitedRate,
+			BurstLimit: unlimitedBurstLimit,
+		},
+	}, unlimitedRate, unlimitedBurstLimit)
+
+	testGroupSetting(&rmpb.TokenBucket{
+		Tokens: 200000,
+		Settings: &rmpb.TokenLimitSettings{
+			FillRate:   unlimitedRate,
+			BurstLimit: -2,
+		},
+	}, unlimitedRate, unlimitedRate)
+}
+
 func TestGroupTokenBucketRequestLoop(t *testing.T) {
 	re := require.New(t)
 	tbSetting := &rmpb.TokenBucket{
@@ -181,9 +265,9 @@ func TestGroupTokenBucketRequestLoop(t *testing.T) {
 	currentTime := initialTime
 	for i, tc := range testCases {
 		tb, trickle := gtb.request(currentTime, tc.requestTokens, uint64(targetPeriod)/uint64(time.Millisecond), clientUniqueID)
-		re.Equal(tc.globalBucketTokensAfterAssign, gtb.GetTokenBucket().Tokens, fmt.Sprintf("Test case %d failed: expected bucket tokens %f, got %f", i, tc.globalBucketTokensAfterAssign, gtb.GetTokenBucket().Tokens))
-		re.LessOrEqual(math.Abs(tb.Tokens-tc.assignedTokens), 1e-7, fmt.Sprintf("Test case %d failed: expected tokens %f, got %f", i, tc.assignedTokens, tb.Tokens))
-		re.Equal(tc.expectedTrickleMs, trickle, fmt.Sprintf("Test case %d failed: expected trickle %d, got %d", i, tc.expectedTrickleMs, trickle))
+		re.Equalf(tc.globalBucketTokensAfterAssign, gtb.GetTokenBucket().Tokens, "Test case %d failed: expected bucket tokens %f, got %f", i, tc.globalBucketTokensAfterAssign, gtb.GetTokenBucket().Tokens)
+		re.LessOrEqualf(math.Abs(tb.Tokens-tc.assignedTokens), 1e-7, "Test case %d failed: expected tokens %f, got %f", i, tc.assignedTokens, tb.Tokens)
+		re.Equalf(tc.expectedTrickleMs, trickle, "Test case %d failed: expected trickle %d, got %d", i, tc.expectedTrickleMs, trickle)
 		currentTime = currentTime.Add(timeIncrement)
 	}
 }

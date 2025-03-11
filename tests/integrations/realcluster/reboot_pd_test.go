@@ -1,4 +1,4 @@
-// Copyright 2023 TiKV Authors
+// Copyright 2023 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,18 +18,18 @@ import (
 	"context"
 	"testing"
 
-	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+
 	"github.com/tikv/pd/client/http"
 )
 
 type rebootPDSuite struct {
-	realClusterSuite
+	clusterSuite
 }
 
 func TestRebootPD(t *testing.T) {
 	suite.Run(t, &rebootPDSuite{
-		realClusterSuite: realClusterSuite{
+		clusterSuite: clusterSuite{
 			suiteName: "reboot_pd",
 		},
 	})
@@ -37,10 +37,10 @@ func TestRebootPD(t *testing.T) {
 
 // https://github.com/tikv/pd/issues/6467
 func (s *rebootPDSuite) TestReloadLabel() {
-	re := require.New(s.T())
+	re := s.Require()
 	ctx := context.Background()
 
-	pdHTTPCli := http.NewClient("pd-real-cluster-test", getPDEndpoints(s.T()))
+	pdHTTPCli := http.NewClient("pd-real-cluster-test", getPDEndpoints(re))
 	resp, err := pdHTTPCli.GetStores(ctx)
 	re.NoError(err)
 	re.NotEmpty(resp.Stores)
@@ -75,7 +75,7 @@ func (s *rebootPDSuite) TestReloadLabel() {
 	// Check the label is set
 	checkLabelsAreEqual()
 	// Restart to reload the label
-	s.restart()
-	pdHTTPCli = http.NewClient("pd-real-cluster-test", getPDEndpoints(s.T()))
+	s.cluster.restart()
+	pdHTTPCli = http.NewClient("pd-real-cluster-test", getPDEndpoints(re))
 	checkLabelsAreEqual()
 }

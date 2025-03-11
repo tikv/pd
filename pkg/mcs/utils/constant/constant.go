@@ -4,7 +4,7 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//	http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -57,12 +57,10 @@ const (
 
 	// MicroserviceRootPath is the root path of microservice in etcd.
 	MicroserviceRootPath = "/ms"
-	// APIServiceName is the name of api server.
-	APIServiceName = "api"
+	// PDServiceName is the name of pd server.
+	PDServiceName = "pd"
 	// TSOServiceName is the name of tso server.
 	TSOServiceName = "tso"
-	// ResourceManagerServiceName is the name of resource manager server.
-	ResourceManagerServiceName = "resource_manager"
 	// SchedulingServiceName is the name of scheduling server.
 	SchedulingServiceName = "scheduling"
 	// KeyspaceGroupsKey is the path component of keyspace groups.

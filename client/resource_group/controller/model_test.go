@@ -17,8 +17,9 @@ package controller
 import (
 	"testing"
 
-	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 	"github.com/stretchr/testify/require"
+
+	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 )
 
 func TestGetRUValueFromConsumption(t *testing.T) {

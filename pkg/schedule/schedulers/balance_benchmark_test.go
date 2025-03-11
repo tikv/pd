@@ -4,13 +4,14 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//	http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
 package schedulers
 
 import (
@@ -18,8 +19,10 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/pingcap/kvproto/pkg/metapb"
+
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/mock/mockconfig"
 	"github.com/tikv/pd/pkg/schedule/operator"
@@ -159,7 +162,7 @@ func BenchmarkPlacementRule(b *testing.B) {
 	b.ResetTimer()
 	var ops []*operator.Operator
 	var plans []plan.Plan
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		ops, plans = sc.Schedule(tc, false)
 	}
 	b.StopTimer()
@@ -173,7 +176,7 @@ func BenchmarkLabel(b *testing.B) {
 	defer cancel()
 	sc := newBalanceRegionScheduler(oc, &balanceRegionSchedulerConfig{})
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		sc.Schedule(tc, false)
 	}
 }
@@ -183,7 +186,7 @@ func BenchmarkNoLabel(b *testing.B) {
 	defer cancel()
 	sc := newBalanceRegionScheduler(oc, &balanceRegionSchedulerConfig{})
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		sc.Schedule(tc, false)
 	}
 }
@@ -193,7 +196,7 @@ func BenchmarkDiagnosticNoLabel1(b *testing.B) {
 	defer cancel()
 	sc := newBalanceRegionScheduler(oc, &balanceRegionSchedulerConfig{})
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		sc.Schedule(tc, true)
 	}
 }
@@ -203,7 +206,7 @@ func BenchmarkDiagnosticNoLabel2(b *testing.B) {
 	defer cancel()
 	sc := newBalanceRegionScheduler(oc, &balanceRegionSchedulerConfig{})
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		sc.Schedule(tc, true)
 	}
 }
@@ -213,7 +216,7 @@ func BenchmarkNoLabel2(b *testing.B) {
 	defer cancel()
 	sc := newBalanceRegionScheduler(oc, &balanceRegionSchedulerConfig{})
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		sc.Schedule(tc, false)
 	}
 }
@@ -223,7 +226,7 @@ func BenchmarkTombStore(b *testing.B) {
 	defer cancel()
 	sc := newBalanceRegionScheduler(oc, &balanceRegionSchedulerConfig{})
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		sc.Schedule(tc, false)
 	}
 }

@@ -17,10 +17,12 @@ package audit
 import (
 	"net/http"
 
-	"github.com/pingcap/log"
 	"github.com/prometheus/client_golang/prometheus"
-	"github.com/tikv/pd/pkg/utils/requestutil"
 	"go.uber.org/zap"
+
+	"github.com/pingcap/log"
+
+	"github.com/tikv/pd/pkg/utils/requestutil"
 )
 
 const (

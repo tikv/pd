@@ -24,14 +24,15 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.etcd.io/etcd/server/v3/embed"
+
 	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
-	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.etcd.io/etcd/server/v3/embed"
 )
 
 const (
@@ -53,7 +54,7 @@ func BenchmarkLoadLargeRules(b *testing.B) {
 
 	b.ResetTimer() // Resets the timer to ignore initialization time in the benchmark
 
-	for n := 0; n < b.N; n++ {
+	for range b.N {
 		runWatcherLoadLabelRule(ctx, re, client)
 	}
 }
@@ -101,7 +102,7 @@ func prepare(t require.TestingT) (context.Context, *clientv3.Client, func()) {
 		}
 		value, err := json.Marshal(rule)
 		re.NoError(err)
-		key := keypath.RegionLabelPathPrefix() + "/" + rule.ID
+		key := keypath.RegionLabelKeyPath(rule.ID)
 		_, err = clientv3.NewKV(client).Put(ctx, key, string(value))
 		re.NoError(err)
 	}

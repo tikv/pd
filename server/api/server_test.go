@@ -23,11 +23,14 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/suite"
+	"go.uber.org/goleak"
+
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
-	"github.com/stretchr/testify/require"
-	"github.com/stretchr/testify/suite"
+
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/assertutil"
@@ -37,7 +40,6 @@ import (
 	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
-	"go.uber.org/goleak"
 )
 
 var (
@@ -88,7 +90,7 @@ func mustNewCluster(re *require.Assertions, num int, opts ...func(cfg *config.Co
 	ch := make(chan *server.Server, num)
 	for _, cfg := range cfgs {
 		go func(cfg *config.Config) {
-			err := logutil.SetupLogger(cfg.Log, &cfg.Logger, &cfg.LogProps, cfg.Security.RedactInfoLog)
+			err := logutil.SetupLogger(&cfg.Log, &cfg.Logger, &cfg.LogProps, cfg.Security.RedactInfoLog)
 			re.NoError(err)
 			zapLogOnce.Do(func() {
 				log.ReplaceGlobals(cfg.Logger, cfg.LogProps)

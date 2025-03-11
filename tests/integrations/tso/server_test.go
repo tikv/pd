@@ -20,16 +20,18 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/suite"
+	"google.golang.org/grpc"
+
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/kvproto/pkg/tsopb"
-	"github.com/stretchr/testify/suite"
+
 	tso "github.com/tikv/pd/pkg/mcs/tso/server"
 	tsopkg "github.com/tikv/pd/pkg/tso"
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/tempurl"
 	tu "github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/tests"
-	"google.golang.org/grpc"
 )
 
 type tsoServerTestSuite struct {
@@ -72,7 +74,7 @@ func (suite *tsoServerTestSuite) SetupSuite() {
 	if suite.legacy {
 		suite.cluster, err = tests.NewTestCluster(suite.ctx, serverCount)
 	} else {
-		suite.cluster, err = tests.NewTestAPICluster(suite.ctx, serverCount)
+		suite.cluster, err = tests.NewTestClusterWithKeyspaceGroup(suite.ctx, serverCount)
 	}
 	re.NoError(err)
 	err = suite.cluster.RunInitialServers()
@@ -148,7 +150,7 @@ func (suite *tsoServerTestSuite) TestConcurrentlyReset() {
 	for range 2 {
 		go func() {
 			defer wg.Done()
-			for j := 0; j <= 50; j++ {
+			for j := range 51 {
 				// Get a copy of now then call base.add, because now is shared by all goroutines
 				// and now.add() will add to itself which isn't atomic and multi-goroutine safe.
 				base := now

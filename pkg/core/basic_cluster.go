@@ -14,7 +14,12 @@
 
 package core
 
-import "bytes"
+import (
+	"bytes"
+	"encoding/json"
+
+	"github.com/tikv/pd/pkg/core/constant"
+)
 
 // BasicCluster provides basic data member and interface for a tikv cluster.
 type BasicCluster struct {
@@ -137,8 +142,8 @@ type StoreSetInformer interface {
 
 // StoreSetController is used to control stores' status.
 type StoreSetController interface {
-	PauseLeaderTransfer(id uint64) error
-	ResumeLeaderTransfer(id uint64)
+	PauseLeaderTransfer(id uint64, d constant.Direction) error
+	ResumeLeaderTransfer(id uint64, d constant.Direction)
 
 	SlowStoreEvicted(id uint64) error
 	SlowStoreRecovered(id uint64)
@@ -150,6 +155,15 @@ type StoreSetController interface {
 type KeyRange struct {
 	StartKey []byte `json:"start-key"`
 	EndKey   []byte `json:"end-key"`
+}
+
+// MarshalJSON marshals to json.
+func (kr KeyRange) MarshalJSON() ([]byte, error) {
+	m := map[string]string{
+		"start-key": HexRegionKeyStr(kr.StartKey),
+		"end-key":   HexRegionKeyStr(kr.EndKey),
+	}
+	return json.Marshal(m)
 }
 
 // NewKeyRange create a KeyRange with the given start key and end key.

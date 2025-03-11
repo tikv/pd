@@ -20,6 +20,7 @@ import (
 	"net/http"
 
 	"github.com/stretchr/testify/require"
+
 	"github.com/tikv/pd/pkg/utils/apiutil"
 )
 

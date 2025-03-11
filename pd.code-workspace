@@ -17,5 +17,7 @@
 			"path": "tools"
 		}
 	],
-	"settings": {}
+	"settings": {
+		"makefile.configureOnOpen": false
+	}
 }
