@@ -1,5 +1,4 @@
 /config/ttl get
-/pd/ get
 /pd//alloc_id get
 /pd//config get
 /pd//keyspaces/alloc_id get
@@ -21,13 +20,13 @@
 /pd//rule_group/ get
 /pd//rules/ get
 /pd//rules/-c get
-/pd//schedule/ get
-/pd//schedule/balance-hot-region-scheduler get
-/pd//schedule/balance-leader-scheduler get
-/pd//schedule/balance-region-scheduler get
-/pd//schedule/evict-slow-store-scheduler get
 /pd//schedule/store_weight//leader get
 /pd//schedule/store_weight//region get
+/pd//scheduler_config/ get
+/pd//scheduler_config/balance-hot-region-scheduler get
+/pd//scheduler_config/balance-leader-scheduler get
+/pd//scheduler_config/balance-region-scheduler get
+/pd//scheduler_config/evict-slow-store-scheduler get
 /pd//service_middleware get
 /pd//timestamp get
 /pd/cluster_id get

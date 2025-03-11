@@ -1,13 +1,11 @@
  get
-/ms//test_service/registry get
-/ms//tso//gta get
+/ms//test_service/registry/ get
 /ms//tso//gta/timestamp get
 /ms//tso//primary get
 /ms//tso//primary/expected_primary get
 /ms//tso/keyspace_groups/election//primary get
 /ms//tso/keyspace_groups/election//primary/expected_primary get
-/ms//tso/registry get
-/pd/ get
+/ms//tso/registry/ get
 /pd//alloc_id get
 /pd//keyspaces/alloc_id get
 /pd//region_label/ get
