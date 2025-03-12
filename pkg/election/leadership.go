@@ -316,7 +316,7 @@ func (ls *Leadership) Watch(serverCtx context.Context, revision int64) {
 
 		done := make(chan struct{})
 		go grpcutil.CheckStream(watcherCtx, watcherCancel, done)
-		watchChan := watcher.Watch(watcherCtx, ls.leaderKey,
+		watchChan := etcdutil.Watch(watcher, watcherCtx, ls.leaderKey,
 			clientv3.WithRev(revision), clientv3.WithProgressNotify())
 		done <- struct{}{}
 		if err := watcherCtx.Err(); err != nil {
