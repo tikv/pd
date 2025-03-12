@@ -639,16 +639,28 @@ func (c *client) UpdateOption(option DynamicOption, value any) error {
 		if err := c.option.setMaxTSOBatchWaitInterval(interval); err != nil {
 			return err
 		}
+<<<<<<< HEAD
 	case EnableTSOFollowerProxy:
 		if c.getServiceMode() != pdpb.ServiceMode_PD_SVC_MODE {
 			return errors.New("[pd] tso follower proxy is only supported in PD service mode")
 		}
+=======
+	case opt.EnableTSOFollowerProxy:
+>>>>>>> 6a07466ce (client: only report error when EnableTSOFollowerProxy is true in ms mode (#9130))
 		enable, ok := value.(bool)
 		if !ok {
 			return errors.New("[pd] invalid value type for EnableTSOFollowerProxy option, it should be bool")
 		}
+<<<<<<< HEAD
 		c.option.setEnableTSOFollowerProxy(enable)
 	case EnableFollowerHandle:
+=======
+		if c.inner.getServiceMode() != pdpb.ServiceMode_PD_SVC_MODE && enable {
+			return errors.New("[pd] tso follower proxy is only supported when PD provides TSO")
+		}
+		c.inner.option.SetEnableTSOFollowerProxy(enable)
+	case opt.EnableFollowerHandle:
+>>>>>>> 6a07466ce (client: only report error when EnableTSOFollowerProxy is true in ms mode (#9130))
 		enable, ok := value.(bool)
 		if !ok {
 			return errors.New("[pd] invalid value type for EnableFollowerHandle option, it should be bool")
