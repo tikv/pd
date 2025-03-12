@@ -833,3 +833,101 @@ func (suite *serverTestSuite) TestBatchSplit() {
 	suite.TearDownSuite()
 	suite.SetupSuite()
 }
+
+func (suite *serverTestSuite) TestBatchSplitCompatibility() {
+	re := suite.Require()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/mcs/scheduling/server/fastUpdateMember", `return(true)`))
+	// simulator the old version of PD
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/allocIDOnce", `return(true)`))
+	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.cluster)
+	re.NoError(err)
+	defer tc.Destroy()
+	tc.WaitForPrimaryServing(re)
+
+	rc := suite.pdLeader.GetServer().GetRaftCluster()
+	re.NotNil(rc)
+	s := &server.GrpcServer{Server: suite.pdLeader.GetServer()}
+	for i := uint64(1); i <= 3; i++ {
+		resp, err := s.PutStore(
+			context.Background(), &pdpb.PutStoreRequest{
+				Header: &pdpb.RequestHeader{ClusterId: suite.pdLeader.GetClusterID()},
+				Store: &metapb.Store{
+					Id:      i,
+					Address: fmt.Sprintf("mock://%d", i),
+					State:   metapb.StoreState_Up,
+					Version: "7.0.0",
+				},
+			},
+		)
+		re.NoError(err)
+		re.Empty(resp.GetHeader().GetError())
+	}
+	grpcPDClient := testutil.MustNewGrpcClient(re, suite.pdLeader.GetServer().GetAddr())
+	stream, err := grpcPDClient.RegionHeartbeat(suite.ctx)
+	re.NoError(err)
+	peers := []*metapb.Peer{
+		{Id: 11, StoreId: 1},
+		{Id: 22, StoreId: 2},
+		{Id: 33, StoreId: 3},
+	}
+
+	interval := &pdpb.TimeInterval{StartTimestamp: 0, EndTimestamp: 10}
+	regionReq := &pdpb.RegionHeartbeatRequest{
+		Header:          testutil.NewRequestHeader(suite.pdLeader.GetClusterID()),
+		Region:          &metapb.Region{Id: 10, Peers: peers, StartKey: []byte("a"), EndKey: []byte("b")},
+		Leader:          peers[0],
+		ApproximateSize: 30 * units.MiB,
+		ApproximateKeys: 300,
+		Interval:        interval,
+		Term:            1,
+		CpuUsage:        100,
+	}
+	err = stream.Send(regionReq)
+	re.NoError(err)
+	testutil.Eventually(re, func() bool {
+		region := tc.GetPrimaryServer().GetCluster().GetRegion(10)
+		return region != nil && region.GetTerm() == 1 &&
+			region.GetApproximateKeys() == 300 && region.GetApproximateSize() == 30 &&
+			reflect.DeepEqual(region.GetLeader(), peers[0]) &&
+			reflect.DeepEqual(region.GetInterval(), interval)
+	})
+
+	req := &pdpb.AskBatchSplitRequest{
+		Header: &pdpb.RequestHeader{
+			ClusterId: suite.pdLeader.GetClusterID(),
+		},
+		Region:     regionReq.GetRegion(),
+		SplitCount: 10,
+	}
+
+	resp, err := grpcPDClient.AskBatchSplit(suite.ctx, req)
+	re.NoError(err)
+	re.Empty(resp.GetHeader().GetError())
+	allocatedIDs := map[uint64]struct{}{}
+	for _, id := range resp.GetIds() {
+		allocatedIDs[id.NewRegionId] = struct{}{}
+		for _, peer := range id.NewPeerIds {
+			allocatedIDs[peer] = struct{}{}
+		}
+	}
+	re.Len(allocatedIDs, 40)
+
+	// simulator the new version of PD
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/allocIDOnce"))
+
+	resp, err = grpcPDClient.AskBatchSplit(suite.ctx, req)
+	re.NoError(err)
+	re.Empty(resp.GetHeader().GetError())
+	for _, id := range resp.GetIds() {
+		_, ok := allocatedIDs[id.NewRegionId]
+		re.False(ok)
+		for _, peer := range id.NewPeerIds {
+			_, ok := allocatedIDs[peer]
+			re.False(ok)
+		}
+	}
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/scheduling/server/fastUpdateMember"))
+
+	suite.TearDownSuite()
+	suite.SetupSuite()
+}
