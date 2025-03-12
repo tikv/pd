@@ -837,7 +837,7 @@ func (suite *serverTestSuite) TestBatchSplit() {
 func (suite *serverTestSuite) TestBatchSplitCompatibility() {
 	re := suite.Require()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/mcs/scheduling/server/fastUpdateMember", `return(true)`))
-	// simulator the old version of PD
+	// simulate the old version of PD
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/allocIDOnce", `return(true)`))
 	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.cluster)
 	re.NoError(err)
@@ -912,7 +912,7 @@ func (suite *serverTestSuite) TestBatchSplitCompatibility() {
 	}
 	re.Len(allocatedIDs, 40)
 
-	// simulator the new version of PD
+	// simulate the new version of PD
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/allocIDOnce"))
 
 	resp, err = grpcPDClient.AskBatchSplit(suite.ctx, req)
