@@ -35,8 +35,7 @@ import (
 	"time"
 
 	"github.com/pmezard/go-difflib/difflib"
-	// Set the correct value when it runs inside docker.
-	_ "go.uber.org/automaxprocs"
+	_ "go.uber.org/automaxprocs" // Set the correct value when it runs inside docker.
 	"go.uber.org/zap"
 
 	"github.com/tikv/pd/tools/pd-ut/alloc"
