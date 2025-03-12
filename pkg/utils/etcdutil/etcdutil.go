@@ -772,6 +772,7 @@ func (lw *LoopWatcher) SetLoadBatchSize(size int64) {
 	lw.loadBatchSize = size
 }
 
+// Watch watches the key, it wraps a injected failpoint.
 func Watch(watcher clientv3.Watcher, ctx context.Context, key string, opts ...clientv3.OpOption) clientv3.WatchChan {
 	InjectFailToCollectTestEtcdKey(key, "watch")
 	return watcher.Watch(ctx, key, opts...)
