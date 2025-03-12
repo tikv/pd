@@ -38,7 +38,7 @@ const (
 	allocIDPathFormat           = "/pd/%d/alloc_id"                           // "/pd/{cluster_id}/alloc_id"
 	keyspaceAllocIDPathFormat   = "/pd/%d/keyspaces/alloc_id"                 // "/pd/{cluster_id}/keyspaces/alloc_id"
 	configPathFormat            = "/pd/%d/config"                             // "/pd/{cluster_id}/config"
-	schedulerConfigPathFormat   = "/pd/%d/schedule/%s"                        // "/pd/{cluster_id}/schedule/{scheduler_name}"
+	schedulerConfigPathFormat   = "/pd/%d/scheduler_config/%s"                // "/pd/{cluster_id}/scheduler_config/{scheduler_name}"
 	storeLeaderWeightPathFormat = "/pd/%d/schedule/store_weight/%020d/leader" // "/pd/{cluster_id}/schedule/store_weight/{store_id}/leader"
 	storeRegionWeightPathFormat = "/pd/%d/schedule/store_weight/%020d/region" // "/pd/{cluster_id}/schedule/store_weight/{store_id}/region"
 
@@ -63,6 +63,7 @@ const (
 	// padded keyspaceID is 8 (decimal representation of uint24max is 16777215).
 	gcSafePointPathFormat        = "/pd/%d/gc/safe_point"                        // "/pd/{cluster_id}/gc/safe_point"
 	gcSafePointServicePathFormat = "/pd/%d/gc/safe_point/service/%s"             // "/pd/{cluster_id}/gc/safe_point/service/{service_id}"
+	gcSafePointV2PrefixFormat    = "/pd/%d/keyspaces/gc_safe_point/"             // "/pd/{cluster_id}/keyspaces/gc_safe_point/"
 	gcSafePointV2PathFormat      = "/pd/%d/keyspaces/gc_safe_point/%08d"         // "/pd/{cluster_id}/keyspaces/gc_safe_point/{keyspace_id}"
 	serviceSafePointV2PathFormat = "/pd/%d/keyspaces/service_safe_point/%08d/%s" // "/pd/{cluster_id}/keyspaces/service_safe_point/{keyspace_id}/{service_id}"
 
@@ -80,7 +81,7 @@ const (
 	keyspaceGroupIDPathFormat   = "/pd/%d/tso/keyspace_groups/membership/%05d" // "/pd/{cluster_id}/tso/keyspace_groups/membership/{group_id}"
 	keyspaceGroupIDPattern      = `tso/keyspace_groups/membership/(\d{5})$`
 
-	servicePathFormat  = "/ms/%d/%s/registry"    // "/ms/{cluster_id}/{service_name}/registry"
+	servicePathFormat  = "/ms/%d/%s/registry/"   // "/ms/{cluster_id}/{service_name}/registry/"
 	registryPathFormat = "/ms/%d/%s/registry/%s" // "/ms/{cluster_id}/{service_name}/registry/{service_addr}"
 
 	msLeaderPathFormat           = "/ms/%d/%s/primary"                                // "/ms/{cluster_id}/{service_name}/primary"
