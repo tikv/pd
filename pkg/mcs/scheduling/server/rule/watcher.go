@@ -40,10 +40,6 @@ type Watcher struct {
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
 
-	// ruleCommonPathPrefix:
-	//  - Key: /pd/{cluster_id}/rule
-	//  - Value: placement.Rule or placement.RuleGroup
-	ruleCommonPathPrefix string
 	// rulesPathPrefix:
 	//   - Key: /pd/{cluster_id}/rules/{group_id}-{rule_id}
 	//   - Value: placement.Rule
@@ -88,7 +84,6 @@ func NewWatcher(
 		ctx:                   ctx,
 		cancel:                cancel,
 		rulesPathPrefix:       keypath.RulesPathPrefix(),
-		ruleCommonPathPrefix:  keypath.RuleCommonPathPrefix(),
 		ruleGroupPathPrefix:   keypath.RuleGroupPathPrefix(),
 		regionLabelPathPrefix: keypath.RegionLabelPathPrefix(),
 		etcdClient:            etcdClient,
@@ -200,7 +195,9 @@ func (rw *Watcher) initializeRuleWatcher() error {
 	rw.ruleWatcher = etcdutil.NewLoopWatcher(
 		rw.ctx, &rw.wg,
 		rw.etcdClient,
-		"scheduling-rule-watcher", rw.ruleCommonPathPrefix,
+		"scheduling-rule-watcher",
+		// Watch placement.Rule or placement.RuleGroup
+		keypath.RuleCommonPathPrefix(),
 		preEventsFn,
 		putFn, deleteFn,
 		postEventsFn,
@@ -238,7 +235,9 @@ func (rw *Watcher) initializeRegionLabelWatcher() error {
 	rw.labelWatcher = etcdutil.NewLoopWatcher(
 		rw.ctx, &rw.wg,
 		rw.etcdClient,
-		"scheduling-region-label-watcher", rw.regionLabelPathPrefix,
+		"scheduling-region-label-watcher",
+		// To keep the consistency with the previous code, we should trim the suffix `/`.
+		strings.TrimSuffix(rw.regionLabelPathPrefix, "/"),
 		preEventsFn,
 		putFn, deleteFn,
 		postEventsFn,

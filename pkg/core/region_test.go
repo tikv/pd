@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"math"
 	mrand "math/rand"
+	"sort"
 	"strconv"
 	"testing"
 	"time"
@@ -1290,4 +1291,43 @@ func TestQueryRegions(t *testing.T) {
 	re.Equal(uint64(1), regionsByID[1].GetRegion().GetId())
 	re.Equal(uint64(2), regionsByID[2].GetRegion().GetId())
 	re.Equal(uint64(3), regionsByID[3].GetRegion().GetId())
+}
+
+func TestGetPeers(t *testing.T) {
+	re := require.New(t)
+	learner := &metapb.Peer{StoreId: 1, Id: 1, Role: metapb.PeerRole_Learner}
+	leader := &metapb.Peer{StoreId: 2, Id: 2}
+	follower1 := &metapb.Peer{StoreId: 3, Id: 3}
+	follower2 := &metapb.Peer{StoreId: 4, Id: 4}
+	region := NewRegionInfo(&metapb.Region{Id: 100, Peers: []*metapb.Peer{
+		leader, follower1, follower2, learner,
+	}}, leader, WithLearners([]*metapb.Peer{learner}))
+	for _, v := range []struct {
+		role  string
+		peers []*metapb.Peer
+	}{
+		{
+			role:  "leader",
+			peers: []*metapb.Peer{leader},
+		},
+		{
+			role:  "follower",
+			peers: []*metapb.Peer{follower1, follower2},
+		},
+		{
+			role:  "learner",
+			peers: []*metapb.Peer{learner},
+		},
+		{
+			role:  "witness",
+			peers: nil,
+		},
+	} {
+		role := NewRole(v.role)
+		peers := region.GetPeersByRole(role)
+		sort.Slice(peers, func(i, j int) bool {
+			return peers[i].Id <= peers[j].Id
+		})
+		re.Equal(v.peers, peers, role)
+	}
 }

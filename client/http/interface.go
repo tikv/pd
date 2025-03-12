@@ -914,7 +914,7 @@ func (c *client) GetMinResolvedTSByStoresIDs(ctx context.Context, storeIDs []uin
 	if len(storeIDs) != 0 {
 		storeIDStrs := make([]string, len(storeIDs))
 		for idx, id := range storeIDs {
-			storeIDStrs[idx] = fmt.Sprintf("%d", id)
+			storeIDStrs[idx] = strconv.FormatUint(id, 10)
 		}
 		uri = fmt.Sprintf("%s?scope=%s", uri, strings.Join(storeIDStrs, ","))
 	}

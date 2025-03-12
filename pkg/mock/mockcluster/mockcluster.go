@@ -325,7 +325,7 @@ func (mc *Cluster) AddRegionStore(storeID uint64, regionCount int, regionSizes .
 		&metapb.Store{Id: storeID, Labels: []*metapb.StoreLabel{
 			{
 				Key:   "ID",
-				Value: fmt.Sprintf("%v", storeID),
+				Value: strconv.FormatUint(storeID, 10),
 			},
 		}},
 		core.SetStoreStats(stats),

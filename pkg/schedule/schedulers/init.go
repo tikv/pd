@@ -559,17 +559,20 @@ func schedulersRegister() {
 			if len(args) < 5 {
 				return errs.ErrSchedulerConfig.FastGenByArgs("args length must be greater than 4")
 			}
-			role, err := url.QueryUnescape(args[0])
+			roleString, err := url.QueryUnescape(args[0])
 			if err != nil {
 				return errs.ErrQueryUnescape.Wrap(err)
 			}
-			jobRole := NewRole(role)
-			if jobRole == unknown {
+			role := core.NewRole(roleString)
+			if role == core.Unknown {
 				return errs.ErrQueryUnescape.FastGenByArgs("role")
 			}
 			engine, err := url.QueryUnescape(args[1])
 			if err != nil {
 				return errs.ErrQueryUnescape.Wrap(err)
+			}
+			if engine != core.EngineTiFlash && engine != core.EngineTiKV {
+				return errs.ErrQueryUnescape.FastGenByArgs("engine must be tikv or tiflash ")
 			}
 			timeout, err := url.QueryUnescape(args[2])
 			if err != nil {
@@ -587,20 +590,20 @@ func schedulersRegister() {
 			if err != nil {
 				return err
 			}
-
 			id := uint64(0)
 			if len(conf.jobs) > 0 {
 				id = conf.jobs[len(conf.jobs)-1].JobID + 1
 			}
 
 			job := &balanceRangeSchedulerJob{
-				Role:    jobRole,
+				Role:    role,
 				Engine:  engine,
 				Timeout: duration,
 				Alias:   alias,
 				Ranges:  ranges,
 				Status:  pending,
 				JobID:   id,
+				Create:  time.Now(),
 			}
 			conf.jobs = append(conf.jobs, job)
 			return nil
