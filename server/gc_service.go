@@ -149,7 +149,7 @@ func (s *GrpcServer) WatchGCSafePointV2(request *pdpb.WatchGCSafePointV2Request,
 	// - If required revision < CompactRevision, we need to reload all configs to avoid losing data.
 	// - If required revision >= CompactRevision, just keep watching.
 	// Use WithPrevKV() to get the previous key-value pair when get Delete Event.
-	watchChan := etcdutil.Watch(s.client, ctx, keypath.GCSafePointV2Prefix(), clientv3.WithRev(revision), clientv3.WithPrefix())
+	watchChan := etcdutil.Watch(ctx, s.client, keypath.GCSafePointV2Prefix(), clientv3.WithRev(revision), clientv3.WithPrefix())
 	for {
 		select {
 		case <-ctx.Done():

@@ -102,7 +102,7 @@ func (s *Service) Watch(req *meta_storagepb.WatchRequest, server meta_storagepb.
 		options = append(options, clientv3.WithPrevKV())
 	}
 	cli := s.manager.GetClient()
-	watchChan := etcdutil.Watch(cli, ctx, key, options...)
+	watchChan := etcdutil.Watch(ctx, cli, key, options...)
 	for {
 		select {
 		case <-ctx.Done():

@@ -533,7 +533,7 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 		}
 		done := make(chan struct{})
 		go grpcutil.CheckStream(watcherCtx, watcherCancel, done)
-		watchChan := Watch(watcher, watcherCtx, lw.key, opts...)
+		watchChan := Watch(watcherCtx, watcher, lw.key, opts...)
 		done <- struct{}{}
 		if err := watcherCtx.Err(); err != nil {
 			log.Warn("error occurred while creating watch channel and retry it", zap.Error(err),
@@ -773,7 +773,7 @@ func (lw *LoopWatcher) SetLoadBatchSize(size int64) {
 }
 
 // Watch watches the key, it wraps a injected failpoint.
-func Watch(watcher clientv3.Watcher, ctx context.Context, key string, opts ...clientv3.OpOption) clientv3.WatchChan {
+func Watch(ctx context.Context, watcher clientv3.Watcher, key string, opts ...clientv3.OpOption) clientv3.WatchChan {
 	InjectFailToCollectTestEtcdKey(key, "watch")
 	return watcher.Watch(ctx, key, opts...)
 }
