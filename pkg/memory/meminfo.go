@@ -15,11 +15,11 @@
 package memory
 
 import (
+	"cmp"
 	"time"
 
 	"github.com/shirou/gopsutil/v3/mem"
 	"go.uber.org/zap"
-	"golang.org/x/exp/constraints"
 
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
@@ -110,7 +110,7 @@ var memUsage *memInfoCache
 var serverMemUsage *memInfoCache
 
 // Min returns the smallest one from its arguments.
-func min[T constraints.Ordered](x T, xs ...T) T {
+func min[T cmp.Ordered](x T, xs ...T) T {
 	min := x
 	for _, n := range xs {
 		if n < min {

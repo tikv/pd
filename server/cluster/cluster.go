@@ -536,7 +536,7 @@ func (c *RaftCluster) startGCTuner() {
 	defer tick.Stop()
 	totalMem, err := memory.MemTotal()
 	if err != nil {
-		log.Fatal("fail to get total memory:%s", zap.Error(err))
+		log.Fatal("fail to get total memory", zap.Error(err))
 	}
 	log.Info("memory info", zap.Uint64("total-mem", totalMem))
 	cfg := c.opt.GetPDServerConfig()
@@ -718,7 +718,7 @@ func (c *RaftCluster) fetchStoreConfigFromTiKV(ctx context.Context, statusAddres
 		failpoint.Return(cfg, nil)
 	})
 	if c.httpClient == nil {
-		return nil, fmt.Errorf("failed to get store config due to nil client")
+		return nil, errors.New("failed to get store config due to nil client")
 	}
 	var url string
 	if netutil.IsEnableHTTPS(c.httpClient) {
@@ -2056,7 +2056,7 @@ func (c *RaftCluster) RemoveTombStoneRecords() error {
 	var stores string
 	if len(failedStores) != 0 {
 		for i, storeID := range failedStores {
-			stores += fmt.Sprintf("%d", storeID)
+			stores += strconv.FormatUint(storeID, 10)
 			if i != len(failedStores)-1 {
 				stores += ", "
 			}

@@ -1950,8 +1950,8 @@ func TestPatrolRegionConfigChange(t *testing.T) {
 		tests.MustPutStore(re, tc, store)
 	}
 	for i := 1; i <= 200; i++ {
-		startKey := []byte(fmt.Sprintf("%d", i*2-1))
-		endKey := []byte(fmt.Sprintf("%d", i*2))
+		startKey := []byte(strconv.Itoa(i*2 - 1))
+		endKey := []byte(strconv.Itoa(i * 2))
 		tests.MustPutRegion(re, tc, uint64(i), uint64(i%3+1), startKey, endKey)
 	}
 	fname := testutil.InitTempFileLogger("debug")

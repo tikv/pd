@@ -135,8 +135,10 @@ func (s *ServiceSafePoint) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-var _ json.Marshaler = &ServiceSafePoint{}
-var _ json.Unmarshaler = &ServiceSafePoint{}
+var (
+	_ json.Marshaler   = (*ServiceSafePoint)(nil)
+	_ json.Unmarshaler = (*ServiceSafePoint)(nil)
+)
 
 // GCBarrier represents a GC barrier that's used to block GC from advancing to keep snapshots not earlier than the
 // barrier to be safe to read. The concept *GC barrier* is replacing the *service safe points*, but it reuses the
