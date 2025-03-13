@@ -156,10 +156,7 @@ type GCBarrier struct {
 func NewGCBarrier(barrierID string, barrierTS uint64, expirationTime *time.Time) *GCBarrier {
 	// Round up the expirationTime.
 	if expirationTime != nil {
-		rounded := expirationTime.Truncate(time.Second)
-		if rounded.Before(*expirationTime) {
-			rounded = rounded.Add(time.Second)
-		}
+		rounded := expirationTime.Add(time.Second - time.Nanosecond).Truncate(time.Second)
 		*expirationTime = rounded
 	}
 	return &GCBarrier{
