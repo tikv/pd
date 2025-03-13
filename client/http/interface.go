@@ -70,7 +70,7 @@ type Client interface {
 	CreateScheduler(ctx context.Context, name string, input map[string]any) error
 	DeleteScheduler(ctx context.Context, name string) error
 	SetSchedulerDelay(context.Context, string, int64) error
-	GetSchedulerConfig(ctx context.Context, name string) (map[string]any, error)
+	GetSchedulerConfig(ctx context.Context, name string) (any, error)
 	/* Rule-related interfaces */
 	GetAllPlacementRuleBundles(context.Context) ([]*GroupBundle, error)
 	GetPlacementRuleBundleByGroup(context.Context, string) (*GroupBundle, error)
@@ -771,8 +771,8 @@ func (c *client) GetSchedulers(ctx context.Context) ([]string, error) {
 }
 
 // GetSchedulerConfig returns the configuration of the specified scheduler for pd cluster
-func (c *client) GetSchedulerConfig(ctx context.Context, name string) (map[string]any, error) {
-	var config map[string]any
+func (c *client) GetSchedulerConfig(ctx context.Context, name string) (any, error) {
+	var config any
 	uri := path.Join(SchedulerConfig, name, "list")
 	err := c.request(ctx, newRequestInfo().
 		WithName(getSchedulerConfig).
