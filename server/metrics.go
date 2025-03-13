@@ -15,8 +15,9 @@
 package server
 
 import (
-	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/prometheus/client_golang/prometheus"
+
+	"github.com/pingcap/kvproto/pkg/pdpb"
 )
 
 var (
@@ -216,17 +217,17 @@ func init() {
 func incRegionRequestCounter(method string, header *pdpb.RequestHeader, err *pdpb.Error) {
 	var (
 		errMsg          = ""
-		callerId        = header.CallerId
+		callerID        = header.CallerId
 		callerComponent = header.CallerComponent
 	)
 	if err != nil {
 		errMsg = err.Type.String()
 	}
-	if callerId == "" {
-		callerId = "unknown"
+	if callerID == "" {
+		callerID = "unknown"
 	}
 	if callerComponent == "" {
 		callerComponent = "unknown"
 	}
-	regionRequestCounter.WithLabelValues(method, callerId, callerComponent, errMsg).Inc()
+	regionRequestCounter.WithLabelValues(method, callerID, callerComponent, errMsg).Inc()
 }
