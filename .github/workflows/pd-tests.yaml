@@ -8,6 +8,7 @@ on:
       - release-6.*
       - release-7.*
       - release-8.*
+      - release-9.*
   pull_request:
     branches:
       - master
@@ -16,6 +17,7 @@ on:
       - release-6.*
       - release-7.*
       - release-8.*
+      - release-9.*
 concurrency:
   group: ${{ github.ref }}-${{ github.workflow }}
   cancel-in-progress: true
