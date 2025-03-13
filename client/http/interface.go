@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"path"
 	"strconv"
 	"strings"
 
@@ -66,9 +67,10 @@ type Client interface {
 	GetReplicateConfig(context.Context) (map[string]any, error)
 	/* Scheduler-related interfaces */
 	GetSchedulers(context.Context) ([]string, error)
-	CreateScheduler(ctx context.Context, name string, storeID uint64) error
+	CreateScheduler(ctx context.Context, name string, input map[string]any) error
 	DeleteScheduler(ctx context.Context, name string) error
 	SetSchedulerDelay(context.Context, string, int64) error
+	GetSchedulerConfig(ctx context.Context, name string) (map[string]any, error)
 	/* Rule-related interfaces */
 	GetAllPlacementRuleBundles(context.Context) ([]*GroupBundle, error)
 	GetPlacementRuleBundleByGroup(context.Context, string) (*GroupBundle, error)
@@ -768,12 +770,25 @@ func (c *client) GetSchedulers(ctx context.Context) ([]string, error) {
 	return schedulers, nil
 }
 
+// GetSchedulerConfig returns the configuration of the specified scheduler for pd cluster
+func (c *client) GetSchedulerConfig(ctx context.Context, name string) (map[string]any, error) {
+	var config map[string]any
+	uri := path.Join(SchedulerConfig, name, "list")
+	err := c.request(ctx, newRequestInfo().
+		WithName(getSchedulerConfig).
+		WithURI(uri).
+		WithMethod(http.MethodGet).
+		WithResp(&config))
+	if err != nil {
+		return nil, err
+	}
+	return config, nil
+}
+
 // CreateScheduler creates a scheduler to PD cluster.
-func (c *client) CreateScheduler(ctx context.Context, name string, storeID uint64) error {
-	inputJSON, err := json.Marshal(map[string]any{
-		"name":     name,
-		"store_id": storeID,
-	})
+func (c *client) CreateScheduler(ctx context.Context, name string, input map[string]any) error {
+	input["name"] = name
+	inputJSON, err := json.Marshal(input)
 	if err != nil {
 		return errors.Trace(err)
 	}

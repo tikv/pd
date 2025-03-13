@@ -54,6 +54,7 @@ const (
 	getStatusName                           = "GetStatus"
 	getReplicateConfigName                  = "GetReplicateConfig"
 	getSchedulersName                       = "GetSchedulers"
+	getSchedulerConfig                      = "GetSchedulerConfig"
 	createSchedulerName                     = "CreateScheduler"
 	deleteSchedulerName                     = "DeleteScheduler"
 	setSchedulerDelayName                   = "SetSchedulerDelay"
