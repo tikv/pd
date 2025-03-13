@@ -23,9 +23,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pingcap/errors"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+
+	"github.com/pingcap/errors"
 
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/id"
@@ -71,7 +72,7 @@ func TestGCStateManager(t *testing.T) {
 	suite.Run(t, new(gcStateManagerTestSuite))
 }
 
-func newGCStateManager(t *testing.T) (storage *endpoint.StorageEndpoint, provider endpoint.GCStateProvider, gcStateManager *GCStateManager, clean func()) {
+func newGCStateManagerForTest(t *testing.T) (storage *endpoint.StorageEndpoint, provider endpoint.GCStateProvider, gcStateManager *GCStateManager, clean func()) {
 	cfg := config.NewConfig()
 	re := require.New(t)
 
@@ -131,7 +132,7 @@ func newGCStateManager(t *testing.T) (storage *endpoint.StorageEndpoint, provide
 }
 
 func (s *gcStateManagerTestSuite) SetupTest() {
-	s.storage, s.provider, s.manager, s.clean = newGCStateManager(s.T())
+	s.storage, s.provider, s.manager, s.clean = newGCStateManagerForTest(s.T())
 
 	s.keyspacePresets.all = []uint32{constant.NullKeyspaceID, 0, 1, 2, 3}
 	s.keyspacePresets.manageable = []uint32{constant.NullKeyspaceID, 2}
@@ -268,7 +269,7 @@ func (s *gcStateManagerTestSuite) TestAdvanceGCSafePointBasic() {
 		re.Equal(uint64(10), newValue)
 		checkGCSafePoint(keyspaceID, 10)
 
-		oldValue, newValue, err = s.manager.AdvanceGCSafePoint(keyspaceID, 11)
+		_, _, err = s.manager.AdvanceGCSafePoint(keyspaceID, 11)
 		re.Error(err)
 		re.ErrorIs(err, errs.ErrGCSafePointExceedsTxnSafePoint)
 
@@ -314,6 +315,7 @@ func (s *gcStateManagerTestSuite) testGCSafePointUpdateSequentiallyImpl(loadFunc
 		re.Error(err)
 		re.ErrorIs(err, errs.ErrGCSafePointExceedsTxnSafePoint)
 		_, err = s.manager.AdvanceTxnSafePoint(constant.NullKeyspaceID, curGCSafePoint, time.Now())
+		re.NoError(err)
 		oldGCSafePoint, newGCSafePoint, err := s.manager.CompatibleUpdateGCSafePoint(curGCSafePoint)
 		re.NoError(err)
 		re.Equal(previousGCSafePoint, oldGCSafePoint)
@@ -976,7 +978,7 @@ func (s *gcStateManagerTestSuite) TestServiceGCSafePointCompatibility() {
 	re.Equal(expected, s.getGCBarrier(constant.NullKeyspaceID, "svc1"))
 
 	// Allows setting different TTL.
-	minSsp, updated, err = s.manager.CompatibleUpdateServiceGCSafePoint("svc1", 12, 3600, now)
+	_, updated, err = s.manager.CompatibleUpdateServiceGCSafePoint("svc1", 12, 3600, now)
 	re.NoError(err)
 	re.True(updated)
 	_, allSsp, err = s.provider.CompatibleLoadAllServiceGCSafePoints()
@@ -985,7 +987,7 @@ func (s *gcStateManagerTestSuite) TestServiceGCSafePointCompatibility() {
 	re.Equal("svc1", allSsp[0].ServiceID)
 	re.Equal(uint64(12), allSsp[0].SafePoint)
 	re.Equal(nowUnix+3600, allSsp[0].ExpiredAt)
-	minSsp, updated, err = s.manager.CompatibleUpdateServiceGCSafePoint("svc1", 12, 3600, now.Add(time.Hour))
+	_, updated, err = s.manager.CompatibleUpdateServiceGCSafePoint("svc1", 12, 3600, now.Add(time.Hour))
 	re.NoError(err)
 	re.True(updated)
 	_, allSsp, err = s.provider.CompatibleLoadAllServiceGCSafePoints()
@@ -994,7 +996,7 @@ func (s *gcStateManagerTestSuite) TestServiceGCSafePointCompatibility() {
 	re.Equal(nowUnix+7200, allSsp[0].ExpiredAt)
 
 	// Internally calls AdvanceTxnSafePoint when simulating updating "gc_worker".
-	minSsp, updated, err = s.manager.CompatibleUpdateServiceGCSafePoint("gc_worker", 20, 3600, now)
+	_, _, err = s.manager.CompatibleUpdateServiceGCSafePoint("gc_worker", 20, 3600, now)
 	// Cannot use finite TTL for "gc_worker".
 	re.Error(err)
 	minSsp, updated, err = s.manager.CompatibleUpdateServiceGCSafePoint("gc_worker", 20, math.MaxInt64, now)
@@ -1005,8 +1007,7 @@ func (s *gcStateManagerTestSuite) TestServiceGCSafePointCompatibility() {
 	s.checkTxnSafePoint(constant.NullKeyspaceID, 12)
 
 	// Deleting service safe point by passing zero TTL
-	//_, err = s.manager.DeleteGCBarrier(constant.NullKeyspaceID, "svc1")
-	minSsp, updated, err = s.manager.CompatibleUpdateServiceGCSafePoint("svc1", 12, 0, now)
+	_, updated, err = s.manager.CompatibleUpdateServiceGCSafePoint("svc1", 12, 0, now)
 	re.NoError(err)
 	// Deleting is regarded as not-updating. This is consistent with the old behavior.
 	re.False(updated)

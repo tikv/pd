@@ -176,7 +176,7 @@ func (m *GCStateManager) AdvanceTxnSafePoint(keyspaceID uint32, target uint64, n
 		return AdvanceTxnSafePointResult{}, err
 	}
 	m.lock.Lock()
-	m.lock.Unlock()
+	defer m.lock.Unlock()
 
 	return m.advanceTxnSafePointImpl(keyspaceID, target, now)
 }
@@ -645,6 +645,7 @@ type AdvanceTxnSafePointResult struct {
 
 // GCState represents the GC state of a keyspace, and additionally its keyspaceID and whether the keyspace-level GC is
 // enabled in this keyspace.
+// nolint:revive
 type GCState struct {
 	KeyspaceID      uint32
 	IsKeyspaceLevel bool
