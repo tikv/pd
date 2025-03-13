@@ -22,8 +22,9 @@ import (
 	"slices"
 	"time"
 
-	"github.com/pingcap/log"
 	"go.uber.org/zap"
+
+	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/keyspace"
@@ -34,10 +35,8 @@ import (
 	"github.com/tikv/pd/server/config"
 )
 
-//var blockGCSafePointErrmsg = "don't allow update gc safe point v1."
-//var blockServiceSafepointErrmsg = "don't allow update service safe point v1."
-
 // GCStateManager is the manager for safePoint of GC and services.
+// nolint:revive
 type GCStateManager struct {
 	lock            syncutil.RWMutex
 	gcMetaStorage   endpoint.GCStateProvider
@@ -50,6 +49,7 @@ func NewGCStateManager(store endpoint.GCStateProvider, cfg config.PDServerConfig
 	return &GCStateManager{gcMetaStorage: store, cfg: cfg, keyspaceManager: keyspaceManager}
 }
 
+// redirectKeyspace checks the given keyspaceID, and returns the actual keyspaceID to operate on.
 func (m *GCStateManager) redirectKeyspace(keyspaceID uint32, isUserAPI bool) (uint32, error) {
 	// Regard it as NullKeyspaceID if the given one is invalid (exceeds the valid range of keyspace id), no matter
 	// whether it exactly matches the NullKeyspaceID.
@@ -74,7 +74,7 @@ func (m *GCStateManager) redirectKeyspace(keyspaceID uint32, isUserAPI bool) (ui
 	return keyspaceID, nil
 }
 
-// CompatibleLoadGCSafePoint loads current GC safe point from storage.
+// CompatibleLoadGCSafePoint loads current GC safe point from storage for the legacy GC API `GetGCSafePoint`.
 func (m *GCStateManager) CompatibleLoadGCSafePoint() (uint64, error) {
 	keyspaceID, err := m.redirectKeyspace(constant.NullKeyspaceID, false)
 	if err != nil {
@@ -87,6 +87,10 @@ func (m *GCStateManager) CompatibleLoadGCSafePoint() (uint64, error) {
 
 // AdvanceGCSafePoint tries to advance the GC safe point to the given target. If the target is less than the current
 // value or greater than the txn safe point, it returns an error.
+//
+// WARNING: This method is only used to manage the GC procedure, and should never be called by code that doesn't
+// have the responsibility to manage GC. It can only be called on NullKeyspace or keyspaces with keyspace level GC
+// enabled.
 func (m *GCStateManager) AdvanceGCSafePoint(keyspaceID uint32, target uint64) (oldGCSafePoint uint64, newGCSafePoint uint64, err error) {
 	keyspaceID, err = m.redirectKeyspace(keyspaceID, false)
 	if err != nil {
@@ -152,6 +156,20 @@ func (m *GCStateManager) advanceGCSafePointImpl(keyspaceID uint32, target uint64
 	return
 }
 
+// AdvanceTxnSafePoint tries to advance the txn safe point to the given target.
+//
+// Returns a struct AdvanceTxnSafePointResult, which contains the old txn safe point, the target, and the new
+// txn safe point it finally made it to advance to. If there's something blocking the txn safe point from being
+// advanced to the given target, it may finally be advanced to a smaller value or remains the previous value, in which
+// case the BlockerDescription field of the AdvanceTxnSafePointResult will be set to a non-empty string describing
+// the reason.
+//
+// Txn safe point of a single keyspace should never decrease. If the given target is smaller than the previous value,
+// it returns an error.
+//
+// WARNING: This method is only used to manage the GC procedure, and should never be called by code that doesn't
+// have the responsibility to manage GC. It can only be called on NullKeyspace or keyspaces with keyspace level GC
+// enabled.
 func (m *GCStateManager) AdvanceTxnSafePoint(keyspaceID uint32, target uint64, now time.Time) (AdvanceTxnSafePointResult, error) {
 	keyspaceID, err := m.redirectKeyspace(keyspaceID, false)
 	if err != nil {
@@ -174,22 +192,6 @@ func (m *GCStateManager) advanceTxnSafePointImpl(keyspaceID uint32, target uint6
 	// point of "gc_worker" is somewhat just like the current procedure of advancing the txn safe point, the most
 	// important purpose of which is to find the actual GC safe point that's safe to use.
 	downgradeCompatibleMode := false
-
-	//// A helper function for handling the compatibility of the service safe point of "gc_worker", which is needed
-	//// for making it able to downgrade to previous versions where service safe points are still in use.
-	//keepGCWorkerServiceSafePointCompatible := func(wb *endpoint.GCStateWriteBatch, sspAsGCBarrier *endpoint.GCBarrier) error {
-	//	// In old versions, every time TiDB performs GC, it updates the service safe point of "gc_worker" to the GC
-	//	// safe point it attempts to advance to, and is allowed to be greater than the minimum service safe point (in
-	//	// which case the minimum one will be the actual GC safe point to use).
-	//	// Note that in old versions, there wasn't the concept of txn safe point. The step to update the service safe
-	//	// point of "gc_worker" is somewhat just like the current procedure of advancing the txn safe point, the most
-	//	// important purpose of which is to find the actual GC safe point that's safe to use.
-	//	downgradeCompatibleMode = true
-	//	sspAsGCBarrier.BarrierTS = target
-	//	// Ensure service safe point of "gc_worker" should never expire.
-	//	sspAsGCBarrier.ExpirationTime = nil
-	//	return wb.SetGCBarrier(keyspaceID, sspAsGCBarrier)
-	//}
 
 	var oldTxnSafePoint uint64
 	newTxnSafePoint := target
@@ -215,10 +217,6 @@ func (m *GCStateManager) advanceTxnSafePointImpl(keyspaceID uint32, target uint6
 
 		for _, barrier := range barriers {
 			if keyspaceID == constant.NullKeyspaceID && barrier.BarrierID == keypath.GCWorkerServiceSafePointID {
-				//err1 = keepGCWorkerServiceSafePointCompatible(wb, barrier)
-				//if err1 != nil {
-				//	return err1
-				//}
 				downgradeCompatibleMode = true
 				continue
 			}
@@ -315,6 +313,27 @@ func (m *GCStateManager) advanceTxnSafePointImpl(keyspaceID uint32, target uint6
 	}, nil
 }
 
+// SetGCBarrier sets a GC barrier, which blocks GC from being advanced over the given barrierTS for at most a duration
+// specified by ttl. This method either adds a new GC barrier or updates an existing one. Returns the information of the
+// new GC barrier.
+//
+// A GC barrier is uniquely identified by the given barrierID in the keyspace scope for NullKeyspace or keyspaces
+// with keyspace-level GC enabled. When this method is called on keyspaces without keyspace-level GC enabled, it will
+// be equivalent to calling it on the NullKeyspace.
+//
+// Once a GC barrier is set, it will block the txn safe point from being advanced over the barrierTS, until the GC
+// barrier is expired (defined by ttl) or manually deleted (by calling DeleteGCBarrier).
+//
+// When this method is called on an existing GC barrier, it updates the barrierTS and ttl of the existing GC barrier and
+// the expiration time will become the current time plus the ttl. This means that calling this method on an existing
+// GC barrier can extend its lifetime arbitrarily.
+//
+// Passing non-positive value to ttl is not allowed. Passing `time.Duration(math.MaxInt64)` to ttl indicates that the
+// GC barrier should never expire.
+//
+// The barrierID must be non-empty. For NullKeyspace, "gc_worker" is a reserved name and cannot be used as a barrierID.
+//
+// The given barrierTS must be greater than or equal to the current txn safe point, or an error will be returned.
 func (m *GCStateManager) SetGCBarrier(keyspaceID uint32, barrierID string, barrierTS uint64, ttl time.Duration, now time.Time) (*endpoint.GCBarrier, error) {
 	if ttl <= 0 {
 		return nil, errs.ErrInvalidArgument.GenWithStackByArgs("ttl", ttl)
@@ -366,6 +385,11 @@ func (m *GCStateManager) setGCBarrierImpl(keyspaceID uint32, barrierID string, b
 	return newBarrier, nil
 }
 
+// DeleteGCBarrier deletes a GC barrier by the given barrierID. Returns the information of the deleted GC barrier, or
+// nil if the barrier does not exist.
+//
+// When this method is called on a keyspace without keyspace-level GC enabled, it will be equivalent to calling it on
+// the NullKeyspace.
 func (m *GCStateManager) DeleteGCBarrier(keyspaceID uint32, barrierID string) (*endpoint.GCBarrier, error) {
 	keyspaceID, err := m.redirectKeyspace(keyspaceID, true)
 	if err != nil {
@@ -400,6 +424,9 @@ func (m *GCStateManager) deleteGCBarrierImpl(keyspaceID uint32, barrierID string
 	return deletedBarrier, err
 }
 
+// getGCStateInTransaction gets all properties in GC states within a context of gcMetaStorage.RunInGCStateTransaction.
+// This read only and won't write anything to the GCStateWriteBatch. It still receives a write batch to ensure
+// it's running in a transactional context.
 func (m *GCStateManager) getGCStateInTransaction(keyspaceID uint32, _ *endpoint.GCStateWriteBatch) (GCState, error) {
 	result := GCState{
 		KeyspaceID: keyspaceID,
@@ -435,6 +462,10 @@ func (m *GCStateManager) getGCStateInTransaction(keyspaceID uint32, _ *endpoint.
 	return result, nil
 }
 
+// GetGCState returns the GC state of the given keyspace.
+//
+// When this method is called on a keyspace without keyspace-level GC enabled, it will be equivalent to calling it on
+// the NullKeyspace.
 func (m *GCStateManager) GetGCState(keyspaceID uint32) (GCState, error) {
 	keyspaceID, err := m.redirectKeyspace(keyspaceID, true)
 	if err != nil {
@@ -455,6 +486,8 @@ func (m *GCStateManager) GetGCState(keyspaceID uint32) (GCState, error) {
 	return result, nil
 }
 
+// GetGlobalGCState returns the GC state of all keyspaces.
+// Returns a map from keyspaceID to GCState. Keyspaces without keyspace-level GC enabled will not be included.
 func (m *GCStateManager) GetGlobalGCState() (map[uint32]GCState, error) {
 	// TODO: Handle the case that there are too many keyspaces and loading them at once is not suitable.
 	allKeyspaces, err := m.keyspaceManager.LoadRangeKeyspace(0, 0)
@@ -500,6 +533,8 @@ func (m *GCStateManager) GetGlobalGCState() (map[uint32]GCState, error) {
 	return results, nil
 }
 
+// saturatingDuration returns a duration calculated by multiplying the given `ratio` and `base`, truncated within the
+// range [0, math.MaxInt64] to avoid negative value and overflowing.
 func saturatingDuration(ratio int64, base time.Duration) time.Duration {
 	if ratio < 0 && base < 0 {
 		ratio, base = -ratio, -base
@@ -529,6 +564,7 @@ func saturatingDuration(ratio int64, base time.Duration) time.Duration {
 // those TiDB nodes.
 //
 // Therefore, the method's behavior is as follows:
+//
 //  1. If the given serviceID is "gc_worker", it internally calls AdvanceTxnSafePoint.
 //     - If the advancing result is the same as newServiceSafePoint, it's the case that the updated service safe
 //     point of "gc_worker" is exactly the minimal one. Returns a simulated service safe point with the service ID
@@ -599,6 +635,7 @@ func (m *GCStateManager) CompatibleUpdateServiceGCSafePoint(serviceID string, ne
 	return minServiceSafePoint, updated, nil
 }
 
+// AdvanceTxnSafePointResult represents the result of an invocation of GCStateManager.AdvanceTxnSafePoint.
 type AdvanceTxnSafePointResult struct {
 	OldTxnSafePoint    uint64
 	Target             uint64
@@ -606,6 +643,8 @@ type AdvanceTxnSafePointResult struct {
 	BlockerDescription string
 }
 
+// GCState represents the GC state of a keyspace, and additionally its keyspaceID and whether the keyspace-level GC is
+// enabled in this keyspace.
 type GCState struct {
 	KeyspaceID      uint32
 	IsKeyspaceLevel bool
