@@ -280,7 +280,7 @@ func (s *gcStateManagerTestSuite) TestAdvanceGCSafePointBasic() {
 		re.Equal(uint64(10), newValue)
 
 		// Does not allow decreasing.
-		oldValue, newValue, err = s.manager.AdvanceGCSafePoint(keyspaceID, 9)
+		_, _, err = s.manager.AdvanceGCSafePoint(keyspaceID, 9)
 		re.Error(err)
 		re.ErrorIs(err, errs.ErrDecreasingGCSafePoint)
 	}
