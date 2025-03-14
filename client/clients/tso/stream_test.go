@@ -24,6 +24,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/zap/zapcore"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
@@ -394,20 +396,21 @@ func (s *testTSOStreamSuite) testTSOStreamBrokenImpl(err error, pendingRequests 
 	}
 }
 
-func (s *testTSOStreamSuite) TestTSOStreamBrokenWithEOFNoPendingReq() {
+func (s *testTSOStreamSuite) TestTSOStreamBroken() {
+	// Broken with EOF and exist no pending request
 	s.testTSOStreamBrokenImpl(io.EOF, 0)
-}
-
-func (s *testTSOStreamSuite) TestTSOStreamCanceledNoPendingReq() {
-	s.testTSOStreamBrokenImpl(context.Canceled, 0)
-}
-
-func (s *testTSOStreamSuite) TestTSOStreamBrokenWithEOFWithPendingReq() {
+	// Broken with EOF and exist pending request
 	s.testTSOStreamBrokenImpl(io.EOF, 5)
-}
-
-func (s *testTSOStreamSuite) TestTSOStreamCanceledWithPendingReq() {
+	// Broken with canceled context and exist no pending request
+	s.testTSOStreamBrokenImpl(context.Canceled, 0)
+	// Broken with canceled context and exist pending request
 	s.testTSOStreamBrokenImpl(context.Canceled, 5)
+	// Broken with grpc unavailable error and exist no pending request
+	s.testTSOStreamBrokenImpl(errors.New("rpc error: code = Unavailable desc = connection error"), 0)
+	s.testTSOStreamBrokenImpl(status.Error(codes.Unavailable, "error reading from server: EOF"), 0)
+	// Broken with grpc unavailable error and exist pending request
+	s.testTSOStreamBrokenImpl(errors.New("rpc error: code = Unavailable desc = connection error"), 5)
+	s.testTSOStreamBrokenImpl(status.Error(codes.Unavailable, "error reading from server: EOF"), 5)
 }
 
 func (s *testTSOStreamSuite) TestTSOStreamFIFO() {

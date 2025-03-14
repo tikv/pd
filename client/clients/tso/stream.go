@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -26,6 +27,8 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
@@ -421,7 +424,8 @@ recvLoop:
 			if hasReq {
 				metrics.RequestFailedDurationTSO.Observe(latencySeconds)
 			}
-			if err == io.EOF {
+			if err == io.EOF || status.Code(err) == codes.Unavailable ||
+				strings.Contains(strings.ToLower(err.Error()), "unavailable") {
 				finishWithErr = errors.WithStack(errs.ErrClientTSOStreamClosed)
 			} else {
 				finishWithErr = errors.WithStack(err)
