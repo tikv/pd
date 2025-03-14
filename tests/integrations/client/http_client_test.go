@@ -565,12 +565,18 @@ func (suite *httpClientTestSuite) TestSchedulers() {
 	re.NoError(err)
 	const schedulerName = "evict-leader-scheduler"
 	re.NotContains(schedulers, schedulerName)
-
-	err = client.CreateScheduler(ctx, schedulerName, 1)
+	input := map[string]any{
+		"store_id": 1,
+	}
+	err = client.CreateScheduler(ctx, schedulerName, input)
 	re.NoError(err)
 	schedulers, err = client.GetSchedulers(ctx)
 	re.NoError(err)
 	re.Contains(schedulers, schedulerName)
+	config, err := client.GetSchedulerConfig(ctx, schedulerName)
+	re.NoError(err)
+	re.Contains(config, "store-id-ranges")
+	re.Contains(config, "batch")
 	err = client.SetSchedulerDelay(ctx, schedulerName, 100)
 	re.NoError(err)
 	err = client.SetSchedulerDelay(ctx, "not-exist", 100)
@@ -722,7 +728,10 @@ func (suite *httpClientTestSuite) TestRedirectWithMetrics() {
 		return nil
 	})
 	c := pd.NewClientWithServiceDiscovery("pd-http-client-it", sd, pd.WithHTTPClient(httpClient), pd.WithMetrics(metricCnt, nil))
-	c.CreateScheduler(context.Background(), "test", 0)
+	input := map[string]any{
+		"store_id": 0,
+	}
+	c.CreateScheduler(context.Background(), "test", input)
 	var out dto.Metric
 	failureCnt, err := metricCnt.GetMetricWithLabelValues([]string{"CreateScheduler", "network error"}...)
 	re.NoError(err)
@@ -739,7 +748,7 @@ func (suite *httpClientTestSuite) TestRedirectWithMetrics() {
 		return nil
 	})
 	c = pd.NewClientWithServiceDiscovery("pd-http-client-it", sd, pd.WithHTTPClient(httpClient), pd.WithMetrics(metricCnt, nil))
-	c.CreateScheduler(context.Background(), "test", 0)
+	c.CreateScheduler(context.Background(), "test", input)
 	successCnt, err := metricCnt.GetMetricWithLabelValues([]string{"CreateScheduler", ""}...)
 	re.NoError(err)
 	successCnt.Write(&out)
@@ -754,7 +763,7 @@ func (suite *httpClientTestSuite) TestRedirectWithMetrics() {
 		return nil
 	})
 	c = pd.NewClientWithServiceDiscovery("pd-http-client-it", sd, pd.WithHTTPClient(httpClient), pd.WithMetrics(metricCnt, nil))
-	c.CreateScheduler(context.Background(), "test", 0)
+	c.CreateScheduler(context.Background(), "test", input)
 	successCnt, err = metricCnt.GetMetricWithLabelValues([]string{"CreateScheduler", ""}...)
 	re.NoError(err)
 	successCnt.Write(&out)
