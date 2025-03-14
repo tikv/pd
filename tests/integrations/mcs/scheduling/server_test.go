@@ -835,9 +835,6 @@ func (suite *serverTestSuite) TestBatchSplit() {
 	suite.SetupSuite()
 }
 
-// The test simulate two cases:
-// 1. The scheduling server is upgraded first, and then the PD server is upgraded.
-// 2. The PD server is downgraded first.
 func (suite *serverTestSuite) TestBatchSplitCompatibility() {
 	re := suite.Require()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/mcs/scheduling/server/fastUpdateMember", `return(true)`))
@@ -902,30 +899,60 @@ func (suite *serverTestSuite) TestBatchSplitCompatibility() {
 		SplitCount: 10,
 	}
 
-	// Use the non batch AllocID, which simulates upgrade scheduling server first.
-	re.NoError(failpoint.Enable("github.com/tikv/pd/server/allocIDOnce", `return(true)`))
+	// case 1: The scheduling server is upgraded first, and then the PD server is upgraded.
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/handleAllocIDNonBatch", `return(true)`))
 	resp, err := grpcPDClient.AskBatchSplit(suite.ctx, req)
 	re.NoError(err)
 	allocatedIDs := map[uint64]struct{}{}
 	var maxID uint64
 	checkAllocatedID(re, resp, allocatedIDs, maxID)
 	re.Len(allocatedIDs, 40)
-
 	// Use the batch AllocID, which means the PD has finished the upgrade.
-	re.NoError(failpoint.Disable("github.com/tikv/pd/server/allocIDOnce"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/handleAllocIDNonBatch"))
 	resp, err = grpcPDClient.AskBatchSplit(suite.ctx, req)
 	re.NoError(err)
 	checkAllocatedID(re, resp, allocatedIDs, maxID)
 	re.Len(allocatedIDs, 80)
 
-	// Use the non batch AllocID, which simulates downgrade PD server first.
-	re.NoError(failpoint.Enable("github.com/tikv/pd/server/allocIDOnce", `return(true)`))
+	// case 2: The PD server is downgraded first.
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/handleAllocIDNonBatch", `return(true)`))
 	resp, err = grpcPDClient.AskBatchSplit(suite.ctx, req)
 	re.NoError(err)
 	checkAllocatedID(re, resp, allocatedIDs, maxID)
 	re.Len(allocatedIDs, 120)
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/handleAllocIDNonBatch"))
+	// Use the batch AllocID, which means the scheduling server has finished the upgrade.
+	resp, err = grpcPDClient.AskBatchSplit(suite.ctx, req)
+	re.NoError(err)
+	checkAllocatedID(re, resp, allocatedIDs, maxID)
+	re.Len(allocatedIDs, 160)
 
-	re.NoError(failpoint.Disable("github.com/tikv/pd/server/allocIDOnce"))
+	// case 3: The PD server is upgraded first, and then the scheduling server is upgraded.
+	re.NoError(failpoint.Enable("github.com/tikv/pd/mcs/scheduling/server/allocIDNonBatch", `return(true)`))
+	resp, err = grpcPDClient.AskBatchSplit(suite.ctx, req)
+	re.NoError(err)
+	checkAllocatedID(re, resp, allocatedIDs, maxID)
+	re.Len(allocatedIDs, 200)
+	re.NoError(failpoint.Disable("github.com/tikv/pd/mcs/scheduling/server/allocIDNonBatch"))
+	// Use the batch AllocID, which means the scheduling server has finished the upgrade.
+	resp, err = grpcPDClient.AskBatchSplit(suite.ctx, req)
+	re.NoError(err)
+	checkAllocatedID(re, resp, allocatedIDs, maxID)
+	re.Len(allocatedIDs, 240)
+
+	// case 4: The scheduling server is downgraded first.
+	re.NoError(failpoint.Enable("github.com/tikv/pd/mcs/scheduling/server/allocIDNonBatch", `return(true)`))
+	resp, err = grpcPDClient.AskBatchSplit(suite.ctx, req)
+	re.NoError(err)
+	checkAllocatedID(re, resp, allocatedIDs, maxID)
+	re.Len(allocatedIDs, 280)
+	re.NoError(failpoint.Disable("github.com/tikv/pd/mcs/scheduling/server/allocIDNonBatch"))
+	// Use the batch AllocID, which means the scheduling server has finished the upgrade.
+	resp, err = grpcPDClient.AskBatchSplit(suite.ctx, req)
+	re.NoError(err)
+	checkAllocatedID(re, resp, allocatedIDs, maxID)
+	re.Len(allocatedIDs, 320)
+
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/scheduling/server/fastUpdateMember"))
 
 	suite.TearDownSuite()
@@ -1014,12 +1041,29 @@ func (suite *serverTestSuite) TestConcurrentBatchSplit() {
 		SplitCount: 10,
 	}
 
-	re.NoError(failpoint.Enable("github.com/tikv/pd/server/allocIDOnce", `return(true)`))
+	// case 1: The scheduling server is upgraded first, PD server has not been upgraded.
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/handleAllocIDNonBatch", `return(true)`))
 	suite.checkConcurrentAllocatedID(re, req, grpcPDClient)
 
-	re.NoError(failpoint.Disable("github.com/tikv/pd/server/allocIDOnce"))
+	// case 2: The scheduling server is upgraded first, PD server has been upgraded.
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/handleAllocIDNonBatch"))
 	suite.checkConcurrentAllocatedID(re, req, grpcPDClient)
 
+	// case 3: The PD server is upgraded first, scheduling server has not been upgraded.
+	re.NoError(failpoint.Enable("github.com/tikv/pd/mcs/scheduling/server/allocIDNonBatch", `return(true)`))
+	suite.checkConcurrentAllocatedID(re, req, grpcPDClient)
+
+	// case 4: The PD server is upgraded first, scheduling server has been upgraded.
+	re.NoError(failpoint.Disable("github.com/tikv/pd/mcs/scheduling/server/allocIDNonBatch"))
+	suite.checkConcurrentAllocatedID(re, req, grpcPDClient)
+
+	// case 5: Both the PD server and scheduling server has not been upgraded.
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/handleAllocIDNonBatch", `return(true)`))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/mcs/scheduling/server/allocIDNonBatch", `return(true)`))
+	suite.checkConcurrentAllocatedID(re, req, grpcPDClient)
+
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/handleAllocIDNonBatch"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/mcs/scheduling/server/allocIDNonBatch"))
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/scheduling/server/fastUpdateMember"))
 
 	suite.TearDownSuite()

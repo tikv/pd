@@ -674,7 +674,7 @@ func (s *GrpcServer) AllocID(ctx context.Context, request *pdpb.AllocIDRequest) 
 	if request.GetCount() != 0 {
 		reqCount = request.GetCount()
 	}
-	failpoint.Inject("allocIDOnce", func() {
+	failpoint.Inject("handleAllocIDNonBatch", func() {
 		reqCount = 1
 	})
 
