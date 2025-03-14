@@ -288,28 +288,57 @@ func (s *Service) AskBatchSplit(_ context.Context, request *schedulingpb.AskBatc
 	splitIDs := make([]*pdpb.SplitID, 0, splitCount)
 	recordRegions := make([]uint64, 0, splitCount+1)
 
-	id, count, err := c.AllocID(splitCount * (1 + uint32(len(request.Region.Peers))))
+	requestIDCount := splitCount * (1 + uint32(len(request.Region.Peers)))
+	id, count, err := c.AllocID(requestIDCount)
 	if err != nil {
 		return nil, err
 	}
-	curID := id - uint64(count)
-	for range splitCount {
-		newRegionID := curID
-		curID++
 
-		peerIDs := make([]uint64, len(request.Region.Peers))
-		for j := 0; j < len(peerIDs); j++ {
-			peerIDs[j] = curID
-			curID++
+	// If the count is not equal to the requestIDCount, it means that the
+	// PD doesn't support allocating IDs in batch. We need to allocate IDs
+	// for each region.
+	if requestIDCount != count {
+		// use non batch way to split region
+		for range splitCount {
+			newRegionID, _, err := c.AllocID(1)
+			if err != nil {
+				return nil, err
+			}
+			peerIDs := make([]uint64, len(request.Region.Peers))
+			for i := 0; i < len(peerIDs); i++ {
+				peerIDs[i], _, err = c.AllocID(1)
+				if err != nil {
+					return nil, err
+				}
+			}
+			recordRegions = append(recordRegions, newRegionID)
+			splitIDs = append(splitIDs, &pdpb.SplitID{
+				NewRegionId: newRegionID,
+				NewPeerIds:  peerIDs,
+			})
+			log.Info("alloc ids for region split", zap.Uint64("region-id", newRegionID), zap.Uint64s("peer-ids", peerIDs))
 		}
+	} else {
+		// use batch way to split region
+		curID := id - uint64(requestIDCount) + 1
+		for range splitCount {
+			newRegionID := curID
+			curID++
 
-		recordRegions = append(recordRegions, newRegionID)
-		splitIDs = append(splitIDs, &pdpb.SplitID{
-			NewRegionId: newRegionID,
-			NewPeerIds:  peerIDs,
-		})
+			peerIDs := make([]uint64, len(request.Region.Peers))
+			for j := 0; j < len(peerIDs); j++ {
+				peerIDs[j] = curID
+				curID++
+			}
 
-		log.Info("alloc ids for region split", zap.Uint64("region-id", newRegionID), zap.Uint64s("peer-ids", peerIDs))
+			recordRegions = append(recordRegions, newRegionID)
+			splitIDs = append(splitIDs, &pdpb.SplitID{
+				NewRegionId: newRegionID,
+				NewPeerIds:  peerIDs,
+			})
+
+			log.Info("alloc ids for region split", zap.Uint64("region-id", newRegionID), zap.Uint64s("peer-ids", peerIDs))
+		}
 	}
 
 	recordRegions = append(recordRegions, reqRegion.GetId())
