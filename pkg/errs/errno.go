@@ -547,5 +547,4 @@ var (
 var (
 	ErrNotFoundSchedulingPrimary = errors.Normalize("cannot find scheduling primary", errors.RFCCodeText("PD:mcs:ErrNotFoundSchedulingPrimary"))
 	ErrSchedulingServer          = errors.Normalize("scheduling server meets %v", errors.RFCCodeText("PD:mcs:ErrSchedulingServer"))
-	ErrIDAllocated               = errors.Normalize("id %v has been allocated", errors.RFCCodeText("PD:mcs:ErrIDAllocated"))
 )
