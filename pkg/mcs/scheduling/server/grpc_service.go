@@ -299,39 +299,62 @@ func (s *Service) AskBatchSplit(_ context.Context, request *schedulingpb.AskBatc
 	// PD doesn't support allocating IDs in batch. We need to allocate IDs
 	// for each region.
 	if requestIDCount != count {
-		for range requestIDCount - 1 {
-			id, _, err = c.AllocID(1)
+		// use non batch way to split region
+		for range splitCount {
+			newRegionID, _, err := c.AllocID(1)
 			if err != nil {
 				return nil, err
 			}
+			if s.maxAllocatedID >= newRegionID {
+				return nil, errs.ErrIDAllocated.FastGenByArgs(newRegionID)
+			}
+			s.maxAllocatedID = newRegionID
+			peerIDs := make([]uint64, len(request.Region.Peers))
+			for i := 0; i < len(peerIDs); i++ {
+				peerIDs[i], _, err = c.AllocID(1)
+				if err != nil {
+					return nil, err
+				}
+				if s.maxAllocatedID >= peerIDs[i] {
+					return nil, errs.ErrIDAllocated.FastGenByArgs(peerIDs[i])
+				}
+				s.maxAllocatedID = peerIDs[i]
+			}
+			recordRegions = append(recordRegions, newRegionID)
+			splitIDs = append(splitIDs, &pdpb.SplitID{
+				NewRegionId: newRegionID,
+				NewPeerIds:  peerIDs,
+			})
+			log.Info("alloc ids for region split", zap.Uint64("region-id", newRegionID), zap.Uint64s("peer-ids", peerIDs))
 		}
-	}
+	} else {
+		// use batch way to split region
+		curID := id - uint64(requestIDCount) + 1
+		// Check the max allocated ID to avoid ID conflict.
+		if s.maxAllocatedID >= curID {
+			return nil, errs.ErrIDAllocated.FastGenByArgs(curID)
+		}
 
-	curID := id - uint64(requestIDCount) + 1
-	// Check the max allocated ID to avoid ID conflict.
-	if s.maxAllocatedID >= curID {
-		return nil, errs.ErrIDAllocated.FastGenByArgs(curID)
-	}
-
-	for range splitCount {
-		newRegionID := curID
-		curID++
-
-		peerIDs := make([]uint64, len(request.Region.Peers))
-		for j := 0; j < len(peerIDs); j++ {
-			peerIDs[j] = curID
+		for range splitCount {
+			newRegionID := curID
 			curID++
+
+			peerIDs := make([]uint64, len(request.Region.Peers))
+			for j := 0; j < len(peerIDs); j++ {
+				peerIDs[j] = curID
+				curID++
+			}
+
+			recordRegions = append(recordRegions, newRegionID)
+			splitIDs = append(splitIDs, &pdpb.SplitID{
+				NewRegionId: newRegionID,
+				NewPeerIds:  peerIDs,
+			})
+
+			log.Info("alloc ids for region split", zap.Uint64("region-id", newRegionID), zap.Uint64s("peer-ids", peerIDs))
 		}
-
-		recordRegions = append(recordRegions, newRegionID)
-		splitIDs = append(splitIDs, &pdpb.SplitID{
-			NewRegionId: newRegionID,
-			NewPeerIds:  peerIDs,
-		})
-
-		log.Info("alloc ids for region split", zap.Uint64("region-id", newRegionID), zap.Uint64s("peer-ids", peerIDs))
+		s.maxAllocatedID = curID - 1
 	}
-	s.maxAllocatedID = curID - 1
 
 	recordRegions = append(recordRegions, reqRegion.GetId())
 	if versioninfo.IsFeatureSupported(c.persistConfig.GetClusterVersion(), versioninfo.RegionMerge) {
