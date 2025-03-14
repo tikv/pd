@@ -661,11 +661,6 @@ error = '''
 init file log error, %s
 '''
 
-["PD:mcs:ErrIDAllocated"]
-error = '''
-id %v has been allocated
-'''
-
 ["PD:mcs:ErrNotFoundSchedulingPrimary"]
 error = '''
 cannot find scheduling primary
