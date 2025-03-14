@@ -905,52 +905,52 @@ func (suite *serverTestSuite) TestBatchSplitCompatibility() {
 	re.NoError(err)
 	allocatedIDs := map[uint64]struct{}{}
 	var maxID uint64
-	checkAllocatedID(re, resp, allocatedIDs, maxID)
+	maxID = checkAllocatedID(re, resp, allocatedIDs, maxID)
 	re.Len(allocatedIDs, 40)
 	// Use the batch AllocID, which means the PD has finished the upgrade.
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/handleAllocIDNonBatch"))
 	resp, err = grpcPDClient.AskBatchSplit(suite.ctx, req)
 	re.NoError(err)
-	checkAllocatedID(re, resp, allocatedIDs, maxID)
+	maxID = checkAllocatedID(re, resp, allocatedIDs, maxID)
 	re.Len(allocatedIDs, 80)
 
 	// case 2: The PD server is downgraded first.
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/handleAllocIDNonBatch", `return(true)`))
 	resp, err = grpcPDClient.AskBatchSplit(suite.ctx, req)
 	re.NoError(err)
-	checkAllocatedID(re, resp, allocatedIDs, maxID)
+	maxID = checkAllocatedID(re, resp, allocatedIDs, maxID)
 	re.Len(allocatedIDs, 120)
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/handleAllocIDNonBatch"))
 	// Use the batch AllocID, which means the scheduling server has finished the upgrade.
 	resp, err = grpcPDClient.AskBatchSplit(suite.ctx, req)
 	re.NoError(err)
-	checkAllocatedID(re, resp, allocatedIDs, maxID)
+	maxID = checkAllocatedID(re, resp, allocatedIDs, maxID)
 	re.Len(allocatedIDs, 160)
 
 	// case 3: The PD server is upgraded first, and then the scheduling server is upgraded.
 	re.NoError(failpoint.Enable("github.com/tikv/pd/mcs/scheduling/server/allocIDNonBatch", `return(true)`))
 	resp, err = grpcPDClient.AskBatchSplit(suite.ctx, req)
 	re.NoError(err)
-	checkAllocatedID(re, resp, allocatedIDs, maxID)
+	maxID = checkAllocatedID(re, resp, allocatedIDs, maxID)
 	re.Len(allocatedIDs, 200)
 	re.NoError(failpoint.Disable("github.com/tikv/pd/mcs/scheduling/server/allocIDNonBatch"))
 	// Use the batch AllocID, which means the scheduling server has finished the upgrade.
 	resp, err = grpcPDClient.AskBatchSplit(suite.ctx, req)
 	re.NoError(err)
-	checkAllocatedID(re, resp, allocatedIDs, maxID)
+	maxID = checkAllocatedID(re, resp, allocatedIDs, maxID)
 	re.Len(allocatedIDs, 240)
 
 	// case 4: The scheduling server is downgraded first.
 	re.NoError(failpoint.Enable("github.com/tikv/pd/mcs/scheduling/server/allocIDNonBatch", `return(true)`))
 	resp, err = grpcPDClient.AskBatchSplit(suite.ctx, req)
 	re.NoError(err)
-	checkAllocatedID(re, resp, allocatedIDs, maxID)
+	maxID = checkAllocatedID(re, resp, allocatedIDs, maxID)
 	re.Len(allocatedIDs, 280)
 	re.NoError(failpoint.Disable("github.com/tikv/pd/mcs/scheduling/server/allocIDNonBatch"))
 	// Use the batch AllocID, which means the scheduling server has finished the upgrade.
 	resp, err = grpcPDClient.AskBatchSplit(suite.ctx, req)
 	re.NoError(err)
-	checkAllocatedID(re, resp, allocatedIDs, maxID)
+	_ = checkAllocatedID(re, resp, allocatedIDs, maxID)
 	re.Len(allocatedIDs, 320)
 
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/scheduling/server/fastUpdateMember"))
@@ -959,7 +959,7 @@ func (suite *serverTestSuite) TestBatchSplitCompatibility() {
 	suite.SetupSuite()
 }
 
-func checkAllocatedID(re *require.Assertions, resp *pdpb.AskBatchSplitResponse, allocatedIDs map[uint64]struct{}, maxID uint64) {
+func checkAllocatedID(re *require.Assertions, resp *pdpb.AskBatchSplitResponse, allocatedIDs map[uint64]struct{}, maxID uint64) uint64 {
 	re.Empty(resp.GetHeader().GetError())
 	for _, id := range resp.GetIds() {
 		_, ok := allocatedIDs[id.NewRegionId]
@@ -975,6 +975,7 @@ func checkAllocatedID(re *require.Assertions, resp *pdpb.AskBatchSplitResponse, 
 			allocatedIDs[peer] = struct{}{}
 		}
 	}
+	return maxID
 }
 
 func (suite *serverTestSuite) TestConcurrentBatchSplit() {
