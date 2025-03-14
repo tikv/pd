@@ -905,49 +905,46 @@ func (suite *serverTestSuite) TestBatchSplitCompatibility() {
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/allocIDOnce", `return(true)`))
 	resp, err := grpcPDClient.AskBatchSplit(suite.ctx, req)
 	re.NoError(err)
-	re.Empty(resp.GetHeader().GetError())
 	allocatedIDs := map[uint64]struct{}{}
-	for _, id := range resp.GetIds() {
-		allocatedIDs[id.NewRegionId] = struct{}{}
-		for _, peer := range id.NewPeerIds {
-			allocatedIDs[peer] = struct{}{}
-		}
-	}
+	var maxID uint64
+	checkAllocatedID(re, resp, allocatedIDs, maxID)
 	re.Len(allocatedIDs, 40)
 
 	// Use the batch AllocID, which means the PD has finished the upgrade.
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/allocIDOnce"))
 	resp, err = grpcPDClient.AskBatchSplit(suite.ctx, req)
 	re.NoError(err)
-	re.Empty(resp.GetHeader().GetError())
-	for _, id := range resp.GetIds() {
-		_, ok := allocatedIDs[id.NewRegionId]
-		re.False(ok)
-		allocatedIDs[id.NewRegionId] = struct{}{}
-		for _, peer := range id.NewPeerIds {
-			_, ok := allocatedIDs[peer]
-			re.False(ok)
-			allocatedIDs[peer] = struct{}{}
-		}
-	}
+	checkAllocatedID(re, resp, allocatedIDs, maxID)
+	re.Len(allocatedIDs, 80)
 
 	// Use the non batch AllocID, which simulates downgrade PD server first.
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/allocIDOnce", `return(true)`))
 	resp, err = grpcPDClient.AskBatchSplit(suite.ctx, req)
 	re.NoError(err)
-	re.Empty(resp.GetHeader().GetError())
-	for _, id := range resp.GetIds() {
-		_, ok := allocatedIDs[id.NewRegionId]
-		re.False(ok)
-		for _, peer := range id.NewPeerIds {
-			_, ok := allocatedIDs[peer]
-			re.False(ok)
-		}
-	}
+	checkAllocatedID(re, resp, allocatedIDs, maxID)
+	re.Len(allocatedIDs, 120)
 
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/allocIDOnce"))
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/scheduling/server/fastUpdateMember"))
 
 	suite.TearDownSuite()
 	suite.SetupSuite()
+}
+
+func checkAllocatedID(re *require.Assertions, resp *pdpb.AskBatchSplitResponse, allocatedIDs map[uint64]struct{}, maxID uint64) {
+	re.Empty(resp.GetHeader().GetError())
+	for _, id := range resp.GetIds() {
+		_, ok := allocatedIDs[id.NewRegionId]
+		re.False(ok)
+		re.Greater(id.NewRegionId, maxID)
+		maxID = id.NewRegionId
+		allocatedIDs[id.NewRegionId] = struct{}{}
+		for _, peer := range id.NewPeerIds {
+			_, ok := allocatedIDs[peer]
+			re.False(ok)
+			re.Greater(peer, maxID)
+			maxID = peer
+			allocatedIDs[peer] = struct{}{}
+		}
+	}
 }
