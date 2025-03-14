@@ -834,11 +834,12 @@ func (suite *serverTestSuite) TestBatchSplit() {
 	suite.SetupSuite()
 }
 
+// The test simulate two cases:
+// 1. The scheduling server is upgraded first, and then the PD server is upgraded.
+// 2. The PD server is downgraded first.
 func (suite *serverTestSuite) TestBatchSplitCompatibility() {
 	re := suite.Require()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/mcs/scheduling/server/fastUpdateMember", `return(true)`))
-	// simulate the old version of PD
-	re.NoError(failpoint.Enable("github.com/tikv/pd/server/allocIDOnce", `return(true)`))
 	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.cluster)
 	re.NoError(err)
 	defer tc.Destroy()
@@ -900,6 +901,8 @@ func (suite *serverTestSuite) TestBatchSplitCompatibility() {
 		SplitCount: 10,
 	}
 
+	// Use the non batch AllocID, which simulates upgrade scheduling server first.
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/allocIDOnce", `return(true)`))
 	resp, err := grpcPDClient.AskBatchSplit(suite.ctx, req)
 	re.NoError(err)
 	re.Empty(resp.GetHeader().GetError())
@@ -912,9 +915,24 @@ func (suite *serverTestSuite) TestBatchSplitCompatibility() {
 	}
 	re.Len(allocatedIDs, 40)
 
-	// simulate the new version of PD
+	// Use the batch AllocID, which means the PD has finished the upgrade.
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/allocIDOnce"))
+	resp, err = grpcPDClient.AskBatchSplit(suite.ctx, req)
+	re.NoError(err)
+	re.Empty(resp.GetHeader().GetError())
+	for _, id := range resp.GetIds() {
+		_, ok := allocatedIDs[id.NewRegionId]
+		re.False(ok)
+		allocatedIDs[id.NewRegionId] = struct{}{}
+		for _, peer := range id.NewPeerIds {
+			_, ok := allocatedIDs[peer]
+			re.False(ok)
+			allocatedIDs[peer] = struct{}{}
+		}
+	}
 
+	// Use the non batch AllocID, which simulates downgrade PD server first.
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/allocIDOnce", `return(true)`))
 	resp, err = grpcPDClient.AskBatchSplit(suite.ctx, req)
 	re.NoError(err)
 	re.Empty(resp.GetHeader().GetError())
@@ -926,6 +944,8 @@ func (suite *serverTestSuite) TestBatchSplitCompatibility() {
 			re.False(ok)
 		}
 	}
+
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/allocIDOnce"))
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/scheduling/server/fastUpdateMember"))
 
 	suite.TearDownSuite()
