@@ -17,7 +17,6 @@ package etcdutil
 import (
 	"context"
 	"crypto/tls"
-	"fmt"
 	"net/http"
 	"net/url"
 	"os"
@@ -174,14 +173,12 @@ func EtcdKVGet(c *clientv3.Client, key string, opts ...clientv3.OpOption) (*clie
 func InjectFailToCollectTestEtcdKey(key, op string) {
 	failpoint.Inject("CollectEtcdKey", func(val failpoint.Value) {
 		file := val.(string)
-		fmt.Println("collect etcd key", file, key, op)
 
 		if len(file) != 0 {
 			err := writeKeyToFile(file, key, op)
 			if err != nil {
 				pwd, _ := os.Getwd()
 				log.Error("write key to file failed", zap.String("pwd", pwd), zap.String("file", file), zap.Error(err))
-				panic(err)
 			}
 		}
 	})
