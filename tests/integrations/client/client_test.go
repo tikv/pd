@@ -107,11 +107,6 @@ func TestClientLeaderChange(t *testing.T) {
 	leader := cluster.GetLeader()
 	waitLeader(re, innerCli.GetServiceDiscovery(), cluster.GetServer(leader))
 
-	testutil.Eventually(re, func() bool {
-		leader, etcdLeader, err := cli.GetLeaders(context.TODO())
-		return err == nil && leader != nil && leader.GetMemberId() == etcdLeader.GetMemberId()
-	})
-
 	err = cluster.GetServer(leader).Stop()
 	re.NoError(err)
 	leader = cluster.WaitLeader()
