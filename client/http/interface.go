@@ -19,7 +19,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"path"
 	"strconv"
 	"strings"
 
@@ -67,7 +66,8 @@ type Client interface {
 	GetReplicateConfig(context.Context) (map[string]any, error)
 	/* Scheduler-related interfaces */
 	GetSchedulers(context.Context) ([]string, error)
-	CreateScheduler(ctx context.Context, name string, input map[string]any) error
+	CreateScheduler(ctx context.Context, name string, storeID uint64) error
+	CreateSchedulerWithInput(ctx context.Context, name string, input map[string]any) error
 	DeleteScheduler(ctx context.Context, name string) error
 	SetSchedulerDelay(context.Context, string, int64) error
 	GetSchedulerConfig(ctx context.Context, name string) (any, error)
@@ -773,10 +773,9 @@ func (c *client) GetSchedulers(ctx context.Context) ([]string, error) {
 // GetSchedulerConfig returns the configuration of the specified scheduler for pd cluster
 func (c *client) GetSchedulerConfig(ctx context.Context, name string) (any, error) {
 	var config any
-	uri := path.Join(SchedulerConfig, name, "list")
 	err := c.request(ctx, newRequestInfo().
 		WithName(getSchedulerConfig).
-		WithURI(uri).
+		WithURI(GetSchedulerConfigURIByName(name)).
 		WithMethod(http.MethodGet).
 		WithResp(&config))
 	if err != nil {
@@ -785,10 +784,26 @@ func (c *client) GetSchedulerConfig(ctx context.Context, name string) (any, erro
 	return config, nil
 }
 
-// CreateScheduler creates a scheduler to PD cluster.
-func (c *client) CreateScheduler(ctx context.Context, name string, input map[string]any) error {
+// CreateSchedulerWithInput creates a scheduler with the specified input.
+func (c *client) CreateSchedulerWithInput(ctx context.Context, name string, input map[string]any) error {
 	input["name"] = name
 	inputJSON, err := json.Marshal(input)
+	if err != nil {
+		return errors.Trace(err)
+	}
+	return c.request(ctx, newRequestInfo().
+		WithName(createSchedulerName).
+		WithURI(Schedulers).
+		WithMethod(http.MethodPost).
+		WithBody(inputJSON))
+}
+
+// CreateScheduler creates a scheduler to PD cluster.
+func (c *client) CreateScheduler(ctx context.Context, name string, storeID uint64) error {
+	inputJSON, err := json.Marshal(map[string]any{
+		"name":     name,
+		"store_id": storeID,
+	})
 	if err != nil {
 		return errors.Trace(err)
 	}

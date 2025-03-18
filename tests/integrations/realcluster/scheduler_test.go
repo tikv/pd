@@ -63,11 +63,9 @@ func (s *schedulerSuite) TestTransferLeader() {
 			newLeader = fmt.Sprintf("pd-%d", i)
 		}
 	}
-	input := map[string]any{
-		"store_id": 1,
-	}
+
 	// record scheduler
-	re.NoError(pdHTTPCli.CreateScheduler(ctx, types.EvictLeaderScheduler.String(), input))
+	re.NoError(pdHTTPCli.CreateScheduler(ctx, types.EvictLeaderScheduler.String(), 1))
 	defer func() {
 		re.NoError(pdHTTPCli.DeleteScheduler(ctx, types.EvictLeaderScheduler.String()))
 	}()
@@ -114,17 +112,11 @@ func (s *schedulerSuite) TestRegionLabelDenyScheduler() {
 	err = pdHTTPCli.DeleteScheduler(ctx, types.BalanceLeaderScheduler.String())
 	if err == nil {
 		defer func() {
-			input := map[string]any{
-				"store_id": 0,
-			}
-			pdHTTPCli.CreateScheduler(ctx, types.BalanceLeaderScheduler.String(), input)
+			pdHTTPCli.CreateScheduler(ctx, types.BalanceLeaderScheduler.String(), 0)
 		}()
 	}
 
-	input := map[string]any{
-		"store_id": region1.Leader.StoreID,
-	}
-	re.NoError(pdHTTPCli.CreateScheduler(ctx, types.GrantLeaderScheduler.String(), input))
+	re.NoError(pdHTTPCli.CreateScheduler(ctx, types.GrantLeaderScheduler.String(), uint64(region1.Leader.StoreID)))
 	defer func() {
 		pdHTTPCli.DeleteScheduler(ctx, types.GrantLeaderScheduler.String())
 	}()
@@ -164,10 +156,7 @@ func (s *schedulerSuite) TestRegionLabelDenyScheduler() {
 
 	// enable evict leader scheduler, and check it works
 	re.NoError(pdHTTPCli.DeleteScheduler(ctx, types.GrantLeaderScheduler.String()))
-	input = map[string]any{
-		"store_id": region1.Leader.StoreID,
-	}
-	re.NoError(pdHTTPCli.CreateScheduler(ctx, types.EvictLeaderScheduler.String(), input))
+	re.NoError(pdHTTPCli.CreateScheduler(ctx, types.EvictLeaderScheduler.String(), uint64(region1.Leader.StoreID)))
 	defer func() {
 		pdHTTPCli.DeleteScheduler(ctx, types.EvictLeaderScheduler.String())
 	}()
@@ -183,10 +172,7 @@ func (s *schedulerSuite) TestRegionLabelDenyScheduler() {
 	}, testutil.WithWaitFor(time.Minute))
 
 	re.NoError(pdHTTPCli.DeleteScheduler(ctx, types.EvictLeaderScheduler.String()))
-	input = map[string]any{
-		"store_id": region1.Leader.StoreID,
-	}
-	re.NoError(pdHTTPCli.CreateScheduler(ctx, types.GrantLeaderScheduler.String(), input))
+	re.NoError(pdHTTPCli.CreateScheduler(ctx, types.GrantLeaderScheduler.String(), uint64(region1.Leader.StoreID)))
 	defer func() {
 		pdHTTPCli.DeleteScheduler(ctx, types.GrantLeaderScheduler.String())
 	}()
@@ -235,10 +221,7 @@ func (s *schedulerSuite) TestGrantOrEvictLeaderTwice() {
 
 	var i int
 	evictLeader := func() {
-		input := map[string]any{
-			"store_id": uint64(region1.Leader.StoreID),
-		}
-		re.NoError(pdHTTPCli.CreateScheduler(ctx, types.EvictLeaderScheduler.String(), input))
+		re.NoError(pdHTTPCli.CreateScheduler(ctx, types.EvictLeaderScheduler.String(), uint64(region1.Leader.StoreID)))
 		// if the second evict leader scheduler cause the pause-leader-filter
 		// disable, the balance-leader-scheduler need some time to transfer
 		// leader. See details in https://github.com/tikv/pd/issues/8756.
@@ -268,10 +251,7 @@ func (s *schedulerSuite) TestGrantOrEvictLeaderTwice() {
 
 	i = 0
 	grantLeader := func() {
-		input := map[string]any{
-			"store_id": uint64(region1.Leader.StoreID),
-		}
-		re.NoError(pdHTTPCli.CreateScheduler(ctx, types.GrantLeaderScheduler.String(), input))
+		re.NoError(pdHTTPCli.CreateScheduler(ctx, types.GrantLeaderScheduler.String(), uint64(region1.Leader.StoreID)))
 		if i == 1 {
 			time.Sleep(3 * time.Second)
 		}

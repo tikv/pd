@@ -565,18 +565,19 @@ func (suite *httpClientTestSuite) TestSchedulers() {
 	re.NoError(err)
 	const schedulerName = "evict-leader-scheduler"
 	re.NotContains(schedulers, schedulerName)
-	input := map[string]any{
-		"store_id": 1,
+
+	err = client.CreateScheduler(ctx, schedulerName, 1)
+	re.NoError(err)
+	checkScheduler := func() {
+		schedulers, err = client.GetSchedulers(ctx)
+		re.NoError(err)
+		re.Contains(schedulers, schedulerName)
+		config, err := client.GetSchedulerConfig(ctx, schedulerName)
+		re.NoError(err)
+		re.Contains(config, "store-id-ranges")
+		re.Contains(config, "batch")
 	}
-	err = client.CreateScheduler(ctx, schedulerName, input)
-	re.NoError(err)
-	schedulers, err = client.GetSchedulers(ctx)
-	re.NoError(err)
-	re.Contains(schedulers, schedulerName)
-	config, err := client.GetSchedulerConfig(ctx, schedulerName)
-	re.NoError(err)
-	re.Contains(config, "store-id-ranges")
-	re.Contains(config, "batch")
+	checkScheduler()
 	err = client.SetSchedulerDelay(ctx, schedulerName, 100)
 	re.NoError(err)
 	err = client.SetSchedulerDelay(ctx, "not-exist", 100)
@@ -586,6 +587,13 @@ func (suite *httpClientTestSuite) TestSchedulers() {
 	schedulers, err = client.GetSchedulers(ctx)
 	re.NoError(err)
 	re.NotContains(schedulers, schedulerName)
+
+	input := map[string]any{
+		"store_id": 1,
+	}
+	re.NoError(client.CreateSchedulerWithInput(ctx, schedulerName, input))
+	checkScheduler()
+	re.NoError(client.DeleteScheduler(ctx, schedulerName))
 }
 
 func (suite *httpClientTestSuite) TestStoreLabels() {
@@ -728,10 +736,7 @@ func (suite *httpClientTestSuite) TestRedirectWithMetrics() {
 		return nil
 	})
 	c := pd.NewClientWithServiceDiscovery("pd-http-client-it", sd, pd.WithHTTPClient(httpClient), pd.WithMetrics(metricCnt, nil))
-	input := map[string]any{
-		"store_id": 0,
-	}
-	c.CreateScheduler(context.Background(), "test", input)
+	c.CreateScheduler(context.Background(), "test", 0)
 	var out dto.Metric
 	failureCnt, err := metricCnt.GetMetricWithLabelValues([]string{"CreateScheduler", "network error"}...)
 	re.NoError(err)
@@ -748,7 +753,7 @@ func (suite *httpClientTestSuite) TestRedirectWithMetrics() {
 		return nil
 	})
 	c = pd.NewClientWithServiceDiscovery("pd-http-client-it", sd, pd.WithHTTPClient(httpClient), pd.WithMetrics(metricCnt, nil))
-	c.CreateScheduler(context.Background(), "test", input)
+	c.CreateScheduler(context.Background(), "test", 0)
 	successCnt, err := metricCnt.GetMetricWithLabelValues([]string{"CreateScheduler", ""}...)
 	re.NoError(err)
 	successCnt.Write(&out)
@@ -763,7 +768,7 @@ func (suite *httpClientTestSuite) TestRedirectWithMetrics() {
 		return nil
 	})
 	c = pd.NewClientWithServiceDiscovery("pd-http-client-it", sd, pd.WithHTTPClient(httpClient), pd.WithMetrics(metricCnt, nil))
-	c.CreateScheduler(context.Background(), "test", input)
+	c.CreateScheduler(context.Background(), "test", 0)
 	successCnt, err = metricCnt.GetMetricWithLabelValues([]string{"CreateScheduler", ""}...)
 	re.NoError(err)
 	successCnt.Write(&out)

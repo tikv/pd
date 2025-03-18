@@ -17,6 +17,7 @@ package http
 import (
 	"fmt"
 	"net/url"
+	"path"
 	"time"
 )
 
@@ -176,6 +177,11 @@ func PlacementRuleBundleWithPartialParameter(partial bool) string {
 // PlacementRuleGroupByID returns the path of PD HTTP API to get placement rule group by ID.
 func PlacementRuleGroupByID(id string) string {
 	return fmt.Sprintf("%s/%s", placementRuleGroup, id)
+}
+
+// GetSchedulerConfigURIByName returns the path of PD HTTP API to get configuration of the given scheduler
+func GetSchedulerConfigURIByName(name string) string {
+	return path.Join(SchedulerConfig, name, "list")
 }
 
 // SchedulerByName returns the scheduler API with the given scheduler name.
