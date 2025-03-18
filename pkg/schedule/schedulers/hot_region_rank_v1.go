@@ -202,12 +202,6 @@ func (*rankV1) needSearchRevertRegions() bool {
 
 func (*rankV1) setSearchRevertRegions() {}
 
-func (r *rankV1) isBetterForWriteLeader() bool {
-	srcRate, dstRate := r.cur.getExtremeLoad(r.firstPriority)
-	peersRate := r.cur.getPeersRateFromCache(r.firstPriority)
-	return srcRate-peersRate >= dstRate+peersRate && r.isTolerance(r.firstPriority, false)
-}
-
 func (r *rankV1) isBetter(dim int) bool {
 	isHot, decRatio := r.getHotDecRatioByPriorities(dim)
 	return isHot && decRatio <= r.greatDecRatio && r.isTolerance(dim, false)
