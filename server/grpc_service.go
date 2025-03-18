@@ -675,6 +675,10 @@ func (s *GrpcServer) AllocID(ctx context.Context, request *pdpb.AllocIDRequest) 
 	if request.GetCount() != 0 {
 		reqCount = request.GetCount()
 	}
+	failpoint.Inject("handleAllocIDNonBatch", func() {
+		reqCount = 1
+	})
+
 	// We can use an allocator for all types ID allocation.
 	id, count, err := s.idAllocator.Alloc(reqCount)
 	if err != nil {
