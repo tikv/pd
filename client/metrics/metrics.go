@@ -246,6 +246,7 @@ var (
 	CmdDurationTSOAsyncWait             prometheus.Observer
 	CmdDurationGetRegion                prometheus.Observer
 	CmdDurationGetAllMembers            prometheus.Observer
+	CmdDurationGetLeaders               prometheus.Observer
 	CmdDurationGetPrevRegion            prometheus.Observer
 	CmdDurationGetRegionByID            prometheus.Observer
 	CmdDurationScanRegions              prometheus.Observer
@@ -274,6 +275,7 @@ var (
 	CmdFailedDurationTSOWait                  prometheus.Observer
 	CmdFailedDurationTSO                      prometheus.Observer
 	CmdFailedDurationGetAllMembers            prometheus.Observer
+	CmdFailedDurationGetLeaders               prometheus.Observer
 	CmdFailedDurationGetPrevRegion            prometheus.Observer
 	CmdFailedDurationGetRegionByID            prometheus.Observer
 	CmdFailedDurationScanRegions              prometheus.Observer
@@ -320,6 +322,7 @@ func initLabelValues() {
 	CmdDurationTSOAsyncWait = cmdDuration.WithLabelValues("tso_async_wait")
 	CmdDurationGetRegion = cmdDuration.WithLabelValues("get_region")
 	CmdDurationGetAllMembers = cmdDuration.WithLabelValues("get_member_info")
+	CmdDurationGetLeaders = cmdDuration.WithLabelValues("get_leaders")
 	CmdDurationGetPrevRegion = cmdDuration.WithLabelValues("get_prev_region")
 	CmdDurationGetRegionByID = cmdDuration.WithLabelValues("get_region_byid")
 	CmdDurationScanRegions = cmdDuration.WithLabelValues("scan_regions")
@@ -348,6 +351,7 @@ func initLabelValues() {
 	CmdFailedDurationTSOWait = cmdFailedDuration.WithLabelValues("wait")
 	CmdFailedDurationTSO = cmdFailedDuration.WithLabelValues("tso")
 	CmdFailedDurationGetAllMembers = cmdFailedDuration.WithLabelValues("get_member_info")
+	CmdFailedDurationGetLeaders = cmdFailedDuration.WithLabelValues("get_leaders")
 	CmdFailedDurationGetPrevRegion = cmdFailedDuration.WithLabelValues("get_prev_region")
 	CmdFailedDurationGetRegionByID = cmdFailedDuration.WithLabelValues("get_region_byid")
 	CmdFailedDurationScanRegions = cmdFailedDuration.WithLabelValues("scan_regions")
