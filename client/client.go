@@ -490,7 +490,7 @@ func (c *client) GetAllMembers(ctx context.Context) ([]*pdpb.Member, error) {
 }
 
 // GetLeaders gets the leader and etcd leader from PD.
-func (c *client) GetLeaders(ctx context.Context) (*pdpb.Member, *pdpb.Member, error) {
+func (c *client) GetLeaders(ctx context.Context) (leader *pdpb.Member, etcdLeader *pdpb.Member, err error) {
 	start := time.Now()
 	defer func() { metrics.CmdDurationGetLeaders.Observe(time.Since(start).Seconds()) }()
 
