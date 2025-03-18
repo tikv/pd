@@ -118,11 +118,11 @@ func (s *RegionStats) Observe(r *core.RegionInfo, cluster RegionStatInformer, op
 				stat := cluster.GetHotPeerStat(utils.Read, r.GetID(), storeID)
 				if stat != nil {
 					bytes := stat.GetLoad(utils.ByteDim)
-					s.StoreLeaderReadBytes[storeID] = uint64(bytes)
+					s.StoreLeaderReadBytes[storeID] += uint64(bytes)
 					keys := stat.GetLoad(utils.KeyDim)
-					s.StoreLeaderReadKeys[storeID] = uint64(keys)
+					s.StoreLeaderReadKeys[storeID] += uint64(keys)
 					qps := stat.GetLoad(utils.QueryDim)
-					s.StoreLeaderReadQuery[storeID] = uint64(qps)
+					s.StoreLeaderReadQuery[storeID] += uint64(qps)
 				}
 			}
 		}
@@ -144,11 +144,11 @@ func (s *RegionStats) Observe(r *core.RegionInfo, cluster RegionStatInformer, op
 				stat := cluster.GetHotPeerStat(utils.Read, r.GetID(), p.GetStoreId())
 				if stat != nil {
 					bytes := stat.GetLoad(utils.ByteDim)
-					s.StorePeerReadBytes[storeID] = uint64(bytes)
+					s.StorePeerReadBytes[storeID] += uint64(bytes)
 					keys := stat.GetLoad(utils.KeyDim)
-					s.StorePeerReadKeys[storeID] = uint64(keys)
+					s.StorePeerReadKeys[storeID] += uint64(keys)
 					qps := stat.GetLoad(utils.QueryDim)
-					s.StorePeerReadQuery[storeID] = uint64(qps)
+					s.StorePeerReadQuery[storeID] += uint64(qps)
 				}
 			}
 			// peer write statistics
@@ -156,11 +156,11 @@ func (s *RegionStats) Observe(r *core.RegionInfo, cluster RegionStatInformer, op
 				stat := cluster.GetHotPeerStat(utils.Write, r.GetID(), p.GetStoreId())
 				if stat != nil {
 					bytes := stat.GetLoad(utils.ByteDim)
-					s.StoreWriteBytes[storeID] = uint64(bytes)
+					s.StoreWriteBytes[storeID] += uint64(bytes)
 					keys := stat.GetLoad(utils.KeyDim)
-					s.StoreWriteKeys[storeID] = uint64(keys)
+					s.StoreWriteKeys[storeID] += uint64(keys)
 					qps := stat.GetLoad(utils.QueryDim)
-					s.StoreWriteQuery[storeID] = uint64(qps)
+					s.StoreWriteQuery[storeID] += uint64(qps)
 				}
 			}
 		}

@@ -38,7 +38,6 @@ const (
 	store                     = "/pd/api/v1/store"
 	Stores                    = "/pd/api/v1/stores"
 	StatsRegion               = "/pd/api/v1/stats/region"
-	DistributionRegion        = "/pd/api/v1/distributions/region"
 	membersPrefix             = "/pd/api/v1/members"
 	leaderPrefix              = "/pd/api/v1/leader"
 	transferLeader            = "/pd/api/v1/leader/transfer"
@@ -131,8 +130,8 @@ func RegionStatsByKeyRange(keyRange *KeyRange, onlyCount bool) string {
 // RegionDistributionsByKeyRange returns the path of PD HTTP API to get region distribution by start key and end key.
 func RegionDistributionsByKeyRange(keyRange *KeyRange, engine string) string {
 	startKeyStr, endKeyStr := keyRange.EscapeAsUTF8Str()
-	return fmt.Sprintf("%s?start_key=%s&end_key=%s&engine=%s",
-		DistributionRegion, startKeyStr, endKeyStr, engine)
+	return fmt.Sprintf("%s?use_hot&start_key=%s&end_key=%s&engine=%s",
+		StatsRegion, startKeyStr, endKeyStr, engine)
 }
 
 // StoreByID returns the store API with store ID parameter.

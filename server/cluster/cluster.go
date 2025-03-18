@@ -55,6 +55,7 @@ import (
 	"github.com/tikv/pd/pkg/ratelimit"
 	"github.com/tikv/pd/pkg/replication"
 	sc "github.com/tikv/pd/pkg/schedule/config"
+	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/hbstream"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/placement"
@@ -2169,13 +2170,65 @@ func (c *RaftCluster) PutMetaCluster(meta *metapb.Cluster) error {
 	return c.putMetaLocked(typeutil.DeepClone(meta, core.ClusterFactory))
 }
 
+// GetHotRegionStatusByRange return region statistics from cluster with hot statistics.
+func (c *RaftCluster) GetHotRegionStatusByRange(startKey, endKey []byte, engine string) *statistics.RegionStats {
+	stores := c.GetStores()
+	switch engine {
+	case core.EngineTiKV:
+		f := filter.NewEngineFilter("user", filter.NotSpecialEngines)
+		stores = filter.SelectSourceStores(stores, []filter.Filter{f}, c.GetSchedulerConfig(), nil, nil)
+	case core.EngineTiFlash:
+		f := filter.NewEngineFilter("user", filter.SpecialEngines)
+		stores = filter.SelectSourceStores(stores, []filter.Filter{f}, c.GetSchedulerConfig(), nil, nil)
+	default:
+	}
+
+	storeMap := make(map[uint64]string, len(stores))
+	for _, store := range stores {
+		storeMap[store.GetID()] = store.GetLabelValue(core.EngineKey)
+	}
+	opt := statistics.WithStoreMapOption(storeMap)
+	stats := statistics.GetRegionStats(c.ScanRegions(startKey, endKey, -1), c, opt)
+	// Fill in the hot write region statistics.
+	for storeID := range storeMap {
+		if _, ok := stats.StoreLeaderCount[storeID]; !ok {
+			stats.StoreLeaderCount[storeID] = 0
+			stats.StoreLeaderKeys[storeID] = 0
+			stats.StoreLeaderSize[storeID] = 0
+		}
+		if _, ok := stats.StorePeerCount[storeID]; !ok {
+			stats.StorePeerCount[storeID] = 0
+			stats.StorePeerKeys[storeID] = 0
+			stats.StorePeerSize[storeID] = 0
+		}
+
+		if _, ok := stats.StoreWriteQuery[storeID]; !ok {
+			stats.StoreWriteBytes[storeID] = 0
+			stats.StoreWriteKeys[storeID] = 0
+			stats.StoreWriteQuery[storeID] = 0
+		}
+
+		if _, ok := stats.StoreLeaderReadQuery[storeID]; !ok {
+			stats.StoreLeaderKeys[storeID] = 0
+			stats.StoreLeaderReadBytes[storeID] = 0
+			stats.StoreLeaderReadQuery[storeID] = 0
+		}
+
+		if _, ok := stats.StorePeerReadQuery[storeID]; !ok {
+			stats.StorePeerReadKeys[storeID] = 0
+			stats.StorePeerReadBytes[storeID] = 0
+			stats.StorePeerReadQuery[storeID] = 0
+		}
+	}
+
+	stats.StoreEngine = storeMap
+	return stats
+}
+
 // GetRegionStatsByRange returns region statistics from cluster.
 // if useHotFlow is true, the hot region statistics will be returned.
-func (c *RaftCluster) GetRegionStatsByRange(startKey, endKey []byte, useHotFlow bool,
+func (c *RaftCluster) GetRegionStatsByRange(startKey, endKey []byte,
 	opts ...statistics.GetRegionStatsOption) *statistics.RegionStats {
-	if useHotFlow {
-		return statistics.GetRegionStats(c.ScanRegions(startKey, endKey, -1), c, opts...)
-	}
 	return statistics.GetRegionStats(c.ScanRegions(startKey, endKey, -1),
 		nil, opts...)
 }

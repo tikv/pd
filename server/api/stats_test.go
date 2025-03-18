@@ -222,9 +222,8 @@ func (suite *statsTestSuite) TestRegionStats() {
 			}
 		}
 	}
-	distributionURL := suite.urlPrefix + "/distributions/region"
-	args := fmt.Sprintf("?start_key=%s&end_key=%s&", "", "")
-	res, err := testDialClient.Get(distributionURL + args)
+	args := fmt.Sprintf("?use_hot&start_key=%s&end_key=%s&", "", "")
+	res, err := testDialClient.Get(statsURL + args)
 	re.NoError(err)
 	stats := &statistics.RegionStats{}
 	err = apiutil.ReadJSON(res.Body, stats)
