@@ -92,16 +92,6 @@ func (r *rankV1) calcProgressiveRank() {
 		return
 	}
 
-	if r.resourceTy == writeLeader {
-		// For write leader, only compare the first priority.
-		// If the first priority is better, the progressiveRank is 3.
-		// Because it is not a solution that needs to be optimized.
-		if r.isBetterForWriteLeader() {
-			r.cur.progressiveRank = 3
-		}
-		return
-	}
-
 	isFirstBetter, isSecondBetter := r.isBetter(r.firstPriority), r.isBetter(r.secondPriority)
 	isFirstNotWorsened := isFirstBetter || r.isNotWorsened(r.firstPriority)
 	isSecondNotWorsened := isSecondBetter || r.isNotWorsened(r.secondPriority)
@@ -152,11 +142,6 @@ func (r *rankV1) betterThan(old *solution) bool {
 	}
 
 	if r.cur.mainPeerStat != old.mainPeerStat {
-		// compare region
-		if r.resourceTy == writeLeader {
-			return r.cur.getPeersRateFromCache(r.firstPriority) > old.getPeersRateFromCache(r.firstPriority)
-		}
-
 		// We will firstly consider ensuring converge faster, secondly reduce oscillation
 		firstCmp, secondCmp := r.getRkCmpPriorities(old)
 		switch r.cur.progressiveRank {
