@@ -156,11 +156,15 @@ func (gta *GlobalTSOAllocator) primaryElectionLoop(groupID uint32) {
 	defer logutil.LogPanic()
 	defer gta.wg.Done()
 
+	logFields := []zap.Field{
+		logutil.CondUint32("keyspace-group-id", groupID, groupID > 0),
+		zap.String("campaign-tso-primary-name", gta.member.Name()),
+		zap.Uint64("campaign-tso-primary-id", gta.member.ID()),
+	}
 	for {
 		select {
 		case <-gta.ctx.Done():
-			log.Info("exit the global tso primary election loop",
-				logutil.CondUint32("keyspace-group-id", groupID, groupID > 0))
+			log.Info("exit the global tso primary election loop", logFields...)
 			return
 		default:
 		}
@@ -171,13 +175,11 @@ func (gta *GlobalTSOAllocator) primaryElectionLoop(groupID uint32) {
 		}
 		if primary != nil {
 			log.Info("start to watch the primary",
-				logutil.CondUint32("keyspace-group-id", groupID, groupID > 0),
-				zap.String("campaign-tso-primary-name", gta.member.Name()),
-				zap.Stringer("tso-primary", primary))
+				append(logFields, zap.Stringer("tso-primary", primary))...)
 			// Watch will keep looping and never return unless the primary has changed.
 			primary.Watch(gta.ctx)
 			log.Info("the tso primary has changed, try to re-campaign a primary",
-				logutil.CondUint32("keyspace-group-id", groupID, groupID > 0))
+				append(logFields, zap.Stringer("old-tso-primary", primary))...)
 		}
 
 		// To make sure the expected primary(if existed) and new primary are on the same server.
@@ -188,37 +190,29 @@ func (gta *GlobalTSOAllocator) primaryElectionLoop(groupID uint32) {
 		// skip campaign the primary if the expected primary is not empty and not equal to the current memberValue.
 		// expected primary ONLY SET BY `{service}/primary/transfer` API.
 		if len(expectedPrimary) > 0 && !strings.Contains(gta.member.MemberValue(), expectedPrimary) {
-			log.Info("skip campaigning of tso primary and check later",
-				zap.String("server-name", gta.member.Name()),
+			log.Info("skip campaigning of tso primary and check later", append(logFields,
 				zap.String("expected-primary-id", expectedPrimary),
-				zap.Uint64("member-id", gta.member.ID()),
-				zap.String("cur-member-value", gta.member.MemberValue()))
+				zap.String("cur-member-value", gta.member.MemberValue()))...)
 			time.Sleep(200 * time.Millisecond)
 			continue
 		}
 
-		gta.campaignLeader(groupID)
+		gta.campaignLeader(groupID, logFields)
 	}
 }
 
-func (gta *GlobalTSOAllocator) campaignLeader(groupID uint32) {
-	log.Info("start to campaign the primary",
-		logutil.CondUint32("keyspace-group-id", groupID, groupID > 0),
-		zap.String("campaign-tso-primary-name", gta.member.Name()))
+func (gta *GlobalTSOAllocator) campaignLeader(groupID uint32, logFields []zap.Field) {
+	log.Info("start to campaign the primary", logFields...)
 	leaderLease := gta.cfg.GetLeaderLease()
 	if err := gta.member.CampaignLeader(gta.ctx, leaderLease); err != nil {
 		if errors.Is(err, errs.ErrEtcdTxnConflict) {
 			log.Info("campaign tso primary meets error due to txn conflict, another tso server may campaign successfully",
-				logutil.CondUint32("keyspace-group-id", groupID, groupID > 0),
-				zap.String("campaign-tso-primary-name", gta.member.Name()))
+				logFields...)
 		} else if errors.Is(err, errs.ErrCheckCampaign) {
 			log.Info("campaign tso primary meets error due to pre-check campaign failed, the tso keyspace group may be in split",
-				logutil.CondUint32("keyspace-group-id", groupID, groupID > 0),
-				zap.String("campaign-tso-primary-name", gta.member.Name()))
+				logFields...)
 		} else {
-			log.Error("campaign tso primary meets error due to etcd error",
-				logutil.CondUint32("keyspace-group-id", groupID, groupID > 0),
-				zap.String("campaign-tso-primary-name", gta.member.Name()), errs.ZapError(err))
+			log.Error("campaign tso primary meets error due to etcd error", append(logFields, errs.ZapError(err))...)
 		}
 		return
 	}
@@ -236,15 +230,11 @@ func (gta *GlobalTSOAllocator) campaignLeader(groupID uint32) {
 
 	// maintain the leadership, after this, TSO can be service.
 	gta.member.KeepLeader(ctx)
-	log.Info("campaign tso primary ok",
-		logutil.CondUint32("keyspace-group-id", groupID, groupID > 0),
-		zap.String("campaign-tso-primary-name", gta.member.Name()))
+	log.Info("campaign tso primary ok", logFields...)
 
 	log.Info("initializing the global tso allocator")
 	if err := gta.Initialize(); err != nil {
-		log.Error("failed to initialize the global tso allocator",
-			logutil.CondUint32("keyspace-group-id", groupID, groupID > 0),
-			errs.ZapError(err))
+		log.Error("failed to initialize the global tso allocator", append(logFields, errs.ZapError(err))...)
 		return
 	}
 	defer func() {
@@ -260,7 +250,7 @@ func (gta *GlobalTSOAllocator) campaignLeader(groupID uint32) {
 			GroupID:     groupID,
 		}, gta.member.MemberValue())
 	if err != nil {
-		log.Error("prepare tso primary watch error", errs.ZapError(err))
+		log.Error("prepare tso primary watch error", append(logFields, errs.ZapError(err))...)
 		return
 	}
 	gta.expectedPrimaryLease.Store(lease)
@@ -274,9 +264,7 @@ func (gta *GlobalTSOAllocator) campaignLeader(groupID uint32) {
 		member.ServiceMemberGauge.WithLabelValues(tsoLabel).Set(0)
 	})
 
-	log.Info("tso primary is ready to serve",
-		logutil.CondUint32("keyspace-group-id", groupID, groupID > 0),
-		zap.String("tso-primary-name", gta.member.Name()))
+	log.Info("tso primary is ready to serve", logFields...)
 
 	leaderTicker := time.NewTicker(constant.LeaderTickInterval)
 	defer leaderTicker.Stop()
@@ -285,17 +273,15 @@ func (gta *GlobalTSOAllocator) campaignLeader(groupID uint32) {
 		select {
 		case <-leaderTicker.C:
 			if !gta.member.IsLeader() {
-				log.Info("no longer a primary because lease has expired, the tso primary will step down",
-					logutil.CondUint32("keyspace-group-id", groupID, groupID > 0))
+				log.Info("no longer a primary because lease has expired, the tso primary will step down", logFields...)
 				return
 			}
 		case <-ctx.Done():
 			// Server is closed and it should return nil.
-			log.Info("exit leader campaign",
-				logutil.CondUint32("keyspace-group-id", groupID, groupID > 0))
+			log.Info("exit leader campaign", logFields...)
 			return
 		case <-exitPrimary:
-			log.Info("no longer be primary because primary have been updated, the TSO primary will step down")
+			log.Info("no longer be primary because primary have been updated, the TSO primary will step down", logFields...)
 			return
 		}
 	}
