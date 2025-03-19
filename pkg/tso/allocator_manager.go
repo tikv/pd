@@ -112,6 +112,8 @@ type AllocatorManager struct {
 	storage endpoint.TSOStorage
 	// TSO config
 	cfg Config
+
+	logFields []zap.Field
 }
 
 // NewAllocatorManager creates a new TSO Allocator Manager.
@@ -130,6 +132,10 @@ func NewAllocatorManager(
 		member:  member,
 		storage: storage,
 		cfg:     cfg,
+		logFields: []zap.Field{
+			logutil.CondUint32("keyspace-group-id", keyspaceGroupID, keyspaceGroupID > 0),
+			zap.String("name", member.Name()),
+		},
 	}
 	am.allocator = NewGlobalTSOAllocator(ctx, am)
 
@@ -166,27 +172,22 @@ func (am *AllocatorManager) tsoAllocatorLoop() {
 	})
 	defer tsTicker.Stop()
 
-	log.Info("entering into allocator update loop", logutil.CondUint32("keyspace-group-id", am.kgID, am.kgID > 0))
+	log.Info("entering into allocator update loop", am.logFields...)
 	for {
 		select {
 		case <-tsTicker.C:
 			if !am.member.IsLeader() {
-				log.Info("allocator doesn't campaign leadership yet",
-					logutil.CondUint32("keyspace-group-id", am.kgID, am.kgID > 0))
-				time.Sleep(200 * time.Millisecond)
+				log.Info("allocator doesn't campaign leadership yet", am.logFields...)
 				continue
 			}
 			if err := am.allocator.UpdateTSO(); err != nil {
-				log.Warn("failed to update allocator's timestamp",
-					logutil.CondUint32("keyspace-group-id", am.kgID, am.kgID > 0),
-					zap.String("name", am.member.Name()),
-					errs.ZapError(err))
+				log.Warn("failed to update allocator's timestamp", append(am.logFields, errs.ZapError(err))...)
 				am.ResetAllocatorGroup(false)
 				return
 			}
 		case <-am.ctx.Done():
 			am.allocator.reset()
-			log.Info("exit the allocator update loop", logutil.CondUint32("keyspace-group-id", am.kgID, am.kgID > 0))
+			log.Info("exit the allocator update loop", am.logFields...)
 			return
 		}
 	}
@@ -195,13 +196,13 @@ func (am *AllocatorManager) tsoAllocatorLoop() {
 // close is used to shutdown TSO Allocator updating daemon.
 // tso service call this function to shutdown the loop here, but pd manages its own loop.
 func (am *AllocatorManager) close() {
-	log.Info("closing the allocator manager", logutil.CondUint32("keyspace-group-id", am.kgID, am.kgID > 0))
+	log.Info("closing the allocator manager", am.logFields...)
 
 	am.allocator.close()
 	am.cancel()
 	am.svcLoopWG.Wait()
 
-	log.Info("closed the allocator manager", logutil.CondUint32("keyspace-group-id", am.kgID, am.kgID > 0))
+	log.Info("closed the allocator manager", am.logFields...)
 }
 
 // GetMember returns the ElectionMember of this AllocatorManager.
@@ -255,7 +256,7 @@ func (am *AllocatorManager) GetLeaderAddr() string {
 func (am *AllocatorManager) startGlobalAllocatorLoop() {
 	if am.allocator == nil {
 		// it should never happen
-		log.Error("failed to start global allocator loop, global allocator not found")
+		log.Error("failed to start global allocator loop, global allocator not found", am.logFields...)
 		return
 	}
 	am.allocator.wg.Add(1)
