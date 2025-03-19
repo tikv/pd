@@ -510,7 +510,7 @@ func (c *RaftCluster) startTSOJobsIfNeeded() error {
 	allocator := c.tsoAllocator.GetAllocator()
 	if !allocator.IsInitialize() {
 		log.Info("initializing the global TSO allocator")
-		if err := allocator.Initialize(0); err != nil {
+		if err := allocator.Initialize(); err != nil {
 			log.Error("failed to initialize the global TSO allocator", errs.ZapError(err))
 			return err
 		}
@@ -2659,6 +2659,6 @@ func (c *RaftCluster) UnsetServiceIndependent(name string) {
 
 // GetGlobalTSOAllocator return global tso allocator
 // It only is used for test.
-func (c *RaftCluster) GetGlobalTSOAllocator() tso.Allocator {
+func (c *RaftCluster) GetGlobalTSOAllocator() *tso.GlobalTSOAllocator {
 	return c.tsoAllocator.GetAllocator()
 }

@@ -32,9 +32,7 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/member"
 	"github.com/tikv/pd/pkg/storage/endpoint"
-	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
-	"github.com/tikv/pd/pkg/utils/syncutil"
 )
 
 const (
@@ -49,23 +47,6 @@ var (
 	// PriorityCheck exported is only for test.
 	PriorityCheck = time.Minute
 )
-
-// AllocatorGroupFilter is used to select AllocatorGroup.
-type AllocatorGroupFilter func(ag *allocatorGroup) bool
-
-type allocatorGroup struct {
-	// ctx is built with cancel from a parent context when set up which can be different
-	// in order to receive Done() signal correctly.
-	// cancel would be call when allocatorGroup is deleted to stop background loop.
-	ctx    context.Context
-	cancel context.CancelFunc
-	// For the Global TSO Allocator, leadership is a PD leader's
-	// leadership, and for the Local TSO Allocator, leadership
-	// is a DC-level certificate to allow an allocator to generate
-	// TSO for local transactions in its DC.
-	leadership *election.Leadership
-	allocator  Allocator
-}
 
 // ElectionMember defines the interface for the election related logic.
 type ElectionMember interface {
@@ -117,15 +98,8 @@ type ElectionMember interface {
 // It is in charge of maintaining TSO allocators' leadership, checking election
 // priority, and forwarding TSO allocation requests to correct TSO Allocators.
 type AllocatorManager struct {
-	mu struct {
-		syncutil.RWMutex
-		// Global TSO Allocator, as a global single point to allocate
-		// TSO for global transactions, such as cross-region cases.
-		allocatorGroup *allocatorGroup
-		// The max suffix sign we have so far, it will be used to calculate
-		// the number of suffix bits we need in the TSO logical part.
-		maxSuffix int32
-	}
+	// Global TSO Allocator, as a global single point to allocate TSO for global transactions.
+	allocator *GlobalTSOAllocator
 	// for the synchronization purpose of the service loops
 	svcLoopWG sync.WaitGroup
 
@@ -134,17 +108,10 @@ type AllocatorManager struct {
 	// kgID is the keyspace group ID
 	kgID uint32
 	// member is for election use
-	member ElectionMember
+	member  ElectionMember
+	storage endpoint.TSOStorage
 	// TSO config
-	storage                endpoint.TSOStorage
-	saveInterval           time.Duration
-	updatePhysicalInterval time.Duration
-	// leaderLease defines the time within which a TSO primary/leader must update its TTL
-	// in etcd, otherwise etcd will expire the leader key and other servers can campaign
-	// the primary/leader again. Etcd only supports seconds TTL, so here is second too.
-	leaderLease    int64
-	maxResetTSGap  func() time.Duration
-	securityConfig *grpcutil.TLSConfig
+	cfg Config
 }
 
 // NewAllocatorManager creates a new TSO Allocator Manager.
@@ -157,43 +124,19 @@ func NewAllocatorManager(
 ) *AllocatorManager {
 	ctx, cancel := context.WithCancel(ctx)
 	am := &AllocatorManager{
-		ctx:                    ctx,
-		cancel:                 cancel,
-		kgID:                   keyspaceGroupID,
-		member:                 member,
-		storage:                storage,
-		saveInterval:           cfg.GetTSOSaveInterval(),
-		updatePhysicalInterval: cfg.GetTSOUpdatePhysicalInterval(),
-		leaderLease:            cfg.GetLeaderLease(),
-		maxResetTSGap:          cfg.GetMaxResetTSGap,
-		securityConfig:         cfg.GetTLSConfig(),
+		ctx:     ctx,
+		cancel:  cancel,
+		kgID:    keyspaceGroupID,
+		member:  member,
+		storage: storage,
+		cfg:     cfg,
 	}
-	am.mu.allocatorGroup = &allocatorGroup{}
+	am.allocator = NewGlobalTSOAllocator(ctx, am)
 
-	// Set up the TSO Allocator here, it will be initialized once the member campaigns leader successfully.
-	am.SetUpAllocator(am.ctx, am.member.GetLeadership())
 	am.svcLoopWG.Add(1)
 	go am.tsoAllocatorLoop()
 
 	return am
-}
-
-// SetUpAllocator is used to set up the allocator, which will initialize the allocator and put it into
-// an allocator daemon. An TSO Allocator should only be set once, and may be initialized and reset multiple times
-// depending on the election.
-func (am *AllocatorManager) SetUpAllocator(ctx context.Context, leadership *election.Leadership) {
-	am.mu.Lock()
-	defer am.mu.Unlock()
-
-	allocator := NewGlobalTSOAllocator(ctx, am)
-	// Create a new allocatorGroup
-	ctx, cancel := context.WithCancel(ctx)
-	am.mu.allocatorGroup = &allocatorGroup{
-		ctx:        ctx,
-		cancel:     cancel,
-		leadership: leadership,
-		allocator:  allocator,
-	}
 }
 
 // getGroupID returns the keyspace group ID of the allocator manager.
@@ -217,8 +160,36 @@ func (am *AllocatorManager) tsoAllocatorLoop() {
 	defer logutil.LogPanic()
 	defer am.svcLoopWG.Done()
 
-	am.AllocatorDaemon(am.ctx)
-	log.Info("exit allocator loop", logutil.CondUint32("keyspace-group-id", am.kgID, am.kgID > 0))
+	tsTicker := time.NewTicker(am.cfg.GetTSOUpdatePhysicalInterval())
+	failpoint.Inject("fastUpdatePhysicalInterval", func() {
+		tsTicker.Reset(time.Millisecond)
+	})
+	defer tsTicker.Stop()
+
+	log.Info("entering into allocator update loop", logutil.CondUint32("keyspace-group-id", am.kgID, am.kgID > 0))
+	for {
+		select {
+		case <-tsTicker.C:
+			if !am.member.IsLeader() {
+				log.Info("allocator doesn't campaign leadership yet",
+					logutil.CondUint32("keyspace-group-id", am.kgID, am.kgID > 0))
+				time.Sleep(200 * time.Millisecond)
+				continue
+			}
+			if err := am.allocator.UpdateTSO(); err != nil {
+				log.Warn("failed to update allocator's timestamp",
+					logutil.CondUint32("keyspace-group-id", am.kgID, am.kgID > 0),
+					zap.String("name", am.member.Name()),
+					errs.ZapError(err))
+				am.ResetAllocatorGroup(false)
+				return
+			}
+		case <-am.ctx.Done():
+			am.allocator.reset()
+			log.Info("exit the allocator update loop", logutil.CondUint32("keyspace-group-id", am.kgID, am.kgID > 0))
+			return
+		}
+	}
 }
 
 // close is used to shutdown TSO Allocator updating daemon.
@@ -226,7 +197,7 @@ func (am *AllocatorManager) tsoAllocatorLoop() {
 func (am *AllocatorManager) close() {
 	log.Info("closing the allocator manager", logutil.CondUint32("keyspace-group-id", am.kgID, am.kgID > 0))
 
-	am.GetAllocator().(*GlobalTSOAllocator).close()
+	am.allocator.close()
 	am.cancel()
 	am.svcLoopWG.Wait()
 
@@ -238,91 +209,32 @@ func (am *AllocatorManager) GetMember() ElectionMember {
 	return am.member
 }
 
-// AllocatorDaemon is used to update every allocator's TSO and check whether we have
-// any new local allocator that needs to be set up.
-func (am *AllocatorManager) AllocatorDaemon(ctx context.Context) {
-	log.Info("entering into allocator daemon", logutil.CondUint32("keyspace-group-id", am.kgID, am.kgID > 0))
-
-	tsTicker := time.NewTicker(am.updatePhysicalInterval)
-	failpoint.Inject("fastUpdatePhysicalInterval", func() {
-		tsTicker.Reset(time.Millisecond)
-	})
-	defer tsTicker.Stop()
-
-	for {
-		select {
-		case <-tsTicker.C:
-			allocatorGroup := am.mu.allocatorGroup
-			// Update the initialized TSO Allocator to advance TSO.
-			if allocatorGroup.allocator.IsInitialize() && allocatorGroup.leadership.Check() {
-				am.updateAllocator(allocatorGroup)
-			}
-		case <-ctx.Done():
-			log.Info("exit allocator daemon", logutil.CondUint32("keyspace-group-id", am.kgID, am.kgID > 0))
-			return
-		}
-	}
-}
-
-// updateAllocator is used to update the allocator in the group.
-func (am *AllocatorManager) updateAllocator(ag *allocatorGroup) {
-	defer logutil.LogPanic()
-
-	select {
-	case <-ag.ctx.Done():
-		// Resetting the allocator will clear TSO in memory
-		ag.allocator.Reset()
-		log.Info("exit the allocator update loop", logutil.CondUint32("keyspace-group-id", am.kgID, am.kgID > 0))
-		return
-	default:
-	}
-	if !ag.leadership.Check() {
-		log.Info("allocator doesn't campaign leadership yet",
-			logutil.CondUint32("keyspace-group-id", am.kgID, am.kgID > 0))
-		time.Sleep(200 * time.Millisecond)
-		return
-	}
-	if err := ag.allocator.UpdateTSO(); err != nil {
-		log.Warn("failed to update allocator's timestamp",
-			logutil.CondUint32("keyspace-group-id", am.kgID, am.kgID > 0),
-			zap.String("name", am.member.Name()),
-			errs.ZapError(err))
-		am.ResetAllocatorGroup(false)
-		return
-	}
-}
-
 // HandleRequest forwards TSO allocation requests to correct TSO Allocators.
 func (am *AllocatorManager) HandleRequest(ctx context.Context, count uint32) (pdpb.Timestamp, error) {
 	defer trace.StartRegion(ctx, "AllocatorManager.HandleRequest").End()
-	return am.GetAllocator().GenerateTSO(ctx, count)
+	return am.allocator.generateTSO(ctx, count)
 }
 
 // ResetAllocatorGroup will reset the allocator's leadership and TSO initialized in memory.
 // It usually should be called before re-triggering an Allocator leader campaign.
 func (am *AllocatorManager) ResetAllocatorGroup(skipResetLeader bool) {
-	am.mu.Lock()
-	defer am.mu.Unlock()
-	am.mu.allocatorGroup.allocator.Reset()
+	am.allocator.reset()
 	// Reset if it still has the leadership. Otherwise the data race may occur because of the re-campaigning.
-	if !skipResetLeader && am.mu.allocatorGroup.leadership.Check() {
-		am.mu.allocatorGroup.leadership.Reset()
+	if !skipResetLeader && am.member.IsLeader() {
+		am.member.ResetLeader()
 	}
 }
 
-// GetAllocator get the allocator by dc-location.
-func (am *AllocatorManager) GetAllocator() Allocator {
-	am.mu.RLock()
-	defer am.mu.RUnlock()
-	return am.mu.allocatorGroup.allocator
+// GetAllocator returns the global TSO allocator.
+func (am *AllocatorManager) GetAllocator() *GlobalTSOAllocator {
+	return am.allocator
 }
 
-// IsLeader returns whether the current member is the leader in the election group.
-func (am *AllocatorManager) IsLeader() bool {
-	if am == nil || am.member == nil || !am.member.IsLeader() {
+func (am *AllocatorManager) isLeader() bool {
+	if am == nil || am.member == nil {
 		return false
 	}
-	return true
+	return am.member.IsLeader()
 }
 
 // GetLeaderAddr returns the address of leader in the election group.
@@ -337,13 +249,15 @@ func (am *AllocatorManager) GetLeaderAddr() string {
 	return leaderAddrs[0]
 }
 
+// The PD server will conduct its own leadership election independently of the allocator manager,
+// while the TSO service will manage its leadership election within the allocator manager.
+// This function is used to manually initiate the allocator leadership election loop.
 func (am *AllocatorManager) startGlobalAllocatorLoop() {
-	globalTSOAllocator, ok := am.mu.allocatorGroup.allocator.(*GlobalTSOAllocator)
-	if !ok {
+	if am.allocator == nil {
 		// it should never happen
 		log.Error("failed to start global allocator loop, global allocator not found")
 		return
 	}
-	globalTSOAllocator.wg.Add(1)
-	go globalTSOAllocator.primaryElectionLoop()
+	am.allocator.wg.Add(1)
+	go am.allocator.primaryElectionLoop(am.getGroupID())
 }

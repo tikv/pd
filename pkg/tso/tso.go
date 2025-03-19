@@ -122,8 +122,7 @@ func (t *timestampOracle) getLastSavedTime() time.Time {
 	return last.(time.Time)
 }
 
-// SyncTimestamp is used to synchronize the timestamp.
-func (t *timestampOracle) SyncTimestamp() error {
+func (t *timestampOracle) syncTimestamp() error {
 	log.Info("start to sync timestamp", logutil.CondUint32("keyspace-group-id", t.keyspaceGroupID, t.keyspaceGroupID > 0))
 	t.metrics.syncEvent.Inc()
 
@@ -262,7 +261,7 @@ func (t *timestampOracle) resetUserTimestamp(leadership *election.Leadership, ts
 	return nil
 }
 
-// UpdateTimestamp is used to update the timestamp.
+// updateTimestamp is used to update the timestamp.
 // This function will do two things:
 //  1. When the logical time is going to be used up, increase the current physical time.
 //  2. When the time window is not big enough, which means the saved etcd time minus the next physical time
@@ -276,7 +275,7 @@ func (t *timestampOracle) resetUserTimestamp(leadership *election.Leadership, ts
 //
 // NOTICE: this function should be called after the TSO in memory has been initialized
 // and should not be called when the TSO in memory has been reset anymore.
-func (t *timestampOracle) UpdateTimestamp() error {
+func (t *timestampOracle) updateTimestamp() error {
 	if !t.isInitialized() {
 		return errs.ErrUpdateTimestamp.FastGenByArgs("timestamp in memory has not been initialized")
 	}
@@ -391,8 +390,7 @@ func (t *timestampOracle) getTS(ctx context.Context, member ElectionMember, coun
 	return resp, errs.ErrGenerateTimestamp.FastGenByArgs("generate global tso maximum number of retries exceeded")
 }
 
-// ResetTimestamp is used to reset the timestamp in memory.
-func (t *timestampOracle) ResetTimestamp() {
+func (t *timestampOracle) resetTimestamp() {
 	t.tsoMux.Lock()
 	defer t.tsoMux.Unlock()
 	log.Info("reset the timestamp in memory", logutil.CondUint32("keyspace-group-id", t.keyspaceGroupID, t.keyspaceGroupID > 0))
