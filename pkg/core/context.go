@@ -23,10 +23,11 @@ import (
 // MetaProcessContext is a context for meta process.
 type MetaProcessContext struct {
 	context.Context
-	Tracer     RegionHeartbeatProcessTracer
-	TaskRunner ratelimit.Runner
-	MiscRunner ratelimit.Runner
-	LogRunner  ratelimit.Runner
+	Tracer           RegionHeartbeatProcessTracer
+	TaskRunner       ratelimit.Runner
+	MiscRunner       ratelimit.Runner
+	LogRunner        ratelimit.Runner
+	SyncRegionRunner ratelimit.Runner
 }
 
 // NewMetaProcessContext creates a new MetaProcessContext.
