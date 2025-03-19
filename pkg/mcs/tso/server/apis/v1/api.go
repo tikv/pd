@@ -34,7 +34,6 @@ import (
 	"github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/storage/endpoint"
-	"github.com/tikv/pd/pkg/tso"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/apiutil/multiservicesapi"
 	"github.com/tikv/pd/pkg/utils/logutil"
@@ -311,7 +310,7 @@ func transferPrimary(c *gin.Context) {
 		memberMap[member.Address] = true
 	}
 
-	if err := utils.TransferPrimary(svr.GetClient(), allocator.GetAllocator().(*tso.GlobalTSOAllocator).GetExpectedPrimaryLease(),
+	if err := utils.TransferPrimary(svr.GetClient(), allocator.GetAllocator().GetExpectedPrimaryLease(),
 		constant.TSOServiceName, svr.Name(), newPrimary, keyspaceGroupID, memberMap); err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
 		return
