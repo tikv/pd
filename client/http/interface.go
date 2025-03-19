@@ -792,7 +792,7 @@ func (c *client) CreateSchedulerWithInput(ctx context.Context, name string, inpu
 		return errors.Trace(err)
 	}
 	return c.request(ctx, newRequestInfo().
-		WithName(createSchedulerName).
+		WithName(createSchedulerNameWithInput).
 		WithURI(Schedulers).
 		WithMethod(http.MethodPost).
 		WithBody(inputJSON))
