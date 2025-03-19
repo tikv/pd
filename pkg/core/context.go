@@ -34,11 +34,12 @@ type MetaProcessContext struct {
 // used in tests, can be changed if no need to test concurrency.
 func ContextTODO() *MetaProcessContext {
 	return &MetaProcessContext{
-		Context:    context.TODO(),
-		Tracer:     NewNoopHeartbeatProcessTracer(),
-		TaskRunner: ratelimit.NewSyncRunner(),
-		MiscRunner: ratelimit.NewSyncRunner(),
-		LogRunner:  ratelimit.NewSyncRunner(),
+		Context:          context.TODO(),
+		Tracer:           NewNoopHeartbeatProcessTracer(),
+		TaskRunner:       ratelimit.NewSyncRunner(),
+		MiscRunner:       ratelimit.NewSyncRunner(),
+		LogRunner:        ratelimit.NewSyncRunner(),
+		SyncRegionRunner: ratelimit.NewSyncRunner(),
 		// Limit default is nil
 	}
 }
