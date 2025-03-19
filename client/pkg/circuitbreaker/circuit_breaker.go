@@ -138,7 +138,7 @@ func (cb *CircuitBreaker) ChangeSettings(apply func(config *Settings)) {
 	defer cb.Unlock()
 
 	apply(cb.config)
-	log.Info("circuit breaker settings changed", zap.Any("config", cb.config))
+	log.Debug("circuit breaker settings changed", zap.Any("config", cb.config))
 }
 
 // Execute calls the given function if the CircuitBreaker is closed and returns the result of execution.

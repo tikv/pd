@@ -38,7 +38,7 @@ const (
 	allocIDPathFormat           = "/pd/%d/alloc_id"                           // "/pd/{cluster_id}/alloc_id"
 	keyspaceAllocIDPathFormat   = "/pd/%d/keyspaces/alloc_id"                 // "/pd/{cluster_id}/keyspaces/alloc_id"
 	configPathFormat            = "/pd/%d/config"                             // "/pd/{cluster_id}/config"
-	schedulerConfigPathFormat   = "/pd/%d/schedule/%s"                        // "/pd/{cluster_id}/schedule/{scheduler_name}"
+	schedulerConfigPathFormat   = "/pd/%d/scheduler_config/%s"                // "/pd/{cluster_id}/scheduler_config/{scheduler_name}"
 	storeLeaderWeightPathFormat = "/pd/%d/schedule/store_weight/%020d/leader" // "/pd/{cluster_id}/schedule/store_weight/{store_id}/leader"
 	storeRegionWeightPathFormat = "/pd/%d/schedule/store_weight/%020d/region" // "/pd/{cluster_id}/schedule/store_weight/{store_id}/region"
 
@@ -61,10 +61,21 @@ const (
 	// "%08d" adds extra padding to make encoded ID ordered.
 	// Encoded ID can be decoded directly with strconv.ParseUint. Width of the
 	// padded keyspaceID is 8 (decimal representation of uint24max is 16777215).
-	gcSafePointPathFormat        = "/pd/%d/gc/safe_point"                        // "/pd/{cluster_id}/gc/safe_point"
-	gcSafePointServicePathFormat = "/pd/%d/gc/safe_point/service/%s"             // "/pd/{cluster_id}/gc/safe_point/service/{service_id}"
-	gcSafePointV2PathFormat      = "/pd/%d/keyspaces/gc_safe_point/%08d"         // "/pd/{cluster_id}/keyspaces/gc_safe_point/{keyspace_id}"
-	serviceSafePointV2PathFormat = "/pd/%d/keyspaces/service_safe_point/%08d/%s" // "/pd/{cluster_id}/keyspaces/service_safe_point/{keyspace_id}/{service_id}"
+	gcStateRevisionPathFormat            = "/pd/%d/gc/gc_state_revision"         // "/pd/{cluster_id}/gc/gc_state_revision"
+	unifiedGCSafePointPathFormat         = "/pd/%d/gc/safe_point"                // "/pd/{cluster_id}/gc/safe_point"
+	keyspaceLevelGCSafePointPrefixFormat = "/pd/%d/keyspaces/gc_safe_point/"     // "/pd/{cluster_id}/keyspaces/gc_safe_point/"
+	keyspaceLevelGCSafePointPathFormat   = "/pd/%d/keyspaces/gc_safe_point/%08d" // "/pd/{cluster_id}/keyspaces/gc_safe_point/{keyspace_id}"
+	// Compatible with old data that was directly written to etcd by TiDB.
+	unifiedTxnSafePointPath = "/tidb/store/gcworker/saved_safe_point"
+	// Note that keyspace-level keys written directly from TiDB doesn't pad the keyspace ID with zeroes.
+	keyspaceLevelTxnSafePointPath     = "/keyspaces/tidb/%d/tidb/store/gcworker/saved_safe_point" // "/keyspaces/tidb/{keyspace_id}/tidb/store/gcworker/saved_safe_point"
+	unifiedGCBarrierPathFormat        = "/pd/%d/gc/safe_point/service/%s"                         // "/pd/{cluster_id}/gc/safe_point/service/{barrier_id}"
+	keyspaceLevelGCBarrierPathFormat  = "/pd/%d/keyspaces/service_safe_point/%08d/%s"             // "/pd/{cluster_id}/keyspaces/service_safe_point/{keyspace_id}/{barrier_id}"
+	unifiedTiDBMinStartTSPrefix       = "/tidb/server/minstartts/"
+	keyspaceLevelTiDBMinStartTSPrefix = "/keyspaces/tidb/%d/tidb/server/minstartts/" // "/keyspaces/tidb/{keyspace_id}/tidb/server/minstartts"
+	gcSafePointV2PrefixFormat         = keyspaceLevelGCSafePointPrefixFormat
+	gcSafePointV2PathFormat           = keyspaceLevelGCSafePointPathFormat
+	serviceSafePointV2PathFormat      = keyspaceLevelGCBarrierPathFormat
 
 	clusterPathFormat              = "/pd/%d/raft"                            // "/pd/{cluster_id}/raft"
 	clusterBootstrapTimePathFormat = "/pd/%d/raft/status/raft_bootstrap_time" // "/pd/{cluster_id}/raft/status/raft_bootstrap_time"
@@ -80,7 +91,7 @@ const (
 	keyspaceGroupIDPathFormat   = "/pd/%d/tso/keyspace_groups/membership/%05d" // "/pd/{cluster_id}/tso/keyspace_groups/membership/{group_id}"
 	keyspaceGroupIDPattern      = `tso/keyspace_groups/membership/(\d{5})$`
 
-	servicePathFormat  = "/ms/%d/%s/registry"    // "/ms/{cluster_id}/{service_name}/registry"
+	servicePathFormat  = "/ms/%d/%s/registry/"   // "/ms/{cluster_id}/{service_name}/registry/"
 	registryPathFormat = "/ms/%d/%s/registry/%s" // "/ms/{cluster_id}/{service_name}/registry/{service_addr}"
 
 	msLeaderPathFormat           = "/ms/%d/%s/primary"                                // "/ms/{cluster_id}/{service_name}/primary"

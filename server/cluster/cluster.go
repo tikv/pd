@@ -2209,7 +2209,7 @@ func (c *RaftCluster) GetHotRegionStatusByRange(startKey, endKey []byte, engine 
 		}
 
 		if _, ok := stats.StoreLeaderReadQuery[storeID]; !ok {
-			stats.StoreLeaderKeys[storeID] = 0
+			stats.StoreLeaderReadKeys[storeID] = 0
 			stats.StoreLeaderReadBytes[storeID] = 0
 			stats.StoreLeaderReadQuery[storeID] = 0
 		}

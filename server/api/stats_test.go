@@ -169,23 +169,6 @@ func (suite *statsTestSuite) TestRegionStats() {
 		StorePeerKeys:    map[uint64]int64{1: 151, 4: 150, 5: 151},
 	}
 
-	stats11 := &statistics.RegionStats{
-		Count:            4,
-		EmptyCount:       1,
-		StorageSize:      351,
-		UserStorageSize:  291,
-		StorageKeys:      221,
-		StoreLeaderCount: map[uint64]int{1: 1},
-		StorePeerCount:   map[uint64]int{1: 3},
-		StoreLeaderSize:  map[uint64]int64{1: 100},
-		StoreLeaderKeys:  map[uint64]int64{1: 50},
-		StorePeerSize:    map[uint64]int64{1: 301},
-		StorePeerKeys:    map[uint64]int64{1: 201},
-		StoreWriteKeys:   map[uint64]uint64{1: 0},
-		StoreWriteBytes:  map[uint64]uint64{1: 0},
-		StoreEngine:      map[uint64]string{1: ""},
-	}
-
 	testdata := []struct {
 		startKey string
 		endKey   string
@@ -222,6 +205,31 @@ func (suite *statsTestSuite) TestRegionStats() {
 			}
 		}
 	}
+
+	stats11 := &statistics.RegionStats{
+		Count:                4,
+		EmptyCount:           1,
+		StorageSize:          351,
+		UserStorageSize:      291,
+		StorageKeys:          221,
+		StoreLeaderCount:     map[uint64]int{1: 1},
+		StorePeerCount:       map[uint64]int{1: 3},
+		StoreLeaderSize:      map[uint64]int64{1: 100},
+		StoreLeaderKeys:      map[uint64]int64{1: 50},
+		StorePeerSize:        map[uint64]int64{1: 301},
+		StorePeerKeys:        map[uint64]int64{1: 201},
+		StoreWriteKeys:       map[uint64]uint64{1: 0},
+		StoreWriteBytes:      map[uint64]uint64{1: 0},
+		StoreWriteQuery:      map[uint64]uint64{1: 0},
+		StoreLeaderReadBytes: map[uint64]uint64{1: 0},
+		StoreLeaderReadKeys:  map[uint64]uint64{1: 0},
+		StoreLeaderReadQuery: map[uint64]uint64{1: 0},
+		StorePeerReadBytes:   map[uint64]uint64{1: 0},
+		StorePeerReadKeys:    map[uint64]uint64{1: 0},
+		StorePeerReadQuery:   map[uint64]uint64{1: 0},
+		StoreEngine:          map[uint64]string{1: ""},
+	}
+
 	args := fmt.Sprintf("?use_hot&start_key=%s&end_key=%s&", "", "")
 	res, err := testDialClient.Get(statsURL + args)
 	re.NoError(err)

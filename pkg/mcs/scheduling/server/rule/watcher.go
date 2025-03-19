@@ -40,10 +40,6 @@ type Watcher struct {
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
 
-	// ruleCommonPathPrefix:
-	//  - Key: /pd/{cluster_id}/rule
-	//  - Value: placement.Rule or placement.RuleGroup
-	ruleCommonPathPrefix string
 	// rulesPathPrefix:
 	//   - Key: /pd/{cluster_id}/rules/{group_id}-{rule_id}
 	//   - Value: placement.Rule
@@ -88,7 +84,6 @@ func NewWatcher(
 		ctx:                   ctx,
 		cancel:                cancel,
 		rulesPathPrefix:       keypath.RulesPathPrefix(),
-		ruleCommonPathPrefix:  keypath.RuleCommonPathPrefix(),
 		ruleGroupPathPrefix:   keypath.RuleGroupPathPrefix(),
 		regionLabelPathPrefix: keypath.RegionLabelPathPrefix(),
 		etcdClient:            etcdClient,
@@ -122,7 +117,7 @@ func (rw *Watcher) initializeRuleWatcher() error {
 	putFn := func(kv *mvccpb.KeyValue) error {
 		key := string(kv.Key)
 		if strings.HasPrefix(key, rw.rulesPathPrefix) {
-			log.Info("update placement rule", zap.String("key", key), zap.String("value", string(kv.Value)))
+			log.Debug("update placement rule", zap.String("key", key), zap.String("value", string(kv.Value)))
 			rule, err := placement.NewRuleFromJSON(kv.Value)
 			if err != nil {
 				return err
@@ -139,7 +134,7 @@ func (rw *Watcher) initializeRuleWatcher() error {
 			}
 			return nil
 		} else if strings.HasPrefix(key, rw.ruleGroupPathPrefix) {
-			log.Info("update placement rule group", zap.String("key", key), zap.String("value", string(kv.Value)))
+			log.Debug("update placement rule group", zap.String("key", key), zap.String("value", string(kv.Value)))
 			ruleGroup, err := placement.NewRuleGroupFromJSON(kv.Value)
 			if err != nil {
 				return err
@@ -158,7 +153,7 @@ func (rw *Watcher) initializeRuleWatcher() error {
 	deleteFn := func(kv *mvccpb.KeyValue) error {
 		key := string(kv.Key)
 		if strings.HasPrefix(key, rw.rulesPathPrefix) {
-			log.Info("delete placement rule", zap.String("key", key))
+			log.Debug("delete placement rule", zap.String("key", key))
 			ruleJSON, err := rw.ruleStorage.LoadRule(strings.TrimPrefix(key, rw.rulesPathPrefix))
 			if err != nil {
 				return err
@@ -173,7 +168,7 @@ func (rw *Watcher) initializeRuleWatcher() error {
 			suspectKeyRanges.Append(rule.StartKey, rule.EndKey)
 			return err
 		} else if strings.HasPrefix(key, rw.ruleGroupPathPrefix) {
-			log.Info("delete placement rule group", zap.String("key", key))
+			log.Debug("delete placement rule group", zap.String("key", key))
 			trimmedKey := strings.TrimPrefix(key, rw.ruleGroupPathPrefix)
 			// Try to add the rule group change to the patch.
 			rw.patch.DeleteGroup(trimmedKey)
@@ -200,7 +195,9 @@ func (rw *Watcher) initializeRuleWatcher() error {
 	rw.ruleWatcher = etcdutil.NewLoopWatcher(
 		rw.ctx, &rw.wg,
 		rw.etcdClient,
-		"scheduling-rule-watcher", rw.ruleCommonPathPrefix,
+		"scheduling-rule-watcher",
+		// Watch placement.Rule or placement.RuleGroup
+		keypath.RuleCommonPathPrefix(),
 		preEventsFn,
 		putFn, deleteFn,
 		postEventsFn,
@@ -227,7 +224,7 @@ func (rw *Watcher) initializeRegionLabelWatcher() error {
 	}
 	deleteFn := func(kv *mvccpb.KeyValue) error {
 		key := string(kv.Key)
-		log.Info("delete region label rule", zap.String("key", key))
+		log.Debug("delete region label rule", zap.String("key", key))
 		return rw.regionLabeler.DeleteLabelRuleLocked(strings.TrimPrefix(key, rw.regionLabelPathPrefix))
 	}
 	postEventsFn := func([]*clientv3.Event) error {
@@ -238,7 +235,9 @@ func (rw *Watcher) initializeRegionLabelWatcher() error {
 	rw.labelWatcher = etcdutil.NewLoopWatcher(
 		rw.ctx, &rw.wg,
 		rw.etcdClient,
-		"scheduling-region-label-watcher", rw.regionLabelPathPrefix,
+		"scheduling-region-label-watcher",
+		// To keep the consistency with the previous code, we should trim the suffix `/`.
+		strings.TrimSuffix(rw.regionLabelPathPrefix, "/"),
 		preEventsFn,
 		putFn, deleteFn,
 		postEventsFn,
