@@ -165,10 +165,10 @@ func (suite *keyspaceGroupManagerTestSuite) TestNewKeyspaceGroupManager() {
 	am, err := kgm.GetAllocatorManager(constant.DefaultKeyspaceGroupID)
 	re.NoError(err)
 	re.Equal(constant.DefaultKeyspaceGroupID, am.kgID)
-	re.Equal(constant.DefaultLeaderLease, am.leaderLease)
-	re.Equal(time.Hour*24, am.maxResetTSGap())
-	re.Equal(time.Duration(constant.DefaultLeaderLease)*time.Second, am.saveInterval)
-	re.Equal(time.Duration(50)*time.Millisecond, am.updatePhysicalInterval)
+	re.Equal(constant.DefaultLeaderLease, am.cfg.GetLeaderLease())
+	re.Equal(time.Hour*24, am.cfg.GetMaxResetTSGap())
+	re.Equal(time.Duration(constant.DefaultLeaderLease)*time.Second, am.cfg.GetTSOSaveInterval())
+	re.Equal(time.Duration(50)*time.Millisecond, am.cfg.GetTSOUpdatePhysicalInterval())
 }
 
 // TestLoadKeyspaceGroupsAssignment tests the loading of the keyspace group assignment.
