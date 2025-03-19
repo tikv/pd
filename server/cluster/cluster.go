@@ -83,6 +83,7 @@ var (
 	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
 	regionUpdateCacheEventCounter = regionEventCounter.WithLabelValues("update_cache")
 	regionUpdateKVEventCounter    = regionEventCounter.WithLabelValues("update_kv")
+	regionMissSyncCounter         = regionEventCounter.WithLabelValues("miss_sync")
 	regionCacheMissCounter        = bucketEventCounter.WithLabelValues("region_cache_miss")
 	versionNotMatchCounter        = bucketEventCounter.WithLabelValues("version_not_match")
 	updateFailedCounter           = bucketEventCounter.WithLabelValues("update_failed")
@@ -1294,6 +1295,8 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 		select {
 		case c.changedRegions <- region:
 		default:
+			regionMissSyncCounter.Inc()
+			log.Warn("region is not added to the syncer", zap.Uint64("region-id", region.GetID()))
 		}
 	}
 	return nil
