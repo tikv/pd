@@ -176,8 +176,8 @@ func (am *AllocatorManager) tsoAllocatorLoop() {
 	for {
 		select {
 		case <-tsTicker.C:
-			if !am.member.IsLeader() {
-				log.Info("allocator doesn't campaign leadership yet", am.logFields...)
+			// Only try to update when the member is leader and the allocator is initialized.
+			if !am.member.IsLeader() || !am.allocator.IsInitialize() {
 				continue
 			}
 			if err := am.allocator.UpdateTSO(); err != nil {
