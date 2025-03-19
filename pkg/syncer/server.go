@@ -17,6 +17,7 @@ package syncer
 import (
 	"context"
 	"io"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -115,6 +116,19 @@ func (s *RegionSyncer) RunServer(ctx context.Context, regionNotifier <-chan *cor
 	var buckets []*metapb.Buckets
 	ticker := time.NewTicker(syncerKeepAliveInterval)
 
+	processRegion := func(region *core.RegionInfo) {
+		requests = append(requests, region.GetMeta())
+		stats = append(stats, region.GetStat())
+		// bucket should not be nil to avoid grpc marshal panic.
+		bucket := &metapb.Buckets{}
+		if b := region.GetBuckets(); b != nil {
+			bucket = b
+		}
+		buckets = append(buckets, bucket)
+		leaders = append(leaders, region.GetLeader())
+		s.history.record(region)
+	}
+
 	defer func() {
 		ticker.Stop()
 		s.mu.Lock()
@@ -128,46 +142,32 @@ func (s *RegionSyncer) RunServer(ctx context.Context, regionNotifier <-chan *cor
 			log.Info("region syncer has been stopped")
 			return
 		case first := <-regionNotifier:
-			requests = append(requests, first.GetMeta())
-			stats = append(stats, first.GetStat())
-			// bucket should not be nil to avoid grpc marshal panic.
-			bucket := &metapb.Buckets{}
-			if b := first.GetBuckets(); b != nil {
-				bucket = b
-			}
-			buckets = append(buckets, bucket)
-			leaders = append(leaders, first.GetLeader())
+			processRegion(first)
 			startIndex := s.history.getNextIndex()
-			s.history.record(first)
-			pending := len(regionNotifier)
-			for i := 0; i < pending && i < maxSyncRegionBatchSize; i++ {
-				region := <-regionNotifier
-				requests = append(requests, region.GetMeta())
-				stats = append(stats, region.GetStat())
-				// bucket should not be nil to avoid grpc marshal panic.
-				bucket := &metapb.Buckets{}
-				if b := region.GetBuckets(); b != nil {
-					bucket = b
+		loop:
+			for range maxSyncRegionBatchSize {
+				select {
+				case region := <-regionNotifier:
+					processRegion(region)
+				default:
+					break loop
 				}
-				buckets = append(buckets, bucket)
-				leaders = append(leaders, region.GetLeader())
-				s.history.record(region)
 			}
 			regions := &pdpb.SyncRegionResponse{
 				Header:        &pdpb.ResponseHeader{ClusterId: keypath.ClusterID()},
-				Regions:       requests,
+				Regions:       slices.Clone(requests),
 				StartIndex:    startIndex,
-				RegionStats:   stats,
-				RegionLeaders: leaders,
-				Buckets:       buckets,
+				RegionStats:   slices.Clone(stats),
+				RegionLeaders: slices.Clone(leaders),
+				Buckets:       slices.Clone(buckets),
 			}
-			s.broadcast(ctx, regions)
+			go s.broadcast(ctx, regions)
 		case <-ticker.C:
 			alive := &pdpb.SyncRegionResponse{
 				Header:     &pdpb.ResponseHeader{ClusterId: keypath.ClusterID()},
 				StartIndex: s.history.getNextIndex(),
 			}
-			s.broadcast(ctx, alive)
+			go s.broadcast(ctx, alive)
 		}
 		requests = requests[:0]
 		stats = stats[:0]
@@ -346,38 +346,40 @@ func (s *RegionSyncer) bindStream(name string, stream ServerStream) {
 }
 
 func (s *RegionSyncer) broadcast(ctx context.Context, regions *pdpb.SyncRegionResponse) {
-	broadcastDone := make(chan struct{}, 1)
-	go func() {
-		defer logutil.LogPanic()
-		var failed []string
-		s.mu.RLock()
-		for name, sender := range s.mu.streams {
-			select {
-			case <-ctx.Done():
-				s.mu.RUnlock()
-				close(broadcastDone)
-				return
-			default:
-			}
+	defer logutil.LogPanic()
+	var (
+		failed sync.Map
+		wg     sync.WaitGroup
+	)
+	uncompletedTaskGauge.Add(1)
+	s.mu.Lock()
+	defer func() {
+		s.mu.Unlock()
+		uncompletedTaskGauge.Add(-1)
+	}()
+	for name, sender := range s.mu.streams {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
+		wg.Add(1)
+		go func(name string, sender ServerStream) {
+			defer wg.Done()
 			err := sender.Send(regions)
 			if err != nil {
 				log.Error("region syncer send data meet error", errs.ZapError(errs.ErrGRPCSend, err))
-				failed = append(failed, name)
+				failed.Store(name, struct{}{})
 			}
-		}
-		s.mu.RUnlock()
-		if len(failed) > 0 {
-			s.mu.Lock()
-			for _, name := range failed {
-				delete(s.mu.streams, name)
-				log.Info("region syncer delete the stream", zap.String("stream", name))
-			}
-			s.mu.Unlock()
-		}
-		close(broadcastDone)
-	}()
-	select {
-	case <-broadcastDone:
-	case <-ctx.Done():
+		}(name, sender)
 	}
+
+	wg.Wait()
+	failed.Range(func(key, value interface{}) bool {
+		name := key.(string)
+		delete(s.mu.streams, name)
+		log.Info("region syncer delete the stream", zap.String("stream", name))
+		return true
+	})
 }
