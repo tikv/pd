@@ -190,6 +190,8 @@ var (
 	ErrSchedulerDuplicated              = errors.Normalize("scheduler duplicated", errors.RFCCodeText("PD:scheduler:ErrSchedulerDuplicated"))
 	ErrSchedulerNotFound                = errors.Normalize("scheduler not found", errors.RFCCodeText("PD:scheduler:ErrSchedulerNotFound"))
 	ErrScheduleConfigNotExist           = errors.Normalize("the config does not exist", errors.RFCCodeText("PD:scheduler:ErrScheduleConfigNotExist"))
+	ErrSchedulerConfigInvalid           = errors.Normalize("invalid scheduler config %s", errors.RFCCodeText("PD:scheduler:ErrSchedulerConfigInvalid"))
+	ErrSchedulerConfigPersistFailed     = errors.Normalize("persist scheduler config failed, %s", errors.RFCCodeText("PD:scheduler:ErrSchedulerConfigPersistFailed"))
 	ErrSchedulerConfig                  = errors.Normalize("wrong scheduler config %s", errors.RFCCodeText("PD:scheduler:ErrSchedulerConfig"))
 	ErrCacheOverflow                    = errors.Normalize("cache overflow", errors.RFCCodeText("PD:scheduler:ErrCacheOverflow"))
 	ErrInternalGrowth                   = errors.Normalize("unknown interval growth type error", errors.RFCCodeText("PD:scheduler:ErrInternalGrowth"))
