@@ -191,7 +191,7 @@ func (suite *httpClientTestSuite) TestMeta() {
 	re.Len(hotWriteRegions.AsPeer, 4)
 	re.Len(hotWriteRegions.AsLeader, 4)
 
-	distribution, err := client.GetRegionDistribution(ctx, pd.NewKeyRange([]byte("a1"), []byte("a3")), "tikv")
+	distribution, err := client.GetRegionDistributionByKeyRange(ctx, pd.NewKeyRange([]byte("a1"), []byte("a3")), "tikv")
 	re.NoError(err)
 	re.Len(distribution.RegionDistributions, 4)
 	sort.Slice(distribution.RegionDistributions, func(i, j int) bool {

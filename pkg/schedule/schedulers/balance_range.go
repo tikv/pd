@@ -16,7 +16,6 @@ package schedulers
 
 import (
 	"bytes"
-	"fmt"
 	"net/http"
 	"sort"
 	"strconv"
@@ -54,8 +53,6 @@ func newBalanceRangeHandler(conf *balanceRangeSchedulerConfig) http.Handler {
 	router := mux.NewRouter()
 	router.HandleFunc("/config", handler.updateConfig).Methods(http.MethodPost)
 	router.HandleFunc("/list", handler.listConfig).Methods(http.MethodGet)
-	router.HandleFunc("/job", handler.addJob).Methods(http.MethodPut)
-	router.HandleFunc("/job", handler.deleteJob).Methods(http.MethodDelete)
 	return router
 }
 
@@ -68,28 +65,6 @@ func (handler *balanceRangeSchedulerHandler) listConfig(w http.ResponseWriter, _
 	if err := handler.rd.JSON(w, http.StatusOK, conf); err != nil {
 		log.Error("failed to marshal balance key range scheduler config", errs.ZapError(err))
 	}
-}
-
-func (handler *balanceRangeSchedulerHandler) addJob(w http.ResponseWriter, req *http.Request) {
-
-}
-
-func (handler *balanceRangeSchedulerHandler) deleteJob(w http.ResponseWriter, req *http.Request) {
-	jobStr := req.URL.Query().Get("job-id")
-	if jobStr == "" {
-		handler.rd.JSON(w, http.StatusBadRequest, "job-id is required")
-		return
-	}
-	jobID, err := strconv.ParseUint(jobStr, 10, 64)
-	if err != nil {
-		handler.rd.JSON(w, http.StatusBadRequest, fmt.Sprintf("job-id:%s is invalid", jobStr))
-		return
-	}
-	if err = handler.config.deleteJob(jobID); err != nil {
-		handler.rd.JSON(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	handler.rd.JSON(w, http.StatusOK, nil)
 }
 
 type balanceRangeSchedulerConfig struct {
@@ -145,43 +120,6 @@ func (conf *balanceRangeSchedulerConfig) finish(index int) *balanceRangeSchedule
 		job.Finish = nil
 	}
 	return job
-}
-
-func (conf *balanceRangeSchedulerConfig) addJob(job *balanceRangeSchedulerJob) error {
-	conf.Lock()
-	defer conf.Unlock()
-	job.JobID = conf.jobs[len(conf.jobs)-1].JobID + 1
-	job.Create = time.Now()
-	job.Status = pending
-	conf.jobs = append(conf.jobs, job)
-	if err := conf.save(); err != nil {
-		conf.jobs = conf.jobs[:len(conf.jobs)-1]
-		return errs.ErrSchedulerConfigPersistFailed.FastGenByArgs(err.Error())
-	}
-	return nil
-}
-
-func (conf *balanceRangeSchedulerConfig) deleteJob(jobID uint64) error {
-	conf.Lock()
-	defer conf.Unlock()
-	for _, job := range conf.jobs {
-		if job.JobID == jobID {
-			status := job.Status
-			if job.Status != running && job.Status != pending {
-				return errs.ErrSchedulerConfigInvalid.FastGenByArgs(job.Status)
-			}
-			now := time.Now()
-			job.Status = cancelled
-			job.Finish = &now
-			if err := conf.save(); err != nil {
-				job.Status = status
-				job.Finish = nil
-				return errs.ErrSchedulerConfigPersistFailed.FastGenByArgs(err.Error())
-			}
-			break
-		}
-	}
-	return nil
 }
 
 func (conf *balanceRangeSchedulerConfig) peek() (int, *balanceRangeSchedulerJob) {
@@ -586,7 +524,6 @@ const (
 	pending JobStatus = iota
 	running
 	finished
-	cancelled
 )
 
 func (s JobStatus) String() string {
@@ -597,8 +534,6 @@ func (s JobStatus) String() string {
 		return "running"
 	case finished:
 		return "finished"
-	case cancelled:
-		return "cancelled"
 	}
 	return "unknown"
 }

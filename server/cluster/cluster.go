@@ -2190,7 +2190,7 @@ func (c *RaftCluster) GetHotRegionStatusByRange(startKey, endKey []byte, engine 
 	opt := statistics.WithStoreMapOption(storeMap)
 	stats := statistics.GetRegionStats(c.ScanRegions(startKey, endKey, -1), c, opt)
 	// Fill in the hot write region statistics.
-	for storeID := range storeMap {
+	for storeID, label := range storeMap {
 		if _, ok := stats.StoreLeaderCount[storeID]; !ok {
 			stats.StoreLeaderCount[storeID] = 0
 			stats.StoreLeaderKeys[storeID] = 0
@@ -2218,6 +2218,9 @@ func (c *RaftCluster) GetHotRegionStatusByRange(startKey, endKey []byte, engine 
 			stats.StorePeerReadKeys[storeID] = 0
 			stats.StorePeerReadBytes[storeID] = 0
 			stats.StorePeerReadQuery[storeID] = 0
+		}
+		if label == "" {
+			storeMap[storeID] = core.EngineTiKV
 		}
 	}
 

@@ -137,8 +137,6 @@ func (s *RegionStats) Observe(r *core.RegionInfo, cluster RegionStatInformer, op
 		s.StorePeerSize[storeID] += r.GetStorePeerApproximateSize(storeID)
 		s.StorePeerKeys[storeID] += r.GetStorePeerApproximateKeys(storeID)
 		if cluster != nil {
-			s.StoreWriteKeys[storeID] += r.GetKeysWritten()
-			s.StoreWriteBytes[storeID] += r.GetBytesWritten()
 			// peer read statistics
 			{
 				stat := cluster.GetHotPeerStat(utils.Read, r.GetID(), p.GetStoreId())
