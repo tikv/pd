@@ -568,9 +568,16 @@ func (suite *httpClientTestSuite) TestSchedulers() {
 
 	err = client.CreateScheduler(ctx, schedulerName, 1)
 	re.NoError(err)
-	schedulers, err = client.GetSchedulers(ctx)
-	re.NoError(err)
-	re.Contains(schedulers, schedulerName)
+	checkScheduler := func() {
+		schedulers, err = client.GetSchedulers(ctx)
+		re.NoError(err)
+		re.Contains(schedulers, schedulerName)
+		config, err := client.GetSchedulerConfig(ctx, schedulerName)
+		re.NoError(err)
+		re.Contains(config, "store-id-ranges")
+		re.Contains(config, "batch")
+	}
+	checkScheduler()
 	err = client.SetSchedulerDelay(ctx, schedulerName, 100)
 	re.NoError(err)
 	err = client.SetSchedulerDelay(ctx, "not-exist", 100)
@@ -580,6 +587,13 @@ func (suite *httpClientTestSuite) TestSchedulers() {
 	schedulers, err = client.GetSchedulers(ctx)
 	re.NoError(err)
 	re.NotContains(schedulers, schedulerName)
+
+	input := map[string]any{
+		"store_id": 1,
+	}
+	re.NoError(client.CreateSchedulerWithInput(ctx, schedulerName, input))
+	checkScheduler()
+	re.NoError(client.DeleteScheduler(ctx, schedulerName))
 }
 
 func (suite *httpClientTestSuite) TestStoreLabels() {

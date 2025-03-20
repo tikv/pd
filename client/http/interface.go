@@ -67,8 +67,10 @@ type Client interface {
 	/* Scheduler-related interfaces */
 	GetSchedulers(context.Context) ([]string, error)
 	CreateScheduler(ctx context.Context, name string, storeID uint64) error
+	CreateSchedulerWithInput(ctx context.Context, name string, input map[string]any) error
 	DeleteScheduler(ctx context.Context, name string) error
 	SetSchedulerDelay(context.Context, string, int64) error
+	GetSchedulerConfig(ctx context.Context, name string) (any, error)
 	/* Rule-related interfaces */
 	GetAllPlacementRuleBundles(context.Context) ([]*GroupBundle, error)
 	GetPlacementRuleBundleByGroup(context.Context, string) (*GroupBundle, error)
@@ -766,6 +768,34 @@ func (c *client) GetSchedulers(ctx context.Context) ([]string, error) {
 		return nil, err
 	}
 	return schedulers, nil
+}
+
+// GetSchedulerConfig returns the configuration of the specified scheduler for pd cluster
+func (c *client) GetSchedulerConfig(ctx context.Context, name string) (any, error) {
+	var config any
+	err := c.request(ctx, newRequestInfo().
+		WithName(getSchedulerConfig).
+		WithURI(GetSchedulerConfigURIByName(name)).
+		WithMethod(http.MethodGet).
+		WithResp(&config))
+	if err != nil {
+		return nil, err
+	}
+	return config, nil
+}
+
+// CreateSchedulerWithInput creates a scheduler with the specified input.
+func (c *client) CreateSchedulerWithInput(ctx context.Context, name string, input map[string]any) error {
+	input["name"] = name
+	inputJSON, err := json.Marshal(input)
+	if err != nil {
+		return errors.Trace(err)
+	}
+	return c.request(ctx, newRequestInfo().
+		WithName(createSchedulerNameWithInput).
+		WithURI(Schedulers).
+		WithMethod(http.MethodPost).
+		WithBody(inputJSON))
 }
 
 // CreateScheduler creates a scheduler to PD cluster.
