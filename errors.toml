@@ -876,11 +876,6 @@ error = '''
 unknown interval growth type error
 '''
 
-["PD:scheduler:ErrSchedulerConfigInvalid"]
-error = '''
-the config is invalid
-'''
-
 ["PD:scheduler:ErrScheduleConfigNotExist"]
 error = '''
 the config does not exist
