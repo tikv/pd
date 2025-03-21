@@ -82,6 +82,13 @@ func removeFailedStoresCommandFunc(cmd *cobra.Command, args []string) {
 			return
 		}
 
+		// This is to detect "<storeid> <storeid>" instead of "<storeid>,<storeid>"
+		if len(args) > 1 {
+			cmd.Println("More arguments than expected")
+			cmd.Usage()
+			return
+		}
+
 		strStores := strings.Split(args[0], ",")
 		var stores []uint64
 		for _, strStore := range strStores {
