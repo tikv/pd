@@ -38,7 +38,7 @@ func TestBalanceRangePlan(t *testing.T) {
 	tc.AddLeaderRegionWithRange(1, "100", "110", 1, 2, 3)
 	job := &balanceRangeSchedulerJob{
 		Engine: core.EngineTiKV,
-		Role:   core.Leader,
+		Rule:   core.Leader,
 		Ranges: []core.KeyRange{core.NewKeyRange("100", "110")},
 	}
 	plan, err := sc.prepare(tc, *operator.NewOpInfluence(), job)
@@ -159,4 +159,35 @@ func TestFetchAllRegions(t *testing.T) {
 	ranges.Append(region.GetStartKey(), []byte(""))
 	regions = fetchAllRegions(tc, ranges)
 	re.Len(regions, 100)
+}
+
+func TestEncode(t *testing.T) {
+	re := require.New(t)
+	job := &balanceRangeSchedulerJob{
+		Engine: core.EngineTiKV,
+		Rule:   core.Leader,
+		JobID:  1,
+		Ranges: []core.KeyRange{core.NewKeyRange("a", "b")},
+	}
+
+	conf := &balanceRangeSchedulerConfig{
+		schedulerConfig: &baseSchedulerConfig{},
+		jobs:            []*balanceRangeSchedulerJob{job},
+	}
+	conf.schedulerConfig.init("test", storage.NewStorageWithMemoryBackend(), conf)
+	re.NoError(conf.save())
+	var conf1 balanceRangeSchedulerConfig
+	re.NoError(conf.load(&conf1))
+	re.Equal(conf1.jobs, conf.jobs)
+
+	job1 := &balanceRangeSchedulerJob{
+		Engine: core.EngineTiKV,
+		Rule:   core.Leader,
+		Status: running,
+		Ranges: []core.KeyRange{core.NewKeyRange("a", "b")},
+		JobID:  2,
+	}
+	re.NoError(conf.addJob(job1))
+	re.NoError(conf.load(&conf1))
+	re.Equal(conf1.jobs, conf.jobs)
 }

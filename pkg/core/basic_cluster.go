@@ -16,6 +16,7 @@ package core
 
 import (
 	"bytes"
+	"encoding/hex"
 	"encoding/json"
 
 	"github.com/tikv/pd/pkg/core/constant"
@@ -164,6 +165,26 @@ func (kr KeyRange) MarshalJSON() ([]byte, error) {
 		"end-key":   HexRegionKeyStr(kr.EndKey),
 	}
 	return json.Marshal(m)
+}
+
+// UnmarshalJSON unmarshals from json.
+func (kr *KeyRange) UnmarshalJSON(data []byte) error {
+	m := make(map[string]string)
+	if err := json.Unmarshal(data, &m); err != nil {
+		return err
+	}
+
+	startKey, err := hex.DecodeString(m["start-key"])
+	if err != nil {
+		return err
+	}
+	endKey, err := hex.DecodeString(m["end-key"])
+	if err != nil {
+		return err
+	}
+	kr.StartKey = startKey
+	kr.EndKey = endKey
+	return nil
 }
 
 // NewKeyRange create a KeyRange with the given start key and end key.
