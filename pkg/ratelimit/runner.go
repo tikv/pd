@@ -106,9 +106,31 @@ func WithRetained(retained bool) TaskOption {
 // Start starts the runner.
 func (cr *ConcurrentRunner) Start(ctx context.Context) {
 	cr.ctx, cr.cancel = context.WithCancel(ctx)
-	cr.wg.Add(1)
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
+	cr.wg.Add(1)
+	go func() {
+		defer cr.wg.Done()
+		for {
+			select {
+			case <-cr.ctx.Done():
+				return
+			case <-ticker.C:
+				maxDuration := time.Duration(0)
+				cr.pendingMu.Lock()
+				if len(cr.pendingTasks) > 0 {
+					maxDuration = time.Since(cr.pendingTasks[0].submittedAt)
+				}
+				for taskName, cnt := range cr.pendingTaskCount {
+					runnerPendingTasks.WithLabelValues(cr.name, taskName).Set(float64(cnt))
+				}
+				cr.pendingMu.Unlock()
+				cr.maxWaitingDuration.Set(maxDuration.Seconds())
+			}
+		}
+	}()
+
+	cr.wg.Add(1)
 	go func() {
 		defer cr.wg.Done()
 		for {
@@ -129,17 +151,6 @@ func (cr *ConcurrentRunner) Start(ctx context.Context) {
 				cr.pendingMu.Unlock()
 				log.Info("stopping async task runner", zap.String("name", cr.name))
 				return
-			case <-ticker.C:
-				maxDuration := time.Duration(0)
-				cr.pendingMu.Lock()
-				if len(cr.pendingTasks) > 0 {
-					maxDuration = time.Since(cr.pendingTasks[0].submittedAt)
-				}
-				for taskName, cnt := range cr.pendingTaskCount {
-					runnerPendingTasks.WithLabelValues(cr.name, taskName).Set(float64(cnt))
-				}
-				cr.pendingMu.Unlock()
-				cr.maxWaitingDuration.Set(maxDuration.Seconds())
 			}
 		}
 	}()
