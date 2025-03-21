@@ -614,6 +614,7 @@ func schedulersRegister() {
 		storage endpoint.ConfigStorage, decoder ConfigDecoder, _ ...func(string) error) (Scheduler, error) {
 		conf := &balanceRangeSchedulerConfig{
 			schedulerConfig: newBaseDefaultSchedulerConfig(),
+			jobs:            make([]*balanceRangeSchedulerJob, 0),
 		}
 		if err := decoder(conf); err != nil {
 			return nil, err

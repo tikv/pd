@@ -16,6 +16,7 @@ package schedulers
 
 import (
 	"bytes"
+	"encoding/json"
 
 	"net/http"
 	"sort"
@@ -117,7 +118,20 @@ func (handler *balanceRangeSchedulerHandler) deleteJob(w http.ResponseWriter, r 
 type balanceRangeSchedulerConfig struct {
 	syncutil.RWMutex
 	schedulerConfig
-	jobs []*balanceRangeSchedulerJob
+	jobs []*balanceRangeSchedulerJob `json:"jobs"`
+}
+
+func (conf *balanceRangeSchedulerConfig) MarshalJSON() ([]byte, error) {
+	return json.Marshal(conf.jobs)
+}
+
+func (conf *balanceRangeSchedulerConfig) UnmarshalJSON(data []byte) error {
+	jobs := make([]*balanceRangeSchedulerJob, 0)
+	if err := json.Unmarshal(data, &jobs); err != nil {
+		return err
+	}
+	conf.jobs = jobs
+	return nil
 }
 
 type balanceRangeSchedulerJob struct {
@@ -253,7 +267,7 @@ func (s *balanceRangeScheduler) ReloadConfig() error {
 	defer s.conf.Unlock()
 
 	jobs := make([]*balanceRangeSchedulerJob, 0, len(s.conf.jobs))
-	if err := s.conf.load(jobs); err != nil {
+	if err := s.conf.load(&jobs); err != nil {
 		return err
 	}
 	s.conf.jobs = jobs
@@ -629,4 +643,19 @@ func (s JobStatus) String() string {
 // MarshalJSON marshals to json.
 func (s JobStatus) MarshalJSON() ([]byte, error) {
 	return []byte(`"` + s.String() + `"`), nil
+}
+
+// UnmarshalJSON unmarshals from json.
+func (s *JobStatus) UnmarshalJSON(data []byte) error {
+	switch string(data) {
+	case `"running"`:
+		*s = running
+	case `"finished"`:
+		*s = finished
+	case `"cancelled"`:
+		*s = cancelled
+	case `"pending"`:
+		*s = pending
+	}
+	return nil
 }

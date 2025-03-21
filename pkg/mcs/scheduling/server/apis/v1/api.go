@@ -610,8 +610,8 @@ func getSchedulerConfigByName(c *gin.Context) {
 // @Failure  500  {string}  string  "PD server failed to proceed the request."
 // @Router   /schedulers/config/{name}/job [get]
 func addSchedulerConfigJobByName(c *gin.Context) {
-	handler := c.MustGet(handlerKey).(*handler.Handler)
-	sc, err := handler.GetSchedulersController()
+	h := c.MustGet(handlerKey).(*handler.Handler)
+	sc, err := h.GetSchedulersController()
 	if err != nil {
 		c.String(http.StatusInternalServerError, err.Error())
 		return

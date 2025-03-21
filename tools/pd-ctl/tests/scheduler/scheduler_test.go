@@ -550,6 +550,9 @@ func (suite *schedulerTestSuite) checkSchedulerConfig(cluster *pdTests.TestClust
 	var jobConf map[string]any
 	testutil.Eventually(re, func() bool {
 		mightExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "balance-range-scheduler"}, &rangeConf)
+		if len(rangeConf) == 0 {
+			return false
+		}
 		jobConf = rangeConf[0]
 		return jobConf["rule"] == "learner" && jobConf["engine"] == "tiflash" && jobConf["alias"] == "test"
 	})

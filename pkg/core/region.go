@@ -403,8 +403,23 @@ func NewRule(role string) Rule {
 }
 
 // MarshalJSON returns the JSON encoding of Role.
-func (r Rule) MarshalJSON() ([]byte, error) {
+func (r *Rule) MarshalJSON() ([]byte, error) {
 	return []byte(`"` + r.String() + `"`), nil
+}
+
+func (r *Rule) UnmarshalJSON(data []byte) error {
+	s := string(data)
+	switch s {
+	case `"leader"`:
+		*r = Leader
+	case `"voter"`:
+		*r = Follower
+	case `"learner"`:
+		*r = Learner
+	default:
+		*r = Unknown
+	}
+	return nil
 }
 
 // GetPeersByRole returns the peers with specified role.
