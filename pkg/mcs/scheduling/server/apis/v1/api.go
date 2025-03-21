@@ -142,6 +142,7 @@ func (s *Service) RegisterSchedulersRouter() {
 	router.GET("/diagnostic/:name", getDiagnosticResult)
 	router.GET("/config", getSchedulerConfig)
 	router.GET("/config/:name/list", getSchedulerConfigByName)
+	router.GET("/config/:name/job", addSchedulerConfigJobByName)
 	// TODO: in the future, we should split pauseOrResumeScheduler to two different APIs.
 	// And we need to do one-to-two forwarding in the API middleware.
 	router.POST("/:name", pauseOrResumeScheduler)
@@ -598,6 +599,39 @@ func getSchedulerConfigByName(c *gin.Context) {
 		return
 	}
 	c.Request.URL.Path = "/list"
+	handlers[name].ServeHTTP(c.Writer, c.Request)
+}
+
+// @Tags     schedulers
+// @Summary  scheduler config job by name.
+// @Produce  json
+// @Success  200  {object}  map[string]any
+// @Failure  404  {string}  string  scheduler not found
+// @Failure  500  {string}  string  "PD server failed to proceed the request."
+// @Router   /schedulers/config/{name}/job [get]
+func addSchedulerConfigJobByName(c *gin.Context) {
+	handler := c.MustGet(handlerKey).(*handler.Handler)
+	sc, err := handler.GetSchedulersController()
+	if err != nil {
+		c.String(http.StatusInternalServerError, err.Error())
+		return
+	}
+	handlers := sc.GetSchedulerHandlers()
+	name := c.Param("name")
+	if _, ok := handlers[name]; !ok {
+		c.String(http.StatusNotFound, errs.ErrSchedulerNotFound.GenWithStackByArgs().Error())
+		return
+	}
+	isDisabled, err := sc.IsSchedulerDisabled(name)
+	if err != nil {
+		c.String(http.StatusInternalServerError, err.Error())
+		return
+	}
+	if isDisabled {
+		c.String(http.StatusNotFound, errs.ErrSchedulerNotFound.GenWithStackByArgs().Error())
+		return
+	}
+	c.Request.URL.Path = "/job"
 	handlers[name].ServeHTTP(c.Writer, c.Request)
 }
 

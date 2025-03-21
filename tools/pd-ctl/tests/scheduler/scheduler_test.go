@@ -551,7 +551,7 @@ func (suite *schedulerTestSuite) checkSchedulerConfig(cluster *pdTests.TestClust
 	testutil.Eventually(re, func() bool {
 		mightExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "balance-range-scheduler"}, &rangeConf)
 		jobConf = rangeConf[0]
-		return jobConf["role"] == "learner" && jobConf["engine"] == "tiflash" && jobConf["alias"] == "test"
+		return jobConf["rule"] == "learner" && jobConf["engine"] == "tiflash" && jobConf["alias"] == "test"
 	})
 	re.Equal(float64(time.Hour.Nanoseconds()), jobConf["timeout"])
 	re.Equal("pending", jobConf["status"])
@@ -560,8 +560,11 @@ func (suite *schedulerTestSuite) checkSchedulerConfig(cluster *pdTests.TestClust
 	re.Equal(core.HexRegionKeyStr([]byte("b")), ranges["end-key"])
 
 	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "add", "balance-range-scheduler", "--format=raw", "tiflash", "learner", "learner", "a", "b"}, nil)
-	re.Contains(echo, "400")
-	re.Contains(echo, "scheduler already exists")
+	re.Contains(echo, "Success!")
+	testutil.Eventually(re, func() bool {
+		mightExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "balance-range-scheduler"}, &rangeConf)
+		return len(rangeConf) == 2
+	})
 	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "remove", "balance-range-scheduler"}, nil)
 	re.Contains(echo, "Success!")
 

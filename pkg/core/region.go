@@ -361,11 +361,11 @@ func (r *RegionInfo) GetPeer(peerID uint64) *metapb.Peer {
 }
 
 // Role is the role of the region.
-type Role int
+type Rule int
 
 const (
 	// Leader is the leader of the region.
-	Leader Role = iota
+	Leader Rule = iota
 	// Follower is the follower of the region.
 	Follower
 	// Learner is the learner of the region.
@@ -375,7 +375,7 @@ const (
 )
 
 // String returns the string value of the role.
-func (r Role) String() string {
+func (r Rule) String() string {
 	switch r {
 	case Leader:
 		return "leader"
@@ -388,8 +388,8 @@ func (r Role) String() string {
 	}
 }
 
-// NewRole creates a new role.
-func NewRole(role string) Role {
+// NewRule creates a new role.
+func NewRule(role string) Rule {
 	switch role {
 	case "leader":
 		return Leader
@@ -403,13 +403,13 @@ func NewRole(role string) Role {
 }
 
 // MarshalJSON returns the JSON encoding of Role.
-func (r Role) MarshalJSON() ([]byte, error) {
+func (r Rule) MarshalJSON() ([]byte, error) {
 	return []byte(`"` + r.String() + `"`), nil
 }
 
 // GetPeersByRole returns the peers with specified role.
-func (r *RegionInfo) GetPeersByRole(role Role) []*metapb.Peer {
-	switch role {
+func (r *RegionInfo) GetPeersByRole(rule Rule) []*metapb.Peer {
+	switch rule {
 	case Leader:
 		return []*metapb.Peer{r.GetLeader()}
 	case Follower:

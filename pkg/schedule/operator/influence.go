@@ -60,7 +60,7 @@ type StoreInfluence struct {
 }
 
 // GetStoreInfluenceByRole returns the influence of the store according to the role.
-func (s *StoreInfluence) GetStoreInfluenceByRole(r core.Role) int64 {
+func (s *StoreInfluence) GetStoreInfluenceByRole(r core.Rule) int64 {
 	switch r {
 	case core.Leader:
 		return s.LeaderCount
