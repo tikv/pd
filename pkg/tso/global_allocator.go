@@ -39,28 +39,6 @@ import (
 	"github.com/tikv/pd/pkg/utils/logutil"
 )
 
-// Allocator is a Timestamp Oracle allocator.
-type Allocator interface {
-	// Initialize is used to initialize a TSO allocator.
-	// It will synchronize TSO with etcd and initialize the
-	// memory for later allocation work.
-	Initialize(suffix int) error
-	// IsInitialize is used to indicates whether this allocator is initialized.
-	IsInitialize() bool
-	// UpdateTSO is used to update the TSO in memory and the time window in etcd.
-	UpdateTSO() error
-	// SetTSO sets the physical part with given TSO. It's mainly used for BR restore.
-	// Cannot set the TSO smaller than now in any case.
-	// if ignoreSmaller=true, if input ts is smaller than current, ignore silently, else return error
-	// if skipUpperBoundCheck=true, skip tso upper bound check
-	SetTSO(tso uint64, ignoreSmaller, skipUpperBoundCheck bool) error
-	// GenerateTSO is used to generate a given number of TSOs.
-	// Make sure you have initialized the TSO allocator before calling.
-	GenerateTSO(ctx context.Context, count uint32) (pdpb.Timestamp, error)
-	// Reset is used to reset the TSO allocator.
-	Reset()
-}
-
 // GlobalTSOAllocator is the global single point TSO allocator.
 // TODO: Local TSO allocator is deprecated now, we can update the name to
 // TSOAllocator and remove the `Global` concept.
@@ -69,8 +47,7 @@ type GlobalTSOAllocator struct {
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
 
-	// for global TSO synchronization
-	am *AllocatorManager
+	cfg Config
 	// for election use
 	member ElectionMember
 	// expectedPrimaryLease is used to store the expected primary lease.
@@ -84,12 +61,12 @@ type GlobalTSOAllocator struct {
 func NewGlobalTSOAllocator(
 	ctx context.Context,
 	am *AllocatorManager,
-) Allocator {
+) *GlobalTSOAllocator {
 	ctx, cancel := context.WithCancel(ctx)
 	gta := &GlobalTSOAllocator{
 		ctx:                   ctx,
 		cancel:                cancel,
-		am:                    am,
+		cfg:                   am.cfg,
 		member:                am.member,
 		timestampOracle:       newGlobalTimestampOracle(am),
 		tsoAllocatorRoleGauge: tsoAllocatorRole.WithLabelValues(am.getGroupIDStr(), GlobalDCLocation),
@@ -103,9 +80,9 @@ func newGlobalTimestampOracle(am *AllocatorManager) *timestampOracle {
 		client:                 am.member.GetLeadership().GetClient(),
 		keyspaceGroupID:        am.kgID,
 		storage:                am.storage,
-		saveInterval:           am.saveInterval,
-		updatePhysicalInterval: am.updatePhysicalInterval,
-		maxResetTSGap:          am.maxResetTSGap,
+		saveInterval:           am.cfg.GetTSOSaveInterval(),
+		updatePhysicalInterval: am.cfg.GetTSOUpdatePhysicalInterval(),
+		maxResetTSGap:          am.cfg.GetMaxResetTSGap,
 		tsoMux:                 &tsoObject{},
 		metrics:                newTSOMetrics(am.getGroupIDStr(), GlobalDCLocation),
 	}
@@ -119,18 +96,10 @@ func (gta *GlobalTSOAllocator) close() {
 	gta.wg.Wait()
 }
 
-// getGroupID returns the keyspace group ID of the allocator.
-func (gta *GlobalTSOAllocator) getGroupID() uint32 {
-	if gta.am == nil {
-		return 0
-	}
-	return gta.am.getGroupID()
-}
-
 // Initialize will initialize the created global TSO allocator.
-func (gta *GlobalTSOAllocator) Initialize(int) error {
+func (gta *GlobalTSOAllocator) Initialize() error {
 	gta.tsoAllocatorRoleGauge.Set(1)
-	return gta.timestampOracle.SyncTimestamp()
+	return gta.timestampOracle.syncTimestamp()
 }
 
 // IsInitialize is used to indicates whether this allocator is initialized.
@@ -144,7 +113,7 @@ func (gta *GlobalTSOAllocator) UpdateTSO() (err error) {
 	// next request succeeds with the new endpoint, according to https://github.com/etcd-io/etcd/issues/8711
 	maxRetryCount := 3
 	for range maxRetryCount {
-		err = gta.timestampOracle.UpdateTimestamp()
+		err = gta.timestampOracle.updateTimestamp()
 		if err == nil {
 			return nil
 		}
@@ -161,12 +130,12 @@ func (gta *GlobalTSOAllocator) SetTSO(tso uint64, ignoreSmaller, skipUpperBoundC
 	return gta.timestampOracle.resetUserTimestamp(gta.member.GetLeadership(), tso, ignoreSmaller, skipUpperBoundCheck)
 }
 
-// GenerateTSO is used to generate the given number of TSOs.
+// generateTSO is used to generate the given number of TSOs.
 // Make sure you have initialized the TSO allocator before calling this method.
 // Basically, there are two ways to generate a Global TSO:
 //  1. The old way to generate a normal TSO from memory directly, which makes the TSO service node become single point.
 //  2. Deprecated: The new way to generate a Global TSO by synchronizing with all other Local TSO Allocators.
-func (gta *GlobalTSOAllocator) GenerateTSO(ctx context.Context, count uint32) (pdpb.Timestamp, error) {
+func (gta *GlobalTSOAllocator) generateTSO(ctx context.Context, count uint32) (pdpb.Timestamp, error) {
 	defer trace.StartRegion(ctx, "GlobalTSOAllocator.GenerateTSO").End()
 	if !gta.member.IsLeader() {
 		gta.getMetrics().notLeaderEvent.Inc()
@@ -176,23 +145,26 @@ func (gta *GlobalTSOAllocator) GenerateTSO(ctx context.Context, count uint32) (p
 	return gta.timestampOracle.getTS(ctx, gta.member, count)
 }
 
-// Reset is used to reset the TSO allocator.
-func (gta *GlobalTSOAllocator) Reset() {
+func (gta *GlobalTSOAllocator) reset() {
 	gta.tsoAllocatorRoleGauge.Set(0)
-	gta.timestampOracle.ResetTimestamp()
+	gta.timestampOracle.resetTimestamp()
 }
 
 // primaryElectionLoop is used to maintain the TSO primary election and TSO's
 // running allocator. It is only used in microservice env.
-func (gta *GlobalTSOAllocator) primaryElectionLoop() {
+func (gta *GlobalTSOAllocator) primaryElectionLoop(groupID uint32) {
 	defer logutil.LogPanic()
 	defer gta.wg.Done()
 
+	logFields := []zap.Field{
+		logutil.CondUint32("keyspace-group-id", groupID, groupID > 0),
+		zap.String("campaign-tso-primary-name", gta.member.Name()),
+		zap.Uint64("campaign-tso-primary-id", gta.member.ID()),
+	}
 	for {
 		select {
 		case <-gta.ctx.Done():
-			log.Info("exit the global tso primary election loop",
-				logutil.CondUint32("keyspace-group-id", gta.getGroupID(), gta.getGroupID() > 0))
+			log.Info("exit the global tso primary election loop", logFields...)
 			return
 		default:
 		}
@@ -203,53 +175,44 @@ func (gta *GlobalTSOAllocator) primaryElectionLoop() {
 		}
 		if primary != nil {
 			log.Info("start to watch the primary",
-				logutil.CondUint32("keyspace-group-id", gta.getGroupID(), gta.getGroupID() > 0),
-				zap.String("campaign-tso-primary-name", gta.member.Name()),
-				zap.Stringer("tso-primary", primary))
+				append(logFields, zap.Stringer("tso-primary", primary))...)
 			// Watch will keep looping and never return unless the primary has changed.
 			primary.Watch(gta.ctx)
 			log.Info("the tso primary has changed, try to re-campaign a primary",
-				logutil.CondUint32("keyspace-group-id", gta.getGroupID(), gta.getGroupID() > 0))
+				append(logFields, zap.Stringer("old-tso-primary", primary))...)
 		}
 
 		// To make sure the expected primary(if existed) and new primary are on the same server.
 		expectedPrimary := mcsutils.GetExpectedPrimaryFlag(gta.member.Client(), &keypath.MsParam{
 			ServiceName: constant.TSOServiceName,
-			GroupID:     gta.getGroupID(),
+			GroupID:     groupID,
 		})
 		// skip campaign the primary if the expected primary is not empty and not equal to the current memberValue.
 		// expected primary ONLY SET BY `{service}/primary/transfer` API.
 		if len(expectedPrimary) > 0 && !strings.Contains(gta.member.MemberValue(), expectedPrimary) {
-			log.Info("skip campaigning of tso primary and check later",
-				zap.String("server-name", gta.member.Name()),
+			log.Info("skip campaigning of tso primary and check later", append(logFields,
 				zap.String("expected-primary-id", expectedPrimary),
-				zap.Uint64("member-id", gta.member.ID()),
-				zap.String("cur-member-value", gta.member.MemberValue()))
+				zap.String("cur-member-value", gta.member.MemberValue()))...)
 			time.Sleep(200 * time.Millisecond)
 			continue
 		}
 
-		gta.campaignLeader()
+		gta.campaignLeader(groupID, logFields)
 	}
 }
 
-func (gta *GlobalTSOAllocator) campaignLeader() {
-	log.Info("start to campaign the primary",
-		logutil.CondUint32("keyspace-group-id", gta.getGroupID(), gta.getGroupID() > 0),
-		zap.String("campaign-tso-primary-name", gta.member.Name()))
-	if err := gta.am.member.CampaignLeader(gta.ctx, gta.am.leaderLease); err != nil {
+func (gta *GlobalTSOAllocator) campaignLeader(groupID uint32, logFields []zap.Field) {
+	log.Info("start to campaign the primary", logFields...)
+	leaderLease := gta.cfg.GetLeaderLease()
+	if err := gta.member.CampaignLeader(gta.ctx, leaderLease); err != nil {
 		if errors.Is(err, errs.ErrEtcdTxnConflict) {
 			log.Info("campaign tso primary meets error due to txn conflict, another tso server may campaign successfully",
-				logutil.CondUint32("keyspace-group-id", gta.getGroupID(), gta.getGroupID() > 0),
-				zap.String("campaign-tso-primary-name", gta.member.Name()))
+				logFields...)
 		} else if errors.Is(err, errs.ErrCheckCampaign) {
 			log.Info("campaign tso primary meets error due to pre-check campaign failed, the tso keyspace group may be in split",
-				logutil.CondUint32("keyspace-group-id", gta.getGroupID(), gta.getGroupID() > 0),
-				zap.String("campaign-tso-primary-name", gta.member.Name()))
+				logFields...)
 		} else {
-			log.Error("campaign tso primary meets error due to etcd error",
-				logutil.CondUint32("keyspace-group-id", gta.getGroupID(), gta.getGroupID() > 0),
-				zap.String("campaign-tso-primary-name", gta.member.Name()), errs.ZapError(err))
+			log.Error("campaign tso primary meets error due to etcd error", append(logFields, errs.ZapError(err))...)
 		}
 		return
 	}
@@ -267,36 +230,33 @@ func (gta *GlobalTSOAllocator) campaignLeader() {
 
 	// maintain the leadership, after this, TSO can be service.
 	gta.member.KeepLeader(ctx)
-	log.Info("campaign tso primary ok",
-		logutil.CondUint32("keyspace-group-id", gta.getGroupID(), gta.getGroupID() > 0),
-		zap.String("campaign-tso-primary-name", gta.member.Name()))
+	log.Info("campaign tso primary ok", logFields...)
 
 	log.Info("initializing the global tso allocator")
-	if err := gta.am.GetAllocator().Initialize(0); err != nil {
-		log.Error("failed to initialize the global tso allocator",
-			logutil.CondUint32("keyspace-group-id", gta.getGroupID(), gta.getGroupID() > 0),
-			errs.ZapError(err))
+	if err := gta.Initialize(); err != nil {
+		log.Error("failed to initialize the global tso allocator", append(logFields, errs.ZapError(err))...)
 		return
 	}
 	defer func() {
-		gta.am.ResetAllocatorGroup(false)
+		gta.reset()
+		gta.member.ResetLeader()
 	}()
 
 	// check expected primary and watch the primary.
 	exitPrimary := make(chan struct{})
 	lease, err := mcsutils.KeepExpectedPrimaryAlive(ctx, gta.member.Client(), exitPrimary,
-		gta.am.leaderLease, &keypath.MsParam{
+		leaderLease, &keypath.MsParam{
 			ServiceName: constant.TSOServiceName,
-			GroupID:     gta.getGroupID(),
+			GroupID:     groupID,
 		}, gta.member.MemberValue())
 	if err != nil {
-		log.Error("prepare tso primary watch error", errs.ZapError(err))
+		log.Error("prepare tso primary watch error", append(logFields, errs.ZapError(err))...)
 		return
 	}
 	gta.expectedPrimaryLease.Store(lease)
 	gta.member.EnableLeader()
 
-	tsoLabel := fmt.Sprintf("TSO Service Group %d", gta.getGroupID())
+	tsoLabel := fmt.Sprintf("TSO Service Group %d", groupID)
 	member.ServiceMemberGauge.WithLabelValues(tsoLabel).Set(1)
 	defer resetLeaderOnce.Do(func() {
 		cancel()
@@ -304,9 +264,7 @@ func (gta *GlobalTSOAllocator) campaignLeader() {
 		member.ServiceMemberGauge.WithLabelValues(tsoLabel).Set(0)
 	})
 
-	log.Info("tso primary is ready to serve",
-		logutil.CondUint32("keyspace-group-id", gta.getGroupID(), gta.getGroupID() > 0),
-		zap.String("tso-primary-name", gta.member.Name()))
+	log.Info("tso primary is ready to serve", logFields...)
 
 	leaderTicker := time.NewTicker(constant.LeaderTickInterval)
 	defer leaderTicker.Stop()
@@ -315,17 +273,15 @@ func (gta *GlobalTSOAllocator) campaignLeader() {
 		select {
 		case <-leaderTicker.C:
 			if !gta.member.IsLeader() {
-				log.Info("no longer a primary because lease has expired, the tso primary will step down",
-					logutil.CondUint32("keyspace-group-id", gta.getGroupID(), gta.getGroupID() > 0))
+				log.Info("no longer a primary because lease has expired, the tso primary will step down", logFields...)
 				return
 			}
 		case <-ctx.Done():
 			// Server is closed and it should return nil.
-			log.Info("exit leader campaign",
-				logutil.CondUint32("keyspace-group-id", gta.getGroupID(), gta.getGroupID() > 0))
+			log.Info("exit leader campaign", logFields...)
 			return
 		case <-exitPrimary:
-			log.Info("no longer be primary because primary have been updated, the TSO primary will step down")
+			log.Info("no longer be primary because primary have been updated, the TSO primary will step down", logFields...)
 			return
 		}
 	}

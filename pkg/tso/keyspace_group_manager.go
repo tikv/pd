@@ -608,7 +608,7 @@ func (kgm *KeyspaceGroupManager) primaryPriorityCheckLoop() {
 					select {
 					case <-ctx.Done():
 					default:
-						allocator, err := kgm.GetAllocatorManager(kg.ID)
+						am, err := kgm.GetAllocatorManager(kg.ID)
 						if err != nil {
 							log.Error("failed to get allocator manager", zap.Error(err))
 							continue
@@ -623,7 +623,7 @@ func (kgm *KeyspaceGroupManager) primaryPriorityCheckLoop() {
 							zap.String("local-address", kgm.tsoServiceID.ServiceAddr),
 							zap.Uint32("keyspace-group-id", kg.ID),
 							zap.Int("local-priority", localPriority))
-						if err := utils.TransferPrimary(kgm.etcdClient, allocator.GetAllocator().(*GlobalTSOAllocator).GetExpectedPrimaryLease(),
+						if err := utils.TransferPrimary(kgm.etcdClient, am.allocator.GetExpectedPrimaryLease(),
 							constant.TSOServiceName, kgm.GetServiceConfig().GetName(), "", kg.ID, memberMap); err != nil {
 							log.Error("failed to transfer primary", zap.Error(err))
 							continue
@@ -1039,7 +1039,7 @@ func (kgm *KeyspaceGroupManager) HandleTSORequest(
 	// TSO is the latest one from the storage, which could prevent the potential
 	// fallback caused by the rolling update of the mixed old PD and TSO service deployment.
 	err = kgm.markGroupRequested(curKeyspaceGroupID, func() error {
-		return am.GetAllocator().Initialize(0)
+		return am.allocator.Initialize()
 	})
 	if err != nil {
 		return pdpb.Timestamp{}, curKeyspaceGroupID, err
@@ -1072,7 +1072,7 @@ func (kgm *KeyspaceGroupManager) GetMinTS() (_ pdpb.Timestamp, kgAskedCount, kgT
 			return pdpb.Timestamp{}, kgAskedCount, kgTotalCount, errs.ErrGetMinTS.FastGenByArgs("leader is not elected")
 		}
 		// Skip the keyspace groups that are not served by this TSO Server/Pod.
-		if am == nil || !am.IsLeader() {
+		if am == nil || !am.isLeader() {
 			continue
 		}
 		kgAskedCount++
@@ -1116,13 +1116,13 @@ func (kgm *KeyspaceGroupManager) checkTSOSplit(
 	if err != nil || splitTargetAM == nil {
 		return err
 	}
-	splitTargetAllocator := splitTargetAM.GetAllocator()
-	splitSourceAllocator := splitSourceAM.GetAllocator()
-	splitTargetTSO, err := splitTargetAllocator.GenerateTSO(context.Background(), 1)
+	splitTargetAllocator := splitTargetAM.allocator
+	splitSourceAllocator := splitSourceAM.allocator
+	splitTargetTSO, err := splitTargetAllocator.generateTSO(context.Background(), 1)
 	if err != nil {
 		return err
 	}
-	splitSourceTSO, err := splitSourceAllocator.GenerateTSO(context.Background(), 1)
+	splitSourceTSO, err := splitSourceAllocator.generateTSO(context.Background(), 1)
 	if err != nil {
 		return err
 	}
@@ -1278,7 +1278,7 @@ mergeLoop:
 		}
 		// If the current TSO node is not the merge target TSO primary node,
 		// we still need to keep this loop running to avoid unexpected primary changes.
-		if !am.IsLeader() {
+		if !am.isLeader() {
 			log.Debug("current tso node is not the merge target primary",
 				zap.String("member", kgm.tsoServiceID.ServiceAddr),
 				zap.Uint32("merge-target-id", mergeTargetID),
@@ -1344,7 +1344,7 @@ mergeLoop:
 				zap.Uint32("merge-target-id", mergeTargetID),
 				zap.Uint32s("merge-list", mergeList),
 				zap.Time("merged-ts", mergedTS))
-			err = am.GetAllocator().SetTSO(
+			err = am.allocator.SetTSO(
 				tsoutil.GenerateTS(tsoutil.GenerateTimestamp(mergedTS, 1)),
 				true, true)
 			if err != nil {
@@ -1399,7 +1399,7 @@ func (kgm *KeyspaceGroupManager) groupSplitPatroller() {
 		}
 		for _, groupID := range kgm.getSplittingGroups() {
 			am, group := kgm.getKeyspaceGroupMeta(groupID)
-			if !am.IsLeader() {
+			if !am.isLeader() {
 				continue
 			}
 			if len(group.Keyspaces) == 0 {
