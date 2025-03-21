@@ -45,7 +45,7 @@ import (
 const (
 	defaultBucketRate        = 20 * units.MiB // 20MB/s
 	defaultBucketCapacity    = 20 * units.MiB // 20MB
-	maxSyncRegionBatchSize   = 100
+	maxSyncRegionBatchSize   = 1000
 	syncerKeepAliveInterval  = 10 * time.Second
 	defaultHistoryBufferSize = 10000
 )

@@ -98,7 +98,7 @@ const (
 	metricsCollectionJobInterval   = 10 * time.Second
 	updateStoreStatsInterval       = 9 * time.Millisecond
 	clientTimeout                  = 3 * time.Second
-	defaultChangedRegionsLimit     = 10000
+	defaultChangedRegionsLimit     = 100000
 	gcTombstoneInterval            = 30 * 24 * time.Hour
 	schedulingServiceCheckInterval = 10 * time.Second
 	tsoServiceCheckInterval        = 100 * time.Millisecond
@@ -1307,6 +1307,7 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 			func(context.Context) {
 				c.changedRegions <- region
 			},
+			ratelimit.WithRetained(true),
 		)
 	}
 	return nil
