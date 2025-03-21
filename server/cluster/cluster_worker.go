@@ -42,20 +42,22 @@ func (c *RaftCluster) HandleRegionHeartbeat(region *core.RegionInfo) error {
 		tracer = core.NewHeartbeatProcessTracer()
 	}
 	defer tracer.Release()
-	var taskRunner, miscRunner, logRunner ratelimit.Runner
-	taskRunner, miscRunner, logRunner = syncRunner, syncRunner, syncRunner
+	var taskRunner, miscRunner, logRunner, syncRegionRunner ratelimit.Runner
+	taskRunner, miscRunner, logRunner, syncRegionRunner = syncRunner, syncRunner, syncRunner, syncRunner
 	if c.GetScheduleConfig().EnableHeartbeatConcurrentRunner {
 		taskRunner = c.heartbeatRunner
 		miscRunner = c.miscRunner
 		logRunner = c.logRunner
+		syncRegionRunner = c.syncRegionRunner
 	}
 
 	ctx := &core.MetaProcessContext{
-		Context:    c.ctx,
-		Tracer:     tracer,
-		TaskRunner: taskRunner,
-		MiscRunner: miscRunner,
-		LogRunner:  logRunner,
+		Context:          c.ctx,
+		Tracer:           tracer,
+		TaskRunner:       taskRunner,
+		MiscRunner:       miscRunner,
+		LogRunner:        logRunner,
+		SyncRegionRunner: syncRegionRunner,
 	}
 	tracer.Begin()
 	if err := c.processRegionHeartbeat(ctx, region); err != nil {
