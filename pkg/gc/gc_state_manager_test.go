@@ -1175,6 +1175,106 @@ func (s *gcStateManagerTestSuite) TestRedirectKeyspace() {
 	}
 }
 
+func (s *gcStateManagerTestSuite) TestGetGCState() {
+	re := s.Require()
+
+	// Check the result of GetAllKeyspaceGCStates and GetGCState are matching.
+	checkAllKeyspaceGCStates := func() {
+		allStates, err := s.manager.GetAllKeyspacesGCStates()
+		re.NoError(err)
+		re.Len(allStates, len(s.keyspacePresets.all))
+		for keyspaceID, state := range allStates {
+			if slices.Contains(s.keyspacePresets.manageable, keyspaceID) {
+				re.Equal(keyspaceID, state.KeyspaceID)
+
+				s, err := s.manager.GetGCState(keyspaceID)
+				re.NoError(err)
+				re.Equal(s, state)
+			} else {
+				re.Contains(s.keyspacePresets.unmanageable, keyspaceID)
+				re.Equal(keyspaceID, state.KeyspaceID)
+				re.False(state.IsKeyspaceLevel)
+			}
+		}
+	}
+
+	for _, keyspaceID := range s.keyspacePresets.manageable {
+		state, err := s.manager.GetGCState(keyspaceID)
+		re.NoError(err)
+		re.Equal(keyspaceID, state.KeyspaceID)
+		if keyspaceID == constant.NullKeyspaceID {
+			re.False(state.IsKeyspaceLevel)
+		} else {
+			re.True(state.IsKeyspaceLevel)
+		}
+		re.Equal(uint64(0), state.TxnSafePoint)
+		re.Equal(uint64(0), state.GCSafePoint)
+		re.Empty(state.GCBarriers)
+	}
+
+	for _, keyspaceID := range slices.Concat(s.keyspacePresets.unmanageable, s.keyspacePresets.nullSynonyms) {
+		state, err := s.manager.GetGCState(keyspaceID)
+		re.NoError(err)
+		re.Equal(constant.NullKeyspaceID, state.KeyspaceID)
+		re.False(state.IsKeyspaceLevel)
+		re.Equal(uint64(0), state.TxnSafePoint)
+		re.Equal(uint64(0), state.GCSafePoint)
+		re.Empty(state.GCBarriers)
+	}
+
+	for _, keyspaceID := range s.keyspacePresets.notExisting {
+		_, err := s.manager.GetGCState(keyspaceID)
+		re.Error(err)
+		re.ErrorIs(err, errs.ErrKeyspaceNotFound)
+	}
+
+	checkAllKeyspaceGCStates()
+
+	now := time.Now().Truncate(time.Second)
+
+	// Do some operations to change their states.
+	_, err := s.manager.AdvanceTxnSafePoint(constant.NullKeyspaceID, 20, now)
+	re.NoError(err)
+	_, _, err = s.manager.AdvanceGCSafePoint(constant.NullKeyspaceID, 15)
+	re.NoError(err)
+	_, err = s.manager.SetGCBarrier(constant.NullKeyspaceID, "b1", 25, time.Hour, now)
+	re.NoError(err)
+	_, err = s.manager.SetGCBarrier(constant.NullKeyspaceID, "b2", 25, time.Hour*2, now)
+	re.NoError(err)
+	_, err = s.manager.AdvanceTxnSafePoint(2, 50, now)
+	re.NoError(err)
+	_, _, err = s.manager.AdvanceGCSafePoint(2, 45)
+	re.NoError(err)
+	_, err = s.manager.SetGCBarrier(2, "b1", 55, time.Hour, now)
+	re.NoError(err)
+	_, err = s.manager.SetGCBarrier(2, "b3", 60, time.Duration(math.MaxInt64), now)
+	re.NoError(err)
+
+	state, err := s.manager.GetGCState(constant.NullKeyspaceID)
+	re.NoError(err)
+	re.Equal(constant.NullKeyspaceID, state.KeyspaceID)
+	re.False(state.IsKeyspaceLevel)
+	re.Equal(uint64(20), state.TxnSafePoint)
+	re.Equal(uint64(15), state.GCSafePoint)
+	re.Equal([]*endpoint.GCBarrier{
+		endpoint.NewGCBarrier("b1", 25, ptime(now.Add(time.Hour))),
+		endpoint.NewGCBarrier("b2", 25, ptime(now.Add(time.Hour*2))),
+	}, state.GCBarriers)
+
+	state, err = s.manager.GetGCState(2)
+	re.NoError(err)
+	re.Equal(uint32(2), state.KeyspaceID)
+	re.True(state.IsKeyspaceLevel)
+	re.Equal(uint64(50), state.TxnSafePoint)
+	re.Equal(uint64(45), state.GCSafePoint)
+	re.Equal([]*endpoint.GCBarrier{
+		endpoint.NewGCBarrier("b1", 55, ptime(now.Add(time.Hour))),
+		endpoint.NewGCBarrier("b3", 60, nil),
+	}, state.GCBarriers)
+
+	checkAllKeyspaceGCStates()
+}
+
 func TestSaturatingDuration(t *testing.T) {
 	re := require.New(t)
 

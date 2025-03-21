@@ -486,9 +486,9 @@ func (m *GCStateManager) GetGCState(keyspaceID uint32) (GCState, error) {
 	return result, nil
 }
 
-// GetGlobalGCState returns the GC state of all keyspaces.
+// GetAllKeyspacesGCStates returns the GC state of all keyspaces.
 // Returns a map from keyspaceID to GCState. Keyspaces without keyspace-level GC enabled will not be included.
-func (m *GCStateManager) GetGlobalGCState() (map[uint32]GCState, error) {
+func (m *GCStateManager) GetAllKeyspacesGCStates() (map[uint32]GCState, error) {
 	// TODO: Handle the case that there are too many keyspaces and loading them at once is not suitable.
 	allKeyspaces, err := m.keyspaceManager.LoadRangeKeyspace(0, 0)
 	if err != nil {
