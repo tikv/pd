@@ -15,7 +15,6 @@
 package gc
 
 import (
-	"errors"
 	"fmt"
 	"math"
 	"math/bits"
@@ -142,17 +141,6 @@ func (m *GCStateManager) redirectKeyspace(keyspaceID uint32, isUserAPI bool) (ui
 	return keyspaceID, nil
 }
 
-// CompatibleLoadGCSafePoint loads current GC safe point from storage for the legacy GC API `GetGCSafePoint`.
-func (m *GCStateManager) CompatibleLoadGCSafePoint() (uint64, error) {
-	keyspaceID, err := m.redirectKeyspace(constant.NullKeyspaceID, false)
-	if err != nil {
-		return 0, err
-	}
-
-	// No need to acquire the lock as a single-key read operation is atomic.
-	return m.gcMetaStorage.LoadGCSafePoint(keyspaceID)
-}
-
 // AdvanceGCSafePoint tries to advance the GC safe point to the given target. If the target is less than the current
 // value or greater than the txn safe point, it returns an error.
 //
@@ -169,17 +157,6 @@ func (m *GCStateManager) AdvanceGCSafePoint(keyspaceID uint32, target uint64) (o
 	defer m.lock.Unlock()
 
 	return m.advanceGCSafePointImpl(keyspaceID, target, false)
-}
-
-// CompatibleUpdateGCSafePoint tries to advance the GC safe point to the given target. If the target is less than the
-// current value, it returns the current value without updating it.
-// This is provided for compatibility purpose, making the existing uses of the deprecated API `UpdateGCSafePoint`
-// still work.
-func (m *GCStateManager) CompatibleUpdateGCSafePoint(target uint64) (oldGCSafePoint uint64, newGCSafePoint uint64, err error) {
-	m.lock.Lock()
-	defer m.lock.Unlock()
-
-	return m.advanceGCSafePointImpl(constant.NullKeyspaceID, target, true)
 }
 
 func (m *GCStateManager) advanceGCSafePointImpl(keyspaceID uint32, target uint64, compatible bool) (oldGCSafePoint uint64, newGCSafePoint uint64, err error) {
@@ -554,53 +531,6 @@ func (m *GCStateManager) GetGCState(keyspaceID uint32) (GCState, error) {
 	return result, nil
 }
 
-// GetAllKeyspacesGCStates returns the GC state of all keyspaces.
-// Returns a map from keyspaceID to GCState. Keyspaces without keyspace-level GC enabled will not be included.
-func (m *GCStateManager) GetAllKeyspacesGCStates() (map[uint32]GCState, error) {
-	// TODO: Handle the case that there are too many keyspaces and loading them at once is not suitable.
-	allKeyspaces, err := m.keyspaceManager.LoadRangeKeyspace(0, 0)
-	if err != nil {
-		return nil, err
-	}
-
-	// Do not guarantee atomicity among different keyspaces here.
-	results := make(map[uint32]GCState)
-	err = m.gcMetaStorage.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
-		nullKeyspaceState, err1 := m.getGCStateInTransaction(constant.NullKeyspaceID, wb)
-		if err1 != nil {
-			return err1
-		}
-		results[constant.NullKeyspaceID] = nullKeyspaceState
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	for _, keyspaceMeta := range allKeyspaces {
-		if keyspaceMeta.Config[keyspace.GCManagementType] != keyspace.KeyspaceLevelGC {
-			results[keyspaceMeta.Id] = GCState{
-				KeyspaceID:      keyspaceMeta.Id,
-				IsKeyspaceLevel: false,
-			}
-			continue
-		}
-
-		err = m.gcMetaStorage.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
-			state, err1 := m.getGCStateInTransaction(keyspaceMeta.Id, wb)
-			if err1 != nil {
-				return err1
-			}
-			results[keyspaceMeta.Id] = state
-			return nil
-		})
-		if err != nil {
-			return nil, err
-		}
-	}
-	return results, nil
-}
-
 // saturatingDuration returns a duration calculated by multiplying the given `ratio` and `base`, truncated within the
 // range [0, math.MaxInt64] to avoid negative value and overflowing.
 func saturatingDuration(ratio int64, base time.Duration) time.Duration {
@@ -615,92 +545,6 @@ func saturatingDuration(ratio int64, base time.Duration) time.Duration {
 		return time.Duration(math.MaxInt64)
 	}
 	return time.Duration(l)
-}
-
-// CompatibleUpdateServiceGCSafePoint updates the service safe point of the given serviceID. Service safe points are
-// being deprecated, and this method provides compatibility for components that are still using service safe point API.
-// This method simulates the behavior of the service safe points in old versions, by internally using txn safe points
-// and GC barriers. The behaviors are mapped as follows:
-//
-//   - The service safe point with service ID "gc_worker" is mapped to the txn safe point.
-//   - The service safe point with other service IDs are mapped to GC barriers with barrier IDs equal to the given
-//     service IDs.
-//
-// Note that the behavior of the service safe point of "gc_worker" is NOT perfectly the same as before: it can no longer
-// be advanced over other service safe points, but will be blocked by the minimal one; and if the cluster was running
-// with TiDB node that haven't migrated to the new GC APIs, it can also be blocked by the *TiDB min start ts* written by
-// those TiDB nodes.
-//
-// Therefore, the method's behavior is as follows:
-//
-//  1. If the given serviceID is "gc_worker", it internally calls AdvanceTxnSafePoint.
-//     - If the advancing result is the same as newServiceSafePoint, it's the case that the updated service safe
-//     point of "gc_worker" is exactly the minimal one. Returns a simulated service safe point with the service ID
-//     equals to "gc_worker".
-//     - Otherwise, it's the case that the service safe point of "gc_worker" is successfully updated, but it's not
-//     the minimal service safe point. Returns a simulated service safe point whose serviceID starts with
-//     "__pseudo_service:" to simulate the minimal service safe point. It may actually be either a GC barrier or
-//     a *TiDB min start ts*.
-//  2. If the given serviceID is anything else, it internally calls SetGCBarrier or DeleteGCBarrier, depending on
-//     whether the `ttl` is positive or not. As the txn safe point is always less or equal to any GC barriers, we
-//     simulate the case that the service safe point of "gc_worker" is the minimal one, and return a service safe point
-//     with the service ID equals to "gc_worker".
-//
-// This function only works on the NullKeyspace.
-func (m *GCStateManager) CompatibleUpdateServiceGCSafePoint(serviceID string, newServiceSafePoint uint64, ttl int64, now time.Time) (minServiceSafePoint *endpoint.ServiceSafePoint, updated bool, err error) {
-	keyspaceID := constant.NullKeyspaceID
-	m.lock.Lock()
-	defer m.lock.Unlock()
-
-	// TODO: After implementing the global GC barrier, redirect the invocation on "native_br" to `SetGlobalGCBarrier`.
-	if serviceID == keypath.GCWorkerServiceSafePointID {
-		if ttl != math.MaxInt64 {
-			return nil, false, errors.New("TTL of gc_worker's service safe point must be infinity")
-		}
-
-		res, err := m.advanceTxnSafePointImpl(keyspaceID, newServiceSafePoint, now)
-		if err != nil {
-			return nil, false, err
-		}
-		if res.NewTxnSafePoint != newServiceSafePoint {
-			minServiceSafePoint = &endpoint.ServiceSafePoint{
-				ServiceID: "__pseudo_service:" + res.BlockerDescription,
-				ExpiredAt: math.MaxInt64,
-				SafePoint: res.NewTxnSafePoint,
-			}
-		} else {
-			minServiceSafePoint = &endpoint.ServiceSafePoint{
-				ServiceID: keypath.GCWorkerServiceSafePointID,
-				ExpiredAt: math.MaxInt64,
-				SafePoint: newServiceSafePoint,
-			}
-		}
-		updated = res.OldTxnSafePoint != res.NewTxnSafePoint
-	} else {
-		if ttl > 0 {
-			_, err = m.setGCBarrierImpl(keyspaceID, serviceID, newServiceSafePoint, saturatingDuration(ttl, time.Second), now)
-		} else {
-			_, err = m.deleteGCBarrierImpl(keyspaceID, serviceID)
-		}
-
-		if err != nil && !errors.Is(err, errs.ErrGCBarrierTSBehindTxnSafePoint) {
-			return nil, false, err
-		}
-		// The atomicity between setting/deleting GC barrier and loading the txn safe point is not guaranteed here.
-		// It doesn't matter much whether it's atomic, but it's important to ensure LoadTxnSafePoint happens *AFTER*
-		// setting/deleting GC barrier.
-		txnSafePoint, err := m.gcMetaStorage.LoadTxnSafePoint(keyspaceID)
-		if err != nil {
-			return nil, false, err
-		}
-		minServiceSafePoint = &endpoint.ServiceSafePoint{
-			ServiceID: keypath.GCWorkerServiceSafePointID,
-			ExpiredAt: math.MaxInt64,
-			SafePoint: txnSafePoint,
-		}
-		updated = ttl > 0 && txnSafePoint <= newServiceSafePoint
-	}
-	return minServiceSafePoint, updated, nil
 }
 
 // AdvanceTxnSafePointResult represents the result of an invocation of GCStateManager.AdvanceTxnSafePoint.
