@@ -570,6 +570,18 @@ func (s *gcStateManagerTestSuite) TestGCBarriers() {
 		re.Error(err)
 		re.ErrorIs(err, errs.ErrInvalidArgument)
 
+		// Non-positive TTL is forbidden.
+		_, err = s.manager.SetGCBarrier(keyspaceID, "b1", 10, 0, now)
+		re.Error(err)
+		re.ErrorIs(err, errs.ErrInvalidArgument)
+		_, err = s.manager.SetGCBarrier(keyspaceID, "b2", 10, 0, now)
+		re.Error(err)
+		re.ErrorIs(err, errs.ErrInvalidArgument)
+		// b1 is not changed.
+		re.Equal(expected, s.getGCBarrier(keyspaceID, "b1"))
+		// b2 still doesn't exist.
+		re.Nil(s.getGCBarrier(keyspaceID, "b2"))
+
 		// Updating the value of the existing GC barrier
 		b, err = s.manager.SetGCBarrier(keyspaceID, "b1", 15, time.Hour, now)
 		re.NoError(err)
@@ -1273,6 +1285,42 @@ func (s *gcStateManagerTestSuite) TestGetGCState() {
 	}, state.GCBarriers)
 
 	checkAllKeyspaceGCStates()
+}
+
+func (s *gcStateManagerTestSuite) TestWeakenedConstraints() {
+	re := s.Require()
+
+	// In some cases the constraints to GC barrier can be violated. Test that the GCStateManager handles these case in
+	// proper way.
+	for _, keyspaceID := range s.keyspacePresets.manageable {
+		_, err := s.manager.AdvanceTxnSafePoint(keyspaceID, 20, time.Now())
+		re.NoError(err)
+		// Force writing a GC barrier with a barrierTS that is smaller than the current txn safe point.
+		err = s.provider.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
+			return wb.SetGCBarrier(keyspaceID, endpoint.NewGCBarrier("b1", 10, nil))
+		})
+		re.NoError(err)
+		// Further advancement of txn safe point takes no effect, and the txn safe point neither goes forward nor
+		// backward.
+		res, err := s.manager.AdvanceTxnSafePoint(keyspaceID, 30, time.Now())
+		re.NoError(err)
+		re.Equal(uint64(20), res.OldTxnSafePoint)
+		re.Equal(uint64(20), res.NewTxnSafePoint)
+		re.Equal(uint64(30), res.Target)
+		re.Contains(res.BlockerDescription, "BarrierID: \"b1\"")
+		s.checkTxnSafePoint(keyspaceID, 20)
+
+		// DeleteGCBarrier can be used to remove the barrier as usual.
+		_, err = s.manager.DeleteGCBarrier(keyspaceID, "b1")
+		re.NoError(err)
+		// The txn safe point can be advanced then.
+		res, err = s.manager.AdvanceTxnSafePoint(keyspaceID, 30, time.Now())
+		re.NoError(err)
+		re.Equal(uint64(20), res.OldTxnSafePoint)
+		re.Equal(uint64(30), res.NewTxnSafePoint)
+		re.Empty(res.BlockerDescription)
+		s.checkTxnSafePoint(keyspaceID, 30)
+	}
 }
 
 func TestSaturatingDuration(t *testing.T) {
