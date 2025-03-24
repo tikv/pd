@@ -48,6 +48,7 @@ type Client interface {
 	GetHotWriteRegions(context.Context) (*StoreHotPeersInfos, error)
 	GetHistoryHotRegions(context.Context, *HistoryHotRegionsRequest) (*HistoryHotRegions, error)
 	GetRegionStatusByKeyRange(context.Context, *KeyRange, bool) (*RegionStats, error)
+	GetRegionDistributionByKeyRange(ctx context.Context, keyRange *KeyRange, engine string) (*RegionDistributions, error)
 	GetStores(context.Context) (*StoresInfo, error)
 	GetStore(context.Context, uint64) (*StoreInfo, error)
 	DeleteStore(context.Context, uint64) error
@@ -319,6 +320,44 @@ func (c *client) GetHistoryHotRegions(ctx context.Context, req *HistoryHotRegion
 		return nil, err
 	}
 	return &historyHotRegions, nil
+}
+
+// GetRegionDistributionByKeyRange gets the region distribution by key range.
+func (c *client) GetRegionDistributionByKeyRange(ctx context.Context, keyRange *KeyRange, engine string) (*RegionDistributions, error) {
+	var regionStats RegionStats
+	err := c.request(ctx, newRequestInfo().
+		WithName(getRegionDistributionsByKeyRangeName).
+		WithURI(RegionDistributionsByKeyRange(keyRange, engine)).
+		WithMethod(http.MethodGet).
+		WithResp(&regionStats))
+	if err != nil {
+		return nil, err
+	}
+	distributions := make([]*RegionDistribution, 0, len(regionStats.StorePeerCount))
+	for storeID, region := range regionStats.StorePeerCount {
+		distribution := &RegionDistribution{
+			StoreID:               storeID,
+			EngineType:            regionStats.StoreEngine[storeID],
+			RegionLeaderCount:     regionStats.StoreLeaderCount[storeID],
+			RegionPeerCount:       region,
+			ApproximateSize:       regionStats.StorePeerSize[storeID],
+			ApproximateKeys:       regionStats.StorePeerKeys[storeID],
+			RegionWriteBytes:      regionStats.StoreWriteBytes[storeID],
+			RegionWriteKeys:       regionStats.StoreWriteKeys[storeID],
+			RegionWriteQuery:      regionStats.StoreWriteQuery[storeID],
+			RegionLeaderReadBytes: regionStats.StoreLeaderReadBytes[storeID],
+			RegionLeaderReadKeys:  regionStats.StoreLeaderReadKeys[storeID],
+			RegionLeaderReadQuery: regionStats.StoreLeaderReadQuery[storeID],
+			RegionPeerReadBytes:   regionStats.StorePeerReadBytes[storeID],
+			RegionPeerReadKeys:    regionStats.StorePeerReadKeys[storeID],
+			RegionPeerReadQuery:   regionStats.StorePeerReadQuery[storeID],
+		}
+		distributions = append(distributions, distribution)
+	}
+	regionDistributions := &RegionDistributions{
+		RegionDistributions: distributions,
+	}
+	return regionDistributions, nil
 }
 
 // GetRegionStatusByKeyRange gets the region status by key range.
