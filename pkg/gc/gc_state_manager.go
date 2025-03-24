@@ -35,7 +35,75 @@ import (
 	"github.com/tikv/pd/server/config"
 )
 
-// GCStateManager is the manager for safePoint of GC and services.
+// This file defines the type GCStateManager is the core for managing states of TiKV's GC for MVCC data. The
+// implementation is based on the endpoint.GCStateProvider interface (and should be the only user of
+// endpoint.GCStateProvider) for reading and storing persistent data, and provides a set of primitives (APIs) for
+// reading and operating GC states, directly handling a set of corresponding gRPC APIs.
+//
+// Explanations of concepts mentioned in this file (here the term `snapshots` means snapshots of TiKV's MVCC data,
+// represented by a timestamp):
+//
+//   - GC Safe Point: A timestamp, the snapshots before which can be safely discarded by GC. Written by the GCWorker
+//     to control the GC procedure.
+//   - Txn Safe Point / Transaction Safe Point: A timestamp, the snapshots equal to or after which can be safely read.
+//     Written by the GCWorker to control the GC procedure.
+//   - GC Barriers: Blocks GC from advancing the txn safe point over some specific timestamps (the barrierTS of these
+//     barriers), ensures snapshots equal to or after which to be safe to read. GC barriers can be set by any components
+//     in the cluster.
+//   - Service Safe Points / Service GC Safe Points: Another mechanism that has the same purpose as GC barriers, but
+//     is planned to be deprecated in favor of GC barriers. However, in order to keep the backward compatibility of the
+//     persistent data, the data structure of service safe points is still used internally to represent GC barriers.
+//     Service safe points can also be set by any components in the cluster.
+//   - TiDB Min StartTS: A TiDB nodes in versions (in which the new GC API defined in this file is not being used) can
+//     write a special key into PD's etcd by directly calling the etcd client API to store the minimum start ts among
+//     all sessions in the TiDB node. TiDB's GCWorker module will load these keys to block GC's advancement. It will
+//     be deprecated and replaced with GC barriers, but for compatibility, if there are such keys, it's still functional
+//     to block the txn safe point from advancing.
+//
+// GC management may differ between different keyspaces. There are two kinds of GC management, each of which has
+// a different path to write its metadata in etcd:
+//
+//   - Keyspace-level: A keyspace manages its GC by itself, and have independent GC states from other keyspaces.
+//   - Unified: Keyspaces not configured to use keyspace-level GC are running unified GC. The NullKeyspace (which is
+//     used when a TiDB node are not configured to use any keyspace) is always running unified GC. For all keyspaces
+//     running unified GC, the GC states are shared and uniformly managed by the NullKeyspace.
+//
+// As the core implementation of GC states calculation, GCStateManager is responsible for maintaining a set of
+// constraints among the properties in the GC states. The constraints are as follows:
+//
+//  1. The txn safe point must never decrease (`t' >= t`).
+//  2. The GC safe point must never decrease (`g' >= g`).
+//  3. It's always held that GC safe point <= txn safe point (`g <= t`).
+//  4. For each GC barrier `b`, txn safe point <= b.BarrierTS (`t <= b.BarrierTS` for b in GC barriers).
+//  5. For each TiDB min start ts `m` (if there is any), each advancement of the txn safe point should not push it to a
+//     new value that is larger than `m` (`t' <= max{t, min(M)}` where `M` is the set of all TiDB min startTSs).
+//
+// Note that the item 5 implies that if there is a TiDB min start ts `m` such that `m` is less than the current txn
+// safe point, then the txn safe point should keep its previous place when trying to advance it. It should neither go
+// forward nor backward. This case is possible because when TiDB nodes in previous versions write its min start ts to
+// etcd, it won't check other properties in the GC states. Neither is it done in an etcd transaction to prevent
+// other concurrent read/write operations to the GC states, so it's even not atomic. What we can do is to keep it as
+// safe as possible.
+//
+// Also note that the item 4 listed above can also be weakened. In most cases, the constraint can be held correctly;
+// however, there can be exceptions considering the procedure during rolling upgrades or downgrading. In previous
+// version of PD, only the GC barriers (as its predecessor, the service safe points) are managed by PD, while the other
+// properties are not; and it updates service safe points without the protection of etcd transactions (it only uses a
+// mutex). Considering leader changes, two `UpdateServiceGCSafePoint` operations is theoretically possible to be run
+// concurrently, leading to a result that a new service safe point is less than the safe point of the next GC.
+// From the perspective of the new GCStateManager, it constructs a case where the txn safe point > a GC barrier.
+// When this happens, it works like how it handles the TiDB min startTSs that is less than the txn safe point:
+// the txn safe point will be neither advanced nor decreased. Thus, here's a downgraded version of the item 4 in the
+// above constraints:
+//
+//  4. (weakened) For each GC barrier `b`, each advancement of the txn safe point should not push it to a new value
+//     that is larger than `b.BarrierTS` (`t' <= max{t, min(b.BarrierTS for b in B)}` where `B` is the set of GC
+//     barriers).
+//
+// TODO: Explicitly state the versions that GCStateManager starts to be functional and the old APIs/concepts/terms is
+//       deprecated when these work are all done.
+
+// GCStateManager is the manager for all kinds of states of TiKV's GC for MVCC data.
 // nolint:revive
 type GCStateManager struct {
 	lock            syncutil.RWMutex
