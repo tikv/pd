@@ -24,15 +24,6 @@ var regionSyncerStatus = prometheus.NewGaugeVec(
 		Help:      "Inner status of the region syncer.",
 	}, []string{"type"})
 
-var (
-	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
-	syncIndexGauge  = regionSyncerStatus.WithLabelValues("sync_index")
-	firstIndexGauge = regionSyncerStatus.WithLabelValues("first_index")
-	lastIndexGauge  = regionSyncerStatus.WithLabelValues("last_index")
-
-	uncompletedTaskGauge = regionSyncerStatus.WithLabelValues("uncompleted_task")
-)
-
 func init() {
 	prometheus.MustRegister(regionSyncerStatus)
 }

@@ -32,6 +32,13 @@ const (
 	defaultFlushCount = 100
 )
 
+var (
+	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
+	syncIndexGauge  = regionSyncerStatus.WithLabelValues("sync_index")
+	firstIndexGauge = regionSyncerStatus.WithLabelValues("first_index")
+	lastIndexGauge  = regionSyncerStatus.WithLabelValues("last_index")
+)
+
 type historyBuffer struct {
 	syncutil.RWMutex
 	index      uint64
