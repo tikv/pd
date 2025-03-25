@@ -98,7 +98,6 @@ const (
 	metricsCollectionJobInterval   = 10 * time.Second
 	updateStoreStatsInterval       = 9 * time.Millisecond
 	clientTimeout                  = 3 * time.Second
-	defaultChangedRegionsLimit     = 10000
 	gcTombstoneInterval            = 30 * 24 * time.Hour
 	schedulingServiceCheckInterval = 10 * time.Second
 	tsoServiceCheckInterval        = 100 * time.Millisecond
@@ -309,7 +308,7 @@ func (c *RaftCluster) InitCluster(
 	c.opt, c.id = opt.(*config.PersistOptions), id
 	c.ctx, c.cancel = context.WithCancel(c.serverCtx)
 	c.progressManager = progress.NewManager()
-	c.changedRegions = make(chan *core.RegionInfo, defaultChangedRegionsLimit)
+	c.changedRegions = make(chan *core.RegionInfo)
 	c.prevStoreLimit = make(map[uint64]map[storelimit.Type]float64)
 	c.unsafeRecoveryController = unsaferecovery.NewController(c)
 	c.keyspaceGroupManager = keyspaceGroupManager

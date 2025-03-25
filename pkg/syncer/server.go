@@ -44,7 +44,7 @@ import (
 const (
 	defaultBucketRate        = 20 * units.MiB // 20MB/s
 	defaultBucketCapacity    = 20 * units.MiB // 20MB
-	maxSyncRegionBatchSize   = 100
+	maxSyncRegionBatchSize   = 1000
 	syncerKeepAliveInterval  = 10 * time.Second
 	defaultHistoryBufferSize = 10000
 )
@@ -128,6 +128,7 @@ func (s *RegionSyncer) RunServer(ctx context.Context, regionNotifier <-chan *cor
 			log.Info("region syncer has been stopped")
 			return
 		case first := <-regionNotifier:
+			failpoint.InjectCall("syncRegionChannelFull")
 			requests = append(requests, first.GetMeta())
 			stats = append(stats, first.GetStat())
 			// bucket should not be nil to avoid grpc marshal panic.
