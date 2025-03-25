@@ -81,23 +81,35 @@ func TestRegionSyncer(t *testing.T) {
 	}
 	close(mockSyncFull)
 
-	// test All regions have been synchronized to the cache of followerServer
-	re.NotNil(followerServer)
-	cacheRegions := leaderServer.GetServer().GetBasicCluster().GetRegions()
-	re.Len(cacheRegions, regionLen)
-	testutil.Eventually(re, func() bool {
-		for _, region := range cacheRegions {
-			r := followerServer.GetServer().GetBasicCluster().GetRegion(region.GetID())
-			if !(region.GetMeta().String() == r.GetMeta().String() &&
-				region.GetStat().String() == r.GetStat().String() &&
-				region.GetLeader().String() == r.GetLeader().String() &&
-				region.GetBuckets().String() == r.GetBuckets().String()) {
-				t.Logf("region.Meta: %v, r.Meta: %v", region.GetMeta().String(), r.GetMeta().String())
-				return false
+	checkRegions := func() {
+		// test All regions have been synchronized to the cache of followerServer
+		re.NotNil(followerServer)
+		cacheRegions := leaderServer.GetServer().GetBasicCluster().GetRegions()
+		re.Len(cacheRegions, regionLen)
+		testutil.Eventually(re, func() bool {
+			for _, region := range cacheRegions {
+				r := followerServer.GetServer().GetBasicCluster().GetRegion(region.GetID())
+				if region.GetMeta().String() != r.GetMeta().String() {
+					t.Logf("region.Meta: %v, r.Meta: %v", region.GetMeta().String(), r.GetMeta().String())
+					return false
+				}
+				if region.GetStat().String() != r.GetStat().String() {
+					t.Logf("region.Stat: %v, r.Stat: %v", region.GetStat().String(), r.GetStat().String())
+					return false
+				}
+				if region.GetLeader().String() != r.GetLeader().String() {
+					t.Logf("region.Leader: %v, r.Leader: %v", region.GetLeader().String(), r.GetLeader().String())
+					return false
+				}
+				if region.GetBuckets().String() != r.GetBuckets().String() {
+					t.Logf("region.Buckets: %v, r.Buckets: %v", region.GetBuckets().String(), r.GetBuckets().String())
+					return false
+				}
 			}
-		}
-		return true
-	})
+			return true
+		})
+	}
+	checkRegions()
 
 	// merge case
 	// region2 -> region1 -> region0
@@ -144,23 +156,7 @@ func TestRegionSyncer(t *testing.T) {
 		re.NoError(err)
 	}
 
-	// test All regions have been synchronized to the cache of followerServer
-	re.NotNil(followerServer)
-	cacheRegions = leaderServer.GetServer().GetBasicCluster().GetRegions()
-	re.Len(cacheRegions, regionLen)
-	testutil.Eventually(re, func() bool {
-		for _, region := range cacheRegions {
-			r := followerServer.GetServer().GetBasicCluster().GetRegion(region.GetID())
-			if !(region.GetMeta().String() == r.GetMeta().String() &&
-				region.GetStat().String() == r.GetStat().String() &&
-				region.GetLeader().String() == r.GetLeader().String() &&
-				region.GetBuckets().String() == r.GetBuckets().String()) {
-				t.Logf("region.Meta: %v, r.Meta: %v", region.GetMeta().String(), r.GetMeta().String())
-				return false
-			}
-		}
-		return true
-	})
+	checkRegions()
 
 	err = leaderServer.Stop()
 	re.NoError(err)

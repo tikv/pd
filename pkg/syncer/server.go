@@ -17,7 +17,6 @@ package syncer
 import (
 	"context"
 	"io"
-	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -157,11 +156,11 @@ func (s *RegionSyncer) RunServer(ctx context.Context, regionNotifier <-chan *cor
 			}
 			regions := &pdpb.SyncRegionResponse{
 				Header:        &pdpb.ResponseHeader{ClusterId: keypath.ClusterID()},
-				Regions:       slices.Clone(requests),
+				Regions:       requests,
 				StartIndex:    startIndex,
-				RegionStats:   slices.Clone(stats),
-				RegionLeaders: slices.Clone(leaders),
-				Buckets:       slices.Clone(buckets),
+				RegionStats:   stats,
+				RegionLeaders: leaders,
+				Buckets:       buckets,
 			}
 			s.broadcast(ctx, regions)
 		case <-ticker.C:
