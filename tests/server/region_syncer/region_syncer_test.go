@@ -82,6 +82,10 @@ func TestRegionSyncer(t *testing.T) {
 	close(mockSyncFull)
 
 	checkRegions := func() {
+		// ensure flush to region storage, we use a duration larger than the
+		// region storage flush rate limit (3s).
+		time.Sleep(4 * time.Second)
+
 		// test All regions have been synchronized to the cache of followerServer
 		re.NotNil(followerServer)
 		cacheRegions := leaderServer.GetServer().GetBasicCluster().GetRegions()

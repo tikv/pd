@@ -125,7 +125,6 @@ func (s *RegionSyncer) RunServer(ctx context.Context, regionNotifier <-chan *cor
 		}
 		buckets = append(buckets, bucket)
 		leaders = append(leaders, region.GetLeader())
-		s.history.record(region)
 	}
 
 	defer func() {
@@ -145,11 +144,13 @@ func (s *RegionSyncer) RunServer(ctx context.Context, regionNotifier <-chan *cor
 
 			processRegion(first)
 			startIndex := s.history.getNextIndex()
+			s.history.record(first)
 		loop:
 			for range maxSyncRegionBatchSize {
 				select {
 				case region := <-regionNotifier:
 					processRegion(region)
+					s.history.record(region)
 				default:
 					break loop
 				}
