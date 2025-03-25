@@ -377,7 +377,7 @@ func (s *RegionSyncer) broadcast(ctx context.Context, regions *pdpb.SyncRegionRe
 
 	go func() {
 		wg.Wait()
-		failed.Range(func(key, value any) bool {
+		failed.Range(func(key, _ any) bool {
 			name := key.(string)
 			delete(s.mu.streams, name)
 			log.Info("region syncer delete the stream", zap.String("stream", name))

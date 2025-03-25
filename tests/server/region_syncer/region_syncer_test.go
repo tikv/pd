@@ -92,6 +92,7 @@ func TestRegionSyncer(t *testing.T) {
 				region.GetStat().String() == r.GetStat().String() &&
 				region.GetLeader().String() == r.GetLeader().String() &&
 				region.GetBuckets().String() == r.GetBuckets().String()) {
+				t.Logf("region.Meta: %v, r.Meta: %v", region.GetMeta().String(), r.GetMeta().String())
 				return false
 			}
 		}
@@ -154,6 +155,7 @@ func TestRegionSyncer(t *testing.T) {
 				region.GetStat().String() == r.GetStat().String() &&
 				region.GetLeader().String() == r.GetLeader().String() &&
 				region.GetBuckets().String() == r.GetBuckets().String()) {
+				t.Logf("region.Meta: %v, r.Meta: %v", region.GetMeta().String(), r.GetMeta().String())
 				return false
 			}
 		}
