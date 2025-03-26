@@ -226,8 +226,9 @@ const (
 	defaultTSOSaveInterval = time.Duration(defaultLeaderLease) * time.Second
 	// defaultTSOUpdatePhysicalInterval is the default value of the config `TSOUpdatePhysicalInterval`.
 	defaultTSOUpdatePhysicalInterval = 50 * time.Millisecond
-	maxTSOUpdatePhysicalInterval     = 10 * time.Second
-	minTSOUpdatePhysicalInterval     = 1 * time.Millisecond
+	// MaxTSOUpdatePhysicalInterval is the max value of the config `TSOUpdatePhysicalInterval`.
+	MaxTSOUpdatePhysicalInterval = 10 * time.Second
+	minTSOUpdatePhysicalInterval = 1 * time.Millisecond
 
 	defaultLogFormat = "text"
 	defaultLogLevel  = "info"
@@ -400,8 +401,8 @@ func (c *Config) Adjust(meta *toml.MetaData, reloading bool) error {
 	configutil.AdjustDuration(&c.TSOSaveInterval, defaultTSOSaveInterval)
 	configutil.AdjustDuration(&c.TSOUpdatePhysicalInterval, defaultTSOUpdatePhysicalInterval)
 
-	if c.TSOUpdatePhysicalInterval.Duration > maxTSOUpdatePhysicalInterval {
-		c.TSOUpdatePhysicalInterval.Duration = maxTSOUpdatePhysicalInterval
+	if c.TSOUpdatePhysicalInterval.Duration > MaxTSOUpdatePhysicalInterval {
+		c.TSOUpdatePhysicalInterval.Duration = MaxTSOUpdatePhysicalInterval
 	} else if c.TSOUpdatePhysicalInterval.Duration < minTSOUpdatePhysicalInterval {
 		c.TSOUpdatePhysicalInterval.Duration = minTSOUpdatePhysicalInterval
 	}

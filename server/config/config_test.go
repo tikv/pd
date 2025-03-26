@@ -253,7 +253,7 @@ tso-update-physical-interval = "15s"
 	err = cfg.Adjust(&meta, false)
 	re.NoError(err)
 
-	re.Equal(maxTSOUpdatePhysicalInterval, cfg.TSOUpdatePhysicalInterval.Duration)
+	re.Equal(MaxTSOUpdatePhysicalInterval, cfg.TSOUpdatePhysicalInterval.Duration)
 
 	cfgData = `
 [log]
