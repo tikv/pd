@@ -1051,6 +1051,11 @@ error = '''
 reset user timestamp failed, %s
 '''
 
+["PD:tso:ErrSaveTimestamp"]
+error = '''
+save timestamp failed, %s
+'''
+
 ["PD:tso:ErrUpdateTimestamp"]
 error = '''
 update timestamp failed, %s

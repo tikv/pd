@@ -91,25 +91,11 @@ func NewGlobalTSOAllocator(
 		cancel:                cancel,
 		am:                    am,
 		member:                am.member,
-		timestampOracle:       newGlobalTimestampOracle(am),
+		timestampOracle:       newTimestampOracle(am),
 		tsoAllocatorRoleGauge: tsoAllocatorRole.WithLabelValues(am.getGroupIDStr(), GlobalDCLocation),
 	}
 
 	return gta
-}
-
-func newGlobalTimestampOracle(am *AllocatorManager) *timestampOracle {
-	oracle := &timestampOracle{
-		client:                 am.member.GetLeadership().GetClient(),
-		keyspaceGroupID:        am.kgID,
-		storage:                am.storage,
-		saveInterval:           am.saveInterval,
-		updatePhysicalInterval: am.updatePhysicalInterval,
-		maxResetTSGap:          am.maxResetTSGap,
-		tsoMux:                 &tsoObject{},
-		metrics:                newTSOMetrics(am.getGroupIDStr(), GlobalDCLocation),
-	}
-	return oracle
 }
 
 // close is used to shutdown the primary election loop.
