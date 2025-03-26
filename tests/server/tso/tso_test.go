@@ -134,50 +134,52 @@ func checkAndReturnTimestampResponse(re *require.Assertions, req *pdpb.TsoReques
 	re.GreaterOrEqual(uint32(timestamp.GetLogical()), req.GetCount())
 	return timestamp
 }
+
 func TestLogicalOverflow(t *testing.T) {
 	re := require.New(t)
 
-	runCase := func(updateInterval time.Duration) {
-		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
-		cluster, err := tests.NewTestCluster(ctx, 1, func(conf *config.Config, _ string) {
-			conf.TSOUpdatePhysicalInterval = typeutil.Duration{Duration: updateInterval}
-		})
-		defer cluster.Destroy()
-		re.NoError(err)
-		re.NoError(cluster.RunInitialServers())
-		re.NotEmpty(cluster.WaitLeader())
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	// Set to max update interval so we can drain the logical part easily.
+	updateInterval := config.MaxTSOUpdatePhysicalInterval
+	cluster, err := tests.NewTestCluster(ctx, 1, func(conf *config.Config, _ string) {
+		conf.TSOUpdatePhysicalInterval = typeutil.Duration{Duration: updateInterval}
+	})
+	defer cluster.Destroy()
+	re.NoError(err)
+	re.NoError(cluster.RunInitialServers())
+	re.NotEmpty(cluster.WaitLeader())
 
-		leaderServer := cluster.GetLeaderServer()
-		re.NotNil(leaderServer)
-		leaderServer.BootstrapCluster()
-		grpcPDClient := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
-		clusterID := leaderServer.GetClusterID()
+	leaderServer := cluster.GetLeaderServer()
+	re.NotNil(leaderServer)
+	leaderServer.BootstrapCluster()
+	grpcPDClient := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
+	clusterID := leaderServer.GetClusterID()
 
-		tsoClient, err := grpcPDClient.Tso(ctx)
-		re.NoError(err)
-		defer tsoClient.CloseSend()
+	tsoClient, err := grpcPDClient.Tso(ctx)
+	re.NoError(err)
+	defer tsoClient.CloseSend()
 
+	var maxDuration time.Duration
+	// Since the max logical count is 2 << 18 (262144), we request 20 times with 26214 count each time.
+	// It's enough to drain the logical part.
+	count := (1 << 18) / 10
+	for range 20 {
 		begin := time.Now()
-		for i := range 3 {
-			req := &pdpb.TsoRequest{
-				Header:     testutil.NewRequestHeader(clusterID),
-				Count:      150000,
-				DcLocation: tso.GlobalDCLocation,
-			}
-			re.NoError(tsoClient.Send(req))
-			_, err = tsoClient.Recv()
-			re.NoError(err)
-			if i == 1 {
-				// the 2nd request may (but not must) overflow, as max logical interval is 262144
-				re.Less(time.Since(begin), updateInterval+50*time.Millisecond) // additional 50ms for gRPC latency
-			}
+		req := &pdpb.TsoRequest{
+			Header:     testutil.NewRequestHeader(clusterID),
+			Count:      uint32(count),
+			DcLocation: tso.GlobalDCLocation,
 		}
-		// the 3rd request must overflow
-		re.GreaterOrEqual(time.Since(begin), updateInterval)
+		re.NoError(tsoClient.Send(req))
+		resp, err := tsoClient.Recv()
+		re.NoError(err)
+		re.NotNil(checkAndReturnTimestampResponse(re, req, resp))
+		duration := time.Since(begin)
+		if duration > maxDuration {
+			maxDuration = duration
+		}
 	}
-
-	for _, updateInterval := range []int{1, 5, 30, 50} {
-		runCase(time.Duration(updateInterval) * time.Millisecond)
-	}
+	// Due to the overflow triggered, there must be a duration greater than the update interval.
+	re.Greater(maxDuration, updateInterval)
 }
