@@ -75,9 +75,6 @@ type timestampOracle struct {
 }
 
 func (t *timestampOracle) saveTimestamp(ts time.Time) error {
-	if !t.member.IsLeader() {
-		return errs.ErrSaveTimestamp.FastGenByArgs("not leader anymore")
-	}
 	return t.storage.SaveTimestamp(t.keyspaceGroupID, ts, t.member.GetLeadership())
 }
 

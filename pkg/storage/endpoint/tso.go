@@ -68,8 +68,16 @@ func (se *StorageEndpoint) LoadTimestamp(groupID uint32) (time.Time, error) {
 // SaveTimestamp saves the timestamp to the storage. The leadership is used to check if the current server is leader
 // before saving the timestamp to ensure a strong consistency for persistence of the TSO timestamp window.
 func (se *StorageEndpoint) SaveTimestamp(groupID uint32, ts time.Time, leadership *election.Leadership) error {
+	logFilds := []zap.Field{
+		zap.Uint32("group-id", groupID),
+		zap.Time("ts", ts),
+		zap.String("leader-key", leadership.GetLeaderKey()),
+		zap.String("expected-leader-value", leadership.GetLeaderValue()),
+	}
+	log.Info("saving timestamp to the storage", logFilds...)
+	// Fast path to return error if the leadership has not been granted yet.
 	if len(leadership.GetLeaderValue()) == 0 {
-		return errors.New("leadership is not valid, leader value is empty")
+		return errors.New("leadership has not been granted yet, leader value is empty")
 	}
 	return se.RunInTxn(context.Background(), func(txn kv.Txn) error {
 		// Ensure the current server is leader by reading and comparing the leader value.
@@ -78,9 +86,7 @@ func (se *StorageEndpoint) SaveTimestamp(groupID uint32, ts time.Time, leadershi
 			return err
 		}
 		if expected := leadership.GetLeaderValue(); leaderValue != expected {
-			log.Error("leader value does not match",
-				zap.Uint32("group-id", groupID), zap.Time("ts", ts),
-				zap.String("current", leaderValue), zap.String("expected", expected))
+			log.Error("leader value does not match", append(logFilds, zap.String("current-leader-value", leaderValue))...)
 			return errors.Errorf("leader value does not match, current: %s, expected: %s", leaderValue, expected)
 		}
 
@@ -93,7 +99,7 @@ func (se *StorageEndpoint) SaveTimestamp(groupID uint32, ts time.Time, leadershi
 		if value != "" {
 			previousTS, err = typeutil.ParseTimestamp([]byte(value))
 			if err != nil {
-				log.Error("parse timestamp failed", zap.Uint32("group-id", groupID), zap.String("value", value), zap.Error(err))
+				log.Error("parse timestamp failed", append(logFilds, zap.String("value", value), zap.Error(err))...)
 				return err
 			}
 		}
