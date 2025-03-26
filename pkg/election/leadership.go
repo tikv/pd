@@ -120,6 +120,14 @@ func (ls *Leadership) GetLeaderKey() string {
 	return ls.leaderKey
 }
 
+// GetLeaderValue is used to get the leader value saved in etcd.
+func (ls *Leadership) GetLeaderValue() string {
+	if ls == nil {
+		return ""
+	}
+	return ls.leaderValue
+}
+
 // SetPrimaryWatch sets the primary watch flag.
 func (ls *Leadership) SetPrimaryWatch(val bool) {
 	ls.primaryWatch.Store(val)

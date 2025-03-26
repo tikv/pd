@@ -23,6 +23,7 @@ import (
 	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
 
+	"github.com/tikv/pd/pkg/election"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/typeutil"
@@ -31,7 +32,7 @@ import (
 // TSOStorage is the interface for timestamp storage.
 type TSOStorage interface {
 	LoadTimestamp(groupID uint32) (time.Time, error)
-	SaveTimestamp(groupID uint32, ts time.Time) error
+	SaveTimestamp(groupID uint32, ts time.Time, leadership *election.Leadership) error
 	DeleteTimestamp(groupID uint32) error
 }
 
@@ -64,9 +65,25 @@ func (se *StorageEndpoint) LoadTimestamp(groupID uint32) (time.Time, error) {
 	return tsWindow, nil
 }
 
-// SaveTimestamp saves the timestamp to the storage.
-func (se *StorageEndpoint) SaveTimestamp(groupID uint32, ts time.Time) error {
+// SaveTimestamp saves the timestamp to the storage. The leadership is used to check if the current server is leader
+// before saving the timestamp to ensure a strong consistency for persistence of the TSO timestamp window.
+func (se *StorageEndpoint) SaveTimestamp(groupID uint32, ts time.Time, leadership *election.Leadership) error {
+	if len(leadership.GetLeaderValue()) == 0 {
+		return errors.New("leadership is not valid, leader value is empty")
+	}
 	return se.RunInTxn(context.Background(), func(txn kv.Txn) error {
+		// Ensure the current server is leader by reading and comparing the leader value.
+		leaderValue, err := txn.Load(leadership.GetLeaderKey())
+		if err != nil {
+			return err
+		}
+		if expected := leadership.GetLeaderValue(); leaderValue != expected {
+			log.Error("leader value does not match",
+				zap.Uint32("group-id", groupID), zap.Time("ts", ts),
+				zap.String("current", leaderValue), zap.String("expected", expected))
+			return errors.Errorf("leader value does not match, current: %s, expected: %s", leaderValue, expected)
+		}
+
 		value, err := txn.Load(keypath.TimestampPath(groupID))
 		if err != nil {
 			return err

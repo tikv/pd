@@ -27,7 +27,6 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 
-	"github.com/tikv/pd/pkg/election"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/logutil"
@@ -60,6 +59,7 @@ type tsoObject struct {
 // timestampOracle is used to maintain the logic of TSO.
 type timestampOracle struct {
 	keyspaceGroupID uint32
+	member          ElectionMember
 	storage         endpoint.TSOStorage
 	// TODO: remove saveInterval
 	saveInterval           time.Duration
@@ -72,6 +72,13 @@ type timestampOracle struct {
 
 	// pre-initialized metrics
 	metrics *tsoMetrics
+}
+
+func (t *timestampOracle) saveTimestamp(ts time.Time) error {
+	if !t.member.IsLeader() {
+		return errs.ErrSaveTimestamp.FastGenByArgs("not leader anymore")
+	}
+	return t.storage.SaveTimestamp(t.keyspaceGroupID, ts, t.member.GetLeadership())
 }
 
 func (t *timestampOracle) setTSOPhysical(next time.Time, force bool) {
@@ -172,7 +179,7 @@ func (t *timestampOracle) syncTimestamp() error {
 	})
 	save := next.Add(t.saveInterval)
 	start := time.Now()
-	if err = t.storage.SaveTimestamp(t.keyspaceGroupID, save); err != nil {
+	if err = t.saveTimestamp(save); err != nil {
 		t.metrics.errSaveSyncTSEvent.Inc()
 		return err
 	}
@@ -202,12 +209,12 @@ func (t *timestampOracle) isInitialized() bool {
 // resetUserTimestamp update the TSO in memory with specified TSO by an atomically way.
 // When ignoreSmaller is true, a smaller tso resetting error will be ignored and do nothing.
 // The TSO in memory can only be set to one which is smaller than current TSO + `maxResetTSGap`.
-func (t *timestampOracle) resetUserTimestamp(leadership *election.Leadership, tso uint64, ignoreSmaller, skipUpperBoundCheck bool) error {
+func (t *timestampOracle) resetUserTimestamp(tso uint64, ignoreSmaller, skipUpperBoundCheck bool) error {
 	t.tsoMux.Lock()
 	defer t.tsoMux.Unlock()
-	if !leadership.Check() {
+	if !t.member.IsLeader() {
 		t.metrics.errLeaseResetTSEvent.Inc()
-		return errs.ErrResetUserTimestamp.FastGenByArgs("lease expired")
+		return errs.ErrResetUserTimestamp.FastGenByArgs(errs.NotLeaderErr)
 	}
 	var (
 		nextPhysical, nextLogical = tsoutil.ParseTS(tso)
@@ -243,7 +250,7 @@ func (t *timestampOracle) resetUserTimestamp(leadership *election.Leadership, ts
 	if typeutil.SubRealTimeByWallClock(t.getLastSavedTime(), nextPhysical) <= updateTimestampGuard {
 		save := nextPhysical.Add(t.saveInterval)
 		start := time.Now()
-		if err := t.storage.SaveTimestamp(t.keyspaceGroupID, save); err != nil {
+		if err := t.saveTimestamp(save); err != nil {
 			t.metrics.errSaveResetTSEvent.Inc()
 			return err
 		}
@@ -326,7 +333,7 @@ func (t *timestampOracle) updateTimestamp() error {
 	if typeutil.SubRealTimeByWallClock(t.getLastSavedTime(), next) <= updateTimestampGuard {
 		save := next.Add(t.saveInterval)
 		start := time.Now()
-		if err := t.storage.SaveTimestamp(t.keyspaceGroupID, save); err != nil {
+		if err := t.saveTimestamp(save); err != nil {
 			log.Warn("save timestamp failed",
 				logutil.CondUint32("keyspace-group-id", t.keyspaceGroupID, t.keyspaceGroupID > 0),
 				zap.Error(err))
@@ -344,7 +351,7 @@ func (t *timestampOracle) updateTimestamp() error {
 
 var maxRetryCount = 10
 
-func (t *timestampOracle) getTS(ctx context.Context, member ElectionMember, count uint32) (pdpb.Timestamp, error) {
+func (t *timestampOracle) getTS(ctx context.Context, count uint32) (pdpb.Timestamp, error) {
 	defer trace.StartRegion(ctx, "timestampOracle.getTS").End()
 	var resp pdpb.Timestamp
 	if count == 0 {
@@ -354,7 +361,7 @@ func (t *timestampOracle) getTS(ctx context.Context, member ElectionMember, coun
 		currentPhysical, _ := t.getTSO()
 		if currentPhysical == typeutil.ZeroTime {
 			// If it's leader, maybe SyncTimestamp hasn't completed yet
-			if member.IsLeader() {
+			if t.member.IsLeader() {
 				time.Sleep(200 * time.Millisecond)
 				continue
 			}
@@ -376,7 +383,7 @@ func (t *timestampOracle) getTS(ctx context.Context, member ElectionMember, coun
 			continue
 		}
 		// In case lease expired after the first check.
-		if !member.IsLeader() {
+		if !t.member.IsLeader() {
 			return pdpb.Timestamp{}, errs.ErrGenerateTimestamp.FastGenByArgs(fmt.Sprintf("requested %s anymore", errs.NotLeaderErr))
 		}
 		return resp, nil

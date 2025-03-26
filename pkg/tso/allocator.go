@@ -131,6 +131,7 @@ func NewAllocator(
 		member:          member,
 		timestampOracle: &timestampOracle{
 			keyspaceGroupID:        keyspaceGroupID,
+			member:                 member,
 			storage:                storage,
 			saveInterval:           cfg.GetTSOSaveInterval(),
 			updatePhysicalInterval: cfg.GetTSOUpdatePhysicalInterval(),
@@ -224,7 +225,7 @@ func (a *Allocator) UpdateTSO() (err error) {
 
 // SetTSO sets the physical part with given TSO.
 func (a *Allocator) SetTSO(tso uint64, ignoreSmaller, skipUpperBoundCheck bool) error {
-	return a.timestampOracle.resetUserTimestamp(a.member.GetLeadership(), tso, ignoreSmaller, skipUpperBoundCheck)
+	return a.timestampOracle.resetUserTimestamp(tso, ignoreSmaller, skipUpperBoundCheck)
 }
 
 // GenerateTSO is used to generate the given number of TSOs. Make sure you have initialized the TSO allocator before calling this method.
@@ -235,7 +236,7 @@ func (a *Allocator) GenerateTSO(ctx context.Context, count uint32) (pdpb.Timesta
 		return pdpb.Timestamp{}, errs.ErrGenerateTimestamp.FastGenByArgs(fmt.Sprintf("requested pd %s of cluster", errs.NotLeaderErr))
 	}
 
-	return a.timestampOracle.getTS(ctx, a.member, count)
+	return a.timestampOracle.getTS(ctx, count)
 }
 
 // Reset is used to reset the TSO allocator, it will also reset the leadership if the `resetLeader` flag is true.

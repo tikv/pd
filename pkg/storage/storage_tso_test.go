@@ -20,17 +20,31 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/tikv/pd/pkg/election"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 )
 
-const testGroupID = uint32(1)
+const (
+	testGroupID     = uint32(1)
+	testLeaderKey   = "test-leader-key"
+	testLeaderValue = "test-leader-value"
+)
+
+func prepare(t *testing.T) (storage Storage, clean func(), leadership *election.Leadership) {
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1)
+	storage = NewStorageWithEtcdBackend(client)
+	leadership = election.NewLeadership(client, testLeaderKey, "storage_tso_test")
+	err := leadership.Campaign(60, testLeaderValue)
+	require.NoError(t, err)
+	return storage, clean, leadership
+}
 
 func TestSaveLoadTimestamp(t *testing.T) {
 	re := require.New(t)
-	storage, clean := newTestStorage(t)
+	storage, clean, leadership := prepare(t)
 	defer clean()
 	expectedTS := time.Now().Round(0)
-	err := storage.SaveTimestamp(testGroupID, expectedTS)
+	err := storage.SaveTimestamp(testGroupID, expectedTS, leadership)
 	re.NoError(err)
 	ts, err := storage.LoadTimestamp(testGroupID)
 	re.NoError(err)
@@ -39,14 +53,14 @@ func TestSaveLoadTimestamp(t *testing.T) {
 
 func TestTimestampTxn(t *testing.T) {
 	re := require.New(t)
-	storage, clean := newTestStorage(t)
+	storage, clean, leadership := prepare(t)
 	defer clean()
 	globalTS1 := time.Now().Round(0)
-	err := storage.SaveTimestamp(testGroupID, globalTS1)
+	err := storage.SaveTimestamp(testGroupID, globalTS1, leadership)
 	re.NoError(err)
 
 	globalTS2 := globalTS1.Add(-time.Millisecond).Round(0)
-	err = storage.SaveTimestamp(testGroupID, globalTS2)
+	err = storage.SaveTimestamp(testGroupID, globalTS2, leadership)
 	re.Error(err)
 
 	ts, err := storage.LoadTimestamp(testGroupID)
@@ -54,7 +68,47 @@ func TestTimestampTxn(t *testing.T) {
 	re.Equal(globalTS1, ts)
 }
 
-func newTestStorage(t *testing.T) (Storage, func()) {
-	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1)
-	return NewStorageWithEtcdBackend(client), clean
+func TestSaveTimestampWithLeaderCheck(t *testing.T) {
+	re := require.New(t)
+	storage, clean, leadership := prepare(t)
+	defer clean()
+
+	// testLeaderKey -> testLeaderValue
+	globalTS := time.Now().Round(0)
+	err := storage.SaveTimestamp(testGroupID, globalTS, leadership)
+	re.NoError(err)
+	ts, err := storage.LoadTimestamp(testGroupID)
+	re.NoError(err)
+	re.Equal(globalTS, ts)
+
+	err = storage.SaveTimestamp(testGroupID, globalTS.Add(time.Second), &election.Leadership{})
+	re.ErrorContains(err, "leadership is not valid, leader value is empty")
+	ts, err = storage.LoadTimestamp(testGroupID)
+	re.NoError(err)
+	re.Equal(globalTS, ts)
+
+	// testLeaderKey -> ""
+	storage.Save(leadership.GetLeaderKey(), "")
+	err = storage.SaveTimestamp(testGroupID, globalTS.Add(time.Second), leadership)
+	re.ErrorContains(err, "leader value does not match")
+	ts, err = storage.LoadTimestamp(testGroupID)
+	re.NoError(err)
+	re.Equal(globalTS, ts)
+
+	// testLeaderKey -> non-existent
+	storage.Remove(leadership.GetLeaderKey())
+	err = storage.SaveTimestamp(testGroupID, globalTS.Add(time.Second), leadership)
+	re.ErrorContains(err, "leader value does not match")
+	ts, err = storage.LoadTimestamp(testGroupID)
+	re.NoError(err)
+	re.Equal(globalTS, ts)
+
+	// testLeaderKey -> testLeaderValue
+	storage.Save(leadership.GetLeaderKey(), testLeaderValue)
+	globalTS = globalTS.Add(time.Second)
+	err = storage.SaveTimestamp(testGroupID, globalTS, leadership)
+	re.NoError(err)
+	ts, err = storage.LoadTimestamp(testGroupID)
+	re.NoError(err)
+	re.Equal(globalTS, ts)
 }
