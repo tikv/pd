@@ -140,7 +140,7 @@ func TestLogicalOverflow(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	// Set to max update interval so we can drain the logical part easily.
+	// Set to max update interval so we can drain the logical part easily later.
 	updateInterval := config.MaxTSOUpdatePhysicalInterval
 	cluster, err := tests.NewTestCluster(ctx, 1, func(conf *config.Config, _ string) {
 		conf.TSOUpdatePhysicalInterval = typeutil.Duration{Duration: updateInterval}
@@ -160,9 +160,12 @@ func TestLogicalOverflow(t *testing.T) {
 	re.NoError(err)
 	defer tsoClient.CloseSend()
 
-	var maxDuration time.Duration
+	var (
+		maxDuration   time.Duration
+		lastTimestamp *pdpb.Timestamp
+	)
 	// Since the max logical count is 2 << 18 (262144), we request 20 times with 26214 count each time.
-	// It's enough to drain the logical part.
+	// This ensures that the logical part will definitely overflow once within the `updateInterval`.
 	count := (1 << 18) / 10
 	for range 20 {
 		begin := time.Now()
@@ -174,12 +177,24 @@ func TestLogicalOverflow(t *testing.T) {
 		re.NoError(tsoClient.Send(req))
 		resp, err := tsoClient.Recv()
 		re.NoError(err)
-		re.NotNil(checkAndReturnTimestampResponse(re, req, resp))
+		// Record the max duration to validate whether the overflow is triggered later.
 		duration := time.Since(begin)
 		if duration > maxDuration {
 			maxDuration = duration
 		}
+		// Check the monotonicity of the timestamp.
+		timestamp := checkAndReturnTimestampResponse(re, req, resp)
+		re.NotNil(timestamp)
+		if lastTimestamp != nil {
+			lastPhysical, curPhysical := lastTimestamp.GetPhysical(), timestamp.GetPhysical()
+			re.GreaterOrEqual(curPhysical, lastPhysical)
+			// If the physical time is the same, the logical time must be strictly increasing.
+			if curPhysical == lastPhysical {
+				re.Greater(timestamp.GetLogical(), lastTimestamp.GetLogical())
+			}
+		}
+		lastTimestamp = timestamp
 	}
-	// Due to the overflow triggered, there must be a duration greater than the update interval.
+	// Due to the overflow triggered, there at least one request duration greater than the `updateInterval`.
 	re.Greater(maxDuration, updateInterval)
 }
