@@ -21,7 +21,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 
 	"github.com/pingcap/failpoint"
@@ -39,8 +38,8 @@ import (
 )
 
 const (
-	// UpdateTimestampGuard is the min timestamp interval.
-	UpdateTimestampGuard = time.Millisecond
+	// updateTimestampGuard is the min timestamp interval.
+	updateTimestampGuard = time.Millisecond
 	// maxLogical is the max upper limit for logical time.
 	// When a TSO's logical time reaches this limit,
 	// the physical time will be forced to increase.
@@ -61,7 +60,6 @@ type tsoObject struct {
 
 // timestampOracle is used to maintain the logic of TSO.
 type timestampOracle struct {
-	client          *clientv3.Client
 	keyspaceGroupID uint32
 	storage         endpoint.TSOStorage
 	// TODO: remove saveInterval
@@ -162,13 +160,13 @@ func (t *timestampOracle) syncTimestamp() error {
 	})
 	// If the current system time minus the saved etcd timestamp is less than `UpdateTimestampGuard`,
 	// the timestamp allocation will start from the saved etcd timestamp temporarily.
-	if typeutil.SubRealTimeByWallClock(next, last) < UpdateTimestampGuard {
+	if typeutil.SubRealTimeByWallClock(next, last) < updateTimestampGuard {
 		log.Warn("system time may be incorrect",
 			logutil.CondUint32("keyspace-group-id", t.keyspaceGroupID, t.keyspaceGroupID > 0),
 			zap.Time("last", last), zap.Time("last-saved", lastSavedTime),
 			zap.Time("next", next),
 			errs.ZapError(errs.ErrIncorrectSystemTime))
-		next = last.Add(UpdateTimestampGuard)
+		next = last.Add(updateTimestampGuard)
 	}
 	failpoint.Inject("failedToSaveTimestamp", func() {
 		failpoint.Return(errs.ErrEtcdTxnInternal)
@@ -244,7 +242,7 @@ func (t *timestampOracle) resetUserTimestamp(leadership *election.Leadership, ts
 		return errs.ErrResetUserTimestamp.FastGenByArgs("the specified ts is too larger than now")
 	}
 	// save into etcd only if nextPhysical is close to lastSavedTime
-	if typeutil.SubRealTimeByWallClock(t.getLastSavedTime(), nextPhysical) <= UpdateTimestampGuard {
+	if typeutil.SubRealTimeByWallClock(t.getLastSavedTime(), nextPhysical) <= updateTimestampGuard {
 		save := nextPhysical.Add(t.saveInterval)
 		start := time.Now()
 		if err := t.storage.SaveTimestamp(t.keyspaceGroupID, save); err != nil {
@@ -310,7 +308,7 @@ func (t *timestampOracle) updateTimestamp() error {
 
 	var next time.Time
 	// If the system time is greater, it will be synchronized with the system time.
-	if jetLag > UpdateTimestampGuard {
+	if jetLag > updateTimestampGuard {
 		next = now
 	} else if prevLogical > maxLogical/2 {
 		// The reason choosing maxLogical/2 here is that it's big enough for common cases.
@@ -327,7 +325,7 @@ func (t *timestampOracle) updateTimestamp() error {
 
 	// It is not safe to increase the physical time to `next`.
 	// The time window needs to be updated and saved to etcd.
-	if typeutil.SubRealTimeByWallClock(t.getLastSavedTime(), next) <= UpdateTimestampGuard {
+	if typeutil.SubRealTimeByWallClock(t.getLastSavedTime(), next) <= updateTimestampGuard {
 		save := next.Add(t.saveInterval)
 		start := time.Now()
 		if err := t.storage.SaveTimestamp(t.keyspaceGroupID, save); err != nil {
