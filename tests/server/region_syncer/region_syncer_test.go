@@ -41,6 +41,7 @@ func TestRegionSyncer(t *testing.T) {
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/storage/levelDBStorageFastFlush", `return(true)`))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/syncer/noFastExitSync", `return(true)`))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/syncer/disableClientStreaming", `return(true)`))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/syncRegionChannelFull", `return(true)`))
 
 	mockSyncFull := make(chan struct{})
 	re.NoError(failpoint.EnableCall("github.com/tikv/pd/pkg/syncer/syncRegionChannelFull", func() {
@@ -79,6 +80,7 @@ func TestRegionSyncer(t *testing.T) {
 		err = rc.HandleRegionHeartbeat(region)
 		re.NoError(err)
 	}
+	time.Sleep(time.Second)
 	close(mockSyncFull)
 
 	checkRegions := func() {
@@ -182,6 +184,7 @@ func TestRegionSyncer(t *testing.T) {
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/syncer/noFastExitSync"))
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/storage/levelDBStorageFastFlush"))
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/syncer/syncRegionChannelFull"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/syncRegionChannelFull"))
 }
 
 func TestFullSyncWithAddMember(t *testing.T) {
