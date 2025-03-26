@@ -30,7 +30,7 @@ import (
 	"github.com/tikv/pd/tests"
 )
 
-func TestReady(t *testing.T) {
+func TestReadyAPI(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -44,23 +44,23 @@ func TestReady(t *testing.T) {
 	url := leader.GetConfig().ClientUrls + v2Prefix + "/ready"
 	// check ready status when region is not loaded for leader
 	failpoint.Enable("github.com/tikv/pd/server/apiv2/handlers/loadRegionSlow", `return("`+leader.GetAddr()+`")`)
-	checkReady(re, url, false)
+	checkReadyAPI(re, url, false)
 	// check ready status when region is loaded for leader
 	failpoint.Disable("github.com/tikv/pd/server/apiv2/handlers/loadRegionSlow")
-	checkReady(re, url, true)
+	checkReadyAPI(re, url, true)
 	// check ready status when region is not loaded for follower
 	followerServer := cluster.GetServer(cluster.GetFollower())
 	url = followerServer.GetConfig().ClientUrls + v2Prefix + "/ready"
 	failpoint.Enable("github.com/tikv/pd/server/apiv2/handlers/loadRegionSlow", `return("`+followerServer.GetAddr()+`")`)
-	checkReady(re, url, true)
-	checkReady(re, url, false, apiutil.PDAllowFollowerHandleHeader)
+	checkReadyAPI(re, url, true)
+	checkReadyAPI(re, url, false, apiutil.PDAllowFollowerHandleHeader)
 	// check ready status when region is loaded for follower
 	failpoint.Disable("github.com/tikv/pd/server/apiv2/handlers/loadRegionSlow")
-	checkReady(re, url, true)
-	checkReady(re, url, true, apiutil.PDAllowFollowerHandleHeader)
+	checkReadyAPI(re, url, true)
+	checkReadyAPI(re, url, true, apiutil.PDAllowFollowerHandleHeader)
 }
 
-func checkReady(re *require.Assertions, url string, isReady bool, headers ...string) {
+func checkReadyAPI(re *require.Assertions, url string, isReady bool, headers ...string) {
 	expectCode := http.StatusOK
 	if !isReady {
 		expectCode = http.StatusInternalServerError
