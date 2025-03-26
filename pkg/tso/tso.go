@@ -93,10 +93,9 @@ func newTimestampOracle(am *AllocatorManager) *timestampOracle {
 	return oracle
 }
 
+// saveTimestamp is used to save the timestamp to the storage. It will pass through
+// the leadership to the storage to ensure only the leader can save the timestamp.
 func (t *timestampOracle) saveTimestamp(ts time.Time) error {
-	if !t.member.IsLeader() {
-		return errs.ErrSaveTimestamp.FastGenByArgs("not leader anymore")
-	}
 	return t.storage.SaveTimestamp(t.keyspaceGroupID, ts, t.member.GetLeadership())
 }
 

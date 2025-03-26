@@ -83,7 +83,7 @@ func TestSaveTimestampWithLeaderCheck(t *testing.T) {
 	re.Equal(globalTS, ts)
 
 	err = storage.SaveTimestamp(testGroupID, globalTS.Add(time.Second), &election.Leadership{})
-	re.ErrorContains(err, "leadership is not valid, leader value is empty")
+	re.ErrorContains(err, "leadership has not been granted yet, leader value is empty")
 	ts, err = storage.LoadTimestamp(keypath.TimestampPath(testGroupID))
 	re.NoError(err)
 	re.Equal(globalTS, ts)
