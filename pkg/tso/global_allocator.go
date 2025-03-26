@@ -77,7 +77,6 @@ func NewGlobalTSOAllocator(
 
 func newGlobalTimestampOracle(am *AllocatorManager) *timestampOracle {
 	oracle := &timestampOracle{
-		client:                 am.member.GetLeadership().GetClient(),
 		keyspaceGroupID:        am.kgID,
 		storage:                am.storage,
 		saveInterval:           am.cfg.GetTSOSaveInterval(),
