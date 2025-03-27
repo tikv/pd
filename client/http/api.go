@@ -17,6 +17,7 @@ package http
 import (
 	"fmt"
 	"net/url"
+	"path"
 	"time"
 )
 
@@ -60,6 +61,7 @@ const (
 	RegionLabelRulesByIDs = "/pd/api/v1/config/region-label/rules/ids"
 	// Scheduler
 	Schedulers            = "/pd/api/v1/schedulers"
+	SchedulerConfig       = "/pd/api/v1/scheduler-config"
 	scatterRangeScheduler = "/pd/api/v1/schedulers/scatter-range-scheduler-"
 	// Admin
 	ResetTS                = "/pd/api/v1/admin/reset-ts"
@@ -127,6 +129,13 @@ func RegionStatsByKeyRange(keyRange *KeyRange, onlyCount bool) string {
 		StatsRegion, startKeyStr, endKeyStr)
 }
 
+// RegionDistributionsByKeyRange returns the path of PD HTTP API to get region distribution by start key and end key.
+func RegionDistributionsByKeyRange(keyRange *KeyRange, engine string) string {
+	startKeyStr, endKeyStr := keyRange.EscapeAsUTF8Str()
+	return fmt.Sprintf("%s?use_hot&start_key=%s&end_key=%s&engine=%s",
+		StatsRegion, startKeyStr, endKeyStr, engine)
+}
+
 // StoreByID returns the store API with store ID parameter.
 func StoreByID(id uint64) string {
 	return fmt.Sprintf("%s/%d", store, id)
@@ -175,6 +184,11 @@ func PlacementRuleBundleWithPartialParameter(partial bool) string {
 // PlacementRuleGroupByID returns the path of PD HTTP API to get placement rule group by ID.
 func PlacementRuleGroupByID(id string) string {
 	return fmt.Sprintf("%s/%s", placementRuleGroup, id)
+}
+
+// GetSchedulerConfigURIByName returns the path of PD HTTP API to get configuration of the given scheduler
+func GetSchedulerConfigURIByName(name string) string {
+	return path.Join(SchedulerConfig, name, "list")
 }
 
 // SchedulerByName returns the scheduler API with the given scheduler name.
