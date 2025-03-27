@@ -447,6 +447,8 @@ func InitRegions(regionLen int) []*core.RegionInfo {
 				Version:  1,
 			}
 			region.UpdateBuckets(buckets, region.GetBuckets())
+		} else {
+			region.UpdateBuckets(&metapb.Buckets{}, region.GetBuckets())
 		}
 		regions = append(regions, region)
 	}
