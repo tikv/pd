@@ -24,6 +24,7 @@ import (
 	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/election"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/typeutil"
@@ -77,7 +78,7 @@ func (se *StorageEndpoint) SaveTimestamp(groupID uint32, ts time.Time, leadershi
 	log.Info("saving timestamp to the storage", logFilds...)
 	// Fast path to return error if the leadership has not been granted yet.
 	if len(leadership.GetLeaderValue()) == 0 {
-		return errors.New("leadership has not been granted yet, leader value is empty")
+		return errors.Errorf("%s due to leadership has not been granted yet", errs.NotLeaderErr)
 	}
 	return se.RunInTxn(context.Background(), func(txn kv.Txn) error {
 		// Ensure the current server is leader by reading and comparing the leader value.
@@ -87,7 +88,7 @@ func (se *StorageEndpoint) SaveTimestamp(groupID uint32, ts time.Time, leadershi
 		}
 		if expected := leadership.GetLeaderValue(); leaderValue != expected {
 			log.Error("leader value does not match", append(logFilds, zap.String("current-leader-value", leaderValue))...)
-			return errors.Errorf("leader value does not match, current: %s, expected: %s", leaderValue, expected)
+			return errors.Errorf("%s due to leader value does not match, current: %s, expected: %s", errs.NotLeaderErr, leaderValue, expected)
 		}
 
 		value, err := txn.Load(keypath.TimestampPath(groupID))

@@ -21,6 +21,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/tikv/pd/pkg/election"
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 )
 
@@ -82,7 +83,7 @@ func TestSaveTimestampWithLeaderCheck(t *testing.T) {
 	re.Equal(globalTS, ts)
 
 	err = storage.SaveTimestamp(testGroupID, globalTS.Add(time.Second), &election.Leadership{})
-	re.ErrorContains(err, "leadership has not been granted yet, leader value is empty")
+	re.True(errs.IsLeaderChanged(err))
 	ts, err = storage.LoadTimestamp(testGroupID)
 	re.NoError(err)
 	re.Equal(globalTS, ts)
@@ -90,7 +91,7 @@ func TestSaveTimestampWithLeaderCheck(t *testing.T) {
 	// testLeaderKey -> ""
 	storage.Save(leadership.GetLeaderKey(), "")
 	err = storage.SaveTimestamp(testGroupID, globalTS.Add(time.Second), leadership)
-	re.ErrorContains(err, "leader value does not match")
+	re.True(errs.IsLeaderChanged(err))
 	ts, err = storage.LoadTimestamp(testGroupID)
 	re.NoError(err)
 	re.Equal(globalTS, ts)
@@ -98,7 +99,7 @@ func TestSaveTimestampWithLeaderCheck(t *testing.T) {
 	// testLeaderKey -> non-existent
 	storage.Remove(leadership.GetLeaderKey())
 	err = storage.SaveTimestamp(testGroupID, globalTS.Add(time.Second), leadership)
-	re.ErrorContains(err, "leader value does not match")
+	re.True(errs.IsLeaderChanged(err))
 	ts, err = storage.LoadTimestamp(testGroupID)
 	re.NoError(err)
 	re.Equal(globalTS, ts)
