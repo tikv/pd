@@ -219,8 +219,6 @@ func (m *GroupManager) allocNodesToAllKeyspaceGroups(ctx context.Context) {
 }
 
 func (m *GroupManager) initTSONodesWatcher(client *clientv3.Client) {
-	tsoServiceKey := keypath.ServicePath(constant.TSOServiceName)
-
 	putFn := func(kv *mvccpb.KeyValue) error {
 		s := &discovery.ServiceRegistryEntry{}
 		if err := json.Unmarshal(kv.Value, s); err != nil {
@@ -247,7 +245,7 @@ func (m *GroupManager) initTSONodesWatcher(client *clientv3.Client) {
 		&m.wg,
 		client,
 		"tso-nodes-watcher",
-		tsoServiceKey,
+		keypath.ServicePath(constant.TSOServiceName),
 		func([]*clientv3.Event) error { return nil },
 		putFn,
 		deleteFn,

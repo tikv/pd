@@ -131,7 +131,7 @@ func (t *timestampOracle) SyncTimestamp() error {
 		time.Sleep(time.Second)
 	})
 
-	last, err := t.storage.LoadTimestamp(keypath.Prefix(keypath.TimestampPath(t.keyspaceGroupID)))
+	last, err := t.storage.LoadTimestamp(keypath.TimestampPath(t.keyspaceGroupID))
 	if err != nil {
 		return err
 	}
@@ -219,6 +219,10 @@ func (t *timestampOracle) resetUserTimestamp(leadership *election.Leadership, ts
 		logicalDifference         = int64(nextLogical) - t.tsoMux.logical
 		physicalDifference        = typeutil.SubTSOPhysicalByWallClock(nextPhysical, t.tsoMux.physical)
 	)
+	// check if the TSO is initialized.
+	if t.tsoMux.physical == typeutil.ZeroTime {
+		return errs.ErrResetUserTimestamp.FastGenByArgs("timestamp in memory has not been initialized")
+	}
 	// do not update if next physical time is less/before than prev
 	if physicalDifference < 0 {
 		t.metrics.errResetSmallPhysicalTSEvent.Inc()

@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"net/http"
 	"reflect"
+	"sync"
 	"testing"
 	"time"
 
@@ -832,4 +833,271 @@ func (suite *serverTestSuite) TestBatchSplit() {
 
 	suite.TearDownSuite()
 	suite.SetupSuite()
+}
+
+func (suite *serverTestSuite) TestBatchSplitCompatibility() {
+	re := suite.Require()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/mcs/scheduling/server/fastUpdateMember", `return(true)`))
+	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.cluster)
+	re.NoError(err)
+	defer tc.Destroy()
+	tc.WaitForPrimaryServing(re)
+
+	rc := suite.pdLeader.GetServer().GetRaftCluster()
+	re.NotNil(rc)
+	s := &server.GrpcServer{Server: suite.pdLeader.GetServer()}
+	for i := uint64(1); i <= 3; i++ {
+		resp, err := s.PutStore(
+			context.Background(), &pdpb.PutStoreRequest{
+				Header: &pdpb.RequestHeader{ClusterId: suite.pdLeader.GetClusterID()},
+				Store: &metapb.Store{
+					Id:      i,
+					Address: fmt.Sprintf("mock://%d", i),
+					State:   metapb.StoreState_Up,
+					Version: "7.0.0",
+				},
+			},
+		)
+		re.NoError(err)
+		re.Empty(resp.GetHeader().GetError())
+	}
+	grpcPDClient := testutil.MustNewGrpcClient(re, suite.pdLeader.GetServer().GetAddr())
+	stream, err := grpcPDClient.RegionHeartbeat(suite.ctx)
+	re.NoError(err)
+	peers := []*metapb.Peer{
+		{Id: 11, StoreId: 1},
+		{Id: 22, StoreId: 2},
+		{Id: 33, StoreId: 3},
+	}
+
+	interval := &pdpb.TimeInterval{StartTimestamp: 0, EndTimestamp: 10}
+	regionReq := &pdpb.RegionHeartbeatRequest{
+		Header:          testutil.NewRequestHeader(suite.pdLeader.GetClusterID()),
+		Region:          &metapb.Region{Id: 10, Peers: peers, StartKey: []byte("a"), EndKey: []byte("b")},
+		Leader:          peers[0],
+		ApproximateSize: 30 * units.MiB,
+		ApproximateKeys: 300,
+		Interval:        interval,
+		Term:            1,
+		CpuUsage:        100,
+	}
+	err = stream.Send(regionReq)
+	re.NoError(err)
+	testutil.Eventually(re, func() bool {
+		region := tc.GetPrimaryServer().GetCluster().GetRegion(10)
+		return region != nil && region.GetTerm() == 1 &&
+			region.GetApproximateKeys() == 300 && region.GetApproximateSize() == 30 &&
+			reflect.DeepEqual(region.GetLeader(), peers[0]) &&
+			reflect.DeepEqual(region.GetInterval(), interval)
+	})
+
+	req := &pdpb.AskBatchSplitRequest{
+		Header: &pdpb.RequestHeader{
+			ClusterId: suite.pdLeader.GetClusterID(),
+		},
+		Region:     regionReq.GetRegion(),
+		SplitCount: 10,
+	}
+
+	// case 1: The scheduling server is upgraded first, and then the PD server is upgraded.
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/handleAllocIDNonBatch", `return(true)`))
+	resp, err := grpcPDClient.AskBatchSplit(suite.ctx, req)
+	re.NoError(err)
+	allocatedIDs := map[uint64]struct{}{}
+	var maxID uint64
+	maxID = checkAllocatedID(re, resp, allocatedIDs, maxID)
+	re.Len(allocatedIDs, 40)
+	// Use the batch AllocID, which means the PD has finished the upgrade.
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/handleAllocIDNonBatch"))
+	resp, err = grpcPDClient.AskBatchSplit(suite.ctx, req)
+	re.NoError(err)
+	maxID = checkAllocatedID(re, resp, allocatedIDs, maxID)
+	re.Len(allocatedIDs, 80)
+
+	// case 2: The PD server is downgraded first.
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/handleAllocIDNonBatch", `return(true)`))
+	resp, err = grpcPDClient.AskBatchSplit(suite.ctx, req)
+	re.NoError(err)
+	maxID = checkAllocatedID(re, resp, allocatedIDs, maxID)
+	re.Len(allocatedIDs, 120)
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/handleAllocIDNonBatch"))
+	// Use the batch AllocID, which means the scheduling server has finished the upgrade.
+	resp, err = grpcPDClient.AskBatchSplit(suite.ctx, req)
+	re.NoError(err)
+	maxID = checkAllocatedID(re, resp, allocatedIDs, maxID)
+	re.Len(allocatedIDs, 160)
+
+	// case 3: The PD server is upgraded first, and then the scheduling server is upgraded.
+	re.NoError(failpoint.Enable("github.com/tikv/pd/mcs/scheduling/server/allocIDNonBatch", `return(true)`))
+	resp, err = grpcPDClient.AskBatchSplit(suite.ctx, req)
+	re.NoError(err)
+	maxID = checkAllocatedID(re, resp, allocatedIDs, maxID)
+	re.Len(allocatedIDs, 200)
+	re.NoError(failpoint.Disable("github.com/tikv/pd/mcs/scheduling/server/allocIDNonBatch"))
+	// Use the batch AllocID, which means the scheduling server has finished the upgrade.
+	resp, err = grpcPDClient.AskBatchSplit(suite.ctx, req)
+	re.NoError(err)
+	maxID = checkAllocatedID(re, resp, allocatedIDs, maxID)
+	re.Len(allocatedIDs, 240)
+
+	// case 4: The scheduling server is downgraded first.
+	re.NoError(failpoint.Enable("github.com/tikv/pd/mcs/scheduling/server/allocIDNonBatch", `return(true)`))
+	resp, err = grpcPDClient.AskBatchSplit(suite.ctx, req)
+	re.NoError(err)
+	maxID = checkAllocatedID(re, resp, allocatedIDs, maxID)
+	re.Len(allocatedIDs, 280)
+	re.NoError(failpoint.Disable("github.com/tikv/pd/mcs/scheduling/server/allocIDNonBatch"))
+	// Use the batch AllocID, which means the scheduling server has finished the upgrade.
+	resp, err = grpcPDClient.AskBatchSplit(suite.ctx, req)
+	re.NoError(err)
+	_ = checkAllocatedID(re, resp, allocatedIDs, maxID)
+	re.Len(allocatedIDs, 320)
+
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/scheduling/server/fastUpdateMember"))
+
+	suite.TearDownSuite()
+	suite.SetupSuite()
+}
+
+func checkAllocatedID(re *require.Assertions, resp *pdpb.AskBatchSplitResponse, allocatedIDs map[uint64]struct{}, maxID uint64) uint64 {
+	re.Empty(resp.GetHeader().GetError())
+	for _, id := range resp.GetIds() {
+		_, ok := allocatedIDs[id.NewRegionId]
+		re.False(ok)
+		re.Greater(id.NewRegionId, maxID)
+		maxID = id.NewRegionId
+		allocatedIDs[id.NewRegionId] = struct{}{}
+		for _, peer := range id.NewPeerIds {
+			_, ok := allocatedIDs[peer]
+			re.False(ok)
+			re.Greater(peer, maxID)
+			maxID = peer
+			allocatedIDs[peer] = struct{}{}
+		}
+	}
+	return maxID
+}
+
+func (suite *serverTestSuite) TestConcurrentBatchSplit() {
+	re := suite.Require()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/mcs/scheduling/server/fastUpdateMember", `return(true)`))
+	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.cluster)
+	re.NoError(err)
+	defer tc.Destroy()
+	tc.WaitForPrimaryServing(re)
+
+	rc := suite.pdLeader.GetServer().GetRaftCluster()
+	re.NotNil(rc)
+	s := &server.GrpcServer{Server: suite.pdLeader.GetServer()}
+	for i := uint64(1); i <= 3; i++ {
+		resp, err := s.PutStore(
+			context.Background(), &pdpb.PutStoreRequest{
+				Header: &pdpb.RequestHeader{ClusterId: suite.pdLeader.GetClusterID()},
+				Store: &metapb.Store{
+					Id:      i,
+					Address: fmt.Sprintf("mock://%d", i),
+					State:   metapb.StoreState_Up,
+					Version: "7.0.0",
+				},
+			},
+		)
+		re.NoError(err)
+		re.Empty(resp.GetHeader().GetError())
+	}
+	grpcPDClient := testutil.MustNewGrpcClient(re, suite.pdLeader.GetServer().GetAddr())
+	stream, err := grpcPDClient.RegionHeartbeat(suite.ctx)
+	re.NoError(err)
+	peers := []*metapb.Peer{
+		{Id: 11, StoreId: 1},
+		{Id: 22, StoreId: 2},
+		{Id: 33, StoreId: 3},
+	}
+
+	interval := &pdpb.TimeInterval{StartTimestamp: 0, EndTimestamp: 10}
+	regionReq := &pdpb.RegionHeartbeatRequest{
+		Header:          testutil.NewRequestHeader(suite.pdLeader.GetClusterID()),
+		Region:          &metapb.Region{Id: 10, Peers: peers, StartKey: []byte("a"), EndKey: []byte("b")},
+		Leader:          peers[0],
+		ApproximateSize: 30 * units.MiB,
+		ApproximateKeys: 300,
+		Interval:        interval,
+		Term:            1,
+		CpuUsage:        100,
+	}
+	err = stream.Send(regionReq)
+	re.NoError(err)
+	testutil.Eventually(re, func() bool {
+		region := tc.GetPrimaryServer().GetCluster().GetRegion(10)
+		return region != nil && region.GetTerm() == 1 &&
+			region.GetApproximateKeys() == 300 && region.GetApproximateSize() == 30 &&
+			reflect.DeepEqual(region.GetLeader(), peers[0]) &&
+			reflect.DeepEqual(region.GetInterval(), interval)
+	})
+
+	req := &pdpb.AskBatchSplitRequest{
+		Header: &pdpb.RequestHeader{
+			ClusterId: suite.pdLeader.GetClusterID(),
+		},
+		Region:     regionReq.GetRegion(),
+		SplitCount: 10,
+	}
+
+	// case 1: The scheduling server is upgraded first, PD server has not been upgraded.
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/handleAllocIDNonBatch", `return(true)`))
+	suite.checkConcurrentAllocatedID(re, req, grpcPDClient)
+
+	// case 2: The scheduling server is upgraded first, PD server has been upgraded.
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/handleAllocIDNonBatch"))
+	suite.checkConcurrentAllocatedID(re, req, grpcPDClient)
+
+	// case 3: The PD server is upgraded first, scheduling server has not been upgraded.
+	re.NoError(failpoint.Enable("github.com/tikv/pd/mcs/scheduling/server/allocIDNonBatch", `return(true)`))
+	suite.checkConcurrentAllocatedID(re, req, grpcPDClient)
+
+	// case 4: The PD server is upgraded first, scheduling server has been upgraded.
+	re.NoError(failpoint.Disable("github.com/tikv/pd/mcs/scheduling/server/allocIDNonBatch"))
+	suite.checkConcurrentAllocatedID(re, req, grpcPDClient)
+
+	// case 5: Both the PD server and scheduling server has not been upgraded.
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/handleAllocIDNonBatch", `return(true)`))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/mcs/scheduling/server/allocIDNonBatch", `return(true)`))
+	suite.checkConcurrentAllocatedID(re, req, grpcPDClient)
+
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/handleAllocIDNonBatch"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/mcs/scheduling/server/allocIDNonBatch"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/scheduling/server/fastUpdateMember"))
+
+	suite.TearDownSuite()
+	suite.SetupSuite()
+}
+
+func (suite *serverTestSuite) checkConcurrentAllocatedID(re *require.Assertions, req *pdpb.AskBatchSplitRequest, grpcPDClient pdpb.PDClient) {
+	var wg sync.WaitGroup
+	var allocatedIDs sync.Map
+	for range 100 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			resp, err := grpcPDClient.AskBatchSplit(suite.ctx, req)
+			re.NoError(err)
+			re.Empty(resp.GetHeader().GetError())
+			for _, id := range resp.GetIds() {
+				_, ok := allocatedIDs.Load(id.NewRegionId)
+				re.False(ok)
+				allocatedIDs.Store(id.NewRegionId, struct{}{})
+				for _, peer := range id.NewPeerIds {
+					_, ok := allocatedIDs.Load(peer)
+					re.False(ok)
+					allocatedIDs.Store(peer, struct{}{})
+				}
+			}
+		}()
+	}
+	wg.Wait()
+	var len int
+	allocatedIDs.Range(func(_, _ any) bool {
+		len++
+		return true
+	})
+	re.Equal(4000, len)
 }

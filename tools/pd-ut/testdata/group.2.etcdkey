@@ -1,0 +1,5 @@
+/pd//region_label/ get
+/pd//region_label/rule_ remove
+/pd//region_label/rule_ save
+encryption_keys get
+encryption_keys watch

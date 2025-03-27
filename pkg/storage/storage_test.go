@@ -160,7 +160,7 @@ func TestSaveServiceGCSafePoint(t *testing.T) {
 		re.NoError(storage.SaveServiceGCSafePoint(ssp))
 	}
 
-	prefix := keypath.GCSafePointServicePrefixPath()
+	prefix := keypath.ServiceGCSafePointPrefix()
 	prefixEnd := clientv3.GetPrefixRangeEnd(prefix)
 	keys, values, err := storage.LoadRange(prefix, prefixEnd, len(serviceSafePoints))
 	re.NoError(err)
