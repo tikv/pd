@@ -16,7 +16,6 @@ package tsoutil
 
 import (
 	"context"
-	"strings"
 	"sync"
 	"time"
 
@@ -141,7 +140,7 @@ func (s *TSODispatcher) dispatch(
 				log.Error("proxy forward tso error",
 					zap.String("forwarded-host", forwardedHost),
 					errs.ZapError(errs.ErrGRPCSend, err))
-				if needUpdateServicePrimaryAddr && strings.Contains(err.Error(), errs.NotLeaderErr) {
+				if needUpdateServicePrimaryAddr && errs.IsLeaderChanged(err) {
 					tsoPrimaryWatchers[0].ForceLoad()
 				}
 				select {
