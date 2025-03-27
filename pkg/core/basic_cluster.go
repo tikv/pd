@@ -158,6 +158,9 @@ type KeyRange struct {
 	EndKey   []byte `json:"end-key"`
 }
 
+var _ json.Marshaler = KeyRange{}
+var _ json.Unmarshaler = &KeyRange{}
+
 // MarshalJSON marshals to json.
 func (kr KeyRange) MarshalJSON() ([]byte, error) {
 	m := map[string]string{

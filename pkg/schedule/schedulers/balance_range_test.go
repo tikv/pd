@@ -161,7 +161,7 @@ func TestFetchAllRegions(t *testing.T) {
 	re.Len(regions, 100)
 }
 
-func TestEncode(t *testing.T) {
+func TestCodecConfig(t *testing.T) {
 	re := require.New(t)
 	job := &balanceRangeSchedulerJob{
 		Engine: core.EngineTiKV,

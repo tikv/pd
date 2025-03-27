@@ -338,7 +338,6 @@ func (c *Cluster) updateScheduler() {
 				log.Error("scheduler not found", zap.String("type", scheduler.Type))
 				continue
 			}
-
 			s, err := schedulers.CreateScheduler(
 				schedulerType,
 				c.coordinator.GetOperatorController(),

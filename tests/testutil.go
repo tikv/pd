@@ -308,16 +308,15 @@ func NewSchedulingTestEnvironment(t *testing.T, opts ...ConfigOption) *Schedulin
 // RunTest is to run test based on the environment.
 // If env not set, it will run test in both non-microservice env and microservice env.
 func (s *SchedulingTestEnvironment) RunTest(test func(*TestCluster)) {
-	s.RunTestInMicroserviceEnv(test)
-	//switch s.Env {
-	//case NonMicroserviceEnv:
-	//	s.RunTestInNonMicroserviceEnv(test)
-	//case MicroserviceEnv:
-	//	s.RunTestInMicroserviceEnv(test)
-	//default:
-	//	s.RunTestInNonMicroserviceEnv(test)
-	//	s.RunTestInMicroserviceEnv(test)
-	//}
+	switch s.Env {
+	case NonMicroserviceEnv:
+		s.RunTestInNonMicroserviceEnv(test)
+	case MicroserviceEnv:
+		s.RunTestInMicroserviceEnv(test)
+	default:
+		s.RunTestInNonMicroserviceEnv(test)
+		s.RunTestInMicroserviceEnv(test)
+	}
 }
 
 // RunTestInNonMicroserviceMode is to run test in non-microservice environment.

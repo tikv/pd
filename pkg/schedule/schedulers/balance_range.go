@@ -311,7 +311,7 @@ func (s *balanceRangeScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster)
 // BalanceRangeCreateOption is used to create a scheduler with an option.
 type BalanceRangeCreateOption func(s *balanceRangeScheduler)
 
-// newBalanceRangeScheduler creates a scheduler that tends to keep given peer Rule on
+// newBalanceRangeScheduler creates a scheduler that tends to keep given peer rule on
 // special store balanced.
 func newBalanceRangeScheduler(opController *operator.Controller, conf *balanceRangeSchedulerConfig, options ...BalanceRangeCreateOption) Scheduler {
 	s := &balanceRangeScheduler{
@@ -641,7 +641,7 @@ func (s JobStatus) String() string {
 }
 
 // MarshalJSON marshals to json.
-func (s JobStatus) MarshalJSON() ([]byte, error) {
+func (s *JobStatus) MarshalJSON() ([]byte, error) {
 	return []byte(`"` + s.String() + `"`), nil
 }
 
