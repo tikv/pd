@@ -28,6 +28,7 @@ type (
 	Component string
 )
 
+// nolint: exported
 const (
 	// TestID is used for test.
 	TestID ID = "test"
@@ -36,22 +37,22 @@ const (
 	TestComponent Component = "test"
 
 	// client-go component
-	CodecPDClient       Component = "codec-pd-client"
-	RegionCache         Component = "region-cache"
-	StoreCache          Component = "store-cache"
-	Oracles             Component = "oracle"
-	Rawkv               Component = "rawkv"
-	KvStore             Component = "kv-store"
-	InterceptedPDClient Component = "intercepted-pd-client"
+	CodecPDClient       Component = "CodecPdClient"
+	RegionCache         Component = "RegionCache"
+	StoreCache          Component = "StoreCache"
+	Oracle              Component = "Oracle"
+	Rawkv               Component = "Rawkv"
+	KvStore             Component = "KvStore"
+	InterceptedPDClient Component = "InterceptedPdClient"
 
 	// TiDB component
-	Pitr             Component = "pitr"
-	Ddl              Component = "ddl"
-	ImportInto       Component = "import-into"
-	TikvHandler      Component = "tikv-handler"
-	GcWorker         Component = "gc-worker"
-	GcJob            Component = "gc-job"
-	DistributedGcJob Component = "distributed-gc-job"
+	Pitr             Component = "Pitr"
+	Ddl              Component = "Ddl"
+	ImportInto       Component = "ImportInto"
+	TikvHandler      Component = "TikvHandler"
+	GcWorker         Component = "GcWorker"
+	GcJob            Component = "GcJob"
+	DistributedGcJob Component = "DistributedGcJob"
 )
 
 var processName ID

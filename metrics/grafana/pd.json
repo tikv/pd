@@ -9217,7 +9217,7 @@
           ],
           "thresholds": [],
           "timeRegions": [],
-          "title": "Total Region Request",
+          "title": "Total Region Request(1% sample)",
           "tooltip": {
             "msResolution": false,
             "shared": true,
@@ -9328,7 +9328,7 @@
           ],
           "thresholds": [],
           "timeRegions": [],
-          "title": "Failed Region Request",
+          "title": "Failed Region Request(1% sample)",
           "tooltip": {
             "msResolution": false,
             "shared": true,

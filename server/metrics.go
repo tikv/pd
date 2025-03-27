@@ -15,6 +15,8 @@
 package server
 
 import (
+	"math/rand"
+
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/pingcap/kvproto/pkg/pdpb"
@@ -215,6 +217,11 @@ func init() {
 }
 
 func incRegionRequestCounter(method string, header *pdpb.RequestHeader, err *pdpb.Error) {
+	if rand.Intn(100) == 0 {
+		// sample 1% region requests to avoid high cardinality
+		return
+	}
+
 	var (
 		errMsg          = ""
 		callerID        = header.CallerId
