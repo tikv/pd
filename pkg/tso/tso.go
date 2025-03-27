@@ -63,6 +63,7 @@ type tsoObject struct {
 type timestampOracle struct {
 	client          *clientv3.Client
 	keyspaceGroupID uint32
+	member          ElectionMember
 	storage         endpoint.TSOStorage
 	// TODO: remove saveInterval
 	saveInterval           time.Duration
@@ -75,6 +76,27 @@ type timestampOracle struct {
 
 	// pre-initialized metrics
 	metrics *tsoMetrics
+}
+
+func newTimestampOracle(am *AllocatorManager) *timestampOracle {
+	oracle := &timestampOracle{
+		client:                 am.member.GetLeadership().GetClient(),
+		keyspaceGroupID:        am.kgID,
+		member:                 am.member,
+		storage:                am.storage,
+		saveInterval:           am.saveInterval,
+		updatePhysicalInterval: am.updatePhysicalInterval,
+		maxResetTSGap:          am.maxResetTSGap,
+		tsoMux:                 &tsoObject{},
+		metrics:                newTSOMetrics(am.getGroupIDStr(), GlobalDCLocation),
+	}
+	return oracle
+}
+
+// saveTimestamp is used to save the timestamp to the storage. It will pass through
+// the leadership to the storage to ensure only the leader can save the timestamp.
+func (t *timestampOracle) saveTimestamp(ts time.Time) error {
+	return t.storage.SaveTimestamp(t.keyspaceGroupID, ts, t.member.GetLeadership())
 }
 
 func (t *timestampOracle) setTSOPhysical(next time.Time, force bool) {
@@ -176,7 +198,7 @@ func (t *timestampOracle) SyncTimestamp() error {
 	})
 	save := next.Add(t.saveInterval)
 	start := time.Now()
-	if err = t.storage.SaveTimestamp(t.keyspaceGroupID, save); err != nil {
+	if err = t.saveTimestamp(save); err != nil {
 		t.metrics.errSaveSyncTSEvent.Inc()
 		return err
 	}
@@ -248,7 +270,7 @@ func (t *timestampOracle) resetUserTimestamp(leadership *election.Leadership, ts
 	if typeutil.SubRealTimeByWallClock(t.getLastSavedTime(), nextPhysical) <= UpdateTimestampGuard {
 		save := nextPhysical.Add(t.saveInterval)
 		start := time.Now()
-		if err := t.storage.SaveTimestamp(t.keyspaceGroupID, save); err != nil {
+		if err := t.saveTimestamp(save); err != nil {
 			t.metrics.errSaveResetTSEvent.Inc()
 			return err
 		}
@@ -331,7 +353,7 @@ func (t *timestampOracle) UpdateTimestamp() error {
 	if typeutil.SubRealTimeByWallClock(t.getLastSavedTime(), next) <= UpdateTimestampGuard {
 		save := next.Add(t.saveInterval)
 		start := time.Now()
-		if err := t.storage.SaveTimestamp(t.keyspaceGroupID, save); err != nil {
+		if err := t.saveTimestamp(save); err != nil {
 			log.Warn("save timestamp failed",
 				logutil.CondUint32("keyspace-group-id", t.keyspaceGroupID, t.keyspaceGroupID > 0),
 				zap.Error(err))
