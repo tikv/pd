@@ -19,6 +19,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/pingcap/failpoint"
+
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/apiv2/middlewares"
@@ -39,6 +41,13 @@ func Ready(c *gin.Context) {
 	svr := c.MustGet(middlewares.ServerContextKey).(*server.Server)
 	s := svr.GetStorage()
 	regionLoaded := storage.AreRegionsLoaded(s)
+	failpoint.Inject("loadRegionSlow", func(val failpoint.Value) {
+		if s, ok := val.(string); ok {
+			if svr.GetAddr() == s {
+				regionLoaded = false
+			}
+		}
+	})
 	if regionLoaded {
 		c.Status(http.StatusOK)
 	} else {
