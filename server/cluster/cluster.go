@@ -116,9 +116,10 @@ const (
 	minSnapshotDurationSec = 5
 
 	// heartbeat relative const
-	heartbeatTaskRunner = "heartbeat-async"
-	miscTaskRunner      = "misc-async"
-	logTaskRunner       = "log-async"
+	heartbeatTaskRunner  = "heartbeat-async"
+	miscTaskRunner       = "misc-async"
+	logTaskRunner        = "log-async"
+	syncRegionTaskRunner = "sync-region-async"
 )
 
 // Server is the interface for cluster.
@@ -190,6 +191,8 @@ type RaftCluster struct {
 	miscRunner ratelimit.Runner
 	// logRunner is used to process the log asynchronously.
 	logRunner ratelimit.Runner
+	// syncRegionRunner is used to sync region asynchronously.
+	syncRegionRunner ratelimit.Runner
 }
 
 // Status saves some state information.
@@ -214,17 +217,22 @@ func NewRaftCluster(
 	tsoAllocator *tso.AllocatorManager,
 ) *RaftCluster {
 	return &RaftCluster{
-		serverCtx:       ctx,
-		member:          member,
-		regionSyncer:    regionSyncer,
-		httpClient:      httpClient,
-		etcdClient:      etcdClient,
-		BasicCluster:    basicCluster,
-		storage:         storage,
-		tsoAllocator:    tsoAllocator,
-		heartbeatRunner: ratelimit.NewConcurrentRunner(heartbeatTaskRunner, ratelimit.NewConcurrencyLimiter(uint64(runtime.NumCPU()*2)), time.Minute),
-		miscRunner:      ratelimit.NewConcurrentRunner(miscTaskRunner, ratelimit.NewConcurrencyLimiter(uint64(runtime.NumCPU()*2)), time.Minute),
-		logRunner:       ratelimit.NewConcurrentRunner(logTaskRunner, ratelimit.NewConcurrencyLimiter(uint64(runtime.NumCPU()*2)), time.Minute),
+		serverCtx:    ctx,
+		member:       member,
+		regionSyncer: regionSyncer,
+		httpClient:   httpClient,
+		etcdClient:   etcdClient,
+		BasicCluster: basicCluster,
+		storage:      storage,
+		tsoAllocator: tsoAllocator,
+		heartbeatRunner: ratelimit.NewConcurrentRunner(heartbeatTaskRunner,
+			ratelimit.NewConcurrencyLimiter(uint64(runtime.NumCPU()*2)), time.Minute),
+		miscRunner: ratelimit.NewConcurrentRunner(miscTaskRunner,
+			ratelimit.NewConcurrencyLimiter(uint64(runtime.NumCPU()*2)), time.Minute),
+		logRunner: ratelimit.NewConcurrentRunner(logTaskRunner,
+			ratelimit.NewConcurrencyLimiter(uint64(runtime.NumCPU()*2)), time.Minute),
+		syncRegionRunner: ratelimit.NewConcurrentRunner(syncRegionTaskRunner,
+			ratelimit.NewConcurrencyLimiter(1), time.Minute),
 	}
 }
 
@@ -303,6 +311,9 @@ func (c *RaftCluster) InitCluster(
 	c.ctx, c.cancel = context.WithCancel(c.serverCtx)
 	c.progressManager = progress.NewManager()
 	c.changedRegions = make(chan *core.RegionInfo, defaultChangedRegionsLimit)
+	failpoint.Inject("syncRegionChannelFull", func() {
+		c.changedRegions = make(chan *core.RegionInfo, 100)
+	})
 	c.prevStoreLimit = make(map[uint64]map[storelimit.Type]float64)
 	c.unsafeRecoveryController = unsaferecovery.NewController(c)
 	c.keyspaceGroupManager = keyspaceGroupManager
@@ -402,6 +413,7 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 	c.heartbeatRunner.Start(c.ctx)
 	c.miscRunner.Start(c.ctx)
 	c.logRunner.Start(c.ctx)
+	c.syncRegionRunner.Start(c.ctx)
 	return nil
 }
 
@@ -884,6 +896,7 @@ func (c *RaftCluster) Stop() {
 	c.heartbeatRunner.Stop()
 	c.miscRunner.Stop()
 	c.logRunner.Stop()
+	c.syncRegionRunner.Stop()
 	c.Unlock()
 
 	c.wg.Wait()
@@ -1292,10 +1305,13 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 	}
 
 	if saveKV || needSync {
-		select {
-		case c.changedRegions <- region:
-		default:
-		}
+		ctx.SyncRegionRunner.RunTask(
+			regionID,
+			ratelimit.SyncRegionToFollower,
+			func(context.Context) {
+				c.changedRegions <- region
+			},
+		)
 	}
 	return nil
 }

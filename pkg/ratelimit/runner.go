@@ -35,6 +35,7 @@ const (
 	HandleOverlaps          = "HandleOverlaps"
 	CollectRegionStatsAsync = "CollectRegionStatsAsync"
 	SaveRegionToKV          = "SaveRegionToKV"
+	SyncRegionToFollower    = "SyncRegionToFollower"
 )
 
 const (
