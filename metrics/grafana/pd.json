@@ -9207,7 +9207,7 @@
           "targets": [
             {
               "expr": "sum(rate(pd_server_region_request_cnt{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\"}[1m])) by (request, caller_id, caller_component)",
-              "legendFormat": "{{request}}-{{caller_id}}->{{caller_component}}",
+              "legendFormat": "{{request}}-{{caller_id}}-{{caller_component}}",
               "interval": "",
               "exemplar": true,
               "intervalFactor": 2,
@@ -9318,7 +9318,7 @@
           "targets": [
             {
               "expr": "sum(rate(pd_server_region_request_cnt{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\", err_msg!=\"\"}[1m])) by (request, caller_id, caller_component)",
-              "legendFormat": "{{request}}-{{caller_id}}->{{caller_component}}",
+              "legendFormat": "{{request}}-{{caller_id}}-{{caller_component}}",
               "interval": "",
               "exemplar": true,
               "intervalFactor": 2,
@@ -9328,7 +9328,7 @@
           ],
           "thresholds": [],
           "timeRegions": [],
-          "title": "Failed Region Request(1% sample)",
+          "title": "Failed Region Request",
           "tooltip": {
             "msResolution": false,
             "shared": true,
