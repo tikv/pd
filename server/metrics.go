@@ -217,7 +217,7 @@ func init() {
 }
 
 func incRegionRequestCounter(method string, header *pdpb.RequestHeader, err *pdpb.Error) {
-	if rand.Intn(100) == 0 {
+	if err == nil && rand.Intn(100) != 0 {
 		// sample 1% region requests to avoid high cardinality
 		return
 	}
