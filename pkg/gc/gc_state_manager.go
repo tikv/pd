@@ -17,7 +17,6 @@ package gc
 import (
 	"fmt"
 	"math"
-	"math/bits"
 	"slices"
 	"time"
 
@@ -531,22 +530,6 @@ func (m *GCStateManager) GetGCState(keyspaceID uint32) (GCState, error) {
 	}
 
 	return result, nil
-}
-
-// saturatingDuration returns a duration calculated by multiplying the given `ratio` and `base`, truncated within the
-// range [0, math.MaxInt64] to avoid negative value and overflowing.
-func saturatingDuration(ratio int64, base time.Duration) time.Duration {
-	if ratio < 0 && base < 0 {
-		ratio, base = -ratio, -base
-	}
-	if ratio < 0 || base < 0 {
-		return 0
-	}
-	h, l := bits.Mul64(uint64(ratio), uint64(base))
-	if h != 0 || l > uint64(math.MaxInt64) {
-		return time.Duration(math.MaxInt64)
-	}
-	return time.Duration(l)
 }
 
 // AdvanceTxnSafePointResult represents the result of an invocation of GCStateManager.AdvanceTxnSafePoint.
