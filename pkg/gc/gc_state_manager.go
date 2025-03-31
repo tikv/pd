@@ -130,11 +130,11 @@ func (m *GCStateManager) redirectKeyspace(keyspaceID uint32, isUserAPI bool) (ui
 	}
 	if keyspaceMeta.Config[keyspace.GCManagementType] != keyspace.KeyspaceLevelGC {
 		if isUserAPI {
-			// The user API is expected to always work. Operate on the state of global GC instead.
+			// The user API is expected to always work. Operate on the state of unified GC instead.
 			return constant.NullKeyspaceID, nil
 		}
 		// Internal API should never be called on keyspaces without keyspace level GC. They won't perform any active
-		// GC operation and will be managed by the global GC.
+		// GC operation and will be managed by the unified GC.
 		return 0, errs.ErrGCOnInvalidKeyspace.GenWithStackByArgs(keyspaceID)
 	}
 
