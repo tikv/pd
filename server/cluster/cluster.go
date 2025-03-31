@@ -183,7 +183,7 @@ type RaftCluster struct {
 	keyspaceGroupManager     *keyspace.GroupManager
 	independentServices      sync.Map
 	hbstreams                *hbstream.HeartbeatStreams
-	tsoAllocator             *tso.AllocatorManager
+	tsoAllocator             *tso.Allocator
 
 	// heartbeatRunner is used to process the subtree update task asynchronously.
 	heartbeatRunner ratelimit.Runner
@@ -214,7 +214,7 @@ func NewRaftCluster(
 	regionSyncer *syncer.RegionSyncer,
 	etcdClient *clientv3.Client,
 	httpClient *http.Client,
-	tsoAllocator *tso.AllocatorManager,
+	tsoAllocator *tso.Allocator,
 ) *RaftCluster {
 	return &RaftCluster{
 		serverCtx:    ctx,
@@ -507,35 +507,32 @@ func (c *RaftCluster) runServiceCheckJob() {
 }
 
 func (c *RaftCluster) startTSOJobsIfNeeded() error {
-	allocator := c.tsoAllocator.GetAllocator()
-	if !allocator.IsInitialize() {
-		log.Info("initializing the global TSO allocator")
-		if err := allocator.Initialize(); err != nil {
-			log.Error("failed to initialize the global TSO allocator", errs.ZapError(err))
+	if !c.tsoAllocator.IsInitialize() {
+		log.Info("initializing the TSO allocator")
+		if err := c.tsoAllocator.Initialize(); err != nil {
+			log.Error("failed to initialize the TSO allocator", errs.ZapError(err))
 			return err
 		}
 	} else if !c.running {
-		// If the global TSO allocator is already initialized, but the running flag is false,
+		// If the TSO allocator is already initialized, but the running flag is false,
 		// it means there maybe unexpected error happened before.
-		log.Warn("the global TSO allocator is already initialized before, but the cluster is not running")
+		log.Warn("the TSO allocator is already initialized before, but the cluster is not running")
 	}
 	return nil
 }
 
 func (c *RaftCluster) stopTSOJobsIfNeeded() {
-	allocator := c.tsoAllocator.GetAllocator()
-	if !allocator.IsInitialize() {
+	if !c.tsoAllocator.IsInitialize() {
 		return
 	}
-	log.Info("closing the global TSO allocator")
-	c.tsoAllocator.ResetAllocatorGroup(true)
+	log.Info("closing the TSO allocator")
+	c.tsoAllocator.Reset(false)
 	failpoint.Inject("updateAfterResetTSO", func() {
-		allocator := c.tsoAllocator.GetAllocator()
-		if err := allocator.UpdateTSO(); !errorspkg.Is(err, errs.ErrUpdateTimestamp) {
+		if err := c.tsoAllocator.UpdateTSO(); !errorspkg.Is(err, errs.ErrUpdateTimestamp) {
 			log.Panic("the tso update after reset should return ErrUpdateTimestamp as expected", zap.Error(err))
 		}
-		if allocator.IsInitialize() {
-			log.Panic("the allocator should be uninitialized after reset")
+		if c.tsoAllocator.IsInitialize() {
+			log.Panic("the tso allocator should be uninitialized after reset")
 		}
 	})
 }
@@ -2655,10 +2652,4 @@ func (c *RaftCluster) SetServiceIndependent(name string) {
 // UnsetServiceIndependent unsets the service to be independent.
 func (c *RaftCluster) UnsetServiceIndependent(name string) {
 	c.independentServices.Delete(name)
-}
-
-// GetGlobalTSOAllocator return global tso allocator
-// It only is used for test.
-func (c *RaftCluster) GetGlobalTSOAllocator() *tso.GlobalTSOAllocator {
-	return c.tsoAllocator.GetAllocator()
 }

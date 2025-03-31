@@ -201,9 +201,8 @@ func (t *timestampOracle) isInitialized() bool {
 }
 
 // resetUserTimestamp update the TSO in memory with specified TSO by an atomically way.
-// When ignoreSmaller is true, resetUserTimestamp will ignore the smaller tso resetting error and do nothing.
-// It's used to write MaxTS during the Global TSO synchronization without failing the writing as much as possible.
-// cannot set timestamp to one which >= current + maxResetTSGap
+// When ignoreSmaller is true, a smaller tso resetting error will be ignored and do nothing.
+// The TSO in memory can only be set to one which is smaller than current TSO + `maxResetTSGap`.
 func (t *timestampOracle) resetUserTimestamp(leadership *election.Leadership, tso uint64, ignoreSmaller, skipUpperBoundCheck bool) error {
 	t.tsoMux.Lock()
 	defer t.tsoMux.Unlock()
@@ -346,7 +345,6 @@ func (t *timestampOracle) updateTimestamp() error {
 
 var maxRetryCount = 10
 
-// getTS is used to get a timestamp.
 func (t *timestampOracle) getTS(ctx context.Context, member ElectionMember, count uint32) (pdpb.Timestamp, error) {
 	defer trace.StartRegion(ctx, "timestampOracle.getTS").End()
 	var resp pdpb.Timestamp
@@ -385,7 +383,7 @@ func (t *timestampOracle) getTS(ctx context.Context, member ElectionMember, coun
 		return resp, nil
 	}
 	t.metrics.exceededMaxRetryEvent.Inc()
-	return resp, errs.ErrGenerateTimestamp.FastGenByArgs("generate global tso maximum number of retries exceeded")
+	return resp, errs.ErrGenerateTimestamp.FastGenByArgs("generate tso maximum number of retries exceeded")
 }
 
 func (t *timestampOracle) resetTimestamp() {

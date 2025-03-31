@@ -991,11 +991,6 @@ error = '''
 get allocator failed, %s
 '''
 
-["PD:tso:ErrGetAllocatorManager"]
-error = '''
-get allocator manager failed, %s
-'''
-
 ["PD:tso:ErrGetMinTS"]
 error = '''
 get min ts failed, %s

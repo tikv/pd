@@ -436,7 +436,7 @@ func (s *GrpcServer) isLocalRequest(host string) bool {
 
 func (s *GrpcServer) getGlobalTSO(ctx context.Context) (pdpb.Timestamp, error) {
 	if !s.IsServiceIndependent(constant.TSOServiceName) {
-		return s.tsoAllocatorManager.HandleRequest(ctx, 1)
+		return s.tsoAllocator.GenerateTSO(ctx, 1)
 	}
 	request := &tsopb.TsoRequest{
 		Header: &tsopb.RequestHeader{

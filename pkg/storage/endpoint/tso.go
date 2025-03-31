@@ -39,7 +39,7 @@ type TSOStorage interface {
 
 var _ TSOStorage = (*StorageEndpoint)(nil)
 
-// LoadTimestamp will get all time windows of Global TSOs from etcd and return the biggest one.
+// LoadTimestamp will get all time windows of TSOs from etcd and return the biggest one.
 // TODO: Due to local TSO is deprecated, maybe we do not need to load timestamp
 // by prefix, we can just load the timestamp by the key.
 func (se *StorageEndpoint) LoadTimestamp(prefix string) (time.Time, error) {
