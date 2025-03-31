@@ -101,9 +101,8 @@ func newGCStateManagerForTest(t *testing.T) (storage *endpoint.StorageEndpoint, 
 	// keyspaceID 0 exists automatically after bootstrapping.
 
 	ks1, err := keyspaceManager.CreateKeyspace(&keyspace.CreateKeyspaceRequest{
-		Name: "ks1",
-		// TODO: Change the value into "unified" when the configuration value is renamed
-		Config:     map[string]string{"gc_management_type": "global_gc"},
+		Name:       "ks1",
+		Config:     map[string]string{"gc_management_type": "global"},
 		CreateTime: time.Now().Unix(),
 		IsPreAlloc: false,
 	})
@@ -111,9 +110,8 @@ func newGCStateManagerForTest(t *testing.T) (storage *endpoint.StorageEndpoint, 
 	re.Equal(uint32(1), ks1.Id)
 
 	ks2, err := keyspaceManager.CreateKeyspace(&keyspace.CreateKeyspaceRequest{
-		Name: "ks2",
-		// TODO: Change the value into "keyspace_level" when the configuration value is renamed
-		Config:     map[string]string{"gc_management_type": "keyspace_level_gc"},
+		Name:       "ks2",
+		Config:     map[string]string{"gc_management_type": "keyspace_level"},
 		CreateTime: time.Now().Unix(),
 		IsPreAlloc: false,
 	})
