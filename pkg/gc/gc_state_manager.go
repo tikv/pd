@@ -238,11 +238,13 @@ func (m *GCStateManager) advanceTxnSafePointImpl(keyspaceID uint32, target uint6
 	// important purpose of which is to find the actual GC safe point that's safe to use.
 	downgradeCompatibleMode := false
 
-	var oldTxnSafePoint uint64
-	newTxnSafePoint := target
-	minBlocker := target
-	var blockingBarrier *endpoint.GCBarrier
-	var blockingMinStartTSOwner *string
+	var (
+		minBlocker              = target
+		oldTxnSafePoint         uint64
+		newTxnSafePoint         uint64
+		blockingBarrier         *endpoint.GCBarrier
+		blockingMinStartTSOwner *string
+	)
 
 	err := m.gcMetaStorage.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
 		var err1 error
