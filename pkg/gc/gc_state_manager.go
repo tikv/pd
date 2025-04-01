@@ -104,7 +104,11 @@ import (
 // GCStateManager is the manager for all kinds of states of TiKV's GC for MVCC data.
 // nolint:revive
 type GCStateManager struct {
-	lock            syncutil.RWMutex
+	// The mutex is for avoiding multiple etcd transactions running concurrently, so that in most cases (where the
+	// concurrent operations happen on a single PD leader) it doesn't need to cause conflicts in etcd transactions
+	// layer. It can be more efficient and avoid failures due to transaction conflict in most cases.
+	// The etcd transactions is still necessary considering the possibility of rare cases like PD leader changes.
+	mu              syncutil.RWMutex
 	gcMetaStorage   endpoint.GCStateProvider
 	cfg             config.PDServerConfig
 	keyspaceManager *keyspace.Manager
@@ -152,8 +156,8 @@ func (m *GCStateManager) AdvanceGCSafePoint(keyspaceID uint32, target uint64) (o
 		return
 	}
 
-	m.lock.Lock()
-	defer m.lock.Unlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 
 	return m.advanceGCSafePointImpl(keyspaceID, target, false)
 }
@@ -219,8 +223,8 @@ func (m *GCStateManager) AdvanceTxnSafePoint(keyspaceID uint32, target uint64, n
 	if err != nil {
 		return AdvanceTxnSafePointResult{}, err
 	}
-	m.lock.Lock()
-	defer m.lock.Unlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 
 	return m.advanceTxnSafePointImpl(keyspaceID, target, now)
 }
@@ -390,8 +394,8 @@ func (m *GCStateManager) SetGCBarrier(keyspaceID uint32, barrierID string, barri
 		return nil, err
 	}
 
-	m.lock.Lock()
-	defer m.lock.Unlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 
 	return m.setGCBarrierImpl(keyspaceID, barrierID, barrierTS, ttl, now)
 }
@@ -442,8 +446,8 @@ func (m *GCStateManager) DeleteGCBarrier(keyspaceID uint32, barrierID string) (*
 		return nil, err
 	}
 
-	m.lock.Lock()
-	defer m.lock.Unlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 
 	return m.deleteGCBarrierImpl(keyspaceID, barrierID)
 }
