@@ -345,7 +345,7 @@ func (m *GCStateManager) advanceTxnSafePointImpl(keyspaceID uint32, target uint6
 	return result, nil
 }
 
-func (m *GCStateManager) logAdvancingTxnSafePoint(result AdvanceTxnSafePointResult, minBlocker uint64, downgradeCompatibleMode bool) {
+func (_ *GCStateManager) logAdvancingTxnSafePoint(result AdvanceTxnSafePointResult, minBlocker uint64, downgradeCompatibleMode bool) {
 	if result.NewTxnSafePoint != result.Target {
 		if result.NewTxnSafePoint == minBlocker {
 			log.Info("txn safe point advancement is being blocked",
