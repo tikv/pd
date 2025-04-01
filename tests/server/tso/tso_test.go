@@ -142,8 +142,84 @@ func TestDisableLocalTSOAfterEnabling(t *testing.T) {
 	resp, err := tsoClient.Recv()
 	re.NoError(err)
 	re.NotNil(checkAndReturnTimestampResponse(re, req, resp))
+<<<<<<< HEAD
 	// Test whether the number of existing DCs is as expected.
 	dcLocations, err := leaderServer.GetTSOAllocatorManager().GetClusterDCLocationsFromEtcd()
 	re.NoError(err)
 	re.Equal(0, len(dcLocations))
+=======
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/tso/delaySyncTimestamp"))
+}
+
+func checkAndReturnTimestampResponse(re *require.Assertions, req *pdpb.TsoRequest, resp *pdpb.TsoResponse) *pdpb.Timestamp {
+	re.Equal(req.GetCount(), resp.GetCount())
+	timestamp := resp.GetTimestamp()
+	re.Positive(timestamp.GetPhysical())
+	re.GreaterOrEqual(uint32(timestamp.GetLogical()), req.GetCount())
+	return timestamp
+}
+
+func TestLogicalOverflow(t *testing.T) {
+	re := require.New(t)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	// Set to max update interval so we can drain the logical part easily later.
+	updateInterval := config.MaxTSOUpdatePhysicalInterval
+	cluster, err := tests.NewTestCluster(ctx, 1, func(conf *config.Config, _ string) {
+		conf.TSOUpdatePhysicalInterval = typeutil.Duration{Duration: updateInterval}
+	})
+	defer cluster.Destroy()
+	re.NoError(err)
+	re.NoError(cluster.RunInitialServers())
+	re.NotEmpty(cluster.WaitLeader())
+
+	leaderServer := cluster.GetLeaderServer()
+	re.NotNil(leaderServer)
+	leaderServer.BootstrapCluster()
+	grpcPDClient := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
+	clusterID := leaderServer.GetClusterID()
+
+	tsoClient, err := grpcPDClient.Tso(ctx)
+	re.NoError(err)
+	defer tsoClient.CloseSend()
+
+	var (
+		maxDuration   time.Duration
+		lastTimestamp *pdpb.Timestamp
+	)
+	// Since the max logical count is 2 << 18 (262144), we request 20 times with 26214 count each time.
+	// This ensures that the logical part will definitely overflow once within the `updateInterval`.
+	count := (1 << 18) / 10
+	for range 20 {
+		begin := time.Now()
+		req := &pdpb.TsoRequest{
+			Header:     testutil.NewRequestHeader(clusterID),
+			Count:      uint32(count),
+			DcLocation: tso.GlobalDCLocation,
+		}
+		re.NoError(tsoClient.Send(req))
+		resp, err := tsoClient.Recv()
+		re.NoError(err)
+		// Record the max duration to validate whether the overflow is triggered later.
+		duration := time.Since(begin)
+		if duration > maxDuration {
+			maxDuration = duration
+		}
+		// Check the monotonicity of the timestamp.
+		timestamp := checkAndReturnTimestampResponse(re, req, resp)
+		re.NotNil(timestamp)
+		if lastTimestamp != nil {
+			lastPhysical, curPhysical := lastTimestamp.GetPhysical(), timestamp.GetPhysical()
+			re.GreaterOrEqual(curPhysical, lastPhysical)
+			// If the physical time is the same, the logical time must be strictly increasing.
+			if curPhysical == lastPhysical {
+				re.Greater(timestamp.GetLogical(), lastTimestamp.GetLogical())
+			}
+		}
+		lastTimestamp = timestamp
+	}
+	// Due to the overflow triggered, there at least one request duration greater than the `updateInterval`.
+	re.Greater(maxDuration, updateInterval)
+>>>>>>> fda80ebb9 (tso: enhance timestamp persistency with strong leader consistency (#9171))
 }
