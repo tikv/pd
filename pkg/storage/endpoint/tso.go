@@ -16,10 +16,8 @@ package endpoint
 
 import (
 	"context"
-	"strings"
 	"time"
 
-	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 
 	"github.com/pingcap/errors"
@@ -32,42 +30,38 @@ import (
 
 // TSOStorage is the interface for timestamp storage.
 type TSOStorage interface {
-	LoadTimestamp(prefix string) (time.Time, error)
+	LoadTimestamp(groupID uint32) (time.Time, error)
 	SaveTimestamp(groupID uint32, ts time.Time) error
 	DeleteTimestamp(groupID uint32) error
 }
 
 var _ TSOStorage = (*StorageEndpoint)(nil)
 
-// LoadTimestamp will get all time windows of TSOs from etcd and return the biggest one.
-// TODO: Due to local TSO is deprecated, maybe we do not need to load timestamp
-// by prefix, we can just load the timestamp by the key.
-func (se *StorageEndpoint) LoadTimestamp(prefix string) (time.Time, error) {
-	prefixEnd := clientv3.GetPrefixRangeEnd(prefix)
-	keys, values, err := se.LoadRange(prefix, prefixEnd, 0)
+// LoadTimestamp retrieves the last saved TSO timestamp from etcd.
+// Before switching back from the TSO microservice to the PD leader,
+// we must ensure that all keyspace groups are merged into the default
+// keyspace group. This guarantees the monotonicity of the TSO by loading
+// the timestamp from a single key.
+func (se *StorageEndpoint) LoadTimestamp(groupID uint32) (time.Time, error) {
+	key := keypath.TimestampPath(groupID)
+	value, err := se.Load(key)
 	if err != nil {
 		return typeutil.ZeroTime, err
 	}
-	if len(keys) == 0 {
+	if len(value) == 0 {
 		return typeutil.ZeroTime, nil
 	}
-
-	maxTSWindow := typeutil.ZeroTime
-	for i, key := range keys {
-		key := strings.TrimSpace(key)
-		if !strings.HasSuffix(key, "timestamp") {
-			continue
-		}
-		tsWindow, err := typeutil.ParseTimestamp([]byte(values[i]))
-		if err != nil {
-			log.Error("parse timestamp window that from etcd failed", zap.String("ts-window-key", key), zap.Time("max-ts-window", maxTSWindow), zap.Error(err))
-			continue
-		}
-		if typeutil.SubRealTimeByWallClock(tsWindow, maxTSWindow) > 0 {
-			maxTSWindow = tsWindow
-		}
+	logFields := []zap.Field{
+		zap.String("ts-window-key", key),
+		zap.String("ts-window-value", value),
 	}
-	return maxTSWindow, nil
+	tsWindow, err := typeutil.ParseTimestamp([]byte(value))
+	if err != nil {
+		log.Error("parse timestamp window that from etcd failed", append(logFields, zap.Error(err))...)
+		return typeutil.ZeroTime, err
+	}
+	log.Info("load timestamp window successfully", append(logFields, zap.Time("ts-window", tsWindow))...)
+	return tsWindow, nil
 }
 
 // SaveTimestamp saves the timestamp to the storage.

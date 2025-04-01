@@ -131,7 +131,7 @@ func checkAndReturnTimestampResponse(re *require.Assertions, req *pdpb.TsoReques
 	re.Equal(req.GetCount(), resp.GetCount())
 	timestamp := resp.GetTimestamp()
 	re.Positive(timestamp.GetPhysical())
-	re.GreaterOrEqual(uint32(timestamp.GetLogical())>>timestamp.GetSuffixBits(), req.GetCount())
+	re.GreaterOrEqual(uint32(timestamp.GetLogical()), req.GetCount())
 	return timestamp
 }
 func TestLogicalOverflow(t *testing.T) {

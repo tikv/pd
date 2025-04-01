@@ -30,7 +30,6 @@ import (
 	"github.com/tikv/pd/pkg/election"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/storage/endpoint"
-	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
@@ -128,7 +127,7 @@ func (t *timestampOracle) syncTimestamp() error {
 		time.Sleep(time.Second)
 	})
 
-	last, err := t.storage.LoadTimestamp(keypath.TimestampPath(t.keyspaceGroupID))
+	last, err := t.storage.LoadTimestamp(t.keyspaceGroupID)
 	if err != nil {
 		return err
 	}

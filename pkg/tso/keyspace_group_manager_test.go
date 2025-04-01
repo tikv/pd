@@ -109,7 +109,7 @@ func (suite *keyspaceGroupManagerTestSuite) TestDeletedGroupCleanup() {
 	suite.applyEtcdEvents(re, []*etcdEvent{generateKeyspaceGroupPutEvent(1, []uint32{1}, []string{svcAddr})})
 	// Check if the TSO key is created.
 	testutil.Eventually(re, func() bool {
-		ts, err := mgr.storage.LoadTimestamp(keypath.TimestampPath(1))
+		ts, err := mgr.storage.LoadTimestamp(1)
 		re.NoError(err)
 		return ts != typeutil.ZeroTime
 	})
@@ -117,7 +117,7 @@ func (suite *keyspaceGroupManagerTestSuite) TestDeletedGroupCleanup() {
 	suite.applyEtcdEvents(re, []*etcdEvent{generateKeyspaceGroupDeleteEvent(1)})
 	// Check if the TSO key is deleted.
 	testutil.Eventually(re, func() bool {
-		ts, err := mgr.storage.LoadTimestamp(keypath.TimestampPath(1))
+		ts, err := mgr.storage.LoadTimestamp(1)
 		re.NoError(err)
 		return ts == typeutil.ZeroTime
 	})
@@ -136,7 +136,7 @@ func (suite *keyspaceGroupManagerTestSuite) TestDeletedGroupCleanup() {
 	re.NotContains(mgr.deletedGroups, constant.DefaultKeyspaceGroupID)
 	mgr.RUnlock()
 	// Default keyspace group TSO key should NOT be deleted.
-	ts, err := mgr.storage.LoadTimestamp(keypath.TimestampPath(0))
+	ts, err := mgr.storage.LoadTimestamp(constant.DefaultKeyspaceGroupID)
 	re.NoError(err)
 	re.NotEmpty(ts)
 
