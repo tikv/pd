@@ -76,7 +76,8 @@ func (se *StorageEndpoint) SaveTimestamp(groupID uint32, ts time.Time, leadershi
 		zap.String("expected-leader-value", leadership.GetLeaderValue()),
 	}
 	log.Info("saving timestamp to the storage", logFilds...)
-	// Fast path to return error if the leadership has not been granted yet.
+	// The PD leadership or TSO primary will always be granted first before the TSO timestamp window is saved.
+	// So we here check whether the leader value is filled to see if the requirement is met.
 	if len(leadership.GetLeaderValue()) == 0 {
 		return errors.Errorf("%s due to leadership has not been granted yet", errs.NotLeaderErr)
 	}
