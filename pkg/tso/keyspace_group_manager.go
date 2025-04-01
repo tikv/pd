@@ -1067,9 +1067,14 @@ func (kgm *KeyspaceGroupManager) GetMinTS() (_ pdpb.Timestamp, kgAskedCount, kgT
 		if kgm.kgs[i] != nil {
 			kgTotalCount++
 		}
+		// It's possible that the keyspace group has been unassigned from its previous TSO node,
+		// so we skip the keyspace group if the allocator is nil to avoid the potential error.
+		if allocator == nil {
+			continue
+		}
 		// If any keyspace group hasn't elected primary, we can't know its current timestamp of
 		// the group, so as to the min ts across all keyspace groups. Return error in this case.
-		if allocator != nil && !allocator.isPrimaryElected() {
+		if !allocator.isPrimaryElected() {
 			return pdpb.Timestamp{}, kgAskedCount, kgTotalCount, errs.ErrGetMinTS.FastGenByArgs("leader is not elected")
 		}
 		// Skip the keyspace groups that are not served by this TSO Server/Pod.
