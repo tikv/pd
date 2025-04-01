@@ -63,7 +63,7 @@ type Leadership struct {
 	client *clientv3.Client
 	// leaderKey and leaderValue are key-value pair in etcd
 	leaderKey   string
-	leaderValue string
+	leaderValue atomic.Value // Stored as string
 
 	keepAliveCtx            context.Context
 	keepAliveCancelFunc     context.CancelFunc
@@ -114,6 +114,31 @@ func (ls *Leadership) GetLeaderKey() string {
 	return ls.leaderKey
 }
 
+<<<<<<< HEAD
+=======
+// GetLeaderValue is used to get the leader value saved in etcd.
+func (ls *Leadership) GetLeaderValue() string {
+	if ls == nil {
+		return ""
+	}
+	leaderValue := ls.leaderValue.Load()
+	if leaderValue == nil {
+		return ""
+	}
+	return leaderValue.(string)
+}
+
+// SetPrimaryWatch sets the primary watch flag.
+func (ls *Leadership) SetPrimaryWatch(val bool) {
+	ls.primaryWatch.Store(val)
+}
+
+// IsPrimary gets the primary watch flag.
+func (ls *Leadership) IsPrimary() bool {
+	return ls.primaryWatch.Load()
+}
+
+>>>>>>> fda80ebb9 (tso: enhance timestamp persistency with strong leader consistency (#9171))
 // GetCampaignTimesNum is used to get the campaign times of the leader within `campaignTimesRecordTimeout`.
 // Need to make sure `AddCampaignTimes` is called before this function.
 func (ls *Leadership) GetCampaignTimesNum() int {
@@ -150,7 +175,7 @@ func (ls *Leadership) AddCampaignTimes() {
 
 // Campaign is used to campaign the leader with given lease and returns a leadership
 func (ls *Leadership) Campaign(leaseTimeout int64, leaderData string, cmps ...clientv3.Cmp) error {
-	ls.leaderValue = leaderData
+	ls.leaderValue.Store(leaderData)
 	// Create a new lease to campaign
 	newLease := &lease{
 		Purpose: ls.purpose,
@@ -216,7 +241,7 @@ func (ls *Leadership) LeaderTxn(cs ...clientv3.Cmp) clientv3.Txn {
 }
 
 func (ls *Leadership) leaderCmp() clientv3.Cmp {
-	return clientv3.Compare(clientv3.Value(ls.leaderKey), "=", ls.leaderValue)
+	return clientv3.Compare(clientv3.Value(ls.leaderKey), "=", ls.GetLeaderValue())
 }
 
 // DeleteLeaderKey deletes the corresponding leader from etcd by the leaderPath as the key.
@@ -393,5 +418,11 @@ func (ls *Leadership) Reset() {
 		ls.keepAliveCancelFunc()
 	}
 	ls.keepAliveCancelFuncLock.Unlock()
+<<<<<<< HEAD
 	ls.getLease().Close()
+=======
+	ls.GetLease().Close()
+	ls.SetPrimaryWatch(false)
+	ls.leaderValue.Store("")
+>>>>>>> fda80ebb9 (tso: enhance timestamp persistency with strong leader consistency (#9171))
 }
