@@ -529,11 +529,7 @@ func (m *GCStateManager) GetGCState(keyspaceID uint32) (GCState, error) {
 		return err1
 	})
 
-	if err != nil {
-		return GCState{}, err
-	}
-
-	return result, nil
+	return result, err
 }
 
 // AdvanceTxnSafePointResult represents the result of an invocation of GCStateManager.AdvanceTxnSafePoint.
