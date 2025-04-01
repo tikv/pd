@@ -190,4 +190,12 @@ func TestCodecConfig(t *testing.T) {
 	re.NoError(conf.addJob(job1))
 	re.NoError(conf.load(&conf1))
 	re.Equal(conf1.jobs, conf.jobs)
+
+	data, err := conf.MarshalJSON()
+	re.NoError(err)
+	conf2 := &balanceRangeSchedulerConfig{
+		jobs: make([]*balanceRangeSchedulerJob, 0),
+	}
+	re.NoError(conf2.UnmarshalJSON(data))
+	re.Equal(conf2.jobs, conf.jobs)
 }

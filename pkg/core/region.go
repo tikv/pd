@@ -360,7 +360,7 @@ func (r *RegionInfo) GetPeer(peerID uint64) *metapb.Peer {
 	return nil
 }
 
-// Role is the role of the region.
+// Rule is the rule for balance range scheduler
 type Rule int
 
 const (
@@ -375,8 +375,8 @@ const (
 )
 
 // String returns the string value of the role.
-func (r Rule) String() string {
-	switch r {
+func (r *Rule) String() string {
+	switch *r {
 	case Leader:
 		return "leader"
 	case Follower:
@@ -407,6 +407,7 @@ func (r *Rule) MarshalJSON() ([]byte, error) {
 	return []byte(`"` + r.String() + `"`), nil
 }
 
+// UnmarshalJSON parses the JSON-encoded data and stores the result in Role.
 func (r *Rule) UnmarshalJSON(data []byte) error {
 	s := string(data)
 	switch s {

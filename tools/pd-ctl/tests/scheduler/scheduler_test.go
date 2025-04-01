@@ -557,7 +557,7 @@ func (suite *schedulerTestSuite) checkSchedulerConfig(cluster *pdTests.TestClust
 		return jobConf["rule"] == "learner" && jobConf["engine"] == "tiflash" && jobConf["alias"] == "test"
 	})
 	re.Equal(float64(time.Hour.Nanoseconds()), jobConf["timeout"])
-	re.Equal("pending", jobConf["status"])
+	re.Equal("running", jobConf["status"])
 	ranges := jobConf["ranges"].([]any)[0].(map[string]any)
 	re.Equal(core.HexRegionKeyStr([]byte("a")), ranges["start-key"])
 	re.Equal(core.HexRegionKeyStr([]byte("b")), ranges["end-key"])

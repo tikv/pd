@@ -17,7 +17,6 @@ package schedulers
 import (
 	"bytes"
 	"encoding/json"
-
 	"net/http"
 	"sort"
 	"strconv"
@@ -118,13 +117,15 @@ func (handler *balanceRangeSchedulerHandler) deleteJob(w http.ResponseWriter, r 
 type balanceRangeSchedulerConfig struct {
 	syncutil.RWMutex
 	schedulerConfig
-	jobs []*balanceRangeSchedulerJob `json:"jobs"`
+	jobs []*balanceRangeSchedulerJob
 }
 
+// MarshalJSON marshals to json.
 func (conf *balanceRangeSchedulerConfig) MarshalJSON() ([]byte, error) {
 	return json.Marshal(conf.jobs)
 }
 
+// UnmarshalJSON unmarshals from json.
 func (conf *balanceRangeSchedulerConfig) UnmarshalJSON(data []byte) error {
 	jobs := make([]*balanceRangeSchedulerJob, 0)
 	if err := json.Unmarshal(data, &jobs); err != nil {
@@ -248,6 +249,7 @@ func (conf *balanceRangeSchedulerConfig) clone() []*balanceRangeSchedulerJob {
 			Alias:   job.Alias,
 			JobID:   job.JobID,
 			Start:   job.Start,
+			Status:  job.Status,
 		})
 	}
 
@@ -626,8 +628,8 @@ const (
 	cancelled
 )
 
-func (s JobStatus) String() string {
-	switch s {
+func (s *JobStatus) String() string {
+	switch *s {
 	case pending:
 		return "pending"
 	case running:

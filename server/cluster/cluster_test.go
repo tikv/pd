@@ -3222,7 +3222,7 @@ func TestAddScheduler(t *testing.T) {
 	var cfg []map[string]any
 
 	re.NoError(json.Unmarshal(conf, &cfg))
-	re.Equal("learner", cfg[0]["role"])
+	re.Equal("learner", cfg[0]["rule"])
 	re.Equal("tiflash", cfg[0]["engine"])
 	re.Equal("test", cfg[0]["alias"])
 	re.Equal(float64(time.Hour.Nanoseconds()), cfg[0]["timeout"])
