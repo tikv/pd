@@ -24,7 +24,11 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
+<<<<<<< HEAD
 	"github.com/tikv/pd/pkg/election"
+=======
+
+>>>>>>> fda80ebb9 (tso: enhance timestamp persistency with strong leader consistency (#9171))
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/keypath"
@@ -64,9 +68,14 @@ type tsoObject struct {
 type timestampOracle struct {
 	client          *clientv3.Client
 	keyspaceGroupID uint32
+<<<<<<< HEAD
 	// When tsPath is empty, it means that it is a global timestampOracle.
 	tsPath  string
 	storage endpoint.TSOStorage
+=======
+	member          ElectionMember
+	storage         endpoint.TSOStorage
+>>>>>>> fda80ebb9 (tso: enhance timestamp persistency with strong leader consistency (#9171))
 	// TODO: remove saveInterval
 	saveInterval           time.Duration
 	updatePhysicalInterval time.Duration
@@ -80,6 +89,10 @@ type timestampOracle struct {
 
 	// pre-initialized metrics
 	metrics *tsoMetrics
+}
+
+func (t *timestampOracle) saveTimestamp(ts time.Time) error {
+	return t.storage.SaveTimestamp(t.keyspaceGroupID, ts, t.member.GetLeadership())
 }
 
 func (t *timestampOracle) setTSOPhysical(next time.Time, force bool) {
@@ -210,7 +223,11 @@ func (t *timestampOracle) SyncTimestamp() error {
 	})
 	save := next.Add(t.saveInterval)
 	start := time.Now()
+<<<<<<< HEAD
 	if err = t.storage.SaveTimestamp(t.GetTimestampPath(), save); err != nil {
+=======
+	if err = t.saveTimestamp(save); err != nil {
+>>>>>>> fda80ebb9 (tso: enhance timestamp persistency with strong leader consistency (#9171))
 		t.metrics.errSaveSyncTSEvent.Inc()
 		return err
 	}
@@ -238,6 +255,7 @@ func (t *timestampOracle) isInitialized() bool {
 }
 
 // resetUserTimestamp update the TSO in memory with specified TSO by an atomically way.
+<<<<<<< HEAD
 // When ignoreSmaller is true, resetUserTimestamp will ignore the smaller tso resetting error and do nothing.
 // It's used to write MaxTS during the Global TSO synchronization without failing the writing as much as possible.
 // cannot set timestamp to one which >= current + maxResetTSGap
@@ -247,11 +265,16 @@ func (t *timestampOracle) resetUserTimestamp(ctx context.Context, leadership *el
 }
 
 func (t *timestampOracle) resetUserTimestampInner(leadership *election.Leadership, tso uint64, ignoreSmaller, skipUpperBoundCheck bool) error {
+=======
+// When ignoreSmaller is true, a smaller tso resetting error will be ignored and do nothing.
+// The TSO in memory can only be set to one which is smaller than current TSO + `maxResetTSGap`.
+func (t *timestampOracle) resetUserTimestamp(tso uint64, ignoreSmaller, skipUpperBoundCheck bool) error {
+>>>>>>> fda80ebb9 (tso: enhance timestamp persistency with strong leader consistency (#9171))
 	t.tsoMux.Lock()
 	defer t.tsoMux.Unlock()
-	if !leadership.Check() {
+	if !t.member.IsLeader() {
 		t.metrics.errLeaseResetTSEvent.Inc()
-		return errs.ErrResetUserTimestamp.FastGenByArgs("lease expired")
+		return errs.ErrResetUserTimestamp.FastGenByArgs(errs.NotLeaderErr)
 	}
 	var (
 		nextPhysical, nextLogical = tsoutil.ParseTS(tso)
@@ -283,7 +306,11 @@ func (t *timestampOracle) resetUserTimestampInner(leadership *election.Leadershi
 	if typeutil.SubRealTimeByWallClock(t.getLastSavedTime(), nextPhysical) <= UpdateTimestampGuard {
 		save := nextPhysical.Add(t.saveInterval)
 		start := time.Now()
+<<<<<<< HEAD
 		if err := t.storage.SaveTimestamp(t.GetTimestampPath(), save); err != nil {
+=======
+		if err := t.saveTimestamp(save); err != nil {
+>>>>>>> fda80ebb9 (tso: enhance timestamp persistency with strong leader consistency (#9171))
 			t.metrics.errSaveResetTSEvent.Inc()
 			return err
 		}
@@ -367,7 +394,11 @@ func (t *timestampOracle) UpdateTimestamp() error {
 	if typeutil.SubRealTimeByWallClock(t.getLastSavedTime(), next) <= UpdateTimestampGuard {
 		save := next.Add(t.saveInterval)
 		start := time.Now()
+<<<<<<< HEAD
 		if err := t.storage.SaveTimestamp(t.GetTimestampPath(), save); err != nil {
+=======
+		if err := t.saveTimestamp(save); err != nil {
+>>>>>>> fda80ebb9 (tso: enhance timestamp persistency with strong leader consistency (#9171))
 			log.Warn("save timestamp failed",
 				logutil.CondUint32("keyspace-group-id", t.keyspaceGroupID, t.keyspaceGroupID > 0),
 				zap.String("dc-location", t.dcLocation),
@@ -387,8 +418,12 @@ func (t *timestampOracle) UpdateTimestamp() error {
 
 var maxRetryCount = 10
 
+<<<<<<< HEAD
 // getTS is used to get a timestamp.
 func (t *timestampOracle) getTS(ctx context.Context, leadership *election.Leadership, count uint32, suffixBits int) (pdpb.Timestamp, error) {
+=======
+func (t *timestampOracle) getTS(ctx context.Context, count uint32) (pdpb.Timestamp, error) {
+>>>>>>> fda80ebb9 (tso: enhance timestamp persistency with strong leader consistency (#9171))
 	defer trace.StartRegion(ctx, "timestampOracle.getTS").End()
 	var resp pdpb.Timestamp
 	if count == 0 {
@@ -398,7 +433,11 @@ func (t *timestampOracle) getTS(ctx context.Context, leadership *election.Leader
 		currentPhysical, _ := t.getTSO()
 		if currentPhysical == typeutil.ZeroTime {
 			// If it's leader, maybe SyncTimestamp hasn't completed yet
+<<<<<<< HEAD
 			if leadership.Check() {
+=======
+			if t.member.IsLeader() {
+>>>>>>> fda80ebb9 (tso: enhance timestamp persistency with strong leader consistency (#9171))
 				time.Sleep(200 * time.Millisecond)
 				continue
 			}
@@ -420,7 +459,11 @@ func (t *timestampOracle) getTS(ctx context.Context, leadership *election.Leader
 			continue
 		}
 		// In case lease expired after the first check.
+<<<<<<< HEAD
 		if !leadership.Check() {
+=======
+		if !t.member.IsLeader() {
+>>>>>>> fda80ebb9 (tso: enhance timestamp persistency with strong leader consistency (#9171))
 			return pdpb.Timestamp{}, errs.ErrGenerateTimestamp.FastGenByArgs(fmt.Sprintf("requested %s anymore", errs.NotLeaderErr))
 		}
 		resp.SuffixBits = uint32(suffixBits)

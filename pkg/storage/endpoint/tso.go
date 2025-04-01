@@ -21,6 +21,12 @@ import (
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
+<<<<<<< HEAD
+=======
+
+	"github.com/tikv/pd/pkg/election"
+	"github.com/tikv/pd/pkg/errs"
+>>>>>>> fda80ebb9 (tso: enhance timestamp persistency with strong leader consistency (#9171))
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/typeutil"
@@ -30,9 +36,15 @@ import (
 
 // TSOStorage is the interface for timestamp storage.
 type TSOStorage interface {
+<<<<<<< HEAD
 	LoadTimestamp(prefix string) (time.Time, error)
 	SaveTimestamp(key string, ts time.Time) error
 	DeleteTimestamp(key string) error
+=======
+	LoadTimestamp(groupID uint32) (time.Time, error)
+	SaveTimestamp(groupID uint32, ts time.Time, leadership *election.Leadership) error
+	DeleteTimestamp(groupID uint32) error
+>>>>>>> fda80ebb9 (tso: enhance timestamp persistency with strong leader consistency (#9171))
 }
 
 var _ TSOStorage = (*StorageEndpoint)(nil)
@@ -68,10 +80,40 @@ func (se *StorageEndpoint) LoadTimestamp(prefix string) (time.Time, error) {
 	return maxTSWindow, nil
 }
 
+<<<<<<< HEAD
 // SaveTimestamp saves the timestamp to the storage.
 func (se *StorageEndpoint) SaveTimestamp(key string, ts time.Time) error {
 	return se.RunInTxn(context.Background(), func(txn kv.Txn) error {
 		value, err := txn.Load(key)
+=======
+// SaveTimestamp saves the timestamp to the storage. The leadership is used to check if the current server is leader
+// before saving the timestamp to ensure a strong consistency for persistence of the TSO timestamp window.
+func (se *StorageEndpoint) SaveTimestamp(groupID uint32, ts time.Time, leadership *election.Leadership) error {
+	logFilds := []zap.Field{
+		zap.Uint32("group-id", groupID),
+		zap.Time("ts", ts),
+		zap.String("leader-key", leadership.GetLeaderKey()),
+		zap.String("expected-leader-value", leadership.GetLeaderValue()),
+	}
+	log.Info("saving timestamp to the storage", logFilds...)
+	// The PD leadership or TSO primary will always be granted first before the TSO timestamp window is saved.
+	// So we here check whether the leader value is filled to see if the requirement is met.
+	if len(leadership.GetLeaderValue()) == 0 {
+		return errors.Errorf("%s due to leadership has not been granted yet", errs.NotLeaderErr)
+	}
+	return se.RunInTxn(context.Background(), func(txn kv.Txn) error {
+		// Ensure the current server is leader by reading and comparing the leader value.
+		leaderValue, err := txn.Load(leadership.GetLeaderKey())
+		if err != nil {
+			return err
+		}
+		if expected := leadership.GetLeaderValue(); leaderValue != expected {
+			log.Error("leader value does not match", append(logFilds, zap.String("current-leader-value", leaderValue))...)
+			return errors.Errorf("%s due to leader value does not match, current: %s, expected: %s", errs.NotLeaderErr, leaderValue, expected)
+		}
+
+		value, err := txn.Load(keypath.TimestampPath(groupID))
+>>>>>>> fda80ebb9 (tso: enhance timestamp persistency with strong leader consistency (#9171))
 		if err != nil {
 			return err
 		}
@@ -80,7 +122,11 @@ func (se *StorageEndpoint) SaveTimestamp(key string, ts time.Time) error {
 		if value != "" {
 			previousTS, err = typeutil.ParseTimestamp([]byte(value))
 			if err != nil {
+<<<<<<< HEAD
 				log.Error("parse timestamp failed", zap.String("key", key), zap.String("value", value), zap.Error(err))
+=======
+				log.Error("parse timestamp failed", append(logFilds, zap.String("value", value), zap.Error(err))...)
+>>>>>>> fda80ebb9 (tso: enhance timestamp persistency with strong leader consistency (#9171))
 				return err
 			}
 		}

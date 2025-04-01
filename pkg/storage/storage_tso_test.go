@@ -21,16 +21,44 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+<<<<<<< HEAD
+=======
+
+	"github.com/tikv/pd/pkg/election"
+	"github.com/tikv/pd/pkg/errs"
+>>>>>>> fda80ebb9 (tso: enhance timestamp persistency with strong leader consistency (#9171))
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
 )
 
+<<<<<<< HEAD
+=======
+const (
+	testGroupID     = uint32(1)
+	testLeaderKey   = "test-leader-key"
+	testLeaderValue = "test-leader-value"
+)
+
+func prepare(t *testing.T) (storage Storage, clean func(), leadership *election.Leadership) {
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1)
+	storage = NewStorageWithEtcdBackend(client)
+	leadership = election.NewLeadership(client, testLeaderKey, "storage_tso_test")
+	err := leadership.Campaign(60, testLeaderValue)
+	require.NoError(t, err)
+	return storage, clean, leadership
+}
+
+>>>>>>> fda80ebb9 (tso: enhance timestamp persistency with strong leader consistency (#9171))
 func TestSaveLoadTimestamp(t *testing.T) {
 	re := require.New(t)
-	storage, clean := newTestStorage(t)
+	storage, clean, leadership := prepare(t)
 	defer clean()
 	expectedTS := time.Now().Round(0)
+<<<<<<< HEAD
 	err := storage.SaveTimestamp(keypath.TimestampKey, expectedTS)
+=======
+	err := storage.SaveTimestamp(testGroupID, expectedTS, leadership)
+>>>>>>> fda80ebb9 (tso: enhance timestamp persistency with strong leader consistency (#9171))
 	re.NoError(err)
 	ts, err := storage.LoadTimestamp("")
 	re.NoError(err)
@@ -67,14 +95,22 @@ func TestGlobalLocalTimestamp(t *testing.T) {
 
 func TestTimestampTxn(t *testing.T) {
 	re := require.New(t)
-	storage, clean := newTestStorage(t)
+	storage, clean, leadership := prepare(t)
 	defer clean()
 	globalTS1 := time.Now().Round(0)
+<<<<<<< HEAD
 	err := storage.SaveTimestamp(keypath.TimestampKey, globalTS1)
 	re.NoError(err)
 
 	globalTS2 := globalTS1.Add(-time.Millisecond).Round(0)
 	err = storage.SaveTimestamp(keypath.TimestampKey, globalTS2)
+=======
+	err := storage.SaveTimestamp(testGroupID, globalTS1, leadership)
+	re.NoError(err)
+
+	globalTS2 := globalTS1.Add(-time.Millisecond).Round(0)
+	err = storage.SaveTimestamp(testGroupID, globalTS2, leadership)
+>>>>>>> fda80ebb9 (tso: enhance timestamp persistency with strong leader consistency (#9171))
 	re.Error(err)
 
 	ts, err := storage.LoadTimestamp("")
@@ -82,8 +118,54 @@ func TestTimestampTxn(t *testing.T) {
 	re.Equal(globalTS1, ts)
 }
 
+<<<<<<< HEAD
 func newTestStorage(t *testing.T) (Storage, func()) {
 	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1)
 	rootPath := path.Join("/pd", strconv.FormatUint(100, 10))
 	return NewStorageWithEtcdBackend(client, rootPath), clean
+=======
+func TestSaveTimestampWithLeaderCheck(t *testing.T) {
+	re := require.New(t)
+	storage, clean, leadership := prepare(t)
+	defer clean()
+
+	// testLeaderKey -> testLeaderValue
+	globalTS := time.Now().Round(0)
+	err := storage.SaveTimestamp(testGroupID, globalTS, leadership)
+	re.NoError(err)
+	ts, err := storage.LoadTimestamp(testGroupID)
+	re.NoError(err)
+	re.Equal(globalTS, ts)
+
+	err = storage.SaveTimestamp(testGroupID, globalTS.Add(time.Second), &election.Leadership{})
+	re.True(errs.IsLeaderChanged(err))
+	ts, err = storage.LoadTimestamp(testGroupID)
+	re.NoError(err)
+	re.Equal(globalTS, ts)
+
+	// testLeaderKey -> ""
+	storage.Save(leadership.GetLeaderKey(), "")
+	err = storage.SaveTimestamp(testGroupID, globalTS.Add(time.Second), leadership)
+	re.True(errs.IsLeaderChanged(err))
+	ts, err = storage.LoadTimestamp(testGroupID)
+	re.NoError(err)
+	re.Equal(globalTS, ts)
+
+	// testLeaderKey -> non-existent
+	storage.Remove(leadership.GetLeaderKey())
+	err = storage.SaveTimestamp(testGroupID, globalTS.Add(time.Second), leadership)
+	re.True(errs.IsLeaderChanged(err))
+	ts, err = storage.LoadTimestamp(testGroupID)
+	re.NoError(err)
+	re.Equal(globalTS, ts)
+
+	// testLeaderKey -> testLeaderValue
+	storage.Save(leadership.GetLeaderKey(), testLeaderValue)
+	globalTS = globalTS.Add(time.Second)
+	err = storage.SaveTimestamp(testGroupID, globalTS, leadership)
+	re.NoError(err)
+	ts, err = storage.LoadTimestamp(testGroupID)
+	re.NoError(err)
+	re.Equal(globalTS, ts)
+>>>>>>> fda80ebb9 (tso: enhance timestamp persistency with strong leader consistency (#9171))
 }
