@@ -15,7 +15,12 @@
 package errs
 
 import (
+<<<<<<< HEAD
 	"github.com/pingcap/errors"
+=======
+	"strings"
+
+>>>>>>> fda80ebb9 (tso: enhance timestamp persistency with strong leader consistency (#9171))
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )
@@ -33,4 +38,12 @@ func ZapError(err error, causeError ...error) zap.Field {
 		}
 	}
 	return zap.Field{Key: "error", Type: zapcore.ErrorType, Interface: err}
+}
+
+// IsLeaderChanged returns true if the error is due to leader changed.
+func IsLeaderChanged(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(err.Error(), NotLeaderErr)
 }
