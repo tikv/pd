@@ -472,12 +472,16 @@ func (m *GCStateManager) deleteGCBarrierImpl(keyspaceID uint32, barrierID string
 
 // getGCStateInTransaction gets all properties in GC states within a context of gcMetaStorage.RunInGCStateTransaction.
 // This read only and won't write anything to the GCStateWriteBatch. It still receives a write batch to ensure
-// it's running in a transactional context.
+// it's running in a in-transaction context.
+// The parameter `keyspaceID` is expected to be either the NullKeyspaceID or the ID of a keyspace that has
+// keyspace-level GC enabled. Otherwise, the result would be undefined.
 func (m *GCStateManager) getGCStateInTransaction(keyspaceID uint32, _ *endpoint.GCStateWriteBatch) (GCState, error) {
 	result := GCState{
 		KeyspaceID: keyspaceID,
 	}
 	if keyspaceID != constant.NullKeyspaceID {
+		// Assuming the parameter `keyspaceID` is either the NullKeyspaceID or the ID of a keyspace that has
+		// keyspace-level GC enabled. So once the keyspaceID is not NullKeyspaceID, `IsKeyspaceLevel` must be true.
 		result.IsKeyspaceLevel = true
 	}
 
