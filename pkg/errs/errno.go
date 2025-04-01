@@ -31,6 +31,7 @@ var (
 
 // tso errors
 var (
+<<<<<<< HEAD
 	ErrSetLocalTSOConfig  = errors.Normalize("set local tso config failed, %s", errors.RFCCodeText("PD:tso:ErrSetLocalTSOConfig"))
 	ErrGetAllocator       = errors.Normalize("get allocator failed, %s", errors.RFCCodeText("PD:tso:ErrGetAllocator"))
 	ErrGetLocalAllocator  = errors.Normalize("get local allocator failed, %s", errors.RFCCodeText("PD:tso:ErrGetLocalAllocator"))
@@ -39,6 +40,23 @@ var (
 	ErrGenerateTimestamp  = errors.Normalize("generate timestamp failed, %s", errors.RFCCodeText("PD:tso:ErrGenerateTimestamp"))
 	ErrLogicOverflow      = errors.Normalize("logic part overflow", errors.RFCCodeText("PD:tso:ErrLogicOverflow"))
 	ErrProxyTSOTimeout    = errors.Normalize("proxy tso timeout", errors.RFCCodeText("PD:tso:ErrProxyTSOTimeout"))
+=======
+	ErrGetAllocator                     = errors.Normalize("get allocator failed, %s", errors.RFCCodeText("PD:tso:ErrGetAllocator"))
+	ErrResetUserTimestamp               = errors.Normalize("reset user timestamp failed, %s", errors.RFCCodeText("PD:tso:ErrResetUserTimestamp"))
+	ErrGenerateTimestamp                = errors.Normalize("generate timestamp failed, %s", errors.RFCCodeText("PD:tso:ErrGenerateTimestamp"))
+	ErrUpdateTimestamp                  = errors.Normalize("update timestamp failed, %s", errors.RFCCodeText("PD:tso:ErrUpdateTimestamp"))
+	ErrSaveTimestamp                    = errors.Normalize("save timestamp failed, %s", errors.RFCCodeText("PD:tso:ErrSaveTimestamp"))
+	ErrLogicOverflow                    = errors.Normalize("logic part overflow", errors.RFCCodeText("PD:tso:ErrLogicOverflow"))
+	ErrProxyTSOTimeout                  = errors.Normalize("proxy tso timeout", errors.RFCCodeText("PD:tso:ErrProxyTSOTimeout"))
+	ErrKeyspaceGroupIDInvalid           = errors.Normalize("the keyspace group id is invalid, %s", errors.RFCCodeText("PD:tso:ErrKeyspaceGroupIDInvalid"))
+	ErrLoadKeyspaceGroupsTimeout        = errors.Normalize("load keyspace groups timeout", errors.RFCCodeText("PD:tso:ErrLoadKeyspaceGroupsTimeout"))
+	ErrLoadKeyspaceGroupsTerminated     = errors.Normalize("load keyspace groups terminated", errors.RFCCodeText("PD:tso:ErrLoadKeyspaceGroupsTerminated"))
+	ErrLoadKeyspaceGroupsRetryExhausted = errors.Normalize("load keyspace groups retry exhausted, %s", errors.RFCCodeText("PD:tso:ErrLoadKeyspaceGroupsRetryExhausted"))
+	ErrKeyspaceGroupNotInitialized      = errors.Normalize("the keyspace group %d isn't initialized", errors.RFCCodeText("PD:tso:ErrKeyspaceGroupNotInitialized"))
+	ErrKeyspaceNotAssigned              = errors.Normalize("the keyspace %d isn't assigned to any keyspace group", errors.RFCCodeText("PD:tso:ErrKeyspaceNotAssigned"))
+	ErrGetMinTS                         = errors.Normalize("get min ts failed, %s", errors.RFCCodeText("PD:tso:ErrGetMinTS"))
+	ErrKeyspaceGroupIsMerging           = errors.Normalize("the keyspace group %d is merging", errors.RFCCodeText("PD:tso:ErrKeyspaceGroupIsMerging"))
+>>>>>>> fda80ebb9 (tso: enhance timestamp persistency with strong leader consistency (#9171))
 )
 
 // member errors

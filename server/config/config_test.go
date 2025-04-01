@@ -280,7 +280,36 @@ tso-update-physical-interval = "15s"
 	err = cfg.Adjust(&meta, false)
 	re.NoError(err)
 
+<<<<<<< HEAD
 	re.Equal(maxTSOUpdatePhysicalInterval, cfg.TSOUpdatePhysicalInterval.Duration)
+=======
+	re.Equal(MaxTSOUpdatePhysicalInterval, cfg.TSOUpdatePhysicalInterval.Duration)
+
+	cfgData = `
+[log]
+level = "debug"
+
+[log.file]
+max-size = 100
+max-days = 10
+max-backups = 5
+`
+	flagSet = pflag.NewFlagSet("testlog", pflag.ContinueOnError)
+	flagSet.StringP("log-level", "L", "info", "log level: debug, info, warn, error, fatal (default 'info')")
+	flagSet.StringP("log-file", "", "pd.log", "log file path")
+	flagSet.Parse(nil)
+	cfg = NewConfig()
+	err = cfg.Parse(flagSet)
+	re.NoError(err)
+	meta, err = toml.Decode(cfgData, &cfg)
+	re.NoError(err)
+	err = cfg.Adjust(&meta, false)
+	re.NoError(err)
+	re.Equal("debug", cfg.Log.Level)
+	re.Equal(100, cfg.Log.File.MaxSize)
+	re.Equal(10, cfg.Log.File.MaxDays)
+	re.Equal(5, cfg.Log.File.MaxBackups)
+>>>>>>> fda80ebb9 (tso: enhance timestamp persistency with strong leader consistency (#9171))
 }
 
 func TestMigrateFlags(t *testing.T) {
