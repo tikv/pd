@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"math/rand"
 	"strconv"
 	"sync"
 	"time"
@@ -242,6 +243,10 @@ func (r *RegionScatterer) scatterRegions(regions map[uint64]*core.RegionInfo, fa
 					err = errors.New("mock error")
 				}
 			})
+			// randomly fail the operator
+			if rand.Intn(100) < 5 {
+				err = errors.Errorf("region %d is not fully replicated", region.GetID())
+			}
 			if err != nil {
 				failures[region.GetID()] = err
 				continue
