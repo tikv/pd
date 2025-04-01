@@ -176,7 +176,7 @@ func (m *GCStateManager) advanceGCSafePointImpl(keyspaceID uint32, target uint64
 				// When in compatible mode, trying to update the safe point to a smaller value fails silently, returning
 				// the actual value. There exist some use cases that fetches the current value by passing zero.
 				log.Warn("deprecated API `UpdateGCSafePoint` is called with invalid argument",
-					zap.Uint64("currentGCSafePoint", oldGCSafePoint), zap.Uint64("attemptedGCSafePoint", target))
+					zap.Uint64("current-gc-safe-point", oldGCSafePoint), zap.Uint64("attempted-gc-safe-point", target))
 				newGCSafePoint = oldGCSafePoint
 				return nil
 			}
@@ -349,24 +349,24 @@ func (m *GCStateManager) logAdvancingTxnSafePoint(result AdvanceTxnSafePointResu
 	if result.NewTxnSafePoint != result.Target {
 		if result.NewTxnSafePoint == minBlocker {
 			log.Info("txn safe point advancement is being blocked",
-				zap.Uint64("oldTxnSafePoint", result.OldTxnSafePoint), zap.Uint64("target", result.Target),
-				zap.Uint64("newTxnSafePoint", result.NewTxnSafePoint), zap.String("blocker", result.BlockerDescription),
-				zap.Bool("downgradeCompatibleMode", downgradeCompatibleMode))
+				zap.Uint64("old-txn-safe-point", result.OldTxnSafePoint), zap.Uint64("target", result.Target),
+				zap.Uint64("new-txn-safe-point", result.NewTxnSafePoint), zap.String("blocker", result.BlockerDescription),
+				zap.Bool("downgrade-compatible-mode", downgradeCompatibleMode))
 		} else {
 			log.Info("txn safe point advancement unable to be blocked by the minimum blocker",
-				zap.Uint64("oldTxnSafePoint", result.OldTxnSafePoint), zap.Uint64("target", result.Target),
-				zap.Uint64("newTxnSafePoint", result.NewTxnSafePoint), zap.String("blocker", result.BlockerDescription),
-				zap.Uint64("minBlockerTS", minBlocker), zap.Bool("downgradeCompatibleMode", downgradeCompatibleMode))
+				zap.Uint64("old-txn-safe-point", result.OldTxnSafePoint), zap.Uint64("target", result.Target),
+				zap.Uint64("new-txn-safe-point", result.NewTxnSafePoint), zap.String("blocker", result.BlockerDescription),
+				zap.Uint64("min-blocker-ts", minBlocker), zap.Bool("downgrade-compatible-mode", downgradeCompatibleMode))
 		}
 	} else if result.NewTxnSafePoint > result.OldTxnSafePoint {
 		log.Info("txn safe point advanced",
-			zap.Uint64("oldTxnSafePoint", result.OldTxnSafePoint), zap.Uint64("newTxnSafePoint", result.NewTxnSafePoint),
-			zap.Bool("downgradeCompatibleMode", downgradeCompatibleMode))
+			zap.Uint64("old-txn-safe-point", result.OldTxnSafePoint), zap.Uint64("new-txn-safe-point", result.NewTxnSafePoint),
+			zap.Bool("downgrade-compatible-mode", downgradeCompatibleMode))
 	} else {
 		log.Info("txn safe point is remaining unchanged",
-			zap.Uint64("oldTxnSafePoint", result.OldTxnSafePoint), zap.Uint64("newTxnSafePoint", result.NewTxnSafePoint),
+			zap.Uint64("old-txn-safe-point", result.OldTxnSafePoint), zap.Uint64("new-txn-safe-point", result.NewTxnSafePoint),
 			zap.Uint64("target", result.Target),
-			zap.Bool("downgradeCompatibleMode", downgradeCompatibleMode))
+			zap.Bool("downgrade-compatible-mode", downgradeCompatibleMode))
 	}
 }
 
