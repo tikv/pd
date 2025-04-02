@@ -250,6 +250,40 @@ func TestUpdateAfterResetTSO(t *testing.T) {
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/tso/delaySyncTimestamp"))
 }
 
+func TestGetTSAfterTransferLeader(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster, err := tests.NewTestCluster(ctx, 2)
+	re.NoError(err)
+	endpoints := runServer(re, cluster)
+	leader := cluster.WaitLeader()
+	re.NotEmpty(leader)
+	defer cluster.Destroy()
+
+	cli := setupCli(re, ctx, endpoints, pd.WithCustomTimeoutOption(10*time.Second))
+	defer cli.Close()
+
+	leaderAddr := cli.(client).GetLeaderAddr()
+	// Resign leader.
+	err = cluster.GetServer(leader).ResignLeader()
+	re.NoError(err)
+	testutil.Eventually(re, func() bool {
+		newLeader := cluster.WaitLeader()
+		return len(newLeader) > 0 && newLeader != leader
+	})
+	// Wait for the leader stream in the client to be updated.
+	cli.(client).ScheduleCheckLeader()
+	testutil.Eventually(re, func() bool {
+		newLeaderAddr := cli.(client).GetLeaderAddr()
+		return len(newLeaderAddr) > 0 && newLeaderAddr != leaderAddr
+	})
+
+	// The leader stream must be updated after the leader switch is sensed by the client.
+	_, _, err = cli.GetTS(ctx)
+	re.NoError(err)
+}
+
 func TestTSOAllocatorLeader(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())

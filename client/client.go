@@ -723,48 +723,8 @@ func (c *client) handleDispatcher(
 			return true
 		})
 	}()
-	// Call updateConnectionCtxs once to init the connectionCtxs first.
-	c.updateConnectionCtxs(dispatcherCtx, dc, &connectionCtxs)
-	// Only the Global TSO needs to watch the updateConnectionCtxsCh to sense the
-	// change of the cluster when TSO Follower Proxy is enabled.
-	// TODO: support TSO Follower Proxy for the Local TSO.
-	if dc == globalDCLocation {
-		go func() {
-			var updateTicker = &time.Ticker{}
-			setNewUpdateTicker := func(ticker *time.Ticker) {
-				if updateTicker.C != nil {
-					updateTicker.Stop()
-				}
-				updateTicker = ticker
-			}
-			// Set to nil before returning to ensure that the existing ticker can be GC.
-			defer setNewUpdateTicker(nil)
-
-			for {
-				select {
-				case <-dispatcherCtx.Done():
-					return
-				case <-c.option.enableTSOFollowerProxyCh:
-					enableTSOFollowerProxy := c.option.getEnableTSOFollowerProxy()
-					if enableTSOFollowerProxy && updateTicker.C == nil {
-						// Because the TSO Follower Proxy is enabled,
-						// the periodic check needs to be performed.
-						setNewUpdateTicker(time.NewTicker(memberUpdateInterval))
-					} else if !enableTSOFollowerProxy && updateTicker.C != nil {
-						// Because the TSO Follower Proxy is disabled,
-						// the periodic check needs to be turned off.
-						setNewUpdateTicker(&time.Ticker{})
-					} else {
-						// The status of TSO Follower Proxy does not change, and updateConnectionCtxs is not triggered
-						continue
-					}
-				case <-updateTicker.C:
-				case <-c.updateConnectionCtxsCh:
-				}
-				c.updateConnectionCtxs(dispatcherCtx, dc, &connectionCtxs)
-			}
-		}()
-	}
+	// Daemon goroutine to update the connectionCtxs periodically and handle the `connectionCtxs` update event.
+	go c.connectionCtxsUpdater(dispatcherCtx, dc, &connectionCtxs)
 
 	// Loop through each batch of TSO requests and send them for processing.
 	streamLoopTimer := time.NewTimer(c.option.timeout)
@@ -883,6 +843,55 @@ tsoBatchLoop:
 	}
 }
 
+func (c *client) connectionCtxsUpdater(
+	ctx context.Context,
+	dc string,
+	connectionCtxs *sync.Map,
+) {
+	if dc != globalDCLocation {
+		return
+	}
+	log.Info("[tso] start tso connection contexts updater", zap.String("dc-location", dc))
+	var updateTicker = &time.Ticker{}
+	setNewUpdateTicker := func(ticker *time.Ticker) {
+		if updateTicker.C != nil {
+			updateTicker.Stop()
+		}
+		updateTicker = ticker
+	}
+	// Set to nil before returning to ensure that the existing ticker can be GC.
+	defer setNewUpdateTicker(nil)
+
+	for {
+		c.updateConnectionCtxs(ctx, dc, connectionCtxs)
+		select {
+		case <-ctx.Done():
+			log.Info("[tso] exit tso connection contexts updater", zap.String("dc-location", dc))
+			return
+		case <-c.option.enableTSOFollowerProxyCh:
+			enableTSOFollowerProxy := c.option.getEnableTSOFollowerProxy()
+			log.Info("[tso] tso follower proxy status changed",
+				zap.String("dc-location", dc),
+				zap.Bool("enable", enableTSOFollowerProxy))
+			if enableTSOFollowerProxy && updateTicker.C == nil {
+				// Because the TSO Follower Proxy is enabled,
+				// the periodic check needs to be performed.
+				setNewUpdateTicker(time.NewTicker(memberUpdateInterval))
+			} else if !enableTSOFollowerProxy && updateTicker.C != nil {
+				// Because the TSO Follower Proxy is disabled,
+				// the periodic check needs to be turned off.
+				setNewUpdateTicker(&time.Ticker{})
+			} else {
+				continue
+			}
+		case <-updateTicker.C:
+			// Triggered periodically when the TSO Follower Proxy is enabled.
+		case <-c.updateConnectionCtxsCh:
+			// Triggered by the leader/follower change.
+		}
+	}
+}
+
 // TSO Follower Proxy only supports the Global TSO proxy now.
 func (c *client) allowTSOFollowerProxy(dc string) bool {
 	return dc == globalDCLocation && c.option.getEnableTSOFollowerProxy()
@@ -941,15 +950,13 @@ func (c *client) tryConnect(
 		cc            *grpc.ClientConn
 	)
 	updateAndClear := func(newAddr string, connectionCtx *connectionContext) {
-		if cc, loaded := connectionCtxs.LoadOrStore(newAddr, connectionCtx); loaded {
-			// If the previous connection still exists, we should close it first.
-			cc.(*connectionContext).cancel()
-			connectionCtxs.Store(newAddr, connectionCtx)
-		}
-		connectionCtxs.Range(func(addr, cc interface{}) bool {
-			if addr.(string) != newAddr {
+		// Only store the `connectionCtx` if it does not exist before.
+		connectionCtxs.LoadOrStore(newAddr, connectionCtx)
+		// Remove all other `connectionCtx`s.
+		connectionCtxs.Range(func(url, cc interface{}) bool {
+			if url.(string) != newAddr {
 				cc.(*connectionContext).cancel()
-				connectionCtxs.Delete(addr)
+				connectionCtxs.Delete(url)
 			}
 			return true
 		})
@@ -959,6 +966,9 @@ func (c *client) tryConnect(
 	for i := 0; i < maxRetryTimes; i++ {
 		c.ScheduleCheckLeader()
 		cc, url = c.getAllocatorClientConnByDCLocation(dc)
+		if _, ok := connectionCtxs.Load(url); ok {
+			return nil
+		}
 		cctx, cancel := context.WithCancel(dispatcherCtx)
 		stream, err = c.createTsoStream(cctx, cancel, pdpb.NewPDClient(cc))
 		failpoint.Inject("unreachableNetwork", func() {

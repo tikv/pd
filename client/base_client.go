@@ -381,6 +381,7 @@ func (c *baseClient) switchLeader(addrs []string) error {
 	// Set PD leader and Global TSO Allocator (which is also the PD leader)
 	c.leader.Store(addr)
 	c.allocators.Store(globalDCLocation, addr)
+	c.scheduleUpdateConnectionCtxs()
 	log.Info("[pd] switch leader", zap.String("new-leader", addr), zap.String("old-leader", oldLeader))
 	return nil
 }
