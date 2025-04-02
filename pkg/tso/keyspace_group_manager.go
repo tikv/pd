@@ -113,7 +113,7 @@ func (s *state) deInitialize() {
 		go func(allocator *Allocator) {
 			defer logutil.LogPanic()
 			defer wg.Done()
-			allocator.close()
+			allocator.Close()
 			log.Info("keyspace group closed", zap.Uint32("keyspace-group-id", allocator.keyspaceGroupID))
 		}(allocator)
 	}
@@ -938,7 +938,7 @@ func (kgm *KeyspaceGroupManager) deleteKeyspaceGroup(groupID uint32) {
 
 	allocator := kgm.allocators[groupID]
 	if allocator != nil {
-		allocator.close()
+		allocator.Close()
 		kgm.allocators[groupID] = nil
 	}
 
@@ -955,7 +955,7 @@ func (kgm *KeyspaceGroupManager) exitElectionMembership(group *endpoint.Keyspace
 
 	allocator := kgm.allocators[group.ID]
 	if allocator != nil {
-		allocator.close()
+		allocator.Close()
 		kgm.allocators[group.ID] = nil
 	}
 

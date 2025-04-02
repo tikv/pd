@@ -533,6 +533,9 @@ func (s *Server) Close() {
 	if s.IsKeyspaceGroupEnabled() {
 		s.keyspaceGroupManager.Close()
 	}
+	if s.tsoAllocator != nil {
+		s.tsoAllocator.Close()
+	}
 
 	if s.client != nil {
 		if err := s.client.Close(); err != nil {

@@ -174,29 +174,29 @@ func (a *Allocator) allocatorUpdater() {
 
 	log.Info("entering into allocator update loop", a.logFields...)
 	for {
-		// Only try to update when the member is leader/primary and the allocator is initialized.
-		if !a.isPrimary() || !a.IsInitialize() {
-			continue
-		}
-		if err := a.UpdateTSO(); err != nil {
-			log.Warn("failed to update allocator's timestamp", append(a.logFields, errs.ZapError(err))...)
-			a.Reset(true)
-			// To wait for the allocator to be re-initialized next time.
-			continue
-		}
 		select {
+		case <-tsTicker.C:
+			// Only try to update when the member is leader/primary and the allocator is initialized.
+			if !a.isPrimary() || !a.IsInitialize() {
+				continue
+			}
+			if err := a.UpdateTSO(); err != nil {
+				log.Warn("failed to update allocator's timestamp", append(a.logFields, errs.ZapError(err))...)
+				a.Reset(true)
+				// To wait for the allocator to be re-initialized next time.
+				continue
+			}
 		case <-a.ctx.Done():
 			a.Reset(false)
 			log.Info("exit the allocator update loop", a.logFields...)
 			return
-		case <-tsTicker.C:
 		}
 	}
 }
 
-// close is used to shutdown the primary election loop.
+// Close is used to close the allocator and shutdown all the daemon loops.
 // tso service call this function to shutdown the loop here, but pd manages its own loop.
-func (a *Allocator) close() {
+func (a *Allocator) Close() {
 	log.Info("closing the allocator", a.logFields...)
 	a.cancel()
 	a.wg.Wait()
