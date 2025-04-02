@@ -175,7 +175,7 @@ type Server struct {
 	// for basicCluster operation.
 	basicCluster *core.BasicCluster
 	// for tso.
-	tsoAllocatorManager *tso.AllocatorManager
+	tsoAllocator *tso.Allocator
 	// for raft cluster
 	cluster *cluster.RaftCluster
 	// For async region heartbeat.
@@ -468,10 +468,10 @@ func (s *Server) startServer(ctx context.Context) error {
 	s.tsoDispatcher = tsoutil.NewTSODispatcher(tsoProxyHandleDuration, tsoProxyBatchSize)
 	s.tsoProtoFactory = &tsoutil.TSOProtoFactory{}
 	s.pdProtoFactory = &tsoutil.PDProtoFactory{}
-	s.tsoAllocatorManager = tso.NewAllocatorManager(s.ctx, constant.DefaultKeyspaceGroupID, s.member, s.storage, s)
+	s.tsoAllocator = tso.NewAllocator(s.ctx, constant.DefaultKeyspaceGroupID, s.member, s.storage, s)
 	s.gcSafePointManager = gc.NewSafePointManager(s.storage, s.cfg.PDServerCfg)
 	s.basicCluster = core.NewBasicCluster()
-	s.cluster = cluster.NewRaftCluster(ctx, s.GetMember(), s.GetBasicCluster(), s.GetStorage(), syncer.NewRegionSyncer(s), s.client, s.httpClient, s.tsoAllocatorManager)
+	s.cluster = cluster.NewRaftCluster(ctx, s.GetMember(), s.GetBasicCluster(), s.GetStorage(), syncer.NewRegionSyncer(s), s.client, s.httpClient, s.tsoAllocator)
 	keyspaceIDAllocator := id.NewAllocator(&id.AllocatorParams{
 		Client: s.client,
 		Label:  id.KeyspaceLabel,
@@ -881,9 +881,9 @@ func (s *Server) GetAllocator() id.Allocator {
 	return s.idAllocator
 }
 
-// GetTSOAllocatorManager returns the manager of TSO Allocator.
-func (s *Server) GetTSOAllocatorManager() *tso.AllocatorManager {
-	return s.tsoAllocatorManager
+// GetTSOAllocator returns the TSO Allocator.
+func (s *Server) GetTSOAllocator() *tso.Allocator {
+	return s.tsoAllocator
 }
 
 // GetKeyspaceManager returns the keyspace manager of server.
@@ -2090,10 +2090,4 @@ func (s *Server) GetMaxResetTSGap() time.Duration {
 // Notes: it is only used for test.
 func (s *Server) SetClient(client *clientv3.Client) {
 	s.client = client
-}
-
-// GetGlobalTSOAllocator return global tso allocator
-// It only is used for test.
-func (s *Server) GetGlobalTSOAllocator() tso.Allocator {
-	return s.cluster.GetGlobalTSOAllocator()
 }

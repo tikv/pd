@@ -17,7 +17,6 @@ package server
 import (
 	"context"
 	"io"
-	"strings"
 	"time"
 
 	"go.uber.org/zap"
@@ -246,7 +245,7 @@ func (s *GrpcServer) forwardTSORequestWithDeadLine(
 	resp, err := forwarder.forwardTSORequest(request)
 	close(done)
 	if err != nil {
-		if strings.Contains(err.Error(), errs.NotLeaderErr) {
+		if errs.IsLeaderChanged(err) {
 			s.tsoPrimaryWatcher.ForceLoad()
 		}
 		return nil, err
@@ -436,7 +435,7 @@ func (s *GrpcServer) isLocalRequest(host string) bool {
 
 func (s *GrpcServer) getGlobalTSO(ctx context.Context) (pdpb.Timestamp, error) {
 	if !s.IsServiceIndependent(constant.TSOServiceName) {
-		return s.tsoAllocatorManager.HandleRequest(ctx, 1)
+		return s.tsoAllocator.GenerateTSO(ctx, 1)
 	}
 	request := &tsopb.TsoRequest{
 		Header: &tsopb.RequestHeader{
@@ -454,7 +453,7 @@ func (s *GrpcServer) getGlobalTSO(ctx context.Context) (pdpb.Timestamp, error) {
 		ok            bool
 	)
 	handleStreamError := func(err error) (needRetry bool) {
-		if strings.Contains(err.Error(), errs.NotLeaderErr) {
+		if errs.IsLeaderChanged(err) {
 			s.tsoPrimaryWatcher.ForceLoad()
 			log.Warn("force to load tso primary address due to error", zap.Error(err), zap.String("tso-addr", forwardedHost))
 			return true

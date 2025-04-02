@@ -131,53 +131,70 @@ func checkAndReturnTimestampResponse(re *require.Assertions, req *pdpb.TsoReques
 	re.Equal(req.GetCount(), resp.GetCount())
 	timestamp := resp.GetTimestamp()
 	re.Positive(timestamp.GetPhysical())
-	re.GreaterOrEqual(uint32(timestamp.GetLogical())>>timestamp.GetSuffixBits(), req.GetCount())
+	re.GreaterOrEqual(uint32(timestamp.GetLogical()), req.GetCount())
 	return timestamp
 }
+
 func TestLogicalOverflow(t *testing.T) {
 	re := require.New(t)
 
-	runCase := func(updateInterval time.Duration) {
-		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
-		cluster, err := tests.NewTestCluster(ctx, 1, func(conf *config.Config, _ string) {
-			conf.TSOUpdatePhysicalInterval = typeutil.Duration{Duration: updateInterval}
-		})
-		defer cluster.Destroy()
-		re.NoError(err)
-		re.NoError(cluster.RunInitialServers())
-		re.NotEmpty(cluster.WaitLeader())
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	// Set to max update interval so we can drain the logical part easily later.
+	updateInterval := config.MaxTSOUpdatePhysicalInterval
+	cluster, err := tests.NewTestCluster(ctx, 1, func(conf *config.Config, _ string) {
+		conf.TSOUpdatePhysicalInterval = typeutil.Duration{Duration: updateInterval}
+	})
+	defer cluster.Destroy()
+	re.NoError(err)
+	re.NoError(cluster.RunInitialServers())
+	re.NotEmpty(cluster.WaitLeader())
 
-		leaderServer := cluster.GetLeaderServer()
-		re.NotNil(leaderServer)
-		leaderServer.BootstrapCluster()
-		grpcPDClient := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
-		clusterID := leaderServer.GetClusterID()
+	leaderServer := cluster.GetLeaderServer()
+	re.NotNil(leaderServer)
+	leaderServer.BootstrapCluster()
+	grpcPDClient := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
+	clusterID := leaderServer.GetClusterID()
 
-		tsoClient, err := grpcPDClient.Tso(ctx)
-		re.NoError(err)
-		defer tsoClient.CloseSend()
+	tsoClient, err := grpcPDClient.Tso(ctx)
+	re.NoError(err)
+	defer tsoClient.CloseSend()
 
+	var (
+		maxDuration   time.Duration
+		lastTimestamp *pdpb.Timestamp
+	)
+	// Since the max logical count is 2 << 18 (262144), we request 20 times with 26214 count each time.
+	// This ensures that the logical part will definitely overflow once within the `updateInterval`.
+	count := (1 << 18) / 10
+	for range 20 {
 		begin := time.Now()
-		for i := range 3 {
-			req := &pdpb.TsoRequest{
-				Header:     testutil.NewRequestHeader(clusterID),
-				Count:      150000,
-				DcLocation: tso.GlobalDCLocation,
-			}
-			re.NoError(tsoClient.Send(req))
-			_, err = tsoClient.Recv()
-			re.NoError(err)
-			if i == 1 {
-				// the 2nd request may (but not must) overflow, as max logical interval is 262144
-				re.Less(time.Since(begin), updateInterval+50*time.Millisecond) // additional 50ms for gRPC latency
+		req := &pdpb.TsoRequest{
+			Header:     testutil.NewRequestHeader(clusterID),
+			Count:      uint32(count),
+			DcLocation: tso.GlobalDCLocation,
+		}
+		re.NoError(tsoClient.Send(req))
+		resp, err := tsoClient.Recv()
+		re.NoError(err)
+		// Record the max duration to validate whether the overflow is triggered later.
+		duration := time.Since(begin)
+		if duration > maxDuration {
+			maxDuration = duration
+		}
+		// Check the monotonicity of the timestamp.
+		timestamp := checkAndReturnTimestampResponse(re, req, resp)
+		re.NotNil(timestamp)
+		if lastTimestamp != nil {
+			lastPhysical, curPhysical := lastTimestamp.GetPhysical(), timestamp.GetPhysical()
+			re.GreaterOrEqual(curPhysical, lastPhysical)
+			// If the physical time is the same, the logical time must be strictly increasing.
+			if curPhysical == lastPhysical {
+				re.Greater(timestamp.GetLogical(), lastTimestamp.GetLogical())
 			}
 		}
-		// the 3rd request must overflow
-		re.GreaterOrEqual(time.Since(begin), updateInterval)
+		lastTimestamp = timestamp
 	}
-
-	for _, updateInterval := range []int{1, 5, 30, 50} {
-		runCase(time.Duration(updateInterval) * time.Millisecond)
-	}
+	// Due to the overflow triggered, there at least one request duration greater than the `updateInterval`.
+	re.Greater(maxDuration, updateInterval)
 }

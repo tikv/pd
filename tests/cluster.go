@@ -39,7 +39,6 @@ import (
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/swaggerserver"
-	"github.com/tikv/pd/pkg/tso"
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
@@ -394,11 +393,6 @@ func (s *TestServer) WaitLeader() bool {
 		time.Sleep(WaitLeaderCheckInterval)
 	}
 	return false
-}
-
-// GetTSOAllocatorManager returns the server's TSO Allocator Manager.
-func (s *TestServer) GetTSOAllocatorManager() *tso.AllocatorManager {
-	return s.server.GetTSOAllocatorManager()
 }
 
 // GetServicePrimaryAddr returns the primary address of the service.
