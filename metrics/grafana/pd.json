@@ -9206,7 +9206,7 @@
           "spaceLength": 10,
           "targets": [
             {
-              "expr": "sum(rate(pd_server_region_request_cnt{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\"}[1m])) by (request, caller_id, caller_component)",
+              "expr": "sum(rate(pd_server_region_request_cnt{k8s_cluster=\"$k8s_cluster\", tidb_cluster=\"$tidb_cluster\", instance=~\"$instance\", err_msg=\"\"}[1m])) by (request, caller_id, caller_component)",
               "legendFormat": "{{request}}-{{caller_id}}-{{caller_component}}",
               "interval": "",
               "exemplar": true,
@@ -9217,7 +9217,7 @@
           ],
           "thresholds": [],
           "timeRegions": [],
-          "title": "Total Region Request(1% sample)",
+          "title": "Success Region Request(1% sample)",
           "tooltip": {
             "msResolution": false,
             "shared": true,
