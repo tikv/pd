@@ -43,9 +43,17 @@ import (
 	"github.com/tikv/pd/pkg/utils/logutil"
 )
 
-// GlobalDCLocation is the Global TSO Allocator's DC location label.
-// Deprecated: This is a legacy label, it should be removed in the future.
-const GlobalDCLocation = "global"
+const (
+	// GlobalDCLocation is the Global TSO Allocator's DC location label.
+	// Deprecated: This is a legacy label, it should be removed in the future.
+	GlobalDCLocation = "global"
+	// maxUpdateTSORetryCount is the max retry count for updating TSO.
+	// When encountering a network partition, manually retrying may help the next request succeed with the new endpoint according to https://github.com/etcd-io/etcd/issues/8711
+	maxUpdateTSORetryCount = 3
+	// Etcd client retry with `roundRobinQuorumBackoff` (https://github.com/etcd-io/etcd/blob/d62cdeee4863001b09e772ed013eb1342a1d0f89/client/v3/client.go#L488),
+	// whose default interval is 25ms, so we sleep 50ms here. (https://github.com/etcd-io/etcd/blob/d62cdeee4863001b09e772ed013eb1342a1d0f89/client/v3/options.go#L53)
+	updateTSORetryInterval = 50 * time.Millisecond
+)
 
 // ElectionMember defines the interface for the election related logic.
 type ElectionMember interface {
@@ -166,21 +174,22 @@ func (a *Allocator) allocatorUpdater() {
 
 	log.Info("entering into allocator update loop", a.logFields...)
 	for {
+		// Only try to update when the member is leader/primary and the allocator is initialized.
+		if !a.isPrimary() || !a.IsInitialize() {
+			continue
+		}
+		if err := a.UpdateTSO(); err != nil {
+			log.Warn("failed to update allocator's timestamp", append(a.logFields, errs.ZapError(err))...)
+			a.Reset(true)
+			// To wait for the allocator to be re-initialized next time.
+			continue
+		}
 		select {
-		case <-tsTicker.C:
-			// Only try to update when the member is leader/primary and the allocator is initialized.
-			if !a.isPrimary() || !a.IsInitialize() {
-				continue
-			}
-			if err := a.UpdateTSO(); err != nil {
-				log.Warn("failed to update allocator's timestamp", append(a.logFields, errs.ZapError(err))...)
-				a.Reset(true)
-				return
-			}
 		case <-a.ctx.Done():
 			a.Reset(false)
 			log.Info("exit the allocator update loop", a.logFields...)
 			return
+		case <-tsTicker.C:
 		}
 	}
 }
@@ -207,18 +216,14 @@ func (a *Allocator) IsInitialize() bool {
 
 // UpdateTSO is used to update the TSO in memory and the time window in etcd.
 func (a *Allocator) UpdateTSO() (err error) {
-	// When meet network partition, we need to manually retry to update the tso,
-	// next request succeeds with the new endpoint, according to https://github.com/etcd-io/etcd/issues/8711
-	maxRetryCount := 3
-	for range maxRetryCount {
+	for i := range maxUpdateTSORetryCount {
 		err = a.timestampOracle.updateTimestamp()
 		if err == nil {
 			return nil
 		}
-		log.Warn("try to update the tso but failed", errs.ZapError(err))
-		// Etcd client retry with roundRobinQuorumBackoff https://github.com/etcd-io/etcd/blob/d62cdeee4863001b09e772ed013eb1342a1d0f89/client/v3/client.go#L488
-		// And its default interval is 25ms, so we sleep 50ms here. https://github.com/etcd-io/etcd/blob/d62cdeee4863001b09e772ed013eb1342a1d0f89/client/v3/options.go#L53
-		time.Sleep(50 * time.Millisecond)
+		log.Warn("try to update the tso but failed",
+			zap.Int("retry-count", i), zap.Duration("retry-interval", updateTSORetryInterval), errs.ZapError(err))
+		time.Sleep(updateTSORetryInterval)
 	}
 	return
 }
