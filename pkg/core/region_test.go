@@ -1323,7 +1323,7 @@ func TestGetPeers(t *testing.T) {
 			peers: nil,
 		},
 	} {
-		role := NewRole(v.role)
+		role := NewRule(v.role)
 		peers := region.GetPeersByRole(role)
 		sort.Slice(peers, func(i, j int) bool {
 			return peers[i].Id <= peers[j].Id
