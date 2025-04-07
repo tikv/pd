@@ -429,7 +429,10 @@ func (ls *Leadership) Reset() {
 		ls.keepAliveCancelFunc()
 	}
 	ls.keepAliveCancelFuncLock.Unlock()
-	ls.GetLease().Close()
+	err := ls.GetLease().Close()
+	if err != nil {
+		log.Error("close lease failed", zap.String("purpose", ls.purpose), errs.ZapError(err))
+	}
 	ls.SetPrimaryWatch(false)
 	ls.leaderValue.Store("")
 }

@@ -330,19 +330,19 @@ func (m *EmbeddedEtcdMember) IsSameLeader(leader any) bool {
 
 // InitMemberInfo initializes the member info.
 func (m *EmbeddedEtcdMember) InitMemberInfo(advertiseClientUrls, advertisePeerUrls, name string) {
-	leader := &pdpb.Member{
+	member := &pdpb.Member{
 		Name:       name,
 		MemberId:   m.ID(),
 		ClientUrls: strings.Split(advertiseClientUrls, ","),
 		PeerUrls:   strings.Split(advertisePeerUrls, ","),
 	}
 
-	data, err := leader.Marshal()
+	data, err := member.Marshal()
 	if err != nil {
 		// can't fail, so panic here.
-		log.Fatal("marshal pd leader meet error", zap.Stringer("pd-leader", leader), errs.ZapError(errs.ErrMarshalLeader, err))
+		log.Fatal("marshal pd member meet error", zap.Stringer("pd-member", member), errs.ZapError(errs.ErrMarshalLeader, err))
 	}
-	m.member = leader
+	m.member = member
 	m.memberValue = string(data)
 	m.leadership = election.NewLeadership(m.client, m.GetLeaderPath(), "leader election")
 	log.Info("member joining election", zap.Stringer("member-info", m.member))
