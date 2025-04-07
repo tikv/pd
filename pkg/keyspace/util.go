@@ -252,3 +252,11 @@ func (hp *indexedHeap) Remove(id uint32) *endpoint.KeyspaceGroup {
 	}
 	return nil
 }
+
+// canGC checks keyspace's state and stateChangedAt against safePoint to determine if we can safely gc it.
+func canGC(meta *keyspacepb.KeyspaceMeta, safePoint int64) bool {
+	if meta.GetState() != keyspacepb.KeyspaceState_ARCHIVED {
+		return false
+	}
+	return meta.GetStateChangedAt() < safePoint
+}
