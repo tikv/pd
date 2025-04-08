@@ -41,12 +41,10 @@ import (
 )
 
 const (
-	msServiceRootPath = "/ms"
-	tsoServiceName    = "tso"
 	// tsoSvcDiscoveryFormat defines the key prefix for keyspace group primary election.
 	// The entire key is in the format of "/ms/<cluster-id>/tso/<group-id>/primary".
 	// The <group-id> is 5 digits integer with leading zeros.
-	tsoSvcDiscoveryFormat = msServiceRootPath + "/%d/" + tsoServiceName + "/%05d/primary"
+	tsoSvcDiscoveryFormat = "/ms/%d/tso/%05d/primary"
 	// initRetryInterval is the rpc retry interval during the initialization phase.
 	initRetryInterval = time.Second
 	// tsoQueryRetryMaxTimes is the max retry times for querying TSO.
@@ -141,7 +139,7 @@ type tsoServiceDiscovery struct {
 	clientConns sync.Map // Store as map[string]*grpc.ClientConn
 
 	// tsoLeaderUpdatedCb will be called when the TSO leader is updated.
-	tsoLeaderUpdatedCb leaderSwitchedCallbackFunc
+	tsoLeaderUpdatedCb LeaderSwitchedCallbackFunc
 
 	checkMembershipCh chan struct{}
 
@@ -359,7 +357,7 @@ func (c *tsoServiceDiscovery) CheckMemberChanged() error {
 }
 
 // ExecAndAddLeaderSwitchedCallback executes the callback once and adds it to the callback list then.
-func (c *tsoServiceDiscovery) ExecAndAddLeaderSwitchedCallback(callback leaderSwitchedCallbackFunc) {
+func (c *tsoServiceDiscovery) ExecAndAddLeaderSwitchedCallback(callback LeaderSwitchedCallbackFunc) {
 	url := c.getPrimaryURL()
 	if len(url) > 0 {
 		if err := callback(url); err != nil {
@@ -371,7 +369,7 @@ func (c *tsoServiceDiscovery) ExecAndAddLeaderSwitchedCallback(callback leaderSw
 
 // AddLeaderSwitchedCallback adds callbacks which will be called when the primary in
 // a primary/secondary configured cluster is switched.
-func (*tsoServiceDiscovery) AddLeaderSwitchedCallback(leaderSwitchedCallbackFunc) {}
+func (*tsoServiceDiscovery) AddLeaderSwitchedCallback(LeaderSwitchedCallbackFunc) {}
 
 // AddMembersChangedCallback adds callbacks which will be called when any primary/secondary
 // in a primary/secondary configured cluster is changed.

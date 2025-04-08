@@ -47,6 +47,7 @@ import (
 	"github.com/tikv/pd/pkg/ratelimit"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
+	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/logutil"
@@ -96,7 +97,8 @@ type pdpbTSORequest struct {
 	err     error
 }
 
-func (s *tsoServer) send(m *pdpb.TsoResponse) error {
+// Send wraps Send() of PD_TsoServer.
+func (s *tsoServer) Send(m *pdpb.TsoResponse) error {
 	if atomic.LoadInt32(&s.closed) == 1 {
 		return io.EOF
 	}
@@ -299,7 +301,7 @@ func (s *GrpcServer) GetMinTS(
 		minTS, err = s.GetMinTSFromTSOService()
 	} else {
 		start := time.Now()
-		ts, internalErr := s.tsoAllocatorManager.HandleRequest(ctx, 1)
+		ts, internalErr := s.tsoAllocator.GenerateTSO(ctx, 1)
 		if internalErr == nil {
 			tsoHandleDuration.Observe(time.Since(start).Seconds())
 		}
@@ -486,29 +488,23 @@ func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
 		defer done()
 	}
 	if s.IsServiceIndependent(constant.TSOServiceName) {
-		return s.forwardTSO(stream)
+		return s.forwardToTSOService(stream)
 	}
 
 	tsDeadlineCh := make(chan *tsoutil.TSDeadline, 1)
 	go tsoutil.WatchTSDeadline(stream.Context(), tsDeadlineCh)
 
 	var (
-		doneCh chan struct{}
-		errCh  chan error
-		// The following are tso forward stream related variables.
-		forwardStream     tsopb.TSO_TsoClient
-		cancelForward     context.CancelFunc
-		forwardCtx        context.Context
-		tsoStreamErr      error
-		lastForwardedHost string
+		doneCh       chan struct{}
+		errCh        chan error
+		forwarder    = newTSOForwarder(stream)
+		tsoStreamErr error
 	)
 
 	defer func() {
-		if cancelForward != nil {
-			cancelForward()
-		}
+		forwarder.cancel()
 		if grpcutil.NeedRebuildConnection(tsoStreamErr) {
-			s.closeDelegateClient(lastForwardedHost)
+			s.closeDelegateClient(forwarder.host)
 		}
 	}()
 
@@ -559,7 +555,7 @@ func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
 				err = errs.ErrGenerateTimestamp.FastGenByArgs("tso count should be positive")
 				return errs.ErrUnknown(err)
 			}
-			forwardCtx, cancelForward, forwardStream, lastForwardedHost, tsoStreamErr, err = s.handleTSOForwarding(forwardCtx, forwardStream, stream, nil, request, tsDeadlineCh, lastForwardedHost, cancelForward)
+			tsoStreamErr, err = s.handleTSOForwarding(stream.Context(), forwarder, request, tsDeadlineCh)
 			if tsoStreamErr != nil {
 				return tsoStreamErr
 			}
@@ -575,7 +571,7 @@ func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
 		}
 		count := request.GetCount()
 		ctx, task := trace.NewTask(ctx, "tso")
-		ts, err := s.tsoAllocatorManager.HandleRequest(ctx, count)
+		ts, err := s.tsoAllocator.GenerateTSO(ctx, count)
 		task.End()
 		tsoHandleDuration.Observe(time.Since(start).Seconds())
 		if err != nil {
@@ -675,18 +671,30 @@ func (s *GrpcServer) AllocID(ctx context.Context, request *pdpb.AllocIDRequest) 
 		return rsp.(*pdpb.AllocIDResponse), err
 	}
 
+	reqCount := uint32(1)
+	if request.GetCount() != 0 {
+		reqCount = request.GetCount()
+	}
+	failpoint.Inject("handleAllocIDNonBatch", func() {
+		reqCount = 1
+	})
+
 	// We can use an allocator for all types ID allocation.
-	id, err := s.idAllocator.Alloc()
+	id, count, err := s.idAllocator.Alloc(reqCount)
 	if err != nil {
 		return &pdpb.AllocIDResponse{
 			Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
 		}, nil
 	}
 
-	return &pdpb.AllocIDResponse{
+	resp := &pdpb.AllocIDResponse{
 		Header: wrapHeader(),
 		Id:     id,
-	}, nil
+	}
+	if count > 1 {
+		resp.Count = count
+	}
+	return resp, nil
 }
 
 // IsSnapshotRecovering implements gRPC PDServer.
@@ -702,6 +710,7 @@ func (s *GrpcServer) IsSnapshotRecovering(ctx context.Context, _ *pdpb.IsSnapsho
 	if s.IsClosed() {
 		return nil, errs.ErrNotStarted
 	}
+
 	// recovering mark is stored in etcd directly, there's no need to forward.
 	marked, err := s.Server.IsSnapshotRecovering(ctx)
 	if err != nil {
@@ -1573,7 +1582,7 @@ func (s *GrpcServer) QueryRegion(stream pdpb.PD_QueryRegionServer) error {
 			request.GetIds(),
 			needBuckets,
 		)
-		regionQueryDuration.Observe(time.Since(start).Seconds())
+		queryRegionDuration.Observe(time.Since(start).Seconds())
 		// Build the response and send it to the client.
 		response := &pdpb.QueryRegionResponse{
 			Header:       wrapHeader(),
@@ -2689,7 +2698,7 @@ func (s *GrpcServer) WatchGlobalConfig(req *pdpb.WatchGlobalConfigRequest, serve
 	// - If required revision < CompactRevision, we need to reload all configs to avoid losing data.
 	// - If required revision >= CompactRevision, just keep watching.
 	// Use WithPrevKV() to get the previous key-value pair when get Delete Event.
-	watchChan := s.client.Watch(ctx, configPath, clientv3.WithPrefix(), clientv3.WithRev(revision), clientv3.WithPrevKV())
+	watchChan := etcdutil.Watch(ctx, s.client, configPath, clientv3.WithPrefix(), clientv3.WithRev(revision), clientv3.WithPrevKV())
 	for {
 		select {
 		case <-ctx.Done():

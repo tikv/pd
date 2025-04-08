@@ -39,7 +39,6 @@ import (
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/swaggerserver"
-	"github.com/tikv/pd/pkg/tso"
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
@@ -87,7 +86,7 @@ var zapLogOnce sync.Once
 func NewTestServer(ctx context.Context, cfg *config.Config, services []string) (*TestServer, error) {
 	//  disable the heartbeat async runner in test
 	cfg.Schedule.EnableHeartbeatConcurrentRunner = false
-	err := logutil.SetupLogger(cfg.Log, &cfg.Logger, &cfg.LogProps, cfg.Security.RedactInfoLog)
+	err := logutil.SetupLogger(&cfg.Log, &cfg.Logger, &cfg.LogProps, cfg.Security.RedactInfoLog)
 	if err != nil {
 		return nil, err
 	}
@@ -447,11 +446,6 @@ func (s *TestServer) GetPreAllocKeyspaceIDs() ([]uint32, error) {
 		ids = append(ids, meta.GetId())
 	}
 	return ids, nil
-}
-
-// GetTSOAllocatorManager returns the server's TSO Allocator Manager.
-func (s *TestServer) GetTSOAllocatorManager() *tso.AllocatorManager {
-	return s.server.GetTSOAllocatorManager()
 }
 
 // GetServicePrimaryAddr returns the primary address of the service.

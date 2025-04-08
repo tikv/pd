@@ -53,7 +53,7 @@ func TestKeyspaceGroup(t *testing.T) {
 	cmd := ctl.GetRootCmd()
 
 	// Show keyspace group information.
-	defaultKeyspaceGroupID := fmt.Sprintf("%d", constant.DefaultKeyspaceGroupID)
+	defaultKeyspaceGroupID := strconv.FormatUint(uint64(constant.DefaultKeyspaceGroupID), 10)
 	args := []string{"-u", pdAddr, "keyspace-group"}
 	output, err := tests.ExecuteCommand(cmd, append(args, defaultKeyspaceGroupID)...)
 	re.NoError(err)
@@ -175,7 +175,7 @@ func TestExternalAllocNodeWhenStart(t *testing.T) {
 	re.NoError(leaderServer.BootstrapCluster())
 
 	// check keyspace group information.
-	defaultKeyspaceGroupID := fmt.Sprintf("%d", constant.DefaultKeyspaceGroupID)
+	defaultKeyspaceGroupID := strconv.FormatUint(uint64(constant.DefaultKeyspaceGroupID), 10)
 	args := []string{"-u", pdAddr, "keyspace-group"}
 	testutil.Eventually(re, func() bool {
 		output, err := tests.ExecuteCommand(cmd, append(args, defaultKeyspaceGroupID)...)
@@ -220,7 +220,7 @@ func TestSetNodeAndPriorityKeyspaceGroup(t *testing.T) {
 	re.NoError(leaderServer.BootstrapCluster())
 
 	// set-node keyspace group.
-	defaultKeyspaceGroupID := fmt.Sprintf("%d", constant.DefaultKeyspaceGroupID)
+	defaultKeyspaceGroupID := strconv.FormatUint(uint64(constant.DefaultKeyspaceGroupID), 10)
 	testutil.Eventually(re, func() bool {
 		args := []string{"-u", pdAddr, "keyspace-group", "set-node", defaultKeyspaceGroupID, tsoAddrs[0], tsoAddrs[1]}
 		output, err := tests.ExecuteCommand(cmd, args...)
@@ -359,7 +359,7 @@ func TestMergeKeyspaceGroup(t *testing.T) {
 
 	// split keyspace group multiple times.
 	for i := 1; i <= 10; i++ {
-		splitTargetID := fmt.Sprintf("%d", i)
+		splitTargetID := strconv.Itoa(i)
 		testutil.Eventually(re, func() bool {
 			args := []string{"-u", pdAddr, "keyspace-group", "split", "0", splitTargetID, splitTargetID}
 			output, err := tests.ExecuteCommand(cmd, args...)
@@ -535,7 +535,7 @@ func TestShowKeyspaceGroupPrimary(t *testing.T) {
 	tc.WaitLeader()
 	leaderServer := tc.GetLeaderServer()
 	re.NoError(leaderServer.BootstrapCluster())
-	defaultKeyspaceGroupID := fmt.Sprintf("%d", constant.DefaultKeyspaceGroupID)
+	defaultKeyspaceGroupID := strconv.FormatUint(uint64(constant.DefaultKeyspaceGroupID), 10)
 
 	// check keyspace group 0 information.
 	var keyspaceGroup endpoint.KeyspaceGroup

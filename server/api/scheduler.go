@@ -99,6 +99,45 @@ func (h *schedulerHandler) CreateScheduler(w http.ResponseWriter, r *http.Reques
 	}
 
 	switch tp {
+	case types.BalanceRangeScheduler:
+		exist, _ := h.IsSchedulerExisted(name)
+		if exist {
+			h.r.JSON(w, http.StatusBadRequest, "The scheduler already exists, pls remove the exist scheduler first.")
+			return
+		}
+		if err := apiutil.CollectStringOption("role", input, collector); err != nil {
+			h.r.JSON(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		if err := apiutil.CollectStringOption("engine", input, collector); err != nil {
+			h.r.JSON(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+
+		defaultTimeout := "1h"
+		if err := apiutil.CollectStringOption("timeout", input, collector); err != nil {
+			if errors.ErrorEqual(err, errs.ErrOptionNotExist) {
+				collector(defaultTimeout)
+			} else {
+				h.r.JSON(w, http.StatusInternalServerError, err.Error())
+				return
+			}
+		}
+
+		if err := apiutil.CollectStringOption("alias", input, collector); err != nil {
+			h.r.JSON(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+
+		if err := apiutil.CollectEscapeStringOption("start-key", input, collector); err != nil {
+			h.r.JSON(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+
+		if err := apiutil.CollectEscapeStringOption("end-key", input, collector); err != nil {
+			h.r.JSON(w, http.StatusInternalServerError, err.Error())
+			return
+		}
 	case types.ScatterRangeScheduler:
 		if err := apiutil.CollectEscapeStringOption("start_key", input, collector); err != nil {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
@@ -230,7 +269,7 @@ func (h *schedulerHandler) handleErr(w http.ResponseWriter, err error) {
 func (h *schedulerHandler) redirectSchedulerDelete(w http.ResponseWriter, name, schedulerName string) {
 	args := strings.Split(name, "-")
 	args = args[len(args)-1:]
-	deleteURL, err := url.JoinPath(h.GetAddr(), "pd", server.SchedulerConfigHandlerPath, schedulerName, "delete", args[0])
+	deleteURL, err := url.JoinPath(h.GetAddr(), server.SchedulerConfigHandlerPath, schedulerName, "delete", args[0])
 	if err != nil {
 		h.r.JSON(w, http.StatusInternalServerError, err.Error())
 		return

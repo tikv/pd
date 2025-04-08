@@ -20,7 +20,6 @@ import (
 
 	clientv3 "go.etcd.io/etcd/client/v3"
 
-	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 
 	"github.com/tikv/pd/pkg/core"
@@ -41,6 +40,7 @@ type Storage interface {
 	endpoint.RuleStorage
 	endpoint.ReplicationStatusStorage
 	endpoint.GCSafePointStorage
+	endpoint.GCStateStorage
 	endpoint.MinResolvedTSStorage
 	endpoint.ExternalTSStorage
 	endpoint.SafePointV2Storage
@@ -56,8 +56,8 @@ func NewStorageWithMemoryBackend() Storage {
 }
 
 // NewStorageWithEtcdBackend creates a new storage with etcd backend.
-func NewStorageWithEtcdBackend(client *clientv3.Client, rootPath string) Storage {
-	return newEtcdBackend(client, rootPath)
+func NewStorageWithEtcdBackend(client *clientv3.Client) Storage {
+	return newEtcdBackend(client)
 }
 
 // NewRegionStorageWithLevelDBBackend will create a specialized storage to
@@ -220,9 +220,6 @@ func AreRegionsLoaded(s Storage) bool {
 	ps := s.(*coreStorage)
 	ps.mu.RLock()
 	defer ps.mu.RUnlock()
-	failpoint.Inject("loadRegionSlow", func() {
-		failpoint.Return(false)
-	})
 	if ps.useRegionStorage.Load() {
 		return ps.regionLoaded == fromLeveldb
 	}

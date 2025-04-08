@@ -44,11 +44,10 @@ import (
 	tso "github.com/tikv/pd/pkg/mcs/tso/server"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/mock/mockid"
-	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/versioninfo"
-	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/server/cluster"
 )
 
 var (
@@ -97,7 +96,7 @@ var once sync.Once
 func InitLogger(logConfig log.Config, logger *zap.Logger, logProps *log.ZapProperties, redactInfoLog logutil.RedactInfoLogType) (err error) {
 	once.Do(func() {
 		// Setup the logger.
-		err = logutil.SetupLogger(logConfig, &logger, &logProps, redactInfoLog)
+		err = logutil.SetupLogger(&logConfig, &logger, &logProps, redactInfoLog)
 		if err != nil {
 			return
 		}
@@ -194,24 +193,33 @@ func WaitForPrimaryServing(re *require.Assertions, serverMap map[string]bs.Serve
 }
 
 // MustPutStore is used for test purpose.
-func MustPutStore(re *require.Assertions, cluster *TestCluster, store *metapb.Store) {
+func MustPutStore(re *require.Assertions, tc *TestCluster, store *metapb.Store) {
 	store.Address = fmt.Sprintf("tikv%d", store.GetId())
 	if len(store.Version) == 0 {
 		store.Version = versioninfo.MinSupportedVersion(versioninfo.Version2_0).String()
 	}
-	svr := cluster.GetLeaderServer().GetServer()
-	grpcServer := &server.GrpcServer{Server: svr}
-	_, err := grpcServer.PutStore(context.Background(), &pdpb.PutStoreRequest{
-		Header: &pdpb.RequestHeader{ClusterId: keypath.ClusterID()},
-		Store:  store,
+	var raftCluster *cluster.RaftCluster
+	// Make sure the raft cluster is ready, no matter if the leader is changed.
+	testutil.Eventually(re, func() bool {
+		leader := tc.GetLeaderServer()
+		if leader == nil {
+			return false
+		}
+		svr := leader.GetServer()
+		if svr == nil {
+			return false
+		}
+		raftCluster = svr.GetRaftCluster()
+		// Wait for the raft cluster on the leader to be bootstrapped.
+		return raftCluster != nil && raftCluster.IsRunning()
 	})
-	re.NoError(err)
-
+	re.NoError(raftCluster.PutMetaStore(store))
 	ts := store.GetLastHeartbeat()
 	if ts == 0 {
 		ts = time.Now().UnixNano()
 	}
-	storeInfo := grpcServer.GetRaftCluster().GetStore(store.GetId())
+
+	storeInfo := raftCluster.GetStore(store.GetId())
 	newStore := storeInfo.Clone(
 		core.SetStoreStats(&pdpb.StoreStats{
 			Capacity:  uint64(10 * units.GiB),
@@ -220,9 +228,9 @@ func MustPutStore(re *require.Assertions, cluster *TestCluster, store *metapb.St
 		}),
 		core.SetLastHeartbeatTS(time.Unix(ts/1e9, ts%1e9)),
 	)
-	grpcServer.GetRaftCluster().GetBasicCluster().PutStore(newStore)
-	if cluster.GetSchedulingPrimaryServer() != nil {
-		cluster.GetSchedulingPrimaryServer().GetCluster().PutStore(newStore)
+	raftCluster.GetBasicCluster().PutStore(newStore)
+	if tc.GetSchedulingPrimaryServer() != nil {
+		tc.GetSchedulingPrimaryServer().GetCluster().PutStore(newStore)
 	}
 }
 
@@ -407,7 +415,7 @@ type idAllocator struct {
 }
 
 func (i *idAllocator) alloc() uint64 {
-	v, _ := i.allocator.Alloc()
+	v, _, _ := i.allocator.Alloc(1)
 	return v
 }
 
@@ -444,6 +452,8 @@ func InitRegions(regionLen int) []*core.RegionInfo {
 				Version:  1,
 			}
 			region.UpdateBuckets(buckets, region.GetBuckets())
+		} else {
+			region.UpdateBuckets(&metapb.Buckets{}, region.GetBuckets())
 		}
 		regions = append(regions, region)
 	}

@@ -114,7 +114,7 @@ func run(simCase string, simConfig *sc.SimConfig) {
 
 // NewSingleServer creates a pd server for simulator.
 func NewSingleServer(ctx context.Context, simConfig *sc.SimConfig) (*server.Server, testutil.CleanupFunc) {
-	err := logutil.SetupLogger(simConfig.ServerConfig.Log, &simConfig.ServerConfig.Logger, &simConfig.ServerConfig.LogProps, simConfig.ServerConfig.Security.RedactInfoLog)
+	err := logutil.SetupLogger(&simConfig.ServerConfig.Log, &simConfig.ServerConfig.Logger, &simConfig.ServerConfig.LogProps, simConfig.ServerConfig.Security.RedactInfoLog)
 	if err == nil {
 		log.ReplaceGlobals(simConfig.ServerConfig.Logger, simConfig.ServerConfig.LogProps)
 	} else {

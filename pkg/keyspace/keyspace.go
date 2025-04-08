@@ -56,12 +56,16 @@ const (
 	// It will not update the keyspace group id when merging or splitting.
 	TSOKeyspaceGroupIDKey = "tso_keyspace_group_id"
 
-	// If `gc_management_type` is `global_gc`, it means the current keyspace requires a tidb without 'keyspace-name'
-	// configured to run a global gc worker to calculate a global gc safe point.
-	// If `gc_management_type` is `keyspace_level_gc` it means the current keyspace can calculate gc safe point by its own.
+	// If `gc_management_type` is `unified`, it means the current keyspace requires a tidb without 'keyspace-name'
+	// configured to run a unified GC worker to calculate a unified GC state.
+	// If `gc_management_type` is `keyspace_level` it means the current keyspace can calculate GC states by its own.
 	GCManagementType = "gc_management_type"
-	// KeyspaceLevelGC is a type of gc_management_type used to indicate that this keyspace independently advances its own gc safe point.
-	KeyspaceLevelGC = "keyspace_level_gc"
+	// KeyspaceLevelGC is a type of gc_management_type used to indicate that this keyspace independently manages its own
+	// GC states
+	KeyspaceLevelGC = "keyspace_level"
+	// UnifiedGC is a type of gc_management_type used to indicate that the GC states of this keyspace is managed
+	// in a unified way (managed by the NullKeyspace).
+	UnifiedGC = "unified"
 )
 
 // Config is the interface for keyspace config.
@@ -681,7 +685,7 @@ func (manager *Manager) LoadRangeKeyspace(startID uint32, limit int) ([]*keyspac
 
 // allocID allocate a new keyspace id.
 func (manager *Manager) allocID() (uint32, error) {
-	id64, err := manager.idAllocator.Alloc()
+	id64, _, err := manager.idAllocator.Alloc(1)
 	if err != nil {
 		return 0, err
 	}

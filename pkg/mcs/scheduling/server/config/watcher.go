@@ -42,10 +42,6 @@ type Watcher struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	// configPath is the path of the configuration in etcd:
-	//  - Key: /pd/{cluster_id}/config
-	//  - Value: configuration JSON.
-	configPath string
 	// schedulerConfigPathPrefix is the path prefix of the scheduler configuration in etcd:
 	//  - Key: /pd/{cluster_id}/scheduler_config/{scheduler_name}
 	//  - Value: configuration JSON.
@@ -87,7 +83,6 @@ func NewWatcher(
 	cw := &Watcher{
 		ctx:                       ctx,
 		cancel:                    cancel,
-		configPath:                keypath.ConfigPath(),
 		ttlConfigPrefix:           sc.TTLConfigPrefix,
 		schedulerConfigPathPrefix: keypath.SchedulerConfigPathPrefix(),
 		etcdClient:                etcdClient,
@@ -144,7 +139,9 @@ func (cw *Watcher) initializeConfigWatcher() error {
 	cw.configWatcher = etcdutil.NewLoopWatcher(
 		cw.ctx, &cw.wg,
 		cw.etcdClient,
-		"scheduling-config-watcher", cw.configPath,
+		"scheduling-config-watcher",
+		// Watch configuration JSON
+		keypath.ConfigPath(),
 		func([]*clientv3.Event) error { return nil },
 		putFn, deleteFn,
 		func([]*clientv3.Event) error { return nil },
@@ -186,10 +183,9 @@ func (cw *Watcher) initializeTTLConfigWatcher() error {
 }
 
 func (cw *Watcher) initializeSchedulerConfigWatcher() error {
-	prefixToTrim := cw.schedulerConfigPathPrefix + "/"
 	putFn := func(kv *mvccpb.KeyValue) error {
 		key := string(kv.Key)
-		name := strings.TrimPrefix(key, prefixToTrim)
+		name := strings.TrimPrefix(key, cw.schedulerConfigPathPrefix)
 		log.Info("update scheduler config", zap.String("name", name),
 			zap.String("value", string(kv.Value)))
 		err := cw.storage.SaveSchedulerConfig(name, kv.Value)
@@ -210,13 +206,15 @@ func (cw *Watcher) initializeSchedulerConfigWatcher() error {
 		key := string(kv.Key)
 		log.Info("remove scheduler config", zap.String("key", key))
 		return cw.storage.RemoveSchedulerConfig(
-			strings.TrimPrefix(key, prefixToTrim),
+			strings.TrimPrefix(key, cw.schedulerConfigPathPrefix),
 		)
 	}
 	cw.schedulerConfigWatcher = etcdutil.NewLoopWatcher(
 		cw.ctx, &cw.wg,
 		cw.etcdClient,
-		"scheduling-scheduler-config-watcher", cw.schedulerConfigPathPrefix,
+		"scheduling-scheduler-config-watcher",
+		// To keep the consistency with the previous code, we should trim the suffix `/`.
+		strings.TrimSuffix(cw.schedulerConfigPathPrefix, "/"),
 		func([]*clientv3.Event) error { return nil },
 		putFn, deleteFn,
 		func([]*clientv3.Event) error { return nil },

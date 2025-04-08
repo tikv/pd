@@ -42,20 +42,22 @@ func (c *RaftCluster) HandleRegionHeartbeat(region *core.RegionInfo) error {
 		tracer = core.NewHeartbeatProcessTracer()
 	}
 	defer tracer.Release()
-	var taskRunner, miscRunner, logRunner ratelimit.Runner
-	taskRunner, miscRunner, logRunner = syncRunner, syncRunner, syncRunner
+	var taskRunner, miscRunner, logRunner, syncRegionRunner ratelimit.Runner
+	taskRunner, miscRunner, logRunner, syncRegionRunner = syncRunner, syncRunner, syncRunner, syncRunner
 	if c.GetScheduleConfig().EnableHeartbeatConcurrentRunner {
 		taskRunner = c.heartbeatRunner
 		miscRunner = c.miscRunner
 		logRunner = c.logRunner
+		syncRegionRunner = c.syncRegionRunner
 	}
 
 	ctx := &core.MetaProcessContext{
-		Context:    c.ctx,
-		Tracer:     tracer,
-		TaskRunner: taskRunner,
-		MiscRunner: miscRunner,
-		LogRunner:  logRunner,
+		Context:          c.ctx,
+		Tracer:           tracer,
+		TaskRunner:       taskRunner,
+		MiscRunner:       miscRunner,
+		LogRunner:        logRunner,
+		SyncRegionRunner: syncRegionRunner,
 	}
 	tracer.Begin()
 	if err := c.processRegionHeartbeat(ctx, region); err != nil {
@@ -89,14 +91,14 @@ func (c *RaftCluster) HandleAskSplit(request *pdpb.AskSplitRequest) (*pdpb.AskSp
 		return nil, errors.New("region split is paused by replication mode")
 	}
 
-	newRegionID, err := c.id.Alloc()
+	newRegionID, _, err := c.id.Alloc(1)
 	if err != nil {
 		return nil, err
 	}
 
 	peerIDs := make([]uint64, len(request.Region.Peers))
 	for i := 0; i < len(peerIDs); i++ {
-		if peerIDs[i], err = c.id.Alloc(); err != nil {
+		if peerIDs[i], _, err = c.id.Alloc(1); err != nil {
 			return nil, err
 		}
 	}
@@ -136,15 +138,15 @@ func (c *RaftCluster) HandleAskBatchSplit(request *pdpb.AskBatchSplitRequest) (*
 	splitIDs := make([]*pdpb.SplitID, 0, splitCount)
 	recordRegions := make([]uint64, 0, splitCount+1)
 
-	for i := 0; i < int(splitCount); i++ {
-		newRegionID, err := c.id.Alloc()
+	for range splitCount {
+		newRegionID, _, err := c.id.Alloc(1)
 		if err != nil {
 			return nil, errs.ErrSchedulerNotFound.FastGenByArgs()
 		}
 
 		peerIDs := make([]uint64, len(request.Region.Peers))
 		for i := 0; i < len(peerIDs); i++ {
-			if peerIDs[i], err = c.id.Alloc(); err != nil {
+			if peerIDs[i], _, err = c.id.Alloc(1); err != nil {
 				return nil, err
 			}
 		}

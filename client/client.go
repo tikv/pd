@@ -55,7 +55,7 @@ type GlobalConfigItem struct {
 // RPCClient is a PD (Placement Driver) RPC and related mcs client which can only call RPC.
 type RPCClient interface {
 	// GetAllMembers gets the members Info from PD
-	GetAllMembers(ctx context.Context) ([]*pdpb.Member, error)
+	GetAllMembers(ctx context.Context) (*pdpb.GetMembersResponse, error)
 	// GetStore gets a store from PD by store id.
 	// The store may expire later. Caller is responsible for caching and taking care
 	// of store change.
@@ -143,12 +143,11 @@ var _ Client = (*client)(nil)
 
 // serviceModeKeeper is for service mode switching.
 type serviceModeKeeper struct {
-	// RMutex here is for the future usage that there might be multiple goroutines
-	// triggering service mode switching concurrently.
 	sync.RWMutex
 	serviceMode     pdpb.ServiceMode
 	tsoClient       *tso.Cli
 	tsoSvcDiscovery sd.ServiceDiscovery
+	routerClient    *router.Cli
 }
 
 func (k *serviceModeKeeper) close() {
@@ -437,12 +436,12 @@ func (c *client) UpdateOption(option opt.DynamicOption, value any) error {
 			return err
 		}
 	case opt.EnableTSOFollowerProxy:
-		if c.inner.getServiceMode() != pdpb.ServiceMode_PD_SVC_MODE {
-			return errors.New("[pd] tso follower proxy is only supported when PD provides TSO")
-		}
 		enable, ok := value.(bool)
 		if !ok {
 			return errors.New("[pd] invalid value type for EnableTSOFollowerProxy option, it should be bool")
+		}
+		if c.inner.getServiceMode() != pdpb.ServiceMode_PD_SVC_MODE && enable {
+			return errors.New("[pd] tso follower proxy is only supported when PD provides TSO")
 		}
 		c.inner.option.SetEnableTSOFollowerProxy(enable)
 	case opt.EnableFollowerHandle:
@@ -457,6 +456,12 @@ func (c *client) UpdateOption(option opt.DynamicOption, value any) error {
 			return errors.New("[pd] invalid value type for TSOClientRPCConcurrency option, it should be int")
 		}
 		c.inner.option.SetTSOClientRPCConcurrency(value)
+	case opt.EnableRouterClient:
+		enable, ok := value.(bool)
+		if !ok {
+			return errors.New("[pd] invalid value type for EnableRouterClient option, it should be bool")
+		}
+		c.inner.option.SetEnableRouterClient(enable)
 	default:
 		return errors.New("[pd] unsupported client option")
 	}
@@ -464,7 +469,7 @@ func (c *client) UpdateOption(option opt.DynamicOption, value any) error {
 }
 
 // GetAllMembers gets the members Info from PD.
-func (c *client) GetAllMembers(ctx context.Context) ([]*pdpb.Member, error) {
+func (c *client) GetAllMembers(ctx context.Context) (*pdpb.GetMembersResponse, error) {
 	start := time.Now()
 	defer func() { metrics.CmdDurationGetAllMembers.Observe(time.Since(start).Seconds()) }()
 
@@ -479,7 +484,7 @@ func (c *client) GetAllMembers(ctx context.Context) ([]*pdpb.Member, error) {
 	if err = c.respForErr(metrics.CmdFailedDurationGetAllMembers, start, err, resp.GetHeader()); err != nil {
 		return nil, err
 	}
-	return resp.GetMembers(), nil
+	return resp, nil
 }
 
 // getClientAndContext returns the leader pd client and the original context. If leader is unhealthy, it returns
@@ -570,21 +575,10 @@ func (c *client) GetMinTS(ctx context.Context) (physical int64, logical int64, e
 	return minTS.Physical, minTS.Logical, nil
 }
 
-func handleRegionResponse(res *pdpb.GetRegionResponse) *router.Region {
-	if res.Region == nil {
-		return nil
-	}
-
-	r := &router.Region{
-		Meta:         res.Region,
-		Leader:       res.Leader,
-		PendingPeers: res.PendingPeers,
-		Buckets:      res.Buckets,
-	}
-	for _, s := range res.DownPeers {
-		r.DownPeers = append(r.DownPeers, s.Peer)
-	}
-	return r
+func (c *client) getRouterClient() *router.Cli {
+	c.inner.RLock()
+	defer c.inner.RUnlock()
+	return c.inner.routerClient
 }
 
 // GetRegionFromMember implements the RPCClient interface.
@@ -623,7 +617,7 @@ func (c *client) GetRegionFromMember(ctx context.Context, key []byte, memberURLs
 		errorMsg := fmt.Sprintf("[pd] can't get region info from member URLs: %+v", memberURLs)
 		return nil, errors.WithStack(errors.New(errorMsg))
 	}
-	return handleRegionResponse(resp), nil
+	return router.ConvertToRegion(resp), nil
 }
 
 // GetRegion implements the RPCClient interface.
@@ -636,6 +630,10 @@ func (c *client) GetRegion(ctx context.Context, key []byte, opts ...opt.GetRegio
 	defer func() { metrics.CmdDurationGetRegion.Observe(time.Since(start).Seconds()) }()
 	ctx, cancel := context.WithTimeout(ctx, c.inner.option.Timeout)
 	defer cancel()
+
+	if routerClient := c.getRouterClient(); routerClient != nil {
+		return routerClient.GetRegion(ctx, key, opts...)
+	}
 
 	options := &opt.GetRegionOp{}
 	for _, opt := range opts {
@@ -663,7 +661,7 @@ func (c *client) GetRegion(ctx context.Context, key []byte, opts ...opt.GetRegio
 	if err = c.respForErr(metrics.CmdFailedDurationGetRegion, start, err, resp.GetHeader()); err != nil {
 		return nil, err
 	}
-	return handleRegionResponse(resp), nil
+	return router.ConvertToRegion(resp), nil
 }
 
 // GetPrevRegion implements the RPCClient interface.
@@ -676,6 +674,10 @@ func (c *client) GetPrevRegion(ctx context.Context, key []byte, opts ...opt.GetR
 	defer func() { metrics.CmdDurationGetPrevRegion.Observe(time.Since(start).Seconds()) }()
 	ctx, cancel := context.WithTimeout(ctx, c.inner.option.Timeout)
 	defer cancel()
+
+	if routerClient := c.getRouterClient(); routerClient != nil {
+		return routerClient.GetPrevRegion(ctx, key, opts...)
+	}
 
 	options := &opt.GetRegionOp{}
 	for _, opt := range opts {
@@ -703,7 +705,7 @@ func (c *client) GetPrevRegion(ctx context.Context, key []byte, opts ...opt.GetR
 	if err = c.respForErr(metrics.CmdFailedDurationGetPrevRegion, start, err, resp.GetHeader()); err != nil {
 		return nil, err
 	}
-	return handleRegionResponse(resp), nil
+	return router.ConvertToRegion(resp), nil
 }
 
 // GetRegionByID implements the RPCClient interface.
@@ -716,6 +718,10 @@ func (c *client) GetRegionByID(ctx context.Context, regionID uint64, opts ...opt
 	defer func() { metrics.CmdDurationGetRegionByID.Observe(time.Since(start).Seconds()) }()
 	ctx, cancel := context.WithTimeout(ctx, c.inner.option.Timeout)
 	defer cancel()
+
+	if routerClient := c.getRouterClient(); routerClient != nil {
+		return routerClient.GetRegionByID(ctx, regionID, opts...)
+	}
 
 	options := &opt.GetRegionOp{}
 	for _, opt := range opts {
@@ -744,7 +750,7 @@ func (c *client) GetRegionByID(ctx context.Context, regionID uint64, opts ...opt
 	if err = c.respForErr(metrics.CmdFailedDurationGetRegionByID, start, err, resp.GetHeader()); err != nil {
 		return nil, err
 	}
-	return handleRegionResponse(resp), nil
+	return router.ConvertToRegion(resp), nil
 }
 
 // ScanRegions implements the RPCClient interface.

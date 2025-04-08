@@ -16,7 +16,6 @@ package tsoutil
 
 import (
 	"context"
-	"strings"
 	"sync"
 	"time"
 
@@ -141,7 +140,7 @@ func (s *TSODispatcher) dispatch(
 				log.Error("proxy forward tso error",
 					zap.String("forwarded-host", forwardedHost),
 					errs.ZapError(errs.ErrGRPCSend, err))
-				if needUpdateServicePrimaryAddr && strings.Contains(err.Error(), errs.NotLeaderErr) {
+				if needUpdateServicePrimaryAddr && errs.IsLeaderChanged(err) {
 					tsoPrimaryWatchers[0].ForceLoad()
 				}
 				select {
@@ -182,13 +181,8 @@ func (s *TSODispatcher) processRequests(forwardStream stream, requests []Request
 	// `logical` is the largest ts's logical part here, we need to do the subtracting before we finish each TSO request.
 	// This is different from the logic of client batch, for example, if we have a largest ts whose logical part is 10,
 	// count is 5, then the splitting results should be 5 and 10.
-	firstLogical := addLogical(logical, -int64(count))
+	firstLogical := logical - int64(count)
 	return s.finishRequest(requests, physical, firstLogical)
-}
-
-// Because of the suffix, we need to shift the count before we add it to the logical part.
-func addLogical(logical, count int64) int64 {
-	return logical + count
 }
 
 func (*TSODispatcher) finishRequest(requests []Request, physical, firstLogical int64) error {

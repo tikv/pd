@@ -19,6 +19,7 @@ import (
 	"crypto/tls"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -154,6 +155,7 @@ func EtcdKVGet(c *clientv3.Client, key string, opts ...clientv3.OpOption) (*clie
 		d := val.(int)
 		time.Sleep(time.Duration(d) * time.Second)
 	})
+	InjectFailToCollectTestEtcdKey(key, "get")
 	resp, err := clientv3.NewKV(c).Get(ctx, key, opts...)
 	if cost := time.Since(start); cost > DefaultSlowRequestTime {
 		log.Warn("kv gets too slow", zap.String("request-key", key), zap.Duration("cost", cost), errs.ZapError(err))
@@ -165,6 +167,42 @@ func EtcdKVGet(c *clientv3.Client, key string, opts ...clientv3.OpOption) (*clie
 		return resp, e
 	}
 	return resp, nil
+}
+
+// InjectFailToCollectTestEtcdKey injects the failpoint to collect the key for testing.
+func InjectFailToCollectTestEtcdKey(key, op string) {
+	failpoint.Inject("CollectEtcdKey", func(val failpoint.Value) {
+		file := val.(string)
+
+		if len(file) != 0 {
+			err := writeKeyToFile(file, key, op)
+			if err != nil {
+				pwd, _ := os.Getwd()
+				log.Error("write key to file failed", zap.String("pwd", pwd), zap.String("file", file), zap.Error(err))
+			}
+		}
+	})
+}
+
+// WriteKeyToFile writes the key to the file. It is only used for testing.
+func writeKeyToFile(file, key, op string) error {
+	f, err := os.OpenFile(file, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	// remove all number in the key to avoid the random number affect.
+	key = strings.Map(func(r rune) rune {
+		if r >= '0' && r <= '9' {
+			return -1
+		}
+		return r
+	}, key)
+
+	if _, err = f.WriteString(key + " " + op + "\n"); err != nil {
+		return err
+	}
+	return nil
 }
 
 // IsHealthy checks if the etcd is healthy.
@@ -492,7 +530,7 @@ func (lw *LoopWatcher) watch(ctx context.Context, revision int64) (nextRevision 
 		}
 		done := make(chan struct{})
 		go grpcutil.CheckStream(watcherCtx, watcherCancel, done)
-		watchChan := watcher.Watch(watcherCtx, lw.key, opts...)
+		watchChan := Watch(watcherCtx, watcher, lw.key, opts...)
 		done <- struct{}{}
 		if err := watcherCtx.Err(); err != nil {
 			log.Warn("error occurred while creating watch channel and retry it", zap.Error(err),
@@ -729,4 +767,10 @@ func (lw *LoopWatcher) SetLoadRetryTimes(times int) {
 // SetLoadBatchSize sets the batch size when loading data from etcd.
 func (lw *LoopWatcher) SetLoadBatchSize(size int64) {
 	lw.loadBatchSize = size
+}
+
+// Watch watches the key, it wraps a injected failpoint.
+func Watch(ctx context.Context, watcher clientv3.Watcher, key string, opts ...clientv3.OpOption) clientv3.WatchChan {
+	InjectFailToCollectTestEtcdKey(key, "watch")
+	return watcher.Watch(ctx, key, opts...)
 }

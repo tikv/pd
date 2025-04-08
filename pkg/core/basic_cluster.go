@@ -16,6 +16,7 @@ package core
 
 import (
 	"bytes"
+	"encoding/json"
 
 	"github.com/tikv/pd/pkg/core/constant"
 )
@@ -156,6 +157,15 @@ type KeyRange struct {
 	EndKey   []byte `json:"end-key"`
 }
 
+// MarshalJSON marshals to json.
+func (kr KeyRange) MarshalJSON() ([]byte, error) {
+	m := map[string]string{
+		"start-key": HexRegionKeyStr(kr.StartKey),
+		"end-key":   HexRegionKeyStr(kr.EndKey),
+	}
+	return json.Marshal(m)
+}
+
 // NewKeyRange create a KeyRange with the given start key and end key.
 func NewKeyRange(startKey, endKey string) KeyRange {
 	return KeyRange{
@@ -167,6 +177,17 @@ func NewKeyRange(startKey, endKey string) KeyRange {
 // KeyRanges is a slice of monotonically increasing KeyRange.
 type KeyRanges struct {
 	krs []*KeyRange
+}
+
+// NewKeyRanges creates a KeyRanges.
+func NewKeyRanges(ranges []KeyRange) *KeyRanges {
+	krs := make([]*KeyRange, 0, len(ranges))
+	for _, kr := range ranges {
+		krs = append(krs, &kr)
+	}
+	return &KeyRanges{
+		krs,
+	}
 }
 
 // NewKeyRangesWithSize creates a KeyRanges with the hint size.

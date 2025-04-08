@@ -92,6 +92,7 @@ func TestMicroserviceTSOClientSuite(t *testing.T) {
 
 func (suite *tsoClientTestSuite) SetupSuite() {
 	re := suite.Require()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/fastUpdatePhysicalInterval", "return(true)"))
 
 	var err error
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
@@ -207,6 +208,7 @@ func (suite *tsoClientTestSuite) TearDownTest() {
 }
 
 func (suite *tsoClientTestSuite) TearDownSuite() {
+	failpoint.Disable("github.com/tikv/pd/pkg/tso/fastUpdatePhysicalInterval")
 	suite.cancel()
 	if !suite.legacy {
 		suite.tsoCluster.Destroy()
@@ -379,10 +381,8 @@ func (suite *tsoClientTestSuite) TestUpdateAfterResetTSO() {
 
 func (suite *tsoClientTestSuite) TestRandomResignLeader() {
 	re := suite.Require()
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/fastUpdatePhysicalInterval", "return(true)"))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/member/skipCampaignLeaderCheck", "return(true)"))
 	defer func() {
-		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/tso/fastUpdatePhysicalInterval"))
 		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/member/skipCampaignLeaderCheck"))
 	}()
 
@@ -426,7 +426,6 @@ func (suite *tsoClientTestSuite) TestRandomResignLeader() {
 
 func (suite *tsoClientTestSuite) TestRandomShutdown() {
 	re := suite.Require()
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/fastUpdatePhysicalInterval", "return(true)"))
 
 	parallelAct := func() {
 		// After https://github.com/tikv/pd/issues/6376 is fixed, we can use a smaller number here.
@@ -445,7 +444,6 @@ func (suite *tsoClientTestSuite) TestRandomShutdown() {
 	mcs.CheckMultiKeyspacesTSO(suite.ctx, re, suite.clients, parallelAct)
 	suite.TearDownSuite()
 	suite.SetupSuite()
-	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/tso/fastUpdatePhysicalInterval"))
 }
 
 func (suite *tsoClientTestSuite) TestGetTSWhileResettingTSOClient() {
@@ -484,6 +482,41 @@ func (suite *tsoClientTestSuite) TestGetTSWhileResettingTSOClient() {
 	stopSignal.Store(true)
 	wg.Wait()
 	re.NoError(failpoint.Disable("github.com/tikv/pd/client/clients/tso/delayDispatchTSORequest"))
+}
+
+func TestTSONotLeader(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	pdCluster, err := tests.NewTestCluster(ctx, 3)
+	re.NoError(err)
+	defer pdCluster.Destroy()
+	err = pdCluster.RunInitialServers()
+	re.NoError(err)
+	leaderName := pdCluster.WaitLeader()
+	re.NotEmpty(leaderName)
+	pdLeader := pdCluster.GetServer(leaderName)
+	backendEndpoints := pdLeader.GetAddr()
+	pdClient, err := pd.NewClientWithContext(context.Background(),
+		caller.TestComponent,
+		[]string{backendEndpoints}, pd.SecurityOption{}, opt.WithMaxErrorRetry(1))
+	re.NoError(err)
+	defer pdClient.Close()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/rebaseErr", "return(true)"))
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func(client pd.Client) {
+		defer wg.Done()
+		pdLeader.ResignLeader()
+		for range 10 {
+			_, _, err := client.GetTS(ctx)
+			re.ErrorContains(err, "not leader")
+		}
+	}(pdClient)
+
+	wg.Wait()
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/rebaseErr"))
 }
 
 // When we upgrade the PD cluster, there may be a period of time that the old and new PDs are running at the same time.

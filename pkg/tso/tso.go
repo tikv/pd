@@ -21,17 +21,14 @@ import (
 	"sync/atomic"
 	"time"
 
-	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 
-	"github.com/tikv/pd/pkg/election"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/storage/endpoint"
-	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
@@ -39,8 +36,8 @@ import (
 )
 
 const (
-	// UpdateTimestampGuard is the min timestamp interval.
-	UpdateTimestampGuard = time.Millisecond
+	// updateTimestampGuard is the min timestamp interval.
+	updateTimestampGuard = time.Millisecond
 	// maxLogical is the max upper limit for logical time.
 	// When a TSO's logical time reaches this limit,
 	// the physical time will be forced to increase.
@@ -61,11 +58,9 @@ type tsoObject struct {
 
 // timestampOracle is used to maintain the logic of TSO.
 type timestampOracle struct {
-	client          *clientv3.Client
 	keyspaceGroupID uint32
-	// When tsPath is empty, it means that it is a global timestampOracle.
-	tsPath  string
-	storage endpoint.TSOStorage
+	member          ElectionMember
+	storage         endpoint.TSOStorage
 	// TODO: remove saveInterval
 	saveInterval           time.Duration
 	updatePhysicalInterval time.Duration
@@ -77,6 +72,10 @@ type timestampOracle struct {
 
 	// pre-initialized metrics
 	metrics *tsoMetrics
+}
+
+func (t *timestampOracle) saveTimestamp(ts time.Time) error {
+	return t.storage.SaveTimestamp(t.keyspaceGroupID, ts, t.member.GetLeadership())
 }
 
 func (t *timestampOracle) setTSOPhysical(next time.Time, force bool) {
@@ -124,8 +123,7 @@ func (t *timestampOracle) getLastSavedTime() time.Time {
 	return last.(time.Time)
 }
 
-// SyncTimestamp is used to synchronize the timestamp.
-func (t *timestampOracle) SyncTimestamp() error {
+func (t *timestampOracle) syncTimestamp() error {
 	log.Info("start to sync timestamp", logutil.CondUint32("keyspace-group-id", t.keyspaceGroupID, t.keyspaceGroupID > 0))
 	t.metrics.syncEvent.Inc()
 
@@ -133,7 +131,7 @@ func (t *timestampOracle) SyncTimestamp() error {
 		time.Sleep(time.Second)
 	})
 
-	last, err := t.storage.LoadTimestamp(t.tsPath)
+	last, err := t.storage.LoadTimestamp(t.keyspaceGroupID)
 	if err != nil {
 		return err
 	}
@@ -165,20 +163,20 @@ func (t *timestampOracle) SyncTimestamp() error {
 	})
 	// If the current system time minus the saved etcd timestamp is less than `UpdateTimestampGuard`,
 	// the timestamp allocation will start from the saved etcd timestamp temporarily.
-	if typeutil.SubRealTimeByWallClock(next, last) < UpdateTimestampGuard {
+	if typeutil.SubRealTimeByWallClock(next, last) < updateTimestampGuard {
 		log.Warn("system time may be incorrect",
 			logutil.CondUint32("keyspace-group-id", t.keyspaceGroupID, t.keyspaceGroupID > 0),
 			zap.Time("last", last), zap.Time("last-saved", lastSavedTime),
 			zap.Time("next", next),
 			errs.ZapError(errs.ErrIncorrectSystemTime))
-		next = last.Add(UpdateTimestampGuard)
+		next = last.Add(updateTimestampGuard)
 	}
 	failpoint.Inject("failedToSaveTimestamp", func() {
 		failpoint.Return(errs.ErrEtcdTxnInternal)
 	})
 	save := next.Add(t.saveInterval)
 	start := time.Now()
-	if err = t.storage.SaveTimestamp(keypath.TimestampPath(t.tsPath), save); err != nil {
+	if err = t.saveTimestamp(save); err != nil {
 		t.metrics.errSaveSyncTSEvent.Inc()
 		return err
 	}
@@ -206,21 +204,24 @@ func (t *timestampOracle) isInitialized() bool {
 }
 
 // resetUserTimestamp update the TSO in memory with specified TSO by an atomically way.
-// When ignoreSmaller is true, resetUserTimestamp will ignore the smaller tso resetting error and do nothing.
-// It's used to write MaxTS during the Global TSO synchronization without failing the writing as much as possible.
-// cannot set timestamp to one which >= current + maxResetTSGap
-func (t *timestampOracle) resetUserTimestamp(leadership *election.Leadership, tso uint64, ignoreSmaller, skipUpperBoundCheck bool) error {
+// When ignoreSmaller is true, a smaller tso resetting error will be ignored and do nothing.
+// The TSO in memory can only be set to one which is smaller than current TSO + `maxResetTSGap`.
+func (t *timestampOracle) resetUserTimestamp(tso uint64, ignoreSmaller, skipUpperBoundCheck bool) error {
 	t.tsoMux.Lock()
 	defer t.tsoMux.Unlock()
-	if !leadership.Check() {
+	if !t.member.IsLeader() {
 		t.metrics.errLeaseResetTSEvent.Inc()
-		return errs.ErrResetUserTimestamp.FastGenByArgs("lease expired")
+		return errs.ErrResetUserTimestamp.FastGenByArgs(errs.NotLeaderErr)
 	}
 	var (
 		nextPhysical, nextLogical = tsoutil.ParseTS(tso)
 		logicalDifference         = int64(nextLogical) - t.tsoMux.logical
 		physicalDifference        = typeutil.SubTSOPhysicalByWallClock(nextPhysical, t.tsoMux.physical)
 	)
+	// check if the TSO is initialized.
+	if t.tsoMux.physical == typeutil.ZeroTime {
+		return errs.ErrResetUserTimestamp.FastGenByArgs("timestamp in memory has not been initialized")
+	}
 	// do not update if next physical time is less/before than prev
 	if physicalDifference < 0 {
 		t.metrics.errResetSmallPhysicalTSEvent.Inc()
@@ -243,10 +244,10 @@ func (t *timestampOracle) resetUserTimestamp(leadership *election.Leadership, ts
 		return errs.ErrResetUserTimestamp.FastGenByArgs("the specified ts is too larger than now")
 	}
 	// save into etcd only if nextPhysical is close to lastSavedTime
-	if typeutil.SubRealTimeByWallClock(t.getLastSavedTime(), nextPhysical) <= UpdateTimestampGuard {
+	if typeutil.SubRealTimeByWallClock(t.getLastSavedTime(), nextPhysical) <= updateTimestampGuard {
 		save := nextPhysical.Add(t.saveInterval)
 		start := time.Now()
-		if err := t.storage.SaveTimestamp(keypath.TimestampPath(t.tsPath), save); err != nil {
+		if err := t.saveTimestamp(save); err != nil {
 			t.metrics.errSaveResetTSEvent.Inc()
 			return err
 		}
@@ -260,7 +261,7 @@ func (t *timestampOracle) resetUserTimestamp(leadership *election.Leadership, ts
 	return nil
 }
 
-// UpdateTimestamp is used to update the timestamp.
+// updateTimestamp is used to update the timestamp.
 // This function will do two things:
 //  1. When the logical time is going to be used up, increase the current physical time.
 //  2. When the time window is not big enough, which means the saved etcd time minus the next physical time
@@ -274,7 +275,7 @@ func (t *timestampOracle) resetUserTimestamp(leadership *election.Leadership, ts
 //
 // NOTICE: this function should be called after the TSO in memory has been initialized
 // and should not be called when the TSO in memory has been reset anymore.
-func (t *timestampOracle) UpdateTimestamp() error {
+func (t *timestampOracle) updateTimestamp() error {
 	if !t.isInitialized() {
 		return errs.ErrUpdateTimestamp.FastGenByArgs("timestamp in memory has not been initialized")
 	}
@@ -309,7 +310,7 @@ func (t *timestampOracle) UpdateTimestamp() error {
 
 	var next time.Time
 	// If the system time is greater, it will be synchronized with the system time.
-	if jetLag > UpdateTimestampGuard {
+	if jetLag > updateTimestampGuard {
 		next = now
 	} else if prevLogical > maxLogical/2 {
 		// The reason choosing maxLogical/2 here is that it's big enough for common cases.
@@ -326,13 +327,12 @@ func (t *timestampOracle) UpdateTimestamp() error {
 
 	// It is not safe to increase the physical time to `next`.
 	// The time window needs to be updated and saved to etcd.
-	if typeutil.SubRealTimeByWallClock(t.getLastSavedTime(), next) <= UpdateTimestampGuard {
+	if typeutil.SubRealTimeByWallClock(t.getLastSavedTime(), next) <= updateTimestampGuard {
 		save := next.Add(t.saveInterval)
 		start := time.Now()
-		if err := t.storage.SaveTimestamp(keypath.TimestampPath(t.tsPath), save); err != nil {
+		if err := t.saveTimestamp(save); err != nil {
 			log.Warn("save timestamp failed",
 				logutil.CondUint32("keyspace-group-id", t.keyspaceGroupID, t.keyspaceGroupID > 0),
-				zap.String("timestamp-path", keypath.TimestampPath(t.tsPath)),
 				zap.Error(err))
 			t.metrics.errSaveUpdateTSEvent.Inc()
 			return err
@@ -348,8 +348,7 @@ func (t *timestampOracle) UpdateTimestamp() error {
 
 var maxRetryCount = 10
 
-// getTS is used to get a timestamp.
-func (t *timestampOracle) getTS(ctx context.Context, leadership *election.Leadership, count uint32) (pdpb.Timestamp, error) {
+func (t *timestampOracle) getTS(ctx context.Context, count uint32) (pdpb.Timestamp, error) {
 	defer trace.StartRegion(ctx, "timestampOracle.getTS").End()
 	var resp pdpb.Timestamp
 	if count == 0 {
@@ -359,7 +358,7 @@ func (t *timestampOracle) getTS(ctx context.Context, leadership *election.Leader
 		currentPhysical, _ := t.getTSO()
 		if currentPhysical == typeutil.ZeroTime {
 			// If it's leader, maybe SyncTimestamp hasn't completed yet
-			if leadership.Check() {
+			if t.member.IsLeader() {
 				time.Sleep(200 * time.Millisecond)
 				continue
 			}
@@ -381,17 +380,16 @@ func (t *timestampOracle) getTS(ctx context.Context, leadership *election.Leader
 			continue
 		}
 		// In case lease expired after the first check.
-		if !leadership.Check() {
+		if !t.member.IsLeader() {
 			return pdpb.Timestamp{}, errs.ErrGenerateTimestamp.FastGenByArgs(fmt.Sprintf("requested %s anymore", errs.NotLeaderErr))
 		}
 		return resp, nil
 	}
 	t.metrics.exceededMaxRetryEvent.Inc()
-	return resp, errs.ErrGenerateTimestamp.FastGenByArgs("generate global tso maximum number of retries exceeded")
+	return resp, errs.ErrGenerateTimestamp.FastGenByArgs("generate tso maximum number of retries exceeded")
 }
 
-// ResetTimestamp is used to reset the timestamp in memory.
-func (t *timestampOracle) ResetTimestamp() {
+func (t *timestampOracle) resetTimestamp() {
 	t.tsoMux.Lock()
 	defer t.tsoMux.Unlock()
 	log.Info("reset the timestamp in memory", logutil.CondUint32("keyspace-group-id", t.keyspaceGroupID, t.keyspaceGroupID > 0))

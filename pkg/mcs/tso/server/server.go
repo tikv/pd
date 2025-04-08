@@ -267,19 +267,9 @@ func (s *Server) GetKeyspaceGroupManager() *tso.KeyspaceGroupManager {
 	return s.keyspaceGroupManager
 }
 
-// GetTSOAllocatorManager returns the manager of TSO Allocator.
-func (s *Server) GetTSOAllocatorManager(keyspaceGroupID uint32) (*tso.AllocatorManager, error) {
-	return s.keyspaceGroupManager.GetAllocatorManager(keyspaceGroupID)
-}
-
-// ValidateInternalRequest checks if server is closed, which is used to validate
-// the gRPC communication between TSO servers internally.
-// TODO: Check if the sender is from the global TSO allocator
-func (s *Server) ValidateInternalRequest(_ *tsopb.RequestHeader, _ bool) error {
-	if s.IsClosed() {
-		return errs.ErrNotStarted
-	}
-	return nil
+// GetTSOAllocator returns the TSO Allocator of the given keyspace group.
+func (s *Server) GetTSOAllocator(keyspaceGroupID uint32) (*tso.Allocator, error) {
+	return s.keyspaceGroupManager.GetAllocator(keyspaceGroupID)
 }
 
 // ValidateRequest checks if the keyspace replica is the primary and clusterID is matched.
@@ -313,12 +303,11 @@ func (s *Server) ResetTS(ts uint64, ignoreSmaller, skipUpperBoundCheck bool, key
 		zap.Bool("ignore-smaller", ignoreSmaller),
 		zap.Bool("skip-upper-bound-check", skipUpperBoundCheck),
 		zap.Uint32("keyspace-group-id", keyspaceGroupID))
-	tsoAllocatorManager, err := s.GetTSOAllocatorManager(keyspaceGroupID)
+	tsoAllocator, err := s.GetTSOAllocator(keyspaceGroupID)
 	if err != nil {
-		log.Error("failed to get allocator manager", errs.ZapError(err))
+		log.Error("failed to get tso allocator", errs.ZapError(err))
 		return err
 	}
-	tsoAllocator := tsoAllocatorManager.GetAllocator()
 	if tsoAllocator == nil {
 		return errs.ErrServerNotStarted
 	}
@@ -346,11 +335,9 @@ func (s *Server) startServer() (err error) {
 
 	// Initialize the TSO service.
 	s.serverLoopCtx, s.serverLoopCancel = context.WithCancel(s.Context())
-	legacySvcRootPath := keypath.LegacyRootPath()
-	tsoSvcRootPath := keypath.TSOSvcRootPath()
 	s.keyspaceGroupManager = tso.NewKeyspaceGroupManager(
 		s.serverLoopCtx, s.serviceID, s.GetClient(), s.GetHTTPClient(),
-		s.cfg.AdvertiseListenAddr, legacySvcRootPath, tsoSvcRootPath, s.cfg)
+		s.cfg.AdvertiseListenAddr, s.cfg)
 	if err := s.keyspaceGroupManager.Initialize(); err != nil {
 		return err
 	}
@@ -414,7 +401,7 @@ func CreateServerWrapper(cmd *cobra.Command, args []string) {
 	}
 
 	// New zap logger
-	err = logutil.SetupLogger(cfg.Log, &cfg.Logger, &cfg.LogProps, cfg.Security.RedactInfoLog)
+	err = logutil.SetupLogger(&cfg.Log, &cfg.Logger, &cfg.LogProps, cfg.Security.RedactInfoLog)
 	if err == nil {
 		log.ReplaceGlobals(cfg.Logger, cfg.LogProps)
 	} else {

@@ -518,7 +518,7 @@ func benchmarkPatrolKeyspaceAssignmentN(
 	}
 	// Benchmark the keyspace assignment patrol.
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		err := suite.manager.PatrolKeyspaceAssignment(0, 0)
 		re.NoError(err)
 	}
