@@ -80,6 +80,7 @@ func getRuleManager(r *http.Request) *placement.RuleManager {
 	return r.Context().Value(ruleCtxKey{}).(*placement.RuleManager)
 }
 
+// GetAllRules returns all rules of the cluster.
 // @Tags     rule
 // @Summary  List all rules of cluster.
 // @Produce  json
@@ -93,6 +94,7 @@ func (h *ruleHandler) GetAllRules(w http.ResponseWriter, r *http.Request) {
 	h.rd.JSON(w, http.StatusOK, rules)
 }
 
+// SetAllRules sets all rules for the cluster.
 // @Tags     rule
 // @Summary  Set all rules for the cluster. If there is an error, modifications are promised to be rollback in memory, but may fail to rollback disk. You probably want to request again to make rules in memory/disk consistent.
 // @Produce  json
@@ -126,6 +128,7 @@ func (h *ruleHandler) SetAllRules(w http.ResponseWriter, r *http.Request) {
 	h.rd.JSON(w, http.StatusOK, "Update rules successfully.")
 }
 
+// GetRuleByGroup returns all rules of the cluster by group.
 // @Tags     rule
 // @Summary  List all rules of cluster by group.
 // @Param    group  path  string  true  "The name of group"
@@ -141,6 +144,7 @@ func (h *ruleHandler) GetRuleByGroup(w http.ResponseWriter, r *http.Request) {
 	h.rd.JSON(w, http.StatusOK, rules)
 }
 
+// GetRulesByRegion returns all rules of the cluster by region.
 // @Tags     rule
 // @Summary  List all rules of cluster by region.
 // @Param    id  path  integer  true  "Region Id"
@@ -163,6 +167,7 @@ func (h *ruleHandler) GetRulesByRegion(w http.ResponseWriter, r *http.Request) {
 	h.rd.JSON(w, http.StatusOK, rules)
 }
 
+// CheckRegionPlacementRule checks the rules and matched peers related to the given region.
 // @Tags     rule
 // @Summary  List rules and matched peers related to the given region.
 // @Param    id  path  integer  true  "Region Id"
@@ -192,6 +197,7 @@ func (h *ruleHandler) CheckRegionPlacementRule(w http.ResponseWriter, r *http.Re
 	h.rd.JSON(w, http.StatusOK, regionFit)
 }
 
+// GetRulesByKey returns all rules of the cluster by key.
 // @Tags     rule
 // @Summary  List all rules of cluster by key.
 // @Param    key  path  string  true  "The name of key"
@@ -213,6 +219,7 @@ func (h *ruleHandler) GetRulesByKey(w http.ResponseWriter, r *http.Request) {
 	h.rd.JSON(w, http.StatusOK, rules)
 }
 
+// GetRuleByGroupAndID returns the rule of the cluster by group and id.
 // @Tags     rule
 // @Summary  Get rule of cluster by group and id.
 // @Param    group  path  string  true  "The name of group"
@@ -233,6 +240,7 @@ func (h *ruleHandler) GetRuleByGroupAndID(w http.ResponseWriter, r *http.Request
 	h.rd.JSON(w, http.StatusOK, rule)
 }
 
+// SetRule sets the rule for the cluster.
 // @Tags     rule
 // @Summary  Update rule of cluster.
 // @Accept   json
@@ -284,6 +292,7 @@ func (h *ruleHandler) syncReplicateConfigWithDefaultRule(rule *placement.Rule) e
 	return nil
 }
 
+// DeleteRuleByGroup deletes the rule of the cluster by group and id.
 // @Tags     rule
 // @Summary  Delete rule of cluster.
 // @Param    group  path  string  true  "The name of group"
@@ -309,6 +318,7 @@ func (h *ruleHandler) DeleteRuleByGroup(w http.ResponseWriter, r *http.Request) 
 	h.rd.JSON(w, http.StatusOK, "Delete rule successfully.")
 }
 
+// BatchRules performs batch operations for the cluster.
 // @Tags     rule
 // @Summary  Batch operations for the cluster. Operations should be independent(different ID). If there is an error, modifications are promised to be rollback in memory, but may fail to rollback disk. You probably want to request again to make rules in memory/disk consistent.
 // @Produce  json
@@ -336,6 +346,7 @@ func (h *ruleHandler) BatchRules(w http.ResponseWriter, r *http.Request) {
 	h.rd.JSON(w, http.StatusOK, "Batch operations successfully.")
 }
 
+// GetGroupConfig returns the rule group config by group id.
 // @Tags     rule
 // @Summary  Get rule group config by group id.
 // @Param    id  path  string  true  "Group Id"
@@ -356,6 +367,7 @@ func (h *ruleHandler) GetGroupConfig(w http.ResponseWriter, r *http.Request) {
 	h.rd.JSON(w, http.StatusOK, group)
 }
 
+// SetGroupConfig sets the rule group config.
 // @Tags     rule
 // @Summary  Update rule group config.
 // @Accept   json
@@ -383,6 +395,7 @@ func (h *ruleHandler) SetGroupConfig(w http.ResponseWriter, r *http.Request) {
 	h.rd.JSON(w, http.StatusOK, "Update rule group successfully.")
 }
 
+// DeleteGroupConfig deletes the rule group config.
 // @Tags     rule
 // @Summary  Delete rule group config.
 // @Param    id  path  string  true  "Group Id"
@@ -406,6 +419,7 @@ func (h *ruleHandler) DeleteGroupConfig(w http.ResponseWriter, r *http.Request) 
 	h.rd.JSON(w, http.StatusOK, "Delete rule group successfully.")
 }
 
+// GetAllGroupConfigs returns all rule group configs.
 // @Tags     rule
 // @Summary  List all rule group configs.
 // @Produce  json
@@ -419,6 +433,7 @@ func (h *ruleHandler) GetAllGroupConfigs(w http.ResponseWriter, r *http.Request)
 	h.rd.JSON(w, http.StatusOK, ruleGroups)
 }
 
+// GetPlacementRules returns all rules and groups configuration.
 // @Tags     rule
 // @Summary  List all rules and groups configuration.
 // @Produce  json
@@ -432,6 +447,7 @@ func (h *ruleHandler) GetPlacementRules(w http.ResponseWriter, r *http.Request) 
 	h.rd.JSON(w, http.StatusOK, bundles)
 }
 
+// SetPlacementRules sets all rules and groups configuration.
 // @Tags     rule
 // @Summary  Update all rules and groups configuration.
 // @Param    partial  query  bool  false  "if partially update rules"  default(false)
@@ -460,6 +476,7 @@ func (h *ruleHandler) SetPlacementRules(w http.ResponseWriter, r *http.Request) 
 	h.rd.JSON(w, http.StatusOK, "Update rules and groups successfully.")
 }
 
+// GetPlacementRuleByGroup returns group config and all rules belong to the group.
 // @Tags     rule
 // @Summary  Get group config and all rules belong to the group.
 // @Param    group  path  string  true  "The name of group"
@@ -475,6 +492,7 @@ func (h *ruleHandler) GetPlacementRuleByGroup(w http.ResponseWriter, r *http.Req
 	h.rd.JSON(w, http.StatusOK, group)
 }
 
+// DeletePlacementRuleByGroup deletes group config and all rules belong to the group.
 // @Tags     rule
 // @Summary  Get group config and all rules belong to the group.
 // @Param    group   path   string  true   "The name or name pattern of group"
@@ -502,6 +520,7 @@ func (h *ruleHandler) DeletePlacementRuleByGroup(w http.ResponseWriter, r *http.
 	h.rd.JSON(w, http.StatusOK, "Delete group and rules successfully.")
 }
 
+// SetPlacementRuleByGroup sets group config and all rules belong to it.
 // @Tags     rule
 // @Summary  Update group and all rules belong to it.
 // @Produce  json

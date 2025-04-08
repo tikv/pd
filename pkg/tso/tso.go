@@ -82,7 +82,7 @@ func (t *timestampOracle) setTSOPhysical(next time.Time, force bool) {
 	t.tsoMux.Lock()
 	defer t.tsoMux.Unlock()
 	// Do not update the zero physical time if the `force` flag is false.
-	if t.tsoMux.physical == typeutil.ZeroTime && !force {
+	if t.tsoMux.physical.Equal(typeutil.ZeroTime) && !force {
 		return
 	}
 	// make sure the ts won't fall back
@@ -95,7 +95,7 @@ func (t *timestampOracle) setTSOPhysical(next time.Time, force bool) {
 func (t *timestampOracle) getTSO() (time.Time, int64) {
 	t.tsoMux.RLock()
 	defer t.tsoMux.RUnlock()
-	if t.tsoMux.physical == typeutil.ZeroTime {
+	if t.tsoMux.physical.Equal(typeutil.ZeroTime) {
 		return typeutil.ZeroTime, 0
 	}
 	return t.tsoMux.physical, t.tsoMux.logical
@@ -106,7 +106,7 @@ func (t *timestampOracle) generateTSO(ctx context.Context, count int64) (physica
 	defer trace.StartRegion(ctx, "timestampOracle.generateTSO").End()
 	t.tsoMux.Lock()
 	defer t.tsoMux.Unlock()
-	if t.tsoMux.physical == typeutil.ZeroTime {
+	if t.tsoMux.physical.Equal(typeutil.ZeroTime) {
 		return 0, 0
 	}
 	physical = t.tsoMux.physical.UnixNano() / int64(time.Millisecond)
@@ -219,7 +219,7 @@ func (t *timestampOracle) resetUserTimestamp(tso uint64, ignoreSmaller, skipUppe
 		physicalDifference        = typeutil.SubTSOPhysicalByWallClock(nextPhysical, t.tsoMux.physical)
 	)
 	// check if the TSO is initialized.
-	if t.tsoMux.physical == typeutil.ZeroTime {
+	if t.tsoMux.physical.Equal(typeutil.ZeroTime) {
 		return errs.ErrResetUserTimestamp.FastGenByArgs("timestamp in memory has not been initialized")
 	}
 	// do not update if next physical time is less/before than prev
@@ -356,7 +356,7 @@ func (t *timestampOracle) getTS(ctx context.Context, count uint32) (pdpb.Timesta
 	}
 	for i := range maxRetryCount {
 		currentPhysical, _ := t.getTSO()
-		if currentPhysical == typeutil.ZeroTime {
+		if currentPhysical.Equal(typeutil.ZeroTime) {
 			// If it's leader, maybe SyncTimestamp hasn't completed yet
 			if t.member.IsLeader() {
 				time.Sleep(200 * time.Millisecond)

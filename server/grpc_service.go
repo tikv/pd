@@ -1596,8 +1596,8 @@ func (s *GrpcServer) QueryRegion(stream pdpb.PD_QueryRegionServer) error {
 	}
 }
 
-// Deprecated: use BatchScanRegions instead.
 // ScanRegions implements gRPC PDServer.
+// Deprecated: use BatchScanRegions instead.
 func (s *GrpcServer) ScanRegions(ctx context.Context, request *pdpb.ScanRegionsRequest) (*pdpb.ScanRegionsResponse, error) {
 	done, err := s.rateLimitCheck()
 	if err != nil {
@@ -1607,7 +1607,7 @@ func (s *GrpcServer) ScanRegions(ctx context.Context, request *pdpb.ScanRegionsR
 		defer done()
 	}
 	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
-		return pdpb.NewPDClient(client).ScanRegions(ctx, request)
+		return pdpb.NewPDClient(client).ScanRegions(ctx, request) //nolint:staticcheck
 	}
 	followerHandle := new(bool)
 	if rsp, err := s.unaryFollowerMiddleware(ctx, request, fn, followerHandle); err != nil {
@@ -2450,6 +2450,7 @@ func convertAskSplitResponse(resp *schedulingpb.AskBatchSplitResponse) *pdpb.Ask
 	}
 }
 
+// SyncMaxTS implements gRPC PDServer.
 // Deprecated.
 func (*GrpcServer) SyncMaxTS(_ context.Context, _ *pdpb.SyncMaxTSRequest) (*pdpb.SyncMaxTSResponse, error) {
 	return &pdpb.SyncMaxTSResponse{
@@ -2573,6 +2574,7 @@ func scatterRegions(cluster *cluster.RaftCluster, regionsID []uint64, group stri
 	return percentage, nil
 }
 
+// GetDCLocationInfo implements gRPC PDServer.
 // Deprecated
 func (*GrpcServer) GetDCLocationInfo(_ context.Context, _ *pdpb.GetDCLocationInfoRequest) (*pdpb.GetDCLocationInfoResponse, error) {
 	return &pdpb.GetDCLocationInfoResponse{

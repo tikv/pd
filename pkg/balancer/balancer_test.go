@@ -34,7 +34,7 @@ func TestBalancerPutAndDelete(t *testing.T) {
 			num := rand.Uint32()
 			balancer.Put(num)
 			exists[num] = struct{}{}
-			re.Equal(len(balancer.GetAll()), len(exists))
+			re.Len(balancer.GetAll(), len(exists))
 			t := balancer.Next()
 			re.Contains(exists, t)
 		}
@@ -42,7 +42,7 @@ func TestBalancerPutAndDelete(t *testing.T) {
 		for num := range exists {
 			balancer.Delete(num)
 			delete(exists, num)
-			re.Equal(len(balancer.GetAll()), len(exists))
+			re.Len(balancer.GetAll(), len(exists))
 			if len(exists) == 0 {
 				break
 			}

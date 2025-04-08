@@ -197,10 +197,10 @@ func TestStore(t *testing.T) {
 	}
 	for i := range 2 {
 		for _, testcase := range labelTestCases {
-			switch {
-			case i == 0: // old way
+			switch i {
+			case 0: // old way
 				args = testcase.args
-			case i == 1: // new way
+			case 1: // new way
 				args = testcase.newArgs
 			}
 			cmd := ctl.GetRootCmd()

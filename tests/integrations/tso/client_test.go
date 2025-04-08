@@ -198,7 +198,7 @@ func (suite *tsoClientTestSuite) waitForAllKeyspaceGroupsInServing(re *require.A
 	// Create clients and make sure they all have discovered the tso service.
 	suite.clients = mcs.WaitForMultiKeyspacesTSOAvailable(
 		suite.ctx, re, suite.keyspaceIDs, suite.getBackendEndpoints())
-	re.Equal(len(suite.keyspaceIDs), len(suite.clients))
+	re.Len(suite.keyspaceIDs, len(suite.clients))
 }
 
 func (suite *tsoClientTestSuite) TearDownTest() {

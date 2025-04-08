@@ -232,7 +232,7 @@ func TestSplitIfRegionTooHot(t *testing.T) {
 	}
 
 	task := buckets.NewCheckPeerTask(b)
-	re.True(tc.HotBucketCache.CheckAsync(task))
+	re.True(tc.CheckAsync(task))
 	time.Sleep(time.Millisecond * 10)
 
 	tc.AddRegionStore(1, 3)
@@ -371,7 +371,7 @@ func TestSplitBucketsByLoad(t *testing.T) {
 			},
 		}
 		task := buckets.NewCheckPeerTask(b)
-		re.True(tc.HotBucketCache.CheckAsync(task))
+		re.True(tc.CheckAsync(task))
 		time.Sleep(time.Millisecond * 10)
 		ops := solve.createSplitOperator([]*core.RegionInfo{region}, byLoad)
 		if data.splitKeys == nil {
@@ -414,10 +414,10 @@ func checkHotWriteRegionPlacement(re *require.Assertions, enablePlacementRules b
 	tc.AddLabelsStore(4, 2, map[string]string{"zone": "z2", "host": "h4"})
 	tc.AddLabelsStore(5, 2, map[string]string{"zone": "z2", "host": "h5"})
 	tc.AddLabelsStore(6, 2, map[string]string{"zone": "z2", "host": "h6"})
-	tc.RuleManager.SetRule(&placement.Rule{
+	tc.SetRule(&placement.Rule{
 		GroupID: "pd", ID: "leader", Role: placement.Leader, Count: 1, LabelConstraints: []placement.LabelConstraint{{Key: "zone", Op: "in", Values: []string{"z1"}}},
 	})
-	tc.RuleManager.SetRule(&placement.Rule{
+	tc.SetRule(&placement.Rule{
 		GroupID: "pd", ID: "voter", Role: placement.Follower, Count: 2, LabelConstraints: []placement.LabelConstraint{{Key: "zone", Op: "in", Values: []string{"z2"}}},
 	})
 	tc.RuleManager.DeleteRule("pd", "default")
@@ -441,7 +441,7 @@ func checkHotWriteRegionPlacement(re *require.Assertions, enablePlacementRules b
 	operatorutil.CheckTransferPeerWithLeaderTransfer(re, ops[0], operator.OpHotRegion, 1, 2)
 	clearPendingInfluence(hb.(*hotScheduler))
 
-	tc.RuleManager.SetRule(&placement.Rule{
+	tc.SetRule(&placement.Rule{
 		GroupID: "pd", ID: "voter", Role: placement.Voter, Count: 2, LabelConstraints: []placement.LabelConstraint{{Key: "zone", Op: "in", Values: []string{"z2"}}},
 	})
 	tc.RuleManager.DeleteRule("pd", "follower")
@@ -508,7 +508,7 @@ func checkHotWriteRegionScheduleByteRateOnly(re *require.Assertions, enablePlace
 	// Will transfer a hot region from store 1, because the total count of peers
 	// which is hot for store 1 is larger than other stores.
 	hasLeaderOperator, hasPeerOperator := false, false
-	for i := 0; i < 20 || !(hasLeaderOperator && hasPeerOperator); i++ {
+	for i := 0; i < 20 || (!hasLeaderOperator || !hasPeerOperator); i++ {
 		ops, _ = hb.Schedule(tc, false)
 		op := ops[0]
 		clearPendingInfluence(hb.(*hotScheduler))
@@ -632,7 +632,7 @@ func TestHotWriteRegionScheduleByteRateOnlyWithTiFlash(t *testing.T) {
 	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
 	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.ConfChangeV2))
-	re.NoError(tc.RuleManager.SetRules([]*placement.Rule{
+	re.NoError(tc.SetRules([]*placement.Rule{
 		{
 			GroupID:        placement.DefaultGroupID,
 			ID:             placement.DefaultRuleID,
@@ -719,7 +719,7 @@ func TestHotWriteRegionScheduleByteRateOnlyWithTiFlash(t *testing.T) {
 	pdServerCfg := tc.GetPDServerConfig()
 	pdServerCfg.FlowRoundByDigit = 6
 	hasLeaderOperator, hasPeerOperator := false, false
-	for i := 0; i < 20 || !(hasLeaderOperator && hasPeerOperator); i++ {
+	for i := 0; i < 20 || (!hasLeaderOperator || !hasPeerOperator); i++ {
 		clearPendingInfluence(hb)
 		ops, _ := hb.Schedule(tc, false)
 		op := ops[0]
@@ -1108,7 +1108,8 @@ func checkHotWriteRegionScheduleWithPendingInfluence(re *require.Assertions, dim
 	updateStore(3, 6*units.MiB*utils.StoreHeartBeatReportInterval)
 	updateStore(4, 4*units.MiB*utils.StoreHeartBeatReportInterval)
 
-	if dim == 0 { // byte rate
+	switch dim {
+	case 0: // byte rate
 		hb.(*hotScheduler).conf.WriteLeaderPriorities = []string{utils.KeyPriority, utils.BytePriority}
 		addRegionInfo(tc, utils.Write, []testRegionInfo{
 			{1, []uint64{1, 2, 3}, 512 * units.KiB, 0, 0},
@@ -1118,7 +1119,7 @@ func checkHotWriteRegionScheduleWithPendingInfluence(re *require.Assertions, dim
 			{5, []uint64{1, 2, 3}, 512 * units.KiB, 0, 0},
 			{6, []uint64{1, 2, 3}, 512 * units.KiB, 0, 0},
 		})
-	} else if dim == 1 { // key rate
+	case 1: // key rate
 		hb.(*hotScheduler).conf.WriteLeaderPriorities = []string{utils.BytePriority, utils.KeyPriority}
 		addRegionInfo(tc, utils.Write, []testRegionInfo{
 			{1, []uint64{1, 2, 3}, 0, 512 * units.KiB, 0},
@@ -1128,6 +1129,7 @@ func checkHotWriteRegionScheduleWithPendingInfluence(re *require.Assertions, dim
 			{5, []uint64{1, 2, 3}, 0, 512 * units.KiB, 0},
 			{6, []uint64{1, 2, 3}, 0, 512 * units.KiB, 0},
 		})
+	default:
 	}
 
 	for range 20 {
@@ -1493,7 +1495,8 @@ func checkHotReadRegionScheduleWithPendingInfluence(re *require.Assertions, dim 
 	updateStore(3, 6*units.MiB*utils.StoreHeartBeatReportInterval)
 	updateStore(4, 5*units.MiB*utils.StoreHeartBeatReportInterval)
 
-	if dim == 0 { // byte rate
+	switch dim {
+	case 0: // byte rate
 		addRegionInfo(tc, utils.Read, []testRegionInfo{
 			{1, []uint64{1, 2, 3}, 512 * units.KiB, 0, 0},
 			{2, []uint64{1, 2, 3}, 512 * units.KiB, 0, 0},
@@ -1504,7 +1507,7 @@ func checkHotReadRegionScheduleWithPendingInfluence(re *require.Assertions, dim 
 			{7, []uint64{3, 2, 1}, 512 * units.KiB, 0, 0},
 			{8, []uint64{3, 2, 1}, 512 * units.KiB, 0, 0},
 		})
-	} else if dim == 1 { // key rate
+	case 1: // key rate
 		addRegionInfo(tc, utils.Read, []testRegionInfo{
 			{1, []uint64{1, 2, 3}, 0, 512 * units.KiB, 0},
 			{2, []uint64{1, 2, 3}, 0, 512 * units.KiB, 0},
@@ -1515,6 +1518,7 @@ func checkHotReadRegionScheduleWithPendingInfluence(re *require.Assertions, dim 
 			{7, []uint64{3, 2, 1}, 0, 512 * units.KiB, 0},
 			{8, []uint64{3, 2, 1}, 0, 512 * units.KiB, 0},
 		})
+	default:
 	}
 
 	// Before schedule, store byte/key rate: 7.1 | 6.1 | 6 | 5
@@ -1990,7 +1994,7 @@ func checkHotCacheCheckRegionFlowWithDifferentThreshold(re *require.Assertions, 
 		}
 	}
 	items := tc.AddLeaderRegionWithWriteInfo(201, 1, rate*utils.RegionHeartBeatReportInterval, 0, 0, utils.RegionHeartBeatReportInterval, []uint64{2, 3}, 1)
-	re.Equal(float64(rate)*statistics.HotThresholdRatio, tc.HotCache.GetThresholds(utils.Write, items[0].StoreID)[0])
+	re.Equal(float64(rate)*statistics.HotThresholdRatio, tc.GetThresholds(utils.Write, items[0].StoreID)[0])
 	// Threshold of store 1,2,3 is 409.6 units.KiB and others are 1 units.KiB
 	// Make the hot threshold of some store is high and the others are low
 	rate = 10 * units.KiB
@@ -2046,7 +2050,7 @@ func TestHotCacheSortHotPeer(t *testing.T) {
 }
 
 func checkSortResult(re *require.Assertions, regions []uint64, hotPeers []*statistics.HotPeerStat) {
-	re.Equal(len(hotPeers), len(regions))
+	re.Len(hotPeers, len(regions))
 	for _, region := range regions {
 		in := false
 		for _, hotPeer := range hotPeers {

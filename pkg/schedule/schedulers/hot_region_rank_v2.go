@@ -121,8 +121,8 @@ func (*rankV2) isAvailable(s *solution) bool {
 }
 
 func (r *rankV2) checkByPriorityAndTolerance(loads []float64, f func(int) bool) bool {
-	switch {
-	case r.resourceTy == writeLeader:
+	switch r.resourceTy {
+	case writeLeader:
 		return r.checkByPriorityAndToleranceFirstOnly(loads, f)
 	default:
 		return r.checkByPriorityAndToleranceAnyOf(loads, f)
@@ -131,8 +131,8 @@ func (r *rankV2) checkByPriorityAndTolerance(loads []float64, f func(int) bool) 
 
 // checkHistoryLoadsByPriority checks the history loads by priority.
 func (r *rankV2) checkHistoryLoadsByPriority(loads [][]float64, f func(int) bool) bool {
-	switch {
-	case r.resourceTy == writeLeader:
+	switch r.resourceTy {
+	case writeLeader:
 		return r.checkHistoryLoadsByPriorityAndToleranceFirstOnly(loads, f)
 	default:
 		return r.checkHistoryByPriorityAndToleranceAnyOf(loads, f)

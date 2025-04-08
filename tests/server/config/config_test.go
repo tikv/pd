@@ -374,7 +374,7 @@ func (suite *configTestSuite) checkConfigDefault(cluster *tests.TestCluster) {
 	re.Equal(uint64(3), defaultCfg.Replication.MaxReplicas)
 	re.Equal(typeutil.StringSlice([]string{}), defaultCfg.Replication.LocationLabels)
 	re.Equal(uint64(2048), defaultCfg.Schedule.RegionScheduleLimit)
-	re.Equal("", defaultCfg.PDServerCfg.MetricStorage)
+	re.Empty(defaultCfg.PDServerCfg.MetricStorage)
 }
 
 func (suite *configTestSuite) TestConfigPDServer() {
@@ -399,7 +399,7 @@ func (suite *configTestSuite) checkConfigPDServer(cluster *tests.TestCluster) {
 	re.Equal(bool(true), sc.UseRegionStorage)
 	re.Equal("table", sc.KeyType)
 	re.Equal(typeutil.StringSlice([]string{}), sc.RuntimeServices)
-	re.Equal("", sc.MetricStorage)
+	re.Empty(sc.MetricStorage)
 	if sc.DashboardAddress != "auto" { // dashboard has been assigned
 		re.Equal(leaderServer.GetAddr(), sc.DashboardAddress)
 	}

@@ -151,7 +151,7 @@ func (t *regionTree) update(item *regionItem, withOverlaps bool, overlaps ...*Re
 	}
 	t.tree.ReplaceOrInsert(item)
 	if t.countRef {
-		item.RegionInfo.IncRef()
+		item.IncRef()
 	}
 	result := make([]*RegionInfo, len(overlaps))
 	for i, overlap := range overlaps {
@@ -220,7 +220,7 @@ func (t *regionTree) remove(region *RegionInfo) {
 	t.totalWriteBytesRate -= regionWriteBytesRate
 	t.totalWriteKeysRate -= regionWriteKeysRate
 	if t.countRef {
-		result.RegionInfo.DecRef()
+		result.DecRef()
 	}
 	if !region.LoadedFromStorage() {
 		t.notFromStorageRegionsCnt--

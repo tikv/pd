@@ -192,7 +192,7 @@ func (suite *mergeCheckerTestSuite) TestBasic() {
 
 	// merge cannot across rule key.
 	suite.cluster.SetEnablePlacementRules(true)
-	suite.cluster.RuleManager.SetRule(&placement.Rule{
+	suite.cluster.SetRule(&placement.Rule{
 		GroupID:     placement.DefaultGroupID,
 		ID:          "test",
 		Index:       1,

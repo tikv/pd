@@ -78,7 +78,7 @@ func (w *HotCache) CheckReadAsync(task func(cache *HotPeerCache)) bool {
 	}
 }
 
-// RegionStats returns the read or write statistics for hot regions.
+// GetHotPeerStats returns hot peer stats for the specified kind (read/write).
 // It returns a map where the keys are store IDs and the values are slices of HotPeerStat.
 func (w *HotCache) GetHotPeerStats(kind utils.RWType, minHotDegree int) map[uint64][]*HotPeerStat {
 	ret := make(chan map[uint64][]*HotPeerStat, 1)

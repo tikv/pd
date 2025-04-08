@@ -562,10 +562,12 @@ func (o *PersistConfig) GetStoreLimit(storeID uint64) (returnSC sc.StoreLimitCon
 // GetStoreLimitByType returns the limit of a store with a given type.
 func (o *PersistConfig) GetStoreLimitByType(storeID uint64, typ storelimit.Type) (returned float64) {
 	defer func() {
-		if typ == storelimit.RemovePeer {
-			returned = o.getTTLFloatOr(fmt.Sprintf("remove-peer-%v", storeID), returned)
-		} else if typ == storelimit.AddPeer {
+		switch typ {
+		case storelimit.AddPeer:
 			returned = o.getTTLFloatOr(fmt.Sprintf("add-peer-%v", storeID), returned)
+		case storelimit.RemovePeer:
+			returned = o.getTTLFloatOr(fmt.Sprintf("remove-peer-%v", storeID), returned)
+		default:
 		}
 	}()
 	limit := o.GetStoreLimit(storeID)

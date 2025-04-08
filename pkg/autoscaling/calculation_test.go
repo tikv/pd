@@ -296,7 +296,7 @@ func TestScaleOutGroupLabel(t *testing.T) {
 	plan := findBestGroupToScaleOut(strategy, nil, TiKV)
 	re.Equal("hotRegion", plan.Labels["specialUse"])
 	plan = findBestGroupToScaleOut(strategy, nil, TiDB)
-	re.Equal("", plan.Labels["specialUse"])
+	re.Empty(plan.Labels["specialUse"])
 }
 
 func TestStrategyChangeCount(t *testing.T) {

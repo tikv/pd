@@ -46,12 +46,13 @@ type minResolvedTS struct {
 	StoresMinResolvedTS map[uint64]uint64 `json:"stores_min_resolved_ts"`
 }
 
+// GetStoreMinResolvedTS gets the store-level min resolved ts.
 // @Tags     min_store_resolved_ts
 // @Summary  Get store-level min resolved ts.
-// @Produce      json
-// @Success      200    {array}   minResolvedTS
+// @Produce  json
+// @Success  200  {array}   minResolvedTS
 // @Failure  400  {string}  string  "The input is invalid."
-// @Failure      500    {string}  string  "PD server failed to proceed the request."
+// @Failure  500  {string}  string  "PD server failed to proceed the request."
 // @Router   /min-resolved-ts/{store_id} [get]
 func (h *minResolvedTSHandler) GetStoreMinResolvedTS(w http.ResponseWriter, r *http.Request) {
 	c := getCluster(r)
@@ -70,6 +71,7 @@ func (h *minResolvedTSHandler) GetStoreMinResolvedTS(w http.ResponseWriter, r *h
 	})
 }
 
+// GetMinResolvedTS gets the cluster-level min resolved ts and optionally store-level min resolved ts.
 // @Tags         min_resolved_ts
 // @Summary      Get cluster-level min resolved ts and optionally store-level min resolved ts.
 // @Description  Optionally, we support a query parameter `scope`
