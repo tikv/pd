@@ -190,6 +190,15 @@ func (suite *httpClientTestSuite) TestMeta() {
 	re.NoError(err)
 	re.Len(hotWriteRegions.AsPeer, 4)
 	re.Len(hotWriteRegions.AsLeader, 4)
+
+	distribution, err := client.GetRegionDistributionByKeyRange(ctx, pd.NewKeyRange([]byte("a1"), []byte("a3")), "tikv")
+	re.NoError(err)
+	re.Len(distribution.RegionDistributions, 4)
+	sort.Slice(distribution.RegionDistributions, func(i, j int) bool {
+		return distribution.RegionDistributions[i].StoreID < distribution.RegionDistributions[j].StoreID
+	})
+	re.Equal(2, distribution.RegionDistributions[0].RegionLeaderCount)
+	re.Equal(2, distribution.RegionDistributions[0].RegionPeerCount)
 	historyHorRegions, err := client.GetHistoryHotRegions(ctx, &pd.HistoryHotRegionsRequest{
 		StartTime: 0,
 		EndTime:   time.Now().AddDate(0, 0, 1).UnixNano() / int64(time.Millisecond),

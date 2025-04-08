@@ -55,6 +55,7 @@ import (
 	"github.com/tikv/pd/pkg/ratelimit"
 	"github.com/tikv/pd/pkg/replication"
 	sc "github.com/tikv/pd/pkg/schedule/config"
+	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/hbstream"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/placement"
@@ -115,9 +116,10 @@ const (
 	minSnapshotDurationSec = 5
 
 	// heartbeat relative const
-	heartbeatTaskRunner = "heartbeat-async"
-	miscTaskRunner      = "misc-async"
-	logTaskRunner       = "log-async"
+	heartbeatTaskRunner  = "heartbeat-async"
+	miscTaskRunner       = "misc-async"
+	logTaskRunner        = "log-async"
+	syncRegionTaskRunner = "sync-region-async"
 )
 
 // Server is the interface for cluster.
@@ -181,7 +183,7 @@ type RaftCluster struct {
 	keyspaceGroupManager     *keyspace.GroupManager
 	independentServices      sync.Map
 	hbstreams                *hbstream.HeartbeatStreams
-	tsoAllocator             *tso.AllocatorManager
+	tsoAllocator             *tso.Allocator
 
 	// heartbeatRunner is used to process the subtree update task asynchronously.
 	heartbeatRunner ratelimit.Runner
@@ -189,6 +191,8 @@ type RaftCluster struct {
 	miscRunner ratelimit.Runner
 	// logRunner is used to process the log asynchronously.
 	logRunner ratelimit.Runner
+	// syncRegionRunner is used to sync region asynchronously.
+	syncRegionRunner ratelimit.Runner
 }
 
 // Status saves some state information.
@@ -210,20 +214,25 @@ func NewRaftCluster(
 	regionSyncer *syncer.RegionSyncer,
 	etcdClient *clientv3.Client,
 	httpClient *http.Client,
-	tsoAllocator *tso.AllocatorManager,
+	tsoAllocator *tso.Allocator,
 ) *RaftCluster {
 	return &RaftCluster{
-		serverCtx:       ctx,
-		member:          member,
-		regionSyncer:    regionSyncer,
-		httpClient:      httpClient,
-		etcdClient:      etcdClient,
-		BasicCluster:    basicCluster,
-		storage:         storage,
-		tsoAllocator:    tsoAllocator,
-		heartbeatRunner: ratelimit.NewConcurrentRunner(heartbeatTaskRunner, ratelimit.NewConcurrencyLimiter(uint64(runtime.NumCPU()*2)), time.Minute),
-		miscRunner:      ratelimit.NewConcurrentRunner(miscTaskRunner, ratelimit.NewConcurrencyLimiter(uint64(runtime.NumCPU()*2)), time.Minute),
-		logRunner:       ratelimit.NewConcurrentRunner(logTaskRunner, ratelimit.NewConcurrencyLimiter(uint64(runtime.NumCPU()*2)), time.Minute),
+		serverCtx:    ctx,
+		member:       member,
+		regionSyncer: regionSyncer,
+		httpClient:   httpClient,
+		etcdClient:   etcdClient,
+		BasicCluster: basicCluster,
+		storage:      storage,
+		tsoAllocator: tsoAllocator,
+		heartbeatRunner: ratelimit.NewConcurrentRunner(heartbeatTaskRunner,
+			ratelimit.NewConcurrencyLimiter(uint64(runtime.NumCPU()*2)), time.Minute),
+		miscRunner: ratelimit.NewConcurrentRunner(miscTaskRunner,
+			ratelimit.NewConcurrencyLimiter(uint64(runtime.NumCPU()*2)), time.Minute),
+		logRunner: ratelimit.NewConcurrentRunner(logTaskRunner,
+			ratelimit.NewConcurrencyLimiter(uint64(runtime.NumCPU()*2)), time.Minute),
+		syncRegionRunner: ratelimit.NewConcurrentRunner(syncRegionTaskRunner,
+			ratelimit.NewConcurrencyLimiter(1), time.Minute),
 	}
 }
 
@@ -302,6 +311,9 @@ func (c *RaftCluster) InitCluster(
 	c.ctx, c.cancel = context.WithCancel(c.serverCtx)
 	c.progressManager = progress.NewManager()
 	c.changedRegions = make(chan *core.RegionInfo, defaultChangedRegionsLimit)
+	failpoint.Inject("syncRegionChannelFull", func() {
+		c.changedRegions = make(chan *core.RegionInfo, 100)
+	})
 	c.prevStoreLimit = make(map[uint64]map[storelimit.Type]float64)
 	c.unsafeRecoveryController = unsaferecovery.NewController(c)
 	c.keyspaceGroupManager = keyspaceGroupManager
@@ -401,6 +413,7 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 	c.heartbeatRunner.Start(c.ctx)
 	c.miscRunner.Start(c.ctx)
 	c.logRunner.Start(c.ctx)
+	c.syncRegionRunner.Start(c.ctx)
 	return nil
 }
 
@@ -494,35 +507,32 @@ func (c *RaftCluster) runServiceCheckJob() {
 }
 
 func (c *RaftCluster) startTSOJobsIfNeeded() error {
-	allocator := c.tsoAllocator.GetAllocator()
-	if !allocator.IsInitialize() {
-		log.Info("initializing the global TSO allocator")
-		if err := allocator.Initialize(0); err != nil {
-			log.Error("failed to initialize the global TSO allocator", errs.ZapError(err))
+	if !c.tsoAllocator.IsInitialize() {
+		log.Info("initializing the TSO allocator")
+		if err := c.tsoAllocator.Initialize(); err != nil {
+			log.Error("failed to initialize the TSO allocator", errs.ZapError(err))
 			return err
 		}
 	} else if !c.running {
-		// If the global TSO allocator is already initialized, but the running flag is false,
+		// If the TSO allocator is already initialized, but the running flag is false,
 		// it means there maybe unexpected error happened before.
-		log.Warn("the global TSO allocator is already initialized before, but the cluster is not running")
+		log.Warn("the TSO allocator is already initialized before, but the cluster is not running")
 	}
 	return nil
 }
 
 func (c *RaftCluster) stopTSOJobsIfNeeded() {
-	allocator := c.tsoAllocator.GetAllocator()
-	if !allocator.IsInitialize() {
+	if !c.tsoAllocator.IsInitialize() {
 		return
 	}
-	log.Info("closing the global TSO allocator")
-	c.tsoAllocator.ResetAllocatorGroup(true)
+	log.Info("closing the TSO allocator")
+	c.tsoAllocator.Reset(false)
 	failpoint.Inject("updateAfterResetTSO", func() {
-		allocator := c.tsoAllocator.GetAllocator()
-		if err := allocator.UpdateTSO(); !errorspkg.Is(err, errs.ErrUpdateTimestamp) {
+		if err := c.tsoAllocator.UpdateTSO(); !errorspkg.Is(err, errs.ErrUpdateTimestamp) {
 			log.Panic("the tso update after reset should return ErrUpdateTimestamp as expected", zap.Error(err))
 		}
-		if allocator.IsInitialize() {
-			log.Panic("the allocator should be uninitialized after reset")
+		if c.tsoAllocator.IsInitialize() {
+			log.Panic("the tso allocator should be uninitialized after reset")
 		}
 	})
 }
@@ -883,6 +893,7 @@ func (c *RaftCluster) Stop() {
 	c.heartbeatRunner.Stop()
 	c.miscRunner.Stop()
 	c.logRunner.Stop()
+	c.syncRegionRunner.Stop()
 	c.Unlock()
 
 	c.wg.Wait()
@@ -1291,10 +1302,13 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 	}
 
 	if saveKV || needSync {
-		select {
-		case c.changedRegions <- region:
-		default:
-		}
+		ctx.SyncRegionRunner.RunTask(
+			regionID,
+			ratelimit.SyncRegionToFollower,
+			func(context.Context) {
+				c.changedRegions <- region
+			},
+		)
 	}
 	return nil
 }
@@ -2169,9 +2183,70 @@ func (c *RaftCluster) PutMetaCluster(meta *metapb.Cluster) error {
 	return c.putMetaLocked(typeutil.DeepClone(meta, core.ClusterFactory))
 }
 
+// GetHotRegionStatusByRange return region statistics from cluster with hot statistics.
+func (c *RaftCluster) GetHotRegionStatusByRange(startKey, endKey []byte, engine string) *statistics.RegionStats {
+	stores := c.GetStores()
+	switch engine {
+	case core.EngineTiKV:
+		f := filter.NewEngineFilter("user", filter.NotSpecialEngines)
+		stores = filter.SelectSourceStores(stores, []filter.Filter{f}, c.GetSchedulerConfig(), nil, nil)
+	case core.EngineTiFlash:
+		f := filter.NewEngineFilter("user", filter.SpecialEngines)
+		stores = filter.SelectSourceStores(stores, []filter.Filter{f}, c.GetSchedulerConfig(), nil, nil)
+	default:
+	}
+
+	storeMap := make(map[uint64]string, len(stores))
+	for _, store := range stores {
+		storeMap[store.GetID()] = store.GetLabelValue(core.EngineKey)
+	}
+	opt := statistics.WithStoreMapOption(storeMap)
+	stats := statistics.GetRegionStats(c.ScanRegions(startKey, endKey, -1), c, opt)
+	// Fill in the hot write region statistics.
+	for storeID, label := range storeMap {
+		if _, ok := stats.StoreLeaderCount[storeID]; !ok {
+			stats.StoreLeaderCount[storeID] = 0
+			stats.StoreLeaderKeys[storeID] = 0
+			stats.StoreLeaderSize[storeID] = 0
+		}
+		if _, ok := stats.StorePeerCount[storeID]; !ok {
+			stats.StorePeerCount[storeID] = 0
+			stats.StorePeerKeys[storeID] = 0
+			stats.StorePeerSize[storeID] = 0
+		}
+
+		if _, ok := stats.StoreWriteQuery[storeID]; !ok {
+			stats.StoreWriteBytes[storeID] = 0
+			stats.StoreWriteKeys[storeID] = 0
+			stats.StoreWriteQuery[storeID] = 0
+		}
+
+		if _, ok := stats.StoreLeaderReadQuery[storeID]; !ok {
+			stats.StoreLeaderReadKeys[storeID] = 0
+			stats.StoreLeaderReadBytes[storeID] = 0
+			stats.StoreLeaderReadQuery[storeID] = 0
+		}
+
+		if _, ok := stats.StorePeerReadQuery[storeID]; !ok {
+			stats.StorePeerReadKeys[storeID] = 0
+			stats.StorePeerReadBytes[storeID] = 0
+			stats.StorePeerReadQuery[storeID] = 0
+		}
+		if label == "" {
+			storeMap[storeID] = core.EngineTiKV
+		}
+	}
+
+	stats.StoreEngine = storeMap
+	return stats
+}
+
 // GetRegionStatsByRange returns region statistics from cluster.
-func (c *RaftCluster) GetRegionStatsByRange(startKey, endKey []byte) *statistics.RegionStats {
-	return statistics.GetRegionStats(c.ScanRegions(startKey, endKey, -1))
+// if useHotFlow is true, the hot region statistics will be returned.
+func (c *RaftCluster) GetRegionStatsByRange(startKey, endKey []byte,
+	opts ...statistics.GetRegionStatsOption) *statistics.RegionStats {
+	return statistics.GetRegionStats(c.ScanRegions(startKey, endKey, -1),
+		nil, opts...)
 }
 
 // GetRegionStatsCount returns the number of regions in the range.
@@ -2577,10 +2652,4 @@ func (c *RaftCluster) SetServiceIndependent(name string) {
 // UnsetServiceIndependent unsets the service to be independent.
 func (c *RaftCluster) UnsetServiceIndependent(name string) {
 	c.independentServices.Delete(name)
-}
-
-// GetGlobalTSOAllocator return global tso allocator
-// It only is used for test.
-func (c *RaftCluster) GetGlobalTSOAllocator() tso.Allocator {
-	return c.tsoAllocator.GetAllocator()
 }

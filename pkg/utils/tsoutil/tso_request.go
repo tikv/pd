@@ -89,7 +89,7 @@ func (r *TSOProtoRequest) postProcess(countSum, physical, firstLogical int64) (i
 		Count:  count,
 		Timestamp: &pdpb.Timestamp{
 			Physical: physical,
-			Logical:  addLogical(firstLogical, countSum),
+			Logical:  firstLogical + countSum,
 		},
 	}
 	// Send back to the client.
@@ -149,7 +149,7 @@ func (r *PDProtoRequest) postProcess(countSum, physical, firstLogical int64) (in
 		Count:  count,
 		Timestamp: &pdpb.Timestamp{
 			Physical: physical,
-			Logical:  addLogical(firstLogical, countSum),
+			Logical:  firstLogical + countSum,
 		},
 	}
 	// Send back to the client.

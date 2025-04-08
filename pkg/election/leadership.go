@@ -65,7 +65,7 @@ type Leadership struct {
 	client *clientv3.Client
 	// leaderKey and leaderValue are key-value pair in etcd
 	leaderKey   string
-	leaderValue string
+	leaderValue atomic.Value // Stored as string
 
 	keepAliveCtx            context.Context
 	keepAliveCancelFunc     context.CancelFunc
@@ -120,6 +120,18 @@ func (ls *Leadership) GetLeaderKey() string {
 	return ls.leaderKey
 }
 
+// GetLeaderValue is used to get the leader value saved in etcd.
+func (ls *Leadership) GetLeaderValue() string {
+	if ls == nil {
+		return ""
+	}
+	leaderValue := ls.leaderValue.Load()
+	if leaderValue == nil {
+		return ""
+	}
+	return leaderValue.(string)
+}
+
 // SetPrimaryWatch sets the primary watch flag.
 func (ls *Leadership) SetPrimaryWatch(val bool) {
 	ls.primaryWatch.Store(val)
@@ -166,7 +178,7 @@ func (ls *Leadership) AddCampaignTimes() {
 
 // Campaign is used to campaign the leader with given lease and returns a leadership
 func (ls *Leadership) Campaign(leaseTimeout int64, leaderData string, cmps ...clientv3.Cmp) error {
-	ls.leaderValue = leaderData
+	ls.leaderValue.Store(leaderData)
 	// Create a new lease to campaign
 	newLease := NewLease(ls.client, ls.purpose)
 	ls.SetLease(newLease)
@@ -233,7 +245,7 @@ func (ls *Leadership) LeaderTxn(cs ...clientv3.Cmp) clientv3.Txn {
 }
 
 func (ls *Leadership) leaderCmp() clientv3.Cmp {
-	return clientv3.Compare(clientv3.Value(ls.leaderKey), "=", ls.leaderValue)
+	return clientv3.Compare(clientv3.Value(ls.leaderKey), "=", ls.GetLeaderValue())
 }
 
 // DeleteLeaderKey deletes the corresponding leader from etcd by the leaderPath as the key.
@@ -419,4 +431,5 @@ func (ls *Leadership) Reset() {
 	ls.keepAliveCancelFuncLock.Unlock()
 	ls.GetLease().Close()
 	ls.SetPrimaryWatch(false)
+	ls.leaderValue.Store("")
 }

@@ -129,6 +129,13 @@ func RegionStatsByKeyRange(keyRange *KeyRange, onlyCount bool) string {
 		StatsRegion, startKeyStr, endKeyStr)
 }
 
+// RegionDistributionsByKeyRange returns the path of PD HTTP API to get region distribution by start key and end key.
+func RegionDistributionsByKeyRange(keyRange *KeyRange, engine string) string {
+	startKeyStr, endKeyStr := keyRange.EscapeAsUTF8Str()
+	return fmt.Sprintf("%s?use_hot&start_key=%s&end_key=%s&engine=%s",
+		StatsRegion, startKeyStr, endKeyStr, engine)
+}
+
 // StoreByID returns the store API with store ID parameter.
 func StoreByID(id uint64) string {
 	return fmt.Sprintf("%s/%d", store, id)
