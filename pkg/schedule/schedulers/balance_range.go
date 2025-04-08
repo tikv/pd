@@ -88,10 +88,12 @@ func (handler *balanceRangeSchedulerHandler) addJob(w http.ResponseWriter, r *ht
 	endKey := input["end-key"].(string)
 	if endKey == "" || startKey == "" {
 		handler.rd.JSON(w, http.StatusBadRequest, "start key and end key cannot both be nil")
+		return
 	}
 	job.Ranges = []core.KeyRange{core.NewKeyRange(startKey, endKey)}
 	if err := handler.config.addJob(job); err != nil {
 		handler.rd.JSON(w, http.StatusBadRequest, err.Error())
+		return
 	}
 	handler.rd.JSON(w, http.StatusOK, nil)
 }
@@ -177,7 +179,11 @@ func (conf *balanceRangeSchedulerConfig) addJob(job *balanceRangeSchedulerJob) e
 	conf.Lock()
 	defer conf.Unlock()
 	job.Status = pending
-	job.JobID = conf.jobs[len(conf.jobs)-1].JobID + 1
+	if len(conf.jobs) == 0 {
+		job.JobID = 1
+	} else {
+		job.JobID = conf.jobs[len(conf.jobs)-1].JobID + 1
+	}
 	conf.jobs = append(conf.jobs, job)
 	if err := conf.save(); err != nil {
 		conf.jobs = conf.jobs[:len(conf.jobs)-1]
@@ -250,6 +256,8 @@ func (conf *balanceRangeSchedulerConfig) clone() []*balanceRangeSchedulerJob {
 			JobID:   job.JobID,
 			Start:   job.Start,
 			Status:  job.Status,
+			Create:  job.Create,
+			Finish:  job.Finish,
 		})
 	}
 
