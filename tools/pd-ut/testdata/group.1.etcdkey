@@ -71,6 +71,9 @@ test-a save
 test-a/ get
 test-a/a save
 test-a/ab save
+test-leader-key get
+test-leader-key remove
+test-leader-key save
 test/ get
 test/a save
 test/ab save

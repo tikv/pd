@@ -34,7 +34,6 @@ import (
 	"github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/storage/endpoint"
-	"github.com/tikv/pd/pkg/tso"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/apiutil/multiservicesapi"
 	"github.com/tikv/pd/pkg/utils/logutil"
@@ -222,12 +221,12 @@ func ResetTS(c *gin.Context) {
 // GetHealth returns the health status of the TSO service.
 func GetHealth(c *gin.Context) {
 	svr := c.MustGet(multiservicesapi.ServiceContextKey).(*tsoserver.Service)
-	am, err := svr.GetKeyspaceGroupManager().GetAllocatorManager(constant.DefaultKeyspaceGroupID)
+	allocator, err := svr.GetKeyspaceGroupManager().GetAllocator(constant.DefaultKeyspaceGroupID)
 	if err != nil {
 		c.String(http.StatusInternalServerError, err.Error())
 		return
 	}
-	if am.GetMember().IsLeaderElected() {
+	if allocator.GetMember().IsLeaderElected() {
 		c.IndentedJSON(http.StatusOK, "ok")
 		return
 	}
@@ -250,13 +249,13 @@ func GetKeyspaceGroupMembers(c *gin.Context) {
 	keyspaceGroups := kgm.GetKeyspaceGroups()
 	members := make(map[uint32]*KeyspaceGroupMember, len(keyspaceGroups))
 	for id, group := range keyspaceGroups {
-		am, err := kgm.GetAllocatorManager(id)
+		allocator, err := kgm.GetAllocator(id)
 		if err != nil {
-			log.Error("failed to get allocator manager",
+			log.Error("failed to get tso allocator",
 				zap.Uint32("keyspace-group-id", id), zap.Error(err))
 			continue
 		}
-		member := am.GetMember()
+		member := allocator.GetMember()
 		members[id] = &KeyspaceGroupMember{
 			Group:     group,
 			Member:    member.GetMember().(*tsopb.Participant),
@@ -298,7 +297,7 @@ func transferPrimary(c *gin.Context) {
 		newPrimary = v
 	}
 
-	allocator, err := svr.GetTSOAllocatorManager(keyspaceGroupID)
+	allocator, err := svr.GetTSOAllocator(keyspaceGroupID)
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
 		return
@@ -311,7 +310,7 @@ func transferPrimary(c *gin.Context) {
 		memberMap[member.Address] = true
 	}
 
-	if err := utils.TransferPrimary(svr.GetClient(), allocator.GetAllocator().(*tso.GlobalTSOAllocator).GetExpectedPrimaryLease(),
+	if err := utils.TransferPrimary(svr.GetClient(), allocator.GetExpectedPrimaryLease(),
 		constant.TSOServiceName, svr.Name(), newPrimary, keyspaceGroupID, memberMap); err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, err.Error())
 		return
