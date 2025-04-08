@@ -209,7 +209,7 @@ func (suite *adminTestSuite) TestResetTS() {
 			re.Contains(string(b), "[PD:etcd:ErrEtcdTxnConflict]etcd transaction failed, conflicted and rolled back")
 			return false
 		default:
-			re.FailNow("unexpected status code %d", resp.StatusCode)
+			re.FailNow("unexpected status code", resp.StatusCode)
 			return false
 		}
 	})

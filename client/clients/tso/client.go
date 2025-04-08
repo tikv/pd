@@ -517,7 +517,7 @@ func (c *Cli) getAllTSOStreamBuilders() map[string]tsoStreamBuilder {
 		resp, err := healthpb.NewHealthClient(cc).Check(healthCtx, &healthpb.HealthCheckRequest{Service: ""})
 		healthCancel()
 		if err == nil && resp.GetStatus() == healthpb.HealthCheckResponse_SERVING {
-			streamBuilders[addr] = c.tsoStreamBuilderFactory.makeBuilder(cc)
+			streamBuilders[addr] = c.makeBuilder(cc)
 		}
 	}
 	return streamBuilders

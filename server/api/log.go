@@ -39,6 +39,7 @@ func newLogHandler(svr *server.Server, rd *render.Render) *logHandler {
 	}
 }
 
+// SetLogLevel sets the log level.
 // @Tags     admin
 // @Summary  Set log level.
 // @Accept   json

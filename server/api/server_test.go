@@ -221,7 +221,7 @@ func (suite *serviceTestSuite) TestServiceLabels() {
 	accessPaths := suite.svr.GetServiceLabels("Profile")
 	re.Len(accessPaths, 1)
 	re.Equal("/pd/api/v1/debug/pprof/profile", accessPaths[0].Path)
-	re.Equal("", accessPaths[0].Method)
+	re.Empty(accessPaths[0].Method)
 	serviceLabel := suite.svr.GetAPIAccessServiceLabel(
 		apiutil.NewAccessPath("/pd/api/v1/debug/pprof/profile", ""))
 	re.Equal("Profile", serviceLabel)
@@ -246,10 +246,10 @@ func (suite *serviceTestSuite) TestServiceLabels() {
 	re.Equal("ResignLeader", serviceLabel)
 	serviceLabel = suite.svr.GetAPIAccessServiceLabel(
 		apiutil.NewAccessPath("/pd/api/v1/leader/resign", http.MethodGet))
-	re.Equal("", serviceLabel)
+	re.Empty(serviceLabel)
 	serviceLabel = suite.svr.GetAPIAccessServiceLabel(
 		apiutil.NewAccessPath("/pd/api/v1/leader/resign", ""))
-	re.Equal("", serviceLabel)
+	re.Empty(serviceLabel)
 
 	accessPaths = suite.svr.GetServiceLabels("queryMetric")
 	re.Len(accessPaths, 4)

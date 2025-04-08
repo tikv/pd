@@ -225,7 +225,7 @@ func (e *DownNode) Run(raft *RaftEngine, _ int64) bool {
 	if e.ID == 0 {
 		arrNodes := raft.conn.getNodes()
 		i := rand.Intn(len(arrNodes))
-		node = nodes[arrNodes[i].Store.GetId()]
+		node = nodes[arrNodes[i].GetId()]
 	} else {
 		node = nodes[uint64(e.ID)]
 	}

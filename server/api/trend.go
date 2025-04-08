@@ -83,6 +83,7 @@ func newTrendHandler(s *server.Server, rd *render.Render) *trendHandler {
 	}
 }
 
+// GetTrend gets the trend of the cluster.
 // @Tags     trend
 // @Summary  Get the growth and changes of data in the most recent period of time.
 // @Param    from  query  integer  false  "From Unix timestamp"

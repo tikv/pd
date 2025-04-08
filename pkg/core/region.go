@@ -1514,8 +1514,8 @@ func (r *RegionsInfo) GetStoreRegions(storeID uint64) []*RegionInfo {
 	return regions
 }
 
-// TODO: benchmark the performance of `QueryRegions`.
 // QueryRegions searches RegionInfo from regionTree by keys and IDs in batch.
+// TODO: benchmark the performance of `QueryRegions`.
 func (r *RegionsInfo) QueryRegions(
 	keys, prevKeys [][]byte, ids []uint64, needBuckets bool,
 ) (keyIDMap, prevKeyIDMap []uint64, regionsByID map[uint64]*pdpb.RegionResponse) {
