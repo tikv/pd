@@ -106,7 +106,11 @@ import (
 // GCStateManager is the manager for all kinds of states of TiKV's GC for MVCC data.
 // nolint:revive
 type GCStateManager struct {
-	lock            syncutil.RWMutex
+	// The mutex is for avoiding multiple etcd transactions running concurrently, so that in most cases (where the
+	// concurrent operations happen on a single PD leader) it doesn't need to cause conflicts in etcd transactions
+	// layer. It can be more efficient and avoid failures due to transaction conflict in most cases.
+	// The etcd transactions is still necessary considering the possibility of rare cases like PD leader changes.
+	mu              syncutil.RWMutex
 	gcMetaStorage   endpoint.GCStateProvider
 	cfg             config.PDServerConfig
 	keyspaceManager *keyspace.Manager
@@ -131,11 +135,11 @@ func (m *GCStateManager) redirectKeyspace(keyspaceID uint32, isUserAPI bool) (ui
 	}
 	if keyspaceMeta.Config[keyspace.GCManagementType] != keyspace.KeyspaceLevelGC {
 		if isUserAPI {
-			// The user API is expected to always work. Operate on the state of global GC instead.
+			// The user API is expected to always work. Operate on the state of unified GC instead.
 			return constant.NullKeyspaceID, nil
 		}
 		// Internal API should never be called on keyspaces without keyspace level GC. They won't perform any active
-		// GC operation and will be managed by the global GC.
+		// GC operation and will be managed by the unified GC.
 		return 0, errs.ErrGCOnInvalidKeyspace.GenWithStackByArgs(keyspaceID)
 	}
 
@@ -165,8 +169,8 @@ func (m *GCStateManager) AdvanceGCSafePoint(keyspaceID uint32, target uint64) (o
 		return
 	}
 
-	m.lock.Lock()
-	defer m.lock.Unlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 
 	return m.advanceGCSafePointImpl(keyspaceID, target, false)
 }
@@ -196,7 +200,7 @@ func (m *GCStateManager) advanceGCSafePointImpl(keyspaceID uint32, target uint64
 				// When in compatible mode, trying to update the safe point to a smaller value fails silently, returning
 				// the actual value. There exist some use cases that fetches the current value by passing zero.
 				log.Warn("deprecated API `UpdateGCSafePoint` is called with invalid argument",
-					zap.Uint64("currentGCSafePoint", oldGCSafePoint), zap.Uint64("attemptedGCSafePoint", target))
+					zap.Uint64("current-gc-safe-point", oldGCSafePoint), zap.Uint64("attempted-gc-safe-point", target))
 				newGCSafePoint = oldGCSafePoint
 				return nil
 			}
@@ -243,8 +247,8 @@ func (m *GCStateManager) AdvanceTxnSafePoint(keyspaceID uint32, target uint64, n
 	if err != nil {
 		return AdvanceTxnSafePointResult{}, err
 	}
-	m.lock.Lock()
-	defer m.lock.Unlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 
 	return m.advanceTxnSafePointImpl(keyspaceID, target, now)
 }
@@ -261,11 +265,13 @@ func (m *GCStateManager) advanceTxnSafePointImpl(keyspaceID uint32, target uint6
 	// important purpose of which is to find the actual GC safe point that's safe to use.
 	downgradeCompatibleMode := false
 
-	var oldTxnSafePoint uint64
-	newTxnSafePoint := target
-	minBlocker := target
-	var blockingBarrier *endpoint.GCBarrier
-	var blockingMinStartTSOwner *string
+	var (
+		minBlocker              = target
+		oldTxnSafePoint         uint64
+		newTxnSafePoint         uint64
+		blockingBarrier         *endpoint.GCBarrier
+		blockingMinStartTSOwner *string
+	)
 
 	err := m.gcMetaStorage.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
 		var err1 error
@@ -351,34 +357,41 @@ func (m *GCStateManager) advanceTxnSafePointImpl(keyspaceID uint32, target uint6
 		if blockingBarrier == nil && blockingMinStartTSOwner == nil {
 			panic("unreachable")
 		}
-		if newTxnSafePoint == minBlocker {
-			log.Info("txn safe point advancement is being blocked",
-				zap.Uint64("oldTxnSafePoint", oldTxnSafePoint), zap.Uint64("target", target),
-				zap.Uint64("newTxnSafePoint", newTxnSafePoint), zap.String("blocker", blockerDesc),
-				zap.Bool("downgradeCompatibleMode", downgradeCompatibleMode))
-		} else {
-			log.Info("txn safe point advancement unable to be blocked by the minimum blocker",
-				zap.Uint64("oldTxnSafePoint", oldTxnSafePoint), zap.Uint64("target", target),
-				zap.Uint64("newTxnSafePoint", newTxnSafePoint), zap.String("blocker", blockerDesc),
-				zap.Uint64("minBlockerTS", minBlocker), zap.Bool("downgradeCompatibleMode", downgradeCompatibleMode))
-		}
-	} else if newTxnSafePoint > oldTxnSafePoint {
-		log.Info("txn safe point advanced",
-			zap.Uint64("oldTxnSafePoint", oldTxnSafePoint), zap.Uint64("newTxnSafePoint", newTxnSafePoint),
-			zap.Bool("downgradeCompatibleMode", downgradeCompatibleMode))
-	} else {
-		log.Info("txn safe point is remaining unchanged",
-			zap.Uint64("oldTxnSafePoint", oldTxnSafePoint), zap.Uint64("newTxnSafePoint", newTxnSafePoint),
-			zap.Uint64("target", target),
-			zap.Bool("downgradeCompatibleMode", downgradeCompatibleMode))
 	}
 
-	return AdvanceTxnSafePointResult{
+	result := AdvanceTxnSafePointResult{
 		OldTxnSafePoint:    oldTxnSafePoint,
 		Target:             target,
 		NewTxnSafePoint:    newTxnSafePoint,
 		BlockerDescription: blockerDesc,
-	}, nil
+	}
+	m.logAdvancingTxnSafePoint(result, minBlocker, downgradeCompatibleMode)
+	return result, nil
+}
+
+func (*GCStateManager) logAdvancingTxnSafePoint(result AdvanceTxnSafePointResult, minBlocker uint64, downgradeCompatibleMode bool) {
+	if result.NewTxnSafePoint != result.Target {
+		if result.NewTxnSafePoint == minBlocker {
+			log.Info("txn safe point advancement is being blocked",
+				zap.Uint64("old-txn-safe-point", result.OldTxnSafePoint), zap.Uint64("target", result.Target),
+				zap.Uint64("new-txn-safe-point", result.NewTxnSafePoint), zap.String("blocker", result.BlockerDescription),
+				zap.Bool("downgrade-compatible-mode", downgradeCompatibleMode))
+		} else {
+			log.Info("txn safe point advancement unable to be blocked by the minimum blocker",
+				zap.Uint64("old-txn-safe-point", result.OldTxnSafePoint), zap.Uint64("target", result.Target),
+				zap.Uint64("new-txn-safe-point", result.NewTxnSafePoint), zap.String("blocker", result.BlockerDescription),
+				zap.Uint64("min-blocker-ts", minBlocker), zap.Bool("downgrade-compatible-mode", downgradeCompatibleMode))
+		}
+	} else if result.NewTxnSafePoint > result.OldTxnSafePoint {
+		log.Info("txn safe point advanced",
+			zap.Uint64("old-txn-safe-point", result.OldTxnSafePoint), zap.Uint64("new-txn-safe-point", result.NewTxnSafePoint),
+			zap.Bool("downgrade-compatible-mode", downgradeCompatibleMode))
+	} else {
+		log.Info("txn safe point is remaining unchanged",
+			zap.Uint64("old-txn-safe-point", result.OldTxnSafePoint), zap.Uint64("new-txn-safe-point", result.NewTxnSafePoint),
+			zap.Uint64("target", result.Target),
+			zap.Bool("downgrade-compatible-mode", downgradeCompatibleMode))
+	}
 }
 
 // SetGCBarrier sets a GC barrier, which blocks GC from being advanced over the given barrierTS for at most a duration
@@ -412,8 +425,8 @@ func (m *GCStateManager) SetGCBarrier(keyspaceID uint32, barrierID string, barri
 		return nil, err
 	}
 
-	m.lock.Lock()
-	defer m.lock.Unlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 
 	return m.setGCBarrierImpl(keyspaceID, barrierID, barrierTS, ttl, now)
 }
@@ -464,8 +477,8 @@ func (m *GCStateManager) DeleteGCBarrier(keyspaceID uint32, barrierID string) (*
 		return nil, err
 	}
 
-	m.lock.Lock()
-	defer m.lock.Unlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
 
 	return m.deleteGCBarrierImpl(keyspaceID, barrierID)
 }
@@ -494,12 +507,16 @@ func (m *GCStateManager) deleteGCBarrierImpl(keyspaceID uint32, barrierID string
 
 // getGCStateInTransaction gets all properties in GC states within a context of gcMetaStorage.RunInGCStateTransaction.
 // This read only and won't write anything to the GCStateWriteBatch. It still receives a write batch to ensure
-// it's running in a transactional context.
+// it's running in a in-transaction context.
+// The parameter `keyspaceID` is expected to be either the NullKeyspaceID or the ID of a keyspace that has
+// keyspace-level GC enabled. Otherwise, the result would be undefined.
 func (m *GCStateManager) getGCStateInTransaction(keyspaceID uint32, _ *endpoint.GCStateWriteBatch) (GCState, error) {
 	result := GCState{
 		KeyspaceID: keyspaceID,
 	}
 	if keyspaceID != constant.NullKeyspaceID {
+		// Assuming the parameter `keyspaceID` is either the NullKeyspaceID or the ID of a keyspace that has
+		// keyspace-level GC enabled. So once the keyspaceID is not NullKeyspaceID, `IsKeyspaceLevel` must be true.
 		result.IsKeyspaceLevel = true
 	}
 
@@ -547,11 +564,7 @@ func (m *GCStateManager) GetGCState(keyspaceID uint32) (GCState, error) {
 		return err1
 	})
 
-	if err != nil {
-		return GCState{}, err
-	}
-
-	return result, nil
+	return result, err
 }
 
 // GetAllKeyspacesGCStates returns the GC state of all keyspaces.

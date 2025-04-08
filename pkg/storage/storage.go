@@ -20,7 +20,6 @@ import (
 
 	clientv3 "go.etcd.io/etcd/client/v3"
 
-	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 
 	"github.com/tikv/pd/pkg/core"
@@ -221,9 +220,6 @@ func AreRegionsLoaded(s Storage) bool {
 	ps := s.(*coreStorage)
 	ps.mu.RLock()
 	defer ps.mu.RUnlock()
-	failpoint.Inject("loadRegionSlow", func() {
-		failpoint.Return(false)
-	})
 	if ps.useRegionStorage.Load() {
 		return ps.regionLoaded == fromLeveldb
 	}

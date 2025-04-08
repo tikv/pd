@@ -1026,11 +1026,6 @@ error = '''
 get allocator failed, %s
 '''
 
-["PD:tso:ErrGetAllocatorManager"]
-error = '''
-get allocator manager failed, %s
-'''
-
 ["PD:tso:ErrGetMinTS"]
 error = '''
 get min ts failed, %s
@@ -1084,6 +1079,11 @@ proxy tso timeout
 ["PD:tso:ErrResetUserTimestamp"]
 error = '''
 reset user timestamp failed, %s
+'''
+
+["PD:tso:ErrSaveTimestamp"]
+error = '''
+save timestamp failed, %s
 '''
 
 ["PD:tso:ErrUpdateTimestamp"]

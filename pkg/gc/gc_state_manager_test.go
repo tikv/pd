@@ -103,7 +103,7 @@ func newGCStateManagerForTest(t *testing.T) (storage *endpoint.StorageEndpoint, 
 
 	ks1, err := keyspaceManager.CreateKeyspace(&keyspace.CreateKeyspaceRequest{
 		Name:       "ks1",
-		Config:     map[string]string{"gc_management_type": "global_gc"},
+		Config:     map[string]string{"gc_management_type": "global"},
 		CreateTime: time.Now().Unix(),
 		IsPreAlloc: false,
 	})
@@ -112,7 +112,7 @@ func newGCStateManagerForTest(t *testing.T) (storage *endpoint.StorageEndpoint, 
 
 	ks2, err := keyspaceManager.CreateKeyspace(&keyspace.CreateKeyspaceRequest{
 		Name:       "ks2",
-		Config:     map[string]string{"gc_management_type": "keyspace_level_gc"},
+		Config:     map[string]string{"gc_management_type": "keyspace_level"},
 		CreateTime: time.Now().Unix(),
 		IsPreAlloc: false,
 	})
