@@ -166,6 +166,11 @@ error = '''
 incorrect system time
 '''
 
+["PD:common:ErrInvalidArgument"]
+error = '''
+invalid argument for %s: %v
+'''
+
 ["PD:core:ErrNoStoreForRegionLeader"]
 error = '''
 can not remove store %d since there are no extra up store to store the leader
@@ -449,6 +454,36 @@ start etcd failed
 ["PD:filepath:ErrFilePathAbs"]
 error = '''
 failed to convert a path to absolute path
+'''
+
+["PD:gc:ErrDecreasingGCSafePoint"]
+error = '''
+trying to update GC safe point to a smaller value, current value: %v, given: %v
+'''
+
+["PD:gc:ErrDecreasingTxnSafePoint"]
+error = '''
+trying to update txn safe point to a smaller value, current value: %v, given: %v
+'''
+
+["PD:gc:ErrGCBarrierTSBehindTxnSafePoint"]
+error = '''
+trying to set a GC barrier on ts %d which is already behind the txn safe point %d
+'''
+
+["PD:gc:ErrGCOnInvalidKeyspace"]
+error = '''
+trying to manage GC in keyspace %v where keyspace level GC is not enabled
+'''
+
+["PD:gc:ErrGCSafePointExceedsTxnSafePoint"]
+error = '''
+trying to update GC safe point to a too large value that exceeds the txn safe point, current value: %v, given: %v, current txn safe point: %v
+'''
+
+["PD:gc:ErrReservedGCBarrierID"]
+error = '''
+trying to set a GC barrier with a barrier ID that is reserved: %v
 '''
 
 ["PD:gin:ErrBindJSON"]
@@ -991,11 +1026,6 @@ error = '''
 get allocator failed, %s
 '''
 
-["PD:tso:ErrGetAllocatorManager"]
-error = '''
-get allocator manager failed, %s
-'''
-
 ["PD:tso:ErrGetMinTS"]
 error = '''
 get min ts failed, %s
@@ -1049,6 +1079,11 @@ proxy tso timeout
 ["PD:tso:ErrResetUserTimestamp"]
 error = '''
 reset user timestamp failed, %s
+'''
+
+["PD:tso:ErrSaveTimestamp"]
+error = '''
+save timestamp failed, %s
 '''
 
 ["PD:tso:ErrUpdateTimestamp"]

@@ -47,7 +47,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/versioninfo"
-	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/server/cluster"
 )
 
 var (
@@ -193,28 +193,33 @@ func WaitForPrimaryServing(re *require.Assertions, serverMap map[string]bs.Serve
 }
 
 // MustPutStore is used for test purpose.
-func MustPutStore(re *require.Assertions, cluster *TestCluster, store *metapb.Store) {
+func MustPutStore(re *require.Assertions, tc *TestCluster, store *metapb.Store) {
 	store.Address = fmt.Sprintf("tikv%d", store.GetId())
 	if len(store.Version) == 0 {
 		store.Version = versioninfo.MinSupportedVersion(versioninfo.Version2_0).String()
 	}
-	var svr *server.Server
+	var raftCluster *cluster.RaftCluster
 	// Make sure the raft cluster is ready, no matter if the leader is changed.
 	testutil.Eventually(re, func() bool {
-		leader := cluster.GetLeaderServer()
+		leader := tc.GetLeaderServer()
 		if leader == nil {
 			return false
 		}
-		svr = leader.GetServer()
-		return svr != nil
+		svr := leader.GetServer()
+		if svr == nil {
+			return false
+		}
+		raftCluster = svr.GetRaftCluster()
+		// Wait for the raft cluster on the leader to be bootstrapped.
+		return raftCluster != nil && raftCluster.IsRunning()
 	})
-	re.NoError(svr.GetRaftCluster().PutMetaStore(store))
+	re.NoError(raftCluster.PutMetaStore(store))
 	ts := store.GetLastHeartbeat()
 	if ts == 0 {
 		ts = time.Now().UnixNano()
 	}
 
-	storeInfo := svr.GetRaftCluster().GetStore(store.GetId())
+	storeInfo := raftCluster.GetStore(store.GetId())
 	newStore := storeInfo.Clone(
 		core.SetStoreStats(&pdpb.StoreStats{
 			Capacity:  uint64(10 * units.GiB),
@@ -223,9 +228,9 @@ func MustPutStore(re *require.Assertions, cluster *TestCluster, store *metapb.St
 		}),
 		core.SetLastHeartbeatTS(time.Unix(ts/1e9, ts%1e9)),
 	)
-	svr.GetRaftCluster().GetBasicCluster().PutStore(newStore)
-	if cluster.GetSchedulingPrimaryServer() != nil {
-		cluster.GetSchedulingPrimaryServer().GetCluster().PutStore(newStore)
+	raftCluster.GetBasicCluster().PutStore(newStore)
+	if tc.GetSchedulingPrimaryServer() != nil {
+		tc.GetSchedulingPrimaryServer().GetCluster().PutStore(newStore)
 	}
 }
 
