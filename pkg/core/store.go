@@ -774,7 +774,7 @@ func (s *StoresInfo) PutStore(store *StoreInfo, opts ...StoreCreateOption) {
 
 // putStoreLocked sets a StoreInfo with storeID.
 func (s *StoresInfo) putStoreLocked(store *StoreInfo, opts ...StoreCreateOption) {
-	if opts != nil {
+	if len(opts) > 0 {
 		store = s.stores[store.GetID()]
 		for _, opt := range opts {
 			opt(store)

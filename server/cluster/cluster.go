@@ -1486,13 +1486,16 @@ func (c *RaftCluster) RemoveStore(storeID uint64, physicallyDestroyed bool) erro
 		}
 	}
 
-	if err := c.setStore(store, core.SetStoreState(metapb.StoreState_Offline, physicallyDestroyed)); err != nil {
-		return err
-	}
 	log.Warn("store has been offline",
 		zap.Uint64("store-id", storeID),
 		zap.String("store-address", store.GetAddress()),
 		zap.Bool("physically-destroyed", physicallyDestroyed))
+	if err := c.setStore(
+		store.Clone(core.SetStoreState(metapb.StoreState_Offline, physicallyDestroyed)),
+		core.SetStoreState(metapb.StoreState_Offline, physicallyDestroyed),
+	); err != nil {
+		return err
+	}
 
 	regionSize := float64(c.GetStoreRegionSize(storeID))
 	c.resetProgress(storeID, store.GetAddress())
@@ -1579,7 +1582,10 @@ func (c *RaftCluster) BuryStore(storeID uint64, forceBury bool) error {
 		zap.String("store-address", store.GetAddress()),
 		zap.String("state", store.GetState().String()),
 		zap.Bool("physically-destroyed", store.IsPhysicallyDestroyed()))
-	err := c.setStore(store, core.SetStoreState(metapb.StoreState_Tombstone))
+	err := c.setStore(
+		store.Clone(core.SetStoreState(metapb.StoreState_Tombstone)),
+		core.SetStoreState(metapb.StoreState_Tombstone),
+	)
 	c.OnStoreVersionChange()
 	if err == nil {
 		// clean up the residual information.
@@ -1716,6 +1722,7 @@ func (c *RaftCluster) SetStoreWeight(storeID uint64, leaderWeight, regionWeight 
 	)
 }
 
+// The meta of StoreInfo should be the latest.
 func (c *RaftCluster) setStore(store *core.StoreInfo, opts ...core.StoreCreateOption) error {
 	if c.storage != nil {
 		if err := c.storage.SaveStoreMeta(store.GetMeta()); err != nil {
