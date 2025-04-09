@@ -766,15 +766,22 @@ func (s *StoresInfo) GetNonWitnessVoterStores(region *RegionInfo) []*StoreInfo {
 /* Stores write operations */
 
 // PutStore sets a StoreInfo with storeID.
-func (s *StoresInfo) PutStore(store *StoreInfo) {
+func (s *StoresInfo) PutStore(store *StoreInfo, opts ...StoreCreateOption) {
 	s.Lock()
 	defer s.Unlock()
-	s.putStoreLocked(store)
+	s.putStoreLocked(store, opts...)
 }
 
 // putStoreLocked sets a StoreInfo with storeID.
-func (s *StoresInfo) putStoreLocked(store *StoreInfo) {
-	s.stores[store.GetID()] = store
+func (s *StoresInfo) putStoreLocked(store *StoreInfo, opts ...StoreCreateOption) {
+	if opts != nil {
+		store = s.stores[store.GetID()]
+		for _, opt := range opts {
+			opt(store)
+		}
+	} else {
+		s.stores[store.GetID()] = store
+	}
 }
 
 // ResetStores resets the store cache.
