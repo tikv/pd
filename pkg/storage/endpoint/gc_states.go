@@ -35,30 +35,10 @@ import (
 // which controls how TiKV's GC for MVCC data should work.
 // Note that this file is only the storage layer of the GC related metadata and doesn't do anything else such as
 // performing calculations or ensuring invariants among properties in GC states. This means that this module is NOT
-// designed for arbitrary use, but restricted for upper layers of GC state management modules only.
+// designed for arbitrary use, but restricted for upper layers of GC state management module (the gc.GCStateManager)
+// only.
 //
-// Explanations of concepts mentioned in this file (here the term `snapshots` means snapshots of TiKV's MVCC data,
-// represented by a timestamp):
-//
-//   - GC Safe Point: A timestamp, the snapshots before which can be safely discarded by GC. Written by the GCWorker
-//     to control the GC procedure.
-//   - Txn Safe Point / Transaction Safe Point: A timestamp, the snapshots equal to or after which can be safely read.
-//     Written by the GCWorker to control the GC procedure.
-//   - GC Barriers: Blocks GC from advancing the txn safe point over some specific timestamps (the barrierTS of these
-//     barriers), ensures snapshots equal to or after which to be safe to read. GC barriers can be set by any components
-//     in the cluster.
-//   - Service Safe Points / Service GC Safe Points: Another mechanism that has the same purpose as GC barriers, but
-//     is planned to be deprecated in favor of GC barriers. However, in order to keep the backward compatibility of the
-//     persistent data, the data structure of service safe points is still used internally to represent GC barriers.
-//     Service safe points can also be set by any components in the cluster.
-//
-// GC management may differ between different keyspaces. There are two kinds of GC management, each of which has
-// different paths to write its metadata in etcd:
-//
-//   - Keyspace-level: A keyspace manages its GC by itself, and have independent GC states from other keyspaces.
-//   - Unified: Keyspaces not configured to use keyspace-level GC are running unified GC. The NullKeyspace (which is
-//     used when a TiDB node are not configured to use any keyspace) is always running unified GC. For all keyspaces
-//     running unified GC, the GC states are shared and uniformly managed by the NullKeyspace.
+// For concepts and terms involved in this file, please see pkg/gc/gc_state_manager.go for detailed explanation.
 
 // ServiceSafePoint is the service safe point for a specific service.
 // NOTE:
@@ -135,8 +115,10 @@ func (s *ServiceSafePoint) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-var _ json.Marshaler = &ServiceSafePoint{}
-var _ json.Unmarshaler = &ServiceSafePoint{}
+var (
+	_ json.Marshaler   = (*ServiceSafePoint)(nil)
+	_ json.Unmarshaler = (*ServiceSafePoint)(nil)
+)
 
 // GCBarrier represents a GC barrier that's used to block GC from advancing to keep snapshots not earlier than the
 // barrier to be safe to read. The concept *GC barrier* is replacing the *service safe points*, but it reuses the
@@ -154,10 +136,7 @@ type GCBarrier struct {
 func NewGCBarrier(barrierID string, barrierTS uint64, expirationTime *time.Time) *GCBarrier {
 	// Round up the expirationTime.
 	if expirationTime != nil {
-		rounded := expirationTime.Truncate(time.Second)
-		if rounded.Before(*expirationTime) {
-			rounded = rounded.Add(time.Second)
-		}
+		rounded := expirationTime.Add(time.Second - time.Nanosecond).Truncate(time.Second)
 		*expirationTime = rounded
 	}
 	return &GCBarrier{

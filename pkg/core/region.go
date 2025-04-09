@@ -360,6 +360,73 @@ func (r *RegionInfo) GetPeer(peerID uint64) *metapb.Peer {
 	return nil
 }
 
+// Role is the role of the region.
+type Role int
+
+const (
+	// Leader is the leader of the region.
+	Leader Role = iota
+	// Follower is the follower of the region.
+	Follower
+	// Learner is the learner of the region.
+	Learner
+	// Unknown is the unknown role of the region include witness.
+	Unknown
+)
+
+// String returns the string value of the role.
+func (r Role) String() string {
+	switch r {
+	case Leader:
+		return "leader"
+	case Follower:
+		return "voter"
+	case Learner:
+		return "learner"
+	default:
+		return "unknown"
+	}
+}
+
+// NewRole creates a new role.
+func NewRole(role string) Role {
+	switch role {
+	case "leader":
+		return Leader
+	case "follower":
+		return Follower
+	case "learner":
+		return Learner
+	default:
+		return Unknown
+	}
+}
+
+// MarshalJSON returns the JSON encoding of Role.
+func (r Role) MarshalJSON() ([]byte, error) {
+	return []byte(`"` + r.String() + `"`), nil
+}
+
+// GetPeersByRole returns the peers with specified role.
+func (r *RegionInfo) GetPeersByRole(role Role) []*metapb.Peer {
+	switch role {
+	case Leader:
+		return []*metapb.Peer{r.GetLeader()}
+	case Follower:
+		followers := r.GetFollowers()
+		ret := make([]*metapb.Peer, 0, len(followers))
+		for _, peer := range followers {
+			ret = append(ret, peer)
+		}
+		return ret
+	case Learner:
+		learners := r.GetLearners()
+		return learners
+	default:
+		return nil
+	}
+}
+
 // GetDownPeer returns the down peer with specified peer id.
 func (r *RegionInfo) GetDownPeer(peerID uint64) *metapb.Peer {
 	for _, down := range r.downPeers {
@@ -480,16 +547,6 @@ func (r *RegionInfo) GetFollowers() map[uint64]*metapb.Peer {
 		}
 	}
 	return followers
-}
-
-// GetFollower randomly returns a follow peer.
-func (r *RegionInfo) GetFollower() *metapb.Peer {
-	for _, peer := range r.GetVoters() {
-		if r.leader == nil || r.leader.GetId() != peer.GetId() {
-			return peer
-		}
-	}
-	return nil
 }
 
 // GetNonWitnessVoters returns a map indicate the non-witness voter peers distributed.

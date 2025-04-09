@@ -40,7 +40,7 @@ func (m *OpInfluence) Add(other *OpInfluence) {
 }
 
 // GetStoreInfluence get storeInfluence of specific store.
-func (m OpInfluence) GetStoreInfluence(id uint64) *StoreInfluence {
+func (m *OpInfluence) GetStoreInfluence(id uint64) *StoreInfluence {
 	storeInfluence, ok := m.StoresInfluence[id]
 	if !ok {
 		storeInfluence = &StoreInfluence{}
@@ -57,6 +57,20 @@ type StoreInfluence struct {
 	LeaderCount  int64
 	WitnessCount int64
 	StepCost     map[storelimit.Type]int64
+}
+
+// GetStoreInfluenceByRole returns the influence of the store according to the role.
+func (s *StoreInfluence) GetStoreInfluenceByRole(r core.Role) int64 {
+	switch r {
+	case core.Leader:
+		return s.LeaderCount
+	case core.Follower:
+		return s.RegionCount
+	case core.Learner:
+		return s.RegionCount
+	default:
+		return 0
+	}
 }
 
 func (s *StoreInfluence) add(other *StoreInfluence) {

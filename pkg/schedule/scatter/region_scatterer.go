@@ -525,22 +525,22 @@ func (r *RegionScatterer) Put(peers map[uint64]*metapb.Peer, leaderStoreID uint6
 		if engineFilter.Target(r.cluster.GetSharedConfig(), store).IsOK() {
 			r.ordinaryEngine.selectedPeer.Put(storeID, group)
 			scatterDistributionCounter.WithLabelValues(
-				fmt.Sprintf("%v", storeID),
-				fmt.Sprintf("%v", false),
+				strconv.FormatUint(storeID, 10),
+				strconv.FormatBool(false),
 				core.EngineTiKV).Inc()
 		} else {
 			engine := store.GetLabelValue(core.EngineKey)
 			ctx, _ := r.specialEngines.Load(engine)
 			ctx.(engineContext).selectedPeer.Put(storeID, group)
 			scatterDistributionCounter.WithLabelValues(
-				fmt.Sprintf("%v", storeID),
-				fmt.Sprintf("%v", false),
+				strconv.FormatUint(storeID, 10),
+				strconv.FormatBool(false),
 				engine).Inc()
 		}
 	}
 	r.ordinaryEngine.selectedLeader.Put(leaderStoreID, group)
 	scatterDistributionCounter.WithLabelValues(
-		fmt.Sprintf("%v", leaderStoreID),
-		fmt.Sprintf("%v", true),
+		strconv.FormatUint(leaderStoreID, 10),
+		strconv.FormatBool(true),
 		core.EngineTiKV).Inc()
 }

@@ -28,11 +28,13 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/pmezard/go-difflib/difflib"
 	"go.uber.org/zap"
 
 	"github.com/tikv/pd/tools/pd-ut/alloc"
@@ -95,6 +97,8 @@ go tool cover --func=xxx`
 var (
 	modulePath           = filepath.Join("github.com", "tikv", "pd")
 	integrationsTestPath = filepath.Join("tests", "integrations")
+	etcdKeyTestFilePath  = filepath.Join("tools", "pd-ut", "testdata")
+	etcdKeyTestFile      string
 )
 
 var (
@@ -108,6 +112,7 @@ var (
 	coverProfile string
 	ignoreDirs   string
 	cache        bool
+	group        string
 )
 
 func main() {
@@ -117,6 +122,7 @@ func main() {
 	coverProfile = stripFlag("--coverprofile")
 	ignoreDirs = stripFlag("--ignore")
 	cache = handleFlag("--cache")
+	group = stripFlag("--group")
 
 	if coverProfile != "" {
 		var err error
@@ -292,36 +298,28 @@ func cmdRun(args ...string) bool {
 	}
 	tasks := make([]task, 0, 5000)
 	start := time.Now()
-	// run all tests
-	if len(args) == 0 {
+	var tmpEtcdKeyFile string
+
+	switch len(args) {
+	case 0, 1: // 0: run all tests, 1: run tests for a single package
+		if len(args) == 1 {
+			dirs := strings.Split(args[0], ",")
+			var dirPkgs []string
+			for _, pkg := range pkgs {
+				for _, dir := range dirs {
+					if strings.Contains(pkg, dir) {
+						dirPkgs = append(dirPkgs, pkg)
+					}
+				}
+			}
+			pkgs = dirPkgs
+		}
 		tasks, err = runExistingTestCases(pkgs)
 		if err != nil {
 			fmt.Println("run existing test cases error", err)
 			return false
 		}
-	}
-
-	// run tests for a single package
-	if len(args) == 1 {
-		dirs := strings.Split(args[0], ",")
-		var dirPkgs []string
-		for _, pkg := range pkgs {
-			for _, dir := range dirs {
-				if strings.Contains(pkg, dir) {
-					dirPkgs = append(dirPkgs, pkg)
-				}
-			}
-		}
-
-		tasks, err = runExistingTestCases(dirPkgs)
-		if err != nil {
-			fmt.Println("run existing test cases error", err)
-			return false
-		}
-	}
-
-	// run a single test
-	if len(args) == 2 {
+	case 2:
 		pkg := args[0]
 		err := buildTestBinary(pkg)
 		if err != nil {
@@ -346,6 +344,29 @@ func cmdRun(args ...string) bool {
 		}
 	}
 
+	var needCheckEtcd bool
+	if group != "" {
+		needCheckEtcd = true
+		etcdKeyTestFile = fmt.Sprintf("group.%s.etcdkey", group)
+	} else if len(args) == 0 {
+		etcdKeyTestFile = "all.etcdkey"
+	} else if len(args) == 1 {
+		etcdKeyTestFile = fmt.Sprintf("pkg.%s.etcdkey", strings.Join(pkgs, "_"))
+	} else if len(args) == 2 {
+		tasksStr := make([]string, 0, len(tasks))
+		for _, task := range tasks {
+			tasksStr = append(tasksStr, task.String())
+		}
+		etcdKeyTestFile = fmt.Sprintf("case.%s.etcdkey", strings.Join(tasksStr, "_"))
+	}
+	pwd, _ := os.Getwd()
+	tmpEtcdKeyFile = filepath.Join(pwd, etcdKeyTestFilePath, fmt.Sprintf("tmp.%s", etcdKeyTestFile))
+
+	os.Setenv("GO_FAILPOINTS", fmt.Sprintf("github.com/tikv/pd/pkg/utils/etcdutil/CollectEtcdKey=return(\"%s\")", tmpEtcdKeyFile))
+	defer func() {
+		os.Setenv("GO_FAILPOINTS", "github.com/tikv/pd/pkg/utils/etcdutil/CollectEtcdKey=return(\"\")")
+	}()
+
 	fmt.Printf("building task finish, parallelism=%d, count=%d, takes=%v\n", parallel*2, len(tasks), time.Since(start))
 
 	taskCh := make(chan task, 100)
@@ -366,6 +387,55 @@ func cmdRun(args ...string) bool {
 	wg.Wait()
 	fmt.Println("run all tasks takes", time.Since(start))
 
+	success := true
+	for _, work := range works {
+		if work.Fail {
+			success = false
+			break
+		}
+	}
+
+	if len(args) != 2 && success {
+		etcdKeyFile := filepath.Join(etcdKeyTestFilePath, etcdKeyTestFile)
+		fmt.Printf("check the etcd key compatibility: \n%s\n%s\n", etcdKeyFile, tmpEtcdKeyFile)
+
+		// compare the etcd key file with the tmpEtcdKeyFile
+		// if they are the same, then the etcd key is compatible
+		etcdKeyFileContent, err := os.ReadFile(etcdKeyFile)
+		if err != nil {
+			fmt.Println("read etcd key file error", err)
+			etcdKeyFileContent = []byte{}
+		}
+		tmpEtcdKeyFileContent, err := os.ReadFile(tmpEtcdKeyFile)
+		if err != nil {
+			fmt.Println("read tmp etcd key file error", err)
+			tmpEtcdKeyFileContent = []byte{}
+		}
+
+		etcdKey := string(etcdKeyFileContent)
+		tmpEtcdKey := removeDuplicate(tmpEtcdKeyFileContent)
+		os.WriteFile(tmpEtcdKeyFile, []byte(tmpEtcdKey), 0600)
+		// If the content is too long, maybe we can not print them.
+		fmt.Printf("etcd key: %s\n\ntest etcd key: %s\n", etcdKey, tmpEtcdKey)
+
+		diff := difflib.UnifiedDiff{
+			A:        difflib.SplitLines(etcdKey),
+			B:        difflib.SplitLines(tmpEtcdKey),
+			FromFile: etcdKeyFile,
+			ToFile:   tmpEtcdKeyFile,
+			Context:  3,
+		}
+		diffText, _ := difflib.GetUnifiedDiffString(diff)
+
+		if len(diffText) != 0 {
+			// print the diff
+			fmt.Println("etcd key is not compatible:")
+			fmt.Println(diffText)
+			if needCheckEtcd {
+				return false
+			}
+		}
+	}
 	if junitFile != "" {
 		out := collectTestResults(works)
 		f, err := os.Create(junitFile)
@@ -383,12 +453,7 @@ func cmdRun(args ...string) bool {
 		collectCoverProfileFile()
 	}
 
-	for _, work := range works {
-		if work.Fail {
-			return false
-		}
-	}
-	return true
+	return success
 }
 
 func runExistingTestCases(pkgs []string) (tasks []task, err error) {
@@ -483,7 +548,7 @@ type task struct {
 }
 
 func (t *task) String() string {
-	return t.pkg + " " + t.test
+	return t.pkg + "." + t.test
 }
 
 func listTestCases(pkg string, tasks []task) []task {
@@ -684,7 +749,7 @@ func (*numa) testCommand(pkg string, fn string) *exec.Cmd {
 		args = append(args, "-test.coverprofile", tmpFile)
 	}
 	if strings.Contains(fn, "Suite") {
-		args = append(args, "-test.cpu", fmt.Sprint(parallel/2))
+		args = append(args, "-test.cpu", strconv.Itoa(parallel/2))
 	} else {
 		args = append(args, "-test.cpu", "1")
 	}
@@ -985,4 +1050,23 @@ type JUnitFailure struct {
 	Message  string `xml:"message,attr"`
 	Type     string `xml:"type,attr"`
 	Contents string `xml:",chardata"`
+}
+
+func removeDuplicate(content []byte) string {
+	lines := strings.Split(string(content), "\n")
+	unique := make(map[string]struct{})
+	for _, line := range lines {
+		if len(line) == 0 {
+			continue
+		}
+		unique[line] = struct{}{}
+	}
+	var res []string
+	for k := range unique {
+		res = append(res, k)
+	}
+
+	// sort the result
+	sort.Strings(res)
+	return strings.Join(res, "\n")
 }

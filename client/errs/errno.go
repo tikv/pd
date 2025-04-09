@@ -116,3 +116,8 @@ type ErrClientGetResourceGroup struct {
 func (e *ErrClientGetResourceGroup) Error() string {
 	return fmt.Sprintf("get resource group %s failed, %s", e.ResourceGroupName, e.Cause)
 }
+
+// scheduler errors
+var (
+	ErrSchedulerConfigUnavailable = errors.Normalize("scheduler config is unavailable, %v", errors.RFCCodeText("PD:client:ErrSchedulerConfigUnavailable"))
+)

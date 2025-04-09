@@ -652,7 +652,7 @@ func TestRaftClusterStartTSOJob(t *testing.T) {
 	re.NotNil(leaderServer)
 	leaderServer.BootstrapCluster()
 	testutil.Eventually(re, func() bool {
-		allocator := tc.GetServer(name).GetServer().GetGlobalTSOAllocator()
+		allocator := tc.GetServer(name).GetServer().GetTSOAllocator()
 		return allocator.IsInitialize()
 	})
 	tc.Destroy()
@@ -668,7 +668,7 @@ func TestRaftClusterStartTSOJob(t *testing.T) {
 	re.NoError(err)
 	tc.WaitLeader()
 	testutil.Eventually(re, func() bool {
-		allocator := tc.GetServer(name).GetServer().GetGlobalTSOAllocator()
+		allocator := tc.GetServer(name).GetServer().GetTSOAllocator()
 		return allocator.IsInitialize()
 	})
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/raftClusterReturn"))
@@ -685,7 +685,7 @@ func TestRaftClusterStartTSOJob(t *testing.T) {
 	re.NoError(err)
 	tc.WaitLeader()
 	testutil.Eventually(re, func() bool {
-		allocator := tc.GetServer(name).GetServer().GetGlobalTSOAllocator()
+		allocator := tc.GetServer(name).GetServer().GetTSOAllocator()
 		return !allocator.IsInitialize()
 	})
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/raftClusterReturn"))
@@ -712,13 +712,13 @@ func TestRaftClusterStartTSOJob(t *testing.T) {
 	}
 	wg.Wait()
 	testutil.Eventually(re, func() bool {
-		allocator := leaderServer.GetServer().GetGlobalTSOAllocator()
+		allocator := leaderServer.GetServer().GetTSOAllocator()
 		return allocator.IsInitialize()
 	})
 	re.NoError(tc.ResignLeader())
 	re.NotEmpty(tc.WaitLeader())
 	testutil.Eventually(re, func() bool {
-		allocator := tc.GetServer(name).GetServer().GetGlobalTSOAllocator()
+		allocator := tc.GetServer(name).GetServer().GetTSOAllocator()
 		return !allocator.IsInitialize()
 	})
 	tc.Destroy()
@@ -1012,7 +1012,7 @@ func TestLoadClusterInfo(t *testing.T) {
 	tc.WaitLeader()
 	leaderServer := tc.GetLeaderServer()
 	svr := leaderServer.GetServer()
-	rc := cluster.NewRaftCluster(ctx, svr.GetMember(), svr.GetBasicCluster(), svr.GetStorage(), syncer.NewRegionSyncer(svr), svr.GetClient(), svr.GetHTTPClient(), svr.GetTSOAllocatorManager())
+	rc := cluster.NewRaftCluster(ctx, svr.GetMember(), svr.GetBasicCluster(), svr.GetStorage(), syncer.NewRegionSyncer(svr), svr.GetClient(), svr.GetHTTPClient(), svr.GetTSOAllocator())
 
 	// Cluster is not bootstrapped.
 	rc.InitCluster(svr.GetAllocator(), svr.GetPersistOptions(), svr.GetHBStreams(), svr.GetKeyspaceGroupManager())
@@ -1053,7 +1053,7 @@ func TestLoadClusterInfo(t *testing.T) {
 	re.NoError(testStorage.Flush())
 
 	raftCluster = cluster.NewRaftCluster(ctx, svr.GetMember(), basicCluster,
-		testStorage, syncer.NewRegionSyncer(svr), svr.GetClient(), svr.GetHTTPClient(), svr.GetTSOAllocatorManager())
+		testStorage, syncer.NewRegionSyncer(svr), svr.GetClient(), svr.GetHTTPClient(), svr.GetTSOAllocator())
 	raftCluster.InitCluster(mockid.NewIDAllocator(), svr.GetPersistOptions(), svr.GetHBStreams(), svr.GetKeyspaceGroupManager())
 	raftCluster, err = raftCluster.LoadClusterInfo()
 	re.NoError(err)
@@ -1769,7 +1769,7 @@ func TestTransferLeaderBack(t *testing.T) {
 	svr := leaderServer.GetServer()
 	rc := cluster.NewRaftCluster(ctx, svr.GetMember(), svr.GetBasicCluster(),
 		svr.GetStorage(), syncer.NewRegionSyncer(svr), svr.GetClient(),
-		svr.GetHTTPClient(), svr.GetTSOAllocatorManager())
+		svr.GetHTTPClient(), svr.GetTSOAllocator())
 	rc.InitCluster(svr.GetAllocator(), svr.GetPersistOptions(), svr.GetHBStreams(), svr.GetKeyspaceGroupManager())
 	storage := rc.GetStorage()
 	meta := &metapb.Cluster{Id: 123}
@@ -1950,8 +1950,8 @@ func TestPatrolRegionConfigChange(t *testing.T) {
 		tests.MustPutStore(re, tc, store)
 	}
 	for i := 1; i <= 200; i++ {
-		startKey := []byte(fmt.Sprintf("%d", i*2-1))
-		endKey := []byte(fmt.Sprintf("%d", i*2))
+		startKey := []byte(strconv.Itoa(i*2 - 1))
+		endKey := []byte(strconv.Itoa(i * 2))
 		tests.MustPutRegion(re, tc, uint64(i), uint64(i%3+1), startKey, endKey)
 	}
 	fname := testutil.InitTempFileLogger("debug")

@@ -137,7 +137,7 @@ func (s *Service) FindGroupByKeyspaceID(
 	}
 
 	keyspaceID := request.GetKeyspaceId()
-	am, keyspaceGroup, keyspaceGroupID, err := s.keyspaceGroupManager.FindGroupByKeyspaceID(keyspaceID)
+	allocator, keyspaceGroup, keyspaceGroupID, err := s.keyspaceGroupManager.FindGroupByKeyspaceID(keyspaceID)
 	if err != nil {
 		return &tsopb.FindGroupByKeyspaceIDResponse{
 			Header: wrapErrorToHeader(tsopb.ErrorType_UNKNOWN, err.Error(), keyspaceGroupID),
@@ -156,7 +156,7 @@ func (s *Service) FindGroupByKeyspaceID(
 			Address: member.Address,
 			// TODO: watch the keyspace groups' primary serving address changes
 			// to get the latest primary serving addresses of all keyspace groups.
-			IsPrimary: member.IsAddressEquivalent(am.GetLeaderAddr()),
+			IsPrimary: member.IsAddressEquivalent(allocator.GetPrimaryAddr()),
 		})
 	}
 

@@ -48,6 +48,7 @@ type Client interface {
 	GetHotWriteRegions(context.Context) (*StoreHotPeersInfos, error)
 	GetHistoryHotRegions(context.Context, *HistoryHotRegionsRequest) (*HistoryHotRegions, error)
 	GetRegionStatusByKeyRange(context.Context, *KeyRange, bool) (*RegionStats, error)
+	GetRegionDistributionByKeyRange(ctx context.Context, keyRange *KeyRange, engine string) (*RegionDistributions, error)
 	GetStores(context.Context) (*StoresInfo, error)
 	GetStore(context.Context, uint64) (*StoreInfo, error)
 	DeleteStore(context.Context, uint64) error
@@ -67,8 +68,10 @@ type Client interface {
 	/* Scheduler-related interfaces */
 	GetSchedulers(context.Context) ([]string, error)
 	CreateScheduler(ctx context.Context, name string, storeID uint64) error
+	CreateSchedulerWithInput(ctx context.Context, name string, input map[string]any) error
 	DeleteScheduler(ctx context.Context, name string) error
 	SetSchedulerDelay(context.Context, string, int64) error
+	GetSchedulerConfig(ctx context.Context, name string) (any, error)
 	/* Rule-related interfaces */
 	GetAllPlacementRuleBundles(context.Context) ([]*GroupBundle, error)
 	GetPlacementRuleBundleByGroup(context.Context, string) (*GroupBundle, error)
@@ -317,6 +320,44 @@ func (c *client) GetHistoryHotRegions(ctx context.Context, req *HistoryHotRegion
 		return nil, err
 	}
 	return &historyHotRegions, nil
+}
+
+// GetRegionDistributionByKeyRange gets the region distribution by key range.
+func (c *client) GetRegionDistributionByKeyRange(ctx context.Context, keyRange *KeyRange, engine string) (*RegionDistributions, error) {
+	var regionStats RegionStats
+	err := c.request(ctx, newRequestInfo().
+		WithName(getRegionDistributionsByKeyRangeName).
+		WithURI(RegionDistributionsByKeyRange(keyRange, engine)).
+		WithMethod(http.MethodGet).
+		WithResp(&regionStats))
+	if err != nil {
+		return nil, err
+	}
+	distributions := make([]*RegionDistribution, 0, len(regionStats.StorePeerCount))
+	for storeID, region := range regionStats.StorePeerCount {
+		distribution := &RegionDistribution{
+			StoreID:               storeID,
+			EngineType:            regionStats.StoreEngine[storeID],
+			RegionLeaderCount:     regionStats.StoreLeaderCount[storeID],
+			RegionPeerCount:       region,
+			ApproximateSize:       regionStats.StorePeerSize[storeID],
+			ApproximateKeys:       regionStats.StorePeerKeys[storeID],
+			RegionWriteBytes:      regionStats.StoreWriteBytes[storeID],
+			RegionWriteKeys:       regionStats.StoreWriteKeys[storeID],
+			RegionWriteQuery:      regionStats.StoreWriteQuery[storeID],
+			RegionLeaderReadBytes: regionStats.StoreLeaderReadBytes[storeID],
+			RegionLeaderReadKeys:  regionStats.StoreLeaderReadKeys[storeID],
+			RegionLeaderReadQuery: regionStats.StoreLeaderReadQuery[storeID],
+			RegionPeerReadBytes:   regionStats.StorePeerReadBytes[storeID],
+			RegionPeerReadKeys:    regionStats.StorePeerReadKeys[storeID],
+			RegionPeerReadQuery:   regionStats.StorePeerReadQuery[storeID],
+		}
+		distributions = append(distributions, distribution)
+	}
+	regionDistributions := &RegionDistributions{
+		RegionDistributions: distributions,
+	}
+	return regionDistributions, nil
 }
 
 // GetRegionStatusByKeyRange gets the region status by key range.
@@ -768,6 +809,34 @@ func (c *client) GetSchedulers(ctx context.Context) ([]string, error) {
 	return schedulers, nil
 }
 
+// GetSchedulerConfig returns the configuration of the specified scheduler for pd cluster
+func (c *client) GetSchedulerConfig(ctx context.Context, name string) (any, error) {
+	var config any
+	err := c.request(ctx, newRequestInfo().
+		WithName(getSchedulerConfig).
+		WithURI(GetSchedulerConfigURIByName(name)).
+		WithMethod(http.MethodGet).
+		WithResp(&config))
+	if err != nil {
+		return nil, err
+	}
+	return config, nil
+}
+
+// CreateSchedulerWithInput creates a scheduler with the specified input.
+func (c *client) CreateSchedulerWithInput(ctx context.Context, name string, input map[string]any) error {
+	input["name"] = name
+	inputJSON, err := json.Marshal(input)
+	if err != nil {
+		return errors.Trace(err)
+	}
+	return c.request(ctx, newRequestInfo().
+		WithName(createSchedulerNameWithInput).
+		WithURI(Schedulers).
+		WithMethod(http.MethodPost).
+		WithBody(inputJSON))
+}
+
 // CreateScheduler creates a scheduler to PD cluster.
 func (c *client) CreateScheduler(ctx context.Context, name string, storeID uint64) error {
 	inputJSON, err := json.Marshal(map[string]any{
@@ -914,7 +983,7 @@ func (c *client) GetMinResolvedTSByStoresIDs(ctx context.Context, storeIDs []uin
 	if len(storeIDs) != 0 {
 		storeIDStrs := make([]string, len(storeIDs))
 		for idx, id := range storeIDs {
-			storeIDStrs[idx] = fmt.Sprintf("%d", id)
+			storeIDStrs[idx] = strconv.FormatUint(id, 10)
 		}
 		uri = fmt.Sprintf("%s?scope=%s", uri, strings.Join(storeIDStrs, ","))
 	}

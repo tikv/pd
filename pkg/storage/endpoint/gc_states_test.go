@@ -519,6 +519,34 @@ func TestGCBarrier(t *testing.T) {
 	}
 }
 
+func TestGCBarrierExpiring(t *testing.T) {
+	re := require.New(t)
+
+	t1 := time.Unix(1, 0)
+	t2 := time.Date(2025, 3, 12, 14, 0, 0, 0, time.Local)
+	t3 := t2.Add(time.Second)
+	t4 := time.Now().Add(time.Hour * 24 * 365 * 100)
+	times := []time.Time{t1, t2, t3, t4}
+
+	for i, expirationTime := range times {
+		b := NewGCBarrier("b1", 1, &expirationTime)
+		// If the current time is equal or before the expiration time, the barrier is not expired.
+		for _, currentTime := range times[:i+1] {
+			re.False(b.IsExpired(currentTime))
+		}
+		// Otherwise, the barrier is expired.
+		for _, currentTime := range times[i+1:] {
+			re.True(b.IsExpired(currentTime))
+		}
+	}
+
+	// When the expiration time is nil, it never expires.
+	b := NewGCBarrier("b1", 1, nil)
+	for _, currentTime := range times {
+		re.False(b.IsExpired(currentTime))
+	}
+}
+
 func TestTxnSafePoint(t *testing.T) {
 	re := require.New(t)
 	se, clean := newEtcdStorageEndpoint(t)
