@@ -218,7 +218,21 @@ func (m *GCStateManager) advanceGCSafePointImpl(keyspaceID uint32, target uint64
 		return wb.SetGCSafePoint(keyspaceID, target)
 	})
 	if err != nil {
+		log.Error("failed to advance GC safe point",
+			zap.Uint32("keyspace-idD", keyspaceID),
+			zap.Uint64("target", target), zap.Bool("compatible-mode", compatible), zap.Error(err))
 		return 0, 0, err
+	}
+
+	if newGCSafePoint != oldGCSafePoint {
+		log.Info("advanced GC safe point",
+			zap.Uint32("keyspace-id", keyspaceID),
+			zap.Uint64("old-gc-safe-point", oldGCSafePoint), zap.Uint64("target", target),
+			zap.Uint64("new-gc-safe-point", newGCSafePoint), zap.Bool("compatible-mode", compatible))
+	} else {
+		log.Info("GC safe point not changed after AdvanceGCSafePoint call",
+			zap.Uint32("keyspace-id", keyspaceID),
+			zap.Uint64("gc-safe-point", newGCSafePoint), zap.Uint64("target", target), zap.Bool("compatible-mode", compatible))
 	}
 
 	if keyspaceID == constant.NullKeyspaceID {
@@ -365,29 +379,33 @@ func (m *GCStateManager) advanceTxnSafePointImpl(keyspaceID uint32, target uint6
 		NewTxnSafePoint:    newTxnSafePoint,
 		BlockerDescription: blockerDesc,
 	}
-	m.logAdvancingTxnSafePoint(result, minBlocker, downgradeCompatibleMode)
+	m.logAdvancingTxnSafePoint(keyspaceID, result, minBlocker, downgradeCompatibleMode)
 	return result, nil
 }
 
-func (*GCStateManager) logAdvancingTxnSafePoint(result AdvanceTxnSafePointResult, minBlocker uint64, downgradeCompatibleMode bool) {
+func (*GCStateManager) logAdvancingTxnSafePoint(keyspaceID uint32, result AdvanceTxnSafePointResult, minBlocker uint64, downgradeCompatibleMode bool) {
 	if result.NewTxnSafePoint != result.Target {
 		if result.NewTxnSafePoint == minBlocker {
 			log.Info("txn safe point advancement is being blocked",
+				zap.Uint32("keyspace-id", keyspaceID),
 				zap.Uint64("old-txn-safe-point", result.OldTxnSafePoint), zap.Uint64("target", result.Target),
 				zap.Uint64("new-txn-safe-point", result.NewTxnSafePoint), zap.String("blocker", result.BlockerDescription),
 				zap.Bool("downgrade-compatible-mode", downgradeCompatibleMode))
 		} else {
 			log.Info("txn safe point advancement unable to be blocked by the minimum blocker",
+				zap.Uint32("keyspace-id", keyspaceID),
 				zap.Uint64("old-txn-safe-point", result.OldTxnSafePoint), zap.Uint64("target", result.Target),
 				zap.Uint64("new-txn-safe-point", result.NewTxnSafePoint), zap.String("blocker", result.BlockerDescription),
 				zap.Uint64("min-blocker-ts", minBlocker), zap.Bool("downgrade-compatible-mode", downgradeCompatibleMode))
 		}
 	} else if result.NewTxnSafePoint > result.OldTxnSafePoint {
 		log.Info("txn safe point advanced",
+			zap.Uint32("keyspace-id", keyspaceID),
 			zap.Uint64("old-txn-safe-point", result.OldTxnSafePoint), zap.Uint64("new-txn-safe-point", result.NewTxnSafePoint),
 			zap.Bool("downgrade-compatible-mode", downgradeCompatibleMode))
 	} else {
 		log.Info("txn safe point is remaining unchanged",
+			zap.Uint32("keyspace-id", keyspaceID),
 			zap.Uint64("old-txn-safe-point", result.OldTxnSafePoint), zap.Uint64("new-txn-safe-point", result.NewTxnSafePoint),
 			zap.Uint64("target", result.Target),
 			zap.Bool("downgrade-compatible-mode", downgradeCompatibleMode))
@@ -460,8 +478,16 @@ func (m *GCStateManager) setGCBarrierImpl(keyspaceID uint32, barrierID string, b
 		return err1
 	})
 	if err != nil {
+		log.Error("failed to set GC barrier",
+			zap.Uint32("keyspace-id", keyspaceID),
+			zap.String("barrier-id", barrierID), zap.Uint64("barrier-ts", barrierTS), zap.Duration("ttl", ttl), zap.Error(err))
 		return nil, err
 	}
+
+	log.Info("GC barrier set",
+		zap.Uint32("keyspace-id", keyspaceID),
+		zap.String("barrier-id", barrierID), zap.Uint64("barrier-ts", barrierTS), zap.Duration("ttl", ttl),
+		zap.Stringer("new-gc-barrier", newBarrier))
 
 	return newBarrier, nil
 }
@@ -502,7 +528,26 @@ func (m *GCStateManager) deleteGCBarrierImpl(keyspaceID uint32, barrierID string
 		}
 		return wb.DeleteGCBarrier(keyspaceID, barrierID)
 	})
-	return deletedBarrier, err
+
+	if err != nil {
+		log.Error("failed to delete GC barrier",
+			zap.Uint32("keyspace-id", keyspaceID),
+			zap.String("barrier-id", barrierID), zap.Error(err))
+		return nil, err
+	}
+
+	if deletedBarrier == nil {
+		log.Info("deleting a not-existing GC barrier",
+			zap.Uint32("keyspace-id", keyspaceID),
+			zap.String("barrier-id", barrierID))
+		return nil, nil
+	} else {
+		log.Info("GC barrier deleted",
+			zap.Uint32("keyspace-id", keyspaceID),
+			zap.String("barrier-id", barrierID), zap.Stringer("deleted-gc-barrier", deletedBarrier))
+	}
+
+	return deletedBarrier, nil
 }
 
 // getGCStateInTransaction gets all properties in GC states within a context of gcMetaStorage.RunInGCStateTransaction.
