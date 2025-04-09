@@ -125,10 +125,11 @@ func (se *StorageEndpoint) LoadStores(putStore func(store *core.StoreInfo, opts 
 			}
 
 			nextID = store.GetId() + 1
-			putStore(core.NewStoreInfo(store),
+			putStore(core.NewStoreInfo(store,
 				core.SetStoreState(store.State),
 				core.SetLeaderWeight(leaderWeight),
-				core.SetRegionWeight(regionWeight))
+				core.SetRegionWeight(regionWeight),
+			))
 		}
 		if len(res) < MinKVRangeLimit {
 			return nil
