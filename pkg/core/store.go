@@ -775,13 +775,9 @@ func (s *StoresInfo) PutStore(store *StoreInfo, opts ...StoreCreateOption) {
 // putStoreLocked sets a StoreInfo with storeID.
 func (s *StoresInfo) putStoreLocked(store *StoreInfo, opts ...StoreCreateOption) {
 	if len(opts) > 0 {
-		store = s.stores[store.GetID()]
-		for _, opt := range opts {
-			opt(store)
-		}
-	} else {
-		s.stores[store.GetID()] = store
+		store = s.stores[store.GetID()].Clone(opts...)
 	}
+	s.stores[store.GetID()] = store
 }
 
 // ResetStores resets the store cache.
