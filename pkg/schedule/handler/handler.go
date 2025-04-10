@@ -1284,6 +1284,9 @@ func (h *Handler) CheckRegionsReplicated(rawStartKey, rawEndKey string) (string,
 		return "", errs.ErrNotBootstrapped.GenWithStackByArgs()
 	}
 	regions := c.ScanRegions(startKey, endKey, -1)
+	if len(regions) == 0 {
+		return "", errs.ErrRegionNotFound.GenWithStackByArgs()
+	}
 	state := "REPLICATED"
 	for _, region := range regions {
 		if !filter.IsRegionReplicated(c, region) {
