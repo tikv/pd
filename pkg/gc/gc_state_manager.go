@@ -659,7 +659,7 @@ func (m *GCStateManager) GetAllKeyspacesGCStates() (map[uint32]GCState, error) {
 }
 
 // saturatingMultiplyDuration returns a duration calculated by multiplying the given `ratio` and `base`, truncated within the
-// range [0, math.MaxInt64] to avoid negative value and overflowing.
+// range [0, math.MaxInt64] to avoid overflowing that may happen on plain multiplication.
 func saturatingMultiplyDuration(ratio int64, base time.Duration) time.Duration {
 	if ratio < 0 && base < 0 {
 		ratio, base = -ratio, -base
