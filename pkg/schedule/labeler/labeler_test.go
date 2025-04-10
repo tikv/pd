@@ -397,7 +397,7 @@ func TestLabelerRuleTTL(t *testing.T) {
 	// rule2 should be physically clear.
 	checkRuleInMemoryAndStorage(re, labeler, "rule2", false)
 
-	re.Equal("", labeler.GetRegionLabel(region, "k2"))
+	re.Empty(labeler.GetRegionLabel(region, "k2"))
 
 	re.NotNil(labeler.GetLabelRule("rule3"))
 	re.NotNil(labeler.GetLabelRule("rule1"))

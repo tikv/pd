@@ -353,7 +353,7 @@ func (s *hotScheduler) balanceHotReadRegions(cluster sche.SchedulerCluster) []*o
 		return nil
 	}
 	leaderSolver.cur = leaderSolver.best
-	if leaderSolver.rank.betterThan(peerSolver.best) {
+	if leaderSolver.betterThan(peerSolver.best) {
 		if leaderSolver.tryAddPendingInfluence() {
 			return leaderOps
 		}
@@ -594,11 +594,11 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 	}
 	bs.cur = &solution{}
 	tryUpdateBestSolution := func() {
-		if label, ok := bs.rank.filterUniformStore(); ok {
+		if label, ok := bs.filterUniformStore(); ok {
 			bs.skipCounter(label).Inc()
 			return
 		}
-		if bs.rank.isAvailable(bs.cur) && bs.rank.betterThan(bs.best) {
+		if bs.isAvailable(bs.cur) && bs.betterThan(bs.best) {
 			if newOps := bs.buildOperators(); len(newOps) > 0 {
 				bs.ops = newOps
 				clone := *bs.cur
@@ -646,9 +646,9 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 
 			for _, dstStore := range bs.filterDstStores() {
 				bs.cur.dstStore = dstStore
-				bs.rank.calcProgressiveRank()
+				bs.calcProgressiveRank()
 				tryUpdateBestSolution()
-				if bs.rank.needSearchRevertRegions() {
+				if bs.needSearchRevertRegions() {
 					hotSchedulerSearchRevertRegionsCounter.Inc()
 					dstStoreID := dstStore.GetID()
 					for _, revertPeerStat := range bs.filteredHotPeers[dstStoreID] {
@@ -659,7 +659,7 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 						}
 						bs.cur.revertPeerStat = revertPeerStat
 						bs.cur.revertRegion = revertRegion
-						bs.rank.calcProgressiveRank()
+						bs.calcProgressiveRank()
 						tryUpdateBestSolution()
 					}
 					bs.cur.revertPeerStat = nil
@@ -669,7 +669,7 @@ func (bs *balanceSolver) solve() []*operator.Operator {
 		}
 	}
 
-	bs.rank.setSearchRevertRegions()
+	bs.setSearchRevertRegions()
 	return bs.ops
 }
 
@@ -814,7 +814,7 @@ func (bs *balanceSolver) filterSrcStores() map[uint64]*statistics.StoreLoadDetai
 }
 
 func (bs *balanceSolver) checkSrcByPriorityAndTolerance(minLoad, expectLoad *statistics.StoreLoad, toleranceRatio float64) bool {
-	return bs.rank.checkByPriorityAndTolerance(minLoad.Loads, func(i int) bool {
+	return bs.checkByPriorityAndTolerance(minLoad.Loads, func(i int) bool {
 		return minLoad.Loads[i] > toleranceRatio*expectLoad.Loads[i]
 	})
 }
@@ -823,7 +823,7 @@ func (bs *balanceSolver) checkSrcHistoryLoadsByPriorityAndTolerance(current, exp
 	if len(current.HistoryLoads) == 0 {
 		return true
 	}
-	return bs.rank.checkHistoryLoadsByPriority(current.HistoryLoads, func(i int) bool {
+	return bs.checkHistoryLoadsByPriority(current.HistoryLoads, func(i int) bool {
 		return slice.AllOf(current.HistoryLoads[i], func(j int) bool {
 			return current.HistoryLoads[i][j] > toleranceRatio*expectLoad.HistoryLoads[i][j]
 		})
@@ -1053,7 +1053,7 @@ func (bs *balanceSolver) pickDstStores(filters []filter.Filter, candidates []*st
 }
 
 func (bs *balanceSolver) checkDstByPriorityAndTolerance(maxLoad, expect *statistics.StoreLoad, toleranceRatio float64) bool {
-	return bs.rank.checkByPriorityAndTolerance(maxLoad.Loads, func(i int) bool {
+	return bs.checkByPriorityAndTolerance(maxLoad.Loads, func(i int) bool {
 		return maxLoad.Loads[i]*toleranceRatio < expect.Loads[i]
 	})
 }
@@ -1062,7 +1062,7 @@ func (bs *balanceSolver) checkDstHistoryLoadsByPriorityAndTolerance(current, exp
 	if len(current.HistoryLoads) == 0 {
 		return true
 	}
-	return bs.rank.checkHistoryLoadsByPriority(current.HistoryLoads, func(i int) bool {
+	return bs.checkHistoryLoadsByPriority(current.HistoryLoads, func(i int) bool {
 		return slice.AllOf(current.HistoryLoads[i], func(j int) bool {
 			return current.HistoryLoads[i][j]*toleranceRatio < expect.HistoryLoads[i][j]
 		})
@@ -1257,9 +1257,9 @@ func stepRank(rk0 float64, step float64) func(float64) int64 {
 // 2. the peer we choose as a source in the current solution is not nil, and it belongs to the source store
 // 3. the region which owns the peer in the current solution is not nil, and its ID should equal to the peer's region ID
 func (bs *balanceSolver) isReadyToBuild() bool {
-	if !(bs.cur.srcStore != nil && bs.cur.dstStore != nil &&
-		bs.cur.mainPeerStat != nil && bs.cur.mainPeerStat.StoreID == bs.cur.srcStore.GetID() &&
-		bs.cur.region != nil && bs.cur.region.GetID() == bs.cur.mainPeerStat.ID()) {
+	if bs.cur.srcStore == nil || bs.cur.dstStore == nil ||
+		bs.cur.mainPeerStat == nil || bs.cur.mainPeerStat.StoreID != bs.cur.srcStore.GetID() ||
+		bs.cur.region == nil || bs.cur.region.GetID() != bs.cur.mainPeerStat.ID() {
 		return false
 	}
 	if bs.cur.revertPeerStat == nil {
@@ -1294,7 +1294,7 @@ func (bs *balanceSolver) buildOperators() (ops []*operator.Operator) {
 	dstStoreID := bs.cur.dstStore.GetID()
 	sourceLabel := strconv.FormatUint(srcStoreID, 10)
 	targetLabel := strconv.FormatUint(dstStoreID, 10)
-	dim := bs.rank.rankToDimString()
+	dim := bs.rankToDimString()
 
 	currentOp, typ, err := bs.createOperator(bs.cur.region, srcStoreID, dstStoreID)
 	if err == nil {
@@ -1444,7 +1444,7 @@ func (bs *balanceSolver) createSplitOperator(regions []*core.RegionInfo, strateg
 			}
 		case byLoad:
 			if hotBuckets == nil {
-				hotBuckets = bs.SchedulerCluster.BucketsStats(bs.minHotDegree, ids...)
+				hotBuckets = bs.BucketsStats(bs.minHotDegree, ids...)
 			}
 			stats, ok := hotBuckets[region.GetID()]
 			if !ok {
@@ -1675,7 +1675,7 @@ func prioritiesToDim(priorities []string) (firstPriority int, secondPriority int
 
 // tooHotNeedSplit returns true if any dim of the hot region is greater than the store threshold.
 func (bs *balanceSolver) tooHotNeedSplit(store *statistics.StoreLoadDetail, region *statistics.HotPeerStat, splitThresholds float64) bool {
-	return bs.rank.checkByPriorityAndTolerance(store.LoadPred.Current.Loads, func(i int) bool {
+	return bs.checkByPriorityAndTolerance(store.LoadPred.Current.Loads, func(i int) bool {
 		return region.Loads[i] > store.LoadPred.Current.Loads[i]*splitThresholds
 	})
 }

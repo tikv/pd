@@ -258,7 +258,7 @@ func (s *balanceWitnessScheduler) Schedule(cluster sche.SchedulerCluster, dryRun
 			makeInfluence(op, solver, usedRegions, sourceCandidate)
 		}
 	}
-	s.retryQuota.gc(sourceCandidate.stores)
+	s.gc(sourceCandidate.stores)
 	return result, collector.GetPlans()
 }
 
@@ -267,7 +267,7 @@ func createTransferWitnessOperator(cs *candidateStores, s *balanceWitnessSchedul
 	store := cs.getStore()
 	ssolver.Step++
 	defer func() { ssolver.Step-- }()
-	retryLimit := s.retryQuota.getLimit(store)
+	retryLimit := s.getLimit(store)
 	ssolver.Source, ssolver.Target = store, nil
 	var op *operator.Operator
 	for range retryLimit {
@@ -280,7 +280,7 @@ func createTransferWitnessOperator(cs *candidateStores, s *balanceWitnessSchedul
 		}
 	}
 	if op != nil {
-		s.retryQuota.resetLimit(store)
+		s.resetLimit(store)
 	} else {
 		s.attenuate(store)
 		log.Debug("no operator created for selected stores", zap.String("scheduler", s.GetName()), zap.Uint64("transfer-out", store.GetID()))

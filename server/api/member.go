@@ -47,6 +47,7 @@ func newMemberHandler(svr *server.Server, rd *render.Render) *memberHandler {
 	}
 }
 
+// GetMembers gets all PD servers in the cluster.
 // @Tags     member
 // @Summary  List all PD servers in the cluster.
 // @Produce  json
@@ -102,6 +103,7 @@ func getMembers(svr *server.Server) (*pdpb.GetMembersResponse, error) {
 	return members, nil
 }
 
+// DeleteMemberByName removes a PD server from the cluster by name.
 // @Tags     member
 // @Summary  Remove a PD server from the cluster.
 // @Param    name  path  string  true  "PD server name"
@@ -149,6 +151,7 @@ func (h *memberHandler) DeleteMemberByName(w http.ResponseWriter, r *http.Reques
 	h.rd.JSON(w, http.StatusOK, fmt.Sprintf("removed, pd: %s", name))
 }
 
+// DeleteMemberByID removes a PD server from the cluster by ID.
 // @Tags     member
 // @Summary  Remove a PD server from the cluster.
 // @Param    id  path  integer  true  "PD server Id"
@@ -181,6 +184,7 @@ func (h *memberHandler) DeleteMemberByID(w http.ResponseWriter, r *http.Request)
 	h.rd.JSON(w, http.StatusOK, fmt.Sprintf("removed, pd: %v", id))
 }
 
+// SetMemberPropertyByName sets the leader priority of a PD server.
 // FIXME: details of input json body params
 // @Tags     member
 // @Summary  Set leader priority of a PD member.
@@ -246,6 +250,7 @@ func newLeaderHandler(svr *server.Server, rd *render.Render) *leaderHandler {
 	}
 }
 
+// GetLeader gets the leader PD server of the cluster.
 // @Tags     leader
 // @Summary  Get the leader PD server of the cluster.
 // @Produce  json
@@ -255,6 +260,7 @@ func (h *leaderHandler) GetLeader(w http.ResponseWriter, _ *http.Request) {
 	h.rd.JSON(w, http.StatusOK, h.svr.GetLeader())
 }
 
+// ResignLeader resigns the current etcd leader.
 // @Tags     leader
 // @Summary  Transfer etcd leadership to another PD server.
 // @Produce  json
@@ -271,6 +277,7 @@ func (h *leaderHandler) ResignLeader(w http.ResponseWriter, _ *http.Request) {
 	h.rd.JSON(w, http.StatusOK, "The resign command is submitted.")
 }
 
+// TransferLeader transfers the etcd leadership to the specific PD server.
 // @Tags     leader
 // @Summary  Transfer etcd leadership to the specific PD server.
 // @Param    nextLeader  path  string  true  "PD server that transfer leader to"

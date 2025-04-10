@@ -301,7 +301,7 @@ func (suite *keyspaceTestSuite) TestListKeyspace() {
 	var resp api.LoadAllKeyspacesResponse
 	re.NoError(json.Unmarshal(output, &resp))
 	re.Len(resp.Keyspaces, 11)
-	re.Equal("", resp.NextPageToken) // No next page token since we load them all.
+	re.Empty(resp.NextPageToken) // No next page token since we load them all.
 	re.Equal("DEFAULT", resp.Keyspaces[0].GetName())
 	for i, meta := range resp.Keyspaces[1:] {
 		re.Equal(fmt.Sprintf("test_keyspace_%d", i), meta.GetName())

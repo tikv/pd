@@ -136,7 +136,7 @@ func TestNewKeyManagerWithCustomConfig(t *testing.T) {
 	re.NotNil(m.masterKeyMeta)
 	keyFileMeta := m.masterKeyMeta.GetFile()
 	re.NotNil(keyFileMeta)
-	re.Equal(config.MasterKey.MasterKeyFileConfig.FilePath, keyFileMeta.Path)
+	re.Equal(config.MasterKey.FilePath, keyFileMeta.Path)
 	// Check loaded keys.
 	re.Nil(m.keys.Load())
 	// Check etcd KV.

@@ -56,7 +56,7 @@ func TestSlidingWindow(t *testing.T) {
 		if cap < minSnapSize {
 			cap = minSnapSize
 		}
-		re.EqualValues(v.capacity, cap)
+		re.Equal(v.capacity, cap)
 	}
 	// case 0: test core.Low level
 	re.True(s.Available(capacity, SendSnapshot, constant.Low))
@@ -67,10 +67,10 @@ func TestSlidingWindow(t *testing.T) {
 
 	// case 1: it will occupy the normal window size not the core.High window.
 	re.True(s.Take(capacity, SendSnapshot, constant.High))
-	re.EqualValues([]int64{capacity, 0, 0, 0}, s.GetUsed())
+	re.Equal([]int64{capacity, 0, 0, 0}, s.GetUsed())
 	re.EqualValues(0, s.windows[constant.High].getUsed())
 	s.Ack(capacity, SendSnapshot)
-	re.EqualValues([]int64{0, 0, 0, 0}, s.GetUsed())
+	re.Equal([]int64{0, 0, 0, 0}, s.GetUsed())
 
 	// case 2: it will occupy the core.High window size if the normal window is full.
 	capacity = 2000
@@ -80,7 +80,7 @@ func TestSlidingWindow(t *testing.T) {
 	re.False(s.Take(capacity, SendSnapshot, constant.Low))
 	re.True(s.Take(capacity-minSnapSize, SendSnapshot, constant.Medium))
 	re.False(s.Take(capacity-minSnapSize, SendSnapshot, constant.Medium))
-	re.EqualValues([]int64{capacity + capacity - minSnapSize*2, capacity - minSnapSize, 0, 0}, s.GetUsed())
+	re.Equal([]int64{capacity + capacity - minSnapSize*2, capacity - minSnapSize, 0, 0}, s.GetUsed())
 	s.Ack(capacity-minSnapSize, SendSnapshot)
 	s.Ack(capacity-minSnapSize, SendSnapshot)
 	re.Equal([]int64{capacity - minSnapSize, 0, 0, 0}, s.GetUsed())

@@ -40,6 +40,7 @@ func newVersionHandler(rd *render.Render) *versionHandler {
 	}
 }
 
+// GetVersion gets the version of PD server.
 // @Summary  Get the version of PD server.
 // @Produce  json
 // @Success  200  {object}  version

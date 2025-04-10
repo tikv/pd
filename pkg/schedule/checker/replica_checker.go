@@ -243,10 +243,12 @@ func (c *ReplicaChecker) fixPeer(region *core.RegionInfo, storeID uint64, status
 		removeExtra := fmt.Sprintf("remove-extra-%s-replica", status)
 		op, err := operator.CreateRemovePeerOperator(removeExtra, c.cluster, operator.OpReplica, region, storeID)
 		if err != nil {
-			if status == offlineStatus {
+			switch status {
+			case offlineStatus:
 				replicaCheckerRemoveExtraOfflineFailedCounter.Inc()
-			} else if status == downStatus {
+			case downStatus:
 				replicaCheckerRemoveExtraDownFailedCounter.Inc()
+			default:
 			}
 			return nil
 		}
@@ -256,10 +258,12 @@ func (c *ReplicaChecker) fixPeer(region *core.RegionInfo, storeID uint64, status
 	regionStores := c.cluster.GetRegionStores(region)
 	target, filterByTempState := c.strategy(c.r, region).SelectStoreToFix(regionStores, storeID)
 	if target == 0 {
-		if status == offlineStatus {
+		switch status {
+		case offlineStatus:
 			replicaCheckerNoStoreOfflineCounter.Inc()
-		} else if status == downStatus {
+		case downStatus:
 			replicaCheckerNoStoreDownCounter.Inc()
+		default:
 		}
 		log.Debug("no best store to add replica", zap.Uint64("region-id", region.GetID()))
 		if filterByTempState {
@@ -271,10 +275,12 @@ func (c *ReplicaChecker) fixPeer(region *core.RegionInfo, storeID uint64, status
 	replace := fmt.Sprintf("replace-%s-replica", status)
 	op, err := operator.CreateMovePeerOperator(replace, c.cluster, region, operator.OpReplica, storeID, newPeer)
 	if err != nil {
-		if status == offlineStatus {
+		switch status {
+		case offlineStatus:
 			replicaCheckerReplaceOfflineFailedCounter.Inc()
-		} else if status == downStatus {
+		case downStatus:
 			replicaCheckerReplaceDownFailedCounter.Inc()
+		default:
 		}
 		return nil
 	}

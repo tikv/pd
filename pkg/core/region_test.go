@@ -412,7 +412,7 @@ func checkMap(re *require.Assertions, rm map[uint64]*regionItem, ids ...uint64) 
 		re.Equal(id, rm[id].GetID())
 	}
 	// Check Len.
-	re.Equal(len(ids), len(rm))
+	re.Len(ids, len(rm))
 	// Check id set.
 	expect := make(map[uint64]struct{})
 	for _, id := range ids {

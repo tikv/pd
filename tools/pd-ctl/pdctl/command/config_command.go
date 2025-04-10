@@ -155,7 +155,7 @@ func NewShowServerConfigCommand() *cobra.Command {
 	}
 }
 
-// NewShowReplicationConfigCommand return a show all subcommand of show subcommand
+// NewShowServiceMiddlewareConfigCommand return a show all subcommand of show subcommand
 func NewShowServiceMiddlewareConfigCommand() *cobra.Command {
 	sc := &cobra.Command{
 		Use:   "service-middleware",
@@ -513,11 +513,12 @@ func setServiceMiddlewareCommandFunc(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	if args[0] == "rate-limit" {
+	switch args[0] {
+	case "rate-limit":
 		input["type"] = "label"
 		postJSON(cmd, serviceMiddlewareConfigPrefix+"/rate-limit", input)
 		return
-	} else if args[0] == "grpc-rate-limit" {
+	case "grpc-rate-limit":
 		postJSON(cmd, serviceMiddlewareConfigPrefix+"/grpc-rate-limit", input)
 		return
 	}

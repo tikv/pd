@@ -151,7 +151,7 @@ func (checker *healthChecker) close() {
 	checker.healthyClients.Range(func(_, value any) bool {
 		healthyCli := value.(*healthyClient)
 		healthyCli.healthState.Set(0)
-		healthyCli.Client.Close()
+		healthyCli.Close()
 		return true
 	})
 }

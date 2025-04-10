@@ -1606,7 +1606,7 @@ func (suite *ruleCheckerTestSuite) TestFixOfflinePeerWithAvailableWitness() {
 
 func (suite *ruleCheckerTestSuite) TestRuleCache() {
 	re := suite.Require()
-	suite.cluster.PersistOptions.SetPlacementRulesCacheEnabled(true)
+	suite.cluster.SetPlacementRulesCacheEnabled(true)
 	suite.cluster.AddLabelsStore(1, 1, map[string]string{"zone": "z1"})
 	suite.cluster.AddLabelsStore(2, 1, map[string]string{"zone": "z1"})
 	suite.cluster.AddLabelsStore(3, 1, map[string]string{"zone": "z2"})

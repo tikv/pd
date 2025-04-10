@@ -102,10 +102,7 @@ func run(simCase string, simConfig *sc.SimConfig) {
 		if err != nil {
 			simutil.Logger.Fatal("run server error", zap.Error(err))
 		}
-		for {
-			if !local.IsClosed() && local.GetMember().IsLeader() {
-				break
-			}
+		for local.IsClosed() || !local.GetMember().IsLeader() {
 			time.Sleep(100 * time.Millisecond)
 		}
 		simStart(local.GetAddr(), "", simCase, simConfig, clean)

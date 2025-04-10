@@ -44,6 +44,7 @@ func newHealthHandler(svr *server.Server, rd *render.Render) *healthHandler {
 	}
 }
 
+// GetHealthStatus gets the health status of PD servers.
 // @Summary  Health status of PD servers.
 // @Produce  json
 // @Success  200  {array}   Health
@@ -74,6 +75,7 @@ func (h *healthHandler) GetHealthStatus(w http.ResponseWriter, _ *http.Request) 
 	h.rd.JSON(w, http.StatusOK, healths)
 }
 
+// Ping checks the health of PD servers.
 // @Summary  Ping PD servers.
 // @Router   /ping [get]
 func (*healthHandler) Ping(http.ResponseWriter, *http.Request) {}

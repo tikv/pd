@@ -230,7 +230,7 @@ func summaryStoresLoadByEngine(
 	if allHotPeersCount != 0 {
 		for _, detail := range loadDetail {
 			for i := range expectLoads {
-				stddevLoads[i] += math.Pow(detail.LoadPred.Current.Loads[i]-expectLoads[i], 2)
+				stddevLoads[i] += math.Pow(detail.LoadPred.Current.Loads[i]-expectLoads[i], 2) //nolint:staticcheck
 			}
 		}
 		for i := range stddevLoads {

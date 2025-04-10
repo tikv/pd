@@ -41,6 +41,7 @@ func newLabelsHandler(svr *server.Server, rd *render.Render) *labelsHandler {
 	}
 }
 
+// GetLabels lists all label values.
 // @Tags     label
 // @Summary  List all label values.
 // @Produce  json
@@ -63,6 +64,7 @@ func (h *labelsHandler) GetLabels(w http.ResponseWriter, r *http.Request) {
 	h.rd.JSON(w, http.StatusOK, labels)
 }
 
+// GetStoresByLabel lists stores that have specific label values.
 // @Tags     label
 // @Summary  List stores that have specific label values.
 // @Param    name   query  string  true  "name of store label filter"

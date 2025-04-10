@@ -39,6 +39,7 @@ func newOperatorHandler(handler *server.Handler, r *render.Render) *operatorHand
 	}
 }
 
+// GetOperatorsByRegion gets a Region's pending operator.
 // @Tags     operator
 // @Summary  Get a Region's pending operator.
 // @Param    region_id  path  int  true  "A Region's Id"
@@ -65,6 +66,7 @@ func (h *operatorHandler) GetOperatorsByRegion(w http.ResponseWriter, r *http.Re
 	h.r.JSON(w, http.StatusOK, op)
 }
 
+// GetOperators lists all pending operators.
 // @Tags     operator
 // @Summary  List pending operators.
 // @Param    kind    query  string  false  "Specify the operator kind."  Enums(admin, leader, region)
@@ -84,7 +86,7 @@ func (h *operatorHandler) GetOperators(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		results, err = h.Handler.GetOperators()
 	} else {
-		results, err = h.Handler.GetOperatorsByKinds(kinds)
+		results, err = h.GetOperatorsByKinds(kinds)
 	}
 
 	if err != nil {
@@ -102,6 +104,7 @@ func (h *operatorHandler) GetOperators(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// DeleteOperators cancels all pending operators.
 // @Tags     operator
 // @Summary  Cancel all pending operators.
 // @Produce  json
@@ -117,6 +120,7 @@ func (h *operatorHandler) DeleteOperators(w http.ResponseWriter, _ *http.Request
 	h.r.JSON(w, http.StatusOK, "All pending operators are canceled.")
 }
 
+// CreateOperator creates an operator.
 // FIXME: details of input json body params
 // @Tags     operator
 // @Summary  Create an operator.
@@ -145,6 +149,7 @@ func (h *operatorHandler) CreateOperator(w http.ResponseWriter, r *http.Request)
 	h.r.JSON(w, statusCode, result)
 }
 
+// DeleteOperatorByRegion cancels a Region's pending operator.
 // @Tags     operator
 // @Summary  Cancel a Region's pending operator.
 // @Param    region_id  path  int  true  "A Region's Id"
@@ -170,6 +175,7 @@ func (h *operatorHandler) DeleteOperatorByRegion(w http.ResponseWriter, r *http.
 	h.r.JSON(w, http.StatusOK, "The pending operator is canceled.")
 }
 
+// GetOperatorRecords lists the finished operators since the given timestamp in second.
 // @Tags     operator
 // @Summary  lists the finished operators since the given timestamp in second.
 // @Param    from  query  integer  false  "From Unix timestamp"

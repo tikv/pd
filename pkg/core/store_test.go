@@ -72,19 +72,13 @@ func TestCloneStore(_ *testing.T) {
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		for {
-			if time.Since(start) > time.Second {
-				break
-			}
+		for time.Since(start) <= time.Second {
 			store.GetMeta().GetState()
 		}
 	}()
 	go func() {
 		defer wg.Done()
-		for {
-			if time.Since(start) > time.Second {
-				break
-			}
+		for time.Since(start) <= time.Second {
 			store.Clone(
 				SetStoreState(metapb.StoreState_Up),
 				SetLastHeartbeatTS(time.Now()),

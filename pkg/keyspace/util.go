@@ -183,6 +183,7 @@ func (hp *indexedHeap) Less(i, j int) bool {
 	return len(hp.items[j].Keyspaces) > len(hp.items[i].Keyspaces)
 }
 
+// Swap swaps the items at the given indices.
 // Implementing heap.Interface.
 func (hp *indexedHeap) Swap(i, j int) {
 	lid := hp.items[i].ID
@@ -192,6 +193,7 @@ func (hp *indexedHeap) Swap(i, j int) {
 	hp.index[rid] = i
 }
 
+// Push adds an item to the heap.
 // Implementing heap.Interface.
 func (hp *indexedHeap) Push(x any) {
 	item := x.(*endpoint.KeyspaceGroup)
@@ -199,6 +201,7 @@ func (hp *indexedHeap) Push(x any) {
 	hp.items = append(hp.items, item)
 }
 
+// Pop removes the top item and returns it.
 // Implementing heap.Interface.
 func (hp *indexedHeap) Pop() any {
 	l := hp.Len()

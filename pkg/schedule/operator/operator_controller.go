@@ -940,7 +940,7 @@ func NewOpWithStatus(op *Operator) *OpWithStatus {
 
 // MarshalJSON returns the status of operator as a JSON string
 func (o *OpWithStatus) MarshalJSON() ([]byte, error) {
-	return []byte(`"` + fmt.Sprintf("status: %s, operator: %s", o.Status.String(), o.Operator.String()) + `"`), nil
+	return []byte(`"` + fmt.Sprintf("status: %s, operator: %s", o.Status.String(), o.String()) + `"`), nil
 }
 
 // records remains the operator and its status for a while.

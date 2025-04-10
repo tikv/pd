@@ -271,7 +271,7 @@ func (suite *scheduleTestSuite) checkAPI(cluster *tests.TestCluster) {
 				}
 				tu.Eventually(re, func() bool {
 					re.NoError(tu.ReadGetJSON(re, tests.TestDialClient, listURL, &resp))
-					re.Equal(len(expectMap), len(resp), "expect %v, got %v", expectMap, resp)
+					re.Len(expectMap, len(resp), "expect %v, got %v", expectMap, resp)
 					for key := range expectMap {
 						if !reflect.DeepEqual(resp[key], expectMap[key]) {
 							suite.T().Logf("key: %s, expect: %v, got: %v", key, expectMap[key], resp[key])

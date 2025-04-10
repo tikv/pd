@@ -1470,7 +1470,7 @@ func TestSyncConfigContext(t *testing.T) {
 		b, err := json.Marshal(cfg)
 		if err != nil {
 			res.WriteHeader(http.StatusInternalServerError)
-			res.Write([]byte(fmt.Sprintf("failed setting up test server: %s", err)))
+			fmt.Fprintf(res, "failed setting up test server: %s", err)
 			return
 		}
 
@@ -1543,13 +1543,13 @@ func TestUpdateStorePendingPeerCount(t *testing.T) {
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
 	tc := newTestCluster(ctx, opt)
-	tc.RaftCluster.coordinator = schedule.NewCoordinator(ctx, tc.RaftCluster, nil)
+	tc.coordinator = schedule.NewCoordinator(ctx, tc.RaftCluster, nil)
 	stores := newTestStores(5, "2.0.0")
 	for _, s := range stores {
 		re.NoError(tc.setStore(s))
 	}
-	tc.RaftCluster.wg.Add(1)
-	go tc.RaftCluster.runUpdateStoreStats()
+	tc.wg.Add(1)
+	go tc.runUpdateStoreStats()
 	peers := []*metapb.Peer{
 		{
 			Id:      2,
@@ -1700,13 +1700,14 @@ func TestCalculateStoreSize1(t *testing.T) {
 	// Put 10 stores.
 	for i, store := range newTestStores(10, "6.0.0") {
 		var labels []*metapb.StoreLabel
-		if i%3 == 0 {
+		switch i % 3 {
+		case 0:
 			// zone 1 has 1, 4, 7, 10
 			labels = append(labels, &metapb.StoreLabel{Key: "zone", Value: "zone1"})
-		} else if i%3 == 1 {
+		case 1:
 			// zone 2 has 2, 5, 8
 			labels = append(labels, &metapb.StoreLabel{Key: "zone", Value: "zone2"})
-		} else {
+		default:
 			// zone 3 has 3, 6, 9
 			labels = append(labels, &metapb.StoreLabel{Key: "zone", Value: "zone3"})
 		}
@@ -2540,7 +2541,7 @@ func TestCollectMetricsConcurrent(t *testing.T) {
 	defer cleanup()
 	rc := co.GetCluster().(*RaftCluster)
 	rc.schedulingController = newSchedulingController(rc.serverCtx, rc.GetBasicCluster(), rc.GetOpts(), rc.GetRuleManager())
-	rc.schedulingController.coordinator = co
+	rc.coordinator = co
 	controller := co.GetSchedulersController()
 	// Make sure there are no problem when concurrent write and read
 	var wg sync.WaitGroup
@@ -2578,7 +2579,7 @@ func TestCollectMetrics(t *testing.T) {
 
 	rc := co.GetCluster().(*RaftCluster)
 	rc.schedulingController = newSchedulingController(rc.serverCtx, rc.GetBasicCluster(), rc.GetOpts(), rc.GetRuleManager())
-	rc.schedulingController.coordinator = co
+	rc.coordinator = co
 	controller := co.GetSchedulersController()
 	count := 10
 	for i := 0; i <= count; i++ {
@@ -2590,7 +2591,7 @@ func TestCollectMetrics(t *testing.T) {
 				HotDegree: 10,
 				AntiCount: utils.HotRegionAntiCount, // for write
 			}
-			tc.hotStat.HotCache.Update(item, utils.Write)
+			tc.hotStat.Update(item, utils.Write)
 		}
 	}
 
@@ -3075,7 +3076,7 @@ func TestShouldRun(t *testing.T) {
 	re := require.New(t)
 
 	tc, co, cleanup := prepare(nil, nil, nil, re)
-	tc.RaftCluster.coordinator = co
+	tc.coordinator = co
 	defer cleanup()
 
 	re.NoError(tc.addLeaderStore(1, 5))
@@ -3122,7 +3123,7 @@ func TestShouldRunWithNonLeaderRegions(t *testing.T) {
 	re := require.New(t)
 
 	tc, co, cleanup := prepare(nil, nil, nil, re)
-	tc.RaftCluster.coordinator = co
+	tc.coordinator = co
 	defer cleanup()
 
 	re.NoError(tc.addLeaderStore(1, 10))
@@ -3268,7 +3269,7 @@ func TestPersistScheduler(t *testing.T) {
 	controller := co.GetSchedulersController()
 	re.Len(controller.GetSchedulerNames(), defaultCount)
 	oc := co.GetOperatorController()
-	storage := tc.RaftCluster.storage
+	storage := tc.storage
 
 	gls1, err := schedulers.CreateScheduler(types.GrantLeaderScheduler, oc, storage, schedulers.ConfigSliceDecoder(types.GrantLeaderScheduler, []string{"1"}), controller.RemoveScheduler)
 	re.NoError(err)
@@ -3316,7 +3317,7 @@ func TestPersistScheduler(t *testing.T) {
 	// option have 9 items because the default scheduler do not remove.
 	re.Len(newOpt.GetSchedulers(), defaultCount+3)
 	re.NoError(newOpt.Persist(storage))
-	tc.RaftCluster.SetScheduleConfig(newOpt.GetScheduleConfig())
+	tc.SetScheduleConfig(newOpt.GetScheduleConfig())
 
 	co = schedule.NewCoordinator(ctx, tc.RaftCluster, hbStreams)
 	co.Run()
@@ -3329,7 +3330,7 @@ func TestPersistScheduler(t *testing.T) {
 	_, newOpt, err = newTestScheduleConfig()
 	re.NoError(err)
 	re.NoError(newOpt.Reload(storage))
-	tc.RaftCluster.SetScheduleConfig(newOpt.GetScheduleConfig())
+	tc.SetScheduleConfig(newOpt.GetScheduleConfig())
 	co = schedule.NewCoordinator(ctx, tc.RaftCluster, hbStreams)
 	co.Run()
 	controller = co.GetSchedulersController()
@@ -3356,7 +3357,7 @@ func TestPersistScheduler(t *testing.T) {
 	_, newOpt, err = newTestScheduleConfig()
 	re.NoError(err)
 	re.NoError(newOpt.Reload(co.GetCluster().GetStorage()))
-	tc.RaftCluster.SetScheduleConfig(newOpt.GetScheduleConfig())
+	tc.SetScheduleConfig(newOpt.GetScheduleConfig())
 	co = schedule.NewCoordinator(ctx, tc.RaftCluster, hbStreams)
 
 	co.Run()
@@ -3384,7 +3385,7 @@ func TestRemoveScheduler(t *testing.T) {
 	controller := co.GetSchedulersController()
 	re.Len(controller.GetSchedulerNames(), defaultCount)
 	oc := co.GetOperatorController()
-	storage := tc.RaftCluster.storage
+	storage := tc.storage
 
 	gls1, err := schedulers.CreateScheduler(types.GrantLeaderScheduler, oc, storage, schedulers.ConfigSliceDecoder(types.GrantLeaderScheduler, []string{"1"}), controller.RemoveScheduler)
 	re.NoError(err)
@@ -3414,7 +3415,7 @@ func TestRemoveScheduler(t *testing.T) {
 	_, newOpt, err := newTestScheduleConfig()
 	re.NoError(err)
 	re.NoError(newOpt.Reload(tc.storage))
-	tc.RaftCluster.SetScheduleConfig(newOpt.GetScheduleConfig())
+	tc.SetScheduleConfig(newOpt.GetScheduleConfig())
 	co = schedule.NewCoordinator(ctx, tc.RaftCluster, hbStreams)
 	co.Run()
 	re.Empty(controller.GetSchedulerNames())

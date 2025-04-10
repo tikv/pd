@@ -105,7 +105,7 @@ func TestTIFLASHEngine(t *testing.T) {
 
 	startKey := fmt.Sprintf("%20d0", 1)
 	endKey := fmt.Sprintf("%20d0", 10)
-	tc.RuleManager.SetRule(&placement.Rule{
+	tc.SetRule(&placement.Rule{
 		GroupID:  "tiflash",
 		ID:       "1",
 		Role:     placement.Learner,

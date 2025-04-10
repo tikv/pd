@@ -164,8 +164,8 @@ func TestRuleStartEndKey(t *testing.T) {
 	// Empty start/end key and key hex.
 	ruleToMarshal := &Rule{}
 	rule := mustMarshalAndUnmarshal(re, ruleToMarshal)
-	re.Equal("", rule.StartKeyHex)
-	re.Equal("", rule.EndKeyHex)
+	re.Empty(rule.StartKeyHex)
+	re.Empty(rule.EndKeyHex)
 	re.Equal([]byte(""), rule.StartKey)
 	re.Equal([]byte(""), rule.EndKey)
 	// Empty start/end key and non-empty key hex.
@@ -228,8 +228,8 @@ func TestRuleOpStartEndKey(t *testing.T) {
 		Rule: &Rule{},
 	}
 	ruleOp := mustMarshalAndUnmarshalRuleOp(re, ruleOpToMarshal)
-	re.Equal("", ruleOp.StartKeyHex)
-	re.Equal("", ruleOp.EndKeyHex)
+	re.Empty(ruleOp.StartKeyHex)
+	re.Empty(ruleOp.EndKeyHex)
 	re.Equal([]byte(""), ruleOp.StartKey)
 	re.Equal([]byte(""), ruleOp.EndKey)
 	// Empty start/end key and non-empty key hex.
