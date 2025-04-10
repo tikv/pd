@@ -219,7 +219,7 @@ func (m *GCStateManager) advanceGCSafePointImpl(keyspaceID uint32, target uint64
 	})
 	if err != nil {
 		log.Error("failed to advance GC safe point",
-			zap.Uint32("keyspace-idD", keyspaceID),
+			zap.Uint32("keyspace-id", keyspaceID),
 			zap.Uint64("target", target), zap.Bool("compatible-mode", compatible), zap.Error(err))
 		return 0, 0, err
 	}
@@ -540,7 +540,6 @@ func (m *GCStateManager) deleteGCBarrierImpl(keyspaceID uint32, barrierID string
 		log.Info("deleting a not-existing GC barrier",
 			zap.Uint32("keyspace-id", keyspaceID),
 			zap.String("barrier-id", barrierID))
-		return nil, nil
 	} else {
 		log.Info("GC barrier deleted",
 			zap.Uint32("keyspace-id", keyspaceID),
@@ -659,9 +658,9 @@ func (m *GCStateManager) GetAllKeyspacesGCStates() (map[uint32]GCState, error) {
 	return results, nil
 }
 
-// saturatingDuration returns a duration calculated by multiplying the given `ratio` and `base`, truncated within the
+// saturatingMultiplyDuration returns a duration calculated by multiplying the given `ratio` and `base`, truncated within the
 // range [0, math.MaxInt64] to avoid negative value and overflowing.
-func saturatingDuration(ratio int64, base time.Duration) time.Duration {
+func saturatingMultiplyDuration(ratio int64, base time.Duration) time.Duration {
 	if ratio < 0 && base < 0 {
 		ratio, base = -ratio, -base
 	}
@@ -736,7 +735,7 @@ func (m *GCStateManager) CompatibleUpdateServiceGCSafePoint(serviceID string, ne
 		updated = res.OldTxnSafePoint != res.NewTxnSafePoint
 	} else {
 		if ttl > 0 {
-			_, err = m.setGCBarrierImpl(keyspaceID, serviceID, newServiceSafePoint, saturatingDuration(ttl, time.Second), now)
+			_, err = m.setGCBarrierImpl(keyspaceID, serviceID, newServiceSafePoint, saturatingMultiplyDuration(ttl, time.Second), now)
 		} else {
 			_, err = m.deleteGCBarrierImpl(keyspaceID, serviceID)
 		}
