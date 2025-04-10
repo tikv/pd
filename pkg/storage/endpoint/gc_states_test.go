@@ -80,7 +80,7 @@ func TestGCBarriersConversions(t *testing.T) {
 	// Test representing GC barriers by service safe points.
 	for i, gcBarrier := range gcBarriers {
 		expectedServiceSafePoint := serviceSafePoints[i]
-		serviceSafePoint := gcBarrier.toServiceSafePoint(keyspaces[i])
+		serviceSafePoint := gcBarrier.ToServiceSafePoint(keyspaces[i])
 		re.Equal(expectedServiceSafePoint, serviceSafePoint)
 	}
 

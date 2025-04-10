@@ -165,8 +165,11 @@ func gcBarrierFromServiceSafePoint(s *ServiceSafePoint) *GCBarrier {
 	return res
 }
 
-// toServiceSafePoint converts the GCBarrier to a synonymous ServiceSafePoint for storing physically.
-func (b *GCBarrier) toServiceSafePoint(keyspaceID uint32) *ServiceSafePoint {
+// ToServiceSafePoint converts the GCBarrier to a synonymous ServiceSafePoint for storing physically.
+// This method should never be used unless handling the physical data, which needs to be compatible with service safe
+// points.
+// This method is public only for keeping some old HTTP API compatible.
+func (b *GCBarrier) ToServiceSafePoint(keyspaceID uint32) *ServiceSafePoint {
 	res := &ServiceSafePoint{
 		ServiceID:  b.BarrierID,
 		ExpiredAt:  math.MaxInt64,
@@ -489,7 +492,7 @@ func (wb *GCStateWriteBatch) SetTxnSafePoint(keyspaceID uint32, txnSafePoint uin
 // SetGCBarrier sets a GCBarrier with the given barrierID for a specific keyspace.
 func (wb *GCStateWriteBatch) SetGCBarrier(keyspaceID uint32, newGCBarrier *GCBarrier) error {
 	key := keypath.GCBarrierPath(keyspaceID, newGCBarrier.BarrierID)
-	return wb.writeJSON(key, newGCBarrier.toServiceSafePoint(keyspaceID))
+	return wb.writeJSON(key, newGCBarrier.ToServiceSafePoint(keyspaceID))
 }
 
 // DeleteGCBarrier deletes the GCBarrier with the given barrierID from a specific keyspace.

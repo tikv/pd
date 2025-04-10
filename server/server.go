@@ -482,7 +482,7 @@ func (s *Server) startServer(ctx context.Context) error {
 		s.keyspaceGroupManager = keyspace.NewKeyspaceGroupManager(s.ctx, s.storage, s.client)
 	}
 	s.keyspaceManager = keyspace.NewKeyspaceManager(s.ctx, s.storage, s.cluster, keyspaceIDAllocator, &s.cfg.Keyspace, s.keyspaceGroupManager)
-	s.safePointV2Manager = gc.NewSafePointManagerV2(s.ctx, s.storage, s.storage, s.storage.(endpoint.GCSafePointStorage))
+	s.safePointV2Manager = gc.NewSafePointManagerV2(s.ctx, s.storage, s.storage, s.storage.GetGCStateProvider())
 	s.hbStreams = hbstream.NewHeartbeatStreams(ctx, "", s.cluster)
 	// initial hot_region_storage in here.
 
@@ -846,6 +846,11 @@ func (s *Server) GetMember() *member.EmbeddedEtcdMember {
 // GetStorage returns the backend storage of server.
 func (s *Server) GetStorage() storage.Storage {
 	return s.storage
+}
+
+// GetGCStateManager returns the GC state manager of the server.
+func (s *Server) GetGCStateManager() *gc.GCStateManager {
+	return s.gcStateManager
 }
 
 // GetHistoryHotRegionStorage returns the backend storage of historyHotRegion.
