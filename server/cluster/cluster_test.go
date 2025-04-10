@@ -3592,9 +3592,12 @@ func TestStoreOverloaded(t *testing.T) {
 		re.True(oc.AddOperator(op1))
 		re.True(oc.RemoveOperator(op1))
 	}
-	for time.Since(start) <= time.Second {
+	for {
 		time.Sleep(time.Millisecond * 10)
 		ops, _ := lb.Schedule(tc, false /* dryRun */)
+		if time.Since(start) > time.Second {
+			break
+		}
 		re.Empty(ops)
 	}
 
