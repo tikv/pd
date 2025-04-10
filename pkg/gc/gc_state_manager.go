@@ -433,6 +433,9 @@ func (*GCStateManager) logAdvancingTxnSafePoint(keyspaceID uint32, result Advanc
 // The barrierID must be non-empty. For NullKeyspace, "gc_worker" is a reserved name and cannot be used as a barrierID.
 //
 // The given barrierTS must be greater than or equal to the current txn safe point, or an error will be returned.
+//
+// When this function executes successfully, its result is never nil, and it's guaranteed that the actual TTL is not
+// less than the specified duration.
 func (m *GCStateManager) SetGCBarrier(keyspaceID uint32, barrierID string, barrierTS uint64, ttl time.Duration, now time.Time) (*endpoint.GCBarrier, error) {
 	if ttl <= 0 {
 		return nil, errs.ErrInvalidArgument.GenWithStackByArgs("ttl", ttl)
@@ -659,9 +662,9 @@ func (m *GCStateManager) GetAllKeyspacesGCStates() (map[uint32]GCState, error) {
 	return results, nil
 }
 
-// saturatingDuration returns a duration calculated by multiplying the given `ratio` and `base`, truncated within the
+// SaturatingDuration returns a duration calculated by multiplying the given `ratio` and `base`, truncated within the
 // range [0, math.MaxInt64] to avoid negative value and overflowing.
-func saturatingDuration(ratio int64, base time.Duration) time.Duration {
+func SaturatingDuration(ratio int64, base time.Duration) time.Duration {
 	if ratio < 0 && base < 0 {
 		ratio, base = -ratio, -base
 	}
@@ -736,7 +739,7 @@ func (m *GCStateManager) CompatibleUpdateServiceGCSafePoint(serviceID string, ne
 		updated = res.OldTxnSafePoint != res.NewTxnSafePoint
 	} else {
 		if ttl > 0 {
-			_, err = m.setGCBarrierImpl(keyspaceID, serviceID, newServiceSafePoint, saturatingDuration(ttl, time.Second), now)
+			_, err = m.setGCBarrierImpl(keyspaceID, serviceID, newServiceSafePoint, SaturatingDuration(ttl, time.Second), now)
 		} else {
 			_, err = m.deleteGCBarrierImpl(keyspaceID, serviceID)
 		}

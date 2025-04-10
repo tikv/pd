@@ -1326,16 +1326,16 @@ func (s *gcStateManagerTestSuite) TestWeakenedConstraints() {
 func TestSaturatingDuration(t *testing.T) {
 	re := require.New(t)
 
-	re.Equal(time.Second*2, saturatingDuration(2, time.Second))
-	re.Equal(time.Second*2, saturatingDuration(-2, -time.Second))
-	re.Equal(time.Second*2, saturatingDuration(2000, time.Millisecond))
-	re.Equal(time.Duration(0), saturatingDuration(-2, time.Second))
-	re.Equal(time.Duration(0), saturatingDuration(2, -time.Second))
+	re.Equal(time.Second*2, SaturatingDuration(2, time.Second))
+	re.Equal(time.Second*2, SaturatingDuration(-2, -time.Second))
+	re.Equal(time.Second*2, SaturatingDuration(2000, time.Millisecond))
+	re.Equal(time.Duration(0), SaturatingDuration(-2, time.Second))
+	re.Equal(time.Duration(0), SaturatingDuration(2, -time.Second))
 
-	re.Equal(time.Duration(math.MaxInt64), saturatingDuration(1<<32, 1<<32))
-	re.Equal(time.Duration(math.MaxInt64), saturatingDuration(1<<62, 2))
-	re.Equal(time.Duration(1<<62), saturatingDuration(1<<61, 2))
-	re.Equal(time.Duration(math.MaxInt64), saturatingDuration(1<<62, 1<<62))
-	re.Equal(time.Duration(math.MaxInt64), saturatingDuration(math.MaxInt64, time.Second))
-	re.Equal(time.Duration(math.MaxInt64), saturatingDuration(math.MaxInt64, math.MaxInt64))
+	re.Equal(time.Duration(math.MaxInt64), SaturatingDuration(1<<32, 1<<32))
+	re.Equal(time.Duration(math.MaxInt64), SaturatingDuration(1<<62, 2))
+	re.Equal(time.Duration(1<<62), SaturatingDuration(1<<61, 2))
+	re.Equal(time.Duration(math.MaxInt64), SaturatingDuration(1<<62, 1<<62))
+	re.Equal(time.Duration(math.MaxInt64), SaturatingDuration(math.MaxInt64, time.Second))
+	re.Equal(time.Duration(math.MaxInt64), SaturatingDuration(math.MaxInt64, math.MaxInt64))
 }

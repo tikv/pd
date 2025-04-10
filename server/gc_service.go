@@ -16,6 +16,8 @@ package server
 
 import (
 	"context"
+	"math"
+	"time"
 
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -25,6 +27,9 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 
+	"github.com/tikv/pd/pkg/gc"
+	"github.com/tikv/pd/pkg/mcs/utils/constant"
+	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 )
 
@@ -178,32 +183,258 @@ func (s *GrpcServer) GetAllGCSafePointV2(_ context.Context, _ *pdpb.GetAllGCSafe
 	return nil, status.Errorf(codes.Unimplemented, "GetAllGCSafePointV2 is abandoned")
 }
 
-func (s *GrpcServer) AdvanceGCSafePoint(ctx context.Context, pointRequest *pdpb.AdvanceGCSafePointRequest) (*pdpb.AdvanceGCSafePointResponse, error) {
-	//TODO implement me
-	panic("implement me")
+func getKeyspaceID(keyspaceScope *pdpb.KeyspaceScope) uint32 {
+	if keyspaceScope == nil {
+		return constant.NullKeyspaceID
+	}
+	return keyspaceScope.GetKeyspaceId()
 }
 
-func (s *GrpcServer) AdvanceTxnSafePoint(ctx context.Context, pointRequest *pdpb.AdvanceTxnSafePointRequest) (*pdpb.AdvanceTxnSafePointResponse, error) {
-	//TODO implement me
-	panic("implement me")
+func gcBarrierToProto(b *endpoint.GCBarrier, now time.Time) *pdpb.GCBarrierInfo {
+	if b == nil {
+		return nil
+	}
+
+	// After rounding, the actual TTL might be not exactly the same as the specified value. Recalculate it anyway.
+	// MaxInt64 represents that the expiration time is not specified and it never expires.
+	var resultTTL int64 = math.MaxInt64
+	if b.ExpirationTime != nil {
+		resultTTL = int64(math.Floor(b.ExpirationTime.Sub(now).Seconds()))
+		if resultTTL < 0 {
+			resultTTL = 0
+		}
+	}
+
+	return &pdpb.GCBarrierInfo{
+		BarrierId:  b.BarrierID,
+		BarrierTs:  b.BarrierTS,
+		TtlSeconds: resultTTL,
+	}
 }
 
-func (s *GrpcServer) SetGCBarrier(ctx context.Context, barrierRequest *pdpb.SetGCBarrierRequest) (*pdpb.SetGCBarrierResponse, error) {
-	//TODO implement me
-	panic("implement me")
+func gcStateToProto(gcState gc.GCState, now time.Time) *pdpb.GCState {
+	gcBarriers := make([]*pdpb.GCBarrierInfo, 0, len(gcState.GCBarriers))
+	for _, b := range gcState.GCBarriers {
+		gcBarriers = append(gcBarriers, gcBarrierToProto(b, now))
+	}
+	return &pdpb.GCState{
+		KeyspaceScope: &pdpb.KeyspaceScope{
+			KeyspaceId: gcState.KeyspaceID,
+		},
+		TxnSafePoint: gcState.TxnSafePoint,
+		GcSafePoint:  gcState.GCSafePoint,
+		GcBarriers:   gcBarriers,
+	}
 }
 
-func (s *GrpcServer) DeleteGCBarrier(ctx context.Context, barrierRequest *pdpb.DeleteGCBarrierRequest) (*pdpb.DeleteGCBarrierResponse, error) {
-	//TODO implement me
-	panic("implement me")
+func (s *GrpcServer) AdvanceGCSafePoint(ctx context.Context, request *pdpb.AdvanceGCSafePointRequest) (*pdpb.AdvanceGCSafePointResponse, error) {
+	done, err := s.rateLimitCheck()
+	if err != nil {
+		return nil, err
+	}
+	if done != nil {
+		defer done()
+	}
+	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
+		return pdpb.NewPDClient(client).AdvanceGCSafePoint(ctx, request)
+	}
+	if rsp, err := s.unaryMiddleware(ctx, request, fn); err != nil {
+		return nil, err
+	} else if rsp != nil {
+		return rsp.(*pdpb.AdvanceGCSafePointResponse), err
+	}
+
+	rc := s.GetRaftCluster()
+	if rc == nil {
+		return &pdpb.AdvanceGCSafePointResponse{Header: notBootstrappedHeader()}, nil
+	}
+	oldGCSafePoint, newGCSafePoint, err := s.gcStateManager.AdvanceGCSafePoint(getKeyspaceID(request.GetKeyspaceScope()), request.GetTarget())
+	if err != nil {
+		return nil, err
+	}
+	return &pdpb.AdvanceGCSafePointResponse{
+		Header:         wrapHeader(),
+		OldGcSafePoint: oldGCSafePoint,
+		NewGcSafePoint: newGCSafePoint,
+	}, nil
 }
 
-func (s *GrpcServer) GetGCState(ctx context.Context, stateRequest *pdpb.GetGCStateRequest) (*pdpb.GetGCStateResponse, error) {
-	//TODO implement me
-	panic("implement me")
+func (s *GrpcServer) AdvanceTxnSafePoint(ctx context.Context, request *pdpb.AdvanceTxnSafePointRequest) (*pdpb.AdvanceTxnSafePointResponse, error) {
+	done, err := s.rateLimitCheck()
+	if err != nil {
+		return nil, err
+	}
+	if done != nil {
+		defer done()
+	}
+	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
+		return pdpb.NewPDClient(client).AdvanceTxnSafePoint(ctx, request)
+	}
+	if rsp, err := s.unaryMiddleware(ctx, request, fn); err != nil {
+		return nil, err
+	} else if rsp != nil {
+		return rsp.(*pdpb.AdvanceTxnSafePointResponse), err
+	}
+
+	rc := s.GetRaftCluster()
+	if rc == nil {
+		return &pdpb.AdvanceTxnSafePointResponse{Header: notBootstrappedHeader()}, nil
+	}
+
+	res, err := s.gcStateManager.AdvanceTxnSafePoint(getKeyspaceID(request.GetKeyspaceScope()), request.GetTarget(), time.Now())
+	if err != nil {
+		return nil, err
+	}
+	return &pdpb.AdvanceTxnSafePointResponse{
+		Header:             wrapHeader(),
+		OldTxnSafePoint:    res.OldTxnSafePoint,
+		NewTxnSafePoint:    res.NewTxnSafePoint,
+		BlockerDescription: res.BlockerDescription,
+	}, nil
 }
 
-func (s *GrpcServer) GetAllKeyspacesGCStates(ctx context.Context, statesRequest *pdpb.GetAllKeyspacesGCStatesRequest) (*pdpb.GetAllKeyspacesGCStatesResponse, error) {
-	//TODO implement me
-	panic("implement me")
+func (s *GrpcServer) SetGCBarrier(ctx context.Context, request *pdpb.SetGCBarrierRequest) (*pdpb.SetGCBarrierResponse, error) {
+	done, err := s.rateLimitCheck()
+	if err != nil {
+		return nil, err
+	}
+	if done != nil {
+		defer done()
+	}
+	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
+		return pdpb.NewPDClient(client).SetGCBarrier(ctx, request)
+	}
+	if rsp, err := s.unaryMiddleware(ctx, request, fn); err != nil {
+		return nil, err
+	} else if rsp != nil {
+		return rsp.(*pdpb.SetGCBarrierResponse), err
+	}
+
+	rc := s.GetRaftCluster()
+	if rc == nil {
+		return &pdpb.SetGCBarrierResponse{Header: notBootstrappedHeader()}, nil
+	}
+
+	now := time.Now()
+	newBarrier, err := s.gcStateManager.SetGCBarrier(
+		getKeyspaceID(request.GetKeyspaceScope()),
+		request.GetBarrierId(),
+		request.GetBarrierTs(),
+		gc.SaturatingDuration(request.GetTtlSeconds(), time.Second),
+		now)
+	if err != nil {
+		return nil, err
+	}
+
+	return &pdpb.SetGCBarrierResponse{
+		Header:         wrapHeader(),
+		NewBarrierInfo: gcBarrierToProto(newBarrier, now),
+	}, nil
+}
+
+func (s *GrpcServer) DeleteGCBarrier(ctx context.Context, request *pdpb.DeleteGCBarrierRequest) (*pdpb.DeleteGCBarrierResponse, error) {
+	done, err := s.rateLimitCheck()
+	if err != nil {
+		return nil, err
+	}
+	if done != nil {
+		defer done()
+	}
+	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
+		return pdpb.NewPDClient(client).DeleteGCBarrier(ctx, request)
+	}
+	if rsp, err := s.unaryMiddleware(ctx, request, fn); err != nil {
+		return nil, err
+	} else if rsp != nil {
+		return rsp.(*pdpb.DeleteGCBarrierResponse), err
+	}
+
+	rc := s.GetRaftCluster()
+	if rc == nil {
+		return &pdpb.DeleteGCBarrierResponse{Header: notBootstrappedHeader()}, nil
+	}
+
+	now := time.Now()
+
+	deletedBarrier, err := s.gcStateManager.DeleteGCBarrier(getKeyspaceID(request.GetKeyspaceScope()), request.GetBarrierId())
+	if err != nil {
+		return nil, err
+	}
+
+	return &pdpb.DeleteGCBarrierResponse{
+		Header:             wrapHeader(),
+		DeletedBarrierInfo: gcBarrierToProto(deletedBarrier, now),
+	}, nil
+}
+
+func (s *GrpcServer) GetGCState(ctx context.Context, request *pdpb.GetGCStateRequest) (*pdpb.GetGCStateResponse, error) {
+	done, err := s.rateLimitCheck()
+	if err != nil {
+		return nil, err
+	}
+	if done != nil {
+		defer done()
+	}
+	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
+		return pdpb.NewPDClient(client).GetGCState(ctx, request)
+	}
+	if rsp, err := s.unaryMiddleware(ctx, request, fn); err != nil {
+		return nil, err
+	} else if rsp != nil {
+		return rsp.(*pdpb.GetGCStateResponse), err
+	}
+
+	rc := s.GetRaftCluster()
+	if rc == nil {
+		return &pdpb.GetGCStateResponse{Header: notBootstrappedHeader()}, nil
+	}
+
+	gcState, err := s.gcStateManager.GetGCState(getKeyspaceID(request.GetKeyspaceScope()))
+	if err != nil {
+		return nil, err
+	}
+
+	return &pdpb.GetGCStateResponse{
+		Header:  wrapHeader(),
+		GcState: gcStateToProto(gcState, time.Now()),
+	}, nil
+}
+
+func (s *GrpcServer) GetAllKeyspacesGCStates(ctx context.Context, request *pdpb.GetAllKeyspacesGCStatesRequest) (*pdpb.GetAllKeyspacesGCStatesResponse, error) {
+	done, err := s.rateLimitCheck()
+	if err != nil {
+		return nil, err
+	}
+	if done != nil {
+		defer done()
+	}
+	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
+		return pdpb.NewPDClient(client).GetAllKeyspacesGCStates(ctx, request)
+	}
+	if rsp, err := s.unaryMiddleware(ctx, request, fn); err != nil {
+		return nil, err
+	} else if rsp != nil {
+		return rsp.(*pdpb.GetAllKeyspacesGCStatesResponse), err
+	}
+
+	rc := s.GetRaftCluster()
+	if rc == nil {
+		return &pdpb.GetAllKeyspacesGCStatesResponse{Header: notBootstrappedHeader()}, nil
+	}
+
+	gcStates, err := s.gcStateManager.GetAllKeyspacesGCStates()
+	if err != nil {
+		return nil, err
+	}
+
+	now := time.Now()
+	gcStatesPb := make([]*pdpb.GCState, 0, len(gcStates))
+	for _, gcState := range gcStates {
+		gcStatesPb = append(gcStatesPb, gcStateToProto(gcState, now))
+	}
+
+	return &pdpb.GetAllKeyspacesGCStatesResponse{
+		Header:   wrapHeader(),
+		GcStates: gcStatesPb,
+	}, nil
 }
