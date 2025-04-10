@@ -248,6 +248,11 @@ const (
 	defaultCheckRegionSplitInterval = 50 * time.Millisecond
 	minCheckRegionSplitInterval     = 1 * time.Millisecond
 	maxCheckRegionSplitInterval     = 100 * time.Millisecond
+	defaultEnableKeyspaceGC         = false
+	defaultKeyspaceGCInterval       = 10 * time.Minute
+	minKeyspaceGCInterval           = 10 * time.Minute
+	maxKeyspaceGCInterval           = 24 * time.Hour
+	defaultKeyspaceGCLifeTime       = 7 * 24 * time.Hour
 
 	defaultEnableSchedulingFallback  = true
 	defaultEnableTSODynamicSwitching = false
@@ -863,6 +868,12 @@ type KeyspaceConfig struct {
 	WaitRegionSplitTimeout typeutil.Duration `toml:"wait-region-split-timeout" json:"wait-region-split-timeout"`
 	// CheckRegionSplitInterval indicates the interval to check whether the region split is complete
 	CheckRegionSplitInterval typeutil.Duration `toml:"check-region-split-interval" json:"check-region-split-interval"`
+	// GCEnable specifies whether to enable background keyspace cleaning.
+	GCEnable bool `toml:"gc-enable" json:"gc-enable"`
+	// GCRunInterval specifies how often cleaning process should be run.
+	GCRunInterval typeutil.Duration `toml:"gc-run-interval" json:"gc-run-interval"`
+	// GCLifeTime specifies how log after keyspace has been archived should it's data be gc.
+	GCLifeTime typeutil.Duration `toml:"gc-life-time" json:"gc-life-time"`
 }
 
 // Validate checks if keyspace config falls within acceptable range.
@@ -873,6 +884,10 @@ func (c *KeyspaceConfig) Validate() error {
 	}
 	if c.CheckRegionSplitInterval.Duration >= c.WaitRegionSplitTimeout.Duration {
 		return errors.New("[keyspace] check-region-split-interval should be less than wait-region-split-timeout")
+	}
+	if c.GCRunInterval.Duration > maxKeyspaceGCInterval || c.GCRunInterval.Duration < minKeyspaceGCInterval {
+		return errors.New(fmt.Sprintf("[keyspace] gc-run-interval should between %v and %v",
+			minKeyspaceGCInterval, maxKeyspaceGCInterval))
 	}
 	return nil
 }
@@ -886,6 +901,20 @@ func (c *KeyspaceConfig) adjust(meta *configutil.ConfigMetaData) {
 	}
 	if !meta.IsDefined("check-region-split-interval") {
 		c.CheckRegionSplitInterval = typeutil.NewDuration(defaultCheckRegionSplitInterval)
+	}
+	if !meta.IsDefined("gc-enable") {
+		c.GCEnable = defaultEnableKeyspaceGC
+	}
+	if !meta.IsDefined("gc-run-interval") {
+		c.GCRunInterval = typeutil.NewDuration(defaultKeyspaceGCInterval)
+	}
+	if c.GCRunInterval.Duration > maxKeyspaceGCInterval {
+		c.GCRunInterval.Duration = maxKeyspaceGCInterval
+	} else if c.GCRunInterval.Duration < minKeyspaceGCInterval {
+		c.GCRunInterval.Duration = minKeyspaceGCInterval
+	}
+	if !meta.IsDefined("gc-life-time") {
+		c.GCLifeTime = typeutil.NewDuration(defaultKeyspaceGCLifeTime)
 	}
 }
 
@@ -915,4 +944,19 @@ func (c *KeyspaceConfig) GetWaitRegionSplitTimeout() time.Duration {
 // GetCheckRegionSplitInterval returns the interval to check whether the region split is complete.
 func (c *KeyspaceConfig) GetCheckRegionSplitInterval() time.Duration {
 	return c.CheckRegionSplitInterval.Duration
+}
+
+// ToGCKeyspace returns whether to gc archived keyspace at given interval.
+func (c *KeyspaceConfig) ToGCKeyspace() bool {
+	return c.GCEnable
+}
+
+// GetGCRunInterval returns the interval of cleaning archived keyspaces.
+func (c *KeyspaceConfig) GetGCRunInterval() time.Duration {
+	return c.GCRunInterval.Duration
+}
+
+// GetGCLifeTime returns how long a keyspace should be kept after it's been archived.
+func (c *KeyspaceConfig) GetGCLifeTime() time.Duration {
+	return c.GCLifeTime.Duration
 }
