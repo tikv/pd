@@ -153,6 +153,26 @@ func (s *gcStateManagerTestSuite) checkTxnSafePoint(keyspaceID uint32, expectedT
 	re.Equal(expectedTxnSafePoint, state.TxnSafePoint)
 }
 
+func (s *gcStateManagerTestSuite) setTiDBMinStartTS(keyspaceID uint32, instance string, ts uint64) {
+	re := s.Require()
+	keyspaceID, err := s.manager.redirectKeyspace(keyspaceID, true)
+	re.NoError(err)
+	prefix := keypath.CompatibleTiDBMinStartTSPrefix(keyspaceID)
+	key := prefix + instance
+	err = s.storage.Save(key, strconv.FormatUint(ts, 10))
+	re.NoError(err)
+}
+
+func (s *gcStateManagerTestSuite) deleteTiDBMinStartTS(keyspaceID uint32, instance string) {
+	re := s.Require()
+	keyspaceID, err := s.manager.redirectKeyspace(keyspaceID, true)
+	re.NoError(err)
+	prefix := keypath.CompatibleTiDBMinStartTSPrefix(keyspaceID)
+	key := prefix + instance
+	err = s.storage.Remove(key)
+	re.NoError(err)
+}
+
 func (s *gcStateManagerTestSuite) TestAdvanceTxnSafePointBasic() {
 	re := s.Require()
 	now := time.Now()
@@ -473,7 +493,7 @@ func (s *gcStateManagerTestSuite) TestLegacyServiceGCSafePointUpdate() {
 	min, updated, err := s.manager.CompatibleUpdateServiceGCSafePoint(gcWorkerServiceID, gcWorkerSafePoint, math.MaxInt64, time.Now())
 	re.NoError(err)
 	re.True(updated)
-	re.Contains(min.ServiceID, "BarrierID: \""+cdcServiceID+"\"")
+	re.Equal(cdcServiceID, min.ServiceID)
 	re.Equal(cdcServiceSafePoint, min.SafePoint)
 
 	// The value shouldn't be updated with current service safe point smaller than the min safe point.
@@ -824,26 +844,8 @@ func (s *gcStateManagerTestSuite) TestGCBarriers() {
 func (s *gcStateManagerTestSuite) TestTiDBMinStartTS() {
 	re := s.Require()
 
-	setTiDBMinStartTS := func(keyspaceID uint32, instance string, ts uint64) {
-		keyspaceID, err := s.manager.redirectKeyspace(keyspaceID, true)
-		re.NoError(err)
-		prefix := keypath.CompatibleTiDBMinStartTSPrefix(keyspaceID)
-		key := prefix + instance
-		err = s.storage.Save(key, strconv.FormatUint(ts, 10))
-		re.NoError(err)
-	}
-
-	deleteTiDBMinStartTS := func(keyspaceID uint32, instance string) {
-		keyspaceID, err := s.manager.redirectKeyspace(keyspaceID, true)
-		re.NoError(err)
-		prefix := keypath.CompatibleTiDBMinStartTSPrefix(keyspaceID)
-		key := prefix + instance
-		err = s.storage.Remove(key)
-		re.NoError(err)
-	}
-
 	for _, keyspaceID := range s.keyspacePresets.manageable {
-		setTiDBMinStartTS(keyspaceID, "instance1", 10)
+		s.setTiDBMinStartTS(keyspaceID, "instance1", 10)
 		res, err := s.manager.AdvanceTxnSafePoint(keyspaceID, 5, time.Now())
 		re.NoError(err)
 		re.Equal(uint64(0), res.OldTxnSafePoint)
@@ -864,9 +866,9 @@ func (s *gcStateManagerTestSuite) TestTiDBMinStartTS() {
 		s.checkTxnSafePoint(keyspaceID, 10)
 
 		// Mixing multiple TiDB min start ts and GC barriers.
-		setTiDBMinStartTS(keyspaceID, "instance1", 20)
-		setTiDBMinStartTS(keyspaceID, "instance2", 22)
-		setTiDBMinStartTS(keyspaceID, "instance3", 26)
+		s.setTiDBMinStartTS(keyspaceID, "instance1", 20)
+		s.setTiDBMinStartTS(keyspaceID, "instance2", 22)
+		s.setTiDBMinStartTS(keyspaceID, "instance3", 26)
 		_, err = s.manager.SetGCBarrier(keyspaceID, "b1", 24, time.Hour, time.Now())
 		re.NoError(err)
 		_, err = s.manager.SetGCBarrier(keyspaceID, "b2", 28, time.Hour, time.Now())
@@ -878,14 +880,14 @@ func (s *gcStateManagerTestSuite) TestTiDBMinStartTS() {
 		re.Equal(uint64(20), res.NewTxnSafePoint)
 		re.Regexp("TiDBMinStartTS.*instance1", res.BlockerDescription)
 
-		deleteTiDBMinStartTS(keyspaceID, "instance1")
+		s.deleteTiDBMinStartTS(keyspaceID, "instance1")
 		res, err = s.manager.AdvanceTxnSafePoint(keyspaceID, 30, time.Now())
 		re.NoError(err)
 		re.Equal(uint64(20), res.OldTxnSafePoint)
 		re.Equal(uint64(22), res.NewTxnSafePoint)
 		re.Regexp("TiDBMinStartTS.*instance2", res.BlockerDescription)
 
-		deleteTiDBMinStartTS(keyspaceID, "instance2")
+		s.deleteTiDBMinStartTS(keyspaceID, "instance2")
 		res, err = s.manager.AdvanceTxnSafePoint(keyspaceID, 30, time.Now())
 		re.NoError(err)
 		re.Equal(uint64(22), res.OldTxnSafePoint)
@@ -900,7 +902,7 @@ func (s *gcStateManagerTestSuite) TestTiDBMinStartTS() {
 		re.Equal(uint64(26), res.NewTxnSafePoint)
 		re.Regexp("TiDBMinStartTS.*instance3", res.BlockerDescription)
 
-		deleteTiDBMinStartTS(keyspaceID, "instance3")
+		s.deleteTiDBMinStartTS(keyspaceID, "instance3")
 		res, err = s.manager.AdvanceTxnSafePoint(keyspaceID, 30, time.Now())
 		re.NoError(err)
 		re.Equal(uint64(26), res.OldTxnSafePoint)
@@ -918,7 +920,7 @@ func (s *gcStateManagerTestSuite) TestTiDBMinStartTS() {
 		// If there's a TiDB node in old version that writes the TiDBMinStartTS, it's possible that TiDBMinStartTS become
 		// lower than txn safe point (as it writes directly to etcd instead of checking constraints in a transaction).
 		// In this case, the txn safe point should neither be pushed nor go backward.
-		setTiDBMinStartTS(keyspaceID, "instance1", 25)
+		s.setTiDBMinStartTS(keyspaceID, "instance1", 25)
 		res, err = s.manager.AdvanceTxnSafePoint(keyspaceID, 35, time.Now())
 		re.NoError(err)
 		re.Equal(uint64(30), res.OldTxnSafePoint)
@@ -926,7 +928,7 @@ func (s *gcStateManagerTestSuite) TestTiDBMinStartTS() {
 		re.Equal(uint64(35), res.Target)
 		re.Regexp("TiDBMinStartTS.*instance1", res.BlockerDescription)
 
-		deleteTiDBMinStartTS(keyspaceID, "instance1")
+		s.deleteTiDBMinStartTS(keyspaceID, "instance1")
 		res, err = s.manager.AdvanceTxnSafePoint(keyspaceID, 35, time.Now())
 		re.NoError(err)
 		re.Equal(uint64(30), res.OldTxnSafePoint)
@@ -1015,14 +1017,28 @@ func (s *gcStateManagerTestSuite) TestServiceGCSafePointCompatibility() {
 	re.NoError(err)
 	re.True(updated)
 	re.Equal(uint64(12), minSsp.SafePoint)
-	re.NotEqual("gc_worker", minSsp.ServiceID)
+	re.Equal("svc1", minSsp.ServiceID)
 	s.checkTxnSafePoint(constant.NullKeyspaceID, 12)
 
 	// Deleting service safe point by passing zero TTL
 	_, updated, err = s.manager.CompatibleUpdateServiceGCSafePoint("svc1", 12, 0, now)
 	re.NoError(err)
-	// Deleting is regarded as not-updating. This is consistent with the old behavior.
+	// Deleting is regarded as not-updating. This is consistent with the behavior of the old UpdateServiceGCSafePoint API.
 	re.False(updated)
+	// And add a TiDBMinStartTS. Then it should also block updating "gc_worker".
+	// This behavior doesn't exist in old UpdateServiceGCSafePoint API, and is new here. In this case, it returns a
+	// simulated service safe point which doesn't actually exist.
+	s.setTiDBMinStartTS(constant.NullKeyspaceID, "instance1", 14)
+	minSsp, updated, err = s.manager.CompatibleUpdateServiceGCSafePoint("gc_worker", 20, math.MaxInt64, now)
+	re.NoError(err)
+	re.True(updated)
+	re.Equal(uint64(14), minSsp.SafePoint)
+	re.Equal("tidb_min_start_ts_instance1", minSsp.ServiceID)
+	s.checkTxnSafePoint(constant.NullKeyspaceID, 14)
+
+	// Delete the TiDBMinStartTS.
+	s.deleteTiDBMinStartTS(constant.NullKeyspaceID, "instance1")
+
 	// Then updating "gc_worker" won't be blocked.
 	minSsp, updated, err = s.manager.CompatibleUpdateServiceGCSafePoint("gc_worker", 20, math.MaxInt64, now)
 	re.NoError(err)

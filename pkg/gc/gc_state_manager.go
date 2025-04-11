@@ -361,10 +361,13 @@ func (m *GCStateManager) advanceTxnSafePointImpl(keyspaceID uint32, target uint6
 	}
 
 	blockerDesc := ""
+	simulatedServiceID := ""
 	if blockingBarrier != nil {
 		blockerDesc = blockingBarrier.String()
+		simulatedServiceID = blockingBarrier.BarrierID
 	} else if blockingMinStartTSOwner != nil {
 		blockerDesc = fmt.Sprintf("TiDBMinStartTS { Key: %+q, MinStartTS: %d }", *blockingMinStartTSOwner, newTxnSafePoint)
+		simulatedServiceID = "tidb_min_start_ts_" + *blockingMinStartTSOwner
 	}
 
 	if newTxnSafePoint != target {
@@ -378,6 +381,7 @@ func (m *GCStateManager) advanceTxnSafePointImpl(keyspaceID uint32, target uint6
 		Target:             target,
 		NewTxnSafePoint:    newTxnSafePoint,
 		BlockerDescription: blockerDesc,
+		simulatedServiceID: simulatedServiceID,
 	}
 	m.logAdvancingTxnSafePoint(keyspaceID, result, minBlocker, downgradeCompatibleMode)
 	return result, nil
@@ -696,7 +700,7 @@ func saturatingMultiplyDuration(ratio int64, base time.Duration) time.Duration {
 //     equals to "gc_worker".
 //     - Otherwise, it's the case that the service safe point of "gc_worker" is successfully updated, but it's not
 //     the minimal service safe point. Returns a simulated service safe point whose serviceID starts with
-//     "__pseudo_service:" to simulate the minimal service safe point. It may actually be either a GC barrier or
+//     "tidb_min_start_ts_" to simulate the minimal service safe point. It may actually be either a GC barrier or
 //     a *TiDB min start ts*.
 //  2. If the given serviceID is anything else, it internally calls SetGCBarrier or DeleteGCBarrier, depending on
 //     whether the `ttl` is positive or not. As the txn safe point is always less or equal to any GC barriers, we
@@ -721,7 +725,7 @@ func (m *GCStateManager) CompatibleUpdateServiceGCSafePoint(serviceID string, ne
 		}
 		if res.NewTxnSafePoint != newServiceSafePoint {
 			minServiceSafePoint = &endpoint.ServiceSafePoint{
-				ServiceID: "__pseudo_service:" + res.BlockerDescription,
+				ServiceID: res.simulatedServiceID,
 				ExpiredAt: math.MaxInt64,
 				SafePoint: res.NewTxnSafePoint,
 			}
@@ -766,6 +770,11 @@ type AdvanceTxnSafePointResult struct {
 	Target             uint64
 	NewTxnSafePoint    uint64
 	BlockerDescription string
+	// When CompatibleUpdateServiceGCSafePoint is called, it needs to set a service ID for the service safe point. As
+	// the current GC barriers mechanism is not the same as the service safe points, sometimes it needs to simulate
+	// the behavior of the service safe point API by returning pseudo service safe points as the results. This field
+	// indicates the service ID that need to be used in this case.
+	simulatedServiceID string
 }
 
 // GCState represents the GC state of a keyspace, and additionally its keyspaceID and whether the keyspace-level GC is
