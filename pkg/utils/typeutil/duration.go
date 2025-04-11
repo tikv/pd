@@ -16,6 +16,8 @@ package typeutil
 
 import (
 	"fmt"
+	"math"
+	"math/bits"
 	"strconv"
 	"time"
 
@@ -61,4 +63,17 @@ func (d *Duration) UnmarshalText(text []byte) error {
 // MarshalText returns the duration as a JSON string.
 func (d Duration) MarshalText() ([]byte, error) {
 	return []byte(d.String()), nil
+}
+
+// SaturatingStdDurationFromSeconds returns a time.Duration representing the given seconds, truncated within the range
+// [0, math.MaxInt64] to avoid overflowing that may happen on plain multiplication.
+func SaturatingStdDurationFromSeconds(seconds int64) time.Duration {
+	if seconds < 0 {
+		return 0
+	}
+	h, l := bits.Mul64(uint64(seconds), uint64(time.Second))
+	if h != 0 || l > uint64(math.MaxInt64) {
+		return time.Duration(math.MaxInt64)
+	}
+	return time.Duration(l)
 }
