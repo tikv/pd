@@ -1338,20 +1338,3 @@ func (s *gcStateManagerTestSuite) TestWeakenedConstraints() {
 		s.checkTxnSafePoint(keyspaceID, 30)
 	}
 }
-
-func TestSaturatingMultiplyDuration(t *testing.T) {
-	re := require.New(t)
-
-	re.Equal(time.Second*2, saturatingMultiplyDuration(2, time.Second))
-	re.Equal(time.Second*2, saturatingMultiplyDuration(-2, -time.Second))
-	re.Equal(time.Second*2, saturatingMultiplyDuration(2000, time.Millisecond))
-	re.Equal(time.Duration(0), saturatingMultiplyDuration(-2, time.Second))
-	re.Equal(time.Duration(0), saturatingMultiplyDuration(2, -time.Second))
-
-	re.Equal(time.Duration(math.MaxInt64), saturatingMultiplyDuration(1<<32, 1<<32))
-	re.Equal(time.Duration(math.MaxInt64), saturatingMultiplyDuration(1<<62, 2))
-	re.Equal(time.Duration(1<<62), saturatingMultiplyDuration(1<<61, 2))
-	re.Equal(time.Duration(math.MaxInt64), saturatingMultiplyDuration(1<<62, 1<<62))
-	re.Equal(time.Duration(math.MaxInt64), saturatingMultiplyDuration(math.MaxInt64, time.Second))
-	re.Equal(time.Duration(math.MaxInt64), saturatingMultiplyDuration(math.MaxInt64, math.MaxInt64))
-}

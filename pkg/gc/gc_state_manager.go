@@ -18,7 +18,6 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"math/bits"
 	"slices"
 	"time"
 
@@ -32,6 +31,7 @@ import (
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/syncutil"
+	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/server/config"
 )
 
@@ -662,22 +662,6 @@ func (m *GCStateManager) GetAllKeyspacesGCStates() (map[uint32]GCState, error) {
 	return results, nil
 }
 
-// saturatingMultiplyDuration returns a duration calculated by multiplying the given `ratio` and `base`, truncated within the
-// range [0, math.MaxInt64] to avoid overflowing that may happen on plain multiplication.
-func saturatingMultiplyDuration(ratio int64, base time.Duration) time.Duration {
-	if ratio < 0 && base < 0 {
-		ratio, base = -ratio, -base
-	}
-	if ratio < 0 || base < 0 {
-		return 0
-	}
-	h, l := bits.Mul64(uint64(ratio), uint64(base))
-	if h != 0 || l > uint64(math.MaxInt64) {
-		return time.Duration(math.MaxInt64)
-	}
-	return time.Duration(l)
-}
-
 // CompatibleUpdateServiceGCSafePoint updates the service safe point of the given serviceID. Service safe points are
 // being deprecated, and this method provides compatibility for components that are still using service safe point API.
 // This method simulates the behavior of the service safe points in old versions, by internally using txn safe points
@@ -739,7 +723,7 @@ func (m *GCStateManager) CompatibleUpdateServiceGCSafePoint(serviceID string, ne
 		updated = res.OldTxnSafePoint != res.NewTxnSafePoint
 	} else {
 		if ttl > 0 {
-			_, err = m.setGCBarrierImpl(keyspaceID, serviceID, newServiceSafePoint, saturatingMultiplyDuration(ttl, time.Second), now)
+			_, err = m.setGCBarrierImpl(keyspaceID, serviceID, newServiceSafePoint, typeutil.SaturatingStdDurationFromSeconds(ttl), now)
 		} else {
 			_, err = m.deleteGCBarrierImpl(keyspaceID, serviceID)
 		}
