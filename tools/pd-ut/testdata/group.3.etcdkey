@@ -46,6 +46,7 @@
 /pd//rules/-c save
 /pd//schedule/store_weight//leader get
 /pd//schedule/store_weight//region get
+/pd//scheduler_config/balance-range-scheduler save
 /pd//scheduler_config/balance-region-scheduler remove
 /pd//scheduler_config/balance-region-scheduler save
 /pd//service_middleware get

@@ -69,6 +69,7 @@
 /pd//scheduler_config/ get
 /pd//scheduler_config/balance-hot-region-scheduler save
 /pd//scheduler_config/balance-leader-scheduler save
+/pd//scheduler_config/balance-range-scheduler save
 /pd//scheduler_config/balance-region-scheduler save
 /pd//scheduler_config/evict-leader-scheduler remove
 /pd//scheduler_config/evict-leader-scheduler save

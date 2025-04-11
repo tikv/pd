@@ -15,10 +15,34 @@
 package core
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 )
+
+func TestCodecKeyRange(t *testing.T) {
+	re := require.New(t)
+
+	testCases := []struct {
+		ks KeyRange
+	}{
+		{
+			NewKeyRange(fmt.Sprintf("%20d", 0), fmt.Sprintf("%20d", 5)),
+		},
+		{
+			NewKeyRange(fmt.Sprintf("%20d", 0), fmt.Sprintf("%20d", 10)),
+		},
+	}
+
+	for _, tc := range testCases {
+		data, err := tc.ks.MarshalJSON()
+		re.NoError(err)
+		var ks KeyRange
+		re.NoError(ks.UnmarshalJSON(data))
+		re.Equal(tc.ks, ks)
+	}
+}
 
 func TestMergeKeyRanges(t *testing.T) {
 	re := require.New(t)
