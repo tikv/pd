@@ -310,6 +310,38 @@ func CollectEscapeStringOption(option string, input map[string]any, collectors .
 	return errs.ErrOptionNotExist.FastGenByArgs(option)
 }
 
+// CollectKeyRangesOption is used to collect key ranges using from input map for given option
+func CollectKeyRangesOption(input map[string]any, collectors ...func(v string)) error {
+	startKeyStr, ok := input["start-key"].(string)
+	if !ok {
+		return errs.ErrOptionNotExist.FastGenByArgs("start-key")
+	}
+	endKeyStr, ok := input["end-key"].(string)
+	if !ok {
+		return errs.ErrOptionNotExist.FastGenByArgs("end-key")
+	}
+	startKeys := strings.Split(startKeyStr, ",")
+	endKeys := strings.Split(endKeyStr, ",")
+	if len(startKeys) != len(endKeys) {
+		return errs.ErrOptionNotExist.FastGenByArgs(startKeyStr, endKeyStr)
+	}
+	for i := range startKeys {
+		startKey, err := url.QueryUnescape(startKeys[i])
+		if err != nil {
+			return err
+		}
+		endKey, err := url.QueryUnescape(endKeys[i])
+		if err != nil {
+			return err
+		}
+		for _, c := range collectors {
+			c(startKey)
+			c(endKey)
+		}
+	}
+	return nil
+}
+
 // CollectStringOption is used to collect string using from input map for given option
 func CollectStringOption(option string, input map[string]any, collectors ...func(v string)) error {
 	if v, ok := input[option].(string); ok {

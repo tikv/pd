@@ -367,7 +367,7 @@ const (
 	// Leader is the leader of the region.
 	Leader Rule = iota
 	// Follower is the follower of the region.
-	Follower
+	Peer
 	// Learner is the learner of the region.
 	Learner
 	// Unknown is the unknown role of the region include witness.
@@ -379,8 +379,8 @@ func (r *Rule) String() string {
 	switch *r {
 	case Leader:
 		return "leader"
-	case Follower:
-		return "voter"
+	case Peer:
+		return "peer"
 	case Learner:
 		return "learner"
 	default:
@@ -393,8 +393,8 @@ func NewRule(role string) Rule {
 	switch role {
 	case "leader":
 		return Leader
-	case "follower":
-		return Follower
+	case "peer":
+		return Peer
 	case "learner":
 		return Learner
 	default:
@@ -413,8 +413,8 @@ func (r *Rule) UnmarshalJSON(data []byte) error {
 	switch s {
 	case `"leader"`:
 		*r = Leader
-	case `"voter"`:
-		*r = Follower
+	case `"peer"`:
+		*r = Peer
 	case `"learner"`:
 		*r = Learner
 	default:
@@ -428,8 +428,8 @@ func (r *RegionInfo) GetPeersByRole(rule Rule) []*metapb.Peer {
 	switch rule {
 	case Leader:
 		return []*metapb.Peer{r.GetLeader()}
-	case Follower:
-		followers := r.GetFollowers()
+	case Peer:
+		followers := r.GetPeers()
 		ret := make([]*metapb.Peer, 0, len(followers))
 		for _, peer := range followers {
 			ret = append(ret, peer)
@@ -581,9 +581,9 @@ func (r *RegionInfo) GetNonWitnessVoters() map[uint64]*metapb.Peer {
 // store as any other followers of the another specified region.
 func (r *RegionInfo) GetDiffFollowers(other *RegionInfo) []*metapb.Peer {
 	res := make([]*metapb.Peer, 0, len(r.meta.Peers))
-	for _, p := range r.GetFollowers() {
+	for _, p := range r.GetPeers() {
 		diff := true
-		for _, o := range other.GetFollowers() {
+		for _, o := range other.GetPeers() {
 			if p.GetStoreId() == o.GetStoreId() {
 				diff = false
 				break

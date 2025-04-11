@@ -64,7 +64,7 @@ func (s *StoreInfluence) GetStoreInfluenceByRole(r core.Rule) int64 {
 	switch r {
 	case core.Leader:
 		return s.LeaderCount
-	case core.Follower:
+	case core.Peer:
 		return s.RegionCount
 	case core.Learner:
 		return s.RegionCount

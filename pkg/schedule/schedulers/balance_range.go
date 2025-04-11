@@ -18,8 +18,10 @@ import (
 	"bytes"
 	"encoding/json"
 	"net/http"
+	"net/url"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -84,18 +86,45 @@ func (handler *balanceRangeSchedulerHandler) addJob(w http.ResponseWriter, r *ht
 	job.Engine = input["engine"].(string)
 	job.Rule = core.NewRule(input["rule"].(string))
 	job.Alias = input["alias"].(string)
-	startKey := input["start-key"].(string)
-	endKey := input["end-key"].(string)
-	if endKey == "" || startKey == "" {
-		handler.rd.JSON(w, http.StatusBadRequest, "start key and end key cannot both be nil")
+	startKeyStr, err := url.QueryUnescape(input["start-key"].(string))
+	if err != nil {
+		handler.rd.JSON(w, http.StatusBadRequest, "start key can't unescape")
 		return
 	}
-	job.Ranges = []core.KeyRange{core.NewKeyRange(startKey, endKey)}
+
+	endKeyStr, err := url.QueryUnescape(input["end-key"].(string))
+	if err != nil {
+		handler.rd.JSON(w, http.StatusBadRequest, "end key can't unescape")
+		return
+	}
+	log.Info("add balance key range job", zap.String("start-key", startKeyStr), zap.String("end-key", endKeyStr))
+	rs, err := decodeKeyRanges(endKeyStr, startKeyStr)
+	if err != nil {
+		handler.rd.JSON(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	job.Ranges = rs
 	if err := handler.config.addJob(job); err != nil {
 		handler.rd.JSON(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	handler.rd.JSON(w, http.StatusOK, nil)
+}
+
+func decodeKeyRanges(startKeyStr string, endKeyStr string) ([]core.KeyRange, error) {
+	startKeys := strings.Split(startKeyStr, ",")
+	endKeys := strings.Split(endKeyStr, ",")
+	if len(startKeys) != len(endKeys) {
+		return nil, errs.ErrAPIInformationInvalid.FastGenByArgs("start key and end key count not match")
+	}
+	rs := make([]core.KeyRange, len(startKeys))
+	for i := range startKeys {
+		if startKeys[i] == "" && endKeys[i] == "" {
+			return nil, errs.ErrAPIInformationInvalid.FastGenByArgs("start key and end key cannot both be nil")
+		}
+		rs[i] = core.NewKeyRange(startKeys[i], endKeys[i])
+	}
+	return rs, nil
 }
 
 func (handler *balanceRangeSchedulerHandler) deleteJob(w http.ResponseWriter, r *http.Request) {
@@ -375,8 +404,14 @@ func (s *balanceRangeScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) 
 			plan.region = filter.SelectOneRegion(cluster.RandLeaderRegions(plan.sourceStoreID(), job.Ranges), nil, baseRegionFilters...)
 		case core.Learner:
 			plan.region = filter.SelectOneRegion(cluster.RandLearnerRegions(plan.sourceStoreID(), job.Ranges), nil, baseRegionFilters...)
-		case core.Follower:
+		case core.Peer:
 			plan.region = filter.SelectOneRegion(cluster.RandFollowerRegions(plan.sourceStoreID(), job.Ranges), nil, baseRegionFilters...)
+			if plan.region == nil {
+				plan.region = filter.SelectOneRegion(cluster.RandLeaderRegions(plan.sourceStoreID(), job.Ranges), nil, baseRegionFilters...)
+			}
+			if plan.region == nil {
+				plan.region = filter.SelectOneRegion(cluster.RandLearnerRegions(plan.sourceStoreID(), job.Ranges), nil, baseRegionFilters...)
+			}
 		}
 		if plan.region == nil {
 			balanceRangeNoRegionCounter.Inc()

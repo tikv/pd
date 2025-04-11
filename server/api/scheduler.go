@@ -147,12 +147,7 @@ func (h *schedulerHandler) CreateScheduler(w http.ResponseWriter, r *http.Reques
 			return
 		}
 
-		if err := apiutil.CollectEscapeStringOption("start-key", input, collector); err != nil {
-			h.r.JSON(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-
-		if err := apiutil.CollectEscapeStringOption("end-key", input, collector); err != nil {
+		if err := apiutil.CollectKeyRangesOption(input, collector); err != nil {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
