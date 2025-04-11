@@ -286,7 +286,7 @@ func (s *hotScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) ([]*opera
 	return s.dispatch(typ, cluster), nil
 }
 
-func (s *hotScheduler) dispatch(typ resourceType, cluster sche.SchedulerCluster) []*operator.Operator {
+func (s *hotScheduler) dispatch(typ resourceType, cluster sche.SchedulerCluster) (ops []*operator.Operator) {
 	s.Lock()
 	defer s.Unlock()
 	s.updateHistoryLoadConfig(s.conf.getHistorySampleDuration(), s.conf.getHistorySampleInterval())
@@ -297,19 +297,22 @@ func (s *hotScheduler) dispatch(typ resourceType, cluster sche.SchedulerCluster)
 		if s.conf.isForbidRWType(utils.Read) {
 			return nil
 		}
-		return s.balanceHotReadRegions(cluster)
+		ops = s.balanceHotReadRegions(cluster)
 	case writePeer:
 		if s.conf.isForbidRWType(utils.Write) {
 			return nil
 		}
-		return s.balanceHotWritePeers(cluster)
+		ops = s.balanceHotWritePeers(cluster)
 	case writeLeader:
 		if s.conf.isForbidRWType(utils.Write) {
 			return nil
 		}
-		return s.balanceHotWriteLeaders(cluster)
+		ops = s.balanceHotWriteLeaders(cluster)
 	}
-	return nil
+	if len(ops) == 0 {
+		hotSchedulerSkipCounter.Inc()
+	}
+	return ops
 }
 
 func (s *hotScheduler) tryAddPendingInfluence(op *operator.Operator, srcStore []uint64, dstStore uint64, infl statistics.Influence, maxZombieDur time.Duration) bool {
@@ -335,21 +338,18 @@ func (s *hotScheduler) balanceHotReadRegions(cluster sche.SchedulerCluster) []*o
 	peerSolver := newBalanceSolver(s, cluster, utils.Read, movePeer)
 	peerOps := peerSolver.solve()
 	if len(leaderOps) == 0 && len(peerOps) == 0 {
-		hotSchedulerSkipCounter.Inc()
 		return nil
 	}
 	if len(leaderOps) == 0 {
 		if peerSolver.tryAddPendingInfluence() {
 			return peerOps
 		}
-		hotSchedulerSkipCounter.Inc()
 		return nil
 	}
 	if len(peerOps) == 0 {
 		if leaderSolver.tryAddPendingInfluence() {
 			return leaderOps
 		}
-		hotSchedulerSkipCounter.Inc()
 		return nil
 	}
 	leaderSolver.cur = leaderSolver.best
@@ -368,7 +368,6 @@ func (s *hotScheduler) balanceHotReadRegions(cluster sche.SchedulerCluster) []*o
 			return leaderOps
 		}
 	}
-	hotSchedulerSkipCounter.Inc()
 	return nil
 }
 
@@ -388,7 +387,6 @@ func (s *hotScheduler) balanceHotWriteLeaders(cluster sche.SchedulerCluster) []*
 		return ops
 	}
 
-	hotSchedulerSkipCounter.Inc()
 	return nil
 }
 
