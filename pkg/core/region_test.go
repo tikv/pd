@@ -1306,25 +1306,25 @@ func TestGetPeers(t *testing.T) {
 		role  string
 		peers []*metapb.Peer
 	}{
-		//{
-		//	role:  "leader",
-		//	peers: []*metapb.Peer{leader},
-		//},
+		{
+			role:  "leader",
+			peers: []*metapb.Peer{leader},
+		},
 		{
 			role:  "peer",
 			peers: []*metapb.Peer{learner, leader, follower1, follower2},
 		},
-		//{
-		//	role:  "learner",
-		//	peers: []*metapb.Peer{learner},
-		//},
-		//{
-		//	role:  "witness",
-		//	peers: nil,
-		//},
+		{
+			role:  "learner",
+			peers: []*metapb.Peer{learner},
+		},
+		{
+			role:  "witness",
+			peers: nil,
+		},
 	} {
 		role := NewRule(v.role)
-		peers := region.GetPeersByRole(role)
+		peers := region.GetPeersByRule(role)
 		sort.Slice(peers, func(i, j int) bool {
 			return peers[i].Id <= peers[j].Id
 		})

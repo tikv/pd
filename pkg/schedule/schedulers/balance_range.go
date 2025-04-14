@@ -575,7 +575,7 @@ func (s *balanceRangeScheduler) prepare(cluster sche.SchedulerCluster, opInfluen
 	}
 	totalScore := int64(0)
 	for _, region := range scanRegions {
-		for _, peer := range region.GetPeersByRole(job.Rule) {
+		for _, peer := range region.GetPeersByRule(job.Rule) {
 			scoreMap[peer.GetStoreId()] += 1
 			totalScore += 1
 		}

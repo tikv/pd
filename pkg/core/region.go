@@ -366,15 +366,15 @@ type Rule int
 const (
 	// Leader is the leader of the region.
 	Leader Rule = iota
-	// Follower is the follower of the region.
+	// Peer is the all the peers of the region.
 	Peer
 	// Learner is the learner of the region.
 	Learner
-	// Unknown is the unknown role of the region include witness.
+	// Unknown is the unknown rule of the region include witness.
 	Unknown
 )
 
-// String returns the string value of the role.
+// String returns the string value of the rule.
 func (r *Rule) String() string {
 	switch *r {
 	case Leader:
@@ -388,7 +388,7 @@ func (r *Rule) String() string {
 	}
 }
 
-// NewRule creates a new role.
+// NewRule creates a new rule.
 func NewRule(role string) Rule {
 	switch role {
 	case "leader":
@@ -402,12 +402,12 @@ func NewRule(role string) Rule {
 	}
 }
 
-// MarshalJSON returns the JSON encoding of Role.
+// MarshalJSON returns the JSON encoding of rule.
 func (r *Rule) MarshalJSON() ([]byte, error) {
 	return []byte(`"` + r.String() + `"`), nil
 }
 
-// UnmarshalJSON parses the JSON-encoded data and stores the result in Role.
+// UnmarshalJSON parses the JSON-encoded data and stores the result in rule.
 func (r *Rule) UnmarshalJSON(data []byte) error {
 	s := string(data)
 	switch s {
@@ -423,8 +423,8 @@ func (r *Rule) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// GetPeersByRole returns the peers with specified role.
-func (r *RegionInfo) GetPeersByRole(rule Rule) []*metapb.Peer {
+// GetPeersByRule returns the peers with specified role.
+func (r *RegionInfo) GetPeersByRule(rule Rule) []*metapb.Peer {
 	switch rule {
 	case Leader:
 		return []*metapb.Peer{r.GetLeader()}

@@ -54,7 +54,7 @@ func (suite *schedulerTestSuite) TearDownSuite() {
 
 func (suite *schedulerTestSuite) TestGetSchedulers() {
 	input := map[string]any{
-		"alias":     "test-sysbench-partition(p1)",
+		"alias":     "test.sysbench.partition(p1)",
 		"engine":    "tikv",
 		"rule":      "leader",
 		"name":      types.BalanceRangeScheduler.String(),
