@@ -866,28 +866,38 @@ func (c *RaftCluster) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest
 
 	limit := store.GetStoreLimit()
 	version := c.opt.GetStoreLimitVersion()
-	var opt core.StoreCreateOption
+	opts := make([]core.StoreCreateOption, 0)
 	if limit == nil || limit.Version() != version {
 		if version == storelimit.VersionV2 {
 			limit = storelimit.NewSlidingWindows()
 		} else {
 			limit = storelimit.NewStoreRateLimit(0.0)
 		}
-		opt = core.SetStoreLimit(limit)
+		opts = append(opts, core.SetStoreLimit(limit))
 	}
 
 	nowTime := time.Now()
-	var newStore *core.StoreInfo
 	// If this cluster has slow stores, we should awaken hibernated regions in other stores.
+<<<<<<< HEAD
 	if needAwaken, slowStoreIDs := c.NeedAwakenAllRegionsInStore(storeID); needAwaken {
 		log.Info("forcely awaken hibernated regions", zap.Uint64("store-id", storeID), zap.Uint64s("slow-stores", slowStoreIDs))
 		newStore = store.Clone(core.SetStoreStats(stats), core.SetLastHeartbeatTS(nowTime), core.SetLastAwakenTime(nowTime), opt)
 		resp.AwakenRegions = &pdpb.AwakenRegions{
 			AbnormalStores: slowStoreIDs,
+=======
+	if !c.IsServiceIndependent(constant.SchedulingServiceName) {
+		if needAwaken, slowStoreIDs := c.NeedAwakenAllRegionsInStore(storeID); needAwaken {
+			log.Info("forcely awaken hibernated regions", zap.Uint64("store-id", storeID), zap.Uint64s("slow-stores", slowStoreIDs))
+			opts = append(opts, core.SetLastAwakenTime(nowTime))
+			resp.AwakenRegions = &pdpb.AwakenRegions{
+				AbnormalStores: slowStoreIDs,
+			}
+>>>>>>> a16b00039 (store: update StoreInfo inside putStoreLocked (#9187))
 		}
-	} else {
-		newStore = store.Clone(core.SetStoreStats(stats), core.SetLastHeartbeatTS(nowTime), opt)
 	}
+	opts = append(opts, core.SetStoreStats(stats), core.SetLastHeartbeatTS(nowTime))
+
+	newStore := store.Clone(opts...)
 
 	if newStore.IsLowSpace(c.opt.GetLowSpaceRatio()) {
 		log.Warn("store does not have enough disk space",
@@ -899,9 +909,10 @@ func (c *RaftCluster) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest
 		if err := c.storage.SaveStore(newStore.GetMeta()); err != nil {
 			log.Error("failed to persist store", zap.Uint64("store-id", storeID), errs.ZapError(err))
 		} else {
-			newStore = newStore.Clone(core.SetLastPersistTime(nowTime))
+			opts = append(opts, core.SetLastPersistTime(nowTime))
 		}
 	}
+<<<<<<< HEAD
 	if store := c.core.GetStore(storeID); store != nil {
 		statistics.UpdateStoreHeartbeatMetrics(store)
 	}
@@ -911,6 +922,23 @@ func (c *RaftCluster) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest
 	c.slowStat.ObserveSlowStoreStatus(storeID, newStore.IsSlow())
 	reportInterval := stats.GetInterval()
 	interval := reportInterval.GetEndTimestamp() - reportInterval.GetStartTimestamp()
+=======
+	// Supply NodeState in the response to help the store handle special cases
+	// more conveniently, such as avoiding calling `remove_peer` redundantly under
+	// NodeState_Removing.
+	resp.State = store.GetNodeState()
+	c.PutStore(newStore, opts...)
+	var (
+		regions  map[uint64]*core.RegionInfo
+		interval uint64
+	)
+	if !c.IsServiceIndependent(constant.SchedulingServiceName) {
+		c.hotStat.Observe(storeID, newStore.GetStoreStats())
+		c.hotStat.FilterUnhealthyStore(c)
+		c.slowStat.ObserveSlowStoreStatus(storeID, newStore.IsSlow())
+		reportInterval := stats.GetInterval()
+		interval = reportInterval.GetEndTimestamp() - reportInterval.GetStartTimestamp()
+>>>>>>> a16b00039 (store: update StoreInfo inside putStoreLocked (#9187))
 
 	// c.limiter is nil before "start" is called
 	if c.limiter != nil && c.opt.GetStoreLimitMode() == "auto" {
@@ -1327,6 +1355,7 @@ func (c *RaftCluster) putStoreImpl(store *metapb.Store, force bool) error {
 		}
 	}
 
+	opts := make([]core.StoreCreateOption, 0)
 	s := c.GetStore(store.GetId())
 	if s == nil {
 		// Add a new store.
@@ -1337,19 +1366,23 @@ func (c *RaftCluster) putStoreImpl(store *metapb.Store, force bool) error {
 		if !force {
 			labels = core.MergeLabels(s.GetLabels(), labels)
 		}
-		// Update an existed store.
-		s = s.Clone(
+		opts = append(opts,
 			core.SetStoreAddress(store.Address, store.StatusAddress, store.PeerAddress),
 			core.SetStoreVersion(store.GitHash, store.Version),
 			core.SetStoreLabels(labels),
 			core.SetStoreStartTime(store.StartTimestamp),
-			core.SetStoreDeployPath(store.DeployPath),
-		)
+			core.SetStoreDeployPath(store.DeployPath))
+		// Update an existed store.
+		s = s.Clone(opts...)
 	}
 	if err := c.checkStoreLabels(s); err != nil {
 		return err
 	}
+<<<<<<< HEAD
 	return c.putStoreLocked(s)
+=======
+	return c.setStore(s, opts...)
+>>>>>>> a16b00039 (store: update StoreInfo inside putStoreLocked (#9187))
 }
 
 func (c *RaftCluster) checkStoreVersion(store *metapb.Store) error {
@@ -1424,6 +1457,7 @@ func (c *RaftCluster) RemoveStore(storeID uint64, physicallyDestroyed bool) erro
 		}
 	}
 
+<<<<<<< HEAD
 	newStore := store.Clone(core.OfflineStore(physicallyDestroyed))
 	log.Warn("store has been offline",
 		zap.Uint64("store-id", storeID),
@@ -1444,6 +1478,31 @@ func (c *RaftCluster) RemoveStore(storeID uint64, physicallyDestroyed bool) erro
 		_ = c.SetStoreLimit(storeID, storelimit.RemovePeer, storelimit.Unlimited)
 	}
 	return err
+=======
+	log.Warn("store has been offline",
+		zap.Uint64("store-id", storeID),
+		zap.String("store-address", store.GetAddress()),
+		zap.Bool("physically-destroyed", physicallyDestroyed))
+	if err := c.setStore(
+		store.Clone(core.SetStoreState(metapb.StoreState_Offline, physicallyDestroyed)),
+		core.SetStoreState(metapb.StoreState_Offline, physicallyDestroyed),
+	); err != nil {
+		return err
+	}
+
+	regionSize := float64(c.GetStoreRegionSize(storeID))
+	c.resetProgress(storeID, store.GetAddress())
+	c.progressManager.AddProgress(encodeRemovingProgressKey(storeID), regionSize, regionSize, nodeStateCheckJobInterval, progress.WindowDurationOption(c.GetCoordinator().GetPatrolRegionsDuration()))
+	// record the current store limit in memory
+	c.prevStoreLimit[storeID] = map[storelimit.Type]float64{
+		storelimit.AddPeer:    c.GetStoreLimitByType(storeID, storelimit.AddPeer),
+		storelimit.RemovePeer: c.GetStoreLimitByType(storeID, storelimit.RemovePeer),
+	}
+	// TODO: if the persist operation encounters error, the "Unlimited" will be rollback.
+	// And considering the store state has changed, RemoveStore is actually successful.
+	_ = c.SetStoreLimit(storeID, storelimit.RemovePeer, storelimit.Unlimited)
+	return nil
+>>>>>>> a16b00039 (store: update StoreInfo inside putStoreLocked (#9187))
 }
 
 func (c *RaftCluster) checkReplicaBeforeOfflineStore(storeID uint64) error {
@@ -1533,14 +1592,25 @@ func (c *RaftCluster) BuryStore(storeID uint64, forceBury bool) error {
 		}
 	}
 
+<<<<<<< HEAD
 	newStore := store.Clone(core.TombstoneStore())
+=======
+>>>>>>> a16b00039 (store: update StoreInfo inside putStoreLocked (#9187))
 	log.Warn("store has been Tombstone",
 		zap.Uint64("store-id", storeID),
-		zap.String("store-address", newStore.GetAddress()),
+		zap.String("store-address", store.GetAddress()),
 		zap.String("state", store.GetState().String()),
 		zap.Bool("physically-destroyed", store.IsPhysicallyDestroyed()))
+<<<<<<< HEAD
 	err := c.putStoreLocked(newStore)
 	c.onStoreVersionChangeLocked()
+=======
+	err := c.setStore(
+		store.Clone(core.SetStoreState(metapb.StoreState_Tombstone)),
+		core.SetStoreState(metapb.StoreState_Tombstone),
+	)
+	c.OnStoreVersionChange()
+>>>>>>> a16b00039 (store: update StoreInfo inside putStoreLocked (#9187))
 	if err == nil {
 		// clean up the residual information.
 		delete(c.prevStoreLimit, storeID)
@@ -1650,7 +1720,11 @@ func (c *RaftCluster) UpStore(storeID uint64) error {
 	log.Warn("store has been up",
 		zap.Uint64("store-id", storeID),
 		zap.String("store-address", newStore.GetAddress()))
+<<<<<<< HEAD
 	err := c.putStoreLocked(newStore)
+=======
+	err := c.setStore(newStore, options...)
+>>>>>>> a16b00039 (store: update StoreInfo inside putStoreLocked (#9187))
 	if err == nil {
 		if exist {
 			// persist the store limit
@@ -1688,7 +1762,11 @@ func (c *RaftCluster) ReadyToServe(storeID uint64) error {
 	log.Info("store has changed to serving",
 		zap.Uint64("store-id", storeID),
 		zap.String("store-address", newStore.GetAddress()))
+<<<<<<< HEAD
 	err := c.putStoreLocked(newStore)
+=======
+	err := c.setStore(newStore, core.SetStoreState(metapb.StoreState_Up))
+>>>>>>> a16b00039 (store: update StoreInfo inside putStoreLocked (#9187))
 	if err == nil {
 		c.resetProgress(storeID, store.GetAddress())
 	}
@@ -1706,23 +1784,37 @@ func (c *RaftCluster) SetStoreWeight(storeID uint64, leaderWeight, regionWeight 
 		return err
 	}
 
-	newStore := store.Clone(
+	return c.setStore(store,
 		core.SetLeaderWeight(leaderWeight),
 		core.SetRegionWeight(regionWeight),
 	)
+<<<<<<< HEAD
 
 	return c.putStoreLocked(newStore)
 }
 
 func (c *RaftCluster) putStoreLocked(store *core.StoreInfo) error {
+=======
+}
+
+// The meta of StoreInfo should be the latest.
+func (c *RaftCluster) setStore(store *core.StoreInfo, opts ...core.StoreCreateOption) error {
+>>>>>>> a16b00039 (store: update StoreInfo inside putStoreLocked (#9187))
 	if c.storage != nil {
 		if err := c.storage.SaveStore(store.GetMeta()); err != nil {
 			return err
 		}
 	}
+<<<<<<< HEAD
 	c.core.PutStore(store)
 	c.hotStat.GetOrCreateRollingStoreStats(store.GetID())
 	c.slowStat.ObserveSlowStoreStatus(store.GetID(), store.IsSlow())
+=======
+	c.PutStore(store, opts...)
+	if !c.IsServiceIndependent(constant.SchedulingServiceName) {
+		c.updateStoreStatistics(store.GetID(), store.IsSlow())
+	}
+>>>>>>> a16b00039 (store: update StoreInfo inside putStoreLocked (#9187))
 	return nil
 }
 
@@ -2434,8 +2526,12 @@ func (c *RaftCluster) SetMinResolvedTS(storeID, minResolvedTS uint64) error {
 		return errs.ErrStoreNotFound.FastGenByArgs(storeID)
 	}
 
+<<<<<<< HEAD
 	newStore := store.Clone(core.SetMinResolvedTS(minResolvedTS))
 	c.core.PutStore(newStore)
+=======
+	c.PutStore(store, core.SetMinResolvedTS(minResolvedTS))
+>>>>>>> a16b00039 (store: update StoreInfo inside putStoreLocked (#9187))
 	return nil
 }
 
