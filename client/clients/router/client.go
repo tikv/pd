@@ -547,10 +547,8 @@ batchLoop:
 		// Step 3: Dispatch the router requests to the stream connection.
 		// TODO: timeout handling if the stream takes too long to process the requests.
 		err = c.processRequests(stream)
-		if err != nil {
-			if !c.handleProcessRequestError(ctx, streamURL, err) {
-				return
-			}
+		if err != nil && !c.handleProcessRequestError(ctx, streamURL, err) {
+			return
 		}
 	}
 }
