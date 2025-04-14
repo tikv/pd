@@ -427,6 +427,7 @@ func gcStateToProto(gcState gc.GCState, now time.Time) *pdpb.GCState {
 	}
 }
 
+// AdvanceGCSafePoint tries to advance the GC safe point.
 func (s *GrpcServer) AdvanceGCSafePoint(ctx context.Context, request *pdpb.AdvanceGCSafePointRequest) (*pdpb.AdvanceGCSafePointResponse, error) {
 	done, err := s.rateLimitCheck()
 	if err != nil {
@@ -459,6 +460,7 @@ func (s *GrpcServer) AdvanceGCSafePoint(ctx context.Context, request *pdpb.Advan
 	}, nil
 }
 
+// AdvanceTxnSafePoint tries to advance the transaction safe point.
 func (s *GrpcServer) AdvanceTxnSafePoint(ctx context.Context, request *pdpb.AdvanceTxnSafePointRequest) (*pdpb.AdvanceTxnSafePointResponse, error) {
 	done, err := s.rateLimitCheck()
 	if err != nil {
@@ -493,6 +495,7 @@ func (s *GrpcServer) AdvanceTxnSafePoint(ctx context.Context, request *pdpb.Adva
 	}, nil
 }
 
+// SetGCBarrier sets a GC barrier.
 func (s *GrpcServer) SetGCBarrier(ctx context.Context, request *pdpb.SetGCBarrierRequest) (*pdpb.SetGCBarrierResponse, error) {
 	done, err := s.rateLimitCheck()
 	if err != nil {
@@ -532,6 +535,7 @@ func (s *GrpcServer) SetGCBarrier(ctx context.Context, request *pdpb.SetGCBarrie
 	}, nil
 }
 
+// SetGCBarrier sets a GC barrier.
 func (s *GrpcServer) DeleteGCBarrier(ctx context.Context, request *pdpb.DeleteGCBarrierRequest) (*pdpb.DeleteGCBarrierResponse, error) {
 	done, err := s.rateLimitCheck()
 	if err != nil {
@@ -567,6 +571,7 @@ func (s *GrpcServer) DeleteGCBarrier(ctx context.Context, request *pdpb.DeleteGC
 	}, nil
 }
 
+// GetGCState gets the GC state.
 func (s *GrpcServer) GetGCState(ctx context.Context, request *pdpb.GetGCStateRequest) (*pdpb.GetGCStateResponse, error) {
 	done, err := s.rateLimitCheck()
 	if err != nil {
@@ -600,6 +605,7 @@ func (s *GrpcServer) GetGCState(ctx context.Context, request *pdpb.GetGCStateReq
 	}, nil
 }
 
+// GetAllKeyspacesGCStates gets the GC states of all keyspaces.
 func (s *GrpcServer) GetAllKeyspacesGCStates(ctx context.Context, request *pdpb.GetAllKeyspacesGCStatesRequest) (*pdpb.GetAllKeyspacesGCStatesResponse, error) {
 	done, err := s.rateLimitCheck()
 	if err != nil {
