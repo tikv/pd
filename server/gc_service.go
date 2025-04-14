@@ -21,11 +21,12 @@ import (
 	"math"
 	"time"
 
-	"github.com/pingcap/kvproto/pkg/pdpb"
-	"github.com/pingcap/log"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
+
+	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/gc"
