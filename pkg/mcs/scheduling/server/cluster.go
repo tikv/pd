@@ -409,6 +409,7 @@ func (c *Cluster) HandleStoreHeartbeat(heartbeat *schedulingpb.StoreHeartbeatReq
 		return errors.Errorf("store %v not found", storeID)
 	}
 
+<<<<<<< HEAD
 	nowTime := time.Now()
 	newStore := store.Clone(core.SetStoreStats(stats), core.SetLastHeartbeatTS(nowTime))
 
@@ -417,6 +418,10 @@ func (c *Cluster) HandleStoreHeartbeat(heartbeat *schedulingpb.StoreHeartbeatReq
 	}
 	c.PutStore(newStore)
 	c.hotStat.Observe(storeID, newStore.GetStoreStats())
+=======
+	c.PutStore(store, core.SetStoreStats(stats), core.SetLastHeartbeatTS(time.Now()))
+	c.hotStat.Observe(storeID, stats)
+>>>>>>> a16b00039 (store: update StoreInfo inside putStoreLocked (#9187))
 	c.hotStat.FilterUnhealthyStore(c)
 	reportInterval := stats.GetInterval()
 	interval := reportInterval.GetEndTimestamp() - reportInterval.GetStartTimestamp()
