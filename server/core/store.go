@@ -603,8 +603,115 @@ func (s *StoresInfo) GetStore(storeID uint64) *StoreInfo {
 	return store
 }
 
+<<<<<<< HEAD:server/core/store.go
 // SetStore sets a StoreInfo with storeID.
 func (s *StoresInfo) SetStore(store *StoreInfo) {
+=======
+// GetStores gets a complete set of StoreInfo.
+func (s *StoresInfo) GetStores() []*StoreInfo {
+	s.RLock()
+	defer s.RUnlock()
+	stores := make([]*StoreInfo, 0, len(s.stores))
+	for _, store := range s.stores {
+		stores = append(stores, store)
+	}
+	return stores
+}
+
+// GetMetaStores gets a complete set of metapb.Store.
+func (s *StoresInfo) GetMetaStores() []*metapb.Store {
+	s.RLock()
+	defer s.RUnlock()
+	stores := make([]*metapb.Store, 0, len(s.stores))
+	for _, store := range s.stores {
+		stores = append(stores, store.GetMeta())
+	}
+	return stores
+}
+
+// GetStoreIDs returns a list of store ids.
+func (s *StoresInfo) GetStoreIDs() []uint64 {
+	s.RLock()
+	defer s.RUnlock()
+	count := len(s.stores)
+	storeIDs := make([]uint64, 0, count)
+	for _, store := range s.stores {
+		storeIDs = append(storeIDs, store.GetID())
+	}
+	return storeIDs
+}
+
+// GetFollowerStores returns all Stores that contains the region's follower peer.
+func (s *StoresInfo) GetFollowerStores(region *RegionInfo) []*StoreInfo {
+	s.RLock()
+	defer s.RUnlock()
+	var stores []*StoreInfo
+	for id := range region.GetFollowers() {
+		if store, ok := s.stores[id]; ok && store != nil {
+			stores = append(stores, store)
+		}
+	}
+	return stores
+}
+
+// GetRegionStores returns all Stores that contains the region's peer.
+func (s *StoresInfo) GetRegionStores(region *RegionInfo) []*StoreInfo {
+	s.RLock()
+	defer s.RUnlock()
+	var stores []*StoreInfo
+	for id := range region.GetStoreIDs() {
+		if store, ok := s.stores[id]; ok && store != nil {
+			stores = append(stores, store)
+		}
+	}
+	return stores
+}
+
+// GetLeaderStore returns all Stores that contains the region's leader peer.
+func (s *StoresInfo) GetLeaderStore(region *RegionInfo) *StoreInfo {
+	s.RLock()
+	defer s.RUnlock()
+	if store, ok := s.stores[region.GetLeader().GetStoreId()]; ok && store != nil {
+		return store
+	}
+	return nil
+}
+
+// GetStoreCount returns the total count of storeInfo.
+func (s *StoresInfo) GetStoreCount() int {
+	s.RLock()
+	defer s.RUnlock()
+	return len(s.stores)
+}
+
+// GetNonWitnessVoterStores returns all Stores that contains the non-witness's voter peer.
+func (s *StoresInfo) GetNonWitnessVoterStores(region *RegionInfo) []*StoreInfo {
+	s.RLock()
+	defer s.RUnlock()
+	var stores []*StoreInfo
+	for id := range region.GetNonWitnessVoters() {
+		if store, ok := s.stores[id]; ok && store != nil {
+			stores = append(stores, store)
+		}
+	}
+	return stores
+}
+
+/* Stores write operations */
+
+// PutStore sets a StoreInfo with storeID.
+func (s *StoresInfo) PutStore(store *StoreInfo, opts ...StoreCreateOption) {
+	s.Lock()
+	defer s.Unlock()
+	s.putStoreLocked(store, opts...)
+}
+
+// putStoreLocked sets a StoreInfo with storeID.
+func (s *StoresInfo) putStoreLocked(store *StoreInfo, opts ...StoreCreateOption) {
+	if len(opts) > 0 {
+		store = s.stores[store.GetID()].Clone(opts...)
+	}
+>>>>>>> a16b00039 (store: update StoreInfo inside putStoreLocked (#9187)):pkg/core/store.go
 	s.stores[store.GetID()] = store
 }
 

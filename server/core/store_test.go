@@ -197,3 +197,68 @@ func TestLowSpaceScoreV2(t *testing.T) {
 		re.Greater(score1, score2)
 	}
 }
+<<<<<<< HEAD:server/core/store_test.go
+=======
+
+// newStoreInfoWithAvailable is created with available and capacity
+func newStoreInfoWithAvailable(id, available, capacity uint64, amp float64) *StoreInfo {
+	stats := &pdpb.StoreStats{}
+	stats.Capacity = capacity
+	stats.Available = available
+	usedSize := capacity - available
+	regionSize := (float64(usedSize) * amp) / units.MiB
+	store := NewStoreInfo(
+		&metapb.Store{
+			Id: id,
+		},
+		SetStoreStats(stats),
+		SetRegionCount(int(regionSize/96)),
+		SetRegionSize(int64(regionSize)),
+	)
+	return store
+}
+
+// newStoreInfoWithDisk is created with all disk infos.
+func newStoreInfoWithDisk(id, used, available, capacity, regionSize uint64) *StoreInfo {
+	stats := &pdpb.StoreStats{}
+	stats.Capacity = capacity
+	stats.Available = available
+	stats.UsedSize = used
+	store := NewStoreInfo(
+		&metapb.Store{
+			Id: id,
+		},
+		SetStoreStats(stats),
+		SetRegionCount(int(regionSize/96)),
+		SetRegionSize(int64(regionSize)),
+	)
+	return store
+}
+
+func TestPutStore(t *testing.T) {
+	store := newStoreInfoWithAvailable(1, 20*units.GiB, 100*units.GiB, 1.4)
+	storesInfo := NewStoresInfo()
+	storesInfo.PutStore(store)
+	re := require.New(t)
+	re.Equal(store, storesInfo.GetStore(store.GetID()))
+
+	opts := []StoreCreateOption{SetStoreState(metapb.StoreState_Up)}
+	store = store.Clone(opts...)
+	re.NotEqual(store, storesInfo.GetStore(store.GetID()))
+	storesInfo.PutStore(store, opts...)
+	re.Equal(store, storesInfo.GetStore(store.GetID()))
+
+	opts = []StoreCreateOption{
+		SetStoreStats(&pdpb.StoreStats{
+			Capacity:  100 * units.GiB,
+			Available: 20 * units.GiB,
+			UsedSize:  80 * units.GiB,
+		}),
+		SetLastHeartbeatTS(time.Now()),
+	}
+	store = store.Clone(opts...)
+	re.NotEqual(store, storesInfo.GetStore(store.GetID()))
+	storesInfo.PutStore(store, opts...)
+	re.Equal(store, storesInfo.GetStore(store.GetID()))
+}
+>>>>>>> a16b00039 (store: update StoreInfo inside putStoreLocked (#9187)):pkg/core/store_test.go
