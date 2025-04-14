@@ -423,18 +423,13 @@ func (r *Rule) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// GetPeersByRule returns the peers with specified role.
+// GetPeersByRule returns the peers with specified rule.
 func (r *RegionInfo) GetPeersByRule(rule Rule) []*metapb.Peer {
 	switch rule {
 	case Leader:
 		return []*metapb.Peer{r.GetLeader()}
 	case Peer:
-		followers := r.GetPeers()
-		ret := make([]*metapb.Peer, 0, len(followers))
-		for _, peer := range followers {
-			ret = append(ret, peer)
-		}
-		return ret
+		return r.GetPeers()
 	case Learner:
 		learners := r.GetLearners()
 		return learners
