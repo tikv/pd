@@ -74,6 +74,7 @@ type Option struct {
 	dynamicOptions [dynamicOptionCount]atomic.Value
 
 	EnableTSOFollowerProxyCh chan struct{}
+	EnableFollowerHandleCh   chan struct{}
 	EnableRouterClientCh     chan struct{}
 }
 
@@ -83,6 +84,7 @@ func NewOption() *Option {
 		Timeout:                  defaultPDTimeout,
 		MaxRetryTimes:            maxInitClusterRetries,
 		EnableTSOFollowerProxyCh: make(chan struct{}, 1),
+		EnableFollowerHandleCh:   make(chan struct{}, 1),
 		EnableRouterClientCh:     make(chan struct{}, 1),
 		InitMetrics:              true,
 	}
@@ -107,7 +109,12 @@ func (o *Option) SetMaxTSOBatchWaitInterval(interval time.Duration) error {
 
 // SetEnableFollowerHandle set the Follower Handle option.
 func (o *Option) SetEnableFollowerHandle(enable bool) {
-	o.dynamicOptions[EnableFollowerHandle].CompareAndSwap(!enable, enable)
+	if o.dynamicOptions[EnableFollowerHandle].CompareAndSwap(!enable, enable) {
+		select {
+		case o.EnableFollowerHandleCh <- struct{}{}:
+		default:
+		}
+	}
 }
 
 // GetEnableFollowerHandle gets the Follower Handle enable option.
