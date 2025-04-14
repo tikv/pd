@@ -38,6 +38,7 @@ import (
 	"github.com/tikv/pd/client/pkg/retry"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/keyspace"
+	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/placement"
@@ -884,16 +885,17 @@ func (suite *httpClientTestSuite) TestGetGCSafePoint() {
 	defer cancel()
 
 	// adding some safepoints to the server
+	now := time.Now().Truncate(time.Second)
 	list := &api.ListServiceGCSafepoint{
 		ServiceGCSafepoints: []*endpoint.ServiceSafePoint{
 			{
 				ServiceID: "AAA",
-				ExpiredAt: time.Now().Unix() + 10,
+				ExpiredAt: now.Unix() + 10,
 				SafePoint: 1,
 			},
 			{
 				ServiceID: "BBB",
-				ExpiredAt: time.Now().Unix() + 10,
+				ExpiredAt: now.Unix() + 10,
 				SafePoint: 2,
 			},
 			{
@@ -906,12 +908,15 @@ func (suite *httpClientTestSuite) TestGetGCSafePoint() {
 		MinServiceGcSafepoint: 1,
 	}
 
-	storage := suite.cluster.GetLeaderServer().GetServer().GetStorage()
+	gcStateManager := suite.cluster.GetLeaderServer().GetServer().GetGCStateManager()
 	for _, ssp := range list.ServiceGCSafepoints {
-		err := storage.SaveServiceGCSafePoint(ssp)
+		_, _, err := gcStateManager.CompatibleUpdateServiceGCSafePoint(ssp.ServiceID, ssp.SafePoint, ssp.ExpiredAt-now.Unix(), now)
 		re.NoError(err)
 	}
-	storage.SaveGCSafePoint(1)
+	_, err := gcStateManager.AdvanceTxnSafePoint(constant.NullKeyspaceID, 1, now)
+	re.NoError(err)
+	_, _, err = gcStateManager.AdvanceGCSafePoint(constant.NullKeyspaceID, 1)
+	re.NoError(err)
 
 	// get the safepoints and start testing
 	l, err := client.GetGCSafePoint(ctx)
@@ -946,9 +951,11 @@ func (suite *httpClientTestSuite) TestGetGCSafePoint() {
 	re.Equal(uint64(0), l.MinServiceGcSafepoint)
 	re.Empty(l.ServiceGCSafepoints)
 
-	// try delete gc_worker, should get an error
+	// Deleting "gc_worker" should result in an error in earlier version. As the service safe point becomes a
+	// compatibility layer over GC barriers, it won't take any effect except that possibly deleting the residual
+	// service safe point of "gc_worker" that was written by previous version.
 	_, err = client.DeleteGCSafePoint(ctx, "gc_worker")
-	re.Error(err)
+	re.NoError(err)
 
 	// try delete some non-exist safepoints, should return normally
 	var msg string
