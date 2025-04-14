@@ -95,6 +95,6 @@ func TestWatcherCompacted(t *testing.T) {
 	err = pd2.Run()
 	re.NoError(err)
 	testutil.Eventually(re, func() bool {
-		return pd2.GetLeader().GetName() == pd1.GetConfig().Name
+		return cluster.WaitLeader() != "" && pd2.GetLeader().GetName() == pd1.GetConfig().Name
 	})
 }
