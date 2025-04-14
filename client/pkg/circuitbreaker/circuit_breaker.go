@@ -325,7 +325,7 @@ func (s *State) onResult(overloaded Overloading) {
 // Define context key type
 type cbCtxKey struct{}
 
-// CircuitBreakerKey used to store circuit breaker
+// CircuitBreakerKey is used to store circuit breaker
 var CircuitBreakerKey = cbCtxKey{}
 
 // FromContext retrieves the circuit breaker from the context
