@@ -35,8 +35,6 @@ import (
 )
 
 const (
-	// privateFileMode grants owner to read/write a file.
-	privateFileMode = 0600
 	// privateDirMode grants owner to make/remove files inside the directory.
 	privateDirMode = 0700
 )
@@ -90,18 +88,6 @@ func PrepareJoinCluster(cfg *config.Config) error {
 
 	if cfg.Join == cfg.AdvertiseClientUrls {
 		return errors.New("join self is forbidden")
-	}
-
-	filePath := filepath.Join(cfg.DataDir, "join")
-	// Read the persist join config
-	if _, err := os.Stat(filePath); !os.IsNotExist(err) {
-		s, err := os.ReadFile(filePath)
-		if err != nil {
-			log.Fatal("read the join config meet error", errs.ZapError(errs.ErrIORead, err))
-		}
-		cfg.InitialCluster = strings.TrimSpace(string(s))
-		cfg.InitialClusterState = embed.ClusterStateFlagExisting
-		return nil
 	}
 
 	initialCluster := ""
@@ -218,8 +204,7 @@ func PrepareJoinCluster(cfg *config.Config) error {
 		return errors.WithStack(err)
 	}
 
-	err = os.WriteFile(filePath, []byte(cfg.InitialCluster), privateFileMode)
-	return errors.WithStack(err)
+	return nil
 }
 
 func isDataExist(d string) bool {

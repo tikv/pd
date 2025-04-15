@@ -16,8 +16,6 @@ package join_test
 
 import (
 	"context"
-	"os"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -57,8 +55,6 @@ func TestSimpleJoin(t *testing.T) {
 	re.NoError(err)
 	err = pd2.Run()
 	re.NoError(err)
-	_, err = os.Stat(filepath.Join(pd2.GetConfig().DataDir, "join"))
-	re.False(os.IsNotExist(err))
 	re.NotEmpty(cluster.WaitLeader())
 	members, err = etcdutil.ListEtcdMembers(ctx, client)
 	re.NoError(err)
@@ -72,8 +68,6 @@ func TestSimpleJoin(t *testing.T) {
 	re.NoError(err)
 	err = pd3.Run()
 	re.NoError(err)
-	_, err = os.Stat(filepath.Join(pd3.GetConfig().DataDir, "join"))
-	re.False(os.IsNotExist(err))
 	re.NotEmpty(cluster.WaitLeader())
 	members, err = etcdutil.ListEtcdMembers(ctx, client)
 	re.NoError(err)
