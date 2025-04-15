@@ -33,7 +33,9 @@ import (
 	"github.com/tikv/pd/client/clients/router"
 	"github.com/tikv/pd/client/opt"
 	"github.com/tikv/pd/client/pkg/caller"
+	"github.com/tikv/pd/pkg/utils/assertutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
+	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
 )
@@ -414,4 +416,20 @@ func (suite *routerClientSuite) TestConcurrentlyEnableFollowerHandle() {
 		case <-ctx.Done():
 		}
 	}
+}
+
+func TestRouterClientHeaderError(t *testing.T) {
+	re := require.New(t)
+	srv, cleanup, err := server.NewTestServer(re, assertutil.CheckerWithNilAssert(re))
+	re.NoError(err)
+	defer cleanup()
+
+	server.MustWaitLeader(re, []*server.Server{srv})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	client := setupCli(ctx, re, srv.GetEndpoints(), opt.WithEnableRouterClient(true))
+
+	r, err := client.GetRegion(ctx, []byte("a"))
+	re.ErrorContains(err, pdpb.ErrorType_NOT_BOOTSTRAPPED.String())
+	re.Nil(r)
 }

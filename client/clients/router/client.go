@@ -613,8 +613,10 @@ func (c *Cli) processRequests(stream pdpb.PD_QueryRegionClient) error {
 	}
 	metrics.RequestDurationQueryRegion.Observe(time.Since(start).Seconds())
 	metrics.QueryRegionBatchSizeTotal.Observe(float64(len(requests)))
-	if resp.Header.GetError() != nil {
-		return errors.New(resp.Header.GetError().GetMessage())
+	// Currently, header errors can occur due to an unready PD leader or follower,
+	// resulting in either a `NOT_BOOTSTRAPPED` or `REGION_NOT_FOUND` error.
+	if headerErr := resp.GetHeader().GetError(); headerErr != nil {
+		return errors.New(headerErr.String())
 	}
 	if keysLen := len(queryReq.Keys); keysLen > 0 {
 		metrics.QueryRegionBatchSizeByKeys.Observe(float64(keysLen))
