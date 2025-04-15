@@ -397,10 +397,9 @@ func (c *Cli) updateConnection(ctx context.Context) {
 	cc, url := c.getLeaderClientConn()
 	if cc == nil || len(url) == 0 {
 		log.Warn("[router] got an invalid leader client connection", zap.String("url", url))
-	}
-	if c.conCtxMgr.Exist(url) {
+	} else if c.conCtxMgr.Exist(url) {
 		log.Debug("[router] the router leader remains unchanged", zap.String("url", url))
-	} else if cc != nil && len(url) > 0 {
+	} else {
 		stream, err := pdpb.NewPDClient(cc).QueryRegion(ctx)
 		if err != nil {
 			log.Error("[router] failed to create the leader router stream connection", errs.ZapError(err))
@@ -418,6 +417,7 @@ func (c *Cli) updateConnection(ctx context.Context) {
 			log.Warn("[router] no router node found")
 			return
 		}
+		// Add the missing follower router stream connections.
 		for url, conn := range conns {
 			if c.conCtxMgr.Exist(url) {
 				log.Debug("[router] the router node remains unchanged", zap.String("url", url))
@@ -433,6 +433,14 @@ func (c *Cli) updateConnection(ctx context.Context) {
 				log.Info("[router] successfully established the router stream connection", zap.String("url", url))
 			}
 		}
+		// Remove the stale follower router stream connections.
+		c.conCtxMgr.GC(func(url string) bool {
+			if _, ok := conns[url]; !ok {
+				log.Info("[router] release the stale router stream connection", zap.String("url", url))
+				return true
+			}
+			return false
+		})
 	} else {
 		// GC all the follower router stream connections.
 		c.conCtxMgr.GC(func(url string) bool {
@@ -519,6 +527,8 @@ batchLoop:
 					return true
 				})
 			}
+			// Check if the follower handle is enabled again before choosing the stream connection.
+			allowFollowerHandle = allowFollowerHandle && c.option.GetEnableFollowerHandle()
 			// Choose a stream connection to send the router request later.
 			var connectionCtx *cctx.ConnectionCtx[pdpb.PD_QueryRegionClient]
 			if allowFollowerHandle {
