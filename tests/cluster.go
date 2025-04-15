@@ -65,6 +65,11 @@ var (
 	WaitLeaderCheckInterval = 500 * time.Millisecond
 	// WaitLeaderRetryTimes represents the maximum number of loops of WaitLeader.
 	WaitLeaderRetryTimes = 100
+
+	// WaitPreAllocKeyspacesInterval represents the time interval of WaitPreAllocKeyspaces running check.
+	WaitPreAllocKeyspacesInterval = 500 * time.Millisecond
+	// WaitPreAllocKeyspacesRetryTimes represents the maximum number of loops of WaitPreAllocKeyspaces.
+	WaitPreAllocKeyspacesRetryTimes = 100
 )
 
 // TestServer is only for test.
@@ -379,6 +384,12 @@ func (s *TestServer) BootstrapCluster() error {
 	if resp.GetHeader().GetError() != nil {
 		return errors.New(resp.GetHeader().GetError().String())
 	}
+
+	err = s.waitPreAllocKeyspaces()
+	if err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -393,6 +404,48 @@ func (s *TestServer) WaitLeader() bool {
 		time.Sleep(WaitLeaderCheckInterval)
 	}
 	return false
+}
+
+func (s *TestServer) waitPreAllocKeyspaces() error {
+	keyspaces := s.GetConfig().Keyspace.PreAlloc
+	if len(keyspaces) == 0 {
+		return nil
+	}
+
+	manager := s.GetKeyspaceManager()
+	idx := 0
+Outer:
+	for range WaitPreAllocKeyspacesRetryTimes {
+		for idx < len(keyspaces) {
+			_, err := manager.LoadKeyspace(keyspaces[idx])
+			if errors.ErrorEqual(err, errs.ErrKeyspaceNotFound) {
+				time.Sleep(WaitPreAllocKeyspacesInterval)
+				continue Outer
+			}
+			if err != nil {
+				return errors.Trace(err)
+			}
+
+			idx += 1
+		}
+		return nil
+	}
+	return errors.New("wait pre-alloc keyspaces retry limit exceeded")
+}
+
+// GetPreAllocKeyspaceIDs returns the pre-allocated keyspace IDs.
+func (s *TestServer) GetPreAllocKeyspaceIDs() ([]uint32, error) {
+	keyspaces := s.GetConfig().Keyspace.PreAlloc
+	ids := make([]uint32, 0, len(keyspaces))
+	manager := s.GetKeyspaceManager()
+	for _, keyspace := range keyspaces {
+		meta, err := manager.LoadKeyspace(keyspace)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+		ids = append(ids, meta.GetId())
+	}
+	return ids, nil
 }
 
 // GetServicePrimaryAddr returns the primary address of the service.

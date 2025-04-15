@@ -80,7 +80,6 @@ func CreateKeyspace(c *gin.Context) {
 		Name:       createParams.Name,
 		Config:     createParams.Config,
 		CreateTime: time.Now().Unix(),
-		IsPreAlloc: false,
 	}
 	meta, err := manager.CreateKeyspace(req)
 	if err != nil {
