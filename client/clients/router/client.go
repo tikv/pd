@@ -519,6 +519,7 @@ batchLoop:
 			allowFollowerHandle := c.option.GetEnableFollowerHandle()
 			if allowFollowerHandle {
 				// We need to ensure all requests in a same batch allow to be handled by the follower.
+				// IMPROVE: separate into the follower and leader handle batches.
 				c.batchController.IterCollectedRequests(func(req *Request) bool {
 					if !req.options.AllowFollowerHandle {
 						allowFollowerHandle = false
