@@ -1663,17 +1663,34 @@ func (s *GrpcServer) QueryRegion(stream pdpb.PD_QueryRegionServer) error {
 			return status.Errorf(codes.FailedPrecondition,
 				"mismatch cluster id, need %d but got %d", clusterID, request.GetHeader().GetClusterId())
 		}
-		rc := s.GetRaftCluster()
-		if rc == nil {
-			resp := &pdpb.QueryRegionResponse{
-				Header: notBootstrappedHeader(),
+		var (
+			rc          *cluster.RaftCluster
+			needBuckets bool
+		)
+		if s.member.IsLeader() {
+			rc = s.GetRaftCluster()
+			if rc == nil {
+				resp := &pdpb.QueryRegionResponse{
+					Header: notBootstrappedHeader(),
+				}
+				if err = stream.Send(resp); err != nil {
+					return errors.WithStack(err)
+				}
+				continue
 			}
-			if err = stream.Send(resp); err != nil {
-				return errors.WithStack(err)
+			needBuckets = rc.GetStoreConfig().IsEnableRegionBucket() && request.GetNeedBuckets()
+		} else {
+			rc = s.cluster
+			if !rc.GetRegionSyncer().IsRunning() {
+				resp := &pdpb.QueryRegionResponse{
+					Header: regionNotFound(),
+				}
+				if err = stream.Send(resp); err != nil {
+					return errors.WithStack(err)
+				}
+				continue
 			}
-			continue
 		}
-		needBuckets := rc.GetStoreConfig().IsEnableRegionBucket() && request.GetNeedBuckets()
 
 		start := time.Now()
 		keyIDMap, prevKeyIDMap, regionsByID := rc.QueryRegions(
