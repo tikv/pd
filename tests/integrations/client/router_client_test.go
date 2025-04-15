@@ -73,7 +73,9 @@ func (suite *routerClientSuite) SetupSuite() {
 	re.NotEmpty(suite.cluster.WaitLeader())
 	leader := suite.cluster.GetLeaderServer()
 	suite.grpcPDClient = testutil.MustNewGrpcClient(re, leader.GetAddr())
-	suite.client = setupCli(suite.ctx, re, endpoints, opt.WithEnableRouterClient(suite.routerClientEnabled))
+	suite.client = setupCli(suite.ctx, re, endpoints,
+		opt.WithEnableRouterClient(suite.routerClientEnabled),
+		opt.WithEnableFollowerHandle(true))
 
 	suite.regionHeartbeat, err = suite.grpcPDClient.RegionHeartbeat(suite.ctx)
 	re.NoError(err)
@@ -405,7 +407,7 @@ func (suite *routerClientSuite) TestConcurrentlyEnableFollowerHandle() {
 
 	wg := sync.WaitGroup{}
 	// Concurrently enable and disable the follower handle.
-	for _, enabled := range []bool{true, false} {
+	for _, enabled := range []bool{false, true} {
 		suite.dispatchConcurrentRequests(ctx, re, &wg)
 		// Switch the follower handle option immediately right after the concurrent requests dispatch.
 		err := suite.client.UpdateOption(opt.EnableFollowerHandle, enabled)

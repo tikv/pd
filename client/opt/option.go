@@ -235,6 +235,13 @@ func WithEnableRouterClient(enable bool) ClientOption {
 	}
 }
 
+// WithEnableFollowerHandle configures the client with allow follower handle option.
+func WithEnableFollowerHandle(enable bool) ClientOption {
+	return func(op *Option) {
+		op.SetEnableFollowerHandle(enable)
+	}
+}
+
 // GetStoreOp represents available options when getting stores.
 type GetStoreOp struct {
 	ExcludeTombstone bool
