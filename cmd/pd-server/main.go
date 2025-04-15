@@ -223,7 +223,6 @@ func start(cmd *cobra.Command, args []string, services ...string) {
 	for _, msg := range cfg.WarningMsgs {
 		log.Warn(msg)
 	}
-	// TODO: Make it configurable if it has big impact on performance.
 	grpcprometheus.EnableHandlingTimeHistogram()
 
 	metricutil.Push(&cfg.Metric)

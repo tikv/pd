@@ -1040,7 +1040,7 @@ func getRegionLabelByKey(c *gin.Context) {
 	handler := c.MustGet(handlerKey).(*handler.Handler)
 
 	idStr := c.Param("id")
-	labelKey := c.Param("key") // TODO: test https://github.com/tikv/pd/pull/4004
+	labelKey := c.Param("key")
 
 	id, err := strconv.ParseUint(idStr, 10, 64)
 	if err != nil {
