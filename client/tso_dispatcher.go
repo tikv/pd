@@ -286,7 +286,11 @@ tsoBatchLoop:
 		// Choose a stream to send the TSO gRPC request.
 	streamChoosingLoop:
 		for {
+<<<<<<< HEAD:client/tso_dispatcher.go
 			connectionCtx := chooseStream(connectionCtxs)
+=======
+			connectionCtx := conCtxMgr.RandomlyPick()
+>>>>>>> c22da0fa57 (feat(router): allow the follower to handle QueryRegion (#9196)):client/clients/tso/dispatcher.go
 			if connectionCtx != nil {
 				streamCtx, cancel, streamURL, stream = connectionCtx.ctx, connectionCtx.cancel, connectionCtx.streamURL, connectionCtx.stream
 			}
