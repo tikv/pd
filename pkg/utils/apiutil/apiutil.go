@@ -542,6 +542,7 @@ func ParseTime(t string) (time.Time, error) {
 	return time.Unix(i, 0), nil
 }
 
+// IsPathInDirectory checks if the given path is in the specified directory.
 func IsPathInDirectory(path, directory string) bool {
 	absPath, err := filepath.Abs(path)
 	if err != nil {
