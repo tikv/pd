@@ -191,6 +191,8 @@ static: install-tools pre-build
 	@ echo "golangci-lint ..."
 	@ golangci-lint run --verbose $(PACKAGE_DIRECTORIES) --allow-parallel-runners
 	@ for mod in $(SUBMODULES); do cd $$mod && $(MAKE) static && cd $(ROOT_PATH) > /dev/null; done
+	@ echo "modernize ..."
+	@ go run golang.org/x/tools/gopls/internal/analysis/modernize/cmd/modernize@latest -test ./...
 
 # Because CI downloads the dashboard code and runs gofmt, we can't add this check into static now.
 fmt:

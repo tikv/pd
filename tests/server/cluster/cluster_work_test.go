@@ -16,7 +16,7 @@ package cluster_test
 
 import (
 	"context"
-	"sort"
+	"slices"
 	"testing"
 	"time"
 
@@ -163,8 +163,8 @@ func TestPendingProcessedRegions(t *testing.T) {
 	res, err := rc.HandleAskBatchSplit(req)
 	re.NoError(err)
 	ids := []uint64{regions[0].GetMeta().GetId(), res.Ids[0].NewRegionId, res.Ids[1].NewRegionId}
-	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+	slices.Sort(ids)
 	pendingProcessedRegions := rc.GetPendingProcessedRegions()
-	sort.Slice(pendingProcessedRegions, func(i, j int) bool { return pendingProcessedRegions[i] < pendingProcessedRegions[j] })
+	slices.Sort(pendingProcessedRegions)
 	re.Equal(ids, pendingProcessedRegions)
 }

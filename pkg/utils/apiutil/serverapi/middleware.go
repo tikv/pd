@@ -17,6 +17,7 @@ package serverapi
 import (
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 
@@ -62,10 +63,8 @@ func IsServiceAllowed(s *server.Server, group apiutil.APIServiceGroup) bool {
 	opt := s.GetServerOption()
 	cfg := opt.GetPDServerConfig()
 	if cfg != nil {
-		for _, allow := range cfg.RuntimeServices {
-			if group.Name == allow {
-				return true
-			}
+		if slices.Contains(cfg.RuntimeServices, group.Name) {
+			return true
 		}
 	}
 
