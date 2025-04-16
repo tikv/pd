@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"slices"
 	"time"
 
 	"github.com/BurntSushi/toml"
@@ -47,14 +48,14 @@ func (m *ConfigMetaData) IsDefined(key string) bool {
 	if m.meta == nil {
 		return false
 	}
-	keys := append([]string(nil), m.path...)
+	keys := slices.Clone(m.path)
 	keys = append(keys, key)
 	return m.meta.IsDefined(keys...)
 }
 
 // Child gets the config metadata of the given path
 func (m *ConfigMetaData) Child(path ...string) *ConfigMetaData {
-	newPath := append([]string(nil), m.path...)
+	newPath := slices.Clone(m.path)
 	newPath = append(newPath, path...)
 	return &ConfigMetaData{
 		meta: m.meta,

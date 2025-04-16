@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -713,11 +714,8 @@ func (filter *storeStateFilter) filter(stores []*metapb.Store) []*metapb.Store {
 	ret := make([]*metapb.Store, 0, len(stores))
 	for _, s := range stores {
 		state := s.GetState()
-		for _, accept := range filter.accepts {
-			if state == accept {
-				ret = append(ret, s)
-				break
-			}
+		if slices.Contains(filter.accepts, state) {
+			ret = append(ret, s)
 		}
 	}
 	return ret

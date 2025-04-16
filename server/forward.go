@@ -17,6 +17,7 @@ package server
 import (
 	"context"
 	"io"
+	"slices"
 	"time"
 
 	"go.uber.org/zap"
@@ -425,12 +426,7 @@ func (s *GrpcServer) isLocalRequest(host string) bool {
 		return true
 	}
 	memberAddrs := s.GetMember().Member().GetClientUrls()
-	for _, addr := range memberAddrs {
-		if addr == host {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(memberAddrs, host)
 }
 
 func (s *GrpcServer) getGlobalTSO(ctx context.Context) (pdpb.Timestamp, error) {

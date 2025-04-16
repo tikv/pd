@@ -21,6 +21,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -589,7 +590,7 @@ func migrateConfigurationFromFile(meta *configutil.ConfigMetaData) error {
 
 // Clone returns a cloned PD server config.
 func (c *PDServerConfig) Clone() *PDServerConfig {
-	runtimeServices := append(c.RuntimeServices[:0:0], c.RuntimeServices...)
+	runtimeServices := slices.Clone(c.RuntimeServices)
 	cfg := *c
 	cfg.RuntimeServices = runtimeServices
 	return &cfg
@@ -891,7 +892,7 @@ func (c *KeyspaceConfig) adjust(meta *configutil.ConfigMetaData) {
 
 // Clone makes a deep copy of the keyspace config.
 func (c *KeyspaceConfig) Clone() *KeyspaceConfig {
-	preAlloc := append(c.PreAlloc[:0:0], c.PreAlloc...)
+	preAlloc := slices.Clone(c.PreAlloc)
 	cfg := *c
 	cfg.PreAlloc = preAlloc
 	return &cfg

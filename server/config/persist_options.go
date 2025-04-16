@@ -18,6 +18,7 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -250,10 +251,8 @@ var supportedTTLConfigs = []string{
 
 // IsSupportedTTLConfig checks whether a key is a supported config item with ttl
 func IsSupportedTTLConfig(key string) bool {
-	for _, supportedConfig := range supportedTTLConfigs {
-		if key == supportedConfig {
-			return true
-		}
+	if slices.Contains(supportedTTLConfigs, key) {
+		return true
 	}
 	return strings.HasPrefix(key, "add-peer-") || strings.HasPrefix(key, "remove-peer-")
 }
@@ -731,7 +730,7 @@ func (o *PersistOptions) RemoveSchedulerCfg(tp types.CheckerSchedulerType) {
 				schedulerCfg.Disable = true
 				v.Schedulers[i] = schedulerCfg
 			} else {
-				v.Schedulers = append(v.Schedulers[:i], v.Schedulers[i+1:]...)
+				v.Schedulers = slices.Delete(v.Schedulers, i, i+1)
 			}
 			o.SetScheduleConfig(v)
 			return

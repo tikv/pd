@@ -217,10 +217,7 @@ func (m *Manager) StartBackgroundLoop(ctx context.Context) {
 	watcher := clientv3.NewWatcher(m.etcdClient)
 	defer watcher.Close()
 	// Check data key rotation every min(dataKeyRotationPeriod, keyRotationCheckPeriod).
-	checkPeriod := m.dataKeyRotationPeriod
-	if keyRotationCheckPeriod < checkPeriod {
-		checkPeriod = keyRotationCheckPeriod
-	}
+	checkPeriod := min(keyRotationCheckPeriod, m.dataKeyRotationPeriod)
 	ticker := time.NewTicker(checkPeriod)
 	defer ticker.Stop()
 

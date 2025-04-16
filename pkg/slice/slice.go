@@ -14,6 +14,8 @@
 
 package slice
 
+import "slices"
+
 // AnyOf returns true if any element in the slice matches the predict func.
 func AnyOf[T any](s []T, p func(int) bool) bool {
 	for i := range s {
@@ -39,12 +41,7 @@ func AllOf[T any](s []T, p func(int) bool) bool {
 
 // Contains returns true if the given slice contains the value.
 func Contains[T comparable](slice []T, value T) bool {
-	for _, v := range slice {
-		if v == value {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(slice, value)
 }
 
 // Remove removes the value from the slice.

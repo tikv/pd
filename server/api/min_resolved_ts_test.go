@@ -63,7 +63,7 @@ func (suite *minResolvedTSTestSuite) SetupSuite() {
 	for i := 1; i <= suite.storesNum; i++ {
 		id := uint64(i)
 		mustPutStore(re, suite.svr, id, metapb.StoreState_Up, metapb.NodeState_Serving, nil)
-		r := core.NewTestRegionInfo(id, id, []byte(fmt.Sprintf("%da", id)), []byte(fmt.Sprintf("%db", id)))
+		r := core.NewTestRegionInfo(id, id, fmt.Appendf(nil, "%da", id), fmt.Appendf(nil, "%db", id))
 		mustRegionHeartbeat(re, suite.svr, r)
 	}
 }

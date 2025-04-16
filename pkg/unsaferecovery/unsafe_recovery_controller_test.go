@@ -18,6 +18,7 @@ package unsaferecovery
 import (
 	"context"
 	"fmt"
+	"slices"
 	"testing"
 	"time"
 
@@ -51,13 +52,7 @@ func hasQuorum(region *metapb.Region, failedStores []uint64) bool {
 		numLiveVoters := 0
 
 		for _, voter := range voters {
-			found := false
-			for _, store := range failedStores {
-				if store == voter.GetStoreId() {
-					found = true
-					break
-				}
-			}
+			found := slices.Contains(failedStores, voter.GetStoreId())
 			if found {
 				numFailedVoters += 1
 			} else {
@@ -121,7 +116,7 @@ func applyRecoveryPlan(re *require.Assertions, storeID uint64, storeReports map[
 	for _, tombstone := range plan.GetTombstones() {
 		for i, report := range reports.PeerReports {
 			if report.GetRegionState().GetRegion().GetId() == tombstone {
-				reports.PeerReports = append(reports.PeerReports[:i], reports.PeerReports[i+1:]...)
+				reports.PeerReports = slices.Delete(reports.PeerReports, i, i+1)
 				break
 			}
 		}
@@ -643,13 +638,7 @@ func TestAutoDetectWithOneLearner(t *testing.T) {
 	req.StoreReport.Step = 1
 	resp := &pdpb.StoreHeartbeatResponse{}
 	recoveryController.HandleStoreHeartbeat(req, resp)
-	hasStore3AsFailedStore := false
-	for _, failedStore := range resp.RecoveryPlan.ForceLeader.FailedStores {
-		if failedStore == 3 {
-			hasStore3AsFailedStore = true
-			break
-		}
-	}
+	hasStore3AsFailedStore := slices.Contains(resp.RecoveryPlan.ForceLeader.FailedStores, 3)
 	re.True(hasStore3AsFailedStore)
 }
 
@@ -871,7 +860,7 @@ func TestTiflashLearnerPeer(t *testing.T) {
 						},
 					},
 				}, p)
-				report.PeerReports = append(report.PeerReports[:i], report.PeerReports[i+1:]...)
+				report.PeerReports = slices.Delete(report.PeerReports, i, i+1)
 				break
 			}
 		}

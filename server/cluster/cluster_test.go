@@ -1470,7 +1470,7 @@ func TestSyncConfigContext(t *testing.T) {
 		b, err := json.Marshal(cfg)
 		if err != nil {
 			res.WriteHeader(http.StatusInternalServerError)
-			res.Write([]byte(fmt.Sprintf("failed setting up test server: %s", err)))
+			res.Write(fmt.Appendf(nil, "failed setting up test server: %s", err))
 			return
 		}
 
@@ -1890,7 +1890,7 @@ func Test(t *testing.T) {
 
 	for i := range n {
 		region := regions[i]
-		regionKey := []byte(fmt.Sprintf("a%20d", i+1))
+		regionKey := fmt.Appendf(nil, "a%20d", i+1)
 
 		re.Nil(cache.GetRegion(i))
 		re.Nil(cache.GetRegionByKey(regionKey))
@@ -2232,8 +2232,8 @@ func newTestRegions(n, m, np uint64) []*core.RegionInfo {
 		region := &metapb.Region{
 			Id:          i,
 			Peers:       peers,
-			StartKey:    []byte(fmt.Sprintf("a%20d", i+1)),
-			EndKey:      []byte(fmt.Sprintf("a%20d", i+2)),
+			StartKey:    fmt.Appendf(nil, "a%20d", i+1),
+			EndKey:      fmt.Appendf(nil, "a%20d", i+2),
 			RegionEpoch: &metapb.RegionEpoch{ConfVer: 2, Version: 2},
 		}
 		regions = append(regions, core.NewRegionInfo(region, peers[0], core.SetApproximateSize(100), core.SetApproximateKeys(1000)))
@@ -2244,8 +2244,8 @@ func newTestRegions(n, m, np uint64) []*core.RegionInfo {
 func newTestRegionMeta(regionID uint64) *metapb.Region {
 	return &metapb.Region{
 		Id:          regionID,
-		StartKey:    []byte(fmt.Sprintf("%20d", regionID)),
-		EndKey:      []byte(fmt.Sprintf("%20d", regionID+1)),
+		StartKey:    fmt.Appendf(nil, "%20d", regionID),
+		EndKey:      fmt.Appendf(nil, "%20d", regionID+1),
 		RegionEpoch: &metapb.RegionEpoch{Version: 1, ConfVer: 1},
 	}
 }

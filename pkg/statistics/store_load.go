@@ -16,6 +16,7 @@ package statistics
 
 import (
 	"math"
+	"slices"
 	"time"
 
 	"github.com/tikv/pd/pkg/core"
@@ -155,7 +156,7 @@ type StoreLoad struct {
 // ToLoadPred returns the current load and future predictive load.
 func (load StoreLoad) ToLoadPred(rwTy utils.RWType, infl *Influence) *StoreLoadPred {
 	future := StoreLoad{
-		Loads: append(load.Loads[:0:0], load.Loads...),
+		Loads: slices.Clone(load.Loads),
 		Count: load.Count,
 	}
 	if infl != nil {

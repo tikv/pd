@@ -17,7 +17,7 @@ package keyspace
 import (
 	"context"
 	"encoding/json"
-	"sort"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -961,9 +961,7 @@ func (m *GroupManager) MergeKeyspaceGroups(mergeTargetID uint32, mergeList []uin
 		for keyspace := range keyspaces {
 			mergedKeyspaces = append(mergedKeyspaces, keyspace)
 		}
-		sort.Slice(mergedKeyspaces, func(i, j int) bool {
-			return mergedKeyspaces[i] < mergedKeyspaces[j]
-		})
+		slices.Sort(mergedKeyspaces)
 		mergeTargetKg.Keyspaces = mergedKeyspaces
 		// Update the merge state of the target keyspace group.
 		mergeTargetKg.MergeState = &endpoint.MergeState{

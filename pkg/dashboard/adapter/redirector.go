@@ -19,6 +19,7 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"slices"
 
 	"github.com/pingcap/tidb-dashboard/pkg/apiserver"
 	"github.com/pingcap/tidb-dashboard/pkg/utils"
@@ -120,11 +121,9 @@ func (h *Redirector) ReverseProxy(w http.ResponseWriter, r *http.Request) {
 	}
 
 	proxySources := r.Header.Values(proxyHeader)
-	for _, proxySource := range proxySources {
-		if proxySource == h.name {
-			w.WriteHeader(http.StatusLoopDetected)
-			return
-		}
+	if slices.Contains(proxySources, h.name) {
+		w.WriteHeader(http.StatusLoopDetected)
+		return
 	}
 
 	proxy.ServeHTTP(w, r)

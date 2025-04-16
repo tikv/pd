@@ -52,10 +52,7 @@ func TestSlidingWindow(t *testing.T) {
 	re.Len(s.windows, int(constant.PriorityLevelLen))
 	// capacity:[10, 10, 10, 10]
 	for i, v := range s.windows {
-		cap := capacity >> i
-		if cap < minSnapSize {
-			cap = minSnapSize
-		}
+		cap := max(capacity>>i, minSnapSize)
 		re.EqualValues(v.capacity, cap)
 	}
 	// case 0: test core.Low level
@@ -179,10 +176,7 @@ func TestFeedback(t *testing.T) {
 				continue
 			}
 			cost := tick - stats.start
-			exec := stats.total
-			if exec < 5 {
-				exec = 5
-			}
+			exec := max(stats.total, 5)
 			err := exec*wait - cost
 			queue.Remove(first)
 			s.Feedback(float64(err))

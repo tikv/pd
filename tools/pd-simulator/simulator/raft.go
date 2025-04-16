@@ -16,6 +16,7 @@ package simulator
 
 import (
 	"context"
+	"slices"
 
 	"go.uber.org/zap"
 
@@ -251,7 +252,7 @@ func (r *RaftEngine) ResetRegionChange(storeID uint64, regionID uint64) {
 	regionIDs := r.regionChange[storeID]
 	for i, id := range regionIDs {
 		if id == regionID {
-			r.regionChange[storeID] = append(r.regionChange[storeID][:i], r.regionChange[storeID][i+1:]...)
+			r.regionChange[storeID] = slices.Delete(r.regionChange[storeID], i, i+1)
 			return
 		}
 	}

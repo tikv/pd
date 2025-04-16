@@ -678,7 +678,7 @@ func TestDataPhysicalRepresentation(t *testing.T) {
 		re.NoError(err)
 
 		// A `RunInGCStateTransaction` operation will also cause an update to the revision key.
-		expectedKeys := append([]kv.KeyValuePair{}, writableKvPairs...)
+		expectedKeys := slices.Clone(writableKvPairs)
 		expectedKeys = append(expectedKeys, kv.KeyValuePair{
 			Key:   "/pd/0/gc/gc_state_revision",
 			Value: "1",

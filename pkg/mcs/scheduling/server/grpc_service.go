@@ -305,7 +305,7 @@ func (s *Service) AskBatchSplit(_ context.Context, request *schedulingpb.AskBatc
 				return nil, err
 			}
 			peerIDs := make([]uint64, len(request.Region.Peers))
-			for i := 0; i < len(peerIDs); i++ {
+			for i := range peerIDs {
 				peerIDs[i], _, err = c.AllocID(1)
 				if err != nil {
 					return nil, err
@@ -326,7 +326,7 @@ func (s *Service) AskBatchSplit(_ context.Context, request *schedulingpb.AskBatc
 			curID++
 
 			peerIDs := make([]uint64, len(request.Region.Peers))
-			for j := 0; j < len(peerIDs); j++ {
+			for j := range peerIDs {
 				peerIDs[j] = curID
 				curID++
 			}

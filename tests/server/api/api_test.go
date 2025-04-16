@@ -1063,7 +1063,7 @@ func TestPreparingProgress(t *testing.T) {
 		tests.MustPutStore(re, cluster, store)
 	}
 	for i := range core.InitClusterRegionThreshold {
-		tests.MustPutRegion(re, cluster, uint64(i+1), uint64(i)%3+1, []byte(fmt.Sprintf("%20d", i)), []byte(fmt.Sprintf("%20d", i+1)), core.SetApproximateSize(10))
+		tests.MustPutRegion(re, cluster, uint64(i+1), uint64(i)%3+1, fmt.Appendf(nil, "%20d", i), fmt.Appendf(nil, "%20d", i+1), core.SetApproximateSize(10))
 	}
 	testutil.Eventually(re, func() bool {
 		return leader.GetRaftCluster().GetTotalRegionCount() == core.InitClusterRegionThreshold
@@ -1114,8 +1114,8 @@ func TestPreparingProgress(t *testing.T) {
 	})
 
 	// update size
-	tests.MustPutRegion(re, cluster, 1000, 4, []byte(fmt.Sprintf("%20d", 1000)), []byte(fmt.Sprintf("%20d", 1001)), core.SetApproximateSize(10))
-	tests.MustPutRegion(re, cluster, 1001, 5, []byte(fmt.Sprintf("%20d", 1001)), []byte(fmt.Sprintf("%20d", 1002)), core.SetApproximateSize(40))
+	tests.MustPutRegion(re, cluster, 1000, 4, fmt.Appendf(nil, "%20d", 1000), fmt.Appendf(nil, "%20d", 1001), core.SetApproximateSize(10))
+	tests.MustPutRegion(re, cluster, 1001, 5, fmt.Appendf(nil, "%20d", 1001), fmt.Appendf(nil, "%20d", 1002), core.SetApproximateSize(40))
 	testutil.Eventually(re, func() bool {
 		output := sendRequest(re, leader.GetAddr()+"/pd/api/v1/stores/progress?action=preparing", http.MethodGet, http.StatusOK)
 		re.NoError(json.Unmarshal(output, &p))

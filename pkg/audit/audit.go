@@ -16,6 +16,7 @@ package audit
 
 import (
 	"net/http"
+	"slices"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"go.uber.org/zap"
@@ -44,12 +45,7 @@ type LabelMatcher struct {
 
 // Match is used to check whether backendLabel is in the labels
 func (m *LabelMatcher) Match(labels *BackendLabels) bool {
-	for _, item := range labels.Labels {
-		if m.backendLabel == item {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(labels.Labels, m.backendLabel)
 }
 
 // Sequence is used to help backend implement audit.Backend

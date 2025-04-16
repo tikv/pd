@@ -475,10 +475,7 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 			m.RUnlock()
 			// prevent many groups and hold the lock long time.
 			for _, group := range groups {
-				ru := group.getRUToken()
-				if ru < 0 {
-					ru = 0
-				}
+				ru := max(group.getRUToken(), 0)
 				availableRUCounter.WithLabelValues(group.Name, group.Name).Set(ru)
 				resourceGroupConfigGauge.WithLabelValues(group.Name, priorityLabel).Set(group.getPriority())
 				resourceGroupConfigGauge.WithLabelValues(group.Name, ruPerSecLabel).Set(group.getFillRate())

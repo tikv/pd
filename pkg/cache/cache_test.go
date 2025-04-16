@@ -16,7 +16,7 @@ package cache
 
 import (
 	"context"
-	"sort"
+	"slices"
 	"testing"
 	"time"
 
@@ -115,8 +115,8 @@ func TestExpireRegionCache(t *testing.T) {
 }
 
 func sortIDs(ids []uint64) []uint64 {
-	ids = append(ids[:0:0], ids...)
-	sort.Slice(ids, func(i, j int) bool { return ids[i] < ids[j] })
+	ids = slices.Clone(ids)
+	slices.Sort(ids)
 	return ids
 }
 

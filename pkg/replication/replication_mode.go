@@ -19,6 +19,7 @@ import (
 	"context"
 	"encoding/json"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -404,10 +405,7 @@ func minimalUpVoters(rule *placement.Rule, upStores, downStores []*core.StoreInf
 			down++
 		}
 	}
-	minimalUp := rule.Count - down
-	if minimalUp < 0 {
-		minimalUp = 0
-	}
+	minimalUp := max(rule.Count-down, 0)
 	if minimalUp > up {
 		minimalUp = up
 	}
@@ -437,10 +435,7 @@ func (m *ModeManager) tickUpdateState() {
 		minimalUpDr := minimalUpVoters(r, stores[drUp], stores[drDown])
 		primaryHasVoter = primaryHasVoter || minimalUpPrimary > 0
 		drHasVoter = drHasVoter || minimalUpDr > 0
-		upVoters := minimalUpPrimary + minimalUpDr
-		if upVoters > r.Count {
-			upVoters = r.Count
-		}
+		upVoters := min(minimalUpPrimary+minimalUpDr, r.Count)
 		totalUpVoter += upVoters
 	}
 
@@ -615,7 +610,7 @@ func (m *ModeManager) checkStoreStatus() ([][]*core.StoreInfo, [][]uint64) {
 	}
 	for i := range stores {
 		sort.Slice(stores[i], func(a, b int) bool { return stores[i][a].GetID() < stores[i][b].GetID() })
-		sort.Slice(storeIDs[i], func(a, b int) bool { return storeIDs[i][a] < storeIDs[i][b] })
+		slices.Sort(storeIDs[i])
 	}
 	return stores, storeIDs
 }
@@ -699,10 +694,7 @@ func (m *ModeManager) estimateProgress() float32 {
 	if m.drSampleTotalRegion <= m.drSampleRecoverCount {
 		m.drSampleTotalRegion = m.drSampleRecoverCount + 1
 	}
-	totalUnchecked := m.drTotalRegion - m.drRecoverCount
-	if totalUnchecked < m.drSampleTotalRegion {
-		totalUnchecked = m.drSampleTotalRegion
-	}
+	totalUnchecked := max(m.drTotalRegion-m.drRecoverCount, m.drSampleTotalRegion)
 	total := m.drRecoverCount + totalUnchecked
 	uncheckRecovered := float32(totalUnchecked) * float32(m.drSampleRecoverCount) / float32(m.drSampleTotalRegion)
 	return (float32(m.drRecoverCount) + uncheckRecovered) / float32(total)

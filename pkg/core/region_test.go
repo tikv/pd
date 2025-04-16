@@ -483,8 +483,8 @@ func TestSetRegion(t *testing.T) {
 		region := NewRegionInfo(&metapb.Region{
 			Id:       uint64(i + 1),
 			Peers:    []*metapb.Peer{peer1, peer2, peer3},
-			StartKey: []byte(fmt.Sprintf("%20d", i*10)),
-			EndKey:   []byte(fmt.Sprintf("%20d", (i+1)*10)),
+			StartKey: fmt.Appendf(nil, "%20d", i*10),
+			EndKey:   fmt.Appendf(nil, "%20d", (i+1)*10),
 		}, peer1)
 		origin, overlaps, rangeChanged := regions.SetRegion(region)
 		regions.UpdateSubTree(region, origin, overlaps, rangeChanged)
@@ -496,8 +496,8 @@ func TestSetRegion(t *testing.T) {
 	region := NewRegionInfo(&metapb.Region{
 		Id:       uint64(21),
 		Peers:    []*metapb.Peer{peer1, peer2, peer3},
-		StartKey: []byte(fmt.Sprintf("%20d", 184)),
-		EndKey:   []byte(fmt.Sprintf("%20d", 211)),
+		StartKey: fmt.Appendf(nil, "%20d", 184),
+		EndKey:   fmt.Appendf(nil, "%20d", 211),
 	}, peer1)
 	region.pendingPeers = append(region.pendingPeers, peer3)
 	origin, overlaps, rangeChanged := regions.SetRegion(region)
@@ -514,8 +514,8 @@ func TestSetRegion(t *testing.T) {
 	region = NewRegionInfo(&metapb.Region{
 		Id:       uint64(21),
 		Peers:    []*metapb.Peer{peer1, peer2, peer3},
-		StartKey: []byte(fmt.Sprintf("%20d", 184)),
-		EndKey:   []byte(fmt.Sprintf("%20d", 212)),
+		StartKey: fmt.Appendf(nil, "%20d", 184),
+		EndKey:   fmt.Appendf(nil, "%20d", 212),
 	}, peer1)
 	region.pendingPeers = append(region.pendingPeers, peer3)
 	origin, overlaps, rangeChanged = regions.SetRegion(region)
@@ -525,7 +525,7 @@ func TestSetRegion(t *testing.T) {
 	re.Len(regions.GetRegions(), 97)
 
 	// Test remove overlaps.
-	region = region.Clone(WithStartKey([]byte(fmt.Sprintf("%20d", 175))), WithNewRegionID(201))
+	region = region.Clone(WithStartKey(fmt.Appendf(nil, "%20d", 175)), WithNewRegionID(201))
 	re.NotNil(regions.GetRegion(21))
 	re.NotNil(regions.GetRegion(18))
 	origin, overlaps, rangeChanged = regions.SetRegion(region)
@@ -565,15 +565,15 @@ func TestShouldRemoveFromSubTree(t *testing.T) {
 	region := NewRegionInfo(&metapb.Region{
 		Id:       uint64(1),
 		Peers:    []*metapb.Peer{peer1, peer2, peer4},
-		StartKey: []byte(fmt.Sprintf("%20d", 10)),
-		EndKey:   []byte(fmt.Sprintf("%20d", 20)),
+		StartKey: fmt.Appendf(nil, "%20d", 10),
+		EndKey:   fmt.Appendf(nil, "%20d", 20),
 	}, peer1)
 
 	origin := NewRegionInfo(&metapb.Region{
 		Id:       uint64(1),
 		Peers:    []*metapb.Peer{peer1, peer2, peer3},
-		StartKey: []byte(fmt.Sprintf("%20d", 10)),
-		EndKey:   []byte(fmt.Sprintf("%20d", 20)),
+		StartKey: fmt.Appendf(nil, "%20d", 10),
+		EndKey:   fmt.Appendf(nil, "%20d", 20),
 	}, peer1)
 	re.True(region.peersEqualTo(origin))
 
@@ -654,8 +654,8 @@ func BenchmarkRandomRegion(b *testing.B) {
 			region := NewRegionInfo(&metapb.Region{
 				Id:       uint64(i + 1),
 				Peers:    []*metapb.Peer{peer},
-				StartKey: []byte(fmt.Sprintf("%20d", i)),
-				EndKey:   []byte(fmt.Sprintf("%20d", i+1)),
+				StartKey: fmt.Appendf(nil, "%20d", i),
+				EndKey:   fmt.Appendf(nil, "%20d", i+1),
 			}, peer)
 			origin, overlaps, rangeChanged := regions.SetRegion(region)
 			regions.UpdateSubTree(region, origin, overlaps, rangeChanged)
@@ -716,8 +716,8 @@ func BenchmarkRandomSetRegion(b *testing.B) {
 		region := NewRegionInfo(&metapb.Region{
 			Id:       uint64(i + 1),
 			Peers:    []*metapb.Peer{peer},
-			StartKey: []byte(fmt.Sprintf("%20d", i)),
-			EndKey:   []byte(fmt.Sprintf("%20d", i+1)),
+			StartKey: fmt.Appendf(nil, "%20d", i),
+			EndKey:   fmt.Appendf(nil, "%20d", i+1),
 		}, peer)
 		origin, overlaps, rangeChanged := regions.SetRegion(region)
 		regions.UpdateSubTree(region, origin, overlaps, rangeChanged)
@@ -738,14 +738,14 @@ func TestGetRegionSizeByRange(t *testing.T) {
 	nums := 100001
 	for i := range nums {
 		peer := &metapb.Peer{StoreId: 1, Id: uint64(i + 1)}
-		endKey := []byte(fmt.Sprintf("%20d", i+1))
+		endKey := fmt.Appendf(nil, "%20d", i+1)
 		if i == nums-1 {
 			endKey = []byte("")
 		}
 		region := NewRegionInfo(&metapb.Region{
 			Id:       uint64(i + 1),
 			Peers:    []*metapb.Peer{peer},
-			StartKey: []byte(fmt.Sprintf("%20d", i)),
+			StartKey: fmt.Appendf(nil, "%20d", i),
 			EndKey:   endKey,
 		}, peer, SetApproximateSize(10))
 		origin, overlaps, rangeChanged := regions.SetRegion(region)
@@ -769,8 +769,8 @@ func BenchmarkRandomSetRegionWithGetRegionSizeByRange(b *testing.B) {
 		region := NewRegionInfo(&metapb.Region{
 			Id:       uint64(i + 1),
 			Peers:    []*metapb.Peer{peer},
-			StartKey: []byte(fmt.Sprintf("%20d", i)),
-			EndKey:   []byte(fmt.Sprintf("%20d", i+1)),
+			StartKey: fmt.Appendf(nil, "%20d", i),
+			EndKey:   fmt.Appendf(nil, "%20d", i+1),
 		}, peer, SetApproximateSize(10))
 		origin, overlaps, rangeChanged := regions.SetRegion(region)
 		regions.UpdateSubTree(region, origin, overlaps, rangeChanged)
@@ -799,8 +799,8 @@ func BenchmarkRandomSetRegionWithGetRegionSizeByRangeParallel(b *testing.B) {
 		region := NewRegionInfo(&metapb.Region{
 			Id:       uint64(i + 1),
 			Peers:    []*metapb.Peer{peer},
-			StartKey: []byte(fmt.Sprintf("%20d", i)),
-			EndKey:   []byte(fmt.Sprintf("%20d", i+1)),
+			StartKey: fmt.Appendf(nil, "%20d", i),
+			EndKey:   fmt.Appendf(nil, "%20d", i+1),
 		}, peer)
 		origin, overlaps, rangeChanged := regions.SetRegion(region)
 		regions.UpdateSubTree(region, origin, overlaps, rangeChanged)
@@ -1035,8 +1035,8 @@ func generateTestRegions(count int, storeNum int) []*RegionInfo {
 		region := NewRegionInfo(&metapb.Region{
 			Id:          uint64(i + 1),
 			Peers:       []*metapb.Peer{peer1, peer2, peer3},
-			StartKey:    []byte(fmt.Sprintf("%20d", i*10)),
-			EndKey:      []byte(fmt.Sprintf("%20d", (i+1)*10)),
+			StartKey:    fmt.Appendf(nil, "%20d", i*10),
+			EndKey:      fmt.Appendf(nil, "%20d", (i+1)*10),
 			RegionEpoch: &metapb.RegionEpoch{ConfVer: 100, Version: 100},
 		},
 			peer1,
@@ -1059,8 +1059,8 @@ func TestUpdateRegionEventualConsistency(t *testing.T) {
 	item := NewRegionInfo(&metapb.Region{
 		Id:          uint64(i + 1),
 		Peers:       []*metapb.Peer{peer1, peer2, peer3},
-		StartKey:    []byte(fmt.Sprintf("%20d", i*10)),
-		EndKey:      []byte(fmt.Sprintf("%20d", (i+1)*10)),
+		StartKey:    fmt.Appendf(nil, "%20d", i*10),
+		EndKey:      fmt.Appendf(nil, "%20d", (i+1)*10),
 		RegionEpoch: &metapb.RegionEpoch{ConfVer: 100, Version: 100},
 	},
 		peer1,

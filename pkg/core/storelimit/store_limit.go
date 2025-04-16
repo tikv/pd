@@ -72,7 +72,7 @@ type StoreRateLimit struct {
 // NewStoreRateLimit creates a StoreRateLimit.
 func NewStoreRateLimit(ratePerSec float64) StoreLimit {
 	limits := make([]*limit, storeLimitTypeLen)
-	for i := 0; i < len(limits); i++ {
+	for i := range limits {
 		l := &limit{}
 		l.Reset(ratePerSec)
 		limits[i] = l

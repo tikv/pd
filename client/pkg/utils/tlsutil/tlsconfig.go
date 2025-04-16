@@ -38,6 +38,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
+	"slices"
 
 	"github.com/pingcap/errors"
 
@@ -126,10 +127,8 @@ func (info tlsInfo) baseConfig() (*tls.Config, error) {
 		cfg.VerifyPeerCertificate = func(_ [][]byte, verifiedChains [][]*x509.Certificate) error {
 			for _, chains := range verifiedChains {
 				if len(chains) != 0 {
-					for _, allowedCN := range info.allowedCNs {
-						if allowedCN == chains[0].Subject.CommonName {
-							return nil
-						}
+					if slices.Contains(info.allowedCNs, chains[0].Subject.CommonName) {
+						return nil
 					}
 				}
 			}

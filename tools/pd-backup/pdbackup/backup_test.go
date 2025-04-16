@@ -104,7 +104,7 @@ func setupServer() (*httptest.Server, *config.Config) {
 		b, err := json.Marshal(serverConfig)
 		if err != nil {
 			res.WriteHeader(http.StatusInternalServerError)
-			res.Write([]byte(fmt.Sprintf("failed setting up test server: %s", err)))
+			res.Write(fmt.Appendf(nil, "failed setting up test server: %s", err))
 			return
 		}
 

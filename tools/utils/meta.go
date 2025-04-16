@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"io"
 	"math/rand/v2"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -280,11 +281,11 @@ func randomPick(slice []int, total int, ratio float64) []int {
 	rand.Shuffle(total, func(i, j int) {
 		slice[i], slice[j] = slice[j], slice[i]
 	})
-	return append(slice[:0:0], slice[0:int(float64(total)*ratio)]...)
+	return slices.Clone(slice[0:int(float64(total)*ratio)])
 }
 
 func pick(slice []int, total int, ratio float64) []int {
-	return append(slice[:0:0], slice[0:int(float64(total)*ratio)]...)
+	return slices.Clone(slice[0:int(float64(total)*ratio)])
 }
 
 // HandleRegionHeartbeat handles the region heartbeat for the given store.

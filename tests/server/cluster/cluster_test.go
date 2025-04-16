@@ -902,8 +902,8 @@ func TestConcurrentHandleRegion(t *testing.T) {
 		re.NoError(err)
 		region := &metapb.Region{
 			Id:       regionID,
-			StartKey: []byte(fmt.Sprintf("%5d", i)),
-			EndKey:   []byte(fmt.Sprintf("%5d", i+1)),
+			StartKey: fmt.Appendf(nil, "%5d", i),
+			EndKey:   fmt.Appendf(nil, "%5d", i+1),
 			Peers:    []*metapb.Peer{{Id: peerID, StoreId: stores[0].GetId()}},
 			RegionEpoch: &metapb.RegionEpoch{
 				ConfVer: initEpochConfVer,
@@ -1039,8 +1039,8 @@ func TestLoadClusterInfo(t *testing.T) {
 	for i := range uint64(n) {
 		region := &metapb.Region{
 			Id:          i,
-			StartKey:    []byte(fmt.Sprintf("%20d", i)),
-			EndKey:      []byte(fmt.Sprintf("%20d", i+1)),
+			StartKey:    fmt.Appendf(nil, "%20d", i),
+			EndKey:      fmt.Appendf(nil, "%20d", i+1),
 			RegionEpoch: &metapb.RegionEpoch{Version: 1, ConfVer: 1},
 		}
 		regions = append(regions, region)
@@ -1074,8 +1074,8 @@ func TestLoadClusterInfo(t *testing.T) {
 	for i := range uint64(m) {
 		region := &metapb.Region{
 			Id:          i,
-			StartKey:    []byte(fmt.Sprintf("%20d", i)),
-			EndKey:      []byte(fmt.Sprintf("%20d", i+1)),
+			StartKey:    fmt.Appendf(nil, "%20d", i),
+			EndKey:      fmt.Appendf(nil, "%20d", i+1),
 			RegionEpoch: &metapb.RegionEpoch{Version: 1, ConfVer: 1},
 		}
 		regions = append(regions, region)

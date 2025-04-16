@@ -17,6 +17,7 @@ package handlers
 import (
 	"context"
 	"fmt"
+	"maps"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -164,9 +165,7 @@ func mustMakeTestKeyspaces(re *require.Assertions, server *tests.TestServer, cou
 // checkUpdateRequest verifies a keyspace meta matches a update request.
 func checkUpdateRequest(re *require.Assertions, request *handlers.UpdateConfigParams, oldConfig, newConfig map[string]string) {
 	expected := map[string]string{}
-	for k, v := range oldConfig {
-		expected[k] = v
-	}
+	maps.Copy(expected, oldConfig)
 	for k, v := range request.Config {
 		if v == nil {
 			delete(expected, k)

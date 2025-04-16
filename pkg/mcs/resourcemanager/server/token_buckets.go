@@ -15,6 +15,7 @@
 package server
 
 import (
+	"maps"
 	"math"
 	"time"
 
@@ -134,9 +135,7 @@ func (gts *GroupTokenBucketState) Clone() *GroupTokenBucketState {
 	var tokenSlots map[uint64]*TokenSlot
 	if gts.tokenSlots != nil {
 		tokenSlots = make(map[uint64]*TokenSlot)
-		for id, tokens := range gts.tokenSlots {
-			tokenSlots[id] = tokens
-		}
+		maps.Copy(tokenSlots, gts.tokenSlots)
 	}
 
 	var lastUpdate *time.Time

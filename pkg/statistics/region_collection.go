@@ -15,6 +15,7 @@
 package statistics
 
 import (
+	"maps"
 	"time"
 
 	"go.uber.org/zap"
@@ -436,9 +437,7 @@ func (l *LabelStatistics) GetLabelCounter() map[string]int {
 	l.RLock()
 	defer l.RUnlock()
 	clonedLabelCounter := make(map[string]int, len(l.labelCounter))
-	for k, v := range l.labelCounter {
-		clonedLabelCounter[k] = v
-	}
+	maps.Copy(clonedLabelCounter, l.labelCounter)
 	return clonedLabelCounter
 }
 
