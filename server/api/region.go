@@ -426,6 +426,7 @@ func (h *regionsHandler) GetEmptyRegions(w http.ResponseWriter, r *http.Request)
 	h.getRegionsByType(w, statistics.EmptyRegion, r)
 }
 
+// HistItem is used to represent a histogram item.
 type HistItem struct {
 	Start int64 `json:"start"`
 	End   int64 `json:"end"`

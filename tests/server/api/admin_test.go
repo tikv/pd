@@ -33,7 +33,6 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/replication"
 	"github.com/tikv/pd/pkg/utils/apiutil"
-	"github.com/tikv/pd/pkg/utils/testutil"
 	tu "github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/api"
@@ -349,7 +348,7 @@ func (suite *adminTestSuite) TestCleanPath() {
 	// transfer path to /config
 	url := fmt.Sprintf("%s/admin/persist-file/../../config", suite.urlPrefix)
 	cfg := &config.Config{}
-	err := testutil.ReadGetJSON(re, testDialClient, url, cfg)
+	err := tu.ReadGetJSON(re, testDialClient, url, cfg)
 	re.NoError(err)
 
 	// handled by router

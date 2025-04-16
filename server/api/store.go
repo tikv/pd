@@ -695,6 +695,7 @@ type storeStateFilter struct {
 	accepts []metapb.StoreState
 }
 
+// NewStoreStateFilter creates a new store state filter.
 func NewStoreStateFilter(u *url.URL) (*storeStateFilter, error) {
 	var acceptStates []metapb.StoreState
 	if v, ok := u.Query()["state"]; ok {
@@ -722,6 +723,7 @@ func NewStoreStateFilter(u *url.URL) (*storeStateFilter, error) {
 	}, nil
 }
 
+// Filter filters the stores by state.
 func (filter *storeStateFilter) Filter(stores []*metapb.Store) []*metapb.Store {
 	ret := make([]*metapb.Store, 0, len(stores))
 	for _, s := range stores {

@@ -30,6 +30,7 @@ import (
 	"github.com/tikv/pd/server"
 )
 
+// APIPrefix is the prefix of the API.
 const APIPrefix = "/pd"
 
 // NewHandler creates a HTTP handler for API.

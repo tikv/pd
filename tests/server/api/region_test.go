@@ -52,6 +52,7 @@ type regionTestSuite struct {
 
 func TestRegionTestSuite(t *testing.T) {
 	suite.Run(t, new(regionTestSuite))
+	suite.Run(t, new(testRegionSuite))
 }
 
 func (suite *regionTestSuite) SetupSuite() {
@@ -454,10 +455,6 @@ type testRegionSuite struct {
 	svr       *server.Server
 	cleanup   tu.CleanupFunc
 	urlPrefix string
-}
-
-func RegionTestSuite(t *testing.T) {
-	suite.Run(t, new(regionTestSuite))
 }
 
 func (suite *testRegionSuite) SetupSuite() {

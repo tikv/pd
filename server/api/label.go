@@ -110,6 +110,7 @@ type storesLabelFilter struct {
 	valuePattern *regexp.Regexp
 }
 
+// NewStoresLabelFilter creates a new storesLabelFilter.
 func NewStoresLabelFilter(name, value string) (*storesLabelFilter, error) {
 	// add (?i) to set a case-insensitive flag
 	keyPattern, err := regexp.Compile("(?i)" + name)
