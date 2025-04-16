@@ -14,9 +14,11 @@
 
 package config
 
-import "maps"
+import (
+	"maps"
 
-import "github.com/tikv/pd/pkg/ratelimit"
+	"github.com/tikv/pd/pkg/ratelimit"
+)
 
 const (
 	defaultEnableAuditMiddleware         = true
