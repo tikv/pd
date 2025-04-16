@@ -23,7 +23,6 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 
-	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
@@ -61,40 +60,33 @@ func (suite *serviceGCSafepointTestSuite) TestServiceGCSafepoint() {
 	re := suite.Require()
 	sspURL := suite.urlPrefix + "/gc/safepoint"
 
-	gcStateManager := suite.svr.GetGCStateManager()
-	now := time.Now().Truncate(time.Second)
+	storage := suite.svr.GetStorage()
 	list := &ListServiceGCSafepoint{
 		ServiceGCSafepoints: []*endpoint.ServiceSafePoint{
 			{
-				ServiceID:  "a",
-				ExpiredAt:  now.Unix() + 10,
-				SafePoint:  1,
-				KeyspaceID: constant.NullKeyspaceID,
+				ServiceID: "a",
+				ExpiredAt: time.Now().Unix() + 10,
+				SafePoint: 1,
 			},
 			{
-				ServiceID:  "b",
-				ExpiredAt:  now.Unix() + 10,
-				SafePoint:  2,
-				KeyspaceID: constant.NullKeyspaceID,
+				ServiceID: "b",
+				ExpiredAt: time.Now().Unix() + 10,
+				SafePoint: 2,
 			},
 			{
-				ServiceID:  "c",
-				ExpiredAt:  now.Unix() + 10,
-				SafePoint:  3,
-				KeyspaceID: constant.NullKeyspaceID,
+				ServiceID: "c",
+				ExpiredAt: time.Now().Unix() + 10,
+				SafePoint: 3,
 			},
 		},
 		GCSafePoint:           1,
 		MinServiceGcSafepoint: 1,
 	}
 	for _, ssp := range list.ServiceGCSafepoints {
-		_, _, err := gcStateManager.CompatibleUpdateServiceGCSafePoint(ssp.ServiceID, ssp.SafePoint, 10, now)
+		err := storage.SaveServiceGCSafePoint(ssp)
 		re.NoError(err)
 	}
-	_, err := gcStateManager.AdvanceTxnSafePoint(constant.NullKeyspaceID, 1, now)
-	re.NoError(err)
-	_, _, err = gcStateManager.AdvanceGCSafePoint(constant.NullKeyspaceID, 1)
-	re.NoError(err)
+	storage.SaveGCSafePoint(1)
 
 	res, err := testDialClient.Get(sspURL)
 	re.NoError(err)
@@ -107,12 +99,7 @@ func (suite *serviceGCSafepointTestSuite) TestServiceGCSafepoint() {
 	err = testutil.CheckDelete(testDialClient, sspURL+"/a", testutil.StatusOK(re))
 	re.NoError(err)
 
-	state, err := gcStateManager.GetGCState(constant.NullKeyspaceID)
+	left, err := storage.LoadAllServiceGCSafePoints()
 	re.NoError(err)
-	left := state.GCBarriers
-	leftSsps := make([]*endpoint.ServiceSafePoint, 0, len(left))
-	for _, barrier := range left {
-		leftSsps = append(leftSsps, barrier.ToServiceSafePoint(constant.NullKeyspaceID))
-	}
-	re.Equal(list.ServiceGCSafepoints[1:], leftSsps)
+	re.Equal(list.ServiceGCSafepoints[1:], left)
 }
