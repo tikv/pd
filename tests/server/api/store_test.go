@@ -38,6 +38,8 @@ import (
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/server/api"
+	"github.com/tikv/pd/tests"
 )
 
 type storeTestSuite struct {
@@ -101,11 +103,11 @@ func (suite *storeTestSuite) SetupSuite() {
 	}
 	re := suite.Require()
 	suite.svr, suite.cleanup = mustNewServer(re)
-	server.MustWaitLeader(re, []*server.Server{suite.svr})
+	tests.MustWaitLeader(re, []*server.Server{suite.svr})
 
 	addr := suite.svr.GetAddr()
 	suite.grpcSvr = &server.GrpcServer{Server: suite.svr}
-	suite.urlPrefix = fmt.Sprintf("%s%s/api/v1", addr, apiPrefix)
+	suite.urlPrefix = fmt.Sprintf("%s%s/api/v1", addr, api.APIPrefix)
 
 	mustBootstrapCluster(re, suite.svr)
 
@@ -435,19 +437,19 @@ func (suite *storeTestSuite) TestUrlStoreFilter() {
 	for _, testCase := range testCases {
 		uu, err := url.Parse(testCase.u)
 		re.NoError(err)
-		f, err := newStoreStateFilter(uu)
+		f, err := api.NewStoreStateFilter(uu)
 		re.NoError(err)
-		re.Equal(testCase.want, f.filter(suite.stores))
+		re.Equal(testCase.want, f.Filter(suite.stores))
 	}
 
 	u, err := url.Parse("http://localhost:2379/pd/api/v1/stores?state=foo")
 	re.NoError(err)
-	_, err = newStoreStateFilter(u)
+	_, err = api.NewStoreStateFilter(u)
 	re.Error(err)
 
 	u, err = url.Parse("http://localhost:2379/pd/api/v1/stores?state=999999")
 	re.NoError(err)
-	_, err = newStoreStateFilter(u)
+	_, err = api.NewStoreStateFilter(u)
 	re.Error(err)
 }
 

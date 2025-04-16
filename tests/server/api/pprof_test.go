@@ -25,6 +25,8 @@ import (
 
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/server/api"
+	"github.com/tikv/pd/tests"
 )
 
 type profTestSuite struct {
@@ -41,10 +43,10 @@ func TestProfTestSuite(t *testing.T) {
 func (suite *profTestSuite) SetupSuite() {
 	re := suite.Require()
 	suite.svr, suite.cleanup = mustNewServer(re)
-	server.MustWaitLeader(re, []*server.Server{suite.svr})
+	tests.MustWaitLeader(re, []*server.Server{suite.svr})
 
 	addr := suite.svr.GetAddr()
-	suite.urlPrefix = fmt.Sprintf("%s%s/api/v1/debug", addr, apiPrefix)
+	suite.urlPrefix = fmt.Sprintf("%s%s/api/v1/debug", addr, api.APIPrefix)
 
 	mustBootstrapCluster(re, suite.svr)
 }

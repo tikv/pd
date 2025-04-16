@@ -29,7 +29,9 @@ import (
 	"github.com/tikv/pd/pkg/utils/keypath"
 	tu "github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/server/api"
 	"github.com/tikv/pd/server/config"
+	"github.com/tikv/pd/tests"
 )
 
 type labelsStoreTestSuite struct {
@@ -124,10 +126,10 @@ func (suite *labelsStoreTestSuite) SetupSuite() {
 	suite.svr, suite.cleanup = mustNewServer(re, func(cfg *config.Config) {
 		cfg.Replication.StrictlyMatchLabel = false
 	})
-	server.MustWaitLeader(re, []*server.Server{suite.svr})
+	tests.MustWaitLeader(re, []*server.Server{suite.svr})
 
 	addr := suite.svr.GetAddr()
-	suite.urlPrefix = fmt.Sprintf("%s%s/api/v1", addr, apiPrefix)
+	suite.urlPrefix = fmt.Sprintf("%s%s/api/v1", addr, api.APIPrefix)
 
 	mustBootstrapCluster(re, suite.svr)
 	for _, store := range suite.stores {
@@ -188,7 +190,7 @@ func (suite *labelsStoreTestSuite) TestStoresLabelFilter() {
 		re.NoError(err)
 		checkStoresInfo(re, info.Stores, testCase.want)
 	}
-	_, err := newStoresLabelFilter("test", ".[test")
+	_, err := api.NewStoresLabelFilter("test", ".[test")
 	re.Error(err)
 }
 
@@ -211,11 +213,11 @@ func (suite *strictlyLabelsStoreTestSuite) SetupSuite() {
 		cfg.Replication.StrictlyMatchLabel = true
 		cfg.Replication.EnablePlacementRules = false
 	})
-	server.MustWaitLeader(re, []*server.Server{suite.svr})
+	tests.MustWaitLeader(re, []*server.Server{suite.svr})
 
 	suite.grpcSvr = &server.GrpcServer{Server: suite.svr}
 	addr := suite.svr.GetAddr()
-	suite.urlPrefix = fmt.Sprintf("%s%s/api/v1", addr, apiPrefix)
+	suite.urlPrefix = fmt.Sprintf("%s%s/api/v1", addr, api.APIPrefix)
 
 	mustBootstrapCluster(re, suite.svr)
 }

@@ -1874,7 +1874,7 @@ func (s *Server) PersistFile(name string, data []byte) error {
 	}
 	log.Info("persist file", zap.String("name", name), zap.Binary("data", data))
 	path := filepath.Join(s.GetConfig().DataDir, name)
-	if !isPathInDirectory(path, s.GetConfig().DataDir) {
+	if !apiutil.IsPathInDirectory(path, s.GetConfig().DataDir) {
 		return errors.New("Invalid file path")
 	}
 	return os.WriteFile(path, data, 0644) // #nosec
