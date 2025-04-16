@@ -17,14 +17,48 @@ package storage
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/pkg/storage/kv"
 )
+
+func TestRegionReload(t *testing.T) {
+	re := require.New(t)
+	se := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
+	regionCount := 10
+	for id := range regionCount {
+		region := newTestRegionMeta(uint64(id))
+		re.NoError(se.SaveRegion(region))
+	}
+	re.Equal(uint64(0), se.NextRegionID())
+
+	// load region will fail after load 5 regions
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*5)
+	defer cancel()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/storage/endpoint/slowLoadRegion", "return(true)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/storage/endpoint/slowLoadRegion"))
+	}()
+	re.Error(se.LoadRegions(ctx, func(_ *core.RegionInfo) []*core.RegionInfo {
+		return nil
+	}))
+	re.NotEqual(uint64(regionCount), se.NextRegionID())
+
+	// load regions will success and the loading cost will less than 10s
+	ctx, cancel = context.WithTimeout(context.Background(), time.Second*8)
+	defer cancel()
+	re.NoError(se.LoadRegions(ctx, func(_ *core.RegionInfo) []*core.RegionInfo {
+		return nil
+	}))
+	re.Equal(uint64(regionCount), se.NextRegionID())
+}
 
 func TestRegionStorage(t *testing.T) {
 	re := require.New(t)

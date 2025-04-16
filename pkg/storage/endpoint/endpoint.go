@@ -30,6 +30,8 @@ import (
 type StorageEndpoint struct {
 	kv.Base
 	encryptionKeyManager *encryption.Manager
+	// nextRegionID is the next region ID to be reloaded
+	nextRegionID uint64
 }
 
 // NewStorageEndpoint creates a new base storage endpoint with the given KV and encryption key manager.
@@ -41,6 +43,7 @@ func NewStorageEndpoint(
 	return &StorageEndpoint{
 		kvBase,
 		encryptionKeyManager,
+		0,
 	}
 }
 
@@ -84,4 +87,9 @@ func loadJSONByPrefix[T any](se *StorageEndpoint, prefix string, limit int) ([]s
 		data = append(data, item)
 	}
 	return keys, data, nil
+}
+
+// NextRegionID returns the next region ID to be reloaded, only for test
+func (se *StorageEndpoint) NextRegionID() uint64 {
+	return se.nextRegionID
 }
