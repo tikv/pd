@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"math"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"sync/atomic"
@@ -1279,7 +1280,7 @@ func (r *RegionsInfo) setRegionLocked(region *RegionInfo, withOverlaps bool, ol 
 				}
 			}
 			if idx >= 0 {
-				ol = append(ol[:idx], ol[idx+1:]...)
+				ol = slices.Delete(ol, idx, idx+1)
 			}
 			r.tree.remove(origin)
 			// Update the RegionInfo in the regionItem.
@@ -1602,10 +1603,7 @@ func splitKeysIntoBatches(keys [][]byte) [][][]byte {
 	keysLen := len(keys)
 	batches := make([][][]byte, 0, (keysLen+batchSearchSize-1)/batchSearchSize)
 	for i := 0; i < keysLen; i += batchSearchSize {
-		end := i + batchSearchSize
-		if end > keysLen {
-			end = keysLen
-		}
+		end := min(i+batchSearchSize, keysLen)
 		batches = append(batches, keys[i:end])
 	}
 	return batches

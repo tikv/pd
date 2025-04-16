@@ -449,10 +449,7 @@ func (s *balanceRangeScheduler) prepare(cluster sche.SchedulerCluster, opInfluen
 	averageScore := int64(0)
 	averageScore = totalScore / int64(len(sources))
 
-	tolerantSizeRatio := int64(float64(len(scanRegions)) * adjustRatio)
-	if tolerantSizeRatio < 1 {
-		tolerantSizeRatio = 1
-	}
+	tolerantSizeRatio := max(int64(float64(len(scanRegions))*adjustRatio), 1)
 	return &balanceRangeSchedulerPlan{
 		SchedulerCluster: cluster,
 		stores:           sources,
