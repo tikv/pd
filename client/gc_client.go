@@ -157,6 +157,7 @@ func wrapKeyspaceScope(keyspaceID uint32) *pdpb.KeyspaceScope {
 	}
 }
 
+// AdvanceTxnSafePoint tries to advance the transaction safe point to the target value.
 func (c gcInternalController) AdvanceTxnSafePoint(ctx context.Context, target uint64) (gc.AdvanceTxnSafePointResult, error) {
 	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
 		span = span.Tracer().StartSpan("pdclient.AdvanceTxnSafePoint", opentracing.ChildOf(span.Context()))
@@ -188,6 +189,7 @@ func (c gcInternalController) AdvanceTxnSafePoint(ctx context.Context, target ui
 	}, nil
 }
 
+// AdvanceGCSafePoint tries to advance the GC safe point to the target value.
 func (c gcInternalController) AdvanceGCSafePoint(ctx context.Context, target uint64) (gc.AdvanceGCSafePointResult, error) {
 	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
 		span = span.Tracer().StartSpan("pdclient.AdvanceGCSafePoint", opentracing.ChildOf(span.Context()))
@@ -268,6 +270,7 @@ func pbToGCBarrierInfo(pb *pdpb.GCBarrierInfo, reqStartTime time.Time) *gc.GCBar
 	)
 }
 
+// SetGCBarrier sets (creates or updates) a GC barrier.
 func (c gcStatesClient) SetGCBarrier(ctx context.Context, barrierID string, barrierTS uint64, ttl time.Duration) (*gc.GCBarrierInfo, error) {
 	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
 		span = span.Tracer().StartSpan("pdclient.SetGCBarrier", opentracing.ChildOf(span.Context()))
@@ -283,7 +286,7 @@ func (c gcStatesClient) SetGCBarrier(ctx context.Context, barrierID string, barr
 		KeyspaceScope: wrapKeyspaceScope(c.keyspaceID),
 		BarrierId:     barrierID,
 		BarrierTs:     barrierTS,
-		TtlSeconds:    0,
+		TtlSeconds:    roundUpDurationToSeconds(ttl),
 	}
 	protoClient, ctx := c.client.getClientAndContext(ctx)
 	if protoClient == nil {
@@ -296,6 +299,7 @@ func (c gcStatesClient) SetGCBarrier(ctx context.Context, barrierID string, barr
 	return pbToGCBarrierInfo(resp.GetNewBarrierInfo(), start), nil
 }
 
+// DeleteGCBarrier deletes a GC barrier.
 func (c gcStatesClient) DeleteGCBarrier(ctx context.Context, barrierID string) (*gc.GCBarrierInfo, error) {
 	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
 		span = span.Tracer().StartSpan("pdclient.DeleteGCBarrier", opentracing.ChildOf(span.Context()))
@@ -322,6 +326,7 @@ func (c gcStatesClient) DeleteGCBarrier(ctx context.Context, barrierID string) (
 	return pbToGCBarrierInfo(resp.GetDeletedBarrierInfo(), start), nil
 }
 
+// GetGCState gets the current GC state.
 func (c gcStatesClient) GetGCState(ctx context.Context) (gc.GCStateInfo, error) {
 	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
 		span = span.Tracer().StartSpan("pdclient.GetGCState", opentracing.ChildOf(span.Context()))

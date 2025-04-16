@@ -1391,10 +1391,12 @@ func adjustCallerComponent(callerComponent caller.Component) caller.Component {
 	return ""
 }
 
+// GetGCInternalController returns the gc.InternalController, which is used for internally controlling the GC states.
 func (c *client) GetGCInternalController(keyspaceID uint32) gc.InternalController {
 	return newGCInternalController(c, keyspaceID)
 }
 
+// GetGCStatesClient returns the gc.GCStatesClient, which is used for accessing the GC states for general purposes.
 func (c *client) GetGCStatesClient(keyspaceID uint32) gc.GCStatesClient {
 	return newGCStatesClient(c, keyspaceID)
 }

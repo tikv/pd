@@ -33,25 +33,31 @@ type Client interface {
 }
 
 // GCStatesClient is the interface for users to access GC states.
-// KeyspaceID is bound to this type when created.
+// KeyspaceID is already bound to this type when created.
 //
 //nolint:revive
 type GCStatesClient interface {
+	// SetGCBarrier sets (creates or updates) a GC barrier.
 	SetGCBarrier(ctx context.Context, barrierID string, barrierTS uint64, ttl time.Duration) (*GCBarrierInfo, error)
+	// DeleteGCBarrier deletes a GC barrier.
 	DeleteGCBarrier(ctx context.Context, barrierID string) (*GCBarrierInfo, error)
+	// GetGCState gets the current GC state.
 	GetGCState(ctx context.Context) (GCStateInfo, error)
 }
 
 // InternalController is the interface for controlling GC execution.
-// KeyspaceID is bound to this type when created.
+// KeyspaceID is already bound to this type when created.
 //
 // WARNING: This is only for internal use. The only possible place to use this is the `GCWorker` in TiDB, or
 // other possible components that are responsible for being the center of controlling GC of the cluster.
 type InternalController interface {
+	// AdvanceTxnSafePoint tries to advance the transaction safe point to the target value.
 	AdvanceTxnSafePoint(ctx context.Context, target uint64) (AdvanceTxnSafePointResult, error)
+	// AdvanceGCSafePoint tries to advance the GC safe point to the target value.
 	AdvanceGCSafePoint(ctx context.Context, target uint64) (AdvanceGCSafePointResult, error)
 }
 
+// AdvanceTxnSafePointResult represents the result of advancing transaction safe point.
 type AdvanceTxnSafePointResult struct {
 	OldTxnSafePoint    uint64
 	Target             uint64
@@ -59,12 +65,15 @@ type AdvanceTxnSafePointResult struct {
 	BlockerDescription string
 }
 
+// AdvanceGCSafePointResult represents the result of advancing GC safe point.
 type AdvanceGCSafePointResult struct {
 	OldGCSafePoint uint64
 	Target         uint64
 	NewGCSafePoint uint64
 }
 
+// GCBarrierInfo represents the information of a GC barrier.
+//
 //nolint:revive
 type GCBarrierInfo struct {
 	BarrierID string
@@ -75,8 +84,10 @@ type GCBarrierInfo struct {
 	getReqStartTime time.Time
 }
 
+// TTLNeverExpire is a special value for TTL that indicates the barrier never expires.
 const TTLNeverExpire = time.Duration(math.MaxInt64)
 
+// NewGCBarrierInfo creates a new GCBarrierInfo instance.
 func NewGCBarrierInfo(barrierID string, barrierTS uint64, ttl time.Duration, getReqStartTime time.Time) *GCBarrierInfo {
 	return &GCBarrierInfo{
 		BarrierID:       barrierID,
@@ -86,17 +97,22 @@ func NewGCBarrierInfo(barrierID string, barrierTS uint64, ttl time.Duration, get
 	}
 }
 
+// IsExpired checks whether the barrier is expired.
 func (b *GCBarrierInfo) IsExpired() bool {
-	return b.isExpired(time.Now())
+	return b.isExpiredImpl(time.Now())
 }
 
-func (b *GCBarrierInfo) isExpired(now time.Time) bool {
+// isExpiredImpl is the internal implementation of IsExpired that accepts caller-specified current time for the
+// convenience of testing.
+func (b *GCBarrierInfo) isExpiredImpl(now time.Time) bool {
 	if b.TTL == TTLNeverExpire {
 		return false
 	}
 	return now.Sub(b.getReqStartTime) > b.TTL
 }
 
+// GCStateInfo represents the information of the GC state.
+//
 //nolint:revive
 type GCStateInfo struct {
 	KeyspaceID   uint32
