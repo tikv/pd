@@ -17,6 +17,7 @@ package placement
 import (
 	"bytes"
 	"encoding/json"
+	"maps"
 	"time"
 )
 
@@ -174,9 +175,7 @@ func (p *RuleConfigPatch) commit() {
 			p.c.rules[key] = rule
 		}
 	}
-	for id, group := range p.mut.groups {
-		p.c.groups[id] = group
-	}
+	maps.Copy(p.c.groups, p.mut.groups)
 	p.c.adjust()
 }
 
