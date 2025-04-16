@@ -900,7 +900,7 @@ func (suite *httpClientTestSuite) TestGetGCSafePoint() {
 			},
 			{
 				ServiceID: "CCC",
-				ExpiredAt: time.Now().Unix() + 10,
+				ExpiredAt: now.Unix() + 10,
 				SafePoint: 3,
 			},
 		},

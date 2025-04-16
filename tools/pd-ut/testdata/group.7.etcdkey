@@ -12,6 +12,8 @@
 /pd//alloc_id get
 /pd//config get
 /pd//config save
+/pd//gc/gc_state_revision get
+/pd//gc/gc_state_revision save
 /pd//gc/safe_point get
 /pd//gc/safe_point save
 /pd//gc/safe_point/service/ get
@@ -21,10 +23,15 @@
 /pd//gc/safe_point/service/BBB save
 /pd//gc/safe_point/service/CCC remove
 /pd//gc/safe_point/service/CCC save
+/pd//gc/safe_point/service/_ get
+/pd//gc/safe_point/service/_ remove
+/pd//gc/safe_point/service/a get
 /pd//gc/safe_point/service/a remove
 /pd//gc/safe_point/service/a save
+/pd//gc/safe_point/service/b get
 /pd//gc/safe_point/service/b remove
 /pd//gc/safe_point/service/b save
+/pd//gc/safe_point/service/c get
 /pd//gc/safe_point/service/c remove
 /pd//gc/safe_point/service/c save
 /pd//gc/safe_point/service/gc_worker remove
@@ -81,6 +88,9 @@
 /pd//tso/keyspace_groups/membership/ get
 /pd//tso/keyspace_groups/membership/ save
 /pd/cluster_id get
+/tidb/server/minstartts/ get
+/tidb/store/gcworker/saved_safe_point get
+/tidb/store/gcworker/saved_safe_point save
 encryption_keys get
 encryption_keys watch
 resource_group/controller get
