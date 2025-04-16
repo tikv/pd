@@ -48,7 +48,6 @@ func mustMakeTestKeyspaces(re *require.Assertions, server *server.Server, start 
 				testConfig2: "200",
 			},
 			CreateTime: now,
-			IsPreAlloc: true, // skip wait region split
 		})
 		re.NoError(err)
 	}
@@ -105,8 +104,7 @@ func mustCreateKeyspaceAtState(re *require.Assertions, server *server.Server, in
 	meta, err := manager.CreateKeyspace(&keyspace.CreateKeyspaceRequest{
 		Name:       fmt.Sprintf("test_keyspace_%d", index),
 		Config:     nil,
-		CreateTime: 0,    // Use 0 to indicate unchanged keyspace.
-		IsPreAlloc: true, // skip wait region split
+		CreateTime: 0, // Use 0 to indicate unchanged keyspace.
 	})
 	re.NoError(err)
 	switch state {
