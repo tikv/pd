@@ -44,6 +44,7 @@ import (
 
 	pd "github.com/tikv/pd/client"
 	"github.com/tikv/pd/client/clients/router"
+	"github.com/tikv/pd/client/constants"
 	"github.com/tikv/pd/client/opt"
 	"github.com/tikv/pd/client/pkg/caller"
 	cb "github.com/tikv/pd/client/pkg/circuitbreaker"
@@ -1276,11 +1277,15 @@ func (suite *clientTestSuite) checkGCSafePoint(re *require.Assertions, expectedS
 func (suite *clientTestSuite) TestUpdateGCSafePoint() {
 	re := suite.Require()
 	suite.checkGCSafePoint(re, 0)
-	for _, safePoint := range []uint64{0, 1, 2, 3, 233, 23333, 233333333333, math.MaxUint64} {
-		newSafePoint, err := suite.client.UpdateGCSafePoint(context.Background(), safePoint) //nolint:staticcheck
+	for _, gcSafePoint := range []uint64{0, 1, 2, 3, 233, 23333, 233333333333, math.MaxUint64} {
+		// Now GC safe point is not allowed to be advanced before advancing the txn safe point. Advance txn safe point
+		// first.
+		_, err := suite.client.GetGCInternalController(constants.NullKeyspaceID).AdvanceTxnSafePoint(context.Background(), gcSafePoint)
 		re.NoError(err)
-		re.Equal(safePoint, newSafePoint)
-		suite.checkGCSafePoint(re, safePoint)
+		newSafePoint, err := suite.client.UpdateGCSafePoint(context.Background(), gcSafePoint) //nolint:staticcheck
+		re.NoError(err)
+		re.Equal(gcSafePoint, newSafePoint)
+		suite.checkGCSafePoint(re, gcSafePoint)
 	}
 	// If the new safe point is less than the old one, it should not be updated.
 	newSafePoint, err := suite.client.UpdateGCSafePoint(context.Background(), 1) //nolint:staticcheck
