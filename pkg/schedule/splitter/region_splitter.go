@@ -19,6 +19,7 @@ import (
 	"context"
 	"encoding/hex"
 	"errors"
+	"maps"
 	"math"
 	"time"
 
@@ -246,9 +247,7 @@ func newSplitKeyResults() *splitKeyResults {
 }
 
 func (r *splitKeyResults) addRegionsID(regionsID map[uint64][]byte) {
-	for id, splitKey := range regionsID {
-		r.newRegions[id] = splitKey
-	}
+	maps.Copy(r.newRegions, regionsID)
 }
 
 func (r *splitKeyResults) getSplitRegions() map[uint64][]byte {
