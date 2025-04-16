@@ -432,14 +432,14 @@ func (*GCStateManager) logAdvancingTxnSafePoint(keyspaceID uint32, result Advanc
 // GC barrier can extend its lifetime arbitrarily.
 //
 // Passing non-positive value to ttl is not allowed. Passing `time.Duration(math.MaxInt64)` to ttl indicates that the
-// GC barrier should never expire.
+// GC barrier should never expire. The ttl might be rounded up, and the actual ttl is guaranteed no less than the
+// specified duration.
 //
 // The barrierID must be non-empty. For NullKeyspace, "gc_worker" is a reserved name and cannot be used as a barrierID.
 //
 // The given barrierTS must be greater than or equal to the current txn safe point, or an error will be returned.
 //
-// When this function executes successfully, its result is never nil, and it's guaranteed that the actual TTL is not
-// less than the specified duration.
+// When this function executes successfully, its result is never nil.
 func (m *GCStateManager) SetGCBarrier(keyspaceID uint32, barrierID string, barrierTS uint64, ttl time.Duration, now time.Time) (*endpoint.GCBarrier, error) {
 	if ttl <= 0 {
 		return nil, errs.ErrInvalidArgument.GenWithStackByArgs("ttl", ttl)

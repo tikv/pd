@@ -105,7 +105,6 @@ func newGCStateManagerForTest(t *testing.T) (storage *endpoint.StorageEndpoint, 
 		Name:       "ks1",
 		Config:     map[string]string{"gc_management_type": "global"},
 		CreateTime: time.Now().Unix(),
-		IsPreAlloc: false,
 	})
 	re.NoError(err)
 	re.Equal(uint32(1), ks1.Id)
@@ -114,7 +113,6 @@ func newGCStateManagerForTest(t *testing.T) (storage *endpoint.StorageEndpoint, 
 		Name:       "ks2",
 		Config:     map[string]string{"gc_management_type": "keyspace_level"},
 		CreateTime: time.Now().Unix(),
-		IsPreAlloc: false,
 	})
 	re.NoError(err)
 	re.Equal(uint32(2), ks2.Id)
@@ -123,7 +121,6 @@ func newGCStateManagerForTest(t *testing.T) (storage *endpoint.StorageEndpoint, 
 		Name:       "ks3",
 		Config:     map[string]string{},
 		CreateTime: time.Now().Unix(),
-		IsPreAlloc: false,
 	})
 	re.NoError(err)
 	re.Equal(uint32(3), ks3.Id)
