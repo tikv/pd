@@ -74,8 +74,6 @@ func NewRegionStorageWithLevelDBBackend(
 	return newRegionStorage(levelDBBackend), nil
 }
 
-// TODO: support other KV storage backends like BadgerDB in the future.
-
 type regionSource int
 
 const (

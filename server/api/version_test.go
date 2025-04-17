@@ -33,8 +33,6 @@ import (
 )
 
 func TestGetVersion(t *testing.T) {
-	// TODO: enable it.
-	t.Skip("Temporary disable. See issue: https://github.com/tikv/pd/issues/1893")
 	re := require.New(t)
 
 	fname := filepath.Join(os.TempDir(), "stdout")

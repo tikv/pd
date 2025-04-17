@@ -216,6 +216,16 @@ func (bc *Controller[T]) pushRequest(req T) {
 	bc.collectedRequestCount++
 }
 
+// IterCollectedRequests iterates the collected requests and calls the given function for each request.
+// If the function returns false, the iteration will be stopped.
+func (bc *Controller[T]) IterCollectedRequests(f func(req T) bool) {
+	for i := range bc.collectedRequests[:bc.collectedRequestCount] {
+		if !f(bc.collectedRequests[i]) {
+			return
+		}
+	}
+}
+
 // GetCollectedRequests returns the collected requests.
 func (bc *Controller[T]) GetCollectedRequests() []T {
 	return bc.collectedRequests[:bc.collectedRequestCount]

@@ -31,24 +31,27 @@ func TestManager(t *testing.T) {
 	manager.Store(ctx, "test-url", 1)
 	re.True(manager.Exist("test-url"))
 
-	cctx := manager.GetConnectionCtx()
+	cctx := manager.RandomlyPick()
 	re.Equal("test-url", cctx.StreamURL)
 	re.Equal(1, cctx.Stream)
+	re.Equal(cctx, manager.GetConnectionCtx("test-url"))
 
 	manager.Store(ctx, "test-url", 2)
-	cctx = manager.GetConnectionCtx()
+	cctx = manager.RandomlyPick()
 	re.Equal("test-url", cctx.StreamURL)
 	re.Equal(1, cctx.Stream)
+	re.Equal(cctx, manager.GetConnectionCtx("test-url"))
 
 	manager.Store(ctx, "test-url", 2, true)
-	cctx = manager.GetConnectionCtx()
+	cctx = manager.RandomlyPick()
 	re.Equal("test-url", cctx.StreamURL)
 	re.Equal(2, cctx.Stream)
+	re.Equal(cctx, manager.GetConnectionCtx("test-url"))
 
 	manager.Store(ctx, "test-another-url", 3)
 	pickedCount := make(map[string]int)
 	for range 1000 {
-		cctx = manager.GetConnectionCtx()
+		cctx = manager.RandomlyPick()
 		pickedCount[cctx.StreamURL]++
 	}
 	re.NotEmpty(pickedCount["test-url"])
@@ -59,20 +62,28 @@ func TestManager(t *testing.T) {
 		return url == "test-url"
 	})
 	re.False(manager.Exist("test-url"))
+	re.Nil(manager.GetConnectionCtx("test-url"))
 	re.True(manager.Exist("test-another-url"))
+	re.Equal(3, manager.GetConnectionCtx("test-another-url").Stream)
 
 	manager.CleanAllAndStore(ctx, "test-url", 1)
 	re.True(manager.Exist("test-url"))
+	re.Equal(1, manager.GetConnectionCtx("test-url").Stream)
 	re.False(manager.Exist("test-another-url"))
+	re.Nil(manager.GetConnectionCtx("test-another-url"))
 
 	manager.Store(ctx, "test-another-url", 3)
 	manager.CleanAllAndStore(ctx, "test-unique-url", 4)
 	re.True(manager.Exist("test-unique-url"))
+	re.Equal(4, manager.GetConnectionCtx("test-unique-url").Stream)
 	re.False(manager.Exist("test-url"))
+	re.Nil(manager.GetConnectionCtx("test-url"))
 	re.False(manager.Exist("test-another-url"))
+	re.Nil(manager.GetConnectionCtx("test-another-url"))
 
 	manager.Release("test-unique-url")
 	re.False(manager.Exist("test-unique-url"))
+	re.Nil(manager.GetConnectionCtx("test-unique-url"))
 
 	for i := range 1000 {
 		manager.Store(ctx, fmt.Sprintf("test-url-%d", i), i)

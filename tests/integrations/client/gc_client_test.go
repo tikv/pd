@@ -209,7 +209,6 @@ func (suite *gcClientTestSuite) mustLoadSafePoint(re *require.Assertions, keyspa
 // mustDeleteSafePoint deletes the gc safe point of the given keyspace id.
 func (suite *gcClientTestSuite) mustDeleteSafePoint(re *require.Assertions, keyspaceID uint32) {
 	safePointPath := keypath.GCSafePointV2Path(keyspaceID)
-	log.Info("test etcd path", zap.Any("path", safePointPath)) // TODO: Delete
 	_, err := suite.server.GetClient().Delete(suite.server.Context(), safePointPath)
 	re.NoError(err)
 }
