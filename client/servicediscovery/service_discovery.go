@@ -849,7 +849,7 @@ func (c *serviceDiscovery) initClusterID() error {
 func (c *serviceDiscovery) checkServiceModeChanged() error {
 	leaderURL := c.getLeaderURL()
 	if len(leaderURL) == 0 {
-		return errors.New("no leader found")
+		return errors.New(errs.NoLeaderErr)
 	}
 
 	clusterInfo, err := c.getClusterInfo(c.ctx, leaderURL, c.option.Timeout)

@@ -686,9 +686,9 @@ error = '''
 etcd leader not found
 '''
 
-["PD:member:ErrMarshalLeader"]
+["PD:member:ErrMarshalMember"]
 error = '''
-marshal leader failed
+marshal member failed
 '''
 
 ["PD:netstat:ErrNetstatTCPSocks"]
