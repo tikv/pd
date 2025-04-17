@@ -340,7 +340,7 @@ func (m *EmbeddedEtcdMember) InitMemberInfo(advertiseClientUrls, advertisePeerUr
 	data, err := member.Marshal()
 	if err != nil {
 		// can't fail, so panic here.
-		log.Fatal("marshal pd member meet error", zap.Stringer("pd-member", member), errs.ZapError(errs.ErrMarshalLeader, err))
+		log.Fatal("marshal pd member meet error", zap.Stringer("pd-member", member), errs.ZapError(errs.ErrMarshalMember, err))
 	}
 	m.member = member
 	m.memberValue = string(data)
