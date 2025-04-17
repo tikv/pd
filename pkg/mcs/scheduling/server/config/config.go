@@ -195,6 +195,21 @@ func (c *Config) GetTLSConfig() *grpcutil.TLSConfig {
 	return &c.Security.TLSConfig
 }
 
+// GetMetricConfig returns the metric config.
+func (c *Config) GetMetricConfig() *metricutil.MetricConfig {
+	return &c.Metric
+}
+
+// GetSecurityConfig returns the security config.
+func (c *Config) GetSecurityConfig() configutil.SecurityConfig {
+	return c.Security
+}
+
+// GetLogConfig returns the log config.
+func (c *Config) GetLogConfig() (log.Config, *zap.Logger, *log.ZapProperties) {
+	return c.Log, c.Logger, c.LogProps
+}
+
 // validate is used to validate if some configurations are right.
 func (c *Config) validate() error {
 	dataDir, err := filepath.Abs(c.DataDir)

@@ -18,15 +18,11 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"os"
-	"os/signal"
 	"runtime"
 	"sync"
 	"sync/atomic"
-	"syscall"
 	"time"
 
-	grpcprometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -39,8 +35,8 @@ import (
 
 	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/mcs/common"
 	"github.com/tikv/pd/pkg/mcs/discovery"
-	"github.com/tikv/pd/pkg/mcs/server"
 	"github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/member"
@@ -50,7 +46,6 @@ import (
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/logutil"
-	"github.com/tikv/pd/pkg/utils/metricutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
 	"github.com/tikv/pd/pkg/versioninfo"
 )
@@ -62,7 +57,7 @@ const serviceName = "TSO Service"
 
 // Server is the TSO server, and it implements bs.Server.
 type Server struct {
-	*server.BaseServer
+	*common.BaseServer
 	diagnosticspb.DiagnosticsServer
 
 	// Server state. 0 is not running, 1 is running.
@@ -91,6 +86,11 @@ type Server struct {
 // Name returns the unique name for this server in the TSO cluster.
 func (s *Server) Name() string {
 	return s.cfg.Name
+}
+
+// ServiceName returns the name of the service.
+func (s *Server) ServiceName() string {
+	return serviceName
 }
 
 // GetBasicServer returns the basic server.
@@ -368,7 +368,7 @@ func (s *Server) startServer() (err error) {
 // CreateServer creates the Server
 func CreateServer(ctx context.Context, cfg *Config) *Server {
 	svr := &Server{
-		BaseServer:        server.NewBaseServer(ctx),
+		BaseServer:        common.NewBaseServer(ctx),
 		DiagnosticsServer: sysutil.NewDiagnosticsServer(cfg.Log.File.Filename),
 		cfg:               cfg,
 	}
@@ -377,73 +377,14 @@ func CreateServer(ctx context.Context, cfg *Config) *Server {
 
 // CreateServerWrapper encapsulates the configuration/log/metrics initialization and create the server
 func CreateServerWrapper(cmd *cobra.Command, args []string) {
-	err := cmd.Flags().Parse(args)
-	if err != nil {
-		cmd.Println(err)
-		return
-	}
-	cfg := NewConfig()
-	flagSet := cmd.Flags()
-	err = cfg.Parse(flagSet)
-	defer logutil.LogPanic()
+	bootstrap := common.NewServerBootstrap(
+		// Server creation function
+		func(ctx context.Context, cfg *Config) *Server {
+			return CreateServer(ctx, cfg)
+		},
+		// Config creation function
+		NewConfig,
+	)
 
-	if err != nil {
-		cmd.Println(err)
-		return
-	}
-
-	if printVersion, err := flagSet.GetBool("version"); err != nil {
-		cmd.Println(err)
-		return
-	} else if printVersion {
-		versioninfo.Print()
-		utils.Exit(0)
-	}
-
-	// New zap logger
-	err = logutil.SetupLogger(&cfg.Log, &cfg.Logger, &cfg.LogProps, cfg.Security.RedactInfoLog)
-	if err == nil {
-		log.ReplaceGlobals(cfg.Logger, cfg.LogProps)
-	} else {
-		log.Fatal("initialize logger error", errs.ZapError(err))
-	}
-	// Flushing any buffered log entries
-	log.Sync()
-
-	versioninfo.Log(serviceName)
-	log.Info("TSO service config", zap.Reflect("config", cfg))
-
-	grpcprometheus.EnableHandlingTimeHistogram()
-	metricutil.Push(&cfg.Metric)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	svr := CreateServer(ctx, cfg)
-
-	sc := make(chan os.Signal, 1)
-	signal.Notify(sc,
-		syscall.SIGHUP,
-		syscall.SIGINT,
-		syscall.SIGTERM,
-		syscall.SIGQUIT)
-
-	var sig os.Signal
-	go func() {
-		sig = <-sc
-		cancel()
-	}()
-
-	if err := svr.Run(); err != nil {
-		log.Fatal("run server failed", errs.ZapError(err))
-	}
-
-	<-ctx.Done()
-	log.Info("got signal to exit", zap.String("signal", sig.String()))
-
-	svr.Close()
-	switch sig {
-	case syscall.SIGTERM:
-		utils.Exit(0)
-	default:
-		utils.Exit(1)
-	}
+	bootstrap.Start(cmd, args)
 }
