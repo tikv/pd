@@ -1219,11 +1219,10 @@ func TestScanRegionLimit(t *testing.T) {
 	}
 
 	for limit := 1; limit <= 18; limit++ {
-		KeyRanges := NewKeyRanges([]KeyRange{
-			NewKeyRange("a", "b"),
-			NewKeyRange("b0", ""), // ensure the key ranges are not merged
-		})
-		resp, err := regions.BatchScanRegions(KeyRanges, WithLimit(limit))
+		keyRanges := NewKeyRangesWithSize(2)
+		keyRanges.Append([]byte("a"), []byte("b"))
+		keyRanges.Append([]byte("b0"), []byte("")) // ensure the key ranges are merged
+		resp, err := regions.BatchScanRegions(keyRanges, WithLimit(limit))
 		re.NoError(err)
 		re.Len(resp, limit)
 	}
