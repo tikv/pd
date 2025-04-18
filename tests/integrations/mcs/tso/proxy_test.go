@@ -272,7 +272,7 @@ func (s *tsoProxyTestSuite) TestTSOProxyRecvFromTSOTimeout() {
 }
 
 func cleanupGRPCStreams(cleanupFuncs []testutil.CleanupFunc) {
-	for i := 0; i < len(cleanupFuncs); i++ {
+	for i := range cleanupFuncs {
 		if cleanupFuncs[i] != nil {
 			cleanupFuncs[i]()
 			cleanupFuncs[i] = nil
