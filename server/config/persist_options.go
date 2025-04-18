@@ -796,9 +796,9 @@ func (o *PersistOptions) Persist(storage endpoint.ConfigStorage) error {
 		},
 		StoreConfig: *o.GetStoreConfig(),
 	}
-	failpoint.Inject("persistFail", func() {
-		failpoint.Return(errors.New("fail to persist"))
-	})
+	if _, _err_ := failpoint.Eval(_curpkg_("persistFail")); _err_ == nil {
+		return errors.New("fail to persist")
+	}
 	return storage.SaveConfig(cfg)
 }
 

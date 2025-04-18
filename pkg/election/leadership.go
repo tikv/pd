@@ -183,19 +183,19 @@ func (ls *Leadership) Campaign(leaseTimeout int64, leaderData string, cmps ...cl
 	newLease := NewLease(ls.client, ls.purpose)
 	ls.SetLease(newLease)
 
-	failpoint.Inject("skipGrantLeader", func(val failpoint.Value) {
+	if val, _err_ := failpoint.Eval(_curpkg_("skipGrantLeader")); _err_ == nil {
 		name, ok := val.(string)
 		if len(name) == 0 {
 			// return directly when not set the name
-			failpoint.Return(errors.Errorf("failed to grant lease"))
+			return errors.Errorf("failed to grant lease")
 		}
 		var member pdpb.Member
 		_ = member.Unmarshal([]byte(leaderData))
 		if ok && member.Name == name {
 			// only return when the name is set and the name is equal to the leader name
-			failpoint.Return(errors.Errorf("failed to grant lease"))
+			return errors.Errorf("failed to grant lease")
 		}
-	})
+	}
 
 	if err := newLease.Grant(leaseTimeout); err != nil {
 		return err
@@ -284,15 +284,15 @@ func (ls *Leadership) Watch(serverCtx context.Context, revision int64) {
 	}()
 
 	unhealthyTimeout := watchLoopUnhealthyTimeout
-	failpoint.Inject("fastTick", func() {
+	if _, _err_ := failpoint.Eval(_curpkg_("fastTick")); _err_ == nil {
 		unhealthyTimeout = 5 * time.Second
-	})
+	}
 	ticker := time.NewTicker(etcdutil.RequestProgressInterval)
 	defer ticker.Stop()
 	lastReceivedResponseTime := time.Now()
 
 	for {
-		failpoint.Inject("delayWatcher", nil)
+		failpoint.Eval(_curpkg_("delayWatcher"))
 
 		// When etcd is not available, the watcher.Watch will block,
 		// so we check the etcd availability first.
@@ -377,11 +377,11 @@ func (ls *Leadership) Watch(serverCtx context.Context, revision int64) {
 				continue
 			}
 		case wresp := <-watchChan:
-			failpoint.Inject("watchChanBlock", func() {
+			if _, _err_ := failpoint.Eval(_curpkg_("watchChanBlock")); _err_ == nil {
 				// watchChanBlock is used to simulate the case that the watchChan is blocked for a long time.
 				// So we discard these responses when the failpoint is injected.
-				failpoint.Goto("watchChanLoop")
-			})
+				goto watchChanLoop
+			}
 			lastReceivedResponseTime = time.Now()
 			if wresp.CompactRevision != 0 {
 				log.Warn("required revision has been compacted, use the compact revision",

@@ -170,12 +170,12 @@ func (c *Controller) PatrolRegions() {
 				c.setPatrolRegionsDuration(dur)
 				start = time.Now()
 			}
-			failpoint.Inject("breakPatrol", func() {
+			if _, _err_ := failpoint.Eval(_curpkg_("breakPatrol")); _err_ == nil {
 				for !c.IsPatrolRegionChanEmpty() {
 					time.Sleep(time.Millisecond * 10)
 				}
-				failpoint.Return()
-			})
+				return
+			}
 		case <-c.ctx.Done():
 			patrolCheckRegionsGauge.Set(0)
 			c.setPatrolRegionsDuration(0)
@@ -288,14 +288,14 @@ func (c *Controller) CheckRegion(region *core.RegionInfo) []*operator.Operator {
 			c.cluster.GetRuleManager().IsRegionFitCached(c.cluster, region)
 		if skipRuleCheck {
 			// If the fit is fetched from cache, it seems that the region doesn't need check
-			failpoint.Inject("assertShouldNotCache", func() {
+			if _, _err_ := failpoint.Eval(_curpkg_("assertShouldNotCache")); _err_ == nil {
 				panic("cached shouldn't be used")
-			})
+			}
 			ruleCheckerGetCacheCounter.Inc()
 		} else {
-			failpoint.Inject("assertShouldCache", func() {
+			if _, _err_ := failpoint.Eval(_curpkg_("assertShouldCache")); _err_ == nil {
 				panic("cached should be used")
-			})
+			}
 			fit := c.priorityInspector.Inspect(region)
 			if op := c.ruleChecker.CheckWithFit(region, fit); op != nil {
 				if opController.OperatorCount(operator.OpReplica) < c.conf.GetReplicaScheduleLimit() {
@@ -413,9 +413,9 @@ func (c *Controller) CheckSuspectRanges() {
 		case <-c.ctx.Done():
 			return
 		case <-ticker.C:
-			failpoint.Inject("skipCheckSuspectRanges", func() {
-				failpoint.Continue()
-			})
+			if _, _err_ := failpoint.Eval(_curpkg_("skipCheckSuspectRanges")); _err_ == nil {
+				continue
+			}
 			keyRange, success := c.PopOneSuspectKeyRange()
 			if !success {
 				continue
@@ -552,10 +552,10 @@ func (c *Controller) GetPatrolRegionScanLimit() int {
 
 func calculateScanLimit(cluster sche.CheckerCluster) int {
 	regionCount := cluster.GetTotalRegionCount()
-	failpoint.Inject("regionCount", func(val failpoint.Value) {
+	if val, _err_ := failpoint.Eval(_curpkg_("regionCount")); _err_ == nil {
 		c, _ := strconv.ParseInt(val.(string), 10, 64)
 		regionCount = int(c)
-	})
+	}
 	scanlimit := max(MinPatrolRegionScanLimit, regionCount/patrolRegionPartition)
 	return min(scanlimit, MaxPatrolScanRegionLimit)
 }

@@ -159,9 +159,9 @@ func (c *innerClient) Watch(ctx context.Context, key []byte, opts ...opt.MetaSto
 		}()
 		for {
 			resp, err := res.Recv()
-			failpoint.Inject("watchStreamError", func() {
+			if _, _err_ := failpoint.Eval(_curpkg_("watchStreamError")); _err_ == nil {
 				err = errors.Errorf("fake error")
-			})
+			}
 			if err != nil {
 				return
 			}

@@ -78,9 +78,9 @@ func (m *Manager) serviceLoop() {
 	defer logutil.LogPanic()
 	defer m.wg.Done()
 	// TODO: After we fix the atomic problem of config, we can remove this failpoint.
-	failpoint.Inject("skipDashboardLoop", func() {
-		failpoint.Return()
-	})
+	if _, _err_ := failpoint.Eval(_curpkg_("skipDashboardLoop")); _err_ == nil {
+		return
+	}
 
 	ticker := time.NewTicker(CheckInterval)
 	defer ticker.Stop()

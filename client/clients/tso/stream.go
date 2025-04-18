@@ -453,17 +453,17 @@ recvLoop:
 // EstimatedRPCLatency returns an estimation of the duration of each TSO RPC. If the stream has never handled any RPC,
 // this function returns 0.
 func (s *tsoStream) EstimatedRPCLatency() time.Duration {
-	failpoint.Inject("tsoStreamSimulateEstimatedRPCLatency", func(val failpoint.Value) {
+	if val, _err_ := failpoint.Eval(_curpkg_("tsoStreamSimulateEstimatedRPCLatency")); _err_ == nil {
 		if s, ok := val.(string); ok {
 			duration, err := time.ParseDuration(s)
 			if err != nil {
 				panic(err)
 			}
-			failpoint.Return(duration)
+			return duration
 		} else {
 			panic("invalid failpoint value for `tsoStreamSimulateEstimatedRPCLatency`: expected string")
 		}
-	})
+	}
 	latencyUs := s.estimatedLatencyMicros.Load()
 	// Limit it at least 100us
 	if latencyUs < 100 {

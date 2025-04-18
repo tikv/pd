@@ -105,10 +105,10 @@ func (s *tsoServer) Send(m *pdpb.TsoResponse) error {
 	done := make(chan error, 1)
 	go func() {
 		defer logutil.LogPanic()
-		failpoint.Inject("tsoProxyFailToSendToClient", func() {
+		if _, _err_ := failpoint.Eval(_curpkg_("tsoProxyFailToSendToClient")); _err_ == nil {
 			done <- errors.New("injected error")
-			failpoint.Return()
-		})
+			return
+		}
 		done <- s.stream.Send(m)
 	}()
 	timer := time.NewTimer(tsoutil.DefaultTSOProxyTimeout)
@@ -129,11 +129,11 @@ func (s *tsoServer) recv(timeout time.Duration) (*pdpb.TsoRequest, error) {
 	if atomic.LoadInt32(&s.closed) == 1 {
 		return nil, io.EOF
 	}
-	failpoint.Inject("tsoProxyRecvFromClientTimeout", func(val failpoint.Value) {
+	if val, _err_ := failpoint.Eval(_curpkg_("tsoProxyRecvFromClientTimeout")); _err_ == nil {
 		if customTimeoutInSeconds, ok := val.(int); ok {
 			timeout = time.Duration(customTimeoutInSeconds) * time.Second
 		}
-	})
+	}
 	requestCh := make(chan *pdpbTSORequest, 1)
 	go func() {
 		defer logutil.LogPanic()
@@ -230,9 +230,9 @@ func (s *GrpcServer) unaryMiddleware(ctx context.Context, req request, fn forwar
 
 // unaryFollowerMiddleware adds the check of followers enable compared to unaryMiddleware.
 func (s *GrpcServer) unaryFollowerMiddleware(ctx context.Context, req request, fn forwardFn, allowFollower *bool) (rsp any, err error) {
-	failpoint.Inject("customTimeout", func() {
+	if _, _err_ := failpoint.Eval(_curpkg_("customTimeout")); _err_ == nil {
 		time.Sleep(5 * time.Second)
-	})
+	}
 	forwardedHost := grpcutil.GetForwardedHost(ctx)
 	if !s.isLocalRequest(forwardedHost) {
 		client, err := s.getDelegateClient(ctx, forwardedHost)
@@ -675,9 +675,9 @@ func (s *GrpcServer) AllocID(ctx context.Context, request *pdpb.AllocIDRequest) 
 	if request.GetCount() != 0 {
 		reqCount = request.GetCount()
 	}
-	failpoint.Inject("handleAllocIDNonBatch", func() {
+	if _, _err_ := failpoint.Eval(_curpkg_("handleAllocIDNonBatch")); _err_ == nil {
 		reqCount = 1
-	})
+	}
 
 	// We can use an allocator for all types ID allocation.
 	id, count, err := s.idAllocator.Alloc(reqCount)
@@ -1058,10 +1058,10 @@ func (s *GrpcServer) ReportBuckets(stream pdpb.PD_ReportBucketsServer) error {
 	}
 	for {
 		request, err := server.recv()
-		failpoint.Inject("grpcClientClosed", func() {
+		if _, _err_ := failpoint.Eval(_curpkg_("grpcClientClosed")); _err_ == nil {
 			err = errs.ErrStreamClosed
 			request = nil
-		})
+		}
 		if err == io.EOF {
 			return nil
 		}
@@ -1069,9 +1069,9 @@ func (s *GrpcServer) ReportBuckets(stream pdpb.PD_ReportBucketsServer) error {
 			return errors.WithStack(err)
 		}
 		forwardedHost := grpcutil.GetForwardedHost(stream.Context())
-		failpoint.Inject("grpcClientClosed", func() {
+		if _, _err_ := failpoint.Eval(_curpkg_("grpcClientClosed")); _err_ == nil {
 			forwardedHost = s.GetMember().Member().GetClientUrls()[0]
-		})
+		}
 		if !s.isLocalRequest(forwardedHost) {
 			if forwardStream == nil || lastForwardedHost != forwardedHost {
 				if cancel != nil {
@@ -1179,9 +1179,9 @@ func (s *GrpcServer) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error
 			return errors.WithStack(err)
 		}
 		forwardedHost := grpcutil.GetForwardedHost(stream.Context())
-		failpoint.Inject("grpcClientClosed", func() {
+		if _, _err_ := failpoint.Eval(_curpkg_("grpcClientClosed")); _err_ == nil {
 			forwardedHost = s.GetMember().Member().GetClientUrls()[0]
-		})
+		}
 		if !s.isLocalRequest(forwardedHost) {
 			if forwardStream == nil || lastForwardedHost != forwardedHost {
 				if cancel != nil {
@@ -1366,9 +1366,9 @@ func (s *GrpcServer) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error
 
 // GetRegion implements gRPC PDServer.
 func (s *GrpcServer) GetRegion(ctx context.Context, request *pdpb.GetRegionRequest) (*pdpb.GetRegionResponse, error) {
-	failpoint.Inject("rateLimit", func() {
-		failpoint.Return(nil, errs.ErrGRPCRateLimitExceeded(errs.ErrRateLimitExceeded))
-	})
+	if _, _err_ := failpoint.Eval(_curpkg_("rateLimit")); _err_ == nil {
+		return nil, errs.ErrGRPCRateLimitExceeded(errs.ErrRateLimitExceeded)
+	}
 	done, err := s.rateLimitCheck()
 	if err != nil {
 		return nil, err
@@ -1385,7 +1385,7 @@ func (s *GrpcServer) GetRegion(ctx context.Context, request *pdpb.GetRegionReque
 	} else if rsp != nil {
 		return rsp.(*pdpb.GetRegionResponse), nil
 	}
-	failpoint.Inject("delayProcess", nil)
+	failpoint.Eval(_curpkg_("delayProcess"))
 	var (
 		rc     *cluster.RaftCluster
 		region *core.RegionInfo
@@ -1514,11 +1514,11 @@ func (s *GrpcServer) GetRegionByID(ctx context.Context, request *pdpb.GetRegionB
 		}
 	}
 	region := rc.GetRegion(request.GetRegionId())
-	failpoint.Inject("followerHandleError", func() {
+	if _, _err_ := failpoint.Eval(_curpkg_("followerHandleError")); _err_ == nil {
 		if *followerHandle {
 			region = nil
 		}
-	})
+	}
 	if region == nil {
 		if *followerHandle {
 			return &pdpb.GetRegionResponse{Header: regionNotFound()}, nil

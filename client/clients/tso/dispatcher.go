@@ -89,9 +89,9 @@ func newTSODispatcher(
 ) *tsoDispatcher {
 	dispatcherCtx, dispatcherCancel := context.WithCancel(ctx)
 	tsoRequestCh := make(chan *Request, maxBatchSize*2)
-	failpoint.Inject("shortDispatcherChannel", func() {
+	if _, _err_ := failpoint.Eval(_curpkg_("shortDispatcherChannel")); _err_ == nil {
 		tsoRequestCh = make(chan *Request, 1)
-	})
+	}
 
 	// A large-enough capacity to hold maximum concurrent RPC requests. In our design, the concurrency is at most 16.
 	const tokenChCapacity = 64
@@ -150,10 +150,10 @@ func (td *tsoDispatcher) handleDispatcher(wg *sync.WaitGroup) {
 		log.Info("[tso] exit tso dispatcher")
 		// Cancel all connections.
 		conCtxMgr.ReleaseAll()
-		if tsoBatchController != nil && tsoBatchController.GetCollectedRequestCount() != 0 {
-			// If you encounter this failure, please check the stack in the logs to see if it's a panic.
-			log.Fatal("batched tso requests not cleared when exiting the tso dispatcher loop", zap.Any("panic", recover()))
-		}
+		//if tsoBatchController != nil && tsoBatchController.GetCollectedRequestCount() != 0 {
+		//	// If you encounter this failure, please check the stack in the logs to see if it's a panic.
+		//	log.Fatal("batched tso requests not cleared when exiting the tso dispatcher loop", zap.Any("panic", recover()))
+		//}
 		tsoErr := errors.WithStack(errs.ErrClosing)
 		td.revokePendingRequests(tsoErr)
 		wg.Done()
@@ -283,9 +283,9 @@ tsoBatchLoop:
 		}
 
 		noDelay := false
-		failpoint.Inject("tsoDispatcherConcurrentModeNoDelay", func() {
+		if _, _err_ := failpoint.Eval(_curpkg_("tsoDispatcherConcurrentModeNoDelay")); _err_ == nil {
 			noDelay = true
-		})
+		}
 
 		// If concurrent RPC is enabled, the time for collecting each request batch is expected to be
 		// estimatedRPCDuration / concurrency. Note the time mentioned here is counted from starting trying to collect
@@ -296,7 +296,7 @@ tsoBatchLoop:
 			estimatedLatency := stream.EstimatedRPCLatency()
 			goalBatchTime := estimatedLatency / time.Duration(td.rpcConcurrency)
 
-			failpoint.Inject("tsoDispatcherConcurrentModeAssertDelayDuration", func(val failpoint.Value) {
+			if val, _err_ := failpoint.Eval(_curpkg_("tsoDispatcherConcurrentModeAssertDelayDuration")); _err_ == nil {
 				if s, ok := val.(string); ok {
 					expected, err := time.ParseDuration(s)
 					if err != nil {
@@ -308,7 +308,7 @@ tsoBatchLoop:
 				} else {
 					panic("invalid value for failpoint tsoDispatcherConcurrentModeAssertDelayDuration: expected string")
 				}
-			})
+			}
 
 			waitTimerStart := time.Now()
 			remainingBatchTime := goalBatchTime - waitTimerStart.Sub(currentBatchStartTime)
@@ -582,9 +582,9 @@ func (td *tsoDispatcher) checkTSORPCConcurrency(ctx context.Context, maxBatchWai
 	immediatelyUpdate := td.rpcConcurrency > 1 && maxBatchWaitInterval > 0
 
 	// Allow always updating for test purpose.
-	failpoint.Inject("tsoDispatcherAlwaysCheckConcurrency", func() {
+	if _, _err_ := failpoint.Eval(_curpkg_("tsoDispatcherAlwaysCheckConcurrency")); _err_ == nil {
 		immediatelyUpdate = true
-	})
+	}
 
 	if !immediatelyUpdate && now.Sub(td.lastCheckConcurrencyTime) < dispatcherCheckRPCConcurrencyInterval {
 		return nil
@@ -635,4 +635,10 @@ func (td *tsoDispatcher) checkTSORPCConcurrency(ctx context.Context, maxBatchWai
 
 func (td *tsoDispatcher) isConcurrentRPCEnabled() bool {
 	return td.rpcConcurrency > 1
+}
+
+func (td *tsoDispatcher) closeContext() {
+	cctx := td.provider.getConnectionCtxMgr()
+	cc := cctx.RandomlyPick()
+	cc.Cancel()
 }

@@ -785,9 +785,9 @@ func (c *client) ScanRegions(ctx context.Context, key, endKey []byte, limit int,
 	}
 	//nolint:staticcheck
 	resp, err := pdpb.NewPDClient(serviceClient.GetClientConn()).ScanRegions(cctx, req)
-	failpoint.Inject("responseNil", func() {
+	if _, _err_ := failpoint.Eval(_curpkg_("responseNil")); _err_ == nil {
 		resp = nil
-	})
+	}
 	if serviceClient.NeedRetry(resp.GetHeader().GetError(), err) {
 		protoClient, cctx := c.getClientAndContext(scanCtx)
 		if protoClient == nil {
@@ -840,9 +840,9 @@ func (c *client) BatchScanRegions(ctx context.Context, ranges []router.KeyRange,
 		return nil, errs.ErrClientGetProtoClient
 	}
 	resp, err := pdpb.NewPDClient(serviceClient.GetClientConn()).BatchScanRegions(cctx, req)
-	failpoint.Inject("responseNil", func() {
+	if _, _err_ := failpoint.Eval(_curpkg_("responseNil")); _err_ == nil {
 		resp = nil
-	})
+	}
 	if serviceClient.NeedRetry(resp.GetHeader().GetError(), err) {
 		protoClient, cctx := c.getClientAndContext(scanCtx)
 		if protoClient == nil {

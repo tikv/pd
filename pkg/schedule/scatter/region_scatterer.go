@@ -237,11 +237,11 @@ func (r *RegionScatterer) scatterRegions(regions map[uint64]*core.RegionInfo, fa
 	for currentRetry := 0; currentRetry <= retryLimit; currentRetry++ {
 		for _, region := range regions {
 			op, err := r.Scatter(region, group, skipStoreLimit)
-			failpoint.Inject("scatterFail", func() {
+			if _, _err_ := failpoint.Eval(_curpkg_("scatterFail")); _err_ == nil {
 				if region.GetID() == 1 {
 					err = errors.New("mock error")
 				}
-			})
+			}
 			if err != nil {
 				failures[region.GetID()] = err
 				continue
@@ -254,10 +254,10 @@ func (r *RegionScatterer) scatterRegions(regions map[uint64]*core.RegionInfo, fa
 					failures[op.RegionID()] = fmt.Errorf("region %v failed to add operator", op.RegionID())
 					continue
 				}
-				failpoint.Inject("scatterHbStreamsDrain", func() {
+				if _, _err_ := failpoint.Eval(_curpkg_("scatterHbStreamsDrain")); _err_ == nil {
 					_ = r.opController.GetHBStreams().Drain(1)
 					r.opController.RemoveOperator(op, operator.AdminStop)
-				})
+				}
 			}
 			delete(failures, region.GetID())
 		}

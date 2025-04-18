@@ -129,10 +129,10 @@ func (rmc *ControllerConfig) Adjust(meta *configutil.ConfigMetaData) {
 	if !meta.IsDefined("ltb-token-rpc-max-delay") {
 		configutil.AdjustDuration(&rmc.LTBTokenRPCMaxDelay, defaultLTBTokenRPCMaxDelay)
 	}
-	failpoint.Inject("enableDegradedModeAndTraceLog", func() {
+	if _, _err_ := failpoint.Eval(_curpkg_("enableDegradedModeAndTraceLog")); _err_ == nil {
 		configutil.AdjustDuration(&rmc.DegradedModeWaitDuration, time.Second)
 		configutil.AdjustBool(&rmc.EnableControllerTraceLog, true)
-	})
+	}
 }
 
 // RequestUnitConfig is the configuration of the request units, which determines the coefficients of

@@ -93,9 +93,9 @@ func (kv *etcdKVBase) LoadRange(key, endKey string, limit int) (keys, values []s
 
 // Save puts a key-value pair to etcd.
 func (kv *etcdKVBase) Save(key, value string) error {
-	failpoint.Inject("etcdSaveFailed", func() {
-		failpoint.Return(errors.New("save failed"))
-	})
+	if _, _err_ := failpoint.Eval(_curpkg_("etcdSaveFailed")); _err_ == nil {
+		return errors.New("save failed")
+	}
 	etcdutil.InjectFailToCollectTestEtcdKey(key, "save")
 
 	txn := NewSlowLogTxn(kv.client)

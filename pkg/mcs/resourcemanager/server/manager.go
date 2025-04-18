@@ -327,9 +327,9 @@ func (m *Manager) GetResourceGroupList(withStats bool) []*ResourceGroup {
 
 func (m *Manager) persistLoop(ctx context.Context) {
 	ticker := time.NewTicker(time.Minute)
-	failpoint.Inject("fastPersist", func() {
+	if _, _err_ := failpoint.Eval(_curpkg_("fastPersist")); _err_ == nil {
 		ticker.Reset(100 * time.Millisecond)
-	})
+	}
 	defer ticker.Stop()
 	for {
 		select {

@@ -41,13 +41,13 @@ func Ready(c *gin.Context) {
 	svr := c.MustGet(middlewares.ServerContextKey).(*server.Server)
 	s := svr.GetStorage()
 	regionLoaded := storage.AreRegionsLoaded(s)
-	failpoint.Inject("loadRegionSlow", func(val failpoint.Value) {
+	if val, _err_ := failpoint.Eval(_curpkg_("loadRegionSlow")); _err_ == nil {
 		if s, ok := val.(string); ok {
 			if svr.GetAddr() == s {
 				regionLoaded = false
 			}
 		}
-	})
+	}
 	if regionLoaded {
 		c.Status(http.StatusOK)
 	} else {

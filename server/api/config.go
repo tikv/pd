@@ -412,10 +412,10 @@ func (h *confHandler) SetScheduleConfig(w http.ResponseWriter, r *http.Request) 
 // @Success  200  {object}  sc.ReplicationConfig
 // @Router   /config/replicate [get]
 func (h *confHandler) GetReplicationConfig(w http.ResponseWriter, r *http.Request) {
-	failpoint.Inject("getReplicationConfigFailed", func(v failpoint.Value) {
+	if v, _err_ := failpoint.Eval(_curpkg_("getReplicationConfigFailed")); _err_ == nil {
 		code := v.(int)
 		h.rd.JSON(w, code, "get config failed")
-	})
+	}
 	if h.svr.IsServiceIndependent(constant.SchedulingServiceName) &&
 		r.Header.Get(apiutil.XForbiddenForwardToMicroserviceHeader) != "true" {
 		cfg, err := h.getSchedulingServerConfig()

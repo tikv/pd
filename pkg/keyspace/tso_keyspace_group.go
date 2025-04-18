@@ -162,9 +162,9 @@ func (m *GroupManager) allocNodesToAllKeyspaceGroups(ctx context.Context) {
 	defer logutil.LogPanic()
 	defer m.wg.Done()
 	ticker := time.NewTicker(allocNodesToKeyspaceGroupsInterval)
-	failpoint.Inject("acceleratedAllocNodes", func() {
+	if _, _err_ := failpoint.Eval(_curpkg_("acceleratedAllocNodes")); _err_ == nil {
 		ticker.Reset(time.Millisecond * 100)
-	})
+	}
 	defer ticker.Stop()
 	log.Info("start to alloc nodes to all keyspace groups")
 	for {
@@ -423,12 +423,12 @@ func (m *GroupManager) UpdateKeyspaceForGroup(userKind endpoint.UserKind, groupI
 		return err
 	}
 
-	failpoint.Inject("externalAllocNode", func(val failpoint.Value) {
+	if val, _err_ := failpoint.Eval(_curpkg_("externalAllocNode")); _err_ == nil {
 		failpointOnce.Do(func() {
 			addrs := val.(string)
 			_ = m.SetNodesForKeyspaceGroup(constant.DefaultKeyspaceGroupID, strings.Split(addrs, ","))
 		})
-	})
+	}
 	m.Lock()
 	defer m.Unlock()
 	return m.updateKeyspaceForGroupLocked(userKind, id, keyspaceID, mutation)

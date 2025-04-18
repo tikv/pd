@@ -132,10 +132,10 @@ func (f *tsoForwarder) forwardTSORequest(
 		Count: request.GetCount(),
 	}
 
-	failpoint.Inject("tsoProxySendToTSOTimeout", func() {
+	if _, _err_ := failpoint.Eval(_curpkg_("tsoProxySendToTSOTimeout")); _err_ == nil {
 		// block until watchDeadline routine cancels the context.
 		<-f.ctx.Done()
-	})
+	}
 
 	select {
 	case <-f.ctx.Done():
@@ -147,10 +147,10 @@ func (f *tsoForwarder) forwardTSORequest(
 		return nil, err
 	}
 
-	failpoint.Inject("tsoProxyRecvFromTSOTimeout", func() {
+	if _, _err_ := failpoint.Eval(_curpkg_("tsoProxyRecvFromTSOTimeout")); _err_ == nil {
 		// block until watchDeadline routine cancels the context.
 		<-f.ctx.Done()
-	})
+	}
 
 	select {
 	case <-f.ctx.Done():
@@ -418,9 +418,9 @@ func (s *GrpcServer) closeDelegateClient(forwardedHost string) {
 }
 
 func (s *GrpcServer) isLocalRequest(host string) bool {
-	failpoint.Inject("useForwardRequest", func() {
-		failpoint.Return(false)
-	})
+	if _, _err_ := failpoint.Eval(_curpkg_("useForwardRequest")); _err_ == nil {
+		return false
+	}
 	if host == "" {
 		return true
 	}

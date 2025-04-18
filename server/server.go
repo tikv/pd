@@ -296,9 +296,9 @@ func CreateServer(ctx context.Context, cfg *config.Config, services []string, le
 	}
 	// New way to register services.
 	s.registry = registry.NewServerServiceRegistry()
-	failpoint.Inject("useGlobalRegistry", func() {
+	if _, _err_ := failpoint.Eval(_curpkg_("useGlobalRegistry")); _err_ == nil {
 		s.registry = registry.ServerServiceRegistry
-	})
+	}
 	s.registry.RegisterService("MetaStorage", ms_server.NewService)
 	s.registry.RegisterService("ResourceManager", rm_server.NewService[*Server])
 	// Register the microservices REST path.
@@ -413,9 +413,9 @@ func (s *Server) initMember(ctx context.Context, etcd *embed.Etcd) error {
 			}
 		}
 	}
-	failpoint.Inject("memberNil", func() {
+	if _, _err_ := failpoint.Eval(_curpkg_("memberNil")); _err_ == nil {
 		time.Sleep(1500 * time.Millisecond)
-	})
+	}
 	s.member = member.NewMember(etcd, s.electionClient, etcdServerID)
 	return nil
 }
@@ -506,7 +506,7 @@ func (s *Server) startServer(ctx context.Context) error {
 		s.grpcServiceRateLimiter.Update(service, ratelimit.InitLimiter())
 	}
 
-	failpoint.InjectCall("delayStartServer")
+	failpoint.Call(_curpkg_("delayStartServer"))
 	// Server has started.
 	atomic.StoreInt64(&s.isRunning, 1)
 	bs.ServerMaxProcsGauge.Set(float64(runtime.GOMAXPROCS(0)))
@@ -609,9 +609,9 @@ func (s *Server) Run() error {
 
 	s.cgMonitor.StartMonitor(s.ctx)
 
-	failpoint.Inject("delayStartServerLoop", func() {
+	if _, _err_ := failpoint.Eval(_curpkg_("delayStartServerLoop")); _err_ == nil {
 		time.Sleep(2 * time.Second)
-	})
+	}
 	s.startServerLoop(s.ctx)
 
 	return nil
@@ -781,7 +781,7 @@ func (s *Server) createRaftCluster() error {
 }
 
 func (s *Server) stopRaftCluster() {
-	failpoint.Inject("raftclusterIsBusy", func() {})
+	failpoint.Eval(_curpkg_("raftclusterIsBusy"))
 	s.cluster.Stop()
 }
 
@@ -1598,13 +1598,13 @@ func (s *Server) leaderLoop() {
 
 		leader, checkAgain := s.member.CheckLeader()
 		// add failpoint to test leader check go to stuck.
-		failpoint.Inject("leaderLoopCheckAgain", func(val failpoint.Value) {
+		if val, _err_ := failpoint.Eval(_curpkg_("leaderLoopCheckAgain")); _err_ == nil {
 			memberString := val.(string)
 			memberID, _ := strconv.ParseUint(memberString, 10, 64)
 			if s.member.ID() == memberID {
 				checkAgain = true
 			}
-		})
+		}
 		if checkAgain {
 			continue
 		}
@@ -1633,10 +1633,10 @@ func (s *Server) leaderLoop() {
 				// use random timeout to avoid leader campaigning storm.
 				randomTimeout := time.Duration(rand.Intn(lostPDLeaderMaxTimeoutSecs))*time.Second + lostPDLeaderMaxTimeoutSecs*time.Second + lostPDLeaderReElectionFactor*s.cfg.ElectionInterval.Duration
 				// add failpoint to test the campaign leader logic.
-				failpoint.Inject("timeoutWaitPDLeader", func() {
+				if _, _err_ := failpoint.Eval(_curpkg_("timeoutWaitPDLeader")); _err_ == nil {
 					log.Info("timeoutWaitPDLeader is injected, skip wait other etcd leader be etcd leader")
 					randomTimeout = time.Duration(rand.Intn(10))*time.Millisecond + 100*time.Millisecond
-				})
+				}
 				if lastUpdated.Add(randomTimeout).Before(time.Now()) && !lastUpdated.IsZero() && etcdLeader != 0 {
 					log.Info("the pd leader is lost for a long time, try to re-campaign a pd leader with resign etcd leader",
 						zap.Duration("timeout", randomTimeout),
@@ -1718,9 +1718,9 @@ func (s *Server) campaignLeader() {
 		return
 	}
 	defer s.stopRaftCluster()
-	failpoint.Inject("rebaseErr", func() {
-		failpoint.Return()
-	})
+	if _, _err_ := failpoint.Eval(_curpkg_("rebaseErr")); _err_ == nil {
+		return
+	}
 	if err := s.idAllocator.Rebase(); err != nil {
 		log.Error("failed to sync id from etcd", errs.ZapError(err))
 		return
@@ -1750,14 +1750,14 @@ func (s *Server) campaignLeader() {
 				return
 			}
 			// add failpoint to test exit leader, failpoint judge the member is the give value, then break
-			failpoint.Inject("exitCampaignLeader", func(val failpoint.Value) {
+			if val, _err_ := failpoint.Eval(_curpkg_("exitCampaignLeader")); _err_ == nil {
 				memberString := val.(string)
 				memberID, _ := strconv.ParseUint(memberString, 10, 64)
 				if s.member.ID() == memberID {
 					log.Info("exit PD leader")
-					failpoint.Return()
+					return
 				}
-			})
+			}
 
 			etcdLeader := s.member.GetEtcdLeader()
 			if etcdLeader != s.member.ID() {

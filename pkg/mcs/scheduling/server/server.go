@@ -179,9 +179,9 @@ func (s *Server) updatePDMemberLoop() {
 	ctx, cancel := context.WithCancel(s.serverLoopCtx)
 	defer cancel()
 	ticker := time.NewTicker(memberUpdateInterval)
-	failpoint.Inject("fastUpdateMember", func() {
+	if _, _err_ := failpoint.Eval(_curpkg_("fastUpdateMember")); _err_ == nil {
 		ticker.Reset(100 * time.Millisecond)
-	})
+	}
 	defer ticker.Stop()
 	var curLeader uint64
 	for {

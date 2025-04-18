@@ -1255,13 +1255,13 @@ func (h *Handler) SplitRegions(ctx context.Context, rawSplitKeys []any, retryLim
 		ProcessedPercentage: percentage,
 		NewRegionsID:        newRegionsID,
 	}
-	failpoint.Inject("splitResponses", func(val failpoint.Value) {
+	if val, _err_ := failpoint.Eval(_curpkg_("splitResponses")); _err_ == nil {
 		rawID, ok := val.(int)
 		if ok {
 			s.ProcessedPercentage = 100
 			s.NewRegionsID = []uint64{uint64(rawID)}
 		}
-	})
+	}
 	return s, nil
 }
 
@@ -1294,12 +1294,12 @@ func (h *Handler) CheckRegionsReplicated(rawStartKey, rawEndKey string) (string,
 			}
 		}
 	}
-	failpoint.Inject("mockPending", func(val failpoint.Value) {
+	if val, _err_ := failpoint.Eval(_curpkg_("mockPending")); _err_ == nil {
 		aok, ok := val.(bool)
 		if ok && aok {
 			state = "PENDING"
 		}
-	})
+	}
 	return state, nil
 }
 

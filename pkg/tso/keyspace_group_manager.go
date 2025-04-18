@@ -567,9 +567,9 @@ func (kgm *KeyspaceGroupManager) primaryPriorityCheckLoop() {
 	defer logutil.LogPanic()
 	defer kgm.wg.Done()
 
-	failpoint.Inject("fastPrimaryPriorityCheck", func() {
+	if _, _err_ := failpoint.Eval(_curpkg_("fastPrimaryPriorityCheck")); _err_ == nil {
 		kgm.primaryPriorityCheckInterval = 200 * time.Millisecond
-	})
+	}
 
 	ticker := time.NewTicker(kgm.primaryPriorityCheckInterval)
 	defer ticker.Stop()
@@ -1387,9 +1387,9 @@ func (kgm *KeyspaceGroupManager) groupSplitPatroller() {
 	defer logutil.LogPanic()
 	defer kgm.wg.Done()
 	patrolInterval := groupPatrolInterval
-	failpoint.Inject("fastGroupSplitPatroller", func() {
+	if _, _err_ := failpoint.Eval(_curpkg_("fastGroupSplitPatroller")); _err_ == nil {
 		patrolInterval = 3 * time.Second
-	})
+	}
 	ticker := time.NewTicker(patrolInterval)
 	defer ticker.Stop()
 	log.Info("group split patroller is started",
@@ -1433,9 +1433,9 @@ func (kgm *KeyspaceGroupManager) deletedGroupCleaner() {
 	defer logutil.LogPanic()
 	defer kgm.wg.Done()
 	patrolInterval := groupPatrolInterval
-	failpoint.Inject("fastDeletedGroupCleaner", func() {
+	if _, _err_ := failpoint.Eval(_curpkg_("fastDeletedGroupCleaner")); _err_ == nil {
 		patrolInterval = 200 * time.Millisecond
-	})
+	}
 	ticker := time.NewTicker(patrolInterval)
 	defer ticker.Stop()
 	log.Info("deleted group cleaner is started",
