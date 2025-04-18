@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -82,7 +83,7 @@ func TestClientLeaderChange(t *testing.T) {
 	defer cluster.Destroy()
 
 	endpoints := runServer(re, cluster)
-	endpointsWithWrongURL := append([]string{}, endpoints...)
+	endpointsWithWrongURL := slices.Clone(endpoints)
 	// inject wrong http scheme
 	for i := range endpointsWithWrongURL {
 		endpointsWithWrongURL[i] = "https://" + strings.TrimPrefix(endpointsWithWrongURL[i], "http://")
