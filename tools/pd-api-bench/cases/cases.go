@@ -218,10 +218,7 @@ func newRegionStats() func() HTTPCase {
 }
 
 func (c *regionsStats) do(ctx context.Context, cli pdHttp.Client) error {
-	upperBound := totalRegion / c.regionSample
-	if upperBound < 1 {
-		upperBound = 1
-	}
+	upperBound := max(totalRegion/c.regionSample, 1)
 	random := rand.Intn(upperBound)
 	startID := c.regionSample*random*4 + 1
 	endID := c.regionSample*(random+1)*4 + 1
