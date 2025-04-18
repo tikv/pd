@@ -89,7 +89,7 @@ func (s *Server) Name() string {
 }
 
 // ServiceName returns the name of the service.
-func (s *Server) ServiceName() string {
+func (*Server) ServiceName() string {
 	return serviceName
 }
 
@@ -379,9 +379,7 @@ func CreateServer(ctx context.Context, cfg *Config) *Server {
 func CreateServerWrapper(cmd *cobra.Command, args []string) {
 	bootstrap := common.NewServerBootstrap(
 		// Server creation function
-		func(ctx context.Context, cfg *Config) *Server {
-			return CreateServer(ctx, cfg)
-		},
+		CreateServer,
 		// Config creation function
 		NewConfig,
 	)
