@@ -64,13 +64,14 @@ func (m *mockTSOServiceProvider) updateConnectionCtxs(ctx context.Context) bool 
 	if m.conCtxMgr.Exist(mockStreamURL) {
 		return true
 	}
+	cctx, cancel := context.WithCancel(ctx)
 	var stream *tsoStream
 	if m.createStream == nil {
-		stream = newTSOStream(ctx, mockStreamURL, newMockTSOStreamImpl(ctx, resultModeGenerated))
+		stream = newTSOStream(cctx, mockStreamURL, newMockTSOStreamImpl(ctx, resultModeGenerated))
 	} else {
 		stream = m.createStream(ctx)
 	}
-	m.conCtxMgr.Store(ctx, mockStreamURL, stream)
+	m.conCtxMgr.Store(cctx, cancel, mockStreamURL, stream)
 	return true
 }
 
