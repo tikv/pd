@@ -8,6 +8,8 @@
 /pd//alloc_id get
 /pd//config get
 /pd//config save
+/pd//gc/gc_state_revision get
+/pd//gc/gc_state_revision save
 /pd//gc/safe_point get
 /pd//gc/safe_point save
 /pd//gc/safe_point/service/ get
@@ -53,6 +55,9 @@
 /pd//timestamp get
 /pd//timestamp save
 /pd/cluster_id get
+/tidb/server/minstartts/ get
+/tidb/store/gcworker/saved_safe_point get
+/tidb/store/gcworker/saved_safe_point save
 TestCallBack get
 TestCallBack watch
 TestLoadNoExistedKey get
