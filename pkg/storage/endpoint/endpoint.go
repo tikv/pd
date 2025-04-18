@@ -93,3 +93,8 @@ func loadJSONByPrefix[T any](se *StorageEndpoint, prefix string, limit int) ([]s
 func (se *StorageEndpoint) NextRegionID() uint64 {
 	return se.nextRegionID
 }
+
+// ResetRegionID resets the next region ID to 0, only for test
+func (se *StorageEndpoint) ResetRegionID() {
+	se.nextRegionID = 0
+}
