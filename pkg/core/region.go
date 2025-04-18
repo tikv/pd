@@ -1841,11 +1841,6 @@ func (r *RegionsInfo) BatchScanRegions(keyRanges *KeyRanges, opts ...BatchScanRe
 	r.t.RLock()
 	defer r.t.RUnlock()
 	for _, keyRange := range krs {
-		if scanOptions.limit > 0 && len(res) >= scanOptions.limit {
-			res = res[:scanOptions.limit]
-			return res, nil
-		}
-
 		regions, err := scanRegion(r.tree, keyRange, scanOptions.limit, scanOptions.outputMustContainAllKeyRange)
 		if err != nil {
 			return nil, err
@@ -1855,6 +1850,10 @@ func (r *RegionsInfo) BatchScanRegions(keyRanges *KeyRanges, opts ...BatchScanRe
 			regions = regions[1:]
 		}
 		res = append(res, regions...)
+		if scanOptions.limit > 0 && len(res) >= scanOptions.limit {
+			res = res[:scanOptions.limit]
+			return res, nil
+		}
 	}
 	return res, nil
 }
