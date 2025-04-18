@@ -127,7 +127,7 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestKeyspacesServedByDefaultKeysp
 			served := false
 			for _, server := range suite.tsoCluster.GetServers() {
 				if server.IsKeyspaceServing(keyspaceID, constant.DefaultKeyspaceGroupID) {
-					tam, err := server.GetTSOAllocatorManager(constant.DefaultKeyspaceGroupID)
+					tam, err := server.GetTSOAllocator(constant.DefaultKeyspaceGroupID)
 					re.NoError(err)
 					re.NotNil(tam)
 					served = true
@@ -151,7 +151,7 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestKeyspacesServedByDefaultKeysp
 			server.IsKeyspaceServing(constant.DefaultKeyspaceID, keyspaceGroupID)
 			for _, keyspaceID := range []uint32{1, 2, 3} {
 				if server.IsKeyspaceServing(keyspaceID, keyspaceGroupID) {
-					tam, err := server.GetTSOAllocatorManager(keyspaceGroupID)
+					tam, err := server.GetTSOAllocator(keyspaceGroupID)
 					re.NoError(err)
 					re.NotNil(tam)
 				}
@@ -214,9 +214,9 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestKeyspacesServedByNonDefaultKe
 				served := false
 				for _, server := range suite.tsoCluster.GetServers() {
 					if server.IsKeyspaceServing(keyspaceID, param.keyspaceGroupID) {
-						am, err := server.GetTSOAllocatorManager(param.keyspaceGroupID)
+						allocator, err := server.GetTSOAllocator(param.keyspaceGroupID)
 						re.NoError(err)
-						re.NotNil(am)
+						re.NotNil(allocator)
 
 						// Make sure every keyspace group is using the right timestamp path
 						// for loading/saving timestamp from/to etcd and the right primary path
@@ -225,7 +225,7 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestKeyspacesServedByNonDefaultKe
 							ServiceName: constant.TSOServiceName,
 							GroupID:     param.keyspaceGroupID,
 						})
-						re.Equal(primaryPath, am.GetMember().GetLeaderPath())
+						re.Equal(primaryPath, allocator.GetMember().GetLeaderPath())
 
 						served = true
 					}
@@ -543,6 +543,7 @@ func TestTwiceSplitKeyspaceGroup(t *testing.T) {
 		conf.Keyspace.PreAlloc = []string{
 			"keyspace_a", "keyspace_b",
 		}
+		conf.Keyspace.WaitRegionSplit = false
 	})
 	re.NoError(err)
 	defer tc.Destroy()
@@ -736,10 +737,12 @@ func TestGetTSOImmediately(t *testing.T) {
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/fastGroupSplitPatroller", `return(true)`))
 
 	// Init PD config but not start.
+	keyspaces := []string{
+		"keyspace_a", "keyspace_b",
+	}
 	tc, err := tests.NewTestClusterWithKeyspaceGroup(ctx, 1, func(conf *config.Config, _ string) {
-		conf.Keyspace.PreAlloc = []string{
-			"keyspace_a", "keyspace_b",
-		}
+		conf.Keyspace.PreAlloc = keyspaces
+		conf.Keyspace.WaitRegionSplit = false
 	})
 	re.NoError(err)
 	defer tc.Destroy()
@@ -783,14 +786,17 @@ func TestGetTSOImmediately(t *testing.T) {
 		return p0 == kg0.Members[0].Address && p1 == kg1.Members[1].Address
 	}, testutil.WithWaitFor(5*time.Second), testutil.WithTickInterval(50*time.Millisecond))
 
-	apiCtx := pd.NewAPIContextV2("keyspace_b") // its keyspace id is 2.
-	cli, err := pd.NewClientWithAPIContext(ctx, apiCtx,
-		caller.TestComponent,
-		[]string{pdAddr}, pd.SecurityOption{})
-	re.NoError(err)
-	_, _, err = cli.GetTS(ctx)
-	re.NoError(err)
-	cli.Close()
+	for _, name := range keyspaces {
+		apiCtx := pd.NewAPIContextV2(name)
+		cli, err := pd.NewClientWithAPIContext(ctx, apiCtx,
+			caller.TestComponent,
+			[]string{pdAddr}, pd.SecurityOption{})
+		re.NoError(err)
+		_, _, err = cli.GetTS(ctx)
+		re.NoError(err)
+		cli.Close()
+	}
+
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/tso/fastPrimaryPriorityCheck"))
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/acceleratedAllocNodes"))
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/tso/fastGroupSplitPatroller"))

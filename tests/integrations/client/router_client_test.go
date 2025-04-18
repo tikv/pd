@@ -30,12 +30,14 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 
 	pd "github.com/tikv/pd/client"
+	"github.com/tikv/pd/client/clients/router"
 	"github.com/tikv/pd/client/opt"
 	"github.com/tikv/pd/client/pkg/caller"
 	"github.com/tikv/pd/pkg/utils/assertutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/config"
+	"github.com/tikv/pd/tests"
 )
 
 func TestRouterClientEnabledSuite(t *testing.T) {
@@ -48,10 +50,9 @@ func TestRouterClientDisabledSuite(t *testing.T) {
 
 type routerClientSuite struct {
 	suite.Suite
-	cleanup         testutil.CleanupFunc
 	ctx             context.Context
 	clean           context.CancelFunc
-	srv             *server.Server
+	cluster         *tests.TestCluster
 	client          pd.Client
 	grpcPDClient    pdpb.PDClient
 	regionHeartbeat pdpb.PD_RegionHeartbeatClient
@@ -63,21 +64,24 @@ type routerClientSuite struct {
 func (suite *routerClientSuite) SetupSuite() {
 	var err error
 	re := suite.Require()
-	suite.srv, suite.cleanup, err = server.NewTestServer(re, assertutil.CheckerWithNilAssert(re))
-	re.NoError(err)
-	suite.grpcPDClient = testutil.MustNewGrpcClient(re, suite.srv.GetAddr())
-
-	server.MustWaitLeader(re, []*server.Server{suite.srv})
-	bootstrapServer(re, newHeader(), suite.grpcPDClient)
-
 	suite.ctx, suite.clean = context.WithCancel(context.Background())
-	suite.client = setupCli(suite.ctx, re, suite.srv.GetEndpoints(), opt.WithEnableRouterClient(suite.routerClientEnabled))
+	suite.cluster, err = tests.NewTestCluster(suite.ctx, 3)
+	re.NoError(err)
+	endpoints := runServer(re, suite.cluster)
+	re.Len(endpoints, 3)
+
+	re.NotEmpty(suite.cluster.WaitLeader())
+	leader := suite.cluster.GetLeaderServer()
+	suite.grpcPDClient = testutil.MustNewGrpcClient(re, leader.GetAddr())
+	suite.client = setupCli(suite.ctx, re, endpoints,
+		opt.WithEnableRouterClient(suite.routerClientEnabled),
+		opt.WithEnableFollowerHandle(true))
 
 	suite.regionHeartbeat, err = suite.grpcPDClient.RegionHeartbeat(suite.ctx)
 	re.NoError(err)
 	suite.reportBucket, err = suite.grpcPDClient.ReportBuckets(suite.ctx)
 	re.NoError(err)
-	cluster := suite.srv.GetRaftCluster()
+	cluster := suite.cluster.GetLeaderServer().GetRaftCluster()
 	re.NotNil(cluster)
 	cluster.GetOpts().(*config.PersistOptions).SetRegionBucketEnabled(true)
 }
@@ -86,7 +90,7 @@ func (suite *routerClientSuite) SetupSuite() {
 func (suite *routerClientSuite) TearDownSuite() {
 	suite.client.Close()
 	suite.clean()
-	suite.cleanup()
+	suite.cluster.Destroy()
 }
 
 func (suite *routerClientSuite) TestGetRegion() {
@@ -143,7 +147,7 @@ func (suite *routerClientSuite) TestGetRegion() {
 		}
 		return r.Buckets != nil
 	})
-	suite.srv.GetRaftCluster().GetOpts().(*config.PersistOptions).SetRegionBucketEnabled(false)
+	suite.cluster.GetLeaderServer().GetRaftCluster().GetOpts().(*config.PersistOptions).SetRegionBucketEnabled(false)
 
 	testutil.Eventually(re, func() bool {
 		r, err := suite.client.GetRegion(context.Background(), []byte("a"), opt.WithBuckets())
@@ -153,7 +157,7 @@ func (suite *routerClientSuite) TestGetRegion() {
 		}
 		return r.Buckets == nil
 	})
-	suite.srv.GetRaftCluster().GetOpts().(*config.PersistOptions).SetRegionBucketEnabled(true)
+	suite.cluster.GetLeaderServer().GetRaftCluster().GetOpts().(*config.PersistOptions).SetRegionBucketEnabled(true)
 
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/grpcClientClosed", `return(true)`))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/useForwardRequest", `return(true)`))
@@ -282,14 +286,23 @@ func (suite *routerClientSuite) dispatchConcurrentRequests(ctx context.Context, 
 	for range concurrency {
 		go func() {
 			defer wg.Done()
+			var (
+				r                   *router.Region
+				err                 error
+				seed                = rand.Intn(100)
+				allowFollowerHandle = seed%2 == 0
+			)
 			// Randomly sleep to avoid the concurrent requests to be dispatched at the same time.
-			seed := rand.Intn(100)
 			time.Sleep(time.Duration(seed) * time.Millisecond)
 			switch seed % 3 {
 			case 0:
 				region := regions[0]
 				testutil.Eventually(re, func() bool {
-					r, err := suite.client.GetRegion(ctx, region.GetStartKey())
+					if allowFollowerHandle {
+						r, err = suite.client.GetRegion(ctx, region.GetStartKey(), opt.WithAllowFollowerHandle())
+					} else {
+						r, err = suite.client.GetRegion(ctx, region.GetStartKey())
+					}
 					if err != nil {
 						re.ErrorContains(err, context.Canceled.Error())
 					}
@@ -302,7 +315,11 @@ func (suite *routerClientSuite) dispatchConcurrentRequests(ctx context.Context, 
 				})
 			case 1:
 				testutil.Eventually(re, func() bool {
-					r, err := suite.client.GetPrevRegion(ctx, regions[1].GetStartKey())
+					if allowFollowerHandle {
+						r, err = suite.client.GetPrevRegion(ctx, regions[1].GetStartKey(), opt.WithAllowFollowerHandle())
+					} else {
+						r, err = suite.client.GetPrevRegion(ctx, regions[1].GetStartKey())
+					}
 					if err != nil {
 						re.ErrorContains(err, context.Canceled.Error())
 					}
@@ -316,7 +333,11 @@ func (suite *routerClientSuite) dispatchConcurrentRequests(ctx context.Context, 
 			case 2:
 				region := regions[0]
 				testutil.Eventually(re, func() bool {
-					r, err := suite.client.GetRegionByID(ctx, region.GetId())
+					if allowFollowerHandle {
+						r, err = suite.client.GetRegionByID(ctx, region.GetId(), opt.WithAllowFollowerHandle())
+					} else {
+						r, err = suite.client.GetRegionByID(ctx, region.GetId())
+					}
 					if err != nil {
 						re.ErrorContains(err, context.Canceled.Error())
 					}
@@ -365,4 +386,52 @@ func (suite *routerClientSuite) TestConcurrentlyEnableRouterClient() {
 		}
 	}
 	wg.Wait()
+}
+
+func (suite *routerClientSuite) TestConcurrentlyEnableFollowerHandle() {
+	re := suite.Require()
+	ctx, cancel := context.WithCancel(suite.ctx)
+	defer cancel()
+
+	// Wait for the region syncer on the follower to be running.
+	testutil.Eventually(re, func() bool {
+		running := true
+		for _, s := range suite.cluster.GetServers() {
+			if s.IsLeader() {
+				continue
+			}
+			running = running && s.GetServer().DirectlyGetRaftCluster().GetRegionSyncer().IsRunning()
+		}
+		return running
+	})
+
+	wg := sync.WaitGroup{}
+	// Concurrently enable and disable the follower handle.
+	for _, enabled := range []bool{false, true} {
+		suite.dispatchConcurrentRequests(ctx, re, &wg)
+		// Switch the follower handle option immediately right after the concurrent requests dispatch.
+		err := suite.client.UpdateOption(opt.EnableFollowerHandle, enabled)
+		re.NoError(err)
+		select {
+		case <-time.After(time.Second):
+			// Let the bullet fly for a while.
+		case <-ctx.Done():
+		}
+	}
+}
+
+func TestRouterClientHeaderError(t *testing.T) {
+	re := require.New(t)
+	srv, cleanup, err := server.NewTestServer(re, assertutil.CheckerWithNilAssert(re))
+	re.NoError(err)
+	defer cleanup()
+
+	server.MustWaitLeader(re, []*server.Server{srv})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	client := setupCli(ctx, re, srv.GetEndpoints(), opt.WithEnableRouterClient(true))
+
+	r, err := client.GetRegion(ctx, []byte("a"))
+	re.ErrorContains(err, pdpb.ErrorType_NOT_BOOTSTRAPPED.String())
+	re.Nil(r)
 }

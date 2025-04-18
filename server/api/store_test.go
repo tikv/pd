@@ -38,7 +38,6 @@ import (
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/server"
-	"github.com/tikv/pd/server/config"
 )
 
 type storeTestSuite struct {
@@ -100,9 +99,8 @@ func (suite *storeTestSuite) SetupSuite() {
 			Version:   "2.0.0",
 		},
 	}
-	// TODO: enable placmentrules
 	re := suite.Require()
-	suite.svr, suite.cleanup = mustNewServer(re, func(cfg *config.Config) { cfg.Replication.EnablePlacementRules = false })
+	suite.svr, suite.cleanup = mustNewServer(re)
 	server.MustWaitLeader(re, []*server.Server{suite.svr})
 
 	addr := suite.svr.GetAddr()

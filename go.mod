@@ -40,7 +40,6 @@ require (
 	github.com/pingcap/sysutil v1.0.1-0.20230407040306-fb007c5aff21
 	github.com/pingcap/tidb-dashboard v0.0.0-20250219061340-d62018124ae2
 	github.com/prometheus/client_golang v1.20.5
-	github.com/prometheus/common v0.55.0
 	github.com/sasha-s/go-deadlock v0.3.5
 	github.com/shirou/gopsutil/v3 v3.23.3
 	github.com/smallnest/chanx v1.2.1-0.20240521153536-01121e21ff99
@@ -64,6 +63,8 @@ require (
 	google.golang.org/grpc v1.62.1
 	gotest.tools/gotestsum v1.7.0
 )
+
+require github.com/prometheus/common v0.55.0 // indirect
 
 require (
 	github.com/KyleBanks/depth v1.2.1 // indirect

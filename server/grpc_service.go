@@ -301,7 +301,7 @@ func (s *GrpcServer) GetMinTS(
 		minTS, err = s.GetMinTSFromTSOService()
 	} else {
 		start := time.Now()
-		ts, internalErr := s.tsoAllocatorManager.HandleRequest(ctx, 1)
+		ts, internalErr := s.tsoAllocator.GenerateTSO(ctx, 1)
 		if internalErr == nil {
 			tsoHandleDuration.Observe(time.Since(start).Seconds())
 		}
@@ -571,7 +571,7 @@ func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
 		}
 		count := request.GetCount()
 		ctx, task := trace.NewTask(ctx, "tso")
-		ts, err := s.tsoAllocatorManager.HandleRequest(ctx, count)
+		ts, err := s.tsoAllocator.GenerateTSO(ctx, count)
 		task.End()
 		tsoHandleDuration.Observe(time.Since(start).Seconds())
 		if err != nil {
@@ -1563,17 +1563,34 @@ func (s *GrpcServer) QueryRegion(stream pdpb.PD_QueryRegionServer) error {
 		if clusterID := keypath.ClusterID(); request.GetHeader().GetClusterId() != clusterID {
 			return errs.ErrMismatchClusterID(clusterID, request.GetHeader().GetClusterId())
 		}
-		rc := s.GetRaftCluster()
-		if rc == nil {
-			resp := &pdpb.QueryRegionResponse{
-				Header: notBootstrappedHeader(),
+		var (
+			rc          *cluster.RaftCluster
+			needBuckets bool
+		)
+		if s.member.IsLeader() {
+			rc = s.GetRaftCluster()
+			if rc == nil {
+				resp := &pdpb.QueryRegionResponse{
+					Header: notBootstrappedHeader(),
+				}
+				if err = stream.Send(resp); err != nil {
+					return errors.WithStack(err)
+				}
+				continue
 			}
-			if err = stream.Send(resp); err != nil {
-				return errors.WithStack(err)
+			needBuckets = rc.GetStoreConfig().IsEnableRegionBucket() && request.GetNeedBuckets()
+		} else {
+			rc = s.cluster
+			if !rc.GetRegionSyncer().IsRunning() {
+				resp := &pdpb.QueryRegionResponse{
+					Header: regionNotFound(),
+				}
+				if err = stream.Send(resp); err != nil {
+					return errors.WithStack(err)
+				}
+				continue
 			}
-			continue
 		}
-		needBuckets := rc.GetStoreConfig().IsEnableRegionBucket() && request.GetNeedBuckets()
 
 		start := time.Now()
 		keyIDMap, prevKeyIDMap, regionsByID := rc.QueryRegions(

@@ -228,7 +228,7 @@ tsoBatchLoop:
 		// Choose a stream to send the TSO gRPC request.
 	streamChoosingLoop:
 		for {
-			connectionCtx := conCtxMgr.GetConnectionCtx()
+			connectionCtx := conCtxMgr.RandomlyPick()
 			if connectionCtx != nil {
 				streamCtx, cancel, streamURL, stream = connectionCtx.Ctx, connectionCtx.Cancel, connectionCtx.StreamURL, connectionCtx.Stream
 			}

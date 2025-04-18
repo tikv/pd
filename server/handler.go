@@ -324,7 +324,7 @@ func (h *Handler) ResetTS(ts uint64, ignoreSmaller, skipUpperBoundCheck bool, _ 
 		zap.Uint64("new-ts", ts),
 		zap.Bool("ignore-smaller", ignoreSmaller),
 		zap.Bool("skip-upper-bound-check", skipUpperBoundCheck))
-	tsoAllocator := h.s.tsoAllocatorManager.GetAllocator()
+	tsoAllocator := h.s.GetTSOAllocator()
 	if tsoAllocator == nil {
 		return errs.ErrServerNotStarted
 	}

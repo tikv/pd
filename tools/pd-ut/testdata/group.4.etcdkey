@@ -39,7 +39,6 @@
 /pd//timestamp get
 /pd//timestamp save
 /pd/cluster_id get
-/topology/tidb/ get
 encryption_keys get
 encryption_keys watch
 resource_group/controller get

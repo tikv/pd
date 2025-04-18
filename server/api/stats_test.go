@@ -22,10 +22,12 @@ import (
 	"github.com/stretchr/testify/suite"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/kvproto/pkg/pdpb"
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/utils/apiutil"
+	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server"
 )
@@ -62,6 +64,7 @@ func (suite *statsTestSuite) TestRegionStats() {
 		ConfVer: 1,
 		Version: 1,
 	}
+	intervalSec := uint64(100)
 	regions := []*core.RegionInfo{
 		core.NewRegionInfo(&metapb.Region{
 			Id:       1,
@@ -75,9 +78,13 @@ func (suite *statsTestSuite) TestRegionStats() {
 			RegionEpoch: epoch,
 		},
 			&metapb.Peer{Id: 101, StoreId: 1},
+			core.SetReportInterval(0, intervalSec),
 			core.SetApproximateSize(100),
 			core.SetApproximateKvSize(80),
 			core.SetApproximateKeys(50),
+			core.SetWrittenBytes(50000*intervalSec),
+			core.SetWrittenKeys(5000*intervalSec),
+			core.SetWrittenQuery(500*intervalSec),
 		),
 		core.NewRegionInfo(
 			&metapb.Region{
@@ -130,8 +137,10 @@ func (suite *statsTestSuite) TestRegionStats() {
 	}
 
 	re := suite.Require()
-	for _, r := range regions {
-		mustRegionHeartbeat(re, suite.svr, r)
+	for range 5 {
+		for _, r := range regions {
+			mustRegionHeartbeat(re, suite.svr, r)
+		}
 	}
 
 	// Distribution (L for leader, F for follower):
@@ -197,7 +206,7 @@ func (suite *statsTestSuite) TestRegionStats() {
 			re.NoError(err)
 			stats := &statistics.RegionStats{}
 			err = apiutil.ReadJSON(res.Body, stats)
-			res.Body.Close()
+			re.NoError(res.Body.Close())
 			re.NoError(err)
 			re.Equal(data.expect.Count, stats.Count)
 			if query != "count" {
@@ -205,4 +214,56 @@ func (suite *statsTestSuite) TestRegionStats() {
 			}
 		}
 	}
+
+	hotStats := &statistics.RegionStats{
+		Count:                4,
+		EmptyCount:           1,
+		StorageSize:          351,
+		UserStorageSize:      291,
+		StorageKeys:          221,
+		StoreLeaderCount:     map[uint64]int{1: 1},
+		StorePeerCount:       map[uint64]int{1: 3},
+		StoreLeaderSize:      map[uint64]int64{1: 100},
+		StoreLeaderKeys:      map[uint64]int64{1: 50},
+		StorePeerSize:        map[uint64]int64{1: 301},
+		StorePeerKeys:        map[uint64]int64{1: 201},
+		StoreWriteBytes:      map[uint64]uint64{1: regions[0].GetBytesWritten() / intervalSec},
+		StoreWriteKeys:       map[uint64]uint64{1: regions[0].GetKeysWritten() / intervalSec},
+		StoreWriteQuery:      map[uint64]uint64{1: regions[0].GetWriteQueryNum() / intervalSec},
+		StoreLeaderReadBytes: map[uint64]uint64{1: 10000},
+		StoreLeaderReadKeys:  map[uint64]uint64{1: 1000},
+		StoreLeaderReadQuery: map[uint64]uint64{1: 100},
+		StorePeerReadBytes:   map[uint64]uint64{1: 10000},
+		StorePeerReadKeys:    map[uint64]uint64{1: 1000},
+		StorePeerReadQuery:   map[uint64]uint64{1: 100},
+		StoreEngine:          map[uint64]string{1: core.EngineTiKV},
+	}
+
+	storeReq := pdpb.StoreHeartbeatRequest{
+		Header: &pdpb.RequestHeader{ClusterId: keypath.ClusterID()},
+		Stats: &pdpb.StoreStats{
+			StoreId:  1,
+			Interval: &pdpb.TimeInterval{StartTimestamp: 0, EndTimestamp: 10},
+			PeerStats: []*pdpb.PeerStat{
+				{
+					RegionId:  1,
+					ReadBytes: 10000 * 10,
+					ReadKeys:  1000 * 10,
+					QueryStats: &pdpb.QueryStats{
+						Get: 100 * 10,
+					},
+				},
+			},
+		},
+	}
+	mustStoreHeartbeat(re, suite.svr, &storeReq)
+
+	args := fmt.Sprintf("?use_hot&start_key=%s&end_key=%s&engine=tikv", "", "")
+	stats := &statistics.RegionStats{}
+	res, err := testDialClient.Get(statsURL + args)
+	re.NoError(err)
+	err = apiutil.ReadJSON(res.Body, stats)
+	re.NoError(res.Body.Close())
+	re.NoError(err)
+	re.Equal(hotStats, stats)
 }

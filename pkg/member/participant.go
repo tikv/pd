@@ -81,7 +81,7 @@ func (m *Participant) InitInfo(p participant, purpose string) {
 	data, err := p.Marshal()
 	if err != nil {
 		// can't fail, so panic here.
-		log.Fatal("marshal leader meet error", zap.String("member-name", p.String()), errs.ZapError(errs.ErrMarshalLeader, err))
+		log.Fatal("marshal member meet error", zap.String("member-name", p.String()), errs.ZapError(errs.ErrMarshalMember, err))
 	}
 	m.member = p
 	m.memberValue = string(data)

@@ -117,7 +117,7 @@ func (rw *Watcher) initializeRuleWatcher() error {
 	putFn := func(kv *mvccpb.KeyValue) error {
 		key := string(kv.Key)
 		if strings.HasPrefix(key, rw.rulesPathPrefix) {
-			log.Info("update placement rule", zap.String("key", key), zap.String("value", string(kv.Value)))
+			log.Debug("update placement rule", zap.String("key", key), zap.String("value", string(kv.Value)))
 			rule, err := placement.NewRuleFromJSON(kv.Value)
 			if err != nil {
 				return err
@@ -134,7 +134,7 @@ func (rw *Watcher) initializeRuleWatcher() error {
 			}
 			return nil
 		} else if strings.HasPrefix(key, rw.ruleGroupPathPrefix) {
-			log.Info("update placement rule group", zap.String("key", key), zap.String("value", string(kv.Value)))
+			log.Debug("update placement rule group", zap.String("key", key), zap.String("value", string(kv.Value)))
 			ruleGroup, err := placement.NewRuleGroupFromJSON(kv.Value)
 			if err != nil {
 				return err
@@ -153,7 +153,7 @@ func (rw *Watcher) initializeRuleWatcher() error {
 	deleteFn := func(kv *mvccpb.KeyValue) error {
 		key := string(kv.Key)
 		if strings.HasPrefix(key, rw.rulesPathPrefix) {
-			log.Info("delete placement rule", zap.String("key", key))
+			log.Debug("delete placement rule", zap.String("key", key))
 			ruleJSON, err := rw.ruleStorage.LoadRule(strings.TrimPrefix(key, rw.rulesPathPrefix))
 			if err != nil {
 				return err
@@ -168,7 +168,7 @@ func (rw *Watcher) initializeRuleWatcher() error {
 			suspectKeyRanges.Append(rule.StartKey, rule.EndKey)
 			return err
 		} else if strings.HasPrefix(key, rw.ruleGroupPathPrefix) {
-			log.Info("delete placement rule group", zap.String("key", key))
+			log.Debug("delete placement rule group", zap.String("key", key))
 			trimmedKey := strings.TrimPrefix(key, rw.ruleGroupPathPrefix)
 			// Try to add the rule group change to the patch.
 			rw.patch.DeleteGroup(trimmedKey)
@@ -224,7 +224,7 @@ func (rw *Watcher) initializeRegionLabelWatcher() error {
 	}
 	deleteFn := func(kv *mvccpb.KeyValue) error {
 		key := string(kv.Key)
-		log.Info("delete region label rule", zap.String("key", key))
+		log.Debug("delete region label rule", zap.String("key", key))
 		return rw.regionLabeler.DeleteLabelRuleLocked(strings.TrimPrefix(key, rw.regionLabelPathPrefix))
 	}
 	postEventsFn := func([]*clientv3.Event) error {

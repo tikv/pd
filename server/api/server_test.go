@@ -187,6 +187,12 @@ func mustRegionHeartbeat(re *require.Assertions, svr *server.Server, region *cor
 	re.NoError(err)
 }
 
+func mustStoreHeartbeat(re *require.Assertions, svr *server.Server, region *pdpb.StoreHeartbeatRequest) {
+	cluster := svr.GetRaftCluster()
+	err := cluster.HandleStoreHeartbeat(region, &pdpb.StoreHeartbeatResponse{})
+	re.NoError(err)
+}
+
 type serviceTestSuite struct {
 	suite.Suite
 	svr     *server.Server

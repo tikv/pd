@@ -200,21 +200,22 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 					var (
 						region       *core.RegionInfo
 						regionLeader *metapb.Peer
+						opts         = []core.RegionCreateOption{core.SetSource(core.Sync)}
 					)
 					if len(regionLeaders) > i && regionLeaders[i].GetId() != 0 {
 						regionLeader = regionLeaders[i]
 					}
 					if hasStats {
-						region = core.NewRegionInfo(r, regionLeader,
+						opts = append(opts,
 							core.SetWrittenBytes(stats[i].BytesWritten),
 							core.SetWrittenKeys(stats[i].KeysWritten),
 							core.SetReadBytes(stats[i].BytesRead),
-							core.SetReadKeys(stats[i].KeysRead),
-							core.SetSource(core.Sync),
-						)
-					} else {
-						region = core.NewRegionInfo(r, regionLeader, core.SetSource(core.Sync))
+							core.SetReadKeys(stats[i].KeysRead))
 					}
+					if hasBuckets {
+						opts = append(opts, core.SetBuckets(buckets[i]))
+					}
+					region = core.NewRegionInfo(r, regionLeader, opts...)
 
 					origin, _, err := bc.PreCheckPutRegion(region)
 					if err != nil {

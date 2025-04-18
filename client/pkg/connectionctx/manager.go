@@ -20,7 +20,8 @@ import (
 	"sync"
 )
 
-type connectionCtx[T any] struct {
+// ConnectionCtx wraps the stream connection with its context info.
+type ConnectionCtx[T any] struct {
 	Ctx    context.Context
 	Cancel context.CancelFunc
 	// Current URL of the stream connection.
@@ -32,13 +33,13 @@ type connectionCtx[T any] struct {
 // Manager is used to manage the connection contexts.
 type Manager[T any] struct {
 	sync.RWMutex
-	connectionCtxs map[string]*connectionCtx[T]
+	connectionCtxs map[string]*ConnectionCtx[T]
 }
 
 // NewManager is used to create a new connection context manager.
 func NewManager[T any]() *Manager[T] {
 	return &Manager[T]{
-		connectionCtxs: make(map[string]*connectionCtx[T], 3),
+		connectionCtxs: make(map[string]*ConnectionCtx[T], 3),
 	}
 }
 
@@ -69,7 +70,7 @@ func (c *Manager[T]) Store(ctx context.Context, url string, stream T, overwrite 
 func (c *Manager[T]) storeLocked(ctx context.Context, url string, stream T) {
 	c.releaseLocked(url)
 	cctx, cancel := context.WithCancel(ctx)
-	c.connectionCtxs[url] = &connectionCtx[T]{cctx, cancel, url, stream}
+	c.connectionCtxs[url] = &ConnectionCtx[T]{cctx, cancel, url, stream}
 }
 
 // CleanAllAndStore is used to store the connection context exclusively. It will release
@@ -124,13 +125,13 @@ func (c *Manager[T]) releaseLocked(url string) {
 	delete(c.connectionCtxs, url)
 }
 
-// GetConnectionCtx is used to get a connection context from the connection context map.
+// RandomlyPick picks a connection context from the connection context map randomly.
 // It uses the reservoir sampling algorithm to randomly pick one connection context.
-func (c *Manager[T]) GetConnectionCtx() *connectionCtx[T] {
+func (c *Manager[T]) RandomlyPick() *ConnectionCtx[T] {
 	c.RLock()
 	defer c.RUnlock()
 	idx := 0
-	var connectionCtx *connectionCtx[T]
+	var connectionCtx *ConnectionCtx[T]
 	for _, cc := range c.connectionCtxs {
 		j := rand.Intn(idx + 1)
 		if j < 1 {
@@ -139,4 +140,15 @@ func (c *Manager[T]) GetConnectionCtx() *connectionCtx[T] {
 		idx++
 	}
 	return connectionCtx
+}
+
+// GetConnectionCtx is used to get a connection context from the connection context map by the given URL.
+func (c *Manager[T]) GetConnectionCtx(url string) *ConnectionCtx[T] {
+	c.RLock()
+	defer c.RUnlock()
+	cc, ok := c.connectionCtxs[url]
+	if !ok {
+		return nil
+	}
+	return cc
 }
