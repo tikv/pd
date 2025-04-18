@@ -250,15 +250,15 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 		emergencyTokenAcquisitionTicker := time.NewTicker(defaultTargetPeriod)
 		defer emergencyTokenAcquisitionTicker.Stop()
 
-		if _, _err_ := failpoint.Eval(_curpkg_("fastCleanup")); _err_ == nil {
+		failpoint.Inject("fastCleanup", func() {
 			cleanupTicker.Reset(100 * time.Millisecond)
 			// because of checking `gc.run.consumption` in cleanupTicker,
 			// so should also change the stateUpdateTicker.
 			stateUpdateTicker.Reset(200 * time.Millisecond)
-		}
-		if _, _err_ := failpoint.Eval(_curpkg_("acceleratedReportingPeriod")); _err_ == nil {
+		})
+		failpoint.Inject("acceleratedReportingPeriod", func() {
 			stateUpdateTicker.Reset(time.Millisecond * 100)
-		}
+		})
 
 		_, metaRevision, err := c.provider.LoadResourceGroups(ctx)
 		if err != nil {
@@ -303,9 +303,9 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 					if err != nil {
 						log.Warn("watch resource group meta failed", zap.Error(err))
 						watchRetryTimer.Reset(watchRetryInterval)
-						if _, _err_ := failpoint.Eval(_curpkg_("watchStreamError")); _err_ == nil {
+						failpoint.Inject("watchStreamError", func() {
 							watchRetryTimer.Reset(20 * time.Millisecond)
-						}
+						})
 					}
 				}
 				if watchConfigChannel == nil {
@@ -339,17 +339,17 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 					c.executeOnAllGroups((*groupCostController).applyDegradedMode)
 				}
 			case resp, ok := <-watchMetaChannel:
-				if _, _err_ := failpoint.Eval(_curpkg_("disableWatch")); _err_ == nil {
+				failpoint.Inject("disableWatch", func() {
 					if c.ruConfig.isSingleGroupByKeyspace {
 						panic("disableWatch")
 					}
-				}
+				})
 				if !ok {
 					watchMetaChannel = nil
 					watchRetryTimer.Reset(watchRetryInterval)
-					if _, _err_ := failpoint.Eval(_curpkg_("watchStreamError")); _err_ == nil {
+					failpoint.Inject("watchStreamError", func() {
 						watchRetryTimer.Reset(20 * time.Millisecond)
-					}
+					})
 					continue
 				}
 				for _, item := range resp {
@@ -398,9 +398,9 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 				if !ok {
 					watchConfigChannel = nil
 					watchRetryTimer.Reset(watchRetryInterval)
-					if _, _err_ := failpoint.Eval(_curpkg_("watchStreamError")); _err_ == nil {
+					failpoint.Inject("watchStreamError", func() {
 						watchRetryTimer.Reset(20 * time.Millisecond)
-					}
+					})
 					continue
 				}
 				for _, item := range resp {
@@ -1061,18 +1061,18 @@ func (gc *groupCostController) updateAvgRUPerSec() {
 
 func (gc *groupCostController) calcAvg(counter *tokenCounter, new float64) bool {
 	deltaDuration := gc.run.now.Sub(counter.avgLastTime)
-	if _, _err_ := failpoint.Eval(_curpkg_("acceleratedReportingPeriod")); _err_ == nil {
+	failpoint.Inject("acceleratedReportingPeriod", func() {
 		deltaDuration = 100 * time.Millisecond
-	}
+	})
 	delta := (new - counter.avgRUPerSecLastRU) / deltaDuration.Seconds()
 	counter.avgRUPerSec = movingAvgFactor*counter.avgRUPerSec + (1-movingAvgFactor)*delta
-	if _, _err_ := failpoint.Eval(_curpkg_("acceleratedSpeedTrend")); _err_ == nil {
+	failpoint.Inject("acceleratedSpeedTrend", func() {
 		if delta > 0 {
 			counter.avgRUPerSec = 1000
 		} else {
 			counter.avgRUPerSec = 0
 		}
-	}
+	})
 	counter.avgLastTime = gc.run.now
 	counter.avgRUPerSecLastRU = new
 	return true
@@ -1083,9 +1083,9 @@ func (gc *groupCostController) shouldReportConsumption() bool {
 		return true
 	}
 	timeSinceLastRequest := gc.run.now.Sub(gc.run.lastRequestTime)
-	if _, _err_ := failpoint.Eval(_curpkg_("acceleratedReportingPeriod")); _err_ == nil {
+	failpoint.Inject("acceleratedReportingPeriod", func() {
 		timeSinceLastRequest = extendedReportingPeriodFactor * defaultTargetPeriod
-	}
+	})
 	// Due to `gc.run.lastRequestTime` update operations late in this logic,
 	// so `timeSinceLastRequest` is less than defaultGroupStateUpdateInterval a little bit, lead to actual report period is greater than defaultTargetPeriod.
 	// Add defaultGroupStateUpdateInterval/2 as duration buffer to avoid it.
@@ -1155,9 +1155,9 @@ func (gc *groupCostController) applyBasicConfigForRUTokenCounters() {
 		fillRate := counter.getTokenBucketFunc().Settings.FillRate
 		cfg.NewBurst = int64(fillRate)
 		cfg.NewRate = float64(fillRate)
-		if _, _err_ := failpoint.Eval(_curpkg_("degradedModeRU")); _err_ == nil {
+		failpoint.Inject("degradedModeRU", func() {
 			cfg.NewRate = 99999999
-		}
+		})
 		counter.limiter.Reconfigure(gc.run.now, cfg, resetLowProcess())
 		log.Info("[resource group controller] resource token bucket enter degraded mode", zap.String("name", gc.name), zap.String("type", rmpb.RequestUnitType_name[int32(typ)]))
 	}
@@ -1249,9 +1249,9 @@ func (gc *groupCostController) collectRequestAndConsumption(selectTyp selectType
 	}
 	// collect request resource
 	selected := gc.run.requestInProgress
-	if _, _err_ := failpoint.Eval(_curpkg_("triggerUpdate")); _err_ == nil {
+	failpoint.Inject("triggerUpdate", func() {
 		selected = true
-	}
+	})
 	switch gc.mode {
 	case rmpb.GroupMode_RawMode:
 		requests := make([]*rmpb.RawResourceItem, 0, len(requestResourceLimitTypeList))
@@ -1282,19 +1282,19 @@ func (gc *groupCostController) collectRequestAndConsumption(selectTyp selectType
 			switch selectTyp {
 			case periodicReport:
 				selected = selected || gc.shouldReportConsumption()
-				if val, _err_ := failpoint.Eval(_curpkg_("triggerPeriodicReport")); _err_ == nil {
+				failpoint.Inject("triggerPeriodicReport", func(val failpoint.Value) {
 					selected = gc.name == val.(string)
-				}
+				})
 				fallthrough
 			case lowToken:
 				if counter.limiter.IsLowTokens() {
 					selected = true
 				}
-				if val, _err_ := failpoint.Eval(_curpkg_("triggerLowRUReport")); _err_ == nil {
+				failpoint.Inject("triggerLowRUReport", func(val failpoint.Value) {
 					if selectTyp == lowToken {
 						selected = gc.name == val.(string)
 					}
-				}
+				})
 			}
 			request := &rmpb.RequestUnitItem{
 				Type:  typ,
@@ -1413,9 +1413,9 @@ func (gc *groupCostController) onRequestWaitImpl(
 			gc.mu.Lock()
 			sub(gc.mu.consumption, delta)
 			gc.mu.Unlock()
-			if _, _err_ := failpoint.Eval(_curpkg_("triggerUpdate")); _err_ == nil {
+			failpoint.Inject("triggerUpdate", func() {
 				gc.lowRUNotifyChan <- notifyMsg{}
-			}
+			})
 			return nil, nil, waitDuration, 0, err
 		}
 		gc.metrics.successfulRequestDuration.Observe(d.Seconds())

@@ -280,9 +280,9 @@ func (c *Cli) connectionCtxsUpdater() {
 				// Because the TSO Follower Proxy is enabled,
 				// the periodic check needs to be performed.
 				setNewUpdateTicker(sd.MemberUpdateInterval)
-				if _, _err_ := failpoint.Eval(_curpkg_("speedUpTsoDispatcherUpdateInterval")); _err_ == nil {
+				failpoint.Inject("speedUpTsoDispatcherUpdateInterval", func() {
 					setNewUpdateTicker(10 * time.Millisecond)
-				}
+				})
 			} else if !enableTSOFollowerProxy && updateTicker.C != nil {
 				// Because the TSO Follower Proxy is disabled,
 				// the periodic check needs to be turned off.
@@ -339,10 +339,10 @@ func (c *Cli) tryConnectToTSO(ctx context.Context) error {
 		if cc != nil {
 			cctx, cancel := context.WithCancel(ctx)
 			stream, err = c.tsoStreamBuilderFactory.makeBuilder(cc).build(cctx, cancel, c.option.Timeout)
-			if _, _err_ := failpoint.Eval(_curpkg_("unreachableNetwork")); _err_ == nil {
+			failpoint.Inject("unreachableNetwork", func() {
 				stream = nil
 				err = status.New(codes.Unavailable, "unavailable").Err()
-			}
+			})
 			if stream != nil && err == nil {
 				c.conCtxMgr.CleanAllAndStore(cctx, cancel, url, stream)
 				return nil
@@ -424,9 +424,9 @@ func (c *Cli) checkLeader(
 		if healthCli != nil {
 			healthCtx, healthCancel := context.WithTimeout(ctx, c.option.Timeout)
 			resp, err := healthCli.Check(healthCtx, &healthpb.HealthCheckRequest{Service: ""})
-			if _, _err_ := failpoint.Eval(_curpkg_("unreachableNetwork")); _err_ == nil {
+			failpoint.Inject("unreachableNetwork", func() {
 				resp.Status = healthpb.HealthCheckResponse_UNKNOWN
-			}
+			})
 			healthCancel()
 			if err == nil && resp.GetStatus() == healthpb.HealthCheckResponse_SERVING {
 				// create a stream of the original tso leader
@@ -567,9 +567,9 @@ func (c *Cli) DispatchRequest(request *Request) (bool, error) {
 		return true, c.ctx.Err()
 	default:
 		// This failpoint will increase the possibility that the request is sent to a closed dispatcher.
-		if _, _err_ := failpoint.Eval(_curpkg_("delayDispatchTSORequest")); _err_ == nil {
+		failpoint.Inject("delayDispatchTSORequest", func() {
 			time.Sleep(time.Second)
-		}
+		})
 		c.getDispatcher().push(request)
 	}
 	// Check the contexts again to make sure the request is not been sent to a closed dispatcher.

@@ -314,9 +314,9 @@ func (manager *Manager) saveNewKeyspace(keyspace *keyspacepb.KeyspaceMeta) error
 // splitKeyspaceRegion add keyspace's boundaries to region label. The corresponding
 // region will then be split by Coordinator's patrolRegion.
 func (manager *Manager) splitKeyspaceRegion(id uint32, waitRegionSplit bool) (err error) {
-	if _, _err_ := failpoint.Eval(_curpkg_("skipSplitRegion")); _err_ == nil {
-		return nil
-	}
+	failpoint.Inject("skipSplitRegion", func() {
+		failpoint.Return(nil)
+	})
 
 	start := time.Now()
 	keyspaceRule := MakeLabelRule(id)

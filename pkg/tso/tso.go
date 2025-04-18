@@ -127,9 +127,9 @@ func (t *timestampOracle) syncTimestamp() error {
 	log.Info("start to sync timestamp", logutil.CondUint32("keyspace-group-id", t.keyspaceGroupID, t.keyspaceGroupID > 0))
 	t.metrics.syncEvent.Inc()
 
-	if _, _err_ := failpoint.Eval(_curpkg_("delaySyncTimestamp")); _err_ == nil {
+	failpoint.Inject("delaySyncTimestamp", func() {
 		time.Sleep(time.Second)
-	}
+	})
 
 	last, err := t.storage.LoadTimestamp(t.keyspaceGroupID)
 	if err != nil {
@@ -155,12 +155,12 @@ func (t *timestampOracle) syncTimestamp() error {
 	}
 
 	next := time.Now()
-	if _, _err_ := failpoint.Eval(_curpkg_("fallBackSync")); _err_ == nil {
+	failpoint.Inject("fallBackSync", func() {
 		next = next.Add(time.Hour)
-	}
-	if _, _err_ := failpoint.Eval(_curpkg_("systemTimeSlow")); _err_ == nil {
+	})
+	failpoint.Inject("systemTimeSlow", func() {
 		next = next.Add(-time.Hour)
-	}
+	})
 	// If the current system time minus the saved etcd timestamp is less than `UpdateTimestampGuard`,
 	// the timestamp allocation will start from the saved etcd timestamp temporarily.
 	if typeutil.SubRealTimeByWallClock(next, last) < updateTimestampGuard {
@@ -171,9 +171,9 @@ func (t *timestampOracle) syncTimestamp() error {
 			errs.ZapError(errs.ErrIncorrectSystemTime))
 		next = last.Add(updateTimestampGuard)
 	}
-	if _, _err_ := failpoint.Eval(_curpkg_("failedToSaveTimestamp")); _err_ == nil {
-		return errs.ErrEtcdTxnInternal
-	}
+	failpoint.Inject("failedToSaveTimestamp", func() {
+		failpoint.Return(errs.ErrEtcdTxnInternal)
+	})
 	save := next.Add(t.saveInterval)
 	start := time.Now()
 	if err = t.saveTimestamp(save); err != nil {
@@ -284,12 +284,12 @@ func (t *timestampOracle) updateTimestamp() error {
 	t.metrics.tsoPhysicalGapGauge.Set(float64(time.Since(prevPhysical).Milliseconds()))
 
 	now := time.Now()
-	if _, _err_ := failpoint.Eval(_curpkg_("fallBackUpdate")); _err_ == nil {
+	failpoint.Inject("fallBackUpdate", func() {
 		now = now.Add(time.Hour)
-	}
-	if _, _err_ := failpoint.Eval(_curpkg_("systemTimeSlow")); _err_ == nil {
+	})
+	failpoint.Inject("systemTimeSlow", func() {
 		now = now.Add(-time.Hour)
-	}
+	})
 
 	t.metrics.saveEvent.Inc()
 

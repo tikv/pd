@@ -146,9 +146,9 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 			}
 
 			stream, err := s.syncRegion(ctx, conn)
-			if _, _err_ := failpoint.Eval(_curpkg_("disableClientStreaming")); _err_ == nil {
+			failpoint.Inject("disableClientStreaming", func() {
 				err = errors.Errorf("no stream")
-			}
+			})
 			if err != nil {
 				if ev, ok := status.FromError(err); ok {
 					if ev.Code() == codes.Canceled {

@@ -139,9 +139,9 @@ func (oc *Controller) GetHBStreams() *hbstream.HeartbeatStreams {
 func (oc *Controller) Dispatch(region *core.RegionInfo, source string, recordOpStepWithTTL func(regionID uint64)) {
 	// Check existed
 	if op := oc.GetOperator(region.GetID()); op != nil {
-		if _, _err_ := failpoint.Eval(_curpkg_("concurrentRemoveOperator")); _err_ == nil {
+		failpoint.Inject("concurrentRemoveOperator", func() {
 			time.Sleep(500 * time.Millisecond)
-		}
+		})
 		// Update operator status:
 		// The operator status should be STARTED.
 		// Check will call CheckSuccess and CheckTimeout.
@@ -178,9 +178,9 @@ func (oc *Controller) Dispatch(region *core.RegionInfo, source string, recordOpS
 					zap.Uint64("region-id", op.RegionID()),
 					zap.String("status", OpStatusToString(op.Status())),
 					zap.Reflect("operator", op), errs.ZapError(errs.ErrUnexpectedOperatorStatus))
-				if _, _err_ := failpoint.Eval(_curpkg_("unexpectedOperator")); _err_ == nil {
+				failpoint.Inject("unexpectedOperator", func() {
 					panic(op)
-				}
+				})
 				_ = op.Cancel(NotInRunningState)
 				oc.buryOperator(op)
 				operatorCounter.WithLabelValues(op.Desc(), "promote-unexpected").Inc()
@@ -457,9 +457,9 @@ func (oc *Controller) checkAddOperator(isPromoting bool, ops ...*Operator) (bool
 				zap.Uint64("region-id", op.RegionID()),
 				zap.String("status", OpStatusToString(op.Status())),
 				zap.Reflect("operator", op), errs.ZapError(errs.ErrUnexpectedOperatorStatus))
-			if _, _err_ := failpoint.Eval(_curpkg_("unexpectedOperator")); _err_ == nil {
+			failpoint.Inject("unexpectedOperator", func() {
 				panic(op)
-			}
+			})
 			operatorCounter.WithLabelValues(op.Desc(), "unexpected-status").Inc()
 			return false, NotInCreateStatus
 		}
@@ -529,9 +529,9 @@ func (oc *Controller) addOperatorInner(op *Operator) bool {
 			zap.Uint64("region-id", regionID),
 			zap.String("status", OpStatusToString(op.Status())),
 			zap.Reflect("operator", op), errs.ZapError(errs.ErrUnexpectedOperatorStatus))
-		if _, _err_ := failpoint.Eval(_curpkg_("unexpectedOperator")); _err_ == nil {
+		failpoint.Inject("unexpectedOperator", func() {
 			panic(op)
-		}
+		})
 		operatorCounter.WithLabelValues(op.Desc(), "unexpected").Inc()
 		return false
 	}
@@ -685,9 +685,9 @@ func (oc *Controller) buryOperator(op *Operator) {
 			zap.Uint64("region-id", op.RegionID()),
 			zap.String("status", OpStatusToString(op.Status())),
 			zap.Reflect("operator", op), errs.ZapError(errs.ErrUnexpectedOperatorStatus))
-		if _, _err_ := failpoint.Eval(_curpkg_("unexpectedOperator")); _err_ == nil {
+		failpoint.Inject("unexpectedOperator", func() {
 			panic(op)
-		}
+		})
 		operatorCounter.WithLabelValues(op.Desc(), "unexpected").Inc()
 		_ = op.Cancel(Unknown)
 	}

@@ -532,12 +532,12 @@ func (c *tsoServiceDiscovery) updateMember() error {
 func (c *tsoServiceDiscovery) findGroupByKeyspaceID(
 	keyspaceID uint32, tsoSrvURL string, timeout time.Duration,
 ) (*tsopb.KeyspaceGroup, error) {
-	if val, _err_ := failpoint.Eval(_curpkg_("unexpectedCallOfFindGroupByKeyspaceID")); _err_ == nil {
+	failpoint.Inject("unexpectedCallOfFindGroupByKeyspaceID", func(val failpoint.Value) {
 		keyspaceToCheck, ok := val.(int)
 		if ok && keyspaceID == uint32(keyspaceToCheck) {
 			panic("findGroupByKeyspaceID is called unexpectedly")
 		}
-	}
+	})
 	ctx, cancel := context.WithTimeout(c.ctx, timeout)
 	defer cancel()
 
@@ -588,10 +588,10 @@ func (c *tsoServiceDiscovery) getTSOServer(sd ServiceDiscovery) (string, error) 
 		if err != nil {
 			return "", err
 		}
-		if _, _err_ := failpoint.Eval(_curpkg_("serverReturnsNoTSOAddrs")); _err_ == nil {
+		failpoint.Inject("serverReturnsNoTSOAddrs", func() {
 			log.Info("[failpoint] injected error: server returns no tso URLs")
 			urls = nil
-		}
+		})
 		if len(urls) == 0 {
 			// There is no error but no tso server url found, which means
 			// the server side hasn't been upgraded to the version that

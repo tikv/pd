@@ -167,9 +167,9 @@ func (a *Allocator) allocatorUpdater() {
 	defer a.wg.Done()
 
 	tsTicker := time.NewTicker(a.cfg.GetTSOUpdatePhysicalInterval())
-	if _, _err_ := failpoint.Eval(_curpkg_("fastUpdatePhysicalInterval")); _err_ == nil {
+	failpoint.Inject("fastUpdatePhysicalInterval", func() {
 		tsTicker.Reset(time.Millisecond)
-	}
+	})
 	defer tsTicker.Stop()
 
 	log.Info("entering into allocator update loop", a.logFields...)

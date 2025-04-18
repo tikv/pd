@@ -91,9 +91,9 @@ func (manager *SafePointV2Manager) LoadGCSafePoint(keyspaceID uint32) (*endpoint
 // checkKeyspace check if target keyspace exists, and if request is a update request,
 // also check if keyspace state allows for update.
 func (manager *SafePointV2Manager) checkKeyspace(keyspaceID uint32, updateRequest bool) error {
-	if _, _err_ := failpoint.Eval(_curpkg_("checkKeyspace")); _err_ == nil {
-		return nil
-	}
+	failpoint.Inject("checkKeyspace", func() {
+		failpoint.Return(nil)
+	})
 
 	err := manager.keyspaceStorage.RunInTxn(manager.ctx, func(txn kv.Txn) error {
 		meta, err := manager.keyspaceStorage.LoadKeyspaceMeta(txn, keyspaceID)

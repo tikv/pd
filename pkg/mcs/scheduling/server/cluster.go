@@ -249,9 +249,9 @@ func (c *Cluster) AllocID(count uint32) (uint64, uint32, error) {
 	defer cancel()
 	req := &pdpb.AllocIDRequest{Header: &pdpb.RequestHeader{ClusterId: keypath.ClusterID()}, Count: count}
 
-	if _, _err_ := failpoint.Eval(_curpkg_("allocIDNonBatch")); _err_ == nil {
+	failpoint.Inject("allocIDNonBatch", func() {
 		req = &pdpb.AllocIDRequest{Header: &pdpb.RequestHeader{ClusterId: keypath.ClusterID()}}
-	}
+	})
 	resp, err := client.AllocID(ctx, req)
 	if err != nil {
 		c.triggerMembershipCheck()
@@ -512,9 +512,9 @@ func (c *Cluster) runCoordinator() {
 	defer c.wg.Done()
 	// force wait for 1 minute to make prepare checker won't be directly skipped
 	runCollectWaitTime := collectWaitTime
-	if _, _err_ := failpoint.Eval(_curpkg_("changeRunCollectWaitTime")); _err_ == nil {
+	failpoint.Inject("changeRunCollectWaitTime", func() {
 		runCollectWaitTime = 1 * time.Second
-	}
+	})
 	c.coordinator.RunUntilStop(runCollectWaitTime)
 }
 

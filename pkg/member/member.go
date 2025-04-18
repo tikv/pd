@@ -182,9 +182,9 @@ func (m *EmbeddedEtcdMember) GetLastLeaderUpdatedTime() time.Time {
 // leader should be changed when campaign leader frequently.
 func (m *EmbeddedEtcdMember) CampaignLeader(ctx context.Context, leaseTimeout int64) error {
 	m.leadership.AddCampaignTimes()
-	if _, _err_ := failpoint.Eval(_curpkg_("skipCampaignLeaderCheck")); _err_ == nil {
-		return m.leadership.Campaign(leaseTimeout, m.MemberValue())
-	}
+	failpoint.Inject("skipCampaignLeaderCheck", func() {
+		failpoint.Return(m.leadership.Campaign(leaseTimeout, m.MemberValue()))
+	})
 
 	if m.leadership.GetCampaignTimesNum() > campaignLeaderFrequencyTimes {
 		if err := m.ResignEtcdLeader(ctx, m.Name(), ""); err != nil {

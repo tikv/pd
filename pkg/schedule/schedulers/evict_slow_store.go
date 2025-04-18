@@ -104,9 +104,9 @@ func (conf *evictSlowStoreSchedulerConfig) readyForRecovery() bool {
 	conf.RLock()
 	defer conf.RUnlock()
 	recoveryDurationGap := conf.RecoveryDurationGap
-	if _, _err_ := failpoint.Eval(_curpkg_("transientRecoveryGap")); _err_ == nil {
+	failpoint.Inject("transientRecoveryGap", func() {
 		recoveryDurationGap = 0
-	}
+	})
 	return uint64(time.Since(conf.lastSlowStoreCaptureTS).Seconds()) >= recoveryDurationGap
 }
 

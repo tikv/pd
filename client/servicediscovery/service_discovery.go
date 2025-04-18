@@ -233,12 +233,12 @@ func (c *serviceClient) checkNetworkAvailable(ctx context.Context) {
 	}
 	healthCli := healthpb.NewHealthClient(c.conn)
 	resp, err := healthCli.Check(ctx, &healthpb.HealthCheckRequest{Service: ""})
-	if val, _err_ := failpoint.Eval(_curpkg_("unreachableNetwork1")); _err_ == nil {
+	failpoint.Inject("unreachableNetwork1", func(val failpoint.Value) {
 		if val, ok := val.(string); (ok && val == c.GetURL()) || !ok {
 			resp = nil
 			err = status.New(codes.Unavailable, "unavailable").Err()
 		}
-	}
+	})
 	rpcErr, ok := status.FromError(err)
 	if (ok && errs.IsNetworkError(rpcErr.Code())) || resp.GetStatus() != healthpb.HealthCheckResponse_SERVING {
 		c.networkFailure.Store(true)
@@ -316,9 +316,9 @@ func (c *serviceAPIClient) NeedRetry(pdErr *pdpb.Error, err error) bool {
 	}
 	if c.fn(pdErr) && c.unavailable.CompareAndSwap(false, true) {
 		c.unavailableUntil.Store(time.Now().Add(time.Second * 10))
-		if _, _err_ := failpoint.Eval(_curpkg_("fastCheckAvailable")); _err_ == nil {
+		failpoint.Inject("fastCheckAvailable", func() {
 			c.unavailableUntil.Store(time.Now().Add(time.Millisecond * 100))
-		}
+		})
 	}
 	return true
 }
@@ -555,20 +555,20 @@ func (c *serviceDiscovery) updateMemberLoop() {
 
 func (c *serviceDiscovery) updateServiceModeLoop() {
 	defer c.wg.Done()
-	if _, _err_ := failpoint.Eval(_curpkg_("skipUpdateServiceMode")); _err_ == nil {
-		return
-	}
-	if _, _err_ := failpoint.Eval(_curpkg_("usePDServiceMode")); _err_ == nil {
+	failpoint.Inject("skipUpdateServiceMode", func() {
+		failpoint.Return()
+	})
+	failpoint.Inject("usePDServiceMode", func() {
 		c.callbacks.onServiceModeUpdate(pdpb.ServiceMode_PD_SVC_MODE)
-		return
-	}
+		failpoint.Return()
+	})
 
 	ctx, cancel := context.WithCancel(c.ctx)
 	defer cancel()
 	ticker := time.NewTicker(serviceModeUpdateInterval)
-	if _, _err_ := failpoint.Eval(_curpkg_("fastUpdateServiceMode")); _err_ == nil {
+	failpoint.Inject("fastUpdateServiceMode", func() {
 		ticker.Reset(10 * time.Millisecond)
-	}
+	})
 	defer ticker.Stop()
 
 	for {

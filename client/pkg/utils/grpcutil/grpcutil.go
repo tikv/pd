@@ -83,9 +83,9 @@ func UnaryCircuitBreakerInterceptor() grpc.UnaryClientInterceptor {
 		}
 		err := cb.Execute(func() (circuitbreaker.Overloading, error) {
 			err := invoker(ctx, method, req, reply, cc, opts...)
-			if _, _err_ := failpoint.Eval(_curpkg_("triggerCircuitBreaker")); _err_ == nil {
+			failpoint.Inject("triggerCircuitBreaker", func() {
 				err = status.Error(codes.ResourceExhausted, "resource exhausted")
-			}
+			})
 			return isOverloaded(err), err
 		})
 		if err != nil {
@@ -203,12 +203,12 @@ func GetOrCreateGRPCConn(ctx context.Context, clientConns *sync.Map, url string,
 	dCtx, cancel := context.WithTimeout(ctx, dialTimeout)
 	defer cancel()
 	cc, err := GetClientConn(dCtx, url, tlsCfg, opt...)
-	if val, _err_ := failpoint.Eval(_curpkg_("unreachableNetwork2")); _err_ == nil {
+	failpoint.Inject("unreachableNetwork2", func(val failpoint.Value) {
 		if val, ok := val.(string); ok && val == url {
 			cc = nil
 			err = errors.Errorf("unreachable network")
 		}
-	}
+	})
 	if err != nil {
 		return nil, err
 	}
