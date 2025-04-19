@@ -17,6 +17,7 @@ package tsoutil
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -42,6 +43,41 @@ type tsoResp interface {
 	GetTimestamp() *pdpb.Timestamp
 }
 
+// TsoRequestProxyQueue contains request channel and allows to communicate error back to client
+// There are multiple streams associated with a single TSO request proxy queue, so we can't use a single channel to
+// communicate it back to all streams and store error in a separate variable
+type TsoRequestProxyQueue struct {
+	request chan Request
+	done    chan struct{}
+	err     atomic.Pointer[error]
+}
+
+func newTsoRequestProxyQueue() *TsoRequestProxyQueue {
+	return &TsoRequestProxyQueue{
+		request: make(chan Request, maxMergeRequests),
+		done:    make(chan struct{}),
+	}
+}
+
+func (q *TsoRequestProxyQueue) close(err error) {
+	q.err.Store(&err)
+	close(q.done)
+}
+
+// Err returns the error if it exists
+func (q *TsoRequestProxyQueue) Err() (err error) {
+	errPtr := q.err.Load()
+	if errPtr != nil {
+		err = *errPtr
+	}
+	return err
+}
+
+// Done returns a channel indicates the queue is closed. Error is available through Err()
+func (q *TsoRequestProxyQueue) Done() chan struct{} {
+	return q.done
+}
+
 // TSODispatcher dispatches the TSO requests to the corresponding forwarding TSO channels.
 type TSODispatcher struct {
 	tsoProxyHandleDuration prometheus.Histogram
@@ -65,22 +101,22 @@ func (s *TSODispatcher) DispatchRequest(
 	ctx context.Context,
 	req Request,
 	tsoProtoFactory ProtoFactory,
-	doneCh <-chan struct{},
-	errCh chan<- error,
-	tsoPrimaryWatchers ...*etcdutil.LoopWatcher) {
+	tsoPrimaryWatchers ...*etcdutil.LoopWatcher) *TsoRequestProxyQueue {
 	key := req.getForwardedHost()
 	val, loaded := s.dispatchChs.Load(key)
 	if !loaded {
-		val = make(chan Request, maxMergeRequests)
+		val = newTsoRequestProxyQueue()
 		val, loaded = s.dispatchChs.LoadOrStore(key, val)
 	}
-	reqCh := val.(chan Request)
+	tsoQueue := val.(*TsoRequestProxyQueue)
 	if !loaded {
+		log.Info("Start new tso proxy dispatcher", zap.String("forwardedHost", req.getForwardedHost()))
 		tsDeadlineCh := make(chan *TSDeadline, 1)
-		go s.dispatch(ctx, tsoProtoFactory, req.getForwardedHost(), req.getClientConn(), reqCh, tsDeadlineCh, doneCh, errCh, tsoPrimaryWatchers...)
+		go s.dispatch(ctx, tsoProtoFactory, req.getForwardedHost(), req.getClientConn(), tsoQueue, tsDeadlineCh, tsoPrimaryWatchers...)
 		go WatchTSDeadline(ctx, tsDeadlineCh)
 	}
-	reqCh <- req
+	tsoQueue.request <- req
+	return tsoQueue
 }
 
 func (s *TSODispatcher) dispatch(
@@ -88,10 +124,8 @@ func (s *TSODispatcher) dispatch(
 	tsoProtoFactory ProtoFactory,
 	forwardedHost string,
 	clientConn *grpc.ClientConn,
-	tsoRequestCh <-chan Request,
+	tsoQueue *TsoRequestProxyQueue,
 	tsDeadlineCh chan<- *TSDeadline,
-	doneCh <-chan struct{},
-	errCh chan<- error,
 	tsoPrimaryWatchers ...*etcdutil.LoopWatcher) {
 	defer logutil.LogPanic()
 	dispatcherCtx, ctxCancel := context.WithCancel(ctx)
@@ -106,12 +140,8 @@ func (s *TSODispatcher) dispatch(
 		select {
 		case <-dispatcherCtx.Done():
 			return
-		case _, ok := <-doneCh:
-			if !ok {
-				return
-			}
-		case errCh <- err:
-			close(errCh)
+		default:
+			tsoQueue.close(err)
 			return
 		}
 	}
@@ -121,11 +151,11 @@ func (s *TSODispatcher) dispatch(
 	needUpdateServicePrimaryAddr := len(tsoPrimaryWatchers) > 0 && tsoPrimaryWatchers[0] != nil
 	for {
 		select {
-		case first := <-tsoRequestCh:
-			pendingTSOReqCount := len(tsoRequestCh) + 1
+		case first := <-tsoQueue.request:
+			pendingTSOReqCount := len(tsoQueue.request) + 1
 			requests[0] = first
 			for i := 1; i < pendingTSOReqCount; i++ {
-				requests[i] = <-tsoRequestCh
+				requests[i] = <-tsoQueue.request
 			}
 			done := make(chan struct{})
 			dl := NewTSDeadline(DefaultTSOProxyTimeout, done, cancel)
@@ -146,12 +176,8 @@ func (s *TSODispatcher) dispatch(
 				select {
 				case <-dispatcherCtx.Done():
 					return
-				case _, ok := <-doneCh:
-					if !ok {
-						return
-					}
-				case errCh <- err:
-					close(errCh)
+				default:
+					tsoQueue.close(err)
 					return
 				}
 			}
