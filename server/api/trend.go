@@ -61,6 +61,7 @@ type trendHistory struct {
 	Entries   []TrendHistoryEntry `json:"entries"`
 }
 
+// TrendHistoryEntry describes the trend history of the cluster.
 // NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
 type TrendHistoryEntry struct {
 	From  uint64 `json:"from"`
