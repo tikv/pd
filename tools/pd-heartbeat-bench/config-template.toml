@@ -6,9 +6,8 @@ region-count = 2000000
 replica = 3
 
 leader-update-ratio = 0.06
-epoch-update-ratio = 0.0
-space-update-ratio = 0.0
-flow-update-ratio = 0.0
-no-update-ratio = 0.0
+epoch-update-ratio = 0.9
+space-update-ratio = 0.9
+flow-update-ratio = 0.9
 
 sample = false
