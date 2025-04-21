@@ -638,8 +638,8 @@ func (td *tsoDispatcher) isConcurrentRPCEnabled() bool {
 }
 
 // closeContext closes the connection context manager. This is used for testing purpose.
-func (td *tsoDispatcher) closeContext() {
+func (td *tsoDispatcher) closeContext(url string) {
 	cctx := td.provider.getConnectionCtxMgr()
-	cc := cctx.RandomlyPick()
+	cc := cctx.GetConnectionCtx(url)
 	cc.Cancel()
 }

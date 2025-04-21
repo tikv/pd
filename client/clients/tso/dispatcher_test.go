@@ -184,7 +184,7 @@ func (s *testTSODispatcherSuite) TestBasic() {
 	s.streamInner.generateNext()
 	s.reqMustReady(req)
 	// close one context and check if the dispatcher can still work
-	s.dispatcher.closeContext()
+	s.dispatcher.closeContext(mockStreamURL)
 	s.streamInner.generateNext()
 	req = s.sendReq(ctx)
 	s.reqMustNotReady(req)

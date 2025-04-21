@@ -22,6 +22,24 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestCancelFunc(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	manager := NewManager[int]()
+	url := "test-url"
+	manager.Store(ctx, cancel, url, 1)
+	re.True(manager.Exist(url))
+	manager.GC(func(url string) bool {
+		return url == "test-url"
+	})
+	select {
+	case <-ctx.Done():
+		re.Equal(context.Canceled, ctx.Err())
+	default:
+		re.Fail("should not have been called")
+	}
+}
+
 func TestManager(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())

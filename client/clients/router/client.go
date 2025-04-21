@@ -395,7 +395,6 @@ func (c *Cli) connectionDaemon() {
 // updateConnection is used to get the leader client connection and update the connection context if it does not exist before.
 func (c *Cli) updateConnection(ctx context.Context) {
 	cc, url := c.getLeaderClientConn()
-
 	if cc == nil || len(url) == 0 {
 		log.Warn("[router] got an invalid leader client connection", zap.String("url", url))
 	} else if c.conCtxMgr.Exist(url) {
