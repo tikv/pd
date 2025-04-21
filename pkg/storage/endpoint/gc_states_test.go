@@ -18,7 +18,7 @@ import (
 	"context"
 	"fmt"
 	"math"
-	"math/rand"
+	"math/rand/v2"
 	"slices"
 	"strconv"
 	"strings"
@@ -233,8 +233,8 @@ func TestGCStateTransactionACID(t *testing.T) {
 				return nil
 			default:
 			}
-			from := rand.Intn(len(allKeys))
-			to := rand.Intn(len(allKeys) - 1)
+			from := rand.IntN(len(allKeys))
+			to := rand.IntN(len(allKeys) - 1)
 			if to >= from {
 				to++
 			}
