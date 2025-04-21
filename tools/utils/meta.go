@@ -180,7 +180,7 @@ func NewRegions(regionCount, replicaCount, storeCount int, header *pdpb.RequestH
 
 		peers := make([]*metapb.Peer, 0, replicaCount)
 		for j := range replicaCount {
-			peers = append(peers, &metapb.Peer{Id: id, StoreId: uint64((i+j)%replicaCount + 1)})
+			peers = append(peers, &metapb.Peer{Id: id, StoreId: uint64((i+j)%storeCount + 1)})
 			id += 1
 		}
 
