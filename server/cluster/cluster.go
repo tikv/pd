@@ -668,7 +668,7 @@ func (c *RaftCluster) syncStoreConfig(stores []*core.StoreInfo) (synced bool, sw
 		}
 
 		// filter out the stores that are not up.
-		if !(store.IsPreparing() || store.IsServing()) {
+		if !store.IsPreparing() && !store.IsServing() {
 			continue
 		}
 		// it will try next store if the current store is failed.
@@ -713,7 +713,7 @@ func (c *RaftCluster) observeStoreConfig(ctx context.Context, address string) (s
 func (c *RaftCluster) updateStoreConfig(oldCfg, cfg *sc.StoreConfig) (switchRaftV2 bool) {
 	cfg.Adjust()
 	c.opt.SetStoreConfig(cfg)
-	switchRaftV2 = oldCfg.Storage.Engine != sc.RaftstoreV2 && cfg.Storage.Engine == sc.RaftstoreV2
+	switchRaftV2 = oldCfg.Engine != sc.RaftstoreV2 && cfg.Engine == sc.RaftstoreV2
 	return
 }
 
@@ -723,7 +723,7 @@ func (c *RaftCluster) fetchStoreConfigFromTiKV(ctx context.Context, statusAddres
 	failpoint.Inject("mockFetchStoreConfigFromTiKV", func(val failpoint.Value) {
 		if regionMaxSize, ok := val.(string); ok {
 			cfg.RegionMaxSize = regionMaxSize
-			cfg.Storage.Engine = sc.RaftstoreV2
+			cfg.Engine = sc.RaftstoreV2
 		}
 		failpoint.Return(cfg, nil)
 	})

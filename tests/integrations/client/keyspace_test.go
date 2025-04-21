@@ -83,7 +83,7 @@ func (suite *clientTestSuite) TestGetAllKeyspaces() {
 	// Get all keyspaces.
 	resKeyspaces, err := suite.client.GetAllKeyspaces(suite.ctx, 1, math.MaxUint32)
 	re.NoError(err)
-	re.Equal(len(metas), len(resKeyspaces))
+	re.Len(metas, len(resKeyspaces))
 	// Check expected keyspaces all in resKeyspaces.
 	for _, expected := range metas {
 		var isExists bool

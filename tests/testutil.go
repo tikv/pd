@@ -324,7 +324,7 @@ func (s *SchedulingTestEnvironment) RunTest(test func(*TestCluster)) {
 	}
 }
 
-// RunTestInNonMicroserviceMode is to run test in non-microservice environment.
+// RunTestInNonMicroserviceEnv is to run test in non-microservice environment.
 func (s *SchedulingTestEnvironment) RunTestInNonMicroserviceEnv(test func(*TestCluster)) {
 	s.t.Logf("start test %s in non-microservice environment", getTestName())
 	if _, ok := s.clusters[NonMicroserviceEnv]; !ok {
@@ -347,7 +347,7 @@ func getTestName() string {
 	return ""
 }
 
-// RunTestInMicroserviceMode is to run test in microservice environment.
+// RunTestInMicroserviceEnv is to run test in microservice environment.
 func (s *SchedulingTestEnvironment) RunTestInMicroserviceEnv(test func(*TestCluster)) {
 	re := require.New(s.t)
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs", `return(true)`))
@@ -438,10 +438,12 @@ func InitRegions(regionLen int) []*core.RegionInfo {
 				{Id: allocator.alloc(), StoreId: uint64(3)},
 			},
 		}
-		if i == 0 {
+		switch i {
+		case 0:
 			r.StartKey = []byte{}
-		} else if i == regionLen-1 {
+		case regionLen - 1:
 			r.EndKey = []byte{}
+		default:
 		}
 		region := core.NewRegionInfo(r, r.Peers[0], core.SetSource(core.Heartbeat))
 		// Here is used to simulate the upgrade process.

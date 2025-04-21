@@ -50,6 +50,7 @@ func newRegionHandler(svr *server.Server, rd *render.Render) *regionHandler {
 	}
 }
 
+// GetRegionByID returns the region info by region ID.
 // @Tags     region
 // @Summary  Search for a region by region ID.
 // @Param    id  path  integer  true  "Region Id"
@@ -86,6 +87,7 @@ func (h *regionHandler) GetRegionByID(w http.ResponseWriter, r *http.Request) {
 	h.rd.Data(w, http.StatusOK, b)
 }
 
+// GetRegion returns the region info by region key.
 // @Tags     region
 // @Summary  Search for a region by a key. GetRegion is named to be consistent with gRPC
 // @Param    key  path  string  true  "Region key"
@@ -122,6 +124,7 @@ func (h *regionHandler) GetRegion(w http.ResponseWriter, r *http.Request) {
 	h.rd.Data(w, http.StatusOK, b)
 }
 
+// CheckRegionsReplicated checks if regions in the given key ranges are replicated.
 // @Tags     region
 // @Summary  Check if regions in the given key ranges are replicated. Returns 'REPLICATED', 'INPROGRESS', or 'PENDING'. 'PENDING' means that there is at least one region pending for scheduling. Similarly, 'INPROGRESS' means there is at least one region in scheduling.
 // @Param    startKey  query  string  true  "Regions start key, hex encoded"
@@ -156,6 +159,7 @@ func newRegionsHandler(svr *server.Server, rd *render.Render) *regionsHandler {
 	}
 }
 
+// GetRegions returns all regions in the cluster.
 // @Tags     region
 // @Summary  List all regions in the cluster.
 // @Produce  json
@@ -172,6 +176,7 @@ func (h *regionsHandler) GetRegions(w http.ResponseWriter, r *http.Request) {
 	h.rd.Data(w, http.StatusOK, b)
 }
 
+// ScanRegions returns all regions in the given range [startKey, endKey).
 // @Tags     region
 // @Summary  List regions in a given range [startKey, endKey).
 // @Param    key     query  string   true   "Region range start key"
@@ -206,6 +211,7 @@ func (h *regionsHandler) ScanRegions(w http.ResponseWriter, r *http.Request) {
 	h.rd.Data(w, http.StatusOK, b)
 }
 
+// GetRegionCount returns the count of all regions in the cluster.
 // @Tags     region
 // @Summary  Get count of regions.
 // @Produce  json
@@ -217,6 +223,7 @@ func (h *regionsHandler) GetRegionCount(w http.ResponseWriter, r *http.Request) 
 	h.rd.JSON(w, http.StatusOK, &response.RegionsInfo{Count: count})
 }
 
+// GetStoreRegions returns all regions of a specific store.
 // @Tags     region
 // @Summary  List all regions of a specific store.
 // @Param    id  path  integer  true  "Store Id"
@@ -252,6 +259,7 @@ func (h *regionsHandler) GetStoreRegions(w http.ResponseWriter, r *http.Request)
 	h.rd.Data(w, http.StatusOK, b)
 }
 
+// GetKeyspaceRegions returns all regions of a specific keyspace ID.
 // @Tags     region
 // @Summary  List regions belongs to the given keyspace ID.
 // @Param    keyspace_id  query  string   true   "Keyspace ID"
@@ -300,6 +308,7 @@ func (h *regionsHandler) GetKeyspaceRegions(w http.ResponseWriter, r *http.Reque
 	h.rd.Data(w, http.StatusOK, b)
 }
 
+// GetMissPeerRegions returns all regions that miss peer.
 // @Tags     region
 // @Summary  List all regions that miss peer.
 // @Produce  json
@@ -329,6 +338,7 @@ func (h *regionsHandler) getRegionsByType(
 	h.rd.Data(w, http.StatusOK, b)
 }
 
+// GetExtraPeerRegions returns all regions that has extra peer.
 // @Tags     region
 // @Summary  List all regions that has extra peer.
 // @Produce  json
@@ -339,6 +349,7 @@ func (h *regionsHandler) GetExtraPeerRegions(w http.ResponseWriter, r *http.Requ
 	h.getRegionsByType(w, statistics.ExtraPeer, r)
 }
 
+// GetPendingPeerRegions returns all regions that has pending peer.
 // @Tags     region
 // @Summary  List all regions that has pending peer.
 // @Produce  json
@@ -349,6 +360,7 @@ func (h *regionsHandler) GetPendingPeerRegions(w http.ResponseWriter, r *http.Re
 	h.getRegionsByType(w, statistics.PendingPeer, r)
 }
 
+// GetDownPeerRegions returns all regions that has down peer.
 // @Tags     region
 // @Summary  List all regions that has down peer.
 // @Produce  json
@@ -359,6 +371,7 @@ func (h *regionsHandler) GetDownPeerRegions(w http.ResponseWriter, r *http.Reque
 	h.getRegionsByType(w, statistics.DownPeer, r)
 }
 
+// GetLearnerPeerRegions returns all regions that has learner peer.
 // @Tags     region
 // @Summary  List all regions that has learner peer.
 // @Produce  json
@@ -369,6 +382,7 @@ func (h *regionsHandler) GetLearnerPeerRegions(w http.ResponseWriter, r *http.Re
 	h.getRegionsByType(w, statistics.LearnerPeer, r)
 }
 
+// GetOfflinePeerRegions returns all regions that has offline peer.
 // @Tags     region
 // @Summary  List all regions that has offline peer.
 // @Produce  json
@@ -379,6 +393,7 @@ func (h *regionsHandler) GetOfflinePeerRegions(w http.ResponseWriter, r *http.Re
 	h.getRegionsByType(w, statistics.OfflinePeer, r)
 }
 
+// GetOverSizedRegions returns all regions that are oversized.
 // @Tags     region
 // @Summary  List all regions that are oversized.
 // @Produce  json
@@ -389,6 +404,7 @@ func (h *regionsHandler) GetOverSizedRegions(w http.ResponseWriter, r *http.Requ
 	h.getRegionsByType(w, statistics.OversizedRegion, r)
 }
 
+// GetUndersizedRegions returns all regions that are undersized.
 // @Tags     region
 // @Summary  List all regions that are undersized.
 // @Produce  json
@@ -399,6 +415,7 @@ func (h *regionsHandler) GetUndersizedRegions(w http.ResponseWriter, r *http.Req
 	h.getRegionsByType(w, statistics.UndersizedRegion, r)
 }
 
+// GetEmptyRegions returns all regions that are empty.
 // @Tags     region
 // @Summary  List all empty regions.
 // @Produce  json
@@ -429,6 +446,7 @@ func (hist histSlice) Less(i, j int) bool {
 	return hist[i].Start < hist[j].Start
 }
 
+// GetSizeHistogram returns the size histogram of all regions.
 // @Tags     region
 // @Summary  Get size of histogram.
 // @Param    bound  query  integer  false  "Size bound of region histogram"  minimum(1)
@@ -453,6 +471,7 @@ func (h *regionsHandler) GetSizeHistogram(w http.ResponseWriter, r *http.Request
 	h.rd.JSON(w, http.StatusOK, histItems)
 }
 
+// GetKeysHistogram returns the keys histogram of all regions.
 // @Tags     region
 // @Summary  Get keys of histogram.
 // @Param    bound  query  integer  false  "Key bound of region histogram"  minimum(1000)
@@ -512,6 +531,7 @@ func calHist(bound int, list *[]int64) *[]*histItem {
 	return &histItems
 }
 
+// GetRangeHoles returns all range holes without any region info.
 // @Tags     region
 // @Summary  List all range holes without any region info.
 // @Produce  json
@@ -522,6 +542,7 @@ func (h *regionsHandler) GetRangeHoles(w http.ResponseWriter, r *http.Request) {
 	h.rd.JSON(w, http.StatusOK, rc.GetRangeHoles())
 }
 
+// GetRegionSiblings returns the sibling regions of a specific region.
 // @Tags     region
 // @Summary  List sibling regions of a specific region.
 // @Param    id  path  integer  true  "Region Id"
@@ -559,6 +580,7 @@ const (
 	minRegionHistogramKeys = 1000
 )
 
+// GetTopWriteFlowRegions returns the regions with the highest write flow.
 // @Tags     region
 // @Summary  List regions with the highest write flow.
 // @Param    limit  query  integer  false  "Limit count"  default(16)
@@ -570,6 +592,7 @@ func (h *regionsHandler) GetTopWriteFlowRegions(w http.ResponseWriter, r *http.R
 	h.getTopNRegions(w, r, func(a, b *core.RegionInfo) bool { return a.GetBytesWritten() < b.GetBytesWritten() })
 }
 
+// GetTopWriteQueryRegions returns the regions with the highest write query flow.
 // @Tags     region
 // @Summary  List regions with the highest write flow.
 // @Param    limit  query  integer  false  "Limit count"  default(16)
@@ -583,6 +606,7 @@ func (h *regionsHandler) GetTopWriteQueryRegions(w http.ResponseWriter, r *http.
 	})
 }
 
+// GetTopReadFlowRegions returns the regions with the highest read flow.
 // @Tags     region
 // @Summary  List regions with the highest read flow.
 // @Param    limit  query  integer  false  "Limit count"  default(16)
@@ -594,6 +618,7 @@ func (h *regionsHandler) GetTopReadFlowRegions(w http.ResponseWriter, r *http.Re
 	h.getTopNRegions(w, r, func(a, b *core.RegionInfo) bool { return a.GetBytesRead() < b.GetBytesRead() })
 }
 
+// GetTopReadQueryRegions returns the regions with the highest read query flow.
 // @Tags     region
 // @Summary  List regions with the highest write flow.
 // @Param    limit  query  integer  false  "Limit count"  default(16)
@@ -607,6 +632,7 @@ func (h *regionsHandler) GetTopReadQueryRegions(w http.ResponseWriter, r *http.R
 	})
 }
 
+// GetTopConfVerRegions returns the regions with the largest conf version.
 // @Tags     region
 // @Summary  List regions with the largest conf version.
 // @Param    limit  query  integer  false  "Limit count"  default(16)
@@ -620,6 +646,7 @@ func (h *regionsHandler) GetTopConfVerRegions(w http.ResponseWriter, r *http.Req
 	})
 }
 
+// GetTopVersionRegions returns the regions with the largest version.
 // @Tags     region
 // @Summary  List regions with the largest version.
 // @Param    limit  query  integer  false  "Limit count"  default(16)
@@ -633,6 +660,7 @@ func (h *regionsHandler) GetTopVersionRegions(w http.ResponseWriter, r *http.Req
 	})
 }
 
+// GetTopSizeRegions returns the regions with the largest size.
 // @Tags     region
 // @Summary  List regions with the largest size.
 // @Param    limit  query  integer  false  "Limit count"  default(16)
@@ -646,6 +674,7 @@ func (h *regionsHandler) GetTopSizeRegions(w http.ResponseWriter, r *http.Reques
 	})
 }
 
+// GetTopKeysRegions returns the regions with the largest keys.
 // @Tags     region
 // @Summary  List regions with the largest keys.
 // @Param    limit  query  integer  false  "Limit count"  default(16)
@@ -659,6 +688,7 @@ func (h *regionsHandler) GetTopKeysRegions(w http.ResponseWriter, r *http.Reques
 	})
 }
 
+// GetTopCPURegions returns the regions with the highest CPU usage.
 // @Tags     region
 // @Summary  List regions with the highest CPU usage.
 // @Param    limit  query  integer  false  "Limit count"  default(16)
@@ -672,6 +702,7 @@ func (h *regionsHandler) GetTopCPURegions(w http.ResponseWriter, r *http.Request
 	})
 }
 
+// AccelerateRegionsScheduleInRange accelerates regions scheduling in a given range.
 // @Tags     region
 // @Summary  Accelerate regions scheduling a in given range, only receive hex format for keys
 // @Accept   json
@@ -707,6 +738,7 @@ func (h *regionsHandler) AccelerateRegionsScheduleInRange(w http.ResponseWriter,
 	h.rd.Text(w, http.StatusOK, fmt.Sprintf("Accelerate regions scheduling in a given range [%s,%s)", rawStartKey, rawEndKey))
 }
 
+// AccelerateRegionsScheduleInRanges accelerates regions scheduling in given ranges.
 // @Tags     region
 // @Summary  Accelerate regions scheduling in given ranges, only receive hex format for keys
 // @Accept   json
@@ -770,6 +802,7 @@ func (h *regionsHandler) getTopNRegions(w http.ResponseWriter, r *http.Request, 
 	h.rd.Data(w, http.StatusOK, b)
 }
 
+// ScatterRegions scatters regions by given key ranges or regions id distributed by given group with given retry limit.
 // @Tags     region
 // @Summary  Scatter regions by given key ranges or regions id distributed by given group with given retry limit
 // @Accept   json
@@ -809,6 +842,7 @@ func (h *regionsHandler) ScatterRegions(w http.ResponseWriter, r *http.Request) 
 	h.rd.JSON(w, http.StatusOK, &s)
 }
 
+// SplitRegions splits regions by given split keys.
 // @Tags     region
 // @Summary  Split regions with given split keys
 // @Accept   json

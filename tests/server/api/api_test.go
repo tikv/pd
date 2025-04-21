@@ -665,7 +665,7 @@ func (suite *redirectorTestSuite) TestAllowFollowerHandle() {
 	request.Header.Add(apiutil.PDAllowFollowerHandleHeader, "true")
 	resp, err := tests.TestDialClient.Do(request)
 	re.NoError(err)
-	re.Equal("", resp.Header.Get(apiutil.PDRedirectorHeader))
+	re.Empty(resp.Header.Get(apiutil.PDRedirectorHeader))
 	defer resp.Body.Close()
 	re.Equal(http.StatusOK, resp.StatusCode)
 	_, err = io.ReadAll(resp.Body)

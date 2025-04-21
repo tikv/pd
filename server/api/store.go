@@ -51,6 +51,7 @@ func newStoreHandler(handler *server.Handler, rd *render.Render) *storeHandler {
 	}
 }
 
+// GetStore gets the store's information.
 // @Tags        store
 // @Summary  Get a store's information.
 // @Param    id  path  integer  true  "Store Id"
@@ -79,6 +80,7 @@ func (h *storeHandler) GetStore(w http.ResponseWriter, r *http.Request) {
 	h.rd.JSON(w, http.StatusOK, storeInfo)
 }
 
+// DeleteStore offline a store.
 // @Tags     store
 // @Summary  Take down a store from the cluster.
 // @Param    id     path   integer  true  "Store Id"
@@ -110,6 +112,7 @@ func (h *storeHandler) DeleteStore(w http.ResponseWriter, r *http.Request) {
 	h.rd.JSON(w, http.StatusOK, "The store is set as Offline.")
 }
 
+// SetStoreState sets the store's state.
 // @Tags     store
 // @Summary  Set the store's state.
 // @Param    id     path   integer  true  "Store Id"
@@ -162,6 +165,7 @@ func (h *storeHandler) responseStoreErr(w http.ResponseWriter, err error, storeI
 	}
 }
 
+// SetStoreLabel sets the store's label.
 // FIXME: details of input json body params
 // @Tags     store
 // @Summary  Set the store's label.
@@ -208,6 +212,7 @@ func (h *storeHandler) SetStoreLabel(w http.ResponseWriter, r *http.Request) {
 	h.rd.JSON(w, http.StatusOK, "The store's label is updated.")
 }
 
+// DeleteStoreLabel deletes the store's label.
 // @Tags     store
 // @Summary  delete the store's label.
 // @Param    id    path  integer  true  "Store Id"
@@ -242,6 +247,7 @@ func (h *storeHandler) DeleteStoreLabel(w http.ResponseWriter, r *http.Request) 
 	h.rd.JSON(w, http.StatusOK, fmt.Sprintf("The label %s is deleted for store %d.", labelKey, storeID))
 }
 
+// SetStoreWeight sets the store's leader/region weight.
 // FIXME: details of input json body params
 // @Tags     store
 // @Summary  Set the store's leader/region weight.
@@ -295,6 +301,7 @@ func (h *storeHandler) SetStoreWeight(w http.ResponseWriter, r *http.Request) {
 	h.rd.JSON(w, http.StatusOK, "The store's weight is updated.")
 }
 
+// SetStoreLimit sets the store's limit.
 // FIXME: details of input json body params
 // @Tags     store
 // @Summary  Set the store's limit.
@@ -386,6 +393,7 @@ func newStoresHandler(handler *server.Handler, rd *render.Render) *storesHandler
 	}
 }
 
+// RemoveTombStone removes tombstone records in the cluster.
 // @Tags     store
 // @Summary  Remove tombstone records in the cluster.
 // @Produce  json
@@ -402,6 +410,7 @@ func (h *storesHandler) RemoveTombStone(w http.ResponseWriter, r *http.Request) 
 	h.rd.JSON(w, http.StatusOK, "Remove tombstone successfully.")
 }
 
+// SetAllStoresLimit sets the limit of all stores in the cluster.
 // FIXME: details of input json body params
 // @Tags     store
 // @Summary  Set limit of all stores in the cluster.
@@ -490,6 +499,7 @@ func (h *storesHandler) SetAllStoresLimit(w http.ResponseWriter, r *http.Request
 	h.rd.JSON(w, http.StatusOK, "Set store limit successfully.")
 }
 
+// GetAllStoresLimit gets the limit of all stores in the cluster.
 // FIXME: details of output json body
 // @Tags     store
 // @Summary  Get limit of all stores in the cluster.
@@ -539,6 +549,7 @@ type Progress struct {
 	LeftSeconds  float64 `json:"left_seconds"`
 }
 
+// GetStoresProgress gets the progress of stores in the cluster.
 // @Tags     stores
 // @Summary  Get store progress in the cluster.
 // @Produce  json
@@ -554,7 +565,7 @@ func (h *storesHandler) GetStoresProgress(w http.ResponseWriter, r *http.Request
 			return
 		}
 
-		action, progress, leftSeconds, currentSpeed, err := h.Handler.GetProgressByID(v)
+		action, progress, leftSeconds, currentSpeed, err := h.GetProgressByID(v)
 		if err != nil {
 			h.rd.JSON(w, http.StatusNotFound, err.Error())
 			return
@@ -571,7 +582,7 @@ func (h *storesHandler) GetStoresProgress(w http.ResponseWriter, r *http.Request
 		return
 	}
 	if v := r.URL.Query().Get("action"); v != "" {
-		progress, leftSeconds, currentSpeed, err := h.Handler.GetProgressByAction(v)
+		progress, leftSeconds, currentSpeed, err := h.GetProgressByAction(v)
 		if err != nil {
 			h.rd.JSON(w, http.StatusNotFound, err.Error())
 			return
@@ -589,6 +600,7 @@ func (h *storesHandler) GetStoresProgress(w http.ResponseWriter, r *http.Request
 	h.rd.JSON(w, http.StatusBadRequest, "need query parameters")
 }
 
+// GetAllStores gets all stores in the cluster.
 // @Tags     store
 // @Summary     Get all stores in the cluster.
 // @Param       state  query  array  true  "Specify accepted store states."
@@ -627,6 +639,7 @@ func (h *storesHandler) GetAllStores(w http.ResponseWriter, r *http.Request) {
 	h.rd.JSON(w, http.StatusOK, StoresInfo)
 }
 
+// GetStoresByState gets stores by states in the cluster.
 // @Tags     store
 // @Summary  Get all stores by states in the cluster.
 // @Param    state  query  array  true  "Specify accepted store states."
