@@ -1201,3 +1201,29 @@ func TestScanRegion(t *testing.T) {
 	re.Len(scanNoError([]byte("a"), []byte("e"), 0), 3)
 	re.Len(scanNoError([]byte("c"), []byte("e"), 0), 1)
 }
+
+func TestScanRegionLimit(t *testing.T) {
+	re := require.New(t)
+	regions := NewRegionsInfo()
+	// Put 18 regions.
+	// [a0, a1) [a1, a2) [a2, a3) [a3, a4) [a4, a5) [a5, a6) [a6, a7) [a7, a8) [a8, a9)
+	// [b0, b1) [b1, b2) [b2, b3) [b3, b4) [b4, b5) [b5, b6) [b6, b7) [b7, b8) [b8, b9)
+	for i := range 9 {
+		aStart := fmt.Appendf(nil, "a%d", i)
+		aEnd := fmt.Appendf(nil, "a%d", i+1)
+		regions.CheckAndPutRegion(NewTestRegionInfo(uint64(i), 1, aStart, aEnd))
+
+		bStart := fmt.Appendf(nil, "b%d", i)
+		bEnd := fmt.Appendf(nil, "b%d", i+1)
+		regions.CheckAndPutRegion(NewTestRegionInfo(uint64(i+9), 1, bStart, bEnd))
+	}
+
+	for limit := 1; limit <= 18; limit++ {
+		keyRanges := NewKeyRangesWithSize(2)
+		keyRanges.Append([]byte("a"), []byte("b"))
+		keyRanges.Append([]byte("b0"), []byte("")) // ensure the key ranges are not merged
+		resp, err := regions.BatchScanRegions(keyRanges, WithLimit(limit))
+		re.NoError(err)
+		re.Len(resp, limit)
+	}
+}
