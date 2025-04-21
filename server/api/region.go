@@ -426,13 +426,14 @@ func (h *regionsHandler) GetEmptyRegions(w http.ResponseWriter, r *http.Request)
 	h.getRegionsByType(w, statistics.EmptyRegion, r)
 }
 
-type histItem struct {
+// HistItem is used to represent a histogram item.
+type HistItem struct {
 	Start int64 `json:"start"`
 	End   int64 `json:"end"`
 	Count int64 `json:"count"`
 }
 
-type histSlice []*histItem
+type histSlice []*HistItem
 
 func (hist histSlice) Len() int {
 	return len(hist)
@@ -451,7 +452,7 @@ func (hist histSlice) Less(i, j int) bool {
 // @Summary  Get size of histogram.
 // @Param    bound  query  integer  false  "Size bound of region histogram"  minimum(1)
 // @Produce  json
-// @Success  200  {array}   histItem
+// @Success  200  {array}   HistItem
 // @Failure  400  {string}  string  "The input is invalid."
 // @Router   /regions/check/hist-size [get]
 func (h *regionsHandler) GetSizeHistogram(w http.ResponseWriter, r *http.Request) {
@@ -476,7 +477,7 @@ func (h *regionsHandler) GetSizeHistogram(w http.ResponseWriter, r *http.Request
 // @Summary  Get keys of histogram.
 // @Param    bound  query  integer  false  "Key bound of region histogram"  minimum(1000)
 // @Produce  json
-// @Success  200  {array}   histItem
+// @Success  200  {array}   HistItem
 // @Failure  400  {string}  string  "The input is invalid."
 // @Router   /regions/check/hist-keys [get]
 func (h *regionsHandler) GetKeysHistogram(w http.ResponseWriter, r *http.Request) {
@@ -509,7 +510,7 @@ func calBound(bound int, r *http.Request) (int, error) {
 	return bound, nil
 }
 
-func calHist(bound int, list *[]int64) *[]*histItem {
+func calHist(bound int, list *[]int64) *[]*HistItem {
 	var histMap = make(map[int64]int)
 	for _, item := range *list {
 		multiple := item / int64(bound)
@@ -519,9 +520,9 @@ func calHist(bound int, list *[]int64) *[]*histItem {
 			histMap[multiple] = 1
 		}
 	}
-	histItems := make([]*histItem, 0, len(histMap))
+	histItems := make([]*HistItem, 0, len(histMap))
 	for multiple, count := range histMap {
-		histInfo := &histItem{}
+		histInfo := &HistItem{}
 		histInfo.Start = multiple * int64(bound)
 		histInfo.End = (multiple+1)*int64(bound) - 1
 		histInfo.Count = int64(count)

@@ -77,7 +77,7 @@ func (h *labelsHandler) GetStoresByLabel(w http.ResponseWriter, r *http.Request)
 	rc := getCluster(r)
 	name := r.URL.Query().Get("name")
 	value := r.URL.Query().Get("value")
-	filter, err := newStoresLabelFilter(name, value)
+	filter, err := NewStoresLabelFilter(name, value)
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
@@ -110,7 +110,8 @@ type storesLabelFilter struct {
 	valuePattern *regexp.Regexp
 }
 
-func newStoresLabelFilter(name, value string) (*storesLabelFilter, error) {
+// NewStoresLabelFilter creates a new storesLabelFilter.
+func NewStoresLabelFilter(name, value string) (*storesLabelFilter, error) {
 	// add (?i) to set a case-insensitive flag
 	keyPattern, err := regexp.Compile("(?i)" + name)
 	if err != nil {

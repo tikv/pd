@@ -32,6 +32,7 @@ import (
 
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/server/api"
 	"github.com/tikv/pd/server/config"
 )
 
@@ -82,7 +83,7 @@ func checkListResponse(re *require.Assertions, body []byte, cfgs []*config.Confi
 func (suite *memberTestSuite) TestMemberList() {
 	re := suite.Require()
 	for _, cfg := range suite.cfgs {
-		addr := cfg.ClientUrls + apiPrefix + "/api/v1/members"
+		addr := cfg.ClientUrls + api.APIPrefix + "/api/v1/members"
 		resp, err := testDialClient.Get(addr)
 		re.NoError(err)
 		buf, err := io.ReadAll(resp.Body)
@@ -95,7 +96,7 @@ func (suite *memberTestSuite) TestMemberList() {
 func (suite *memberTestSuite) TestMemberLeader() {
 	re := suite.Require()
 	leader := suite.servers[0].GetLeader()
-	addr := suite.cfgs[rand.Intn(len(suite.cfgs))].ClientUrls + apiPrefix + "/api/v1/leader"
+	addr := suite.cfgs[rand.Intn(len(suite.cfgs))].ClientUrls + api.APIPrefix + "/api/v1/leader"
 	resp, err := testDialClient.Get(addr)
 	re.NoError(err)
 	defer resp.Body.Close()
@@ -111,7 +112,7 @@ func (suite *memberTestSuite) TestMemberLeader() {
 func (suite *memberTestSuite) TestChangeLeaderPeerUrls() {
 	re := suite.Require()
 	leader := suite.servers[0].GetLeader()
-	addr := suite.cfgs[rand.Intn(len(suite.cfgs))].ClientUrls + apiPrefix + "/api/v1/leader"
+	addr := suite.cfgs[rand.Intn(len(suite.cfgs))].ClientUrls + api.APIPrefix + "/api/v1/leader"
 	resp, err := testDialClient.Get(addr)
 	re.NoError(err)
 	defer resp.Body.Close()
@@ -124,7 +125,7 @@ func (suite *memberTestSuite) TestChangeLeaderPeerUrls() {
 
 	newPeerUrls := []string{"http://127.0.0.1:1111"}
 	suite.changeLeaderPeerUrls(leader, newPeerUrls)
-	addr = suite.cfgs[rand.Intn(len(suite.cfgs))].ClientUrls + apiPrefix + "/api/v1/members"
+	addr = suite.cfgs[rand.Intn(len(suite.cfgs))].ClientUrls + api.APIPrefix + "/api/v1/members"
 	resp, err = testDialClient.Get(addr)
 	re.NoError(err)
 	buf, err = io.ReadAll(resp.Body)
@@ -153,7 +154,7 @@ func (suite *memberTestSuite) changeLeaderPeerUrls(leader *pdpb.Member, urls []s
 
 func (suite *memberTestSuite) TestResignMyself() {
 	re := suite.Require()
-	addr := suite.cfgs[0].ClientUrls + apiPrefix + "/api/v1/leader/resign"
+	addr := suite.cfgs[0].ClientUrls + api.APIPrefix + "/api/v1/leader/resign"
 	resp, err := testDialClient.Post(addr, "", nil)
 	re.NoError(err)
 	re.Equal(http.StatusOK, resp.StatusCode)

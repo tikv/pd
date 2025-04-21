@@ -27,7 +27,9 @@ import (
 	"github.com/tikv/pd/pkg/ratelimit"
 	tu "github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/server/api"
 	"github.com/tikv/pd/server/config"
+	"github.com/tikv/pd/tests"
 )
 
 type auditMiddlewareTestSuite struct {
@@ -46,10 +48,10 @@ func (suite *auditMiddlewareTestSuite) SetupSuite() {
 	suite.svr, suite.cleanup = mustNewServer(re, func(cfg *config.Config) {
 		cfg.Replication.EnablePlacementRules = false
 	})
-	server.MustWaitLeader(re, []*server.Server{suite.svr})
+	tests.MustWaitLeader(re, []*server.Server{suite.svr})
 
 	addr := suite.svr.GetAddr()
-	suite.urlPrefix = fmt.Sprintf("%s%s/api/v1", addr, apiPrefix)
+	suite.urlPrefix = fmt.Sprintf("%s%s/api/v1", addr, api.APIPrefix)
 }
 
 func (suite *auditMiddlewareTestSuite) TearDownSuite() {
@@ -123,9 +125,9 @@ func TestRateLimitConfigTestSuite(t *testing.T) {
 func (suite *rateLimitConfigTestSuite) SetupSuite() {
 	re := suite.Require()
 	suite.svr, suite.cleanup = mustNewServer(re)
-	server.MustWaitLeader(re, []*server.Server{suite.svr})
+	tests.MustWaitLeader(re, []*server.Server{suite.svr})
 	mustBootstrapCluster(re, suite.svr)
-	suite.urlPrefix = fmt.Sprintf("%s%s/api/v1", suite.svr.GetAddr(), apiPrefix)
+	suite.urlPrefix = fmt.Sprintf("%s%s/api/v1", suite.svr.GetAddr(), api.APIPrefix)
 }
 
 func (suite *rateLimitConfigTestSuite) TearDownSuite() {
@@ -134,7 +136,7 @@ func (suite *rateLimitConfigTestSuite) TearDownSuite() {
 
 func (suite *rateLimitConfigTestSuite) TestUpdateRateLimitConfig() {
 	re := suite.Require()
-	urlPrefix := fmt.Sprintf("%s%s/api/v1/service-middleware/config/rate-limit", suite.svr.GetAddr(), apiPrefix)
+	urlPrefix := fmt.Sprintf("%s%s/api/v1/service-middleware/config/rate-limit", suite.svr.GetAddr(), api.APIPrefix)
 
 	// test empty type
 	input := make(map[string]any)
@@ -280,7 +282,7 @@ func (suite *rateLimitConfigTestSuite) TestUpdateRateLimitConfig() {
 }
 
 func (suite *rateLimitConfigTestSuite) TestUpdateGRPCRateLimitConfig() {
-	urlPrefix := fmt.Sprintf("%s%s/api/v1/service-middleware/config/grpc-rate-limit", suite.svr.GetAddr(), apiPrefix)
+	urlPrefix := fmt.Sprintf("%s%s/api/v1/service-middleware/config/grpc-rate-limit", suite.svr.GetAddr(), api.APIPrefix)
 	re := suite.Require()
 
 	// test empty label

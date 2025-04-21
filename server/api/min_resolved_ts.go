@@ -38,8 +38,9 @@ func newMinResolvedTSHandler(svr *server.Server, rd *render.Render) *minResolved
 	}
 }
 
+// MinResolvedTS is the response type for min resolved ts.
 // NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
-type minResolvedTS struct {
+type MinResolvedTS struct {
 	IsRealTime          bool              `json:"is_real_time,omitempty"`
 	MinResolvedTS       uint64            `json:"min_resolved_ts"`
 	PersistInterval     typeutil.Duration `json:"persist_interval,omitempty"`
@@ -50,7 +51,7 @@ type minResolvedTS struct {
 // @Tags     min_store_resolved_ts
 // @Summary  Get store-level min resolved ts.
 // @Produce  json
-// @Success  200  {array}   minResolvedTS
+// @Success  200  {array}   MinResolvedTS
 // @Failure  400  {string}  string  "The input is invalid."
 // @Failure  500  {string}  string  "PD server failed to proceed the request."
 // @Router   /min-resolved-ts/{store_id} [get]
@@ -64,7 +65,7 @@ func (h *minResolvedTSHandler) GetStoreMinResolvedTS(w http.ResponseWriter, r *h
 	}
 	value := c.GetStoreMinResolvedTS(storeID)
 	persistInterval := c.GetPDServerConfig().MinResolvedTSPersistenceInterval
-	h.rd.JSON(w, http.StatusOK, minResolvedTS{
+	h.rd.JSON(w, http.StatusOK, MinResolvedTS{
 		MinResolvedTS:   value,
 		PersistInterval: persistInterval,
 		IsRealTime:      persistInterval.Duration != 0,
@@ -83,7 +84,7 @@ func (h *minResolvedTSHandler) GetStoreMinResolvedTS(w http.ResponseWriter, r *h
 //
 // @Produce  json
 // @Param        scope  query     string  false  "Scope of the min resolved ts: comma-separated list of store IDs (e.g., '1,2,3')."  default(cluster)
-// @Success  200  {array}   minResolvedTS
+// @Success  200  {array}   MinResolvedTS
 // @Failure  500  {string}  string  "PD server failed to proceed the request."
 // @Router       /min-resolved-ts [get]
 func (h *minResolvedTSHandler) GetMinResolvedTS(w http.ResponseWriter, r *http.Request) {
@@ -121,7 +122,7 @@ func (h *minResolvedTSHandler) GetMinResolvedTS(w http.ResponseWriter, r *http.R
 		}
 	}
 
-	h.rd.JSON(w, http.StatusOK, minResolvedTS{
+	h.rd.JSON(w, http.StatusOK, MinResolvedTS{
 		MinResolvedTS:       scopeMinResolvedTS,
 		PersistInterval:     persistInterval,
 		IsRealTime:          persistInterval.Duration != 0,

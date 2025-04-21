@@ -58,11 +58,12 @@ type trendStore struct {
 type trendHistory struct {
 	StartTime int64               `json:"start"`
 	EndTime   int64               `json:"end"`
-	Entries   []trendHistoryEntry `json:"entries"`
+	Entries   []TrendHistoryEntry `json:"entries"`
 }
 
+// TrendHistoryEntry describes the trend history of the cluster.
 // NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
-type trendHistoryEntry struct {
+type TrendHistoryEntry struct {
 	From  uint64 `json:"from"`
 	To    uint64 `json:"to"`
 	Kind  string `json:"kind"`
@@ -178,15 +179,15 @@ func (h *trendHandler) getTrendHistory(start time.Time) (*trendHistory, error) {
 		return nil, err
 	}
 	// Use a tmp map to merge same histories together.
-	historyMap := make(map[trendHistoryEntry]int)
+	historyMap := make(map[TrendHistoryEntry]int)
 	for _, entry := range operatorHistory {
-		historyMap[trendHistoryEntry{
+		historyMap[TrendHistoryEntry{
 			From: entry.From,
 			To:   entry.To,
 			Kind: entry.Kind.String(),
 		}]++
 	}
-	history := make([]trendHistoryEntry, 0, len(historyMap))
+	history := make([]TrendHistoryEntry, 0, len(historyMap))
 	for entry, count := range historyMap {
 		entry.Count = count
 		history = append(history, entry)

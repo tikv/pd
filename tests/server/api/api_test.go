@@ -309,7 +309,7 @@ func (suite *middlewareTestSuite) TestRateLimitMiddleware() {
 	for _, s := range suite.cluster.GetServers() {
 		servers = append(servers, s.GetServer())
 	}
-	server.MustWaitLeader(re, servers)
+	tests.MustWaitLeader(re, servers)
 	leader = suite.cluster.GetLeaderServer()
 	re.True(leader.GetServer().GetServiceMiddlewarePersistOptions().IsRateLimitEnabled())
 	cfg, ok := leader.GetServer().GetRateLimitConfig().LimiterConfig["SetLogLevel"]
@@ -445,7 +445,7 @@ func (suite *middlewareTestSuite) TestAuditPrometheusBackend() {
 	for _, s := range suite.cluster.GetServers() {
 		servers = append(servers, s.GetServer())
 	}
-	server.MustWaitLeader(re, servers)
+	tests.MustWaitLeader(re, servers)
 	leader = suite.cluster.GetLeaderServer()
 
 	timeUnix = time.Now().Unix() - 20

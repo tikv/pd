@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strconv"
 	"testing"
 	"time"
@@ -34,6 +35,9 @@ import (
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	tu "github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/server/api"
+	"github.com/tikv/pd/server/config"
+	"github.com/tikv/pd/tests"
 )
 
 type adminTestSuite struct {
@@ -50,10 +54,10 @@ func TestAdminTestSuite(t *testing.T) {
 func (suite *adminTestSuite) SetupSuite() {
 	re := suite.Require()
 	suite.svr, suite.cleanup = mustNewServer(re)
-	server.MustWaitLeader(re, []*server.Server{suite.svr})
+	tests.MustWaitLeader(re, []*server.Server{suite.svr})
 
 	addr := suite.svr.GetAddr()
-	suite.urlPrefix = fmt.Sprintf("%s%s/api/v1", addr, apiPrefix)
+	suite.urlPrefix = fmt.Sprintf("%s%s/api/v1", addr, api.APIPrefix)
 
 	mustBootstrapCluster(re, suite.svr)
 }
@@ -337,4 +341,25 @@ func (suite *adminTestSuite) TestRecoverAllocID() {
 		tu.StatusOK(re), tu.StringContain(re, "false")))
 	re.NoError(tu.CheckPostJSON(testDialClient, url, []byte(`{"id": "100000"}`),
 		tu.Status(re, http.StatusForbidden), tu.StringContain(re, "can only recover alloc id when recovering")))
+}
+
+func (suite *adminTestSuite) TestCleanPath() {
+	re := suite.Require()
+	// transfer path to /config
+	url := fmt.Sprintf("%s/admin/persist-file/../../config", suite.urlPrefix)
+	cfg := &config.Config{}
+	err := tu.ReadGetJSON(re, testDialClient, url, cfg)
+	re.NoError(err)
+
+	// handled by router
+	response := httptest.NewRecorder()
+	r, _, _ := api.NewHandler(context.Background(), suite.svr)
+	request, err := http.NewRequest(http.MethodGet, url, http.NoBody)
+	re.NoError(err)
+	r.ServeHTTP(response, request)
+	// handled by `cleanPath` which is in `mux.ServeHTTP`
+	result := response.Result()
+	defer result.Body.Close()
+	re.NotNil(result.Header["Location"])
+	re.Contains(result.Header["Location"][0], "/pd/api/v1/config")
 }

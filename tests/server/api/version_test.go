@@ -29,7 +29,9 @@ import (
 	"github.com/tikv/pd/pkg/utils/assertutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/server/api"
 	"github.com/tikv/pd/server/config"
+	"github.com/tikv/pd/tests"
 )
 
 func TestGetVersion(t *testing.T) {
@@ -40,12 +42,12 @@ func TestGetVersion(t *testing.T) {
 	temp, _ := os.Create(fname)
 	os.Stdout = temp
 
-	cfg := server.NewTestSingleConfig(assertutil.CheckerWithNilAssert(re))
+	cfg := tests.NewTestSingleConfig(assertutil.CheckerWithNilAssert(re))
 	reqCh := make(chan struct{})
 	go func() {
 		<-reqCh
 		time.Sleep(200 * time.Millisecond)
-		addr := cfg.ClientUrls + apiPrefix + "/api/v1/version"
+		addr := cfg.ClientUrls + api.APIPrefix + "/api/v1/version"
 		resp, err := testDialClient.Get(addr)
 		re.NoError(err)
 		defer resp.Body.Close()
@@ -56,7 +58,7 @@ func TestGetVersion(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	ch := make(chan *server.Server)
 	go func(cfg *config.Config) {
-		s, err := server.CreateServer(ctx, cfg, nil, NewHandler)
+		s, err := server.CreateServer(ctx, cfg, nil, api.NewHandler)
 		re.NoError(err)
 		re.NoError(failpoint.Enable("github.com/tikv/pd/server/memberNil", `return(true)`))
 		reqCh <- struct{}{}

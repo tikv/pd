@@ -616,13 +616,13 @@ func (h *storesHandler) GetAllStores(w http.ResponseWriter, r *http.Request) {
 		Stores: make([]*response.StoreInfo, 0, len(stores)),
 	}
 
-	urlFilter, err := newStoreStateFilter(r.URL)
+	urlFilter, err := NewStoreStateFilter(r.URL)
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	stores = urlFilter.filter(stores)
+	stores = urlFilter.Filter(stores)
 	for _, s := range stores {
 		storeID := s.GetId()
 		store := rc.GetStore(storeID)
@@ -695,7 +695,8 @@ type storeStateFilter struct {
 	accepts []metapb.StoreState
 }
 
-func newStoreStateFilter(u *url.URL) (*storeStateFilter, error) {
+// NewStoreStateFilter creates a new store state filter.
+func NewStoreStateFilter(u *url.URL) (*storeStateFilter, error) {
 	var acceptStates []metapb.StoreState
 	if v, ok := u.Query()["state"]; ok {
 		for _, s := range v {
@@ -722,7 +723,8 @@ func newStoreStateFilter(u *url.URL) (*storeStateFilter, error) {
 	}, nil
 }
 
-func (filter *storeStateFilter) filter(stores []*metapb.Store) []*metapb.Store {
+// Filter filters the stores by state.
+func (filter *storeStateFilter) Filter(stores []*metapb.Store) []*metapb.Store {
 	ret := make([]*metapb.Store, 0, len(stores))
 	for _, s := range stores {
 		state := s.GetState()

@@ -1032,12 +1032,12 @@ func TestClientTestSuite(t *testing.T) {
 func (suite *clientTestSuite) SetupSuite() {
 	var err error
 	re := suite.Require()
-	suite.srv, suite.cleanup, err = server.NewTestServer(re, assertutil.CheckerWithNilAssert(re))
+	suite.srv, suite.cleanup, err = tests.NewServer(re, assertutil.CheckerWithNilAssert(re))
 	re.NoError(err)
 	suite.grpcPDClient = testutil.MustNewGrpcClient(re, suite.srv.GetAddr())
 	suite.grpcSvr = &server.GrpcServer{Server: suite.srv}
 
-	server.MustWaitLeader(re, []*server.Server{suite.srv})
+	tests.MustWaitLeader(re, []*server.Server{suite.srv})
 	bootstrapServer(re, newHeader(), suite.grpcPDClient)
 
 	suite.ctx, suite.clean = context.WithCancel(context.Background())
