@@ -87,7 +87,7 @@ func NewConcurrentRunner(name string, limiter *ConcurrencyLimiter, maxPendingDur
 		name:               name,
 		limiter:            limiter,
 		maxPendingDuration: maxPendingDuration,
-		taskChan:           make(chan *Task),
+		taskChan:           make(chan *Task, 1),
 		pendingTasks:       make([]*Task, 0, initialCapacity),
 		pendingTaskCount:   make(map[string]int),
 		existTasks:         make(map[taskID]*Task),
