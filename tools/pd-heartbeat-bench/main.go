@@ -162,7 +162,7 @@ func putStores(ctx context.Context, cfg *config.Config, cli pdpb.PDClient, store
 			log.Fatal("failed to put store", zap.Uint64("store-id", i), zap.String("err", resp.GetHeader().GetError().String()))
 		}
 		go func(ctx context.Context, storeID uint64) {
-			heartbeatTicker := time.NewTicker(3 * time.Second)
+			heartbeatTicker := time.NewTicker(10 * time.Second)
 			defer heartbeatTicker.Stop()
 			for {
 				select {
@@ -191,16 +191,12 @@ func createHeartbeatStream(ctx context.Context, cfg *config.Config) (pdpb.PDClie
 		for {
 			resp, err := stream.Recv()
 			if err != nil {
-				log.Error("receive error", zap.Error(err))
+				log.Error("receive error", zap.Error(err), zap.Int("failed-request", failedRequest))
 				failedRequest++
 			}
 			if resp.GetHeader().GetError() != nil {
-				log.Error("receive error", zap.String("err", resp.GetHeader().GetError().String()))
+				log.Error("receive error", zap.String("err", resp.GetHeader().GetError().String()), zap.Int("failed-request", failedRequest))
 				failedRequest++
-			}
-			if failedRequest > 100 {
-				log.Error("receive error", zap.String("err", "too many errors"))
-				break
 			}
 		}
 	}()
