@@ -139,7 +139,7 @@ type Regions struct {
 }
 
 // NewRegions initializes the regions with the given region count and replica count.
-func NewRegions(regionCount, replicaCount int, header *pdpb.RequestHeader) *Regions {
+func NewRegions(regionCount, replicaCount, storeCount int, header *pdpb.RequestHeader) *Regions {
 	rs := &Regions{
 		regionCount:  regionCount,
 		replicaCount: replicaCount,
@@ -203,7 +203,7 @@ func (rs *Regions) Update(regionCount, replicaCount int, options *config.Options
 	reportRegions := pick(indexes, regionCount, options.GetReportRatio())
 
 	reportCount := len(reportRegions)
-	rs.updateFlow = pick(reportRegions, reportCount, options.GetFlowUpdateRatio())
+	rs.updateFlow = randomPick(reportRegions, reportCount, options.GetFlowUpdateRatio())
 	rs.updateLeader = randomPick(reportRegions, reportCount, options.GetLeaderUpdateRatio())
 	rs.updateEpoch = randomPick(reportRegions, reportCount, options.GetEpochUpdateRatio())
 	rs.updateSpace = randomPick(reportRegions, reportCount, options.GetSpaceUpdateRatio())

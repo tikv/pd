@@ -121,7 +121,7 @@ func bootstrap(ctx context.Context, cli pdpb.PDClient) {
 	store := &metapb.Store{
 		Id:      1,
 		Address: fmt.Sprintf("localhost:%d", 2),
-		Version: "6.4.0-alpha",
+		Version: "9.0.0-alpha.1",
 	}
 	region := &metapb.Region{
 		Id:          1,
@@ -150,7 +150,7 @@ func putStores(ctx context.Context, cfg *config.Config, cli pdpb.PDClient, store
 		store := &metapb.Store{
 			Id:      i,
 			Address: fmt.Sprintf("localhost:%d", i),
-			Version: "6.4.0-alpha",
+			Version: "9.0.0-alpha.1",
 		}
 		cctx, cancel := context.WithCancel(ctx)
 		resp, err := cli.PutStore(cctx, &pdpb.PutStoreRequest{Header: header(), Store: store})
@@ -162,7 +162,7 @@ func putStores(ctx context.Context, cfg *config.Config, cli pdpb.PDClient, store
 			log.Fatal("failed to put store", zap.Uint64("store-id", i), zap.String("err", resp.GetHeader().GetError().String()))
 		}
 		go func(ctx context.Context, storeID uint64) {
-			heartbeatTicker := time.NewTicker(10 * time.Second)
+			heartbeatTicker := time.NewTicker(3 * time.Second)
 			defer heartbeatTicker.Stop()
 			for {
 				select {
@@ -187,9 +187,21 @@ func createHeartbeatStream(ctx context.Context, cfg *config.Config) (pdpb.PDClie
 	}
 
 	go func() {
-		// do nothing
+		failedRequest := 0
 		for {
-			stream.Recv()
+			resp, err := stream.Recv()
+			if err != nil {
+				log.Error("receive error", zap.Error(err))
+				failedRequest++
+			}
+			if resp.GetHeader().GetError() != nil {
+				log.Error("receive error", zap.String("err", resp.GetHeader().GetError().String()))
+				failedRequest++
+			}
+			if failedRequest > 100 {
+				log.Error("receive error", zap.String("err", "too many errors"))
+				break
+			}
 		}
 	}()
 	return cli, stream
@@ -312,7 +324,7 @@ func main() {
 
 	initClusterID(ctx, cli)
 	go runHTTPServer(cfg, options)
-	regions := utils.NewRegions(cfg.RegionCount, cfg.Replica, header())
+	regions := utils.NewRegions(cfg.RegionCount, cfg.Replica, cfg.StoreCount, header())
 	log.Info("finish init regions")
 	stores := newStores(cfg.StoreCount)
 	stores.update(regions)

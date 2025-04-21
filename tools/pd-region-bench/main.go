@@ -208,7 +208,7 @@ func (s *benchmarkSuite) prepareRegions(ctx context.Context, cli pdpb.PDClient) 
 	defer cancel()
 
 	// Generate the regions info first.
-	s.regions = utils.NewRegions(*regionCount, 3, s.header())
+	s.regions = utils.NewRegions(*regionCount, 3, 3, s.header())
 	// Heartbeat the regions with two rounds to ensure all regions are fulfilled.
 	heartbeatStream := s.createHeartbeatStream(cctx, cli)
 	for range 2 {
