@@ -60,14 +60,22 @@ func (m *mockTSOServiceProvider) updateConnectionCtxs(ctx context.Context, _dc s
 	if ok {
 		return true
 	}
+<<<<<<< HEAD:client/tso_dispatcher_test.go
 	ctx, cancel := context.WithCancel(ctx)
+=======
+	cctx, cancel := context.WithCancel(ctx)
+>>>>>>> f86063f60 (client: connection use the  same context with the stream.  (#9217)):client/clients/tso/dispatcher_test.go
 	var stream *tsoStream
 	if m.createStream == nil {
-		stream = newTSOStream(ctx, mockStreamURL, newMockTSOStreamImpl(ctx, resultModeGenerated))
+		stream = newTSOStream(cctx, mockStreamURL, newMockTSOStreamImpl(ctx, resultModeGenerated))
 	} else {
 		stream = m.createStream(ctx)
 	}
+<<<<<<< HEAD:client/tso_dispatcher_test.go
 	connectionCtxs.LoadOrStore(mockStreamURL, &tsoConnectionContext{ctx, cancel, mockStreamURL, stream})
+=======
+	m.conCtxMgr.Store(cctx, cancel, mockStreamURL, stream)
+>>>>>>> f86063f60 (client: connection use the  same context with the stream.  (#9217)):client/clients/tso/dispatcher_test.go
 	return true
 }
 
@@ -90,13 +98,9 @@ func (s *testTSODispatcherSuite) SetupTest() {
 	s.option.timeout = time.Hour
 	// As the internal logic of the tsoDispatcher allows it to create streams multiple times, but our tests needs
 	// single stable access to the inner stream, we do not allow it to create it more than once in these tests.
-	creating := new(atomic.Bool)
 	// To avoid data race on reading `stream` and `streamInner` fields.
 	created := new(atomic.Bool)
 	createStream := func(ctx context.Context) *tsoStream {
-		if !creating.CompareAndSwap(false, true) {
-			s.re.FailNow("testTSODispatcherSuite: trying to create stream more than once, which is unsupported in this tests")
-		}
 		s.streamInner = newMockTSOStreamImpl(ctx, resultModeGenerateOnSignal)
 		s.stream = newTSOStream(ctx, mockStreamURL, s.streamInner)
 		created.Store(true)
@@ -184,6 +188,11 @@ func (s *testTSODispatcherSuite) TestBasic() {
 	s.reqMustNotReady(req)
 	s.streamInner.generateNext()
 	s.reqMustReady(req)
+	// close one context and check if the dispatcher can still work
+	s.dispatcher.closeContext(mockStreamURL)
+	s.streamInner.generateNext()
+	req = s.sendReq(ctx)
+	s.reqMustNotReady(req)
 }
 
 func (s *testTSODispatcherSuite) checkIdleTokenCount(expectedTotal int) {
