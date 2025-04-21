@@ -38,6 +38,7 @@ func newMinResolvedTSHandler(svr *server.Server, rd *render.Render) *minResolved
 	}
 }
 
+// MinResolvedTS is the response type for min resolved ts.
 // NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
 type MinResolvedTS struct {
 	IsRealTime          bool              `json:"is_real_time,omitempty"`
