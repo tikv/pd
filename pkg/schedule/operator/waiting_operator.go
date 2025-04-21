@@ -15,7 +15,7 @@
 package operator
 
 import (
-	"math/rand"
+	"math/rand/v2"
 
 	"github.com/tikv/pd/pkg/utils/syncutil"
 )

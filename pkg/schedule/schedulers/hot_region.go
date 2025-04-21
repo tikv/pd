@@ -17,7 +17,7 @@ package schedulers
 import (
 	"fmt"
 	"math"
-	"math/rand"
+	"math/rand/v2"
 	"net/http"
 	"sort"
 	"strconv"
@@ -85,7 +85,6 @@ type baseHotScheduler struct {
 	regionPendings map[uint64]*pendingInfluence
 	// types is the resource types that the scheduler considers.
 	types           []resourceType
-	r               *rand.Rand
 	updateReadTime  time.Time
 	updateWriteTime time.Time
 }
@@ -100,7 +99,6 @@ func newBaseHotScheduler(
 		BaseScheduler:  base,
 		regionPendings: make(map[uint64]*pendingInfluence),
 		stHistoryLoads: statistics.NewStoreHistoryLoads(utils.DimLen, sampleDuration, sampleInterval),
-		r:              rand.New(rand.NewSource(time.Now().UnixNano())),
 	}
 	for ty := resourceType(0); ty < resourceTypeLen; ty++ {
 		ret.types = append(ret.types, ty)
@@ -191,7 +189,7 @@ func (s *baseHotScheduler) summaryPendingInfluence(storeInfos map[uint64]*statis
 }
 
 func (s *baseHotScheduler) randomType() resourceType {
-	return s.types[s.r.Int()%len(s.types)]
+	return s.types[rand.Int()%len(s.types)]
 }
 
 type hotScheduler struct {

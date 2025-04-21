@@ -307,7 +307,7 @@ func (s *balanceRangeScheduler) transferPeer(plan *balanceRangeSchedulerPlan, ds
 		filter.NewExcludedFilter(s.GetName(), nil, excludeTargets),
 		filter.NewPlacementSafeguard(s.GetName(), conf, plan.GetBasicCluster(), plan.GetRuleManager(), plan.region, plan.source, plan.fit),
 	}
-	candidates := filter.NewCandidates(s.R, dstStores).FilterTarget(conf, nil, s.filterCounter, filters...)
+	candidates := filter.NewCandidates(dstStores).FilterTarget(conf, nil, s.filterCounter, filters...)
 	for i := range candidates.Stores {
 		plan.target = candidates.Stores[len(candidates.Stores)-i-1]
 		plan.targetScore = plan.score(plan.target.GetID())
