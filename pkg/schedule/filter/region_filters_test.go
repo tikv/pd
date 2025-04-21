@@ -105,8 +105,8 @@ func TestRegionEmptyFilter(t *testing.T) {
 			Id: i,
 			Peers: []*metapb.Peer{
 				{StoreId: i + 1, Id: i + 1}},
-			StartKey: []byte(fmt.Sprintf("%3da", i+1)),
-			EndKey:   []byte(fmt.Sprintf("%3dz", i+1)),
+			StartKey: fmt.Appendf(nil, "%3da", i+1),
+			EndKey:   fmt.Appendf(nil, "%3dz", i+1),
 		}, &metapb.Peer{StoreId: i + 1, Id: i + 1}))
 	}
 	re.Equal(filter.Select(region), statusRegionEmpty)

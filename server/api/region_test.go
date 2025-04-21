@@ -363,8 +363,8 @@ func TestRegionsWithKillRequest(t *testing.T) {
 	regionCount := 10000
 	tu.GenerateTestDataConcurrently(regionCount, func(i int) {
 		r := core.NewTestRegionInfo(uint64(i+2), 1,
-			[]byte(fmt.Sprintf("%09d", i)),
-			[]byte(fmt.Sprintf("%09d", i+1)),
+			fmt.Appendf(nil, "%09d", i),
+			fmt.Appendf(nil, "%09d", i+1),
 			core.SetApproximateKeys(10), core.SetApproximateSize(10))
 		mustRegionHeartbeat(re, svr, r)
 	})
@@ -668,8 +668,8 @@ func BenchmarkGetRegions(b *testing.B) {
 	regionCount := 1000000
 	for i := range regionCount {
 		r := core.NewTestRegionInfo(uint64(i+2), 1,
-			[]byte(fmt.Sprintf("%09d", i)),
-			[]byte(fmt.Sprintf("%09d", i+1)),
+			fmt.Appendf(nil, "%09d", i),
+			fmt.Appendf(nil, "%09d", i+1),
 			core.SetApproximateKeys(10), core.SetApproximateSize(10))
 		mustRegionHeartbeat(re, svr, r)
 	}

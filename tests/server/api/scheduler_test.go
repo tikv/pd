@@ -20,6 +20,7 @@ import (
 	"io"
 	"net/http"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -831,10 +832,5 @@ func isSchedulerPaused(re *require.Assertions, urlPrefix, name string) bool {
 	err := tu.ReadGetJSON(re, tests.TestDialClient, fmt.Sprintf("%s?status=paused", urlPrefix), &schedulers,
 		tu.StatusOK(re))
 	re.NoError(err)
-	for _, scheduler := range schedulers {
-		if scheduler == name {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(schedulers, name)
 }

@@ -263,10 +263,7 @@ func (w *fitWorker) fitRule(index int) bool {
 		}
 	}
 
-	count := w.rules[index].Count
-	if len(candidates) < count {
-		count = len(candidates)
-	}
+	count := min(len(candidates), w.rules[index].Count)
 
 	return w.fixRuleWithCandidates(candidates, index, count)
 }

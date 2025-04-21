@@ -295,8 +295,8 @@ func mustSaveRegions(re *require.Assertions, s endpoint.RegionStorage, n int) []
 func newTestRegionMeta(regionID uint64) *metapb.Region {
 	return &metapb.Region{
 		Id:       regionID,
-		StartKey: []byte(fmt.Sprintf("%20d", regionID)),
-		EndKey:   []byte(fmt.Sprintf("%20d", regionID+1)),
+		StartKey: fmt.Appendf(nil, "%20d", regionID),
+		EndKey:   fmt.Appendf(nil, "%20d", regionID+1),
 	}
 }
 

@@ -16,6 +16,7 @@ package api
 
 import (
 	"fmt"
+	"slices"
 	"testing"
 	"time"
 
@@ -108,13 +109,7 @@ func newRegionInfo(id uint64, startKey, endKey string, confVer, ver uint64, vote
 		leader *metapb.Peer
 	)
 	for _, id := range voters {
-		witness := false
-		for _, wid := range witnesses {
-			if id == wid {
-				witness = true
-				break
-			}
-		}
+		witness := slices.Contains(witnesses, id)
 		p := &metapb.Peer{Id: 10 + id, StoreId: id, IsWitness: witness}
 		if id == leaderStore {
 			leader = p
@@ -122,13 +117,7 @@ func newRegionInfo(id uint64, startKey, endKey string, confVer, ver uint64, vote
 		peers = append(peers, p)
 	}
 	for _, id := range learners {
-		witness := false
-		for _, wid := range witnesses {
-			if id == wid {
-				witness = true
-				break
-			}
-		}
+		witness := slices.Contains(witnesses, id)
 		p := &metapb.Peer{Id: 10 + id, StoreId: id, Role: metapb.PeerRole_Learner, IsWitness: witness}
 		peers = append(peers, p)
 	}

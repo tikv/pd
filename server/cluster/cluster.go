@@ -23,6 +23,7 @@ import (
 	"math"
 	"net/http"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -676,7 +677,7 @@ func (c *RaftCluster) syncStoreConfig(stores []*core.StoreInfo) (synced bool, sw
 		switchRaftV2, needPersist, err = c.observeStoreConfig(c.ctx, address)
 		if err != nil {
 			// delete the store if it is failed and retry next store.
-			stores = append(stores[:index], stores[index+1:]...)
+			stores = slices.Delete(stores, index, index+1)
 			index--
 			storeSyncConfigEvent.WithLabelValues(address, "fail").Inc()
 			log.Debug("sync store config failed, it will try next store", zap.Error(err))
@@ -1105,10 +1106,7 @@ func (c *RaftCluster) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest
 	for _, stat := range stats.GetSnapshotStats() {
 		// the duration of snapshot is the sum between to send and generate snapshot.
 		// notice: to enlarge the limit in time, we reset the executing duration when it less than the minSnapshotDurationSec.
-		dur := stat.GetSendDurationSec() + stat.GetGenerateDurationSec()
-		if dur < minSnapshotDurationSec {
-			dur = minSnapshotDurationSec
-		}
+		dur := max(stat.GetSendDurationSec()+stat.GetGenerateDurationSec(), minSnapshotDurationSec)
 		// This error is the diff between the executing duration and the waiting duration.
 		// The waiting duration is the total duration minus the executing duration.
 		// so e=executing_duration-waiting_duration=executing_duration-(total_duration-executing_duration)=2*executing_duration-total_duration
@@ -2631,10 +2629,8 @@ func IsClientURL(addr string, etcdClient *clientv3.Client) bool {
 		return false
 	}
 	for _, member := range members {
-		for _, u := range member.GetClientUrls() {
-			if u == addr {
-				return true
-			}
+		if slices.Contains(member.GetClientUrls(), addr) {
+			return true
 		}
 	}
 	return false
