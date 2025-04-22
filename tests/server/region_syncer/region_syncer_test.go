@@ -174,7 +174,7 @@ func TestRegionSyncer(t *testing.T) {
 		return !leaderServer.GetServer().GetRaftCluster().GetRegionSyncer().IsRunning()
 	})
 	re.NotNil(leaderServer)
-	loadRegions := leaderServer.GetServer().GetRaftCluster().GetRegions()
+	loadRegions := leaderServer.GetServer().GetRegions()
 	re.Len(loadRegions, regionLen)
 	for _, region := range regions {
 		r := leaderServer.GetRegionInfoByID(region.GetID())
@@ -227,12 +227,12 @@ func TestFullSyncWithAddMember(t *testing.T) {
 	// waiting for synchronization to complete
 	var loadRegionLen int
 	testutil.Eventually(re, func() bool {
-		loadRegionLen = len(pd2.GetServer().GetRaftCluster().GetRegions())
+		loadRegionLen = len(pd2.GetServer().GetBasicCluster().GetRegions())
 		return loadRegionLen == regionLen
 	})
 	re.NoError(cluster.ResignLeader())
 	re.Equal("pd2", cluster.WaitLeader())
-	loadRegionLen = len(pd2.GetServer().GetRaftCluster().GetRegions())
+	loadRegionLen = len(pd2.GetServer().GetRegions())
 	re.Equal(regionLen, loadRegionLen)
 }
 
@@ -271,7 +271,7 @@ func TestPrepareChecker(t *testing.T) {
 	re.NotEmpty(cluster.WaitLeader())
 	// waiting for synchronization to complete
 	testutil.Eventually(re, func() bool {
-		return len(pd2.GetServer().GetRaftCluster().GetRegions()) == regionLen
+		return len(pd2.GetServer().GetBasicCluster().GetRegions()) == regionLen
 	})
 	leaderServer = cluster.GetLeaderServer()
 	err = cluster.ResignLeader()
@@ -328,7 +328,7 @@ func TestPrepareCheckerWithTransferLeader(t *testing.T) {
 	re.NotEmpty(cluster.WaitLeader())
 	// waiting for synchronization to complete
 	testutil.Eventually(re, func() bool {
-		return len(pd2.GetServer().GetRaftCluster().GetRegions()) == regionLen
+		return len(pd2.GetServer().GetBasicCluster().GetRegions()) == regionLen
 	})
 	leaderServer = cluster.GetLeaderServer()
 	err = cluster.ResignLeader()

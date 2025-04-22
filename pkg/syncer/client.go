@@ -175,12 +175,14 @@ func (s *RegionSyncer) StartSyncWithLeader(addr string) {
 					}
 					// Check if the leader is still there to avoid waiting for a `retryInterval`.
 					if s.server.GetLeader() == nil {
-						log.Info("stop synchronizing with leader due to leader stepped down")
+						log.Info("stop synchronizing with leader due to leader stepped down",
+							zap.String("server", s.server.Name()), zap.Uint64("next-index", s.history.getNextIndex()))
 						return
 					}
 					select {
 					case <-ctx.Done():
-						log.Info("stop synchronizing with leader due to context canceled")
+						log.Info("stop synchronizing with leader due to context canceled",
+							zap.String("server", s.server.Name()), zap.Uint64("next-index", s.history.getNextIndex()))
 						return
 					case <-time.After(retryInterval):
 					}
