@@ -93,7 +93,7 @@ func (s *Service) GetResourceGroup(_ context.Context, req *rmpb.GetResourceGroup
 	if err := s.checkServing(); err != nil {
 		return nil, err
 	}
-	rg := s.manager.GetResourceGroup(req.ResourceGroupName, req.WithRuStats)
+	rg := s.manager.GetResourceGroup(req.ResourceGroupName, req.WithRuStats, req.Keyspace)
 	if rg == nil {
 		return nil, errors.New("resource group not found")
 	}
@@ -107,13 +107,15 @@ func (s *Service) ListResourceGroups(_ context.Context, req *rmpb.ListResourceGr
 	if err := s.checkServing(); err != nil {
 		return nil, err
 	}
-	groups := s.manager.GetResourceGroupList(req.WithRuStats)
+
+	groups := s.manager.GetResourceGroupList(req.WithRuStats, req.Keyspace)
 	resp := &rmpb.ListResourceGroupsResponse{
 		Groups: make([]*rmpb.ResourceGroup, 0, len(groups)),
 	}
 	for _, group := range groups {
 		resp.Groups = append(resp.Groups, group.IntoProtoResourceGroup())
 	}
+
 	return resp, nil
 }
 
@@ -134,7 +136,7 @@ func (s *Service) DeleteResourceGroup(_ context.Context, req *rmpb.DeleteResourc
 	if err := s.checkServing(); err != nil {
 		return nil, err
 	}
-	err := s.manager.DeleteResourceGroup(req.ResourceGroupName)
+	err := s.manager.DeleteResourceGroup(req.ResourceGroupName, req.Keyspace)
 	if err != nil {
 		return nil, err
 	}
@@ -180,7 +182,7 @@ func (s *Service) AcquireTokenBuckets(stream rmpb.ResourceManager_AcquireTokenBu
 		for _, req := range request.Requests {
 			resourceGroupName := req.GetResourceGroupName()
 			// Get the resource group from manager to acquire token buckets.
-			rg := s.manager.GetMutableResourceGroup(resourceGroupName)
+			rg := s.manager.GetMutableResourceGroup(resourceGroupName, req.Keyspace)
 			if rg == nil {
 				log.Warn("resource group not found", zap.String("resource-group", resourceGroupName))
 				continue

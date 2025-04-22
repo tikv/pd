@@ -231,13 +231,19 @@ func (rg *ResourceGroup) IntoProtoResourceGroup() *rmpb.ResourceGroup {
 
 // persistSettings persists the resource group settings.
 // TODO: persist the state of the group separately.
-func (rg *ResourceGroup) persistSettings(storage endpoint.ResourceGroupStorage) error {
+func (rg *ResourceGroup) persistSettings(storage endpoint.ResourceGroupStorage, name string) error {
 	metaGroup := rg.IntoProtoResourceGroup()
-	return storage.SaveResourceGroupSetting(rg.Name, metaGroup)
+	return storage.SaveResourceGroupSetting(name, metaGroup)
+}
+
+// Keyspace is the keyspace of a resource group.
+type Keyspace struct {
+	KeyspaceID uint32 `json:"keyspaceID,omitempty"`
 }
 
 // GroupStates is the tokens set of a resource group.
 type GroupStates struct {
+	Keyspace *Keyspace `json:"keyspace,omitempty"`
 	// RU tokens
 	RU *GroupTokenBucketState `json:"r_u,omitempty"`
 	// RU consumption
@@ -299,7 +305,7 @@ func (rg *ResourceGroup) UpdateRUConsumption(c *rmpb.Consumption) {
 }
 
 // persistStates persists the resource group tokens.
-func (rg *ResourceGroup) persistStates(storage endpoint.ResourceGroupStorage) error {
+func (rg *ResourceGroup) persistStates(storage endpoint.ResourceGroupStorage, name string) error {
 	states := rg.GetGroupStates()
-	return storage.SaveResourceGroupStates(rg.Name, states)
+	return storage.SaveResourceGroupStates(name, states)
 }

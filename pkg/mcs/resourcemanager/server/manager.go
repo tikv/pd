@@ -17,6 +17,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"math"
 	"sort"
 	"strings"
@@ -60,6 +61,7 @@ type Manager struct {
 	srv              bs.Server
 	controllerConfig *ControllerConfig
 	groups           map[string]*ResourceGroup
+	keyspaceGroups   map[uint32]*KeyspaceGroupManager
 	storage          endpoint.ResourceGroupStorage
 	// consumptionChan is used to send the consumption
 	// info to the background metrics flusher.
@@ -90,6 +92,7 @@ func NewManager[T ConfigProvider](srv bs.Server) *Manager {
 	m := &Manager{
 		controllerConfig: srv.(T).GetControllerConfig(),
 		groups:           make(map[string]*ResourceGroup),
+		keyspaceGroups:   make(map[uint32]*KeyspaceGroupManager),
 		consumptionDispatcher: make(chan struct {
 			resourceGroupName string
 			*rmpb.Consumption
@@ -110,6 +113,13 @@ func NewManager[T ConfigProvider](srv bs.Server) *Manager {
 	// The second initialization after becoming serving.
 	srv.AddServiceReadyCallback(m.Init)
 	return m
+}
+
+// KeyspaceGroupManager is the manager of keyspace resource groups.
+type KeyspaceGroupManager struct {
+	// TODO: add keyspace specific settings.
+	// resource_group_name --> ResourceGroup
+	groups map[string]*ResourceGroup
 }
 
 // GetBasicServer returns the basic server.
@@ -135,6 +145,7 @@ func (m *Manager) Init(ctx context.Context) error {
 	// Load resource group meta info from storage.
 	m.Lock()
 	m.groups = make(map[string]*ResourceGroup)
+	m.keyspaceGroups = make(map[uint32]*KeyspaceGroupManager)
 	m.Unlock()
 	handler := func(k, v string) {
 		group := &rmpb.ResourceGroup{}
@@ -142,7 +153,20 @@ func (m *Manager) Init(ctx context.Context) error {
 			log.Error("failed to parse the resource group", zap.Error(err), zap.String("k", k), zap.String("v", v))
 			panic(err)
 		}
-		m.groups[group.Name] = FromProtoResourceGroup(group)
+		if group.GetKeyspace() != nil {
+			keyspaceID := group.GetKeyspace().GetId()
+			if _, ok := m.keyspaceGroups[keyspaceID]; !ok {
+				groups := make(map[string]*ResourceGroup)
+				groups[group.Name] = FromProtoResourceGroup(group)
+				m.keyspaceGroups[keyspaceID] = &KeyspaceGroupManager{
+					groups: groups,
+				}
+			} else {
+				m.keyspaceGroups[keyspaceID].groups[group.Name] = FromProtoResourceGroup(group)
+			}
+		} else {
+			m.groups[group.Name] = FromProtoResourceGroup(group)
+		}
 	}
 	if err := m.storage.LoadResourceGroupSettings(handler); err != nil {
 		return err
@@ -154,15 +178,27 @@ func (m *Manager) Init(ctx context.Context) error {
 			log.Error("failed to parse the resource group state", zap.Error(err), zap.String("k", k), zap.String("v", v))
 			panic(err)
 		}
-		if group, ok := m.groups[k]; ok {
-			group.SetStatesIntoResourceGroup(tokens)
+		if tokens.Keyspace != nil {
+			keyspaceID := tokens.Keyspace.KeyspaceID
+			if _, ok := m.keyspaceGroups[keyspaceID]; !ok {
+				log.Error("keyspace group not found", zap.Uint32("keyspace-id", keyspaceID))
+				return
+			}
+			k := strings.TrimPrefix(k, fmt.Sprintf("%d/", keyspaceID))
+			if group, ok := m.keyspaceGroups[keyspaceID].groups[k]; ok {
+				group.SetStatesIntoResourceGroup(tokens)
+			}
+		} else {
+			if group, ok := m.groups[k]; ok {
+				group.SetStatesIntoResourceGroup(tokens)
+			}
 		}
 	}
 	if err := m.storage.LoadResourceGroupStates(tokenHandler); err != nil {
 		return err
 	}
 
-	// Add default group if it's not inited.
+	// Add default group if it's not initialized.
 	if _, ok := m.groups[reservedDefaultGroupName]; !ok {
 		defaultGroup := &ResourceGroup{
 			Name: reservedDefaultGroupName,
@@ -248,13 +284,30 @@ func (m *Manager) AddResourceGroup(grouppb *rmpb.ResourceGroup) error {
 	group := FromProtoResourceGroup(grouppb)
 	m.Lock()
 	defer m.Unlock()
-	if err := group.persistSettings(m.storage); err != nil {
+	name := group.Name
+	if grouppb.GetKeyspace() != nil {
+		name = fmt.Sprintf("%d/%s", grouppb.GetKeyspace().GetId(), name)
+	}
+	if err := group.persistSettings(m.storage, name); err != nil {
 		return err
 	}
-	if err := group.persistStates(m.storage); err != nil {
+	if err := group.persistStates(m.storage, name); err != nil {
 		return err
 	}
-	m.groups[group.Name] = group
+	if grouppb.GetKeyspace() != nil {
+		keyspaceID := grouppb.GetKeyspace().GetId()
+		if _, ok := m.keyspaceGroups[keyspaceID]; !ok {
+			groups := make(map[string]*ResourceGroup)
+			groups[group.Name] = group
+			m.keyspaceGroups[keyspaceID] = &KeyspaceGroupManager{
+				groups: groups,
+			}
+		} else {
+			m.keyspaceGroups[keyspaceID].groups[group.Name] = group
+		}
+	} else {
+		m.groups[group.Name] = group
+	}
 	return nil
 }
 
@@ -263,10 +316,25 @@ func (m *Manager) ModifyResourceGroup(group *rmpb.ResourceGroup) error {
 	if group == nil || group.Name == "" {
 		return errs.ErrInvalidGroup
 	}
+	var (
+		curGroup *ResourceGroup
+		exist    bool
+		name     string
+	)
 	m.Lock()
-	curGroup, ok := m.groups[group.Name]
+	if group.GetKeyspace() != nil {
+		keyspaceID := group.GetKeyspace().GetId()
+		if _, ok := m.keyspaceGroups[keyspaceID]; !ok {
+			return errs.ErrResourceGroupNotExists.FastGenByArgs(group.Name)
+		}
+		curGroup, exist = m.keyspaceGroups[keyspaceID].groups[group.Name]
+		name = fmt.Sprintf("%d/%s", keyspaceID, group.Name)
+	} else {
+		curGroup, exist = m.groups[group.Name]
+		name = group.Name
+	}
 	m.Unlock()
-	if !ok {
+	if !exist {
 		return errs.ErrResourceGroupNotExists.FastGenByArgs(group.Name)
 	}
 
@@ -274,49 +342,101 @@ func (m *Manager) ModifyResourceGroup(group *rmpb.ResourceGroup) error {
 	if err != nil {
 		return err
 	}
-	return curGroup.persistSettings(m.storage)
+	return curGroup.persistSettings(m.storage, name)
 }
 
 // DeleteResourceGroup deletes a resource group.
-func (m *Manager) DeleteResourceGroup(name string) error {
+func (m *Manager) DeleteResourceGroup(name string, keyspace *rmpb.Keyspace) error {
 	if name == reservedDefaultGroupName {
 		return errs.ErrDeleteReservedGroup
+	}
+	if keyspace != nil {
+		keyspaceID := keyspace.GetId()
+		name = fmt.Sprintf("%d/%s", keyspaceID, name)
 	}
 	if err := m.storage.DeleteResourceGroupSetting(name); err != nil {
 		return err
 	}
 	m.Lock()
-	delete(m.groups, name)
+	if keyspace != nil {
+		keyspaceID := keyspace.GetId()
+		if group, ok := m.keyspaceGroups[keyspaceID]; ok {
+			delete(group.groups, name)
+			if len(group.groups) == 0 {
+				delete(m.keyspaceGroups, keyspaceID)
+			}
+		}
+	} else {
+		delete(m.groups, name)
+	}
 	m.Unlock()
 	return nil
 }
 
 // GetResourceGroup returns a copy of a resource group.
-func (m *Manager) GetResourceGroup(name string, withStats bool) *ResourceGroup {
+func (m *Manager) GetResourceGroup(name string, withStats bool, keyspace *rmpb.Keyspace) *ResourceGroup {
 	m.RLock()
 	defer m.RUnlock()
-	if group, ok := m.groups[name]; ok {
-		return group.Clone(withStats)
+	if keyspace != nil {
+		keyspaceID := keyspace.GetId()
+		if group, ok := m.keyspaceGroups[keyspaceID]; ok {
+			if rg, ok := group.groups[name]; ok {
+				return rg.Clone(withStats)
+			}
+		}
+	} else {
+		if group, ok := m.groups[name]; ok {
+			return group.Clone(withStats)
+		}
 	}
 	return nil
 }
 
 // GetMutableResourceGroup returns a mutable resource group.
-func (m *Manager) GetMutableResourceGroup(name string) *ResourceGroup {
+func (m *Manager) GetMutableResourceGroup(name string, keyspace *rmpb.Keyspace) *ResourceGroup {
 	m.RLock()
 	defer m.RUnlock()
-	if group, ok := m.groups[name]; ok {
-		return group
+	if keyspace != nil {
+		keyspaceID := keyspace.GetId()
+		if group, ok := m.keyspaceGroups[keyspaceID]; ok {
+			if rg, ok := group.groups[name]; ok {
+				return rg
+			}
+		}
+	} else {
+		if group, ok := m.groups[name]; ok {
+			return group
+		}
 	}
 	return nil
 }
 
 // GetResourceGroupList returns copies of resource group list.
-func (m *Manager) GetResourceGroupList(withStats bool) []*ResourceGroup {
+func (m *Manager) GetResourceGroupList(withStats bool, keyspace *rmpb.Keyspace) []*ResourceGroup {
 	m.RLock()
+	if keyspace != nil {
+		keyspaceID := keyspace.GetId()
+		if group, ok := m.keyspaceGroups[keyspaceID]; ok {
+			res := make([]*ResourceGroup, 0, len(group.groups))
+			for _, group := range group.groups {
+				res = append(res, group.Clone(withStats))
+			}
+			m.RUnlock()
+			sort.Slice(res, func(i, j int) bool {
+				return res[i].Name < res[j].Name
+			})
+			return res
+		}
+		return nil
+	}
 	res := make([]*ResourceGroup, 0, len(m.groups))
 	for _, group := range m.groups {
 		res = append(res, group.Clone(withStats))
+	}
+	for _, group := range m.keyspaceGroups {
+		for _, g := range group.groups {
+			res = append(res, g.Clone(withStats))
+		}
 	}
 	m.RUnlock()
 	sort.Slice(res, func(i, j int) bool {
@@ -352,12 +472,29 @@ func (m *Manager) persistResourceGroupRunningState() {
 		m.RLock()
 		group, ok := m.groups[keys[idx]]
 		if ok {
-			if err := group.persistStates(m.storage); err != nil {
+			if err := group.persistStates(m.storage, group.Name); err != nil {
 				log.Error("persist resource group state failed", zap.Error(err))
 			}
 		}
 		m.RUnlock()
 	}
+
+	m.RLock()
+	for kg := range m.keyspaceGroups {
+		keyspaceGroup, ok := m.keyspaceGroups[kg]
+		if ok {
+			for k := range keyspaceGroup.groups {
+				group, ok := keyspaceGroup.groups[k]
+				if ok {
+					name := fmt.Sprintf("%d/%s", kg, group.Name)
+					if err := group.persistStates(m.storage, name); err != nil {
+						log.Error("persist resource group state failed", zap.Error(err))
+					}
+				}
+			}
+		}
+	}
+	m.RUnlock()
 }
 
 // Receive the consumption and flush it to the metrics.
@@ -439,7 +576,8 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 			m.consumptionRecord[consumptionRecordKey{name: name, ruType: ruLabelType}] = time.Now()
 
 			// TODO: maybe we need to distinguish background ru.
-			if rg := m.GetMutableResourceGroup(name); rg != nil {
+			// TODO: support keyspace group
+			if rg := m.GetMutableResourceGroup(name, nil); rg != nil {
 				rg.UpdateRUConsumption(consumptionInfo.Consumption)
 			}
 		case <-cleanUpTicker.C:

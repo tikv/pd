@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"net/http"
 	"reflect"
+	"strconv"
 	"strings"
 
 	"github.com/gin-contrib/cors"
@@ -161,7 +162,20 @@ func (s *Service) putResourceGroup(c *gin.Context) {
 //	@Router		/config/group/{name} [get]
 func (s *Service) getResourceGroup(c *gin.Context) {
 	withStats := strings.EqualFold(c.Query("with_stats"), "true")
-	group := s.manager.GetResourceGroup(c.Param("name"), withStats)
+	var keyspace *rmpb.Keyspace
+	keyspaceIDStr := c.Query("keyspace_id")
+	if keyspaceIDStr != "" {
+		keyspaceID, err := strconv.ParseUint(keyspaceIDStr, 10, 32)
+		if err != nil {
+			c.String(http.StatusBadRequest, fmt.Sprintf("keyspace id %d is invalid", keyspaceID))
+			return
+		}
+		keyspace = &rmpb.Keyspace{
+			Id: uint32(keyspaceID),
+		}
+	}
+
+	group := s.manager.GetResourceGroup(c.Param("name"), withStats, keyspace)
 	if group == nil {
 		c.String(http.StatusNotFound, errors.New("resource group not found").Error())
 	}
@@ -178,7 +192,20 @@ func (s *Service) getResourceGroup(c *gin.Context) {
 //	@Router		/config/groups [get]
 func (s *Service) getResourceGroupList(c *gin.Context) {
 	withStats := strings.EqualFold(c.Query("with_stats"), "true")
-	groups := s.manager.GetResourceGroupList(withStats)
+	var keyspace *rmpb.Keyspace
+	keyspaceIDStr := c.Query("keyspace_id")
+	if keyspaceIDStr != "" {
+		keyspaceID, err := strconv.ParseUint(keyspaceIDStr, 10, 32)
+		if err != nil {
+			c.String(http.StatusBadRequest, fmt.Sprintf("keyspace id %d is invalid", keyspaceID))
+			return
+		}
+		keyspace = &rmpb.Keyspace{
+			Id: uint32(keyspaceID),
+		}
+	}
+
+	groups := s.manager.GetResourceGroupList(withStats, keyspace)
 	c.IndentedJSON(http.StatusOK, groups)
 }
 
@@ -191,7 +218,19 @@ func (s *Service) getResourceGroupList(c *gin.Context) {
 //	@Failure	404		{string}	error
 //	@Router		/config/group/{name} [delete]
 func (s *Service) deleteResourceGroup(c *gin.Context) {
-	if err := s.manager.DeleteResourceGroup(c.Param("name")); err != nil {
+	var keyspace *rmpb.Keyspace
+	keyspaceIDStr := c.Query("keyspace_id")
+	if keyspaceIDStr != "" {
+		keyspaceID, err := strconv.ParseUint(keyspaceIDStr, 10, 32)
+		if err != nil {
+			c.String(http.StatusBadRequest, fmt.Sprintf("keyspace id %d is invalid", keyspaceID))
+			return
+		}
+		keyspace = &rmpb.Keyspace{
+			Id: uint32(keyspaceID),
+		}
+	}
+	if err := s.manager.DeleteResourceGroup(c.Param("name"), keyspace); err != nil {
 		c.String(http.StatusNotFound, err.Error())
 	}
 	c.String(http.StatusOK, "Success!")

@@ -87,7 +87,7 @@ type ResourceGroupProvider interface {
 	ListResourceGroups(ctx context.Context, opts ...pd.GetResourceGroupOption) ([]*rmpb.ResourceGroup, error)
 	AddResourceGroup(ctx context.Context, metaGroup *rmpb.ResourceGroup) (string, error)
 	ModifyResourceGroup(ctx context.Context, metaGroup *rmpb.ResourceGroup) (string, error)
-	DeleteResourceGroup(ctx context.Context, resourceGroupName string) (string, error)
+	DeleteResourceGroup(ctx context.Context, resourceGroupName string, opts ...pd.DeleteResourceGroupOption) (string, error)
 	AcquireTokenBuckets(ctx context.Context, request *rmpb.TokenBucketsRequest) ([]*rmpb.TokenBucketResponse, error)
 	LoadResourceGroups(ctx context.Context) ([]*rmpb.ResourceGroup, int64, error)
 
