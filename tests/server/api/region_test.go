@@ -772,7 +772,7 @@ func (suite *regionTestSuite) checkRegionsWithKillRequest(cluster *tests.TestClu
 	urlPrefix := leader.GetAddr() + "/pd/api/v1"
 	url := fmt.Sprintf("%s/regions", urlPrefix)
 
-	regionCount := 100000
+	regionCount := 100
 	tu.GenerateTestDataConcurrently(regionCount, func(i int) {
 		r := core.NewTestRegionInfo(uint64(i+2), 1,
 			[]byte(fmt.Sprintf("%09d", i)),
@@ -785,6 +785,7 @@ func (suite *regionTestSuite) checkRegionsWithKillRequest(cluster *tests.TestClu
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
 	re.NoError(err)
 	doneCh := make(chan struct{}, 1)
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/api/slowRequest", "return(true)"))
 	go func() {
 		resp, err := testDialClient.Do(req)
 		defer func() {
@@ -801,6 +802,7 @@ func (suite *regionTestSuite) checkRegionsWithKillRequest(cluster *tests.TestClu
 	cancel()
 	<-doneCh
 	close(doneCh)
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/api/slowRequest"))
 }
 
 func (suite *regionTestSuite) TestRegionKey() {
