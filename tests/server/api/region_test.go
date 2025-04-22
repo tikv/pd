@@ -451,11 +451,11 @@ func pauseAllCheckers(re *require.Assertions, cluster *tests.TestCluster) {
 func (suite *regionTestSuite) TestRegion() {
 	// use a new environment to avoid affecting other tests
 	env := tests.NewSchedulingTestEnvironment(suite.T())
-	env.RunTest(suite.testRegion)
+	env.RunTest(suite.checkRegion)
 	env.Cleanup()
 }
 
-func (suite *regionTestSuite) testRegion(cluster *tests.TestCluster) {
+func (suite *regionTestSuite) checkRegion(cluster *tests.TestCluster) {
 	re := suite.Require()
 	leader := cluster.GetLeaderServer()
 	urlPrefix := leader.GetAddr() + "/pd/api/v1"
@@ -509,11 +509,11 @@ func (suite *regionTestSuite) testRegion(cluster *tests.TestCluster) {
 func (suite *regionTestSuite) TestRegionCheck() {
 	// use a new environment to avoid affecting other tests
 	env := tests.NewSchedulingTestEnvironment(suite.T())
-	env.RunTest(suite.testRegionCheck)
+	env.RunTest(suite.checkRegionCheck)
 	env.Cleanup()
 }
 
-func (suite *regionTestSuite) testRegionCheck(cluster *tests.TestCluster) {
+func (suite *regionTestSuite) checkRegionCheck(cluster *tests.TestCluster) {
 	re := suite.Require()
 	leader := cluster.GetLeaderServer()
 	urlPrefix := leader.GetAddr() + "/pd/api/v1"
@@ -613,11 +613,11 @@ func (suite *regionTestSuite) testRegionCheck(cluster *tests.TestCluster) {
 func (suite *regionTestSuite) TestRegions() {
 	// use a new environment to avoid affecting other tests
 	env := tests.NewSchedulingTestEnvironment(suite.T())
-	env.RunTest(suite.testRegions)
+	env.RunTest(suite.checkRegions)
 	env.Cleanup()
 }
 
-func (suite *regionTestSuite) testRegions(cluster *tests.TestCluster) {
+func (suite *regionTestSuite) checkRegions(cluster *tests.TestCluster) {
 	re := suite.Require()
 	leader := cluster.GetLeaderServer()
 	urlPrefix := leader.GetAddr() + "/pd/api/v1"
@@ -653,11 +653,11 @@ func (suite *regionTestSuite) testRegions(cluster *tests.TestCluster) {
 func (suite *regionTestSuite) TestStoreRegions() {
 	// use a new environment to avoid affecting other tests
 	env := tests.NewSchedulingTestEnvironment(suite.T())
-	env.RunTest(suite.testStoreRegions)
+	env.RunTest(suite.checkStoreRegions)
 	env.Cleanup()
 }
 
-func (suite *regionTestSuite) testStoreRegions(cluster *tests.TestCluster) {
+func (suite *regionTestSuite) checkStoreRegions(cluster *tests.TestCluster) {
 	re := suite.Require()
 	leader := cluster.GetLeaderServer()
 	urlPrefix := leader.GetAddr() + "/pd/api/v1"
@@ -700,11 +700,11 @@ func (suite *regionTestSuite) testStoreRegions(cluster *tests.TestCluster) {
 func (suite *regionTestSuite) TestTop() {
 	// use a new environment to avoid affecting other tests
 	env := tests.NewSchedulingTestEnvironment(suite.T())
-	env.RunTest(suite.testTop)
+	env.RunTest(suite.checkTop)
 	env.Cleanup()
 }
 
-func (suite *regionTestSuite) testTop(cluster *tests.TestCluster) {
+func (suite *regionTestSuite) checkTop(cluster *tests.TestCluster) {
 	re := suite.Require()
 	leader := cluster.GetLeaderServer()
 	urlPrefix := leader.GetAddr() + "/pd/api/v1"
@@ -762,11 +762,11 @@ func checkTopRegions(re *require.Assertions, url string, regionIDs []uint64) {
 func (suite *regionTestSuite) TestRegionsWithKillRequest() {
 	// use a new environment to avoid affecting other tests
 	env := tests.NewSchedulingTestEnvironment(suite.T())
-	env.RunTest(suite.testRegionsWithKillRequest)
+	env.RunTest(suite.checkRegionsWithKillRequest)
 	env.Cleanup()
 }
 
-func (suite *regionTestSuite) testRegionsWithKillRequest(cluster *tests.TestCluster) {
+func (suite *regionTestSuite) checkRegionsWithKillRequest(cluster *tests.TestCluster) {
 	re := suite.Require()
 	leader := cluster.GetLeaderServer()
 	urlPrefix := leader.GetAddr() + "/pd/api/v1"
@@ -806,11 +806,11 @@ func (suite *regionTestSuite) testRegionsWithKillRequest(cluster *tests.TestClus
 func (suite *regionTestSuite) TestRegionKey() {
 	// use a new environment to avoid affecting other tests
 	env := tests.NewSchedulingTestEnvironment(suite.T())
-	env.RunTest(suite.testRegionKey)
+	env.RunTest(suite.checkRegionKey)
 	env.Cleanup()
 }
 
-func (suite *regionTestSuite) testRegionKey(cluster *tests.TestCluster) {
+func (suite *regionTestSuite) checkRegionKey(cluster *tests.TestCluster) {
 	re := suite.Require()
 	leader := cluster.GetLeaderServer()
 	urlPrefix := leader.GetAddr() + "/pd/api/v1"
@@ -826,11 +826,11 @@ func (suite *regionTestSuite) testRegionKey(cluster *tests.TestCluster) {
 func (suite *regionTestSuite) TestScanRegionByKeys() {
 	// use a new environment to avoid affecting other tests
 	env := tests.NewSchedulingTestEnvironment(suite.T())
-	env.RunTest(suite.testScanRegionByKeys)
+	env.RunTest(suite.checkScanRegionByKeys)
 	env.Cleanup()
 }
 
-func (suite *regionTestSuite) testScanRegionByKeys(cluster *tests.TestCluster) {
+func (suite *regionTestSuite) checkScanRegionByKeys(cluster *tests.TestCluster) {
 	re := suite.Require()
 	leader := cluster.GetLeaderServer()
 	urlPrefix := leader.GetAddr() + "/pd/api/v1"
@@ -939,11 +939,11 @@ func (suite *regionTestSuite) testScanRegionByKeys(cluster *tests.TestCluster) {
 func (suite *regionTestSuite) TestRegionRangeHoles() {
 	// use a new environment to avoid affecting other tests
 	env := tests.NewSchedulingTestEnvironment(suite.T())
-	env.RunTest(suite.testRegionRangeHoles)
+	env.RunTest(suite.checkRegionRangeHoles)
 	env.Cleanup()
 }
 
-func (suite *regionTestSuite) testRegionRangeHoles(cluster *tests.TestCluster) {
+func (suite *regionTestSuite) checkRegionRangeHoles(cluster *tests.TestCluster) {
 	re := suite.Require()
 	leader := cluster.GetLeaderServer()
 	urlPrefix := leader.GetAddr() + "/pd/api/v1"
