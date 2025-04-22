@@ -399,7 +399,9 @@ func (s *SchedulingTestEnvironment) startCluster(m Env) {
 		re.NoError(err)
 		re.NotEmpty(cluster.WaitLeader())
 		leaderServer := cluster.GetServer(cluster.GetLeader())
-		re.NoError(leaderServer.BootstrapCluster())
+		if !s.SkipBootstrap {
+			re.NoError(leaderServer.BootstrapCluster())
+		}
 		s.clusters[NonMicroserviceEnv] = cluster
 	case MicroserviceEnv:
 		cluster, err := NewTestClusterWithKeyspaceGroup(ctx, s.PDCount, s.opts...)
