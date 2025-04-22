@@ -496,7 +496,7 @@ func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
 
 	var (
 		// The following are tso forward stream related variables.
-		tsoRequestProxyQueue *tsoutil.TsoRequestProxyQueue
+		tsoRequestProxyQueue context.Context
 		forwarder            = newTSOForwarder(stream)
 		tsoStreamErr         error
 	)
@@ -567,7 +567,6 @@ func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
 		}
 
 		if s.IsServiceIndependent(constant.TSOServiceName) {
-			var err error
 			if request.GetCount() == 0 {
 				err = errs.ErrGenerateTimestamp.FastGenByArgs("tso count should be positive")
 				return errs.ErrUnknown(err)
