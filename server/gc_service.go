@@ -422,9 +422,10 @@ func gcStateToProto(gcState gc.GCState, now time.Time) *pdpb.GCState {
 		KeyspaceScope: &pdpb.KeyspaceScope{
 			KeyspaceId: gcState.KeyspaceID,
 		},
-		TxnSafePoint: gcState.TxnSafePoint,
-		GcSafePoint:  gcState.GCSafePoint,
-		GcBarriers:   gcBarriers,
+		IsKeyspaceLevelGc: gcState.IsKeyspaceLevel,
+		TxnSafePoint:      gcState.TxnSafePoint,
+		GcSafePoint:       gcState.GCSafePoint,
+		GcBarriers:        gcBarriers,
 	}
 }
 
