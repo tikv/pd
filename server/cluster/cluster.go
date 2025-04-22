@@ -1327,6 +1327,7 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 			func(context.Context) {
 				c.changedRegions <- region
 			},
+			ratelimit.WithRetained(true),
 		)
 	}
 	return nil
