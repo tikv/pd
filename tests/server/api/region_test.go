@@ -772,7 +772,7 @@ func (suite *regionTestSuite) checkRegionsWithKillRequest(cluster *tests.TestClu
 	urlPrefix := leader.GetAddr() + "/pd/api/v1"
 	url := fmt.Sprintf("%s/regions", urlPrefix)
 
-	regionCount := 50000
+	regionCount := 100000
 	tu.GenerateTestDataConcurrently(regionCount, func(i int) {
 		r := core.NewTestRegionInfo(uint64(i+2), 1,
 			[]byte(fmt.Sprintf("%09d", i)),
@@ -784,7 +784,7 @@ func (suite *regionTestSuite) checkRegionsWithKillRequest(cluster *tests.TestClu
 	ctx, cancel := context.WithCancel(context.Background())
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, http.NoBody)
 	re.NoError(err)
-	doneCh := make(chan struct{})
+	doneCh := make(chan struct{}, 1)
 	go func() {
 		resp, err := testDialClient.Do(req)
 		defer func() {
