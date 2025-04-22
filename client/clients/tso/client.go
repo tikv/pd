@@ -331,8 +331,9 @@ func (c *Cli) tryConnectToTSO(ctx context.Context) error {
 		c.svcDiscovery.ScheduleCheckMemberChanged()
 		cc, url = c.getTSOLeaderClientConn()
 		if c.conCtxMgr.Exist(url) {
+			cctx, cancel := context.WithCancel(ctx)
 			// Just trigger the clean up of the stale connection contexts.
-			c.conCtxMgr.CleanAllAndStore(ctx, url)
+			c.conCtxMgr.CleanAllAndStore(cctx, cancel, url)
 			return nil
 		}
 		if cc != nil {
@@ -343,7 +344,7 @@ func (c *Cli) tryConnectToTSO(ctx context.Context) error {
 				err = status.New(codes.Unavailable, "unavailable").Err()
 			})
 			if stream != nil && err == nil {
-				c.conCtxMgr.CleanAllAndStore(ctx, url, stream)
+				c.conCtxMgr.CleanAllAndStore(cctx, cancel, url, stream)
 				return nil
 			}
 
@@ -388,7 +389,7 @@ func (c *Cli) tryConnectToTSO(ctx context.Context) error {
 				// the goroutine is used to check the network and change back to the original stream
 				go c.checkLeader(ctx, cancel, forwardedHostTrim, addr, url)
 				metrics.RequestForwarded.WithLabelValues(forwardedHostTrim, addr).Set(1)
-				c.conCtxMgr.CleanAllAndStore(ctx, backupURL, stream)
+				c.conCtxMgr.CleanAllAndStore(cctx, cancel, backupURL, stream)
 				return nil
 			}
 			cancel()
@@ -433,7 +434,7 @@ func (c *Cli) checkLeader(
 				stream, err := c.tsoStreamBuilderFactory.makeBuilder(cc).build(cctx, cancel, c.option.Timeout)
 				if err == nil && stream != nil {
 					log.Info("[tso] recover the original tso stream since the network has become normal", zap.String("url", url))
-					c.conCtxMgr.CleanAllAndStore(ctx, url, stream)
+					c.conCtxMgr.CleanAllAndStore(cctx, cancel, url, stream)
 					return
 				}
 			}
@@ -487,7 +488,7 @@ func (c *Cli) tryConnectToTSOWithProxy(ctx context.Context) error {
 				addrTrim := tlsutil.TrimHTTPPrefix(addr)
 				metrics.RequestForwarded.WithLabelValues(forwardedHostTrim, addrTrim).Set(1)
 			}
-			c.conCtxMgr.Store(ctx, addr, stream)
+			c.conCtxMgr.Store(cctx, cancel, addr, stream)
 			continue
 		}
 		log.Error("[tso] create the tso stream failed",

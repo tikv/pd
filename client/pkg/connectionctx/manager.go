@@ -53,7 +53,7 @@ func (c *Manager[T]) Exist(url string) bool {
 
 // Store is used to store the connection context, `overwrite` is used to force the store operation
 // no matter whether the connection context exists before, which is false by default.
-func (c *Manager[T]) Store(ctx context.Context, url string, stream T, overwrite ...bool) {
+func (c *Manager[T]) Store(ctx context.Context, cancel context.CancelFunc, url string, stream T, overwrite ...bool) {
 	c.Lock()
 	defer c.Unlock()
 	overwriteFlag := false
@@ -64,19 +64,18 @@ func (c *Manager[T]) Store(ctx context.Context, url string, stream T, overwrite 
 	if !overwriteFlag && ok {
 		return
 	}
-	c.storeLocked(ctx, url, stream)
+	c.storeLocked(ctx, cancel, url, stream)
 }
 
-func (c *Manager[T]) storeLocked(ctx context.Context, url string, stream T) {
+func (c *Manager[T]) storeLocked(ctx context.Context, cancel context.CancelFunc, url string, stream T) {
 	c.releaseLocked(url)
-	cctx, cancel := context.WithCancel(ctx)
-	c.connectionCtxs[url] = &ConnectionCtx[T]{cctx, cancel, url, stream}
+	c.connectionCtxs[url] = &ConnectionCtx[T]{ctx, cancel, url, stream}
 }
 
 // CleanAllAndStore is used to store the connection context exclusively. It will release
 // all other connection contexts. `stream` is optional, if it is not provided, all
 // connection contexts other than the given `url` will be released.
-func (c *Manager[T]) CleanAllAndStore(ctx context.Context, url string, stream ...T) {
+func (c *Manager[T]) CleanAllAndStore(ctx context.Context, cancel context.CancelFunc, url string, stream ...T) {
 	c.Lock()
 	defer c.Unlock()
 	// Remove all other `connectionCtx`s.
@@ -86,7 +85,7 @@ func (c *Manager[T]) CleanAllAndStore(ctx context.Context, url string, stream ..
 	if len(stream) == 0 {
 		return
 	}
-	c.storeLocked(ctx, url, stream[0])
+	c.storeLocked(ctx, cancel, url, stream[0])
 }
 
 // GC is used to release all connection contexts that match the given condition.

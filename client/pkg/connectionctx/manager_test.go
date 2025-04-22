@@ -22,13 +22,31 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestCancelFunc(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	manager := NewManager[int]()
+	url := "test-url"
+	manager.Store(ctx, cancel, url, 1)
+	re.True(manager.Exist(url))
+	manager.GC(func(url string) bool {
+		return url == "test-url"
+	})
+	select {
+	case <-ctx.Done():
+		re.Equal(context.Canceled, ctx.Err())
+	default:
+		re.Fail("should not have been called")
+	}
+}
+
 func TestManager(t *testing.T) {
 	re := require.New(t)
-	ctx := context.Background()
+	ctx, cancel := context.WithCancel(context.Background())
 	manager := NewManager[int]()
 
 	re.False(manager.Exist("test-url"))
-	manager.Store(ctx, "test-url", 1)
+	manager.Store(ctx, cancel, "test-url", 1)
 	re.True(manager.Exist("test-url"))
 
 	cctx := manager.RandomlyPick()
@@ -36,19 +54,19 @@ func TestManager(t *testing.T) {
 	re.Equal(1, cctx.Stream)
 	re.Equal(cctx, manager.GetConnectionCtx("test-url"))
 
-	manager.Store(ctx, "test-url", 2)
+	manager.Store(ctx, cancel, "test-url", 2)
 	cctx = manager.RandomlyPick()
 	re.Equal("test-url", cctx.StreamURL)
 	re.Equal(1, cctx.Stream)
 	re.Equal(cctx, manager.GetConnectionCtx("test-url"))
 
-	manager.Store(ctx, "test-url", 2, true)
+	manager.Store(ctx, cancel, "test-url", 2, true)
 	cctx = manager.RandomlyPick()
 	re.Equal("test-url", cctx.StreamURL)
 	re.Equal(2, cctx.Stream)
 	re.Equal(cctx, manager.GetConnectionCtx("test-url"))
 
-	manager.Store(ctx, "test-another-url", 3)
+	manager.Store(ctx, cancel, "test-another-url", 3)
 	pickedCount := make(map[string]int)
 	for range 1000 {
 		cctx = manager.RandomlyPick()
@@ -66,14 +84,14 @@ func TestManager(t *testing.T) {
 	re.True(manager.Exist("test-another-url"))
 	re.Equal(3, manager.GetConnectionCtx("test-another-url").Stream)
 
-	manager.CleanAllAndStore(ctx, "test-url", 1)
+	manager.CleanAllAndStore(ctx, cancel, "test-url", 1)
 	re.True(manager.Exist("test-url"))
 	re.Equal(1, manager.GetConnectionCtx("test-url").Stream)
 	re.False(manager.Exist("test-another-url"))
 	re.Nil(manager.GetConnectionCtx("test-another-url"))
 
-	manager.Store(ctx, "test-another-url", 3)
-	manager.CleanAllAndStore(ctx, "test-unique-url", 4)
+	manager.Store(ctx, cancel, "test-another-url", 3)
+	manager.CleanAllAndStore(ctx, cancel, "test-unique-url", 4)
 	re.True(manager.Exist("test-unique-url"))
 	re.Equal(4, manager.GetConnectionCtx("test-unique-url").Stream)
 	re.False(manager.Exist("test-url"))
@@ -86,7 +104,7 @@ func TestManager(t *testing.T) {
 	re.Nil(manager.GetConnectionCtx("test-unique-url"))
 
 	for i := range 1000 {
-		manager.Store(ctx, fmt.Sprintf("test-url-%d", i), i)
+		manager.Store(ctx, cancel, fmt.Sprintf("test-url-%d", i), i)
 	}
 	re.Len(manager.connectionCtxs, 1000)
 	manager.ReleaseAll()
