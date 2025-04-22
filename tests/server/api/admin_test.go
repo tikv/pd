@@ -373,7 +373,7 @@ func (suite *adminTestSuite) checkRecoverAllocID(cluster *tests.TestCluster) {
 }
 
 func (suite *adminTestSuite) TestCleanPath() {
-	suite.env.RunTest(suite.checkCleanPath)
+	suite.env.RunTestInNonMicroserviceEnv(suite.checkCleanPath)
 }
 
 func (suite *adminTestSuite) checkCleanPath(cluster *tests.TestCluster) {
