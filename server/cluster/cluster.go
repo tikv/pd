@@ -1308,10 +1308,21 @@ func (c *RaftCluster) processRegionHeartbeat(ctx *core.MetaProcessContext, regio
 	}
 
 	if saveKV || needSync {
+<<<<<<< HEAD
 		select {
 		case c.changedRegions <- region:
 		default:
 		}
+=======
+		ctx.SyncRegionRunner.RunTask(
+			regionID,
+			ratelimit.SyncRegionToFollower,
+			func(context.Context) {
+				c.changedRegions <- region
+			},
+			ratelimit.WithRetained(true),
+		)
+>>>>>>> 1f565a69a (syncer: set retained=true to syncRegionRunner (#9227))
 	}
 	return nil
 }
