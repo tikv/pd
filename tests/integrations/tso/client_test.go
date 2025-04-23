@@ -509,12 +509,27 @@ func TestTSOFollowerProxyWhenLeaderChanged(t *testing.T) {
 		reqCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		defer cancel()
 		_, _, err = pdClient.GetTS(reqCtx)
-		re.ErrorContains(err, errMsg)
+		if errMsg != "" {
+			re.ErrorContains(err, errMsg)
+		} else {
+			re.NoError(err)
+		}
 	}
 	checkErrFn("rpc error")
-	// try again
 	pdCluster.WaitLeader()
+	// try again, the error is same
 	checkErrFn("rpc error")
+	// it will work when pull/9219 is merged
+	//testutil.Eventually(re, func() bool {
+	//	reqCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	//	defer cancel()
+	//	_, _, err = pdClient.GetTS(reqCtx)
+	//	if err != nil {
+	//		re.Contains(err.Error(), "pd is not leader of cluster")
+	//		return false
+	//	}
+	//	return err == nil
+	//}, testutil.WithWaitFor(time.Second))
 }
 
 func TestTSONotLeader(t *testing.T) {
