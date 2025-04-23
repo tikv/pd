@@ -97,7 +97,7 @@ func TestConfigClone(t *testing.T) {
 
 	con2.StoreIDWithRanges[1], _ = getKeyRanges([]string{"a", "b", "c", "d"})
 	con3 := con2.clone()
-	re.Equal(len(con3.getRanges(1)), len(con2.getRanges(1)))
+	re.Len(con3.getRanges(1), len(con2.getRanges(1)))
 
 	con3.StoreIDWithRanges[1][0].StartKey = []byte("aaa")
 	con4 := con3.clone()

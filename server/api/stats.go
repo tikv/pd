@@ -35,6 +35,7 @@ func newStatsHandler(svr *server.Server, rd *render.Render) *statsHandler {
 	}
 }
 
+// GetRegionStatus gets the region statistics of a specified range.
 // @Tags     stats
 // @Summary  Get region statistics of a specified range.
 // @Param    start_key  query  string  true   "Start key"

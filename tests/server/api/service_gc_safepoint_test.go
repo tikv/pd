@@ -27,6 +27,8 @@ import (
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/server/api"
+	"github.com/tikv/pd/tests"
 )
 
 type serviceGCSafepointTestSuite struct {
@@ -43,10 +45,10 @@ func TestServiceGCSafepointTestSuite(t *testing.T) {
 func (suite *serviceGCSafepointTestSuite) SetupSuite() {
 	re := suite.Require()
 	suite.svr, suite.cleanup = mustNewServer(re)
-	server.MustWaitLeader(re, []*server.Server{suite.svr})
+	tests.MustWaitLeader(re, []*server.Server{suite.svr})
 
 	addr := suite.svr.GetAddr()
-	suite.urlPrefix = fmt.Sprintf("%s%s/api/v1", addr, apiPrefix)
+	suite.urlPrefix = fmt.Sprintf("%s%s/api/v1", addr, api.APIPrefix)
 
 	mustBootstrapCluster(re, suite.svr)
 	mustPutStore(re, suite.svr, 1, metapb.StoreState_Up, metapb.NodeState_Serving, nil)
@@ -61,7 +63,7 @@ func (suite *serviceGCSafepointTestSuite) TestServiceGCSafepoint() {
 	sspURL := suite.urlPrefix + "/gc/safepoint"
 
 	storage := suite.svr.GetStorage()
-	list := &ListServiceGCSafepoint{
+	list := &api.ListServiceGCSafepoint{
 		ServiceGCSafepoints: []*endpoint.ServiceSafePoint{
 			{
 				ServiceID: "a",
@@ -91,7 +93,7 @@ func (suite *serviceGCSafepointTestSuite) TestServiceGCSafepoint() {
 	res, err := testDialClient.Get(sspURL)
 	re.NoError(err)
 	defer res.Body.Close()
-	listResp := &ListServiceGCSafepoint{}
+	listResp := &api.ListServiceGCSafepoint{}
 	err = apiutil.ReadJSON(res.Body, listResp)
 	re.NoError(err)
 	re.Equal(list, listResp)

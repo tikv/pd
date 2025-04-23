@@ -260,7 +260,7 @@ func (c *serviceClient) NeedRetry(pdErr *pdpb.Error, err error) bool {
 	if c.IsConnectedToLeader() {
 		return false
 	}
-	return !(err == nil && pdErr == nil)
+	return err != nil || pdErr != nil
 }
 
 type errFn func(*pdpb.Error) bool

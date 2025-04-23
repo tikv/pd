@@ -29,6 +29,8 @@ import (
 	"github.com/tikv/pd/pkg/storage/kv"
 	tu "github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/server/api"
+	"github.com/tikv/pd/tests"
 )
 
 type hotStatusTestSuite struct {
@@ -45,10 +47,10 @@ func TestHotStatusTestSuite(t *testing.T) {
 func (suite *hotStatusTestSuite) SetupSuite() {
 	re := suite.Require()
 	suite.svr, suite.cleanup = mustNewServer(re)
-	server.MustWaitLeader(re, []*server.Server{suite.svr})
+	tests.MustWaitLeader(re, []*server.Server{suite.svr})
 
 	addr := suite.svr.GetAddr()
-	suite.urlPrefix = fmt.Sprintf("%s%s/api/v1/hotspot", addr, apiPrefix)
+	suite.urlPrefix = fmt.Sprintf("%s%s/api/v1/hotspot", addr, api.APIPrefix)
 
 	mustBootstrapCluster(re, suite.svr)
 }

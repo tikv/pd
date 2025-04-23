@@ -23,11 +23,12 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/server/api"
 	"github.com/tikv/pd/server/config"
 )
 
 func checkSliceResponse(re *require.Assertions, body []byte, cfgs []*config.Config, unhealthy string) {
-	var got []Health
+	var got []api.Health
 	re.NoError(json.Unmarshal(body, &got))
 	re.Len(cfgs, len(got))
 
@@ -60,7 +61,7 @@ func TestHealthSlice(t *testing.T) {
 		}
 	}
 	mustBootstrapCluster(re, leader)
-	addr := leader.GetConfig().ClientUrls + apiPrefix + "/api/v1/health"
+	addr := leader.GetConfig().ClientUrls + api.APIPrefix + "/api/v1/health"
 	follower.Close()
 	resp, err := testDialClient.Get(addr)
 	re.NoError(err)

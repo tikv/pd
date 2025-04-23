@@ -459,17 +459,21 @@ func resetStoreState(re *require.Assertions, rc *cluster.RaftCluster, storeID ui
 	store := rc.GetStore(storeID)
 	re.NotNil(store)
 	newStore := store.Clone(core.SetStoreState(metapb.StoreState_Offline, false))
-	if state == metapb.StoreState_Up {
+	switch state {
+	case metapb.StoreState_Up:
 		newStore = newStore.Clone(core.SetStoreState(metapb.StoreState_Up))
-	} else if state == metapb.StoreState_Tombstone {
+	case metapb.StoreState_Tombstone:
 		newStore = newStore.Clone(core.SetStoreState(metapb.StoreState_Tombstone))
+	default:
 	}
 
 	rc.GetBasicCluster().PutStore(newStore)
-	if state == metapb.StoreState_Offline {
+	switch state {
+	case metapb.StoreState_Offline:
 		rc.SetStoreLimit(storeID, storelimit.RemovePeer, storelimit.Unlimited)
-	} else if state == metapb.StoreState_Tombstone {
+	case metapb.StoreState_Tombstone:
 		rc.RemoveStoreLimit(storeID)
+	default:
 	}
 }
 
@@ -494,10 +498,12 @@ func testStateAndLimit(re *require.Assertions, clusterID uint64, rc *cluster.Raf
 		re.NoError(err)
 		expectState := expectStates[0]
 		re.Equal(expectState, getStore(re, clusterID, grpcPDClient, storeID).GetState())
-		if expectState == metapb.StoreState_Offline {
+		switch expectState {
+		case metapb.StoreState_Offline:
 			re.True(isOKAfter)
-		} else if expectState == metapb.StoreState_Tombstone {
+		case metapb.StoreState_Tombstone:
 			re.False(isOKAfter)
+		default:
 		}
 	} else {
 		re.Error(err)
@@ -910,10 +916,12 @@ func TestConcurrentHandleRegion(t *testing.T) {
 				Version: initEpochVersion,
 			},
 		}
-		if i == 0 {
+		switch i {
+		case 0:
 			region.StartKey = []byte("")
-		} else if i == concurrent-1 {
+		case concurrent - 1:
 			region.EndKey = []byte("")
+		default:
 		}
 
 		wg.Add(1)

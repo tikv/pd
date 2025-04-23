@@ -22,6 +22,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/tikv/pd/pkg/versioninfo"
+	"github.com/tikv/pd/server/api"
 )
 
 func checkStatusResponse(re *require.Assertions, body []byte) {
@@ -38,7 +39,7 @@ func TestStatus(t *testing.T) {
 	defer clean()
 
 	for _, cfg := range cfgs {
-		addr := cfg.ClientUrls + apiPrefix + "/api/v1/status"
+		addr := cfg.ClientUrls + api.APIPrefix + "/api/v1/status"
 		resp, err := testDialClient.Get(addr)
 		re.NoError(err)
 		buf, err := io.ReadAll(resp.Body)
