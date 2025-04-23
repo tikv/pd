@@ -30,7 +30,9 @@ import (
 	"github.com/tikv/pd/pkg/schedule/types"
 	tu "github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/server/api"
 	"github.com/tikv/pd/server/config"
+	"github.com/tikv/pd/tests"
 )
 
 type diagnosticTestSuite struct {
@@ -49,12 +51,12 @@ func TestDiagnosticTestSuite(t *testing.T) {
 func (suite *diagnosticTestSuite) SetupSuite() {
 	re := suite.Require()
 	suite.svr, suite.cleanup = mustNewServer(re)
-	server.MustWaitLeader(re, []*server.Server{suite.svr})
+	tests.MustWaitLeader(re, []*server.Server{suite.svr})
 
 	addr := suite.svr.GetAddr()
-	suite.urlPrefix = fmt.Sprintf("%s%s/api/v1/schedulers/diagnostic", addr, apiPrefix)
-	suite.schedulerPrefix = fmt.Sprintf("%s%s/api/v1/schedulers", addr, apiPrefix)
-	suite.configPrefix = fmt.Sprintf("%s%s/api/v1/config", addr, apiPrefix)
+	suite.urlPrefix = fmt.Sprintf("%s%s/api/v1/schedulers/diagnostic", addr, api.APIPrefix)
+	suite.schedulerPrefix = fmt.Sprintf("%s%s/api/v1/schedulers", addr, api.APIPrefix)
+	suite.configPrefix = fmt.Sprintf("%s%s/api/v1/config", addr, api.APIPrefix)
 
 	mustBootstrapCluster(re, suite.svr)
 	mustPutStore(re, suite.svr, 1, metapb.StoreState_Up, metapb.NodeState_Serving, nil)

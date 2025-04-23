@@ -533,6 +533,9 @@ func (s *Server) Close() {
 	if s.IsKeyspaceGroupEnabled() {
 		s.keyspaceGroupManager.Close()
 	}
+	if s.tsoAllocator != nil {
+		s.tsoAllocator.Close()
+	}
 
 	if s.client != nil {
 		if err := s.client.Close(); err != nil {
@@ -1066,18 +1069,18 @@ func (s *Server) SetReplicationConfig(cfg sc.ReplicationConfig) error {
 
 		CheckInDefaultRule := func() error {
 			// replication config won't work when placement rule is enabled and exceeds one default rule
-			if !(defaultRule != nil &&
-				len(defaultRule.StartKey) == 0 && len(defaultRule.EndKey) == 0) {
+			if defaultRule == nil ||
+				len(defaultRule.StartKey) != 0 || len(defaultRule.EndKey) != 0 {
 				return errors.New("cannot update MaxReplicas, LocationLabels or IsolationLevel when placement rules feature is enabled and not only default rule exists, please update rule instead")
 			}
-			if !(defaultRule.Count == int(old.MaxReplicas) && typeutil.AreStringSlicesEqual(defaultRule.LocationLabels, []string(old.LocationLabels)) && defaultRule.IsolationLevel == old.IsolationLevel) {
+			if defaultRule.Count != int(old.MaxReplicas) || !typeutil.AreStringSlicesEqual(defaultRule.LocationLabels, []string(old.LocationLabels)) || defaultRule.IsolationLevel != old.IsolationLevel {
 				return errors.New("cannot to update replication config, the default rules do not consistent with replication config, please update rule instead")
 			}
 
 			return nil
 		}
 
-		if !(cfg.MaxReplicas == old.MaxReplicas && typeutil.AreStringSlicesEqual(cfg.LocationLabels, old.LocationLabels) && cfg.IsolationLevel == old.IsolationLevel) {
+		if cfg.MaxReplicas != old.MaxReplicas || !typeutil.AreStringSlicesEqual(cfg.LocationLabels, old.LocationLabels) || cfg.IsolationLevel != old.IsolationLevel {
 			if err := CheckInDefaultRule(); err != nil {
 				return err
 			}
@@ -1871,7 +1874,7 @@ func (s *Server) PersistFile(name string, data []byte) error {
 	}
 	log.Info("persist file", zap.String("name", name), zap.Binary("data", data))
 	path := filepath.Join(s.GetConfig().DataDir, name)
-	if !isPathInDirectory(path, s.GetConfig().DataDir) {
+	if !apiutil.IsPathInDirectory(path, s.GetConfig().DataDir) {
 		return errors.New("Invalid file path")
 	}
 	return os.WriteFile(path, data, 0644) // #nosec

@@ -172,7 +172,7 @@ func NewConfig() *Config {
 }
 
 const (
-	defaultLeaderLease             = int64(3)
+	defaultLeaderLease             = int64(5)
 	defaultCompactionMode          = "periodic"
 	defaultAutoCompactionRetention = "1h"
 	defaultQuotaBackendBytes       = typeutil.ByteSize(8 * units.GiB) // 8GB

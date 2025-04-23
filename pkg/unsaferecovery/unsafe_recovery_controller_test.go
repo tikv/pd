@@ -138,10 +138,12 @@ func applyRecoveryPlan(re *require.Assertions, storeID uint64, storeReports map[
 							peer.Role = metapb.PeerRole_Voter
 						}
 						// exit joint state
-						if peer.Role == metapb.PeerRole_DemotingVoter {
+						switch peer.Role {
+						case metapb.PeerRole_DemotingVoter:
 							peer.Role = metapb.PeerRole_Learner
-						} else if peer.Role == metapb.PeerRole_IncomingVoter {
+						case metapb.PeerRole_IncomingVoter:
 							peer.Role = metapb.PeerRole_Voter
+						default:
 						}
 					}
 					for _, failedVoter := range demote.GetFailedVoters() {

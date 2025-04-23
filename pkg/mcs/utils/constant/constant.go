@@ -24,8 +24,6 @@ const (
 	// TCPNetworkStr is the string of tcp network
 	TCPNetworkStr = "tcp"
 
-	// DefaultEnableGRPCGateway is the default value of EnableGRPCGateway
-	DefaultEnableGRPCGateway = true
 	// DefaultGRPCGracefulStopTimeout is the default timeout to wait for grpc server to gracefully stop
 	DefaultGRPCGracefulStopTimeout = 5 * time.Second
 	// DefaultHTTPGracefulShutdownTimeout is the default timeout to wait for http server to gracefully shutdown
@@ -46,9 +44,12 @@ const (
 
 	// DefaultKeyspaceID is the default key space id.
 	// Valid keyspace id range is [0, 0xFFFFFF](uint24max, or 16777215)
-	// ​0 is reserved for default keyspace with the name "DEFAULT", It's initialized when PD bootstrap
+	// 0 is reserved for default keyspace with the name "DEFAULT". It's initialized when PD bootstraps
 	// and reserved for users who haven't been assigned keyspace.
 	DefaultKeyspaceID = uint32(0)
+	// ValidKeyspaceIDMask is the mask of valid bits for keyspace ID. If any bit outside the mask is set, the keyspace
+	// ID is considered invalid and regarded as the same as NullKeyspaceID.
+	ValidKeyspaceIDMask = uint32(0xFFFFFF)
 	// NullKeyspaceID is used for api v1 or legacy path where is keyspace agnostic.
 	NullKeyspaceID = uint32(0xFFFFFFFF)
 	// DefaultKeyspaceGroupID is the default key space group id.

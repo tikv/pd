@@ -53,6 +53,7 @@ func newSchedulerHandler(svr *server.Server, r *render.Render) *schedulerHandler
 	}
 }
 
+// GetSchedulers lists all schedulers.
 // @Tags     scheduler
 // @Summary  List all created schedulers by status.
 // @Produce  json
@@ -62,7 +63,7 @@ func newSchedulerHandler(svr *server.Server, r *render.Render) *schedulerHandler
 func (h *schedulerHandler) GetSchedulers(w http.ResponseWriter, r *http.Request) {
 	status := r.URL.Query().Get("status")
 	_, needTS := r.URL.Query()["timestamp"]
-	output, err := h.Handler.GetSchedulerByStatus(status, needTS)
+	output, err := h.GetSchedulerByStatus(status, needTS)
 	if err != nil {
 		h.r.JSON(w, http.StatusInternalServerError, err.Error())
 		return
@@ -70,6 +71,7 @@ func (h *schedulerHandler) GetSchedulers(w http.ResponseWriter, r *http.Request)
 	h.r.JSON(w, http.StatusOK, output)
 }
 
+// CreateScheduler creates a scheduler.
 // FIXME: details of input json body params
 // @Tags     scheduler
 // @Summary  Create a scheduler.
@@ -245,6 +247,7 @@ func (h *schedulerHandler) CreateScheduler(w http.ResponseWriter, r *http.Reques
 	h.r.JSON(w, http.StatusOK, "The scheduler is created.")
 }
 
+// DeleteScheduler deletes a scheduler.
 // @Tags     scheduler
 // @Summary  Delete a scheduler.
 // @Param    name  path  string  true  "The name of the scheduler."
@@ -296,6 +299,7 @@ func (h *schedulerHandler) redirectSchedulerDelete(w http.ResponseWriter, name, 
 	h.r.JSON(w, resp.StatusCode, nil)
 }
 
+// PauseOrResumeScheduler pauses or resumes a scheduler.
 // FIXME: details of input json body params
 // @Tags     scheduler
 // @Summary  Pause or resume a scheduler.

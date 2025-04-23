@@ -13,6 +13,13 @@
 /pd//config get
 /pd//config save
 /pd//config watch
+/pd//gc/safe_point get
+/pd//gc/safe_point save
+/pd//gc/safe_point/service/ get
+/pd//gc/safe_point/service/a remove
+/pd//gc/safe_point/service/a save
+/pd//gc/safe_point/service/b save
+/pd//gc/safe_point/service/c save
 /pd//keyspaces/alloc_id get
 /pd//keyspaces/id/DEFAULT get
 /pd//keyspaces/id/DEFAULT save
@@ -22,6 +29,10 @@
 /pd//keyspaces/meta/ save
 /pd//leader get
 /pd//leader watch
+/pd//member//binary_version get
+/pd//member//deploy_path get
+/pd//member//git_hash get
+/pd//member//leader_priority get
 /pd//raft get
 /pd//raft save
 /pd//raft/external_timestamp get
@@ -37,6 +48,10 @@
 /pd//region_label watch
 /pd//region_label/ get
 /pd//region_label/keyspaces/ save
+/pd//region_label/rule remove
+/pd//region_label/rule save
+/pd//region_label/rule/a/b remove
+/pd//region_label/rule/a/b save
 /pd//replication_mode/dr-auto-sync get
 /pd//replication_mode/dr-auto-sync save
 /pd//rule get

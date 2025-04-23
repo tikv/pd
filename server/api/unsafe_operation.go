@@ -36,6 +36,7 @@ func newUnsafeOperationHandler(svr *server.Server, rd *render.Render) *unsafeOpe
 	}
 }
 
+// RemoveFailedStores removes failed stores unsafely.
 // @Tags     unsafe
 // @Summary  Remove failed stores unsafely.
 // @Accept   json
@@ -78,6 +79,7 @@ func (h *unsafeOperationHandler) RemoveFailedStores(w http.ResponseWriter, r *ht
 	h.rd.JSON(w, http.StatusOK, "Request has been accepted.")
 }
 
+// GetFailedStoresRemovalStatus gets the current status of failed stores removal.
 // @Tags     unsafe
 // @Summary  Show the current status of failed stores removal.
 // @Produce  json

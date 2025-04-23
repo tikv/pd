@@ -309,7 +309,7 @@ func (suite *middlewareTestSuite) TestRateLimitMiddleware() {
 	for _, s := range suite.cluster.GetServers() {
 		servers = append(servers, s.GetServer())
 	}
-	server.MustWaitLeader(re, servers)
+	tests.MustWaitLeader(re, servers)
 	leader = suite.cluster.GetLeaderServer()
 	re.True(leader.GetServer().GetServiceMiddlewarePersistOptions().IsRateLimitEnabled())
 	cfg, ok := leader.GetServer().GetRateLimitConfig().LimiterConfig["SetLogLevel"]
@@ -445,7 +445,7 @@ func (suite *middlewareTestSuite) TestAuditPrometheusBackend() {
 	for _, s := range suite.cluster.GetServers() {
 		servers = append(servers, s.GetServer())
 	}
-	server.MustWaitLeader(re, servers)
+	tests.MustWaitLeader(re, servers)
 	leader = suite.cluster.GetLeaderServer()
 
 	timeUnix = time.Now().Unix() - 20
@@ -665,7 +665,7 @@ func (suite *redirectorTestSuite) TestAllowFollowerHandle() {
 	request.Header.Add(apiutil.PDAllowFollowerHandleHeader, "true")
 	resp, err := tests.TestDialClient.Do(request)
 	re.NoError(err)
-	re.Equal("", resp.Header.Get(apiutil.PDRedirectorHeader))
+	re.Empty(resp.Header.Get(apiutil.PDRedirectorHeader))
 	defer resp.Body.Close()
 	re.Equal(http.StatusOK, resp.StatusCode)
 	_, err = io.ReadAll(resp.Body)

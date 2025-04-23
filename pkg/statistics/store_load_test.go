@@ -43,7 +43,7 @@ func TestHistoryLoads(t *testing.T) {
 		expectLoads[utils.KeyDim][i] = 2.0
 		expectLoads[utils.QueryDim][i] = 3.0
 	}
-	re.EqualValues(expectLoads, historyLoads.Get(1, rwTp, kind))
+	re.Equal(expectLoads, historyLoads.Get(1, rwTp, kind))
 
 	historyLoads = NewStoreHistoryLoads(utils.DimLen, time.Millisecond, time.Millisecond)
 	historyLoads.Add(1, rwTp, kind, loads)
