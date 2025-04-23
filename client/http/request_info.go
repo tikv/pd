@@ -58,6 +58,7 @@ const (
 	getSchedulerConfig                      = "GetSchedulerConfig"
 	createSchedulerName                     = "CreateScheduler"
 	createSchedulerNameWithInput            = "CreateSchedulerWithInput"
+	cancelSchedulerJobName                  = "CancelSchedulerJob"
 	deleteSchedulerName                     = "DeleteScheduler"
 	setSchedulerDelayName                   = "SetSchedulerDelay"
 	getAllPlacementRuleBundlesName          = "GetAllPlacementRuleBundles"
