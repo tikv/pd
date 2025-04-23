@@ -523,21 +523,21 @@ func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
 			// as proxy might fail on the previous request, and we need to return the error to client
 
 			// Create a channel to receive the stream data or error asynchronously
-			streamCh := make(chan *pdpb.TsoRequest)
-			streamErrCh := make(chan error)
+			streamCh := make(chan *pdpb.TsoRequest, 1)
+			streamErrCh := make(chan error, 1)
 			go func() {
 				req, err := stream.Recv()
 				if err != nil {
 					streamErrCh <- err
-					return
+				} else {
+					streamCh <- req
 				}
-				streamCh <- req
 			}()
 
 			// Wait for either stream data or error from tso proxy
 			select {
 			case <-tsoRequestProxyCtx.Done():
-				err = tsoRequestProxyCtx.Err()
+				err = context.Cause(tsoRequestProxyCtx)
 			case err = <-streamErrCh:
 			case req := <-streamCh:
 				request = req
@@ -563,8 +563,7 @@ func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
 			}
 
 			tsoRequest := tsoutil.NewPDProtoRequest(forwardedHost, clientConn, request, stream)
-			// don't pass a stream context here as dispatcher serves multiple streams
-			tsoRequestProxyCtx = s.tsoDispatcher.DispatchRequest(s.ctx, tsoRequest, s.pdProtoFactory, s.tsoPrimaryWatcher)
+			tsoRequestProxyCtx = s.tsoDispatcher.DispatchRequest(ctx, s.ctx, tsoRequest, s.pdProtoFactory, s.tsoPrimaryWatcher)
 			continue
 		}
 

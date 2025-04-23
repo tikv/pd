@@ -71,28 +71,33 @@ func NewTSODispatcher(tsoProxyHandleDuration, tsoProxyBatchSize prometheus.Histo
 
 // DispatchRequest is the entry point for dispatching/forwarding a tso request to the destination host
 func (s *TSODispatcher) DispatchRequest(
-	ctx context.Context,
+	streamCtx context.Context,
+	serverCtx context.Context,
 	req Request,
 	tsoProtoFactory ProtoFactory,
 	tsoPrimaryWatchers ...*etcdutil.LoopWatcher) context.Context {
 	key := req.getForwardedHost()
 	val, loaded := s.dispatchChs.Load(key)
 	if !loaded {
-		val = tsoRequestProxyQueue{}
+		val = tsoRequestProxyQueue{requestCh: make(chan Request, maxMergeRequests+1)}
 		val, loaded = s.dispatchChs.LoadOrStore(key, val)
 	}
 	tsoQueue := val.(tsoRequestProxyQueue)
 	if !loaded {
 		log.Info("start new tso proxy dispatcher", zap.String("forwarded-host", req.getForwardedHost()))
 		tsDeadlineCh := make(chan *TSDeadline, 1)
-		dispatcherCtx, ctxCancel := context.WithCancelCause(ctx)
+		dispatcherCtx, ctxCancel := context.WithCancelCause(serverCtx)
 		tsoQueue.ctx = dispatcherCtx
 		tsoQueue.cancel = ctxCancel
 		go s.dispatch(tsoQueue, tsoProtoFactory, req.getForwardedHost(), req.getClientConn(), tsDeadlineCh, tsoPrimaryWatchers...)
 		go WatchTSDeadline(dispatcherCtx, tsDeadlineCh)
 	}
-	tsoQueue.requestCh <- req
-	return tsoQueue.ctx
+	select {
+	case tsoQueue.requestCh <- req:
+		return tsoQueue.ctx
+	case <-streamCtx.Done():
+		return tsoQueue.ctx
+	}
 }
 
 func (s *TSODispatcher) dispatch(
@@ -133,7 +138,13 @@ func (s *TSODispatcher) dispatch(
 			}
 			done := make(chan struct{})
 			dl := NewTSDeadline(DefaultTSOProxyTimeout, done, cancel)
-			tsDeadlineCh <- dl
+			select {
+			case tsDeadlineCh <- dl:
+			case <-tsoQueue.ctx.Done():
+				log.Info("close tso proxy as parent context is completed")
+				return
+			}
+
 			err = s.processRequests(forwardStream, requests[:pendingTSOReqCount])
 			close(done)
 			if err != nil {
