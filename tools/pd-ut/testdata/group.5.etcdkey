@@ -21,6 +21,8 @@
 /pd//gc/safe_point/service/b save
 /pd//gc/safe_point/service/c save
 /pd//keyspaces/alloc_id get
+/pd//keyspaces/id/ get
+/pd//keyspaces/id/ save
 /pd//keyspaces/id/DEFAULT get
 /pd//keyspaces/id/DEFAULT save
 /pd//keyspaces/id/test_keyspace_ get
