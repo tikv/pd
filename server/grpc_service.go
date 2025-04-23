@@ -496,9 +496,9 @@ func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
 
 	var (
 		// The following are tso forward stream related variables.
-		tsoRequestProxyQueue context.Context
-		forwarder            = newTSOForwarder(stream)
-		tsoStreamErr         error
+		tsoRequestProxyCtx context.Context
+		forwarder          = newTSOForwarder(stream)
+		tsoStreamErr       error
 	)
 
 	defer func() {
@@ -511,10 +511,12 @@ func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
 	ctx, cancel := context.WithCancel(stream.Context())
 	defer cancel()
 	for {
-		var request *pdpb.TsoRequest
-		var err error
+		var (
+			request *pdpb.TsoRequest
+			err     error
+		)
 
-		if tsoRequestProxyQueue == nil {
+		if tsoRequestProxyCtx == nil {
 			request, err = stream.Recv()
 		} else {
 			// if we forward requests to TSO proxy we can't block on the next request in the stream
@@ -534,8 +536,8 @@ func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
 
 			// Wait for either stream data or error from tso proxy
 			select {
-			case <-tsoRequestProxyQueue.Done():
-				err = tsoRequestProxyQueue.Err()
+			case <-tsoRequestProxyCtx.Done():
+				err = tsoRequestProxyCtx.Err()
 			case err = <-streamErrCh:
 			case req := <-streamCh:
 				request = req
@@ -562,7 +564,7 @@ func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
 
 			tsoRequest := tsoutil.NewPDProtoRequest(forwardedHost, clientConn, request, stream)
 			// don't pass a stream context here as dispatcher serves multiple streams
-			tsoRequestProxyQueue = s.tsoDispatcher.DispatchRequest(s.ctx, tsoRequest, s.pdProtoFactory, s.tsoPrimaryWatcher)
+			tsoRequestProxyCtx = s.tsoDispatcher.DispatchRequest(s.ctx, tsoRequest, s.pdProtoFactory, s.tsoPrimaryWatcher)
 			continue
 		}
 

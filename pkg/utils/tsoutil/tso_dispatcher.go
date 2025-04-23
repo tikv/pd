@@ -37,8 +37,8 @@ const (
 	maxMergeRequests = 10000
 	// DefaultTSOProxyTimeout defines the default timeout value of TSP Proxying
 	DefaultTSOProxyTimeout = 3 * time.Second
-	// TSOProxyStreamIdleTimeout defines how long Proxy stream will live if no request is received
-	TSOProxyStreamIdleTimeout = 5 * time.Minute
+	// tsoProxyStreamIdleTimeout defines how long Proxy stream will live if no request is received
+	tsoProxyStreamIdleTimeout = 5 * time.Minute
 )
 
 type tsoResp interface {
@@ -46,9 +46,9 @@ type tsoResp interface {
 }
 
 type tsoRequestProxyQueue struct {
-	request chan Request
-	ctx     context.Context
-	cancel  context.CancelCauseFunc
+	requestCh chan Request
+	ctx       context.Context
+	cancel    context.CancelCauseFunc
 }
 
 // TSODispatcher dispatches the TSO requests to the corresponding forwarding TSO channels.
@@ -83,7 +83,7 @@ func (s *TSODispatcher) DispatchRequest(
 	}
 	tsoQueue := val.(tsoRequestProxyQueue)
 	if !loaded {
-		log.Info("Start new tso proxy dispatcher", zap.String("forwardedHost", req.getForwardedHost()))
+		log.Info("start new tso proxy dispatcher", zap.String("forwarded-host", req.getForwardedHost()))
 		tsDeadlineCh := make(chan *TSDeadline, 1)
 		dispatcherCtx, ctxCancel := context.WithCancelCause(ctx)
 		tsoQueue.ctx = dispatcherCtx
@@ -91,7 +91,7 @@ func (s *TSODispatcher) DispatchRequest(
 		go s.dispatch(tsoQueue, tsoProtoFactory, req.getForwardedHost(), req.getClientConn(), tsDeadlineCh, tsoPrimaryWatchers...)
 		go WatchTSDeadline(dispatcherCtx, tsDeadlineCh)
 	}
-	tsoQueue.request <- req
+	tsoQueue.requestCh <- req
 	return tsoQueue.ctx
 }
 
@@ -110,22 +110,26 @@ func (s *TSODispatcher) dispatch(
 		log.Error("create tso forwarding stream error",
 			zap.String("forwarded-host", forwardedHost),
 			errs.ZapError(errs.ErrGRPCCreateStream, err))
-		tsoQueue.cancel(err)
+		if err != nil {
+			tsoQueue.cancel(err)
+		} else {
+			tsoQueue.cancel(errors.New("create tso forwarding stream error: empty stream"))
+		}
 		return
 	}
 	defer cancel()
 
 	requests := make([]Request, maxMergeRequests+1)
 	needUpdateServicePrimaryAddr := len(tsoPrimaryWatchers) > 0 && tsoPrimaryWatchers[0] != nil
+	noProxyRequestsTimer := time.NewTimer(tsoProxyStreamIdleTimeout)
 	for {
-		noProxyRequestsTimer := time.NewTimer(TSOProxyStreamIdleTimeout)
+		noProxyRequestsTimer.Reset(tsoProxyStreamIdleTimeout)
 		select {
-		case first := <-tsoQueue.request:
-			noProxyRequestsTimer.Reset(TSOProxyStreamIdleTimeout)
-			pendingTSOReqCount := len(tsoQueue.request) + 1
+		case first := <-tsoQueue.requestCh:
+			pendingTSOReqCount := len(tsoQueue.requestCh) + 1
 			requests[0] = first
 			for i := 1; i < pendingTSOReqCount; i++ {
-				requests[i] = <-tsoQueue.request
+				requests[i] = <-tsoQueue.requestCh
 			}
 			done := make(chan struct{})
 			dl := NewTSDeadline(DefaultTSOProxyTimeout, done, cancel)
@@ -142,8 +146,11 @@ func (s *TSODispatcher) dispatch(
 				tsoQueue.cancel(err)
 				return
 			}
+		case <-tsoQueue.ctx.Done():
+			log.Info("close tso proxy as parent context is completed")
+			return
 		case <-noProxyRequestsTimer.C:
-			log.Info("Close tso proxy as it is idle for a while")
+			log.Info("close tso proxy as it is idle for a while")
 			tsoQueue.cancel(errors.New("TSOProxyStreamIdleTimeout"))
 			return
 		}
