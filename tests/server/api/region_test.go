@@ -53,64 +53,17 @@ func TestRegionTestSuite(t *testing.T) {
 	suite.Run(t, new(regionTestSuite))
 }
 
-func (suite *regionTestSuite) SetupSuite() {
+func (suite *regionTestSuite) SetupTest() {
+	// use a new environment to avoid affecting other tests
 	suite.env = tests.NewSchedulingTestEnvironment(suite.T())
 }
 
-func (suite *regionTestSuite) TearDownSuite() {
+func (suite *regionTestSuite) TearDownTest() {
 	suite.env.Cleanup()
 }
 
-func (suite *regionTestSuite) TearDownTest() {
-	cleanFunc := func(cluster *tests.TestCluster) {
-		// clean region cache
-		leader := cluster.GetLeaderServer()
-		re := suite.Require()
-		pdAddr := cluster.GetConfig().GetClientURL()
-		for _, region := range leader.GetRegions() {
-			url := fmt.Sprintf("%s/pd/api/v1/admin/cache/region/%d", pdAddr, region.GetID())
-			err := tu.CheckDelete(tests.TestDialClient, url, tu.StatusOK(re))
-			re.NoError(err)
-		}
-		re.Empty(leader.GetRegions())
-		// clean rules
-		def := placement.GroupBundle{
-			ID: "pd",
-			Rules: []*placement.Rule{
-				{GroupID: "pd", ID: "default", Role: "voter", Count: 3},
-			},
-		}
-		data, err := json.Marshal([]placement.GroupBundle{def})
-		re.NoError(err)
-		urlPrefix := cluster.GetLeaderServer().GetAddr()
-		err = tu.CheckPostJSON(tests.TestDialClient, urlPrefix+"/pd/api/v1/config/placement-rule", data, tu.StatusOK(re))
-		re.NoError(err)
-		// clean stores
-		for _, store := range leader.GetStores() {
-			re.NoError(cluster.GetLeaderServer().GetRaftCluster().RemoveStore(store.GetId(), true))
-			re.NoError(cluster.GetLeaderServer().GetRaftCluster().BuryStore(store.GetId(), true))
-		}
-		re.NoError(cluster.GetLeaderServer().GetRaftCluster().RemoveTombStoneRecords())
-		re.Empty(leader.GetStores())
-		tu.Eventually(re, func() bool {
-			if sche := cluster.GetSchedulingPrimaryServer(); sche != nil {
-				for _, s := range sche.GetBasicCluster().GetStores() {
-					if s.GetState() != metapb.StoreState_Tombstone {
-						return false
-					}
-				}
-			}
-			return true
-		})
-	}
-	suite.env.RunTest(cleanFunc)
-}
-
 func (suite *regionTestSuite) TestSplitRegions() {
-	// use a new environment to avoid affecting other tests
-	env := tests.NewSchedulingTestEnvironment(suite.T())
-	env.RunTest(suite.checkSplitRegions)
-	env.Cleanup()
+	suite.env.RunTest(suite.checkSplitRegions)
 }
 
 func (suite *regionTestSuite) checkSplitRegions(cluster *tests.TestCluster) {
@@ -227,10 +180,7 @@ func (suite *regionTestSuite) checkAccelerateRegionsScheduleInRanges(cluster *te
 }
 
 func (suite *regionTestSuite) TestScatterRegions() {
-	// use a new environment to avoid affecting other tests
-	env := tests.NewSchedulingTestEnvironment(suite.T())
-	env.RunTest(suite.checkScatterRegions)
-	env.Cleanup()
+	suite.env.RunTest(suite.checkScatterRegions)
 }
 
 func (suite *regionTestSuite) checkScatterRegions(cluster *tests.TestCluster) {
@@ -449,10 +399,7 @@ func pauseAllCheckers(re *require.Assertions, cluster *tests.TestCluster) {
 }
 
 func (suite *regionTestSuite) TestRegion() {
-	// use a new environment to avoid affecting other tests
-	env := tests.NewSchedulingTestEnvironment(suite.T())
-	env.RunTest(suite.checkRegion)
-	env.Cleanup()
+	suite.env.RunTest(suite.checkRegion)
 }
 
 func (suite *regionTestSuite) checkRegion(cluster *tests.TestCluster) {
@@ -507,10 +454,7 @@ func (suite *regionTestSuite) checkRegion(cluster *tests.TestCluster) {
 }
 
 func (suite *regionTestSuite) TestRegionCheck() {
-	// use a new environment to avoid affecting other tests
-	env := tests.NewSchedulingTestEnvironment(suite.T())
-	env.RunTest(suite.checkRegionCheck)
-	env.Cleanup()
+	suite.env.RunTest(suite.checkRegionCheck)
 }
 
 func (suite *regionTestSuite) checkRegionCheck(cluster *tests.TestCluster) {
@@ -611,10 +555,7 @@ func (suite *regionTestSuite) checkRegionCheck(cluster *tests.TestCluster) {
 }
 
 func (suite *regionTestSuite) TestRegions() {
-	// use a new environment to avoid affecting other tests
-	env := tests.NewSchedulingTestEnvironment(suite.T())
-	env.RunTest(suite.checkRegions)
-	env.Cleanup()
+	suite.env.RunTest(suite.checkRegions)
 }
 
 func (suite *regionTestSuite) checkRegions(cluster *tests.TestCluster) {
@@ -651,10 +592,7 @@ func (suite *regionTestSuite) checkRegions(cluster *tests.TestCluster) {
 }
 
 func (suite *regionTestSuite) TestStoreRegions() {
-	// use a new environment to avoid affecting other tests
-	env := tests.NewSchedulingTestEnvironment(suite.T())
-	env.RunTest(suite.checkStoreRegions)
-	env.Cleanup()
+	suite.env.RunTest(suite.checkStoreRegions)
 }
 
 func (suite *regionTestSuite) checkStoreRegions(cluster *tests.TestCluster) {
@@ -698,10 +636,7 @@ func (suite *regionTestSuite) checkStoreRegions(cluster *tests.TestCluster) {
 }
 
 func (suite *regionTestSuite) TestTop() {
-	// use a new environment to avoid affecting other tests
-	env := tests.NewSchedulingTestEnvironment(suite.T())
-	env.RunTest(suite.checkTop)
-	env.Cleanup()
+	suite.env.RunTest(suite.checkTop)
 }
 
 func (suite *regionTestSuite) checkTop(cluster *tests.TestCluster) {
@@ -760,10 +695,7 @@ func checkTopRegions(re *require.Assertions, url string, regionIDs []uint64) {
 }
 
 func (suite *regionTestSuite) TestRegionsWithKillRequest() {
-	// use a new environment to avoid affecting other tests
-	env := tests.NewSchedulingTestEnvironment(suite.T())
-	env.RunTest(suite.checkRegionsWithKillRequest)
-	env.Cleanup()
+	suite.env.RunTest(suite.checkRegionsWithKillRequest)
 }
 
 func (suite *regionTestSuite) checkRegionsWithKillRequest(cluster *tests.TestCluster) {
@@ -806,10 +738,7 @@ func (suite *regionTestSuite) checkRegionsWithKillRequest(cluster *tests.TestClu
 }
 
 func (suite *regionTestSuite) TestRegionKey() {
-	// use a new environment to avoid affecting other tests
-	env := tests.NewSchedulingTestEnvironment(suite.T())
-	env.RunTest(suite.checkRegionKey)
-	env.Cleanup()
+	suite.env.RunTest(suite.checkRegionKey)
 }
 
 func (suite *regionTestSuite) checkRegionKey(cluster *tests.TestCluster) {
@@ -826,10 +755,7 @@ func (suite *regionTestSuite) checkRegionKey(cluster *tests.TestCluster) {
 }
 
 func (suite *regionTestSuite) TestScanRegionByKeys() {
-	// use a new environment to avoid affecting other tests
-	env := tests.NewSchedulingTestEnvironment(suite.T())
-	env.RunTest(suite.checkScanRegionByKeys)
-	env.Cleanup()
+	suite.env.RunTest(suite.checkScanRegionByKeys)
 }
 
 func (suite *regionTestSuite) checkScanRegionByKeys(cluster *tests.TestCluster) {
@@ -939,10 +865,7 @@ func (suite *regionTestSuite) checkScanRegionByKeys(cluster *tests.TestCluster) 
 }
 
 func (suite *regionTestSuite) TestRegionRangeHoles() {
-	// use a new environment to avoid affecting other tests
-	env := tests.NewSchedulingTestEnvironment(suite.T())
-	env.RunTest(suite.checkRegionRangeHoles)
-	env.Cleanup()
+	suite.env.RunTest(suite.checkRegionRangeHoles)
 }
 
 func (suite *regionTestSuite) checkRegionRangeHoles(cluster *tests.TestCluster) {
