@@ -21,19 +21,67 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/suite"
 
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/api"
-	"github.com/tikv/pd/server/config"
+	"github.com/tikv/pd/tests"
 )
 
-func checkSliceResponse(re *require.Assertions, body []byte, cfgs []*config.Config, unhealthy string) {
+type healthTestSuite struct {
+	suite.Suite
+	env *tests.SchedulingTestEnvironment
+}
+
+func TestHealthTestSuite(t *testing.T) {
+	suite.Run(t, new(healthTestSuite))
+}
+
+func (suite *healthTestSuite) SetupSuite() {
+	suite.env = tests.NewSchedulingTestEnvironment(suite.T())
+	suite.env.PDCount = 3
+}
+
+func (suite *healthTestSuite) TearDownSuite() {
+	suite.env.Cleanup()
+}
+
+func (suite *healthTestSuite) TestHealthSlice() {
+	suite.env.RunTest(suite.checkHealthSlice)
+}
+
+func (suite *healthTestSuite) checkHealthSlice(cluster *tests.TestCluster) {
+	re := suite.Require()
+	servers := cluster.GetServers()
+
+	var leader, follower *server.Server
+
+	for _, server := range servers {
+		svr := server.GetServer()
+		if !svr.IsClosed() && svr.GetMember().IsLeader() {
+			leader = svr
+		} else {
+			follower = svr
+		}
+	}
+	addr := leader.GetAddr() + "/pd/api/v1/health"
+	follower.Close()
+	resp, err := testDialClient.Get(addr)
+	re.NoError(err)
+	defer resp.Body.Close()
+	buf, err := io.ReadAll(resp.Body)
+	re.NoError(err)
+	checkSliceResponse(re, buf, servers, follower.GetConfig().Name)
+}
+
+func checkSliceResponse(re *require.Assertions, body []byte, servers map[string]*tests.TestServer, unhealthy string) {
 	var got []api.Health
 	re.NoError(json.Unmarshal(body, &got))
-	re.Len(cfgs, len(got))
+	re.Len(servers, len(got))
 
 	for _, h := range got {
-		for _, cfg := range cfgs {
+		for _, server := range servers {
+			cfg := server.GetConfig()
 			if h.Name != cfg.Name {
 				continue
 			}
@@ -45,28 +93,4 @@ func checkSliceResponse(re *require.Assertions, body []byte, cfgs []*config.Conf
 		}
 		re.True(h.Health)
 	}
-}
-
-func TestHealthSlice(t *testing.T) {
-	re := require.New(t)
-	cfgs, svrs, clean := mustNewCluster(re, 3)
-	defer clean()
-	var leader, follower *server.Server
-
-	for _, svr := range svrs {
-		if !svr.IsClosed() && svr.GetMember().IsLeader() {
-			leader = svr
-		} else {
-			follower = svr
-		}
-	}
-	mustBootstrapCluster(re, leader)
-	addr := leader.GetConfig().ClientUrls + api.APIPrefix + "/api/v1/health"
-	follower.Close()
-	resp, err := testDialClient.Get(addr)
-	re.NoError(err)
-	defer resp.Body.Close()
-	buf, err := io.ReadAll(resp.Body)
-	re.NoError(err)
-	checkSliceResponse(re, buf, cfgs, follower.GetConfig().Name)
 }
