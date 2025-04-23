@@ -484,6 +484,39 @@ func (suite *tsoClientTestSuite) TestGetTSWhileResettingTSOClient() {
 	re.NoError(failpoint.Disable("github.com/tikv/pd/client/clients/tso/delayDispatchTSORequest"))
 }
 
+func TestTSOFollowerProxyWhenLeaderChanged(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	pdCluster, err := tests.NewTestCluster(ctx, 3)
+	re.NoError(err)
+	defer pdCluster.Destroy()
+	err = pdCluster.RunInitialServers()
+	re.NoError(err)
+	leaderName := pdCluster.WaitLeader()
+	re.NotEmpty(leaderName)
+	pdLeader := pdCluster.GetServer(leaderName)
+	backendEndpoints := pdLeader.GetAddr()
+	pdClient, err := pd.NewClientWithContext(context.Background(),
+		caller.TestComponent,
+		[]string{backendEndpoints}, pd.SecurityOption{}, opt.WithMaxErrorRetry(1))
+	re.NoError(err)
+	defer pdClient.Close()
+	re.NoError(pdClient.UpdateOption(opt.EnableTSOFollowerProxy, true))
+	// client can get ts response after pd leader changed
+	re.NoError(pdLeader.ResignLeader())
+	checkErrFn := func(errMsg string) {
+		reqCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+		_, _, err = pdClient.GetTS(reqCtx)
+		re.ErrorContains(err, errMsg)
+	}
+	checkErrFn("rpc error")
+	// try again
+	pdCluster.WaitLeader()
+	checkErrFn("rpc error")
+}
+
 func TestTSONotLeader(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
