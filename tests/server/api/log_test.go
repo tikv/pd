@@ -16,7 +16,6 @@ package api
 
 import (
 	"encoding/json"
-	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/suite"
@@ -24,16 +23,12 @@ import (
 	"github.com/pingcap/log"
 
 	tu "github.com/tikv/pd/pkg/utils/testutil"
-	"github.com/tikv/pd/server"
-	"github.com/tikv/pd/server/api"
 	"github.com/tikv/pd/tests"
 )
 
 type logTestSuite struct {
 	suite.Suite
-	svr       *server.Server
-	cleanup   tu.CleanupFunc
-	urlPrefix string
+	env *tests.SchedulingTestEnvironment
 }
 
 func TestLogTestSuite(t *testing.T) {
@@ -41,26 +36,26 @@ func TestLogTestSuite(t *testing.T) {
 }
 
 func (suite *logTestSuite) SetupSuite() {
-	re := suite.Require()
-	suite.svr, suite.cleanup = mustNewServer(re)
-	tests.MustWaitLeader(re, []*server.Server{suite.svr})
-
-	addr := suite.svr.GetAddr()
-	suite.urlPrefix = fmt.Sprintf("%s%s/api/v1/admin", addr, api.APIPrefix)
-
-	mustBootstrapCluster(re, suite.svr)
+	suite.env = tests.NewSchedulingTestEnvironment(suite.T())
 }
 
 func (suite *logTestSuite) TearDownSuite() {
-	suite.cleanup()
+	suite.env.Cleanup()
 }
 
 func (suite *logTestSuite) TestSetLogLevel() {
+	suite.env.RunTest(suite.checkSetLogLevel)
+}
+
+func (suite *logTestSuite) checkSetLogLevel(cluster *tests.TestCluster) {
 	re := suite.Require()
+	leader := cluster.GetLeaderServer()
+	urlPrefix := leader.GetAddr() + "/pd/api/v1"
+
 	level := "error"
 	data, err := json.Marshal(level)
 	re.NoError(err)
-	err = tu.CheckPostJSON(testDialClient, suite.urlPrefix+"/log", data, tu.StatusOK(re))
+	err = tu.CheckPostJSON(testDialClient, urlPrefix+"/admin/log", data, tu.StatusOK(re))
 	re.NoError(err)
 	re.Equal(level, log.GetLevel().String())
 }
