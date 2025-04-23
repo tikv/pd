@@ -606,7 +606,7 @@ func (suite *httpClientTestSuite) TestSchedulers() {
 	const schedulerName2 = "balance-range-scheduler"
 	input = map[string]any{
 		"engine":    "tikv",
-		"rule":      "leader",
+		"rule":      "leader-scatter",
 		"start-key": "100",
 		"end-key":   "200",
 		"alias":     "test",

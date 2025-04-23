@@ -364,12 +364,12 @@ func (r *RegionInfo) GetPeer(peerID uint64) *metapb.Peer {
 type Rule int
 
 const (
-	// Leader is the leader of the region.
-	Leader Rule = iota
-	// Peer is the all the peers of the region.
-	Peer
-	// Learner is the learner of the region.
-	Learner
+	// LeaderScatter scatter the leader of the region.
+	LeaderScatter Rule = iota
+	// PeerScatter scatter all the peers of the region.
+	PeerScatter
+	// LearnerScatter is the learner of the region.
+	LearnerScatter
 	// Unknown is the unknown rule of the region include witness.
 	Unknown
 )
@@ -377,12 +377,12 @@ const (
 // String returns the string value of the rule.
 func (r *Rule) String() string {
 	switch *r {
-	case Leader:
-		return "leader"
-	case Peer:
-		return "peer"
-	case Learner:
-		return "learner"
+	case LeaderScatter:
+		return "leader-scatter"
+	case PeerScatter:
+		return "peer-scatter"
+	case LearnerScatter:
+		return "learner-scatter"
 	default:
 		return "unknown"
 	}
@@ -391,12 +391,12 @@ func (r *Rule) String() string {
 // NewRule creates a new rule.
 func NewRule(role string) Rule {
 	switch role {
-	case "leader":
-		return Leader
-	case "peer":
-		return Peer
-	case "learner":
-		return Learner
+	case "leader-scatter":
+		return LeaderScatter
+	case "peer-scatter":
+		return PeerScatter
+	case "learner-scatter":
+		return LearnerScatter
 	default:
 		return Unknown
 	}
@@ -411,12 +411,12 @@ func (r *Rule) MarshalJSON() ([]byte, error) {
 func (r *Rule) UnmarshalJSON(data []byte) error {
 	s := string(data)
 	switch s {
-	case `"leader"`:
-		*r = Leader
-	case `"peer"`:
-		*r = Peer
-	case `"learner"`:
-		*r = Learner
+	case `"leader-scatter"`:
+		*r = LearnerScatter
+	case `"peer-scatter"`:
+		*r = PeerScatter
+	case `"learner-scatter"`:
+		*r = LeaderScatter
 	default:
 		*r = Unknown
 	}
@@ -426,13 +426,12 @@ func (r *Rule) UnmarshalJSON(data []byte) error {
 // GetPeersByRule returns the peers with specified rule.
 func (r *RegionInfo) GetPeersByRule(rule Rule) []*metapb.Peer {
 	switch rule {
-	case Leader:
+	case LeaderScatter:
 		return []*metapb.Peer{r.GetLeader()}
-	case Peer:
+	case PeerScatter:
 		return r.GetPeers()
-	case Learner:
-		learners := r.GetLearners()
-		return learners
+	case LearnerScatter:
+		return r.GetLearners()
 	default:
 		return nil
 	}
@@ -576,9 +575,9 @@ func (r *RegionInfo) GetNonWitnessVoters() map[uint64]*metapb.Peer {
 // store as any other followers of the another specified region.
 func (r *RegionInfo) GetDiffFollowers(other *RegionInfo) []*metapb.Peer {
 	res := make([]*metapb.Peer, 0, len(r.meta.Peers))
-	for _, p := range r.GetPeers() {
+	for _, p := range r.GetFollowers() {
 		diff := true
-		for _, o := range other.GetPeers() {
+		for _, o := range other.GetFollowers() {
 			if p.GetStoreId() == o.GetStoreId() {
 				diff = false
 				break

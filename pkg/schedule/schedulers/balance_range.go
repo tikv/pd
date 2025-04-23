@@ -400,11 +400,11 @@ func (s *balanceRangeScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) 
 			break
 		}
 		switch job.Rule {
-		case core.Leader:
+		case core.LeaderScatter:
 			plan.region = filter.SelectOneRegion(cluster.RandLeaderRegions(plan.sourceStoreID(), job.Ranges), nil, baseRegionFilters...)
-		case core.Learner:
+		case core.LearnerScatter:
 			plan.region = filter.SelectOneRegion(cluster.RandLearnerRegions(plan.sourceStoreID(), job.Ranges), nil, baseRegionFilters...)
-		case core.Peer:
+		case core.PeerScatter:
 			plan.region = filter.SelectOneRegion(cluster.RandFollowerRegions(plan.sourceStoreID(), job.Ranges), nil, baseRegionFilters...)
 			if plan.region == nil {
 				plan.region = filter.SelectOneRegion(cluster.RandLeaderRegions(plan.sourceStoreID(), job.Ranges), nil, baseRegionFilters...)
@@ -442,7 +442,7 @@ func (s *balanceRangeScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) 
 // transferPeer selects the best store to create a new peer to replace the old peer.
 func (s *balanceRangeScheduler) transferPeer(plan *balanceRangeSchedulerPlan, dstStores []*core.StoreInfo) *operator.Operator {
 	excludeTargets := plan.region.GetStoreIDs()
-	if plan.job.Rule == core.Leader {
+	if plan.job.Rule == core.LeaderScatter {
 		excludeTargets = make(map[uint64]struct{})
 		excludeTargets[plan.region.GetLeader().GetStoreId()] = struct{}{}
 	}
@@ -468,7 +468,7 @@ func (s *balanceRangeScheduler) transferPeer(plan *balanceRangeSchedulerPlan, ds
 
 		oldPeer := plan.region.GetStorePeer(sourceID)
 		exist := false
-		if plan.job.Rule == core.Leader {
+		if plan.job.Rule == core.LeaderScatter {
 			peers := plan.region.GetPeers()
 			for _, peer := range peers {
 				if peer.GetStoreId() == targetID {

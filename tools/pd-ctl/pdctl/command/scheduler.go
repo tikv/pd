@@ -379,7 +379,7 @@ func NewBalanceWitnessSchedulerCommand() *cobra.Command {
 func NewBalanceRangeSchedulerCommand() *cobra.Command {
 	// todo: add deprecated warning if sql support
 	c := &cobra.Command{
-		Use:   "balance-range-scheduler [--format=raw|encode|hex] <engine> <role> <alias> <start_key> <end_key>",
+		Use:   "balance-range-scheduler [--format=raw|encode|hex] <engine> <rule> <alias> <start_key> <end_key>",
 		Short: "add a scheduler to balance region for given range",
 		Run:   addSchedulerForBalanceRangeCommandFunc,
 	}

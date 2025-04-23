@@ -565,7 +565,7 @@ func schedulersRegister() {
 			}
 			rule := core.NewRule(ruleString)
 			if rule == core.Unknown {
-				return errs.ErrQueryUnescape.FastGenByArgs("role")
+				return errs.ErrQueryUnescape.FastGenByArgs("rule must be leader-scatter, peer-scatter, learner-scatter")
 			}
 			engine, err := url.QueryUnescape(args[1])
 			if err != nil {

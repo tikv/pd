@@ -544,7 +544,7 @@ func (suite *schedulerTestSuite) checkSchedulerConfig(cluster *pdTests.TestClust
 	// test balance key range scheduler
 	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "add", "balance-range-scheduler"}, nil)
 	re.NotContains(echo, "Success!")
-	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "add", "balance-range-scheduler", "--format=raw", "tiflash", "learner", "test", "a", "b"}, nil)
+	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "add", "balance-range-scheduler", "--format=raw", "tiflash", "learner-scatter", "test", "a", "b"}, nil)
 	re.Contains(echo, "Success!")
 	var rangeConf []map[string]any
 	var jobConf map[string]any
@@ -554,7 +554,7 @@ func (suite *schedulerTestSuite) checkSchedulerConfig(cluster *pdTests.TestClust
 			return false
 		}
 		jobConf = rangeConf[0]
-		return jobConf["rule"] == "learner" && jobConf["engine"] == "tiflash" && jobConf["alias"] == "test"
+		return jobConf["rule"] == "learner-scatter" && jobConf["engine"] == "tiflash" && jobConf["alias"] == "test"
 	})
 	re.Equal(float64(time.Hour.Nanoseconds()), jobConf["timeout"])
 	re.Equal("running", jobConf["status"])
@@ -562,7 +562,7 @@ func (suite *schedulerTestSuite) checkSchedulerConfig(cluster *pdTests.TestClust
 	re.Equal(core.HexRegionKeyStr([]byte("a")), ranges["start-key"])
 	re.Equal(core.HexRegionKeyStr([]byte("b")), ranges["end-key"])
 
-	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "add", "balance-range-scheduler", "--format=raw", "tiflash", "learner", "learner", "a", "b"}, nil)
+	echo = mustExec(re, cmd, []string{"-u", pdAddr, "scheduler", "add", "balance-range-scheduler", "--format=raw", "tiflash", "learner-scatter", "learner", "a", "b"}, nil)
 	re.Contains(echo, "Success!")
 	testutil.Eventually(re, func() bool {
 		mightExec(re, cmd, []string{"-u", pdAddr, "scheduler", "config", "balance-range-scheduler"}, &rangeConf)
