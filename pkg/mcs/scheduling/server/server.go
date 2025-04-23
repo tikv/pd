@@ -17,17 +17,13 @@ package server
 import (
 	"context"
 	"net/http"
-	"os"
-	"os/signal"
 	"runtime"
 	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
-	"syscall"
 	"time"
 
-	grpcprometheus "github.com/grpc-ecosystem/go-grpc-prometheus"
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -44,11 +40,11 @@ import (
 	"github.com/tikv/pd/pkg/cache"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/mcs/common"
 	"github.com/tikv/pd/pkg/mcs/discovery"
 	"github.com/tikv/pd/pkg/mcs/scheduling/server/config"
 	"github.com/tikv/pd/pkg/mcs/scheduling/server/meta"
 	"github.com/tikv/pd/pkg/mcs/scheduling/server/rule"
-	"github.com/tikv/pd/pkg/mcs/server"
 	"github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/member"
@@ -64,7 +60,6 @@ import (
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/memberutil"
-	"github.com/tikv/pd/pkg/utils/metricutil"
 	"github.com/tikv/pd/pkg/versioninfo"
 )
 
@@ -78,7 +73,7 @@ const (
 
 // Server is the scheduling server, and it implements bs.Server.
 type Server struct {
-	*server.BaseServer
+	*common.BaseServer
 	diagnosticspb.DiagnosticsServer
 
 	// Server state. 0 is not running, 1 is running.
@@ -119,6 +114,11 @@ type Server struct {
 // Name returns the unique name for this server in the scheduling cluster.
 func (s *Server) Name() string {
 	return s.cfg.Name
+}
+
+// ServiceName returns the name of the service.
+func (*Server) ServiceName() string {
+	return serviceName
 }
 
 // GetAddr returns the server address.
@@ -561,7 +561,7 @@ func (s *Server) GetConfig() *config.Config {
 // CreateServer creates the Server
 func CreateServer(ctx context.Context, cfg *config.Config) *Server {
 	svr := &Server{
-		BaseServer:        server.NewBaseServer(ctx),
+		BaseServer:        common.NewBaseServer(ctx),
 		DiagnosticsServer: sysutil.NewDiagnosticsServer(cfg.Log.File.Filename),
 		cfg:               cfg,
 		persistConfig:     config.NewPersistConfig(cfg, cache.NewStringTTL(ctx, sc.DefaultGCInterval, sc.DefaultTTL)),
@@ -573,73 +573,12 @@ func CreateServer(ctx context.Context, cfg *config.Config) *Server {
 // CreateServerWrapper encapsulates the configuration/log/metrics initialization and create the server
 func CreateServerWrapper(cmd *cobra.Command, args []string) {
 	schedulers.Register()
-	err := cmd.Flags().Parse(args)
-	if err != nil {
-		cmd.Println(err)
-		return
-	}
-	cfg := config.NewConfig()
-	flagSet := cmd.Flags()
-	err = cfg.Parse(flagSet)
-	defer logutil.LogPanic()
+	bootstrap := common.NewServerBootstrap(
+		// Server creation function
+		CreateServer,
+		// Config creation function
+		config.NewConfig,
+	)
 
-	if err != nil {
-		cmd.Println(err)
-		return
-	}
-
-	if printVersion, err := flagSet.GetBool("version"); err != nil {
-		cmd.Println(err)
-		return
-	} else if printVersion {
-		versioninfo.Print()
-		utils.Exit(0)
-	}
-
-	// New zap logger
-	err = logutil.SetupLogger(&cfg.Log, &cfg.Logger, &cfg.LogProps, cfg.Security.RedactInfoLog)
-	if err == nil {
-		log.ReplaceGlobals(cfg.Logger, cfg.LogProps)
-	} else {
-		log.Fatal("initialize logger error", errs.ZapError(err))
-	}
-	// Flushing any buffered log entries
-	log.Sync()
-
-	versioninfo.Log(serviceName)
-	log.Info("scheduling service config", zap.Reflect("config", cfg))
-
-	grpcprometheus.EnableHandlingTimeHistogram()
-	metricutil.Push(&cfg.Metric)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	svr := CreateServer(ctx, cfg)
-
-	sc := make(chan os.Signal, 1)
-	signal.Notify(sc,
-		syscall.SIGHUP,
-		syscall.SIGINT,
-		syscall.SIGTERM,
-		syscall.SIGQUIT)
-
-	var sig os.Signal
-	go func() {
-		sig = <-sc
-		cancel()
-	}()
-
-	if err := svr.Run(); err != nil {
-		log.Fatal("run server failed", errs.ZapError(err))
-	}
-
-	<-ctx.Done()
-	log.Info("got signal to exit", zap.String("signal", sig.String()))
-
-	svr.Close()
-	switch sig {
-	case syscall.SIGTERM:
-		utils.Exit(0)
-	default:
-		utils.Exit(1)
-	}
+	bootstrap.Start(cmd, args)
 }
