@@ -28,40 +28,36 @@ import (
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
-	"github.com/tikv/pd/pkg/utils/testutil"
-	"github.com/tikv/pd/server"
-	"github.com/tikv/pd/server/api"
 	"github.com/tikv/pd/tests"
 )
 
-type statsTestSuite struct {
+type statTestSuite struct {
 	suite.Suite
-	svr       *server.Server
-	cleanup   testutil.CleanupFunc
-	urlPrefix string
+	env *tests.SchedulingTestEnvironment
 }
 
-func TestStatsTestSuite(t *testing.T) {
-	suite.Run(t, new(statsTestSuite))
+func TestStatTestSuite(t *testing.T) {
+	suite.Run(t, new(statTestSuite))
 }
 
-func (suite *statsTestSuite) SetupSuite() {
+func (suite *statTestSuite) SetupSuite() {
+	suite.env = tests.NewSchedulingTestEnvironment(suite.T())
+}
+
+func (suite *statTestSuite) TearDownSuite() {
+	suite.env.Cleanup()
+}
+
+func (suite *statTestSuite) TestRegionStats() {
+	suite.env.RunTestInNonMicroserviceEnv(suite.checkRegionStats)
+}
+
+func (suite *statTestSuite) checkRegionStats(cluster *tests.TestCluster) {
 	re := suite.Require()
-	suite.svr, suite.cleanup = mustNewServer(re)
-	tests.MustWaitLeader(re, []*server.Server{suite.svr})
+	leader := cluster.GetLeaderServer()
+	urlPrefix := leader.GetAddr() + "/pd/api/v1"
 
-	addr := suite.svr.GetAddr()
-	suite.urlPrefix = fmt.Sprintf("%s%s/api/v1", addr, api.APIPrefix)
-
-	mustBootstrapCluster(re, suite.svr)
-}
-
-func (suite *statsTestSuite) TearDownSuite() {
-	suite.cleanup()
-}
-
-func (suite *statsTestSuite) TestRegionStats() {
-	statsURL := suite.urlPrefix + "/stats/region"
+	statsURL := urlPrefix + "/stats/region"
 	epoch := &metapb.RegionEpoch{
 		ConfVer: 1,
 		Version: 1,
@@ -138,10 +134,9 @@ func (suite *statsTestSuite) TestRegionStats() {
 		),
 	}
 
-	re := suite.Require()
 	for range 5 {
 		for _, r := range regions {
-			mustRegionHeartbeat(re, suite.svr, r)
+			tests.MustPutRegionInfo(re, cluster, r)
 		}
 	}
 
@@ -258,7 +253,8 @@ func (suite *statsTestSuite) TestRegionStats() {
 			},
 		},
 	}
-	mustStoreHeartbeat(re, suite.svr, &storeReq)
+
+	tests.MustHandleStoreHeartbeat(re, cluster, &storeReq)
 
 	args := fmt.Sprintf("?use_hot&start_key=%s&end_key=%s&engine=tikv", "", "")
 	stats := &statistics.RegionStats{}
