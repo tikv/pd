@@ -148,7 +148,6 @@ func NewTSOTestServer(ctx context.Context, cfg *tso.Config) (*tso.Server, testut
 	}
 	cleanup := func() {
 		s.Close()
-		os.RemoveAll(cfg.DataDir)
 	}
 	return s, cleanup, nil
 }
@@ -179,7 +178,6 @@ func NewSchedulingTestServer(ctx context.Context, cfg *sc.Config) (*scheduling.S
 	}
 	cleanup := func() {
 		s.Close()
-		os.RemoveAll(cfg.DataDir)
 	}
 	return s, cleanup, nil
 }
