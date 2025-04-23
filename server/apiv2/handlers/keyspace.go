@@ -39,7 +39,6 @@ func RegisterKeyspace(r *gin.RouterGroup) {
 	router := r.Group("keyspaces")
 	router.Use(middlewares.BootstrapChecker())
 	router.POST("", CreateKeyspace)
-	// Only used by next-gen TiDB.
 	router.POST("/id", CreateKeyspaceByID)
 	router.GET("", LoadAllKeyspaces)
 	router.GET("/:name", LoadKeyspace)

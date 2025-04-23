@@ -291,9 +291,7 @@ func (manager *Manager) CreateKeyspace(request *CreateKeyspaceRequest) (*keyspac
 }
 
 // CreateKeyspaceByID create a keyspace meta with given config and save it to storage.
-// This function is used by next-gen TiDB.
 func (manager *Manager) CreateKeyspaceByID(request *CreateKeyspaceByIDRequest) (*keyspacepb.KeyspaceMeta, error) {
-	// Validate purposed name's legality.
 	if request.ID == nil {
 		return nil, errors.New("keyspace id is empty")
 	}
