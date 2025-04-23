@@ -412,11 +412,11 @@ func (r *Rule) UnmarshalJSON(data []byte) error {
 	s := string(data)
 	switch s {
 	case `"leader-scatter"`:
-		*r = LearnerScatter
+		*r = LeaderScatter
 	case `"peer-scatter"`:
 		*r = PeerScatter
 	case `"learner-scatter"`:
-		*r = LeaderScatter
+		*r = LearnerScatter
 	default:
 		*r = Unknown
 	}

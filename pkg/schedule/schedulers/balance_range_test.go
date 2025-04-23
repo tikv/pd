@@ -38,7 +38,7 @@ func TestBalanceRangePlan(t *testing.T) {
 	tc.AddLeaderRegionWithRange(1, "100", "110", 1, 2, 3)
 	job := &balanceRangeSchedulerJob{
 		Engine: core.EngineTiKV,
-		Rule:   core.Leader,
+		Rule:   core.LeaderScatter,
 		Ranges: []core.KeyRange{core.NewKeyRange("100", "110")},
 	}
 	plan, err := sc.prepare(tc, *operator.NewOpInfluence(), job)
@@ -54,7 +54,9 @@ func TestTIKVEngine(t *testing.T) {
 	re := require.New(t)
 	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
-	scheduler, err := CreateScheduler(types.BalanceRangeScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.BalanceRangeScheduler, []string{"leader", "tikv", "1h", "test", "100", "200"}))
+	scheduler, err := CreateScheduler(types.BalanceRangeScheduler, oc, storage.NewStorageWithMemoryBackend(),
+		ConfigSliceDecoder(types.BalanceRangeScheduler,
+			[]string{"leader-scatter", "tikv", "1h", "test", "100", "200"}))
 	re.NoError(err)
 	ops, _ := scheduler.Schedule(tc, true)
 	re.Empty(ops)
@@ -118,7 +120,9 @@ func TestTIFLASHEngine(t *testing.T) {
 	})
 
 	// generate a balance range scheduler with tiflash engine
-	scheduler, err := CreateScheduler(types.BalanceRangeScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.BalanceRangeScheduler, []string{"learner", "tiflash", "1h", "test", startKey, endKey}))
+	scheduler, err := CreateScheduler(types.BalanceRangeScheduler, oc, storage.NewStorageWithMemoryBackend(),
+		ConfigSliceDecoder(types.BalanceRangeScheduler,
+			[]string{"learner-scatter", "tiflash", "1h", "test", startKey, endKey}))
 	re.NoError(err)
 	// tiflash-4 only has 1 region, so it doesn't need to balance
 	ops, _ := scheduler.Schedule(tc, false)
@@ -165,7 +169,7 @@ func TestCodecConfig(t *testing.T) {
 	re := require.New(t)
 	job := &balanceRangeSchedulerJob{
 		Engine: core.EngineTiKV,
-		Rule:   core.Leader,
+		Rule:   core.LeaderScatter,
 		JobID:  1,
 		Ranges: []core.KeyRange{core.NewKeyRange("a", "b")},
 	}
@@ -174,7 +178,7 @@ func TestCodecConfig(t *testing.T) {
 		schedulerConfig: &baseSchedulerConfig{},
 		jobs:            []*balanceRangeSchedulerJob{job},
 	}
-	conf.schedulerConfig.init("test", storage.NewStorageWithMemoryBackend(), conf)
+	conf.init("test", storage.NewStorageWithMemoryBackend(), conf)
 	re.NoError(conf.save())
 	var conf1 balanceRangeSchedulerConfig
 	re.NoError(conf.load(&conf1))
@@ -182,7 +186,7 @@ func TestCodecConfig(t *testing.T) {
 
 	job1 := &balanceRangeSchedulerJob{
 		Engine: core.EngineTiKV,
-		Rule:   core.Leader,
+		Rule:   core.LeaderScatter,
 		Status: running,
 		Ranges: []core.KeyRange{core.NewKeyRange("a", "b")},
 		JobID:  2,

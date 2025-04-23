@@ -17,6 +17,7 @@ package schedulers
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/url"
 	"sort"
@@ -88,13 +89,13 @@ func (handler *balanceRangeSchedulerHandler) addJob(w http.ResponseWriter, r *ht
 	job.Alias = input["alias"].(string)
 	startKeyStr, err := url.QueryUnescape(input["start-key"].(string))
 	if err != nil {
-		handler.rd.JSON(w, http.StatusBadRequest, "start key can't unescape")
+		handler.rd.JSON(w, http.StatusBadRequest, fmt.Sprint("start key:%s can't be unescaped", input["start-key"].(string)))
 		return
 	}
 
 	endKeyStr, err := url.QueryUnescape(input["end-key"].(string))
 	if err != nil {
-		handler.rd.JSON(w, http.StatusBadRequest, "end key can't unescape")
+		handler.rd.JSON(w, http.StatusBadRequest, fmt.Sprint("end key:%s can't be unescaped", input["end-key"].(string)))
 		return
 	}
 	log.Info("add balance key range job", zap.String("start-key", startKeyStr), zap.String("end-key", endKeyStr))
@@ -115,7 +116,7 @@ func decodeKeyRanges(startKeyStr string, endKeyStr string) ([]core.KeyRange, err
 	startKeys := strings.Split(startKeyStr, ",")
 	endKeys := strings.Split(endKeyStr, ",")
 	if len(startKeys) != len(endKeys) {
-		return nil, errs.ErrAPIInformationInvalid.FastGenByArgs("start key and end key count not match")
+		return nil, errs.ErrAPIInformationInvalid.FastGenByArgs("the length of start key doesn't equal to end key")
 	}
 	rs := make([]core.KeyRange, len(startKeys))
 	for i := range startKeys {

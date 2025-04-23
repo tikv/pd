@@ -17,7 +17,6 @@ package api
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/tikv/pd/server/api"
 	"io"
 	"net/http"
 	"net/url"
@@ -39,6 +38,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	tu "github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/server/api"
 	"github.com/tikv/pd/tests"
 )
 
