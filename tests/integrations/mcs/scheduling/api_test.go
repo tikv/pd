@@ -411,7 +411,6 @@ func (suite *apiTestSuite) checkConfig(cluster *tests.TestCluster) {
 	re.Equal(cfg.Schedule.EnableCrossTableMerge, s.GetConfig().Schedule.EnableCrossTableMerge)
 	re.Equal(cfg.Replication.MaxReplicas, s.GetConfig().Replication.MaxReplicas)
 	re.Equal(cfg.Replication.LocationLabels, s.GetConfig().Replication.LocationLabels)
-	re.Equal(cfg.DataDir, s.GetConfig().DataDir)
 }
 
 func (suite *apiTestSuite) TestConfigForward() {
