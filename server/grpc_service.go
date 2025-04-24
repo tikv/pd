@@ -563,7 +563,8 @@ func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
 			}
 
 			tsoRequest := tsoutil.NewPDProtoRequest(forwardedHost, clientConn, request, stream)
-			tsoRequestProxyCtx = s.tsoDispatcher.DispatchRequest(ctx, s.ctx, tsoRequest, s.pdProtoFactory, s.tsoPrimaryWatcher)
+			// don't pass a stream context here as dispatcher serves multiple streams
+			tsoRequestProxyCtx = s.tsoDispatcher.DispatchRequest(s.ctx, tsoRequest, s.pdProtoFactory, s.tsoPrimaryWatcher)
 			continue
 		}
 

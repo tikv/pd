@@ -70,12 +70,7 @@ func NewTSODispatcher(tsoProxyHandleDuration, tsoProxyBatchSize prometheus.Histo
 }
 
 // DispatchRequest is the entry point for dispatching/forwarding a tso request to the destination host
-func (s *TSODispatcher) DispatchRequest(
-	streamCtx context.Context,
-	serverCtx context.Context,
-	req Request,
-	tsoProtoFactory ProtoFactory,
-	tsoPrimaryWatchers ...*etcdutil.LoopWatcher) context.Context {
+func (s *TSODispatcher) DispatchRequest(serverCtx context.Context, req Request, tsoProtoFactory ProtoFactory, tsoPrimaryWatchers ...*etcdutil.LoopWatcher) context.Context {
 	key := req.getForwardedHost()
 	val, loaded := s.dispatchChs.Load(key)
 	if !loaded {
