@@ -85,17 +85,24 @@ func (handler *balanceRangeSchedulerHandler) addJob(w http.ResponseWriter, r *ht
 		Timeout: time.Hour,
 	}
 	job.Engine = input["engine"].(string)
+	if job.Engine != core.EngineTiFlash && job.Engine != core.EngineTiKV {
+		handler.rd.JSON(w, http.StatusBadRequest, fmt.Sprintf("engine:%s must be tikv or tiflash", input["engine"].(string)))
+	}
 	job.Rule = core.NewRule(input["rule"].(string))
+	if job.Rule != core.LeaderScatter && job.Rule != core.PeerScatter && job.Rule != core.LearnerScatter {
+		handler.rd.JSON(w, http.StatusBadRequest, fmt.Sprintf("rule:%s must be leader-scatter, learner-scatter or peer-scatter",
+			input["engine"].(string)))
+	}
 	job.Alias = input["alias"].(string)
 	startKeyStr, err := url.QueryUnescape(input["start-key"].(string))
 	if err != nil {
-		handler.rd.JSON(w, http.StatusBadRequest, fmt.Sprint("start key:%s can't be unescaped", input["start-key"].(string)))
+		handler.rd.JSON(w, http.StatusBadRequest, fmt.Sprintf("start key:%s can't be unescaped", input["start-key"].(string)))
 		return
 	}
 
 	endKeyStr, err := url.QueryUnescape(input["end-key"].(string))
 	if err != nil {
-		handler.rd.JSON(w, http.StatusBadRequest, fmt.Sprint("end key:%s can't be unescaped", input["end-key"].(string)))
+		handler.rd.JSON(w, http.StatusBadRequest, fmt.Sprintf("end key:%s can't be unescaped", input["end-key"].(string)))
 		return
 	}
 	log.Info("add balance key range job", zap.String("start-key", startKeyStr), zap.String("end-key", endKeyStr))
@@ -116,12 +123,12 @@ func decodeKeyRanges(startKeyStr string, endKeyStr string) ([]core.KeyRange, err
 	startKeys := strings.Split(startKeyStr, ",")
 	endKeys := strings.Split(endKeyStr, ",")
 	if len(startKeys) != len(endKeys) {
-		return nil, errs.ErrAPIInformationInvalid.FastGenByArgs("the length of start key doesn't equal to end key")
+		return nil, errs.ErrInvalidArgument.FastGenByArgs("the length of start key doesn't equal to end key")
 	}
 	rs := make([]core.KeyRange, len(startKeys))
 	for i := range startKeys {
 		if startKeys[i] == "" && endKeys[i] == "" {
-			return nil, errs.ErrAPIInformationInvalid.FastGenByArgs("start key and end key cannot both be nil")
+			return nil, errs.ErrInvalidArgument.FastGenByArgs("start key and end key cannot both be nil")
 		}
 		rs[i] = core.NewKeyRange(startKeys[i], endKeys[i])
 	}
@@ -187,15 +194,17 @@ func (conf *balanceRangeSchedulerConfig) deleteJob(jobID uint64) error {
 		if job.JobID == jobID {
 			status := job.Status
 			if job.Status != pending && job.Status != running {
-				return errs.ErrScheduleConfigNotExist.FastGenByArgs(jobID)
+				return errs.ErrInvalidArgument.FastGenByArgs(fmt.Sprintf("The job status:%s must be"+
+					" pending or running", job.Status.String()))
 			}
 			job.Status = cancelled
+			start := job.Start
 			now := time.Now()
 			job.Start = &now
 			job.Finish = &now
 			if err := conf.save(); err != nil {
 				job.Status = status
-				job.Start = nil
+				job.Start = start
 				job.Finish = nil
 				return err
 			}

@@ -315,16 +315,16 @@ func CollectEscapeStringOption(option string, input map[string]any, collectors .
 func CollectKeyRangesOption(input map[string]any, collectors ...func(v string)) error {
 	startKeyStr, ok := input["start-key"].(string)
 	if !ok {
-		return errs.ErrOptionNotExist.FastGenByArgs("start-key")
+		return errs.ErrInvalidArgument.FastGenByArgs("start-key")
 	}
 	endKeyStr, ok := input["end-key"].(string)
 	if !ok {
-		return errs.ErrOptionNotExist.FastGenByArgs("end-key")
+		return errs.ErrInvalidArgument.FastGenByArgs("end-key")
 	}
 	startKeys := strings.Split(startKeyStr, ",")
 	endKeys := strings.Split(endKeyStr, ",")
 	if len(startKeys) != len(endKeys) {
-		return errs.ErrOptionNotExist.FastGenByArgs(startKeyStr, endKeyStr)
+		return errs.ErrInvalidArgument.FastGenByArgs(startKeyStr, endKeyStr)
 	}
 	for i := range startKeys {
 		startKey, err := url.QueryUnescape(startKeys[i])
