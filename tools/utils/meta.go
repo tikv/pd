@@ -203,7 +203,7 @@ func (rs *Regions) Update(regionCount, replicaCount int, options *config.Options
 	reportRegions := pick(indexes, regionCount, options.GetReportRatio())
 
 	reportCount := len(reportRegions)
-	rs.updateFlow = randomPick(reportRegions, reportCount, options.GetFlowUpdateRatio())
+	rs.updateFlow = pick(reportRegions, reportCount, options.GetFlowUpdateRatio())
 	rs.updateLeader = randomPick(reportRegions, reportCount, options.GetLeaderUpdateRatio())
 	rs.updateEpoch = randomPick(reportRegions, reportCount, options.GetEpochUpdateRatio())
 	rs.updateSpace = randomPick(reportRegions, reportCount, options.GetSpaceUpdateRatio())
