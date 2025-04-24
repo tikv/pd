@@ -1332,27 +1332,27 @@ func TestGetPeers(t *testing.T) {
 		leader, follower1, follower2, learner,
 	}}, leader, WithLearners([]*metapb.Peer{learner}))
 	for _, v := range []struct {
-		role  string
+		rule  string
 		peers []*metapb.Peer
 	}{
 		{
-			role:  "leader",
+			rule:  "leader-scatter",
 			peers: []*metapb.Peer{leader},
 		},
 		{
-			role:  "peer",
+			rule:  "peer-scatter",
 			peers: []*metapb.Peer{learner, leader, follower1, follower2},
 		},
 		{
-			role:  "learner",
+			rule:  "learner-scatter",
 			peers: []*metapb.Peer{learner},
 		},
 		{
-			role:  "witness",
+			rule:  "witness-scatter",
 			peers: nil,
 		},
 	} {
-		role := NewRule(v.role)
+		role := NewRule(v.rule)
 		peers := region.GetPeersByRule(role)
 		sort.Slice(peers, func(i, j int) bool {
 			return peers[i].Id <= peers[j].Id

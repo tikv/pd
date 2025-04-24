@@ -389,8 +389,8 @@ func (r *Rule) String() string {
 }
 
 // NewRule creates a new rule.
-func NewRule(role string) Rule {
-	switch role {
+func NewRule(rule string) Rule {
+	switch rule {
 	case "leader-scatter":
 		return LeaderScatter
 	case "peer-scatter":

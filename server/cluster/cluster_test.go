@@ -1143,7 +1143,7 @@ func TestRegionLabelIsolationLevel(t *testing.T) {
 		}
 		store := &metapb.Store{
 			Id:      i,
-			Address: fmt.Sprintf("127.0.0.1:%d", i),
+			Address: fmt.Sprintf("mock://tikv-%d:%d", i, i),
 			State:   metapb.StoreState_Up,
 			Labels:  labels,
 		}
@@ -2205,8 +2205,8 @@ func newTestStores(n uint64, version string) []*core.StoreInfo {
 	for i := uint64(1); i <= n; i++ {
 		store := &metapb.Store{
 			Id:            i,
-			Address:       fmt.Sprintf("127.0.0.1:%d", i),
-			StatusAddress: fmt.Sprintf("127.0.0.1:%d", i),
+			Address:       fmt.Sprintf("mock://tikv-%d:%d", i, i),
+			StatusAddress: fmt.Sprintf("mock://tikv-%d:%d", i, i+1),
 			State:         metapb.StoreState_Up,
 			Version:       version,
 			DeployPath:    getTestDeployPath(i),

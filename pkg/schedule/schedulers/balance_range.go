@@ -194,8 +194,8 @@ func (conf *balanceRangeSchedulerConfig) deleteJob(jobID uint64) error {
 		if job.JobID == jobID {
 			status := job.Status
 			if job.Status != pending && job.Status != running {
-				return errs.ErrInvalidArgument.FastGenByArgs(fmt.Sprintf("The job status:%s must be"+
-					" pending or running", job.Status.String()))
+				return errs.ErrInvalidArgument.FastGenByArgs(fmt.Sprintf(
+					"The job:%d has been completed and cannot be cancelled.", jobID))
 			}
 			job.Status = cancelled
 			start := job.Start

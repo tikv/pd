@@ -200,7 +200,7 @@ func WaitForPrimaryServing(re *require.Assertions, serverMap map[string]bs.Serve
 
 // MustPutStore is used for test purpose.
 func MustPutStore(re *require.Assertions, tc *TestCluster, store *metapb.Store) {
-	store.Address = fmt.Sprintf("tikv%d", store.GetId())
+	store.Address = fmt.Sprintf("mock://tikv-%d:%d", store.GetId(), store.GetId())
 	if len(store.Version) == 0 {
 		store.Version = versioninfo.MinSupportedVersion(versioninfo.Version2_0).String()
 	}

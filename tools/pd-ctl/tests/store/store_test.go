@@ -414,7 +414,7 @@ func TestStore(t *testing.T) {
 	re.Equal(20.0, limit)
 
 	// store delete addr <address>
-	args = []string{"-u", pdAddr, "store", "delete", "addr", "tikv3"}
+	args = []string{"-u", pdAddr, "store", "delete", "addr", "mock://tikv-3:3"}
 	output, err = tests.ExecuteCommand(cmd, args...)
 	re.Equal("Success!\n", string(output))
 	re.NoError(err)
@@ -431,7 +431,7 @@ func TestStore(t *testing.T) {
 	// store cancel-delete addr <address>
 	limit = leaderServer.GetRaftCluster().GetStoreLimitByType(3, storelimit.RemovePeer)
 	re.Equal(storelimit.Unlimited, limit)
-	args = []string{"-u", pdAddr, "store", "cancel-delete", "addr", "tikv3"}
+	args = []string{"-u", pdAddr, "store", "cancel-delete", "addr", "mock://tikv-3:3"}
 	output, err = tests.ExecuteCommand(cmd, args...)
 	re.Equal("Success!\n", string(output))
 	re.NoError(err)

@@ -180,7 +180,7 @@ func (suite *configTestSuite) TestSchedulerConfigWatch() {
 	err = suite.pdLeaderServer.GetServer().GetRaftCluster().PutMetaStore(
 		&metapb.Store{
 			Id:            2,
-			Address:       "mock://2",
+			Address:       "mock://tikv-2:2",
 			State:         metapb.StoreState_Up,
 			NodeState:     metapb.NodeState_Serving,
 			LastHeartbeat: time.Now().UnixNano(),
