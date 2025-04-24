@@ -147,7 +147,8 @@ type Server interface {
 // region 1 -> /1/raft/r/1, value is metapb.Region
 type RaftCluster struct {
 	syncutil.RWMutex
-	wg sync.WaitGroup
+	storeStateLock syncutil.Mutex
+	wg             sync.WaitGroup
 
 	serverCtx context.Context
 	ctx       context.Context
@@ -1467,6 +1468,8 @@ func (c *RaftCluster) checkStoreLabels(s *core.StoreInfo) error {
 // RemoveStore marks a store as offline in cluster.
 // State transition: Up -> Offline.
 func (c *RaftCluster) RemoveStore(storeID uint64, physicallyDestroyed bool) error {
+	c.storeStateLock.Lock()
+	defer c.storeStateLock.Unlock()
 	store := c.GetStore(storeID)
 	if store == nil {
 		return errs.ErrStoreNotFound.FastGenByArgs(storeID)
@@ -1558,8 +1561,17 @@ func (c *RaftCluster) getUpStores() []uint64 {
 }
 
 // BuryStore marks a store as tombstone in cluster.
-// If forceBury is false, the store should be offlined and emptied before calling this func.
+// It is used by unsafe recovery or other special cases.
 func (c *RaftCluster) BuryStore(storeID uint64, forceBury bool) error {
+	c.storeStateLock.Lock()
+	defer c.storeStateLock.Unlock()
+	return c.BuryStoreLocked(storeID, forceBury)
+}
+
+// BuryStoreLocked marks a store as tombstone in cluster.
+// If forceBury is false, the store should be offlined and emptied before calling this func.
+// It is used by cluster check stores.
+func (c *RaftCluster) BuryStoreLocked(storeID uint64, forceBury bool) error {
 	store := c.GetStore(storeID)
 	if store == nil {
 		return errs.ErrStoreNotFound.FastGenByArgs(storeID)
@@ -1634,6 +1646,8 @@ func (c *RaftCluster) NeedAwakenAllRegionsInStore(storeID uint64) (needAwaken bo
 
 // UpStore up a store from offline
 func (c *RaftCluster) UpStore(storeID uint64) error {
+	c.storeStateLock.Lock()
+	defer c.storeStateLock.Unlock()
 	store := c.GetStore(storeID)
 	if store == nil {
 		return errs.ErrStoreNotFound.FastGenByArgs(storeID)
@@ -1676,8 +1690,8 @@ func (c *RaftCluster) UpStore(storeID uint64) error {
 	return err
 }
 
-// ReadyToServe change store's node state to Serving.
-func (c *RaftCluster) ReadyToServe(storeID uint64) error {
+// ReadyToServeLocked change store's node state to Serving.
+func (c *RaftCluster) ReadyToServeLocked(storeID uint64) error {
 	store := c.GetStore(storeID)
 	if store == nil {
 		return errs.ErrStoreNotFound.FastGenByArgs(storeID)
@@ -1751,6 +1765,8 @@ func (c *RaftCluster) isStorePrepared() bool {
 }
 
 func (c *RaftCluster) checkStores() {
+	c.storeStateLock.Lock()
+	defer c.storeStateLock.Unlock()
 	var offlineStores []*metapb.Store
 	var upStoreCount int
 	stores := c.GetStores()
@@ -1775,7 +1791,7 @@ func (c *RaftCluster) checkStores() {
 		storeID := store.GetID()
 		if store.IsPreparing() {
 			if store.GetUptime() >= c.opt.GetMaxStorePreparingTime() || c.GetTotalRegionCount() < core.InitClusterRegionThreshold {
-				if err := c.ReadyToServe(storeID); err != nil {
+				if err := c.ReadyToServeLocked(storeID); err != nil {
 					log.Error("change store to serving failed",
 						zap.Stringer("store", store.GetMeta()),
 						zap.Int("region-count", c.GetTotalRegionCount()),
@@ -1786,7 +1802,7 @@ func (c *RaftCluster) checkStores() {
 				regionSize := float64(store.GetRegionSize())
 				log.Debug("store serving threshold", zap.Uint64("store-id", storeID), zap.Float64("threshold", threshold), zap.Float64("region-size", regionSize))
 				if regionSize >= threshold {
-					if err := c.ReadyToServe(storeID); err != nil {
+					if err := c.ReadyToServeLocked(storeID); err != nil {
 						log.Error("change store to serving failed",
 							zap.Stringer("store", store.GetMeta()),
 							errs.ZapError(err))
@@ -1819,7 +1835,7 @@ func (c *RaftCluster) checkStores() {
 			needBury = false
 		})
 		if needBury {
-			if err := c.BuryStore(id, false); err != nil {
+			if err := c.BuryStoreLocked(id, false); err != nil {
 				log.Error("bury store failed",
 					zap.Stringer("store", offlineStore),
 					errs.ZapError(err))
