@@ -331,6 +331,53 @@ func TestStaleRegion(t *testing.T) {
 	re.NoError(err)
 }
 
+// Ref https://github.com/tikv/pd/issues/9221
+func TestConcurrencyGetPutConfig(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	tc, err := tests.NewTestCluster(ctx, 1)
+	defer tc.Destroy()
+	re.NoError(err)
+
+	err = tc.RunInitialServers()
+	re.NoError(err)
+
+	tc.WaitLeader()
+	leaderServer := tc.GetServer(tc.GetLeader())
+	grpcPDClient := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
+	clusterID := leaderServer.GetClusterID()
+	bootstrapCluster(re, clusterID, grpcPDClient)
+	rc := leaderServer.GetRaftCluster()
+	re.NotNil(rc)
+	// Get region.
+	region := getRegion(re, clusterID, grpcPDClient, []byte("abc"))
+	re.Len(region.GetPeers(), 1)
+	peer := region.GetPeers()[0]
+
+	wg := sync.WaitGroup{}
+	for i := range 10 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := range 100 {
+				storeID := peer.GetStoreId()
+				client := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
+				store := getStore(re, clusterID, client, storeID)
+				store.Address = "127.0.0.1:1"
+				store.Labels = []*metapb.StoreLabel{
+					{
+						Key:   "testKey",
+						Value: "testValue_" + strconv.Itoa(i) + "_" + strconv.Itoa(j),
+					},
+				}
+				putStore(grpcPDClient, clusterID, store)
+			}
+		}()
+	}
+	wg.Wait()
+}
+
 func TestGetPutConfig(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
