@@ -196,7 +196,7 @@ func (s *benchmarkSuite) prepareStores(ctx context.Context, cli pdpb.PDClient) {
 		storeID := uint64(i)
 		stores = append(stores, &metapb.Store{
 			Id:      storeID,
-			Address: fmt.Sprintf("localhost:%d", storeID),
+			Address: fmt.Sprintf("mock://tikv-%d:%d", storeID, storeID),
 			Version: version(),
 		})
 	}

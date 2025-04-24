@@ -120,7 +120,7 @@ func bootstrap(ctx context.Context, cli pdpb.PDClient) {
 
 	store := &metapb.Store{
 		Id:      1,
-		Address: fmt.Sprintf("localhost:%d", 2),
+		Address: fmt.Sprintf("mock://tikv-1:%d", 2),
 		Version: "6.4.0-alpha",
 	}
 	region := &metapb.Region{
@@ -149,7 +149,7 @@ func putStores(ctx context.Context, cfg *config.Config, cli pdpb.PDClient, store
 	for i := uint64(1); i <= uint64(cfg.StoreCount); i++ {
 		store := &metapb.Store{
 			Id:      i,
-			Address: fmt.Sprintf("localhost:%d", i),
+			Address: fmt.Sprintf("mock://tikv-%d:%d", i, i),
 			Version: "6.4.0-alpha",
 		}
 		cctx, cancel := context.WithCancel(ctx)
