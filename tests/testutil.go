@@ -36,6 +36,7 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/kvproto/pkg/schedulingpb"
 	"github.com/pingcap/log"
 
 	bs "github.com/tikv/pd/pkg/basicserver"
@@ -265,6 +266,22 @@ func MustPutRegionInfo(re *require.Assertions, cluster *TestCluster, regionInfo 
 	re.NoError(err)
 	if cluster.GetSchedulingPrimaryServer() != nil {
 		err = cluster.GetSchedulingPrimaryServer().GetCluster().HandleRegionHeartbeat(regionInfo)
+		re.NoError(err)
+	}
+}
+
+// MustHandleStoreHeartbeat is used for test purpose.
+func MustHandleStoreHeartbeat(re *require.Assertions, cluster *TestCluster, heartbeat *pdpb.StoreHeartbeatRequest) {
+	err := cluster.GetLeaderServer().GetRaftCluster().HandleStoreHeartbeat(heartbeat, &pdpb.StoreHeartbeatResponse{})
+	re.NoError(err)
+	if cluster.GetSchedulingPrimaryServer() != nil {
+		hb := &schedulingpb.StoreHeartbeatRequest{
+			Header: &schedulingpb.RequestHeader{
+				ClusterId: heartbeat.Header.ClusterId,
+			},
+			Stats: heartbeat.GetStats(),
+		}
+		err = cluster.GetSchedulingPrimaryServer().GetCluster().HandleStoreHeartbeat(hb)
 		re.NoError(err)
 	}
 }
