@@ -1213,7 +1213,7 @@ func TestReplicationModeStatus(t *testing.T) {
 	res, err := grpcPDClient.Bootstrap(context.Background(), req)
 	re.NoError(err)
 	re.Equal(replication_modepb.ReplicationMode_DR_AUTO_SYNC, res.GetReplicationStatus().GetMode()) // check status in bootstrap response
-	store := &metapb.Store{Id: 11, Address: "mock://tikv-1:1", Version: "v4.1.0"}
+	store := &metapb.Store{Id: 11, Address: "mock://tikv-11:11", Version: "v4.1.0"}
 	putRes, err := putStore(grpcPDClient, clusterID, store)
 	re.NoError(err)
 	re.Equal(replication_modepb.ReplicationMode_DR_AUTO_SYNC, putRes.GetReplicationStatus().GetMode()) // check status in putStore response
@@ -1554,7 +1554,7 @@ func TestTransferLeaderForScheduler(t *testing.T) {
 	for i := 1; i <= storesNum; i++ {
 		store := &metapb.Store{
 			Id:      uint64(i),
-			Address: "mock://tikv-1:" + strconv.Itoa(i),
+			Address: fmt.Sprintf("mock://tikv-%d:%d", i, i),
 		}
 		resp, err := putStore(grpcPDClient, leaderServer.GetClusterID(), store)
 		re.NoError(err)
