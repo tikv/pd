@@ -112,7 +112,7 @@ var (
 
 	store = &metapb.Store{
 		Id:        1,
-		Address:   "localhost",
+		Address:   "mock://tikv-1:1",
 		NodeState: metapb.NodeState_Serving,
 	}
 	peers = []*metapb.Peer{
@@ -220,7 +220,7 @@ func mustPutStore(re *require.Assertions, svr *server.Server, id uint64, state m
 		Header: &pdpb.RequestHeader{ClusterId: keypath.ClusterID()},
 		Store: &metapb.Store{
 			Id:        id,
-			Address:   fmt.Sprintf("tikv%d", id),
+			Address:   fmt.Sprintf("mock://tikv-%d:%d", id, id),
 			State:     state,
 			NodeState: nodeState,
 			Labels:    labels,

@@ -149,7 +149,6 @@ func NewTSOTestServer(ctx context.Context, cfg *tso.Config) (*tso.Server, testut
 	}
 	cleanup := func() {
 		s.Close()
-		os.RemoveAll(cfg.DataDir)
 	}
 	return s, cleanup, nil
 }
@@ -180,7 +179,6 @@ func NewSchedulingTestServer(ctx context.Context, cfg *sc.Config) (*scheduling.S
 	}
 	cleanup := func() {
 		s.Close()
-		os.RemoveAll(cfg.DataDir)
 	}
 	return s, cleanup, nil
 }
@@ -203,7 +201,7 @@ func WaitForPrimaryServing(re *require.Assertions, serverMap map[string]bs.Serve
 
 // MustPutStore is used for test purpose.
 func MustPutStore(re *require.Assertions, tc *TestCluster, store *metapb.Store) {
-	store.Address = fmt.Sprintf("tikv%d", store.GetId())
+	store.Address = fmt.Sprintf("mock://tikv-%d:%d", store.GetId(), store.GetId())
 	if len(store.Version) == 0 {
 		store.Version = versioninfo.MinSupportedVersion(versioninfo.Version2_0).String()
 	}
@@ -322,7 +320,10 @@ type SchedulingTestEnvironment struct {
 	opts     []ConfigOption
 	clusters map[Env]*TestCluster
 	cancels  []context.CancelFunc
-	Env      Env
+	// only take effect in non-microservice env
+	SkipBootstrap bool
+	PDCount       int
+	Env           Env
 }
 
 // NewSchedulingTestEnvironment is to create a new SchedulingTestEnvironment.
@@ -402,9 +403,12 @@ func (s *SchedulingTestEnvironment) startCluster(m Env) {
 	re := require.New(s.t)
 	ctx, cancel := context.WithCancel(context.Background())
 	s.cancels = append(s.cancels, cancel)
+	if s.PDCount == 0 {
+		s.PDCount = 1
+	}
 	switch m {
 	case NonMicroserviceEnv:
-		cluster, err := NewTestCluster(ctx, 1, s.opts...)
+		cluster, err := NewTestCluster(ctx, s.PDCount, s.opts...)
 		re.NoError(err)
 		err = cluster.RunInitialServers()
 		re.NoError(err)
@@ -413,7 +417,7 @@ func (s *SchedulingTestEnvironment) startCluster(m Env) {
 		re.NoError(leaderServer.BootstrapCluster())
 		s.clusters[NonMicroserviceEnv] = cluster
 	case MicroserviceEnv:
-		cluster, err := NewTestClusterWithKeyspaceGroup(ctx, 1, s.opts...)
+		cluster, err := NewTestClusterWithKeyspaceGroup(ctx, s.PDCount, s.opts...)
 		re.NoError(err)
 		err = cluster.RunInitialServers()
 		re.NoError(err)

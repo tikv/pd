@@ -65,7 +65,7 @@ func TestDistinctScore(t *testing.T) {
 }
 
 func TestCloneStore(_ *testing.T) {
-	meta := &metapb.Store{Id: 1, Address: "mock://tikv-1", Labels: []*metapb.StoreLabel{{Key: "zone", Value: "z1"}, {Key: "host", Value: "h1"}}}
+	meta := &metapb.Store{Id: 1, Address: "mock://tikv-1:1", Labels: []*metapb.StoreLabel{{Key: "zone", Value: "z1"}, {Key: "host", Value: "h1"}}}
 	store := NewStoreInfo(meta)
 	start := time.Now()
 	wg := sync.WaitGroup{}
@@ -90,7 +90,7 @@ func TestCloneStore(_ *testing.T) {
 
 func TestCloneMetaStore(t *testing.T) {
 	re := require.New(t)
-	store := &metapb.Store{Id: 1, Address: "mock://tikv-1", Labels: []*metapb.StoreLabel{{Key: "zone", Value: "z1"}, {Key: "host", Value: "h1"}}}
+	store := &metapb.Store{Id: 1, Address: "mock://tikv-1:1", Labels: []*metapb.StoreLabel{{Key: "zone", Value: "z1"}, {Key: "host", Value: "h1"}}}
 	store2 := typeutil.DeepClone(NewStoreInfo(store).meta, StoreFactory)
 	re.Equal(store2.Labels, store.Labels)
 	store2.Labels[0].Value = "changed value"
@@ -99,7 +99,7 @@ func TestCloneMetaStore(t *testing.T) {
 
 func BenchmarkStoreClone(b *testing.B) {
 	meta := &metapb.Store{Id: 1,
-		Address: "mock://tikv-1",
+		Address: "mock://tikv-1:1",
 		Labels:  []*metapb.StoreLabel{{Key: "zone", Value: "z1"}, {Key: "host", Value: "h1"}}}
 	store := NewStoreInfo(meta)
 	b.ResetTimer()

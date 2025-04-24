@@ -176,7 +176,7 @@ func (suite *serverTestSuite) TestForwardStoreHeartbeat() {
 			Header: &pdpb.RequestHeader{ClusterId: suite.pdLeader.GetClusterID()},
 			Store: &metapb.Store{
 				Id:      1,
-				Address: "tikv1",
+				Address: "mock://tikv-1:1",
 				State:   metapb.StoreState_Up,
 				Version: "7.0.0",
 			},
@@ -322,7 +322,7 @@ func (suite *serverTestSuite) TestSchedulerSync() {
 	err = suite.pdLeader.GetServer().GetRaftCluster().PutMetaStore(
 		&metapb.Store{
 			Id:            2,
-			Address:       "mock://2",
+			Address:       "mock://tikv-2:2",
 			State:         metapb.StoreState_Up,
 			NodeState:     metapb.NodeState_Serving,
 			LastHeartbeat: time.Now().UnixNano(),
@@ -437,7 +437,7 @@ func (suite *serverTestSuite) TestForwardRegionHeartbeat() {
 				Header: &pdpb.RequestHeader{ClusterId: suite.pdLeader.GetClusterID()},
 				Store: &metapb.Store{
 					Id:      i,
-					Address: fmt.Sprintf("mock://%d", i),
+					Address: fmt.Sprintf("mock://tikv-%d:%d", i, i),
 					State:   metapb.StoreState_Up,
 					Version: "7.0.0",
 				},
@@ -519,7 +519,7 @@ func (suite *serverTestSuite) TestStoreLimit() {
 				Header: &pdpb.RequestHeader{ClusterId: suite.pdLeader.GetClusterID()},
 				Store: &metapb.Store{
 					Id:      i,
-					Address: fmt.Sprintf("mock://%d", i),
+					Address: fmt.Sprintf("mock://tikv-%d:%d", i, i),
 					State:   metapb.StoreState_Up,
 					Version: "7.0.0",
 				},
@@ -709,7 +709,7 @@ func (suite *serverTestSuite) TestOnlineProgress() {
 				Header: &pdpb.RequestHeader{ClusterId: suite.pdLeader.GetClusterID()},
 				Store: &metapb.Store{
 					Id:      i,
-					Address: fmt.Sprintf("mock://%d", i),
+					Address: fmt.Sprintf("mock://tikv-%d:%d", i, i),
 					State:   metapb.StoreState_Up,
 					Version: "7.0.0",
 				},
@@ -732,7 +732,7 @@ func (suite *serverTestSuite) TestOnlineProgress() {
 			Header: &pdpb.RequestHeader{ClusterId: suite.pdLeader.GetClusterID()},
 			Store: &metapb.Store{
 				Id:      4,
-				Address: fmt.Sprintf("mock://%d", 4),
+				Address: "mock://tikv-4:4",
 				State:   metapb.StoreState_Up,
 				Version: "7.0.0",
 			},
@@ -779,7 +779,7 @@ func (suite *serverTestSuite) TestBatchSplit() {
 				Header: &pdpb.RequestHeader{ClusterId: suite.pdLeader.GetClusterID()},
 				Store: &metapb.Store{
 					Id:      i,
-					Address: fmt.Sprintf("mock://%d", i),
+					Address: fmt.Sprintf("mock://tikv-%d:%d", i, i),
 					State:   metapb.StoreState_Up,
 					Version: "7.0.0",
 				},
@@ -852,7 +852,7 @@ func (suite *serverTestSuite) TestBatchSplitCompatibility() {
 				Header: &pdpb.RequestHeader{ClusterId: suite.pdLeader.GetClusterID()},
 				Store: &metapb.Store{
 					Id:      i,
-					Address: fmt.Sprintf("mock://%d", i),
+					Address: fmt.Sprintf("mock://tikv-%d:%d", i, i),
 					State:   metapb.StoreState_Up,
 					Version: "7.0.0",
 				},
@@ -995,7 +995,7 @@ func (suite *serverTestSuite) TestConcurrentBatchSplit() {
 				Header: &pdpb.RequestHeader{ClusterId: suite.pdLeader.GetClusterID()},
 				Store: &metapb.Store{
 					Id:      i,
-					Address: fmt.Sprintf("mock://%d", i),
+					Address: fmt.Sprintf("mock://tikv-%d:%d", i, i),
 					State:   metapb.StoreState_Up,
 					Version: "7.0.0",
 				},
