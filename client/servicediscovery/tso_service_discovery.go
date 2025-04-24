@@ -303,7 +303,7 @@ func (c *tsoServiceDiscovery) GetServiceURLs() []string {
 	return c.keyspaceGroupSD.urls
 }
 
-// GetServingURL returns the grpc client connection of the serving endpoint
+// GetServingEndpointClientConn returns the grpc client connection of the serving endpoint
 // which is the primary in a primary/secondary configured cluster.
 func (c *tsoServiceDiscovery) GetServingEndpointClientConn() *grpc.ClientConn {
 	if cc, ok := c.clientConns.Load(c.getPrimaryURL()); ok {
@@ -431,7 +431,7 @@ func (c *tsoServiceDiscovery) updateMember() error {
 	if len(tsoServerURL) > 0 {
 		keyspaceGroup, err = c.findGroupByKeyspaceID(keyspaceID, tsoServerURL, UpdateMemberTimeout)
 		if err != nil {
-			if c.tsoServerDiscovery.countFailure() {
+			if c.countFailure() {
 				log.Error("[tso] failed to find the keyspace group",
 					zap.Uint32("keyspace-id-in-request", keyspaceID),
 					zap.String("tso-server-url", tsoServerURL),
@@ -439,7 +439,7 @@ func (c *tsoServiceDiscovery) updateMember() error {
 			}
 			return err
 		}
-		c.tsoServerDiscovery.resetFailure()
+		c.resetFailure()
 	} else {
 		// There is no error but no tso server URL found, which means
 		// the server side hasn't been upgraded to the version that

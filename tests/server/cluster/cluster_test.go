@@ -66,8 +66,8 @@ const (
 	initEpochVersion uint64 = 1
 	initEpochConfVer uint64 = 1
 
-	testMetaStoreAddr = "127.0.0.1:12345"
-	testStoreAddr     = "127.0.0.1:0"
+	testMetaStoreAddr = "mock://tikv-1:12345"
+	testStoreAddr     = "mock://tikv-1:1"
 )
 
 func TestBootstrap(t *testing.T) {
@@ -149,7 +149,7 @@ func TestDamagedRegion(t *testing.T) {
 			Header: &pdpb.RequestHeader{ClusterId: leaderServer.GetClusterID()},
 			Store: &metapb.Store{
 				Id:      1,
-				Address: "mock-1",
+				Address: "mock://tikv-1:1",
 				Version: "2.0.1",
 			},
 		},
@@ -157,7 +157,7 @@ func TestDamagedRegion(t *testing.T) {
 			Header: &pdpb.RequestHeader{ClusterId: leaderServer.GetClusterID()},
 			Store: &metapb.Store{
 				Id:      2,
-				Address: "mock-4",
+				Address: "mock://tikv-2:2",
 				Version: "2.0.1",
 			},
 		},
@@ -165,7 +165,7 @@ func TestDamagedRegion(t *testing.T) {
 			Header: &pdpb.RequestHeader{ClusterId: leaderServer.GetClusterID()},
 			Store: &metapb.Store{
 				Id:      3,
-				Address: "mock-6",
+				Address: "mock://tikv-3:3",
 				Version: "2.0.1",
 			},
 		},
@@ -331,6 +331,53 @@ func TestStaleRegion(t *testing.T) {
 	re.NoError(err)
 }
 
+// Ref https://github.com/tikv/pd/issues/9221
+func TestConcurrencyGetPutConfig(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	tc, err := tests.NewTestCluster(ctx, 1)
+	defer tc.Destroy()
+	re.NoError(err)
+
+	err = tc.RunInitialServers()
+	re.NoError(err)
+
+	tc.WaitLeader()
+	leaderServer := tc.GetServer(tc.GetLeader())
+	grpcPDClient := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
+	clusterID := leaderServer.GetClusterID()
+	bootstrapCluster(re, clusterID, grpcPDClient)
+	rc := leaderServer.GetRaftCluster()
+	re.NotNil(rc)
+	// Get region.
+	region := getRegion(re, clusterID, grpcPDClient, []byte("abc"))
+	re.Len(region.GetPeers(), 1)
+	peer := region.GetPeers()[0]
+
+	wg := sync.WaitGroup{}
+	for i := range 10 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := range 100 {
+				storeID := peer.GetStoreId()
+				client := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
+				store := getStore(re, clusterID, client, storeID)
+				store.Address = "mock://tikv-1:1"
+				store.Labels = []*metapb.StoreLabel{
+					{
+						Key:   "testKey",
+						Value: "testValue_" + strconv.Itoa(i) + "_" + strconv.Itoa(j),
+					},
+				}
+				putStore(grpcPDClient, clusterID, store)
+			}
+		}()
+	}
+	wg.Wait()
+}
+
 func TestGetPutConfig(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -367,7 +414,7 @@ func TestGetPutConfig(t *testing.T) {
 	store := getStore(re, clusterID, grpcPDClient, storeID)
 
 	// Update store.
-	store.Address = "127.0.0.1:1"
+	store.Address = "mock://tikv-1:1"
 	testPutStore(re, clusterID, rc, grpcPDClient, store)
 
 	// Remove store.
@@ -459,17 +506,21 @@ func resetStoreState(re *require.Assertions, rc *cluster.RaftCluster, storeID ui
 	store := rc.GetStore(storeID)
 	re.NotNil(store)
 	newStore := store.Clone(core.SetStoreState(metapb.StoreState_Offline, false))
-	if state == metapb.StoreState_Up {
+	switch state {
+	case metapb.StoreState_Up:
 		newStore = newStore.Clone(core.SetStoreState(metapb.StoreState_Up))
-	} else if state == metapb.StoreState_Tombstone {
+	case metapb.StoreState_Tombstone:
 		newStore = newStore.Clone(core.SetStoreState(metapb.StoreState_Tombstone))
+	default:
 	}
 
 	rc.GetBasicCluster().PutStore(newStore)
-	if state == metapb.StoreState_Offline {
+	switch state {
+	case metapb.StoreState_Offline:
 		rc.SetStoreLimit(storeID, storelimit.RemovePeer, storelimit.Unlimited)
-	} else if state == metapb.StoreState_Tombstone {
+	case metapb.StoreState_Tombstone:
 		rc.RemoveStoreLimit(storeID)
+	default:
 	}
 }
 
@@ -494,10 +545,12 @@ func testStateAndLimit(re *require.Assertions, clusterID uint64, rc *cluster.Raf
 		re.NoError(err)
 		expectState := expectStates[0]
 		re.Equal(expectState, getStore(re, clusterID, grpcPDClient, storeID).GetState())
-		if expectState == metapb.StoreState_Offline {
+		switch expectState {
+		case metapb.StoreState_Offline:
 			re.True(isOKAfter)
-		} else if expectState == metapb.StoreState_Tombstone {
+		case metapb.StoreState_Tombstone:
 			re.False(isOKAfter)
+		default:
 		}
 	} else {
 		re.Error(err)
@@ -611,7 +664,7 @@ func TestRaftClusterMultipleRestart(t *testing.T) {
 	// add an offline store
 	storeID, _, err := leaderServer.GetAllocator().Alloc(1)
 	re.NoError(err)
-	store := newMetaStore(storeID, "127.0.0.1:4", "2.1.0", metapb.StoreState_Offline, getTestDeployPath(storeID))
+	store := newMetaStore(storeID, "mock://tikv-1:1", "2.1.0", metapb.StoreState_Offline, getTestDeployPath(storeID))
 	rc := leaderServer.GetRaftCluster()
 	re.NotNil(rc)
 	err = rc.PutMetaStore(store)
@@ -793,7 +846,7 @@ func TestStoreVersionChange(t *testing.T) {
 	svr.SetClusterVersion("2.0.0")
 	storeID, _, err := leaderServer.GetAllocator().Alloc(1)
 	re.NoError(err)
-	store := newMetaStore(storeID, "127.0.0.1:4", "2.1.0", metapb.StoreState_Up, getTestDeployPath(storeID))
+	store := newMetaStore(storeID, "mock://tikv-1:1", "2.1.0", metapb.StoreState_Up, getTestDeployPath(storeID))
 	var wg sync.WaitGroup
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/versionChangeConcurrency", `return(true)`))
 	wg.Add(1)
@@ -827,7 +880,7 @@ func TestConcurrentHandleRegion(t *testing.T) {
 	grpcPDClient := testutil.MustNewGrpcClient(re, leaderServer.GetAddr())
 	clusterID := leaderServer.GetClusterID()
 	bootstrapCluster(re, clusterID, grpcPDClient)
-	storeAddrs := []string{"127.0.1.1:0", "127.0.1.1:1", "127.0.1.1:2"}
+	storeAddrs := []string{"mock://tikv-1:0", "mock://tikv-1:1", "mock://tikv-1:2"}
 	rc := leaderServer.GetRaftCluster()
 	re.NotNil(rc)
 	stores := make([]*metapb.Store, 0, len(storeAddrs))
@@ -910,10 +963,12 @@ func TestConcurrentHandleRegion(t *testing.T) {
 				Version: initEpochVersion,
 			},
 		}
-		if i == 0 {
+		switch i {
+		case 0:
 			region.StartKey = []byte("")
-		} else if i == concurrent-1 {
+		case concurrent - 1:
 			region.EndKey = []byte("")
+		default:
 		}
 
 		wg.Add(1)
@@ -1105,7 +1160,7 @@ func TestTiFlashWithPlacementRules(t *testing.T) {
 
 	tiflashStore := &metapb.Store{
 		Id:      11,
-		Address: "127.0.0.1:1",
+		Address: "mock://tiflash-1:1",
 		Labels:  []*metapb.StoreLabel{{Key: "engine", Value: "tiflash"}},
 		Version: "v4.1.0",
 	}
@@ -1158,7 +1213,7 @@ func TestReplicationModeStatus(t *testing.T) {
 	res, err := grpcPDClient.Bootstrap(context.Background(), req)
 	re.NoError(err)
 	re.Equal(replication_modepb.ReplicationMode_DR_AUTO_SYNC, res.GetReplicationStatus().GetMode()) // check status in bootstrap response
-	store := &metapb.Store{Id: 11, Address: "127.0.0.1:1", Version: "v4.1.0"}
+	store := &metapb.Store{Id: 11, Address: "mock://tikv-11:11", Version: "v4.1.0"}
 	putRes, err := putStore(grpcPDClient, clusterID, store)
 	re.NoError(err)
 	re.Equal(replication_modepb.ReplicationMode_DR_AUTO_SYNC, putRes.GetReplicationStatus().GetMode()) // check status in putStore response
@@ -1499,7 +1554,7 @@ func TestTransferLeaderForScheduler(t *testing.T) {
 	for i := 1; i <= storesNum; i++ {
 		store := &metapb.Store{
 			Id:      uint64(i),
-			Address: "127.0.0.1:" + strconv.Itoa(i),
+			Address: fmt.Sprintf("mock://tikv-%d:%d", i, i),
 		}
 		resp, err := putStore(grpcPDClient, leaderServer.GetClusterID(), store)
 		re.NoError(err)
@@ -1665,7 +1720,7 @@ func TestMinResolvedTS(t *testing.T) {
 		store := &metapb.Store{
 			Id:      storeID,
 			Version: "v6.0.0",
-			Address: "127.0.0.1:" + strconv.Itoa(int(storeID)),
+			Address: "mock://tikv-1:" + strconv.Itoa(int(storeID)),
 		}
 		if isTiflash {
 			store.Labels = []*metapb.StoreLabel{{Key: "engine", Value: "tiflash"}}
@@ -1834,7 +1889,7 @@ func TestExternalTimestamp(t *testing.T) {
 	store := &metapb.Store{
 		Id:      1,
 		Version: "v6.0.0",
-		Address: "127.0.0.1:" + strconv.Itoa(int(1)),
+		Address: "mock://tikv-1:" + strconv.Itoa(int(1)),
 	}
 	resp, err := putStore(grpcPDClient, clusterID, store)
 	re.NoError(err)

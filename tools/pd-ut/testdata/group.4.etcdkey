@@ -1,4 +1,10 @@
 /config/ttl get
+/ms//scheduling/primary get
+/ms//scheduling/primary watch
+/ms//tso//primary get
+/ms//tso//primary watch
+/ms//tso/registry/ get
+/ms//tso/registry/ watch
 /pd//alloc_id get
 /pd//config get
 /pd//config save

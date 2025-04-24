@@ -27,13 +27,15 @@ import (
 	"github.com/tikv/pd/pkg/schedule/operator"
 	tu "github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/server/api"
+	"github.com/tikv/pd/tests"
 )
 
 func TestTrend(t *testing.T) {
 	re := require.New(t)
 	svr, cleanup := mustNewServer(re)
 	defer cleanup()
-	server.MustWaitLeader(re, []*server.Server{svr})
+	tests.MustWaitLeader(re, []*server.Server{svr})
 
 	mustBootstrapCluster(re, svr)
 	for i := 1; i <= 3; i++ {
@@ -77,8 +79,8 @@ func TestTrend(t *testing.T) {
 	mustRegionHeartbeat(re, svr, region6)
 	time.Sleep(50 * time.Millisecond)
 
-	var trend Trend
-	err = tu.ReadGetJSON(re, testDialClient, fmt.Sprintf("%s%s/api/v1/trend", svr.GetAddr(), apiPrefix), &trend)
+	var trend api.Trend
+	err = tu.ReadGetJSON(re, testDialClient, fmt.Sprintf("%s%s/api/v1/trend", svr.GetAddr(), api.APIPrefix), &trend)
 	re.NoError(err)
 
 	// Check store states.
@@ -91,14 +93,14 @@ func TestTrend(t *testing.T) {
 	}
 
 	// Check history.
-	expectHistory := map[trendHistoryEntry]int{
+	expectHistory := map[api.TrendHistoryEntry]int{
 		{From: 1, To: 2, Kind: "leader"}: 2,
 		{From: 1, To: 3, Kind: "region"}: 1,
 		{From: 2, To: 3, Kind: "region"}: 1,
 	}
 	re.Len(trend.History.Entries, 3)
 	for _, history := range trend.History.Entries {
-		re.Equal(expectHistory[trendHistoryEntry{From: history.From, To: history.To, Kind: history.Kind}], history.Count)
+		re.Equal(expectHistory[api.TrendHistoryEntry{From: history.From, To: history.To, Kind: history.Kind}], history.Count)
 	}
 }
 

@@ -50,7 +50,7 @@ func BootstrapCluster(ctx context.Context, cli pdpb.PDClient, header *pdpb.Reque
 
 	store := &metapb.Store{
 		Id:      1,
-		Address: fmt.Sprintf("localhost:%d", 2),
+		Address: fmt.Sprintf("mock://tikv-1:%d", 2),
 		Version: version,
 	}
 	region := &metapb.Region{

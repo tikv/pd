@@ -636,3 +636,10 @@ func (td *tsoDispatcher) checkTSORPCConcurrency(ctx context.Context, maxBatchWai
 func (td *tsoDispatcher) isConcurrentRPCEnabled() bool {
 	return td.rpcConcurrency > 1
 }
+
+// closeContext closes the connection context manager. This is used for testing purpose.
+func (td *tsoDispatcher) closeContext(url string) {
+	cctx := td.provider.getConnectionCtxMgr()
+	cc := cctx.GetConnectionCtx(url)
+	cc.Cancel()
+}
