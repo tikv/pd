@@ -622,14 +622,14 @@ func (suite *apiTestSuite) checkStores(cluster *tests.TestCluster) {
 		{
 			// metapb.StoreState_Up == 0
 			Id:        1,
-			Address:   "tikv1",
+			Address:   "mock://tikv-1:1",
 			State:     metapb.StoreState_Up,
 			NodeState: metapb.NodeState_Serving,
 			Version:   "2.0.0",
 		},
 		{
 			Id:        4,
-			Address:   "tikv4",
+			Address:   "mock://tikv-4:4",
 			State:     metapb.StoreState_Up,
 			NodeState: metapb.NodeState_Serving,
 			Version:   "2.0.0",
@@ -637,7 +637,7 @@ func (suite *apiTestSuite) checkStores(cluster *tests.TestCluster) {
 		{
 			// metapb.StoreState_Offline == 1
 			Id:        6,
-			Address:   "tikv6",
+			Address:   "mock://tikv-6:6",
 			State:     metapb.StoreState_Offline,
 			NodeState: metapb.NodeState_Removing,
 			Version:   "2.0.0",
@@ -645,7 +645,7 @@ func (suite *apiTestSuite) checkStores(cluster *tests.TestCluster) {
 		{
 			// metapb.StoreState_Tombstone == 2
 			Id:        7,
-			Address:   "tikv7",
+			Address:   "mock://tikv-7:7",
 			State:     metapb.StoreState_Tombstone,
 			NodeState: metapb.NodeState_Removed,
 			Version:   "2.0.0",
@@ -677,17 +677,17 @@ func (suite *apiTestSuite) checkStores(cluster *tests.TestCluster) {
 	urlPrefix = fmt.Sprintf("%s/scheduling/api/v1/stores/1", scheServerAddr)
 	err = testutil.ReadGetJSON(re, tests.TestDialClient, urlPrefix, &resp)
 	re.NoError(err)
-	re.Equal("tikv1", resp["store"].(map[string]any)["address"])
+	re.Equal("mock://tikv-1:1", resp["store"].(map[string]any)["address"])
 	re.Equal("Up", resp["store"].(map[string]any)["state_name"])
 	urlPrefix = fmt.Sprintf("%s/scheduling/api/v1/stores/6", scheServerAddr)
 	err = testutil.ReadGetJSON(re, tests.TestDialClient, urlPrefix, &resp)
 	re.NoError(err)
-	re.Equal("tikv6", resp["store"].(map[string]any)["address"])
+	re.Equal("mock://tikv-6:6", resp["store"].(map[string]any)["address"])
 	re.Equal("Offline", resp["store"].(map[string]any)["state_name"])
 	urlPrefix = fmt.Sprintf("%s/scheduling/api/v1/stores/7", scheServerAddr)
 	err = testutil.ReadGetJSON(re, tests.TestDialClient, urlPrefix, &resp)
 	re.NoError(err)
-	re.Equal("tikv7", resp["store"].(map[string]any)["address"])
+	re.Equal("mock://tikv-7:7", resp["store"].(map[string]any)["address"])
 	re.Equal("Tombstone", resp["store"].(map[string]any)["state_name"])
 	urlPrefix = fmt.Sprintf("%s/scheduling/api/v1/stores/233", scheServerAddr)
 	testutil.CheckGetJSON(tests.TestDialClient, urlPrefix, nil,

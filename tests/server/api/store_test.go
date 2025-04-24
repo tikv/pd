@@ -72,14 +72,14 @@ func (suite *storeTestSuite) SetupSuite() {
 		{
 			// metapb.StoreState_Up == 0
 			Id:        1,
-			Address:   "tikv1",
+			Address:   "mock://tikv-1:1",
 			State:     metapb.StoreState_Up,
 			NodeState: metapb.NodeState_Serving,
 			Version:   "2.0.0",
 		},
 		{
 			Id:        4,
-			Address:   "tikv4",
+			Address:   "mock://tikv-4:4",
 			State:     metapb.StoreState_Up,
 			NodeState: metapb.NodeState_Serving,
 			Version:   "2.0.0",
@@ -87,7 +87,7 @@ func (suite *storeTestSuite) SetupSuite() {
 		{
 			// metapb.StoreState_Offline == 1
 			Id:        6,
-			Address:   "tikv6",
+			Address:   "mock://tikv-6:6",
 			State:     metapb.StoreState_Offline,
 			NodeState: metapb.NodeState_Removing,
 			Version:   "2.0.0",
@@ -95,7 +95,7 @@ func (suite *storeTestSuite) SetupSuite() {
 		{
 			// metapb.StoreState_Tombstone == 2
 			Id:        7,
-			Address:   "tikv7",
+			Address:   "mock://tikv-7:7",
 			State:     metapb.StoreState_Tombstone,
 			NodeState: metapb.NodeState_Removed,
 			Version:   "2.0.0",
@@ -173,7 +173,7 @@ func (suite *storeTestSuite) TestStoresList() {
 	s := &server.GrpcServer{Server: suite.svr}
 	store := &metapb.Store{
 		Id:            100,
-		Address:       fmt.Sprintf("tikv%d", 100),
+		Address:       "mock://tikv-100:100",
 		State:         metapb.StoreState_Up,
 		Version:       versioninfo.MinSupportedVersion(versioninfo.Version2_0).String(),
 		LastHeartbeat: time.Now().UnixNano() - int64(1*time.Hour),
