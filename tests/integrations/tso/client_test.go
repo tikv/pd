@@ -511,6 +511,10 @@ func TestTSONotLeader(t *testing.T) {
 		pdLeader.ResignLeader()
 		for range 10 {
 			_, _, err := client.GetTS(ctx)
+			// stream maybe cancelld when the leader is resigned
+			if err.Error() == context.Canceled.Error() {
+				return
+			}
 			re.ErrorContains(err, "not leader")
 		}
 	}(pdClient)
