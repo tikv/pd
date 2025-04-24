@@ -67,7 +67,7 @@ func NewNode(s *cases.Store, config *sc.SimConfig) (*Node, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	store := &metapb.Store{
 		Id:      s.ID,
-		Address: fmt.Sprintf("mock:://tikv-%d", s.ID),
+		Address: fmt.Sprintf("mock:://tikv-%d:%d", s.ID, s.ID),
 		Version: config.StoreVersion,
 		Labels:  s.Labels,
 		State:   s.Status,

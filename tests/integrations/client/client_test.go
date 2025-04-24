@@ -986,16 +986,16 @@ var (
 	// If we alloc ID in client in the future, these IDs must be updated.
 	stores = []*metapb.Store{
 		{Id: 1,
-			Address: "localhost:1",
+			Address: "mock://tikv-1:1",
 		},
 		{Id: 2,
-			Address: "localhost:2",
+			Address: "mock://tikv-2:2",
 		},
 		{Id: 3,
-			Address: "localhost:3",
+			Address: "mock://tikv-3:3",
 		},
 		{Id: 4,
-			Address: "localhost:4",
+			Address: "mock://tikv-4:4",
 		},
 	}
 
