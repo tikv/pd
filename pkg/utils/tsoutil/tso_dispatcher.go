@@ -92,12 +92,8 @@ func (s *TSODispatcher) DispatchRequest(
 		go s.dispatch(tsoQueue, tsoProtoFactory, req.getForwardedHost(), req.getClientConn(), tsDeadlineCh, tsoPrimaryWatchers...)
 		go WatchTSDeadline(dispatcherCtx, tsDeadlineCh)
 	}
-	select {
-	case tsoQueue.requestCh <- req:
-		return tsoQueue.ctx
-	case <-streamCtx.Done():
-		return tsoQueue.ctx
-	}
+	tsoQueue.requestCh <- req
+	return tsoQueue.ctx
 }
 
 func (s *TSODispatcher) dispatch(
@@ -108,6 +104,7 @@ func (s *TSODispatcher) dispatch(
 	tsDeadlineCh chan<- *TSDeadline,
 	tsoPrimaryWatchers ...*etcdutil.LoopWatcher) {
 	defer logutil.LogPanic()
+	dispatcherCtx := tsoQueue.ctx
 	defer s.dispatchChs.Delete(forwardedHost)
 
 	forwardStream, cancel, err := tsoProtoFactory.createForwardStream(tsoQueue.ctx, clientConn)
@@ -140,11 +137,9 @@ func (s *TSODispatcher) dispatch(
 			dl := NewTSDeadline(DefaultTSOProxyTimeout, done, cancel)
 			select {
 			case tsDeadlineCh <- dl:
-			case <-tsoQueue.ctx.Done():
-				log.Info("close tso proxy as parent context is completed")
+			case <-dispatcherCtx.Done():
 				return
 			}
-
 			err = s.processRequests(forwardStream, requests[:pendingTSOReqCount])
 			close(done)
 			if err != nil {
@@ -157,12 +152,11 @@ func (s *TSODispatcher) dispatch(
 				tsoQueue.cancel(err)
 				return
 			}
-		case <-tsoQueue.ctx.Done():
-			log.Info("close tso proxy as parent context is completed")
-			return
 		case <-noProxyRequestsTimer.C:
 			log.Info("close tso proxy as it is idle for a while")
 			tsoQueue.cancel(errors.New("TSOProxyStreamIdleTimeout"))
+			return
+		case <-dispatcherCtx.Done():
 			return
 		}
 	}
