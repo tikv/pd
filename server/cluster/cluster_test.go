@@ -3847,7 +3847,7 @@ func TestConcurrentStoreStats(t *testing.T) {
 		re.NoError(cluster.putRegion(region))
 	}
 	for i := range storeCount {
-		re.NotZero(cluster.GetStoreRegionCount(uint64(i + 1)))
+		re.NotZero(cluster.GetStoreRegionCount(i + 1))
 	}
 
 	// Add stores to the cluster.
@@ -3883,7 +3883,7 @@ func TestConcurrentStoreStats(t *testing.T) {
 			// it means we can't remove store anymore
 			break
 		}
-		storeID := uint64(i + 1)
+		storeID := i + 1
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
