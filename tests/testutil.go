@@ -36,6 +36,7 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/kvproto/pkg/schedulingpb"
 	"github.com/pingcap/log"
 
 	bs "github.com/tikv/pd/pkg/basicserver"
@@ -269,6 +270,22 @@ func MustPutRegionInfo(re *require.Assertions, cluster *TestCluster, regionInfo 
 	}
 }
 
+// MustHandleStoreHeartbeat is used for test purpose.
+func MustHandleStoreHeartbeat(re *require.Assertions, cluster *TestCluster, heartbeat *pdpb.StoreHeartbeatRequest) {
+	err := cluster.GetLeaderServer().GetRaftCluster().HandleStoreHeartbeat(heartbeat, &pdpb.StoreHeartbeatResponse{})
+	re.NoError(err)
+	if cluster.GetSchedulingPrimaryServer() != nil {
+		hb := &schedulingpb.StoreHeartbeatRequest{
+			Header: &schedulingpb.RequestHeader{
+				ClusterId: heartbeat.Header.ClusterId,
+			},
+			Stats: heartbeat.GetStats(),
+		}
+		err = cluster.GetSchedulingPrimaryServer().GetCluster().HandleStoreHeartbeat(hb)
+		re.NoError(err)
+	}
+}
+
 // MustReportBuckets is used for test purpose.
 func MustReportBuckets(re *require.Assertions, cluster *TestCluster, regionID uint64, start, end []byte, stats *metapb.BucketStats) *metapb.Buckets {
 	buckets := &metapb.Buckets{
@@ -397,7 +414,9 @@ func (s *SchedulingTestEnvironment) startCluster(m Env) {
 		re.NoError(err)
 		re.NotEmpty(cluster.WaitLeader())
 		leaderServer := cluster.GetServer(cluster.GetLeader())
-		re.NoError(leaderServer.BootstrapCluster())
+		if !s.SkipBootstrap {
+			re.NoError(leaderServer.BootstrapCluster())
+		}
 		s.clusters[NonMicroserviceEnv] = cluster
 	case MicroserviceEnv:
 		cluster, err := NewTestClusterWithKeyspaceGroup(ctx, s.PDCount, s.opts...)

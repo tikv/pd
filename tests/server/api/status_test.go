@@ -20,10 +20,46 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/suite"
 
 	"github.com/tikv/pd/pkg/versioninfo"
-	"github.com/tikv/pd/server/api"
+	"github.com/tikv/pd/tests"
 )
+
+type statusTestSuite struct {
+	suite.Suite
+	env *tests.SchedulingTestEnvironment
+}
+
+func TestStatusTestSuite(t *testing.T) {
+	suite.Run(t, new(statusTestSuite))
+}
+
+func (suite *statusTestSuite) SetupSuite() {
+	suite.env = tests.NewSchedulingTestEnvironment(suite.T())
+}
+
+func (suite *statusTestSuite) TearDownSuite() {
+	suite.env.Cleanup()
+}
+
+func (suite *statusTestSuite) TestStatus() {
+	suite.env.RunTest(suite.checkStatus)
+}
+
+func (suite *statusTestSuite) checkStatus(cluster *tests.TestCluster) {
+	re := suite.Require()
+	leader := cluster.GetLeaderServer()
+	urlPrefix := leader.GetAddr() + "/pd/api/v1"
+
+	addr := urlPrefix + "/status"
+	resp, err := testDialClient.Get(addr)
+	re.NoError(err)
+	buf, err := io.ReadAll(resp.Body)
+	re.NoError(err)
+	checkStatusResponse(re, buf)
+	resp.Body.Close()
+}
 
 func checkStatusResponse(re *require.Assertions, body []byte) {
 	got := versioninfo.Status{}
@@ -31,20 +67,4 @@ func checkStatusResponse(re *require.Assertions, body []byte) {
 	re.Equal(versioninfo.PDBuildTS, got.BuildTS)
 	re.Equal(versioninfo.PDGitHash, got.GitHash)
 	re.Equal(versioninfo.PDReleaseVersion, got.Version)
-}
-
-func TestStatus(t *testing.T) {
-	re := require.New(t)
-	cfgs, _, clean := mustNewCluster(re, 1)
-	defer clean()
-
-	for _, cfg := range cfgs {
-		addr := cfg.ClientUrls + api.APIPrefix + "/api/v1/status"
-		resp, err := testDialClient.Get(addr)
-		re.NoError(err)
-		buf, err := io.ReadAll(resp.Body)
-		re.NoError(err)
-		checkStatusResponse(re, buf)
-		resp.Body.Close()
-	}
 }
