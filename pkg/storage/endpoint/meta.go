@@ -36,7 +36,7 @@ type MetaStorage interface {
 	LoadStoreMeta(storeID uint64, store *metapb.Store) (bool, error)
 	SaveStoreMeta(store *metapb.Store) error
 	SaveStoreWeight(storeID uint64, leader, region float64) error
-	LoadStores(f func(store *core.StoreInfo)) error
+	LoadStores(f func(store *core.StoreInfo, opts ...core.StoreCreateOption)) error
 	DeleteStoreMeta(store *metapb.Store) error
 	RegionStorage
 }
@@ -93,7 +93,7 @@ func (se *StorageEndpoint) SaveStoreWeight(storeID uint64, leader, region float6
 }
 
 // LoadStores loads all stores from storage to StoresInfo.
-func (se *StorageEndpoint) LoadStores(f func(store *core.StoreInfo)) error {
+func (se *StorageEndpoint) LoadStores(putStore func(store *core.StoreInfo, opts ...core.StoreCreateOption)) error {
 	nextID := uint64(0)
 	endKey := keypath.StorePath(math.MaxUint64)
 	for {
@@ -121,10 +121,12 @@ func (se *StorageEndpoint) LoadStores(f func(store *core.StoreInfo)) error {
 			if err != nil {
 				return err
 			}
-			newStoreInfo := core.NewStoreInfo(store, core.SetLeaderWeight(leaderWeight), core.SetRegionWeight(regionWeight))
 
 			nextID = store.GetId() + 1
-			f(newStoreInfo)
+			putStore(core.NewStoreInfo(store,
+				core.SetLeaderWeight(leaderWeight),
+				core.SetRegionWeight(regionWeight),
+			))
 		}
 		if len(res) < MinKVRangeLimit {
 			return nil
