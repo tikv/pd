@@ -84,5 +84,5 @@ func TestCheckDiff(t *testing.T) {
 		Context:  3,
 	}
 	diffText, _ = difflib.GetUnifiedDiffString(diff)
-	require.Equal(t, "", diffText)
+	require.Empty(t, diffText)
 }

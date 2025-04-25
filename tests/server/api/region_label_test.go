@@ -28,6 +28,8 @@ import (
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	tu "github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/server/api"
+	"github.com/tikv/pd/tests"
 )
 
 type regionLabelTestSuite struct {
@@ -44,10 +46,10 @@ func TestRegionLabelTestSuite(t *testing.T) {
 func (suite *regionLabelTestSuite) SetupSuite() {
 	re := suite.Require()
 	suite.svr, suite.cleanup = mustNewServer(re)
-	server.MustWaitLeader(re, []*server.Server{suite.svr})
+	tests.MustWaitLeader(re, []*server.Server{suite.svr})
 
 	addr := suite.svr.GetAddr()
-	suite.urlPrefix = fmt.Sprintf("%s%s/api/v1/config/region-label/", addr, apiPrefix)
+	suite.urlPrefix = fmt.Sprintf("%s%s/api/v1/config/region-label/", addr, api.APIPrefix)
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion", "return(true)"))
 	mustBootstrapCluster(re, suite.svr)
 }

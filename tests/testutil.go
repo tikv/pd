@@ -30,11 +30,13 @@ import (
 
 	"github.com/docker/go-units"
 	"github.com/stretchr/testify/require"
+	"go.etcd.io/etcd/server/v3/embed"
 	"go.uber.org/zap"
 
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/kvproto/pkg/schedulingpb"
 	"github.com/pingcap/log"
 
 	bs "github.com/tikv/pd/pkg/basicserver"
@@ -44,10 +46,17 @@ import (
 	tso "github.com/tikv/pd/pkg/mcs/tso/server"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/mock/mockid"
+	"github.com/tikv/pd/pkg/schedule/schedulers"
+	"github.com/tikv/pd/pkg/utils/apiutil"
+	"github.com/tikv/pd/pkg/utils/assertutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
+	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/testutil"
+	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/pkg/versioninfo"
+	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/cluster"
+	"github.com/tikv/pd/server/config"
 )
 
 var (
@@ -140,7 +149,6 @@ func NewTSOTestServer(ctx context.Context, cfg *tso.Config) (*tso.Server, testut
 	}
 	cleanup := func() {
 		s.Close()
-		os.RemoveAll(cfg.DataDir)
 	}
 	return s, cleanup, nil
 }
@@ -171,7 +179,6 @@ func NewSchedulingTestServer(ctx context.Context, cfg *sc.Config) (*scheduling.S
 	}
 	cleanup := func() {
 		s.Close()
-		os.RemoveAll(cfg.DataDir)
 	}
 	return s, cleanup, nil
 }
@@ -194,7 +201,7 @@ func WaitForPrimaryServing(re *require.Assertions, serverMap map[string]bs.Serve
 
 // MustPutStore is used for test purpose.
 func MustPutStore(re *require.Assertions, tc *TestCluster, store *metapb.Store) {
-	store.Address = fmt.Sprintf("tikv%d", store.GetId())
+	store.Address = fmt.Sprintf("mock://tikv-%d:%d", store.GetId(), store.GetId())
 	if len(store.Version) == 0 {
 		store.Version = versioninfo.MinSupportedVersion(versioninfo.Version2_0).String()
 	}
@@ -263,6 +270,22 @@ func MustPutRegionInfo(re *require.Assertions, cluster *TestCluster, regionInfo 
 	}
 }
 
+// MustHandleStoreHeartbeat is used for test purpose.
+func MustHandleStoreHeartbeat(re *require.Assertions, cluster *TestCluster, heartbeat *pdpb.StoreHeartbeatRequest) {
+	err := cluster.GetLeaderServer().GetRaftCluster().HandleStoreHeartbeat(heartbeat, &pdpb.StoreHeartbeatResponse{})
+	re.NoError(err)
+	if cluster.GetSchedulingPrimaryServer() != nil {
+		hb := &schedulingpb.StoreHeartbeatRequest{
+			Header: &schedulingpb.RequestHeader{
+				ClusterId: heartbeat.Header.ClusterId,
+			},
+			Stats: heartbeat.GetStats(),
+		}
+		err = cluster.GetSchedulingPrimaryServer().GetCluster().HandleStoreHeartbeat(hb)
+		re.NoError(err)
+	}
+}
+
 // MustReportBuckets is used for test purpose.
 func MustReportBuckets(re *require.Assertions, cluster *TestCluster, regionID uint64, start, end []byte, stats *metapb.BucketStats) *metapb.Buckets {
 	buckets := &metapb.Buckets{
@@ -297,7 +320,10 @@ type SchedulingTestEnvironment struct {
 	opts     []ConfigOption
 	clusters map[Env]*TestCluster
 	cancels  []context.CancelFunc
-	Env      Env
+	// only take effect in non-microservice env
+	SkipBootstrap bool
+	PDCount       int
+	Env           Env
 }
 
 // NewSchedulingTestEnvironment is to create a new SchedulingTestEnvironment.
@@ -324,7 +350,7 @@ func (s *SchedulingTestEnvironment) RunTest(test func(*TestCluster)) {
 	}
 }
 
-// RunTestInNonMicroserviceMode is to run test in non-microservice environment.
+// RunTestInNonMicroserviceEnv is to run test in non-microservice environment.
 func (s *SchedulingTestEnvironment) RunTestInNonMicroserviceEnv(test func(*TestCluster)) {
 	s.t.Logf("start test %s in non-microservice environment", getTestName())
 	if _, ok := s.clusters[NonMicroserviceEnv]; !ok {
@@ -347,7 +373,7 @@ func getTestName() string {
 	return ""
 }
 
-// RunTestInMicroserviceMode is to run test in microservice environment.
+// RunTestInMicroserviceEnv is to run test in microservice environment.
 func (s *SchedulingTestEnvironment) RunTestInMicroserviceEnv(test func(*TestCluster)) {
 	re := require.New(s.t)
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs", `return(true)`))
@@ -377,18 +403,23 @@ func (s *SchedulingTestEnvironment) startCluster(m Env) {
 	re := require.New(s.t)
 	ctx, cancel := context.WithCancel(context.Background())
 	s.cancels = append(s.cancels, cancel)
+	if s.PDCount == 0 {
+		s.PDCount = 1
+	}
 	switch m {
 	case NonMicroserviceEnv:
-		cluster, err := NewTestCluster(ctx, 1, s.opts...)
+		cluster, err := NewTestCluster(ctx, s.PDCount, s.opts...)
 		re.NoError(err)
 		err = cluster.RunInitialServers()
 		re.NoError(err)
 		re.NotEmpty(cluster.WaitLeader())
 		leaderServer := cluster.GetServer(cluster.GetLeader())
-		re.NoError(leaderServer.BootstrapCluster())
+		if !s.SkipBootstrap {
+			re.NoError(leaderServer.BootstrapCluster())
+		}
 		s.clusters[NonMicroserviceEnv] = cluster
 	case MicroserviceEnv:
-		cluster, err := NewTestClusterWithKeyspaceGroup(ctx, 1, s.opts...)
+		cluster, err := NewTestClusterWithKeyspaceGroup(ctx, s.PDCount, s.opts...)
 		re.NoError(err)
 		err = cluster.RunInitialServers()
 		re.NoError(err)
@@ -438,10 +469,12 @@ func InitRegions(regionLen int) []*core.RegionInfo {
 				{Id: allocator.alloc(), StoreId: uint64(3)},
 			},
 		}
-		if i == 0 {
+		switch i {
+		case 0:
 			r.StartKey = []byte{}
-		} else if i == regionLen-1 {
+		case regionLen - 1:
 			r.EndKey = []byte{}
+		default:
 		}
 		region := core.NewRegionInfo(r, r.Peers[0], core.SetSource(core.Heartbeat))
 		// Here is used to simulate the upgrade process.
@@ -458,4 +491,123 @@ func InitRegions(regionLen int) []*core.RegionInfo {
 		regions = append(regions, region)
 	}
 	return regions
+}
+
+var logOnce sync.Once
+
+// NewTestSingleConfig is only for test to create one pd.
+// Because PD client also needs this, so export here.
+func NewTestSingleConfig(c *assertutil.Checker) *config.Config {
+	schedulers.Register()
+	cfg := &config.Config{
+		Name:       "pd",
+		ClientUrls: tempurl.Alloc(),
+		PeerUrls:   tempurl.Alloc(),
+
+		InitialClusterState: embed.ClusterStateFlagNew,
+
+		LeaderLease:     10,
+		TSOSaveInterval: typeutil.NewDuration(200 * time.Millisecond),
+	}
+
+	cfg.AdvertiseClientUrls = cfg.ClientUrls
+	cfg.AdvertisePeerUrls = cfg.PeerUrls
+	cfg.DataDir, _ = os.MkdirTemp("", "pd_tests")
+	cfg.InitialCluster = fmt.Sprintf("pd=%s", cfg.PeerUrls)
+	cfg.DisableStrictReconfigCheck = true
+	cfg.TickInterval = typeutil.NewDuration(100 * time.Millisecond)
+	cfg.ElectionInterval = typeutil.NewDuration(3 * time.Second)
+	cfg.LeaderPriorityCheckInterval = typeutil.NewDuration(100 * time.Millisecond)
+	err := logutil.SetupLogger(&cfg.Log, &cfg.Logger, &cfg.LogProps, cfg.Security.RedactInfoLog)
+	c.AssertNil(err)
+	logOnce.Do(func() {
+		log.ReplaceGlobals(cfg.Logger, cfg.LogProps)
+	})
+
+	c.AssertNil(cfg.Adjust(nil, false))
+	cfg.Keyspace.WaitRegionSplit = false
+
+	return cfg
+}
+
+// NewTestMultiConfig is only for test to create multiple pd configurations.
+// Because PD client also needs this, so export here.
+func NewTestMultiConfig(c *assertutil.Checker, count int) []*config.Config {
+	cfgs := make([]*config.Config, count)
+
+	clusters := []string{}
+	for i := 1; i <= count; i++ {
+		cfg := NewTestSingleConfig(c)
+		cfg.Name = fmt.Sprintf("pd%d", i)
+
+		clusters = append(clusters, fmt.Sprintf("%s=%s", cfg.Name, cfg.PeerUrls))
+
+		cfgs[i-1] = cfg
+	}
+
+	initialCluster := strings.Join(clusters, ",")
+	for _, cfg := range cfgs {
+		cfg.InitialCluster = initialCluster
+	}
+
+	return cfgs
+}
+
+// NewServer creates a pd server for testing.
+func NewServer(re *require.Assertions, c *assertutil.Checker) (*server.Server, testutil.CleanupFunc, error) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cfg := NewTestSingleConfig(c)
+	mockHandler := CreateMockHandler(re, "127.0.0.1")
+	s, err := server.CreateServer(ctx, cfg, nil, mockHandler)
+	if err != nil {
+		cancel()
+		return nil, nil, err
+	}
+	if err = s.Run(); err != nil {
+		cancel()
+		return nil, nil, err
+	}
+
+	cleanup := func() {
+		cancel()
+		s.Close()
+		os.RemoveAll(cfg.DataDir)
+	}
+	return s, cleanup, nil
+}
+
+// MustWaitLeader return the leader until timeout.
+func MustWaitLeader(re *require.Assertions, svrs []*server.Server) *server.Server {
+	var leader *server.Server
+	testutil.Eventually(re, func() bool {
+		for _, svr := range svrs {
+			// All servers' GetLeader should return the same leader.
+			if svr.GetLeader() == nil || (leader != nil && svr.GetLeader().GetMemberId() != leader.GetLeader().GetMemberId()) {
+				return false
+			}
+			if leader == nil && !svr.IsClosed() {
+				leader = svr
+			}
+		}
+		return true
+	})
+	return leader
+}
+
+// CreateMockHandler creates a mock handler for test.
+func CreateMockHandler(re *require.Assertions, ip string) server.HandlerBuilder {
+	return func(context.Context, *server.Server) (http.Handler, apiutil.APIServiceGroup, error) {
+		mux := http.NewServeMux()
+		mux.HandleFunc("/pd/apis/mock/v1/hello", func(w http.ResponseWriter, r *http.Request) {
+			fmt.Fprintln(w, "Hello World")
+			// test getting ip
+			clientIP, _ := apiutil.GetIPPortFromHTTPRequest(r)
+			re.Equal(ip, clientIP)
+		})
+		info := apiutil.APIServiceGroup{
+			Name:    "mock",
+			Version: "v1",
+		}
+		return mux, info, nil
+	}
 }

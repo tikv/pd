@@ -67,7 +67,7 @@ func NewNode(s *cases.Store, config *sc.SimConfig) (*Node, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	store := &metapb.Store{
 		Id:      s.ID,
-		Address: fmt.Sprintf("mock:://tikv-%d", s.ID),
+		Address: fmt.Sprintf("mock:://tikv-%d:%d", s.ID, s.ID),
 		Version: config.StoreVersion,
 		Labels:  s.Labels,
 		State:   s.Status,
@@ -106,7 +106,7 @@ func (n *Node) Start() error {
 	}
 	n.wg.Add(1)
 	go n.receiveRegionHeartbeat()
-	n.Store.State = metapb.StoreState_Up
+	n.State = metapb.StoreState_Up
 	return nil
 }
 
@@ -138,7 +138,7 @@ func (n *Node) Tick(wg *sync.WaitGroup) {
 
 // GetState returns current node state.
 func (n *Node) GetState() metapb.StoreState {
-	return n.Store.State
+	return n.State
 }
 
 func (n *Node) stepTask() {

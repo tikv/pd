@@ -29,7 +29,9 @@ import (
 	"github.com/tikv/pd/pkg/utils/keypath"
 	tu "github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/server/api"
 	"github.com/tikv/pd/server/config"
+	"github.com/tikv/pd/tests"
 )
 
 type labelsStoreTestSuite struct {
@@ -48,7 +50,7 @@ func (suite *labelsStoreTestSuite) SetupSuite() {
 	suite.stores = []*metapb.Store{
 		{
 			Id:        1,
-			Address:   "tikv1",
+			Address:   "mock://tikv-1:1",
 			State:     metapb.StoreState_Up,
 			NodeState: metapb.NodeState_Serving,
 			Labels: []*metapb.StoreLabel{
@@ -65,7 +67,7 @@ func (suite *labelsStoreTestSuite) SetupSuite() {
 		},
 		{
 			Id:        4,
-			Address:   "tikv4",
+			Address:   "mock://tikv-4:4",
 			State:     metapb.StoreState_Up,
 			NodeState: metapb.NodeState_Serving,
 			Labels: []*metapb.StoreLabel{
@@ -82,7 +84,7 @@ func (suite *labelsStoreTestSuite) SetupSuite() {
 		},
 		{
 			Id:        6,
-			Address:   "tikv6",
+			Address:   "mock://tikv-6:6",
 			State:     metapb.StoreState_Up,
 			NodeState: metapb.NodeState_Serving,
 			Labels: []*metapb.StoreLabel{
@@ -99,7 +101,7 @@ func (suite *labelsStoreTestSuite) SetupSuite() {
 		},
 		{
 			Id:        7,
-			Address:   "tikv7",
+			Address:   "mock://tikv-7:7",
 			State:     metapb.StoreState_Up,
 			NodeState: metapb.NodeState_Serving,
 			Labels: []*metapb.StoreLabel{
@@ -124,10 +126,10 @@ func (suite *labelsStoreTestSuite) SetupSuite() {
 	suite.svr, suite.cleanup = mustNewServer(re, func(cfg *config.Config) {
 		cfg.Replication.StrictlyMatchLabel = false
 	})
-	server.MustWaitLeader(re, []*server.Server{suite.svr})
+	tests.MustWaitLeader(re, []*server.Server{suite.svr})
 
 	addr := suite.svr.GetAddr()
-	suite.urlPrefix = fmt.Sprintf("%s%s/api/v1", addr, apiPrefix)
+	suite.urlPrefix = fmt.Sprintf("%s%s/api/v1", addr, api.APIPrefix)
 
 	mustBootstrapCluster(re, suite.svr)
 	for _, store := range suite.stores {
@@ -188,7 +190,7 @@ func (suite *labelsStoreTestSuite) TestStoresLabelFilter() {
 		re.NoError(err)
 		checkStoresInfo(re, info.Stores, testCase.want)
 	}
-	_, err := newStoresLabelFilter("test", ".[test")
+	_, err := api.NewStoresLabelFilter("test", ".[test")
 	re.Error(err)
 }
 
@@ -211,11 +213,11 @@ func (suite *strictlyLabelsStoreTestSuite) SetupSuite() {
 		cfg.Replication.StrictlyMatchLabel = true
 		cfg.Replication.EnablePlacementRules = false
 	})
-	server.MustWaitLeader(re, []*server.Server{suite.svr})
+	tests.MustWaitLeader(re, []*server.Server{suite.svr})
 
 	suite.grpcSvr = &server.GrpcServer{Server: suite.svr}
 	addr := suite.svr.GetAddr()
-	suite.urlPrefix = fmt.Sprintf("%s%s/api/v1", addr, apiPrefix)
+	suite.urlPrefix = fmt.Sprintf("%s%s/api/v1", addr, api.APIPrefix)
 
 	mustBootstrapCluster(re, suite.svr)
 }
@@ -230,7 +232,7 @@ func (suite *strictlyLabelsStoreTestSuite) TestStoreMatch() {
 		{
 			store: &metapb.Store{
 				Id:      1,
-				Address: "tikv1",
+				Address: "mock://tikv-1:1",
 				State:   metapb.StoreState_Up,
 				Labels: []*metapb.StoreLabel{
 					{
@@ -249,7 +251,7 @@ func (suite *strictlyLabelsStoreTestSuite) TestStoreMatch() {
 		{
 			store: &metapb.Store{
 				Id:      2,
-				Address: "tikv2",
+				Address: "mock://tikv-2:2",
 				State:   metapb.StoreState_Up,
 				Labels:  []*metapb.StoreLabel{},
 				Version: "3.0.0",
@@ -260,7 +262,7 @@ func (suite *strictlyLabelsStoreTestSuite) TestStoreMatch() {
 		{
 			store: &metapb.Store{
 				Id:      2,
-				Address: "tikv2",
+				Address: "mock://tikv-2:2",
 				State:   metapb.StoreState_Up,
 				Labels: []*metapb.StoreLabel{
 					{
@@ -284,7 +286,7 @@ func (suite *strictlyLabelsStoreTestSuite) TestStoreMatch() {
 		{
 			store: &metapb.Store{
 				Id:      3,
-				Address: "tiflash1",
+				Address: "mock://tiflash-3:3",
 				State:   metapb.StoreState_Up,
 				Labels: []*metapb.StoreLabel{
 					{
@@ -318,7 +320,7 @@ func (suite *strictlyLabelsStoreTestSuite) TestStoreMatch() {
 				Version: testCase.store.Version,
 			},
 		})
-		if testCase.store.Address == "tiflash1" {
+		if testCase.store.Address == "mock://tiflash-3:3" {
 			re.Contains(resp.GetHeader().GetError().String(), testCase.expectError)
 			continue
 		}

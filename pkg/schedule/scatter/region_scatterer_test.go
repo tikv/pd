@@ -186,7 +186,7 @@ func scatterSpecial(re *require.Assertions, numOrdinaryStores, numSpecialStores,
 		tc.AddLabelsStore(numOrdinaryStores+i, 0, map[string]string{"engine": "tiflash"})
 	}
 	tc.SetEnablePlacementRules(true)
-	re.NoError(tc.RuleManager.SetRule(&placement.Rule{
+	re.NoError(tc.SetRule(&placement.Rule{
 		GroupID: placement.DefaultGroupID, ID: "learner", Role: placement.Learner, Count: 3,
 		LabelConstraints: []placement.LabelConstraint{{Key: "engine", Op: placement.In, Values: []string{"tiflash"}}}}))
 
@@ -576,7 +576,7 @@ func TestRegionHasLearner(t *testing.T) {
 	for i := voterCount + 1; i <= 8; i++ {
 		tc.AddLabelsStore(i, 0, map[string]string{"zone": "z2"})
 	}
-	tc.RuleManager.SetRule(&placement.Rule{
+	tc.SetRule(&placement.Rule{
 		GroupID: placement.DefaultGroupID,
 		ID:      placement.DefaultRuleID,
 		Role:    placement.Voter,
@@ -589,7 +589,7 @@ func TestRegionHasLearner(t *testing.T) {
 			},
 		},
 	})
-	tc.RuleManager.SetRule(&placement.Rule{
+	tc.SetRule(&placement.Rule{
 		GroupID: placement.DefaultGroupID,
 		ID:      "learner",
 		Role:    placement.Learner,

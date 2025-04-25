@@ -38,7 +38,8 @@ import (
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/server"
-	"github.com/tikv/pd/server/config"
+	"github.com/tikv/pd/server/api"
+	"github.com/tikv/pd/tests"
 )
 
 type storeTestSuite struct {
@@ -71,14 +72,14 @@ func (suite *storeTestSuite) SetupSuite() {
 		{
 			// metapb.StoreState_Up == 0
 			Id:        1,
-			Address:   "tikv1",
+			Address:   "mock://tikv-1:1",
 			State:     metapb.StoreState_Up,
 			NodeState: metapb.NodeState_Serving,
 			Version:   "2.0.0",
 		},
 		{
 			Id:        4,
-			Address:   "tikv4",
+			Address:   "mock://tikv-4:4",
 			State:     metapb.StoreState_Up,
 			NodeState: metapb.NodeState_Serving,
 			Version:   "2.0.0",
@@ -86,7 +87,7 @@ func (suite *storeTestSuite) SetupSuite() {
 		{
 			// metapb.StoreState_Offline == 1
 			Id:        6,
-			Address:   "tikv6",
+			Address:   "mock://tikv-6:6",
 			State:     metapb.StoreState_Offline,
 			NodeState: metapb.NodeState_Removing,
 			Version:   "2.0.0",
@@ -94,20 +95,19 @@ func (suite *storeTestSuite) SetupSuite() {
 		{
 			// metapb.StoreState_Tombstone == 2
 			Id:        7,
-			Address:   "tikv7",
+			Address:   "mock://tikv-7:7",
 			State:     metapb.StoreState_Tombstone,
 			NodeState: metapb.NodeState_Removed,
 			Version:   "2.0.0",
 		},
 	}
-	// TODO: enable placmentrules
 	re := suite.Require()
-	suite.svr, suite.cleanup = mustNewServer(re, func(cfg *config.Config) { cfg.Replication.EnablePlacementRules = false })
-	server.MustWaitLeader(re, []*server.Server{suite.svr})
+	suite.svr, suite.cleanup = mustNewServer(re)
+	tests.MustWaitLeader(re, []*server.Server{suite.svr})
 
 	addr := suite.svr.GetAddr()
 	suite.grpcSvr = &server.GrpcServer{Server: suite.svr}
-	suite.urlPrefix = fmt.Sprintf("%s%s/api/v1", addr, apiPrefix)
+	suite.urlPrefix = fmt.Sprintf("%s%s/api/v1", addr, api.APIPrefix)
 
 	mustBootstrapCluster(re, suite.svr)
 
@@ -173,7 +173,7 @@ func (suite *storeTestSuite) TestStoresList() {
 	s := &server.GrpcServer{Server: suite.svr}
 	store := &metapb.Store{
 		Id:            100,
-		Address:       fmt.Sprintf("tikv%d", 100),
+		Address:       "mock://tikv-100:100",
 		State:         metapb.StoreState_Up,
 		Version:       versioninfo.MinSupportedVersion(versioninfo.Version2_0).String(),
 		LastHeartbeat: time.Now().UnixNano() - int64(1*time.Hour),
@@ -437,19 +437,19 @@ func (suite *storeTestSuite) TestUrlStoreFilter() {
 	for _, testCase := range testCases {
 		uu, err := url.Parse(testCase.u)
 		re.NoError(err)
-		f, err := newStoreStateFilter(uu)
+		f, err := api.NewStoreStateFilter(uu)
 		re.NoError(err)
-		re.Equal(testCase.want, f.filter(suite.stores))
+		re.Equal(testCase.want, f.Filter(suite.stores))
 	}
 
 	u, err := url.Parse("http://localhost:2379/pd/api/v1/stores?state=foo")
 	re.NoError(err)
-	_, err = newStoreStateFilter(u)
+	_, err = api.NewStoreStateFilter(u)
 	re.Error(err)
 
 	u, err = url.Parse("http://localhost:2379/pd/api/v1/stores?state=999999")
 	re.NoError(err)
-	_, err = newStoreStateFilter(u)
+	_, err = api.NewStoreStateFilter(u)
 	re.Error(err)
 }
 
