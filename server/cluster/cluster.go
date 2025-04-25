@@ -1016,7 +1016,6 @@ func (c *RaftCluster) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest
 	if store == nil {
 		return errors.Errorf("store %v not found", storeID)
 	}
-	statistics.UpdateStoreHeartbeatMetrics(store)
 
 	limit := store.GetStoreLimit()
 	version := c.opt.GetStoreLimitVersion()
@@ -1041,8 +1040,9 @@ func (c *RaftCluster) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest
 			}
 		}
 	}
-	opts = append(opts, core.SetStoreStats(stats), core.SetLastHeartbeatTS(nowTime))
 
+	statistics.UpdateStoreHeartbeatMetrics(store)
+	opts = append(opts, core.SetStoreStats(stats), core.SetLastHeartbeatTS(nowTime))
 	newStore := store.Clone(opts...)
 
 	if newStore.IsLowSpace(c.opt.GetLowSpaceRatio()) {
