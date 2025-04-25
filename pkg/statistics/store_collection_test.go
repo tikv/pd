@@ -15,7 +15,7 @@
 package statistics
 
 import (
-	"strconv"
+	"fmt"
 	"testing"
 	"time"
 
@@ -39,15 +39,15 @@ func TestStoreStatistics(t *testing.T) {
 	opt.SetReplicationConfig(rep)
 
 	metaStores := []*metapb.Store{
-		{Id: 1, Address: "mock://tikv-1", Labels: []*metapb.StoreLabel{{Key: "zone", Value: "z1"}, {Key: "host", Value: "h1"}}},
-		{Id: 2, Address: "mock://tikv-2", Labels: []*metapb.StoreLabel{{Key: "zone", Value: "z1"}, {Key: "host", Value: "h2"}}},
-		{Id: 3, Address: "mock://tikv-3", Labels: []*metapb.StoreLabel{{Key: "zone", Value: "z2"}, {Key: "host", Value: "h1"}}},
-		{Id: 4, Address: "mock://tikv-4", Labels: []*metapb.StoreLabel{{Key: "zone", Value: "z2"}, {Key: "host", Value: "h2"}}},
-		{Id: 5, Address: "mock://tikv-5", Labels: []*metapb.StoreLabel{{Key: "zone", Value: "z3"}, {Key: "host", Value: "h1"}}},
-		{Id: 6, Address: "mock://tikv-6", Labels: []*metapb.StoreLabel{{Key: "zone", Value: "z3"}, {Key: "host", Value: "h2"}}},
-		{Id: 7, Address: "mock://tikv-7", Labels: []*metapb.StoreLabel{{Key: "host", Value: "h1"}}},
-		{Id: 8, Address: "mock://tikv-8", Labels: []*metapb.StoreLabel{{Key: "host", Value: "h2"}}},
-		{Id: 8, Address: "mock://tikv-9", Labels: []*metapb.StoreLabel{{Key: "host", Value: "h3"}}, State: metapb.StoreState_Tombstone, NodeState: metapb.NodeState_Removed},
+		{Id: 1, Address: "mock://tikv-1:1", Labels: []*metapb.StoreLabel{{Key: "zone", Value: "z1"}, {Key: "host", Value: "h1"}}},
+		{Id: 2, Address: "mock://tikv-2:2", Labels: []*metapb.StoreLabel{{Key: "zone", Value: "z1"}, {Key: "host", Value: "h2"}}},
+		{Id: 3, Address: "mock://tikv-3:3", Labels: []*metapb.StoreLabel{{Key: "zone", Value: "z2"}, {Key: "host", Value: "h1"}}},
+		{Id: 4, Address: "mock://tikv-4:4", Labels: []*metapb.StoreLabel{{Key: "zone", Value: "z2"}, {Key: "host", Value: "h2"}}},
+		{Id: 5, Address: "mock://tikv-5:5", Labels: []*metapb.StoreLabel{{Key: "zone", Value: "z3"}, {Key: "host", Value: "h1"}}},
+		{Id: 6, Address: "mock://tikv-6:6", Labels: []*metapb.StoreLabel{{Key: "zone", Value: "z3"}, {Key: "host", Value: "h2"}}},
+		{Id: 7, Address: "mock://tikv-7:7", Labels: []*metapb.StoreLabel{{Key: "host", Value: "h1"}}},
+		{Id: 8, Address: "mock://tikv-8:8", Labels: []*metapb.StoreLabel{{Key: "host", Value: "h2"}}},
+		{Id: 8, Address: "mock://tikv-9:9", Labels: []*metapb.StoreLabel{{Key: "host", Value: "h3"}}, State: metapb.StoreState_Tombstone, NodeState: metapb.NodeState_Removed},
 	}
 	storesStats := NewStoresStats()
 	stores := make([]*core.StoreInfo, 0, len(metaStores))
@@ -108,7 +108,7 @@ func TestSummaryStoreInfos(t *testing.T) {
 	for _, storeID := range []int{1, 3} {
 		storeInfos[uint64(storeID)] = &StoreSummaryInfo{
 			isTiFlash: false,
-			StoreInfo: core.NewStoreInfo(&metapb.Store{Id: uint64(storeID), Address: "mock://tikv" + strconv.Itoa(storeID)}, core.SetLastHeartbeatTS(time.Now())),
+			StoreInfo: core.NewStoreInfo(&metapb.Store{Id: uint64(storeID), Address: fmt.Sprintf("mock://tikv-%d:%d", storeID, storeID)}, core.SetLastHeartbeatTS(time.Now())),
 		}
 		storeLoads[uint64(storeID)] = []float64{1, 2, 0, 0, 5}
 		for i, v := range storeLoads[uint64(storeID)] {
