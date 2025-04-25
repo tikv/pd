@@ -127,7 +127,7 @@ func (s *Service) Tso(stream tsopb.TSO_TsoServer) error {
 
 			tsoProtoFactory := s.tsoProtoFactory
 			tsoRequest := tsoutil.NewTSOProtoRequest(forwardedHost, clientConn, request, stream)
-			s.tsoDispatcher.DispatchRequest(ctx, tsoRequest, tsoProtoFactory, doneCh, errCh)
+			s.tsoDispatcher.DispatchRequest(ctx, tsoRequest, tsoProtoFactory)
 			continue
 		}
 
