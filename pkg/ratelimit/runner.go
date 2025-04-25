@@ -116,7 +116,7 @@ func (cr *ConcurrentRunner) Start(ctx context.Context) {
 			select {
 			case task := <-cr.taskChan:
 				if cr.limiter != nil {
-					token, err := cr.limiter.AcquireToken(context.Background())
+					token, err := cr.limiter.AcquireToken(cr.ctx)
 					if err != nil {
 						continue
 					}
