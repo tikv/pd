@@ -1016,6 +1016,7 @@ func (c *RaftCluster) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest
 	if store == nil {
 		return errors.Errorf("store %v not found", storeID)
 	}
+	statistics.UpdateStoreHeartbeatMetrics(store)
 
 	limit := store.GetStoreLimit()
 	version := c.opt.GetStoreLimitVersion()
@@ -1057,18 +1058,8 @@ func (c *RaftCluster) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest
 			opts = append(opts, core.SetLastPersistTime(nowTime))
 		}
 	}
-<<<<<<< HEAD
-	if store := c.GetStore(storeID); store != nil {
-		statistics.UpdateStoreHeartbeatMetrics(store)
-	}
-	c.PutStore(newStore)
-=======
-	// Supply NodeState in the response to help the store handle special cases
-	// more conveniently, such as avoiding calling `remove_peer` redundantly under
-	// NodeState_Removing.
-	resp.State = store.GetNodeState()
+
 	c.PutStore(newStore, opts...)
->>>>>>> a16b00039 (store: update StoreInfo inside putStoreLocked (#9187))
 	var (
 		regions  map[uint64]*core.RegionInfo
 		interval uint64
