@@ -16,11 +16,8 @@ package tsoutil
 
 import (
 	"context"
-<<<<<<< HEAD
-	"strings"
-=======
 	"errors"
->>>>>>> 505569c77 (tso: fix tso proxy error propagation (#9219))
+	"strings"
 	"sync"
 	"time"
 

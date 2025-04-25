@@ -536,21 +536,13 @@ func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
 	go tsoutil.WatchTSDeadline(stream.Context(), tsDeadlineCh)
 
 	var (
-<<<<<<< HEAD
-		doneCh chan struct{}
-		errCh  chan error
-		// The following are tso forward stream related variables.
-		forwardStream     tsopb.TSO_TsoClient
-		cancelForward     context.CancelFunc
-		forwardCtx        context.Context
-		tsoStreamErr      error
-		lastForwardedHost string
-=======
 		// The following are tso forward stream related variables.
 		tsoRequestProxyCtx context.Context
-		forwarder          = newTSOForwarder(stream)
+		forwardStream      tsopb.TSO_TsoClient
+		cancelForward      context.CancelFunc
+		forwardCtx         context.Context
 		tsoStreamErr       error
->>>>>>> 505569c77 (tso: fix tso proxy error propagation (#9219))
+		lastForwardedHost  string
 	)
 
 	defer func() {
