@@ -15,25 +15,34 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
 	tu "github.com/tikv/pd/pkg/utils/testutil"
+	"github.com/tikv/pd/tests"
 )
 
 func TestGRPCGateway(t *testing.T) {
 	re := require.New(t)
-	svr, clean := mustNewServer(re)
-	defer clean()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cluster, err := tests.NewTestCluster(ctx, 1)
+	re.NoError(err)
+	defer cluster.Destroy()
+	err = cluster.RunInitialServers()
+	re.NoError(err)
+	re.NotEmpty(cluster.WaitLeader())
+	leaderServer := cluster.GetLeaderServer()
 
-	addr := svr.GetConfig().ClientUrls + "/v3/kv/put"
+	addr := leaderServer.GetAddr() + "/v3/kv/put"
 	putKey := map[string]string{"key": "Zm9v", "value": "YmFy"}
 	v, _ := json.Marshal(putKey)
-	err := tu.CheckPostJSON(testDialClient, addr, v, tu.StatusOK(re))
+	err = tu.CheckPostJSON(testDialClient, addr, v, tu.StatusOK(re))
 	re.NoError(err)
-	addr = svr.GetConfig().ClientUrls + "/v3/kv/range"
+	addr = leaderServer.GetAddr() + "/v3/kv/range"
 	getKey := map[string]string{"key": "Zm9v"}
 	v, _ = json.Marshal(getKey)
 	err = tu.CheckPostJSON(testDialClient, addr, v, tu.StatusOK(re), tu.StringContain(re, "Zm9v"))
