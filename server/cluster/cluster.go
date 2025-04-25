@@ -1398,7 +1398,6 @@ func (c *RaftCluster) putStoreImpl(store *metapb.Store, force bool) error {
 
 	opts := make([]core.StoreCreateOption, 0)
 	s := c.GetStore(store.GetId())
-
 	if s == nil {
 		// Add a new store.
 		s = core.NewStoreInfo(store)
