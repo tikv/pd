@@ -233,6 +233,8 @@ func MustPutStore(re *require.Assertions, tc *TestCluster, store *metapb.Store) 
 			UsedSize:  uint64(9 * units.GiB),
 			Available: uint64(1 * units.GiB),
 		}),
+		core.SetStoreState(store.GetState(), store.GetPhysicallyDestroyed()),
+		core.SetNodeState(store.GetNodeState()),
 		core.SetLastHeartbeatTS(time.Unix(ts/1e9, ts%1e9)),
 	)
 	raftCluster.GetBasicCluster().PutStore(newStore)

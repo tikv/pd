@@ -21,6 +21,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -29,19 +30,13 @@ import (
 	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/schedule/types"
 	tu "github.com/tikv/pd/pkg/utils/testutil"
-	"github.com/tikv/pd/server"
-	"github.com/tikv/pd/server/api"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
 )
 
 type diagnosticTestSuite struct {
 	suite.Suite
-	svr             *server.Server
-	cleanup         tu.CleanupFunc
-	urlPrefix       string
-	configPrefix    string
-	schedulerPrefix string
+	env *tests.SchedulingTestEnvironment
 }
 
 func TestDiagnosticTestSuite(t *testing.T) {
@@ -49,44 +44,41 @@ func TestDiagnosticTestSuite(t *testing.T) {
 }
 
 func (suite *diagnosticTestSuite) SetupSuite() {
-	re := suite.Require()
-	suite.svr, suite.cleanup = mustNewServer(re)
-	tests.MustWaitLeader(re, []*server.Server{suite.svr})
-
-	addr := suite.svr.GetAddr()
-	suite.urlPrefix = fmt.Sprintf("%s%s/api/v1/schedulers/diagnostic", addr, api.APIPrefix)
-	suite.schedulerPrefix = fmt.Sprintf("%s%s/api/v1/schedulers", addr, api.APIPrefix)
-	suite.configPrefix = fmt.Sprintf("%s%s/api/v1/config", addr, api.APIPrefix)
-
-	mustBootstrapCluster(re, suite.svr)
-	mustPutStore(re, suite.svr, 1, metapb.StoreState_Up, metapb.NodeState_Serving, nil)
-	mustPutStore(re, suite.svr, 2, metapb.StoreState_Up, metapb.NodeState_Serving, nil)
+	suite.env = tests.NewSchedulingTestEnvironment(suite.T())
 }
 
 func (suite *diagnosticTestSuite) TearDownSuite() {
-	suite.cleanup()
-}
-
-func (suite *diagnosticTestSuite) checkStatus(status string, url string) {
-	re := suite.Require()
-	err := tu.CheckGetUntilStatusCode(re, testDialClient, url, http.StatusOK)
-	re.NoError(err)
-	suite.Eventually(func() bool {
-		result := &schedulers.DiagnosticResult{}
-		err := tu.ReadGetJSON(re, testDialClient, url, result)
-		re.NoError(err)
-		return result.Status == status
-	}, time.Second, time.Millisecond*50)
+	suite.env.Cleanup()
 }
 
 func (suite *diagnosticTestSuite) TestSchedulerDiagnosticAPI() {
+	suite.env.RunTestInNonMicroserviceEnv(suite.checkSchedulerDiagnosticAPI)
+}
+
+func (suite *diagnosticTestSuite) checkSchedulerDiagnosticAPI(cluster *tests.TestCluster) {
 	re := suite.Require()
-	addr := suite.configPrefix
+
+	for i := range 3 {
+		tests.MustPutStore(re, cluster, &metapb.Store{
+			Id:        uint64(i + 1),
+			Address:   fmt.Sprintf("mock://tikv-%d:%d", i+1, i+1),
+			State:     metapb.StoreState_Up,
+			NodeState: metapb.NodeState_Serving,
+		})
+	}
+
+	leader := cluster.GetLeaderServer()
+	urlPrefix := leader.GetAddr() + "/pd/api/v1"
+
+	diagnosticPrefix := fmt.Sprintf("%s/schedulers/diagnostic", urlPrefix)
+	schedulerPrefix := fmt.Sprintf("%s/schedulers", urlPrefix)
+	configPrefix := fmt.Sprintf("%s/config", urlPrefix)
+
 	cfg := &config.Config{}
-	err := tu.ReadGetJSON(re, testDialClient, addr, cfg)
+	err := tu.ReadGetJSON(re, testDialClient, configPrefix, cfg)
 	re.NoError(err)
 
-	re.NoError(tu.ReadGetJSON(re, testDialClient, addr, cfg))
+	re.NoError(tu.ReadGetJSON(re, testDialClient, configPrefix, cfg))
 	re.True(cfg.Schedule.EnableDiagnostic)
 
 	ms := map[string]any{
@@ -95,50 +87,59 @@ func (suite *diagnosticTestSuite) TestSchedulerDiagnosticAPI() {
 	}
 	postData, err := json.Marshal(ms)
 	re.NoError(err)
-	re.NoError(tu.CheckPostJSON(testDialClient, addr, postData, tu.StatusOK(re)))
+	re.NoError(tu.CheckPostJSON(testDialClient, configPrefix, postData, tu.StatusOK(re)))
 	cfg = &config.Config{}
-	re.NoError(tu.ReadGetJSON(re, testDialClient, addr, cfg))
+	re.NoError(tu.ReadGetJSON(re, testDialClient, configPrefix, cfg))
 	re.True(cfg.Schedule.EnableDiagnostic)
 
-	balanceRegionURL := suite.urlPrefix + "/" + types.BalanceRegionScheduler.String()
+	balanceRegionURL := diagnosticPrefix + "/" + types.BalanceRegionScheduler.String()
 	result := &schedulers.DiagnosticResult{}
 	err = tu.ReadGetJSON(re, testDialClient, balanceRegionURL, result)
 	re.NoError(err)
 	re.Equal("disabled", result.Status)
 
-	evictLeaderURL := suite.urlPrefix + "/" + types.EvictLeaderScheduler.String()
+	evictLeaderURL := diagnosticPrefix + "/" + types.EvictLeaderScheduler.String()
 	re.NoError(tu.CheckGetJSON(testDialClient, evictLeaderURL, nil, tu.StatusNotOK(re)))
 
 	input := make(map[string]any)
 	input["name"] = types.BalanceRegionScheduler.String()
 	body, err := json.Marshal(input)
 	re.NoError(err)
-	err = tu.CheckPostJSON(testDialClient, suite.schedulerPrefix, body, tu.StatusOK(re))
+	err = tu.CheckPostJSON(testDialClient, schedulerPrefix, body, tu.StatusOK(re))
 	re.NoError(err)
-	suite.checkStatus("pending", balanceRegionURL)
+	checkStatus(re, "pending", balanceRegionURL)
 
 	input = make(map[string]any)
 	input["delay"] = 30
 	pauseArgs, err := json.Marshal(input)
 	re.NoError(err)
-	err = tu.CheckPostJSON(testDialClient, suite.schedulerPrefix+"/"+types.BalanceRegionScheduler.String(), pauseArgs, tu.StatusOK(re))
+	err = tu.CheckPostJSON(testDialClient, schedulerPrefix+"/"+types.BalanceRegionScheduler.String(), pauseArgs, tu.StatusOK(re))
 	re.NoError(err)
-	suite.checkStatus("paused", balanceRegionURL)
+	checkStatus(re, "paused", balanceRegionURL)
 
 	input["delay"] = 0
 	pauseArgs, err = json.Marshal(input)
 	re.NoError(err)
-	err = tu.CheckPostJSON(testDialClient, suite.schedulerPrefix+"/"+types.BalanceRegionScheduler.String(), pauseArgs, tu.StatusOK(re))
+	err = tu.CheckPostJSON(testDialClient, schedulerPrefix+"/"+types.BalanceRegionScheduler.String(), pauseArgs, tu.StatusOK(re))
 	re.NoError(err)
-	suite.checkStatus("pending", balanceRegionURL)
+	checkStatus(re, "pending", balanceRegionURL)
 
-	fmt.Println("before put region")
-	mustPutRegion(re, suite.svr, 1000, 1, []byte("a"), []byte("b"), core.SetApproximateSize(60))
-	fmt.Println("after put region")
-	suite.checkStatus("normal", balanceRegionURL)
+	tests.MustPutRegion(re, cluster, 1000, 1, []byte("a"), []byte("b"), core.SetApproximateSize(60))
+	checkStatus(re, "normal", balanceRegionURL)
 
-	deleteURL := fmt.Sprintf("%s/%s", suite.schedulerPrefix, types.BalanceRegionScheduler.String())
+	deleteURL := fmt.Sprintf("%s/%s", schedulerPrefix, types.BalanceRegionScheduler.String())
 	err = tu.CheckDelete(testDialClient, deleteURL, tu.StatusOK(re))
 	re.NoError(err)
-	suite.checkStatus("disabled", balanceRegionURL)
+	checkStatus(re, "disabled", balanceRegionURL)
+}
+
+func checkStatus(re *require.Assertions, status string, url string) {
+	err := tu.CheckGetUntilStatusCode(re, testDialClient, url, http.StatusOK)
+	re.NoError(err)
+	re.Eventually(func() bool {
+		result := &schedulers.DiagnosticResult{}
+		err := tu.ReadGetJSON(re, testDialClient, url, result)
+		re.NoError(err)
+		return result.Status == status
+	}, time.Second, time.Millisecond*50)
 }
