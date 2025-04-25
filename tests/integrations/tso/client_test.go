@@ -505,31 +505,22 @@ func TestTSOFollowerProxyWhenLeaderChanged(t *testing.T) {
 	re.NoError(pdClient.UpdateOption(opt.EnableTSOFollowerProxy, true))
 	// client can get ts response after pd leader changed
 	re.NoError(pdLeader.ResignLeader())
-	checkErrFn := func(errMsg string) {
+	reqCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	_, _, err = pdClient.GetTS(reqCtx)
+	re.ErrorContains(err, "requested pd is not leader of cluster")
+	pdCluster.WaitLeader()
+	// it will work when pull/9219 is merged
+	testutil.Eventually(re, func() bool {
 		reqCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		defer cancel()
 		_, _, err = pdClient.GetTS(reqCtx)
-		if errMsg != "" {
-			re.ErrorContains(err, errMsg)
-		} else {
-			re.NoError(err)
+		if err != nil {
+			re.Contains(err.Error(), "pd is not leader of cluster")
+			return false
 		}
-	}
-	checkErrFn("rpc error")
-	pdCluster.WaitLeader()
-	// try again, the error is same
-	checkErrFn("rpc error")
-	// it will work when pull/9219 is merged
-	//testutil.Eventually(re, func() bool {
-	//	reqCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	//	defer cancel()
-	//	_, _, err = pdClient.GetTS(reqCtx)
-	//	if err != nil {
-	//		re.Contains(err.Error(), "pd is not leader of cluster")
-	//		return false
-	//	}
-	//	return err == nil
-	//}, testutil.WithWaitFor(time.Second))
+		return err == nil
+	}, testutil.WithWaitFor(time.Second))
 }
 
 func TestTSONotLeader(t *testing.T) {
@@ -559,10 +550,6 @@ func TestTSONotLeader(t *testing.T) {
 		pdLeader.ResignLeader()
 		for range 10 {
 			_, _, err := client.GetTS(ctx)
-			// stream maybe cancelld when the leader is resigned
-			if err.Error() == context.Canceled.Error() {
-				return
-			}
 			re.ErrorContains(err, "not leader")
 		}
 	}(pdClient)
