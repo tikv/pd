@@ -437,7 +437,7 @@ func (bs *balanceSolver) filterHotPeers(storeLoad *statistics.StoreLoadDetail) [
 		bs.nthHotPeer[storeID][bs.secondPriority] = secondSort[topnPosition-1]
 	}
 	if len(hotPeers) > bs.maxPeerNum {
-		union := bs.sortHotPeers(firstSort, secondSort)
+		union := sortHotPeers(firstSort, secondSort, bs.maxPeerNum)
 		ret = make([]*statistics.HotPeerStat, 0, len(union))
 		for peer := range union {
 			appendItem(peer)
@@ -451,10 +451,13 @@ func (bs *balanceSolver) filterHotPeers(storeLoad *statistics.StoreLoadDetail) [
 	return ret
 }
 
-func (bs *balanceSolver) sortHotPeers(firstSort, secondSort []*statistics.HotPeerStat) map[*statistics.HotPeerStat]struct{} {
-	union := make(map[*statistics.HotPeerStat]struct{}, bs.maxPeerNum)
+func sortHotPeers[T any](firstSort, secondSort []*T, maxPeerNum int) map[*T]struct{} {
+	union := make(map[*T]struct{}, maxPeerNum)
 	// At most MaxPeerNum peers, to prevent balanceSolver.solve() too slow.
-	for len(union) < bs.maxPeerNum {
+	for len(union) < maxPeerNum {
+		if len(firstSort) == 0 && len(secondSort) == 0 {
+			break
+		}
 		for len(firstSort) > 0 {
 			peer := firstSort[0]
 			firstSort = firstSort[1:]
@@ -463,7 +466,7 @@ func (bs *balanceSolver) sortHotPeers(firstSort, secondSort []*statistics.HotPee
 				break
 			}
 		}
-		for len(union) < bs.maxPeerNum && len(secondSort) > 0 {
+		for len(union) < maxPeerNum && len(secondSort) > 0 {
 			peer := secondSort[0]
 			secondSort = secondSort[1:]
 			if _, ok := union[peer]; !ok {
