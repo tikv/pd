@@ -36,6 +36,7 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/kvproto/pkg/schedulingpb"
 	"github.com/pingcap/log"
 
 	bs "github.com/tikv/pd/pkg/basicserver"
@@ -200,7 +201,7 @@ func WaitForPrimaryServing(re *require.Assertions, serverMap map[string]bs.Serve
 
 // MustPutStore is used for test purpose.
 func MustPutStore(re *require.Assertions, tc *TestCluster, store *metapb.Store) {
-	store.Address = fmt.Sprintf("tikv%d", store.GetId())
+	store.Address = fmt.Sprintf("mock://tikv-%d:%d", store.GetId(), store.GetId())
 	if len(store.Version) == 0 {
 		store.Version = versioninfo.MinSupportedVersion(versioninfo.Version2_0).String()
 	}
@@ -265,6 +266,22 @@ func MustPutRegionInfo(re *require.Assertions, cluster *TestCluster, regionInfo 
 	re.NoError(err)
 	if cluster.GetSchedulingPrimaryServer() != nil {
 		err = cluster.GetSchedulingPrimaryServer().GetCluster().HandleRegionHeartbeat(regionInfo)
+		re.NoError(err)
+	}
+}
+
+// MustHandleStoreHeartbeat is used for test purpose.
+func MustHandleStoreHeartbeat(re *require.Assertions, cluster *TestCluster, heartbeat *pdpb.StoreHeartbeatRequest) {
+	err := cluster.GetLeaderServer().GetRaftCluster().HandleStoreHeartbeat(heartbeat, &pdpb.StoreHeartbeatResponse{})
+	re.NoError(err)
+	if cluster.GetSchedulingPrimaryServer() != nil {
+		hb := &schedulingpb.StoreHeartbeatRequest{
+			Header: &schedulingpb.RequestHeader{
+				ClusterId: heartbeat.Header.ClusterId,
+			},
+			Stats: heartbeat.GetStats(),
+		}
+		err = cluster.GetSchedulingPrimaryServer().GetCluster().HandleStoreHeartbeat(hb)
 		re.NoError(err)
 	}
 }
@@ -397,7 +414,9 @@ func (s *SchedulingTestEnvironment) startCluster(m Env) {
 		re.NoError(err)
 		re.NotEmpty(cluster.WaitLeader())
 		leaderServer := cluster.GetServer(cluster.GetLeader())
-		re.NoError(leaderServer.BootstrapCluster())
+		if !s.SkipBootstrap {
+			re.NoError(leaderServer.BootstrapCluster())
+		}
 		s.clusters[NonMicroserviceEnv] = cluster
 	case MicroserviceEnv:
 		cluster, err := NewTestClusterWithKeyspaceGroup(ctx, s.PDCount, s.opts...)

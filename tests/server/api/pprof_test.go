@@ -17,47 +17,41 @@ package api
 import (
 	"archive/zip"
 	"bytes"
-	"fmt"
 	"io"
 	"testing"
 
 	"github.com/stretchr/testify/suite"
 
-	"github.com/tikv/pd/pkg/utils/testutil"
-	"github.com/tikv/pd/server"
-	"github.com/tikv/pd/server/api"
 	"github.com/tikv/pd/tests"
 )
 
-type profTestSuite struct {
+type pprofTestSuite struct {
 	suite.Suite
-	svr       *server.Server
-	cleanup   testutil.CleanupFunc
-	urlPrefix string
+	env *tests.SchedulingTestEnvironment
 }
 
-func TestProfTestSuite(t *testing.T) {
-	suite.Run(t, new(profTestSuite))
+func TestPprofTestSuite(t *testing.T) {
+	suite.Run(t, new(pprofTestSuite))
 }
 
-func (suite *profTestSuite) SetupSuite() {
+func (suite *pprofTestSuite) SetupSuite() {
+	suite.env = tests.NewSchedulingTestEnvironment(suite.T())
+}
+
+func (suite *pprofTestSuite) TearDownSuite() {
+	suite.env.Cleanup()
+}
+
+func (suite *pprofTestSuite) TestGetZip() {
+	suite.env.RunTestInNonMicroserviceEnv(suite.checkGetZip)
+}
+
+func (suite *pprofTestSuite) checkGetZip(cluster *tests.TestCluster) {
 	re := suite.Require()
-	suite.svr, suite.cleanup = mustNewServer(re)
-	tests.MustWaitLeader(re, []*server.Server{suite.svr})
+	leader := cluster.GetLeaderServer()
+	urlPrefix := leader.GetAddr() + "/pd/api/v1"
 
-	addr := suite.svr.GetAddr()
-	suite.urlPrefix = fmt.Sprintf("%s%s/api/v1/debug", addr, api.APIPrefix)
-
-	mustBootstrapCluster(re, suite.svr)
-}
-
-func (suite *profTestSuite) TearDownSuite() {
-	suite.cleanup()
-}
-
-func (suite *profTestSuite) TestGetZip() {
-	re := suite.Require()
-	rsp, err := testDialClient.Get(suite.urlPrefix + "/pprof/zip?" + "seconds=5")
+	rsp, err := testDialClient.Get(urlPrefix + "/debug/pprof/zip?" + "seconds=5")
 	re.NoError(err)
 	defer rsp.Body.Close()
 	body, err := io.ReadAll(rsp.Body)
