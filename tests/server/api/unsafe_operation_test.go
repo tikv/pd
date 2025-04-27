@@ -16,8 +16,8 @@ package api
 
 import (
 	"encoding/json"
-	"fmt"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/suite"
 
@@ -25,16 +25,13 @@ import (
 
 	"github.com/tikv/pd/pkg/unsaferecovery"
 	tu "github.com/tikv/pd/pkg/utils/testutil"
-	"github.com/tikv/pd/server"
-	"github.com/tikv/pd/server/api"
+	"github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/tests"
 )
 
 type unsafeOperationTestSuite struct {
 	suite.Suite
-	svr       *server.Server
-	cleanup   tu.CleanupFunc
-	urlPrefix string
+	env *tests.SchedulingTestEnvironment
 }
 
 func TestUnsafeOperationTestSuite(t *testing.T) {
@@ -42,64 +39,86 @@ func TestUnsafeOperationTestSuite(t *testing.T) {
 }
 
 func (suite *unsafeOperationTestSuite) SetupTest() {
-	re := suite.Require()
-	suite.svr, suite.cleanup = mustNewServer(re)
-	tests.MustWaitLeader(re, []*server.Server{suite.svr})
-
-	addr := suite.svr.GetAddr()
-	suite.urlPrefix = fmt.Sprintf("%s%s/api/v1/admin/unsafe", addr, api.APIPrefix)
-
-	mustBootstrapCluster(re, suite.svr)
-	mustPutStore(re, suite.svr, 1, metapb.StoreState_Offline, metapb.NodeState_Removing, nil)
+	cluster.DefaultMinResolvedTSPersistenceInterval = time.Millisecond
+	suite.env = tests.NewSchedulingTestEnvironment(suite.T())
 }
 
 func (suite *unsafeOperationTestSuite) TearDownTest() {
-	suite.cleanup()
+	suite.env.Cleanup()
 }
 
 func (suite *unsafeOperationTestSuite) TestRemoveFailedStores() {
+	suite.env.RunTestInNonMicroserviceEnv(suite.checkRemoveFailedStores)
+}
+
+func (suite *unsafeOperationTestSuite) checkRemoveFailedStores(cluster *tests.TestCluster) {
 	re := suite.Require()
+
+	tests.MustPutStore(re, cluster, &metapb.Store{
+		Id:            1,
+		Address:       "mock://tikv-1:1",
+		State:         metapb.StoreState_Offline,
+		NodeState:     metapb.NodeState_Removing,
+		LastHeartbeat: time.Now().UnixNano(),
+	})
+
+	leader := cluster.GetLeaderServer()
+	urlPrefix := leader.GetAddr() + "/pd/api/v1/admin/unsafe"
 
 	input := map[string]any{"stores": []uint64{}}
 	data, _ := json.Marshal(input)
-	err := tu.CheckPostJSON(testDialClient, suite.urlPrefix+"/remove-failed-stores", data, tu.StatusNotOK(re),
+	err := tu.CheckPostJSON(testDialClient, urlPrefix+"/remove-failed-stores", data, tu.StatusNotOK(re),
 		tu.StringEqual(re, "\"[PD:unsaferecovery:ErrUnsafeRecoveryInvalidInput]invalid input no store specified\"\n"))
 	re.NoError(err)
 
 	input = map[string]any{"stores": []string{"abc", "def"}}
 	data, _ = json.Marshal(input)
-	err = tu.CheckPostJSON(testDialClient, suite.urlPrefix+"/remove-failed-stores", data, tu.StatusNotOK(re),
+	err = tu.CheckPostJSON(testDialClient, urlPrefix+"/remove-failed-stores", data, tu.StatusNotOK(re),
 		tu.StringEqual(re, "\"Store ids are invalid\"\n"))
 	re.NoError(err)
 
 	input = map[string]any{"stores": []uint64{1, 2}}
 	data, _ = json.Marshal(input)
-	err = tu.CheckPostJSON(testDialClient, suite.urlPrefix+"/remove-failed-stores", data, tu.StatusNotOK(re),
+	err = tu.CheckPostJSON(testDialClient, urlPrefix+"/remove-failed-stores", data, tu.StatusNotOK(re),
 		tu.StringEqual(re, "\"[PD:unsaferecovery:ErrUnsafeRecoveryInvalidInput]invalid input store 2 doesn't exist\"\n"))
 	re.NoError(err)
 
 	input = map[string]any{"stores": []uint64{1}}
 	data, _ = json.Marshal(input)
-	err = tu.CheckPostJSON(testDialClient, suite.urlPrefix+"/remove-failed-stores", data, tu.StatusOK(re))
+	err = tu.CheckPostJSON(testDialClient, urlPrefix+"/remove-failed-stores", data, tu.StatusOK(re))
 	re.NoError(err)
 
 	// Test show
 	var output []unsaferecovery.StageOutput
-	err = tu.ReadGetJSON(re, testDialClient, suite.urlPrefix+"/remove-failed-stores/show", &output)
+	err = tu.ReadGetJSON(re, testDialClient, urlPrefix+"/remove-failed-stores/show", &output)
 	re.NoError(err)
 }
 
 func (suite *unsafeOperationTestSuite) TestRemoveFailedStoresAutoDetect() {
+	suite.env.RunTestInNonMicroserviceEnv(suite.checkRemoveFailedStoresAutoDetect)
+}
+
+func (suite *unsafeOperationTestSuite) checkRemoveFailedStoresAutoDetect(cluster *tests.TestCluster) {
 	re := suite.Require()
+
+	tests.MustPutStore(re, cluster, &metapb.Store{
+		Id:            1,
+		Address:       "mock://tikv-1:1",
+		State:         metapb.StoreState_Offline,
+		NodeState:     metapb.NodeState_Removing,
+		LastHeartbeat: time.Now().UnixNano(),
+	})
+	leader := cluster.GetLeaderServer()
+	urlPrefix := leader.GetAddr() + "/pd/api/v1/admin/unsafe"
 
 	input := map[string]any{"auto-detect": false}
 	data, _ := json.Marshal(input)
-	err := tu.CheckPostJSON(testDialClient, suite.urlPrefix+"/remove-failed-stores", data, tu.StatusNotOK(re),
+	err := tu.CheckPostJSON(testDialClient, urlPrefix+"/remove-failed-stores", data, tu.StatusNotOK(re),
 		tu.StringEqual(re, "\"Store ids are invalid\"\n"))
 	re.NoError(err)
 
 	input = map[string]any{"auto-detect": true}
 	data, _ = json.Marshal(input)
-	err = tu.CheckPostJSON(testDialClient, suite.urlPrefix+"/remove-failed-stores", data, tu.StatusOK(re))
+	err = tu.CheckPostJSON(testDialClient, urlPrefix+"/remove-failed-stores", data, tu.StatusOK(re))
 	re.NoError(err)
 }

@@ -16,7 +16,6 @@ package api
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/url"
 	"sort"
 	"testing"
@@ -27,16 +26,12 @@ import (
 
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	tu "github.com/tikv/pd/pkg/utils/testutil"
-	"github.com/tikv/pd/server"
-	"github.com/tikv/pd/server/api"
 	"github.com/tikv/pd/tests"
 )
 
 type regionLabelTestSuite struct {
 	suite.Suite
-	svr       *server.Server
-	cleanup   tu.CleanupFunc
-	urlPrefix string
+	env *tests.SchedulingTestEnvironment
 }
 
 func TestRegionLabelTestSuite(t *testing.T) {
@@ -45,25 +40,27 @@ func TestRegionLabelTestSuite(t *testing.T) {
 
 func (suite *regionLabelTestSuite) SetupSuite() {
 	re := suite.Require()
-	suite.svr, suite.cleanup = mustNewServer(re)
-	tests.MustWaitLeader(re, []*server.Server{suite.svr})
-
-	addr := suite.svr.GetAddr()
-	suite.urlPrefix = fmt.Sprintf("%s%s/api/v1/config/region-label/", addr, api.APIPrefix)
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion", "return(true)"))
-	mustBootstrapCluster(re, suite.svr)
+	suite.env = tests.NewSchedulingTestEnvironment(suite.T())
 }
 
 func (suite *regionLabelTestSuite) TearDownSuite() {
 	re := suite.Require()
-	suite.cleanup()
+	suite.env.Cleanup()
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion"))
 }
 
 func (suite *regionLabelTestSuite) TestGetSet() {
+	suite.env.RunTestInNonMicroserviceEnv(suite.checkGetSet)
+}
+
+func (suite *regionLabelTestSuite) checkGetSet(cluster *tests.TestCluster) {
 	re := suite.Require()
+	leader := cluster.GetLeaderServer()
+	urlPrefix := leader.GetAddr() + "/pd/api/v1/config/region-label"
+
 	var resp []*labeler.LabelRule
-	err := tu.ReadGetJSON(re, testDialClient, suite.urlPrefix+"rules", &resp)
+	err := tu.ReadGetJSON(re, testDialClient, urlPrefix+"/rules", &resp)
 	re.NoError(err)
 	re.Empty(resp)
 
@@ -75,24 +72,24 @@ func (suite *regionLabelTestSuite) TestGetSet() {
 	ruleIDs := []string{"rule1", "rule2/a/b", "rule3"}
 	for _, rule := range rules {
 		data, _ := json.Marshal(rule)
-		err = tu.CheckPostJSON(testDialClient, suite.urlPrefix+"rule", data, tu.StatusOK(re))
+		err = tu.CheckPostJSON(testDialClient, urlPrefix+"/rule", data, tu.StatusOK(re))
 		re.NoError(err)
 	}
 	for i, id := range ruleIDs {
 		var rule labeler.LabelRule
-		err = tu.ReadGetJSON(re, testDialClient, suite.urlPrefix+"rule/"+url.QueryEscape(id), &rule)
+		err = tu.ReadGetJSON(re, testDialClient, urlPrefix+"/rule/"+url.QueryEscape(id), &rule)
 		re.NoError(err)
 		re.Equal(rules[i], &rule)
 	}
 
-	err = tu.ReadGetJSONWithBody(re, testDialClient, suite.urlPrefix+"rules/ids", []byte(`["rule1", "rule3"]`), &resp)
+	err = tu.ReadGetJSONWithBody(re, testDialClient, urlPrefix+"/rules/ids", []byte(`["rule1", "rule3"]`), &resp)
 	re.NoError(err)
 	expects := []*labeler.LabelRule{rules[0], rules[2]}
 	re.Equal(expects, resp)
 
-	err = tu.CheckDelete(testDialClient, suite.urlPrefix+"rule/"+url.QueryEscape("rule2/a/b"), tu.StatusOK(re))
+	err = tu.CheckDelete(testDialClient, urlPrefix+"/rule/"+url.QueryEscape("rule2/a/b"), tu.StatusOK(re))
 	re.NoError(err)
-	err = tu.ReadGetJSON(re, testDialClient, suite.urlPrefix+"rules", &resp)
+	err = tu.ReadGetJSON(re, testDialClient, urlPrefix+"/rules", &resp)
 	re.NoError(err)
 	sort.Slice(resp, func(i, j int) bool { return resp[i].ID < resp[j].ID })
 	re.Equal([]*labeler.LabelRule{rules[0], rules[2]}, resp)
@@ -104,9 +101,9 @@ func (suite *regionLabelTestSuite) TestGetSet() {
 		DeleteRules: []string{"rule1"},
 	}
 	data, _ := json.Marshal(patch)
-	err = tu.CheckPatchJSON(testDialClient, suite.urlPrefix+"rules", data, tu.StatusOK(re))
+	err = tu.CheckPatchJSON(testDialClient, urlPrefix+"/rules", data, tu.StatusOK(re))
 	re.NoError(err)
-	err = tu.ReadGetJSON(re, testDialClient, suite.urlPrefix+"rules", &resp)
+	err = tu.ReadGetJSON(re, testDialClient, urlPrefix+"/rules", &resp)
 	re.NoError(err)
 	sort.Slice(resp, func(i, j int) bool { return resp[i].ID < resp[j].ID })
 	re.Equal([]*labeler.LabelRule{rules[1], rules[2]}, resp)
