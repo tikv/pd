@@ -260,10 +260,6 @@ func stLdRate(dim int) func(ld *statistics.StoreLoad) float64 {
 	}
 }
 
-func stLdCount(ld *statistics.StoreLoad) float64 {
-	return ld.Count
-}
-
 type storeLoadCmp func(ld1, ld2 *statistics.StoreLoad) int
 
 // negLoadCmp returns a cmp that returns the negation of cmps.
