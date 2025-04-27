@@ -290,7 +290,8 @@ func (m *Manager) DeleteResourceGroup(name string) error {
 	// Clean up the resource group config metrics
 	resourceGroupConfigGauge.DeletePartialMatch(prometheus.Labels{newResourceGroupNameLabel: name})
 	m.Unlock()
-	return nil
+	// Clean up the resource group states
+	return m.storage.DeleteResourceGroupStates(name)
 }
 
 // GetResourceGroup returns a copy of a resource group.
