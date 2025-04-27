@@ -140,7 +140,7 @@ func TestSummaryStoreInfos(t *testing.T) {
 		expect := []float64{2, 4, 10}
 		for _, detail := range details {
 			loads := detail.LoadPred.Current.HistoryLoads
-			re.Equal(len(loads), len(expectHistoryLoads))
+			re.Len(loads, len(expectHistoryLoads))
 			storeID := detail.GetID()
 			for i := range loads {
 				for j := range loads[0] {
@@ -150,7 +150,7 @@ func TestSummaryStoreInfos(t *testing.T) {
 				}
 			}
 
-			re.Equal(len(detail.LoadPred.Expect.HistoryLoads), len(expectHistoryLoads))
+			re.Len(detail.LoadPred.Expect.HistoryLoads, len(expectHistoryLoads))
 			for i, loads := range detail.LoadPred.Expect.HistoryLoads {
 				for _, load := range loads {
 					if load != 0 {
