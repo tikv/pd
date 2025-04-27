@@ -475,6 +475,44 @@ func (suite *tsoClientTestSuite) TestGetTSWhileResettingTSOClient() {
 	re.NoError(failpoint.Disable("github.com/tikv/pd/client/delayDispatchTSORequest"))
 }
 
+func TestTSOFollowerProxyWhenLeaderChanged(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	pdCluster, err := tests.NewTestCluster(ctx, 3)
+	re.NoError(err)
+	defer pdCluster.Destroy()
+	err = pdCluster.RunInitialServers()
+	re.NoError(err)
+	leaderName := pdCluster.WaitLeader()
+	re.NotEmpty(leaderName)
+	pdLeader := pdCluster.GetServer(leaderName)
+	backendEndpoints := pdLeader.GetAddr()
+	pdClient, err := pd.NewClientWithContext(context.Background(),
+		[]string{backendEndpoints}, pd.SecurityOption{}, pd.WithMaxErrorRetry(1))
+	re.NoError(err)
+	defer pdClient.Close()
+	re.NoError(pdClient.UpdateOption(pd.EnableTSOFollowerProxy, true))
+	// client can get ts response after pd leader changed
+	re.NoError(pdLeader.ResignLeader())
+	reqCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	_, _, err = pdClient.GetTS(reqCtx)
+	re.ErrorContains(err, "rpc error")
+	pdCluster.WaitLeader()
+	// tso server works well and can't get the rpc error response
+	testutil.Eventually(re, func() bool {
+		reqCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+		_, _, err = pdClient.GetTS(reqCtx)
+		if err != nil {
+			re.Contains(err.Error(), "pd is not leader of cluster")
+			return false
+		}
+		return err == nil
+	}, testutil.WithWaitFor(time.Second))
+}
+
 func TestTSONotLeader(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
