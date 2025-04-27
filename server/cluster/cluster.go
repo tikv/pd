@@ -1765,83 +1765,17 @@ func (c *RaftCluster) isStorePrepared() bool {
 }
 
 func (c *RaftCluster) checkStores() {
-	c.storeStateLock.Lock()
-	defer c.storeStateLock.Unlock()
 	var offlineStores []*metapb.Store
 	var upStoreCount int
 	stores := c.GetStores()
 
 	for _, store := range stores {
-		// the store has already been tombstone
-		if store.IsRemoved() {
-			if store.DownTime() > gcTombstoneInterval {
-				err := c.deleteStore(store)
-				if err != nil {
-					log.Error("auto gc the tombstone store failed",
-						zap.Stringer("store", store.GetMeta()),
-						zap.Duration("down-time", store.DownTime()),
-						errs.ZapError(err))
-				} else {
-					log.Info("auto gc the tombstone store success", zap.Stringer("store", store.GetMeta()), zap.Duration("down-time", store.DownTime()))
-				}
-			}
-			continue
+		isUp, isOffline := c.checkStore(store, stores)
+		if isUp {
+			upStoreCount++
 		}
-
-		storeID := store.GetID()
-		if store.IsPreparing() {
-			if store.GetUptime() >= c.opt.GetMaxStorePreparingTime() || c.GetTotalRegionCount() < core.InitClusterRegionThreshold {
-				if err := c.ReadyToServeLocked(storeID); err != nil {
-					log.Error("change store to serving failed",
-						zap.Stringer("store", store.GetMeta()),
-						zap.Int("region-count", c.GetTotalRegionCount()),
-						errs.ZapError(err))
-				}
-			} else if c.IsPrepared() || (c.IsServiceIndependent(constant.SchedulingServiceName) && c.isStorePrepared()) {
-				threshold := c.getThreshold(stores, store)
-				regionSize := float64(store.GetRegionSize())
-				log.Debug("store serving threshold", zap.Uint64("store-id", storeID), zap.Float64("threshold", threshold), zap.Float64("region-size", regionSize))
-				if regionSize >= threshold {
-					if err := c.ReadyToServeLocked(storeID); err != nil {
-						log.Error("change store to serving failed",
-							zap.Stringer("store", store.GetMeta()),
-							errs.ZapError(err))
-					}
-				} else {
-					remaining := threshold - regionSize
-					// If we add multiple stores, the total will need to be changed.
-					c.progressManager.UpdateProgressTotal(encodePreparingProgressKey(storeID), threshold)
-					c.updateProgress(storeID, store.GetAddress(), preparingAction, regionSize, remaining, true /* inc */)
-				}
-			}
-		}
-
-		if store.IsUp() {
-			if !store.IsLowSpace(c.opt.GetLowSpaceRatio()) {
-				upStoreCount++
-			}
-			continue
-		}
-
-		offlineStore := store.GetMeta()
-		id := offlineStore.GetId()
-		regionSize := c.GetStoreRegionSize(id)
-		if c.IsPrepared() {
-			c.updateProgress(id, store.GetAddress(), removingAction, float64(regionSize), float64(regionSize), false /* dec */)
-		}
-		// If the store is empty, it can be buried.
-		needBury := c.GetStoreRegionCount(id) == 0
-		failpoint.Inject("doNotBuryStore", func(_ failpoint.Value) {
-			needBury = false
-		})
-		if needBury {
-			if err := c.BuryStoreLocked(id, false); err != nil {
-				log.Error("bury store failed",
-					zap.Stringer("store", offlineStore),
-					errs.ZapError(err))
-			}
-		} else {
-			offlineStores = append(offlineStores, offlineStore)
+		if isOffline {
+			offlineStores = append(offlineStores, store.GetMeta())
 		}
 	}
 
@@ -1855,6 +1789,81 @@ func (c *RaftCluster) checkStores() {
 			log.Warn("store may not turn into Tombstone, there are no extra up store has enough space to accommodate the extra replica", zap.Stringer("store", offlineStore))
 		}
 	}
+}
+
+func (c *RaftCluster) checkStore(store *core.StoreInfo, stores []*core.StoreInfo) (isUp, isOffline bool) {
+	c.storeStateLock.Lock()
+	defer c.storeStateLock.Unlock()
+	// the store has already been tombstone
+	if store.IsRemoved() {
+		if store.DownTime() > gcTombstoneInterval {
+			err := c.deleteStore(store)
+			if err != nil {
+				log.Error("auto gc the tombstone store failed",
+					zap.Stringer("store", store.GetMeta()),
+					zap.Duration("down-time", store.DownTime()),
+					errs.ZapError(err))
+			} else {
+				log.Info("auto gc the tombstone store success", zap.Stringer("store", store.GetMeta()), zap.Duration("down-time", store.DownTime()))
+			}
+		}
+		return
+	}
+
+	storeID := store.GetID()
+	if store.IsPreparing() {
+		if store.GetUptime() >= c.opt.GetMaxStorePreparingTime() || c.GetTotalRegionCount() < core.InitClusterRegionThreshold {
+			if err := c.ReadyToServeLocked(storeID); err != nil {
+				log.Error("change store to serving failed",
+					zap.Stringer("store", store.GetMeta()),
+					zap.Int("region-count", c.GetTotalRegionCount()),
+					errs.ZapError(err))
+			}
+		} else if c.IsPrepared() || (c.IsServiceIndependent(constant.SchedulingServiceName) && c.isStorePrepared()) {
+			threshold := c.getThreshold(stores, store)
+			regionSize := float64(store.GetRegionSize())
+			log.Debug("store serving threshold", zap.Uint64("store-id", storeID), zap.Float64("threshold", threshold), zap.Float64("region-size", regionSize))
+			if regionSize >= threshold {
+				if err := c.ReadyToServeLocked(storeID); err != nil {
+					log.Error("change store to serving failed",
+						zap.Stringer("store", store.GetMeta()),
+						errs.ZapError(err))
+				}
+			} else {
+				remaining := threshold - regionSize
+				// If we add multiple stores, the total will need to be changed.
+				c.progressManager.UpdateProgressTotal(encodePreparingProgressKey(storeID), threshold)
+				c.updateProgress(storeID, store.GetAddress(), preparingAction, regionSize, remaining, true /* inc */)
+			}
+		}
+	}
+
+	if store.IsUp() {
+		if !store.IsLowSpace(c.opt.GetLowSpaceRatio()) {
+			isUp = true
+		}
+		return
+	}
+
+	regionSize := c.GetStoreRegionSize(storeID)
+	if c.IsPrepared() {
+		c.updateProgress(storeID, store.GetAddress(), removingAction, float64(regionSize), float64(regionSize), false /* dec */)
+	}
+	// If the store is empty, it can be buried.
+	needBury := c.GetStoreRegionCount(storeID) == 0
+	failpoint.Inject("doNotBuryStore", func(_ failpoint.Value) {
+		needBury = false
+	})
+	if needBury {
+		if err := c.BuryStoreLocked(storeID, false); err != nil {
+			log.Error("bury store failed",
+				zap.Uint64("store-id", storeID),
+				errs.ZapError(err))
+		}
+	} else {
+		isOffline = true
+	}
+	return
 }
 
 func (c *RaftCluster) getThreshold(stores []*core.StoreInfo, store *core.StoreInfo) float64 {
