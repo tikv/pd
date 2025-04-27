@@ -55,7 +55,7 @@ func (suite *logTestSuite) checkSetLogLevel(cluster *tests.TestCluster) {
 	level := "error"
 	data, err := json.Marshal(level)
 	re.NoError(err)
-	err = tu.CheckPostJSON(testDialClient, urlPrefix+"/admin/log", data, tu.StatusOK(re))
+	err = tu.CheckPostJSON(tests.TestDialClient, urlPrefix+"/admin/log", data, tu.StatusOK(re))
 	re.NoError(err)
 	re.Equal(level, log.GetLevel().String())
 }

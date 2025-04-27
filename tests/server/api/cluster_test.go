@@ -71,7 +71,7 @@ func (suite *clusterTestSuite) checkCluster(cluster *tests.TestCluster) {
 	// Test set the config
 	url := fmt.Sprintf("%s/cluster", urlPrefix)
 	c1 := &metapb.Cluster{}
-	err := tu.ReadGetJSON(re, testDialClient, url, c1)
+	err := tu.ReadGetJSON(re, tests.TestDialClient, url, c1)
 	re.NoError(err)
 
 	c2 := &metapb.Cluster{}
@@ -81,7 +81,7 @@ func (suite *clusterTestSuite) checkCluster(cluster *tests.TestCluster) {
 	}
 	re.NoError(svr.SetReplicationConfig(r))
 
-	err = tu.ReadGetJSON(re, testDialClient, url, c2)
+	err = tu.ReadGetJSON(re, tests.TestDialClient, url, c2)
 	re.NoError(err)
 
 	c1.MaxPeerCount = 6
@@ -93,18 +93,18 @@ func (suite *clusterTestSuite) testGetClusterStatus(leader *tests.TestServer, ur
 	re := suite.Require()
 	url := fmt.Sprintf("%s/cluster/status", urlPrefix)
 	status := cluster.Status{}
-	err := tu.ReadGetJSON(re, testDialClient, url, &status)
+	err := tu.ReadGetJSON(re, tests.TestDialClient, url, &status)
 	re.NoError(err)
 	re.True(status.RaftBootstrapTime.IsZero())
 	re.False(status.IsInitialized)
 	now := time.Now()
 	re.NoError(leader.BootstrapCluster())
-	err = tu.ReadGetJSON(re, testDialClient, url, &status)
+	err = tu.ReadGetJSON(re, tests.TestDialClient, url, &status)
 	re.NoError(err)
 	re.True(status.RaftBootstrapTime.After(now))
 	re.False(status.IsInitialized)
 	leader.GetServer().SetReplicationConfig(sc.ReplicationConfig{MaxReplicas: 1})
-	err = tu.ReadGetJSON(re, testDialClient, url, &status)
+	err = tu.ReadGetJSON(re, tests.TestDialClient, url, &status)
 	re.NoError(err)
 	re.True(status.RaftBootstrapTime.After(now))
 	re.True(status.IsInitialized)

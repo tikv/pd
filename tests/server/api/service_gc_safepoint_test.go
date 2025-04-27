@@ -91,7 +91,7 @@ func (suite *serviceGCSafepointTestSuite) checkServiceGCSafepoint(cluster *tests
 	}
 	storage.SaveGCSafePoint(1)
 
-	res, err := testDialClient.Get(sspURL)
+	res, err := tests.TestDialClient.Get(sspURL)
 	re.NoError(err)
 	defer res.Body.Close()
 	listResp := &api.ListServiceGCSafepoint{}
@@ -99,7 +99,7 @@ func (suite *serviceGCSafepointTestSuite) checkServiceGCSafepoint(cluster *tests
 	re.NoError(err)
 	re.Equal(list, listResp)
 
-	err = testutil.CheckDelete(testDialClient, sspURL+"/a", testutil.StatusOK(re))
+	err = testutil.CheckDelete(tests.TestDialClient, sspURL+"/a", testutil.StatusOK(re))
 	re.NoError(err)
 
 	left, err := storage.LoadAllServiceGCSafePoints()
