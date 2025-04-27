@@ -16,7 +16,6 @@ package api
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"testing"
 	"time"
@@ -29,15 +28,12 @@ import (
 	"github.com/tikv/pd/pkg/storage/kv"
 	tu "github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server"
-	"github.com/tikv/pd/server/api"
 	"github.com/tikv/pd/tests"
 )
 
 type hotStatusTestSuite struct {
 	suite.Suite
-	svr       *server.Server
-	cleanup   tu.CleanupFunc
-	urlPrefix string
+	env *tests.SchedulingTestEnvironment
 }
 
 func TestHotStatusTestSuite(t *testing.T) {
@@ -45,45 +41,54 @@ func TestHotStatusTestSuite(t *testing.T) {
 }
 
 func (suite *hotStatusTestSuite) SetupSuite() {
-	re := suite.Require()
-	suite.svr, suite.cleanup = mustNewServer(re)
-	tests.MustWaitLeader(re, []*server.Server{suite.svr})
-
-	addr := suite.svr.GetAddr()
-	suite.urlPrefix = fmt.Sprintf("%s%s/api/v1/hotspot", addr, api.APIPrefix)
-
-	mustBootstrapCluster(re, suite.svr)
+	suite.env = tests.NewSchedulingTestEnvironment(suite.T())
 }
 
 func (suite *hotStatusTestSuite) TearDownSuite() {
-	suite.cleanup()
+	suite.env.Cleanup()
 }
 
-func (suite *hotStatusTestSuite) TestGetHotStore() {
+func (suite *hotStatusTestSuite) TestHotStatus() {
+	suite.env.RunTestInNonMicroserviceEnv(suite.checkGetHotStore)
+	suite.env.RunTestInNonMicroserviceEnv(suite.checkGetHistoryHotRegionsBasic)
+	suite.env.RunTestInNonMicroserviceEnv(suite.checkGetHistoryHotRegionsTimeRange)
+	suite.env.RunTestInNonMicroserviceEnv(suite.checkGetHistoryHotRegionsIDAndTypes)
+}
+
+func (suite *hotStatusTestSuite) checkGetHotStore(cluster *tests.TestCluster) {
 	re := suite.Require()
+
+	leader := cluster.GetLeaderServer()
+	urlPrefix := leader.GetAddr() + "/pd/api/v1"
 	stat := handler.HotStoreStats{}
-	err := tu.ReadGetJSON(re, testDialClient, suite.urlPrefix+"/stores", &stat)
+	err := tu.ReadGetJSON(re, testDialClient, urlPrefix+"/hotspot/stores", &stat)
 	re.NoError(err)
 }
 
-func (suite *hotStatusTestSuite) TestGetHistoryHotRegionsBasic() {
+func (suite *hotStatusTestSuite) checkGetHistoryHotRegionsBasic(cluster *tests.TestCluster) {
 	re := suite.Require()
+
+	leader := cluster.GetLeaderServer()
+	urlPrefix := leader.GetAddr() + "/pd/api/v1"
 	request := server.HistoryHotRegionsRequest{
 		StartTime: 0,
 		EndTime:   time.Now().AddDate(0, 2, 0).UnixNano() / int64(time.Millisecond),
 	}
 	data, err := json.Marshal(request)
 	re.NoError(err)
-	err = tu.CheckGetJSON(testDialClient, suite.urlPrefix+"/regions/history", data, tu.StatusOK(re))
+	err = tu.CheckGetJSON(testDialClient, urlPrefix+"/hotspot/regions/history", data, tu.StatusOK(re))
 	re.NoError(err)
 	errRequest := "{\"start_time\":\"err\"}"
-	err = tu.CheckGetJSON(testDialClient, suite.urlPrefix+"/regions/history", []byte(errRequest), tu.StatusNotOK(re))
+	err = tu.CheckGetJSON(testDialClient, urlPrefix+"/hotspot/regions/history", []byte(errRequest), tu.StatusNotOK(re))
 	re.NoError(err)
 }
 
-func (suite *hotStatusTestSuite) TestGetHistoryHotRegionsTimeRange() {
+func (suite *hotStatusTestSuite) checkGetHistoryHotRegionsTimeRange(cluster *tests.TestCluster) {
 	re := suite.Require()
-	hotRegionStorage := suite.svr.GetHistoryHotRegionStorage()
+
+	leader := cluster.GetLeaderServer()
+	urlPrefix := leader.GetAddr() + "/pd/api/v1"
+	hotRegionStorage := leader.GetServer().GetHistoryHotRegionStorage()
 	now := time.Now()
 	hotRegions := []*storage.HistoryHotRegion{
 		{
@@ -105,21 +110,24 @@ func (suite *hotStatusTestSuite) TestGetHistoryHotRegionsTimeRange() {
 		err := json.Unmarshal(res, historyHotRegions)
 		re.NoError(err)
 		for _, region := range historyHotRegions.HistoryHotRegion {
-			suite.GreaterOrEqual(region.UpdateTime, request.StartTime)
-			suite.LessOrEqual(region.UpdateTime, request.EndTime)
+			re.GreaterOrEqual(region.UpdateTime, request.StartTime)
+			re.LessOrEqual(region.UpdateTime, request.EndTime)
 		}
 	}
 	err := writeToDB(hotRegionStorage.LevelDBKV, hotRegions)
 	re.NoError(err)
 	data, err := json.Marshal(request)
 	re.NoError(err)
-	err = tu.CheckGetJSON(testDialClient, suite.urlPrefix+"/regions/history", data, check)
+	err = tu.CheckGetJSON(testDialClient, urlPrefix+"/hotspot/regions/history", data, check)
 	re.NoError(err)
 }
 
-func (suite *hotStatusTestSuite) TestGetHistoryHotRegionsIDAndTypes() {
+func (suite *hotStatusTestSuite) checkGetHistoryHotRegionsIDAndTypes(cluster *tests.TestCluster) {
 	re := suite.Require()
-	hotRegionStorage := suite.svr.GetHistoryHotRegionStorage()
+
+	leader := cluster.GetLeaderServer()
+	urlPrefix := leader.GetAddr() + "/pd/api/v1"
+	hotRegionStorage := leader.GetServer().GetHistoryHotRegionStorage()
 	now := time.Now()
 	hotRegions := []*storage.HistoryHotRegion{
 		{
@@ -197,7 +205,7 @@ func (suite *hotStatusTestSuite) TestGetHistoryHotRegionsIDAndTypes() {
 	re.NoError(err)
 	data, err := json.Marshal(request)
 	re.NoError(err)
-	err = tu.CheckGetJSON(testDialClient, suite.urlPrefix+"/regions/history", data, check)
+	err = tu.CheckGetJSON(testDialClient, urlPrefix+"/hotspot/regions/history", data, check)
 	re.NoError(err)
 }
 
