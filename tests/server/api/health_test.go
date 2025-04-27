@@ -66,7 +66,7 @@ func (suite *healthTestSuite) checkHealthSlice(cluster *tests.TestCluster) {
 	}
 	addr := leader.GetAddr() + "/pd/api/v1/health"
 	follower.Close()
-	resp, err := testDialClient.Get(addr)
+	resp, err := tests.TestDialClient.Get(addr)
 	re.NoError(err)
 	defer resp.Body.Close()
 	buf, err := io.ReadAll(resp.Body)

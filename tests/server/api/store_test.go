@@ -74,31 +74,31 @@ func (suite *storeTestSuite) checkStoresList(cluster *tests.TestCluster) {
 
 	url := fmt.Sprintf("%s/stores", urlPrefix)
 	info := new(response.StoresInfo)
-	err := tu.ReadGetJSON(re, testDialClient, url, info)
+	err := tu.ReadGetJSON(re, tests.TestDialClient, url, info)
 	re.NoError(err)
 	checkStoresInfo(re, info.Stores, stores[:3])
 
 	url = fmt.Sprintf("%s/stores/check?state=up", urlPrefix)
 	info = new(response.StoresInfo)
-	err = tu.ReadGetJSON(re, testDialClient, url, info)
+	err = tu.ReadGetJSON(re, tests.TestDialClient, url, info)
 	re.NoError(err)
 	checkStoresInfo(re, info.Stores, stores[:2])
 
 	url = fmt.Sprintf("%s/stores/check?state=offline", urlPrefix)
 	info = new(response.StoresInfo)
-	err = tu.ReadGetJSON(re, testDialClient, url, info)
+	err = tu.ReadGetJSON(re, tests.TestDialClient, url, info)
 	re.NoError(err)
 	checkStoresInfo(re, info.Stores, stores[2:3])
 
 	url = fmt.Sprintf("%s/stores/check?state=tombstone", urlPrefix)
 	info = new(response.StoresInfo)
-	err = tu.ReadGetJSON(re, testDialClient, url, info)
+	err = tu.ReadGetJSON(re, tests.TestDialClient, url, info)
 	re.NoError(err)
 	checkStoresInfo(re, info.Stores, stores[3:])
 
 	url = fmt.Sprintf("%s/stores/check?state=tombstone&state=offline", urlPrefix)
 	info = new(response.StoresInfo)
-	err = tu.ReadGetJSON(re, testDialClient, url, info)
+	err = tu.ReadGetJSON(re, tests.TestDialClient, url, info)
 	re.NoError(err)
 	checkStoresInfo(re, info.Stores, stores[2:])
 
@@ -114,7 +114,7 @@ func (suite *storeTestSuite) checkStoresList(cluster *tests.TestCluster) {
 
 	url = fmt.Sprintf("%s/stores/check?state=down", urlPrefix)
 	info = new(response.StoresInfo)
-	err = tu.ReadGetJSON(re, testDialClient, url, info)
+	err = tu.ReadGetJSON(re, tests.TestDialClient, url, info)
 	re.NoError(err)
 	checkStoresInfo(re, info.Stores, []*metapb.Store{store})
 
@@ -124,7 +124,7 @@ func (suite *storeTestSuite) checkStoresList(cluster *tests.TestCluster) {
 
 	url = fmt.Sprintf("%s/stores/check?state=disconnected", urlPrefix)
 	info = new(response.StoresInfo)
-	err = tu.ReadGetJSON(re, testDialClient, url, info)
+	err = tu.ReadGetJSON(re, tests.TestDialClient, url, info)
 	re.NoError(err)
 	checkStoresInfo(re, info.Stores, []*metapb.Store{store})
 }
@@ -181,7 +181,7 @@ func (suite *storeTestSuite) checkGetAllLimit(cluster *tests.TestCluster) {
 	for _, testCase := range testCases {
 		suite.T().Log(testCase.name)
 		info := make(map[uint64]any, 4)
-		err := tu.ReadGetJSON(re, testDialClient, testCase.url, &info)
+		err := tu.ReadGetJSON(re, tests.TestDialClient, testCase.url, &info)
 		re.NoError(err)
 		re.Len(info, len(testCase.expectedStores))
 		for id := range testCase.expectedStores {
@@ -204,7 +204,7 @@ func (suite *storeTestSuite) checkStoreLimitTTL(cluster *tests.TestCluster) {
 	}
 	postData, err := json.Marshal(data)
 	re.NoError(err)
-	err = tu.CheckPostJSON(testDialClient, url, postData, tu.StatusOK(re))
+	err = tu.CheckPostJSON(tests.TestDialClient, url, postData, tu.StatusOK(re))
 	re.NoError(err)
 	// remove peer
 	data = map[string]any{
@@ -213,7 +213,7 @@ func (suite *storeTestSuite) checkStoreLimitTTL(cluster *tests.TestCluster) {
 	}
 	postData, err = json.Marshal(data)
 	re.NoError(err)
-	err = tu.CheckPostJSON(testDialClient, url, postData, tu.StatusOK(re))
+	err = tu.CheckPostJSON(tests.TestDialClient, url, postData, tu.StatusOK(re))
 	re.NoError(err)
 	// all store limit add peer
 	url = fmt.Sprintf("%s/stores/limit?ttlSecond=%v", urlPrefix, 3)
@@ -223,7 +223,7 @@ func (suite *storeTestSuite) checkStoreLimitTTL(cluster *tests.TestCluster) {
 	}
 	postData, err = json.Marshal(data)
 	re.NoError(err)
-	err = tu.CheckPostJSON(testDialClient, url, postData, tu.StatusOK(re))
+	err = tu.CheckPostJSON(tests.TestDialClient, url, postData, tu.StatusOK(re))
 	re.NoError(err)
 	// all store limit remove peer
 	data = map[string]any{
@@ -232,7 +232,7 @@ func (suite *storeTestSuite) checkStoreLimitTTL(cluster *tests.TestCluster) {
 	}
 	postData, err = json.Marshal(data)
 	re.NoError(err)
-	err = tu.CheckPostJSON(testDialClient, url, postData, tu.StatusOK(re))
+	err = tu.CheckPostJSON(tests.TestDialClient, url, postData, tu.StatusOK(re))
 	re.NoError(err)
 
 	re.Equal(float64(999), leader.GetPersistOptions().GetStoreLimit(uint64(1)).AddPeer)
@@ -253,7 +253,7 @@ func (suite *storeTestSuite) checkStoreLabel(cluster *tests.TestCluster) {
 	urlPrefix := leader.GetAddr() + "/pd/api/v1"
 	url := fmt.Sprintf("%s/store/1", urlPrefix)
 	var info response.StoreInfo
-	err := tu.ReadGetJSON(re, testDialClient, url, &info)
+	err := tu.ReadGetJSON(re, tests.TestDialClient, url, &info)
 	re.NoError(err)
 	re.Empty(info.Store.Labels)
 
@@ -261,25 +261,25 @@ func (suite *storeTestSuite) checkStoreLabel(cluster *tests.TestCluster) {
 	// enable label match check.
 	labelCheck := map[string]string{"strictly-match-label": "true"}
 	lc, _ := json.Marshal(labelCheck)
-	err = tu.CheckPostJSON(testDialClient, urlPrefix+"/config", lc, tu.StatusOK(re))
+	err = tu.CheckPostJSON(tests.TestDialClient, urlPrefix+"/config", lc, tu.StatusOK(re))
 	re.NoError(err)
 	// Test set.
 	labels := map[string]string{"zone": "cn", "host": "local"}
 	b, err := json.Marshal(labels)
 	re.NoError(err)
 	// TODO: supports strictly match check in placement rules
-	err = tu.CheckPostJSON(testDialClient, url+"/label", b,
+	err = tu.CheckPostJSON(tests.TestDialClient, url+"/label", b,
 		tu.StatusNotOK(re),
 		tu.StringContain(re, "key matching the label was not found"))
 	re.NoError(err)
 	locationLabels := map[string]string{"location-labels": "zone,host"}
 	ll, _ := json.Marshal(locationLabels)
-	err = tu.CheckPostJSON(testDialClient, urlPrefix+"/config", ll, tu.StatusOK(re))
+	err = tu.CheckPostJSON(tests.TestDialClient, urlPrefix+"/config", ll, tu.StatusOK(re))
 	re.NoError(err)
-	err = tu.CheckPostJSON(testDialClient, url+"/label", b, tu.StatusOK(re))
+	err = tu.CheckPostJSON(tests.TestDialClient, url+"/label", b, tu.StatusOK(re))
 	re.NoError(err)
 
-	err = tu.ReadGetJSON(re, testDialClient, url, &info)
+	err = tu.ReadGetJSON(re, tests.TestDialClient, url, &info)
 	re.NoError(err)
 	re.Len(info.Store.Labels, len(labels))
 	for _, l := range info.Store.Labels {
@@ -290,17 +290,17 @@ func (suite *storeTestSuite) checkStoreLabel(cluster *tests.TestCluster) {
 	// disable label match check.
 	labelCheck = map[string]string{"strictly-match-label": "false"}
 	lc, _ = json.Marshal(labelCheck)
-	err = tu.CheckPostJSON(testDialClient, urlPrefix+"/config", lc, tu.StatusOK(re))
+	err = tu.CheckPostJSON(tests.TestDialClient, urlPrefix+"/config", lc, tu.StatusOK(re))
 	re.NoError(err)
 
 	labels = map[string]string{"zack": "zack1", "Host": "host1"}
 	b, err = json.Marshal(labels)
 	re.NoError(err)
-	err = tu.CheckPostJSON(testDialClient, url+"/label", b, tu.StatusOK(re))
+	err = tu.CheckPostJSON(tests.TestDialClient, url+"/label", b, tu.StatusOK(re))
 	re.NoError(err)
 
 	expectLabel := map[string]string{"zone": "cn", "zack": "zack1", "host": "host1"}
-	err = tu.ReadGetJSON(re, testDialClient, url, &info)
+	err = tu.ReadGetJSON(re, tests.TestDialClient, url, &info)
 	re.NoError(err)
 	re.Len(info.Store.Labels, len(expectLabel))
 	for _, l := range info.Store.Labels {
@@ -310,9 +310,9 @@ func (suite *storeTestSuite) checkStoreLabel(cluster *tests.TestCluster) {
 	// delete label
 	b, err = json.Marshal(map[string]string{"host": ""})
 	re.NoError(err)
-	err = tu.CheckPostJSON(testDialClient, url+"/label", b, tu.StatusOK(re))
+	err = tu.CheckPostJSON(tests.TestDialClient, url+"/label", b, tu.StatusOK(re))
 	re.NoError(err)
-	err = tu.ReadGetJSON(re, testDialClient, url, &info)
+	err = tu.ReadGetJSON(re, tests.TestDialClient, url, &info)
 	re.NoError(err)
 	delete(expectLabel, "host")
 	re.Len(info.Store.Labels, len(expectLabel))
@@ -349,7 +349,7 @@ func (suite *storeTestSuite) checkStoreGet(cluster *tests.TestCluster) {
 		},
 	})
 	info := new(response.StoreInfo)
-	err := tu.ReadGetJSON(re, testDialClient, url, info)
+	err := tu.ReadGetJSON(re, tests.TestDialClient, url, info)
 	re.NoError(err)
 	capacity, _ := units.RAMInBytes("1.636TiB")
 	available, _ := units.RAMInBytes("1.555TiB")
@@ -394,39 +394,39 @@ func (suite *storeTestSuite) checkStoreDelete(cluster *tests.TestCluster) {
 	}
 	for _, testCase := range testCases {
 		url := fmt.Sprintf("%s/store/%d", urlPrefix, testCase.id)
-		status := requestStatusBody(re, testDialClient, http.MethodDelete, url)
+		status := requestStatusBody(re, tests.TestDialClient, http.MethodDelete, url)
 		re.Equal(testCase.status, status)
 	}
 	// store 6 origin status:offline
 	url := fmt.Sprintf("%s/store/6", urlPrefix)
 	store := new(response.StoreInfo)
-	err := tu.ReadGetJSON(re, testDialClient, url, store)
+	err := tu.ReadGetJSON(re, tests.TestDialClient, url, store)
 	re.NoError(err)
 	re.False(store.Store.PhysicallyDestroyed)
 	re.Equal(metapb.StoreState_Offline, store.Store.State)
 
 	// up store success because it is offline but not physically destroyed
-	status := requestStatusBody(re, testDialClient, http.MethodPost, fmt.Sprintf("%s/state?state=Up", url))
+	status := requestStatusBody(re, tests.TestDialClient, http.MethodPost, fmt.Sprintf("%s/state?state=Up", url))
 	re.Equal(http.StatusOK, status)
 
-	status = requestStatusBody(re, testDialClient, http.MethodGet, url)
+	status = requestStatusBody(re, tests.TestDialClient, http.MethodGet, url)
 	re.Equal(http.StatusOK, status)
 	store = new(response.StoreInfo)
-	err = tu.ReadGetJSON(re, testDialClient, url, store)
+	err = tu.ReadGetJSON(re, tests.TestDialClient, url, store)
 	re.NoError(err)
 	re.Equal(metapb.StoreState_Up, store.Store.State)
 	re.False(store.Store.PhysicallyDestroyed)
 
 	// offline store with physically destroyed
-	status = requestStatusBody(re, testDialClient, http.MethodDelete, fmt.Sprintf("%s?force=true", url))
+	status = requestStatusBody(re, tests.TestDialClient, http.MethodDelete, fmt.Sprintf("%s?force=true", url))
 	re.Equal(http.StatusOK, status)
-	err = tu.ReadGetJSON(re, testDialClient, url, store)
+	err = tu.ReadGetJSON(re, tests.TestDialClient, url, store)
 	re.NoError(err)
 	re.Equal(metapb.StoreState_Offline, store.Store.State)
 	re.True(store.Store.PhysicallyDestroyed)
 
 	// try to up store again failed because it is physically destroyed
-	status = requestStatusBody(re, testDialClient, http.MethodPost, fmt.Sprintf("%s/state?state=Up", url))
+	status = requestStatusBody(re, tests.TestDialClient, http.MethodPost, fmt.Sprintf("%s/state?state=Up", url))
 	re.Equal(http.StatusBadRequest, status)
 }
 
@@ -454,39 +454,39 @@ func (suite *storeTestSuite) checkStoreSetState(cluster *tests.TestCluster) {
 	}
 	url := fmt.Sprintf("%s/store/1", urlPrefix)
 	info := response.StoreInfo{}
-	err := tu.ReadGetJSON(re, testDialClient, url, &info)
+	err := tu.ReadGetJSON(re, tests.TestDialClient, url, &info)
 	re.NoError(err)
 	re.Equal(metapb.StoreState_Up, info.Store.State)
 
 	// Set to Offline.
 	info = response.StoreInfo{}
-	err = tu.CheckPostJSON(testDialClient, url+"/state?state=Offline", nil, tu.StatusOK(re))
+	err = tu.CheckPostJSON(tests.TestDialClient, url+"/state?state=Offline", nil, tu.StatusOK(re))
 	re.NoError(err)
-	err = tu.ReadGetJSON(re, testDialClient, url, &info)
+	err = tu.ReadGetJSON(re, tests.TestDialClient, url, &info)
 	re.NoError(err)
 	re.Equal(metapb.StoreState_Offline, info.Store.State)
 
 	// store not found
 	info = response.StoreInfo{}
-	err = tu.CheckPostJSON(testDialClient, urlPrefix+"/store/10086/state?state=Offline", nil, tu.StatusNotOK(re))
+	err = tu.CheckPostJSON(tests.TestDialClient, urlPrefix+"/store/10086/state?state=Offline", nil, tu.StatusNotOK(re))
 	re.NoError(err)
 
 	// Invalid state.
 	invalidStates := []string{"Foo", "Tombstone"}
 	for _, state := range invalidStates {
 		info = response.StoreInfo{}
-		err = tu.CheckPostJSON(testDialClient, url+"/state?state="+state, nil, tu.StatusNotOK(re))
+		err = tu.CheckPostJSON(tests.TestDialClient, url+"/state?state="+state, nil, tu.StatusNotOK(re))
 		re.NoError(err)
-		err := tu.ReadGetJSON(re, testDialClient, url, &info)
+		err := tu.ReadGetJSON(re, tests.TestDialClient, url, &info)
 		re.NoError(err)
 		re.Equal(metapb.StoreState_Offline, info.Store.State)
 	}
 
 	// Set back to Up.
 	info = response.StoreInfo{}
-	err = tu.CheckPostJSON(testDialClient, url+"/state?state=Up", nil, tu.StatusOK(re))
+	err = tu.CheckPostJSON(tests.TestDialClient, url+"/state?state=Up", nil, tu.StatusOK(re))
 	re.NoError(err)
-	err = tu.ReadGetJSON(re, testDialClient, url, &info)
+	err = tu.ReadGetJSON(re, tests.TestDialClient, url, &info)
 	re.NoError(err)
 	re.Equal(metapb.StoreState_Up, info.Store.State)
 }

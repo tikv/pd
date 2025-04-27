@@ -75,10 +75,10 @@ func (suite *diagnosticTestSuite) checkSchedulerDiagnosticAPI(cluster *tests.Tes
 	configPrefix := fmt.Sprintf("%s/config", urlPrefix)
 
 	cfg := &config.Config{}
-	err := tu.ReadGetJSON(re, testDialClient, configPrefix, cfg)
+	err := tu.ReadGetJSON(re, tests.TestDialClient, configPrefix, cfg)
 	re.NoError(err)
 
-	re.NoError(tu.ReadGetJSON(re, testDialClient, configPrefix, cfg))
+	re.NoError(tu.ReadGetJSON(re, tests.TestDialClient, configPrefix, cfg))
 	re.True(cfg.Schedule.EnableDiagnostic)
 
 	ms := map[string]any{
@@ -87,25 +87,25 @@ func (suite *diagnosticTestSuite) checkSchedulerDiagnosticAPI(cluster *tests.Tes
 	}
 	postData, err := json.Marshal(ms)
 	re.NoError(err)
-	re.NoError(tu.CheckPostJSON(testDialClient, configPrefix, postData, tu.StatusOK(re)))
+	re.NoError(tu.CheckPostJSON(tests.TestDialClient, configPrefix, postData, tu.StatusOK(re)))
 	cfg = &config.Config{}
-	re.NoError(tu.ReadGetJSON(re, testDialClient, configPrefix, cfg))
+	re.NoError(tu.ReadGetJSON(re, tests.TestDialClient, configPrefix, cfg))
 	re.True(cfg.Schedule.EnableDiagnostic)
 
 	balanceRegionURL := diagnosticPrefix + "/" + types.BalanceRegionScheduler.String()
 	result := &schedulers.DiagnosticResult{}
-	err = tu.ReadGetJSON(re, testDialClient, balanceRegionURL, result)
+	err = tu.ReadGetJSON(re, tests.TestDialClient, balanceRegionURL, result)
 	re.NoError(err)
 	re.Equal("disabled", result.Status)
 
 	evictLeaderURL := diagnosticPrefix + "/" + types.EvictLeaderScheduler.String()
-	re.NoError(tu.CheckGetJSON(testDialClient, evictLeaderURL, nil, tu.StatusNotOK(re)))
+	re.NoError(tu.CheckGetJSON(tests.TestDialClient, evictLeaderURL, nil, tu.StatusNotOK(re)))
 
 	input := make(map[string]any)
 	input["name"] = types.BalanceRegionScheduler.String()
 	body, err := json.Marshal(input)
 	re.NoError(err)
-	err = tu.CheckPostJSON(testDialClient, schedulerPrefix, body, tu.StatusOK(re))
+	err = tu.CheckPostJSON(tests.TestDialClient, schedulerPrefix, body, tu.StatusOK(re))
 	re.NoError(err)
 	checkStatus(re, "pending", balanceRegionURL)
 
@@ -113,14 +113,14 @@ func (suite *diagnosticTestSuite) checkSchedulerDiagnosticAPI(cluster *tests.Tes
 	input["delay"] = 30
 	pauseArgs, err := json.Marshal(input)
 	re.NoError(err)
-	err = tu.CheckPostJSON(testDialClient, schedulerPrefix+"/"+types.BalanceRegionScheduler.String(), pauseArgs, tu.StatusOK(re))
+	err = tu.CheckPostJSON(tests.TestDialClient, schedulerPrefix+"/"+types.BalanceRegionScheduler.String(), pauseArgs, tu.StatusOK(re))
 	re.NoError(err)
 	checkStatus(re, "paused", balanceRegionURL)
 
 	input["delay"] = 0
 	pauseArgs, err = json.Marshal(input)
 	re.NoError(err)
-	err = tu.CheckPostJSON(testDialClient, schedulerPrefix+"/"+types.BalanceRegionScheduler.String(), pauseArgs, tu.StatusOK(re))
+	err = tu.CheckPostJSON(tests.TestDialClient, schedulerPrefix+"/"+types.BalanceRegionScheduler.String(), pauseArgs, tu.StatusOK(re))
 	re.NoError(err)
 	checkStatus(re, "pending", balanceRegionURL)
 
@@ -128,17 +128,17 @@ func (suite *diagnosticTestSuite) checkSchedulerDiagnosticAPI(cluster *tests.Tes
 	checkStatus(re, "normal", balanceRegionURL)
 
 	deleteURL := fmt.Sprintf("%s/%s", schedulerPrefix, types.BalanceRegionScheduler.String())
-	err = tu.CheckDelete(testDialClient, deleteURL, tu.StatusOK(re))
+	err = tu.CheckDelete(tests.TestDialClient, deleteURL, tu.StatusOK(re))
 	re.NoError(err)
 	checkStatus(re, "disabled", balanceRegionURL)
 }
 
 func checkStatus(re *require.Assertions, status string, url string) {
-	err := tu.CheckGetUntilStatusCode(re, testDialClient, url, http.StatusOK)
+	err := tu.CheckGetUntilStatusCode(re, tests.TestDialClient, url, http.StatusOK)
 	re.NoError(err)
 	re.Eventually(func() bool {
 		result := &schedulers.DiagnosticResult{}
-		err := tu.ReadGetJSON(re, testDialClient, url, result)
+		err := tu.ReadGetJSON(re, tests.TestDialClient, url, result)
 		re.NoError(err)
 		return result.Status == status
 	}, time.Second, time.Millisecond*50)
