@@ -671,7 +671,7 @@ func TestSortHotPeers(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+		t.Run(tt.name, func(*testing.T) {
 			result := sortHotPeers(tt.firstSort, tt.secondSort, tt.maxPeerNum)
 			re.Len(result, len(tt.expected))
 
