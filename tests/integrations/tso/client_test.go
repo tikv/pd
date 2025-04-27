@@ -500,7 +500,6 @@ func TestTSOFollowerProxyWhenLeaderChanged(t *testing.T) {
 	_, _, err = pdClient.GetTS(reqCtx)
 	re.ErrorContains(err, "rpc error")
 	pdCluster.WaitLeader()
-	// it will work when pull/9219 is merged
 	// tso server works well and can't get the rpc error response
 	testutil.Eventually(re, func() bool {
 		reqCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
