@@ -163,7 +163,10 @@ func (mc *Cluster) BucketsStats(degree int, regions ...uint64) map[uint64][]*buc
 // GetHotPeerStats returns the read or write statistics for hot regions.
 // It returns a map where the keys are store IDs and the values are slices of HotPeerStat.
 // The result only includes peers that are hot enough.
-func (mc *Cluster) GetHotPeerStats(rw utils.RWType) map[uint64][]*statistics.HotPeerStat {
+func (mc *Cluster) GetHotPeerStats(rw utils.RWType, minHotDegree int) map[uint64][]*statistics.HotPeerStat {
+	if minHotDegree > 0 {
+		return mc.HotCache.GetHotPeerStats(rw, minHotDegree)
+	}
 	return mc.HotCache.GetHotPeerStats(rw, mc.GetHotRegionCacheHitsThreshold())
 }
 

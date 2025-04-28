@@ -26,5 +26,5 @@ type RegionStatInformer interface {
 	// GetHotPeerStats return the read or write statistics for hot regions.
 	// It returns a map where the keys are store IDs and the values are slices of HotPeerStat.
 	// The result only includes peers that are hot enough.
-	GetHotPeerStats(rw utils.RWType) map[uint64][]*HotPeerStat
+	GetHotPeerStats(rw utils.RWType, minHotDegree int) map[uint64][]*HotPeerStat
 }

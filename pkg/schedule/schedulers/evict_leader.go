@@ -34,6 +34,8 @@ import (
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
 	"github.com/tikv/pd/pkg/schedule/types"
+	"github.com/tikv/pd/pkg/statistics"
+	"github.com/tikv/pd/pkg/statistics/utils"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 )
@@ -331,17 +333,29 @@ func scheduleEvictLeaderBatch(r *rand.Rand, name string, cluster sche.SchedulerC
 }
 
 func scheduleEvictLeaderOnce(r *rand.Rand, name string, cluster sche.SchedulerCluster, conf evictLeaderStoresConf) []*operator.Operator {
-	stores := conf.getStores()
-	ops := make([]*operator.Operator, 0, len(stores))
-	for _, storeID := range stores {
+	storeIDs := conf.getStores()
+	ops := make([]*operator.Operator, 0, len(storeIDs))
+
+	pendingFilter := filter.NewRegionPendingFilter()
+	downFilter := filter.NewRegionDownFilter()
+
+	for _, storeID := range storeIDs {
 		ranges := conf.getKeyRangesByID(storeID)
 		if len(ranges) == 0 {
 			continue
 		}
 		var filters []filter.Filter
-		pendingFilter := filter.NewRegionPendingFilter()
-		downFilter := filter.NewRegionDownFilter()
-		region := filter.SelectOneRegion(cluster.RandLeaderRegions(storeID, ranges), nil, pendingFilter, downFilter)
+		var region *core.RegionInfo
+		regions := statistics.GetHotStoreLeaders(cluster.GetBasicCluster(), storeID, cluster.GetHotPeerStats(utils.Write, 1))
+		region = filter.RandomSelectOneRegion(regions, nil, pendingFilter, downFilter)
+		if region == nil {
+			regions := statistics.GetHotStoreLeaders(cluster.GetBasicCluster(), storeID, cluster.GetHotPeerStats(utils.Read, 1))
+			region = filter.RandomSelectOneRegion(regions, nil, pendingFilter, downFilter)
+		}
+		if region == nil {
+			region = filter.SelectOneRegion(cluster.RandLeaderRegions(storeID, ranges), nil, pendingFilter, downFilter)
+		}
+
 		if region == nil {
 			// try to pick unhealthy region
 			region = filter.SelectOneRegion(cluster.RandLeaderRegions(storeID, ranges), nil)

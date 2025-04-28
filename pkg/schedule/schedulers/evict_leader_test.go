@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"testing"
 
+	"github.com/docker/go-units"
 	"github.com/stretchr/testify/require"
 
 	"github.com/pingcap/kvproto/pkg/metapb"
@@ -26,6 +27,7 @@ import (
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/types"
+	"github.com/tikv/pd/pkg/statistics/utils"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/utils/operatorutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
@@ -135,5 +137,61 @@ func TestBatchEvict(t *testing.T) {
 	testutil.Eventually(re, func() bool {
 		ops, _ := sl.Schedule(tc, false)
 		return len(ops) == 5
+	})
+}
+
+func TestEvictHotLeader(t *testing.T) {
+	re := require.New(t)
+
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+
+	tc.AddRegionStore(1, 20)
+	tc.AddRegionStore(2, 20)
+	tc.AddRegionStore(3, 20)
+
+	tc.UpdateStorageWrittenBytes(1, 10*units.MiB*utils.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenBytes(2, 10*units.MiB*utils.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenBytes(3, 10*units.MiB*utils.StoreHeartBeatReportInterval)
+
+	tc.UpdateStorageWrittenKeys(1, 10*units.MiB*utils.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenKeys(2, 10*units.MiB*utils.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenKeys(3, 10*units.MiB*utils.StoreHeartBeatReportInterval)
+
+	addRegionInfo(tc, utils.Write, []testRegionInfo{
+		{3, []uint64{2, 1, 3}, 0.0, 0, 0},
+		{4, []uint64{2, 1, 3}, 0.0, 0, 0},
+		{5, []uint64{2, 1, 3}, 0.0, 0, 0},
+		{6, []uint64{2, 1, 3}, 0.5 * units.MiB, 1 * units.MiB, 0},
+		{7, []uint64{2, 1, 3}, 0.0, 0, 0},
+		{8, []uint64{2, 1, 3}, 1.0 * units.MiB, 2 * units.MiB, 0},
+		{9, []uint64{2, 1, 3}, 0.0, 0, 0},
+		{10, []uint64{2, 1, 3}, 2.0 * units.MiB, 3 * units.MiB, 0},
+		{11, []uint64{2, 1, 3}, 0.0, 0, 0},
+		{12, []uint64{2, 1, 3}, 0.0, 0, 0},
+		{13, []uint64{2, 1, 3}, 1.5 * units.MiB, 4 * units.MiB, 0},
+		{14, []uint64{2, 1, 3}, 0.0, 0, 0},
+	})
+
+	// hot read has lower priority than hot write
+	addRegionInfo(tc, utils.Read, []testRegionInfo{
+		{15, []uint64{2, 1, 3}, 0.0, 0, 0},
+		{16, []uint64{2, 1, 3}, 1.5 * units.MiB, 4 * units.MiB, 0},
+		{17, []uint64{2, 1, 3}, 0.0, 0, 0},
+	})
+
+	sl, err := CreateScheduler(types.EvictLeaderScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.EvictLeaderScheduler, []string{"2"}), func(string) error { return nil })
+	re.NoError(err)
+	re.True(sl.IsScheduleAllowed(tc))
+	testutil.Eventually(re, func() bool {
+		ops, _ := sl.Schedule(tc, false)
+		for _, op := range ops {
+			switch op.RegionID() {
+			case 3, 4, 5, 7, 9, 11, 12, 14, 15, 16, 17:
+				re.FailNow("unexpected region", op.RegionID())
+			default:
+			}
+		}
+		return len(ops) == 3
 	})
 }

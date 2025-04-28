@@ -132,7 +132,7 @@ func (s *baseHotScheduler) prepareForBalance(typ resourceType, cluster sche.Sche
 		// update read statistics
 		// avoid to update read statistics frequently
 		if time.Since(s.updateReadTime) >= statisticsInterval {
-			regionRead := cluster.GetHotPeerStats(utils.Read)
+			regionRead := cluster.GetHotPeerStats(utils.Read, 0)
 			prepare(regionRead, utils.Read, constant.LeaderKind)
 			prepare(regionRead, utils.Read, constant.RegionKind)
 			s.updateReadTime = time.Now()
@@ -141,7 +141,7 @@ func (s *baseHotScheduler) prepareForBalance(typ resourceType, cluster sche.Sche
 		// update write statistics
 		// avoid to update write statistics frequently
 		if time.Since(s.updateWriteTime) >= statisticsInterval {
-			regionWrite := cluster.GetHotPeerStats(utils.Write)
+			regionWrite := cluster.GetHotPeerStats(utils.Write, 0)
 			prepare(regionWrite, utils.Write, constant.LeaderKind)
 			prepare(regionWrite, utils.Write, constant.RegionKind)
 			s.updateWriteTime = time.Now()

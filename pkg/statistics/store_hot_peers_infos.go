@@ -158,7 +158,7 @@ func summaryStoresLoadByEngine(
 		store := info.StoreInfo
 		id := store.GetID()
 		storeLoads, ok := storesLoads[id]
-		if !ok || !collector.filter(info, kind) {
+		if !ok || !collector.filter(store, kind) {
 			continue
 		}
 
@@ -288,4 +288,32 @@ func filterHotPeers(kind constant.ResourceKind, peers []*HotPeerStat) []*HotPeer
 		}
 	}
 	return ret
+}
+
+// GetHotStoreLeaders returns the hot leaders of a store.
+func GetHotStoreLeaders(
+	cluster *core.BasicCluster,
+	id uint64,
+	storeHotPeers map[uint64][]*HotPeerStat,
+) map[uint64]*core.RegionInfo {
+	store := cluster.GetStore(id)
+	if store == nil || store.IsTiFlash() {
+		return nil
+	}
+	var hotPeers []*HotPeerStat
+	for _, peer := range filterHotPeers(constant.LeaderKind, storeHotPeers[id]) {
+		hotPeers = append(hotPeers, peer.Clone())
+	}
+
+	hotLeaders := make(map[uint64]*core.RegionInfo)
+	for _, peer := range hotPeers {
+		regionID := peer.RegionID
+		region := cluster.GetRegion(regionID)
+		if region == nil {
+			continue
+		}
+		hotLeaders[regionID] = region
+	}
+
+	return hotLeaders
 }
