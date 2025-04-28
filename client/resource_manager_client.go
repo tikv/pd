@@ -18,7 +18,6 @@ import (
 	"context"
 	"time"
 
-	"github.com/gogo/protobuf/proto"
 	"go.uber.org/zap"
 
 	"github.com/pingcap/errors"
@@ -53,7 +52,7 @@ type ResourceManagerClient interface {
 	AddResourceGroup(ctx context.Context, metaGroup *rmpb.ResourceGroup) (string, error)
 	ModifyResourceGroup(ctx context.Context, metaGroup *rmpb.ResourceGroup) (string, error)
 	DeleteResourceGroup(ctx context.Context, resourceGroupName string) (string, error)
-	LoadResourceGroups(ctx context.Context) ([]*rmpb.ResourceGroup, int64, error)
+	GetResourceGroupsMetaRevision(ctx context.Context) (int64, error)
 	AcquireTokenBuckets(ctx context.Context, request *rmpb.TokenBucketsRequest) ([]*rmpb.TokenBucketResponse, error)
 	Watch(ctx context.Context, key []byte, opts ...opt.MetaStorageOption) (chan []*meta_storagepb.Event, error)
 }
@@ -188,24 +187,16 @@ func (c *client) DeleteResourceGroup(ctx context.Context, resourceGroupName stri
 	return resp.GetBody(), nil
 }
 
-// LoadResourceGroups implements the ResourceManagerClient interface.
-func (c *client) LoadResourceGroups(ctx context.Context) ([]*rmpb.ResourceGroup, int64, error) {
-	resp, err := c.Get(ctx, GroupSettingsPathPrefixBytes, opt.WithPrefix())
+// GetResourceGroupsMetaRevision implements the ResourceManagerClient interface.
+func (c *client) GetResourceGroupsMetaRevision(ctx context.Context) (int64, error) {
+	resp, err := c.Get(ctx, GroupSettingsPathPrefixBytes, opt.WithPrefix(), opt.WithCountOnly())
 	if err != nil {
-		return nil, 0, err
+		return 0, err
 	}
 	if resp.Header.Error != nil {
-		return nil, resp.Header.Revision, errors.New(resp.Header.Error.Message)
+		return resp.Header.Revision, errors.New(resp.Header.Error.Message)
 	}
-	groups := make([]*rmpb.ResourceGroup, 0, len(resp.Kvs))
-	for _, item := range resp.Kvs {
-		group := &rmpb.ResourceGroup{}
-		if err := proto.Unmarshal(item.Value, group); err != nil {
-			continue
-		}
-		groups = append(groups, group)
-	}
-	return groups, resp.Header.Revision, nil
+	return resp.Header.Revision, nil
 }
 
 // AcquireTokenBuckets implements the ResourceManagerClient interface.

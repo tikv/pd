@@ -171,6 +171,12 @@ func (s *Service) Get(ctx context.Context, req *meta_storagepb.GetRequest) (*met
 	if limit := req.GetLimit(); limit != 0 {
 		options = append(options, clientv3.WithLimit(limit))
 	}
+	if req.GetKeysOnly() {
+		options = append(options, clientv3.WithKeysOnly())
+	}
+	if req.GetCountOnly() {
+		options = append(options, clientv3.WithCountOnly())
+	}
 	cli := s.manager.GetClient()
 	res, err := cli.Get(ctx, key, options...)
 	var revision int64

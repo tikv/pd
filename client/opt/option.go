@@ -313,6 +313,8 @@ type MetaStorageOp struct {
 	Lease            int64
 	Limit            int64
 	IsOptsWithPrefix bool
+	KeysOnly         bool
+	CountOnly        bool
 }
 
 // MetaStorageOption configures MetaStorageOp.
@@ -347,5 +349,19 @@ func WithLease(lease int64) MetaStorageOption {
 func WithPrefix() MetaStorageOption {
 	return func(op *MetaStorageOp) {
 		op.IsOptsWithPrefix = true
+	}
+}
+
+// WithKeysOnly specifies that only keys should be returned.
+func WithKeysOnly() MetaStorageOption {
+	return func(op *MetaStorageOp) {
+		op.KeysOnly = true
+	}
+}
+
+// WithCountOnly specifies that only the count of keys should be returned.
+func WithCountOnly() MetaStorageOption {
+	return func(op *MetaStorageOp) {
+		op.CountOnly = true
 	}
 }
