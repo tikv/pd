@@ -15,12 +15,16 @@
 package tests
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"math/rand"
 	"net"
 	"net/http"
 	"os"
+	"path"
 	"runtime"
 	"strconv"
 	"strings"
@@ -36,6 +40,7 @@ import (
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/kvproto/pkg/schedulingpb"
 	"github.com/pingcap/log"
 
 	bs "github.com/tikv/pd/pkg/basicserver"
@@ -232,6 +237,8 @@ func MustPutStore(re *require.Assertions, tc *TestCluster, store *metapb.Store) 
 			UsedSize:  uint64(9 * units.GiB),
 			Available: uint64(1 * units.GiB),
 		}),
+		core.SetStoreState(store.GetState(), store.GetPhysicallyDestroyed()),
+		core.SetNodeState(store.GetNodeState()),
 		core.SetLastHeartbeatTS(time.Unix(ts/1e9, ts%1e9)),
 	)
 	raftCluster.GetBasicCluster().PutStore(newStore)
@@ -265,6 +272,22 @@ func MustPutRegionInfo(re *require.Assertions, cluster *TestCluster, regionInfo 
 	re.NoError(err)
 	if cluster.GetSchedulingPrimaryServer() != nil {
 		err = cluster.GetSchedulingPrimaryServer().GetCluster().HandleRegionHeartbeat(regionInfo)
+		re.NoError(err)
+	}
+}
+
+// MustHandleStoreHeartbeat is used for test purpose.
+func MustHandleStoreHeartbeat(re *require.Assertions, cluster *TestCluster, heartbeat *pdpb.StoreHeartbeatRequest) {
+	err := cluster.GetLeaderServer().GetRaftCluster().HandleStoreHeartbeat(heartbeat, &pdpb.StoreHeartbeatResponse{})
+	re.NoError(err)
+	if cluster.GetSchedulingPrimaryServer() != nil {
+		hb := &schedulingpb.StoreHeartbeatRequest{
+			Header: &schedulingpb.RequestHeader{
+				ClusterId: heartbeat.Header.ClusterId,
+			},
+			Stats: heartbeat.GetStats(),
+		}
+		err = cluster.GetSchedulingPrimaryServer().GetCluster().HandleStoreHeartbeat(hb)
 		re.NoError(err)
 	}
 }
@@ -397,7 +420,9 @@ func (s *SchedulingTestEnvironment) startCluster(m Env) {
 		re.NoError(err)
 		re.NotEmpty(cluster.WaitLeader())
 		leaderServer := cluster.GetServer(cluster.GetLeader())
-		re.NoError(leaderServer.BootstrapCluster())
+		if !s.SkipBootstrap {
+			re.NoError(leaderServer.BootstrapCluster())
+		}
 		s.clusters[NonMicroserviceEnv] = cluster
 	case MicroserviceEnv:
 		cluster, err := NewTestClusterWithKeyspaceGroup(ctx, s.PDCount, s.opts...)
@@ -591,4 +616,64 @@ func CreateMockHandler(re *require.Assertions, ip string) server.HandlerBuilder 
 		}
 		return mux, info, nil
 	}
+}
+
+const (
+	schedulersPrefix      = "/pd/api/v1/schedulers"
+	schedulerConfigPrefix = "/pd/api/v1/scheduler-config"
+)
+
+// MustAddScheduler adds a scheduler with HTTP API.
+func MustAddScheduler(
+	re *require.Assertions, serverAddr string,
+	schedulerName string, args map[string]any,
+) {
+	request := map[string]any{
+		"name": schedulerName,
+	}
+	for arg, val := range args {
+		request[arg] = val
+	}
+	data, err := json.Marshal(request)
+	re.NoError(err)
+	httpReq, err := http.NewRequest(http.MethodPost, fmt.Sprintf("%s%s", serverAddr, schedulersPrefix), bytes.NewBuffer(data))
+	re.NoError(err)
+	// Send request.
+	resp, err := TestDialClient.Do(httpReq)
+	re.NoError(err)
+	defer resp.Body.Close()
+	data, err = io.ReadAll(resp.Body)
+	re.NoError(err)
+	re.Equal(http.StatusOK, resp.StatusCode, string(data))
+}
+
+// MustDeleteScheduler deletes a scheduler with HTTP API.
+func MustDeleteScheduler(re *require.Assertions, serverAddr, schedulerName string) {
+	httpReq, err := http.NewRequest(http.MethodDelete, fmt.Sprintf("%s%s/%s", serverAddr, schedulersPrefix, schedulerName), http.NoBody)
+	re.NoError(err)
+	resp, err := TestDialClient.Do(httpReq)
+	re.NoError(err)
+	defer resp.Body.Close()
+	data, err := io.ReadAll(resp.Body)
+	re.NoError(err)
+	re.Equal(http.StatusOK, resp.StatusCode, string(data))
+}
+
+// MustCallSchedulerConfigAPI calls a scheduler config with HTTP API with the given args.
+func MustCallSchedulerConfigAPI(
+	re *require.Assertions,
+	method, serverAddr, schedulerName string, args []string,
+	input map[string]any,
+) {
+	data, err := json.Marshal(input)
+	re.NoError(err)
+	args = append([]string{schedulerConfigPrefix, schedulerName}, args...)
+	httpReq, err := http.NewRequest(method, fmt.Sprintf("%s%s", serverAddr, path.Join(args...)), bytes.NewBuffer(data))
+	re.NoError(err)
+	resp, err := TestDialClient.Do(httpReq)
+	re.NoError(err)
+	defer resp.Body.Close()
+	data, err = io.ReadAll(resp.Body)
+	re.NoError(err)
+	re.Equal(http.StatusOK, resp.StatusCode, string(data))
 }

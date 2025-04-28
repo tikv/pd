@@ -139,7 +139,7 @@ type Regions struct {
 }
 
 // NewRegions initializes the regions with the given region count and replica count.
-func NewRegions(regionCount, replicaCount int, header *pdpb.RequestHeader) *Regions {
+func NewRegions(regionCount, replicaCount, storeCount int, header *pdpb.RequestHeader) *Regions {
 	rs := &Regions{
 		regionCount:  regionCount,
 		replicaCount: replicaCount,
@@ -180,7 +180,7 @@ func NewRegions(regionCount, replicaCount int, header *pdpb.RequestHeader) *Regi
 
 		peers := make([]*metapb.Peer, 0, replicaCount)
 		for j := range replicaCount {
-			peers = append(peers, &metapb.Peer{Id: id, StoreId: uint64((i+j)%replicaCount + 1)})
+			peers = append(peers, &metapb.Peer{Id: id, StoreId: uint64((i+j)%storeCount + 1)})
 			id += 1
 		}
 

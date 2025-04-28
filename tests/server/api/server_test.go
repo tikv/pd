@@ -24,15 +24,12 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 
 	"github.com/tikv/pd/pkg/utils/apiutil"
-	"github.com/tikv/pd/pkg/utils/testutil"
-	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/tests"
 )
 
 type serviceTestSuite struct {
 	suite.Suite
-	svr     *server.Server
-	cleanup testutil.CleanupFunc
+	env *tests.SchedulingTestEnvironment
 }
 
 func TestServiceTestSuite(t *testing.T) {
@@ -40,54 +37,62 @@ func TestServiceTestSuite(t *testing.T) {
 }
 
 func (suite *serviceTestSuite) SetupSuite() {
-	re := suite.Require()
-	suite.svr, suite.cleanup = mustNewServer(re)
-	tests.MustWaitLeader(re, []*server.Server{suite.svr})
-
-	mustBootstrapCluster(re, suite.svr)
-	mustPutStore(re, suite.svr, 1, metapb.StoreState_Up, metapb.NodeState_Serving, nil)
+	suite.env = tests.NewSchedulingTestEnvironment(suite.T())
 }
 
 func (suite *serviceTestSuite) TearDownSuite() {
-	suite.cleanup()
+	suite.env.Cleanup()
 }
 
 func (suite *serviceTestSuite) TestServiceLabels() {
+	suite.env.RunTest(suite.checkServiceLabels)
+}
+
+func (suite *serviceTestSuite) checkServiceLabels(cluster *tests.TestCluster) {
 	re := suite.Require()
-	accessPaths := suite.svr.GetServiceLabels("Profile")
+
+	tests.MustPutStore(re, cluster, &metapb.Store{
+		Id:        1,
+		Address:   "mock://tikv-1:1",
+		State:     metapb.StoreState_Up,
+		NodeState: metapb.NodeState_Serving,
+	})
+
+	leader := cluster.GetLeaderServer().GetServer()
+	accessPaths := leader.GetServiceLabels("Profile")
 	re.Len(accessPaths, 1)
 	re.Equal("/pd/api/v1/debug/pprof/profile", accessPaths[0].Path)
 	re.Empty(accessPaths[0].Method)
-	serviceLabel := suite.svr.GetAPIAccessServiceLabel(
+	serviceLabel := leader.GetAPIAccessServiceLabel(
 		apiutil.NewAccessPath("/pd/api/v1/debug/pprof/profile", ""))
 	re.Equal("Profile", serviceLabel)
-	serviceLabel = suite.svr.GetAPIAccessServiceLabel(
+	serviceLabel = leader.GetAPIAccessServiceLabel(
 		apiutil.NewAccessPath("/pd/api/v1/debug/pprof/profile", http.MethodGet))
 	re.Equal("Profile", serviceLabel)
 
-	accessPaths = suite.svr.GetServiceLabels("GetSchedulerConfig")
+	accessPaths = leader.GetServiceLabels("GetSchedulerConfig")
 	re.Len(accessPaths, 1)
 	re.Equal("/pd/api/v1/scheduler-config", accessPaths[0].Path)
 	re.Equal("GET", accessPaths[0].Method)
-	accessPaths = suite.svr.GetServiceLabels("HandleSchedulerConfig")
+	accessPaths = leader.GetServiceLabels("HandleSchedulerConfig")
 	re.Len(accessPaths, 4)
 	re.Equal("/pd/api/v1/scheduler-config", accessPaths[0].Path)
 
-	accessPaths = suite.svr.GetServiceLabels("ResignLeader")
+	accessPaths = leader.GetServiceLabels("ResignLeader")
 	re.Len(accessPaths, 1)
 	re.Equal("/pd/api/v1/leader/resign", accessPaths[0].Path)
 	re.Equal(http.MethodPost, accessPaths[0].Method)
-	serviceLabel = suite.svr.GetAPIAccessServiceLabel(
+	serviceLabel = leader.GetAPIAccessServiceLabel(
 		apiutil.NewAccessPath("/pd/api/v1/leader/resign", http.MethodPost))
 	re.Equal("ResignLeader", serviceLabel)
-	serviceLabel = suite.svr.GetAPIAccessServiceLabel(
+	serviceLabel = leader.GetAPIAccessServiceLabel(
 		apiutil.NewAccessPath("/pd/api/v1/leader/resign", http.MethodGet))
 	re.Empty(serviceLabel)
-	serviceLabel = suite.svr.GetAPIAccessServiceLabel(
+	serviceLabel = leader.GetAPIAccessServiceLabel(
 		apiutil.NewAccessPath("/pd/api/v1/leader/resign", ""))
 	re.Empty(serviceLabel)
 
-	accessPaths = suite.svr.GetServiceLabels("queryMetric")
+	accessPaths = leader.GetServiceLabels("queryMetric")
 	re.Len(accessPaths, 4)
 	sort.Slice(accessPaths, func(i, j int) bool {
 		if accessPaths[i].Path == accessPaths[j].Path {
@@ -103,10 +108,10 @@ func (suite *serviceTestSuite) TestServiceLabels() {
 	re.Equal(http.MethodGet, accessPaths[2].Method)
 	re.Equal("/pd/api/v1/metric/query_range", accessPaths[3].Path)
 	re.Equal(http.MethodPost, accessPaths[3].Method)
-	serviceLabel = suite.svr.GetAPIAccessServiceLabel(
+	serviceLabel = leader.GetAPIAccessServiceLabel(
 		apiutil.NewAccessPath("/pd/api/v1/metric/query", http.MethodPost))
 	re.Equal("queryMetric", serviceLabel)
-	serviceLabel = suite.svr.GetAPIAccessServiceLabel(
+	serviceLabel = leader.GetAPIAccessServiceLabel(
 		apiutil.NewAccessPath("/pd/api/v1/metric/query", http.MethodGet))
 	re.Equal("queryMetric", serviceLabel)
 }
