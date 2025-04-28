@@ -20,7 +20,29 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+<<<<<<< HEAD
 	"github.com/pkg/errors"
+=======
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/collectors"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/soheilhy/cmux"
+	etcdtypes "go.etcd.io/etcd/client/pkg/v3/types"
+	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.uber.org/zap"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/keepalive"
+
+	"github.com/pingcap/kvproto/pkg/diagnosticspb"
+	"github.com/pingcap/log"
+
+	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/mcs/discovery"
+	"github.com/tikv/pd/pkg/mcs/utils/constant"
+	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/pkg/utils/apiutil"
+	"github.com/tikv/pd/pkg/utils/apiutil/multiservicesapi"
+>>>>>>> ac5967544 (Metrics: Go runtime metrics (#8927))
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"go.etcd.io/etcd/clientv3"
 )
@@ -52,7 +74,15 @@ func InitClusterID(ctx context.Context, client *clientv3.Client) (id uint64, err
 }
 
 // PromHandler is a handler to get prometheus metrics.
+<<<<<<< HEAD
 func PromHandler(handler http.Handler) gin.HandlerFunc {
+=======
+func PromHandler() gin.HandlerFunc {
+	prometheus.DefaultRegisterer.Unregister(collectors.NewGoCollector())
+	if err := prometheus.Register(collectors.NewGoCollector(collectors.WithGoCollectorRuntimeMetrics(collectors.MetricsGC, collectors.MetricsMemory, collectors.MetricsScheduler))); err != nil {
+		log.Warn("go runtime collectors have already registered", errs.ZapError(err))
+	}
+>>>>>>> ac5967544 (Metrics: Go runtime metrics (#8927))
 	return func(c *gin.Context) {
 		handler.ServeHTTP(c.Writer, c.Request)
 	}
