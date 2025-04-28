@@ -185,7 +185,7 @@ type MockResourceGroupProvider struct {
 func newMockResourceGroupProvider() *MockResourceGroupProvider {
 	mockProvider := &MockResourceGroupProvider{}
 	mockProvider.On("Get", mock.Anything, mock.Anything, mock.Anything).Return(&meta_storagepb.GetResponse{}, nil)
-	mockProvider.On("LoadResourceGroups", mock.Anything).Return([]*rmpb.ResourceGroup{}, int64(0), nil)
+	mockProvider.On("GetResourceGroupsMetaRevision", mock.Anything).Return(int64(0), nil)
 	mockProvider.On("Watch", mock.Anything, mock.Anything, mock.Anything).Return(make(chan []*meta_storagepb.Event), nil)
 	return mockProvider
 }
@@ -220,9 +220,9 @@ func (m *MockResourceGroupProvider) AcquireTokenBuckets(ctx context.Context, req
 	return args.Get(0).([]*rmpb.TokenBucketResponse), args.Error(1)
 }
 
-func (m *MockResourceGroupProvider) LoadResourceGroups(ctx context.Context) ([]*rmpb.ResourceGroup, int64, error) {
+func (m *MockResourceGroupProvider) GetResourceGroupsMetaRevision(ctx context.Context) (int64, error) {
 	args := m.Called(ctx)
-	return args.Get(0).([]*rmpb.ResourceGroup), args.Get(1).(int64), args.Error(2)
+	return args.Get(0).(int64), args.Error(1)
 }
 
 func (m *MockResourceGroupProvider) Watch(ctx context.Context, key []byte, opts ...opt.MetaStorageOption) (chan []*meta_storagepb.Event, error) {
