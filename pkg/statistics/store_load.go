@@ -148,11 +148,6 @@ func (s *StoreSummaryInfo) SetEngineAsTiFlash() {
 // Loads is a vector that contains different dimensions of loads.
 type Loads [utils.DimLen]float64
 
-func (l Loads) clone() Loads {
-	var newLoads = l
-	return newLoads
-}
-
 // HistoryLoads is a circular buffer of loads. The reason for using
 // [utils.DimLen][]float64 instead of [][utils.DimLen]float64 is to make it easier
 // for the `checkHistoryLoadsByPriority` function to handle.
@@ -171,7 +166,7 @@ type StoreLoad struct {
 // ToLoadPred returns the current load and future predictive load.
 func (load StoreLoad) ToLoadPred(rwTy utils.RWType, infl *Influence) *StoreLoadPred {
 	future := StoreLoad{
-		Loads: load.Loads.clone(),
+		Loads: load.Loads,
 		Count: load.Count,
 	}
 	if infl != nil {
