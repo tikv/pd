@@ -80,6 +80,10 @@ func (s *tsoProxyTestSuite) SetupTest() {
 }
 
 func (s *tsoProxyTestSuite) reCreateProxyClient() {
+	if s.proxyClient != nil {
+		_ = s.proxyClient.CloseSend()
+		s.clientCancel()
+	}
 	s.proxyClient, s.clientCtx, s.clientCancel = s.createClient()
 }
 
@@ -167,7 +171,6 @@ func (s *tsoProxyTestSuite) TestClientsContinueToWorkAfterFirstStreamIsClosed() 
 	s.verifyProxyIsHealthy(re)
 	// open second stream
 	proxyClient, _, cancel := s.createClient()
-	defer s.proxyClient.CloseSend()
 	defer cancel()
 	defer proxyClient.CloseSend()
 
