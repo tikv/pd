@@ -45,6 +45,8 @@ import (
 	"github.com/tikv/pd/pkg/utils/syncutil"
 )
 
+var defaultJobTimeout = time.Hour
+
 type balanceRangeSchedulerHandler struct {
 	rd     *render.Render
 	config *balanceRangeSchedulerConfig
@@ -82,16 +84,18 @@ func (handler *balanceRangeSchedulerHandler) addJob(w http.ResponseWriter, r *ht
 	job := &balanceRangeSchedulerJob{
 		Create:  time.Now(),
 		Status:  pending,
-		Timeout: time.Hour,
+		Timeout: defaultJobTimeout,
 	}
 	job.Engine = input["engine"].(string)
 	if job.Engine != core.EngineTiFlash && job.Engine != core.EngineTiKV {
 		handler.rd.JSON(w, http.StatusBadRequest, fmt.Sprintf("engine:%s must be tikv or tiflash", input["engine"].(string)))
+		return
 	}
 	job.Rule = core.NewRule(input["rule"].(string))
 	if job.Rule != core.LeaderScatter && job.Rule != core.PeerScatter && job.Rule != core.LearnerScatter {
 		handler.rd.JSON(w, http.StatusBadRequest, fmt.Sprintf("rule:%s must be leader-scatter, learner-scatter or peer-scatter",
 			input["engine"].(string)))
+		return
 	}
 	job.Alias = input["alias"].(string)
 	startKeyStr, err := url.QueryUnescape(input["start-key"].(string))
