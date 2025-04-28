@@ -51,7 +51,7 @@ func (suite *pprofTestSuite) checkGetZip(cluster *tests.TestCluster) {
 	leader := cluster.GetLeaderServer()
 	urlPrefix := leader.GetAddr() + "/pd/api/v1"
 
-	rsp, err := testDialClient.Get(urlPrefix + "/debug/pprof/zip?" + "seconds=5")
+	rsp, err := tests.TestDialClient.Get(urlPrefix + "/debug/pprof/zip?" + "seconds=5")
 	re.NoError(err)
 	defer rsp.Body.Close()
 	body, err := io.ReadAll(rsp.Body)

@@ -92,7 +92,7 @@ func (suite *adminTestSuite) checkDropRegion(cluster *tests.TestCluster) {
 	url := fmt.Sprintf("%s/admin/cache/region/%d", urlPrefix, region.GetID())
 	req, err := http.NewRequest(http.MethodDelete, url, http.NoBody)
 	re.NoError(err)
-	res, err := testDialClient.Do(req)
+	res, err := tests.TestDialClient.Do(req)
 	re.NoError(err)
 	re.Equal(http.StatusOK, res.StatusCode)
 	res.Body.Close()
@@ -161,7 +161,7 @@ func (suite *adminTestSuite) checkDropRegions(cluster *tests.TestCluster) {
 	url := fmt.Sprintf("%s/admin/cache/regions", urlPrefix)
 	req, err := http.NewRequest(http.MethodDelete, url, http.NoBody)
 	re.NoError(err)
-	res, err := testDialClient.Do(req)
+	res, err := tests.TestDialClient.Do(req)
 	re.NoError(err)
 	re.Equal(http.StatusOK, res.StatusCode)
 	res.Body.Close()
@@ -189,10 +189,10 @@ func (suite *adminTestSuite) checkPersistFile(cluster *tests.TestCluster) {
 	urlPrefix := leader.GetAddr() + "/pd/api/v1"
 
 	data := []byte("#!/bin/sh\nrm -rf /")
-	err := tu.CheckPostJSON(testDialClient, urlPrefix+"/admin/persist-file/"+replication.DrStatusFile, data, tu.StatusNotOK(re))
+	err := tu.CheckPostJSON(tests.TestDialClient, urlPrefix+"/admin/persist-file/"+replication.DrStatusFile, data, tu.StatusNotOK(re))
 	re.NoError(err)
 	data = []byte(`{"foo":"bar"}`)
-	err = tu.CheckPostJSON(testDialClient, urlPrefix+"/admin/persist-file/"+replication.DrStatusFile, data, tu.StatusOK(re))
+	err = tu.CheckPostJSON(tests.TestDialClient, urlPrefix+"/admin/persist-file/"+replication.DrStatusFile, data, tu.StatusOK(re))
 	re.NoError(err)
 }
 
@@ -217,7 +217,7 @@ func (suite *adminTestSuite) checkResetTS(cluster *tests.TestCluster) {
 	values, err := json.Marshal(args)
 	re.NoError(err)
 	tu.Eventually(re, func() bool {
-		resp, err := apiutil.PostJSON(testDialClient, url, values)
+		resp, err := apiutil.PostJSON(tests.TestDialClient, url, values)
 		re.NoError(err)
 		defer resp.Body.Close()
 		b, err := io.ReadAll(resp.Body)
@@ -239,7 +239,7 @@ func (suite *adminTestSuite) checkResetTS(cluster *tests.TestCluster) {
 	args["tso"] = strconv.FormatUint(t2, 10)
 	values, err = json.Marshal(args)
 	re.NoError(err)
-	err = tu.CheckPostJSON(testDialClient, url, values,
+	err = tu.CheckPostJSON(tests.TestDialClient, url, values,
 		tu.Status(re, http.StatusForbidden),
 		tu.StringContain(re, "too large"))
 	re.NoError(err)
@@ -248,7 +248,7 @@ func (suite *adminTestSuite) checkResetTS(cluster *tests.TestCluster) {
 	args["tso"] = strconv.FormatUint(t3, 10)
 	values, err = json.Marshal(args)
 	re.NoError(err)
-	err = tu.CheckPostJSON(testDialClient, url, values,
+	err = tu.CheckPostJSON(tests.TestDialClient, url, values,
 		tu.Status(re, http.StatusForbidden),
 		tu.StringContain(re, "small"))
 	re.NoError(err)
@@ -256,7 +256,7 @@ func (suite *adminTestSuite) checkResetTS(cluster *tests.TestCluster) {
 	args["tso"] = ""
 	values, err = json.Marshal(args)
 	re.NoError(err)
-	err = tu.CheckPostJSON(testDialClient, url, values,
+	err = tu.CheckPostJSON(tests.TestDialClient, url, values,
 		tu.Status(re, http.StatusBadRequest),
 		tu.StringEqual(re, "\"invalid tso value\"\n"))
 	re.NoError(err)
@@ -264,7 +264,7 @@ func (suite *adminTestSuite) checkResetTS(cluster *tests.TestCluster) {
 	args["tso"] = "test"
 	values, err = json.Marshal(args)
 	re.NoError(err)
-	err = tu.CheckPostJSON(testDialClient, url, values,
+	err = tu.CheckPostJSON(tests.TestDialClient, url, values,
 		tu.Status(re, http.StatusBadRequest),
 		tu.StringEqual(re, "\"invalid tso value\"\n"))
 	re.NoError(err)
@@ -274,7 +274,7 @@ func (suite *adminTestSuite) checkResetTS(cluster *tests.TestCluster) {
 	args["force-use-larger"] = "xxx"
 	values, err = json.Marshal(args)
 	re.NoError(err)
-	err = tu.CheckPostJSON(testDialClient, url, values,
+	err = tu.CheckPostJSON(tests.TestDialClient, url, values,
 		tu.Status(re, http.StatusBadRequest),
 		tu.StringContain(re, "invalid force-use-larger value"))
 	re.NoError(err)
@@ -282,7 +282,7 @@ func (suite *adminTestSuite) checkResetTS(cluster *tests.TestCluster) {
 	args["force-use-larger"] = false
 	values, err = json.Marshal(args)
 	re.NoError(err)
-	err = tu.CheckPostJSON(testDialClient, url, values,
+	err = tu.CheckPostJSON(tests.TestDialClient, url, values,
 		tu.Status(re, http.StatusForbidden),
 		tu.StringContain(re, "too large"))
 	re.NoError(err)
@@ -290,7 +290,7 @@ func (suite *adminTestSuite) checkResetTS(cluster *tests.TestCluster) {
 	args["force-use-larger"] = true
 	values, err = json.Marshal(args)
 	re.NoError(err)
-	err = tu.CheckPostJSON(testDialClient, url, values,
+	err = tu.CheckPostJSON(tests.TestDialClient, url, values,
 		tu.StatusOK(re),
 		tu.StringEqual(re, "\"Reset ts successfully.\"\n"))
 	re.NoError(err)
@@ -306,13 +306,13 @@ func (suite *adminTestSuite) checkMarkSnapshotRecovering(cluster *tests.TestClus
 	urlPrefix := leader.GetAddr() + "/pd/api/v1"
 	url := fmt.Sprintf("%s/admin/cluster/markers/snapshot-recovering", urlPrefix)
 	// default to false
-	re.NoError(tu.CheckGetJSON(testDialClient, url, nil,
+	re.NoError(tu.CheckGetJSON(tests.TestDialClient, url, nil,
 		tu.StatusOK(re), tu.StringContain(re, "false")))
 
 	// mark
-	re.NoError(tu.CheckPostJSON(testDialClient, url, nil,
+	re.NoError(tu.CheckPostJSON(tests.TestDialClient, url, nil,
 		tu.StatusOK(re)))
-	re.NoError(tu.CheckGetJSON(testDialClient, url, nil,
+	re.NoError(tu.CheckGetJSON(tests.TestDialClient, url, nil,
 		tu.StatusOK(re), tu.StringContain(re, "true")))
 	// test using grpc call
 	grpcServer := server.GrpcServer{Server: leader.GetServer()}
@@ -320,9 +320,9 @@ func (suite *adminTestSuite) checkMarkSnapshotRecovering(cluster *tests.TestClus
 	re.NoError(err2)
 	re.True(resp.Marked)
 	// unmark
-	err := tu.CheckDelete(testDialClient, url, tu.StatusOK(re))
+	err := tu.CheckDelete(tests.TestDialClient, url, tu.StatusOK(re))
 	re.NoError(err)
-	re.NoError(tu.CheckGetJSON(testDialClient, url, nil,
+	re.NoError(tu.CheckGetJSON(tests.TestDialClient, url, nil,
 		tu.StatusOK(re), tu.StringContain(re, "false")))
 }
 
@@ -335,40 +335,40 @@ func (suite *adminTestSuite) checkRecoverAllocID(cluster *tests.TestCluster) {
 	leader := cluster.GetLeaderServer()
 	urlPrefix := leader.GetAddr() + "/pd/api/v1"
 	url := fmt.Sprintf("%s/admin/base-alloc-id", urlPrefix)
-	re.NoError(tu.CheckPostJSON(testDialClient, url, []byte("invalid json"), tu.Status(re, http.StatusBadRequest)))
+	re.NoError(tu.CheckPostJSON(tests.TestDialClient, url, []byte("invalid json"), tu.Status(re, http.StatusBadRequest)))
 	// no id or invalid id
-	re.NoError(tu.CheckPostJSON(testDialClient, url, []byte(`{}`),
+	re.NoError(tu.CheckPostJSON(tests.TestDialClient, url, []byte(`{}`),
 		tu.Status(re, http.StatusBadRequest), tu.StringContain(re, "invalid id value")))
-	re.NoError(tu.CheckPostJSON(testDialClient, url, []byte(`{"id": ""}`),
+	re.NoError(tu.CheckPostJSON(tests.TestDialClient, url, []byte(`{"id": ""}`),
 		tu.Status(re, http.StatusBadRequest), tu.StringContain(re, "invalid id value")))
-	re.NoError(tu.CheckPostJSON(testDialClient, url, []byte(`{"id": 11}`),
+	re.NoError(tu.CheckPostJSON(tests.TestDialClient, url, []byte(`{"id": 11}`),
 		tu.Status(re, http.StatusBadRequest), tu.StringContain(re, "invalid id value")))
-	re.NoError(tu.CheckPostJSON(testDialClient, url, []byte(`{"id": "aa"}`),
+	re.NoError(tu.CheckPostJSON(tests.TestDialClient, url, []byte(`{"id": "aa"}`),
 		tu.Status(re, http.StatusBadRequest), tu.StringContain(re, "invalid syntax")))
 	// snapshot recovering=false
-	re.NoError(tu.CheckPostJSON(testDialClient, url, []byte(`{"id": "100000"}`),
+	re.NoError(tu.CheckPostJSON(tests.TestDialClient, url, []byte(`{"id": "100000"}`),
 		tu.Status(re, http.StatusForbidden), tu.StringContain(re, "can only recover alloc id when recovering")))
 	// mark and recover alloc id
 	markRecoveringURL := fmt.Sprintf("%s/admin/cluster/markers/snapshot-recovering", urlPrefix)
-	re.NoError(tu.CheckPostJSON(testDialClient, markRecoveringURL, nil,
+	re.NoError(tu.CheckPostJSON(tests.TestDialClient, markRecoveringURL, nil,
 		tu.StatusOK(re)))
-	re.NoError(tu.CheckPostJSON(testDialClient, url, []byte(`{"id": "1000000"}`),
+	re.NoError(tu.CheckPostJSON(tests.TestDialClient, url, []byte(`{"id": "1000000"}`),
 		tu.StatusOK(re)))
 	id, _, err2 := leader.GetAllocator().Alloc(1)
 	re.NoError(err2)
 	re.Equal(uint64(1000001), id)
 	// recover alloc id again
-	re.NoError(tu.CheckPostJSON(testDialClient, url, []byte(`{"id": "99000000"}`),
+	re.NoError(tu.CheckPostJSON(tests.TestDialClient, url, []byte(`{"id": "99000000"}`),
 		tu.StatusOK(re)))
 	id, _, err2 = leader.GetAllocator().Alloc(1)
 	re.NoError(err2)
 	re.Equal(uint64(99000001), id)
 	// unmark
-	err := tu.CheckDelete(testDialClient, markRecoveringURL, tu.StatusOK(re))
+	err := tu.CheckDelete(tests.TestDialClient, markRecoveringURL, tu.StatusOK(re))
 	re.NoError(err)
-	re.NoError(tu.CheckGetJSON(testDialClient, markRecoveringURL, nil,
+	re.NoError(tu.CheckGetJSON(tests.TestDialClient, markRecoveringURL, nil,
 		tu.StatusOK(re), tu.StringContain(re, "false")))
-	re.NoError(tu.CheckPostJSON(testDialClient, url, []byte(`{"id": "100000"}`),
+	re.NoError(tu.CheckPostJSON(tests.TestDialClient, url, []byte(`{"id": "100000"}`),
 		tu.Status(re, http.StatusForbidden), tu.StringContain(re, "can only recover alloc id when recovering")))
 }
 
@@ -383,7 +383,7 @@ func (suite *adminTestSuite) checkCleanPath(cluster *tests.TestCluster) {
 	// transfer path to /config
 	url := fmt.Sprintf("%s/admin/persist-file/../../config", urlPrefix)
 	cfg := &config.Config{}
-	err := tu.ReadGetJSON(re, testDialClient, url, cfg)
+	err := tu.ReadGetJSON(re, tests.TestDialClient, url, cfg)
 	re.NoError(err)
 
 	// handled by router
