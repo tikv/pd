@@ -64,10 +64,7 @@ require (
 	gotest.tools/gotestsum v1.7.0
 )
 
-require (
-	github.com/golang/glog v1.2.0 // indirect
-	github.com/prometheus/common v0.55.0 // indirect
-)
+require github.com/prometheus/common v0.55.0 // indirect
 
 require (
 	github.com/KyleBanks/depth v1.2.1 // indirect
