@@ -148,11 +148,13 @@ func summaryStoresLoadByEngine(
 	kind constant.ResourceKind,
 	collector storeCollector,
 ) []*StoreLoadDetail {
-	loadDetail := make([]*StoreLoadDetail, 0, len(storeInfos))
-	allStoreLoadSum := make([]float64, utils.DimLen)
-	allStoreHistoryLoadSum := make([][]float64, utils.DimLen) // row: dim, column: time
-	allStoreCount := 0
-	allHotPeersCount := 0
+	var (
+		loadDetail             = make([]*StoreLoadDetail, 0, len(storeInfos))
+		allStoreLoadSum        Loads
+		allStoreHistoryLoadSum HistoryLoads
+		allStoreCount          = 0
+		allHotPeersCount       = 0
+	)
 
 	for _, info := range storeInfos {
 		store := info.StoreInfo
@@ -164,17 +166,17 @@ func summaryStoresLoadByEngine(
 
 		// Find all hot peers first
 		var hotPeers []*HotPeerStat
-		peerLoadSum := make([]float64, utils.DimLen)
+		var peerLoadSum Loads
 		// For hot leaders, we need to calculate the sum of the leader's write and read flow rather than the all peers.
 		for _, peer := range filterHotPeers(kind, storeHotPeers[id]) {
-			for i := range peerLoadSum {
-				peerLoadSum[i] += peer.GetLoad(i)
+			for dim := range utils.DimLen {
+				peerLoadSum[dim] += peer.GetLoad(dim)
 			}
 			hotPeers = append(hotPeers, peer.Clone())
 		}
 		currentLoads := collector.getLoads(storeLoads, peerLoadSum, rwTy, kind)
 
-		var historyLoads [][]float64
+		var historyLoads HistoryLoads
 		if storesHistoryLoads != nil {
 			historyLoads = storesHistoryLoads.Get(id, rwTy, kind)
 
@@ -214,21 +216,23 @@ func summaryStoresLoadByEngine(
 		return loadDetail
 	}
 
-	expectCount := float64(allHotPeersCount) / float64(allStoreCount)
-	expectLoads := make([]float64, len(allStoreLoadSum))
-	for i := range expectLoads {
+	var (
+		expectCount = float64(allHotPeersCount) / float64(allStoreCount)
+		expectLoads Loads
+		// TODO: remove some the max value or min value to avoid the effect of extreme value.
+		expectHistoryLoads HistoryLoads
+		stddevLoads        Loads
+	)
+	for i := range utils.DimLen {
 		expectLoads[i] = allStoreLoadSum[i] / float64(allStoreCount)
 	}
 
-	// TODO: remove some the max value or min value to avoid the effect of extreme value.
-	expectHistoryLoads := make([][]float64, utils.DimLen) // row: dim, column: time
-	for i := range allStoreHistoryLoadSum {
-		expectHistoryLoads[i] = make([]float64, len(allStoreHistoryLoadSum[i]))
-		for j := range allStoreHistoryLoadSum[i] {
-			expectHistoryLoads[i][j] = allStoreHistoryLoadSum[i][j] / float64(allStoreCount)
+	for dim := range allStoreHistoryLoadSum {
+		expectHistoryLoads[dim] = make([]float64, len(allStoreHistoryLoadSum[dim]))
+		for j := range allStoreHistoryLoadSum[dim] {
+			expectHistoryLoads[dim][j] = allStoreHistoryLoadSum[dim][j] / float64(allStoreCount)
 		}
 	}
-	stddevLoads := make([]float64, len(allStoreLoadSum))
 	if allHotPeersCount != 0 {
 		for _, detail := range loadDetail {
 			for i := range expectLoads {

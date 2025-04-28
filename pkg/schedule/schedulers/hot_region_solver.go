@@ -90,15 +90,12 @@ func (bs *balanceSolver) init() {
 	// Init store load detail according to the type.
 	bs.stLoadDetail = bs.sche.stLoadInfos[bs.resourceTy]
 
-	bs.maxSrc = &statistics.StoreLoad{Loads: make([]float64, utils.DimLen)}
-	bs.minDst = &statistics.StoreLoad{
-		Loads: make([]float64, utils.DimLen),
-		Count: math.MaxFloat64,
-	}
+	bs.maxSrc = &statistics.StoreLoad{}
+	bs.minDst = &statistics.StoreLoad{Count: math.MaxFloat64}
 	for i := range bs.minDst.Loads {
 		bs.minDst.Loads[i] = math.MaxFloat64
 	}
-	maxCur := &statistics.StoreLoad{Loads: make([]float64, utils.DimLen)}
+	maxCur := &statistics.StoreLoad{}
 
 	bs.filteredHotPeers = make(map[uint64][]*statistics.HotPeerStat)
 	bs.nthHotPeer = make(map[uint64][]*statistics.HotPeerStat)
@@ -114,7 +111,7 @@ func (bs *balanceSolver) init() {
 		utils.ByteDim:  bs.sche.conf.getByteRankStepRatio(),
 		utils.KeyDim:   bs.sche.conf.getKeyRankStepRatio(),
 		utils.QueryDim: bs.sche.conf.getQueryRateRankStepRatio()}
-	stepLoads := make([]float64, utils.DimLen)
+	var stepLoads statistics.Loads
 	for i := range stepLoads {
 		stepLoads[i] = maxCur.Loads[i] * rankStepRatios[i]
 	}
@@ -645,8 +642,8 @@ func (bs *balanceSolver) checkDstHistoryLoadsByPriorityAndTolerance(current, exp
 	})
 }
 
-func (bs *balanceSolver) checkByPriorityAndToleranceAllOf(loads []float64, f func(int) bool) bool {
-	return slice.AllOf(loads, func(i int) bool {
+func (bs *balanceSolver) checkByPriorityAndToleranceAllOf(loads statistics.Loads, f func(int) bool) bool {
+	return slice.AllOf(loads[:], func(i int) bool {
 		if bs.isSelectedDim(i) {
 			return f(i)
 		}
@@ -654,8 +651,8 @@ func (bs *balanceSolver) checkByPriorityAndToleranceAllOf(loads []float64, f fun
 	})
 }
 
-func (bs *balanceSolver) checkHistoryLoadsByPriorityAndToleranceAllOf(loads [][]float64, f func(int) bool) bool {
-	return slice.AllOf(loads, func(i int) bool {
+func (bs *balanceSolver) checkHistoryLoadsByPriorityAndToleranceAllOf(loads statistics.HistoryLoads, f func(int) bool) bool {
+	return slice.AllOf(loads[:], func(i int) bool {
 		if bs.isSelectedDim(i) {
 			return f(i)
 		}
@@ -663,8 +660,8 @@ func (bs *balanceSolver) checkHistoryLoadsByPriorityAndToleranceAllOf(loads [][]
 	})
 }
 
-func (bs *balanceSolver) checkByPriorityAndToleranceAnyOf(loads []float64, f func(int) bool) bool {
-	return slice.AnyOf(loads, func(i int) bool {
+func (bs *balanceSolver) checkByPriorityAndToleranceAnyOf(loads statistics.Loads, f func(int) bool) bool {
+	return slice.AnyOf(loads[:], func(i int) bool {
 		if bs.isSelectedDim(i) {
 			return f(i)
 		}
@@ -672,8 +669,8 @@ func (bs *balanceSolver) checkByPriorityAndToleranceAnyOf(loads []float64, f fun
 	})
 }
 
-func (bs *balanceSolver) checkHistoryByPriorityAndToleranceAnyOf(loads [][]float64, f func(int) bool) bool {
-	return slice.AnyOf(loads, func(i int) bool {
+func (bs *balanceSolver) checkHistoryByPriorityAndToleranceAnyOf(loads statistics.HistoryLoads, f func(int) bool) bool {
+	return slice.AnyOf(loads[:], func(i int) bool {
 		if bs.isSelectedDim(i) {
 			return f(i)
 		}
@@ -681,11 +678,11 @@ func (bs *balanceSolver) checkHistoryByPriorityAndToleranceAnyOf(loads [][]float
 	})
 }
 
-func (bs *balanceSolver) checkByPriorityAndToleranceFirstOnly(_ []float64, f func(int) bool) bool {
+func (bs *balanceSolver) checkByPriorityAndToleranceFirstOnly(_ statistics.Loads, f func(int) bool) bool {
 	return f(bs.firstPriority)
 }
 
-func (bs *balanceSolver) checkHistoryLoadsByPriorityAndToleranceFirstOnly(_ [][]float64, f func(int) bool) bool {
+func (bs *balanceSolver) checkHistoryLoadsByPriorityAndToleranceFirstOnly(_ statistics.HistoryLoads, f func(int) bool) bool {
 	return f(bs.firstPriority)
 }
 

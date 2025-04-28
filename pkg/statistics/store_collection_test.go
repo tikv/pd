@@ -102,13 +102,19 @@ func TestSummaryStoreInfos(t *testing.T) {
 	rw := utils.Read
 	kind := constant.LeaderKind
 	collector := newTikvCollector()
-	storeHistoryLoad := NewStoreHistoryLoads(utils.DimLen, DefaultHistorySampleDuration, DefaultHistorySampleInterval)
+	storeHistoryLoad := NewStoreHistoryLoads(DefaultHistorySampleDuration, DefaultHistorySampleInterval)
 	storeInfos := make(map[uint64]*StoreSummaryInfo)
 	storeLoads := make(map[uint64][]float64)
 	for _, storeID := range []int{1, 3} {
 		storeInfos[uint64(storeID)] = &StoreSummaryInfo{
 			isTiFlash: false,
-			StoreInfo: core.NewStoreInfo(&metapb.Store{Id: uint64(storeID), Address: fmt.Sprintf("mock://tikv-%d:%d", storeID, storeID)}, core.SetLastHeartbeatTS(time.Now())),
+			StoreInfo: core.NewStoreInfo(
+				&metapb.Store{
+					Id:      uint64(storeID),
+					Address: fmt.Sprintf("mock://tikv-%d:%d", storeID, storeID),
+				},
+				core.SetLastHeartbeatTS(time.Now()),
+			),
 		}
 		storeLoads[uint64(storeID)] = []float64{1, 2, 0, 0, 5}
 		for i, v := range storeLoads[uint64(storeID)] {
