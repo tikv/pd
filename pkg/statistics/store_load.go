@@ -153,10 +153,13 @@ func (l Loads) clone() Loads {
 	return newLoads
 }
 
-// HistoryLoads is a circular buffer of loads. The reason for using 
-// [utils.DimLen][]float64 instead of [][utils.DimLen]float64 is to make it easier 
+// HistoryLoads is a circular buffer of loads. The reason for using
+// [utils.DimLen][]float64 instead of [][utils.DimLen]float64 is to make it easier
 // for the `checkHistoryLoadsByPriority` function to handle.
-type HistoryLoads [utils.DimLen][/* buffer size */]float64
+type HistoryLoads [utils.DimLen][] /* buffer size */ float64
+
+// StoreStats is a vector that contains different dimensions of store stat.
+type StoreStats [utils.StoreStatCount]float64
 
 // StoreLoad records the current load.
 type StoreLoad struct {

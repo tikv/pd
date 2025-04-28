@@ -27,7 +27,7 @@ type storeCollector interface {
 	// filter determines whether the Store needs to be handled by itself.
 	filter(info *StoreSummaryInfo, kind constant.ResourceKind) bool
 	// getLoads obtains available loads from storeLoads and peerLoadSum according to rwTy and kind.
-	getLoads(storeLoads []float64, peerLoadSum Loads, rwTy utils.RWType, kind constant.ResourceKind) (loads Loads)
+	getLoads(storeLoads StoreStats, peerLoadSum Loads, rwTy utils.RWType, kind constant.ResourceKind) (loads Loads)
 }
 
 type tikvCollector struct{}
@@ -53,7 +53,7 @@ func (tikvCollector) filter(info *StoreSummaryInfo, kind constant.ResourceKind) 
 	return false
 }
 
-func (tikvCollector) getLoads(storeLoads []float64, peerLoadSum Loads, rwTy utils.RWType, kind constant.ResourceKind) (loads Loads) {
+func (tikvCollector) getLoads(storeLoads StoreStats, peerLoadSum Loads, rwTy utils.RWType, kind constant.ResourceKind) (loads Loads) {
 	switch rwTy {
 	case utils.Read:
 		loads[utils.ByteDim] = storeLoads[utils.StoreReadBytes]
@@ -100,7 +100,7 @@ func (tiflashCollector) filter(info *StoreSummaryInfo, kind constant.ResourceKin
 	return false
 }
 
-func (c tiflashCollector) getLoads(storeLoads []float64, peerLoadSum Loads, rwTy utils.RWType, kind constant.ResourceKind) (loads Loads) {
+func (c tiflashCollector) getLoads(storeLoads StoreStats, peerLoadSum Loads, rwTy utils.RWType, kind constant.ResourceKind) (loads Loads) {
 	switch rwTy {
 	case utils.Read:
 		// TODO: Need TiFlash StoreHeartbeat support

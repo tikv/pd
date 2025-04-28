@@ -104,22 +104,23 @@ func TestSummaryStoreInfos(t *testing.T) {
 	collector := newTikvCollector()
 	storeHistoryLoad := NewStoreHistoryLoads(DefaultHistorySampleDuration, DefaultHistorySampleInterval)
 	storeInfos := make(map[uint64]*StoreSummaryInfo)
-	storeLoads := make(map[uint64][]float64)
-	for _, storeID := range []int{1, 3} {
-		storeInfos[uint64(storeID)] = &StoreSummaryInfo{
+	storeLoads := make(map[uint64]StoreStats)
+	for _, storeID := range []uint64{1, 3} {
+		storeInfos[storeID] = &StoreSummaryInfo{
 			isTiFlash: false,
 			StoreInfo: core.NewStoreInfo(
 				&metapb.Store{
-					Id:      uint64(storeID),
+					Id:      storeID,
 					Address: fmt.Sprintf("mock://tikv-%d:%d", storeID, storeID),
 				},
 				core.SetLastHeartbeatTS(time.Now()),
 			),
 		}
-		storeLoads[uint64(storeID)] = []float64{1, 2, 0, 0, 5}
-		for i, v := range storeLoads[uint64(storeID)] {
-			storeLoads[uint64(storeID)][i] = v * float64(storeID)
+		storeStats := StoreStats{1, 2, 0, 0, 5}
+		for i, v := range storeStats {
+			storeStats[i] = v * float64(storeID)
 		}
+		storeLoads[storeID] = storeStats
 	}
 
 	// case 1: put one element into history load
