@@ -606,3 +606,79 @@ func TestBucketFirstStat(t *testing.T) {
 		re.Equal(data.expect, bs.bucketFirstStat())
 	}
 }
+
+func TestSortHotPeers(t *testing.T) {
+	re := require.New(t)
+
+	type testPeer struct {
+		id int
+	}
+
+	peer1 := &testPeer{id: 1}
+	peer2 := &testPeer{id: 2}
+	peer3 := &testPeer{id: 3}
+	peer4 := &testPeer{id: 4}
+
+	tests := []struct {
+		name       string
+		firstSort  []*testPeer
+		secondSort []*testPeer
+		maxPeerNum int
+		expected   []*testPeer
+	}{
+		{
+			name:       "No duplicates, maxPeerNum greater than total peers",
+			firstSort:  []*testPeer{peer1, peer2},
+			secondSort: []*testPeer{peer3, peer4},
+			maxPeerNum: 5,
+			expected:   []*testPeer{peer1, peer3, peer2, peer4},
+		},
+		{
+			name:       "No duplicates, maxPeerNum less than total peers",
+			firstSort:  []*testPeer{peer1, peer2},
+			secondSort: []*testPeer{peer3, peer4},
+			maxPeerNum: 3,
+			expected:   []*testPeer{peer1, peer3, peer2},
+		},
+		{
+			name:       "Duplicates in both lists",
+			firstSort:  []*testPeer{peer1, peer2},
+			secondSort: []*testPeer{peer2, peer3},
+			maxPeerNum: 3,
+			expected:   []*testPeer{peer1, peer2, peer3},
+		},
+		{
+			name:       "Empty firstSort",
+			firstSort:  []*testPeer{},
+			secondSort: []*testPeer{peer3, peer4},
+			maxPeerNum: 2,
+			expected:   []*testPeer{peer3, peer4},
+		},
+		{
+			name:       "Empty secondSort",
+			firstSort:  []*testPeer{peer1, peer2},
+			secondSort: []*testPeer{},
+			maxPeerNum: 2,
+			expected:   []*testPeer{peer1, peer2},
+		},
+		{
+			name:       "Both lists empty",
+			firstSort:  []*testPeer{},
+			secondSort: []*testPeer{},
+			maxPeerNum: 2,
+			expected:   []*testPeer{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(*testing.T) {
+			result := sortHotPeers(tt.firstSort, tt.secondSort, tt.maxPeerNum)
+			re.Len(result, len(tt.expected))
+
+			for _, expectedPeer := range tt.expected {
+				_, exists := result[expectedPeer]
+				re.True(exists, "Expected peer not found in result")
+			}
+		})
+	}
+}
