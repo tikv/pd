@@ -16,13 +16,9 @@ package schedulers
 
 import (
 	"bytes"
-	"encoding/json"
-	"fmt"
 	"net/http"
-	"net/url"
 	"sort"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -41,11 +37,8 @@ import (
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/schedule/plan"
 	"github.com/tikv/pd/pkg/schedule/types"
-	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 )
-
-var defaultJobTimeout = time.Hour
 
 type balanceRangeSchedulerHandler struct {
 	rd     *render.Render
@@ -60,8 +53,6 @@ func newBalanceRangeHandler(conf *balanceRangeSchedulerConfig) http.Handler {
 	router := mux.NewRouter()
 	router.HandleFunc("/config", handler.updateConfig).Methods(http.MethodPost)
 	router.HandleFunc("/list", handler.listConfig).Methods(http.MethodGet)
-	router.HandleFunc("/job", handler.addJob).Methods(http.MethodPut)
-	router.HandleFunc("/job", handler.deleteJob).Methods(http.MethodDelete)
 	return router
 }
 
@@ -76,111 +67,15 @@ func (handler *balanceRangeSchedulerHandler) listConfig(w http.ResponseWriter, _
 	}
 }
 
-func (handler *balanceRangeSchedulerHandler) addJob(w http.ResponseWriter, r *http.Request) {
-	var input map[string]any
-	if err := apiutil.ReadJSONRespondError(handler.rd, w, r.Body, &input); err != nil {
-		return
-	}
-	job := &balanceRangeSchedulerJob{
-		Create:  time.Now(),
-		Status:  pending,
-		Timeout: defaultJobTimeout,
-	}
-	job.Engine = input["engine"].(string)
-	if job.Engine != core.EngineTiFlash && job.Engine != core.EngineTiKV {
-		handler.rd.JSON(w, http.StatusBadRequest, fmt.Sprintf("engine:%s must be tikv or tiflash", input["engine"].(string)))
-		return
-	}
-	job.Rule = core.NewRule(input["rule"].(string))
-	if job.Rule != core.LeaderScatter && job.Rule != core.PeerScatter && job.Rule != core.LearnerScatter {
-		handler.rd.JSON(w, http.StatusBadRequest, fmt.Sprintf("rule:%s must be leader-scatter, learner-scatter or peer-scatter",
-			input["engine"].(string)))
-		return
-	}
-	job.Alias = input["alias"].(string)
-	startKeyStr, err := url.QueryUnescape(input["start-key"].(string))
-	if err != nil {
-		handler.rd.JSON(w, http.StatusBadRequest, fmt.Sprintf("start key:%s can't be unescaped", input["start-key"].(string)))
-		return
-	}
-
-	endKeyStr, err := url.QueryUnescape(input["end-key"].(string))
-	if err != nil {
-		handler.rd.JSON(w, http.StatusBadRequest, fmt.Sprintf("end key:%s can't be unescaped", input["end-key"].(string)))
-		return
-	}
-	log.Info("add balance key range job", zap.String("start-key", startKeyStr), zap.String("end-key", endKeyStr))
-	rs, err := decodeKeyRanges(endKeyStr, startKeyStr)
-	if err != nil {
-		handler.rd.JSON(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	job.Ranges = rs
-	if err := handler.config.addJob(job); err != nil {
-		handler.rd.JSON(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	handler.rd.JSON(w, http.StatusOK, nil)
-}
-
-func decodeKeyRanges(startKeyStr string, endKeyStr string) ([]core.KeyRange, error) {
-	startKeys := strings.Split(startKeyStr, ",")
-	endKeys := strings.Split(endKeyStr, ",")
-	if len(startKeys) != len(endKeys) {
-		return nil, errs.ErrInvalidArgument.FastGenByArgs("the length of start key doesn't equal to end key")
-	}
-	rs := make([]core.KeyRange, len(startKeys))
-	for i := range startKeys {
-		if startKeys[i] == "" && endKeys[i] == "" {
-			return nil, errs.ErrInvalidArgument.FastGenByArgs("start key and end key cannot both be nil")
-		}
-		rs[i] = core.NewKeyRange(startKeys[i], endKeys[i])
-	}
-	return rs, nil
-}
-
-func (handler *balanceRangeSchedulerHandler) deleteJob(w http.ResponseWriter, r *http.Request) {
-	jobStr := r.URL.Query().Get("job-id")
-	if jobStr == "" {
-		handler.rd.JSON(w, http.StatusBadRequest, "job-id is required")
-		return
-	}
-	jobID, err := strconv.ParseUint(jobStr, 10, 64)
-	if err != nil {
-		handler.rd.JSON(w, http.StatusBadRequest, "invalid job-id")
-		return
-	}
-	if err := handler.config.deleteJob(jobID); err != nil {
-		handler.rd.JSON(w, http.StatusInternalServerError, err)
-		return
-	}
-	handler.rd.JSON(w, http.StatusOK, nil)
-}
-
 type balanceRangeSchedulerConfig struct {
 	syncutil.RWMutex
 	schedulerConfig
 	jobs []*balanceRangeSchedulerJob
 }
 
-// MarshalJSON marshals to json.
-func (conf *balanceRangeSchedulerConfig) MarshalJSON() ([]byte, error) {
-	return json.Marshal(conf.jobs)
-}
-
-// UnmarshalJSON unmarshals from json.
-func (conf *balanceRangeSchedulerConfig) UnmarshalJSON(data []byte) error {
-	jobs := make([]*balanceRangeSchedulerJob, 0)
-	if err := json.Unmarshal(data, &jobs); err != nil {
-		return err
-	}
-	conf.jobs = jobs
-	return nil
-}
-
 type balanceRangeSchedulerJob struct {
 	JobID   uint64          `json:"job-id"`
-	Rule    core.Rule       `json:"rule"`
+	Role    core.Role       `json:"role"`
 	Engine  string          `json:"engine"`
 	Timeout time.Duration   `json:"timeout"`
 	Ranges  []core.KeyRange `json:"ranges"`
@@ -189,52 +84,6 @@ type balanceRangeSchedulerJob struct {
 	Finish  *time.Time      `json:"finish,omitempty"`
 	Create  time.Time       `json:"create"`
 	Status  JobStatus       `json:"status"`
-}
-
-func (conf *balanceRangeSchedulerConfig) deleteJob(jobID uint64) error {
-	conf.Lock()
-	defer conf.Unlock()
-	for _, job := range conf.jobs {
-		if job.JobID == jobID {
-			status := job.Status
-			if job.Status != pending && job.Status != running {
-				return errs.ErrInvalidArgument.FastGenByArgs(fmt.Sprintf(
-					"The job:%d has been completed and cannot be cancelled.", jobID))
-			}
-			job.Status = cancelled
-			start := job.Start
-			now := time.Now()
-			if job.Start == nil {
-				job.Start = &now
-			}
-			job.Finish = &now
-			if err := conf.save(); err != nil {
-				job.Status = status
-				job.Start = start
-				job.Finish = nil
-				return err
-			}
-			return nil
-		}
-	}
-	return errs.ErrScheduleConfigNotExist.FastGenByArgs(jobID)
-}
-
-func (conf *balanceRangeSchedulerConfig) addJob(job *balanceRangeSchedulerJob) error {
-	conf.Lock()
-	defer conf.Unlock()
-	job.Status = pending
-	if len(conf.jobs) == 0 {
-		job.JobID = 1
-	} else {
-		job.JobID = conf.jobs[len(conf.jobs)-1].JobID + 1
-	}
-	conf.jobs = append(conf.jobs, job)
-	if err := conf.save(); err != nil {
-		conf.jobs = conf.jobs[:len(conf.jobs)-1]
-		return err
-	}
-	return nil
 }
 
 func (conf *balanceRangeSchedulerConfig) begin(index int) *balanceRangeSchedulerJob {
@@ -294,15 +143,12 @@ func (conf *balanceRangeSchedulerConfig) clone() []*balanceRangeSchedulerJob {
 		copy(ranges, job.Ranges)
 		jobs = append(jobs, &balanceRangeSchedulerJob{
 			Ranges:  ranges,
-			Rule:    job.Rule,
+			Role:    job.Role,
 			Engine:  job.Engine,
 			Timeout: job.Timeout,
 			Alias:   job.Alias,
 			JobID:   job.JobID,
 			Start:   job.Start,
-			Status:  job.Status,
-			Create:  job.Create,
-			Finish:  job.Finish,
 		})
 	}
 
@@ -322,7 +168,7 @@ func (s *balanceRangeScheduler) ReloadConfig() error {
 	defer s.conf.Unlock()
 
 	jobs := make([]*balanceRangeSchedulerJob, 0, len(s.conf.jobs))
-	if err := s.conf.load(&jobs); err != nil {
+	if err := s.conf.load(jobs); err != nil {
 		return err
 	}
 	s.conf.jobs = jobs
@@ -366,7 +212,7 @@ func (s *balanceRangeScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster)
 // BalanceRangeCreateOption is used to create a scheduler with an option.
 type BalanceRangeCreateOption func(s *balanceRangeScheduler)
 
-// newBalanceRangeScheduler creates a scheduler that tends to keep given peer rule on
+// newBalanceRangeScheduler creates a scheduler that tends to keep given peer Role on
 // special store balanced.
 func newBalanceRangeScheduler(opController *operator.Controller, conf *balanceRangeSchedulerConfig, options ...BalanceRangeCreateOption) Scheduler {
 	s := &balanceRangeScheduler{
@@ -415,19 +261,13 @@ func (s *balanceRangeScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) 
 		if plan.sourceScore < plan.averageScore {
 			break
 		}
-		switch job.Rule {
-		case core.LeaderScatter:
+		switch job.Role {
+		case core.Leader:
 			plan.region = filter.SelectOneRegion(cluster.RandLeaderRegions(plan.sourceStoreID(), job.Ranges), nil, baseRegionFilters...)
-		case core.LearnerScatter:
+		case core.Learner:
 			plan.region = filter.SelectOneRegion(cluster.RandLearnerRegions(plan.sourceStoreID(), job.Ranges), nil, baseRegionFilters...)
-		case core.PeerScatter:
+		case core.Follower:
 			plan.region = filter.SelectOneRegion(cluster.RandFollowerRegions(plan.sourceStoreID(), job.Ranges), nil, baseRegionFilters...)
-			if plan.region == nil {
-				plan.region = filter.SelectOneRegion(cluster.RandLeaderRegions(plan.sourceStoreID(), job.Ranges), nil, baseRegionFilters...)
-			}
-			if plan.region == nil {
-				plan.region = filter.SelectOneRegion(cluster.RandLearnerRegions(plan.sourceStoreID(), job.Ranges), nil, baseRegionFilters...)
-			}
 		}
 		if plan.region == nil {
 			balanceRangeNoRegionCounter.Inc()
@@ -458,7 +298,7 @@ func (s *balanceRangeScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) 
 // transferPeer selects the best store to create a new peer to replace the old peer.
 func (s *balanceRangeScheduler) transferPeer(plan *balanceRangeSchedulerPlan, dstStores []*core.StoreInfo) *operator.Operator {
 	excludeTargets := plan.region.GetStoreIDs()
-	if plan.job.Rule == core.LeaderScatter {
+	if plan.job.Role == core.Leader {
 		excludeTargets = make(map[uint64]struct{})
 		excludeTargets[plan.region.GetLeader().GetStoreId()] = struct{}{}
 	}
@@ -484,7 +324,7 @@ func (s *balanceRangeScheduler) transferPeer(plan *balanceRangeSchedulerPlan, ds
 
 		oldPeer := plan.region.GetStorePeer(sourceID)
 		exist := false
-		if plan.job.Rule == core.LeaderScatter {
+		if plan.job.Role == core.Leader {
 			peers := plan.region.GetPeers()
 			for _, peer := range peers {
 				if peer.GetStoreId() == targetID {
@@ -591,16 +431,16 @@ func (s *balanceRangeScheduler) prepare(cluster sche.SchedulerCluster, opInfluen
 	}
 	totalScore := int64(0)
 	for _, region := range scanRegions {
-		for _, peer := range region.GetPeersByRule(job.Rule) {
+		for _, peer := range region.GetPeersByRole(job.Role) {
 			scoreMap[peer.GetStoreId()] += 1
 			totalScore += 1
 		}
 	}
 
 	sort.Slice(sources, func(i, j int) bool {
-		rule := job.Rule
-		iop := opInfluence.GetStoreInfluence(sources[i].GetID()).GetStoreInfluenceByRole(rule)
-		jop := opInfluence.GetStoreInfluence(sources[j].GetID()).GetStoreInfluenceByRole(rule)
+		role := job.Role
+		iop := opInfluence.GetStoreInfluence(sources[i].GetID()).GetStoreInfluenceByRole(role)
+		jop := opInfluence.GetStoreInfluence(sources[j].GetID()).GetStoreInfluenceByRole(role)
 		iScore := scoreMap[sources[i].GetID()]
 		jScore := scoreMap[sources[j].GetID()]
 		return iScore+iop > jScore+jop
@@ -641,7 +481,7 @@ func (p *balanceRangeSchedulerPlan) score(storeID uint64) int64 {
 
 func (p *balanceRangeSchedulerPlan) shouldBalance(scheduler string) bool {
 	sourceInfluence := p.opInfluence.GetStoreInfluence(p.sourceStoreID())
-	sourceInf := sourceInfluence.GetStoreInfluenceByRole(p.job.Rule)
+	sourceInf := sourceInfluence.GetStoreInfluenceByRole(p.job.Role)
 	// Sometimes, there are many remove-peer operators in the source store, we don't want to pick this store as source.
 	if sourceInf < 0 {
 		sourceInf = -sourceInf
@@ -651,7 +491,7 @@ func (p *balanceRangeSchedulerPlan) shouldBalance(scheduler string) bool {
 	sourceScore := p.sourceScore - sourceInf - p.tolerate
 
 	targetInfluence := p.opInfluence.GetStoreInfluence(p.targetStoreID())
-	targetInf := targetInfluence.GetStoreInfluenceByRole(p.job.Rule)
+	targetInf := targetInfluence.GetStoreInfluenceByRole(p.job.Role)
 	// Sometimes, there are many add-peer operators in the target store, we don't want to pick this store as target.
 	if targetInf < 0 {
 		targetInf = -targetInf
@@ -684,39 +524,21 @@ const (
 	pending JobStatus = iota
 	running
 	finished
-	cancelled
 )
 
-func (s *JobStatus) String() string {
-	switch *s {
+func (s JobStatus) String() string {
+	switch s {
 	case pending:
 		return "pending"
 	case running:
 		return "running"
 	case finished:
 		return "finished"
-	case cancelled:
-		return "cancelled"
 	}
 	return "unknown"
 }
 
 // MarshalJSON marshals to json.
-func (s *JobStatus) MarshalJSON() ([]byte, error) {
+func (s JobStatus) MarshalJSON() ([]byte, error) {
 	return []byte(`"` + s.String() + `"`), nil
-}
-
-// UnmarshalJSON unmarshals from json.
-func (s *JobStatus) UnmarshalJSON(data []byte) error {
-	switch string(data) {
-	case `"running"`:
-		*s = running
-	case `"finished"`:
-		*s = finished
-	case `"cancelled"`:
-		*s = cancelled
-	case `"pending"`:
-		*s = pending
-	}
-	return nil
 }
