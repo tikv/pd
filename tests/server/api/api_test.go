@@ -794,7 +794,7 @@ func TestRemovingProgress(t *testing.T) {
 	clusterID := leader.GetClusterID()
 	req := &pdpb.BootstrapRequest{
 		Header: testutil.NewRequestHeader(clusterID),
-		Store:  &metapb.Store{Id: 1, Address: "127.0.0.1:0"},
+		Store:  &metapb.Store{Id: 1, Address: "mock://tikv-1:1"},
 		Region: &metapb.Region{Id: 2, Peers: []*metapb.Peer{{Id: 3, StoreId: 1, Role: metapb.PeerRole_Voter}}},
 	}
 	resp, err := grpcPDClient.Bootstrap(context.Background(), req)
@@ -971,7 +971,7 @@ func TestSendApiWhenRestartRaftCluster(t *testing.T) {
 	clusterID := leader.GetClusterID()
 	req := &pdpb.BootstrapRequest{
 		Header: testutil.NewRequestHeader(clusterID),
-		Store:  &metapb.Store{Id: 1, Address: "127.0.0.1:0"},
+		Store:  &metapb.Store{Id: 1, Address: "mock://tikv-1:1"},
 		Region: &metapb.Region{Id: 2, Peers: []*metapb.Peer{{Id: 3, StoreId: 1, Role: metapb.PeerRole_Voter}}},
 	}
 	resp, err := grpcPDClient.Bootstrap(context.Background(), req)
@@ -1015,7 +1015,7 @@ func TestPreparingProgress(t *testing.T) {
 	clusterID := leader.GetClusterID()
 	req := &pdpb.BootstrapRequest{
 		Header: testutil.NewRequestHeader(clusterID),
-		Store:  &metapb.Store{Id: 1, Address: "127.0.0.1:0"},
+		Store:  &metapb.Store{Id: 1, Address: "mock://tikv-1:1"},
 		Region: &metapb.Region{Id: 2, Peers: []*metapb.Peer{{Id: 3, StoreId: 1, Role: metapb.PeerRole_Voter}}},
 	}
 	resp, err := grpcPDClient.Bootstrap(context.Background(), req)
