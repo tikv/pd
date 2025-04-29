@@ -233,8 +233,9 @@ func (conf *evictLeaderSchedulerConfig) delete(id uint64) (any, error) {
 
 type evictLeaderScheduler struct {
 	*BaseScheduler
-	conf    *evictLeaderSchedulerConfig
-	handler http.Handler
+	conf           *evictLeaderSchedulerConfig
+	handler        http.Handler
+	pendingRegions map[uint64]*operator.Operator
 }
 
 // newEvictLeaderScheduler creates an admin scheduler that transfers all leaders
@@ -242,9 +243,10 @@ type evictLeaderScheduler struct {
 func newEvictLeaderScheduler(opController *operator.Controller, conf *evictLeaderSchedulerConfig) Scheduler {
 	handler := newEvictLeaderHandler(conf)
 	return &evictLeaderScheduler{
-		BaseScheduler: NewBaseScheduler(opController, types.EvictLeaderScheduler, conf),
-		conf:          conf,
-		handler:       handler,
+		BaseScheduler:  NewBaseScheduler(opController, types.EvictLeaderScheduler, conf),
+		conf:           conf,
+		handler:        handler,
+		pendingRegions: make(map[uint64]*operator.Operator),
 	}
 }
 
@@ -290,7 +292,7 @@ func (s *evictLeaderScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) 
 // Schedule implements the Scheduler interface.
 func (s *evictLeaderScheduler) Schedule(cluster sche.SchedulerCluster, _ bool) ([]*operator.Operator, []plan.Plan) {
 	evictLeaderCounter.Inc()
-	return scheduleEvictLeaderBatch(s.R, s.GetName(), cluster, s.conf), nil
+	return scheduleEvictLeaderBatch(s.R, s.GetName(), cluster, s.conf, s.pendingRegions), nil
 }
 
 func uniqueAppendOperator(dst []*operator.Operator, src ...*operator.Operator) []*operator.Operator {
@@ -314,11 +316,19 @@ type evictLeaderStoresConf interface {
 	getBatch() int
 }
 
-func scheduleEvictLeaderBatch(r *rand.Rand, name string, cluster sche.SchedulerCluster, conf evictLeaderStoresConf) []*operator.Operator {
+func scheduleEvictLeaderBatch(r *rand.Rand, name string, cluster sche.SchedulerCluster, conf evictLeaderStoresConf, pendingRegions map[uint64]*operator.Operator) []*operator.Operator {
+	for _, op := range pendingRegions {
+		status := op.CheckAndGetStatus()
+		if operator.IsEndStatus(status) {
+			// If the operator is finished, remove it from pending regions.
+			delete(pendingRegions, op.RegionID())
+			continue
+		}
+	}
 	var ops []*operator.Operator
 	batchSize := conf.getBatch()
 	for range batchSize {
-		once := scheduleEvictLeaderOnce(r, name, cluster, conf)
+		once := scheduleEvictLeaderOnce(r, name, cluster, conf, pendingRegions)
 		// no more regions
 		if len(once) == 0 {
 			break
@@ -332,7 +342,7 @@ func scheduleEvictLeaderBatch(r *rand.Rand, name string, cluster sche.SchedulerC
 	return ops
 }
 
-func scheduleEvictLeaderOnce(r *rand.Rand, name string, cluster sche.SchedulerCluster, conf evictLeaderStoresConf) []*operator.Operator {
+func scheduleEvictLeaderOnce(r *rand.Rand, name string, cluster sche.SchedulerCluster, conf evictLeaderStoresConf, pendingRegions map[uint64]*operator.Operator) []*operator.Operator {
 	storeIDs := conf.getStores()
 	ops := make([]*operator.Operator, 0, len(storeIDs))
 
@@ -340,18 +350,21 @@ func scheduleEvictLeaderOnce(r *rand.Rand, name string, cluster sche.SchedulerCl
 	downFilter := filter.NewRegionDownFilter()
 
 	for _, storeID := range storeIDs {
+		var isHot bool
 		ranges := conf.getKeyRangesByID(storeID)
 		if len(ranges) == 0 {
 			continue
 		}
-		var filters []filter.Filter
-		var region *core.RegionInfo
-		regions := statistics.GetHotStoreLeaders(cluster.GetBasicCluster(), storeID, cluster.GetHotPeerStats(utils.Write, 1))
-		region = filter.RandomSelectOneRegion(regions, nil, pendingFilter, downFilter)
-		if region == nil {
-			regions := statistics.GetHotStoreLeaders(cluster.GetBasicCluster(), storeID, cluster.GetHotPeerStats(utils.Read, 1))
-			region = filter.RandomSelectOneRegion(regions, nil, pendingFilter, downFilter)
+		var (
+			filters []filter.Filter
+			region  *core.RegionInfo
+		)
+
+		if pendingRegions != nil {
+			region = pickHotLeader(cluster, pendingRegions, storeID, downFilter)
+			isHot = true
 		}
+
 		if region == nil {
 			region = filter.SelectOneRegion(cluster.RandLeaderRegions(storeID, ranges), nil, pendingFilter, downFilter)
 		}
@@ -397,6 +410,9 @@ func scheduleEvictLeaderOnce(r *rand.Rand, name string, cluster sche.SchedulerCl
 		op.SetPriorityLevel(constant.Urgent)
 		op.Counters = append(op.Counters, evictLeaderNewOperatorCounter)
 		ops = append(ops, op)
+		if pendingRegions != nil && isHot {
+			pendingRegions[region.GetID()] = op
+		}
 	}
 	return ops
 }
@@ -501,4 +517,26 @@ func newEvictLeaderHandler(config *evictLeaderSchedulerConfig) http.Handler {
 	router.HandleFunc("/list", h.listConfig).Methods(http.MethodGet)
 	router.HandleFunc("/delete/{store_id}", h.deleteConfig).Methods(http.MethodDelete)
 	return router
+}
+
+func pickHotLeader(cluster sche.SchedulerCluster, pendingRegions map[uint64]*operator.Operator, storeID uint64, downFilter filter.RegionFilter) *core.RegionInfo {
+	regions := statistics.GetHotStoreLeaders(cluster.GetBasicCluster(), storeID, cluster.GetHotPeerStats(utils.Write, 1))
+	if len(regions) != 0 {
+		for _, region := range regions {
+			if pendingRegions[region.GetID()] != nil {
+				delete(regions, region.GetID())
+			}
+		}
+		return filter.RandomSelectOneRegion(regions, nil, downFilter)
+	}
+
+	regions = statistics.GetHotStoreLeaders(cluster.GetBasicCluster(), storeID, cluster.GetHotPeerStats(utils.Read, 1))
+	if len(regions) != 0 {
+		for _, region := range regions {
+			if pendingRegions[region.GetID()] != nil {
+				delete(regions, region.GetID())
+			}
+		}
+	}
+	return filter.RandomSelectOneRegion(regions, nil, downFilter)
 }

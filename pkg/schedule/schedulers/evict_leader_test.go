@@ -183,15 +183,13 @@ func TestEvictHotLeader(t *testing.T) {
 	sl, err := CreateScheduler(types.EvictLeaderScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.EvictLeaderScheduler, []string{"2"}), func(string) error { return nil })
 	re.NoError(err)
 	re.True(sl.IsScheduleAllowed(tc))
-	testutil.Eventually(re, func() bool {
-		ops, _ := sl.Schedule(tc, false)
-		for _, op := range ops {
-			switch op.RegionID() {
-			case 3, 4, 5, 7, 9, 11, 12, 14, 15, 16, 17:
-				re.FailNow("unexpected region", op.RegionID())
-			default:
-			}
+	ops, _ := sl.Schedule(tc, false)
+	for _, op := range ops {
+		switch op.RegionID() {
+		case 3, 4, 5, 7, 9, 11, 12, 14, 15, 16, 17:
+			re.FailNow("unexpected region", op.RegionID())
+		default:
 		}
-		return len(ops) == 3
-	})
+	}
+	re.Len(ops, 3)
 }

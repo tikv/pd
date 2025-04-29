@@ -18,6 +18,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/docker/go-units"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
@@ -27,6 +28,7 @@ import (
 	"github.com/tikv/pd/pkg/mock/mockcluster"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/types"
+	"github.com/tikv/pd/pkg/statistics/utils"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/utils/operatorutil"
 )
@@ -182,6 +184,97 @@ func TestEvictSlowStoreBatch(t *testing.T) {
 	re.NoError(es.(*evictSlowStoreScheduler).conf.save())
 	ops, _ = es.Schedule(tc, false)
 	re.Len(ops, 5)
+
+	newStoreInfo = storeInfo.Clone(func(store *core.StoreInfo) {
+		store.GetStoreStats().SlowScore = 0
+	})
+
+	tc.PutStore(newStoreInfo)
+	// no slow store need to evict.
+	ops, _ = es.Schedule(tc, false)
+	re.Empty(ops)
+
+	es2, ok := es.(*evictSlowStoreScheduler)
+	re.True(ok)
+	re.Zero(es2.conf.evictStore())
+
+	// check the value from storage.
+	var persistValue evictSlowStoreSchedulerConfig
+	err = es2.conf.load(&persistValue)
+	re.NoError(err)
+
+	re.Equal(es2.conf.EvictedStores, persistValue.EvictedStores)
+	re.Zero(persistValue.evictStore())
+	re.True(persistValue.readyForRecovery())
+	re.Equal(5, persistValue.Batch)
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/schedulers/transientRecoveryGap"))
+}
+
+func TestEvictSlowStoreHot(t *testing.T) {
+	re := require.New(t)
+	cancel, _, tc, oc := prepareSchedulersTest()
+	defer cancel()
+
+	// Add stores
+	tc.AddLeaderStore(1, 0)
+	tc.AddLeaderStore(2, 0)
+	tc.AddLeaderStore(3, 0)
+
+	tc.UpdateStorageWrittenBytes(1, 10*units.MiB*utils.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenBytes(2, 10*units.MiB*utils.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenBytes(3, 10*units.MiB*utils.StoreHeartBeatReportInterval)
+
+	tc.UpdateStorageWrittenKeys(1, 10*units.MiB*utils.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenKeys(2, 10*units.MiB*utils.StoreHeartBeatReportInterval)
+	tc.UpdateStorageWrittenKeys(3, 10*units.MiB*utils.StoreHeartBeatReportInterval)
+
+	for i := 1; i <= 10000; i++ {
+		if i%1000 == 0 {
+			addRegionInfo(tc, utils.Write, []testRegionInfo{
+				{uint64(i), []uint64{1, 2}, 512 * units.KiB, 0, 0},
+			})
+			continue
+		}
+		tc.AddLeaderRegion(uint64(i), 1, 2)
+	}
+
+	storage := storage.NewStorageWithMemoryBackend()
+	es, err := CreateScheduler(types.EvictSlowStoreScheduler, oc, storage, ConfigSliceDecoder(types.EvictSlowStoreScheduler, []string{}), nil)
+	re.NoError(err)
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/schedule/schedulers/transientRecoveryGap", "return(true)"))
+	storeInfo := tc.GetStore(1)
+	newStoreInfo := storeInfo.Clone(func(store *core.StoreInfo) {
+		store.GetStoreStats().SlowScore = 100
+	})
+	tc.PutStore(newStoreInfo)
+	re.True(es.IsScheduleAllowed(tc))
+	// Add evict leader scheduler to store 1
+	ops, _ := es.Schedule(tc, false)
+	re.Len(ops, 3)
+	checkOp := make(map[uint64]struct{})
+	for _, op := range ops {
+		id := op.RegionID()
+		_, ok := checkOp[id]
+		re.False(ok)
+		r := tc.GetRegion(op.RegionID())
+		re.NotEmpty(r.GetBytesWritten())
+	}
+	operatorutil.CheckMultiTargetTransferLeader(re, ops[0], operator.OpLeader, 1, []uint64{2})
+	re.Equal(types.EvictSlowStoreScheduler.String(), ops[0].Desc())
+
+	es.(*evictSlowStoreScheduler).conf.Batch = 5
+	re.NoError(es.(*evictSlowStoreScheduler).conf.save())
+	ops, _ = es.Schedule(tc, false)
+	re.Len(ops, 5)
+	checkOp = make(map[uint64]struct{})
+	for _, op := range ops {
+		id := op.RegionID()
+		_, ok := checkOp[id]
+		re.False(ok)
+		checkOp[id] = struct{}{}
+		r := tc.GetRegion(id)
+		re.NotEmpty(r.GetBytesWritten())
+	}
 
 	newStoreInfo = storeInfo.Clone(func(store *core.StoreInfo) {
 		store.GetStoreStats().SlowScore = 0
