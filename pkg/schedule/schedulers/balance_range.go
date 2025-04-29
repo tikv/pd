@@ -204,7 +204,9 @@ func (conf *balanceRangeSchedulerConfig) deleteJob(jobID uint64) error {
 			job.Status = cancelled
 			start := job.Start
 			now := time.Now()
-			job.Start = &now
+			if job.Start == nil {
+				job.Start = &now
+			}
 			job.Finish = &now
 			if err := conf.save(); err != nil {
 				job.Status = status
