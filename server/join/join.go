@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -49,6 +50,8 @@ var listMemberRetryTimes = 20
 //
 //	and it is not a member of cluster, join does MemberAdd, it returns an
 //	error if PD tries to join itself, missing data or join a duplicated PD.
+//	If previously the node joined but failed to start, it will attempt to
+//	start as the same membeer again.
 //
 // Etcd automatically re-joins the cluster if there is a data directory. So
 // first it checks if there is a data directory or not. If there is, it returns
@@ -59,6 +62,9 @@ var listMemberRetryTimes = 20
 //
 //   - A new PD joins an existing cluster.
 //     What join does: MemberAdd, MemberList, then generate initial-cluster.
+//
+//   - A new PD joined an existing cluster but failed to start.
+//     What join does: MemberList, then generate initial-cluster.
 //
 //   - A failed PD re-joins the previous cluster.
 //     What join does: return an error. (etcd reports: raft log corrupted,
@@ -122,13 +128,19 @@ func PrepareJoinCluster(cfg *config.Config) error {
 	}
 
 	existed := false
+	joinedFailedToStart := false
 	for _, m := range listResp.Members {
 		if len(m.Name) == 0 {
-			log.Error("there is an abnormal joined member in the current member list",
-				zap.Uint64("id", m.ID),
-				zap.Strings("peer-urls", m.PeerURLs),
-				zap.Strings("client-urls", m.ClientURLs))
-			return errors.Errorf("there is a member %d that has not joined successfully", m.ID)
+			if isSameSlice(m.PeerURLs, strings.Split(cfg.AdvertisePeerUrls, ",")) {
+				log.Warn("the PD is already in the cluster but previously failed to start after join", zap.Any("member", m))
+				joinedFailedToStart = true
+			} else {
+				log.Error("there is an abnormal joined member in the current member list",
+					zap.Uint64("id", m.ID),
+					zap.Strings("peer-urls", m.PeerURLs),
+					zap.Strings("client-urls", m.ClientURLs))
+				return errors.Errorf("there is a member %d that has not joined successfully", m.ID)
+			}
 		}
 		if m.Name == cfg.Name {
 			existed = true
@@ -149,10 +161,13 @@ func PrepareJoinCluster(cfg *config.Config) error {
 	// - A new PD joins an existing cluster.
 	// - A deleted PD joins to previous cluster.
 	{
-		// First adds member through the API
-		addResp, err = etcdutil.AddEtcdMember(client, []string{cfg.AdvertisePeerUrls})
-		if err != nil {
-			return err
+		// No need to add member if the PD is already in the cluster.
+		if !joinedFailedToStart {
+			// First adds member through the API
+			addResp, err = etcdutil.AddEtcdMember(client, []string{cfg.AdvertisePeerUrls})
+			if err != nil {
+				return err
+			}
 		}
 	}
 	failpoint.Label("LabelSkipAddMember")
@@ -176,11 +191,16 @@ func PrepareJoinCluster(cfg *config.Config) error {
 				listSucc = true
 			}
 			if len(n) == 0 {
-				log.Error("there is an abnormal joined member in the current member list",
-					zap.Uint64("id", memb.ID),
-					zap.Strings("peer-urls", memb.PeerURLs),
-					zap.Strings("client-urls", memb.ClientURLs))
-				return errors.Errorf("there is a member %d that has not joined successfully", memb.ID)
+				if joinedFailedToStart && isSameSlice(memb.PeerURLs, strings.Split(cfg.AdvertisePeerUrls, ",")) {
+					n = cfg.Name
+					listSucc = true
+				} else {
+					log.Error("there is an abnormal joined member in the current member list",
+						zap.Uint64("id", memb.ID),
+						zap.Strings("peer-urls", memb.PeerURLs),
+						zap.Strings("client-urls", memb.ClientURLs))
+					return errors.Errorf("there is a member %d that has not joined successfully", memb.ID)
+				}
 			}
 			for _, m := range memb.PeerURLs {
 				pds = append(pds, fmt.Sprintf("%s=%s", n, m))
@@ -205,6 +225,18 @@ func PrepareJoinCluster(cfg *config.Config) error {
 	}
 
 	return nil
+}
+
+func isSameSlice(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for _, item := range a {
+		if !slices.Contains(b, item) {
+			return false
+		}
+	}
+	return true
 }
 
 func isDataExist(d string) bool {
