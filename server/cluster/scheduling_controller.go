@@ -257,7 +257,7 @@ func (sc *schedulingController) GetStoresStats() *statistics.StoresStats {
 }
 
 // GetStoresLoads returns load stats of all stores.
-func (sc *schedulingController) GetStoresLoads() map[uint64]statistics.StoreStats {
+func (sc *schedulingController) GetStoresLoads() map[uint64]statistics.StoreLoads {
 	return sc.hotStat.GetStoresLoads()
 }
 
