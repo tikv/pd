@@ -102,11 +102,12 @@ func (s *tsoProxyTestSuite) TearDownTest() {
 	s.serverCancel()
 }
 
-func (s *tsoProxyTestSuite) verifyProxyIsHealthy(re *require.Assertions) {
-	s.verifyProxyIsHealthyWith(re, s.proxyClient)
+func (s *tsoProxyTestSuite) verifyProxyIsHealthy() {
+	s.verifyProxyIsHealthyWith(s.proxyClient)
 }
 
-func (s *tsoProxyTestSuite) verifyProxyIsHealthyWith(re *require.Assertions, client pdpb.PD_TsoClient) {
+func (s *tsoProxyTestSuite) verifyProxyIsHealthyWith(client pdpb.PD_TsoClient) {
+	re := s.Require()
 	re.NoError(client.Send(s.defaultReq))
 	resp, err := client.Recv()
 	re.NoError(err)
@@ -125,7 +126,7 @@ func (s *tsoProxyTestSuite) assertReceiveError(re *require.Assertions, errStr st
 
 func (s *tsoProxyTestSuite) TestProxyPropagatesLeaderErrorQuickly() {
 	re := s.Require()
-	s.verifyProxyIsHealthy(re)
+	s.verifyProxyIsHealthy()
 
 	// change leader
 	re.NoError(s.cluster.ResignLeader())
@@ -133,21 +134,21 @@ func (s *tsoProxyTestSuite) TestProxyPropagatesLeaderErrorQuickly() {
 	start := time.Now()
 	s.assertReceiveError(re, "pd is not leader of cluster")
 
-	// verify fails faster than 3 second timeout, otherwise the unavailable time will be too long.
+	// verify fails faster than timeout, otherwise the unavailable time will be too long.
 	re.Less(time.Since(start), time.Second)
 }
 
 func (s *tsoProxyTestSuite) TestProxyClientIsCancelledQuicklyOnServerShutdown() {
 	re := s.Require()
 	// open a proxy stream
-	s.verifyProxyIsHealthy(re)
+	s.verifyProxyIsHealthy()
 
 	s.serverCancel()
 
 	start := time.Now()
 	s.assertReceiveError(re, "Canceled")
 
-	// verify fails faster than 3 second timeout, otherwise the unavailable time will be too long.
+	// verify fails faster than timeout, otherwise the unavailable time will be too long.
 	re.Less(time.Since(start), time.Second)
 }
 
@@ -164,12 +165,11 @@ func (s *tsoProxyTestSuite) TestProxyCanNotCreateConnectionToLeader() {
 
 	// verify stream can be recreated
 	s.reCreateProxyClient()
-	s.verifyProxyIsHealthy(re)
+	s.verifyProxyIsHealthy()
 }
 
 func (s *tsoProxyTestSuite) TestClientsContinueToWorkAfterFirstStreamIsClosed() {
-	re := s.Require()
-	s.verifyProxyIsHealthy(re)
+	s.verifyProxyIsHealthy()
 	// open second stream
 	proxyClient, _, cancel := s.createClient()
 	defer cancel()
@@ -179,11 +179,11 @@ func (s *tsoProxyTestSuite) TestClientsContinueToWorkAfterFirstStreamIsClosed() 
 	s.proxyClient.CloseSend()
 
 	// verify other streams are still working
-	s.verifyProxyIsHealthyWith(re, proxyClient)
+	s.verifyProxyIsHealthyWith(proxyClient)
 
 	// restart new stream again
 	s.reCreateProxyClient()
-	s.verifyProxyIsHealthy(re)
+	s.verifyProxyIsHealthy()
 }
 
 func (s *tsoProxyTestSuite) TestIdleStreamToLeaderIsClosedAndRecreated() {
@@ -199,5 +199,5 @@ func (s *tsoProxyTestSuite) TestIdleStreamToLeaderIsClosedAndRecreated() {
 	s.reCreateProxyClient()
 
 	// now sever proxy is closed, let's send one more request to verify reset stream is recreated on demand
-	s.verifyProxyIsHealthy(re)
+	s.verifyProxyIsHealthy()
 }
