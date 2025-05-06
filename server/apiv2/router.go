@@ -52,6 +52,7 @@ func NewV2Handler(_ context.Context, svr *server.Server) (http.Handler, apiutil.
 		c.Next()
 	})
 	root := router.Group(apiV2Prefix)
+	// add ready handler before Redirector to avoid redirecting it to the leader
 	root.GET("ready", handlers.Ready)
 	root.Use(middlewares.Redirector())
 	handlers.RegisterKeyspace(root)
