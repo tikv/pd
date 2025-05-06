@@ -68,23 +68,14 @@ type RPCClient interface {
 	// UpdateGCSafePoint TiKV will check it and do GC themselves if necessary.
 	// If the given safePoint is less than the current one, it will not be updated.
 	// Returns the new safePoint after updating.
-	//
-	// Deprecated: This API is deprecated and replaced by AdvanceGCSafePoint, which expected only for use of the
-	// GCWorker of TiDB or any component that is responsible for managing and driving GC. For callers that want to
-	// read the current GC safe point, consider using GetGCStates instead.
 	UpdateGCSafePoint(ctx context.Context, safePoint uint64) (uint64, error)
 	// UpdateServiceGCSafePoint updates the safepoint for specific service and
 	// returns the minimum safepoint across all services, this value is used to
 	// determine the safepoint for multiple services, it does not trigger a GC
 	// job. Use UpdateGCSafePoint to trigger the GC job if needed.
-	//
-	// Deprecated: This API is deprecated and replaced by SetGCBarrier and DeleteGCBarrier.
 	UpdateServiceGCSafePoint(ctx context.Context, serviceID string, ttl int64, safePoint uint64) (uint64, error)
-	// Deprecated: These v2 APIs are deprecated. Consider using GetGCStates instead.
 	UpdateGCSafePointV2(ctx context.Context, keyspaceID uint32, safePoint uint64) (uint64, error)
-	// Deprecated: These v2 APIs are deprecated. Consider using SetGCBarrier & DeleteGCBarrier instead.
 	UpdateServiceSafePointV2(ctx context.Context, keyspaceID uint32, serviceID string, ttl int64, safePoint uint64) (uint64, error)
-	// Deprecated: These v2 APIs are deprecated. Consider polling GetAllKeyspacesGCStates instead.
 	WatchGCSafePointV2(ctx context.Context, revision int64) (chan []*pdpb.SafePointEvent, error)
 	// ScatterRegion scatters the specified region. Should use it for a batch of regions,
 	// and the distribution of these regions will be dispersed.

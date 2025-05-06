@@ -33,7 +33,6 @@ import (
 )
 
 // UpdateGCSafePointV2 update gc safe point for the given keyspace.
-// Deprecated: These v2 APIs are deprecated. Consider using GetGCStates instead.
 func (c *client) UpdateGCSafePointV2(ctx context.Context, keyspaceID uint32, safePoint uint64) (uint64, error) {
 	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
 		span = span.Tracer().StartSpan("pdclient.UpdateGCSafePointV2", opentracing.ChildOf(span.Context()))
@@ -63,7 +62,6 @@ func (c *client) UpdateGCSafePointV2(ctx context.Context, keyspaceID uint32, saf
 }
 
 // UpdateServiceSafePointV2 update service safe point for the given keyspace.
-// Deprecated: These v2 APIs are deprecated. Consider using SetGCBarrier & DeleteGCBarrier instead.
 func (c *client) UpdateServiceSafePointV2(ctx context.Context, keyspaceID uint32, serviceID string, ttl int64, safePoint uint64) (uint64, error) {
 	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
 		span = span.Tracer().StartSpan("pdclient.UpdateServiceSafePointV2", opentracing.ChildOf(span.Context()))
@@ -94,7 +92,6 @@ func (c *client) UpdateServiceSafePointV2(ctx context.Context, keyspaceID uint32
 }
 
 // WatchGCSafePointV2 watch gc safe point change.
-// Deprecated: These v2 APIs are deprecated. Consider polling GetAllKeyspacesGCStates instead.
 func (c *client) WatchGCSafePointV2(ctx context.Context, revision int64) (chan []*pdpb.SafePointEvent, error) {
 	SafePointEventsChan := make(chan []*pdpb.SafePointEvent)
 	req := &pdpb.WatchGCSafePointV2Request{

@@ -21,7 +21,6 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/unrolled/render"
 
-	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/server"
 )
@@ -54,18 +53,17 @@ type ListServiceGCSafepoint struct {
 // @Failure  500  {string}  string  "PD server failed to proceed the request."
 // @Router   /gc/safepoint [get]
 func (h *serviceGCSafepointHandler) GetGCSafePoint(w http.ResponseWriter, _ *http.Request) {
-	gcStateManager := h.svr.GetGCStateManager()
-	gcState, err := gcStateManager.GetGCState(constant.NullKeyspaceID)
+	storage := h.svr.GetStorage()
+	gcSafepoint, err := storage.LoadGCSafePoint()
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-
-	ssps := make([]*endpoint.ServiceSafePoint, 0, len(gcState.GCBarriers))
-	for _, barrier := range gcState.GCBarriers {
-		ssps = append(ssps, barrier.ToServiceSafePoint(constant.NullKeyspaceID))
+	ssps, err := storage.LoadAllServiceGCSafePoints()
+	if err != nil {
+		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
+		return
 	}
-
 	var minSSp *endpoint.ServiceSafePoint
 	for _, ssp := range ssps {
 		if (minSSp == nil || minSSp.SafePoint > ssp.SafePoint) &&
@@ -78,7 +76,7 @@ func (h *serviceGCSafepointHandler) GetGCSafePoint(w http.ResponseWriter, _ *htt
 		minServiceGcSafepoint = minSSp.SafePoint
 	}
 	list := ListServiceGCSafepoint{
-		GCSafePoint:           gcState.GCSafePoint,
+		GCSafePoint:           gcSafepoint,
 		ServiceGCSafepoints:   ssps,
 		MinServiceGcSafepoint: minServiceGcSafepoint,
 	}
@@ -94,16 +92,9 @@ func (h *serviceGCSafepointHandler) GetGCSafePoint(w http.ResponseWriter, _ *htt
 // @Router   /gc/safepoint/{service_id} [delete]
 // @Tags     rule
 func (h *serviceGCSafepointHandler) DeleteGCSafePoint(w http.ResponseWriter, r *http.Request) {
-	// Directly write to the storage and bypassing the existing constraint checks.
-	// It's risky to do this, but when this HTTP API is used, it usually means that we are already taking risks.
-	provider := h.svr.GetStorage().GetGCStateProvider()
+	storage := h.svr.GetStorage()
 	serviceID := mux.Vars(r)["service_id"]
-	err := provider.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
-		// As GC barriers and service safe points shares the same data, deleting GC barriers acts the same as deleting
-		// service safe points.
-		err := wb.DeleteGCBarrier(constant.NullKeyspaceID, serviceID)
-		return err
-	})
+	err := storage.RemoveServiceGCSafePoint(serviceID)
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
