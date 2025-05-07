@@ -200,7 +200,7 @@ func summaryStoresLoadByEngine(
 		// Build store load prediction from current load and pending influence.
 		stLoadPred := (&StoreLoad{
 			Loads:        currentLoads,
-			Count:        float64(len(hotPeers)),
+			HotPeerCount: float64(len(hotPeers)),
 			HistoryLoads: historyLoads,
 		}).ToLoadPred(rwTy, info.PendingSum)
 
@@ -264,12 +264,12 @@ func summaryStoresLoadByEngine(
 	}
 	expect := StoreLoad{
 		Loads:        expectLoads,
-		Count:        expectCount,
+		HotPeerCount: expectCount,
 		HistoryLoads: expectHistoryLoads,
 	}
 	stddev := StoreLoad{
-		Loads: stddevLoads,
-		Count: expectCount,
+		Loads:        stddevLoads,
+		HotPeerCount: expectCount,
 	}
 	for _, detail := range loadDetail {
 		detail.LoadPred.Expect = expect

@@ -91,7 +91,7 @@ func (bs *balanceSolver) init() {
 	bs.stLoadDetail = bs.sche.stLoadInfos[bs.resourceTy]
 
 	bs.maxSrc = &statistics.StoreLoad{}
-	bs.minDst = &statistics.StoreLoad{Count: math.MaxFloat64}
+	bs.minDst = &statistics.StoreLoad{HotPeerCount: math.MaxFloat64}
 	for i := range bs.minDst.Loads {
 		bs.minDst.Loads[i] = math.MaxFloat64
 	}
@@ -116,8 +116,8 @@ func (bs *balanceSolver) init() {
 		stepLoads[i] = maxCur.Loads[i] * rankStepRatios[i]
 	}
 	bs.rankStep = &statistics.StoreLoad{
-		Loads: stepLoads,
-		Count: maxCur.Count * bs.sche.conf.getCountRankStepRatio(),
+		Loads:        stepLoads,
+		HotPeerCount: maxCur.HotPeerCount * bs.sche.conf.getCountRankStepRatio(),
 	}
 }
 
@@ -318,7 +318,7 @@ func (bs *balanceSolver) tryAddPendingInfluence() bool {
 }
 
 func (bs *balanceSolver) collectPendingInfluence(peer *statistics.HotPeerStat) statistics.Influence {
-	infl := statistics.Influence{Loads: make([]float64, utils.RegionStatCount), Count: 1}
+	infl := statistics.Influence{Loads: make([]float64, utils.RegionStatCount), HotPeerCount: 1}
 	bs.rwTy.SetFullLoadRates(infl.Loads, peer.GetLoads())
 	inverse := bs.rwTy.Inverse()
 	another := bs.GetHotPeerStat(inverse, peer.RegionID, peer.StoreID)
@@ -756,7 +756,7 @@ func (bs *balanceSolver) compareSrcStore(detail1, detail2 *statistics.StoreLoadD
 					stLdRankCmp(stLdRate(bs.secondPriority), stepRank(bs.maxSrc.Loads[bs.secondPriority], bs.rankStep.Loads[bs.secondPriority])),
 				))),
 				diffCmp(sliceLoadCmp(
-					stLdRankCmp(stLdCount, stepRank(0, bs.rankStep.Count)),
+					stLdRankCmp(stLdCount, stepRank(0, bs.rankStep.HotPeerCount)),
 					stLdRankCmp(stLdRate(bs.firstPriority), stepRank(0, bs.rankStep.Loads[bs.firstPriority])),
 					stLdRankCmp(stLdRate(bs.secondPriority), stepRank(0, bs.rankStep.Loads[bs.secondPriority])),
 				)),
@@ -796,7 +796,7 @@ func (bs *balanceSolver) compareDstStore(detail1, detail2 *statistics.StoreLoadD
 					stLdRankCmp(stLdRate(bs.secondPriority), stepRank(bs.minDst.Loads[bs.secondPriority], bs.rankStep.Loads[bs.secondPriority])),
 				)),
 				diffCmp(sliceLoadCmp(
-					stLdRankCmp(stLdCount, stepRank(0, bs.rankStep.Count)),
+					stLdRankCmp(stLdCount, stepRank(0, bs.rankStep.HotPeerCount)),
 					stLdRankCmp(stLdRate(bs.firstPriority), stepRank(0, bs.rankStep.Loads[bs.firstPriority])),
 					stLdRankCmp(stLdRate(bs.secondPriority), stepRank(0, bs.rankStep.Loads[bs.secondPriority])),
 				)))

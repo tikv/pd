@@ -100,8 +100,8 @@ type StoreSummaryInfo struct {
 
 // Influence records operator influence.
 type Influence struct {
-	Loads []float64
-	Count float64
+	Loads        []float64
+	HotPeerCount float64
 }
 
 // SummaryStoreInfos return a mapping from store to summary information.
@@ -125,14 +125,14 @@ func (s *StoreSummaryInfo) AddInfluence(infl *Influence, w float64) {
 	}
 	if s.PendingSum == nil {
 		s.PendingSum = &Influence{
-			Loads: make([]float64, len(infl.Loads)),
-			Count: 0,
+			Loads:        make([]float64, len(infl.Loads)),
+			HotPeerCount: 0,
 		}
 	}
 	for i, load := range infl.Loads {
 		s.PendingSum.Loads[i] += load * w
 	}
-	s.PendingSum.Count += infl.Count * w
+	s.PendingSum.HotPeerCount += infl.HotPeerCount * w
 }
 
 // IsTiFlash returns true if the store is TiFlash.
@@ -159,15 +159,15 @@ type StoreLoads [utils.StoreLoadCount]float64
 // StoreLoad records the current load.
 type StoreLoad struct {
 	Loads        Loads
-	Count        float64
+	HotPeerCount float64
 	HistoryLoads HistoryLoads
 }
 
 // ToLoadPred returns the current load and future predictive load.
 func (load StoreLoad) ToLoadPred(rwTy utils.RWType, infl *Influence) *StoreLoadPred {
 	future := StoreLoad{
-		Loads: load.Loads,
-		Count: load.Count,
+		Loads:        load.Loads,
+		HotPeerCount: load.HotPeerCount,
 	}
 	if infl != nil {
 		switch rwTy {
@@ -180,7 +180,7 @@ func (load StoreLoad) ToLoadPred(rwTy utils.RWType, infl *Influence) *StoreLoadP
 			future.Loads[utils.KeyDim] += infl.Loads[utils.RegionWriteKeys]
 			future.Loads[utils.QueryDim] += infl.Loads[utils.RegionWriteQueryNum]
 		}
-		future.Count += infl.Count
+		future.HotPeerCount += infl.HotPeerCount
 	}
 	return &StoreLoadPred{
 		Current: load,
@@ -214,8 +214,8 @@ func (lp *StoreLoadPred) Pending() *StoreLoad {
 		loads[i] = mx.Loads[i] - mn.Loads[i]
 	}
 	return &StoreLoad{
-		Loads: loads,
-		Count: 0,
+		Loads:        loads,
+		HotPeerCount: 0,
 	}
 }
 
@@ -227,8 +227,8 @@ func (lp *StoreLoadPred) Diff() *StoreLoad {
 		loads[i] = mx.Loads[i] - mn.Loads[i]
 	}
 	return &StoreLoad{
-		Loads: loads,
-		Count: mx.Count - mn.Count,
+		Loads:        loads,
+		HotPeerCount: mx.HotPeerCount - mn.HotPeerCount,
 	}
 }
 
@@ -239,8 +239,8 @@ func MinLoad(a, b *StoreLoad) *StoreLoad {
 		loads[i] = math.Min(a.Loads[i], b.Loads[i])
 	}
 	return &StoreLoad{
-		Loads: loads,
-		Count: math.Min(a.Count, b.Count),
+		Loads:        loads,
+		HotPeerCount: math.Min(a.HotPeerCount, b.HotPeerCount),
 	}
 }
 
@@ -251,8 +251,8 @@ func MaxLoad(a, b *StoreLoad) *StoreLoad {
 		loads[i] = math.Max(a.Loads[i], b.Loads[i])
 	}
 	return &StoreLoad{
-		Loads: loads,
-		Count: math.Max(a.Count, b.Count),
+		Loads:        loads,
+		HotPeerCount: math.Max(a.HotPeerCount, b.HotPeerCount),
 	}
 }
 
