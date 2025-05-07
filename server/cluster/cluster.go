@@ -1986,7 +1986,7 @@ func getSortedLabels(storeLabels []*metapb.StoreLabel, locationLabels []string) 
 // putSortedLabels puts the label pairs back to pool
 func putSortedLabels(pairs *LabelPairs) {
 	// Return empty labels to pool
-	for i := 0; i < pairs.usedSize; i++ {
+	for i := range pairs.usedSize {
 		label := pairs.pairs[i]
 		if label.Value == "" {
 			label.Key = ""

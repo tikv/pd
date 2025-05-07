@@ -3994,7 +3994,7 @@ func BenchmarkHandleRegionHeartbeat(b *testing.B) {
 // generateTestStores creates n stores with different labels for testing
 func generateTestStores(n int) []*core.StoreInfo {
 	stores := make([]*core.StoreInfo, 0, n)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		store := core.NewStoreInfo(&metapb.Store{
 			Id: uint64(i),
 			Labels: []*metapb.StoreLabel{
@@ -4026,7 +4026,7 @@ func BenchmarkBuildTopology(b *testing.B) {
 			b.ResetTimer()
 			b.ReportAllocs()
 
-			for i := 0; i < b.N; i++ {
+			for range b.N {
 				buildTopology(
 					stores[0],
 					stores,
