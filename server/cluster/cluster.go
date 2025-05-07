@@ -1908,8 +1908,8 @@ func getStoreTopoWeight(store *core.StoreInfo, stores []*core.StoreInfo, locatio
 		return weight / float64(count) / sameLocationStoreNum
 	}
 
-	labels := getSortedLabels(store.GetLabels(), locationLabels)
-	for _, label := range labels.pairs {
+	sortedLabels := getSortedLabels(store.GetLabels(), locationLabels)
+	for _, label := range sortedLabels.pairs {
 		if _, ok := topo[label.Value]; ok {
 			if slice.Contains(validLabels, label.Key) {
 				weight /= float64(len(topo))
@@ -1919,7 +1919,7 @@ func getStoreTopoWeight(store *core.StoreInfo, stores []*core.StoreInfo, locatio
 			break
 		}
 	}
-	putSortedLabels(labels)
+	putSortedLabels(sortedLabels)
 
 	return weight / sameLocationStoreNum
 }
@@ -1949,22 +1949,22 @@ var labelPairsPool = sync.Pool{
 // getSortedLabels returns sorted store labels. Both returned slice and contained labels are from pool.
 func getSortedLabels(storeLabels []*metapb.StoreLabel, locationLabels []string) *LabelPairs {
 	// Get label pairs from pool
-	pairs := labelPairsPool.Get().(*LabelPairs)
-	pairs.usedSize = 0
+	labelPairs := labelPairsPool.Get().(*LabelPairs)
+	labelPairs.usedSize = 0
 
 	// Reset but keep capacity
-	if cap(pairs.pairs) < len(locationLabels) {
-		pairs.pairs = make([]*metapb.StoreLabel, 0, len(locationLabels))
+	if cap(labelPairs.pairs) < len(locationLabels) {
+		labelPairs.pairs = make([]*metapb.StoreLabel, 0, len(locationLabels))
 	}
-	pairs.pairs = pairs.pairs[:0]
+	labelPairs.pairs = labelPairs.pairs[:0]
 
 	// Build sorted labels
 	for _, ll := range locationLabels {
 		find := false
 		for _, sl := range storeLabels {
 			if ll == sl.Key {
-				pairs.pairs = append(pairs.pairs, sl)
-				pairs.usedSize++
+				labelPairs.pairs = append(labelPairs.pairs, sl)
+				labelPairs.usedSize++
 				find = true
 				break
 			}
@@ -1975,12 +1975,12 @@ func getSortedLabels(storeLabels []*metapb.StoreLabel, locationLabels []string) 
 			label := storeLabelPool.Get().(*metapb.StoreLabel)
 			label.Key = ll
 			label.Value = ""
-			pairs.pairs = append(pairs.pairs, label)
-			pairs.usedSize++
+			labelPairs.pairs = append(labelPairs.pairs, label)
+			labelPairs.usedSize++
 		}
 	}
 
-	return pairs
+	return labelPairs
 }
 
 // putSortedLabels puts the label pairs back to pool
@@ -2047,9 +2047,9 @@ func buildTopology(s *core.StoreInfo, stores []*core.StoreInfo, locationLabels [
 	// 3. Build topology graph
 	for _, store := range stores {
 		if store.IsServing() || store.IsPreparing() {
-			labels := getSortedLabels(store.GetLabels(), locationLabels)
-			updateTopology(topology, labels, (*labelCount))
-			putSortedLabels(labels)
+			sortedLabels := getSortedLabels(store.GetLabels(), locationLabels)
+			updateTopology(topology, sortedLabels, (*labelCount))
+			putSortedLabels(sortedLabels)
 		}
 	}
 
@@ -2081,13 +2081,13 @@ func buildTopology(s *core.StoreInfo, stores []*core.StoreInfo, locationLabels [
 	return topology, validLabels, sameLocationStoreNum, isMatch
 }
 
-func updateTopology(topology map[string]any, labels *LabelPairs, labelCount []int) {
-	if labels == nil || len(labels.pairs) == 0 {
+func updateTopology(topology map[string]any, sortedLabels *LabelPairs, labelCount []int) {
+	if sortedLabels == nil || len(sortedLabels.pairs) == 0 {
 		return
 	}
 
 	topo := topology
-	for i, l := range labels.pairs {
+	for i, l := range sortedLabels.pairs {
 		if _, exist := topo[l.Value]; !exist {
 			// Get new map from pool and clean it
 			m := topologyPool.Get().(map[string]any)
