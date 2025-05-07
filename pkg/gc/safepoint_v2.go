@@ -27,6 +27,7 @@ import (
 
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/keyspace"
+	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
@@ -49,8 +50,8 @@ type SafePointV2Manager struct {
 	keyspaceStorage endpoint.KeyspaceStorage
 	// v2Storage is the storage GCSafePointV2 and ServiceSafePointV2.
 	v2Storage endpoint.SafePointV2Storage
-	// v1Storage is the storage for v1 format GCSafePoint and ServiceGCSafePoint, it's used during pd update.
-	v1Storage endpoint.GCSafePointStorage
+	// v1Provider is the storage for v1 format GCSafePoint and ServiceGCSafePoint, it's used during pd update.
+	v1Provider endpoint.GCStateProvider
 }
 
 // NewSafePointManagerV2 returns a new SafePointV2Manager.
@@ -58,14 +59,14 @@ func NewSafePointManagerV2(
 	ctx context.Context,
 	keyspaceStore endpoint.KeyspaceStorage,
 	v2Storage endpoint.SafePointV2Storage,
-	v1Storage endpoint.GCSafePointStorage,
+	v1Provider endpoint.GCStateProvider,
 ) *SafePointV2Manager {
 	return &SafePointV2Manager{
 		ctx:             ctx,
 		LockGroup:       syncutil.NewLockGroup(syncutil.WithHash(keyspace.MaskKeyspaceID)),
 		keyspaceStorage: keyspaceStore,
 		v2Storage:       v2Storage,
-		v1Storage:       v1Storage,
+		v1Provider:      v1Provider,
 	}
 }
 
@@ -127,7 +128,7 @@ func (manager *SafePointV2Manager) getGCSafePoint(keyspaceID uint32) (*endpoint.
 	}
 	// If failed to find a valid safe point, check if a safe point exist in v1 storage, and use it.
 	if v2SafePoint.SafePoint == 0 {
-		v1SafePoint, err := manager.v1Storage.LoadGCSafePoint()
+		v1SafePoint, err := manager.v1Provider.LoadGCSafePoint(constant.NullKeyspaceID)
 		if err != nil {
 			return nil, err
 		}
