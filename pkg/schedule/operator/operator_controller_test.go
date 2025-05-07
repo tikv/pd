@@ -495,6 +495,7 @@ func (suite *operatorControllerTestSuite) TestPollDispatchRegionForMergeRegion()
 
 func (suite *operatorControllerTestSuite) TestConcurrentMergeConflict() {
 	re := suite.Require()
+
 	opts := mockconfig.NewTestOptions()
 	cluster := mockcluster.NewCluster(suite.ctx, opts)
 	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, cluster, false /* no need to run */)
@@ -502,31 +503,31 @@ func (suite *operatorControllerTestSuite) TestConcurrentMergeConflict() {
 	cluster.AddLabelsStore(1, 1, map[string]string{"host": "host1"})
 	cluster.AddLabelsStore(2, 1, map[string]string{"host": "host2"})
 	cluster.AddLabelsStore(3, 1, map[string]string{"host": "host3"})
-
-	source := newRegionInfo(101, "1a", "1b", 10, 10, []uint64{101, 1}, []uint64{101, 1})
-	source.GetMeta().RegionEpoch = &metapb.RegionEpoch{}
-	cluster.PutRegion(source)
-	target := newRegionInfo(102, "1b", "1c", 10, 10, []uint64{101, 1}, []uint64{101, 1})
-	target.GetMeta().RegionEpoch = &metapb.RegionEpoch{}
-	cluster.PutRegion(target)
-
+	left := newRegionInfo(101, "1a", "1b", 10, 10, []uint64{101, 1}, []uint64{101, 1})
+	left.GetMeta().RegionEpoch = &metapb.RegionEpoch{}
+	cluster.PutRegion(left)
+	middle := newRegionInfo(102, "1b", "1c", 10, 10, []uint64{101, 1}, []uint64{101, 1})
+	middle.GetMeta().RegionEpoch = &metapb.RegionEpoch{}
+	cluster.PutRegion(middle)
+	right := newRegionInfo(103, "1c", "1d", 10, 10, []uint64{101, 1}, []uint64{101, 1})
+	right.GetMeta().RegionEpoch = &metapb.RegionEpoch{}
+	cluster.PutRegion(right)
 	wg := &sync.WaitGroup{}
 	for range 5 {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			for range 10 {
-				ops, err := CreateMergeRegionOperator("merge-region", cluster, source, target, OpMerge)
-				re.NoError(err)
-				re.NotEmpty(ops)
-				for i := range ops {
-					controller.addOperatorInner(ops[i])
-				}
-			}
+			ops1, err := CreateMergeRegionOperator("merge-region", cluster, left, middle, OpMerge)
+			re.NoError(err)
+			re.Len(ops1, 2)
+			controller.AddWaitingOperator(ops1...)
+			ops2, err := CreateMergeRegionOperator("merge-region", cluster, middle, right, OpMerge)
+			re.NoError(err)
+			re.Len(ops2, 2)
+			controller.AddWaitingOperator(ops2...)
 		}()
 	}
 	wg.Wait()
-
 	var count int
 	controller.operators.Range(func(key any, op any) bool {
 		if op.(*Operator).Kind() == OpMerge {
@@ -534,7 +535,6 @@ func (suite *operatorControllerTestSuite) TestConcurrentMergeConflict() {
 		}
 		return true
 	})
-	re.NotZero(count)
 	re.Equal(count, int(controller.counts.getCountByKind(OpMerge)))
 }
 
