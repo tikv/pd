@@ -529,7 +529,7 @@ func (suite *operatorControllerTestSuite) TestConcurrentMergeConflict() {
 	}
 	wg.Wait()
 	var count int
-	controller.operators.Range(func(key any, op any) bool {
+	controller.operators.Range(func(_ any, op any) bool {
 		if op.(*Operator).Kind() == OpMerge {
 			count++
 		}
