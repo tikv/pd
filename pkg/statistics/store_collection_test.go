@@ -104,7 +104,7 @@ func TestSummaryStoreInfos(t *testing.T) {
 	collector := newTikvCollector()
 	storeHistoryLoad := NewStoreHistoryLoads(DefaultHistorySampleDuration, DefaultHistorySampleInterval)
 	storeInfos := make(map[uint64]*StoreSummaryInfo)
-	storeLoads := make(map[uint64]StoreLoads)
+	storeLoads := make(map[uint64]StoreKindLoads)
 	for _, storeID := range []uint64{1, 3} {
 		storeInfos[storeID] = &StoreSummaryInfo{
 			isTiFlash: false,
@@ -116,7 +116,7 @@ func TestSummaryStoreInfos(t *testing.T) {
 				core.SetLastHeartbeatTS(time.Now()),
 			),
 		}
-		storeStats := StoreLoads{1, 2, 0, 0, 5}
+		storeStats := StoreKindLoads{1, 2, 0, 0, 5}
 		for i, v := range storeStats {
 			storeStats[i] = v * float64(storeID)
 		}

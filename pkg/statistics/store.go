@@ -105,12 +105,12 @@ func (s *StoresStats) SetRegionsStats(storeIDs []uint64, writeBytesRates, writeK
 }
 
 // GetStoresLoads returns all stores loads.
-func (s *StoresStats) GetStoresLoads() map[uint64]StoreLoads {
+func (s *StoresStats) GetStoresLoads() map[uint64]StoreKindLoads {
 	s.RLock()
 	defer s.RUnlock()
-	res := make(map[uint64]StoreLoads, len(s.rollingStoresStats))
+	res := make(map[uint64]StoreKindLoads, len(s.rollingStoresStats))
 	for storeID, stats := range s.rollingStoresStats {
-		var storeStats StoreLoads
+		var storeStats StoreKindLoads
 		for i := range utils.StoreLoadCount {
 			storeStats[i] = stats.GetLoad(i)
 		}

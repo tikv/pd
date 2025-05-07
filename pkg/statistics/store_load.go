@@ -153,8 +153,11 @@ type Loads [utils.DimLen]float64
 // for the `checkHistoryLoadsByPriority` function to handle.
 type HistoryLoads [utils.DimLen][] /* buffer size */ float64
 
-// StoreLoads is a vector that contains different dimensions of store loads.
-type StoreLoads [utils.StoreLoadCount]float64
+// StoreKindLoads is a vector that contains different dimensions of store loads.
+type StoreKindLoads [utils.StoreLoadCount]float64
+
+// RegionKindLoads is a vector that contains different dimensions of region loads.
+type RegionKindLoads [utils.RegionStatCount]float64
 
 // StoreLoad records the current load.
 type StoreLoad struct {

@@ -16,5 +16,5 @@ package statistics
 
 // StoreStatInformer provides access to a shared informer of statistics.
 type StoreStatInformer interface {
-	GetStoresLoads() map[uint64]StoreLoads
+	GetStoresLoads() map[uint64]StoreKindLoads
 }
