@@ -412,7 +412,7 @@ func (s *GrpcServer) SetGCBarrier(ctx context.Context, request *pdpb.SetGCBarrie
 	}, nil
 }
 
-// SetGCBarrier sets a GC barrier.
+// DeleteGCBarrier deletes a GC barrier.
 func (s *GrpcServer) DeleteGCBarrier(ctx context.Context, request *pdpb.DeleteGCBarrierRequest) (*pdpb.DeleteGCBarrierResponse, error) {
 	done, err := s.rateLimitCheck()
 	if err != nil {
