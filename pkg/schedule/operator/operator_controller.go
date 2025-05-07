@@ -667,10 +667,6 @@ func (oc *Controller) removeRelatedMergeOperator(op *Operator) {
 	}
 	relatedOp := relatedOpi.(*Operator)
 	if relatedOp != nil && relatedOp.Status() != CANCELED {
-		log.Info("operator canceled related merge region",
-			zap.Uint64("region-id", relatedOp.RegionID()),
-			zap.String("additional-info", relatedOp.LogAdditionalInfo()),
-			zap.Duration("takes", relatedOp.RunningTime()))
 		oc.removeOperatorInner(relatedOp)
 		relatedOp.Cancel(RelatedMergeRegion)
 		oc.buryOperator(relatedOp)

@@ -184,9 +184,8 @@ func (l *Lease) keepAliveWorker(ctx context.Context, interval time.Duration) <-c
 					case ch <- expire:
 					// Here we don't use `ctx1.Done()` because we want to make sure if the keep alive success, we can update the expire time.
 					case <-ctx.Done():
+						log.Info("lease keep alive once exit", zap.String("purpose", l.Purpose), zap.Time("start", start), zap.Time("expire", expire))
 					}
-				} else {
-					log.Error("keep alive response ttl is zero", zap.String("purpose", l.Purpose))
 				}
 			}(start)
 
