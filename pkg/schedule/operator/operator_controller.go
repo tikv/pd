@@ -538,6 +538,7 @@ func (oc *Controller) addOperatorInner(op *Operator) bool {
 			zap.Uint64("region-id", regionID),
 			zap.Reflect("old", old.(*Operator)),
 			zap.Reflect("new", op))
+		operatorCounter.WithLabelValues(op.Desc(), "redundant").Inc()
 		return false
 	}
 
