@@ -21,6 +21,14 @@ import (
 	"sync"
 	"time"
 
+<<<<<<< HEAD
+=======
+	"github.com/prometheus/client_golang/prometheus"
+	"go.uber.org/zap"
+	"google.golang.org/grpc"
+
+	"github.com/pingcap/failpoint"
+>>>>>>> ff346b5b4 (tso: fix tso proxy error propagation and add test (#9268))
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/prometheus/client_golang/prometheus"
@@ -73,10 +81,10 @@ func (s *TSODispatcher) DispatchRequest(serverCtx context.Context, req Request, 
 	key := req.getForwardedHost()
 	val, loaded := s.dispatchChs.Load(key)
 	if !loaded {
-		val = tsoRequestProxyQueue{requestCh: make(chan Request, maxMergeRequests+1)}
+		val = &tsoRequestProxyQueue{requestCh: make(chan Request, maxMergeRequests+1)}
 		val, loaded = s.dispatchChs.LoadOrStore(key, val)
 	}
-	tsoQueue := val.(tsoRequestProxyQueue)
+	tsoQueue := val.(*tsoRequestProxyQueue)
 	if !loaded {
 		log.Info("start new tso proxy dispatcher", zap.String("forwarded-host", req.getForwardedHost()))
 		tsDeadlineCh := make(chan *TSDeadline, 1)
@@ -91,7 +99,7 @@ func (s *TSODispatcher) DispatchRequest(serverCtx context.Context, req Request, 
 }
 
 func (s *TSODispatcher) dispatch(
-	tsoQueue tsoRequestProxyQueue,
+	tsoQueue *tsoRequestProxyQueue,
 	tsoProtoFactory ProtoFactory,
 	forwardedHost string,
 	clientConn *grpc.ClientConn,
@@ -102,6 +110,10 @@ func (s *TSODispatcher) dispatch(
 	defer s.dispatchChs.Delete(forwardedHost)
 
 	forwardStream, cancel, err := tsoProtoFactory.createForwardStream(tsoQueue.ctx, clientConn)
+	failpoint.Inject("canNotCreateForwardStream", func() {
+		cancel()
+		err = errors.New("canNotCreateForwardStream")
+	})
 	if err != nil || forwardStream == nil {
 		log.Error("create tso forwarding stream error",
 			zap.String("forwarded-host", forwardedHost),
@@ -120,6 +132,10 @@ func (s *TSODispatcher) dispatch(
 	noProxyRequestsTimer := time.NewTimer(tsoProxyStreamIdleTimeout)
 	for {
 		noProxyRequestsTimer.Reset(tsoProxyStreamIdleTimeout)
+		failpoint.Inject("tsoProxyStreamIdleTimeout", func() {
+			noProxyRequestsTimer.Reset(0)
+			<-tsoQueue.requestCh // consume the request so that the select below results in the idle case
+		})
 		select {
 		case first := <-tsoQueue.requestCh:
 			pendingTSOReqCount := len(tsoQueue.requestCh) + 1
