@@ -20,6 +20,14 @@ import (
 	"sync"
 	"time"
 
+<<<<<<< HEAD
+=======
+	"github.com/prometheus/client_golang/prometheus"
+	"go.uber.org/zap"
+	"google.golang.org/grpc"
+
+	"github.com/pingcap/failpoint"
+>>>>>>> ff346b5b4 (tso: fix tso proxy error propagation and add test (#9268))
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/prometheus/client_golang/prometheus"
@@ -70,10 +78,17 @@ func (s *TSODispatcher) DispatchRequest(
 	key := req.getForwardedHost()
 	val, loaded := s.dispatchChs.Load(key)
 	if !loaded {
+<<<<<<< HEAD
 		val = make(chan Request, maxMergeRequests)
 		val, loaded = s.dispatchChs.LoadOrStore(key, val)
 	}
 	reqCh := val.(chan Request)
+=======
+		val = &tsoRequestProxyQueue{requestCh: make(chan Request, maxMergeRequests+1)}
+		val, loaded = s.dispatchChs.LoadOrStore(key, val)
+	}
+	tsoQueue := val.(*tsoRequestProxyQueue)
+>>>>>>> ff346b5b4 (tso: fix tso proxy error propagation and add test (#9268))
 	if !loaded {
 		tsDeadlineCh := make(chan *TSDeadline, 1)
 		go s.dispatch(ctx, tsoProtoFactory, req.getForwardedHost(), req.getClientConn(), reqCh, tsDeadlineCh, doneCh, errCh, tsoPrimaryWatchers...)
@@ -83,7 +98,11 @@ func (s *TSODispatcher) DispatchRequest(
 }
 
 func (s *TSODispatcher) dispatch(
+<<<<<<< HEAD
 	ctx context.Context,
+=======
+	tsoQueue *tsoRequestProxyQueue,
+>>>>>>> ff346b5b4 (tso: fix tso proxy error propagation and add test (#9268))
 	tsoProtoFactory ProtoFactory,
 	forwardedHost string,
 	clientConn *grpc.ClientConn,
@@ -97,7 +116,15 @@ func (s *TSODispatcher) dispatch(
 	defer ctxCancel()
 	defer s.dispatchChs.Delete(forwardedHost)
 
+<<<<<<< HEAD
 	forwardStream, cancel, err := tsoProtoFactory.createForwardStream(ctx, clientConn)
+=======
+	forwardStream, cancel, err := tsoProtoFactory.createForwardStream(tsoQueue.ctx, clientConn)
+	failpoint.Inject("canNotCreateForwardStream", func() {
+		cancel()
+		err = errors.New("canNotCreateForwardStream")
+	})
+>>>>>>> ff346b5b4 (tso: fix tso proxy error propagation and add test (#9268))
 	if err != nil || forwardStream == nil {
 		log.Error("create tso forwarding stream error",
 			zap.String("forwarded-host", forwardedHost),
@@ -119,6 +146,14 @@ func (s *TSODispatcher) dispatch(
 	requests := make([]Request, maxMergeRequests+1)
 	needUpdateServicePrimaryAddr := len(tsoPrimaryWatchers) > 0 && tsoPrimaryWatchers[0] != nil
 	for {
+<<<<<<< HEAD
+=======
+		noProxyRequestsTimer.Reset(tsoProxyStreamIdleTimeout)
+		failpoint.Inject("tsoProxyStreamIdleTimeout", func() {
+			noProxyRequestsTimer.Reset(0)
+			<-tsoQueue.requestCh // consume the request so that the select below results in the idle case
+		})
+>>>>>>> ff346b5b4 (tso: fix tso proxy error propagation and add test (#9268))
 		select {
 		case first := <-tsoRequestCh:
 			pendingTSOReqCount := len(tsoRequestCh) + 1
