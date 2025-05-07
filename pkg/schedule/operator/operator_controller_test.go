@@ -494,21 +494,22 @@ func (suite *operatorControllerTestSuite) TestPollDispatchRegionForMergeRegion()
 func (suite *operatorControllerTestSuite) TestConcurrentMergeConflict() {
 	re := suite.Require()
 
-	for range 10 {
-		opts := mockconfig.NewTestOptions()
-		cluster := mockcluster.NewCluster(suite.ctx, opts)
-		stream := hbstream.NewTestHeartbeatStreams(suite.ctx, cluster, false /* no need to run */)
-		controller := NewController(suite.ctx, cluster.GetBasicCluster(), cluster.GetSharedConfig(), stream)
-		cluster.AddLabelsStore(1, 1, map[string]string{"host": "host1"})
-		cluster.AddLabelsStore(2, 1, map[string]string{"host": "host2"})
-		cluster.AddLabelsStore(3, 1, map[string]string{"host": "host3"})
-		left := newRegionInfo(101, "1a", "1b", 10, 10, []uint64{101, 1}, []uint64{101, 1})
+	opts := mockconfig.NewTestOptions()
+	cluster := mockcluster.NewCluster(suite.ctx, opts)
+	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, cluster, false /* no need to run */)
+	controller := NewController(suite.ctx, cluster.GetBasicCluster(), cluster.GetSharedConfig(), stream)
+	cluster.AddLabelsStore(1, 1, map[string]string{"host": "host1"})
+	cluster.AddLabelsStore(2, 1, map[string]string{"host": "host2"})
+	cluster.AddLabelsStore(3, 1, map[string]string{"host": "host3"})
+
+	for i := range 10 {
+		left := newRegionInfo(uint64(100+i), fmt.Sprintf("%da", i), fmt.Sprintf("%db", i), 10, 10, []uint64{101, 1}, []uint64{101, 1})
 		left.GetMeta().RegionEpoch = &metapb.RegionEpoch{}
 		cluster.PutRegion(left)
-		middle := newRegionInfo(102, "1b", "1c", 10, 10, []uint64{101, 1}, []uint64{101, 1})
+		middle := newRegionInfo(uint64(101+i), fmt.Sprintf("%db", i), fmt.Sprintf("%dc", i), 10, 10, []uint64{101, 1}, []uint64{101, 1})
 		middle.GetMeta().RegionEpoch = &metapb.RegionEpoch{}
 		cluster.PutRegion(middle)
-		right := newRegionInfo(103, "1c", "1d", 10, 10, []uint64{101, 1}, []uint64{101, 1})
+		right := newRegionInfo(uint64(102+i), fmt.Sprintf("%dc", i), fmt.Sprintf("%dd", i), 10, 10, []uint64{101, 1}, []uint64{101, 1})
 		right.GetMeta().RegionEpoch = &metapb.RegionEpoch{}
 		cluster.PutRegion(right)
 		wg := &sync.WaitGroup{}
