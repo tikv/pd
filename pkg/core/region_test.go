@@ -16,11 +16,13 @@ package core
 
 import (
 	"crypto/rand"
+	"encoding/json"
 	"fmt"
 	"math"
 	mrand "math/rand"
 	"sort"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -1330,31 +1332,47 @@ func TestGetPeers(t *testing.T) {
 		leader, follower1, follower2, learner,
 	}}, leader, WithLearners([]*metapb.Peer{learner}))
 	for _, v := range []struct {
-		role  string
+		rule  string
 		peers []*metapb.Peer
 	}{
 		{
-			role:  "leader",
+			rule:  "leader-scatter",
 			peers: []*metapb.Peer{leader},
 		},
 		{
-			role:  "follower",
-			peers: []*metapb.Peer{follower1, follower2},
+			rule:  "peer-scatter",
+			peers: []*metapb.Peer{learner, leader, follower1, follower2},
 		},
 		{
-			role:  "learner",
+			rule:  "learner-scatter",
 			peers: []*metapb.Peer{learner},
 		},
 		{
-			role:  "witness",
+			rule:  "witness-scatter",
 			peers: nil,
 		},
 	} {
-		role := NewRole(v.role)
-		peers := region.GetPeersByRole(role)
+		role := NewRule(v.rule)
+		peers := region.GetPeersByRule(role)
 		sort.Slice(peers, func(i, j int) bool {
 			return peers[i].Id <= peers[j].Id
 		})
 		re.Equal(v.peers, peers, role)
+	}
+}
+
+func TestCodecRule(t *testing.T) {
+	re := require.New(t)
+	for _, v := range []string{"leader", "peer", "learner", "witness"} {
+		rule := NewRule(v)
+		if rule != Unknown {
+			re.Equal(rule.String(), v)
+		}
+		body, err := json.Marshal(&rule)
+		re.NoError(err)
+		re.Equal(strings.Join([]string{"\"", rule.String(), "\""}, ""), string(body))
+		var rule2 Rule
+		re.NoError(json.Unmarshal(body, &rule2))
+		re.Equal(rule.String(), rule2.String())
 	}
 }

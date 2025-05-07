@@ -15,12 +15,16 @@
 package tests
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"math/rand"
 	"net"
 	"net/http"
 	"os"
+	"path"
 	"runtime"
 	"strconv"
 	"strings"
@@ -612,4 +616,64 @@ func CreateMockHandler(re *require.Assertions, ip string) server.HandlerBuilder 
 		}
 		return mux, info, nil
 	}
+}
+
+const (
+	schedulersPrefix      = "/pd/api/v1/schedulers"
+	schedulerConfigPrefix = "/pd/api/v1/scheduler-config"
+)
+
+// MustAddScheduler adds a scheduler with HTTP API.
+func MustAddScheduler(
+	re *require.Assertions, serverAddr string,
+	schedulerName string, args map[string]any,
+) {
+	request := map[string]any{
+		"name": schedulerName,
+	}
+	for arg, val := range args {
+		request[arg] = val
+	}
+	data, err := json.Marshal(request)
+	re.NoError(err)
+	httpReq, err := http.NewRequest(http.MethodPost, fmt.Sprintf("%s%s", serverAddr, schedulersPrefix), bytes.NewBuffer(data))
+	re.NoError(err)
+	// Send request.
+	resp, err := TestDialClient.Do(httpReq)
+	re.NoError(err)
+	defer resp.Body.Close()
+	data, err = io.ReadAll(resp.Body)
+	re.NoError(err)
+	re.Equal(http.StatusOK, resp.StatusCode, string(data))
+}
+
+// MustDeleteScheduler deletes a scheduler with HTTP API.
+func MustDeleteScheduler(re *require.Assertions, serverAddr, schedulerName string) {
+	httpReq, err := http.NewRequest(http.MethodDelete, fmt.Sprintf("%s%s/%s", serverAddr, schedulersPrefix, schedulerName), http.NoBody)
+	re.NoError(err)
+	resp, err := TestDialClient.Do(httpReq)
+	re.NoError(err)
+	defer resp.Body.Close()
+	data, err := io.ReadAll(resp.Body)
+	re.NoError(err)
+	re.Equal(http.StatusOK, resp.StatusCode, string(data))
+}
+
+// MustCallSchedulerConfigAPI calls a scheduler config with HTTP API with the given args.
+func MustCallSchedulerConfigAPI(
+	re *require.Assertions,
+	method, serverAddr, schedulerName string, args []string,
+	input map[string]any,
+) {
+	data, err := json.Marshal(input)
+	re.NoError(err)
+	args = append([]string{schedulerConfigPrefix, schedulerName}, args...)
+	httpReq, err := http.NewRequest(method, fmt.Sprintf("%s%s", serverAddr, path.Join(args...)), bytes.NewBuffer(data))
+	re.NoError(err)
+	resp, err := TestDialClient.Do(httpReq)
+	re.NoError(err)
+	defer resp.Body.Close()
+	data, err = io.ReadAll(resp.Body)
+	re.NoError(err)
+	re.Equal(http.StatusOK, resp.StatusCode, string(data))
 }

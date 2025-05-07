@@ -199,7 +199,7 @@ func (suite *statTestSuite) checkRegionStats(cluster *tests.TestCluster) {
 	for _, data := range testdata {
 		for _, query := range []string{"", "count"} {
 			args := fmt.Sprintf("?start_key=%s&end_key=%s&%s", data.startKey, data.endKey, query)
-			res, err := testDialClient.Get(statsURL + args)
+			res, err := tests.TestDialClient.Get(statsURL + args)
 			re.NoError(err)
 			stats := &statistics.RegionStats{}
 			err = apiutil.ReadJSON(res.Body, stats)
@@ -258,7 +258,7 @@ func (suite *statTestSuite) checkRegionStats(cluster *tests.TestCluster) {
 
 	args := fmt.Sprintf("?use_hot&start_key=%s&end_key=%s&engine=tikv", "", "")
 	stats := &statistics.RegionStats{}
-	res, err := testDialClient.Get(statsURL + args)
+	res, err := tests.TestDialClient.Get(statsURL + args)
 	re.NoError(err)
 	err = apiutil.ReadJSON(res.Body, stats)
 	re.NoError(res.Body.Close())

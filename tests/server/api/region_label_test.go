@@ -60,7 +60,7 @@ func (suite *regionLabelTestSuite) checkGetSet(cluster *tests.TestCluster) {
 	urlPrefix := leader.GetAddr() + "/pd/api/v1/config/region-label"
 
 	var resp []*labeler.LabelRule
-	err := tu.ReadGetJSON(re, testDialClient, urlPrefix+"/rules", &resp)
+	err := tu.ReadGetJSON(re, tests.TestDialClient, urlPrefix+"/rules", &resp)
 	re.NoError(err)
 	re.Empty(resp)
 
@@ -72,24 +72,24 @@ func (suite *regionLabelTestSuite) checkGetSet(cluster *tests.TestCluster) {
 	ruleIDs := []string{"rule1", "rule2/a/b", "rule3"}
 	for _, rule := range rules {
 		data, _ := json.Marshal(rule)
-		err = tu.CheckPostJSON(testDialClient, urlPrefix+"/rule", data, tu.StatusOK(re))
+		err = tu.CheckPostJSON(tests.TestDialClient, urlPrefix+"/rule", data, tu.StatusOK(re))
 		re.NoError(err)
 	}
 	for i, id := range ruleIDs {
 		var rule labeler.LabelRule
-		err = tu.ReadGetJSON(re, testDialClient, urlPrefix+"/rule/"+url.QueryEscape(id), &rule)
+		err = tu.ReadGetJSON(re, tests.TestDialClient, urlPrefix+"/rule/"+url.QueryEscape(id), &rule)
 		re.NoError(err)
 		re.Equal(rules[i], &rule)
 	}
 
-	err = tu.ReadGetJSONWithBody(re, testDialClient, urlPrefix+"/rules/ids", []byte(`["rule1", "rule3"]`), &resp)
+	err = tu.ReadGetJSONWithBody(re, tests.TestDialClient, urlPrefix+"/rules/ids", []byte(`["rule1", "rule3"]`), &resp)
 	re.NoError(err)
 	expects := []*labeler.LabelRule{rules[0], rules[2]}
 	re.Equal(expects, resp)
 
-	err = tu.CheckDelete(testDialClient, urlPrefix+"/rule/"+url.QueryEscape("rule2/a/b"), tu.StatusOK(re))
+	err = tu.CheckDelete(tests.TestDialClient, urlPrefix+"/rule/"+url.QueryEscape("rule2/a/b"), tu.StatusOK(re))
 	re.NoError(err)
-	err = tu.ReadGetJSON(re, testDialClient, urlPrefix+"/rules", &resp)
+	err = tu.ReadGetJSON(re, tests.TestDialClient, urlPrefix+"/rules", &resp)
 	re.NoError(err)
 	sort.Slice(resp, func(i, j int) bool { return resp[i].ID < resp[j].ID })
 	re.Equal([]*labeler.LabelRule{rules[0], rules[2]}, resp)
@@ -101,9 +101,9 @@ func (suite *regionLabelTestSuite) checkGetSet(cluster *tests.TestCluster) {
 		DeleteRules: []string{"rule1"},
 	}
 	data, _ := json.Marshal(patch)
-	err = tu.CheckPatchJSON(testDialClient, urlPrefix+"/rules", data, tu.StatusOK(re))
+	err = tu.CheckPatchJSON(tests.TestDialClient, urlPrefix+"/rules", data, tu.StatusOK(re))
 	re.NoError(err)
-	err = tu.ReadGetJSON(re, testDialClient, urlPrefix+"/rules", &resp)
+	err = tu.ReadGetJSON(re, tests.TestDialClient, urlPrefix+"/rules", &resp)
 	re.NoError(err)
 	sort.Slice(resp, func(i, j int) bool { return resp[i].ID < resp[j].ID })
 	re.Equal([]*labeler.LabelRule{rules[1], rules[2]}, resp)

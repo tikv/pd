@@ -36,10 +36,8 @@ import (
 
 type labelsStoreTestSuite struct {
 	suite.Suite
-	svr       *server.Server
-	cleanup   tu.CleanupFunc
-	urlPrefix string
-	stores    []*metapb.Store
+	env    *tests.SchedulingTestEnvironment
+	stores []*metapb.Store
 }
 
 func TestLabelsStoreTestSuite(t *testing.T) {
@@ -47,6 +45,21 @@ func TestLabelsStoreTestSuite(t *testing.T) {
 }
 
 func (suite *labelsStoreTestSuite) SetupSuite() {
+	suite.env = tests.NewSchedulingTestEnvironment(suite.T())
+}
+
+func (suite *labelsStoreTestSuite) TearDownSuite() {
+	suite.env.Cleanup()
+}
+
+func (suite *labelsStoreTestSuite) TestLabelsGet() {
+	suite.env.RunTest(suite.checkLabelsGet)
+	suite.env.RunTest(suite.checkStoresLabelFilter)
+}
+
+func (suite *labelsStoreTestSuite) checkLabelsGet(cluster *tests.TestCluster) {
+	re := suite.Require()
+
 	suite.stores = []*metapb.Store{
 		{
 			Id:        1,
@@ -122,34 +135,24 @@ func (suite *labelsStoreTestSuite) SetupSuite() {
 		},
 	}
 
-	re := suite.Require()
-	suite.svr, suite.cleanup = mustNewServer(re, func(cfg *config.Config) {
-		cfg.Replication.StrictlyMatchLabel = false
-	})
-	tests.MustWaitLeader(re, []*server.Server{suite.svr})
-
-	addr := suite.svr.GetAddr()
-	suite.urlPrefix = fmt.Sprintf("%s%s/api/v1", addr, api.APIPrefix)
-
-	mustBootstrapCluster(re, suite.svr)
 	for _, store := range suite.stores {
-		mustPutStore(re, suite.svr, store.Id, store.State, store.NodeState, store.Labels)
+		tests.MustPutStore(re, cluster, store)
 	}
-}
 
-func (suite *labelsStoreTestSuite) TearDownSuite() {
-	suite.cleanup()
-}
+	leader := cluster.GetLeaderServer()
+	urlPrefix := leader.GetAddr() + "/pd/api/v1"
 
-func (suite *labelsStoreTestSuite) TestLabelsGet() {
-	re := suite.Require()
-	url := fmt.Sprintf("%s/labels", suite.urlPrefix)
+	url := fmt.Sprintf("%s/labels", urlPrefix)
 	labels := make([]*metapb.StoreLabel, 0, len(suite.stores))
-	re.NoError(tu.ReadGetJSON(re, testDialClient, url, &labels))
+	re.NoError(tu.ReadGetJSON(re, tests.TestDialClient, url, &labels))
 }
 
-func (suite *labelsStoreTestSuite) TestStoresLabelFilter() {
+func (suite *labelsStoreTestSuite) checkStoresLabelFilter(cluster *tests.TestCluster) {
 	re := suite.Require()
+
+	leader := cluster.GetLeaderServer()
+	urlPrefix := leader.GetAddr() + "/pd/api/v1"
+
 	var testCases = []struct {
 		name, value string
 		want        []*metapb.Store
@@ -184,9 +187,9 @@ func (suite *labelsStoreTestSuite) TestStoresLabelFilter() {
 		},
 	}
 	for _, testCase := range testCases {
-		url := fmt.Sprintf("%s/labels/stores?name=%s&value=%s", suite.urlPrefix, testCase.name, testCase.value)
+		url := fmt.Sprintf("%s/labels/stores?name=%s&value=%s", urlPrefix, testCase.name, testCase.value)
 		info := new(response.StoresInfo)
-		err := tu.ReadGetJSON(re, testDialClient, url, info)
+		err := tu.ReadGetJSON(re, tests.TestDialClient, url, info)
 		re.NoError(err)
 		checkStoresInfo(re, info.Stores, testCase.want)
 	}
@@ -196,10 +199,7 @@ func (suite *labelsStoreTestSuite) TestStoresLabelFilter() {
 
 type strictlyLabelsStoreTestSuite struct {
 	suite.Suite
-	svr       *server.Server
-	grpcSvr   *server.GrpcServer
-	cleanup   tu.CleanupFunc
-	urlPrefix string
+	env *tests.SchedulingTestEnvironment
 }
 
 func TestStrictlyLabelsStoreTestSuite(t *testing.T) {
@@ -207,23 +207,29 @@ func TestStrictlyLabelsStoreTestSuite(t *testing.T) {
 }
 
 func (suite *strictlyLabelsStoreTestSuite) SetupSuite() {
-	re := suite.Require()
-	suite.svr, suite.cleanup = mustNewServer(re, func(cfg *config.Config) {
-		cfg.Replication.LocationLabels = []string{"zone", "disk"}
-		cfg.Replication.StrictlyMatchLabel = true
-		cfg.Replication.EnablePlacementRules = false
-	})
-	tests.MustWaitLeader(re, []*server.Server{suite.svr})
+	suite.env = tests.NewSchedulingTestEnvironment(suite.T(),
+		func(conf *config.Config, _ string) {
+			conf.Replication.LocationLabels = []string{"zone", "disk"}
+			conf.Replication.StrictlyMatchLabel = true
+			conf.Replication.EnablePlacementRules = false
+		})
+}
 
-	suite.grpcSvr = &server.GrpcServer{Server: suite.svr}
-	addr := suite.svr.GetAddr()
-	suite.urlPrefix = fmt.Sprintf("%s%s/api/v1", addr, api.APIPrefix)
-
-	mustBootstrapCluster(re, suite.svr)
+func (suite *strictlyLabelsStoreTestSuite) TearDownSuite() {
+	suite.env.Cleanup()
 }
 
 func (suite *strictlyLabelsStoreTestSuite) TestStoreMatch() {
+	suite.env.RunTest(suite.checkStoreMatch)
+}
+
+func (suite *strictlyLabelsStoreTestSuite) checkStoreMatch(cluster *tests.TestCluster) {
 	re := suite.Require()
+
+	leader := cluster.GetLeaderServer()
+	urlPrefix := leader.GetAddr() + "/pd/api/v1"
+	grpcServer := server.GrpcServer{Server: leader.GetServer()}
+
 	testCases := []struct {
 		store       *metapb.Store
 		valid       bool
@@ -310,7 +316,7 @@ func (suite *strictlyLabelsStoreTestSuite) TestStoreMatch() {
 	}
 
 	for _, testCase := range testCases {
-		resp, err := suite.grpcSvr.PutStore(context.Background(), &pdpb.PutStoreRequest{
+		resp, err := grpcServer.PutStore(context.Background(), &pdpb.PutStoreRequest{
 			Header: &pdpb.RequestHeader{ClusterId: keypath.ClusterID()},
 			Store: &metapb.Store{
 				Id:      testCase.store.Id,
@@ -334,12 +340,12 @@ func (suite *strictlyLabelsStoreTestSuite) TestStoreMatch() {
 
 	// enable placement rules. Report no error any more.
 	re.NoError(tu.CheckPostJSON(
-		testDialClient,
-		fmt.Sprintf("%s/config", suite.urlPrefix),
+		tests.TestDialClient,
+		fmt.Sprintf("%s/config", urlPrefix),
 		[]byte(`{"enable-placement-rules":"true"}`),
 		tu.StatusOK(re)))
 	for _, testCase := range testCases {
-		resp, err := suite.grpcSvr.PutStore(context.Background(), &pdpb.PutStoreRequest{
+		resp, err := grpcServer.PutStore(context.Background(), &pdpb.PutStoreRequest{
 			Header: &pdpb.RequestHeader{ClusterId: keypath.ClusterID()},
 			Store: &metapb.Store{
 				Id:      testCase.store.Id,
@@ -356,8 +362,4 @@ func (suite *strictlyLabelsStoreTestSuite) TestStoreMatch() {
 			re.Contains(resp.GetHeader().GetError().String(), testCase.expectError)
 		}
 	}
-}
-
-func (suite *strictlyLabelsStoreTestSuite) TearDownSuite() {
-	suite.cleanup()
 }

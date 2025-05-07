@@ -62,7 +62,7 @@ func (suite *memberTestSuite) checkMemberList(cluster *tests.TestCluster) {
 
 	for _, svr := range svrs {
 		addr := svr.GetAddr() + api.APIPrefix + "/api/v1/members"
-		resp, err := testDialClient.Get(addr)
+		resp, err := tests.TestDialClient.Get(addr)
 		re.NoError(err)
 		buf, err := io.ReadAll(resp.Body)
 		re.NoError(err)
@@ -85,7 +85,7 @@ func (suite *memberTestSuite) checkMemberLeader(cluster *tests.TestCluster) {
 	}
 
 	addr := addrs[rand.Intn(len(addrs))]
-	resp, err := testDialClient.Get(addr)
+	resp, err := tests.TestDialClient.Get(addr)
 	re.NoError(err)
 	defer resp.Body.Close()
 	buf, err := io.ReadAll(resp.Body)
@@ -111,7 +111,7 @@ func (suite *memberTestSuite) checkChangeLeaderPeerUrls(cluster *tests.TestClust
 	}
 
 	addr := addrs[rand.Intn(len(addrs))]
-	resp, err := testDialClient.Get(addr)
+	resp, err := tests.TestDialClient.Get(addr)
 	re.NoError(err)
 	defer resp.Body.Close()
 	buf, err := io.ReadAll(resp.Body)
@@ -128,7 +128,7 @@ func (suite *memberTestSuite) checkChangeLeaderPeerUrls(cluster *tests.TestClust
 		addrs1 = append(addrs1, svr.GetAddr()+api.APIPrefix+"/api/v1/members")
 	}
 	addr = addrs1[rand.Intn(len(addrs1))]
-	resp, err = testDialClient.Get(addr)
+	resp, err = tests.TestDialClient.Get(addr)
 	re.NoError(err)
 	buf, err = io.ReadAll(resp.Body)
 	re.NoError(err)
@@ -162,7 +162,7 @@ func (suite *memberTestSuite) checkResignMyself(cluster *tests.TestCluster) {
 	re := suite.Require()
 	leader := cluster.GetLeaderServer()
 	addr := leader.GetAddr() + api.APIPrefix + "/api/v1/leader/resign"
-	resp, err := testDialClient.Post(addr, "", nil)
+	resp, err := tests.TestDialClient.Post(addr, "", nil)
 	re.NoError(err)
 	re.Equal(http.StatusOK, resp.StatusCode)
 	_, _ = io.Copy(io.Discard, resp.Body)

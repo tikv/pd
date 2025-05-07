@@ -67,30 +67,30 @@ func (suite *unsafeOperationTestSuite) checkRemoveFailedStores(cluster *tests.Te
 
 	input := map[string]any{"stores": []uint64{}}
 	data, _ := json.Marshal(input)
-	err := tu.CheckPostJSON(testDialClient, urlPrefix+"/remove-failed-stores", data, tu.StatusNotOK(re),
+	err := tu.CheckPostJSON(tests.TestDialClient, urlPrefix+"/remove-failed-stores", data, tu.StatusNotOK(re),
 		tu.StringEqual(re, "\"[PD:unsaferecovery:ErrUnsafeRecoveryInvalidInput]invalid input no store specified\"\n"))
 	re.NoError(err)
 
 	input = map[string]any{"stores": []string{"abc", "def"}}
 	data, _ = json.Marshal(input)
-	err = tu.CheckPostJSON(testDialClient, urlPrefix+"/remove-failed-stores", data, tu.StatusNotOK(re),
+	err = tu.CheckPostJSON(tests.TestDialClient, urlPrefix+"/remove-failed-stores", data, tu.StatusNotOK(re),
 		tu.StringEqual(re, "\"Store ids are invalid\"\n"))
 	re.NoError(err)
 
 	input = map[string]any{"stores": []uint64{1, 2}}
 	data, _ = json.Marshal(input)
-	err = tu.CheckPostJSON(testDialClient, urlPrefix+"/remove-failed-stores", data, tu.StatusNotOK(re),
+	err = tu.CheckPostJSON(tests.TestDialClient, urlPrefix+"/remove-failed-stores", data, tu.StatusNotOK(re),
 		tu.StringEqual(re, "\"[PD:unsaferecovery:ErrUnsafeRecoveryInvalidInput]invalid input store 2 doesn't exist\"\n"))
 	re.NoError(err)
 
 	input = map[string]any{"stores": []uint64{1}}
 	data, _ = json.Marshal(input)
-	err = tu.CheckPostJSON(testDialClient, urlPrefix+"/remove-failed-stores", data, tu.StatusOK(re))
+	err = tu.CheckPostJSON(tests.TestDialClient, urlPrefix+"/remove-failed-stores", data, tu.StatusOK(re))
 	re.NoError(err)
 
 	// Test show
 	var output []unsaferecovery.StageOutput
-	err = tu.ReadGetJSON(re, testDialClient, urlPrefix+"/remove-failed-stores/show", &output)
+	err = tu.ReadGetJSON(re, tests.TestDialClient, urlPrefix+"/remove-failed-stores/show", &output)
 	re.NoError(err)
 }
 
@@ -113,12 +113,12 @@ func (suite *unsafeOperationTestSuite) checkRemoveFailedStoresAutoDetect(cluster
 
 	input := map[string]any{"auto-detect": false}
 	data, _ := json.Marshal(input)
-	err := tu.CheckPostJSON(testDialClient, urlPrefix+"/remove-failed-stores", data, tu.StatusNotOK(re),
+	err := tu.CheckPostJSON(tests.TestDialClient, urlPrefix+"/remove-failed-stores", data, tu.StatusNotOK(re),
 		tu.StringEqual(re, "\"Store ids are invalid\"\n"))
 	re.NoError(err)
 
 	input = map[string]any{"auto-detect": true}
 	data, _ = json.Marshal(input)
-	err = tu.CheckPostJSON(testDialClient, urlPrefix+"/remove-failed-stores", data, tu.StatusOK(re))
+	err = tu.CheckPostJSON(tests.TestDialClient, urlPrefix+"/remove-failed-stores", data, tu.StatusOK(re))
 	re.NoError(err)
 }

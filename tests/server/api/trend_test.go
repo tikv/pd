@@ -80,7 +80,7 @@ func (suite *trendTestSuite) checkTrend(cluster *tests.TestCluster) {
 	time.Sleep(time.Second)
 	re.NoError(svr.GetHandler().AddTransferPeerOperator(6, 1, 3))
 	// Complete the operators.
-	mustRegionHeartbeat(re, svr, region4.Clone(core.WithLeader(region4.GetStorePeer(2))))
+	tests.MustPutRegionInfo(re, cluster, region4.Clone(core.WithLeader(region4.GetStorePeer(2))))
 
 	op, err := svr.GetHandler().GetOperator(5)
 	re.NoError(err)
@@ -104,7 +104,7 @@ func (suite *trendTestSuite) checkTrend(cluster *tests.TestCluster) {
 	time.Sleep(50 * time.Millisecond)
 
 	var trend api.Trend
-	err = tu.ReadGetJSON(re, testDialClient, fmt.Sprintf("%s/trend", urlPrefix), &trend)
+	err = tu.ReadGetJSON(re, tests.TestDialClient, fmt.Sprintf("%s/trend", urlPrefix), &trend)
 	re.NoError(err)
 
 	// Check store states.

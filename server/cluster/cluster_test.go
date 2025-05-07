@@ -3215,7 +3215,7 @@ func TestAddScheduler(t *testing.T) {
 	_, err = schedulers.CreateScheduler(types.BalanceRangeScheduler, oc, storage.NewStorageWithMemoryBackend(), schedulers.ConfigSliceDecoder(types.BalanceRangeScheduler, []string{}), controller.RemoveScheduler)
 	re.Error(err)
 
-	gls, err = schedulers.CreateScheduler(types.BalanceRangeScheduler, oc, storage.NewStorageWithMemoryBackend(), schedulers.ConfigSliceDecoder(types.BalanceRangeScheduler, []string{"learner", "tiflash", "1h", "test", "100", "200"}), controller.RemoveScheduler)
+	gls, err = schedulers.CreateScheduler(types.BalanceRangeScheduler, oc, storage.NewStorageWithMemoryBackend(), schedulers.ConfigSliceDecoder(types.BalanceRangeScheduler, []string{"learner-scatter", "tiflash", "1h", "test", "100", "200"}), controller.RemoveScheduler)
 	re.NoError(err)
 	re.NoError(controller.AddScheduler(gls))
 	conf, err = gls.EncodeConfig()
@@ -3223,7 +3223,7 @@ func TestAddScheduler(t *testing.T) {
 	var cfg []map[string]any
 
 	re.NoError(json.Unmarshal(conf, &cfg))
-	re.Equal("learner", cfg[0]["role"])
+	re.Equal("learner-scatter", cfg[0]["rule"])
 	re.Equal("tiflash", cfg[0]["engine"])
 	re.Equal("test", cfg[0]["alias"])
 	re.Equal(float64(time.Hour.Nanoseconds()), cfg[0]["timeout"])
