@@ -51,7 +51,7 @@ var listMemberRetryTimes = 20
 //	and it is not a member of cluster, join does MemberAdd, it returns an
 //	error if PD tries to join itself, missing data or join a duplicated PD.
 //	If previously the node joined but failed to start, it will attempt to
-//	start as the same membeer again.
+//	start as the same member again.
 //
 // Etcd automatically re-joins the cluster if there is a data directory. So
 // first it checks if there is a data directory or not. If there is, it returns
@@ -129,9 +129,10 @@ func PrepareJoinCluster(cfg *config.Config) error {
 
 	existed := false
 	joinedFailedToStart := false
+	advertisePeerURLs := strings.Split(cfg.AdvertisePeerUrls, ",")
 	for _, m := range listResp.Members {
 		if len(m.Name) == 0 {
-			if slice.EqualWithoutOrder(m.PeerURLs, strings.Split(cfg.AdvertisePeerUrls, ",")) {
+			if slice.EqualWithoutOrder(m.PeerURLs, advertisePeerURLs) {
 				log.Warn("the PD is already in the cluster but previously failed to start after join", zap.Any("member", m))
 				joinedFailedToStart = true
 			} else {
@@ -191,8 +192,7 @@ func PrepareJoinCluster(cfg *config.Config) error {
 				listSucc = true
 			}
 			if len(n) == 0 {
-				if joinedFailedToStart {
-					// At this point we already know that there is only one member without a name and it's the current one.
+				if joinedFailedToStart && slice.EqualWithoutOrder(memb.PeerURLs, advertisePeerURLs) {
 					n = cfg.Name
 					listSucc = true
 				} else {

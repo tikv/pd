@@ -78,4 +78,9 @@ func TestFailedToStartPDAfterSuccessfulJoin(t *testing.T) {
 	re.NoError(err)
 	re.Len(members.Members, 2)
 	re.Equal(cluster.GetServer("pd1").GetClusterID(), pd2.GetClusterID())
+	if !pd2.IsLeader() {
+		// Check that PD2 can become the leader.
+		re.NoError(cluster.ResignLeader())
+		re.Equal(cluster.WaitLeader(), pd2.GetConfig().Name)
+	}
 }
