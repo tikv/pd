@@ -914,7 +914,7 @@ func (suite *ruleTestSuite) checkLeaderAndVoter(cluster *tests.TestCluster) {
 	stores := []*metapb.Store{
 		{
 			Id:        1,
-			Address:   "tikv1",
+			Address:   "mock://tikv-1:1",
 			State:     metapb.StoreState_Up,
 			NodeState: metapb.NodeState_Serving,
 			Version:   "7.5.0",
@@ -922,7 +922,7 @@ func (suite *ruleTestSuite) checkLeaderAndVoter(cluster *tests.TestCluster) {
 		},
 		{
 			Id:        2,
-			Address:   "tikv2",
+			Address:   "mock://tikv-2:2",
 			State:     metapb.StoreState_Up,
 			NodeState: metapb.NodeState_Serving,
 			Version:   "7.5.0",
@@ -1304,14 +1304,14 @@ func (suite *regionRuleTestSuite) checkRegionPlacementRule(cluster *tests.TestCl
 	stores := []*metapb.Store{
 		{
 			Id:        1,
-			Address:   "tikv1",
+			Address:   "mock://tikv-1:1",
 			State:     metapb.StoreState_Up,
 			NodeState: metapb.NodeState_Serving,
 			Version:   "2.0.0",
 		},
 		{
 			Id:        2,
-			Address:   "tikv2",
+			Address:   "mock://tikv-2:2",
 			State:     metapb.StoreState_Up,
 			NodeState: metapb.NodeState_Serving,
 			Version:   "2.0.0",

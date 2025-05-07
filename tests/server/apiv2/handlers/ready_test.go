@@ -25,7 +25,6 @@ import (
 
 	"github.com/pingcap/failpoint"
 
-	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/server/apiv2/handlers"
 	"github.com/tikv/pd/tests"
 )
@@ -41,26 +40,26 @@ func TestReadyAPI(t *testing.T) {
 	re.NotEmpty(cluster.WaitLeader())
 	leader := cluster.GetLeaderServer()
 	re.NoError(leader.BootstrapCluster())
-	url := leader.GetConfig().ClientUrls + v2Prefix + "/ready"
+	leaderURL := leader.GetConfig().ClientUrls + v2Prefix + "/ready"
+	followerServer := cluster.GetServer(cluster.GetFollower())
+	followerURL := followerServer.GetConfig().ClientUrls + v2Prefix + "/ready"
+	checkReadyAPI(re, leaderURL, true)
+	checkReadyAPI(re, followerURL, true)
+
 	// check ready status when region is not loaded for leader
 	failpoint.Enable("github.com/tikv/pd/server/apiv2/handlers/loadRegionSlow", `return("`+leader.GetAddr()+`")`)
-	checkReadyAPI(re, url, false)
-	// check ready status when region is loaded for leader
-	failpoint.Disable("github.com/tikv/pd/server/apiv2/handlers/loadRegionSlow")
-	checkReadyAPI(re, url, true)
+	checkReadyAPI(re, leaderURL, false)
+	checkReadyAPI(re, followerURL, true)
+
 	// check ready status when region is not loaded for follower
-	followerServer := cluster.GetServer(cluster.GetFollower())
-	url = followerServer.GetConfig().ClientUrls + v2Prefix + "/ready"
 	failpoint.Enable("github.com/tikv/pd/server/apiv2/handlers/loadRegionSlow", `return("`+followerServer.GetAddr()+`")`)
-	checkReadyAPI(re, url, true)
-	checkReadyAPI(re, url, false, apiutil.PDAllowFollowerHandleHeader)
-	// check ready status when region is loaded for follower
+	checkReadyAPI(re, leaderURL, true)
+	checkReadyAPI(re, followerURL, false)
+
 	failpoint.Disable("github.com/tikv/pd/server/apiv2/handlers/loadRegionSlow")
-	checkReadyAPI(re, url, true)
-	checkReadyAPI(re, url, true, apiutil.PDAllowFollowerHandleHeader)
 }
 
-func checkReadyAPI(re *require.Assertions, url string, isReady bool, headers ...string) {
+func checkReadyAPI(re *require.Assertions, url string, isReady bool) {
 	expectCode := http.StatusOK
 	if !isReady {
 		expectCode = http.StatusInternalServerError
@@ -68,9 +67,6 @@ func checkReadyAPI(re *require.Assertions, url string, isReady bool, headers ...
 	// check ready status
 	req, err := http.NewRequest(http.MethodGet, url, http.NoBody)
 	re.NoError(err)
-	if len(headers) > 0 {
-		req.Header.Add(headers[0], "true")
-	}
 	resp, err := tests.TestDialClient.Do(req)
 	re.NoError(err)
 	defer resp.Body.Close()
@@ -81,9 +77,6 @@ func checkReadyAPI(re *require.Assertions, url string, isReady bool, headers ...
 	// check ready status with verbose
 	req, err = http.NewRequest(http.MethodGet, url+"?verbose", http.NoBody)
 	re.NoError(err)
-	if len(headers) > 0 {
-		req.Header.Add(headers[0], "true")
-	}
 	resp, err = tests.TestDialClient.Do(req)
 	re.NoError(err)
 	defer resp.Body.Close()

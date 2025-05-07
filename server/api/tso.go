@@ -34,6 +34,7 @@ func newTSOHandler(svr *server.Server, rd *render.Render) *tsoHandler {
 	}
 }
 
+// TransferLocalTSOAllocator transfers the local TSO allocator to another PD server.
 // @Tags     tso
 // @Summary  Transfer Local TSO Allocator
 // @Accept   json

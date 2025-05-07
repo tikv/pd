@@ -24,8 +24,6 @@ const (
 	// TCPNetworkStr is the string of tcp network
 	TCPNetworkStr = "tcp"
 
-	// DefaultEnableGRPCGateway is the default value of EnableGRPCGateway
-	DefaultEnableGRPCGateway = true
 	// DefaultGRPCGracefulStopTimeout is the default timeout to wait for grpc server to gracefully stop
 	DefaultGRPCGracefulStopTimeout = 5 * time.Second
 	// DefaultHTTPGracefulShutdownTimeout is the default timeout to wait for http server to gracefully shutdown

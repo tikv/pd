@@ -15,7 +15,6 @@
 package api
 
 import (
-	"fmt"
 	"testing"
 	"time"
 
@@ -26,14 +25,13 @@ import (
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
-	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/server/api"
+	"github.com/tikv/pd/tests"
 )
 
 type serviceGCSafepointTestSuite struct {
 	suite.Suite
-	svr       *server.Server
-	cleanup   testutil.CleanupFunc
-	urlPrefix string
+	env *tests.SchedulingTestEnvironment
 }
 
 func TestServiceGCSafepointTestSuite(t *testing.T) {
@@ -41,27 +39,32 @@ func TestServiceGCSafepointTestSuite(t *testing.T) {
 }
 
 func (suite *serviceGCSafepointTestSuite) SetupSuite() {
-	re := suite.Require()
-	suite.svr, suite.cleanup = mustNewServer(re)
-	server.MustWaitLeader(re, []*server.Server{suite.svr})
-
-	addr := suite.svr.GetAddr()
-	suite.urlPrefix = fmt.Sprintf("%s%s/api/v1", addr, apiPrefix)
-
-	mustBootstrapCluster(re, suite.svr)
-	mustPutStore(re, suite.svr, 1, metapb.StoreState_Up, metapb.NodeState_Serving, nil)
+	suite.env = tests.NewSchedulingTestEnvironment(suite.T())
 }
 
 func (suite *serviceGCSafepointTestSuite) TearDownSuite() {
-	suite.cleanup()
+	suite.env.Cleanup()
 }
 
 func (suite *serviceGCSafepointTestSuite) TestServiceGCSafepoint() {
-	re := suite.Require()
-	sspURL := suite.urlPrefix + "/gc/safepoint"
+	suite.env.RunTest(suite.checkServiceGCSafepoint)
+}
 
-	storage := suite.svr.GetStorage()
-	list := &ListServiceGCSafepoint{
+func (suite *serviceGCSafepointTestSuite) checkServiceGCSafepoint(cluster *tests.TestCluster) {
+	re := suite.Require()
+
+	tests.MustPutStore(re, cluster, &metapb.Store{
+		Id:        1,
+		Address:   "mock://tikv-1:1",
+		State:     metapb.StoreState_Up,
+		NodeState: metapb.NodeState_Serving,
+	})
+
+	leader := cluster.GetLeaderServer()
+	sspURL := leader.GetAddr() + "/pd/api/v1/gc/safepoint"
+
+	storage := leader.GetServer().GetStorage()
+	list := &api.ListServiceGCSafepoint{
 		ServiceGCSafepoints: []*endpoint.ServiceSafePoint{
 			{
 				ServiceID: "a",
@@ -88,15 +91,15 @@ func (suite *serviceGCSafepointTestSuite) TestServiceGCSafepoint() {
 	}
 	storage.SaveGCSafePoint(1)
 
-	res, err := testDialClient.Get(sspURL)
+	res, err := tests.TestDialClient.Get(sspURL)
 	re.NoError(err)
 	defer res.Body.Close()
-	listResp := &ListServiceGCSafepoint{}
+	listResp := &api.ListServiceGCSafepoint{}
 	err = apiutil.ReadJSON(res.Body, listResp)
 	re.NoError(err)
 	re.Equal(list, listResp)
 
-	err = testutil.CheckDelete(testDialClient, sspURL+"/a", testutil.StatusOK(re))
+	err = testutil.CheckDelete(tests.TestDialClient, sspURL+"/a", testutil.StatusOK(re))
 	re.NoError(err)
 
 	left, err := storage.LoadAllServiceGCSafePoints()

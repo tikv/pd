@@ -44,6 +44,7 @@ const (
 	checkSuspectRangesInterval = 100 * time.Millisecond
 	// DefaultPendingRegionCacheSize is the default length of waiting list.
 	DefaultPendingRegionCacheSize = 100000
+	// MinPatrolRegionScanLimit is the min limit of regions to scan for a batch.
 	// For 1,024,000 regions, patrolRegionScanLimit is 1000, which is max(MinPatrolRegionScanLimit, 1,024,000/patrolRegionPartition)
 	// In order to avoid the patrolRegionScanLimit to be too big or too small, it will be limited to [128,8192].
 	// It takes about 10s to iterate 1,024,000 regions(with DefaultPatrolRegionInterval=10ms) where other steps are not considered.

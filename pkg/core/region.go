@@ -360,68 +360,78 @@ func (r *RegionInfo) GetPeer(peerID uint64) *metapb.Peer {
 	return nil
 }
 
-// Role is the role of the region.
-type Role int
+// Rule is the rule for balance range scheduler
+type Rule int
 
 const (
-	// Leader is the leader of the region.
-	Leader Role = iota
-	// Follower is the follower of the region.
-	Follower
-	// Learner is the learner of the region.
-	Learner
-	// Unknown is the unknown role of the region include witness.
+	// LeaderScatter scatter the leader of the region.
+	LeaderScatter Rule = iota
+	// PeerScatter scatter all the peers of the region.
+	PeerScatter
+	// LearnerScatter is the learner of the region.
+	LearnerScatter
+	// Unknown is the unknown rule of the region include witness.
 	Unknown
 )
 
-// String returns the string value of the role.
-func (r Role) String() string {
-	switch r {
-	case Leader:
-		return "leader"
-	case Follower:
-		return "voter"
-	case Learner:
-		return "learner"
+// String returns the string value of the rule.
+func (r *Rule) String() string {
+	switch *r {
+	case LeaderScatter:
+		return "leader-scatter"
+	case PeerScatter:
+		return "peer-scatter"
+	case LearnerScatter:
+		return "learner-scatter"
 	default:
 		return "unknown"
 	}
 }
 
-// NewRole creates a new role.
-func NewRole(role string) Role {
-	switch role {
-	case "leader":
-		return Leader
-	case "follower":
-		return Follower
-	case "learner":
-		return Learner
+// NewRule creates a new rule.
+func NewRule(rule string) Rule {
+	switch rule {
+	case "leader-scatter":
+		return LeaderScatter
+	case "peer-scatter":
+		return PeerScatter
+	case "learner-scatter":
+		return LearnerScatter
 	default:
 		return Unknown
 	}
 }
 
-// MarshalJSON returns the JSON encoding of Role.
-func (r Role) MarshalJSON() ([]byte, error) {
+// MarshalJSON returns the JSON encoding of rule.
+func (r *Rule) MarshalJSON() ([]byte, error) {
 	return []byte(`"` + r.String() + `"`), nil
 }
 
-// GetPeersByRole returns the peers with specified role.
-func (r *RegionInfo) GetPeersByRole(role Role) []*metapb.Peer {
-	switch role {
-	case Leader:
+// UnmarshalJSON parses the JSON-encoded data and stores the result in rule.
+func (r *Rule) UnmarshalJSON(data []byte) error {
+	s := string(data)
+	switch s {
+	case `"leader-scatter"`:
+		*r = LeaderScatter
+	case `"peer-scatter"`:
+		*r = PeerScatter
+	case `"learner-scatter"`:
+		*r = LearnerScatter
+	default:
+		*r = Unknown
+	}
+	return nil
+}
+
+// GetPeersByRule returns the peers with specified rule.
+func (r *RegionInfo) GetPeersByRule(rule Rule) []*metapb.Peer {
+	switch rule {
+	case LeaderScatter:
 		return []*metapb.Peer{r.GetLeader()}
-	case Follower:
-		followers := r.GetFollowers()
-		ret := make([]*metapb.Peer, 0, len(followers))
-		for _, peer := range followers {
-			ret = append(ret, peer)
-		}
-		return ret
-	case Learner:
-		learners := r.GetLearners()
-		return learners
+	case PeerScatter:
+		return r.GetPeers()
+	case LearnerScatter:
+		return r.GetLearners()
 	default:
 		return nil
 	}
@@ -1514,8 +1524,8 @@ func (r *RegionsInfo) GetStoreRegions(storeID uint64) []*RegionInfo {
 	return regions
 }
 
-// TODO: benchmark the performance of `QueryRegions`.
 // QueryRegions searches RegionInfo from regionTree by keys and IDs in batch.
+// TODO: benchmark the performance of `QueryRegions`.
 func (r *RegionsInfo) QueryRegions(
 	keys, prevKeys [][]byte, ids []uint64, needBuckets bool,
 ) (keyIDMap, prevKeyIDMap []uint64, regionsByID map[uint64]*pdpb.RegionResponse) {
@@ -2033,11 +2043,6 @@ func (r *RegionsInfo) BatchScanRegions(keyRanges *KeyRanges, opts ...BatchScanRe
 	r.t.RLock()
 	defer r.t.RUnlock()
 	for _, keyRange := range krs {
-		if scanOptions.limit > 0 && len(res) >= scanOptions.limit {
-			res = res[:scanOptions.limit]
-			return res, nil
-		}
-
 		regions, err := scanRegion(r.tree, keyRange, scanOptions.limit, scanOptions.outputMustContainAllKeyRange)
 		if err != nil {
 			return nil, err
@@ -2047,6 +2052,10 @@ func (r *RegionsInfo) BatchScanRegions(keyRanges *KeyRanges, opts ...BatchScanRe
 			regions = regions[1:]
 		}
 		res = append(res, regions...)
+		if scanOptions.limit > 0 && len(res) >= scanOptions.limit {
+			res = res[:scanOptions.limit]
+			return res, nil
+		}
 	}
 	return res, nil
 }

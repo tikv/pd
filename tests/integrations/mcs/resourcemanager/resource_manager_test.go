@@ -1504,7 +1504,7 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupControllerConfigCh
 	expectStr, err := json.Marshal(expectCfg)
 	re.NoError(err)
 	re.JSONEq(string(respString), string(expectStr))
-	re.EqualValues(expectRUCfg, c1.GetConfig())
+	re.Equal(expectRUCfg, c1.GetConfig())
 
 	testCases := []struct {
 		configJSON string
@@ -1550,16 +1550,16 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupControllerConfigCh
 		sendRequest("POST", getAddr()+configURL, strings.NewReader(t.configJSON))
 		time.Sleep(500 * time.Millisecond)
 		t.expected(expectRUCfg)
-		re.EqualValues(expectRUCfg, c1.GetConfig())
+		re.Equal(expectRUCfg, c1.GetConfig())
 
 		expectRUCfg2 := *expectRUCfg
 		// always apply the client option
 		expectRUCfg2.LTBMaxWaitDuration = time.Hour
-		re.EqualValues(&expectRUCfg2, c2.GetConfig())
+		re.Equal(&expectRUCfg2, c2.GetConfig())
 	}
 	// restart c1
 	c1.Stop()
 	c1, err = controller.NewResourceGroupController(suite.ctx, 1, cli, nil)
 	re.NoError(err)
-	re.EqualValues(expectRUCfg, c1.GetConfig())
+	re.Equal(expectRUCfg, c1.GetConfig())
 }
