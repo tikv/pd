@@ -18,7 +18,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 	"time"
 
@@ -31,6 +30,7 @@ import (
 	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/server/config"
 )
@@ -131,7 +131,7 @@ func PrepareJoinCluster(cfg *config.Config) error {
 	joinedFailedToStart := false
 	for _, m := range listResp.Members {
 		if len(m.Name) == 0 {
-			if isSameSlice(m.PeerURLs, strings.Split(cfg.AdvertisePeerUrls, ",")) {
+			if slice.EqualWithoutOrder(m.PeerURLs, strings.Split(cfg.AdvertisePeerUrls, ",")) {
 				log.Warn("the PD is already in the cluster but previously failed to start after join", zap.Any("member", m))
 				joinedFailedToStart = true
 			} else {
@@ -191,7 +191,8 @@ func PrepareJoinCluster(cfg *config.Config) error {
 				listSucc = true
 			}
 			if len(n) == 0 {
-				if joinedFailedToStart && isSameSlice(memb.PeerURLs, strings.Split(cfg.AdvertisePeerUrls, ",")) {
+				if joinedFailedToStart {
+					// At this point we already know that there is only one member without a name and it's the current one.
 					n = cfg.Name
 					listSucc = true
 				} else {
@@ -225,18 +226,6 @@ func PrepareJoinCluster(cfg *config.Config) error {
 	}
 
 	return nil
-}
-
-func isSameSlice(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for _, item := range a {
-		if !slices.Contains(b, item) {
-			return false
-		}
-	}
-	return true
 }
 
 func isDataExist(d string) bool {

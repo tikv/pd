@@ -14,6 +14,8 @@
 
 package slice
 
+import "slices"
+
 // AnyOf returns true if any element in the slice matches the predict func.
 func AnyOf[T any](s []T, p func(int) bool) bool {
 	for i := range s {
@@ -57,4 +59,17 @@ func Remove[T comparable](slice []T, value T) []T {
 		}
 	}
 	return slice[:j]
+}
+
+// EqualWithoutOrder checks if two slices are equal without considering the order.
+func EqualWithoutOrder[T comparable](a, b []T) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for _, item := range a {
+		if !slices.Contains(b, item) {
+			return false
+		}
+	}
+	return true
 }
