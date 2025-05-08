@@ -63,6 +63,7 @@ import (
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/operatorutil"
+	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/pkg/versioninfo"
@@ -2186,7 +2187,12 @@ func newTestRaftCluster(
 	s storage.Storage,
 ) *RaftCluster {
 	opt.GetScheduleConfig().EnableHeartbeatConcurrentRunner = false
-	rc := &RaftCluster{serverCtx: ctx, BasicCluster: core.NewBasicCluster(), storage: s}
+	rc := &RaftCluster{
+		serverCtx:      ctx,
+		BasicCluster:   core.NewBasicCluster(),
+		storage:        s,
+		storeStateLock: syncutil.NewLockGroup(syncutil.WithRemoveEntryOnUnlock(true)),
+	}
 	rc.InitCluster(id, opt, nil, nil)
 	rc.ruleManager = placement.NewRuleManager(ctx, storage.NewStorageWithMemoryBackend(), rc, opt)
 	if opt.IsPlacementRulesEnabled() {
