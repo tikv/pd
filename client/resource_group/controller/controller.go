@@ -89,7 +89,7 @@ type ResourceGroupProvider interface {
 	ModifyResourceGroup(ctx context.Context, metaGroup *rmpb.ResourceGroup) (string, error)
 	DeleteResourceGroup(ctx context.Context, resourceGroupName string) (string, error)
 	AcquireTokenBuckets(ctx context.Context, request *rmpb.TokenBucketsRequest) ([]*rmpb.TokenBucketResponse, error)
-	LoadResourceGroups(ctx context.Context) ([]*rmpb.ResourceGroup, int64, error)
+	GetResourceGroupsMetaRevision(ctx context.Context) (int64, error)
 
 	metastorage.Client
 }
@@ -260,7 +260,7 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 			stateUpdateTicker.Reset(time.Millisecond * 100)
 		})
 
-		_, metaRevision, err := c.provider.LoadResourceGroups(ctx)
+		metaRevision, err := c.provider.GetResourceGroupsMetaRevision(ctx)
 		if err != nil {
 			log.Warn("load resource group revision failed", zap.Error(err))
 		}
