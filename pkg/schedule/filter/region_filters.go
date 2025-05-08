@@ -62,6 +62,26 @@ func SelectOneRegion(regions []*core.RegionInfo, collector *plan.Collector, filt
 	return nil
 }
 
+// RandomSelectOneRegion selects one region that be selected from the list.
+func RandomSelectOneRegion(regions map[uint64]*core.RegionInfo, collector *plan.Collector, filters ...RegionFilter) *core.RegionInfo {
+	for _, r := range regions {
+		if len(filters) == 0 || slice.AllOf(filters,
+			func(i int) bool {
+				status := filters[i].Select(r)
+				if !status.IsOK() {
+					if collector != nil {
+						collector.Collect(plan.SetResource(r), plan.SetStatus(status))
+					}
+					return false
+				}
+				return true
+			}) {
+			return r
+		}
+	}
+	return nil
+}
+
 // RegionFilter is an interface to filter region.
 type RegionFilter interface {
 	// Return plan.Status show whether be filtered

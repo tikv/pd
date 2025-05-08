@@ -195,8 +195,9 @@ func (handler *evictSlowStoreHandler) listConfig(w http.ResponseWriter, _ *http.
 
 type evictSlowStoreScheduler struct {
 	*BaseScheduler
-	conf    *evictSlowStoreSchedulerConfig
-	handler http.Handler
+	conf           *evictSlowStoreSchedulerConfig
+	handler        http.Handler
+	pendingRegions map[uint64]*operator.Operator
 }
 
 // ServeHTTP implements the http.Handler interface.
@@ -271,8 +272,8 @@ func (s *evictSlowStoreScheduler) cleanupEvictLeader(cluster sche.SchedulerClust
 	cluster.SlowStoreRecovered(evictSlowStore)
 }
 
-func (s *evictSlowStoreScheduler) schedulerEvictLeader(cluster sche.SchedulerCluster) []*operator.Operator {
-	return scheduleEvictLeaderBatch(s.R, s.GetName(), cluster, s.conf)
+func (s *evictSlowStoreScheduler) schedulerEvictLeader(cluster sche.SchedulerCluster, pendingRegions map[uint64]*operator.Operator) []*operator.Operator {
+	return scheduleEvictLeaderBatch(s.R, s.GetName(), cluster, s.conf, pendingRegions)
 }
 
 // IsScheduleAllowed implements the Scheduler interface.
@@ -302,7 +303,8 @@ func (s *evictSlowStoreScheduler) Schedule(cluster sche.SchedulerCluster, _ bool
 			log.Info("slow store has been recovered",
 				zap.Uint64("store-id", store.GetID()))
 		} else {
-			return s.schedulerEvictLeader(cluster), nil
+			ops := s.schedulerEvictLeader(cluster, s.pendingRegions)
+			return ops, nil
 		}
 		s.cleanupEvictLeader(cluster)
 		return nil, nil
@@ -336,15 +338,16 @@ func (s *evictSlowStoreScheduler) Schedule(cluster sche.SchedulerCluster, _ bool
 		log.Info("prepare for evicting leader failed", zap.Error(err), zap.Uint64("store-id", slowStore.GetID()))
 		return nil, nil
 	}
-	return s.schedulerEvictLeader(cluster), nil
+	return s.schedulerEvictLeader(cluster, s.pendingRegions), nil
 }
 
 // newEvictSlowStoreScheduler creates a scheduler that detects and evicts slow stores.
 func newEvictSlowStoreScheduler(opController *operator.Controller, conf *evictSlowStoreSchedulerConfig) Scheduler {
 	handler := newEvictSlowStoreHandler(conf)
 	return &evictSlowStoreScheduler{
-		BaseScheduler: NewBaseScheduler(opController, types.EvictSlowStoreScheduler, conf),
-		conf:          conf,
-		handler:       handler,
+		BaseScheduler:  NewBaseScheduler(opController, types.EvictSlowStoreScheduler, conf),
+		conf:           conf,
+		handler:        handler,
+		pendingRegions: make(map[uint64]*operator.Operator),
 	}
 }
