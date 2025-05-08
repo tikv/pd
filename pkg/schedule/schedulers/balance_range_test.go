@@ -16,7 +16,9 @@ package schedulers
 
 import (
 	"fmt"
+	"github.com/pingcap/failpoint"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -202,4 +204,88 @@ func TestCodecConfig(t *testing.T) {
 	}
 	re.NoError(conf2.UnmarshalJSON(data))
 	re.Equal(conf2.jobs, conf.jobs)
+}
+
+func TestJobExpired(t *testing.T) {
+	now := time.Now()
+	for _, data := range []struct {
+		finishedTime time.Time
+		expired      bool
+	}{
+		{
+			finishedTime: now.Add(-reserverDuration - 10*time.Second),
+			expired:      true,
+		},
+		{
+			finishedTime: now.Add(-reserverDuration + 10*time.Second),
+			expired:      false,
+		},
+	} {
+		job := &balanceRangeSchedulerJob{
+			Finish: &data.finishedTime,
+		}
+		require.Equal(t, data.expired, job.expired(reserverDuration))
+	}
+}
+
+func TestJobGC(t *testing.T) {
+	re := require.New(t)
+	conf := &balanceRangeSchedulerConfig{
+		schedulerConfig: &baseSchedulerConfig{},
+		jobs:            make([]*balanceRangeSchedulerJob, 0),
+	}
+	conf.init("test", storage.NewStorageWithMemoryBackend(), conf)
+	now := time.Now()
+	job := &balanceRangeSchedulerJob{
+		Finish: &now,
+	}
+	re.NoError(conf.addJob(job))
+	re.NoError(conf.deleteJob(1))
+	re.NoError(conf.gc())
+	re.Len(conf.jobs, 1)
+
+	expiredTime := now.Add(-reserverDuration - 10*time.Second)
+	conf.jobs[0].Finish = &expiredTime
+	re.NoError(conf.gc())
+	re.Empty(conf.jobs)
+}
+
+func TestPersistFail(t *testing.T) {
+	re := require.New(t)
+	persisFail := "github.com/tikv/pd/pkg/schedule/schedulers/persistFail"
+	re.NoError(failpoint.Enable(persisFail, "return(true)"))
+	defer func() {
+		re.NoError(failpoint.Disable(persisFail))
+	}()
+	job := &balanceRangeSchedulerJob{
+		Engine: core.EngineTiKV,
+		Rule:   core.LeaderScatter,
+		JobID:  1,
+		Ranges: []core.KeyRange{core.NewKeyRange("a", "b")},
+	}
+	conf := &balanceRangeSchedulerConfig{
+		schedulerConfig: &baseSchedulerConfig{},
+		jobs:            []*balanceRangeSchedulerJob{job},
+	}
+	conf.init("test", storage.NewStorageWithMemoryBackend(), conf)
+	errMsg := "fail to persist"
+	newJob := &balanceRangeSchedulerJob{}
+	re.ErrorContains(conf.addJob(newJob), errMsg)
+	re.Len(conf.jobs, 1)
+
+	re.ErrorContains(conf.deleteJob(1), errMsg)
+	re.NotEqual(conf.jobs[0].Status, cancelled)
+
+	re.ErrorContains(conf.begin(0), errMsg)
+	re.NotEqual(conf.jobs[0].Status, running)
+
+	conf.jobs[0].Status = running
+	re.ErrorContains(conf.finish(0), errMsg)
+	re.NotEqual(conf.jobs[0].Status, finished)
+
+	conf.jobs[0].Status = cancelled
+	finishedTime := time.Now().Add(-reserverDuration - 10*time.Second)
+	conf.jobs[0].Finish = &finishedTime
+	re.ErrorContains(conf.gc(), errMsg)
+	re.Len(conf.jobs, 1)
 }
