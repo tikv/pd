@@ -859,7 +859,7 @@ func (suite *scheduleTestSuite) checkBalanceRangeAPI(cluster *tests.TestCluster)
 	leaderAddr := cluster.GetLeaderServer().GetAddr()
 	urlPrefix := fmt.Sprintf("%s/pd/api/v1", leaderAddr)
 	// add balance-range-scheduler
-	suite.NoError(tu.CheckPostJSON(tests.TestDialClient, urlPrefix+"/schedulers", data, func(_ []byte, i int, _ http.Header) {
+	suite.Require().NoError(tu.CheckPostJSON(tests.TestDialClient, urlPrefix+"/schedulers", data, func(_ []byte, i int, _ http.Header) {
 		suite.Equal(http.StatusOK, i)
 	}))
 
@@ -886,7 +886,7 @@ func (suite *scheduleTestSuite) checkBalanceRangeAPI(cluster *tests.TestCluster)
 	input["alias"] = "test-sysbench-partition(p2)"
 	data, err = json.Marshal(input)
 	suite.NoError(err)
-	suite.NoError(tu.CheckPostJSON(tests.TestDialClient, urlPrefix+"/schedulers", data, func(_ []byte, i int, _ http.Header) {
+	suite.Require().NoError(tu.CheckPostJSON(tests.TestDialClient, urlPrefix+"/schedulers", data, func(_ []byte, i int, _ http.Header) {
 		suite.Equal(http.StatusOK, i)
 	}))
 	tu.Eventually(suite.Require(), func() bool {
@@ -908,7 +908,7 @@ func (suite *scheduleTestSuite) checkBalanceRangeAPI(cluster *tests.TestCluster)
 	})
 
 	// cancel job
-	suite.NoError(tu.CheckDelete(tests.TestDialClient,
+	suite.Require().NoError(tu.CheckDelete(tests.TestDialClient,
 		fmt.Sprintf("%s/scheduler-config/%s/job?job-id=1", urlPrefix, types.BalanceRangeScheduler.String()),
 		func(_ []byte, i int, _ http.Header) {
 			suite.Equal(http.StatusOK, i)
