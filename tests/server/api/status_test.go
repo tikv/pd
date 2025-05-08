@@ -53,7 +53,7 @@ func (suite *statusTestSuite) checkStatus(cluster *tests.TestCluster) {
 	urlPrefix := leader.GetAddr() + "/pd/api/v1"
 
 	addr := urlPrefix + "/status"
-	resp, err := testDialClient.Get(addr)
+	resp, err := tests.TestDialClient.Get(addr)
 	re.NoError(err)
 	buf, err := io.ReadAll(resp.Body)
 	re.NoError(err)

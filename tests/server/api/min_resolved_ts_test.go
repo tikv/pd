@@ -193,7 +193,7 @@ func setAllStoresMinResolvedTS(svr *tests.TestServer, ts uint64) {
 
 func checkMinResolvedTS(re *require.Assertions, url string, expect *api.MinResolvedTS) {
 	re.Eventually(func() bool {
-		res, err := testDialClient.Get(url)
+		res, err := tests.TestDialClient.Get(url)
 		re.NoError(err)
 		defer res.Body.Close()
 		listResp := &api.MinResolvedTS{}
@@ -207,7 +207,7 @@ func checkMinResolvedTS(re *require.Assertions, url string, expect *api.MinResol
 func checkMinResolvedTSByStores(re *require.Assertions, url string, expect *api.MinResolvedTS, scope string) {
 	re.Eventually(func() bool {
 		url := fmt.Sprintf("%s?scope=%s", url, scope)
-		res, err := testDialClient.Get(url)
+		res, err := tests.TestDialClient.Get(url)
 		re.NoError(err)
 		defer res.Body.Close()
 		listResp := &api.MinResolvedTS{}

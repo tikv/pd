@@ -61,7 +61,7 @@ func (suite *hotStatusTestSuite) checkGetHotStore(cluster *tests.TestCluster) {
 	leader := cluster.GetLeaderServer()
 	urlPrefix := leader.GetAddr() + "/pd/api/v1"
 	stat := handler.HotStoreStats{}
-	err := tu.ReadGetJSON(re, testDialClient, urlPrefix+"/hotspot/stores", &stat)
+	err := tu.ReadGetJSON(re, tests.TestDialClient, urlPrefix+"/hotspot/stores", &stat)
 	re.NoError(err)
 }
 
@@ -76,10 +76,10 @@ func (suite *hotStatusTestSuite) checkGetHistoryHotRegionsBasic(cluster *tests.T
 	}
 	data, err := json.Marshal(request)
 	re.NoError(err)
-	err = tu.CheckGetJSON(testDialClient, urlPrefix+"/hotspot/regions/history", data, tu.StatusOK(re))
+	err = tu.CheckGetJSON(tests.TestDialClient, urlPrefix+"/hotspot/regions/history", data, tu.StatusOK(re))
 	re.NoError(err)
 	errRequest := "{\"start_time\":\"err\"}"
-	err = tu.CheckGetJSON(testDialClient, urlPrefix+"/hotspot/regions/history", []byte(errRequest), tu.StatusNotOK(re))
+	err = tu.CheckGetJSON(tests.TestDialClient, urlPrefix+"/hotspot/regions/history", []byte(errRequest), tu.StatusNotOK(re))
 	re.NoError(err)
 }
 
@@ -118,7 +118,7 @@ func (suite *hotStatusTestSuite) checkGetHistoryHotRegionsTimeRange(cluster *tes
 	re.NoError(err)
 	data, err := json.Marshal(request)
 	re.NoError(err)
-	err = tu.CheckGetJSON(testDialClient, urlPrefix+"/hotspot/regions/history", data, check)
+	err = tu.CheckGetJSON(tests.TestDialClient, urlPrefix+"/hotspot/regions/history", data, check)
 	re.NoError(err)
 }
 
@@ -205,7 +205,7 @@ func (suite *hotStatusTestSuite) checkGetHistoryHotRegionsIDAndTypes(cluster *te
 	re.NoError(err)
 	data, err := json.Marshal(request)
 	re.NoError(err)
-	err = tu.CheckGetJSON(testDialClient, urlPrefix+"/hotspot/regions/history", data, check)
+	err = tu.CheckGetJSON(tests.TestDialClient, urlPrefix+"/hotspot/regions/history", data, check)
 	re.NoError(err)
 }
 

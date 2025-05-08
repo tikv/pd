@@ -95,6 +95,8 @@
 /pd//scheduler_config/balance-hot-region-scheduler save
 /pd//scheduler_config/balance-leader-scheduler remove
 /pd//scheduler_config/balance-leader-scheduler save
+/pd//scheduler_config/balance-range-scheduler remove
+/pd//scheduler_config/balance-range-scheduler save
 /pd//scheduler_config/balance-region-scheduler remove
 /pd//scheduler_config/balance-region-scheduler save
 /pd//scheduler_config/balance-witness-scheduler remove
