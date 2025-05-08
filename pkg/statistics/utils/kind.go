@@ -91,12 +91,12 @@ func (k RegionStatKind) String() string {
 	return "unknown RegionStatKind"
 }
 
-// StoreStatKind represents the statistics type of store.
-type StoreStatKind int
+// StoreLoadKind represents the load type of store.
+type StoreLoadKind int
 
-// Different store statistics kinds.
+// Different store load kinds.
 const (
-	StoreReadBytes StoreStatKind = iota
+	StoreReadBytes StoreLoadKind = iota
 	StoreReadKeys
 	StoreWriteBytes
 	StoreWriteKeys
@@ -109,10 +109,10 @@ const (
 	StoreRegionsWriteBytes // Same as StoreWriteBytes, but it is counted by RegionHeartbeat.
 	StoreRegionsWriteKeys  // Same as StoreWriteKeys, but it is counted by RegionHeartbeat.
 
-	StoreStatCount
+	StoreLoadCount
 )
 
-func (k StoreStatKind) String() string {
+func (k StoreLoadKind) String() string {
 	switch k {
 	case StoreReadBytes:
 		return "store_read_bytes"

@@ -683,16 +683,16 @@ func TestHotWriteRegionScheduleByteRateOnlyWithTiFlash(t *testing.T) {
 		re.True(
 			loadsEqual(
 				hb.stLoadInfos[writeLeader][1].LoadPred.Expect.Loads,
-				[]float64{hotRegionBytesSum / allowLeaderTiKVCount, hotRegionKeysSum / allowLeaderTiKVCount, tikvQuerySum / allowLeaderTiKVCount}))
+				statistics.Loads{hotRegionBytesSum / allowLeaderTiKVCount, hotRegionKeysSum / allowLeaderTiKVCount, tikvQuerySum / allowLeaderTiKVCount}))
 		re.NotEqual(tikvQuerySum, hotRegionQuerySum)
 		re.True(
 			loadsEqual(
 				hb.stLoadInfos[writePeer][1].LoadPred.Expect.Loads,
-				[]float64{tikvBytesSum / aliveTiKVCount, tikvKeysSum / aliveTiKVCount, 0}))
+				statistics.Loads{tikvBytesSum / aliveTiKVCount, tikvKeysSum / aliveTiKVCount, 0}))
 		re.True(
 			loadsEqual(
 				hb.stLoadInfos[writePeer][8].LoadPred.Expect.Loads,
-				[]float64{regionBytesSum / aliveTiFlashCount, regionKeysSum / aliveTiFlashCount, 0}))
+				statistics.Loads{regionBytesSum / aliveTiFlashCount, regionKeysSum / aliveTiFlashCount, 0}))
 		// check IsTraceRegionFlow == false
 		pdServerCfg := tc.GetPDServerConfig()
 		pdServerCfg.FlowRoundByDigit = 8
@@ -705,7 +705,7 @@ func TestHotWriteRegionScheduleByteRateOnlyWithTiFlash(t *testing.T) {
 		re.True(
 			loadsEqual(
 				hb.stLoadInfos[writePeer][8].LoadPred.Expect.Loads,
-				[]float64{hotRegionBytesSum / aliveTiFlashCount, hotRegionKeysSum / aliveTiFlashCount, 0}))
+				statistics.Loads{hotRegionBytesSum / aliveTiFlashCount, hotRegionKeysSum / aliveTiFlashCount, 0}))
 		// revert
 		pdServerCfg.FlowRoundByDigit = 3
 		tc.SetPDServerConfig(pdServerCfg)
@@ -1974,10 +1974,7 @@ func nearlyAbout(f1, f2 float64) bool {
 	return false
 }
 
-func loadsEqual(loads1, loads2 []float64) bool {
-	if len(loads1) != utils.DimLen || len(loads2) != utils.DimLen {
-		return false
-	}
+func loadsEqual(loads1, loads2 statistics.Loads) bool {
 	for i, load := range loads1 {
 		if math.Abs(load-loads2[i]) > 0.01 {
 			return false
