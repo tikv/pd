@@ -18,7 +18,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"github.com/pingcap/errors"
 	"net/http"
 	"net/url"
 	"sort"
@@ -30,6 +29,7 @@ import (
 	"github.com/unrolled/render"
 	"go.uber.org/zap"
 
+	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/log"
 
@@ -178,7 +178,7 @@ func (conf *balanceRangeSchedulerConfig) addJob(job *balanceRangeSchedulerJob) e
 	} else {
 		job.JobID = conf.jobs[len(conf.jobs)-1].JobID + 1
 	}
-	return conf.persistLocked(func(conf *balanceRangeSchedulerConfig) {
+	return conf.persistLocked(func() {
 		conf.jobs = append(conf.jobs, job)
 	})
 }
@@ -192,7 +192,7 @@ func (conf *balanceRangeSchedulerConfig) deleteJob(jobID uint64) error {
 				return errs.ErrInvalidArgument.FastGenByArgs(fmt.Sprintf(
 					"The job:%d has been completed and cannot be cancelled.", jobID))
 			}
-			return conf.persistLocked(func(_ *balanceRangeSchedulerConfig) {
+			return conf.persistLocked(func() {
 				job.Status = cancelled
 				now := time.Now()
 				if job.Start == nil {
@@ -221,14 +221,14 @@ func (conf *balanceRangeSchedulerConfig) gc() error {
 	if !needGC {
 		return nil
 	}
-	return conf.persistLocked(func(conf *balanceRangeSchedulerConfig) {
+	return conf.persistLocked(func() {
 		conf.jobs = conf.jobs[gcIdx+1:]
 	})
 }
 
-func (conf *balanceRangeSchedulerConfig) persistLocked(before func(conf *balanceRangeSchedulerConfig)) error {
+func (conf *balanceRangeSchedulerConfig) persistLocked(before func()) error {
 	originJobs := conf.cloneLocked()
-	before(conf)
+	before()
 	if err := conf.save(); err != nil {
 		conf.jobs = originJobs
 		return err
@@ -258,7 +258,7 @@ func (conf *balanceRangeSchedulerConfig) begin(index int) error {
 	if job.Status != pending {
 		return errors.New("the job is not pending")
 	}
-	return conf.persistLocked(func(conf *balanceRangeSchedulerConfig) {
+	return conf.persistLocked(func() {
 		now := time.Now()
 		job.Start = &now
 		job.Status = running
@@ -273,7 +273,7 @@ func (conf *balanceRangeSchedulerConfig) finish(index int) error {
 	if job.Status != running {
 		return errors.New("the job is not running")
 	}
-	return conf.persistLocked(func(conf *balanceRangeSchedulerConfig) {
+	return conf.persistLocked(func() {
 		now := time.Now()
 		job.Finish = &now
 		job.Status = finished

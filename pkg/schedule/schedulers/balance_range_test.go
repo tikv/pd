@@ -16,11 +16,12 @@ package schedulers
 
 import (
 	"fmt"
-	"github.com/pingcap/failpoint"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/pingcap/failpoint"
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/schedule/operator"
@@ -274,14 +275,14 @@ func TestPersistFail(t *testing.T) {
 	re.Len(conf.jobs, 1)
 
 	re.ErrorContains(conf.deleteJob(1), errMsg)
-	re.NotEqual(conf.jobs[0].Status, cancelled)
+	re.NotEqual(cancelled, conf.jobs[0].Status)
 
 	re.ErrorContains(conf.begin(0), errMsg)
-	re.NotEqual(conf.jobs[0].Status, running)
+	re.NotEqual(running, conf.jobs[0].Status)
 
 	conf.jobs[0].Status = running
 	re.ErrorContains(conf.finish(0), errMsg)
-	re.NotEqual(conf.jobs[0].Status, finished)
+	re.NotEqual(finished, conf.jobs[0].Status)
 
 	conf.jobs[0].Status = cancelled
 	finishedTime := time.Now().Add(-reserverDuration - 10*time.Second)
