@@ -36,7 +36,6 @@ import (
 	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/utils/apiutil"
-	"github.com/tikv/pd/pkg/utils/testutil"
 	tu "github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/tests"
@@ -865,7 +864,7 @@ func (suite *scheduleTestSuite) checkBalanceRangeAPI(cluster *tests.TestCluster)
 	}))
 
 	// check
-	testutil.Eventually(suite.Require(), func() bool {
+	tu.Eventually(suite.Require(), func() bool {
 		resp, err := apiutil.GetJSON(tests.TestDialClient, fmt.Sprintf("%s/scheduler-config/%s/list", urlPrefix, types.BalanceRangeScheduler.String()), nil)
 		suite.NoError(err)
 		defer resp.Body.Close()
@@ -890,7 +889,7 @@ func (suite *scheduleTestSuite) checkBalanceRangeAPI(cluster *tests.TestCluster)
 	suite.NoError(tu.CheckPostJSON(tests.TestDialClient, urlPrefix+"/schedulers", data, func(_ []byte, i int, _ http.Header) {
 		suite.Equal(http.StatusOK, i)
 	}))
-	testutil.Eventually(suite.Require(), func() bool {
+	tu.Eventually(suite.Require(), func() bool {
 		resp, err := apiutil.GetJSON(tests.TestDialClient, fmt.Sprintf("%s/scheduler-config/%s/list", urlPrefix, types.BalanceRangeScheduler.String()), nil)
 		suite.NoError(err)
 		defer resp.Body.Close()
@@ -915,7 +914,7 @@ func (suite *scheduleTestSuite) checkBalanceRangeAPI(cluster *tests.TestCluster)
 			suite.Equal(http.StatusOK, i)
 		}))
 	// check job again
-	testutil.Eventually(suite.Require(), func() bool {
+	tu.Eventually(suite.Require(), func() bool {
 		resp, err := apiutil.GetJSON(tests.TestDialClient, fmt.Sprintf("%s/scheduler-config/%s/list", urlPrefix, types.BalanceRangeScheduler.String()), nil)
 		suite.NoError(err)
 		defer resp.Body.Close()
