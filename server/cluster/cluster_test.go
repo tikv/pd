@@ -63,6 +63,7 @@ import (
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/operatorutil"
+	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/pkg/versioninfo"
@@ -2186,7 +2187,12 @@ func newTestRaftCluster(
 	s storage.Storage,
 ) *RaftCluster {
 	opt.GetScheduleConfig().EnableHeartbeatConcurrentRunner = false
-	rc := &RaftCluster{serverCtx: ctx, BasicCluster: core.NewBasicCluster(), storage: s}
+	rc := &RaftCluster{
+		serverCtx:      ctx,
+		BasicCluster:   core.NewBasicCluster(),
+		storage:        s,
+		storeStateLock: syncutil.NewLockGroup(syncutil.WithRemoveEntryOnUnlock(true)),
+	}
 	rc.InitCluster(id, opt, nil, nil)
 	rc.ruleManager = placement.NewRuleManager(ctx, storage.NewStorageWithMemoryBackend(), rc, opt)
 	if opt.IsPlacementRulesEnabled() {
@@ -3819,6 +3825,80 @@ func TestInterval(t *testing.T) {
 		}
 		re.Less(sc.GetInterval(), time.Second*time.Duration(n/2))
 	}
+}
+
+func TestConcurrentStoreStats(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	_, opt, err := newTestScheduleConfig()
+	re.NoError(err)
+	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
+	cluster.coordinator = schedule.NewCoordinator(ctx, cluster, nil)
+	cluster.ruleManager = placement.NewRuleManager(ctx, storage.NewStorageWithMemoryBackend(), cluster, cluster.GetOpts())
+	if opt.IsPlacementRulesEnabled() {
+		err := cluster.ruleManager.Initialize(opt.GetMaxReplicas(), opt.GetLocationLabels(), opt.GetIsolationLevel(), false)
+		if err != nil {
+			panic(err)
+		}
+	}
+
+	storeCount := uint64(100)
+	replica := cluster.GetReplicationConfig().MaxReplicas
+
+	// Add regions to the cluster.
+	regions := newTestRegions(storeCount+1, storeCount+1, replica)
+	for _, region := range regions {
+		re.NoError(cluster.putRegion(region))
+	}
+	for i := range storeCount {
+		re.NotZero(cluster.GetStoreRegionCount(i + 1))
+	}
+
+	// Add stores to the cluster.
+	for i := uint64(1); i <= storeCount; i++ {
+		store := &metapb.Store{
+			Id:            i,
+			Address:       fmt.Sprintf("mock://tikv-%d:%d", i, i),
+			StatusAddress: fmt.Sprintf("mock://tikv-%d:%d", i, i+1),
+			Version:       "2.0.0",
+			DeployPath:    getTestDeployPath(i),
+			NodeState:     metapb.NodeState_Preparing,
+		}
+		cluster.PutMetaStore(store)
+		// avoid store is buried
+		req := &pdpb.StoreHeartbeatRequest{}
+		resp := &pdpb.StoreHeartbeatResponse{}
+		req.Stats = &pdpb.StoreStats{
+			StoreId:     i,
+			Capacity:    100,
+			Available:   50,
+			RegionCount: 1,
+		}
+		re.NoError(cluster.HandleStoreHeartbeat(req, resp))
+	}
+	re.Equal(int(storeCount), cluster.GetStoreCount())
+
+	// Try to remove store and check store state at the same time.
+	// If we remove store first, the store state will be in removing state.
+	// If we check store state first, the store state will be changed to state serving and then removing.
+	wg := sync.WaitGroup{}
+	for i := range storeCount {
+		if len(cluster.getUpStores()) == int(replica) {
+			// it means we can't remove store anymore
+			break
+		}
+		storeID := i + 1
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			cluster.checkStores()
+		}()
+		re.NoError(cluster.RemoveStore(storeID, false))
+		re.Equal(metapb.NodeState_Removing, cluster.GetStore(storeID).GetNodeState(), "store %d should be in removing state", storeID)
+	}
+	wg.Wait()
 }
 
 func waitAddLearner(re *require.Assertions, stream mockhbstream.HeartbeatStream, region *core.RegionInfo, storeID uint64) *core.RegionInfo {
