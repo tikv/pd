@@ -34,6 +34,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/tests"
 )
 
 // gcClientTestReceiver is the pdpb.PD_WatchGCSafePointV2Server mock for testing.
@@ -74,7 +75,7 @@ func (suite *gcClientTestSuite) SetupSuite() {
 	)
 	checker := assertutil.NewChecker()
 	checker.FailNow = func() {}
-	gsi, suite.cleanup, err = server.NewTestServer(re, checker)
+	gsi, suite.cleanup, err = tests.NewServer(re, checker)
 	suite.server = &server.GrpcServer{Server: gsi}
 	re.NoError(err)
 	addr := suite.server.GetAddr()
@@ -209,7 +210,6 @@ func (suite *gcClientTestSuite) mustLoadSafePoint(re *require.Assertions, keyspa
 // mustDeleteSafePoint deletes the gc safe point of the given keyspace id.
 func (suite *gcClientTestSuite) mustDeleteSafePoint(re *require.Assertions, keyspaceID uint32) {
 	safePointPath := keypath.GCSafePointV2Path(keyspaceID)
-	log.Info("test etcd path", zap.Any("path", safePointPath)) // TODO: Delete
 	_, err := suite.server.GetClient().Delete(suite.server.Context(), safePointPath)
 	re.NoError(err)
 }

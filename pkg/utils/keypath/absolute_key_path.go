@@ -151,7 +151,7 @@ func ClusterPath() string {
 	return fmt.Sprintf(clusterPathFormat, ClusterID())
 }
 
-// ClusterBootstrapTimeKey returns the path to save the cluster bootstrap timestamp.
+// ClusterBootstrapTimePath returns the path to save the cluster bootstrap time.
 func ClusterBootstrapTimePath() string {
 	return fmt.Sprintf(clusterBootstrapTimePathFormat, ClusterID())
 }

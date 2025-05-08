@@ -33,6 +33,7 @@ var (
 	testAddrMap   = make(map[string]struct{})
 )
 
+// AllocURLFromUT is the environment variable used to get the test URL from UT.
 // reference: /pd/tools/pd-ut/alloc/server.go
 const AllocURLFromUT = "allocURLFromUT"
 

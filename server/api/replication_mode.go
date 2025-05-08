@@ -34,6 +34,7 @@ func newReplicationModeHandler(svr *server.Server, rd *render.Render) *replicati
 	}
 }
 
+// GetReplicationModeStatus gets the status of replication mode.
 // @Tags     replication_mode
 // @Summary  Get status of replication mode
 // @Produce  json

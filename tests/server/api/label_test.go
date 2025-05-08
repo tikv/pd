@@ -29,15 +29,15 @@ import (
 	"github.com/tikv/pd/pkg/utils/keypath"
 	tu "github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/server/api"
 	"github.com/tikv/pd/server/config"
+	"github.com/tikv/pd/tests"
 )
 
 type labelsStoreTestSuite struct {
 	suite.Suite
-	svr       *server.Server
-	cleanup   tu.CleanupFunc
-	urlPrefix string
-	stores    []*metapb.Store
+	env    *tests.SchedulingTestEnvironment
+	stores []*metapb.Store
 }
 
 func TestLabelsStoreTestSuite(t *testing.T) {
@@ -45,10 +45,25 @@ func TestLabelsStoreTestSuite(t *testing.T) {
 }
 
 func (suite *labelsStoreTestSuite) SetupSuite() {
+	suite.env = tests.NewSchedulingTestEnvironment(suite.T())
+}
+
+func (suite *labelsStoreTestSuite) TearDownSuite() {
+	suite.env.Cleanup()
+}
+
+func (suite *labelsStoreTestSuite) TestLabelsGet() {
+	suite.env.RunTest(suite.checkLabelsGet)
+	suite.env.RunTest(suite.checkStoresLabelFilter)
+}
+
+func (suite *labelsStoreTestSuite) checkLabelsGet(cluster *tests.TestCluster) {
+	re := suite.Require()
+
 	suite.stores = []*metapb.Store{
 		{
 			Id:        1,
-			Address:   "tikv1",
+			Address:   "mock://tikv-1:1",
 			State:     metapb.StoreState_Up,
 			NodeState: metapb.NodeState_Serving,
 			Labels: []*metapb.StoreLabel{
@@ -65,7 +80,7 @@ func (suite *labelsStoreTestSuite) SetupSuite() {
 		},
 		{
 			Id:        4,
-			Address:   "tikv4",
+			Address:   "mock://tikv-4:4",
 			State:     metapb.StoreState_Up,
 			NodeState: metapb.NodeState_Serving,
 			Labels: []*metapb.StoreLabel{
@@ -82,7 +97,7 @@ func (suite *labelsStoreTestSuite) SetupSuite() {
 		},
 		{
 			Id:        6,
-			Address:   "tikv6",
+			Address:   "mock://tikv-6:6",
 			State:     metapb.StoreState_Up,
 			NodeState: metapb.NodeState_Serving,
 			Labels: []*metapb.StoreLabel{
@@ -99,7 +114,7 @@ func (suite *labelsStoreTestSuite) SetupSuite() {
 		},
 		{
 			Id:        7,
-			Address:   "tikv7",
+			Address:   "mock://tikv-7:7",
 			State:     metapb.StoreState_Up,
 			NodeState: metapb.NodeState_Serving,
 			Labels: []*metapb.StoreLabel{
@@ -120,34 +135,24 @@ func (suite *labelsStoreTestSuite) SetupSuite() {
 		},
 	}
 
-	re := suite.Require()
-	suite.svr, suite.cleanup = mustNewServer(re, func(cfg *config.Config) {
-		cfg.Replication.StrictlyMatchLabel = false
-	})
-	server.MustWaitLeader(re, []*server.Server{suite.svr})
-
-	addr := suite.svr.GetAddr()
-	suite.urlPrefix = fmt.Sprintf("%s%s/api/v1", addr, apiPrefix)
-
-	mustBootstrapCluster(re, suite.svr)
 	for _, store := range suite.stores {
-		mustPutStore(re, suite.svr, store.Id, store.State, store.NodeState, store.Labels)
+		tests.MustPutStore(re, cluster, store)
 	}
-}
 
-func (suite *labelsStoreTestSuite) TearDownSuite() {
-	suite.cleanup()
-}
+	leader := cluster.GetLeaderServer()
+	urlPrefix := leader.GetAddr() + "/pd/api/v1"
 
-func (suite *labelsStoreTestSuite) TestLabelsGet() {
-	re := suite.Require()
-	url := fmt.Sprintf("%s/labels", suite.urlPrefix)
+	url := fmt.Sprintf("%s/labels", urlPrefix)
 	labels := make([]*metapb.StoreLabel, 0, len(suite.stores))
-	re.NoError(tu.ReadGetJSON(re, testDialClient, url, &labels))
+	re.NoError(tu.ReadGetJSON(re, tests.TestDialClient, url, &labels))
 }
 
-func (suite *labelsStoreTestSuite) TestStoresLabelFilter() {
+func (suite *labelsStoreTestSuite) checkStoresLabelFilter(cluster *tests.TestCluster) {
 	re := suite.Require()
+
+	leader := cluster.GetLeaderServer()
+	urlPrefix := leader.GetAddr() + "/pd/api/v1"
+
 	var testCases = []struct {
 		name, value string
 		want        []*metapb.Store
@@ -182,22 +187,19 @@ func (suite *labelsStoreTestSuite) TestStoresLabelFilter() {
 		},
 	}
 	for _, testCase := range testCases {
-		url := fmt.Sprintf("%s/labels/stores?name=%s&value=%s", suite.urlPrefix, testCase.name, testCase.value)
+		url := fmt.Sprintf("%s/labels/stores?name=%s&value=%s", urlPrefix, testCase.name, testCase.value)
 		info := new(response.StoresInfo)
-		err := tu.ReadGetJSON(re, testDialClient, url, info)
+		err := tu.ReadGetJSON(re, tests.TestDialClient, url, info)
 		re.NoError(err)
 		checkStoresInfo(re, info.Stores, testCase.want)
 	}
-	_, err := newStoresLabelFilter("test", ".[test")
+	_, err := api.NewStoresLabelFilter("test", ".[test")
 	re.Error(err)
 }
 
 type strictlyLabelsStoreTestSuite struct {
 	suite.Suite
-	svr       *server.Server
-	grpcSvr   *server.GrpcServer
-	cleanup   tu.CleanupFunc
-	urlPrefix string
+	env *tests.SchedulingTestEnvironment
 }
 
 func TestStrictlyLabelsStoreTestSuite(t *testing.T) {
@@ -205,23 +207,29 @@ func TestStrictlyLabelsStoreTestSuite(t *testing.T) {
 }
 
 func (suite *strictlyLabelsStoreTestSuite) SetupSuite() {
-	re := suite.Require()
-	suite.svr, suite.cleanup = mustNewServer(re, func(cfg *config.Config) {
-		cfg.Replication.LocationLabels = []string{"zone", "disk"}
-		cfg.Replication.StrictlyMatchLabel = true
-		cfg.Replication.EnablePlacementRules = false
-	})
-	server.MustWaitLeader(re, []*server.Server{suite.svr})
+	suite.env = tests.NewSchedulingTestEnvironment(suite.T(),
+		func(conf *config.Config, _ string) {
+			conf.Replication.LocationLabels = []string{"zone", "disk"}
+			conf.Replication.StrictlyMatchLabel = true
+			conf.Replication.EnablePlacementRules = false
+		})
+}
 
-	suite.grpcSvr = &server.GrpcServer{Server: suite.svr}
-	addr := suite.svr.GetAddr()
-	suite.urlPrefix = fmt.Sprintf("%s%s/api/v1", addr, apiPrefix)
-
-	mustBootstrapCluster(re, suite.svr)
+func (suite *strictlyLabelsStoreTestSuite) TearDownSuite() {
+	suite.env.Cleanup()
 }
 
 func (suite *strictlyLabelsStoreTestSuite) TestStoreMatch() {
+	suite.env.RunTest(suite.checkStoreMatch)
+}
+
+func (suite *strictlyLabelsStoreTestSuite) checkStoreMatch(cluster *tests.TestCluster) {
 	re := suite.Require()
+
+	leader := cluster.GetLeaderServer()
+	urlPrefix := leader.GetAddr() + "/pd/api/v1"
+	grpcServer := server.GrpcServer{Server: leader.GetServer()}
+
 	testCases := []struct {
 		store       *metapb.Store
 		valid       bool
@@ -230,7 +238,7 @@ func (suite *strictlyLabelsStoreTestSuite) TestStoreMatch() {
 		{
 			store: &metapb.Store{
 				Id:      1,
-				Address: "tikv1",
+				Address: "mock://tikv-1:1",
 				State:   metapb.StoreState_Up,
 				Labels: []*metapb.StoreLabel{
 					{
@@ -249,7 +257,7 @@ func (suite *strictlyLabelsStoreTestSuite) TestStoreMatch() {
 		{
 			store: &metapb.Store{
 				Id:      2,
-				Address: "tikv2",
+				Address: "mock://tikv-2:2",
 				State:   metapb.StoreState_Up,
 				Labels:  []*metapb.StoreLabel{},
 				Version: "3.0.0",
@@ -260,7 +268,7 @@ func (suite *strictlyLabelsStoreTestSuite) TestStoreMatch() {
 		{
 			store: &metapb.Store{
 				Id:      2,
-				Address: "tikv2",
+				Address: "mock://tikv-2:2",
 				State:   metapb.StoreState_Up,
 				Labels: []*metapb.StoreLabel{
 					{
@@ -284,7 +292,7 @@ func (suite *strictlyLabelsStoreTestSuite) TestStoreMatch() {
 		{
 			store: &metapb.Store{
 				Id:      3,
-				Address: "tiflash1",
+				Address: "mock://tiflash-3:3",
 				State:   metapb.StoreState_Up,
 				Labels: []*metapb.StoreLabel{
 					{
@@ -308,7 +316,7 @@ func (suite *strictlyLabelsStoreTestSuite) TestStoreMatch() {
 	}
 
 	for _, testCase := range testCases {
-		resp, err := suite.grpcSvr.PutStore(context.Background(), &pdpb.PutStoreRequest{
+		resp, err := grpcServer.PutStore(context.Background(), &pdpb.PutStoreRequest{
 			Header: &pdpb.RequestHeader{ClusterId: keypath.ClusterID()},
 			Store: &metapb.Store{
 				Id:      testCase.store.Id,
@@ -318,7 +326,7 @@ func (suite *strictlyLabelsStoreTestSuite) TestStoreMatch() {
 				Version: testCase.store.Version,
 			},
 		})
-		if testCase.store.Address == "tiflash1" {
+		if testCase.store.Address == "mock://tiflash-3:3" {
 			re.Contains(resp.GetHeader().GetError().String(), testCase.expectError)
 			continue
 		}
@@ -332,12 +340,12 @@ func (suite *strictlyLabelsStoreTestSuite) TestStoreMatch() {
 
 	// enable placement rules. Report no error any more.
 	re.NoError(tu.CheckPostJSON(
-		testDialClient,
-		fmt.Sprintf("%s/config", suite.urlPrefix),
+		tests.TestDialClient,
+		fmt.Sprintf("%s/config", urlPrefix),
 		[]byte(`{"enable-placement-rules":"true"}`),
 		tu.StatusOK(re)))
 	for _, testCase := range testCases {
-		resp, err := suite.grpcSvr.PutStore(context.Background(), &pdpb.PutStoreRequest{
+		resp, err := grpcServer.PutStore(context.Background(), &pdpb.PutStoreRequest{
 			Header: &pdpb.RequestHeader{ClusterId: keypath.ClusterID()},
 			Store: &metapb.Store{
 				Id:      testCase.store.Id,
@@ -354,8 +362,4 @@ func (suite *strictlyLabelsStoreTestSuite) TestStoreMatch() {
 			re.Contains(resp.GetHeader().GetError().String(), testCase.expectError)
 		}
 	}
-}
-
-func (suite *strictlyLabelsStoreTestSuite) TearDownSuite() {
-	suite.cleanup()
 }

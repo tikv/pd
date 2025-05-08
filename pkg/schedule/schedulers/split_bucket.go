@@ -179,7 +179,7 @@ func (s *splitBucketScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster) 
 		splitBucketDisableCounter.Inc()
 		return false
 	}
-	allowed := s.BaseScheduler.OpController.OperatorCount(operator.OpSplit) < s.conf.getSplitLimit()
+	allowed := s.OpController.OperatorCount(operator.OpSplit) < s.conf.getSplitLimit()
 	if !allowed {
 		splitBucketSplitLimitCounter.Inc()
 		operator.IncOperatorLimitCounter(s.GetType(), operator.OpSplit)
