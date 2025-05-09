@@ -21,9 +21,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/goleak"
+
+	"github.com/pingcap/kvproto/pkg/pdpb"
 
 	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
