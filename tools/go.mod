@@ -23,13 +23,8 @@ require (
 	github.com/pingcap/failpoint v0.0.0-20210918120811-547c13e3eb00
 	github.com/pingcap/kvproto v0.0.0-20240403065636-c699538f7aa1
 	github.com/pingcap/log v1.1.1-0.20221110025148-ca232912c9f3
-<<<<<<< HEAD
 	github.com/pkg/errors v0.9.1
-	github.com/prometheus/client_golang v1.19.0
-=======
 	github.com/prometheus/client_golang v1.20.5
-	github.com/prometheus/common v0.55.0
->>>>>>> ac5967544 (Metrics: Go runtime metrics (#8927))
 	github.com/spf13/cobra v1.8.0
 	github.com/spf13/pflag v1.0.5
 	github.com/stretchr/testify v1.9.0
@@ -38,7 +33,7 @@ require (
 	go.etcd.io/etcd v0.5.0-alpha.5.0.20240320135013-950cd5fbe6ca
 	go.uber.org/goleak v1.3.0
 	go.uber.org/zap v1.27.0
-	golang.org/x/text v0.15.0
+	golang.org/x/text v0.16.0
 	google.golang.org/grpc v1.62.1
 )
 
@@ -68,14 +63,9 @@ require (
 	github.com/breeswish/gin-jwt/v2 v2.6.4-jwt-patch // indirect
 	github.com/bytedance/sonic v1.11.6 // indirect
 	github.com/bytedance/sonic/loader v0.1.1 // indirect
-<<<<<<< HEAD
 	github.com/cakturk/go-netstat v0.0.0-20200220111822-e5b49efee7a5 // indirect
-	github.com/cenkalti/backoff/v4 v4.0.2 // indirect
-	github.com/cespare/xxhash/v2 v2.2.0 // indirect
-=======
 	github.com/cenkalti/backoff/v4 v4.2.1 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
->>>>>>> ac5967544 (Metrics: Go runtime metrics (#8927))
 	github.com/cloudwego/base64x v0.1.4 // indirect
 	github.com/cloudwego/iasm v0.2.0 // indirect
 	github.com/coreos/go-systemd v0.0.0-20191104093116-d3cd4ed1dbcf // indirect
@@ -143,14 +133,9 @@ require (
 	github.com/pingcap/tipb v0.0.0-20220718022156-3e2483c20a9e // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/power-devops/perfstat v0.0.0-20221212215047-62379fc7944b // indirect
-<<<<<<< HEAD
-	github.com/prometheus/client_model v0.6.0 // indirect
-	github.com/prometheus/common v0.51.1 // indirect
-	github.com/prometheus/procfs v0.13.0 // indirect
-=======
 	github.com/prometheus/client_model v0.6.1 // indirect
+	github.com/prometheus/common v0.55.0 // indirect
 	github.com/prometheus/procfs v0.15.1 // indirect
->>>>>>> ac5967544 (Metrics: Go runtime metrics (#8927))
 	github.com/rs/cors v1.7.0 // indirect
 	github.com/samber/lo v1.37.0 // indirect
 	github.com/sasha-s/go-deadlock v0.2.0 // indirect
@@ -184,23 +169,13 @@ require (
 	golang.org/x/arch v0.8.0 // indirect
 	golang.org/x/crypto v0.24.0 // indirect
 	golang.org/x/exp v0.0.0-20230711005742-c3f37128e5a4 // indirect
-<<<<<<< HEAD
-	golang.org/x/image v0.10.0 // indirect
-	golang.org/x/net v0.25.0 // indirect
-	golang.org/x/oauth2 v0.18.0 // indirect
-	golang.org/x/sync v0.6.0 // indirect
-	golang.org/x/sys v0.20.0 // indirect
-	golang.org/x/time v0.5.0 // indirect
-	golang.org/x/tools v0.14.0 // indirect
-	google.golang.org/appengine v1.6.8 // indirect
-=======
 	golang.org/x/image v0.18.0 // indirect
 	golang.org/x/net v0.26.0 // indirect
 	golang.org/x/oauth2 v0.21.0 // indirect
 	golang.org/x/sync v0.7.0 // indirect
 	golang.org/x/sys v0.22.0 // indirect
 	golang.org/x/time v0.5.0 // indirect
->>>>>>> ac5967544 (Metrics: Go runtime metrics (#8927))
+	golang.org/x/tools v0.21.1-0.20240508182429-e35e4ccd0d2d // indirect
 	google.golang.org/genproto v0.0.0-20240401170217-c3f982113cda // indirect
 	google.golang.org/genproto/googleapis/api v0.0.0-20240401170217-c3f982113cda // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20240401170217-c3f982113cda // indirect
