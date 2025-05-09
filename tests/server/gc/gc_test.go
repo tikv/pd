@@ -28,6 +28,7 @@ import (
 	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/utils/testutil"
+	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
 )
 
@@ -42,7 +43,9 @@ func TestGCOperations(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	cluster, err := tests.NewTestCluster(ctx, 1)
+	cluster, err := tests.NewTestCluster(ctx, 1, func(conf *config.Config, _ string) {
+		conf.Keyspace.WaitRegionSplit = false
+	})
 	re.NoError(err)
 	defer cluster.Destroy()
 	re.NoError(cluster.RunInitialServers())
@@ -204,13 +207,13 @@ func TestGCOperations(t *testing.T) {
 			re.Nil(resp.Header.Error)
 			re.Equal(keyspaceID, resp.GetGcState().KeyspaceScope.KeyspaceId)
 			re.Equal(keyspaceID != constant.NullKeyspaceID, resp.GetGcState().GetIsKeyspaceLevelGc())
-			re.Equal(uint64(20), resp.GetGcState().GetTxnSafePoint())
+			re.Equal(uint64(15), resp.GetGcState().GetTxnSafePoint())
 			re.Equal(uint64(8), resp.GetGcState().GetGcSafePoint())
 			re.Len(resp.GetGcState().GetGcBarriers(), 1)
 			re.Equal("b1", resp.GetGcState().GetGcBarriers()[0].GetBarrierId())
 			re.Equal(uint64(15), resp.GetGcState().GetGcBarriers()[0].GetBarrierTs())
-			re.Greater(int(resp.GetGcState().GetGcBarriers()[0].GetTtlSeconds()), int64(3500))
-			re.Less(int(resp.GetGcState().GetGcBarriers()[0].GetTtlSeconds()), int64(3601))
+			re.Greater(resp.GetGcState().GetGcBarriers()[0].GetTtlSeconds(), int64(3500))
+			re.Less(resp.GetGcState().GetGcBarriers()[0].GetTtlSeconds(), int64(3601))
 		}
 	}
 
@@ -224,22 +227,27 @@ func TestGCOperations(t *testing.T) {
 	re.NoError(err)
 	re.NotNil(resp.Header)
 	re.Nil(resp.Header.Error)
-	re.Len(resp.GetGcStates(), 2)
-	receivedKeyspaces := make([]uint32, 0, 2)
+	// The default keyspace (keyspaceID == 0) will be included, so it has 3.
+	re.Len(resp.GetGcStates(), 3)
+	receivedKeyspaceIDs := make([]uint32, 0, 2)
 	for _, gcState := range resp.GetGcStates() {
-		receivedKeyspaces = append(receivedKeyspaces, gcState.KeyspaceScope.KeyspaceId)
+		receivedKeyspaceIDs = append(receivedKeyspaceIDs, gcState.KeyspaceScope.KeyspaceId)
 	}
-	slices.Sort(receivedKeyspaces)
-	re.Equal([]uint32{ks1.Id, constant.NullKeyspaceID}, receivedKeyspaces)
+	slices.Sort(receivedKeyspaceIDs)
+	re.Equal([]uint32{0, ks1.Id, constant.NullKeyspaceID}, receivedKeyspaceIDs)
 	// As the same test logic was run on the two keyspaces, they should have the same result.
 	for _, gcState := range resp.GetGcStates() {
+		// Ignore the default keyspace (keyspaceID == 0) which is not used in this test.
+		if gcState.KeyspaceScope.KeyspaceId == 0 {
+			continue
+		}
 		re.Equal(gcState.KeyspaceScope.KeyspaceId != constant.NullKeyspaceID, gcState.GetIsKeyspaceLevelGc())
-		re.Equal(uint64(20), gcState.GetTxnSafePoint())
+		re.Equal(uint64(15), gcState.GetTxnSafePoint())
 		re.Equal(uint64(8), gcState.GetGcSafePoint())
 		re.Len(gcState.GetGcBarriers(), 1)
 		re.Equal("b1", gcState.GetGcBarriers()[0].GetBarrierId())
 		re.Equal(uint64(15), gcState.GetGcBarriers()[0].GetBarrierTs())
-		re.Greater(int(gcState.GetGcBarriers()[0].GetTtlSeconds()), int64(3500))
-		re.Less(int(gcState.GetGcBarriers()[0].GetTtlSeconds()), int64(3601))
+		re.Greater(gcState.GetGcBarriers()[0].GetTtlSeconds(), int64(3500))
+		re.Less(gcState.GetGcBarriers()[0].GetTtlSeconds(), int64(3601))
 	}
 }
