@@ -115,3 +115,36 @@ func TestMergeKeyRanges(t *testing.T) {
 		re.Equal(tc.expect, rs.Ranges(), tc.name)
 	}
 }
+
+func TestOverLap(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		a, b   KeyRange
+		expect bool
+	}{
+		{
+			name:   "overlap",
+			a:      NewKeyRange("a", "c"),
+			b:      NewKeyRange("b", "d"),
+			expect: true,
+		},
+		{
+			name:   "no overlap",
+			a:      NewKeyRange("a", "b"),
+			b:      NewKeyRange("c", "d"),
+			expect: false,
+		},
+		{
+			name:   "has overlap",
+			a:      NewKeyRange("a", "b"),
+			b:      NewKeyRange("b", "d"),
+			expect: true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			re := require.New(t)
+			re.Equal(tc.expect, tc.a.OverLapped(&tc.b))
+			re.Equal(tc.expect, tc.b.OverLapped(&tc.a))
+		})
+	}
+}

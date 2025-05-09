@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"encoding/hex"
 	"encoding/json"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 
 	"github.com/tikv/pd/pkg/core/constant"
 )
@@ -156,6 +157,12 @@ type StoreSetController interface {
 type KeyRange struct {
 	StartKey []byte `json:"start-key"`
 	EndKey   []byte `json:"end-key"`
+}
+
+func (kr *KeyRange) OverLapped(other *KeyRange) bool {
+	leftMax := keyutil.MaxKey(kr.StartKey, other.StartKey)
+	rightMin := keyutil.MinKey(kr.EndKey, other.EndKey)
+	return bytes.Compare(leftMax, rightMin) <= 0
 }
 
 var _ json.Marshaler = &KeyRange{}
