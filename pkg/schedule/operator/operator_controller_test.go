@@ -491,6 +491,54 @@ func (suite *operatorControllerTestSuite) TestPollDispatchRegionForMergeRegion()
 	re.Equal(0, controller.opNotifierQueue.len())
 }
 
+func (suite *operatorControllerTestSuite) TestConcurrentMergeConflict() {
+	re := suite.Require()
+
+	opts := mockconfig.NewTestOptions()
+	cluster := mockcluster.NewCluster(suite.ctx, opts)
+	stream := hbstream.NewTestHeartbeatStreams(suite.ctx, cluster, false /* no need to run */)
+	controller := NewController(suite.ctx, cluster.GetBasicCluster(), cluster.GetSharedConfig(), stream)
+	cluster.AddLabelsStore(1, 1, map[string]string{"host": "host1"})
+	cluster.AddLabelsStore(2, 1, map[string]string{"host": "host2"})
+	cluster.AddLabelsStore(3, 1, map[string]string{"host": "host3"})
+
+	for i := range 10 {
+		left := newRegionInfo(uint64(100+i), fmt.Sprintf("%da", i), fmt.Sprintf("%db", i), 10, 10, []uint64{101, 1}, []uint64{101, 1})
+		left.GetMeta().RegionEpoch = &metapb.RegionEpoch{}
+		cluster.PutRegion(left)
+		middle := newRegionInfo(uint64(101+i), fmt.Sprintf("%db", i), fmt.Sprintf("%dc", i), 10, 10, []uint64{101, 1}, []uint64{101, 1})
+		middle.GetMeta().RegionEpoch = &metapb.RegionEpoch{}
+		cluster.PutRegion(middle)
+		right := newRegionInfo(uint64(102+i), fmt.Sprintf("%dc", i), fmt.Sprintf("%dd", i), 10, 10, []uint64{101, 1}, []uint64{101, 1})
+		right.GetMeta().RegionEpoch = &metapb.RegionEpoch{}
+		cluster.PutRegion(right)
+		wg := &sync.WaitGroup{}
+		for range 5 {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				ops1, err := CreateMergeRegionOperator("merge-region", cluster, left, middle, OpMerge)
+				re.NoError(err)
+				re.Len(ops1, 2)
+				controller.AddWaitingOperator(ops1...)
+				ops2, err := CreateMergeRegionOperator("merge-region", cluster, middle, right, OpMerge)
+				re.NoError(err)
+				re.Len(ops2, 2)
+				controller.AddWaitingOperator(ops2...)
+			}()
+		}
+		wg.Wait()
+		var count int
+		controller.operators.Range(func(_ any, op any) bool {
+			if op.(*Operator).Kind() == OpMerge {
+				count++
+			}
+			return true
+		})
+		re.Equal(count, int(controller.counts.getCountByKind(OpMerge)))
+	}
+}
+
 func (suite *operatorControllerTestSuite) TestCheckOperatorLightly() {
 	re := suite.Require()
 	opts := mockconfig.NewTestOptions()
