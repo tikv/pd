@@ -58,7 +58,7 @@ func TestGCOperations(t *testing.T) {
 
 	ks1, err := leaderServer.GetKeyspaceManager().CreateKeyspace(&keyspace.CreateKeyspaceRequest{
 		Name:       "ks1",
-		Config:     map[string]string{"gc_management_type": "keyspace_level"},
+		Config:     map[string]string{keyspace.GCManagementType: keyspace.KeyspaceLevelGC},
 		CreateTime: time.Now().Unix(),
 	})
 	re.NoError(err)
