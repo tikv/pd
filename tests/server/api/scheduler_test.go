@@ -95,23 +95,23 @@ func (suite *scheduleTestSuite) checkOriginAPI(cluster *tests.TestCluster) {
 	input := make(map[string]any)
 	input["name"] = "evict-leader-scheduler"
 	body, err := json.Marshal(input)
-	suite.NoError(err)
-	suite.NoError(tu.CheckPostJSON(tests.TestDialClient, urlPrefix, body,
+	re.NoError(err)
+	re.NoError(tu.CheckPostJSON(tests.TestDialClient, urlPrefix, body,
 		tu.Status(re, http.StatusBadRequest),
 		tu.StringEqual(re, "missing store id")),
 	)
 	input["store_id"] = "abc" // bad case
 	body, err = json.Marshal(input)
-	suite.NoError(err)
-	suite.NoError(tu.CheckPostJSON(tests.TestDialClient, urlPrefix, body,
+	re.NoError(err)
+	re.NoError(tu.CheckPostJSON(tests.TestDialClient, urlPrefix, body,
 		tu.Status(re, http.StatusBadRequest),
 		tu.StringEqual(re, "please input a right store id")),
 	)
 
 	input["store_id"] = 1
 	body, err = json.Marshal(input)
-	suite.NoError(err)
-	suite.NoError(tu.CheckPostJSON(tests.TestDialClient, urlPrefix, body, tu.StatusOK(re)))
+	re.NoError(err)
+	re.NoError(tu.CheckPostJSON(tests.TestDialClient, urlPrefix, body, tu.StatusOK(re)))
 
 	suite.assertSchedulerExists(urlPrefix, "evict-leader-scheduler")
 	resp := make(map[string]any)
@@ -846,6 +846,7 @@ func (suite *scheduleTestSuite) TestBalanceRangeAPI() {
 }
 
 func (suite *scheduleTestSuite) checkBalanceRangeAPI(cluster *tests.TestCluster) {
+	re := suite.Require()
 	input := map[string]any{
 		"alias":     "test.sysbench.partition(p1)",
 		"engine":    "tikv",
@@ -855,77 +856,77 @@ func (suite *scheduleTestSuite) checkBalanceRangeAPI(cluster *tests.TestCluster)
 		"end-key":   url.QueryEscape("200"),
 	}
 	data, err := json.Marshal(input)
-	suite.Require().NoError(err)
+	re.NoError(err)
 	leaderAddr := cluster.GetLeaderServer().GetAddr()
 	urlPrefix := fmt.Sprintf("%s/pd/api/v1", leaderAddr)
 	// add balance-range-scheduler
-	suite.Require().NoError(tu.CheckPostJSON(tests.TestDialClient, urlPrefix+"/schedulers", data, func(_ []byte, i int, _ http.Header) {
-		suite.Equal(http.StatusOK, i)
+	re.NoError(tu.CheckPostJSON(tests.TestDialClient, urlPrefix+"/schedulers", data, func(_ []byte, i int, _ http.Header) {
+		re.Equal(http.StatusOK, i)
 	}))
 
 	// check
-	tu.Eventually(suite.Require(), func() bool {
+	tu.Eventually(re, func() bool {
 		resp, err := apiutil.GetJSON(tests.TestDialClient, fmt.Sprintf("%s/scheduler-config/%s/list", urlPrefix, types.BalanceRangeScheduler.String()), nil)
-		suite.NoError(err)
+		re.NoError(err)
 		defer resp.Body.Close()
 		if resp.StatusCode != http.StatusOK {
 			return false
 		}
 		b, err := io.ReadAll(resp.Body)
-		suite.NoError(err)
+		re.NoError(err)
 		var scheduler []map[string]any
-		suite.NoError(json.Unmarshal(b, &scheduler))
-		suite.Len(scheduler, 1)
-		suite.Equal(input["alias"], scheduler[0]["alias"])
-		suite.Equal(input["engine"], scheduler[0]["engine"])
-		suite.Equal(input["rule"], scheduler[0]["rule"])
+		re.NoError(json.Unmarshal(b, &scheduler))
+		re.Len(scheduler, 1)
+		re.Equal(input["alias"], scheduler[0]["alias"])
+		re.Equal(input["engine"], scheduler[0]["engine"])
+		re.Equal(input["rule"], scheduler[0]["rule"])
 		return true
 	})
 
 	// add more job
 	input["alias"] = "test-sysbench-partition(p2)"
 	data, err = json.Marshal(input)
-	suite.NoError(err)
-	suite.Require().NoError(tu.CheckPostJSON(tests.TestDialClient, urlPrefix+"/schedulers", data, func(_ []byte, i int, _ http.Header) {
-		suite.Equal(http.StatusOK, i)
+	re.NoError(err)
+	re.NoError(tu.CheckPostJSON(tests.TestDialClient, urlPrefix+"/schedulers", data, func(_ []byte, i int, _ http.Header) {
+		re.Equal(http.StatusOK, i)
 	}))
-	tu.Eventually(suite.Require(), func() bool {
+	tu.Eventually(re, func() bool {
 		resp, err := apiutil.GetJSON(tests.TestDialClient, fmt.Sprintf("%s/scheduler-config/%s/list", urlPrefix, types.BalanceRangeScheduler.String()), nil)
-		suite.NoError(err)
+		re.NoError(err)
 		defer resp.Body.Close()
 		if resp.StatusCode != http.StatusOK {
 			return false
 		}
 		b, err := io.ReadAll(resp.Body)
-		suite.NoError(err)
+		re.NoError(err)
 		var scheduler []map[string]any
-		suite.NoError(json.Unmarshal(b, &scheduler))
-		suite.Len(scheduler, 2)
-		suite.Equal(input["alias"], scheduler[1]["alias"])
-		suite.Equal(input["engine"], scheduler[1]["engine"])
-		suite.Equal(input["rule"], scheduler[1]["rule"])
+		re.NoError(json.Unmarshal(b, &scheduler))
+		re.Len(scheduler, 2)
+		re.Equal(input["alias"], scheduler[1]["alias"])
+		re.Equal(input["engine"], scheduler[1]["engine"])
+		re.Equal(input["rule"], scheduler[1]["rule"])
 		return true
 	})
 
 	// cancel job
-	suite.Require().NoError(tu.CheckDelete(tests.TestDialClient,
+	re.NoError(tu.CheckDelete(tests.TestDialClient,
 		fmt.Sprintf("%s/scheduler-config/%s/job?job-id=1", urlPrefix, types.BalanceRangeScheduler.String()),
 		func(_ []byte, i int, _ http.Header) {
-			suite.Equal(http.StatusOK, i)
+			re.Equal(http.StatusOK, i)
 		}))
 	// check job again
-	tu.Eventually(suite.Require(), func() bool {
+	tu.Eventually(re, func() bool {
 		resp, err := apiutil.GetJSON(tests.TestDialClient, fmt.Sprintf("%s/scheduler-config/%s/list", urlPrefix, types.BalanceRangeScheduler.String()), nil)
-		suite.NoError(err)
+		re.NoError(err)
 		defer resp.Body.Close()
 		if resp.StatusCode != http.StatusOK {
 			return false
 		}
 		b, err := io.ReadAll(resp.Body)
-		suite.NoError(err)
+		re.NoError(err)
 		var scheduler []map[string]any
-		suite.NoError(json.Unmarshal(b, &scheduler))
-		suite.Len(scheduler, 2)
+		re.NoError(json.Unmarshal(b, &scheduler))
+		re.Len(scheduler, 2)
 		slices.SortFunc(scheduler, func(a, b map[string]any) int {
 			aID := a["job-id"].(float64)
 			bID := b["job-id"].(float64)
@@ -937,10 +938,10 @@ func (suite *scheduleTestSuite) checkBalanceRangeAPI(cluster *tests.TestCluster)
 			}
 			return -1
 		})
-		suite.Equal("cancelled", scheduler[1]["status"])
+		re.Equal("cancelled", scheduler[1]["status"])
 		return true
 	})
 	// delete scheduler
 	deleteURL := fmt.Sprintf("%s/schedulers/%s", urlPrefix, types.BalanceRangeScheduler.String())
-	suite.NoError(tu.CheckDelete(tests.TestDialClient, deleteURL, tu.StatusOK(suite.Require())))
+	re.NoError(tu.CheckDelete(tests.TestDialClient, deleteURL, tu.StatusOK(re)))
 }
