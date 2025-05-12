@@ -16,7 +16,6 @@ package tsoutil
 
 import (
 	"context"
-	"strings"
 	"sync"
 	"time"
 
@@ -134,6 +133,7 @@ func (s *TSODispatcher) dispatch(
 				log.Error("proxy forward tso error",
 					zap.String("forwarded-host", forwardedHost),
 					errs.ZapError(errs.ErrGRPCSend, err))
+<<<<<<< HEAD
 				if needUpdateServicePrimaryAddr {
 					if strings.Contains(err.Error(), errs.NotLeaderErr) || strings.Contains(err.Error(), errs.MismatchLeaderErr) {
 						select {
@@ -141,6 +141,10 @@ func (s *TSODispatcher) dispatch(
 						default:
 						}
 					}
+=======
+				if needUpdateServicePrimaryAddr && errs.IsLeaderChanged(err) {
+					tsoPrimaryWatchers[0].ForceLoad()
+>>>>>>> fda80ebb9 (tso: enhance timestamp persistency with strong leader consistency (#9171))
 				}
 				select {
 				case <-dispatcherCtx.Done():

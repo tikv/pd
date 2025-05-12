@@ -786,7 +786,16 @@ error = '''
 reset user timestamp failed, %s
 '''
 
+<<<<<<< HEAD
 ["PD:tso:ErrSetLocalTSOConfig"]
+=======
+["PD:tso:ErrSaveTimestamp"]
+error = '''
+save timestamp failed, %s
+'''
+
+["PD:tso:ErrUpdateTimestamp"]
+>>>>>>> fda80ebb9 (tso: enhance timestamp persistency with strong leader consistency (#9171))
 error = '''
 set local tso config failed, %s
 '''
