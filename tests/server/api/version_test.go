@@ -48,7 +48,7 @@ func TestGetVersion(t *testing.T) {
 		<-reqCh
 		time.Sleep(200 * time.Millisecond)
 		addr := cfg.ClientUrls + api.APIPrefix + "/api/v1/version"
-		resp, err := testDialClient.Get(addr)
+		resp, err := tests.TestDialClient.Get(addr)
 		re.NoError(err)
 		defer resp.Body.Close()
 		_, err = io.ReadAll(resp.Body)

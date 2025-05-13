@@ -87,7 +87,7 @@ func NewConcurrentRunner(name string, limiter *ConcurrencyLimiter, maxPendingDur
 		name:               name,
 		limiter:            limiter,
 		maxPendingDuration: maxPendingDuration,
-		taskChan:           make(chan *Task),
+		taskChan:           make(chan *Task, 1),
 		pendingTasks:       make([]*Task, 0, initialCapacity),
 		pendingTaskCount:   make(map[string]int),
 		existTasks:         make(map[taskID]*Task),
@@ -116,7 +116,7 @@ func (cr *ConcurrentRunner) Start(ctx context.Context) {
 			select {
 			case task := <-cr.taskChan:
 				if cr.limiter != nil {
-					token, err := cr.limiter.AcquireToken(context.Background())
+					token, err := cr.limiter.AcquireToken(cr.ctx)
 					if err != nil {
 						continue
 					}
