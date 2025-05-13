@@ -172,8 +172,9 @@ func hasInvalidPatternRecursive(node *Node) bool {
 							rowDataNode := tableRowVariant.children[1]
 							// Confirm if rowDataNode's type is as expected, which is determined by DecodeTableRow's handleTyp.
 							if rowDataNode.typ == "index_values" || rowDataNode.typ == "row_id" {
-								// Condition 1: Does rowDataNode.val (i.e., the row data) end with \x01?
-								if !(len(rowDataNode.val) > 0 && rowDataNode.val[len(rowDataNode.val)-1] == '\x01') {
+								// Condition 1: Does row data end with non \x00?
+								// And we only care about the 9 bytes of the row data.
+								if !(len(rowDataNode.val) == 9 && rowDataNode.val[len(rowDataNode.val)-1] != '\x00') {
 									continue
 								}
 								// Condition 2: Does rowDataNode have extra output?
