@@ -616,7 +616,7 @@ func (m *GCStateManager) GetGCState(keyspaceID uint32) (GCState, error) {
 
 // GetAllKeyspacesGCStates returns the GC state of all keyspaces.
 // Returns a map from keyspaceID to GCState. Keyspaces without keyspace-level GC enabled will not be included.
-// Note, it returns the active keyspace. If a keyspace is DISABLE/ARCHIVED/TOMBSTONE, it's ignored here.
+// Note, it returns only the GC states of active keyspace. If a keyspace is in DISABLE/ARCHIVED/TOMBSTONE state, it's ignored here.
 func (m *GCStateManager) GetAllKeyspacesGCStates() (map[uint32]GCState, error) {
 	// TODO: Handle the case that there are too many keyspaces and loading them at once is not suitable.
 	allKeyspaces, err := m.keyspaceManager.LoadRangeKeyspace(0, 0)
