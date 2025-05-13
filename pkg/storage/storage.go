@@ -18,19 +18,15 @@ import (
 	"context"
 	"sync/atomic"
 
-<<<<<<< HEAD
-=======
 	clientv3 "go.etcd.io/etcd/client/v3"
 
 	"github.com/pingcap/failpoint"
->>>>>>> da4b43a68 (api: support to query whether pd has loaded region (#8749))
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/encryption"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/syncutil"
-	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
 // Storage is the interface for the backend storage of the PD.
