@@ -27,13 +27,16 @@ import (
 
 	"slices"
 
+	"github.com/docker/go-units"
 	"github.com/pingcap/log"
 	"github.com/pingcap/tidb/util/codec"
 	pd "github.com/tikv/pd/client"
 	"go.uber.org/zap"
+	"google.golang.org/grpc"
 )
 
-const defaultLimit = 1048576
+const msgSize = 16 * units.MiB
+const defaultLimit = 65536
 
 var (
 	pdAddrs  = flag.String("pd", "127.0.0.1:2379", "pd address")
@@ -64,7 +67,8 @@ func main() {
 			CAPath:   *caPath,
 			CertPath: *certPath,
 			KeyPath:  *keyPath,
-		})
+		},
+		pd.WithGRPCDialOptions(grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(msgSize))))
 	if err != nil {
 		log.Error("failed to create pd client", zap.Error(err))
 		os.Exit(1)
@@ -133,7 +137,7 @@ func checkRegion(region *pd.Region) {
 				zap.Error(err))
 			return
 		}
-		log.Error("found invalid pattern",
+		log.Info("found invalid pattern",
 			zap.Uint64("region_id", regionID),
 			zap.Int64("table_id", tableID),
 			zap.String("key", hex.EncodeToString(key)))

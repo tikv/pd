@@ -3,6 +3,7 @@ module github.com/tikv/pd/tools/pd-patroller
 go 1.23.0
 
 require (
+	github.com/docker/go-units v0.4.0
 	github.com/pingcap/log v1.1.1-0.20221110025148-ca232912c9f3
 	github.com/pingcap/tidb v1.1.0-beta.0.20220610072431-5d4745e9d415
 	github.com/stretchr/testify v1.10.0
