@@ -107,9 +107,12 @@ func patrolRegions(ctx context.Context, pdCli pd.Client, limit int) (int, error)
 		for _, region := range regions {
 			checkRegion(region)
 		}
-		endKey := regions[len(regions)-1].Meta.GetEndKey()
 		count += len(regions)
-		if len(regions) == 0 || bytes.Compare(startKey, endKey) >= 0 {
+		if len(regions) == 0 {
+			return count, nil
+		}
+		endKey := regions[len(regions)-1].Meta.GetEndKey()
+		if bytes.Compare(startKey, endKey) >= 0 {
 			return count, nil
 		}
 		startKey = endKey
