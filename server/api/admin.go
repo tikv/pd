@@ -46,6 +46,7 @@ func newAdminHandler(svr *server.Server, rd *render.Render) *adminHandler {
 	}
 }
 
+// DeleteRegionCache removes a specific region from cache.
 // @Tags     admin
 // @Summary  Drop a specific region from cache.
 // @Param    id  path  integer  true  "Region Id"
@@ -73,6 +74,7 @@ func (h *adminHandler) DeleteRegionCache(w http.ResponseWriter, r *http.Request)
 	h.rd.JSON(w, http.StatusOK, msg)
 }
 
+// DeleteRegionStorage removes a specific region from storage.
 // @Tags     admin
 // @Summary  Remove target region from region cache and storage.
 // @Param    id  path  integer  true  "Region Id"
@@ -117,6 +119,7 @@ func (h *adminHandler) DeleteRegionStorage(w http.ResponseWriter, r *http.Reques
 	h.rd.JSON(w, http.StatusOK, msg)
 }
 
+// DeleteAllRegionCache removes all regions from cache.
 // @Tags     admin
 // @Summary  Drop all regions from cache.
 // @Produce  json
@@ -137,6 +140,7 @@ func (h *adminHandler) DeleteAllRegionCache(w http.ResponseWriter, r *http.Reque
 	h.rd.JSON(w, http.StatusOK, msg)
 }
 
+// SavePersistFile saves the persist file.
 // Intentionally no swagger mark as it is supposed to be only used in
 // server-to-server.
 // For security reason,

@@ -422,11 +422,11 @@ func (suite *routerClientSuite) TestConcurrentlyEnableFollowerHandle() {
 
 func TestRouterClientHeaderError(t *testing.T) {
 	re := require.New(t)
-	srv, cleanup, err := server.NewTestServer(re, assertutil.CheckerWithNilAssert(re))
+	srv, cleanup, err := tests.NewServer(re, assertutil.CheckerWithNilAssert(re))
 	re.NoError(err)
 	defer cleanup()
 
-	server.MustWaitLeader(re, []*server.Server{srv})
+	tests.MustWaitLeader(re, []*server.Server{srv})
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	client := setupCli(ctx, re, srv.GetEndpoints(), opt.WithEnableRouterClient(true))

@@ -328,8 +328,11 @@ func (s *GrpcServer) AdvanceGCSafePoint(ctx context.Context, request *pdpb.Advan
 	}
 	oldGCSafePoint, newGCSafePoint, err := s.gcStateManager.AdvanceGCSafePoint(getKeyspaceID(request.GetKeyspaceScope()), request.GetTarget())
 	if err != nil {
-		return nil, err
+		return &pdpb.AdvanceGCSafePointResponse{
+			Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
+		}, nil
 	}
+
 	return &pdpb.AdvanceGCSafePointResponse{
 		Header:         wrapHeader(),
 		OldGcSafePoint: oldGCSafePoint,
@@ -362,8 +365,11 @@ func (s *GrpcServer) AdvanceTxnSafePoint(ctx context.Context, request *pdpb.Adva
 
 	res, err := s.gcStateManager.AdvanceTxnSafePoint(getKeyspaceID(request.GetKeyspaceScope()), request.GetTarget(), time.Now())
 	if err != nil {
-		return nil, err
+		return &pdpb.AdvanceTxnSafePointResponse{
+			Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
+		}, nil
 	}
+
 	return &pdpb.AdvanceTxnSafePointResponse{
 		Header:             wrapHeader(),
 		OldTxnSafePoint:    res.OldTxnSafePoint,
@@ -403,7 +409,9 @@ func (s *GrpcServer) SetGCBarrier(ctx context.Context, request *pdpb.SetGCBarrie
 		typeutil.SaturatingStdDurationFromSeconds(request.GetTtlSeconds()),
 		now)
 	if err != nil {
-		return nil, err
+		return &pdpb.SetGCBarrierResponse{
+			Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
+		}, nil
 	}
 
 	return &pdpb.SetGCBarrierResponse{
@@ -412,7 +420,7 @@ func (s *GrpcServer) SetGCBarrier(ctx context.Context, request *pdpb.SetGCBarrie
 	}, nil
 }
 
-// SetGCBarrier sets a GC barrier.
+// DeleteGCBarrier deletes a GC barrier.
 func (s *GrpcServer) DeleteGCBarrier(ctx context.Context, request *pdpb.DeleteGCBarrierRequest) (*pdpb.DeleteGCBarrierResponse, error) {
 	done, err := s.rateLimitCheck()
 	if err != nil {
@@ -439,7 +447,9 @@ func (s *GrpcServer) DeleteGCBarrier(ctx context.Context, request *pdpb.DeleteGC
 
 	deletedBarrier, err := s.gcStateManager.DeleteGCBarrier(getKeyspaceID(request.GetKeyspaceScope()), request.GetBarrierId())
 	if err != nil {
-		return nil, err
+		return &pdpb.DeleteGCBarrierResponse{
+			Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
+		}, nil
 	}
 
 	return &pdpb.DeleteGCBarrierResponse{
@@ -473,7 +483,9 @@ func (s *GrpcServer) GetGCState(ctx context.Context, request *pdpb.GetGCStateReq
 
 	gcState, err := s.gcStateManager.GetGCState(getKeyspaceID(request.GetKeyspaceScope()))
 	if err != nil {
-		return nil, err
+		return &pdpb.GetGCStateResponse{
+			Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
+		}, nil
 	}
 
 	return &pdpb.GetGCStateResponse{
@@ -507,7 +519,9 @@ func (s *GrpcServer) GetAllKeyspacesGCStates(ctx context.Context, request *pdpb.
 
 	gcStates, err := s.gcStateManager.GetAllKeyspacesGCStates()
 	if err != nil {
-		return nil, err
+		return &pdpb.GetAllKeyspacesGCStatesResponse{
+			Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
+		}, nil
 	}
 
 	now := time.Now()

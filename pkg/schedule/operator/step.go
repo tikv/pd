@@ -855,7 +855,7 @@ func (cpe ChangePeerV2Enter) ConfVerChanged(region *core.RegionInfo) uint64 {
 		peer := region.GetStorePeer(dv.ToStore)
 		// the demoting peer may be removed later, and when merging witness region the two witnesses may be not on the same store,
 		// witness scheduling will occur, cause a voter witness -> non-witness learner -> voter.
-		if peer != nil && (peer.GetId() != dv.PeerID || (!core.IsLearnerOrDemotingVoter(peer) && !(dv.IsWitness && !peer.GetIsWitness()))) {
+		if peer != nil && (peer.GetId() != dv.PeerID || (!core.IsLearnerOrDemotingVoter(peer) && (!dv.IsWitness || peer.GetIsWitness()))) {
 			return 0
 		}
 	}

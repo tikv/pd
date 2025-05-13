@@ -987,16 +987,16 @@ var (
 	// If we alloc ID in client in the future, these IDs must be updated.
 	stores = []*metapb.Store{
 		{Id: 1,
-			Address: "localhost:1",
+			Address: "mock://tikv-1:1",
 		},
 		{Id: 2,
-			Address: "localhost:2",
+			Address: "mock://tikv-2:2",
 		},
 		{Id: 3,
-			Address: "localhost:3",
+			Address: "mock://tikv-3:3",
 		},
 		{Id: 4,
-			Address: "localhost:4",
+			Address: "mock://tikv-4:4",
 		},
 	}
 
@@ -1029,12 +1029,12 @@ type clientTestSuiteImpl struct {
 func (suite *clientTestSuiteImpl) setup() {
 	var err error
 	re := suite.Require()
-	suite.srv, suite.cleanup, err = server.NewTestServer(re, assertutil.CheckerWithNilAssert(re))
+	suite.srv, suite.cleanup, err = tests.NewServer(re, assertutil.CheckerWithNilAssert(re))
 	re.NoError(err)
 	suite.grpcPDClient = testutil.MustNewGrpcClient(re, suite.srv.GetAddr())
 	suite.grpcSvr = &server.GrpcServer{Server: suite.srv}
 
-	server.MustWaitLeader(re, []*server.Server{suite.srv})
+	tests.MustWaitLeader(re, []*server.Server{suite.srv})
 	bootstrapServer(re, newHeader(), suite.grpcPDClient)
 
 	suite.ctx, suite.clean = context.WithCancel(context.Background())

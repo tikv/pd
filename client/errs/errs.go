@@ -35,7 +35,6 @@ func IsLeaderChange(err error) bool {
 	errMsg := err.Error()
 	return strings.Contains(errMsg, NoLeaderErr) ||
 		strings.Contains(errMsg, NotLeaderErr) ||
-		strings.Contains(errMsg, MismatchLeaderErr) ||
 		strings.Contains(errMsg, NotServedErr) ||
 		strings.Contains(errMsg, NotPrimaryErr)
 }

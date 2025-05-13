@@ -149,11 +149,11 @@ type Client interface {
 	GetPrevRegion(ctx context.Context, key []byte, opts ...opt.GetRegionOption) (*Region, error)
 	// GetRegionByID gets a region and its leader Peer from PD by id.
 	GetRegionByID(ctx context.Context, regionID uint64, opts ...opt.GetRegionOption) (*Region, error)
-	// Deprecated: use BatchScanRegions instead.
 	// ScanRegions gets a list of regions, starts from the region that contains key.
 	// Limit limits the maximum number of regions returned. It returns all the regions in the given range if limit <= 0.
 	// If a region has no leader, corresponding leader will be placed by a peer
 	// with empty value (PeerID is 0).
+	// Deprecated: use BatchScanRegions instead.
 	ScanRegions(ctx context.Context, key, endKey []byte, limit int, opts ...opt.GetRegionOption) ([]*Region, error)
 	// BatchScanRegions gets a list of regions, starts from the region that contains key.
 	// Limit limits the maximum number of regions returned. It returns all the regions in the given ranges if limit <= 0.
@@ -400,14 +400,18 @@ func (c *Cli) updateConnection(ctx context.Context) {
 	} else if c.conCtxMgr.Exist(url) {
 		log.Debug("[router] the router leader remains unchanged", zap.String("url", url))
 	} else {
-		stream, err := pdpb.NewPDClient(cc).QueryRegion(ctx)
+		cctx, cancel := context.WithCancel(ctx)
+		stream, err := pdpb.NewPDClient(cc).QueryRegion(cctx)
 		if err != nil {
 			log.Error("[router] failed to create the leader router stream connection", errs.ZapError(err))
 		}
 		// Store the stream connection context if it is successfully created.
 		if stream != nil {
-			c.conCtxMgr.Store(ctx, url, stream)
+			c.conCtxMgr.Store(cctx, cancel, url, stream)
 			log.Info("[router] successfully established the leader router stream connection", zap.String("url", url))
+		} else {
+			log.Warn("[router] failed to create the leader router stream connection")
+			cancel()
 		}
 	}
 	// If enabled the follower handle, we need to update the follower router stream connections as well.
@@ -423,14 +427,18 @@ func (c *Cli) updateConnection(ctx context.Context) {
 				log.Debug("[router] the router node remains unchanged", zap.String("url", url))
 				continue
 			}
-			stream, err := pdpb.NewPDClient(conn).QueryRegion(ctx)
+			cctx, cancel := context.WithCancel(ctx)
+			stream, err := pdpb.NewPDClient(conn).QueryRegion(cctx)
 			if err != nil {
 				log.Error("[router] failed to create the router stream connection", errs.ZapError(err))
 			}
 			// Store the stream connection context if it is successfully created.
 			if stream != nil {
-				c.conCtxMgr.Store(ctx, url, stream)
+				c.conCtxMgr.Store(cctx, cancel, url, stream)
 				log.Info("[router] successfully established the router stream connection", zap.String("url", url))
+			} else {
+				log.Warn("[router] failed to create the router stream connection")
+				cancel()
 			}
 		}
 		// Remove the stale follower router stream connections.

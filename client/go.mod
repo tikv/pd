@@ -1,6 +1,6 @@
 module github.com/tikv/pd/client
 
-go 1.23
+go 1.23.0
 
 require (
 	github.com/BurntSushi/toml v0.3.1
@@ -10,7 +10,7 @@ require (
 	github.com/opentracing/opentracing-go v1.2.0
 	github.com/pingcap/errors v0.11.5-0.20211224045212-9687c2b0f87c
 	github.com/pingcap/failpoint v0.0.0-20240528011301-b51a646c7c86
-	github.com/pingcap/kvproto v0.0.0-20250224053625-b6a98c6bf02d
+	github.com/pingcap/kvproto v0.0.0-20250512085210-1174a93e5067
 	github.com/pingcap/log v1.1.1-0.20221110025148-ca232912c9f3
 	github.com/prometheus/client_golang v1.20.5
 	github.com/stretchr/testify v1.9.0
@@ -35,13 +35,11 @@ require (
 	github.com/stretchr/objx v0.5.2 // indirect
 	go.uber.org/atomic v1.10.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
-	golang.org/x/net v0.33.0 // indirect
-	golang.org/x/sys v0.28.0 // indirect
-	golang.org/x/text v0.21.0 // indirect
+	golang.org/x/net v0.38.0 // indirect
+	golang.org/x/sys v0.31.0 // indirect
+	golang.org/x/text v0.23.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20240123012728-ef4313101c80 // indirect
 	google.golang.org/protobuf v1.34.2 // indirect
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
-
-replace github.com/pingcap/kvproto => github.com/MyonKeminta/kvproto v0.0.0-20250422131702-6653a56d7ef8
