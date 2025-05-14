@@ -2022,14 +2022,18 @@ func (s *clientStatefulTestSuite) checkGCBarrier(re *require.Assertions, keyspac
 func (s *clientStatefulTestSuite) TestUpdateGCSafePoint() {
 	re := s.Require()
 	s.checkGCSafePoint(re, constants.NullKeyspaceID, 0)
-	for _, safePoint := range []uint64{0, 1, 2, 3, 233, 23333, 233333333333, math.MaxUint64} {
-		newSafePoint, err := s.client.UpdateGCSafePoint(context.Background(), safePoint)
+	for _, gcSafePoint := range []uint64{0, 1, 2, 3, 233, 23333, 233333333333, math.MaxUint64} {
+		// Now GC safe point is not allowed to be advanced before advancing the txn safe point. Advance txn safe point
+		// first.
+		_, err := s.client.GetGCInternalController(constants.NullKeyspaceID).AdvanceTxnSafePoint(context.Background(), gcSafePoint)
 		re.NoError(err)
-		re.Equal(safePoint, newSafePoint)
-		s.checkGCSafePoint(re, constants.NullKeyspaceID, safePoint)
+		newSafePoint, err := s.client.UpdateGCSafePoint(context.Background(), gcSafePoint) //nolint:staticcheck
+		re.NoError(err)
+		re.Equal(gcSafePoint, newSafePoint)
+		s.checkGCSafePoint(re, constants.NullKeyspaceID, gcSafePoint)
 	}
 	// If the new safe point is less than the old one, it should not be updated.
-	newSafePoint, err := s.client.UpdateGCSafePoint(context.Background(), 1)
+	newSafePoint, err := s.client.UpdateGCSafePoint(context.Background(), 1) //nolint:staticcheck
 	re.Equal(uint64(math.MaxUint64), newSafePoint)
 	re.NoError(err)
 	s.checkGCSafePoint(re, constants.NullKeyspaceID, math.MaxUint64)
@@ -2037,6 +2041,24 @@ func (s *clientStatefulTestSuite) TestUpdateGCSafePoint() {
 
 func (s *clientStatefulTestSuite) TestUpdateServiceGCSafePoint() {
 	re := s.Require()
+
+	loadMinServiceGCSafePoint := func() *endpoint.ServiceSafePoint {
+		res, _, err := s.srv.GetGCStateManager().CompatibleUpdateServiceGCSafePoint("_", 0, 0, time.Now())
+		re.NoError(err)
+		return res
+	}
+
+	loadServiceGCSafePointByServiceID := func(serviceID string) *endpoint.ServiceSafePoint {
+		gcStates, err := s.srv.GetGCStateManager().GetGCState(constants.NullKeyspaceID)
+		re.NoError(err)
+		for _, b := range gcStates.GCBarriers {
+			if b.BarrierID == serviceID {
+				return b.ToServiceSafePoint(constants.NullKeyspaceID)
+			}
+		}
+		return nil
+	}
+
 	serviceSafePoints := []struct {
 		ServiceID string
 		TTL       int64
@@ -2047,6 +2069,7 @@ func (s *clientStatefulTestSuite) TestUpdateServiceGCSafePoint() {
 		{"c", 1000, 3},
 	}
 	for _, ssp := range serviceSafePoints {
+		//nolint:staticcheck
 		min, err := s.client.UpdateServiceGCSafePoint(context.Background(),
 			ssp.ServiceID, 1000, ssp.SafePoint)
 		re.NoError(err)
@@ -2054,95 +2077,125 @@ func (s *clientStatefulTestSuite) TestUpdateServiceGCSafePoint() {
 		re.Equal(uint64(0), min)
 	}
 
+	//nolint:staticcheck
 	min, err := s.client.UpdateServiceGCSafePoint(context.Background(),
 		"gc_worker", math.MaxInt64, 10)
 	re.NoError(err)
 	re.Equal(uint64(1), min)
 
+	// Note that as the service safe points became a compatibility layer over the GC barriers and the txn safe point,
+	// the (simulated) service safe point of "gc_worker" is no longer able to be advanced over the minimal existing
+	// GC barrier.
+
+	//nolint:staticcheck
 	min, err = s.client.UpdateServiceGCSafePoint(context.Background(),
 		"a", 1000, 4)
 	re.NoError(err)
+	re.Equal(uint64(1), min)
+	//nolint:staticcheck
+	min, err = s.client.UpdateServiceGCSafePoint(context.Background(),
+		"gc_worker", math.MaxInt64, 10)
+	re.NoError(err)
 	re.Equal(uint64(2), min)
 
+	//nolint:staticcheck
 	min, err = s.client.UpdateServiceGCSafePoint(context.Background(),
 		"b", -100, 2)
+	re.NoError(err)
+	re.Equal(uint64(2), min)
+	//nolint:staticcheck
+	min, err = s.client.UpdateServiceGCSafePoint(context.Background(),
+		"gc_worker", math.MaxInt64, 10)
 	re.NoError(err)
 	re.Equal(uint64(3), min)
 
 	// Minimum safepoint does not regress
+	//nolint:staticcheck
 	min, err = s.client.UpdateServiceGCSafePoint(context.Background(),
 		"b", 1000, 2)
 	re.NoError(err)
 	re.Equal(uint64(3), min)
 
-	// Update only the TTL of the minimum safepoint
-	oldMinSsp, err := s.srv.GetStorage().LoadMinServiceGCSafePoint(time.Now())
-	re.NoError(err)
+	// Update only the TTL of the service safe point "c"
+	oldMinSsp := loadServiceGCSafePointByServiceID("c")
 	re.Equal("c", oldMinSsp.ServiceID)
 	re.Equal(uint64(3), oldMinSsp.SafePoint)
+	//nolint:staticcheck
 	min, err = s.client.UpdateServiceGCSafePoint(context.Background(),
 		"c", 2000, 3)
 	re.NoError(err)
 	re.Equal(uint64(3), min)
-	minSsp, err := s.srv.GetStorage().LoadMinServiceGCSafePoint(time.Now())
-	re.NoError(err)
+	minSsp := loadServiceGCSafePointByServiceID("c")
 	re.Equal("c", minSsp.ServiceID)
-	re.Equal(uint64(3), oldMinSsp.SafePoint)
+	re.Equal(uint64(3), minSsp.SafePoint)
 	s.GreaterOrEqual(minSsp.ExpiredAt-oldMinSsp.ExpiredAt, int64(1000))
 
 	// Shrinking TTL is also allowed
+	//nolint:staticcheck
 	min, err = s.client.UpdateServiceGCSafePoint(context.Background(),
 		"c", 1, 3)
 	re.NoError(err)
 	re.Equal(uint64(3), min)
-	minSsp, err = s.srv.GetStorage().LoadMinServiceGCSafePoint(time.Now())
+	minSsp = loadServiceGCSafePointByServiceID("c")
 	re.NoError(err)
 	re.Equal("c", minSsp.ServiceID)
 	re.Less(minSsp.ExpiredAt, oldMinSsp.ExpiredAt)
 
 	// TTL can be infinite (represented by math.MaxInt64)
+	//nolint:staticcheck
 	min, err = s.client.UpdateServiceGCSafePoint(context.Background(),
 		"c", math.MaxInt64, 3)
 	re.NoError(err)
 	re.Equal(uint64(3), min)
-	minSsp, err = s.srv.GetStorage().LoadMinServiceGCSafePoint(time.Now())
+	minSsp = loadServiceGCSafePointByServiceID("c")
 	re.NoError(err)
 	re.Equal("c", minSsp.ServiceID)
 	re.Equal(minSsp.ExpiredAt, int64(math.MaxInt64))
 
 	// Delete "a" and "c"
-	min, err = s.client.UpdateServiceGCSafePoint(context.Background(),
+	//nolint:staticcheck
+	_, err = s.client.UpdateServiceGCSafePoint(context.Background(),
 		"c", -1, 3)
 	re.NoError(err)
-	re.Equal(uint64(4), min)
-	min, err = s.client.UpdateServiceGCSafePoint(context.Background(),
+	//nolint:staticcheck
+	_, err = s.client.UpdateServiceGCSafePoint(context.Background(),
 		"a", -1, 4)
 	re.NoError(err)
-	// Now gc_worker is the only remaining service safe point.
+	// Now the service safe point of gc_worker can be advanced as other service safe points are all deleted.
+	//nolint:staticcheck
+	min, err = s.client.UpdateServiceGCSafePoint(context.Background(),
+		"gc_worker", math.MaxInt64, 10)
+	re.NoError(err)
 	re.Equal(uint64(10), min)
 
 	// gc_worker cannot be deleted.
+	//nolint:staticcheck
 	_, err = s.client.UpdateServiceGCSafePoint(context.Background(),
 		"gc_worker", -1, 10)
 	re.Error(err)
 
 	// Cannot set non-infinity TTL for gc_worker
+	//nolint:staticcheck
 	_, err = s.client.UpdateServiceGCSafePoint(context.Background(),
 		"gc_worker", 10000000, 10)
 	re.Error(err)
 
 	// Service safepoint must have a non-empty ID
+	//nolint:staticcheck
 	_, err = s.client.UpdateServiceGCSafePoint(context.Background(),
 		"", 1000, 15)
 	re.Error(err)
 
 	// Put some other safepoints to test fixing gc_worker's safepoint when there exists other safepoints.
+	//nolint:staticcheck
 	_, err = s.client.UpdateServiceGCSafePoint(context.Background(),
 		"a", 1000, 11)
 	re.NoError(err)
+	//nolint:staticcheck
 	_, err = s.client.UpdateServiceGCSafePoint(context.Background(),
 		"b", 1000, 12)
 	re.NoError(err)
+	//nolint:staticcheck
 	_, err = s.client.UpdateServiceGCSafePoint(context.Background(),
 		"c", 1000, 13)
 	re.NoError(err)
@@ -2161,39 +2214,18 @@ func (s *clientStatefulTestSuite) TestUpdateServiceGCSafePoint() {
 		re.NoError(err)
 	}
 
-	minSsp, err = s.srv.GetStorage().LoadMinServiceGCSafePoint(time.Now())
+	minSsp = loadMinServiceGCSafePoint()
 	re.NoError(err)
 	re.Equal("gc_worker", minSsp.ServiceID)
 	re.Equal(uint64(10), minSsp.SafePoint)
 	re.Equal(int64(math.MaxInt64), minSsp.ExpiredAt)
 
-	// Force delete gc_worker, then the min service safe point was 11 of "a" in previous implementation, but 0
-	// for compatibility of txn safe point.
-	err = s.srv.GetStorage().Remove(gcWorkerKey)
-	re.NoError(err)
-	minSsp, err = s.srv.GetStorage().LoadMinServiceGCSafePoint(time.Now())
-	re.NoError(err)
-	re.Equal(uint64(0), minSsp.SafePoint)
-
 	// Advancing txn safe point also affects the gc_worker's service safe point.
 	_, err = s.client.GetGCInternalController(constants.NullKeyspaceID).AdvanceTxnSafePoint(context.Background(), 11)
 	re.NoError(err)
-	minSsp, err = s.srv.GetStorage().LoadMinServiceGCSafePoint(time.Now())
+	minSsp = loadMinServiceGCSafePoint()
 	re.NoError(err)
 	re.Equal(uint64(11), minSsp.SafePoint)
-
-	// After calling LoadMinServiceGCS when "gc_worker"'s service safepoint is missing, "gc_worker"'s service safepoint
-	// will be newly created.
-	// Increase "a" so that "gc_worker" is the only minimum that will be returned by LoadMinServiceGCSafePoint.
-	_, err = s.client.UpdateServiceGCSafePoint(context.Background(),
-		"a", 1000, 14)
-	re.NoError(err)
-
-	minSsp, err = s.srv.GetStorage().LoadMinServiceGCSafePoint(time.Now())
-	re.NoError(err)
-	re.Equal("gc_worker", minSsp.ServiceID)
-	re.Equal(uint64(11), minSsp.SafePoint)
-	re.Equal(int64(math.MaxInt64), minSsp.ExpiredAt)
 }
 
 func (s *clientStatefulTestSuite) prepareKeyspacesForGCTest() {
