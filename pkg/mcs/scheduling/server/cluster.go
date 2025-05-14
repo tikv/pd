@@ -16,6 +16,7 @@ package server
 
 import (
 	"context"
+	"github.com/tikv/pd/pkg/schedule/rangelist"
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -62,6 +63,7 @@ type Cluster struct {
 	*core.BasicCluster
 	persistConfig     *config.PersistConfig
 	ruleManager       *placement.RuleManager
+	keyRangeManager   *rangelist.KeyRangeManager
 	labelerManager    *labeler.RegionLabeler
 	regionStats       *statistics.RegionStatistics
 	labelStats        *statistics.LabelStatistics
@@ -114,6 +116,7 @@ func NewCluster(
 		cancel:            cancel,
 		BasicCluster:      basicCluster,
 		ruleManager:       ruleManager,
+		keyRangeManager:   rangelist.NewKeyRangeManager(),
 		labelerManager:    labelerManager,
 		persistConfig:     persistConfig,
 		hotStat:           statistics.NewHotStat(ctx, basicCluster),
@@ -174,6 +177,11 @@ func (c *Cluster) GetSharedConfig() sc.SharedConfigProvider {
 // GetRuleManager returns the rule manager.
 func (c *Cluster) GetRuleManager() *placement.RuleManager {
 	return c.ruleManager
+}
+
+// GetKeyRangeManager returns the key range manager
+func (c *Cluster) GetKeyRangeManager() *rangelist.KeyRangeManager {
+	return c.keyRangeManager
 }
 
 // GetRegionLabeler returns the region labeler.

@@ -38,7 +38,6 @@ import (
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
-
 	"github.com/tikv/pd/pkg/cluster"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/storelimit"
@@ -59,6 +58,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/hbstream"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/placement"
+	"github.com/tikv/pd/pkg/schedule/rangelist"
 	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/statistics/utils"
@@ -174,6 +174,7 @@ type RaftCluster struct {
 	opt *config.PersistOptions
 	*schedulingController
 	ruleManager              *placement.RuleManager
+	keyRangeManager          *rangelist.KeyRangeManager
 	regionLabeler            *labeler.RegionLabeler
 	replicationMode          *replication.ModeManager
 	unsafeRecoveryController *unsaferecovery.Controller
@@ -945,6 +946,11 @@ func (c *RaftCluster) GetReplicationMode() *replication.ModeManager {
 // GetRuleManager returns the rule manager reference.
 func (c *RaftCluster) GetRuleManager() *placement.RuleManager {
 	return c.ruleManager
+}
+
+// GetKeyRangeManager returns the key range manager reference
+func (c *RaftCluster) GetKeyRangeManager() *rangelist.KeyRangeManager {
+	return c.keyRangeManager
 }
 
 // GetRegionLabeler returns the region labeler.

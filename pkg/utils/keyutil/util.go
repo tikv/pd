@@ -41,6 +41,32 @@ func MinKey(a, b []byte) []byte {
 	return a
 }
 
+func MaxKeyWithBoundary(a, b []byte, opt boundary) []byte {
+	if opt == left {
+		return MaxKey(a, b)
+	}
+	if len(a) == 0 {
+		return a
+	}
+	if len(b) == 0 {
+		return b
+	}
+	return MaxKey(a, b)
+}
+
+func MinKeyWithBoundary(a, b []byte, opt boundary) []byte {
+	if opt == left {
+		return MinKey(a, b)
+	}
+	if len(a) == 0 {
+		return b
+	}
+	if len(b) == 0 {
+		return a
+	}
+	return MinKey(a, b)
+}
+
 type boundary int
 
 const (

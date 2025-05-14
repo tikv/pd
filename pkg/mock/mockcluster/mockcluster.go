@@ -35,6 +35,7 @@ import (
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/placement"
+	"github.com/tikv/pd/pkg/schedule/rangelist"
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/statistics/buckets"
 	"github.com/tikv/pd/pkg/statistics/utils"
@@ -55,6 +56,7 @@ type Cluster struct {
 	*core.BasicCluster
 	*mockid.IDAllocator
 	*placement.RuleManager
+	*rangelist.KeyRangeManager
 	*labeler.RegionLabeler
 	*statistics.HotStat
 	*config.PersistOptions
@@ -212,6 +214,11 @@ func (mc *Cluster) initRuleManager() {
 // GetRuleManager returns the ruleManager of the cluster.
 func (mc *Cluster) GetRuleManager() *placement.RuleManager {
 	return mc.RuleManager
+}
+
+// GetKeyRangeManager returns the key range manager of the cluster.
+func (mc *Cluster) GetKeyRangeManager() *rangelist.KeyRangeManager {
+	return mc.KeyRangeManager
 }
 
 // GetRegionLabeler returns the region labeler of the cluster.

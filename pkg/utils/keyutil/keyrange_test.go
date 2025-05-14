@@ -15,6 +15,7 @@
 package keyutil
 
 import (
+	"encoding/json"
 	"fmt"
 	"testing"
 
@@ -146,5 +147,106 @@ func TestMergeKeyRanges(t *testing.T) {
 		rs := &KeyRanges{krs: tc.input}
 		rs.Merge()
 		re.Equal(tc.expect, rs.Ranges(), tc.name)
+	}
+}
+
+func TestSortAndDeduce(t *testing.T) {
+	re := require.New(t)
+	fn := func(a, b string) *KeyRange {
+		ks := NewKeyRange(a, b)
+		return &ks
+	}
+	testCases := []struct {
+		name   string
+		input  []*KeyRange
+		expect []*KeyRange
+	}{
+		{
+			name:   "empty",
+			input:  []*KeyRange{},
+			expect: []*KeyRange{},
+		},
+		{
+			name:   "single",
+			input:  []*KeyRange{fn("a", "b")},
+			expect: []*KeyRange{fn("a", "b")},
+		},
+		{
+			name:   "non-overlapping",
+			input:  []*KeyRange{fn("a", "b"), fn("c", "d")},
+			expect: []*KeyRange{fn("a", "b"), fn("c", "d")},
+		},
+		{
+			name:   "overlapping",
+			input:  []*KeyRange{fn("a", "c"), fn("b", "d")},
+			expect: []*KeyRange{fn("a", "d")},
+		},
+		{
+			name:   "empty keys",
+			input:  []*KeyRange{fn("", ""), fn("a", "b")},
+			expect: []*KeyRange{fn("", "")},
+		},
+		{
+			name:   "one empty key",
+			input:  []*KeyRange{fn("d", ""), fn("", "b"), fn("b", "c")},
+			expect: []*KeyRange{fn("", "c"), fn("d", "")},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			rs := &KeyRanges{krs: tc.input}
+			rs.SortAndDeduce()
+			re.Equal(tc.expect, rs.Ranges(), tc.name)
+		})
+	}
+}
+
+func TestSubtractKeyRanges(t *testing.T) {
+	re := require.New(t)
+	fn := func(a, b string) *KeyRange {
+		ks := NewKeyRange(a, b)
+		return &ks
+	}
+	testCases := []struct {
+		name   string
+		ks     []*KeyRange
+		base   *KeyRange
+		expect []*KeyRange
+	}{
+		{
+			name:   "empty",
+			ks:     []*KeyRange{},
+			base:   &KeyRange{},
+			expect: []*KeyRange{},
+		},
+		{
+			name:   "single",
+			ks:     []*KeyRange{fn("a", "d"), fn("e", "f")},
+			base:   &KeyRange{},
+			expect: []*KeyRange{fn("", "a"), fn("d", "e"), fn("f", "")},
+		},
+		{
+			name:   "non-overlapping",
+			ks:     []*KeyRange{fn("a", "d"), fn("e", "f")},
+			base:   fn("g", "h"),
+			expect: []*KeyRange{fn("g", "h")},
+		},
+		{
+			name:   "overlapping",
+			ks:     []*KeyRange{fn("a", "d"), fn("e", "f")},
+			base:   fn("c", "g"),
+			expect: []*KeyRange{fn("d", "e"), fn("f", "g")},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			rs := &KeyRanges{krs: tc.ks}
+			res := rs.SubtractKeyRanges(tc.base)
+			expectData, _ := json.Marshal(tc.expect)
+			actualData, _ := json.Marshal(res)
+			re.EqualValues(expectData, actualData, tc.name)
+		})
 	}
 }
