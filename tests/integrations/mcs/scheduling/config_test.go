@@ -37,7 +37,6 @@ import (
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/tests"
-	"github.com/tikv/pd/tests/server/api"
 )
 
 type configTestSuite struct {
@@ -166,7 +165,7 @@ func (suite *configTestSuite) TestSchedulerConfigWatch() {
 	})
 	re.Equal(namesFromPDService, namesFromSchedulingServer)
 	// Add a new scheduler.
-	api.MustAddScheduler(re, suite.pdLeaderServer.GetAddr(), types.EvictLeaderScheduler.String(), map[string]any{
+	tests.MustAddScheduler(re, suite.pdLeaderServer.GetAddr(), types.EvictLeaderScheduler.String(), map[string]any{
 		"store_id": 1,
 	})
 	// Check the new scheduler's config.
@@ -188,15 +187,15 @@ func (suite *configTestSuite) TestSchedulerConfigWatch() {
 		},
 	)
 	re.NoError(err)
-	api.MustAddScheduler(re, suite.pdLeaderServer.GetAddr(), types.EvictLeaderScheduler.String(), map[string]any{
+	tests.MustAddScheduler(re, suite.pdLeaderServer.GetAddr(), types.EvictLeaderScheduler.String(), map[string]any{
 		"store_id": 2,
 	})
 	assertEvictLeaderStoreIDs(re, storage, []uint64{1, 2})
 	// Update the scheduler by removing a store.
-	api.MustDeleteScheduler(re, suite.pdLeaderServer.GetAddr(), fmt.Sprintf("%s-%d", types.EvictLeaderScheduler.String(), 1))
+	tests.MustDeleteScheduler(re, suite.pdLeaderServer.GetAddr(), fmt.Sprintf("%s-%d", types.EvictLeaderScheduler.String(), 1))
 	assertEvictLeaderStoreIDs(re, storage, []uint64{2})
 	// Delete the scheduler.
-	api.MustDeleteScheduler(re, suite.pdLeaderServer.GetAddr(), types.EvictLeaderScheduler.String())
+	tests.MustDeleteScheduler(re, suite.pdLeaderServer.GetAddr(), types.EvictLeaderScheduler.String())
 	// Check the removed scheduler's config.
 	testutil.Eventually(re, func() bool {
 		namesFromSchedulingServer, _, err = storage.LoadAllSchedulerConfigs()

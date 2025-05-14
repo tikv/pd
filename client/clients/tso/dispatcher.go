@@ -215,15 +215,6 @@ tsoBatchLoop:
 		if maxBatchWaitInterval >= 0 {
 			tsoBatchController.AdjustBestBatchSize()
 		}
-		// Stop the timer if it's not stopped.
-		if !streamLoopTimer.Stop() {
-			select {
-			case <-streamLoopTimer.C: // try to drain from the channel
-			default:
-			}
-		}
-		// We need be careful here, see more details in the comments of Timer.Reset.
-		// https://pkg.go.dev/time@master#Timer.Reset
 		streamLoopTimer.Reset(option.Timeout)
 		// Choose a stream to send the TSO gRPC request.
 	streamChoosingLoop:

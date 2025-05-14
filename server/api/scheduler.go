@@ -15,8 +15,12 @@
 package api
 
 import (
+	"bytes"
+	"encoding/json"
+	"io"
 	"net/http"
 	"net/url"
+	"path"
 	"strconv"
 	"strings"
 
@@ -104,10 +108,24 @@ func (h *schedulerHandler) CreateScheduler(w http.ResponseWriter, r *http.Reques
 	case types.BalanceRangeScheduler:
 		exist, _ := h.IsSchedulerExisted(name)
 		if exist {
-			h.r.JSON(w, http.StatusBadRequest, "The scheduler already exists, pls remove the exist scheduler first.")
+			handler, err := h.GetSchedulerConfigHandler()
+			if err == nil && handler != nil {
+				r.URL.Path = path.Join(server.SchedulerConfigHandlerPath, string(types.BalanceRangeScheduler), "job")
+				r.Method = http.MethodPut
+				data, err := json.Marshal(input)
+				if err != nil {
+					h.r.JSON(w, http.StatusInternalServerError, err.Error())
+					return
+				}
+
+				r.Body = io.NopCloser(bytes.NewBuffer(data))
+				handler.ServeHTTP(w, r)
+				return
+			}
+			h.r.JSON(w, http.StatusNotAcceptable, err.Error())
 			return
 		}
-		if err := apiutil.CollectStringOption("role", input, collector); err != nil {
+		if err := apiutil.CollectStringOption("rule", input, collector); err != nil {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}
@@ -131,12 +149,7 @@ func (h *schedulerHandler) CreateScheduler(w http.ResponseWriter, r *http.Reques
 			return
 		}
 
-		if err := apiutil.CollectEscapeStringOption("start-key", input, collector); err != nil {
-			h.r.JSON(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-
-		if err := apiutil.CollectEscapeStringOption("end-key", input, collector); err != nil {
+		if err := apiutil.CollectKeyRangesOption(input, collector); err != nil {
 			h.r.JSON(w, http.StatusInternalServerError, err.Error())
 			return
 		}

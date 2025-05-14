@@ -69,6 +69,7 @@ type Client interface {
 	GetSchedulers(context.Context) ([]string, error)
 	CreateScheduler(ctx context.Context, name string, storeID uint64) error
 	CreateSchedulerWithInput(ctx context.Context, name string, input map[string]any) error
+	CancelSchedulerJob(ctx context.Context, name string, jobID uint64) error
 	DeleteScheduler(ctx context.Context, name string) error
 	SetSchedulerDelay(context.Context, string, int64) error
 	GetSchedulerConfig(ctx context.Context, name string) (any, error)
@@ -821,6 +822,14 @@ func (c *client) GetSchedulerConfig(ctx context.Context, name string) (any, erro
 		return nil, err
 	}
 	return config, nil
+}
+
+// CancelSchedulerJob cancels the specified scheduler job.
+func (c *client) CancelSchedulerJob(ctx context.Context, name string, jobID uint64) error {
+	return c.request(ctx, newRequestInfo().
+		WithName(cancelSchedulerJobName).
+		WithURI(GetCancelSchedulerJobURIByNameAndJobID(name, jobID)).
+		WithMethod(http.MethodDelete))
 }
 
 // CreateSchedulerWithInput creates a scheduler with the specified input.

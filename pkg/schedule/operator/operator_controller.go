@@ -510,10 +510,6 @@ func isHigherPriorityOperator(new, old *Operator) bool {
 
 func (oc *Controller) addOperatorInner(op *Operator) bool {
 	regionID := op.RegionID()
-	log.Info("add operator",
-		zap.Uint64("region-id", regionID),
-		zap.Reflect("operator", op),
-		zap.String("additional-info", op.LogAdditionalInfo()))
 
 	// If there is an old operator, replace it. The priority should be checked
 	// already.
@@ -535,8 +531,22 @@ func (oc *Controller) addOperatorInner(op *Operator) bool {
 		operatorCounter.WithLabelValues(op.Desc(), "unexpected").Inc()
 		return false
 	}
-	oc.operators.Store(regionID, op)
+
+	old, loaded := oc.operators.LoadOrStore(regionID, op)
+	if loaded {
+		log.Debug("operator already exists",
+			zap.Uint64("region-id", regionID),
+			zap.Reflect("old", old.(*Operator)),
+			zap.Reflect("new", op))
+		operatorCounter.WithLabelValues(op.Desc(), "redundant").Inc()
+		return false
+	}
+
 	oc.counts.inc(op.SchedulerKind())
+	log.Info("add operator",
+		zap.Uint64("region-id", regionID),
+		zap.Reflect("operator", op),
+		zap.String("additional-info", op.LogAdditionalInfo()))
 	operatorCounter.WithLabelValues(op.Desc(), "start").Inc()
 	operatorSizeHist.WithLabelValues(op.Desc()).Observe(float64(op.ApproximateSize))
 	opInfluence := NewTotalOpInfluence([]*Operator{op}, oc.cluster)
@@ -667,10 +677,6 @@ func (oc *Controller) removeRelatedMergeOperator(op *Operator) {
 	}
 	relatedOp := relatedOpi.(*Operator)
 	if relatedOp != nil && relatedOp.Status() != CANCELED {
-		log.Info("operator canceled related merge region",
-			zap.Uint64("region-id", relatedOp.RegionID()),
-			zap.String("additional-info", relatedOp.LogAdditionalInfo()),
-			zap.Duration("takes", relatedOp.RunningTime()))
 		oc.removeOperatorInner(relatedOp)
 		relatedOp.Cancel(RelatedMergeRegion)
 		oc.buryOperator(relatedOp)

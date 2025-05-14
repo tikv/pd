@@ -59,7 +59,6 @@ import (
 	"github.com/tikv/pd/server/cluster"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
-	"github.com/tikv/pd/tests/server/api"
 )
 
 const (
@@ -1568,10 +1567,10 @@ func TestTransferLeaderForScheduler(t *testing.T) {
 	re.True(leaderServer.GetRaftCluster().IsPrepared())
 	schedsNum := len(rc.GetCoordinator().GetSchedulersController().GetSchedulerNames())
 	// Add evict leader scheduler
-	api.MustAddScheduler(re, leaderServer.GetAddr(), types.EvictLeaderScheduler.String(), map[string]any{
+	tests.MustAddScheduler(re, leaderServer.GetAddr(), types.EvictLeaderScheduler.String(), map[string]any{
 		"store_id": 1,
 	})
-	api.MustAddScheduler(re, leaderServer.GetAddr(), types.EvictLeaderScheduler.String(), map[string]any{
+	tests.MustAddScheduler(re, leaderServer.GetAddr(), types.EvictLeaderScheduler.String(), map[string]any{
 		"store_id": 2,
 	})
 	// Check scheduler updated.

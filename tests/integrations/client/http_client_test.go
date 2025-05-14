@@ -603,6 +603,40 @@ func (suite *httpClientTestSuite) TestSchedulers() {
 	re.NoError(client.CreateSchedulerWithInput(ctx, schedulerName, input))
 	checkScheduler()
 	re.NoError(client.DeleteScheduler(ctx, schedulerName))
+	const schedulerName2 = "balance-range-scheduler"
+	input = map[string]any{
+		"engine":    "tikv",
+		"rule":      "leader-scatter",
+		"start-key": "100",
+		"end-key":   "200",
+		"alias":     "test",
+	}
+	re.NoError(client.CreateSchedulerWithInput(ctx, schedulerName2, input))
+	checkFn := func() map[string]any {
+		config, err := client.GetSchedulerConfig(ctx, schedulerName2)
+		re.NoError(err)
+		jobs, ok := config.([]any)
+		re.True(ok, config)
+		res := make([]map[string]any, 0, len(jobs))
+		for _, job := range jobs {
+			jobMap, ok := job.(map[string]any)
+			re.True(ok, config)
+			res = append(res, jobMap)
+		}
+		return res[0]
+	}
+	job := checkFn()
+	jobID := uint64(job["job-id"].(float64))
+	re.Equal(uint64(0), jobID)
+	_, ok := job["start"].(*time.Time)
+	re.False(ok, job)
+
+	// cancel one job
+	re.NoError(client.CancelSchedulerJob(ctx, schedulerName2, jobID))
+	job = checkFn()
+	status, ok := job["status"]
+	re.True(ok)
+	re.Equal("cancelled", status)
 }
 
 func (suite *httpClientTestSuite) TestStoreLabels() {
