@@ -16,7 +16,6 @@ package core
 
 import (
 	"bytes"
-	"github.com/tikv/pd/pkg/utils/keyutil"
 	"math/rand"
 
 	"go.uber.org/zap"
@@ -26,6 +25,7 @@ import (
 
 	"github.com/tikv/pd/pkg/btree"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
 )
 

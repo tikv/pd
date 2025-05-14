@@ -15,7 +15,6 @@
 package schedulers
 
 import (
-	"github.com/tikv/pd/pkg/utils/keyutil"
 	"go.uber.org/zap"
 
 	"github.com/pingcap/log"
@@ -28,6 +27,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
 	"github.com/tikv/pd/pkg/schedule/types"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 )
 
 type labelSchedulerConfig struct {

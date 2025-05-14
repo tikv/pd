@@ -16,10 +16,10 @@ package schedulers
 
 import (
 	"github.com/docker/go-units"
-	"github.com/tikv/pd/pkg/utils/keyutil"
 
 	"github.com/tikv/pd/pkg/core"
 	sche "github.com/tikv/pd/pkg/schedule/core"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 )
 
 // rangeCluster isolates the cluster by range.

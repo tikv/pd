@@ -15,7 +15,6 @@
 package schedulers
 
 import (
-	"github.com/tikv/pd/pkg/utils/keyutil"
 	"math/rand"
 	"net/http"
 	"strconv"
@@ -36,6 +35,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/plan"
 	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/utils/apiutil"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 )
 

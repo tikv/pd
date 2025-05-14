@@ -16,7 +16,6 @@ package rule
 
 import (
 	"context"
-	"github.com/tikv/pd/pkg/utils/keyutil"
 	"strings"
 	"sync"
 
@@ -32,6 +31,7 @@ import (
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 )
 
 // Watcher is used to watch the PD for any Placement Rule changes.

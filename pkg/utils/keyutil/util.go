@@ -18,7 +18,6 @@ import (
 	"bytes"
 	"encoding/hex"
 	"fmt"
-	"sort"
 )
 
 // BuildKeyRangeKey build key for a keyRange
@@ -66,37 +65,4 @@ func less(a, b []byte, boundary boundary) bool {
 // If the key is empty and the boundary is right, the keys is infinite.
 func Between(startKey, endKey, key []byte) bool {
 	return less(startKey, key, left) && less(key, endKey, right)
-}
-
-type DefaultKeyRangeManager struct {
-	sortedKeyRanges []*KeyRange
-}
-
-func (rm *DefaultKeyRangeManager) GetAvailableKeyRange() []*KeyRange {
-	return rm.sortedKeyRanges
-}
-
-func (rm *DefaultKeyRangeManager) AddKeyRange(keyRanges []*KeyRange) error {
-	rm.sortedKeyRanges = append(rm.sortedKeyRanges, keyRanges...)
-	sort.Slice(rm.sortedKeyRanges, func(i, j int) bool {
-		return less(rm.sortedKeyRanges[i].StartKey, rm.sortedKeyRanges[j].StartKey, left)
-	})
-	return nil
-}
-
-func (rm *DefaultKeyRangeManager) RemoveDirtyKeyRange(keyRanges []KeyRange) {
-	//for _, keyRange := range keyRanges {
-	//	for i, dirtyKeyRange := range rm.dirtyKeyRanges {
-	//		if bytes.Equal(keyRange.StartKey, dirtyKeyRange.StartKey) &&
-	//			bytes.Equal(keyRange.EndKey, dirtyKeyRange.EndKey) {
-	//			rm.dirtyKeyRanges = append(rm.dirtyKeyRanges[:i], rm.dirtyKeyRanges[i+1:]...)
-	//			break
-	//		}
-	//	}
-	//}
-	return
-}
-
-func (rm *DefaultKeyRangeManager) removeKeyRange(keyRange KeyRange) {
-
 }
