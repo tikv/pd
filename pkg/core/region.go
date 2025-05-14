@@ -19,7 +19,6 @@ import (
 	"context"
 	"encoding/hex"
 	"fmt"
-	"github.com/tikv/pd/pkg/utils/keyutil"
 	"math"
 	"reflect"
 	"sort"
@@ -40,6 +39,7 @@ import (
 	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"

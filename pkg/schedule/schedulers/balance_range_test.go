@@ -16,7 +16,6 @@ package schedulers
 
 import (
 	"fmt"
-	"github.com/tikv/pd/pkg/utils/keyutil"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -26,6 +25,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/storage"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 )
 
 func TestBalanceRangePlan(t *testing.T) {

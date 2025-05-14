@@ -16,7 +16,6 @@ package schedulers
 
 import (
 	"github.com/pingcap/log"
-	"github.com/tikv/pd/pkg/utils/keyutil"
 
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/errs"
@@ -25,6 +24,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
 	"github.com/tikv/pd/pkg/schedule/types"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 )
 
 type shuffleLeaderSchedulerConfig struct {

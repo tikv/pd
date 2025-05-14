@@ -17,7 +17,6 @@ package schedulers
 import (
 	"bytes"
 	"encoding/json"
-	"github.com/tikv/pd/pkg/utils/keyutil"
 	"io"
 	"net/http"
 	"sort"
@@ -37,6 +36,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
 	"github.com/tikv/pd/pkg/schedule/types"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/reflectutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 )

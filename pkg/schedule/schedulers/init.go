@@ -15,7 +15,6 @@
 package schedulers
 
 import (
-	"github.com/tikv/pd/pkg/utils/keyutil"
 	"net/url"
 	"strconv"
 	"strings"
@@ -27,6 +26,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/storage/endpoint"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 )
 
 var registerOnce sync.Once

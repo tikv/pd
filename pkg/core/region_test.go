@@ -18,7 +18,6 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
-	"github.com/tikv/pd/pkg/utils/keyutil"
 	"math"
 	mrand "math/rand"
 	"sort"
@@ -36,6 +35,7 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/id"
 	"github.com/tikv/pd/pkg/mock/mockid"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 )
 
 func TestNeedMerge(t *testing.T) {

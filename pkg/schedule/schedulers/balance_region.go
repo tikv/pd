@@ -15,7 +15,6 @@
 package schedulers
 
 import (
-	"github.com/tikv/pd/pkg/utils/keyutil"
 	"sort"
 	"strconv"
 
@@ -31,6 +30,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
 	"github.com/tikv/pd/pkg/schedule/types"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 )
 
 type balanceRegionSchedulerConfig struct {

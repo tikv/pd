@@ -15,7 +15,6 @@
 package schedulers
 
 import (
-	"github.com/tikv/pd/pkg/utils/keyutil"
 	"net/url"
 	"strconv"
 	"time"
@@ -32,6 +31,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/schedule/plan"
 	"github.com/tikv/pd/pkg/statistics"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 )
 
 const (

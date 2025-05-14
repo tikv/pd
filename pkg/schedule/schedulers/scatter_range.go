@@ -16,7 +16,6 @@ package schedulers
 
 import (
 	"fmt"
-	"github.com/tikv/pd/pkg/utils/keyutil"
 	"net/http"
 
 	"github.com/gorilla/mux"
@@ -30,6 +29,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/plan"
 	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/utils/apiutil"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 )
 
