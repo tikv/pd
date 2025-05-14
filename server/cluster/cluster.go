@@ -136,7 +136,8 @@ type Server interface {
 // region 1 -> /1/raft/r/1, value is metapb.Region
 type RaftCluster struct {
 	syncutil.RWMutex
-	wg sync.WaitGroup
+	storeStateLock *syncutil.LockGroup
+	wg             sync.WaitGroup
 
 	serverCtx context.Context
 	ctx       context.Context
@@ -188,11 +189,31 @@ type Status struct {
 func NewRaftCluster(ctx context.Context, clusterID uint64, regionSyncer *syncer.RegionSyncer, etcdClient *clientv3.Client,
 	httpClient *http.Client) *RaftCluster {
 	return &RaftCluster{
+<<<<<<< HEAD
 		serverCtx:    ctx,
 		clusterID:    clusterID,
 		regionSyncer: regionSyncer,
 		httpClient:   httpClient,
 		etcdClient:   etcdClient,
+=======
+		serverCtx:      ctx,
+		storeStateLock: syncutil.NewLockGroup(syncutil.WithRemoveEntryOnUnlock(true)),
+		member:         member,
+		regionSyncer:   regionSyncer,
+		httpClient:     httpClient,
+		etcdClient:     etcdClient,
+		BasicCluster:   basicCluster,
+		storage:        storage,
+		tsoAllocator:   tsoAllocator,
+		heartbeatRunner: ratelimit.NewConcurrentRunner(heartbeatTaskRunner,
+			ratelimit.NewConcurrencyLimiter(uint64(runtime.NumCPU()*2)), time.Minute),
+		miscRunner: ratelimit.NewConcurrentRunner(miscTaskRunner,
+			ratelimit.NewConcurrencyLimiter(uint64(runtime.NumCPU()*2)), time.Minute),
+		logRunner: ratelimit.NewConcurrentRunner(logTaskRunner,
+			ratelimit.NewConcurrencyLimiter(uint64(runtime.NumCPU()*2)), time.Minute),
+		syncRegionRunner: ratelimit.NewConcurrentRunner(syncRegionTaskRunner,
+			ratelimit.NewConcurrencyLimiter(1), time.Minute),
+>>>>>>> ae59bc09f (cluster: fix store state change problem (#9257))
 	}
 }
 
@@ -1498,9 +1519,14 @@ func (c *RaftCluster) checkStoreLabels(s *core.StoreInfo) error {
 // RemoveStore marks a store as offline in cluster.
 // State transition: Up -> Offline.
 func (c *RaftCluster) RemoveStore(storeID uint64, physicallyDestroyed bool) error {
+<<<<<<< HEAD
 	c.Lock()
 	defer c.Unlock()
 
+=======
+	c.storeStateLock.Lock(uint32(storeID))
+	defer c.storeStateLock.Unlock(uint32(storeID))
+>>>>>>> ae59bc09f (cluster: fix store state change problem (#9257))
 	store := c.GetStore(storeID)
 	if store == nil {
 		return errs.ErrStoreNotFound.FastGenByArgs(storeID)
@@ -1606,11 +1632,23 @@ func (c *RaftCluster) getUpStores() []uint64 {
 }
 
 // BuryStore marks a store as tombstone in cluster.
-// If forceBury is false, the store should be offlined and emptied before calling this func.
+// It is used by unsafe recovery or other special cases.
 func (c *RaftCluster) BuryStore(storeID uint64, forceBury bool) error {
+<<<<<<< HEAD
 	c.Lock()
 	defer c.Unlock()
 
+=======
+	c.storeStateLock.Lock(uint32(storeID))
+	defer c.storeStateLock.Unlock(uint32(storeID))
+	return c.BuryStoreLocked(storeID, forceBury)
+}
+
+// BuryStoreLocked marks a store as tombstone in cluster.
+// If forceBury is false, the store should be offlined and emptied before calling this func.
+// It is used by cluster check stores.
+func (c *RaftCluster) BuryStoreLocked(storeID uint64, forceBury bool) error {
+>>>>>>> ae59bc09f (cluster: fix store state change problem (#9257))
 	store := c.GetStore(storeID)
 	if store == nil {
 		return errs.ErrStoreNotFound.FastGenByArgs(storeID)
@@ -1718,9 +1756,14 @@ func (c *RaftCluster) NeedAwakenAllRegionsInStore(storeID uint64) (needAwaken bo
 
 // UpStore up a store from offline
 func (c *RaftCluster) UpStore(storeID uint64) error {
+<<<<<<< HEAD
 	c.Lock()
 	defer c.Unlock()
 
+=======
+	c.storeStateLock.Lock(uint32(storeID))
+	defer c.storeStateLock.Unlock(uint32(storeID))
+>>>>>>> ae59bc09f (cluster: fix store state change problem (#9257))
 	store := c.GetStore(storeID)
 	if store == nil {
 		return errs.ErrStoreNotFound.FastGenByArgs(storeID)
@@ -1763,11 +1806,16 @@ func (c *RaftCluster) UpStore(storeID uint64) error {
 	return err
 }
 
+<<<<<<< HEAD
 // ReadyToServe change store's node state to Serving.
 func (c *RaftCluster) ReadyToServe(storeID uint64) error {
 	c.Lock()
 	defer c.Unlock()
 
+=======
+// ReadyToServeLocked change store's node state to Serving.
+func (c *RaftCluster) ReadyToServeLocked(storeID uint64) error {
+>>>>>>> ae59bc09f (cluster: fix store state change problem (#9257))
 	store := c.GetStore(storeID)
 	if store == nil {
 		return errs.ErrStoreNotFound.FastGenByArgs(storeID)
@@ -1835,21 +1883,11 @@ func (c *RaftCluster) checkStores() {
 	stores := c.GetStores()
 
 	for _, store := range stores {
-		// the store has already been tombstone
-		if store.IsRemoved() {
-			if store.DownTime() > gcTombstoneInterval {
-				err := c.deleteStore(store)
-				if err != nil {
-					log.Error("auto gc the tombstone store failed",
-						zap.Stringer("store", store.GetMeta()),
-						zap.Duration("down-time", store.DownTime()),
-						errs.ZapError(err))
-				} else {
-					log.Info("auto gc the tombstone store success", zap.Stringer("store", store.GetMeta()), zap.Duration("down-time", store.DownTime()))
-				}
-			}
-			continue
+		isUp, isOffline := c.checkStore(store, stores)
+		if isUp {
+			upStoreCount++
 		}
+<<<<<<< HEAD
 
 		storeID := store.GetID()
 		if store.IsPreparing() {
@@ -1902,6 +1940,10 @@ func (c *RaftCluster) checkStores() {
 			}
 		} else {
 			offlineStores = append(offlineStores, offlineStore)
+=======
+		if isOffline {
+			offlineStores = append(offlineStores, store.GetMeta())
+>>>>>>> ae59bc09f (cluster: fix store state change problem (#9257))
 		}
 	}
 
@@ -1915,6 +1957,81 @@ func (c *RaftCluster) checkStores() {
 			log.Warn("store may not turn into Tombstone, there are no extra up store has enough space to accommodate the extra replica", zap.Stringer("store", offlineStore))
 		}
 	}
+}
+
+func (c *RaftCluster) checkStore(store *core.StoreInfo, stores []*core.StoreInfo) (isUp, isOffline bool) {
+	storeID := store.GetID()
+	c.storeStateLock.Lock(uint32(storeID))
+	defer c.storeStateLock.Unlock(uint32(storeID))
+	// the store has already been tombstone
+	if store.IsRemoved() {
+		if store.DownTime() > gcTombstoneInterval {
+			err := c.deleteStore(store)
+			if err != nil {
+				log.Error("auto gc the tombstone store failed",
+					zap.Stringer("store", store.GetMeta()),
+					zap.Duration("down-time", store.DownTime()),
+					errs.ZapError(err))
+			} else {
+				log.Info("auto gc the tombstone store success", zap.Stringer("store", store.GetMeta()), zap.Duration("down-time", store.DownTime()))
+			}
+		}
+		return
+	}
+
+	if store.IsPreparing() {
+		if store.GetUptime() >= c.opt.GetMaxStorePreparingTime() || c.GetTotalRegionCount() < core.InitClusterRegionThreshold {
+			if err := c.ReadyToServeLocked(storeID); err != nil {
+				log.Error("change store to serving failed",
+					zap.Stringer("store", store.GetMeta()),
+					zap.Int("region-count", c.GetTotalRegionCount()),
+					errs.ZapError(err))
+			}
+		} else if c.IsPrepared() || (c.IsServiceIndependent(constant.SchedulingServiceName) && c.isStorePrepared()) {
+			threshold := c.getThreshold(stores, store)
+			regionSize := float64(store.GetRegionSize())
+			log.Debug("store serving threshold", zap.Uint64("store-id", storeID), zap.Float64("threshold", threshold), zap.Float64("region-size", regionSize))
+			if regionSize >= threshold {
+				if err := c.ReadyToServeLocked(storeID); err != nil {
+					log.Error("change store to serving failed",
+						zap.Stringer("store", store.GetMeta()),
+						errs.ZapError(err))
+				}
+			} else {
+				remaining := threshold - regionSize
+				// If we add multiple stores, the total will need to be changed.
+				c.progressManager.UpdateProgressTotal(encodePreparingProgressKey(storeID), threshold)
+				c.updateProgress(storeID, store.GetAddress(), preparingAction, regionSize, remaining, true /* inc */)
+			}
+		}
+	}
+
+	if store.IsUp() {
+		if !store.IsLowSpace(c.opt.GetLowSpaceRatio()) {
+			isUp = true
+		}
+		return
+	}
+
+	regionSize := c.GetStoreRegionSize(storeID)
+	if c.IsPrepared() {
+		c.updateProgress(storeID, store.GetAddress(), removingAction, float64(regionSize), float64(regionSize), false /* dec */)
+	}
+	// If the store is empty, it can be buried.
+	needBury := c.GetStoreRegionCount(storeID) == 0
+	failpoint.Inject("doNotBuryStore", func(_ failpoint.Value) {
+		needBury = false
+	})
+	if needBury {
+		if err := c.BuryStoreLocked(storeID, false); err != nil {
+			log.Error("bury store failed",
+				zap.Uint64("store-id", storeID),
+				errs.ZapError(err))
+		}
+	} else {
+		isOffline = true
+	}
+	return
 }
 
 func (c *RaftCluster) getThreshold(stores []*core.StoreInfo, store *core.StoreInfo) float64 {
