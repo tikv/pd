@@ -3896,7 +3896,9 @@ func TestConcurrentStoreStats(t *testing.T) {
 			cluster.checkStores()
 		}()
 		re.NoError(cluster.RemoveStore(storeID, false))
-		re.Equal(metapb.NodeState_Removing, cluster.GetStore(storeID).GetNodeState(), "store %d should be in removing state", storeID)
+		testutil.Eventually(re, func() bool {
+			return metapb.NodeState_Removing == cluster.GetStore(storeID).GetNodeState()
+		})
 	}
 	wg.Wait()
 }
