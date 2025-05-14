@@ -15,6 +15,7 @@
 package schedulers
 
 import (
+	"github.com/tikv/pd/pkg/utils/keyutil"
 	"math/rand"
 
 	"github.com/pingcap/log"
@@ -33,7 +34,7 @@ import (
 type randomMergeSchedulerConfig struct {
 	schedulerConfig
 
-	Ranges []core.KeyRange `json:"ranges"`
+	Ranges []keyutil.KeyRange `json:"ranges"`
 	// TODO: When we prepare to use Ranges, we will need to implement the ReloadConfig function for this scheduler.
 }
 

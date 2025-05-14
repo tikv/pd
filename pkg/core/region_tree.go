@@ -16,6 +16,7 @@ package core
 
 import (
 	"bytes"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 	"math/rand"
 
 	"go.uber.org/zap"
@@ -345,7 +346,7 @@ func (t *regionTree) getAdjacentItem(item *regionItem) (prev *regionItem, next *
 	return prev, next
 }
 
-func (t *regionTree) randomRegion(ranges []KeyRange) *RegionInfo {
+func (t *regionTree) randomRegion(ranges []keyutil.KeyRange) *RegionInfo {
 	regions := t.RandomRegions(1, ranges)
 	if len(regions) == 0 {
 		return nil
@@ -354,7 +355,7 @@ func (t *regionTree) randomRegion(ranges []KeyRange) *RegionInfo {
 }
 
 // RandomRegions get n random regions within the given ranges.
-func (t *regionTree) RandomRegions(n int, ranges []KeyRange) []*RegionInfo {
+func (t *regionTree) RandomRegions(n int, ranges []keyutil.KeyRange) []*RegionInfo {
 	treeLen := t.length()
 	if treeLen == 0 || n < 1 {
 		return nil

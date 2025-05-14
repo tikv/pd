@@ -1,18 +1,4 @@
-// Copyright 2024 TiKV Project Authors.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
-package core
+package keyutil
 
 import (
 	"fmt"
@@ -41,6 +27,39 @@ func TestCodecKeyRange(t *testing.T) {
 		var ks KeyRange
 		re.NoError(ks.UnmarshalJSON(data))
 		re.Equal(tc.ks, ks)
+	}
+}
+
+func TestOverLap(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		a, b   KeyRange
+		expect bool
+	}{
+		{
+			name:   "overlap",
+			a:      NewKeyRange("a", "c"),
+			b:      NewKeyRange("b", "d"),
+			expect: true,
+		},
+		{
+			name:   "no overlap",
+			a:      NewKeyRange("a", "b"),
+			b:      NewKeyRange("c", "d"),
+			expect: false,
+		},
+		{
+			name:   "continuous",
+			a:      NewKeyRange("a", "b"),
+			b:      NewKeyRange("b", "d"),
+			expect: true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			re := require.New(t)
+			re.Equal(tc.expect, tc.a.OverLapped(&tc.b))
+			re.Equal(tc.expect, tc.b.OverLapped(&tc.a))
+		})
 	}
 }
 
@@ -113,38 +132,5 @@ func TestMergeKeyRanges(t *testing.T) {
 		rs := &KeyRanges{krs: tc.input}
 		rs.Merge()
 		re.Equal(tc.expect, rs.Ranges(), tc.name)
-	}
-}
-
-func TestOverLap(t *testing.T) {
-	for _, tc := range []struct {
-		name   string
-		a, b   KeyRange
-		expect bool
-	}{
-		{
-			name:   "overlap",
-			a:      NewKeyRange("a", "c"),
-			b:      NewKeyRange("b", "d"),
-			expect: true,
-		},
-		{
-			name:   "no overlap",
-			a:      NewKeyRange("a", "b"),
-			b:      NewKeyRange("c", "d"),
-			expect: false,
-		},
-		{
-			name:   "has overlap",
-			a:      NewKeyRange("a", "b"),
-			b:      NewKeyRange("b", "d"),
-			expect: true,
-		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			re := require.New(t)
-			re.Equal(tc.expect, tc.a.OverLapped(&tc.b))
-			re.Equal(tc.expect, tc.b.OverLapped(&tc.a))
-		})
 	}
 }

@@ -15,6 +15,7 @@
 package schedulers
 
 import (
+	"github.com/tikv/pd/pkg/utils/keyutil"
 	"net/url"
 	"strconv"
 	"strings"
@@ -163,7 +164,7 @@ func schedulersRegister() {
 		storage endpoint.ConfigStorage, decoder ConfigDecoder, removeSchedulerCb ...func(string) error) (Scheduler, error) {
 		conf := &evictLeaderSchedulerConfig{
 			schedulerConfig:   &baseSchedulerConfig{},
-			StoreIDWithRanges: make(map[uint64][]core.KeyRange),
+			StoreIDWithRanges: make(map[uint64][]keyutil.KeyRange),
 		}
 		if err := decoder(conf); err != nil {
 			return nil, err
@@ -296,7 +297,7 @@ func schedulersRegister() {
 		storage endpoint.ConfigStorage, decoder ConfigDecoder, removeSchedulerCb ...func(string) error) (Scheduler, error) {
 		conf := &grantLeaderSchedulerConfig{
 			schedulerConfig:   &baseSchedulerConfig{},
-			StoreIDWithRanges: make(map[uint64][]core.KeyRange),
+			StoreIDWithRanges: make(map[uint64][]keyutil.KeyRange),
 		}
 		conf.cluster = opController.GetCluster()
 		conf.removeSchedulerCb = removeSchedulerCb[0]

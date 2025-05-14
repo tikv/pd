@@ -15,6 +15,7 @@
 package schedulers
 
 import (
+	"github.com/tikv/pd/pkg/utils/keyutil"
 	"net/http"
 	"time"
 
@@ -79,11 +80,11 @@ func (conf *evictSlowStoreSchedulerConfig) getStores() []uint64 {
 	return conf.EvictedStores
 }
 
-func (conf *evictSlowStoreSchedulerConfig) getKeyRangesByID(id uint64) []core.KeyRange {
+func (conf *evictSlowStoreSchedulerConfig) getKeyRangesByID(id uint64) []keyutil.KeyRange {
 	if conf.evictStore() != id {
 		return nil
 	}
-	return []core.KeyRange{core.NewKeyRange("", "")}
+	return []keyutil.KeyRange{keyutil.NewKeyRange("", "")}
 }
 
 func (conf *evictSlowStoreSchedulerConfig) getBatch() int {

@@ -15,6 +15,7 @@
 package schedulers
 
 import (
+	"github.com/tikv/pd/pkg/utils/keyutil"
 	"sort"
 	"strconv"
 
@@ -35,7 +36,7 @@ import (
 type balanceRegionSchedulerConfig struct {
 	baseDefaultSchedulerConfig
 
-	Ranges []core.KeyRange `json:"ranges"`
+	Ranges []keyutil.KeyRange `json:"ranges"`
 	// TODO: When we prepare to use Ranges, we will need to implement the ReloadConfig function for this scheduler.
 }
 

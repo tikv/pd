@@ -16,8 +16,8 @@ package schedulers
 
 import (
 	"github.com/pingcap/log"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 
-	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/core/constant"
 	"github.com/tikv/pd/pkg/errs"
 	sche "github.com/tikv/pd/pkg/schedule/core"
@@ -30,7 +30,7 @@ import (
 type shuffleLeaderSchedulerConfig struct {
 	schedulerConfig
 
-	Ranges []core.KeyRange `json:"ranges"`
+	Ranges []keyutil.KeyRange `json:"ranges"`
 	// TODO: When we prepare to use Ranges, we will need to implement the ReloadConfig function for this scheduler.
 }
 

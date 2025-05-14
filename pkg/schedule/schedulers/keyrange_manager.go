@@ -15,47 +15,34 @@
 package schedulers
 
 import (
-	"bytes"
-	"slices"
-
-	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 )
 
 type KeyRangeManager interface {
-	GetAvailableKeyRange() []core.KeyRange
-	AddKeyRange([]core.KeyRange) error
-	RemoveDirtyKeyRange([]core.KeyRange)
+	GetAvailableKeyRange() []keyutil.KeyRange
+	AddKeyRange([]keyutil.KeyRange) error
+	RemoveDirtyKeyRange([]keyutil.KeyRange)
 }
 
 var _ KeyRangeManager = &DefaultKeyRangeManager{}
 
 type DefaultKeyRangeManager struct {
-	sortedKeyRanges []core.KeyRange
+	sortedKeyRanges []keyutil.KeyRange
 }
 
-func (rm *DefaultKeyRangeManager) GetAvailableKeyRange() []core.KeyRange {
-
-}
-
-func (rm *DefaultKeyRangeManager) AddKeyRange(keyRanges []core.KeyRange) error {
-	rm.sortedKeyRanges = append(rm.sortedKeyRanges, keyRanges...)
-	slices.sli
+func (rm *DefaultKeyRangeManager) GetAvailableKeyRange() []keyutil.KeyRange {
 	return nil
 }
 
-func (rm *DefaultKeyRangeManager) RemoveDirtyKeyRange(keyRanges []core.KeyRange) {
-	for _, keyRange := range keyRanges {
-		for i, dirtyKeyRange := range rm.dirtyKeyRanges {
-			if bytes.Equal(keyRange.StartKey, dirtyKeyRange.StartKey) &&
-				bytes.Equal(keyRange.EndKey, dirtyKeyRange.EndKey) {
-				rm.dirtyKeyRanges = append(rm.dirtyKeyRanges[:i], rm.dirtyKeyRanges[i+1:]...)
-				break
-			}
-		}
-	}
+func (rm *DefaultKeyRangeManager) AddKeyRange(keyRanges []keyutil.KeyRange) error {
+	return nil
+}
+
+func (rm *DefaultKeyRangeManager) RemoveDirtyKeyRange(keyRanges []keyutil.KeyRange) {
+
 	return
 }
 
-func (rm *DefaultKeyRangeManager) removeKeyRange(keyRange core.KeyRange) []core.KeyRange {
+func (rm *DefaultKeyRangeManager) removeKeyRange(keyRange keyutil.KeyRange) {
 
 }
