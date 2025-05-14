@@ -149,6 +149,52 @@ func (suite *keyspaceTestSuite) TestCreateKeyspace() {
 	re.Error(err)
 }
 
+func makeCreateKeyspaceByIDRequests(count int) []*CreateKeyspaceByIDRequest {
+	now := time.Now().Unix()
+	requests := make([]*CreateKeyspaceByIDRequest, count)
+	for i := range count {
+		id := uint32(i + 1)
+		requests[i] = &CreateKeyspaceByIDRequest{
+			ID: &id,
+			Config: map[string]string{
+				testConfig1: "100",
+				testConfig2: "200",
+			},
+			CreateTime: now,
+		}
+	}
+	return requests
+}
+
+func (suite *keyspaceTestSuite) TestCreateKeyspaceByID() {
+	re := suite.Require()
+	manager := suite.manager
+	requests := makeCreateKeyspaceByIDRequests(10)
+
+	for i, request := range requests {
+		created, err := manager.CreateKeyspaceByID(request)
+		re.NoError(err)
+		re.Equal(uint32(i+1), created.Id)
+		checkCreateByIDRequest(re, request, created)
+
+		loaded, err := manager.LoadKeyspaceByID(*request.ID)
+		re.NoError(err)
+		checkCreateByIDRequest(re, request, loaded)
+
+		loaded, err = manager.LoadKeyspaceByID(created.Id)
+		re.NoError(err)
+		checkCreateByIDRequest(re, request, loaded)
+	}
+
+	// Create a keyspace with existing ID must return error.
+	_, err := manager.CreateKeyspaceByID(requests[0])
+	re.Error(err)
+
+	// Create a keyspace with empty id must return error.
+	_, err = manager.CreateKeyspaceByID(&CreateKeyspaceByIDRequest{})
+	re.Error(err)
+}
+
 func makeMutations() []*Mutation {
 	return []*Mutation{
 		{
@@ -337,6 +383,15 @@ func (suite *keyspaceTestSuite) TestUpdateMultipleKeyspace() {
 // checkCreateRequest verifies a keyspace meta matches a create request.
 func checkCreateRequest(re *require.Assertions, request *CreateKeyspaceRequest, meta *keyspacepb.KeyspaceMeta) {
 	re.Equal(request.Name, meta.GetName())
+	re.Equal(request.CreateTime, meta.GetCreatedAt())
+	re.Equal(request.CreateTime, meta.GetStateChangedAt())
+	re.Equal(keyspacepb.KeyspaceState_ENABLED, meta.GetState())
+	re.Equal(request.Config, meta.GetConfig())
+}
+
+// checkCreateByIDRequest verifies a keyspace meta matches a create request.
+func checkCreateByIDRequest(re *require.Assertions, request *CreateKeyspaceByIDRequest, meta *keyspacepb.KeyspaceMeta) {
+	re.Equal(*request.ID, meta.GetId())
 	re.Equal(request.CreateTime, meta.GetCreatedAt())
 	re.Equal(request.CreateTime, meta.GetStateChangedAt())
 	re.Equal(keyspacepb.KeyspaceState_ENABLED, meta.GetState())
