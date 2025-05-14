@@ -214,18 +214,18 @@ func TestJobExpired(t *testing.T) {
 		expired      bool
 	}{
 		{
-			finishedTime: now.Add(-reserverDuration - 10*time.Second),
+			finishedTime: now.Add(-reserveDuration - 10*time.Second),
 			expired:      true,
 		},
 		{
-			finishedTime: now.Add(-reserverDuration + 10*time.Second),
+			finishedTime: now.Add(-reserveDuration + 10*time.Second),
 			expired:      false,
 		},
 	} {
 		job := &balanceRangeSchedulerJob{
 			Finish: &data.finishedTime,
 		}
-		require.Equal(t, data.expired, job.expired(reserverDuration))
+		require.Equal(t, data.expired, job.expired(reserveDuration))
 	}
 }
 
@@ -245,7 +245,7 @@ func TestJobGC(t *testing.T) {
 	re.NoError(conf.gc())
 	re.Len(conf.jobs, 1)
 
-	expiredTime := now.Add(-reserverDuration - 10*time.Second)
+	expiredTime := now.Add(-reserveDuration - 10*time.Second)
 	conf.jobs[0].Finish = &expiredTime
 	re.NoError(conf.gc())
 	re.Empty(conf.jobs)
@@ -285,7 +285,7 @@ func TestPersistFail(t *testing.T) {
 	re.NotEqual(finished, conf.jobs[0].Status)
 
 	conf.jobs[0].Status = cancelled
-	finishedTime := time.Now().Add(-reserverDuration - 10*time.Second)
+	finishedTime := time.Now().Add(-reserveDuration - 10*time.Second)
 	conf.jobs[0].Finish = &finishedTime
 	re.ErrorContains(conf.gc(), errMsg)
 	re.Len(conf.jobs, 1)

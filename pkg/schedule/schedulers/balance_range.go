@@ -48,7 +48,7 @@ import (
 
 var (
 	defaultJobTimeout = time.Hour
-	reserverDuration  = 7 * 24 * time.Hour
+	reserveDuration   = 7 * 24 * time.Hour
 )
 
 type balanceRangeSchedulerHandler struct {
@@ -211,7 +211,7 @@ func (conf *balanceRangeSchedulerConfig) gc() error {
 	conf.Lock()
 	defer conf.Unlock()
 	for idx, job := range conf.jobs {
-		if job.isComplete() && job.expired(reserverDuration) {
+		if job.isComplete() && job.expired(reserveDuration) {
 			needGC = true
 			gcIdx = idx
 		} else {
