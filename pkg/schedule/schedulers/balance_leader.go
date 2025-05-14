@@ -371,7 +371,7 @@ func (s *balanceLeaderScheduler) Schedule(cluster sche.SchedulerCluster, dryRun 
 			}
 		}
 	}
-	s.retryQuota.gc(append(sourceCandidate.stores, targetCandidate.stores...))
+	s.gc(append(sourceCandidate.stores, targetCandidate.stores...))
 	return result, collector.GetPlans()
 }
 
@@ -380,7 +380,7 @@ func createTransferLeaderOperator(cs *candidateStores, dir string, s *balanceLea
 	store := cs.getStore()
 	ssolver.Step++
 	defer func() { ssolver.Step-- }()
-	retryLimit := s.retryQuota.getLimit(store)
+	retryLimit := s.getLimit(store)
 	var creator func(*solver, *plan.Collector) *operator.Operator
 	switch dir {
 	case transferOut:
@@ -400,7 +400,7 @@ func createTransferLeaderOperator(cs *candidateStores, dir string, s *balanceLea
 		}
 	}
 	if op != nil {
-		s.retryQuota.resetLimit(store)
+		s.resetLimit(store)
 	} else {
 		s.attenuate(store)
 		log.Debug("no operator created for selected stores", zap.String("scheduler", s.GetName()), zap.Uint64(dir, store.GetID()))
@@ -416,7 +416,7 @@ func makeInfluence(op *operator.Operator, plan *solver, usedRegions map[uint64]s
 		storesIDs := candidate.binarySearchStores(plan.Source, plan.Target)
 		candidateUpdateStores[id] = storesIDs
 	}
-	operator.AddOpInfluence(op, plan.opInfluence, plan.SchedulerCluster.GetBasicCluster())
+	operator.AddOpInfluence(op, plan.opInfluence, plan.GetBasicCluster())
 	for id, candidate := range candidates {
 		for _, pos := range candidateUpdateStores[id] {
 			candidate.resortStoreWithPos(pos)

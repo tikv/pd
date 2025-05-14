@@ -26,10 +26,6 @@ const (
 	// Note: keep the same as the ones defined on the client side, because the client side checks if an error message
 	// contains this string to judge whether the leader is changed.
 	NotLeaderErr = "is not leader"
-	// MismatchLeaderErr indicates the non-leader member received the requests which should be received by leader.
-	// Note: keep the same as the ones defined on the client side, because the client side checks if an error message
-	// contains this string to judge whether the leader is changed.
-	MismatchLeaderErr = "mismatch leader id"
 	// NotServedErr indicates an tso node/pod received the requests for the keyspace groups which are not served by it.
 	// Note: keep the same as the ones defined on the client side, because the client side checks if an error message
 	// contains this string to judge whether the leader is changed.
@@ -122,7 +118,7 @@ var (
 // member errors
 var (
 	ErrEtcdLeaderNotFound = errors.Normalize("etcd leader not found", errors.RFCCodeText("PD:member:ErrEtcdLeaderNotFound"))
-	ErrMarshalLeader      = errors.Normalize("marshal leader failed", errors.RFCCodeText("PD:member:ErrMarshalLeader"))
+	ErrMarshalMember      = errors.Normalize("marshal member failed", errors.RFCCodeText("PD:member:ErrMarshalMember"))
 	ErrCheckCampaign      = errors.Normalize("check campaign failed", errors.RFCCodeText("PD:member:ErrCheckCampaign"))
 )
 
@@ -301,16 +297,6 @@ var (
 // versioninfo errors
 var (
 	ErrFeatureNotExisted = errors.Normalize("feature not existed", errors.RFCCodeText("PD:versioninfo:ErrFeatureNotExisted"))
-)
-
-// autoscaling errors
-var (
-	ErrUnsupportedMetricsType   = errors.Normalize("unsupported metrics type %v", errors.RFCCodeText("PD:autoscaling:ErrUnsupportedMetricsType"))
-	ErrUnsupportedComponentType = errors.Normalize("unsupported component type %v", errors.RFCCodeText("PD:autoscaling:ErrUnsupportedComponentType"))
-	ErrUnexpectedType           = errors.Normalize("unexpected type %v", errors.RFCCodeText("PD:autoscaling:ErrUnexpectedType"))
-	ErrTypeConversion           = errors.Normalize("type conversion error", errors.RFCCodeText("PD:autoscaling:ErrTypeConversion"))
-	ErrEmptyMetricsResponse     = errors.Normalize("metrics response from Prometheus is empty", errors.RFCCodeText("PD:autoscaling:ErrEmptyMetricsResponse"))
-	ErrEmptyMetricsResult       = errors.Normalize("result from Prometheus is empty, %s", errors.RFCCodeText("PD:autoscaling:ErrEmptyMetricsResult"))
 )
 
 // apiutil errors

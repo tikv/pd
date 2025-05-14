@@ -468,7 +468,7 @@ func chooseEvictCandidate(cluster sche.SchedulerCluster, lastEvictCandidate *slo
 		if store.IsRemoved() {
 			continue
 		}
-		if !(store.IsPreparing() || store.IsServing()) {
+		if !store.IsPreparing() && !store.IsServing() {
 			continue
 		}
 		if slowTrend := store.GetSlowTrend(); slowTrend != nil {
@@ -549,7 +549,7 @@ func checkStoresAreUpdated(cluster sche.SchedulerCluster, slowStoreID uint64, sl
 			updatedStores += 1
 			continue
 		}
-		if !(store.IsPreparing() || store.IsServing()) {
+		if !store.IsPreparing() && !store.IsServing() {
 			updatedStores += 1
 			continue
 		}
@@ -579,7 +579,7 @@ func checkStoreSlowerThanOthers(cluster sche.SchedulerCluster, target *core.Stor
 		if store.IsRemoved() {
 			continue
 		}
-		if !(store.IsPreparing() || store.IsServing()) {
+		if !store.IsPreparing() && !store.IsServing() {
 			continue
 		}
 		if store.GetID() == target.GetID() {
@@ -633,7 +633,7 @@ func checkStoreFasterThanOthers(cluster sche.SchedulerCluster, target *core.Stor
 		if store.IsRemoved() {
 			continue
 		}
-		if !(store.IsPreparing() || store.IsServing()) {
+		if !store.IsPreparing() && !store.IsServing() {
 			continue
 		}
 		if store.GetID() == target.GetID() {

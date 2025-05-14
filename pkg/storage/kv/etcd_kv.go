@@ -52,7 +52,7 @@ func NewEtcdKVBase(client *clientv3.Client) *etcdKVBase {
 	return &etcdKVBase{client: client}
 }
 
-// NewEtcdKV creates a new etcd kv.
+// Load loads the value of the key from etcd.
 func (kv *etcdKVBase) Load(key string) (string, error) {
 	resp, err := etcdutil.EtcdKVGet(kv.client, key)
 	if err != nil {
@@ -243,13 +243,13 @@ func (txn *etcdTxn) Load(key string) (string, error) {
 	}
 	var condition clientv3.Cmp
 	var value string
-	switch respLen := len(resp.Kvs); {
-	case respLen == 0:
+	switch respLen := len(resp.Kvs); respLen {
+	case 0:
 		// If target key does not contain a value, pin the CreateRevision of the key to 0.
 		// Returned value should be empty string.
 		value = ""
 		condition = clientv3.Compare(clientv3.CreateRevision(key), "=", 0)
-	case respLen == 1:
+	case 1:
 		// If target key has value, must make sure it stays the same at the time of commit.
 		value = string(resp.Kvs[0].Value)
 		condition = clientv3.Compare(clientv3.Value(key), "=", value)
@@ -302,11 +302,12 @@ type rawTxnWrapper struct {
 func (l *rawTxnWrapper) If(conditions ...RawTxnCondition) RawTxn {
 	cmpList := make([]clientv3.Cmp, 0, len(conditions))
 	for _, c := range conditions {
-		if c.CmpType == RawTxnCmpExists {
+		switch c.CmpType {
+		case RawTxnCmpExists:
 			cmpList = append(cmpList, clientv3.Compare(clientv3.CreateRevision(c.Key), ">", 0))
-		} else if c.CmpType == RawTxnCmpNotExists {
+		case RawTxnCmpNotExists:
 			cmpList = append(cmpList, clientv3.Compare(clientv3.CreateRevision(c.Key), "=", 0))
-		} else {
+		default:
 			var cmpOp string
 			switch c.CmpType {
 			case RawTxnCmpEqual:

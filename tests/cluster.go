@@ -29,7 +29,6 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 
-	"github.com/tikv/pd/pkg/autoscaling"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/dashboard"
 	"github.com/tikv/pd/pkg/errs"
@@ -97,7 +96,7 @@ func NewTestServer(ctx context.Context, cfg *config.Config, services []string) (
 	if err != nil {
 		return nil, err
 	}
-	serviceBuilders := []server.HandlerBuilder{api.NewHandler, apiv2.NewV2Handler, autoscaling.NewHandler}
+	serviceBuilders := []server.HandlerBuilder{api.NewHandler, apiv2.NewV2Handler}
 	if swaggerserver.Enabled() {
 		serviceBuilders = append(serviceBuilders, swaggerserver.NewHandler)
 	}
@@ -374,7 +373,7 @@ func (s *TestServer) GetStoreRegions(storeID uint64) []*core.RegionInfo {
 func (s *TestServer) BootstrapCluster() error {
 	bootstrapReq := &pdpb.BootstrapRequest{
 		Header: &pdpb.RequestHeader{ClusterId: keypath.ClusterID()},
-		Store:  &metapb.Store{Id: 1, Address: "mock://1", LastHeartbeat: time.Now().UnixNano()},
+		Store:  &metapb.Store{Id: 1, Address: "mock://tikv-1:1", LastHeartbeat: time.Now().UnixNano()},
 		Region: &metapb.Region{Id: 2, Peers: []*metapb.Peer{{Id: 3, StoreId: 1, Role: metapb.PeerRole_Voter}}},
 	}
 	resp, err := s.grpcServer.Bootstrap(context.Background(), bootstrapReq)

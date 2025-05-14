@@ -164,7 +164,7 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestKeyspacesServedByDefaultKeysp
 	keyspaceIDs := []uint32{0, 1, 2, 3, 1000}
 	clients := mcs.WaitForMultiKeyspacesTSOAvailable(
 		suite.ctx, re, keyspaceIDs, []string{suite.pdLeaderServer.GetAddr()})
-	re.Equal(len(keyspaceIDs), len(clients))
+	re.Len(keyspaceIDs, len(clients))
 	mcs.CheckMultiKeyspacesTSO(suite.ctx, re, clients, func() {
 		time.Sleep(3 * time.Second)
 	})
@@ -247,7 +247,7 @@ func (suite *tsoKeyspaceGroupManagerTestSuite) TestKeyspacesServedByNonDefaultKe
 
 	clients := mcs.WaitForMultiKeyspacesTSOAvailable(
 		suite.ctx, re, keyspaceIDs, []string{suite.pdLeaderServer.GetAddr()})
-	re.Equal(len(keyspaceIDs), len(clients))
+	re.Len(keyspaceIDs, len(clients))
 	mcs.CheckMultiKeyspacesTSO(suite.ctx, re, clients, func() {
 		time.Sleep(3 * time.Second)
 	})

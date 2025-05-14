@@ -318,7 +318,7 @@ type retryClient struct {
 
 func newRetryClient(node *Node) *retryClient {
 	// Init PD client and putting it into node.
-	tag := fmt.Sprintf("store %d", node.Store.Id)
+	tag := fmt.Sprintf("store %d", node.Id)
 	var (
 		client                   Client
 		receiveRegionHeartbeatCh <-chan *pdpb.RegionHeartbeatResponse
@@ -524,7 +524,7 @@ retry:
 	return leaderURL, pdCli, nil
 }
 
-/* PDHTTPClient is a client for PD HTTP API, these are the functions that are used in the simulator */
+// PutPDConfig is used to put the PD config
 func PutPDConfig(config *sc.PDConfig) error {
 	if len(config.PlacementRules) > 0 {
 		ruleOps := make([]*pdHttp.RuleOp, 0)

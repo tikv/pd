@@ -256,7 +256,7 @@ func (s *evictLeaderScheduler) ServeHTTP(w http.ResponseWriter, r *http.Request)
 	s.handler.ServeHTTP(w, r)
 }
 
-// GetName implements the Scheduler interface.
+// EncodeConfig encodes the config to a byte array.
 func (s *evictLeaderScheduler) EncodeConfig() ([]byte, error) {
 	return s.conf.encodeConfig()
 }

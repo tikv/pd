@@ -232,7 +232,7 @@ func TestSplitIfRegionTooHot(t *testing.T) {
 	}
 
 	task := buckets.NewCheckPeerTask(b)
-	re.True(tc.HotBucketCache.CheckAsync(task))
+	re.True(tc.CheckAsync(task))
 	time.Sleep(time.Millisecond * 10)
 
 	tc.AddRegionStore(1, 3)
@@ -278,116 +278,6 @@ func TestSplitIfRegionTooHot(t *testing.T) {
 	re.Empty(ops)
 }
 
-func TestSplitBucketsBySize(t *testing.T) {
-	re := require.New(t)
-	cancel, _, tc, oc := prepareSchedulersTest()
-	tc.SetRegionBucketEnabled(true)
-	defer cancel()
-	hb, err := CreateScheduler(readType, oc, storage.NewStorageWithMemoryBackend(), nil)
-	re.NoError(err)
-	solve := newBalanceSolver(hb.(*hotScheduler), tc, utils.Read, transferLeader)
-	solve.cur = &solution{}
-	region := core.NewTestRegionInfo(1, 1, []byte("a"), []byte("f"))
-
-	testdata := []struct {
-		hotBuckets [][]byte
-		splitKeys  [][]byte
-	}{
-		{
-			[][]byte{[]byte("a"), []byte("b"), []byte("f")},
-			[][]byte{[]byte("b")},
-		},
-		{
-			[][]byte{[]byte(""), []byte("a"), []byte("")},
-			nil,
-		},
-		{
-			[][]byte{},
-			nil,
-		},
-	}
-
-	for _, data := range testdata {
-		b := &metapb.Buckets{
-			RegionId:   1,
-			PeriodInMs: 1000,
-			Keys:       data.hotBuckets,
-		}
-		region.UpdateBuckets(b, region.GetBuckets())
-		ops := solve.createSplitOperator([]*core.RegionInfo{region}, bySize)
-		if data.splitKeys == nil {
-			re.Empty(ops)
-			continue
-		}
-		re.Len(ops, 1)
-		op := ops[0]
-		re.Equal(splitHotReadBuckets, op.Desc())
-
-		expectOp, err := operator.CreateSplitRegionOperator(splitHotReadBuckets, region, operator.OpSplit, pdpb.CheckPolicy_USEKEY, data.splitKeys)
-		re.NoError(err)
-		re.Equal(expectOp.Brief(), op.Brief())
-	}
-}
-
-func TestSplitBucketsByLoad(t *testing.T) {
-	re := require.New(t)
-	cancel, _, tc, oc := prepareSchedulersTest()
-	tc.SetRegionBucketEnabled(true)
-	defer cancel()
-	hb, err := CreateScheduler(readType, oc, storage.NewStorageWithMemoryBackend(), nil)
-	re.NoError(err)
-	solve := newBalanceSolver(hb.(*hotScheduler), tc, utils.Read, transferLeader)
-	solve.cur = &solution{}
-	region := core.NewTestRegionInfo(1, 1, []byte("a"), []byte("f"))
-	testdata := []struct {
-		hotBuckets [][]byte
-		splitKeys  [][]byte
-	}{
-		{
-			[][]byte{[]byte(""), []byte("b"), []byte("")},
-			[][]byte{[]byte("b")},
-		},
-		{
-			[][]byte{[]byte(""), []byte("a"), []byte("")},
-			nil,
-		},
-		{
-			[][]byte{[]byte("b"), []byte("c"), []byte("")},
-			[][]byte{[]byte("c")},
-		},
-	}
-	for _, data := range testdata {
-		b := &metapb.Buckets{
-			RegionId:   1,
-			PeriodInMs: 1000,
-			Keys:       data.hotBuckets,
-			Stats: &metapb.BucketStats{
-				ReadBytes:  []uint64{10 * units.KiB, 10 * units.MiB},
-				ReadKeys:   []uint64{256, 256},
-				ReadQps:    []uint64{0, 0},
-				WriteBytes: []uint64{0, 0},
-				WriteQps:   []uint64{0, 0},
-				WriteKeys:  []uint64{0, 0},
-			},
-		}
-		task := buckets.NewCheckPeerTask(b)
-		re.True(tc.HotBucketCache.CheckAsync(task))
-		time.Sleep(time.Millisecond * 10)
-		ops := solve.createSplitOperator([]*core.RegionInfo{region}, byLoad)
-		if data.splitKeys == nil {
-			re.Empty(ops)
-			continue
-		}
-		re.Len(ops, 1)
-		op := ops[0]
-		re.Equal(splitHotReadBuckets, op.Desc())
-
-		expectOp, err := operator.CreateSplitRegionOperator(splitHotReadBuckets, region, operator.OpSplit, pdpb.CheckPolicy_USEKEY, data.splitKeys)
-		re.NoError(err)
-		re.Equal(expectOp.Brief(), op.Brief())
-	}
-}
-
 func TestHotWriteRegionScheduleByteRateOnly(t *testing.T) {
 	re := require.New(t)
 	checkHotWriteRegionScheduleByteRateOnly(re, false /* disable placement rules */)
@@ -414,10 +304,10 @@ func checkHotWriteRegionPlacement(re *require.Assertions, enablePlacementRules b
 	tc.AddLabelsStore(4, 2, map[string]string{"zone": "z2", "host": "h4"})
 	tc.AddLabelsStore(5, 2, map[string]string{"zone": "z2", "host": "h5"})
 	tc.AddLabelsStore(6, 2, map[string]string{"zone": "z2", "host": "h6"})
-	tc.RuleManager.SetRule(&placement.Rule{
+	tc.SetRule(&placement.Rule{
 		GroupID: "pd", ID: "leader", Role: placement.Leader, Count: 1, LabelConstraints: []placement.LabelConstraint{{Key: "zone", Op: "in", Values: []string{"z1"}}},
 	})
-	tc.RuleManager.SetRule(&placement.Rule{
+	tc.SetRule(&placement.Rule{
 		GroupID: "pd", ID: "voter", Role: placement.Follower, Count: 2, LabelConstraints: []placement.LabelConstraint{{Key: "zone", Op: "in", Values: []string{"z2"}}},
 	})
 	tc.RuleManager.DeleteRule("pd", "default")
@@ -441,7 +331,7 @@ func checkHotWriteRegionPlacement(re *require.Assertions, enablePlacementRules b
 	operatorutil.CheckTransferPeerWithLeaderTransfer(re, ops[0], operator.OpHotRegion, 1, 2)
 	clearPendingInfluence(hb.(*hotScheduler))
 
-	tc.RuleManager.SetRule(&placement.Rule{
+	tc.SetRule(&placement.Rule{
 		GroupID: "pd", ID: "voter", Role: placement.Voter, Count: 2, LabelConstraints: []placement.LabelConstraint{{Key: "zone", Op: "in", Values: []string{"z2"}}},
 	})
 	tc.RuleManager.DeleteRule("pd", "follower")
@@ -508,7 +398,7 @@ func checkHotWriteRegionScheduleByteRateOnly(re *require.Assertions, enablePlace
 	// Will transfer a hot region from store 1, because the total count of peers
 	// which is hot for store 1 is larger than other stores.
 	hasLeaderOperator, hasPeerOperator := false, false
-	for i := 0; i < 20 || !(hasLeaderOperator && hasPeerOperator); i++ {
+	for i := 0; i < 20 || (!hasLeaderOperator || !hasPeerOperator); i++ {
 		ops, _ = hb.Schedule(tc, false)
 		op := ops[0]
 		clearPendingInfluence(hb.(*hotScheduler))
@@ -632,7 +522,7 @@ func TestHotWriteRegionScheduleByteRateOnlyWithTiFlash(t *testing.T) {
 	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
 	tc.SetClusterVersion(versioninfo.MinSupportedVersion(versioninfo.ConfChangeV2))
-	re.NoError(tc.RuleManager.SetRules([]*placement.Rule{
+	re.NoError(tc.SetRules([]*placement.Rule{
 		{
 			GroupID:        placement.DefaultGroupID,
 			ID:             placement.DefaultRuleID,
@@ -719,7 +609,7 @@ func TestHotWriteRegionScheduleByteRateOnlyWithTiFlash(t *testing.T) {
 	pdServerCfg := tc.GetPDServerConfig()
 	pdServerCfg.FlowRoundByDigit = 6
 	hasLeaderOperator, hasPeerOperator := false, false
-	for i := 0; i < 20 || !(hasLeaderOperator && hasPeerOperator); i++ {
+	for i := 0; i < 20 || (!hasLeaderOperator || !hasPeerOperator); i++ {
 		clearPendingInfluence(hb)
 		ops, _ := hb.Schedule(tc, false)
 		op := ops[0]
@@ -1108,7 +998,8 @@ func checkHotWriteRegionScheduleWithPendingInfluence(re *require.Assertions, dim
 	updateStore(3, 6*units.MiB*utils.StoreHeartBeatReportInterval)
 	updateStore(4, 4*units.MiB*utils.StoreHeartBeatReportInterval)
 
-	if dim == 0 { // byte rate
+	switch dim {
+	case 0: // byte rate
 		hb.(*hotScheduler).conf.WriteLeaderPriorities = []string{utils.KeyPriority, utils.BytePriority}
 		addRegionInfo(tc, utils.Write, []testRegionInfo{
 			{1, []uint64{1, 2, 3}, 512 * units.KiB, 0, 0},
@@ -1118,7 +1009,7 @@ func checkHotWriteRegionScheduleWithPendingInfluence(re *require.Assertions, dim
 			{5, []uint64{1, 2, 3}, 512 * units.KiB, 0, 0},
 			{6, []uint64{1, 2, 3}, 512 * units.KiB, 0, 0},
 		})
-	} else if dim == 1 { // key rate
+	case 1: // key rate
 		hb.(*hotScheduler).conf.WriteLeaderPriorities = []string{utils.BytePriority, utils.KeyPriority}
 		addRegionInfo(tc, utils.Write, []testRegionInfo{
 			{1, []uint64{1, 2, 3}, 0, 512 * units.KiB, 0},
@@ -1128,6 +1019,7 @@ func checkHotWriteRegionScheduleWithPendingInfluence(re *require.Assertions, dim
 			{5, []uint64{1, 2, 3}, 0, 512 * units.KiB, 0},
 			{6, []uint64{1, 2, 3}, 0, 512 * units.KiB, 0},
 		})
+	default:
 	}
 
 	for range 20 {
@@ -1493,7 +1385,8 @@ func checkHotReadRegionScheduleWithPendingInfluence(re *require.Assertions, dim 
 	updateStore(3, 6*units.MiB*utils.StoreHeartBeatReportInterval)
 	updateStore(4, 5*units.MiB*utils.StoreHeartBeatReportInterval)
 
-	if dim == 0 { // byte rate
+	switch dim {
+	case 0: // byte rate
 		addRegionInfo(tc, utils.Read, []testRegionInfo{
 			{1, []uint64{1, 2, 3}, 512 * units.KiB, 0, 0},
 			{2, []uint64{1, 2, 3}, 512 * units.KiB, 0, 0},
@@ -1504,7 +1397,7 @@ func checkHotReadRegionScheduleWithPendingInfluence(re *require.Assertions, dim 
 			{7, []uint64{3, 2, 1}, 512 * units.KiB, 0, 0},
 			{8, []uint64{3, 2, 1}, 512 * units.KiB, 0, 0},
 		})
-	} else if dim == 1 { // key rate
+	case 1: // key rate
 		addRegionInfo(tc, utils.Read, []testRegionInfo{
 			{1, []uint64{1, 2, 3}, 0, 512 * units.KiB, 0},
 			{2, []uint64{1, 2, 3}, 0, 512 * units.KiB, 0},
@@ -1515,6 +1408,7 @@ func checkHotReadRegionScheduleWithPendingInfluence(re *require.Assertions, dim 
 			{7, []uint64{3, 2, 1}, 0, 512 * units.KiB, 0},
 			{8, []uint64{3, 2, 1}, 0, 512 * units.KiB, 0},
 		})
+	default:
 	}
 
 	// Before schedule, store byte/key rate: 7.1 | 6.1 | 6 | 5
@@ -1990,7 +1884,7 @@ func checkHotCacheCheckRegionFlowWithDifferentThreshold(re *require.Assertions, 
 		}
 	}
 	items := tc.AddLeaderRegionWithWriteInfo(201, 1, rate*utils.RegionHeartBeatReportInterval, 0, 0, utils.RegionHeartBeatReportInterval, []uint64{2, 3}, 1)
-	re.Equal(float64(rate)*statistics.HotThresholdRatio, tc.HotCache.GetThresholds(utils.Write, items[0].StoreID)[0])
+	re.Equal(float64(rate)*statistics.HotThresholdRatio, tc.GetThresholds(utils.Write, items[0].StoreID)[0])
 	// Threshold of store 1,2,3 is 409.6 units.KiB and others are 1 units.KiB
 	// Make the hot threshold of some store is high and the others are low
 	rate = 10 * units.KiB
@@ -2002,60 +1896,6 @@ func checkHotCacheCheckRegionFlowWithDifferentThreshold(re *require.Assertions, 
 		} else {
 			re.Equal(utils.Update, item.GetActionType())
 		}
-	}
-}
-
-func TestHotCacheSortHotPeer(t *testing.T) {
-	re := require.New(t)
-	cancel, _, tc, oc := prepareSchedulersTest()
-	defer cancel()
-	sche, err := CreateScheduler(types.BalanceHotRegionScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigJSONDecoder([]byte("null")))
-	re.NoError(err)
-	hb := sche.(*hotScheduler)
-	leaderSolver := newBalanceSolver(hb, tc, utils.Read, transferLeader)
-	hotPeers := []*statistics.HotPeerStat{{
-		RegionID: 1,
-		Loads: []float64{
-			utils.QueryDim: 10,
-			utils.ByteDim:  1,
-		},
-	}, {
-		RegionID: 2,
-		Loads: []float64{
-			utils.QueryDim: 1,
-			utils.ByteDim:  10,
-		},
-	}, {
-		RegionID: 3,
-		Loads: []float64{
-			utils.QueryDim: 5,
-			utils.ByteDim:  6,
-		},
-	}}
-
-	st := &statistics.StoreLoadDetail{
-		HotPeers: hotPeers,
-	}
-	leaderSolver.maxPeerNum = 1
-	u := leaderSolver.filterHotPeers(st)
-	checkSortResult(re, []uint64{1}, u)
-
-	leaderSolver.maxPeerNum = 2
-	u = leaderSolver.filterHotPeers(st)
-	checkSortResult(re, []uint64{1, 2}, u)
-}
-
-func checkSortResult(re *require.Assertions, regions []uint64, hotPeers []*statistics.HotPeerStat) {
-	re.Equal(len(hotPeers), len(regions))
-	for _, region := range regions {
-		in := false
-		for _, hotPeer := range hotPeers {
-			if hotPeer.RegionID == region {
-				in = true
-				break
-			}
-		}
-		re.True(in)
 	}
 }
 
@@ -2604,373 +2444,6 @@ func TestConfigValidation(t *testing.T) {
 	re.Error(err)
 }
 
-type maxZombieDurTestCase struct {
-	typ           resourceType
-	isTiFlash     bool
-	firstPriority int
-	maxZombieDur  int
-}
-
-func TestMaxZombieDuration(t *testing.T) {
-	re := require.New(t)
-	cancel, _, _, oc := prepareSchedulersTest()
-	defer cancel()
-	hb, err := CreateScheduler(types.BalanceHotRegionScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.BalanceHotRegionScheduler, nil))
-	re.NoError(err)
-	maxZombieDur := hb.(*hotScheduler).conf.getValidConf().MaxZombieRounds
-	testCases := []maxZombieDurTestCase{
-		{
-			typ:          readPeer,
-			maxZombieDur: maxZombieDur * utils.StoreHeartBeatReportInterval,
-		},
-		{
-			typ:          readLeader,
-			maxZombieDur: maxZombieDur * utils.StoreHeartBeatReportInterval,
-		},
-		{
-			typ:          writePeer,
-			maxZombieDur: maxZombieDur * utils.StoreHeartBeatReportInterval,
-		},
-		{
-			typ:          writePeer,
-			isTiFlash:    true,
-			maxZombieDur: maxZombieDur * utils.RegionHeartBeatReportInterval,
-		},
-		{
-			typ:           writeLeader,
-			firstPriority: utils.KeyDim,
-			maxZombieDur:  maxZombieDur * utils.RegionHeartBeatReportInterval,
-		},
-		{
-			typ:           writeLeader,
-			firstPriority: utils.QueryDim,
-			maxZombieDur:  maxZombieDur * utils.StoreHeartBeatReportInterval,
-		},
-	}
-	for _, testCase := range testCases {
-		src := &statistics.StoreLoadDetail{
-			StoreSummaryInfo: &statistics.StoreSummaryInfo{},
-		}
-		if testCase.isTiFlash {
-			src.SetEngineAsTiFlash()
-		}
-		bs := &balanceSolver{
-			sche:          hb.(*hotScheduler),
-			resourceTy:    testCase.typ,
-			firstPriority: testCase.firstPriority,
-			best:          &solution{srcStore: src},
-		}
-		re.Equal(time.Duration(testCase.maxZombieDur)*time.Second, bs.calcMaxZombieDur())
-	}
-}
-
-func TestExpect(t *testing.T) {
-	re := require.New(t)
-	cancel, _, _, oc := prepareSchedulersTest()
-	defer cancel()
-	hb, err := CreateScheduler(types.BalanceHotRegionScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.BalanceHotRegionScheduler, nil))
-	re.NoError(err)
-	testCases := []struct {
-		rankVersion    string
-		strict         bool
-		isSrc          bool
-		allow          bool
-		toleranceRatio float64
-		rs             resourceType
-		load           *statistics.StoreLoad
-		expect         *statistics.StoreLoad
-	}{
-		// test src, it will be allowed when loads are higher than expect
-		{
-			rankVersion: "v1",
-			strict:      true, // all of
-			load: &statistics.StoreLoad{ // all dims are higher than expect, allow schedule
-				Loads:        []float64{2.0, 2.0, 2.0},
-				HistoryLoads: [][]float64{{2.0, 2.0}, {2.0, 2.0}, {2.0, 2.0}},
-			},
-			expect: &statistics.StoreLoad{
-				Loads:        []float64{1.0, 1.0, 1.0},
-				HistoryLoads: [][]float64{{1.0, 1.0}, {1.0, 1.0}, {1.0, 1.0}},
-			},
-			isSrc: true,
-			allow: true,
-		},
-		{
-			rankVersion: "v1",
-			strict:      true, // all of
-			load: &statistics.StoreLoad{ // all dims are higher than expect, but lower than expect*toleranceRatio, not allow schedule
-				Loads:        []float64{2.0, 2.0, 2.0},
-				HistoryLoads: [][]float64{{2.0, 2.0}, {2.0, 2.0}, {2.0, 2.0}},
-			},
-			expect: &statistics.StoreLoad{
-				Loads:        []float64{1.0, 1.0, 1.0},
-				HistoryLoads: [][]float64{{1.0, 1.0}, {1.0, 1.0}, {1.0, 1.0}},
-			},
-			isSrc:          true,
-			toleranceRatio: 2.2,
-			allow:          false,
-		},
-		{
-			rankVersion: "v1",
-			strict:      true, // all of
-			load: &statistics.StoreLoad{ // only queryDim is lower, but the dim is no selected, allow schedule
-				Loads:        []float64{2.0, 2.0, 1.0},
-				HistoryLoads: [][]float64{{2.0, 2.0}, {2.0, 2.0}, {1.0, 1.0}},
-			},
-			expect: &statistics.StoreLoad{
-				Loads:        []float64{1.0, 1.0, 1.0},
-				HistoryLoads: [][]float64{{1.0, 1.0}, {1.0, 1.0}, {1.0, 1.0}},
-			},
-			isSrc: true,
-			allow: true,
-		},
-		{
-			rankVersion: "v1",
-			strict:      true, // all of
-			load: &statistics.StoreLoad{ // only keyDim is lower, and the dim is selected, not allow schedule
-				Loads:        []float64{2.0, 1.0, 2.0},
-				HistoryLoads: [][]float64{{2.0, 2.0}, {1.0, 1.0}, {1.0, 1.0}},
-			},
-			expect: &statistics.StoreLoad{
-				Loads:        []float64{1.0, 1.0, 1.0},
-				HistoryLoads: [][]float64{{1.0, 1.0}, {1.0, 1.0}, {1.0, 1.0}},
-			},
-			isSrc: true,
-			allow: false,
-		},
-		{
-			rankVersion: "v1",
-			strict:      false, // first only
-			load: &statistics.StoreLoad{ // keyDim is higher, and the dim is selected, allow schedule
-				Loads:        []float64{1.0, 2.0, 1.0},
-				HistoryLoads: [][]float64{{1.0, 1.0}, {2.0, 2.0}, {1.0, 1.0}},
-			},
-			expect: &statistics.StoreLoad{
-				Loads:        []float64{1.0, 1.0, 1.0},
-				HistoryLoads: [][]float64{{1.0, 1.0}, {1.0, 1.0}, {1.0, 1.0}},
-			},
-			isSrc: true,
-			allow: true,
-		},
-		{
-			rankVersion: "v1",
-			strict:      false, // first only
-			load: &statistics.StoreLoad{ // although byteDim is higher, the dim is not first, not allow schedule
-				Loads:        []float64{2.0, 1.0, 1.0},
-				HistoryLoads: [][]float64{{2.0, 1.0}, {1.0, 1.0}, {1.0, 1.0}},
-			},
-			expect: &statistics.StoreLoad{
-				Loads:        []float64{1.0, 1.0, 1.0},
-				HistoryLoads: [][]float64{{1.0, 1.0}, {1.0, 1.0}, {1.0, 1.0}},
-			},
-			isSrc: true,
-			allow: false,
-		},
-		{
-			rankVersion: "v1",
-			strict:      false, // first only
-			load: &statistics.StoreLoad{ // although queryDim is higher, the dim is no selected, not allow schedule
-				Loads:        []float64{1.0, 1.0, 2.0},
-				HistoryLoads: [][]float64{{1.0, 1.0}, {1.0, 1.0}, {2.0, 2.0}},
-			},
-			expect: &statistics.StoreLoad{
-				Loads:        []float64{1.0, 1.0, 1.0},
-				HistoryLoads: [][]float64{{1.0, 1.0}, {1.0, 1.0}, {1.0, 1.0}},
-			},
-			isSrc: true,
-			allow: false,
-		},
-		{
-			rankVersion: "v1",
-			strict:      false, // first only
-			load: &statistics.StoreLoad{ // all dims are lower than expect, not allow schedule
-				Loads:        []float64{1.0, 1.0, 1.0},
-				HistoryLoads: [][]float64{{1.0, 1.0}, {1.0, 1.0}, {1.0, 1.0}},
-			},
-			expect: &statistics.StoreLoad{
-				Loads:        []float64{2.0, 2.0, 2.0},
-				HistoryLoads: [][]float64{{2.0, 2.0}, {2.0, 2.0}, {2.0, 2.0}},
-			},
-			isSrc: true,
-			allow: false,
-		},
-		{
-			rankVersion: "v1",
-			strict:      true,
-			rs:          writeLeader,
-			load: &statistics.StoreLoad{ // only keyDim is higher, but write leader only consider the first priority
-				Loads:        []float64{1.0, 2.0, 1.0},
-				HistoryLoads: [][]float64{{1.0, 1.0}, {2.0, 2.0}, {2.0, 2.0}},
-			},
-			expect: &statistics.StoreLoad{
-				Loads:        []float64{1.0, 1.0, 1.0},
-				HistoryLoads: [][]float64{{1.0, 1.0}, {1.0, 1.0}, {1.0, 1.0}},
-			},
-			isSrc: true,
-			allow: true,
-		},
-		{
-			rankVersion: "v1",
-			strict:      true,
-			rs:          writeLeader,
-			load: &statistics.StoreLoad{ // although byteDim is higher, the dim is not first, not allow schedule
-				Loads:        []float64{2.0, 1.0, 1.0},
-				HistoryLoads: [][]float64{{2.0, 2.0}, {1.0, 1.0}, {2.0, 2.0}},
-			},
-			expect: &statistics.StoreLoad{
-				Loads:        []float64{1.0, 1.0, 1.0},
-				HistoryLoads: [][]float64{{1.0, 1.0}, {1.0, 1.0}, {1.0, 1.0}},
-			},
-			isSrc: true,
-			allow: false,
-		},
-		{
-			rankVersion: "v1",
-			strict:      true,
-			rs:          writeLeader,
-			load: &statistics.StoreLoad{ // history loads is not higher than the expected.
-				Loads:        []float64{2.0, 1.0, 1.0},
-				HistoryLoads: [][]float64{{2.0, 2.0}, {1.0, 2.0}, {1.0, 2.0}},
-			},
-			expect: &statistics.StoreLoad{
-				Loads:        []float64{1.0, 1.0, 1.0},
-				HistoryLoads: [][]float64{{1.0, 2.0}, {1.0, 2.0}, {1.0, 2.0}},
-			},
-			isSrc: true,
-			allow: false,
-		},
-		// v2
-		{
-			rankVersion: "v2",
-			strict:      false, // any of
-			load: &statistics.StoreLoad{ // keyDim is higher, and the dim is selected, allow schedule
-				Loads:        []float64{1.0, 2.0, 1.0},
-				HistoryLoads: [][]float64{{1.0, 1.0}, {2.0, 2.0}, {1.0, 1.0}},
-			},
-			expect: &statistics.StoreLoad{
-				Loads:        []float64{1.0, 1.0, 1.0},
-				HistoryLoads: [][]float64{{1.0, 1.0}, {1.0, 1.0}, {1.0, 1.0}},
-			},
-			isSrc: true,
-			allow: true,
-		},
-		{
-			rankVersion: "v2",
-			strict:      false, // any of
-			load: &statistics.StoreLoad{ // byteDim is higher, and the dim is selected, allow schedule
-				Loads:        []float64{2.0, 1.0, 1.0},
-				HistoryLoads: [][]float64{{2.0, 2.0}, {1.0, 1.0}, {1.0, 1.0}},
-			},
-			expect: &statistics.StoreLoad{
-				Loads:        []float64{1.0, 1.0, 1.0},
-				HistoryLoads: [][]float64{{1.0, 1.0}, {1.0, 1.0}, {1.0, 1.0}},
-			},
-			isSrc: true,
-			allow: true,
-		},
-		{
-			rankVersion: "v2",
-			strict:      false, // any of
-			load: &statistics.StoreLoad{ // although queryDim is higher, the dim is no selected, not allow schedule
-				Loads:        []float64{1.0, 1.0, 2.0},
-				HistoryLoads: [][]float64{{1.0, 1.0}, {1.0, 1.0}, {2.0, 2.0}},
-			},
-			expect: &statistics.StoreLoad{
-				Loads:        []float64{1.0, 1.0, 1.0},
-				HistoryLoads: [][]float64{{1.0, 1.0}, {1.0, 1.0}, {1.0, 1.0}},
-			},
-			isSrc: true,
-			allow: false,
-		},
-		{
-			rankVersion: "v2",
-			strict:      false, // any of
-			load: &statistics.StoreLoad{ // all dims are lower than expect, not allow schedule
-				Loads:        []float64{1.0, 1.0, 1.0},
-				HistoryLoads: [][]float64{{1.0, 1.0}, {1.0, 1.0}, {1.0, 1.0}},
-			},
-			expect: &statistics.StoreLoad{
-				Loads:        []float64{2.0, 2.0, 2.0},
-				HistoryLoads: [][]float64{{2.0, 2.0}, {2.0, 2.0}, {2.0, 2.0}},
-			},
-			isSrc: true,
-			allow: false,
-		},
-		{
-			rankVersion: "v2",
-			strict:      true,
-			rs:          writeLeader,
-			load: &statistics.StoreLoad{ // only keyDim is higher, but write leader only consider the first priority
-				Loads:        []float64{1.0, 2.0, 1.0},
-				HistoryLoads: [][]float64{{1.0, 1.0}, {2.0, 2.0}, {1.0, 1.0}},
-			},
-			expect: &statistics.StoreLoad{
-				Loads:        []float64{1.0, 1.0, 1.0},
-				HistoryLoads: [][]float64{{1.0, 1.0}, {1.0, 1.0}, {1.0, 1.0}},
-			},
-			isSrc: true,
-			allow: true,
-		},
-		{
-			rankVersion: "v2",
-			strict:      true,
-			rs:          writeLeader,
-			load: &statistics.StoreLoad{ // although byteDim is higher, the dim is not first, not allow schedule
-				Loads:        []float64{2.0, 1.0, 1.0},
-				HistoryLoads: [][]float64{{2.0, 2.0}, {1.0, 1.0}, {1.0, 1.0}},
-			},
-			expect: &statistics.StoreLoad{
-				Loads:        []float64{1.0, 1.0, 1.0},
-				HistoryLoads: [][]float64{{1.0, 1.0}, {1.0, 1.0}, {1.0, 1.0}},
-			},
-			isSrc: true,
-			allow: false,
-		},
-	}
-
-	srcToDst := func(src *statistics.StoreLoad) *statistics.StoreLoad {
-		dst := make([]float64, len(src.Loads))
-		for i, v := range src.Loads {
-			dst[i] = 3.0 - v
-		}
-		historyLoads := make([][]float64, len(src.HistoryLoads))
-		for i, dim := range src.HistoryLoads {
-			historyLoads[i] = make([]float64, len(dim))
-			for j, load := range dim {
-				historyLoads[i][j] = 3.0 - load
-			}
-		}
-		return &statistics.StoreLoad{
-			Loads:        dst,
-			HistoryLoads: historyLoads,
-		}
-	}
-
-	for _, testCase := range testCases {
-		toleranceRatio := testCase.toleranceRatio
-		if toleranceRatio == 0.0 {
-			toleranceRatio = 1.0 // default for test case
-		}
-		bs := &balanceSolver{
-			sche:           hb.(*hotScheduler),
-			firstPriority:  utils.KeyDim,
-			secondPriority: utils.ByteDim,
-			resourceTy:     testCase.rs,
-		}
-		if testCase.rankVersion == "v1" {
-			bs.rank = initRankV1(bs)
-		} else {
-			bs.rank = initRankV2(bs)
-		}
-
-		bs.sche.conf.StrictPickingStore = testCase.strict
-		re.Equal(testCase.allow, bs.checkSrcByPriorityAndTolerance(testCase.load, testCase.expect, toleranceRatio))
-		re.Equal(testCase.allow, bs.checkDstByPriorityAndTolerance(srcToDst(testCase.load), srcToDst(testCase.expect), toleranceRatio))
-		re.Equal(testCase.allow, bs.checkSrcHistoryLoadsByPriorityAndTolerance(testCase.load, testCase.expect, toleranceRatio))
-		re.Equal(testCase.allow, bs.checkDstHistoryLoadsByPriorityAndTolerance(srcToDst(testCase.load), srcToDst(testCase.expect), toleranceRatio))
-	}
-}
-
 // ref https://github.com/tikv/pd/issues/5701
 func TestEncodeConfig(t *testing.T) {
 	re := require.New(t)
@@ -2981,47 +2454,4 @@ func TestEncodeConfig(t *testing.T) {
 	data, err := sche.EncodeConfig()
 	re.NoError(err)
 	re.NotEqual("null", string(data))
-}
-
-func TestBucketFirstStat(t *testing.T) {
-	re := require.New(t)
-	testdata := []struct {
-		firstPriority  int
-		secondPriority int
-		rwTy           utils.RWType
-		expect         utils.RegionStatKind
-	}{
-		{
-			firstPriority:  utils.KeyDim,
-			secondPriority: utils.ByteDim,
-			rwTy:           utils.Write,
-			expect:         utils.RegionWriteKeys,
-		},
-		{
-			firstPriority:  utils.QueryDim,
-			secondPriority: utils.ByteDim,
-			rwTy:           utils.Write,
-			expect:         utils.RegionWriteBytes,
-		},
-		{
-			firstPriority:  utils.KeyDim,
-			secondPriority: utils.ByteDim,
-			rwTy:           utils.Read,
-			expect:         utils.RegionReadKeys,
-		},
-		{
-			firstPriority:  utils.QueryDim,
-			secondPriority: utils.ByteDim,
-			rwTy:           utils.Read,
-			expect:         utils.RegionReadBytes,
-		},
-	}
-	for _, data := range testdata {
-		bs := &balanceSolver{
-			firstPriority:  data.firstPriority,
-			secondPriority: data.secondPriority,
-			rwTy:           data.rwTy,
-		}
-		re.Equal(data.expect, bs.bucketFirstStat())
-	}
 }

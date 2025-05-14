@@ -159,7 +159,7 @@ func (suite *serviceClientTestSuite) SetupSuite() {
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
-	suite.NotNil(suite.leaderClient)
+	suite.Require().NotNil(suite.leaderClient)
 }
 
 func (suite *serviceClientTestSuite) TearDownTest() {

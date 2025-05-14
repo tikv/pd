@@ -30,7 +30,7 @@ type MetaProcessContext struct {
 	SyncRegionRunner ratelimit.Runner
 }
 
-// NewMetaProcessContext creates a new MetaProcessContext.
+// ContextTODO returns a context for meta process.
 // used in tests, can be changed if no need to test concurrency.
 func ContextTODO() *MetaProcessContext {
 	return &MetaProcessContext{

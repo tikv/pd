@@ -82,7 +82,7 @@ func TestConcurrentRunner(t *testing.T) {
 		for i := 1; i < 11; i++ {
 			regionID := uint64(i)
 			if i == 10 {
-				regionID = 4
+				regionID = 6
 			}
 			err := runner.RunTask(
 				regionID,
@@ -95,7 +95,12 @@ func TestConcurrentRunner(t *testing.T) {
 			time.Sleep(1 * time.Millisecond)
 		}
 
-		updatedSubmitted := runner.pendingTasks[1].submittedAt
+		var updatedSubmitted time.Time
+		for _, task := range runner.pendingTasks {
+			if task.id == 6 {
+				updatedSubmitted = task.submittedAt
+			}
+		}
 		lastSubmitted := runner.pendingTasks[len(runner.pendingTasks)-1].submittedAt
 		require.Greater(t, updatedSubmitted, lastSubmitted)
 	})

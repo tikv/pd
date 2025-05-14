@@ -138,15 +138,6 @@ func (l *Lease) KeepAlive(ctx context.Context) {
 					l.expireTime.Store(t)
 				}
 			}
-			// Stop the timer if it's not stopped.
-			if !timer.Stop() {
-				select {
-				case <-timer.C: // try to drain from the channel
-				default:
-				}
-			}
-			// We need be careful here, see more details in the comments of Timer.Reset.
-			// https://pkg.go.dev/time@master#Timer.Reset
 			timer.Reset(l.leaseTimeout)
 		case <-timer.C:
 			log.Info("keep alive lease too slow", zap.Duration("timeout-duration", l.leaseTimeout), zap.Time("actual-expire", l.expireTime.Load().(time.Time)), zap.String("purpose", l.Purpose))
@@ -193,9 +184,8 @@ func (l *Lease) keepAliveWorker(ctx context.Context, interval time.Duration) <-c
 					case ch <- expire:
 					// Here we don't use `ctx1.Done()` because we want to make sure if the keep alive success, we can update the expire time.
 					case <-ctx.Done():
+						log.Info("lease keep alive once exit", zap.String("purpose", l.Purpose), zap.Time("start", start), zap.Time("expire", expire))
 					}
-				} else {
-					log.Error("keep alive response ttl is zero", zap.String("purpose", l.Purpose))
 				}
 			}(start)
 

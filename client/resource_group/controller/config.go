@@ -126,15 +126,15 @@ type Config struct {
 // Adjust adjusts the configuration.
 func (c *Config) Adjust() {
 	// valid the configuration, TODO: separately add the valid function.
-	if c.BaseConfig.LTBMaxWaitDuration.Duration == 0 {
-		c.BaseConfig.LTBMaxWaitDuration = NewDuration(defaultMaxWaitDuration)
+	if c.LTBMaxWaitDuration.Duration == 0 {
+		c.LTBMaxWaitDuration = NewDuration(defaultMaxWaitDuration)
 	}
-	if c.LocalBucketConfig.WaitRetryInterval.Duration == 0 {
-		c.LocalBucketConfig.WaitRetryInterval = NewDuration(defaultWaitRetryInterval)
+	if c.WaitRetryInterval.Duration == 0 {
+		c.WaitRetryInterval = NewDuration(defaultWaitRetryInterval)
 	}
 	// adjust the client settings. calculate the retry times.
-	if int(c.BaseConfig.LTBTokenRPCMaxDelay.Duration) != int(c.LocalBucketConfig.WaitRetryInterval.Duration)*c.LocalBucketConfig.WaitRetryTimes {
-		c.LocalBucketConfig.WaitRetryTimes = int(c.BaseConfig.LTBTokenRPCMaxDelay.Duration / c.LocalBucketConfig.WaitRetryInterval.Duration)
+	if int(c.LTBTokenRPCMaxDelay.Duration) != int(c.WaitRetryInterval.Duration)*c.WaitRetryTimes {
+		c.WaitRetryTimes = int(c.LTBTokenRPCMaxDelay.Duration / c.WaitRetryInterval.Duration)
 	}
 }
 

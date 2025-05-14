@@ -75,7 +75,7 @@ func (se *StorageEndpoint) SaveTimestamp(groupID uint32, ts time.Time, leadershi
 		zap.String("leader-key", leadership.GetLeaderKey()),
 		zap.String("expected-leader-value", leadership.GetLeaderValue()),
 	}
-	log.Info("saving timestamp to the storage", logFilds...)
+	log.Debug("saving timestamp to the storage", logFilds...)
 	// The PD leadership or TSO primary will always be granted first before the TSO timestamp window is saved.
 	// So we here check whether the leader value is filled to see if the requirement is met.
 	if len(leadership.GetLeaderValue()) == 0 {

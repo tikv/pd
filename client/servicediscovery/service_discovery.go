@@ -260,7 +260,7 @@ func (c *serviceClient) NeedRetry(pdErr *pdpb.Error, err error) bool {
 	if c.IsConnectedToLeader() {
 		return false
 	}
-	return !(err == nil && pdErr == nil)
+	return err != nil || pdErr != nil
 }
 
 type errFn func(*pdpb.Error) bool
@@ -849,7 +849,7 @@ func (c *serviceDiscovery) initClusterID() error {
 func (c *serviceDiscovery) checkServiceModeChanged() error {
 	leaderURL := c.getLeaderURL()
 	if len(leaderURL) == 0 {
-		return errors.New("no leader found")
+		return errors.New(errs.NoLeaderErr)
 	}
 
 	clusterInfo, err := c.getClusterInfo(c.ctx, leaderURL, c.option.Timeout)

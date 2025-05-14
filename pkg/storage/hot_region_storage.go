@@ -323,7 +323,7 @@ func (h *HotRegionStorage) flush() error {
 		}
 		batch.Put([]byte(key), value)
 	}
-	if err := h.LevelDBKV.Write(batch, nil); err != nil {
+	if err := h.Write(batch, nil); err != nil {
 		return errs.ErrLevelDBWrite.Wrap(err).GenWithStackByCause()
 	}
 	h.batchHotInfo = make(map[string]*HistoryHotRegion)

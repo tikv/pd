@@ -119,7 +119,7 @@ func (suite *keyspaceGroupManagerTestSuite) TestDeletedGroupCleanup() {
 	testutil.Eventually(re, func() bool {
 		ts, err := mgr.storage.LoadTimestamp(1)
 		re.NoError(err)
-		return ts == typeutil.ZeroTime
+		return ts.Equal(typeutil.ZeroTime)
 	})
 	// Check if the keyspace group is deleted completely.
 	mgr.RLock()
@@ -938,7 +938,7 @@ func (suite *keyspaceGroupManagerTestSuite) TestUpdateKeyspaceGroupMembership() 
 		verifyGlobalKeyspaceLookupTable(re, kgm.keyspaceLookupTable, newGroup.KeyspaceLookupTable)
 
 		// Verify the keyspaces loaded is sorted.
-		re.Equal(len(keyspaces), len(newGroup.Keyspaces))
+		re.Len(keyspaces, len(newGroup.Keyspaces))
 		for i := range newGroup.Keyspaces {
 			if i > 0 {
 				re.Less(newGroup.Keyspaces[i-1], newGroup.Keyspaces[i])
@@ -950,7 +950,7 @@ func (suite *keyspaceGroupManagerTestSuite) TestUpdateKeyspaceGroupMembership() 
 func verifyLocalKeyspaceLookupTable(
 	re *require.Assertions, keyspaceLookupTable map[uint32]struct{}, newKeyspaces []uint32,
 ) {
-	re.Equalf(len(newKeyspaces), len(keyspaceLookupTable),
+	re.Lenf(newKeyspaces, len(keyspaceLookupTable),
 		"%v %v", newKeyspaces, keyspaceLookupTable)
 	for _, keyspace := range newKeyspaces {
 		_, ok := keyspaceLookupTable[keyspace]

@@ -17,15 +17,12 @@ package server
 import (
 	"fmt"
 	"os"
-	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/BurntSushi/toml"
 	"github.com/spf13/pflag"
 	"go.uber.org/zap"
 
-	"github.com/pingcap/errors"
 	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
@@ -57,9 +54,7 @@ type Config struct {
 	ListenAddr          string `toml:"listen-addr" json:"listen-addr"`
 	AdvertiseListenAddr string `toml:"advertise-listen-addr" json:"advertise-listen-addr"`
 
-	Name              string `toml:"name" json:"name"`
-	DataDir           string `toml:"data-dir" json:"data-dir"`
-	EnableGRPCGateway bool   `json:"enable-grpc-gateway"`
+	Name string `toml:"name" json:"name"`
 
 	// LeaderLease defines the time within which a TSO primary/leader must update its TTL
 	// in etcd, otherwise etcd will expire the leader key and other servers can campaign
@@ -188,12 +183,6 @@ func (c *Config) Adjust(meta *toml.MetaData) error {
 		}
 		configutil.AdjustString(&c.Name, fmt.Sprintf("%s-%s", defaultName, hostname))
 	}
-	configutil.AdjustString(&c.DataDir, fmt.Sprintf("default-datadir.%s", c.Name))
-	configutil.AdjustPath(&c.DataDir)
-
-	if err := c.Validate(); err != nil {
-		return err
-	}
 
 	configutil.AdjustString(&c.BackendEndpoints, defaultBackendEndpoints)
 	configutil.AdjustString(&c.ListenAddr, defaultListenAddr)
@@ -214,10 +203,6 @@ func (c *Config) Adjust(meta *toml.MetaData) error {
 			zap.Duration("update-physical-interval", c.TSOUpdatePhysicalInterval.Duration))
 	}
 
-	if !configMetaData.IsDefined("enable-grpc-gateway") {
-		c.EnableGRPCGateway = constant.DefaultEnableGRPCGateway
-	}
-
 	c.adjustLog(configMetaData.Child("log"))
 	return c.Security.Encryption.Adjust()
 }
@@ -228,25 +213,4 @@ func (c *Config) adjustLog(meta *configutil.ConfigMetaData) {
 	}
 	configutil.AdjustString(&c.Log.Format, constant.DefaultLogFormat)
 	configutil.AdjustString(&c.Log.Level, constant.DefaultLogLevel)
-}
-
-// Validate is used to validate if some configurations are right.
-func (c *Config) Validate() error {
-	dataDir, err := filepath.Abs(c.DataDir)
-	if err != nil {
-		return errors.WithStack(err)
-	}
-	logFile, err := filepath.Abs(c.Log.File.Filename)
-	if err != nil {
-		return errors.WithStack(err)
-	}
-	rel, err := filepath.Rel(dataDir, filepath.Dir(logFile))
-	if err != nil {
-		return errors.WithStack(err)
-	}
-	if !strings.HasPrefix(rel, "..") {
-		return errors.New("log directory shouldn't be the subdirectory of data directory")
-	}
-
-	return nil
 }

@@ -1006,7 +1006,7 @@ func TestServiceMiddlewareConfig(t *testing.T) {
 
 	_, err = tests.ExecuteCommand(cmd, "-u", pdAddr, "config", "set", "service-middleware", "audit", "enable-audit", "false")
 	re.NoError(err)
-	conf.AuditConfig.EnableAudit = false
+	conf.EnableAudit = false
 	check()
 	_, err = tests.ExecuteCommand(cmd, "-u", pdAddr, "config", "set", "service-middleware", "rate-limit", "GetRegion", "qps", "100.1")
 	re.NoError(err)
@@ -1270,7 +1270,7 @@ func (suite *configTestSuite) checkPDServerConfig(cluster *pdTests.TestCluster) 
 	re.Equal(24*time.Hour, conf.MaxResetTSGap.Duration)
 	re.Equal("table", conf.KeyType)
 	re.Equal(typeutil.StringSlice([]string{}), conf.RuntimeServices)
-	re.Equal("", conf.MetricStorage)
+	re.Empty(conf.MetricStorage)
 	if conf.DashboardAddress != "auto" { // dashboard has been assigned
 		re.Equal(leaderServer.GetAddr(), conf.DashboardAddress)
 	}

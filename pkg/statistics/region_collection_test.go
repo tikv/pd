@@ -45,10 +45,10 @@ func TestRegionStatistics(t *testing.T) {
 	}
 
 	metaStores := []*metapb.Store{
-		{Id: 1, Address: "mock://tikv-1"},
-		{Id: 2, Address: "mock://tikv-2"},
-		{Id: 3, Address: "mock://tikv-3"},
-		{Id: 7, Address: "mock://tikv-7"},
+		{Id: 1, Address: "mock://tikv-1:1"},
+		{Id: 2, Address: "mock://tikv-2:2"},
+		{Id: 3, Address: "mock://tikv-3:3"},
+		{Id: 7, Address: "mock://tikv-7:7"},
 	}
 
 	stores := make([]*core.StoreInfo, 0, len(metaStores))
@@ -134,10 +134,10 @@ func TestRegionStatisticsWithPlacementRule(t *testing.T) {
 		{Id: 9, StoreId: 8, IsWitness: true},
 	}
 	metaStores := []*metapb.Store{
-		{Id: 1, Address: "mock://tikv-1"},
-		{Id: 2, Address: "mock://tikv-2"},
-		{Id: 3, Address: "mock://tikv-3"},
-		{Id: 7, Address: "mock://tikv-7"},
+		{Id: 1, Address: "mock://tikv-1:1"},
+		{Id: 2, Address: "mock://tikv-2:2"},
+		{Id: 3, Address: "mock://tikv-3:3"},
+		{Id: 7, Address: "mock://tikv-7:7"},
 	}
 
 	stores := make([]*core.StoreInfo, 0, len(metaStores))
@@ -223,9 +223,9 @@ func TestRegionLabelIsolationLevel(t *testing.T) {
 	regionID := 1
 	f := func(labels []map[string]string, res string, locationLabels []string) {
 		metaStores := []*metapb.Store{
-			{Id: 1, Address: "mock://tikv-1"},
-			{Id: 2, Address: "mock://tikv-2"},
-			{Id: 3, Address: "mock://tikv-3"},
+			{Id: 1, Address: "mock://tikv-1:1"},
+			{Id: 2, Address: "mock://tikv-2:2"},
+			{Id: 3, Address: "mock://tikv-3:3"},
 		}
 		stores := make([]*core.StoreInfo, 0, len(labels))
 		for i, m := range metaStores {
@@ -255,7 +255,7 @@ func TestRegionLabelIsolationLevel(t *testing.T) {
 	re.Equal(nonIsolation, label)
 	label = GetRegionLabelIsolation(nil, nil)
 	re.Equal(nonIsolation, label)
-	store := core.NewStoreInfo(&metapb.Store{Id: 1, Address: "mock://tikv-1"}, core.SetStoreLabels([]*metapb.StoreLabel{{Key: "foo", Value: "bar"}}))
+	store := core.NewStoreInfo(&metapb.Store{Id: 1, Address: "mock://tikv-1:1"}, core.SetStoreLabels([]*metapb.StoreLabel{{Key: "foo", Value: "bar"}}))
 	label = GetRegionLabelIsolation([]*core.StoreInfo{store}, locationLabels)
 	re.Equal("zone", label)
 
@@ -286,9 +286,9 @@ func BenchmarkObserve(b *testing.B) {
 	}
 
 	metaStores := []*metapb.Store{
-		{Id: 1, Address: "mock://tikv-1"},
-		{Id: 2, Address: "mock://tikv-2"},
-		{Id: 3, Address: "mock://tikv-3"},
+		{Id: 1, Address: "mock://tikv-1:1"},
+		{Id: 2, Address: "mock://tikv-2:2"},
+		{Id: 3, Address: "mock://tikv-3:3"},
 	}
 
 	stores := make([]*core.StoreInfo, 0, len(metaStores))

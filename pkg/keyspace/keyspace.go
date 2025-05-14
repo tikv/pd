@@ -55,7 +55,7 @@ const (
 	// Note: Config[TSOKeyspaceGroupIDKey] is only used to judge whether there is keyspace group id.
 	// It will not update the keyspace group id when merging or splitting.
 	TSOKeyspaceGroupIDKey = "tso_keyspace_group_id"
-
+	// GCManagementType is the key for gc_management_type in keyspace config.
 	// If `gc_management_type` is `unified`, it means the current keyspace requires a tidb without 'keyspace-name'
 	// configured to run a unified GC worker to calculate a unified GC state.
 	// If `gc_management_type` is `keyspace_level` it means the current keyspace can calculate GC states by its own.

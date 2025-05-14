@@ -19,7 +19,9 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -93,23 +95,23 @@ func (suite *scheduleTestSuite) checkOriginAPI(cluster *tests.TestCluster) {
 	input := make(map[string]any)
 	input["name"] = "evict-leader-scheduler"
 	body, err := json.Marshal(input)
-	suite.NoError(err)
-	suite.NoError(tu.CheckPostJSON(tests.TestDialClient, urlPrefix, body,
+	re.NoError(err)
+	re.NoError(tu.CheckPostJSON(tests.TestDialClient, urlPrefix, body,
 		tu.Status(re, http.StatusBadRequest),
 		tu.StringEqual(re, "missing store id")),
 	)
 	input["store_id"] = "abc" // bad case
 	body, err = json.Marshal(input)
-	suite.NoError(err)
-	suite.NoError(tu.CheckPostJSON(tests.TestDialClient, urlPrefix, body,
+	re.NoError(err)
+	re.NoError(tu.CheckPostJSON(tests.TestDialClient, urlPrefix, body,
 		tu.Status(re, http.StatusBadRequest),
 		tu.StringEqual(re, "please input a right store id")),
 	)
 
 	input["store_id"] = 1
 	body, err = json.Marshal(input)
-	suite.NoError(err)
-	suite.NoError(tu.CheckPostJSON(tests.TestDialClient, urlPrefix, body, tu.StatusOK(re)))
+	re.NoError(err)
+	re.NoError(tu.CheckPostJSON(tests.TestDialClient, urlPrefix, body, tu.StatusOK(re)))
 
 	suite.assertSchedulerExists(urlPrefix, "evict-leader-scheduler")
 	resp := make(map[string]any)
@@ -271,7 +273,7 @@ func (suite *scheduleTestSuite) checkAPI(cluster *tests.TestCluster) {
 				}
 				tu.Eventually(re, func() bool {
 					re.NoError(tu.ReadGetJSON(re, tests.TestDialClient, listURL, &resp))
-					re.Equal(len(expectMap), len(resp), "expect %v, got %v", expectMap, resp)
+					re.Len(expectMap, len(resp), "expect %v, got %v", expectMap, resp)
 					for key := range expectMap {
 						if !reflect.DeepEqual(resp[key], expectMap[key]) {
 							suite.T().Logf("key: %s, expect: %v, got: %v", key, expectMap[key], resp[key])
@@ -837,4 +839,109 @@ func isSchedulerPaused(re *require.Assertions, urlPrefix, name string) bool {
 		}
 	}
 	return false
+}
+
+func (suite *scheduleTestSuite) TestBalanceRangeAPI() {
+	suite.te.RunTest(suite.checkBalanceRangeAPI)
+}
+
+func (suite *scheduleTestSuite) checkBalanceRangeAPI(cluster *tests.TestCluster) {
+	re := suite.Require()
+	input := map[string]any{
+		"alias":     "test.sysbench.partition(p1)",
+		"engine":    "tikv",
+		"rule":      "leader-scatter",
+		"name":      types.BalanceRangeScheduler.String(),
+		"start-key": url.QueryEscape("100"),
+		"end-key":   url.QueryEscape("200"),
+	}
+	data, err := json.Marshal(input)
+	re.NoError(err)
+	leaderAddr := cluster.GetLeaderServer().GetAddr()
+	urlPrefix := fmt.Sprintf("%s/pd/api/v1", leaderAddr)
+	// add balance-range-scheduler
+	re.NoError(tu.CheckPostJSON(tests.TestDialClient, urlPrefix+"/schedulers", data, func(_ []byte, i int, _ http.Header) {
+		re.Equal(http.StatusOK, i)
+	}))
+
+	// check
+	tu.Eventually(re, func() bool {
+		resp, err := apiutil.GetJSON(tests.TestDialClient, fmt.Sprintf("%s/scheduler-config/%s/list", urlPrefix, types.BalanceRangeScheduler.String()), nil)
+		re.NoError(err)
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			return false
+		}
+		b, err := io.ReadAll(resp.Body)
+		re.NoError(err)
+		var scheduler []map[string]any
+		re.NoError(json.Unmarshal(b, &scheduler))
+		re.Len(scheduler, 1)
+		re.Equal(input["alias"], scheduler[0]["alias"])
+		re.Equal(input["engine"], scheduler[0]["engine"])
+		re.Equal(input["rule"], scheduler[0]["rule"])
+		return true
+	})
+
+	// add more job
+	input["alias"] = "test-sysbench-partition(p2)"
+	data, err = json.Marshal(input)
+	re.NoError(err)
+	re.NoError(tu.CheckPostJSON(tests.TestDialClient, urlPrefix+"/schedulers", data, func(_ []byte, i int, _ http.Header) {
+		re.Equal(http.StatusOK, i)
+	}))
+	tu.Eventually(re, func() bool {
+		resp, err := apiutil.GetJSON(tests.TestDialClient, fmt.Sprintf("%s/scheduler-config/%s/list", urlPrefix, types.BalanceRangeScheduler.String()), nil)
+		re.NoError(err)
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			return false
+		}
+		b, err := io.ReadAll(resp.Body)
+		re.NoError(err)
+		var scheduler []map[string]any
+		re.NoError(json.Unmarshal(b, &scheduler))
+		re.Len(scheduler, 2)
+		re.Equal(input["alias"], scheduler[1]["alias"])
+		re.Equal(input["engine"], scheduler[1]["engine"])
+		re.Equal(input["rule"], scheduler[1]["rule"])
+		return true
+	})
+
+	// cancel job
+	re.NoError(tu.CheckDelete(tests.TestDialClient,
+		fmt.Sprintf("%s/scheduler-config/%s/job?job-id=1", urlPrefix, types.BalanceRangeScheduler.String()),
+		func(_ []byte, i int, _ http.Header) {
+			re.Equal(http.StatusOK, i)
+		}))
+	// check job again
+	tu.Eventually(re, func() bool {
+		resp, err := apiutil.GetJSON(tests.TestDialClient, fmt.Sprintf("%s/scheduler-config/%s/list", urlPrefix, types.BalanceRangeScheduler.String()), nil)
+		re.NoError(err)
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			return false
+		}
+		b, err := io.ReadAll(resp.Body)
+		re.NoError(err)
+		var scheduler []map[string]any
+		re.NoError(json.Unmarshal(b, &scheduler))
+		re.Len(scheduler, 2)
+		slices.SortFunc(scheduler, func(a, b map[string]any) int {
+			aID := a["job-id"].(float64)
+			bID := b["job-id"].(float64)
+			if aID == bID {
+				return 0
+			}
+			if aID > bID {
+				return 1
+			}
+			return -1
+		})
+		re.Equal("cancelled", scheduler[1]["status"])
+		return true
+	})
+	// delete scheduler
+	deleteURL := fmt.Sprintf("%s/schedulers/%s", urlPrefix, types.BalanceRangeScheduler.String())
+	re.NoError(tu.CheckDelete(tests.TestDialClient, deleteURL, tu.StatusOK(re)))
 }

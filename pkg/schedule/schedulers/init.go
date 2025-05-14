@@ -559,13 +559,13 @@ func schedulersRegister() {
 			if len(args) < 5 {
 				return errs.ErrSchedulerConfig.FastGenByArgs("args length must be greater than 4")
 			}
-			roleString, err := url.QueryUnescape(args[0])
+			ruleString, err := url.QueryUnescape(args[0])
 			if err != nil {
 				return errs.ErrQueryUnescape.Wrap(err)
 			}
-			role := core.NewRole(roleString)
-			if role == core.Unknown {
-				return errs.ErrQueryUnescape.FastGenByArgs("role")
+			rule := core.NewRule(ruleString)
+			if rule == core.Unknown {
+				return errs.ErrQueryUnescape.FastGenByArgs("rule must be leader-scatter, peer-scatter, learner-scatter")
 			}
 			engine, err := url.QueryUnescape(args[1])
 			if err != nil {
@@ -596,7 +596,7 @@ func schedulersRegister() {
 			}
 
 			job := &balanceRangeSchedulerJob{
-				Role:    role,
+				Rule:    rule,
 				Engine:  engine,
 				Timeout: duration,
 				Alias:   alias,
@@ -614,6 +614,7 @@ func schedulersRegister() {
 		storage endpoint.ConfigStorage, decoder ConfigDecoder, _ ...func(string) error) (Scheduler, error) {
 		conf := &balanceRangeSchedulerConfig{
 			schedulerConfig: newBaseDefaultSchedulerConfig(),
+			jobs:            make([]*balanceRangeSchedulerJob, 0),
 		}
 		if err := decoder(conf); err != nil {
 			return nil, err

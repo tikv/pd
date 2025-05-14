@@ -202,15 +202,16 @@ func ResetTS(c *gin.Context) {
 	}
 
 	if err = svr.ResetTS(ts, ignoreSmaller, skipUpperBoundCheck, 0); err != nil {
-		if err == errs.ErrServerNotStarted {
+		switch err {
+		case errs.ErrServerNotStarted:
 			c.String(http.StatusInternalServerError, err.Error())
-		} else if err == errs.ErrEtcdTxnConflict {
+		case errs.ErrEtcdTxnConflict:
 			// If the error is ErrEtcdTxnConflict, it means there is a temporary failure.
 			// Return 503 to let the client retry.
 			// Ref: https://datatracker.ietf.org/doc/html/rfc7231#section-6.6.4
 			c.String(http.StatusServiceUnavailable,
 				fmt.Sprintf("It's a temporary failure with error %s, please retry.", err.Error()))
-		} else {
+		default:
 			c.String(http.StatusForbidden, err.Error())
 		}
 		return

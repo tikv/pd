@@ -394,7 +394,7 @@ func NewKeyspaceGroupManager(
 	kgm.storage = endpoint.NewStorageEndpoint(
 		kv.NewEtcdKVBase(kgm.etcdClient), nil)
 	kgm.compiledKGMembershipIDRegexp = keypath.GetCompiledKeyspaceGroupIDRegexp()
-	kgm.state.initialize()
+	kgm.initialize()
 	return kgm
 }
 
@@ -430,7 +430,7 @@ func (kgm *KeyspaceGroupManager) Close() {
 	// added/initialized after that.
 	kgm.cancel()
 	kgm.wg.Wait()
-	kgm.state.deInitialize()
+	kgm.deInitialize()
 
 	log.Info("keyspace group manager closed")
 }
@@ -1031,7 +1031,7 @@ func (kgm *KeyspaceGroupManager) HandleTSORequest(
 	if err != nil {
 		return pdpb.Timestamp{}, curKeyspaceGroupID, err
 	}
-	err = kgm.state.checkGroupMerge(curKeyspaceGroupID)
+	err = kgm.checkGroupMerge(curKeyspaceGroupID)
 	if err != nil {
 		return pdpb.Timestamp{}, curKeyspaceGroupID, err
 	}
@@ -1118,7 +1118,7 @@ func genNotServedErr(perr *perrors.Error, keyspaceGroupID uint32) error {
 func (kgm *KeyspaceGroupManager) checkTSOSplit(
 	keyspaceGroupID uint32,
 ) error {
-	splitTargetAllocator, splitSourceAllocator, err := kgm.state.checkGroupSplit(keyspaceGroupID)
+	splitTargetAllocator, splitSourceAllocator, err := kgm.checkGroupSplit(keyspaceGroupID)
 	if err != nil || splitTargetAllocator == nil {
 		return err
 	}

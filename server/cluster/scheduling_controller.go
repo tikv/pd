@@ -469,6 +469,9 @@ func (sc *schedulingController) getEvictLeaderStores() (evictStores []uint64) {
 
 // IsPrepared return true if the prepare checker is ready.
 func (sc *schedulingController) IsPrepared() bool {
+	if sc == nil || sc.coordinator == nil {
+		return false
+	}
 	sc.mu.RLock()
 	defer sc.mu.RUnlock()
 	return sc.coordinator.GetPrepareChecker().IsPrepared()

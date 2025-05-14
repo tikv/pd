@@ -80,7 +80,9 @@ func TestRegionSyncer(t *testing.T) {
 		err = rc.HandleRegionHeartbeat(region)
 		re.NoError(err)
 	}
-	time.Sleep(time.Second)
+	testutil.Eventually(re, func() bool {
+		return len(rc.GetRegions()) == regionLen
+	})
 	close(mockSyncFull)
 
 	checkRegions := func() {
@@ -172,7 +174,7 @@ func TestRegionSyncer(t *testing.T) {
 		return !leaderServer.GetServer().GetRaftCluster().GetRegionSyncer().IsRunning()
 	})
 	re.NotNil(leaderServer)
-	loadRegions := leaderServer.GetServer().GetRaftCluster().GetRegions()
+	loadRegions := leaderServer.GetServer().GetRegions()
 	re.Len(loadRegions, regionLen)
 	for _, region := range regions {
 		r := leaderServer.GetRegionInfoByID(region.GetID())
@@ -223,11 +225,15 @@ func TestFullSyncWithAddMember(t *testing.T) {
 	re.NoError(pd2.Run())
 	re.Equal("pd1", cluster.WaitLeader())
 	// waiting for synchronization to complete
-	time.Sleep(3 * time.Second)
+	var loadRegionLen int
+	testutil.Eventually(re, func() bool {
+		loadRegionLen = len(pd2.GetServer().GetBasicCluster().GetRegions())
+		return loadRegionLen == regionLen
+	})
 	re.NoError(cluster.ResignLeader())
 	re.Equal("pd2", cluster.WaitLeader())
-	loadRegions := pd2.GetServer().GetRaftCluster().GetRegions()
-	re.Len(loadRegions, regionLen)
+	loadRegionLen = len(pd2.GetServer().GetRegions())
+	re.Equal(regionLen, loadRegionLen)
 }
 
 func TestPrepareChecker(t *testing.T) {
@@ -264,7 +270,9 @@ func TestPrepareChecker(t *testing.T) {
 	re.NoError(err)
 	re.NotEmpty(cluster.WaitLeader())
 	// waiting for synchronization to complete
-	time.Sleep(3 * time.Second)
+	testutil.Eventually(re, func() bool {
+		return len(pd2.GetServer().GetBasicCluster().GetRegions()) == regionLen
+	})
 	leaderServer = cluster.GetLeaderServer()
 	err = cluster.ResignLeader()
 	re.NoError(err)
@@ -275,8 +283,9 @@ func TestPrepareChecker(t *testing.T) {
 		err = rc.HandleRegionHeartbeat(region)
 		re.NoError(err)
 	}
-	time.Sleep(time.Second)
-	re.True(rc.IsPrepared())
+	testutil.Eventually(re, func() bool {
+		return rc.IsPrepared()
+	})
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/schedule/changeCoordinatorTicker"))
 }
 
@@ -318,7 +327,9 @@ func TestPrepareCheckerWithTransferLeader(t *testing.T) {
 	re.NoError(err)
 	re.NotEmpty(cluster.WaitLeader())
 	// waiting for synchronization to complete
-	time.Sleep(3 * time.Second)
+	testutil.Eventually(re, func() bool {
+		return len(pd2.GetServer().GetBasicCluster().GetRegions()) == regionLen
+	})
 	leaderServer = cluster.GetLeaderServer()
 	err = cluster.ResignLeader()
 	re.NoError(err)

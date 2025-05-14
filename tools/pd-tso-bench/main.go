@@ -156,8 +156,8 @@ func reqWorker(ctx context.Context, pdClients []pd.Client, clientIdx int, durCh 
 	defer cancel()
 	var (
 		err                    error
-		maxRetryTime           int           = 120
-		sleepIntervalOnFailure time.Duration = 1000 * time.Millisecond
+		maxRetryTime           = 120
+		sleepIntervalOnFailure = 1000 * time.Millisecond
 		totalSleepBeforeGetTS  time.Duration
 	)
 	pdCli := pdClients[clientIdx]

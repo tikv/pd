@@ -31,36 +31,6 @@ error = '''
 redirect to not primary
 '''
 
-["PD:autoscaling:ErrEmptyMetricsResponse"]
-error = '''
-metrics response from Prometheus is empty
-'''
-
-["PD:autoscaling:ErrEmptyMetricsResult"]
-error = '''
-result from Prometheus is empty, %s
-'''
-
-["PD:autoscaling:ErrTypeConversion"]
-error = '''
-type conversion error
-'''
-
-["PD:autoscaling:ErrUnexpectedType"]
-error = '''
-unexpected type %v
-'''
-
-["PD:autoscaling:ErrUnsupportedComponentType"]
-error = '''
-unsupported component type %v
-'''
-
-["PD:autoscaling:ErrUnsupportedMetricsType"]
-error = '''
-unsupported metrics type %v
-'''
-
 ["PD:cgroup:ErrNoCPUControllerDetected"]
 error = '''
 no cpu controller detected
@@ -716,9 +686,9 @@ error = '''
 etcd leader not found
 '''
 
-["PD:member:ErrMarshalLeader"]
+["PD:member:ErrMarshalMember"]
 error = '''
-marshal leader failed
+marshal member failed
 '''
 
 ["PD:netstat:ErrNetstatTCPSocks"]

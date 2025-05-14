@@ -74,7 +74,7 @@ func TestRegionInfo(t *testing.T) {
 	re.Regexp("Remove peer.*", DiffRegionPeersInfo(r, info))
 	re.Equal(removePeer, r.GetStorePeer(n))
 	r = r.Clone(WithRemoveStorePeer(n))
-	re.Equal("", DiffRegionPeersInfo(r, info))
+	re.Empty(DiffRegionPeersInfo(r, info))
 	re.Nil(r.GetStorePeer(n))
 	r = r.Clone(WithStartKey([]byte{0}))
 	re.Regexp("StartKey Changed.*", DiffRegionKeyInfo(r, info))

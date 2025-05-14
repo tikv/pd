@@ -39,6 +39,7 @@ func newHotStatusHandler(handler *server.Handler, rd *render.Render) *hotStatusH
 	}
 }
 
+// GetHotWriteRegions lists the hot write regions.
 // @Tags     hotspot
 // @Summary  List the hot write regions.
 // @Produce  json
@@ -50,6 +51,7 @@ func (h *hotStatusHandler) GetHotWriteRegions(w http.ResponseWriter, r *http.Req
 	h.getHotRegions(utils.Write, w, r)
 }
 
+// GetHotReadRegions lists the hot read regions.
 // @Tags     hotspot
 // @Summary  List the hot read regions.
 // @Produce  json
@@ -96,6 +98,7 @@ func (h *hotStatusHandler) getHotRegions(typ utils.RWType, w http.ResponseWriter
 	h.rd.JSON(w, http.StatusOK, hotRegions)
 }
 
+// GetHotStores lists the hot stores.
 // @Tags     hotspot
 // @Summary  List the hot stores.
 // @Produce  json
@@ -111,6 +114,7 @@ func (h *hotStatusHandler) GetHotStores(w http.ResponseWriter, _ *http.Request) 
 	h.rd.JSON(w, http.StatusOK, stats)
 }
 
+// GetHotBuckets lists the hot buckets.
 // @Tags     hotspot
 // @Summary  List the hot buckets.
 // @Produce  json
@@ -133,6 +137,7 @@ func (h *hotStatusHandler) GetHotBuckets(w http.ResponseWriter, r *http.Request)
 	h.rd.JSON(w, http.StatusOK, ret)
 }
 
+// GetHistoryHotRegions lists the history hot regions.
 // @Tags     hotspot
 // @Summary  List the history hot regions.
 // @Accept   json
