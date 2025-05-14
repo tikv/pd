@@ -70,7 +70,7 @@ func (suite *storeTestSuite) checkStoresList(cluster *tests.TestCluster) {
 	urlPrefix := leader.GetAddr() + "/pd/api/v1"
 
 	// store 1 is used to bootstrapped that its state might be different the store inside initStores.
-	leader.GetRaftCluster().ReadyToServe(1)
+	leader.GetRaftCluster().ReadyToServeLocked(1)
 
 	url := fmt.Sprintf("%s/stores", urlPrefix)
 	info := new(response.StoresInfo)
@@ -335,7 +335,7 @@ func (suite *storeTestSuite) checkStoreGet(cluster *tests.TestCluster) {
 
 	leader := cluster.GetLeaderServer()
 	// store 1 is used to bootstrapped that its state might be different the store inside initStores.
-	leader.GetRaftCluster().ReadyToServe(1)
+	leader.GetRaftCluster().ReadyToServeLocked(1)
 	urlPrefix := leader.GetAddr() + "/pd/api/v1"
 	url := fmt.Sprintf("%s/store/1", urlPrefix)
 
