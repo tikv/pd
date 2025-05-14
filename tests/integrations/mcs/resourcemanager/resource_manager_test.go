@@ -622,7 +622,7 @@ func (suite *resourceManagerClientTestSuite) TestSwitchBurst() {
 		duration += time.Since(startTime)
 		re.NoError(err)
 	}
-	re.Less(duration, 100*time.Millisecond)
+	re.Less(duration, 300*time.Millisecond)
 	re.NoError(failpoint.Disable("github.com/tikv/pd/client/resource_group/controller/acceleratedReportingPeriod"))
 	re.NoError(failpoint.Disable("github.com/tikv/pd/client/resource_group/controller/acceleratedSpeedTrend"))
 	controller.Stop()

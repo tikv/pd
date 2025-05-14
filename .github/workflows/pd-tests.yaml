@@ -1,28 +1,20 @@
 name: PD Test
 on:
-  push:
-    branches:
-      - master
-      - release-4.0
-      - release-5.*
-      - release-6.*
-      - release-7.*
-      - release-8.*
   pull_request:
     branches:
-      - master
-      - release-4.0
-      - release-5.*
-      - release-6.*
-      - release-7.*
-      - release-8.*
+      - release-8.5-keyspace
+    types: [ opened, synchronize, reopened, labeled ]
+
 concurrency:
   group: ${{ github.ref }}-${{ github.workflow }}
   cancel-in-progress: true
+
 jobs:
   chunks:
-    runs-on: ubuntu-latest
+    runs-on: x64
+    if: contains(github.event.pull_request.labels.*.name, 'run-ut')
     strategy:
+      max-parallel: 3
       fail-fast: true
       matrix:
         include:
@@ -70,7 +62,8 @@ jobs:
           path: covprofile_${{ matrix.worker_id }}
   report-coverage:
     needs: chunks
-    runs-on: ubuntu-latest
+    runs-on: x64
+    if: contains(github.event.pull_request.labels.*.name, 'run-ut')
     steps:
       - name: Checkout code
         uses: actions/checkout@v4

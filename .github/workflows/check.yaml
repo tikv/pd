@@ -1,8 +1,14 @@
 name: Check PD
-on: [push, pull_request]
+
+on:
+  pull_request:
+    branches:
+      - release-8.5-keyspace
+
 concurrency:
   group: ${{ github.ref }}-${{ github.workflow }}
   cancel-in-progress: true
+
 jobs:
   statics:
     runs-on: ubuntu-latest

@@ -1,19 +1,8 @@
 name: TSO Function Test
 on:
-  push:
-    branches:
-      - master
-      - release-5.*
-      - release-6.*
-      - release-7.*
-      - release-8.*
   pull_request:
     branches:
-      - master
-      - release-5.*
-      - release-6.*
-      - release-7.*
-      - release-8.*
+      - release-8.5-keyspace
 concurrency:
   group: ${{ github.ref }}-${{ github.workflow }}
   cancel-in-progress: true

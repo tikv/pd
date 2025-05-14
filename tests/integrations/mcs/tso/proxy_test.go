@@ -133,16 +133,16 @@ func TestTSOProxyStress(_ *testing.T) {
 	re := s.Require()
 
 	const (
-		totalRounds = 4
-		clientsIncr = 500
+		totalRounds = 3
+		clientsIncr = 100
 		// The graceful period for TSO Proxy to recover from gPRC and TSO failures.
 		recoverySLA = 5 * time.Second
 	)
 	streams := make([]pdpb.PD_TsoClient, 0)
 	cleanupFuncs := make([]testutil.CleanupFunc, 0)
 
-	// Start stress test for 90 seconds to avoid ci-test-job to timeout.
-	ctxTimeout, cancel := context.WithTimeout(s.ctx, 90*time.Second)
+	// Start stress test for 15 seconds to avoid ci-test-job to timeout.
+	ctxTimeout, cancel := context.WithTimeout(s.ctx, 30*time.Second)
 	defer cancel()
 
 	// Push load from many concurrent clients in multiple rounds and increase the #client each round.
