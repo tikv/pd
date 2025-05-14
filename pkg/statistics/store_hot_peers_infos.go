@@ -176,11 +176,13 @@ func summaryStoresLoadByEngine(
 
 		var historyLoads [][]float64
 		if storesHistoryLoads != nil {
-			for i, historyLoads := range storesHistoryLoads.Get(id, rwTy, kind) {
-				if allStoreHistoryLoadSum[i] == nil || len(allStoreHistoryLoadSum[i]) < len(historyLoads) {
-					allStoreHistoryLoadSum[i] = make([]float64, len(historyLoads))
+			historyLoads = storesHistoryLoads.Get(id, rwTy, kind)
+
+			for i, loads := range historyLoads {
+				if allStoreHistoryLoadSum[i] == nil || len(allStoreHistoryLoadSum[i]) < len(loads) {
+					allStoreHistoryLoadSum[i] = make([]float64, len(loads))
 				}
-				for j, historyLoad := range historyLoads {
+				for j, historyLoad := range loads {
 					allStoreHistoryLoadSum[i][j] += historyLoad
 				}
 			}
