@@ -193,6 +193,11 @@ func (suite *keyspaceTestSuite) TestCreateKeyspaceByID() {
 	_, err := manager.CreateKeyspaceByID(requests[0])
 	re.Error(err)
 
+	// Create a keyspace with existing name must return error.
+	*requests[0].ID = 100
+	_, err = manager.CreateKeyspaceByID(requests[0])
+	re.Error(err)
+
 	// Create a keyspace with empty id must return error.
 	_, err = manager.CreateKeyspaceByID(&CreateKeyspaceByIDRequest{})
 	re.Error(err)
