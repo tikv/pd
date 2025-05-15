@@ -275,10 +275,7 @@ func gcBarrierToProto(b *endpoint.GCBarrier, now time.Time) *pdpb.GCBarrierInfo 
 	// MaxInt64 represents that the expiration time is not specified and it never expires.
 	var resultTTL int64 = math.MaxInt64
 	if b.ExpirationTime != nil {
-		resultTTL = int64(math.Floor(b.ExpirationTime.Sub(now).Seconds()))
-		if resultTTL < 0 {
-			resultTTL = 0
-		}
+		resultTTL = int64(max(math.Floor(b.ExpirationTime.Sub(now).Seconds()), 0))
 	}
 
 	return &pdpb.GCBarrierInfo{
