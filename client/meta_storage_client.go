@@ -108,10 +108,12 @@ func (c *innerClient) Get(ctx context.Context, key []byte, opts ...opt.MetaStora
 
 	ctx, cancel := context.WithTimeout(ctx, c.option.Timeout)
 	req := &meta_storagepb.GetRequest{
-		Key:      key,
-		RangeEnd: options.RangeEnd,
-		Limit:    options.Limit,
-		Revision: options.Revision,
+		Key:       key,
+		RangeEnd:  options.RangeEnd,
+		Limit:     options.Limit,
+		Revision:  options.Revision,
+		KeysOnly:  options.KeysOnly,
+		CountOnly: options.CountOnly,
 	}
 	ctx = grpcutil.BuildForwardContext(ctx, c.serviceDiscovery.GetServingURL())
 	cli := c.metaStorageClient()
