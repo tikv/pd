@@ -25,13 +25,13 @@ import (
 
 	"github.com/pingcap/log"
 
-	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/schedule/checker"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 )
 
 // Watcher is used to watch the PD for any Placement Rule changes.
@@ -104,13 +104,13 @@ func NewWatcher(
 }
 
 func (rw *Watcher) initializeRuleWatcher() error {
-	var suspectKeyRanges *core.KeyRanges
+	var suspectKeyRanges *keyutil.KeyRanges
 
 	preEventsFn := func([]*clientv3.Event) error {
 		// It will be locked until the postEventsFn is finished.
 		rw.ruleManager.Lock()
 		rw.patch = rw.ruleManager.BeginPatch()
-		suspectKeyRanges = &core.KeyRanges{}
+		suspectKeyRanges = &keyutil.KeyRanges{}
 		return nil
 	}
 
