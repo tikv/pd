@@ -17,7 +17,6 @@ package scheduling
 import (
 	"context"
 	"fmt"
-	"github.com/tikv/pd/pkg/utils/keyutil"
 	"testing"
 	"time"
 

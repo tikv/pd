@@ -134,13 +134,27 @@ func (rs *KeyRanges) SortAndDeduce() {
 	rs.krs = res
 }
 
-func (rs *KeyRanges) Delete(kr *KeyRange) {
-	for i, r := range rs.krs {
-		if bytes.Equal(r.StartKey, kr.StartKey) && bytes.Equal(r.EndKey, kr.EndKey) {
-			rs.krs = append(rs.krs[:i], rs.krs[i+1:]...)
-			return
+// Delete deletes the KeyRange from the KeyRanges.
+func (rs *KeyRanges) Delete(base *KeyRange) {
+	res := make([]*KeyRange, 0)
+	for _, r := range rs.krs {
+		if !r.OverLapped(base) {
+			res = append(res, r)
+			continue
+		}
+		if less(r.StartKey, base.StartKey, left) {
+			res = append(res, &KeyRange{StartKey: r.StartKey, EndKey: MinKeyWithBoundary(r.EndKey, base.StartKey, right)})
+		}
+
+		if less(base.EndKey, r.EndKey, right) {
+			startKey := MaxKeyWithBoundary(r.StartKey, base.EndKey, right)
+			if len(r.StartKey) == 0 {
+				startKey = base.EndKey
+			}
+			res = append(res, &KeyRange{StartKey: startKey, EndKey: r.EndKey})
 		}
 	}
+	rs.krs = res
 }
 
 // SubtractKeyRanges returns the KeyRanges that are not overlapped with the given KeyRange.

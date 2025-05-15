@@ -16,7 +16,6 @@ package server
 
 import (
 	"context"
-	"github.com/tikv/pd/pkg/schedule/rangelist"
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -42,6 +41,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
+	"github.com/tikv/pd/pkg/schedule/rangelist"
 	"github.com/tikv/pd/pkg/schedule/scatter"
 	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/schedule/splitter"

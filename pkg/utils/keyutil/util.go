@@ -41,6 +41,8 @@ func MinKey(a, b []byte) []byte {
 	return a
 }
 
+// MaxKeyWithBoundary returns the bigger key for the given keys.
+// it is different from MaxKey, if the key is empty and the boundary is right, the empty key is biggest,
 func MaxKeyWithBoundary(a, b []byte, opt boundary) []byte {
 	if opt == left {
 		return MaxKey(a, b)
@@ -54,6 +56,8 @@ func MaxKeyWithBoundary(a, b []byte, opt boundary) []byte {
 	return MaxKey(a, b)
 }
 
+// MinKeyWithBoundary returns the smaller key for the given keys.
+// it is different from MinKey, if the key is empty and the boundary is right, the empty key is biggest.
 func MinKeyWithBoundary(a, b []byte, opt boundary) []byte {
 	if opt == left {
 		return MinKey(a, b)

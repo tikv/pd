@@ -140,7 +140,7 @@ func (s *balanceRegionScheduler) Schedule(cluster sche.SchedulerCluster, dryRun 
 	rs := s.conf.Ranges
 	if len(rs) == 1 && len(rs[0].StartKey) == 0 && len(rs[0].EndKey) == 0 {
 		km := solver.GetKeyRangeManager()
-		rs = km.GetBlankKeyRanges(&rs[0])
+		rs = km.GetNonOverlappingKeyRanges(&rs[0])
 	}
 	// sourcesStore is sorted by region score desc, so we pick the first store as source store.
 	for sourceIndex, solver.Source = range sourceStores {

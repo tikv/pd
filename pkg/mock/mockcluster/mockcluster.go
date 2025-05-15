@@ -75,6 +75,7 @@ func NewCluster(ctx context.Context, opts *config.PersistOptions) *Cluster {
 		HotStat:                 statistics.NewHotStat(ctx, bc),
 		HotBucketCache:          buckets.NewBucketsCache(ctx),
 		PersistOptions:          opts,
+		KeyRangeManager:         rangelist.NewKeyRangeManager(),
 		pendingProcessedRegions: map[uint64]struct{}{},
 		Storage:                 storage.NewStorageWithMemoryBackend(),
 	}

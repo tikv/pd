@@ -15,10 +15,12 @@
 package rangelist
 
 import (
-	"github.com/tikv/pd/pkg/utils/keyutil"
 	"sync"
+
+	"github.com/tikv/pd/pkg/utils/keyutil"
 )
 
+// KeyRangeManager is a manager for key ranges.
 type KeyRangeManager struct {
 	sync.Mutex
 	sortedKeyRanges *keyutil.KeyRanges
@@ -31,12 +33,14 @@ func NewKeyRangeManager() *KeyRangeManager {
 	}
 }
 
-func (s *KeyRangeManager) GetBlankKeyRanges(base *keyutil.KeyRange) []keyutil.KeyRange {
+// GetNonOverlappingKeyRanges returns the non-overlapping key ranges of the given base key range.
+func (s *KeyRangeManager) GetNonOverlappingKeyRanges(base *keyutil.KeyRange) []keyutil.KeyRange {
 	s.Lock()
 	defer s.Unlock()
 	return s.sortedKeyRanges.SubtractKeyRanges(base)
 }
 
+// Append appends the key ranges to the manager.
 func (s *KeyRangeManager) Append(rs []keyutil.KeyRange) {
 	s.Lock()
 	defer s.Unlock()
@@ -46,6 +50,7 @@ func (s *KeyRangeManager) Append(rs []keyutil.KeyRange) {
 	s.sortedKeyRanges.SortAndDeduce()
 }
 
+// Delete deletes the overlapping key ranges from the manager.
 func (s *KeyRangeManager) Delete(rs []keyutil.KeyRange) {
 	s.Lock()
 	defer s.Unlock()
