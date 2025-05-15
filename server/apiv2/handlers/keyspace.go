@@ -93,6 +93,7 @@ func CreateKeyspace(c *gin.Context) {
 // CreateKeyspaceByIDParams represents parameters needed when creating a new keyspace by ID.
 type CreateKeyspaceByIDParams struct {
 	ID     *uint32           `json:"id"`
+	Name   string            `json:"name"`
 	Config map[string]string `json:"config"`
 }
 
@@ -121,6 +122,7 @@ func CreateKeyspaceByID(c *gin.Context) {
 	}
 	req := &keyspace.CreateKeyspaceByIDRequest{
 		ID:         createParams.ID,
+		Name:       createParams.Name,
 		Config:     createParams.Config,
 		CreateTime: time.Now().Unix(),
 	}
