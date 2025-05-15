@@ -61,6 +61,7 @@ import (
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/statistics/utils"
 	"github.com/tikv/pd/pkg/storage"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/operatorutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
@@ -1937,10 +1938,10 @@ func Test(t *testing.T) {
 	pendingFilter := filter.NewRegionPendingFilter()
 	downFilter := filter.NewRegionDownFilter()
 	for i := range n {
-		region := filter.SelectOneRegion(tc.RandLeaderRegions(i, []core.KeyRange{core.NewKeyRange("", "")}), nil, pendingFilter, downFilter)
+		region := filter.SelectOneRegion(tc.RandLeaderRegions(i, []keyutil.KeyRange{keyutil.NewKeyRange("", "")}), nil, pendingFilter, downFilter)
 		re.Equal(i, region.GetLeader().GetStoreId())
 
-		region = filter.SelectOneRegion(tc.RandFollowerRegions(i, []core.KeyRange{core.NewKeyRange("", "")}), nil, pendingFilter, downFilter)
+		region = filter.SelectOneRegion(tc.RandFollowerRegions(i, []keyutil.KeyRange{keyutil.NewKeyRange("", "")}), nil, pendingFilter, downFilter)
 		re.NotEqual(i, region.GetLeader().GetStoreId())
 
 		re.NotNil(region.GetStorePeer(i))
@@ -1957,15 +1958,15 @@ func Test(t *testing.T) {
 	// All regions will be filtered out if they have pending peers.
 	for i := range n {
 		for range cache.GetStoreLeaderCount(i) {
-			region := filter.SelectOneRegion(tc.RandLeaderRegions(i, []core.KeyRange{core.NewKeyRange("", "")}), nil, pendingFilter, downFilter)
+			region := filter.SelectOneRegion(tc.RandLeaderRegions(i, []keyutil.KeyRange{keyutil.NewKeyRange("", "")}), nil, pendingFilter, downFilter)
 			newRegion := region.Clone(core.WithPendingPeers(region.GetPeers()))
 			origin, overlaps, rangeChanged = cache.SetRegion(newRegion)
 			cache.UpdateSubTree(newRegion, origin, overlaps, rangeChanged)
 		}
-		re.Nil(filter.SelectOneRegion(tc.RandLeaderRegions(i, []core.KeyRange{core.NewKeyRange("", "")}), nil, pendingFilter, downFilter))
+		re.Nil(filter.SelectOneRegion(tc.RandLeaderRegions(i, []keyutil.KeyRange{keyutil.NewKeyRange("", "")}), nil, pendingFilter, downFilter))
 	}
 	for i := range n {
-		re.Nil(filter.SelectOneRegion(tc.RandFollowerRegions(i, []core.KeyRange{core.NewKeyRange("", "")}), nil, pendingFilter, downFilter))
+		re.Nil(filter.SelectOneRegion(tc.RandFollowerRegions(i, []keyutil.KeyRange{keyutil.NewKeyRange("", "")}), nil, pendingFilter, downFilter))
 	}
 }
 
