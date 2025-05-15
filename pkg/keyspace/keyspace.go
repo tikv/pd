@@ -20,6 +20,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/tikv/pd/pkg/member"
 	"go.uber.org/zap"
 
 	"github.com/pingcap/errors"
@@ -74,6 +75,9 @@ type Config interface {
 	ToWaitRegionSplit() bool
 	GetWaitRegionSplitTimeout() time.Duration
 	GetCheckRegionSplitInterval() time.Duration
+	ToGCKeyspace() bool
+	GetGCRunInterval() time.Duration
+	GetGCLifeTime() time.Duration
 }
 
 // Manager manages keyspace related data.
@@ -89,12 +93,16 @@ type Manager struct {
 	store endpoint.KeyspaceStorage
 	// rc is the raft cluster of the server.
 	cluster core.ClusterInformer
+	// member is the current pd's member information, used to check if server is leader.
+	member *member.EmbeddedEtcdMember
 	// config is the configurations of the manager.
 	config Config
 	// kgm is the keyspace group manager of the server.
 	kgm *GroupManager
 	// nextPatrolStartID is the next start id of keyspace assignment patrol.
 	nextPatrolStartID uint32
+	// gcWorker is used to clean up archived keyspace.
+	gcWorker *gcWorker
 }
 
 // CreateKeyspaceRequest represents necessary arguments to create a keyspace.
@@ -122,11 +130,12 @@ func NewKeyspaceManager(
 	ctx context.Context,
 	store endpoint.KeyspaceStorage,
 	cluster core.ClusterInformer,
+	member *member.EmbeddedEtcdMember,
 	idAllocator id.Allocator,
 	config Config,
 	kgm *GroupManager,
 ) *Manager {
-	return &Manager{
+	manager := &Manager{
 		ctx: ctx,
 		// Remove the lock of the given key from the lock group when unlock to
 		// keep minimal working set, which is suited for low qps, non-time-critical
@@ -137,10 +146,13 @@ func NewKeyspaceManager(
 		idAllocator:       idAllocator,
 		store:             store,
 		cluster:           cluster,
+		member:            member,
 		config:            config,
 		kgm:               kgm,
 		nextPatrolStartID: constant.DefaultKeyspaceID,
 	}
+	manager.gcWorker = manager.newGCWorker()
+	return manager
 }
 
 // Bootstrap saves default keyspace info.
@@ -198,12 +210,15 @@ func (manager *Manager) Bootstrap() error {
 			}
 		}()
 	}
+	// start gc loop.
+	go manager.gcWorker.run()
 	return nil
 }
 
 // UpdateConfig update keyspace manager's config.
 func (manager *Manager) UpdateConfig(cfg Config) {
 	manager.config = cfg
+	manager.gcWorker.reload(cfg)
 }
 
 // CreateKeyspace create a keyspace meta with given config and save it to storage.

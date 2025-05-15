@@ -59,6 +59,9 @@ type mockConfig struct {
 	WaitRegionSplit          bool
 	WaitRegionSplitTimeout   typeutil.Duration
 	CheckRegionSplitInterval typeutil.Duration
+	GCKeyspace               bool
+	GCRunInterval            time.Duration
+	GCLifeTime               time.Duration
 }
 
 func (m *mockConfig) GetPreAlloc() []string {
@@ -77,13 +80,25 @@ func (m *mockConfig) GetCheckRegionSplitInterval() time.Duration {
 	return m.CheckRegionSplitInterval.Duration
 }
 
+func (m *mockConfig) ToGCKeyspace() bool {
+	return m.GCKeyspace
+}
+
+func (m *mockConfig) GetGCRunInterval() time.Duration {
+	return m.GCRunInterval
+}
+
+func (m *mockConfig) GetGCLifeTime() time.Duration {
+	return m.GCLifeTime
+}
+
 func (suite *keyspaceTestSuite) SetupTest() {
 	re := suite.Require()
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
 	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
 	allocator := mockid.NewIDAllocator()
 	kgm := NewKeyspaceGroupManager(suite.ctx, store, nil)
-	suite.manager = NewKeyspaceManager(suite.ctx, store, nil, allocator, &mockConfig{}, kgm)
+	suite.manager = NewKeyspaceManager(suite.ctx, store, nil, nil, allocator, &mockConfig{}, kgm)
 	re.NoError(kgm.Bootstrap(suite.ctx))
 	re.NoError(suite.manager.Bootstrap())
 }
