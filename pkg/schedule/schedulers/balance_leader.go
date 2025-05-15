@@ -36,6 +36,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
 	"github.com/tikv/pd/pkg/schedule/types"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/reflectutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 )
@@ -53,7 +54,7 @@ const (
 )
 
 type balanceLeaderSchedulerParam struct {
-	Ranges []core.KeyRange `json:"ranges"`
+	Ranges []keyutil.KeyRange `json:"ranges"`
 	// Batch is used to generate multiple operators by one scheduling
 	Batch int `json:"batch"`
 }
@@ -106,7 +107,7 @@ func (conf *balanceLeaderSchedulerParam) validateLocked() bool {
 func (conf *balanceLeaderSchedulerConfig) clone() *balanceLeaderSchedulerParam {
 	conf.RLock()
 	defer conf.RUnlock()
-	ranges := make([]core.KeyRange, len(conf.Ranges))
+	ranges := make([]keyutil.KeyRange, len(conf.Ranges))
 	copy(ranges, conf.Ranges)
 	return &balanceLeaderSchedulerParam{
 		Ranges: ranges,
@@ -120,10 +121,10 @@ func (conf *balanceLeaderSchedulerConfig) getBatch() int {
 	return conf.Batch
 }
 
-func (conf *balanceLeaderSchedulerConfig) getRanges() []core.KeyRange {
+func (conf *balanceLeaderSchedulerConfig) getRanges() []keyutil.KeyRange {
 	conf.RLock()
 	defer conf.RUnlock()
-	ranges := make([]core.KeyRange, len(conf.Ranges))
+	ranges := make([]keyutil.KeyRange, len(conf.Ranges))
 	copy(ranges, conf.Ranges)
 	return ranges
 }

@@ -35,6 +35,7 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/id"
 	"github.com/tikv/pd/pkg/mock/mockid"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 )
 
 func TestNeedMerge(t *testing.T) {
@@ -674,8 +675,8 @@ func BenchmarkRandomRegion(b *testing.B) {
 				regions.RandLeaderRegions(1, nil)
 			}
 		})
-		ranges := []KeyRange{
-			NewKeyRange(fmt.Sprintf("%20d", size/4), fmt.Sprintf("%20d", size*3/4)),
+		ranges := []keyutil.KeyRange{
+			keyutil.NewKeyRange(fmt.Sprintf("%20d", size/4), fmt.Sprintf("%20d", size*3/4)),
 		}
 		b.Run(fmt.Sprintf("random region single range with size %d", size), func(b *testing.B) {
 			b.ResetTimer()
@@ -689,11 +690,11 @@ func BenchmarkRandomRegion(b *testing.B) {
 				regions.RandLeaderRegions(1, ranges)
 			}
 		})
-		ranges = []KeyRange{
-			NewKeyRange(fmt.Sprintf("%20d", 0), fmt.Sprintf("%20d", size/4)),
-			NewKeyRange(fmt.Sprintf("%20d", size/4), fmt.Sprintf("%20d", size/2)),
-			NewKeyRange(fmt.Sprintf("%20d", size/2), fmt.Sprintf("%20d", size*3/4)),
-			NewKeyRange(fmt.Sprintf("%20d", size*3/4), fmt.Sprintf("%20d", size)),
+		ranges = []keyutil.KeyRange{
+			keyutil.NewKeyRange(fmt.Sprintf("%20d", 0), fmt.Sprintf("%20d", size/4)),
+			keyutil.NewKeyRange(fmt.Sprintf("%20d", size/4), fmt.Sprintf("%20d", size/2)),
+			keyutil.NewKeyRange(fmt.Sprintf("%20d", size/2), fmt.Sprintf("%20d", size*3/4)),
+			keyutil.NewKeyRange(fmt.Sprintf("%20d", size*3/4), fmt.Sprintf("%20d", size)),
 		}
 		b.Run(fmt.Sprintf("random region multiple ranges with size %d", size), func(b *testing.B) {
 			b.ResetTimer()
@@ -1157,11 +1158,11 @@ func TestScanRegion(t *testing.T) {
 		err                  error
 	)
 	scanError := func(startKey, endKey []byte, limit int) {
-		regions, err = scanRegion(tree, &KeyRange{StartKey: startKey, EndKey: endKey}, limit, needContainAllRanges)
+		regions, err = scanRegion(tree, &keyutil.KeyRange{StartKey: startKey, EndKey: endKey}, limit, needContainAllRanges)
 		re.Error(err)
 	}
 	scanNoError := func(startKey, endKey []byte, limit int) []*RegionInfo {
-		regions, err = scanRegion(tree, &KeyRange{StartKey: startKey, EndKey: endKey}, limit, needContainAllRanges)
+		regions, err = scanRegion(tree, &keyutil.KeyRange{StartKey: startKey, EndKey: endKey}, limit, needContainAllRanges)
 		re.NoError(err)
 		return regions
 	}
@@ -1224,9 +1225,9 @@ func TestScanRegionLimit(t *testing.T) {
 	}
 
 	for limit := 1; limit <= 18; limit++ {
-		KeyRanges := NewKeyRanges([]KeyRange{
-			NewKeyRange("a", "b"),
-			NewKeyRange("b0", ""), // ensure the key ranges are not merged
+		KeyRanges := keyutil.NewKeyRanges([]keyutil.KeyRange{
+			keyutil.NewKeyRange("a", "b"),
+			keyutil.NewKeyRange("b0", ""), // ensure the key ranges are not merged
 		})
 		resp, err := regions.BatchScanRegions(KeyRanges, WithLimit(limit))
 		re.NoError(err)

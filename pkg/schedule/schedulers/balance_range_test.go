@@ -25,6 +25,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/storage"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 )
 
 func TestBalanceRangePlan(t *testing.T) {
@@ -39,7 +40,7 @@ func TestBalanceRangePlan(t *testing.T) {
 	job := &balanceRangeSchedulerJob{
 		Engine: core.EngineTiKV,
 		Rule:   core.LeaderScatter,
-		Ranges: []core.KeyRange{core.NewKeyRange("100", "110")},
+		Ranges: []keyutil.KeyRange{keyutil.NewKeyRange("100", "110")},
 	}
 	plan, err := sc.prepare(tc, *operator.NewOpInfluence(), job)
 	re.NoError(err)
@@ -152,12 +153,12 @@ func TestFetchAllRegions(t *testing.T) {
 		tc.AddLeaderRegion(uint64(i), 1, 2, 3)
 	}
 
-	ranges := core.NewKeyRangesWithSize(1)
+	ranges := keyutil.NewKeyRangesWithSize(1)
 	ranges.Append([]byte(""), []byte(""))
 	regions := fetchAllRegions(tc, ranges)
 	re.Len(regions, 100)
 
-	ranges = core.NewKeyRangesWithSize(1)
+	ranges = keyutil.NewKeyRangesWithSize(1)
 	region := tc.GetRegion(50)
 	ranges.Append([]byte(""), region.GetStartKey())
 	ranges.Append(region.GetStartKey(), []byte(""))
@@ -171,7 +172,7 @@ func TestCodecConfig(t *testing.T) {
 		Engine: core.EngineTiKV,
 		Rule:   core.LeaderScatter,
 		JobID:  1,
-		Ranges: []core.KeyRange{core.NewKeyRange("a", "b")},
+		Ranges: []keyutil.KeyRange{keyutil.NewKeyRange("a", "b")},
 	}
 
 	conf := &balanceRangeSchedulerConfig{
@@ -188,7 +189,7 @@ func TestCodecConfig(t *testing.T) {
 		Engine: core.EngineTiKV,
 		Rule:   core.LeaderScatter,
 		Status: running,
-		Ranges: []core.KeyRange{core.NewKeyRange("a", "b")},
+		Ranges: []keyutil.KeyRange{keyutil.NewKeyRange("a", "b")},
 		JobID:  2,
 	}
 	re.NoError(conf.addJob(job1))

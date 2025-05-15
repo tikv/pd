@@ -35,6 +35,7 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/hbstream"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/versioninfo"
 )
@@ -841,7 +842,7 @@ func (oc *Controller) GetHistory(start time.Time) []OpHistory {
 type OpInfluenceOption func(region *core.RegionInfo) bool
 
 // WithRangeOption returns an OpInfluenceOption that filters the region by the key ranges.
-func WithRangeOption(ranges []core.KeyRange) OpInfluenceOption {
+func WithRangeOption(ranges []keyutil.KeyRange) OpInfluenceOption {
 	return func(region *core.RegionInfo) bool {
 		for _, r := range ranges {
 			// the start key of the region must greater than the given range start key.
