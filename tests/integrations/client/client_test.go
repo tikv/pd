@@ -1976,14 +1976,14 @@ func (s *clientStatefulTestSuite) checkTxnSafePoint(re *require.Assertions, keys
 	re.Equal(expectedTxnSafePoint, gcState.TxnSafePoint)
 }
 
-func (s *clientStatefulTestSuite) waitForGCBarrierExpiring(re *require.Assertions, b *gc.GCBarrierInfo, maxWaitTime time.Duration) {
+func (*clientStatefulTestSuite) waitForGCBarrierExpiring(re *require.Assertions, b *gc.GCBarrierInfo, maxWaitTime time.Duration) {
 	waitStartTime := time.Now()
 	for {
 		if b.IsExpired() {
 			return
 		}
 		if time.Since(waitStartTime) > maxWaitTime {
-			re.Fail("GC barrier not expired in expected time, barrier: %+v, maxWaitTime: %v", *b, maxWaitTime)
+			re.Failf("GC barrier not expired in expected time", "barrier: %+v, maxWaitTime: %v", *b, maxWaitTime)
 		}
 		time.Sleep(time.Millisecond * 50)
 	}
@@ -1998,20 +1998,20 @@ func (s *clientStatefulTestSuite) checkGCBarrier(re *require.Assertions, keyspac
 	for _, b := range gcState.GCBarriers {
 		if b.BarrierID == barrierID {
 			if found {
-				re.Fail("duplicated barrier ID found in the GC states, barrierID: %s, GC state: %+v", barrierID, gcState)
+				re.Failf("duplicated barrier ID found in the GC states", "barrierID: %s, GC state: %+v", barrierID, gcState)
 				return
 			}
 			if expectedBarrierTS != 0 {
 				re.Equal(expectedBarrierTS, b.BarrierTS)
 			} else {
-				re.Fail("expected GC barrier not exist but found, barrierID: %s, GC state: %+v", barrierID, gcState)
+				re.Failf("expected GC barrier not exist but found", "barrierID: %s, GC state: %+v", barrierID, gcState)
 				return
 			}
 			found = true
 		}
 	}
 	if expectedBarrierTS != 0 && !found {
-		re.Fail("GC barrier expected to exist but not found, barrierID: %s, GC state: %+v", barrierID, gcState)
+		re.Failf("GC barrier expected to exist but not found", "barrierID: %s, GC state: %+v", barrierID, gcState)
 	}
 }
 
