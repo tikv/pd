@@ -94,9 +94,34 @@ func MustCreateKeyspace(re *require.Assertions, server *tests.TestServer, reques
 	return meta.KeyspaceMeta
 }
 
+// MustCreateKeyspaceByID creates a keyspace with HTTP API.
+func MustCreateKeyspaceByID(re *require.Assertions, server *tests.TestServer, request *handlers.CreateKeyspaceByIDParams) *keyspacepb.KeyspaceMeta {
+	data, err := json.Marshal(request)
+	re.NoError(err)
+	httpReq, err := http.NewRequest(http.MethodPost, server.GetAddr()+keyspacesPrefix+"/id", bytes.NewBuffer(data))
+	re.NoError(err)
+	resp, err := tests.TestDialClient.Do(httpReq)
+	re.NoError(err)
+	defer resp.Body.Close()
+	re.Equal(http.StatusOK, resp.StatusCode)
+	data, err = io.ReadAll(resp.Body)
+	re.NoError(err)
+	meta := &handlers.KeyspaceMeta{}
+	re.NoError(json.Unmarshal(data, meta))
+	checkCreateByIDRequest(re, request, meta.KeyspaceMeta)
+	return meta.KeyspaceMeta
+}
+
 // checkCreateRequest verifies a keyspace meta matches a create request.
 func checkCreateRequest(re *require.Assertions, request *handlers.CreateKeyspaceParams, meta *keyspacepb.KeyspaceMeta) {
 	re.Equal(request.Name, meta.Name)
+	re.Equal(keyspacepb.KeyspaceState_ENABLED, meta.State)
+	re.Equal(request.Config, meta.Config)
+}
+
+// checkCreateByIDRequest verifies a keyspace meta matches a create request.
+func checkCreateByIDRequest(re *require.Assertions, request *handlers.CreateKeyspaceByIDParams, meta *keyspacepb.KeyspaceMeta) {
+	re.Equal(*request.ID, meta.Id)
 	re.Equal(keyspacepb.KeyspaceState_ENABLED, meta.State)
 	re.Equal(request.Config, meta.Config)
 }

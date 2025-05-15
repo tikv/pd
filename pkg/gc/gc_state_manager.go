@@ -23,6 +23,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/errs"
@@ -617,6 +618,7 @@ func (m *GCStateManager) GetGCState(keyspaceID uint32) (GCState, error) {
 
 // GetAllKeyspacesGCStates returns the GC state of all keyspaces.
 // Returns a map from keyspaceID to GCState. Keyspaces without keyspace-level GC enabled will not be included.
+// Note, it returns only the GC states of active keyspace. If a keyspace is in DISABLE/ARCHIVED/TOMBSTONE state, it's ignored here.
 func (m *GCStateManager) GetAllKeyspacesGCStates() (map[uint32]GCState, error) {
 	// TODO: Handle the case that there are too many keyspaces and loading them at once is not suitable.
 	allKeyspaces, err := m.keyspaceManager.LoadRangeKeyspace(0, 0)
@@ -639,6 +641,11 @@ func (m *GCStateManager) GetAllKeyspacesGCStates() (map[uint32]GCState, error) {
 	}
 
 	for _, keyspaceMeta := range allKeyspaces {
+		// Just handle the active keyspace, leave the others up to keyspace management.
+		if keyspaceMeta.State != keyspacepb.KeyspaceState_ENABLED {
+			continue
+		}
+
 		if keyspaceMeta.Config[keyspace.GCManagementType] != keyspace.KeyspaceLevelGC {
 			results[keyspaceMeta.Id] = GCState{
 				KeyspaceID:      keyspaceMeta.Id,
