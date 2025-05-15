@@ -38,7 +38,6 @@ import (
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
-	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 )
@@ -74,6 +73,7 @@ const (
 type Config interface {
 	GetPreAlloc() []string
 	ToWaitRegionSplit() bool
+	GetDisableRawKVRegionSplit() bool
 	GetWaitRegionSplitTimeout() time.Duration
 	GetCheckRegionSplitInterval() time.Duration
 }
@@ -506,7 +506,8 @@ func (manager *Manager) splitKeyspaceRegion(id uint32, waitRegionSplit bool) (er
 	})
 
 	start := time.Now()
-	keyspaceRule := MakeLabelRule(id)
+	skipRaw := manager.config.GetDisableRawKVRegionSplit()
+	keyspaceRule := makeLabelRule(id, skipRaw)
 	cl, ok := manager.cluster.(interface{ GetRegionLabeler() *labeler.RegionLabeler })
 	if !ok {
 		return errors.New("cluster does not support region label")
@@ -527,11 +528,17 @@ func (manager *Manager) splitKeyspaceRegion(id uint32, waitRegionSplit bool) (er
 					zap.Error(err),
 				)
 			}
+			return
 		}
+		log.Info("[keyspace] added region label for keyspace",
+			zap.Uint32("keyspace-id", id),
+			zap.Any("label-rule", keyspaceRule),
+			zap.Duration("takes", time.Since(start)),
+		)
 	}()
 
 	if waitRegionSplit {
-		err = manager.waitKeyspaceRegionSplit(id)
+		err = manager.waitKeyspaceRegionSplit(id, skipRaw)
 		if err != nil {
 			log.Warn("[keyspace] wait region split meets error",
 				zap.Uint32("keyspace-id", id),
@@ -540,16 +547,10 @@ func (manager *Manager) splitKeyspaceRegion(id uint32, waitRegionSplit bool) (er
 		}
 		return err
 	}
-
-	log.Info("[keyspace] added region label for keyspace",
-		zap.Uint32("keyspace-id", id),
-		logutil.ZapRedactString("label-rule", keyspaceRule.String()),
-		zap.Duration("takes", time.Since(start)),
-	)
-	return
+	return nil
 }
 
-func (manager *Manager) waitKeyspaceRegionSplit(id uint32) error {
+func (manager *Manager) waitKeyspaceRegionSplit(id uint32, skipRaw bool) error {
 	ticker := time.NewTicker(manager.config.GetCheckRegionSplitInterval())
 	timer := time.NewTimer(manager.config.GetWaitRegionSplitTimeout())
 	defer func() {
@@ -561,7 +562,7 @@ func (manager *Manager) waitKeyspaceRegionSplit(id uint32) error {
 		case <-manager.ctx.Done():
 			return errors.New("[keyspace] wait region split canceled")
 		case <-ticker.C:
-			if manager.CheckKeyspaceRegionBound(id) {
+			if manager.checkKeyspaceRegionBound(id, skipRaw) {
 				log.Info("[keyspace] wait region split successfully", zap.Uint32("keyspace-id", id))
 				return nil
 			}
@@ -576,7 +577,15 @@ func (manager *Manager) waitKeyspaceRegionSplit(id uint32) error {
 
 // CheckKeyspaceRegionBound checks whether the keyspace region has been split.
 func (manager *Manager) CheckKeyspaceRegionBound(id uint32) bool {
+	return manager.checkKeyspaceRegionBound(id, manager.config.GetDisableRawKVRegionSplit())
+}
+
+func (manager *Manager) checkKeyspaceRegionBound(id uint32, skipRaw bool) bool {
 	regionBound := MakeRegionBound(id)
+	if skipRaw {
+		return manager.checkBound(regionBound.TxnLeftBound) &&
+			manager.checkBound(regionBound.TxnRightBound)
+	}
 	return manager.checkBound(regionBound.RawLeftBound) &&
 		manager.checkBound(regionBound.RawRightBound) &&
 		manager.checkBound(regionBound.TxnLeftBound) &&
