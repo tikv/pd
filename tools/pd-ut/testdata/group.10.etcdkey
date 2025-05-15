@@ -19,9 +19,9 @@
 /pd//alloc_id get
 /pd//config get
 /pd//config save
-/pd//gc/gc_state_revision get
-/pd//gc/gc_state_revision save
+/pd//gc/safe_point/service/ get
 /pd//gc/safe_point/service/a save
+/pd//gc/safe_point/service/gc_worker save
 /pd//gc/safe_point/service/service- save
 /pd//keyspaces/alloc_id get
 /pd//keyspaces/id/DEFAULT get
@@ -65,7 +65,6 @@
 /pd//tso/keyspace_groups/membership/ remove
 /pd//tso/keyspace_groups/membership/ save
 /pd/cluster_id get
-/tidb/store/gcworker/saved_safe_point get
 encryption_keys get
 encryption_keys watch
 resource_group/controller get
