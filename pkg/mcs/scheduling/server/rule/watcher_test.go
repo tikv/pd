@@ -16,6 +16,7 @@ package rule
 
 import (
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"os"
 	"strconv"
@@ -100,11 +101,17 @@ func prepare(t require.TestingT) (context.Context, *clientv3.Client, func()) {
 	<-etcd.Server.ReadyNotify()
 
 	for i := 1; i < rulesNum+1; i++ {
+		regionBound := keyspace.MakeRegionBound(uint32(i))
 		rule := &labeler.LabelRule{
 			ID:       "test_" + strconv.Itoa(i),
 			Labels:   []labeler.RegionLabel{{Key: "test", Value: "test"}},
 			RuleType: labeler.KeyRange,
-			Data:     keyspace.MakeKeyRanges(uint32(i)),
+			Data: labeler.MakeKeyRanges(
+				hex.EncodeToString(regionBound.TxnLeftBound),
+				hex.EncodeToString(regionBound.TxnRightBound),
+				hex.EncodeToString(regionBound.RawLeftBound),
+				hex.EncodeToString(regionBound.RawRightBound),
+			),
 		}
 		value, err := json.Marshal(rule)
 		re.NoError(err)

@@ -144,10 +144,12 @@ func TestMakeLabelRule(t *testing.T) {
 	re := require.New(t)
 	testCases := []struct {
 		id                uint32
+		skipRaw           bool
 		expectedLabelRule *labeler.LabelRule
 	}{
 		{
-			id: 0,
+			id:      0,
+			skipRaw: false,
 			expectedLabelRule: &labeler.LabelRule{
 				ID:    getRegionLabelID(0),
 				Index: 0,
@@ -171,7 +173,8 @@ func TestMakeLabelRule(t *testing.T) {
 			},
 		},
 		{
-			id: 4242,
+			id:      4242,
+			skipRaw: false,
 			expectedLabelRule: &labeler.LabelRule{
 				ID:    getRegionLabelID(4242),
 				Index: 0,
@@ -194,9 +197,51 @@ func TestMakeLabelRule(t *testing.T) {
 				},
 			},
 		},
+		{
+			id:      0,
+			skipRaw: true,
+			expectedLabelRule: &labeler.LabelRule{
+				ID:    "keyspaces/0",
+				Index: 0,
+				Labels: []labeler.RegionLabel{
+					{
+						Key:   "id",
+						Value: "0",
+					},
+				},
+				RuleType: "key-range",
+				Data: []any{
+					map[string]any{
+						"start_key": hex.EncodeToString(codec.EncodeBytes([]byte{'x', 0, 0, 0})),
+						"end_key":   hex.EncodeToString(codec.EncodeBytes([]byte{'x', 0, 0, 1})),
+					},
+				},
+			},
+		},
+		{
+			id:      4242,
+			skipRaw: true,
+			expectedLabelRule: &labeler.LabelRule{
+				ID:    "keyspaces/4242",
+				Index: 0,
+				Labels: []labeler.RegionLabel{
+					{
+						Key:   "id",
+						Value: "4242",
+					},
+				},
+				RuleType: "key-range",
+				Data: []any{
+					map[string]any{
+						"start_key": hex.EncodeToString(codec.EncodeBytes([]byte{'x', 0, 0x10, 0x92})),
+						"end_key":   hex.EncodeToString(codec.EncodeBytes([]byte{'x', 0, 0x10, 0x93})),
+					},
+				},
+			},
+		},
 	}
 	for _, testCase := range testCases {
-		re.Equal(testCase.expectedLabelRule, MakeLabelRule(testCase.id))
+		re.Equal(testCase.expectedLabelRule, makeLabelRule(testCase.id, testCase.skipRaw))
 	}
 }
 
