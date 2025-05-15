@@ -43,9 +43,9 @@ func GetRootCmd() *cobra.Command {
 	}
 
 	rootCmd.PersistentFlags().StringP("pd", "u", "http://127.0.0.1:2379", "address of PD")
-	rootCmd.PersistentFlags().String("cacert", "", "path of file that contains list of trusted SSL CAs")
-	rootCmd.PersistentFlags().String("cert", "", "path of file that contains X509 certificate in PEM format")
-	rootCmd.PersistentFlags().String("key", "", "path of file that contains X509 key in PEM format")
+	rootCmd.PersistentFlags().String("cacert", os.Getenv("CA_PATH"), "path of file that contains list of trusted SSL CAs")
+	rootCmd.PersistentFlags().String("cert", os.Getenv("CERT_PATH"), "path of file that contains X509 certificate in PEM format")
+	rootCmd.PersistentFlags().String("key", os.Getenv("KEY_PATH"), "path of file that contains X509 key in PEM format")
 
 	rootCmd.Flags().ParseErrorsWhitelist.UnknownFlags = true
 

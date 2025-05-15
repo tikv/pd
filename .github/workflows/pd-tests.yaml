@@ -60,6 +60,7 @@ jobs:
         with:
           name: cover-reports-${{ matrix.worker_id }}
           path: covprofile_${{ matrix.worker_id }}
+          overwrite: true
   report-coverage:
     needs: chunks
     runs-on: x64
