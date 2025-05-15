@@ -42,6 +42,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/plan"
 	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/utils/apiutil"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 )
 
@@ -123,18 +124,18 @@ func (handler *balanceRangeSchedulerHandler) addJob(w http.ResponseWriter, r *ht
 	handler.rd.JSON(w, http.StatusOK, nil)
 }
 
-func decodeKeyRanges(startKeyStr string, endKeyStr string) ([]core.KeyRange, error) {
+func decodeKeyRanges(startKeyStr string, endKeyStr string) ([]keyutil.KeyRange, error) {
 	startKeys := strings.Split(startKeyStr, ",")
 	endKeys := strings.Split(endKeyStr, ",")
 	if len(startKeys) != len(endKeys) {
 		return nil, errs.ErrInvalidArgument.FastGenByArgs("the length of start key doesn't equal to end key")
 	}
-	rs := make([]core.KeyRange, len(startKeys))
+	rs := make([]keyutil.KeyRange, len(startKeys))
 	for i := range startKeys {
 		if startKeys[i] == "" && endKeys[i] == "" {
 			return nil, errs.ErrInvalidArgument.FastGenByArgs("start key and end key cannot both be nil")
 		}
-		rs[i] = core.NewKeyRange(startKeys[i], endKeys[i])
+		rs[i] = keyutil.NewKeyRange(startKeys[i], endKeys[i])
 	}
 	return rs, nil
 }
@@ -179,16 +180,16 @@ func (conf *balanceRangeSchedulerConfig) UnmarshalJSON(data []byte) error {
 }
 
 type balanceRangeSchedulerJob struct {
-	JobID   uint64          `json:"job-id"`
-	Rule    core.Rule       `json:"rule"`
-	Engine  string          `json:"engine"`
-	Timeout time.Duration   `json:"timeout"`
-	Ranges  []core.KeyRange `json:"ranges"`
-	Alias   string          `json:"alias"`
-	Start   *time.Time      `json:"start,omitempty"`
-	Finish  *time.Time      `json:"finish,omitempty"`
-	Create  time.Time       `json:"create"`
-	Status  JobStatus       `json:"status"`
+	JobID   uint64             `json:"job-id"`
+	Rule    core.Rule          `json:"rule"`
+	Engine  string             `json:"engine"`
+	Timeout time.Duration      `json:"timeout"`
+	Ranges  []keyutil.KeyRange `json:"ranges"`
+	Alias   string             `json:"alias"`
+	Start   *time.Time         `json:"start,omitempty"`
+	Finish  *time.Time         `json:"finish,omitempty"`
+	Create  time.Time          `json:"create"`
+	Status  JobStatus          `json:"status"`
 }
 
 func (conf *balanceRangeSchedulerConfig) deleteJob(jobID uint64) error {
@@ -290,7 +291,7 @@ func (conf *balanceRangeSchedulerConfig) clone() []*balanceRangeSchedulerJob {
 	defer conf.RUnlock()
 	jobs := make([]*balanceRangeSchedulerJob, 0, len(conf.jobs))
 	for _, job := range conf.jobs {
-		ranges := make([]core.KeyRange, len(job.Ranges))
+		ranges := make([]keyutil.KeyRange, len(job.Ranges))
 		copy(ranges, job.Ranges)
 		jobs = append(jobs, &balanceRangeSchedulerJob{
 			Ranges:  ranges,
@@ -539,7 +540,7 @@ type balanceRangeSchedulerPlan struct {
 	tolerate     int64
 }
 
-func fetchAllRegions(cluster sche.SchedulerCluster, ranges *core.KeyRanges) []*core.RegionInfo {
+func fetchAllRegions(cluster sche.SchedulerCluster, ranges *keyutil.KeyRanges) []*core.RegionInfo {
 	scanLimit := 32
 	regions := make([]*core.RegionInfo, 0)
 	krs := ranges.Ranges()
@@ -578,7 +579,7 @@ func (s *balanceRangeScheduler) prepare(cluster sche.SchedulerCluster, opInfluen
 		return nil, errs.ErrStoresNotEnough.FastGenByArgs("no store to select")
 	}
 
-	krs := core.NewKeyRanges(job.Ranges)
+	krs := keyutil.NewKeyRanges(job.Ranges)
 	scanRegions := fetchAllRegions(cluster, krs)
 	if len(scanRegions) == 0 {
 		return nil, errs.ErrRegionNotFound.FastGenByArgs("no region found")

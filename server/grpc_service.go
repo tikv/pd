@@ -50,6 +50,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
@@ -1719,8 +1720,8 @@ func (s *GrpcServer) BatchScanRegions(ctx context.Context, request *pdpb.BatchSc
 	}
 	needBucket := request.GetNeedBuckets() && !*followerHandle && rc.GetStoreConfig().IsEnableRegionBucket()
 	limit := request.GetLimit()
-	// cast to core.KeyRanges and check the validation.
-	keyRanges := core.NewKeyRangesWithSize(len(request.GetRanges()))
+	// cast to keyutil.KeyRanges and check the validation.
+	keyRanges := keyutil.NewKeyRangesWithSize(len(request.GetRanges()))
 	reqRanges := request.GetRanges()
 	for i, reqRange := range reqRanges {
 		if i > 0 {
