@@ -1,5 +1,8 @@
 /config/ttl get
 /global/config/ watch
+/keyspaces/tidb//tidb/server/minstartts/ get
+/keyspaces/tidb//tidb/store/gcworker/saved_safe_point get
+/keyspaces/tidb//tidb/store/gcworker/saved_safe_point save
 /ms//scheduling/primary get
 /ms//scheduling/primary watch
 /ms//scheduling/registry/ get
@@ -23,15 +26,11 @@
 /pd//gc/safe_point/service/BBB save
 /pd//gc/safe_point/service/CCC remove
 /pd//gc/safe_point/service/CCC save
-/pd//gc/safe_point/service/_ get
-/pd//gc/safe_point/service/_ remove
-/pd//gc/safe_point/service/a get
 /pd//gc/safe_point/service/a remove
 /pd//gc/safe_point/service/a save
 /pd//gc/safe_point/service/b get
 /pd//gc/safe_point/service/b remove
 /pd//gc/safe_point/service/b save
-/pd//gc/safe_point/service/c get
 /pd//gc/safe_point/service/c remove
 /pd//gc/safe_point/service/c save
 /pd//gc/safe_point/service/gc_worker remove
@@ -43,11 +42,17 @@
 /pd//keyspaces/gc_safe_point/ watch
 /pd//keyspaces/id/DEFAULT get
 /pd//keyspaces/id/DEFAULT save
+/pd//keyspaces/id/ks get
+/pd//keyspaces/id/ks save
 /pd//keyspaces/id/non-existing keyspace get
 /pd//keyspaces/id/test_keyspace_ get
 /pd//keyspaces/id/test_keyspace_ save
 /pd//keyspaces/meta/ get
 /pd//keyspaces/meta/ save
+/pd//keyspaces/service_safe_point// get
+/pd//keyspaces/service_safe_point//b get
+/pd//keyspaces/service_safe_point//b remove
+/pd//keyspaces/service_safe_point//b save
 /pd//leader get
 /pd//leader watch
 /pd//member//binary_version get
