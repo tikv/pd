@@ -40,7 +40,7 @@ import (
 const (
 	alterEpsilon               = 1e-9
 	minReCheckDurationGap      = 120 // default gap for re-check the slow node, unit: s
-	defaultRecoveryDurationGap = 600 // default gap for recovery, unit: s.
+	defaultRecoveryDurationGap = 900 // default gap for recovery, unit: s.
 )
 
 type slowCandidate struct {
