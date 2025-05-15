@@ -27,6 +27,7 @@ import (
 	"github.com/stretchr/testify/suite"
 
 	"github.com/pingcap/errors"
+	"github.com/pingcap/kvproto/pkg/keyspacepb"
 
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/id"
@@ -125,6 +126,16 @@ func newGCStateManagerForTest(t *testing.T) (storage *endpoint.StorageEndpoint, 
 	re.NoError(err)
 	re.Equal(uint32(3), ks3.Id)
 
+	ks4, err := keyspaceManager.CreateKeyspace(&keyspace.CreateKeyspaceRequest{
+		Name:       "ks4",
+		Config:     map[string]string{},
+		CreateTime: time.Now().Unix(),
+	})
+	re.NoError(err)
+	_, err = keyspaceManager.UpdateKeyspaceState("ks4", keyspacepb.KeyspaceState_DISABLED, time.Now().Unix())
+	re.NoError(err)
+	re.Equal(uint32(4), ks4.Id)
+
 	return s, s.GetGCStateProvider(), gcStateManager, clean
 }
 
@@ -135,7 +146,7 @@ func (s *gcStateManagerTestSuite) SetupTest() {
 	s.keyspacePresets.manageable = []uint32{constant.NullKeyspaceID, 2}
 	s.keyspacePresets.unmanageable = []uint32{0, 1, 3}
 	s.keyspacePresets.unifiedGC = []uint32{constant.NullKeyspaceID, 0, 1, 3}
-	s.keyspacePresets.notExisting = []uint32{4, 0xffffff}
+	s.keyspacePresets.notExisting = []uint32{5, 0xffffff}
 	s.keyspacePresets.nullSynonyms = []uint32{constant.NullKeyspaceID, 0x1000000, 0xfffffffe}
 }
 

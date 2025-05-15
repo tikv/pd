@@ -2079,6 +2079,7 @@ func (suite *ruleCheckerTestAdvancedSuite) TestReplaceAnExistingPeerCases() {
 }
 
 func (suite *ruleCheckerTestSuite) TestRemoveOrphanPeer() {
+	re := suite.Require()
 	suite.cluster.AddLabelsStore(1, 1, map[string]string{"zone": "z1", "host": "h1"})
 	suite.cluster.AddLabelsStore(2, 1, map[string]string{"zone": "z1", "host": "h1"})
 	suite.cluster.AddLabelsStore(3, 1, map[string]string{"zone": "z1", "host": "h1"})
@@ -2104,14 +2105,14 @@ func (suite *ruleCheckerTestSuite) TestRemoveOrphanPeer() {
 	// case1: regionA has 3 peers but not extra peer can be removed, so it needs to add peer first
 	suite.cluster.AddLeaderRegionWithRange(1, "200", "300", 1, 2, 3)
 	op := suite.rc.Check(suite.cluster.GetRegion(1))
-	suite.NotNil(op)
-	suite.Equal("add-rule-peer", op.Desc())
+	re.NotNil(op)
+	re.Equal("add-rule-peer", op.Desc())
 
 	// case2: regionB has 4 peers and one extra peer can be removed, so it needs to remove extra peer first
 	suite.cluster.AddLeaderRegionWithRange(2, "300", "400", 1, 2, 3, 4)
 	op = suite.rc.Check(suite.cluster.GetRegion(2))
-	suite.NotNil(op)
-	suite.Equal("remove-orphan-peer", op.Desc())
+	re.NotNil(op)
+	re.Equal("remove-orphan-peer", op.Desc())
 }
 
 func (suite *ruleCheckerTestSuite) TestIssue7808() {
