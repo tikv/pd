@@ -102,6 +102,7 @@ func TestSplitKeyspaceGroup(t *testing.T) {
 	}
 	tc, err := pdTests.NewTestAPICluster(ctx, 3, func(conf *config.Config, _ string) {
 		conf.Keyspace.PreAlloc = keyspaces
+		conf.Keyspace.WaitRegionSplit = false
 	})
 	re.NoError(err)
 	defer tc.Destroy()
@@ -157,6 +158,7 @@ func TestExternalAllocNodeWhenStart(t *testing.T) {
 	}
 	tc, err := pdTests.NewTestAPICluster(ctx, 1, func(conf *config.Config, _ string) {
 		conf.Keyspace.PreAlloc = keyspaces
+		conf.Keyspace.WaitRegionSplit = false
 	})
 	re.NoError(err)
 	defer tc.Destroy()
@@ -197,6 +199,7 @@ func TestSetNodeAndPriorityKeyspaceGroup(t *testing.T) {
 	}
 	tc, err := pdTests.NewTestAPICluster(ctx, 3, func(conf *config.Config, _ string) {
 		conf.Keyspace.PreAlloc = keyspaces
+		conf.Keyspace.WaitRegionSplit = false
 	})
 	re.NoError(err)
 	defer tc.Destroy()
@@ -301,6 +304,7 @@ func TestMergeKeyspaceGroup(t *testing.T) {
 	}
 	tc, err := pdTests.NewTestAPICluster(ctx, 1, func(conf *config.Config, _ string) {
 		conf.Keyspace.PreAlloc = keyspaces
+		conf.Keyspace.WaitRegionSplit = false
 	})
 	re.NoError(err)
 	defer tc.Destroy()
@@ -420,6 +424,7 @@ func TestKeyspaceGroupState(t *testing.T) {
 	}
 	tc, err := pdTests.NewTestAPICluster(ctx, 1, func(conf *config.Config, _ string) {
 		conf.Keyspace.PreAlloc = keyspaces
+		conf.Keyspace.WaitRegionSplit = false
 	})
 	re.NoError(err)
 	defer tc.Destroy()
@@ -511,6 +516,7 @@ func TestShowKeyspaceGroupPrimary(t *testing.T) {
 	}
 	tc, err := pdTests.NewTestAPICluster(ctx, 1, func(conf *config.Config, _ string) {
 		conf.Keyspace.PreAlloc = keyspaces
+		conf.Keyspace.WaitRegionSplit = false
 	})
 	re.NoError(err)
 	defer tc.Destroy()

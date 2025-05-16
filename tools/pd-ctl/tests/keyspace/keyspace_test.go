@@ -49,6 +49,7 @@ func TestKeyspace(t *testing.T) {
 	}
 	tc, err := pdTests.NewTestAPICluster(ctx, 3, func(conf *config.Config, _ string) {
 		conf.Keyspace.PreAlloc = keyspaces
+		conf.Keyspace.WaitRegionSplit = false
 	})
 	re.NoError(err)
 	defer tc.Destroy()
@@ -65,6 +66,8 @@ func TestKeyspace(t *testing.T) {
 	leaderServer := tc.GetLeaderServer()
 	re.NoError(leaderServer.BootstrapCluster())
 	defaultKeyspaceGroupID := fmt.Sprintf("%d", constant.DefaultKeyspaceGroupID)
+	keyspaceIDs, err := leaderServer.GetPreAllocKeyspaceIDs()
+	re.NoError(err)
 
 	var k api.KeyspaceMeta
 	keyspaceName := "keyspace_1"
@@ -75,13 +78,13 @@ func TestKeyspace(t *testing.T) {
 		re.NoError(json.Unmarshal(output, &k))
 		return k.GetName() == keyspaceName
 	})
-	re.Equal(uint32(1), k.GetId())
+	re.Equal(keyspaceIDs[0], k.GetId())
 	re.Equal(defaultKeyspaceGroupID, k.Config[keyspace.TSOKeyspaceGroupIDKey])
 
 	// split keyspace group.
 	newGroupID := "2"
 	testutil.Eventually(re, func() bool {
-		args := []string{"-u", pdAddr, "keyspace-group", "split", "0", newGroupID, "1"}
+		args := []string{"-u", pdAddr, "keyspace-group", "split", "0", newGroupID, strconv.Itoa(int(keyspaceIDs[0]))}
 		output, err := tests.ExecuteCommand(cmd, args...)
 		re.NoError(err)
 		return strings.Contains(string(output), "Success")

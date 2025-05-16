@@ -538,6 +538,7 @@ func TestTwiceSplitKeyspaceGroup(t *testing.T) {
 		conf.Keyspace.PreAlloc = []string{
 			"keyspace_a", "keyspace_b",
 		}
+		conf.Keyspace.WaitRegionSplit = false
 	})
 	re.NoError(err)
 	pdAddr := tc.GetConfig().GetClientURL()
@@ -731,10 +732,12 @@ func TestGetTSOImmediately(t *testing.T) {
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/fastGroupSplitPatroller", `return(true)`))
 
 	// Init api server config but not start.
+	keyspaces := []string{
+		"keyspace_a", "keyspace_b",
+	}
 	tc, err := tests.NewTestAPICluster(ctx, 1, func(conf *config.Config, _ string) {
-		conf.Keyspace.PreAlloc = []string{
-			"keyspace_a", "keyspace_b",
-		}
+		conf.Keyspace.PreAlloc = keyspaces
+		conf.Keyspace.WaitRegionSplit = false
 	})
 	re.NoError(err)
 	pdAddr := tc.GetConfig().GetClientURL()
@@ -778,12 +781,15 @@ func TestGetTSOImmediately(t *testing.T) {
 		return p0 == kg0.Members[0].Address && p1 == kg1.Members[1].Address
 	}, testutil.WithWaitFor(5*time.Second), testutil.WithTickInterval(50*time.Millisecond))
 
-	apiCtx := pd.NewAPIContextV2("keyspace_b") // its keyspace id is 2.
-	cli, err := pd.NewClientWithAPIContext(ctx, apiCtx, []string{pdAddr}, pd.SecurityOption{})
-	re.NoError(err)
-	_, _, err = cli.GetTS(ctx)
-	re.NoError(err)
-	cli.Close()
+	for _, name := range keyspaces {
+		apiCtx := pd.NewAPIContextV2(name)
+		cli, err := pd.NewClientWithAPIContext(ctx, apiCtx, []string{pdAddr}, pd.SecurityOption{})
+		re.NoError(err)
+		_, _, err = cli.GetTS(ctx)
+		re.NoError(err)
+		cli.Close()
+	}
+
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/tso/fastPrimaryPriorityCheck"))
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/acceleratedAllocNodes"))
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/tso/fastGroupSplitPatroller"))

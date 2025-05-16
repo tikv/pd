@@ -55,6 +55,7 @@ func (suite *keyspaceTestSuite) SetupTest() {
 	suite.cancel = cancel
 	cluster, err := tests.NewTestCluster(ctx, 3, func(conf *config.Config, _ string) {
 		conf.Keyspace.PreAlloc = preAllocKeyspace
+		conf.Keyspace.WaitRegionSplit = false
 	})
 	suite.cluster = cluster
 	re.NoError(err)
@@ -84,7 +85,6 @@ func (suite *keyspaceTestSuite) TestRegionLabeler() {
 		keyspaces[i], err = manager.CreateKeyspace(&keyspace.CreateKeyspaceRequest{
 			Name:       fmt.Sprintf("test_keyspace_%d", i),
 			CreateTime: now,
-			IsPreAlloc: true, // skip wait region split
 		})
 		re.NoError(err)
 	}

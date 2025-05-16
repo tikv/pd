@@ -91,6 +91,7 @@ func NewTestSingleConfig(c *assertutil.Checker) *config.Config {
 	})
 
 	c.AssertNil(cfg.Adjust(nil, false))
+	cfg.Keyspace.WaitRegionSplit = false
 
 	return cfg
 }
