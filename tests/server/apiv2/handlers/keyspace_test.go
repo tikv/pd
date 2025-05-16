@@ -17,6 +17,7 @@ package handlers
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -180,9 +181,11 @@ func mustMakeTestKeyspacesByIDs(re *require.Assertions, server *tests.TestServer
 	}
 	resultMeta := make([]*keyspacepb.KeyspaceMeta, count)
 	for i := range count {
+		name := strconv.Itoa(i + 1)
 		id := uint32(i + 1)
 		createRequest := &handlers.CreateKeyspaceByIDParams{
 			ID:     &id,
+			Name:   name,
 			Config: testConfig,
 		}
 		resultMeta[i] = MustCreateKeyspaceByID(re, server, createRequest)
