@@ -136,7 +136,7 @@ func (mc *Cluster) LoadRegion(regionID uint64, peerStoreIDs ...uint64) {
 }
 
 // GetStoresLoads gets stores load statistics.
-func (mc *Cluster) GetStoresLoads() map[uint64][]float64 {
+func (mc *Cluster) GetStoresLoads() map[uint64]statistics.StoreKindLoads {
 	mc.FilterUnhealthyStore(mc)
 	return mc.HotStat.GetStoresLoads()
 }

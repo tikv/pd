@@ -26,14 +26,14 @@ import (
 
 func TestHistoryLoads(t *testing.T) {
 	re := require.New(t)
-	historyLoads := NewStoreHistoryLoads(utils.DimLen, DefaultHistorySampleDuration, 0)
-	loads := []float64{1.0, 2.0, 3.0}
+	historyLoads := NewStoreHistoryLoads(DefaultHistorySampleDuration, 0)
+	loads := Loads{1.0, 2.0, 3.0}
 	rwTp := utils.Read
 	kind := constant.LeaderKind
 	historyLoads.Add(1, rwTp, kind, loads)
 	re.Len(historyLoads.Get(1, rwTp, kind)[0], 10)
 
-	expectLoads := make([][]float64, utils.DimLen)
+	var expectLoads HistoryLoads
 	for i := range loads {
 		expectLoads[i] = make([]float64, 10)
 	}
@@ -45,19 +45,19 @@ func TestHistoryLoads(t *testing.T) {
 	}
 	re.Equal(expectLoads, historyLoads.Get(1, rwTp, kind))
 
-	historyLoads = NewStoreHistoryLoads(utils.DimLen, time.Millisecond, time.Millisecond)
+	historyLoads = NewStoreHistoryLoads(time.Millisecond, time.Millisecond)
 	historyLoads.Add(1, rwTp, kind, loads)
 	re.Len(historyLoads.Get(1, rwTp, kind)[0], 1)
 
-	historyLoads = NewStoreHistoryLoads(utils.DimLen, time.Millisecond, time.Second)
+	historyLoads = NewStoreHistoryLoads(time.Millisecond, time.Second)
 	historyLoads.Add(1, rwTp, kind, loads)
 	re.Empty(historyLoads.Get(1, rwTp, kind)[0])
 
-	historyLoads = NewStoreHistoryLoads(utils.DimLen, 0, time.Second)
+	historyLoads = NewStoreHistoryLoads(0, time.Second)
 	historyLoads.Add(1, rwTp, kind, loads)
 	re.Empty(historyLoads.Get(1, rwTp, kind)[0])
 
-	historyLoads = NewStoreHistoryLoads(utils.DimLen, 0, 0)
+	historyLoads = NewStoreHistoryLoads(0, 0)
 	historyLoads.Add(1, rwTp, kind, loads)
 	re.Empty(historyLoads.Get(1, rwTp, kind)[0])
 }
