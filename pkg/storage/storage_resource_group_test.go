@@ -30,10 +30,10 @@ func TestResourceGroupStorage(t *testing.T) {
 	storage := NewStorageWithMemoryBackend()
 
 	keyspaceGroups := map[uint32][]string{
-		constant.NullKeyspaceID:    generateRandomResourceGroupNames(100),
-		constant.DefaultKeyspaceID: generateRandomResourceGroupNames(100),
-		1:                          generateRandomResourceGroupNames(100),
-		2:                          generateRandomResourceGroupNames(100),
+		constant.NullKeyspaceID:    generateRandomResourceGroupNames(),
+		constant.DefaultKeyspaceID: generateRandomResourceGroupNames(),
+		1:                          generateRandomResourceGroupNames(),
+		2:                          generateRandomResourceGroupNames(),
 	}
 	// Test legacy and keyspace resource group settings.
 	for keyspaceID, names := range keyspaceGroups {
@@ -80,16 +80,19 @@ func TestResourceGroupStorage(t *testing.T) {
 	re.NoError(err)
 }
 
-const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*()-_=+[]{}|;:,.<>?/"
+const (
+	n       = 100
+	charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*()-_=+[]{}|;:,.<>?/"
+)
 
 // generateRandomResourceGroupNames generates n random resource group names with letters, numbers and symbols.
-func generateRandomResourceGroupNames(n int) []string {
+func generateRandomResourceGroupNames() []string {
 	names := make([]string, n)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		// Generate a random length between 1 and 100 characters.
 		length := 1 + rand.Intn(100)
 		name := make([]byte, length)
-		for j := 0; j < length; j++ {
+		for j := range length {
 			name[j] = charset[rand.Intn(len(charset))]
 		}
 		names[i] = string(name)
