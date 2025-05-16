@@ -263,7 +263,7 @@ func TestPersistFail(t *testing.T) {
 		Engine: core.EngineTiKV,
 		Rule:   core.LeaderScatter,
 		JobID:  1,
-		Ranges: []core.KeyRange{core.NewKeyRange("a", "b")},
+		Ranges: []keyutil.KeyRange{keyutil.NewKeyRange("a", "b")},
 	}
 	conf := &balanceRangeSchedulerConfig{
 		schedulerConfig: &baseSchedulerConfig{},
