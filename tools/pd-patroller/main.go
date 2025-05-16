@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -38,16 +39,79 @@ import (
 const msgSize = 16 * units.MiB
 const defaultLimit = 65536
 
+// Default hex-encoded end keys to skip. These are always active.
+var defaultSkipHexKeys = []string{"7800000000000000fb", "7800000100000000fb"}
+
 var (
-	pdAddrs  = flag.String("pd", "127.0.0.1:2379", "pd address")
-	limit    = flag.Int("limit", defaultLimit, "the limit of regions")
-	caPath   = flag.String("cacert", "", "path of file that contains list of trusted SSL CAs")
-	certPath = flag.String("cert", "", "path of file that contains X509 certificate in PEM format")
-	keyPath  = flag.String("key", "", "path of file that contains X509 key in PEM format")
+	pdAddrs   = flag.String("pd", "127.0.0.1:2379", "pd address")
+	limit     = flag.Int("limit", defaultLimit, "the limit of regions")
+	caPath    = flag.String("cacert", "", "path of file that contains list of trusted SSL CAs")
+	certPath  = flag.String("cert", "", "path of file that contains X509 certificate in PEM format")
+	keyPath   = flag.String("key", "", "path of file that contains X509 key in PEM format")
+	logLevel  = flag.String("log-level", "info", "log level (debug, info, warn, error, fatal)")
+	logFile   = flag.String("log-file", "", "log file path (empty for stderr)")
+	logFormat = flag.String("log-format", "text", "log format (text or json)")
+
+	skipKeysHexStr = flag.String("skip-keys-hex", "", "Additional comma-separated list of hex-encoded end keys to skip (appended to defaults)")
+
+	processedSkipKeysHex map[string]struct{}
 )
 
 func main() {
 	flag.Parse()
+
+	logCfg := &log.Config{
+		Level:  *logLevel,
+		Format: *logFormat,
+	}
+	if *logFile != "" {
+		logCfg.File = log.FileLogConfig{Filename: *logFile}
+	}
+	logger, props, err := log.InitLogger(logCfg)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "failed to initialize logger: %v\n", err)
+		os.Exit(1)
+	}
+	log.ReplaceGlobals(logger, props)
+
+	// Initialize the set of keys to skip
+	processedSkipKeysHex = make(map[string]struct{})
+
+	// 1. Add default keys first
+	log.Info("Adding default hex-encoded end keys to skip list", zap.Strings("default_skip_keys", defaultSkipHexKeys))
+	for _, keyStr := range defaultSkipHexKeys {
+		// Defaults are assumed to be clean, but TrimSpace is harmless
+		trimmedKey := strings.TrimSpace(keyStr)
+		if trimmedKey != "" {
+			processedSkipKeysHex[trimmedKey] = struct{}{}
+		}
+	}
+
+	// 2. Add custom keys from command-line argument if provided
+	if *skipKeysHexStr != "" {
+		customKeysToParse := strings.Split(*skipKeysHexStr, ",")
+		log.Info("Appending custom hex-encoded end keys to skip list from command-line argument", zap.Strings("custom_skip_keys_to_add", customKeysToParse))
+		for _, keyStr := range customKeysToParse {
+			trimmedKey := strings.TrimSpace(keyStr)
+			if trimmedKey != "" {
+				if _, exists := processedSkipKeysHex[trimmedKey]; !exists {
+					processedSkipKeysHex[trimmedKey] = struct{}{}
+				} else {
+					// Log if a custom key is already in the list (e.g., it was a default or a duplicate in the custom list)
+					log.Debug("Custom skip key already present in the skip list (either a default or a duplicate entry)", zap.String("key", trimmedKey))
+				}
+			}
+		}
+	}
+
+	finalSkipKeysList := make([]string, 0, len(processedSkipKeysHex))
+	for k := range processedSkipKeysHex {
+		finalSkipKeysList = append(finalSkipKeysList, k)
+	}
+	log.Info("Final combined list of hex-encoded end keys to skip",
+		zap.Int("total_skip_keys_count", len(processedSkipKeysHex)),
+		zap.Strings("all_skip_keys", finalSkipKeysList))
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -122,7 +186,14 @@ func patrolRegions(ctx context.Context, pdCli pd.Client, limit int) (int, error)
 func checkRegion(region *pd.Region) {
 	regionID := region.Meta.GetId()
 	key := region.Meta.GetEndKey()
-	if len(key) == 0 || hex.EncodeToString(key) == "7800000000000000fb" || hex.EncodeToString(key) == "7800000100000000fb" {
+	if len(key) == 0 {
+		return
+	}
+	hexKeyStr := hex.EncodeToString(key)
+	if _, shouldSkip := processedSkipKeysHex[hexKeyStr]; shouldSkip {
+		log.Debug("Skipping region: end key is in the skip list",
+			zap.Uint64("region_id", regionID),
+			zap.String("end_key_hex", hexKeyStr))
 		return
 	}
 	log.Debug("patrol region",
