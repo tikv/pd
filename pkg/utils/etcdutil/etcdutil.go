@@ -184,6 +184,34 @@ func InjectFailToCollectTestEtcdKey(key, op string) {
 	})
 }
 
+// InjectFailToCollectTestEtcdOps injects the failpoint to collect a set of ops for testing.
+func InjectFailToCollectTestEtcdOps(ops ...clientv3.Op) {
+	failpoint.Inject("CollectEtcdKey", func(val failpoint.Value) {
+		file := val.(string)
+
+		if len(file) != 0 {
+			for _, op := range ops {
+				opType := ""
+				if op.IsPut() {
+					opType = "save"
+				} else if op.IsDelete() {
+					opType = "remove"
+				} else if op.IsGet() {
+					opType = "get"
+				} else {
+					// Ignore
+					continue
+				}
+				err := writeKeyToFile(file, string(op.KeyBytes()), opType)
+				if err != nil {
+					pwd, _ := os.Getwd()
+					log.Error("write key to file failed", zap.String("pwd", pwd), zap.String("file", file), zap.Error(err))
+				}
+			}
+		}
+	})
+}
+
 // WriteKeyToFile writes the key to the file. It is only used for testing.
 func writeKeyToFile(file, key, op string) error {
 	f, err := os.OpenFile(file, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)

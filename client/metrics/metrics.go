@@ -269,6 +269,11 @@ var (
 	CmdDurationQueryRegionAsyncWait     prometheus.Observer
 	CmdDurationQueryRegionWait          prometheus.Observer
 	CmdDurationQueryRegion              prometheus.Observer
+	CmdDurationAdvanceTxnSafePoint      prometheus.Observer
+	CmdDurationAdvanceGCSafePoint       prometheus.Observer
+	CmdDurationSetGCBarrier             prometheus.Observer
+	CmdDurationDeleteGCBarrier          prometheus.Observer
+	CmdDurationGetGCState               prometheus.Observer
 
 	CmdFailedDurationGetRegion                prometheus.Observer
 	CmdFailedDurationTSOWait                  prometheus.Observer
@@ -291,6 +296,11 @@ var (
 	CmdFailedDurationQueryRegionAsyncWait     prometheus.Observer
 	CmdFailedDurationQueryRegionWait          prometheus.Observer
 	CmdFailedDurationQueryRegion              prometheus.Observer
+	CmdFailedDurationAdvanceTxnSafePoint      prometheus.Observer
+	CmdFailedDurationAdvanceGCSafePoint       prometheus.Observer
+	CmdFailedDurationSetGCBarrier             prometheus.Observer
+	CmdFailedDurationDeleteGCBarrier          prometheus.Observer
+	CmdFailedDurationGetGCState               prometheus.Observer
 
 	InternalCmdDurationGetClusterInfo prometheus.Observer
 	InternalCmdDurationGetMembers     prometheus.Observer
@@ -343,6 +353,11 @@ func initLabelValues() {
 	CmdDurationQueryRegionAsyncWait = cmdDuration.WithLabelValues("query_region_async_wait")
 	CmdDurationQueryRegionWait = cmdDuration.WithLabelValues("query_region_wait")
 	CmdDurationQueryRegion = cmdDuration.WithLabelValues("query_region")
+	CmdDurationAdvanceTxnSafePoint = cmdDuration.WithLabelValues("advance_txn_safe_point")
+	CmdDurationAdvanceGCSafePoint = cmdDuration.WithLabelValues("advance_gc_safe_point")
+	CmdDurationSetGCBarrier = cmdDuration.WithLabelValues("set_gc_barrier")
+	CmdDurationDeleteGCBarrier = cmdDuration.WithLabelValues("delete_gc_barrier")
+	CmdDurationGetGCState = cmdDuration.WithLabelValues("get_gc_state")
 
 	CmdFailedDurationGetRegion = cmdFailedDuration.WithLabelValues("get_region")
 	CmdFailedDurationTSOWait = cmdFailedDuration.WithLabelValues("wait")
@@ -365,6 +380,11 @@ func initLabelValues() {
 	CmdFailedDurationQueryRegionAsyncWait = cmdFailedDuration.WithLabelValues("query_region_async_wait")
 	CmdFailedDurationQueryRegionWait = cmdFailedDuration.WithLabelValues("query_region_wait")
 	CmdFailedDurationQueryRegion = cmdFailedDuration.WithLabelValues("query_region")
+	CmdFailedDurationAdvanceTxnSafePoint = cmdFailedDuration.WithLabelValues("advance_txn_safe_point")
+	CmdFailedDurationAdvanceGCSafePoint = cmdFailedDuration.WithLabelValues("advance_gc_safe_point")
+	CmdFailedDurationSetGCBarrier = cmdFailedDuration.WithLabelValues("set_gc_barrier")
+	CmdFailedDurationDeleteGCBarrier = cmdFailedDuration.WithLabelValues("delete_gc_barrier")
+	CmdFailedDurationGetGCState = cmdFailedDuration.WithLabelValues("get_gc_state")
 
 	InternalCmdDurationGetClusterInfo = internalCmdDuration.WithLabelValues("get_cluster_info")
 	InternalCmdDurationGetMembers = internalCmdDuration.WithLabelValues("get_members")

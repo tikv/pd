@@ -1,6 +1,7 @@
 /config/ttl get
 /keyspaces/tidb//tidb/server/minstartts/ get
 /keyspaces/tidb//tidb/store/gcworker/saved_safe_point get
+/keyspaces/tidb//tidb/store/gcworker/saved_safe_point save
 /ms//scheduling/primary get
 /ms//scheduling/primary watch
 /ms//tso//primary get
@@ -11,11 +12,16 @@
 /pd//config get
 /pd//config save
 /pd//gc/gc_state_revision get
+/pd//gc/gc_state_revision save
 /pd//gc/safe_point get
+/pd//gc/safe_point save
 /pd//gc/safe_point/service/ get
 /pd//gc/safe_point/service/b get
+/pd//gc/safe_point/service/b remove
+/pd//gc/safe_point/service/b save
 /pd//keyspaces/alloc_id get
 /pd//keyspaces/gc_safe_point/ get
+/pd//keyspaces/gc_safe_point/ save
 /pd//keyspaces/id/DEFAULT get
 /pd//keyspaces/id/DEFAULT save
 /pd//keyspaces/id/ks get
@@ -28,6 +34,8 @@
 /pd//keyspaces/meta/ save
 /pd//keyspaces/service_safe_point// get
 /pd//keyspaces/service_safe_point//b get
+/pd//keyspaces/service_safe_point//b remove
+/pd//keyspaces/service_safe_point//b save
 /pd//leader get
 /pd//leader watch
 /pd//member//binary_version get
@@ -58,6 +66,7 @@
 /pd/cluster_id get
 /tidb/server/minstartts/ get
 /tidb/store/gcworker/saved_safe_point get
+/tidb/store/gcworker/saved_safe_point save
 encryption_keys get
 encryption_keys watch
 resource_group/controller get
