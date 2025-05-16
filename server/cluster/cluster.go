@@ -1428,6 +1428,11 @@ func (c *RaftCluster) checkStoreVersion(store *metapb.Store) error {
 	if err != nil {
 		return errors.Errorf("invalid put store %v, error: %s", store, err)
 	}
+
+	if !c.opt.GetPDServerConfig().EnableCheckStoreCompatible {
+		return nil
+	}
+
 	clusterVersion := *c.opt.GetClusterVersion()
 	if !versioninfo.IsCompatible(clusterVersion, *v) {
 		return errors.Errorf("version should compatible with version  %s, got %s", clusterVersion, v)

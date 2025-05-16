@@ -253,6 +253,10 @@ const (
 	maxCheckRegionSplitInterval     = 100 * time.Millisecond
 
 	defaultEnableSchedulingFallback = true
+
+	// The checking of store compatibility has a drawback that it may block the downgrade process.
+	// In serverless, it's safe to disable this checking as cluster is managed, and the compatibility is guaranteed.
+	defaultEnableCheckStoreCompatible = false
 )
 
 // Special keys for Labels
@@ -529,6 +533,8 @@ type PDServerConfig struct {
 	GCTunerThreshold float64 `toml:"gc-tuner-threshold" json:"gc-tuner-threshold"`
 	// BlockSafePointV1 is used to control gc safe point v1 and service safe point v1 can not be updated.
 	BlockSafePointV1 bool `toml:"block-safe-point-v1" json:"block-safe-point-v1,string"`
+	// EnableCheckStoreCompatible is used to enable the checking store compatibility.
+	EnableCheckStoreCompatible bool `toml:"enable-check-store-compatible" json:"enable-check-store-compatible"`
 }
 
 func (c *PDServerConfig) adjust(meta *configutil.ConfigMetaData) error {
@@ -577,6 +583,9 @@ func (c *PDServerConfig) adjust(meta *configutil.ConfigMetaData) error {
 		c.GCTunerThreshold = minGCTunerThreshold
 	} else if c.GCTunerThreshold > maxGCTunerThreshold {
 		c.GCTunerThreshold = maxGCTunerThreshold
+	}
+	if !meta.IsDefined("enable-check-store-compatible") {
+		c.EnableCheckStoreCompatible = defaultEnableCheckStoreCompatible
 	}
 	if err := migrateConfigurationFromFile(meta); err != nil {
 		return err
