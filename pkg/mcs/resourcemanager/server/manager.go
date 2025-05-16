@@ -18,10 +18,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus/push"
 	"go.uber.org/zap"
 
 	"github.com/pingcap/errors"
@@ -46,6 +48,8 @@ const (
 	metricsCleanupTimeout     = 20 * time.Minute
 	defaultCollectIntervalSec = 20
 	tickPerSecond             = time.Second
+
+	pushMetricsTimeout = 10 * time.Second
 )
 
 // Manager is the manager of resource group.
@@ -721,6 +725,13 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 	failpoint.Inject("fastCleanupTicker", func() {
 		cleanUpTicker.Reset(100 * time.Millisecond)
 	})
+	pushMetricsTickerC := make(<-chan time.Time)
+	controllerConfig := m.GetControllerConfig()
+	if controllerConfig.PushMetricsAddress != "" && controllerConfig.PushMetricsInterval.Duration > 0 {
+		pushMetricsTicker := time.NewTicker(controllerConfig.PushMetricsInterval.Duration)
+		pushMetricsTickerC = pushMetricsTicker.C
+		defer pushMetricsTicker.Stop()
+	}
 
 	for {
 		select {
@@ -797,6 +808,24 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 					}
 				}
 			}
+		case <-pushMetricsTickerC:
+			podName := os.Getenv("HOSTNAME")
+			if podName == "" {
+				podName = "default"
+			}
+			pushCtx, cancel := context.WithTimeout(ctx, pushMetricsTimeout)
+			start := time.Now()
+			err := push.New(controllerConfig.PushMetricsAddress, "resource_group_svc").
+				Grouping("pod", podName).
+				Collector(readRequestUnitCost).
+				Collector(writeRequestUnitCost).
+				Collector(sqlLayerRequestUnitCost).
+				PushContext(pushCtx)
+			cancel()
+			if err != nil {
+				log.Error("push metrics to Prometheus failed", zap.Error(err))
+			}
+			pushRUMetricsDuration.Observe(time.Since(start).Seconds())
 		}
 	}
 }

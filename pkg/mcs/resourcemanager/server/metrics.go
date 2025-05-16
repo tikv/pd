@@ -211,6 +211,15 @@ var (
 			Name:      "service_limit",
 			Help:      "Gauge of the total RU limit of specific keyspace.",
 		}, []string{keyspaceNameLabel})
+
+	pushRUMetricsDuration = prometheus.NewHistogram(
+		prometheus.HistogramOpts{
+			Namespace: namespace,
+			Subsystem: ruSubsystem,
+			Name:      "push_ru_metrics_duration_seconds",
+			Help:      "The duration of pushing RU metrics to Prometheus.",
+			Buckets:   prometheus.DefBuckets,
+		})
 )
 
 type metrics struct {
@@ -264,6 +273,7 @@ func init() {
 	prometheus.MustRegister(sampledRequestUnitPerSec)
 	prometheus.MustRegister(overrideSettings)
 	prometheus.MustRegister(serviceLimit)
+	prometheus.MustRegister(pushRUMetricsDuration)
 }
 
 func newMetrics() *metrics {

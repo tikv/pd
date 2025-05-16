@@ -174,6 +174,12 @@ type ControllerConfig struct {
 	// EnableControllerTraceLog is to control whether resource control client enable trace.
 	EnableControllerTraceLog bool `toml:"enable-controller-trace-log" json:"enable-controller-trace-log,string"`
 
+	// PushMetricsAddress is the address to push metrics.
+	PushMetricsAddress string `toml:"push-metrics-address" json:"push-metrics-address"`
+
+	// PushMetricsInterval is the interval to push metrics.
+	PushMetricsInterval typeutil.Duration `toml:"push-metrics-interval" json:"push-metrics-interval"`
+
 	RUVersionPolicy *RUVersionPolicy `toml:"ru-version-policy" json:"ru-version-policy,omitempty"`
 }
 
