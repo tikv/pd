@@ -84,6 +84,43 @@ func TestLess(t *testing.T) {
 	}
 }
 
+func TestKeyCompare(t *testing.T) {
+	re := require.New(t)
+	TestData := []struct {
+		a   []byte
+		b   []byte
+		opt boundary
+		min []byte
+		max []byte
+	}{
+		{
+			[]byte("a"),
+			[]byte("b"),
+			left,
+			[]byte("a"),
+			[]byte("b"),
+		},
+		{
+			[]byte("a"),
+			[]byte(""),
+			left,
+			[]byte(""),
+			[]byte("a"),
+		},
+		{
+			[]byte("a"),
+			[]byte(""),
+			right,
+			[]byte("a"),
+			[]byte(""),
+		},
+	}
+	for _, data := range TestData {
+		re.Equal(data.min, MinKeyWithBoundary(data.a, data.b, data.opt))
+		re.Equal(data.max, MaxKeyWithBoundary(data.a, data.b, data.opt))
+	}
+}
+
 func TestBetween(t *testing.T) {
 	re := require.New(t)
 	TestData := []struct {
