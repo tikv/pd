@@ -40,25 +40,19 @@ var _ ResourceGroupStorage = (*StorageEndpoint)(nil)
 
 // SaveResourceGroupSetting stores a resource group to storage.
 func (se *StorageEndpoint) SaveResourceGroupSetting(keyspaceID uint32, name string, msg proto.Message) error {
-	if keyspaceID == constant.DefaultKeyspaceID {
-		return se.saveProto(keypath.ResourceGroupSettingPath(name), msg)
-	}
 	return se.saveProto(keypath.KeyspaceResourceGroupSettingPath(keyspaceID, name), msg)
 }
 
 // DeleteResourceGroupSetting removes a resource group from storage.
 func (se *StorageEndpoint) DeleteResourceGroupSetting(keyspaceID uint32, name string) error {
-	if keyspaceID == constant.DefaultKeyspaceID {
-		return se.Remove(keypath.ResourceGroupSettingPath(name))
-	}
 	return se.Remove(keypath.KeyspaceResourceGroupSettingPath(keyspaceID, name))
 }
 
 // LoadResourceGroupSettings loads all resource groups from storage.
 func (se *StorageEndpoint) LoadResourceGroupSettings(f func(keyspaceID uint32, name string, rawValue string)) error {
 	if err := se.loadRangeByPrefix(keypath.ResourceGroupSettingPrefix(), func(key, value string) {
-		// Using the default keyspace ID for the resource group settings loaded from the legacy path.
-		f(constant.DefaultKeyspaceID, key, value)
+		// Using the null keyspace ID for the resource group settings loaded from the legacy path.
+		f(constant.NullKeyspaceID, key, value)
 	}); err != nil {
 		return err
 	}
@@ -75,25 +69,19 @@ func (se *StorageEndpoint) LoadResourceGroupSettings(f func(keyspaceID uint32, n
 
 // SaveResourceGroupStates stores a resource group to storage.
 func (se *StorageEndpoint) SaveResourceGroupStates(keyspaceID uint32, name string, obj any) error {
-	if keyspaceID == constant.DefaultKeyspaceID {
-		return se.saveJSON(keypath.ResourceGroupStatePath(name), obj)
-	}
 	return se.saveJSON(keypath.KeyspaceResourceGroupStatePath(keyspaceID, name), obj)
 }
 
 // DeleteResourceGroupStates removes a resource group from storage.
 func (se *StorageEndpoint) DeleteResourceGroupStates(keyspaceID uint32, name string) error {
-	if keyspaceID == constant.DefaultKeyspaceID {
-		return se.Remove(keypath.ResourceGroupStatePath(name))
-	}
 	return se.Remove(keypath.KeyspaceResourceGroupStatePath(keyspaceID, name))
 }
 
 // LoadResourceGroupStates loads all resource groups from storage.
 func (se *StorageEndpoint) LoadResourceGroupStates(f func(keyspaceID uint32, name string, rawValue string)) error {
 	if err := se.loadRangeByPrefix(keypath.ResourceGroupStatePrefix(), func(key, value string) {
-		// Using the default keyspace ID for the resource group states loaded from the legacy path.
-		f(constant.DefaultKeyspaceID, key, value)
+		// Using the null keyspace ID for the resource group states loaded from the legacy path.
+		f(constant.NullKeyspaceID, key, value)
 	}); err != nil {
 		return err
 	}

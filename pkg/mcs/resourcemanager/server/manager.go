@@ -285,7 +285,7 @@ func (m *Manager) DeleteResourceGroup(name string) error {
 	if name == reservedDefaultGroupName {
 		return errs.ErrDeleteReservedGroup
 	}
-	if err := m.storage.DeleteResourceGroupSetting(constant.DefaultKeyspaceID, name); err != nil {
+	if err := m.storage.DeleteResourceGroupSetting(constant.NullKeyspaceID, name); err != nil {
 		return err
 	}
 	m.Lock()

@@ -15,6 +15,7 @@
 package storage
 
 import (
+	"math/rand"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -29,9 +30,10 @@ func TestResourceGroupStorage(t *testing.T) {
 	storage := NewStorageWithMemoryBackend()
 
 	keyspaceGroups := map[uint32][]string{
-		constant.DefaultKeyspaceID: {"rg1", "rg2", "rg/3", "4/rg/5"},
-		1:                          {"rg1", "rg2", "rg/3", "4/rg/5"},
-		2:                          {"rg1", "rg2", "rg/3", "4/rg/5"},
+		constant.NullKeyspaceID:    generateRandomResourceGroupNames(100),
+		constant.DefaultKeyspaceID: generateRandomResourceGroupNames(100),
+		1:                          generateRandomResourceGroupNames(100),
+		2:                          generateRandomResourceGroupNames(100),
 	}
 	// Test legacy and keyspace resource group settings.
 	for keyspaceID, names := range keyspaceGroups {
@@ -76,4 +78,21 @@ func TestResourceGroupStorage(t *testing.T) {
 		re.Fail("should not load any resource group state")
 	})
 	re.NoError(err)
+}
+
+const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*()-_=+[]{}|;:,.<>?/"
+
+// generateRandomResourceGroupNames generates n random resource group names with letters, numbers and symbols.
+func generateRandomResourceGroupNames(n int) []string {
+	names := make([]string, n)
+	for i := 0; i < n; i++ {
+		// Generate a random length between 1 and 100 characters.
+		length := 1 + rand.Intn(100)
+		name := make([]byte, length)
+		for j := 0; j < length; j++ {
+			name[j] = charset[rand.Intn(len(charset))]
+		}
+		names[i] = string(name)
+	}
+	return names
 }

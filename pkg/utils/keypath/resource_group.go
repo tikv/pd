@@ -18,6 +18,8 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+
+	"github.com/tikv/pd/pkg/mcs/utils/constant"
 )
 
 // ControllerConfigPath returns the path to save the controller config.
@@ -25,33 +27,39 @@ func ControllerConfigPath() string {
 	return controllerConfigPath
 }
 
-// ResourceGroupSettingPath returns the path to save the legacy resource group settings.
-func ResourceGroupSettingPath(groupName string) string {
+// resourceGroupSettingPath returns the path to save the legacy resource group settings.
+func resourceGroupSettingPath(groupName string) string {
 	return fmt.Sprintf(resourceGroupSettingsPathFormat, groupName)
 }
 
-// ResourceGroupStatePath returns the path to save the legacy resource group states.
-func ResourceGroupStatePath(groupName string) string {
+// resourceGroupStatePath returns the path to save the legacy resource group states.
+func resourceGroupStatePath(groupName string) string {
 	return fmt.Sprintf(resourceGroupStatesPathFormat, groupName)
 }
 
 // ResourceGroupSettingPrefix returns the prefix of the legacy resource group settings.
 func ResourceGroupSettingPrefix() string {
-	return ResourceGroupSettingPath("")
+	return resourceGroupSettingPath("")
 }
 
 // ResourceGroupStatePrefix returns the prefix of the legacy resource group states.
 func ResourceGroupStatePrefix() string {
-	return ResourceGroupStatePath("")
+	return resourceGroupStatePath("")
 }
 
 // KeyspaceResourceGroupSettingPath returns the path to save the keyspace resource group settings.
 func KeyspaceResourceGroupSettingPath(keyspaceID uint32, groupName string) string {
+	if keyspaceID == constant.NullKeyspaceID {
+		return resourceGroupSettingPath(groupName)
+	}
 	return fmt.Sprintf(keyspaceResourceGroupSettingsPathFormat, keyspaceID, groupName)
 }
 
 // KeyspaceResourceGroupStatePath returns the path to save the keyspace resource group states.
 func KeyspaceResourceGroupStatePath(keyspaceID uint32, groupName string) string {
+	if keyspaceID == constant.NullKeyspaceID {
+		return resourceGroupStatePath(groupName)
+	}
 	return fmt.Sprintf(keyspaceResourceGroupStatesPathFormat, keyspaceID, groupName)
 }
 

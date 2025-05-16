@@ -234,7 +234,7 @@ func (rg *ResourceGroup) IntoProtoResourceGroup() *rmpb.ResourceGroup {
 // TODO: persist the state of the group separately.
 func (rg *ResourceGroup) persistSettings(storage endpoint.ResourceGroupStorage) error {
 	metaGroup := rg.IntoProtoResourceGroup()
-	return storage.SaveResourceGroupSetting(constant.DefaultKeyspaceID, rg.Name, metaGroup)
+	return storage.SaveResourceGroupSetting(constant.NullKeyspaceID, rg.Name, metaGroup)
 }
 
 // GroupStates is the tokens set of a resource group.
@@ -302,5 +302,5 @@ func (rg *ResourceGroup) UpdateRUConsumption(c *rmpb.Consumption) {
 // persistStates persists the resource group tokens.
 func (rg *ResourceGroup) persistStates(storage endpoint.ResourceGroupStorage) error {
 	states := rg.GetGroupStates()
-	return storage.SaveResourceGroupStates(constant.DefaultKeyspaceID, rg.Name, states)
+	return storage.SaveResourceGroupStates(constant.NullKeyspaceID, rg.Name, states)
 }
