@@ -35,6 +35,8 @@ func TestCheckKey(t *testing.T) {
 		{[]byte("7480000000000B01FFE75F720000000000FA"), true, 721383},
 		{[]byte("7480000000000ADEFF9E5F720000000000FA"), true, 712350},
 		{[]byte("7480000000000AE1FFAB5F720000000000FA"), true, 713131},
+		// TODO: only consider the 9 bytes of the key and with non 0x00
+		{[]byte("7480000000000001FFD75F728000000000FF0000140130FF0000FD"), true, 471}, // end with 0x0130FF
 	}
 	for _, tc := range testCases {
 		rootNode := N("key", tc.key)
