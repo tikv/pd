@@ -129,6 +129,15 @@ var (
 			Name:      "group_config",
 			Help:      "Config of the resource group.",
 		}, []string{newResourceGroupNameLabel, typeLabel})
+
+	pushRUMetricsDuration = prometheus.NewHistogram(
+		prometheus.HistogramOpts{
+			Namespace: namespace,
+			Subsystem: ruSubsystem,
+			Name:      "push_ru_metrics_duration_seconds",
+			Help:      "The duration of pushing RU metrics to Prometheus.",
+			Buckets:   prometheus.DefBuckets,
+		})
 )
 
 func init() {
@@ -144,4 +153,5 @@ func init() {
 	prometheus.MustRegister(readRequestUnitMaxPerSecCost)
 	prometheus.MustRegister(writeRequestUnitMaxPerSecCost)
 	prometheus.MustRegister(resourceGroupConfigGauge)
+	prometheus.MustRegister(pushRUMetricsDuration)
 }

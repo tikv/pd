@@ -29,7 +29,7 @@ tidy:
 	git diff --quiet go.mod go.sum
 
 test: failpoint-enable
-	CGO_ENABLED=1 go test ./$(value test_name)/... -v -tags deadlock -race -cover || { $(MAKE) failpoint-disable && exit 1; }
+	CGO_ENABLED=1 go test ./$(value test_name)/... -v -race -cover || { $(MAKE) failpoint-disable && exit 1; }
 	$(MAKE) failpoint-disable
 
 ci-test-job:

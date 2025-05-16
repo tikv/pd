@@ -18,6 +18,7 @@ import (
 	"context"
 	"encoding/json"
 	"math"
+	"os"
 	"sort"
 	"strings"
 	"time"
@@ -28,6 +29,7 @@ import (
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 	"github.com/pingcap/log"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/push"
 	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/storage/endpoint"
@@ -48,6 +50,8 @@ const (
 
 	reservedDefaultGroupName = "default"
 	middlePriority           = 8
+
+	pushMetricsTimeout = 10 * time.Second
 )
 
 // Manager is the manager of resource group.
@@ -179,7 +183,7 @@ func (m *Manager) Init(ctx context.Context) error {
 	}
 
 	// Start the background metrics flusher.
-	go m.backgroundMetricsFlush(ctx)
+	go m.backgroundMetricsFlush(ctx, m.controllerConfig.PushMetricsAddress, m.controllerConfig.PushMetricsInterval.Duration)
 	go func() {
 		defer logutil.LogPanic()
 		m.persistLoop(ctx)
@@ -357,7 +361,7 @@ func (m *Manager) persistResourceGroupRunningState() {
 }
 
 // Receive the consumption and flush it to the metrics.
-func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
+func (m *Manager) backgroundMetricsFlush(ctx context.Context, pushMetricsAddr string, pushMetricsInterval time.Duration) {
 	defer logutil.LogPanic()
 	cleanUpTicker := time.NewTicker(metricsCleanupInterval)
 	defer cleanUpTicker.Stop()
@@ -366,6 +370,13 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 	recordMaxTicker := time.NewTicker(tickPerSecond)
 	defer recordMaxTicker.Stop()
 	maxPerSecTrackers := make(map[string]*maxPerSecCostTracker)
+
+	pushMetricsTickerC := make(<-chan time.Time)
+	if pushMetricsAddr != "" && pushMetricsInterval.Seconds() > 0 {
+		pushMetricsTicker := time.NewTicker(pushMetricsInterval)
+		pushMetricsTickerC = pushMetricsTicker.C
+		defer pushMetricsTicker.Stop()
+	}
 	for {
 		select {
 		case <-ctx.Done():
@@ -495,6 +506,25 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 					t.FlushMetrics()
 				}
 			}
+
+		case <-pushMetricsTickerC:
+			podName := os.Getenv("HOSTNAME")
+			if podName == "" {
+				podName = "default"
+			}
+			pushCtx, cancel := context.WithTimeout(ctx, pushMetricsTimeout)
+			start := time.Now()
+			err := push.New(pushMetricsAddr, "resource_group_svc").
+				Grouping("pod", podName).
+				Collector(readRequestUnitCost).
+				Collector(writeRequestUnitCost).
+				Collector(sqlLayerRequestUnitCost).
+				PushContext(pushCtx)
+			cancel()
+			if err != nil {
+				log.Error("push metrics to Prometheus failed", zap.Error(err))
+			}
+			pushRUMetricsDuration.Observe(time.Since(start).Seconds())
 		}
 	}
 }
