@@ -164,9 +164,7 @@ type Server struct {
 	encryptionKeyManager *encryption.Manager
 	// for storage operation.
 	storage storage.Storage
-	// safe point manager (to be deprecated)
-	gcSafePointManager *gc.SafePointManager
-	// GC states manager
+	// safepoint manager
 	gcStateManager *gc.GCStateManager
 	// keyspace manager
 	keyspaceManager *keyspace.Manager
@@ -471,7 +469,6 @@ func (s *Server) startServer(ctx context.Context) error {
 	s.tsoProtoFactory = &tsoutil.TSOProtoFactory{}
 	s.pdProtoFactory = &tsoutil.PDProtoFactory{}
 	s.tsoAllocator = tso.NewAllocator(s.ctx, constant.DefaultKeyspaceGroupID, s.member, s.storage, s)
-	s.gcSafePointManager = gc.NewSafePointManager(s.storage, s.cfg.PDServerCfg)
 	s.basicCluster = core.NewBasicCluster()
 	s.cluster = cluster.NewRaftCluster(ctx, s.GetMember(), s.GetBasicCluster(), s.GetStorage(), syncer.NewRegionSyncer(s), s.client, s.httpClient, s.tsoAllocator)
 	keyspaceIDAllocator := id.NewAllocator(&id.AllocatorParams{
@@ -485,7 +482,7 @@ func (s *Server) startServer(ctx context.Context) error {
 	}
 	s.keyspaceManager = keyspace.NewKeyspaceManager(s.ctx, s.storage, s.cluster, keyspaceIDAllocator, &s.cfg.Keyspace, s.keyspaceGroupManager)
 	s.gcStateManager = gc.NewGCStateManager(s.storage.GetGCStateProvider(), s.cfg.PDServerCfg, s.keyspaceManager)
-	s.safePointV2Manager = gc.NewSafePointManagerV2(s.ctx, s.storage, s.storage, s.storage)
+	s.safePointV2Manager = gc.NewSafePointManagerV2(s.ctx, s.storage, s.storage, s.storage.GetGCStateProvider())
 	s.hbStreams = hbstream.NewHeartbeatStreams(ctx, "", s.cluster)
 	// initial hot_region_storage in here.
 
