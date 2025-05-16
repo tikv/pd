@@ -1223,7 +1223,7 @@ func (am *AllocatorManager) getOrCreateGRPCConn(ctx context.Context, addr string
 	if ok {
 		return conn, nil
 	}
-	tlsCfg, err := am.securityConfig.ToTLSConfig()
+	tlsCfg, err := am.securityConfig.ToClientTLSConfig()
 	if err != nil {
 		return nil, err
 	}

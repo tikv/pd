@@ -633,7 +633,7 @@ func (kgm *KeyspaceGroupManager) primaryPriorityCheckLoop() {
 					log.Warn("no alive tso node", zap.String("local-address", kgm.tsoServiceID.ServiceAddr))
 					continue
 				}
-				// If there is a alive member with higher priority, reset the leader.
+				// If there is an alive member with higher priority, reset the leader.
 				resetLeader := false
 				for _, m := range kg.Members {
 					if m.Priority <= localPriority {

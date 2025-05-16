@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 cert_dir="$2"
 
 function generate_certs() {
