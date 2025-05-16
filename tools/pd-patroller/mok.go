@@ -23,7 +23,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/pingcap/tidb/util/codec"
+	"github.com/pingcap/tidb/pkg/util/codec"
 )
 
 var keyFormat = "proto"

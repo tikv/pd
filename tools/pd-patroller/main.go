@@ -30,7 +30,7 @@ import (
 
 	"github.com/docker/go-units"
 	"github.com/pingcap/log"
-	"github.com/pingcap/tidb/util/codec"
+	"github.com/pingcap/tidb/pkg/util/codec"
 	pd "github.com/tikv/pd/client"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
