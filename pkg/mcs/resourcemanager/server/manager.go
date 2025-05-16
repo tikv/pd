@@ -33,6 +33,7 @@ import (
 
 	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/jsonutil"
@@ -136,10 +137,11 @@ func (m *Manager) Init(ctx context.Context) error {
 	m.Lock()
 	m.groups = make(map[string]*ResourceGroup)
 	m.Unlock()
-	handler := func(k, v string) {
+	handler := func(keyspaceID uint32, name string, rawValue string) {
 		group := &rmpb.ResourceGroup{}
-		if err := proto.Unmarshal([]byte(v), group); err != nil {
-			log.Error("failed to parse the resource group", zap.Error(err), zap.String("k", k), zap.String("v", v))
+		if err := proto.Unmarshal([]byte(rawValue), group); err != nil {
+			log.Error("failed to parse the resource group",
+				zap.Uint32("keyspace-id", keyspaceID), zap.String("name", name), zap.String("raw-value", rawValue), zap.Error(err))
 			panic(err)
 		}
 		m.groups[group.Name] = FromProtoResourceGroup(group)
@@ -148,13 +150,14 @@ func (m *Manager) Init(ctx context.Context) error {
 		return err
 	}
 	// Load resource group states from storage.
-	tokenHandler := func(k, v string) {
+	tokenHandler := func(keyspaceID uint32, name string, rawValue string) {
 		tokens := &GroupStates{}
-		if err := json.Unmarshal([]byte(v), tokens); err != nil {
-			log.Error("failed to parse the resource group state", zap.Error(err), zap.String("k", k), zap.String("v", v))
+		if err := json.Unmarshal([]byte(rawValue), tokens); err != nil {
+			log.Error("failed to parse the resource group state",
+				zap.Uint32("keyspace-id", keyspaceID), zap.String("name", name), zap.String("raw-value", rawValue), zap.Error(err))
 			panic(err)
 		}
-		if group, ok := m.groups[k]; ok {
+		if group, ok := m.groups[name]; ok {
 			group.SetStatesIntoResourceGroup(tokens)
 		}
 	}
@@ -282,7 +285,7 @@ func (m *Manager) DeleteResourceGroup(name string) error {
 	if name == reservedDefaultGroupName {
 		return errs.ErrDeleteReservedGroup
 	}
-	if err := m.storage.DeleteResourceGroupSetting(name); err != nil {
+	if err := m.storage.DeleteResourceGroupSetting(constant.NullKeyspaceID, name); err != nil {
 		return err
 	}
 	m.Lock()
@@ -475,10 +478,7 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 			m.RUnlock()
 			// prevent many groups and hold the lock long time.
 			for _, group := range groups {
-				ru := group.getRUToken()
-				if ru < 0 {
-					ru = 0
-				}
+				ru := math.Max(group.getRUToken(), 0)
 				availableRUCounter.WithLabelValues(group.Name, group.Name).Set(ru)
 				resourceGroupConfigGauge.WithLabelValues(group.Name, priorityLabel).Set(group.getPriority())
 				resourceGroupConfigGauge.WithLabelValues(group.Name, ruPerSecLabel).Set(group.getFillRate())

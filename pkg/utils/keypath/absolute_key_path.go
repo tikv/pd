@@ -107,6 +107,12 @@ const (
 	msTsoKespaceExpectedLeaderPathFormat = "/ms/%d/tso/keyspace_groups/election/%05d/primary/expected_primary" // "/ms/{cluster_id}/tso/keyspace_groups/election/{group_id}/primary"
 
 	// resource group path
+	keyspaceResourceGroupSettingsPathPrefixFormat = "resource_group/keyspace/settings/"      // "resource_group/keyspace/settings/"
+	keyspaceResourceGroupSettingsPathFormat       = "resource_group/keyspace/settings/%d/%s" // "resource_group/keyspace/settings/{keyspace_id}/{group_name}"
+	keyspaceResourceGroupStatesPathPrefixFormat   = "resource_group/keyspace/states/"        // "resource_group/keyspace/states/"
+	keyspaceResourceGroupStatesPathFormat         = "resource_group/keyspace/states/%d/%s"   // "resource_group/keyspace/states/{keyspace_id}/{group_name}"
+	// legacy resource group path without introducing keyspace, to keep compatibility,
+	// resource groups loaded from the legacy path will be assigned to the default keyspace ID.
 	resourceGroupSettingsPathFormat = "resource_group/settings/%s" // "resource_group/settings/{group_name}"
 	resourceGroupStatesPathFormat   = "resource_group/states/%s"   // "resource_group/states/{group_name}"
 	controllerConfigPath            = "resource_group/controller"  // "resource_group/controller"
