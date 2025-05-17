@@ -2608,7 +2608,7 @@ func TestCollectMetrics(t *testing.T) {
 		rc.collectSchedulingMetrics()
 	}
 	stores := co.GetCluster().GetStores()
-	regionStats := co.GetCluster().GetHotPeerStats(utils.Write)
+	regionStats := co.GetCluster().GetHotPeerStats(utils.Write, 0)
 	status1 := statistics.CollectHotPeerInfos(stores, regionStats)
 	status2 := statistics.GetHotStatus(stores, co.GetCluster().GetStoresLoads(), regionStats, utils.Write, co.GetCluster().GetSchedulerConfig().IsTraceRegionFlow())
 	for _, s := range status2.AsLeader {
