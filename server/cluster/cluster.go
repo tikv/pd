@@ -893,18 +893,8 @@ func (c *RaftCluster) HandleStoreHeartbeat(heartbeat *pdpb.StoreHeartbeatRequest
 			opts = append(opts, core.SetLastPersistTime(nowTime))
 		}
 	}
-<<<<<<< HEAD
-	if store := c.core.GetStore(storeID); store != nil {
-		statistics.UpdateStoreHeartbeatMetrics(store)
-	}
-	c.core.PutStore(newStore)
-=======
-	// Supply NodeState in the response to help the store handle special cases
-	// more conveniently, such as avoiding calling `remove_peer` redundantly under
-	// NodeState_Removing.
-	resp.State = store.GetNodeState()
-	c.PutStore(newStore, opts...)
->>>>>>> a16b00039 (store: update StoreInfo inside putStoreLocked (#9187))
+	statistics.UpdateStoreHeartbeatMetrics(store)
+	c.core.PutStore(newStore, opts...)
 	var (
 		regions  map[uint64]*core.RegionInfo
 		interval uint64
@@ -1290,8 +1280,8 @@ func (c *RaftCluster) DeleteStoreLabel(storeID uint64, labelKey string) error {
 }
 
 // PutStore puts a store.
-func (c *RaftCluster) PutStore(store *metapb.Store) error {
-	if err := c.putStoreImpl(store, false); err != nil {
+func (c *RaftCluster) PutStore(store *metapb.Store, opts ...core.StoreCreateOption) error {
+	if err := c.putStoreImpl(store, false, opts...); err != nil {
 		return err
 	}
 	c.OnStoreVersionChange()
@@ -1302,7 +1292,7 @@ func (c *RaftCluster) PutStore(store *metapb.Store) error {
 // putStoreImpl puts a store.
 // If 'force' is true, the store's labels will overwrite those labels which already existed in the store.
 // If 'force' is false, the store's labels will merge into those labels which already existed in the store.
-func (c *RaftCluster) putStoreImpl(store *metapb.Store, force bool) error {
+func (c *RaftCluster) putStoreImpl(store *metapb.Store, force bool, opts ...core.StoreCreateOption) error {
 	c.Lock()
 	defer c.Unlock()
 
@@ -1325,7 +1315,6 @@ func (c *RaftCluster) putStoreImpl(store *metapb.Store, force bool) error {
 		}
 	}
 
-	opts := make([]core.StoreCreateOption, 0)
 	s := c.GetStore(store.GetId())
 	if s == nil {
 		// Add a new store.
@@ -1348,11 +1337,7 @@ func (c *RaftCluster) putStoreImpl(store *metapb.Store, force bool) error {
 	if err := c.checkStoreLabels(s); err != nil {
 		return err
 	}
-<<<<<<< HEAD
-	return c.putStoreLocked(s)
-=======
-	return c.setStore(s, opts...)
->>>>>>> a16b00039 (store: update StoreInfo inside putStoreLocked (#9187))
+	return c.putStoreLocked(s, opts...)
 }
 
 func (c *RaftCluster) checkStoreVersion(store *metapb.Store) error {
@@ -1425,10 +1410,12 @@ func (c *RaftCluster) RemoveStore(storeID uint64, physicallyDestroyed bool) erro
 
 	log.Warn("store has been offline",
 		zap.Uint64("store-id", storeID),
-<<<<<<< HEAD
-		zap.String("store-address", newStore.GetAddress()),
-		zap.Bool("physically-destroyed", newStore.IsPhysicallyDestroyed()))
-	err := c.putStoreLocked(newStore)
+		zap.String("store-address", store.GetAddress()),
+		zap.Bool("physically-destroyed", store.IsPhysicallyDestroyed()))
+	err := c.putStoreLocked(
+		store.Clone(core.SetStoreState(metapb.StoreState_Offline, physicallyDestroyed)),
+		core.SetStoreState(metapb.StoreState_Offline, physicallyDestroyed),
+	)
 	if err == nil {
 		regionSize := float64(c.core.GetStoreRegionSize(storeID))
 		c.resetProgress(storeID, store.GetAddress())
@@ -1443,29 +1430,6 @@ func (c *RaftCluster) RemoveStore(storeID uint64, physicallyDestroyed bool) erro
 		_ = c.SetStoreLimit(storeID, storelimit.RemovePeer, storelimit.Unlimited)
 	}
 	return err
-=======
-		zap.String("store-address", store.GetAddress()),
-		zap.Bool("physically-destroyed", physicallyDestroyed))
-	if err := c.setStore(
-		store.Clone(core.SetStoreState(metapb.StoreState_Offline, physicallyDestroyed)),
-		core.SetStoreState(metapb.StoreState_Offline, physicallyDestroyed),
-	); err != nil {
-		return err
-	}
-
-	regionSize := float64(c.GetStoreRegionSize(storeID))
-	c.resetProgress(storeID, store.GetAddress())
-	c.progressManager.AddProgress(encodeRemovingProgressKey(storeID), regionSize, regionSize, nodeStateCheckJobInterval, progress.WindowDurationOption(c.GetCoordinator().GetPatrolRegionsDuration()))
-	// record the current store limit in memory
-	c.prevStoreLimit[storeID] = map[storelimit.Type]float64{
-		storelimit.AddPeer:    c.GetStoreLimitByType(storeID, storelimit.AddPeer),
-		storelimit.RemovePeer: c.GetStoreLimitByType(storeID, storelimit.RemovePeer),
-	}
-	// TODO: if the persist operation encounters error, the "Unlimited" will be rollback.
-	// And considering the store state has changed, RemoveStore is actually successful.
-	_ = c.SetStoreLimit(storeID, storelimit.RemovePeer, storelimit.Unlimited)
-	return nil
->>>>>>> a16b00039 (store: update StoreInfo inside putStoreLocked (#9187))
 }
 
 func (c *RaftCluster) checkReplicaBeforeOfflineStore(storeID uint64) error {
@@ -1542,16 +1506,11 @@ func (c *RaftCluster) BuryStore(storeID uint64, forceBury bool) error {
 		zap.String("store-address", store.GetAddress()),
 		zap.String("state", store.GetState().String()),
 		zap.Bool("physically-destroyed", store.IsPhysicallyDestroyed()))
-<<<<<<< HEAD
-	err := c.putStoreLocked(newStore)
-	c.onStoreVersionChangeLocked()
-=======
-	err := c.setStore(
+	err := c.putStoreLocked(
 		store.Clone(core.SetStoreState(metapb.StoreState_Tombstone)),
 		core.SetStoreState(metapb.StoreState_Tombstone),
 	)
-	c.OnStoreVersionChange()
->>>>>>> a16b00039 (store: update StoreInfo inside putStoreLocked (#9187))
+	c.onStoreVersionChangeLocked()
 	if err == nil {
 		// clean up the residual information.
 		delete(c.prevStoreLimit, storeID)
@@ -1665,11 +1624,7 @@ func (c *RaftCluster) UpStore(storeID uint64) error {
 	log.Warn("store has been up",
 		zap.Uint64("store-id", storeID),
 		zap.String("store-address", newStore.GetAddress()))
-<<<<<<< HEAD
-	err := c.putStoreLocked(newStore)
-=======
-	err := c.setStore(newStore, options...)
->>>>>>> a16b00039 (store: update StoreInfo inside putStoreLocked (#9187))
+	err := c.putStoreLocked(newStore, options...)
 	if err == nil {
 		if exist {
 			// persist the store limit
@@ -1707,11 +1662,7 @@ func (c *RaftCluster) ReadyToServe(storeID uint64) error {
 	log.Info("store has changed to serving",
 		zap.Uint64("store-id", storeID),
 		zap.String("store-address", newStore.GetAddress()))
-<<<<<<< HEAD
-	err := c.putStoreLocked(newStore)
-=======
-	err := c.setStore(newStore, core.SetStoreState(metapb.StoreState_Up))
->>>>>>> a16b00039 (store: update StoreInfo inside putStoreLocked (#9187))
+	err := c.putStoreLocked(newStore, core.SetStoreState(metapb.StoreState_Up))
 	if err == nil {
 		c.resetProgress(storeID, store.GetAddress())
 	}
@@ -1729,34 +1680,20 @@ func (c *RaftCluster) SetStoreWeight(storeID uint64, leaderWeight, regionWeight 
 		return err
 	}
 
-	return c.setStore(store,
+	return c.putStoreLocked(store,
 		core.SetLeaderWeight(leaderWeight),
 		core.SetRegionWeight(regionWeight),
 	)
-<<<<<<< HEAD
-
-	return c.putStoreLocked(newStore)
 }
 
-func (c *RaftCluster) putStoreLocked(store *core.StoreInfo) error {
-=======
-}
-
-// The meta of StoreInfo should be the latest.
-func (c *RaftCluster) setStore(store *core.StoreInfo, opts ...core.StoreCreateOption) error {
->>>>>>> a16b00039 (store: update StoreInfo inside putStoreLocked (#9187))
+func (c *RaftCluster) putStoreLocked(store *core.StoreInfo, opts ...core.StoreCreateOption) error {
 	if c.storage != nil {
 		if err := c.storage.SaveStoreMeta(store.GetMeta()); err != nil {
 			return err
 		}
 	}
-<<<<<<< HEAD
-	c.core.PutStore(store)
+	c.core.PutStore(store, opts...)
 	if !c.IsServiceIndependent(mcsutils.SchedulingServiceName) {
-=======
-	c.PutStore(store, opts...)
-	if !c.IsServiceIndependent(constant.SchedulingServiceName) {
->>>>>>> a16b00039 (store: update StoreInfo inside putStoreLocked (#9187))
 		c.updateStoreStatistics(store.GetID(), store.IsSlow())
 	}
 	return nil
@@ -2331,12 +2268,7 @@ func (c *RaftCluster) SetMinResolvedTS(storeID, minResolvedTS uint64) error {
 		return errs.ErrStoreNotFound.FastGenByArgs(storeID)
 	}
 
-<<<<<<< HEAD
-	newStore := store.Clone(core.SetMinResolvedTS(minResolvedTS))
-	c.core.PutStore(newStore)
-=======
-	c.PutStore(store, core.SetMinResolvedTS(minResolvedTS))
->>>>>>> a16b00039 (store: update StoreInfo inside putStoreLocked (#9187))
+	c.core.PutStore(store, core.SetMinResolvedTS(minResolvedTS))
 	return nil
 }
 

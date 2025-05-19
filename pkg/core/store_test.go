@@ -236,17 +236,17 @@ func newStoreInfoWithDisk(id, used, available, capacity, regionSize uint64) *Sto
 	return store
 }
 
-func TestPutStore(t *testing.T) {
+func TestSetStore(t *testing.T) {
 	store := newStoreInfoWithAvailable(1, 20*units.GiB, 100*units.GiB, 1.4)
 	storesInfo := NewStoresInfo()
-	storesInfo.PutStore(store)
+	storesInfo.SetStore(store)
 	re := require.New(t)
 	re.Equal(store, storesInfo.GetStore(store.GetID()))
 
 	opts := []StoreCreateOption{SetStoreState(metapb.StoreState_Up)}
 	store = store.Clone(opts...)
 	re.NotEqual(store, storesInfo.GetStore(store.GetID()))
-	storesInfo.PutStore(store, opts...)
+	storesInfo.SetStore(store, opts...)
 	re.Equal(store, storesInfo.GetStore(store.GetID()))
 
 	opts = []StoreCreateOption{
@@ -259,6 +259,6 @@ func TestPutStore(t *testing.T) {
 	}
 	store = store.Clone(opts...)
 	re.NotEqual(store, storesInfo.GetStore(store.GetID()))
-	storesInfo.PutStore(store, opts...)
+	storesInfo.SetStore(store, opts...)
 	re.Equal(store, storesInfo.GetStore(store.GetID()))
 }
