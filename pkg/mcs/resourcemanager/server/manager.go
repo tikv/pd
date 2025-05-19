@@ -144,6 +144,10 @@ func (m *Manager) Init(ctx context.Context) error {
 }
 
 func (m *Manager) loadKeyspaceResourceGroups() error {
+	// Empty the keyspace resource group manager map before the loading.
+	m.Lock()
+	m.krgms = make(map[uint32]*keyspaceResourceGroupManager)
+	m.Unlock()
 	// Load keyspace resource group meta info from the storage.
 	if err := m.storage.LoadResourceGroupSettings(func(keyspaceID uint32, name string, rawValue string) {
 		err := m.getOrCreateKeyspaceResourceGroupManager(keyspaceID).addResourceGroupFromRaw(name, rawValue)
@@ -226,7 +230,8 @@ func (m *Manager) GetControllerConfig() *ControllerConfig {
 // on this retry mechanism.
 func (m *Manager) AddResourceGroup(grouppb *rmpb.ResourceGroup) error {
 	keyspaceID := constant.NullKeyspaceID
-	krgm := m.getKeyspaceResourceGroupManager(keyspaceID)
+	// TODO: validate the keyspace with the given ID first.
+	krgm := m.getOrCreateKeyspaceResourceGroupManager(keyspaceID)
 	if krgm == nil {
 		return errs.ErrKeyspaceNotExists.FastGenByArgs(keyspaceID)
 	}
