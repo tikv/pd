@@ -513,13 +513,13 @@ func TestRemovingProcess(t *testing.T) {
 	cluster.progressManager = progress.NewManager()
 	cluster.RemoveStore(1, false)
 	cluster.checkStores()
-	process := "removing-1"
+	storeID := uint64(1)
 	// no region moving
-	p, l, cs, err := cluster.progressManager.Status(process)
-	re.NoError(err)
-	re.Equal(0.0, p)
-	re.Equal(math.MaxFloat64, l)
-	re.Equal(0.0, cs)
+	p := cluster.progressManager.GetProgressByStoreID(storeID)
+	re.NotNil(p)
+	re.Equal(0.0, p.ProgressPercent)
+	re.Equal(math.MaxFloat64, p.LeftSecond)
+	re.Equal(0.0, p.CurrentSpeed)
 	i := 0
 	// simulate region moving by deleting region from store 1
 	for _, region := range regionInStore1 {
@@ -530,16 +530,16 @@ func TestRemovingProcess(t *testing.T) {
 		i++
 	}
 	cluster.checkStores()
-	p, l, cs, err = cluster.progressManager.Status(process)
-	re.NoError(err)
+	p = cluster.progressManager.GetProgressByStoreID(storeID)
+	re.NotNil(p)
 	// In above we delete 5 region from store 1, the total count of region in store 1 is 20.
 	// process = 5 / 20 = 0.25
-	re.Equal(0.25, p)
+	re.Equal(0.25, p.ProgressPercent)
 	// Each region is 100MB, we use more than 1s to move 5 region.
 	// speed = 5 * 100MB / 20s = 25MB/s
-	re.Equal(25.0, cs)
+	re.Equal(25.0, p.CurrentSpeed)
 	// left second = 15 * 100MB / 25s = 60s
-	re.Equal(60.0, l)
+	re.Equal(60.0, p.LeftSecond)
 }
 
 func TestDeleteStoreUpdatesClusterVersion(t *testing.T) {

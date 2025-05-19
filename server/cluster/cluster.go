@@ -24,7 +24,6 @@ import (
 	"net/http"
 	"runtime"
 	"strconv"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -105,8 +104,6 @@ const (
 	// since the once the store is added or removed, we shouldn't return an error even if the store limit is failed to persist.
 	persistLimitRetryTimes  = 5
 	persistLimitWaitTime    = 100 * time.Millisecond
-	removingAction          = "removing"
-	preparingAction         = "preparing"
 	gcTunerCheckCfgInterval = 10 * time.Second
 
 	// minSnapshotDurationSec is the minimum duration that a store can tolerate.
@@ -1479,9 +1476,7 @@ func (c *RaftCluster) RemoveStore(storeID uint64, physicallyDestroyed bool) erro
 	if err := c.setStore(newStore); err != nil {
 		return err
 	}
-	regionSize := float64(c.GetStoreRegionSize(storeID))
-	c.resetProgress(storeID, store.GetAddress())
-	c.progressManager.AddProgress(encodeRemovingProgressKey(storeID), regionSize, regionSize, nodeStateCheckJobInterval, progress.WindowDurationOption(c.GetCoordinator().GetPatrolRegionsDuration()))
+
 	// record the current store limit in memory
 	c.prevStoreLimit[storeID] = map[storelimit.Type]float64{
 		storelimit.AddPeer:    c.GetStoreLimitByType(storeID, storelimit.AddPeer),
@@ -1572,7 +1567,6 @@ func (c *RaftCluster) BuryStore(storeID uint64, forceBury bool) error {
 		delete(c.prevStoreLimit, storeID)
 		c.RemoveStoreLimit(storeID)
 		addr := store.GetAddress()
-		c.resetProgress(storeID, addr)
 		storeIDStr := strconv.FormatUint(storeID, 10)
 		statistics.ResetStoreStatistics(addr, storeIDStr)
 		if !c.IsServiceIndependent(constant.SchedulingServiceName) {
@@ -1643,21 +1637,21 @@ func (c *RaftCluster) UpStore(storeID uint64) error {
 	log.Warn("store has been up",
 		zap.Uint64("store-id", storeID),
 		zap.String("store-address", newStore.GetAddress()))
-	err := c.setStore(newStore)
-	if err == nil {
-		if exist {
-			// persist the store limit
-			_ = c.SetStoreLimit(storeID, storelimit.AddPeer, limiter[storelimit.AddPeer])
-			_ = c.SetStoreLimit(storeID, storelimit.RemovePeer, limiter[storelimit.RemovePeer])
-		}
-		c.resetProgress(storeID, store.GetAddress())
+
+	if err := c.setStore(newStore); err != nil {
+		return err
 	}
-	return err
+	if exist {
+		// persist the store limit
+		_ = c.SetStoreLimit(storeID, storelimit.AddPeer, limiter[storelimit.AddPeer])
+		_ = c.SetStoreLimit(storeID, storelimit.RemovePeer, limiter[storelimit.RemovePeer])
+	}
+	return nil
 }
 
-// ReadyToServe change store's node state to Serving.
-func (c *RaftCluster) ReadyToServe(storeID uint64) error {
-	store := c.GetStore(storeID)
+// readyToServe change store's node state to Serving.
+func (c *RaftCluster) readyToServe(store *core.StoreInfo) error {
+	storeID := store.GetID()
 	if store == nil {
 		return errs.ErrStoreNotFound.FastGenByArgs(storeID)
 	}
@@ -1679,9 +1673,6 @@ func (c *RaftCluster) ReadyToServe(storeID uint64) error {
 		zap.Uint64("store-id", storeID),
 		zap.String("store-address", newStore.GetAddress()))
 	err := c.setStore(newStore)
-	if err == nil {
-		c.resetProgress(storeID, store.GetAddress())
-	}
 	return err
 }
 
@@ -1718,6 +1709,12 @@ func (c *RaftCluster) setStore(store *core.StoreInfo) error {
 }
 
 func (c *RaftCluster) isStorePrepared() bool {
+	if c.schedulingController.IsPrepared() {
+		return true
+	}
+	if !c.IsServiceIndependent(constant.SchedulingServiceName) {
+		return false
+	}
 	for _, store := range c.GetStores() {
 		if !store.IsPreparing() && !store.IsServing() {
 			continue
@@ -1731,86 +1728,82 @@ func (c *RaftCluster) isStorePrepared() bool {
 }
 
 func (c *RaftCluster) checkStores() {
-	var offlineStores []*metapb.Store
-	var upStoreCount int
-	stores := c.GetStores()
+	var (
+		offlineStores []*metapb.Store
+		upStoreCount  int
+		stores        = c.GetStores()
+	)
+
+	countUpStore := func(store *core.StoreInfo) {
+		if !store.IsLowSpace(c.opt.GetLowSpaceRatio()) {
+			upStoreCount++
+		}
+	}
 
 	for _, store := range stores {
-		// the store has already been tombstone
-		if store.IsRemoved() {
-			if store.DownTime() > gcTombstoneInterval {
-				err := c.deleteStore(store)
-				if err != nil {
-					log.Error("auto gc the tombstone store failed",
-						zap.Stringer("store", store.GetMeta()),
-						zap.Duration("down-time", store.DownTime()),
-						errs.ZapError(err))
-				} else {
-					log.Info("auto gc the tombstone store success", zap.Stringer("store", store.GetMeta()), zap.Duration("down-time", store.DownTime()))
-				}
+		var (
+			regionSize = float64(store.GetRegionSize())
+			storeID    = store.GetID()
+			threadhold float64
+		)
+		switch store.GetNodeState() {
+		case metapb.NodeState_Preparing:
+			countUpStore(store)
+			timeToServe := store.GetUptime() >= c.opt.GetMaxStorePreparingTime() ||
+				c.GetTotalRegionCount() < core.InitClusterRegionThreshold
+			if !timeToServe && c.isStorePrepared() {
+				threadhold = c.getThreshold(stores, store)
+				log.Debug("store preparing threshold", zap.Uint64("store-id", storeID),
+					zap.Float64("threshold", threadhold),
+					zap.Float64("region-size", regionSize))
+				timeToServe = regionSize >= threadhold
 			}
-			continue
-		}
-
-		storeID := store.GetID()
-		if store.IsPreparing() {
-			if store.GetUptime() >= c.opt.GetMaxStorePreparingTime() || c.GetTotalRegionCount() < core.InitClusterRegionThreshold {
-				if err := c.ReadyToServe(storeID); err != nil {
+			if timeToServe {
+				if err := c.readyToServe(store); err != nil {
 					log.Error("change store to serving failed",
 						zap.Stringer("store", store.GetMeta()),
 						zap.Int("region-count", c.GetTotalRegionCount()),
 						errs.ZapError(err))
 				}
-			} else if c.IsPrepared() || (c.IsServiceIndependent(constant.SchedulingServiceName) && c.isStorePrepared()) {
-				threshold := c.getThreshold(stores, store)
-				regionSize := float64(store.GetRegionSize())
-				log.Debug("store serving threshold", zap.Uint64("store-id", storeID), zap.Float64("threshold", threshold), zap.Float64("region-size", regionSize))
-				if regionSize >= threshold {
-					if err := c.ReadyToServe(storeID); err != nil {
-						log.Error("change store to serving failed",
-							zap.Stringer("store", store.GetMeta()),
-							errs.ZapError(err))
-					}
-				} else {
-					remaining := threshold - regionSize
-					// If we add multiple stores, the total will need to be changed.
-					c.progressManager.UpdateProgressTotal(encodePreparingProgressKey(storeID), threshold)
-					c.updateProgress(storeID, store.GetAddress(), preparingAction, regionSize, remaining, true /* inc */)
+			}
+		case metapb.NodeState_Serving:
+			countUpStore(store)
+		case metapb.NodeState_Removing:
+			offlineStore := store.GetMeta()
+			id := offlineStore.GetId()
+			// If the store is empty, it can be buried.
+			needBury := c.GetStoreRegionCount(id) == 0
+			failpoint.Inject("doNotBuryStore", func(_ failpoint.Value) {
+				needBury = false
+			})
+			if needBury {
+				if err := c.BuryStore(id, false); err != nil {
+					log.Error("bury store failed",
+						zap.Stringer("store", offlineStore),
+						errs.ZapError(err))
 				}
+			} else {
+				offlineStores = append(offlineStores, offlineStore)
 			}
-		}
-
-		if store.IsUp() {
-			if !store.IsLowSpace(c.opt.GetLowSpaceRatio()) {
-				upStoreCount++
+		case metapb.NodeState_Removed:
+			if store.DownTime() <= gcTombstoneInterval {
+				continue
 			}
-			continue
-		}
-
-		offlineStore := store.GetMeta()
-		id := offlineStore.GetId()
-		regionSize := c.GetStoreRegionSize(id)
-		if c.IsPrepared() {
-			c.updateProgress(id, store.GetAddress(), removingAction, float64(regionSize), float64(regionSize), false /* dec */)
-		}
-		// If the store is empty, it can be buried.
-		needBury := c.GetStoreRegionCount(id) == 0
-		failpoint.Inject("doNotBuryStore", func(_ failpoint.Value) {
-			needBury = false
-		})
-		if needBury {
-			if err := c.BuryStore(id, false); err != nil {
-				log.Error("bury store failed",
-					zap.Stringer("store", offlineStore),
+			// the store has already been tombstone
+			err := c.deleteStore(store)
+			if err != nil {
+				log.Error("auto gc the tombstone store failed",
+					zap.Stringer("store", store.GetMeta()),
+					zap.Duration("down-time", store.DownTime()),
 					errs.ZapError(err))
+			} else {
+				log.Info("auto gc the tombstone store success", zap.Stringer("store", store.GetMeta()), zap.Duration("down-time", store.DownTime()))
 			}
-		} else {
-			offlineStores = append(offlineStores, offlineStore)
 		}
-	}
 
-	if len(offlineStores) == 0 {
-		return
+		if c.isStorePrepared() {
+			c.progressManager.UpdateProgress(store, regionSize, threadhold, nodeStateCheckJobInterval)
+		}
 	}
 
 	// When placement rules feature is enabled. It is hard to determine required replica count precisely.
@@ -1977,57 +1970,6 @@ func updateTopology(topology map[string]any, sortedLabels []*metapb.StoreLabel) 
 	return labelCount
 }
 
-func (c *RaftCluster) updateProgress(storeID uint64, storeAddress, action string, current, remaining float64, isInc bool) {
-	storeLabel := strconv.FormatUint(storeID, 10)
-	var progressName string
-	var opts []progress.Option
-	switch action {
-	case removingAction:
-		progressName = encodeRemovingProgressKey(storeID)
-		opts = []progress.Option{progress.WindowDurationOption(c.GetCoordinator().GetPatrolRegionsDuration())}
-	case preparingAction:
-		progressName = encodePreparingProgressKey(storeID)
-	}
-
-	if exist := c.progressManager.AddProgress(progressName, current, remaining, nodeStateCheckJobInterval, opts...); !exist {
-		return
-	}
-	c.progressManager.UpdateProgress(progressName, current, remaining, isInc, opts...)
-	progress, leftSeconds, currentSpeed, err := c.progressManager.Status(progressName)
-	if err != nil {
-		log.Error("get progress status failed", zap.String("progress", progressName), zap.Float64("remaining", remaining), errs.ZapError(err))
-		return
-	}
-	storesProgressGauge.WithLabelValues(storeAddress, storeLabel, action).Set(progress)
-	storesSpeedGauge.WithLabelValues(storeAddress, storeLabel, action).Set(currentSpeed)
-	storesETAGauge.WithLabelValues(storeAddress, storeLabel, action).Set(leftSeconds)
-}
-
-func (c *RaftCluster) resetProgress(storeID uint64, storeAddress string) {
-	storeLabel := strconv.FormatUint(storeID, 10)
-
-	progress := encodePreparingProgressKey(storeID)
-	if exist := c.progressManager.RemoveProgress(progress); exist {
-		storesProgressGauge.DeleteLabelValues(storeAddress, storeLabel, preparingAction)
-		storesSpeedGauge.DeleteLabelValues(storeAddress, storeLabel, preparingAction)
-		storesETAGauge.DeleteLabelValues(storeAddress, storeLabel, preparingAction)
-	}
-	progress = encodeRemovingProgressKey(storeID)
-	if exist := c.progressManager.RemoveProgress(progress); exist {
-		storesProgressGauge.DeleteLabelValues(storeAddress, storeLabel, removingAction)
-		storesSpeedGauge.DeleteLabelValues(storeAddress, storeLabel, removingAction)
-		storesETAGauge.DeleteLabelValues(storeAddress, storeLabel, removingAction)
-	}
-}
-
-func encodeRemovingProgressKey(storeID uint64) string {
-	return fmt.Sprintf("%s-%d", removingAction, storeID)
-}
-
-func encodePreparingProgressKey(storeID uint64) string {
-	return fmt.Sprintf("%s-%d", preparingAction, storeID)
-}
-
 // RemoveTombStoneRecords removes the tombStone Records.
 func (c *RaftCluster) RemoveTombStoneRecords() error {
 	var failedStores []uint64
@@ -2105,9 +2047,6 @@ func (*RaftCluster) resetHealthStatus() {
 
 func (c *RaftCluster) resetProgressIndicator() {
 	c.progressManager.Reset()
-	storesProgressGauge.Reset()
-	storesSpeedGauge.Reset()
-	storesETAGauge.Reset()
 }
 
 // OnStoreVersionChange changes the version of the cluster when needed.
@@ -2442,56 +2381,20 @@ func (c *RaftCluster) GetEtcdClient() *clientv3.Client {
 }
 
 // GetProgressByID returns the progress details for a given store ID.
-func (c *RaftCluster) GetProgressByID(storeID string) (action string, process, ls, cs float64, err error) {
-	filter := func(progress string) bool {
-		s := strings.Split(progress, "-")
-		return len(s) == 2 && s[1] == storeID
+func (c *RaftCluster) GetProgressByID(storeID uint64) (*progress.Progress, error) {
+	p := c.progressManager.GetProgressByStoreID(storeID)
+	if p == nil {
+		return nil, errs.ErrProgressNotFound.FastGenByArgs(fmt.Sprintf("the given store ID: %d", storeID))
 	}
-	progress := c.progressManager.GetProgresses(filter)
-	if len(progress) != 0 {
-		process, ls, cs, err = c.progressManager.Status(progress[0])
-		if err != nil {
-			return
-		}
-		if strings.HasPrefix(progress[0], removingAction) {
-			action = removingAction
-		} else if strings.HasPrefix(progress[0], preparingAction) {
-			action = preparingAction
-		}
-		return
-	}
-	return "", 0, 0, 0, errs.ErrProgressNotFound.FastGenByArgs(fmt.Sprintf("the given store ID: %s", storeID))
+	return p, nil
 }
 
-// GetProgressByAction returns the progress details for a given action.
-func (c *RaftCluster) GetProgressByAction(action string) (process, ls, cs float64, err error) {
-	filter := func(progress string) bool {
-		return strings.HasPrefix(progress, action)
+func (c *RaftCluster) GetProgressByAction(action string) (*progress.Progress, error) {
+	p := c.progressManager.GetAverageProgressByAction(progress.Action(action))
+	if p == nil {
+		return nil, errs.ErrProgressNotFound.FastGenByArgs(fmt.Sprintf("the action: %s", action))
 	}
-
-	progresses := c.progressManager.GetProgresses(filter)
-	if len(progresses) == 0 {
-		return 0, 0, 0, errs.ErrProgressNotFound.FastGenByArgs(fmt.Sprintf("the action: %s", action))
-	}
-	var p, l, s float64
-	for _, progress := range progresses {
-		p, l, s, err = c.progressManager.Status(progress)
-		if err != nil {
-			return
-		}
-		process += p
-		ls += l
-		cs += s
-	}
-	num := float64(len(progresses))
-	process /= num
-	cs /= num
-	ls /= num
-	// handle the special cases
-	if math.IsNaN(ls) || math.IsInf(ls, 0) {
-		ls = math.MaxFloat64
-	}
-	return
+	return p, nil
 }
 
 var healthURL = "/pd/api/v1/ping"

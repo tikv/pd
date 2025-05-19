@@ -15,12 +15,12 @@
 package progress
 
 import (
-	"container/list"
-	"fmt"
-	"math"
+	"context"
+	"strconv"
 	"time"
 
-	"github.com/tikv/pd/pkg/errs"
+	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 )
 
@@ -31,213 +31,218 @@ const (
 	maxSpeedCalculationWindow = 2 * time.Hour
 	// minSpeedCalculationWindow is the minimum speed calculation window
 	minSpeedCalculationWindow = 10 * time.Minute
+	updateInterval            = 10 * time.Second
+
+	removingAction  Action = "removing"
+	preparingAction Action = "preparing"
 )
 
 // Manager is used to maintain the progresses we care about.
 type Manager struct {
 	syncutil.RWMutex
-	progresses map[string]*progressIndicator
+	progresses map[uint64]*progressIndicator
 }
 
 // NewManager creates a new Manager.
 func NewManager() *Manager {
 	return &Manager{
-		progresses: make(map[string]*progressIndicator),
+		progresses: make(map[uint64]*progressIndicator),
 	}
 }
 
-// progressIndicator reflects a specified progress.
-type progressIndicator struct {
-	total     float64
-	remaining float64
-	// We use a fixed interval's history to calculate the latest average speed.
-	history *list.List
-	// We use (maxSpeedCalculationWindow / updateInterval + 1) to get the windowCapacity.
-	// Assume that the windowCapacity is 4, the init value is 1. After update 3 times with 2, 3, 4 separately. The window will become [1, 2, 3, 4].
-	// Then we update it again with 5, the window will become [2, 3, 4, 5].
-	windowCapacity int
-	// windowLength is used to determine what data will be computed.
-	// Assume that the windowLength is 2, the init value is 1. The value that will be calculated are [1].
-	// After update 3 times with 2, 3, 4 separately. The value that will be calculated are [3,4] and the values in queue are [(1,2),3,4].
-	// It helps us avoid calculation results jumping change when patrol-region-interval changes.
-	windowLength int
-	// front is the first element which should be used.
-	// currentWindowLength indicates where the front is currently in the queue.
-	// Assume that the windowLength is 2, the init value is 1. The front is [1] and currentWindowLength is 1.
-	// After update 3 times with 2, 3, 4 separately.
-	// The front is [3], the currentWindowLength is 2, and values in queue are [(1,2),3,4]
-	//                                                                                ^ front
-	//                                                                                - - currentWindowLength = len([3,4]) = 2
-	// We will always keep the currentWindowLength equal to windowLength if the actual size is enough.
-	front               *list.Element
-	currentWindowLength int
+// Action is the action of the progress.
+type Action string
 
-	updateInterval time.Duration
-	lastSpeed      float64
+type Progress struct {
+	Action
+	ProgressPercent float64
+	LeftSecond      float64
+	CurrentSpeed    float64
 }
 
 // Reset resets the progress manager.
 func (m *Manager) Reset() {
+	storesProgressGauge.Reset()
+	storesSpeedGauge.Reset()
+	storesETAGauge.Reset()
+
 	m.Lock()
 	defer m.Unlock()
 
-	m.progresses = make(map[string]*progressIndicator)
+	m.progresses = make(map[uint64]*progressIndicator)
 }
 
-// Option is used to do some action for progressIndicator.
-type Option func(*progressIndicator)
+func (m *Manager) addProgress(
+	storeID uint64,
+	action Action,
+	current, total float64,
+	updateInterval time.Duration,
+	opts ...Option,
+) *Progress {
+	m.progresses[storeID] = newProgressIndicator(
+		action,
+		current, total,
+		updateInterval,
+		opts...,
+	)
+	return m.progresses[storeID].Progress
+}
 
-// WindowDurationOption changes the time window size.
-func WindowDurationOption(dur time.Duration) func(*progressIndicator) {
-	return func(pi *progressIndicator) {
-		if dur < minSpeedCalculationWindow {
-			dur = minSpeedCalculationWindow
-		} else if dur > maxSpeedCalculationWindow {
-			dur = maxSpeedCalculationWindow
+func (m *Manager) GC(ctx context.Context) {
+	ticker := time.NewTicker(2 * time.Minute)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			m.gc()
+		case <-ctx.Done():
+			return
 		}
-		pi.windowLength = int(dur/pi.updateInterval) + 1
 	}
 }
 
-// AddProgress adds a progress into manager if it doesn't exist.
-func (m *Manager) AddProgress(progress string, current, total float64, updateInterval time.Duration, opts ...Option) (exist bool) {
+func (m *Manager) gc() {
 	m.Lock()
 	defer m.Unlock()
-
-	history := list.New()
-	history.PushBack(current)
-	if _, exist = m.progresses[progress]; !exist {
-		pi := &progressIndicator{
-			total:          total,
-			remaining:      total,
-			history:        history,
-			windowCapacity: int(maxSpeedCalculationWindow/updateInterval) + 1,
-			windowLength:   int(minSpeedCalculationWindow / updateInterval),
-			updateInterval: updateInterval,
+	for storeID, p := range m.progresses {
+		if p.waitDelete {
+			storeIDStr := strconv.FormatUint(storeID, 10)
+			delete(m.progresses, storeID)
+			storesProgressGauge.DeleteLabelValues("", storeIDStr, string(p.Action))
+			storesSpeedGauge.DeleteLabelValues("", storeIDStr, string(p.Action))
+			storesETAGauge.DeleteLabelValues("", storeIDStr, string(p.Action))
 		}
-		for _, op := range opts {
-			op(pi)
-		}
-		m.progresses[progress] = pi
-		pi.front = history.Front()
-		pi.currentWindowLength = 1
 	}
-	return
+}
+
+func (m *Manager) markProgressAsFinished(storeID uint64) {
+	m.Lock()
+	defer m.Unlock()
+	if _, exist := m.progresses[storeID]; !exist {
+		return
+	}
+
+	m.progresses[storeID].waitDelete = true
+	m.progresses[storeID].push(m.progresses[storeID].targetRegionSize)
+	m.progresses[storeID].updateProgress()
+}
+
+// UpdateProgress updates the progress of the store.
+//   - targetRegionSize is the total region size that need to be added/deleted.
+//     If the store is in preparing state, it represents the total region size
+//     that need to be added, and it may be updated during the process.
+//     If the store is in removing state, it represents the total region size
+//     that need to be deleted, and it is set in the first time.
+func (m *Manager) UpdateProgress(
+	store *core.StoreInfo,
+	currentRegionSize, threadhold float64,
+	windowDuration time.Duration,
+) {
+	if store.IsServing() || store.IsRemoved() {
+		m.markProgressAsFinished(store.GetID())
+		return
+	}
+	var (
+		storeID          = store.GetID()
+		opts             []Option
+		action           Action
+		targetRegionSize float64
+	)
+	switch store.GetNodeState() {
+	case metapb.NodeState_Preparing:
+		action = preparingAction
+		targetRegionSize = threadhold
+	case metapb.NodeState_Removing:
+		action = removingAction
+		m.Lock()
+		p, exist := m.progresses[storeID]
+		if exist && p.Action == removingAction {
+			// currentRegionSize represents the current deleted region size.
+			currentRegionSize = p.targetRegionSize - currentRegionSize
+		} else {
+			// targetRegionSize represents the total region size that need to be
+			// deleted. It is set in the first time when the store is in removing state.
+			targetRegionSize = currentRegionSize
+			currentRegionSize = 0
+		}
+		m.Unlock()
+		opts = []Option{WindowDurationOption(windowDuration)}
+	}
+
+	p := m.updateProgress(storeID, action, currentRegionSize, targetRegionSize, opts...)
+	if p == nil {
+		return
+	}
 }
 
 // UpdateProgress updates the progress if it exists.
-func (m *Manager) UpdateProgress(progress string, current, remaining float64, isInc bool, opts ...Option) {
+// currentRegionSize represents the current added/deleted region size.
+func (m *Manager) updateProgress(storeID uint64, action Action, currentRegionSize, targetRegionSize float64, opts ...Option) *Progress {
 	m.Lock()
 	defer m.Unlock()
 
-	p, exist := m.progresses[progress]
-	if !exist {
-		return
+	p, exist := m.progresses[storeID]
+	if !exist || p.Action != action {
+		return m.addProgress(storeID, action, currentRegionSize, targetRegionSize, updateInterval, opts...)
 	}
 
 	for _, op := range opts {
 		op(p)
 	}
-	p.remaining = remaining
-	if p.total < remaining {
-		p.total = remaining
+
+	// The targetRegionSize of the preparing progress may be updated.
+	if p.targetRegionSize < targetRegionSize {
+		p.targetRegionSize = targetRegionSize
 	}
 
-	p.history.PushBack(current)
-	p.currentWindowLength++
+	p.push(currentRegionSize)
+	p.updateProgress()
 
-	// try to move `front` into correct place.
-	for p.currentWindowLength > p.windowLength {
-		p.front = p.front.Next()
-		p.currentWindowLength--
-	}
-	for p.currentWindowLength < p.windowLength && p.front.Prev() != nil {
-		p.front = p.front.Prev()
-		p.currentWindowLength++
-	}
-
-	for p.history.Len() > p.windowCapacity {
-		p.history.Remove(p.history.Front())
-	}
-
-	// It means it just init and we haven't update the progress
-	if p.history.Len() <= 1 {
-		p.lastSpeed = 0
-	} else if isInc {
-		// the value increases, e.g., [1, 2, 3]
-		p.lastSpeed = (current - p.front.Value.(float64)) /
-			(float64(p.currentWindowLength-1) * p.updateInterval.Seconds())
-	} else {
-		// the value decreases, e.g., [3, 2, 1]
-		p.lastSpeed = (p.front.Value.(float64) - current) /
-			(float64(p.currentWindowLength-1) * p.updateInterval.Seconds())
-	}
-	if p.lastSpeed < 0 {
-		p.lastSpeed = 0
-	}
-}
-
-// UpdateProgressTotal updates the total value of a progress if it exists.
-func (m *Manager) UpdateProgressTotal(progress string, total float64) {
-	m.Lock()
-	defer m.Unlock()
-
-	if p, exist := m.progresses[progress]; exist {
-		p.total = total
-	}
-}
-
-// RemoveProgress removes a progress from manager.
-func (m *Manager) RemoveProgress(progress string) (exist bool) {
-	m.Lock()
-	defer m.Unlock()
-
-	if _, exist = m.progresses[progress]; exist {
-		delete(m.progresses, progress)
-		return
-	}
-	return
+	storeLabel := strconv.FormatUint(storeID, 10)
+	// For now, we don't need to record the address of the store. We can record
+	// them when we need it.
+	storesProgressGauge.WithLabelValues("", storeLabel, string(action)).Set(p.ProgressPercent)
+	storesSpeedGauge.WithLabelValues("", storeLabel, string(action)).Set(p.CurrentSpeed)
+	storesETAGauge.WithLabelValues("", storeLabel, string(action)).Set(p.LeftSecond)
+	return p.Progress
 }
 
 // GetProgresses gets progresses according to the filter.
-func (m *Manager) GetProgresses(filter func(p string) bool) []string {
+func (m *Manager) GetProgressByStoreID(storeID uint64) *Progress {
 	m.RLock()
 	defer m.RUnlock()
 
-	progresses := make([]string, 0, len(m.progresses))
-	for p := range m.progresses {
-		if filter(p) {
-			progresses = append(progresses, p)
-		}
+	if p, exist := m.progresses[storeID]; !exist {
+		return nil
+	} else {
+		return p.Progress
 	}
-	return progresses
 }
 
-// Status returns the current progress status of a give name.
-func (m *Manager) Status(progressName string) (progress, leftSeconds, currentSpeed float64, err error) {
+func (m *Manager) GetAverageProgressByAction(action Action) *Progress {
 	m.RLock()
 	defer m.RUnlock()
 
-	p, exist := m.progresses[progressName]
-	if !exist {
-		err = errs.ErrProgressNotFound.FastGenByArgs(fmt.Sprintf("the progress: %s", progressName))
-		return
+	var (
+		totalProgressPercent, totalLeftSeconds, totalCurrentSpeed float64
+		count                                                     int
+	)
+	for _, p := range m.progresses {
+		if p.Action == action {
+			totalProgressPercent += p.Progress.ProgressPercent
+			totalLeftSeconds += p.LeftSecond
+			totalCurrentSpeed += p.CurrentSpeed
+			count++
+		}
 	}
-	progress = 1 - p.remaining/p.total
-	if progress < 0 {
-		progress = 0
-		err = errs.ErrProgressWrongStatus.FastGenByArgs(fmt.Sprintf("the remaining: %v is larger than the total: %v", p.remaining, p.total))
-		return
+	if count == 0 {
+		return nil
 	}
-	currentSpeed = p.lastSpeed
-	// When the progress is newly added, there is no last speed.
-	if p.lastSpeed == 0 && p.history.Len() <= 1 {
-		currentSpeed = 0
+	return &Progress{
+		Action:          action,
+		ProgressPercent: totalProgressPercent / float64(count),
+		LeftSecond:      totalLeftSeconds / float64(count),
+		CurrentSpeed:    totalCurrentSpeed / float64(count),
 	}
-
-	leftSeconds = p.remaining / currentSpeed
-	if math.IsNaN(leftSeconds) || math.IsInf(leftSeconds, 0) {
-		leftSeconds = math.MaxFloat64
-	}
-	return
 }

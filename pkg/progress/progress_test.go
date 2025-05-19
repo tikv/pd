@@ -16,202 +16,128 @@ package progress
 
 import (
 	"math"
-	"strings"
 	"testing"
 	"time"
 
+	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/require"
+	"github.com/tikv/pd/pkg/core"
 )
 
 func TestProgress(t *testing.T) {
-	re := require.New(t)
-	n := "test"
-	m := NewManager()
-	re.False(m.AddProgress(n, 100, 100, 10*time.Second))
-	p, ls, cs, err := m.Status(n)
-	re.NoError(err)
-	re.Equal(0.0, p)
-	re.Equal(math.MaxFloat64, ls)
-	re.Equal(0.0, cs)
-	time.Sleep(time.Second)
-	re.True(m.AddProgress(n, 100, 100, 10*time.Second))
+	var (
+		re       = require.New(t)
+		storeID  = uint64(1)
+		storeID2 = uint64(2)
+		m        = NewManager()
+	)
 
-	m.UpdateProgress(n, 30, 30, false)
-	p, ls, cs, err = m.Status(n)
-	re.NoError(err)
-	re.Equal(0.7, p)
-	re.Less(math.Abs(ls-30.0/7.0), 1e-6)
-	re.Less(math.Abs(cs-7), 1e-6)
-	// there is no scheduling
-	for range 1000 {
-		m.UpdateProgress(n, 30, 30, false)
-	}
-	re.Equal(721, m.progresses[n].history.Len())
-	p, ls, cs, err = m.Status(n)
-	re.NoError(err)
-	re.Equal(0.7, p)
-	re.Equal(math.MaxFloat64, ls)
-	re.Equal(0.0, cs)
+	// test add progress
+	p := m.addProgress(storeID, preparingAction, 10, 100, updateInterval)
+	re.Equal(preparingAction, p.Action)
+	re.Equal(0.1, p.ProgressPercent)
+	re.Equal(math.MaxFloat64, p.LeftSecond)
+	re.Equal(0.0, p.CurrentSpeed)
+	p2 := m.GetProgressByStoreID(storeID)
+	re.Equal(p2, p)
 
-	ps := m.GetProgresses(func(p string) bool {
-		return strings.Contains(p, n)
-	})
-	re.Len(ps, 1)
-	re.Equal(n, ps[0])
-	ps = m.GetProgresses(func(p string) bool {
-		return strings.Contains(p, "a")
-	})
-	re.Empty(ps)
-	re.True(m.RemoveProgress(n))
-	re.False(m.RemoveProgress(n))
+	p = m.updateProgress(storeID2, preparingAction, 20, 100)
+	re.Equal(preparingAction, p.Action)
+	re.Equal(0.2, p.ProgressPercent)
+	re.Equal(math.MaxFloat64, p.LeftSecond)
+	re.Equal(0.0, p.CurrentSpeed)
+	p2 = m.GetProgressByStoreID(storeID2)
+	re.Equal(p2, p)
+
+	// test update progress
+	p = m.updateProgress(storeID, preparingAction, 30, 100)
+	re.Equal(preparingAction, p.Action)
+	re.Equal(0.3, p.ProgressPercent)
+	re.Equal(2.0, p.CurrentSpeed) // 2 region/s
+	re.Equal(35.0, p.LeftSecond)
+
+	p = m.updateProgress(storeID2, preparingAction, 30, 100)
+	re.Equal(preparingAction, p.Action)
+	re.Equal(0.3, p.ProgressPercent)
+	re.Equal(1.0, p.CurrentSpeed) // 1 region/s
+	re.Equal(70.0, p.LeftSecond)
+
+	// test gc progress
+	m.markProgressAsFinished(storeID)
+	m.gc()
+	re.Nil(m.GetProgressByStoreID(storeID))
 }
 
-func TestAbnormal(t *testing.T) {
-	re := require.New(t)
-	n := "test"
-	m := NewManager()
-	re.False(m.AddProgress(n, 100, 100, 10*time.Second))
-	p, ls, cs, err := m.Status(n)
-	re.NoError(err)
-	re.Equal(0.0, p)
-	re.Equal(math.MaxFloat64, ls)
-	re.Equal(0.0, cs)
-	// When offline a store, but there are still many write operations
-	m.UpdateProgress(n, 110, 110, false)
-	p, ls, cs, err = m.Status(n)
-	re.NoError(err)
-	re.Equal(0.0, p)
-	re.Equal(math.MaxFloat64, ls)
-	re.Equal(0.0, cs)
-	// It usually won't happens
-	m.UpdateProgressTotal(n, 10)
-	p, ls, cs, err = m.Status(n)
-	re.Error(err)
-	re.Equal(0.0, p)
-	re.Equal(0.0, ls)
-	re.Equal(0.0, cs)
-}
+func TestUpdateProgress(t *testing.T) {
+	var (
+		re    = require.New(t)
+		store = core.NewStoreInfo(&metapb.Store{
+			Id:        1,
+			NodeState: metapb.NodeState_Preparing,
+		})
+		m              = NewManager()
+		windowDuration = 10 * time.Second
+	)
 
-func TestProgressWithDynamicWindow(t *testing.T) {
-	// The full capacity of queue is 721.
-	re := require.New(t)
-	n := "test"
-	m := NewManager()
-	re.False(m.AddProgress(n, 100, 100, 10*time.Second))
-	p, ls, cs, err := m.Status(n)
-	re.NoError(err)
-	re.Equal(0.0, p)
-	re.Equal(math.MaxFloat64, ls)
-	re.Equal(0.0, cs)
-	time.Sleep(time.Second)
-	re.True(m.AddProgress(n, 100, 100, 10*time.Second))
+	testPrepare := func() {
+		// test update progress with store state preparing
+		m.UpdateProgress(store, 10, 100, windowDuration)
+		p := m.GetProgressByStoreID(store.GetID())
+		re.Equal(preparingAction, p.Action)
+		re.Equal(0.1, p.ProgressPercent)
+		re.Equal(math.MaxFloat64, p.LeftSecond)
+		re.Equal(0.0, p.CurrentSpeed)
 
-	m.UpdateProgress(n, 31, 31, false)
-	p, ls, cs, err = m.Status(n)
-	re.NoError(err)
-	re.Equal(0.69, p)
-	re.Less(math.Abs(ls-31.0/6.9), 1e-6)
-	re.Less(math.Abs(cs-6.9), 1e-6)
-	re.Equal(2, m.progresses[n].currentWindowLength)
-	re.Equal(100.0, m.progresses[n].front.Value.(float64))
+		m.UpdateProgress(store, 20, 100, windowDuration)
+		p = m.GetProgressByStoreID(store.GetID())
+		re.Equal(preparingAction, p.Action)
+		re.Equal(0.2, p.ProgressPercent)
+		re.Equal(80.0, p.LeftSecond)
+		re.Equal(1.0, p.CurrentSpeed)
 
-	m.UpdateProgress(n, 30, 30, false, WindowDurationOption(time.Minute*20))
-	re.Equal(3, m.progresses[n].currentWindowLength)
-	re.Equal(100.0, m.progresses[n].front.Value.(float64))
-	p, ls, cs, err = m.Status(n)
-	re.NoError(err)
-	re.Equal(0.7, p)
-	re.Less(math.Abs(ls-30.0/(7.0/2)), 1e-6)
-	re.Less(math.Abs(cs-3.5), 1e-6)
-
-	for range 1000 {
-		m.UpdateProgress(n, 30, 30, false)
+		store = store.Clone(core.SetStoreState(metapb.StoreState_Up))
+		m.UpdateProgress(store, 101, 100, windowDuration)
+		p = m.GetProgressByStoreID(store.GetID())
+		re.Equal(preparingAction, p.Action)
+		re.Equal(1.0, p.ProgressPercent)
+		re.Equal(0.0, p.LeftSecond)
+		re.Equal(4.5, p.CurrentSpeed)
 	}
-	re.Equal(721, m.progresses[n].history.Len())
-	p, ls, cs, err = m.Status(n)
-	re.NoError(err)
-	re.Equal(0.7, p)
-	re.Equal(math.MaxFloat64, ls)
-	re.Equal(0.0, cs)
-	m.UpdateProgress(n, 29, 29, false, WindowDurationOption(time.Minute*20))
-	re.Equal(121, m.progresses[n].currentWindowLength)
-	re.Equal(30.0, m.progresses[n].front.Value.(float64))
-	re.Equal(721, m.progresses[n].history.Len())
 
-	for range 60 {
-		m.UpdateProgress(n, 28, 28, false)
+	testRemove := func() {
+		// test update progress with store state removing
+		store = store.Clone(core.SetStoreState(metapb.StoreState_Offline, false))
+		m.UpdateProgress(store, 100, 0, windowDuration)
+		p := m.GetProgressByStoreID(store.GetID())
+		re.Equal(removingAction, p.Action)
+		re.Equal(0.0, p.ProgressPercent)
+		re.Equal(math.MaxFloat64, p.LeftSecond)
+		re.Equal(0.0, p.CurrentSpeed)
+
+		m.UpdateProgress(store, 80, 0, windowDuration)
+		p = m.GetProgressByStoreID(store.GetID())
+		re.Equal(removingAction, p.Action)
+		re.Equal(0.2, p.ProgressPercent)
+		re.Equal(40.0, p.LeftSecond)
+		re.Equal(2.0, p.CurrentSpeed)
+
+		store = store.Clone(core.SetStoreState(metapb.StoreState_Tombstone))
+		m.UpdateProgress(store, 0, 0, windowDuration)
+		p = m.GetProgressByStoreID(store.GetID())
+		re.Equal(removingAction, p.Action)
+		re.Equal(1.0, p.ProgressPercent)
+		re.Equal(0.0, p.LeftSecond)
+		re.Equal(5.0, p.CurrentSpeed)
 	}
-	re.Equal(721, m.progresses[n].history.Len())
-	p, ls, cs, err = m.Status(n)
-	re.NoError(err)
-	re.Equal(0.72, p)
-	re.Equal(float64(28/(2./120)*10.), ls)
-	re.Equal(float64(2./120/10.), cs)
 
-	m.UpdateProgress(n, 28, 28, false, WindowDurationOption(time.Minute*10))
-	re.Equal(721, m.progresses[n].history.Len())
-	re.Equal(61, m.progresses[n].currentWindowLength)
-	re.Equal(28.0, m.progresses[n].front.Value.(float64))
-	p, ls, cs, err = m.Status(n)
-	re.NoError(err)
-	re.Equal(0.72, p)
-	re.Equal(math.MaxFloat64, ls)
-	re.Equal(0.0, cs)
+	testPrepare()
+	m.gc()
+	testRemove()
 
-	m.UpdateProgress(n, 28, 28, false, WindowDurationOption(time.Minute*20))
-	re.Equal(121, m.progresses[n].currentWindowLength)
-	re.Equal(30.0, m.progresses[n].front.Value.(float64))
-	p, ls, cs, err = m.Status(n)
-	re.NoError(err)
-	re.Equal(0.72, p)
-	re.Equal(float64(28/(2./120)*10.), ls)
-	re.Equal(float64(2./120/10.), cs)
-
-	m.UpdateProgress(n, 1, 1, false, WindowDurationOption(time.Minute*12))
-	re.Equal(73, m.progresses[n].currentWindowLength)
-	re.Equal(30.0, m.progresses[n].front.Value.(float64))
-	p, ls, cs, err = m.Status(n)
-	re.NoError(err)
-	re.Equal(0.99, p)
-	re.Equal(float64(1/(29./72)*10.), ls)
-	re.Equal(float64(29./72/10.), cs)
-
-	m.UpdateProgress(n, 1, 1, false, WindowDurationOption(time.Minute*5))
-	re.Equal(61, m.progresses[n].currentWindowLength)
-	re.Equal(28.0, m.progresses[n].front.Value.(float64))
-	p, ls, cs, err = m.Status(n)
-	re.NoError(err)
-	re.Equal(0.99, p)
-	re.Equal(float64(1/(27./60)*10.), ls)
-	re.Equal(float64(27./60/10.), cs)
-
-	m.UpdateProgress(n, 1, 1, false, WindowDurationOption(time.Minute*180))
-	p, ls, cs, err = m.Status(n)
-	re.Equal(721, m.progresses[n].currentWindowLength)
-	re.Equal(30.0, m.progresses[n].front.Value.(float64))
-	re.NoError(err)
-	re.Equal(0.99, p)
-	re.Equal(float64(1/(29./720)*10.), ls)
-	re.Equal(float64(29./720/10.), cs)
-	for range 2000 {
-		m.UpdateProgress(n, 1, 1, false)
-	}
-	re.Equal(721, m.progresses[n].history.Len())
-	p, ls, cs, err = m.Status(n)
-	re.NoError(err)
-	re.Equal(0.99, p)
-	re.Equal(math.MaxFloat64, ls)
-	re.Equal(0.0, cs)
-
-	ps := m.GetProgresses(func(p string) bool {
-		return strings.Contains(p, n)
+	store = core.NewStoreInfo(&metapb.Store{
+		Id:        1,
+		NodeState: metapb.NodeState_Preparing,
 	})
-	re.Len(ps, 1)
-	re.Equal(n, ps[0])
-	ps = m.GetProgresses(func(p string) bool {
-		return strings.Contains(p, "a")
-	})
-	re.Empty(ps)
-	re.True(m.RemoveProgress(n))
-	re.False(m.RemoveProgress(n))
+	testPrepare()
+	testRemove()
 }
