@@ -31,6 +31,7 @@ import (
 	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/registry"
+	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 )
 
@@ -191,12 +192,12 @@ func (s *Service) AcquireTokenBuckets(stream rmpb.ResourceManager_AcquireTokenBu
 			if isBackground && isTiFlash {
 				return errors.New("background and tiflash cannot be true at the same time")
 			}
-			s.manager.consumptionDispatcher <- struct {
-				resourceGroupName string
-				*rmpb.Consumption
-				isBackground bool
-				isTiFlash    bool
-			}{resourceGroupName, req.GetConsumptionSinceLastRequest(), isBackground, isTiFlash}
+			s.manager.dispatchConsumption(constant.NullKeyspaceID, &consumptionItem{
+				resourceGroupName: resourceGroupName,
+				Consumption:       req.GetConsumptionSinceLastRequest(),
+				isBackground:      isBackground,
+				isTiFlash:         isTiFlash,
+			})
 			if isBackground {
 				continue
 			}

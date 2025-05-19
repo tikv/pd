@@ -26,7 +26,6 @@ import (
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 	"github.com/pingcap/log"
 
-	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 )
@@ -232,9 +231,9 @@ func (rg *ResourceGroup) IntoProtoResourceGroup() *rmpb.ResourceGroup {
 
 // persistSettings persists the resource group settings.
 // TODO: persist the state of the group separately.
-func (rg *ResourceGroup) persistSettings(storage endpoint.ResourceGroupStorage) error {
+func (rg *ResourceGroup) persistSettings(keyspaceID uint32, storage endpoint.ResourceGroupStorage) error {
 	metaGroup := rg.IntoProtoResourceGroup()
-	return storage.SaveResourceGroupSetting(constant.NullKeyspaceID, rg.Name, metaGroup)
+	return storage.SaveResourceGroupSetting(keyspaceID, rg.Name, metaGroup)
 }
 
 // GroupStates is the tokens set of a resource group.
@@ -300,7 +299,7 @@ func (rg *ResourceGroup) UpdateRUConsumption(c *rmpb.Consumption) {
 }
 
 // persistStates persists the resource group tokens.
-func (rg *ResourceGroup) persistStates(storage endpoint.ResourceGroupStorage) error {
+func (rg *ResourceGroup) persistStates(keyspaceID uint32, storage endpoint.ResourceGroupStorage) error {
 	states := rg.GetGroupStates()
-	return storage.SaveResourceGroupStates(constant.NullKeyspaceID, rg.Name, states)
+	return storage.SaveResourceGroupStates(keyspaceID, rg.Name, states)
 }
