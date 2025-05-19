@@ -426,10 +426,11 @@ func TestBackgroundMetricsFlush(t *testing.T) {
 
 	// Start the background metrics flush.
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	go krgm.backgroundMetricsFlush(ctx)
 
-	// Send some consumption data.
-	consumption := &consumptionItem{
+	// Send consumption to the dispatcher.
+	krgm.consumptionDispatcher <- &consumptionItem{
 		resourceGroupName: "test_group",
 		Consumption: &resource_manager.Consumption{
 			RRU:               10.0,
@@ -443,22 +444,12 @@ func TestBackgroundMetricsFlush(t *testing.T) {
 		},
 	}
 
-	// Send consumption to the dispatcher.
-	krgm.consumptionDispatcher <- consumption
-
-	// Check if the consumption record was updated.
-	testutil.Eventually(re, func() bool {
-		return len(krgm.consumptionRecord) > 0
-	})
-
 	// Verify consumption was added to the resource group.
-	updatedGroup := krgm.getResourceGroup("test_group", true)
-	re.NotNil(updatedGroup)
-	re.Equal(float64(10.0), updatedGroup.RUConsumption.RRU)
-	re.Equal(float64(20.0), updatedGroup.RUConsumption.WRU)
-
-	// Clean up
-	cancel()
+	testutil.Eventually(re, func() bool {
+		updatedGroup := krgm.getResourceGroup("test_group", true)
+		re.NotNil(updatedGroup)
+		return updatedGroup.RUConsumption.RRU == 10.0 && updatedGroup.RUConsumption.WRU == 20.0
+	})
 }
 
 func TestPersistResourceGroupRunningState(t *testing.T) {

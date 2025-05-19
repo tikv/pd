@@ -85,8 +85,6 @@ func (m *Manager) GetBasicServer() bs.Server {
 
 // GetStorage returns the storage.
 func (m *Manager) GetStorage() endpoint.ResourceGroupStorage {
-	m.RLock()
-	defer m.RUnlock()
 	return m.storage
 }
 
