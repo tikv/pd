@@ -2023,7 +2023,7 @@ func (c *RaftCluster) collectMetrics() {
 
 func (c *RaftCluster) resetMetrics() {
 	c.resetHealthStatus()
-	c.resetProgressIndicator()
+	c.progressManager.Reset()
 }
 
 func (c *RaftCluster) collectHealthStatus() {
@@ -2043,10 +2043,6 @@ func (c *RaftCluster) collectHealthStatus() {
 
 func (*RaftCluster) resetHealthStatus() {
 	healthStatusGauge.Reset()
-}
-
-func (c *RaftCluster) resetProgressIndicator() {
-	c.progressManager.Reset()
 }
 
 // OnStoreVersionChange changes the version of the cluster when needed.

@@ -136,8 +136,8 @@ func (m *Manager) UpdateProgress(
 	currentRegionSize, threadhold float64,
 ) {
 	p := m.GetProgressByStoreID(store.GetID())
-	if p != nil && ((p.Action == preparingAction && store.IsServing()) ||
-		(p.Action == removingAction && store.IsRemoved())) {
+	if p != nil && ((p.Action == preparingAction && !store.IsPreparing()) ||
+		(p.Action == removingAction && !store.IsRemoving())) {
 		m.markProgressAsFinished(store.GetID())
 		return
 	}
@@ -169,6 +169,8 @@ func (m *Manager) UpdateProgress(
 			currentRegionSize = 0
 		}
 		m.Unlock()
+	default:
+		return
 	}
 
 	m.updateProgress(storeID, action, currentRegionSize, targetRegionSize)

@@ -138,7 +138,6 @@ func TestUpdateProgress(t *testing.T) {
 	}
 
 	testPrepare()
-	m.gc()
 	testRemove()
 
 	store = core.NewStoreInfo(&metapb.Store{
