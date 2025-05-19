@@ -172,14 +172,20 @@ func (m *Manager) loadKeyspaceResourceGroups() error {
 	}); err != nil {
 		return err
 	}
+	// Initialize the reserved keyspace resource group manager and default resource groups.
+	m.initReserved()
+	return nil
+}
 
+func (m *Manager) initReserved() {
+	// Initialize the null keyspace resource group manager if it doesn't exist.
+	m.getOrCreateKeyspaceResourceGroupManager(constant.NullKeyspaceID)
 	// Initialize the default resource group respectively for each keyspace.
 	m.RLock()
 	defer m.RUnlock()
 	for _, krgm := range m.krgms {
 		krgm.initDefaultResourceGroup()
 	}
-	return nil
 }
 
 // UpdateControllerConfigItem updates the controller config item.
