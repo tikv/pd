@@ -19,19 +19,15 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 )
 
 const (
-	// maxSpeedCalculationWindow is the maximum size of the time window used to calculate the speed,
-	// but it does not mean that all data in it will be used to calculate the speed,
-	// which data is used depends on the patrol region duration
-	maxSpeedCalculationWindow = 2 * time.Hour
-	// minSpeedCalculationWindow is the minimum speed calculation window
-	minSpeedCalculationWindow = 10 * time.Minute
-	updateInterval            = 10 * time.Second
+	gcInterval  = 2 * time.Minute
+	expiredTime = 30 * time.Second
 
 	removingAction  Action = "removing"
 	preparingAction Action = "preparing"
@@ -77,19 +73,16 @@ func (m *Manager) addProgress(
 	action Action,
 	current, total float64,
 	updateInterval time.Duration,
-	opts ...Option,
-) *Progress {
+) {
 	m.progresses[storeID] = newProgressIndicator(
 		action,
 		current, total,
 		updateInterval,
-		opts...,
 	)
-	return m.progresses[storeID].Progress
 }
 
 func (m *Manager) GC(ctx context.Context) {
-	ticker := time.NewTicker(2 * time.Minute)
+	ticker := time.NewTicker(gcInterval)
 	defer ticker.Stop()
 
 	for {
@@ -106,7 +99,17 @@ func (m *Manager) gc() {
 	m.Lock()
 	defer m.Unlock()
 	for storeID, p := range m.progresses {
-		if p.waitDelete {
+		exactExpiredTime := expiredTime
+		failpoint.Inject("gcExpiredTime", func(val failpoint.Value) {
+			if s, ok := val.(string); ok {
+				var err error
+				exactExpiredTime, err = time.ParseDuration(s)
+				if err != nil {
+					panic(err)
+				}
+			}
+		})
+		if p.completeAt.Before(time.Now().Add(-exactExpiredTime)) {
 			storeIDStr := strconv.FormatUint(storeID, 10)
 			delete(m.progresses, storeID)
 			storesProgressGauge.DeleteLabelValues("", storeIDStr, string(p.Action))
@@ -123,30 +126,29 @@ func (m *Manager) markProgressAsFinished(storeID uint64) {
 		return
 	}
 
-	m.progresses[storeID].waitDelete = true
+	m.progresses[storeID].completeAt = time.Now()
 	m.progresses[storeID].push(m.progresses[storeID].targetRegionSize)
-	m.progresses[storeID].updateProgress()
 }
 
 // UpdateProgress updates the progress of the store.
-//   - targetRegionSize is the total region size that need to be added/deleted.
-//     If the store is in preparing state, it represents the total region size
-//     that need to be added, and it may be updated during the process.
-//     If the store is in removing state, it represents the total region size
-//     that need to be deleted, and it is set in the first time.
 func (m *Manager) UpdateProgress(
 	store *core.StoreInfo,
 	currentRegionSize, threadhold float64,
-	windowDuration time.Duration,
 ) {
-	if store.IsServing() || store.IsRemoved() {
+	p := m.GetProgressByStoreID(store.GetID())
+	if p != nil && ((p.Action == preparingAction && store.IsServing()) ||
+		(p.Action == removingAction && store.IsRemoved())) {
 		m.markProgressAsFinished(store.GetID())
 		return
 	}
 	var (
-		storeID          = store.GetID()
-		opts             []Option
-		action           Action
+		storeID = store.GetID()
+		action  Action
+		//  targetRegionSize is the total region size that need to be added/deleted.
+		//  - If the store is in preparing state, it represents the total region size
+		//    that need to be added, and it may be updated during the process.
+		//  - If the store is in removing state, it represents the total region size
+		//    that need to be deleted, and it is set in the first time.
 		targetRegionSize float64
 	)
 	switch store.GetNodeState() {
@@ -167,28 +169,21 @@ func (m *Manager) UpdateProgress(
 			currentRegionSize = 0
 		}
 		m.Unlock()
-		opts = []Option{WindowDurationOption(windowDuration)}
 	}
 
-	p := m.updateProgress(storeID, action, currentRegionSize, targetRegionSize, opts...)
-	if p == nil {
-		return
-	}
+	m.updateProgress(storeID, action, currentRegionSize, targetRegionSize)
 }
 
 // UpdateProgress updates the progress if it exists.
 // currentRegionSize represents the current added/deleted region size.
-func (m *Manager) updateProgress(storeID uint64, action Action, currentRegionSize, targetRegionSize float64, opts ...Option) *Progress {
+func (m *Manager) updateProgress(storeID uint64, action Action, currentRegionSize, targetRegionSize float64) {
 	m.Lock()
 	defer m.Unlock()
 
 	p, exist := m.progresses[storeID]
 	if !exist || p.Action != action {
-		return m.addProgress(storeID, action, currentRegionSize, targetRegionSize, updateInterval, opts...)
-	}
-
-	for _, op := range opts {
-		op(p)
+		m.addProgress(storeID, action, currentRegionSize, targetRegionSize, updateInterval)
+		return
 	}
 
 	// The targetRegionSize of the preparing progress may be updated.
@@ -197,7 +192,6 @@ func (m *Manager) updateProgress(storeID uint64, action Action, currentRegionSiz
 	}
 
 	p.push(currentRegionSize)
-	p.updateProgress()
 
 	storeLabel := strconv.FormatUint(storeID, 10)
 	// For now, we don't need to record the address of the store. We can record
@@ -205,7 +199,6 @@ func (m *Manager) updateProgress(storeID uint64, action Action, currentRegionSiz
 	storesProgressGauge.WithLabelValues("", storeLabel, string(action)).Set(p.ProgressPercent)
 	storesSpeedGauge.WithLabelValues("", storeLabel, string(action)).Set(p.CurrentSpeed)
 	storesETAGauge.WithLabelValues("", storeLabel, string(action)).Set(p.LeftSecond)
-	return p.Progress
 }
 
 // GetProgresses gets progresses according to the filter.

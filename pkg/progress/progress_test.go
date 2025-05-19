@@ -19,6 +19,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/stretchr/testify/require"
 	"github.com/tikv/pd/pkg/core"
@@ -33,7 +34,8 @@ func TestProgress(t *testing.T) {
 	)
 
 	// test add progress
-	p := m.addProgress(storeID, preparingAction, 10, 100, updateInterval)
+	m.addProgress(storeID, preparingAction, 10, 100, updateInterval)
+	p := m.GetProgressByStoreID(storeID)
 	re.Equal(preparingAction, p.Action)
 	re.Equal(0.1, p.ProgressPercent)
 	re.Equal(math.MaxFloat64, p.LeftSecond)
@@ -41,7 +43,8 @@ func TestProgress(t *testing.T) {
 	p2 := m.GetProgressByStoreID(storeID)
 	re.Equal(p2, p)
 
-	p = m.updateProgress(storeID2, preparingAction, 20, 100)
+	m.updateProgress(storeID2, preparingAction, 20, 100)
+	p = m.GetProgressByStoreID(storeID2)
 	re.Equal(preparingAction, p.Action)
 	re.Equal(0.2, p.ProgressPercent)
 	re.Equal(math.MaxFloat64, p.LeftSecond)
@@ -50,13 +53,15 @@ func TestProgress(t *testing.T) {
 	re.Equal(p2, p)
 
 	// test update progress
-	p = m.updateProgress(storeID, preparingAction, 30, 100)
+	m.updateProgress(storeID, preparingAction, 30, 100)
+	p = m.GetProgressByStoreID(storeID)
 	re.Equal(preparingAction, p.Action)
 	re.Equal(0.3, p.ProgressPercent)
 	re.Equal(2.0, p.CurrentSpeed) // 2 region/s
 	re.Equal(35.0, p.LeftSecond)
 
-	p = m.updateProgress(storeID2, preparingAction, 30, 100)
+	m.updateProgress(storeID2, preparingAction, 30, 100)
+	p = m.GetProgressByStoreID(storeID2)
 	re.Equal(preparingAction, p.Action)
 	re.Equal(0.3, p.ProgressPercent)
 	re.Equal(1.0, p.CurrentSpeed) // 1 region/s
@@ -64,8 +69,11 @@ func TestProgress(t *testing.T) {
 
 	// test gc progress
 	m.markProgressAsFinished(storeID)
+	failpoint.Enable("github.com/tikv/pd/pkg/progress/gcExpiredTime", `return("100ms")`)
+	time.Sleep(200 * time.Millisecond)
 	m.gc()
 	re.Nil(m.GetProgressByStoreID(storeID))
+	failpoint.Disable("github.com/tikv/pd/pkg/progress/gcExpiredTime")
 }
 
 func TestUpdateProgress(t *testing.T) {
@@ -75,20 +83,19 @@ func TestUpdateProgress(t *testing.T) {
 			Id:        1,
 			NodeState: metapb.NodeState_Preparing,
 		})
-		m              = NewManager()
-		windowDuration = 10 * time.Second
+		m = NewManager()
 	)
 
 	testPrepare := func() {
 		// test update progress with store state preparing
-		m.UpdateProgress(store, 10, 100, windowDuration)
+		m.UpdateProgress(store, 10, 100)
 		p := m.GetProgressByStoreID(store.GetID())
 		re.Equal(preparingAction, p.Action)
 		re.Equal(0.1, p.ProgressPercent)
 		re.Equal(math.MaxFloat64, p.LeftSecond)
 		re.Equal(0.0, p.CurrentSpeed)
 
-		m.UpdateProgress(store, 20, 100, windowDuration)
+		m.UpdateProgress(store, 20, 100)
 		p = m.GetProgressByStoreID(store.GetID())
 		re.Equal(preparingAction, p.Action)
 		re.Equal(0.2, p.ProgressPercent)
@@ -96,7 +103,7 @@ func TestUpdateProgress(t *testing.T) {
 		re.Equal(1.0, p.CurrentSpeed)
 
 		store = store.Clone(core.SetStoreState(metapb.StoreState_Up))
-		m.UpdateProgress(store, 101, 100, windowDuration)
+		m.UpdateProgress(store, 101, 100)
 		p = m.GetProgressByStoreID(store.GetID())
 		re.Equal(preparingAction, p.Action)
 		re.Equal(1.0, p.ProgressPercent)
@@ -107,14 +114,14 @@ func TestUpdateProgress(t *testing.T) {
 	testRemove := func() {
 		// test update progress with store state removing
 		store = store.Clone(core.SetStoreState(metapb.StoreState_Offline, false))
-		m.UpdateProgress(store, 100, 0, windowDuration)
+		m.UpdateProgress(store, 100, 0)
 		p := m.GetProgressByStoreID(store.GetID())
 		re.Equal(removingAction, p.Action)
 		re.Equal(0.0, p.ProgressPercent)
 		re.Equal(math.MaxFloat64, p.LeftSecond)
 		re.Equal(0.0, p.CurrentSpeed)
 
-		m.UpdateProgress(store, 80, 0, windowDuration)
+		m.UpdateProgress(store, 80, 0)
 		p = m.GetProgressByStoreID(store.GetID())
 		re.Equal(removingAction, p.Action)
 		re.Equal(0.2, p.ProgressPercent)
@@ -122,7 +129,7 @@ func TestUpdateProgress(t *testing.T) {
 		re.Equal(2.0, p.CurrentSpeed)
 
 		store = store.Clone(core.SetStoreState(metapb.StoreState_Tombstone))
-		m.UpdateProgress(store, 0, 0, windowDuration)
+		m.UpdateProgress(store, 0, 0)
 		p = m.GetProgressByStoreID(store.GetID())
 		re.Equal(removingAction, p.Action)
 		re.Equal(1.0, p.ProgressPercent)

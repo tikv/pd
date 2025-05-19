@@ -1802,7 +1802,7 @@ func (c *RaftCluster) checkStores() {
 		}
 
 		if c.isStorePrepared() {
-			c.progressManager.UpdateProgress(store, regionSize, threadhold, nodeStateCheckJobInterval)
+			c.progressManager.UpdateProgress(store, regionSize, threadhold)
 		}
 	}
 
