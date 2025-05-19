@@ -19,6 +19,7 @@ package main
 import (
 	"encoding/base64"
 	"encoding/hex"
+	"fmt"
 	"net/url"
 	"strconv"
 	"strings"
@@ -51,13 +52,18 @@ func DecodeHex(n *Node) *Variant {
 	if n.typ != "key" {
 		return nil
 	}
+	if n.decodedBy == "hex" {
+		return nil
+	}
 	decoded, err := hex.DecodeString(string(n.val))
 	if err != nil {
 		return nil
 	}
+	newNode := N("key", decoded)
+	newNode.decodedBy = "hex"
 	return &Variant{
 		method:   "decode hex key",
-		children: []*Node{N("key", decoded)},
+		children: []*Node{newNode},
 	}
 }
 
@@ -65,11 +71,28 @@ func DecodeComparableKey(n *Node) *Variant {
 	if n.typ != "key" {
 		return nil
 	}
-	b, decoded, err := codec.DecodeBytes(n.val, nil)
+	if len(n.val) == 0 || n.decodedBy == "mvcc" {
+		return nil
+	}
+
+	var decoded []byte
+	var b []byte
+	var err error
+
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("panic in DecodeComparableKey: %v", r)
+		}
+	}()
+
+	b, decoded, err = codec.DecodeBytes(n.val, nil)
 	if err != nil {
 		return nil
 	}
+
 	children := []*Node{N("key", decoded)}
+	children[0].decodedBy = "mvcc"
+
 	switch len(b) {
 	case 0:
 	case 8:
@@ -84,10 +107,10 @@ func DecodeComparableKey(n *Node) *Variant {
 }
 
 func DecodeRocksDBKey(n *Node) *Variant {
-	if n.typ != "key" {
+	if n.typ != "key" || len(n.val) == 0 {
 		return nil
 	}
-	if len(n.val) > 0 && n.val[0] == 'z' {
+	if n.val[0] == 'z' {
 		return &Variant{
 			method:   "decode rocksdb data key",
 			children: []*Node{N("key", n.val[1:])},
@@ -97,7 +120,10 @@ func DecodeRocksDBKey(n *Node) *Variant {
 }
 
 func DecodeKeyspace(n *Node) *Variant {
-	if n.typ == "key" && IsValidKeyMode(n.val[0]) && len(n.val) >= 4 {
+	if n.typ != "key" || len(n.val) == 0 {
+		return nil
+	}
+	if len(n.val) >= 4 && IsValidKeyMode(n.val[0]) {
 		keyType := "key"
 		if IsRawKeyMode(n.val[0]) {
 			keyType = "raw_key"
@@ -111,7 +137,10 @@ func DecodeKeyspace(n *Node) *Variant {
 }
 
 func DecodeTablePrefix(n *Node) *Variant {
-	if n.typ == "key" && len(n.val) >= 9 && n.val[0] == 't' {
+	if n.typ != "key" || len(n.val) < 9 {
+		return nil
+	}
+	if n.val[0] == 't' {
 		return &Variant{
 			method:   "table prefix",
 			children: []*Node{N("table_id", n.val[1:])},
@@ -121,7 +150,10 @@ func DecodeTablePrefix(n *Node) *Variant {
 }
 
 func DecodeTableRow(n *Node) *Variant {
-	if n.typ == "key" && len(n.val) >= 19 && n.val[0] == 't' && n.val[9] == '_' && n.val[10] == 'r' {
+	if n.typ != "key" || len(n.val) < 19 {
+		return nil
+	}
+	if n.val[0] == 't' && n.val[9] == '_' && n.val[10] == 'r' {
 		handleTyp := "index_values"
 		if remain, _, err := codec.DecodeInt(n.val[11:]); err == nil && len(remain) == 0 {
 			handleTyp = "row_id"
@@ -135,7 +167,10 @@ func DecodeTableRow(n *Node) *Variant {
 }
 
 func DecodeTableIndex(n *Node) *Variant {
-	if n.typ == "key" && len(n.val) >= 19 && n.val[0] == 't' && n.val[9] == '_' && n.val[10] == 'i' {
+	if n.typ != "key" || len(n.val) < 19 {
+		return nil
+	}
+	if n.val[0] == 't' && n.val[9] == '_' && n.val[10] == 'i' {
 		return &Variant{
 			method:   "table index key",
 			children: []*Node{N("table_id", n.val[1:9]), N("index_id", n.val[11:19]), N("index_values", n.val[19:])},
@@ -186,18 +221,19 @@ func DecodeBase64(n *Node) *Variant {
 	if n.typ != "key" {
 		return nil
 	}
+	if n.decodedBy == "base64" {
+		return nil
+	}
 	s, err := base64.StdEncoding.DecodeString(string(n.val))
 	if err != nil {
 		return nil
 	}
 	child := N("key", []byte(s))
-	child.Expand()
-	if len(child.variants) == 0 {
-		return nil
-	}
+	child.decodedBy = "base64"
+
 	return &Variant{
 		method:   "decode base64 key",
-		children: []*Node{N("key", []byte(s))},
+		children: []*Node{child},
 	}
 }
 

@@ -29,9 +29,11 @@ import (
 var keyFormat = "proto"
 
 type Node struct {
-	typ      string // "key", "table_id", "row_id", "index_id", "index_values", "index_value", "ts"
-	val      []byte
-	variants []*Variant
+	typ       string // "key", "table_id", "row_id", "index_id", "index_values", "index_value", "ts"
+	val       []byte
+	variants  []*Variant
+	decodedBy string // Tracks which rule decoded this node, prevents infinite recursion
+	expanded  bool   // Marks whether the node has been expanded
 }
 
 type Variant struct {
@@ -40,7 +42,7 @@ type Variant struct {
 }
 
 func N(t string, v []byte) *Node {
-	return &Node{typ: t, val: v}
+	return &Node{typ: t, val: v, decodedBy: "", expanded: false}
 }
 
 func (n *Node) String() string {
@@ -84,14 +86,50 @@ func (n *Node) String() string {
 }
 
 func (n *Node) Expand() *Node {
+	return n.expandWithDepth(0, make(map[string]bool))
+}
+
+// Track visited nodes to prevent cycles and duplicate processing
+// Add a depth-limited expand method
+func (n *Node) expandWithDepth(depth int, visited map[string]bool) *Node {
+	// If already expanded, return immediately
+	if n.expanded {
+		return n
+	}
+
+	// Limit maximum recursion depth to prevent infinite recursion
+	maxDepth := 20 // Reduced maximum recursion depth
+	if depth > maxDepth {
+		return n
+	}
+
+	// Create a unique identifier for this node based on value to detect cycles
+	nodeKey := fmt.Sprintf("%s:%x", n.typ, n.val)
+	if visited[nodeKey] {
+		// Cycle detected, return immediately
+		return n
+	}
+
+	// Mark current node as visited
+	visited[nodeKey] = true
+
+	// Mark as expanded
+	n.expanded = true
+
 	for _, fn := range rules {
 		if t := fn(n); t != nil {
 			for _, child := range t.children {
-				child.Expand()
+				// Recursively expand child nodes, pass visited map
+				visitedCopy := make(map[string]bool)
+				for k, v := range visited {
+					visitedCopy[k] = v
+				}
+				child.expandWithDepth(depth+1, visitedCopy)
 			}
 			n.variants = append(n.variants, t)
 		}
 	}
+
 	return n
 }
 
