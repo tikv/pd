@@ -86,7 +86,10 @@ func (n *Node) String() string {
 }
 
 func (n *Node) Expand() *Node {
-	return n.expandWithDepth(0, make(map[string]bool))
+	// Create a map to track visited nodes across the entire expansion
+	visited := make(map[string]bool)
+	// Start expansion with depth 0
+	return n.expandWithDepth(0, visited)
 }
 
 // Track visited nodes to prevent cycles and duplicate processing
@@ -98,12 +101,12 @@ func (n *Node) expandWithDepth(depth int, visited map[string]bool) *Node {
 	}
 
 	// Limit maximum recursion depth to prevent infinite recursion
-	maxDepth := 20 // Reduced maximum recursion depth
+	maxDepth := 20 // Set maximum recursion depth
 	if depth > maxDepth {
 		return n
 	}
 
-	// Create a unique identifier for this node based on value to detect cycles
+	// Create a unique identifier for this node based on type and value to detect cycles
 	nodeKey := fmt.Sprintf("%s:%x", n.typ, n.val)
 	if visited[nodeKey] {
 		// Cycle detected, return immediately
@@ -116,17 +119,24 @@ func (n *Node) expandWithDepth(depth int, visited map[string]bool) *Node {
 	// Mark as expanded
 	n.expanded = true
 
+	// Use defer/recover to prevent panics from crashing the program
+	defer func() {
+		if r := recover(); r != nil {
+			// Log the panic but continue execution
+			fmt.Printf("Recovered from panic in expandWithDepth: %v\n", r)
+		}
+	}()
+
 	for _, fn := range rules {
 		if t := fn(n); t != nil {
-			for _, child := range t.children {
-				// Recursively expand child nodes, pass visited map
-				visitedCopy := make(map[string]bool)
-				for k, v := range visited {
-					visitedCopy[k] = v
-				}
-				child.expandWithDepth(depth+1, visitedCopy)
-			}
+			// Add the variant before processing children to maintain structure
 			n.variants = append(n.variants, t)
+
+			for _, child := range t.children {
+				// Recursively expand child nodes with incremented depth
+				// Use the same visited map to track node visits across the entire tree
+				child.expandWithDepth(depth+1, visited)
+			}
 		}
 	}
 

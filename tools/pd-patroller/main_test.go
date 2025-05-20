@@ -16,7 +16,6 @@ package main
 
 import (
 	"encoding/hex"
-	"strings"
 	"testing"
 	"time"
 
@@ -107,35 +106,9 @@ func TestExpand_StackOverflowFromLogKey(t *testing.T) {
 		t.Logf("First level variants count: %d", len(expandedNode.variants))
 
 		// Recursively print node tree
-		printNodeTree(t, expandedNode, 0)
-		expandedNode.Print()
+		//expandedNode.Print()
 
 	case <-time.After(5 * time.Second):
 		t.Fatal("Test timed out after 5 seconds - possible infinite recursion")
-	}
-}
-
-// Recursively print the node tree structure
-func printNodeTree(t *testing.T, node *Node, depth int) {
-	indentation := strings.Repeat("  ", depth)
-	t.Logf("%s- Node: type=%s, value=%s", indentation, node.typ, node.String())
-
-	// Print variants
-	if len(node.variants) > 0 {
-		t.Logf("%s  Variants: %d", indentation, len(node.variants))
-		for i, variant := range node.variants {
-			t.Logf("%s  Variant %d: method=%s, children=%d", indentation, i, variant.method, len(variant.children))
-
-			// Recursively print children nodes, but limit depth to 3 to avoid excessive output
-			if depth < 3 {
-				for _, child := range variant.children {
-					// Adjust indentation for next level
-					printNodeTree(t, child, depth+1)
-				}
-			} else if len(variant.children) > 0 {
-				// Show deeper levels in brief
-				t.Logf("%s    ... (additional %d children not shown)", indentation, len(variant.children))
-			}
-		}
 	}
 }

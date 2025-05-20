@@ -184,6 +184,22 @@ func patrolRegions(ctx context.Context, pdCli pd.Client, limit int) (int, error)
 }
 
 func checkRegion(region *pd.Region) {
+	// Add a panic recovery to ensure we don't crash the entire program
+	defer func() {
+		if r := recover(); r != nil {
+			regionID := region.Meta.GetId()
+			key := region.Meta.GetEndKey()
+			hexKeyStr := hex.EncodeToString(key)
+			log.Error("Recovered from panic in checkRegion",
+				zap.Uint64("region_id", regionID),
+				zap.String("end_key_hex", hexKeyStr),
+				zap.Any("error", r))
+
+			// Add this key to the skip list to avoid processing it in the future
+			processedSkipKeysHex[hexKeyStr] = struct{}{}
+		}
+	}()
+
 	regionID := region.Meta.GetId()
 	key := region.Meta.GetEndKey()
 	if len(key) == 0 {

@@ -55,7 +55,20 @@ func DecodeHex(n *Node) *Variant {
 	if n.decodedBy == "hex" {
 		return nil
 	}
-	decoded, err := hex.DecodeString(string(n.val))
+
+	// Use defer/recover to prevent panics
+	var decoded []byte
+	var err error
+
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				err = fmt.Errorf("panic in DecodeHex: %v", r)
+			}
+		}()
+		decoded, err = hex.DecodeString(string(n.val))
+	}()
+
 	if err != nil {
 		return nil
 	}
@@ -183,17 +196,46 @@ func DecodeIndexValues(n *Node) *Variant {
 	if n.typ != "index_values" {
 		return nil
 	}
+
+	// Use defer/recover to prevent panics from propagating
 	var children []*Node
+	defer func() {
+		if r := recover(); r != nil {
+			// If we panic, just return the raw key
+			children = append(children, N("key", n.val))
+		}
+	}()
+
 	for key := n.val; len(key) > 0; {
-		remain, _, e := codec.DecodeOne(key)
+
+		// Attempt to decode safely
+		var remain []byte
+		var e error
+
+		// Use a nested recovery to handle potential panics in codec.DecodeOne
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					e = fmt.Errorf("panic in DecodeOne: %v", r)
+				}
+			}()
+			remain, _, e = codec.DecodeOne(key)
+		}()
+
 		if e != nil {
 			children = append(children, N("key", key))
 			break
 		} else {
+			// Safety check to prevent infinite loops
+			if len(remain) >= len(key) {
+				children = append(children, N("key", key))
+				break
+			}
 			children = append(children, N("index_value", key[:len(key)-len(remain)]))
 		}
 		key = remain
 	}
+
 	return &Variant{
 		method:   "decode index values",
 		children: children,
@@ -224,7 +266,25 @@ func DecodeBase64(n *Node) *Variant {
 	if n.decodedBy == "base64" {
 		return nil
 	}
-	s, err := base64.StdEncoding.DecodeString(string(n.val))
+
+	// Safety check for input length
+	if len(n.val) > 10000 {
+		return nil
+	}
+
+	// Use defer/recover to prevent panics
+	var s []byte
+	var err error
+
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				err = fmt.Errorf("panic in DecodeBase64: %v", r)
+			}
+		}()
+		s, err = base64.StdEncoding.DecodeString(string(n.val))
+	}()
+
 	if err != nil {
 		return nil
 	}
@@ -269,3 +329,4 @@ func DecodeURLEscaped(n *Node) *Variant {
 		children: []*Node{N("key", []byte(s))},
 	}
 }
+/ Copyright 2025 TiKV Project Authors.
