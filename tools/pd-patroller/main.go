@@ -17,6 +17,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/hex"
 	"flag"
 	"fmt"
@@ -32,6 +33,11 @@ import (
 	"github.com/pingcap/log"
 	"github.com/pingcap/tidb/pkg/util/codec"
 	pd "github.com/tikv/pd/client"
+	"github.com/tikv/pd/client/clients/router"
+	pdHttp "github.com/tikv/pd/client/http"
+	"github.com/tikv/pd/client/opt"
+	"github.com/tikv/pd/client/pkg/caller"
+	"go.etcd.io/etcd/client/pkg/v3/transport"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 )
@@ -40,21 +46,23 @@ const msgSize = 16 * units.MiB
 const defaultLimit = 65536
 
 // Default hex-encoded end keys to skip. These are always active.
-var defaultSkipHexKeys = []string{"7800000000000000fb", "7800000100000000fb"}
+var (
+	defaultSkipHexKeys   = []string{"7800000000000000fb", "7800000100000000fb"}
+	processedSkipKeysHex map[string]struct{}
+	invalidRegions       = map[uint64]string{} // regionID -> endKey
+)
 
 var (
-	pdAddrs   = flag.String("pd", "127.0.0.1:2379", "pd address")
-	limit     = flag.Int("limit", defaultLimit, "the limit of regions")
-	caPath    = flag.String("cacert", "", "path of file that contains list of trusted SSL CAs")
-	certPath  = flag.String("cert", "", "path of file that contains X509 certificate in PEM format")
-	keyPath   = flag.String("key", "", "path of file that contains X509 key in PEM format")
-	logLevel  = flag.String("log-level", "info", "log level (debug, info, warn, error, fatal)")
-	logFile   = flag.String("log-file", "", "log file path (empty for stderr)")
-	logFormat = flag.String("log-format", "text", "log format (text or json)")
-
-	skipKeysHexStr = flag.String("skip-keys-hex", "", "Additional comma-separated list of hex-encoded end keys to skip (appended to defaults)")
-
-	processedSkipKeysHex map[string]struct{}
+	pdAddr          = flag.String("pd", "127.0.0.1:2379", "pd address")
+	limit           = flag.Int("limit", defaultLimit, "the limit of regions")
+	caPath          = flag.String("cacert", "", "path of file that contains list of trusted SSL CAs")
+	certPath        = flag.String("cert", "", "path of file that contains X509 certificate in PEM format")
+	keyPath         = flag.String("key", "", "path of file that contains X509 key in PEM format")
+	logLevel        = flag.String("log-level", "info", "log level (debug, info, warn, error, fatal)")
+	logFile         = flag.String("log-file", "", "log file path (empty for stderr)")
+	logFormat       = flag.String("log-format", "text", "log format (text or json)")
+	enableAutoMerge = flag.Bool("enable-auto-merge", false, "Enable automatic region merge after detecting an invalid key")
+	skipKeysHexStr  = flag.String("skip-keys-hex", "", "Additional comma-separated list of hex-encoded end keys to skip (appended to defaults)")
 )
 
 func main() {
@@ -78,7 +86,6 @@ func main() {
 	processedSkipKeysHex = make(map[string]struct{})
 
 	// 1. Add default keys first
-	log.Info("Adding default hex-encoded end keys to skip list", zap.Strings("default_skip_keys", defaultSkipHexKeys))
 	for _, keyStr := range defaultSkipHexKeys {
 		// Defaults are assumed to be clean, but TrimSpace is harmless
 		trimmedKey := strings.TrimSpace(keyStr)
@@ -90,7 +97,7 @@ func main() {
 	// 2. Add custom keys from command-line argument if provided
 	if *skipKeysHexStr != "" {
 		customKeysToParse := strings.Split(*skipKeysHexStr, ",")
-		log.Info("Appending custom hex-encoded end keys to skip list from command-line argument", zap.Strings("custom_skip_keys_to_add", customKeysToParse))
+		log.Info("appending custom hex-encoded end keys to skip list from command-line argument", zap.Strings("custom_skip_keys_to_add", customKeysToParse))
 		for _, keyStr := range customKeysToParse {
 			trimmedKey := strings.TrimSpace(keyStr)
 			if trimmedKey != "" {
@@ -98,7 +105,7 @@ func main() {
 					processedSkipKeysHex[trimmedKey] = struct{}{}
 				} else {
 					// Log if a custom key is already in the list (e.g., it was a default or a duplicate in the custom list)
-					log.Debug("Custom skip key already present in the skip list (either a default or a duplicate entry)", zap.String("key", trimmedKey))
+					log.Debug("custom skip key already present in the skip list (either a default or a duplicate entry)", zap.String("key", trimmedKey))
 				}
 			}
 		}
@@ -108,7 +115,7 @@ func main() {
 	for k := range processedSkipKeysHex {
 		finalSkipKeysList = append(finalSkipKeysList, k)
 	}
-	log.Info("Final combined list of hex-encoded end keys to skip",
+	log.Info("add hex-encoded keys to skip",
 		zap.Int("total_skip_keys_count", len(processedSkipKeysHex)),
 		zap.Strings("all_skip_keys", finalSkipKeysList))
 
@@ -126,13 +133,13 @@ func main() {
 		cancel()
 	}()
 
-	pdCli, err := pd.NewClientWithContext(ctx, []string{*pdAddrs},
+	pdCli, err := pd.NewClientWithContext(ctx, caller.TestComponent, []string{*pdAddr},
 		pd.SecurityOption{
 			CAPath:   *caPath,
 			CertPath: *certPath,
 			KeyPath:  *keyPath,
 		},
-		pd.WithGRPCDialOptions(grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(msgSize))))
+		opt.WithGRPCDialOptions(grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(msgSize))))
 	if err != nil {
 		log.Error("failed to create pd client", zap.Error(err))
 		os.Exit(1)
@@ -153,6 +160,14 @@ func main() {
 	log.Info("patrol regions finished",
 		zap.Int("count", count),
 		zap.Duration("duration", time.Since(startTime)))
+
+	if *enableAutoMerge {
+		if len(invalidRegions) == 0 {
+			log.Info("no invalid regions found, skipping automatic merge")
+			return
+		}
+		autoMergeRegions(ctx)
+	}
 }
 
 func patrolRegions(ctx context.Context, pdCli pd.Client, limit int) (int, error) {
@@ -183,14 +198,14 @@ func patrolRegions(ctx context.Context, pdCli pd.Client, limit int) (int, error)
 	}
 }
 
-func checkRegion(region *pd.Region) {
+func checkRegion(region *router.Region) {
 	// Add a panic recovery to ensure we don't crash the entire program
 	defer func() {
 		if r := recover(); r != nil {
 			regionID := region.Meta.GetId()
 			key := region.Meta.GetEndKey()
 			hexKeyStr := hex.EncodeToString(key)
-			log.Error("Recovered from panic in checkRegion",
+			log.Error("recovered from panic in checkRegion",
 				zap.Uint64("region_id", regionID),
 				zap.String("end_key_hex", hexKeyStr),
 				zap.Any("error", r))
@@ -207,7 +222,7 @@ func checkRegion(region *pd.Region) {
 	}
 	hexKeyStr := hex.EncodeToString(key)
 	if _, shouldSkip := processedSkipKeysHex[hexKeyStr]; shouldSkip {
-		log.Debug("Skipping region: end key is in the skip list",
+		log.Debug("skipping region: end key is in the skip list",
 			zap.Uint64("region_id", regionID),
 			zap.String("end_key_hex", hexKeyStr))
 		return
@@ -231,6 +246,7 @@ func checkRegion(region *pd.Region) {
 			zap.Uint64("region_id", regionID),
 			zap.Int64("table_id", tableID),
 			zap.String("key", hex.EncodeToString(key)))
+		invalidRegions[regionID] = hexKeyStr
 	}
 }
 
@@ -320,4 +336,68 @@ func extractTableIDRecursive(node *Node) (tableID int64, found bool, err error) 
 		}
 	}
 	return 0, false, nil
+}
+
+func autoMergeRegions(ctx context.Context) {
+	pdHttpCli := newPDHttpClient()
+	log.Info("starting automatic region merge for invalid regions")
+	for regionID, endKeyHex := range invalidRegions {
+		rightRegionID, err := getRegionsSiblingByID(ctx, pdHttpCli, regionID, endKeyHex)
+		if err != nil {
+			log.Error("failed to find right sibling region",
+				zap.Uint64("region_id", regionID),
+				zap.String("end_key_hex", endKeyHex),
+				zap.Error(err))
+			continue
+		}
+		err = pdHttpCli.CreateMergeOperator(ctx, regionID, rightRegionID)
+		if err != nil {
+			log.Error("failed to create merge request",
+				zap.Uint64("region_id", regionID),
+				zap.Uint64("right_region_id", rightRegionID),
+				zap.Error(err))
+			continue
+		}
+		log.Info("merge request created successfully",
+			zap.Uint64("region_id", regionID),
+			zap.Uint64("right_region_id", rightRegionID))
+	}
+}
+
+func getRegionsSiblingByID(ctx context.Context, pdHttpCli pdHttp.Client, regionID uint64, endKeyHex string) (uint64, error) {
+	resp, err := pdHttpCli.GetRegionsSiblingByID(ctx, regionID)
+	if err != nil {
+		return 0, err
+	}
+	if resp.Count == 0 {
+		return 0, fmt.Errorf("no sibling region found for region %d", regionID)
+	}
+	rigitRegion := resp.Regions[resp.Count-1]
+	rightStartKey := strings.ToUpper(rigitRegion.GetStartKey())
+	leftEndKey := strings.ToUpper(endKeyHex)
+	if strings.Compare(rightStartKey, leftEndKey) == 0 {
+		return uint64(rigitRegion.ID), nil
+	}
+	return 0, fmt.Errorf("right sibling region's start key %s does not match the end key %s", rightStartKey, leftEndKey)
+}
+
+func newPDHttpClient() pdHttp.Client {
+	var (
+		tlsConfig *tls.Config
+		err       error
+	)
+	if *caPath != "" || *certPath != "" || *keyPath != "" {
+		tlsInfo := transport.TLSInfo{
+			CertFile:      *certPath,
+			KeyFile:       *keyPath,
+			TrustedCAFile: *caPath,
+		}
+		tlsConfig, err = tlsInfo.ClientConfig()
+		if err != nil {
+			log.Error("failed to create TLS config", zap.Error(err))
+			os.Exit(1)
+		}
+	}
+	url := ModifyURLScheme(*pdAddr, tlsConfig)
+	return pdHttp.NewClient("tools-pd-pattroller", []string{url}, pdHttp.WithTLSConfig(tlsConfig))
 }
