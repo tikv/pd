@@ -33,18 +33,23 @@ const (
 	testKeyspaceCount = 10
 )
 
-func mustMakeTestKeyspaces(re *require.Assertions, server *server.Server, start int) []*keyspacepb.KeyspaceMeta {
+func mustMakeTestKeyspaces(re *require.Assertions, server *server.Server, start int, isUseSafePointV2 bool) []*keyspacepb.KeyspaceMeta {
 	now := time.Now().Unix()
 	var err error
 	keyspaces := make([]*keyspacepb.KeyspaceMeta, testKeyspaceCount)
 	manager := server.GetKeyspaceManager()
+
+	ksConfig := map[string]string{
+		testConfig1: "100",
+		testConfig2: "200",
+	}
+	if isUseSafePointV2 {
+		ksConfig[keyspace.SafePointVersion] = keyspace.KeyspaceGlobalSafePointVersionV2
+	}
 	for i := range testKeyspaceCount {
 		keyspaces[i], err = manager.CreateKeyspace(&keyspace.CreateKeyspaceRequest{
-			Name: fmt.Sprintf("test_keyspace_%d", start+i),
-			Config: map[string]string{
-				testConfig1: "100",
-				testConfig2: "200",
-			},
+			Name:       fmt.Sprintf("test_keyspace_%d", start+i),
+			Config:     ksConfig,
 			CreateTime: now,
 		})
 		re.NoError(err)
@@ -54,7 +59,7 @@ func mustMakeTestKeyspaces(re *require.Assertions, server *server.Server, start 
 
 func (suite *clientTestSuite) TestLoadKeyspace() {
 	re := suite.Require()
-	metas := mustMakeTestKeyspaces(re, suite.srv, 0)
+	metas := mustMakeTestKeyspaces(re, suite.srv, 0, false)
 	for _, expected := range metas {
 		loaded, err := suite.client.LoadKeyspace(suite.ctx, expected.GetName())
 		re.NoError(err)
@@ -72,7 +77,7 @@ func (suite *clientTestSuite) TestLoadKeyspace() {
 
 func (suite *clientTestSuite) TestGetAllKeyspaces() {
 	re := suite.Require()
-	metas := mustMakeTestKeyspaces(re, suite.srv, 20)
+	metas := mustMakeTestKeyspaces(re, suite.srv, 20, false)
 	for _, expected := range metas {
 		loaded, err := suite.client.LoadKeyspace(suite.ctx, expected.GetName())
 		re.NoError(err)

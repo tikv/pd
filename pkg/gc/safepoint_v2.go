@@ -92,28 +92,39 @@ func (manager *SafePointV2Manager) checkKeyspace(keyspaceID uint32, updateReques
 		failpoint.Return(nil)
 	})
 
-	err := manager.keyspaceStorage.RunInTxn(manager.ctx, func(txn kv.Txn) error {
-		meta, err := manager.keyspaceStorage.LoadKeyspaceMeta(txn, keyspaceID)
-		if err != nil {
-			return err
-		}
-		// If a keyspace does not exist, then loading its gc safe point is prohibited.
-		if meta == nil {
-			return keyspace.ErrKeyspaceNotFound
-		}
-		// If keyspace's state does not permit updating safe point, we return error.
-		if updateRequest && !slice.Contains(allowUpdateSafePoint, meta.GetState()) {
-			return errors.Errorf("cannot update keyspace that's %s", meta.GetState().String())
-		}
-		return nil
-	})
+	meta, err := manager.getKeyspaceMeta(keyspaceID)
 	if err != nil {
 		log.Warn("check keyspace failed",
 			zap.Uint32("keyspace-id", keyspaceID),
 			zap.Error(err),
 		)
 	}
+	// If a keyspace does not exist, then loading its gc safe point is prohibited.
+	if meta == nil {
+		return keyspace.ErrKeyspaceNotFound
+	}
+	// If keyspace's state does not permit updating safe point, we return error.
+	if updateRequest && !slice.Contains(allowUpdateSafePoint, meta.GetState()) {
+		return errors.Errorf("cannot update keyspace that's %s", meta.GetState().String())
+	}
+
 	return err
+}
+
+func (manager *SafePointV2Manager) getKeyspaceMeta(keyspaceID uint32) (*keyspacepb.KeyspaceMeta, error) {
+	var (
+		meta *keyspacepb.KeyspaceMeta
+		err  error
+	)
+	err = manager.keyspaceStorage.RunInTxn(manager.ctx, func(txn kv.Txn) error {
+		meta, err = manager.keyspaceStorage.LoadKeyspaceMeta(txn, keyspaceID)
+		if err != nil {
+			return err
+		}
+
+		return nil
+	})
+	return meta, err
 }
 
 // getGCSafePoint first try to load gc safepoint from v2 storage, if failed, load from v1 storage instead.
@@ -122,8 +133,17 @@ func (manager *SafePointV2Manager) getGCSafePoint(keyspaceID uint32) (*endpoint.
 	if err != nil {
 		return nil, err
 	}
+	meta, err := manager.getKeyspaceMeta(keyspaceID)
+	if err != nil {
+		return nil, err
+	}
+
+	if meta == nil {
+		return nil, keyspace.ErrKeyspaceNotFound
+	}
+
 	// If failed to find a valid safe point, check if a safe point exist in v1 storage, and use it.
-	if v2SafePoint.SafePoint == 0 {
+	if v2SafePoint.SafePoint == 0 && meta.Config[keyspace.SafePointVersion] != keyspace.KeyspaceGlobalSafePointVersionV2 {
 		v1SafePoint, err := manager.v1Storage.LoadGCSafePoint()
 		if err != nil {
 			return nil, err

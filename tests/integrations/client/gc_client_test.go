@@ -21,11 +21,13 @@ import (
 	"time"
 
 	"github.com/pingcap/failpoint"
+	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	pd "github.com/tikv/pd/client"
+	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/utils/assertutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/testutil"
@@ -59,6 +61,7 @@ type gcClientTestSuite struct {
 	client              pd.Client
 	cleanup             testutil.CleanupFunc
 	gcSafePointV2Prefix string
+	keyspaces           []*keyspacepb.KeyspaceMeta
 }
 
 func TestGcClientTestSuite(t *testing.T) {
@@ -83,11 +86,15 @@ func (suite *gcClientTestSuite) SetupSuite() {
 	suite.gcSafePointV2Prefix = path.Join(rootPath, keypath.GCSafePointV2Prefix())
 	// Enable the fail-point to skip checking keyspace validity.
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/gc/checkKeyspace", "return(true)"))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion", "return(true)"))
+	// Create keyspace and set `keyspace.SafePointVersion` is `v2`.
+	suite.keyspaces = mustMakeTestKeyspaces(re, suite.server.Server, 100, true)
 }
 
 func (suite *gcClientTestSuite) TearDownSuite() {
 	re := suite.Require()
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/gc/checkKeyspace"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion"))
 	suite.cleanup()
 	suite.client.Close()
 }
@@ -110,7 +117,8 @@ func (suite *gcClientTestSuite) TestWatch1() {
 	}, receiver)
 
 	// Init gc safe points as index value of keyspace 0 ~ 5.
-	for i := range 6 {
+
+	for i := 1; i < 6; i++ {
 		suite.mustUpdateSafePoint(re, uint32(i), uint64(i))
 	}
 
@@ -120,7 +128,8 @@ func (suite *gcClientTestSuite) TestWatch1() {
 	}
 
 	// check gc safe point equal to keyspace id for keyspace 0 ~ 2 .
-	for i := range 3 {
+
+	for i := 1; i < 3; i++ {
 		re.Equal(uint64(i), suite.mustLoadSafePoint(re, uint32(i)))
 	}
 
@@ -138,7 +147,7 @@ func (suite *gcClientTestSuite) TestClientWatchWithRevision() {
 // nolint:revive
 func (suite *gcClientTestSuite) testClientWatchWithRevision(fromNewRevision bool) {
 	re := suite.Require()
-	testKeyspaceID := uint32(100)
+	testKeyspaceID := uint32(10)
 	initGCSafePoint := uint64(50)
 	updatedGCSafePoint := uint64(100)
 
@@ -248,4 +257,27 @@ func (suite *gcClientTestSuite) TestUpdateServiceSafePointV2() {
 	_ = suite.mustUpdateServiceSafePoint(keyspaceID02, serviceSafePoint02, ttl, serviceID)
 	minSafePoint02 := suite.mustLoadServiceSafePoint(keyspaceID02, serviceID)
 	suite.Equal(serviceSafePoint02, minSafePoint02)
+}
+
+func (suite *gcClientTestSuite) TestGetGCSafePointV2() {
+	re := suite.Require()
+
+	// The keyspace.SafePointVersion of current keyspace is v2, when obtaining the GC V2 safe point,
+	// if the GC safe point has not yet been generated, it should not get the GC safe point from GC V1.
+
+	expectGCV1SafePoint := uint64(100)
+	re.Equal(keyspace.KeyspaceGlobalSafePointVersionV2, suite.keyspaces[0].Config[keyspace.SafePointVersion])
+
+	// Set GC V1 GC safe point.
+	_, err := suite.server.Server.GetSafePointV1Manager().UpdateGCSafePoint(expectGCV1SafePoint)
+	re.NoError(err)
+	gcV1SafePoint, err := suite.server.Server.GetSafePointV1Manager().LoadGCSafePoint()
+	re.NoError(err)
+	re.Equal(expectGCV1SafePoint, gcV1SafePoint)
+
+	// Check GC V2 GC safe point is not equal to GC V1 GC safe point.
+	res, err := suite.server.Server.GetSafePointV2Manager().LoadGCSafePoint(suite.keyspaces[0].Id)
+	re.NoError(err)
+	re.NotEqual(expectGCV1SafePoint, res.SafePoint)
+	re.Equal(uint64(0), res.SafePoint)
 }
