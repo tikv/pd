@@ -16,11 +16,13 @@ package core
 
 import (
 	"crypto/rand"
+	"encoding/json"
 	"fmt"
 	"math"
 	mrand "math/rand"
 	"sort"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -33,6 +35,7 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/id"
 	"github.com/tikv/pd/pkg/mock/mockid"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 )
 
 func TestNeedMerge(t *testing.T) {
@@ -672,8 +675,8 @@ func BenchmarkRandomRegion(b *testing.B) {
 				regions.RandLeaderRegions(1, nil)
 			}
 		})
-		ranges := []KeyRange{
-			NewKeyRange(fmt.Sprintf("%20d", size/4), fmt.Sprintf("%20d", size*3/4)),
+		ranges := []keyutil.KeyRange{
+			keyutil.NewKeyRange(fmt.Sprintf("%20d", size/4), fmt.Sprintf("%20d", size*3/4)),
 		}
 		b.Run(fmt.Sprintf("random region single range with size %d", size), func(b *testing.B) {
 			b.ResetTimer()
@@ -687,11 +690,11 @@ func BenchmarkRandomRegion(b *testing.B) {
 				regions.RandLeaderRegions(1, ranges)
 			}
 		})
-		ranges = []KeyRange{
-			NewKeyRange(fmt.Sprintf("%20d", 0), fmt.Sprintf("%20d", size/4)),
-			NewKeyRange(fmt.Sprintf("%20d", size/4), fmt.Sprintf("%20d", size/2)),
-			NewKeyRange(fmt.Sprintf("%20d", size/2), fmt.Sprintf("%20d", size*3/4)),
-			NewKeyRange(fmt.Sprintf("%20d", size*3/4), fmt.Sprintf("%20d", size)),
+		ranges = []keyutil.KeyRange{
+			keyutil.NewKeyRange(fmt.Sprintf("%20d", 0), fmt.Sprintf("%20d", size/4)),
+			keyutil.NewKeyRange(fmt.Sprintf("%20d", size/4), fmt.Sprintf("%20d", size/2)),
+			keyutil.NewKeyRange(fmt.Sprintf("%20d", size/2), fmt.Sprintf("%20d", size*3/4)),
+			keyutil.NewKeyRange(fmt.Sprintf("%20d", size*3/4), fmt.Sprintf("%20d", size)),
 		}
 		b.Run(fmt.Sprintf("random region multiple ranges with size %d", size), func(b *testing.B) {
 			b.ResetTimer()
@@ -1155,11 +1158,11 @@ func TestScanRegion(t *testing.T) {
 		err                  error
 	)
 	scanError := func(startKey, endKey []byte, limit int) {
-		regions, err = scanRegion(tree, &KeyRange{StartKey: startKey, EndKey: endKey}, limit, needContainAllRanges)
+		regions, err = scanRegion(tree, &keyutil.KeyRange{StartKey: startKey, EndKey: endKey}, limit, needContainAllRanges)
 		re.Error(err)
 	}
 	scanNoError := func(startKey, endKey []byte, limit int) []*RegionInfo {
-		regions, err = scanRegion(tree, &KeyRange{StartKey: startKey, EndKey: endKey}, limit, needContainAllRanges)
+		regions, err = scanRegion(tree, &keyutil.KeyRange{StartKey: startKey, EndKey: endKey}, limit, needContainAllRanges)
 		re.NoError(err)
 		return regions
 	}
@@ -1222,9 +1225,9 @@ func TestScanRegionLimit(t *testing.T) {
 	}
 
 	for limit := 1; limit <= 18; limit++ {
-		KeyRanges := NewKeyRanges([]KeyRange{
-			NewKeyRange("a", "b"),
-			NewKeyRange("b0", ""), // ensure the key ranges are not merged
+		KeyRanges := keyutil.NewKeyRanges([]keyutil.KeyRange{
+			keyutil.NewKeyRange("a", "b"),
+			keyutil.NewKeyRange("b0", ""), // ensure the key ranges are not merged
 		})
 		resp, err := regions.BatchScanRegions(KeyRanges, WithLimit(limit))
 		re.NoError(err)
@@ -1330,31 +1333,47 @@ func TestGetPeers(t *testing.T) {
 		leader, follower1, follower2, learner,
 	}}, leader, WithLearners([]*metapb.Peer{learner}))
 	for _, v := range []struct {
-		role  string
+		rule  string
 		peers []*metapb.Peer
 	}{
 		{
-			role:  "leader",
+			rule:  "leader-scatter",
 			peers: []*metapb.Peer{leader},
 		},
 		{
-			role:  "follower",
-			peers: []*metapb.Peer{follower1, follower2},
+			rule:  "peer-scatter",
+			peers: []*metapb.Peer{learner, leader, follower1, follower2},
 		},
 		{
-			role:  "learner",
+			rule:  "learner-scatter",
 			peers: []*metapb.Peer{learner},
 		},
 		{
-			role:  "witness",
+			rule:  "witness-scatter",
 			peers: nil,
 		},
 	} {
-		role := NewRole(v.role)
-		peers := region.GetPeersByRole(role)
+		role := NewRule(v.rule)
+		peers := region.GetPeersByRule(role)
 		sort.Slice(peers, func(i, j int) bool {
 			return peers[i].Id <= peers[j].Id
 		})
 		re.Equal(v.peers, peers, role)
+	}
+}
+
+func TestCodecRule(t *testing.T) {
+	re := require.New(t)
+	for _, v := range []string{"leader", "peer", "learner", "witness"} {
+		rule := NewRule(v)
+		if rule != Unknown {
+			re.Equal(rule.String(), v)
+		}
+		body, err := json.Marshal(&rule)
+		re.NoError(err)
+		re.Equal(strings.Join([]string{"\"", rule.String(), "\""}, ""), string(body))
+		var rule2 Rule
+		re.NoError(json.Unmarshal(body, &rule2))
+		re.Equal(rule.String(), rule2.String())
 	}
 }

@@ -21,6 +21,8 @@
 /pd//gc/safe_point/service/b save
 /pd//gc/safe_point/service/c save
 /pd//keyspaces/alloc_id get
+/pd//keyspaces/id/ get
+/pd//keyspaces/id/ save
 /pd//keyspaces/id/DEFAULT get
 /pd//keyspaces/id/DEFAULT save
 /pd//keyspaces/id/test_keyspace_ get
@@ -95,6 +97,8 @@
 /pd//scheduler_config/balance-hot-region-scheduler save
 /pd//scheduler_config/balance-leader-scheduler remove
 /pd//scheduler_config/balance-leader-scheduler save
+/pd//scheduler_config/balance-range-scheduler remove
+/pd//scheduler_config/balance-range-scheduler save
 /pd//scheduler_config/balance-region-scheduler remove
 /pd//scheduler_config/balance-region-scheduler save
 /pd//scheduler_config/balance-witness-scheduler remove
@@ -126,6 +130,8 @@ encryption_keys get
 encryption_keys watch
 resource_group/controller get
 resource_group/controller save
+resource_group/keyspace/settings/ get
+resource_group/keyspace/states/ get
 resource_group/settings/ get
 resource_group/settings/default save
 resource_group/states/ get

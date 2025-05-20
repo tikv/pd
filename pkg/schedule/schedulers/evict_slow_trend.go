@@ -34,13 +34,16 @@ import (
 	"github.com/tikv/pd/pkg/schedule/plan"
 	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/utils/apiutil"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 )
 
 const (
-	alterEpsilon               = 1e-9
-	minReCheckDurationGap      = 120 // default gap for re-check the slow node, unit: s
-	defaultRecoveryDurationGap = 600 // default gap for recovery, unit: s.
+	alterEpsilon          = 1e-9
+	minReCheckDurationGap = 120 // default gap for re-check the slow node, unit: s
+	// We use 1800 seconds as the default gap for recovery, which is 30 minutes.
+	// This is based on the SLA level reflected by AWS EBS. And we can adjust it later if needed.
+	defaultRecoveryDurationGap = 1800 // default gap for recovery, unit: s.
 )
 
 type slowCandidate struct {
@@ -94,11 +97,11 @@ func (conf *evictSlowTrendSchedulerConfig) getStores() []uint64 {
 	return conf.EvictedStores
 }
 
-func (conf *evictSlowTrendSchedulerConfig) getKeyRangesByID(id uint64) []core.KeyRange {
+func (conf *evictSlowTrendSchedulerConfig) getKeyRangesByID(id uint64) []keyutil.KeyRange {
 	if conf.evictedStore() != id {
 		return nil
 	}
-	return []core.KeyRange{core.NewKeyRange("", "")}
+	return []keyutil.KeyRange{keyutil.NewKeyRange("", "")}
 }
 
 func (*evictSlowTrendSchedulerConfig) getBatch() int {

@@ -36,6 +36,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/apiutil"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 )
 
@@ -74,7 +75,7 @@ func init() {
 	})
 
 	schedulers.RegisterScheduler(userEvictLeaderScheduler, func(opController *operator.Controller, storage endpoint.ConfigStorage, decoder schedulers.ConfigDecoder, _ ...func(string) error) (schedulers.Scheduler, error) {
-		conf := &evictLeaderSchedulerConfig{StoreIDWitRanges: make(map[uint64][]core.KeyRange), storage: storage}
+		conf := &evictLeaderSchedulerConfig{StoreIDWitRanges: make(map[uint64][]keyutil.KeyRange), storage: storage}
 		if err := decoder(conf); err != nil {
 			return nil, err
 		}
@@ -97,7 +98,7 @@ func SchedulerArgs() []string {
 type evictLeaderSchedulerConfig struct {
 	mu               syncutil.RWMutex
 	storage          endpoint.ConfigStorage
-	StoreIDWitRanges map[uint64][]core.KeyRange `json:"store-id-ranges"`
+	StoreIDWitRanges map[uint64][]keyutil.KeyRange `json:"store-id-ranges"`
 	cluster          *core.BasicCluster
 }
 
@@ -343,8 +344,8 @@ func newEvictLeaderHandler(config *evictLeaderSchedulerConfig) http.Handler {
 	return router
 }
 
-func getKeyRanges(args []string) ([]core.KeyRange, error) {
-	var ranges []core.KeyRange
+func getKeyRanges(args []string) ([]keyutil.KeyRange, error) {
+	var ranges []keyutil.KeyRange
 	for len(args) > 1 {
 		startKey, err := url.QueryUnescape(args[0])
 		if err != nil {
@@ -355,10 +356,10 @@ func getKeyRanges(args []string) ([]core.KeyRange, error) {
 			return nil, err
 		}
 		args = args[2:]
-		ranges = append(ranges, core.NewKeyRange(startKey, endKey))
+		ranges = append(ranges, keyutil.NewKeyRange(startKey, endKey))
 	}
 	if len(ranges) == 0 {
-		return []core.KeyRange{core.NewKeyRange("", "")}, nil
+		return []keyutil.KeyRange{keyutil.NewKeyRange("", "")}, nil
 	}
 	return ranges, nil
 }

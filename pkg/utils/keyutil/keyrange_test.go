@@ -1,4 +1,4 @@
-// Copyright 2024 TiKV Project Authors.
+// Copyright 2025 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,13 +12,70 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package core
+package keyutil
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 )
+
+func TestCodecKeyRange(t *testing.T) {
+	re := require.New(t)
+
+	testCases := []struct {
+		ks KeyRange
+	}{
+		{
+			NewKeyRange(fmt.Sprintf("%20d", 0), fmt.Sprintf("%20d", 5)),
+		},
+		{
+			NewKeyRange(fmt.Sprintf("%20d", 0), fmt.Sprintf("%20d", 10)),
+		},
+	}
+
+	for _, tc := range testCases {
+		data, err := tc.ks.MarshalJSON()
+		re.NoError(err)
+		var ks KeyRange
+		re.NoError(ks.UnmarshalJSON(data))
+		re.Equal(tc.ks, ks)
+	}
+}
+
+func TestOverLap(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		a, b   KeyRange
+		expect bool
+	}{
+		{
+			name:   "overlap",
+			a:      NewKeyRange("a", "c"),
+			b:      NewKeyRange("b", "d"),
+			expect: true,
+		},
+		{
+			name:   "no overlap",
+			a:      NewKeyRange("a", "b"),
+			b:      NewKeyRange("c", "d"),
+			expect: false,
+		},
+		{
+			name:   "continuous",
+			a:      NewKeyRange("a", "b"),
+			b:      NewKeyRange("b", "d"),
+			expect: true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			re := require.New(t)
+			re.Equal(tc.expect, tc.a.OverLapped(&tc.b))
+			re.Equal(tc.expect, tc.b.OverLapped(&tc.a))
+		})
+	}
+}
 
 func TestMergeKeyRanges(t *testing.T) {
 	re := require.New(t)
