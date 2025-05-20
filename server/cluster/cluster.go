@@ -382,7 +382,7 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 		}
 	}
 	c.checkSchedulingService()
-	c.wg.Add(9)
+	c.wg.Add(10)
 	go c.runServiceCheckJob()
 	go c.runMetricsCollectionJob()
 	go c.runNodeStateCheckJob()
@@ -392,6 +392,7 @@ func (c *RaftCluster) Start(s Server, bootstrap bool) (err error) {
 	go c.runStoreConfigSync()
 	go c.runUpdateStoreStats()
 	go c.startGCTuner()
+	go c.startProgressGC()
 
 	c.running = true
 	c.heartbeatRunner.Start(c.ctx)
@@ -590,6 +591,13 @@ func (c *RaftCluster) startGCTuner() {
 			checkAndUpdateIfCfgChange()
 		}
 	}
+}
+
+func (c *RaftCluster) startProgressGC() {
+	defer logutil.LogPanic()
+	defer c.wg.Done()
+
+	c.progressManager.GC(c.ctx)
 }
 
 // runStoreConfigSync runs the job to sync the store config from TiKV.
