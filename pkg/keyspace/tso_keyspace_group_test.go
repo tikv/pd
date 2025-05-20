@@ -69,7 +69,9 @@ func (suite *keyspaceGroupTestSuite) SetupTest() {
 	suite.kgm = NewKeyspaceGroupManager(suite.ctx, store, nil)
 	idAllocator := mockid.NewIDAllocator()
 	cluster := mockcluster.NewCluster(suite.ctx, mockconfig.NewTestOptions())
-	suite.kg = NewKeyspaceManager(suite.ctx, store, cluster, idAllocator, &mockConfig{}, suite.kgm, nil)
+	var err error
+	suite.kg, err = NewKeyspaceManager(suite.ctx, store, cluster, idAllocator, &mockConfig{}, suite.kgm, nil)
+	re.NoError(err)
 	re.NoError(suite.kgm.Bootstrap(suite.ctx))
 }
 

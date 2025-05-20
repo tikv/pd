@@ -533,7 +533,7 @@ func (s *Server) startServer(ctx context.Context) error {
 		s.keyspaceGroupManager = keyspace.NewKeyspaceGroupManager(s.ctx, s.storage, s.client)
 	}
 	s.metaServiceGroupManager = keyspace.NewMetaServiceGroupManager(s.storage, s.cfg.Keyspace.GetMetaServiceGroups())
-	s.keyspaceManager = keyspace.NewKeyspaceManager(
+	s.keyspaceManager, err = keyspace.NewKeyspaceManager(
 		s.ctx,
 		s.storage,
 		s.cluster,
@@ -542,6 +542,9 @@ func (s *Server) startServer(ctx context.Context) error {
 		s.keyspaceGroupManager,
 		s.metaServiceGroupManager,
 	)
+	if err != nil {
+		return err
+	}
 	// Only start the metering writer if a valid metering config is provided.
 	if len(s.cfg.Metering.Type) > 0 {
 		s.meteringWriter, err = metering.NewWriter(s.ctx, &s.cfg.Metering, fmt.Sprintf("pd%d", s.GetMember().ID()))
@@ -1213,7 +1216,9 @@ func (s *Server) SetKeyspaceConfig(oldCfg, newCfg *config.KeyspaceConfig) error 
 			errs.ZapError(err))
 		return err
 	}
-	s.keyspaceManager.UpdateConfig(newCfg)
+	if err := s.keyspaceManager.UpdateConfig(newCfg); err != nil {
+		return err
+	}
 
 	log.Info("keyspace config is updated", zap.Reflect("new", newCfg), zap.Reflect("old", oldCfg))
 	return nil
@@ -2082,7 +2087,9 @@ func (s *Server) reloadConfigFromKV() error {
 	}
 	s.loadRateLimitConfig()
 	s.loadGRPCRateLimitConfig()
-	s.loadKeyspaceConfig()
+	if err := s.loadKeyspaceConfig(); err != nil {
+		return err
+	}
 	useRegionStorage := s.persistOptions.IsUseRegionStorage()
 	regionStorage := storage.TrySwitchRegionStorage(s.storage, useRegionStorage)
 	if regionStorage != nil {
@@ -2095,12 +2102,12 @@ func (s *Server) reloadConfigFromKV() error {
 	return nil
 }
 
-func (s *Server) loadKeyspaceConfig() {
+func (s *Server) loadKeyspaceConfig() error {
 	if s.keyspaceManager == nil {
-		return
+		return nil
 	}
 	cfg := s.persistOptions.GetKeyspaceConfig()
-	s.keyspaceManager.UpdateConfig(cfg)
+	return s.keyspaceManager.UpdateConfig(cfg)
 }
 
 func (s *Server) loadRateLimitConfig() {

@@ -68,6 +68,10 @@ const (
 	// UnifiedGC is a type of gc_management_type used to indicate that the GC states of this keyspace is managed
 	// in a unified way (managed by the NullKeyspace).
 	UnifiedGC = "unified"
+	// SafePointVersion is the key for safe point version in keyspace meta config.
+	SafePointVersion = "safe_point_version"
+	// KeyspaceGlobalSafePointVersionV2 is the safe point v2 value for keyspace safe point version.
+	KeyspaceGlobalSafePointVersionV2 = "v2"
 	// MetaServiceGroupIDKey is the key for meta-service group id in keyspace config.
 	MetaServiceGroupIDKey = "meta_service_group_id"
 	// MetaServiceGroupAddressesKey is the key for meta-service group addresses in keyspace config.
@@ -80,6 +84,8 @@ type Config interface {
 	ToWaitRegionSplit() bool
 	GetWaitRegionSplitTimeout() time.Duration
 	GetCheckRegionSplitInterval() time.Duration
+	GetEnableGlobalSafePointV2() bool
+	SetEnableGlobalSafePointV2(bool)
 	// GetMetaServiceGroups returns the meta-service groups for keyspace assignment.
 	// key is the meta-service group id and value is the meta-service group addresses.
 	SetMetaServiceGroups(map[string]string)
@@ -144,8 +150,8 @@ func NewKeyspaceManager(
 	config Config,
 	kgm *GroupManager,
 	mgm *MetaServiceGroupManager,
-) *Manager {
-	return &Manager{
+) (*Manager, error) {
+	manager := &Manager{
 		ctx: ctx,
 		// Remove the lock of the given key from the lock group when unlock to
 		// keep minimal working set, which is suited for low qps, non-time-critical
@@ -161,6 +167,33 @@ func NewKeyspaceManager(
 		mgm:               mgm,
 		nextPatrolStartID: constant.StartKeyspaceID,
 	}
+	if err := manager.SetGlobalSafePointV2(); err != nil {
+		return nil, err
+	}
+	return manager, nil
+}
+
+// SetGlobalSafePointV2 sets the global safe point version according to config.
+func (manager *Manager) SetGlobalSafePointV2() error {
+	return manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
+		globalSafePointVersion, err := manager.store.GetGlobalSafePointVersion(txn)
+		if err != nil {
+			return err
+		}
+		if globalSafePointVersion == KeyspaceGlobalSafePointVersionV2 {
+			manager.config.SetEnableGlobalSafePointV2(true)
+			return nil
+		}
+		if !manager.config.GetEnableGlobalSafePointV2() {
+			manager.config.SetEnableGlobalSafePointV2(false)
+			return nil
+		}
+		if err := manager.store.SaveGlobalSafePointVersion(txn, KeyspaceGlobalSafePointVersionV2); err != nil {
+			return err
+		}
+		manager.config.SetEnableGlobalSafePointV2(true)
+		return nil
+	})
 }
 
 // Bootstrap saves default keyspace info.
@@ -222,6 +255,9 @@ func (manager *Manager) initReserveKeyspace(id uint32, name string) error {
 	if id == constant.SystemKeyspaceID {
 		config[GCManagementType] = KeyspaceLevelGC
 	}
+	if manager.config.GetEnableGlobalSafePointV2() {
+		config[SafePointVersion] = KeyspaceGlobalSafePointVersionV2
+	}
 	meta.Config = config
 	err = manager.saveNewKeyspace(meta)
 	// It's possible that default/system keyspace already exists in the storage (e.g. PD restart/recover),
@@ -233,11 +269,12 @@ func (manager *Manager) initReserveKeyspace(id uint32, name string) error {
 }
 
 // UpdateConfig update keyspace manager's config.
-func (manager *Manager) UpdateConfig(cfg Config) {
+func (manager *Manager) UpdateConfig(cfg Config) error {
 	manager.config = cfg
 	if manager.mgm != nil {
 		manager.mgm.updateGroups(cfg.GetMetaServiceGroups())
 	}
+	return manager.SetGlobalSafePointV2()
 }
 
 // CreateKeyspace create a keyspace meta with given config and save it to storage.
@@ -301,6 +338,12 @@ func (manager *Manager) CreateKeyspace(request *CreateKeyspaceRequest) (*keyspac
 		if v, ok := request.Config[GCManagementType]; !ok || len(v) == 0 {
 			request.Config[GCManagementType] = KeyspaceLevelGC
 		}
+	}
+	if manager.config.GetEnableGlobalSafePointV2() {
+		if request.Config == nil {
+			request.Config = make(map[string]string)
+		}
+		request.Config[SafePointVersion] = KeyspaceGlobalSafePointVersionV2
 	}
 	// assign meta-service group for the new keyspace if meta-service groups exist.
 	assignToMetaServiceGroup := manager.mgm != nil && len(manager.mgm.GetGroups()) > 0

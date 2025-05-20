@@ -69,7 +69,16 @@ type mockConfig struct {
 	WaitRegionSplitTimeout   typeutil.Duration
 	CheckRegionSplitInterval typeutil.Duration
 	// MetaServiceGroups is used to mock the meta-service groups for keyspace assignment.
-	MetaServiceGroups map[string]string
+	MetaServiceGroups       map[string]string
+	EnableGlobalSafePointV2 bool
+}
+
+func (m *mockConfig) SetEnableGlobalSafePointV2(isEnable bool) {
+	m.EnableGlobalSafePointV2 = isEnable
+}
+
+func (m *mockConfig) GetEnableGlobalSafePointV2() bool {
+	return m.EnableGlobalSafePointV2
 }
 
 func (m *mockConfig) GetPreAlloc() []string {
@@ -102,7 +111,9 @@ func (suite *keyspaceTestSuite) SetupTest() {
 	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
 	allocator := mockid.NewIDAllocator()
 	kgm := NewKeyspaceGroupManager(suite.ctx, store, nil)
-	suite.manager = NewKeyspaceManager(suite.ctx, store, nil, allocator, &mockConfig{}, kgm, nil)
+	var err error
+	suite.manager, err = NewKeyspaceManager(suite.ctx, store, nil, allocator, &mockConfig{}, kgm, nil)
+	re.NoError(err)
 	re.NoError(kgm.Bootstrap(suite.ctx))
 	re.NoError(suite.manager.Bootstrap())
 }
@@ -957,7 +968,8 @@ func TestIterateKeyspaces(t *testing.T) {
 		store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
 		allocator := mockid.NewIDAllocator()
 		kgm := NewKeyspaceGroupManager(ctx, store, nil)
-		manager := NewKeyspaceManager(ctx, store, nil, allocator, &mockConfig{}, kgm, nil)
+		manager, err := NewKeyspaceManager(ctx, store, nil, allocator, &mockConfig{}, kgm, nil)
+		re.NoError(err)
 
 		re.NoError(kgm.Bootstrap(ctx))
 		re.NoError(manager.Bootstrap())
@@ -1036,6 +1048,26 @@ func TestIterateKeyspaces(t *testing.T) {
 
 	testWithNKeyspaces(1, 999, 1, 11)
 	testWithNKeyspaces(1, 1000, 10, 12)
+}
+
+func (suite *keyspaceTestSuite) TestEnableGlobalSafePointV2CreateKeyspace() {
+	re := suite.Require()
+	suite.manager.config.SetEnableGlobalSafePointV2(true)
+	re.NoError(suite.manager.SetGlobalSafePointV2())
+	requests := makeCreateKeyspaceRequests(10)
+
+	for i, request := range requests {
+		created, err := suite.manager.CreateKeyspace(request)
+		re.NoError(err)
+		re.Equal(uint32(i+1), created.Id)
+		checkSafePointVersion(re, created)
+	}
+}
+
+func checkSafePointVersion(re *require.Assertions, meta *keyspacepb.KeyspaceMeta) {
+	val, ok := meta.Config[SafePointVersion]
+	re.True(ok)
+	re.Equal(KeyspaceGlobalSafePointVersionV2, val)
 }
 
 // Benchmark the keyspace assignment patrol.

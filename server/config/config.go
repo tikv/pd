@@ -248,6 +248,7 @@ const (
 
 	defaultWaitRegionSplitTimeout   = 30 * time.Second
 	defaultCheckRegionSplitInterval = 50 * time.Millisecond
+	defaultEnableGlobalSafePointV2  = false
 	minCheckRegionSplitInterval     = 1 * time.Millisecond
 	maxCheckRegionSplitInterval     = 100 * time.Millisecond
 
@@ -882,6 +883,8 @@ type KeyspaceConfig struct {
 	// MetaServiceGroups is the available external meta-service groups.
 	// The key is the meta-service group name, and the value is the corresponding endpoint.
 	MetaServiceGroups map[string]string `toml:"meta-service-groups" json:"meta-service-groups"`
+	// EnableGlobalSafePointV2 is to set new keyspace safe point version to v2.
+	EnableGlobalSafePointV2 bool `toml:"enable-global-safe-point-v2" json:"enable-global-safe-point-v2,string"`
 }
 
 // Validate checks if keyspace config falls within acceptable range.
@@ -913,6 +916,9 @@ func (c *KeyspaceConfig) adjust(meta *configutil.ConfigMetaData) {
 	}
 	if !meta.IsDefined("check-region-split-interval") {
 		c.CheckRegionSplitInterval = typeutil.NewDuration(defaultCheckRegionSplitInterval)
+	}
+	if !meta.IsDefined("enable-global-safe-point-v2") {
+		c.EnableGlobalSafePointV2 = defaultEnableGlobalSafePointV2
 	}
 }
 
@@ -963,4 +969,14 @@ func (c *KeyspaceConfig) GetMetaServiceGroups() map[string]string {
 // SetMetaServiceGroups updates the current meta-service-group configuration.
 func (c *KeyspaceConfig) SetMetaServiceGroups(metaServiceGroups map[string]string) {
 	c.MetaServiceGroups = metaServiceGroups
+}
+
+// GetEnableGlobalSafePointV2 returns whether to enable global safe point v2.
+func (c *KeyspaceConfig) GetEnableGlobalSafePointV2() bool {
+	return c.EnableGlobalSafePointV2
+}
+
+// SetEnableGlobalSafePointV2 sets whether to enable global safe point v2.
+func (c *KeyspaceConfig) SetEnableGlobalSafePointV2(isEnable bool) {
+	c.EnableGlobalSafePointV2 = isEnable
 }

@@ -92,12 +92,13 @@ const (
 	minResolvedTSPathFormat        = "/pd/%d/raft/min_resolved_ts"            // "/pd/{cluster_id}/raft/min_resolved_ts"
 	externalTimestampPathFormat    = "/pd/%d/raft/external_timestamp"         // "/pd/{cluster_id}/raft/external_timestamp"
 
-	keyspaceMetaPrefixFormat    = "/pd/%d/keyspaces/meta/"                     // "/pd/{cluster_id}/keyspaces/meta/"
-	keyspaceMetaPathFormat      = "/pd/%d/keyspaces/meta/%08d"                 // "/pd/{cluster_id}/keyspaces/meta/{keyspace_id}"
-	keyspaceIDPathFormat        = "/pd/%d/keyspaces/id/%s"                     // "/pd/{cluster_id}/keyspaces/id/{keyspace_name}"
-	keyspaceGroupIDPrefixFormat = "/pd/%d/tso/keyspace_groups/membership/"     // "/pd/{cluster_id}/tso/keyspace_groups/membership/"
-	keyspaceGroupIDPathFormat   = "/pd/%d/tso/keyspace_groups/membership/%05d" // "/pd/{cluster_id}/tso/keyspace_groups/membership/{group_id}"
-	keyspaceGroupIDPattern      = `tso/keyspace_groups/membership/(\d{5})$`
+	keyspaceMetaPrefixFormat                 = "/pd/%d/keyspaces/meta/"                     // "/pd/{cluster_id}/keyspaces/meta/"
+	keyspaceMetaPathFormat                   = "/pd/%d/keyspaces/meta/%08d"                 // "/pd/{cluster_id}/keyspaces/meta/{keyspace_id}"
+	keyspaceIDPathFormat                     = "/pd/%d/keyspaces/id/%s"                     // "/pd/{cluster_id}/keyspaces/id/{keyspace_name}"
+	keyspaceGlobalSafePointVersionPathFormat = "/pd/%d/keyspaces/global/safe_point_version" // "/pd/{cluster_id}/keyspaces/global/safe_point_version"
+	keyspaceGroupIDPrefixFormat              = "/pd/%d/tso/keyspace_groups/membership/"     // "/pd/{cluster_id}/tso/keyspace_groups/membership/"
+	keyspaceGroupIDPathFormat                = "/pd/%d/tso/keyspace_groups/membership/%05d" // "/pd/{cluster_id}/tso/keyspace_groups/membership/{group_id}"
+	keyspaceGroupIDPattern                   = `tso/keyspace_groups/membership/(\d{5})$`
 
 	servicePathFormat  = "/ms/%d/%s/registry/"   // "/ms/{cluster_id}/{service_name}/registry/"
 	registryPathFormat = "/ms/%d/%s/registry/%s" // "/ms/{cluster_id}/{service_name}/registry/{service_addr}"
@@ -227,6 +228,11 @@ func KeyspaceMetaPath(spaceID uint32) string {
 // KeyspaceIDPath returns the path to keyspace id from the given keyspace name.
 func KeyspaceIDPath(name string) string {
 	return fmt.Sprintf(keyspaceIDPathFormat, ClusterID(), name)
+}
+
+// KeyspaceGlobalSafePointVersionPath returns the global keyspace safe point version path.
+func KeyspaceGlobalSafePointVersionPath() string {
+	return fmt.Sprintf(keyspaceGlobalSafePointVersionPathFormat, ClusterID())
 }
 
 // KeyspaceGroupIDPrefix returns the prefix of keyspace group id.
