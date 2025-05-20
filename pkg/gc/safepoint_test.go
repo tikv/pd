@@ -171,14 +171,35 @@ func TestBlockUpdateSafePointV1(t *testing.T) {
 	gcWorkerSafePoint := uint64(8)
 
 	min, updated, err := manager.UpdateServiceGCSafePoint(gcworkerServiceID, gcWorkerSafePoint, math.MaxInt64, time.Now())
-	re.Error(err, blockServiceSafepointErrmsg)
-	re.Equal(err.Error(), blockServiceSafepointErrmsg)
+	re.Error(err)
+
+	re.Equal(err.Error(), blockServiceSafepointErr.Error())
 	re.False(updated)
 	re.Nil(min)
 
 	oldSafePoint, err := manager.UpdateGCSafePoint(gcWorkerSafePoint)
 	re.Error(err)
-	re.Equal(err.Error(), blockGCSafePointErrmsg)
+	re.Equal(err.Error(), blockGCSafePointErr.Error())
 
 	re.Equal(uint64(0), oldSafePoint)
+}
+
+func TestBlockSafePointV1Update(t *testing.T) {
+	re := require.New(t)
+
+	manager := NewSafePointManager(newGCStorage(), config.PDServerConfig{})
+	manager.cfg.BlockSafePointV1 = true
+	testServiceID := "test_service_id"
+	testServiceSafePoint := uint64(8)
+
+	_, updated, err := manager.UpdateServiceGCSafePoint(testServiceID, testServiceSafePoint, math.MaxInt64, time.Now())
+	re.Error(err)
+	re.Equal(err.Error(), blockServiceSafepointErr.Error())
+
+	re.False(updated)
+
+	testGCSafePoint := uint64(8)
+	_, err = manager.UpdateGCSafePoint(testGCSafePoint)
+	re.Error(err)
+	re.Equal(err.Error(), blockGCSafePointErr.Error())
 }
