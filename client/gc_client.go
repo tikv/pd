@@ -324,7 +324,7 @@ func (c gcStatesClient) DeleteGCBarrier(ctx context.Context, barrierID string) (
 }
 
 // GetGCState gets the current GC state.
-func (c gcStatesClient) GetGCState(ctx context.Context) (gc.GCStateInfo, error) {
+func (c gcStatesClient) GetGCState(ctx context.Context) (gc.GCState, error) {
 	if span := opentracing.SpanFromContext(ctx); span != nil && span.Tracer() != nil {
 		span = span.Tracer().StartSpan("pdclient.GetGCState", opentracing.ChildOf(span.Context()))
 		defer span.Finish()
@@ -340,11 +340,11 @@ func (c gcStatesClient) GetGCState(ctx context.Context) (gc.GCStateInfo, error) 
 	}
 	protoClient, ctx := c.client.getClientAndContext(ctx)
 	if protoClient == nil {
-		return gc.GCStateInfo{}, errs.ErrClientGetProtoClient
+		return gc.GCState{}, errs.ErrClientGetProtoClient
 	}
 	resp, err := protoClient.GetGCState(ctx, req)
 	if err = c.client.respForErr(metrics.CmdFailedDurationGetGCState, start, err, resp.GetHeader()); err != nil {
-		return gc.GCStateInfo{}, err
+		return gc.GCState{}, err
 	}
 
 	gcState := resp.GetGcState()
@@ -356,7 +356,7 @@ func (c gcStatesClient) GetGCState(ctx context.Context) (gc.GCStateInfo, error) 
 	for _, b := range gcState.GetGcBarriers() {
 		gcBarriers = append(gcBarriers, pbToGCBarrierInfo(b, start))
 	}
-	return gc.GCStateInfo{
+	return gc.GCState{
 		KeyspaceID:   keyspaceID,
 		TxnSafePoint: gcState.GetTxnSafePoint(),
 		GCSafePoint:  gcState.GetGcSafePoint(),

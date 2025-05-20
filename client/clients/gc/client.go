@@ -42,7 +42,7 @@ type GCStatesClient interface {
 	// DeleteGCBarrier deletes a GC barrier.
 	DeleteGCBarrier(ctx context.Context, barrierID string) (*GCBarrierInfo, error)
 	// GetGCState gets the current GC state.
-	GetGCState(ctx context.Context) (GCStateInfo, error)
+	GetGCState(ctx context.Context) (GCState, error)
 }
 
 // InternalController is the interface for controlling GC execution.
@@ -111,10 +111,10 @@ func (b *GCBarrierInfo) isExpiredImpl(now time.Time) bool {
 	return now.Sub(b.getReqStartTime) > b.TTL
 }
 
-// GCStateInfo represents the information of the GC state.
+// GCState represents the information of the GC state.
 //
 //nolint:revive
-type GCStateInfo struct {
+type GCState struct {
 	KeyspaceID   uint32
 	TxnSafePoint uint64
 	GCSafePoint  uint64
