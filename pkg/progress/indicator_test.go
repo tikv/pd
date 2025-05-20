@@ -68,7 +68,7 @@ func TestProgressIndicator_WindowManagement(t *testing.T) {
 	// Push data to fill the window
 	for i := range 9 {
 		pi.push(float64(i + 1))
-		re.Equal(int(i+2), pi.history.Len())
+		re.Equal(i+2, pi.history.Len())
 		re.Equal(0.0, pi.front.Value.(float64))
 	}
 

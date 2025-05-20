@@ -71,7 +71,7 @@ func TestProgress(t *testing.T) {
 	m.markProgressAsFinished(storeID)
 	failpoint.Enable("github.com/tikv/pd/pkg/progress/gcExpiredTime", `return("100ms")`)
 	time.Sleep(200 * time.Millisecond)
-	m.gc()
+	m.gcCompletedProgress()
 	re.Nil(m.GetProgressByStoreID(storeID))
 	failpoint.Disable("github.com/tikv/pd/pkg/progress/gcExpiredTime")
 }

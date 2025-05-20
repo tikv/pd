@@ -2393,6 +2393,7 @@ func (c *RaftCluster) GetProgressByID(storeID uint64) (*progress.Progress, error
 	return p, nil
 }
 
+// GetProgressByAction returns the progress details for a given action.
 func (c *RaftCluster) GetProgressByAction(action string) (*progress.Progress, error) {
 	p := c.progressManager.GetAverageProgressByAction(progress.Action(action))
 	if p == nil {

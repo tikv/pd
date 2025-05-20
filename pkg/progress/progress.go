@@ -49,6 +49,7 @@ func NewManager() *Manager {
 // Action is the action of the progress.
 type Action string
 
+// Progress is the progress of the online/offline store.
 type Progress struct {
 	Action
 	ProgressPercent float64
@@ -81,6 +82,7 @@ func (m *Manager) addProgress(
 	)
 }
 
+// GC starts a goroutine to clean up the completed progress.
 func (m *Manager) GC(ctx context.Context) {
 	ticker := time.NewTicker(gcInterval)
 	defer ticker.Stop()
@@ -88,14 +90,14 @@ func (m *Manager) GC(ctx context.Context) {
 	for {
 		select {
 		case <-ticker.C:
-			m.gc()
+			m.gcCompletedProgress()
 		case <-ctx.Done():
 			return
 		}
 	}
 }
 
-func (m *Manager) gc() {
+func (m *Manager) gcCompletedProgress() {
 	m.Lock()
 	defer m.Unlock()
 	for storeID, p := range m.progresses {
@@ -176,8 +178,7 @@ func (m *Manager) UpdateProgress(
 	m.updateProgress(storeID, action, currentRegionSize, targetRegionSize)
 }
 
-// UpdateProgress updates the progress if it exists.
-// currentRegionSize represents the current added/deleted region size.
+// nolint:confusing-naming
 func (m *Manager) updateProgress(storeID uint64, action Action, currentRegionSize, targetRegionSize float64) {
 	m.Lock()
 	defer m.Unlock()
@@ -208,13 +209,14 @@ func (m *Manager) GetProgressByStoreID(storeID uint64) *Progress {
 	m.RLock()
 	defer m.RUnlock()
 
-	if p, exist := m.progresses[storeID]; !exist {
+	p, exist := m.progresses[storeID]
+	if !exist {
 		return nil
-	} else {
-		return p.Progress
 	}
+	return p.Progress
 }
 
+// GetAverageProgressByAction gets the average progress of all stores
 func (m *Manager) GetAverageProgressByAction(action Action) *Progress {
 	m.RLock()
 	defer m.RUnlock()
