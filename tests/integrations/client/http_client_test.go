@@ -190,6 +190,15 @@ func (suite *httpClientTestSuite) TestMeta() {
 	re.NoError(err)
 	re.Len(hotWriteRegions.AsPeer, 4)
 	re.Len(hotWriteRegions.AsLeader, 4)
+
+	distribution, err := client.GetRegionDistributionByKeyRange(ctx, pd.NewKeyRange([]byte("a1"), []byte("a3")), "tikv")
+	re.NoError(err)
+	re.Len(distribution.RegionDistributions, 4)
+	sort.Slice(distribution.RegionDistributions, func(i, j int) bool {
+		return distribution.RegionDistributions[i].StoreID < distribution.RegionDistributions[j].StoreID
+	})
+	re.Equal(2, distribution.RegionDistributions[0].RegionLeaderCount)
+	re.Equal(2, distribution.RegionDistributions[0].RegionPeerCount)
 	historyHorRegions, err := client.GetHistoryHotRegions(ctx, &pd.HistoryHotRegionsRequest{
 		StartTime: 0,
 		EndTime:   time.Now().AddDate(0, 0, 1).UnixNano() / int64(time.Millisecond),
@@ -568,9 +577,16 @@ func (suite *httpClientTestSuite) TestSchedulers() {
 
 	err = client.CreateScheduler(ctx, schedulerName, 1)
 	re.NoError(err)
-	schedulers, err = client.GetSchedulers(ctx)
-	re.NoError(err)
-	re.Contains(schedulers, schedulerName)
+	checkScheduler := func() {
+		schedulers, err = client.GetSchedulers(ctx)
+		re.NoError(err)
+		re.Contains(schedulers, schedulerName)
+		config, err := client.GetSchedulerConfig(ctx, schedulerName)
+		re.NoError(err)
+		re.Contains(config, "store-id-ranges")
+		re.Contains(config, "batch")
+	}
+	checkScheduler()
 	err = client.SetSchedulerDelay(ctx, schedulerName, 100)
 	re.NoError(err)
 	err = client.SetSchedulerDelay(ctx, "not-exist", 100)
@@ -580,6 +596,47 @@ func (suite *httpClientTestSuite) TestSchedulers() {
 	schedulers, err = client.GetSchedulers(ctx)
 	re.NoError(err)
 	re.NotContains(schedulers, schedulerName)
+
+	input := map[string]any{
+		"store_id": 1,
+	}
+	re.NoError(client.CreateSchedulerWithInput(ctx, schedulerName, input))
+	checkScheduler()
+	re.NoError(client.DeleteScheduler(ctx, schedulerName))
+	const schedulerName2 = "balance-range-scheduler"
+	input = map[string]any{
+		"engine":    "tikv",
+		"rule":      "leader-scatter",
+		"start-key": "100",
+		"end-key":   "200",
+		"alias":     "test",
+	}
+	re.NoError(client.CreateSchedulerWithInput(ctx, schedulerName2, input))
+	checkFn := func() map[string]any {
+		config, err := client.GetSchedulerConfig(ctx, schedulerName2)
+		re.NoError(err)
+		jobs, ok := config.([]any)
+		re.True(ok, config)
+		res := make([]map[string]any, 0, len(jobs))
+		for _, job := range jobs {
+			jobMap, ok := job.(map[string]any)
+			re.True(ok, config)
+			res = append(res, jobMap)
+		}
+		return res[0]
+	}
+	job := checkFn()
+	jobID := uint64(job["job-id"].(float64))
+	re.Equal(uint64(0), jobID)
+	_, ok := job["start"].(*time.Time)
+	re.False(ok, job)
+
+	// cancel one job
+	re.NoError(client.CancelSchedulerJob(ctx, schedulerName2, jobID))
+	job = checkFn()
+	status, ok := job["status"]
+	re.True(ok)
+	re.Equal("cancelled", status)
 }
 
 func (suite *httpClientTestSuite) TestStoreLabels() {

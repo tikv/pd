@@ -28,16 +28,16 @@ type operatorWithTime struct {
 type operatorQueue []*operatorWithTime
 
 // Len implements heap.Interface.
-func (opn operatorQueue) Len() int { return len(opn) }
+func (opn *operatorQueue) Len() int { return len(*opn) }
 
 // Less implements heap.Interface.
-func (opn operatorQueue) Less(i, j int) bool {
-	return opn[i].time.Before(opn[j].time)
+func (opn *operatorQueue) Less(i, j int) bool {
+	return (*opn)[i].time.Before((*opn)[j].time)
 }
 
 // Swap implements heap.Interface.
-func (opn operatorQueue) Swap(i, j int) {
-	opn[i], opn[j] = opn[j], opn[i]
+func (opn *operatorQueue) Swap(i, j int) {
+	(*opn)[i], (*opn)[j] = (*opn)[j], (*opn)[i]
 }
 
 // Push implements heap.Interface.

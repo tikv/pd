@@ -49,7 +49,7 @@ import (
 )
 
 // SchedulerConfigHandlerPath is the api router path of the schedule config handler.
-var SchedulerConfigHandlerPath = "/api/v1/scheduler-config"
+var SchedulerConfigHandlerPath = "/pd/api/v1/scheduler-config"
 
 type server struct {
 	*Server
@@ -312,7 +312,7 @@ func (h *Handler) GetSchedulerConfigHandler() (http.Handler, error) {
 	}
 	mux := http.NewServeMux()
 	for name, handler := range c.GetSchedulerHandlers() {
-		prefix := path.Join(pdRootPath, SchedulerConfigHandlerPath, name)
+		prefix := path.Join(SchedulerConfigHandlerPath, name)
 		urlPath := prefix + "/"
 		mux.Handle(urlPath, http.StripPrefix(prefix, handler))
 	}
@@ -325,7 +325,7 @@ func (h *Handler) ResetTS(ts uint64, ignoreSmaller, skipUpperBoundCheck bool, _ 
 		zap.Uint64("new-ts", ts),
 		zap.Bool("ignore-smaller", ignoreSmaller),
 		zap.Bool("skip-upper-bound-check", skipUpperBoundCheck))
-	tsoAllocator := h.s.tsoAllocatorManager.GetAllocator()
+	tsoAllocator := h.s.GetTSOAllocator()
 	if tsoAllocator == nil {
 		return errs.ErrServerNotStarted
 	}
@@ -356,7 +356,7 @@ func (h *Handler) PluginLoad(pluginPath string) error {
 
 	// make sure path is in data dir
 	filePath, err := filepath.Abs(pluginPath)
-	if err != nil || !isPathInDirectory(filePath, h.s.GetConfig().DataDir) {
+	if err != nil || !apiutil.IsPathInDirectory(filePath, h.s.GetConfig().DataDir) {
 		return errs.ErrFilePathAbs.Wrap(err)
 	}
 
@@ -458,7 +458,7 @@ func (h *Handler) RedirectSchedulerUpdate(name string, storeID float64) error {
 	input := make(map[string]any)
 	input["name"] = name
 	input["store_id"] = storeID
-	updateURL, err := url.JoinPath(h.GetAddr(), "pd", SchedulerConfigHandlerPath, name, "config")
+	updateURL, err := url.JoinPath(h.GetAddr(), SchedulerConfigHandlerPath, name, "config")
 	if err != nil {
 		return err
 	}

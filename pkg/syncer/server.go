@@ -37,13 +37,14 @@ import (
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
+	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 )
 
 const (
 	defaultBucketRate        = 20 * units.MiB // 20MB/s
 	defaultBucketCapacity    = 20 * units.MiB // 20MB
-	maxSyncRegionBatchSize   = 100
+	maxSyncRegionBatchSize   = 1000
 	syncerKeepAliveInterval  = 10 * time.Second
 	defaultHistoryBufferSize = 10000
 )
@@ -114,6 +115,18 @@ func (s *RegionSyncer) RunServer(ctx context.Context, regionNotifier <-chan *cor
 	var buckets []*metapb.Buckets
 	ticker := time.NewTicker(syncerKeepAliveInterval)
 
+	processRegion := func(region *core.RegionInfo) {
+		requests = append(requests, region.GetMeta())
+		stats = append(stats, region.GetStat())
+		// bucket should not be nil to avoid grpc marshal panic.
+		bucket := &metapb.Buckets{}
+		if b := region.GetBuckets(); b != nil {
+			bucket = b
+		}
+		buckets = append(buckets, bucket)
+		leaders = append(leaders, region.GetLeader())
+	}
+
 	defer func() {
 		ticker.Stop()
 		s.mu.Lock()
@@ -127,30 +140,20 @@ func (s *RegionSyncer) RunServer(ctx context.Context, regionNotifier <-chan *cor
 			log.Info("region syncer has been stopped")
 			return
 		case first := <-regionNotifier:
-			requests = append(requests, first.GetMeta())
-			stats = append(stats, first.GetStat())
-			// bucket should not be nil to avoid grpc marshal panic.
-			bucket := &metapb.Buckets{}
-			if b := first.GetBuckets(); b != nil {
-				bucket = b
-			}
-			buckets = append(buckets, bucket)
-			leaders = append(leaders, first.GetLeader())
+			failpoint.InjectCall("syncRegionChannelFull")
+
+			processRegion(first)
 			startIndex := s.history.getNextIndex()
 			s.history.record(first)
-			pending := len(regionNotifier)
-			for i := 0; i < pending && i < maxSyncRegionBatchSize; i++ {
-				region := <-regionNotifier
-				requests = append(requests, region.GetMeta())
-				stats = append(stats, region.GetStat())
-				// bucket should not be nil to avoid grpc marshal panic.
-				bucket := &metapb.Buckets{}
-				if b := region.GetBuckets(); b != nil {
-					bucket = b
+		loop:
+			for range maxSyncRegionBatchSize {
+				select {
+				case region := <-regionNotifier:
+					processRegion(region)
+					s.history.record(region)
+				default:
+					break loop
 				}
-				buckets = append(buckets, bucket)
-				leaders = append(leaders, region.GetLeader())
-				s.history.record(region)
 			}
 			regions := &pdpb.SyncRegionResponse{
 				Header:        &pdpb.ResponseHeader{ClusterId: keypath.ClusterID()},
@@ -160,13 +163,13 @@ func (s *RegionSyncer) RunServer(ctx context.Context, regionNotifier <-chan *cor
 				RegionLeaders: leaders,
 				Buckets:       buckets,
 			}
-			s.broadcast(regions)
+			s.broadcast(ctx, regions)
 		case <-ticker.C:
 			alive := &pdpb.SyncRegionResponse{
 				Header:     &pdpb.ResponseHeader{ClusterId: keypath.ClusterID()},
 				StartIndex: s.history.getNextIndex(),
 			}
-			s.broadcast(alive)
+			s.broadcast(ctx, alive)
 		}
 		requests = requests[:0]
 		stats = stats[:0]
@@ -344,23 +347,47 @@ func (s *RegionSyncer) bindStream(name string, stream ServerStream) {
 	s.mu.streams[name] = stream
 }
 
-func (s *RegionSyncer) broadcast(regions *pdpb.SyncRegionResponse) {
-	var failed []string
-	s.mu.RLock()
+func (s *RegionSyncer) broadcast(ctx context.Context, regions *pdpb.SyncRegionResponse) {
+	broadcastDone := make(chan struct{})
+
+	defer logutil.LogPanic()
+	var (
+		failed sync.Map
+		wg     sync.WaitGroup
+	)
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	for name, sender := range s.mu.streams {
-		err := sender.Send(regions)
-		if err != nil {
-			log.Error("region syncer send data meet error", errs.ZapError(errs.ErrGRPCSend, err))
-			failed = append(failed, name)
+		select {
+		case <-ctx.Done():
+			return
+		default:
 		}
+
+		wg.Add(1)
+		go func(name string, sender ServerStream) {
+			defer wg.Done()
+			err := sender.Send(regions)
+			if err != nil {
+				log.Error("region syncer send data meet error", errs.ZapError(errs.ErrGRPCSend, err))
+				failed.Store(name, struct{}{})
+			}
+		}(name, sender)
 	}
-	s.mu.RUnlock()
-	if len(failed) > 0 {
-		s.mu.Lock()
-		for _, name := range failed {
+
+	go func() {
+		wg.Wait()
+		failed.Range(func(key, _ any) bool {
+			name := key.(string)
 			delete(s.mu.streams, name)
 			log.Info("region syncer delete the stream", zap.String("stream", name))
-		}
-		s.mu.Unlock()
+			return true
+		})
+		close(broadcastDone)
+	}()
+
+	select {
+	case <-broadcastDone:
+	case <-ctx.Done():
 	}
 }

@@ -40,8 +40,8 @@ func TestBasic(t *testing.T) {
 	re := require.New(t)
 	storage := NewStorageWithMemoryBackend()
 
-	re.Equal("raft/s/00000000000000000123", keypath.StorePath(123))
-	re.Equal("raft/r/00000000000000000123", keypath.RegionPath(123))
+	re.Equal("/pd/0/raft/s/00000000000000000123", keypath.StorePath(123))
+	re.Equal("/pd/0/raft/r/00000000000000000123", keypath.RegionPath(123))
 
 	meta := &metapb.Cluster{Id: 123}
 	ok, err := storage.LoadMeta(meta)
@@ -160,7 +160,7 @@ func TestSaveServiceGCSafePoint(t *testing.T) {
 		re.NoError(storage.SaveServiceGCSafePoint(ssp))
 	}
 
-	prefix := keypath.GCSafePointServicePrefixPath()
+	prefix := keypath.ServiceGCSafePointPrefix()
 	prefixEnd := clientv3.GetPrefixRangeEnd(prefix)
 	keys, values, err := storage.LoadRange(prefix, prefixEnd, len(serviceSafePoints))
 	re.NoError(err)

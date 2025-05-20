@@ -23,6 +23,8 @@ import (
 
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+
+	"github.com/tikv/pd/pkg/utils/keyutil"
 )
 
 func TestRegionInfo(t *testing.T) {
@@ -74,7 +76,7 @@ func TestRegionInfo(t *testing.T) {
 	re.Regexp("Remove peer.*", DiffRegionPeersInfo(r, info))
 	re.Equal(removePeer, r.GetStorePeer(n))
 	r = r.Clone(WithRemoveStorePeer(n))
-	re.Equal("", DiffRegionPeersInfo(r, info))
+	re.Empty(DiffRegionPeersInfo(r, info))
 	re.Nil(r.GetStorePeer(n))
 	r = r.Clone(WithStartKey([]byte{0}))
 	re.Regexp("StartKey Changed.*", DiffRegionKeyInfo(r, info))
@@ -280,11 +282,11 @@ func TestRandomRegion(t *testing.T) {
 
 	regionA := NewTestRegionInfo(1, 1, []byte(""), []byte("g"))
 	updateNewItem(tree, regionA)
-	ra := tree.randomRegion([]KeyRange{NewKeyRange("", "")})
+	ra := tree.randomRegion([]keyutil.KeyRange{keyutil.NewKeyRange("", "")})
 	re.Equal(regionA, ra)
 	ra = tree.randomRegion(nil)
 	re.Equal(regionA, ra)
-	ra2 := tree.RandomRegions(2, []KeyRange{NewKeyRange("", "")})
+	ra2 := tree.RandomRegions(2, []keyutil.KeyRange{keyutil.NewKeyRange("", "")})
 	re.Equal([]*RegionInfo{regionA, regionA}, ra2)
 	ra2 = tree.RandomRegions(2, nil)
 	re.Equal([]*RegionInfo{regionA, regionA}, ra2)
@@ -296,74 +298,74 @@ func TestRandomRegion(t *testing.T) {
 	updateNewItem(tree, regionC)
 	updateNewItem(tree, regionD)
 
-	rb := tree.randomRegion([]KeyRange{NewKeyRange("g", "n")})
+	rb := tree.randomRegion([]keyutil.KeyRange{keyutil.NewKeyRange("g", "n")})
 	re.Equal(regionB, rb)
-	rc := tree.randomRegion([]KeyRange{NewKeyRange("n", "t")})
+	rc := tree.randomRegion([]keyutil.KeyRange{keyutil.NewKeyRange("n", "t")})
 	re.Equal(regionC, rc)
-	rd := tree.randomRegion([]KeyRange{NewKeyRange("t", "")})
+	rd := tree.randomRegion([]keyutil.KeyRange{keyutil.NewKeyRange("t", "")})
 	re.Equal(regionD, rd)
 
-	rf := tree.randomRegion([]KeyRange{NewKeyRange("", "a")})
+	rf := tree.randomRegion([]keyutil.KeyRange{keyutil.NewKeyRange("", "a")})
 	re.Nil(rf)
-	rf = tree.randomRegion([]KeyRange{NewKeyRange("o", "s")})
+	rf = tree.randomRegion([]keyutil.KeyRange{keyutil.NewKeyRange("o", "s")})
 	re.Nil(rf)
-	rf = tree.randomRegion([]KeyRange{NewKeyRange("", "a")})
+	rf = tree.randomRegion([]keyutil.KeyRange{keyutil.NewKeyRange("", "a")})
 	re.Nil(rf)
-	rf = tree.randomRegion([]KeyRange{NewKeyRange("z", "")})
+	rf = tree.randomRegion([]keyutil.KeyRange{keyutil.NewKeyRange("z", "")})
 	re.Nil(rf)
 
 	checkRandomRegion(re, tree, []*RegionInfo{regionA, regionB, regionC, regionD}, nil)
-	checkRandomRegion(re, tree, []*RegionInfo{regionA, regionB, regionC, regionD}, []KeyRange{NewKeyRange("", "")})
-	checkRandomRegion(re, tree, []*RegionInfo{regionA, regionB}, []KeyRange{NewKeyRange("", "n")})
-	checkRandomRegion(re, tree, []*RegionInfo{regionC, regionD}, []KeyRange{NewKeyRange("n", "")})
-	checkRandomRegion(re, tree, []*RegionInfo{}, []KeyRange{NewKeyRange("h", "s")})
-	checkRandomRegion(re, tree, []*RegionInfo{regionB, regionC}, []KeyRange{NewKeyRange("a", "z")})
+	checkRandomRegion(re, tree, []*RegionInfo{regionA, regionB, regionC, regionD}, []keyutil.KeyRange{keyutil.NewKeyRange("", "")})
+	checkRandomRegion(re, tree, []*RegionInfo{regionA, regionB}, []keyutil.KeyRange{keyutil.NewKeyRange("", "n")})
+	checkRandomRegion(re, tree, []*RegionInfo{regionC, regionD}, []keyutil.KeyRange{keyutil.NewKeyRange("n", "")})
+	checkRandomRegion(re, tree, []*RegionInfo{}, []keyutil.KeyRange{keyutil.NewKeyRange("h", "s")})
+	checkRandomRegion(re, tree, []*RegionInfo{regionB, regionC}, []keyutil.KeyRange{keyutil.NewKeyRange("a", "z")})
 }
 
 func TestRandomRegionDiscontinuous(t *testing.T) {
 	re := require.New(t)
 	tree := newRegionTree()
-	r := tree.randomRegion([]KeyRange{NewKeyRange("c", "f")})
+	r := tree.randomRegion([]keyutil.KeyRange{keyutil.NewKeyRange("c", "f")})
 	re.Nil(r)
 
 	// test for single region
 	regionA := NewTestRegionInfo(1, 1, []byte("c"), []byte("f"))
 	updateNewItem(tree, regionA)
-	ra := tree.randomRegion([]KeyRange{NewKeyRange("c", "e")})
+	ra := tree.randomRegion([]keyutil.KeyRange{keyutil.NewKeyRange("c", "e")})
 	re.Nil(ra)
-	ra = tree.randomRegion([]KeyRange{NewKeyRange("c", "f")})
+	ra = tree.randomRegion([]keyutil.KeyRange{keyutil.NewKeyRange("c", "f")})
 	re.Equal(regionA, ra)
-	ra = tree.randomRegion([]KeyRange{NewKeyRange("c", "g")})
+	ra = tree.randomRegion([]keyutil.KeyRange{keyutil.NewKeyRange("c", "g")})
 	re.Equal(regionA, ra)
-	ra = tree.randomRegion([]KeyRange{NewKeyRange("a", "e")})
+	ra = tree.randomRegion([]keyutil.KeyRange{keyutil.NewKeyRange("a", "e")})
 	re.Nil(ra)
-	ra = tree.randomRegion([]KeyRange{NewKeyRange("a", "f")})
+	ra = tree.randomRegion([]keyutil.KeyRange{keyutil.NewKeyRange("a", "f")})
 	re.Equal(regionA, ra)
-	ra = tree.randomRegion([]KeyRange{NewKeyRange("a", "g")})
+	ra = tree.randomRegion([]keyutil.KeyRange{keyutil.NewKeyRange("a", "g")})
 	re.Equal(regionA, ra)
 
 	regionB := NewTestRegionInfo(2, 2, []byte("n"), []byte("x"))
 	updateNewItem(tree, regionB)
-	rb := tree.randomRegion([]KeyRange{NewKeyRange("g", "x")})
+	rb := tree.randomRegion([]keyutil.KeyRange{keyutil.NewKeyRange("g", "x")})
 	re.Equal(regionB, rb)
-	rb = tree.randomRegion([]KeyRange{NewKeyRange("g", "y")})
+	rb = tree.randomRegion([]keyutil.KeyRange{keyutil.NewKeyRange("g", "y")})
 	re.Equal(regionB, rb)
-	rb = tree.randomRegion([]KeyRange{NewKeyRange("n", "y")})
+	rb = tree.randomRegion([]keyutil.KeyRange{keyutil.NewKeyRange("n", "y")})
 	re.Equal(regionB, rb)
-	rb = tree.randomRegion([]KeyRange{NewKeyRange("o", "y")})
+	rb = tree.randomRegion([]keyutil.KeyRange{keyutil.NewKeyRange("o", "y")})
 	re.Nil(rb)
 
 	regionC := NewTestRegionInfo(3, 3, []byte("z"), []byte(""))
 	updateNewItem(tree, regionC)
-	rc := tree.randomRegion([]KeyRange{NewKeyRange("y", "")})
+	rc := tree.randomRegion([]keyutil.KeyRange{keyutil.NewKeyRange("y", "")})
 	re.Equal(regionC, rc)
 	regionD := NewTestRegionInfo(4, 4, []byte(""), []byte("a"))
 	updateNewItem(tree, regionD)
-	rd := tree.randomRegion([]KeyRange{NewKeyRange("", "b")})
+	rd := tree.randomRegion([]keyutil.KeyRange{keyutil.NewKeyRange("", "b")})
 	re.Equal(regionD, rd)
 
 	checkRandomRegion(re, tree, []*RegionInfo{regionA, regionB, regionC, regionD}, nil)
-	checkRandomRegion(re, tree, []*RegionInfo{regionA, regionB, regionC, regionD}, []KeyRange{NewKeyRange("", "")})
+	checkRandomRegion(re, tree, []*RegionInfo{regionA, regionB, regionC, regionD}, []keyutil.KeyRange{keyutil.NewKeyRange("", "")})
 }
 
 func updateNewItem(tree *regionTree, region *RegionInfo) {
@@ -371,7 +373,7 @@ func updateNewItem(tree *regionTree, region *RegionInfo) {
 	tree.update(item, false)
 }
 
-func checkRandomRegion(re *require.Assertions, tree *regionTree, regions []*RegionInfo, ranges []KeyRange) {
+func checkRandomRegion(re *require.Assertions, tree *regionTree, regions []*RegionInfo, ranges []keyutil.KeyRange) {
 	keys := make(map[string]struct{})
 	for i := 0; i < 10000 && len(keys) < len(regions); i++ {
 		re := tree.randomRegion(ranges)
@@ -426,7 +428,7 @@ const MaxCount = 1_000_000
 
 func BenchmarkRegionTreeSequentialInsert(b *testing.B) {
 	tree := newRegionTree()
-	for i := 0; i < b.N; i++ {
+	for i := range b.N {
 		item := &RegionInfo{meta: &metapb.Region{StartKey: []byte(fmt.Sprintf("%20d", i)), EndKey: []byte(fmt.Sprintf("%20d", i+1))}}
 		updateNewItem(tree, item)
 	}
@@ -435,7 +437,7 @@ func BenchmarkRegionTreeSequentialInsert(b *testing.B) {
 func BenchmarkRegionTreeRandomInsert(b *testing.B) {
 	data := mock1MRegionTree().clearTree().shuffleItems()
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for i := range b.N {
 		index := i % MaxCount
 		updateNewItem(data.tree, data.items[index])
 	}
@@ -458,7 +460,7 @@ func BenchmarkRegionTreeRandomOverlapsInsert(b *testing.B) {
 		items = append(items, &RegionInfo{meta: &metapb.Region{StartKey: []byte(fmt.Sprintf("%20d", startKey)), EndKey: []byte(fmt.Sprintf("%20d", endKey))}})
 	}
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for i := range b.N {
 		index := i % MaxCount
 		updateNewItem(tree, items[index])
 	}
@@ -467,7 +469,7 @@ func BenchmarkRegionTreeRandomOverlapsInsert(b *testing.B) {
 func BenchmarkRegionTreeRandomUpdate(b *testing.B) {
 	data := mock1MRegionTree().shuffleItems()
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for i := range b.N {
 		index := i % MaxCount
 		updateNewItem(data.tree, data.items[index])
 	}
@@ -476,7 +478,7 @@ func BenchmarkRegionTreeRandomUpdate(b *testing.B) {
 func BenchmarkRegionTreeSequentialLookUpRegion(b *testing.B) {
 	data := mock1MRegionTree()
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for i := range b.N {
 		index := i % MaxCount
 		data.tree.find(&regionItem{RegionInfo: data.items[index]})
 	}
@@ -485,7 +487,7 @@ func BenchmarkRegionTreeSequentialLookUpRegion(b *testing.B) {
 func BenchmarkRegionTreeRandomLookUpRegion(b *testing.B) {
 	data := mock1MRegionTree().shuffleItems()
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for i := range b.N {
 		index := i % MaxCount
 		data.tree.find(&regionItem{RegionInfo: data.items[index]})
 	}
@@ -494,7 +496,7 @@ func BenchmarkRegionTreeRandomLookUpRegion(b *testing.B) {
 func BenchmarkRegionTreeScan(b *testing.B) {
 	data := mock1MRegionTree().shuffleItems()
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		data.tree.scanRanges()
 	}
 }

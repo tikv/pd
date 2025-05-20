@@ -34,13 +34,16 @@ import (
 	"github.com/tikv/pd/pkg/schedule/plan"
 	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/utils/apiutil"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 )
 
 const (
-	alterEpsilon               = 1e-9
-	minReCheckDurationGap      = 120 // default gap for re-check the slow node, unit: s
-	defaultRecoveryDurationGap = 600 // default gap for recovery, unit: s.
+	alterEpsilon          = 1e-9
+	minReCheckDurationGap = 120 // default gap for re-check the slow node, unit: s
+	// We use 1800 seconds as the default gap for recovery, which is 30 minutes.
+	// This is based on the SLA level reflected by AWS EBS. And we can adjust it later if needed.
+	defaultRecoveryDurationGap = 1800 // default gap for recovery, unit: s.
 )
 
 type slowCandidate struct {
@@ -94,11 +97,11 @@ func (conf *evictSlowTrendSchedulerConfig) getStores() []uint64 {
 	return conf.EvictedStores
 }
 
-func (conf *evictSlowTrendSchedulerConfig) getKeyRangesByID(id uint64) []core.KeyRange {
+func (conf *evictSlowTrendSchedulerConfig) getKeyRangesByID(id uint64) []keyutil.KeyRange {
 	if conf.evictedStore() != id {
 		return nil
 	}
-	return []core.KeyRange{core.NewKeyRange("", "")}
+	return []keyutil.KeyRange{keyutil.NewKeyRange("", "")}
 }
 
 func (*evictSlowTrendSchedulerConfig) getBatch() int {
@@ -468,7 +471,7 @@ func chooseEvictCandidate(cluster sche.SchedulerCluster, lastEvictCandidate *slo
 		if store.IsRemoved() {
 			continue
 		}
-		if !(store.IsPreparing() || store.IsServing()) {
+		if !store.IsPreparing() && !store.IsServing() {
 			continue
 		}
 		if slowTrend := store.GetSlowTrend(); slowTrend != nil {
@@ -549,7 +552,7 @@ func checkStoresAreUpdated(cluster sche.SchedulerCluster, slowStoreID uint64, sl
 			updatedStores += 1
 			continue
 		}
-		if !(store.IsPreparing() || store.IsServing()) {
+		if !store.IsPreparing() && !store.IsServing() {
 			updatedStores += 1
 			continue
 		}
@@ -579,7 +582,7 @@ func checkStoreSlowerThanOthers(cluster sche.SchedulerCluster, target *core.Stor
 		if store.IsRemoved() {
 			continue
 		}
-		if !(store.IsPreparing() || store.IsServing()) {
+		if !store.IsPreparing() && !store.IsServing() {
 			continue
 		}
 		if store.GetID() == target.GetID() {
@@ -633,7 +636,7 @@ func checkStoreFasterThanOthers(cluster sche.SchedulerCluster, target *core.Stor
 		if store.IsRemoved() {
 			continue
 		}
-		if !(store.IsPreparing() || store.IsServing()) {
+		if !store.IsPreparing() && !store.IsServing() {
 			continue
 		}
 		if store.GetID() == target.GetID() {

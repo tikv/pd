@@ -4,7 +4,7 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//	http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"net/http"
 	"reflect"
+	"sync"
 	"testing"
 	"time"
 
@@ -39,7 +40,6 @@ import (
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/tests"
-	"github.com/tikv/pd/tests/server/api"
 )
 
 func TestMain(m *testing.M) {
@@ -66,7 +66,7 @@ func (suite *serverTestSuite) SetupSuite() {
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/mcs/scheduling/server/changeRunCollectWaitTime", `return(true)`))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs", `return(true)`))
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
-	suite.cluster, err = tests.NewTestPDServiceCluster(suite.ctx, 1)
+	suite.cluster, err = tests.NewTestClusterWithKeyspaceGroup(suite.ctx, 1)
 	re.NoError(err)
 
 	err = suite.cluster.RunInitialServers()
@@ -96,7 +96,7 @@ func (suite *serverTestSuite) TestAllocID() {
 	defer tc.Destroy()
 	tc.WaitForPrimaryServing(re)
 	time.Sleep(200 * time.Millisecond)
-	id, err := tc.GetPrimaryServer().GetCluster().AllocID()
+	id, _, err := tc.GetPrimaryServer().GetCluster().AllocID(1)
 	re.NoError(err)
 	re.NotEqual(uint64(0), id)
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/scheduling/server/fastUpdateMember"))
@@ -116,7 +116,7 @@ func (suite *serverTestSuite) TestAllocIDAfterLeaderChange() {
 	tc.WaitForPrimaryServing(re)
 	time.Sleep(200 * time.Millisecond)
 	cluster := tc.GetPrimaryServer().GetCluster()
-	id, err := cluster.AllocID()
+	id, _, err := cluster.AllocID(1)
 	re.NoError(err)
 	re.NotEqual(uint64(0), id)
 	suite.cluster.ResignLeader()
@@ -125,7 +125,7 @@ func (suite *serverTestSuite) TestAllocIDAfterLeaderChange() {
 	suite.pdLeader = suite.cluster.GetServer(leaderName)
 	suite.backendEndpoints = suite.pdLeader.GetAddr()
 	time.Sleep(time.Second)
-	id1, err := cluster.AllocID()
+	id1, _, err := cluster.AllocID(1)
 	re.NoError(err)
 	re.Greater(id1, id)
 	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/scheduling/server/fastUpdateMember"))
@@ -175,7 +175,7 @@ func (suite *serverTestSuite) TestForwardStoreHeartbeat() {
 			Header: &pdpb.RequestHeader{ClusterId: suite.pdLeader.GetClusterID()},
 			Store: &metapb.Store{
 				Id:      1,
-				Address: "tikv1",
+				Address: "mock://tikv-1:1",
 				State:   metapb.StoreState_Up,
 				Version: "7.0.0",
 			},
@@ -220,7 +220,7 @@ func (suite *serverTestSuite) TestSchedulingServiceFallback() {
 	// Change back to the default value.
 	conf.EnableSchedulingFallback = true
 	leaderServer.SetMicroserviceConfig(*conf)
-	// PD service will execute scheduling jobs since there is no scheduling server.
+	// PD will execute scheduling jobs since there is no scheduling server.
 	testutil.Eventually(re, func() bool {
 		return suite.pdLeader.GetServer().GetRaftCluster().IsSchedulingControllerRunning()
 	})
@@ -229,7 +229,7 @@ func (suite *serverTestSuite) TestSchedulingServiceFallback() {
 	re.NoError(err)
 	defer tc.Destroy()
 	tc.WaitForPrimaryServing(re)
-	// After scheduling server is started, PD service will not execute scheduling jobs.
+	// After scheduling server is started, PD will not execute scheduling jobs.
 	testutil.Eventually(re, func() bool {
 		return !suite.pdLeader.GetServer().GetRaftCluster().IsSchedulingControllerRunning()
 	})
@@ -238,7 +238,7 @@ func (suite *serverTestSuite) TestSchedulingServiceFallback() {
 		return tc.GetPrimaryServer().GetCluster().IsBackgroundJobsRunning()
 	})
 	tc.GetPrimaryServer().Close()
-	// Stop scheduling server. PD service will execute scheduling jobs again.
+	// Stop scheduling server. PD will execute scheduling jobs again.
 	testutil.Eventually(re, func() bool {
 		return suite.pdLeader.GetServer().GetRaftCluster().IsSchedulingControllerRunning()
 	})
@@ -246,7 +246,7 @@ func (suite *serverTestSuite) TestSchedulingServiceFallback() {
 	re.NoError(err)
 	defer tc1.Destroy()
 	tc1.WaitForPrimaryServing(re)
-	// After scheduling server is started, PD service will not execute scheduling jobs.
+	// After scheduling server is started, PD will not execute scheduling jobs.
 	testutil.Eventually(re, func() bool {
 		return !suite.pdLeader.GetServer().GetRaftCluster().IsSchedulingControllerRunning()
 	})
@@ -259,21 +259,21 @@ func (suite *serverTestSuite) TestSchedulingServiceFallback() {
 func (suite *serverTestSuite) TestDisableSchedulingServiceFallback() {
 	re := suite.Require()
 
-	// PD service will execute scheduling jobs since there is no scheduling server.
+	// PD will execute scheduling jobs since there is no scheduling server.
 	testutil.Eventually(re, func() bool {
 		re.NotNil(suite.pdLeader.GetServer())
 		re.NotNil(suite.pdLeader.GetServer().GetRaftCluster())
 		return suite.pdLeader.GetServer().GetRaftCluster().IsSchedulingControllerRunning()
 	})
 	leaderServer := suite.pdLeader.GetServer()
-	// After Disabling scheduling service fallback, the PD service will stop scheduling.
+	// After Disabling scheduling service fallback, the PD will stop scheduling.
 	conf := leaderServer.GetMicroserviceConfig().Clone()
 	conf.EnableSchedulingFallback = false
 	leaderServer.SetMicroserviceConfig(*conf)
 	testutil.Eventually(re, func() bool {
 		return !suite.pdLeader.GetServer().GetRaftCluster().IsSchedulingControllerRunning()
 	})
-	// Enable scheduling service fallback again, the PD service will restart scheduling.
+	// Enable scheduling service fallback again, the PD will restart scheduling.
 	conf.EnableSchedulingFallback = true
 	leaderServer.SetMicroserviceConfig(*conf)
 	testutil.Eventually(re, func() bool {
@@ -284,7 +284,7 @@ func (suite *serverTestSuite) TestDisableSchedulingServiceFallback() {
 	re.NoError(err)
 	defer tc.Destroy()
 	tc.WaitForPrimaryServing(re)
-	// After scheduling server is started, PD service will not execute scheduling jobs.
+	// After scheduling server is started, PD will not execute scheduling jobs.
 	testutil.Eventually(re, func() bool {
 		return !suite.pdLeader.GetServer().GetRaftCluster().IsSchedulingControllerRunning()
 	})
@@ -292,7 +292,7 @@ func (suite *serverTestSuite) TestDisableSchedulingServiceFallback() {
 	testutil.Eventually(re, func() bool {
 		return tc.GetPrimaryServer().GetCluster().IsBackgroundJobsRunning()
 	})
-	// Disable scheduling service fallback and stop scheduling server. PD service won't execute scheduling jobs again.
+	// Disable scheduling service fallback and stop scheduling server. PD won't execute scheduling jobs again.
 	conf.EnableSchedulingFallback = false
 	leaderServer.SetMicroserviceConfig(*conf)
 	tc.GetPrimaryServer().Close()
@@ -310,18 +310,18 @@ func (suite *serverTestSuite) TestSchedulerSync() {
 	tc.WaitForPrimaryServing(re)
 	schedulersController := tc.GetPrimaryServer().GetCluster().GetCoordinator().GetSchedulersController()
 	checkEvictLeaderSchedulerExist(re, schedulersController, false)
-	// Add a new evict-leader-scheduler through the PD service.
-	api.MustAddScheduler(re, suite.backendEndpoints, types.EvictLeaderScheduler.String(), map[string]any{
+	// Add a new evict-leader-scheduler through the PD.
+	tests.MustAddScheduler(re, suite.backendEndpoints, types.EvictLeaderScheduler.String(), map[string]any{
 		"store_id": 1,
 	})
 	// Check if the evict-leader-scheduler is added.
 	checkEvictLeaderSchedulerExist(re, schedulersController, true)
 	checkEvictLeaderStoreIDs(re, schedulersController, []uint64{1})
-	// Add a store_id to the evict-leader-scheduler through the PD service.
+	// Add a store_id to the evict-leader-scheduler through the PD.
 	err = suite.pdLeader.GetServer().GetRaftCluster().PutMetaStore(
 		&metapb.Store{
 			Id:            2,
-			Address:       "mock://2",
+			Address:       "mock://tikv-2:2",
 			State:         metapb.StoreState_Up,
 			NodeState:     metapb.NodeState_Serving,
 			LastHeartbeat: time.Now().UnixNano(),
@@ -329,47 +329,47 @@ func (suite *serverTestSuite) TestSchedulerSync() {
 		},
 	)
 	re.NoError(err)
-	api.MustAddScheduler(re, suite.backendEndpoints, types.EvictLeaderScheduler.String(), map[string]any{
+	tests.MustAddScheduler(re, suite.backendEndpoints, types.EvictLeaderScheduler.String(), map[string]any{
 		"store_id": 2,
 	})
 	checkEvictLeaderSchedulerExist(re, schedulersController, true)
 	checkEvictLeaderStoreIDs(re, schedulersController, []uint64{1, 2})
-	// Delete a store_id from the evict-leader-scheduler through the PD service.
-	api.MustDeleteScheduler(re, suite.backendEndpoints, fmt.Sprintf("%s-%d", types.EvictLeaderScheduler.String(), 1))
+	// Delete a store_id from the evict-leader-scheduler through the PD.
+	tests.MustDeleteScheduler(re, suite.backendEndpoints, fmt.Sprintf("%s-%d", types.EvictLeaderScheduler.String(), 1))
 	checkEvictLeaderSchedulerExist(re, schedulersController, true)
 	checkEvictLeaderStoreIDs(re, schedulersController, []uint64{2})
-	// Add a store_id to the evict-leader-scheduler through the PD service by the scheduler handler.
-	api.MustCallSchedulerConfigAPI(re, http.MethodPost, suite.backendEndpoints, types.EvictLeaderScheduler.String(), []string{"config"}, map[string]any{
+	// Add a store_id to the evict-leader-scheduler through the PD by the scheduler handler.
+	tests.MustCallSchedulerConfigAPI(re, http.MethodPost, suite.backendEndpoints, types.EvictLeaderScheduler.String(), []string{"config"}, map[string]any{
 		"name":     types.EvictLeaderScheduler.String(),
 		"store_id": 1,
 	})
 	checkEvictLeaderSchedulerExist(re, schedulersController, true)
 	checkEvictLeaderStoreIDs(re, schedulersController, []uint64{1, 2})
-	// Delete a store_id from the evict-leader-scheduler through the PD service by the scheduler handler.
-	api.MustCallSchedulerConfigAPI(re, http.MethodDelete, suite.backendEndpoints, types.EvictLeaderScheduler.String(), []string{"delete", "2"}, nil)
+	// Delete a store_id from the evict-leader-scheduler through the PD by the scheduler handler.
+	tests.MustCallSchedulerConfigAPI(re, http.MethodDelete, suite.backendEndpoints, types.EvictLeaderScheduler.String(), []string{"delete", "2"}, nil)
 	checkEvictLeaderSchedulerExist(re, schedulersController, true)
 	checkEvictLeaderStoreIDs(re, schedulersController, []uint64{1})
 	// If the last store is deleted, the scheduler should be removed.
-	api.MustCallSchedulerConfigAPI(re, http.MethodDelete, suite.backendEndpoints, types.EvictLeaderScheduler.String(), []string{"delete", "1"}, nil)
+	tests.MustCallSchedulerConfigAPI(re, http.MethodDelete, suite.backendEndpoints, types.EvictLeaderScheduler.String(), []string{"delete", "1"}, nil)
 	// Check if the scheduler is removed.
 	checkEvictLeaderSchedulerExist(re, schedulersController, false)
 
-	// Delete the evict-leader-scheduler through the PD service by removing the last store_id.
-	api.MustAddScheduler(re, suite.backendEndpoints, types.EvictLeaderScheduler.String(), map[string]any{
+	// Delete the evict-leader-scheduler through the PD by removing the last store_id.
+	tests.MustAddScheduler(re, suite.backendEndpoints, types.EvictLeaderScheduler.String(), map[string]any{
 		"store_id": 1,
 	})
 	checkEvictLeaderSchedulerExist(re, schedulersController, true)
 	checkEvictLeaderStoreIDs(re, schedulersController, []uint64{1})
-	api.MustDeleteScheduler(re, suite.backendEndpoints, fmt.Sprintf("%s-%d", types.EvictLeaderScheduler.String(), 1))
+	tests.MustDeleteScheduler(re, suite.backendEndpoints, fmt.Sprintf("%s-%d", types.EvictLeaderScheduler.String(), 1))
 	checkEvictLeaderSchedulerExist(re, schedulersController, false)
 
-	// Delete the evict-leader-scheduler through the PD service.
-	api.MustAddScheduler(re, suite.backendEndpoints, types.EvictLeaderScheduler.String(), map[string]any{
+	// Delete the evict-leader-scheduler through the PD.
+	tests.MustAddScheduler(re, suite.backendEndpoints, types.EvictLeaderScheduler.String(), map[string]any{
 		"store_id": 1,
 	})
 	checkEvictLeaderSchedulerExist(re, schedulersController, true)
 	checkEvictLeaderStoreIDs(re, schedulersController, []uint64{1})
-	api.MustDeleteScheduler(re, suite.backendEndpoints, types.EvictLeaderScheduler.String())
+	tests.MustDeleteScheduler(re, suite.backendEndpoints, types.EvictLeaderScheduler.String())
 	checkEvictLeaderSchedulerExist(re, schedulersController, false)
 
 	// The default scheduler could not be deleted, it could only be disabled.
@@ -388,12 +388,12 @@ func (suite *serverTestSuite) TestSchedulerSync() {
 	}
 	for _, name := range defaultSchedulerNames {
 		checkDisabled(name, false)
-		api.MustDeleteScheduler(re, suite.backendEndpoints, name)
+		tests.MustDeleteScheduler(re, suite.backendEndpoints, name)
 		checkDisabled(name, true)
 	}
 	for _, name := range defaultSchedulerNames {
 		checkDisabled(name, true)
-		api.MustAddScheduler(re, suite.backendEndpoints, name, nil)
+		tests.MustAddScheduler(re, suite.backendEndpoints, name, nil)
 		checkDisabled(name, false)
 	}
 }
@@ -436,7 +436,7 @@ func (suite *serverTestSuite) TestForwardRegionHeartbeat() {
 				Header: &pdpb.RequestHeader{ClusterId: suite.pdLeader.GetClusterID()},
 				Store: &metapb.Store{
 					Id:      i,
-					Address: fmt.Sprintf("mock://%d", i),
+					Address: fmt.Sprintf("mock://tikv-%d:%d", i, i),
 					State:   metapb.StoreState_Up,
 					Version: "7.0.0",
 				},
@@ -518,7 +518,7 @@ func (suite *serverTestSuite) TestStoreLimit() {
 				Header: &pdpb.RequestHeader{ClusterId: suite.pdLeader.GetClusterID()},
 				Store: &metapb.Store{
 					Id:      i,
-					Address: fmt.Sprintf("mock://%d", i),
+					Address: fmt.Sprintf("mock://tikv-%d:%d", i, i),
 					State:   metapb.StoreState_Up,
 					Version: "7.0.0",
 				},
@@ -551,7 +551,7 @@ func (suite *serverTestSuite) TestStoreLimit() {
 	leaderServer.GetRaftCluster().SetStoreLimit(1, storelimit.RemovePeer, 60)
 	leaderServer.GetRaftCluster().SetStoreLimit(2, storelimit.AddPeer, 60)
 	leaderServer.GetRaftCluster().SetStoreLimit(2, storelimit.RemovePeer, 60)
-	// There is a time window between setting store limit in PD service side and capturing the change in scheduling service.
+	// There is a time window between setting store limit in PD side and capturing the change in scheduling service.
 	waitSyncFinish(re, tc, storelimit.AddPeer, 60)
 	for i := uint64(1); i <= 5; i++ {
 		op := operator.NewTestOperator(2, &metapb.RegionEpoch{}, operator.OpRegion, operator.AddPeer{ToStore: 2, PeerID: 100})
@@ -636,7 +636,7 @@ func (suite *multipleServerTestSuite) SetupSuite() {
 	re := suite.Require()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs", `return(true)`))
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
-	suite.cluster, err = tests.NewTestPDServiceCluster(suite.ctx, 2)
+	suite.cluster, err = tests.NewTestClusterWithKeyspaceGroup(suite.ctx, 2)
 	re.NoError(err)
 
 	err = suite.cluster.RunInitialServers()
@@ -708,7 +708,7 @@ func (suite *serverTestSuite) TestOnlineProgress() {
 				Header: &pdpb.RequestHeader{ClusterId: suite.pdLeader.GetClusterID()},
 				Store: &metapb.Store{
 					Id:      i,
-					Address: fmt.Sprintf("mock://%d", i),
+					Address: fmt.Sprintf("mock://tikv-%d:%d", i, i),
 					State:   metapb.StoreState_Up,
 					Version: "7.0.0",
 				},
@@ -731,7 +731,7 @@ func (suite *serverTestSuite) TestOnlineProgress() {
 			Header: &pdpb.RequestHeader{ClusterId: suite.pdLeader.GetClusterID()},
 			Store: &metapb.Store{
 				Id:      4,
-				Address: fmt.Sprintf("mock://%d", 4),
+				Address: "mock://tikv-4:4",
 				State:   metapb.StoreState_Up,
 				Version: "7.0.0",
 			},
@@ -759,4 +759,344 @@ func (suite *serverTestSuite) TestOnlineProgress() {
 	re.NoError(err)
 	suite.TearDownSuite()
 	suite.SetupSuite()
+}
+
+func (suite *serverTestSuite) TestBatchSplit() {
+	re := suite.Require()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/mcs/scheduling/server/fastUpdateMember", `return(true)`))
+	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.cluster)
+	re.NoError(err)
+	defer tc.Destroy()
+	tc.WaitForPrimaryServing(re)
+
+	rc := suite.pdLeader.GetServer().GetRaftCluster()
+	re.NotNil(rc)
+	s := &server.GrpcServer{Server: suite.pdLeader.GetServer()}
+	for i := uint64(1); i <= 3; i++ {
+		resp, err := s.PutStore(
+			context.Background(), &pdpb.PutStoreRequest{
+				Header: &pdpb.RequestHeader{ClusterId: suite.pdLeader.GetClusterID()},
+				Store: &metapb.Store{
+					Id:      i,
+					Address: fmt.Sprintf("mock://tikv-%d:%d", i, i),
+					State:   metapb.StoreState_Up,
+					Version: "7.0.0",
+				},
+			},
+		)
+		re.NoError(err)
+		re.Empty(resp.GetHeader().GetError())
+	}
+	grpcPDClient := testutil.MustNewGrpcClient(re, suite.pdLeader.GetServer().GetAddr())
+	stream, err := grpcPDClient.RegionHeartbeat(suite.ctx)
+	re.NoError(err)
+	peers := []*metapb.Peer{
+		{Id: 11, StoreId: 1},
+		{Id: 22, StoreId: 2},
+		{Id: 33, StoreId: 3},
+	}
+
+	interval := &pdpb.TimeInterval{StartTimestamp: 0, EndTimestamp: 10}
+	regionReq := &pdpb.RegionHeartbeatRequest{
+		Header:          testutil.NewRequestHeader(suite.pdLeader.GetClusterID()),
+		Region:          &metapb.Region{Id: 10, Peers: peers, StartKey: []byte("a"), EndKey: []byte("b")},
+		Leader:          peers[0],
+		ApproximateSize: 30 * units.MiB,
+		ApproximateKeys: 300,
+		Interval:        interval,
+		Term:            1,
+		CpuUsage:        100,
+	}
+	err = stream.Send(regionReq)
+	re.NoError(err)
+	testutil.Eventually(re, func() bool {
+		region := tc.GetPrimaryServer().GetCluster().GetRegion(10)
+		return region != nil && region.GetTerm() == 1 &&
+			region.GetApproximateKeys() == 300 && region.GetApproximateSize() == 30 &&
+			reflect.DeepEqual(region.GetLeader(), peers[0]) &&
+			reflect.DeepEqual(region.GetInterval(), interval)
+	})
+
+	req := &pdpb.AskBatchSplitRequest{
+		Header: &pdpb.RequestHeader{
+			ClusterId: suite.pdLeader.GetClusterID(),
+		},
+		Region:     regionReq.GetRegion(),
+		SplitCount: 10,
+	}
+
+	resp, err := grpcPDClient.AskBatchSplit(suite.ctx, req)
+	re.NoError(err)
+	re.Empty(resp.GetHeader().GetError())
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/scheduling/server/fastUpdateMember"))
+
+	suite.TearDownSuite()
+	suite.SetupSuite()
+}
+
+func (suite *serverTestSuite) TestBatchSplitCompatibility() {
+	re := suite.Require()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/mcs/scheduling/server/fastUpdateMember", `return(true)`))
+	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.cluster)
+	re.NoError(err)
+	defer tc.Destroy()
+	tc.WaitForPrimaryServing(re)
+
+	rc := suite.pdLeader.GetServer().GetRaftCluster()
+	re.NotNil(rc)
+	s := &server.GrpcServer{Server: suite.pdLeader.GetServer()}
+	for i := uint64(1); i <= 3; i++ {
+		resp, err := s.PutStore(
+			context.Background(), &pdpb.PutStoreRequest{
+				Header: &pdpb.RequestHeader{ClusterId: suite.pdLeader.GetClusterID()},
+				Store: &metapb.Store{
+					Id:      i,
+					Address: fmt.Sprintf("mock://tikv-%d:%d", i, i),
+					State:   metapb.StoreState_Up,
+					Version: "7.0.0",
+				},
+			},
+		)
+		re.NoError(err)
+		re.Empty(resp.GetHeader().GetError())
+	}
+	grpcPDClient := testutil.MustNewGrpcClient(re, suite.pdLeader.GetServer().GetAddr())
+	stream, err := grpcPDClient.RegionHeartbeat(suite.ctx)
+	re.NoError(err)
+	peers := []*metapb.Peer{
+		{Id: 11, StoreId: 1},
+		{Id: 22, StoreId: 2},
+		{Id: 33, StoreId: 3},
+	}
+
+	interval := &pdpb.TimeInterval{StartTimestamp: 0, EndTimestamp: 10}
+	regionReq := &pdpb.RegionHeartbeatRequest{
+		Header:          testutil.NewRequestHeader(suite.pdLeader.GetClusterID()),
+		Region:          &metapb.Region{Id: 10, Peers: peers, StartKey: []byte("a"), EndKey: []byte("b")},
+		Leader:          peers[0],
+		ApproximateSize: 30 * units.MiB,
+		ApproximateKeys: 300,
+		Interval:        interval,
+		Term:            1,
+		CpuUsage:        100,
+	}
+	err = stream.Send(regionReq)
+	re.NoError(err)
+	testutil.Eventually(re, func() bool {
+		region := tc.GetPrimaryServer().GetCluster().GetRegion(10)
+		return region != nil && region.GetTerm() == 1 &&
+			region.GetApproximateKeys() == 300 && region.GetApproximateSize() == 30 &&
+			reflect.DeepEqual(region.GetLeader(), peers[0]) &&
+			reflect.DeepEqual(region.GetInterval(), interval)
+	})
+
+	req := &pdpb.AskBatchSplitRequest{
+		Header: &pdpb.RequestHeader{
+			ClusterId: suite.pdLeader.GetClusterID(),
+		},
+		Region:     regionReq.GetRegion(),
+		SplitCount: 10,
+	}
+
+	// case 1: The scheduling server is upgraded first, and then the PD server is upgraded.
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/handleAllocIDNonBatch", `return(true)`))
+	resp, err := grpcPDClient.AskBatchSplit(suite.ctx, req)
+	re.NoError(err)
+	allocatedIDs := map[uint64]struct{}{}
+	var maxID uint64
+	maxID = checkAllocatedID(re, resp, allocatedIDs, maxID)
+	re.Len(allocatedIDs, 40)
+	// Use the batch AllocID, which means the PD has finished the upgrade.
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/handleAllocIDNonBatch"))
+	resp, err = grpcPDClient.AskBatchSplit(suite.ctx, req)
+	re.NoError(err)
+	maxID = checkAllocatedID(re, resp, allocatedIDs, maxID)
+	re.Len(allocatedIDs, 80)
+
+	// case 2: The PD server is downgraded first.
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/handleAllocIDNonBatch", `return(true)`))
+	resp, err = grpcPDClient.AskBatchSplit(suite.ctx, req)
+	re.NoError(err)
+	maxID = checkAllocatedID(re, resp, allocatedIDs, maxID)
+	re.Len(allocatedIDs, 120)
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/handleAllocIDNonBatch"))
+	// Use the batch AllocID, which means the scheduling server has finished the upgrade.
+	resp, err = grpcPDClient.AskBatchSplit(suite.ctx, req)
+	re.NoError(err)
+	maxID = checkAllocatedID(re, resp, allocatedIDs, maxID)
+	re.Len(allocatedIDs, 160)
+
+	// case 3: The PD server is upgraded first, and then the scheduling server is upgraded.
+	re.NoError(failpoint.Enable("github.com/tikv/pd/mcs/scheduling/server/allocIDNonBatch", `return(true)`))
+	resp, err = grpcPDClient.AskBatchSplit(suite.ctx, req)
+	re.NoError(err)
+	maxID = checkAllocatedID(re, resp, allocatedIDs, maxID)
+	re.Len(allocatedIDs, 200)
+	re.NoError(failpoint.Disable("github.com/tikv/pd/mcs/scheduling/server/allocIDNonBatch"))
+	// Use the batch AllocID, which means the scheduling server has finished the upgrade.
+	resp, err = grpcPDClient.AskBatchSplit(suite.ctx, req)
+	re.NoError(err)
+	maxID = checkAllocatedID(re, resp, allocatedIDs, maxID)
+	re.Len(allocatedIDs, 240)
+
+	// case 4: The scheduling server is downgraded first.
+	re.NoError(failpoint.Enable("github.com/tikv/pd/mcs/scheduling/server/allocIDNonBatch", `return(true)`))
+	resp, err = grpcPDClient.AskBatchSplit(suite.ctx, req)
+	re.NoError(err)
+	maxID = checkAllocatedID(re, resp, allocatedIDs, maxID)
+	re.Len(allocatedIDs, 280)
+	re.NoError(failpoint.Disable("github.com/tikv/pd/mcs/scheduling/server/allocIDNonBatch"))
+	// Use the batch AllocID, which means the scheduling server has finished the upgrade.
+	resp, err = grpcPDClient.AskBatchSplit(suite.ctx, req)
+	re.NoError(err)
+	_ = checkAllocatedID(re, resp, allocatedIDs, maxID)
+	re.Len(allocatedIDs, 320)
+
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/scheduling/server/fastUpdateMember"))
+
+	suite.TearDownSuite()
+	suite.SetupSuite()
+}
+
+func checkAllocatedID(re *require.Assertions, resp *pdpb.AskBatchSplitResponse, allocatedIDs map[uint64]struct{}, maxID uint64) uint64 {
+	re.Empty(resp.GetHeader().GetError())
+	for _, id := range resp.GetIds() {
+		_, ok := allocatedIDs[id.NewRegionId]
+		re.False(ok)
+		re.Greater(id.NewRegionId, maxID)
+		maxID = id.NewRegionId
+		allocatedIDs[id.NewRegionId] = struct{}{}
+		for _, peer := range id.NewPeerIds {
+			_, ok := allocatedIDs[peer]
+			re.False(ok)
+			re.Greater(peer, maxID)
+			maxID = peer
+			allocatedIDs[peer] = struct{}{}
+		}
+	}
+	return maxID
+}
+
+func (suite *serverTestSuite) TestConcurrentBatchSplit() {
+	re := suite.Require()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/mcs/scheduling/server/fastUpdateMember", `return(true)`))
+	tc, err := tests.NewTestSchedulingCluster(suite.ctx, 1, suite.cluster)
+	re.NoError(err)
+	defer tc.Destroy()
+	tc.WaitForPrimaryServing(re)
+
+	rc := suite.pdLeader.GetServer().GetRaftCluster()
+	re.NotNil(rc)
+	s := &server.GrpcServer{Server: suite.pdLeader.GetServer()}
+	for i := uint64(1); i <= 3; i++ {
+		resp, err := s.PutStore(
+			context.Background(), &pdpb.PutStoreRequest{
+				Header: &pdpb.RequestHeader{ClusterId: suite.pdLeader.GetClusterID()},
+				Store: &metapb.Store{
+					Id:      i,
+					Address: fmt.Sprintf("mock://tikv-%d:%d", i, i),
+					State:   metapb.StoreState_Up,
+					Version: "7.0.0",
+				},
+			},
+		)
+		re.NoError(err)
+		re.Empty(resp.GetHeader().GetError())
+	}
+	grpcPDClient := testutil.MustNewGrpcClient(re, suite.pdLeader.GetServer().GetAddr())
+	stream, err := grpcPDClient.RegionHeartbeat(suite.ctx)
+	re.NoError(err)
+	peers := []*metapb.Peer{
+		{Id: 11, StoreId: 1},
+		{Id: 22, StoreId: 2},
+		{Id: 33, StoreId: 3},
+	}
+
+	interval := &pdpb.TimeInterval{StartTimestamp: 0, EndTimestamp: 10}
+	regionReq := &pdpb.RegionHeartbeatRequest{
+		Header:          testutil.NewRequestHeader(suite.pdLeader.GetClusterID()),
+		Region:          &metapb.Region{Id: 10, Peers: peers, StartKey: []byte("a"), EndKey: []byte("b")},
+		Leader:          peers[0],
+		ApproximateSize: 30 * units.MiB,
+		ApproximateKeys: 300,
+		Interval:        interval,
+		Term:            1,
+		CpuUsage:        100,
+	}
+	err = stream.Send(regionReq)
+	re.NoError(err)
+	testutil.Eventually(re, func() bool {
+		region := tc.GetPrimaryServer().GetCluster().GetRegion(10)
+		return region != nil && region.GetTerm() == 1 &&
+			region.GetApproximateKeys() == 300 && region.GetApproximateSize() == 30 &&
+			reflect.DeepEqual(region.GetLeader(), peers[0]) &&
+			reflect.DeepEqual(region.GetInterval(), interval)
+	})
+
+	req := &pdpb.AskBatchSplitRequest{
+		Header: &pdpb.RequestHeader{
+			ClusterId: suite.pdLeader.GetClusterID(),
+		},
+		Region:     regionReq.GetRegion(),
+		SplitCount: 10,
+	}
+
+	// case 1: The scheduling server is upgraded first, PD server has not been upgraded.
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/handleAllocIDNonBatch", `return(true)`))
+	suite.checkConcurrentAllocatedID(re, req, grpcPDClient)
+
+	// case 2: The scheduling server is upgraded first, PD server has been upgraded.
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/handleAllocIDNonBatch"))
+	suite.checkConcurrentAllocatedID(re, req, grpcPDClient)
+
+	// case 3: The PD server is upgraded first, scheduling server has not been upgraded.
+	re.NoError(failpoint.Enable("github.com/tikv/pd/mcs/scheduling/server/allocIDNonBatch", `return(true)`))
+	suite.checkConcurrentAllocatedID(re, req, grpcPDClient)
+
+	// case 4: The PD server is upgraded first, scheduling server has been upgraded.
+	re.NoError(failpoint.Disable("github.com/tikv/pd/mcs/scheduling/server/allocIDNonBatch"))
+	suite.checkConcurrentAllocatedID(re, req, grpcPDClient)
+
+	// case 5: Both the PD server and scheduling server has not been upgraded.
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/handleAllocIDNonBatch", `return(true)`))
+	re.NoError(failpoint.Enable("github.com/tikv/pd/mcs/scheduling/server/allocIDNonBatch", `return(true)`))
+	suite.checkConcurrentAllocatedID(re, req, grpcPDClient)
+
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/handleAllocIDNonBatch"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/mcs/scheduling/server/allocIDNonBatch"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/scheduling/server/fastUpdateMember"))
+
+	suite.TearDownSuite()
+	suite.SetupSuite()
+}
+
+func (suite *serverTestSuite) checkConcurrentAllocatedID(re *require.Assertions, req *pdpb.AskBatchSplitRequest, grpcPDClient pdpb.PDClient) {
+	var wg sync.WaitGroup
+	var allocatedIDs sync.Map
+	for range 100 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			resp, err := grpcPDClient.AskBatchSplit(suite.ctx, req)
+			re.NoError(err)
+			re.Empty(resp.GetHeader().GetError())
+			for _, id := range resp.GetIds() {
+				_, ok := allocatedIDs.Load(id.NewRegionId)
+				re.False(ok)
+				allocatedIDs.Store(id.NewRegionId, struct{}{})
+				for _, peer := range id.NewPeerIds {
+					_, ok := allocatedIDs.Load(peer)
+					re.False(ok)
+					allocatedIDs.Store(peer, struct{}{})
+				}
+			}
+		}()
+	}
+	wg.Wait()
+	var len int
+	allocatedIDs.Range(func(_, _ any) bool {
+		len++
+		return true
+	})
+	re.Equal(4000, len)
 }

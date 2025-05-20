@@ -49,8 +49,9 @@ func TestKeyspace(t *testing.T) {
 	for i := 1; i < 10; i++ {
 		keyspaces = append(keyspaces, fmt.Sprintf("keyspace_%d", i))
 	}
-	tc, err := pdTests.NewTestPDServiceCluster(ctx, 3, func(conf *config.Config, _ string) {
+	tc, err := pdTests.NewTestClusterWithKeyspaceGroup(ctx, 3, func(conf *config.Config, _ string) {
 		conf.Keyspace.PreAlloc = keyspaces
+		conf.Keyspace.WaitRegionSplit = false
 	})
 	re.NoError(err)
 	defer tc.Destroy()
@@ -66,7 +67,9 @@ func TestKeyspace(t *testing.T) {
 	tc.WaitLeader()
 	leaderServer := tc.GetLeaderServer()
 	re.NoError(leaderServer.BootstrapCluster())
-	defaultKeyspaceGroupID := fmt.Sprintf("%d", constant.DefaultKeyspaceGroupID)
+	defaultKeyspaceGroupID := strconv.FormatUint(uint64(constant.DefaultKeyspaceGroupID), 10)
+	keyspaceIDs, err := leaderServer.GetPreAllocKeyspaceIDs()
+	re.NoError(err)
 
 	var k api.KeyspaceMeta
 	keyspaceName := "keyspace_1"
@@ -77,13 +80,13 @@ func TestKeyspace(t *testing.T) {
 		re.NoError(json.Unmarshal(output, &k))
 		return k.GetName() == keyspaceName
 	})
-	re.Equal(uint32(1), k.GetId())
+	re.Equal(keyspaceIDs[0], k.GetId())
 	re.Equal(defaultKeyspaceGroupID, k.Config[keyspace.TSOKeyspaceGroupIDKey])
 
 	// split keyspace group.
 	newGroupID := "2"
 	testutil.Eventually(re, func() bool {
-		args := []string{"-u", pdAddr, "keyspace-group", "split", "0", newGroupID, "1"}
+		args := []string{"-u", pdAddr, "keyspace-group", "split", "0", newGroupID, strconv.Itoa(int(keyspaceIDs[0]))}
 		output, err := tests.ExecuteCommand(cmd, args...)
 		re.NoError(err)
 		return strings.Contains(string(output), "Success")
@@ -155,7 +158,7 @@ func (suite *keyspaceTestSuite) SetupTest() {
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/delayStartServerLoop", `return(true)`))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion", "return(true)"))
-	tc, err := pdTests.NewTestPDServiceCluster(suite.ctx, 1)
+	tc, err := pdTests.NewTestClusterWithKeyspaceGroup(suite.ctx, 1)
 	re.NoError(err)
 	re.NoError(tc.RunInitialServers())
 	tc.WaitLeader()
@@ -167,13 +170,10 @@ func (suite *keyspaceTestSuite) SetupTest() {
 
 func (suite *keyspaceTestSuite) TearDownTest() {
 	re := suite.Require()
-	re.NoError(failpoint.Disable("github.com/tikv/pd/server/delayStartServerLoop"))
-	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion"))
-}
-
-func (suite *keyspaceTestSuite) TearDownSuite() {
 	suite.cancel()
 	suite.cluster.Destroy()
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/delayStartServerLoop"))
+	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion"))
 }
 
 func (suite *keyspaceTestSuite) TestShowKeyspace() {
@@ -301,7 +301,7 @@ func (suite *keyspaceTestSuite) TestListKeyspace() {
 	var resp api.LoadAllKeyspacesResponse
 	re.NoError(json.Unmarshal(output, &resp))
 	re.Len(resp.Keyspaces, 11)
-	re.Equal("", resp.NextPageToken) // No next page token since we load them all.
+	re.Empty(resp.NextPageToken) // No next page token since we load them all.
 	re.Equal("DEFAULT", resp.Keyspaces[0].GetName())
 	for i, meta := range resp.Keyspaces[1:] {
 		re.Equal(fmt.Sprintf("test_keyspace_%d", i), meta.GetName())

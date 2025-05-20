@@ -25,6 +25,7 @@ import (
 
 	"github.com/tikv/pd/pkg/btree"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
 )
 
@@ -151,7 +152,7 @@ func (t *regionTree) update(item *regionItem, withOverlaps bool, overlaps ...*Re
 	}
 	t.tree.ReplaceOrInsert(item)
 	if t.countRef {
-		item.RegionInfo.IncRef()
+		item.IncRef()
 	}
 	result := make([]*RegionInfo, len(overlaps))
 	for i, overlap := range overlaps {
@@ -220,7 +221,7 @@ func (t *regionTree) remove(region *RegionInfo) {
 	t.totalWriteBytesRate -= regionWriteBytesRate
 	t.totalWriteKeysRate -= regionWriteKeysRate
 	if t.countRef {
-		result.RegionInfo.DecRef()
+		result.DecRef()
 	}
 	if !region.LoadedFromStorage() {
 		t.notFromStorageRegionsCnt--
@@ -253,6 +254,26 @@ func (t *regionTree) searchPrev(regionKey []byte) *RegionInfo {
 		return nil
 	}
 	return prevRegionItem.RegionInfo
+}
+
+// searchByKeys searches the regions by keys and return a slice of `*RegionInfo` whose order is the same as the input keys.
+func (t *regionTree) searchByKeys(keys [][]byte) []*RegionInfo {
+	regions := make([]*RegionInfo, len(keys))
+	// TODO: do we need to deduplicate the input keys?
+	for idx, key := range keys {
+		regions[idx] = t.search(key)
+	}
+	return regions
+}
+
+// searchByPrevKeys searches the regions by prevKeys and return a slice of `*RegionInfo` whose order is the same as the input keys.
+func (t *regionTree) searchByPrevKeys(prevKeys [][]byte) []*RegionInfo {
+	regions := make([]*RegionInfo, len(prevKeys))
+	// TODO: do we need to deduplicate the input keys?
+	for idx, key := range prevKeys {
+		regions[idx] = t.searchPrev(key)
+	}
+	return regions
 }
 
 // find returns the range item contains the start key.
@@ -301,7 +322,7 @@ func (t *regionTree) scanRanges() []*RegionInfo {
 	return res
 }
 
-func (t *regionTree) getAdjacentRegions(region *RegionInfo) (*regionItem, *regionItem) {
+func (t *regionTree) getAdjacentRegions(region *RegionInfo) (prev, next *regionItem) {
 	item := &regionItem{RegionInfo: &RegionInfo{meta: &metapb.Region{StartKey: region.GetStartKey()}}}
 	return t.getAdjacentItem(item)
 }
@@ -325,7 +346,7 @@ func (t *regionTree) getAdjacentItem(item *regionItem) (prev *regionItem, next *
 	return prev, next
 }
 
-func (t *regionTree) randomRegion(ranges []KeyRange) *RegionInfo {
+func (t *regionTree) randomRegion(ranges []keyutil.KeyRange) *RegionInfo {
 	regions := t.RandomRegions(1, ranges)
 	if len(regions) == 0 {
 		return nil
@@ -334,7 +355,7 @@ func (t *regionTree) randomRegion(ranges []KeyRange) *RegionInfo {
 }
 
 // RandomRegions get n random regions within the given ranges.
-func (t *regionTree) RandomRegions(n int, ranges []KeyRange) []*RegionInfo {
+func (t *regionTree) RandomRegions(n int, ranges []keyutil.KeyRange) []*RegionInfo {
 	treeLen := t.length()
 	if treeLen == 0 || n < 1 {
 		return nil

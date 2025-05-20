@@ -1,3 +1,17 @@
+// Copyright 2023 TiKV Project Authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package server
 
 import (
@@ -178,7 +192,7 @@ func (c *Cluster) GetRegionScatterer() *scatter.RegionScatterer {
 }
 
 // GetStoresLoads returns load stats of all stores.
-func (c *Cluster) GetStoresLoads() map[uint64][]float64 {
+func (c *Cluster) GetStoresLoads() map[uint64]statistics.StoreKindLoads {
 	return c.hotStat.GetStoresLoads()
 }
 
@@ -225,20 +239,25 @@ func (c *Cluster) GetSchedulerConfig() sc.SchedulerConfigProvider { return c.per
 // GetStoreConfig returns the store config.
 func (c *Cluster) GetStoreConfig() sc.StoreConfigProvider { return c.persistConfig }
 
-// AllocID allocates a new ID.
-func (c *Cluster) AllocID() (uint64, error) {
+// AllocID allocates new IDs.
+func (c *Cluster) AllocID(count uint32) (uint64, uint32, error) {
 	client, err := c.getPDLeaderClient()
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
 	ctx, cancel := context.WithTimeout(c.ctx, requestTimeout)
 	defer cancel()
-	resp, err := client.AllocID(ctx, &pdpb.AllocIDRequest{Header: &pdpb.RequestHeader{ClusterId: keypath.ClusterID()}})
+	req := &pdpb.AllocIDRequest{Header: &pdpb.RequestHeader{ClusterId: keypath.ClusterID()}, Count: count}
+
+	failpoint.Inject("allocIDNonBatch", func() {
+		req = &pdpb.AllocIDRequest{Header: &pdpb.RequestHeader{ClusterId: keypath.ClusterID()}}
+	})
+	resp, err := client.AllocID(ctx, req)
 	if err != nil {
 		c.triggerMembershipCheck()
-		return 0, err
+		return 0, 0, err
 	}
-	return resp.GetId(), nil
+	return resp.GetId(), resp.GetCount(), nil
 }
 
 func (c *Cluster) getPDLeaderClient() (pdpb.PDClient, error) {
@@ -257,8 +276,8 @@ func (c *Cluster) triggerMembershipCheck() {
 	}
 }
 
-// SwitchPDServiceLeader switches the PD service leader.
-func (c *Cluster) SwitchPDServiceLeader(new pdpb.PDClient) bool {
+// SwitchPDLeader switches the PD leader.
+func (c *Cluster) SwitchPDLeader(new pdpb.PDClient) bool {
 	old := c.pdLeader.Load()
 	return c.pdLeader.CompareAndSwap(old, new)
 }
@@ -314,7 +333,11 @@ func (c *Cluster) updateScheduler() {
 		)
 		// Create the newly added schedulers.
 		for _, scheduler := range latestSchedulersConfig {
-			schedulerType := types.ConvertOldStrToType[scheduler.Type]
+			schedulerType, ok := types.ConvertOldStrToType[scheduler.Type]
+			if !ok {
+				log.Error("scheduler not found", zap.String("type", scheduler.Type))
+				continue
+			}
 			s, err := schedulers.CreateScheduler(
 				schedulerType,
 				c.coordinator.GetOperatorController(),
@@ -411,14 +434,8 @@ func (c *Cluster) HandleStoreHeartbeat(heartbeat *schedulingpb.StoreHeartbeatReq
 		return errors.Errorf("store %v not found", storeID)
 	}
 
-	nowTime := time.Now()
-	newStore := store.Clone(core.SetStoreStats(stats), core.SetLastHeartbeatTS(nowTime))
-
-	if store := c.GetStore(storeID); store != nil {
-		statistics.UpdateStoreHeartbeatMetrics(store)
-	}
-	c.PutStore(newStore)
-	c.hotStat.Observe(storeID, newStore.GetStoreStats())
+	c.PutStore(store, core.SetStoreStats(stats), core.SetLastHeartbeatTS(time.Now()))
+	c.hotStat.Observe(storeID, stats)
 	c.hotStat.FilterUnhealthyStore(c)
 	reportInterval := stats.GetInterval()
 	interval := reportInterval.GetEndTimestamp() - reportInterval.GetStartTimestamp()

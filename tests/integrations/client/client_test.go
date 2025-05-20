@@ -21,8 +21,6 @@ import (
 	"fmt"
 	"math"
 	"os"
-	"path"
-	"reflect"
 	"sort"
 	"strconv"
 	"strings"
@@ -229,17 +227,18 @@ func TestGetTSAfterTransferLeader(t *testing.T) {
 	defer cancel()
 	cluster, err := tests.NewTestCluster(ctx, 2)
 	re.NoError(err)
+	defer cluster.Destroy()
 	endpoints := runServer(re, cluster)
 	leader := cluster.WaitLeader()
 	re.NotEmpty(leader)
-	defer cluster.Destroy()
 
 	cli := setupCli(ctx, re, endpoints, opt.WithCustomTimeoutOption(10*time.Second))
 	defer cli.Close()
 
 	var leaderSwitched atomic.Bool
-	cli.GetServiceDiscovery().AddServingURLSwitchedCallback(func() {
+	cli.GetServiceDiscovery().AddLeaderSwitchedCallback(func(string) error {
 		leaderSwitched.Store(true)
+		return nil
 	})
 	err = cluster.GetServer(leader).ResignLeader()
 	re.NoError(err)
@@ -361,7 +360,7 @@ func TestTSOFollowerProxyWithTSOService(t *testing.T) {
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/servicediscovery/fastUpdateServiceMode", `return(true)`))
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	cluster, err := tests.NewTestPDServiceCluster(ctx, 1)
+	cluster, err := tests.NewTestClusterWithKeyspaceGroup(ctx, 1)
 	re.NoError(err)
 	defer cluster.Destroy()
 	err = cluster.RunInitialServers()
@@ -516,8 +515,6 @@ func (suite *followerForwardAndHandleTestSuite) SetupSuite() {
 		return err == nil
 	})
 }
-
-func (*followerForwardAndHandleTestSuite) TearDownTest() {}
 
 func (suite *followerForwardAndHandleTestSuite) TearDownSuite() {
 	suite.cluster.Destroy()
@@ -978,7 +975,7 @@ type idAllocator struct {
 }
 
 func (i *idAllocator) alloc() uint64 {
-	id, _ := i.allocator.Alloc()
+	id, _, _ := i.allocator.Alloc(1)
 	return id
 }
 
@@ -989,16 +986,16 @@ var (
 	// If we alloc ID in client in the future, these IDs must be updated.
 	stores = []*metapb.Store{
 		{Id: 1,
-			Address: "localhost:1",
+			Address: "mock://tikv-1:1",
 		},
 		{Id: 2,
-			Address: "localhost:2",
+			Address: "mock://tikv-2:2",
 		},
 		{Id: 3,
-			Address: "localhost:3",
+			Address: "mock://tikv-3:3",
 		},
 		{Id: 4,
-			Address: "localhost:4",
+			Address: "mock://tikv-4:4",
 		},
 	}
 
@@ -1035,12 +1032,12 @@ func TestClientTestSuite(t *testing.T) {
 func (suite *clientTestSuite) SetupSuite() {
 	var err error
 	re := suite.Require()
-	suite.srv, suite.cleanup, err = server.NewTestServer(re, assertutil.CheckerWithNilAssert(re))
+	suite.srv, suite.cleanup, err = tests.NewServer(re, assertutil.CheckerWithNilAssert(re))
 	re.NoError(err)
 	suite.grpcPDClient = testutil.MustNewGrpcClient(re, suite.srv.GetAddr())
 	suite.grpcSvr = &server.GrpcServer{Server: suite.srv}
 
-	server.MustWaitLeader(re, []*server.Server{suite.srv})
+	tests.MustWaitLeader(re, []*server.Server{suite.srv})
 	bootstrapServer(re, newHeader(), suite.grpcPDClient)
 
 	suite.ctx, suite.clean = context.WithCancel(context.Background())
@@ -1063,13 +1060,15 @@ func (suite *clientTestSuite) SetupSuite() {
 			},
 		})
 
-		storeInfo := suite.grpcSvr.GetRaftCluster().GetStore(store.GetId())
-		newStore := storeInfo.Clone(core.SetStoreStats(&pdpb.StoreStats{
-			Capacity:  uint64(10 * units.GiB),
-			UsedSize:  uint64(9 * units.GiB),
-			Available: uint64(1 * units.GiB),
-		}))
-		suite.grpcSvr.GetRaftCluster().GetBasicCluster().PutStore(newStore)
+		suite.grpcSvr.StoreHeartbeat(context.Background(), &pdpb.StoreHeartbeatRequest{
+			Header: newHeader(),
+			Stats: &pdpb.StoreStats{
+				StoreId:   store.GetId(),
+				Capacity:  uint64(10 * units.GiB),
+				UsedSize:  uint64(9 * units.GiB),
+				Available: uint64(1 * units.GiB),
+			},
+		})
 	}
 	cluster.GetOpts().(*config.PersistOptions).SetRegionBucketEnabled(true)
 }
@@ -1106,117 +1105,8 @@ func bootstrapServer(re *require.Assertions, header *pdpb.RequestHeader, client 
 	re.Equal(pdpb.ErrorType_OK, resp.GetHeader().GetError().GetType())
 }
 
-func (suite *clientTestSuite) TestGetRegion() {
-	re := suite.Require()
-	regionID := regionIDAllocator.alloc()
-	region := &metapb.Region{
-		Id: regionID,
-		RegionEpoch: &metapb.RegionEpoch{
-			ConfVer: 1,
-			Version: 1,
-		},
-		Peers: peers,
-	}
-	req := &pdpb.RegionHeartbeatRequest{
-		Header: newHeader(),
-		Region: region,
-		Leader: peers[0],
-	}
-	err := suite.regionHeartbeat.Send(req)
-	re.NoError(err)
-	testutil.Eventually(re, func() bool {
-		r, err := suite.client.GetRegion(context.Background(), []byte("a"))
-		re.NoError(err)
-		if r == nil {
-			return false
-		}
-		return reflect.DeepEqual(region, r.Meta) &&
-			reflect.DeepEqual(peers[0], r.Leader) &&
-			r.Buckets == nil
-	})
-	breq := &pdpb.ReportBucketsRequest{
-		Header: newHeader(),
-		Buckets: &metapb.Buckets{
-			RegionId:   regionID,
-			Version:    1,
-			Keys:       [][]byte{[]byte("a"), []byte("z")},
-			PeriodInMs: 2000,
-			Stats: &metapb.BucketStats{
-				ReadBytes:  []uint64{1},
-				ReadKeys:   []uint64{1},
-				ReadQps:    []uint64{1},
-				WriteBytes: []uint64{1},
-				WriteKeys:  []uint64{1},
-				WriteQps:   []uint64{1},
-			},
-		},
-	}
-	re.NoError(suite.reportBucket.Send(breq))
-	testutil.Eventually(re, func() bool {
-		r, err := suite.client.GetRegion(context.Background(), []byte("a"), opt.WithBuckets())
-		re.NoError(err)
-		if r == nil {
-			return false
-		}
-		return r.Buckets != nil
-	})
-	suite.srv.GetRaftCluster().GetOpts().(*config.PersistOptions).SetRegionBucketEnabled(false)
-
-	testutil.Eventually(re, func() bool {
-		r, err := suite.client.GetRegion(context.Background(), []byte("a"), opt.WithBuckets())
-		re.NoError(err)
-		if r == nil {
-			return false
-		}
-		return r.Buckets == nil
-	})
-	suite.srv.GetRaftCluster().GetOpts().(*config.PersistOptions).SetRegionBucketEnabled(true)
-
-	re.NoError(failpoint.Enable("github.com/tikv/pd/server/grpcClientClosed", `return(true)`))
-	re.NoError(failpoint.Enable("github.com/tikv/pd/server/useForwardRequest", `return(true)`))
-	re.NoError(suite.reportBucket.Send(breq))
-	re.Error(suite.reportBucket.RecvMsg(breq))
-	re.NoError(failpoint.Disable("github.com/tikv/pd/server/grpcClientClosed"))
-	re.NoError(failpoint.Disable("github.com/tikv/pd/server/useForwardRequest"))
-}
-
-func (suite *clientTestSuite) TestGetPrevRegion() {
-	re := suite.Require()
-	regionLen := 10
-	regions := make([]*metapb.Region, 0, regionLen)
-	for i := range regionLen {
-		regionID := regionIDAllocator.alloc()
-		r := &metapb.Region{
-			Id: regionID,
-			RegionEpoch: &metapb.RegionEpoch{
-				ConfVer: 1,
-				Version: 1,
-			},
-			StartKey: []byte{byte(i)},
-			EndKey:   []byte{byte(i + 1)},
-			Peers:    peers,
-		}
-		regions = append(regions, r)
-		req := &pdpb.RegionHeartbeatRequest{
-			Header: newHeader(),
-			Region: r,
-			Leader: peers[0],
-		}
-		err := suite.regionHeartbeat.Send(req)
-		re.NoError(err)
-	}
-	time.Sleep(500 * time.Millisecond)
-	for i := range 20 {
-		testutil.Eventually(re, func() bool {
-			r, err := suite.client.GetPrevRegion(context.Background(), []byte{byte(i)})
-			re.NoError(err)
-			if i > 0 && i < regionLen {
-				return reflect.DeepEqual(peers[0], r.Leader) &&
-					reflect.DeepEqual(regions[i-1], r.Meta)
-			}
-			return r == nil
-		})
-	}
+func (suite *clientTestSuite) SetupTest() {
+	suite.grpcSvr.DirectlyGetRaftCluster().ResetRegionCache()
 }
 
 func (suite *clientTestSuite) TestScanRegions() {
@@ -1296,49 +1186,6 @@ func (suite *clientTestSuite) TestScanRegions() {
 	check([]byte{1}, []byte{6}, 2, regions[1:3])
 }
 
-func (suite *clientTestSuite) TestGetRegionByID() {
-	re := suite.Require()
-	regionID := regionIDAllocator.alloc()
-	region := &metapb.Region{
-		Id: regionID,
-		RegionEpoch: &metapb.RegionEpoch{
-			ConfVer: 1,
-			Version: 1,
-		},
-		Peers: peers,
-	}
-	req := &pdpb.RegionHeartbeatRequest{
-		Header: newHeader(),
-		Region: region,
-		Leader: peers[0],
-	}
-	err := suite.regionHeartbeat.Send(req)
-	re.NoError(err)
-
-	testutil.Eventually(re, func() bool {
-		r, err := suite.client.GetRegionByID(context.Background(), regionID)
-		re.NoError(err)
-		if r == nil {
-			return false
-		}
-		return reflect.DeepEqual(region, r.Meta) &&
-			reflect.DeepEqual(peers[0], r.Leader)
-	})
-
-	// test WithCallerComponent
-	testutil.Eventually(re, func() bool {
-		r, err := suite.client.
-			WithCallerComponent(caller.GetComponent(0)).
-			GetRegionByID(context.Background(), regionID)
-		re.NoError(err)
-		if r == nil {
-			return false
-		}
-		return reflect.DeepEqual(region, r.Meta) &&
-			reflect.DeepEqual(peers[0], r.Leader)
-	})
-}
-
 func (suite *clientTestSuite) TestGetStore() {
 	re := suite.Require()
 	cluster := suite.srv.GetRaftCluster()
@@ -1348,6 +1195,7 @@ func (suite *clientTestSuite) TestGetStore() {
 	// Get an up store should be OK.
 	n, err := suite.client.GetStore(context.Background(), store.GetId())
 	re.NoError(err)
+	store.LastHeartbeat = n.LastHeartbeat
 	re.Equal(store, n)
 
 	actualStores, err := suite.client.GetAllStores(context.Background())
@@ -1554,7 +1402,7 @@ func (suite *clientTestSuite) TestUpdateServiceGCSafePoint() {
 	re.NoError(err)
 
 	// Force set invalid ttl to gc_worker
-	gcWorkerKey := path.Join("gc", "safe_point", "service", "gc_worker")
+	gcWorkerKey := keypath.ServiceGCSafePointPath("gc_worker")
 	{
 		gcWorkerSsp := &endpoint.ServiceSafePoint{
 			ServiceID: "gc_worker",
@@ -1595,32 +1443,26 @@ func (suite *clientTestSuite) TestUpdateServiceGCSafePoint() {
 
 func (suite *clientTestSuite) TestScatterRegion() {
 	re := suite.Require()
-	CreateRegion := func() uint64 {
-		regionID := regionIDAllocator.alloc()
-		region := &metapb.Region{
-			Id: regionID,
-			RegionEpoch: &metapb.RegionEpoch{
-				ConfVer: 1,
-				Version: 1,
-			},
-			Peers:    peers,
-			StartKey: []byte("fff"),
-			EndKey:   []byte("ggg"),
-		}
-		req := &pdpb.RegionHeartbeatRequest{
-			Header: newHeader(),
-			Region: region,
-			Leader: peers[0],
-		}
-		err := suite.regionHeartbeat.Send(req)
-		re.NoError(err)
-		return regionID
-	}
-	var regionID = CreateRegion()
-	regionsID := []uint64{regionID}
-	// Test interface `ScatterRegions`.
+	regionID := regionIDAllocator.alloc()
 	testutil.Eventually(re, func() bool {
-		scatterResp, err := suite.client.ScatterRegions(context.Background(), regionsID, opt.WithGroup("test"), opt.WithRetry(1))
+		err := suite.regionHeartbeat.Send(&pdpb.RegionHeartbeatRequest{
+			Header: newHeader(),
+			Region: &metapb.Region{
+				Id: regionID,
+				RegionEpoch: &metapb.RegionEpoch{
+					ConfVer: 1,
+					Version: 1,
+				},
+				Peers:    peers,
+				StartKey: []byte("fff"),
+				EndKey:   []byte("ggg"),
+			},
+			Leader: peers[0],
+		})
+		if err != nil {
+			return false
+		}
+		scatterResp, err := suite.client.ScatterRegions(context.Background(), []uint64{regionID}, opt.WithGroup("test"), opt.WithRetry(1))
 		if err != nil {
 			return false
 		}
@@ -1631,18 +1473,35 @@ func (suite *clientTestSuite) TestScatterRegion() {
 		if err != nil {
 			return false
 		}
-		return resp.GetRegionId() == regionID &&
-			string(resp.GetDesc()) == "scatter-region" &&
-			resp.GetStatus() == pdpb.OperatorStatus_RUNNING
-	}, testutil.WithTickInterval(time.Second))
+		if resp.GetRegionId() != regionID || string(resp.GetDesc()) != "scatter-region" {
+			return false
+		}
+		return resp.GetStatus() == pdpb.OperatorStatus_RUNNING || resp.GetStatus() == pdpb.OperatorStatus_SUCCESS
+	})
 
 	// Test interface `ScatterRegion`.
 	// TODO: Deprecate interface `ScatterRegion`.
 	// create a new region as scatter operation from previous test might be running
-
-	regionID = CreateRegion()
+	regionID = regionIDAllocator.alloc()
 	testutil.Eventually(re, func() bool {
-		err := suite.client.ScatterRegion(context.Background(), regionID)
+		err := suite.regionHeartbeat.Send(&pdpb.RegionHeartbeatRequest{
+			Header: newHeader(),
+			Region: &metapb.Region{
+				Id: regionID,
+				RegionEpoch: &metapb.RegionEpoch{
+					ConfVer: 1,
+					Version: 1,
+				},
+				Peers:    peers,
+				StartKey: []byte("ggg"),
+				EndKey:   []byte("hhh"),
+			},
+			Leader: peers[0],
+		})
+		if err != nil {
+			return false
+		}
+		err = suite.client.ScatterRegion(context.Background(), regionID)
 		if err != nil {
 			return false
 		}
@@ -1650,10 +1509,11 @@ func (suite *clientTestSuite) TestScatterRegion() {
 		if err != nil {
 			return false
 		}
-		return resp.GetRegionId() == regionID &&
-			string(resp.GetDesc()) == "scatter-region" &&
-			resp.GetStatus() == pdpb.OperatorStatus_RUNNING
-	}, testutil.WithTickInterval(time.Second))
+		if resp.GetRegionId() != regionID || string(resp.GetDesc()) != "scatter-region" {
+			return false
+		}
+		return resp.GetStatus() == pdpb.OperatorStatus_RUNNING || resp.GetStatus() == pdpb.OperatorStatus_SUCCESS
+	})
 }
 
 func TestWatch(t *testing.T) {
@@ -2050,6 +1910,7 @@ func TestGetRegionWithBackoff(t *testing.T) {
 	// Initialize the client with context and backoff
 	client, err := pd.NewClientWithContext(ctx, caller.TestComponent, endpoints, pd.SecurityOption{})
 	re.NoError(err)
+	defer client.Close()
 
 	// Record the start time
 	start := time.Now()
@@ -2177,8 +2038,7 @@ func TestCircuitBreakerOpenAndChangeSettings(t *testing.T) {
 		*config = cb.AlwaysClosedSettings
 	})
 	_, err = cli.GetRegion(ctx, []byte("a"))
-	re.Error(err)
-	re.Contains(err.Error(), "ResourceExhausted")
+	re.NoError(err)
 	re.NoError(failpoint.Disable("github.com/tikv/pd/client/pkg/utils/grpcutil/triggerCircuitBreaker"))
 }
 
@@ -2247,8 +2107,7 @@ func TestCircuitBreakerHalfOpenAndChangeSettings(t *testing.T) {
 	// It won't be changed to open state.
 	for range 100 {
 		_, err := cli.GetRegion(ctx, []byte("a"))
-		re.Error(err)
-		re.NotContains(err.Error(), "circuit breaker is open")
+		re.NoError(err)
 	}
 	re.NoError(failpoint.Disable("github.com/tikv/pd/client/pkg/utils/grpcutil/triggerCircuitBreaker"))
 }

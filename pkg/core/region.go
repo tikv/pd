@@ -39,6 +39,7 @@ import (
 	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
@@ -47,6 +48,7 @@ import (
 const (
 	randomRegionMaxRetry = 10
 	scanRegionLimit      = 1000
+	batchSearchSize      = 16
 	// CollectFactor is the factor to collect the count of region.
 	CollectFactor = 0.9
 )
@@ -359,6 +361,83 @@ func (r *RegionInfo) GetPeer(peerID uint64) *metapb.Peer {
 	return nil
 }
 
+// Rule is the rule for balance range scheduler
+type Rule int
+
+const (
+	// LeaderScatter scatter the leader of the region.
+	LeaderScatter Rule = iota
+	// PeerScatter scatter all the peers of the region.
+	PeerScatter
+	// LearnerScatter is the learner of the region.
+	LearnerScatter
+	// Unknown is the unknown rule of the region include witness.
+	Unknown
+)
+
+// String returns the string value of the rule.
+func (r *Rule) String() string {
+	switch *r {
+	case LeaderScatter:
+		return "leader-scatter"
+	case PeerScatter:
+		return "peer-scatter"
+	case LearnerScatter:
+		return "learner-scatter"
+	default:
+		return "unknown"
+	}
+}
+
+// NewRule creates a new rule.
+func NewRule(rule string) Rule {
+	switch rule {
+	case "leader-scatter":
+		return LeaderScatter
+	case "peer-scatter":
+		return PeerScatter
+	case "learner-scatter":
+		return LearnerScatter
+	default:
+		return Unknown
+	}
+}
+
+// MarshalJSON returns the JSON encoding of rule.
+func (r *Rule) MarshalJSON() ([]byte, error) {
+	return []byte(`"` + r.String() + `"`), nil
+}
+
+// UnmarshalJSON parses the JSON-encoded data and stores the result in rule.
+func (r *Rule) UnmarshalJSON(data []byte) error {
+	s := string(data)
+	switch s {
+	case `"leader-scatter"`:
+		*r = LeaderScatter
+	case `"peer-scatter"`:
+		*r = PeerScatter
+	case `"learner-scatter"`:
+		*r = LearnerScatter
+	default:
+		*r = Unknown
+	}
+	return nil
+}
+
+// GetPeersByRule returns the peers with specified rule.
+func (r *RegionInfo) GetPeersByRule(rule Rule) []*metapb.Peer {
+	switch rule {
+	case LeaderScatter:
+		return []*metapb.Peer{r.GetLeader()}
+	case PeerScatter:
+		return r.GetPeers()
+	case LearnerScatter:
+		return r.GetLearners()
+	default:
+		return nil
+	}
+}
+
 // GetDownPeer returns the down peer with specified peer id.
 func (r *RegionInfo) GetDownPeer(peerID uint64) *metapb.Peer {
 	for _, down := range r.downPeers {
@@ -479,16 +558,6 @@ func (r *RegionInfo) GetFollowers() map[uint64]*metapb.Peer {
 		}
 	}
 	return followers
-}
-
-// GetFollower randomly returns a follow peer.
-func (r *RegionInfo) GetFollower() *metapb.Peer {
-	for _, peer := range r.GetVoters() {
-		if r.leader == nil || r.leader.GetId() != peer.GetId() {
-			return peer
-		}
-	}
-	return nil
 }
 
 // GetNonWitnessVoters returns a map indicate the non-witness voter peers distributed.
@@ -1417,22 +1486,14 @@ func SortedPeersStatsEqual(peersA, peersB []*pdpb.PeerStats) bool {
 func (r *RegionsInfo) GetRegionByKey(regionKey []byte) *RegionInfo {
 	r.t.RLock()
 	defer r.t.RUnlock()
-	region := r.tree.search(regionKey)
-	if region == nil {
-		return nil
-	}
-	return r.getRegionLocked(region.GetID())
+	return r.tree.search(regionKey)
 }
 
 // GetPrevRegionByKey searches previous RegionInfo from regionTree
 func (r *RegionsInfo) GetPrevRegionByKey(regionKey []byte) *RegionInfo {
 	r.t.RLock()
 	defer r.t.RUnlock()
-	region := r.tree.searchPrev(regionKey)
-	if region == nil {
-		return nil
-	}
-	return r.getRegionLocked(region.GetID())
+	return r.tree.searchPrev(regionKey)
 }
 
 // GetRegions gets all RegionInfo from regionMap
@@ -1462,6 +1523,146 @@ func (r *RegionsInfo) GetStoreRegions(storeID uint64) []*RegionInfo {
 	}
 	// no need to consider witness, as it is already included in leaders, followers and learners
 	return regions
+}
+
+// QueryRegions searches RegionInfo from regionTree by keys and IDs in batch.
+// TODO: benchmark the performance of `QueryRegions`.
+func (r *RegionsInfo) QueryRegions(
+	keys, prevKeys [][]byte, ids []uint64, needBuckets bool,
+) (keyIDMap, prevKeyIDMap []uint64, regionsByID map[uint64]*pdpb.RegionResponse) {
+	var (
+		start                time.Time
+		regions, prevRegions []*RegionInfo
+	)
+
+	// Iterate the region keys to find the regions.
+	if len(keys) > 0 {
+		queryRegionKeysCount.Add(float64(len(keys)))
+		start = time.Now()
+		regions = r.getRegionsByKeys(keys)
+		queryRegionByKeysDuration.Observe(time.Since(start).Seconds())
+		// Assert the returned regions count matches the input keys.
+		if len(regions) != len(keys) {
+			panic("returned regions count mismatch with the input keys")
+		}
+	}
+
+	// Iterate the prevKeys to find the regions.
+	if len(prevKeys) > 0 {
+		queryRegionPrevKeysCount.Add(float64(len(prevKeys)))
+		start = time.Now()
+		prevRegions = r.getRegionsByPrevKeys(prevKeys)
+		queryRegionByPrevKeysDuration.Observe(time.Since(start).Seconds())
+		// Assert the returned regions count matches the input keys.
+		if len(prevRegions) != len(prevKeys) {
+			panic("returned prev regions count mismatch with the input keys")
+		}
+	}
+
+	// Build the key -> ID map for the final results.
+	regionsByID = make(map[uint64]*pdpb.RegionResponse, len(regions)+len(prevRegions)+len(ids))
+	keyIDMap = sortOutKeyIDMap(regionsByID, regions, needBuckets)
+	prevKeyIDMap = sortOutKeyIDMap(regionsByID, prevRegions, needBuckets)
+
+	// Iterate the region IDs to find the regions.
+	if len(ids) > 0 {
+		queryRegionIDsCount.Add(float64(len(ids)))
+		start = time.Now()
+		for _, id := range ids {
+			// Check if the region has been found.
+			if regionFound, ok := regionsByID[id]; (ok && regionFound != nil) || id == 0 {
+				continue
+			}
+			// If the given region ID is not found in the region tree, set the region to nil.
+			if region := r.GetRegion(id); region == nil {
+				regionsByID[id] = nil
+			} else {
+				regionResp := &pdpb.RegionResponse{
+					Region:       region.GetMeta(),
+					Leader:       region.GetLeader(),
+					DownPeers:    region.GetDownPeers(),
+					PendingPeers: region.GetPendingPeers(),
+				}
+				if needBuckets {
+					regionResp.Buckets = region.GetBuckets()
+				}
+				regionsByID[id] = regionResp
+			}
+		}
+		queryRegionByIDsDuration.Observe(time.Since(start).Seconds())
+	}
+
+	return keyIDMap, prevKeyIDMap, regionsByID
+}
+
+// getRegionsByKeys searches RegionInfo from regionTree by keys.
+func (r *RegionsInfo) getRegionsByKeys(keys [][]byte) []*RegionInfo {
+	regions := make([]*RegionInfo, 0, len(keys))
+	// Split the keys into multiple batches, and search each batch separately.
+	// This is to avoid the lock contention on the `regionTree`.
+	for _, batch := range splitKeysIntoBatches(keys) {
+		r.t.RLock()
+		results := r.tree.searchByKeys(batch)
+		r.t.RUnlock()
+		regions = append(regions, results...)
+	}
+	return regions
+}
+
+func splitKeysIntoBatches(keys [][]byte) [][][]byte {
+	keysLen := len(keys)
+	batches := make([][][]byte, 0, (keysLen+batchSearchSize-1)/batchSearchSize)
+	for i := 0; i < keysLen; i += batchSearchSize {
+		end := i + batchSearchSize
+		if end > keysLen {
+			end = keysLen
+		}
+		batches = append(batches, keys[i:end])
+	}
+	return batches
+}
+
+func (r *RegionsInfo) getRegionsByPrevKeys(prevKeys [][]byte) []*RegionInfo {
+	regions := make([]*RegionInfo, 0, len(prevKeys))
+	for _, batch := range splitKeysIntoBatches(prevKeys) {
+		r.t.RLock()
+		results := r.tree.searchByPrevKeys(batch)
+		r.t.RUnlock()
+		regions = append(regions, results...)
+	}
+	return regions
+}
+
+// sortOutKeyIDMap will iterate the regions, convert it to a slice of regionID that corresponds to the input regions.
+// It will also update `regionsByID` with the regionID and regionResponse.
+func sortOutKeyIDMap(
+	regionsByID map[uint64]*pdpb.RegionResponse, regions []*RegionInfo, needBuckets bool,
+) []uint64 {
+	keyIDMap := make([]uint64, len(regions))
+	for idx, region := range regions {
+		regionID := region.GetMeta().GetId()
+		keyIDMap[idx] = regionID
+		// Check if the region has been found.
+		if regionFound, ok := regionsByID[regionID]; (ok && regionFound != nil) || regionID == 0 {
+			continue
+		}
+		// If the given key is not found in the region tree, set the region to nil.
+		if region == nil {
+			regionsByID[regionID] = nil
+		} else {
+			regionResp := &pdpb.RegionResponse{
+				Region:       region.GetMeta(),
+				Leader:       region.GetLeader(),
+				DownPeers:    region.GetDownPeers(),
+				PendingPeers: region.GetPendingPeers(),
+			}
+			if needBuckets {
+				regionResp.Buckets = region.GetBuckets()
+			}
+			regionsByID[regionID] = regionResp
+		}
+	}
+	return keyIDMap
 }
 
 // SubTreeRegionType is the type of sub tree region.
@@ -1673,42 +1874,42 @@ func (r *RegionsInfo) GetStoreWitnessCount(storeID uint64) int {
 }
 
 // RandPendingRegions randomly gets a store's n regions with a pending peer.
-func (r *RegionsInfo) RandPendingRegions(storeID uint64, ranges []KeyRange) []*RegionInfo {
+func (r *RegionsInfo) RandPendingRegions(storeID uint64, ranges []keyutil.KeyRange) []*RegionInfo {
 	r.st.RLock()
 	defer r.st.RUnlock()
 	return r.pendingPeers[storeID].RandomRegions(randomRegionMaxRetry, ranges)
 }
 
 // This function is used for test only.
-func (r *RegionsInfo) randLeaderRegion(storeID uint64, ranges []KeyRange) {
+func (r *RegionsInfo) randLeaderRegion(storeID uint64, ranges []keyutil.KeyRange) {
 	r.st.RLock()
 	defer r.st.RUnlock()
 	_ = r.leaders[storeID].randomRegion(ranges)
 }
 
 // RandLeaderRegions randomly gets a store's n leader regions.
-func (r *RegionsInfo) RandLeaderRegions(storeID uint64, ranges []KeyRange) []*RegionInfo {
+func (r *RegionsInfo) RandLeaderRegions(storeID uint64, ranges []keyutil.KeyRange) []*RegionInfo {
 	r.st.RLock()
 	defer r.st.RUnlock()
 	return r.leaders[storeID].RandomRegions(randomRegionMaxRetry, ranges)
 }
 
 // RandFollowerRegions randomly gets a store's n follower regions.
-func (r *RegionsInfo) RandFollowerRegions(storeID uint64, ranges []KeyRange) []*RegionInfo {
+func (r *RegionsInfo) RandFollowerRegions(storeID uint64, ranges []keyutil.KeyRange) []*RegionInfo {
 	r.st.RLock()
 	defer r.st.RUnlock()
 	return r.followers[storeID].RandomRegions(randomRegionMaxRetry, ranges)
 }
 
 // RandLearnerRegions randomly gets a store's n learner regions.
-func (r *RegionsInfo) RandLearnerRegions(storeID uint64, ranges []KeyRange) []*RegionInfo {
+func (r *RegionsInfo) RandLearnerRegions(storeID uint64, ranges []keyutil.KeyRange) []*RegionInfo {
 	r.st.RLock()
 	defer r.st.RUnlock()
 	return r.learners[storeID].RandomRegions(randomRegionMaxRetry, ranges)
 }
 
 // RandWitnessRegions randomly gets a store's n witness regions.
-func (r *RegionsInfo) RandWitnessRegions(storeID uint64, ranges []KeyRange) []*RegionInfo {
+func (r *RegionsInfo) RandWitnessRegions(storeID uint64, ranges []keyutil.KeyRange) []*RegionInfo {
 	r.st.RLock()
 	defer r.st.RUnlock()
 	return r.witnesses[storeID].RandomRegions(randomRegionMaxRetry, ranges)
@@ -1830,7 +2031,7 @@ func (r *RegionsInfo) ScanRegions(startKey, endKey []byte, limit int) []*RegionI
 // BatchScanRegions scans regions in given key pairs, returns at most `limit` regions.
 // limit <= 0 means no limit.
 // The given key pairs should be non-overlapping.
-func (r *RegionsInfo) BatchScanRegions(keyRanges *KeyRanges, opts ...BatchScanRegionsOptionFunc) ([]*RegionInfo, error) {
+func (r *RegionsInfo) BatchScanRegions(keyRanges *keyutil.KeyRanges, opts ...BatchScanRegionsOptionFunc) ([]*RegionInfo, error) {
 	keyRanges.Merge()
 	krs := keyRanges.Ranges()
 	res := make([]*RegionInfo, 0, len(krs))
@@ -1843,11 +2044,6 @@ func (r *RegionsInfo) BatchScanRegions(keyRanges *KeyRanges, opts ...BatchScanRe
 	r.t.RLock()
 	defer r.t.RUnlock()
 	for _, keyRange := range krs {
-		if scanOptions.limit > 0 && len(res) >= scanOptions.limit {
-			res = res[:scanOptions.limit]
-			return res, nil
-		}
-
 		regions, err := scanRegion(r.tree, keyRange, scanOptions.limit, scanOptions.outputMustContainAllKeyRange)
 		if err != nil {
 			return nil, err
@@ -1857,11 +2053,15 @@ func (r *RegionsInfo) BatchScanRegions(keyRanges *KeyRanges, opts ...BatchScanRe
 			regions = regions[1:]
 		}
 		res = append(res, regions...)
+		if scanOptions.limit > 0 && len(res) >= scanOptions.limit {
+			res = res[:scanOptions.limit]
+			return res, nil
+		}
 	}
 	return res, nil
 }
 
-func scanRegion(regionTree *regionTree, keyRange *KeyRange, limit int, outputMustContainAllKeyRange bool) ([]*RegionInfo, error) {
+func scanRegion(regionTree *regionTree, keyRange *keyutil.KeyRange, limit int, outputMustContainAllKeyRange bool) ([]*RegionInfo, error) {
 	var (
 		res        []*RegionInfo
 		lastRegion = &RegionInfo{
@@ -1992,17 +2192,16 @@ func (r *RegionsInfo) CollectWaitLockMetrics() {
 }
 
 // GetAdjacentRegions returns region's info that is adjacent with specific region
-func (r *RegionsInfo) GetAdjacentRegions(region *RegionInfo) (*RegionInfo, *RegionInfo) {
+func (r *RegionsInfo) GetAdjacentRegions(region *RegionInfo) (prev, next *RegionInfo) {
 	r.t.RLock()
 	defer r.t.RUnlock()
 	p, n := r.tree.getAdjacentRegions(region)
-	var prev, next *RegionInfo
 	// check key to avoid key range hole
 	if p != nil && bytes.Equal(p.GetEndKey(), region.GetStartKey()) {
-		prev = r.getRegionLocked(p.GetID())
+		prev = p.RegionInfo
 	}
 	if n != nil && bytes.Equal(region.GetEndKey(), n.GetStartKey()) {
-		next = r.getRegionLocked(n.GetID())
+		next = n.RegionInfo
 	}
 	return prev, next
 }

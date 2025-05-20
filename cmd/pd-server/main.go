@@ -27,7 +27,6 @@ import (
 
 	"github.com/pingcap/log"
 
-	"github.com/tikv/pd/pkg/autoscaling"
 	"github.com/tikv/pd/pkg/dashboard"
 	"github.com/tikv/pd/pkg/errs"
 	scheduling "github.com/tikv/pd/pkg/mcs/scheduling/server"
@@ -209,7 +208,7 @@ func start(cmd *cobra.Command, args []string, services ...string) {
 	// Check the PD version first before running.
 	server.CheckAndGetPDVersion()
 	// New zap logger
-	err = logutil.SetupLogger(cfg.Log, &cfg.Logger, &cfg.LogProps, cfg.Security.RedactInfoLog)
+	err = logutil.SetupLogger(&cfg.Log, &cfg.Logger, &cfg.LogProps, cfg.Security.RedactInfoLog)
 	if err == nil {
 		log.ReplaceGlobals(cfg.Logger, cfg.LogProps)
 	} else {
@@ -218,20 +217,15 @@ func start(cmd *cobra.Command, args []string, services ...string) {
 	// Flushing any buffered log entries
 	defer log.Sync()
 	memory.InitMemoryHook()
-	if len(services) != 0 {
-		versioninfo.Log(server.PDServiceMode)
-	} else {
-		versioninfo.Log(server.PDMode)
-	}
+	versioninfo.Log(server.PD)
 
 	for _, msg := range cfg.WarningMsgs {
 		log.Warn(msg)
 	}
-
-	// TODO: Make it configurable if it has big impact on performance.
 	grpcprometheus.EnableHandlingTimeHistogram()
 
 	metricutil.Push(&cfg.Metric)
+	metricutil.EnablePyroscope()
 
 	err = join.PrepareJoinCluster(cfg)
 	if err != nil {
@@ -240,7 +234,7 @@ func start(cmd *cobra.Command, args []string, services ...string) {
 
 	// Creates server.
 	ctx, cancel := context.WithCancel(context.Background())
-	serviceBuilders := []server.HandlerBuilder{api.NewHandler, apiv2.NewV2Handler, autoscaling.NewHandler}
+	serviceBuilders := []server.HandlerBuilder{api.NewHandler, apiv2.NewV2Handler}
 	if swaggerserver.Enabled() {
 		serviceBuilders = append(serviceBuilders, swaggerserver.NewHandler)
 	}

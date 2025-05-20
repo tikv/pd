@@ -26,8 +26,6 @@ const (
 	NoLeaderErr = "no leader"
 	// NotLeaderErr indicates the non-leader member received the requests which should be received by leader.
 	NotLeaderErr = "not leader"
-	// MismatchLeaderErr indicates the non-leader member received the requests which should be received by leader.
-	MismatchLeaderErr = "mismatch leader id"
 	// NotServedErr indicates an tso node/pod received the requests for the keyspace groups which are not served by it.
 	NotServedErr = "is not served"
 	// RetryTimeoutErr indicates the server is busy.
@@ -116,3 +114,8 @@ type ErrClientGetResourceGroup struct {
 func (e *ErrClientGetResourceGroup) Error() string {
 	return fmt.Sprintf("get resource group %s failed, %s", e.ResourceGroupName, e.Cause)
 }
+
+// scheduler errors
+var (
+	ErrSchedulerConfigUnavailable = errors.Normalize("scheduler config is unavailable, %v", errors.RFCCodeText("PD:client:ErrSchedulerConfigUnavailable"))
+)

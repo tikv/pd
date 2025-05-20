@@ -4,13 +4,14 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//	http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
 package filter
 
 import (
@@ -473,6 +474,16 @@ func TestSpecialUseFilter(t *testing.T) {
 	}
 }
 
+func TestSpecialEngine(t *testing.T) {
+	re := require.New(t)
+	tiflash := core.NewStoreInfoWithLabel(1, map[string]string{core.EngineKey: core.EngineTiFlash})
+	tikv := core.NewStoreInfoWithLabel(2, map[string]string{core.EngineKey: core.EngineTiKV})
+	re.True(SpecialEngines.MatchStore(tiflash))
+	re.False(SpecialEngines.MatchStore(tikv))
+	re.True(NotSpecialEngines.MatchStore(tikv))
+	re.False(NotSpecialEngines.MatchStore(tiflash))
+}
+
 func BenchmarkCloneRegionTest(b *testing.B) {
 	epoch := &metapb.RegionEpoch{
 		ConfVer: 1,
@@ -493,7 +504,7 @@ func BenchmarkCloneRegionTest(b *testing.B) {
 		core.SetApproximateKeys(20),
 	)
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		_ = createRegionForRuleFit(region.GetStartKey(), region.GetEndKey(), region.GetPeers(), region.GetLeader())
 	}
 }

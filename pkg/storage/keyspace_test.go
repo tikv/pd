@@ -147,9 +147,10 @@ func makeTestKeyspaces() []*keyspacepb.KeyspaceMeta {
 // TestEncodeSpaceID test spaceID encoding.
 func TestEncodeSpaceID(t *testing.T) {
 	re := require.New(t)
-	re.Equal("keyspaces/meta/00000000", keypath.KeyspaceMetaPath(0))
-	re.Equal("keyspaces/meta/16777215", keypath.KeyspaceMetaPath(1<<24-1))
-	re.Equal("keyspaces/meta/00000100", keypath.KeyspaceMetaPath(100))
-	re.Equal("keyspaces/meta/00000011", keypath.KeyspaceMetaPath(11))
-	re.Equal("keyspaces/meta/00000010", keypath.KeyspaceMetaPath(10))
+	prefix := keypath.KeyspaceMetaPrefix()
+	re.Equal(prefix+"00000000", keypath.KeyspaceMetaPath(0))
+	re.Equal(prefix+"16777215", keypath.KeyspaceMetaPath(1<<24-1))
+	re.Equal(prefix+"00000100", keypath.KeyspaceMetaPath(100))
+	re.Equal(prefix+"00000011", keypath.KeyspaceMetaPath(11))
+	re.Equal(prefix+"00000010", keypath.KeyspaceMetaPath(10))
 }

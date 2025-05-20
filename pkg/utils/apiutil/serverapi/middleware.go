@@ -116,7 +116,7 @@ func MicroserviceRedirectRule(matchPath, targetPath, targetServiceName string,
 }
 
 func (h *redirector) matchMicroserviceRedirectRules(r *http.Request) (bool, string) {
-	if !h.s.IsPDServiceMode() {
+	if !h.s.IsKeyspaceGroupEnabled() {
 		return false, ""
 	}
 	if len(h.microserviceRedirectRules) == 0 {
@@ -223,7 +223,7 @@ func (h *redirector) ServeHTTP(w http.ResponseWriter, r *http.Request, next http
 		clientUrls = leader.GetClientUrls()
 		r.Header.Set(apiutil.PDRedirectorHeader, h.s.Name())
 	} else {
-		// Prevent more than one redirection among PD/PD service.
+		// Prevent more than one redirection among PD.
 		log.Error("redirect but server is not leader", zap.String("from", name), zap.String("server", h.s.Name()), errs.ZapError(errs.ErrRedirectToNotLeader))
 		http.Error(w, errs.ErrRedirectToNotLeader.FastGenByArgs().Error(), http.StatusInternalServerError)
 		return

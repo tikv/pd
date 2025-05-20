@@ -43,7 +43,7 @@ type Allocator interface {
 	// SetBase set base id
 	SetBase(newBase uint64) error
 	// Alloc allocs a unique id.
-	Alloc() (uint64, error)
+	Alloc(count uint32) (uint64, uint32, error)
 	// Rebase resets the base for the allocator from the persistent window boundary,
 	// which also resets the end of the allocator. (base, end) is the range that can
 	// be allocated in memory.
@@ -94,19 +94,21 @@ func NewAllocator(params *AllocatorParams) Allocator {
 }
 
 // Alloc returns a new id.
-func (alloc *allocatorImpl) Alloc() (uint64, error) {
+func (alloc *allocatorImpl) Alloc(count uint32) (uint64, uint32, error) {
 	alloc.mu.Lock()
 	defer alloc.mu.Unlock()
 
-	if alloc.base == alloc.end {
-		if err := alloc.rebaseLocked(true); err != nil {
-			return 0, err
+	for range count {
+		if alloc.base == alloc.end {
+			if err := alloc.rebaseLocked(true); err != nil {
+				return 0, 0, err
+			}
 		}
+
+		alloc.base++
 	}
 
-	alloc.base++
-
-	return alloc.base, nil
+	return alloc.base, count, nil
 }
 
 // SetBase sets the base.

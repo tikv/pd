@@ -25,6 +25,7 @@ import (
 	"net/http"
 	"net/url"
 	"path"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -310,6 +311,38 @@ func CollectEscapeStringOption(option string, input map[string]any, collectors .
 	return errs.ErrOptionNotExist.FastGenByArgs(option)
 }
 
+// CollectKeyRangesOption is used to collect key ranges using from input map for given option
+func CollectKeyRangesOption(input map[string]any, collectors ...func(v string)) error {
+	startKeyStr, ok := input["start-key"].(string)
+	if !ok {
+		return errs.ErrInvalidArgument.FastGenByArgs("start-key")
+	}
+	endKeyStr, ok := input["end-key"].(string)
+	if !ok {
+		return errs.ErrInvalidArgument.FastGenByArgs("end-key")
+	}
+	startKeys := strings.Split(startKeyStr, ",")
+	endKeys := strings.Split(endKeyStr, ",")
+	if len(startKeys) != len(endKeys) {
+		return errs.ErrInvalidArgument.FastGenByArgs(startKeyStr, endKeyStr)
+	}
+	for i := range startKeys {
+		startKey, err := url.QueryUnescape(startKeys[i])
+		if err != nil {
+			return err
+		}
+		endKey, err := url.QueryUnescape(endKeys[i])
+		if err != nil {
+			return err
+		}
+		for _, c := range collectors {
+			c(startKey)
+			c(endKey)
+		}
+	}
+	return nil
+}
+
 // CollectStringOption is used to collect string using from input map for given option
 func CollectStringOption(option string, input map[string]any, collectors ...func(v string)) error {
 	if v, ok := input[option].(string); ok {
@@ -539,4 +572,19 @@ func ParseTime(t string) (time.Time, error) {
 		return time.Time{}, err
 	}
 	return time.Unix(i, 0), nil
+}
+
+// IsPathInDirectory checks if the given path is in the specified directory.
+func IsPathInDirectory(path, directory string) bool {
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return false
+	}
+
+	absDir, err := filepath.Abs(directory)
+	if err != nil {
+		return false
+	}
+
+	return strings.HasPrefix(absPath, absDir)
 }

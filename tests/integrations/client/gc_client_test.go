@@ -15,8 +15,6 @@
 package client_test
 
 import (
-	"path"
-	"strconv"
 	"testing"
 	"time"
 
@@ -36,6 +34,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/tests"
 )
 
 // gcClientTestReceiver is the pdpb.PD_WatchGCSafePointV2Server mock for testing.
@@ -76,7 +75,7 @@ func (suite *gcClientTestSuite) SetupSuite() {
 	)
 	checker := assertutil.NewChecker()
 	checker.FailNow = func() {}
-	gsi, suite.cleanup, err = server.NewTestServer(re, checker)
+	gsi, suite.cleanup, err = tests.NewServer(re, checker)
 	suite.server = &server.GrpcServer{Server: gsi}
 	re.NoError(err)
 	addr := suite.server.GetAddr()
@@ -85,8 +84,7 @@ func (suite *gcClientTestSuite) SetupSuite() {
 		[]string{addr}, pd.SecurityOption{},
 	)
 	re.NoError(err)
-	rootPath := path.Join("/pd", strconv.FormatUint(keypath.ClusterID(), 10))
-	suite.gcSafePointV2Prefix = path.Join(rootPath, keypath.GCSafePointV2Prefix())
+	suite.gcSafePointV2Prefix = keypath.GCSafePointV2Prefix()
 	// Enable the fail-point to skip checking keyspace validity.
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/gc/checkKeyspace", "return(true)"))
 }
@@ -211,15 +209,14 @@ func (suite *gcClientTestSuite) mustLoadSafePoint(re *require.Assertions, keyspa
 
 // mustDeleteSafePoint deletes the gc safe point of the given keyspace id.
 func (suite *gcClientTestSuite) mustDeleteSafePoint(re *require.Assertions, keyspaceID uint32) {
-	safePointPath := path.Join(suite.gcSafePointV2Prefix, keypath.EncodeKeyspaceID(keyspaceID))
-	log.Info("test etcd path", zap.Any("path", safePointPath)) // TODO: Delete
+	safePointPath := keypath.GCSafePointV2Path(keyspaceID)
 	_, err := suite.server.GetClient().Delete(suite.server.Context(), safePointPath)
 	re.NoError(err)
 }
 
 // mustGetRevision gets the revision of the given keyspace's gc safe point.
 func (suite *gcClientTestSuite) mustGetRevision(re *require.Assertions, keyspaceID uint32) int64 {
-	safePointPath := path.Join(suite.gcSafePointV2Prefix, keypath.EncodeKeyspaceID(keyspaceID))
+	safePointPath := keypath.GCSafePointV2Path(keyspaceID)
 	res, err := suite.server.GetClient().Get(suite.server.Context(), safePointPath)
 	re.NoError(err)
 	return res.Header.GetRevision()

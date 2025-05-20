@@ -99,6 +99,15 @@ var (
 			Buckets:   prometheus.ExponentialBuckets(0.0005, 2, 13),
 		})
 
+	queryRegionDuration = prometheus.NewHistogram(
+		prometheus.HistogramOpts{
+			Namespace: "pd",
+			Subsystem: "server",
+			Name:      "query_region_duration_seconds",
+			Help:      "Bucketed histogram of processing time (s) of region query requests.",
+			Buckets:   prometheus.ExponentialBuckets(0.0005, 2, 13),
+		})
+
 	bucketReportLatency = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: "pd",
@@ -160,6 +169,14 @@ var (
 			Name:      "forward_fail_total",
 			Help:      "Counter of forward fail.",
 		}, []string{"request", "type"})
+	forwardTsoDuration = prometheus.NewHistogram(
+		prometheus.HistogramOpts{
+			Namespace: "pd",
+			Subsystem: "server",
+			Name:      "forward_tso_duration_seconds",
+			Help:      "Bucketed histogram of processing time (s) of handled forward tso requests.",
+			Buckets:   prometheus.ExponentialBuckets(0.0005, 2, 13),
+		})
 )
 
 func init() {
@@ -172,6 +189,7 @@ func init() {
 	prometheus.MustRegister(tsoProxyBatchSize)
 	prometheus.MustRegister(tsoProxyForwardTimeoutCounter)
 	prometheus.MustRegister(tsoHandleDuration)
+	prometheus.MustRegister(queryRegionDuration)
 	prometheus.MustRegister(regionHeartbeatHandleDuration)
 	prometheus.MustRegister(storeHeartbeatHandleDuration)
 	prometheus.MustRegister(bucketReportCounter)
@@ -180,4 +198,5 @@ func init() {
 	prometheus.MustRegister(bucketReportInterval)
 	prometheus.MustRegister(apiConcurrencyGauge)
 	prometheus.MustRegister(forwardFailCounter)
+	prometheus.MustRegister(forwardTsoDuration)
 }

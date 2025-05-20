@@ -1,3 +1,17 @@
+// Copyright 2022 TiKV Project Authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package config
 
 import (
@@ -65,7 +79,7 @@ func NewConfig() *Config {
 	fs := cfg.flagSet
 	fs.ParseErrorsWhitelist.UnknownFlags = true
 	fs.StringVar(&cfg.configFile, "config", "", "config file")
-	fs.StringVar(&cfg.PDAddr, "pd-endpoints", "127.0.0.1:2379", "pd address")
+	fs.StringVar(&cfg.PDAddr, "pd-endpoints", "127.0.0.1:2379", "pd leader address")
 	fs.StringVar(&cfg.Log.File.Filename, "log-file", "", "log file path")
 	fs.StringVar(&cfg.StatusAddr, "status-addr", "127.0.0.1:20180", "status address")
 	fs.StringVar(&cfg.Security.CAPath, "cacert", "", "path of file that contains list of trusted TLS CAs")

@@ -93,16 +93,10 @@ import (
 
 const (
 	serverMetricsInterval = time.Minute
-	// pdRootPath for all pd servers.
-	pdRootPath  = "/pd"
-	pdAPIPrefix = "/pd/"
+	pdAPIPrefix           = "/pd/"
 
-	recoveringMarkPath = "cluster/markers/snapshot-recovering"
-
-	// PDMode represents that server is in PD mode.
-	PDMode = "PD"
-	// PDServiceMode represents that server is in PD service mode which is in microservice architecture.
-	PDServiceMode = "PD Service"
+	// PD is name of member.
+	PD = "PD"
 
 	// maxRetryTimesGetServicePrimary is the max retry times for getting primary addr.
 	// Note: it need to be less than client.defaultPDTimeout
@@ -123,6 +117,11 @@ var (
 	etcdAppliedIndexGauge   = etcdStateGauge.WithLabelValues("appliedIndex")
 	etcdCommittedIndexGauge = etcdStateGauge.WithLabelValues("committedIndex")
 )
+
+type streamWrapper struct {
+	tsopb.TSO_TsoClient
+	syncutil.Mutex
+}
 
 // Server is the pd server. It implements bs.Server
 type Server struct {
@@ -155,7 +154,6 @@ type Server struct {
 	electionClient *clientv3.Client
 	// http client
 	httpClient *http.Client
-	rootPath   string
 
 	// Server services.
 	// for id allocator, we can use one allocator for
@@ -166,8 +164,10 @@ type Server struct {
 	encryptionKeyManager *encryption.Manager
 	// for storage operation.
 	storage storage.Storage
-	// safepoint manager
+	// safe point manager (to be deprecated)
 	gcSafePointManager *gc.SafePointManager
+	// GC states manager
+	gcStateManager *gc.GCStateManager
 	// keyspace manager
 	keyspaceManager *keyspace.Manager
 	// safe point V2 manager
@@ -177,7 +177,7 @@ type Server struct {
 	// for basicCluster operation.
 	basicCluster *core.BasicCluster
 	// for tso.
-	tsoAllocatorManager *tso.AllocatorManager
+	tsoAllocator *tso.Allocator
 	// for raft cluster
 	cluster *cluster.RaftCluster
 	// For async region heartbeat.
@@ -201,7 +201,7 @@ type Server struct {
 
 	tsoClientPool struct {
 		syncutil.RWMutex
-		clients map[string]tsopb.TSO_TsoClient
+		clients map[string]*streamWrapper
 	}
 
 	// tsoDispatcher is used to dispatch different TSO requests to
@@ -227,7 +227,7 @@ type Server struct {
 	auditBackends []audit.Backend
 
 	registry                 *registry.ServiceRegistry
-	mode                     string
+	isKeyspaceGroupEnabled   bool
 	servicePrimaryMap        sync.Map /* Store as map[string]string */
 	tsoPrimaryWatcher        *etcdutil.LoopWatcher
 	schedulingPrimaryWatcher *etcdutil.LoopWatcher
@@ -241,13 +241,16 @@ type HandlerBuilder func(context.Context, *Server) (http.Handler, apiutil.APISer
 
 // CreateServer creates the UNINITIALIZED pd server with given configuration.
 func CreateServer(ctx context.Context, cfg *config.Config, services []string, legacyServiceBuilders ...HandlerBuilder) (*Server, error) {
-	var mode string
-	if len(services) != 0 {
-		mode = PDServiceMode
-	} else {
-		mode = PDMode
-	}
-	log.Info(fmt.Sprintf("%s config", mode), zap.Reflect("config", cfg))
+	// TODO: Currently, whether we enable microservice or not is determined by the service list.
+	// It's equal to whether we enable the keyspace group or not.
+	// But indeed the keyspace group is independent of the microservice.
+	// There could be the following scenarios:
+	// 1. Enable microservice but disable keyspace group. (non-serverless scenario)
+	// 2. Enable microservice and enable keyspace group. (serverless scenario)
+	// 3. Disable microservice and disable keyspace group. (both serverless scenario and non-serverless scenario)
+	// We should separate the keyspace group from the microservice later.
+	isKeyspaceGroupEnabled := len(services) != 0
+	log.Info("PD config", zap.Bool("enable-keyspace-group", isKeyspaceGroupEnabled), zap.Reflect("config", cfg))
 	serviceMiddlewareCfg := config.NewServiceMiddlewareConfig()
 
 	s := &Server{
@@ -259,12 +262,12 @@ func CreateServer(ctx context.Context, cfg *config.Config, services []string, le
 		ctx:                             ctx,
 		startTimestamp:                  time.Now().Unix(),
 		DiagnosticsServer:               sysutil.NewDiagnosticsServer(cfg.Log.File.Filename),
-		mode:                            mode,
+		isKeyspaceGroupEnabled:          isKeyspaceGroupEnabled,
 		tsoClientPool: struct {
 			syncutil.RWMutex
-			clients map[string]tsopb.TSO_TsoClient
+			clients map[string]*streamWrapper
 		}{
-			clients: make(map[string]tsopb.TSO_TsoClient),
+			clients: make(map[string]*streamWrapper),
 		},
 	}
 	s.handler = newHandler(s)
@@ -434,7 +437,6 @@ func (s *Server) startServer(ctx context.Context) error {
 	metadataGauge.WithLabelValues(fmt.Sprintf("cluster%d", clusterID)).Set(0)
 	bs.ServerInfoGauge.WithLabelValues(versioninfo.PDReleaseVersion, versioninfo.PDGitHash).Set(float64(time.Now().Unix()))
 
-	s.rootPath = keypath.PDRootPath()
 	s.member.InitMemberInfo(s.cfg.AdvertiseClientUrls, s.cfg.AdvertisePeerUrls, s.Name())
 	if err := s.member.SetMemberDeployPath(s.member.ID()); err != nil {
 		return err
@@ -455,7 +457,7 @@ func (s *Server) startServer(ctx context.Context) error {
 		return err
 	}
 	// Initialize an etcd storage as the default storage.
-	defaultStorage := storage.NewStorageWithEtcdBackend(s.client, s.rootPath)
+	defaultStorage := storage.NewStorageWithEtcdBackend(s.client)
 	// Initialize a specialized LevelDB storage to store the region-related meta info independently.
 	regionStorage, err := storage.NewRegionStorageWithLevelDBBackend(
 		ctx,
@@ -468,20 +470,21 @@ func (s *Server) startServer(ctx context.Context) error {
 	s.tsoDispatcher = tsoutil.NewTSODispatcher(tsoProxyHandleDuration, tsoProxyBatchSize)
 	s.tsoProtoFactory = &tsoutil.TSOProtoFactory{}
 	s.pdProtoFactory = &tsoutil.PDProtoFactory{}
-	s.tsoAllocatorManager = tso.NewAllocatorManager(s.ctx, constant.DefaultKeyspaceGroupID, s.member, s.rootPath, s.storage, s)
+	s.tsoAllocator = tso.NewAllocator(s.ctx, constant.DefaultKeyspaceGroupID, s.member, s.storage, s)
 	s.gcSafePointManager = gc.NewSafePointManager(s.storage, s.cfg.PDServerCfg)
 	s.basicCluster = core.NewBasicCluster()
-	s.cluster = cluster.NewRaftCluster(ctx, s.GetMember(), s.GetBasicCluster(), s.GetStorage(), syncer.NewRegionSyncer(s), s.client, s.httpClient, s.tsoAllocatorManager)
+	s.cluster = cluster.NewRaftCluster(ctx, s.GetMember(), s.GetBasicCluster(), s.GetStorage(), syncer.NewRegionSyncer(s), s.client, s.httpClient, s.tsoAllocator)
 	keyspaceIDAllocator := id.NewAllocator(&id.AllocatorParams{
 		Client: s.client,
 		Label:  id.KeyspaceLabel,
 		Member: s.member.MemberValue(),
 		Step:   keyspace.AllocStep,
 	})
-	if s.IsPDServiceMode() {
+	if s.IsKeyspaceGroupEnabled() {
 		s.keyspaceGroupManager = keyspace.NewKeyspaceGroupManager(s.ctx, s.storage, s.client)
 	}
 	s.keyspaceManager = keyspace.NewKeyspaceManager(s.ctx, s.storage, s.cluster, keyspaceIDAllocator, &s.cfg.Keyspace, s.keyspaceGroupManager)
+	s.gcStateManager = gc.NewGCStateManager(s.storage.GetGCStateProvider(), s.cfg.PDServerCfg, s.keyspaceManager)
 	s.safePointV2Manager = gc.NewSafePointManagerV2(s.ctx, s.storage, s.storage, s.storage)
 	s.hbStreams = hbstream.NewHeartbeatStreams(ctx, "", s.cluster)
 	// initial hot_region_storage in here.
@@ -530,8 +533,11 @@ func (s *Server) Close() {
 	s.cgMonitor.StopMonitor()
 
 	s.stopServerLoop()
-	if s.IsPDServiceMode() {
+	if s.IsKeyspaceGroupEnabled() {
 		s.keyspaceGroupManager.Close()
+	}
+	if s.tsoAllocator != nil {
+		s.tsoAllocator.Close()
 	}
 
 	if s.client != nil {
@@ -641,7 +647,7 @@ func (s *Server) startServerLoop(ctx context.Context) {
 	go s.etcdLeaderLoop()
 	go s.serverMetricsLoop()
 	go s.encryptionKeyManagerLoop()
-	if s.IsPDServiceMode() {
+	if s.IsKeyspaceGroupEnabled() {
 		s.initTSOPrimaryWatcher()
 		s.initSchedulingPrimaryWatcher()
 	}
@@ -709,28 +715,23 @@ func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.BootstrapRe
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}
-	clusterRootPath := keypath.ClusterRootPath(s.rootPath)
 
 	var ops []clientv3.Op
-	ops = append(ops, clientv3.OpPut(clusterRootPath, string(clusterValue)))
+	ops = append(ops, clientv3.OpPut(keypath.ClusterPath(), string(clusterValue)))
 
 	// Set bootstrap time
 	// Because we will write the cluster meta into etcd directly,
 	// so we need to handle the root key path manually here.
-	bootstrapKey := keypath.AppendToRootPath(s.rootPath, keypath.ClusterBootstrapTimeKey())
-	nano := time.Now().UnixNano()
-
-	timeData := typeutil.Uint64ToBytes(uint64(nano))
-	ops = append(ops, clientv3.OpPut(bootstrapKey, string(timeData)))
+	timeData := typeutil.Uint64ToBytes(uint64(time.Now().UnixNano()))
+	ops = append(ops, clientv3.OpPut(keypath.ClusterBootstrapTimePath(), string(timeData)))
 
 	// Set store meta
 	storeMeta := req.GetStore()
-	storePath := keypath.AppendToRootPath(s.rootPath, keypath.StorePath(storeMeta.GetId()))
 	storeValue, err := storeMeta.Marshal()
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}
-	ops = append(ops, clientv3.OpPut(storePath, string(storeValue)))
+	ops = append(ops, clientv3.OpPut(keypath.StorePath(storeMeta.GetId()), string(storeValue)))
 
 	regionValue, err := req.GetRegion().Marshal()
 	if err != nil {
@@ -738,11 +739,10 @@ func (s *Server) bootstrapCluster(req *pdpb.BootstrapRequest) (*pdpb.BootstrapRe
 	}
 
 	// Set region meta with region id.
-	regionPath := keypath.AppendToRootPath(s.rootPath, keypath.RegionPath(req.GetRegion().GetId()))
-	ops = append(ops, clientv3.OpPut(regionPath, string(regionValue)))
+	ops = append(ops, clientv3.OpPut(keypath.RegionPath(req.GetRegion().GetId()), string(regionValue)))
 
 	// TODO: we must figure out a better way to handle bootstrap failed, maybe intervene manually.
-	bootstrapCmp := clientv3.Compare(clientv3.CreateRevision(clusterRootPath), "=", 0)
+	bootstrapCmp := clientv3.Compare(clientv3.CreateRevision(keypath.ClusterPath()), "=", 0)
 	resp, err := kv.NewSlowLogTxn(s.client).If(bootstrapCmp).Then(ops...).Commit()
 	if err != nil {
 		return nil, errs.ErrEtcdTxnInternal.Wrap(err).GenWithStackByCause()
@@ -788,9 +788,9 @@ func (s *Server) stopRaftCluster() {
 	s.cluster.Stop()
 }
 
-// IsPDServiceMode return whether the server is in PD service mode.
-func (s *Server) IsPDServiceMode() bool {
-	return s.mode == PDServiceMode
+// IsKeyspaceGroupEnabled return whether the server is in PD.
+func (s *Server) IsKeyspaceGroupEnabled() bool {
+	return s.isKeyspaceGroupEnabled
 }
 
 // GetAddr returns the server urls for clients.
@@ -851,6 +851,11 @@ func (s *Server) GetStorage() storage.Storage {
 	return s.storage
 }
 
+// GetGCStateManager returns the GC state manager of the server.
+func (s *Server) GetGCStateManager() *gc.GCStateManager {
+	return s.gcStateManager
+}
+
 // GetHistoryHotRegionStorage returns the backend storage of historyHotRegion.
 func (s *Server) GetHistoryHotRegionStorage() *storage.HotRegionStorage {
 	return s.hotRegionStorage
@@ -887,9 +892,9 @@ func (s *Server) GetAllocator() id.Allocator {
 	return s.idAllocator
 }
 
-// GetTSOAllocatorManager returns the manager of TSO Allocator.
-func (s *Server) GetTSOAllocatorManager() *tso.AllocatorManager {
-	return s.tsoAllocatorManager
+// GetTSOAllocator returns the TSO Allocator.
+func (s *Server) GetTSOAllocator() *tso.Allocator {
+	return s.tsoAllocator
 }
 
 // GetKeyspaceManager returns the keyspace manager of server.
@@ -1072,18 +1077,18 @@ func (s *Server) SetReplicationConfig(cfg sc.ReplicationConfig) error {
 
 		CheckInDefaultRule := func() error {
 			// replication config won't work when placement rule is enabled and exceeds one default rule
-			if !(defaultRule != nil &&
-				len(defaultRule.StartKey) == 0 && len(defaultRule.EndKey) == 0) {
+			if defaultRule == nil ||
+				len(defaultRule.StartKey) != 0 || len(defaultRule.EndKey) != 0 {
 				return errors.New("cannot update MaxReplicas, LocationLabels or IsolationLevel when placement rules feature is enabled and not only default rule exists, please update rule instead")
 			}
-			if !(defaultRule.Count == int(old.MaxReplicas) && typeutil.AreStringSlicesEqual(defaultRule.LocationLabels, []string(old.LocationLabels)) && defaultRule.IsolationLevel == old.IsolationLevel) {
+			if defaultRule.Count != int(old.MaxReplicas) || !typeutil.AreStringSlicesEqual(defaultRule.LocationLabels, []string(old.LocationLabels)) || defaultRule.IsolationLevel != old.IsolationLevel {
 				return errors.New("cannot to update replication config, the default rules do not consistent with replication config, please update rule instead")
 			}
 
 			return nil
 		}
 
-		if !(cfg.MaxReplicas == old.MaxReplicas && typeutil.AreStringSlicesEqual(cfg.LocationLabels, old.LocationLabels) && cfg.IsolationLevel == old.IsolationLevel) {
+		if cfg.MaxReplicas != old.MaxReplicas || !typeutil.AreStringSlicesEqual(cfg.LocationLabels, old.LocationLabels) || cfg.IsolationLevel != old.IsolationLevel {
 			if err := CheckInDefaultRule(); err != nil {
 				return err
 			}
@@ -1390,7 +1395,7 @@ func (s *Server) GetRaftCluster() *cluster.RaftCluster {
 
 // IsServiceIndependent returns whether the service is independent.
 func (s *Server) IsServiceIndependent(name string) bool {
-	if s.mode == PDServiceMode && !s.IsClosed() {
+	if s.isKeyspaceGroupEnabled && !s.IsClosed() {
 		if name == constant.TSOServiceName && !s.GetMicroserviceConfig().IsTSODynamicSwitchingEnabled() {
 			return true
 		}
@@ -1595,7 +1600,7 @@ func (s *Server) leaderLoop() {
 
 	for {
 		if s.IsClosed() {
-			log.Info(fmt.Sprintf("server is closed, return %s leader loop", s.mode))
+			log.Info("server is closed, return PD leader loop")
 			return
 		}
 
@@ -1664,13 +1669,13 @@ func (s *Server) leaderLoop() {
 }
 
 func (s *Server) campaignLeader() {
-	log.Info(fmt.Sprintf("start to campaign %s leader", s.mode), zap.String("campaign-leader-name", s.Name()))
+	log.Info("start to campaign PD leader", zap.String("campaign-leader-name", s.Name()))
 	if err := s.member.CampaignLeader(s.ctx, s.cfg.LeaderLease); err != nil {
 		if err.Error() == errs.ErrEtcdTxnConflict.Error() {
-			log.Info(fmt.Sprintf("campaign %s leader meets error due to txn conflict, another PD/PD service may campaign successfully", s.mode),
+			log.Info("campaign PD leader meets error due to txn conflict, another PD may campaign successfully",
 				zap.String("campaign-leader-name", s.Name()))
 		} else {
-			log.Error(fmt.Sprintf("campaign %s leader meets error due to etcd error", s.mode),
+			log.Error("campaign PD leader meets error due to etcd error",
 				zap.String("campaign-leader-name", s.Name()),
 				errs.ZapError(err))
 		}
@@ -1690,7 +1695,7 @@ func (s *Server) campaignLeader() {
 
 	// maintain the PD leadership, after this, TSO can be service.
 	s.member.KeepLeader(ctx)
-	log.Info(fmt.Sprintf("campaign %s leader ok", s.mode), zap.String("campaign-leader-name", s.Name()))
+	log.Info("campaign PD leader ok", zap.String("campaign-leader-name", s.Name()))
 
 	if err := s.reloadConfigFromKV(); err != nil {
 		log.Error("failed to reload configuration", errs.ZapError(err))
@@ -1721,23 +1726,26 @@ func (s *Server) campaignLeader() {
 		return
 	}
 	defer s.stopRaftCluster()
+	failpoint.Inject("rebaseErr", func() {
+		failpoint.Return()
+	})
 	if err := s.idAllocator.Rebase(); err != nil {
 		log.Error("failed to sync id from etcd", errs.ZapError(err))
 		return
 	}
 	// EnableLeader to accept the remaining service, such as GetStore, GetRegion.
 	s.member.EnableLeader()
-	member.ServiceMemberGauge.WithLabelValues(s.mode).Set(1)
+	member.ServiceMemberGauge.WithLabelValues(PD).Set(1)
 	defer resetLeaderOnce.Do(func() {
 		// as soon as cancel the leadership keepalive, then other member have chance
 		// to be new leader.
 		cancel()
 		s.member.ResetLeader()
-		member.ServiceMemberGauge.WithLabelValues(s.mode).Set(0)
+		member.ServiceMemberGauge.WithLabelValues(PD).Set(0)
 	})
 
 	CheckPDVersionWithClusterVersion(s.persistOptions)
-	log.Info(fmt.Sprintf("%s leader is ready to serve", s.mode), zap.String("leader-name", s.Name()))
+	log.Info("PD leader is ready to serve", zap.String("leader-name", s.Name()))
 
 	leaderTicker := time.NewTicker(constant.LeaderTickInterval)
 	defer leaderTicker.Stop()
@@ -1746,7 +1754,7 @@ func (s *Server) campaignLeader() {
 		select {
 		case <-leaderTicker.C:
 			if !s.member.IsLeader() {
-				log.Info("no longer a leader because lease has expired, pd leader will step down")
+				log.Info("no longer a leader because lease has expired, PD leader will step down")
 				return
 			}
 			// add failpoint to test exit leader, failpoint judge the member is the give value, then break
@@ -1874,7 +1882,7 @@ func (s *Server) PersistFile(name string, data []byte) error {
 	}
 	log.Info("persist file", zap.String("name", name), zap.Binary("data", data))
 	path := filepath.Join(s.GetConfig().DataDir, name)
-	if !isPathInDirectory(path, s.GetConfig().DataDir) {
+	if !apiutil.IsPathInDirectory(path, s.GetConfig().DataDir) {
 		return errors.New("Invalid file path")
 	}
 	return os.WriteFile(path, data, 0644) // #nosec
@@ -1912,7 +1920,7 @@ func (s *Server) IsTTLConfigExist(key string) bool {
 // and is deleted after BR EBS restore is done.
 func (s *Server) MarkSnapshotRecovering() error {
 	log.Info("mark snapshot recovering")
-	markPath := keypath.AppendToRootPath(s.rootPath, recoveringMarkPath)
+	markPath := keypath.RecoveringMarkPath()
 	// the value doesn't matter, set to a static string
 	_, err := kv.NewSlowLogTxn(s.client).
 		If(clientv3.Compare(clientv3.CreateRevision(markPath), "=", 0)).
@@ -1924,8 +1932,7 @@ func (s *Server) MarkSnapshotRecovering() error {
 
 // IsSnapshotRecovering check whether recovering-mark marked
 func (s *Server) IsSnapshotRecovering(ctx context.Context) (bool, error) {
-	markPath := keypath.AppendToRootPath(s.rootPath, recoveringMarkPath)
-	resp, err := s.client.Get(ctx, markPath)
+	resp, err := s.client.Get(ctx, keypath.RecoveringMarkPath())
 	if err != nil {
 		return false, err
 	}
@@ -1935,8 +1942,7 @@ func (s *Server) IsSnapshotRecovering(ctx context.Context) (bool, error) {
 // UnmarkSnapshotRecovering unmark recovering mark
 func (s *Server) UnmarkSnapshotRecovering(ctx context.Context) error {
 	log.Info("unmark snapshot recovering")
-	markPath := keypath.AppendToRootPath(s.rootPath, recoveringMarkPath)
-	_, err := s.client.Delete(ctx, markPath)
+	_, err := s.client.Delete(ctx, keypath.RecoveringMarkPath())
 	// if other client already unmarked, return success too
 	return err
 }
@@ -2095,10 +2101,4 @@ func (s *Server) GetMaxResetTSGap() time.Duration {
 // Notes: it is only used for test.
 func (s *Server) SetClient(client *clientv3.Client) {
 	s.client = client
-}
-
-// GetGlobalTSOAllocator return global tso allocator
-// It only is used for test.
-func (s *Server) GetGlobalTSOAllocator() tso.Allocator {
-	return s.cluster.GetGlobalTSOAllocator()
 }

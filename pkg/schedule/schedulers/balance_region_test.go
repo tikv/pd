@@ -565,7 +565,7 @@ func checkBalanceRegionOpInfluence(re *require.Assertions, enablePlacementRules 
 	// ensure store score without operator influence : store 4 > store 3
 	// and store score with operator influence : store 3 > store 4
 	for i := 1; i <= 8; i++ {
-		id, _ := tc.Alloc()
+		id, _, _ := tc.Alloc(1)
 		origin := tc.AddLeaderRegion(id, 4)
 		newPeer := &metapb.Peer{StoreId: 3, Role: metapb.PeerRole_Voter}
 		op, _ := operator.CreateMovePeerOperator("balance-region", tc, origin, operator.OpKind(0), 4, newPeer)
@@ -750,10 +750,7 @@ func TestBalanceWhenRegionNotHeartbeat(t *testing.T) {
 // scheduleAndApplyOperator will try to schedule for `count` times and apply the operator if the operator is created.
 func scheduleAndApplyOperator(tc *mockcluster.Cluster, hb Scheduler, count int) {
 	limit := 0
-	for {
-		if limit > count {
-			break
-		}
+	for limit <= count {
 		ops, _ := hb.Schedule(tc, false)
 		if ops == nil {
 			limit++

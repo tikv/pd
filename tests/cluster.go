@@ -29,7 +29,6 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 
-	"github.com/tikv/pd/pkg/autoscaling"
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/dashboard"
 	"github.com/tikv/pd/pkg/errs"
@@ -39,7 +38,6 @@ import (
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/schedule/schedulers"
 	"github.com/tikv/pd/pkg/swaggerserver"
-	"github.com/tikv/pd/pkg/tso"
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
@@ -66,6 +64,11 @@ var (
 	WaitLeaderCheckInterval = 500 * time.Millisecond
 	// WaitLeaderRetryTimes represents the maximum number of loops of WaitLeader.
 	WaitLeaderRetryTimes = 100
+
+	// WaitPreAllocKeyspacesInterval represents the time interval of WaitPreAllocKeyspaces running check.
+	WaitPreAllocKeyspacesInterval = 500 * time.Millisecond
+	// WaitPreAllocKeyspacesRetryTimes represents the maximum number of loops of WaitPreAllocKeyspaces.
+	WaitPreAllocKeyspacesRetryTimes = 100
 )
 
 // TestServer is only for test.
@@ -82,7 +85,7 @@ var zapLogOnce sync.Once
 func NewTestServer(ctx context.Context, cfg *config.Config, services []string) (*TestServer, error) {
 	//  disable the heartbeat async runner in test
 	cfg.Schedule.EnableHeartbeatConcurrentRunner = false
-	err := logutil.SetupLogger(cfg.Log, &cfg.Logger, &cfg.LogProps, cfg.Security.RedactInfoLog)
+	err := logutil.SetupLogger(&cfg.Log, &cfg.Logger, &cfg.LogProps, cfg.Security.RedactInfoLog)
 	if err != nil {
 		return nil, err
 	}
@@ -93,7 +96,7 @@ func NewTestServer(ctx context.Context, cfg *config.Config, services []string) (
 	if err != nil {
 		return nil, err
 	}
-	serviceBuilders := []server.HandlerBuilder{api.NewHandler, apiv2.NewV2Handler, autoscaling.NewHandler}
+	serviceBuilders := []server.HandlerBuilder{api.NewHandler, apiv2.NewV2Handler}
 	if swaggerserver.Enabled() {
 		serviceBuilders = append(serviceBuilders, swaggerserver.NewHandler)
 	}
@@ -370,7 +373,7 @@ func (s *TestServer) GetStoreRegions(storeID uint64) []*core.RegionInfo {
 func (s *TestServer) BootstrapCluster() error {
 	bootstrapReq := &pdpb.BootstrapRequest{
 		Header: &pdpb.RequestHeader{ClusterId: keypath.ClusterID()},
-		Store:  &metapb.Store{Id: 1, Address: "mock://1", LastHeartbeat: time.Now().UnixNano()},
+		Store:  &metapb.Store{Id: 1, Address: "mock://tikv-1:1", LastHeartbeat: time.Now().UnixNano()},
 		Region: &metapb.Region{Id: 2, Peers: []*metapb.Peer{{Id: 3, StoreId: 1, Role: metapb.PeerRole_Voter}}},
 	}
 	resp, err := s.grpcServer.Bootstrap(context.Background(), bootstrapReq)
@@ -380,6 +383,12 @@ func (s *TestServer) BootstrapCluster() error {
 	if resp.GetHeader().GetError() != nil {
 		return errors.New(resp.GetHeader().GetError().String())
 	}
+
+	err = s.waitPreAllocKeyspaces()
+	if err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -396,9 +405,46 @@ func (s *TestServer) WaitLeader() bool {
 	return false
 }
 
-// GetTSOAllocatorManager returns the server's TSO Allocator Manager.
-func (s *TestServer) GetTSOAllocatorManager() *tso.AllocatorManager {
-	return s.server.GetTSOAllocatorManager()
+func (s *TestServer) waitPreAllocKeyspaces() error {
+	keyspaces := s.GetConfig().Keyspace.PreAlloc
+	if len(keyspaces) == 0 {
+		return nil
+	}
+
+	manager := s.GetKeyspaceManager()
+	idx := 0
+Outer:
+	for range WaitPreAllocKeyspacesRetryTimes {
+		for idx < len(keyspaces) {
+			_, err := manager.LoadKeyspace(keyspaces[idx])
+			if errors.ErrorEqual(err, errs.ErrKeyspaceNotFound) {
+				time.Sleep(WaitPreAllocKeyspacesInterval)
+				continue Outer
+			}
+			if err != nil {
+				return errors.Trace(err)
+			}
+
+			idx += 1
+		}
+		return nil
+	}
+	return errors.New("wait pre-alloc keyspaces retry limit exceeded")
+}
+
+// GetPreAllocKeyspaceIDs returns the pre-allocated keyspace IDs.
+func (s *TestServer) GetPreAllocKeyspaceIDs() ([]uint32, error) {
+	keyspaces := s.GetConfig().Keyspace.PreAlloc
+	ids := make([]uint32, 0, len(keyspaces))
+	manager := s.GetKeyspaceManager()
+	for _, keyspace := range keyspaces {
+		meta, err := manager.LoadKeyspace(keyspace)
+		if err != nil {
+			return nil, errors.Trace(err)
+		}
+		ids = append(ids, meta.GetId())
+	}
+	return ids, nil
 }
 
 // GetServicePrimaryAddr returns the primary address of the service.
@@ -429,8 +475,8 @@ func NewTestCluster(ctx context.Context, initialServerCount int, opts ...ConfigO
 	return createTestCluster(ctx, initialServerCount, nil, opts...)
 }
 
-// NewTestPDServiceCluster creates a new TestCluster with PD service.
-func NewTestPDServiceCluster(ctx context.Context, initialServerCount int, opts ...ConfigOption) (*TestCluster, error) {
+// NewTestClusterWithKeyspaceGroup creates a new TestCluster with PD.
+func NewTestClusterWithKeyspaceGroup(ctx context.Context, initialServerCount int, opts ...ConfigOption) (*TestCluster, error) {
 	return createTestCluster(ctx, initialServerCount, []string{constant.PDServiceName}, opts...)
 }
 
@@ -461,13 +507,13 @@ func createTestCluster(ctx context.Context, initialServerCount int, services []s
 	}, nil
 }
 
-// RestartTestAPICluster restarts the API test cluster.
-func RestartTestAPICluster(ctx context.Context, cluster *TestCluster) (*TestCluster, error) {
+// RestartTestPDCluster restarts the PD test cluster.
+func RestartTestPDCluster(ctx context.Context, cluster *TestCluster) (*TestCluster, error) {
 	return restartTestCluster(ctx, cluster, true)
 }
 
 func restartTestCluster(
-	ctx context.Context, cluster *TestCluster, isPDServiceMode bool,
+	ctx context.Context, cluster *TestCluster, isKeyspaceGroupEnabled bool,
 ) (newTestCluster *TestCluster, err error) {
 	schedulers.Register()
 	newTestCluster = &TestCluster{
@@ -494,7 +540,7 @@ func restartTestCluster(
 				newServer *TestServer
 				serverErr error
 			)
-			if isPDServiceMode {
+			if isKeyspaceGroupEnabled {
 				newServer, serverErr = NewTestServer(ctx, serverCfg, []string{constant.PDServiceName})
 			} else {
 				newServer, serverErr = NewTestServer(ctx, serverCfg, nil)
@@ -729,8 +775,8 @@ func (c *TestCluster) Join(ctx context.Context, opts ...ConfigOption) (*TestServ
 	return s, nil
 }
 
-// JoinPDServer is used to add a new TestServer into the cluster.
-func (c *TestCluster) JoinPDServer(ctx context.Context, opts ...ConfigOption) (*TestServer, error) {
+// JoinWithKeyspaceGroup is used to add a new TestServer into the cluster with keyspace group enabled.
+func (c *TestCluster) JoinWithKeyspaceGroup(ctx context.Context, opts ...ConfigOption) (*TestServer, error) {
 	conf, err := c.config.join().Generate(opts...)
 	if err != nil {
 		return nil, err

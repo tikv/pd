@@ -245,7 +245,7 @@ func (ci *clientInner) doRequest(
 		if readErr != nil {
 			logFields = append(logFields, zap.NamedError("read-body-error", err))
 		} else {
-			// PD service will return a JSON body containing the detailed error message
+			// PD will return a JSON body containing the detailed error message
 			// when the status code is not `http.StatusOK` 200.
 			bs = bytes.TrimSpace(bs)
 			logFields = append(logFields, zap.ByteString("body", bs))

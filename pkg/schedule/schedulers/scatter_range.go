@@ -23,13 +23,13 @@ import (
 
 	"github.com/pingcap/errors"
 
-	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/errs"
 	sche "github.com/tikv/pd/pkg/schedule/core"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
 	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/utils/apiutil"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 )
 
@@ -116,14 +116,14 @@ func newScatterRangeScheduler(opController *operator.Controller, config *scatter
 			opController,
 			&balanceLeaderSchedulerConfig{
 				balanceLeaderSchedulerParam: balanceLeaderSchedulerParam{
-					Ranges: []core.KeyRange{core.NewKeyRange("", "")}},
+					Ranges: []keyutil.KeyRange{keyutil.NewKeyRange("", "")}},
 			},
 			// the name will not be persisted
 			WithBalanceLeaderName("scatter-range-leader"),
 		),
 		balanceRegion: newBalanceRegionScheduler(
 			opController,
-			&balanceRegionSchedulerConfig{Ranges: []core.KeyRange{core.NewKeyRange("", "")}},
+			&balanceRegionSchedulerConfig{Ranges: []keyutil.KeyRange{keyutil.NewKeyRange("", "")}},
 			// the name will not be persisted
 			WithBalanceRegionName("scatter-range-region"),
 		),

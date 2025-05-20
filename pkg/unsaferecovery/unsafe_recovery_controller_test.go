@@ -4,7 +4,7 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//	   http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -138,10 +138,12 @@ func applyRecoveryPlan(re *require.Assertions, storeID uint64, storeReports map[
 							peer.Role = metapb.PeerRole_Voter
 						}
 						// exit joint state
-						if peer.Role == metapb.PeerRole_DemotingVoter {
+						switch peer.Role {
+						case metapb.PeerRole_DemotingVoter:
 							peer.Role = metapb.PeerRole_Learner
-						} else if peer.Role == metapb.PeerRole_IncomingVoter {
+						case metapb.PeerRole_IncomingVoter:
 							peer.Role = metapb.PeerRole_Voter
+						default:
 						}
 					}
 					for _, failedVoter := range demote.GetFailedVoters() {
@@ -1843,8 +1845,8 @@ func newTestStores(n uint64, version string) []*core.StoreInfo {
 	for i := uint64(1); i <= n; i++ {
 		store := &metapb.Store{
 			Id:            i,
-			Address:       fmt.Sprintf("127.0.0.1:%d", i),
-			StatusAddress: fmt.Sprintf("127.0.0.1:%d", i),
+			Address:       fmt.Sprintf("mock://tikv-%d:%d", i, i),
+			StatusAddress: fmt.Sprintf("mock://tikv-%d:%d", i, i+1),
 			State:         metapb.StoreState_Up,
 			Version:       version,
 			DeployPath:    getTestDeployPath(i),

@@ -36,6 +36,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 
 	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/response"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
@@ -211,7 +212,7 @@ func BenchmarkDoRequestWithServiceMiddleware(b *testing.B) {
 	resp, _ := tests.TestDialClient.Do(req)
 	resp.Body.Close()
 	b.StartTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		doTestRequestWithLogAudit(leader)
 	}
 	cancel()
@@ -308,7 +309,7 @@ func (suite *middlewareTestSuite) TestRateLimitMiddleware() {
 	for _, s := range suite.cluster.GetServers() {
 		servers = append(servers, s.GetServer())
 	}
-	server.MustWaitLeader(re, servers)
+	tests.MustWaitLeader(re, servers)
 	leader = suite.cluster.GetLeaderServer()
 	re.True(leader.GetServer().GetServiceMiddlewarePersistOptions().IsRateLimitEnabled())
 	cfg, ok := leader.GetServer().GetRateLimitConfig().LimiterConfig["SetLogLevel"]
@@ -444,7 +445,7 @@ func (suite *middlewareTestSuite) TestAuditPrometheusBackend() {
 	for _, s := range suite.cluster.GetServers() {
 		servers = append(servers, s.GetServer())
 	}
-	server.MustWaitLeader(re, servers)
+	tests.MustWaitLeader(re, servers)
 	leader = suite.cluster.GetLeaderServer()
 
 	timeUnix = time.Now().Unix() - 20
@@ -518,7 +519,7 @@ func BenchmarkDoRequestWithLocalLogAudit(b *testing.B) {
 	resp, _ := tests.TestDialClient.Do(req)
 	resp.Body.Close()
 	b.StartTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		doTestRequestWithLogAudit(leader)
 	}
 	cancel()
@@ -540,7 +541,7 @@ func BenchmarkDoRequestWithPrometheusAudit(b *testing.B) {
 	resp, _ := tests.TestDialClient.Do(req)
 	resp.Body.Close()
 	b.StartTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		doTestRequestWithPrometheus(leader)
 	}
 	cancel()
@@ -562,7 +563,7 @@ func BenchmarkDoRequestWithoutServiceMiddleware(b *testing.B) {
 	resp, _ := tests.TestDialClient.Do(req)
 	resp.Body.Close()
 	b.StartTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		doTestRequestWithLogAudit(leader)
 	}
 	cancel()
@@ -664,11 +665,47 @@ func (suite *redirectorTestSuite) TestAllowFollowerHandle() {
 	request.Header.Add(apiutil.PDAllowFollowerHandleHeader, "true")
 	resp, err := tests.TestDialClient.Do(request)
 	re.NoError(err)
-	re.Equal("", resp.Header.Get(apiutil.PDRedirectorHeader))
+	re.Empty(resp.Header.Get(apiutil.PDRedirectorHeader))
 	defer resp.Body.Close()
 	re.Equal(http.StatusOK, resp.StatusCode)
 	_, err = io.ReadAll(resp.Body)
 	re.NoError(err)
+}
+
+func (suite *redirectorTestSuite) TestPing() {
+	re := suite.Require()
+	// Find a follower.
+	var follower *server.Server
+	leader := suite.cluster.GetLeaderServer()
+	for _, svr := range suite.cluster.GetServers() {
+		if svr != leader {
+			follower = svr.GetServer()
+			break
+		}
+	}
+
+	for _, svr := range suite.cluster.GetServers() {
+		if svr.GetServer() != follower {
+			svr.Stop()
+		}
+	}
+	addr := follower.GetAddr() + "/pd/api/v1/ping"
+	request, err := http.NewRequest(http.MethodGet, addr, http.NoBody)
+	// ping request should not be redirected.
+	request.Header.Add(apiutil.PDAllowFollowerHandleHeader, "true")
+	re.NoError(err)
+	resp, err := tests.TestDialClient.Do(request)
+	re.NoError(err)
+	defer resp.Body.Close()
+	re.Equal(http.StatusOK, resp.StatusCode)
+	_, err = io.ReadAll(resp.Body)
+	re.NoError(err)
+	for _, svr := range suite.cluster.GetServers() {
+		if svr.GetServer() != follower {
+			re.NoError(svr.Run())
+		}
+	}
+	re.NotEmpty(suite.cluster.WaitLeader())
 }
 
 func (suite *redirectorTestSuite) TestNotLeader() {
@@ -757,7 +794,7 @@ func TestRemovingProgress(t *testing.T) {
 	clusterID := leader.GetClusterID()
 	req := &pdpb.BootstrapRequest{
 		Header: testutil.NewRequestHeader(clusterID),
-		Store:  &metapb.Store{Id: 1, Address: "127.0.0.1:0"},
+		Store:  &metapb.Store{Id: 1, Address: "mock://tikv-1:1"},
 		Region: &metapb.Region{Id: 2, Peers: []*metapb.Peer{{Id: 3, StoreId: 1, Role: metapb.PeerRole_Voter}}},
 	}
 	resp, err := grpcPDClient.Bootstrap(context.Background(), req)
@@ -797,6 +834,24 @@ func TestRemovingProgress(t *testing.T) {
 	re.Contains(string(output), "no progress found for the action")
 	output = sendRequest(re, leader.GetAddr()+"/pd/api/v1/stores/progress?id=2", http.MethodGet, http.StatusNotFound)
 	re.Contains(string(output), "no progress found for the given store ID")
+
+	// wait that stores are up
+	testutil.Eventually(re, func() bool {
+		output = sendRequest(re, leader.GetAddr()+"/pd/api/v1/stores", http.MethodGet, http.StatusOK)
+		var storesInfo response.StoresInfo
+		if err := json.Unmarshal(output, &storesInfo); err != nil {
+			return false
+		}
+		if len(storesInfo.Stores) != 3 {
+			return false
+		}
+		for _, store := range storesInfo.Stores {
+			if store.Store.GetNodeState() != metapb.NodeState_Serving {
+				return false
+			}
+		}
+		return true
+	})
 
 	// remove store 1 and store 2
 	_ = sendRequest(re, leader.GetAddr()+"/pd/api/v1/store/1", http.MethodDelete, http.StatusOK)
@@ -840,6 +895,9 @@ func TestRemovingProgress(t *testing.T) {
 
 	testutil.Eventually(re, func() bool {
 		// wait for cluster prepare
+		if leader.GetRaftCluster() == nil {
+			return false
+		}
 		if !leader.GetRaftCluster().IsPrepared() {
 			leader.GetRaftCluster().SetPrepared()
 			return false
@@ -866,14 +924,16 @@ func TestRemovingProgress(t *testing.T) {
 		}
 		// store 1: 40/10s = 4
 		// store 2: 20/10s = 2
-		// average speed = (2+4)/2 = 33
-		if p.CurrentSpeed != 3.0 {
+		// average speed = (2+4)/2 = 3.0
+		// If checkStore is executed multiple times, the time windows will increase
+		// which is 10s, 20s, 30s ..., the corresponding speed will be 3.0, 1.5, 1 ...
+		if p.CurrentSpeed > 3.0 {
 			return false
 		}
 		// store 1: (20+50)/4 = 17.5s
 		// store 2: (10+40)/2 = 25s
 		// average time = (17.5+25)/2 = 21.25s
-		if p.LeftSeconds != 21.25 {
+		if p.LeftSeconds < 21.25 {
 			return false
 		}
 		return true
@@ -885,9 +945,9 @@ func TestRemovingProgress(t *testing.T) {
 	// store 2: (30-10)/(30+40) ~= 0.285
 	re.Equal("0.29", fmt.Sprintf("%.2f", p.Progress))
 	// store 2: 20/10s = 2
-	re.Equal(2.0, p.CurrentSpeed)
+	re.LessOrEqual(p.CurrentSpeed, 2.0)
 	// store 2: (10+40)/2 = 25s
-	re.Equal(25.0, p.LeftSeconds)
+	re.GreaterOrEqual(p.LeftSeconds, 25.0)
 
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs"))
 }
@@ -911,7 +971,7 @@ func TestSendApiWhenRestartRaftCluster(t *testing.T) {
 	clusterID := leader.GetClusterID()
 	req := &pdpb.BootstrapRequest{
 		Header: testutil.NewRequestHeader(clusterID),
-		Store:  &metapb.Store{Id: 1, Address: "127.0.0.1:0"},
+		Store:  &metapb.Store{Id: 1, Address: "mock://tikv-1:1"},
 		Region: &metapb.Region{Id: 2, Peers: []*metapb.Peer{{Id: 3, StoreId: 1, Role: metapb.PeerRole_Voter}}},
 	}
 	resp, err := grpcPDClient.Bootstrap(context.Background(), req)
@@ -955,7 +1015,7 @@ func TestPreparingProgress(t *testing.T) {
 	clusterID := leader.GetClusterID()
 	req := &pdpb.BootstrapRequest{
 		Header: testutil.NewRequestHeader(clusterID),
-		Store:  &metapb.Store{Id: 1, Address: "127.0.0.1:0"},
+		Store:  &metapb.Store{Id: 1, Address: "mock://tikv-1:1"},
 		Region: &metapb.Region{Id: 2, Peers: []*metapb.Peer{{Id: 3, StoreId: 1, Role: metapb.PeerRole_Voter}}},
 	}
 	resp, err := grpcPDClient.Bootstrap(context.Background(), req)
@@ -1068,16 +1128,19 @@ func TestPreparingProgress(t *testing.T) {
 		if fmt.Sprintf("%.2f", p.Progress) != "0.13" {
 			return false
 		}
+
 		// store 4: 10/10s = 1
 		// store 5: 40/10s = 4
 		// average speed = (1+4)/2 = 2.5
-		if p.CurrentSpeed != 2.5 {
+		// If checkStore is executed multiple times, the time windows will increase
+		// which is 10s, 20s, 30s ..., the corresponding speed will be 2.5, 1.5, 1 ...
+		if p.CurrentSpeed > 2.5 {
 			return false
 		}
 		// store 4: 179/1 ~= 179
 		// store 5: 149/4 ~= 37.25
 		// average time ~= (179+37.25)/2 = 108.125
-		if p.LeftSeconds != 108.125 {
+		if p.LeftSeconds < 108.125 {
 			return false
 		}
 		return true
@@ -1087,8 +1150,8 @@ func TestPreparingProgress(t *testing.T) {
 	re.NoError(json.Unmarshal(output, &p))
 	re.Equal("preparing", p.Action)
 	re.Equal("0.05", fmt.Sprintf("%.2f", p.Progress))
-	re.Equal(1.0, p.CurrentSpeed)
-	re.Equal(179.0, p.LeftSeconds)
+	re.LessOrEqual(p.CurrentSpeed, 1.0)
+	re.GreaterOrEqual(p.LeftSeconds, 179.0)
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs"))
 }
 
@@ -1097,7 +1160,9 @@ func sendRequest(re *require.Assertions, url string, method string, statusCode i
 
 	testutil.Eventually(re, func() bool {
 		resp, err := tests.TestDialClient.Do(req)
-		re.NoError(err)
+		if err != nil {
+			return false
+		}
 		defer resp.Body.Close()
 
 		// Due to service unavailability caused by environmental issues,
@@ -1105,7 +1170,9 @@ func sendRequest(re *require.Assertions, url string, method string, statusCode i
 		if resp.StatusCode == http.StatusServiceUnavailable {
 			return false
 		}
-		re.Equal(statusCode, resp.StatusCode)
+		if resp.StatusCode != statusCode {
+			return false
+		}
 		output, err = io.ReadAll(resp.Body)
 		re.NoError(err)
 		return true

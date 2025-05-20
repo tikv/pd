@@ -30,7 +30,8 @@ import (
 	"github.com/tikv/pd/server"
 )
 
-const apiPrefix = "/pd"
+// APIPrefix is the prefix of the API.
+const APIPrefix = "/pd"
 
 // NewHandler creates a HTTP handler for API.
 func NewHandler(_ context.Context, svr *server.Server) (http.Handler, apiutil.APIServiceGroup, error) {
@@ -38,8 +39,8 @@ func NewHandler(_ context.Context, svr *server.Server) (http.Handler, apiutil.AP
 		Name:   "core",
 		IsCore: true,
 	}
-	prefix := apiPrefix + "/api/v1"
-	r := createRouter(apiPrefix, svr)
+	prefix := APIPrefix + "/api/v1"
+	r := createRouter(APIPrefix, svr)
 	router := mux.NewRouter()
 
 	// Following requests are redirected:
@@ -63,9 +64,9 @@ func NewHandler(_ context.Context, svr *server.Server) (http.Handler, apiutil.AP
 	// Following requests are **not** redirected:
 	//	"/schedulers", http.MethodPost
 	//	"/schedulers/{name}", http.MethodDelete
-	//  Because the writing of all the config of the scheduling service is in the PD service,
+	//  Because the writing of all the config of the scheduling service is in the PD,
 	// 	we should not post and delete the scheduler directly in the scheduling service.
-	router.PathPrefix(apiPrefix).Handler(negroni.New(
+	router.PathPrefix(APIPrefix).Handler(negroni.New(
 		serverapi.NewRuntimeServiceValidator(svr, group),
 		serverapi.NewRedirector(svr,
 			serverapi.MicroserviceRedirectRule(
@@ -153,7 +154,7 @@ func NewHandler(_ context.Context, svr *server.Server) (http.Handler, apiutil.AP
 				scheapi.APIPathPrefix+"/config/placement-rule",
 				constant.SchedulingServiceName,
 				[]string{http.MethodGet}),
-			// because the writing of all the meta information of the scheduling service is in the PD service,
+			// because the writing of all the meta information of the scheduling service is in the PD,
 			// we should not post and delete the scheduler directly in the scheduling service.
 			serverapi.MicroserviceRedirectRule(
 				prefix+"/schedulers",

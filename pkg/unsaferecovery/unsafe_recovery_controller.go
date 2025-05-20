@@ -4,7 +4,7 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//	   http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -110,7 +110,7 @@ type cluster interface {
 	core.StoreSetInformer
 
 	ResetRegionCache()
-	AllocID() (uint64, error)
+	AllocID(uint32) (uint64, uint32, error)
 	BuryStore(storeID uint64, forceBury bool) error
 	GetSchedulerConfig() sc.SchedulerConfigProvider
 }
@@ -515,7 +515,7 @@ func (u *Controller) changeStage(stage stage) {
 			count := 0
 			for store := range u.failedStores {
 				count += 1
-				stores += fmt.Sprintf("%d", store)
+				stores += strconv.FormatUint(store, 10)
 				if count != len(u.failedStores) {
 					stores += ", "
 				}
@@ -587,7 +587,7 @@ func (u *Controller) getForceLeaderPlanDigest() map[string][]string {
 		if forceLeaders != nil {
 			regions := ""
 			for i, regionID := range forceLeaders.GetEnterForceLeaders() {
-				regions += fmt.Sprintf("%d", regionID)
+				regions += strconv.FormatUint(regionID, 10)
 				if i != len(forceLeaders.GetEnterForceLeaders())-1 {
 					regions += ", "
 				}
@@ -1151,11 +1151,11 @@ func (u *Controller) generateCreateEmptyRegionPlan(newestRegionTree *regionTree,
 	hasPlan := false
 
 	createRegion := func(startKey, endKey []byte, storeID uint64) (*metapb.Region, error) {
-		regionID, err := u.cluster.AllocID()
+		regionID, _, err := u.cluster.AllocID(1)
 		if err != nil {
 			return nil, err
 		}
-		peerID, err := u.cluster.AllocID()
+		peerID, _, err := u.cluster.AllocID(1)
 		if err != nil {
 			return nil, err
 		}

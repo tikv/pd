@@ -16,11 +16,11 @@ package server
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 	"os"
 	"os/signal"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -110,7 +110,7 @@ type Server struct {
 	hbStreams *hbstream.HeartbeatStreams
 	storage   *endpoint.StorageEndpoint
 
-	// for watching the PD service meta info updates that are related to the scheduling.
+	// for watching the PD meta info updates that are related to the scheduling.
 	configWatcher *config.Watcher
 	ruleWatcher   *rule.Watcher
 	metaWatcher   *meta.Watcher
@@ -169,10 +169,10 @@ func (s *Server) startServerLoop() {
 	s.serverLoopCtx, s.serverLoopCancel = context.WithCancel(s.Context())
 	s.serverLoopWg.Add(2)
 	go s.primaryElectionLoop()
-	go s.updatePDServiceMemberLoop()
+	go s.updatePDMemberLoop()
 }
 
-func (s *Server) updatePDServiceMemberLoop() {
+func (s *Server) updatePDMemberLoop() {
 	defer logutil.LogPanic()
 	defer s.serverLoopWg.Done()
 
@@ -202,12 +202,12 @@ func (s *Server) updatePDServiceMemberLoop() {
 		}
 		for _, ep := range members.Members {
 			if len(ep.GetClientURLs()) == 0 { // This member is not started yet.
-				log.Info("member is not started yet", zap.String("member-id", fmt.Sprintf("%x", ep.GetID())), errs.ZapError(err))
+				log.Info("member is not started yet", zap.String("member-id", strconv.FormatUint(ep.GetID(), 16)), errs.ZapError(err))
 				continue
 			}
 			status, err := s.GetClient().Status(ctx, ep.ClientURLs[0])
 			if err != nil {
-				log.Info("failed to get status of member", zap.String("member-id", fmt.Sprintf("%x", ep.ID)), zap.String("endpoint", ep.ClientURLs[0]), errs.ZapError(err))
+				log.Info("failed to get status of member", zap.String("member-id", strconv.FormatUint(ep.ID, 16)), zap.String("endpoint", ep.ClientURLs[0]), errs.ZapError(err))
 				continue
 			}
 			if status.Leader == ep.ID {
@@ -220,9 +220,9 @@ func (s *Server) updatePDServiceMemberLoop() {
 					// double check
 					break
 				}
-				if s.cluster.SwitchPDServiceLeader(pdpb.NewPDClient(cc)) {
+				if s.cluster.SwitchPDLeader(pdpb.NewPDClient(cc)) {
 					if status.Leader != curLeader {
-						log.Info("switch leader", zap.String("leader-id", fmt.Sprintf("%x", ep.ID)), zap.String("endpoint", ep.ClientURLs[0]))
+						log.Info("switch leader", zap.String("leader-id", strconv.FormatUint(ep.ID, 16)), zap.String("endpoint", ep.ClientURLs[0]))
 					}
 					curLeader = ep.ID
 					break
@@ -597,7 +597,7 @@ func CreateServerWrapper(cmd *cobra.Command, args []string) {
 	}
 
 	// New zap logger
-	err = logutil.SetupLogger(cfg.Log, &cfg.Logger, &cfg.LogProps, cfg.Security.RedactInfoLog)
+	err = logutil.SetupLogger(&cfg.Log, &cfg.Logger, &cfg.LogProps, cfg.Security.RedactInfoLog)
 	if err == nil {
 		log.ReplaceGlobals(cfg.Logger, cfg.LogProps)
 	} else {

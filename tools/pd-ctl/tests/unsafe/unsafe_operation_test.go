@@ -39,7 +39,6 @@ func TestRemoveFailedStores(t *testing.T) {
 	re.NoError(err)
 	pdAddr := cluster.GetConfig().GetClientURL()
 	cmd := ctl.GetRootCmd()
-	defer cluster.Destroy()
 
 	args := []string{"-u", pdAddr, "unsafe", "remove-failed-stores", "1,2,3"}
 	_, err = tests.ExecuteCommand(cmd, args...)

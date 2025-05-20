@@ -15,12 +15,16 @@
 package tests
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"math/rand"
 	"net"
 	"net/http"
 	"os"
+	"path"
 	"runtime"
 	"strconv"
 	"strings"
@@ -30,11 +34,13 @@ import (
 
 	"github.com/docker/go-units"
 	"github.com/stretchr/testify/require"
+	"go.etcd.io/etcd/server/v3/embed"
 	"go.uber.org/zap"
 
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/kvproto/pkg/schedulingpb"
 	"github.com/pingcap/log"
 
 	bs "github.com/tikv/pd/pkg/basicserver"
@@ -44,11 +50,17 @@ import (
 	tso "github.com/tikv/pd/pkg/mcs/tso/server"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/mock/mockid"
-	"github.com/tikv/pd/pkg/utils/keypath"
+	"github.com/tikv/pd/pkg/schedule/schedulers"
+	"github.com/tikv/pd/pkg/utils/apiutil"
+	"github.com/tikv/pd/pkg/utils/assertutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
+	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/testutil"
+	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/pkg/versioninfo"
 	"github.com/tikv/pd/server"
+	"github.com/tikv/pd/server/cluster"
+	"github.com/tikv/pd/server/config"
 )
 
 var (
@@ -97,7 +109,7 @@ var once sync.Once
 func InitLogger(logConfig log.Config, logger *zap.Logger, logProps *log.ZapProperties, redactInfoLog logutil.RedactInfoLogType) (err error) {
 	once.Do(func() {
 		// Setup the logger.
-		err = logutil.SetupLogger(logConfig, &logger, &logProps, redactInfoLog)
+		err = logutil.SetupLogger(&logConfig, &logger, &logProps, redactInfoLog)
 		if err != nil {
 			return
 		}
@@ -141,7 +153,6 @@ func NewTSOTestServer(ctx context.Context, cfg *tso.Config) (*tso.Server, testut
 	}
 	cleanup := func() {
 		s.Close()
-		os.RemoveAll(cfg.DataDir)
 	}
 	return s, cleanup, nil
 }
@@ -172,7 +183,6 @@ func NewSchedulingTestServer(ctx context.Context, cfg *sc.Config) (*scheduling.S
 	}
 	cleanup := func() {
 		s.Close()
-		os.RemoveAll(cfg.DataDir)
 	}
 	return s, cleanup, nil
 }
@@ -194,35 +204,46 @@ func WaitForPrimaryServing(re *require.Assertions, serverMap map[string]bs.Serve
 }
 
 // MustPutStore is used for test purpose.
-func MustPutStore(re *require.Assertions, cluster *TestCluster, store *metapb.Store) {
-	store.Address = fmt.Sprintf("tikv%d", store.GetId())
+func MustPutStore(re *require.Assertions, tc *TestCluster, store *metapb.Store) {
+	store.Address = fmt.Sprintf("mock://tikv-%d:%d", store.GetId(), store.GetId())
 	if len(store.Version) == 0 {
 		store.Version = versioninfo.MinSupportedVersion(versioninfo.Version2_0).String()
 	}
-	svr := cluster.GetLeaderServer().GetServer()
-	grpcServer := &server.GrpcServer{Server: svr}
-	_, err := grpcServer.PutStore(context.Background(), &pdpb.PutStoreRequest{
-		Header: &pdpb.RequestHeader{ClusterId: keypath.ClusterID()},
-		Store:  store,
+	var raftCluster *cluster.RaftCluster
+	// Make sure the raft cluster is ready, no matter if the leader is changed.
+	testutil.Eventually(re, func() bool {
+		leader := tc.GetLeaderServer()
+		if leader == nil {
+			return false
+		}
+		svr := leader.GetServer()
+		if svr == nil {
+			return false
+		}
+		raftCluster = svr.GetRaftCluster()
+		// Wait for the raft cluster on the leader to be bootstrapped.
+		return raftCluster != nil && raftCluster.IsRunning()
 	})
-	re.NoError(err)
-
+	re.NoError(raftCluster.PutMetaStore(store))
 	ts := store.GetLastHeartbeat()
 	if ts == 0 {
 		ts = time.Now().UnixNano()
 	}
-	storeInfo := grpcServer.GetRaftCluster().GetStore(store.GetId())
+
+	storeInfo := raftCluster.GetStore(store.GetId())
 	newStore := storeInfo.Clone(
 		core.SetStoreStats(&pdpb.StoreStats{
 			Capacity:  uint64(10 * units.GiB),
 			UsedSize:  uint64(9 * units.GiB),
 			Available: uint64(1 * units.GiB),
 		}),
+		core.SetStoreState(store.GetState(), store.GetPhysicallyDestroyed()),
+		core.SetNodeState(store.GetNodeState()),
 		core.SetLastHeartbeatTS(time.Unix(ts/1e9, ts%1e9)),
 	)
-	grpcServer.GetRaftCluster().GetBasicCluster().PutStore(newStore)
-	if cluster.GetSchedulingPrimaryServer() != nil {
-		cluster.GetSchedulingPrimaryServer().GetCluster().PutStore(newStore)
+	raftCluster.GetBasicCluster().PutStore(newStore)
+	if tc.GetSchedulingPrimaryServer() != nil {
+		tc.GetSchedulingPrimaryServer().GetCluster().PutStore(newStore)
 	}
 }
 
@@ -255,6 +276,22 @@ func MustPutRegionInfo(re *require.Assertions, cluster *TestCluster, regionInfo 
 	}
 }
 
+// MustHandleStoreHeartbeat is used for test purpose.
+func MustHandleStoreHeartbeat(re *require.Assertions, cluster *TestCluster, heartbeat *pdpb.StoreHeartbeatRequest) {
+	err := cluster.GetLeaderServer().GetRaftCluster().HandleStoreHeartbeat(heartbeat, &pdpb.StoreHeartbeatResponse{})
+	re.NoError(err)
+	if cluster.GetSchedulingPrimaryServer() != nil {
+		hb := &schedulingpb.StoreHeartbeatRequest{
+			Header: &schedulingpb.RequestHeader{
+				ClusterId: heartbeat.Header.ClusterId,
+			},
+			Stats: heartbeat.GetStats(),
+		}
+		err = cluster.GetSchedulingPrimaryServer().GetCluster().HandleStoreHeartbeat(hb)
+		re.NoError(err)
+	}
+}
+
 // MustReportBuckets is used for test purpose.
 func MustReportBuckets(re *require.Assertions, cluster *TestCluster, regionID uint64, start, end []byte, stats *metapb.BucketStats) *metapb.Buckets {
 	buckets := &metapb.Buckets{
@@ -271,25 +308,28 @@ func MustReportBuckets(re *require.Assertions, cluster *TestCluster, regionID ui
 	return buckets
 }
 
-// SchedulerMode is used for test purpose.
-type SchedulerMode int
+// Env is used for test purpose.
+type Env int
 
 const (
-	// Both represents both PD mode and API mode.
-	Both SchedulerMode = iota
-	// PDMode represents PD mode.
-	PDMode
-	// PDServiceMode represents API mode.
-	PDServiceMode
+	// Both represents both scheduler environments.
+	Both Env = iota
+	// NonMicroserviceEnv represents non-microservice env.
+	NonMicroserviceEnv
+	// MicroserviceEnv represents microservice env.
+	MicroserviceEnv
 )
 
 // SchedulingTestEnvironment is used for test purpose.
 type SchedulingTestEnvironment struct {
 	t        *testing.T
 	opts     []ConfigOption
-	clusters map[SchedulerMode]*TestCluster
+	clusters map[Env]*TestCluster
 	cancels  []context.CancelFunc
-	RunMode  SchedulerMode
+	// only take effect in non-microservice env
+	SkipBootstrap bool
+	PDCount       int
+	Env           Env
 }
 
 // NewSchedulingTestEnvironment is to create a new SchedulingTestEnvironment.
@@ -297,38 +337,38 @@ func NewSchedulingTestEnvironment(t *testing.T, opts ...ConfigOption) *Schedulin
 	return &SchedulingTestEnvironment{
 		t:        t,
 		opts:     opts,
-		clusters: make(map[SchedulerMode]*TestCluster),
+		clusters: make(map[Env]*TestCluster),
 		cancels:  make([]context.CancelFunc, 0),
 	}
 }
 
-// RunTestBasedOnMode runs test based on mode.
-// If mode not set, it will run test in both PD mode and API mode.
-func (s *SchedulingTestEnvironment) RunTestBasedOnMode(test func(*TestCluster)) {
-	switch s.RunMode {
-	case PDMode:
-		s.RunTestInPDMode(test)
-	case PDServiceMode:
-		s.RunTestInPDServiceMode(test)
+// RunTest is to run test based on the environment.
+// If env not set, it will run test in both non-microservice env and microservice env.
+func (s *SchedulingTestEnvironment) RunTest(test func(*TestCluster)) {
+	switch s.Env {
+	case NonMicroserviceEnv:
+		s.RunTestInNonMicroserviceEnv(test)
+	case MicroserviceEnv:
+		s.RunTestInMicroserviceEnv(test)
 	default:
-		s.RunTestInPDMode(test)
-		s.RunTestInPDServiceMode(test)
+		s.RunTestInNonMicroserviceEnv(test)
+		s.RunTestInMicroserviceEnv(test)
 	}
 }
 
-// RunTestInPDMode is to run test in pd mode.
-func (s *SchedulingTestEnvironment) RunTestInPDMode(test func(*TestCluster)) {
-	s.t.Logf("start test %s in pd mode", getTestName())
-	if _, ok := s.clusters[PDMode]; !ok {
-		s.startCluster(PDMode)
+// RunTestInNonMicroserviceEnv is to run test in non-microservice environment.
+func (s *SchedulingTestEnvironment) RunTestInNonMicroserviceEnv(test func(*TestCluster)) {
+	s.t.Logf("start test %s in non-microservice environment", getTestName())
+	if _, ok := s.clusters[NonMicroserviceEnv]; !ok {
+		s.startCluster(NonMicroserviceEnv)
 	}
-	test(s.clusters[PDMode])
+	test(s.clusters[NonMicroserviceEnv])
 }
 
 func getTestName() string {
 	pc, _, _, _ := runtime.Caller(2)
 	caller := runtime.FuncForPC(pc)
-	if caller == nil || strings.Contains(caller.Name(), "RunTestBasedOnMode") {
+	if caller == nil || strings.Contains(caller.Name(), "RunTest") {
 		pc, _, _, _ = runtime.Caller(3)
 		caller = runtime.FuncForPC(pc)
 	}
@@ -339,8 +379,8 @@ func getTestName() string {
 	return ""
 }
 
-// RunTestInPDServiceMode is to run test in pd service mode.
-func (s *SchedulingTestEnvironment) RunTestInPDServiceMode(test func(*TestCluster)) {
+// RunTestInMicroserviceEnv is to run test in microservice environment.
+func (s *SchedulingTestEnvironment) RunTestInMicroserviceEnv(test func(*TestCluster)) {
 	re := require.New(s.t)
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs", `return(true)`))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/mcs/scheduling/server/fastUpdateMember", `return(true)`))
@@ -348,11 +388,11 @@ func (s *SchedulingTestEnvironment) RunTestInPDServiceMode(test func(*TestCluste
 		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/scheduling/server/fastUpdateMember"))
 		re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs"))
 	}()
-	s.t.Logf("start test %s in pd service mode", getTestName())
-	if _, ok := s.clusters[PDServiceMode]; !ok {
-		s.startCluster(PDServiceMode)
+	s.t.Logf("start test %s in microservice environment", getTestName())
+	if _, ok := s.clusters[MicroserviceEnv]; !ok {
+		s.startCluster(MicroserviceEnv)
 	}
-	test(s.clusters[PDServiceMode])
+	test(s.clusters[MicroserviceEnv])
 }
 
 // Cleanup is to cleanup the environment.
@@ -365,22 +405,27 @@ func (s *SchedulingTestEnvironment) Cleanup() {
 	}
 }
 
-func (s *SchedulingTestEnvironment) startCluster(m SchedulerMode) {
+func (s *SchedulingTestEnvironment) startCluster(m Env) {
 	re := require.New(s.t)
 	ctx, cancel := context.WithCancel(context.Background())
 	s.cancels = append(s.cancels, cancel)
+	if s.PDCount == 0 {
+		s.PDCount = 1
+	}
 	switch m {
-	case PDMode:
-		cluster, err := NewTestCluster(ctx, 1, s.opts...)
+	case NonMicroserviceEnv:
+		cluster, err := NewTestCluster(ctx, s.PDCount, s.opts...)
 		re.NoError(err)
 		err = cluster.RunInitialServers()
 		re.NoError(err)
 		re.NotEmpty(cluster.WaitLeader())
 		leaderServer := cluster.GetServer(cluster.GetLeader())
-		re.NoError(leaderServer.BootstrapCluster())
-		s.clusters[PDMode] = cluster
-	case PDServiceMode:
-		cluster, err := NewTestPDServiceCluster(ctx, 1, s.opts...)
+		if !s.SkipBootstrap {
+			re.NoError(leaderServer.BootstrapCluster())
+		}
+		s.clusters[NonMicroserviceEnv] = cluster
+	case MicroserviceEnv:
+		cluster, err := NewTestClusterWithKeyspaceGroup(ctx, s.PDCount, s.opts...)
 		re.NoError(err)
 		err = cluster.RunInitialServers()
 		re.NoError(err)
@@ -398,7 +443,7 @@ func (s *SchedulingTestEnvironment) startCluster(m SchedulerMode) {
 		testutil.Eventually(re, func() bool {
 			return cluster.GetLeaderServer().GetServer().IsServiceIndependent(constant.SchedulingServiceName)
 		})
-		s.clusters[PDServiceMode] = cluster
+		s.clusters[MicroserviceEnv] = cluster
 	}
 }
 
@@ -407,7 +452,7 @@ type idAllocator struct {
 }
 
 func (i *idAllocator) alloc() uint64 {
-	v, _ := i.allocator.Alloc()
+	v, _, _ := i.allocator.Alloc(1)
 	return v
 }
 
@@ -430,10 +475,12 @@ func InitRegions(regionLen int) []*core.RegionInfo {
 				{Id: allocator.alloc(), StoreId: uint64(3)},
 			},
 		}
-		if i == 0 {
+		switch i {
+		case 0:
 			r.StartKey = []byte{}
-		} else if i == regionLen-1 {
+		case regionLen - 1:
 			r.EndKey = []byte{}
+		default:
 		}
 		region := core.NewRegionInfo(r, r.Peers[0], core.SetSource(core.Heartbeat))
 		// Here is used to simulate the upgrade process.
@@ -444,8 +491,189 @@ func InitRegions(regionLen int) []*core.RegionInfo {
 				Version:  1,
 			}
 			region.UpdateBuckets(buckets, region.GetBuckets())
+		} else {
+			region.UpdateBuckets(&metapb.Buckets{}, region.GetBuckets())
 		}
 		regions = append(regions, region)
 	}
 	return regions
+}
+
+var logOnce sync.Once
+
+// NewTestSingleConfig is only for test to create one pd.
+// Because PD client also needs this, so export here.
+func NewTestSingleConfig(c *assertutil.Checker) *config.Config {
+	schedulers.Register()
+	cfg := &config.Config{
+		Name:       "pd",
+		ClientUrls: tempurl.Alloc(),
+		PeerUrls:   tempurl.Alloc(),
+
+		InitialClusterState: embed.ClusterStateFlagNew,
+
+		LeaderLease:     10,
+		TSOSaveInterval: typeutil.NewDuration(200 * time.Millisecond),
+	}
+
+	cfg.AdvertiseClientUrls = cfg.ClientUrls
+	cfg.AdvertisePeerUrls = cfg.PeerUrls
+	cfg.DataDir, _ = os.MkdirTemp("", "pd_tests")
+	cfg.InitialCluster = fmt.Sprintf("pd=%s", cfg.PeerUrls)
+	cfg.DisableStrictReconfigCheck = true
+	cfg.TickInterval = typeutil.NewDuration(100 * time.Millisecond)
+	cfg.ElectionInterval = typeutil.NewDuration(3 * time.Second)
+	cfg.LeaderPriorityCheckInterval = typeutil.NewDuration(100 * time.Millisecond)
+	err := logutil.SetupLogger(&cfg.Log, &cfg.Logger, &cfg.LogProps, cfg.Security.RedactInfoLog)
+	c.AssertNil(err)
+	logOnce.Do(func() {
+		log.ReplaceGlobals(cfg.Logger, cfg.LogProps)
+	})
+
+	c.AssertNil(cfg.Adjust(nil, false))
+	cfg.Keyspace.WaitRegionSplit = false
+
+	return cfg
+}
+
+// NewTestMultiConfig is only for test to create multiple pd configurations.
+// Because PD client also needs this, so export here.
+func NewTestMultiConfig(c *assertutil.Checker, count int) []*config.Config {
+	cfgs := make([]*config.Config, count)
+
+	clusters := []string{}
+	for i := 1; i <= count; i++ {
+		cfg := NewTestSingleConfig(c)
+		cfg.Name = fmt.Sprintf("pd%d", i)
+
+		clusters = append(clusters, fmt.Sprintf("%s=%s", cfg.Name, cfg.PeerUrls))
+
+		cfgs[i-1] = cfg
+	}
+
+	initialCluster := strings.Join(clusters, ",")
+	for _, cfg := range cfgs {
+		cfg.InitialCluster = initialCluster
+	}
+
+	return cfgs
+}
+
+// NewServer creates a pd server for testing.
+func NewServer(re *require.Assertions, c *assertutil.Checker) (*server.Server, testutil.CleanupFunc, error) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cfg := NewTestSingleConfig(c)
+	mockHandler := CreateMockHandler(re, "127.0.0.1")
+	s, err := server.CreateServer(ctx, cfg, nil, mockHandler)
+	if err != nil {
+		cancel()
+		return nil, nil, err
+	}
+	if err = s.Run(); err != nil {
+		cancel()
+		return nil, nil, err
+	}
+
+	cleanup := func() {
+		cancel()
+		s.Close()
+		os.RemoveAll(cfg.DataDir)
+	}
+	return s, cleanup, nil
+}
+
+// MustWaitLeader return the leader until timeout.
+func MustWaitLeader(re *require.Assertions, svrs []*server.Server) *server.Server {
+	var leader *server.Server
+	testutil.Eventually(re, func() bool {
+		for _, svr := range svrs {
+			// All servers' GetLeader should return the same leader.
+			if svr.GetLeader() == nil || (leader != nil && svr.GetLeader().GetMemberId() != leader.GetLeader().GetMemberId()) {
+				return false
+			}
+			if leader == nil && !svr.IsClosed() {
+				leader = svr
+			}
+		}
+		return true
+	})
+	return leader
+}
+
+// CreateMockHandler creates a mock handler for test.
+func CreateMockHandler(re *require.Assertions, ip string) server.HandlerBuilder {
+	return func(context.Context, *server.Server) (http.Handler, apiutil.APIServiceGroup, error) {
+		mux := http.NewServeMux()
+		mux.HandleFunc("/pd/apis/mock/v1/hello", func(w http.ResponseWriter, r *http.Request) {
+			fmt.Fprintln(w, "Hello World")
+			// test getting ip
+			clientIP, _ := apiutil.GetIPPortFromHTTPRequest(r)
+			re.Equal(ip, clientIP)
+		})
+		info := apiutil.APIServiceGroup{
+			Name:    "mock",
+			Version: "v1",
+		}
+		return mux, info, nil
+	}
+}
+
+const (
+	schedulersPrefix      = "/pd/api/v1/schedulers"
+	schedulerConfigPrefix = "/pd/api/v1/scheduler-config"
+)
+
+// MustAddScheduler adds a scheduler with HTTP API.
+func MustAddScheduler(
+	re *require.Assertions, serverAddr string,
+	schedulerName string, args map[string]any,
+) {
+	request := map[string]any{
+		"name": schedulerName,
+	}
+	for arg, val := range args {
+		request[arg] = val
+	}
+	data, err := json.Marshal(request)
+	re.NoError(err)
+	httpReq, err := http.NewRequest(http.MethodPost, fmt.Sprintf("%s%s", serverAddr, schedulersPrefix), bytes.NewBuffer(data))
+	re.NoError(err)
+	// Send request.
+	resp, err := TestDialClient.Do(httpReq)
+	re.NoError(err)
+	defer resp.Body.Close()
+	data, err = io.ReadAll(resp.Body)
+	re.NoError(err)
+	re.Equal(http.StatusOK, resp.StatusCode, string(data))
+}
+
+// MustDeleteScheduler deletes a scheduler with HTTP API.
+func MustDeleteScheduler(re *require.Assertions, serverAddr, schedulerName string) {
+	httpReq, err := http.NewRequest(http.MethodDelete, fmt.Sprintf("%s%s/%s", serverAddr, schedulersPrefix, schedulerName), http.NoBody)
+	re.NoError(err)
+	resp, err := TestDialClient.Do(httpReq)
+	re.NoError(err)
+	defer resp.Body.Close()
+	data, err := io.ReadAll(resp.Body)
+	re.NoError(err)
+	re.Equal(http.StatusOK, resp.StatusCode, string(data))
+}
+
+// MustCallSchedulerConfigAPI calls a scheduler config with HTTP API with the given args.
+func MustCallSchedulerConfigAPI(
+	re *require.Assertions,
+	method, serverAddr, schedulerName string, args []string,
+	input map[string]any,
+) {
+	data, err := json.Marshal(input)
+	re.NoError(err)
+	args = append([]string{schedulerConfigPrefix, schedulerName}, args...)
+	httpReq, err := http.NewRequest(method, fmt.Sprintf("%s%s", serverAddr, path.Join(args...)), bytes.NewBuffer(data))
+	re.NoError(err)
+	resp, err := TestDialClient.Do(httpReq)
+	re.NoError(err)
+	defer resp.Body.Close()
+	data, err = io.ReadAll(resp.Body)
+	re.NoError(err)
+	re.Equal(http.StatusOK, resp.StatusCode, string(data))
 }

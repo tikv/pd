@@ -33,22 +33,18 @@ import (
 	"github.com/tikv/pd/pkg/utils/keypath"
 )
 
-// Watcher is used to watch the PD service for any meta changes.
+// Watcher is used to watch the PD for any meta changes.
 type Watcher struct {
 	wg     sync.WaitGroup
 	ctx    context.Context
 	cancel context.CancelFunc
-	// storePathPrefix is the path of the store in etcd:
-	//  - Key: /pd/{cluster_id}/raft/s/
-	//  - Value: meta store proto.
-	storePathPrefix string
 
 	etcdClient   *clientv3.Client
 	basicCluster *core.BasicCluster
 	storeWatcher *etcdutil.LoopWatcher
 }
 
-// NewWatcher creates a new watcher to watch the meta change from PD service.
+// NewWatcher creates a new watcher to watch the meta change from PD.
 func NewWatcher(
 	ctx context.Context,
 	etcdClient *clientv3.Client,
@@ -56,11 +52,10 @@ func NewWatcher(
 ) (*Watcher, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	w := &Watcher{
-		ctx:             ctx,
-		cancel:          cancel,
-		storePathPrefix: keypath.StorePathPrefix(),
-		etcdClient:      etcdClient,
-		basicCluster:    basicCluster,
+		ctx:          ctx,
+		cancel:       cancel,
+		etcdClient:   etcdClient,
+		basicCluster: basicCluster,
 	}
 	err := w.initializeStoreWatcher()
 	if err != nil {
@@ -82,7 +77,7 @@ func (w *Watcher) initializeStoreWatcher() error {
 		if origin == nil {
 			w.basicCluster.PutStore(core.NewStoreInfo(store))
 		} else {
-			w.basicCluster.PutStore(origin.Clone(core.SetStoreMeta(store)))
+			w.basicCluster.PutStore(origin, core.SetStoreMeta(store))
 		}
 
 		if store.GetNodeState() == metapb.NodeState_Removed {
@@ -108,7 +103,9 @@ func (w *Watcher) initializeStoreWatcher() error {
 	w.storeWatcher = etcdutil.NewLoopWatcher(
 		w.ctx, &w.wg,
 		w.etcdClient,
-		"scheduling-store-watcher", w.storePathPrefix,
+		"scheduling-store-watcher",
+		// Watch meta store proto
+		keypath.StorePathPrefix(),
 		func([]*clientv3.Event) error { return nil },
 		putFn, deleteFn,
 		func([]*clientv3.Event) error { return nil },

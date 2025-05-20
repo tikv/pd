@@ -105,14 +105,16 @@ func (s *StoresStats) SetRegionsStats(storeIDs []uint64, writeBytesRates, writeK
 }
 
 // GetStoresLoads returns all stores loads.
-func (s *StoresStats) GetStoresLoads() map[uint64][]float64 {
+func (s *StoresStats) GetStoresLoads() map[uint64]StoreKindLoads {
 	s.RLock()
 	defer s.RUnlock()
-	res := make(map[uint64][]float64, len(s.rollingStoresStats))
+	res := make(map[uint64]StoreKindLoads, len(s.rollingStoresStats))
 	for storeID, stats := range s.rollingStoresStats {
-		for i := utils.StoreStatKind(0); i < utils.StoreStatCount; i++ {
-			res[storeID] = append(res[storeID], stats.GetLoad(i))
+		var storeStats StoreKindLoads
+		for i := range utils.StoreLoadCount {
+			storeStats[i] = stats.GetLoad(i)
 		}
+		res[storeID] = storeStats
 	}
 	return res
 }
@@ -129,11 +131,6 @@ func (s *StoresStats) FilterUnhealthyStore(cluster core.StoreSetInformer) {
 	}
 }
 
-// UpdateStoreHeartbeatMetrics is used to update store heartbeat interval metrics
-func UpdateStoreHeartbeatMetrics(store *core.StoreInfo) {
-	storeHeartbeatIntervalHist.Observe(time.Since(store.GetLastHeartbeatTS()).Seconds())
-}
-
 // RollingStoreStats are multiple sets of recent historical records with specified windows size.
 type RollingStoreStats struct {
 	syncutil.RWMutex
@@ -143,8 +140,8 @@ type RollingStoreStats struct {
 
 // NewRollingStoreStats creates a RollingStoreStats.
 func newRollingStoreStats() *RollingStoreStats {
-	timeMedians := make([]*movingaverage.TimeMedian, utils.StoreStatCount)
-	movingAvgs := make([]movingaverage.MovingAvg, utils.StoreStatCount)
+	timeMedians := make([]*movingaverage.TimeMedian, utils.StoreLoadCount)
+	movingAvgs := make([]movingaverage.MovingAvg, utils.StoreLoadCount)
 
 	// from StoreHeartbeat
 	interval := utils.StoreHeartBeatReportInterval * time.Second
@@ -244,7 +241,7 @@ func (r *RollingStoreStats) SetRegionsStats(writeBytesRate, writeKeysRate float6
 }
 
 // GetLoad returns store's load.
-func (r *RollingStoreStats) GetLoad(k utils.StoreStatKind) float64 {
+func (r *RollingStoreStats) GetLoad(k utils.StoreLoadKind) float64 {
 	r.RLock()
 	defer r.RUnlock()
 	switch k {
@@ -257,7 +254,7 @@ func (r *RollingStoreStats) GetLoad(k utils.StoreStatKind) float64 {
 }
 
 // GetInstantLoad returns store's instant load.
-func (r *RollingStoreStats) GetInstantLoad(k utils.StoreStatKind) float64 {
+func (r *RollingStoreStats) GetInstantLoad(k utils.StoreLoadKind) float64 {
 	r.RLock()
 	defer r.RUnlock()
 	switch k {

@@ -28,6 +28,7 @@ import (
 
 	"github.com/pingcap/errcode"
 	"github.com/pingcap/errors"
+	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/errs"
@@ -57,6 +58,7 @@ func newConfHandler(svr *server.Server, rd *render.Render) *confHandler {
 	}
 }
 
+// GetConfig gets the full config.
 // @Tags     config
 // @Summary  Get full config.
 // @Produce  json
@@ -79,6 +81,7 @@ func (h *confHandler) GetConfig(w http.ResponseWriter, r *http.Request) {
 	h.rd.JSON(w, http.StatusOK, cfg)
 }
 
+// GetDefaultConfig gets the default config.
 // @Tags     config
 // @Summary  Get default config.
 // @Produce  json
@@ -95,6 +98,7 @@ func (h *confHandler) GetDefaultConfig(w http.ResponseWriter, _ *http.Request) {
 	h.rd.JSON(w, http.StatusOK, config)
 }
 
+// SetConfig sets the config.
 // FIXME: details of input json body params
 // @Tags     config
 // @Summary  Update a config item.
@@ -332,6 +336,7 @@ func getConfigMap(cfg map[string]any, key []string, value any) map[string]any {
 	return cfg
 }
 
+// GetScheduleConfig gets the schedule config.
 // @Tags     config
 // @Summary  Get schedule config.
 // @Produce  json
@@ -353,6 +358,7 @@ func (h *confHandler) GetScheduleConfig(w http.ResponseWriter, r *http.Request) 
 	h.rd.JSON(w, http.StatusOK, cfg)
 }
 
+// SetScheduleConfig sets the schedule config.
 // @Tags     config
 // @Summary  Update a schedule config item.
 // @Accept   json
@@ -405,12 +411,17 @@ func (h *confHandler) SetScheduleConfig(w http.ResponseWriter, r *http.Request) 
 	h.rd.JSON(w, http.StatusOK, "The config is updated.")
 }
 
+// GetReplicationConfig gets the replication config.
 // @Tags     config
 // @Summary  Get replication config.
 // @Produce  json
 // @Success  200  {object}  sc.ReplicationConfig
 // @Router   /config/replicate [get]
 func (h *confHandler) GetReplicationConfig(w http.ResponseWriter, r *http.Request) {
+	failpoint.Inject("getReplicationConfigFailed", func(v failpoint.Value) {
+		code := v.(int)
+		h.rd.JSON(w, code, "get config failed")
+	})
 	if h.svr.IsServiceIndependent(constant.SchedulingServiceName) &&
 		r.Header.Get(apiutil.XForbiddenForwardToMicroserviceHeader) != "true" {
 		cfg, err := h.getSchedulingServerConfig()
@@ -424,6 +435,7 @@ func (h *confHandler) GetReplicationConfig(w http.ResponseWriter, r *http.Reques
 	h.rd.JSON(w, http.StatusOK, h.svr.GetReplicationConfig())
 }
 
+// SetReplicationConfig sets the replication config.
 // @Tags     config
 // @Summary  Update a replication config item.
 // @Accept   json
@@ -447,6 +459,7 @@ func (h *confHandler) SetReplicationConfig(w http.ResponseWriter, r *http.Reques
 	h.rd.JSON(w, http.StatusOK, "The config is updated.")
 }
 
+// GetLabelPropertyConfig gets the label property config.
 // @Tags     config
 // @Summary  Get label property config.
 // @Produce  json
@@ -456,6 +469,7 @@ func (h *confHandler) GetLabelPropertyConfig(w http.ResponseWriter, _ *http.Requ
 	h.rd.JSON(w, http.StatusOK, h.svr.GetLabelProperty())
 }
 
+// SetLabelPropertyConfig sets the label property config.
 // @Tags     config
 // @Summary  Update label property config item.
 // @Accept   json
@@ -487,6 +501,7 @@ func (h *confHandler) SetLabelPropertyConfig(w http.ResponseWriter, r *http.Requ
 	h.rd.JSON(w, http.StatusOK, "The config is updated.")
 }
 
+// GetClusterVersion gets the cluster version.
 // @Tags     config
 // @Summary  Get cluster version.
 // @Produce  json
@@ -496,6 +511,7 @@ func (h *confHandler) GetClusterVersion(w http.ResponseWriter, _ *http.Request) 
 	h.rd.JSON(w, http.StatusOK, h.svr.GetClusterVersion())
 }
 
+// SetClusterVersion sets the cluster version.
 // @Tags     config
 // @Summary  Update cluster version.
 // @Accept   json
@@ -524,6 +540,7 @@ func (h *confHandler) SetClusterVersion(w http.ResponseWriter, r *http.Request) 
 	h.rd.JSON(w, http.StatusOK, "The cluster version is updated.")
 }
 
+// GetReplicationModeConfig gets the replication mode config.
 // @Tags     config
 // @Summary  Get replication mode config.
 // @Produce  json
@@ -533,6 +550,7 @@ func (h *confHandler) GetReplicationModeConfig(w http.ResponseWriter, _ *http.Re
 	h.rd.JSON(w, http.StatusOK, h.svr.GetReplicationModeConfig())
 }
 
+// SetReplicationModeConfig sets the replication mode config.
 // @Tags     config
 // @Summary  Set replication mode config.
 // @Accept   json
@@ -554,6 +572,7 @@ func (h *confHandler) SetReplicationModeConfig(w http.ResponseWriter, r *http.Re
 	h.rd.JSON(w, http.StatusOK, "The replication mode config is updated.")
 }
 
+// GetPDServerConfig gets the PD server config.
 // @Tags     config
 // @Summary  Get PD server config.
 // @Produce  json

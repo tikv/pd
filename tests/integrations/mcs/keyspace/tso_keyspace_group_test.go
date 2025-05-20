@@ -60,7 +60,7 @@ func (suite *keyspaceGroupTestSuite) SetupTest() {
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/acceleratedAllocNodes", `return(true)`))
 	ctx, cancel := context.WithCancel(context.Background())
 	suite.ctx = ctx
-	cluster, err := tests.NewTestPDServiceCluster(suite.ctx, 1)
+	cluster, err := tests.NewTestClusterWithKeyspaceGroup(suite.ctx, 1)
 	suite.cluster = cluster
 	re.NoError(err)
 	re.NoError(cluster.RunInitialServers())

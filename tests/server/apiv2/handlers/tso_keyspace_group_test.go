@@ -42,7 +42,7 @@ func TestKeyspaceGroupTestSuite(t *testing.T) {
 func (suite *keyspaceGroupTestSuite) SetupTest() {
 	re := suite.Require()
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
-	cluster, err := tests.NewTestPDServiceCluster(suite.ctx, 1)
+	cluster, err := tests.NewTestClusterWithKeyspaceGroup(suite.ctx, 1)
 	suite.cluster = cluster
 	re.NoError(err)
 	re.NoError(cluster.RunInitialServers())

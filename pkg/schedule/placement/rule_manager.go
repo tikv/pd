@@ -21,11 +21,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 
 	"go.uber.org/zap"
-	"golang.org/x/exp/slices"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/log"

@@ -92,13 +92,14 @@ func TestMicroserviceTSOClientSuite(t *testing.T) {
 
 func (suite *tsoClientTestSuite) SetupSuite() {
 	re := suite.Require()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/fastUpdatePhysicalInterval", "return(true)"))
 
 	var err error
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
 	if suite.legacy {
 		suite.cluster, err = tests.NewTestCluster(suite.ctx, serverCount)
 	} else {
-		suite.cluster, err = tests.NewTestPDServiceCluster(suite.ctx, serverCount, func(conf *config.Config, _ string) {
+		suite.cluster, err = tests.NewTestClusterWithKeyspaceGroup(suite.ctx, serverCount, func(conf *config.Config, _ string) {
 			conf.Microservice.EnableTSODynamicSwitching = false
 		})
 	}
@@ -197,7 +198,7 @@ func (suite *tsoClientTestSuite) waitForAllKeyspaceGroupsInServing(re *require.A
 	// Create clients and make sure they all have discovered the tso service.
 	suite.clients = mcs.WaitForMultiKeyspacesTSOAvailable(
 		suite.ctx, re, suite.keyspaceIDs, suite.getBackendEndpoints())
-	re.Equal(len(suite.keyspaceIDs), len(suite.clients))
+	re.Len(suite.keyspaceIDs, len(suite.clients))
 }
 
 func (suite *tsoClientTestSuite) TearDownTest() {
@@ -207,6 +208,7 @@ func (suite *tsoClientTestSuite) TearDownTest() {
 }
 
 func (suite *tsoClientTestSuite) TearDownSuite() {
+	failpoint.Disable("github.com/tikv/pd/pkg/tso/fastUpdatePhysicalInterval")
 	suite.cancel()
 	if !suite.legacy {
 		suite.tsoCluster.Destroy()
@@ -379,10 +381,8 @@ func (suite *tsoClientTestSuite) TestUpdateAfterResetTSO() {
 
 func (suite *tsoClientTestSuite) TestRandomResignLeader() {
 	re := suite.Require()
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/fastUpdatePhysicalInterval", "return(true)"))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/member/skipCampaignLeaderCheck", "return(true)"))
 	defer func() {
-		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/tso/fastUpdatePhysicalInterval"))
 		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/member/skipCampaignLeaderCheck"))
 	}()
 
@@ -426,7 +426,6 @@ func (suite *tsoClientTestSuite) TestRandomResignLeader() {
 
 func (suite *tsoClientTestSuite) TestRandomShutdown() {
 	re := suite.Require()
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/fastUpdatePhysicalInterval", "return(true)"))
 
 	parallelAct := func() {
 		// After https://github.com/tikv/pd/issues/6376 is fixed, we can use a smaller number here.
@@ -445,7 +444,6 @@ func (suite *tsoClientTestSuite) TestRandomShutdown() {
 	mcs.CheckMultiKeyspacesTSO(suite.ctx, re, suite.clients, parallelAct)
 	suite.TearDownSuite()
 	suite.SetupSuite()
-	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/tso/fastUpdatePhysicalInterval"))
 }
 
 func (suite *tsoClientTestSuite) TestGetTSWhileResettingTSOClient() {
@@ -486,6 +484,45 @@ func (suite *tsoClientTestSuite) TestGetTSWhileResettingTSOClient() {
 	re.NoError(failpoint.Disable("github.com/tikv/pd/client/clients/tso/delayDispatchTSORequest"))
 }
 
+func TestTSONotLeader(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	pdCluster, err := tests.NewTestCluster(ctx, 3)
+	re.NoError(err)
+	defer pdCluster.Destroy()
+	err = pdCluster.RunInitialServers()
+	re.NoError(err)
+	leaderName := pdCluster.WaitLeader()
+	re.NotEmpty(leaderName)
+	pdLeader := pdCluster.GetServer(leaderName)
+	backendEndpoints := pdLeader.GetAddr()
+	pdClient, err := pd.NewClientWithContext(context.Background(),
+		caller.TestComponent,
+		[]string{backendEndpoints}, pd.SecurityOption{}, opt.WithMaxErrorRetry(1))
+	re.NoError(err)
+	defer pdClient.Close()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/server/rebaseErr", "return(true)"))
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func(client pd.Client) {
+		defer wg.Done()
+		pdLeader.ResignLeader()
+		for range 10 {
+			_, _, err := client.GetTS(ctx)
+			// stream maybe cancelld when the leader is resigned
+			if err.Error() == context.Canceled.Error() {
+				return
+			}
+			re.ErrorContains(err, "not leader")
+		}
+	}(pdClient)
+
+	wg.Wait()
+	re.NoError(failpoint.Disable("github.com/tikv/pd/server/rebaseErr"))
+}
+
 // When we upgrade the PD cluster, there may be a period of time that the old and new PDs are running at the same time.
 func TestMixedTSODeployment(t *testing.T) {
 	re := require.New(t)
@@ -498,9 +535,9 @@ func TestMixedTSODeployment(t *testing.T) {
 	}()
 
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	cluster, err := tests.NewTestCluster(ctx, 1)
 	re.NoError(err)
-	defer cancel()
 	defer cluster.Destroy()
 
 	err = cluster.RunInitialServers()
@@ -510,9 +547,9 @@ func TestMixedTSODeployment(t *testing.T) {
 	re.NotNil(leaderServer)
 	backendEndpoints := leaderServer.GetAddr()
 
-	apiSvr, err := cluster.JoinPDServer(ctx)
+	pdSvr, err := cluster.Join(ctx)
 	re.NoError(err)
-	err = apiSvr.Run()
+	err = pdSvr.Run()
 	re.NoError(err)
 
 	s, cleanup := tests.StartSingleTSOTestServer(ctx, re, backendEndpoints, tempurl.Alloc())
@@ -537,23 +574,25 @@ func TestMixedTSODeployment(t *testing.T) {
 	wg.Wait()
 }
 
-// TestUpgradingAPIandTSOClusters tests the scenario that after we restart the API cluster
+// TestUpgradingPDAndTSOClusters tests the scenario that after we restart the PD cluster
 // then restart the TSO cluster, the TSO service can still serve TSO requests normally.
-func TestUpgradingAPIandTSOClusters(t *testing.T) {
+func TestUpgradingPDAndTSOClusters(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
-	// Create an API cluster which has 3 servers
-	apiCluster, err := tests.NewTestPDServiceCluster(ctx, 3)
+	// Create an PD cluster which has 3 servers
+	pdCluster, err := tests.NewTestClusterWithKeyspaceGroup(ctx, 3)
 	re.NoError(err)
-	err = apiCluster.RunInitialServers()
+	defer pdCluster.Destroy()
+	err = pdCluster.RunInitialServers()
 	re.NoError(err)
-	leaderName := apiCluster.WaitLeader()
+	leaderName := pdCluster.WaitLeader()
 	re.NotEmpty(leaderName)
-	pdLeader := apiCluster.GetServer(leaderName)
+	pdLeader := pdCluster.GetServer(leaderName)
 	backendEndpoints := pdLeader.GetAddr()
 
-	// Create a pd client in PD mode to let the API leader to forward requests to the TSO cluster.
+	// Create a PD client in microservice env to let the PD leader to forward requests to the TSO cluster.
 	re.NoError(failpoint.Enable("github.com/tikv/pd/client/servicediscovery/usePDServiceMode", "return(true)"))
 	pdClient, err := pd.NewClientWithContext(context.Background(),
 		caller.TestComponent,
@@ -569,7 +608,7 @@ func TestUpgradingAPIandTSOClusters(t *testing.T) {
 	mcs.WaitForTSOServiceAvailable(ctx, re, pdClient)
 
 	// Restart the API cluster
-	apiCluster, err = tests.RestartTestAPICluster(ctx, apiCluster)
+	_, err = tests.RestartTestPDCluster(ctx, pdCluster)
 	re.NoError(err)
 	// The TSO service should be eventually healthy
 	mcs.WaitForTSOServiceAvailable(ctx, re, pdClient)
@@ -577,12 +616,10 @@ func TestUpgradingAPIandTSOClusters(t *testing.T) {
 	// Restart the TSO cluster
 	tsoCluster, err = tests.RestartTestTSOCluster(ctx, tsoCluster)
 	re.NoError(err)
+	defer tsoCluster.Destroy()
 	// The TSO service should be eventually healthy
 	mcs.WaitForTSOServiceAvailable(ctx, re, pdClient)
 
-	tsoCluster.Destroy()
-	apiCluster.Destroy()
-	cancel()
 	re.NoError(failpoint.Disable("github.com/tikv/pd/client/servicediscovery/usePDServiceMode"))
 }
 

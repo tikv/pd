@@ -76,7 +76,7 @@ func (suite *tsoConsistencyTestSuite) SetupSuite() {
 	if suite.legacy {
 		suite.cluster, err = tests.NewTestCluster(suite.ctx, serverCount)
 	} else {
-		suite.cluster, err = tests.NewTestPDServiceCluster(suite.ctx, serverCount)
+		suite.cluster, err = tests.NewTestClusterWithKeyspaceGroup(suite.ctx, serverCount)
 	}
 	re.NoError(err)
 	err = suite.cluster.RunInitialServers()
@@ -139,7 +139,7 @@ func (suite *tsoConsistencyTestSuite) request(ctx context.Context, count uint32)
 
 func (suite *tsoConsistencyTestSuite) TestRequestTSOConcurrently() {
 	suite.requestTSOConcurrently()
-	// Test Global TSO after the leader change
+	// Test TSO after the leader change
 	suite.pdLeaderServer.GetServer().GetMember().ResetLeader()
 	suite.cluster.WaitLeader()
 	suite.requestTSOConcurrently()

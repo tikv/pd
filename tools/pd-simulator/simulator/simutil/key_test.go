@@ -50,7 +50,7 @@ func TestGenerateTiDBEncodedSplitKey(t *testing.T) {
 	re := require.New(t)
 	s := []byte(codec.EncodeBytes([]byte("a")))
 	e := []byte(codec.EncodeBytes([]byte("ab")))
-	for i := 0; i <= 1000; i++ {
+	for range 1001 {
 		cc, err := GenerateTiDBEncodedSplitKey(s, e)
 		re.NoError(err)
 		re.Less(string(s), string(cc))
@@ -84,7 +84,7 @@ func TestGenerateTiDBEncodedSplitKey(t *testing.T) {
 	// split equal key
 	s = codec.EncodeBytes([]byte{116, 128, 0, 0, 0, 0, 0, 0, 1})
 	e = codec.EncodeBytes([]byte{116, 128, 0, 0, 0, 0, 0, 0, 1, 1})
-	for i := 0; i <= 1000; i++ {
+	for range 1001 {
 		re.Less(string(s), string(e))
 		splitKey, err = GenerateTiDBEncodedSplitKey(s, e)
 		re.NoError(err)

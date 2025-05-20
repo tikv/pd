@@ -41,12 +41,10 @@ import (
 )
 
 const (
-	msServiceRootPath = "/ms"
-	tsoServiceName    = "tso"
 	// tsoSvcDiscoveryFormat defines the key prefix for keyspace group primary election.
 	// The entire key is in the format of "/ms/<cluster-id>/tso/<group-id>/primary".
 	// The <group-id> is 5 digits integer with leading zeros.
-	tsoSvcDiscoveryFormat = msServiceRootPath + "/%d/" + tsoServiceName + "/%05d/primary"
+	tsoSvcDiscoveryFormat = "/ms/%d/tso/%05d/primary"
 	// initRetryInterval is the rpc retry interval during the initialization phase.
 	initRetryInterval = time.Second
 	// tsoQueryRetryMaxTimes is the max retry times for querying TSO.
@@ -55,10 +53,7 @@ const (
 	tsoQueryRetryInterval = 500 * time.Millisecond
 )
 
-var (
-	_ ServiceDiscovery = (*tsoServiceDiscovery)(nil)
-	_ TSOEventSource   = (*tsoServiceDiscovery)(nil)
-)
+var _ ServiceDiscovery = (*tsoServiceDiscovery)(nil)
 
 // keyspaceGroupSvcDiscovery is used for discovering the serving endpoints of the keyspace
 // group to which the keyspace belongs
@@ -144,7 +139,7 @@ type tsoServiceDiscovery struct {
 	clientConns sync.Map // Store as map[string]*grpc.ClientConn
 
 	// tsoLeaderUpdatedCb will be called when the TSO leader is updated.
-	tsoLeaderUpdatedCb tsoLeaderURLUpdatedFunc
+	tsoLeaderUpdatedCb LeaderSwitchedCallbackFunc
 
 	checkMembershipCh chan struct{}
 
@@ -308,7 +303,7 @@ func (c *tsoServiceDiscovery) GetServiceURLs() []string {
 	return c.keyspaceGroupSD.urls
 }
 
-// GetServingURL returns the grpc client connection of the serving endpoint
+// GetServingEndpointClientConn returns the grpc client connection of the serving endpoint
 // which is the primary in a primary/secondary configured cluster.
 func (c *tsoServiceDiscovery) GetServingEndpointClientConn() *grpc.ClientConn {
 	if cc, ok := c.clientConns.Load(c.getPrimaryURL()); ok {
@@ -361,16 +356,8 @@ func (c *tsoServiceDiscovery) CheckMemberChanged() error {
 	return nil
 }
 
-// AddServingURLSwitchedCallback adds callbacks which will be called when the primary in
-// a primary/secondary configured cluster is switched.
-func (*tsoServiceDiscovery) AddServingURLSwitchedCallback(...func()) {}
-
-// AddServiceURLsSwitchedCallback adds callbacks which will be called when any primary/secondary
-// in a primary/secondary configured cluster is changed.
-func (*tsoServiceDiscovery) AddServiceURLsSwitchedCallback(...func()) {}
-
-// SetTSOLeaderURLUpdatedCallback adds a callback which will be called when the TSO leader is updated.
-func (c *tsoServiceDiscovery) SetTSOLeaderURLUpdatedCallback(callback tsoLeaderURLUpdatedFunc) {
+// ExecAndAddLeaderSwitchedCallback executes the callback once and adds it to the callback list then.
+func (c *tsoServiceDiscovery) ExecAndAddLeaderSwitchedCallback(callback LeaderSwitchedCallbackFunc) {
 	url := c.getPrimaryURL()
 	if len(url) > 0 {
 		if err := callback(url); err != nil {
@@ -379,6 +366,14 @@ func (c *tsoServiceDiscovery) SetTSOLeaderURLUpdatedCallback(callback tsoLeaderU
 	}
 	c.tsoLeaderUpdatedCb = callback
 }
+
+// AddLeaderSwitchedCallback adds callbacks which will be called when the primary in
+// a primary/secondary configured cluster is switched.
+func (*tsoServiceDiscovery) AddLeaderSwitchedCallback(LeaderSwitchedCallbackFunc) {}
+
+// AddMembersChangedCallback adds callbacks which will be called when any primary/secondary
+// in a primary/secondary configured cluster is changed.
+func (*tsoServiceDiscovery) AddMembersChangedCallback(func()) {}
 
 // GetServiceClient implements ServiceDiscovery
 func (c *tsoServiceDiscovery) GetServiceClient() ServiceClient {
@@ -436,7 +431,7 @@ func (c *tsoServiceDiscovery) updateMember() error {
 	if len(tsoServerURL) > 0 {
 		keyspaceGroup, err = c.findGroupByKeyspaceID(keyspaceID, tsoServerURL, UpdateMemberTimeout)
 		if err != nil {
-			if c.tsoServerDiscovery.countFailure() {
+			if c.countFailure() {
 				log.Error("[tso] failed to find the keyspace group",
 					zap.Uint32("keyspace-id-in-request", keyspaceID),
 					zap.String("tso-server-url", tsoServerURL),
@@ -444,7 +439,7 @@ func (c *tsoServiceDiscovery) updateMember() error {
 			}
 			return err
 		}
-		c.tsoServerDiscovery.resetFailure()
+		c.resetFailure()
 	} else {
 		// There is no error but no tso server URL found, which means
 		// the server side hasn't been upgraded to the version that

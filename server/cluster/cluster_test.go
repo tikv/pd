@@ -22,6 +22,7 @@ import (
 	"math/rand"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -60,8 +61,10 @@ import (
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/statistics/utils"
 	"github.com/tikv/pd/pkg/storage"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/operatorutil"
+	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/pkg/versioninfo"
@@ -110,6 +113,7 @@ func TestStoreHeartbeat(t *testing.T) {
 		re.NotEqual(int64(0), s.GetLastHeartbeatTS().UnixNano())
 		re.Equal(req.GetStats(), s.GetStoreStats())
 		re.Equal("v2", cluster.GetStore(1).GetStoreLimit().Version())
+		re.Equal(s.GetMeta().GetNodeState(), resp.GetState())
 
 		storeMetasAfterHeartbeat = append(storeMetasAfterHeartbeat, s.GetMeta())
 	}
@@ -292,7 +296,7 @@ func TestSetOfflineStore(t *testing.T) {
 		re.True(cluster.GetStore(storeID).IsRemoved())
 	}
 	// test bury store
-	for storeID := uint64(0); storeID <= 4; storeID++ {
+	for storeID := range uint64(5) {
 		store := cluster.GetStore(storeID)
 		if store == nil || store.IsUp() {
 			re.Error(cluster.BuryStore(storeID, false))
@@ -333,7 +337,7 @@ func TestSetOfflineWithReplica(t *testing.T) {
 }
 
 func addEvictLeaderScheduler(cluster *RaftCluster, storeID uint64) (evictScheduler schedulers.Scheduler, err error) {
-	args := []string{fmt.Sprintf("%d", storeID)}
+	args := []string{strconv.FormatUint(storeID, 10)}
 	evictScheduler, err = schedulers.CreateScheduler(types.EvictLeaderScheduler, cluster.GetOperatorController(), cluster.storage, schedulers.ConfigSliceDecoder(types.EvictLeaderScheduler, args), cluster.GetCoordinator().GetSchedulersController().RemoveScheduler)
 	if err != nil {
 		return
@@ -1135,13 +1139,13 @@ func TestRegionLabelIsolationLevel(t *testing.T) {
 	for i := uint64(1); i <= 4; i++ {
 		var labels []*metapb.StoreLabel
 		if i == 4 {
-			labels = []*metapb.StoreLabel{{Key: "zone", Value: fmt.Sprintf("%d", 3)}, {Key: "engine", Value: "tiflash"}}
+			labels = []*metapb.StoreLabel{{Key: "zone", Value: strconv.Itoa(3)}, {Key: "engine", Value: "tiflash"}}
 		} else {
-			labels = []*metapb.StoreLabel{{Key: "zone", Value: fmt.Sprintf("%d", i)}}
+			labels = []*metapb.StoreLabel{{Key: "zone", Value: strconv.FormatUint(i, 10)}}
 		}
 		store := &metapb.Store{
 			Id:      i,
-			Address: fmt.Sprintf("127.0.0.1:%d", i),
+			Address: fmt.Sprintf("mock://tikv-%d:%d", i, i),
 			State:   metapb.StoreState_Up,
 			Labels:  labels,
 		}
@@ -1468,7 +1472,7 @@ func TestSyncConfigContext(t *testing.T) {
 		b, err := json.Marshal(cfg)
 		if err != nil {
 			res.WriteHeader(http.StatusInternalServerError)
-			res.Write([]byte(fmt.Sprintf("failed setting up test server: %s", err)))
+			fmt.Fprintf(res, "failed setting up test server: %s", err)
 			return
 		}
 
@@ -1541,13 +1545,13 @@ func TestUpdateStorePendingPeerCount(t *testing.T) {
 	_, opt, err := newTestScheduleConfig()
 	re.NoError(err)
 	tc := newTestCluster(ctx, opt)
-	tc.RaftCluster.coordinator = schedule.NewCoordinator(ctx, tc.RaftCluster, nil)
+	tc.coordinator = schedule.NewCoordinator(ctx, tc.RaftCluster, nil)
 	stores := newTestStores(5, "2.0.0")
 	for _, s := range stores {
 		re.NoError(tc.setStore(s))
 	}
-	tc.RaftCluster.wg.Add(1)
-	go tc.RaftCluster.runUpdateStoreStats()
+	tc.wg.Add(1)
+	go tc.runUpdateStoreStats()
 	peers := []*metapb.Peer{
 		{
 			Id:      2,
@@ -1698,13 +1702,14 @@ func TestCalculateStoreSize1(t *testing.T) {
 	// Put 10 stores.
 	for i, store := range newTestStores(10, "6.0.0") {
 		var labels []*metapb.StoreLabel
-		if i%3 == 0 {
+		switch i % 3 {
+		case 0:
 			// zone 1 has 1, 4, 7, 10
 			labels = append(labels, &metapb.StoreLabel{Key: "zone", Value: "zone1"})
-		} else if i%3 == 1 {
+		case 1:
 			// zone 2 has 2, 5, 8
 			labels = append(labels, &metapb.StoreLabel{Key: "zone", Value: "zone2"})
-		} else {
+		default:
 			// zone 3 has 3, 6, 9
 			labels = append(labels, &metapb.StoreLabel{Key: "zone", Value: "zone3"})
 		}
@@ -1933,10 +1938,10 @@ func Test(t *testing.T) {
 	pendingFilter := filter.NewRegionPendingFilter()
 	downFilter := filter.NewRegionDownFilter()
 	for i := range n {
-		region := filter.SelectOneRegion(tc.RandLeaderRegions(i, []core.KeyRange{core.NewKeyRange("", "")}), nil, pendingFilter, downFilter)
+		region := filter.SelectOneRegion(tc.RandLeaderRegions(i, []keyutil.KeyRange{keyutil.NewKeyRange("", "")}), nil, pendingFilter, downFilter)
 		re.Equal(i, region.GetLeader().GetStoreId())
 
-		region = filter.SelectOneRegion(tc.RandFollowerRegions(i, []core.KeyRange{core.NewKeyRange("", "")}), nil, pendingFilter, downFilter)
+		region = filter.SelectOneRegion(tc.RandFollowerRegions(i, []keyutil.KeyRange{keyutil.NewKeyRange("", "")}), nil, pendingFilter, downFilter)
 		re.NotEqual(i, region.GetLeader().GetStoreId())
 
 		re.NotNil(region.GetStorePeer(i))
@@ -1953,15 +1958,15 @@ func Test(t *testing.T) {
 	// All regions will be filtered out if they have pending peers.
 	for i := range n {
 		for range cache.GetStoreLeaderCount(i) {
-			region := filter.SelectOneRegion(tc.RandLeaderRegions(i, []core.KeyRange{core.NewKeyRange("", "")}), nil, pendingFilter, downFilter)
+			region := filter.SelectOneRegion(tc.RandLeaderRegions(i, []keyutil.KeyRange{keyutil.NewKeyRange("", "")}), nil, pendingFilter, downFilter)
 			newRegion := region.Clone(core.WithPendingPeers(region.GetPeers()))
 			origin, overlaps, rangeChanged = cache.SetRegion(newRegion)
 			cache.UpdateSubTree(newRegion, origin, overlaps, rangeChanged)
 		}
-		re.Nil(filter.SelectOneRegion(tc.RandLeaderRegions(i, []core.KeyRange{core.NewKeyRange("", "")}), nil, pendingFilter, downFilter))
+		re.Nil(filter.SelectOneRegion(tc.RandLeaderRegions(i, []keyutil.KeyRange{keyutil.NewKeyRange("", "")}), nil, pendingFilter, downFilter))
 	}
 	for i := range n {
-		re.Nil(filter.SelectOneRegion(tc.RandFollowerRegions(i, []core.KeyRange{core.NewKeyRange("", "")}), nil, pendingFilter, downFilter))
+		re.Nil(filter.SelectOneRegion(tc.RandFollowerRegions(i, []keyutil.KeyRange{keyutil.NewKeyRange("", "")}), nil, pendingFilter, downFilter))
 	}
 }
 
@@ -2183,7 +2188,12 @@ func newTestRaftCluster(
 	s storage.Storage,
 ) *RaftCluster {
 	opt.GetScheduleConfig().EnableHeartbeatConcurrentRunner = false
-	rc := &RaftCluster{serverCtx: ctx, BasicCluster: core.NewBasicCluster(), storage: s}
+	rc := &RaftCluster{
+		serverCtx:      ctx,
+		BasicCluster:   core.NewBasicCluster(),
+		storage:        s,
+		storeStateLock: syncutil.NewLockGroup(syncutil.WithRemoveEntryOnUnlock(true)),
+	}
 	rc.InitCluster(id, opt, nil, nil)
 	rc.ruleManager = placement.NewRuleManager(ctx, storage.NewStorageWithMemoryBackend(), rc, opt)
 	if opt.IsPlacementRulesEnabled() {
@@ -2202,8 +2212,8 @@ func newTestStores(n uint64, version string) []*core.StoreInfo {
 	for i := uint64(1); i <= n; i++ {
 		store := &metapb.Store{
 			Id:            i,
-			Address:       fmt.Sprintf("127.0.0.1:%d", i),
-			StatusAddress: fmt.Sprintf("127.0.0.1:%d", i),
+			Address:       fmt.Sprintf("mock://tikv-%d:%d", i, i),
+			StatusAddress: fmt.Sprintf("mock://tikv-%d:%d", i, i+1),
 			State:         metapb.StoreState_Up,
 			Version:       version,
 			DeployPath:    getTestDeployPath(i),
@@ -2335,7 +2345,7 @@ func checkStaleRegion(origin *metapb.Region, region *metapb.Region) error {
 }
 
 func (c *testCluster) AllocPeer(storeID uint64) (*metapb.Peer, error) {
-	id, err := c.AllocID()
+	id, _, err := c.AllocID(1)
 	if err != nil {
 		return nil, err
 	}
@@ -2538,7 +2548,7 @@ func TestCollectMetricsConcurrent(t *testing.T) {
 	defer cleanup()
 	rc := co.GetCluster().(*RaftCluster)
 	rc.schedulingController = newSchedulingController(rc.serverCtx, rc.GetBasicCluster(), rc.GetOpts(), rc.GetRuleManager())
-	rc.schedulingController.coordinator = co
+	rc.coordinator = co
 	controller := co.GetSchedulersController()
 	// Make sure there are no problem when concurrent write and read
 	var wg sync.WaitGroup
@@ -2576,7 +2586,7 @@ func TestCollectMetrics(t *testing.T) {
 
 	rc := co.GetCluster().(*RaftCluster)
 	rc.schedulingController = newSchedulingController(rc.serverCtx, rc.GetBasicCluster(), rc.GetOpts(), rc.GetRuleManager())
-	rc.schedulingController.coordinator = co
+	rc.coordinator = co
 	controller := co.GetSchedulersController()
 	count := 10
 	for i := 0; i <= count; i++ {
@@ -2588,7 +2598,7 @@ func TestCollectMetrics(t *testing.T) {
 				HotDegree: 10,
 				AntiCount: utils.HotRegionAntiCount, // for write
 			}
-			tc.hotStat.HotCache.Update(item, utils.Write)
+			tc.hotStat.Update(item, utils.Write)
 		}
 	}
 
@@ -3073,7 +3083,7 @@ func TestShouldRun(t *testing.T) {
 	re := require.New(t)
 
 	tc, co, cleanup := prepare(nil, nil, nil, re)
-	tc.RaftCluster.coordinator = co
+	tc.coordinator = co
 	defer cleanup()
 
 	re.NoError(tc.addLeaderStore(1, 5))
@@ -3120,7 +3130,7 @@ func TestShouldRunWithNonLeaderRegions(t *testing.T) {
 	re := require.New(t)
 
 	tc, co, cleanup := prepare(nil, nil, nil, re)
-	tc.RaftCluster.coordinator = co
+	tc.coordinator = co
 	defer cleanup()
 
 	re.NoError(tc.addLeaderStore(1, 10))
@@ -3209,6 +3219,22 @@ func TestAddScheduler(t *testing.T) {
 	re.NoError(err)
 	re.NoError(controller.AddScheduler(gls))
 
+	_, err = schedulers.CreateScheduler(types.BalanceRangeScheduler, oc, storage.NewStorageWithMemoryBackend(), schedulers.ConfigSliceDecoder(types.BalanceRangeScheduler, []string{}), controller.RemoveScheduler)
+	re.Error(err)
+
+	gls, err = schedulers.CreateScheduler(types.BalanceRangeScheduler, oc, storage.NewStorageWithMemoryBackend(), schedulers.ConfigSliceDecoder(types.BalanceRangeScheduler, []string{"learner-scatter", "tiflash", "1h", "test", "100", "200"}), controller.RemoveScheduler)
+	re.NoError(err)
+	re.NoError(controller.AddScheduler(gls))
+	conf, err = gls.EncodeConfig()
+	re.NoError(err)
+	var cfg []map[string]any
+
+	re.NoError(json.Unmarshal(conf, &cfg))
+	re.Equal("learner-scatter", cfg[0]["rule"])
+	re.Equal("tiflash", cfg[0]["engine"])
+	re.Equal("test", cfg[0]["alias"])
+	re.Equal(float64(time.Hour.Nanoseconds()), cfg[0]["timeout"])
+
 	hb, err := schedulers.CreateScheduler(types.BalanceHotRegionScheduler, oc, storage.NewStorageWithMemoryBackend(), schedulers.ConfigJSONDecoder([]byte("{}")))
 	re.NoError(err)
 	conf, err = hb.EncodeConfig()
@@ -3250,7 +3276,7 @@ func TestPersistScheduler(t *testing.T) {
 	controller := co.GetSchedulersController()
 	re.Len(controller.GetSchedulerNames(), defaultCount)
 	oc := co.GetOperatorController()
-	storage := tc.RaftCluster.storage
+	storage := tc.storage
 
 	gls1, err := schedulers.CreateScheduler(types.GrantLeaderScheduler, oc, storage, schedulers.ConfigSliceDecoder(types.GrantLeaderScheduler, []string{"1"}), controller.RemoveScheduler)
 	re.NoError(err)
@@ -3298,7 +3324,7 @@ func TestPersistScheduler(t *testing.T) {
 	// option have 9 items because the default scheduler do not remove.
 	re.Len(newOpt.GetSchedulers(), defaultCount+3)
 	re.NoError(newOpt.Persist(storage))
-	tc.RaftCluster.SetScheduleConfig(newOpt.GetScheduleConfig())
+	tc.SetScheduleConfig(newOpt.GetScheduleConfig())
 
 	co = schedule.NewCoordinator(ctx, tc.RaftCluster, hbStreams)
 	co.Run()
@@ -3311,7 +3337,7 @@ func TestPersistScheduler(t *testing.T) {
 	_, newOpt, err = newTestScheduleConfig()
 	re.NoError(err)
 	re.NoError(newOpt.Reload(storage))
-	tc.RaftCluster.SetScheduleConfig(newOpt.GetScheduleConfig())
+	tc.SetScheduleConfig(newOpt.GetScheduleConfig())
 	co = schedule.NewCoordinator(ctx, tc.RaftCluster, hbStreams)
 	co.Run()
 	controller = co.GetSchedulersController()
@@ -3338,7 +3364,7 @@ func TestPersistScheduler(t *testing.T) {
 	_, newOpt, err = newTestScheduleConfig()
 	re.NoError(err)
 	re.NoError(newOpt.Reload(co.GetCluster().GetStorage()))
-	tc.RaftCluster.SetScheduleConfig(newOpt.GetScheduleConfig())
+	tc.SetScheduleConfig(newOpt.GetScheduleConfig())
 	co = schedule.NewCoordinator(ctx, tc.RaftCluster, hbStreams)
 
 	co.Run()
@@ -3366,7 +3392,7 @@ func TestRemoveScheduler(t *testing.T) {
 	controller := co.GetSchedulersController()
 	re.Len(controller.GetSchedulerNames(), defaultCount)
 	oc := co.GetOperatorController()
-	storage := tc.RaftCluster.storage
+	storage := tc.storage
 
 	gls1, err := schedulers.CreateScheduler(types.GrantLeaderScheduler, oc, storage, schedulers.ConfigSliceDecoder(types.GrantLeaderScheduler, []string{"1"}), controller.RemoveScheduler)
 	re.NoError(err)
@@ -3396,7 +3422,7 @@ func TestRemoveScheduler(t *testing.T) {
 	_, newOpt, err := newTestScheduleConfig()
 	re.NoError(err)
 	re.NoError(newOpt.Reload(tc.storage))
-	tc.RaftCluster.SetScheduleConfig(newOpt.GetScheduleConfig())
+	tc.SetScheduleConfig(newOpt.GetScheduleConfig())
 	co = schedule.NewCoordinator(ctx, tc.RaftCluster, hbStreams)
 	co.Run()
 	re.Empty(controller.GetSchedulerNames())
@@ -3802,6 +3828,82 @@ func TestInterval(t *testing.T) {
 	}
 }
 
+func TestConcurrentStoreStats(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	_, opt, err := newTestScheduleConfig()
+	re.NoError(err)
+	cluster := newTestRaftCluster(ctx, mockid.NewIDAllocator(), opt, storage.NewStorageWithMemoryBackend())
+	cluster.coordinator = schedule.NewCoordinator(ctx, cluster, nil)
+	cluster.ruleManager = placement.NewRuleManager(ctx, storage.NewStorageWithMemoryBackend(), cluster, cluster.GetOpts())
+	if opt.IsPlacementRulesEnabled() {
+		err := cluster.ruleManager.Initialize(opt.GetMaxReplicas(), opt.GetLocationLabels(), opt.GetIsolationLevel(), false)
+		if err != nil {
+			panic(err)
+		}
+	}
+
+	storeCount := uint64(100)
+	replica := cluster.GetReplicationConfig().MaxReplicas
+
+	// Add regions to the cluster.
+	regions := newTestRegions(storeCount+1, storeCount+1, replica)
+	for _, region := range regions {
+		re.NoError(cluster.putRegion(region))
+	}
+	for i := range storeCount {
+		re.NotZero(cluster.GetStoreRegionCount(i + 1))
+	}
+
+	// Add stores to the cluster.
+	for i := uint64(1); i <= storeCount; i++ {
+		store := &metapb.Store{
+			Id:            i,
+			Address:       fmt.Sprintf("mock://tikv-%d:%d", i, i),
+			StatusAddress: fmt.Sprintf("mock://tikv-%d:%d", i, i+1),
+			Version:       "2.0.0",
+			DeployPath:    getTestDeployPath(i),
+			NodeState:     metapb.NodeState_Preparing,
+		}
+		cluster.PutMetaStore(store)
+		// avoid store is buried
+		req := &pdpb.StoreHeartbeatRequest{}
+		resp := &pdpb.StoreHeartbeatResponse{}
+		req.Stats = &pdpb.StoreStats{
+			StoreId:     i,
+			Capacity:    100,
+			Available:   50,
+			RegionCount: 1,
+		}
+		re.NoError(cluster.HandleStoreHeartbeat(req, resp))
+	}
+	re.Equal(int(storeCount), cluster.GetStoreCount())
+
+	// Try to remove store and check store state at the same time.
+	// If we remove store first, the store state will be in removing state.
+	// If we check store state first, the store state will be changed to state serving and then removing.
+	wg := sync.WaitGroup{}
+	for i := range storeCount {
+		if len(cluster.getUpStores()) == int(replica) {
+			// it means we can't remove store anymore
+			break
+		}
+		storeID := i + 1
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			cluster.checkStores()
+		}()
+		re.NoError(cluster.RemoveStore(storeID, false))
+		testutil.Eventually(re, func() bool {
+			return metapb.NodeState_Removing == cluster.GetStore(storeID).GetNodeState()
+		})
+	}
+	wg.Wait()
+}
+
 func waitAddLearner(re *require.Assertions, stream mockhbstream.HeartbeatStream, region *core.RegionInfo, storeID uint64) *core.RegionInfo {
 	var res *pdpb.RegionHeartbeatResponse
 	testutil.Eventually(re, func() bool {
@@ -3905,7 +4007,7 @@ func BenchmarkHandleStatsAsync(b *testing.B) {
 	// Reset timer after setup
 	b.ResetTimer()
 	// Run HandleStatsAsync b.N times
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		cluster.HandleStatsAsync(c, region)
 	}
 }
@@ -3966,7 +4068,7 @@ func BenchmarkHandleRegionHeartbeat(b *testing.B) {
 	// Reset timer after setup
 	b.ResetTimer()
 	// Run HandleRegionHeartbeat b.N times
-	for i := 0; i < b.N; i++ {
+	for i := range b.N {
 		region := core.RegionFromHeartbeat(requests[i], flowRoundDivisor)
 		c.HandleRegionHeartbeat(region)
 	}

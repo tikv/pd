@@ -1,3 +1,17 @@
+// Copyright 2022 TiKV Project Authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package pdbackup
 
 import (
@@ -20,6 +34,7 @@ import (
 	"go.etcd.io/etcd/server/v3/embed"
 	"go.uber.org/goleak"
 
+	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
@@ -89,7 +104,7 @@ func setupServer() (*httptest.Server, *config.Config) {
 		b, err := json.Marshal(serverConfig)
 		if err != nil {
 			res.WriteHeader(http.StatusInternalServerError)
-			res.Write([]byte(fmt.Sprintf("failed setting up test server: %s", err)))
+			fmt.Fprintf(res, "failed setting up test server: %s", err)
 			return
 		}
 
@@ -115,7 +130,7 @@ func (s *backupTestSuite) BeforeTest(string, string) {
 		rootPath               = path.Join(pdRootPath, strconv.FormatUint(clusterID, 10))
 		allocTimestampMaxBytes = typeutil.Uint64ToBytes(allocTimestampMax)
 	)
-	_, err = s.etcdClient.Put(ctx, keypath.TimestampPath(rootPath), string(allocTimestampMaxBytes))
+	_, err = s.etcdClient.Put(ctx, keypath.TimestampPath(constant.DefaultKeyspaceGroupID), string(allocTimestampMaxBytes))
 	re.NoError(err)
 
 	var (
