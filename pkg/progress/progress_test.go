@@ -43,7 +43,7 @@ func TestProgress(t *testing.T) {
 	p2 := m.GetProgressByStoreID(storeID)
 	re.Equal(p2, p)
 
-	m.updateProgress(storeID2, preparingAction, 20, 100)
+	m.updateStoreProgress(storeID2, preparingAction, 20, 100)
 	p = m.GetProgressByStoreID(storeID2)
 	re.Equal(preparingAction, p.Action)
 	re.Equal(0.2, p.ProgressPercent)
@@ -53,14 +53,14 @@ func TestProgress(t *testing.T) {
 	re.Equal(p2, p)
 
 	// test update progress
-	m.updateProgress(storeID, preparingAction, 30, 100)
+	m.updateStoreProgress(storeID, preparingAction, 30, 100)
 	p = m.GetProgressByStoreID(storeID)
 	re.Equal(preparingAction, p.Action)
 	re.Equal(0.3, p.ProgressPercent)
 	re.Equal(2.0, p.CurrentSpeed) // 2 region/s
 	re.Equal(35.0, p.LeftSecond)
 
-	m.updateProgress(storeID2, preparingAction, 30, 100)
+	m.updateStoreProgress(storeID2, preparingAction, 30, 100)
 	p = m.GetProgressByStoreID(storeID2)
 	re.Equal(preparingAction, p.Action)
 	re.Equal(0.3, p.ProgressPercent)

@@ -175,11 +175,10 @@ func (m *Manager) UpdateProgress(
 		return
 	}
 
-	m.updateProgress(storeID, action, currentRegionSize, targetRegionSize)
+	m.updateStoreProgress(storeID, action, currentRegionSize, targetRegionSize)
 }
 
-// nolint:confusing-naming
-func (m *Manager) updateProgress(storeID uint64, action Action, currentRegionSize, targetRegionSize float64) {
+func (m *Manager) updateStoreProgress(storeID uint64, action Action, currentRegionSize, targetRegionSize float64) {
 	m.Lock()
 	defer m.Unlock()
 
