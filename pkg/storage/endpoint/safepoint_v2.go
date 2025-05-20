@@ -27,6 +27,11 @@ import (
 	"go.uber.org/zap"
 )
 
+const (
+	// NullKeyspaceID is used for api v1 or legacy path where is keyspace agnostic.
+	nullKeyspaceID = uint32(0xFFFFFFFF)
+)
+
 // GCSafePointV2 represents the overall safe point for a specific keyspace.
 type GCSafePointV2 struct {
 	KeyspaceID uint32 `json:"keyspace_id"`
@@ -118,6 +123,17 @@ func (se *StorageEndpoint) LoadMinServiceSafePointV2(keyspaceID uint32, now time
 
 	hasGCWorker := false
 	min := &ServiceSafePointV2{KeyspaceID: keyspaceID, SafePoint: math.MaxUint64}
+
+	// Load global service safe point
+	serviceSafePointV1, err := se.loadServiceGCSafePointV1(keypath.NativeBRServiceID)
+	if err != nil {
+		return nil, err
+	}
+	if serviceSafePointV1 != nil {
+		min.KeyspaceID = nullKeyspaceID
+		min.SafePoint = serviceSafePointV1.SafePoint
+	}
+
 	for i, key := range keys {
 		serviceSafePoint := &ServiceSafePointV2{}
 		if err = json.Unmarshal([]byte(values[i]), serviceSafePoint); err != nil {
@@ -155,6 +171,22 @@ func (se *StorageEndpoint) LoadMinServiceSafePointV2(keyspaceID uint32, now time
 		return se.initServiceSafePointV2ForGCWorker(keyspaceID, min.SafePoint)
 	}
 	return min, nil
+}
+
+// loadServiceGCSafePointV1 loads current GC safe point from storage.
+func (se *StorageEndpoint) loadServiceGCSafePointV1(serviceID string) (*ServiceSafePoint, error) {
+	serviceIDPath := keypath.GCSafePointServicePrefixPath() + serviceID
+	value, err := se.Load(serviceIDPath)
+	if err != nil || value == "" {
+		return nil, err
+	}
+
+	ssp := &ServiceSafePoint{}
+	if err := json.Unmarshal([]byte(value), ssp); err != nil {
+		return nil, err
+	}
+
+	return ssp, nil
 }
 
 // LoadServiceSafePointV2 returns ServiceSafePointV2 for given keyspaceID and serviceID.

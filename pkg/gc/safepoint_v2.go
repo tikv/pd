@@ -212,3 +212,13 @@ func (manager *SafePointV2Manager) RemoveServiceSafePoint(keyspaceID uint32, ser
 	}
 	return minServiceSafePoint, nil
 }
+
+// LoadMinServiceSafePointV2 update keyspace service safe point with the given serviceSafePoint.
+func (manager *SafePointV2Manager) LoadMinServiceSafePointV2(serviceSafePoint *endpoint.ServiceSafePointV2, now time.Time) (*endpoint.ServiceSafePointV2, error) {
+	return manager.v2Storage.LoadMinServiceSafePointV2(serviceSafePoint.KeyspaceID, now)
+}
+
+// LoadServiceSafePointV2 update keyspace service safe point with the given serviceSafePoint.
+func (manager *SafePointV2Manager) LoadServiceSafePointV2(keyspaceID uint32, serviceID string) (*endpoint.ServiceSafePointV2, error) {
+	return manager.v2Storage.LoadServiceSafePointV2(keyspaceID, serviceID)
+}

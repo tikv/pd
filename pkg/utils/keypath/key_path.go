@@ -46,19 +46,17 @@ const (
 	CustomSchedulerConfigPath = "scheduler_config"
 	// GCWorkerServiceSafePointID is the service id of GC worker.
 	GCWorkerServiceSafePointID = "gc_worker"
-	// NativeBRServiceID is CSE native br service id.
-	NativeBRServiceID         = "native_br"
-	minResolvedTS             = "min_resolved_ts"
-	externalTimeStamp         = "external_timestamp"
-	keyspaceSafePointPrefix   = "keyspaces/gc_safepoint"
-	keyspaceGCSafePointSuffix = "gc"
-	keyspacePrefix            = "keyspaces"
-	keyspaceMetaInfix         = "meta"
-	keyspaceIDInfix           = "id"
-	keyspaceAllocID           = "alloc_id"
-	gcSafePointInfix          = "gc_safe_point"
-	serviceSafePointInfix     = "service_safe_point"
-	regionPathPrefix          = "raft/r"
+	minResolvedTS              = "min_resolved_ts"
+	externalTimeStamp          = "external_timestamp"
+	keyspaceSafePointPrefix    = "keyspaces/gc_safepoint"
+	keyspaceGCSafePointSuffix  = "gc"
+	keyspacePrefix             = "keyspaces"
+	keyspaceMetaInfix          = "meta"
+	keyspaceIDInfix            = "id"
+	keyspaceAllocID            = "alloc_id"
+	gcSafePointInfix           = "gc_safe_point"
+	serviceSafePointInfix      = "service_safe_point"
+	regionPathPrefix           = "raft/r"
 	// resource group storage endpoint has prefix `resource_group`
 	// ResourceGroupSettingsPath is the path to save the resource group settings.
 	ResourceGroupSettingsPath = "settings"
@@ -85,6 +83,9 @@ const (
 	// Keyspace safe point version.
 	keyspaceGlobalInfix                 = "global"
 	keyspaceGlobalSafePointVersionInfix = "safe_point_version"
+
+	// NativeBRServiceID is CSE native br service id.
+	NativeBRServiceID = "native_br"
 )
 
 // PDRootPath returns the PD root path.

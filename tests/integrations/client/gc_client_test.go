@@ -218,3 +218,34 @@ func (suite *gcClientTestSuite) mustGetRevision(re *require.Assertions, keyspace
 	re.NoError(err)
 	return res.Header.GetRevision()
 }
+
+// mustUpdateServiceSafePoint updates the service safe point of the given keyspace id.
+func (suite *gcClientTestSuite) mustUpdateServiceSafePoint(keyspaceID uint32, safePoint uint64, ttl int64, serviceID string) uint64 {
+	res, err := suite.client.UpdateServiceSafePointV2(suite.server.Context(), keyspaceID, serviceID, ttl, safePoint)
+	suite.NoError(err)
+	return res
+}
+
+// mustUpdateServiceSafePoint updates the service safe point of the given keyspace id.
+func (suite *gcClientTestSuite) mustLoadServiceSafePoint(keyspaceID uint32, serviceID string) uint64 {
+	res, err := suite.server.GetSafePointV2Manager().LoadServiceSafePointV2(keyspaceID, serviceID)
+	suite.NoError(err)
+	return res.SafePoint
+}
+
+func (suite *gcClientTestSuite) TestUpdateServiceSafePointV2() {
+	serviceID := "test_service_id"
+	ttl := int64(10000)
+
+	keyspaceID01 := uint32(1)
+	serviceSafePoint01 := uint64(1)
+	_ = suite.mustUpdateServiceSafePoint(keyspaceID01, serviceSafePoint01, ttl, serviceID)
+	minSafePoint01 := suite.mustLoadServiceSafePoint(keyspaceID01, serviceID)
+	suite.Equal(serviceSafePoint01, minSafePoint01)
+
+	keyspaceID02 := uint32(2)
+	serviceSafePoint02 := uint64(2)
+	_ = suite.mustUpdateServiceSafePoint(keyspaceID02, serviceSafePoint02, ttl, serviceID)
+	minSafePoint02 := suite.mustLoadServiceSafePoint(keyspaceID02, serviceID)
+	suite.Equal(serviceSafePoint02, minSafePoint02)
+}

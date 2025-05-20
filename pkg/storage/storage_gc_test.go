@@ -150,3 +150,45 @@ func TestLoadEmpty(t *testing.T) {
 	re.NoError(err)
 	re.Nil(serviceSafePoint)
 }
+
+func TestGlobalServiceSafePoint(t *testing.T) {
+	// expectMinServiceSafePoint is a very small value,
+	// we set NativeBRServiceID's service safe point to expectMinServiceSafePoint,
+	// and check min service safe point V2 is expectMinServiceSafePoint.
+	expectMinServiceSafePoint := uint64(50)
+
+	re := require.New(t)
+	storage := NewStorageWithMemoryBackend()
+	currentTime := time.Now()
+	expireAt1 := currentTime.Add(1000 * time.Second).Unix()
+	expireAt2 := currentTime.Add(2000 * time.Second).Unix()
+	expireAt3 := currentTime.Add(3000 * time.Second).Unix()
+
+	testKeyspaceID := uint32(1)
+	serviceSafePoints := []*endpoint.ServiceSafePointV2{
+		{KeyspaceID: testKeyspaceID, ServiceID: "0", ExpiredAt: expireAt1, SafePoint: 300},
+		{KeyspaceID: testKeyspaceID, ServiceID: "1", ExpiredAt: expireAt2, SafePoint: 400},
+		{KeyspaceID: testKeyspaceID, ServiceID: "2", ExpiredAt: expireAt3, SafePoint: 500},
+	}
+
+	globalServiceIDs := []string{keypath.NativeBRServiceID, "test01"}
+	minGlobalSafePoints := []uint64{expectMinServiceSafePoint, expectMinServiceSafePoint + 1}
+
+	for i, globalServiceID := range globalServiceIDs {
+		ssp := &endpoint.ServiceSafePoint{
+			ServiceID: globalServiceID,
+			ExpiredAt: expireAt3,
+			SafePoint: minGlobalSafePoints[i],
+		}
+		storage.SaveServiceGCSafePoint(ssp)
+	}
+
+	for _, serviceSafePoint := range serviceSafePoints {
+		re.NoError(storage.SaveServiceSafePointV2(serviceSafePoint))
+	}
+	// enabling failpoint to make expired key removal immediately observable
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/storage/endpoint/removeExpiredKeys", "return(true)"))
+	minSafePoint, err := storage.LoadMinServiceSafePointV2(testKeyspaceID, currentTime)
+	re.NoError(err)
+	re.Equal(expectMinServiceSafePoint, minSafePoint.SafePoint)
+}
