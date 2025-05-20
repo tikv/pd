@@ -15,77 +15,32 @@
 package server
 
 import (
-	"context"
 	"encoding/json"
-	"sync"
 	"testing"
 	"time"
 
 	"github.com/gogo/protobuf/proto"
 	"github.com/stretchr/testify/require"
 
-	"github.com/pingcap/kvproto/pkg/resource_manager"
+	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 
 	"github.com/tikv/pd/pkg/storage"
-	"github.com/tikv/pd/pkg/storage/endpoint"
-	"github.com/tikv/pd/pkg/utils/testutil"
 )
-
-// mockCentralManager implements the centralManager interface for testing.
-type mockCentralManager struct {
-	mu      sync.RWMutex
-	config  *ControllerConfig
-	storage endpoint.ResourceGroupStorage
-}
-
-func newMockCentralManager() *mockCentralManager {
-	config := &ControllerConfig{
-		RequestUnit: RequestUnitConfig{
-			CPUMsCost:             1.0,
-			ReadBaseCost:          1.0,
-			ReadCostPerByte:       1.0,
-			ReadPerBatchBaseCost:  1.0,
-			WriteBaseCost:         1.0,
-			WriteCostPerByte:      1.0,
-			WritePerBatchBaseCost: 1.0,
-		},
-	}
-	return &mockCentralManager{
-		config:  config,
-		storage: storage.NewStorageWithMemoryBackend(),
-	}
-}
-
-// GetControllerConfig implements the centralManager interface.
-func (mcm *mockCentralManager) GetControllerConfig() *ControllerConfig {
-	mcm.mu.RLock()
-	defer mcm.mu.RUnlock()
-	return mcm.config
-}
-
-// GetStorage implements the centralManager interface.
-func (mcm *mockCentralManager) GetStorage() endpoint.ResourceGroupStorage {
-	return mcm.storage
-}
 
 func TestNewKeyspaceResourceGroupManager(t *testing.T) {
 	re := require.New(t)
 
-	centralMgr := newMockCentralManager()
-	krgm := newKeyspaceResourceGroupManager(1, centralMgr)
+	krgm := newKeyspaceResourceGroupManager(1, storage.NewStorageWithMemoryBackend())
 
 	re.NotNil(krgm)
 	re.Equal(uint32(1), krgm.keyspaceID)
 	re.Empty(krgm.groups)
-	re.NotNil(krgm.consumptionDispatcher)
-	re.NotNil(krgm.consumptionRecord)
 }
 
 func TestInitDefaultResourceGroup(t *testing.T) {
 	re := require.New(t)
 
-	centralMgr := newMockCentralManager()
-	krgm := newKeyspaceResourceGroupManager(1, centralMgr)
+	krgm := newKeyspaceResourceGroupManager(1, storage.NewStorageWithMemoryBackend())
 
 	// No default resource group initially.
 	_, exists := krgm.groups[reservedDefaultGroupName]
@@ -98,7 +53,7 @@ func TestInitDefaultResourceGroup(t *testing.T) {
 	defaultGroup, exists := krgm.groups[reservedDefaultGroupName]
 	re.True(exists)
 	re.Equal(reservedDefaultGroupName, defaultGroup.Name)
-	re.Equal(resource_manager.GroupMode_RUMode, defaultGroup.Mode)
+	re.Equal(rmpb.GroupMode_RUMode, defaultGroup.Mode)
 	re.Equal(uint32(middlePriority), defaultGroup.Priority)
 
 	// Verify the default resource group has unlimited rate and burst limit.
@@ -109,25 +64,24 @@ func TestInitDefaultResourceGroup(t *testing.T) {
 func TestAddResourceGroup(t *testing.T) {
 	re := require.New(t)
 
-	centralMgr := newMockCentralManager()
-	krgm := newKeyspaceResourceGroupManager(1, centralMgr)
+	krgm := newKeyspaceResourceGroupManager(1, storage.NewStorageWithMemoryBackend())
 
 	// Test adding invalid resource group (empty name).
-	group := &resource_manager.ResourceGroup{
+	group := &rmpb.ResourceGroup{
 		Name: "",
-		Mode: resource_manager.GroupMode_RUMode,
+		Mode: rmpb.GroupMode_RUMode,
 	}
 	err := krgm.addResourceGroup(group)
 	re.Error(err)
 
 	// Test adding a valid resource group.
-	group = &resource_manager.ResourceGroup{
+	group = &rmpb.ResourceGroup{
 		Name:     "test_group",
-		Mode:     resource_manager.GroupMode_RUMode,
+		Mode:     rmpb.GroupMode_RUMode,
 		Priority: 5,
-		RUSettings: &resource_manager.GroupRequestUnitSettings{
-			RU: &resource_manager.TokenBucket{
-				Settings: &resource_manager.TokenLimitSettings{
+		RUSettings: &rmpb.GroupRequestUnitSettings{
+			RU: &rmpb.TokenBucket{
+				Settings: &rmpb.TokenLimitSettings{
 					FillRate:   100,
 					BurstLimit: 200,
 				},
@@ -141,7 +95,7 @@ func TestAddResourceGroup(t *testing.T) {
 	addedGroup, exists := krgm.groups["test_group"]
 	re.True(exists)
 	re.Equal("test_group", addedGroup.Name)
-	re.Equal(resource_manager.GroupMode_RUMode, addedGroup.Mode)
+	re.Equal(rmpb.GroupMode_RUMode, addedGroup.Mode)
 	re.Equal(uint32(5), addedGroup.Priority)
 	re.Equal(uint64(100), addedGroup.RUSettings.RU.Settings.FillRate)
 	re.Equal(int64(200), addedGroup.RUSettings.RU.Settings.BurstLimit)
@@ -150,17 +104,16 @@ func TestAddResourceGroup(t *testing.T) {
 func TestModifyResourceGroup(t *testing.T) {
 	re := require.New(t)
 
-	centralMgr := newMockCentralManager()
-	krgm := newKeyspaceResourceGroupManager(1, centralMgr)
+	krgm := newKeyspaceResourceGroupManager(1, storage.NewStorageWithMemoryBackend())
 
 	// Add a resource group first.
-	group := &resource_manager.ResourceGroup{
+	group := &rmpb.ResourceGroup{
 		Name:     "test_group",
-		Mode:     resource_manager.GroupMode_RUMode,
+		Mode:     rmpb.GroupMode_RUMode,
 		Priority: 5,
-		RUSettings: &resource_manager.GroupRequestUnitSettings{
-			RU: &resource_manager.TokenBucket{
-				Settings: &resource_manager.TokenLimitSettings{
+		RUSettings: &rmpb.GroupRequestUnitSettings{
+			RU: &rmpb.TokenBucket{
+				Settings: &rmpb.TokenLimitSettings{
 					FillRate:   100,
 					BurstLimit: 200,
 				},
@@ -171,13 +124,13 @@ func TestModifyResourceGroup(t *testing.T) {
 	re.NoError(err)
 
 	// Modify the resource group.
-	modifiedGroup := &resource_manager.ResourceGroup{
+	modifiedGroup := &rmpb.ResourceGroup{
 		Name:     "test_group",
-		Mode:     resource_manager.GroupMode_RUMode,
+		Mode:     rmpb.GroupMode_RUMode,
 		Priority: 10,
-		RUSettings: &resource_manager.GroupRequestUnitSettings{
-			RU: &resource_manager.TokenBucket{
-				Settings: &resource_manager.TokenLimitSettings{
+		RUSettings: &rmpb.GroupRequestUnitSettings{
+			RU: &rmpb.TokenBucket{
+				Settings: &rmpb.TokenLimitSettings{
 					FillRate:   200,
 					BurstLimit: 300,
 				},
@@ -196,9 +149,9 @@ func TestModifyResourceGroup(t *testing.T) {
 	re.Equal(int64(300), updatedGroup.RUSettings.RU.Settings.BurstLimit)
 
 	// Try to modify a non-existent group.
-	nonExistentGroup := &resource_manager.ResourceGroup{
+	nonExistentGroup := &rmpb.ResourceGroup{
 		Name: "non_existent",
-		Mode: resource_manager.GroupMode_RUMode,
+		Mode: rmpb.GroupMode_RUMode,
 	}
 	err = krgm.modifyResourceGroup(nonExistentGroup)
 	re.Error(err)
@@ -207,13 +160,12 @@ func TestModifyResourceGroup(t *testing.T) {
 func TestDeleteResourceGroup(t *testing.T) {
 	re := require.New(t)
 
-	centralMgr := newMockCentralManager()
-	krgm := newKeyspaceResourceGroupManager(1, centralMgr)
+	krgm := newKeyspaceResourceGroupManager(1, storage.NewStorageWithMemoryBackend())
 
 	// Add a resource group first.
-	group := &resource_manager.ResourceGroup{
+	group := &rmpb.ResourceGroup{
 		Name:     "test_group",
-		Mode:     resource_manager.GroupMode_RUMode,
+		Mode:     rmpb.GroupMode_RUMode,
 		Priority: 5,
 	}
 	err := krgm.addResourceGroup(group)
@@ -244,17 +196,16 @@ func TestDeleteResourceGroup(t *testing.T) {
 func TestGetResourceGroup(t *testing.T) {
 	re := require.New(t)
 
-	centralMgr := newMockCentralManager()
-	krgm := newKeyspaceResourceGroupManager(1, centralMgr)
+	krgm := newKeyspaceResourceGroupManager(1, storage.NewStorageWithMemoryBackend())
 
 	// Add a resource group.
-	group := &resource_manager.ResourceGroup{
+	group := &rmpb.ResourceGroup{
 		Name:     "test_group",
-		Mode:     resource_manager.GroupMode_RUMode,
+		Mode:     rmpb.GroupMode_RUMode,
 		Priority: 5,
-		RUSettings: &resource_manager.GroupRequestUnitSettings{
-			RU: &resource_manager.TokenBucket{
-				Settings: &resource_manager.TokenLimitSettings{
+		RUSettings: &rmpb.GroupRequestUnitSettings{
+			RU: &rmpb.TokenBucket{
+				Settings: &rmpb.TokenLimitSettings{
 					FillRate:   100,
 					BurstLimit: 200,
 				},
@@ -268,7 +219,7 @@ func TestGetResourceGroup(t *testing.T) {
 	retrievedGroup := krgm.getResourceGroup("test_group", false)
 	re.NotNil(retrievedGroup)
 	re.Equal("test_group", retrievedGroup.Name)
-	re.Equal(resource_manager.GroupMode_RUMode, retrievedGroup.Mode)
+	re.Equal(rmpb.GroupMode_RUMode, retrievedGroup.Mode)
 	re.Equal(uint32(5), retrievedGroup.Priority)
 
 	// Get a non-existent group.
@@ -279,15 +230,14 @@ func TestGetResourceGroup(t *testing.T) {
 func TestGetResourceGroupList(t *testing.T) {
 	re := require.New(t)
 
-	centralMgr := newMockCentralManager()
-	krgm := newKeyspaceResourceGroupManager(1, centralMgr)
+	krgm := newKeyspaceResourceGroupManager(1, storage.NewStorageWithMemoryBackend())
 
 	// Add some resource groups.
 	for i := 1; i <= 3; i++ {
 		name := "group" + string(rune('0'+i))
-		group := &resource_manager.ResourceGroup{
+		group := &rmpb.ResourceGroup{
 			Name:     name,
-			Mode:     resource_manager.GroupMode_RUMode,
+			Mode:     rmpb.GroupMode_RUMode,
 			Priority: uint32(i),
 		}
 		err := krgm.addResourceGroup(group)
@@ -307,17 +257,16 @@ func TestGetResourceGroupList(t *testing.T) {
 func TestAddResourceGroupFromRaw(t *testing.T) {
 	re := require.New(t)
 
-	centralMgr := newMockCentralManager()
-	krgm := newKeyspaceResourceGroupManager(1, centralMgr)
+	krgm := newKeyspaceResourceGroupManager(1, storage.NewStorageWithMemoryBackend())
 
 	// Create a resource group.
-	group := &resource_manager.ResourceGroup{
+	group := &rmpb.ResourceGroup{
 		Name:     "test_group",
-		Mode:     resource_manager.GroupMode_RUMode,
+		Mode:     rmpb.GroupMode_RUMode,
 		Priority: 5,
-		RUSettings: &resource_manager.GroupRequestUnitSettings{
-			RU: &resource_manager.TokenBucket{
-				Settings: &resource_manager.TokenLimitSettings{
+		RUSettings: &rmpb.GroupRequestUnitSettings{
+			RU: &rmpb.TokenBucket{
+				Settings: &rmpb.TokenLimitSettings{
 					FillRate:   100,
 					BurstLimit: 200,
 				},
@@ -337,7 +286,7 @@ func TestAddResourceGroupFromRaw(t *testing.T) {
 	addedGroup, exists := krgm.groups["test_group"]
 	re.True(exists)
 	re.Equal("test_group", addedGroup.Name)
-	re.Equal(resource_manager.GroupMode_RUMode, addedGroup.Mode)
+	re.Equal(rmpb.GroupMode_RUMode, addedGroup.Mode)
 	re.Equal(uint32(5), addedGroup.Priority)
 
 	// Test with invalid raw value.
@@ -348,17 +297,16 @@ func TestAddResourceGroupFromRaw(t *testing.T) {
 func TestSetRawStatesIntoResourceGroup(t *testing.T) {
 	re := require.New(t)
 
-	centralMgr := newMockCentralManager()
-	krgm := newKeyspaceResourceGroupManager(1, centralMgr)
+	krgm := newKeyspaceResourceGroupManager(1, storage.NewStorageWithMemoryBackend())
 
 	// Add a resource group first.
-	group := &resource_manager.ResourceGroup{
+	group := &rmpb.ResourceGroup{
 		Name:     "test_group",
-		Mode:     resource_manager.GroupMode_RUMode,
+		Mode:     rmpb.GroupMode_RUMode,
 		Priority: 5,
-		RUSettings: &resource_manager.GroupRequestUnitSettings{
-			RU: &resource_manager.TokenBucket{
-				Settings: &resource_manager.TokenLimitSettings{
+		RUSettings: &rmpb.GroupRequestUnitSettings{
+			RU: &rmpb.TokenBucket{
+				Settings: &rmpb.TokenLimitSettings{
 					FillRate:   100,
 					BurstLimit: 200,
 				},
@@ -376,7 +324,7 @@ func TestSetRawStatesIntoResourceGroup(t *testing.T) {
 			Tokens:     tokens,
 			LastUpdate: &lastUpdate,
 		},
-		RUConsumption: &resource_manager.Consumption{
+		RUConsumption: &rmpb.Consumption{
 			RRU: 50,
 			WRU: 30,
 		},
@@ -401,71 +349,20 @@ func TestSetRawStatesIntoResourceGroup(t *testing.T) {
 	re.Error(err)
 }
 
-func TestBackgroundMetricsFlush(t *testing.T) {
-	re := require.New(t)
-
-	centralMgr := newMockCentralManager()
-	krgm := newKeyspaceResourceGroupManager(1, centralMgr)
-
-	// Add a resource group.
-	group := &resource_manager.ResourceGroup{
-		Name:     "test_group",
-		Mode:     resource_manager.GroupMode_RUMode,
-		Priority: 5,
-		RUSettings: &resource_manager.GroupRequestUnitSettings{
-			RU: &resource_manager.TokenBucket{
-				Settings: &resource_manager.TokenLimitSettings{
-					FillRate:   100,
-					BurstLimit: 200,
-				},
-			},
-		},
-	}
-	err := krgm.addResourceGroup(group)
-	re.NoError(err)
-
-	// Start the background metrics flush.
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	go krgm.backgroundMetricsFlush(ctx)
-
-	// Send consumption to the dispatcher.
-	krgm.consumptionDispatcher <- &consumptionItem{
-		resourceGroupName: "test_group",
-		Consumption: &resource_manager.Consumption{
-			RRU:               10.0,
-			WRU:               20.0,
-			ReadBytes:         1000,
-			WriteBytes:        2000,
-			TotalCpuTimeMs:    30,
-			SqlLayerCpuTimeMs: 10,
-			KvReadRpcCount:    5,
-			KvWriteRpcCount:   10,
-		},
-	}
-
-	// Verify consumption was added to the resource group.
-	testutil.Eventually(re, func() bool {
-		updatedGroup := krgm.getResourceGroup("test_group", true)
-		re.NotNil(updatedGroup)
-		return updatedGroup.RUConsumption.RRU == 10.0 && updatedGroup.RUConsumption.WRU == 20.0
-	})
-}
-
 func TestPersistResourceGroupRunningState(t *testing.T) {
 	re := require.New(t)
 
-	centralMgr := newMockCentralManager()
-	krgm := newKeyspaceResourceGroupManager(1, centralMgr)
+	storage := storage.NewStorageWithMemoryBackend()
+	krgm := newKeyspaceResourceGroupManager(1, storage)
 
 	// Add a resource group
-	group := &resource_manager.ResourceGroup{
+	group := &rmpb.ResourceGroup{
 		Name:     "test_group",
-		Mode:     resource_manager.GroupMode_RUMode,
+		Mode:     rmpb.GroupMode_RUMode,
 		Priority: 5,
-		RUSettings: &resource_manager.GroupRequestUnitSettings{
-			RU: &resource_manager.TokenBucket{
-				Settings: &resource_manager.TokenLimitSettings{
+		RUSettings: &rmpb.GroupRequestUnitSettings{
+			RU: &rmpb.TokenBucket{
+				Settings: &rmpb.TokenLimitSettings{
 					FillRate:   100,
 					BurstLimit: 200,
 				},
@@ -476,7 +373,7 @@ func TestPersistResourceGroupRunningState(t *testing.T) {
 	re.NoError(err)
 
 	// Check the states before persist.
-	centralMgr.GetStorage().LoadResourceGroupStates(func(keyspaceID uint32, name, rawValue string) {
+	storage.LoadResourceGroupStates(func(keyspaceID uint32, name, rawValue string) {
 		re.Equal(uint32(1), keyspaceID)
 		re.Equal("test_group", name)
 		states := &GroupStates{}
@@ -491,7 +388,7 @@ func TestPersistResourceGroupRunningState(t *testing.T) {
 	krgm.persistResourceGroupRunningState()
 
 	// Verify state was persisted.
-	centralMgr.GetStorage().LoadResourceGroupStates(func(keyspaceID uint32, name, rawValue string) {
+	storage.LoadResourceGroupStates(func(keyspaceID uint32, name, rawValue string) {
 		re.Equal(uint32(1), keyspaceID)
 		re.Equal("test_group", name)
 		states := &GroupStates{}
