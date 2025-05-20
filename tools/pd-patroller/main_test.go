@@ -104,10 +104,6 @@ func TestExpand_StackOverflowFromLogKey(t *testing.T) {
 		keyFormat = "proto" // Ensure proto format output
 		t.Logf("Original key: %s", expandedNode.String())
 		t.Logf("First level variants count: %d", len(expandedNode.variants))
-
-		// Recursively print node tree
-		//expandedNode.Print()
-
 	case <-time.After(5 * time.Second):
 		t.Fatal("Test timed out after 5 seconds - possible infinite recursion")
 	}

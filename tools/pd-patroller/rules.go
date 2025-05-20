@@ -329,4 +329,3 @@ func DecodeURLEscaped(n *Node) *Variant {
 		children: []*Node{N("key", []byte(s))},
 	}
 }
-/ Copyright 2025 TiKV Project Authors.
