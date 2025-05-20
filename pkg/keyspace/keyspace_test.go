@@ -58,6 +58,15 @@ type mockConfig struct {
 	DisableRawKVRegionSplit  bool
 	WaitRegionSplitTimeout   typeutil.Duration
 	CheckRegionSplitInterval typeutil.Duration
+	EnableGlobalSafePointV2  bool
+}
+
+func (m *mockConfig) SetEnableGlobalSafePointV2(isEnable bool) {
+	m.EnableGlobalSafePointV2 = isEnable
+}
+
+func (m *mockConfig) GetEnableGlobalSafePointV2() bool {
+	return m.EnableGlobalSafePointV2
 }
 
 func (m *mockConfig) GetPreAlloc() []string {
@@ -86,7 +95,9 @@ func (suite *keyspaceTestSuite) SetupTest() {
 	store := endpoint.NewStorageEndpoint(kv.NewMemoryKV(), nil)
 	allocator := mockid.NewIDAllocator()
 	kgm := NewKeyspaceGroupManager(suite.ctx, store, nil)
-	suite.manager = NewKeyspaceManager(suite.ctx, store, nil, allocator, &mockConfig{}, kgm)
+	var err error
+	suite.manager, err = NewKeyspaceManager(suite.ctx, store, nil, allocator, &mockConfig{}, kgm)
+	re.NoError(err)
 	re.NoError(kgm.Bootstrap(suite.ctx))
 	re.NoError(suite.manager.Bootstrap())
 }
@@ -528,4 +539,24 @@ func benchmarkPatrolKeyspaceAssignmentN(
 	b.StopTimer()
 	suite.TearDownTest()
 	suite.TearDownSuite()
+}
+
+func (suite *keyspaceTestSuite) TestEnableGlobalSafePointV2CreateKeyspace() {
+	re := suite.Require()
+	manager := suite.manager
+	manager.config.SetEnableGlobalSafePointV2(true)
+	requests := makeCreateKeyspaceRequests(10)
+
+	for i, request := range requests {
+		created, err := manager.CreateKeyspace(request)
+		re.NoError(err)
+		re.Equal(uint32(i+1), created.Id)
+		checkSafePointVersion(re, created)
+	}
+}
+
+func checkSafePointVersion(re *require.Assertions, meta *keyspacepb.KeyspaceMeta) {
+	val, ok := meta.Config[SafePointVersion]
+	re.True(ok)
+	re.Equal(KeyspaceGlobalSafePointVersionV2, val)
 }

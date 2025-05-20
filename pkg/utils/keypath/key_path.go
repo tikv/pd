@@ -79,6 +79,10 @@ const (
 
 	// ClusterIDPath is the path to store cluster id
 	ClusterIDPath = "/pd/cluster_id"
+
+	// Keyspace safe point version.
+	keyspaceGlobalInfix                 = "global"
+	keyspaceGlobalSafePointVersionInfix = "safe_point_version"
 )
 
 // PDRootPath returns the PD root path.
@@ -277,6 +281,18 @@ func KeyspaceMetaPrefix() string {
 func KeyspaceMetaPath(spaceID uint32) string {
 	idStr := EncodeKeyspaceID(spaceID)
 	return path.Join(KeyspaceMetaPrefix(), idStr)
+}
+
+// KeyspaceGlobalSetPath return the path prefix of global keyspace settings .
+// Path: keyspace/global/
+func KeyspaceGlobalSetPath() string {
+	return path.Join(keyspacePrefix, keyspaceGlobalInfix) + "/"
+}
+
+// KeyspaceGlobalSafePointVersionPath returns global safe point version path.
+// Path: keyspaces/global/safe_point_version
+func KeyspaceGlobalSafePointVersionPath() string {
+	return path.Join(KeyspaceGlobalSetPath(), "/", keyspaceGlobalSafePointVersionInfix)
 }
 
 // KeyspaceIDPath returns the path to keyspace id from the given name.

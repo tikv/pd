@@ -246,6 +246,7 @@ const (
 	minGCTunerThreshold               = 0
 	maxGCTunerThreshold               = 0.9
 	defaultDisableRawKVRegionSplit    = false
+	defaultEnableGlobalSafePointV2    = false
 
 	defaultWaitRegionSplitTimeout   = 30 * time.Second
 	defaultCheckRegionSplitInterval = 50 * time.Millisecond
@@ -878,6 +879,8 @@ type KeyspaceConfig struct {
 	DisableRawKVRegionSplit bool `toml:"disable-raw-kv-region-split" json:"disable-raw-kv-region-split,string"`
 	// CheckRegionSplitInterval indicates the interval to check whether the region split is complete
 	CheckRegionSplitInterval typeutil.Duration `toml:"check-region-split-interval" json:"check-region-split-interval"`
+	// EnableGlobalSafePointV2 is to set new keyspace safe point version to v2.
+	EnableGlobalSafePointV2 bool `toml:"enable-global-safe-point-v2" json:"enable-global-safe-point-v2,string"`
 }
 
 // Validate checks if keyspace config falls within acceptable range.
@@ -904,6 +907,9 @@ func (c *KeyspaceConfig) adjust(meta *configutil.ConfigMetaData) {
 	}
 	if !meta.IsDefined("disable-raw-kv-region-split") {
 		c.DisableRawKVRegionSplit = defaultDisableRawKVRegionSplit
+	}
+	if !meta.IsDefined("enable-global-safe-point-v2") {
+		c.EnableGlobalSafePointV2 = defaultEnableGlobalSafePointV2
 	}
 }
 
@@ -938,4 +944,14 @@ func (c *KeyspaceConfig) GetWaitRegionSplitTimeout() time.Duration {
 // GetCheckRegionSplitInterval returns the interval to check whether the region split is complete.
 func (c *KeyspaceConfig) GetCheckRegionSplitInterval() time.Duration {
 	return c.CheckRegionSplitInterval.Duration
+}
+
+// GetEnableGlobalSafePointV2 returns whether to enable global safe point v2.
+func (c *KeyspaceConfig) GetEnableGlobalSafePointV2() bool {
+	return c.EnableGlobalSafePointV2
+}
+
+// SetEnableGlobalSafePointV2 set whether to enable global safe point v2.
+func (c *KeyspaceConfig) SetEnableGlobalSafePointV2(isEnable bool) {
+	c.EnableGlobalSafePointV2 = isEnable
 }

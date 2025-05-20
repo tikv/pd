@@ -502,7 +502,10 @@ func (s *Server) startServer(ctx context.Context) error {
 	if s.IsAPIServiceMode() {
 		s.keyspaceGroupManager = keyspace.NewKeyspaceGroupManager(s.ctx, s.storage, s.client)
 	}
-	s.keyspaceManager = keyspace.NewKeyspaceManager(s.ctx, s.storage, s.cluster, keyspaceIDAllocator, &s.cfg.Keyspace, s.keyspaceGroupManager)
+	s.keyspaceManager, err = keyspace.NewKeyspaceManager(s.ctx, s.storage, s.cluster, keyspaceIDAllocator, &s.cfg.Keyspace, s.keyspaceGroupManager)
+	if err != nil {
+		return err
+	}
 	s.safePointV2Manager = gc.NewSafePointManagerV2(s.ctx, s.storage, s.storage, s.storage)
 	s.hbStreams = hbstream.NewHeartbeatStreams(ctx, "", s.cluster)
 	// initial hot_region_storage in here.
@@ -999,7 +1002,9 @@ func (s *Server) SetKeyspaceConfig(cfg config.KeyspaceConfig) error {
 			errs.ZapError(err))
 		return err
 	}
-	s.keyspaceManager.UpdateConfig(&cfg)
+	if err := s.keyspaceManager.UpdateConfig(&cfg); err != nil {
+		return err
+	}
 	log.Info("keyspace config is updated", zap.Reflect("new", cfg), zap.Reflect("old", old))
 	return nil
 }
@@ -1840,7 +1845,10 @@ func (s *Server) reloadConfigFromKV() error {
 	}
 	s.loadRateLimitConfig()
 	s.loadGRPCRateLimitConfig()
-	s.loadKeyspaceConfig()
+	err = s.loadKeyspaceConfig()
+	if err != nil {
+		return err
+	}
 	useRegionStorage := s.persistOptions.IsUseRegionStorage()
 	regionStorage := storage.TrySwitchRegionStorage(s.storage, useRegionStorage)
 	if regionStorage != nil {
@@ -1853,12 +1861,12 @@ func (s *Server) reloadConfigFromKV() error {
 	return nil
 }
 
-func (s *Server) loadKeyspaceConfig() {
+func (s *Server) loadKeyspaceConfig() error {
 	if s.keyspaceManager == nil {
-		return
+		return nil
 	}
 	cfg := s.persistOptions.GetKeyspaceConfig()
-	s.keyspaceManager.UpdateConfig(cfg)
+	return s.keyspaceManager.UpdateConfig(cfg)
 }
 
 func (s *Server) loadRateLimitConfig() {
