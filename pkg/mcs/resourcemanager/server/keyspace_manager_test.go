@@ -27,20 +27,13 @@ import (
 	"github.com/tikv/pd/pkg/storage"
 )
 
-func TestNewKeyspaceResourceGroupManager(t *testing.T) {
-	re := require.New(t)
-
-	krgm := newKeyspaceResourceGroupManager(1, storage.NewStorageWithMemoryBackend())
-
-	re.NotNil(krgm)
-	re.Equal(uint32(1), krgm.keyspaceID)
-	re.Empty(krgm.groups)
-}
-
 func TestInitDefaultResourceGroup(t *testing.T) {
 	re := require.New(t)
 
 	krgm := newKeyspaceResourceGroupManager(1, storage.NewStorageWithMemoryBackend())
+	re.NotNil(krgm)
+	re.Equal(uint32(1), krgm.keyspaceID)
+	re.Empty(krgm.groups)
 
 	// No default resource group initially.
 	_, exists := krgm.groups[reservedDefaultGroupName]
@@ -73,6 +66,13 @@ func TestAddResourceGroup(t *testing.T) {
 	}
 	err := krgm.addResourceGroup(group)
 	re.Error(err)
+	// Test adding invalid resource group (too long name).
+	group = &rmpb.ResourceGroup{
+		Name: "test_the_resource_group_name_is_too_long",
+		Mode: rmpb.GroupMode_RUMode,
+	}
+	err = krgm.addResourceGroup(group)
+	re.Error(err)
 
 	// Test adding a valid resource group.
 	group = &rmpb.ResourceGroup{
@@ -94,11 +94,11 @@ func TestAddResourceGroup(t *testing.T) {
 	// Verify the group was added.
 	addedGroup, exists := krgm.groups["test_group"]
 	re.True(exists)
-	re.Equal("test_group", addedGroup.Name)
-	re.Equal(rmpb.GroupMode_RUMode, addedGroup.Mode)
-	re.Equal(uint32(5), addedGroup.Priority)
-	re.Equal(uint64(100), addedGroup.RUSettings.RU.Settings.FillRate)
-	re.Equal(int64(200), addedGroup.RUSettings.RU.Settings.BurstLimit)
+	re.Equal(group.GetName(), addedGroup.Name)
+	re.Equal(group.GetMode(), addedGroup.Mode)
+	re.Equal(group.GetPriority(), addedGroup.Priority)
+	re.Equal(group.GetRUSettings().GetRU().GetSettings().GetFillRate(), addedGroup.RUSettings.RU.Settings.FillRate)
+	re.Equal(group.GetRUSettings().GetRU().GetSettings().GetBurstLimit(), addedGroup.RUSettings.RU.Settings.BurstLimit)
 }
 
 func TestModifyResourceGroup(t *testing.T) {
@@ -143,10 +143,10 @@ func TestModifyResourceGroup(t *testing.T) {
 	// Verify the group was modified.
 	updatedGroup, exists := krgm.groups["test_group"]
 	re.True(exists)
-	re.Equal("test_group", updatedGroup.Name)
-	re.Equal(uint32(10), updatedGroup.Priority)
-	re.Equal(uint64(200), updatedGroup.RUSettings.RU.Settings.FillRate)
-	re.Equal(int64(300), updatedGroup.RUSettings.RU.Settings.BurstLimit)
+	re.Equal(modifiedGroup.GetName(), updatedGroup.Name)
+	re.Equal(modifiedGroup.GetPriority(), updatedGroup.Priority)
+	re.Equal(modifiedGroup.GetRUSettings().GetRU().GetSettings().GetFillRate(), updatedGroup.RUSettings.RU.Settings.FillRate)
+	re.Equal(modifiedGroup.GetRUSettings().GetRU().GetSettings().GetBurstLimit(), updatedGroup.RUSettings.RU.Settings.BurstLimit)
 
 	// Try to modify a non-existent group.
 	nonExistentGroup := &rmpb.ResourceGroup{
@@ -172,16 +172,14 @@ func TestDeleteResourceGroup(t *testing.T) {
 	re.NoError(err)
 
 	// Verify the group exists.
-	_, exists := krgm.groups["test_group"]
-	re.True(exists)
+	re.NotNil(krgm.getResourceGroup(group.GetName(), false))
 
 	// Delete the group.
-	err = krgm.deleteResourceGroup("test_group")
+	err = krgm.deleteResourceGroup(group.GetName())
 	re.NoError(err)
 
 	// Verify the group was deleted.
-	_, exists = krgm.groups["test_group"]
-	re.False(exists)
+	re.Nil(krgm.getResourceGroup(group.GetName(), false))
 
 	// Try to delete the default group.
 	krgm.initDefaultResourceGroup()
@@ -189,8 +187,7 @@ func TestDeleteResourceGroup(t *testing.T) {
 	re.Error(err) // Should not be able to delete default group.
 
 	// Verify default group still exists.
-	_, exists = krgm.groups[reservedDefaultGroupName]
-	re.True(exists)
+	re.NotNil(krgm.getResourceGroup(reservedDefaultGroupName, false))
 }
 
 func TestGetResourceGroup(t *testing.T) {
@@ -216,11 +213,11 @@ func TestGetResourceGroup(t *testing.T) {
 	re.NoError(err)
 
 	// Get the resource group without stats.
-	retrievedGroup := krgm.getResourceGroup("test_group", false)
+	retrievedGroup := krgm.getResourceGroup(group.GetName(), false)
 	re.NotNil(retrievedGroup)
-	re.Equal("test_group", retrievedGroup.Name)
-	re.Equal(rmpb.GroupMode_RUMode, retrievedGroup.Mode)
-	re.Equal(uint32(5), retrievedGroup.Priority)
+	re.Equal(group.GetName(), retrievedGroup.Name)
+	re.Equal(group.GetMode(), retrievedGroup.Mode)
+	re.Equal(group.GetPriority(), retrievedGroup.Priority)
 
 	// Get a non-existent group.
 	nonExistentGroup := krgm.getResourceGroup("non_existent", false)
@@ -252,6 +249,17 @@ func TestGetResourceGroupList(t *testing.T) {
 	re.Equal("group1", groups[0].Name)
 	re.Equal("group2", groups[1].Name)
 	re.Equal("group3", groups[2].Name)
+
+	krgm.initDefaultResourceGroup()
+	groups = krgm.getResourceGroupList(false, true)
+	re.Len(groups, 4)
+	groups = krgm.getResourceGroupList(false, false)
+	re.Len(groups, 3)
+
+	names := krgm.getResourceGroupNames(true)
+	re.Len(names, 4)
+	names = krgm.getResourceGroupNames(false)
+	re.Len(names, 3)
 }
 
 func TestAddResourceGroupFromRaw(t *testing.T) {
@@ -279,18 +287,18 @@ func TestAddResourceGroupFromRaw(t *testing.T) {
 	re.NoError(err)
 
 	// Add from raw.
-	err = krgm.addResourceGroupFromRaw("test_group", string(data))
+	err = krgm.addResourceGroupFromRaw(group.GetName(), string(data))
 	re.NoError(err)
 
 	// Verify the group was added correctly.
-	addedGroup, exists := krgm.groups["test_group"]
+	addedGroup, exists := krgm.groups[group.GetName()]
 	re.True(exists)
-	re.Equal("test_group", addedGroup.Name)
-	re.Equal(rmpb.GroupMode_RUMode, addedGroup.Mode)
-	re.Equal(uint32(5), addedGroup.Priority)
+	re.Equal(group.GetName(), addedGroup.Name)
+	re.Equal(group.GetMode(), addedGroup.Mode)
+	re.Equal(group.GetPriority(), addedGroup.Priority)
 
 	// Test with invalid raw value.
-	err = krgm.addResourceGroupFromRaw("invalid", "invalid_data")
+	err = krgm.addResourceGroupFromRaw(group.GetName(), "invalid_data")
 	re.Error(err)
 }
 
@@ -335,17 +343,17 @@ func TestSetRawStatesIntoResourceGroup(t *testing.T) {
 	re.NoError(err)
 
 	// Set raw states.
-	err = krgm.setRawStatesIntoResourceGroup("test_group", string(data))
+	err = krgm.setRawStatesIntoResourceGroup(group.GetName(), string(data))
 	re.NoError(err)
 
 	// Verify states were updated.
-	updatedGroup := krgm.groups["test_group"]
+	updatedGroup := krgm.groups[group.GetName()]
 	re.InDelta(tokens, updatedGroup.RUSettings.RU.Tokens, 0.001)
-	re.Equal(float64(50), updatedGroup.RUConsumption.RRU)
-	re.Equal(float64(30), updatedGroup.RUConsumption.WRU)
+	re.Equal(states.RUConsumption.RRU, updatedGroup.RUConsumption.RRU)
+	re.Equal(states.RUConsumption.WRU, updatedGroup.RUConsumption.WRU)
 
 	// Test with invalid raw value.
-	err = krgm.setRawStatesIntoResourceGroup("test_group", "invalid_data")
+	err = krgm.setRawStatesIntoResourceGroup(group.GetName(), "invalid_data")
 	re.Error(err)
 }
 
@@ -375,14 +383,14 @@ func TestPersistResourceGroupRunningState(t *testing.T) {
 	// Check the states before persist.
 	storage.LoadResourceGroupStates(func(keyspaceID uint32, name, rawValue string) {
 		re.Equal(uint32(1), keyspaceID)
-		re.Equal("test_group", name)
+		re.Equal(group.GetName(), name)
 		states := &GroupStates{}
 		err := json.Unmarshal([]byte(rawValue), states)
 		re.NoError(err)
 		re.Equal(0.0, states.RU.Tokens)
 	})
 
-	mutableGroup := krgm.getMutableResourceGroup("test_group")
+	mutableGroup := krgm.getMutableResourceGroup(group.GetName())
 	mutableGroup.RUSettings.RU.Tokens = 100.0
 	// Persist the running state.
 	krgm.persistResourceGroupRunningState()
@@ -390,10 +398,10 @@ func TestPersistResourceGroupRunningState(t *testing.T) {
 	// Verify state was persisted.
 	storage.LoadResourceGroupStates(func(keyspaceID uint32, name, rawValue string) {
 		re.Equal(uint32(1), keyspaceID)
-		re.Equal("test_group", name)
+		re.Equal(group.GetName(), name)
 		states := &GroupStates{}
 		err := json.Unmarshal([]byte(rawValue), states)
 		re.NoError(err)
-		re.Equal(100.0, states.RU.Tokens)
+		re.Equal(mutableGroup.RUSettings.RU.Tokens, states.RU.Tokens)
 	})
 }
