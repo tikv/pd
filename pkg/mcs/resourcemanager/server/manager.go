@@ -89,12 +89,12 @@ func (m *Manager) GetStorage() endpoint.ResourceGroupStorage {
 }
 
 func (m *Manager) getOrCreateKeyspaceResourceGroupManager(keyspaceID uint32) *keyspaceResourceGroupManager {
-	krgm := m.getKeyspaceResourceGroupManager(keyspaceID)
-	if krgm == nil {
+	m.Lock()
+	defer m.Unlock()
+	krgm, ok := m.krgms[keyspaceID]
+	if !ok {
 		krgm = newKeyspaceResourceGroupManager(keyspaceID, m)
-		m.Lock()
 		m.krgms[keyspaceID] = krgm
-		m.Unlock()
 	}
 	return krgm
 }
@@ -323,6 +323,12 @@ func (m *Manager) persistResourceGroupRunningState() {
 func (m *Manager) dispatchConsumption(keyspaceID uint32, item *consumptionItem) {
 	krgm := m.getKeyspaceResourceGroupManager(keyspaceID)
 	if krgm == nil {
+		log.Warn("failed to dispatch consumption due to the keyspace resource group manager cannot be found",
+			zap.Uint32("keyspace-id", keyspaceID),
+			zap.String("group-name", item.resourceGroupName),
+			zap.Bool("is-background", item.isBackground),
+			zap.Bool("is-tiflash", item.isTiFlash),
+		)
 		return
 	}
 	krgm.consumptionDispatcher <- item
