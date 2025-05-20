@@ -216,29 +216,19 @@ func (krgm *keyspaceResourceGroupManager) getMutableResourceGroup(name string) *
 	return krgm.groups[name]
 }
 
-func (krgm *keyspaceResourceGroupManager) getResourceGroupList(withStats bool) []*ResourceGroup {
+func (krgm *keyspaceResourceGroupManager) getResourceGroupList(withStats, includeDefault bool) []*ResourceGroup {
 	krgm.RLock()
 	res := make([]*ResourceGroup, 0, len(krgm.groups))
 	for _, group := range krgm.groups {
+		if !includeDefault && group.Name == reservedDefaultGroupName {
+			continue
+		}
 		res = append(res, group.Clone(withStats))
 	}
 	krgm.RUnlock()
 	sort.Slice(res, func(i, j int) bool {
 		return res[i].Name < res[j].Name
 	})
-	return res
-}
-
-func (krgm *keyspaceResourceGroupManager) getMutableResourceGroups(inlcudeDefault bool) []*ResourceGroup {
-	krgm.RLock()
-	defer krgm.RUnlock()
-	res := make([]*ResourceGroup, 0, len(krgm.groups))
-	for _, group := range krgm.groups {
-		if !inlcudeDefault && group.Name == reservedDefaultGroupName {
-			continue
-		}
-		res = append(res, group.Clone(true))
-	}
 	return res
 }
 
@@ -383,7 +373,7 @@ func (krgm *keyspaceResourceGroupManager) backgroundMetricsFlush(ctx context.Con
 			}
 		case <-availableRUTicker.C:
 			// prevent many groups and hold the lock long time.
-			for _, group := range krgm.getMutableResourceGroups(false) {
+			for _, group := range krgm.getResourceGroupList(true, false) {
 				ru := math.Max(group.getRUToken(), 0)
 				availableRUCounter.WithLabelValues(group.Name, group.Name).Set(ru)
 				resourceGroupConfigGauge.WithLabelValues(group.Name, priorityLabel).Set(group.getPriority())

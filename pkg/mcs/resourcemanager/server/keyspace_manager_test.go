@@ -295,7 +295,7 @@ func TestGetResourceGroupList(t *testing.T) {
 	}
 
 	// Get all resource groups.
-	groups := krgm.getResourceGroupList(false)
+	groups := krgm.getResourceGroupList(false, true)
 	re.Len(groups, 3)
 
 	// Verify groups are sorted by name.

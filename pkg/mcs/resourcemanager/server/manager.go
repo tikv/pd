@@ -289,7 +289,7 @@ func (m *Manager) GetResourceGroupList(withStats bool) []*ResourceGroup {
 	if krgm == nil {
 		return nil
 	}
-	return krgm.getResourceGroupList(withStats)
+	return krgm.getResourceGroupList(withStats, true)
 }
 
 func (m *Manager) persistLoop(ctx context.Context) {
