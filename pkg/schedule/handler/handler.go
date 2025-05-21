@@ -1034,7 +1034,7 @@ func (h *Handler) GetHotStores() (*HotStoreStats, error) {
 }
 
 // GetStoresLoads gets all hot write stores stats.
-func (h *Handler) GetStoresLoads() (map[uint64][]float64, error) {
+func (h *Handler) GetStoresLoads() (map[uint64]statistics.StoreKindLoads, error) {
 	c := h.GetCluster()
 	if c == nil {
 		return nil, errs.ErrNotBootstrapped.GenWithStackByArgs()

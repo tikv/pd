@@ -262,7 +262,7 @@ func stLdRate(dim int) func(ld *statistics.StoreLoad) float64 {
 }
 
 func stLdCount(ld *statistics.StoreLoad) float64 {
-	return ld.Count
+	return ld.HotPeerCount
 }
 
 type storeLoadCmp func(ld1, ld2 *statistics.StoreLoad) int

@@ -192,7 +192,7 @@ func (c *Cluster) GetRegionScatterer() *scatter.RegionScatterer {
 }
 
 // GetStoresLoads returns load stats of all stores.
-func (c *Cluster) GetStoresLoads() map[uint64][]float64 {
+func (c *Cluster) GetStoresLoads() map[uint64]statistics.StoreKindLoads {
 	return c.hotStat.GetStoresLoads()
 }
 

@@ -31,6 +31,7 @@ import (
 	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/registry"
+	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 )
 
@@ -93,7 +94,7 @@ func (s *Service) GetResourceGroup(_ context.Context, req *rmpb.GetResourceGroup
 	if err := s.checkServing(); err != nil {
 		return nil, err
 	}
-	rg := s.manager.GetResourceGroup(req.ResourceGroupName, req.WithRuStats)
+	rg := s.manager.GetResourceGroup(constant.NullKeyspaceID, req.ResourceGroupName, req.WithRuStats)
 	if rg == nil {
 		return nil, errors.New("resource group not found")
 	}
@@ -107,7 +108,7 @@ func (s *Service) ListResourceGroups(_ context.Context, req *rmpb.ListResourceGr
 	if err := s.checkServing(); err != nil {
 		return nil, err
 	}
-	groups := s.manager.GetResourceGroupList(req.WithRuStats)
+	groups := s.manager.GetResourceGroupList(constant.NullKeyspaceID, req.WithRuStats)
 	resp := &rmpb.ListResourceGroupsResponse{
 		Groups: make([]*rmpb.ResourceGroup, 0, len(groups)),
 	}
@@ -134,7 +135,7 @@ func (s *Service) DeleteResourceGroup(_ context.Context, req *rmpb.DeleteResourc
 	if err := s.checkServing(); err != nil {
 		return nil, err
 	}
-	err := s.manager.DeleteResourceGroup(req.ResourceGroupName)
+	err := s.manager.DeleteResourceGroup(constant.NullKeyspaceID, req.ResourceGroupName)
 	if err != nil {
 		return nil, err
 	}
@@ -180,24 +181,17 @@ func (s *Service) AcquireTokenBuckets(stream rmpb.ResourceManager_AcquireTokenBu
 		for _, req := range request.Requests {
 			resourceGroupName := req.GetResourceGroupName()
 			// Get the resource group from manager to acquire token buckets.
-			rg := s.manager.GetMutableResourceGroup(resourceGroupName)
+			rg := s.manager.GetMutableResourceGroup(constant.NullKeyspaceID, resourceGroupName)
 			if rg == nil {
 				log.Warn("resource group not found", zap.String("resource-group", resourceGroupName))
 				continue
 			}
 			// Send the consumption to update the metrics.
-			isBackground := req.GetIsBackground()
-			isTiFlash := req.GetIsTiflash()
-			if isBackground && isTiFlash {
-				return errors.New("background and tiflash cannot be true at the same time")
+			err = s.manager.dispatchConsumption(req)
+			if err != nil {
+				return err
 			}
-			s.manager.consumptionDispatcher <- struct {
-				resourceGroupName string
-				*rmpb.Consumption
-				isBackground bool
-				isTiFlash    bool
-			}{resourceGroupName, req.GetConsumptionSinceLastRequest(), isBackground, isTiFlash}
-			if isBackground {
+			if req.GetIsBackground() {
 				continue
 			}
 			now := time.Now()
