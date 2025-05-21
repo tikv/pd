@@ -216,6 +216,8 @@ func (conf *balanceRangeSchedulerConfig) gc() error {
 			needGC = true
 			gcIdx = idx
 		} else {
+			// The jobs are sorted by the started time and executed by it.
+			// So it can end util the first element doesn't satisfy the condition.
 			break
 		}
 	}
@@ -227,9 +229,9 @@ func (conf *balanceRangeSchedulerConfig) gc() error {
 	})
 }
 
-func (conf *balanceRangeSchedulerConfig) persistLocked(before func()) error {
+func (conf *balanceRangeSchedulerConfig) persistLocked(updateFn func()) error {
 	originJobs := conf.cloneLocked()
-	before()
+	updateFn()
 	if err := conf.save(); err != nil {
 		conf.jobs = originJobs
 		return err
