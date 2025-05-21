@@ -155,7 +155,8 @@ func makeCreateKeyspaceByIDRequests(count int) []*CreateKeyspaceByIDRequest {
 	for i := range count {
 		id := uint32(i + 1)
 		requests[i] = &CreateKeyspaceByIDRequest{
-			ID: &id,
+			ID:   &id,
+			Name: strconv.FormatUint(uint64(id), 10),
 			Config: map[string]string{
 				testConfig1: "100",
 				testConfig2: "200",
@@ -174,7 +175,9 @@ func (suite *keyspaceTestSuite) TestCreateKeyspaceByID() {
 	for i, request := range requests {
 		created, err := manager.CreateKeyspaceByID(request)
 		re.NoError(err)
-		re.Equal(uint32(i+1), created.Id)
+		id := i + 1
+		re.Equal(uint32(id), created.Id)
+		re.Equal(strconv.Itoa(id), created.Name)
 		checkCreateByIDRequest(re, request, created)
 
 		loaded, err := manager.LoadKeyspaceByID(*request.ID)
@@ -190,8 +193,18 @@ func (suite *keyspaceTestSuite) TestCreateKeyspaceByID() {
 	_, err := manager.CreateKeyspaceByID(requests[0])
 	re.Error(err)
 
+	// Create a keyspace with existing name must return error.
+	*requests[0].ID = 100
+	_, err = manager.CreateKeyspaceByID(requests[0])
+	re.Error(err)
+
 	// Create a keyspace with empty id must return error.
 	_, err = manager.CreateKeyspaceByID(&CreateKeyspaceByIDRequest{})
+	re.Error(err)
+
+	// Create a keyspace with empty name must return error.
+	id := uint32(100)
+	_, err = manager.CreateKeyspaceByID(&CreateKeyspaceByIDRequest{ID: &id, Name: ""})
 	re.Error(err)
 }
 
