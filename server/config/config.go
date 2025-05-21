@@ -43,6 +43,11 @@ import (
 	"go.uber.org/zap"
 )
 
+var (
+	// DefaultEnableGlobalSafePointV2 is the default value of enable global safe point v2.
+	DefaultEnableGlobalSafePointV2 = "false"
+)
+
 // Config is the pd server configuration.
 // NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
 type Config struct {
@@ -246,7 +251,6 @@ const (
 	minGCTunerThreshold               = 0
 	maxGCTunerThreshold               = 0.9
 	defaultDisableRawKVRegionSplit    = false
-	defaultEnableGlobalSafePointV2    = false
 
 	defaultWaitRegionSplitTimeout   = 30 * time.Second
 	defaultCheckRegionSplitInterval = 50 * time.Millisecond
@@ -909,7 +913,7 @@ func (c *KeyspaceConfig) adjust(meta *configutil.ConfigMetaData) {
 		c.DisableRawKVRegionSplit = defaultDisableRawKVRegionSplit
 	}
 	if !meta.IsDefined("enable-global-safe-point-v2") {
-		c.EnableGlobalSafePointV2 = defaultEnableGlobalSafePointV2
+		c.EnableGlobalSafePointV2 = (DefaultEnableGlobalSafePointV2 == "true")
 	}
 }
 

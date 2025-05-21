@@ -78,7 +78,10 @@ endif
 ROOT_PATH := $(shell pwd)
 BUILD_BIN_PATH := $(ROOT_PATH)/bin
 
-build: pd-server pd-ctl pd-recover
+set-global-safepoint:
+    $(eval LDFLAGS += -X "$(PD_PKG)/server/config.DefaultEnableGlobalSafePointV2=true")
+
+build: set-global-safepoint pd-server pd-ctl pd-recover
 
 tools: pd-tso-bench pd-heartbeat-bench regions-dump stores-dump pd-api-bench pd-ut
 
