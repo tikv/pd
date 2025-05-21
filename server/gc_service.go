@@ -403,7 +403,7 @@ func (s *GrpcServer) SetGCBarrier(ctx context.Context, request *pdpb.SetGCBarrie
 	barrierID := request.GetBarrierId()
 	barrierTS := request.GetBarrierTs()
 	ttl := typeutil.SaturatingStdDurationFromSeconds(request.GetTtlSeconds())
-	newBarrier, err := s.gcStateManager.SetGCBarrier(ctx, keyspaceID, barrierID, barrierTS, ttl, now)
+	newBarrier, err := s.gcStateManager.SetGCBarrier(keyspaceID, barrierID, barrierTS, ttl, now)
 	if err != nil {
 		return &pdpb.SetGCBarrierResponse{
 			Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
