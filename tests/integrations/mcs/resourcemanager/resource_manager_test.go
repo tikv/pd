@@ -1563,3 +1563,111 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupControllerConfigCh
 	re.NoError(err)
 	re.Equal(expectRUCfg, c1.GetConfig())
 }
+
+func (suite *resourceManagerClientTestSuite) TestResourceGroupCURDWithKeyspace() {
+	re := suite.Require()
+	cli := suite.client
+	keyspaceID := uint32(1)
+
+	// Add resource group
+	group := &rmpb.ResourceGroup{
+		Name: "keyspace_test",
+		Mode: rmpb.GroupMode_RUMode,
+		RUSettings: &rmpb.GroupRequestUnitSettings{
+			RU: &rmpb.TokenBucket{
+				Settings: &rmpb.TokenLimitSettings{
+					FillRate: 10000,
+				},
+				Tokens: 100000,
+			},
+		},
+		KeyspaceId: &rmpb.KeyspaceIDValue{Value: keyspaceID},
+	}
+	resp, err := cli.AddResourceGroup(suite.ctx, group)
+	re.NoError(err)
+	re.Contains(resp, "Success!")
+
+	// Get and List resource group without keyspace id
+	rg, err := cli.GetResourceGroup(suite.ctx, group.Name)
+	re.EqualError(err, fmt.Sprintf("get resource group %v failed, rpc error: code = Unknown desc = resource group not found", group.Name))
+	re.Nil(rg)
+	rgs, err := cli.ListResourceGroups(suite.ctx)
+	re.NoError(err)
+	re.Len(rgs, 1)
+	re.Equal("default", rgs[0].Name)
+
+	// Get and List resource group with keyspace id
+	opts := []pd.GetResourceGroupOption{
+		pd.WithKeyspaceID(keyspaceID),
+		pd.WithRUStats,
+	}
+	rg, err = cli.GetResourceGroup(suite.ctx, group.Name, opts...)
+	re.NoError(err)
+	re.NotNil(rg)
+	rgs, err = cli.ListResourceGroups(suite.ctx, opts...)
+	re.NoError(err)
+	re.Len(rgs, 1)
+	re.Equal(rgs[0].Name, group.Name)
+
+	// Modify resource group with keyspace id
+	group.RUSettings.RU.Settings.FillRate = 1000
+	resp, err = cli.ModifyResourceGroup(suite.ctx, group)
+	re.NoError(err)
+	re.Contains(resp, "Success!")
+	rg, err = cli.GetResourceGroup(suite.ctx, group.Name, opts...)
+	re.NoError(err)
+	re.Equal(group.RUSettings.RU.Settings.FillRate, rg.RUSettings.RU.Settings.FillRate)
+
+	// Test AcquireTokenBuckets without keyspace id
+	testConsumption := &rmpb.Consumption{
+		RRU:               200.0,
+		WRU:               100.0,
+		ReadBytes:         1024,
+		WriteBytes:        512,
+		TotalCpuTimeMs:    50.0,
+		SqlLayerCpuTimeMs: 40.0,
+		KvReadRpcCount:    5,
+		KvWriteRpcCount:   6,
+	}
+	req := &rmpb.TokenBucketsRequest{
+		Requests: []*rmpb.TokenBucketRequest{
+			{
+				ResourceGroupName:           group.Name,
+				ConsumptionSinceLastRequest: testConsumption,
+			},
+		},
+		TargetRequestPeriodMs: 1000,
+		ClientUniqueId:        1,
+	}
+	_, err = cli.AcquireTokenBuckets(suite.ctx, req)
+	re.NoError(err)
+	time.Sleep(10 * time.Millisecond)
+	rg, err = cli.GetResourceGroup(suite.ctx, group.Name, opts...)
+	re.NoError(err)
+	re.NotEqual(rg.RUStats, testConsumption)
+
+	// Test AcquireTokenBuckets with keyspace id
+	req.Requests[0].KeyspaceId = &rmpb.KeyspaceIDValue{Value: keyspaceID}
+	_, err = cli.AcquireTokenBuckets(suite.ctx, req)
+	re.NoError(err)
+	time.Sleep(10 * time.Millisecond)
+	rg, err = cli.GetResourceGroup(suite.ctx, group.Name, opts...)
+	re.NoError(err)
+	re.Equal(rg.RUStats, testConsumption)
+
+	// Delete resource group without keyspace id
+	resp, err = cli.DeleteResourceGroup(suite.ctx, group.Name)
+	re.NoError(err)
+	re.Contains(resp, "Success!")
+	rg, err = cli.GetResourceGroup(suite.ctx, group.Name, opts...)
+	re.NoError(err)
+	re.NotNil(rg)
+
+	// Delete resource group with keyspace id
+	resp, err = cli.DeleteResourceGroup(suite.ctx, group.Name, pd.DeleteWithKeyspaceID(keyspaceID))
+	re.NoError(err)
+	re.Contains(resp, "Success!")
+	rg, err = cli.GetResourceGroup(suite.ctx, group.Name, opts...)
+	re.EqualError(err, fmt.Sprintf("get resource group %v failed, rpc error: code = Unknown desc = resource group not found", group.Name))
+	re.Nil(rg)
+}

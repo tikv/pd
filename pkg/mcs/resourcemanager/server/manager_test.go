@@ -47,7 +47,13 @@ func TestBackgroundMetricsFlush(t *testing.T) {
 	defer cancel()
 	err := m.Init(ctx)
 	re.NoError(err)
+	// Test without keyspace ID
+	checkBackgrouundMetricsFlush(re, m, nil)
+	// Test with keyspace ID
+	checkBackgrouundMetricsFlush(re, m, &rmpb.KeyspaceIDValue{Value: 1})
+}
 
+func checkBackgrouundMetricsFlush(re *require.Assertions, manager *Manager, keyspaceIDValue *rmpb.KeyspaceIDValue) {
 	// Add a resource group.
 	group := &rmpb.ResourceGroup{
 		Name:     "test_group",
@@ -61,8 +67,9 @@ func TestBackgroundMetricsFlush(t *testing.T) {
 				},
 			},
 		},
+		KeyspaceId: keyspaceIDValue,
 	}
-	err = m.AddResourceGroup(group)
+	err := manager.AddResourceGroup(group)
 	re.NoError(err)
 
 	// Send consumption to the dispatcher.
@@ -72,14 +79,72 @@ func TestBackgroundMetricsFlush(t *testing.T) {
 			RRU: 10.0,
 			WRU: 20.0,
 		},
+		KeyspaceId: keyspaceIDValue,
 	}
-	m.dispatchConsumption(req)
+	manager.dispatchConsumption(req)
 
 	// Verify consumption was added to the resource group.
 	testutil.Eventually(re, func() bool {
-		updatedGroup := m.GetResourceGroup(constant.NullKeyspaceID, req.GetResourceGroupName(), true)
+		keyspaceID := constant.NullKeyspaceID
+		if keyspaceIDValue != nil {
+			keyspaceID = keyspaceIDValue.GetValue()
+		}
+		updatedGroup := manager.GetResourceGroup(keyspaceID, req.GetResourceGroupName(), true)
 		re.NotNil(updatedGroup)
 		return updatedGroup.RUConsumption.RRU == req.ConsumptionSinceLastRequest.RRU &&
 			updatedGroup.RUConsumption.WRU == req.ConsumptionSinceLastRequest.WRU
+	})
+}
+
+func TestAddAndModifyResourceGroup(t *testing.T) {
+	re := require.New(t)
+
+	storage := storage.NewStorageWithMemoryBackend()
+	m := NewManager[*mockConfigProvider](&mockConfigProvider{})
+	m.storage = storage
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	err := m.Init(ctx)
+	re.NoError(err)
+
+	// Test without keyspace ID
+	checkAddAndModifyResourceGroup(re, m, nil)
+	// Test with keyspace ID
+	checkAddAndModifyResourceGroup(re, m, &rmpb.KeyspaceIDValue{Value: 1})
+}
+
+func checkAddAndModifyResourceGroup(re *require.Assertions, manager *Manager, keyspaceIDValue *rmpb.KeyspaceIDValue) {
+	group := &rmpb.ResourceGroup{
+		Name:     "test_group",
+		Mode:     rmpb.GroupMode_RUMode,
+		Priority: 5,
+		RUSettings: &rmpb.GroupRequestUnitSettings{
+			RU: &rmpb.TokenBucket{
+				Settings: &rmpb.TokenLimitSettings{
+					FillRate:   100,
+					BurstLimit: 200,
+				},
+			},
+		},
+		KeyspaceId: keyspaceIDValue,
+	}
+	err := manager.AddResourceGroup(group)
+	re.NoError(err)
+
+	group.Priority = 10
+	group.RUSettings.RU.Settings.BurstLimit = 300
+	err = manager.ModifyResourceGroup(group)
+	re.NoError(err)
+
+	testutil.Eventually(re, func() bool {
+		keyspaceID := constant.NullKeyspaceID
+		if keyspaceIDValue != nil {
+			keyspaceID = keyspaceIDValue.GetValue()
+		}
+		rg := manager.GetResourceGroup(keyspaceID, group.Name, true)
+		re.NotNil(rg)
+		return rg.Priority == group.Priority &&
+			rg.RUSettings.RU.Settings.BurstLimit == group.RUSettings.RU.Settings.BurstLimit
 	})
 }
