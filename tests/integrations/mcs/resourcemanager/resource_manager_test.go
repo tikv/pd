@@ -32,6 +32,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/pingcap/failpoint"
+	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 	"github.com/pingcap/log"
 
@@ -41,6 +42,7 @@ import (
 	"github.com/tikv/pd/client/resource_group/controller"
 	sd "github.com/tikv/pd/client/servicediscovery"
 	"github.com/tikv/pd/pkg/mcs/resourcemanager/server"
+	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/tests"
@@ -1588,6 +1590,16 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupCURDWithKeyspace()
 	)
 	defer clientKeyspace.Close()
 
+	// Add keyspace meta.
+	keyspace := &keyspacepb.KeyspaceMeta{
+		Id:   keyspaceID,
+		Name: "keyspace_test",
+	}
+	storage := suite.cluster.GetLeaderServer().GetServer().GetStorage()
+	err := storage.RunInTxn(suite.ctx, func(txn kv.Txn) error {
+		return storage.SaveKeyspaceMeta(txn, keyspace)
+	})
+	re.NoError(err)
 	// Add resource group
 	group := &rmpb.ResourceGroup{
 		Name: "keyspace_test",

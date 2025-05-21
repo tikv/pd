@@ -14,7 +14,13 @@
 
 package server
 
-import "github.com/prometheus/client_golang/prometheus"
+import (
+	"math"
+
+	"github.com/prometheus/client_golang/prometheus"
+
+	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
+)
 
 const (
 	namespace                 = "resource_manager"
@@ -29,6 +35,7 @@ const (
 	tiflashTypeLabel          = "ap"
 	defaultTypeLabel          = "tp"
 	newResourceGroupNameLabel = "resource_group"
+	keyspaceNameLabel         = "keyspace_name"
 
 	// Labels for the config.
 	ruPerSecLabel   = "ru_per_sec"
@@ -45,14 +52,14 @@ var (
 			Subsystem: ruSubsystem,
 			Name:      "read_request_unit_sum",
 			Help:      "Counter of the read request unit cost for all resource groups.",
-		}, []string{resourceGroupNameLabel, newResourceGroupNameLabel, typeLabel})
+		}, []string{resourceGroupNameLabel, newResourceGroupNameLabel, typeLabel, keyspaceNameLabel})
 	writeRequestUnitCost = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: namespace,
 			Subsystem: ruSubsystem,
 			Name:      "write_request_unit_sum",
 			Help:      "Counter of the write request unit cost for all resource groups.",
-		}, []string{resourceGroupNameLabel, newResourceGroupNameLabel, typeLabel})
+		}, []string{resourceGroupNameLabel, newResourceGroupNameLabel, typeLabel, keyspaceNameLabel})
 
 	readRequestUnitMaxPerSecCost = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
@@ -60,14 +67,14 @@ var (
 			Subsystem: ruSubsystem,
 			Name:      "read_request_unit_max_per_sec",
 			Help:      "Gauge of the max read request unit per second for all resource groups.",
-		}, []string{newResourceGroupNameLabel})
+		}, []string{newResourceGroupNameLabel, keyspaceNameLabel})
 	writeRequestUnitMaxPerSecCost = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: namespace,
 			Subsystem: ruSubsystem,
 			Name:      "write_request_unit_max_per_sec",
 			Help:      "Gauge of the max write request unit per second for all resource groups.",
-		}, []string{newResourceGroupNameLabel})
+		}, []string{newResourceGroupNameLabel, keyspaceNameLabel})
 
 	sqlLayerRequestUnitCost = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
@@ -75,7 +82,7 @@ var (
 			Subsystem: ruSubsystem,
 			Name:      "sql_layer_request_unit_sum",
 			Help:      "The number of the sql layer request unit cost for all resource groups.",
-		}, []string{resourceGroupNameLabel, newResourceGroupNameLabel})
+		}, []string{resourceGroupNameLabel, newResourceGroupNameLabel, keyspaceNameLabel})
 
 	// Resource cost metrics.
 	readByteCost = prometheus.NewCounterVec(
@@ -84,35 +91,35 @@ var (
 			Subsystem: resourceSubsystem,
 			Name:      "read_byte_sum",
 			Help:      "Counter of the read byte cost for all resource groups.",
-		}, []string{resourceGroupNameLabel, newResourceGroupNameLabel, typeLabel})
+		}, []string{resourceGroupNameLabel, newResourceGroupNameLabel, typeLabel, keyspaceNameLabel})
 	writeByteCost = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: namespace,
 			Subsystem: resourceSubsystem,
 			Name:      "write_byte_sum",
 			Help:      "Counter of the write byte cost for all resource groups.",
-		}, []string{resourceGroupNameLabel, newResourceGroupNameLabel, typeLabel})
+		}, []string{resourceGroupNameLabel, newResourceGroupNameLabel, typeLabel, keyspaceNameLabel})
 	kvCPUCost = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: namespace,
 			Subsystem: resourceSubsystem,
 			Name:      "kv_cpu_time_ms_sum",
 			Help:      "Counter of the KV CPU time cost in milliseconds for all resource groups.",
-		}, []string{resourceGroupNameLabel, newResourceGroupNameLabel, typeLabel})
+		}, []string{resourceGroupNameLabel, newResourceGroupNameLabel, typeLabel, keyspaceNameLabel})
 	sqlCPUCost = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: namespace,
 			Subsystem: resourceSubsystem,
 			Name:      "sql_cpu_time_ms_sum",
 			Help:      "Counter of the SQL CPU time cost in milliseconds for all resource groups.",
-		}, []string{resourceGroupNameLabel, newResourceGroupNameLabel, typeLabel})
+		}, []string{resourceGroupNameLabel, newResourceGroupNameLabel, typeLabel, keyspaceNameLabel})
 	requestCount = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: namespace,
 			Subsystem: resourceSubsystem,
 			Name:      "request_count",
 			Help:      "The number of read/write requests for all resource groups.",
-		}, []string{resourceGroupNameLabel, newResourceGroupNameLabel, typeLabel})
+		}, []string{resourceGroupNameLabel, newResourceGroupNameLabel, typeLabel, keyspaceNameLabel})
 
 	availableRUCounter = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
@@ -120,7 +127,7 @@ var (
 			Subsystem: ruSubsystem,
 			Name:      "available_ru",
 			Help:      "Counter of the available RU for all resource groups.",
-		}, []string{resourceGroupNameLabel, newResourceGroupNameLabel})
+		}, []string{resourceGroupNameLabel, newResourceGroupNameLabel, keyspaceNameLabel})
 
 	resourceGroupConfigGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
@@ -128,7 +135,7 @@ var (
 			Subsystem: serverSubsystem,
 			Name:      "group_config",
 			Help:      "Config of the resource group.",
-		}, []string{newResourceGroupNameLabel, typeLabel})
+		}, []string{newResourceGroupNameLabel, typeLabel, keyspaceNameLabel})
 )
 
 func init() {
@@ -144,4 +151,104 @@ func init() {
 	prometheus.MustRegister(readRequestUnitMaxPerSecCost)
 	prometheus.MustRegister(writeRequestUnitMaxPerSecCost)
 	prometheus.MustRegister(resourceGroupConfigGauge)
+}
+
+type counterMetrics struct {
+	RRUMetrics               prometheus.Counter
+	WRUMetrics               prometheus.Counter
+	SQLLayerRUMetrics        prometheus.Counter
+	ReadByteMetrics          prometheus.Counter
+	WriteByteMetrics         prometheus.Counter
+	KvCPUMetrics             prometheus.Counter
+	SQLCPUMetrics            prometheus.Counter
+	ReadRequestCountMetrics  prometheus.Counter
+	WriteRequestCountMetrics prometheus.Counter
+}
+
+func newCounterMetrics(keyspaceName, groupName, ruLabelType string) *counterMetrics {
+	return &counterMetrics{
+		RRUMetrics:               readRequestUnitCost.WithLabelValues(groupName, groupName, ruLabelType, keyspaceName),
+		WRUMetrics:               writeRequestUnitCost.WithLabelValues(groupName, groupName, ruLabelType, keyspaceName),
+		SQLLayerRUMetrics:        sqlLayerRequestUnitCost.WithLabelValues(groupName, groupName, keyspaceName),
+		ReadByteMetrics:          readByteCost.WithLabelValues(groupName, groupName, ruLabelType, keyspaceName),
+		WriteByteMetrics:         writeByteCost.WithLabelValues(groupName, groupName, ruLabelType, keyspaceName),
+		KvCPUMetrics:             kvCPUCost.WithLabelValues(groupName, groupName, ruLabelType, keyspaceName),
+		SQLCPUMetrics:            sqlCPUCost.WithLabelValues(groupName, groupName, ruLabelType, keyspaceName),
+		ReadRequestCountMetrics:  requestCount.WithLabelValues(groupName, groupName, readTypeLabel, keyspaceName),
+		WriteRequestCountMetrics: requestCount.WithLabelValues(groupName, groupName, writeTypeLabel, keyspaceName),
+	}
+}
+
+func (m *counterMetrics) add(consumption *rmpb.Consumption, controllerConfig *ControllerConfig) {
+	// RU info.
+	if consumption.RRU > 0 {
+		m.RRUMetrics.Add(consumption.RRU)
+	}
+	if consumption.WRU > 0 {
+		m.WRUMetrics.Add(consumption.WRU)
+	}
+	// Byte info.
+	if consumption.ReadBytes > 0 {
+		m.ReadByteMetrics.Add(consumption.ReadBytes)
+	}
+	if consumption.WriteBytes > 0 {
+		m.WriteByteMetrics.Add(consumption.WriteBytes)
+	}
+	// CPU time info.
+	if consumption.TotalCpuTimeMs > 0 {
+		if consumption.SqlLayerCpuTimeMs > 0 {
+			m.SQLLayerRUMetrics.Add(consumption.SqlLayerCpuTimeMs * controllerConfig.RequestUnit.CPUMsCost)
+			m.SQLCPUMetrics.Add(consumption.SqlLayerCpuTimeMs)
+		}
+		m.KvCPUMetrics.Add(consumption.TotalCpuTimeMs - consumption.SqlLayerCpuTimeMs)
+	}
+	// RPC count info.
+	if consumption.KvReadRpcCount > 0 {
+		m.ReadRequestCountMetrics.Add(consumption.KvReadRpcCount)
+	}
+	if consumption.KvWriteRpcCount > 0 {
+		m.WriteRequestCountMetrics.Add(consumption.KvWriteRpcCount)
+	}
+}
+
+type gaugeMetrics struct {
+	availableRUCounter                 prometheus.Gauge
+	priorityResourceGroupConfigGauge   prometheus.Gauge
+	ruPerSecResourceGroupConfigGauge   prometheus.Gauge
+	ruCapacityResourceGroupConfigGauge prometheus.Gauge
+}
+
+func newGaugeMetrics(keyspaceName, groupName string) *gaugeMetrics {
+	return &gaugeMetrics{
+		availableRUCounter:                 availableRUCounter.WithLabelValues(groupName, groupName, keyspaceName),
+		priorityResourceGroupConfigGauge:   resourceGroupConfigGauge.WithLabelValues(groupName, priorityLabel, keyspaceName),
+		ruPerSecResourceGroupConfigGauge:   resourceGroupConfigGauge.WithLabelValues(groupName, ruPerSecLabel, keyspaceName),
+		ruCapacityResourceGroupConfigGauge: resourceGroupConfigGauge.WithLabelValues(groupName, ruCapacityLabel, keyspaceName),
+	}
+}
+
+func (m *gaugeMetrics) set(group *ResourceGroup) {
+	ru := math.Max(group.getRUToken(), 0)
+	m.availableRUCounter.Set(ru)
+	m.priorityResourceGroupConfigGauge.Set(group.getPriority())
+	m.ruPerSecResourceGroupConfigGauge.Set(group.getFillRate())
+	m.ruCapacityResourceGroupConfigGauge.Set(group.getBurstLimit())
+}
+
+func deleteLabelValues(keyspaceName, groupName, ruLabelType string) {
+	readRequestUnitCost.DeleteLabelValues(groupName, groupName, ruLabelType, keyspaceName)
+	writeRequestUnitCost.DeleteLabelValues(groupName, groupName, ruLabelType, keyspaceName)
+	sqlLayerRequestUnitCost.DeleteLabelValues(groupName, groupName, keyspaceName)
+	readByteCost.DeleteLabelValues(groupName, groupName, ruLabelType, keyspaceName)
+	writeByteCost.DeleteLabelValues(groupName, groupName, ruLabelType, keyspaceName)
+	kvCPUCost.DeleteLabelValues(groupName, groupName, ruLabelType, keyspaceName)
+	sqlCPUCost.DeleteLabelValues(groupName, groupName, ruLabelType, keyspaceName)
+	requestCount.DeleteLabelValues(groupName, groupName, readTypeLabel, keyspaceName)
+	requestCount.DeleteLabelValues(groupName, groupName, writeTypeLabel, keyspaceName)
+	availableRUCounter.DeleteLabelValues(groupName, groupName, keyspaceName)
+	readRequestUnitMaxPerSecCost.DeleteLabelValues(groupName, keyspaceName)
+	writeRequestUnitMaxPerSecCost.DeleteLabelValues(groupName, keyspaceName)
+	readRequestUnitMaxPerSecCost.DeleteLabelValues(groupName, keyspaceName)
+	writeRequestUnitMaxPerSecCost.DeleteLabelValues(groupName, keyspaceName)
+	resourceGroupConfigGauge.DeletePartialMatch(prometheus.Labels{newResourceGroupNameLabel: groupName, keyspaceNameLabel: keyspaceName})
 }
