@@ -40,10 +40,10 @@ import (
 )
 
 const (
-	persistLoopInterval        = 1 * time.Minute
+	persistLoopInterval        = time.Minute
 	metricsCleanupInterval     = time.Minute
 	metricsCleanupTimeout      = 20 * time.Minute
-	metricsAvailableRUInterval = 1 * time.Second
+	metricsAvailableRUInterval = time.Second
 	defaultCollectIntervalSec  = 20
 	tickPerSecond              = time.Second
 )
@@ -141,9 +141,17 @@ func (m *Manager) Init(ctx context.Context) error {
 	}
 
 	// Load keyspace resource groups from the storage.
-	if err := m.loadKeyspaceResourceGroups(); err != nil {
-		return err
-	}
+	// This operation is potentially time-consuming when there are many keyspaces and resource groups.
+	// So we run it in a new goroutine to prevent it from blocking the leader startup.
+	go func() {
+		start := time.Now()
+		log.Info("start to load keyspace resource groups in the background")
+		if err := m.loadKeyspaceResourceGroups(start); err != nil {
+			log.Error("failed to load keyspace resource groups", zap.Duration("time-cost", time.Since(start)), zap.Error(err))
+		} else {
+			log.Info("load keyspace resource groups finished", zap.Duration("time-cost", time.Since(start)))
+		}
+	}()
 
 	// Start the background metrics flusher.
 	go m.backgroundMetricsFlush(ctx)
@@ -155,7 +163,7 @@ func (m *Manager) Init(ctx context.Context) error {
 	return nil
 }
 
-func (m *Manager) loadKeyspaceResourceGroups() error {
+func (m *Manager) loadKeyspaceResourceGroups(start time.Time) error {
 	// Empty the keyspace resource group manager map before the loading.
 	m.Lock()
 	m.krgms = make(map[uint32]*keyspaceResourceGroupManager)
@@ -170,6 +178,7 @@ func (m *Manager) loadKeyspaceResourceGroups() error {
 	}); err != nil {
 		return err
 	}
+	log.Info("load keyspace resource groups meta info finished", zap.Duration("time-cost", time.Since(start)))
 	// Load keyspace resource group states from the storage.
 	if err := m.storage.LoadResourceGroupStates(func(keyspaceID uint32, name string, rawValue string) {
 		krgm := m.getKeyspaceResourceGroupManager(keyspaceID)
@@ -186,6 +195,7 @@ func (m *Manager) loadKeyspaceResourceGroups() error {
 	}); err != nil {
 		return err
 	}
+	log.Info("load keyspace resource groups states finished", zap.Duration("time-cost", time.Since(start)))
 	// Initialize the reserved keyspace resource group manager and default resource groups.
 	m.initReserved()
 	return nil
