@@ -308,7 +308,8 @@ func (c *RaftCluster) InitCluster(
 	keyspaceGroupManager *keyspace.GroupManager) error {
 	c.opt, c.id = opt.(*config.PersistOptions), id
 	c.ctx, c.cancel = context.WithCancel(c.serverCtx)
-	c.progressManager = progress.NewManager()
+	c.progressManager = progress.NewManager(c.GetCoordinator().GetCheckerController(),
+		nodeStateCheckJobInterval)
 	c.changedRegions = make(chan *core.RegionInfo, defaultChangedRegionsLimit)
 	failpoint.Inject("syncRegionChannelFull", func() {
 		c.changedRegions = make(chan *core.RegionInfo, 100)

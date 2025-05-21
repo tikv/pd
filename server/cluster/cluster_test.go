@@ -514,7 +514,8 @@ func TestRemovingProcess(t *testing.T) {
 		re.NoError(cluster.putRegion(region))
 	}
 	re.Len(regionInStore1, 20)
-	cluster.progressManager = progress.NewManager()
+	cluster.progressManager = progress.NewManager(cluster.GetCoordinator().GetCheckerController(),
+		nodeStateCheckJobInterval)
 	cluster.RemoveStore(1, false)
 	cluster.checkStores()
 	storeID := uint64(1)

@@ -27,16 +27,25 @@ import (
 	"github.com/tikv/pd/pkg/core"
 )
 
+type mockPatrolRegionsDurationGetter struct {
+	dur time.Duration
+}
+
+func (m *mockPatrolRegionsDurationGetter) GetPatrolRegionsDuration() time.Duration {
+	return m.dur
+}
+
 func TestProgress(t *testing.T) {
 	var (
-		re       = require.New(t)
-		storeID  = uint64(1)
-		storeID2 = uint64(2)
-		m        = NewManager()
+		re             = require.New(t)
+		storeID        = uint64(1)
+		storeID2       = uint64(2)
+		updateInterval = time.Second
+		m              = NewManager(&mockPatrolRegionsDurationGetter{10 * time.Second}, updateInterval)
 	)
 
 	// test add progress
-	m.addProgress(storeID, preparingAction, 10, 100, updateInterval)
+	m.addProgress(storeID, preparingAction, 10, 100)
 	p := m.GetProgressByStoreID(storeID)
 	re.Equal(preparingAction, p.Action)
 	re.Equal(0.1, p.ProgressPercent)
@@ -59,15 +68,15 @@ func TestProgress(t *testing.T) {
 	p = m.GetProgressByStoreID(storeID)
 	re.Equal(preparingAction, p.Action)
 	re.Equal(0.3, p.ProgressPercent)
-	re.Equal(2.0, p.CurrentSpeed) // 2 region/s
-	re.Equal(35.0, p.LeftSecond)
+	re.Equal(20.0, p.CurrentSpeed) 
+	re.Equal(3.50, p.LeftSecond)
 
 	m.updateStoreProgress(storeID2, preparingAction, 30, 100)
 	p = m.GetProgressByStoreID(storeID2)
 	re.Equal(preparingAction, p.Action)
 	re.Equal(0.3, p.ProgressPercent)
-	re.Equal(1.0, p.CurrentSpeed) // 1 region/s
-	re.Equal(70.0, p.LeftSecond)
+	re.Equal(10.0, p.CurrentSpeed) 
+	re.Equal(7.0, p.LeftSecond)
 
 	// test gc progress
 	m.markProgressAsFinished(storeID)
@@ -78,18 +87,18 @@ func TestProgress(t *testing.T) {
 	failpoint.Disable("github.com/tikv/pd/pkg/progress/gcExpiredTime")
 }
 
-func TestUpdateProgress(t *testing.T) {
+func TestOnlineAndOffline(t *testing.T) {
 	var (
-		re    = require.New(t)
-		store = core.NewStoreInfo(&metapb.Store{
-			Id:        1,
-			NodeState: metapb.NodeState_Preparing,
-		})
-		m = NewManager()
+		re             = require.New(t)
+		updateInterval = time.Second
+		m              = NewManager(&mockPatrolRegionsDurationGetter{10 * time.Second}, updateInterval)
 	)
 
-	testPrepare := func() {
-		// test update progress with store state preparing
+	testOnline := func(sourceState, targetState metapb.NodeState) {
+		store := core.NewStoreInfo(&metapb.Store{
+			Id:        1,
+			NodeState: sourceState,
+		})
 		m.UpdateProgress(store, 10, 100)
 		p := m.GetProgressByStoreID(store.GetID())
 		re.Equal(preparingAction, p.Action)
@@ -101,21 +110,25 @@ func TestUpdateProgress(t *testing.T) {
 		p = m.GetProgressByStoreID(store.GetID())
 		re.Equal(preparingAction, p.Action)
 		re.Equal(0.2, p.ProgressPercent)
-		re.Equal(80.0, p.LeftSecond)
-		re.Equal(1.0, p.CurrentSpeed)
+		re.Equal(8*updateInterval.Seconds(), p.LeftSecond)
+		re.Equal(10.0, p.CurrentSpeed)
 
-		store = store.Clone(core.SetStoreState(metapb.StoreState_Up))
+		store = store.Clone(core.SetNodeState(targetState))
 		m.UpdateProgress(store, 101, 100)
 		p = m.GetProgressByStoreID(store.GetID())
+		re.Nil(p)
+		p = m.completedProgress[store.GetID()].Progress
 		re.Equal(preparingAction, p.Action)
 		re.Equal(1.0, p.ProgressPercent)
 		re.Equal(0.0, p.LeftSecond)
-		re.Equal(4.5, p.CurrentSpeed)
+		re.Equal(45.0, p.CurrentSpeed)
 	}
 
-	testRemove := func() {
-		// test update progress with store state removing
-		store = store.Clone(core.SetStoreState(metapb.StoreState_Offline, false))
+	testOffline := func(sourceState, targetState metapb.NodeState) {
+		store := core.NewStoreInfo(&metapb.Store{
+			Id:        1,
+			NodeState: sourceState,
+		})
 		m.UpdateProgress(store, 100, 0)
 		p := m.GetProgressByStoreID(store.GetID())
 		re.Equal(removingAction, p.Action)
@@ -127,25 +140,52 @@ func TestUpdateProgress(t *testing.T) {
 		p = m.GetProgressByStoreID(store.GetID())
 		re.Equal(removingAction, p.Action)
 		re.Equal(0.2, p.ProgressPercent)
-		re.Equal(40.0, p.LeftSecond)
-		re.Equal(2.0, p.CurrentSpeed)
+		re.Equal(4*updateInterval.Seconds(), p.LeftSecond)
+		re.Equal(20.0, p.CurrentSpeed)
 
-		store = store.Clone(core.SetStoreState(metapb.StoreState_Tombstone))
+		store = store.Clone(core.SetNodeState(targetState))
 		m.UpdateProgress(store, 0, 0)
 		p = m.GetProgressByStoreID(store.GetID())
+		re.Nil(p)
+		p = m.completedProgress[store.GetID()].Progress
 		re.Equal(removingAction, p.Action)
 		re.Equal(1.0, p.ProgressPercent)
 		re.Equal(0.0, p.LeftSecond)
-		re.Equal(5.0, p.CurrentSpeed)
+		re.Equal(50.0, p.CurrentSpeed)
 	}
 
-	testPrepare()
-	testRemove()
+	testOnline(metapb.NodeState_Preparing, metapb.NodeState_Serving)
+	testOffline(metapb.NodeState_Removing, metapb.NodeState_Removed)
+	// test twice
+	testOnline(metapb.NodeState_Preparing, metapb.NodeState_Serving)
+	testOffline(metapb.NodeState_Removing, metapb.NodeState_Removed)
 
-	store = core.NewStoreInfo(&metapb.Store{
+	// test online, skip serving and offline directly
+	store := core.NewStoreInfo(&metapb.Store{
 		Id:        1,
 		NodeState: metapb.NodeState_Preparing,
 	})
-	testPrepare()
-	testRemove()
+
+	m.UpdateProgress(store, 10, 100)
+	p := m.GetProgressByStoreID(store.GetID())
+	re.Equal(preparingAction, p.Action)
+	re.Equal(0.1, p.ProgressPercent)
+	re.Equal(math.MaxFloat64, p.LeftSecond)
+	re.Equal(0.0, p.CurrentSpeed)
+
+	store = store.Clone(core.SetNodeState(metapb.NodeState_Removing))
+	m.UpdateProgress(store, 100, 0)
+	p = m.GetProgressByStoreID(store.GetID())
+	re.NotNil(p)
+	re.Equal(removingAction, p.Action)
+	re.Equal(0.0, p.ProgressPercent)
+	re.Equal(math.MaxFloat64, p.LeftSecond)
+	re.Equal(0.0, p.CurrentSpeed)
+
+	// preparing is completed
+	p = m.completedProgress[store.GetID()].Progress
+	re.Equal(preparingAction, p.Action)
+	re.Equal(1.0, p.ProgressPercent)
+	re.Equal(0.0, p.LeftSecond)
+	re.Equal(90.0, p.CurrentSpeed)
 }

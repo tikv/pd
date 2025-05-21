@@ -25,12 +25,12 @@ import (
 )
 
 const (
+	// maxSpeedCalculationWindow is the maximum size of the time window used to calculate the speed,
+	// but it does not mean that all data in it will be used to calculate the speed,
+	// which data is used depends on the patrol region duration
+	maxSpeedCalculationWindow = 2 * time.Hour
 	// minSpeedCalculationWindow is the minimum speed calculation window
 	minSpeedCalculationWindow = 10 * time.Minute
-
-	// updateInterval is the interval that each history.Element added.
-	// It is same as nodeStateCheckJobInterval.
-	updateInterval = 10 * time.Second
 )
 
 // progressIndicator reflects a specified progress.
@@ -40,6 +40,10 @@ type progressIndicator struct {
 	targetRegionSize float64
 	// We use a fixed interval's history to calculate the latest average speed.
 	history *list.List
+	// We use (maxSpeedCalculationWindow / updateInterval + 1) to get the windowCapacity.
+	// Assume that the windowCapacity is 4, the init value is 1. After update 3 times with 2, 3, 4 separately. The window will become [1, 2, 3, 4].
+	// Then we update it again with 5, the window will become [2, 3, 4, 5].
+	windowCapacity int
 	// windowLength is used to determine what data will be computed.
 	// Assume that the windowLength is 2, the init value is 1. The value that will be calculated are [1].
 	// After update 3 times with 2, 3, 4 separately. The value that will be calculated are [3,4] and the values in queue are [(1,2),3,4].
@@ -82,12 +86,22 @@ func newProgressIndicator(
 		front:               history.Front(),
 		targetRegionSize:    total,
 		history:             history,
+		windowCapacity:      int(maxSpeedCalculationWindow/updateInterval) + 1,
 		windowLength:        int(minSpeedCalculationWindow / updateInterval),
 		updateInterval:      updateInterval,
 		currentWindowLength: 1,
 	}
 
 	return pi
+}
+
+func (p *progressIndicator) adjustWindowLength(dur time.Duration) {
+	if dur < minSpeedCalculationWindow {
+		dur = minSpeedCalculationWindow
+	} else if dur > maxSpeedCalculationWindow {
+		dur = maxSpeedCalculationWindow
+	}
+	p.windowLength = int(dur/p.updateInterval) + 1
 }
 
 func (p *progressIndicator) updateProgress() {
@@ -121,16 +135,23 @@ func (p *progressIndicator) updateProgress() {
 func (p *progressIndicator) push(data float64) {
 	p.history.PushBack(data)
 	p.currentWindowLength++
+	p.moveWindow()
 
+	for p.history.Len() > p.windowCapacity {
+		p.history.Remove(p.history.Front())
+	}
+
+	p.updateProgress()
+}
+
+func (p *progressIndicator) moveWindow() {
 	// try to move `front` into correct place.
 	for p.currentWindowLength > p.windowLength {
 		p.front = p.front.Next()
 		p.currentWindowLength--
 	}
-
-	for p.history.Len() > p.windowLength {
-		p.history.Remove(p.history.Front())
+	for p.currentWindowLength < p.windowLength && p.front.Prev() != nil {
+		p.front = p.front.Prev()
+		p.currentWindowLength++
 	}
-
-	p.updateProgress()
 }

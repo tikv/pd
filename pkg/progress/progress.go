@@ -34,16 +34,27 @@ const (
 	preparingAction Action = "preparing"
 )
 
+type patrolRegionsDurationGetter interface {
+	GetPatrolRegionsDuration() time.Duration
+}
+
 // Manager is used to maintain the progresses we care about.
 type Manager struct {
 	syncutil.RWMutex
-	progresses map[uint64]*progressIndicator
+	progresses                  map[uint64]*progressIndicator
+	completedProgress           map[uint64]*progressIndicator
+	patrolRegionsDurationGetter patrolRegionsDurationGetter
+
+	updateInterval time.Duration
 }
 
 // NewManager creates a new Manager.
-func NewManager() *Manager {
+func NewManager(patrolRegionsDurationGetter patrolRegionsDurationGetter, updateInterval time.Duration) *Manager {
 	return &Manager{
-		progresses: make(map[uint64]*progressIndicator),
+		progresses:                  make(map[uint64]*progressIndicator),
+		completedProgress:           make(map[uint64]*progressIndicator),
+		patrolRegionsDurationGetter: patrolRegionsDurationGetter,
+		updateInterval:              updateInterval,
 	}
 }
 
@@ -74,12 +85,11 @@ func (m *Manager) addProgress(
 	storeID uint64,
 	action Action,
 	current, total float64,
-	updateInterval time.Duration,
 ) {
 	m.progresses[storeID] = newProgressIndicator(
 		action,
 		current, total,
-		updateInterval,
+		m.updateInterval,
 	)
 }
 
@@ -101,7 +111,7 @@ func (m *Manager) GC(ctx context.Context) {
 func (m *Manager) gcCompletedProgress() {
 	m.Lock()
 	defer m.Unlock()
-	for storeID, p := range m.progresses {
+	for storeID, p := range m.completedProgress {
 		exactExpiredTime := expiredTime
 		failpoint.Inject("gcExpiredTime", func(val failpoint.Value) {
 			if s, ok := val.(string); ok {
@@ -114,7 +124,7 @@ func (m *Manager) gcCompletedProgress() {
 		})
 		if p.completeAt.Before(time.Now().Add(-exactExpiredTime)) {
 			storeIDStr := strconv.FormatUint(storeID, 10)
-			delete(m.progresses, storeID)
+			delete(m.completedProgress, storeID)
 			storesProgressGauge.DeleteLabelValues("", storeIDStr, string(p.Action))
 			storesSpeedGauge.DeleteLabelValues("", storeIDStr, string(p.Action))
 			storesETAGauge.DeleteLabelValues("", storeIDStr, string(p.Action))
@@ -125,12 +135,15 @@ func (m *Manager) gcCompletedProgress() {
 func (m *Manager) markProgressAsFinished(storeID uint64) {
 	m.Lock()
 	defer m.Unlock()
-	if _, exist := m.progresses[storeID]; !exist {
+	p, exist := m.progresses[storeID]
+	if !exist {
 		return
 	}
 
-	m.progresses[storeID].completeAt = time.Now()
-	m.progresses[storeID].push(m.progresses[storeID].targetRegionSize)
+	p.completeAt = time.Now()
+	p.push(p.targetRegionSize)
+	m.completedProgress[storeID] = p
+	delete(m.progresses, storeID)
 }
 
 // UpdateProgress updates the progress of the store.
@@ -142,7 +155,6 @@ func (m *Manager) UpdateProgress(
 	if p != nil && ((p.Action == preparingAction && !store.IsPreparing()) ||
 		(p.Action == removingAction && !store.IsRemoving())) {
 		m.markProgressAsFinished(store.GetID())
-		return
 	}
 	var (
 		storeID = store.GetID()
@@ -179,19 +191,33 @@ func (m *Manager) UpdateProgress(
 	m.updateStoreProgress(storeID, action, currentRegionSize, targetRegionSize)
 }
 
-func (m *Manager) updateStoreProgress(storeID uint64, action Action, currentRegionSize, targetRegionSize float64) {
+func (m *Manager) updateStoreProgress(
+	storeID uint64,
+	action Action,
+	currentRegionSize, targetRegionSize float64,
+) {
 	m.Lock()
 	defer m.Unlock()
 
 	p, exist := m.progresses[storeID]
 	if !exist || p.Action != action {
-		m.addProgress(storeID, action, currentRegionSize, targetRegionSize, updateInterval)
+		m.addProgress(storeID, action, currentRegionSize, targetRegionSize)
 		return
 	}
 
 	// The targetRegionSize of the preparing progress may be updated.
 	if p.targetRegionSize < targetRegionSize {
 		p.targetRegionSize = targetRegionSize
+	}
+	if action == removingAction {
+		// If the number of regions is large, each round of PatrolRegion takes a
+		// long time. The regions of the offline store may have not been scanned
+		// during some updateInterval. In this case, if the window is not large
+		// enough, the offline speed will vary greatly, which is not in line
+		// with expectations. Therefore, we adjust the window size based on the
+		// time consumed by PatrolRegion to avoid excessive fluctuations in the
+		// offline speed, which may cause misleading results.
+		p.adjustWindowLength(m.patrolRegionsDurationGetter.GetPatrolRegionsDuration())
 	}
 
 	p.push(currentRegionSize)

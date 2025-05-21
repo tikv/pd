@@ -55,15 +55,17 @@ func TestProgressIndicator_UpdateProgress(t *testing.T) {
 	re.Equal(0.0, pi.Progress.LeftSecond)
 }
 
-func TestProgressIndicator_WindowManagement(t *testing.T) {
+func TestWindowCapacity(t *testing.T) {
 	re := require.New(t)
-	updateInterval := minSpeedCalculationWindow / 10
+	updateInterval := time.Second
 	pi := newProgressIndicator(
 		Action("test"),
 		0,
-		100,
+		1000,
 		updateInterval,
 	)
+	pi.windowCapacity = 100
+	pi.windowLength = 10
 
 	// Push data to fill the window
 	for i := range 9 {
@@ -74,11 +76,96 @@ func TestProgressIndicator_WindowManagement(t *testing.T) {
 
 	// Ensure the window length is maintained
 	re.Equal(pi.windowLength, pi.history.Len())
+	re.Equal(0.0, pi.front.Value.(float64))
 
-	// Push more data to exceed the window capacity
+	// Push more data to exceed the window length
 	pi.push(20)
-	re.Equal(pi.windowLength, pi.history.Len())
-
+	re.Equal(pi.windowLength+1, pi.history.Len())
 	// Ensure the front element is updated correctly
 	re.Equal(1.0, pi.front.Value.(float64))
+
+	for i := 20; i < 200; i++ {
+		pi.push(float64(i))
+	}
+	re.Equal(pi.windowCapacity, pi.history.Len())
+}
+
+func TestMoveWindow(t *testing.T) {
+	updateInterval := time.Second
+	pi := newProgressIndicator(
+		Action("test"),
+		0,
+		100,
+		updateInterval,
+	)
+
+	// Fill history with known values
+	for i := 1; i <= 5; i++ {
+		pi.push(float64(i * 10))
+	}
+	checkProgressWindow(t, pi, 0.0, 600, 6)
+
+	// Decrease the window
+	pi.windowLength = 2
+	pi.moveWindow()
+	checkProgressWindow(t, pi, 40.0, 2, 2)
+
+	// Enlarge the window
+	pi.windowLength = 4
+	pi.moveWindow()
+	checkProgressWindow(t, pi, 20.0, 4, 4)
+	// Enlarge the window again, it should not exceed the history length
+	pi.windowLength = 10
+	pi.moveWindow()
+	checkProgressWindow(t, pi, 0.0, 10, 6)
+}
+
+func TestAdjustWindowLength(t *testing.T) {
+	re := require.New(t)
+	updateInterval := time.Second
+	pi := newProgressIndicator(
+		Action("test"),
+		0,
+		100,
+		updateInterval,
+	)
+
+	testCases := []struct {
+		duration  time.Duration
+		expected  int
+	}{
+		{
+			duration: 1 * time.Minute,
+			expected: int(minSpeedCalculationWindow/updateInterval) + 1,
+		},
+		{
+			duration: 3 * time.Hour,
+			expected: int(maxSpeedCalculationWindow/updateInterval) + 1,
+		},
+		{
+			duration: 30 * time.Minute,
+			expected: int((30 * time.Minute)/updateInterval) + 1,
+		},
+		{
+			duration: minSpeedCalculationWindow,
+			expected: int(minSpeedCalculationWindow/updateInterval) + 1,
+		},
+		{
+			duration: maxSpeedCalculationWindow,
+			expected: int(maxSpeedCalculationWindow/updateInterval) + 1,
+		},
+	}
+
+	for _, tc := range testCases {
+		pi.adjustWindowLength(tc.duration)
+		re.Equal(tc.expected, pi.windowLength)
+	}
+}
+
+func checkProgressWindow(t *testing.T, pi *progressIndicator,
+	expectedFront float64, expectedWindowLength, expectedCurrentWindowLength int) {
+	re := require.New(t)
+	re.Equal(expectedFront, pi.front.Value.(float64))
+	re.Equal(expectedWindowLength, pi.windowLength)
+	re.Equal(expectedCurrentWindowLength, pi.currentWindowLength)
 }
