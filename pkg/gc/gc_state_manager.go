@@ -493,6 +493,44 @@ func (m *GCStateManager) SetGlobalGCBarrier(ctx context.Context, barrierID strin
 	return newBarrier, nil
 }
 
+// DeleteGlobalGCBarrier deletes a global GC barrier by the given barrierID.
+// Returns the information of the deleted GC barrier, or nil if the barrier does not exist.
+func (m *GCStateManager) DeleteGlobalGCBarrier(ctx context.Context, barrierID string) (*endpoint.GCBarrier, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	// Disallow empty barrierID
+	if len(barrierID) == 0 {
+		return nil, errs.ErrInvalidArgument.GenWithStackByArgs("barrierID", barrierID)
+	}
+
+	var deletedBarrier *endpoint.GCBarrier
+	err := m.gcMetaStorage.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
+		var err1 error
+		deletedBarrier, err1 = m.gcMetaStorage.LoadGlobalGCBarrier(barrierID)
+		if err1 != nil {
+			return err1
+		}
+		return wb.DeleteGlobalGCBarrier(barrierID)
+	})
+
+	if err != nil {
+		log.Error("failed to delete global GC barrier",
+			zap.String("barrier-id", barrierID), zap.Error(err))
+		return nil, err
+	}
+
+	if deletedBarrier == nil {
+		log.Info("deleting a not-existing global GC barrier",
+			zap.String("barrier-id", barrierID))
+	} else {
+		log.Info("global GC barrier deleted",
+			zap.String("barrier-id", barrierID), zap.Stringer("deleted-gc-barrier", deletedBarrier))
+	}
+
+	return deletedBarrier, nil
+}
+
 // SetGCBarrier sets a GC barrier, which blocks GC from being advanced over the given barrierTS for at most a duration
 // specified by ttl. This method either adds a new GC barrier or updates an existing one. Returns the information of the
 // new GC barrier.

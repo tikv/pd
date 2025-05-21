@@ -316,6 +316,22 @@ func (p GCStateProvider) LoadAllGCBarriers(keyspaceID uint32) ([]*GCBarrier, err
 	return p.loadAllGCBarriers(prefix)
 }
 
+// LoadGlobalGCBarrier loads the GCBarrier of the given barrierID from storage.
+func (p GCStateProvider) LoadGlobalGCBarrier(barrierID string) (*GCBarrier, error) {
+	key := keypath.GlobalGCBarrierPath(barrierID)
+	// GCBarrier is stored in ServiceSafePoint format for compatibility.
+	serviceSafePoint, err := loadJSON[*ServiceSafePoint](p.storage, key)
+	if err != nil {
+		return nil, err
+	}
+	barrier :=  gcBarrierFromServiceSafePoint(serviceSafePoint)
+	if barrier != nil && !barrier.IsGlobal {
+		log.Warn("LoadGlobalGCBarrier detects wrong json data",
+			zap.String("barrierID", barrier.BarrierID))
+		barrier.IsGlobal = true
+	}
+	return barrier, nil
+}
 
 func (p GCStateProvider) loadAllGCBarriers(prefix string) ([]*GCBarrier, error) {
 	// TODO: Limit the count for each call.
@@ -328,7 +344,10 @@ func (p GCStateProvider) loadAllGCBarriers(prefix string) ([]*GCBarrier, error) 
 	}
 	barriers := make([]*GCBarrier, 0, len(serviceSafePoints))
 	for _, serviceSafePoint := range serviceSafePoints {
-		barriers = append(barriers, gcBarrierFromServiceSafePoint(serviceSafePoint))
+		barrier := gcBarrierFromServiceSafePoint(serviceSafePoint)
+		if barrier != nil {
+			barriers = append(barriers, barrier)
+		}
 	}
 	return barriers, nil
 }

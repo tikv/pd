@@ -403,12 +403,7 @@ func (s *GrpcServer) SetGCBarrier(ctx context.Context, request *pdpb.SetGCBarrie
 	barrierID := request.GetBarrierId()
 	barrierTS := request.GetBarrierTs()
 	ttl := typeutil.SaturatingStdDurationFromSeconds(request.GetTtlSeconds())
-	var newBarrier *endpoint.GCBarrier
-	if keyspaceID == constant.NullKeyspaceID {
-		newBarrier, err = s.gcStateManager.SetGlobalGCBarrier(ctx, barrierID, barrierTS, ttl, now)
-	} else {
-		newBarrier, err = s.gcStateManager.SetGCBarrier(ctx, keyspaceID, barrierID, barrierTS, ttl, now)
-	}
+	newBarrier, err := s.gcStateManager.SetGCBarrier(ctx, keyspaceID, barrierID, barrierTS, ttl, now)
 	if err != nil {
 		return &pdpb.SetGCBarrierResponse{
 			Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
@@ -537,5 +532,84 @@ func (s *GrpcServer) GetAllKeyspacesGCStates(ctx context.Context, request *pdpb.
 	return &pdpb.GetAllKeyspacesGCStatesResponse{
 		Header:   wrapHeader(),
 		GcStates: gcStatesPb,
+	}, nil
+}
+
+// SetGlobalGCBarrier sets a global GC barrier.
+func (s *GrpcServer) SetGlobalGCBarrier(ctx context.Context, request *pdpb.SetGlobalGCBarrierRequest) (*pdpb.SetGlobalGCBarrierResponse, error) {
+	done, err := s.rateLimitCheck()
+	if err != nil {
+		return nil, err
+	}
+	if done != nil {
+		defer done()
+	}
+	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
+		return pdpb.NewPDClient(client).SetGlobalGCBarrier(ctx, request)
+	}
+	if rsp, err := s.unaryMiddleware(ctx, request, fn); err != nil {
+		return nil, err
+	} else if rsp != nil {
+		return rsp.(*pdpb.SetGlobalGCBarrierResponse), err
+	}
+
+	rc := s.GetRaftCluster()
+	if rc == nil {
+		return &pdpb.SetGlobalGCBarrierResponse{Header: notBootstrappedHeader()}, nil
+	}
+
+	now := time.Now()
+	barrierID := request.GetBarrierInfo().GetBarrierId()
+	barrierTS := request.GetBarrierInfo().GetBarrierTs()
+	ttl := typeutil.SaturatingStdDurationFromSeconds(request.GetBarrierInfo().GetTtlSeconds())
+	newBarrier, err := s.gcStateManager.SetGlobalGCBarrier(ctx, barrierID, barrierTS, ttl, now)
+	if err != nil {
+		return &pdpb.SetGlobalGCBarrierResponse{
+			Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
+		}, nil
+	}
+
+	return &pdpb.SetGlobalGCBarrierResponse{
+		Header:         wrapHeader(),
+		NewBarrierInfo: gcBarrierToProto(newBarrier, now),
+	}, nil
+}
+
+// DeleteGlobalGCBarrier deletes a GC barrier.
+func (s *GrpcServer) DeleteGlobalGCBarrier(ctx context.Context, request *pdpb.DeleteGlobalGCBarrierRequest) (*pdpb.DeleteGlobalGCBarrierResponse, error) {
+	done, err := s.rateLimitCheck()
+	if err != nil {
+		return nil, err
+	}
+	if done != nil {
+		defer done()
+	}
+	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
+		return pdpb.NewPDClient(client).DeleteGlobalGCBarrier(ctx, request)
+	}
+	if rsp, err := s.unaryMiddleware(ctx, request, fn); err != nil {
+		return nil, err
+	} else if rsp != nil {
+		return rsp.(*pdpb.DeleteGlobalGCBarrierResponse), err
+	}
+
+	rc := s.GetRaftCluster()
+	if rc == nil {
+		return &pdpb.DeleteGlobalGCBarrierResponse{Header: notBootstrappedHeader()}, nil
+	}
+
+	now := time.Now()
+
+	barrierID := request.GetBarrierId()
+	deletedBarrier, err := s.gcStateManager.DeleteGlobalGCBarrier(ctx, barrierID)
+	if err != nil {
+		return &pdpb.DeleteGlobalGCBarrierResponse{
+			Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
+		}, nil
+	}
+
+	return &pdpb.DeleteGlobalGCBarrierResponse{
+		Header:             wrapHeader(),
+		DeletedBarrierInfo: gcBarrierToProto(deletedBarrier, now),
 	}, nil
 }
