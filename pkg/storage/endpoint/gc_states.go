@@ -330,7 +330,7 @@ func (p GCStateProvider) LoadGlobalGCBarrier(barrierID string) (*GCBarrier, erro
 	if err != nil {
 		return nil, err
 	}
-	barrier :=  gcBarrierFromServiceSafePoint(serviceSafePoint)
+	barrier := gcBarrierFromServiceSafePoint(serviceSafePoint)
 	if barrier != nil && !barrier.IsGlobal {
 		log.Warn("LoadGlobalGCBarrier detects wrong json data",
 			zap.String("barrierID", barrier.BarrierID))
@@ -531,7 +531,6 @@ func (wb *GCStateWriteBatch) SetGlobalGCBarrier(barrier *GCBarrier) error {
 	// The keyspace ID is meanless here, but it's better to avoid 0 which is a valid keyspace ID.
 	return wb.writeJSON(key, barrier.ToServiceSafePoint(constant.NullKeyspaceID))
 }
-
 
 // LoadGlobalGCBarriers loads all global GC barriers.
 func (p GCStateProvider) LoadGlobalGCBarriers() ([]*GCBarrier, error) {
