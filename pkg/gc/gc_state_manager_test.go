@@ -567,6 +567,20 @@ func (s *gcStateManagerTestSuite) getAllGCBarriers(keyspaceID uint32) []*endpoin
 	return state.GCBarriers
 }
 
+func (s *gcStateManagerTestSuite) getGlobalGCBarrier(barrierID string) *endpoint.GCBarrier {
+	re := s.Require()
+	barrier, err := s.manager.gcMetaStorage.LoadGlobalGCBarrier(barrierID)
+	re.NoError(err)
+	return barrier
+}
+
+func (s *gcStateManagerTestSuite) getGlobalGCBarriers() []*endpoint.GCBarrier {
+	re := s.Require()
+	barriers, err := s.manager.gcMetaStorage.LoadGlobalGCBarriers()
+	re.NoError(err)
+	return barriers
+}
+
 // ptime is a helper for getting pointer of time.
 func ptime(t time.Time) *time.Time {
 	return &t
@@ -847,6 +861,247 @@ func (s *gcStateManagerTestSuite) TestGCBarriers() {
 	re.NoError(err)
 	re.Equal(uint64(300), res.NewTxnSafePoint)
 	re.Empty(res.BlockerDescription)
+}
+
+func (s *gcStateManagerTestSuite) TestGlobalGCBarriers() {
+	re := s.Require()
+
+	now := time.Date(2025, 03, 06, 11, 50, 30, 0, time.Local)
+	re.Empty(s.getGlobalGCBarriers())
+
+	keyspaceID := s.keyspacePresets.manageable[0]
+
+	// Set global GC barrier and read back.
+	b, err := s.manager.SetGlobalGCBarrier(context.Background(), "b1", 10, time.Hour, now)
+	re.NoError(err)
+	expected := endpoint.NewGCBarrier("b1", 10, ptime(now.Add(time.Hour))).SetGlobal()
+	re.Equal(expected, b)
+	bs := s.getGlobalGCBarriers()
+	re.Len(bs, 1)
+	re.Equal(expected, bs[0])
+
+	// Empty barrierID is forbidden.
+	_, err = s.manager.SetGlobalGCBarrier(context.Background(), "", 10, time.Hour, now)
+	re.Error(err)
+	re.ErrorIs(err, errs.ErrInvalidArgument)
+	_, err = s.manager.DeleteGlobalGCBarrier(context.Background(), "")
+	re.Error(err)
+	re.ErrorIs(err, errs.ErrInvalidArgument)
+
+	// Non-positive TTL is forbidden.
+	_, err = s.manager.SetGlobalGCBarrier(context.Background(), "b1", 10, 0, now)
+	re.Error(err)
+	re.ErrorIs(err, errs.ErrInvalidArgument)
+	_, err = s.manager.SetGlobalGCBarrier(context.Background(), "b2", 10, 0, now)
+	re.Error(err)
+	re.ErrorIs(err, errs.ErrInvalidArgument)
+	// b1 is not changed.
+	re.Equal(expected, s.getGlobalGCBarrier("b1"))
+	// b2 still doesn't exist.
+	re.Nil(s.getGlobalGCBarrier("b2"))
+
+	// Updating the value of the existing GC barrier
+	b, err = s.manager.SetGlobalGCBarrier(context.Background(), "b1", 15, time.Hour, now)
+	re.NoError(err)
+	expected = endpoint.NewGCBarrier("b1", 15, ptime(now.Add(time.Hour))).SetGlobal()
+	re.Equal(expected, b)
+	re.Len(s.getGlobalGCBarriers(), 1)
+	re.Equal(expected, s.getGlobalGCBarrier("b1"))
+
+	b, err = s.manager.SetGlobalGCBarrier(context.Background(), "b1", 15, time.Hour*2, now)
+	re.NoError(err)
+	expected = endpoint.NewGCBarrier("b1", 15, ptime(now.Add(time.Hour*2))).SetGlobal()
+	re.Equal(expected, b)
+	re.Len(s.getGlobalGCBarriers(), 1)
+	re.Equal(expected, s.getGlobalGCBarrier("b1"))
+
+	// Allows shrinking the barrier ts.
+	b, err = s.manager.SetGlobalGCBarrier(context.Background(), "b1", 10, time.Hour, now)
+	re.NoError(err)
+	expected = endpoint.NewGCBarrier("b1", 10, ptime(now.Add(time.Hour))).SetGlobal()
+	re.Equal(expected, b)
+	re.Len(s.getGlobalGCBarriers(), 1)
+	re.Equal(expected, s.getGlobalGCBarrier("b1"))
+
+	// Never expiring
+	b, err = s.manager.SetGlobalGCBarrier(context.Background(), "b1", 10, time.Duration(math.MaxInt64), now)
+	re.NoError(err)
+	expected = endpoint.NewGCBarrier("b1", 10, nil).SetGlobal()
+	re.Equal(expected, b)
+	re.Len(s.getGlobalGCBarriers(), 1)
+	re.Equal(expected, s.getGlobalGCBarrier("b1"))
+
+	// global GC barriers blocks the txn safe point.
+	res, err := s.manager.AdvanceTxnSafePoint(keyspaceID, 5, now)
+	re.NoError(err)
+	re.Equal(uint64(0), res.OldTxnSafePoint)
+	re.Equal(uint64(5), res.NewTxnSafePoint)
+	re.Empty(res.BlockerDescription)
+	res, err = s.manager.AdvanceTxnSafePoint(keyspaceID, 10, now)
+	re.NoError(err)
+	re.Equal(uint64(5), res.OldTxnSafePoint)
+	re.Equal(uint64(10), res.NewTxnSafePoint)
+	re.Empty(res.BlockerDescription)
+	res, err = s.manager.AdvanceTxnSafePoint(keyspaceID, 15, now)
+	re.NoError(err)
+	re.Equal(uint64(10), res.OldTxnSafePoint)
+	re.Equal(uint64(10), res.NewTxnSafePoint)
+	re.Equal(uint64(15), res.Target)
+	re.Contains(res.BlockerDescription, "BarrierID: \"b1\"")
+	s.checkTxnSafePoint(keyspaceID, 10)
+
+	_, err = s.manager.SetGlobalGCBarrier(context.Background(), "b1", 15, time.Hour, now)
+	re.NoError(err)
+	// AdvanceTxnSafePoint advances the txn safe point as much as possible.
+	res, err = s.manager.AdvanceTxnSafePoint(keyspaceID, 20, now)
+	re.NoError(err)
+	re.Equal(uint64(10), res.OldTxnSafePoint)
+	re.Equal(uint64(15), res.NewTxnSafePoint)
+	re.Equal(uint64(20), res.Target)
+	re.Contains(res.BlockerDescription, "BarrierID: \"b1\"")
+
+	// Multiple GC barriers
+	_, err = s.manager.SetGlobalGCBarrier(context.Background(), "b1", 20, time.Hour, now)
+	re.NoError(err)
+	_, err = s.manager.SetGlobalGCBarrier(context.Background(), "b2", 20, time.Hour, now)
+	re.NoError(err)
+	re.Len(s.getGlobalGCBarriers(), 2)
+	expected = endpoint.NewGCBarrier("b1", 20, ptime(now.Add(time.Hour))).SetGlobal()
+	re.Equal(expected, s.getGlobalGCBarrier("b1"))
+	expected = endpoint.NewGCBarrier("b2", 20, ptime(now.Add(time.Hour))).SetGlobal()
+	re.Equal(expected, s.getGlobalGCBarrier("b2"))
+
+	res, err = s.manager.AdvanceTxnSafePoint(keyspaceID, 25, now)
+	re.NoError(err)
+	re.Equal(uint64(15), res.OldTxnSafePoint)
+	re.Equal(uint64(20), res.NewTxnSafePoint)
+	re.Equal(uint64(25), res.Target)
+	re.NotEmpty(res.BlockerDescription)
+
+	// When there are different GC barriers, block with the minimum one.
+	_, err = s.manager.SetGlobalGCBarrier(context.Background(), "b1", 25, time.Hour, now)
+	re.NoError(err)
+	_, err = s.manager.SetGlobalGCBarrier(context.Background(), "b2", 27, time.Hour, now)
+	re.NoError(err)
+	re.Len(s.getGlobalGCBarriers(), 2)
+	expected = endpoint.NewGCBarrier("b1", 25, ptime(now.Add(time.Hour))).SetGlobal()
+	re.Equal(expected, s.getGlobalGCBarrier("b1"))
+	expected = endpoint.NewGCBarrier("b2", 27, ptime(now.Add(time.Hour))).SetGlobal()
+	re.Equal(expected, s.getGlobalGCBarrier("b2"))
+
+	res, err = s.manager.AdvanceTxnSafePoint(keyspaceID, 30, now)
+	re.NoError(err)
+	re.Equal(uint64(20), res.OldTxnSafePoint)
+	re.Equal(uint64(25), res.NewTxnSafePoint)
+	re.Equal(uint64(30), res.Target)
+	re.Contains(res.BlockerDescription, "BarrierID: \"b1\"")
+
+	// Deleting GC barriers
+	b, err = s.manager.DeleteGlobalGCBarrier(context.Background(), "b1")
+	re.NoError(err)
+	expected = endpoint.NewGCBarrier("b1", 25, ptime(now.Add(time.Hour))).SetGlobal()
+	re.Equal(expected, b)
+	re.Len(s.getGlobalGCBarriers(), 1)
+
+	res, err = s.manager.AdvanceTxnSafePoint(keyspaceID, 30, now)
+	re.NoError(err)
+	re.Equal(uint64(25), res.OldTxnSafePoint)
+	re.Equal(uint64(27), res.NewTxnSafePoint)
+	re.Equal(uint64(30), res.Target)
+	re.Contains(res.BlockerDescription, "BarrierID: \"b2\"")
+
+	b, err = s.manager.DeleteGlobalGCBarrier(context.Background(), "b2")
+	re.NoError(err)
+	expected = endpoint.NewGCBarrier("b2", 27, ptime(now.Add(time.Hour))).SetGlobal()
+	re.Equal(expected, b)
+	re.Empty(s.getGlobalGCBarriers())
+
+	res, err = s.manager.AdvanceTxnSafePoint(keyspaceID, 30, now)
+	re.NoError(err)
+	re.Equal(uint64(27), res.OldTxnSafePoint)
+	re.Equal(uint64(30), res.NewTxnSafePoint)
+	re.Equal(uint64(30), res.Target)
+	re.Empty(res.BlockerDescription)
+
+	// Deleting non-existing GC barrier.
+	b, err = s.manager.DeleteGlobalGCBarrier(context.Background(), "b1")
+	re.NoError(err)
+	re.Nil(b)
+
+	// Test TTL
+	_, err = s.manager.SetGlobalGCBarrier(context.Background(), "b3", 40, time.Minute, now)
+	re.NoError(err)
+	_, err = s.manager.SetGlobalGCBarrier(context.Background(), "b4", 45, time.Minute*2, now)
+	re.NoError(err)
+	_, err = s.manager.SetGlobalGCBarrier(context.Background(), "b5", 50, time.Duration(math.MaxInt64), now)
+	re.NoError(err)
+
+	// Not expiring
+	for _, t := range []time.Time{now, now.Add(time.Second * 59), now.Add(time.Minute)} {
+		res, err = s.manager.AdvanceTxnSafePoint(keyspaceID, 60, t)
+		re.NoError(err)
+		re.Equal(uint64(40), res.NewTxnSafePoint)
+		re.Contains(res.BlockerDescription, "BarrierID: \"b3\"")
+		s.checkTxnSafePoint(keyspaceID, 40)
+		re.Len(s.getGlobalGCBarriers(), 3)
+	}
+
+	// b3 expires
+	res, err = s.manager.AdvanceTxnSafePoint(keyspaceID, 60, now.Add(time.Minute*2))
+	re.NoError(err)
+	re.Equal(uint64(45), res.NewTxnSafePoint)
+	re.Contains(res.BlockerDescription, "BarrierID: \"b4\"")
+	s.checkTxnSafePoint(keyspaceID, 45)
+	re.Len(s.getGlobalGCBarriers(), 2)
+
+	// b4 expires, but b5 never expires.
+	res, err = s.manager.AdvanceTxnSafePoint(keyspaceID, 60, now.Add(time.Hour*24*365*100))
+	re.NoError(err)
+	re.Equal(uint64(50), res.NewTxnSafePoint)
+	re.Contains(res.BlockerDescription, "BarrierID: \"b5\"")
+	s.checkTxnSafePoint(keyspaceID, 50)
+	re.Len(s.getGlobalGCBarriers(), 1)
+
+	// Manually delete b5
+	b, err = s.manager.DeleteGlobalGCBarrier(context.Background(), "b5")
+	re.NoError(err)
+	re.Equal("b5", b.BarrierID)
+
+	res, err = s.manager.AdvanceTxnSafePoint(keyspaceID, 60, now.Add(time.Hour*24*365*100))
+	re.NoError(err)
+	re.Equal(uint64(60), res.NewTxnSafePoint)
+	s.checkTxnSafePoint(keyspaceID, 60)
+
+	re.Empty(s.getGlobalGCBarriers())
+
+	// Disallows setting GC barrier before txn safe point.
+	_, err = s.manager.SetGlobalGCBarrier(context.Background(), "b6", 50, time.Hour, now)
+	re.Error(err)
+	re.ErrorIs(err, errs.ErrGCBarrierTSBehindTxnSafePoint)
+	re.Empty(s.getGlobalGCBarriers())
+	// BarrierTS exactly equals to txn safe point is allowed.
+	b, err = s.manager.SetGlobalGCBarrier(context.Background(), "b6", 60, time.Hour, now)
+	re.NoError(err)
+	expected = endpoint.NewGCBarrier("b6", 60, ptime(now.Add(time.Hour))).SetGlobal()
+	re.Equal(expected, b)
+	re.Len(s.getGlobalGCBarriers(), 1)
+	re.Equal(expected, s.getGlobalGCBarrier("b6"))
+
+	// Clear.
+	_, err = s.manager.DeleteGlobalGCBarrier(context.Background(), "b6")
+	re.NoError(err)
+
+	// Global barriers take effect on all keyspaces.
+	ks1 := s.keyspacePresets.manageable[0]
+	ks2 := s.keyspacePresets.manageable[1]
+	_, err = s.manager.SetGlobalGCBarrier(context.Background(), "b1", 200, time.Hour, now)
+	re.NoError(err)
+	re.Len(s.getAllGCBarriers(ks1), 0)
+	re.Len(s.getAllGCBarriers(ks2), 0)
+	res, err = s.manager.AdvanceTxnSafePoint(ks2, 300, now)
+	re.NoError(err)
+	re.Equal(uint64(200), res.NewTxnSafePoint)
+	re.Contains(res.BlockerDescription, "BarrierID: \"b1\"")
 }
 
 func (s *gcStateManagerTestSuite) TestTiDBMinStartTS() {

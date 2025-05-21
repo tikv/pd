@@ -151,6 +151,12 @@ func NewGCBarrier(barrierID string, barrierTS uint64, expirationTime *time.Time)
 	}
 }
 
+// SetGlobal sets the IsGlobal field to true.
+func (b *GCBarrier) SetGlobal() *GCBarrier {
+	b.IsGlobal = true
+	return b
+}
+
 // gcBarrierFromServiceSafePoint returns the GCBarrier that's synonymous to the given service safe point.
 func gcBarrierFromServiceSafePoint(s *ServiceSafePoint) *GCBarrier {
 	if s == nil {
@@ -526,6 +532,8 @@ func (wb *GCStateWriteBatch) SetGlobalGCBarrier(barrier *GCBarrier) error {
 	return wb.writeJSON(key, barrier.ToServiceSafePoint(constant.NullKeyspaceID))
 }
 
+
+// LoadGlobalGCBarriers loads all global GC barriers.
 func (p GCStateProvider) LoadGlobalGCBarriers() ([]*GCBarrier, error) {
 	prefix := keypath.GlobalGCBarrierPrefix()
 	barriers, err := p.loadAllGCBarriers(prefix)

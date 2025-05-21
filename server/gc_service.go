@@ -441,10 +441,7 @@ func (s *GrpcServer) DeleteGCBarrier(ctx context.Context, request *pdpb.DeleteGC
 
 	now := time.Now()
 
-	keyspaceID := getKeyspaceID(request.GetKeyspaceScope())
-	barrierID := request.GetBarrierId()
-	// if keyspaceID == constant.
-	deletedBarrier, err := s.gcStateManager.DeleteGCBarrier(keyspaceID, barrierID)
+	deletedBarrier, err := s.gcStateManager.DeleteGCBarrier(getKeyspaceID(request.GetKeyspaceScope()), request.GetBarrierId())
 	if err != nil {
 		return &pdpb.DeleteGCBarrierResponse{
 			Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
