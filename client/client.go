@@ -519,10 +519,29 @@ func (c *client) GetLocalTSAsync(ctx context.Context, _ string) tso.TSFuture {
 	return c.GetTSAsync(ctx)
 }
 
+const (
+	// maxTSORetryTimes is the max retry times for TSO request.
+	maxTSORetryTimes = 20
+	// retryInterval is the interval between two TSO requests.
+	retryInterval = 100 * time.Millisecond
+)
+
 // GetTS implements the TSOClient interface.
 func (c *client) GetTS(ctx context.Context) (physical int64, logical int64, err error) {
-	resp := c.GetTSAsync(ctx)
-	return resp.Wait()
+	for range maxTSORetryTimes {
+		resp := c.GetTSAsync(ctx)
+		if physical, logical, err = resp.Wait(); err != nil {
+			if errs.IsLeaderChange(err) {
+				// If the leader changes, we need to retry.
+				time.Sleep(retryInterval)
+				continue
+			} else {
+				break
+			}
+		}
+	}
+
+	return physical, logical, err
 }
 
 // GetLocalTS implements the TSOClient interface.
