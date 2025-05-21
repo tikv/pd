@@ -71,6 +71,7 @@ const (
 	keyspaceLevelTxnSafePointPath     = "/keyspaces/tidb/%d/tidb/store/gcworker/saved_safe_point" // "/keyspaces/tidb/{keyspace_id}/tidb/store/gcworker/saved_safe_point"
 	unifiedGCBarrierPathFormat        = "/pd/%d/gc/safe_point/service/%s"                         // "/pd/{cluster_id}/gc/safe_point/service/{barrier_id}"
 	keyspaceLevelGCBarrierPathFormat  = "/pd/%d/keyspaces/service_safe_point/%08d/%s"             // "/pd/{cluster_id}/keyspaces/service_safe_point/{keyspace_id}/{barrier_id}"
+	globalGCBarrierPathFormat = "/pd/%d/gc/global_gc_barriers/%d" // "/pd/{cluster_id}/gc/global_gc_barriers/{barrier_id}"
 	unifiedTiDBMinStartTSPrefix       = "/tidb/server/minstartts/"
 	keyspaceLevelTiDBMinStartTSPrefix = "/keyspaces/tidb/%d/tidb/server/minstartts/" // "/keyspaces/tidb/{keyspace_id}/tidb/server/minstartts"
 	gcSafePointV2PrefixFormat         = keyspaceLevelGCSafePointPrefixFormat

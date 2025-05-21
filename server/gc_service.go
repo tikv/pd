@@ -399,12 +399,16 @@ func (s *GrpcServer) SetGCBarrier(ctx context.Context, request *pdpb.SetGCBarrie
 	}
 
 	now := time.Now()
-	newBarrier, err := s.gcStateManager.SetGCBarrier(
-		getKeyspaceID(request.GetKeyspaceScope()),
-		request.GetBarrierId(),
-		request.GetBarrierTs(),
-		typeutil.SaturatingStdDurationFromSeconds(request.GetTtlSeconds()),
-		now)
+	keyspaceID := getKeyspaceID(request.GetKeyspaceScope())
+	barrierID := request.GetBarrierId()
+	barrierTS := request.GetBarrierTs()
+	ttl := typeutil.SaturatingStdDurationFromSeconds(request.GetTtlSeconds())
+	var newBarrier *endpoint.GCBarrier
+	if keyspaceID == constant.NullKeyspaceID {
+		newBarrier, err = s.gcStateManager.SetGlobalGCBarrier(ctx, barrierID, barrierTS, ttl, now)
+	} else {
+		newBarrier, err = s.gcStateManager.SetGCBarrier(ctx, keyspaceID, barrierID, barrierTS, ttl, now)
+	}
 	if err != nil {
 		return &pdpb.SetGCBarrierResponse{
 			Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
@@ -442,7 +446,10 @@ func (s *GrpcServer) DeleteGCBarrier(ctx context.Context, request *pdpb.DeleteGC
 
 	now := time.Now()
 
-	deletedBarrier, err := s.gcStateManager.DeleteGCBarrier(getKeyspaceID(request.GetKeyspaceScope()), request.GetBarrierId())
+	keyspaceID := getKeyspaceID(request.GetKeyspaceScope())
+	barrierID := request.GetBarrierId()
+	// if keyspaceID == constant.
+	deletedBarrier, err := s.gcStateManager.DeleteGCBarrier(keyspaceID, barrierID)
 	if err != nil {
 		return &pdpb.DeleteGCBarrierResponse{
 			Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),

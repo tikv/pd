@@ -21,9 +21,12 @@ import (
 	"strconv"
 	"time"
 
+	"go.uber.org/zap"
+
 	clientv3 "go.etcd.io/etcd/client/v3"
 
 	"github.com/pingcap/errors"
+	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
@@ -128,6 +131,8 @@ type GCBarrier struct {
 	BarrierTS uint64
 	// Nil means never expiring.
 	ExpirationTime *time.Time
+	// Whether it is a global GCBarrier.
+	IsGlobal bool
 }
 
 // NewGCBarrier creates a new GCBarrier. The given expirationTime will be rounded up to the next second if it's
@@ -308,6 +313,11 @@ func (p GCStateProvider) LoadGCBarrier(keyspaceID uint32, barrierID string) (*GC
 // LoadAllGCBarriers loads all GC barriers of the given keyspace.
 func (p GCStateProvider) LoadAllGCBarriers(keyspaceID uint32) ([]*GCBarrier, error) {
 	prefix := keypath.GCBarrierPrefix(keyspaceID)
+	return p.loadAllGCBarriers(prefix)
+}
+
+
+func (p GCStateProvider) loadAllGCBarriers(prefix string) ([]*GCBarrier, error) {
 	// TODO: Limit the count for each call.
 	_, serviceSafePoints, err := loadJSONByPrefix[*ServiceSafePoint](p.storage, prefix, 0)
 	if err != nil {
@@ -485,6 +495,40 @@ func (wb *GCStateWriteBatch) SetTxnSafePoint(keyspaceID uint32, txnSafePoint uin
 		Key:    key,
 		OpType: kv.RawTxnOpPut,
 		Value:  value,
+	})
+	return nil
+}
+
+// SetGlobalGCBarrier sets a global GCBarrier.
+func (wb *GCStateWriteBatch) SetGlobalGCBarrier(barrier *GCBarrier) error {
+	key := keypath.GlobalGCBarrierPath(barrier.BarrierID)
+	barrier.IsGlobal = true
+	// The keyspace ID is meanless here, but it's better to avoid 0 which is a valid keyspace ID.
+	return wb.writeJSON(key, barrier.ToServiceSafePoint(constant.NullKeyspaceID))
+}
+
+func (p GCStateProvider) LoadGlobalGCBarriers() ([]*GCBarrier, error) {
+	prefix := keypath.GlobalGCBarrierPrefix()
+	barriers, err := p.loadAllGCBarriers(prefix)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	for _, barrier := range barriers {
+		if !barrier.IsGlobal {
+			log.Warn("LoadGlobalGCBarriers detects wrong json data",
+				zap.String("barrierID", barrier.BarrierID))
+			barrier.IsGlobal = true
+		}
+	}
+	return barriers, nil
+}
+
+// DeleteGlobalGCBarrier deletes the global GCBarrier with the given barrierID.
+func (wb *GCStateWriteBatch) DeleteGlobalGCBarrier(barrierID string) error {
+	key := keypath.GlobalGCBarrierPath(barrierID)
+	wb.ops = append(wb.ops, kv.RawTxnOp{
+		Key:    key,
+		OpType: kv.RawTxnOpDelete,
 	})
 	return nil
 }

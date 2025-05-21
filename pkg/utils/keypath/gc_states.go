@@ -55,6 +55,14 @@ func GCBarrierPath(keyspaceID uint32, barrierID string) string {
 	return fmt.Sprintf(keyspaceLevelGCBarrierPathFormat, ClusterID(), keyspaceID, barrierID)
 }
 
+func GlobalGCBarrierPrefix() string {
+	return GlobalGCBarrierPath("")
+}
+
+func GlobalGCBarrierPath(barrierID string) string {
+	return fmt.Sprintf(globalGCBarrierPathFormat, ClusterID(), barrierID)
+}
+
 // ServiceGCSafePointPrefix returns the prefix of the paths of service safe points. It internally shares the same data
 // with GC barriers and only works for NullKeyspace.
 func ServiceGCSafePointPrefix() string {
