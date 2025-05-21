@@ -535,9 +535,8 @@ func (c *client) GetTS(ctx context.Context) (physical int64, logical int64, err 
 				// If the leader changes, we need to retry.
 				time.Sleep(retryInterval)
 				continue
-			} else {
-				break
 			}
+			break
 		}
 	}
 
