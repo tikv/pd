@@ -500,7 +500,7 @@ func TestTSONotLeader(t *testing.T) {
 	backendEndpoints := pdLeader.GetAddr()
 	pdClient, err := pd.NewClientWithContext(context.Background(),
 		caller.TestComponent,
-		[]string{backendEndpoints}, pd.SecurityOption{}, opt.WithMaxErrorRetry(1))
+		[]string{backendEndpoints}, pd.SecurityOption{})
 	re.NoError(err)
 	defer pdClient.Close()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/rebaseErr", "return(true)"))
@@ -509,14 +509,8 @@ func TestTSONotLeader(t *testing.T) {
 	go func(client pd.Client) {
 		defer wg.Done()
 		pdLeader.ResignLeader()
-		for range 10 {
-			_, _, err := client.GetTS(ctx)
-			// stream maybe canceled when the leader is resigned
-			if err.Error() == context.Canceled.Error() {
-				return
-			}
-			re.ErrorContains(err, "not leader")
-		}
+		_, _, err := client.GetTS(ctx)
+		re.ErrorContains(err, "not leader")
 	}(pdClient)
 
 	wg.Wait()
