@@ -49,7 +49,8 @@ type Manager struct {
 }
 
 // NewManager creates a new Manager.
-func NewManager(patrolRegionsDurationGetter patrolRegionsDurationGetter, updateInterval time.Duration) *Manager {
+func NewManager(patrolRegionsDurationGetter patrolRegionsDurationGetter,
+	updateInterval time.Duration) *Manager {
 	return &Manager{
 		progresses:                  make(map[uint64]*progressIndicator),
 		completedProgress:           make(map[uint64]*progressIndicator),

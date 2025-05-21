@@ -15,6 +15,7 @@
 package progress
 
 import (
+	"fmt"
 	"math"
 	"testing"
 	"time"
@@ -68,14 +69,14 @@ func TestProgress(t *testing.T) {
 	p = m.GetProgressByStoreID(storeID)
 	re.Equal(preparingAction, p.Action)
 	re.Equal(0.3, p.ProgressPercent)
-	re.Equal(20.0, p.CurrentSpeed) 
+	re.Equal(20.0, p.CurrentSpeed)
 	re.Equal(3.50, p.LeftSecond)
 
 	m.updateStoreProgress(storeID2, preparingAction, 30, 100)
 	p = m.GetProgressByStoreID(storeID2)
 	re.Equal(preparingAction, p.Action)
 	re.Equal(0.3, p.ProgressPercent)
-	re.Equal(10.0, p.CurrentSpeed) 
+	re.Equal(10.0, p.CurrentSpeed)
 	re.Equal(7.0, p.LeftSecond)
 
 	// test gc progress
@@ -188,4 +189,77 @@ func TestOnlineAndOffline(t *testing.T) {
 	re.Equal(1.0, p.ProgressPercent)
 	re.Equal(0.0, p.LeftSecond)
 	re.Equal(90.0, p.CurrentSpeed)
+}
+
+func TestDynamicPatrolRegionsDuration(t *testing.T) {
+	var (
+		re = require.New(t)
+		// Corresponding window capacity is 121, window length is 11
+		updateInterval = time.Minute
+		store          = core.NewStoreInfo(&metapb.Store{
+			Id:        1,
+			NodeState: metapb.NodeState_Removing,
+		})
+		mockGetter = &mockPatrolRegionsDurationGetter{10 * time.Second}
+		m          = NewManager(mockGetter, updateInterval)
+	)
+
+	checkSecond := func(seconds, expected float64) {
+		re.LessOrEqual(math.Abs(seconds/updateInterval.Seconds()-expected), 0.01,
+			fmt.Sprintf("expected %f", seconds/updateInterval.Seconds()))
+	}
+	checkSpeed := func(speed, expected float64) {
+		re.LessOrEqual(math.Abs(speed*updateInterval.Seconds()-expected), 0.01,
+			fmt.Sprintf("expected %f", speed*updateInterval.Seconds()))
+	}
+
+	currentRegionSize := 1000.0
+	for range 121 {
+		m.UpdateProgress(store, currentRegionSize, 0)
+		currentRegionSize--
+	}
+	p := m.GetProgressByStoreID(store.GetID())
+	re.Equal(removingAction, p.Action)
+	re.Equal(0.12, p.ProgressPercent)
+	checkSecond(p.LeftSecond, 880.0)
+	checkSpeed(p.CurrentSpeed, 1)
+
+	// PatrolRegion has not scanned any offline peers within 5 minutes
+	currentRegionSize++
+	for range 5 {
+		m.UpdateProgress(store, currentRegionSize, 0)
+	}
+
+	p = m.GetProgressByStoreID(store.GetID())
+	// Speed becomes slower
+	checkSecond(p.LeftSecond, 1760.0)
+	checkSpeed(p.CurrentSpeed, 0.5)
+
+	// Before it was 10 minutes(minSpeedCalculationWindow), window length is 10,
+	// Now it is 19 minutes(maxSpeedCalculationWindow), window length is 20.
+	mockGetter.dur = 19 * time.Minute
+	for range 4 { // why 4? because I want to keep ten identical values in the history.
+		m.UpdateProgress(store, currentRegionSize, 0)
+	}
+	p = m.GetProgressByStoreID(store.GetID())
+	// Speed becomes stable, because the patrol region duration is larger.
+	checkSecond(p.LeftSecond, 1672.0)
+	checkSpeed(p.CurrentSpeed, 0.52631)
+	re.Equal(20, m.progresses[store.GetID()].currentWindowLength)
+	front, back := 110.0, 120.0
+	re.Equal(front, m.progresses[store.GetID()].front.Value.(float64))
+	re.Equal(back, m.progresses[store.GetID()].history.Back().Value.(float64))
+
+	for i := range 10 {
+		currentRegionSize--
+		m.UpdateProgress(store, currentRegionSize, 0)
+		p = m.GetProgressByStoreID(store.GetID())
+
+		front++
+		back++
+		re.Equal(front, m.progresses[store.GetID()].front.Value.(float64), i)
+		re.Equal(back, m.progresses[store.GetID()].history.Back().Value.(float64), i)
+		// Speed becomes stable.
+		checkSpeed(p.CurrentSpeed, 0.52631)
+	}
 }
