@@ -60,6 +60,8 @@ ifeq ($(RUN_CI), 1)
 	RELEASE_VERSION := None
 endif
 
+PD_PKG := github.com/tikv/pd
+
 LDFLAGS += -X "$(PD_PKG)/pkg/versioninfo.PDReleaseVersion=v8.5.0-serverless"
 LDFLAGS += -X "$(PD_PKG)/pkg/versioninfo.PDBuildTS=$(shell date -u '+%Y-%m-%d %I:%M:%S')"
 LDFLAGS += -X "$(PD_PKG)/pkg/versioninfo.PDGitHash=$(shell git rev-parse HEAD)"
@@ -164,7 +166,6 @@ dashboard-replace-distro-info:
 
 #### Static tools ####
 
-PD_PKG := github.com/tikv/pd
 PACKAGES := $(shell go list ./...)
 
 GO_TOOLS_BIN_PATH := $(ROOT_PATH)/.tools/bin
