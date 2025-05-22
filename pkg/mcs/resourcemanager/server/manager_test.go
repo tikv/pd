@@ -17,14 +17,18 @@ package server
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/pingcap/failpoint"
+	"github.com/pingcap/kvproto/pkg/keyspacepb"
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 
 	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/storage"
+	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/testutil"
 )
 
@@ -36,12 +40,16 @@ func (*mockConfigProvider) AddStartCallback(...func()) {}
 
 func (*mockConfigProvider) AddServiceReadyCallback(...func(context.Context) error) {}
 
-func TestBackgroundMetricsFlush(t *testing.T) {
-	re := require.New(t)
-
+func prepareManager() *Manager {
 	storage := storage.NewStorageWithMemoryBackend()
 	m := NewManager[*mockConfigProvider](&mockConfigProvider{})
 	m.storage = storage
+	return m
+}
+
+func TestBackgroundMetricsFlush(t *testing.T) {
+	re := require.New(t)
+	m := prepareManager()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -77,9 +85,60 @@ func TestBackgroundMetricsFlush(t *testing.T) {
 
 	// Verify consumption was added to the resource group.
 	testutil.Eventually(re, func() bool {
+		// TODO: test with the keyspace name.
 		updatedGroup := m.GetResourceGroup(constant.NullKeyspaceID, req.GetResourceGroupName(), true)
 		re.NotNil(updatedGroup)
 		return updatedGroup.RUConsumption.RRU == req.ConsumptionSinceLastRequest.RRU &&
 			updatedGroup.RUConsumption.WRU == req.ConsumptionSinceLastRequest.WRU
 	})
+}
+
+func TestCleanUpTicker(t *testing.T) {
+	re := require.New(t)
+	m := prepareManager()
+
+	// Put a keyspace meta.
+	keyspaceMeta := &keyspacepb.KeyspaceMeta{
+		Id:   5299,
+		Name: "test_keyspace",
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	err := m.storage.RunInTxn(ctx, func(txn kv.Txn) error {
+		err := m.storage.SaveKeyspaceMeta(txn, keyspaceMeta)
+		return err
+	})
+	re.NoError(err)
+	// Insert two consumption records manually.
+	m.consumptionRecord[consumptionRecordKey{
+		keyspaceID: keyspaceMeta.GetId(),
+		groupName:  "test_group_1",
+		ruType:     defaultTypeLabel,
+	}] = time.Now().Add(-metricsCleanupTimeout * 2)
+	m.consumptionRecord[consumptionRecordKey{
+		keyspaceID: keyspaceMeta.GetId(),
+		groupName:  "test_group_2",
+		ruType:     defaultTypeLabel,
+	}] = time.Now().Add(-metricsCleanupTimeout / 2)
+	// Start the background metrics flush loop.
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/mcs/resourcemanager/server/fastCleanupTicker", `return(true)`))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/mcs/resourcemanager/server/fastCleanupTicker"))
+	}()
+	err = m.Init(ctx)
+	re.NoError(err)
+	// Ensure the cleanup ticker is triggered.
+	time.Sleep(200 * time.Millisecond)
+	// Close the manager to avoid the data race.
+	m.close()
+
+	re.Len(m.consumptionRecord, 1)
+	re.Contains(m.consumptionRecord, consumptionRecordKey{
+		keyspaceID: keyspaceMeta.GetId(),
+		groupName:  "test_group_2",
+		ruType:     defaultTypeLabel,
+	})
+	keyspaceName, err := m.getKeyspaceNameByID(ctx, keyspaceMeta.GetId())
+	re.NoError(err)
+	re.Equal(keyspaceMeta.GetName(), keyspaceName)
 }
