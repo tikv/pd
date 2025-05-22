@@ -28,6 +28,7 @@ import (
 
 	"github.com/pingcap/log"
 
+	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 )
@@ -148,16 +149,27 @@ func (bs *BaseServer) InitListener(tlsCfg *grpcutil.TLSConfig, listenAddr string
 	if err != nil {
 		return err
 	}
-	tlsConfig, err := tlsCfg.ToTLSConfig()
+	tlsInfo, err := tlsCfg.ToTLSInfo()
 	if err != nil {
+		return errs.ErrTLSConfig.Wrap(err).GenWithStackByCause()
+	}
+
+	if tlsInfo == nil {
+		bs.muxListener, err = net.Listen(constant.TCPNetworkStr, listenURL.Host)
 		return err
 	}
-	if tlsConfig != nil {
+
+	tlsConfig, err := tlsInfo.ServerConfig()
+	if err != nil {
+		return errs.ErrTLSConfig.Wrap(err).GenWithStackByCause()
+	}
+	if tlsConfig == nil {
+		bs.muxListener, err = net.Listen(constant.TCPNetworkStr, listenURL.Host)
+	} else {
 		bs.secure = true
 		bs.muxListener, err = tls.Listen(constant.TCPNetworkStr, listenURL.Host, tlsConfig)
-	} else {
-		bs.muxListener, err = net.Listen(constant.TCPNetworkStr, listenURL.Host)
 	}
+
 	return err
 }
 
