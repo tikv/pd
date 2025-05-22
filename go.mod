@@ -10,6 +10,7 @@ go 1.23.0
 require (
 	github.com/AlekSi/gocov-xml v1.0.0
 	github.com/BurntSushi/toml v0.3.1
+	github.com/alecthomas/template v0.0.0-20190718012654-fb15b899a751
 	github.com/aws/aws-sdk-go-v2/config v1.25.12
 	github.com/aws/aws-sdk-go-v2/credentials v1.16.10
 	github.com/aws/aws-sdk-go-v2/service/kms v1.26.5
@@ -222,3 +223,5 @@ require (
 	moul.io/zapgorm2 v1.1.0 // indirect
 	sigs.k8s.io/yaml v1.4.0 // indirect
 )
+
+replace github.com/pingcap/kvproto => github.com/tiancaiamao/kvproto v0.0.0-20250521042540-68439c41a03d

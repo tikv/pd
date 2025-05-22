@@ -21,9 +21,12 @@ import (
 	"strconv"
 	"time"
 
+	"go.uber.org/zap"
+
 	clientv3 "go.etcd.io/etcd/client/v3"
 
 	"github.com/pingcap/errors"
+	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
@@ -128,6 +131,8 @@ type GCBarrier struct {
 	BarrierTS uint64
 	// Nil means never expiring.
 	ExpirationTime *time.Time
+	// Whether it is a global GCBarrier.
+	IsGlobal bool
 }
 
 // NewGCBarrier creates a new GCBarrier. The given expirationTime will be rounded up to the next second if it's
@@ -144,6 +149,12 @@ func NewGCBarrier(barrierID string, barrierTS uint64, expirationTime *time.Time)
 		BarrierTS:      barrierTS,
 		ExpirationTime: expirationTime,
 	}
+}
+
+// SetGlobal sets the IsGlobal field to true.
+func (b *GCBarrier) SetGlobal() *GCBarrier {
+	b.IsGlobal = true
+	return b
 }
 
 // gcBarrierFromServiceSafePoint returns the GCBarrier that's synonymous to the given service safe point.
@@ -308,6 +319,27 @@ func (p GCStateProvider) LoadGCBarrier(keyspaceID uint32, barrierID string) (*GC
 // LoadAllGCBarriers loads all GC barriers of the given keyspace.
 func (p GCStateProvider) LoadAllGCBarriers(keyspaceID uint32) ([]*GCBarrier, error) {
 	prefix := keypath.GCBarrierPrefix(keyspaceID)
+	return p.loadAllGCBarriers(prefix)
+}
+
+// LoadGlobalGCBarrier loads the GCBarrier of the given barrierID from storage.
+func (p GCStateProvider) LoadGlobalGCBarrier(barrierID string) (*GCBarrier, error) {
+	key := keypath.GlobalGCBarrierPath(barrierID)
+	// GCBarrier is stored in ServiceSafePoint format for compatibility.
+	serviceSafePoint, err := loadJSON[*ServiceSafePoint](p.storage, key)
+	if err != nil {
+		return nil, err
+	}
+	barrier := gcBarrierFromServiceSafePoint(serviceSafePoint)
+	if barrier != nil && !barrier.IsGlobal {
+		log.Warn("LoadGlobalGCBarrier detects wrong json data",
+			zap.String("barrierID", barrier.BarrierID))
+		barrier.IsGlobal = true
+	}
+	return barrier, nil
+}
+
+func (p GCStateProvider) loadAllGCBarriers(prefix string) ([]*GCBarrier, error) {
 	// TODO: Limit the count for each call.
 	_, serviceSafePoints, err := loadJSONByPrefix[*ServiceSafePoint](p.storage, prefix, 0)
 	if err != nil {
@@ -318,7 +350,10 @@ func (p GCStateProvider) LoadAllGCBarriers(keyspaceID uint32) ([]*GCBarrier, err
 	}
 	barriers := make([]*GCBarrier, 0, len(serviceSafePoints))
 	for _, serviceSafePoint := range serviceSafePoints {
-		barriers = append(barriers, gcBarrierFromServiceSafePoint(serviceSafePoint))
+		barrier := gcBarrierFromServiceSafePoint(serviceSafePoint)
+		if barrier != nil {
+			barriers = append(barriers, barrier)
+		}
 	}
 	return barriers, nil
 }
@@ -485,6 +520,41 @@ func (wb *GCStateWriteBatch) SetTxnSafePoint(keyspaceID uint32, txnSafePoint uin
 		Key:    key,
 		OpType: kv.RawTxnOpPut,
 		Value:  value,
+	})
+	return nil
+}
+
+// SetGlobalGCBarrier sets a global GCBarrier.
+func (wb *GCStateWriteBatch) SetGlobalGCBarrier(barrier *GCBarrier) error {
+	key := keypath.GlobalGCBarrierPath(barrier.BarrierID)
+	barrier.IsGlobal = true
+	// The keyspace ID is meanless here, but it's better to avoid 0 which is a valid keyspace ID.
+	return wb.writeJSON(key, barrier.ToServiceSafePoint(constant.NullKeyspaceID))
+}
+
+// LoadGlobalGCBarriers loads all global GC barriers.
+func (p GCStateProvider) LoadGlobalGCBarriers() ([]*GCBarrier, error) {
+	prefix := keypath.GlobalGCBarrierPrefix()
+	barriers, err := p.loadAllGCBarriers(prefix)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	for _, barrier := range barriers {
+		if !barrier.IsGlobal {
+			log.Warn("LoadGlobalGCBarriers detects wrong json data",
+				zap.String("barrierID", barrier.BarrierID))
+			barrier.IsGlobal = true
+		}
+	}
+	return barriers, nil
+}
+
+// DeleteGlobalGCBarrier deletes the global GCBarrier with the given barrierID.
+func (wb *GCStateWriteBatch) DeleteGlobalGCBarrier(barrierID string) error {
+	key := keypath.GlobalGCBarrierPath(barrierID)
+	wb.ops = append(wb.ops, kv.RawTxnOp{
+		Key:    key,
+		OpType: kv.RawTxnOpDelete,
 	})
 	return nil
 }
