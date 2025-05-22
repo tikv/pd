@@ -1838,7 +1838,7 @@ func (c *RaftCluster) checkStore(store *core.StoreInfo, stores []*core.StoreInfo
 			needBury = false
 		})
 		if needBury {
-			if err := c.BuryStore(storeID, false); err != nil {
+			if err := c.BuryStoreLocked(storeID, false); err != nil {
 				log.Error("bury store failed",
 					zap.Stringer("store", store.GetMeta()),
 					errs.ZapError(err))
