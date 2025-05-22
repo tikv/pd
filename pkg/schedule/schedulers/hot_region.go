@@ -88,7 +88,7 @@ func newBaseHotScheduler(
 	ret := &baseHotScheduler{
 		BaseScheduler:  base,
 		regionPendings: make(map[uint64]*pendingInfluence),
-		stHistoryLoads: statistics.NewStoreHistoryLoads(utils.DimLen, sampleDuration, sampleInterval),
+		stHistoryLoads: statistics.NewStoreHistoryLoads(sampleDuration, sampleInterval),
 		r:              rand.New(rand.NewSource(time.Now().UnixNano())),
 	}
 	for ty := resourceType(0); ty < resourceTypeLen; ty++ {
@@ -387,8 +387,8 @@ type rank interface {
 	calcProgressiveRank()
 	betterThan(*solution) bool
 	rankToDimString() string
-	checkByPriorityAndTolerance(loads []float64, f func(int) bool) bool
-	checkHistoryLoadsByPriority(loads [][]float64, f func(int) bool) bool
+	checkByPriorityAndTolerance(loads statistics.Loads, f func(int) bool) bool
+	checkHistoryLoadsByPriority(loads statistics.HistoryLoads, f func(int) bool) bool
 }
 
 // calcPendingInfluence return the calculate weight of one Operator, the value will between [0,1]

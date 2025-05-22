@@ -111,7 +111,10 @@ type CreateKeyspaceRequest struct {
 type CreateKeyspaceByIDRequest struct {
 	// ID of the keyspace to be created.
 	// Using an existing ID will result in error.
-	ID     *uint32
+	ID *uint32
+	// Name of the keyspace to be created.
+	// Using an existing name will result in error.
+	Name   string
 	Config map[string]string
 	// CreateTime is the timestamp used to record creation time.
 	CreateTime int64
@@ -296,7 +299,14 @@ func (manager *Manager) CreateKeyspaceByID(request *CreateKeyspaceByIDRequest) (
 		return nil, errors.New("keyspace id is empty")
 	}
 	id := *request.ID
-	name := strconv.FormatUint(uint64(id), 10)
+	name := request.Name
+	if len(name) == 0 {
+		return nil, errors.New("keyspace name is empty")
+	}
+	// Validate purposed name's legality.
+	if err := validateName(name); err != nil {
+		return nil, err
+	}
 	userKind := endpoint.StringUserKind(request.Config[UserKindKey])
 	config, err := manager.kgm.GetKeyspaceConfigByKind(userKind)
 	if err != nil {
