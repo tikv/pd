@@ -35,6 +35,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/plan"
 	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/storage"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/operatorutil"
 	"github.com/tikv/pd/pkg/versioninfo"
 )
@@ -446,6 +447,13 @@ func (suite *balanceLeaderRangeSchedulerTestSuite) TestSingleRangeBalance() {
 	ops, _ = lb.Schedule(suite.tc, false)
 	re.Empty(ops)
 	lb, err = CreateScheduler(types.BalanceLeaderScheduler, suite.oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.BalanceLeaderScheduler, []string{"b", ""}))
+	re.NoError(err)
+	ops, _ = lb.Schedule(suite.tc, false)
+	re.Empty(ops)
+
+	kye := keyutil.NewKeyRange("a", "g")
+	suite.tc.Append([]keyutil.KeyRange{kye})
+	lb, err = CreateScheduler(types.BalanceLeaderScheduler, suite.oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.BalanceLeaderScheduler, []string{"", ""}))
 	re.NoError(err)
 	ops, _ = lb.Schedule(suite.tc, false)
 	re.Empty(ops)
