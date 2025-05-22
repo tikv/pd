@@ -82,6 +82,12 @@ func (m *Manager) Reset() {
 	m.progresses = make(map[uint64]*progressIndicator)
 }
 
+func (m *Manager) SetPatrolRegionsDurationGetter(getter patrolRegionsDurationGetter) {
+	m.Lock()
+	defer m.Unlock()
+	m.patrolRegionsDurationGetter = getter
+}
+
 func (m *Manager) addProgress(
 	storeID uint64,
 	action Action,
@@ -231,7 +237,7 @@ func (m *Manager) updateStoreProgress(
 	storesETAGauge.WithLabelValues("", storeLabel, string(action)).Set(p.LeftSecond)
 }
 
-// GetProgresses gets progresses according to the filter.
+// GetProgressByStoreID gets progresses by the store id.
 func (m *Manager) GetProgressByStoreID(storeID uint64) *Progress {
 	m.RLock()
 	defer m.RUnlock()
@@ -254,7 +260,7 @@ func (m *Manager) GetAverageProgressByAction(action Action) *Progress {
 	)
 	for _, p := range m.progresses {
 		if p.Action == action {
-			totalProgressPercent += p.Progress.ProgressPercent
+			totalProgressPercent += p.ProgressPercent
 			totalLeftSeconds += p.LeftSecond
 			totalCurrentSpeed += p.CurrentSpeed
 			count++

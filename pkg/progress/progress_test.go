@@ -15,7 +15,6 @@
 package progress
 
 import (
-	"fmt"
 	"math"
 	"testing"
 	"time"
@@ -194,7 +193,7 @@ func TestOnlineAndOffline(t *testing.T) {
 func TestDynamicPatrolRegionsDuration(t *testing.T) {
 	var (
 		re = require.New(t)
-		// Corresponding window capacity is 121, window length is 11
+		// Corresponding window capacity is 121, window length is 10
 		updateInterval = time.Minute
 		store          = core.NewStoreInfo(&metapb.Store{
 			Id:        1,
@@ -206,11 +205,11 @@ func TestDynamicPatrolRegionsDuration(t *testing.T) {
 
 	checkSecond := func(seconds, expected float64) {
 		re.LessOrEqual(math.Abs(seconds/updateInterval.Seconds()-expected), 0.01,
-			fmt.Sprintf("expected %f", seconds/updateInterval.Seconds()))
+			"expected %f", seconds/updateInterval.Seconds())
 	}
 	checkSpeed := func(speed, expected float64) {
 		re.LessOrEqual(math.Abs(speed*updateInterval.Seconds()-expected), 0.01,
-			fmt.Sprintf("expected %f", speed*updateInterval.Seconds()))
+			"expected %f", speed*updateInterval.Seconds())
 	}
 
 	currentRegionSize := 1000.0

@@ -33,26 +33,26 @@ func TestProgressIndicator_UpdateProgress(t *testing.T) {
 	)
 
 	// Test initial state
-	re.Zero(pi.Progress.ProgressPercent)
-	re.Zero(pi.Progress.CurrentSpeed)
-	re.Equal(math.MaxFloat64, pi.Progress.LeftSecond)
+	re.Zero(pi.ProgressPercent)
+	re.Zero(pi.CurrentSpeed)
+	re.Equal(math.MaxFloat64, pi.LeftSecond)
 
 	// Push data and test progress update
 	pi.push(10)
-	re.Equal(0.1, pi.Progress.ProgressPercent)
-	re.Equal(10.0, pi.Progress.CurrentSpeed)
-	re.Equal(9.0, pi.Progress.LeftSecond)
+	re.Equal(0.1, pi.ProgressPercent)
+	re.Equal(10.0, pi.CurrentSpeed)
+	re.Equal(9.0, pi.LeftSecond)
 
 	// Push more data and test progress update
 	pi.push(50)
-	re.Equal(0.5, pi.Progress.ProgressPercent)
-	re.Equal(25.0, pi.Progress.CurrentSpeed)
-	re.Equal(2.0, pi.Progress.LeftSecond)
+	re.Equal(0.5, pi.ProgressPercent)
+	re.Equal(25.0, pi.CurrentSpeed)
+	re.Equal(2.0, pi.LeftSecond)
 
 	// Push data exceeding targetRegionSize
 	pi.push(120)
-	re.Equal(1.0, pi.Progress.ProgressPercent)
-	re.Equal(0.0, pi.Progress.LeftSecond)
+	re.Equal(1.0, pi.ProgressPercent)
+	re.Equal(0.0, pi.LeftSecond)
 }
 
 func TestWindowCapacity(t *testing.T) {
@@ -131,8 +131,8 @@ func TestAdjustWindowLength(t *testing.T) {
 	)
 
 	testCases := []struct {
-		duration  time.Duration
-		expected  int
+		duration time.Duration
+		expected int
 	}{
 		{
 			duration: 1 * time.Minute,
@@ -144,7 +144,7 @@ func TestAdjustWindowLength(t *testing.T) {
 		},
 		{
 			duration: 30 * time.Minute,
-			expected: int((30 * time.Minute)/updateInterval) + 1,
+			expected: int((30*time.Minute)/updateInterval) + 1,
 		},
 		{
 			duration: minSpeedCalculationWindow,

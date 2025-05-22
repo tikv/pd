@@ -308,8 +308,6 @@ func (c *RaftCluster) InitCluster(
 	keyspaceGroupManager *keyspace.GroupManager) error {
 	c.opt, c.id = opt.(*config.PersistOptions), id
 	c.ctx, c.cancel = context.WithCancel(c.serverCtx)
-	c.progressManager = progress.NewManager(c.GetCoordinator().GetCheckerController(),
-		nodeStateCheckJobInterval)
 	c.changedRegions = make(chan *core.RegionInfo, defaultChangedRegionsLimit)
 	failpoint.Inject("syncRegionChannelFull", func() {
 		c.changedRegions = make(chan *core.RegionInfo, 100)
@@ -435,6 +433,12 @@ func (c *RaftCluster) checkSchedulingService() {
 	} else {
 		c.startSchedulingJobs(c, c.hbstreams)
 		c.UnsetServiceIndependent(constant.SchedulingServiceName)
+	}
+	if c.progressManager == nil {
+		c.progressManager = progress.NewManager(c.GetCoordinator().GetCheckerController(),
+			nodeStateCheckJobInterval)
+	} else {
+		c.progressManager.SetPatrolRegionsDurationGetter(c.GetCoordinator().GetCheckerController())
 	}
 }
 
@@ -1752,6 +1756,7 @@ func (c *RaftCluster) setStore(store *core.StoreInfo, opts ...core.StoreCreateOp
 }
 
 func (c *RaftCluster) isStorePrepared() bool {
+	// nolint:staticcheck
 	if c.schedulingController.IsPrepared() {
 		return true
 	}

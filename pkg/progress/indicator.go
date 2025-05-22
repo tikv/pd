@@ -123,7 +123,7 @@ func (p *progressIndicator) updateProgress() {
 		currentRegionSize = p.targetRegionSize
 		p.completeAt = time.Now()
 	}
-	p.Progress.ProgressPercent = currentRegionSize / p.targetRegionSize
+	p.ProgressPercent = currentRegionSize / p.targetRegionSize
 
 	if p.CurrentSpeed == 0 {
 		p.LeftSecond = math.MaxFloat64
