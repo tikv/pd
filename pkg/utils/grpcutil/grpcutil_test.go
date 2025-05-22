@@ -62,7 +62,7 @@ func TestToTLSConfig(t *testing.T) {
 		CAPath:   filepath.Join(certPath, "ca.pem"),
 	}
 	// test without bytes
-	_, err := tlsConfig.ToTLSConfig()
+	_, err := tlsConfig.ToClientTLSConfig()
 	re.NoError(err)
 
 	// test with bytes
@@ -70,18 +70,18 @@ func TestToTLSConfig(t *testing.T) {
 	tlsConfig.SSLCABytes = caData
 	tlsConfig.SSLCertBytes = certData
 	tlsConfig.SSLKEYBytes = keyData
-	_, err = tlsConfig.ToTLSConfig()
+	_, err = tlsConfig.ToClientTLSConfig()
 	re.NoError(err)
 
 	// test wrong cert bytes
 	tlsConfig.SSLCertBytes = []byte("invalid cert")
-	_, err = tlsConfig.ToTLSConfig()
+	_, err = tlsConfig.ToClientTLSConfig()
 	re.True(errors.ErrorEqual(err, errs.ErrCryptoX509KeyPair))
 
 	// test wrong ca bytes
 	tlsConfig.SSLCertBytes = certData
 	tlsConfig.SSLCABytes = []byte("invalid ca")
-	_, err = tlsConfig.ToTLSConfig()
+	_, err = tlsConfig.ToClientTLSConfig()
 	re.True(errors.ErrorEqual(err, errs.ErrCryptoAppendCertsFromPEM))
 }
 
