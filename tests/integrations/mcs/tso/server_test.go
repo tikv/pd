@@ -259,13 +259,11 @@ func (suite *PDServiceForward) ShutDown() {
 	re := suite.re
 
 	etcdClient := suite.pdLeader.GetEtcdClient()
-	endpoints, err := discovery.Discover(etcdClient, constant.TSOServiceName)
-	re.NoError(err)
-	if len(endpoints) != 0 {
-		endpoints, err = discovery.Discover(etcdClient, constant.TSOServiceName)
+	testutil.Eventually(re, func() bool {
+		endpoints, err := discovery.Discover(etcdClient, constant.TSOServiceName)
 		re.NoError(err)
-		re.Empty(endpoints)
-	}
+		return len(endpoints) == 0
+	})
 	suite.cluster.Destroy()
 	suite.cancel()
 	re.NoError(failpoint.Disable("github.com/tikv/pd/client/servicediscovery/usePDServiceMode"))
@@ -410,7 +408,9 @@ func TestForwardTSOUnexpectedToFollower3(t *testing.T) {
 	suite := NewPDServiceForward(re)
 	defer suite.ShutDown()
 	suite.checkForwardTSOUnexpectedToFollower(func() {
-		_, _, err := suite.pdClient.GetTS(suite.ctx)
+		// Replace GetTS with GetTSAsync to avoid retry
+		resp := suite.pdClient.GetTSAsync(suite.ctx)
+		_, _, err := resp.Wait()
 		re.Error(err)
 	})
 }
