@@ -1139,11 +1139,10 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupRUConsumption() {
 		ClientUniqueId:        1,
 	})
 	re.NoError(err)
-	testutil.Eventually(re, func() bool {
-		g, err = cli.GetResourceGroup(suite.ctx, group.Name, pd.WithRUStats)
-		re.NoError(err)
-		return g.RUStats == testConsumption
-	})
+	time.Sleep(10 * time.Millisecond)
+	g, err = cli.GetResourceGroup(suite.ctx, group.Name, pd.WithRUStats)
+	re.NoError(err)
+	re.Equal(g.RUStats, testConsumption)
 
 	// update resource group, ru stats not change
 	g.RUSettings.RU.Settings.FillRate = 12345
@@ -1642,21 +1641,19 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupCURDWithKeyspace()
 	}
 	_, err = cli.AcquireTokenBuckets(suite.ctx, req)
 	re.NoError(err)
-	testutil.Eventually(re, func() bool {
-		rg, err = cli.GetResourceGroup(suite.ctx, group.Name, opts...)
-		re.NoError(err)
-		return rg.RUStats != testConsumption
-	})
+	time.Sleep(10 * time.Millisecond)
+	rg, err = cli.GetResourceGroup(suite.ctx, group.Name, opts...)
+	re.NoError(err)
+	re.NotEqual(rg.RUStats, testConsumption)
 
 	// Test AcquireTokenBuckets with keyspace id
 	req.Requests[0].KeyspaceId = &rmpb.KeyspaceIDValue{Value: keyspaceID}
 	_, err = cli.AcquireTokenBuckets(suite.ctx, req)
 	re.NoError(err)
-	testutil.Eventually(re, func() bool {
-		rg, err = cli.GetResourceGroup(suite.ctx, group.Name, opts...)
-		re.NoError(err)
-		return rg.RUStats == testConsumption
-	})
+	time.Sleep(10 * time.Millisecond)
+	rg, err = cli.GetResourceGroup(suite.ctx, group.Name, opts...)
+	re.NoError(err)
+	re.Equal(rg.RUStats, testConsumption)
 
 	// Delete resource group without keyspace id
 	resp, err = cli.DeleteResourceGroup(suite.ctx, group.Name)
