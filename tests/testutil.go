@@ -406,7 +406,7 @@ func (s *SchedulingTestEnvironment) startCluster(m SchedulerMode) {
 		re.NoError(leaderServer.BootstrapCluster())
 		leaderServer.GetRaftCluster().SetPrepared()
 		// start scheduling cluster
-		tc, err := NewTestSchedulingCluster(ctx, 1, leaderServer.GetAddr())
+		tc, err := NewTestSchedulingCluster(ctx, 1, cluster)
 		re.NoError(err)
 		tc.WaitForPrimaryServing(re)
 		tc.GetPrimaryServer().GetCluster().SetPrepared()

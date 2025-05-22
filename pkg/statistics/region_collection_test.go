@@ -31,7 +31,7 @@ func TestRegionStatistics(t *testing.T) {
 	re := require.New(t)
 	store := storage.NewStorageWithMemoryBackend()
 	manager := placement.NewRuleManager(context.Background(), store, nil, nil)
-	err := manager.Initialize(3, []string{"zone", "rack", "host"}, "")
+	err := manager.Initialize(3, []string{"zone", "rack", "host"}, "", false)
 	re.NoError(err)
 	opt := mockconfig.NewTestOptions()
 	opt.SetPlacementRuleEnabled(false)
@@ -120,7 +120,7 @@ func TestRegionStatisticsWithPlacementRule(t *testing.T) {
 	re := require.New(t)
 	store := storage.NewStorageWithMemoryBackend()
 	manager := placement.NewRuleManager(context.Background(), store, nil, nil)
-	err := manager.Initialize(3, []string{"zone", "rack", "host"}, "")
+	err := manager.Initialize(3, []string{"zone", "rack", "host"}, "", false)
 	re.NoError(err)
 	opt := mockconfig.NewTestOptions()
 	opt.SetPlacementRuleEnabled(true)
@@ -274,7 +274,7 @@ func BenchmarkObserve(b *testing.B) {
 	// Setup
 	store := storage.NewStorageWithMemoryBackend()
 	manager := placement.NewRuleManager(context.Background(), store, nil, nil)
-	manager.Initialize(3, []string{"zone", "rack", "host"}, "")
+	manager.Initialize(3, []string{"zone", "rack", "host"}, "", false)
 	opt := mockconfig.NewTestOptions()
 	opt.SetPlacementRuleEnabled(false)
 	peers := []*metapb.Peer{

@@ -30,17 +30,19 @@ import (
 type TestSchedulingCluster struct {
 	ctx context.Context
 
+	pd               *TestCluster
 	backendEndpoints string
 	servers          map[string]*scheduling.Server
 	cleanupFuncs     map[string]testutil.CleanupFunc
 }
 
 // NewTestSchedulingCluster creates a new scheduling test cluster.
-func NewTestSchedulingCluster(ctx context.Context, initialServerCount int, backendEndpoints string) (tc *TestSchedulingCluster, err error) {
+func NewTestSchedulingCluster(ctx context.Context, initialServerCount int, pd *TestCluster) (tc *TestSchedulingCluster, err error) {
 	schedulers.Register()
 	tc = &TestSchedulingCluster{
 		ctx:              ctx,
-		backendEndpoints: backendEndpoints,
+		pd:               pd,
+		backendEndpoints: pd.GetLeaderServer().GetAddr(),
 		servers:          make(map[string]*scheduling.Server, initialServerCount),
 		cleanupFuncs:     make(map[string]testutil.CleanupFunc, initialServerCount),
 	}
@@ -114,7 +116,6 @@ func (tc *TestSchedulingCluster) WaitForPrimaryServing(re *require.Assertions) *
 		}
 		return false
 	}, testutil.WithWaitFor(10*time.Second), testutil.WithTickInterval(50*time.Millisecond))
-
 	return primary
 }
 
