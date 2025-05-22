@@ -82,6 +82,7 @@ func (m *Manager) Reset() {
 	m.progresses = make(map[uint64]*progressIndicator)
 }
 
+// SetPatrolRegionsDurationGetter sets the patrol regions duration getter.
 func (m *Manager) SetPatrolRegionsDurationGetter(getter patrolRegionsDurationGetter) {
 	m.Lock()
 	defer m.Unlock()
