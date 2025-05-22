@@ -61,6 +61,14 @@ func TestTIKVEngine(t *testing.T) {
 	scheduler, err := CreateScheduler(types.BalanceRangeScheduler, oc, storage.NewStorageWithMemoryBackend(),
 		ConfigSliceDecoder(types.BalanceRangeScheduler,
 			[]string{"leader-scatter", "tikv", "1h", "test", "100", "200"}))
+	re.True(scheduler.IsScheduleAllowed(tc))
+	km := tc.GetKeyRangeManager()
+	kr := keyutil.NewKeyRange("", "")
+	ranges := km.GetNonOverlappingKeyRanges(&kr)
+	re.Len(ranges, 2)
+	re.Equal(ranges[0], keyutil.NewKeyRange("", "100"))
+	re.Equal(ranges[1], keyutil.NewKeyRange("200", ""))
+
 	re.NoError(err)
 	ops, _ := scheduler.Schedule(tc, true)
 	re.Empty(ops)
@@ -93,6 +101,7 @@ func TestTIKVEngine(t *testing.T) {
 	re.Equal("3", op.GetAdditionalInfo("sourceScore"))
 	re.Equal("0", op.GetAdditionalInfo("targetScore"))
 	re.Contains(op.Brief(), "mv peer: store [1] to [4]")
+
 }
 
 func TestTIFLASHEngine(t *testing.T) {
