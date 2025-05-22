@@ -1503,6 +1503,7 @@ func (c *RaftCluster) RemoveStore(storeID uint64, physicallyDestroyed bool) erro
 
 	log.Warn("store has been offline",
 		zap.Uint64("store-id", storeID),
+		zap.Int("region-count", store.GetRegionCount()),
 		zap.String("store-address", store.GetAddress()),
 		zap.Bool("physically-destroyed", physicallyDestroyed))
 	if err := c.setStore(
@@ -1776,6 +1777,8 @@ func (c *RaftCluster) isStorePrepared() bool {
 }
 
 func (c *RaftCluster) checkStores() {
+	c.UpdateAllStoreStatus()
+
 	var (
 		offlineStores []*metapb.Store
 		upStoreCount  int
@@ -1829,25 +1832,23 @@ func (c *RaftCluster) checkStore(store *core.StoreInfo, stores []*core.StoreInfo
 		}
 	case metapb.NodeState_Serving:
 	case metapb.NodeState_Removing:
-		offlineStore := store.GetMeta()
-		id := offlineStore.GetId()
 		// If the store is empty, it can be buried.
-		needBury := c.GetStoreRegionCount(id) == 0
+		needBury := c.GetStoreRegionCount(storeID) == 0
 		failpoint.Inject("doNotBuryStore", func(_ failpoint.Value) {
 			needBury = false
 		})
 		if needBury {
-			if err := c.BuryStore(id, false); err != nil {
+			if err := c.BuryStore(storeID, false); err != nil {
 				log.Error("bury store failed",
-					zap.Stringer("store", offlineStore),
+					zap.Stringer("store", store.GetMeta()),
 					errs.ZapError(err))
 			}
 		} else {
-			return true
+			isInOffline = true
 		}
 	case metapb.NodeState_Removed:
 		if store.DownTime() <= gcTombstoneInterval {
-			return
+			break
 		}
 		// the store has already been tombstone
 		err := c.deleteStore(store)

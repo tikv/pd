@@ -541,10 +541,10 @@ func TestRemovingProcess(t *testing.T) {
 	// process = 5 / 20 = 0.25
 	re.Equal(0.25, p.ProgressPercent)
 	// Each region is 100MB, we use more than 1s to move 5 region.
-	// speed = 5 * 100MB / 20s = 25MB/s
-	re.Equal(25.0, p.CurrentSpeed)
-	// left second = 15 * 100MB / 25s = 60s
-	re.Equal(60.0, p.LeftSecond)
+	// speed = 5 * 100MB / 10s = 50MB/s
+	re.Equal(50.0, p.CurrentSpeed)
+	// left second = 15 * 100 / 50 = 60s
+	re.Equal(30.0, p.LeftSecond)
 }
 
 func TestDeleteStoreUpdatesClusterVersion(t *testing.T) {
