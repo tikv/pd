@@ -44,6 +44,7 @@ type Client interface {
 	GetRegionsByStoreID(context.Context, uint64) (*RegionsInfo, error)
 	GetEmptyRegions(context.Context) (*RegionsInfo, error)
 	GetRegionsReplicatedStateByKeyRange(context.Context, *KeyRange) (string, error)
+	GetRegionsSiblingByID(context.Context, uint64) (*RegionsInfo, error)
 	GetHotReadRegions(context.Context) (*StoreHotPeersInfos, error)
 	GetHotWriteRegions(context.Context) (*StoreHotPeersInfos, error)
 	GetHistoryHotRegions(context.Context, *HistoryHotRegionsRequest) (*HistoryHotRegions, error)
@@ -110,6 +111,7 @@ type Client interface {
 	/* Microservice interfaces */
 	GetMicroserviceMembers(context.Context, string) ([]MicroserviceMember, error)
 	GetMicroservicePrimary(context.Context, string) (string, error)
+	CreateMergeOperator(context.Context, uint64, uint64) error
 	DeleteOperators(context.Context) error
 
 	/* Keyspace interface */
@@ -273,6 +275,20 @@ func (c *client) GetRegionsReplicatedStateByKeyRange(ctx context.Context, keyRan
 		return "", err
 	}
 	return state, nil
+}
+
+// GetRegionsSiblingByID gets the regions sibling info by ID.
+func (c *client) GetRegionsSiblingByID(ctx context.Context, regionID uint64) (*RegionsInfo, error) {
+	var regions RegionsInfo
+	err := c.request(ctx, newRequestInfo().
+		WithName(getRegionsSiblingsByID).
+		WithURI(RegionsSiblingsByID(regionID)).
+		WithMethod(http.MethodGet).
+		WithResp(&regions))
+	if err != nil {
+		return nil, err
+	}
+	return &regions, nil
 }
 
 // GetHotReadRegions gets the hot read region statistics info.
@@ -1052,6 +1068,24 @@ func (c *client) GetPDVersion(ctx context.Context) (string, error) {
 		WithResp(&ver))
 	return ver.Version, err
 }
+
+// CreateMergeOperator creates a merge operator.
+func (c *client) CreateMergeOperator(ctx context.Context, sourceRegionID, targetRegionID uint64) error {
+	inputJSON, err := json.Marshal(map[string]any{
+		"name":             "merge-region",
+		"source_region_id": sourceRegionID,
+		"target_region_id": targetRegionID,
+	})
+	if err != nil {
+		return errors.Trace(err)
+	}
+	return c.request(ctx, newRequestInfo().
+		WithName(createMergeOperatorName).
+		WithURI(operators).
+		WithMethod(http.MethodPost).
+		WithBody(inputJSON))
+}
+
 
 // DeleteOperators deletes the running operators.
 func (c *client) DeleteOperators(ctx context.Context) error {
