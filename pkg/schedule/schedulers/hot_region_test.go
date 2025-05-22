@@ -310,7 +310,7 @@ func checkHotWriteRegionPlacement(re *require.Assertions, enablePlacementRules b
 	tc.SetRule(&placement.Rule{
 		GroupID: "pd", ID: "voter", Role: placement.Follower, Count: 2, LabelConstraints: []placement.LabelConstraint{{Key: "zone", Op: "in", Values: []string{"z2"}}},
 	})
-	tc.RuleManager.DeleteRule("pd", "default")
+	tc.RuleManager.DeleteRule(placement.DefaultGroupID, placement.DefaultRuleID)
 
 	tc.UpdateStorageWrittenBytes(1, 10*units.MiB*utils.StoreHeartBeatReportInterval)
 	tc.UpdateStorageWrittenBytes(2, 0)

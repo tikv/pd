@@ -16,6 +16,7 @@ package pd
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/gogo/protobuf/proto"
@@ -34,34 +35,40 @@ import (
 type actionType int
 
 const (
-	add                        actionType = 0
-	modify                     actionType = 1
-	groupSettingsPathPrefix               = "resource_group/settings"
-	controllerConfigPathPrefix            = "resource_group/controller"
+	add                                    actionType = 0
+	modify                                 actionType = 1
+	groupSettingsPathPrefix                           = "resource_group/settings"
+	keyspaceResourceGroupSettingPathPrefix            = "resource_group/keyspace/settings/%d"
+	controllerConfigPathPrefix                        = "resource_group/controller"
 )
 
-// GroupSettingsPathPrefixBytes is used to watch or get resource groups.
-var GroupSettingsPathPrefixBytes = []byte(groupSettingsPathPrefix)
+func GroupSettingsPathPrefixBytes(keyspaceID uint32) []byte {
+	if keyspaceID == constants.NullKeyspaceID {
+		return []byte(groupSettingsPathPrefix)
+	}
+	// TODO: Do we need to consider isSingleGroupByKeyspace?
+	// Will it be always true when we pass keyspaceID to this function?
+	return fmt.Appendf(nil, keyspaceResourceGroupSettingPathPrefix, keyspaceID)
+}
 
 // ControllerConfigPathPrefixBytes is used to watch or get controller config.
 var ControllerConfigPathPrefixBytes = []byte(controllerConfigPathPrefix)
 
 // ResourceManagerClient manages resource group info and token request.
 type ResourceManagerClient interface {
-	ListResourceGroups(ctx context.Context, opts ...GetResourceGroupOption) ([]*rmpb.ResourceGroup, error)
-	GetResourceGroup(ctx context.Context, resourceGroupName string, opts ...GetResourceGroupOption) (*rmpb.ResourceGroup, error)
+	ListResourceGroups(ctx context.Context, keyspaceID uint32, opts ...GetResourceGroupOption) ([]*rmpb.ResourceGroup, error)
+	GetResourceGroup(ctx context.Context, resourceGroupName string, keyspaceID uint32, opts ...GetResourceGroupOption) (*rmpb.ResourceGroup, error)
 	AddResourceGroup(ctx context.Context, metaGroup *rmpb.ResourceGroup) (string, error)
 	ModifyResourceGroup(ctx context.Context, metaGroup *rmpb.ResourceGroup) (string, error)
-	DeleteResourceGroup(ctx context.Context, resourceGroupName string, opts ...DeleteResourceGroupOption) (string, error)
-	LoadResourceGroups(ctx context.Context) ([]*rmpb.ResourceGroup, int64, error)
+	DeleteResourceGroup(ctx context.Context, resourceGroupName string, keyspaceID uint32) (string, error)
+	LoadResourceGroups(ctx context.Context, keyspaceID uint32) ([]*rmpb.ResourceGroup, int64, error)
 	AcquireTokenBuckets(ctx context.Context, request *rmpb.TokenBucketsRequest) ([]*rmpb.TokenBucketResponse, error)
 	Watch(ctx context.Context, key []byte, opts ...opt.MetaStorageOption) (chan []*meta_storagepb.Event, error)
 }
 
 // GetResourceGroupOp represents available options when getting resource group.
 type GetResourceGroupOp struct {
-	withRUStats    bool
-	withKeyspaceID *rmpb.KeyspaceIDValue
+	withRUStats bool
 }
 
 // GetResourceGroupOption configures GetResourceGroupOp.
@@ -70,32 +77,6 @@ type GetResourceGroupOption func(*GetResourceGroupOp)
 // WithRUStats specifies to return resource group with ru statistics data.
 func WithRUStats(op *GetResourceGroupOp) {
 	op.withRUStats = true
-}
-
-// WithKeyspaceID specifies to return resource group with keyspace id.
-func WithKeyspaceID(keyspaceID uint32) GetResourceGroupOption {
-	return func(op *GetResourceGroupOp) {
-		op.withKeyspaceID = &rmpb.KeyspaceIDValue{
-			Value: keyspaceID,
-		}
-	}
-}
-
-// DeleteResourceGroupOp represents available options when deleting resource group.
-type DeleteResourceGroupOp struct {
-	withKeyspaceID *rmpb.KeyspaceIDValue
-}
-
-// DeleteResourceGroupOption configures DeleteResourceGroupOp.
-type DeleteResourceGroupOption func(*DeleteResourceGroupOp)
-
-// DeleteWithKeyspaceID specifies to delete resource group with keyspace id.
-func DeleteWithKeyspaceID(keyspaceID uint32) DeleteResourceGroupOption {
-	return func(op *DeleteResourceGroupOp) {
-		op.withKeyspaceID = &rmpb.KeyspaceIDValue{
-			Value: keyspaceID,
-		}
-	}
 }
 
 // resourceManagerClient gets the ResourceManager client of current PD leader.
@@ -108,7 +89,7 @@ func (c *innerClient) resourceManagerClient() (rmpb.ResourceManagerClient, error
 }
 
 // ListResourceGroups loads and returns all metadata of resource groups.
-func (c *client) ListResourceGroups(ctx context.Context, ops ...GetResourceGroupOption) ([]*rmpb.ResourceGroup, error) {
+func (c *client) ListResourceGroups(ctx context.Context, keyspaceID uint32, ops ...GetResourceGroupOption) ([]*rmpb.ResourceGroup, error) {
 	cc, err := c.inner.resourceManagerClient()
 	if err != nil {
 		return nil, err
@@ -119,7 +100,11 @@ func (c *client) ListResourceGroups(ctx context.Context, ops ...GetResourceGroup
 	}
 	req := &rmpb.ListResourceGroupsRequest{
 		WithRuStats: getOp.withRUStats,
-		KeyspaceId:  getOp.withKeyspaceID,
+	}
+	if keyspaceID != constants.NullKeyspaceID {
+		req.KeyspaceId = &rmpb.KeyspaceIDValue{
+			Value: keyspaceID,
+		}
 	}
 	resp, err := cc.ListResourceGroups(ctx, req)
 	if err != nil {
@@ -134,7 +119,7 @@ func (c *client) ListResourceGroups(ctx context.Context, ops ...GetResourceGroup
 }
 
 // GetResourceGroup implements the ResourceManagerClient interface.
-func (c *client) GetResourceGroup(ctx context.Context, resourceGroupName string, ops ...GetResourceGroupOption) (*rmpb.ResourceGroup, error) {
+func (c *client) GetResourceGroup(ctx context.Context, resourceGroupName string, keyspaceID uint32, ops ...GetResourceGroupOption) (*rmpb.ResourceGroup, error) {
 	cc, err := c.inner.resourceManagerClient()
 	if err != nil {
 		return nil, err
@@ -146,7 +131,11 @@ func (c *client) GetResourceGroup(ctx context.Context, resourceGroupName string,
 	req := &rmpb.GetResourceGroupRequest{
 		ResourceGroupName: resourceGroupName,
 		WithRuStats:       getOp.withRUStats,
-		KeyspaceId:        getOp.withKeyspaceID,
+	}
+	if keyspaceID != constants.NullKeyspaceID {
+		req.KeyspaceId = &rmpb.KeyspaceIDValue{
+			Value: keyspaceID,
+		}
 	}
 	resp, err := cc.GetResourceGroup(ctx, req)
 	if err != nil {
@@ -197,18 +186,18 @@ func (c *client) putResourceGroup(ctx context.Context, metaGroup *rmpb.ResourceG
 }
 
 // DeleteResourceGroup implements the ResourceManagerClient interface.
-func (c *client) DeleteResourceGroup(ctx context.Context, resourceGroupName string, ops ...DeleteResourceGroupOption) (string, error) {
+func (c *client) DeleteResourceGroup(ctx context.Context, resourceGroupName string, keyspaceID uint32) (string, error) {
 	cc, err := c.inner.resourceManagerClient()
 	if err != nil {
 		return "", err
 	}
-	deleteOp := &DeleteResourceGroupOp{}
-	for _, op := range ops {
-		op(deleteOp)
-	}
 	req := &rmpb.DeleteResourceGroupRequest{
 		ResourceGroupName: resourceGroupName,
-		KeyspaceId:        deleteOp.withKeyspaceID,
+	}
+	if keyspaceID != constants.NullKeyspaceID {
+		req.KeyspaceId = &rmpb.KeyspaceIDValue{
+			Value: keyspaceID,
+		}
 	}
 	resp, err := cc.DeleteResourceGroup(ctx, req)
 	if err != nil {
@@ -223,8 +212,9 @@ func (c *client) DeleteResourceGroup(ctx context.Context, resourceGroupName stri
 }
 
 // LoadResourceGroups implements the ResourceManagerClient interface.
-func (c *client) LoadResourceGroups(ctx context.Context) ([]*rmpb.ResourceGroup, int64, error) {
-	resp, err := c.Get(ctx, GroupSettingsPathPrefixBytes, opt.WithPrefix())
+func (c *client) LoadResourceGroups(ctx context.Context, keyspaceID uint32) ([]*rmpb.ResourceGroup, int64, error) {
+	prefix := GroupSettingsPathPrefixBytes(keyspaceID)
+	resp, err := c.Get(ctx, prefix, opt.WithPrefix())
 	if err != nil {
 		return nil, 0, err
 	}

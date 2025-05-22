@@ -32,6 +32,7 @@ import (
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 
 	pd "github.com/tikv/pd/client"
+	"github.com/tikv/pd/client/constants"
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/opt"
 )
@@ -190,12 +191,12 @@ func newMockResourceGroupProvider() *MockResourceGroupProvider {
 	return mockProvider
 }
 
-func (m *MockResourceGroupProvider) GetResourceGroup(ctx context.Context, resourceGroupName string, opts ...pd.GetResourceGroupOption) (*rmpb.ResourceGroup, error) {
+func (m *MockResourceGroupProvider) GetResourceGroup(ctx context.Context, resourceGroupName string, keyspaceID uint32, opts ...pd.GetResourceGroupOption) (*rmpb.ResourceGroup, error) {
 	args := m.Called(ctx, resourceGroupName, opts)
 	return args.Get(0).(*rmpb.ResourceGroup), args.Error(1)
 }
 
-func (m *MockResourceGroupProvider) ListResourceGroups(ctx context.Context, opts ...pd.GetResourceGroupOption) ([]*rmpb.ResourceGroup, error) {
+func (m *MockResourceGroupProvider) ListResourceGroups(ctx context.Context, keyspaceID uint32, opts ...pd.GetResourceGroupOption) ([]*rmpb.ResourceGroup, error) {
 	args := m.Called(ctx, opts)
 	return args.Get(0).([]*rmpb.ResourceGroup), args.Error(1)
 }
@@ -210,7 +211,7 @@ func (m *MockResourceGroupProvider) ModifyResourceGroup(ctx context.Context, met
 	return args.String(0), args.Error(1)
 }
 
-func (m *MockResourceGroupProvider) DeleteResourceGroup(ctx context.Context, resourceGroupName string, _ ...pd.DeleteResourceGroupOption) (string, error) {
+func (m *MockResourceGroupProvider) DeleteResourceGroup(ctx context.Context, resourceGroupName string, keyspaceID uint32) (string, error) {
 	args := m.Called(ctx, resourceGroupName)
 	return args.String(0), args.Error(1)
 }
@@ -220,7 +221,7 @@ func (m *MockResourceGroupProvider) AcquireTokenBuckets(ctx context.Context, req
 	return args.Get(0).([]*rmpb.TokenBucketResponse), args.Error(1)
 }
 
-func (m *MockResourceGroupProvider) LoadResourceGroups(ctx context.Context) ([]*rmpb.ResourceGroup, int64, error) {
+func (m *MockResourceGroupProvider) LoadResourceGroups(ctx context.Context, keyspaceID uint32) ([]*rmpb.ResourceGroup, int64, error) {
 	args := m.Called(ctx)
 	return args.Get(0).([]*rmpb.ResourceGroup), args.Get(1).(int64), args.Error(2)
 }
@@ -251,7 +252,7 @@ func TestControllerWithTwoGroupRequestConcurrency(t *testing.T) {
 	defer failpoint.Disable("github.com/tikv/pd/client/resource_group/controller/triggerLowRUReport")
 
 	mockProvider := newMockResourceGroupProvider()
-	controller, _ := NewResourceGroupController(ctx, 1, mockProvider, nil)
+	controller, _ := NewResourceGroupController(ctx, 1, mockProvider, nil, constants.NullKeyspaceID)
 	controller.Start(ctx)
 
 	defaultResourceGroup := &rmpb.ResourceGroup{Name: defaultResourceGroupName, Mode: rmpb.GroupMode_RUMode, RUSettings: &rmpb.GroupRequestUnitSettings{RU: &rmpb.TokenBucket{Settings: &rmpb.TokenLimitSettings{FillRate: 1000000}}}}
@@ -325,7 +326,7 @@ func TestTryGetController(t *testing.T) {
 	defer cancel()
 
 	mockProvider := newMockResourceGroupProvider()
-	controller, _ := NewResourceGroupController(ctx, 1, mockProvider, nil)
+	controller, _ := NewResourceGroupController(ctx, 1, mockProvider, nil, constants.NullKeyspaceID)
 	controller.Start(ctx)
 
 	defaultResourceGroup := &rmpb.ResourceGroup{Name: defaultResourceGroupName, Mode: rmpb.GroupMode_RUMode, RUSettings: &rmpb.GroupRequestUnitSettings{RU: &rmpb.TokenBucket{Settings: &rmpb.TokenLimitSettings{FillRate: 1000000}}}}
