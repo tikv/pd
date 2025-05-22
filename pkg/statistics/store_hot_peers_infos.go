@@ -70,7 +70,13 @@ func CollectHotPeerInfos(stores []*core.StoreInfo, regionStats map[uint64][]*Hot
 
 // GetHotStatus returns the hot status for a given type.
 // NOTE: This function is exported by HTTP API. It does not contain `isLearner` and `LastUpdateTime` field. If need, please call `updateRegionInfo`.
-func GetHotStatus(stores []*core.StoreInfo, storesLoads map[uint64][]float64, regionStats map[uint64][]*HotPeerStat, typ utils.RWType, isTraceRegionFlow bool) *StoreHotPeersInfos {
+func GetHotStatus(
+	stores []*core.StoreInfo,
+	storesLoads map[uint64]StoreKindLoads,
+	regionStats map[uint64][]*HotPeerStat,
+	typ utils.RWType,
+	isTraceRegionFlow bool,
+) *StoreHotPeersInfos {
 	stInfos := SummaryStoreInfos(stores)
 	stLoadInfosAsLeader := SummaryStoresLoad(
 		stInfos,
@@ -106,7 +112,7 @@ func GetHotStatus(stores []*core.StoreInfo, storesLoads map[uint64][]float64, re
 // it will filter the hot peer and calculate the current and future stat(rate,count) for each store
 func SummaryStoresLoad(
 	storeInfos map[uint64]*StoreSummaryInfo,
-	storesLoads map[uint64][]float64,
+	storesLoads map[uint64]StoreKindLoads,
 	storesHistoryLoads *StoreHistoryLoads,
 	storeHotPeers map[uint64][]*HotPeerStat,
 	isTraceRegionFlow bool,
@@ -141,18 +147,20 @@ func SummaryStoresLoad(
 
 func summaryStoresLoadByEngine(
 	storeInfos map[uint64]*StoreSummaryInfo,
-	storesLoads map[uint64][]float64,
+	storesLoads map[uint64]StoreKindLoads,
 	storesHistoryLoads *StoreHistoryLoads,
 	storeHotPeers map[uint64][]*HotPeerStat,
 	rwTy utils.RWType,
 	kind constant.ResourceKind,
 	collector storeCollector,
 ) []*StoreLoadDetail {
-	loadDetail := make([]*StoreLoadDetail, 0, len(storeInfos))
-	allStoreLoadSum := make([]float64, utils.DimLen)
-	allStoreHistoryLoadSum := make([][]float64, utils.DimLen) // row: dim, column: time
-	allStoreCount := 0
-	allHotPeersCount := 0
+	var (
+		loadDetail             = make([]*StoreLoadDetail, 0, len(storeInfos))
+		allStoreLoadSum        Loads
+		allStoreHistoryLoadSum HistoryLoads
+		allStoreCount          = 0
+		allHotPeersCount       = 0
+	)
 
 	for _, info := range storeInfos {
 		store := info.StoreInfo
@@ -164,17 +172,17 @@ func summaryStoresLoadByEngine(
 
 		// Find all hot peers first
 		var hotPeers []*HotPeerStat
-		peerLoadSum := make([]float64, utils.DimLen)
+		var peerLoadSum Loads
 		// For hot leaders, we need to calculate the sum of the leader's write and read flow rather than the all peers.
 		for _, peer := range filterHotPeers(kind, storeHotPeers[id]) {
-			for i := range peerLoadSum {
-				peerLoadSum[i] += peer.GetLoad(i)
+			for dim := range utils.DimLen {
+				peerLoadSum[dim] += peer.GetLoad(dim)
 			}
 			hotPeers = append(hotPeers, peer.Clone())
 		}
 		currentLoads := collector.getLoads(storeLoads, peerLoadSum, rwTy, kind)
 
-		var historyLoads [][]float64
+		var historyLoads HistoryLoads
 		if storesHistoryLoads != nil {
 			historyLoads = storesHistoryLoads.Get(id, rwTy, kind)
 
@@ -198,7 +206,7 @@ func summaryStoresLoadByEngine(
 		// Build store load prediction from current load and pending influence.
 		stLoadPred := (&StoreLoad{
 			Loads:        currentLoads,
-			Count:        float64(len(hotPeers)),
+			HotPeerCount: float64(len(hotPeers)),
 			HistoryLoads: historyLoads,
 		}).ToLoadPred(rwTy, info.PendingSum)
 
@@ -214,21 +222,23 @@ func summaryStoresLoadByEngine(
 		return loadDetail
 	}
 
-	expectCount := float64(allHotPeersCount) / float64(allStoreCount)
-	expectLoads := make([]float64, len(allStoreLoadSum))
-	for i := range expectLoads {
+	var (
+		expectCount = float64(allHotPeersCount) / float64(allStoreCount)
+		expectLoads Loads
+		// TODO: remove some the max value or min value to avoid the effect of extreme value.
+		expectHistoryLoads HistoryLoads
+		stddevLoads        Loads
+	)
+	for i := range utils.DimLen {
 		expectLoads[i] = allStoreLoadSum[i] / float64(allStoreCount)
 	}
 
-	// TODO: remove some the max value or min value to avoid the effect of extreme value.
-	expectHistoryLoads := make([][]float64, utils.DimLen) // row: dim, column: time
-	for i := range allStoreHistoryLoadSum {
-		expectHistoryLoads[i] = make([]float64, len(allStoreHistoryLoadSum[i]))
-		for j := range allStoreHistoryLoadSum[i] {
-			expectHistoryLoads[i][j] = allStoreHistoryLoadSum[i][j] / float64(allStoreCount)
+	for dim := range allStoreHistoryLoadSum {
+		expectHistoryLoads[dim] = make([]float64, len(allStoreHistoryLoadSum[dim]))
+		for j := range allStoreHistoryLoadSum[dim] {
+			expectHistoryLoads[dim][j] = allStoreHistoryLoadSum[dim][j] / float64(allStoreCount)
 		}
 	}
-	stddevLoads := make([]float64, len(allStoreLoadSum))
 	if allHotPeersCount != 0 {
 		for _, detail := range loadDetail {
 			for i := range expectLoads {
@@ -260,12 +270,12 @@ func summaryStoresLoadByEngine(
 	}
 	expect := StoreLoad{
 		Loads:        expectLoads,
-		Count:        expectCount,
+		HotPeerCount: expectCount,
 		HistoryLoads: expectHistoryLoads,
 	}
 	stddev := StoreLoad{
-		Loads: stddevLoads,
-		Count: expectCount,
+		Loads:        stddevLoads,
+		HotPeerCount: expectCount,
 	}
 	for _, detail := range loadDetail {
 		detail.LoadPred.Expect = expect

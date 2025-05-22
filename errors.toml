@@ -846,6 +846,11 @@ error = '''
 invalid group settings, please check the group name, priority and the number of resources
 '''
 
+["PD:resourcemanager:ErrKeyspaceNotExists"]
+error = '''
+the keyspace does not exist with id %d
+'''
+
 ["PD:scatter:ErrEmptyRegion"]
 error = '''
 empty region

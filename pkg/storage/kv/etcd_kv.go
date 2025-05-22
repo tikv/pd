@@ -354,14 +354,18 @@ func convertOps(ops []RawTxnOp) []clientv3.Op {
 // Then implements RawTxn interface for adding operations that need to be executed when the condition passes to
 // the transaction.
 func (l *rawTxnWrapper) Then(ops ...RawTxnOp) RawTxn {
-	l.inner = l.inner.Then(convertOps(ops)...)
+	convertedOps := convertOps(ops)
+	etcdutil.InjectFailToCollectTestEtcdOps(convertedOps...)
+	l.inner = l.inner.Then(convertedOps...)
 	return l
 }
 
 // Else implements RawTxn interface for adding operations that need to be executed when the condition doesn't pass
 // to the transaction.
 func (l *rawTxnWrapper) Else(ops ...RawTxnOp) RawTxn {
-	l.inner = l.inner.Else(convertOps(ops)...)
+	convertedOps := convertOps(ops)
+	etcdutil.InjectFailToCollectTestEtcdOps(convertedOps...)
+	l.inner = l.inner.Else(convertedOps...)
 	return l
 }
 

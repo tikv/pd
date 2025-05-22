@@ -54,7 +54,7 @@ func mustMakeTestKeyspaces(re *require.Assertions, server *server.Server, start 
 	return keyspaces
 }
 
-func (suite *clientTestSuite) TestLoadKeyspace() {
+func (suite *clientStatelessTestSuite) TestLoadKeyspace() {
 	re := suite.Require()
 	metas := mustMakeTestKeyspaces(re, suite.srv, 0)
 	for _, expected := range metas {
@@ -72,7 +72,7 @@ func (suite *clientTestSuite) TestLoadKeyspace() {
 	re.Equal(constant.DefaultKeyspaceName, keyspaceDefault.GetName())
 }
 
-func (suite *clientTestSuite) TestGetAllKeyspaces() {
+func (suite *clientStatelessTestSuite) TestGetAllKeyspaces() {
 	re := suite.Require()
 	metas := mustMakeTestKeyspaces(re, suite.srv, 20)
 	for _, expected := range metas {
@@ -130,7 +130,7 @@ func mustCreateKeyspaceAtState(re *require.Assertions, server *server.Server, in
 	return meta
 }
 
-func (suite *clientTestSuite) TestUpdateKeyspaceState() {
+func (suite *clientStatelessTestSuite) TestUpdateKeyspaceState() {
 	re := suite.Require()
 	allStates := []keyspacepb.KeyspaceState{
 		keyspacepb.KeyspaceState_ENABLED,
