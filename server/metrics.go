@@ -14,7 +14,13 @@
 
 package server
 
-import "github.com/prometheus/client_golang/prometheus"
+import (
+	"math/rand"
+
+	"github.com/prometheus/client_golang/prometheus"
+
+	"github.com/pingcap/kvproto/pkg/pdpb"
+)
 
 var (
 	timeJumpBackCounter = prometheus.NewCounter(
@@ -177,6 +183,14 @@ var (
 			Help:      "Bucketed histogram of processing time (s) of handled forward tso requests.",
 			Buckets:   prometheus.ExponentialBuckets(0.0005, 2, 13),
 		})
+
+	regionRequestCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "pd",
+			Subsystem: "server",
+			Name:      "region_request_cnt",
+			Help:      "Counter of region request.",
+		}, []string{"request", "caller_id", "caller_component", "err_msg"})
 )
 
 func init() {
@@ -199,4 +213,28 @@ func init() {
 	prometheus.MustRegister(apiConcurrencyGauge)
 	prometheus.MustRegister(forwardFailCounter)
 	prometheus.MustRegister(forwardTsoDuration)
+	prometheus.MustRegister(regionRequestCounter)
+}
+
+func incRegionRequestCounter(method string, header *pdpb.RequestHeader, err *pdpb.Error) {
+	if err == nil && rand.Intn(100) != 0 {
+		// sample 1% region requests to avoid high cardinality
+		return
+	}
+
+	var (
+		errMsg          = ""
+		callerID        = header.CallerId
+		callerComponent = header.CallerComponent
+	)
+	if err != nil {
+		errMsg = err.Type.String()
+	}
+	if callerID == "" {
+		callerID = "unknown"
+	}
+	if callerComponent == "" {
+		callerComponent = "unknown"
+	}
+	regionRequestCounter.WithLabelValues(method, callerID, callerComponent, errMsg).Inc()
 }
