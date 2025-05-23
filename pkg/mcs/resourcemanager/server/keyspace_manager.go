@@ -32,13 +32,13 @@ import (
 
 const (
 	defaultConsumptionChanSize = 1024
-
-	reservedDefaultGroupName = "default"
-	maxGroupNameLength       = 32
-	middlePriority           = 8
-	maxPriority              = 16
-	unlimitedRate            = math.MaxInt32
-	unlimitedBurstLimit      = -1
+	maxGroupNameLength         = 32
+	middlePriority             = 8
+	maxPriority                = 16
+	unlimitedRate              = math.MaxInt32
+	unlimitedBurstLimit        = -1
+	// DefaultResourceGroupName is the reserved default resource group name within each keyspace.
+	DefaultResourceGroupName = "default"
 )
 
 // consumptionItem is used to send the consumption info to the background metrics flusher.
@@ -96,13 +96,13 @@ func (krgm *keyspaceResourceGroupManager) setRawStatesIntoResourceGroup(name str
 
 func (krgm *keyspaceResourceGroupManager) initDefaultResourceGroup() {
 	krgm.RLock()
-	if _, ok := krgm.groups[reservedDefaultGroupName]; ok {
+	if _, ok := krgm.groups[DefaultResourceGroupName]; ok {
 		krgm.RUnlock()
 		return
 	}
 	krgm.RUnlock()
 	defaultGroup := &ResourceGroup{
-		Name: reservedDefaultGroupName,
+		Name: DefaultResourceGroupName,
 		Mode: rmpb.GroupMode_RUMode,
 		RUSettings: &RequestUnitSettings{
 			RU: &GroupTokenBucket{
@@ -159,7 +159,7 @@ func (krgm *keyspaceResourceGroupManager) modifyResourceGroup(group *rmpb.Resour
 }
 
 func (krgm *keyspaceResourceGroupManager) deleteResourceGroup(name string) error {
-	if name == reservedDefaultGroupName {
+	if name == DefaultResourceGroupName {
 		return errs.ErrDeleteReservedGroup
 	}
 	if err := krgm.storage.DeleteResourceGroupSetting(krgm.keyspaceID, name); err != nil {
@@ -190,7 +190,7 @@ func (krgm *keyspaceResourceGroupManager) getResourceGroupList(withStats, includ
 	krgm.RLock()
 	res := make([]*ResourceGroup, 0, len(krgm.groups))
 	for _, group := range krgm.groups {
-		if !includeDefault && group.Name == reservedDefaultGroupName {
+		if !includeDefault && group.Name == DefaultResourceGroupName {
 			continue
 		}
 		res = append(res, group.Clone(withStats))
@@ -207,7 +207,7 @@ func (krgm *keyspaceResourceGroupManager) getResourceGroupNames(includeDefault b
 	defer krgm.RUnlock()
 	res := make([]string, 0, len(krgm.groups))
 	for name := range krgm.groups {
-		if !includeDefault && name == reservedDefaultGroupName {
+		if !includeDefault && name == DefaultResourceGroupName {
 			continue
 		}
 		res = append(res, name)

@@ -36,16 +36,16 @@ func TestInitDefaultResourceGroup(t *testing.T) {
 	re.Empty(krgm.groups)
 
 	// No default resource group initially.
-	_, exists := krgm.groups[reservedDefaultGroupName]
+	_, exists := krgm.groups[DefaultResourceGroupName]
 	re.False(exists)
 
 	// Initialize the default resource group.
 	krgm.initDefaultResourceGroup()
 
 	// Verify the default resource group is created.
-	defaultGroup, exists := krgm.groups[reservedDefaultGroupName]
+	defaultGroup, exists := krgm.groups[DefaultResourceGroupName]
 	re.True(exists)
-	re.Equal(reservedDefaultGroupName, defaultGroup.Name)
+	re.Equal(DefaultResourceGroupName, defaultGroup.Name)
 	re.Equal(rmpb.GroupMode_RUMode, defaultGroup.Mode)
 	re.Equal(uint32(middlePriority), defaultGroup.Priority)
 
@@ -183,11 +183,11 @@ func TestDeleteResourceGroup(t *testing.T) {
 
 	// Try to delete the default group.
 	krgm.initDefaultResourceGroup()
-	err = krgm.deleteResourceGroup(reservedDefaultGroupName)
+	err = krgm.deleteResourceGroup(DefaultResourceGroupName)
 	re.Error(err) // Should not be able to delete default group.
 
 	// Verify default group still exists.
-	re.NotNil(krgm.getResourceGroup(reservedDefaultGroupName, false))
+	re.NotNil(krgm.getResourceGroup(DefaultResourceGroupName, false))
 }
 
 func TestGetResourceGroup(t *testing.T) {
