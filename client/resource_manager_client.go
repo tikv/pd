@@ -42,6 +42,7 @@ const (
 	controllerConfigPathPrefix                        = "resource_group/controller"
 )
 
+// GroupSettingsPathPrefixBytes is used to watch or get resource groups.
 func GroupSettingsPathPrefixBytes(keyspaceID uint32) []byte {
 	if keyspaceID == constants.NullKeyspaceID {
 		return []byte(groupSettingsPathPrefix)
