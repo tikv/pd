@@ -30,10 +30,12 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/goleak"
+	"go.uber.org/zap"
 
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/response"
@@ -1160,6 +1162,7 @@ func sendRequest(re *require.Assertions, url string, method string, statusCode i
 
 	testutil.Eventually(re, func() bool {
 		resp, err := tests.TestDialClient.Do(req)
+		log.Info("send request", zap.String("url", url), zap.String("method", method), zap.Int("statusCode", resp.StatusCode))
 		if err != nil {
 			return false
 		}
