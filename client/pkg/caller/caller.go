@@ -22,9 +22,9 @@ import (
 )
 
 type (
-	// Caller ID can be understood as a binary file; it is a process.
+	// ID can be understood as a binary file; it is a process.
 	ID string
-	// Caller component refers to the components within the process.
+	// Component refers to the components within the process.
 	Component string
 )
 

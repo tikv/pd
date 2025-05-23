@@ -192,7 +192,7 @@ func (c *Cluster) GetRegionScatterer() *scatter.RegionScatterer {
 }
 
 // GetStoresLoads returns load stats of all stores.
-func (c *Cluster) GetStoresLoads() map[uint64][]float64 {
+func (c *Cluster) GetStoresLoads() map[uint64]statistics.StoreKindLoads {
 	return c.hotStat.GetStoresLoads()
 }
 
@@ -247,7 +247,12 @@ func (c *Cluster) AllocID(count uint32) (uint64, uint32, error) {
 	}
 	ctx, cancel := context.WithTimeout(c.ctx, requestTimeout)
 	defer cancel()
-	resp, err := client.AllocID(ctx, &pdpb.AllocIDRequest{Header: &pdpb.RequestHeader{ClusterId: keypath.ClusterID()}, Count: count})
+	req := &pdpb.AllocIDRequest{Header: &pdpb.RequestHeader{ClusterId: keypath.ClusterID()}, Count: count}
+
+	failpoint.Inject("allocIDNonBatch", func() {
+		req = &pdpb.AllocIDRequest{Header: &pdpb.RequestHeader{ClusterId: keypath.ClusterID()}}
+	})
+	resp, err := client.AllocID(ctx, req)
 	if err != nil {
 		c.triggerMembershipCheck()
 		return 0, 0, err
@@ -429,11 +434,8 @@ func (c *Cluster) HandleStoreHeartbeat(heartbeat *schedulingpb.StoreHeartbeatReq
 		return errors.Errorf("store %v not found", storeID)
 	}
 
-	nowTime := time.Now()
-	newStore := store.Clone(core.SetStoreStats(stats), core.SetLastHeartbeatTS(nowTime))
-
-	c.PutStore(newStore)
-	c.hotStat.Observe(storeID, newStore.GetStoreStats())
+	c.PutStore(store, core.SetStoreStats(stats), core.SetLastHeartbeatTS(time.Now()))
+	c.hotStat.Observe(storeID, stats)
 	c.hotStat.FilterUnhealthyStore(c)
 	reportInterval := stats.GetInterval()
 	interval := reportInterval.GetEndTimestamp() - reportInterval.GetStartTimestamp()

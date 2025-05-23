@@ -164,8 +164,10 @@ type Server struct {
 	encryptionKeyManager *encryption.Manager
 	// for storage operation.
 	storage storage.Storage
-	// safepoint manager
+	// safe point manager (to be deprecated)
 	gcSafePointManager *gc.SafePointManager
+	// GC states manager
+	gcStateManager *gc.GCStateManager
 	// keyspace manager
 	keyspaceManager *keyspace.Manager
 	// safe point V2 manager
@@ -175,7 +177,7 @@ type Server struct {
 	// for basicCluster operation.
 	basicCluster *core.BasicCluster
 	// for tso.
-	tsoAllocatorManager *tso.AllocatorManager
+	tsoAllocator *tso.Allocator
 	// for raft cluster
 	cluster *cluster.RaftCluster
 	// For async region heartbeat.
@@ -468,10 +470,10 @@ func (s *Server) startServer(ctx context.Context) error {
 	s.tsoDispatcher = tsoutil.NewTSODispatcher(tsoProxyHandleDuration, tsoProxyBatchSize)
 	s.tsoProtoFactory = &tsoutil.TSOProtoFactory{}
 	s.pdProtoFactory = &tsoutil.PDProtoFactory{}
-	s.tsoAllocatorManager = tso.NewAllocatorManager(s.ctx, constant.DefaultKeyspaceGroupID, s.member, s.storage, s)
+	s.tsoAllocator = tso.NewAllocator(s.ctx, constant.DefaultKeyspaceGroupID, s.member, s.storage, s)
 	s.gcSafePointManager = gc.NewSafePointManager(s.storage, s.cfg.PDServerCfg)
 	s.basicCluster = core.NewBasicCluster()
-	s.cluster = cluster.NewRaftCluster(ctx, s.GetMember(), s.GetBasicCluster(), s.GetStorage(), syncer.NewRegionSyncer(s), s.client, s.httpClient, s.tsoAllocatorManager)
+	s.cluster = cluster.NewRaftCluster(ctx, s.GetMember(), s.GetBasicCluster(), s.GetStorage(), syncer.NewRegionSyncer(s), s.client, s.httpClient, s.tsoAllocator)
 	keyspaceIDAllocator := id.NewAllocator(&id.AllocatorParams{
 		Client: s.client,
 		Label:  id.KeyspaceLabel,
@@ -482,6 +484,7 @@ func (s *Server) startServer(ctx context.Context) error {
 		s.keyspaceGroupManager = keyspace.NewKeyspaceGroupManager(s.ctx, s.storage, s.client)
 	}
 	s.keyspaceManager = keyspace.NewKeyspaceManager(s.ctx, s.storage, s.cluster, keyspaceIDAllocator, &s.cfg.Keyspace, s.keyspaceGroupManager)
+	s.gcStateManager = gc.NewGCStateManager(s.storage.GetGCStateProvider(), s.cfg.PDServerCfg, s.keyspaceManager)
 	s.safePointV2Manager = gc.NewSafePointManagerV2(s.ctx, s.storage, s.storage, s.storage)
 	s.hbStreams = hbstream.NewHeartbeatStreams(ctx, "", s.cluster)
 	// initial hot_region_storage in here.
@@ -532,6 +535,9 @@ func (s *Server) Close() {
 	s.stopServerLoop()
 	if s.IsKeyspaceGroupEnabled() {
 		s.keyspaceGroupManager.Close()
+	}
+	if s.tsoAllocator != nil {
+		s.tsoAllocator.Close()
 	}
 
 	if s.client != nil {
@@ -845,6 +851,11 @@ func (s *Server) GetStorage() storage.Storage {
 	return s.storage
 }
 
+// GetGCStateManager returns the GC state manager of the server.
+func (s *Server) GetGCStateManager() *gc.GCStateManager {
+	return s.gcStateManager
+}
+
 // GetHistoryHotRegionStorage returns the backend storage of historyHotRegion.
 func (s *Server) GetHistoryHotRegionStorage() *storage.HotRegionStorage {
 	return s.hotRegionStorage
@@ -881,9 +892,9 @@ func (s *Server) GetAllocator() id.Allocator {
 	return s.idAllocator
 }
 
-// GetTSOAllocatorManager returns the manager of TSO Allocator.
-func (s *Server) GetTSOAllocatorManager() *tso.AllocatorManager {
-	return s.tsoAllocatorManager
+// GetTSOAllocator returns the TSO Allocator.
+func (s *Server) GetTSOAllocator() *tso.Allocator {
+	return s.tsoAllocator
 }
 
 // GetKeyspaceManager returns the keyspace manager of server.
@@ -1066,18 +1077,18 @@ func (s *Server) SetReplicationConfig(cfg sc.ReplicationConfig) error {
 
 		CheckInDefaultRule := func() error {
 			// replication config won't work when placement rule is enabled and exceeds one default rule
-			if !(defaultRule != nil &&
-				len(defaultRule.StartKey) == 0 && len(defaultRule.EndKey) == 0) {
+			if defaultRule == nil ||
+				len(defaultRule.StartKey) != 0 || len(defaultRule.EndKey) != 0 {
 				return errors.New("cannot update MaxReplicas, LocationLabels or IsolationLevel when placement rules feature is enabled and not only default rule exists, please update rule instead")
 			}
-			if !(defaultRule.Count == int(old.MaxReplicas) && typeutil.AreStringSlicesEqual(defaultRule.LocationLabels, []string(old.LocationLabels)) && defaultRule.IsolationLevel == old.IsolationLevel) {
+			if defaultRule.Count != int(old.MaxReplicas) || !typeutil.AreStringSlicesEqual(defaultRule.LocationLabels, []string(old.LocationLabels)) || defaultRule.IsolationLevel != old.IsolationLevel {
 				return errors.New("cannot to update replication config, the default rules do not consistent with replication config, please update rule instead")
 			}
 
 			return nil
 		}
 
-		if !(cfg.MaxReplicas == old.MaxReplicas && typeutil.AreStringSlicesEqual(cfg.LocationLabels, old.LocationLabels) && cfg.IsolationLevel == old.IsolationLevel) {
+		if cfg.MaxReplicas != old.MaxReplicas || !typeutil.AreStringSlicesEqual(cfg.LocationLabels, old.LocationLabels) || cfg.IsolationLevel != old.IsolationLevel {
 			if err := CheckInDefaultRule(); err != nil {
 				return err
 			}
@@ -1871,7 +1882,7 @@ func (s *Server) PersistFile(name string, data []byte) error {
 	}
 	log.Info("persist file", zap.String("name", name), zap.Binary("data", data))
 	path := filepath.Join(s.GetConfig().DataDir, name)
-	if !isPathInDirectory(path, s.GetConfig().DataDir) {
+	if !apiutil.IsPathInDirectory(path, s.GetConfig().DataDir) {
 		return errors.New("Invalid file path")
 	}
 	return os.WriteFile(path, data, 0644) // #nosec
@@ -2090,10 +2101,4 @@ func (s *Server) GetMaxResetTSGap() time.Duration {
 // Notes: it is only used for test.
 func (s *Server) SetClient(client *clientv3.Client) {
 	s.client = client
-}
-
-// GetGlobalTSOAllocator return global tso allocator
-// It only is used for test.
-func (s *Server) GetGlobalTSOAllocator() tso.Allocator {
-	return s.cluster.GetGlobalTSOAllocator()
 }

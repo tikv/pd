@@ -25,48 +25,65 @@ import (
 
 	"github.com/pingcap/failpoint"
 
-	tu "github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server/apiv2/handlers"
 	"github.com/tikv/pd/tests"
 )
 
-func TestReady(t *testing.T) {
+func TestReadyAPI(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	cluster, err := tests.NewTestCluster(ctx, 1)
+	cluster, err := tests.NewTestCluster(ctx, 3)
 	re.NoError(err)
 	defer cluster.Destroy()
 	re.NoError(cluster.RunInitialServers())
 	re.NotEmpty(cluster.WaitLeader())
-	server := cluster.GetLeaderServer()
-	re.NoError(server.BootstrapCluster())
-	url := server.GetConfig().ClientUrls + v2Prefix + "/ready"
-	failpoint.Enable("github.com/tikv/pd/pkg/storage/loadRegionSlow", `return()`)
-	checkReady(re, url, false)
-	failpoint.Disable("github.com/tikv/pd/pkg/storage/loadRegionSlow")
-	checkReady(re, url, true)
+	leader := cluster.GetLeaderServer()
+	re.NoError(leader.BootstrapCluster())
+	leaderURL := leader.GetConfig().ClientUrls + v2Prefix + "/ready"
+	followerServer := cluster.GetServer(cluster.GetFollower())
+	followerURL := followerServer.GetConfig().ClientUrls + v2Prefix + "/ready"
+	checkReadyAPI(re, leaderURL, true)
+	checkReadyAPI(re, followerURL, true)
+
+	// check ready status when region is not loaded for leader
+	failpoint.Enable("github.com/tikv/pd/server/apiv2/handlers/loadRegionSlow", `return("`+leader.GetAddr()+`")`)
+	checkReadyAPI(re, leaderURL, false)
+	checkReadyAPI(re, followerURL, true)
+
+	// check ready status when region is not loaded for follower
+	failpoint.Enable("github.com/tikv/pd/server/apiv2/handlers/loadRegionSlow", `return("`+followerServer.GetAddr()+`")`)
+	checkReadyAPI(re, leaderURL, true)
+	checkReadyAPI(re, followerURL, false)
+
+	failpoint.Disable("github.com/tikv/pd/server/apiv2/handlers/loadRegionSlow")
 }
 
-func checkReady(re *require.Assertions, url string, isReady bool) {
+func checkReadyAPI(re *require.Assertions, url string, isReady bool) {
 	expectCode := http.StatusOK
 	if !isReady {
 		expectCode = http.StatusInternalServerError
 	}
-	resp, err := tests.TestDialClient.Get(url)
+	// check ready status
+	req, err := http.NewRequest(http.MethodGet, url, http.NoBody)
+	re.NoError(err)
+	resp, err := tests.TestDialClient.Do(req)
 	re.NoError(err)
 	defer resp.Body.Close()
 	buf, err := io.ReadAll(resp.Body)
 	re.NoError(err)
 	re.Empty(buf)
 	re.Equal(expectCode, resp.StatusCode)
+	// check ready status with verbose
+	req, err = http.NewRequest(http.MethodGet, url+"?verbose", http.NoBody)
+	re.NoError(err)
+	resp, err = tests.TestDialClient.Do(req)
+	re.NoError(err)
+	defer resp.Body.Close()
+	buf, err = io.ReadAll(resp.Body)
+	re.NoError(err)
 	r := &handlers.ReadyStatus{}
-	if isReady {
-		r.RegionLoaded = true
-	}
-	data, err := json.Marshal(r)
-	re.NoError(err)
-	err = tu.CheckGetJSON(tests.TestDialClient, url+"?verbose", data,
-		tu.Status(re, expectCode))
-	re.NoError(err)
+	re.NoError(json.Unmarshal(buf, &r))
+	re.Equal(expectCode, resp.StatusCode)
+	re.Equal(isReady, r.RegionLoaded)
 }

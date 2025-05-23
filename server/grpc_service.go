@@ -47,8 +47,10 @@ import (
 	"github.com/tikv/pd/pkg/ratelimit"
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/storage/kv"
+	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
@@ -300,7 +302,7 @@ func (s *GrpcServer) GetMinTS(
 		minTS, err = s.GetMinTSFromTSOService()
 	} else {
 		start := time.Now()
-		ts, internalErr := s.tsoAllocatorManager.HandleRequest(ctx, 1)
+		ts, internalErr := s.tsoAllocator.GenerateTSO(ctx, 1)
 		if internalErr == nil {
 			tsoHandleDuration.Observe(time.Since(start).Seconds())
 		}
@@ -494,10 +496,10 @@ func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
 	go tsoutil.WatchTSDeadline(stream.Context(), tsDeadlineCh)
 
 	var (
-		doneCh       chan struct{}
-		errCh        chan error
-		forwarder    = newTSOForwarder(stream)
-		tsoStreamErr error
+		// The following are tso forward stream related variables.
+		tsoRequestProxyCtx context.Context
+		forwarder          = newTSOForwarder(stream)
+		tsoStreamErr       error
 	)
 
 	defer func() {
@@ -510,19 +512,42 @@ func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
 	ctx, cancel := context.WithCancel(stream.Context())
 	defer cancel()
 	for {
-		// Prevent unnecessary performance overhead of the channel.
-		if errCh != nil {
+		var (
+			request *pdpb.TsoRequest
+			err     error
+		)
+
+		if tsoRequestProxyCtx == nil {
+			request, err = stream.Recv()
+		} else {
+			// if we forward requests to TSO proxy we can't block on the next request in the stream
+			// as proxy might fail on the previous request, and we need to return the error to client
+
+			// Create a channel to receive the stream data or error asynchronously
+			streamCh := make(chan *pdpb.TsoRequest, 1)
+			streamErrCh := make(chan error, 1)
+			go func() {
+				req, err := stream.Recv()
+				if err != nil {
+					streamErrCh <- err
+				} else {
+					streamCh <- req
+				}
+			}()
+
+			// Wait for either stream data or error from tso proxy
 			select {
-			case err := <-errCh:
-				return errors.WithStack(err)
-			default:
+			case <-tsoRequestProxyCtx.Done():
+				err = context.Cause(tsoRequestProxyCtx)
+			case err = <-streamErrCh:
+			case req := <-streamCh:
+				request = req
 			}
 		}
-		request, err := stream.Recv()
+
 		if err == io.EOF {
 			return nil
-		}
-		if err != nil {
+		} else if err != nil {
 			return errors.WithStack(err)
 		}
 
@@ -538,14 +563,9 @@ func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
 				return errors.WithStack(err)
 			}
 
-			if errCh == nil {
-				doneCh = make(chan struct{})
-				defer close(doneCh) // nolint
-				errCh = make(chan error)
-			}
-
 			tsoRequest := tsoutil.NewPDProtoRequest(forwardedHost, clientConn, request, stream)
-			s.tsoDispatcher.DispatchRequest(ctx, tsoRequest, s.pdProtoFactory, doneCh, errCh, s.tsoPrimaryWatcher)
+			// don't pass a stream context here as dispatcher serves multiple streams
+			tsoRequestProxyCtx = s.tsoDispatcher.DispatchRequest(s.ctx, tsoRequest, s.pdProtoFactory, s.tsoPrimaryWatcher)
 			continue
 		}
 
@@ -570,7 +590,7 @@ func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
 		}
 		count := request.GetCount()
 		ctx, task := trace.NewTask(ctx, "tso")
-		ts, err := s.tsoAllocatorManager.HandleRequest(ctx, count)
+		ts, err := s.tsoAllocator.GenerateTSO(ctx, count)
 		task.End()
 		tsoHandleDuration.Observe(time.Since(start).Seconds())
 		if err != nil {
@@ -674,6 +694,10 @@ func (s *GrpcServer) AllocID(ctx context.Context, request *pdpb.AllocIDRequest) 
 	if request.GetCount() != 0 {
 		reqCount = request.GetCount()
 	}
+	failpoint.Inject("handleAllocIDNonBatch", func() {
+		reqCount = 1
+	})
+
 	// We can use an allocator for all types ID allocation.
 	id, count, err := s.idAllocator.Alloc(reqCount)
 	if err != nil {
@@ -705,6 +729,7 @@ func (s *GrpcServer) IsSnapshotRecovering(ctx context.Context, _ *pdpb.IsSnapsho
 	if s.IsClosed() {
 		return nil, errs.ErrNotStarted
 	}
+
 	// recovering mark is stored in etcd directly, there's no need to forward.
 	marked, err := s.Server.IsSnapshotRecovering(ctx)
 	if err != nil {
@@ -1566,17 +1591,34 @@ func (s *GrpcServer) QueryRegion(stream pdpb.PD_QueryRegionServer) error {
 		if clusterID := keypath.ClusterID(); request.GetHeader().GetClusterId() != clusterID {
 			return errs.ErrMismatchClusterID(clusterID, request.GetHeader().GetClusterId())
 		}
-		rc := s.GetRaftCluster()
-		if rc == nil {
-			resp := &pdpb.QueryRegionResponse{
-				Header: notBootstrappedHeader(),
+		var (
+			rc          *cluster.RaftCluster
+			needBuckets bool
+		)
+		if s.member.IsLeader() {
+			rc = s.GetRaftCluster()
+			if rc == nil {
+				resp := &pdpb.QueryRegionResponse{
+					Header: notBootstrappedHeader(),
+				}
+				if err = stream.Send(resp); err != nil {
+					return errors.WithStack(err)
+				}
+				continue
 			}
-			if err = stream.Send(resp); err != nil {
-				return errors.WithStack(err)
+			needBuckets = rc.GetStoreConfig().IsEnableRegionBucket() && request.GetNeedBuckets()
+		} else {
+			rc = s.cluster
+			if !rc.GetRegionSyncer().IsRunning() {
+				resp := &pdpb.QueryRegionResponse{
+					Header: regionNotFound(),
+				}
+				if err = stream.Send(resp); err != nil {
+					return errors.WithStack(err)
+				}
+				continue
 			}
-			continue
 		}
-		needBuckets := rc.GetStoreConfig().IsEnableRegionBucket() && request.GetNeedBuckets()
 
 		start := time.Now()
 		keyIDMap, prevKeyIDMap, regionsByID := rc.QueryRegions(
@@ -1604,7 +1646,6 @@ func (s *GrpcServer) QueryRegion(stream pdpb.PD_QueryRegionServer) error {
 }
 
 // Deprecated: use BatchScanRegions instead.
-// ScanRegions implements gRPC PDServer.
 func (s *GrpcServer) ScanRegions(ctx context.Context, request *pdpb.ScanRegionsRequest) (resp *pdpb.ScanRegionsResponse, err error) {
 	done, err := s.rateLimitCheck()
 	if err != nil {
@@ -1614,7 +1655,7 @@ func (s *GrpcServer) ScanRegions(ctx context.Context, request *pdpb.ScanRegionsR
 		defer done()
 	}
 	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
-		return pdpb.NewPDClient(client).ScanRegions(ctx, request)
+		return pdpb.NewPDClient(client).ScanRegions(ctx, request) //nolint:staticcheck
 	}
 	followerHandle := new(bool)
 	if rsp, err := s.unaryFollowerMiddleware(ctx, request, fn, followerHandle); err != nil {
@@ -1698,8 +1739,8 @@ func (s *GrpcServer) BatchScanRegions(ctx context.Context, request *pdpb.BatchSc
 	}
 	needBucket := request.GetNeedBuckets() && !*followerHandle && rc.GetStoreConfig().IsEnableRegionBucket()
 	limit := request.GetLimit()
-	// cast to core.KeyRanges and check the validation.
-	keyRanges := core.NewKeyRangesWithSize(len(request.GetRanges()))
+	// cast to keyutil.KeyRanges and check the validation.
+	keyRanges := keyutil.NewKeyRangesWithSize(len(request.GetRanges()))
 	reqRanges := request.GetRanges()
 	for i, reqRange := range reqRanges {
 		if i > 0 {
@@ -2464,6 +2505,7 @@ func convertAskSplitResponse(resp *schedulingpb.AskBatchSplitResponse) *pdpb.Ask
 	}
 }
 
+// SyncMaxTS implements gRPC PDServer.
 // Deprecated.
 func (*GrpcServer) SyncMaxTS(_ context.Context, _ *pdpb.SyncMaxTSRequest) (*pdpb.SyncMaxTSResponse, error) {
 	return &pdpb.SyncMaxTSResponse{
@@ -2587,6 +2629,7 @@ func scatterRegions(cluster *cluster.RaftCluster, regionsID []uint64, group stri
 	return percentage, nil
 }
 
+// GetDCLocationInfo implements gRPC PDServer.
 // Deprecated
 func (*GrpcServer) GetDCLocationInfo(_ context.Context, _ *pdpb.GetDCLocationInfoRequest) (*pdpb.GetDCLocationInfoResponse, error) {
 	return &pdpb.GetDCLocationInfoResponse{
@@ -2712,7 +2755,7 @@ func (s *GrpcServer) WatchGlobalConfig(req *pdpb.WatchGlobalConfigRequest, serve
 	// - If required revision < CompactRevision, we need to reload all configs to avoid losing data.
 	// - If required revision >= CompactRevision, just keep watching.
 	// Use WithPrevKV() to get the previous key-value pair when get Delete Event.
-	watchChan := s.client.Watch(ctx, configPath, clientv3.WithPrefix(), clientv3.WithRev(revision), clientv3.WithPrevKV())
+	watchChan := etcdutil.Watch(ctx, s.client, configPath, clientv3.WithPrefix(), clientv3.WithRev(revision), clientv3.WithPrevKV())
 	for {
 		select {
 		case <-ctx.Done():

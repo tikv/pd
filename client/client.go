@@ -32,6 +32,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 
+	"github.com/tikv/pd/client/clients/gc"
 	"github.com/tikv/pd/client/clients/metastorage"
 	"github.com/tikv/pd/client/clients/router"
 	"github.com/tikv/pd/client/clients/tso"
@@ -55,7 +56,7 @@ type GlobalConfigItem struct {
 // RPCClient is a PD (Placement Driver) RPC and related mcs client which can only call RPC.
 type RPCClient interface {
 	// GetAllMembers gets the members Info from PD
-	GetAllMembers(ctx context.Context) ([]*pdpb.Member, error)
+	GetAllMembers(ctx context.Context) (*pdpb.GetMembersResponse, error)
 	// GetStore gets a store from PD by store id.
 	// The store may expire later. Caller is responsible for caching and taking care
 	// of store change.
@@ -73,6 +74,9 @@ type RPCClient interface {
 	// determine the safepoint for multiple services, it does not trigger a GC
 	// job. Use UpdateGCSafePoint to trigger the GC job if needed.
 	UpdateServiceGCSafePoint(ctx context.Context, serviceID string, ttl int64, safePoint uint64) (uint64, error)
+	UpdateGCSafePointV2(ctx context.Context, keyspaceID uint32, safePoint uint64) (uint64, error)
+	UpdateServiceSafePointV2(ctx context.Context, keyspaceID uint32, serviceID string, ttl int64, safePoint uint64) (uint64, error)
+	WatchGCSafePointV2(ctx context.Context, revision int64) (chan []*pdpb.SafePointEvent, error)
 	// ScatterRegion scatters the specified region. Should use it for a batch of regions,
 	// and the distribution of these regions will be dispersed.
 	// NOTICE: This method is the old version of ScatterRegions, you should use the later one as your first choice.
@@ -102,10 +106,9 @@ type RPCClient interface {
 	router.Client
 	tso.Client
 	metastorage.Client
+	gc.Client
 	// KeyspaceClient manages keyspace metadata.
 	KeyspaceClient
-	// GCClient manages gcSafePointV2 and serviceSafePointV2
-	GCClient
 	// ResourceManagerClient manages resource group metadata and token assignment.
 	ResourceManagerClient
 }
@@ -436,12 +439,12 @@ func (c *client) UpdateOption(option opt.DynamicOption, value any) error {
 			return err
 		}
 	case opt.EnableTSOFollowerProxy:
-		if c.inner.getServiceMode() != pdpb.ServiceMode_PD_SVC_MODE {
-			return errors.New("[pd] tso follower proxy is only supported when PD provides TSO")
-		}
 		enable, ok := value.(bool)
 		if !ok {
 			return errors.New("[pd] invalid value type for EnableTSOFollowerProxy option, it should be bool")
+		}
+		if c.inner.getServiceMode() != pdpb.ServiceMode_PD_SVC_MODE && enable {
+			return errors.New("[pd] tso follower proxy is only supported when PD provides TSO")
 		}
 		c.inner.option.SetEnableTSOFollowerProxy(enable)
 	case opt.EnableFollowerHandle:
@@ -469,7 +472,7 @@ func (c *client) UpdateOption(option opt.DynamicOption, value any) error {
 }
 
 // GetAllMembers gets the members Info from PD.
-func (c *client) GetAllMembers(ctx context.Context) ([]*pdpb.Member, error) {
+func (c *client) GetAllMembers(ctx context.Context) (*pdpb.GetMembersResponse, error) {
 	start := time.Now()
 	defer func() { metrics.CmdDurationGetAllMembers.Observe(time.Since(start).Seconds()) }()
 
@@ -484,7 +487,7 @@ func (c *client) GetAllMembers(ctx context.Context) ([]*pdpb.Member, error) {
 	if err = c.respForErr(metrics.CmdFailedDurationGetAllMembers, start, err, resp.GetHeader()); err != nil {
 		return nil, err
 	}
-	return resp.GetMembers(), nil
+	return resp, nil
 }
 
 // getClientAndContext returns the leader pd client and the original context. If leader is unhealthy, it returns
@@ -507,6 +510,7 @@ func (c *client) GetTSAsync(ctx context.Context) tso.TSFuture {
 	return c.inner.dispatchTSORequestWithRetry(ctx)
 }
 
+// GetLocalTSAsync implements the TSOClient interface.
 // Deprecated: the Local TSO feature has been deprecated. Regardless of the
 // parameters passed, the behavior of this interface will be equivalent to
 // `GetTSAsync`. If you want to use a separately deployed TSO service,
@@ -521,6 +525,7 @@ func (c *client) GetTS(ctx context.Context) (physical int64, logical int64, err 
 	return resp.Wait()
 }
 
+// GetLocalTS implements the TSOClient interface.
 // Deprecated: the Local TSO feature has been deprecated. Regardless of the
 // parameters passed, the behavior of this interface will be equivalent to
 // `GetTS`. If you want to use a separately deployed TSO service,
@@ -1371,4 +1376,14 @@ func adjustCallerComponent(callerComponent caller.Component) caller.Component {
 	log.Warn("Unknown callerComponent", zap.String("callerComponent", string(callerComponent)))
 	// If the callerComponent is still in pd/client, we set it to empty.
 	return ""
+}
+
+// GetGCInternalController returns the gc.InternalController, which is used for internally controlling the GC states.
+func (c *client) GetGCInternalController(keyspaceID uint32) gc.InternalController {
+	return newGCInternalController(c, keyspaceID)
+}
+
+// GetGCStatesClient returns the gc.GCStatesClient, which is used for accessing the GC states for general purposes.
+func (c *client) GetGCStatesClient(keyspaceID uint32) gc.GCStatesClient {
+	return newGCStatesClient(c, keyspaceID)
 }

@@ -35,6 +35,7 @@ const (
 	HandleOverlaps          = "HandleOverlaps"
 	CollectRegionStatsAsync = "CollectRegionStatsAsync"
 	SaveRegionToKV          = "SaveRegionToKV"
+	SyncRegionToFollower    = "SyncRegionToFollower"
 )
 
 const (
@@ -86,7 +87,7 @@ func NewConcurrentRunner(name string, limiter *ConcurrencyLimiter, maxPendingDur
 		name:               name,
 		limiter:            limiter,
 		maxPendingDuration: maxPendingDuration,
-		taskChan:           make(chan *Task),
+		taskChan:           make(chan *Task, 1),
 		pendingTasks:       make([]*Task, 0, initialCapacity),
 		pendingTaskCount:   make(map[string]int),
 		existTasks:         make(map[taskID]*Task),
@@ -107,15 +108,15 @@ func WithRetained(retained bool) TaskOption {
 func (cr *ConcurrentRunner) Start(ctx context.Context) {
 	cr.ctx, cr.cancel = context.WithCancel(ctx)
 	cr.wg.Add(1)
-	ticker := time.NewTicker(5 * time.Second)
-	defer ticker.Stop()
 	go func() {
 		defer cr.wg.Done()
+		ticker := time.NewTicker(5 * time.Second)
+		defer ticker.Stop()
 		for {
 			select {
 			case task := <-cr.taskChan:
 				if cr.limiter != nil {
-					token, err := cr.limiter.AcquireToken(context.Background())
+					token, err := cr.limiter.AcquireToken(cr.ctx)
 					if err != nil {
 						continue
 					}

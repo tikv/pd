@@ -27,6 +27,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/storage"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/operatorutil"
 	"github.com/tikv/pd/pkg/utils/testutil"
 )
@@ -91,13 +92,13 @@ func TestEvictLeaderWithUnhealthyPeer(t *testing.T) {
 func TestConfigClone(t *testing.T) {
 	re := require.New(t)
 
-	emptyConf := &evictLeaderSchedulerConfig{StoreIDWithRanges: make(map[uint64][]core.KeyRange)}
+	emptyConf := &evictLeaderSchedulerConfig{StoreIDWithRanges: make(map[uint64][]keyutil.KeyRange)}
 	con2 := emptyConf.clone()
 	re.Empty(con2.getKeyRangesByID(1))
 
 	con2.StoreIDWithRanges[1], _ = getKeyRanges([]string{"a", "b", "c", "d"})
 	con3 := con2.clone()
-	re.Equal(len(con3.getRanges(1)), len(con2.getRanges(1)))
+	re.Len(con3.getRanges(1), len(con2.getRanges(1)))
 
 	con3.StoreIDWithRanges[1][0].StartKey = []byte("aaa")
 	con4 := con3.clone()

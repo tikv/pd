@@ -311,15 +311,15 @@ func easyjson75d7afa0EncodeGithubComTikvPdServerApi(out *jwriter.Writer, in Regi
 }
 
 // MarshalJSON supports json.Marshaler interface
-func (v RegionInfo) MarshalJSON() ([]byte, error) {
+func (v *RegionInfo) MarshalJSON() ([]byte, error) {
 	w := jwriter.Writer{}
-	easyjson75d7afa0EncodeGithubComTikvPdServerApi(&w, v)
+	easyjson75d7afa0EncodeGithubComTikvPdServerApi(&w, *v)
 	return w.Buffer.BuildBytes(), w.Error
 }
 
 // MarshalEasyJSON supports easyjson.Marshaler interface
-func (v RegionInfo) MarshalEasyJSON(w *jwriter.Writer) {
-	easyjson75d7afa0EncodeGithubComTikvPdServerApi(w, v)
+func (v *RegionInfo) MarshalEasyJSON(w *jwriter.Writer) {
+	easyjson75d7afa0EncodeGithubComTikvPdServerApi(w, *v)
 }
 
 // UnmarshalJSON supports json.Unmarshaler interface

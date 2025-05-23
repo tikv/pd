@@ -37,6 +37,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/plan"
 	"github.com/tikv/pd/pkg/schedule/types"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/reflectutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 )
@@ -54,7 +55,7 @@ type balanceWitnessSchedulerConfig struct {
 	syncutil.RWMutex
 	schedulerConfig
 
-	Ranges []core.KeyRange `json:"ranges"`
+	Ranges []keyutil.KeyRange `json:"ranges"`
 	// Batch is used to generate multiple operators by one scheduling
 	Batch int `json:"batch"`
 }
@@ -100,7 +101,7 @@ func (conf *balanceWitnessSchedulerConfig) validateLocked() bool {
 func (conf *balanceWitnessSchedulerConfig) clone() *balanceWitnessSchedulerConfig {
 	conf.RLock()
 	defer conf.RUnlock()
-	ranges := make([]core.KeyRange, len(conf.Ranges))
+	ranges := make([]keyutil.KeyRange, len(conf.Ranges))
 	copy(ranges, conf.Ranges)
 	return &balanceWitnessSchedulerConfig{
 		Ranges: ranges,
@@ -114,10 +115,10 @@ func (conf *balanceWitnessSchedulerConfig) getBatch() int {
 	return conf.Batch
 }
 
-func (conf *balanceWitnessSchedulerConfig) getRanges() []core.KeyRange {
+func (conf *balanceWitnessSchedulerConfig) getRanges() []keyutil.KeyRange {
 	conf.RLock()
 	defer conf.RUnlock()
-	ranges := make([]core.KeyRange, len(conf.Ranges))
+	ranges := make([]keyutil.KeyRange, len(conf.Ranges))
 	copy(ranges, conf.Ranges)
 	return ranges
 }
@@ -258,7 +259,7 @@ func (s *balanceWitnessScheduler) Schedule(cluster sche.SchedulerCluster, dryRun
 			makeInfluence(op, solver, usedRegions, sourceCandidate)
 		}
 	}
-	s.retryQuota.gc(sourceCandidate.stores)
+	s.gc(sourceCandidate.stores)
 	return result, collector.GetPlans()
 }
 
@@ -267,7 +268,7 @@ func createTransferWitnessOperator(cs *candidateStores, s *balanceWitnessSchedul
 	store := cs.getStore()
 	ssolver.Step++
 	defer func() { ssolver.Step-- }()
-	retryLimit := s.retryQuota.getLimit(store)
+	retryLimit := s.getLimit(store)
 	ssolver.Source, ssolver.Target = store, nil
 	var op *operator.Operator
 	for range retryLimit {
@@ -280,7 +281,7 @@ func createTransferWitnessOperator(cs *candidateStores, s *balanceWitnessSchedul
 		}
 	}
 	if op != nil {
-		s.retryQuota.resetLimit(store)
+		s.resetLimit(store)
 	} else {
 		s.attenuate(store)
 		log.Debug("no operator created for selected stores", zap.String("scheduler", s.GetName()), zap.Uint64("transfer-out", store.GetID()))

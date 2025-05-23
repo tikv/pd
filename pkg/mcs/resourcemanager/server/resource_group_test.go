@@ -56,6 +56,6 @@ func TestClone(t *testing.T) {
 		var rg ResourceGroup
 		gofakeit.Struct(&rg)
 		rgClone := rg.Clone(true)
-		require.EqualValues(t, &rg, rgClone)
+		require.Equal(t, &rg, rgClone)
 	}
 }

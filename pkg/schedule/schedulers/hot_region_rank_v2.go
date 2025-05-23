@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"math"
 
+	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/statistics/utils"
 )
 
@@ -120,9 +121,9 @@ func (*rankV2) isAvailable(s *solution) bool {
 	return s.progressiveRank >= 3 || (s.progressiveRank > 0 && s.revertRegion == nil)
 }
 
-func (r *rankV2) checkByPriorityAndTolerance(loads []float64, f func(int) bool) bool {
-	switch {
-	case r.resourceTy == writeLeader:
+func (r *rankV2) checkByPriorityAndTolerance(loads statistics.Loads, f func(int) bool) bool {
+	switch r.resourceTy {
+	case writeLeader:
 		return r.checkByPriorityAndToleranceFirstOnly(loads, f)
 	default:
 		return r.checkByPriorityAndToleranceAnyOf(loads, f)
@@ -130,9 +131,9 @@ func (r *rankV2) checkByPriorityAndTolerance(loads []float64, f func(int) bool) 
 }
 
 // checkHistoryLoadsByPriority checks the history loads by priority.
-func (r *rankV2) checkHistoryLoadsByPriority(loads [][]float64, f func(int) bool) bool {
-	switch {
-	case r.resourceTy == writeLeader:
+func (r *rankV2) checkHistoryLoadsByPriority(loads statistics.HistoryLoads, f func(int) bool) bool {
+	switch r.resourceTy {
+	case writeLeader:
 		return r.checkHistoryLoadsByPriorityAndToleranceFirstOnly(loads, f)
 	default:
 		return r.checkHistoryByPriorityAndToleranceAnyOf(loads, f)

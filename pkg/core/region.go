@@ -39,6 +39,7 @@ import (
 	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/utils/typeutil"
@@ -360,6 +361,83 @@ func (r *RegionInfo) GetPeer(peerID uint64) *metapb.Peer {
 	return nil
 }
 
+// Rule is the rule for balance range scheduler
+type Rule int
+
+const (
+	// LeaderScatter scatter the leader of the region.
+	LeaderScatter Rule = iota
+	// PeerScatter scatter all the peers of the region.
+	PeerScatter
+	// LearnerScatter is the learner of the region.
+	LearnerScatter
+	// Unknown is the unknown rule of the region include witness.
+	Unknown
+)
+
+// String returns the string value of the rule.
+func (r *Rule) String() string {
+	switch *r {
+	case LeaderScatter:
+		return "leader-scatter"
+	case PeerScatter:
+		return "peer-scatter"
+	case LearnerScatter:
+		return "learner-scatter"
+	default:
+		return "unknown"
+	}
+}
+
+// NewRule creates a new rule.
+func NewRule(rule string) Rule {
+	switch rule {
+	case "leader-scatter":
+		return LeaderScatter
+	case "peer-scatter":
+		return PeerScatter
+	case "learner-scatter":
+		return LearnerScatter
+	default:
+		return Unknown
+	}
+}
+
+// MarshalJSON returns the JSON encoding of rule.
+func (r *Rule) MarshalJSON() ([]byte, error) {
+	return []byte(`"` + r.String() + `"`), nil
+}
+
+// UnmarshalJSON parses the JSON-encoded data and stores the result in rule.
+func (r *Rule) UnmarshalJSON(data []byte) error {
+	s := string(data)
+	switch s {
+	case `"leader-scatter"`:
+		*r = LeaderScatter
+	case `"peer-scatter"`:
+		*r = PeerScatter
+	case `"learner-scatter"`:
+		*r = LearnerScatter
+	default:
+		*r = Unknown
+	}
+	return nil
+}
+
+// GetPeersByRule returns the peers with specified rule.
+func (r *RegionInfo) GetPeersByRule(rule Rule) []*metapb.Peer {
+	switch rule {
+	case LeaderScatter:
+		return []*metapb.Peer{r.GetLeader()}
+	case PeerScatter:
+		return r.GetPeers()
+	case LearnerScatter:
+		return r.GetLearners()
+	default:
+		return nil
+	}
+}
+
 // GetDownPeer returns the down peer with specified peer id.
 func (r *RegionInfo) GetDownPeer(peerID uint64) *metapb.Peer {
 	for _, down := range r.downPeers {
@@ -480,16 +558,6 @@ func (r *RegionInfo) GetFollowers() map[uint64]*metapb.Peer {
 		}
 	}
 	return followers
-}
-
-// GetFollower randomly returns a follow peer.
-func (r *RegionInfo) GetFollower() *metapb.Peer {
-	for _, peer := range r.GetVoters() {
-		if r.leader == nil || r.leader.GetId() != peer.GetId() {
-			return peer
-		}
-	}
-	return nil
 }
 
 // GetNonWitnessVoters returns a map indicate the non-witness voter peers distributed.
@@ -1457,8 +1525,8 @@ func (r *RegionsInfo) GetStoreRegions(storeID uint64) []*RegionInfo {
 	return regions
 }
 
-// TODO: benchmark the performance of `QueryRegions`.
 // QueryRegions searches RegionInfo from regionTree by keys and IDs in batch.
+// TODO: benchmark the performance of `QueryRegions`.
 func (r *RegionsInfo) QueryRegions(
 	keys, prevKeys [][]byte, ids []uint64, needBuckets bool,
 ) (keyIDMap, prevKeyIDMap []uint64, regionsByID map[uint64]*pdpb.RegionResponse) {
@@ -1806,42 +1874,42 @@ func (r *RegionsInfo) GetStoreWitnessCount(storeID uint64) int {
 }
 
 // RandPendingRegions randomly gets a store's n regions with a pending peer.
-func (r *RegionsInfo) RandPendingRegions(storeID uint64, ranges []KeyRange) []*RegionInfo {
+func (r *RegionsInfo) RandPendingRegions(storeID uint64, ranges []keyutil.KeyRange) []*RegionInfo {
 	r.st.RLock()
 	defer r.st.RUnlock()
 	return r.pendingPeers[storeID].RandomRegions(randomRegionMaxRetry, ranges)
 }
 
 // This function is used for test only.
-func (r *RegionsInfo) randLeaderRegion(storeID uint64, ranges []KeyRange) {
+func (r *RegionsInfo) randLeaderRegion(storeID uint64, ranges []keyutil.KeyRange) {
 	r.st.RLock()
 	defer r.st.RUnlock()
 	_ = r.leaders[storeID].randomRegion(ranges)
 }
 
 // RandLeaderRegions randomly gets a store's n leader regions.
-func (r *RegionsInfo) RandLeaderRegions(storeID uint64, ranges []KeyRange) []*RegionInfo {
+func (r *RegionsInfo) RandLeaderRegions(storeID uint64, ranges []keyutil.KeyRange) []*RegionInfo {
 	r.st.RLock()
 	defer r.st.RUnlock()
 	return r.leaders[storeID].RandomRegions(randomRegionMaxRetry, ranges)
 }
 
 // RandFollowerRegions randomly gets a store's n follower regions.
-func (r *RegionsInfo) RandFollowerRegions(storeID uint64, ranges []KeyRange) []*RegionInfo {
+func (r *RegionsInfo) RandFollowerRegions(storeID uint64, ranges []keyutil.KeyRange) []*RegionInfo {
 	r.st.RLock()
 	defer r.st.RUnlock()
 	return r.followers[storeID].RandomRegions(randomRegionMaxRetry, ranges)
 }
 
 // RandLearnerRegions randomly gets a store's n learner regions.
-func (r *RegionsInfo) RandLearnerRegions(storeID uint64, ranges []KeyRange) []*RegionInfo {
+func (r *RegionsInfo) RandLearnerRegions(storeID uint64, ranges []keyutil.KeyRange) []*RegionInfo {
 	r.st.RLock()
 	defer r.st.RUnlock()
 	return r.learners[storeID].RandomRegions(randomRegionMaxRetry, ranges)
 }
 
 // RandWitnessRegions randomly gets a store's n witness regions.
-func (r *RegionsInfo) RandWitnessRegions(storeID uint64, ranges []KeyRange) []*RegionInfo {
+func (r *RegionsInfo) RandWitnessRegions(storeID uint64, ranges []keyutil.KeyRange) []*RegionInfo {
 	r.st.RLock()
 	defer r.st.RUnlock()
 	return r.witnesses[storeID].RandomRegions(randomRegionMaxRetry, ranges)
@@ -1963,7 +2031,7 @@ func (r *RegionsInfo) ScanRegions(startKey, endKey []byte, limit int) []*RegionI
 // BatchScanRegions scans regions in given key pairs, returns at most `limit` regions.
 // limit <= 0 means no limit.
 // The given key pairs should be non-overlapping.
-func (r *RegionsInfo) BatchScanRegions(keyRanges *KeyRanges, opts ...BatchScanRegionsOptionFunc) ([]*RegionInfo, error) {
+func (r *RegionsInfo) BatchScanRegions(keyRanges *keyutil.KeyRanges, opts ...BatchScanRegionsOptionFunc) ([]*RegionInfo, error) {
 	keyRanges.Merge()
 	krs := keyRanges.Ranges()
 	res := make([]*RegionInfo, 0, len(krs))
@@ -1976,11 +2044,6 @@ func (r *RegionsInfo) BatchScanRegions(keyRanges *KeyRanges, opts ...BatchScanRe
 	r.t.RLock()
 	defer r.t.RUnlock()
 	for _, keyRange := range krs {
-		if scanOptions.limit > 0 && len(res) >= scanOptions.limit {
-			res = res[:scanOptions.limit]
-			return res, nil
-		}
-
 		regions, err := scanRegion(r.tree, keyRange, scanOptions.limit, scanOptions.outputMustContainAllKeyRange)
 		if err != nil {
 			return nil, err
@@ -1990,11 +2053,15 @@ func (r *RegionsInfo) BatchScanRegions(keyRanges *KeyRanges, opts ...BatchScanRe
 			regions = regions[1:]
 		}
 		res = append(res, regions...)
+		if scanOptions.limit > 0 && len(res) >= scanOptions.limit {
+			res = res[:scanOptions.limit]
+			return res, nil
+		}
 	}
 	return res, nil
 }
 
-func scanRegion(regionTree *regionTree, keyRange *KeyRange, limit int, outputMustContainAllKeyRange bool) ([]*RegionInfo, error) {
+func scanRegion(regionTree *regionTree, keyRange *keyutil.KeyRange, limit int, outputMustContainAllKeyRange bool) ([]*RegionInfo, error) {
 	var (
 		res        []*RegionInfo
 		lastRegion = &RegionInfo{

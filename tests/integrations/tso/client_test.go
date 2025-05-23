@@ -92,6 +92,7 @@ func TestMicroserviceTSOClientSuite(t *testing.T) {
 
 func (suite *tsoClientTestSuite) SetupSuite() {
 	re := suite.Require()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/fastUpdatePhysicalInterval", "return(true)"))
 
 	var err error
 	suite.ctx, suite.cancel = context.WithCancel(context.Background())
@@ -197,7 +198,7 @@ func (suite *tsoClientTestSuite) waitForAllKeyspaceGroupsInServing(re *require.A
 	// Create clients and make sure they all have discovered the tso service.
 	suite.clients = mcs.WaitForMultiKeyspacesTSOAvailable(
 		suite.ctx, re, suite.keyspaceIDs, suite.getBackendEndpoints())
-	re.Equal(len(suite.keyspaceIDs), len(suite.clients))
+	re.Len(suite.keyspaceIDs, len(suite.clients))
 }
 
 func (suite *tsoClientTestSuite) TearDownTest() {
@@ -207,6 +208,7 @@ func (suite *tsoClientTestSuite) TearDownTest() {
 }
 
 func (suite *tsoClientTestSuite) TearDownSuite() {
+	failpoint.Disable("github.com/tikv/pd/pkg/tso/fastUpdatePhysicalInterval")
 	suite.cancel()
 	if !suite.legacy {
 		suite.tsoCluster.Destroy()
@@ -379,10 +381,8 @@ func (suite *tsoClientTestSuite) TestUpdateAfterResetTSO() {
 
 func (suite *tsoClientTestSuite) TestRandomResignLeader() {
 	re := suite.Require()
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/fastUpdatePhysicalInterval", "return(true)"))
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/member/skipCampaignLeaderCheck", "return(true)"))
 	defer func() {
-		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/tso/fastUpdatePhysicalInterval"))
 		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/member/skipCampaignLeaderCheck"))
 	}()
 
@@ -426,7 +426,6 @@ func (suite *tsoClientTestSuite) TestRandomResignLeader() {
 
 func (suite *tsoClientTestSuite) TestRandomShutdown() {
 	re := suite.Require()
-	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/tso/fastUpdatePhysicalInterval", "return(true)"))
 
 	parallelAct := func() {
 		// After https://github.com/tikv/pd/issues/6376 is fixed, we can use a smaller number here.
@@ -445,7 +444,6 @@ func (suite *tsoClientTestSuite) TestRandomShutdown() {
 	mcs.CheckMultiKeyspacesTSO(suite.ctx, re, suite.clients, parallelAct)
 	suite.TearDownSuite()
 	suite.SetupSuite()
-	re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/tso/fastUpdatePhysicalInterval"))
 }
 
 func (suite *tsoClientTestSuite) TestGetTSWhileResettingTSOClient() {
@@ -513,6 +511,10 @@ func TestTSONotLeader(t *testing.T) {
 		pdLeader.ResignLeader()
 		for range 10 {
 			_, _, err := client.GetTS(ctx)
+			// stream maybe cancelld when the leader is resigned
+			if err.Error() == context.Canceled.Error() {
+				return
+			}
 			re.ErrorContains(err, "not leader")
 		}
 	}(pdClient)

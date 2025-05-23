@@ -16,10 +16,13 @@ package core
 
 import (
 	"crypto/rand"
+	"encoding/json"
 	"fmt"
 	"math"
 	mrand "math/rand"
+	"sort"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -32,6 +35,7 @@ import (
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/id"
 	"github.com/tikv/pd/pkg/mock/mockid"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 )
 
 func TestNeedMerge(t *testing.T) {
@@ -411,7 +415,7 @@ func checkMap(re *require.Assertions, rm map[uint64]*regionItem, ids ...uint64) 
 		re.Equal(id, rm[id].GetID())
 	}
 	// Check Len.
-	re.Equal(len(ids), len(rm))
+	re.Len(ids, len(rm))
 	// Check id set.
 	expect := make(map[uint64]struct{})
 	for _, id := range ids {
@@ -671,8 +675,8 @@ func BenchmarkRandomRegion(b *testing.B) {
 				regions.RandLeaderRegions(1, nil)
 			}
 		})
-		ranges := []KeyRange{
-			NewKeyRange(fmt.Sprintf("%20d", size/4), fmt.Sprintf("%20d", size*3/4)),
+		ranges := []keyutil.KeyRange{
+			keyutil.NewKeyRange(fmt.Sprintf("%20d", size/4), fmt.Sprintf("%20d", size*3/4)),
 		}
 		b.Run(fmt.Sprintf("random region single range with size %d", size), func(b *testing.B) {
 			b.ResetTimer()
@@ -686,11 +690,11 @@ func BenchmarkRandomRegion(b *testing.B) {
 				regions.RandLeaderRegions(1, ranges)
 			}
 		})
-		ranges = []KeyRange{
-			NewKeyRange(fmt.Sprintf("%20d", 0), fmt.Sprintf("%20d", size/4)),
-			NewKeyRange(fmt.Sprintf("%20d", size/4), fmt.Sprintf("%20d", size/2)),
-			NewKeyRange(fmt.Sprintf("%20d", size/2), fmt.Sprintf("%20d", size*3/4)),
-			NewKeyRange(fmt.Sprintf("%20d", size*3/4), fmt.Sprintf("%20d", size)),
+		ranges = []keyutil.KeyRange{
+			keyutil.NewKeyRange(fmt.Sprintf("%20d", 0), fmt.Sprintf("%20d", size/4)),
+			keyutil.NewKeyRange(fmt.Sprintf("%20d", size/4), fmt.Sprintf("%20d", size/2)),
+			keyutil.NewKeyRange(fmt.Sprintf("%20d", size/2), fmt.Sprintf("%20d", size*3/4)),
+			keyutil.NewKeyRange(fmt.Sprintf("%20d", size*3/4), fmt.Sprintf("%20d", size)),
 		}
 		b.Run(fmt.Sprintf("random region multiple ranges with size %d", size), func(b *testing.B) {
 			b.ResetTimer()
@@ -1154,11 +1158,11 @@ func TestScanRegion(t *testing.T) {
 		err                  error
 	)
 	scanError := func(startKey, endKey []byte, limit int) {
-		regions, err = scanRegion(tree, &KeyRange{StartKey: startKey, EndKey: endKey}, limit, needContainAllRanges)
+		regions, err = scanRegion(tree, &keyutil.KeyRange{StartKey: startKey, EndKey: endKey}, limit, needContainAllRanges)
 		re.Error(err)
 	}
 	scanNoError := func(startKey, endKey []byte, limit int) []*RegionInfo {
-		regions, err = scanRegion(tree, &KeyRange{StartKey: startKey, EndKey: endKey}, limit, needContainAllRanges)
+		regions, err = scanRegion(tree, &keyutil.KeyRange{StartKey: startKey, EndKey: endKey}, limit, needContainAllRanges)
 		re.NoError(err)
 		return regions
 	}
@@ -1202,6 +1206,33 @@ func TestScanRegion(t *testing.T) {
 	needContainAllRanges = false
 	re.Len(scanNoError([]byte("a"), []byte("e"), 0), 3)
 	re.Len(scanNoError([]byte("c"), []byte("e"), 0), 1)
+}
+
+func TestScanRegionLimit(t *testing.T) {
+	re := require.New(t)
+	regions := NewRegionsInfo()
+	// Put 18 regions.
+	// [a0, a1) [a1, a2) [a2, a3) [a3, a4) [a4, a5) [a5, a6) [a6, a7) [a7, a8) [a8, a9)
+	// [b0, b1) [b1, b2) [b2, b3) [b3, b4) [b4, b5) [b5, b6) [b6, b7) [b7, b8) [b8, b9)
+	for i := range 9 {
+		aStart := fmt.Appendf(nil, "a%d", i)
+		aEnd := fmt.Appendf(nil, "a%d", i+1)
+		regions.CheckAndPutRegion(NewTestRegionInfo(uint64(i), 1, aStart, aEnd))
+
+		bStart := fmt.Appendf(nil, "b%d", i)
+		bEnd := fmt.Appendf(nil, "b%d", i+1)
+		regions.CheckAndPutRegion(NewTestRegionInfo(uint64(i+9), 1, bStart, bEnd))
+	}
+
+	for limit := 1; limit <= 18; limit++ {
+		KeyRanges := keyutil.NewKeyRanges([]keyutil.KeyRange{
+			keyutil.NewKeyRange("a", "b"),
+			keyutil.NewKeyRange("b0", ""), // ensure the key ranges are not merged
+		})
+		resp, err := regions.BatchScanRegions(KeyRanges, WithLimit(limit))
+		re.NoError(err)
+		re.Len(resp, limit)
+	}
 }
 
 func TestQueryRegions(t *testing.T) {
@@ -1290,4 +1321,59 @@ func TestQueryRegions(t *testing.T) {
 	re.Equal(uint64(1), regionsByID[1].GetRegion().GetId())
 	re.Equal(uint64(2), regionsByID[2].GetRegion().GetId())
 	re.Equal(uint64(3), regionsByID[3].GetRegion().GetId())
+}
+
+func TestGetPeers(t *testing.T) {
+	re := require.New(t)
+	learner := &metapb.Peer{StoreId: 1, Id: 1, Role: metapb.PeerRole_Learner}
+	leader := &metapb.Peer{StoreId: 2, Id: 2}
+	follower1 := &metapb.Peer{StoreId: 3, Id: 3}
+	follower2 := &metapb.Peer{StoreId: 4, Id: 4}
+	region := NewRegionInfo(&metapb.Region{Id: 100, Peers: []*metapb.Peer{
+		leader, follower1, follower2, learner,
+	}}, leader, WithLearners([]*metapb.Peer{learner}))
+	for _, v := range []struct {
+		rule  string
+		peers []*metapb.Peer
+	}{
+		{
+			rule:  "leader-scatter",
+			peers: []*metapb.Peer{leader},
+		},
+		{
+			rule:  "peer-scatter",
+			peers: []*metapb.Peer{learner, leader, follower1, follower2},
+		},
+		{
+			rule:  "learner-scatter",
+			peers: []*metapb.Peer{learner},
+		},
+		{
+			rule:  "witness-scatter",
+			peers: nil,
+		},
+	} {
+		role := NewRule(v.rule)
+		peers := region.GetPeersByRule(role)
+		sort.Slice(peers, func(i, j int) bool {
+			return peers[i].Id <= peers[j].Id
+		})
+		re.Equal(v.peers, peers, role)
+	}
+}
+
+func TestCodecRule(t *testing.T) {
+	re := require.New(t)
+	for _, v := range []string{"leader", "peer", "learner", "witness"} {
+		rule := NewRule(v)
+		if rule != Unknown {
+			re.Equal(rule.String(), v)
+		}
+		body, err := json.Marshal(&rule)
+		re.NoError(err)
+		re.Equal(strings.Join([]string{"\"", rule.String(), "\""}, ""), string(body))
+		var rule2 Rule
+		re.NoError(json.Unmarshal(body, &rule2))
+		re.Equal(rule.String(), rule2.String())
+	}
 }

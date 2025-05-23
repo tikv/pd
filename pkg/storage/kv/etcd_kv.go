@@ -52,7 +52,7 @@ func NewEtcdKVBase(client *clientv3.Client) *etcdKVBase {
 	return &etcdKVBase{client: client}
 }
 
-// NewEtcdKV creates a new etcd kv.
+// Load loads the value of the key from etcd.
 func (kv *etcdKVBase) Load(key string) (string, error) {
 	resp, err := etcdutil.EtcdKVGet(kv.client, key)
 	if err != nil {
@@ -96,6 +96,8 @@ func (kv *etcdKVBase) Save(key, value string) error {
 	failpoint.Inject("etcdSaveFailed", func() {
 		failpoint.Return(errors.New("save failed"))
 	})
+	etcdutil.InjectFailToCollectTestEtcdKey(key, "save")
+
 	txn := NewSlowLogTxn(kv.client)
 	resp, err := txn.Then(clientv3.OpPut(key, value)).Commit()
 	if err != nil {
@@ -111,6 +113,8 @@ func (kv *etcdKVBase) Save(key, value string) error {
 
 // Remove removes the key from etcd.
 func (kv *etcdKVBase) Remove(key string) error {
+	etcdutil.InjectFailToCollectTestEtcdKey(key, "remove")
+
 	txn := NewSlowLogTxn(kv.client)
 	resp, err := txn.Then(clientv3.OpDelete(key)).Commit()
 	if err != nil {
@@ -214,13 +218,18 @@ func (kv *etcdKVBase) RunInTxn(ctx context.Context, f func(txn Txn) error) error
 // Save puts a put operation into operations.
 // Note that save result are not immediately observable before current transaction commit.
 func (txn *etcdTxn) Save(key, value string) error {
+	etcdutil.InjectFailToCollectTestEtcdKey(key, "save")
+
 	operation := clientv3.OpPut(key, value)
 	txn.operations = append(txn.operations, operation)
+
 	return nil
 }
 
 // Remove puts a delete operation into operations.
 func (txn *etcdTxn) Remove(key string) error {
+	etcdutil.InjectFailToCollectTestEtcdKey(key, "remove")
+
 	operation := clientv3.OpDelete(key)
 	txn.operations = append(txn.operations, operation)
 	return nil
@@ -234,13 +243,13 @@ func (txn *etcdTxn) Load(key string) (string, error) {
 	}
 	var condition clientv3.Cmp
 	var value string
-	switch respLen := len(resp.Kvs); {
-	case respLen == 0:
+	switch respLen := len(resp.Kvs); respLen {
+	case 0:
 		// If target key does not contain a value, pin the CreateRevision of the key to 0.
 		// Returned value should be empty string.
 		value = ""
 		condition = clientv3.Compare(clientv3.CreateRevision(key), "=", 0)
-	case respLen == 1:
+	case 1:
 		// If target key has value, must make sure it stays the same at the time of commit.
 		value = string(resp.Kvs[0].Value)
 		condition = clientv3.Compare(clientv3.Value(key), "=", value)
@@ -293,11 +302,12 @@ type rawTxnWrapper struct {
 func (l *rawTxnWrapper) If(conditions ...RawTxnCondition) RawTxn {
 	cmpList := make([]clientv3.Cmp, 0, len(conditions))
 	for _, c := range conditions {
-		if c.CmpType == RawTxnCmpExists {
+		switch c.CmpType {
+		case RawTxnCmpExists:
 			cmpList = append(cmpList, clientv3.Compare(clientv3.CreateRevision(c.Key), ">", 0))
-		} else if c.CmpType == RawTxnCmpNotExists {
+		case RawTxnCmpNotExists:
 			cmpList = append(cmpList, clientv3.Compare(clientv3.CreateRevision(c.Key), "=", 0))
-		} else {
+		default:
 			var cmpOp string
 			switch c.CmpType {
 			case RawTxnCmpEqual:
@@ -344,14 +354,18 @@ func convertOps(ops []RawTxnOp) []clientv3.Op {
 // Then implements RawTxn interface for adding operations that need to be executed when the condition passes to
 // the transaction.
 func (l *rawTxnWrapper) Then(ops ...RawTxnOp) RawTxn {
-	l.inner = l.inner.Then(convertOps(ops)...)
+	convertedOps := convertOps(ops)
+	etcdutil.InjectFailToCollectTestEtcdOps(convertedOps...)
+	l.inner = l.inner.Then(convertedOps...)
 	return l
 }
 
 // Else implements RawTxn interface for adding operations that need to be executed when the condition doesn't pass
 // to the transaction.
 func (l *rawTxnWrapper) Else(ops ...RawTxnOp) RawTxn {
-	l.inner = l.inner.Else(convertOps(ops)...)
+	convertedOps := convertOps(ops)
+	etcdutil.InjectFailToCollectTestEtcdOps(convertedOps...)
+	l.inner = l.inner.Else(convertedOps...)
 	return l
 }
 

@@ -138,7 +138,7 @@ func (cb *CircuitBreaker) ChangeSettings(apply func(config *Settings)) {
 	defer cb.Unlock()
 
 	apply(cb.config)
-	log.Info("circuit breaker settings changed", zap.Any("config", cb.config))
+	log.Debug("circuit breaker settings changed", zap.Any("config", cb.config))
 }
 
 // Execute calls the given function if the CircuitBreaker is closed and returns the result of execution.
@@ -325,7 +325,7 @@ func (s *State) onResult(overloaded Overloading) {
 // Define context key type
 type cbCtxKey struct{}
 
-// Key used to store circuit breaker
+// CircuitBreakerKey is used to store circuit breaker
 var CircuitBreakerKey = cbCtxKey{}
 
 // FromContext retrieves the circuit breaker from the context

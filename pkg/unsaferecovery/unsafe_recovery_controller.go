@@ -515,7 +515,7 @@ func (u *Controller) changeStage(stage stage) {
 			count := 0
 			for store := range u.failedStores {
 				count += 1
-				stores += fmt.Sprintf("%d", store)
+				stores += strconv.FormatUint(store, 10)
 				if count != len(u.failedStores) {
 					stores += ", "
 				}
@@ -587,7 +587,7 @@ func (u *Controller) getForceLeaderPlanDigest() map[string][]string {
 		if forceLeaders != nil {
 			regions := ""
 			for i, regionID := range forceLeaders.GetEnterForceLeaders() {
-				regions += fmt.Sprintf("%d", regionID)
+				regions += strconv.FormatUint(regionID, 10)
 				if i != len(forceLeaders.GetEnterForceLeaders())-1 {
 					regions += ", "
 				}

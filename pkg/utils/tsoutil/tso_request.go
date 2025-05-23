@@ -39,11 +39,6 @@ type Request interface {
 	postProcess(countSum, physical, firstLogical int64) (int64, error)
 }
 
-// response is an interface wrapping tsopb.TsoResponse and pdpb.TsoResponse
-type response interface {
-	GetTimestamp() *pdpb.Timestamp
-}
-
 // TSOProtoRequest wraps the request and stream channel in the TSO grpc service
 type TSOProtoRequest struct {
 	forwardedHost string
@@ -94,7 +89,7 @@ func (r *TSOProtoRequest) postProcess(countSum, physical, firstLogical int64) (i
 		Count:  count,
 		Timestamp: &pdpb.Timestamp{
 			Physical: physical,
-			Logical:  addLogical(firstLogical, countSum),
+			Logical:  firstLogical + countSum,
 		},
 	}
 	// Send back to the client.
@@ -154,7 +149,7 @@ func (r *PDProtoRequest) postProcess(countSum, physical, firstLogical int64) (in
 		Count:  count,
 		Timestamp: &pdpb.Timestamp{
 			Physical: physical,
-			Logical:  addLogical(firstLogical, countSum),
+			Logical:  firstLogical + countSum,
 		},
 	}
 	// Send back to the client.

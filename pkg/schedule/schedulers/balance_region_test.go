@@ -750,10 +750,7 @@ func TestBalanceWhenRegionNotHeartbeat(t *testing.T) {
 // scheduleAndApplyOperator will try to schedule for `count` times and apply the operator if the operator is created.
 func scheduleAndApplyOperator(tc *mockcluster.Cluster, hb Scheduler, count int) {
 	limit := 0
-	for {
-		if limit > count {
-			break
-		}
+	for limit <= count {
 		ops, _ := hb.Schedule(tc, false)
 		if ops == nil {
 			limit++

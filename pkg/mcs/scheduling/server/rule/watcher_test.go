@@ -18,7 +18,6 @@ import (
 	"context"
 	"encoding/json"
 	"os"
-	"path/filepath"
 	"strconv"
 	"testing"
 	"time"
@@ -68,7 +67,6 @@ func runWatcherLoadLabelRule(ctx context.Context, re *require.Assertions, client
 		ctx:                   ctx,
 		cancel:                cancel,
 		rulesPathPrefix:       keypath.RulesPathPrefix(),
-		ruleCommonPathPrefix:  keypath.RuleCommonPathPrefix(),
 		ruleGroupPathPrefix:   keypath.RuleGroupPathPrefix(),
 		regionLabelPathPrefix: keypath.RegionLabelPathPrefix(),
 		etcdClient:            client,
@@ -85,7 +83,7 @@ func prepare(t require.TestingT) (context.Context, *clientv3.Client, func()) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	cfg := etcdutil.NewTestSingleConfig()
-	cfg.Dir = filepath.Join(os.TempDir(), "/pd_tests")
+	cfg.Dir, _ = os.MkdirTemp("", "pd_tests")
 	os.RemoveAll(cfg.Dir)
 	etcd, err := embed.StartEtcd(cfg)
 	re.NoError(err)
