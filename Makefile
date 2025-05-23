@@ -49,10 +49,14 @@ ifeq ($(PLUGIN), 1)
 endif
 
 ifeq ($(ENABLE_FIPS), 1)
-	BUILD_TAGS+=boringcrypto
-	BUILD_GOEXPERIMENT=boringcrypto
+	BUILD_TAGS += boringcrypto
+	BUILD_GOEXPERIMENT = boringcrypto
 	BUILD_CGO_ENABLED := 1
 	BUILD_TOOL_CGO_ENABLED := 1
+endif
+
+ifeq ($(NEXT_GEN), 1)
+	BUILD_TAGS += nextgen
 endif
 
 RELEASE_VERSION ?= $(shell git describe --tags --dirty --always)
