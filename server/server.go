@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"math"
 	"math/rand"
 	"net/http"
 	"os"
@@ -1896,7 +1897,23 @@ func (s *Server) SaveTTLConfig(data map[string]any, ttl time.Duration) error {
 		}
 	}
 	for k, v := range data {
-		if err := s.persistOptions.SetTTLData(s.ctx, s.client, k, fmt.Sprint(v), ttl); err != nil {
+		var valueStr string
+		switch val := v.(type) {
+		case float64:
+			// math.Trunc(val) returns the integer part of val
+			if val == math.Trunc(val) {
+				valueStr = strconv.FormatInt(int64(val), 10)
+			} else {
+				valueStr = strconv.FormatFloat(val, 'f', -1, 64)
+			}
+		case int, int8, int16, int32, int64:
+			valueStr = fmt.Sprintf("%d", val)
+		case uint, uint8, uint16, uint32, uint64:
+			valueStr = fmt.Sprintf("%d", val)
+		default:
+			valueStr = fmt.Sprint(v)
+		}
+		if err := s.persistOptions.SetTTLData(s.ctx, s.client, k, valueStr, ttl); err != nil {
 			return err
 		}
 	}
