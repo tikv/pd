@@ -191,7 +191,7 @@ func newMockResourceGroupProvider() *MockResourceGroupProvider {
 	return mockProvider
 }
 
-func (m *MockResourceGroupProvider) GetResourceGroup(ctx context.Context, resourceGroupName string, _ uint32, opts ...pd.GetResourceGroupOption) (*rmpb.ResourceGroup, error) {
+func (m *MockResourceGroupProvider) GetResourceGroup(ctx context.Context, _ uint32, resourceGroupName string, opts ...pd.GetResourceGroupOption) (*rmpb.ResourceGroup, error) {
 	args := m.Called(ctx, resourceGroupName, opts)
 	return args.Get(0).(*rmpb.ResourceGroup), args.Error(1)
 }
@@ -211,7 +211,7 @@ func (m *MockResourceGroupProvider) ModifyResourceGroup(ctx context.Context, met
 	return args.String(0), args.Error(1)
 }
 
-func (m *MockResourceGroupProvider) DeleteResourceGroup(ctx context.Context, resourceGroupName string, _ uint32) (string, error) {
+func (m *MockResourceGroupProvider) DeleteResourceGroup(ctx context.Context, _ uint32, resourceGroupName string) (string, error) {
 	args := m.Called(ctx, resourceGroupName)
 	return args.String(0), args.Error(1)
 }

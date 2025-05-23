@@ -58,10 +58,10 @@ var ControllerConfigPathPrefixBytes = []byte(controllerConfigPathPrefix)
 // ResourceManagerClient manages resource group info and token request.
 type ResourceManagerClient interface {
 	ListResourceGroups(ctx context.Context, keyspaceID uint32, opts ...GetResourceGroupOption) ([]*rmpb.ResourceGroup, error)
-	GetResourceGroup(ctx context.Context, resourceGroupName string, keyspaceID uint32, opts ...GetResourceGroupOption) (*rmpb.ResourceGroup, error)
+	GetResourceGroup(ctx context.Context, keyspaceID uint32, resourceGroupName string, opts ...GetResourceGroupOption) (*rmpb.ResourceGroup, error)
 	AddResourceGroup(ctx context.Context, metaGroup *rmpb.ResourceGroup) (string, error)
 	ModifyResourceGroup(ctx context.Context, metaGroup *rmpb.ResourceGroup) (string, error)
-	DeleteResourceGroup(ctx context.Context, resourceGroupName string, keyspaceID uint32) (string, error)
+	DeleteResourceGroup(ctx context.Context, keyspaceID uint32, resourceGroupName string) (string, error)
 	LoadResourceGroups(ctx context.Context, keyspaceID uint32) ([]*rmpb.ResourceGroup, int64, error)
 	AcquireTokenBuckets(ctx context.Context, request *rmpb.TokenBucketsRequest) ([]*rmpb.TokenBucketResponse, error)
 	Watch(ctx context.Context, key []byte, opts ...opt.MetaStorageOption) (chan []*meta_storagepb.Event, error)
@@ -120,7 +120,7 @@ func (c *client) ListResourceGroups(ctx context.Context, keyspaceID uint32, ops 
 }
 
 // GetResourceGroup implements the ResourceManagerClient interface.
-func (c *client) GetResourceGroup(ctx context.Context, resourceGroupName string, keyspaceID uint32, ops ...GetResourceGroupOption) (*rmpb.ResourceGroup, error) {
+func (c *client) GetResourceGroup(ctx context.Context, keyspaceID uint32, resourceGroupName string, ops ...GetResourceGroupOption) (*rmpb.ResourceGroup, error) {
 	cc, err := c.inner.resourceManagerClient()
 	if err != nil {
 		return nil, err
@@ -187,7 +187,7 @@ func (c *client) putResourceGroup(ctx context.Context, metaGroup *rmpb.ResourceG
 }
 
 // DeleteResourceGroup implements the ResourceManagerClient interface.
-func (c *client) DeleteResourceGroup(ctx context.Context, resourceGroupName string, keyspaceID uint32) (string, error) {
+func (c *client) DeleteResourceGroup(ctx context.Context, keyspaceID uint32, resourceGroupName string) (string, error) {
 	cc, err := c.inner.resourceManagerClient()
 	if err != nil {
 		return "", err

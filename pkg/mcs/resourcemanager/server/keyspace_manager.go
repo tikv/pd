@@ -37,7 +37,7 @@ const (
 	maxPriority                = 16
 	unlimitedRate              = math.MaxInt32
 	unlimitedBurstLimit        = -1
-	// DefaultResourceGroupName is the default resource group name.
+	// DefaultResourceGroupName is the reserved default resource group name within each keyspace.
 	DefaultResourceGroupName = "default"
 )
 
