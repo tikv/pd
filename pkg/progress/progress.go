@@ -274,7 +274,7 @@ func (m *Manager) GetAverageProgressByAction(action Action) *Progress {
 	if math.IsInf(totalLeftSeconds, 1) {
 		totalLeftSeconds = math.MaxFloat64
 	} else {
-		totalLeftSeconds = totalLeftSeconds / float64(count)
+		totalLeftSeconds /= float64(count)
 	}
 
 	return &Progress{
