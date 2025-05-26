@@ -364,7 +364,7 @@ func scheduleEvictLeaderOnce(r *rand.Rand, name string, cluster sche.SchedulerCl
 			inProgressFilter := filter.NewRegionInProgressFilter(func(id uint64) bool {
 				return pendingRegions[id] != nil
 			})
-			region = pickHotLeader(cluster, pendingRegions, storeID, inProgressFilter, downFilter)
+			region = pickHotLeader(cluster, storeID, inProgressFilter, downFilter)
 			isHot = true
 		}
 
@@ -538,13 +538,13 @@ func newEvictLeaderHandler(config *evictLeaderSchedulerConfig) http.Handler {
 	return router
 }
 
-func pickHotLeader(cluster sche.SchedulerCluster, pendingRegions map[uint64]*operator.Operator, storeID uint64, inProgressFilter, downFilter filter.RegionFilter) *core.RegionInfo {
-	regions := statistics.GetHotStoreLeaders(cluster.GetBasicCluster(), storeID, cluster.GetHotPeerStats(utils.Write, 3))
+func pickHotLeader(cluster sche.SchedulerCluster, storeID uint64, inProgressFilter, downFilter filter.RegionFilter) *core.RegionInfo {
+	regions := statistics.GetHotStoreLeaders(cluster.GetBasicCluster(), storeID, cluster.GetHotPeerStats(utils.Write, 1))
 	if len(regions) != 0 {
 		return filter.RandomSelectOneRegion(regions, nil, inProgressFilter, downFilter)
 	}
 
-	regions = statistics.GetHotStoreLeaders(cluster.GetBasicCluster(), storeID, cluster.GetHotPeerStats(utils.Read, 3))
+	regions = statistics.GetHotStoreLeaders(cluster.GetBasicCluster(), storeID, cluster.GetHotPeerStats(utils.Read, 1))
 	if len(regions) != 0 {
 		return filter.RandomSelectOneRegion(regions, nil, inProgressFilter, downFilter)
 	}
