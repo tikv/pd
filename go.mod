@@ -39,7 +39,7 @@ require (
 	github.com/pingcap/errcode v0.3.0
 	github.com/pingcap/errors v0.11.5-0.20211224045212-9687c2b0f87c
 	github.com/pingcap/failpoint v0.0.0-20210918120811-547c13e3eb00
-	github.com/pingcap/kvproto v0.0.0-20230920042517-db656f45023b
+	github.com/pingcap/kvproto v0.0.0-20250526075340-5030ed622c15
 	github.com/pingcap/log v1.1.1-0.20221110025148-ca232912c9f3
 	github.com/pingcap/sysutil v1.0.1-0.20230407040306-fb007c5aff21
 	github.com/pingcap/tidb-dashboard v0.0.0-20241212093248-834dbcafa291
@@ -68,6 +68,8 @@ require (
 	google.golang.org/grpc v1.59.0
 	gotest.tools/gotestsum v1.7.0
 )
+
+require github.com/golang/glog v1.1.2 // indirect
 
 require (
 	github.com/KyleBanks/depth v1.2.1 // indirect
