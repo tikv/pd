@@ -571,6 +571,14 @@ func (suite *httpClientTestSuite) TestTTLConfigPersist() {
 			inputValue:        float64(987.65),
 			expectedEtcdValue: "987.65",
 		},
+		{
+			inputValue:        int(-1),
+			expectedEtcdValue: "-1",
+		},
+		{
+			inputValue:        int32(-2147483647),
+			expectedEtcdValue: "-2147483647",
+		},
 	}
 
 	for _, tc := range testCases {
