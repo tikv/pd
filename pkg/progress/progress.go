@@ -16,6 +16,7 @@ package progress
 
 import (
 	"context"
+	"math"
 	"strconv"
 	"time"
 
@@ -270,10 +271,16 @@ func (m *Manager) GetAverageProgressByAction(action Action) *Progress {
 	if count == 0 {
 		return nil
 	}
+	if math.IsInf(totalLeftSeconds, 1) {
+		totalLeftSeconds = math.MaxFloat64
+	} else {
+		totalLeftSeconds = totalLeftSeconds / float64(count)
+	}
+
 	return &Progress{
 		Action:          action,
 		ProgressPercent: totalProgressPercent / float64(count),
-		LeftSecond:      totalLeftSeconds / float64(count),
+		LeftSecond:      totalLeftSeconds,
 		CurrentSpeed:    totalCurrentSpeed / float64(count),
 	}
 }

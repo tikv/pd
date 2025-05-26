@@ -1833,7 +1833,7 @@ func (c *RaftCluster) checkStore(store *core.StoreInfo, stores []*core.StoreInfo
 	case metapb.NodeState_Serving:
 	case metapb.NodeState_Removing:
 		// If the store is empty, it can be buried.
-		needBury := c.GetStoreRegionCount(storeID) == 0
+		needBury := regionSize == 0
 		failpoint.Inject("doNotBuryStore", func(_ failpoint.Value) {
 			needBury = false
 		})

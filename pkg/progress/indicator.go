@@ -105,6 +105,14 @@ func (p *progressIndicator) adjustWindowLength(dur time.Duration) {
 }
 
 func (p *progressIndicator) updateProgress() {
+	if p.targetRegionSize == 0 {
+		p.ProgressPercent = 1
+		p.LeftSecond = 0
+		p.CurrentSpeed = 0
+		p.completeAt = time.Now()
+		return
+	}
+
 	currentRegionSize := p.history.Back().Value.(float64)
 	// It means it just init and we haven't update the progress
 	if p.history.Len() <= 1 {
@@ -123,12 +131,11 @@ func (p *progressIndicator) updateProgress() {
 		currentRegionSize = p.targetRegionSize
 		p.completeAt = time.Now()
 	}
-	p.ProgressPercent = currentRegionSize / p.targetRegionSize
 
-	if p.CurrentSpeed == 0 {
+	p.ProgressPercent = currentRegionSize / p.targetRegionSize
+	p.LeftSecond = (p.targetRegionSize - currentRegionSize) / p.CurrentSpeed
+	if math.IsNaN(p.LeftSecond) || math.IsInf(p.LeftSecond, 0) {
 		p.LeftSecond = math.MaxFloat64
-	} else {
-		p.LeftSecond = (p.targetRegionSize - currentRegionSize) / p.CurrentSpeed
 	}
 }
 
