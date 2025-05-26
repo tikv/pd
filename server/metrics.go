@@ -18,8 +18,10 @@ import (
 	"math/rand"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"go.uber.org/zap"
 
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/log"
 )
 
 var (
@@ -190,7 +192,7 @@ var (
 			Subsystem: "server",
 			Name:      "region_request_cnt",
 			Help:      "Counter of region request.",
-		}, []string{"request", "caller_id", "caller_component", "err_msg"})
+		}, []string{"request", "caller_id", "caller_component", "event"})
 )
 
 func init() {
@@ -216,6 +218,13 @@ func init() {
 	prometheus.MustRegister(regionRequestCounter)
 }
 
+type requestEvent string
+
+const (
+	requestSuccess requestEvent = "success"
+	requestFailed  requestEvent = "failed"
+)
+
 func incRegionRequestCounter(method string, header *pdpb.RequestHeader, err *pdpb.Error) {
 	if err == nil && rand.Intn(100) != 0 {
 		// sample 1% region requests to avoid high cardinality
@@ -223,12 +232,17 @@ func incRegionRequestCounter(method string, header *pdpb.RequestHeader, err *pdp
 	}
 
 	var (
-		errMsg          = ""
+		event           = requestSuccess
 		callerID        = header.CallerId
 		callerComponent = header.CallerComponent
 	)
 	if err != nil {
-		errMsg = err.Type.String()
+		log.Warn("region request encounter error",
+			zap.String("method", method),
+			zap.String("caller_id", callerID),
+			zap.String("caller_component", callerComponent),
+			zap.Stringer("error", err))
+		event = requestFailed
 	}
 	if callerID == "" {
 		callerID = "unknown"
@@ -236,5 +250,5 @@ func incRegionRequestCounter(method string, header *pdpb.RequestHeader, err *pdp
 	if callerComponent == "" {
 		callerComponent = "unknown"
 	}
-	regionRequestCounter.WithLabelValues(method, callerID, callerComponent, errMsg).Inc()
+	regionRequestCounter.WithLabelValues(method, callerID, callerComponent, string(event)).Inc()
 }
