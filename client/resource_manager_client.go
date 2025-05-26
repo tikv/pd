@@ -47,8 +47,6 @@ func GroupSettingsPathPrefixBytes(keyspaceID uint32) []byte {
 	if keyspaceID == constants.NullKeyspaceID {
 		return []byte(groupSettingsPathPrefix)
 	}
-	// TODO: Do we need to consider isSingleGroupByKeyspace?
-	// Will it be always true when we pass keyspaceID to this function?
 	return fmt.Appendf(nil, keyspaceResourceGroupSettingPathPrefix, keyspaceID)
 }
 
