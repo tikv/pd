@@ -361,7 +361,10 @@ func scheduleEvictLeaderOnce(r *rand.Rand, name string, cluster sche.SchedulerCl
 		)
 
 		if pendingRegions != nil {
-			region = pickHotLeader(cluster, pendingRegions, storeID, downFilter)
+			inProgressFilter := filter.NewRegionInProgressFilter(func(id uint64) bool {
+				return pendingRegions[id] != nil
+			})
+			region = pickHotLeader(cluster, pendingRegions, storeID, inProgressFilter, downFilter)
 			isHot = true
 		}
 
@@ -402,11 +405,20 @@ func scheduleEvictLeaderOnce(r *rand.Rand, name string, cluster sche.SchedulerCl
 		for _, t := range targets {
 			targetIDs = append(targetIDs, t.GetID())
 		}
-		if cluster.GetLeaderStore(region).GetID() != storeID {
-			log.Debug("skip evict leader for region, because the leader store is not the evict store",
+
+		leaderStore := cluster.GetLeaderStore(region)
+		if leaderStore == nil {
+			log.Debug("skip evict leader for region, because the leader store is nil",
+				zap.Uint64("region-id", region.GetID()))
+			evictLeaderNoLeaderCounter.Inc()
+			continue
+		}
+		if leaderStore.GetID() != storeID {
+			log.Debug("skip evict leader for region, because the leader store is not the evict store anymore",
 				zap.Uint64("region-id", region.GetID()),
 				zap.Uint64("leader-store-id", cluster.GetLeaderStore(region).GetID()),
 				zap.Uint64("evict-store-id", storeID))
+			evictLeaderStaleCounter.Inc()
 			continue
 		}
 		op, err := operator.CreateTransferLeaderOperator(name, cluster, region, target.GetID(), targetIDs, operator.OpLeader)
@@ -526,24 +538,15 @@ func newEvictLeaderHandler(config *evictLeaderSchedulerConfig) http.Handler {
 	return router
 }
 
-func pickHotLeader(cluster sche.SchedulerCluster, pendingRegions map[uint64]*operator.Operator, storeID uint64, downFilter filter.RegionFilter) *core.RegionInfo {
-	regions := statistics.GetHotStoreLeaders(cluster.GetBasicCluster(), storeID, cluster.GetHotPeerStats(utils.Write, 1))
+func pickHotLeader(cluster sche.SchedulerCluster, pendingRegions map[uint64]*operator.Operator, storeID uint64, inProgressFilter, downFilter filter.RegionFilter) *core.RegionInfo {
+	regions := statistics.GetHotStoreLeaders(cluster.GetBasicCluster(), storeID, cluster.GetHotPeerStats(utils.Write, 3))
 	if len(regions) != 0 {
-		for _, region := range regions {
-			if pendingRegions[region.GetID()] != nil {
-				delete(regions, region.GetID())
-			}
-		}
-		return filter.RandomSelectOneRegion(regions, nil, downFilter)
+		return filter.RandomSelectOneRegion(regions, nil, inProgressFilter, downFilter)
 	}
 
-	regions = statistics.GetHotStoreLeaders(cluster.GetBasicCluster(), storeID, cluster.GetHotPeerStats(utils.Read, 1))
+	regions = statistics.GetHotStoreLeaders(cluster.GetBasicCluster(), storeID, cluster.GetHotPeerStats(utils.Read, 3))
 	if len(regions) != 0 {
-		for _, region := range regions {
-			if pendingRegions[region.GetID()] != nil {
-				delete(regions, region.GetID())
-			}
-		}
+		return filter.RandomSelectOneRegion(regions, nil, inProgressFilter, downFilter)
 	}
-	return filter.RandomSelectOneRegion(regions, nil, downFilter)
+	return nil
 }

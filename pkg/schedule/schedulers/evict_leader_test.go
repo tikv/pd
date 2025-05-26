@@ -16,6 +16,7 @@ package schedulers
 
 import (
 	"bytes"
+	"math/rand"
 	"testing"
 
 	"github.com/docker/go-units"
@@ -192,4 +193,92 @@ func TestEvictHotLeader(t *testing.T) {
 		}
 	}
 	re.Len(ops, 3)
+}
+
+func BenchmarkScheduleEvictLeaderBatch(b *testing.B) {
+	cases := []struct {
+		name       string
+		stores     int
+		regions    int
+		hotRegions int
+		writeRate  float64
+	}{
+		{"cold", 10, 500000, 0, 0},
+		{"hot", 10, 500000, 5000, 2.0},
+	}
+
+	for _, tc := range cases {
+		b.Run(tc.name, func(b *testing.B) {
+			cancel, _, cluster, oc := prepareSchedulersTest()
+			defer cancel()
+
+			// Add stores with write statistics
+			for i := 1; i <= tc.stores; i++ {
+				cluster.AddLeaderStore(uint64(i), 0)
+				if tc.writeRate > 0 {
+					writtenBytes := uint64(tc.writeRate * float64(units.MiB) * utils.StoreHeartBeatReportInterval)
+					cluster.UpdateStorageWrittenBytes(uint64(i), writtenBytes)
+					cluster.UpdateStorageWrittenKeys(uint64(i), writtenBytes)
+				}
+			}
+
+			hotRegions := make([]testRegionInfo, 0, tc.hotRegions)
+			if tc.hotRegions > 0 {
+				for i := 1; i <= tc.hotRegions; i++ {
+					peers := []uint64{1} // leader在store 1
+					for len(peers) < 3 {
+						sid := uint64(rand.Intn(tc.stores) + 1)
+						if !containsUint64(peers, sid) {
+							peers = append(peers, sid)
+						}
+					}
+					hotRegions = append(hotRegions, testRegionInfo{
+						id:        uint64(i),
+						peers:     peers,
+						byteRate:  tc.writeRate * units.MiB,
+						keyRate:   tc.writeRate * units.MiB * 2,
+						queryRate: 0,
+					})
+				}
+			}
+
+			// Add regions with leaders
+			for i := 1; i <= tc.regions; i++ {
+				peers := []uint64{uint64(rand.Intn(tc.stores) + 1)}
+				for len(peers) < 3 {
+					sid := uint64(rand.Intn(tc.stores) + 1)
+					if !containsUint64(peers, sid) {
+						peers = append(peers, sid)
+					}
+				}
+				cluster.AddLeaderRegion(uint64(i), peers[0], peers[1], peers[2])
+			}
+
+			if len(hotRegions) > 0 {
+				addRegionInfo(cluster, utils.Write, hotRegions)
+			}
+
+			// Create scheduler and configure store 1 as evict target
+			sl, err := CreateScheduler(types.EvictLeaderScheduler, oc, storage.NewStorageWithMemoryBackend(),
+				ConfigSliceDecoder(types.EvictLeaderScheduler, []string{"1"}),
+				func(string) error { return nil })
+			if err != nil {
+				b.Fatal(err)
+			}
+
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				sl.Schedule(cluster, false)
+			}
+		})
+	}
+}
+
+func containsUint64(arr []uint64, val uint64) bool {
+	for _, a := range arr {
+		if a == val {
+			return true
+		}
+	}
+	return false
 }

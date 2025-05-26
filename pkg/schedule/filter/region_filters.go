@@ -120,6 +120,24 @@ func (*regionDownFilter) Select(region *core.RegionInfo) *plan.Status {
 	return statusOK
 }
 
+type regionInProgressFilter struct {
+	// return true if the region is in progress.
+	checkFn func(uint64) bool
+}
+
+// NewRegionInProgressFilter creates a RegionFilter that filters regions based on a custom check function.
+func NewRegionInProgressFilter(checkFn func(uint64) bool) RegionFilter {
+	return &regionInProgressFilter{checkFn: checkFn}
+}
+
+// Select implements the RegionFilter interface.
+func (f *regionInProgressFilter) Select(region *core.RegionInfo) *plan.Status {
+	if f.checkFn(region.GetID()) {
+		return statusRegionInProgress
+	}
+	return statusOK
+}
+
 // RegionReplicatedFilter filters all unreplicated regions.
 type RegionReplicatedFilter struct {
 	cluster sche.SharedCluster

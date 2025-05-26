@@ -69,7 +69,7 @@ func (l *RegionLabeler) doGC(gcInterval time.Duration) {
 			l.checkAndClearExpiredLabels()
 			log.Debug("region labeler GC")
 		case <-l.ctx.Done():
-			log.Info("region labeler GC stopped")
+			log.Debug("region labeler GC stopped")
 			return
 		}
 	}

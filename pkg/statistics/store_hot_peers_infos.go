@@ -296,17 +296,8 @@ func GetHotStoreLeaders(
 	id uint64,
 	storeHotPeers map[uint64][]*HotPeerStat,
 ) map[uint64]*core.RegionInfo {
-	store := cluster.GetStore(id)
-	if store == nil || store.IsTiFlash() {
-		return nil
-	}
-	var hotPeers []*HotPeerStat
-	for _, peer := range filterHotPeers(constant.LeaderKind, storeHotPeers[id]) {
-		hotPeers = append(hotPeers, peer.Clone())
-	}
-
 	hotLeaders := make(map[uint64]*core.RegionInfo)
-	for _, peer := range hotPeers {
+	for _, peer := range filterHotPeers(constant.LeaderKind, storeHotPeers[id]) {
 		regionID := peer.RegionID
 		region := cluster.GetRegion(regionID)
 		if region == nil {
