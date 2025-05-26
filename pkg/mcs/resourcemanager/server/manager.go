@@ -116,6 +116,24 @@ func (m *Manager) GetStorage() endpoint.ResourceGroupStorage {
 	return m.storage
 }
 
+// GetKeyspaceServiceLimiter returns the service limit of the keyspace.
+func (m *Manager) GetKeyspaceServiceLimiter(keyspaceID uint32) *serviceLimiter {
+	krgm := m.getKeyspaceResourceGroupManager(keyspaceID)
+	if krgm == nil {
+		return nil
+	}
+	return krgm.getServiceLimiter().Clone()
+}
+
+// SetKeyspaceServiceLimit sets the service limit of the keyspace.
+func (m *Manager) SetKeyspaceServiceLimit(keyspaceID uint32, serviceLimit float64) {
+	krgm := m.getKeyspaceResourceGroupManager(keyspaceID)
+	if krgm == nil {
+		return
+	}
+	krgm.setServiceLimiter(serviceLimit)
+}
+
 func (m *Manager) getOrCreateKeyspaceResourceGroupManager(keyspaceID uint32, initDefault bool) *keyspaceResourceGroupManager {
 	m.Lock()
 	krgm, ok := m.krgms[keyspaceID]

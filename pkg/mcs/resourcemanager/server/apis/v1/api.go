@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"net/http"
 	"reflect"
+	"strconv"
 	"strings"
 
 	"github.com/gin-contrib/cors"
@@ -36,15 +37,14 @@ import (
 	"github.com/tikv/pd/pkg/utils/reflectutil"
 )
 
-// APIPathPrefix is the prefix of the API path.
-const APIPathPrefix = "/resource-manager/api/v1/"
+const apiPathPrefix = "/resource-manager/api/v1/"
 
 var (
 	apiServiceGroup = apiutil.APIServiceGroup{
 		Name:       "resource-manager",
 		Version:    "v1",
 		IsCore:     false,
-		PathPrefix: APIPathPrefix,
+		PathPrefix: apiPathPrefix,
 	}
 )
 
@@ -78,7 +78,7 @@ func NewService(srv *rmserver.Service) *Service {
 	apiHandlerEngine.GET("metrics", utils.PromHandler())
 	apiHandlerEngine.GET("status", utils.StatusHandler)
 	pprof.Register(apiHandlerEngine)
-	endpoint := apiHandlerEngine.Group(APIPathPrefix)
+	endpoint := apiHandlerEngine.Group(apiPathPrefix)
 	endpoint.Use(multiservicesapi.ServiceRedirector())
 	s := &Service{
 		manager:          manager,
@@ -99,6 +99,8 @@ func (s *Service) RegisterRouter() {
 	configEndpoint.DELETE("/group/:name", s.deleteResourceGroup)
 	configEndpoint.GET("/controller", s.getControllerConfig)
 	configEndpoint.POST("/controller", s.setControllerConfig)
+	configEndpoint.POST("/keyspace/:keyspace_id/service-limit", s.setKeyspaceServiceLimit)
+	configEndpoint.GET("/keyspace/:keyspace_id/service-limit", s.getKeyspaceServiceLimit)
 }
 
 func (s *Service) handler() http.Handler {
@@ -238,4 +240,69 @@ func (s *Service) setControllerConfig(c *gin.Context) {
 		}
 	}
 	c.String(http.StatusOK, "Success!")
+}
+
+type keyspaceServiceLimitRequest struct {
+	ServiceLimit float64 `json:"service_limit"`
+}
+
+// SetKeyspaceServiceLimit
+//
+//	@Tags		ResourceManager
+//	@Summary	Set the service limit of the keyspace.
+//	@Param		keyspace_id		path		string	true	"Keyspace ID"
+//	@Param		service_limit	body		object	true	"json params, keyspaceServiceLimitRequest"
+//	@Success	200				{string}	string	"Success!"
+//	@Failure	400				{string}	error
+//	@Router		/config/keyspace/{keyspace_id}/service-limit [post]
+func (s *Service) setKeyspaceServiceLimit(c *gin.Context) {
+	keyspaceID, err := parseKeyspaceID(c)
+	if err != nil {
+		c.String(http.StatusBadRequest, err.Error())
+		return
+	}
+	var req keyspaceServiceLimitRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.String(http.StatusBadRequest, err.Error())
+		return
+	}
+	if req.ServiceLimit < 0 {
+		c.String(http.StatusBadRequest, "service_limit must be non-negative")
+		return
+	}
+	s.manager.SetKeyspaceServiceLimit(keyspaceID, req.ServiceLimit)
+	c.String(http.StatusOK, "Success!")
+}
+
+func parseKeyspaceID(c *gin.Context) (uint32, error) {
+	keyspaceIDStr := c.Param("keyspace_id")
+	if len(keyspaceIDStr) == 0 {
+		return constant.NullKeyspaceID, errors.New("keyspace_id is required")
+	}
+	keyspaceID, err := strconv.ParseUint(keyspaceIDStr, 10, 32)
+	if err != nil {
+		return constant.NullKeyspaceID, errors.New("keyspace_id must be a number")
+	}
+	return uint32(keyspaceID), nil
+}
+
+// GetKeyspaceServiceLimit
+//
+//	@Tags		ResourceManager
+//	@Summary	Get the service limit of the keyspace.
+//	@Param		keyspace_id		path		string	true	"Keyspace ID"
+//	@Success	200				{string}	json	format	of	rmserver.serviceLimiter
+//	@Failure	400				{string}	error
+func (s *Service) getKeyspaceServiceLimit(c *gin.Context) {
+	keyspaceID, err := parseKeyspaceID(c)
+	if err != nil {
+		c.String(http.StatusBadRequest, err.Error())
+		return
+	}
+	limiter := s.manager.GetKeyspaceServiceLimiter(keyspaceID)
+	if limiter == nil {
+		c.String(http.StatusNotFound, "keyspace manager not found with keyspace_id %s", keyspaceID)
+		return
+	}
+	c.IndentedJSON(http.StatusOK, limiter)
 }

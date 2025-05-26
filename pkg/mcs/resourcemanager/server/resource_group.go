@@ -189,6 +189,7 @@ func (rg *ResourceGroup) RequestRU(
 	now time.Time,
 	requiredToken float64,
 	targetPeriodMs, clientUniqueID uint64,
+	sl *serviceLimiter,
 ) *rmpb.GrantedRUTokenBucket {
 	rg.Lock()
 	defer rg.Unlock()
@@ -196,7 +197,18 @@ func (rg *ResourceGroup) RequestRU(
 	if rg.RUSettings == nil || rg.RUSettings.RU.Settings == nil {
 		return nil
 	}
+	// First, try to get tokens from the resource group.
 	tb, trickleTimeMs := rg.RUSettings.RU.request(now, requiredToken, targetPeriodMs, clientUniqueID)
+	// Then, try to apply the service limit.
+	grantedTokens := tb.GetTokens()
+	limitedTokens := sl.applyServiceLimit(now, grantedTokens)
+	if limitedTokens < grantedTokens {
+		tb.Tokens = limitedTokens
+		// Retain the unused tokens for the later requests if it has a burst limit.
+		if rg.RUSettings.RU.Settings.BurstLimit > 0 {
+			rg.RUSettings.RU.lastLimitedTokens += grantedTokens - limitedTokens
+		}
+	}
 	return &rmpb.GrantedRUTokenBucket{GrantedTokens: tb, TrickleTimeMs: trickleTimeMs}
 }
 

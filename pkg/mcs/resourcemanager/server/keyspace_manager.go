@@ -56,6 +56,7 @@ type keyspaceResourceGroupManager struct {
 
 	keyspaceID uint32
 	storage    endpoint.ResourceGroupStorage
+	sl         *serviceLimiter
 }
 
 func newKeyspaceResourceGroupManager(keyspaceID uint32, storage endpoint.ResourceGroupStorage) *keyspaceResourceGroupManager {
@@ -63,6 +64,7 @@ func newKeyspaceResourceGroupManager(keyspaceID uint32, storage endpoint.Resourc
 		groups:     make(map[string]*ResourceGroup),
 		keyspaceID: keyspaceID,
 		storage:    storage,
+		sl:         newServiceLimiter(0),
 	}
 }
 
@@ -236,4 +238,18 @@ func (krgm *keyspaceResourceGroupManager) persistResourceGroupRunningState() {
 		}
 		krgm.RUnlock()
 	}
+}
+
+func (krgm *keyspaceResourceGroupManager) setServiceLimiter(serviceLimit float64) {
+	krgm.RLock()
+	sl := krgm.sl
+	krgm.RUnlock()
+	// Set the new service limit to the limiter.
+	sl.setServiceLimit(serviceLimit)
+}
+
+func (krgm *keyspaceResourceGroupManager) getServiceLimiter() *serviceLimiter {
+	krgm.RLock()
+	defer krgm.RUnlock()
+	return krgm.sl
 }

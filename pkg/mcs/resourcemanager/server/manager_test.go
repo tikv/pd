@@ -262,3 +262,53 @@ func TestCleanUpTicker(t *testing.T) {
 	re.NoError(err)
 	re.Equal("test_keyspace", keyspaceName)
 }
+
+func TestKeyspaceServiceLimit(t *testing.T) {
+	re := require.New(t)
+
+	storage := storage.NewStorageWithMemoryBackend()
+	m := NewManager[*mockConfigProvider](&mockConfigProvider{})
+	m.storage = storage
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	err := m.Init(ctx)
+	re.NoError(err)
+	// Test the default service limit is 0.0.
+	limiter := m.GetKeyspaceServiceLimiter(constant.NullKeyspaceID)
+	re.NotNil(limiter)
+	re.Equal(0.0, limiter.ServiceLimit)
+	re.Equal(0.0, limiter.AvailableTokens)
+	group := &rmpb.ResourceGroup{
+		Name:     "test_group",
+		Mode:     rmpb.GroupMode_RUMode,
+		Priority: 5,
+		RUSettings: &rmpb.GroupRequestUnitSettings{
+			RU: &rmpb.TokenBucket{
+				Settings: &rmpb.TokenLimitSettings{
+					FillRate:   100,
+					BurstLimit: 200,
+				},
+			},
+		},
+		KeyspaceId: &rmpb.KeyspaceIDValue{Value: 1},
+	}
+	// Test the limiter of the non-existing keyspace is nil.
+	limiter = m.GetKeyspaceServiceLimiter(group.KeyspaceId.Value)
+	re.Nil(limiter)
+	// Test the limiter of the newly created keyspace is 0.0.
+	err = m.AddResourceGroup(group)
+	re.NoError(err)
+	limiter = m.GetKeyspaceServiceLimiter(1)
+	re.Equal(0.0, limiter.ServiceLimit)
+	re.Equal(0.0, limiter.AvailableTokens)
+	// Test set the service limit of the keyspace.
+	m.SetKeyspaceServiceLimit(1, 100.0)
+	limiter = m.GetKeyspaceServiceLimiter(1)
+	re.Equal(100.0, limiter.ServiceLimit)
+	re.Equal(0.0, limiter.AvailableTokens) // When setting from 0 to positive, available tokens remain 0
+	// Test set the service limit of the non-existing keyspace.
+	m.SetKeyspaceServiceLimit(2, 100.0)
+	limiter = m.GetKeyspaceServiceLimiter(2)
+	re.Nil(limiter)
+}
