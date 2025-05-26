@@ -402,6 +402,13 @@ func scheduleEvictLeaderOnce(r *rand.Rand, name string, cluster sche.SchedulerCl
 		for _, t := range targets {
 			targetIDs = append(targetIDs, t.GetID())
 		}
+		if cluster.GetLeaderStore(region).GetID() != storeID {
+			log.Debug("skip evict leader for region, because the leader store is not the evict store",
+				zap.Uint64("region-id", region.GetID()),
+				zap.Uint64("leader-store-id", cluster.GetLeaderStore(region).GetID()),
+				zap.Uint64("evict-store-id", storeID))
+			continue
+		}
 		op, err := operator.CreateTransferLeaderOperator(name, cluster, region, target.GetID(), targetIDs, operator.OpLeader)
 		if err != nil {
 			log.Debug("fail to create evict leader operator", errs.ZapError(err))
