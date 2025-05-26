@@ -324,11 +324,11 @@ func (m *GCStateManager) advanceTxnSafePointImpl(keyspaceID uint32, target uint6
 				// not-expired state again. Once we regard a GC barrier as expired, it must be expired *strictly*,
 				// otherwise it may break the constraint that GC barriers must block the txn safe point from being
 				// advanced over them.
-				if barrier.IsGlobal {
-					err1 = wb.DeleteGlobalGCBarrier(barrier.BarrierID)
-				} else {
-					err1 = wb.DeleteGCBarrier(keyspaceID, barrier.BarrierID)
-				}
+				// if barrier.IsGlobal {
+				// 	err1 = wb.DeleteGlobalGCBarrier(barrier.BarrierID)
+				// } else {
+				err1 = wb.DeleteGCBarrier(keyspaceID, barrier.BarrierID)
+				// }
 				if err1 != nil {
 					return err1
 				}
@@ -429,7 +429,7 @@ func (*GCStateManager) logAdvancingTxnSafePoint(keyspaceID uint32, result Advanc
 
 // SetGlobalGCBarrier sets a global GC barrier.
 // Global GC barrier takes effect globally, every keyspace should also consider global barriers.
-func (m *GCStateManager) SetGlobalGCBarrier(ctx context.Context, barrierID string, barrierTS uint64, ttl time.Duration, now time.Time) (*endpoint.GCBarrier, error) {
+func (m *GCStateManager) SetGlobalGCBarrier(ctx context.Context, barrierID string, barrierTS uint64, ttl time.Duration, now time.Time) (*endpoint.GlobalGCBarrier, error) {
 	if ttl <= 0 {
 		return nil, errs.ErrInvalidArgument.GenWithStackByArgs("ttl", ttl)
 	}
@@ -443,7 +443,7 @@ func (m *GCStateManager) SetGlobalGCBarrier(ctx context.Context, barrierID strin
 		t := now.Add(ttl)
 		expirationTime = &t
 	}
-	newBarrier := endpoint.NewGCBarrier(barrierID, barrierTS, expirationTime)
+	newBarrier := endpoint.NewGlobalGCBarrier(barrierID, barrierTS, expirationTime)
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -466,17 +466,17 @@ func (m *GCStateManager) SetGlobalGCBarrier(ctx context.Context, barrierID strin
 				return err1
 			}
 			if barrierTS < txnSafePoint {
-				return errs.ErrGCBarrierTSBehindTxnSafePoint.GenWithStackByArgs(barrierTS, txnSafePoint)
+				return errs.ErrGlobalGCBarrierTSBehindTxnSafePoint.GenWithStackByArgs(barrierTS, txnSafePoint)
 			}
 		}
 
-		// Note, allKeyspaces by LoadRangeKeyspace() do not contain the null keyspace!
+		// NOTE, allKeyspaces by LoadRangeKeyspace() do not contain the null keyspace!
 		txnSafePoint, err2 := m.gcMetaStorage.LoadTxnSafePoint(constant.NullKeyspaceID)
 		if err2 != nil {
 			return err2
 		}
 		if barrierTS < txnSafePoint {
-			return errs.ErrGCBarrierTSBehindTxnSafePoint.GenWithStackByArgs(barrierTS, txnSafePoint)
+			return errs.ErrGlobalGCBarrierTSBehindTxnSafePoint.GenWithStackByArgs(barrierTS, txnSafePoint)
 		}
 
 		err2 = wb.SetGlobalGCBarrier(newBarrier)
@@ -500,7 +500,7 @@ func (m *GCStateManager) SetGlobalGCBarrier(ctx context.Context, barrierID strin
 
 // DeleteGlobalGCBarrier deletes a global GC barrier by the given barrierID.
 // Returns the information of the deleted GC barrier, or nil if the barrier does not exist.
-func (m *GCStateManager) DeleteGlobalGCBarrier(ctx context.Context, barrierID string) (*endpoint.GCBarrier, error) {
+func (m *GCStateManager) DeleteGlobalGCBarrier(ctx context.Context, barrierID string) (*endpoint.GlobalGCBarrier, error) {
 	if len(barrierID) == 0 {
 		return nil, errs.ErrInvalidArgument.GenWithStackByArgs("barrierID", barrierID)
 	}
@@ -508,7 +508,7 @@ func (m *GCStateManager) DeleteGlobalGCBarrier(ctx context.Context, barrierID st
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	var deletedBarrier *endpoint.GCBarrier
+	var deletedBarrier *endpoint.GlobalGCBarrier
 	err := m.gcMetaStorage.RunInGCStateTransaction(func(wb *endpoint.GCStateWriteBatch) error {
 		var err1 error
 		deletedBarrier, err1 = m.gcMetaStorage.LoadGlobalGCBarrier(barrierID)
@@ -600,7 +600,6 @@ func (m *GCStateManager) setGCBarrierImpl(keyspaceID uint32, barrierID string, b
 		if barrierTS < txnSafePoint {
 			return errs.ErrGCBarrierTSBehindTxnSafePoint.GenWithStackByArgs(barrierTS, txnSafePoint)
 		}
-
 		err1 = wb.SetGCBarrier(keyspaceID, newBarrier)
 		return err1
 	})

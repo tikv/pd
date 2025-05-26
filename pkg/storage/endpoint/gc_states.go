@@ -21,12 +21,9 @@ import (
 	"strconv"
 	"time"
 
-	"go.uber.org/zap"
-
 	clientv3 "go.etcd.io/etcd/client/v3"
 
 	"github.com/pingcap/errors"
-	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
@@ -123,6 +120,76 @@ var (
 	_ json.Unmarshaler = (*ServiceSafePoint)(nil)
 )
 
+// GlobalGCBarrier represents a global GC barrier.
+// It looks like a GCBarrier now but the struct might change with the code evolve.
+type GlobalGCBarrier struct {
+	BarrierID string
+	BarrierTS uint64
+	// Nil means never expiring.
+	ExpirationTime *time.Time
+}
+
+// NewGlobalGCBarrier creates a new GlobalGCBarrier. The given expirationTime will be rounded up to the next second if it's
+// not in integral seconds.
+// Passing nil to `expirationTime` means the barrier never expires.
+func NewGlobalGCBarrier(barrierID string, barrierTS uint64, expirationTime *time.Time) *GlobalGCBarrier {
+	// Round up the expirationTime.
+	if expirationTime != nil {
+		rounded := expirationTime.Add(time.Second - time.Nanosecond).Truncate(time.Second)
+		*expirationTime = rounded
+	}
+	return &GlobalGCBarrier{
+		BarrierID:      barrierID,
+		BarrierTS:      barrierTS,
+		ExpirationTime: expirationTime,
+	}
+}
+
+// globalGCBarrierFromServiceSafePoint returns the GCBarrier that's synonymous to the given service safe point.
+func globalGCBarrierFromServiceSafePoint(s *ServiceSafePoint) *GlobalGCBarrier {
+	if s == nil {
+		return nil
+	}
+
+	res := &GlobalGCBarrier{
+		BarrierID:      s.ServiceID,
+		BarrierTS:      s.SafePoint,
+		ExpirationTime: nil,
+	}
+	if s.ExpiredAt < math.MaxInt64 && s.ExpiredAt > 0 {
+		expirationTime := new(time.Time)
+		*expirationTime = time.Unix(s.ExpiredAt, 0)
+		res.ExpirationTime = expirationTime
+	}
+	return res
+}
+
+// ToServiceSafePoint converts the global GCBarrier to a synonymous ServiceSafePoint for storing physically.
+// This method should never be used unless handling the physical data, which needs to be compatible with service safe
+// points.
+// This method is public only for keeping some old HTTP API compatible.
+func (b *GlobalGCBarrier) ToServiceSafePoint() *ServiceSafePoint {
+	res := &ServiceSafePoint{
+		ServiceID: b.BarrierID,
+		ExpiredAt: math.MaxInt64,
+		SafePoint: b.BarrierTS,
+	}
+	if b.ExpirationTime != nil {
+		res.ExpiredAt = b.ExpirationTime.Unix()
+	}
+	return res
+}
+
+// String implements fmt.Stringer.
+func (b *GlobalGCBarrier) String() string {
+	expirationTime := "<nil>"
+	if b.ExpirationTime != nil {
+		expirationTime = b.ExpirationTime.String()
+	}
+	return fmt.Sprintf("GlobalGCBarrier { BarrierID: %+q, BarrierTS: %d, ExpirationTime: %+q }",
+		b.BarrierID, b.BarrierTS, expirationTime)
+}
+
 // GCBarrier represents a GC barrier that's used to block GC from advancing to keep snapshots not earlier than the
 // barrier to be safe to read. The concept *GC barrier* is replacing the *service safe points*, but it reuses the
 // same physical persistent data as the service safe points for backward compatibility.
@@ -131,8 +198,6 @@ type GCBarrier struct {
 	BarrierTS uint64
 	// Nil means never expiring.
 	ExpirationTime *time.Time
-	// Whether it is a global GCBarrier.
-	IsGlobal bool
 }
 
 // NewGCBarrier creates a new GCBarrier. The given expirationTime will be rounded up to the next second if it's
@@ -149,12 +214,6 @@ func NewGCBarrier(barrierID string, barrierTS uint64, expirationTime *time.Time)
 		BarrierTS:      barrierTS,
 		ExpirationTime: expirationTime,
 	}
-}
-
-// SetGlobal sets the IsGlobal field to true.
-func (b *GCBarrier) SetGlobal() *GCBarrier {
-	b.IsGlobal = true
-	return b
 }
 
 // gcBarrierFromServiceSafePoint returns the GCBarrier that's synonymous to the given service safe point.
@@ -323,20 +382,24 @@ func (p GCStateProvider) LoadAllGCBarriers(keyspaceID uint32) ([]*GCBarrier, err
 }
 
 // LoadGlobalGCBarrier loads the GCBarrier of the given barrierID from storage.
-func (p GCStateProvider) LoadGlobalGCBarrier(barrierID string) (*GCBarrier, error) {
+func (p GCStateProvider) LoadGlobalGCBarrier(barrierID string) (*GlobalGCBarrier, error) {
 	key := keypath.GlobalGCBarrierPath(barrierID)
-	// GCBarrier is stored in ServiceSafePoint format for compatibility.
 	serviceSafePoint, err := loadJSON[*ServiceSafePoint](p.storage, key)
 	if err != nil {
-		return nil, err
+		return nil, errors.Trace(err)
 	}
-	barrier := gcBarrierFromServiceSafePoint(serviceSafePoint)
-	if barrier != nil && !barrier.IsGlobal {
-		log.Warn("LoadGlobalGCBarrier detects wrong json data",
-			zap.String("barrierID", barrier.BarrierID))
-		barrier.IsGlobal = true
-	}
+	barrier := globalGCBarrierFromServiceSafePoint(serviceSafePoint)
 	return barrier, nil
+}
+
+// LoadGlobalGCBarriers loads all global GC barriers.
+func (p GCStateProvider) LoadGlobalGCBarriers() ([]*GCBarrier, error) {
+	prefix := keypath.GlobalGCBarrierPrefix()
+	barriers, err := p.loadAllGCBarriers(prefix)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	return barriers, nil
 }
 
 func (p GCStateProvider) loadAllGCBarriers(prefix string) ([]*GCBarrier, error) {
@@ -525,28 +588,9 @@ func (wb *GCStateWriteBatch) SetTxnSafePoint(keyspaceID uint32, txnSafePoint uin
 }
 
 // SetGlobalGCBarrier sets a global GCBarrier.
-func (wb *GCStateWriteBatch) SetGlobalGCBarrier(barrier *GCBarrier) error {
+func (wb *GCStateWriteBatch) SetGlobalGCBarrier(barrier *GlobalGCBarrier) error {
 	key := keypath.GlobalGCBarrierPath(barrier.BarrierID)
-	barrier.IsGlobal = true
-	// The keyspace ID is meanless here, but it's better to avoid 0 which is a valid keyspace ID.
-	return wb.writeJSON(key, barrier.ToServiceSafePoint(constant.NullKeyspaceID))
-}
-
-// LoadGlobalGCBarriers loads all global GC barriers.
-func (p GCStateProvider) LoadGlobalGCBarriers() ([]*GCBarrier, error) {
-	prefix := keypath.GlobalGCBarrierPrefix()
-	barriers, err := p.loadAllGCBarriers(prefix)
-	if err != nil {
-		return nil, errors.Trace(err)
-	}
-	for _, barrier := range barriers {
-		if !barrier.IsGlobal {
-			log.Warn("LoadGlobalGCBarriers detects wrong json data",
-				zap.String("barrierID", barrier.BarrierID))
-			barrier.IsGlobal = true
-		}
-	}
-	return barriers, nil
+	return wb.writeJSON(key, barrier.ToServiceSafePoint())
 }
 
 // DeleteGlobalGCBarrier deletes the global GCBarrier with the given barrierID.

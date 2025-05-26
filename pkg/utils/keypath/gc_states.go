@@ -57,7 +57,7 @@ func GCBarrierPath(keyspaceID uint32, barrierID string) string {
 
 // GlobalGCBarrierPrefix returns the prefix of the paths of global GC barriers.
 func GlobalGCBarrierPrefix() string {
-	return GlobalGCBarrierPath("")
+	return globalGCBarrierPathPrefix
 }
 
 // GlobalGCBarrierPath returns the key path of global GC barrier with given barrierID.

@@ -285,6 +285,25 @@ func gcBarrierToProto(b *endpoint.GCBarrier, now time.Time) *pdpb.GCBarrierInfo 
 	}
 }
 
+func globalGCBarrierToProto(b *endpoint.GlobalGCBarrier, now time.Time) *pdpb.GCBarrierInfo {
+	if b == nil {
+		return nil
+	}
+
+	// After rounding, the actual TTL might be not exactly the same as the specified value. Recalculate it anyway.
+	// MaxInt64 represents that the expiration time is not specified and it never expires.
+	var resultTTL int64 = math.MaxInt64
+	if b.ExpirationTime != nil {
+		resultTTL = int64(max(math.Floor(b.ExpirationTime.Sub(now).Seconds()), 0))
+	}
+
+	return &pdpb.GCBarrierInfo{
+		BarrierId:  b.BarrierID,
+		BarrierTs:  b.BarrierTS,
+		TtlSeconds: resultTTL,
+	}
+}
+
 func gcStateToProto(gcState gc.GCState, now time.Time) *pdpb.GCState {
 	gcBarriers := make([]*pdpb.GCBarrierInfo, 0, len(gcState.GCBarriers))
 	for _, b := range gcState.GCBarriers {
@@ -568,7 +587,7 @@ func (s *GrpcServer) SetGlobalGCBarrier(ctx context.Context, request *pdpb.SetGl
 
 	return &pdpb.SetGlobalGCBarrierResponse{
 		Header:         wrapHeader(),
-		NewBarrierInfo: gcBarrierToProto(newBarrier, now),
+		NewBarrierInfo: globalGCBarrierToProto(newBarrier, now),
 	}, nil
 }
 
@@ -607,6 +626,6 @@ func (s *GrpcServer) DeleteGlobalGCBarrier(ctx context.Context, request *pdpb.De
 
 	return &pdpb.DeleteGlobalGCBarrierResponse{
 		Header:             wrapHeader(),
-		DeletedBarrierInfo: gcBarrierToProto(deletedBarrier, now),
+		DeletedBarrierInfo: globalGCBarrierToProto(deletedBarrier, now),
 	}, nil
 }
