@@ -1145,15 +1145,25 @@ func TestPreparingProgress(t *testing.T) {
 		if p.LeftSeconds < 108.125 {
 			return false
 		}
+
+		output = sendRequest(re, leader.GetAddr()+"/pd/api/v1/stores/progress?id=4", http.MethodGet, http.StatusOK)
+		re.NoError(json.Unmarshal(output, &p))
+		if p.Action != "preparing" {
+			return false
+		}
+		if fmt.Sprintf("%.2f", p.Progress) != "0.05" {
+			return false
+		}
+		if p.CurrentSpeed > 1.0 {
+			return false
+		}
+		if p.LeftSeconds < 179.0 {
+			return false
+		}
+
 		return true
 	})
 
-	output := sendRequest(re, leader.GetAddr()+"/pd/api/v1/stores/progress?id=4", http.MethodGet, http.StatusOK)
-	re.NoError(json.Unmarshal(output, &p))
-	re.Equal("preparing", p.Action)
-	re.Equal("0.05", fmt.Sprintf("%.2f", p.Progress))
-	re.LessOrEqual(p.CurrentSpeed, 1.0)
-	re.GreaterOrEqual(p.LeftSeconds, 179.0)
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs"))
 }
 
