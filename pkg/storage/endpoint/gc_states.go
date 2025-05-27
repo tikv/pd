@@ -180,6 +180,11 @@ func (b *GlobalGCBarrier) ToServiceSafePoint() *ServiceSafePoint {
 	return res
 }
 
+// IsExpired checks whether the GlobalGCBarrier is expired at the given time.
+func (b *GlobalGCBarrier) IsExpired(now time.Time) bool {
+	return b.ExpirationTime != nil && now.After(*b.ExpirationTime)
+}
+
 // String implements fmt.Stringer.
 func (b *GlobalGCBarrier) String() string {
 	expirationTime := "<nil>"
@@ -188,6 +193,16 @@ func (b *GlobalGCBarrier) String() string {
 	}
 	return fmt.Sprintf("GlobalGCBarrier { BarrierID: %+q, BarrierTS: %d, ExpirationTime: %+q }",
 		b.BarrierID, b.BarrierTS, expirationTime)
+}
+
+type globalGCBarrierDecoder struct {
+	barriers []*GlobalGCBarrier
+}
+
+func (d *globalGCBarrierDecoder) decode(v *ServiceSafePoint) {
+	if v != nil {
+		d.barriers = append(d.barriers, globalGCBarrierFromServiceSafePoint(v))
+	}
 }
 
 // GCBarrier represents a GC barrier that's used to block GC from advancing to keep snapshots not earlier than the
@@ -233,6 +248,16 @@ func gcBarrierFromServiceSafePoint(s *ServiceSafePoint) *GCBarrier {
 		res.ExpirationTime = expirationTime
 	}
 	return res
+}
+
+type gcBarrierDecoder struct {
+	barriers []*GCBarrier
+}
+
+func (d *gcBarrierDecoder) decode(v *ServiceSafePoint) {
+	if v != nil {
+		d.barriers = append(d.barriers, gcBarrierFromServiceSafePoint(v))
+	}
 }
 
 // ToServiceSafePoint converts the GCBarrier to a synonymous ServiceSafePoint for storing physically.
@@ -378,7 +403,12 @@ func (p GCStateProvider) LoadGCBarrier(keyspaceID uint32, barrierID string) (*GC
 // LoadAllGCBarriers loads all GC barriers of the given keyspace.
 func (p GCStateProvider) LoadAllGCBarriers(keyspaceID uint32) ([]*GCBarrier, error) {
 	prefix := keypath.GCBarrierPrefix(keyspaceID)
-	return p.loadAllGCBarriers(prefix)
+	var dec gcBarrierDecoder
+	err := p.loadAllGCBarriers(prefix, dec.decode)
+	if err != nil {
+		return nil, errors.Trace(err)
+	}
+	return dec.barriers, nil
 }
 
 // LoadGlobalGCBarrier loads the GCBarrier of the given barrierID from storage.
@@ -393,32 +423,29 @@ func (p GCStateProvider) LoadGlobalGCBarrier(barrierID string) (*GlobalGCBarrier
 }
 
 // LoadGlobalGCBarriers loads all global GC barriers.
-func (p GCStateProvider) LoadGlobalGCBarriers() ([]*GCBarrier, error) {
+func (p GCStateProvider) LoadGlobalGCBarriers() ([]*GlobalGCBarrier, error) {
 	prefix := keypath.GlobalGCBarrierPrefix()
-	barriers, err := p.loadAllGCBarriers(prefix)
+	var dec globalGCBarrierDecoder
+	err := p.loadAllGCBarriers(prefix, dec.decode)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
-	return barriers, nil
+	return dec.barriers, nil
 }
 
-func (p GCStateProvider) loadAllGCBarriers(prefix string) ([]*GCBarrier, error) {
+func (p GCStateProvider) loadAllGCBarriers(prefix string, decoder func(*ServiceSafePoint)) error {
 	// TODO: Limit the count for each call.
 	_, serviceSafePoints, err := loadJSONByPrefix[*ServiceSafePoint](p.storage, prefix, 0)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	if len(serviceSafePoints) == 0 {
-		return nil, nil
+		return nil
 	}
-	barriers := make([]*GCBarrier, 0, len(serviceSafePoints))
 	for _, serviceSafePoint := range serviceSafePoints {
-		barrier := gcBarrierFromServiceSafePoint(serviceSafePoint)
-		if barrier != nil {
-			barriers = append(barriers, barrier)
-		}
+		decoder(serviceSafePoint)
 	}
-	return barriers, nil
+	return nil
 }
 
 // CompatibleLoadTiDBMinStartTS loads the minStartTS reported to etcd directly by TiDB.

@@ -285,7 +285,7 @@ func gcBarrierToProto(b *endpoint.GCBarrier, now time.Time) *pdpb.GCBarrierInfo 
 	}
 }
 
-func globalGCBarrierToProto(b *endpoint.GlobalGCBarrier, now time.Time) *pdpb.GCBarrierInfo {
+func globalGCBarrierToProto(b *endpoint.GlobalGCBarrier, now time.Time) *pdpb.GlobalGCBarrierInfo {
 	if b == nil {
 		return nil
 	}
@@ -297,7 +297,7 @@ func globalGCBarrierToProto(b *endpoint.GlobalGCBarrier, now time.Time) *pdpb.GC
 		resultTTL = int64(max(math.Floor(b.ExpirationTime.Sub(now).Seconds()), 0))
 	}
 
-	return &pdpb.GCBarrierInfo{
+	return &pdpb.GlobalGCBarrierInfo{
 		BarrierId:  b.BarrierID,
 		BarrierTs:  b.BarrierTS,
 		TtlSeconds: resultTTL,
@@ -575,9 +575,9 @@ func (s *GrpcServer) SetGlobalGCBarrier(ctx context.Context, request *pdpb.SetGl
 	}
 
 	now := time.Now()
-	barrierID := request.GetBarrierInfo().GetBarrierId()
-	barrierTS := request.GetBarrierInfo().GetBarrierTs()
-	ttl := typeutil.SaturatingStdDurationFromSeconds(request.GetBarrierInfo().GetTtlSeconds())
+	barrierID := request.GetBarrierId()
+	barrierTS := request.GetBarrierTs()
+	ttl := typeutil.SaturatingStdDurationFromSeconds(request.GetTtlSeconds())
 	newBarrier, err := s.gcStateManager.SetGlobalGCBarrier(ctx, barrierID, barrierTS, ttl, now)
 	if err != nil {
 		return &pdpb.SetGlobalGCBarrierResponse{

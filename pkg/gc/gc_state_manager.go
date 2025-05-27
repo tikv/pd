@@ -286,6 +286,7 @@ func (m *GCStateManager) advanceTxnSafePointImpl(keyspaceID uint32, target uint6
 		oldTxnSafePoint         uint64
 		newTxnSafePoint         uint64
 		blockingBarrier         *endpoint.GCBarrier
+		blockingGlobalBarrier   *endpoint.GlobalGCBarrier
 		blockingMinStartTSOwner *string
 	)
 
@@ -304,11 +305,6 @@ func (m *GCStateManager) advanceTxnSafePointImpl(keyspaceID uint32, target uint6
 		if err1 != nil {
 			return err1
 		}
-		globals, err2 := m.gcMetaStorage.LoadGlobalGCBarriers()
-		if err2 != nil {
-			return err2
-		}
-		barriers = append(barriers, globals...)
 
 		for _, barrier := range barriers {
 			if keyspaceID == constant.NullKeyspaceID && barrier.BarrierID == keypath.GCWorkerServiceSafePointID {
@@ -324,11 +320,7 @@ func (m *GCStateManager) advanceTxnSafePointImpl(keyspaceID uint32, target uint6
 				// not-expired state again. Once we regard a GC barrier as expired, it must be expired *strictly*,
 				// otherwise it may break the constraint that GC barriers must block the txn safe point from being
 				// advanced over them.
-				// if barrier.IsGlobal {
-				// 	err1 = wb.DeleteGlobalGCBarrier(barrier.BarrierID)
-				// } else {
 				err1 = wb.DeleteGCBarrier(keyspaceID, barrier.BarrierID)
-				// }
 				if err1 != nil {
 					return err1
 				}
@@ -356,6 +348,31 @@ func (m *GCStateManager) advanceTxnSafePointImpl(keyspaceID uint32, target uint6
 			blockingMinStartTSOwner = &ownerKey
 		}
 
+		// Global GC barriers also block txn safe point.
+		globals, err2 := m.gcMetaStorage.LoadGlobalGCBarriers()
+		if err2 != nil {
+			return err2
+		}
+		for _, barrier := range globals {
+			if keyspaceID == constant.NullKeyspaceID && barrier.BarrierID == keypath.GCWorkerServiceSafePointID {
+				downgradeCompatibleMode = true
+				continue
+			}
+			if barrier.IsExpired(now) {
+				err1 = wb.DeleteGlobalGCBarrier(barrier.BarrierID)
+				if err1 != nil {
+					return err1
+				}
+				// Do not block GC with expired barriers.
+				continue
+			}
+
+			if barrier.BarrierTS < minBlocker {
+				minBlocker = barrier.BarrierTS
+				blockingGlobalBarrier = barrier
+			}
+		}
+
 		// Txn safe point never decreases.
 		newTxnSafePoint = max(oldTxnSafePoint, minBlocker)
 
@@ -376,6 +393,9 @@ func (m *GCStateManager) advanceTxnSafePointImpl(keyspaceID uint32, target uint6
 	if blockingBarrier != nil {
 		blockerDesc = blockingBarrier.String()
 		simulatedServiceID = blockingBarrier.BarrierID
+	} else if blockingGlobalBarrier != nil {
+		blockerDesc = blockingGlobalBarrier.String()
+		simulatedServiceID = blockingGlobalBarrier.BarrierID
 	} else if blockingMinStartTSOwner != nil {
 		blockerDesc = fmt.Sprintf("TiDBMinStartTS { Key: %+q, MinStartTS: %d }", *blockingMinStartTSOwner, newTxnSafePoint)
 		simulatedServiceID = "tidb_min_start_ts_" + *blockingMinStartTSOwner
