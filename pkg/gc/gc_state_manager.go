@@ -354,10 +354,6 @@ func (m *GCStateManager) advanceTxnSafePointImpl(keyspaceID uint32, target uint6
 			return err2
 		}
 		for _, barrier := range globals {
-			if keyspaceID == constant.NullKeyspaceID && barrier.BarrierID == keypath.GCWorkerServiceSafePointID {
-				downgradeCompatibleMode = true
-				continue
-			}
 			if barrier.IsExpired(now) {
 				err1 = wb.DeleteGlobalGCBarrier(barrier.BarrierID)
 				if err1 != nil {
@@ -366,7 +362,6 @@ func (m *GCStateManager) advanceTxnSafePointImpl(keyspaceID uint32, target uint6
 				// Do not block GC with expired barriers.
 				continue
 			}
-
 			if barrier.BarrierTS < minBlocker {
 				minBlocker = barrier.BarrierTS
 				blockingGlobalBarrier = barrier
@@ -402,7 +397,7 @@ func (m *GCStateManager) advanceTxnSafePointImpl(keyspaceID uint32, target uint6
 	}
 
 	if newTxnSafePoint != target {
-		if blockingBarrier == nil && blockingMinStartTSOwner == nil {
+		if blockingBarrier == nil && blockingMinStartTSOwner == nil && blockingGlobalBarrier == nil {
 			panic("unreachable")
 		}
 	}

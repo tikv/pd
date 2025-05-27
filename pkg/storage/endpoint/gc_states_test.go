@@ -91,6 +91,50 @@ func TestGCBarriersConversions(t *testing.T) {
 	}
 }
 
+func TestGlobalGCBarriersConversions(t *testing.T) {
+	re := require.New(t)
+
+	t1 := time.Date(2025, 2, 20, 15, 30, 00, 0, time.Local)
+	t2 := t1.Add(time.Minute)
+	t3 := t1.Add(time.Millisecond)
+	t4 := t1.Add(time.Millisecond * 999)
+
+	gcBarriers := []*GlobalGCBarrier{
+		NewGlobalGCBarrier("a", 1, nil),
+		NewGlobalGCBarrier("b", 2, &t1),
+		NewGlobalGCBarrier("c", uint64(t1.UnixMilli())<<18, &t2),
+		NewGlobalGCBarrier("d", math.MaxUint64-1, &t3),
+		NewGlobalGCBarrier("e", 456139133457530881, &t4),
+	}
+
+	// Check t3 & t4 are rounded
+	t3Rounded := time.Date(2025, 2, 20, 15, 30, 01, 0, time.Local)
+	re.Equal(t3Rounded, *gcBarriers[3].ExpirationTime)
+	re.Equal(t3Rounded, *gcBarriers[4].ExpirationTime)
+
+	serviceSafePoints := []*ServiceSafePoint{
+		{ServiceID: "a", ExpiredAt: math.MaxInt64, SafePoint: 1},
+		{ServiceID: "b", ExpiredAt: t1.Unix(), SafePoint: 2},
+		{ServiceID: "c", ExpiredAt: t2.Unix(), SafePoint: uint64(t1.UnixMilli()) << 18},
+		{ServiceID: "d", ExpiredAt: t3Rounded.Unix(), SafePoint: math.MaxUint64 - 1},
+		{ServiceID: "e", ExpiredAt: t3Rounded.Unix(), SafePoint: 456139133457530881},
+	}
+
+	// Test representing GC barriers by service safe points.
+	for i, gcBarrier := range gcBarriers {
+		expectedServiceSafePoint := serviceSafePoints[i]
+		serviceSafePoint := gcBarrier.ToServiceSafePoint()
+		re.Equal(expectedServiceSafePoint, serviceSafePoint)
+	}
+
+	var dec globalGCBarrierDecoder
+	for i, serviceSafePoint := range serviceSafePoints {
+		expectedGCBarrier := gcBarriers[i]
+		dec.decode(serviceSafePoint)
+		re.Equal(expectedGCBarrier, dec.barriers[i])
+	}
+}
+
 func loadValue(re *require.Assertions, se *StorageEndpoint, key string) string {
 	v, err := se.Load(key)
 	re.NoError(err)
@@ -517,6 +561,81 @@ func TestGCBarrier(t *testing.T) {
 		re.NoError(err)
 		re.Empty(loadedBarriers)
 	}
+}
+
+func TestGlobalGCBarrier(t *testing.T) {
+	re := require.New(t)
+	se, clean := newEtcdStorageEndpoint(t)
+	defer clean()
+	provider := se.GetGCStateProvider()
+	expirationTime := time.Unix(1740127928, 0)
+
+	gcBarriers := []*GlobalGCBarrier{
+		{BarrierID: "1", BarrierTS: 1, ExpirationTime: &expirationTime},
+		{BarrierID: "2", BarrierTS: 2, ExpirationTime: nil},
+		{BarrierID: "3", BarrierTS: 3, ExpirationTime: &expirationTime},
+	}
+
+	// Empty.
+	loadedBarriers, err := provider.LoadGlobalGCBarriers()
+	re.NoError(err)
+	re.Empty(loadedBarriers)
+
+	// Loading not existing GC barrier results in nils.
+	for _, gcBarrier := range gcBarriers {
+		loadedBarrier, err := provider.LoadGlobalGCBarrier(gcBarrier.BarrierID)
+		re.NoError(err)
+		re.Nil(loadedBarrier)
+	}
+
+	for _, gcBarrier := range gcBarriers {
+		err := provider.RunInGCStateTransaction(func(wb *GCStateWriteBatch) error {
+			return wb.SetGlobalGCBarrier(gcBarrier)
+		})
+		re.NoError(err)
+	}
+
+	// Check the raw data.
+	pathPrefix := keypath.GlobalGCBarrierPrefix()
+	re.JSONEq(`{"service_id":"1","expired_at":1740127928,"safe_point":1,"keyspace_id":0}`,
+		loadValue(re, se, pathPrefix+"1"))
+	re.JSONEq(`{"service_id":"2","expired_at":9223372036854775807,"safe_point":2,"keyspace_id":0}`,
+		loadValue(re, se, pathPrefix+"2"))
+	re.JSONEq(`{"service_id":"3","expired_at":1740127928,"safe_point":3,"keyspace_id":0}`,
+		loadValue(re, se, pathPrefix+"3"))
+
+	// Check with the GC barrier API.
+	loadedBarriers, err = provider.LoadGlobalGCBarriers()
+	re.NoError(err)
+	re.Len(loadedBarriers, 3)
+	for i, barrier := range loadedBarriers {
+		re.Equal(gcBarriers[i].BarrierID, barrier.BarrierID)
+		re.Equal(gcBarriers[i].BarrierTS, barrier.BarrierTS)
+		re.Equal(gcBarriers[i].ExpirationTime, barrier.ExpirationTime)
+
+		// Check key matches.
+		b, err := provider.LoadGlobalGCBarrier(barrier.BarrierID)
+		re.NoError(err)
+		re.Equal(barrier.BarrierID, b.BarrierID)
+	}
+
+	// Test deletion
+	for _, gcBarrier := range gcBarriers {
+		err = provider.RunInGCStateTransaction(func(wb *GCStateWriteBatch) error {
+			return wb.DeleteGlobalGCBarrier(gcBarrier.BarrierID)
+		})
+		re.NoError(err)
+
+		// Not exist anymore.
+		loadedBarrier, err := provider.LoadGlobalGCBarrier(gcBarrier.BarrierID)
+		re.NoError(err)
+		re.Nil(loadedBarrier)
+	}
+
+	// After deletion, reading range returns empty again.
+	loadedBarriers, err = provider.LoadGlobalGCBarriers()
+	re.NoError(err)
+	re.Empty(loadedBarriers)
 }
 
 func TestGCBarrierExpiring(t *testing.T) {

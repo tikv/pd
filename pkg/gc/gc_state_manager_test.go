@@ -567,14 +567,14 @@ func (s *gcStateManagerTestSuite) getAllGCBarriers(keyspaceID uint32) []*endpoin
 	return state.GCBarriers
 }
 
-func (s *gcStateManagerTestSuite) getGlobalGCBarrier(barrierID string) *endpoint.GCBarrier {
+func (s *gcStateManagerTestSuite) getGlobalGCBarrier(barrierID string) *endpoint.GlobalGCBarrier {
 	re := s.Require()
 	barrier, err := s.manager.gcMetaStorage.LoadGlobalGCBarrier(barrierID)
 	re.NoError(err)
 	return barrier
 }
 
-func (s *gcStateManagerTestSuite) getGlobalGCBarriers() []*endpoint.GCBarrier {
+func (s *gcStateManagerTestSuite) getGlobalGCBarriers() []*endpoint.GlobalGCBarrier {
 	re := s.Require()
 	barriers, err := s.manager.gcMetaStorage.LoadGlobalGCBarriers()
 	re.NoError(err)
@@ -874,7 +874,7 @@ func (s *gcStateManagerTestSuite) TestGlobalGCBarriers() {
 	// Set global GC barrier and read back.
 	b, err := s.manager.SetGlobalGCBarrier(context.Background(), "b1", 10, time.Hour, now)
 	re.NoError(err)
-	expected := endpoint.NewGCBarrier("b1", 10, ptime(now.Add(time.Hour))).SetGlobal()
+	expected := endpoint.NewGlobalGCBarrier("b1", 10, ptime(now.Add(time.Hour)))
 	re.Equal(expected, b)
 	bs := s.getGlobalGCBarriers()
 	re.Len(bs, 1)
@@ -903,14 +903,14 @@ func (s *gcStateManagerTestSuite) TestGlobalGCBarriers() {
 	// Updating the value of the existing GC barrier
 	b, err = s.manager.SetGlobalGCBarrier(context.Background(), "b1", 15, time.Hour, now)
 	re.NoError(err)
-	expected = endpoint.NewGCBarrier("b1", 15, ptime(now.Add(time.Hour))).SetGlobal()
+	expected = endpoint.NewGlobalGCBarrier("b1", 15, ptime(now.Add(time.Hour)))
 	re.Equal(expected, b)
 	re.Len(s.getGlobalGCBarriers(), 1)
 	re.Equal(expected, s.getGlobalGCBarrier("b1"))
 
 	b, err = s.manager.SetGlobalGCBarrier(context.Background(), "b1", 15, time.Hour*2, now)
 	re.NoError(err)
-	expected = endpoint.NewGCBarrier("b1", 15, ptime(now.Add(time.Hour*2))).SetGlobal()
+	expected = endpoint.NewGlobalGCBarrier("b1", 15, ptime(now.Add(time.Hour*2)))
 	re.Equal(expected, b)
 	re.Len(s.getGlobalGCBarriers(), 1)
 	re.Equal(expected, s.getGlobalGCBarrier("b1"))
@@ -918,7 +918,7 @@ func (s *gcStateManagerTestSuite) TestGlobalGCBarriers() {
 	// Allows shrinking the barrier ts.
 	b, err = s.manager.SetGlobalGCBarrier(context.Background(), "b1", 10, time.Hour, now)
 	re.NoError(err)
-	expected = endpoint.NewGCBarrier("b1", 10, ptime(now.Add(time.Hour))).SetGlobal()
+	expected = endpoint.NewGlobalGCBarrier("b1", 10, ptime(now.Add(time.Hour)))
 	re.Equal(expected, b)
 	re.Len(s.getGlobalGCBarriers(), 1)
 	re.Equal(expected, s.getGlobalGCBarrier("b1"))
@@ -926,7 +926,7 @@ func (s *gcStateManagerTestSuite) TestGlobalGCBarriers() {
 	// Never expiring
 	b, err = s.manager.SetGlobalGCBarrier(context.Background(), "b1", 10, time.Duration(math.MaxInt64), now)
 	re.NoError(err)
-	expected = endpoint.NewGCBarrier("b1", 10, nil).SetGlobal()
+	expected = endpoint.NewGlobalGCBarrier("b1", 10, nil)
 	re.Equal(expected, b)
 	re.Len(s.getGlobalGCBarriers(), 1)
 	re.Equal(expected, s.getGlobalGCBarrier("b1"))
@@ -966,9 +966,9 @@ func (s *gcStateManagerTestSuite) TestGlobalGCBarriers() {
 	_, err = s.manager.SetGlobalGCBarrier(context.Background(), "b2", 20, time.Hour, now)
 	re.NoError(err)
 	re.Len(s.getGlobalGCBarriers(), 2)
-	expected = endpoint.NewGCBarrier("b1", 20, ptime(now.Add(time.Hour))).SetGlobal()
+	expected = endpoint.NewGlobalGCBarrier("b1", 20, ptime(now.Add(time.Hour)))
 	re.Equal(expected, s.getGlobalGCBarrier("b1"))
-	expected = endpoint.NewGCBarrier("b2", 20, ptime(now.Add(time.Hour))).SetGlobal()
+	expected = endpoint.NewGlobalGCBarrier("b2", 20, ptime(now.Add(time.Hour)))
 	re.Equal(expected, s.getGlobalGCBarrier("b2"))
 
 	res, err = s.manager.AdvanceTxnSafePoint(keyspaceID, 25, now)
@@ -984,9 +984,9 @@ func (s *gcStateManagerTestSuite) TestGlobalGCBarriers() {
 	_, err = s.manager.SetGlobalGCBarrier(context.Background(), "b2", 27, time.Hour, now)
 	re.NoError(err)
 	re.Len(s.getGlobalGCBarriers(), 2)
-	expected = endpoint.NewGCBarrier("b1", 25, ptime(now.Add(time.Hour))).SetGlobal()
+	expected = endpoint.NewGlobalGCBarrier("b1", 25, ptime(now.Add(time.Hour)))
 	re.Equal(expected, s.getGlobalGCBarrier("b1"))
-	expected = endpoint.NewGCBarrier("b2", 27, ptime(now.Add(time.Hour))).SetGlobal()
+	expected = endpoint.NewGlobalGCBarrier("b2", 27, ptime(now.Add(time.Hour)))
 	re.Equal(expected, s.getGlobalGCBarrier("b2"))
 
 	res, err = s.manager.AdvanceTxnSafePoint(keyspaceID, 30, now)
@@ -999,7 +999,7 @@ func (s *gcStateManagerTestSuite) TestGlobalGCBarriers() {
 	// Deleting GC barriers
 	b, err = s.manager.DeleteGlobalGCBarrier(context.Background(), "b1")
 	re.NoError(err)
-	expected = endpoint.NewGCBarrier("b1", 25, ptime(now.Add(time.Hour))).SetGlobal()
+	expected = endpoint.NewGlobalGCBarrier("b1", 25, ptime(now.Add(time.Hour)))
 	re.Equal(expected, b)
 	re.Len(s.getGlobalGCBarriers(), 1)
 
@@ -1012,7 +1012,7 @@ func (s *gcStateManagerTestSuite) TestGlobalGCBarriers() {
 
 	b, err = s.manager.DeleteGlobalGCBarrier(context.Background(), "b2")
 	re.NoError(err)
-	expected = endpoint.NewGCBarrier("b2", 27, ptime(now.Add(time.Hour))).SetGlobal()
+	expected = endpoint.NewGlobalGCBarrier("b2", 27, ptime(now.Add(time.Hour)))
 	re.Equal(expected, b)
 	re.Empty(s.getGlobalGCBarriers())
 
@@ -1077,12 +1077,12 @@ func (s *gcStateManagerTestSuite) TestGlobalGCBarriers() {
 	// Disallows setting GC barrier before txn safe point.
 	_, err = s.manager.SetGlobalGCBarrier(context.Background(), "b6", 50, time.Hour, now)
 	re.Error(err)
-	re.ErrorIs(err, errs.ErrGCBarrierTSBehindTxnSafePoint)
+	re.ErrorIs(err, errs.ErrGlobalGCBarrierTSBehindTxnSafePoint)
 	re.Empty(s.getGlobalGCBarriers())
 	// BarrierTS exactly equals to txn safe point is allowed.
 	b, err = s.manager.SetGlobalGCBarrier(context.Background(), "b6", 60, time.Hour, now)
 	re.NoError(err)
-	expected = endpoint.NewGCBarrier("b6", 60, ptime(now.Add(time.Hour))).SetGlobal()
+	expected = endpoint.NewGlobalGCBarrier("b6", 60, ptime(now.Add(time.Hour)))
 	re.Equal(expected, b)
 	re.Len(s.getGlobalGCBarriers(), 1)
 	re.Equal(expected, s.getGlobalGCBarrier("b6"))
