@@ -48,7 +48,7 @@ type GCStatesClient interface {
 	// DeleteGlobalGCBarrier deletes a global GC barrier.
 	DeleteGlobalGCBarrier(ctx context.Context, barrierID string) (*GlobalGCBarrierInfo, error)
 	// Get the GC states from all keyspaces.
-	GetAllKeyspaceGCStates(ctx context.Contest) (GCStates, error)
+	GetAllKeyspacesGCStates(ctx context.Context) (GCStates, error)
 }
 
 // InternalController is the interface for controlling GC execution.
@@ -138,6 +138,14 @@ func NewGlobalGCBarrierInfo(barrierID string, barrierTS uint64, ttl time.Duratio
 	}
 }
 
+// IsExpired checks whether the barrier is expired.
+func (b *GlobalGCBarrierInfo) IsExpired() bool {
+	if b.TTL == TTLNeverExpire {
+		return false
+	}
+	return time.Now().Sub(b.getReqStartTime) > b.TTL
+}
+
 // GCState represents the information of the GC state.
 //
 //nolint:revive
@@ -153,5 +161,5 @@ type GCStates struct {
     // Maps from keyspace id to GC state of that keyspace.
     GCStates map[uint32]GCState
     // All existing global GC barriers.
-    GlobalGCBarriers []GCBarrierInfo
+    GlobalGCBarriers []*GlobalGCBarrierInfo
 }

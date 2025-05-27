@@ -538,16 +538,27 @@ func (s *GrpcServer) GetAllKeyspacesGCStates(ctx context.Context, request *pdpb.
 			Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
 		}, nil
 	}
-
 	now := time.Now()
 	gcStatesPb := make([]*pdpb.GCState, 0, len(gcStates))
 	for _, gcState := range gcStates {
 		gcStatesPb = append(gcStatesPb, gcStateToProto(gcState, now))
 	}
 
+	globalBarriers, err := s.gcStateManager.LoadGlobalGCBarriers()
+	if err != nil {
+		return &pdpb.GetAllKeyspacesGCStatesResponse{
+			Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
+		}, nil
+	}
+	gcBarriersPb := make([]*pdpb.GlobalGCBarrierInfo, 0, len(globalBarriers))
+	for _, barrier := range globalBarriers {
+		gcBarriersPb = append(gcBarriersPb, globalGCBarrierToProto(barrier, now))
+	}
+
 	return &pdpb.GetAllKeyspacesGCStatesResponse{
-		Header:   wrapHeader(),
-		GcStates: gcStatesPb,
+		Header:           wrapHeader(),
+		GcStates:         gcStatesPb,
+		GlobalGcBarriers: gcBarriersPb,
 	}, nil
 }
 
