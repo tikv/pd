@@ -94,7 +94,11 @@ func (s *Service) GetResourceGroup(_ context.Context, req *rmpb.GetResourceGroup
 	if err := s.checkServing(); err != nil {
 		return nil, err
 	}
-	rg := s.manager.GetResourceGroup(constant.NullKeyspaceID, req.ResourceGroupName, req.WithRuStats)
+	keyspaceID := constant.NullKeyspaceID
+	if req.KeyspaceId != nil {
+		keyspaceID = req.KeyspaceId.GetValue()
+	}
+	rg := s.manager.GetResourceGroup(keyspaceID, req.ResourceGroupName, req.WithRuStats)
 	if rg == nil {
 		return nil, errors.New("resource group not found")
 	}
@@ -108,7 +112,11 @@ func (s *Service) ListResourceGroups(_ context.Context, req *rmpb.ListResourceGr
 	if err := s.checkServing(); err != nil {
 		return nil, err
 	}
-	groups := s.manager.GetResourceGroupList(constant.NullKeyspaceID, req.WithRuStats)
+	keyspaceID := constant.NullKeyspaceID
+	if req.KeyspaceId != nil {
+		keyspaceID = req.KeyspaceId.GetValue()
+	}
+	groups := s.manager.GetResourceGroupList(keyspaceID, req.WithRuStats)
 	resp := &rmpb.ListResourceGroupsResponse{
 		Groups: make([]*rmpb.ResourceGroup, 0, len(groups)),
 	}
@@ -135,7 +143,11 @@ func (s *Service) DeleteResourceGroup(_ context.Context, req *rmpb.DeleteResourc
 	if err := s.checkServing(); err != nil {
 		return nil, err
 	}
-	err := s.manager.DeleteResourceGroup(constant.NullKeyspaceID, req.ResourceGroupName)
+	keyspaceID := constant.NullKeyspaceID
+	if req.KeyspaceId != nil {
+		keyspaceID = req.KeyspaceId.GetValue()
+	}
+	err := s.manager.DeleteResourceGroup(keyspaceID, req.ResourceGroupName)
 	if err != nil {
 		return nil, err
 	}
@@ -180,8 +192,12 @@ func (s *Service) AcquireTokenBuckets(stream rmpb.ResourceManager_AcquireTokenBu
 		resps := &rmpb.TokenBucketsResponse{}
 		for _, req := range request.Requests {
 			resourceGroupName := req.GetResourceGroupName()
+			keyspaceID := constant.NullKeyspaceID
+			if req.KeyspaceId != nil {
+				keyspaceID = req.KeyspaceId.GetValue()
+			}
 			// Get the resource group from manager to acquire token buckets.
-			rg := s.manager.GetMutableResourceGroup(constant.NullKeyspaceID, resourceGroupName)
+			rg := s.manager.GetMutableResourceGroup(keyspaceID, resourceGroupName)
 			if rg == nil {
 				log.Warn("resource group not found", zap.String("resource-group", resourceGroupName))
 				continue

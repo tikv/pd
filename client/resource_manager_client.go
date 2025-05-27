@@ -52,7 +52,7 @@ type ResourceManagerClient interface {
 	GetResourceGroup(ctx context.Context, resourceGroupName string, opts ...GetResourceGroupOption) (*rmpb.ResourceGroup, error)
 	AddResourceGroup(ctx context.Context, metaGroup *rmpb.ResourceGroup) (string, error)
 	ModifyResourceGroup(ctx context.Context, metaGroup *rmpb.ResourceGroup) (string, error)
-	DeleteResourceGroup(ctx context.Context, resourceGroupName string) (string, error)
+	DeleteResourceGroup(ctx context.Context, resourceGroupName string, opts ...DeleteResourceGroupOption) (string, error)
 	LoadResourceGroups(ctx context.Context) ([]*rmpb.ResourceGroup, int64, error)
 	AcquireTokenBuckets(ctx context.Context, request *rmpb.TokenBucketsRequest) ([]*rmpb.TokenBucketResponse, error)
 	Watch(ctx context.Context, key []byte, opts ...opt.MetaStorageOption) (chan []*meta_storagepb.Event, error)
@@ -60,7 +60,8 @@ type ResourceManagerClient interface {
 
 // GetResourceGroupOp represents available options when getting resource group.
 type GetResourceGroupOp struct {
-	withRUStats bool
+	withRUStats    bool
+	withKeyspaceID *rmpb.KeyspaceIDValue
 }
 
 // GetResourceGroupOption configures GetResourceGroupOp.
@@ -69,6 +70,32 @@ type GetResourceGroupOption func(*GetResourceGroupOp)
 // WithRUStats specifies to return resource group with ru statistics data.
 func WithRUStats(op *GetResourceGroupOp) {
 	op.withRUStats = true
+}
+
+// WithKeyspaceID specifies to return resource group with keyspace id.
+func WithKeyspaceID(keyspaceID uint32) GetResourceGroupOption {
+	return func(op *GetResourceGroupOp) {
+		op.withKeyspaceID = &rmpb.KeyspaceIDValue{
+			Value: keyspaceID,
+		}
+	}
+}
+
+// DeleteResourceGroupOp represents available options when deleting resource group.
+type DeleteResourceGroupOp struct {
+	withKeyspaceID *rmpb.KeyspaceIDValue
+}
+
+// DeleteResourceGroupOption configures DeleteResourceGroupOp.
+type DeleteResourceGroupOption func(*DeleteResourceGroupOp)
+
+// DeleteWithKeyspaceID specifies to delete resource group with keyspace id.
+func DeleteWithKeyspaceID(keyspaceID uint32) DeleteResourceGroupOption {
+	return func(op *DeleteResourceGroupOp) {
+		op.withKeyspaceID = &rmpb.KeyspaceIDValue{
+			Value: keyspaceID,
+		}
+	}
 }
 
 // resourceManagerClient gets the ResourceManager client of current PD leader.
@@ -92,6 +119,7 @@ func (c *client) ListResourceGroups(ctx context.Context, ops ...GetResourceGroup
 	}
 	req := &rmpb.ListResourceGroupsRequest{
 		WithRuStats: getOp.withRUStats,
+		KeyspaceId:  getOp.withKeyspaceID,
 	}
 	resp, err := cc.ListResourceGroups(ctx, req)
 	if err != nil {
@@ -118,6 +146,7 @@ func (c *client) GetResourceGroup(ctx context.Context, resourceGroupName string,
 	req := &rmpb.GetResourceGroupRequest{
 		ResourceGroupName: resourceGroupName,
 		WithRuStats:       getOp.withRUStats,
+		KeyspaceId:        getOp.withKeyspaceID,
 	}
 	resp, err := cc.GetResourceGroup(ctx, req)
 	if err != nil {
@@ -168,13 +197,18 @@ func (c *client) putResourceGroup(ctx context.Context, metaGroup *rmpb.ResourceG
 }
 
 // DeleteResourceGroup implements the ResourceManagerClient interface.
-func (c *client) DeleteResourceGroup(ctx context.Context, resourceGroupName string) (string, error) {
+func (c *client) DeleteResourceGroup(ctx context.Context, resourceGroupName string, ops ...DeleteResourceGroupOption) (string, error) {
 	cc, err := c.inner.resourceManagerClient()
 	if err != nil {
 		return "", err
 	}
+	deleteOp := &DeleteResourceGroupOp{}
+	for _, op := range ops {
+		op(deleteOp)
+	}
 	req := &rmpb.DeleteResourceGroupRequest{
 		ResourceGroupName: resourceGroupName,
+		KeyspaceId:        deleteOp.withKeyspaceID,
 	}
 	resp, err := cc.DeleteResourceGroup(ctx, req)
 	if err != nil {

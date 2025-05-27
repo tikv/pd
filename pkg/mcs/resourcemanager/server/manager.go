@@ -248,7 +248,9 @@ func (m *Manager) GetControllerConfig() *ControllerConfig {
 // on this retry mechanism.
 func (m *Manager) AddResourceGroup(grouppb *rmpb.ResourceGroup) error {
 	keyspaceID := constant.NullKeyspaceID
-	// TODO: validate the keyspace with the given ID first.
+	if grouppb.KeyspaceId != nil {
+		keyspaceID = grouppb.KeyspaceId.GetValue()
+	}
 	krgm := m.getOrCreateKeyspaceResourceGroupManager(keyspaceID)
 	if krgm == nil {
 		return errs.ErrKeyspaceNotExists.FastGenByArgs(keyspaceID)
@@ -257,17 +259,21 @@ func (m *Manager) AddResourceGroup(grouppb *rmpb.ResourceGroup) error {
 }
 
 // ModifyResourceGroup modifies an existing resource group.
-func (m *Manager) ModifyResourceGroup(group *rmpb.ResourceGroup) error {
+func (m *Manager) ModifyResourceGroup(grouppb *rmpb.ResourceGroup) error {
 	keyspaceID := constant.NullKeyspaceID
+	if grouppb.KeyspaceId != nil {
+		keyspaceID = grouppb.KeyspaceId.GetValue()
+	}
 	krgm := m.getKeyspaceResourceGroupManager(keyspaceID)
 	if krgm == nil {
 		return errs.ErrKeyspaceNotExists.FastGenByArgs(keyspaceID)
 	}
-	return krgm.modifyResourceGroup(group)
+	return krgm.modifyResourceGroup(grouppb)
 }
 
 // DeleteResourceGroup deletes a resource group.
 func (m *Manager) DeleteResourceGroup(keyspaceID uint32, name string) error {
+	// TODO: should we allow to delete default resource group?
 	krgm := m.getKeyspaceResourceGroupManager(keyspaceID)
 	if krgm == nil {
 		return errs.ErrKeyspaceNotExists.FastGenByArgs(keyspaceID)
@@ -336,8 +342,12 @@ func (m *Manager) dispatchConsumption(req *rmpb.TokenBucketRequest) error {
 	if isBackground && isTiFlash {
 		return errors.New("background and tiflash cannot be true at the same time")
 	}
+	keyspaceID := constant.NullKeyspaceID
+	if req.KeyspaceId != nil {
+		keyspaceID = req.KeyspaceId.GetValue()
+	}
 	m.consumptionDispatcher <- &consumptionItem{
-		keyspaceID:        constant.NullKeyspaceID,
+		keyspaceID:        keyspaceID,
 		resourceGroupName: req.GetResourceGroupName(),
 		Consumption:       req.GetConsumptionSinceLastRequest(),
 		isBackground:      isBackground,

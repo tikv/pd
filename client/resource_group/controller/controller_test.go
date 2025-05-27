@@ -210,7 +210,7 @@ func (m *MockResourceGroupProvider) ModifyResourceGroup(ctx context.Context, met
 	return args.String(0), args.Error(1)
 }
 
-func (m *MockResourceGroupProvider) DeleteResourceGroup(ctx context.Context, resourceGroupName string) (string, error) {
+func (m *MockResourceGroupProvider) DeleteResourceGroup(ctx context.Context, resourceGroupName string, _ ...pd.DeleteResourceGroupOption) (string, error) {
 	args := m.Called(ctx, resourceGroupName)
 	return args.String(0), args.Error(1)
 }
