@@ -129,11 +129,11 @@ resource_group/states/controller_test save
 resource_group/states/default save
 resource_group/states/failover_test save
 resource_group/states/keyspace_test save
+resource_group/states/keyspace_test_ save
 resource_group/states/mode_test save
 resource_group/states/penalty_test save
 resource_group/states/stale_test save
 resource_group/states/test save
-resource_group/states/keyspace_test_ save
 resource_group/states/test_ru_consumption save
 resource_group/states/tombstone_test save
 resource_group/states/watch_test save
