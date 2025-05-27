@@ -274,6 +274,8 @@ var (
 	CmdDurationSetGCBarrier             prometheus.Observer
 	CmdDurationDeleteGCBarrier          prometheus.Observer
 	CmdDurationGetGCState               prometheus.Observer
+	CmdDurationSetGlobalGCBarrier             prometheus.Observer
+	CmdDurationDeleteGlobalGCBarrier          prometheus.Observer
 
 	CmdFailedDurationGetRegion                prometheus.Observer
 	CmdFailedDurationTSOWait                  prometheus.Observer
@@ -300,6 +302,8 @@ var (
 	CmdFailedDurationAdvanceGCSafePoint       prometheus.Observer
 	CmdFailedDurationSetGCBarrier             prometheus.Observer
 	CmdFailedDurationDeleteGCBarrier          prometheus.Observer
+	CmdFailedDurationSetGlobalGCBarrier             prometheus.Observer
+	CmdFailedDurationDeleteGlobalGCBarrier          prometheus.Observer
 	CmdFailedDurationGetGCState               prometheus.Observer
 
 	InternalCmdDurationGetClusterInfo prometheus.Observer
@@ -358,6 +362,8 @@ func initLabelValues() {
 	CmdDurationSetGCBarrier = cmdDuration.WithLabelValues("set_gc_barrier")
 	CmdDurationDeleteGCBarrier = cmdDuration.WithLabelValues("delete_gc_barrier")
 	CmdDurationGetGCState = cmdDuration.WithLabelValues("get_gc_state")
+	CmdDurationSetGCBarrier = cmdDuration.WithLabelValues("set_global_gc_barrier")
+	CmdDurationDeleteGCBarrier = cmdDuration.WithLabelValues("delete_global_gc_barrier")
 
 	CmdFailedDurationGetRegion = cmdFailedDuration.WithLabelValues("get_region")
 	CmdFailedDurationTSOWait = cmdFailedDuration.WithLabelValues("wait")
