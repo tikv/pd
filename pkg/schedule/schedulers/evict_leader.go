@@ -317,17 +317,17 @@ type evictLeaderStoresConf interface {
 }
 
 func scheduleEvictLeaderBatch(r *rand.Rand, name string, cluster sche.SchedulerCluster, conf evictLeaderStoresConf, pendingRegions map[uint64]*operator.Operator) []*operator.Operator {
-	for _, op := range pendingRegions {
-		status := op.CheckAndGetStatus()
-		if operator.IsEndStatus(status) {
-			// If the operator is finished, remove it from pending regions.
-			delete(pendingRegions, op.RegionID())
-			continue
-		}
-	}
 	var ops []*operator.Operator
 	batchSize := conf.getBatch()
 	for range batchSize {
+		for _, op := range pendingRegions {
+			status := op.CheckAndGetStatus()
+			if operator.IsEndStatus(status) {
+				// If the operator is finished, remove it from pending regions.
+				delete(pendingRegions, op.RegionID())
+				continue
+			}
+		}
 		once := scheduleEvictLeaderOnce(r, name, cluster, conf, pendingRegions)
 		// no more regions
 		if len(once) == 0 {
@@ -544,9 +544,5 @@ func pickHotLeader(cluster sche.SchedulerCluster, storeID uint64, inProgressFilt
 		return filter.RandomSelectOneRegion(regions, nil, inProgressFilter, downFilter)
 	}
 
-	regions = statistics.GetHotStoreLeaders(cluster.GetBasicCluster(), storeID, cluster.GetHotPeerStats(utils.Read, 1))
-	if len(regions) != 0 {
-		return filter.RandomSelectOneRegion(regions, nil, inProgressFilter, downFilter)
-	}
 	return nil
 }
