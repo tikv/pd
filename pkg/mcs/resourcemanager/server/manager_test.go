@@ -164,7 +164,10 @@ func prepareKeyspaceName(ctx context.Context, re *require.Assertions, manager *M
 	}
 	err := manager.storage.RunInTxn(ctx, func(txn kv.Txn) error {
 		err := manager.storage.SaveKeyspaceMeta(txn, keyspaceMeta)
-		return err
+		if err != nil {
+			return err
+		}
+		return manager.storage.SaveKeyspaceID(txn, keyspaceMeta.Id, keyspaceMeta.Name)
 	})
 	re.NoError(err)
 }
@@ -308,7 +311,55 @@ func TestKeyspaceServiceLimit(t *testing.T) {
 	re.Equal(100.0, limiter.ServiceLimit)
 	re.Equal(0.0, limiter.AvailableTokens) // When setting from 0 to positive, available tokens remain 0
 	// Test set the service limit of the non-existing keyspace.
-	m.SetKeyspaceServiceLimit(2, 100.0)
 	limiter = m.GetKeyspaceServiceLimiter(2)
 	re.Nil(limiter)
+	m.SetKeyspaceServiceLimit(2, 100.0)
+	limiter = m.GetKeyspaceServiceLimiter(2)
+	re.Equal(100.0, limiter.ServiceLimit)
+	re.Equal(0.0, limiter.AvailableTokens)
+}
+
+func TestKeyspaceNameLookup(t *testing.T) {
+	re := require.New(t)
+	m := prepareManager()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	err := m.Init(ctx)
+	re.NoError(err)
+	// Get the null keyspace ID by an empty name.
+	idValue, err := m.GetKeyspaceIDByName(ctx, "")
+	re.NoError(err)
+	re.NotNil(idValue)
+	re.Equal(constant.NullKeyspaceID, idValue.Value)
+	// Get the non-existing keyspace ID by name.
+	idValue, err = m.GetKeyspaceIDByName(ctx, "non-existing-keyspace")
+	re.Error(err)
+	re.Nil(idValue)
+	// Get the null keyspace name.
+	name, err := m.getKeyspaceNameByID(ctx, constant.NullKeyspaceID)
+	re.NoError(err)
+	re.Empty(name)
+	// Get the non-existing keyspace name.
+	name, err = m.getKeyspaceNameByID(ctx, 1)
+	re.Error(err)
+	re.Empty(name)
+	// Get the keyspace ID by name first, then get the keyspace name by ID.
+	prepareKeyspaceName(ctx, re, m, &rmpb.KeyspaceIDValue{Value: 1}, "test_keyspace")
+	idValue, err = m.GetKeyspaceIDByName(ctx, "test_keyspace")
+	re.NoError(err)
+	re.NotNil(idValue)
+	re.Equal(uint32(1), idValue.Value)
+	name, err = m.getKeyspaceNameByID(ctx, 1)
+	re.NoError(err)
+	re.Equal("test_keyspace", name)
+	// Get the keyspace name by ID first, then get the keyspace ID by name.
+	prepareKeyspaceName(ctx, re, m, &rmpb.KeyspaceIDValue{Value: 2}, "test_keyspace_2")
+	name, err = m.getKeyspaceNameByID(ctx, 2)
+	re.NoError(err)
+	re.Equal("test_keyspace_2", name)
+	idValue, err = m.GetKeyspaceIDByName(ctx, "test_keyspace_2")
+	re.NoError(err)
+	re.NotNil(idValue)
+	re.Equal(uint32(2), idValue.Value)
 }

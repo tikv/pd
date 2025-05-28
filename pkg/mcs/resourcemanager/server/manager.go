@@ -67,6 +67,8 @@ type Manager struct {
 	consumptionDispatcher chan *consumptionItem
 	// cached keyspace name for each keyspace ID.
 	keyspaceNameLookup map[uint32]string
+	// used to get the keyspace ID by name.
+	keyspaceIDLookup map[string]uint32
 }
 
 // ConfigProvider is used to get resource manager config from the given
@@ -83,6 +85,7 @@ func NewManager[T ConfigProvider](srv bs.Server) *Manager {
 		krgms:                 make(map[uint32]*keyspaceResourceGroupManager),
 		consumptionDispatcher: make(chan *consumptionItem, defaultConsumptionChanSize),
 		keyspaceNameLookup:    make(map[uint32]string),
+		keyspaceIDLookup:      make(map[string]uint32),
 	}
 	// The first initialization after the server is started.
 	srv.AddStartCallback(func() {
@@ -127,7 +130,8 @@ func (m *Manager) GetKeyspaceServiceLimiter(keyspaceID uint32) *serviceLimiter {
 
 // SetKeyspaceServiceLimit sets the service limit of the keyspace.
 func (m *Manager) SetKeyspaceServiceLimit(keyspaceID uint32, serviceLimit float64) {
-	krgm := m.getKeyspaceResourceGroupManager(keyspaceID)
+	// If the keyspace is not found, create a new keyspace resource group manager.
+	krgm := m.getOrCreateKeyspaceResourceGroupManager(keyspaceID)
 	if krgm == nil {
 		return
 	}
@@ -387,7 +391,9 @@ func (m *Manager) getKeyspaceNameByID(ctx context.Context, id uint32) (string, e
 		return "", nil
 	}
 	// Try to get the keyspace name from the cache first.
+	m.RLock()
 	name, ok := m.keyspaceNameLookup[id]
+	m.RUnlock()
 	if ok {
 		return name, nil
 	}
@@ -409,8 +415,48 @@ func (m *Manager) getKeyspaceNameByID(ctx context.Context, id uint32) (string, e
 		return "", fmt.Errorf("got an empty keyspace name by id %d", id)
 	}
 	// Update the cache.
+	m.Lock()
 	m.keyspaceNameLookup[id] = loadedName
+	m.keyspaceIDLookup[loadedName] = id
+	m.Unlock()
 	return loadedName, nil
+}
+
+// GetKeyspaceIDByName gets the keyspace ID by name.
+func (m *Manager) GetKeyspaceIDByName(ctx context.Context, name string) (*rmpb.KeyspaceIDValue, error) {
+	if len(name) == 0 {
+		return &rmpb.KeyspaceIDValue{Value: constant.NullKeyspaceID}, nil
+	}
+	m.RLock()
+	id, ok := m.keyspaceIDLookup[name]
+	m.RUnlock()
+	if ok {
+		return &rmpb.KeyspaceIDValue{Value: id}, nil
+	}
+	var (
+		loadedID uint32
+		err      error
+	)
+	err = m.storage.RunInTxn(ctx, func(txn kv.Txn) error {
+		ok, loadedID, err = m.storage.LoadKeyspaceID(txn, name)
+		if err != nil {
+			return err
+		}
+		return nil
+	})
+	if err != nil {
+		log.Error("failed to get the keyspace id", zap.String("keyspace-name", name), zap.Error(err))
+		return nil, err
+	}
+	if !ok {
+		return nil, fmt.Errorf("keyspace not found with name: %s", name)
+	}
+	// Update the cache.
+	m.Lock()
+	m.keyspaceNameLookup[loadedID] = name
+	m.keyspaceIDLookup[name] = loadedID
+	m.Unlock()
+	return &rmpb.KeyspaceIDValue{Value: loadedID}, nil
 }
 
 func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
