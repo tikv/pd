@@ -28,8 +28,8 @@ import (
 )
 
 const (
-	gcInterval  = 2 * time.Minute
-	expiredTime = 30 * time.Second
+	gcInterval      = 2 * time.Minute
+	expiredDuration = 30 * time.Second
 
 	removingAction  Action = "removing"
 	preparingAction Action = "preparing"
@@ -120,18 +120,19 @@ func (m *Manager) GC(ctx context.Context) {
 func (m *Manager) gcCompletedProgress() {
 	m.Lock()
 	defer m.Unlock()
-	for storeID, p := range m.completedProgress {
-		exactExpiredTime := expiredTime
-		failpoint.Inject("gcExpiredTime", func(val failpoint.Value) {
-			if s, ok := val.(string); ok {
-				var err error
-				exactExpiredTime, err = time.ParseDuration(s)
-				if err != nil {
-					panic(err)
-				}
+	exactExpiredDuration := expiredDuration
+	failpoint.Inject("gcExpiredTime", func(val failpoint.Value) {
+		if s, ok := val.(string); ok {
+			var err error
+			exactExpiredDuration, err = time.ParseDuration(s)
+			if err != nil {
+				panic(err)
 			}
-		})
-		if p.completeAt.Before(time.Now().Add(-exactExpiredTime)) {
+		}
+	})
+	exactExpiredTime := time.Now().Add(-exactExpiredDuration)
+	for storeID, p := range m.completedProgress {
+		if p.completeAt.Before(exactExpiredTime) {
 			storeIDStr := strconv.FormatUint(storeID, 10)
 			delete(m.completedProgress, storeID)
 			storesProgressGauge.DeleteLabelValues("", storeIDStr, string(p.Action))
