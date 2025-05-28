@@ -22,7 +22,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/prometheus/client_golang/prometheus"
 	"go.uber.org/zap"
 
 	"github.com/pingcap/errors"
@@ -66,33 +65,8 @@ type Manager struct {
 	// consumptionChan is used to send the consumption
 	// info to the background metrics flusher.
 	consumptionDispatcher chan *consumptionItem
-	// record update time of each resource group
-	consumptionRecord map[consumptionRecordKey]time.Time
-	// max per sec trackers for each keyspace and resource group.
-	maxPerSecTrackers map[trackerKey]*maxPerSecCostTracker
-	// cached counter metrics for each keyspace, resource group and RU type.
-	counterMetrics map[metricsKey]*counterMetrics
-	// cached gauge metrics for each keyspace, resource group and RU type.
-	gaugeMetrics map[metricsKey]*gaugeMetrics
 	// cached keyspace name for each keyspace ID.
 	keyspaceNameLookup map[uint32]string
-}
-
-type consumptionRecordKey struct {
-	keyspaceID uint32
-	groupName  string
-	ruType     string
-}
-
-type metricsKey struct {
-	keyspaceID uint32
-	groupName  string
-	ruType     string
-}
-
-type trackerKey struct {
-	keyspaceID uint32
-	groupName  string
 }
 
 // ConfigProvider is used to get resource manager config from the given
@@ -108,10 +82,6 @@ func NewManager[T ConfigProvider](srv bs.Server) *Manager {
 		controllerConfig:      srv.(T).GetControllerConfig(),
 		krgms:                 make(map[uint32]*keyspaceResourceGroupManager),
 		consumptionDispatcher: make(chan *consumptionItem, defaultConsumptionChanSize),
-		consumptionRecord:     make(map[consumptionRecordKey]time.Time),
-		maxPerSecTrackers:     make(map[trackerKey]*maxPerSecCostTracker),
-		counterMetrics:        make(map[metricsKey]*counterMetrics),
-		gaugeMetrics:          make(map[metricsKey]*gaugeMetrics),
 		keyspaceNameLookup:    make(map[uint32]string),
 	}
 	// The first initialization after the server is started.
@@ -389,49 +359,6 @@ func (m *Manager) dispatchConsumption(req *rmpb.TokenBucketRequest) error {
 	return nil
 }
 
-func (m *Manager) insertConsumptionRecord(keyspaceID uint32, groupName string, ruType string) {
-	m.consumptionRecord[consumptionRecordKey{keyspaceID: keyspaceID, groupName: groupName, ruType: ruType}] = time.Now()
-}
-
-func (m *Manager) deleteConsumptionRecord(record consumptionRecordKey) {
-	delete(m.consumptionRecord, record)
-}
-
-func (m *Manager) getMaxPerSecTracker(keyspaceID uint32, keyspaceName, groupName string) *maxPerSecCostTracker {
-	tracker := m.maxPerSecTrackers[trackerKey{keyspaceID, groupName}]
-	if tracker == nil {
-		tracker = newMaxPerSecCostTracker(keyspaceName, groupName, defaultCollectIntervalSec)
-		m.maxPerSecTrackers[trackerKey{keyspaceID, groupName}] = tracker
-	}
-	return tracker
-}
-
-func (m *Manager) deleteMaxPerSecTracker(keyspaceID uint32, groupName string) {
-	delete(m.maxPerSecTrackers, trackerKey{keyspaceID, groupName})
-}
-
-func (m *Manager) getCounterMetrics(keyspaceID uint32, keyspaceName, groupName, ruType string) *counterMetrics {
-	key := metricsKey{keyspaceID, groupName, ruType}
-	if m.counterMetrics[key] == nil {
-		m.counterMetrics[key] = newCounterMetrics(keyspaceName, groupName, ruType)
-	}
-	return m.counterMetrics[key]
-}
-
-func (m *Manager) getGaugeMetrics(keyspaceID uint32, keyspaceName, groupName string) *gaugeMetrics {
-	key := metricsKey{keyspaceID, groupName, ""}
-	if m.gaugeMetrics[key] == nil {
-		m.gaugeMetrics[key] = newGaugeMetrics(keyspaceName, groupName)
-	}
-	return m.gaugeMetrics[key]
-}
-
-func (m *Manager) deleteMetrics(keyspaceID uint32, keyspaceName, groupName, ruType string) {
-	delete(m.counterMetrics, metricsKey{keyspaceID, groupName, ruType})
-	delete(m.gaugeMetrics, metricsKey{keyspaceID, groupName, ""})
-	deleteLabelValues(keyspaceName, groupName, ruType)
-}
-
 func (m *Manager) getKeyspaceNameByID(ctx context.Context, id uint32) (string, error) {
 	if id == constant.NullKeyspaceID {
 		return "", nil
@@ -501,9 +428,9 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 			}
 
 			name := consumptionInfo.resourceGroupName
-			m.getMaxPerSecTracker(keyspaceID, keyspaceName, name).collect(consumption)
-			m.getCounterMetrics(keyspaceID, keyspaceName, name, ruLabelType).add(consumption, m.controllerConfig)
-			m.insertConsumptionRecord(keyspaceID, name, ruLabelType)
+			getMaxPerSecTracker(keyspaceID, keyspaceName, name).collect(consumption)
+			getCounterMetrics(keyspaceID, keyspaceName, name, ruLabelType).add(consumption, m.controllerConfig)
+			insertConsumptionRecord(keyspaceID, name, ruLabelType)
 
 			// TODO: maybe we need to distinguish background ru.
 			if rg := m.GetMutableResourceGroup(keyspaceID, name); rg != nil {
@@ -511,7 +438,7 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 			}
 		case <-cleanUpTicker.C:
 			// Clean up the metrics that have not been updated for a long time.
-			for r, lastTime := range m.consumptionRecord {
+			for r, lastTime := range consumptionRecordMap {
 				if time.Since(lastTime) <= metricsCleanupTimeout {
 					continue
 				}
@@ -519,9 +446,9 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 				if err != nil {
 					continue
 				}
-				m.deleteConsumptionRecord(r)
-				m.deleteMetrics(r.keyspaceID, keyspaceName, r.groupName, r.ruType)
-				m.deleteMaxPerSecTracker(r.keyspaceID, r.groupName)
+				deleteConsumptionRecord(r)
+				deleteMetrics(r.keyspaceID, keyspaceName, r.groupName, r.ruType)
+				deleteMaxPerSecTracker(r.keyspaceID, r.groupName)
 			}
 		case <-availableRUTicker.C:
 			// Prevent from holding the lock too long when there're many keyspaces and resource groups.
@@ -531,7 +458,7 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 					continue
 				}
 				for _, group := range krgm.getResourceGroupList(true, false) {
-					m.getGaugeMetrics(krgm.keyspaceID, keyspaceName, group.Name).set(group)
+					getGaugeMetrics(krgm.keyspaceID, keyspaceName, group.Name).set(group)
 				}
 			}
 		case <-recordMaxTicker.C:
@@ -543,65 +470,9 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 				}
 				names := krgm.getResourceGroupNames(true)
 				for _, name := range names {
-					m.getMaxPerSecTracker(krgm.keyspaceID, keyspaceName, name).flushMetrics()
+					getMaxPerSecTracker(krgm.keyspaceID, keyspaceName, name).flushMetrics()
 				}
 			}
 		}
-	}
-}
-
-type maxPerSecCostTracker struct {
-	keyspaceName  string
-	groupName     string
-	maxPerSecRRU  float64
-	maxPerSecWRU  float64
-	rruSum        float64
-	wruSum        float64
-	lastRRUSum    float64
-	lastWRUSum    float64
-	flushPeriod   int
-	cnt           int
-	rruMaxMetrics prometheus.Gauge
-	wruMaxMetrics prometheus.Gauge
-}
-
-func newMaxPerSecCostTracker(keyspaceName, groupName string, flushPeriod int) *maxPerSecCostTracker {
-	return &maxPerSecCostTracker{
-		keyspaceName:  keyspaceName,
-		groupName:     groupName,
-		flushPeriod:   flushPeriod,
-		rruMaxMetrics: readRequestUnitMaxPerSecCost.WithLabelValues(groupName, keyspaceName),
-		wruMaxMetrics: writeRequestUnitMaxPerSecCost.WithLabelValues(groupName, keyspaceName),
-	}
-}
-
-func (t *maxPerSecCostTracker) collect(consume *rmpb.Consumption) {
-	t.rruSum += consume.RRU
-	t.wruSum += consume.WRU
-}
-
-func (t *maxPerSecCostTracker) flushMetrics() {
-	if t.lastRRUSum == 0 && t.lastWRUSum == 0 {
-		t.lastRRUSum = t.rruSum
-		t.lastWRUSum = t.wruSum
-		return
-	}
-	deltaRRU := t.rruSum - t.lastRRUSum
-	deltaWRU := t.wruSum - t.lastWRUSum
-	t.lastRRUSum = t.rruSum
-	t.lastWRUSum = t.wruSum
-	if deltaRRU > t.maxPerSecRRU {
-		t.maxPerSecRRU = deltaRRU
-	}
-	if deltaWRU > t.maxPerSecWRU {
-		t.maxPerSecWRU = deltaWRU
-	}
-	t.cnt++
-	// flush to metrics in every flushPeriod.
-	if t.cnt%t.flushPeriod == 0 {
-		t.rruMaxMetrics.Set(t.maxPerSecRRU)
-		t.wruMaxMetrics.Set(t.maxPerSecWRU)
-		t.maxPerSecRRU = 0
-		t.maxPerSecWRU = 0
 	}
 }

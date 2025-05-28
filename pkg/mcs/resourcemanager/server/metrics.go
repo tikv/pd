@@ -16,6 +16,7 @@ package server
 
 import (
 	"math"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 
@@ -138,6 +139,34 @@ var (
 		}, []string{newResourceGroupNameLabel, typeLabel, keyspaceNameLabel})
 )
 
+var (
+	// record update time of each resource group
+	consumptionRecordMap map[consumptionRecordKey]time.Time
+	// max per sec trackers for each keyspace and resource group.
+	maxPerSecTrackerMap map[trackerKey]*maxPerSecCostTracker
+	// cached counter metrics for each keyspace, resource group and RU type.
+	counterMetricsMap map[metricsKey]*counterMetrics
+	// cached gauge metrics for each keyspace, resource group and RU type.
+	gaugeMetricsMap map[metricsKey]*gaugeMetrics
+)
+
+type consumptionRecordKey struct {
+	keyspaceID uint32
+	groupName  string
+	ruType     string
+}
+
+type metricsKey struct {
+	keyspaceID uint32
+	groupName  string
+	ruType     string
+}
+
+type trackerKey struct {
+	keyspaceID uint32
+	groupName  string
+}
+
 func init() {
 	prometheus.MustRegister(readRequestUnitCost)
 	prometheus.MustRegister(writeRequestUnitCost)
@@ -151,6 +180,58 @@ func init() {
 	prometheus.MustRegister(readRequestUnitMaxPerSecCost)
 	prometheus.MustRegister(writeRequestUnitMaxPerSecCost)
 	prometheus.MustRegister(resourceGroupConfigGauge)
+
+	initMaps()
+}
+
+func initMaps() {
+	consumptionRecordMap = make(map[consumptionRecordKey]time.Time)
+	maxPerSecTrackerMap = make(map[trackerKey]*maxPerSecCostTracker)
+	counterMetricsMap = make(map[metricsKey]*counterMetrics)
+	gaugeMetricsMap = make(map[metricsKey]*gaugeMetrics)
+}
+
+func insertConsumptionRecord(keyspaceID uint32, groupName string, ruType string) {
+	consumptionRecordMap[consumptionRecordKey{keyspaceID: keyspaceID, groupName: groupName, ruType: ruType}] = time.Now()
+}
+
+func deleteConsumptionRecord(record consumptionRecordKey) {
+	delete(consumptionRecordMap, record)
+}
+
+func getMaxPerSecTracker(keyspaceID uint32, keyspaceName, groupName string) *maxPerSecCostTracker {
+	tracker := maxPerSecTrackerMap[trackerKey{keyspaceID, groupName}]
+	if tracker == nil {
+		tracker = newMaxPerSecCostTracker(keyspaceName, groupName, defaultCollectIntervalSec)
+		maxPerSecTrackerMap[trackerKey{keyspaceID, groupName}] = tracker
+	}
+	return tracker
+}
+
+func deleteMaxPerSecTracker(keyspaceID uint32, groupName string) {
+	delete(maxPerSecTrackerMap, trackerKey{keyspaceID, groupName})
+}
+
+func getCounterMetrics(keyspaceID uint32, keyspaceName, groupName, ruType string) *counterMetrics {
+	key := metricsKey{keyspaceID, groupName, ruType}
+	if counterMetricsMap[key] == nil {
+		counterMetricsMap[key] = newCounterMetrics(keyspaceName, groupName, ruType)
+	}
+	return counterMetricsMap[key]
+}
+
+func getGaugeMetrics(keyspaceID uint32, keyspaceName, groupName string) *gaugeMetrics {
+	key := metricsKey{keyspaceID, groupName, ""}
+	if gaugeMetricsMap[key] == nil {
+		gaugeMetricsMap[key] = newGaugeMetrics(keyspaceName, groupName)
+	}
+	return gaugeMetricsMap[key]
+}
+
+func deleteMetrics(keyspaceID uint32, keyspaceName, groupName, ruType string) {
+	delete(counterMetricsMap, metricsKey{keyspaceID, groupName, ruType})
+	delete(gaugeMetricsMap, metricsKey{keyspaceID, groupName, ""})
+	deleteLabelValues(keyspaceName, groupName, ruType)
 }
 
 type counterMetrics struct {
@@ -251,4 +332,60 @@ func deleteLabelValues(keyspaceName, groupName, ruLabelType string) {
 	readRequestUnitMaxPerSecCost.DeleteLabelValues(groupName, keyspaceName)
 	writeRequestUnitMaxPerSecCost.DeleteLabelValues(groupName, keyspaceName)
 	resourceGroupConfigGauge.DeletePartialMatch(prometheus.Labels{newResourceGroupNameLabel: groupName, keyspaceNameLabel: keyspaceName})
+}
+
+type maxPerSecCostTracker struct {
+	keyspaceName  string
+	groupName     string
+	maxPerSecRRU  float64
+	maxPerSecWRU  float64
+	rruSum        float64
+	wruSum        float64
+	lastRRUSum    float64
+	lastWRUSum    float64
+	flushPeriod   int
+	cnt           int
+	rruMaxMetrics prometheus.Gauge
+	wruMaxMetrics prometheus.Gauge
+}
+
+func newMaxPerSecCostTracker(keyspaceName, groupName string, flushPeriod int) *maxPerSecCostTracker {
+	return &maxPerSecCostTracker{
+		keyspaceName:  keyspaceName,
+		groupName:     groupName,
+		flushPeriod:   flushPeriod,
+		rruMaxMetrics: readRequestUnitMaxPerSecCost.WithLabelValues(groupName, keyspaceName),
+		wruMaxMetrics: writeRequestUnitMaxPerSecCost.WithLabelValues(groupName, keyspaceName),
+	}
+}
+
+func (t *maxPerSecCostTracker) collect(consume *rmpb.Consumption) {
+	t.rruSum += consume.RRU
+	t.wruSum += consume.WRU
+}
+
+func (t *maxPerSecCostTracker) flushMetrics() {
+	if t.lastRRUSum == 0 && t.lastWRUSum == 0 {
+		t.lastRRUSum = t.rruSum
+		t.lastWRUSum = t.wruSum
+		return
+	}
+	deltaRRU := t.rruSum - t.lastRRUSum
+	deltaWRU := t.wruSum - t.lastWRUSum
+	t.lastRRUSum = t.rruSum
+	t.lastWRUSum = t.wruSum
+	if deltaRRU > t.maxPerSecRRU {
+		t.maxPerSecRRU = deltaRRU
+	}
+	if deltaWRU > t.maxPerSecWRU {
+		t.maxPerSecWRU = deltaWRU
+	}
+	t.cnt++
+	// flush to metrics in every flushPeriod.
+	if t.cnt%t.flushPeriod == 0 {
+		t.rruMaxMetrics.Set(t.maxPerSecRRU)
+		t.wruMaxMetrics.Set(t.maxPerSecWRU)
+		t.maxPerSecRRU = 0
+		t.maxPerSecWRU = 0
+	}
 }
