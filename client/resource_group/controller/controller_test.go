@@ -191,12 +191,12 @@ func newMockResourceGroupProvider() *MockResourceGroupProvider {
 	return mockProvider
 }
 
-func (m *MockResourceGroupProvider) GetResourceGroup(ctx context.Context, _ uint32, resourceGroupName string, opts ...pd.GetResourceGroupOption) (*rmpb.ResourceGroup, error) {
+func (m *MockResourceGroupProvider) GetResourceGroup(ctx context.Context, resourceGroupName string, opts ...pd.GetResourceGroupOption) (*rmpb.ResourceGroup, error) {
 	args := m.Called(ctx, resourceGroupName, opts)
 	return args.Get(0).(*rmpb.ResourceGroup), args.Error(1)
 }
 
-func (m *MockResourceGroupProvider) ListResourceGroups(ctx context.Context, _ uint32, opts ...pd.GetResourceGroupOption) ([]*rmpb.ResourceGroup, error) {
+func (m *MockResourceGroupProvider) ListResourceGroups(ctx context.Context, opts ...pd.GetResourceGroupOption) ([]*rmpb.ResourceGroup, error) {
 	args := m.Called(ctx, opts)
 	return args.Get(0).([]*rmpb.ResourceGroup), args.Error(1)
 }
@@ -211,7 +211,7 @@ func (m *MockResourceGroupProvider) ModifyResourceGroup(ctx context.Context, met
 	return args.String(0), args.Error(1)
 }
 
-func (m *MockResourceGroupProvider) DeleteResourceGroup(ctx context.Context, _ uint32, resourceGroupName string) (string, error) {
+func (m *MockResourceGroupProvider) DeleteResourceGroup(ctx context.Context, resourceGroupName string) (string, error) {
 	args := m.Called(ctx, resourceGroupName)
 	return args.String(0), args.Error(1)
 }
@@ -221,7 +221,7 @@ func (m *MockResourceGroupProvider) AcquireTokenBuckets(ctx context.Context, req
 	return args.Get(0).([]*rmpb.TokenBucketResponse), args.Error(1)
 }
 
-func (m *MockResourceGroupProvider) LoadResourceGroups(ctx context.Context, _ uint32) ([]*rmpb.ResourceGroup, int64, error) {
+func (m *MockResourceGroupProvider) LoadResourceGroups(ctx context.Context) ([]*rmpb.ResourceGroup, int64, error) {
 	args := m.Called(ctx)
 	return args.Get(0).([]*rmpb.ResourceGroup), args.Get(1).(int64), args.Error(2)
 }

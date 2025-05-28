@@ -83,13 +83,13 @@ type ResourceGroupKVInterceptor interface {
 
 // ResourceGroupProvider provides some api to interact with resource manager server.
 type ResourceGroupProvider interface {
-	GetResourceGroup(ctx context.Context, keyspaceID uint32, resourceGroupName string, opts ...pd.GetResourceGroupOption) (*rmpb.ResourceGroup, error)
-	ListResourceGroups(ctx context.Context, keyspaceID uint32, opts ...pd.GetResourceGroupOption) ([]*rmpb.ResourceGroup, error)
+	GetResourceGroup(ctx context.Context, resourceGroupName string, opts ...pd.GetResourceGroupOption) (*rmpb.ResourceGroup, error)
+	ListResourceGroups(ctx context.Context, opts ...pd.GetResourceGroupOption) ([]*rmpb.ResourceGroup, error)
 	AddResourceGroup(ctx context.Context, metaGroup *rmpb.ResourceGroup) (string, error)
 	ModifyResourceGroup(ctx context.Context, metaGroup *rmpb.ResourceGroup) (string, error)
-	DeleteResourceGroup(ctx context.Context, keyspaceID uint32, resourceGroupName string) (string, error)
+	DeleteResourceGroup(ctx context.Context, resourceGroupName string) (string, error)
 	AcquireTokenBuckets(ctx context.Context, request *rmpb.TokenBucketsRequest) ([]*rmpb.TokenBucketResponse, error)
-	LoadResourceGroups(ctx context.Context, keyspaceID uint32) ([]*rmpb.ResourceGroup, int64, error)
+	LoadResourceGroups(ctx context.Context) ([]*rmpb.ResourceGroup, int64, error)
 
 	metastorage.Client
 }
@@ -263,7 +263,7 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 			stateUpdateTicker.Reset(time.Millisecond * 100)
 		})
 
-		_, metaRevision, err := c.provider.LoadResourceGroups(ctx, c.keyspaceID)
+		_, metaRevision, err := c.provider.LoadResourceGroups(ctx)
 		if err != nil {
 			log.Warn("load resource group revision failed", zap.Error(err))
 		}
@@ -480,7 +480,7 @@ func (c *ResourceGroupsController) tryGetResourceGroupController(
 		return gc, nil
 	}
 	// Call gRPC to fetch the resource group info.
-	group, err := c.provider.GetResourceGroup(ctx, c.keyspaceID, name)
+	group, err := c.provider.GetResourceGroup(ctx, name)
 	if err != nil {
 		return nil, err
 	}
