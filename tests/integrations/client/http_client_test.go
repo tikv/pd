@@ -547,6 +547,66 @@ func (suite *httpClientTestSuite) TestConfig() {
 	re.Empty(resp.Kvs)
 }
 
+func (suite *httpClientTestSuite) TestTTLConfigPersist() {
+	re := suite.Require()
+	client := suite.client
+	ctx, cancel := context.WithCancel(suite.ctx)
+	defer cancel()
+	configKey := "schedule.max-pending-peer-count"
+
+	testCases := []struct {
+		inputValue        any
+		expectedEtcdValue string
+	}{
+		{
+			inputValue:        uint64(10000000),
+			expectedEtcdValue: "10000000",
+		},
+		{
+			inputValue:        int(20000000),
+			expectedEtcdValue: "20000000",
+		},
+		{
+			inputValue:        float64(2147483647),
+			expectedEtcdValue: "2147483647",
+		},
+		{
+			inputValue:        float64(1234567890.0),
+			expectedEtcdValue: "1234567890",
+		},
+		{
+			inputValue:        float64(0.0),
+			expectedEtcdValue: "0",
+		},
+		{
+			inputValue:        float64(987.65),
+			expectedEtcdValue: "987.65",
+		},
+		{
+			inputValue:        int(-1),
+			expectedEtcdValue: "-1",
+		},
+		{
+			inputValue:        int32(-2147483647),
+			expectedEtcdValue: "-2147483647",
+		},
+	}
+
+	for _, tc := range testCases {
+		newConfig := map[string]any{
+			configKey: tc.inputValue,
+		}
+		err := client.SetConfig(ctx, newConfig, 10000)
+		re.NoError(err)
+		resp, err := suite.cluster.GetEtcdClient().Get(ctx, sc.TTLConfigPrefix+"/"+configKey)
+		re.NoError(err)
+		re.Len(resp.Kvs, 1)
+		re.Equal([]byte(tc.expectedEtcdValue), resp.Kvs[0].Value)
+		err = client.SetConfig(ctx, newConfig, 0)
+		re.NoError(err)
+	}
+}
+
 func (suite *httpClientTestSuite) TestScheduleConfig() {
 	re := suite.Require()
 	client := suite.client
