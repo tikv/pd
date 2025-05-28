@@ -2614,13 +2614,14 @@ func (s *GrpcServer) SplitAndScatterRegions(ctx context.Context, request *pdpb.S
 }
 
 // scatterRegions add operators to scatter regions and return the processed percentage and error
+// returns the percentage of successfully scattered regions and the IDs of failed regions
 func scatterRegions(cluster *cluster.RaftCluster, regionsID []uint64, group string, retryLimit int, skipStoreLimit bool) (int, []uint64, error) {
 	opsCount, failures, err := cluster.GetRegionScatterer().ScatterRegionsByID(regionsID, group, retryLimit, skipStoreLimit)
 	if err != nil {
 		return 0, nil, err
 	}
 	percentage := 100
-	var failedRegionsID []uint64
+	var failedRegionIDs []uint64
 	if len(failures) > 0 {
 		percentage = 100 - 100*len(failures)/(opsCount+len(failures))
 		log.Debug("scatter regions", zap.Errors("failures", func() []error {
@@ -2631,10 +2632,10 @@ func scatterRegions(cluster *cluster.RaftCluster, regionsID []uint64, group stri
 			return r
 		}()))
 		for regionID := range failures {
-			failedRegionsID = append(failedRegionsID, regionID)
+			failedRegionIDs = append(failedRegionIDs, regionID)
 		}
 	}
-	return percentage, failedRegionsID, nil
+	return percentage, failedRegionIDs, nil
 }
 
 // GetDCLocationInfo implements gRPC PDServer.
