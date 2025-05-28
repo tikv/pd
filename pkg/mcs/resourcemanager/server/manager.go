@@ -131,11 +131,7 @@ func (m *Manager) GetKeyspaceServiceLimiter(keyspaceID uint32) *serviceLimiter {
 // SetKeyspaceServiceLimit sets the service limit of the keyspace.
 func (m *Manager) SetKeyspaceServiceLimit(keyspaceID uint32, serviceLimit float64) {
 	// If the keyspace is not found, create a new keyspace resource group manager.
-	krgm := m.getOrCreateKeyspaceResourceGroupManager(keyspaceID)
-	if krgm == nil {
-		return
-	}
-	krgm.setServiceLimiter(serviceLimit)
+	m.getOrCreateKeyspaceResourceGroupManager(keyspaceID).setServiceLimiter(serviceLimit)
 }
 
 func (m *Manager) getOrCreateKeyspaceResourceGroupManager(keyspaceID uint32, initDefault bool) *keyspaceResourceGroupManager {
