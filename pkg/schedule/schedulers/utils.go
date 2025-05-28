@@ -411,3 +411,11 @@ func pauseAndResumeLeaderTransfer[T any](cluster *core.BasicCluster, direction c
 		}
 	}
 }
+
+// IsDefaultKeyRange checks if the given key ranges are the default key range.
+func IsDefaultKeyRange(rs []keyutil.KeyRange) bool {
+	if len(rs) == 1 && len(rs[0].StartKey) == 0 && len(rs[0].EndKey) == 0 {
+		return true
+	}
+	return false
+}
