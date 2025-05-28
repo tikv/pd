@@ -26,6 +26,7 @@ import (
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 
 	bs "github.com/tikv/pd/pkg/basicserver"
+	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/pkg/storage/kv"
 	"github.com/tikv/pd/pkg/utils/testutil"
@@ -44,6 +45,59 @@ func prepareManager() *Manager {
 	m := NewManager[*mockConfigProvider](&mockConfigProvider{})
 	m.storage = storage
 	return m
+}
+
+func TestInitManager(t *testing.T) {
+	re := require.New(t)
+	m := prepareManager()
+
+	re.Empty(m.getKeyspaceResourceGroupManagers())
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	err := m.Init(ctx)
+	re.NoError(err)
+	// There should only be one null keyspace resource group manager.
+	krgm := m.getKeyspaceResourceGroupManager(constant.NullKeyspaceID)
+	re.NotNil(krgm)
+	re.Equal(constant.NullKeyspaceID, krgm.keyspaceID)
+	re.Equal(DefaultResourceGroupName, krgm.getMutableResourceGroup(DefaultResourceGroupName).Name)
+	// Add a new keyspace resource group manager.
+	group := &rmpb.ResourceGroup{
+		Name:       "test_group",
+		Mode:       rmpb.GroupMode_RUMode,
+		Priority:   5,
+		KeyspaceId: &rmpb.KeyspaceIDValue{Value: 1},
+	}
+	err = m.AddResourceGroup(group)
+	re.NoError(err)
+	// Adding a new keyspace resource group should create a new keyspace resource group manager.
+	krgm = m.getKeyspaceResourceGroupManager(1)
+	re.NotNil(krgm)
+	re.Equal(group.KeyspaceId.Value, krgm.keyspaceID)
+	re.Equal(group.Name, krgm.getMutableResourceGroup(group.Name).Name)
+	// A default resource group should be created for the keyspace as well.
+	defaultGroup := krgm.getMutableResourceGroup(DefaultResourceGroupName)
+	re.Equal(DefaultResourceGroupName, defaultGroup.Name)
+	// Modify the default resource group settings.
+	defaultGroup.RUSettings.RU.Settings.FillRate = 100
+	// TODO: set the keyspace ID inside `IntoProtoResourceGroup`.
+	defaultGroupPb := defaultGroup.IntoProtoResourceGroup()
+	defaultGroupPb.KeyspaceId = &rmpb.KeyspaceIDValue{Value: 1}
+	err = m.ModifyResourceGroup(defaultGroupPb)
+	re.NoError(err)
+	// Rebuild the manager based on the same storage.
+	storage := m.storage
+	m = NewManager[*mockConfigProvider](&mockConfigProvider{})
+	m.storage = storage
+	err = m.Init(ctx)
+	re.NoError(err)
+	re.Len(m.getKeyspaceResourceGroupManagers(), 2)
+	// Get the default resource group.
+	rg := m.GetResourceGroup(1, DefaultResourceGroupName, true)
+	re.NotNil(rg)
+	// Verify the default resource group settings are updated. This is to ensure the default resource group
+	// can be loaded from the storage correctly rather than created as a new one.
+	re.Equal(defaultGroup.RUSettings.RU.Settings.FillRate, rg.RUSettings.RU.Settings.FillRate)
 }
 
 func TestBackgroundMetricsFlush(t *testing.T) {

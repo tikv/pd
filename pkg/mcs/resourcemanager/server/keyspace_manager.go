@@ -59,11 +59,12 @@ type keyspaceResourceGroupManager struct {
 }
 
 func newKeyspaceResourceGroupManager(keyspaceID uint32, storage endpoint.ResourceGroupStorage) *keyspaceResourceGroupManager {
-	return &keyspaceResourceGroupManager{
+	krgm := &keyspaceResourceGroupManager{
 		groups:     make(map[string]*ResourceGroup),
 		keyspaceID: keyspaceID,
 		storage:    storage,
 	}
+	return krgm
 }
 
 func (krgm *keyspaceResourceGroupManager) addResourceGroupFromRaw(name string, rawValue string) error {
@@ -96,11 +97,11 @@ func (krgm *keyspaceResourceGroupManager) setRawStatesIntoResourceGroup(name str
 
 func (krgm *keyspaceResourceGroupManager) initDefaultResourceGroup() {
 	krgm.RLock()
-	if _, ok := krgm.groups[DefaultResourceGroupName]; ok {
-		krgm.RUnlock()
+	_, ok := krgm.groups[DefaultResourceGroupName]
+	krgm.RUnlock()
+	if ok {
 		return
 	}
-	krgm.RUnlock()
 	defaultGroup := &ResourceGroup{
 		Name: DefaultResourceGroupName,
 		Mode: rmpb.GroupMode_RUMode,

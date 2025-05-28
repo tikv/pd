@@ -116,13 +116,17 @@ func (m *Manager) GetStorage() endpoint.ResourceGroupStorage {
 	return m.storage
 }
 
-func (m *Manager) getOrCreateKeyspaceResourceGroupManager(keyspaceID uint32) *keyspaceResourceGroupManager {
+func (m *Manager) getOrCreateKeyspaceResourceGroupManager(keyspaceID uint32, initDefault bool) *keyspaceResourceGroupManager {
 	m.Lock()
-	defer m.Unlock()
 	krgm, ok := m.krgms[keyspaceID]
 	if !ok {
 		krgm = newKeyspaceResourceGroupManager(keyspaceID, m.storage)
 		m.krgms[keyspaceID] = krgm
+	}
+	m.Unlock()
+	// Init the default resource group if needed.
+	if initDefault {
+		krgm.initDefaultResourceGroup()
 	}
 	return krgm
 }
@@ -175,7 +179,8 @@ func (m *Manager) loadKeyspaceResourceGroups() error {
 	m.Unlock()
 	// Load keyspace resource group meta info from the storage.
 	if err := m.storage.LoadResourceGroupSettings(func(keyspaceID uint32, name string, rawValue string) {
-		err := m.getOrCreateKeyspaceResourceGroupManager(keyspaceID).addResourceGroupFromRaw(name, rawValue)
+		// Since the default resource group might be loaded from the storage, we don't need to initialize it here.
+		err := m.getOrCreateKeyspaceResourceGroupManager(keyspaceID, false).addResourceGroupFromRaw(name, rawValue)
 		if err != nil {
 			log.Error("failed to add resource group to the keyspace resource group manager",
 				zap.Uint32("keyspace-id", keyspaceID), zap.String("group-name", name), zap.Error(err))
@@ -206,11 +211,9 @@ func (m *Manager) loadKeyspaceResourceGroups() error {
 
 func (m *Manager) initReserved() {
 	// Initialize the null keyspace resource group manager if it doesn't exist.
-	m.getOrCreateKeyspaceResourceGroupManager(constant.NullKeyspaceID)
-	// Initialize the default resource group respectively for each keyspace.
-	m.RLock()
-	defer m.RUnlock()
-	for _, krgm := range m.krgms {
+	m.getOrCreateKeyspaceResourceGroupManager(constant.NullKeyspaceID, true)
+	// Initialize the default resource group respectively for each keyspace if it doesn't exist.
+	for _, krgm := range m.getKeyspaceResourceGroupManagers() {
 		krgm.initDefaultResourceGroup()
 	}
 }
@@ -261,7 +264,9 @@ func (m *Manager) GetControllerConfig() *ControllerConfig {
 // on this retry mechanism.
 func (m *Manager) AddResourceGroup(grouppb *rmpb.ResourceGroup) error {
 	keyspaceID := extractKeyspaceID(grouppb.GetKeyspaceId())
-	krgm := m.getOrCreateKeyspaceResourceGroupManager(keyspaceID)
+	// If the keyspace is not initialized, it means this is the first resource group created for this keyspace,
+	// so we need to initialize the default resource group for the keyspace as well.
+	krgm := m.getOrCreateKeyspaceResourceGroupManager(keyspaceID, true)
 	if krgm == nil {
 		return errs.ErrKeyspaceNotExists.FastGenByArgs(keyspaceID)
 	}

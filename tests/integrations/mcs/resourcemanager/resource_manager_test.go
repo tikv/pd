@@ -1633,8 +1633,8 @@ func (suite *resourceManagerClientTestSuite) TestResourceGroupCURDWithKeyspace()
 	re.NotNil(rg)
 	rgs, err = clientKeyspace.ListResourceGroups(suite.ctx, pd.WithRUStats)
 	re.NoError(err)
-	re.Len(rgs, 1)
-	re.Equal(rgs[0].Name, group.Name)
+	re.Len(rgs, 2) // Including the default resource group.
+	re.Contains(rgs, rg)
 
 	// Modify resource group with keyspace id
 	group.RUSettings.RU.Settings.FillRate = 1000
