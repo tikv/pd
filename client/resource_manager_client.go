@@ -99,11 +99,9 @@ func (c *client) ListResourceGroups(ctx context.Context, ops ...GetResourceGroup
 	}
 	req := &rmpb.ListResourceGroupsRequest{
 		WithRuStats: getOp.withRUStats,
-	}
-	if c.inner.keyspaceID != constants.NullKeyspaceID {
-		req.KeyspaceId = &rmpb.KeyspaceIDValue{
+		KeyspaceId: &rmpb.KeyspaceIDValue{
 			Value: c.inner.keyspaceID,
-		}
+		},
 	}
 	resp, err := cc.ListResourceGroups(ctx, req)
 	if err != nil {
@@ -130,11 +128,9 @@ func (c *client) GetResourceGroup(ctx context.Context, resourceGroupName string,
 	req := &rmpb.GetResourceGroupRequest{
 		ResourceGroupName: resourceGroupName,
 		WithRuStats:       getOp.withRUStats,
-	}
-	if c.inner.keyspaceID != constants.NullKeyspaceID {
-		req.KeyspaceId = &rmpb.KeyspaceIDValue{
+		KeyspaceId: &rmpb.KeyspaceIDValue{
 			Value: c.inner.keyspaceID,
-		}
+		},
 	}
 	resp, err := cc.GetResourceGroup(ctx, req)
 	if err != nil {
@@ -192,11 +188,9 @@ func (c *client) DeleteResourceGroup(ctx context.Context, resourceGroupName stri
 	}
 	req := &rmpb.DeleteResourceGroupRequest{
 		ResourceGroupName: resourceGroupName,
-	}
-	if c.inner.keyspaceID != constants.NullKeyspaceID {
-		req.KeyspaceId = &rmpb.KeyspaceIDValue{
+		KeyspaceId: &rmpb.KeyspaceIDValue{
 			Value: c.inner.keyspaceID,
-		}
+		},
 	}
 	resp, err := cc.DeleteResourceGroup(ctx, req)
 	if err != nil {
