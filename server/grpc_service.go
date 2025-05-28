@@ -2613,7 +2613,7 @@ func (s *GrpcServer) SplitAndScatterRegions(ctx context.Context, request *pdpb.S
 	}, nil
 }
 
-// scatterRegions add operators to scatter regions and return the processed percentage and error
+// scatterRegions add operators to scatter regions
 // returns the percentage of successfully scattered regions and the IDs of failed regions
 func scatterRegions(cluster *cluster.RaftCluster, regionsID []uint64, group string, retryLimit int, skipStoreLimit bool) (int, []uint64, error) {
 	opsCount, failures, err := cluster.GetRegionScatterer().ScatterRegionsByID(regionsID, group, retryLimit, skipStoreLimit)
