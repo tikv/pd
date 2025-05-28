@@ -16,6 +16,7 @@ package pd
 
 import (
 	"context"
+	"math"
 	"testing"
 	"time"
 
@@ -63,4 +64,29 @@ func TestClientWithRetry(t *testing.T) {
 	re.Error(err)
 	defer cli.Close()
 	re.Less(time.Since(start), time.Second*10)
+}
+
+func TestRoundUpDurationToSeconds(t *testing.T) {
+	re := require.New(t)
+	re.Equal(int64(0), roundUpDurationToSeconds(0))
+	re.Equal(int64(1), roundUpDurationToSeconds(time.Millisecond))
+	re.Equal(int64(1), roundUpDurationToSeconds(time.Second))
+	re.Equal(int64(3600), roundUpDurationToSeconds(time.Hour))
+	re.Equal(int64(3601), roundUpDurationToSeconds(time.Hour+1))
+	// time.Duration(9223372036854775807) -> 9223372036.854... secs -(round up)-> 9223372037
+	re.Equal(int64(9223372037), roundUpDurationToSeconds(math.MaxInt64-1))
+	re.Equal(int64(math.MaxInt64), roundUpDurationToSeconds(math.MaxInt64))
+}
+
+func TestSaturatingStdDurationFromSeconds(t *testing.T) {
+	re := require.New(t)
+
+	re.Equal(time.Second*2, saturatingStdDurationFromSeconds(2))
+	re.Equal(time.Duration(0), saturatingStdDurationFromSeconds(-2))
+	re.Equal(time.Hour, saturatingStdDurationFromSeconds(3600))
+	re.Equal(time.Duration(math.MaxInt64), saturatingStdDurationFromSeconds(1<<34))
+	re.Equal((1<<33)*time.Second, saturatingStdDurationFromSeconds(1<<33))
+	re.Equal(9223372036*time.Second, saturatingStdDurationFromSeconds(9223372036))
+	re.Equal(time.Duration(math.MaxInt64), saturatingStdDurationFromSeconds(9223372037))
+	re.Equal(time.Duration(math.MaxInt64), saturatingStdDurationFromSeconds(math.MaxInt64))
 }

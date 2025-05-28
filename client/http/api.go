@@ -191,6 +191,11 @@ func GetSchedulerConfigURIByName(name string) string {
 	return path.Join(SchedulerConfig, name, "list")
 }
 
+// GetCancelSchedulerJobURIByNameAndJobID returns the path of PD HTTP API to cancel the job of the given scheduler
+func GetCancelSchedulerJobURIByNameAndJobID(name string, jobID uint64) string {
+	return fmt.Sprintf("%s/%s/job?job-id=%d", SchedulerConfig, name, jobID)
+}
+
 // SchedulerByName returns the scheduler API with the given scheduler name.
 func SchedulerByName(name string) string {
 	return fmt.Sprintf("%s/%s", Schedulers, name)

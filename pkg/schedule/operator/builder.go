@@ -524,7 +524,7 @@ func (b *Builder) prepareBuild() (string, error) {
 	// it will demote to learner first, then switch witness, finally promote the non-witness learner to voter back),
 	// the logic here is reused for batch switch.
 	if len(b.toAdd)+len(b.toRemove)+len(b.toPromote)+len(b.toWitness)+len(b.toNonWitness)+len(b.toPromoteNonWitness) <= 1 &&
-		len(b.toDemote) == 0 && !(len(b.toRemove) == 1 && len(b.targetPeers) == 1) {
+		len(b.toDemote) == 0 && (len(b.toRemove) != 1 || len(b.targetPeers) != 1) {
 		// If only one peer changed and the change type is not demote, joint consensus is not used.
 		// Unless the changed is 2 voters to 1 voter, see https://github.com/tikv/pd/issues/4411 .
 		b.useJointConsensus = false
@@ -846,7 +846,7 @@ func (b *Builder) execChangePeerV2(needEnter bool, needTransferLeader bool) {
 	}
 
 	// TiKV will handle leave step if only single peer change in promote and demote when enter step is bypassed
-	if !(needEnter && len(step.PromoteLearners)+len(step.DemoteVoters) == 1) {
+	if !needEnter || len(step.PromoteLearners)+len(step.DemoteVoters) != 1 {
 		b.steps = append(b.steps, ChangePeerV2Leave(step))
 	}
 }

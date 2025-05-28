@@ -309,7 +309,7 @@ func (suite *middlewareTestSuite) TestRateLimitMiddleware() {
 	for _, s := range suite.cluster.GetServers() {
 		servers = append(servers, s.GetServer())
 	}
-	server.MustWaitLeader(re, servers)
+	tests.MustWaitLeader(re, servers)
 	leader = suite.cluster.GetLeaderServer()
 	re.True(leader.GetServer().GetServiceMiddlewarePersistOptions().IsRateLimitEnabled())
 	cfg, ok := leader.GetServer().GetRateLimitConfig().LimiterConfig["SetLogLevel"]
@@ -445,7 +445,7 @@ func (suite *middlewareTestSuite) TestAuditPrometheusBackend() {
 	for _, s := range suite.cluster.GetServers() {
 		servers = append(servers, s.GetServer())
 	}
-	server.MustWaitLeader(re, servers)
+	tests.MustWaitLeader(re, servers)
 	leader = suite.cluster.GetLeaderServer()
 
 	timeUnix = time.Now().Unix() - 20
@@ -665,7 +665,7 @@ func (suite *redirectorTestSuite) TestAllowFollowerHandle() {
 	request.Header.Add(apiutil.PDAllowFollowerHandleHeader, "true")
 	resp, err := tests.TestDialClient.Do(request)
 	re.NoError(err)
-	re.Equal("", resp.Header.Get(apiutil.PDRedirectorHeader))
+	re.Empty(resp.Header.Get(apiutil.PDRedirectorHeader))
 	defer resp.Body.Close()
 	re.Equal(http.StatusOK, resp.StatusCode)
 	_, err = io.ReadAll(resp.Body)
@@ -794,7 +794,7 @@ func TestRemovingProgress(t *testing.T) {
 	clusterID := leader.GetClusterID()
 	req := &pdpb.BootstrapRequest{
 		Header: testutil.NewRequestHeader(clusterID),
-		Store:  &metapb.Store{Id: 1, Address: "127.0.0.1:0"},
+		Store:  &metapb.Store{Id: 1, Address: "mock://tikv-1:1"},
 		Region: &metapb.Region{Id: 2, Peers: []*metapb.Peer{{Id: 3, StoreId: 1, Role: metapb.PeerRole_Voter}}},
 	}
 	resp, err := grpcPDClient.Bootstrap(context.Background(), req)
@@ -971,7 +971,7 @@ func TestSendApiWhenRestartRaftCluster(t *testing.T) {
 	clusterID := leader.GetClusterID()
 	req := &pdpb.BootstrapRequest{
 		Header: testutil.NewRequestHeader(clusterID),
-		Store:  &metapb.Store{Id: 1, Address: "127.0.0.1:0"},
+		Store:  &metapb.Store{Id: 1, Address: "mock://tikv-1:1"},
 		Region: &metapb.Region{Id: 2, Peers: []*metapb.Peer{{Id: 3, StoreId: 1, Role: metapb.PeerRole_Voter}}},
 	}
 	resp, err := grpcPDClient.Bootstrap(context.Background(), req)
@@ -1015,7 +1015,7 @@ func TestPreparingProgress(t *testing.T) {
 	clusterID := leader.GetClusterID()
 	req := &pdpb.BootstrapRequest{
 		Header: testutil.NewRequestHeader(clusterID),
-		Store:  &metapb.Store{Id: 1, Address: "127.0.0.1:0"},
+		Store:  &metapb.Store{Id: 1, Address: "mock://tikv-1:1"},
 		Region: &metapb.Region{Id: 2, Peers: []*metapb.Peer{{Id: 3, StoreId: 1, Role: metapb.PeerRole_Voter}}},
 	}
 	resp, err := grpcPDClient.Bootstrap(context.Background(), req)

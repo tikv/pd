@@ -38,7 +38,7 @@ type MetaStorage interface {
 	LoadStoreMeta(storeID uint64, store *metapb.Store) (bool, error)
 	SaveStoreMeta(store *metapb.Store) error
 	SaveStoreWeight(storeID uint64, leader, region float64) error
-	LoadStores(f func(store *core.StoreInfo)) error
+	LoadStores(f func(store *core.StoreInfo, opts ...core.StoreCreateOption)) error
 	DeleteStoreMeta(store *metapb.Store) error
 	RegionStorage
 }
@@ -95,7 +95,7 @@ func (se *StorageEndpoint) SaveStoreWeight(storeID uint64, leader, region float6
 }
 
 // LoadStores loads all stores from storage to StoresInfo.
-func (se *StorageEndpoint) LoadStores(f func(store *core.StoreInfo)) error {
+func (se *StorageEndpoint) LoadStores(putStore func(store *core.StoreInfo, opts ...core.StoreCreateOption)) error {
 	nextID := uint64(0)
 	endKey := keypath.StorePath(math.MaxUint64)
 	for {
@@ -123,10 +123,12 @@ func (se *StorageEndpoint) LoadStores(f func(store *core.StoreInfo)) error {
 			if err != nil {
 				return err
 			}
-			newStoreInfo := core.NewStoreInfo(store, core.SetLeaderWeight(leaderWeight), core.SetRegionWeight(regionWeight))
 
 			nextID = store.GetId() + 1
-			f(newStoreInfo)
+			putStore(core.NewStoreInfo(store,
+				core.SetLeaderWeight(leaderWeight),
+				core.SetRegionWeight(regionWeight),
+			))
 		}
 		if len(res) < MinKVRangeLimit {
 			return nil
@@ -170,7 +172,6 @@ func (se *StorageEndpoint) LoadRegion(regionID uint64, region *metapb.Region) (o
 
 // LoadRegions loads all regions from storage to RegionsInfo.
 func (se *StorageEndpoint) LoadRegions(ctx context.Context, f func(region *core.RegionInfo) []*core.RegionInfo) error {
-	nextID := uint64(0)
 	endKey := keypath.RegionPath(math.MaxUint64)
 
 	// Since the region key may be very long, using a larger rangeLimit will cause
@@ -182,7 +183,7 @@ func (se *StorageEndpoint) LoadRegions(ctx context.Context, f func(region *core.
 			rangeLimit = 1
 			time.Sleep(time.Second)
 		})
-		startKey := keypath.RegionPath(nextID)
+		startKey := keypath.RegionPath(se.nextRegionID)
 		_, res, err := se.LoadRange(startKey, endKey, rangeLimit)
 		if err != nil {
 			if rangeLimit /= 2; rangeLimit >= MinKVRangeLimit {
@@ -205,7 +206,7 @@ func (se *StorageEndpoint) LoadRegions(ctx context.Context, f func(region *core.
 				return err
 			}
 
-			nextID = region.GetId() + 1
+			se.nextRegionID = region.GetId() + 1
 			overlaps := f(core.NewRegionInfo(region, nil, core.SetSource(core.Storage)))
 			for _, item := range overlaps {
 				if err := se.DeleteRegion(item.GetMeta()); err != nil {

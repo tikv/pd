@@ -27,7 +27,6 @@ import (
 
 	"github.com/pingcap/log"
 
-	"github.com/tikv/pd/pkg/autoscaling"
 	"github.com/tikv/pd/pkg/dashboard"
 	"github.com/tikv/pd/pkg/errs"
 	scheduling "github.com/tikv/pd/pkg/mcs/scheduling/server"
@@ -223,7 +222,6 @@ func start(cmd *cobra.Command, args []string, services ...string) {
 	for _, msg := range cfg.WarningMsgs {
 		log.Warn(msg)
 	}
-	// TODO: Make it configurable if it has big impact on performance.
 	grpcprometheus.EnableHandlingTimeHistogram()
 
 	metricutil.Push(&cfg.Metric)
@@ -236,7 +234,7 @@ func start(cmd *cobra.Command, args []string, services ...string) {
 
 	// Creates server.
 	ctx, cancel := context.WithCancel(context.Background())
-	serviceBuilders := []server.HandlerBuilder{api.NewHandler, apiv2.NewV2Handler, autoscaling.NewHandler}
+	serviceBuilders := []server.HandlerBuilder{api.NewHandler, apiv2.NewV2Handler}
 	if swaggerserver.Enabled() {
 		serviceBuilders = append(serviceBuilders, swaggerserver.NewHandler)
 	}

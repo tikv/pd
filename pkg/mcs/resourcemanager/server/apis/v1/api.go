@@ -30,6 +30,7 @@ import (
 
 	rmserver "github.com/tikv/pd/pkg/mcs/resourcemanager/server"
 	"github.com/tikv/pd/pkg/mcs/utils"
+	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/apiutil/multiservicesapi"
 	"github.com/tikv/pd/pkg/utils/reflectutil"
@@ -161,7 +162,7 @@ func (s *Service) putResourceGroup(c *gin.Context) {
 //	@Router		/config/group/{name} [get]
 func (s *Service) getResourceGroup(c *gin.Context) {
 	withStats := strings.EqualFold(c.Query("with_stats"), "true")
-	group := s.manager.GetResourceGroup(c.Param("name"), withStats)
+	group := s.manager.GetResourceGroup(constant.NullKeyspaceID, c.Param("name"), withStats)
 	if group == nil {
 		c.String(http.StatusNotFound, errors.New("resource group not found").Error())
 	}
@@ -178,7 +179,7 @@ func (s *Service) getResourceGroup(c *gin.Context) {
 //	@Router		/config/groups [get]
 func (s *Service) getResourceGroupList(c *gin.Context) {
 	withStats := strings.EqualFold(c.Query("with_stats"), "true")
-	groups := s.manager.GetResourceGroupList(withStats)
+	groups := s.manager.GetResourceGroupList(constant.NullKeyspaceID, withStats)
 	c.IndentedJSON(http.StatusOK, groups)
 }
 
@@ -191,7 +192,7 @@ func (s *Service) getResourceGroupList(c *gin.Context) {
 //	@Failure	404		{string}	error
 //	@Router		/config/group/{name} [delete]
 func (s *Service) deleteResourceGroup(c *gin.Context) {
-	if err := s.manager.DeleteResourceGroup(c.Param("name")); err != nil {
+	if err := s.manager.DeleteResourceGroup(constant.NullKeyspaceID, c.Param("name")); err != nil {
 		c.String(http.StatusNotFound, err.Error())
 	}
 	c.String(http.StatusOK, "Success!")

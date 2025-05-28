@@ -55,13 +55,17 @@ const (
 	// Note: Config[TSOKeyspaceGroupIDKey] is only used to judge whether there is keyspace group id.
 	// It will not update the keyspace group id when merging or splitting.
 	TSOKeyspaceGroupIDKey = "tso_keyspace_group_id"
-
-	// If `gc_management_type` is `global_gc`, it means the current keyspace requires a tidb without 'keyspace-name'
-	// configured to run a global gc worker to calculate a global gc safe point.
-	// If `gc_management_type` is `keyspace_level_gc` it means the current keyspace can calculate gc safe point by its own.
+	// GCManagementType is the key for gc_management_type in keyspace config.
+	// If `gc_management_type` is `unified`, it means the current keyspace requires a tidb without 'keyspace-name'
+	// configured to run a unified GC worker to calculate a unified GC state.
+	// If `gc_management_type` is `keyspace_level` it means the current keyspace can calculate GC states by its own.
 	GCManagementType = "gc_management_type"
-	// KeyspaceLevelGC is a type of gc_management_type used to indicate that this keyspace independently advances its own gc safe point.
-	KeyspaceLevelGC = "keyspace_level_gc"
+	// KeyspaceLevelGC is a type of gc_management_type used to indicate that this keyspace independently manages its own
+	// GC states
+	KeyspaceLevelGC = "keyspace_level"
+	// UnifiedGC is a type of gc_management_type used to indicate that the GC states of this keyspace is managed
+	// in a unified way (managed by the NullKeyspace).
+	UnifiedGC = "unified"
 )
 
 // Config is the interface for keyspace config.
@@ -101,8 +105,19 @@ type CreateKeyspaceRequest struct {
 	Config map[string]string
 	// CreateTime is the timestamp used to record creation time.
 	CreateTime int64
-	// IsPreAlloc indicates whether the keyspace is pre-allocated when the cluster starts.
-	IsPreAlloc bool
+}
+
+// CreateKeyspaceByIDRequest represents necessary arguments to create a keyspace.
+type CreateKeyspaceByIDRequest struct {
+	// ID of the keyspace to be created.
+	// Using an existing ID will result in error.
+	ID *uint32
+	// Name of the keyspace to be created.
+	// Using an existing name will result in error.
+	Name   string
+	Config map[string]string
+	// CreateTime is the timestamp used to record creation time.
+	CreateTime int64
 }
 
 // NewKeyspaceManager creates a Manager of keyspace related data.
@@ -163,24 +178,28 @@ func (manager *Manager) Bootstrap() error {
 	// Initialize pre-alloc keyspace.
 	preAlloc := manager.config.GetPreAlloc()
 	for _, keyspaceName := range preAlloc {
-		config, err := manager.kgm.GetKeyspaceConfigByKind(endpoint.Basic)
-		if err != nil {
-			return err
-		}
-		req := &CreateKeyspaceRequest{
-			Name:       keyspaceName,
-			CreateTime: now,
-			IsPreAlloc: true,
-			Config:     config,
-		}
-		keyspace, err := manager.CreateKeyspace(req)
-		// Ignore the keyspaceExists error for the same reason as saving default keyspace.
-		if err != nil && err != errs.ErrKeyspaceExists {
-			return err
-		}
-		if err := manager.kgm.UpdateKeyspaceForGroup(endpoint.Basic, config[TSOKeyspaceGroupIDKey], keyspace.GetId(), opAdd); err != nil {
-			return err
-		}
+		go func() {
+			config, err := manager.kgm.GetKeyspaceConfigByKind(endpoint.Basic)
+			if err != nil {
+				log.Error("[keyspace] failed to get keyspace config for pre-alloc keyspace", zap.String("keyspaceName", keyspaceName), zap.Error(err))
+				return
+			}
+			req := &CreateKeyspaceRequest{
+				Name:       keyspaceName,
+				CreateTime: now,
+				Config:     config,
+			}
+			keyspace, err := manager.CreateKeyspace(req)
+			// Ignore the keyspaceExists error for the same reason as saving default keyspace.
+			if err != nil && err != errs.ErrKeyspaceExists {
+				log.Error("[keyspace] failed to create pre-alloc keyspace", zap.String("keyspaceName", keyspaceName), zap.Error(err))
+				return
+			}
+			if err := manager.kgm.UpdateKeyspaceForGroup(endpoint.Basic, config[TSOKeyspaceGroupIDKey], keyspace.GetId(), opAdd); err != nil {
+				log.Error("[keyspace] failed to update pre-alloc keyspace for group", zap.String("keyspaceName", keyspaceName), zap.Error(err))
+				return
+			}
+		}()
 	}
 	return nil
 }
@@ -232,11 +251,8 @@ func (manager *Manager) CreateKeyspace(request *CreateKeyspaceRequest) (*keyspac
 		)
 		return nil, err
 	}
-	// If the request to create a keyspace is pre-allocated when the PD starts,
-	// there is no need to wait for the region split, because TiKV has not started.
-	waitRegionSplit := !request.IsPreAlloc && manager.config.ToWaitRegionSplit()
 	// Split keyspace region.
-	err = manager.splitKeyspaceRegion(newID, waitRegionSplit)
+	err = manager.splitKeyspaceRegion(newID, manager.config.ToWaitRegionSplit())
 	if err != nil {
 		err2 := manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
 			idPath := keypath.KeyspaceIDPath(request.Name)
@@ -273,6 +289,88 @@ func (manager *Manager) CreateKeyspace(request *CreateKeyspaceRequest) (*keyspac
 	log.Info("[keyspace] keyspace created",
 		zap.Uint32("keyspace-id", keyspace.GetId()),
 		zap.String("name", keyspace.GetName()),
+	)
+	return keyspace, nil
+}
+
+// CreateKeyspaceByID create a keyspace meta with given config and save it to storage.
+func (manager *Manager) CreateKeyspaceByID(request *CreateKeyspaceByIDRequest) (*keyspacepb.KeyspaceMeta, error) {
+	if request.ID == nil {
+		return nil, errors.New("keyspace id is empty")
+	}
+	id := *request.ID
+	name := request.Name
+	if len(name) == 0 {
+		return nil, errors.New("keyspace name is empty")
+	}
+	// Validate purposed name's legality.
+	if err := validateName(name); err != nil {
+		return nil, err
+	}
+	userKind := endpoint.StringUserKind(request.Config[UserKindKey])
+	config, err := manager.kgm.GetKeyspaceConfigByKind(userKind)
+	if err != nil {
+		return nil, err
+	}
+	if len(config) != 0 {
+		if request.Config == nil {
+			request.Config = config
+		} else {
+			request.Config[TSOKeyspaceGroupIDKey] = config[TSOKeyspaceGroupIDKey]
+			request.Config[UserKindKey] = config[UserKindKey]
+		}
+	}
+	// Create a disabled keyspace meta for tikv-server to get the config on keyspace split.
+	keyspace := &keyspacepb.KeyspaceMeta{
+		Id:             id,
+		Name:           name,
+		State:          keyspacepb.KeyspaceState_DISABLED,
+		CreatedAt:      request.CreateTime,
+		StateChangedAt: request.CreateTime,
+		Config:         request.Config,
+	}
+	err = manager.saveNewKeyspace(keyspace)
+	if err != nil {
+		log.Warn("[keyspace] failed to save keyspace before split",
+			zap.Uint32("keyspace-id", keyspace.GetId()),
+			zap.String("keyspace-name", keyspace.GetName()),
+			zap.Error(err),
+		)
+		return nil, err
+	}
+	// Split keyspace region.
+	err = manager.splitKeyspaceRegion(id, manager.config.ToWaitRegionSplit())
+	if err != nil {
+		err2 := manager.store.RunInTxn(manager.ctx, func(txn kv.Txn) error {
+			metaPath := keypath.KeyspaceMetaPath(id)
+			return txn.Remove(metaPath)
+		})
+		if err2 != nil {
+			log.Warn("[keyspace] failed to remove pre-created keyspace after split failed",
+				zap.Uint32("keyspace-id", keyspace.GetId()),
+				zap.String("keyspace-name", keyspace.GetName()),
+				zap.Error(err2),
+			)
+		}
+		return nil, err
+	}
+	// enable the keyspace metadata after split.
+	keyspace.State = keyspacepb.KeyspaceState_ENABLED
+	_, err = manager.UpdateKeyspaceStateByID(id, keyspacepb.KeyspaceState_ENABLED, request.CreateTime)
+	if err != nil {
+		log.Warn("[keyspace] failed to create keyspace",
+			zap.Uint32("keyspace-id", keyspace.GetId()),
+			zap.String("keyspace-name", keyspace.GetName()),
+			zap.Error(err),
+		)
+		return nil, err
+	}
+	if err := manager.kgm.UpdateKeyspaceForGroup(userKind, config[TSOKeyspaceGroupIDKey], keyspace.GetId(), opAdd); err != nil {
+		return nil, err
+	}
+	log.Info("[keyspace] keyspace created",
+		zap.Uint32("keyspace-id", keyspace.GetId()),
+		zap.String("keyspace-name", keyspace.GetName()),
 	)
 	return keyspace, nil
 }
@@ -531,7 +629,6 @@ func (manager *Manager) UpdateKeyspaceConfig(name string, mutations []*Mutation)
 		}
 		return nil
 	})
-
 	if err != nil {
 		log.Warn("[keyspace] failed to update keyspace config",
 			zap.Uint32("keyspace-id", meta.GetId()),

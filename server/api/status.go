@@ -35,6 +35,7 @@ func newStatusHandler(svr *server.Server, rd *render.Render) *statusHandler {
 	}
 }
 
+// GetPDStatus gets the build info of PD server.
 // @Summary  Get the build info of PD server.
 // @Produce  json
 // @Success  200  {object}  versioninfo.Status

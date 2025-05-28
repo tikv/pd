@@ -17,14 +17,18 @@ package schedulers
 import (
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/pingcap/failpoint"
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/schedule/types"
 	"github.com/tikv/pd/pkg/storage"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 )
 
 func TestBalanceRangePlan(t *testing.T) {
@@ -38,8 +42,8 @@ func TestBalanceRangePlan(t *testing.T) {
 	tc.AddLeaderRegionWithRange(1, "100", "110", 1, 2, 3)
 	job := &balanceRangeSchedulerJob{
 		Engine: core.EngineTiKV,
-		Role:   core.Leader,
-		Ranges: []core.KeyRange{core.NewKeyRange("100", "110")},
+		Rule:   core.LeaderScatter,
+		Ranges: []keyutil.KeyRange{keyutil.NewKeyRange("100", "110")},
 	}
 	plan, err := sc.prepare(tc, *operator.NewOpInfluence(), job)
 	re.NoError(err)
@@ -54,7 +58,9 @@ func TestTIKVEngine(t *testing.T) {
 	re := require.New(t)
 	cancel, _, tc, oc := prepareSchedulersTest()
 	defer cancel()
-	scheduler, err := CreateScheduler(types.BalanceRangeScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.BalanceRangeScheduler, []string{"leader", "tikv", "1h", "test", "100", "200"}))
+	scheduler, err := CreateScheduler(types.BalanceRangeScheduler, oc, storage.NewStorageWithMemoryBackend(),
+		ConfigSliceDecoder(types.BalanceRangeScheduler,
+			[]string{"leader-scatter", "tikv", "1h", "test", "100", "200"}))
 	re.NoError(err)
 	ops, _ := scheduler.Schedule(tc, true)
 	re.Empty(ops)
@@ -105,7 +111,7 @@ func TestTIFLASHEngine(t *testing.T) {
 
 	startKey := fmt.Sprintf("%20d0", 1)
 	endKey := fmt.Sprintf("%20d0", 10)
-	tc.RuleManager.SetRule(&placement.Rule{
+	tc.SetRule(&placement.Rule{
 		GroupID:  "tiflash",
 		ID:       "1",
 		Role:     placement.Learner,
@@ -118,7 +124,9 @@ func TestTIFLASHEngine(t *testing.T) {
 	})
 
 	// generate a balance range scheduler with tiflash engine
-	scheduler, err := CreateScheduler(types.BalanceRangeScheduler, oc, storage.NewStorageWithMemoryBackend(), ConfigSliceDecoder(types.BalanceRangeScheduler, []string{"learner", "tiflash", "1h", "test", startKey, endKey}))
+	scheduler, err := CreateScheduler(types.BalanceRangeScheduler, oc, storage.NewStorageWithMemoryBackend(),
+		ConfigSliceDecoder(types.BalanceRangeScheduler,
+			[]string{"learner-scatter", "tiflash", "1h", "test", startKey, endKey}))
 	re.NoError(err)
 	// tiflash-4 only has 1 region, so it doesn't need to balance
 	ops, _ := scheduler.Schedule(tc, false)
@@ -148,15 +156,138 @@ func TestFetchAllRegions(t *testing.T) {
 		tc.AddLeaderRegion(uint64(i), 1, 2, 3)
 	}
 
-	ranges := core.NewKeyRangesWithSize(1)
+	ranges := keyutil.NewKeyRangesWithSize(1)
 	ranges.Append([]byte(""), []byte(""))
 	regions := fetchAllRegions(tc, ranges)
 	re.Len(regions, 100)
 
-	ranges = core.NewKeyRangesWithSize(1)
+	ranges = keyutil.NewKeyRangesWithSize(1)
 	region := tc.GetRegion(50)
 	ranges.Append([]byte(""), region.GetStartKey())
 	ranges.Append(region.GetStartKey(), []byte(""))
 	regions = fetchAllRegions(tc, ranges)
 	re.Len(regions, 100)
+}
+
+func TestCodecConfig(t *testing.T) {
+	re := require.New(t)
+	job := &balanceRangeSchedulerJob{
+		Engine: core.EngineTiKV,
+		Rule:   core.LeaderScatter,
+		JobID:  1,
+		Ranges: []keyutil.KeyRange{keyutil.NewKeyRange("a", "b")},
+	}
+
+	conf := &balanceRangeSchedulerConfig{
+		schedulerConfig: &baseSchedulerConfig{},
+		jobs:            []*balanceRangeSchedulerJob{job},
+	}
+	conf.init("test", storage.NewStorageWithMemoryBackend(), conf)
+	re.NoError(conf.save())
+	var conf1 balanceRangeSchedulerConfig
+	re.NoError(conf.load(&conf1))
+	re.Equal(conf1.jobs, conf.jobs)
+
+	job1 := &balanceRangeSchedulerJob{
+		Engine: core.EngineTiKV,
+		Rule:   core.LeaderScatter,
+		Status: running,
+		Ranges: []keyutil.KeyRange{keyutil.NewKeyRange("a", "b")},
+		JobID:  2,
+	}
+	re.NoError(conf.addJob(job1))
+	re.NoError(conf.load(&conf1))
+	re.Equal(conf1.jobs, conf.jobs)
+
+	data, err := conf.MarshalJSON()
+	re.NoError(err)
+	conf2 := &balanceRangeSchedulerConfig{
+		jobs: make([]*balanceRangeSchedulerJob, 0),
+	}
+	re.NoError(conf2.UnmarshalJSON(data))
+	re.Equal(conf2.jobs, conf.jobs)
+}
+
+func TestJobExpired(t *testing.T) {
+	now := time.Now()
+	for _, data := range []struct {
+		finishedTime time.Time
+		expired      bool
+	}{
+		{
+			finishedTime: now.Add(-reserveDuration - 10*time.Second),
+			expired:      true,
+		},
+		{
+			finishedTime: now.Add(-reserveDuration + 10*time.Second),
+			expired:      false,
+		},
+	} {
+		job := &balanceRangeSchedulerJob{
+			Finish: &data.finishedTime,
+		}
+		require.Equal(t, data.expired, job.expired(reserveDuration))
+	}
+}
+
+func TestJobGC(t *testing.T) {
+	re := require.New(t)
+	conf := &balanceRangeSchedulerConfig{
+		schedulerConfig: &baseSchedulerConfig{},
+		jobs:            make([]*balanceRangeSchedulerJob, 0),
+	}
+	conf.init("test", storage.NewStorageWithMemoryBackend(), conf)
+	now := time.Now()
+	job := &balanceRangeSchedulerJob{
+		Finish: &now,
+	}
+	re.NoError(conf.addJob(job))
+	re.NoError(conf.deleteJob(1))
+	re.NoError(conf.gc())
+	re.Len(conf.jobs, 1)
+
+	expiredTime := now.Add(-reserveDuration - 10*time.Second)
+	conf.jobs[0].Finish = &expiredTime
+	re.NoError(conf.gc())
+	re.Empty(conf.jobs)
+}
+
+func TestPersistFail(t *testing.T) {
+	re := require.New(t)
+	persisFail := "github.com/tikv/pd/pkg/schedule/schedulers/persistFail"
+	re.NoError(failpoint.Enable(persisFail, "return(true)"))
+	defer func() {
+		re.NoError(failpoint.Disable(persisFail))
+	}()
+	job := &balanceRangeSchedulerJob{
+		Engine: core.EngineTiKV,
+		Rule:   core.LeaderScatter,
+		JobID:  1,
+		Ranges: []keyutil.KeyRange{keyutil.NewKeyRange("a", "b")},
+	}
+	conf := &balanceRangeSchedulerConfig{
+		schedulerConfig: &baseSchedulerConfig{},
+		jobs:            []*balanceRangeSchedulerJob{job},
+	}
+	conf.init("test", storage.NewStorageWithMemoryBackend(), conf)
+	errMsg := "fail to persist"
+	newJob := &balanceRangeSchedulerJob{}
+	re.ErrorContains(conf.addJob(newJob), errMsg)
+	re.Len(conf.jobs, 1)
+
+	re.ErrorContains(conf.deleteJob(1), errMsg)
+	re.NotEqual(cancelled, conf.jobs[0].Status)
+
+	re.ErrorContains(conf.begin(0), errMsg)
+	re.NotEqual(running, conf.jobs[0].Status)
+
+	conf.jobs[0].Status = running
+	re.ErrorContains(conf.finish(0), errMsg)
+	re.NotEqual(finished, conf.jobs[0].Status)
+
+	conf.jobs[0].Status = cancelled
+	finishedTime := time.Now().Add(-reserveDuration - 10*time.Second)
+	conf.jobs[0].Finish = &finishedTime
+	re.ErrorContains(conf.gc(), errMsg)
+	re.Len(conf.jobs, 1)
 }

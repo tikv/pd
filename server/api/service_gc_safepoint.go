@@ -46,6 +46,7 @@ type ListServiceGCSafepoint struct {
 	GCSafePoint           uint64                       `json:"gc_safe_point"`
 }
 
+// GetGCSafePoint gets the service GC safepoint.
 // @Tags     service_gc_safepoint
 // @Summary  Get all service GC safepoint.
 // @Produce  json
@@ -83,6 +84,7 @@ func (h *serviceGCSafepointHandler) GetGCSafePoint(w http.ResponseWriter, _ *htt
 	h.rd.JSON(w, http.StatusOK, list)
 }
 
+// DeleteGCSafePoint deletes a service GC safepoint.
 // @Tags     service_gc_safepoint
 // @Summary  Delete a service GC safepoint.
 // @Param    service_id  path  string  true  "Service ID"

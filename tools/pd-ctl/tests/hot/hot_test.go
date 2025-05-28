@@ -71,7 +71,7 @@ func (suite *hotTestSuite) TearDownTest() {
 		if sche := cluster.GetSchedulingPrimaryServer(); sche != nil {
 			hotStat = sche.GetCluster().GetHotStat()
 		}
-		hotStat.HotCache.CleanCache()
+		hotStat.CleanCache()
 	}
 	suite.env.RunTest(cleanFunc)
 }

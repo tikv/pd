@@ -465,10 +465,12 @@ func TestAsynctimeout(t *testing.T) {
 func setStoreState(cluster *mockcluster.Cluster, states ...string) {
 	for i, state := range states {
 		store := cluster.GetStore(uint64(i + 1))
-		if state == "down" {
+		switch state {
+		case "down":
 			store.GetMeta().LastHeartbeat = time.Now().Add(-time.Minute * 10).UnixNano()
-		} else if state == "up" {
+		case "up":
 			store.GetMeta().LastHeartbeat = time.Now().UnixNano()
+		default:
 		}
 		cluster.PutStore(store)
 	}

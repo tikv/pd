@@ -139,6 +139,7 @@ func TestTSOServerStartFirst(t *testing.T) {
 
 	cluster, err := tests.NewTestClusterWithKeyspaceGroup(ctx, 1, func(conf *config.Config, _ string) {
 		conf.Keyspace.PreAlloc = []string{"k1", "k2"}
+		conf.Keyspace.WaitRegionSplit = false
 	})
 	defer cluster.Destroy()
 	re.NoError(err)

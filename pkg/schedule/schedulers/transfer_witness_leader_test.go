@@ -89,5 +89,3 @@ func TestTransferWitnessLeaderWithUnhealthyPeer(t *testing.T) {
 	ops, _ = sl.Schedule(tc, false)
 	re.Empty(ops)
 }
-
-// TODO: add more tests with witness

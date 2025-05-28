@@ -60,6 +60,11 @@ func TestValidateName(t *testing.T) {
 		{"many many spaces", true},
 		{"keyspace?limit=1", true},
 		{"keyspace%1", true},
+		{"789z-_", false},
+		{"789z-_)", true},
+		{"78912345678982u7389217897238917389127893781278937128973812728397281378932179837", true},
+		{"scope1", false},
+		{"-----", false},
 	}
 	for _, testCase := range testCases {
 		re.Equal(testCase.hasErr, validateName(testCase.name) != nil)

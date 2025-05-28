@@ -85,8 +85,6 @@ func MainStart(args []string) {
 
 	rootCmd.Flags().BoolP("interact", "i", false, "Run pdctl with readline.")
 	rootCmd.Flags().BoolP("version", "V", false, "Print version information and exit.")
-	// TODO: deprecated
-	rootCmd.Flags().BoolP("detach", "d", true, "Run pdctl without readline.")
 
 	rootCmd.Run = func(cmd *cobra.Command, _ []string) {
 		if v, err := cmd.Flags().GetBool("version"); err == nil && v {

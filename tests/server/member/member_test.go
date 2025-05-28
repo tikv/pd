@@ -382,11 +382,11 @@ func TestGetLeader(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	cfg := server.NewTestSingleConfig(assertutil.CheckerWithNilAssert(re))
+	cfg := tests.NewTestSingleConfig(assertutil.CheckerWithNilAssert(re))
 	wg := &sync.WaitGroup{}
 	wg.Add(1)
 	done := make(chan bool)
-	svr, err := server.CreateServer(ctx, cfg, nil, server.CreateMockHandler(re, "127.0.0.1"))
+	svr, err := server.CreateServer(ctx, cfg, nil, tests.CreateMockHandler(re, "127.0.0.1"))
 	re.NoError(err)
 	defer svr.Close()
 	re.NoError(svr.Run())
@@ -394,7 +394,7 @@ func TestGetLeader(t *testing.T) {
 	go sendRequest(re, wg, done, cfg.ClientUrls)
 	time.Sleep(100 * time.Millisecond)
 
-	server.MustWaitLeader(re, []*server.Server{svr})
+	tests.MustWaitLeader(re, []*server.Server{svr})
 
 	re.NotNil(svr.GetLeader())
 

@@ -61,7 +61,7 @@ func TestMemKV(t *testing.T) {
 func testReadWrite(re *require.Assertions, kv Base) {
 	v, err := kv.Load("key")
 	re.NoError(err)
-	re.Equal("", v)
+	re.Empty(v)
 	err = kv.Save("key", "value")
 	re.NoError(err)
 	v, err = kv.Load("key")
@@ -71,7 +71,7 @@ func testReadWrite(re *require.Assertions, kv Base) {
 	re.NoError(err)
 	v, err = kv.Load("key")
 	re.NoError(err)
-	re.Equal("", v)
+	re.Empty(v)
 	err = kv.Remove("key")
 	re.NoError(err)
 }
@@ -168,7 +168,7 @@ func testLoadConflict(re *require.Assertions, kv Base) {
 func mustHaveKeys(re *require.Assertions, kv Base, prefix string, expected ...KeyValuePair) {
 	keys, values, err := kv.LoadRange(prefix, clientv3.GetPrefixRangeEnd(prefix), 0)
 	re.NoError(err)
-	re.Equal(len(expected), len(keys))
+	re.Len(expected, len(keys))
 	for i, key := range keys {
 		re.Equal(expected[i].Key, key)
 		re.Equal(expected[i].Value, values[i])

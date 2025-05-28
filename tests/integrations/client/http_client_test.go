@@ -547,6 +547,66 @@ func (suite *httpClientTestSuite) TestConfig() {
 	re.Empty(resp.Kvs)
 }
 
+func (suite *httpClientTestSuite) TestTTLConfigPersist() {
+	re := suite.Require()
+	client := suite.client
+	ctx, cancel := context.WithCancel(suite.ctx)
+	defer cancel()
+	configKey := "schedule.max-pending-peer-count"
+
+	testCases := []struct {
+		inputValue        any
+		expectedEtcdValue string
+	}{
+		{
+			inputValue:        uint64(10000000),
+			expectedEtcdValue: "10000000",
+		},
+		{
+			inputValue:        int(20000000),
+			expectedEtcdValue: "20000000",
+		},
+		{
+			inputValue:        float64(2147483647),
+			expectedEtcdValue: "2147483647",
+		},
+		{
+			inputValue:        float64(1234567890.0),
+			expectedEtcdValue: "1234567890",
+		},
+		{
+			inputValue:        float64(0.0),
+			expectedEtcdValue: "0",
+		},
+		{
+			inputValue:        float64(987.65),
+			expectedEtcdValue: "987.65",
+		},
+		{
+			inputValue:        int(-1),
+			expectedEtcdValue: "-1",
+		},
+		{
+			inputValue:        int32(-2147483647),
+			expectedEtcdValue: "-2147483647",
+		},
+	}
+
+	for _, tc := range testCases {
+		newConfig := map[string]any{
+			configKey: tc.inputValue,
+		}
+		err := client.SetConfig(ctx, newConfig, 10000)
+		re.NoError(err)
+		resp, err := suite.cluster.GetEtcdClient().Get(ctx, sc.TTLConfigPrefix+"/"+configKey)
+		re.NoError(err)
+		re.Len(resp.Kvs, 1)
+		re.Equal([]byte(tc.expectedEtcdValue), resp.Kvs[0].Value)
+		err = client.SetConfig(ctx, newConfig, 0)
+		re.NoError(err)
+	}
+}
+
 func (suite *httpClientTestSuite) TestScheduleConfig() {
 	re := suite.Require()
 	client := suite.client
@@ -603,6 +663,40 @@ func (suite *httpClientTestSuite) TestSchedulers() {
 	re.NoError(client.CreateSchedulerWithInput(ctx, schedulerName, input))
 	checkScheduler()
 	re.NoError(client.DeleteScheduler(ctx, schedulerName))
+	const schedulerName2 = "balance-range-scheduler"
+	input = map[string]any{
+		"engine":    "tikv",
+		"rule":      "leader-scatter",
+		"start-key": "100",
+		"end-key":   "200",
+		"alias":     "test",
+	}
+	re.NoError(client.CreateSchedulerWithInput(ctx, schedulerName2, input))
+	checkFn := func() map[string]any {
+		config, err := client.GetSchedulerConfig(ctx, schedulerName2)
+		re.NoError(err)
+		jobs, ok := config.([]any)
+		re.True(ok, config)
+		res := make([]map[string]any, 0, len(jobs))
+		for _, job := range jobs {
+			jobMap, ok := job.(map[string]any)
+			re.True(ok, config)
+			res = append(res, jobMap)
+		}
+		return res[0]
+	}
+	job := checkFn()
+	jobID := uint64(job["job-id"].(float64))
+	re.Equal(uint64(0), jobID)
+	_, ok := job["start"].(*time.Time)
+	re.False(ok, job)
+
+	// cancel one job
+	re.NoError(client.CancelSchedulerJob(ctx, schedulerName2, jobID))
+	job = checkFn()
+	status, ok := job["status"]
+	re.True(ok)
+	re.Equal("cancelled", status)
 }
 
 func (suite *httpClientTestSuite) TestStoreLabels() {

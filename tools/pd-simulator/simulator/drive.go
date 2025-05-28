@@ -241,7 +241,7 @@ func (d *Driver) RegionsHeartbeat(ctx context.Context) {
 	regionInterval := uint64(config.RaftStore.RegionHeartBeatInterval.Duration / config.SimTickInterval.Duration)
 	nodesChannel := make(map[uint64]chan *core.RegionInfo, len(d.conn.Nodes))
 	for _, n := range d.conn.Nodes {
-		nodesChannel[n.Store.GetId()] = make(chan *core.RegionInfo, d.simConfig.TotalRegion)
+		nodesChannel[n.GetId()] = make(chan *core.RegionInfo, d.simConfig.TotalRegion)
 		go func(storeID uint64, ch chan *core.RegionInfo) {
 			for {
 				select {
@@ -252,7 +252,7 @@ func (d *Driver) RegionsHeartbeat(ctx context.Context) {
 					return
 				}
 			}
-		}(n.Store.GetId(), nodesChannel[n.Store.GetId()])
+		}(n.GetId(), nodesChannel[n.GetId()])
 	}
 
 	for {
@@ -263,9 +263,9 @@ func (d *Driver) RegionsHeartbeat(ctx context.Context) {
 				healthyNodes := make(map[uint64]bool)
 				for _, n := range d.conn.Nodes {
 					if n.GetNodeState() != metapb.NodeState_Preparing && n.GetNodeState() != metapb.NodeState_Serving {
-						healthyNodes[n.Store.GetId()] = false
+						healthyNodes[n.GetId()] = false
 					} else {
-						healthyNodes[n.Store.GetId()] = true
+						healthyNodes[n.GetId()] = true
 					}
 				}
 				for _, region := range regions {
@@ -388,9 +388,9 @@ func (d *Driver) updateNodeAvailable() {
 	for storeID, n := range d.conn.Nodes {
 		n.statsMutex.Lock()
 		if n.hasExtraUsedSpace {
-			n.stats.StoreStats.Available = n.stats.StoreStats.Capacity - uint64(d.raftEngine.regionsInfo.GetStoreRegionSize(storeID)) - uint64(d.simConfig.RaftStore.ExtraUsedSpace)
+			n.stats.Available = n.stats.Capacity - uint64(d.raftEngine.regionsInfo.GetStoreRegionSize(storeID)) - uint64(d.simConfig.RaftStore.ExtraUsedSpace)
 		} else {
-			n.stats.StoreStats.Available = n.stats.StoreStats.Capacity - uint64(d.raftEngine.regionsInfo.GetStoreRegionSize(storeID))
+			n.stats.Available = n.stats.Capacity - uint64(d.raftEngine.regionsInfo.GetStoreRegionSize(storeID))
 		}
 		n.statsMutex.Unlock()
 	}

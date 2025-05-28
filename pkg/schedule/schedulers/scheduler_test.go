@@ -273,13 +273,13 @@ func TestShuffleRegionRole(t *testing.T) {
 
 	// update rule to 1leader+1follower+1learner
 	tc.SetEnablePlacementRules(true)
-	tc.RuleManager.SetRule(&placement.Rule{
+	tc.SetRule(&placement.Rule{
 		GroupID: placement.DefaultGroupID,
 		ID:      placement.DefaultRuleID,
 		Role:    placement.Voter,
 		Count:   2,
 	})
-	tc.RuleManager.SetRule(&placement.Rule{
+	tc.SetRule(&placement.Rule{
 		GroupID: placement.DefaultGroupID,
 		ID:      "learner",
 		Role:    placement.Learner,

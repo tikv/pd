@@ -16,7 +16,6 @@ package server
 
 import (
 	"context"
-	"os"
 
 	"github.com/spf13/pflag"
 	"github.com/stretchr/testify/require"
@@ -43,7 +42,6 @@ func NewTestServer(ctx context.Context, re *require.Assertions, cfg *config.Conf
 
 	cleanup := func() {
 		s.Close()
-		os.RemoveAll(cfg.DataDir)
 	}
 	return s, cleanup, nil
 }

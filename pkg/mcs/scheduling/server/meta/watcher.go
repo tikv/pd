@@ -77,7 +77,7 @@ func (w *Watcher) initializeStoreWatcher() error {
 		if origin == nil {
 			w.basicCluster.PutStore(core.NewStoreInfo(store))
 		} else {
-			w.basicCluster.PutStore(origin.Clone(core.SetStoreMeta(store)))
+			w.basicCluster.PutStore(origin, core.SetStoreMeta(store))
 		}
 
 		if store.GetNodeState() == metapb.NodeState_Removed {

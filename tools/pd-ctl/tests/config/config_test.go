@@ -88,7 +88,7 @@ func (suite *configTestSuite) TearDownTest() {
 		def := placement.GroupBundle{
 			ID: "pd",
 			Rules: []*placement.Rule{
-				{GroupID: "pd", ID: "default", Role: "voter", Count: 3},
+				{GroupID: placement.DefaultGroupID, ID: placement.DefaultRuleID, Role: "voter", Count: 3},
 			},
 		}
 		data, err := json.Marshal([]placement.GroupBundle{def})
@@ -825,7 +825,7 @@ func (suite *configTestSuite) checkPlacementRuleBundle(cluster *pdTests.TestClus
 	bundles = []placement.GroupBundle{{
 		ID: "pd",
 		Rules: []*placement.Rule{
-			{GroupID: "pd", ID: "default", Role: "voter", Count: 3},
+			{GroupID: placement.DefaultGroupID, ID: placement.DefaultRuleID, Role: "voter", Count: 3},
 		},
 	}}
 	b, err = json.Marshal(bundles)
@@ -837,7 +837,7 @@ func (suite *configTestSuite) checkPlacementRuleBundle(cluster *pdTests.TestClus
 	re.NoError(err)
 
 	checkLoadRuleBundle(re, pdAddr, fname, []placement.GroupBundle{
-		{ID: "pd", Index: 0, Override: false, Rules: []*placement.Rule{{GroupID: "pd", ID: placement.DefaultRuleID, Role: placement.Voter, Count: 3}}},
+		{ID: "pd", Index: 0, Override: false, Rules: []*placement.Rule{{GroupID: placement.DefaultGroupID, ID: placement.DefaultRuleID, Role: placement.Voter, Count: 3}}},
 	})
 }
 
@@ -1006,7 +1006,7 @@ func TestServiceMiddlewareConfig(t *testing.T) {
 
 	_, err = tests.ExecuteCommand(cmd, "-u", pdAddr, "config", "set", "service-middleware", "audit", "enable-audit", "false")
 	re.NoError(err)
-	conf.AuditConfig.EnableAudit = false
+	conf.EnableAudit = false
 	check()
 	_, err = tests.ExecuteCommand(cmd, "-u", pdAddr, "config", "set", "service-middleware", "rate-limit", "GetRegion", "qps", "100.1")
 	re.NoError(err)
@@ -1270,7 +1270,7 @@ func (suite *configTestSuite) checkPDServerConfig(cluster *pdTests.TestCluster) 
 	re.Equal(24*time.Hour, conf.MaxResetTSGap.Duration)
 	re.Equal("table", conf.KeyType)
 	re.Equal(typeutil.StringSlice([]string{}), conf.RuntimeServices)
-	re.Equal("", conf.MetricStorage)
+	re.Empty(conf.MetricStorage)
 	if conf.DashboardAddress != "auto" { // dashboard has been assigned
 		re.Equal(leaderServer.GetAddr(), conf.DashboardAddress)
 	}

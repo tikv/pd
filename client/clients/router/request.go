@@ -38,8 +38,7 @@ type Request struct {
 	// ID field represents this is a `GetRegionByID` request.
 	id uint64
 
-	// NeedBuckets field represents whether the request needs to get the region buckets.
-	needBuckets bool
+	options *opt.GetRegionOp
 
 	done chan error
 	// region will be set after the request is done.
@@ -82,13 +81,8 @@ func (req *Request) wait() (*Region, error) {
 
 // GetRegion implements the Client interface.
 func (c *Cli) GetRegion(ctx context.Context, key []byte, opts ...opt.GetRegionOption) (*Region, error) {
-	req := c.newRequest(ctx)
+	req := c.newRequest(ctx, opts...)
 	req.key = key
-	options := &opt.GetRegionOp{}
-	for _, opt := range opts {
-		opt(options)
-	}
-	req.needBuckets = options.NeedBuckets
 
 	c.requestCh <- req
 	return req.wait()
@@ -96,13 +90,8 @@ func (c *Cli) GetRegion(ctx context.Context, key []byte, opts ...opt.GetRegionOp
 
 // GetPrevRegion implements the Client interface.
 func (c *Cli) GetPrevRegion(ctx context.Context, key []byte, opts ...opt.GetRegionOption) (*Region, error) {
-	req := c.newRequest(ctx)
+	req := c.newRequest(ctx, opts...)
 	req.prevKey = key
-	options := &opt.GetRegionOp{}
-	for _, opt := range opts {
-		opt(options)
-	}
-	req.needBuckets = options.NeedBuckets
 
 	c.requestCh <- req
 	return req.wait()
@@ -110,13 +99,8 @@ func (c *Cli) GetPrevRegion(ctx context.Context, key []byte, opts ...opt.GetRegi
 
 // GetRegionByID implements the Client interface.
 func (c *Cli) GetRegionByID(ctx context.Context, regionID uint64, opts ...opt.GetRegionOption) (*Region, error) {
-	req := c.newRequest(ctx)
+	req := c.newRequest(ctx, opts...)
 	req.id = regionID
-	options := &opt.GetRegionOp{}
-	for _, opt := range opts {
-		opt(options)
-	}
-	req.needBuckets = options.NeedBuckets
 
 	c.requestCh <- req
 	return req.wait()

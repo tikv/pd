@@ -50,6 +50,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/pkg/utils/grpcutil"
 	"github.com/tikv/pd/pkg/utils/keypath"
+	"github.com/tikv/pd/pkg/utils/keyutil"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 	"github.com/tikv/pd/pkg/utils/tsoutil"
@@ -301,7 +302,7 @@ func (s *GrpcServer) GetMinTS(
 		minTS, err = s.GetMinTSFromTSOService()
 	} else {
 		start := time.Now()
-		ts, internalErr := s.tsoAllocatorManager.HandleRequest(ctx, 1)
+		ts, internalErr := s.tsoAllocator.GenerateTSO(ctx, 1)
 		if internalErr == nil {
 			tsoHandleDuration.Observe(time.Since(start).Seconds())
 		}
@@ -495,10 +496,10 @@ func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
 	go tsoutil.WatchTSDeadline(stream.Context(), tsDeadlineCh)
 
 	var (
-		doneCh       chan struct{}
-		errCh        chan error
-		forwarder    = newTSOForwarder(stream)
-		tsoStreamErr error
+		// The following are tso forward stream related variables.
+		tsoRequestProxyCtx context.Context
+		forwarder          = newTSOForwarder(stream)
+		tsoStreamErr       error
 	)
 
 	defer func() {
@@ -511,19 +512,42 @@ func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
 	ctx, cancel := context.WithCancel(stream.Context())
 	defer cancel()
 	for {
-		// Prevent unnecessary performance overhead of the channel.
-		if errCh != nil {
+		var (
+			request *pdpb.TsoRequest
+			err     error
+		)
+
+		if tsoRequestProxyCtx == nil {
+			request, err = stream.Recv()
+		} else {
+			// if we forward requests to TSO proxy we can't block on the next request in the stream
+			// as proxy might fail on the previous request, and we need to return the error to client
+
+			// Create a channel to receive the stream data or error asynchronously
+			streamCh := make(chan *pdpb.TsoRequest, 1)
+			streamErrCh := make(chan error, 1)
+			go func() {
+				req, err := stream.Recv()
+				if err != nil {
+					streamErrCh <- err
+				} else {
+					streamCh <- req
+				}
+			}()
+
+			// Wait for either stream data or error from tso proxy
 			select {
-			case err := <-errCh:
-				return errors.WithStack(err)
-			default:
+			case <-tsoRequestProxyCtx.Done():
+				err = context.Cause(tsoRequestProxyCtx)
+			case err = <-streamErrCh:
+			case req := <-streamCh:
+				request = req
 			}
 		}
-		request, err := stream.Recv()
+
 		if err == io.EOF {
 			return nil
-		}
-		if err != nil {
+		} else if err != nil {
 			return errors.WithStack(err)
 		}
 
@@ -539,14 +563,9 @@ func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
 				return errors.WithStack(err)
 			}
 
-			if errCh == nil {
-				doneCh = make(chan struct{})
-				defer close(doneCh) // nolint
-				errCh = make(chan error)
-			}
-
 			tsoRequest := tsoutil.NewPDProtoRequest(forwardedHost, clientConn, request, stream)
-			s.tsoDispatcher.DispatchRequest(ctx, tsoRequest, s.pdProtoFactory, doneCh, errCh, s.tsoPrimaryWatcher)
+			// don't pass a stream context here as dispatcher serves multiple streams
+			tsoRequestProxyCtx = s.tsoDispatcher.DispatchRequest(s.ctx, tsoRequest, s.pdProtoFactory, s.tsoPrimaryWatcher)
 			continue
 		}
 
@@ -571,7 +590,7 @@ func (s *GrpcServer) Tso(stream pdpb.PD_TsoServer) error {
 		}
 		count := request.GetCount()
 		ctx, task := trace.NewTask(ctx, "tso")
-		ts, err := s.tsoAllocatorManager.HandleRequest(ctx, count)
+		ts, err := s.tsoAllocator.GenerateTSO(ctx, count)
 		task.End()
 		tsoHandleDuration.Observe(time.Since(start).Seconds())
 		if err != nil {
@@ -1365,7 +1384,7 @@ func (s *GrpcServer) RegionHeartbeat(stream pdpb.PD_RegionHeartbeatServer) error
 }
 
 // GetRegion implements gRPC PDServer.
-func (s *GrpcServer) GetRegion(ctx context.Context, request *pdpb.GetRegionRequest) (*pdpb.GetRegionResponse, error) {
+func (s *GrpcServer) GetRegion(ctx context.Context, request *pdpb.GetRegionRequest) (resp *pdpb.GetRegionResponse, err error) {
 	failpoint.Inject("rateLimit", func() {
 		failpoint.Return(nil, errs.ErrGRPCRateLimitExceeded(errs.ErrRateLimitExceeded))
 	})
@@ -1390,6 +1409,9 @@ func (s *GrpcServer) GetRegion(ctx context.Context, request *pdpb.GetRegionReque
 		rc     *cluster.RaftCluster
 		region *core.RegionInfo
 	)
+	defer func() {
+		incRegionRequestCounter("GetRegion", request.Header, resp.Header.Error)
+	}()
 	if *followerHandle {
 		rc = s.cluster
 		if !rc.GetRegionSyncer().IsRunning() {
@@ -1428,7 +1450,7 @@ func (s *GrpcServer) GetRegion(ctx context.Context, request *pdpb.GetRegionReque
 }
 
 // GetPrevRegion implements gRPC PDServer
-func (s *GrpcServer) GetPrevRegion(ctx context.Context, request *pdpb.GetRegionRequest) (*pdpb.GetRegionResponse, error) {
+func (s *GrpcServer) GetPrevRegion(ctx context.Context, request *pdpb.GetRegionRequest) (resp *pdpb.GetRegionResponse, err error) {
 	done, err := s.rateLimitCheck()
 	if err != nil {
 		return nil, err
@@ -1446,6 +1468,9 @@ func (s *GrpcServer) GetPrevRegion(ctx context.Context, request *pdpb.GetRegionR
 		return rsp.(*pdpb.GetRegionResponse), err
 	}
 
+	defer func() {
+		incRegionRequestCounter("GetPrevRegion", request.Header, resp.Header.Error)
+	}()
 	var rc *cluster.RaftCluster
 	if *followerHandle {
 		// no need to check running status
@@ -1483,7 +1508,7 @@ func (s *GrpcServer) GetPrevRegion(ctx context.Context, request *pdpb.GetRegionR
 }
 
 // GetRegionByID implements gRPC PDServer.
-func (s *GrpcServer) GetRegionByID(ctx context.Context, request *pdpb.GetRegionByIDRequest) (*pdpb.GetRegionResponse, error) {
+func (s *GrpcServer) GetRegionByID(ctx context.Context, request *pdpb.GetRegionByIDRequest) (resp *pdpb.GetRegionResponse, err error) {
 	done, err := s.rateLimitCheck()
 	if err != nil {
 		return nil, err
@@ -1501,6 +1526,9 @@ func (s *GrpcServer) GetRegionByID(ctx context.Context, request *pdpb.GetRegionB
 		return rsp.(*pdpb.GetRegionResponse), err
 	}
 
+	defer func() {
+		incRegionRequestCounter("GetRegionByID", request.Header, resp.Header.Error)
+	}()
 	var rc *cluster.RaftCluster
 	if *followerHandle {
 		rc = s.cluster
@@ -1563,17 +1591,34 @@ func (s *GrpcServer) QueryRegion(stream pdpb.PD_QueryRegionServer) error {
 		if clusterID := keypath.ClusterID(); request.GetHeader().GetClusterId() != clusterID {
 			return errs.ErrMismatchClusterID(clusterID, request.GetHeader().GetClusterId())
 		}
-		rc := s.GetRaftCluster()
-		if rc == nil {
-			resp := &pdpb.QueryRegionResponse{
-				Header: notBootstrappedHeader(),
+		var (
+			rc          *cluster.RaftCluster
+			needBuckets bool
+		)
+		if s.member.IsLeader() {
+			rc = s.GetRaftCluster()
+			if rc == nil {
+				resp := &pdpb.QueryRegionResponse{
+					Header: notBootstrappedHeader(),
+				}
+				if err = stream.Send(resp); err != nil {
+					return errors.WithStack(err)
+				}
+				continue
 			}
-			if err = stream.Send(resp); err != nil {
-				return errors.WithStack(err)
+			needBuckets = rc.GetStoreConfig().IsEnableRegionBucket() && request.GetNeedBuckets()
+		} else {
+			rc = s.cluster
+			if !rc.GetRegionSyncer().IsRunning() {
+				resp := &pdpb.QueryRegionResponse{
+					Header: regionNotFound(),
+				}
+				if err = stream.Send(resp); err != nil {
+					return errors.WithStack(err)
+				}
+				continue
 			}
-			continue
 		}
-		needBuckets := rc.GetStoreConfig().IsEnableRegionBucket() && request.GetNeedBuckets()
 
 		start := time.Now()
 		keyIDMap, prevKeyIDMap, regionsByID := rc.QueryRegions(
@@ -1590,15 +1635,19 @@ func (s *GrpcServer) QueryRegion(stream pdpb.PD_QueryRegionServer) error {
 			PrevKeyIdMap: prevKeyIDMap,
 			RegionsById:  regionsByID,
 		}
+		incRegionRequestCounter("QueryRegion", request.Header, response.Header.Error)
+
+		regionRequestCounter.WithLabelValues("QueryRegion", request.Header.CallerId,
+			request.Header.CallerComponent, "").Inc()
 		if err := stream.Send(response); err != nil {
 			return errors.WithStack(err)
 		}
 	}
 }
 
-// Deprecated: use BatchScanRegions instead.
 // ScanRegions implements gRPC PDServer.
-func (s *GrpcServer) ScanRegions(ctx context.Context, request *pdpb.ScanRegionsRequest) (*pdpb.ScanRegionsResponse, error) {
+// Deprecated: use BatchScanRegions instead.
+func (s *GrpcServer) ScanRegions(ctx context.Context, request *pdpb.ScanRegionsRequest) (resp *pdpb.ScanRegionsResponse, err error) {
 	done, err := s.rateLimitCheck()
 	if err != nil {
 		return nil, err
@@ -1607,7 +1656,7 @@ func (s *GrpcServer) ScanRegions(ctx context.Context, request *pdpb.ScanRegionsR
 		defer done()
 	}
 	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
-		return pdpb.NewPDClient(client).ScanRegions(ctx, request)
+		return pdpb.NewPDClient(client).ScanRegions(ctx, request) //nolint:staticcheck
 	}
 	followerHandle := new(bool)
 	if rsp, err := s.unaryFollowerMiddleware(ctx, request, fn, followerHandle); err != nil {
@@ -1616,6 +1665,9 @@ func (s *GrpcServer) ScanRegions(ctx context.Context, request *pdpb.ScanRegionsR
 		return rsp.(*pdpb.ScanRegionsResponse), nil
 	}
 
+	defer func() {
+		incRegionRequestCounter("ScanRegions", request.Header, resp.Header.Error)
+	}()
 	var rc *cluster.RaftCluster
 	if *followerHandle {
 		rc = s.cluster
@@ -1632,7 +1684,7 @@ func (s *GrpcServer) ScanRegions(ctx context.Context, request *pdpb.ScanRegionsR
 	if *followerHandle && len(regions) == 0 {
 		return &pdpb.ScanRegionsResponse{Header: regionNotFound()}, nil
 	}
-	resp := &pdpb.ScanRegionsResponse{Header: wrapHeader()}
+	resp = &pdpb.ScanRegionsResponse{Header: wrapHeader()}
 	for _, r := range regions {
 		leader := r.GetLeader()
 		if leader == nil {
@@ -1652,7 +1704,7 @@ func (s *GrpcServer) ScanRegions(ctx context.Context, request *pdpb.ScanRegionsR
 }
 
 // BatchScanRegions implements gRPC PDServer.
-func (s *GrpcServer) BatchScanRegions(ctx context.Context, request *pdpb.BatchScanRegionsRequest) (*pdpb.BatchScanRegionsResponse, error) {
+func (s *GrpcServer) BatchScanRegions(ctx context.Context, request *pdpb.BatchScanRegionsRequest) (resp *pdpb.BatchScanRegionsResponse, err error) {
 	done, err := s.rateLimitCheck()
 	if err != nil {
 		return nil, err
@@ -1670,6 +1722,10 @@ func (s *GrpcServer) BatchScanRegions(ctx context.Context, request *pdpb.BatchSc
 		return rsp.(*pdpb.BatchScanRegionsResponse), nil
 	}
 
+	defer func() {
+		incRegionRequestCounter("BatchScanRegions", request.Header, resp.Header.Error)
+	}()
+
 	var rc *cluster.RaftCluster
 	if *followerHandle {
 		rc = s.cluster
@@ -1684,8 +1740,8 @@ func (s *GrpcServer) BatchScanRegions(ctx context.Context, request *pdpb.BatchSc
 	}
 	needBucket := request.GetNeedBuckets() && !*followerHandle && rc.GetStoreConfig().IsEnableRegionBucket()
 	limit := request.GetLimit()
-	// cast to core.KeyRanges and check the validation.
-	keyRanges := core.NewKeyRangesWithSize(len(request.GetRanges()))
+	// cast to keyutil.KeyRanges and check the validation.
+	keyRanges := keyutil.NewKeyRangesWithSize(len(request.GetRanges()))
 	reqRanges := request.GetRanges()
 	for i, reqRange := range reqRanges {
 		if i > 0 {
@@ -1735,7 +1791,7 @@ func (s *GrpcServer) BatchScanRegions(ctx context.Context, request *pdpb.BatchSc
 	if *followerHandle && len(regions) == 0 {
 		return &pdpb.BatchScanRegionsResponse{Header: regionNotFound()}, nil
 	}
-	resp := &pdpb.BatchScanRegionsResponse{Header: wrapHeader(), Regions: regions}
+	resp = &pdpb.BatchScanRegionsResponse{Header: wrapHeader(), Regions: regions}
 	return resp, nil
 }
 
@@ -2452,6 +2508,7 @@ func convertAskSplitResponse(resp *schedulingpb.AskBatchSplitResponse) *pdpb.Ask
 	}
 }
 
+// SyncMaxTS implements gRPC PDServer.
 // Deprecated.
 func (*GrpcServer) SyncMaxTS(_ context.Context, _ *pdpb.SyncMaxTSRequest) (*pdpb.SyncMaxTSResponse, error) {
 	return &pdpb.SyncMaxTSResponse{
@@ -2581,6 +2638,7 @@ func scatterRegions(cluster *cluster.RaftCluster, regionsID []uint64, group stri
 	return percentage, failedRegionIDs, nil
 }
 
+// GetDCLocationInfo implements gRPC PDServer.
 // Deprecated
 func (*GrpcServer) GetDCLocationInfo(_ context.Context, _ *pdpb.GetDCLocationInfoRequest) (*pdpb.GetDCLocationInfoResponse, error) {
 	return &pdpb.GetDCLocationInfoResponse{

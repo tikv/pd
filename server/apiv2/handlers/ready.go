@@ -19,6 +19,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/pingcap/failpoint"
+
 	"github.com/tikv/pd/pkg/storage"
 	"github.com/tikv/pd/server"
 	"github.com/tikv/pd/server/apiv2/middlewares"
@@ -30,7 +32,8 @@ type ReadyStatus struct {
 	RegionLoaded bool `json:"region_loaded"`
 }
 
-// @Summary  It will return whether pd follower is ready to became leader.
+// Ready checks if the region is loaded.
+// @Summary  It will return whether pd follower is ready to became leader. This request is always served by the instance that receives it and never forwarded to the leader.
 // @Router   /ready [get]
 // @Param    verbose  query  bool  false  "Whether to return details."
 // @Success  200
@@ -39,6 +42,13 @@ func Ready(c *gin.Context) {
 	svr := c.MustGet(middlewares.ServerContextKey).(*server.Server)
 	s := svr.GetStorage()
 	regionLoaded := storage.AreRegionsLoaded(s)
+	failpoint.Inject("loadRegionSlow", func(val failpoint.Value) {
+		if s, ok := val.(string); ok {
+			if svr.GetAddr() == s {
+				regionLoaded = false
+			}
+		}
+	})
 	if regionLoaded {
 		c.Status(http.StatusOK)
 	} else {
