@@ -409,8 +409,7 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 			log.Info("resource group manager background metrics flush loop exits")
 			return
 		case consumptionInfo := <-m.consumptionDispatcher:
-			consumption := consumptionInfo.Consumption
-			if consumption == nil {
+			if consumptionInfo == nil || consumptionInfo.Consumption == nil {
 				continue
 			}
 			keyspaceID := consumptionInfo.keyspaceID
@@ -418,22 +417,9 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 			if err != nil {
 				continue
 			}
-
-			ruLabelType := defaultTypeLabel
-			if consumptionInfo.isBackground {
-				ruLabelType = backgroundTypeLabel
-			}
-			if consumptionInfo.isTiFlash {
-				ruLabelType = tiflashTypeLabel
-			}
-
-			name := consumptionInfo.resourceGroupName
-			getMaxPerSecTracker(keyspaceID, keyspaceName, name).collect(consumption)
-			getCounterMetrics(keyspaceID, keyspaceName, name, ruLabelType).add(consumption, m.controllerConfig)
-			insertConsumptionRecord(keyspaceID, name, ruLabelType)
-
+			recordConsumption(consumptionInfo, keyspaceName, m.controllerConfig)
 			// TODO: maybe we need to distinguish background ru.
-			if rg := m.GetMutableResourceGroup(keyspaceID, name); rg != nil {
+			if rg := m.GetMutableResourceGroup(keyspaceID, consumptionInfo.resourceGroupName); rg != nil {
 				rg.UpdateRUConsumption(consumptionInfo.Consumption)
 			}
 		case <-cleanUpTicker.C:
@@ -446,9 +432,7 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 				if err != nil {
 					continue
 				}
-				deleteConsumptionRecord(r)
-				deleteMetrics(r.keyspaceID, keyspaceName, r.groupName, r.ruType)
-				deleteMaxPerSecTracker(r.keyspaceID, r.groupName)
+				cleanupAllMetrics(r, keyspaceName)
 			}
 		case <-availableRUTicker.C:
 			// Prevent from holding the lock too long when there're many keyspaces and resource groups.
@@ -468,8 +452,7 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 				if err != nil {
 					continue
 				}
-				names := krgm.getResourceGroupNames(true)
-				for _, name := range names {
+				for _, name := range krgm.getResourceGroupNames(true) {
 					getMaxPerSecTracker(krgm.keyspaceID, keyspaceName, name).flushMetrics()
 				}
 			}

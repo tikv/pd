@@ -234,6 +234,28 @@ func deleteMetrics(keyspaceID uint32, keyspaceName, groupName, ruType string) {
 	deleteLabelValues(keyspaceName, groupName, ruType)
 }
 
+func recordConsumption(consumptionInfo *consumptionItem, keyspaceName string, controllerConfig *ControllerConfig) {
+	keyspaceID := consumptionInfo.keyspaceID
+	groupName := consumptionInfo.resourceGroupName
+	ruLabelType := defaultTypeLabel
+	if consumptionInfo.isBackground {
+		ruLabelType = backgroundTypeLabel
+	}
+	if consumptionInfo.isTiFlash {
+		ruLabelType = tiflashTypeLabel
+	}
+	consumption := consumptionInfo.Consumption
+	getMaxPerSecTracker(keyspaceID, keyspaceName, groupName).collect(consumption)
+	getCounterMetrics(keyspaceID, keyspaceName, groupName, ruLabelType).add(consumption, controllerConfig)
+	insertConsumptionRecord(keyspaceID, groupName, ruLabelType)
+}
+
+func cleanupAllMetrics(r consumptionRecordKey, keyspaceName string) {
+	deleteConsumptionRecord(r)
+	deleteMetrics(r.keyspaceID, keyspaceName, r.groupName, r.ruType)
+	deleteMaxPerSecTracker(r.keyspaceID, r.groupName)
+}
+
 type counterMetrics struct {
 	RRUMetrics               prometheus.Counter
 	WRUMetrics               prometheus.Counter
