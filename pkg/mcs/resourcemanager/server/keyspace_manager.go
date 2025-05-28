@@ -59,12 +59,11 @@ type keyspaceResourceGroupManager struct {
 }
 
 func newKeyspaceResourceGroupManager(keyspaceID uint32, storage endpoint.ResourceGroupStorage) *keyspaceResourceGroupManager {
-	krgm := &keyspaceResourceGroupManager{
+	return &keyspaceResourceGroupManager{
 		groups:     make(map[string]*ResourceGroup),
 		keyspaceID: keyspaceID,
 		storage:    storage,
 	}
-	return krgm
 }
 
 func (krgm *keyspaceResourceGroupManager) addResourceGroupFromRaw(name string, rawValue string) error {
