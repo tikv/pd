@@ -76,8 +76,8 @@ func (s TLSConfig) ToTLSInfo() (*transport.TLSInfo, error) {
 	}, nil
 }
 
-// ToTLSConfig generates tls config.
-func (s TLSConfig) ToTLSConfig() (*tls.Config, error) {
+// ToClientTLSConfig generates tls config.
+func (s TLSConfig) ToClientTLSConfig() (*tls.Config, error) {
 	if len(s.SSLCABytes) != 0 || len(s.SSLCertBytes) != 0 || len(s.SSLKEYBytes) != 0 {
 		cert, err := tls.X509KeyPair(s.SSLCertBytes, s.SSLKEYBytes)
 		if err != nil {
@@ -102,13 +102,36 @@ func (s TLSConfig) ToTLSConfig() (*tls.Config, error) {
 		return nil, nil
 	}
 	if err != nil {
-		return nil, errs.ErrEtcdTLSConfig.Wrap(err).GenWithStackByCause()
+		return nil, errs.ErrTLSConfig.Wrap(err).GenWithStackByCause()
 	}
 
 	tlsConfig, err := tlsInfo.ClientConfig()
 	if err != nil {
-		return nil, errs.ErrEtcdTLSConfig.Wrap(err).GenWithStackByCause()
+		return nil, errs.ErrTLSConfig.Wrap(err).GenWithStackByCause()
 	}
+	return tlsConfig, nil
+}
+
+// ToServerTLSConfig generates tls config.
+func (s TLSConfig) ToServerTLSConfig() (*tls.Config, error) {
+	if len(s.CertPath) == 0 && len(s.KeyPath) == 0 {
+		return nil, nil
+	}
+
+	tlsInfo := transport.TLSInfo{
+		CertFile:      s.CertPath,
+		KeyFile:       s.KeyPath,
+		TrustedCAFile: s.CAPath,
+		AllowedCNs:    s.CertAllowedCNs,
+	}
+
+	tlsConfig, err := tlsInfo.ServerConfig()
+	if err != nil {
+		return nil, errs.ErrTLSConfig.Wrap(err).GenWithStackByCause()
+	}
+	tlsConfig.NextProtos = []string{"http/1.1", "h2"}
+	tlsConfig.ClientAuth = tls.VerifyClientCertIfGiven
+
 	return tlsConfig, nil
 }
 
@@ -191,7 +214,7 @@ func IsFollowerHandleEnabled(ctx context.Context) bool {
 }
 
 func establish(ctx context.Context, addr string, tlsConfig *TLSConfig, do ...grpc.DialOption) (*grpc.ClientConn, error) {
-	tlsCfg, err := tlsConfig.ToTLSConfig()
+	tlsCfg, err := tlsConfig.ToClientTLSConfig()
 	if err != nil {
 		return nil, err
 	}
