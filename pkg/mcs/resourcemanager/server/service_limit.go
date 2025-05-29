@@ -18,6 +18,10 @@ import (
 	"math"
 	"time"
 
+	"go.uber.org/zap"
+
+	"github.com/pingcap/log"
+
 	"github.com/tikv/pd/pkg/utils/syncutil"
 )
 
@@ -36,14 +40,17 @@ type serviceLimiter struct {
 	AvailableTokens float64 `json:"available_tokens"`
 	// LastUpdate records the last time the limiter was updated.
 	LastUpdate time.Time `json:"last_update"`
+	// KeyspaceID is the keyspace ID of the keyspace that this limiter belongs to.
+	keyspaceID uint32
 }
 
-func newServiceLimiter(serviceLimit float64) *serviceLimiter {
+func newServiceLimiter(keyspaceID uint32, serviceLimit float64) *serviceLimiter {
 	// The service limit should be non-negative.
 	serviceLimit = math.Max(0, serviceLimit)
 	return &serviceLimiter{
 		ServiceLimit: serviceLimit,
 		LastUpdate:   time.Now(),
+		keyspaceID:   keyspaceID,
 	}
 }
 
@@ -79,6 +86,12 @@ func (krl *serviceLimiter) refillTokensLocked(now time.Time) {
 	// Calculate the elapsed time since the last update.
 	elapsed := now.Sub(krl.LastUpdate).Seconds()
 	if elapsed < 0 {
+		log.Warn("refill service limit tokens with negative elapsed time",
+			zap.Uint32("keyspace-id", krl.keyspaceID),
+			zap.Float64("service_limit", krl.ServiceLimit),
+			zap.Float64("available_tokens", krl.AvailableTokens),
+			zap.Float64("elapsed", elapsed),
+		)
 		return
 	}
 	// Add tokens based on the configured rate and the burst limit.
@@ -133,5 +146,6 @@ func (krl *serviceLimiter) Clone() *serviceLimiter {
 		ServiceLimit:    krl.ServiceLimit,
 		AvailableTokens: krl.AvailableTokens,
 		LastUpdate:      krl.LastUpdate,
+		keyspaceID:      krl.keyspaceID,
 	}
 }

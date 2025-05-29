@@ -64,7 +64,7 @@ func newKeyspaceResourceGroupManager(keyspaceID uint32, storage endpoint.Resourc
 		groups:     make(map[string]*ResourceGroup),
 		keyspaceID: keyspaceID,
 		storage:    storage,
-		sl:         newServiceLimiter(0),
+		sl:         newServiceLimiter(keyspaceID, 0),
 	}
 }
 

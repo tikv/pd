@@ -411,11 +411,15 @@ func (m *Manager) getKeyspaceNameByID(ctx context.Context, id uint32) (string, e
 		return "", fmt.Errorf("got an empty keyspace name by id %d", id)
 	}
 	// Update the cache.
-	m.Lock()
-	m.keyspaceNameLookup[id] = loadedName
-	m.keyspaceIDLookup[loadedName] = id
-	m.Unlock()
+	m.updateKeyspaceNameLookup(id, loadedName)
 	return loadedName, nil
+}
+
+func (m *Manager) updateKeyspaceNameLookup(id uint32, name string) {
+	m.Lock()
+	defer m.Unlock()
+	m.keyspaceNameLookup[id] = name
+	m.keyspaceIDLookup[name] = id
 }
 
 // GetKeyspaceIDByName gets the keyspace ID by name.
@@ -448,10 +452,7 @@ func (m *Manager) GetKeyspaceIDByName(ctx context.Context, name string) (*rmpb.K
 		return nil, fmt.Errorf("keyspace not found with name: %s", name)
 	}
 	// Update the cache.
-	m.Lock()
-	m.keyspaceNameLookup[loadedID] = name
-	m.keyspaceIDLookup[name] = loadedID
-	m.Unlock()
+	m.updateKeyspaceNameLookup(loadedID, name)
 	return &rmpb.KeyspaceIDValue{Value: loadedID}, nil
 }
 

@@ -267,10 +267,6 @@ func (s *Service) setKeyspaceServiceLimit(c *gin.Context) {
 		c.String(http.StatusBadRequest, err.Error())
 		return
 	}
-	if keyspaceIDValue == nil {
-		c.String(http.StatusNotFound, fmt.Sprintf("keyspace not found with name: %s", keyspaceName))
-		return
-	}
 	var req KeyspaceServiceLimitRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.String(http.StatusBadRequest, err.Error())
@@ -291,16 +287,13 @@ func (s *Service) setKeyspaceServiceLimit(c *gin.Context) {
 //	@Param		keyspace_name	path		string	true	"Keyspace name"
 //	@Success	200				{string}	json	format	of	rmserver.serviceLimiter
 //	@Failure	400				{string}	error
+//	@Failure	404				{string}	error
 //	@Router		/config/keyspace/service-limit/{keyspace_name} [get]
 func (s *Service) getKeyspaceServiceLimit(c *gin.Context) {
 	keyspaceName := c.Param("keyspace_name")
 	keyspaceIDValue, err := s.manager.GetKeyspaceIDByName(c, keyspaceName)
 	if err != nil {
 		c.String(http.StatusBadRequest, err.Error())
-		return
-	}
-	if keyspaceIDValue == nil {
-		c.String(http.StatusNotFound, fmt.Sprintf("keyspace not found with name: %s", keyspaceName))
 		return
 	}
 	keyspaceID := keyspaceIDValue.GetValue()
