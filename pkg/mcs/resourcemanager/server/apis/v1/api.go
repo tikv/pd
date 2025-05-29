@@ -179,6 +179,7 @@ func (s *Service) getResourceGroup(c *gin.Context) {
 //	@Router		/config/groups [get]
 func (s *Service) getResourceGroupList(c *gin.Context) {
 	withStats := strings.EqualFold(c.Query("with_stats"), "true")
+	// TODO: get the keyspace name from the params.
 	groups := s.manager.GetResourceGroupList(constant.NullKeyspaceID, withStats)
 	c.IndentedJSON(http.StatusOK, groups)
 }
@@ -192,6 +193,7 @@ func (s *Service) getResourceGroupList(c *gin.Context) {
 //	@Failure	404		{string}	error
 //	@Router		/config/group/{name} [delete]
 func (s *Service) deleteResourceGroup(c *gin.Context) {
+	// TODO: get the keyspace name from the params.
 	if err := s.manager.DeleteResourceGroup(constant.NullKeyspaceID, c.Param("name")); err != nil {
 		c.String(http.StatusNotFound, err.Error())
 	}
