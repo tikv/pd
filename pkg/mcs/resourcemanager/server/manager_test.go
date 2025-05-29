@@ -317,6 +317,11 @@ func TestKeyspaceServiceLimit(t *testing.T) {
 	limiter = m.GetKeyspaceServiceLimiter(2)
 	re.Equal(100.0, limiter.ServiceLimit)
 	re.Equal(0.0, limiter.AvailableTokens)
+	// Ensure the keyspace resource group manager is initialized correctly.
+	krgm := m.getKeyspaceResourceGroupManager(2)
+	re.NotNil(krgm)
+	re.Equal(uint32(2), krgm.keyspaceID)
+	re.Equal(DefaultResourceGroupName, krgm.getMutableResourceGroup(DefaultResourceGroupName).Name)
 }
 
 func TestKeyspaceNameLookup(t *testing.T) {
