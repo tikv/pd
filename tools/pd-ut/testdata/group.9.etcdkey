@@ -116,6 +116,8 @@ resource_group/settings/stale_test remove
 resource_group/settings/stale_test save
 resource_group/settings/test remove
 resource_group/settings/test save
+resource_group/settings/test_group remove
+resource_group/settings/test_group save
 resource_group/settings/test_ru_consumption remove
 resource_group/settings/test_ru_consumption save
 resource_group/settings/tombstone_test remove
@@ -136,6 +138,7 @@ resource_group/states/mode_test save
 resource_group/states/penalty_test save
 resource_group/states/stale_test save
 resource_group/states/test save
+resource_group/states/test_group save
 resource_group/states/test_ru_consumption save
 resource_group/states/tombstone_test save
 resource_group/states/watch_test save
