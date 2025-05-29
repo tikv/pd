@@ -188,6 +188,21 @@ func (suite *resourceManagerAPITestSuite) TestResourceGroupAPI() {
 	}
 }
 
+func (suite *resourceManagerAPITestSuite) TestKeyspaceIDValidation() {
+	re := suite.Require()
+
+	name := "default"
+	queryParams := url.Values{}
+	queryParams.Set("keyspace_id", "invalid_keyspace_id")
+
+	_, statusCode := suite.sendRequest(re, http.MethodGet, "/config/group/"+name, queryParams, nil)
+	re.Equal(http.StatusBadRequest, statusCode)
+	_, statusCode = suite.sendRequest(re, http.MethodDelete, "/config/group/"+name, queryParams, nil)
+	re.Equal(http.StatusBadRequest, statusCode)
+	_, statusCode = suite.sendRequest(re, http.MethodGet, "/config/groups", queryParams, nil)
+	re.Equal(http.StatusBadRequest, statusCode)
+}
+
 func (suite *resourceManagerAPITestSuite) mustAddResourceGroup(re *require.Assertions, group *rmpb.ResourceGroup) {
 	bodyBytes := suite.mustSendRequest(re, http.MethodPost, "/config/group", nil, group)
 	re.Equal("Success!", string(bodyBytes))
