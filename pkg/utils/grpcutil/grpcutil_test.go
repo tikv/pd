@@ -16,6 +16,8 @@ package grpcutil
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -45,7 +47,8 @@ func loadTLSContent(re *require.Assertions, caPath, certPath, keyPath string) (c
 	return
 }
 
-func TestToTLSConfig(t *testing.T) {
+func TestToClientTLSConfig(t *testing.T) {
+	re := require.New(t)
 	if err := exec.Command(certScript, "generate", certPath).Run(); err != nil {
 		t.Fatal(err)
 	}
@@ -55,7 +58,6 @@ func TestToTLSConfig(t *testing.T) {
 		}
 	}()
 
-	re := require.New(t)
 	tlsConfig := TLSConfig{
 		KeyPath:  filepath.Join(certPath, "pd-server-key.pem"),
 		CertPath: filepath.Join(certPath, "pd-server.pem"),
@@ -85,6 +87,109 @@ func TestToTLSConfig(t *testing.T) {
 	re.True(errors.ErrorEqual(err, errs.ErrCryptoAppendCertsFromPEM))
 }
 
+func TestToServerTLSConfig(t *testing.T) {
+	re := require.New(t)
+
+	if err := exec.Command(certScript, "generate", certPath).Run(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := exec.Command(certScript, "cleanup", certPath).Run(); err != nil {
+			t.Fatal(err)
+		}
+	}()
+
+	tests := []struct {
+		name          string
+		tlsConfig     TLSConfig
+		wantErr       bool
+		checkConfig   bool
+		allowedCNs    []string
+		validateProto bool
+	}{
+		{
+			name: "valid certificate configuration",
+			tlsConfig: TLSConfig{
+				KeyPath:  filepath.Join(certPath, "pd-server-key.pem"),
+				CertPath: filepath.Join(certPath, "pd-server.pem"),
+				CAPath:   filepath.Join(certPath, "ca.pem"),
+			},
+			checkConfig:   true,
+			validateProto: true,
+		},
+		{
+			name: "with allowed CNs",
+			tlsConfig: TLSConfig{
+				KeyPath:        filepath.Join(certPath, "pd-server-key.pem"),
+				CertPath:       filepath.Join(certPath, "pd-server.pem"),
+				CAPath:         filepath.Join(certPath, "ca.pem"),
+				CertAllowedCNs: []string{"pd-server"},
+			},
+			checkConfig: true,
+			allowedCNs:  []string{"pd-server"},
+		},
+		{
+			name: "empty cert and key paths",
+			tlsConfig: TLSConfig{
+				CAPath: filepath.Join(certPath, "ca.pem"),
+			},
+			wantErr: false, // Should return nil config, not error
+		},
+		{
+			name: "invalid cert path",
+			tlsConfig: TLSConfig{
+				CAPath:   filepath.Join(certPath, "ca.pem"),
+				CertPath: "non-existent.pem",
+				KeyPath:  filepath.Join(certPath, "pd-server-key.pem"),
+			},
+			wantErr: true,
+		},
+		{
+			name: "invalid key path",
+			tlsConfig: TLSConfig{
+				CAPath:   filepath.Join(certPath, "ca.pem"),
+				CertPath: filepath.Join(certPath, "pd-server-key.pem"),
+				KeyPath:  "non-existent.pem",
+			},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tlsConfig, err := tt.tlsConfig.ToServerTLSConfig()
+			if tt.wantErr {
+				re.Error(err)
+				return
+			}
+			re.NoError(err)
+
+			if !tt.checkConfig {
+				if tt.tlsConfig.CertPath == "" && tt.tlsConfig.KeyPath == "" {
+					re.Nil(tlsConfig)
+				}
+				return
+			}
+
+			re.NotNil(tlsConfig)
+			re.Equal(tls.VerifyClientCertIfGiven, tlsConfig.ClientAuth)
+
+			if tt.validateProto {
+				re.Contains(tlsConfig.NextProtos, "http/1.1")
+				re.Contains(tlsConfig.NextProtos, "h2")
+			}
+
+			// Validate allowed CNs
+			if len(tt.allowedCNs) > 0 {
+				cert, err := tls.LoadX509KeyPair(tt.tlsConfig.CertPath, tt.tlsConfig.KeyPath)
+				re.NoError(err)
+				x509Cert, err := x509.ParseCertificate(cert.Certificate[0])
+				re.NoError(err)
+				re.Contains(tt.allowedCNs, x509Cert.Subject.CommonName)
+			}
+		})
+	}
+}
 func BenchmarkGetForwardedHost(b *testing.B) {
 	// Without forwarded host key
 	md := metadata.Pairs("test", "example.com")
