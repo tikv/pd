@@ -1807,7 +1807,7 @@ func (c *RaftCluster) checkStore(store *core.StoreInfo, stores []*core.StoreInfo
 	var (
 		regionSize = float64(store.GetRegionSize())
 		storeID    = store.GetID()
-		threadhold float64
+		threshold  float64
 	)
 	c.storeStateLock.Lock(uint32(storeID))
 	defer c.storeStateLock.Unlock(uint32(storeID))
@@ -1816,11 +1816,11 @@ func (c *RaftCluster) checkStore(store *core.StoreInfo, stores []*core.StoreInfo
 		timeToServe := store.GetUptime() >= c.opt.GetMaxStorePreparingTime() ||
 			c.GetTotalRegionCount() < core.InitClusterRegionThreshold
 		if !timeToServe && c.isStorePrepared() {
-			threadhold = c.getThreshold(stores, store)
+			threshold = c.getThreshold(stores, store)
 			log.Debug("store preparing threshold", zap.Uint64("store-id", storeID),
-				zap.Float64("threshold", threadhold),
+				zap.Float64("threshold", threshold),
 				zap.Float64("region-size", regionSize))
-			timeToServe = regionSize >= threadhold
+			timeToServe = regionSize >= threshold
 		}
 		if timeToServe {
 			if err := c.ReadyToServeLocked(storeID); err != nil {
@@ -1862,7 +1862,7 @@ func (c *RaftCluster) checkStore(store *core.StoreInfo, stores []*core.StoreInfo
 		}
 	}
 	if c.isStorePrepared() {
-		c.progressManager.UpdateProgress(store, regionSize, threadhold)
+		c.progressManager.UpdateProgress(store, regionSize, threshold)
 	}
 	return
 }

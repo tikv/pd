@@ -159,7 +159,7 @@ func (m *Manager) markProgressAsFinished(storeID uint64) {
 // UpdateProgress updates the progress of the store.
 func (m *Manager) UpdateProgress(
 	store *core.StoreInfo,
-	currentRegionSize, threadhold float64,
+	currentRegionSize, threshold float64,
 ) {
 	p := m.GetProgressByStoreID(store.GetID())
 	if p != nil && ((p.Action == preparingAction && !store.IsPreparing()) ||
@@ -179,10 +179,10 @@ func (m *Manager) UpdateProgress(
 	switch store.GetNodeState() {
 	case metapb.NodeState_Preparing:
 		action = preparingAction
-		targetRegionSize = threadhold
+		targetRegionSize = threshold
 	case metapb.NodeState_Removing:
 		action = removingAction
-		m.Lock()
+		m.RLock()
 		p, exist := m.progresses[storeID]
 		if exist && p.Action == removingAction {
 			// currentRegionSize represents the current deleted region size.
@@ -193,7 +193,7 @@ func (m *Manager) UpdateProgress(
 			targetRegionSize = currentRegionSize
 			currentRegionSize = 0
 		}
-		m.Unlock()
+		m.RUnlock()
 	default:
 		return
 	}
