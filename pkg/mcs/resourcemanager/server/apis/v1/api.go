@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"net/http"
 	"reflect"
+	"strconv"
 	"strings"
 
 	"github.com/gin-contrib/cors"
@@ -28,6 +29,7 @@ import (
 
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 
+	"github.com/tikv/pd/pkg/errs"
 	rmserver "github.com/tikv/pd/pkg/mcs/resourcemanager/server"
 	"github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
@@ -165,10 +167,16 @@ func (s *Service) putResourceGroup(c *gin.Context) {
 //	@Failure	404		    {string}	error
 //	@Param		name	    path		string	true	"groupName"
 //	@Param		with_stats	query		bool	false	"whether to return statistics data."
+//	@Param		keyspace_id	query		uint32	false	"keyspace ID, if not set, it will be treated as null keyspace ID."
 //	@Router		/config/group/{name} [get]
 func (s *Service) getResourceGroup(c *gin.Context) {
 	withStats := strings.EqualFold(c.Query("with_stats"), "true")
-	group := s.manager.GetResourceGroup(constant.NullKeyspaceID, c.Param("name"), withStats)
+	keyspaceID, err := getKeyspaceIDFromQuery(c)
+	if err != nil {
+		c.String(http.StatusBadRequest, err.Error())
+		return
+	}
+	group := s.manager.GetResourceGroup(keyspaceID, c.Param("name"), withStats)
 	if group == nil {
 		c.String(http.StatusNotFound, errors.New("resource group not found").Error())
 	}
@@ -182,11 +190,16 @@ func (s *Service) getResourceGroup(c *gin.Context) {
 //	@Success	200	{string}	json	format	of	[]rmserver.ResourceGroup
 //	@Failure	404	{string}	error
 //	@Param		with_stats		query	bool	false	"whether to return statistics data."
+//	@Param		keyspace_id	query		uint32	false	"keyspace ID, if not set, it will be treated as null keyspace ID."
 //	@Router		/config/groups [get]
 func (s *Service) getResourceGroupList(c *gin.Context) {
 	withStats := strings.EqualFold(c.Query("with_stats"), "true")
-	// TODO: get the keyspace name from the params.
-	groups := s.manager.GetResourceGroupList(constant.NullKeyspaceID, withStats)
+	keyspaceID, err := getKeyspaceIDFromQuery(c)
+	if err != nil {
+		c.String(http.StatusBadRequest, err.Error())
+		return
+	}
+	groups := s.manager.GetResourceGroupList(keyspaceID, withStats)
 	c.IndentedJSON(http.StatusOK, groups)
 }
 
@@ -195,12 +208,17 @@ func (s *Service) getResourceGroupList(c *gin.Context) {
 //	@Tags		ResourceManager
 //	@Summary	delete resource group by name.
 //	@Param		name	path		string	true	"Name of the resource group to be deleted"
+//	@Param		keyspace_id	query		uint32	false	"keyspace ID, if not set, it will be treated as null keyspace ID."
 //	@Success	200		{string}	string	"Success!"
 //	@Failure	404		{string}	error
 //	@Router		/config/group/{name} [delete]
 func (s *Service) deleteResourceGroup(c *gin.Context) {
-	// TODO: get the keyspace name from the params.
-	if err := s.manager.DeleteResourceGroup(constant.NullKeyspaceID, c.Param("name")); err != nil {
+	keyspaceID, err := getKeyspaceIDFromQuery(c)
+	if err != nil {
+		c.String(http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := s.manager.DeleteResourceGroup(keyspaceID, c.Param("name")); err != nil {
 		c.String(http.StatusNotFound, err.Error())
 	}
 	c.String(http.StatusOK, "Success!")
@@ -303,4 +321,16 @@ func (s *Service) getKeyspaceServiceLimit(c *gin.Context) {
 		return
 	}
 	c.IndentedJSON(http.StatusOK, limiter)
+}
+
+func getKeyspaceIDFromQuery(c *gin.Context) (uint32, error) {
+	keyspaceIDStr := c.Query("keyspace_id")
+	if keyspaceIDStr == "" {
+		return constant.NullKeyspaceID, nil
+	}
+	keyspaceID, err := strconv.ParseUint(keyspaceIDStr, 10, 32)
+	if err != nil {
+		return 0, errs.ErrStrconvParseUint.Wrap(err).GenWithStackByArgs(keyspaceIDStr)
+	}
+	return uint32(keyspaceID), nil
 }
