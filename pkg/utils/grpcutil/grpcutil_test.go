@@ -99,7 +99,7 @@ func TestToServerTLSConfig(t *testing.T) {
 		}
 	}()
 
-	tests := []struct {
+	testCases := []struct {
 		name          string
 		tlsConfig     TLSConfig
 		wantErr       bool
@@ -155,17 +155,17 @@ func TestToServerTLSConfig(t *testing.T) {
 		},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			tlsConfig, err := tt.tlsConfig.ToServerTLSConfig()
-			if tt.wantErr {
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(_ *testing.T) {
+			tlsConfig, err := testCase.tlsConfig.ToServerTLSConfig()
+			if testCase.wantErr {
 				re.Error(err)
 				return
 			}
 			re.NoError(err)
 
-			if !tt.checkConfig {
-				if tt.tlsConfig.CertPath == "" && tt.tlsConfig.KeyPath == "" {
+			if !testCase.checkConfig {
+				if testCase.tlsConfig.CertPath == "" && testCase.tlsConfig.KeyPath == "" {
 					re.Nil(tlsConfig)
 				}
 				return
@@ -174,18 +174,18 @@ func TestToServerTLSConfig(t *testing.T) {
 			re.NotNil(tlsConfig)
 			re.Equal(tls.VerifyClientCertIfGiven, tlsConfig.ClientAuth)
 
-			if tt.validateProto {
+			if testCase.validateProto {
 				re.Contains(tlsConfig.NextProtos, "http/1.1")
 				re.Contains(tlsConfig.NextProtos, "h2")
 			}
 
 			// Validate allowed CNs
-			if len(tt.allowedCNs) > 0 {
-				cert, err := tls.LoadX509KeyPair(tt.tlsConfig.CertPath, tt.tlsConfig.KeyPath)
+			if len(testCase.allowedCNs) > 0 {
+				cert, err := tls.LoadX509KeyPair(testCase.tlsConfig.CertPath, testCase.tlsConfig.KeyPath)
 				re.NoError(err)
 				x509Cert, err := x509.ParseCertificate(cert.Certificate[0])
 				re.NoError(err)
-				re.Contains(tt.allowedCNs, x509Cert.Subject.CommonName)
+				re.Contains(testCase.allowedCNs, x509Cert.Subject.CommonName)
 			}
 		})
 	}
