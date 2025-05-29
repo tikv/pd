@@ -119,7 +119,7 @@ func (p *progressIndicator) updateProgress() {
 
 	currentRegionSize := p.history.Back().Value.(float64)
 	// It means it just init and we haven't update the progress
-	if p.history.Len() <= 1 {
+	if p.history.Len() <= 1 || p.currentWindowLength == 1 {
 		p.CurrentSpeed = 0
 	} else {
 		// the value increases, e.g., [1, 2, 3]
