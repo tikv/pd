@@ -33,8 +33,10 @@ import (
 const (
 	spaceIDMax = ^uint32(0) >> 8 // 16777215 (Uint24Max) is the maximum value of spaceID.
 	// namePattern is a regex that specifies acceptable characters of the keyspace name.
-	// Name must be non-empty and contains only alphanumerical, `_` and `-`.
-	namePattern = "^[-A-Za-z0-9_]+$"
+	// Valid name must be non-empty and 64 characters or fewer and consist only of letters (a-z, A-Z),
+	// numbers (0-9), hyphens (-), and underscores (_).
+	// currently, we enforce this rule to tidb_service_scope and keyspace_name.
+	namePattern = "^[-A-Za-z0-9_]{1,64}$"
 )
 
 var (
