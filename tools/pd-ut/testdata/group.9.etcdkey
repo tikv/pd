@@ -21,8 +21,12 @@
 /pd//config get
 /pd//config save
 /pd//config watch
+/pd//keyspaces/alloc_id get
 /pd//keyspaces/id/DEFAULT get
 /pd//keyspaces/id/DEFAULT save
+/pd//keyspaces/id/non_existing_keyspace get
+/pd//keyspaces/id/test_keyspace get
+/pd//keyspaces/id/test_keyspace save
 /pd//keyspaces/meta/ get
 /pd//keyspaces/meta/ save
 /pd//leader get
