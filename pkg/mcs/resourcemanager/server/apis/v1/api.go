@@ -36,14 +36,15 @@ import (
 	"github.com/tikv/pd/pkg/utils/reflectutil"
 )
 
-const apiPathPrefix = "/resource-manager/api/v1/"
+// APIPathPrefix is the prefix of the API path.
+const APIPathPrefix = "/resource-manager/api/v1/"
 
 var (
 	apiServiceGroup = apiutil.APIServiceGroup{
 		Name:       "resource-manager",
 		Version:    "v1",
 		IsCore:     false,
-		PathPrefix: apiPathPrefix,
+		PathPrefix: APIPathPrefix,
 	}
 )
 
@@ -77,7 +78,7 @@ func NewService(srv *rmserver.Service) *Service {
 	apiHandlerEngine.GET("metrics", utils.PromHandler())
 	apiHandlerEngine.GET("status", utils.StatusHandler)
 	pprof.Register(apiHandlerEngine)
-	endpoint := apiHandlerEngine.Group(apiPathPrefix)
+	endpoint := apiHandlerEngine.Group(APIPathPrefix)
 	endpoint.Use(multiservicesapi.ServiceRedirector())
 	s := &Service{
 		manager:          manager,
@@ -98,6 +99,10 @@ func (s *Service) RegisterRouter() {
 	configEndpoint.DELETE("/group/:name", s.deleteResourceGroup)
 	configEndpoint.GET("/controller", s.getControllerConfig)
 	configEndpoint.POST("/controller", s.setControllerConfig)
+	// Without keyspace name, it will get/set the service limit of the null keyspace.
+	configEndpoint.POST("/keyspace/service-limit", s.setKeyspaceServiceLimit)
+	configEndpoint.GET("/keyspace/service-limit", s.getKeyspaceServiceLimit)
+	// With keyspace name, it will get/set the service limit of the given keyspace.
 	configEndpoint.POST("/keyspace/service-limit/:keyspace_name", s.setKeyspaceServiceLimit)
 	configEndpoint.GET("/keyspace/service-limit/:keyspace_name", s.getKeyspaceServiceLimit)
 }
@@ -241,7 +246,8 @@ func (s *Service) setControllerConfig(c *gin.Context) {
 	c.String(http.StatusOK, "Success!")
 }
 
-type keyspaceServiceLimitRequest struct {
+// KeyspaceServiceLimitRequest is the request body for setting the service limit of the keyspace.
+type KeyspaceServiceLimitRequest struct {
 	ServiceLimit float64 `json:"service_limit"`
 }
 
@@ -265,7 +271,7 @@ func (s *Service) setKeyspaceServiceLimit(c *gin.Context) {
 		c.String(http.StatusNotFound, fmt.Sprintf("keyspace not found with name: %s", keyspaceName))
 		return
 	}
-	var req keyspaceServiceLimitRequest
+	var req KeyspaceServiceLimitRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.String(http.StatusBadRequest, err.Error())
 		return

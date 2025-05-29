@@ -26,8 +26,10 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
+	"github.com/pingcap/failpoint"
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 
+	"github.com/tikv/pd/pkg/keyspace"
 	"github.com/tikv/pd/pkg/mcs/resourcemanager/server"
 	"github.com/tikv/pd/pkg/mcs/resourcemanager/server/apis/v1"
 	"github.com/tikv/pd/tests"
@@ -220,4 +222,76 @@ func (suite *resourceManagerAPITestSuite) mustGetControllerConfig(re *require.As
 func (suite *resourceManagerAPITestSuite) mustSetControllerConfig(re *require.Assertions, config map[string]any) {
 	bodyBytes := suite.mustSendRequest(re, http.MethodPost, "/config/controller", config)
 	re.Equal("Success!", string(bodyBytes))
+}
+
+func (suite *resourceManagerAPITestSuite) TestKeyspaceServiceLimitAPI() {
+	re := suite.Require()
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion", "return(true)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion"))
+	}()
+
+	// Prepare the keyspace for later test.
+	leaderServer := suite.cluster.GetLeaderServer()
+	leaderServer.GetKeyspaceManager().CreateKeyspace(
+		&keyspace.CreateKeyspaceRequest{
+			Name: "test_keyspace",
+		},
+	)
+	for _, keyspaceName := range []string{"", "test_keyspace"} {
+		// Get the keyspace service limit.
+		limit, statusCode := suite.tryToGetKeyspaceServiceLimit(re, keyspaceName)
+		if len(keyspaceName) == 0 {
+			// The null keyspace is always available.
+			re.Equal(http.StatusOK, statusCode)
+			re.Equal(0.0, limit)
+		} else {
+			// The keyspace manager has not been created yet.
+			re.Equal(http.StatusNotFound, statusCode)
+			re.Equal(0.0, limit)
+		}
+		// Try to set the keyspace service limit to a negative value.
+		resp, statusCode := suite.tryToSetKeyspaceServiceLimit(re, keyspaceName, -1.0)
+		re.Equal(http.StatusBadRequest, statusCode)
+		re.Equal("service_limit must be non-negative", resp)
+		// Set the keyspace service limit to a positive value.
+		resp, statusCode = suite.tryToSetKeyspaceServiceLimit(re, keyspaceName, 1.0)
+		re.Equal(http.StatusOK, statusCode)
+		re.Equal("Success!", resp)
+		limit, statusCode = suite.tryToGetKeyspaceServiceLimit(re, keyspaceName)
+		re.Equal(http.StatusOK, statusCode)
+		re.Equal(1.0, limit)
+	}
+	// Try to set a non-existing keyspace's service limit.
+	resp, statusCode := suite.tryToSetKeyspaceServiceLimit(re, "non_existing_keyspace", 1.0)
+	re.Equal(http.StatusBadRequest, statusCode)
+	re.Equal("keyspace not found with name: non_existing_keyspace", resp)
+	// Try to get a non-existing keyspace's service limit.
+	limit, statusCode := suite.tryToGetKeyspaceServiceLimit(re, "non_existing_keyspace")
+	re.Equal(http.StatusBadRequest, statusCode)
+	re.Equal(0.0, limit)
+}
+
+func (suite *resourceManagerAPITestSuite) tryToGetKeyspaceServiceLimit(re *require.Assertions, keyspaceName string) (float64, int) {
+	bodyBytes, statusCode := suite.sendRequest(re, http.MethodGet, "/config/keyspace/service-limit/"+keyspaceName, nil)
+	if statusCode != http.StatusOK {
+		return 0.0, statusCode
+	}
+	var limiter struct {
+		ServiceLimit float64 `json:"service_limit"`
+	}
+	re.NoError(json.NewDecoder(bytes.NewReader(bodyBytes)).Decode(&limiter))
+	return limiter.ServiceLimit, statusCode
+}
+
+func (suite *resourceManagerAPITestSuite) tryToSetKeyspaceServiceLimit(re *require.Assertions, keyspaceName string, limit float64) (string, int) {
+	bodyBytes, statusCode := suite.sendRequest(
+		re,
+		http.MethodPost,
+		"/config/keyspace/service-limit/"+keyspaceName,
+		apis.KeyspaceServiceLimitRequest{
+			ServiceLimit: limit,
+		},
+	)
+	return string(bodyBytes), statusCode
 }
