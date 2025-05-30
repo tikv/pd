@@ -227,7 +227,7 @@ func WatchTSDeadline(ctx context.Context, tsDeadlineCh <-chan *TSDeadline) {
 		case d := <-tsDeadlineCh:
 			select {
 			case <-d.timer.C:
-				log.Error("tso proxy request processing is canceled due to timeout",
+				log.Warn("tso proxy request processing is canceled due to timeout",
 					errs.ZapError(errs.ErrProxyTSOTimeout))
 				d.cancel()
 				timerutil.GlobalTimerPool.Put(d.timer)
