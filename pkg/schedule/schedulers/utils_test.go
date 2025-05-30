@@ -15,6 +15,7 @@
 package schedulers
 
 import (
+	"github.com/tikv/pd/pkg/utils/keyutil"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -52,4 +53,20 @@ func TestRetryQuota(t *testing.T) {
 	// test resetLimit
 	q.resetLimit(store1)
 	re.Equal(10, q.getLimit(store1))
+}
+
+func TestIsDefaultKeyRange(t *testing.T) {
+	re := require.New(t)
+	rs := []keyutil.KeyRange{{
+		StartKey: []byte(""),
+		EndKey:   []byte(""),
+	}}
+	re.True(IsDefaultKeyRange(rs))
+	rs = []keyutil.KeyRange{
+		{
+			StartKey: []byte("a"),
+			EndKey:   []byte(""),
+		},
+	}
+	re.False(IsDefaultKeyRange(rs))
 }

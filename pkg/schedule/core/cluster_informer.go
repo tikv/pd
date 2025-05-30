@@ -19,6 +19,7 @@ import (
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/placement"
+	"github.com/tikv/pd/pkg/schedule/rangelist"
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/statistics/buckets"
 	"github.com/tikv/pd/pkg/storage"
@@ -61,6 +62,7 @@ type SharedCluster interface {
 	GetBasicCluster() *core.BasicCluster
 	GetSharedConfig() sc.SharedConfigProvider
 	GetRuleManager() *placement.RuleManager
+	GetKeyRangeManager() *rangelist.KeyRangeManager
 	AllocID(uint32) (uint64, uint32, error)
 	IsSchedulingHalted() bool
 }
