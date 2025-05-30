@@ -54,10 +54,10 @@ type testCacheCase struct {
 func TestCache(t *testing.T) {
 	re := require.New(t)
 	tests := []*testCacheCase{
-		{utils.Read, transferLeader, 3, utils.Update},
+		{utils.Read, transferLeader, 4, utils.Remove},
 		{utils.Read, movePeer, 4, utils.Remove},
 		{utils.Read, addReplica, 4, utils.Update},
-		{utils.Write, transferLeader, 3, utils.Remove},
+		{utils.Write, transferLeader, 4, utils.Remove},
 		{utils.Write, movePeer, 4, utils.Remove},
 		{utils.Write, addReplica, 4, utils.Remove},
 	}
