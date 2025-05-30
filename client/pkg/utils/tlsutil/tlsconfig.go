@@ -207,7 +207,7 @@ func (s TLSConfig) ToTLSConfig() (*tls.Config, error) {
 
 	tlsConfig, err := tlsInfo.clientConfig()
 	if err != nil {
-		return nil, errs.ErrEtcdTLSConfig.Wrap(err).GenWithStackByCause()
+		return nil, errs.ErrTLSConfig.Wrap(err).GenWithStackByCause()
 	}
 	return tlsConfig, nil
 }

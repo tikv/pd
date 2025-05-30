@@ -31,7 +31,6 @@ import (
 	bs "github.com/tikv/pd/pkg/basicserver"
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/mcs/registry"
-	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 )
 
@@ -94,11 +93,7 @@ func (s *Service) GetResourceGroup(_ context.Context, req *rmpb.GetResourceGroup
 	if err := s.checkServing(); err != nil {
 		return nil, err
 	}
-	keyspaceID := constant.NullKeyspaceID
-	if req.KeyspaceId != nil {
-		keyspaceID = req.KeyspaceId.GetValue()
-	}
-	rg := s.manager.GetResourceGroup(keyspaceID, req.ResourceGroupName, req.WithRuStats)
+	rg := s.manager.GetResourceGroup(extractKeyspaceID(req.GetKeyspaceId()), req.ResourceGroupName, req.WithRuStats)
 	if rg == nil {
 		return nil, errors.New("resource group not found")
 	}
@@ -112,11 +107,7 @@ func (s *Service) ListResourceGroups(_ context.Context, req *rmpb.ListResourceGr
 	if err := s.checkServing(); err != nil {
 		return nil, err
 	}
-	keyspaceID := constant.NullKeyspaceID
-	if req.KeyspaceId != nil {
-		keyspaceID = req.KeyspaceId.GetValue()
-	}
-	groups := s.manager.GetResourceGroupList(keyspaceID, req.WithRuStats)
+	groups := s.manager.GetResourceGroupList(extractKeyspaceID(req.GetKeyspaceId()), req.WithRuStats)
 	resp := &rmpb.ListResourceGroupsResponse{
 		Groups: make([]*rmpb.ResourceGroup, 0, len(groups)),
 	}
@@ -143,11 +134,7 @@ func (s *Service) DeleteResourceGroup(_ context.Context, req *rmpb.DeleteResourc
 	if err := s.checkServing(); err != nil {
 		return nil, err
 	}
-	keyspaceID := constant.NullKeyspaceID
-	if req.KeyspaceId != nil {
-		keyspaceID = req.KeyspaceId.GetValue()
-	}
-	err := s.manager.DeleteResourceGroup(keyspaceID, req.ResourceGroupName)
+	err := s.manager.DeleteResourceGroup(extractKeyspaceID(req.GetKeyspaceId()), req.ResourceGroupName)
 	if err != nil {
 		return nil, err
 	}
@@ -192,12 +179,8 @@ func (s *Service) AcquireTokenBuckets(stream rmpb.ResourceManager_AcquireTokenBu
 		resps := &rmpb.TokenBucketsResponse{}
 		for _, req := range request.Requests {
 			resourceGroupName := req.GetResourceGroupName()
-			keyspaceID := constant.NullKeyspaceID
-			if req.KeyspaceId != nil {
-				keyspaceID = req.KeyspaceId.GetValue()
-			}
 			// Get the resource group from manager to acquire token buckets.
-			rg := s.manager.GetMutableResourceGroup(keyspaceID, resourceGroupName)
+			rg := s.manager.GetMutableResourceGroup(extractKeyspaceID(req.GetKeyspaceId()), resourceGroupName)
 			if rg == nil {
 				log.Warn("resource group not found", zap.String("resource-group", resourceGroupName))
 				continue

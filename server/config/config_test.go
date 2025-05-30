@@ -43,7 +43,7 @@ func TestSecurity(t *testing.T) {
 func TestTLS(t *testing.T) {
 	re := require.New(t)
 	cfg := NewConfig()
-	tls, err := cfg.Security.ToTLSConfig()
+	tls, err := cfg.Security.ToClientTLSConfig()
 	re.NoError(err)
 	re.Nil(tls)
 }

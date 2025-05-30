@@ -14,7 +14,15 @@
 
 package server
 
-import "github.com/prometheus/client_golang/prometheus"
+import (
+	"math/rand"
+
+	"github.com/prometheus/client_golang/prometheus"
+	"go.uber.org/zap"
+
+	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/log"
+)
 
 var (
 	timeJumpBackCounter = prometheus.NewCounter(
@@ -177,6 +185,14 @@ var (
 			Help:      "Bucketed histogram of processing time (s) of handled forward tso requests.",
 			Buckets:   prometheus.ExponentialBuckets(0.0005, 2, 13),
 		})
+
+	regionRequestCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "pd",
+			Subsystem: "server",
+			Name:      "region_request_cnt",
+			Help:      "Counter of region request.",
+		}, []string{"request", "caller_id", "caller_component", "event"})
 )
 
 func init() {
@@ -199,4 +215,40 @@ func init() {
 	prometheus.MustRegister(apiConcurrencyGauge)
 	prometheus.MustRegister(forwardFailCounter)
 	prometheus.MustRegister(forwardTsoDuration)
+	prometheus.MustRegister(regionRequestCounter)
+}
+
+type requestEvent string
+
+const (
+	requestSuccess requestEvent = "success"
+	requestFailed  requestEvent = "failed"
+)
+
+func incRegionRequestCounter(method string, header *pdpb.RequestHeader, err *pdpb.Error) {
+	if err == nil && rand.Intn(100) != 0 {
+		// sample 1% region requests to avoid high cardinality
+		return
+	}
+
+	var (
+		event           = requestSuccess
+		callerID        = header.CallerId
+		callerComponent = header.CallerComponent
+	)
+	if err != nil {
+		log.Warn("region request encounter error",
+			zap.String("method", method),
+			zap.String("caller_id", callerID),
+			zap.String("caller_component", callerComponent),
+			zap.Stringer("error", err))
+		event = requestFailed
+	}
+	if callerID == "" {
+		callerID = "unknown"
+	}
+	if callerComponent == "" {
+		callerComponent = "unknown"
+	}
+	regionRequestCounter.WithLabelValues(method, callerID, callerComponent, string(event)).Inc()
 }

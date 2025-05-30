@@ -87,7 +87,7 @@ type ResourceGroupProvider interface {
 	ListResourceGroups(ctx context.Context, opts ...pd.GetResourceGroupOption) ([]*rmpb.ResourceGroup, error)
 	AddResourceGroup(ctx context.Context, metaGroup *rmpb.ResourceGroup) (string, error)
 	ModifyResourceGroup(ctx context.Context, metaGroup *rmpb.ResourceGroup) (string, error)
-	DeleteResourceGroup(ctx context.Context, resourceGroupName string, opts ...pd.DeleteResourceGroupOption) (string, error)
+	DeleteResourceGroup(ctx context.Context, resourceGroupName string) (string, error)
 	AcquireTokenBuckets(ctx context.Context, request *rmpb.TokenBucketsRequest) ([]*rmpb.TokenBucketResponse, error)
 	LoadResourceGroups(ctx context.Context) ([]*rmpb.ResourceGroup, int64, error)
 
@@ -140,6 +140,7 @@ type ResourceGroupsController struct {
 	provider         ResourceGroupProvider
 	groupsController sync.Map
 	ruConfig         *RUConfig
+	keyspaceID       uint32
 
 	loopCtx    context.Context
 	loopCancel func()
@@ -174,6 +175,7 @@ func NewResourceGroupController(
 	clientUniqueID uint64,
 	provider ResourceGroupProvider,
 	requestUnitConfig *RequestUnitConfig,
+	keyspaceID uint32,
 	opts ...ResourceControlCreateOption,
 ) (*ResourceGroupsController, error) {
 	config, err := loadServerConfig(ctx, provider)
@@ -188,6 +190,7 @@ func NewResourceGroupController(
 	controller := &ResourceGroupsController{
 		clientUniqueID:        clientUniqueID,
 		provider:              provider,
+		keyspaceID:            keyspaceID,
 		ruConfig:              ruConfig,
 		lowTokenNotifyChan:    make(chan notifyMsg, 1),
 		tokenResponseChan:     make(chan []*rmpb.TokenBucketResponse, 1),
@@ -197,7 +200,7 @@ func NewResourceGroupController(
 	for _, opt := range opts {
 		opt(controller)
 	}
-	log.Info("load resource controller config", zap.Reflect("config", config), zap.Reflect("ru-config", controller.ruConfig))
+	log.Info("load resource controller config", zap.Reflect("config", config), zap.Reflect("ru-config", controller.ruConfig), zap.Uint32("keyspace-id", keyspaceID))
 	controller.calculators = []ResourceCalculator{newKVCalculator(controller.ruConfig), newSQLCalculator(controller.ruConfig)}
 	controller.safeRuConfig.Store(controller.ruConfig)
 	enableControllerTraceLog.Store(config.EnableControllerTraceLog)
@@ -272,7 +275,8 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 		var watchMetaChannel, watchConfigChannel chan []*meta_storagepb.Event
 		if !c.ruConfig.isSingleGroupByKeyspace {
 			// Use WithPrevKV() to get the previous key-value pair when get Delete Event.
-			watchMetaChannel, err = c.provider.Watch(ctx, pd.GroupSettingsPathPrefixBytes, opt.WithRev(metaRevision), opt.WithPrefix(), opt.WithPrevKV())
+			prefix := pd.GroupSettingsPathPrefixBytes(c.keyspaceID)
+			watchMetaChannel, err = c.provider.Watch(ctx, prefix, opt.WithRev(metaRevision), opt.WithPrefix(), opt.WithPrevKV())
 			if err != nil {
 				log.Warn("watch resource group meta failed", zap.Error(err))
 			}
@@ -299,7 +303,8 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 			case <-watchRetryTimer.C:
 				if !c.ruConfig.isSingleGroupByKeyspace && watchMetaChannel == nil {
 					// Use WithPrevKV() to get the previous key-value pair when get Delete Event.
-					watchMetaChannel, err = c.provider.Watch(ctx, pd.GroupSettingsPathPrefixBytes, opt.WithRev(metaRevision), opt.WithPrefix(), opt.WithPrevKV())
+					prefix := pd.GroupSettingsPathPrefixBytes(c.keyspaceID)
+					watchMetaChannel, err = c.provider.Watch(ctx, prefix, opt.WithRev(metaRevision), opt.WithPrefix(), opt.WithPrevKV())
 					if err != nil {
 						log.Warn("watch resource group meta failed", zap.Error(err))
 						watchRetryTimer.Reset(watchRetryInterval)
