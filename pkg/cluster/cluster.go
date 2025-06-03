@@ -51,8 +51,16 @@ func HandleStatsAsync(c Cluster, region *core.RegionInfo) {
 		}
 	}
 
+	checkLeaderChangeTask := func(cache *statistics.HotPeerCache) {
+		leaderChangedStats := cache.CheckLeaderChange(region)
+		for _, stat := range leaderChangedStats {
+			cache.UpdateStat(stat)
+		}
+	}
+
 	c.GetHotStat().CheckWriteAsync(checkExpiredTask)
 	c.GetHotStat().CheckReadAsync(checkExpiredTask)
+	c.GetHotStat().CheckReadAsync(checkLeaderChangeTask)
 	c.GetHotStat().CheckWriteAsync(checkWritePeerTask)
 	c.GetCoordinator().GetSchedulersController().CheckTransferWitnessLeader(region)
 }

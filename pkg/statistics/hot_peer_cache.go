@@ -142,11 +142,37 @@ func (f *HotPeerCache) CollectExpiredItems(region *core.RegionInfo) []*HotPeerSt
 	regionID := region.GetID()
 	items := make([]*HotPeerStat, 0)
 	if ids, ok := f.storesOfRegion[regionID]; ok {
-		for storeID, isLeader := range ids {
-			if region.GetStorePeer(storeID) == nil || (isLeader && region.GetLeader().GetStoreId() != storeID) {
+		for storeID := range ids {
+			if region.GetStorePeer(storeID) == nil {
 				item := f.getOldHotPeerStat(regionID, storeID)
 				if item != nil {
 					item.actionType = utils.Remove
+					items = append(items, item)
+				}
+			}
+		}
+	}
+	return items
+}
+
+// CheckLeaderChange checks whether the leader of the region has changed.
+func (f *HotPeerCache) CheckLeaderChange(region *core.RegionInfo) []*HotPeerStat {
+	regionID := region.GetID()
+	newLeader := region.GetLeader().GetStoreId()
+	items := make([]*HotPeerStat, 0)
+	if ids, ok := f.storesOfRegion[regionID]; ok {
+		for storeID, isLeader := range ids {
+			if isLeader && newLeader != storeID {
+				item := f.getOldHotPeerStat(regionID, storeID)
+				if item != nil {
+					item.actionType = utils.Update
+					item.isLeader = false
+					items = append(items, item)
+				}
+				item = f.getOldHotPeerStat(regionID, newLeader)
+				if item != nil {
+					item.actionType = utils.Update
+					item.isLeader = true
 					items = append(items, item)
 				}
 			}
