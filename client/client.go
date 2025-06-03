@@ -528,18 +528,27 @@ const (
 
 // GetTS implements the TSOClient interface.
 func (c *client) GetTS(ctx context.Context) (physical int64, logical int64, err error) {
-	for range maxTSORetryTimes {
+	var retryCount int
+	for retryCount = range maxTSORetryTimes {
 		resp := c.GetTSAsync(ctx)
 		if physical, logical, err = resp.Wait(); err != nil {
 			if errs.IsLeaderChange(err) {
-				// If the leader changes, we need to retry.
-				time.Sleep(retryInterval)
-				continue
+				select {
+				case <-ctx.Done():
+					return 0, 0, errs.ErrClientGetTSO.Wrap(ctx.Err()).GenWithStackByCause()
+				default:
+					if retryCount != 0 {
+						// If the leader changes, we need to retry.
+						// For the first time, we retry immediately to avoid impacting the latency.
+						time.Sleep(retryInterval)
+					}
+					continue
+				}
 			}
 			break
 		}
 	}
-
+	metrics.TSORetryCount.Observe(float64(retryCount))
 	return physical, logical, err
 }
 
