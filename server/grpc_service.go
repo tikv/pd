@@ -2600,7 +2600,7 @@ func (s *GrpcServer) SplitAndScatterRegions(ctx context.Context, request *pdpb.S
 		return &pdpb.SplitAndScatterRegionsResponse{Header: notBootstrappedHeader()}, nil
 	}
 	splitFinishedPercentage, newRegionIDs := rc.GetRegionSplitter().SplitRegions(ctx, request.GetSplitKeys(), int(request.GetRetryLimit()))
-	scatterFinishedPercentage, failedRegionsID, err := scatterRegions(rc, newRegionIDs, request.GetGroup(), int(request.GetRetryLimit()), false)
+	scatterFinishedPercentage, _, err := scatterRegions(rc, newRegionIDs, request.GetGroup(), int(request.GetRetryLimit()), false)
 	if err != nil {
 		return nil, err
 	}
@@ -2609,7 +2609,6 @@ func (s *GrpcServer) SplitAndScatterRegions(ctx context.Context, request *pdpb.S
 		RegionsId:                 newRegionIDs,
 		SplitFinishedPercentage:   uint64(splitFinishedPercentage),
 		ScatterFinishedPercentage: uint64(scatterFinishedPercentage),
-		FailedRegionsId:           failedRegionsID,
 	}, nil
 }
 
@@ -2951,4 +2950,14 @@ func (s *GrpcServer) rateLimitCheck() (done ratelimit.DoneFunc, err error) {
 		return
 	}
 	return
+}
+
+// TODO: waiting for https://github.com/tikv/pd/pull/9361
+func (s *GrpcServer) SetGlobalGCBarrier(context.Context, *pdpb.SetGlobalGCBarrierRequest) (*pdpb.SetGlobalGCBarrierResponse, error) {
+	return nil, nil
+}
+
+// TODO: waiting for https://github.com/tikv/pd/pull/9361
+func (s *GrpcServer) DeleteGlobalGCBarrier(context.Context, *pdpb.DeleteGlobalGCBarrierRequest) (*pdpb.DeleteGlobalGCBarrierResponse, error) {
+	return nil, nil
 }
