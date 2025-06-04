@@ -122,6 +122,7 @@ github.com/fogleman/gg v1.3.0/go.mod h1:R/bRT+9gY/C5z7JzPU0zXsXHKM4/ayA+zqcVNZzP
 github.com/fsnotify/fsnotify v1.4.7/go.mod h1:jwhsz4b93w/PPRr/qN1Yymfu8t87LnFCMoQvtojpjFo=
 github.com/gabriel-vasile/mimetype v1.4.3 h1:in2uUcidCuFcDKtdcBxlR0rJ1+fsokWf+uqxgUFjbI0=
 github.com/gabriel-vasile/mimetype v1.4.3/go.mod h1:d8uq/6HKRL6CGdk+aubisF/M5GcPfT7nKyLpA0lbSSk=
+github.com/ghodss/yaml v1.0.0 h1:wQHKEahhL6wmXdzwWG11gIVCkOv05bNOh+Rxn0yngAk=
 github.com/ghodss/yaml v1.0.0/go.mod h1:4dBDuWmgqj2HViK6kFavaiC9ZROes6MMH2rRYeMEF04=
 github.com/gin-contrib/cors v1.6.0 h1:0Z7D/bVhE6ja07lI8CTjTonp6SB07o8bNuFyRbsBUQg=
 github.com/gin-contrib/cors v1.6.0/go.mod h1:cI+h6iOAyxKRtUtC6iF/Si1KSFvGm/gK+kshxlCi8ro=
@@ -392,6 +393,8 @@ github.com/pingcap/failpoint v0.0.0-20240528011301-b51a646c7c86/go.mod h1:exzhVY
 github.com/pingcap/kvproto v0.0.0-20191211054548-3c6b38ea5107/go.mod h1:WWLmULLO7l8IOcQG+t+ItJ3fEcrL5FxF0Wu+HrMy26w=
 github.com/pingcap/kvproto v0.0.0-20250521074834-db74bf0e3ac1 h1:peVY7sHw2RCDH8lEHEVMYe4M7GXyeXRKR8QDc5f5dM4=
 github.com/pingcap/kvproto v0.0.0-20250521074834-db74bf0e3ac1/go.mod h1:rXxWk2UnwfUhLXha1jxRWPADw9eMZGWEWCg92Tgmb/8=
+github.com/pingcap/kvproto v0.0.0-20250604040614-03ba9a7536b7 h1:uwrQuSiA0jCfIQbHqidifaiy+O4f03pGoRBcbAyVNzI=
+github.com/pingcap/kvproto v0.0.0-20250604040614-03ba9a7536b7/go.mod h1:rXxWk2UnwfUhLXha1jxRWPADw9eMZGWEWCg92Tgmb/8=
 github.com/pingcap/log v0.0.0-20210625125904-98ed8e2eb1c7/go.mod h1:8AanEdAHATuRurdGxZXBz0At+9avep+ub7U1AGYLIMM=
 github.com/pingcap/log v1.1.1-0.20221110025148-ca232912c9f3 h1:HR/ylkkLmGdSSDaD8IDP+SZrdhV1Kibl9KrHxJ9eciw=
 github.com/pingcap/log v1.1.1-0.20221110025148-ca232912c9f3/go.mod h1:DWQW5jICDR7UJh4HtxXSM20Churx4CQL0fwL/SoOSA4=

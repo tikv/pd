@@ -22,7 +22,7 @@ require (
 	github.com/mattn/go-shellwords v1.0.12
 	github.com/pingcap/errors v0.11.5-0.20211224045212-9687c2b0f87c
 	github.com/pingcap/failpoint v0.0.0-20240528011301-b51a646c7c86
-	github.com/pingcap/kvproto v0.0.0-20250521074834-db74bf0e3ac1
+	github.com/pingcap/kvproto v0.0.0-20250604040614-03ba9a7536b7
 	github.com/pingcap/log v1.1.1-0.20221110025148-ca232912c9f3
 	github.com/pmezard/go-difflib v1.0.0
 	github.com/prometheus/client_golang v1.20.5
@@ -81,6 +81,7 @@ require (
 	github.com/elliotchance/pie/v2 v2.1.0 // indirect
 	github.com/fogleman/gg v1.3.0 // indirect
 	github.com/gabriel-vasile/mimetype v1.4.3 // indirect
+	github.com/ghodss/yaml v1.0.0 // indirect
 	github.com/gin-contrib/sse v0.1.0 // indirect
 	github.com/go-logr/logr v1.3.0 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
@@ -100,6 +101,7 @@ require (
 	github.com/golang-jwt/jwt v3.2.2+incompatible // indirect
 	github.com/golang-jwt/jwt/v4 v4.5.2 // indirect
 	github.com/golang/freetype v0.0.0-20170609003504-e2365dfdc4a0 // indirect
+	github.com/golang/glog v1.2.0 // indirect
 	github.com/golang/protobuf v1.5.4 // indirect
 	github.com/golang/snappy v0.0.4 // indirect
 	github.com/google/btree v1.1.2 // indirect
@@ -192,6 +194,7 @@ require (
 	golang.org/x/crypto v0.36.0 // indirect
 	golang.org/x/exp v0.0.0-20230711005742-c3f37128e5a4 // indirect
 	golang.org/x/image v0.18.0 // indirect
+	golang.org/x/mod v0.17.0 // indirect
 	golang.org/x/net v0.38.0 // indirect
 	golang.org/x/oauth2 v0.21.0 // indirect
 	golang.org/x/sync v0.12.0 // indirect
