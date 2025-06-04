@@ -322,7 +322,7 @@ func (suite *resourceManagerAPITestSuite) TestKeyspaceServiceLimitAPI() {
 }
 
 func (suite *resourceManagerAPITestSuite) tryToGetKeyspaceServiceLimit(re *require.Assertions, keyspaceName string) (float64, int) {
-	bodyBytes, statusCode := suite.sendRequest(re, http.MethodGet, "/config/keyspace/service-limit/"+keyspaceName, nil)
+	bodyBytes, statusCode := suite.sendRequest(re, http.MethodGet, "/config/keyspace/service-limit/"+keyspaceName, nil, nil)
 	if statusCode != http.StatusOK {
 		return 0.0, statusCode
 	}
@@ -338,6 +338,7 @@ func (suite *resourceManagerAPITestSuite) tryToSetKeyspaceServiceLimit(re *requi
 		re,
 		http.MethodPost,
 		"/config/keyspace/service-limit/"+keyspaceName,
+		nil,
 		apis.KeyspaceServiceLimitRequest{
 			ServiceLimit: limit,
 		},
