@@ -16,6 +16,7 @@ package schedulers
 
 import (
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -306,6 +307,8 @@ func (s *evictSlowStoreScheduler) Schedule(cluster sche.SchedulerCluster, _ bool
 			return s.schedulerEvictLeader(cluster), nil
 		}
 		s.cleanupEvictLeader(cluster)
+		storeIDStr := strconv.FormatUint(store.GetID(), 10)
+		storeSlowEvictedStatusGauge.DeleteLabelValues(s.GetName(), storeIDStr)
 		return nil, nil
 	}
 
@@ -337,6 +340,9 @@ func (s *evictSlowStoreScheduler) Schedule(cluster sche.SchedulerCluster, _ bool
 		log.Info("prepare for evicting leader failed", zap.Error(err), zap.Uint64("store-id", slowStore.GetID()))
 		return nil, nil
 	}
+	// Record the slow store evicted status.
+	storeIDStr := strconv.FormatUint(slowStore.GetID(), 10)
+	storeSlowEvictedStatusGauge.WithLabelValues(s.GetName(), storeIDStr).Set(1)
 	return s.schedulerEvictLeader(cluster), nil
 }
 
