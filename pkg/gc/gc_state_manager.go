@@ -444,7 +444,7 @@ func (*GCStateManager) logAdvancingTxnSafePoint(keyspaceID uint32, result Advanc
 
 // SetGlobalGCBarrier sets a global GC barrier.
 // Global GC barrier takes effect globally, every keyspace should also consider global barriers.
-func (m *GCStateManager) SetGlobalGCBarrier(ctx context.Context, barrierID string, barrierTS uint64, ttl time.Duration, now time.Time) (*endpoint.GlobalGCBarrier, error) {
+func (m *GCStateManager) SetGlobalGCBarrier(_ context.Context, barrierID string, barrierTS uint64, ttl time.Duration, now time.Time) (*endpoint.GlobalGCBarrier, error) {
 	if ttl <= 0 {
 		return nil, errs.ErrInvalidArgument.GenWithStackByArgs("ttl", ttl)
 	}
@@ -515,7 +515,7 @@ func (m *GCStateManager) SetGlobalGCBarrier(ctx context.Context, barrierID strin
 
 // DeleteGlobalGCBarrier deletes a global GC barrier by the given barrierID.
 // Returns the information of the deleted GC barrier, or nil if the barrier does not exist.
-func (m *GCStateManager) DeleteGlobalGCBarrier(ctx context.Context, barrierID string) (*endpoint.GlobalGCBarrier, error) {
+func (m *GCStateManager) DeleteGlobalGCBarrier(_ context.Context, barrierID string) (*endpoint.GlobalGCBarrier, error) {
 	if len(barrierID) == 0 {
 		return nil, errs.ErrInvalidArgument.GenWithStackByArgs("barrierID", barrierID)
 	}

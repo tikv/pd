@@ -1096,8 +1096,8 @@ func (s *gcStateManagerTestSuite) TestGlobalGCBarriers() {
 	ks2 := s.keyspacePresets.manageable[1]
 	_, err = s.manager.SetGlobalGCBarrier(context.Background(), "b1", 200, time.Hour, now)
 	re.NoError(err)
-	re.Len(s.getAllGCBarriers(ks1), 0)
-	re.Len(s.getAllGCBarriers(ks2), 0)
+	re.Empty(s.getAllGCBarriers(ks1))
+	re.Empty(s.getAllGCBarriers(ks2))
 	res, err = s.manager.AdvanceTxnSafePoint(ks2, 300, now)
 	re.NoError(err)
 	re.Equal(uint64(200), res.NewTxnSafePoint)

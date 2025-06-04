@@ -404,7 +404,7 @@ func (p GCStateProvider) LoadGCBarrier(keyspaceID uint32, barrierID string) (*GC
 func (p GCStateProvider) LoadAllGCBarriers(keyspaceID uint32) ([]*GCBarrier, error) {
 	prefix := keypath.GCBarrierPrefix(keyspaceID)
 	var dec gcBarrierDecoder
-	err := p.loadAllGCBarriers(prefix, dec.decode)
+	err := p.loadAllGCBarriersImpl(prefix, dec.decode)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
@@ -426,14 +426,14 @@ func (p GCStateProvider) LoadGlobalGCBarrier(barrierID string) (*GlobalGCBarrier
 func (p GCStateProvider) LoadGlobalGCBarriers() ([]*GlobalGCBarrier, error) {
 	prefix := keypath.GlobalGCBarrierPrefix()
 	var dec globalGCBarrierDecoder
-	err := p.loadAllGCBarriers(prefix, dec.decode)
+	err := p.loadAllGCBarriersImpl(prefix, dec.decode)
 	if err != nil {
 		return nil, errors.Trace(err)
 	}
 	return dec.barriers, nil
 }
 
-func (p GCStateProvider) loadAllGCBarriers(prefix string, decoder func(*ServiceSafePoint)) error {
+func (p GCStateProvider) loadAllGCBarriersImpl(prefix string, decoder func(*ServiceSafePoint)) error {
 	// TODO: Limit the count for each call.
 	_, serviceSafePoints, err := loadJSONByPrefix[*ServiceSafePoint](p.storage, prefix, 0)
 	if err != nil {

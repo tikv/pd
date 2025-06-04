@@ -255,12 +255,10 @@ func TestGCOperations(t *testing.T) {
 	// Global GC Barrier API
 	{
 		req := &pdpb.SetGlobalGCBarrierRequest{
-			Header: header,
-			BarrierInfo: &pdpb.GCBarrierInfo{
-				BarrierId:  "b1",
-				BarrierTs:  20,
-				TtlSeconds: 3600,
-			},
+			Header:     header,
+			BarrierId:  "b1",
+			BarrierTs:  20,
+			TtlSeconds: 3600,
 		}
 		resp, err := grpcPDClient.SetGlobalGCBarrier(ctx, req)
 		re.NoError(err)
@@ -275,12 +273,10 @@ func TestGCOperations(t *testing.T) {
 	// Successfully sets a global GC barrier with infinite ttl.
 	{
 		req := &pdpb.SetGlobalGCBarrierRequest{
-			Header: header,
-			BarrierInfo: &pdpb.GCBarrierInfo{
-				BarrierId:  "b2",
-				BarrierTs:  24,
-				TtlSeconds: math.MaxInt64,
-			},
+			Header:     header,
+			BarrierId:  "b2",
+			BarrierTs:  24,
+			TtlSeconds: math.MaxInt64,
 		}
 		resp, err := grpcPDClient.SetGlobalGCBarrier(ctx, req)
 		re.NoError(err)
@@ -294,18 +290,16 @@ func TestGCOperations(t *testing.T) {
 	// Failed to set a global GC barrier (below txn safe point)
 	{
 		req := &pdpb.SetGlobalGCBarrierRequest{
-			Header: header,
-			BarrierInfo: &pdpb.GCBarrierInfo{
-				BarrierId:  "b3",
-				BarrierTs:  9,
-				TtlSeconds: 3600,
-			},
+			Header:     header,
+			BarrierId:  "b3",
+			BarrierTs:  9,
+			TtlSeconds: 3600,
 		}
 		resp, err := grpcPDClient.SetGlobalGCBarrier(ctx, req)
 		re.NoError(err)
 		re.NotNil(resp.Header)
 		re.NotNil(resp.Header.Error)
-		re.Contains(resp.Header.Error.Message, "ErrGCBarrierTSBehindTxnSafePoint")
+		re.Contains(resp.Header.Error.Message, "ErrGlobalGCBarrierTSBehindTxnSafePoint")
 	}
 
 	{
