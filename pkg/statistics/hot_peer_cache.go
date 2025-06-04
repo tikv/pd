@@ -157,6 +157,9 @@ func (f *HotPeerCache) CollectExpiredItems(region *core.RegionInfo) []*HotPeerSt
 
 // CheckLeaderChange checks whether the leader of the region has changed.
 func (f *HotPeerCache) CheckLeaderChange(region *core.RegionInfo) []*HotPeerStat {
+	if f.kind == utils.Write {
+		return nil
+	}
 	regionID := region.GetID()
 	newLeader := region.GetLeader().GetStoreId()
 	items := make([]*HotPeerStat, 0)
@@ -167,12 +170,14 @@ func (f *HotPeerCache) CheckLeaderChange(region *core.RegionInfo) []*HotPeerStat
 				if item != nil {
 					item.actionType = utils.Update
 					item.isLeader = false
+					item.lastTransferLeaderTime = time.Now()
 					items = append(items, item)
 				}
 				item = f.getOldHotPeerStat(regionID, newLeader)
 				if item != nil {
 					item.actionType = utils.Update
 					item.isLeader = true
+					item.lastTransferLeaderTime = time.Now()
 					items = append(items, item)
 				}
 			}

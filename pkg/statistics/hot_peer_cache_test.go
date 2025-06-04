@@ -97,7 +97,9 @@ func checkFlow(cache *HotPeerCache, region *core.RegionInfo, peers []*metapb.Pee
 	reportInterval := region.GetInterval()
 	interval := reportInterval.GetEndTimestamp() - reportInterval.GetStartTimestamp()
 	res = append(res, cache.CollectExpiredItems(region)...)
-	res = append(res, cache.CheckLeaderChange(region)...)
+	if cache.kind == utils.Read {
+		res = append(res, cache.CheckLeaderChange(region)...)
+	}
 	return append(res, cache.CheckPeerFlow(region, peers, region.GetLoads(), interval)...)
 }
 
