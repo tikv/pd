@@ -17,6 +17,7 @@
 /pd//config save
 /pd//gc/gc_state_revision get
 /pd//gc/gc_state_revision save
+/pd//gc/global_gc_barriers/ get
 /pd//gc/safe_point get
 /pd//gc/safe_point save
 /pd//gc/safe_point/service/ get
@@ -109,3 +110,4 @@ resource_group/states/ get
 resource_group/states/default save
 test watch
 watch_test watch
+watch_test watch/pd/cluster_id get
