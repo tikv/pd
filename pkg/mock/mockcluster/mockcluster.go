@@ -17,6 +17,7 @@ package mockcluster
 import (
 	"context"
 	"fmt"
+	"github.com/tikv/pd/pkg/schedule/keyrange"
 	"strconv"
 	"time"
 
@@ -35,7 +36,6 @@ import (
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/placement"
-	"github.com/tikv/pd/pkg/schedule/rangelist"
 	"github.com/tikv/pd/pkg/statistics"
 	"github.com/tikv/pd/pkg/statistics/buckets"
 	"github.com/tikv/pd/pkg/statistics/utils"
@@ -56,7 +56,7 @@ type Cluster struct {
 	*core.BasicCluster
 	*mockid.IDAllocator
 	*placement.RuleManager
-	*rangelist.KeyRangeManager
+	*keyrange.KeyRangeManager
 	*labeler.RegionLabeler
 	*statistics.HotStat
 	*config.PersistOptions
@@ -75,7 +75,7 @@ func NewCluster(ctx context.Context, opts *config.PersistOptions) *Cluster {
 		HotStat:                 statistics.NewHotStat(ctx, bc),
 		HotBucketCache:          buckets.NewBucketsCache(ctx),
 		PersistOptions:          opts,
-		KeyRangeManager:         rangelist.NewKeyRangeManager(),
+		KeyRangeManager:         keyrange.NewKeyRangeManager(),
 		pendingProcessedRegions: map[uint64]struct{}{},
 		Storage:                 storage.NewStorageWithMemoryBackend(),
 	}
@@ -218,7 +218,7 @@ func (mc *Cluster) GetRuleManager() *placement.RuleManager {
 }
 
 // GetKeyRangeManager returns the key range manager of the cluster.
-func (mc *Cluster) GetKeyRangeManager() *rangelist.KeyRangeManager {
+func (mc *Cluster) GetKeyRangeManager() *keyrange.KeyRangeManager {
 	return mc.KeyRangeManager
 }
 
