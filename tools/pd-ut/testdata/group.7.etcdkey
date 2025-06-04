@@ -110,4 +110,3 @@ resource_group/states/ get
 resource_group/states/default save
 test watch
 watch_test watch
-watch_test watch/pd/cluster_id get
