@@ -610,6 +610,7 @@ func (suite *apiTestSuite) checkStatus(cluster *tests.TestCluster) {
 	re.Equal(versioninfo.PDBuildTS, status.BuildTS)
 	re.Equal(versioninfo.PDGitHash, status.GitHash)
 	re.Equal(versioninfo.PDReleaseVersion, status.Version)
+	re.Equal(versioninfo.PDKernelType, status.KernelType)
 }
 
 func (suite *apiTestSuite) TestStores() {
