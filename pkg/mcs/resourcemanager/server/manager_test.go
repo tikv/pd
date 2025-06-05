@@ -224,7 +224,6 @@ func checkAddAndModifyResourceGroup(re *require.Assertions, manager *Manager, ke
 
 func TestCleanUpTicker(t *testing.T) {
 	re := require.New(t)
-	initMaps()
 	m := prepareManager()
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -233,12 +232,12 @@ func TestCleanUpTicker(t *testing.T) {
 	keyspaceID := uint32(1)
 	prepareKeyspaceName(ctx, re, m, &rmpb.KeyspaceIDValue{Value: keyspaceID}, "test_keyspace")
 	// Insert two consumption records manually.
-	consumptionRecordMap[consumptionRecordKey{
+	m.metrics.consumptionRecordMap[consumptionRecordKey{
 		keyspaceID: keyspaceID,
 		groupName:  "test_group_1",
 		ruType:     defaultTypeLabel,
 	}] = time.Now().Add(-metricsCleanupTimeout * 2)
-	consumptionRecordMap[consumptionRecordKey{
+	m.metrics.consumptionRecordMap[consumptionRecordKey{
 		keyspaceID: keyspaceID,
 		groupName:  "test_group_2",
 		ruType:     defaultTypeLabel,
@@ -255,8 +254,8 @@ func TestCleanUpTicker(t *testing.T) {
 	// Close the manager to avoid the data race.
 	m.close()
 
-	re.Len(consumptionRecordMap, 1)
-	re.Contains(consumptionRecordMap, consumptionRecordKey{
+	re.Len(m.metrics.consumptionRecordMap, 1)
+	re.Contains(m.metrics.consumptionRecordMap, consumptionRecordKey{
 		keyspaceID: keyspaceID,
 		groupName:  "test_group_2",
 		ruType:     defaultTypeLabel,

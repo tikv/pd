@@ -255,11 +255,6 @@ func TestGetResourceGroupList(t *testing.T) {
 	re.Len(groups, 4)
 	groups = krgm.getResourceGroupList(false, false)
 	re.Len(groups, 3)
-
-	names := krgm.getResourceGroupNames(true)
-	re.Len(names, 4)
-	names = krgm.getResourceGroupNames(false)
-	re.Len(names, 3)
 }
 
 func TestAddResourceGroupFromRaw(t *testing.T) {

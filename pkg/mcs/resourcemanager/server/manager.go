@@ -40,12 +40,11 @@ import (
 )
 
 const (
-	persistLoopInterval        = 1 * time.Minute
-	metricsCleanupInterval     = time.Minute
-	metricsCleanupTimeout      = 20 * time.Minute
-	metricsAvailableRUInterval = 1 * time.Second
-	defaultCollectIntervalSec  = 20
-	tickPerSecond              = time.Second
+	persistLoopInterval       = time.Minute
+	metricsCleanupInterval    = time.Minute
+	metricsCleanupTimeout     = 20 * time.Minute
+	defaultCollectIntervalSec = 20
+	tickPerSecond             = time.Second
 )
 
 // Manager is the manager of resource group.
@@ -69,6 +68,8 @@ type Manager struct {
 	keyspaceNameLookup map[uint32]string
 	// used to get the keyspace ID by name.
 	keyspaceIDLookup map[string]uint32
+	// metrics is the collection of metrics.
+	metrics *metrics
 }
 
 // ConfigProvider is used to get resource manager config from the given
@@ -86,6 +87,7 @@ func NewManager[T ConfigProvider](srv bs.Server) *Manager {
 		consumptionDispatcher: make(chan *consumptionItem, defaultConsumptionChanSize),
 		keyspaceNameLookup:    make(map[uint32]string),
 		keyspaceIDLookup:      make(map[string]uint32),
+		metrics:               newMetrics(),
 	}
 	// The first initialization after the server is started.
 	srv.AddStartCallback(func() {
@@ -461,10 +463,8 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 	defer m.wg.Done()
 	cleanUpTicker := time.NewTicker(metricsCleanupInterval)
 	defer cleanUpTicker.Stop()
-	availableRUTicker := time.NewTicker(metricsAvailableRUInterval)
-	defer availableRUTicker.Stop()
-	recordMaxTicker := time.NewTicker(tickPerSecond)
-	defer recordMaxTicker.Stop()
+	metricsTicker := time.NewTicker(tickPerSecond)
+	defer metricsTicker.Stop()
 	failpoint.Inject("fastCleanupTicker", func() {
 		cleanUpTicker.Reset(100 * time.Millisecond)
 	})
@@ -483,14 +483,14 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 			if err != nil {
 				continue
 			}
-			recordConsumption(consumptionInfo, keyspaceName, m.controllerConfig)
+			m.metrics.recordConsumption(consumptionInfo, keyspaceName, m.controllerConfig)
 			// TODO: maybe we need to distinguish background ru.
 			if rg := m.GetMutableResourceGroup(keyspaceID, consumptionInfo.resourceGroupName); rg != nil {
 				rg.UpdateRUConsumption(consumptionInfo.Consumption)
 			}
 		case <-cleanUpTicker.C:
 			// Clean up the metrics that have not been updated for a long time.
-			for r, lastTime := range consumptionRecordMap {
+			for r, lastTime := range m.metrics.consumptionRecordMap {
 				if time.Since(lastTime) <= metricsCleanupTimeout {
 					continue
 				}
@@ -498,28 +498,24 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 				if err != nil {
 					continue
 				}
-				cleanupAllMetrics(r, keyspaceName)
+				m.metrics.cleanupAllMetrics(r, keyspaceName)
 			}
-		case <-availableRUTicker.C:
+		case <-metricsTicker.C:
 			// Prevent from holding the lock too long when there're many keyspaces and resource groups.
 			for _, krgm := range m.getKeyspaceResourceGroupManagers() {
 				keyspaceName, err := m.getKeyspaceNameByID(ctx, krgm.keyspaceID)
 				if err != nil {
 					continue
 				}
-				for _, group := range krgm.getResourceGroupList(true, false) {
-					getGaugeMetrics(krgm.keyspaceID, keyspaceName, group.Name).set(group)
-				}
-			}
-		case <-recordMaxTicker.C:
-			// Record the sum of RRU and WRU every second.
-			for _, krgm := range m.getKeyspaceResourceGroupManagers() {
-				keyspaceName, err := m.getKeyspaceNameByID(ctx, krgm.keyspaceID)
-				if err != nil {
-					continue
-				}
-				for _, name := range krgm.getResourceGroupNames(true) {
-					getMaxPerSecTracker(krgm.keyspaceID, keyspaceName, name).flushMetrics()
+				for _, group := range krgm.getResourceGroupList(true, true) {
+					groupName := group.Name
+					// Record the sum of RRU and WRU every second.
+					m.metrics.getMaxPerSecTracker(krgm.keyspaceID, keyspaceName, groupName).flushMetrics()
+					// Skip the default resource group for the later metrics.
+					if groupName == DefaultResourceGroupName {
+						continue
+					}
+					m.metrics.getGaugeMetrics(krgm.keyspaceID, keyspaceName, groupName).set(group)
 				}
 			}
 		}
