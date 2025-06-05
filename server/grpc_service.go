@@ -2952,12 +2952,10 @@ func (s *GrpcServer) rateLimitCheck() (done ratelimit.DoneFunc, err error) {
 	return
 }
 
-// TODO: waiting for https://github.com/tikv/pd/pull/9361
 func (s *GrpcServer) SetGlobalGCBarrier(context.Context, *pdpb.SetGlobalGCBarrierRequest) (*pdpb.SetGlobalGCBarrierResponse, error) {
-	return nil, nil
+	panic("SetGlobalGCBarrier is not implemented yet, waiting for https://github.com/tikv/pd/pull/9361")
 }
 
-// TODO: waiting for https://github.com/tikv/pd/pull/9361
 func (s *GrpcServer) DeleteGlobalGCBarrier(context.Context, *pdpb.DeleteGlobalGCBarrierRequest) (*pdpb.DeleteGlobalGCBarrierResponse, error) {
-	return nil, nil
+	panic("DeleteGlobalGCBarrier is not implemented yet, waiting for https://github.com/tikv/pd/pull/9361")
 }
