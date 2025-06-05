@@ -106,10 +106,9 @@ func (suite *resourceManagerAPITestSuite) sendRequest(
 func (suite *resourceManagerAPITestSuite) mustSendRequest(
 	re *require.Assertions,
 	method, path string,
-	queryParams url.Values,
 	body any,
 ) []byte {
-	bodyBytes, statusCode := suite.sendRequest(re, method, path, queryParams, body)
+	bodyBytes, statusCode := suite.sendRequest(re, method, path, nil, body)
 	re.Equal(http.StatusOK, statusCode, string(bodyBytes))
 	return bodyBytes
 }
@@ -203,12 +202,12 @@ func (suite *resourceManagerAPITestSuite) TestResourceGroupAPI() {
 }
 
 func (suite *resourceManagerAPITestSuite) mustAddResourceGroup(re *require.Assertions, group *rmpb.ResourceGroup) {
-	bodyBytes := suite.mustSendRequest(re, http.MethodPost, "/config/group", nil, group)
+	bodyBytes := suite.mustSendRequest(re, http.MethodPost, "/config/group", group)
 	re.Equal("Success!", string(bodyBytes))
 }
 
 func (suite *resourceManagerAPITestSuite) mustUpdateResourceGroup(re *require.Assertions, group *rmpb.ResourceGroup) {
-	bodyBytes := suite.mustSendRequest(re, http.MethodPut, "/config/group", nil, group)
+	bodyBytes := suite.mustSendRequest(re, http.MethodPut, "/config/group", group)
 	re.Equal("Success!", string(bodyBytes))
 }
 
@@ -263,14 +262,14 @@ func (suite *resourceManagerAPITestSuite) TestControllerConfigAPI() {
 }
 
 func (suite *resourceManagerAPITestSuite) mustGetControllerConfig(re *require.Assertions) *server.ControllerConfig {
-	bodyBytes := suite.mustSendRequest(re, http.MethodGet, "/config/controller", nil, nil)
+	bodyBytes := suite.mustSendRequest(re, http.MethodGet, "/config/controller", nil)
 	config := &server.ControllerConfig{}
 	re.NoError(json.NewDecoder(bytes.NewReader(bodyBytes)).Decode(config))
 	return config
 }
 
 func (suite *resourceManagerAPITestSuite) mustSetControllerConfig(re *require.Assertions, config map[string]any) {
-	bodyBytes := suite.mustSendRequest(re, http.MethodPost, "/config/controller", nil, config)
+	bodyBytes := suite.mustSendRequest(re, http.MethodPost, "/config/controller", config)
 	re.Equal("Success!", string(bodyBytes))
 }
 

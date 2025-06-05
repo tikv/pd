@@ -29,6 +29,7 @@
 /pd//keyspaces/id/test_keyspace save
 /pd//keyspaces/id/test_keyspace_ get
 /pd//keyspaces/id/test_keyspace_ save
+/pd//keyspaces/id/test_keyspace__err get
 /pd//keyspaces/meta/ get
 /pd//keyspaces/meta/ save
 /pd//leader get
