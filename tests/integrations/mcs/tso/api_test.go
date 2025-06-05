@@ -263,6 +263,7 @@ func (suite *tsoAPITestSuite) TestStatus() {
 	re.Equal(versioninfo.PDBuildTS, s.BuildTS)
 	re.Equal(versioninfo.PDGitHash, s.GitHash)
 	re.Equal(versioninfo.PDReleaseVersion, s.Version)
+	re.Equal(versioninfo.PDKernelType, s.KernelType)
 }
 
 func (suite *tsoAPITestSuite) TestConfig() {

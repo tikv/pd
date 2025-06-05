@@ -16,6 +16,11 @@
 
 package kerneltype
 
+var (
+	// KernelType is the current kernel type, which is Classic in this case.
+	KernelType = "Classic"
+)
+
 // IsNextGen returns true if the current kernel type is NextGen.
 func IsNextGen() bool {
 	return false
