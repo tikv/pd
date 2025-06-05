@@ -281,7 +281,7 @@ func (m *Manager) GetControllerConfig() *ControllerConfig {
 // NOTE: AddResourceGroup should also be idempotent because tidb depends
 // on this retry mechanism.
 func (m *Manager) AddResourceGroup(grouppb *rmpb.ResourceGroup) error {
-	keyspaceID := extractKeyspaceID(grouppb.GetKeyspaceId())
+	keyspaceID := ExtractKeyspaceID(grouppb.GetKeyspaceId())
 	// If the keyspace is not initialized, it means this is the first resource group created for this keyspace,
 	// so we need to initialize the default resource group for the keyspace as well.
 	krgm := m.getOrCreateKeyspaceResourceGroupManager(keyspaceID, true)
@@ -293,7 +293,7 @@ func (m *Manager) AddResourceGroup(grouppb *rmpb.ResourceGroup) error {
 
 // ModifyResourceGroup modifies an existing resource group.
 func (m *Manager) ModifyResourceGroup(grouppb *rmpb.ResourceGroup) error {
-	keyspaceID := extractKeyspaceID(grouppb.GetKeyspaceId())
+	keyspaceID := ExtractKeyspaceID(grouppb.GetKeyspaceId())
 	krgm := m.getKeyspaceResourceGroupManager(keyspaceID)
 	if krgm == nil {
 		return errs.ErrKeyspaceNotExists.FastGenByArgs(keyspaceID)
@@ -373,7 +373,7 @@ func (m *Manager) dispatchConsumption(req *rmpb.TokenBucketRequest) error {
 		return errors.New("background and tiflash cannot be true at the same time")
 	}
 	m.consumptionDispatcher <- &consumptionItem{
-		keyspaceID:        extractKeyspaceID(req.GetKeyspaceId()),
+		keyspaceID:        ExtractKeyspaceID(req.GetKeyspaceId()),
 		resourceGroupName: req.GetResourceGroupName(),
 		Consumption:       req.GetConsumptionSinceLastRequest(),
 		isBackground:      isBackground,

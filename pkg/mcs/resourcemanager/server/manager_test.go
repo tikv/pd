@@ -146,7 +146,7 @@ func checkBackgroundMetricsFlush(ctx context.Context, re *require.Assertions, ma
 	}
 	manager.dispatchConsumption(req)
 
-	keyspaceID := extractKeyspaceID(req.GetKeyspaceId())
+	keyspaceID := ExtractKeyspaceID(req.GetKeyspaceId())
 	// Verify consumption was added to the resource group.
 	testutil.Eventually(re, func() bool {
 		updatedGroup := manager.GetResourceGroup(keyspaceID, req.GetResourceGroupName(), true)
@@ -159,7 +159,7 @@ func checkBackgroundMetricsFlush(ctx context.Context, re *require.Assertions, ma
 // Put a keyspace meta into the storage.
 func prepareKeyspaceName(ctx context.Context, re *require.Assertions, manager *Manager, keyspaceIDValue *rmpb.KeyspaceIDValue, keyspaceName string) {
 	keyspaceMeta := &keyspacepb.KeyspaceMeta{
-		Id:   extractKeyspaceID(keyspaceIDValue),
+		Id:   ExtractKeyspaceID(keyspaceIDValue),
 		Name: keyspaceName,
 	}
 	err := manager.storage.RunInTxn(ctx, func(txn kv.Txn) error {
@@ -213,7 +213,7 @@ func checkAddAndModifyResourceGroup(re *require.Assertions, manager *Manager, ke
 	err = manager.ModifyResourceGroup(group)
 	re.NoError(err)
 
-	keyspaceID := extractKeyspaceID(keyspaceIDValue)
+	keyspaceID := ExtractKeyspaceID(keyspaceIDValue)
 	testutil.Eventually(re, func() bool {
 		rg := manager.GetResourceGroup(keyspaceID, group.Name, true)
 		re.NotNil(rg)
