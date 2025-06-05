@@ -38,6 +38,6 @@ func TestExtractKeyspaceID(t *testing.T) {
 		{&rmpb.KeyspaceIDValue{Value: math.MaxUint32}, math.MaxUint32},
 	}
 	for _, tc := range testCases {
-		re.Equal(tc.expected, extractKeyspaceID(tc.keyspaceIDValue))
+		re.Equal(tc.expected, ExtractKeyspaceID(tc.keyspaceIDValue))
 	}
 }

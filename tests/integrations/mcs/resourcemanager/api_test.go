@@ -150,7 +150,9 @@ func (suite *resourceManagerAPITestSuite) TestResourceGroupAPI() {
 		}
 		suite.mustAddResourceGroup(re, groupToAdd)
 		// Get the resource group.
-		group := suite.mustGetResourceGroup(re, groupToAdd.Name, keyspaceName)
+		group := suite.mustGetResourceGroup(re, groupToAdd.Name, keyspaceName+"_err")
+		re.Nil(group)
+		group = suite.mustGetResourceGroup(re, groupToAdd.Name, keyspaceName)
 		re.NotNil(group)
 		re.Equal(groupToAdd.Name, group.Name)
 		re.Equal(groupToAdd.Mode, group.Mode)
@@ -172,7 +174,9 @@ func (suite *resourceManagerAPITestSuite) TestResourceGroupAPI() {
 		re.Equal(groupToUpdate.RUSettings.RU.Settings.FillRate, group.RUSettings.RU.Settings.FillRate)
 		re.Equal(groupToUpdate.RUSettings.RU.Settings.BurstLimit, group.RUSettings.RU.Settings.BurstLimit)
 		// Get the resource group list.
-		groups := suite.mustGetResourceGroupList(re, keyspaceName)
+		groups := suite.mustGetResourceGroupList(re, keyspaceName+"_err")
+		re.Nil(groups)
+		groups = suite.mustGetResourceGroupList(re, keyspaceName)
 		re.NotNil(groups)
 		re.Len(groups, 2) // Include the default resource group.
 		for _, group := range groups {
@@ -186,6 +190,9 @@ func (suite *resourceManagerAPITestSuite) TestResourceGroupAPI() {
 			re.Equal(groupToUpdate.RUSettings.RU.Settings.FillRate, group.RUSettings.RU.Settings.FillRate)
 		}
 		// Delete the resource group.
+		suite.mustDeleteResourceGroup(re, groupToAdd.Name, keyspaceName+"_err")
+		group = suite.mustGetResourceGroup(re, groupToAdd.Name, keyspaceName)
+		re.NotNil(group)
 		suite.mustDeleteResourceGroup(re, groupToAdd.Name, keyspaceName)
 		group = suite.mustGetResourceGroup(re, groupToAdd.Name, keyspaceName)
 		re.Nil(group)
@@ -221,7 +228,11 @@ func (suite *resourceManagerAPITestSuite) mustGetResourceGroup(re *require.Asser
 func (suite *resourceManagerAPITestSuite) mustGetResourceGroupList(re *require.Assertions, keyspaceName string) []*server.ResourceGroup {
 	queryParams := url.Values{}
 	queryParams.Set("keyspace_name", keyspaceName)
-	bodyBytes := suite.mustSendRequest(re, http.MethodGet, "/config/groups", queryParams, nil)
+	bodyBytes, statusCode := suite.sendRequest(re, http.MethodGet, "/config/groups", queryParams, nil)
+	if statusCode != http.StatusOK {
+		re.Equal(http.StatusNotFound, statusCode)
+		return nil
+	}
 	groups := []*server.ResourceGroup{}
 	re.NoError(json.NewDecoder(bytes.NewReader(bodyBytes)).Decode(&groups))
 	return groups
@@ -230,7 +241,11 @@ func (suite *resourceManagerAPITestSuite) mustGetResourceGroupList(re *require.A
 func (suite *resourceManagerAPITestSuite) mustDeleteResourceGroup(re *require.Assertions, name string, keyspaceName string) {
 	queryParams := url.Values{}
 	queryParams.Set("keyspace_name", keyspaceName)
-	bodyBytes := suite.mustSendRequest(re, http.MethodDelete, "/config/group/"+name, queryParams, nil)
+	bodyBytes, statusCode := suite.sendRequest(re, http.MethodDelete, "/config/group/"+name, queryParams, nil)
+	if statusCode != http.StatusOK {
+		re.Equal(http.StatusNotFound, statusCode)
+		return
+	}
 	re.Equal("Success!", string(bodyBytes))
 }
 

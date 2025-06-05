@@ -171,10 +171,10 @@ func (s *Service) getResourceGroup(c *gin.Context) {
 	keyspaceName := c.Query("keyspace_name")
 	keyspaceIDValue, err := s.manager.GetKeyspaceIDByName(c, keyspaceName)
 	if err != nil {
-		c.String(http.StatusBadRequest, err.Error())
+		c.String(http.StatusNotFound, err.Error())
 		return
 	}
-	keyspaceID := keyspaceIDValue.GetValue()
+	keyspaceID := rmserver.ExtractKeyspaceID(keyspaceIDValue)
 	group := s.manager.GetResourceGroup(keyspaceID, c.Param("name"), withStats)
 	if group == nil {
 		c.String(http.StatusNotFound, errors.New("resource group not found").Error())
@@ -196,10 +196,10 @@ func (s *Service) getResourceGroupList(c *gin.Context) {
 	keyspaceName := c.Query("keyspace_name")
 	keyspaceIDValue, err := s.manager.GetKeyspaceIDByName(c, keyspaceName)
 	if err != nil {
-		c.String(http.StatusBadRequest, err.Error())
+		c.String(http.StatusNotFound, err.Error())
 		return
 	}
-	keyspaceID := keyspaceIDValue.GetValue()
+	keyspaceID := rmserver.ExtractKeyspaceID(keyspaceIDValue)
 	groups := s.manager.GetResourceGroupList(keyspaceID, withStats)
 	c.IndentedJSON(http.StatusOK, groups)
 }
@@ -217,10 +217,10 @@ func (s *Service) deleteResourceGroup(c *gin.Context) {
 	keyspaceName := c.Query("keyspace_name")
 	keyspaceIDValue, err := s.manager.GetKeyspaceIDByName(c, keyspaceName)
 	if err != nil {
-		c.String(http.StatusBadRequest, err.Error())
+		c.String(http.StatusNotFound, err.Error())
 		return
 	}
-	keyspaceID := keyspaceIDValue.GetValue()
+	keyspaceID := rmserver.ExtractKeyspaceID(keyspaceIDValue)
 	if err := s.manager.DeleteResourceGroup(keyspaceID, c.Param("name")); err != nil {
 		c.String(http.StatusNotFound, err.Error())
 	}
@@ -297,7 +297,8 @@ func (s *Service) setKeyspaceServiceLimit(c *gin.Context) {
 		c.String(http.StatusBadRequest, "service_limit must be non-negative")
 		return
 	}
-	s.manager.SetKeyspaceServiceLimit(keyspaceIDValue.GetValue(), req.ServiceLimit)
+	keyspaceID := rmserver.ExtractKeyspaceID(keyspaceIDValue)
+	s.manager.SetKeyspaceServiceLimit(keyspaceID, req.ServiceLimit)
 	c.String(http.StatusOK, "Success!")
 }
 
@@ -317,7 +318,7 @@ func (s *Service) getKeyspaceServiceLimit(c *gin.Context) {
 		c.String(http.StatusBadRequest, err.Error())
 		return
 	}
-	keyspaceID := keyspaceIDValue.GetValue()
+	keyspaceID := rmserver.ExtractKeyspaceID(keyspaceIDValue)
 	limiter := s.manager.GetKeyspaceServiceLimiter(keyspaceID)
 	if limiter == nil {
 		c.String(http.StatusNotFound, fmt.Sprintf("keyspace manager not found with keyspace name: %s, id: %d", keyspaceName, keyspaceID))
