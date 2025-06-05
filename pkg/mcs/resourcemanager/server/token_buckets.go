@@ -120,7 +120,14 @@ type GroupTokenBucketState struct {
 	// ClientUniqueID -> TokenSlot
 	tokenSlots                 map[uint64]*TokenSlot
 	clientConsumptionTokensSum float64
-	lastBurstTokens            float64
+	// Used to store tokens in the token slot that exceed burst limits,
+	// ensuring that these tokens are not lost but are reintroduced into
+	// token calculation during the next update.
+	lastBurstTokens float64
+	// Used to store tokens that exceed the service limit,
+	// ensuring that these tokens are not lost but are reintroduced into
+	// token calculation during the next update.
+	lastLimitedTokens float64
 
 	LastUpdate  *time.Time `json:"last_update,omitempty"`
 	Initialized bool       `json:"initialized"`
@@ -347,8 +354,9 @@ func (gtb *GroupTokenBucket) updateTokens(now time.Time, burstLimit int64, clien
 		gtb.init(now, clientUniqueID)
 	} else if burst := float64(burstLimit); burst > 0 {
 		if delta := now.Sub(*gtb.LastUpdate); delta > 0 {
-			elapseTokens = float64(gtb.Settings.GetFillRate())*delta.Seconds() + gtb.lastBurstTokens
+			elapseTokens = float64(gtb.Settings.GetFillRate())*delta.Seconds() + gtb.lastBurstTokens + gtb.lastLimitedTokens
 			gtb.lastBurstTokens = 0
+			gtb.lastLimitedTokens = 0
 			gtb.Tokens += elapseTokens
 		}
 		if gtb.Tokens > burst {

@@ -32,6 +32,7 @@ import (
 	"github.com/pingcap/kvproto/pkg/pdpb"
 	"github.com/pingcap/log"
 
+	"github.com/tikv/pd/client/clients/gc"
 	"github.com/tikv/pd/client/clients/metastorage"
 	"github.com/tikv/pd/client/clients/router"
 	"github.com/tikv/pd/client/clients/tso"
@@ -73,6 +74,9 @@ type RPCClient interface {
 	// determine the safepoint for multiple services, it does not trigger a GC
 	// job. Use UpdateGCSafePoint to trigger the GC job if needed.
 	UpdateServiceGCSafePoint(ctx context.Context, serviceID string, ttl int64, safePoint uint64) (uint64, error)
+	UpdateGCSafePointV2(ctx context.Context, keyspaceID uint32, safePoint uint64) (uint64, error)
+	UpdateServiceSafePointV2(ctx context.Context, keyspaceID uint32, serviceID string, ttl int64, safePoint uint64) (uint64, error)
+	WatchGCSafePointV2(ctx context.Context, revision int64) (chan []*pdpb.SafePointEvent, error)
 	// ScatterRegion scatters the specified region. Should use it for a batch of regions,
 	// and the distribution of these regions will be dispersed.
 	// NOTICE: This method is the old version of ScatterRegions, you should use the later one as your first choice.
@@ -102,10 +106,9 @@ type RPCClient interface {
 	router.Client
 	tso.Client
 	metastorage.Client
+	gc.Client
 	// KeyspaceClient manages keyspace metadata.
 	KeyspaceClient
-	// GCClient manages gcSafePointV2 and serviceSafePointV2
-	GCClient
 	// ResourceManagerClient manages resource group metadata and token assignment.
 	ResourceManagerClient
 }
@@ -1373,4 +1376,14 @@ func adjustCallerComponent(callerComponent caller.Component) caller.Component {
 	log.Warn("Unknown callerComponent", zap.String("callerComponent", string(callerComponent)))
 	// If the callerComponent is still in pd/client, we set it to empty.
 	return ""
+}
+
+// GetGCInternalController returns the gc.InternalController, which is used for internally controlling the GC states.
+func (c *client) GetGCInternalController(keyspaceID uint32) gc.InternalController {
+	return newGCInternalController(c, keyspaceID)
+}
+
+// GetGCStatesClient returns the gc.GCStatesClient, which is used for accessing the GC states for general purposes.
+func (c *client) GetGCStatesClient(keyspaceID uint32) gc.GCStatesClient {
+	return newGCStatesClient(c, keyspaceID)
 }

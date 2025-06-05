@@ -387,7 +387,7 @@ func (s *GrpcServer) getDelegateClient(ctx context.Context, forwardedHost string
 		return client.(*grpc.ClientConn), nil
 	}
 
-	tlsConfig, err := s.GetTLSConfig().ToTLSConfig()
+	tlsConfig, err := s.GetTLSConfig().ToClientTLSConfig()
 	if err != nil {
 		return nil, err
 	}

@@ -149,7 +149,7 @@ func testTLSReload(
 	endpoints := make([]string, 0, len(testServers))
 	for _, s := range testServers {
 		endpoints = append(endpoints, s.GetConfig().AdvertiseClientUrls)
-		tlsConfig, err := s.GetConfig().Security.ToTLSConfig()
+		tlsConfig, err := s.GetConfig().Security.ToClientTLSConfig()
 		re.NoError(err)
 		httpClient := &http.Client{
 			Transport: &http.Transport{

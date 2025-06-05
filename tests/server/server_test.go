@@ -543,7 +543,7 @@ func TestCheckClusterID(t *testing.T) {
 	re.NoError(err)
 	urlsMap, err := etcdtypes.NewURLsMap(svr.GetConfig().InitialCluster)
 	re.NoError(err)
-	tlsConfig, err := svr.GetConfig().Security.ToTLSConfig()
+	tlsConfig, err := svr.GetConfig().Security.ToClientTLSConfig()
 	re.NoError(err)
 	err = etcdutil.CheckClusterID(etcd.Server.Cluster().ID(), urlsMap, tlsConfig)
 	re.Error(err)

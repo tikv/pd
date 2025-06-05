@@ -94,7 +94,7 @@ func CheckClusterID(localClusterID etcdtypes.ID, um etcdtypes.URLsMap, tlsConfig
 		trp.CloseIdleConnections()
 		if gerr != nil {
 			// Do not return error, because other members may be not ready.
-			log.Error("failed to get cluster from remote", errs.ZapError(errs.ErrEtcdGetCluster, gerr))
+			log.Warn("failed to get cluster from remote", errs.ZapError(errs.ErrEtcdGetCluster, gerr))
 			continue
 		}
 
@@ -179,6 +179,34 @@ func InjectFailToCollectTestEtcdKey(key, op string) {
 			if err != nil {
 				pwd, _ := os.Getwd()
 				log.Error("write key to file failed", zap.String("pwd", pwd), zap.String("file", file), zap.Error(err))
+			}
+		}
+	})
+}
+
+// InjectFailToCollectTestEtcdOps injects the failpoint to collect a set of ops for testing.
+func InjectFailToCollectTestEtcdOps(ops ...clientv3.Op) {
+	failpoint.Inject("CollectEtcdKey", func(val failpoint.Value) {
+		file := val.(string)
+
+		if len(file) != 0 {
+			for _, op := range ops {
+				opType := ""
+				if op.IsPut() {
+					opType = "save"
+				} else if op.IsDelete() {
+					opType = "remove"
+				} else if op.IsGet() {
+					opType = "get"
+				} else {
+					// Ignore
+					continue
+				}
+				err := writeKeyToFile(file, string(op.KeyBytes()), opType)
+				if err != nil {
+					pwd, _ := os.Getwd()
+					log.Error("write key to file failed", zap.String("pwd", pwd), zap.String("file", file), zap.Error(err))
+				}
 			}
 		}
 	})
