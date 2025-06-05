@@ -19,7 +19,6 @@ import (
 	"encoding/json"
 	errorspkg "errors"
 	"fmt"
-	"github.com/tikv/pd/pkg/schedule/keyrange"
 	"io"
 	"math"
 	"net/http"
@@ -58,6 +57,7 @@ import (
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/filter"
 	"github.com/tikv/pd/pkg/schedule/hbstream"
+	"github.com/tikv/pd/pkg/schedule/keyrange"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/placement"
 	"github.com/tikv/pd/pkg/slice"
@@ -176,7 +176,7 @@ type RaftCluster struct {
 	opt *config.PersistOptions
 	*schedulingController
 	ruleManager              *placement.RuleManager
-	keyRangeManager          *keyrange.KeyRangeManager
+	keyRangeManager          *keyrange.Manager
 	regionLabeler            *labeler.RegionLabeler
 	replicationMode          *replication.ModeManager
 	unsafeRecoveryController *unsaferecovery.Controller
@@ -323,7 +323,7 @@ func (c *RaftCluster) InitCluster(
 	c.keyspaceGroupManager = keyspaceGroupManager
 	c.hbstreams = hbstreams
 	c.ruleManager = placement.NewRuleManager(c.ctx, c.storage, c, c.GetOpts())
-	c.keyRangeManager = keyrange.NewKeyRangeManager()
+	c.keyRangeManager = keyrange.NewManager()
 	if c.opt.IsPlacementRulesEnabled() {
 		err := c.ruleManager.Initialize(c.opt.GetMaxReplicas(), c.opt.GetLocationLabels(), c.opt.GetIsolationLevel(), false)
 		if err != nil {
@@ -953,7 +953,7 @@ func (c *RaftCluster) GetRuleManager() *placement.RuleManager {
 }
 
 // GetKeyRangeManager returns the key range manager reference
-func (c *RaftCluster) GetKeyRangeManager() *keyrange.KeyRangeManager {
+func (c *RaftCluster) GetKeyRangeManager() *keyrange.Manager {
 	return c.keyRangeManager
 }
 

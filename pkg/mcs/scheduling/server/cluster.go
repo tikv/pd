@@ -16,7 +16,6 @@ package server
 
 import (
 	"context"
-	"github.com/tikv/pd/pkg/schedule/keyrange"
 	"runtime"
 	"sync"
 	"sync/atomic"
@@ -39,6 +38,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule"
 	sc "github.com/tikv/pd/pkg/schedule/config"
 	"github.com/tikv/pd/pkg/schedule/hbstream"
+	"github.com/tikv/pd/pkg/schedule/keyrange"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/schedule/operator"
 	"github.com/tikv/pd/pkg/schedule/placement"
@@ -63,7 +63,7 @@ type Cluster struct {
 	*core.BasicCluster
 	persistConfig     *config.PersistConfig
 	ruleManager       *placement.RuleManager
-	keyRangeManager   *keyrange.KeyRangeManager
+	keyRangeManager   *keyrange.Manager
 	labelerManager    *labeler.RegionLabeler
 	regionStats       *statistics.RegionStatistics
 	labelStats        *statistics.LabelStatistics
@@ -116,7 +116,7 @@ func NewCluster(
 		cancel:            cancel,
 		BasicCluster:      basicCluster,
 		ruleManager:       ruleManager,
-		keyRangeManager:   keyrange.NewKeyRangeManager(),
+		keyRangeManager:   keyrange.NewManager(),
 		labelerManager:    labelerManager,
 		persistConfig:     persistConfig,
 		hotStat:           statistics.NewHotStat(ctx, basicCluster),
@@ -180,7 +180,7 @@ func (c *Cluster) GetRuleManager() *placement.RuleManager {
 }
 
 // GetKeyRangeManager returns the key range manager
-func (c *Cluster) GetKeyRangeManager() *keyrange.KeyRangeManager {
+func (c *Cluster) GetKeyRangeManager() *keyrange.Manager {
 	return c.keyRangeManager
 }
 

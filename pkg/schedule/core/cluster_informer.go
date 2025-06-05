@@ -62,7 +62,7 @@ type SharedCluster interface {
 	GetBasicCluster() *core.BasicCluster
 	GetSharedConfig() sc.SharedConfigProvider
 	GetRuleManager() *placement.RuleManager
-	GetKeyRangeManager() *keyrange.KeyRangeManager
+	GetKeyRangeManager() *keyrange.Manager
 	AllocID(uint32) (uint64, uint32, error)
 	IsSchedulingHalted() bool
 }

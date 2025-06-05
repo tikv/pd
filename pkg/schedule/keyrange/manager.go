@@ -20,28 +20,28 @@ import (
 	"github.com/tikv/pd/pkg/utils/keyutil"
 )
 
-// KeyRangeManager is a manager for key ranges.
-type KeyRangeManager struct {
+// Manager is a manager for key ranges.
+type Manager struct {
 	sync.Mutex
 	sortedKeyRanges *keyutil.KeyRanges
 }
 
-// NewKeyRangeManager creates a new KeyRangeManager.
-func NewKeyRangeManager() *KeyRangeManager {
-	return &KeyRangeManager{
+// NewManager creates a new Manager.
+func NewManager() *Manager {
+	return &Manager{
 		sortedKeyRanges: &keyutil.KeyRanges{},
 	}
 }
 
 // GetNonOverlappingKeyRanges returns the non-overlapping key ranges of the given base key range.
-func (s *KeyRangeManager) GetNonOverlappingKeyRanges(base *keyutil.KeyRange) []keyutil.KeyRange {
+func (s *Manager) GetNonOverlappingKeyRanges(base *keyutil.KeyRange) []keyutil.KeyRange {
 	s.Lock()
 	defer s.Unlock()
 	return s.sortedKeyRanges.SubtractKeyRanges(base)
 }
 
 // Append appends the key ranges to the manager.
-func (s *KeyRangeManager) Append(rs []keyutil.KeyRange) {
+func (s *Manager) Append(rs []keyutil.KeyRange) {
 	s.Lock()
 	defer s.Unlock()
 	for _, r := range rs {
@@ -51,7 +51,7 @@ func (s *KeyRangeManager) Append(rs []keyutil.KeyRange) {
 }
 
 // Delete deletes the overlapping key ranges from the manager.
-func (s *KeyRangeManager) Delete(rs []keyutil.KeyRange) {
+func (s *Manager) Delete(rs []keyutil.KeyRange) {
 	s.Lock()
 	defer s.Unlock()
 	for _, r := range rs {
