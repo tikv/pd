@@ -1303,7 +1303,10 @@ func (suite *clientStatelessTestSuite) TestScatterRegion() {
 			return false
 		}
 		if scatterResp.FinishedPercentage != uint64(100) {
+			require.Contains(suite.T(), scatterResp.FailedRegionsId, regionID)
 			return false
+		} else {
+			require.Empty(suite.T(), scatterResp.FailedRegionsId)
 		}
 		resp, err := suite.client.GetOperator(context.Background(), regionID)
 		if err != nil {
