@@ -394,12 +394,16 @@ func (s *balanceRangeScheduler) IsScheduleAllowed(cluster sche.SchedulerCluster)
 			if err := s.conf.begin(index); err != nil {
 				return false
 			}
+			km := cluster.GetKeyRangeManager()
+			km.Append(job.Ranges)
 		}
 		// todo: add other conditions such as the diff of the score between the source and target store.
 		if time.Since(*job.Start) > job.Timeout {
 			if err := s.conf.finish(index); err != nil {
 				return false
 			}
+			km := cluster.GetKeyRangeManager()
+			km.Delete(job.Ranges)
 			balanceRangeExpiredCounter.Inc()
 		}
 	}
