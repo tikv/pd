@@ -40,6 +40,7 @@ require (
 	github.com/ReneKroon/ttlcache/v2 v2.3.0 // indirect
 	github.com/VividCortex/mysqlerr v1.0.0 // indirect
 	github.com/Xeoncross/go-aesctr-with-hmac v0.0.0-20200623134604-12b17a7ff502 // indirect
+	github.com/alecthomas/template v0.0.0-20190718012654-fb15b899a751 // indirect
 	github.com/aws/aws-sdk-go-v2 v1.23.5 // indirect
 	github.com/aws/aws-sdk-go-v2/config v1.25.12 // indirect
 	github.com/aws/aws-sdk-go-v2/credentials v1.16.10 // indirect
@@ -209,3 +210,5 @@ require (
 	gorm.io/driver/sqlite v1.5.7 // indirect
 	sigs.k8s.io/yaml v1.4.0 // indirect
 )
+
+replace github.com/pingcap/kvproto => github.com/tiancaiamao/kvproto v0.0.0-20250527075632-19ed6383b311

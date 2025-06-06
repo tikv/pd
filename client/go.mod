@@ -43,3 +43,5 @@ require (
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
+
+replace github.com/pingcap/kvproto => github.com/tiancaiamao/kvproto v0.0.0-20250527075632-19ed6383b311

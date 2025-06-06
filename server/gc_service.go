@@ -285,6 +285,25 @@ func gcBarrierToProto(b *endpoint.GCBarrier, now time.Time) *pdpb.GCBarrierInfo 
 	}
 }
 
+func globalGCBarrierToProto(b *endpoint.GlobalGCBarrier, now time.Time) *pdpb.GlobalGCBarrierInfo {
+	if b == nil {
+		return nil
+	}
+
+	// After rounding, the actual TTL might be not exactly the same as the specified value. Recalculate it anyway.
+	// MaxInt64 represents that the expiration time is not specified and it never expires.
+	var resultTTL int64 = math.MaxInt64
+	if b.ExpirationTime != nil {
+		resultTTL = int64(max(math.Floor(b.ExpirationTime.Sub(now).Seconds()), 0))
+	}
+
+	return &pdpb.GlobalGCBarrierInfo{
+		BarrierId:  b.BarrierID,
+		BarrierTs:  b.BarrierTS,
+		TtlSeconds: resultTTL,
+	}
+}
+
 func gcStateToProto(gcState gc.GCState, now time.Time) *pdpb.GCState {
 	gcBarriers := make([]*pdpb.GCBarrierInfo, 0, len(gcState.GCBarriers))
 	for _, b := range gcState.GCBarriers {
@@ -399,12 +418,11 @@ func (s *GrpcServer) SetGCBarrier(ctx context.Context, request *pdpb.SetGCBarrie
 	}
 
 	now := time.Now()
-	newBarrier, err := s.gcStateManager.SetGCBarrier(
-		getKeyspaceID(request.GetKeyspaceScope()),
-		request.GetBarrierId(),
-		request.GetBarrierTs(),
-		typeutil.SaturatingStdDurationFromSeconds(request.GetTtlSeconds()),
-		now)
+	keyspaceID := getKeyspaceID(request.GetKeyspaceScope())
+	barrierID := request.GetBarrierId()
+	barrierTS := request.GetBarrierTs()
+	ttl := typeutil.SaturatingStdDurationFromSeconds(request.GetTtlSeconds())
+	newBarrier, err := s.gcStateManager.SetGCBarrier(keyspaceID, barrierID, barrierTS, ttl, now)
 	if err != nil {
 		return &pdpb.SetGCBarrierResponse{
 			Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
@@ -520,15 +538,105 @@ func (s *GrpcServer) GetAllKeyspacesGCStates(ctx context.Context, request *pdpb.
 			Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
 		}, nil
 	}
-
 	now := time.Now()
 	gcStatesPb := make([]*pdpb.GCState, 0, len(gcStates))
 	for _, gcState := range gcStates {
 		gcStatesPb = append(gcStatesPb, gcStateToProto(gcState, now))
 	}
 
+	globalBarriers, err := s.gcStateManager.LoadGlobalGCBarriers()
+	if err != nil {
+		return &pdpb.GetAllKeyspacesGCStatesResponse{
+			Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
+		}, nil
+	}
+	gcBarriersPb := make([]*pdpb.GlobalGCBarrierInfo, 0, len(globalBarriers))
+	for _, barrier := range globalBarriers {
+		gcBarriersPb = append(gcBarriersPb, globalGCBarrierToProto(barrier, now))
+	}
+
 	return &pdpb.GetAllKeyspacesGCStatesResponse{
-		Header:   wrapHeader(),
-		GcStates: gcStatesPb,
+		Header:           wrapHeader(),
+		GcStates:         gcStatesPb,
+		GlobalGcBarriers: gcBarriersPb,
+	}, nil
+}
+
+// SetGlobalGCBarrier sets a global GC barrier.
+func (s *GrpcServer) SetGlobalGCBarrier(ctx context.Context, request *pdpb.SetGlobalGCBarrierRequest) (*pdpb.SetGlobalGCBarrierResponse, error) {
+	done, err := s.rateLimitCheck()
+	if err != nil {
+		return nil, err
+	}
+	if done != nil {
+		defer done()
+	}
+	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
+		return pdpb.NewPDClient(client).SetGlobalGCBarrier(ctx, request)
+	}
+	if rsp, err := s.unaryMiddleware(ctx, request, fn); err != nil {
+		return nil, err
+	} else if rsp != nil {
+		return rsp.(*pdpb.SetGlobalGCBarrierResponse), err
+	}
+
+	rc := s.GetRaftCluster()
+	if rc == nil {
+		return &pdpb.SetGlobalGCBarrierResponse{Header: notBootstrappedHeader()}, nil
+	}
+
+	now := time.Now()
+	barrierID := request.GetBarrierId()
+	barrierTS := request.GetBarrierTs()
+	ttl := typeutil.SaturatingStdDurationFromSeconds(request.GetTtlSeconds())
+	newBarrier, err := s.gcStateManager.SetGlobalGCBarrier(ctx, barrierID, barrierTS, ttl, now)
+	if err != nil {
+		return &pdpb.SetGlobalGCBarrierResponse{
+			Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
+		}, nil
+	}
+
+	return &pdpb.SetGlobalGCBarrierResponse{
+		Header:         wrapHeader(),
+		NewBarrierInfo: globalGCBarrierToProto(newBarrier, now),
+	}, nil
+}
+
+// DeleteGlobalGCBarrier deletes a GC barrier.
+func (s *GrpcServer) DeleteGlobalGCBarrier(ctx context.Context, request *pdpb.DeleteGlobalGCBarrierRequest) (*pdpb.DeleteGlobalGCBarrierResponse, error) {
+	done, err := s.rateLimitCheck()
+	if err != nil {
+		return nil, err
+	}
+	if done != nil {
+		defer done()
+	}
+	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
+		return pdpb.NewPDClient(client).DeleteGlobalGCBarrier(ctx, request)
+	}
+	if rsp, err := s.unaryMiddleware(ctx, request, fn); err != nil {
+		return nil, err
+	} else if rsp != nil {
+		return rsp.(*pdpb.DeleteGlobalGCBarrierResponse), err
+	}
+
+	rc := s.GetRaftCluster()
+	if rc == nil {
+		return &pdpb.DeleteGlobalGCBarrierResponse{Header: notBootstrappedHeader()}, nil
+	}
+
+	now := time.Now()
+
+	barrierID := request.GetBarrierId()
+	deletedBarrier, err := s.gcStateManager.DeleteGlobalGCBarrier(ctx, barrierID)
+	if err != nil {
+		return &pdpb.DeleteGlobalGCBarrierResponse{
+			Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
+		}, nil
+	}
+
+	return &pdpb.DeleteGlobalGCBarrierResponse{
+		Header:             wrapHeader(),
+		DeletedBarrierInfo: globalGCBarrierToProto(deletedBarrier, now),
 	}, nil
 }
