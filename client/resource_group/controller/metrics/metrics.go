@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package controller
+package metrics
 
 import "github.com/prometheus/client_golang/prometheus"
 
@@ -29,7 +29,27 @@ const (
 )
 
 var (
-	resourceGroupStatusGauge = prometheus.NewGaugeVec(
+	ResourceGroupStatusGauge         *prometheus.GaugeVec
+	SuccessfulRequestDuration        *prometheus.HistogramVec
+	FailedLimitReserveDuration       *prometheus.HistogramVec
+	FailedRequestCounter             *prometheus.CounterVec
+	GroupRunningKVRequestCounter     *prometheus.GaugeVec
+	RequestRetryCounter              *prometheus.CounterVec
+	TokenRequestDuration             *prometheus.HistogramVec
+	ResourceGroupTokenRequestCounter *prometheus.CounterVec
+	LowTokenRequestNotifyCounter     *prometheus.CounterVec
+	TokenConsumedHistogram           *prometheus.HistogramVec
+	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
+	FailedTokenRequestDuration     prometheus.Observer
+	SuccessfulTokenRequestDuration prometheus.Observer
+)
+
+func init() {
+	initMetrics(nil)
+}
+
+func initMetrics(onstLabels prometheus.Labels) {
+	ResourceGroupStatusGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: namespace,
 			Subsystem: "resource_group",
@@ -37,7 +57,7 @@ var (
 			Help:      "Status of the resource group.",
 		}, []string{resourceGroupNameLabel, newResourceGroupNameLabel})
 
-	successfulRequestDuration = prometheus.NewHistogramVec(
+	SuccessfulRequestDuration = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: namespace,
 			Subsystem: requestSubsystem,
@@ -46,7 +66,7 @@ var (
 			Help:      "Bucketed histogram of wait duration of successful request.",
 		}, []string{resourceGroupNameLabel, newResourceGroupNameLabel})
 
-	failedLimitReserveDuration = prometheus.NewHistogramVec(
+	FailedLimitReserveDuration = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: namespace,
 			Subsystem: requestSubsystem,
@@ -55,7 +75,7 @@ var (
 			Help:      "Bucketed histogram of wait duration of failed request.",
 		}, []string{resourceGroupNameLabel, newResourceGroupNameLabel})
 
-	failedRequestCounter = prometheus.NewCounterVec(
+	FailedRequestCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: namespace,
 			Subsystem: requestSubsystem,
@@ -63,7 +83,7 @@ var (
 			Help:      "Counter of failed request.",
 		}, []string{resourceGroupNameLabel, newResourceGroupNameLabel, errType})
 
-	groupRunningKVRequestCounter = prometheus.NewGaugeVec(
+	GroupRunningKVRequestCounter = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: namespace,
 			Subsystem: requestSubsystem,
@@ -71,7 +91,7 @@ var (
 			Help:      "Counter of running kv request.",
 		}, []string{newResourceGroupNameLabel})
 
-	requestRetryCounter = prometheus.NewCounterVec(
+	RequestRetryCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: namespace,
 			Subsystem: requestSubsystem,
@@ -79,7 +99,7 @@ var (
 			Help:      "Counter of retry time for request.",
 		}, []string{resourceGroupNameLabel, newResourceGroupNameLabel})
 
-	tokenRequestDuration = prometheus.NewHistogramVec(
+	TokenRequestDuration = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: namespace,
 			Subsystem: tokenRequestSubsystem,
@@ -88,7 +108,7 @@ var (
 			Help:      "Bucketed histogram of latency(s) of token request.",
 		}, []string{"type"})
 
-	resourceGroupTokenRequestCounter = prometheus.NewCounterVec(
+	ResourceGroupTokenRequestCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: namespace,
 			Subsystem: tokenRequestSubsystem,
@@ -96,14 +116,14 @@ var (
 			Help:      "Counter of token request by every resource group.",
 		}, []string{resourceGroupNameLabel, newResourceGroupNameLabel})
 
-	lowTokenRequestNotifyCounter = prometheus.NewCounterVec(
+	LowTokenRequestNotifyCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: namespace,
 			Subsystem: tokenRequestSubsystem,
 			Name:      "low_token_notified",
 			Help:      "Counter of low token request.",
 		}, []string{newResourceGroupNameLabel})
-	tokenConsumedHistogram = prometheus.NewHistogramVec(
+	TokenConsumedHistogram = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: namespace,
 			Subsystem: tokenRequestSubsystem,
@@ -111,23 +131,23 @@ var (
 			Buckets:   []float64{.5, 1, 2, 5, 10, 15, 20, 40, 64, 128, 256, 512, 1024, 2048}, // 0 ~ 2048
 			Help:      "Bucketed histogram of token consume.",
 		}, []string{newResourceGroupNameLabel})
-)
 
-var (
 	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
-	failedTokenRequestDuration     = tokenRequestDuration.WithLabelValues("fail")
-	successfulTokenRequestDuration = tokenRequestDuration.WithLabelValues("success")
-)
+	FailedTokenRequestDuration = TokenRequestDuration.WithLabelValues("fail")
+	SuccessfulTokenRequestDuration = TokenRequestDuration.WithLabelValues("success")
+}
 
-func init() {
-	prometheus.MustRegister(resourceGroupStatusGauge)
-	prometheus.MustRegister(successfulRequestDuration)
-	prometheus.MustRegister(failedRequestCounter)
-	prometheus.MustRegister(failedLimitReserveDuration)
-	prometheus.MustRegister(groupRunningKVRequestCounter)
-	prometheus.MustRegister(requestRetryCounter)
-	prometheus.MustRegister(tokenRequestDuration)
-	prometheus.MustRegister(resourceGroupTokenRequestCounter)
-	prometheus.MustRegister(lowTokenRequestNotifyCounter)
-	prometheus.MustRegister(tokenConsumedHistogram)
+// InitAndRegisterMetrics initializes and register metrics.
+func InitAndRegisterMetrics(constLabels prometheus.Labels) {
+	initMetrics(constLabels)
+	prometheus.MustRegister(ResourceGroupStatusGauge)
+	prometheus.MustRegister(SuccessfulRequestDuration)
+	prometheus.MustRegister(FailedRequestCounter)
+	prometheus.MustRegister(FailedLimitReserveDuration)
+	prometheus.MustRegister(GroupRunningKVRequestCounter)
+	prometheus.MustRegister(RequestRetryCounter)
+	prometheus.MustRegister(TokenRequestDuration)
+	prometheus.MustRegister(ResourceGroupTokenRequestCounter)
+	prometheus.MustRegister(LowTokenRequestNotifyCounter)
+	prometheus.MustRegister(TokenConsumedHistogram)
 }
