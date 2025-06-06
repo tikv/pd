@@ -29,30 +29,29 @@ const (
 )
 
 var (
-	//ResourceGroupStatusGauge comments placeholder
+	// ResourceGroupStatusGauge comments placeholder
 	ResourceGroupStatusGauge *prometheus.GaugeVec
-	//SuccessfulRequestDuration comments placeholder
+	// SuccessfulRequestDuration comments placeholder
 	SuccessfulRequestDuration *prometheus.HistogramVec
-	//FailedLimitReserveDuration comments placeholder
+	// FailedLimitReserveDuration comments placeholder
 	FailedLimitReserveDuration *prometheus.HistogramVec
-	//FailedRequestCounter comments placeholder
+	// FailedRequestCounter comments placeholder
 	FailedRequestCounter *prometheus.CounterVec
-	//GroupRunningKVRequestCounter comments placeholder
+	// GroupRunningKVRequestCounter comments placeholder
 	GroupRunningKVRequestCounter *prometheus.GaugeVec
-	//RequestRetryCounter comments placeholder
+	// RequestRetryCounter comments placeholder
 	RequestRetryCounter *prometheus.CounterVec
-	//TokenRequestDuration comments placeholder
+	// TokenRequestDuration comments placeholder
 	TokenRequestDuration *prometheus.HistogramVec
-	//ResourceGroupTokenRequestCounter comments placeholder
+	// ResourceGroupTokenRequestCounter comments placeholder
 	ResourceGroupTokenRequestCounter *prometheus.CounterVec
-	//LowTokenRequestNotifyCounter comments placeholder
+	// LowTokenRequestNotifyCounter comments placeholder
 	LowTokenRequestNotifyCounter *prometheus.CounterVec
-	//TokenConsumedHistogram comments placeholder
+	// TokenConsumedHistogram comments placeholder
 	TokenConsumedHistogram *prometheus.HistogramVec
-	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
-	//FailedTokenRequestDuration comments placeholder
+	// FailedTokenRequestDuration comments placeholder, WithLabelValues is a heavy operation, define variable to avoid call it every time.
 	FailedTokenRequestDuration prometheus.Observer
-	//SuccessfulTokenRequestDuration comments placeholder
+	// SuccessfulTokenRequestDuration comments placeholder, WithLabelValues is a heavy operation, define variable to avoid call it every time.
 	SuccessfulTokenRequestDuration prometheus.Observer
 )
 
