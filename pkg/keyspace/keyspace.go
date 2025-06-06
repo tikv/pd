@@ -759,6 +759,7 @@ func updateKeyspaceState(meta *keyspacepb.KeyspaceMeta, newState keyspacepb.Keys
 }
 
 // LoadRangeKeyspace load up to limit keyspaces starting from keyspace with startID.
+// It will not load the NullKeyspace meta data.
 func (manager *Manager) LoadRangeKeyspace(startID uint32, limit int) ([]*keyspacepb.KeyspaceMeta, error) {
 	// Load Start should fall within acceptable ID range.
 	if startID > spaceIDMax {
