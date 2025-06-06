@@ -28,10 +28,10 @@ func TestDiscover(t *testing.T) {
 	re := require.New(t)
 	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1)
 	defer clean()
-	sr1 := NewServiceRegister(context.Background(), client, "test_service", "127.0.0.1:1", "127.0.0.1:1", 1)
+	sr1 := NewServiceRegister(context.Background(), client, "test_service", "127.0.0.1:1", "127.0.0.1:1", DefaultLeaseInSeconds)
 	err := sr1.Register()
 	re.NoError(err)
-	sr2 := NewServiceRegister(context.Background(), client, "test_service", "127.0.0.1:2", "127.0.0.1:2", 1)
+	sr2 := NewServiceRegister(context.Background(), client, "test_service", "127.0.0.1:2", "127.0.0.1:2", DefaultLeaseInSeconds)
 	err = sr2.Register()
 	re.NoError(err)
 
@@ -43,7 +43,8 @@ func TestDiscover(t *testing.T) {
 
 	sr1.cancel()
 	sr2.cancel()
-	time.Sleep(3 * time.Second)
+	time.Sleep(DefaultLeaseInSeconds * time.Second) // ensure that the lease is expired
+	time.Sleep(500 * time.Millisecond)              // wait for the etcd to clean up the expired keys
 	endpoints, err = Discover(client, "test_service")
 	re.NoError(err)
 	re.Empty(endpoints)
@@ -56,13 +57,13 @@ func TestServiceRegistryEntry(t *testing.T) {
 	entry1 := &ServiceRegistryEntry{ServiceAddr: "127.0.0.1:1"}
 	s1, err := entry1.Serialize()
 	re.NoError(err)
-	sr1 := NewServiceRegister(context.Background(), client, "test_service", "127.0.0.1:1", s1, 1)
+	sr1 := NewServiceRegister(context.Background(), client, "test_service", "127.0.0.1:1", s1, DefaultLeaseInSeconds)
 	err = sr1.Register()
 	re.NoError(err)
 	entry2 := &ServiceRegistryEntry{ServiceAddr: "127.0.0.1:2"}
 	s2, err := entry2.Serialize()
 	re.NoError(err)
-	sr2 := NewServiceRegister(context.Background(), client, "test_service", "127.0.0.1:2", s2, 1)
+	sr2 := NewServiceRegister(context.Background(), client, "test_service", "127.0.0.1:2", s2, DefaultLeaseInSeconds)
 	err = sr2.Register()
 	re.NoError(err)
 
@@ -78,7 +79,8 @@ func TestServiceRegistryEntry(t *testing.T) {
 
 	sr1.cancel()
 	sr2.cancel()
-	time.Sleep(3 * time.Second)
+	time.Sleep(DefaultLeaseInSeconds * time.Second) // ensure that the lease is expired
+	time.Sleep(500 * time.Millisecond)              // wait for the etcd to clean up the expired keys
 	endpoints, err = Discover(client, "test_service")
 	re.NoError(err)
 	re.Empty(endpoints)

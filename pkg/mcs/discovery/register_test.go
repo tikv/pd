@@ -52,14 +52,14 @@ func TestRegister(t *testing.T) {
 	re.Empty(resp.Kvs)
 
 	// Test the case that ctx is canceled.
-	sr = NewServiceRegister(context.Background(), client, "test_service", "127.0.0.1:2", "127.0.0.1:2", 1)
+	sr = NewServiceRegister(context.Background(), client, "test_service", "127.0.0.1:2", "127.0.0.1:2", DefaultLeaseInSeconds)
 	err = sr.Register()
 	re.NoError(err)
 	sr.cancel()
 	re.Empty(getKeyAfterLeaseExpired(re, client, sr.key))
 
 	// Test the case that keepalive is failed when the etcd is restarted.
-	sr = NewServiceRegister(context.Background(), client, "test_service", "127.0.0.1:2", "127.0.0.1:2", 1)
+	sr = NewServiceRegister(context.Background(), client, "test_service", "127.0.0.1:2", "127.0.0.1:2", DefaultLeaseInSeconds)
 	err = sr.Register()
 	re.NoError(err)
 	fname := testutil.InitTempFileLogger("info")
@@ -88,7 +88,8 @@ func TestRegister(t *testing.T) {
 }
 
 func getKeyAfterLeaseExpired(re *require.Assertions, client *clientv3.Client, key string) string {
-	time.Sleep(3 * time.Second) // ensure that the lease is expired
+	time.Sleep(DefaultLeaseInSeconds * time.Second) // ensure that the lease is expired
+	time.Sleep(500 * time.Millisecond)              // wait for the etcd to clean up the expired keys
 	resp, err := client.Get(context.Background(), key)
 	re.NoError(err)
 	if len(resp.Kvs) == 0 {
