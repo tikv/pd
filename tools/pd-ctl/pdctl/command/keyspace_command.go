@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -284,24 +285,35 @@ func listKeyspaceCommandFunc(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	url := keyspacePrefix
+	baseURL := keyspacePrefix
+	u, err := url.Parse(baseURL)
+	if err != nil {
+		cmd.PrintErrln("Failed to parse base URL: ", err)
+		return
+	}
+
+	query := u.Query()
+
 	limit, err := cmd.Flags().GetString(nmLimit)
 	if err != nil {
 		cmd.PrintErrln("Failed to parse flag: ", err)
 		return
 	}
 	if limit != "" {
-		url += fmt.Sprintf("?limit=%s", limit)
+		query.Set("limit", limit)
 	}
+
 	pageToken, err := cmd.Flags().GetString(nmPageToken)
 	if err != nil {
 		cmd.PrintErrln("Failed to parse flag: ", err)
 		return
 	}
 	if pageToken != "" {
-		url += fmt.Sprintf("&page_token=%s", pageToken)
+		query.Set("page_token", pageToken)
 	}
-	resp, err := doRequest(cmd, url, http.MethodGet, http.Header{})
+
+	u.RawQuery = query.Encode()
+	resp, err := doRequest(cmd, u.String(), http.MethodGet, http.Header{})
 	if err != nil {
 		cmd.PrintErrln("Failed to list keyspace: ", err)
 		return
