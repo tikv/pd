@@ -62,6 +62,26 @@ func SelectOneRegion(regions []*core.RegionInfo, collector *plan.Collector, filt
 	return nil
 }
 
+// RandomSelectOneRegion selects one region that be selected from the list.
+func RandomSelectOneRegion(regions map[uint64]*core.RegionInfo, collector *plan.Collector, filters ...RegionFilter) *core.RegionInfo {
+	for _, r := range regions {
+		if len(filters) == 0 || slice.AllOf(filters,
+			func(i int) bool {
+				status := filters[i].Select(r)
+				if !status.IsOK() {
+					if collector != nil {
+						collector.Collect(plan.SetResource(r), plan.SetStatus(status))
+					}
+					return false
+				}
+				return true
+			}) {
+			return r
+		}
+	}
+	return nil
+}
+
 // RegionFilter is an interface to filter region.
 type RegionFilter interface {
 	// Return plan.Status show whether be filtered
@@ -96,6 +116,24 @@ func NewRegionDownFilter() RegionFilter {
 func (*regionDownFilter) Select(region *core.RegionInfo) *plan.Status {
 	if hasDownPeers(region) {
 		return statusRegionDownPeer
+	}
+	return statusOK
+}
+
+type regionInProgressFilter struct {
+	// return true if the region is in progress.
+	checkFn func(uint64) bool
+}
+
+// NewRegionInProgressFilter creates a RegionFilter that filters regions based on a custom check function.
+func NewRegionInProgressFilter(checkFn func(uint64) bool) RegionFilter {
+	return &regionInProgressFilter{checkFn: checkFn}
+}
+
+// Select implements the RegionFilter interface.
+func (f *regionInProgressFilter) Select(region *core.RegionInfo) *plan.Status {
+	if f.checkFn(region.GetID()) {
+		return statusRegionInProgress
 	}
 	return statusOK
 }
