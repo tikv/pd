@@ -500,7 +500,7 @@ func TestTSONotLeader(t *testing.T) {
 	backendEndpoints := pdLeader.GetAddr()
 	pdClient, err := pd.NewClientWithContext(context.Background(),
 		caller.TestComponent,
-		[]string{backendEndpoints}, pd.SecurityOption{}, opt.WithMaxErrorRetry(1))
+		[]string{backendEndpoints}, pd.SecurityOption{})
 	re.NoError(err)
 	defer pdClient.Close()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/rebaseErr", "return(true)"))
@@ -509,14 +509,8 @@ func TestTSONotLeader(t *testing.T) {
 	go func(client pd.Client) {
 		defer wg.Done()
 		pdLeader.ResignLeader()
-		for range 10 {
-			_, _, err := client.GetTS(ctx)
-			// stream maybe cancelld when the leader is resigned
-			if err.Error() == context.Canceled.Error() {
-				return
-			}
-			re.ErrorContains(err, "not leader")
-		}
+		_, _, err := client.GetTS(ctx)
+		re.ErrorContains(err, "not leader")
 	}(pdClient)
 
 	wg.Wait()
@@ -652,4 +646,61 @@ func checkTSO(
 			}
 		}()
 	}
+}
+
+func TestRetryGetTSNotLeader(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	pdCluster, err := tests.NewTestCluster(ctx, 3)
+	re.NoError(err)
+	defer pdCluster.Destroy()
+	err = pdCluster.RunInitialServers()
+	re.NoError(err)
+	leaderName := pdCluster.WaitLeader()
+	re.NotEmpty(leaderName)
+	pdLeader := pdCluster.GetServer(leaderName)
+	backendEndpoints := pdLeader.GetAddr()
+	pdClient, err := pd.NewClientWithContext(context.Background(),
+		caller.TestComponent,
+		[]string{backendEndpoints}, pd.SecurityOption{})
+	re.NoError(err)
+	defer pdClient.Close()
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+	ctx1, cancel1 := context.WithCancel(ctx)
+	go func(client pd.Client) {
+		defer wg.Done()
+		for {
+			var ts, lastTS uint64
+			for {
+				select {
+				case <-ctx1.Done():
+					// Make sure the lastTS is not empty
+					re.NotEmpty(lastTS)
+					return
+				default:
+				}
+				physical, logical, err := client.GetTS(ctx1)
+				if err != nil {
+					re.ErrorContains(err, context.Canceled.Error())
+					continue
+				}
+				ts = tsoutil.ComposeTS(physical, logical)
+				re.Less(lastTS, ts)
+				lastTS = ts
+			}
+		}
+	}(pdClient)
+
+	for range 5 {
+		time.Sleep(time.Second)
+		err = pdLeader.ResignLeader()
+		re.NoError(err)
+	}
+
+	cancel1()
+	wg.Wait()
 }
