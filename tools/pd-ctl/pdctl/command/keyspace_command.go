@@ -285,15 +285,8 @@ func listKeyspaceCommandFunc(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	baseURL := keyspacePrefix
-	u, err := url.Parse(baseURL)
-	if err != nil {
-		cmd.PrintErrln("Failed to parse base URL: ", err)
-		return
-	}
-
-	query := u.Query()
-
+	u := keyspacePrefix
+	query := make(url.Values)
 	limit, err := cmd.Flags().GetString(nmLimit)
 	if err != nil {
 		cmd.PrintErrln("Failed to parse flag: ", err)
@@ -312,8 +305,12 @@ func listKeyspaceCommandFunc(cmd *cobra.Command, args []string) {
 		query.Set("page_token", pageToken)
 	}
 
-	u.RawQuery = query.Encode()
-	resp, err := doRequest(cmd, u.String(), http.MethodGet, http.Header{})
+	if len(query) > 0 {
+		u += "?"
+		u += query.Encode()
+	}
+
+	resp, err := doRequest(cmd, fmt.Sprintf("%s?%s", keyspacePrefix, query.Encode()), http.MethodGet, http.Header{})
 	if err != nil {
 		cmd.PrintErrln("Failed to list keyspace: ", err)
 		return
