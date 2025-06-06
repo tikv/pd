@@ -751,11 +751,11 @@ func (suite *serverTestSuite) TestOnlineProgress() {
 		}
 	}
 	time.Sleep(2 * time.Second)
-	action, progress, ls, cs, err := rc.GetProgressByID("4")
-	re.Equal("preparing", action)
-	re.NotEmpty(progress)
-	re.NotEmpty(cs)
-	re.NotEmpty(ls)
+	p, err := rc.GetProgressByID(4)
+	re.Equal("preparing", string(p.Action))
+	re.NotEmpty(p.ProgressPercent)
+	re.NotEmpty(p.CurrentSpeed)
+	re.NotEmpty(p.LeftSecond)
 	re.NoError(err)
 	suite.TearDownSuite()
 	suite.SetupSuite()

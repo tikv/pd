@@ -30,10 +30,12 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/goleak"
+	"go.uber.org/zap"
 
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/metapb"
 	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/log"
 
 	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/response"
@@ -1143,15 +1145,25 @@ func TestPreparingProgress(t *testing.T) {
 		if p.LeftSeconds < 108.125 {
 			return false
 		}
+
+		output = sendRequest(re, leader.GetAddr()+"/pd/api/v1/stores/progress?id=4", http.MethodGet, http.StatusOK)
+		re.NoError(json.Unmarshal(output, &p))
+		if p.Action != "preparing" {
+			return false
+		}
+		if fmt.Sprintf("%.2f", p.Progress) != "0.05" {
+			return false
+		}
+		if p.CurrentSpeed > 1.0 {
+			return false
+		}
+		if p.LeftSeconds < 179.0 {
+			return false
+		}
+
 		return true
 	})
 
-	output := sendRequest(re, leader.GetAddr()+"/pd/api/v1/stores/progress?id=4", http.MethodGet, http.StatusOK)
-	re.NoError(json.Unmarshal(output, &p))
-	re.Equal("preparing", p.Action)
-	re.Equal("0.05", fmt.Sprintf("%.2f", p.Progress))
-	re.LessOrEqual(p.CurrentSpeed, 1.0)
-	re.GreaterOrEqual(p.LeftSeconds, 179.0)
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/cluster/highFrequencyClusterJobs"))
 }
 
@@ -1160,6 +1172,7 @@ func sendRequest(re *require.Assertions, url string, method string, statusCode i
 
 	testutil.Eventually(re, func() bool {
 		resp, err := tests.TestDialClient.Do(req)
+		log.Info("send request", zap.String("url", url), zap.String("method", method), zap.Int("status-code", resp.StatusCode))
 		if err != nil {
 			return false
 		}
