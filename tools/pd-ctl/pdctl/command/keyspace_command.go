@@ -310,7 +310,7 @@ func listKeyspaceCommandFunc(cmd *cobra.Command, args []string) {
 		u += query.Encode()
 	}
 
-	resp, err := doRequest(cmd, fmt.Sprintf("%s?%s", keyspacePrefix, query.Encode()), http.MethodGet, http.Header{})
+	resp, err := doRequest(cmd, u, http.MethodGet, http.Header{})
 	if err != nil {
 		cmd.PrintErrln("Failed to list keyspace: ", err)
 		return
