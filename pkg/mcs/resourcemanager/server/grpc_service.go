@@ -93,7 +93,7 @@ func (s *Service) GetResourceGroup(_ context.Context, req *rmpb.GetResourceGroup
 	if err := s.checkServing(); err != nil {
 		return nil, err
 	}
-	rg := s.manager.GetResourceGroup(extractKeyspaceID(req.GetKeyspaceId()), req.ResourceGroupName, req.WithRuStats)
+	rg := s.manager.GetResourceGroup(ExtractKeyspaceID(req.GetKeyspaceId()), req.ResourceGroupName, req.WithRuStats)
 	if rg == nil {
 		return nil, errors.New("resource group not found")
 	}
@@ -107,7 +107,7 @@ func (s *Service) ListResourceGroups(_ context.Context, req *rmpb.ListResourceGr
 	if err := s.checkServing(); err != nil {
 		return nil, err
 	}
-	groups := s.manager.GetResourceGroupList(extractKeyspaceID(req.GetKeyspaceId()), req.WithRuStats)
+	groups := s.manager.GetResourceGroupList(ExtractKeyspaceID(req.GetKeyspaceId()), req.WithRuStats)
 	resp := &rmpb.ListResourceGroupsResponse{
 		Groups: make([]*rmpb.ResourceGroup, 0, len(groups)),
 	}
@@ -134,7 +134,7 @@ func (s *Service) DeleteResourceGroup(_ context.Context, req *rmpb.DeleteResourc
 	if err := s.checkServing(); err != nil {
 		return nil, err
 	}
-	err := s.manager.DeleteResourceGroup(extractKeyspaceID(req.GetKeyspaceId()), req.ResourceGroupName)
+	err := s.manager.DeleteResourceGroup(ExtractKeyspaceID(req.GetKeyspaceId()), req.ResourceGroupName)
 	if err != nil {
 		return nil, err
 	}
@@ -181,7 +181,7 @@ func (s *Service) AcquireTokenBuckets(stream rmpb.ResourceManager_AcquireTokenBu
 			logFields      = make([]zap.Field, 2)
 		)
 		for _, req := range request.Requests {
-			keyspaceID := extractKeyspaceID(req.GetKeyspaceId())
+			keyspaceID := ExtractKeyspaceID(req.GetKeyspaceId())
 			resourceGroupName := req.GetResourceGroupName()
 			logFields[0] = zap.Uint32("keyspace-id", keyspaceID)
 			logFields[1] = zap.String("resource-group", resourceGroupName)

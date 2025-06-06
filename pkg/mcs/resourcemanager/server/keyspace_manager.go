@@ -204,19 +204,6 @@ func (krgm *keyspaceResourceGroupManager) getResourceGroupList(withStats, includ
 	return res
 }
 
-func (krgm *keyspaceResourceGroupManager) getResourceGroupNames(includeDefault bool) []string {
-	krgm.RLock()
-	defer krgm.RUnlock()
-	res := make([]string, 0, len(krgm.groups))
-	for name := range krgm.groups {
-		if !includeDefault && name == DefaultResourceGroupName {
-			continue
-		}
-		res = append(res, name)
-	}
-	return res
-}
-
 func (krgm *keyspaceResourceGroupManager) persistResourceGroupRunningState() {
 	krgm.RLock()
 	keys := make([]string, 0, len(krgm.groups))

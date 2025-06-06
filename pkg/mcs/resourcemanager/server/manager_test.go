@@ -146,7 +146,7 @@ func checkBackgroundMetricsFlush(ctx context.Context, re *require.Assertions, ma
 	}
 	manager.dispatchConsumption(req)
 
-	keyspaceID := extractKeyspaceID(req.GetKeyspaceId())
+	keyspaceID := ExtractKeyspaceID(req.GetKeyspaceId())
 	// Verify consumption was added to the resource group.
 	testutil.Eventually(re, func() bool {
 		updatedGroup := manager.GetResourceGroup(keyspaceID, req.GetResourceGroupName(), true)
@@ -159,7 +159,7 @@ func checkBackgroundMetricsFlush(ctx context.Context, re *require.Assertions, ma
 // Put a keyspace meta into the storage.
 func prepareKeyspaceName(ctx context.Context, re *require.Assertions, manager *Manager, keyspaceIDValue *rmpb.KeyspaceIDValue, keyspaceName string) {
 	keyspaceMeta := &keyspacepb.KeyspaceMeta{
-		Id:   extractKeyspaceID(keyspaceIDValue),
+		Id:   ExtractKeyspaceID(keyspaceIDValue),
 		Name: keyspaceName,
 	}
 	err := manager.storage.RunInTxn(ctx, func(txn kv.Txn) error {
@@ -213,7 +213,7 @@ func checkAddAndModifyResourceGroup(re *require.Assertions, manager *Manager, ke
 	err = manager.ModifyResourceGroup(group)
 	re.NoError(err)
 
-	keyspaceID := extractKeyspaceID(keyspaceIDValue)
+	keyspaceID := ExtractKeyspaceID(keyspaceIDValue)
 	testutil.Eventually(re, func() bool {
 		rg := manager.GetResourceGroup(keyspaceID, group.Name, true)
 		re.NotNil(rg)
@@ -224,7 +224,6 @@ func checkAddAndModifyResourceGroup(re *require.Assertions, manager *Manager, ke
 
 func TestCleanUpTicker(t *testing.T) {
 	re := require.New(t)
-	initMaps()
 	m := prepareManager()
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -233,12 +232,12 @@ func TestCleanUpTicker(t *testing.T) {
 	keyspaceID := uint32(1)
 	prepareKeyspaceName(ctx, re, m, &rmpb.KeyspaceIDValue{Value: keyspaceID}, "test_keyspace")
 	// Insert two consumption records manually.
-	consumptionRecordMap[consumptionRecordKey{
+	m.metrics.consumptionRecordMap[consumptionRecordKey{
 		keyspaceID: keyspaceID,
 		groupName:  "test_group_1",
 		ruType:     defaultTypeLabel,
 	}] = time.Now().Add(-metricsCleanupTimeout * 2)
-	consumptionRecordMap[consumptionRecordKey{
+	m.metrics.consumptionRecordMap[consumptionRecordKey{
 		keyspaceID: keyspaceID,
 		groupName:  "test_group_2",
 		ruType:     defaultTypeLabel,
@@ -255,8 +254,8 @@ func TestCleanUpTicker(t *testing.T) {
 	// Close the manager to avoid the data race.
 	m.close()
 
-	re.Len(consumptionRecordMap, 1)
-	re.Contains(consumptionRecordMap, consumptionRecordKey{
+	re.Len(m.metrics.consumptionRecordMap, 1)
+	re.Contains(m.metrics.consumptionRecordMap, consumptionRecordKey{
 		keyspaceID: keyspaceID,
 		groupName:  "test_group_2",
 		ruType:     defaultTypeLabel,
