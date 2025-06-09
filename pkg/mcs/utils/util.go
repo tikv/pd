@@ -72,6 +72,7 @@ func StatusHandler(c *gin.Context) {
 		GitHash:        versioninfo.PDGitHash,
 		Version:        versioninfo.PDReleaseVersion,
 		StartTimestamp: svr.StartTimestamp(),
+		KernelType:     versioninfo.PDKernelType,
 	}
 
 	c.IndentedJSON(http.StatusOK, version)

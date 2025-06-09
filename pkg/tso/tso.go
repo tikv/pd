@@ -280,8 +280,6 @@ func (t *timestampOracle) updateTimestamp() error {
 		return errs.ErrUpdateTimestamp.FastGenByArgs("timestamp in memory has not been initialized")
 	}
 	prevPhysical, prevLogical := t.getTSO()
-	t.metrics.tsoPhysicalGauge.Set(float64(prevPhysical.UnixNano() / int64(time.Millisecond)))
-	t.metrics.tsoPhysicalGapGauge.Set(float64(time.Since(prevPhysical).Milliseconds()))
 
 	now := time.Now()
 	failpoint.Inject("fallBackUpdate", func() {
@@ -290,10 +288,12 @@ func (t *timestampOracle) updateTimestamp() error {
 	failpoint.Inject("systemTimeSlow", func() {
 		now = now.Add(-time.Hour)
 	})
+	jetLag := typeutil.SubRealTimeByWallClock(now, prevPhysical)
 
+	t.metrics.tsoPhysicalGauge.Set(float64(prevPhysical.UnixNano() / int64(time.Millisecond)))
+	t.metrics.tsoPhysicalGapGauge.Set(float64(jetLag.Milliseconds()))
 	t.metrics.saveEvent.Inc()
 
-	jetLag := typeutil.SubRealTimeByWallClock(now, prevPhysical)
 	if jetLag > 3*t.updatePhysicalInterval && jetLag > jetLagWarningThreshold {
 		log.Warn("clock offset",
 			logutil.CondUint32("keyspace-group-id", t.keyspaceGroupID, t.keyspaceGroupID > 0),

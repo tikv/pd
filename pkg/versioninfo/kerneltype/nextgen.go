@@ -16,7 +16,12 @@
 
 package kerneltype
 
-// IsNextGen returns true if the current kernel type is NextGen.
+var (
+	// KernelType is the current kernel type, which is Next Generation in this case.
+	KernelType = "Next Generation"
+)
+
+// IsNextGen returns true if the current kernel type is Next Generation.
 // see doc.go for more info.
 func IsNextGen() bool {
 	return true
