@@ -46,6 +46,9 @@ const (
 	//   - ~10s, which smooths the RU/s fluctuations but may not track the spike that quickly.
 	//   - ~20s, which smooths the RU/s fluctuations but can only be used to observe the long-term trend.
 	defaultRUTrackerTimeConstant = 5 * time.Second
+	// minSampledRUPerSec is the minimum RU/s to be sampled by the RU tracker. If it's less than this value,
+	// the sampled RU/s will be treated as 0.
+	minSampledRUPerSec = 1.0
 )
 
 // consumptionItem is used to send the consumption info to the background metrics flusher.
@@ -307,7 +310,7 @@ func (rt *ruTracker) sample(now time.Time, totalRU float64, dur time.Duration) {
 		return
 	}
 	// Calculate the average RU/s within the `dur`.
-	ruPerSec := totalRU / dur.Seconds()
+	ruPerSec := math.Max(0, totalRU) / dur.Seconds()
 	// If the last sample time is not set, set the last EMA directly.
 	if rt.lastSampleTime.IsZero() {
 		rt.lastEMA = ruPerSec
@@ -324,6 +327,10 @@ func (rt *ruTracker) sample(now time.Time, totalRU float64, dur time.Duration) {
 	//   2. The decay factor is time-aware, the larger the time delta, the lower the weight of the "old data".
 	decay := math.Exp(-rt.beta * dt)
 	rt.lastEMA = decay*rt.lastEMA + (1-decay)*ruPerSec
+	// If the `lastEMA` is less than `minSampledRUPerSec`, set it to 0 to avoid converging into a very small value.
+	if rt.lastEMA < minSampledRUPerSec {
+		rt.lastEMA = 0
+	}
 	rt.lastSampleTime = now
 }
 
