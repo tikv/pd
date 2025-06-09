@@ -254,8 +254,12 @@ func (krgm *keyspaceResourceGroupManager) getOrCreateRUTracker(name string) *ruT
 	rt := krgm.getRUTracker(name)
 	if rt == nil {
 		krgm.Lock()
-		rt = newRUTracker(defaultRUTrackerTimeConstant)
-		krgm.ruTrackers[name] = rt
+		// Double check the RU tracker is not created by other goroutine.
+		rt = krgm.ruTrackers[name]
+		if rt == nil {
+			rt = newRUTracker(defaultRUTrackerTimeConstant)
+			krgm.ruTrackers[name] = rt
+		}
 		krgm.Unlock()
 	}
 	return rt
