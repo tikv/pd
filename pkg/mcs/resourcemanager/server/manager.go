@@ -157,6 +157,20 @@ func (m *Manager) getKeyspaceResourceGroupManager(keyspaceID uint32) *keyspaceRe
 	return m.krgms[keyspaceID]
 }
 
+func (m *Manager) accessKeyspaceResourceGroupManager(keyspaceID uint32, groupName string) (*keyspaceResourceGroupManager, error) {
+	krgm := m.getKeyspaceResourceGroupManager(keyspaceID)
+	if krgm == nil && groupName == DefaultResourceGroupName {
+		// For the default resource group, if the keyspace manager doesn't exist yet
+		// and the group name is the default resource group name, we try to get or create it.
+		krgm = m.getOrCreateKeyspaceResourceGroupManager(keyspaceID, true)
+		return krgm, nil
+	}
+	if krgm == nil {
+		return nil, errs.ErrKeyspaceNotExists.FastGenByArgs(keyspaceID)
+	}
+	return krgm, nil
+}
+
 // Init initializes the resource group manager.
 func (m *Manager) Init(ctx context.Context) error {
 	v, err := m.storage.LoadControllerConfig()
@@ -296,26 +310,26 @@ func (m *Manager) AddResourceGroup(grouppb *rmpb.ResourceGroup) error {
 // ModifyResourceGroup modifies an existing resource group.
 func (m *Manager) ModifyResourceGroup(grouppb *rmpb.ResourceGroup) error {
 	keyspaceID := ExtractKeyspaceID(grouppb.GetKeyspaceId())
-	krgm := m.getKeyspaceResourceGroupManager(keyspaceID)
-	if krgm == nil {
-		return errs.ErrKeyspaceNotExists.FastGenByArgs(keyspaceID)
+	krgm, err := m.accessKeyspaceResourceGroupManager(keyspaceID, grouppb.Name)
+	if err != nil {
+		return err
 	}
 	return krgm.modifyResourceGroup(grouppb)
 }
 
 // DeleteResourceGroup deletes a resource group.
 func (m *Manager) DeleteResourceGroup(keyspaceID uint32, name string) error {
-	krgm := m.getKeyspaceResourceGroupManager(keyspaceID)
-	if krgm == nil {
-		return errs.ErrKeyspaceNotExists.FastGenByArgs(keyspaceID)
+	krgm, err := m.accessKeyspaceResourceGroupManager(keyspaceID, name)
+	if err != nil {
+		return err
 	}
 	return krgm.deleteResourceGroup(name)
 }
 
 // GetResourceGroup returns a copy of a resource group.
 func (m *Manager) GetResourceGroup(keyspaceID uint32, name string, withStats bool) *ResourceGroup {
-	krgm := m.getKeyspaceResourceGroupManager(keyspaceID)
-	if krgm == nil {
+	krgm, err := m.accessKeyspaceResourceGroupManager(keyspaceID, name)
+	if err != nil {
 		return nil
 	}
 	return krgm.getResourceGroup(name, withStats)
@@ -323,8 +337,8 @@ func (m *Manager) GetResourceGroup(keyspaceID uint32, name string, withStats boo
 
 // GetMutableResourceGroup returns a mutable resource group.
 func (m *Manager) GetMutableResourceGroup(keyspaceID uint32, name string) *ResourceGroup {
-	krgm := m.getKeyspaceResourceGroupManager(keyspaceID)
-	if krgm == nil {
+	krgm, err := m.accessKeyspaceResourceGroupManager(keyspaceID, name)
+	if err != nil {
 		return nil
 	}
 	return krgm.getMutableResourceGroup(name)
@@ -332,16 +346,16 @@ func (m *Manager) GetMutableResourceGroup(keyspaceID uint32, name string) *Resou
 
 // GetResourceGroupList returns copies of resource group list.
 func (m *Manager) GetResourceGroupList(keyspaceID uint32, withStats bool) []*ResourceGroup {
-	krgm := m.getKeyspaceResourceGroupManager(keyspaceID)
-	if krgm == nil {
+	krgm, err := m.accessKeyspaceResourceGroupManager(keyspaceID, DefaultResourceGroupName)
+	if err != nil {
 		return nil
 	}
 	return krgm.getResourceGroupList(withStats, true)
 }
 
 func (m *Manager) getRUTracker(keyspaceID uint32, name string) *ruTracker {
-	krgm := m.getKeyspaceResourceGroupManager(keyspaceID)
-	if krgm == nil {
+	krgm, err := m.accessKeyspaceResourceGroupManager(keyspaceID, DefaultResourceGroupName)
+	if err != nil {
 		return nil
 	}
 	return krgm.getOrCreateRUTracker(name)
