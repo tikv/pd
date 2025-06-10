@@ -48,7 +48,7 @@ import (
 )
 
 var (
-	defaultJobTimeout = time.Hour
+	defaultJobTimeout = 30 * time.Minute
 	reserveDuration   = 7 * 24 * time.Hour
 )
 

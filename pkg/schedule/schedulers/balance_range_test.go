@@ -282,7 +282,9 @@ func TestPersistFail(t *testing.T) {
 	}
 	conf.init("test", storage.NewStorageWithMemoryBackend(), conf)
 	errMsg := "fail to persist"
-	newJob := &balanceRangeSchedulerJob{}
+	newJob := &balanceRangeSchedulerJob{
+		Alias: "test.t",
+	}
 	re.ErrorContains(conf.addJob(newJob), errMsg)
 	re.Len(conf.jobs, 1)
 
