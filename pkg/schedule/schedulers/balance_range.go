@@ -116,7 +116,7 @@ func (handler *balanceRangeSchedulerHandler) addJob(w http.ResponseWriter, r *ht
 		handler.rd.JSON(w, http.StatusBadRequest, fmt.Sprintf("end key:%s can't be unescaped", input["end-key"].(string)))
 		return
 	}
-	log.Info("add balance key range job", zap.String("start-key", startKeyStr), zap.String("end-key", endKeyStr))
+	log.Info("add balance key range job", zap.String("alias", job.Alias))
 	rs, err := decodeKeyRanges(endKeyStr, startKeyStr)
 	if err != nil {
 		handler.rd.JSON(w, http.StatusBadRequest, err.Error())
@@ -173,6 +173,14 @@ type balanceRangeSchedulerConfig struct {
 func (conf *balanceRangeSchedulerConfig) addJob(job *balanceRangeSchedulerJob) error {
 	conf.Lock()
 	defer conf.Unlock()
+	for _, c := range conf.jobs {
+		if c.isComplete() {
+			continue
+		}
+		if job.Alias == c.Alias {
+			return errors.New("job already exists")
+		}
+	}
 	job.Status = pending
 	if len(conf.jobs) == 0 {
 		job.JobID = 1

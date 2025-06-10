@@ -47,31 +47,37 @@ func TestCodecKeyRange(t *testing.T) {
 func TestOverLap(t *testing.T) {
 	re := require.New(t)
 	for _, tc := range []struct {
-		name   string
-		a, b   KeyRange
-		expect bool
+		name       string
+		a, b       KeyRange
+		expect     bool
+		isAdjacent bool
 	}{
 		{
-			name:   "overlap",
-			a:      NewKeyRange("a", "c"),
-			b:      NewKeyRange("b", "d"),
-			expect: true,
+			name:       "overlap",
+			a:          NewKeyRange("a", "c"),
+			b:          NewKeyRange("b", "d"),
+			expect:     true,
+			isAdjacent: false,
 		},
 		{
-			name:   "no overlap",
-			a:      NewKeyRange("a", "b"),
-			b:      NewKeyRange("c", "d"),
-			expect: false,
+			name:       "no overlap",
+			a:          NewKeyRange("a", "b"),
+			b:          NewKeyRange("c", "d"),
+			expect:     false,
+			isAdjacent: false,
 		},
 		{
-			name:   "continuous",
-			a:      NewKeyRange("a", "b"),
-			b:      NewKeyRange("b", "d"),
-			expect: true,
+			name:       "continuous",
+			a:          NewKeyRange("a", "b"),
+			b:          NewKeyRange("b", "d"),
+			expect:     true,
+			isAdjacent: true,
 		},
 	} {
 		re.Equal(tc.expect, tc.a.OverLapped(&tc.b))
 		re.Equal(tc.expect, tc.b.OverLapped(&tc.a))
+		re.Equal(tc.isAdjacent, tc.b.IsAdjacent(&tc.a))
+		re.Equal(tc.isAdjacent, tc.a.IsAdjacent(&tc.b))
 	}
 }
 

@@ -41,6 +41,12 @@ func (kr *KeyRange) OverLapped(other *KeyRange) bool {
 	return less(leftMax, rightMin, right)
 }
 
+// IsAdjacent returns true if the two KeyRanges are adjacent.
+func (kr *KeyRange) IsAdjacent(other *KeyRange) bool {
+	// Check if the end of one range is equal to the start of the other range
+	return bytes.Equal(kr.EndKey, other.StartKey) || bytes.Equal(other.EndKey, kr.StartKey)
+}
+
 var _ json.Marshaler = &KeyRange{}
 var _ json.Unmarshaler = &KeyRange{}
 
@@ -114,7 +120,7 @@ func (rs *KeyRanges) Append(startKey, endKey []byte) {
 
 // SortAndDeduce sorts the KeyRanges and deduces the overlapped KeyRanges.
 func (rs *KeyRanges) SortAndDeduce() {
-	if len(rs.krs) == 0 {
+	if len(rs.krs) <= 1 {
 		return
 	}
 	sort.Slice(rs.krs, func(i, j int) bool {
@@ -124,7 +130,7 @@ func (rs *KeyRanges) SortAndDeduce() {
 	res = append(res, rs.krs[0])
 	for i := 1; i < len(rs.krs); i++ {
 		last := res[len(res)-1]
-		if last.OverLapped(rs.krs[i]) {
+		if last.IsAdjacent(rs.krs[i]) {
 			last.StartKey = MinKeyWithBoundary(last.StartKey, rs.krs[i].StartKey, left)
 			last.EndKey = MaxKeyWithBoundary(last.EndKey, rs.krs[i].EndKey, right)
 		} else {
