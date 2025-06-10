@@ -77,7 +77,7 @@ func showLabelListStoresCommandFunc(cmd *cobra.Command, args []string) {
 	}
 	query := make(url.Values)
 	query.Set("name", getValue(args, 0))
-	query.Set("value", args[1])
+	query.Set("value", getValue(args, 1))
 	prefix := labelsStorePrefix
 	if len(query) > 0 {
 		prefix += "?" + query.Encode()

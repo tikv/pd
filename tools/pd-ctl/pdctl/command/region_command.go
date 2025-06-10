@@ -448,6 +448,9 @@ func showRegionWithCheckCommandFunc(cmd *cobra.Command, args []string) {
 			query.Set("bound", "10000")
 		}
 	}
+	if len(query) > 0 {
+		prefix += "?" + query.Encode()
+	}
 	r, err := doRequest(cmd, prefix, http.MethodGet, http.Header{})
 	if err != nil {
 		cmd.Printf("Failed to get region: %s\n", err)
