@@ -319,9 +319,10 @@ func (m *Manager) ModifyResourceGroup(grouppb *rmpb.ResourceGroup) error {
 
 // DeleteResourceGroup deletes a resource group.
 func (m *Manager) DeleteResourceGroup(keyspaceID uint32, name string) error {
-	krgm, err := m.accessKeyspaceResourceGroupManager(keyspaceID, name)
-	if err != nil {
-		return err
+	// "default" group can't be deleted, so there is not need to call accessKeyspaceResourceGroupManager
+	krgm := m.getKeyspaceResourceGroupManager(keyspaceID)
+	if krgm == nil {
+		return errs.ErrKeyspaceNotExists.FastGenByArgs(keyspaceID)
 	}
 	return krgm.deleteResourceGroup(name)
 }
