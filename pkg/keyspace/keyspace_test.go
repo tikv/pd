@@ -149,6 +149,53 @@ func (suite *keyspaceTestSuite) TestCreateKeyspace() {
 	re.Error(err)
 }
 
+func (suite *keyspaceTestSuite) TestGCManagementTypeDefaultValue() {
+	re := suite.Require()
+	manager := suite.manager
+
+	now := time.Now().Unix()
+	const classic = `return(false)`
+	const nextGen = `return(true)`
+
+	type testCase struct {
+		nextGenFlag      string
+		gcManagementType string
+		expect           string
+	}
+
+	cases := []testCase{
+		{classic, "", ""},
+		{classic, UnifiedGC, UnifiedGC},
+		{classic, KeyspaceLevelGC, KeyspaceLevelGC},
+		{nextGen, "", KeyspaceLevelGC},
+		{nextGen, UnifiedGC, UnifiedGC},
+		{classic, KeyspaceLevelGC, KeyspaceLevelGC},
+	}
+	defer failpoint.Disable("github.com/tikv/pd/pkg/versioninfo/kerneltype/mockNextGenBuildFlag")
+	for idx, tc := range cases {
+		failpoint.Enable("github.com/tikv/pd/pkg/versioninfo/kerneltype/mockNextGenBuildFlag", tc.nextGenFlag)
+		cfg := make(map[string]string)
+		if tc.gcManagementType != "" {
+			cfg[GCManagementType] = tc.gcManagementType
+		}
+		req := &CreateKeyspaceRequest{
+			Name:       fmt.Sprintf("test_gc_management_type_%d", idx),
+			CreateTime: now,
+			Config:     cfg,
+		}
+		created, err := manager.CreateKeyspace(req)
+		re.NoError(err)
+		loaded, err := manager.LoadKeyspaceByID(created.Id)
+		re.NoError(err)
+		re.Equal(loaded.Config[GCManagementType], tc.expect, fmt.Sprintf("case %d failed", idx))
+	}
+
+	// Null keyspace is special, CreateKeyspace() cannot create it and
+	// the keyspace meta data of config GCManageType is not unified.
+	_, err := manager.LoadKeyspaceByID(constant.NullKeyspaceID)
+	re.NotNil(err)
+}
+
 func makeCreateKeyspaceByIDRequests(count int) []*CreateKeyspaceByIDRequest {
 	now := time.Now().Unix()
 	requests := make([]*CreateKeyspaceByIDRequest, count)
