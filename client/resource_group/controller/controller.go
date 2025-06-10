@@ -52,6 +52,9 @@ const (
 	watchRetryInterval = 30 * time.Second
 
 	bigRequestThreshold = 4 * 1024 * 1024 // 4MB -> 16 RRU
+
+	defaultResourceGroupFillRate   = 2_000_000
+	defaultResourceGroupBurstLimit = 50_000_000_000
 )
 
 type selectType int
@@ -133,6 +136,20 @@ func WithDegradedModeWaitDuration(d time.Duration) ResourceControlCreateOption {
 	}
 }
 
+// WithTempBurstLimit is the option to set BurstLimit.
+func WithTempBurstLimit(tempBurstLimit int64) ResourceControlCreateOption {
+	return func(controller *ResourceGroupsController) {
+		controller.tempBurstLimit = tempBurstLimit
+	}
+}
+
+// WithTempFillRate is the option to set FillRate.
+func WithTempFillRate(tempFillRate uint64) ResourceControlCreateOption {
+	return func(controller *ResourceGroupsController) {
+		controller.tempFillRate = tempFillRate
+	}
+}
+
 var _ ResourceGroupKVInterceptor = (*ResourceGroupsController)(nil)
 
 // ResourceGroupsController implements ResourceGroupKVInterceptor.
@@ -163,6 +180,10 @@ type ResourceGroupsController struct {
 		// Currently, we don't do multiple `AcquireTokenBuckets`` at the same time, so there are no concurrency problems with `currentRequests`.
 		currentRequests []*rmpb.TokenBucketRequest
 	}
+
+	isTempResourceGroup bool
+	tempFillRate        uint64
+	tempBurstLimit      int64
 
 	opts []ResourceControlCreateOption
 
@@ -197,6 +218,8 @@ func NewResourceGroupController(
 		tokenResponseChan:     make(chan []*rmpb.TokenBucketResponse, 1),
 		tokenBucketUpdateChan: make(chan *groupCostController, maxNotificationChanLen),
 		opts:                  opts,
+		tempFillRate:          defaultResourceGroupFillRate,
+		tempBurstLimit:        defaultResourceGroupBurstLimit,
 	}
 	for _, opt := range opts {
 		opt(controller)
@@ -466,6 +489,19 @@ func NewResourceGroupNotExistErr(name string) error {
 	return errors.Errorf("%s does not exist", name)
 }
 
+func (c *ResourceGroupsController) getDegradedResourceGroup(resourceGroupName string) *rmpb.ResourceGroup {
+	var group *rmpb.ResourceGroup
+	group.Name = resourceGroupName
+	group.Mode = rmpb.GroupMode_RUMode
+	group.RUSettings = &rmpb.GroupRequestUnitSettings{RU: &rmpb.TokenBucket{
+		Settings: &rmpb.TokenLimitSettings{
+			FillRate:   c.tempFillRate,
+			BurstLimit: c.tempBurstLimit,
+		},
+	}}
+	return group
+}
+
 // tryGetResourceGroupController will try to get the resource group controller from local cache first.
 // If the local cache misses, it will then call gRPC to fetch the resource group info from the remote server.
 // If `useTombstone` is true, it will return the resource group controller even if it is marked as tombstone.
@@ -480,10 +516,17 @@ func (c *ResourceGroupsController) tryGetResourceGroupController(
 		}
 		return gc, nil
 	}
+	log.Info("test-yjy tryGetResourceGroupController", zap.String("name", name))
 	// Call gRPC to fetch the resource group info.
 	group, err := c.provider.GetResourceGroup(ctx, name)
 	if err != nil {
-		return nil, err
+		if !c.isTempResourceGroup {
+			c.isTempResourceGroup = true
+			group = c.getDegradedResourceGroup(name)
+		}
+		//		return nil, err
+	} else {
+		c.isTempResourceGroup = false
 	}
 	if group == nil {
 		return nil, NewResourceGroupNotExistErr(name)
@@ -497,11 +540,13 @@ func (c *ResourceGroupsController) tryGetResourceGroupController(
 	if err != nil {
 		return nil, err
 	}
-	// Check again to prevent initializing the same resource group concurrently.
-	gc, loaded := c.loadOrStoreGroupController(name, gc)
-	if !loaded {
-		metrics.ResourceGroupStatusGauge.WithLabelValues(name, group.Name).Set(1)
-		log.Info("[resource group controller] create resource group cost controller", zap.String("name", name))
+	if !c.isTempResourceGroup {
+		// Check again to prevent initializing the same resource group concurrently.
+		_, loaded := c.loadOrStoreGroupController(name, gc)
+		if !loaded {
+			metrics.ResourceGroupStatusGauge.WithLabelValues(name, group.Name).Set(1)
+			log.Info("[resource group controller] create resource group cost controller", zap.String("name", name))
+		}
 	}
 	return gc, nil
 }
