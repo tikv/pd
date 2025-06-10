@@ -15,7 +15,6 @@
 package apis
 
 import (
-	"errors"
 	"fmt"
 	"net/http"
 	"reflect"
@@ -175,9 +174,10 @@ func (s *Service) getResourceGroup(c *gin.Context) {
 		return
 	}
 	keyspaceID := rmserver.ExtractKeyspaceID(keyspaceIDValue)
-	group := s.manager.GetResourceGroup(keyspaceID, c.Param("name"), withStats)
-	if group == nil {
-		c.String(http.StatusNotFound, errors.New("resource group not found").Error())
+	group, err := s.manager.GetResourceGroup(keyspaceID, c.Param("name"), withStats)
+	if err != nil {
+		c.String(http.StatusNotFound, err.Error())
+		return
 	}
 	c.IndentedJSON(http.StatusOK, group)
 }
@@ -200,7 +200,11 @@ func (s *Service) getResourceGroupList(c *gin.Context) {
 		return
 	}
 	keyspaceID := rmserver.ExtractKeyspaceID(keyspaceIDValue)
-	groups := s.manager.GetResourceGroupList(keyspaceID, withStats)
+	groups, err := s.manager.GetResourceGroupList(keyspaceID, withStats)
+	if err != nil {
+		c.String(http.StatusNotFound, err.Error())
+		return
+	}
 	c.IndentedJSON(http.StatusOK, groups)
 }
 
@@ -223,6 +227,7 @@ func (s *Service) deleteResourceGroup(c *gin.Context) {
 	keyspaceID := rmserver.ExtractKeyspaceID(keyspaceIDValue)
 	if err := s.manager.DeleteResourceGroup(keyspaceID, c.Param("name")); err != nil {
 		c.String(http.StatusNotFound, err.Error())
+		return
 	}
 	c.String(http.StatusOK, "Success!")
 }

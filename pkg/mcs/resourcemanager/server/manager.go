@@ -328,38 +328,38 @@ func (m *Manager) DeleteResourceGroup(keyspaceID uint32, name string) error {
 }
 
 // GetResourceGroup returns a copy of a resource group.
-func (m *Manager) GetResourceGroup(keyspaceID uint32, name string, withStats bool) *ResourceGroup {
+func (m *Manager) GetResourceGroup(keyspaceID uint32, name string, withStats bool) (*ResourceGroup, error) {
 	krgm, err := m.accessKeyspaceResourceGroupManager(keyspaceID, name)
 	if err != nil {
-		return nil
+		return nil, err
 	}
-	return krgm.getResourceGroup(name, withStats)
+	return krgm.getResourceGroup(name, withStats), nil
 }
 
 // GetMutableResourceGroup returns a mutable resource group.
-func (m *Manager) GetMutableResourceGroup(keyspaceID uint32, name string) *ResourceGroup {
+func (m *Manager) GetMutableResourceGroup(keyspaceID uint32, name string) (*ResourceGroup, error) {
 	krgm, err := m.accessKeyspaceResourceGroupManager(keyspaceID, name)
 	if err != nil {
-		return nil
+		return nil, err
 	}
-	return krgm.getMutableResourceGroup(name)
+	return krgm.getMutableResourceGroup(name), nil
 }
 
 // GetResourceGroupList returns copies of resource group list.
-func (m *Manager) GetResourceGroupList(keyspaceID uint32, withStats bool) []*ResourceGroup {
+func (m *Manager) GetResourceGroupList(keyspaceID uint32, withStats bool) ([]*ResourceGroup, error) {
 	krgm, err := m.accessKeyspaceResourceGroupManager(keyspaceID, DefaultResourceGroupName)
 	if err != nil {
-		return nil
+		return nil, err
 	}
-	return krgm.getResourceGroupList(withStats, true)
+	return krgm.getResourceGroupList(withStats, true), nil
 }
 
-func (m *Manager) getRUTracker(keyspaceID uint32, name string) *ruTracker {
+func (m *Manager) getRUTracker(keyspaceID uint32, name string) (*ruTracker, error) {
 	krgm, err := m.accessKeyspaceResourceGroupManager(keyspaceID, DefaultResourceGroupName)
 	if err != nil {
-		return nil
+		return nil, err
 	}
-	return krgm.getOrCreateRUTracker(name)
+	return krgm.getOrCreateRUTracker(name), nil
 }
 
 func (m *Manager) persistLoop(ctx context.Context) {
@@ -511,11 +511,21 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 			sinceLastRecord := m.metrics.recordConsumption(consumptionInfo, keyspaceName, m.controllerConfig, now)
 			resourceGroupName := consumptionInfo.resourceGroupName
 			// TODO: maybe we need to distinguish background ru.
-			if rg := m.GetMutableResourceGroup(keyspaceID, resourceGroupName); rg != nil {
+			if rg, err := m.GetMutableResourceGroup(keyspaceID, resourceGroupName); rg != nil {
 				rg.UpdateRUConsumption(consumptionInfo.Consumption)
+			} else {
+				log.Error("failed to get mutable resource group",
+					zap.Uint32("keyspace-id", keyspaceID),
+					zap.String("resource-group-name", resourceGroupName),
+					zap.Error(err))
 			}
-			if rt := m.getRUTracker(keyspaceID, resourceGroupName); rt != nil {
+			if rt, err := m.getRUTracker(keyspaceID, resourceGroupName); rt != nil {
 				rt.sample(now, consumptionInfo.RRU+consumptionInfo.WRU, sinceLastRecord)
+			} else {
+				log.Error("failed to get RU tracker",
+					zap.Uint32("keyspace-id", keyspaceID),
+					zap.String("resource-group-name", resourceGroupName),
+					zap.Error(err))
 			}
 		case <-cleanUpTicker.C:
 			// Clean up the metrics that have not been updated for a long time.
