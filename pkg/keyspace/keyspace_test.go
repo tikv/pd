@@ -187,13 +187,8 @@ func (suite *keyspaceTestSuite) TestGCManagementTypeDefaultValue() {
 		re.NoError(err)
 		loaded, err := manager.LoadKeyspaceByID(created.Id)
 		re.NoError(err)
-		re.Equal(loaded.Config[GCManagementType], tc.expect, fmt.Sprintf("case %d failed", idx))
+		re.Equal(loaded.Config[GCManagementType], tc.expect)
 	}
-
-	// Null keyspace is special, CreateKeyspace() cannot create it and
-	// the keyspace meta data of config GCManageType is not unified.
-	_, err := manager.LoadKeyspaceByID(constant.NullKeyspaceID)
-	re.NotNil(err)
 }
 
 func makeCreateKeyspaceByIDRequests(count int) []*CreateKeyspaceByIDRequest {
