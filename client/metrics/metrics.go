@@ -182,7 +182,7 @@ func initMetrics(constLabels prometheus.Labels) {
 			Name:        "tso_retry",
 			ConstLabels: constLabels,
 			Help:        "Counter of retry time for TSO request.",
-			Buckets:     []float64{1, 2, 4, 8, 10, 12, 16, 20},
+			Buckets:     []float64{1, 2, 4, 8, 12, 16, 20},
 		})
 
 	RequestForwarded = prometheus.NewGaugeVec(
