@@ -17,6 +17,7 @@ package server
 
 import (
 	"encoding/json"
+	"math"
 	"time"
 
 	"github.com/gogo/protobuf/proto"
@@ -29,6 +30,10 @@ import (
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/pkg/utils/syncutil"
 )
+
+// overrideFillRateToleranceRate is the tolerance rate to override the fill rate, i.e., the fill rate will only
+// be overridden if the new fill rate exceeds the original fill rate by this specified tolerance rate.
+const overrideFillRateToleranceRate = 0.05
 
 // ResourceGroup is the definition of a resource group, for REST API.
 type ResourceGroup struct {
@@ -116,13 +121,48 @@ func (rg *ResourceGroup) getPriority() float64 {
 	return float64(rg.Priority)
 }
 
+// getFillRate returns the fill rate of the resource group.
+// It may be overridden by the override fill rate of the runtime state.
 func (rg *ResourceGroup) getFillRate() float64 {
+	rg.RLock()
+	defer rg.RUnlock()
+	return rg.RUSettings.RU.getFillRate()
+}
+
+// getFillRateSetting returns the fill rate setting of the resource group.
+// It is the fill rate setting in the resource group settings.
+func (rg *ResourceGroup) getFillRateSetting() float64 {
 	rg.RLock()
 	defer rg.RUnlock()
 	return rg.RUSettings.RU.getFillRateSetting()
 }
 
-func (rg *ResourceGroup) getBurstLimit() float64 {
+// getOverrideFillRate returns the override fill rate of the resource group.
+func (rg *ResourceGroup) getOverrideFillRate() float64 {
+	rg.RLock()
+	defer rg.RUnlock()
+	return rg.RUSettings.RU.overrideFillRate
+}
+
+func (rg *ResourceGroup) overrideFillRate(new float64) {
+	rg.Lock()
+	defer rg.Unlock()
+	original := rg.RUSettings.RU.overrideFillRate
+	// If the fill rate has not been set before or the new value is negative,
+	// set it to the new fill rate directly without checking the tolerance.
+	if original < 0 || new < 0 {
+		rg.RUSettings.RU.overrideFillRate = new
+		return
+	}
+	// If the new fill rate exceeds the original by more than the allowed tolerance,
+	// override it.
+	if math.Abs(new-original) > original*overrideFillRateToleranceRate {
+		rg.RUSettings.RU.overrideFillRate = new
+		return
+	}
+}
+
+func (rg *ResourceGroup) getBurstLimitSetting() float64 {
 	rg.RLock()
 	defer rg.RUnlock()
 	return float64(rg.RUSettings.RU.getBurstLimitSetting())

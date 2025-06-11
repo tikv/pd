@@ -361,14 +361,6 @@ func (m *Manager) GetResourceGroupList(keyspaceID uint32, withStats bool) ([]*Re
 	return krgm.getResourceGroupList(withStats, true), nil
 }
 
-func (m *Manager) getRUTracker(keyspaceID uint32, name string) *ruTracker {
-	krgm := m.getKeyspaceResourceGroupManager(keyspaceID)
-	if krgm == nil {
-		return nil
-	}
-	return krgm.getOrCreateRUTracker(name)
-}
-
 func (m *Manager) persistLoop(ctx context.Context) {
 	defer m.wg.Done()
 	ticker := time.NewTicker(persistLoopInterval)
@@ -521,8 +513,15 @@ func (m *Manager) backgroundMetricsFlush(ctx context.Context) {
 			if rg, _ := m.GetMutableResourceGroup(keyspaceID, resourceGroupName); rg != nil {
 				rg.UpdateRUConsumption(consumptionInfo.Consumption)
 			}
-			if rt := m.getRUTracker(keyspaceID, resourceGroupName); rt != nil {
-				rt.sample(now, consumptionInfo.RRU+consumptionInfo.WRU, sinceLastRecord)
+			if krgm := m.getKeyspaceResourceGroupManager(keyspaceID); krgm != nil {
+				// Sample the latest RU consumption.
+				krgm.getOrCreateRUTracker(resourceGroupName).sample(
+					now,
+					consumptionInfo.RRU+consumptionInfo.WRU,
+					sinceLastRecord,
+				)
+				// Consiliate the fill rate of the resource group.
+				krgm.conciliateFillRates()
 			}
 		case <-cleanUpTicker.C:
 			// Clean up the metrics that have not been updated for a long time.

@@ -346,3 +346,113 @@ func (rt *ruTracker) getRUPerSec() float64 {
 	defer rt.RUnlock()
 	return rt.lastEMA
 }
+
+// conciliateFillRates is used to conciliate the fill rate of each resource group.
+// Under the service limit, there might be multiple resource groups with different
+// priorities consuming the RU at the same time. In this case, we need to conciliate
+// the fill rate of the resource group to ensure the priority, for example, there are
+// three resource groups with priorities 1, 2, and 3, and the service limit is 50 RU/s:
+// - Group A: priority 1, fill rate 30 RU/s
+// - Group B: priority 2, fill rate 20 RU/s
+// - Group C: priority 3, fill rate 10 RU/s
+// In this case, the fill rate of the resource group should be 30 RU/s, 20 RU/s, and 0 RU/s,
+// respectively. The conciliation algorithm is as follows:
+//  1. Sort the resource groups by the priority.
+//  2. Start from the highest priority resource group, get the real-time RU/s of each.
+//  3. Calculate the total real-time RU/s of the resource groups within the same priority.
+//     a. If the total real-time RU/s is greater than the service limit,
+//     allocate the service limit to all resource groups based on the proportion of RU/s.
+//     b. If the total real-time RU/s is less or equal to the service limit,
+//     allocate the needed RU/s to the resource group respectively.
+//  4. Calculate the remaining service limit, and repeat the process for the next priority
+//     until the service limit is allocated.
+func (krgm *keyspaceResourceGroupManager) conciliateFillRates() {
+	serviceLimiter := krgm.getServiceLimiter()
+	// No need to conciliate if the service limit is not set or is 0.
+	if serviceLimiter == nil || serviceLimiter.ServiceLimit == 0 {
+		return
+	}
+	priorityQueues := krgm.getPriorityQueues()
+	if len(priorityQueues) == 0 {
+		return
+	}
+	remainingServiceLimit := serviceLimiter.ServiceLimit
+	for _, queue := range priorityQueues {
+		if len(queue) == 0 {
+			continue
+		}
+		totalRUPerSec := 0.0 // The total real-time RU/s of all resource groups in the current priority.
+		ruPerSecMap := make(map[string]float64, len(queue))
+		for _, group := range queue {
+			ruTracker := krgm.getRUTracker(group.Name)
+			// Not found the RU tracker, skip this group.
+			if ruTracker == nil {
+				continue
+			}
+			ruPerSec := ruTracker.getRUPerSec()
+			totalRUPerSec += ruPerSec
+			ruPerSecMap[group.Name] = ruPerSec
+		}
+		if totalRUPerSec > remainingServiceLimit {
+			// If the total real-time RU/s is greater than the service limit,
+			// allocate the service limit to all resource groups based on the proportion of RU/s.
+			for _, group := range queue {
+				ruPerSec := ruPerSecMap[group.Name]
+				overrideFillRate := math.Min(
+					remainingServiceLimit*ruPerSec/totalRUPerSec,
+					group.getFillRate(), // Should not exceed the fill rate setting.
+				)
+				group.overrideFillRate(overrideFillRate)
+			}
+			remainingServiceLimit = 0
+		} else {
+			// If the total real-time RU/s is less or equal to the service limit,
+			// allocate the needed RU/s to the resource group respectively.
+			for _, group := range queue {
+				// By setting the override fill rate to -1 to allow the resource group to consume
+				// as many RUs as they originally need according to its fill rate setting. This is
+				// to prevent the true demand from being suppressed due to setting `overrideFillRate`,
+				// thereby wasting idle resources of the Service Limit.
+				group.overrideFillRate(-1)
+			}
+			// Although this layer does not set `overrideFillRate`, it still needs to deduct the actual
+			// RU consumption from `remainingFillRate` to reflect the concept of priority, so that the
+			// available service limit share decreases level by level.
+			remainingServiceLimit -= totalRUPerSec
+		}
+	}
+}
+
+func (krgm *keyspaceResourceGroupManager) getPriorityQueues() [][]*ResourceGroup {
+	priorityQueues := make([][]*ResourceGroup, maxPriority+1)
+	krgm.RLock()
+	for _, group := range krgm.groups {
+		if group.Name == DefaultResourceGroupName {
+			continue
+		}
+		priority := group.Priority
+		priorityQueues[priority] = append(priorityQueues[priority], group)
+	}
+	krgm.RUnlock()
+	// Sort the priority queues in descending order.
+	sort.Slice(priorityQueues, func(i, j int) bool {
+		queueI, queueJ := priorityQueues[i], priorityQueues[j]
+		if len(queueI) == 0 {
+			return true
+		}
+		if len(queueJ) == 0 {
+			return false
+		}
+		return queueI[0].Priority > queueJ[0].Priority
+	})
+	// Filter out empty queues in-place
+	n := 0
+	for _, queue := range priorityQueues {
+		if len(queue) == 0 {
+			continue
+		}
+		priorityQueues[n] = queue
+		n++
+	}
+	return priorityQueues[:n]
+}
