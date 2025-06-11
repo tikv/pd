@@ -36,6 +36,7 @@ import (
 	"github.com/tikv/pd/pkg/schedule/hbstream"
 	"github.com/tikv/pd/pkg/schedule/labeler"
 	"github.com/tikv/pd/pkg/utils/keyutil"
+	"github.com/tikv/pd/pkg/utils/testutil"
 )
 
 type operatorControllerTestSuite struct {
@@ -505,18 +506,20 @@ func (suite *operatorControllerTestSuite) TestConcurrentMergeConflict() {
 	cluster.AddLabelsStore(2, 1, map[string]string{"host": "host2"})
 	cluster.AddLabelsStore(3, 1, map[string]string{"host": "host3"})
 
-	for i := range 10 {
-		left := newRegionInfo(uint64(100+i), fmt.Sprintf("%da", i), fmt.Sprintf("%db", i), 10, 10, []uint64{101, 1}, []uint64{101, 1})
+	for i := range 20 {
+		suite.T().Logf("Case %d", i)
+		leftID := uint64(10000 + i*3)
+		left := newRegionInfo(leftID, fmt.Sprintf("%05da", leftID), fmt.Sprintf("%05db", leftID), 10, 10, []uint64{101, 1}, []uint64{101, 1})
 		left.GetMeta().RegionEpoch = &metapb.RegionEpoch{}
 		cluster.PutRegion(left)
-		middle := newRegionInfo(uint64(101+i), fmt.Sprintf("%db", i), fmt.Sprintf("%dc", i), 10, 10, []uint64{101, 1}, []uint64{101, 1})
+		middle := newRegionInfo(leftID+1, fmt.Sprintf("%05db", leftID), fmt.Sprintf("%05dc", leftID), 10, 10, []uint64{101, 1}, []uint64{101, 1})
 		middle.GetMeta().RegionEpoch = &metapb.RegionEpoch{}
 		cluster.PutRegion(middle)
-		right := newRegionInfo(uint64(102+i), fmt.Sprintf("%dc", i), fmt.Sprintf("%dd", i), 10, 10, []uint64{101, 1}, []uint64{101, 1})
+		right := newRegionInfo(leftID+2, fmt.Sprintf("%05dc", leftID), fmt.Sprintf("%05dd", leftID), 10, 10, []uint64{101, 1}, []uint64{101, 1})
 		right.GetMeta().RegionEpoch = &metapb.RegionEpoch{}
 		cluster.PutRegion(right)
 		wg := &sync.WaitGroup{}
-		for range 5 {
+		for range 20 {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
@@ -531,14 +534,17 @@ func (suite *operatorControllerTestSuite) TestConcurrentMergeConflict() {
 			}()
 		}
 		wg.Wait()
-		var count int
-		controller.operators.Range(func(_ any, op any) bool {
-			if op.(*Operator).Kind() == OpMerge {
-				count++
-			}
-			return true
+		testutil.Eventually(re, func() bool {
+			var count int
+			controller.operators.Range(func(_ any, op any) bool {
+				if op.(*Operator).Kind() == OpMerge {
+					count++
+				}
+				return true
+			})
+			suite.T().Logf("merge count: %d, expected: %d", controller.counts.getCountByKind(OpMerge), count)
+			return count == int(controller.counts.getCountByKind(OpMerge))
 		})
-		re.Equal(count, int(controller.counts.getCountByKind(OpMerge)))
 	}
 }
 
