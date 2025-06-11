@@ -35,7 +35,11 @@ require (
 	github.com/pingcap/errcode v0.3.0
 	github.com/pingcap/errors v0.11.5-0.20211224045212-9687c2b0f87c
 	github.com/pingcap/failpoint v0.0.0-20240528011301-b51a646c7c86
+<<<<<<< HEAD
 	github.com/pingcap/kvproto v0.0.0-20250709071721-7f3c4e328828
+=======
+	github.com/pingcap/kvproto v0.0.0-20250604104108-d780eebb4f38
+>>>>>>> 29ead019cd (add failed_regions_id for scatter regions response (#9167))
 	github.com/pingcap/log v1.1.1-0.20221110025148-ca232912c9f3
 	github.com/pingcap/sysutil v1.0.1-0.20230407040306-fb007c5aff21
 	github.com/pingcap/tidb-dashboard v0.0.0-20241212035039-4b076331523a
