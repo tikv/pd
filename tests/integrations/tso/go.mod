@@ -11,8 +11,8 @@ replace (
 // reset grpc and protobuf deps in order to import client and server at the same time
 
 require (
-	github.com/pingcap/failpoint v0.0.0-20220801062533-2eaa32854a6c
-	github.com/pingcap/kvproto v0.0.0-20230920042517-db656f45023b
+	github.com/pingcap/failpoint v0.0.0-20240528011301-b51a646c7c86
+	github.com/pingcap/kvproto v0.0.0-20251217070556-007154d367a2
 	github.com/stretchr/testify v1.9.0
 	github.com/tikv/pd v0.0.0-00010101000000-000000000000
 	github.com/tikv/pd/client v0.0.0-00010101000000-000000000000
@@ -57,7 +57,7 @@ require (
 	github.com/coreos/go-systemd v0.0.0-20190719114852-fd7a80b32e1f // indirect
 	github.com/coreos/pkg v0.0.0-20180928190104-399ea9e2e55f // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
-	github.com/docker/go-units v0.4.0 // indirect
+	github.com/docker/go-units v0.5.0 // indirect
 	github.com/dustin/go-humanize v1.0.0 // indirect
 	github.com/elliotchance/pie/v2 v2.1.0 // indirect
 	github.com/fogleman/gg v1.3.0 // indirect
