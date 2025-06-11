@@ -434,7 +434,7 @@ func (c *Coordinator) GetHotRegionsByType(typ utils.RWType) *statistics.StoreHot
 	isTraceFlow := c.cluster.GetSchedulerConfig().IsTraceRegionFlow()
 	storeLoads := c.cluster.GetStoresLoads()
 	stores := c.cluster.GetStores()
-	hotPeerStats := c.cluster.GetHotPeerStats(typ)
+	hotPeerStats := c.cluster.GetHotPeerStats(typ, 0)
 	infos := statistics.GetHotStatus(stores, storeLoads, hotPeerStats, typ, isTraceFlow)
 	// update params `IsLearner` and `LastUpdateTime`
 	s := []statistics.StoreHotPeersStat{infos.AsLeader, infos.AsPeer}
@@ -500,7 +500,7 @@ func (c *Coordinator) CollectHotSpotMetrics() {
 
 func collectHotMetrics(cluster sche.ClusterInformer, stores []*core.StoreInfo, typ utils.RWType) {
 	kind := typ.String()
-	hotPeerStats := cluster.GetHotPeerStats(typ)
+	hotPeerStats := cluster.GetHotPeerStats(typ, 0)
 	status := statistics.CollectHotPeerInfos(stores, hotPeerStats) // only returns TotalBytesRate,TotalKeysRate,TotalQueryRate,Count
 
 	for _, s := range stores {

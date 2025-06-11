@@ -210,7 +210,11 @@ func (c *Cluster) GetHotPeerStat(rw utils.RWType, regionID, storeID uint64) *sta
 // It returns a map where the keys are store IDs and the values are slices of HotPeerStat.
 // The result only includes peers that are hot enough.
 // GetHotPeerStats is a thread-safe method.
-func (c *Cluster) GetHotPeerStats(rw utils.RWType) map[uint64][]*statistics.HotPeerStat {
+func (c *Cluster) GetHotPeerStats(rw utils.RWType, minHotDegree int) map[uint64][]*statistics.HotPeerStat {
+	if minHotDegree > 0 {
+		return c.hotStat.GetHotPeerStats(rw, minHotDegree)
+	}
+
 	threshold := c.persistConfig.GetHotRegionCacheHitsThreshold()
 	if rw == utils.Read {
 		// As read stats are reported by store heartbeat, the threshold needs to be adjusted.

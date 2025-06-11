@@ -250,6 +250,7 @@ var (
 	evictLeaderNoLeaderCounter      = evictLeaderCounterWithEvent("no-leader")
 	evictLeaderPickUnhealthyCounter = evictLeaderCounterWithEvent("pick-unhealthy-region")
 	evictLeaderNoTargetStoreCounter = evictLeaderCounterWithEvent("no-target-store")
+	evictLeaderStaleCounter         = evictLeaderCounterWithEvent("stale")
 	evictLeaderNewOperatorCounter   = evictLeaderCounterWithEvent("new-operator")
 
 	evictSlowStoreCounter = schedulerCounter.WithLabelValues(types.EvictSlowStoreScheduler.String(), "schedule")

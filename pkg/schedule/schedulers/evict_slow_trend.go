@@ -268,8 +268,9 @@ func (handler *evictSlowTrendHandler) listConfig(w http.ResponseWriter, _ *http.
 
 type evictSlowTrendScheduler struct {
 	*BaseScheduler
-	conf    *evictSlowTrendSchedulerConfig
-	handler http.Handler
+	conf           *evictSlowTrendSchedulerConfig
+	handler        http.Handler
+	pendingRegions map[uint64]*operator.Operator
 }
 
 // GetNextInterval implements the Scheduler interface.
@@ -360,7 +361,7 @@ func (s *evictSlowTrendScheduler) scheduleEvictLeader(cluster sche.SchedulerClus
 		return nil
 	}
 	storeSlowTrendEvictedStatusGauge.WithLabelValues(store.GetAddress(), strconv.FormatUint(store.GetID(), 10)).Set(1)
-	return scheduleEvictLeaderBatch(s.R, s.GetName(), cluster, s.conf)
+	return scheduleEvictLeaderBatch(s.R, s.GetName(), cluster, s.conf, s.pendingRegions)
 }
 
 // IsScheduleAllowed implements the Scheduler interface.
@@ -447,9 +448,10 @@ func (s *evictSlowTrendScheduler) Schedule(cluster sche.SchedulerCluster, _ bool
 func newEvictSlowTrendScheduler(opController *operator.Controller, conf *evictSlowTrendSchedulerConfig) Scheduler {
 	handler := newEvictSlowTrendHandler(conf)
 	sche := &evictSlowTrendScheduler{
-		BaseScheduler: NewBaseScheduler(opController, types.EvictSlowTrendScheduler, conf),
-		conf:          conf,
-		handler:       handler,
+		BaseScheduler:  NewBaseScheduler(opController, types.EvictSlowTrendScheduler, conf),
+		conf:           conf,
+		handler:        handler,
+		pendingRegions: make(map[uint64]*operator.Operator),
 	}
 	return sche
 }
