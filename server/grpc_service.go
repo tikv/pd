@@ -2955,11 +2955,11 @@ func (s *GrpcServer) rateLimitCheck() (done ratelimit.DoneFunc, err error) {
 }
 
 // SetGlobalGCBarrier implements gRPC PDServer.
-func (s *GrpcServer) SetGlobalGCBarrier(context.Context, *pdpb.SetGlobalGCBarrierRequest) (*pdpb.SetGlobalGCBarrierResponse, error) {
+func (*GrpcServer) SetGlobalGCBarrier(context.Context, *pdpb.SetGlobalGCBarrierRequest) (*pdpb.SetGlobalGCBarrierResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "SetGlobalGCBarrier is not implemented yet, waiting for https://github.com/tikv/pd/pull/9361")
 }
 
 // DeleteGlobalGCBarrier implements gRPC PDServer.
-func (s *GrpcServer) DeleteGlobalGCBarrier(context.Context, *pdpb.DeleteGlobalGCBarrierRequest) (*pdpb.DeleteGlobalGCBarrierResponse, error) {
+func (*GrpcServer) DeleteGlobalGCBarrier(context.Context, *pdpb.DeleteGlobalGCBarrierRequest) (*pdpb.DeleteGlobalGCBarrierResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "DeleteGlobalGCBarrier is not implemented yet, waiting for https://github.com/tikv/pd/pull/9361")
 }
