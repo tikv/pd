@@ -16,6 +16,7 @@ package server
 
 import (
 	"encoding/json"
+	"math"
 	"testing"
 	"time"
 
@@ -25,6 +26,7 @@ import (
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 
 	"github.com/tikv/pd/pkg/storage"
+	"github.com/tikv/pd/pkg/utils/testutil"
 )
 
 func TestInitDefaultResourceGroup(t *testing.T) {
@@ -398,5 +400,30 @@ func TestPersistResourceGroupRunningState(t *testing.T) {
 		err := json.Unmarshal([]byte(rawValue), states)
 		re.NoError(err)
 		re.Equal(mutableGroup.RUSettings.RU.Tokens, states.RU.Tokens)
+	})
+}
+
+func TestRUTracker(t *testing.T) {
+	const floatDelta = 0.1
+	re := require.New(t)
+
+	rt := newRUTracker(time.Second)
+	now := time.Now()
+	rt.sample(now, 100, time.Duration(0))
+	re.Zero(rt.getRUPerSec())
+	rt.sample(now, 100, time.Second)
+	re.Equal(100.0, rt.getRUPerSec())
+	now = now.Add(time.Second)
+	rt.sample(now, 100, time.Second)
+	re.InDelta(100.0, rt.getRUPerSec(), floatDelta)
+	now = now.Add(time.Second)
+	rt.sample(now, 200, time.Second)
+	re.InDelta(150.0, rt.getRUPerSec(), floatDelta)
+	// EMA should eventually converge to 10000 RU/s.
+	const targetRUPerSec = 10000.0
+	testutil.Eventually(re, func() bool {
+		now = now.Add(time.Second)
+		rt.sample(now, targetRUPerSec, time.Second)
+		return math.Abs(rt.getRUPerSec()-targetRUPerSec) < floatDelta
 	})
 }
