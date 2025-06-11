@@ -158,12 +158,13 @@ func (m *Manager) getKeyspaceResourceGroupManager(keyspaceID uint32) *keyspaceRe
 }
 
 func (m *Manager) accessKeyspaceResourceGroupManager(keyspaceID uint32, groupName string) (*keyspaceResourceGroupManager, error) {
-	krgm := m.getKeyspaceResourceGroupManager(keyspaceID)
-	if krgm == nil && groupName == DefaultResourceGroupName {
+	var krgm *keyspaceResourceGroupManager
+	if groupName == DefaultResourceGroupName {
 		// For the default resource group, if the keyspace manager doesn't exist yet
 		// and the group name is the default resource group name, we try to get or create it.
 		krgm = m.getOrCreateKeyspaceResourceGroupManager(keyspaceID, true)
-		return krgm, nil
+	} else {
+		krgm = m.getKeyspaceResourceGroupManager(keyspaceID)
 	}
 	if krgm == nil {
 		return nil, errs.ErrKeyspaceNotExists.FastGenByArgs(keyspaceID)

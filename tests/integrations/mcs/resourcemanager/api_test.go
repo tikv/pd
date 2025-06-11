@@ -201,7 +201,7 @@ func (suite *resourceManagerAPITestSuite) TestResourceGroupAPI() {
 	}
 }
 
-func (suite *resourceManagerAPITestSuite) Test() {
+func (suite *resourceManagerAPITestSuite) TestResourceGroupAPIInit() {
 	re := suite.Require()
 	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion", "return(true)"))
 	defer func() {
