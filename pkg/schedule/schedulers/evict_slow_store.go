@@ -315,7 +315,11 @@ func (s *evictSlowStoreScheduler) Schedule(cluster sche.SchedulerCluster, _ bool
 			// slow node next time.
 			log.Info("slow store has been removed",
 				zap.Uint64("store-id", store.GetID()))
-		} else if store.GetSlowScore() <= slowStoreRecoverThreshold {
+			s.cleanupEvictLeader(cluster)
+			return nil, nil
+		}
+
+		if store.GetSlowScore() <= slowStoreRecoverThreshold {
 			if err := s.conf.tryUpdateRecoverStatus(true); err != nil {
 				log.Info("evict-slow-store-scheduler persist config failed", zap.Uint64("store-id", store.GetID()), zap.Error(err))
 				return nil, nil
@@ -327,6 +331,8 @@ func (s *evictSlowStoreScheduler) Schedule(cluster sche.SchedulerCluster, _ bool
 
 			log.Info("slow store has been recovered",
 				zap.Uint64("store-id", store.GetID()))
+			s.cleanupEvictLeader(cluster)
+			return nil, nil
 		} else {
 			if err := s.conf.tryUpdateRecoverStatus(false); err != nil {
 				log.Info("evict-slow-store-scheduler persist config failed", zap.Uint64("store-id", store.GetID()), zap.Error(err))
@@ -334,8 +340,6 @@ func (s *evictSlowStoreScheduler) Schedule(cluster sche.SchedulerCluster, _ bool
 			}
 			return s.schedulerEvictLeader(cluster), nil
 		}
-		s.cleanupEvictLeader(cluster)
-		return nil, nil
 	}
 
 	var slowStore *core.StoreInfo
