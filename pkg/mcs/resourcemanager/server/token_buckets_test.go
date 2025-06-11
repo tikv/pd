@@ -39,7 +39,7 @@ func TestGroupTokenBucketUpdateAndPatch(t *testing.T) {
 	time1 := time.Now()
 	tb.request(time1, 0, 0, clientUniqueID)
 	re.LessOrEqual(math.Abs(tbSetting.Tokens-tb.Tokens), 1e-7)
-	re.Equal(tbSetting.Settings.FillRate, tb.Settings.FillRate)
+	re.Equal(float64(tbSetting.Settings.FillRate), tb.getFillRateSetting())
 
 	tbSetting = &rmpb.TokenBucket{
 		Tokens: -100000,
@@ -53,7 +53,7 @@ func TestGroupTokenBucketUpdateAndPatch(t *testing.T) {
 	time2 := time.Now()
 	tb.request(time2, 0, 0, clientUniqueID)
 	re.LessOrEqual(math.Abs(100000-tb.Tokens), time2.Sub(time1).Seconds()*float64(tbSetting.Settings.FillRate)+1e7)
-	re.Equal(tbSetting.Settings.FillRate, tb.Settings.FillRate)
+	re.Equal(float64(tbSetting.Settings.FillRate), tb.getFillRateSetting())
 
 	tbSetting = &rmpb.TokenBucket{
 		Tokens: 0,
@@ -135,11 +135,11 @@ func TestGroupTokenBucketRequestBurstLimit(t *testing.T) {
 		re.Contains(gtb.tokenSlots, clientUniqueID)
 		// it should not be able to change group settings
 		groupSetting := gtb.tokenSlots[clientUniqueID]
-		re.Equal(expectedBurstLimit, groupSetting.settings.BurstLimit)
-		re.Equal(uint64(expectedFillRate), groupSetting.settings.FillRate)
+		re.Equal(expectedBurstLimit, groupSetting.burstLimit)
+		re.Equal(uint64(expectedFillRate), groupSetting.fillRate)
 		// it should not be able to change gtb settings
-		re.Equal(tbSetting.GetSettings().BurstLimit, gtb.Settings.BurstLimit)
-		re.Equal(tbSetting.GetSettings().FillRate, gtb.Settings.FillRate)
+		re.Equal(float64(tbSetting.GetSettings().FillRate), gtb.getFillRateSetting())
+		re.Equal(tbSetting.GetSettings().BurstLimit, gtb.getBurstLimitSetting())
 	}
 
 	// case 1: fillrate = 2000, burstLimit = 2000,0,-1,-2
