@@ -27,6 +27,7 @@ import (
 
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
 
+	"github.com/tikv/pd/pkg/errs"
 	rmserver "github.com/tikv/pd/pkg/mcs/resourcemanager/server"
 	"github.com/tikv/pd/pkg/mcs/utils"
 	"github.com/tikv/pd/pkg/utils/apiutil"
@@ -174,9 +175,14 @@ func (s *Service) getResourceGroup(c *gin.Context) {
 		return
 	}
 	keyspaceID := rmserver.ExtractKeyspaceID(keyspaceIDValue)
-	group, err := s.manager.GetResourceGroup(keyspaceID, c.Param("name"), withStats)
+	groupName := c.Param("name")
+	group, err := s.manager.GetResourceGroup(keyspaceID, groupName, withStats)
 	if err != nil {
 		c.String(http.StatusNotFound, err.Error())
+		return
+	}
+	if group == nil {
+		c.String(http.StatusNotFound, errs.ErrResourceGroupNotExists.FastGenByArgs(groupName).Error())
 		return
 	}
 	c.IndentedJSON(http.StatusOK, group)
