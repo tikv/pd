@@ -16,6 +16,7 @@ package server
 
 import (
 	"encoding/json"
+	"fmt"
 	"math"
 	"testing"
 	"time"
@@ -52,7 +53,7 @@ func TestInitDefaultResourceGroup(t *testing.T) {
 	re.Equal(uint32(middlePriority), defaultGroup.Priority)
 
 	// Verify the default resource group has unlimited rate and burst limit.
-	re.Equal(float64(unlimitedRate), defaultGroup.RUSettings.RU.getFillRateSetting())
+	re.Equal(float64(unlimitedRate), defaultGroup.RUSettings.RU.getFillRate())
 	re.Equal(int64(unlimitedBurstLimit), defaultGroup.RUSettings.RU.getBurstLimitSetting())
 }
 
@@ -101,7 +102,7 @@ func TestAddResourceGroup(t *testing.T) {
 	re.Equal(group.GetPriority(), addedGroup.Priority)
 	re.Equal(
 		float64(group.GetRUSettings().GetRU().GetSettings().GetFillRate()),
-		addedGroup.RUSettings.RU.getFillRateSetting(),
+		addedGroup.RUSettings.RU.getFillRate(),
 	)
 	re.Equal(group.GetRUSettings().GetRU().GetSettings().GetBurstLimit(), addedGroup.RUSettings.RU.getBurstLimitSetting())
 }
@@ -152,7 +153,7 @@ func TestModifyResourceGroup(t *testing.T) {
 	re.Equal(modifiedGroup.GetPriority(), updatedGroup.Priority)
 	re.Equal(
 		float64(modifiedGroup.GetRUSettings().GetRU().GetSettings().GetFillRate()),
-		updatedGroup.RUSettings.RU.getFillRateSetting(),
+		updatedGroup.RUSettings.RU.getFillRate(),
 	)
 	re.Equal(modifiedGroup.GetRUSettings().GetRU().GetSettings().GetBurstLimit(), updatedGroup.RUSettings.RU.getBurstLimitSetting())
 
@@ -520,4 +521,276 @@ func TestPersistAndReloadIntegrity(t *testing.T) {
 	re.Equal(float64(100), reloadedGroup.RUConsumption.RRU)
 	re.Equal(float64(200), reloadedGroup.RUConsumption.WRU)
 	re.Equal(uint32(10), reloadedGroup.Priority)
+}
+
+func TestGetPriorityQueues(t *testing.T) {
+	re := require.New(t)
+
+	krgm := newKeyspaceResourceGroupManager(1, storage.NewStorageWithMemoryBackend())
+
+	// Add some resource groups with different priorities.
+	groups := map[uint32]*rmpb.ResourceGroup{
+		1: {
+			Name:     "group_with_priority_1",
+			Mode:     rmpb.GroupMode_RUMode,
+			Priority: 1,
+		},
+		2: {
+			Name:     "group_with_priority_2",
+			Mode:     rmpb.GroupMode_RUMode,
+			Priority: 2,
+		},
+		3: {
+			Name:     "group_with_priority_3",
+			Mode:     rmpb.GroupMode_RUMode,
+			Priority: 3,
+		},
+	}
+	for _, group := range groups {
+		err := krgm.addResourceGroup(group)
+		re.NoError(err)
+	}
+	// Verify the priority queues.
+	priorityQueues := krgm.getPriorityQueues()
+	re.Len(priorityQueues, 3)
+	// Check if the priority queues are sorted in descending order.
+	for i := range len(priorityQueues) - 1 {
+		re.Greater(priorityQueues[i][0].Priority, priorityQueues[i+1][0].Priority)
+	}
+	// Check if the priority queues are correct.
+	for _, queue := range priorityQueues {
+		group := queue[0]
+		re.Equal(groups[group.Priority].Name, group.Name)
+	}
+}
+
+func TestOverrideFillRate(t *testing.T) {
+	re := require.New(t)
+
+	testCases := []struct {
+		originalFillRate float64
+		overrideFillRate float64
+		expectedFillRate float64
+	}{
+		{
+			originalFillRate: -1,
+			overrideFillRate: -1,
+			expectedFillRate: -1,
+		},
+		{
+			originalFillRate: -1,
+			overrideFillRate: 0,
+			expectedFillRate: 0,
+		},
+		{
+			originalFillRate: -1,
+			overrideFillRate: 100,
+			expectedFillRate: 100,
+		},
+		{
+			originalFillRate: 0,
+			overrideFillRate: -1,
+			expectedFillRate: -1,
+		},
+		{
+			originalFillRate: 0,
+			overrideFillRate: 0,
+			expectedFillRate: 0,
+		},
+		{
+			originalFillRate: 0,
+			overrideFillRate: 100,
+			expectedFillRate: 100,
+		},
+		{
+			originalFillRate: 100,
+			overrideFillRate: -1,
+			expectedFillRate: -1,
+		},
+		{
+			originalFillRate: 100,
+			overrideFillRate: 0,
+			expectedFillRate: 0,
+		},
+		{
+			originalFillRate: 100,
+			overrideFillRate: 96,
+			expectedFillRate: 100,
+		},
+		{
+			originalFillRate: 100,
+			overrideFillRate: 95,
+			expectedFillRate: 100,
+		},
+		{
+			originalFillRate: 100,
+			overrideFillRate: 94,
+			expectedFillRate: 94,
+		},
+		{
+			originalFillRate: 100,
+			overrideFillRate: 104,
+			expectedFillRate: 100,
+		},
+		{
+			originalFillRate: 100,
+			overrideFillRate: 105,
+			expectedFillRate: 100,
+		},
+		{
+			originalFillRate: 100,
+			overrideFillRate: 106,
+			expectedFillRate: 106,
+		},
+	}
+	krgm := newKeyspaceResourceGroupManager(1, storage.NewStorageWithMemoryBackend())
+	groupName := "test_group"
+	group := &rmpb.ResourceGroup{
+		Name: groupName,
+		Mode: rmpb.GroupMode_RUMode,
+	}
+	err := krgm.addResourceGroup(group)
+	re.NoError(err)
+	for idx, tc := range testCases {
+		group := krgm.getMutableResourceGroup(groupName)
+		group.RUSettings.RU.overrideFillRate = tc.originalFillRate
+		group.overrideFillRate(tc.overrideFillRate)
+		re.Equal(tc.expectedFillRate, group.RUSettings.RU.overrideFillRate, "case %d", idx)
+	}
+}
+
+func TestConciliateFillRate(t *testing.T) {
+	re := require.New(t)
+
+	testCases := []struct {
+		name                 string
+		serviceLimit         float64
+		priorityList         []uint32
+		fillRateSettingList  []float64
+		ruPerSecList         []float64
+		expectedFillRateList []float64
+	}{
+		{
+			name:                 "One priority with sufficient service limit",
+			serviceLimit:         100,
+			priorityList:         []uint32{1, 1, 1},
+			fillRateSettingList:  []float64{10, 20, 30},
+			ruPerSecList:         []float64{10, 20, 30},
+			expectedFillRateList: []float64{10, 20, 30},
+		},
+		{
+			name:                 "One priority exceeding service limit - proportional throttling",
+			serviceLimit:         50,
+			priorityList:         []uint32{1, 1, 1},
+			fillRateSettingList:  []float64{20, 30, 50},
+			ruPerSecList:         []float64{20, 30, 50},
+			expectedFillRateList: []float64{10, 15, 25}, // 50 * (20/100), 50 * (30/100), 50 * (50/100)
+		},
+		{
+			name:                 "Multiple priorities with sufficient service limit",
+			serviceLimit:         200,
+			priorityList:         []uint32{3, 3, 2, 2, 1},
+			fillRateSettingList:  []float64{20, 30, 25, 35, 40},
+			ruPerSecList:         []float64{10, 15, 20, 30, 40},
+			expectedFillRateList: []float64{20, 30, 25, 35, 40},
+		},
+		{
+			name:                 "Multiple priorities with insufficient service limit - higher priority gets preference",
+			serviceLimit:         80,
+			priorityList:         []uint32{3, 3, 2, 1, 1},
+			fillRateSettingList:  []float64{30, 20, 30, 20, 10},
+			ruPerSecList:         []float64{30, 20, 30, 20, 10},
+			expectedFillRateList: []float64{30, 20, 30, 0, 0}, // Priority 3 gets 50, priority 2 gets 30, priority 1 gets 0
+		},
+		{
+			name:                 "Higher priority consumes all service limit",
+			serviceLimit:         100,
+			priorityList:         []uint32{5, 5, 3, 2, 1},
+			fillRateSettingList:  []float64{60, 60, 30, 20, 10},
+			ruPerSecList:         []float64{60, 60, 30, 20, 10},
+			expectedFillRateList: []float64{50, 50, 0, 0, 0}, // Only priority 5 gets resources, proportionally
+		},
+		{
+			name:                 "Zero service limit",
+			serviceLimit:         0,
+			priorityList:         []uint32{3, 2, 1},
+			fillRateSettingList:  []float64{10, 20, 30},
+			ruPerSecList:         []float64{10, 20, 30},
+			expectedFillRateList: []float64{10, 20, 30},
+		},
+		{
+			name:                 "Zero demand from all groups",
+			serviceLimit:         100,
+			priorityList:         []uint32{3, 2, 1},
+			fillRateSettingList:  []float64{10, 20, 30},
+			ruPerSecList:         []float64{0, 0, 0},
+			expectedFillRateList: []float64{10, 20, 30}, // Should get their configured rates when no demand
+		},
+		{
+			name:                 "Mixed demand and sufficient capacity",
+			serviceLimit:         150,
+			priorityList:         []uint32{4, 3, 3, 2, 1},
+			fillRateSettingList:  []float64{40, 30, 20, 25, 15},
+			ruPerSecList:         []float64{35, 25, 15, 20, 10},
+			expectedFillRateList: []float64{40, 30, 20, 25, 15}, // All groups get their demand so the fill rate is the same as the fill rate setting
+		},
+		{
+			name:                 "Partial throttling across priorities - priority 3 gets full, priority 2 gets partial, priority 1 gets none",
+			serviceLimit:         120,
+			priorityList:         []uint32{3, 3, 2, 2, 1},
+			fillRateSettingList:  []float64{40, 30, 30, 30, 20},
+			ruPerSecList:         []float64{40, 30, 30, 30, 20},
+			expectedFillRateList: []float64{40, 30, 25, 25, 0}, // Priority 3 gets full, priority 2 gets partial, priority 1 gets none
+		},
+		{
+			name:                 "Partial throttling across priorities - priority 3 gets full, priority 2 gets full, priority 1 gets partial",
+			serviceLimit:         120,
+			priorityList:         []uint32{3, 3, 2, 2, 1, 1},
+			fillRateSettingList:  []float64{40, 30, 20, 20, 30, 30},
+			ruPerSecList:         []float64{40, 30, 10, 10, 30, 30},
+			expectedFillRateList: []float64{40, 30, 20, 20, 15, 15}, // Priority 3 gets full, priority 2 gets full, priority 1 gets partial
+		},
+	}
+	genGroupName := func(caseIdx, i int) string {
+		return fmt.Sprintf("case_%d_group_%d", caseIdx, i)
+	}
+	for idx, tc := range testCases {
+		krgm := newKeyspaceResourceGroupManager(1, storage.NewStorageWithMemoryBackend())
+		// Set the service limit.
+		krgm.setServiceLimit(tc.serviceLimit)
+		// Add the resource groups.
+		for i, priority := range tc.priorityList {
+			group := &rmpb.ResourceGroup{
+				Name:     genGroupName(idx, i),
+				Mode:     rmpb.GroupMode_RUMode,
+				Priority: priority,
+				RUSettings: &rmpb.GroupRequestUnitSettings{
+					RU: &rmpb.TokenBucket{
+						Settings: &rmpb.TokenLimitSettings{
+							FillRate: uint64(tc.fillRateSettingList[i]),
+						},
+					},
+				},
+			}
+			err := krgm.addResourceGroup(group)
+			re.NoError(err, "case %s, group %d", tc.name, i)
+		}
+		// Mock the RU/s of each resource group.
+		now := time.Now()
+		for i, ruPerSec := range tc.ruPerSecList {
+			krgm.getOrCreateRUTracker(genGroupName(idx, i)).
+				sample(now, ruPerSec, time.Second)
+		}
+		// Conciliate the fill rate.
+		krgm.conciliateFillRates()
+		// Verify the override fill rate of each resource group.
+		for i, expectedFillRate := range tc.expectedFillRateList {
+			group := krgm.getMutableResourceGroup(genGroupName(idx, i))
+			re.Equal(
+				expectedFillRate,
+				group.RUSettings.RU.getFillRate(),
+				"case %s, group %d", tc.name, i,
+			)
+		}
+	}
 }
