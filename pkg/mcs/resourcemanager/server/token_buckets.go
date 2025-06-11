@@ -152,9 +152,7 @@ func (gts *GroupTokenBucketState) clone() *GroupTokenBucketState {
 	var tokenSlots map[uint64]*tokenSlot
 	if gts.tokenSlots != nil {
 		tokenSlots = make(map[uint64]*tokenSlot)
-		for id, tokens := range gts.tokenSlots {
-			tokenSlots[id] = tokens
-		}
+		maps.Copy(tokenSlots, gts.tokenSlots)
 	}
 
 	var lastUpdate *time.Time
