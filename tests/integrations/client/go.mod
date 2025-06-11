@@ -11,8 +11,21 @@ replace (
 
 require (
 	github.com/docker/go-units v0.4.0
+<<<<<<< HEAD:tests/integrations/client/go.mod
 	github.com/pingcap/failpoint v0.0.0-20210918120811-547c13e3eb00
 	github.com/pingcap/kvproto v0.0.0-20250526075340-5030ed622c15
+=======
+	github.com/gin-contrib/cors v1.6.0
+	github.com/gin-contrib/gzip v0.0.1
+	github.com/gin-contrib/pprof v1.4.0
+	github.com/gin-gonic/gin v1.10.0
+	github.com/go-echarts/go-echarts v1.0.0
+	github.com/influxdata/tdigest v0.0.1
+	github.com/mattn/go-shellwords v1.0.12
+	github.com/pingcap/errors v0.11.5-0.20211224045212-9687c2b0f87c
+	github.com/pingcap/failpoint v0.0.0-20240528011301-b51a646c7c86
+	github.com/pingcap/kvproto v0.0.0-20250604104108-d780eebb4f38
+>>>>>>> 29ead019cd (add failed_regions_id for scatter regions response (#9167)):tools/go.mod
 	github.com/pingcap/log v1.1.1-0.20221110025148-ca232912c9f3
 	github.com/stretchr/testify v1.9.0
 	github.com/tikv/pd v0.0.0-00010101000000-000000000000
