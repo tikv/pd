@@ -516,7 +516,7 @@ func (c *ResourceGroupsController) tryGetResourceGroupController(
 		}
 		return gc, nil
 	}
-	log.Info("test-yjy tryGetResourceGroupController", zap.String("name", name))
+
 	// Call gRPC to fetch the resource group info.
 	group, err := c.provider.GetResourceGroup(ctx, name)
 	if err != nil {
@@ -531,6 +531,7 @@ func (c *ResourceGroupsController) tryGetResourceGroupController(
 	if group == nil {
 		return nil, NewResourceGroupNotExistErr(name)
 	}
+	log.Info("test-yjy tryGetResourceGroupController", zap.String("name", name), zap.Any("group", group))
 	// Check again to prevent initializing the same resource group concurrently.
 	if gc, ok = c.loadGroupController(name); ok {
 		return gc, nil
