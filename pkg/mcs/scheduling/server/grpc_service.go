@@ -188,7 +188,188 @@ func (s *Service) StoreHeartbeat(ctx context.Context, request *schedulingpb.Stor
 	if err := c.HandleStoreHeartbeat(request); err != nil {
 		log.Error("handle store heartbeat failed", zap.Error(err))
 	}
+<<<<<<< HEAD
 	return &schedulingpb.StoreHeartbeatResponse{Header: &schedulingpb.ResponseHeader{ClusterId: s.clusterID}}, nil
+=======
+	return &schedulingpb.StoreHeartbeatResponse{Header: wrapHeader()}, nil
+}
+
+// SplitRegions split regions by the given split keys
+func (s *Service) SplitRegions(ctx context.Context, request *schedulingpb.SplitRegionsRequest) (*schedulingpb.SplitRegionsResponse, error) {
+	c := s.GetCluster()
+	if c == nil {
+		return &schedulingpb.SplitRegionsResponse{Header: notBootstrappedHeader()}, nil
+	}
+	finishedPercentage, newRegionIDs := c.GetRegionSplitter().SplitRegions(ctx, request.GetSplitKeys(), int(request.GetRetryLimit()))
+	return &schedulingpb.SplitRegionsResponse{
+		Header:             wrapHeader(),
+		RegionsId:          newRegionIDs,
+		FinishedPercentage: uint64(finishedPercentage),
+	}, nil
+}
+
+// ScatterRegions implements gRPC SchedulingServer.
+func (s *Service) ScatterRegions(_ context.Context, request *schedulingpb.ScatterRegionsRequest) (*schedulingpb.ScatterRegionsResponse, error) {
+	c := s.GetCluster()
+	if c == nil {
+		return &schedulingpb.ScatterRegionsResponse{Header: notBootstrappedHeader()}, nil
+	}
+
+	opsCount, failures, err := c.GetRegionScatterer().ScatterRegionsByID(request.GetRegionsId(), request.GetGroup(), int(request.GetRetryLimit()), request.GetSkipStoreLimit())
+	if err != nil {
+		header := errorHeader(&schedulingpb.Error{
+			Type:    schedulingpb.ErrorType_UNKNOWN,
+			Message: err.Error(),
+		})
+		return &schedulingpb.ScatterRegionsResponse{Header: header}, nil
+	}
+	percentage := 100
+	failedRegionIDs := make([]uint64, 0, len(failures))
+	if len(failures) > 0 {
+		percentage = 100 - 100*len(failures)/(opsCount+len(failures))
+		log.Debug("scatter regions", zap.Errors("failures", func() []error {
+			r := make([]error, 0, len(failures))
+			for _, err := range failures {
+				r = append(r, err)
+			}
+			return r
+		}()))
+		for regionID := range failures {
+			failedRegionIDs = append(failedRegionIDs, regionID)
+		}
+	}
+	return &schedulingpb.ScatterRegionsResponse{
+		Header:             wrapHeader(),
+		FinishedPercentage: uint64(percentage),
+		FailedRegionsId:    failedRegionIDs,
+	}, nil
+}
+
+// GetOperator gets information about the operator belonging to the specify region.
+func (s *Service) GetOperator(_ context.Context, request *schedulingpb.GetOperatorRequest) (*schedulingpb.GetOperatorResponse, error) {
+	c := s.GetCluster()
+	if c == nil {
+		return &schedulingpb.GetOperatorResponse{Header: notBootstrappedHeader()}, nil
+	}
+
+	opController := c.GetCoordinator().GetOperatorController()
+	requestID := request.GetRegionId()
+	r := opController.GetOperatorStatus(requestID)
+	if r == nil {
+		header := errorHeader(&schedulingpb.Error{
+			Type:    schedulingpb.ErrorType_UNKNOWN,
+			Message: "region not found",
+		})
+		return &schedulingpb.GetOperatorResponse{Header: header}, nil
+	}
+
+	return &schedulingpb.GetOperatorResponse{
+		Header:   wrapHeader(),
+		RegionId: requestID,
+		Desc:     []byte(r.Desc()),
+		Kind:     []byte(r.Kind().String()),
+		Status:   r.Status,
+	}, nil
+}
+
+// AskBatchSplit implements gRPC SchedulingServer.
+func (s *Service) AskBatchSplit(_ context.Context, request *schedulingpb.AskBatchSplitRequest) (*schedulingpb.AskBatchSplitResponse, error) {
+	c := s.GetCluster()
+	if c == nil {
+		return &schedulingpb.AskBatchSplitResponse{Header: notBootstrappedHeader()}, nil
+	}
+
+	if request.GetRegion() == nil {
+		return &schedulingpb.AskBatchSplitResponse{
+			Header: wrapErrorToHeader(schedulingpb.ErrorType_UNKNOWN,
+				"missing region for split"),
+		}, nil
+	}
+
+	if c.IsSchedulingHalted() {
+		return nil, errs.ErrSchedulingIsHalted.FastGenByArgs()
+	}
+	if !c.persistConfig.IsTikvRegionSplitEnabled() {
+		return nil, errs.ErrSchedulerTiKVSplitDisabled.FastGenByArgs()
+	}
+	reqRegion := request.GetRegion()
+	splitCount := request.GetSplitCount()
+	err := c.ValidRegion(reqRegion)
+	if err != nil {
+		return nil, err
+	}
+	splitIDs := make([]*pdpb.SplitID, 0, splitCount)
+	recordRegions := make([]uint64, 0, splitCount+1)
+
+	requestIDCount := splitCount * (1 + uint32(len(request.Region.Peers)))
+	id, count, err := c.AllocID(requestIDCount)
+	if err != nil {
+		return nil, err
+	}
+
+	// If the count is not equal to the requestIDCount, it means that the
+	// PD doesn't support allocating IDs in batch. We need to allocate IDs
+	// for each region.
+	if requestIDCount != count {
+		// use non batch way to split region
+		for range splitCount {
+			newRegionID, _, err := c.AllocID(1)
+			if err != nil {
+				return nil, err
+			}
+			peerIDs := make([]uint64, len(request.Region.Peers))
+			for i := 0; i < len(peerIDs); i++ {
+				peerIDs[i], _, err = c.AllocID(1)
+				if err != nil {
+					return nil, err
+				}
+			}
+			recordRegions = append(recordRegions, newRegionID)
+			splitIDs = append(splitIDs, &pdpb.SplitID{
+				NewRegionId: newRegionID,
+				NewPeerIds:  peerIDs,
+			})
+			log.Info("alloc ids for region split", zap.Uint64("region-id", newRegionID), zap.Uint64s("peer-ids", peerIDs))
+		}
+	} else {
+		// use batch way to split region
+		curID := id - uint64(requestIDCount) + 1
+		for range splitCount {
+			newRegionID := curID
+			curID++
+
+			peerIDs := make([]uint64, len(request.Region.Peers))
+			for j := 0; j < len(peerIDs); j++ {
+				peerIDs[j] = curID
+				curID++
+			}
+
+			recordRegions = append(recordRegions, newRegionID)
+			splitIDs = append(splitIDs, &pdpb.SplitID{
+				NewRegionId: newRegionID,
+				NewPeerIds:  peerIDs,
+			})
+
+			log.Info("alloc ids for region split", zap.Uint64("region-id", newRegionID), zap.Uint64s("peer-ids", peerIDs))
+		}
+	}
+
+	recordRegions = append(recordRegions, reqRegion.GetId())
+	if versioninfo.IsFeatureSupported(c.persistConfig.GetClusterVersion(), versioninfo.RegionMerge) {
+		// Disable merge the regions in a period of time.
+		c.GetCoordinator().GetMergeChecker().RecordRegionSplit(recordRegions)
+	}
+
+	// If region splits during the scheduling process, regions with abnormal
+	// status may be left, and these regions need to be checked with higher
+	// priority.
+	c.GetCoordinator().GetCheckerController().AddPendingProcessedRegions(false, recordRegions...)
+
+	return &schedulingpb.AskBatchSplitResponse{
+		Header: wrapHeader(),
+		Ids:    splitIDs,
+	}, nil
+>>>>>>> 29ead019c (add failed_regions_id for scatter regions response (#9167))
 }
 
 // RegisterGRPCService registers the service to gRPC server.
