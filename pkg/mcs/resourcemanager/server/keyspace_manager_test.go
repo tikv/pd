@@ -52,7 +52,7 @@ func TestInitDefaultResourceGroup(t *testing.T) {
 	re.Equal(uint32(middlePriority), defaultGroup.Priority)
 
 	// Verify the default resource group has unlimited rate and burst limit.
-	re.Equal(uint64(unlimitedRate), defaultGroup.RUSettings.RU.getFillRateSetting())
+	re.Equal(float64(unlimitedRate), defaultGroup.RUSettings.RU.getFillRateSetting())
 	re.Equal(int64(unlimitedBurstLimit), defaultGroup.RUSettings.RU.getBurstLimitSetting())
 }
 
@@ -99,7 +99,10 @@ func TestAddResourceGroup(t *testing.T) {
 	re.Equal(group.GetName(), addedGroup.Name)
 	re.Equal(group.GetMode(), addedGroup.Mode)
 	re.Equal(group.GetPriority(), addedGroup.Priority)
-	re.Equal(group.GetRUSettings().GetRU().GetSettings().GetFillRate(), addedGroup.RUSettings.RU.getFillRateSetting())
+	re.Equal(
+		float64(group.GetRUSettings().GetRU().GetSettings().GetFillRate()),
+		addedGroup.RUSettings.RU.getFillRateSetting(),
+	)
 	re.Equal(group.GetRUSettings().GetRU().GetSettings().GetBurstLimit(), addedGroup.RUSettings.RU.getBurstLimitSetting())
 }
 
@@ -147,7 +150,10 @@ func TestModifyResourceGroup(t *testing.T) {
 	re.True(exists)
 	re.Equal(modifiedGroup.GetName(), updatedGroup.Name)
 	re.Equal(modifiedGroup.GetPriority(), updatedGroup.Priority)
-	re.Equal(modifiedGroup.GetRUSettings().GetRU().GetSettings().GetFillRate(), updatedGroup.RUSettings.RU.getFillRateSetting())
+	re.Equal(
+		float64(modifiedGroup.GetRUSettings().GetRU().GetSettings().GetFillRate()),
+		updatedGroup.RUSettings.RU.getFillRateSetting(),
+	)
 	re.Equal(modifiedGroup.GetRUSettings().GetRU().GetSettings().GetBurstLimit(), updatedGroup.RUSettings.RU.getBurstLimitSetting())
 
 	// Try to modify a non-existent group.
