@@ -236,7 +236,7 @@ func (manager *Manager) CreateKeyspace(request *CreateKeyspaceRequest) (*keyspac
 	}
 	// Set default value of GCManagementType to KeyspaceLevelGC for NextGen
 	if kerneltype.IsNextGen() {
-		if _, ok := request.Config[GCManagementType]; !ok {
+		if v, ok := request.Config[GCManagementType]; !ok || len(v) == 0 {
 			request.Config[GCManagementType] = KeyspaceLevelGC
 		}
 	}

@@ -187,7 +187,7 @@ func (suite *keyspaceTestSuite) TestGCManagementTypeDefaultValue() {
 		re.NoError(err)
 		loaded, err := manager.LoadKeyspaceByID(created.Id)
 		re.NoError(err)
-		re.Equal(loaded.Config[GCManagementType], tc.expect)
+		re.Equal(tc.expect, loaded.Config[GCManagementType])
 	}
 }
 
