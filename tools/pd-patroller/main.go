@@ -43,13 +43,10 @@ import (
 )
 
 const msgSize = 16 * units.MiB
-const defaultLimit = 65536
+const defaultLimit = 8192
 
-// Default hex-encoded end keys to skip. These are always active.
 var (
-	defaultSkipHexKeys   = []string{"7800000000000000fb", "7800000100000000fb"}
-	processedSkipKeysHex map[string]struct{}
-	invalidRegions       = map[uint64]string{} // regionID -> endKey
+	invalidRegions map[uint64]string // regionID -> endKey
 )
 
 var (
@@ -62,7 +59,6 @@ var (
 	logFile         = flag.String("log-file", "", "log file path (empty for stderr)")
 	logFormat       = flag.String("log-format", "text", "log format (text or json)")
 	enableAutoMerge = flag.Bool("enable-auto-merge", false, "Enable automatic region merge after detecting an invalid key")
-	skipKeysHexStr  = flag.String("skip-keys-hex", "", "Additional comma-separated list of hex-encoded end keys to skip (appended to defaults)")
 )
 
 func main() {
@@ -81,43 +77,6 @@ func main() {
 		os.Exit(1)
 	}
 	log.ReplaceGlobals(logger, props)
-
-	// Initialize the set of keys to skip
-	processedSkipKeysHex = make(map[string]struct{})
-
-	// 1. Add default keys first
-	for _, keyStr := range defaultSkipHexKeys {
-		// Defaults are assumed to be clean, but TrimSpace is harmless
-		trimmedKey := strings.TrimSpace(keyStr)
-		if trimmedKey != "" {
-			processedSkipKeysHex[trimmedKey] = struct{}{}
-		}
-	}
-
-	// 2. Add custom keys from command-line argument if provided
-	if *skipKeysHexStr != "" {
-		customKeysToParse := strings.Split(*skipKeysHexStr, ",")
-		log.Info("appending custom hex-encoded end keys to skip list from command-line argument", zap.Strings("custom_skip_keys_to_add", customKeysToParse))
-		for _, keyStr := range customKeysToParse {
-			trimmedKey := strings.TrimSpace(keyStr)
-			if trimmedKey != "" {
-				if _, exists := processedSkipKeysHex[trimmedKey]; !exists {
-					processedSkipKeysHex[trimmedKey] = struct{}{}
-				} else {
-					// Log if a custom key is already in the list (e.g., it was a default or a duplicate in the custom list)
-					log.Debug("custom skip key already present in the skip list (either a default or a duplicate entry)", zap.String("key", trimmedKey))
-				}
-			}
-		}
-	}
-
-	finalSkipKeysList := make([]string, 0, len(processedSkipKeysHex))
-	for k := range processedSkipKeysHex {
-		finalSkipKeysList = append(finalSkipKeysList, k)
-	}
-	log.Info("add hex-encoded keys to skip",
-		zap.Int("total_skip_keys_count", len(processedSkipKeysHex)),
-		zap.Strings("all_skip_keys", finalSkipKeysList))
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -149,6 +108,8 @@ func main() {
 	if *limit <= 0 {
 		log.Info("limit is negative, which means no limit")
 	}
+
+	invalidRegions = make(map[uint64]string)
 
 	// TODO: if the cluster supports WithAllowFollowerHandle, we will use it.
 	startTime := time.Now()
@@ -209,9 +170,6 @@ func checkRegion(region *router.Region) {
 				zap.Uint64("region_id", regionID),
 				zap.String("end_key_hex", hexKeyStr),
 				zap.Any("error", r))
-
-			// Add this key to the skip list to avoid processing it in the future
-			processedSkipKeysHex[hexKeyStr] = struct{}{}
 		}
 	}()
 
@@ -221,12 +179,6 @@ func checkRegion(region *router.Region) {
 		return
 	}
 	hexKeyStr := hex.EncodeToString(key)
-	if _, shouldSkip := processedSkipKeysHex[hexKeyStr]; shouldSkip {
-		log.Debug("skipping region: end key is in the skip list",
-			zap.Uint64("region_id", regionID),
-			zap.String("end_key_hex", hexKeyStr))
-		return
-	}
 	log.Debug("patrol region",
 		zap.Uint64("region_id", regionID),
 		zap.String("key", hex.EncodeToString(key)))
