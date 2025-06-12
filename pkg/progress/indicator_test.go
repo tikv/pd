@@ -22,7 +22,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestProgressIndicator_UpdateProgress(t *testing.T) {
+func TestProgressIndicatorUpdateProgress(t *testing.T) {
 	re := require.New(t)
 	updateInterval := time.Second
 	pi := newProgressIndicator(
