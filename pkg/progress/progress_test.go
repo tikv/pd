@@ -136,12 +136,19 @@ func TestOnlineAndOffline(t *testing.T) {
 		re.Equal(math.MaxFloat64, p.LeftSecond)
 		re.Equal(0.0, p.CurrentSpeed)
 
+		m.UpdateProgress(store, 110, 0)
+		p = m.GetProgressByStoreID(store.GetID())
+		re.Equal(removingAction, p.Action)
+		re.Equal(0.0, p.ProgressPercent)
+		re.Equal(math.MaxFloat64, p.LeftSecond)
+		re.Equal(0.0, p.CurrentSpeed)
+
 		m.UpdateProgress(store, 80, 0)
 		p = m.GetProgressByStoreID(store.GetID())
 		re.Equal(removingAction, p.Action)
 		re.Equal(0.2, p.ProgressPercent)
-		re.Equal(4*updateInterval.Seconds(), p.LeftSecond)
-		re.Equal(20.0, p.CurrentSpeed)
+		re.Equal(8*updateInterval.Seconds(), p.LeftSecond)
+		re.Equal(10.0, p.CurrentSpeed)
 
 		store = store.Clone(core.SetNodeState(targetState))
 		m.UpdateProgress(store, 0, 0)
@@ -151,7 +158,7 @@ func TestOnlineAndOffline(t *testing.T) {
 		re.Equal(removingAction, p.Action)
 		re.Equal(1.0, p.ProgressPercent)
 		re.Equal(0.0, p.LeftSecond)
-		re.Equal(50.0, p.CurrentSpeed)
+		re.Equal(33, int(p.CurrentSpeed))
 	}
 
 	testOnline(metapb.NodeState_Preparing, metapb.NodeState_Serving)

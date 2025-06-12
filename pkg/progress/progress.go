@@ -186,7 +186,7 @@ func (m *Manager) UpdateProgress(
 		p, exist := m.progresses[storeID]
 		if exist && p.Action == removingAction {
 			// currentRegionSize represents the current deleted region size.
-			currentRegionSize = p.targetRegionSize - currentRegionSize
+			currentRegionSize = math.Max(0, p.targetRegionSize-currentRegionSize)
 		} else {
 			// targetRegionSize represents the total region size that need to be
 			// deleted. It is set in the first time when the store is in removing state.
