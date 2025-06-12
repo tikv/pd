@@ -25,12 +25,11 @@ import (
 	"time"
 
 	"github.com/pingcap/errors"
-	"github.com/stretchr/testify/mock"
-	"github.com/stretchr/testify/require"
-
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/kvproto/pkg/meta_storagepb"
 	rmpb "github.com/pingcap/kvproto/pkg/resource_manager"
+	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/require"
 
 	pd "github.com/tikv/pd/client"
 	"github.com/tikv/pd/client/constants"
@@ -447,4 +446,18 @@ func TestGetResourceGroup(t *testing.T) {
 	gc, err = controller.tryGetResourceGroupController(ctx, "test-group", false)
 	re.NoError(err)
 	re.Equal(testResourceGroup, gc.getMeta())
+
+	// ----------------
+
+	// case3: when we don't set degradedRUSettings and GetResourceGroup return error, tryGetResourceGroupController will return err.
+	failpoint.Enable("github.com/tikv/pd/client/resource_group/controller/gerResourceGroupError", `return()`)
+	defer failpoint.Disable("github.com/tikv/pd/client/resource_group/controller/gerResourceGroupError")
+
+	controller02, _ := NewResourceGroupController(ctx, 1, mockProvider, nil, constants.NullKeyspaceID)
+	controller02.Start(ctx)
+
+	gc02, err := controller02.tryGetResourceGroupController(ctx, "test-group", false)
+	re.Error(err)
+	re.Nil(gc02)
+
 }

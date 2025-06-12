@@ -52,9 +52,6 @@ const (
 	watchRetryInterval = 30 * time.Second
 
 	bigRequestThreshold = 4 * 1024 * 1024 // 4MB -> 16 RRU
-
-	defaultResourceGroupFillRate   = 2_000_000
-	defaultResourceGroupBurstLimit = 50_000_000_000
 )
 
 type selectType int
@@ -209,7 +206,6 @@ func NewResourceGroupController(
 		lowTokenNotifyChan:    make(chan notifyMsg, 1),
 		tokenResponseChan:     make(chan []*rmpb.TokenBucketResponse, 1),
 		tokenBucketUpdateChan: make(chan *groupCostController, maxNotificationChanLen),
-		degradedRUSettings:    getDefaultDegradedRUSettings(),
 		opts:                  opts,
 	}
 	for _, opt := range opts {
@@ -220,17 +216,6 @@ func NewResourceGroupController(
 	controller.safeRuConfig.Store(controller.ruConfig)
 	enableControllerTraceLog.Store(config.EnableControllerTraceLog)
 	return controller, nil
-}
-
-func getDefaultDegradedRUSettings() *rmpb.GroupRequestUnitSettings {
-	return &rmpb.GroupRequestUnitSettings{
-		RU: &rmpb.TokenBucket{
-			Settings: &rmpb.TokenLimitSettings{
-				FillRate:   defaultResourceGroupFillRate,
-				BurstLimit: defaultResourceGroupBurstLimit,
-			},
-		},
-	}
 }
 
 func loadServerConfig(ctx context.Context, provider ResourceGroupProvider) (*Config, error) {
@@ -518,11 +503,14 @@ func (c *ResourceGroupsController) tryGetResourceGroupController(
 	// Call gRPC to fetch the resource group info.
 	group, err := c.provider.GetResourceGroup(ctx, name)
 	if err != nil {
-		if !c.isUseDegradedResourceGroup {
+		if c.degradedRUSettings != nil && !c.isUseDegradedResourceGroup {
 			c.isUseDegradedResourceGroup = true
 			group = c.getDegradedResourceGroup(name)
+		} else {
+			return nil, err
 		}
 	} else {
+
 		c.isUseDegradedResourceGroup = false
 	}
 	if group == nil {
