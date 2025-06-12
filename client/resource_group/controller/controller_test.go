@@ -25,7 +25,6 @@ import (
 	"time"
 
 	"github.com/pingcap/errors"
-	"github.com/pingcap/log"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
@@ -199,7 +198,6 @@ func (m *MockResourceGroupProvider) GetResourceGroup(ctx context.Context, resour
 		err = errors.New("fake get resource group error")
 	})
 	if err != nil {
-		log.Info("test-yjy GetResourceGroup err")
 		return nil, &errs.ErrClientGetResourceGroup{ResourceGroupName: resourceGroupName, Cause: err.Error()}
 	}
 
