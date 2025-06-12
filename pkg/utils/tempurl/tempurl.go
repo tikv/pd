@@ -16,22 +16,30 @@ package tempurl
 
 import (
 	"fmt"
+	"io"
 	"net"
-	"sync"
+	"net/http"
+	"os"
 	"time"
 
 	"github.com/pingcap/log"
+
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/utils/syncutil"
 )
 
 var (
-	testAddrMutex sync.Mutex
+	testAddrMutex syncutil.Mutex
 	testAddrMap   = make(map[string]struct{})
 )
 
+// AllocURLFromUT is the environment variable used to get the test URL from UT.
+// reference: /pd/tools/pd-ut/alloc/server.go
+const AllocURLFromUT = "allocURLFromUT"
+
 // Alloc allocates a local URL for testing.
 func Alloc() string {
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		if u := tryAllocTestURL(); u != "" {
 			return u
 		}
@@ -42,6 +50,9 @@ func Alloc() string {
 }
 
 func tryAllocTestURL() string {
+	if url := getFromUT(); url != "" {
+		return url
+	}
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		log.Fatal("listen failed", errs.ZapError(err))
@@ -62,4 +73,27 @@ func tryAllocTestURL() string {
 	}
 	testAddrMap[addr] = struct{}{}
 	return addr
+}
+
+func getFromUT() string {
+	addr := os.Getenv(AllocURLFromUT)
+	if addr == "" {
+		return ""
+	}
+
+	req, err := http.NewRequest(http.MethodGet, addr, nil)
+	if err != nil {
+		return ""
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil || resp.StatusCode != http.StatusOK {
+		return ""
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return ""
+	}
+	url := string(body)
+	return url
 }

@@ -17,9 +17,10 @@ package api
 import (
 	"net/http"
 
-	"github.com/tikv/pd/server"
-	"github.com/tikv/pd/server/statistics"
 	"github.com/unrolled/render"
+
+	"github.com/tikv/pd/pkg/statistics"
+	"github.com/tikv/pd/server"
 )
 
 type statsHandler struct {
@@ -34,10 +35,14 @@ func newStatsHandler(svr *server.Server, rd *render.Render) *statsHandler {
 	}
 }
 
+// GetRegionStatus gets the region statistics of a specified range.
 // @Tags     stats
 // @Summary  Get region statistics of a specified range.
-// @Param    start_key  query  string  true  "Start key"
-// @Param    end_key    query  string  true  "End key"
+// @Param    start_key  query  string  true   "Start key"
+// @Param    end_key    query  string  true   "End key"
+// @Param    count      query  bool    false  "Whether only count the number of regions"
+// @Param    use_hot    query  bool    false  "Whether use hot region statistics"
+// @Param    engine     query  string  false  "Engine type"
 // @Produce  json
 // @Success  200  {object}  statistics.RegionStats
 // @Router   /stats/region [get]
@@ -46,9 +51,13 @@ func (h *statsHandler) GetRegionStatus(w http.ResponseWriter, r *http.Request) {
 	startKey, endKey := r.URL.Query().Get("start_key"), r.URL.Query().Get("end_key")
 	var stats *statistics.RegionStats
 	if r.URL.Query().Has("count") {
-		stats = rc.GetRangeCount([]byte(startKey), []byte(endKey))
+		stats = rc.GetRegionStatsCount([]byte(startKey), []byte(endKey))
+	} else if r.URL.Query().Has("use_hot") {
+		engine := r.URL.Query().Get("engine")
+		stats = rc.GetHotRegionStatusByRange([]byte(startKey), []byte(endKey), engine)
 	} else {
-		stats = rc.GetRegionStats([]byte(startKey), []byte(endKey))
+		stats = rc.GetRegionStatsByRange([]byte(startKey), []byte(endKey))
 	}
+
 	h.rd.JSON(w, http.StatusOK, stats)
 }

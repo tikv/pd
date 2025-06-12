@@ -17,8 +17,9 @@ package api
 import (
 	"net/http"
 
-	"github.com/tikv/pd/server"
 	"github.com/unrolled/render"
+
+	"github.com/tikv/pd/server"
 )
 
 type replicationModeHandler struct {
@@ -33,6 +34,7 @@ func newReplicationModeHandler(svr *server.Server, rd *render.Render) *replicati
 	}
 }
 
+// GetReplicationModeStatus gets the status of replication mode.
 // @Tags     replication_mode
 // @Summary  Get status of replication mode
 // @Produce  json

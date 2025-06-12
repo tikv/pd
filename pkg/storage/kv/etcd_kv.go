@@ -16,17 +16,18 @@ package kv
 
 import (
 	"context"
-	"path"
-	"strings"
+	"fmt"
 	"time"
+
+	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.uber.org/zap"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
+
 	"github.com/tikv/pd/pkg/errs"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
-	"go.etcd.io/etcd/clientv3"
-	"go.uber.org/zap"
 )
 
 const (
@@ -34,22 +35,25 @@ const (
 	slowRequestTime = time.Second
 )
 
+var (
+	// WithLabelValues is a heavy operation, define variable to avoid call it every time.
+	txnFailedCounter       = txnCounter.WithLabelValues("failed")
+	txnSuccessCounter      = txnCounter.WithLabelValues("success")
+	txnFailedDurationHist  = txnDuration.WithLabelValues("failed")
+	txnSuccessDurationHist = txnDuration.WithLabelValues("success")
+)
+
 type etcdKVBase struct {
-	client   *clientv3.Client
-	rootPath string
+	client *clientv3.Client
 }
 
 // NewEtcdKVBase creates a new etcd kv.
-func NewEtcdKVBase(client *clientv3.Client, rootPath string) *etcdKVBase {
-	return &etcdKVBase{
-		client:   client,
-		rootPath: rootPath,
-	}
+func NewEtcdKVBase(client *clientv3.Client) *etcdKVBase {
+	return &etcdKVBase{client: client}
 }
 
+// Load loads the value of the key from etcd.
 func (kv *etcdKVBase) Load(key string) (string, error) {
-	key = path.Join(kv.rootPath, key)
-
 	resp, err := etcdutil.EtcdKVGet(kv.client, key)
 	if err != nil {
 		return "", err
@@ -62,34 +66,38 @@ func (kv *etcdKVBase) Load(key string) (string, error) {
 	return string(resp.Kvs[0].Value), nil
 }
 
-func (kv *etcdKVBase) LoadRange(key, endKey string, limit int) ([]string, []string, error) {
-	// Note: reason to use `strings.Join` instead of `path.Join` is that the latter will
-	// removes suffix '/' of the joined string.
-	// As a result, when we try to scan from "foo/", it ends up scanning from "/pd/foo"
-	// internally, and returns unexpected keys such as "foo_bar/baz".
-	key = strings.Join([]string{kv.rootPath, key}, "/")
-	endKey = strings.Join([]string{kv.rootPath, endKey}, "/")
+// LoadRange loads a range of keys [key, endKey) from etcd.
+func (kv *etcdKVBase) LoadRange(key, endKey string, limit int) (keys, values []string, err error) {
+	var OpOption []clientv3.OpOption
+	// If endKey is "\x00", it means to scan with prefix.
+	// If the key is empty and endKey is "\x00", it means to scan all keys.
+	if endKey == "\x00" {
+		OpOption = append(OpOption, clientv3.WithPrefix())
+	} else {
+		OpOption = append(OpOption, clientv3.WithRange(endKey))
+	}
 
-	withRange := clientv3.WithRange(endKey)
-	withLimit := clientv3.WithLimit(int64(limit))
-	resp, err := etcdutil.EtcdKVGet(kv.client, key, withRange, withLimit)
+	OpOption = append(OpOption, clientv3.WithLimit(int64(limit)))
+	resp, err := etcdutil.EtcdKVGet(kv.client, key, OpOption...)
 	if err != nil {
 		return nil, nil, err
 	}
-	keys := make([]string, 0, len(resp.Kvs))
-	values := make([]string, 0, len(resp.Kvs))
+	keys = make([]string, 0, len(resp.Kvs))
+	values = make([]string, 0, len(resp.Kvs))
 	for _, item := range resp.Kvs {
-		keys = append(keys, strings.TrimPrefix(strings.TrimPrefix(string(item.Key), kv.rootPath), "/"))
+		keys = append(keys, string(item.Key))
 		values = append(values, string(item.Value))
 	}
 	return keys, values, nil
 }
 
+// Save puts a key-value pair to etcd.
 func (kv *etcdKVBase) Save(key, value string) error {
 	failpoint.Inject("etcdSaveFailed", func() {
 		failpoint.Return(errors.New("save failed"))
 	})
-	key = path.Join(kv.rootPath, key)
+	etcdutil.InjectFailToCollectTestEtcdKey(key, "save")
+
 	txn := NewSlowLogTxn(kv.client)
 	resp, err := txn.Then(clientv3.OpPut(key, value)).Commit()
 	if err != nil {
@@ -103,8 +111,9 @@ func (kv *etcdKVBase) Save(key, value string) error {
 	return nil
 }
 
+// Remove removes the key from etcd.
 func (kv *etcdKVBase) Remove(key string) error {
-	key = path.Join(kv.rootPath, key)
+	etcdutil.InjectFailToCollectTestEtcdKey(key, "remove")
 
 	txn := NewSlowLogTxn(kv.client)
 	resp, err := txn.Then(clientv3.OpDelete(key)).Commit()
@@ -117,6 +126,13 @@ func (kv *etcdKVBase) Remove(key string) error {
 		return errs.ErrEtcdTxnConflict.FastGenByArgs()
 	}
 	return nil
+}
+
+// CreateRawTxn creates a transaction that provides interface in if-then-else pattern.
+func (kv *etcdKVBase) CreateRawTxn() RawTxn {
+	return &rawTxnWrapper{
+		inner: NewSlowLogTxn(kv.client),
+	}
 }
 
 // SlowLogTxn wraps etcd transaction and log slow one.
@@ -162,12 +178,232 @@ func (t *SlowLogTxn) Commit() (*clientv3.TxnResponse, error) {
 			zap.Duration("cost", cost),
 			errs.ZapError(err))
 	}
-	label := "success"
+
 	if err != nil {
-		label = "failed"
+		txnFailedCounter.Inc()
+		txnFailedDurationHist.Observe(cost.Seconds())
+	} else {
+		txnSuccessCounter.Inc()
+		txnSuccessDurationHist.Observe(cost.Seconds())
 	}
-	txnCounter.WithLabelValues(label).Inc()
-	txnDuration.WithLabelValues(label).Observe(cost.Seconds())
 
 	return resp, errors.WithStack(err)
+}
+
+// etcdTxn is used to record user's action during RunInTxn,
+// It stores modification in operations to apply as a single transaction during commit.
+// All load/loadRange result will be stored in conditions.
+// Transaction commit will be successful only if all conditions are met,
+// aka, no other transaction has modified values loaded during current transaction.
+type etcdTxn struct {
+	kv         *etcdKVBase
+	ctx        context.Context
+	conditions []clientv3.Cmp
+	operations []clientv3.Op
+}
+
+// RunInTxn runs user provided function f in a transaction.
+func (kv *etcdKVBase) RunInTxn(ctx context.Context, f func(txn Txn) error) error {
+	txn := &etcdTxn{
+		kv:  kv,
+		ctx: ctx,
+	}
+	err := f(txn)
+	if err != nil {
+		return err
+	}
+	return txn.commit()
+}
+
+// Save puts a put operation into operations.
+// Note that save result are not immediately observable before current transaction commit.
+func (txn *etcdTxn) Save(key, value string) error {
+	etcdutil.InjectFailToCollectTestEtcdKey(key, "save")
+
+	operation := clientv3.OpPut(key, value)
+	txn.operations = append(txn.operations, operation)
+
+	return nil
+}
+
+// Remove puts a delete operation into operations.
+func (txn *etcdTxn) Remove(key string) error {
+	etcdutil.InjectFailToCollectTestEtcdKey(key, "remove")
+
+	operation := clientv3.OpDelete(key)
+	txn.operations = append(txn.operations, operation)
+	return nil
+}
+
+// Load loads the target value from etcd and puts a comparator into conditions.
+func (txn *etcdTxn) Load(key string) (string, error) {
+	resp, err := etcdutil.EtcdKVGet(txn.kv.client, key)
+	if err != nil {
+		return "", err
+	}
+	var condition clientv3.Cmp
+	var value string
+	switch respLen := len(resp.Kvs); respLen {
+	case 0:
+		// If target key does not contain a value, pin the CreateRevision of the key to 0.
+		// Returned value should be empty string.
+		value = ""
+		condition = clientv3.Compare(clientv3.CreateRevision(key), "=", 0)
+	case 1:
+		// If target key has value, must make sure it stays the same at the time of commit.
+		value = string(resp.Kvs[0].Value)
+		condition = clientv3.Compare(clientv3.Value(key), "=", value)
+	default:
+		// If response contains multiple kvs, error occurred.
+		return "", errs.ErrEtcdKVGetResponse.GenWithStackByArgs(resp.Kvs)
+	}
+	// Append the check condition to transaction.
+	txn.conditions = append(txn.conditions, condition)
+	return value, nil
+}
+
+// LoadRange loads the target range from etcd,
+// Then for each value loaded, it puts a comparator into conditions.
+func (txn *etcdTxn) LoadRange(key, endKey string, limit int) (keys []string, values []string, err error) {
+	keys, values, err = txn.kv.LoadRange(key, endKey, limit)
+	// If LoadRange failed, preserve the failure behavior of base LoadRange.
+	if err != nil {
+		return keys, values, err
+	}
+	// If LoadRange successful, must make sure values stay the same before commit.
+	for i := range keys {
+		condition := clientv3.Compare(clientv3.Value(keys[i]), "=", values[i])
+		txn.conditions = append(txn.conditions, condition)
+	}
+	return keys, values, err
+}
+
+// commit perform the operations on etcd, with pre-condition that values observed by user have not been changed.
+func (txn *etcdTxn) commit() error {
+	// Using slowLogTxn to commit transaction.
+	slowLogTxn := NewSlowLogTxn(txn.kv.client)
+	slowLogTxn.If(txn.conditions...)
+	slowLogTxn.Then(txn.operations...)
+	resp, err := slowLogTxn.Commit()
+	if err != nil {
+		return err
+	}
+	if !resp.Succeeded {
+		return errs.ErrEtcdTxnConflict.FastGenByArgs()
+	}
+	return nil
+}
+
+type rawTxnWrapper struct {
+	inner clientv3.Txn
+}
+
+// If implements RawTxn interface for adding conditions to the transaction.
+func (l *rawTxnWrapper) If(conditions ...RawTxnCondition) RawTxn {
+	cmpList := make([]clientv3.Cmp, 0, len(conditions))
+	for _, c := range conditions {
+		switch c.CmpType {
+		case RawTxnCmpExists:
+			cmpList = append(cmpList, clientv3.Compare(clientv3.CreateRevision(c.Key), ">", 0))
+		case RawTxnCmpNotExists:
+			cmpList = append(cmpList, clientv3.Compare(clientv3.CreateRevision(c.Key), "=", 0))
+		default:
+			var cmpOp string
+			switch c.CmpType {
+			case RawTxnCmpEqual:
+				cmpOp = "="
+			case RawTxnCmpNotEqual:
+				cmpOp = "!="
+			case RawTxnCmpGreater:
+				cmpOp = ">"
+			case RawTxnCmpLess:
+				cmpOp = "<"
+			default:
+				panic(fmt.Sprintf("unknown cmp type %v", c.CmpType))
+			}
+			cmpList = append(cmpList, clientv3.Compare(clientv3.Value(c.Key), cmpOp, c.Value))
+		}
+	}
+	l.inner = l.inner.If(cmpList...)
+	return l
+}
+
+func convertOps(ops []RawTxnOp) []clientv3.Op {
+	opsList := make([]clientv3.Op, 0, len(ops))
+	for _, op := range ops {
+		switch op.OpType {
+		case RawTxnOpPut:
+			opsList = append(opsList, clientv3.OpPut(op.Key, op.Value))
+		case RawTxnOpDelete:
+			opsList = append(opsList, clientv3.OpDelete(op.Key))
+		case RawTxnOpGet:
+			opsList = append(opsList, clientv3.OpGet(op.Key))
+		case RawTxnOpGetRange:
+			if op.EndKey == "\x00" {
+				opsList = append(opsList, clientv3.OpGet(op.Key, clientv3.WithPrefix(), clientv3.WithLimit(int64(op.Limit))))
+			} else {
+				opsList = append(opsList, clientv3.OpGet(op.Key, clientv3.WithRange(op.EndKey), clientv3.WithLimit(int64(op.Limit))))
+			}
+		default:
+			panic(fmt.Sprintf("unknown op type %v", op.OpType))
+		}
+	}
+	return opsList
+}
+
+// Then implements RawTxn interface for adding operations that need to be executed when the condition passes to
+// the transaction.
+func (l *rawTxnWrapper) Then(ops ...RawTxnOp) RawTxn {
+	convertedOps := convertOps(ops)
+	etcdutil.InjectFailToCollectTestEtcdOps(convertedOps...)
+	l.inner = l.inner.Then(convertedOps...)
+	return l
+}
+
+// Else implements RawTxn interface for adding operations that need to be executed when the condition doesn't pass
+// to the transaction.
+func (l *rawTxnWrapper) Else(ops ...RawTxnOp) RawTxn {
+	convertedOps := convertOps(ops)
+	etcdutil.InjectFailToCollectTestEtcdOps(convertedOps...)
+	l.inner = l.inner.Else(convertedOps...)
+	return l
+}
+
+// Commit implements RawTxn interface for committing the transaction.
+func (l *rawTxnWrapper) Commit() (RawTxnResponse, error) {
+	resp, err := l.inner.Commit()
+	if err != nil {
+		return RawTxnResponse{}, err
+	}
+	items := make([]RawTxnResponseItem, 0, len(resp.Responses))
+	for i, rpcRespItem := range resp.Responses {
+		var respItem RawTxnResponseItem
+		if put := rpcRespItem.GetResponsePut(); put != nil {
+			// Put and delete operations of etcd's transaction won't return any previous data. Skip handling it.
+			respItem = RawTxnResponseItem{}
+		} else if del := rpcRespItem.GetResponseDeleteRange(); del != nil {
+			// Put and delete operations of etcd's transaction won't return any previous data. Skip handling it.
+			respItem = RawTxnResponseItem{}
+		} else if rangeResp := rpcRespItem.GetResponseRange(); rangeResp != nil {
+			kvs := make([]KeyValuePair, 0, len(rangeResp.Kvs))
+			for _, kv := range rangeResp.Kvs {
+				kvs = append(kvs, KeyValuePair{
+					Key:   string(kv.Key),
+					Value: string(kv.Value),
+				})
+			}
+			respItem = RawTxnResponseItem{
+				KeyValuePairs: kvs,
+			}
+		} else {
+			return RawTxnResponse{}, errs.ErrEtcdTxnResponse.GenWithStackByArgs(
+				fmt.Sprintf("succeeded: %v, index: %v, response: %v", resp.Succeeded, i, rpcRespItem),
+			)
+		}
+		items = append(items, respItem)
+	}
+	return RawTxnResponse{
+		Succeeded: resp.Succeeded,
+		Responses: items,
+	}, nil
 }

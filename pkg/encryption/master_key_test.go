@@ -17,14 +17,15 @@ package encryption
 import (
 	"encoding/hex"
 	"os"
+	"path/filepath"
 	"testing"
 
-	"github.com/pingcap/kvproto/pkg/encryptionpb"
 	"github.com/stretchr/testify/require"
+
+	"github.com/pingcap/kvproto/pkg/encryptionpb"
 )
 
 func TestPlaintextMasterKey(t *testing.T) {
-	t.Parallel()
 	re := require.New(t)
 	config := &encryptionpb.MasterKey{
 		Backend: &encryptionpb.MasterKey_Plaintext{
@@ -50,9 +51,8 @@ func TestPlaintextMasterKey(t *testing.T) {
 }
 
 func TestEncrypt(t *testing.T) {
-	t.Parallel()
 	re := require.New(t)
-	keyHex := "2f07ec61e5a50284f47f2b402a962ec672e500b26cb3aa568bb1531300c74806"
+	keyHex := "2f07ec61e5a50284f47f2b402a962ec672e500b26cb3aa568bb1531300c74806" // #nosec G101
 	key, err := hex.DecodeString(keyHex)
 	re.NoError(err)
 	masterKey := &MasterKey{key: key}
@@ -66,9 +66,8 @@ func TestEncrypt(t *testing.T) {
 }
 
 func TestDecrypt(t *testing.T) {
-	t.Parallel()
 	re := require.New(t)
-	keyHex := "2f07ec61e5a50284f47f2b402a962ec672e500b26cb3aa568bb1531300c74806"
+	keyHex := "2f07ec61e5a50284f47f2b402a962ec672e500b26cb3aa568bb1531300c74806" // #nosec G101
 	key, err := hex.DecodeString(keyHex)
 	re.NoError(err)
 	plaintext := "this-is-a-plaintext"
@@ -83,7 +82,6 @@ func TestDecrypt(t *testing.T) {
 }
 
 func TestNewFileMasterKeyMissingPath(t *testing.T) {
-	t.Parallel()
 	re := require.New(t)
 	config := &encryptionpb.MasterKey{
 		Backend: &encryptionpb.MasterKey_File{
@@ -97,10 +95,8 @@ func TestNewFileMasterKeyMissingPath(t *testing.T) {
 }
 
 func TestNewFileMasterKeyMissingFile(t *testing.T) {
-	t.Parallel()
 	re := require.New(t)
-	dir := t.TempDir()
-	path := dir + "/key"
+	path := filepath.Join(t.TempDir(), "key")
 	config := &encryptionpb.MasterKey{
 		Backend: &encryptionpb.MasterKey_File{
 			File: &encryptionpb.MasterKeyFile{
@@ -113,10 +109,8 @@ func TestNewFileMasterKeyMissingFile(t *testing.T) {
 }
 
 func TestNewFileMasterKeyNotHexString(t *testing.T) {
-	t.Parallel()
 	re := require.New(t)
-	dir := t.TempDir()
-	path := dir + "/key"
+	path := filepath.Join(t.TempDir(), "key")
 	os.WriteFile(path, []byte("not-a-hex-string"), 0600)
 	config := &encryptionpb.MasterKey{
 		Backend: &encryptionpb.MasterKey_File{
@@ -130,10 +124,8 @@ func TestNewFileMasterKeyNotHexString(t *testing.T) {
 }
 
 func TestNewFileMasterKeyLengthMismatch(t *testing.T) {
-	t.Parallel()
 	re := require.New(t)
-	dir := t.TempDir()
-	path := dir + "/key"
+	path := filepath.Join(t.TempDir(), "key")
 	os.WriteFile(path, []byte("2f07ec61e5a50284f47f2b402a962ec6"), 0600)
 	config := &encryptionpb.MasterKey{
 		Backend: &encryptionpb.MasterKey_File{
@@ -147,11 +139,9 @@ func TestNewFileMasterKeyLengthMismatch(t *testing.T) {
 }
 
 func TestNewFileMasterKey(t *testing.T) {
-	t.Parallel()
 	re := require.New(t)
-	key := "2f07ec61e5a50284f47f2b402a962ec672e500b26cb3aa568bb1531300c74806"
-	dir := t.TempDir()
-	path := dir + "/key"
+	key := "2f07ec61e5a50284f47f2b402a962ec672e500b26cb3aa568bb1531300c74806" // #nosec G101
+	path := filepath.Join(t.TempDir(), "key")
 	os.WriteFile(path, []byte(key), 0600)
 	config := &encryptionpb.MasterKey{
 		Backend: &encryptionpb.MasterKey_File{

@@ -27,8 +27,8 @@ func NewIDAllocator() *IDAllocator {
 }
 
 // Alloc returns a new id.
-func (alloc *IDAllocator) Alloc() (uint64, error) {
-	return atomic.AddUint64(&alloc.base, 1), nil
+func (alloc *IDAllocator) Alloc(uint32) (uint64, uint32, error) {
+	return atomic.AddUint64(&alloc.base, 1), 1, nil
 }
 
 // SetBase implements the IDAllocator interface.
@@ -38,6 +38,6 @@ func (alloc *IDAllocator) SetBase(newBase uint64) error {
 }
 
 // Rebase implements the IDAllocator interface.
-func (alloc *IDAllocator) Rebase() error {
+func (*IDAllocator) Rebase() error {
 	return nil
 }

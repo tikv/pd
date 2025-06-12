@@ -21,7 +21,7 @@ import (
 // Item is the cache entry.
 type Item struct {
 	Key   uint64
-	Value interface{}
+	Value any
 }
 
 // LRU is 'Least-Recently-Used' cache.
@@ -45,7 +45,7 @@ func newLRU(maxCount int) *LRU {
 }
 
 // Put puts an item into cache.
-func (c *LRU) Put(key uint64, value interface{}) {
+func (c *LRU) Put(key uint64, value any) {
 	if ele, ok := c.cache[key]; ok {
 		c.ll.MoveToFront(ele)
 		ele.Value.(*Item).Value = value
@@ -61,7 +61,7 @@ func (c *LRU) Put(key uint64, value interface{}) {
 }
 
 // Get retrieves an item from cache.
-func (c *LRU) Get(key uint64) (interface{}, bool) {
+func (c *LRU) Get(key uint64) (any, bool) {
 	if ele, ok := c.cache[key]; ok {
 		c.ll.MoveToFront(ele)
 		return ele.Value.(*Item).Value, true
@@ -71,7 +71,7 @@ func (c *LRU) Get(key uint64) (interface{}, bool) {
 }
 
 // Peek reads an item from cache. The action is no considered 'Use'.
-func (c *LRU) Peek(key uint64) (interface{}, bool) {
+func (c *LRU) Peek(key uint64) (any, bool) {
 	if ele, ok := c.cache[key]; ok {
 		return ele.Value.(*Item).Value, true
 	}
@@ -104,7 +104,7 @@ func (c *LRU) removeOldest() {
 	}
 }
 
-func (c *LRU) getAndRemoveOldest() (uint64, interface{}, bool) {
+func (c *LRU) getAndRemoveOldest() (uint64, any, bool) {
 	ele := c.ll.Back()
 	if ele != nil {
 		c.removeElement(ele)

@@ -15,17 +15,23 @@
 package endpoint
 
 import (
+	"context"
 	"strconv"
 
 	"github.com/gogo/protobuf/proto"
+	clientv3 "go.etcd.io/etcd/client/v3"
+
 	"github.com/pingcap/kvproto/pkg/keyspacepb"
-	"go.etcd.io/etcd/clientv3"
+
+	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/storage/kv"
+	"github.com/tikv/pd/pkg/utils/keypath"
 )
 
 const (
-	// spaceIDBase is base used to encode/decode spaceID.
+	// SpaceIDBase is base used to encode/decode spaceID.
 	// It's set to 10 for better readability.
-	spaceIDBase = 10
+	SpaceIDBase = 10
 	// spaceIDBitSizeMax is the max bitSize of spaceID.
 	// It's currently set to 24 (3bytes).
 	spaceIDBitSizeMax = 24
@@ -33,49 +39,73 @@ const (
 
 // KeyspaceStorage defines storage operations on keyspace related data.
 type KeyspaceStorage interface {
-	// SaveKeyspace saves the given keyspace to the storage.
-	SaveKeyspace(*keyspacepb.KeyspaceMeta) error
-	// LoadKeyspace loads keyspace specified by spaceID.
-	LoadKeyspace(spaceID uint32, keyspace *keyspacepb.KeyspaceMeta) (bool, error)
-	// RemoveKeyspace removes target keyspace specified by spaceID.
-	RemoveKeyspace(spaceID uint32) error
+	SaveKeyspaceMeta(txn kv.Txn, meta *keyspacepb.KeyspaceMeta) error
+	LoadKeyspaceMeta(txn kv.Txn, id uint32) (*keyspacepb.KeyspaceMeta, error)
+	SaveKeyspaceID(txn kv.Txn, id uint32, name string) error
+	LoadKeyspaceID(txn kv.Txn, name string) (bool, uint32, error)
 	// LoadRangeKeyspace loads no more than limit keyspaces starting at startID.
-	LoadRangeKeyspace(startID uint32, limit int) ([]*keyspacepb.KeyspaceMeta, error)
-	// SaveKeyspaceIDByName saves keyspace name to ID lookup information.
-	// It saves the ID onto the path encoded with name.
-	SaveKeyspaceIDByName(spaceID uint32, name string) error
-	// LoadKeyspaceIDByName loads keyspace ID for the given keyspace specified by name.
-	// It first constructs path to spaceID with the given name, then attempt to retrieve
-	// target spaceID. If the target keyspace does not exist, result boolean is set to false.
-	LoadKeyspaceIDByName(name string) (bool, uint32, error)
+	LoadRangeKeyspace(txn kv.Txn, startID uint32, limit int) ([]*keyspacepb.KeyspaceMeta, error)
+	RunInTxn(ctx context.Context, f func(txn kv.Txn) error) error
 }
 
 var _ KeyspaceStorage = (*StorageEndpoint)(nil)
 
-// SaveKeyspace saves the given keyspace to the storage.
-func (se *StorageEndpoint) SaveKeyspace(keyspace *keyspacepb.KeyspaceMeta) error {
-	key := KeyspaceMetaPath(keyspace.GetId())
-	return se.saveProto(key, keyspace)
+// SaveKeyspaceMeta adds a save keyspace meta operation to target transaction.
+func (*StorageEndpoint) SaveKeyspaceMeta(txn kv.Txn, meta *keyspacepb.KeyspaceMeta) error {
+	metaPath := keypath.KeyspaceMetaPath(meta.GetId())
+	metaVal, err := proto.Marshal(meta)
+	if err != nil {
+		return errs.ErrProtoMarshal.Wrap(err).GenWithStackByCause()
+	}
+	return txn.Save(metaPath, string(metaVal))
 }
 
-// LoadKeyspace loads keyspace specified by spaceID.
-func (se *StorageEndpoint) LoadKeyspace(spaceID uint32, keyspace *keyspacepb.KeyspaceMeta) (bool, error) {
-	key := KeyspaceMetaPath(spaceID)
-	return se.loadProto(key, keyspace)
+// LoadKeyspaceMeta load and return keyspace meta specified by id.
+// If keyspace does not exist or error occurs, returned meta will be nil.
+func (*StorageEndpoint) LoadKeyspaceMeta(txn kv.Txn, id uint32) (*keyspacepb.KeyspaceMeta, error) {
+	metaPath := keypath.KeyspaceMetaPath(id)
+	metaVal, err := txn.Load(metaPath)
+	if err != nil || metaVal == "" {
+		return nil, err
+	}
+	meta := &keyspacepb.KeyspaceMeta{}
+	err = proto.Unmarshal([]byte(metaVal), meta)
+	if err != nil {
+		return nil, errs.ErrProtoUnmarshal.Wrap(err).GenWithStackByCause()
+	}
+	return meta, nil
 }
 
-// RemoveKeyspace removes target keyspace specified by spaceID.
-func (se *StorageEndpoint) RemoveKeyspace(spaceID uint32) error {
-	key := KeyspaceMetaPath(spaceID)
-	return se.Remove(key)
+// SaveKeyspaceID saves keyspace ID to the path specified by keyspace name.
+func (*StorageEndpoint) SaveKeyspaceID(txn kv.Txn, id uint32, name string) error {
+	idPath := keypath.KeyspaceIDPath(name)
+	idVal := strconv.FormatUint(uint64(id), SpaceIDBase)
+	return txn.Save(idPath, idVal)
+}
+
+// LoadKeyspaceID loads keyspace ID from the path specified by keyspace name.
+// An additional boolean is returned to indicate whether target id exists,
+// it returns false if target id not found, or if error occurred.
+func (*StorageEndpoint) LoadKeyspaceID(txn kv.Txn, name string) (bool, uint32, error) {
+	idPath := keypath.KeyspaceIDPath(name)
+	idVal, err := txn.Load(idPath)
+	// Failed to load the keyspaceID if loading operation errored, or if keyspace does not exist.
+	if err != nil || idVal == "" {
+		return false, 0, err
+	}
+	id64, err := strconv.ParseUint(idVal, SpaceIDBase, spaceIDBitSizeMax)
+	if err != nil {
+		return false, 0, err
+	}
+	return true, uint32(id64), nil
 }
 
 // LoadRangeKeyspace loads keyspaces starting at startID.
 // limit specifies the limit of loaded keyspaces.
-func (se *StorageEndpoint) LoadRangeKeyspace(startID uint32, limit int) ([]*keyspacepb.KeyspaceMeta, error) {
-	startKey := KeyspaceMetaPath(startID)
-	endKey := clientv3.GetPrefixRangeEnd(KeyspaceMetaPrefix())
-	keys, values, err := se.LoadRange(startKey, endKey, limit)
+func (*StorageEndpoint) LoadRangeKeyspace(txn kv.Txn, startID uint32, limit int) ([]*keyspacepb.KeyspaceMeta, error) {
+	startKey := keypath.KeyspaceMetaPath(startID)
+	endKey := clientv3.GetPrefixRangeEnd(keypath.KeyspaceMetaPrefix())
+	keys, values, err := txn.LoadRange(startKey, endKey, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -91,26 +121,4 @@ func (se *StorageEndpoint) LoadRangeKeyspace(startID uint32, limit int) ([]*keys
 		keyspaces = append(keyspaces, keyspace)
 	}
 	return keyspaces, nil
-}
-
-// SaveKeyspaceIDByName saves keyspace name to ID lookup information to storage.
-func (se *StorageEndpoint) SaveKeyspaceIDByName(spaceID uint32, name string) error {
-	key := KeyspaceIDPath(name)
-	idStr := strconv.FormatUint(uint64(spaceID), spaceIDBase)
-	return se.Save(key, idStr)
-}
-
-// LoadKeyspaceIDByName loads keyspace ID for the given keyspace name
-func (se *StorageEndpoint) LoadKeyspaceIDByName(name string) (bool, uint32, error) {
-	key := KeyspaceIDPath(name)
-	idStr, err := se.Load(key)
-	// Failed to load the keyspaceID if loading operation errored, or if keyspace does not exist.
-	if err != nil || idStr == "" {
-		return false, 0, err
-	}
-	id64, err := strconv.ParseUint(idStr, spaceIDBase, spaceIDBitSizeMax)
-	if err != nil {
-		return false, 0, err
-	}
-	return true, uint32(id64), nil
 }

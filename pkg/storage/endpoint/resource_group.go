@@ -14,26 +14,94 @@
 
 package endpoint
 
-// ResourceGroupStorage defines the storage operations on the rule.
+import (
+	"github.com/gogo/protobuf/proto"
+	"go.uber.org/zap"
+
+	"github.com/pingcap/log"
+
+	"github.com/tikv/pd/pkg/mcs/utils/constant"
+	"github.com/tikv/pd/pkg/utils/keypath"
+)
+
+// ResourceGroupStorage defines the storage operations on the resource group.
 type ResourceGroupStorage interface {
-	LoadResourceGroups(f func(k, v string)) error
-	SaveResourceGroup(groupName string, groupPayload interface{}) error
-	DeleteResourceGroup(groupName string) error
+	LoadResourceGroupSettings(f func(keyspaceID uint32, name, rawValue string)) error
+	SaveResourceGroupSetting(keyspaceID uint32, name string, msg proto.Message) error
+	DeleteResourceGroupSetting(keyspaceID uint32, name string) error
+	LoadResourceGroupStates(f func(keyspaceID uint32, name, rawValue string)) error
+	SaveResourceGroupStates(keyspaceID uint32, name string, obj any) error
+	DeleteResourceGroupStates(keyspaceID uint32, name string) error
+	SaveControllerConfig(config any) error
+	LoadControllerConfig() (string, error)
 }
 
 var _ ResourceGroupStorage = (*StorageEndpoint)(nil)
 
-// SaveResourceGroup stores a resource group to storage.
-func (se *StorageEndpoint) SaveResourceGroup(groupName string, payload interface{}) error {
-	return se.saveJSON(resourceGroupPath, groupName, payload)
+// SaveResourceGroupSetting stores a resource group to storage.
+func (se *StorageEndpoint) SaveResourceGroupSetting(keyspaceID uint32, name string, msg proto.Message) error {
+	return se.saveProto(keypath.KeyspaceResourceGroupSettingPath(keyspaceID, name), msg)
 }
 
-// DeleteResourceGroup removes a resource group from storage.
-func (se *StorageEndpoint) DeleteResourceGroup(groupName string) error {
-	return se.Remove(resourceGroupKeyPath(groupName))
+// DeleteResourceGroupSetting removes a resource group from storage.
+func (se *StorageEndpoint) DeleteResourceGroupSetting(keyspaceID uint32, name string) error {
+	return se.Remove(keypath.KeyspaceResourceGroupSettingPath(keyspaceID, name))
 }
 
-// LoadResourceGroups loads all resource groups from storage.
-func (se *StorageEndpoint) LoadResourceGroups(f func(k, v string)) error {
-	return se.loadRangeByPrefix(resourceGroupPath+"/", f)
+// LoadResourceGroupSettings loads all resource groups from storage.
+func (se *StorageEndpoint) LoadResourceGroupSettings(f func(keyspaceID uint32, name string, rawValue string)) error {
+	if err := se.loadRangeByPrefix(keypath.ResourceGroupSettingPrefix(), func(key, value string) {
+		// Using the null keyspace ID for the resource group settings loaded from the legacy path.
+		f(constant.NullKeyspaceID, key, value)
+	}); err != nil {
+		return err
+	}
+	return se.loadRangeByPrefix(keypath.KeyspaceResourceGroupSettingPrefix(), func(key, value string) {
+		// Parse the key to get the keyspace ID and resource group name respectively.
+		keyspaceID, name, err := keypath.ParseKeyspaceResourceGroupPath(key)
+		if err != nil {
+			log.Error("failed to parse the keyspace ID and resource group name", zap.String("key", key), zap.Error(err))
+			return
+		}
+		f(keyspaceID, name, value)
+	})
+}
+
+// SaveResourceGroupStates stores a resource group to storage.
+func (se *StorageEndpoint) SaveResourceGroupStates(keyspaceID uint32, name string, obj any) error {
+	return se.saveJSON(keypath.KeyspaceResourceGroupStatePath(keyspaceID, name), obj)
+}
+
+// DeleteResourceGroupStates removes a resource group from storage.
+func (se *StorageEndpoint) DeleteResourceGroupStates(keyspaceID uint32, name string) error {
+	return se.Remove(keypath.KeyspaceResourceGroupStatePath(keyspaceID, name))
+}
+
+// LoadResourceGroupStates loads all resource groups from storage.
+func (se *StorageEndpoint) LoadResourceGroupStates(f func(keyspaceID uint32, name string, rawValue string)) error {
+	if err := se.loadRangeByPrefix(keypath.ResourceGroupStatePrefix(), func(key, value string) {
+		// Using the null keyspace ID for the resource group states loaded from the legacy path.
+		f(constant.NullKeyspaceID, key, value)
+	}); err != nil {
+		return err
+	}
+	return se.loadRangeByPrefix(keypath.KeyspaceResourceGroupStatePrefix(), func(key, value string) {
+		// Parse the key to get the keyspace ID and resource group name respectively.
+		keyspaceID, name, err := keypath.ParseKeyspaceResourceGroupPath(key)
+		if err != nil {
+			log.Error("failed to parse the keyspace ID and resource group name", zap.String("key", key), zap.Error(err))
+			return
+		}
+		f(keyspaceID, name, value)
+	})
+}
+
+// SaveControllerConfig stores the resource controller config to storage.
+func (se *StorageEndpoint) SaveControllerConfig(config any) error {
+	return se.saveJSON(keypath.ControllerConfigPath(), config)
+}
+
+// LoadControllerConfig loads the resource controller config from storage.
+func (se *StorageEndpoint) LoadControllerConfig() (string, error) {
+	return se.Load(keypath.ControllerConfigPath())
 }

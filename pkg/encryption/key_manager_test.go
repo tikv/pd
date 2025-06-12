@@ -17,8 +17,6 @@ package encryption
 import (
 	"context"
 	"encoding/hex"
-	"fmt"
-	"net/url"
 	"os"
 	"path/filepath"
 	"sync/atomic"
@@ -26,17 +24,18 @@ import (
 	"time"
 
 	"github.com/gogo/protobuf/proto"
-	"github.com/pingcap/kvproto/pkg/encryptionpb"
 	"github.com/stretchr/testify/require"
+	clientv3 "go.etcd.io/etcd/client/v3"
+
+	"github.com/pingcap/kvproto/pkg/encryptionpb"
+
+	"github.com/tikv/pd/pkg/core"
 	"github.com/tikv/pd/pkg/election"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
-	"github.com/tikv/pd/pkg/utils/tempurl"
 	"github.com/tikv/pd/pkg/utils/typeutil"
-	"github.com/tikv/pd/server/core"
-	"go.etcd.io/etcd/clientv3"
-	"go.etcd.io/etcd/embed"
 )
 
+// #nosec G101
 const (
 	testMasterKey     = "8fd7e3e917c170d92f3e51a981dd7bc8fba11f3df7d8df994842f6e86f69b530"
 	testMasterKey2    = "8fd7e3e917c170d92f3e51a981dd7bc8fba11f3df7d8df994842f6e86f69b531"
@@ -49,35 +48,11 @@ func getTestDataKey() []byte {
 	return key
 }
 
-func newTestEtcd(t *testing.T, re *require.Assertions) (client *clientv3.Client) {
-	cfg := embed.NewConfig()
-	cfg.Name = "test_etcd"
-	cfg.Dir = t.TempDir()
-	cfg.Logger = "zap"
-	pu, err := url.Parse(tempurl.Alloc())
-	re.NoError(err)
-	cfg.LPUrls = []url.URL{*pu}
-	cfg.APUrls = cfg.LPUrls
-	cu, err := url.Parse(tempurl.Alloc())
-	re.NoError(err)
-	cfg.LCUrls = []url.URL{*cu}
-	cfg.ACUrls = cfg.LCUrls
-	cfg.InitialCluster = fmt.Sprintf("%s=%s", cfg.Name, &cfg.LPUrls[0])
-	cfg.ClusterState = embed.ClusterStateFlagNew
-	server, err := embed.StartEtcd(cfg)
-	re.NoError(err)
-	<-server.Server.ReadyNotify()
-
-	client, err = clientv3.New(clientv3.Config{
-		Endpoints: []string{cfg.LCUrls[0].String()},
-	})
-	re.NoError(err)
-
+func newTestEtcd(t *testing.T) (client *clientv3.Client) {
+	_, client, clean := etcdutil.NewTestEtcdCluster(t, 1)
 	t.Cleanup(func() {
-		client.Close()
-		server.Close()
+		clean()
 	})
-
 	return client
 }
 
@@ -113,7 +88,7 @@ func checkMasterKeyMeta(re *require.Assertions, value []byte, meta *encryptionpb
 func TestNewKeyManagerBasic(t *testing.T) {
 	re := require.New(t)
 	// Initialize.
-	client := newTestEtcd(t, re)
+	client := newTestEtcd(t)
 	// Use default config.
 	config := &Config{}
 	err := config.Adjust()
@@ -135,7 +110,7 @@ func TestNewKeyManagerBasic(t *testing.T) {
 func TestNewKeyManagerWithCustomConfig(t *testing.T) {
 	re := require.New(t)
 	// Initialize.
-	client := newTestEtcd(t, re)
+	client := newTestEtcd(t)
 	keyFile := newTestKeyFile(t, re)
 	// Custom config
 	rotatePeriod, err := time.ParseDuration("100h")
@@ -161,7 +136,7 @@ func TestNewKeyManagerWithCustomConfig(t *testing.T) {
 	re.NotNil(m.masterKeyMeta)
 	keyFileMeta := m.masterKeyMeta.GetFile()
 	re.NotNil(keyFileMeta)
-	re.Equal(config.MasterKey.MasterKeyFileConfig.FilePath, keyFileMeta.Path)
+	re.Equal(config.MasterKey.FilePath, keyFileMeta.Path)
 	// Check loaded keys.
 	re.Nil(m.keys.Load())
 	// Check etcd KV.
@@ -173,7 +148,7 @@ func TestNewKeyManagerWithCustomConfig(t *testing.T) {
 func TestNewKeyManagerLoadKeys(t *testing.T) {
 	re := require.New(t)
 	// Initialize.
-	client := newTestEtcd(t, re)
+	client := newTestEtcd(t)
 	keyFile := newTestKeyFile(t, re)
 	leadership := newTestLeader(re, client)
 	// Use default config.
@@ -214,7 +189,7 @@ func TestNewKeyManagerLoadKeys(t *testing.T) {
 func TestGetCurrentKey(t *testing.T) {
 	re := require.New(t)
 	// Initialize.
-	client := newTestEtcd(t, re)
+	client := newTestEtcd(t)
 	// Use default config.
 	config := &Config{}
 	err := config.Adjust()
@@ -257,7 +232,7 @@ func TestGetCurrentKey(t *testing.T) {
 func TestGetKey(t *testing.T) {
 	re := require.New(t)
 	// Initialize.
-	client := newTestEtcd(t, re)
+	client := newTestEtcd(t)
 	keyFile := newTestKeyFile(t, re)
 	leadership := newTestLeader(re, client)
 	// Store initial keys in etcd.
@@ -312,7 +287,7 @@ func TestGetKey(t *testing.T) {
 func TestLoadKeyEmpty(t *testing.T) {
 	re := require.New(t)
 	// Initialize.
-	client := newTestEtcd(t, re)
+	client := newTestEtcd(t)
 	keyFile := newTestKeyFile(t, re)
 	leadership := newTestLeader(re, client)
 	// Store initial keys in etcd.
@@ -340,7 +315,7 @@ func TestLoadKeyEmpty(t *testing.T) {
 	// Simulate keys get deleted.
 	_, err = client.Delete(context.Background(), EncryptionKeysPath)
 	re.NoError(err)
-	re.NotNil(m.loadKeys())
+	re.Error(m.loadKeys())
 }
 
 func TestWatcher(t *testing.T) {
@@ -348,7 +323,7 @@ func TestWatcher(t *testing.T) {
 	// Initialize.
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	client := newTestEtcd(t, re)
+	client := newTestEtcd(t)
 	keyFile := newTestKeyFile(t, re)
 	leadership := newTestLeader(re, client)
 	// Setup helper
@@ -356,8 +331,7 @@ func TestWatcher(t *testing.T) {
 	// Listen on watcher event
 	reloadEvent := make(chan struct{}, 10)
 	helper.eventAfterReloadByWatcher = func() {
-		var e struct{}
-		reloadEvent <- e
+		reloadEvent <- struct{}{}
 	}
 	// Use default config.
 	config := &Config{}
@@ -384,6 +358,8 @@ func TestWatcher(t *testing.T) {
 			},
 		},
 	}
+	// wait watch to start
+	time.Sleep(time.Second)
 	err = saveKeys(leadership, masterKeyMeta, keys, defaultKeyManagerHelper())
 	re.NoError(err)
 	<-reloadEvent
@@ -424,7 +400,7 @@ func TestWatcher(t *testing.T) {
 func TestSetLeadershipWithEncryptionOff(t *testing.T) {
 	re := require.New(t)
 	// Initialize.
-	client := newTestEtcd(t, re)
+	client := newTestEtcd(t)
 	// Use default config.
 	config := &Config{}
 	err := config.Adjust()
@@ -449,7 +425,7 @@ func TestSetLeadershipWithEncryptionEnabling(t *testing.T) {
 	// Initialize.
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	client := newTestEtcd(t, re)
+	client := newTestEtcd(t)
 	keyFile := newTestKeyFile(t, re)
 	leadership := newTestLeader(re, client)
 	// Setup helper
@@ -502,7 +478,7 @@ func TestSetLeadershipWithEncryptionMethodChanged(t *testing.T) {
 	// Initialize.
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	client := newTestEtcd(t, re)
+	client := newTestEtcd(t)
 	keyFile := newTestKeyFile(t, re)
 	leadership := newTestLeader(re, client)
 	// Setup helper
@@ -536,7 +512,7 @@ func TestSetLeadershipWithEncryptionMethodChanged(t *testing.T) {
 	}
 	err := saveKeys(leadership, masterKeyMeta, keys, defaultKeyManagerHelper())
 	re.NoError(err)
-	// Config with different encrption method.
+	// Config with different encryption method.
 	config := &Config{
 		DataEncryptionMethod: "aes256-ctr",
 		MasterKey: MasterKeyConfig{
@@ -578,7 +554,7 @@ func TestSetLeadershipWithCurrentKeyExposed(t *testing.T) {
 	// Initialize.
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	client := newTestEtcd(t, re)
+	client := newTestEtcd(t)
 	keyFile := newTestKeyFile(t, re)
 	leadership := newTestLeader(re, client)
 	// Setup helper
@@ -606,7 +582,7 @@ func TestSetLeadershipWithCurrentKeyExposed(t *testing.T) {
 	}
 	err := saveKeys(leadership, masterKeyMeta, keys, defaultKeyManagerHelper())
 	re.NoError(err)
-	// Config with different encrption method.
+	// Config with different encryption method.
 	config := &Config{
 		DataEncryptionMethod: "aes128-ctr",
 		MasterKey: MasterKeyConfig{
@@ -649,7 +625,7 @@ func TestSetLeadershipWithCurrentKeyExpired(t *testing.T) {
 	// Initialize.
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	client := newTestEtcd(t, re)
+	client := newTestEtcd(t)
 	keyFile := newTestKeyFile(t, re)
 	leadership := newTestLeader(re, client)
 	// Setup helper
@@ -724,7 +700,7 @@ func TestSetLeadershipWithMasterKeyChanged(t *testing.T) {
 	// Initialize.
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	client := newTestEtcd(t, re)
+	client := newTestEtcd(t)
 	keyFile := newTestKeyFile(t, re)
 	keyFile2 := newTestKeyFile(t, re, testMasterKey2)
 	leadership := newTestLeader(re, client)
@@ -789,7 +765,7 @@ func TestSetLeadershipWithMasterKeyChanged(t *testing.T) {
 func TestSetLeadershipMasterKeyWithCiphertextKey(t *testing.T) {
 	re := require.New(t)
 	// Initialize.
-	client := newTestEtcd(t, re)
+	client := newTestEtcd(t)
 	keyFile := newTestKeyFile(t, re)
 	leadership := newTestLeader(re, client)
 	// Setup helper
@@ -801,7 +777,7 @@ func TestSetLeadershipMasterKeyWithCiphertextKey(t *testing.T) {
 	outputMasterKey, _ := hex.DecodeString(testMasterKey)
 	outputCiphertextKey, _ := hex.DecodeString(testCiphertextKey)
 	helper.newMasterKey = func(
-		meta *encryptionpb.MasterKey,
+		_ *encryptionpb.MasterKey,
 		ciphertext []byte,
 	) (*MasterKey, error) {
 		if newMasterKeyCalled < 2 {
@@ -867,7 +843,7 @@ func TestSetLeadershipWithEncryptionDisabling(t *testing.T) {
 	// Initialize.
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	client := newTestEtcd(t, re)
+	client := newTestEtcd(t)
 	keyFile := newTestKeyFile(t, re)
 	leadership := newTestLeader(re, client)
 	// Setup helper
@@ -923,7 +899,7 @@ func TestKeyRotation(t *testing.T) {
 	// Initialize.
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	client := newTestEtcd(t, re)
+	client := newTestEtcd(t)
 	keyFile := newTestKeyFile(t, re)
 	leadership := newTestLeader(re, client)
 	// Setup helper
@@ -932,7 +908,7 @@ func TestKeyRotation(t *testing.T) {
 	mockNow := int64(1601679533)
 	helper.now = func() time.Time { return time.Unix(atomic.LoadInt64(&mockNow), 0) }
 	mockTick := make(chan time.Time)
-	helper.tick = func(ticker *time.Ticker) <-chan time.Time { return mockTick }
+	helper.tick = func(_ *time.Ticker) <-chan time.Time { return mockTick }
 	// Listen on watcher event
 	reloadEvent := make(chan struct{}, 10)
 	helper.eventAfterReloadByWatcher = func() {
@@ -1019,7 +995,7 @@ func TestKeyRotationConflict(t *testing.T) {
 	// Initialize.
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	client := newTestEtcd(t, re)
+	client := newTestEtcd(t)
 	keyFile := newTestKeyFile(t, re)
 	leadership := newTestLeader(re, client)
 	// Setup helper
@@ -1028,7 +1004,7 @@ func TestKeyRotationConflict(t *testing.T) {
 	mockNow := int64(1601679533)
 	helper.now = func() time.Time { return time.Unix(atomic.LoadInt64(&mockNow), 0) }
 	mockTick := make(chan time.Time, 10)
-	helper.tick = func(ticker *time.Ticker) <-chan time.Time { return mockTick }
+	helper.tick = func(_ *time.Ticker) <-chan time.Time { return mockTick }
 	// Listen on ticker event
 	tickerEvent := make(chan struct{}, 10)
 	helper.eventAfterTicker = func() {

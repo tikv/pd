@@ -16,34 +16,24 @@ error = '''
 redirect failed
 '''
 
-["PD:autoscaling:ErrEmptyMetricsResponse"]
+["PD:apiutil:ErrRedirectNoLeader"]
 error = '''
-metrics response from Prometheus is empty
+redirect finds no leader
 '''
 
-["PD:autoscaling:ErrEmptyMetricsResult"]
+["PD:apiutil:ErrRedirectToNotLeader"]
 error = '''
-result from Prometheus is empty, %s
+redirect to not leader
 '''
 
-["PD:autoscaling:ErrTypeConversion"]
+["PD:apiutil:ErrRedirectToNotPrimary"]
 error = '''
-type conversion error
+redirect to not primary
 '''
 
-["PD:autoscaling:ErrUnexpectedType"]
+["PD:cgroup:ErrNoCPUControllerDetected"]
 error = '''
-unexpected type %v
-'''
-
-["PD:autoscaling:ErrUnsupportedComponentType"]
-error = '''
-unsupported component type %v
-'''
-
-["PD:autoscaling:ErrUnsupportedMetricsType"]
-error = '''
-unsupported metrics type %v
+no cpu controller detected
 '''
 
 ["PD:checker:ErrCheckerMergeAgain"]
@@ -56,6 +46,36 @@ error = '''
 checker not found
 '''
 
+["PD:checker:ErrNoNewLeader"]
+error = '''
+no new leader
+'''
+
+["PD:checker:ErrNoStoreToAdd"]
+error = '''
+no store to add peer
+'''
+
+["PD:checker:ErrNoStoreToReplace"]
+error = '''
+no store to replace peer
+'''
+
+["PD:checker:ErrPeerCannotBeLeader"]
+error = '''
+peer cannot be leader
+'''
+
+["PD:checker:ErrPeerCannotBeWitness"]
+error = '''
+peer cannot be witness
+'''
+
+["PD:checker:ErrRegionNoLeader"]
+error = '''
+region no leader
+'''
+
 ["PD:client:ErrClientCreateTSOStream"]
 error = '''
 create TSO stream failed, %s
@@ -63,7 +83,7 @@ create TSO stream failed, %s
 
 ["PD:client:ErrClientGetLeader"]
 error = '''
-get leader from %v error
+get leader failed, %v
 '''
 
 ["PD:client:ErrClientGetMember"]
@@ -71,14 +91,14 @@ error = '''
 get member failed
 '''
 
-["PD:client:ErrClientGetTSO"]
+["PD:client:ErrClientGetMinTSO"]
 error = '''
-get TSO failed, %v
+get min TSO failed, %v
 '''
 
-["PD:client:ErrClientGetTSOTimeout"]
+["PD:client:ErrClientGetTSO"]
 error = '''
-get TSO timeout
+get TSO failed
 '''
 
 ["PD:cluster:ErrInvalidStoreID"]
@@ -91,6 +111,11 @@ error = '''
 TiKV cluster not bootstrapped, please start TiKV first
 '''
 
+["PD:cluster:ErrSchedulingIsHalted"]
+error = '''
+scheduling is halted
+'''
+
 ["PD:cluster:ErrStoreIsUp"]
 error = '''
 store is still up, please remove store gracefully
@@ -101,9 +126,19 @@ error = '''
 failed to get the source store
 '''
 
+["PD:common:ErrGetTargetStore"]
+error = '''
+failed to get the target store
+'''
+
 ["PD:common:ErrIncorrectSystemTime"]
 error = '''
 incorrect system time
+'''
+
+["PD:common:ErrInvalidArgument"]
+error = '''
+invalid argument for %s: %v
 '''
 
 ["PD:core:ErrNoStoreForRegionLeader"]
@@ -111,14 +146,24 @@ error = '''
 can not remove store %d since there are no extra up store to store the leader
 '''
 
-["PD:core:ErrPauseLeaderTransfer"]
+["PD:core:ErrPauseLeaderTransferIn"]
 error = '''
-store %v is paused for leader transfer
+store %v is paused for leader transfer in
+'''
+
+["PD:core:ErrPauseLeaderTransferOut"]
+error = '''
+store %v is paused for leader transfer out
 '''
 
 ["PD:core:ErrSlowStoreEvicted"]
 error = '''
 store %v is evicted as a slow store
+'''
+
+["PD:core:ErrSlowTrendEvicted"]
+error = '''
+store %v is evicted as a slow store by trend
 '''
 
 ["PD:core:ErrStoreDestroyed"]
@@ -336,11 +381,6 @@ error = '''
 etcd move leader error
 '''
 
-["PD:etcd:ErrEtcdTLSConfig"]
-error = '''
-etcd TLS config error
-'''
-
 ["PD:etcd:ErrEtcdTxnConflict"]
 error = '''
 etcd transaction failed, conflicted and rolled back
@@ -349,6 +389,11 @@ etcd transaction failed, conflicted and rolled back
 ["PD:etcd:ErrEtcdTxnInternal"]
 error = '''
 internal etcd transaction error occurred
+'''
+
+["PD:etcd:ErrEtcdTxnResponse"]
+error = '''
+etcd transaction returned invalid response: %v
 '''
 
 ["PD:etcd:ErrEtcdURLMap"]
@@ -374,6 +419,36 @@ start etcd failed
 ["PD:filepath:ErrFilePathAbs"]
 error = '''
 failed to convert a path to absolute path
+'''
+
+["PD:gc:ErrDecreasingGCSafePoint"]
+error = '''
+trying to update GC safe point to a smaller value, current value: %v, given: %v
+'''
+
+["PD:gc:ErrDecreasingTxnSafePoint"]
+error = '''
+trying to update txn safe point to a smaller value, current value: %v, given: %v
+'''
+
+["PD:gc:ErrGCBarrierTSBehindTxnSafePoint"]
+error = '''
+trying to set a GC barrier on ts %d which is already behind the txn safe point %d
+'''
+
+["PD:gc:ErrGCOnInvalidKeyspace"]
+error = '''
+trying to manage GC in keyspace %v where keyspace level GC is not enabled
+'''
+
+["PD:gc:ErrGCSafePointExceedsTxnSafePoint"]
+error = '''
+trying to update GC safe point to a too large value that exceeds the txn safe point, current value: %v, given: %v, current txn safe point: %v
+'''
+
+["PD:gc:ErrReservedGCBarrierID"]
+error = '''
+trying to set a GC barrier with a barrier ID that is reserved: %v
 '''
 
 ["PD:gin:ErrBindJSON"]
@@ -416,6 +491,11 @@ error = '''
 security config error: %s
 '''
 
+["PD:grpcutil:ErrTLSConfig"]
+error = '''
+TLS config error
+'''
+
 ["PD:hex:ErrHexDecodingString"]
 error = '''
 decode string %s error
@@ -451,6 +531,116 @@ error = '''
 failed to unmarshal json
 '''
 
+["PD:keyspace:ErrExceedMaxEtcdTxnOps"]
+error = '''
+exceed max etcd txn operations
+'''
+
+["PD:keyspace:ErrIllegalOperation"]
+error = '''
+unknown operation
+'''
+
+["PD:keyspace:ErrKeyspaceExists"]
+error = '''
+keyspace already exists
+'''
+
+["PD:keyspace:ErrKeyspaceGroupExists"]
+error = '''
+keyspace group already exists
+'''
+
+["PD:keyspace:ErrKeyspaceGroupInMerging"]
+error = '''
+keyspace group %v is in merging state
+'''
+
+["PD:keyspace:ErrKeyspaceGroupInSplit"]
+error = '''
+keyspace group %v is in split state
+'''
+
+["PD:keyspace:ErrKeyspaceGroupNotEnoughReplicas"]
+error = '''
+not enough replicas in the keyspace group
+'''
+
+["PD:keyspace:ErrKeyspaceGroupNotExists"]
+error = '''
+keyspace group %v does not exist
+'''
+
+["PD:keyspace:ErrKeyspaceGroupNotInMerging"]
+error = '''
+keyspace group %v is not in merging state
+'''
+
+["PD:keyspace:ErrKeyspaceGroupNotInSplit"]
+error = '''
+keyspace group %v is not in split state
+'''
+
+["PD:keyspace:ErrKeyspaceGroupPrimaryNotFound"]
+error = '''
+primary of keyspace group does not exist
+'''
+
+["PD:keyspace:ErrKeyspaceGroupWithEmptyKeyspace"]
+error = '''
+keyspace group with empty keyspace
+'''
+
+["PD:keyspace:ErrKeyspaceNotFound"]
+error = '''
+keyspace does not exist
+'''
+
+["PD:keyspace:ErrKeyspaceNotInAnyKeyspaceGroup"]
+error = '''
+keyspace is not in any keyspace group
+'''
+
+["PD:keyspace:ErrKeyspaceNotInKeyspaceGroup"]
+error = '''
+keyspace is not in this keyspace group
+'''
+
+["PD:keyspace:ErrModifyDefaultKeyspace"]
+error = '''
+cannot modify default keyspace's state
+'''
+
+["PD:keyspace:ErrModifyDefaultKeyspaceGroup"]
+error = '''
+default keyspace group cannot be modified
+'''
+
+["PD:keyspace:ErrNoAvailableNode"]
+error = '''
+no available node
+'''
+
+["PD:keyspace:ErrNodeNotInKeyspaceGroup"]
+error = '''
+the tso node is not in this keyspace group
+'''
+
+["PD:keyspace:ErrRegionSplitFailed"]
+error = '''
+region split failed
+'''
+
+["PD:keyspace:ErrRegionSplitTimeout"]
+error = '''
+region split timeout
+'''
+
+["PD:keyspace:ErrUnsupportedOperationInKeyspace"]
+error = '''
+it's a unsupported operation
+'''
+
 ["PD:leveldb:ErrLevelDBClose"]
 error = '''
 close leveldb error
@@ -476,19 +666,49 @@ error = '''
 init file log error, %s
 '''
 
+["PD:mcs:ErrNotFoundSchedulingPrimary"]
+error = '''
+cannot find scheduling primary
+'''
+
+["PD:mcs:ErrSchedulingServer"]
+error = '''
+scheduling server meets %v
+'''
+
+["PD:member:ErrCheckCampaign"]
+error = '''
+check campaign failed
+'''
+
 ["PD:member:ErrEtcdLeaderNotFound"]
 error = '''
 etcd leader not found
 '''
 
-["PD:member:ErrMarshalLeader"]
+["PD:member:ErrMarshalMember"]
 error = '''
-marshal leader failed
+marshal member failed
 '''
 
 ["PD:netstat:ErrNetstatTCPSocks"]
 error = '''
 TCP socks error
+'''
+
+["PD:operator:ErrAddOperator"]
+error = '''
+failed to add operator, maybe already have one
+'''
+
+["PD:operator:ErrOperatorNotFound"]
+error = '''
+operator not found
+'''
+
+["PD:operator:ErrPluginNotFound"]
+error = '''
+plugin is not found: %s
 '''
 
 ["PD:os:ErrOSOpen"]
@@ -501,6 +721,11 @@ error = '''
 build rule list failed, %s
 '''
 
+["PD:placement:ErrKeyFormat"]
+error = '''
+key should be in hex format, %s
+'''
+
 ["PD:placement:ErrLoadRule"]
 error = '''
 load rule failed
@@ -511,9 +736,19 @@ error = '''
 load rule group failed
 '''
 
+["PD:placement:ErrPlacementDisabled"]
+error = '''
+placement rules feature is disabled
+'''
+
 ["PD:placement:ErrRuleContent"]
 error = '''
 invalid rule content, %s
+'''
+
+["PD:placement:ErrRuleNotFound"]
+error = '''
+rule not found
 '''
 
 ["PD:plugin:ErrLoadPlugin"]
@@ -561,6 +796,31 @@ error = '''
 failed to unmarshal proto
 '''
 
+["PD:ratelimit:ErrMaxWaitingTasksExceeded"]
+error = '''
+max waiting tasks exceeded
+'''
+
+["PD:region:ErrRegionAbnormalPeer"]
+error = '''
+region %v has abnormal peer
+'''
+
+["PD:region:ErrRegionInvalidID"]
+error = '''
+invalid region id
+'''
+
+["PD:region:ErrRegionNotAdjacent"]
+error = '''
+two regions are not adjacent
+'''
+
+["PD:region:ErrRegionNotFound"]
+error = '''
+region %v not found
+'''
+
 ["PD:region:ErrRegionRuleContent"]
 error = '''
 invalid region rule content, %s
@@ -569,6 +829,31 @@ invalid region rule content, %s
 ["PD:region:ErrRegionRuleNotFound"]
 error = '''
 region label rule not found for id %s
+'''
+
+["PD:resourcemanager:ErrDeleteReservedGroup"]
+error = '''
+cannot delete reserved group
+'''
+
+["PD:resourcemanager:ErrGroupNotExists"]
+error = '''
+the %s resource group does not exist
+'''
+
+["PD:resourcemanager:ErrInvalidGroup"]
+error = '''
+invalid group settings, please check the group name, priority and the number of resources
+'''
+
+["PD:resourcemanager:ErrKeyspaceNotExists"]
+error = '''
+the keyspace does not exist with id %d
+'''
+
+["PD:scatter:ErrEmptyRegion"]
+error = '''
+empty region
 '''
 
 ["PD:schedule:ErrCreateOperator"]
@@ -661,9 +946,19 @@ error = '''
 cannot set invalid configuration
 '''
 
+["PD:server:ErrLeaderFrequentlyChange"]
+error = '''
+leader %s frequently changed, leader-key is [%s]
+'''
+
 ["PD:server:ErrLeaderNil"]
 error = '''
 leader is nil
+'''
+
+["PD:server:ErrRateLimitExceeded"]
+error = '''
+rate limit exceeded
 '''
 
 ["PD:server:ErrServerNotStarted"]
@@ -706,9 +1001,44 @@ error = '''
 get allocator failed, %s
 '''
 
-["PD:tso:ErrGetLocalAllocator"]
+["PD:tso:ErrGetMinTS"]
 error = '''
-get local allocator failed, %s
+get min ts failed, %s
+'''
+
+["PD:tso:ErrKeyspaceGroupIDInvalid"]
+error = '''
+the keyspace group id is invalid, %s
+'''
+
+["PD:tso:ErrKeyspaceGroupIsMerging"]
+error = '''
+the keyspace group %d is merging
+'''
+
+["PD:tso:ErrKeyspaceGroupNotInitialized"]
+error = '''
+the keyspace group %d isn't initialized
+'''
+
+["PD:tso:ErrKeyspaceNotAssigned"]
+error = '''
+the keyspace %d isn't assigned to any keyspace group
+'''
+
+["PD:tso:ErrLoadKeyspaceGroupsRetryExhausted"]
+error = '''
+load keyspace groups retry exhausted, %s
+'''
+
+["PD:tso:ErrLoadKeyspaceGroupsTerminated"]
+error = '''
+load keyspace groups terminated
+'''
+
+["PD:tso:ErrLoadKeyspaceGroupsTimeout"]
+error = '''
+load keyspace groups timeout
 '''
 
 ["PD:tso:ErrLogicOverflow"]
@@ -726,14 +1056,14 @@ error = '''
 reset user timestamp failed, %s
 '''
 
-["PD:tso:ErrSetLocalTSOConfig"]
+["PD:tso:ErrSaveTimestamp"]
 error = '''
-set local tso config failed, %s
+save timestamp failed, %s
 '''
 
-["PD:tso:ErrSyncMaxTS"]
+["PD:tso:ErrUpdateTimestamp"]
 error = '''
-sync max ts failed, %s
+update timestamp failed, %s
 '''
 
 ["PD:typeutil:ErrBytesToUint64"]

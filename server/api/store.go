@@ -23,112 +23,21 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
+	"github.com/unrolled/render"
+
 	"github.com/pingcap/errcode"
 	"github.com/pingcap/errors"
 	"github.com/pingcap/kvproto/pkg/metapb"
+	"github.com/pingcap/log"
+
+	"github.com/tikv/pd/pkg/core/storelimit"
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/response"
+	sc "github.com/tikv/pd/pkg/schedule/config"
+	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/utils/apiutil"
-	"github.com/tikv/pd/pkg/utils/typeutil"
 	"github.com/tikv/pd/server"
-	"github.com/tikv/pd/server/config"
-	"github.com/tikv/pd/server/core"
-	"github.com/tikv/pd/server/core/storelimit"
-	"github.com/unrolled/render"
 )
-
-// MetaStore contains meta information about a store.
-type MetaStore struct {
-	*metapb.Store
-	StateName string `json:"state_name"`
-}
-
-// StoreStatus contains status about a store.
-type StoreStatus struct {
-	Capacity           typeutil.ByteSize  `json:"capacity"`
-	Available          typeutil.ByteSize  `json:"available"`
-	UsedSize           typeutil.ByteSize  `json:"used_size"`
-	LeaderCount        int                `json:"leader_count"`
-	LeaderWeight       float64            `json:"leader_weight"`
-	LeaderScore        float64            `json:"leader_score"`
-	LeaderSize         int64              `json:"leader_size"`
-	RegionCount        int                `json:"region_count"`
-	RegionWeight       float64            `json:"region_weight"`
-	RegionScore        float64            `json:"region_score"`
-	RegionSize         int64              `json:"region_size"`
-	WitnessCount       int                `json:"witness_count"`
-	SlowScore          uint64             `json:"slow_score"`
-	SendingSnapCount   uint32             `json:"sending_snap_count,omitempty"`
-	ReceivingSnapCount uint32             `json:"receiving_snap_count,omitempty"`
-	IsBusy             bool               `json:"is_busy,omitempty"`
-	StartTS            *time.Time         `json:"start_ts,omitempty"`
-	LastHeartbeatTS    *time.Time         `json:"last_heartbeat_ts,omitempty"`
-	Uptime             *typeutil.Duration `json:"uptime,omitempty"`
-}
-
-// StoreInfo contains information about a store.
-type StoreInfo struct {
-	Store  *MetaStore   `json:"store"`
-	Status *StoreStatus `json:"status"`
-}
-
-const (
-	disconnectedName = "Disconnected"
-	downStateName    = "Down"
-)
-
-func newStoreInfo(opt *config.ScheduleConfig, store *core.StoreInfo) *StoreInfo {
-	s := &StoreInfo{
-		Store: &MetaStore{
-			Store:     store.GetMeta(),
-			StateName: store.GetState().String(),
-		},
-		Status: &StoreStatus{
-			Capacity:           typeutil.ByteSize(store.GetCapacity()),
-			Available:          typeutil.ByteSize(store.GetAvailable()),
-			UsedSize:           typeutil.ByteSize(store.GetUsedSize()),
-			LeaderCount:        store.GetLeaderCount(),
-			LeaderWeight:       store.GetLeaderWeight(),
-			LeaderScore:        store.LeaderScore(core.StringToSchedulePolicy(opt.LeaderSchedulePolicy), 0),
-			LeaderSize:         store.GetLeaderSize(),
-			RegionCount:        store.GetRegionCount(),
-			RegionWeight:       store.GetRegionWeight(),
-			RegionScore:        store.RegionScore(opt.RegionScoreFormulaVersion, opt.HighSpaceRatio, opt.LowSpaceRatio, 0),
-			RegionSize:         store.GetRegionSize(),
-			WitnessCount:       store.GetWitnessCount(),
-			SlowScore:          store.GetSlowScore(),
-			SendingSnapCount:   store.GetSendingSnapCount(),
-			ReceivingSnapCount: store.GetReceivingSnapCount(),
-			IsBusy:             store.IsBusy(),
-		},
-	}
-
-	if store.GetStoreStats() != nil {
-		startTS := store.GetStartTime()
-		s.Status.StartTS = &startTS
-	}
-	if lastHeartbeat := store.GetLastHeartbeatTS(); !lastHeartbeat.IsZero() {
-		s.Status.LastHeartbeatTS = &lastHeartbeat
-	}
-	if upTime := store.GetUptime(); upTime > 0 {
-		duration := typeutil.NewDuration(upTime)
-		s.Status.Uptime = &duration
-	}
-
-	if store.GetState() == metapb.StoreState_Up {
-		if store.DownTime() > opt.MaxStoreDownTime.Duration {
-			s.Store.StateName = downStateName
-		} else if store.IsDisconnected() {
-			s.Store.StateName = disconnectedName
-		}
-	}
-	return s
-}
-
-// StoresInfo records stores' info.
-type StoresInfo struct {
-	Count  int          `json:"count"`
-	Stores []*StoreInfo `json:"stores"`
-}
 
 type storeHandler struct {
 	handler *server.Handler
@@ -142,14 +51,15 @@ func newStoreHandler(handler *server.Handler, rd *render.Render) *storeHandler {
 	}
 }
 
-// @Tags     store
+// GetStore gets the store's information.
+// @Tags        store
 // @Summary  Get a store's information.
 // @Param    id  path  integer  true  "Store Id"
-// @Produce  json
-// @Success  200  {object}  StoreInfo
+// @Produce     json
+// @Success  200  {object}  response.StoreInfo
 // @Failure  400  {string}  string  "The input is invalid."
 // @Failure  404  {string}  string  "The store does not exist."
-// @Failure  500  {string}  string  "PD server failed to proceed the request."
+// @Failure     500  {string}  string  "PD server failed to proceed the request."
 // @Router   /store/{id} [get]
 func (h *storeHandler) GetStore(w http.ResponseWriter, r *http.Request) {
 	rc := getCluster(r)
@@ -162,14 +72,15 @@ func (h *storeHandler) GetStore(w http.ResponseWriter, r *http.Request) {
 
 	store := rc.GetStore(storeID)
 	if store == nil {
-		h.rd.JSON(w, http.StatusNotFound, server.ErrStoreNotFound(storeID).Error())
+		h.rd.JSON(w, http.StatusNotFound, errs.ErrStoreNotFound.FastGenByArgs(storeID).Error())
 		return
 	}
 
-	storeInfo := newStoreInfo(h.handler.GetScheduleConfig(), store)
+	storeInfo := response.BuildStoreInfo(h.handler.GetScheduleConfig(), store)
 	h.rd.JSON(w, http.StatusOK, storeInfo)
 }
 
+// DeleteStore offline a store.
 // @Tags     store
 // @Summary  Take down a store from the cluster.
 // @Param    id     path   integer  true  "Store Id"
@@ -201,6 +112,7 @@ func (h *storeHandler) DeleteStore(w http.ResponseWriter, r *http.Request) {
 	h.rd.JSON(w, http.StatusOK, "The store is set as Offline.")
 }
 
+// SetStoreState sets the store's state.
 // @Tags     store
 // @Summary  Set the store's state.
 // @Param    id     path   integer  true  "Store Id"
@@ -253,6 +165,7 @@ func (h *storeHandler) responseStoreErr(w http.ResponseWriter, err error, storeI
 	}
 }
 
+// SetStoreLabel sets the store's label.
 // FIXME: details of input json body params
 // @Tags     store
 // @Summary  Set the store's label.
@@ -285,7 +198,7 @@ func (h *storeHandler) SetStoreLabel(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 
-	if err := config.ValidateLabels(labels); err != nil {
+	if err := sc.ValidateLabels(labels); err != nil {
 		apiutil.ErrorResp(h.rd, w, errcode.NewInvalidInputErr(err))
 		return
 	}
@@ -299,12 +212,13 @@ func (h *storeHandler) SetStoreLabel(w http.ResponseWriter, r *http.Request) {
 	h.rd.JSON(w, http.StatusOK, "The store's label is updated.")
 }
 
+// DeleteStoreLabel deletes the store's label.
 // @Tags     store
 // @Summary  delete the store's label.
 // @Param    id    path  integer  true  "Store Id"
 // @Param    body  body  object   true  "Labels in json format"
 // @Produce  json
-// @Success  200  {string}  string  "The store's label is updated."
+// @Success  200  {string}  string  "The label is deleted for store."
 // @Failure  400  {string}  string  "The input is invalid."
 // @Failure  500  {string}  string  "PD server failed to proceed the request."
 // @Router   /store/{id}/label [delete]
@@ -321,7 +235,7 @@ func (h *storeHandler) DeleteStoreLabel(w http.ResponseWriter, r *http.Request) 
 	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &labelKey); err != nil {
 		return
 	}
-	if err := config.ValidateLabelKey(labelKey); err != nil {
+	if err := sc.ValidateLabelKey(labelKey); err != nil {
 		apiutil.ErrorResp(h.rd, w, errcode.NewInvalidInputErr(err))
 		return
 	}
@@ -333,13 +247,14 @@ func (h *storeHandler) DeleteStoreLabel(w http.ResponseWriter, r *http.Request) 
 	h.rd.JSON(w, http.StatusOK, fmt.Sprintf("The label %s is deleted for store %d.", labelKey, storeID))
 }
 
+// SetStoreWeight sets the store's leader/region weight.
 // FIXME: details of input json body params
 // @Tags     store
 // @Summary  Set the store's leader/region weight.
 // @Param    id    path  integer  true  "Store Id"
 // @Param    body  body  object   true  "json params"
 // @Produce  json
-// @Success  200  {string}  string  "The store's label is updated."
+// @Success  200  {string}  string  "The store's weight is updated."
 // @Failure  400  {string}  string  "The input is invalid."
 // @Failure  500  {string}  string  "PD server failed to proceed the request."
 // @Router   /store/{id}/weight [post]
@@ -352,7 +267,7 @@ func (h *storeHandler) SetStoreWeight(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var input map[string]interface{}
+	var input map[string]any
 	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &input); err != nil {
 		return
 	}
@@ -383,9 +298,10 @@ func (h *storeHandler) SetStoreWeight(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.rd.JSON(w, http.StatusOK, "The store's label is updated.")
+	h.rd.JSON(w, http.StatusOK, "The store's weight is updated.")
 }
 
+// SetStoreLimit sets the store's limit.
 // FIXME: details of input json body params
 // @Tags     store
 // @Summary  Set the store's limit.
@@ -393,12 +309,16 @@ func (h *storeHandler) SetStoreWeight(w http.ResponseWriter, r *http.Request) {
 // @Param    id         path   integer  true   "Store Id"
 // @Param    body       body   object   true   "json params"
 // @Produce  json
-// @Success  200  {string}  string  "The store's label is updated."
+// @Success  200  {string}  string  "The store's limit is updated."
 // @Failure  400  {string}  string  "The input is invalid."
 // @Failure  500  {string}  string  "PD server failed to proceed the request."
 // @Router   /store/{id}/limit [post]
 func (h *storeHandler) SetStoreLimit(w http.ResponseWriter, r *http.Request) {
 	rc := getCluster(r)
+	if version := rc.GetScheduleConfig().StoreLimitVersion; version != storelimit.VersionV1 {
+		h.rd.JSON(w, http.StatusBadRequest, fmt.Sprintf("current store limit version:%s not support set limit", version))
+		return
+	}
 	vars := mux.Vars(r)
 	storeID, errParse := apiutil.ParseUint64VarsField(vars, "id")
 	if errParse != nil {
@@ -408,11 +328,11 @@ func (h *storeHandler) SetStoreLimit(w http.ResponseWriter, r *http.Request) {
 
 	store := rc.GetStore(storeID)
 	if store == nil {
-		h.rd.JSON(w, http.StatusInternalServerError, server.ErrStoreNotFound(storeID).Error())
+		h.rd.JSON(w, http.StatusInternalServerError, errs.ErrStoreNotFound.FastGenByArgs(storeID).Error())
 		return
 	}
 
-	var input map[string]interface{}
+	var input map[string]any
 	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &input); err != nil {
 		return
 	}
@@ -448,7 +368,9 @@ func (h *storeHandler) SetStoreLimit(w http.ResponseWriter, r *http.Request) {
 			if typ == storelimit.RemovePeer {
 				key = fmt.Sprintf("remove-peer-%v", storeID)
 			}
-			h.handler.SetStoreLimitTTL(key, ratePerMin, time.Duration(ttl)*time.Second)
+			if err := h.handler.SetStoreLimitTTL(key, ratePerMin, time.Duration(ttl)*time.Second); err != nil {
+				log.Warn("failed to set store limit", errs.ZapError(err))
+			}
 			continue
 		}
 		if err := h.handler.SetStoreLimit(storeID, ratePerMin, typ); err != nil {
@@ -456,7 +378,7 @@ func (h *storeHandler) SetStoreLimit(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	h.rd.JSON(w, http.StatusOK, "The store's label is updated.")
+	h.rd.JSON(w, http.StatusOK, "The store's limit is updated.")
 }
 
 type storesHandler struct {
@@ -471,6 +393,7 @@ func newStoresHandler(handler *server.Handler, rd *render.Render) *storesHandler
 	}
 }
 
+// RemoveTombStone removes tombstone records in the cluster.
 // @Tags     store
 // @Summary  Remove tombstone records in the cluster.
 // @Produce  json
@@ -487,6 +410,7 @@ func (h *storesHandler) RemoveTombStone(w http.ResponseWriter, r *http.Request) 
 	h.rd.JSON(w, http.StatusOK, "Remove tombstone successfully.")
 }
 
+// SetAllStoresLimit sets the limit of all stores in the cluster.
 // FIXME: details of input json body params
 // @Tags     store
 // @Summary  Set limit of all stores in the cluster.
@@ -499,7 +423,12 @@ func (h *storesHandler) RemoveTombStone(w http.ResponseWriter, r *http.Request) 
 // @Failure  500  {string}  string  "PD server failed to proceed the request."
 // @Router   /stores/limit [post]
 func (h *storesHandler) SetAllStoresLimit(w http.ResponseWriter, r *http.Request) {
-	var input map[string]interface{}
+	cfg := h.GetScheduleConfig()
+	if version := cfg.StoreLimitVersion; version != storelimit.VersionV1 {
+		h.rd.JSON(w, http.StatusBadRequest, fmt.Sprintf("current store limit version:%s not support get limit", version))
+		return
+	}
+	var input map[string]any
 	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &input); err != nil {
 		return
 	}
@@ -546,7 +475,7 @@ func (h *storesHandler) SetAllStoresLimit(w http.ResponseWriter, r *http.Request
 			}
 		}
 	} else {
-		labelMap := input["labels"].(map[string]interface{})
+		labelMap := input["labels"].(map[string]any)
 		labels := make([]*metapb.StoreLabel, 0, len(input))
 		for k, v := range labelMap {
 			labels = append(labels, &metapb.StoreLabel{
@@ -555,7 +484,7 @@ func (h *storesHandler) SetAllStoresLimit(w http.ResponseWriter, r *http.Request
 			})
 		}
 
-		if err := config.ValidateLabels(labels); err != nil {
+		if err := sc.ValidateLabels(labels); err != nil {
 			apiutil.ErrorResp(h.rd, w, errcode.NewInvalidInputErr(err))
 			return
 		}
@@ -570,6 +499,7 @@ func (h *storesHandler) SetAllStoresLimit(w http.ResponseWriter, r *http.Request
 	h.rd.JSON(w, http.StatusOK, "Set store limit successfully.")
 }
 
+// GetAllStoresLimit gets the limit of all stores in the cluster.
 // FIXME: details of output json body
 // @Tags     store
 // @Summary  Get limit of all stores in the cluster.
@@ -579,7 +509,12 @@ func (h *storesHandler) SetAllStoresLimit(w http.ResponseWriter, r *http.Request
 // @Failure  500  {string}  string  "PD server failed to proceed the request."
 // @Router   /stores/limit [get]
 func (h *storesHandler) GetAllStoresLimit(w http.ResponseWriter, r *http.Request) {
-	limits := h.GetScheduleConfig().StoreLimit
+	cfg := h.GetScheduleConfig()
+	if version := cfg.StoreLimitVersion; version != storelimit.VersionV1 {
+		h.rd.JSON(w, http.StatusBadRequest, fmt.Sprintf("current store limit version:%s not support get limit", version))
+		return
+	}
+	limits := cfg.StoreLimit
 	includeTombstone := false
 	var err error
 	if includeStr := r.URL.Query().Get("include_tombstone"); includeStr != "" {
@@ -590,7 +525,7 @@ func (h *storesHandler) GetAllStoresLimit(w http.ResponseWriter, r *http.Request
 		}
 	}
 	if !includeTombstone {
-		returned := make(map[uint64]config.StoreLimitConfig, len(limits))
+		returned := make(map[uint64]sc.StoreLimitConfig, len(limits))
 		rc := getCluster(r)
 		for storeID, v := range limits {
 			store := rc.GetStore(storeID)
@@ -605,46 +540,6 @@ func (h *storesHandler) GetAllStoresLimit(w http.ResponseWriter, r *http.Request
 	h.rd.JSON(w, http.StatusOK, limits)
 }
 
-// @Tags     store
-// @Summary  Set limit scene in the cluster.
-// @Accept   json
-// @Param    body  body  storelimit.Scene  true  "Store limit scene"
-// @Produce  json
-// @Success  200  {string}  string  "Set store limit scene successfully."
-// @Failure  400  {string}  string  "The input is invalid."
-// @Failure  500  {string}  string  "PD server failed to proceed the request."
-// @Router   /stores/limit/scene [post]
-func (h *storesHandler) SetStoreLimitScene(w http.ResponseWriter, r *http.Request) {
-	typeName := r.URL.Query().Get("type")
-	typeValue, err := parseStoreLimitType(typeName)
-	if err != nil {
-		h.rd.JSON(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	scene := h.Handler.GetStoreLimitScene(typeValue)
-	if err := apiutil.ReadJSONRespondError(h.rd, w, r.Body, &scene); err != nil {
-		return
-	}
-	h.Handler.SetStoreLimitScene(scene, typeValue)
-	h.rd.JSON(w, http.StatusOK, "Set store limit scene successfully.")
-}
-
-// @Tags     store
-// @Summary  Get limit scene in the cluster.
-// @Produce  json
-// @Success  200  {string}  string  "Get store limit scene successfully."
-// @Router   /stores/limit/scene [get]
-func (h *storesHandler) GetStoreLimitScene(w http.ResponseWriter, r *http.Request) {
-	typeName := r.URL.Query().Get("type")
-	typeValue, err := parseStoreLimitType(typeName)
-	if err != nil {
-		h.rd.JSON(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	scene := h.Handler.GetStoreLimitScene(typeValue)
-	h.rd.JSON(w, http.StatusOK, scene)
-}
-
 // Progress contains status about a progress.
 type Progress struct {
 	Action       string  `json:"action"`
@@ -654,6 +549,7 @@ type Progress struct {
 	LeftSeconds  float64 `json:"left_seconds"`
 }
 
+// GetStoresProgress gets the progress of stores in the cluster.
 // @Tags     stores
 // @Summary  Get store progress in the cluster.
 // @Produce  json
@@ -669,7 +565,7 @@ func (h *storesHandler) GetStoresProgress(w http.ResponseWriter, r *http.Request
 			return
 		}
 
-		action, progress, leftSeconds, currentSpeed, err := h.Handler.GetProgressByID(v)
+		action, progress, leftSeconds, currentSpeed, err := h.GetProgressByID(v)
 		if err != nil {
 			h.rd.JSON(w, http.StatusNotFound, err.Error())
 			return
@@ -686,7 +582,7 @@ func (h *storesHandler) GetStoresProgress(w http.ResponseWriter, r *http.Request
 		return
 	}
 	if v := r.URL.Query().Get("action"); v != "" {
-		progress, leftSeconds, currentSpeed, err := h.Handler.GetProgressByAction(v)
+		progress, leftSeconds, currentSpeed, err := h.GetProgressByAction(v)
 		if err != nil {
 			h.rd.JSON(w, http.StatusNotFound, err.Error())
 			return
@@ -704,36 +600,90 @@ func (h *storesHandler) GetStoresProgress(w http.ResponseWriter, r *http.Request
 	h.rd.JSON(w, http.StatusBadRequest, "need query parameters")
 }
 
+// GetAllStores gets all stores in the cluster.
 // @Tags     store
-// @Summary  Get stores in the cluster.
-// @Param    state  query  array  true  "Specify accepted store states."
+// @Summary     Get all stores in the cluster.
+// @Param       state  query  array  true  "Specify accepted store states."
 // @Produce  json
-// @Success  200  {object}  StoresInfo
+// @Success     200  {object}  response.StoresInfo
 // @Failure  500  {string}  string  "PD server failed to proceed the request."
-// @Router   /stores [get]
-func (h *storesHandler) GetStores(w http.ResponseWriter, r *http.Request) {
+// @Router      /stores [get]
+// @Deprecated  Better to use /stores/check instead.
+func (h *storesHandler) GetAllStores(w http.ResponseWriter, r *http.Request) {
 	rc := getCluster(r)
 	stores := rc.GetMetaStores()
-	StoresInfo := &StoresInfo{
-		Stores: make([]*StoreInfo, 0, len(stores)),
+	StoresInfo := &response.StoresInfo{
+		Stores: make([]*response.StoreInfo, 0, len(stores)),
 	}
 
-	urlFilter, err := newStoreStateFilter(r.URL)
+	urlFilter, err := NewStoreStateFilter(r.URL)
 	if err != nil {
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
-	stores = urlFilter.filter(rc.GetMetaStores())
+	stores = urlFilter.Filter(stores)
 	for _, s := range stores {
 		storeID := s.GetId()
 		store := rc.GetStore(storeID)
 		if store == nil {
-			h.rd.JSON(w, http.StatusInternalServerError, server.ErrStoreNotFound(storeID).Error())
+			h.rd.JSON(w, http.StatusInternalServerError, errs.ErrStoreNotFound.FastGenByArgs(storeID).Error())
 			return
 		}
 
-		storeInfo := newStoreInfo(h.GetScheduleConfig(), store)
+		storeInfo := response.BuildStoreInfo(h.GetScheduleConfig(), store)
+		StoresInfo.Stores = append(StoresInfo.Stores, storeInfo)
+	}
+	StoresInfo.Count = len(StoresInfo.Stores)
+
+	h.rd.JSON(w, http.StatusOK, StoresInfo)
+}
+
+// GetStoresByState gets stores by states in the cluster.
+// @Tags     store
+// @Summary  Get all stores by states in the cluster.
+// @Param    state  query  array  true  "Specify accepted store states."
+// @Produce  json
+// @Success  200  {object}  response.StoresInfo
+// @Failure  500  {string}  string  "PD server failed to proceed the request."
+// @Router   /stores/check [get]
+func (h *storesHandler) GetStoresByState(w http.ResponseWriter, r *http.Request) {
+	rc := getCluster(r)
+	stores := rc.GetMetaStores()
+	StoresInfo := &response.StoresInfo{
+		Stores: make([]*response.StoreInfo, 0, len(stores)),
+	}
+
+	lowerStateName := []string{strings.ToLower(response.DownStateName), strings.ToLower(response.DisconnectedName)}
+	for _, v := range metapb.StoreState_name {
+		lowerStateName = append(lowerStateName, strings.ToLower(v))
+	}
+
+	var queryStates []string
+	if v, ok := r.URL.Query()["state"]; ok {
+		for _, s := range v {
+			stateName := strings.ToLower(s)
+			if stateName != "" && !slice.Contains(lowerStateName, stateName) {
+				h.rd.JSON(w, http.StatusBadRequest, "unknown StoreState: "+s)
+				return
+			} else if stateName != "" {
+				queryStates = append(queryStates, stateName)
+			}
+		}
+	}
+
+	for _, s := range stores {
+		storeID := s.GetId()
+		store := rc.GetStore(storeID)
+		if store == nil {
+			h.rd.JSON(w, http.StatusInternalServerError, errs.ErrStoreNotFound.FastGenByArgs(storeID).Error())
+			return
+		}
+
+		storeInfo := response.BuildStoreInfo(h.GetScheduleConfig(), store)
+		if queryStates != nil && !slice.Contains(queryStates, strings.ToLower(storeInfo.Store.StateName)) {
+			continue
+		}
 		StoresInfo.Stores = append(StoresInfo.Stores, storeInfo)
 	}
 	StoresInfo.Count = len(StoresInfo.Stores)
@@ -745,7 +695,8 @@ type storeStateFilter struct {
 	accepts []metapb.StoreState
 }
 
-func newStoreStateFilter(u *url.URL) (*storeStateFilter, error) {
+// NewStoreStateFilter creates a new store state filter.
+func NewStoreStateFilter(u *url.URL) (*storeStateFilter, error) {
 	var acceptStates []metapb.StoreState
 	if v, ok := u.Query()["state"]; ok {
 		for _, s := range v {
@@ -772,7 +723,8 @@ func newStoreStateFilter(u *url.URL) (*storeStateFilter, error) {
 	}, nil
 }
 
-func (filter *storeStateFilter) filter(stores []*metapb.Store) []*metapb.Store {
+// Filter filters the stores by state.
+func (filter *storeStateFilter) Filter(stores []*metapb.Store) []*metapb.Store {
 	ret := make([]*metapb.Store, 0, len(stores))
 	for _, s := range stores {
 		state := s.GetState()
@@ -786,7 +738,7 @@ func (filter *storeStateFilter) filter(stores []*metapb.Store) []*metapb.Store {
 	return ret
 }
 
-func getStoreLimitType(input map[string]interface{}) ([]storelimit.Type, error) {
+func getStoreLimitType(input map[string]any) ([]storelimit.Type, error) {
 	typeNameIface, ok := input["type"]
 	var err error
 	if ok {

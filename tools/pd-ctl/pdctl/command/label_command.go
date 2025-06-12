@@ -16,14 +16,15 @@ package command
 
 import (
 	"encoding/json"
-	"fmt"
 	"net/http"
+	"net/url"
 
 	"github.com/spf13/cobra"
-	"github.com/tikv/pd/server/api"
-	"github.com/tikv/pd/server/config"
-	"github.com/tikv/pd/server/core"
-	"github.com/tikv/pd/server/statistics"
+
+	"github.com/tikv/pd/pkg/core"
+	"github.com/tikv/pd/pkg/response"
+	sc "github.com/tikv/pd/pkg/schedule/config"
+	"github.com/tikv/pd/pkg/statistics"
 )
 
 var (
@@ -53,7 +54,7 @@ func NewLabelListStoresCommand() *cobra.Command {
 	return l
 }
 
-func showLabelsCommandFunc(cmd *cobra.Command, args []string) {
+func showLabelsCommandFunc(cmd *cobra.Command, _ []string) {
 	r, err := doRequest(cmd, labelsPrefix, http.MethodGet, http.Header{})
 	if err != nil {
 		cmd.Printf("Failed to get labels: %s\n", err)
@@ -74,9 +75,13 @@ func showLabelListStoresCommandFunc(cmd *cobra.Command, args []string) {
 		cmd.Println("Usage: label store name [value]")
 		return
 	}
-	namePrefix := fmt.Sprintf("name=%s", getValue(args, 0))
-	valuePrefix := fmt.Sprintf("value=%s", getValue(args, 1))
-	prefix := fmt.Sprintf("%s?%s&%s", labelsStorePrefix, namePrefix, valuePrefix)
+	query := make(url.Values)
+	query.Set("name", getValue(args, 0))
+	query.Set("value", getValue(args, 1))
+	prefix := labelsStorePrefix
+	if len(query) > 0 {
+		prefix += "?" + query.Encode()
+	}
 	r, err := doRequest(cmd, prefix, http.MethodGet, http.Header{})
 	if err != nil {
 		cmd.Printf("Failed to get stores through label: %s\n", err)
@@ -95,13 +100,13 @@ func NewCheckLabels() *cobra.Command {
 	}
 }
 
-func getReplicationConfig(cmd *cobra.Command, _ []string) (*config.ReplicationConfig, error) {
+func getReplicationConfig(cmd *cobra.Command, _ []string) (*sc.ReplicationConfig, error) {
 	prefix := configPrefix + "/replicate"
 	body, err := doRequest(cmd, prefix, http.MethodGet, http.Header{})
 	if err != nil {
 		return nil, err
 	}
-	var config config.ReplicationConfig
+	var config sc.ReplicationConfig
 	if err := json.Unmarshal([]byte(body), &config); err != nil {
 		return nil, err
 	}
@@ -114,7 +119,7 @@ func getStores(cmd *cobra.Command, _ []string) ([]*core.StoreInfo, error) {
 	if err != nil {
 		return nil, err
 	}
-	var storesInfo api.StoresInfo
+	var storesInfo response.StoresInfo
 	if err := json.Unmarshal([]byte(body), &storesInfo); err != nil {
 		return nil, err
 	}
@@ -125,13 +130,13 @@ func getStores(cmd *cobra.Command, _ []string) ([]*core.StoreInfo, error) {
 	return stores, nil
 }
 
-func getRegions(cmd *cobra.Command, _ []string) ([]api.RegionInfo, error) {
+func getRegions(cmd *cobra.Command, _ []string) ([]response.RegionInfo, error) {
 	prefix := regionsPrefix
 	body, err := doRequest(cmd, prefix, http.MethodGet, http.Header{})
 	if err != nil {
 		return nil, err
 	}
-	var RegionsInfo api.RegionsInfo
+	var RegionsInfo response.RegionsInfo
 	if err := json.Unmarshal([]byte(body), &RegionsInfo); err != nil {
 		return nil, err
 	}

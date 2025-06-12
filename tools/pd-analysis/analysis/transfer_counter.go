@@ -23,6 +23,8 @@ import (
 	"strings"
 	"sync"
 
+	"go.uber.org/zap"
+
 	"github.com/tikv/pd/pkg/utils/syncutil"
 )
 
@@ -96,7 +98,7 @@ func (c *TransferCounter) AddSource(regionID, sourceStoreID uint64) {
 		}
 		delete(c.regionMap, regionID)
 	} else {
-		log.Fatal("Error when add sourceStore in transfer region map. SourceStoreID: ", sourceStoreID, " regionID: ", regionID)
+		log.Fatal("error when add sourceStore in transfer region map", zap.Uint64("source-store", sourceStoreID), zap.Uint64("region", regionID))
 	}
 }
 
@@ -124,7 +126,7 @@ func (c *TransferCounter) prepare() {
 	}
 
 	c.graphMat = nil
-	for i := 0; i < c.scheduledStoreNum; i++ {
+	for range c.scheduledStoreNum {
 		tmp := make([]uint64, c.scheduledStoreNum)
 		c.graphMat = append(c.graphMat, tmp)
 	}
@@ -156,7 +158,7 @@ func (c *TransferCounter) dfs(cur int, path []int) {
 		if path[0] == target { // is a loop
 			// get curMinFlow
 			curMinFlow := flow
-			for i := 0; i < len(path)-1; i++ {
+			for i := range len(path) - 1 {
 				pathFlow := c.graphMat[path[i]][path[i+1]]
 				if curMinFlow > pathFlow {
 					curMinFlow = pathFlow
@@ -166,7 +168,7 @@ func (c *TransferCounter) dfs(cur int, path []int) {
 			if curMinFlow != 0 {
 				c.loopResultPath = append(c.loopResultPath, path)
 				c.loopResultCount = append(c.loopResultCount, curMinFlow*uint64(len(path)))
-				for i := 0; i < len(path)-1; i++ {
+				for i := range len(path) - 1 {
 					c.graphMat[path[i]][path[i+1]] -= curMinFlow
 				}
 				c.graphMat[cur][target] -= curMinFlow
@@ -185,7 +187,7 @@ func (c *TransferCounter) Result() {
 		c.prepare()
 	}
 
-	for i := 0; i < c.scheduledStoreNum; i++ {
+	for i := range c.scheduledStoreNum {
 		c.dfs(i, make([]int, 0))
 	}
 
@@ -220,20 +222,20 @@ func (c *TransferCounter) printGraph() {
 func (c *TransferCounter) PrintResult() {
 	c.prepare()
 	// Output log
-	log.Println("Total Schedules Graph: ")
+	log.Println("total schedules graph: ")
 	c.printGraph()
 	// Solve data
 	c.Result()
 	// Output log
-	log.Println("Redundant Loop: ")
+	log.Println("redundant loop: ")
 	for index, value := range c.loopResultPath {
 		fmt.Println(index, value, c.loopResultCount[index])
 	}
-	log.Println("Necessary Schedules Graph: ")
+	log.Println("necessary schedules graph: ")
 	c.printGraph()
-	log.Println("Scheduled Store: ", c.scheduledStoreNum)
-	log.Println("Redundant Schedules: ", c.Redundant)
-	log.Println("Necessary Schedules: ", c.Necessary)
+	log.Println("scheduled store: ", c.scheduledStoreNum)
+	log.Println("redundant schedules: ", c.Redundant)
+	log.Println("necessary schedules: ", c.Necessary)
 
 	// Output csv file
 	fd, err := os.OpenFile("result.txt", os.O_RDWR|os.O_CREATE|os.O_APPEND, 0600)
@@ -242,7 +244,7 @@ func (c *TransferCounter) PrintResult() {
 	}
 	defer func() {
 		if err := fd.Close(); err != nil {
-			log.Printf("Error closing file: %s\n", err)
+			log.Printf("error closing file: %s\n", err)
 		}
 	}()
 	fdContent := strings.Join([]string{

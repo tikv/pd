@@ -1,4 +1,4 @@
-// Copyright 2014-2022 Google Inc.
+// Copyright 2022 TiKV Project Authors.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Copyright 2022 TiKV Project Authors.
+// Copyright 2014-2022 Google Inc.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -36,6 +36,8 @@ import (
 	"sort"
 	"sync"
 	"testing"
+
+	"github.com/tikv/pd/pkg/utils/syncutil"
 )
 
 // perm returns a random permutation of n Int items in the range [0, n).
@@ -48,7 +50,7 @@ func perm(n int) (out []Int) {
 
 // rang returns an ordered list of Int items in the range [0, n).
 func rang(n int) (out []Int) {
-	for i := 0; i < n; i++ {
+	for i := range n {
 		out = append(out, Int(i))
 	}
 	return
@@ -80,7 +82,7 @@ func allrev[T Item[T]](t *BTreeG[T]) (out []T) {
 	return
 }
 
-func assertEq(t *testing.T, desc string, got, need interface{}) {
+func assertEq(t *testing.T, desc string, got, need any) {
 	if !reflect.DeepEqual(need, got) {
 		t.Fatalf("%s failed: need %T %v, but got %T %v", desc, need, need, got, got)
 	}
@@ -99,10 +101,10 @@ func TestBTreeSizeInfo(t *testing.T) {
 		max, _ := tr.Max()
 		assertEq(t, "check max", tr.GetAt(tr.Len()-1), max)
 	}
-	for k := 0; k < treeSize; k++ {
+	for k := range treeSize {
 		assertEq(t, "get k-th", tr.GetAt(k), Int(k))
 	}
-	for x := Int(0); x < treeSize; x++ {
+	for x := range Int(treeSize) {
 		y, rk := tr.GetWithIndex(x)
 		assertEq(t, "get", y, x)
 		assertEq(t, "get rank", rk, int(x))
@@ -126,10 +128,10 @@ func TestBTreeSizeInfo(t *testing.T) {
 		max, _ := tr.Max()
 		assertEq(t, "after delete check max", tr.GetAt(tr.Len()-1), max)
 	}
-	for k := 0; k < treeSize/3; k++ {
+	for k := range treeSize / 3 {
 		assertEq(t, "after delete get k-th", tr.GetAt(k), Int(3*k))
 	}
-	for x := Int(0); x < treeSize; x++ {
+	for x := range Int(treeSize) {
 		y, rk := tr.GetWithIndex(x)
 		if x%3 == 0 {
 			assertEq(t, "after delete get", y, x)
@@ -167,7 +169,7 @@ func TestBTreeSizeInfo(t *testing.T) {
 func TestBTreeG(t *testing.T) {
 	tr := NewG[Int](*btreeDegree)
 	const treeSize = 10000
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		if min, found := tr.Min(); found {
 			t.Fatalf("empty min, got %+v", min)
 		}
@@ -279,7 +281,7 @@ func TestDeleteMaxG(t *testing.T) {
 		got = append(got, v)
 	}
 	// Reverse our list.
-	for i := 0; i < len(got)/2; i++ {
+	for i := range len(got) / 2 {
 		got[i], got[len(got)-i-1] = got[len(got)-i-1], got[i]
 	}
 	if want := rang(100); !reflect.DeepEqual(got, want) {
@@ -472,8 +474,8 @@ func BenchmarkSeek(b *testing.B) {
 	}
 	b.StartTimer()
 
-	for i := 0; i < b.N; i++ {
-		tr.AscendGreaterOrEqual(Int(i%size), func(i Int) bool { return false })
+	for i := range b.N {
+		tr.AscendGreaterOrEqual(Int(i%size), func(_ Int) bool { return false })
 	}
 }
 
@@ -485,7 +487,7 @@ func BenchmarkDeleteInsert(b *testing.B) {
 		tr.ReplaceOrInsert(item)
 	}
 	b.StartTimer()
-	for i := 0; i < b.N; i++ {
+	for i := range b.N {
 		tr.Delete(insertP[i%benchmarkTreeSize])
 		tr.ReplaceOrInsert(insertP[i%benchmarkTreeSize])
 	}
@@ -500,7 +502,7 @@ func BenchmarkDeleteInsertCloneOnce(b *testing.B) {
 	}
 	tr = tr.Clone()
 	b.StartTimer()
-	for i := 0; i < b.N; i++ {
+	for i := range b.N {
 		tr.Delete(insertP[i%benchmarkTreeSize])
 		tr.ReplaceOrInsert(insertP[i%benchmarkTreeSize])
 	}
@@ -514,7 +516,7 @@ func BenchmarkDeleteInsertCloneEachTime(b *testing.B) {
 		tr.ReplaceOrInsert(item)
 	}
 	b.StartTimer()
-	for i := 0; i < b.N; i++ {
+	for i := range b.N {
 		tr = tr.Clone()
 		tr.Delete(insertP[i%benchmarkTreeSize])
 		tr.ReplaceOrInsert(insertP[i%benchmarkTreeSize])
@@ -616,7 +618,7 @@ func BenchmarkAscend(b *testing.B) {
 	}
 	sort.Sort(byInts(arr))
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		j := 0
 		tr.Ascend(func(item Int) bool {
 			if item != arr[j] {
@@ -636,7 +638,7 @@ func BenchmarkDescend(b *testing.B) {
 	}
 	sort.Sort(byInts(arr))
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		j := len(arr) - 1
 		tr.Descend(func(item Int) bool {
 			if item != arr[j] {
@@ -656,7 +658,7 @@ func BenchmarkAscendRange(b *testing.B) {
 	}
 	sort.Sort(byInts(arr))
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		j := 100
 		tr.AscendRange(Int(100), arr[len(arr)-100], func(item Int) bool {
 			if item != arr[j] {
@@ -679,7 +681,7 @@ func BenchmarkDescendRange(b *testing.B) {
 	}
 	sort.Sort(byInts(arr))
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		j := len(arr) - 100
 		tr.DescendRange(arr[len(arr)-100], Int(100), func(item Int) bool {
 			if item != arr[j] {
@@ -702,7 +704,7 @@ func BenchmarkAscendGreaterOrEqual(b *testing.B) {
 	}
 	sort.Sort(byInts(arr))
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		j := 100
 		k := 0
 		tr.AscendGreaterOrEqual(Int(100), func(item Int) bool {
@@ -730,7 +732,7 @@ func BenchmarkDescendLessOrEqual(b *testing.B) {
 	}
 	sort.Sort(byInts(arr))
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for range b.N {
 		j := len(arr) - 100
 		k := len(arr)
 		tr.DescendLessOrEqual(arr[len(arr)-100], func(item Int) bool {
@@ -752,7 +754,7 @@ func BenchmarkDescendLessOrEqual(b *testing.B) {
 
 const cloneTestSize = 10000
 
-func cloneTestG[T Item[T]](t *testing.T, b *BTreeG[T], start int, p []T, wg *sync.WaitGroup, trees *[]*BTreeG[T], lock *sync.Mutex) {
+func cloneTestG[T Item[T]](t *testing.T, b *BTreeG[T], start int, p []T, wg *sync.WaitGroup, trees *[]*BTreeG[T], lock *syncutil.Mutex) {
 	t.Logf("Starting new clone at %v", start)
 	lock.Lock()
 	*trees = append(*trees, b)
@@ -773,7 +775,7 @@ func TestCloneConcurrentOperationsG(t *testing.T) {
 	p := perm(cloneTestSize)
 	var wg sync.WaitGroup
 	wg.Add(1)
-	go cloneTestG(t, b, 0, p, &wg, &trees, &sync.Mutex{})
+	go cloneTestG(t, b, 0, p, &wg, &trees, &syncutil.Mutex{})
 	wg.Wait()
 	want := rang(cloneTestSize)
 	t.Logf("Starting equality checks on %d trees", len(trees))
@@ -784,7 +786,7 @@ func TestCloneConcurrentOperationsG(t *testing.T) {
 	}
 	t.Log("Removing half from first half")
 	toRemove := rang(cloneTestSize)[cloneTestSize/2:]
-	for i := 0; i < len(trees)/2; i++ {
+	for i := range len(trees) / 2 {
 		tree := trees[i]
 		wg.Add(1)
 		go func() {
@@ -820,7 +822,7 @@ func BenchmarkDeleteAndRestore(b *testing.B) {
 		}
 		b.ReportAllocs()
 		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
+		for range b.N {
 			dels := make([]Int, 0, tr.Len())
 			tr.Ascend(ItemIteratorG[Int](func(b Int) bool {
 				dels = append(dels, b)
@@ -843,7 +845,7 @@ func BenchmarkDeleteAndRestore(b *testing.B) {
 		}
 		b.ReportAllocs()
 		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
+		for range b.N {
 			dels := make([]Int, 0, tr.Len())
 			tr.Ascend(ItemIteratorG[Int](func(b Int) bool {
 				dels = append(dels, b)
@@ -867,7 +869,7 @@ func BenchmarkDeleteAndRestore(b *testing.B) {
 		}
 		b.ReportAllocs()
 		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
+		for range b.N {
 			tr.Clear(true)
 			for _, v := range items {
 				tr.ReplaceOrInsert(v)
@@ -881,7 +883,7 @@ func BenchmarkDeleteAndRestore(b *testing.B) {
 		}
 		b.ReportAllocs()
 		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
+		for range b.N {
 			tr.Clear(true)
 			for _, v := range items {
 				tr.ReplaceOrInsert(v)

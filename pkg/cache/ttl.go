@@ -16,15 +16,19 @@ package cache
 
 import (
 	"context"
+	"sync/atomic"
 	"time"
 
-	"github.com/pingcap/log"
-	"github.com/tikv/pd/pkg/utils/syncutil"
 	"go.uber.org/zap"
+
+	"github.com/pingcap/log"
+
+	"github.com/tikv/pd/pkg/utils/logutil"
+	"github.com/tikv/pd/pkg/utils/syncutil"
 )
 
 type ttlCacheItem struct {
-	value  interface{}
+	value  any
 	expire time.Time
 }
 
@@ -33,34 +37,37 @@ type ttlCache struct {
 	syncutil.RWMutex
 	ctx context.Context
 
-	items      map[interface{}]ttlCacheItem
+	items      map[any]ttlCacheItem
 	ttl        time.Duration
 	gcInterval time.Duration
+	// isGCRunning is used to avoid running GC multiple times.
+	isGCRunning atomic.Bool
 }
 
 // NewTTL returns a new TTL cache.
 func newTTL(ctx context.Context, gcInterval time.Duration, duration time.Duration) *ttlCache {
 	c := &ttlCache{
-		ctx:        ctx,
-		items:      make(map[interface{}]ttlCacheItem),
-		ttl:        duration,
-		gcInterval: gcInterval,
+		ctx:         ctx,
+		items:       make(map[any]ttlCacheItem),
+		ttl:         duration,
+		gcInterval:  gcInterval,
+		isGCRunning: atomic.Bool{},
 	}
-
-	go c.doGC()
 	return c
 }
 
 // Put puts an item into cache.
-func (c *ttlCache) put(key interface{}, value interface{}) {
+func (c *ttlCache) put(key any, value any) {
 	c.putWithTTL(key, value, c.ttl)
 }
 
 // PutWithTTL puts an item into cache with specified TTL.
-func (c *ttlCache) putWithTTL(key interface{}, value interface{}, ttl time.Duration) {
+func (c *ttlCache) putWithTTL(key any, value any, ttl time.Duration) {
 	c.Lock()
 	defer c.Unlock()
-
+	if len(c.items) == 0 && c.isGCRunning.CompareAndSwap(false, true) {
+		go c.doGC()
+	}
 	c.items[key] = ttlCacheItem{
 		value:  value,
 		expire: time.Now().Add(ttl),
@@ -68,7 +75,7 @@ func (c *ttlCache) putWithTTL(key interface{}, value interface{}, ttl time.Durat
 }
 
 // Get retrieves an item from cache.
-func (c *ttlCache) get(key interface{}) (interface{}, bool) {
+func (c *ttlCache) get(key any) (any, bool) {
 	c.RLock()
 	defer c.RUnlock()
 
@@ -85,11 +92,11 @@ func (c *ttlCache) get(key interface{}) (interface{}, bool) {
 }
 
 // GetKeys returns all keys that are not expired.
-func (c *ttlCache) getKeys() []interface{} {
+func (c *ttlCache) getKeys() []any {
 	c.RLock()
 	defer c.RUnlock()
 
-	var keys []interface{}
+	var keys []any
 
 	now := time.Now()
 	for key, item := range c.items {
@@ -101,7 +108,7 @@ func (c *ttlCache) getKeys() []interface{} {
 }
 
 // Remove eliminates an item from cache.
-func (c *ttlCache) remove(key interface{}) {
+func (c *ttlCache) remove(key any) {
 	c.Lock()
 	defer c.Unlock()
 
@@ -109,7 +116,7 @@ func (c *ttlCache) remove(key interface{}) {
 }
 
 // pop one key/value that is not expired. If boolean is false, it means that it didn't find the valid one.
-func (c *ttlCache) pop() (interface{}, interface{}, bool) {
+func (c *ttlCache) pop() (key, value any, exist bool) {
 	c.Lock()
 	defer c.Unlock()
 	now := time.Now()
@@ -142,6 +149,7 @@ func (c *ttlCache) Clear() {
 }
 
 func (c *ttlCache) doGC() {
+	defer logutil.LogPanic()
 	ticker := time.NewTicker(c.gcInterval)
 	defer ticker.Stop()
 
@@ -158,6 +166,11 @@ func (c *ttlCache) doGC() {
 						delete(c.items, key)
 					}
 				}
+			}
+			if len(c.items) == 0 && c.isGCRunning.CompareAndSwap(true, false) {
+				c.Unlock()
+				log.Debug("TTL GC items is empty exit")
+				return
 			}
 			c.Unlock()
 			log.Debug("TTL GC items", zap.Int("count", count))
@@ -197,18 +210,18 @@ func NewIDTTL(ctx context.Context, gcInterval, ttl time.Duration) *TTLUint64 {
 }
 
 // Get return the value by key id
-func (c *TTLUint64) Get(id uint64) (interface{}, bool) {
-	return c.ttlCache.get(id)
+func (c *TTLUint64) Get(id uint64) (any, bool) {
+	return c.get(id)
 }
 
 // Put saves an ID in cache.
-func (c *TTLUint64) Put(id uint64, value interface{}) {
-	c.ttlCache.put(id, value)
+func (c *TTLUint64) Put(id uint64, value any) {
+	c.put(id, value)
 }
 
 // GetAllID returns all ids.
 func (c *TTLUint64) GetAllID() []uint64 {
-	keys := c.ttlCache.getKeys()
+	keys := c.getKeys()
 	var ids []uint64
 	for _, key := range keys {
 		id, ok := key.(uint64)
@@ -221,18 +234,18 @@ func (c *TTLUint64) GetAllID() []uint64 {
 
 // Exists checks if an ID exists in cache.
 func (c *TTLUint64) Exists(id uint64) bool {
-	_, ok := c.ttlCache.get(id)
+	_, ok := c.get(id)
 	return ok
 }
 
 // Remove remove key
 func (c *TTLUint64) Remove(key uint64) {
-	c.ttlCache.remove(key)
+	c.remove(key)
 }
 
 // PutWithTTL puts an item into cache with specified TTL.
-func (c *TTLUint64) PutWithTTL(key uint64, value interface{}, ttl time.Duration) {
-	c.ttlCache.putWithTTL(key, value, ttl)
+func (c *TTLUint64) PutWithTTL(key uint64, value any, ttl time.Duration) {
+	c.putWithTTL(key, value, ttl)
 }
 
 // TTLString is simple TTL saves key string and value.
@@ -248,18 +261,18 @@ func NewStringTTL(ctx context.Context, gcInterval, ttl time.Duration) *TTLString
 }
 
 // Put put the string key with the value
-func (c *TTLString) Put(key string, value interface{}) {
-	c.ttlCache.put(key, value)
+func (c *TTLString) Put(key string, value any) {
+	c.put(key, value)
 }
 
 // PutWithTTL puts an item into cache with specified TTL.
-func (c *TTLString) PutWithTTL(key string, value interface{}, ttl time.Duration) {
-	c.ttlCache.putWithTTL(key, value, ttl)
+func (c *TTLString) PutWithTTL(key string, value any, ttl time.Duration) {
+	c.putWithTTL(key, value, ttl)
 }
 
 // Pop one key/value that is not expired
-func (c *TTLString) Pop() (string, interface{}, bool) {
-	k, v, success := c.ttlCache.pop()
+func (c *TTLString) Pop() (string, any, bool) {
+	k, v, success := c.pop()
 	if !success {
 		return "", nil, false
 	}
@@ -271,13 +284,13 @@ func (c *TTLString) Pop() (string, interface{}, bool) {
 }
 
 // Get return the value by key id
-func (c *TTLString) Get(id string) (interface{}, bool) {
-	return c.ttlCache.get(id)
+func (c *TTLString) Get(id string) (any, bool) {
+	return c.get(id)
 }
 
 // GetAllID returns all key ids
 func (c *TTLString) GetAllID() []string {
-	keys := c.ttlCache.getKeys()
+	keys := c.getKeys()
 	var ids []string
 	for _, key := range keys {
 		id, ok := key.(string)

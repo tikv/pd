@@ -19,12 +19,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/pingcap/failpoint"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/goleak"
+
+	"github.com/pingcap/failpoint"
+
 	"github.com/tikv/pd/pkg/utils/testutil"
 	"github.com/tikv/pd/server/config"
 	"github.com/tikv/pd/tests"
-	"go.uber.org/goleak"
 )
 
 func TestMain(m *testing.M) {
@@ -35,21 +37,21 @@ func TestWatcher(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	cluster, err := tests.NewTestCluster(ctx, 1, func(conf *config.Config, serverName string) { conf.AutoCompactionRetention = "1s" })
+	cluster, err := tests.NewTestCluster(ctx, 1, func(conf *config.Config, _ string) { conf.AutoCompactionRetention = "1s" })
 	defer cluster.Destroy()
 	re.NoError(err)
 
 	err = cluster.RunInitialServers()
 	re.NoError(err)
-	cluster.WaitLeader()
-	pd1 := cluster.GetServer(cluster.GetLeader())
+	re.NotEmpty(cluster.WaitLeader())
+	pd1 := cluster.GetLeaderServer()
 	re.NotNil(pd1)
 
 	pd2, err := cluster.Join(ctx)
 	re.NoError(err)
 	err = pd2.Run()
 	re.NoError(err)
-	cluster.WaitLeader()
+	re.NotEmpty(cluster.WaitLeader())
 
 	time.Sleep(5 * time.Second)
 	pd3, err := cluster.Join(ctx)
@@ -57,11 +59,12 @@ func TestWatcher(t *testing.T) {
 	re.NoError(failpoint.Enable("github.com/tikv/pd/server/delayWatcher", `pause`))
 	err = pd3.Run()
 	re.NoError(err)
+	re.NotEmpty(cluster.WaitLeader())
 	time.Sleep(200 * time.Millisecond)
 	re.Equal(pd1.GetConfig().Name, pd3.GetLeader().GetName())
 	err = pd1.Stop()
 	re.NoError(err)
-	cluster.WaitLeader()
+	re.NotEmpty(cluster.WaitLeader())
 	re.Equal(pd2.GetConfig().Name, pd2.GetLeader().GetName())
 	re.NoError(failpoint.Disable("github.com/tikv/pd/server/delayWatcher"))
 	testutil.Eventually(re, func() bool {
@@ -73,14 +76,14 @@ func TestWatcherCompacted(t *testing.T) {
 	re := require.New(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	cluster, err := tests.NewTestCluster(ctx, 1, func(conf *config.Config, serverName string) { conf.AutoCompactionRetention = "1s" })
+	cluster, err := tests.NewTestCluster(ctx, 1, func(conf *config.Config, _ string) { conf.AutoCompactionRetention = "1s" })
 	defer cluster.Destroy()
 	re.NoError(err)
 
 	err = cluster.RunInitialServers()
 	re.NoError(err)
-	cluster.WaitLeader()
-	pd1 := cluster.GetServer(cluster.GetLeader())
+	re.NotEmpty(cluster.WaitLeader())
+	pd1 := cluster.GetLeaderServer()
 	re.NotNil(pd1)
 	client := pd1.GetEtcdClient()
 	_, err = client.Put(context.Background(), "test", "v")
@@ -92,6 +95,6 @@ func TestWatcherCompacted(t *testing.T) {
 	err = pd2.Run()
 	re.NoError(err)
 	testutil.Eventually(re, func() bool {
-		return pd2.GetLeader().GetName() == pd1.GetConfig().Name
+		return len(cluster.WaitLeader()) > 0 && pd2.GetLeader().GetName() == pd1.GetConfig().Name
 	})
 }

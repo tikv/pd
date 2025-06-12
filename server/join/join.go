@@ -17,24 +17,25 @@ package join
 import (
 	"fmt"
 	"os"
-	"path"
+	"path/filepath"
 	"strings"
 	"time"
+
+	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.etcd.io/etcd/server/v3/embed"
+	"go.uber.org/zap"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
 	"github.com/pingcap/log"
+
 	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/slice"
 	"github.com/tikv/pd/pkg/utils/etcdutil"
 	"github.com/tikv/pd/server/config"
-	"go.etcd.io/etcd/clientv3"
-	"go.etcd.io/etcd/embed"
-	"go.uber.org/zap"
 )
 
 const (
-	// privateFileMode grants owner to read/write a file.
-	privateFileMode = 0600
 	// privateDirMode grants owner to make/remove files inside the directory.
 	privateDirMode = 0700
 )
@@ -45,10 +46,12 @@ var listMemberRetryTimes = 20
 // PrepareJoinCluster sends MemberAdd command to PD cluster,
 // and returns the initial configuration of the PD cluster.
 //
-// TL;TR: The join functionality is safe. With data, join does nothing, w/o data
+// TL;DR: The join functionality is safe. With data, join does nothing, w/o data
 //
 //	and it is not a member of cluster, join does MemberAdd, it returns an
 //	error if PD tries to join itself, missing data or join a duplicated PD.
+//	If previously the node joined but failed to start, it will attempt to
+//	start as the same member again.
 //
 // Etcd automatically re-joins the cluster if there is a data directory. So
 // first it checks if there is a data directory or not. If there is, it returns
@@ -59,6 +62,9 @@ var listMemberRetryTimes = 20
 //
 //   - A new PD joins an existing cluster.
 //     What join does: MemberAdd, MemberList, then generate initial-cluster.
+//
+//   - A new PD joined an existing cluster but failed to start.
+//     What join does: MemberList, then generate initial-cluster.
 //
 //   - A failed PD re-joins the previous cluster.
 //     What join does: return an error. (etcd reports: raft log corrupted,
@@ -90,28 +96,16 @@ func PrepareJoinCluster(cfg *config.Config) error {
 		return errors.New("join self is forbidden")
 	}
 
-	filePath := path.Join(cfg.DataDir, "join")
-	// Read the persist join config
-	if _, err := os.Stat(filePath); !os.IsNotExist(err) {
-		s, err := os.ReadFile(filePath)
-		if err != nil {
-			log.Fatal("read the join config meet error", errs.ZapError(errs.ErrIORead, err))
-		}
-		cfg.InitialCluster = strings.TrimSpace(string(s))
-		cfg.InitialClusterState = embed.ClusterStateFlagExisting
-		return nil
-	}
-
 	initialCluster := ""
 	// Cases with data directory.
-	if isDataExist(path.Join(cfg.DataDir, "member")) {
+	if isDataExist(filepath.Join(cfg.DataDir, "member")) {
 		cfg.InitialCluster = initialCluster
 		cfg.InitialClusterState = embed.ClusterStateFlagExisting
 		return nil
 	}
 
 	// Below are cases without data directory.
-	tlsConfig, err := cfg.Security.ToTLSConfig()
+	tlsConfig, err := cfg.Security.ToClientTLSConfig()
 	if err != nil {
 		return err
 	}
@@ -128,15 +122,26 @@ func PrepareJoinCluster(cfg *config.Config) error {
 	}
 	defer client.Close()
 
-	listResp, err := etcdutil.ListEtcdMembers(client)
+	listResp, err := etcdutil.ListEtcdMembers(client.Ctx(), client)
 	if err != nil {
 		return err
 	}
 
 	existed := false
+	joinedFailedToStart := false
+	advertisePeerURLs := strings.Split(cfg.AdvertisePeerUrls, ",")
 	for _, m := range listResp.Members {
 		if len(m.Name) == 0 {
-			return errors.New("there is a member that has not joined successfully")
+			if slice.EqualWithoutOrder(m.PeerURLs, advertisePeerURLs) {
+				log.Warn("the PD is already in the cluster but previously failed to start after join", zap.Any("member", m))
+				joinedFailedToStart = true
+			} else {
+				log.Error("there is an abnormal joined member in the current member list",
+					zap.Uint64("id", m.ID),
+					zap.Strings("peer-urls", m.PeerURLs),
+					zap.Strings("client-urls", m.ClientURLs))
+				return errors.Errorf("there is a member %d that has not joined successfully", m.ID)
+			}
 		}
 		if m.Name == cfg.Name {
 			existed = true
@@ -150,17 +155,20 @@ func PrepareJoinCluster(cfg *config.Config) error {
 
 	var addResp *clientv3.MemberAddResponse
 
-	failpoint.Inject("add-member-failed", func() {
+	failpoint.Inject("addMemberFailed", func() {
 		listMemberRetryTimes = 2
 		failpoint.Goto("LabelSkipAddMember")
 	})
 	// - A new PD joins an existing cluster.
 	// - A deleted PD joins to previous cluster.
 	{
-		// First adds member through the API
-		addResp, err = etcdutil.AddEtcdMember(client, []string{cfg.AdvertisePeerUrls})
-		if err != nil {
-			return err
+		// No need to add member if the PD is already in the cluster.
+		if !joinedFailedToStart {
+			// First adds member through the API
+			addResp, err = etcdutil.AddEtcdMember(client, []string{cfg.AdvertisePeerUrls})
+			if err != nil {
+				return err
+			}
 		}
 	}
 	failpoint.Label("LabelSkipAddMember")
@@ -170,8 +178,8 @@ func PrepareJoinCluster(cfg *config.Config) error {
 		listSucc bool
 	)
 
-	for i := 0; i < listMemberRetryTimes; i++ {
-		listResp, err = etcdutil.ListEtcdMembers(client)
+	for range listMemberRetryTimes {
+		listResp, err = etcdutil.ListEtcdMembers(client.Ctx(), client)
 		if err != nil {
 			return err
 		}
@@ -184,7 +192,16 @@ func PrepareJoinCluster(cfg *config.Config) error {
 				listSucc = true
 			}
 			if len(n) == 0 {
-				return errors.New("there is a member that has not joined successfully")
+				if joinedFailedToStart && slice.EqualWithoutOrder(memb.PeerURLs, advertisePeerURLs) {
+					n = cfg.Name
+					listSucc = true
+				} else {
+					log.Error("there is an abnormal joined member in the current member list",
+						zap.Uint64("id", memb.ID),
+						zap.Strings("peer-urls", memb.PeerURLs),
+						zap.Strings("client-urls", memb.ClientURLs))
+					return errors.Errorf("there is a member %d that has not joined successfully", memb.ID)
+				}
 			}
 			for _, m := range memb.PeerURLs {
 				pds = append(pds, fmt.Sprintf("%s=%s", n, m))
@@ -208,8 +225,7 @@ func PrepareJoinCluster(cfg *config.Config) error {
 		return errors.WithStack(err)
 	}
 
-	err = os.WriteFile(filePath, []byte(cfg.InitialCluster), privateFileMode)
-	return errors.WithStack(err)
+	return nil
 }
 
 func isDataExist(d string) bool {

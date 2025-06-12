@@ -18,13 +18,17 @@ import (
 	"context"
 	"time"
 
-	"github.com/pingcap/log"
-	"github.com/tikv/pd/pkg/errs"
 	"go.uber.org/zap"
+
+	"github.com/pingcap/log"
+
+	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/utils/logutil"
 )
 
 // StartMonitor calls systimeErrHandler if system time jump backward.
 func StartMonitor(ctx context.Context, now func() time.Time, systimeErrHandler func()) {
+	defer logutil.LogPanic()
 	log.Info("start system time monitor")
 	tick := time.NewTicker(100 * time.Millisecond)
 	defer tick.Stop()

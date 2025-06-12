@@ -18,11 +18,11 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
 	"github.com/tikv/pd/pkg/slice"
 )
 
 func TestSlice(t *testing.T) {
-	t.Parallel()
 	re := require.New(t)
 	testCases := []struct {
 		a      []int
@@ -45,17 +45,63 @@ func TestSlice(t *testing.T) {
 }
 
 func TestSliceContains(t *testing.T) {
-	t.Parallel()
 	re := require.New(t)
 	ss := []string{"a", "b", "c"}
-	re.Contains(ss, "a")
-	re.NotContains(ss, "d")
+	re.True(slice.Contains(ss, "a"))
+	re.False(slice.Contains(ss, "d"))
 
 	us := []uint64{1, 2, 3}
-	re.Contains(us, uint64(1))
-	re.NotContains(us, uint64(4))
+	re.True(slice.Contains(us, uint64(1)))
+	re.False(slice.Contains(us, uint64(4)))
 
 	is := []int64{1, 2, 3}
-	re.Contains(is, int64(1))
-	re.NotContains(is, int64(4))
+	re.True(slice.Contains(is, int64(1)))
+	re.False(slice.Contains(is, int64(4)))
+}
+
+func TestSliceRemoveGenericTypes(t *testing.T) {
+	re := require.New(t)
+	ss := []string{"a", "b", "c"}
+	ss = slice.Remove(ss, "a")
+	re.Equal([]string{"b", "c"}, ss)
+
+	us := []uint64{1, 2, 3}
+	us = slice.Remove(us, 1)
+	re.Equal([]uint64{2, 3}, us)
+
+	is := []int64{1, 2, 3}
+	is = slice.Remove(is, 1)
+	re.Equal([]int64{2, 3}, is)
+}
+
+func TestSliceRemove(t *testing.T) {
+	re := require.New(t)
+
+	is := []int64{}
+	is = slice.Remove(is, 1)
+	re.Equal([]int64{}, is)
+
+	is = []int64{1}
+	is = slice.Remove(is, 2)
+	re.Equal([]int64{1}, is)
+	is = slice.Remove(is, 1)
+	re.Equal([]int64{}, is)
+
+	is = []int64{1, 2, 3}
+	is = slice.Remove(is, 1)
+	re.Equal([]int64{2, 3}, is)
+
+	is = []int64{1, 1, 1}
+	is = slice.Remove(is, 1)
+	re.Equal([]int64{}, is)
+}
+
+func TestSliceEqualWithoutOrder(t *testing.T) {
+	re := require.New(t)
+	re.True(slice.EqualWithoutOrder([]string{"a", "b"}, []string{"b", "a"}))
+	re.True(slice.EqualWithoutOrder([]string{}, []string{}))
+	re.False(slice.EqualWithoutOrder([]string{}, []string{"a"}))
+	re.False(slice.EqualWithoutOrder([]string{"a", "b"}, []string{"b", "c"}))
+	re.False(slice.EqualWithoutOrder([]string{"a", "b"}, []string{"b"}))
+	re.False(slice.EqualWithoutOrder([]string{"a"}, []string{"b", "c"}))
 }

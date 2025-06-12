@@ -1,8 +1,10 @@
 # PD Simulator Configuration
 
-[tick]
 ## the tick interval when starting PD inside (default: "100ms")
 sim-tick-interval = "100ms"
+total-store = 10
+total-region = 10000
+case-name = "balance-leader"
 
 [store]
 ## the capacity size of a new store in GB (default: 1024)
@@ -11,8 +13,8 @@ store-capacity = 1024
 store-available = 1024
 ## the io rate of a new store in MB/s (default: 40)
 store-io-per-second = 40
-## the version of a new store (default: "2.1.0")
-store-version = "2.1.0"
+## the version of a new store (default: "8.1.0")
+store-version = "8.1.0"
 
 ## the meaning of these configurations below are similar with config.toml
 [server]

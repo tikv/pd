@@ -16,11 +16,12 @@ package distroutil
 
 import (
 	"os"
-	"path"
+	"path/filepath"
+
+	"go.uber.org/zap"
 
 	"github.com/pingcap/log"
 	"github.com/pingcap/tidb-dashboard/util/distro"
-	"go.uber.org/zap"
 )
 
 const (
@@ -33,10 +34,10 @@ const (
 func MustGetResPath() string {
 	exePath, err := os.Executable()
 	if err != nil {
-		log.Fatal("Failed to read the execution path", zap.Error(err))
+		log.Fatal("failed to read the execution path", zap.Error(err))
 		return ""
 	}
-	return path.Join(path.Dir(exePath), resFolderName)
+	return filepath.Join(filepath.Dir(exePath), resFolderName)
 }
 
 // MustLoadAndReplaceStrings loads the distro strings from ${BinaryPath}/distro-res/strings.json
@@ -44,10 +45,10 @@ func MustGetResPath() string {
 // distro string will be used.
 func MustLoadAndReplaceStrings() {
 	resPath := MustGetResPath()
-	strings, err := distro.ReadResourceStringsFromFile(path.Join(resPath, stringsFileName))
+	strings, err := distro.ReadResourceStringsFromFile(filepath.Join(resPath, stringsFileName))
 	if err != nil {
-		log.Fatal("Failed to load distro strings", zap.Error(err))
+		log.Fatal("failed to load distro strings", zap.Error(err))
 	}
-	log.Info("Using distribution strings", zap.Any("strings", strings))
+	log.Info("using distribution strings", zap.Any("strings", strings))
 	distro.ReplaceGlobal(strings)
 }

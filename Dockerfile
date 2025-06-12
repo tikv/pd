@@ -1,4 +1,4 @@
-FROM golang:1.19-alpine as builder
+FROM golang:1.23-alpine as builder
 
 RUN apk add --no-cache \
     make \
@@ -6,7 +6,8 @@ RUN apk add --no-cache \
     bash \
     curl \
     gcc \
-    g++
+    g++ \
+    binutils-gold
 
 # Install jq for pd-ctl
 RUN cd / && \
@@ -24,9 +25,11 @@ RUN GO111MODULE=on go mod download
 
 COPY . .
 
-RUN make
+# Workaround sqlite3 and alpine 3.19 incompatibility
+# https://github.com/mattn/go-sqlite3/issues/1164
+RUN CGO_CFLAGS="-D_LARGEFILE64_SOURCE" make
 
-FROM alpine:3.5
+FROM alpine:3.17
 
 COPY --from=builder /go/src/github.com/tikv/pd/bin/pd-server /pd-server
 COPY --from=builder /go/src/github.com/tikv/pd/bin/pd-ctl /pd-ctl

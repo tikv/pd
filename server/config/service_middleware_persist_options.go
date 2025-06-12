@@ -19,14 +19,16 @@ import (
 	"sync/atomic"
 
 	"github.com/pingcap/failpoint"
+
 	"github.com/tikv/pd/pkg/storage/endpoint"
 )
 
 // ServiceMiddlewarePersistOptions wraps all service middleware configurations that need to persist to storage and
 // allows to access them safely.
 type ServiceMiddlewarePersistOptions struct {
-	audit     atomic.Value
-	rateLimit atomic.Value
+	audit         atomic.Value
+	rateLimit     atomic.Value
+	grpcRateLimit atomic.Value
 }
 
 // NewServiceMiddlewarePersistOptions creates a new ServiceMiddlewarePersistOptions instance.
@@ -34,15 +36,16 @@ func NewServiceMiddlewarePersistOptions(cfg *ServiceMiddlewareConfig) *ServiceMi
 	o := &ServiceMiddlewarePersistOptions{}
 	o.audit.Store(&cfg.AuditConfig)
 	o.rateLimit.Store(&cfg.RateLimitConfig)
+	o.grpcRateLimit.Store(&cfg.GRPCRateLimitConfig)
 	return o
 }
 
-// GetAuditConfig returns pd service middleware configurations.
+// GetAuditConfig returns PD middleware configurations.
 func (o *ServiceMiddlewarePersistOptions) GetAuditConfig() *AuditConfig {
 	return o.audit.Load().(*AuditConfig)
 }
 
-// SetAuditConfig sets the PD service middleware configuration.
+// SetAuditConfig sets the PD middleware configuration.
 func (o *ServiceMiddlewarePersistOptions) SetAuditConfig(cfg *AuditConfig) {
 	o.audit.Store(cfg)
 }
@@ -52,12 +55,12 @@ func (o *ServiceMiddlewarePersistOptions) IsAuditEnabled() bool {
 	return o.GetAuditConfig().EnableAudit
 }
 
-// GetRateLimitConfig returns pd service middleware configurations.
+// GetRateLimitConfig returns PD middleware configurations.
 func (o *ServiceMiddlewarePersistOptions) GetRateLimitConfig() *RateLimitConfig {
 	return o.rateLimit.Load().(*RateLimitConfig)
 }
 
-// SetRateLimitConfig sets the PD service middleware configuration.
+// SetRateLimitConfig sets the PD middleware configuration.
 func (o *ServiceMiddlewarePersistOptions) SetRateLimitConfig(cfg *RateLimitConfig) {
 	o.rateLimit.Store(cfg)
 }
@@ -67,11 +70,27 @@ func (o *ServiceMiddlewarePersistOptions) IsRateLimitEnabled() bool {
 	return o.GetRateLimitConfig().EnableRateLimit
 }
 
+// GetGRPCRateLimitConfig returns PD middleware configurations.
+func (o *ServiceMiddlewarePersistOptions) GetGRPCRateLimitConfig() *GRPCRateLimitConfig {
+	return o.grpcRateLimit.Load().(*GRPCRateLimitConfig)
+}
+
+// SetGRPCRateLimitConfig sets the PD middleware configuration.
+func (o *ServiceMiddlewarePersistOptions) SetGRPCRateLimitConfig(cfg *GRPCRateLimitConfig) {
+	o.grpcRateLimit.Store(cfg)
+}
+
+// IsGRPCRateLimitEnabled returns whether rate limit middleware is enabled
+func (o *ServiceMiddlewarePersistOptions) IsGRPCRateLimitEnabled() bool {
+	return o.GetGRPCRateLimitConfig().EnableRateLimit
+}
+
 // Persist saves the configuration to the storage.
 func (o *ServiceMiddlewarePersistOptions) Persist(storage endpoint.ServiceMiddlewareStorage) error {
 	cfg := &ServiceMiddlewareConfig{
-		AuditConfig:     *o.GetAuditConfig(),
-		RateLimitConfig: *o.GetRateLimitConfig(),
+		AuditConfig:         *o.GetAuditConfig(),
+		RateLimitConfig:     *o.GetRateLimitConfig(),
+		GRPCRateLimitConfig: *o.GetGRPCRateLimitConfig(),
 	}
 	err := storage.SaveServiceMiddlewareConfig(cfg)
 	failpoint.Inject("persistServiceMiddlewareFail", func() {
@@ -91,6 +110,7 @@ func (o *ServiceMiddlewarePersistOptions) Reload(storage endpoint.ServiceMiddlew
 	if isExist {
 		o.audit.Store(&cfg.AuditConfig)
 		o.rateLimit.Store(&cfg.RateLimitConfig)
+		o.grpcRateLimit.Store(&cfg.GRPCRateLimitConfig)
 	}
 	return nil
 }

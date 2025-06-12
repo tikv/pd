@@ -15,9 +15,12 @@
 package errs
 
 import (
-	"github.com/pingcap/errors"
+	"strings"
+
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
+
+	"github.com/pingcap/errors"
 )
 
 // ZapError is used to make the log output easier.
@@ -27,10 +30,18 @@ func ZapError(err error, causeError ...error) zap.Field {
 	}
 	if e, ok := err.(*errors.Error); ok {
 		if len(causeError) >= 1 {
-			err = e.Wrap(causeError[0]).FastGenWithCause()
+			err = e.Wrap(causeError[0])
 		} else {
 			err = e.FastGenByArgs()
 		}
 	}
 	return zap.Field{Key: "error", Type: zapcore.ErrorType, Interface: err}
+}
+
+// IsLeaderChanged returns true if the error is due to leader changed.
+func IsLeaderChanged(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(err.Error(), NotLeaderErr)
 }

@@ -15,10 +15,34 @@
 package errs
 
 import (
-	"github.com/pingcap/errors"
+	"strings"
+
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
+	"google.golang.org/grpc/codes"
+
+	"github.com/pingcap/errors"
 )
+
+// IsLeaderChange will determine whether there is a leader/primary change.
+func IsLeaderChange(err error) bool {
+	if err == nil {
+		return false
+	}
+	if err == ErrClientTSOStreamClosed {
+		return true
+	}
+	errMsg := err.Error()
+	return strings.Contains(errMsg, NoLeaderErr) ||
+		strings.Contains(errMsg, NotLeaderErr) ||
+		strings.Contains(errMsg, NotServedErr) ||
+		strings.Contains(errMsg, NotPrimaryErr)
+}
+
+// IsNetworkError returns true if the error is a network error.
+func IsNetworkError(code codes.Code) bool {
+	return code == codes.Unavailable || code == codes.DeadlineExceeded
+}
 
 // ZapError is used to make the log output easier.
 func ZapError(err error, causeError ...error) zap.Field {
@@ -27,7 +51,7 @@ func ZapError(err error, causeError ...error) zap.Field {
 	}
 	if e, ok := err.(*errors.Error); ok {
 		if len(causeError) >= 1 {
-			err = e.Wrap(causeError[0]).FastGenWithCause()
+			err = e.Wrap(causeError[0])
 		} else {
 			err = e.FastGenByArgs()
 		}

@@ -16,11 +16,13 @@ package api
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/gorilla/mux"
+	"github.com/unrolled/render"
+
 	"github.com/tikv/pd/pkg/storage/endpoint"
 	"github.com/tikv/pd/server"
-	"github.com/unrolled/render"
 )
 
 type serviceGCSafepointHandler struct {
@@ -35,19 +37,23 @@ func newServiceGCSafepointHandler(svr *server.Server, rd *render.Render) *servic
 	}
 }
 
+// ListServiceGCSafepoint is the response for list service GC safepoint.
 // NOTE: This type is exported by HTTP API. Please pay more attention when modifying it.
-type listServiceGCSafepoint struct {
-	ServiceGCSafepoints []*endpoint.ServiceSafePoint `json:"service_gc_safe_points"`
-	GCSafePoint         uint64                       `json:"gc_safe_point"`
+// This type is in sync with `pd/client/http/types.go`.
+type ListServiceGCSafepoint struct {
+	ServiceGCSafepoints   []*endpoint.ServiceSafePoint `json:"service_gc_safe_points"`
+	MinServiceGcSafepoint uint64                       `json:"min_service_gc_safe_point,omitempty"`
+	GCSafePoint           uint64                       `json:"gc_safe_point"`
 }
 
+// GetGCSafePoint gets the service GC safepoint.
 // @Tags     service_gc_safepoint
 // @Summary  Get all service GC safepoint.
 // @Produce  json
-// @Success  200  {array}   listServiceGCSafepoint
+// @Success  200  {array}   ListServiceGCSafepoint
 // @Failure  500  {string}  string  "PD server failed to proceed the request."
 // @Router   /gc/safepoint [get]
-func (h *serviceGCSafepointHandler) GetGCSafePoint(w http.ResponseWriter, r *http.Request) {
+func (h *serviceGCSafepointHandler) GetGCSafePoint(w http.ResponseWriter, _ *http.Request) {
 	storage := h.svr.GetStorage()
 	gcSafepoint, err := storage.LoadGCSafePoint()
 	if err != nil {
@@ -59,13 +65,26 @@ func (h *serviceGCSafepointHandler) GetGCSafePoint(w http.ResponseWriter, r *htt
 		h.rd.JSON(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	list := listServiceGCSafepoint{
-		GCSafePoint:         gcSafepoint,
-		ServiceGCSafepoints: ssps,
+	var minSSp *endpoint.ServiceSafePoint
+	for _, ssp := range ssps {
+		if (minSSp == nil || minSSp.SafePoint > ssp.SafePoint) &&
+			ssp.ExpiredAt > time.Now().Unix() {
+			minSSp = ssp
+		}
+	}
+	minServiceGcSafepoint := uint64(0)
+	if minSSp != nil {
+		minServiceGcSafepoint = minSSp.SafePoint
+	}
+	list := ListServiceGCSafepoint{
+		GCSafePoint:           gcSafepoint,
+		ServiceGCSafepoints:   ssps,
+		MinServiceGcSafepoint: minServiceGcSafepoint,
 	}
 	h.rd.JSON(w, http.StatusOK, list)
 }
 
+// DeleteGCSafePoint deletes a service GC safepoint.
 // @Tags     service_gc_safepoint
 // @Summary  Delete a service GC safepoint.
 // @Param    service_id  path  string  true  "Service ID"

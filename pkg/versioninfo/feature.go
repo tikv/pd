@@ -16,9 +16,11 @@ package versioninfo
 
 import (
 	"github.com/coreos/go-semver/semver"
-	"github.com/pingcap/log"
-	"github.com/tikv/pd/pkg/errs"
 	"go.uber.org/zap"
+
+	"github.com/pingcap/log"
+
+	"github.com/tikv/pd/pkg/errs"
 )
 
 // Feature supported features.
@@ -59,7 +61,7 @@ var featuresDict = map[Feature]string{
 	Version5_0:           "5.0.0",
 	ConfChangeV2:         "5.0.0",
 	HotScheduleWithQuery: "5.2.0",
-	SwitchWitness:        "6.5.0",
+	SwitchWitness:        "6.6.0",
 }
 
 // MinSupportedVersion returns the minimum support version for the specified feature.

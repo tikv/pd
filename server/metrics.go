@@ -14,7 +14,15 @@
 
 package server
 
-import "github.com/prometheus/client_golang/prometheus"
+import (
+	"math/rand"
+
+	"github.com/prometheus/client_golang/prometheus"
+	"go.uber.org/zap"
+
+	"github.com/pingcap/kvproto/pkg/pdpb"
+	"github.com/pingcap/log"
+)
 
 var (
 	timeJumpBackCounter = prometheus.NewCounter(
@@ -45,7 +53,7 @@ var (
 			Subsystem: "scheduler",
 			Name:      "region_heartbeat_latency_seconds",
 			Help:      "Bucketed histogram of latency (s) of receiving heartbeat.",
-			Buckets:   prometheus.ExponentialBuckets(1, 2, 12),
+			Buckets:   prometheus.ExponentialBuckets(0.0005, 2, 13),
 		}, []string{"address", "store"})
 
 	metadataGauge = prometheus.NewGaugeVec(
@@ -82,12 +90,29 @@ var (
 			Buckets:   prometheus.ExponentialBuckets(1, 2, 13),
 		})
 
+	tsoProxyForwardTimeoutCounter = prometheus.NewCounter(
+		prometheus.CounterOpts{
+			Namespace: "pd",
+			Subsystem: "server",
+			Name:      "tso_proxy_forward_timeout_total",
+			Help:      "Counter of timeouts when tso proxy forwarding tso requests to tso service.",
+		})
+
 	tsoHandleDuration = prometheus.NewHistogram(
 		prometheus.HistogramOpts{
 			Namespace: "pd",
 			Subsystem: "server",
 			Name:      "handle_tso_duration_seconds",
 			Help:      "Bucketed histogram of processing time (s) of handled tso requests.",
+			Buckets:   prometheus.ExponentialBuckets(0.0005, 2, 13),
+		})
+
+	queryRegionDuration = prometheus.NewHistogram(
+		prometheus.HistogramOpts{
+			Namespace: "pd",
+			Subsystem: "server",
+			Name:      "query_region_duration_seconds",
+			Help:      "Bucketed histogram of processing time (s) of region query requests.",
 			Buckets:   prometheus.ExponentialBuckets(0.0005, 2, 13),
 		})
 
@@ -118,6 +143,7 @@ var (
 			Buckets:   prometheus.ExponentialBuckets(0.0001, 2, 29), // 0.1ms ~ 7hours
 		}, []string{"address", "store"})
 
+	// TODO: pre-allocate gauge metrics
 	storeHeartbeatHandleDuration = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: "pd",
@@ -127,14 +153,6 @@ var (
 			Buckets:   prometheus.ExponentialBuckets(0.0001, 2, 29), // 0.1ms ~ 7hours
 		}, []string{"address", "store"})
 
-	serverInfo = prometheus.NewGaugeVec(
-		prometheus.GaugeOpts{
-			Namespace: "pd",
-			Subsystem: "server",
-			Name:      "info",
-			Help:      "Indicate the pd server info, and the value is the start timestamp (s).",
-		}, []string{"version", "hash"})
-
 	serviceAuditHistogram = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Namespace: "pd",
@@ -142,7 +160,39 @@ var (
 			Name:      "audit_handling_seconds",
 			Help:      "PD server service handling audit",
 			Buckets:   prometheus.DefBuckets,
-		}, []string{"service", "method", "component", "ip"})
+		}, []string{"service", "method", "caller_id", "ip"})
+
+	apiConcurrencyGauge = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: "pd",
+			Subsystem: "server",
+			Name:      "api_concurrency",
+			Help:      "Concurrency number of the api.",
+		}, []string{"kind", "api"})
+
+	forwardFailCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "pd",
+			Subsystem: "server",
+			Name:      "forward_fail_total",
+			Help:      "Counter of forward fail.",
+		}, []string{"request", "type"})
+	forwardTsoDuration = prometheus.NewHistogram(
+		prometheus.HistogramOpts{
+			Namespace: "pd",
+			Subsystem: "server",
+			Name:      "forward_tso_duration_seconds",
+			Help:      "Bucketed histogram of processing time (s) of handled forward tso requests.",
+			Buckets:   prometheus.ExponentialBuckets(0.0005, 2, 13),
+		})
+
+	regionRequestCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: "pd",
+			Subsystem: "server",
+			Name:      "region_request_cnt",
+			Help:      "Counter of region request.",
+		}, []string{"request", "caller_id", "caller_component", "event"})
 )
 
 func init() {
@@ -153,12 +203,52 @@ func init() {
 	prometheus.MustRegister(etcdStateGauge)
 	prometheus.MustRegister(tsoProxyHandleDuration)
 	prometheus.MustRegister(tsoProxyBatchSize)
+	prometheus.MustRegister(tsoProxyForwardTimeoutCounter)
 	prometheus.MustRegister(tsoHandleDuration)
+	prometheus.MustRegister(queryRegionDuration)
 	prometheus.MustRegister(regionHeartbeatHandleDuration)
 	prometheus.MustRegister(storeHeartbeatHandleDuration)
-	prometheus.MustRegister(serverInfo)
 	prometheus.MustRegister(bucketReportCounter)
 	prometheus.MustRegister(bucketReportLatency)
 	prometheus.MustRegister(serviceAuditHistogram)
 	prometheus.MustRegister(bucketReportInterval)
+	prometheus.MustRegister(apiConcurrencyGauge)
+	prometheus.MustRegister(forwardFailCounter)
+	prometheus.MustRegister(forwardTsoDuration)
+	prometheus.MustRegister(regionRequestCounter)
+}
+
+type requestEvent string
+
+const (
+	requestSuccess requestEvent = "success"
+	requestFailed  requestEvent = "failed"
+)
+
+func incRegionRequestCounter(method string, header *pdpb.RequestHeader, err *pdpb.Error) {
+	if err == nil && rand.Intn(100) != 0 {
+		// sample 1% region requests to avoid high cardinality
+		return
+	}
+
+	var (
+		event           = requestSuccess
+		callerID        = header.CallerId
+		callerComponent = header.CallerComponent
+	)
+	if err != nil {
+		log.Warn("region request encounter error",
+			zap.String("method", method),
+			zap.String("caller_id", callerID),
+			zap.String("caller_component", callerComponent),
+			zap.Stringer("error", err))
+		event = requestFailed
+	}
+	if callerID == "" {
+		callerID = "unknown"
+	}
+	if callerComponent == "" {
+		callerComponent = "unknown"
+	}
+	regionRequestCounter.WithLabelValues(method, callerID, callerComponent, string(event)).Inc()
 }

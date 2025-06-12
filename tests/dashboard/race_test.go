@@ -20,11 +20,9 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+
 	"github.com/tikv/pd/pkg/dashboard"
 	"github.com/tikv/pd/tests"
-
-	// Register schedulers.
-	_ "github.com/tikv/pd/server/schedulers"
 )
 
 func TestCancelDuringStarting(t *testing.T) {
@@ -38,7 +36,7 @@ func TestCancelDuringStarting(t *testing.T) {
 	re.NoError(err)
 	defer cluster.Destroy()
 	re.NoError(cluster.RunInitialServers())
-	cluster.WaitLeader()
+	re.NotEmpty(cluster.WaitLeader())
 
 	time.Sleep(60 * time.Millisecond)
 	cancel()

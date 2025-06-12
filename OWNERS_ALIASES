@@ -1,0 +1,6 @@
+# Sort the member alphabetically.
+aliases:
+  sig-critical-approvers-config:
+    - BenMeadowcroft
+    - niubell
+    - yudongusa

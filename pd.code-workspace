@@ -1,17 +1,23 @@
 {
 	"folders": [
 		{
+			"name": "pd-server",
 			"path": "."
 		},
 		{
+			"name": "pd-client",
 			"path": "client"
 		},
 		{
-			"path": "tests/client"
+			"name": "pd-integration-tests",
+			"path": "tests/integrations"
 		},
 		{
-			"path": "tools/pd-tso-bench"
+			"name": "pd-tools",
+			"path": "tools"
 		}
 	],
-	"settings": {}
+	"settings": {
+		"makefile.configureOnOpen": false
+	}
 }

@@ -21,7 +21,6 @@ import (
 )
 
 func TestMaxFilter(t *testing.T) {
-	t.Parallel()
 	re := require.New(t)
 	var empty float64 = 0
 	data := []float64{2, 1, 3, 4, 1, 1, 3, 3, 2, 0, 5}

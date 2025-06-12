@@ -19,39 +19,44 @@ import (
 	"net/url"
 
 	"github.com/gin-gonic/gin"
-	"github.com/pingcap/log"
-	"github.com/tikv/pd/pkg/errs"
-	"github.com/tikv/pd/pkg/utils/apiutil/serverapi"
-	"github.com/tikv/pd/server"
 	"go.uber.org/zap"
+
+	"github.com/pingcap/log"
+
+	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/utils/apiutil"
+	"github.com/tikv/pd/server"
 )
 
 // Redirector is a middleware to redirect the request to the right place.
 func Redirector() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		svr := c.MustGet("server").(*server.Server)
-		allowFollowerHandle := len(c.Request.Header.Get(serverapi.AllowFollowerHandle)) > 0
-		isLeader := svr.GetMember().IsLeader()
-		if !svr.IsClosed() && (allowFollowerHandle || isLeader) {
+		svr := c.MustGet(ServerContextKey).(*server.Server)
+
+		if svr.IsClosed() {
+			c.AbortWithStatusJSON(http.StatusInternalServerError, errs.ErrServerNotStarted.FastGenByArgs().Error())
+			return
+		}
+		allowFollowerHandle := len(c.Request.Header.Get(apiutil.PDAllowFollowerHandleHeader)) > 0
+		if allowFollowerHandle || svr.GetMember().IsLeader() {
 			c.Next()
 			return
 		}
 
 		// Prevent more than one redirection.
-		if name := c.Request.Header.Get(serverapi.RedirectorHeader); len(name) != 0 {
-			log.Error("redirect but server is not leader", zap.String("from", name), zap.String("server", svr.Name()), errs.ZapError(errs.ErrRedirect))
-			c.AbortWithStatusJSON(http.StatusInternalServerError, errs.ErrRedirect.FastGenByArgs().Error())
+		if name := c.Request.Header.Get(apiutil.PDRedirectorHeader); len(name) != 0 {
+			log.Error("redirect but server is not leader", zap.String("from", name), zap.String("server", svr.Name()), errs.ZapError(errs.ErrRedirectToNotLeader))
+			c.AbortWithStatusJSON(http.StatusInternalServerError, errs.ErrRedirectToNotLeader.FastGenByArgs().Error())
 			return
 		}
 
-		c.Request.Header.Set(serverapi.RedirectorHeader, svr.Name())
+		c.Request.Header.Set(apiutil.PDRedirectorHeader, svr.Name())
 
-		leader := svr.GetMember().GetLeader()
-		if leader == nil {
+		if svr.GetMember().GetLeader() == nil {
 			c.AbortWithStatusJSON(http.StatusServiceUnavailable, errs.ErrLeaderNil.FastGenByArgs().Error())
 			return
 		}
-		clientUrls := leader.GetClientUrls()
+		clientUrls := svr.GetMember().GetLeader().GetClientUrls()
 		urls := make([]url.URL, 0, len(clientUrls))
 		for _, item := range clientUrls {
 			u, err := url.Parse(item)
@@ -64,7 +69,7 @@ func Redirector() gin.HandlerFunc {
 		}
 
 		client := svr.GetHTTPClient()
-		serverapi.NewCustomReverseProxies(client, urls).ServeHTTP(c.Writer, c.Request)
+		apiutil.NewCustomReverseProxies(client, urls).ServeHTTP(c.Writer, c.Request)
 		c.Abort()
 	}
 }

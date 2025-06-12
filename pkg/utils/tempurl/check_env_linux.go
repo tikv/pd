@@ -11,6 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
 //go:build linux
 // +build linux
 
@@ -18,7 +19,9 @@ package tempurl
 
 import (
 	"github.com/cakturk/go-netstat/netstat"
+
 	"github.com/pingcap/log"
+
 	"github.com/tikv/pd/pkg/errs"
 )
 
@@ -36,7 +39,7 @@ func checkAddr(addr string) (bool, error) {
 		return s.RemoteAddr.String() == addr || s.LocalAddr.String() == addr
 	})
 	if err != nil {
-		return false, errs.ErrNetstatTCPSocks.Wrap(err).FastGenWithCause()
+		return false, errs.ErrNetstatTCPSocks.Wrap(err)
 	}
 	return len(tabs) < 1, nil
 }

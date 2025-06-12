@@ -19,10 +19,12 @@ import (
 	"io"
 	"net/http"
 
+	"github.com/unrolled/render"
+
 	"github.com/pingcap/log"
+
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/server"
-	"github.com/unrolled/render"
 )
 
 type logHandler struct {
@@ -37,6 +39,7 @@ func newLogHandler(svr *server.Server, rd *render.Render) *logHandler {
 	}
 }
 
+// SetLogLevel sets the log level.
 // @Tags     admin
 // @Summary  Set log level.
 // @Accept   json

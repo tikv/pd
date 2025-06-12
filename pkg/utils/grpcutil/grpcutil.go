@@ -18,18 +18,33 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"io"
 	"net/url"
+	"strings"
+	"time"
 
-	"github.com/pingcap/log"
-	"github.com/tikv/pd/pkg/errs"
-	"go.etcd.io/etcd/pkg/transport"
+	"go.etcd.io/etcd/client/pkg/v3/transport"
+	"go.uber.org/zap"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/backoff"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
+
+	"github.com/pingcap/errors"
+	"github.com/pingcap/log"
+
+	"github.com/tikv/pd/pkg/errs"
+	"github.com/tikv/pd/pkg/utils/logutil"
 )
 
-// ForwardMetadataKey is used to record the forwarded host of PD.
-const ForwardMetadataKey = "pd-forwarded-host"
+const (
+	// ForwardMetadataKey is used to record the forwarded host of PD.
+	ForwardMetadataKey = "pd-forwarded-host"
+	// FollowerHandleMetadataKey is used to mark the permit of follower handle.
+	FollowerHandleMetadataKey = "pd-allow-follower-handle"
+)
 
 // TLSConfig is the configuration for supporting tls.
 type TLSConfig struct {
@@ -39,16 +54,30 @@ type TLSConfig struct {
 	CertPath string `toml:"cert-path" json:"cert-path"`
 	// KeyPath is the path of file that contains X509 key in PEM format.
 	KeyPath string `toml:"key-path" json:"key-path"`
-	// CertAllowedCN is a CN which must be provided by a client
-	CertAllowedCN []string `toml:"cert-allowed-cn" json:"cert-allowed-cn"`
+	// CertAllowedCNs is the list of CN which must be provided by a client
+	CertAllowedCNs []string `toml:"cert-allowed-cn" json:"cert-allowed-cn"`
 
 	SSLCABytes   []byte
 	SSLCertBytes []byte
 	SSLKEYBytes  []byte
 }
 
-// ToTLSConfig generates tls config.
-func (s TLSConfig) ToTLSConfig() (*tls.Config, error) {
+// ToTLSInfo converts TLSConfig to transport.TLSInfo.
+func (s TLSConfig) ToTLSInfo() (*transport.TLSInfo, error) {
+	if len(s.CertPath) == 0 && len(s.KeyPath) == 0 {
+		return nil, nil
+	}
+
+	return &transport.TLSInfo{
+		CertFile:      s.CertPath,
+		KeyFile:       s.KeyPath,
+		TrustedCAFile: s.CAPath,
+		AllowedCNs:    s.CertAllowedCNs,
+	}, nil
+}
+
+// ToClientTLSConfig generates tls config.
+func (s TLSConfig) ToClientTLSConfig() (*tls.Config, error) {
 	if len(s.SSLCABytes) != 0 || len(s.SSLCertBytes) != 0 || len(s.SSLKEYBytes) != 0 {
 		cert, err := tls.X509KeyPair(s.SSLCertBytes, s.SSLKEYBytes)
 		if err != nil {
@@ -68,38 +97,42 @@ func (s TLSConfig) ToTLSConfig() (*tls.Config, error) {
 		}, nil
 	}
 
-	if len(s.CertPath) == 0 && len(s.KeyPath) == 0 {
+	tlsInfo, err := s.ToTLSInfo()
+	if tlsInfo == nil {
 		return nil, nil
 	}
-	allowedCN, err := s.GetOneAllowedCN()
 	if err != nil {
-		return nil, err
+		return nil, errs.ErrTLSConfig.Wrap(err).GenWithStackByCause()
+	}
+
+	tlsConfig, err := tlsInfo.ClientConfig()
+	if err != nil {
+		return nil, errs.ErrTLSConfig.Wrap(err).GenWithStackByCause()
+	}
+	return tlsConfig, nil
+}
+
+// ToServerTLSConfig generates tls config.
+func (s TLSConfig) ToServerTLSConfig() (*tls.Config, error) {
+	if len(s.CertPath) == 0 && len(s.KeyPath) == 0 {
+		return nil, nil
 	}
 
 	tlsInfo := transport.TLSInfo{
 		CertFile:      s.CertPath,
 		KeyFile:       s.KeyPath,
 		TrustedCAFile: s.CAPath,
-		AllowedCN:     allowedCN,
+		AllowedCNs:    s.CertAllowedCNs,
 	}
 
-	tlsConfig, err := tlsInfo.ClientConfig()
+	tlsConfig, err := tlsInfo.ServerConfig()
 	if err != nil {
-		return nil, errs.ErrEtcdTLSConfig.Wrap(err).GenWithStackByCause()
+		return nil, errs.ErrTLSConfig.Wrap(err).GenWithStackByCause()
 	}
-	return tlsConfig, nil
-}
+	tlsConfig.NextProtos = []string{"http/1.1", "h2"}
+	tlsConfig.ClientAuth = tls.VerifyClientCertIfGiven
 
-// GetOneAllowedCN only gets the first one CN.
-func (s TLSConfig) GetOneAllowedCN() (string, error) {
-	switch len(s.CertAllowedCN) {
-	case 1:
-		return s.CertAllowedCN[0], nil
-	case 0:
-		return "", nil
-	default:
-		return "", errs.ErrSecurityConfig.FastGenByArgs("only supports one CN")
-	}
+	return tlsConfig, nil
 }
 
 // GetClientConn returns a gRPC client connection.
@@ -116,7 +149,7 @@ func (s TLSConfig) GetOneAllowedCN() (string, error) {
 // ctx will be noop. Users should call ClientConn.Close to terminate all the
 // pending operations after this function returns.
 func GetClientConn(ctx context.Context, addr string, tlsCfg *tls.Config, do ...grpc.DialOption) (*grpc.ClientConn, error) {
-	opt := grpc.WithInsecure()
+	opt := grpc.WithTransportCredentials(insecure.NewCredentials())
 	if tlsCfg != nil {
 		creds := credentials.NewTLS(tlsCfg)
 		opt = grpc.WithTransportCredentials(creds)
@@ -125,7 +158,18 @@ func GetClientConn(ctx context.Context, addr string, tlsCfg *tls.Config, do ...g
 	if err != nil {
 		return nil, errs.ErrURLParse.Wrap(err).GenWithStackByCause()
 	}
-	cc, err := grpc.DialContext(ctx, u.Host, append(do, opt)...)
+	// Here we use a shorter MaxDelay to make the connection recover faster.
+	// The default MaxDelay is 120s, which is too long for us.
+	backoffOpts := grpc.WithConnectParams(grpc.ConnectParams{
+		Backoff: backoff.Config{
+			BaseDelay:  time.Second,
+			Multiplier: 1.6,
+			Jitter:     0.2,
+			MaxDelay:   3 * time.Second,
+		},
+	})
+	do = append(do, opt, backoffOpts)
+	cc, err := grpc.DialContext(ctx, u.Host, do...)
 	if err != nil {
 		return nil, errs.ErrGRPCDial.Wrap(err).GenWithStackByCause()
 	}
@@ -134,8 +178,8 @@ func GetClientConn(ctx context.Context, addr string, tlsCfg *tls.Config, do ...g
 
 // BuildForwardContext creates a context with receiver metadata information.
 // It is used in client side.
-func BuildForwardContext(ctx context.Context, addr string) context.Context {
-	md := metadata.Pairs(ForwardMetadataKey, addr)
+func BuildForwardContext(ctx context.Context, url string) context.Context {
+	md := metadata.Pairs(ForwardMetadataKey, url)
 	return metadata.NewOutgoingContext(ctx, md)
 }
 
@@ -147,4 +191,90 @@ func ResetForwardContext(ctx context.Context) context.Context {
 	}
 	md.Set(ForwardMetadataKey, "")
 	return metadata.NewOutgoingContext(ctx, md)
+}
+
+// GetForwardedHost returns the forwarded host in metadata.
+func GetForwardedHost(ctx context.Context) string {
+	s := metadata.ValueFromIncomingContext(ctx, ForwardMetadataKey)
+	if len(s) > 0 {
+		return s[0]
+	}
+	return ""
+}
+
+// IsFollowerHandleEnabled returns the follower host in metadata.
+func IsFollowerHandleEnabled(ctx context.Context) bool {
+	md, ok := metadata.FromIncomingContext(ctx)
+	if !ok {
+		log.Debug("failed to get gRPC incoming metadata when checking follower handle is enabled")
+		return false
+	}
+	_, ok = md[FollowerHandleMetadataKey]
+	return ok
+}
+
+func establish(ctx context.Context, addr string, tlsConfig *TLSConfig, do ...grpc.DialOption) (*grpc.ClientConn, error) {
+	tlsCfg, err := tlsConfig.ToClientTLSConfig()
+	if err != nil {
+		return nil, err
+	}
+	cc, err := GetClientConn(
+		ctx,
+		addr,
+		tlsCfg,
+		do...,
+	)
+	if err != nil {
+		return nil, errors.WithStack(err)
+	}
+	return cc, nil
+}
+
+// CreateClientConn creates a client connection to the given target.
+func CreateClientConn(ctx context.Context, addr string, tlsConfig *TLSConfig, do ...grpc.DialOption) *grpc.ClientConn {
+	var (
+		conn *grpc.ClientConn
+		err  error
+	)
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		default:
+		}
+		conn, err = establish(ctx, addr, tlsConfig, do...)
+		if err != nil {
+			log.Error("cannot establish connection", zap.String("addr", addr), errs.ZapError(err))
+			continue
+		}
+		break
+	}
+	return conn
+}
+
+// CheckStream checks stream status, if stream is not created successfully in time, cancel context.
+// TODO: If goroutine here timeout when tso stream created successfully, we need to handle it correctly.
+func CheckStream(ctx context.Context, cancel context.CancelFunc, done chan struct{}) {
+	defer logutil.LogPanic()
+	timer := time.NewTimer(3 * time.Second)
+	defer timer.Stop()
+	select {
+	case <-done:
+		return
+	case <-timer.C:
+		cancel()
+	case <-ctx.Done():
+	}
+	<-done
+}
+
+// NeedRebuildConnection checks if the error is a connection error.
+func NeedRebuildConnection(err error) bool {
+	return (err != nil) && (err == io.EOF ||
+		strings.Contains(err.Error(), codes.Unavailable.String()) || // Unavailable indicates the service is currently unavailable. This is a most likely a transient condition.
+		strings.Contains(err.Error(), codes.DeadlineExceeded.String()) || // DeadlineExceeded means operation expired before completion.
+		strings.Contains(err.Error(), codes.Internal.String()) || // Internal errors.
+		strings.Contains(err.Error(), codes.Unknown.String()) || // Unknown error.
+		strings.Contains(err.Error(), codes.ResourceExhausted.String())) // ResourceExhausted is returned when either the client or the server has exhausted their resources.
+	// Besides, we don't need to rebuild the connection if the code is Canceled, which means the client cancelled the request.
 }

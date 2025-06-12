@@ -14,7 +14,9 @@ DASHBOARD_DIR=$(go list -f "{{.Dir}}" -m github.com/pingcap/tidb-dashboard)
 if [ "$1" = "git-hash" ]; then
   echo "${DASHBOARD_DIR}" | awk -F- '{print $NF}'
 elif [ "$1" = "internal-version" ]; then
-  grep -v '^#' "${DASHBOARD_DIR}/release-version"
+  CUR_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
+  BASE_DIR="$(dirname "$CUR_DIR")"
+  grep -v '^#' "$BASE_DIR/scripts/dashboard-version"
 else
   exit 1
 fi

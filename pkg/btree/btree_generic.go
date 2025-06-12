@@ -1,3 +1,17 @@
+// Copyright 2022 TiKV Project Authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 // Copyright 2014-2022 Google Inc.
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -59,26 +73,13 @@
 // Those without this prefix are specific to the 'Item' interface, and use
 // its 'Less' function for ordering.
 
-// Copyright 2022 TiKV Project Authors.
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//	http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
-//revive:disable
+// nolint
 package btree
 
 import (
 	"sort"
-	"sync"
+
+	"github.com/tikv/pd/pkg/utils/syncutil"
 )
 
 // Item represents a single object in the tree.
@@ -101,7 +102,7 @@ const (
 // FreeList, in particular when they're created with Clone.
 // Two Btrees using the same freelist are safe for concurrent write access.
 type FreeListG[T Item[T]] struct {
-	mu       sync.Mutex
+	mu       syncutil.Mutex
 	freelist []*node[T]
 }
 
@@ -820,7 +821,7 @@ type copyOnWriteContext[T Item[T]] struct {
 // The internal tree structure of b is marked read-only and shared between t and
 // t2.  Writes to both t and t2 use copy-on-write logic, creating new nodes
 // whenever one of b's original nodes would have been modified.  Read operations
-// should have no performance degredation.  Write operations for both t and t2
+// should have no performance degradation.  Write operations for both t and t2
 // will initially experience minor slow-downs caused by additional allocs and
 // copies due to the aforementioned copy-on-write logic, but should converge to
 // the original performance characteristics of the original tree.

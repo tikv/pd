@@ -19,11 +19,11 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+
 	"github.com/tikv/pd/pkg/utils/typeutil"
 )
 
 func TestCamelCaseToSnakeCase(t *testing.T) {
-	t.Parallel()
 	re := require.New(t)
 	inputs := []struct {
 		name    string
@@ -56,7 +56,7 @@ func TestCamelCaseToSnakeCase(t *testing.T) {
 	}
 }
 
-func TestCoverage(t *testing.T) {
+func TestCoverage(_ *testing.T) {
 	cfgs := []*MetricConfig{
 		{
 			PushJob:     "j1",

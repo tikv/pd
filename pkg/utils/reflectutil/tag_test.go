@@ -35,7 +35,6 @@ type testStruct3 struct {
 }
 
 func TestFindJSONFullTagByChildTag(t *testing.T) {
-	t.Parallel()
 	re := require.New(t)
 	key := "enable"
 	result := FindJSONFullTagByChildTag(reflect.TypeOf(testStruct1{}), key)
@@ -51,21 +50,19 @@ func TestFindJSONFullTagByChildTag(t *testing.T) {
 }
 
 func TestFindSameFieldByJSON(t *testing.T) {
-	t.Parallel()
 	re := require.New(t)
-	input := map[string]interface{}{
+	input := map[string]any{
 		"name": "test2",
 	}
 	t2 := testStruct2{}
 	re.True(FindSameFieldByJSON(&t2, input))
-	input = map[string]interface{}{
+	input = map[string]any{
 		"enable": "test2",
 	}
 	re.False(FindSameFieldByJSON(&t2, input))
 }
 
 func TestFindFieldByJSONTag(t *testing.T) {
-	t.Parallel()
 	re := require.New(t)
 	t1 := testStruct1{}
 	t2 := testStruct2{}
