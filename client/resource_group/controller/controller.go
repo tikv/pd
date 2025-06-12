@@ -176,8 +176,7 @@ type ResourceGroupsController struct {
 	// a cache for ru config and make concurrency safe.
 	safeRuConfig atomic.Pointer[RUConfig]
 
-	isUseDegradedResourceGroup bool
-	degradedRUSettings         *rmpb.GroupRequestUnitSettings
+	degradedRUSettings *rmpb.GroupRequestUnitSettings
 }
 
 // NewResourceGroupController returns a new ResourceGroupsController which impls ResourceGroupKVInterceptor
@@ -499,17 +498,19 @@ func (c *ResourceGroupsController) tryGetResourceGroupController(
 		}
 		return gc, nil
 	}
+
+	isUseDegradedResourceGroup := false
 	// Call gRPC to fetch the resource group info.
 	group, err := c.provider.GetResourceGroup(ctx, name)
 	if err != nil {
-		if c.degradedRUSettings != nil && !c.isUseDegradedResourceGroup {
-			c.isUseDegradedResourceGroup = true
+		if c.degradedRUSettings != nil && !isUseDegradedResourceGroup {
+			isUseDegradedResourceGroup = true
 			group = c.getDegradedResourceGroup(name)
 		} else {
 			return nil, err
 		}
 	} else {
-		c.isUseDegradedResourceGroup = false
+		isUseDegradedResourceGroup = false
 	}
 	if group == nil {
 		return nil, NewResourceGroupNotExistErr(name)
@@ -523,7 +524,7 @@ func (c *ResourceGroupsController) tryGetResourceGroupController(
 	if err != nil {
 		return nil, err
 	}
-	if !c.isUseDegradedResourceGroup {
+	if !isUseDegradedResourceGroup {
 		// Check again to prevent initializing the same resource group concurrently.
 		_, loaded := c.loadOrStoreGroupController(name, gc)
 		if !loaded {

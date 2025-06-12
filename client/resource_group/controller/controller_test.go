@@ -441,6 +441,11 @@ func TestGetResourceGroup(t *testing.T) {
 	re.NoError(err)
 	re.Equal(expectResourceGroup, gc.getMeta())
 
+	// case2: when GetResourceGroup return error again, It should still return the expectResourceGroup.
+	gc, err = controller.tryGetResourceGroupController(ctx, "test-group", false)
+	re.NoError(err)
+	re.Equal(expectResourceGroup, gc.getMeta())
+
 	// case2: If `GetResourceGroup` returns no error (`nil`), it should return the testResourceGroup.
 	failpoint.Disable("github.com/tikv/pd/client/resource_group/controller/gerResourceGroupError")
 	gc, err = controller.tryGetResourceGroupController(ctx, "test-group", false)
