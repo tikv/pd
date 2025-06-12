@@ -446,13 +446,13 @@ func TestGetResourceGroup(t *testing.T) {
 	re.NoError(err)
 	re.Equal(expectResourceGroup, gc.getMeta())
 
-	// case2: If `GetResourceGroup` returns no error (`nil`), it should return the testResourceGroup.
+	// case3: If `GetResourceGroup` returns no error (`nil`), it should return the testResourceGroup.
 	failpoint.Disable("github.com/tikv/pd/client/resource_group/controller/gerResourceGroupError")
 	gc, err = controller.tryGetResourceGroupController(ctx, "test-group", false)
 	re.NoError(err)
 	re.Equal(testResourceGroup, gc.getMeta())
 
-	// case3: when we don't set degradedRUSettings and GetResourceGroup return error, tryGetResourceGroupController will return err.
+	// case4: when we don't set degradedRUSettings and GetResourceGroup return error, tryGetResourceGroupController will return err.
 	failpoint.Enable("github.com/tikv/pd/client/resource_group/controller/gerResourceGroupError", `return()`)
 	defer failpoint.Disable("github.com/tikv/pd/client/resource_group/controller/gerResourceGroupError")
 
