@@ -499,7 +499,6 @@ func (c *ResourceGroupsController) tryGetResourceGroupController(
 		}
 		return gc, nil
 	}
-
 	// Call gRPC to fetch the resource group info.
 	group, err := c.provider.GetResourceGroup(ctx, name)
 	if err != nil {
