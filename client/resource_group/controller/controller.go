@@ -136,17 +136,10 @@ func WithDegradedModeWaitDuration(d time.Duration) ResourceControlCreateOption {
 	}
 }
 
-// WithTempBurstLimit is the option to set BurstLimit.
-func WithTempBurstLimit(tempBurstLimit int64) ResourceControlCreateOption {
+// WithDegradedRUSettings is the option to set the degraded RU settings for the resource group.
+func WithDegradedRUSettings(degradedRUSettings *rmpb.GroupRequestUnitSettings) ResourceControlCreateOption {
 	return func(controller *ResourceGroupsController) {
-		controller.tempBurstLimit = tempBurstLimit
-	}
-}
-
-// WithTempFillRate is the option to set FillRate.
-func WithTempFillRate(tempFillRate uint64) ResourceControlCreateOption {
-	return func(controller *ResourceGroupsController) {
-		controller.tempFillRate = tempFillRate
+		controller.degradedRUSettings = degradedRUSettings
 	}
 }
 
@@ -181,14 +174,13 @@ type ResourceGroupsController struct {
 		currentRequests []*rmpb.TokenBucketRequest
 	}
 
-	isTempResourceGroup bool
-	tempFillRate        uint64
-	tempBurstLimit      int64
-
 	opts []ResourceControlCreateOption
 
 	// a cache for ru config and make concurrency safe.
 	safeRuConfig atomic.Pointer[RUConfig]
+
+	isTempResourceGroup bool
+	degradedRUSettings  *rmpb.GroupRequestUnitSettings
 }
 
 // NewResourceGroupController returns a new ResourceGroupsController which impls ResourceGroupKVInterceptor
@@ -217,9 +209,8 @@ func NewResourceGroupController(
 		lowTokenNotifyChan:    make(chan notifyMsg, 1),
 		tokenResponseChan:     make(chan []*rmpb.TokenBucketResponse, 1),
 		tokenBucketUpdateChan: make(chan *groupCostController, maxNotificationChanLen),
+		degradedRUSettings:    getDefaultDegradedRUSettings(),
 		opts:                  opts,
-		tempFillRate:          defaultResourceGroupFillRate,
-		tempBurstLimit:        defaultResourceGroupBurstLimit,
 	}
 	for _, opt := range opts {
 		opt(controller)
@@ -229,6 +220,17 @@ func NewResourceGroupController(
 	controller.safeRuConfig.Store(controller.ruConfig)
 	enableControllerTraceLog.Store(config.EnableControllerTraceLog)
 	return controller, nil
+}
+
+func getDefaultDegradedRUSettings() *rmpb.GroupRequestUnitSettings {
+	return &rmpb.GroupRequestUnitSettings{
+		RU: &rmpb.TokenBucket{
+			Settings: &rmpb.TokenLimitSettings{
+				FillRate:   defaultResourceGroupFillRate,
+				BurstLimit: defaultResourceGroupBurstLimit,
+			},
+		},
+	}
 }
 
 func loadServerConfig(ctx context.Context, provider ResourceGroupProvider) (*Config, error) {
@@ -490,15 +492,11 @@ func NewResourceGroupNotExistErr(name string) error {
 }
 
 func (c *ResourceGroupsController) getDegradedResourceGroup(resourceGroupName string) *rmpb.ResourceGroup {
-	var group *rmpb.ResourceGroup
-	group.Name = resourceGroupName
-	group.Mode = rmpb.GroupMode_RUMode
-	group.RUSettings = &rmpb.GroupRequestUnitSettings{RU: &rmpb.TokenBucket{
-		Settings: &rmpb.TokenLimitSettings{
-			FillRate:   c.tempFillRate,
-			BurstLimit: c.tempBurstLimit,
-		},
-	}}
+	group := &rmpb.ResourceGroup{
+		Name:       resourceGroupName,
+		Mode:       rmpb.GroupMode_RUMode,
+		RUSettings: c.degradedRUSettings,
+	}
 	return group
 }
 
@@ -517,21 +515,22 @@ func (c *ResourceGroupsController) tryGetResourceGroupController(
 		return gc, nil
 	}
 
+	log.Info("test-yjy getDegradedResourceGroup 00")
 	// Call gRPC to fetch the resource group info.
 	group, err := c.provider.GetResourceGroup(ctx, name)
 	if err != nil {
+		log.Info("test-yjy getDegradedResourceGroup 01")
 		if !c.isTempResourceGroup {
 			c.isTempResourceGroup = true
+			log.Info("test-yjy getDegradedResourceGroup")
 			group = c.getDegradedResourceGroup(name)
 		}
-		//		return nil, err
 	} else {
 		c.isTempResourceGroup = false
 	}
 	if group == nil {
 		return nil, NewResourceGroupNotExistErr(name)
 	}
-	log.Info("test-yjy tryGetResourceGroupController", zap.String("name", name), zap.Any("group", group))
 	// Check again to prevent initializing the same resource group concurrently.
 	if gc, ok = c.loadGroupController(name); ok {
 		return gc, nil

@@ -24,6 +24,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/pingcap/errors"
+	"github.com/pingcap/log"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
@@ -192,6 +194,15 @@ func newMockResourceGroupProvider() *MockResourceGroupProvider {
 }
 
 func (m *MockResourceGroupProvider) GetResourceGroup(ctx context.Context, resourceGroupName string, opts ...pd.GetResourceGroupOption) (*rmpb.ResourceGroup, error) {
+	var err error
+	failpoint.Inject("gerResourceGroupError", func() {
+		err = errors.New("fake get resource group error")
+	})
+	if err != nil {
+		log.Info("test-yjy GetResourceGroup err")
+		return nil, &errs.ErrClientGetResourceGroup{ResourceGroupName: resourceGroupName, Cause: err.Error()}
+	}
+
 	args := m.Called(ctx, resourceGroupName, opts)
 	return args.Get(0).(*rmpb.ResourceGroup), args.Error(1)
 }
@@ -382,4 +393,61 @@ func TestTryGetController(t *testing.T) {
 	consumption, err = controller.OnResponse(defaultResourceGroupName, requestInfo, responseInfo)
 	re.NoError(err)
 	re.NotEmpty(consumption)
+}
+
+func TestGetResourceGroup(t *testing.T) {
+	re := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Enable the failpoint to simulate an error when getting the resource group.
+	failpoint.Enable("github.com/tikv/pd/client/resource_group/controller/gerResourceGroupError", `return()`)
+	defer failpoint.Disable("github.com/tikv/pd/client/resource_group/controller/gerResourceGroupError")
+
+	mockProvider := newMockResourceGroupProvider()
+
+	expectResourceGroupName := "test-group"
+	expectRUSettings := &rmpb.GroupRequestUnitSettings{
+		RU: &rmpb.TokenBucket{
+			Settings: &rmpb.TokenLimitSettings{
+				FillRate:   uint64(50),
+				BurstLimit: int64(100),
+			},
+		},
+	}
+	expectResourceGroup := &rmpb.ResourceGroup{
+		Name:       expectResourceGroupName,
+		Mode:       rmpb.GroupMode_RUMode,
+		RUSettings: expectRUSettings,
+	}
+
+	opts := []ResourceControlCreateOption{WithDegradedRUSettings(expectRUSettings)}
+
+	controller, _ := NewResourceGroupController(ctx, 1, mockProvider, nil, constants.NullKeyspaceID, opts...)
+	controller.Start(ctx)
+
+	testResourceGroup := &rmpb.ResourceGroup{
+		Name: "test-group",
+		Mode: rmpb.GroupMode_RUMode,
+		RUSettings: &rmpb.GroupRequestUnitSettings{
+			RU: &rmpb.TokenBucket{
+				Settings: &rmpb.TokenLimitSettings{
+					FillRate: 1000000,
+				},
+			},
+		},
+	}
+	mockProvider.On("GetResourceGroup", mock.Anything, "test-group", mock.Anything).Return(testResourceGroup, nil)
+
+	// case1: when GetResourceGroup return error, it should return the expectResourceGroup.
+	gc, err := controller.tryGetResourceGroupController(ctx, "test-group", false)
+	re.NoError(err)
+	re.Equal(expectResourceGroup, gc.getMeta())
+
+	// case2: If `GetResourceGroup` returns no error (`nil`), it should return the testResourceGroup.
+	failpoint.Disable("github.com/tikv/pd/client/resource_group/controller/gerResourceGroupError")
+	gc, err = controller.tryGetResourceGroupController(ctx, "test-group", false)
+	re.NoError(err)
+	re.Equal(testResourceGroup, gc.getMeta())
+
 }

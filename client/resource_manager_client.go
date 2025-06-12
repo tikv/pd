@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/gogo/protobuf/proto"
+	"github.com/pingcap/failpoint"
 	"go.uber.org/zap"
 
 	"github.com/pingcap/errors"
@@ -117,6 +118,17 @@ func (c *client) ListResourceGroups(ctx context.Context, ops ...GetResourceGroup
 
 // GetResourceGroup implements the ResourceManagerClient interface.
 func (c *client) GetResourceGroup(ctx context.Context, resourceGroupName string, ops ...GetResourceGroupOption) (*rmpb.ResourceGroup, error) {
+	var err error
+	failpoint.Inject("gerResourceGroupError", func() {
+		err = errors.New("fake get resource group error")
+	})
+	if err != nil {
+		log.Info("test-yjy GetResourceGroup err")
+		return nil, &errs.ErrClientGetResourceGroup{ResourceGroupName: resourceGroupName, Cause: err.Error()}
+	}
+
+	log.Info("test-yjy GetResourceGroup no err")
+
 	cc, err := c.inner.resourceManagerClient()
 	if err != nil {
 		return nil, err
