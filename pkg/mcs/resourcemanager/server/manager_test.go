@@ -97,7 +97,7 @@ func TestInitManager(t *testing.T) {
 	re.NotNil(rg)
 	// Verify the default resource group settings are updated. This is to ensure the default resource group
 	// can be loaded from the storage correctly rather than created as a new one.
-	re.Equal(defaultGroup.RUSettings.RU.Settings.FillRate, rg.RUSettings.RU.Settings.FillRate)
+	re.Equal(defaultGroup.RUSettings.RU.getFillRateSetting(), rg.RUSettings.RU.getFillRateSetting())
 }
 
 func TestBackgroundMetricsFlush(t *testing.T) {
@@ -218,7 +218,7 @@ func checkAddAndModifyResourceGroup(re *require.Assertions, manager *Manager, ke
 		rg := manager.GetResourceGroup(keyspaceID, group.Name, true)
 		re.NotNil(rg)
 		return rg.Priority == group.Priority &&
-			rg.RUSettings.RU.Settings.BurstLimit == group.RUSettings.RU.Settings.BurstLimit
+			rg.RUSettings.RU.getBurstLimitSetting() == group.RUSettings.RU.Settings.BurstLimit
 	})
 }
 
