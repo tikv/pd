@@ -39,6 +39,7 @@ import (
 	"github.com/tikv/pd/pkg/utils/keypath"
 	"github.com/tikv/pd/pkg/utils/logutil"
 	"github.com/tikv/pd/pkg/utils/syncutil"
+	"github.com/tikv/pd/pkg/versioninfo/kerneltype"
 )
 
 const (
@@ -231,6 +232,12 @@ func (manager *Manager) CreateKeyspace(request *CreateKeyspaceRequest) (*keyspac
 		} else {
 			request.Config[TSOKeyspaceGroupIDKey] = config[TSOKeyspaceGroupIDKey]
 			request.Config[UserKindKey] = config[UserKindKey]
+		}
+	}
+	// Set default value of GCManagementType to KeyspaceLevelGC for NextGen
+	if kerneltype.IsNextGen() {
+		if v, ok := request.Config[GCManagementType]; !ok || len(v) == 0 {
+			request.Config[GCManagementType] = KeyspaceLevelGC
 		}
 	}
 	// Create a disabled keyspace meta for tikv-server to get the config on keyspace split.

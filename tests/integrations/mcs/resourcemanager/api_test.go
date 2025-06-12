@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -77,6 +78,7 @@ func (suite *resourceManagerAPITestSuite) getEndpoint(re *require.Assertions, el
 func (suite *resourceManagerAPITestSuite) sendRequest(
 	re *require.Assertions,
 	method, path string,
+	queryParams url.Values,
 	body any,
 ) ([]byte, int) {
 	var bodyReader io.Reader
@@ -85,8 +87,11 @@ func (suite *resourceManagerAPITestSuite) sendRequest(
 		re.NoError(err)
 		bodyReader = bytes.NewBuffer(data)
 	}
-
-	httpReq, err := http.NewRequest(method, suite.getEndpoint(re, path), bodyReader)
+	path = suite.getEndpoint(re, path)
+	if len(queryParams) > 0 {
+		path += "?" + queryParams.Encode()
+	}
+	httpReq, err := http.NewRequest(method, path, bodyReader)
 	re.NoError(err)
 	resp, err := tests.TestDialClient.Do(httpReq)
 	re.NoError(err)
@@ -103,67 +108,97 @@ func (suite *resourceManagerAPITestSuite) mustSendRequest(
 	method, path string,
 	body any,
 ) []byte {
-	bodyBytes, statusCode := suite.sendRequest(re, method, path, body)
-	re.Equal(http.StatusOK, statusCode)
+	bodyBytes, statusCode := suite.sendRequest(re, method, path, nil, body)
+	re.Equal(http.StatusOK, statusCode, string(bodyBytes))
 	return bodyBytes
 }
 
 func (suite *resourceManagerAPITestSuite) TestResourceGroupAPI() {
 	re := suite.Require()
-
-	// Add a resource group.
-	groupToAdd := &rmpb.ResourceGroup{
-		Name:     "test_group",
-		Mode:     rmpb.GroupMode_RUMode,
-		Priority: 5,
-		RUSettings: &rmpb.GroupRequestUnitSettings{
-			RU: &rmpb.TokenBucket{
-				Settings: &rmpb.TokenLimitSettings{
-					FillRate:   100,
-					BurstLimit: 200,
+	re.NoError(failpoint.Enable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion", "return(true)"))
+	defer func() {
+		re.NoError(failpoint.Disable("github.com/tikv/pd/pkg/keyspace/skipSplitRegion"))
+	}()
+	for i := range 3 {
+		// Create keyspace
+		keyspaceName := fmt.Sprint("test_keyspace_", i)
+		leaderServer := suite.cluster.GetLeaderServer()
+		meta, err := leaderServer.GetKeyspaceManager().CreateKeyspace(
+			&keyspace.CreateKeyspaceRequest{
+				Name: keyspaceName,
+			},
+		)
+		re.NoError(err)
+		keyspaceID := &rmpb.KeyspaceIDValue{
+			Value: meta.GetId(),
+		}
+		// Add a resource group.
+		groupToAdd := &rmpb.ResourceGroup{
+			Name:     "test_group",
+			Mode:     rmpb.GroupMode_RUMode,
+			Priority: uint32(5 + i),
+			RUSettings: &rmpb.GroupRequestUnitSettings{
+				RU: &rmpb.TokenBucket{
+					Settings: &rmpb.TokenLimitSettings{
+						FillRate:   uint64(100 + i),
+						BurstLimit: int64(200 + i),
+					},
 				},
 			},
-		},
-	}
-	suite.mustAddResourceGroup(re, groupToAdd)
-	// Get the resource group.
-	group := suite.mustGetResourceGroup(re, groupToAdd.Name)
-	re.Equal(groupToAdd.Name, group.Name)
-	re.Equal(groupToAdd.Mode, group.Mode)
-	re.Equal(groupToAdd.Priority, group.Priority)
-	re.Equal(groupToAdd.RUSettings.RU.Settings.FillRate, group.RUSettings.RU.Settings.FillRate)
-	re.Equal(groupToAdd.RUSettings.RU.Settings.BurstLimit, group.RUSettings.RU.Settings.BurstLimit)
-	// Update the resource group.
-	groupToUpdate := group.Clone(false)
-	groupToUpdate.Priority = 10
-	groupToUpdate.RUSettings.RU.Settings.FillRate = 200
-	suite.mustUpdateResourceGroup(re, groupToUpdate.IntoProtoResourceGroup())
-	group = suite.mustGetResourceGroup(re, groupToAdd.Name)
-	re.Equal(groupToUpdate.Name, group.Name)
-	re.Equal(groupToUpdate.Mode, group.Mode)
-	re.Equal(groupToUpdate.Priority, group.Priority)
-	re.Equal(groupToUpdate.RUSettings.RU.Settings.FillRate, group.RUSettings.RU.Settings.FillRate)
-	re.Equal(groupToUpdate.RUSettings.RU.Settings.BurstLimit, group.RUSettings.RU.Settings.BurstLimit)
-	// Get the resource group list.
-	groups := suite.mustGetResourceGroupList(re)
-	re.Len(groups, 2) // Include the default resource group.
-	for _, group := range groups {
-		// Skip the default resource group.
-		if group.Name == server.DefaultResourceGroupName {
-			continue
+			KeyspaceId: keyspaceID,
 		}
+		suite.mustAddResourceGroup(re, groupToAdd)
+		// Get the resource group.
+		group := suite.mustGetResourceGroup(re, groupToAdd.Name, keyspaceName+"_err")
+		re.Nil(group)
+		group = suite.mustGetResourceGroup(re, groupToAdd.Name, keyspaceName)
+		re.NotNil(group)
+		re.Equal(groupToAdd.Name, group.Name)
+		re.Equal(groupToAdd.Mode, group.Mode)
+		re.Equal(groupToAdd.Priority, group.Priority)
+		re.Equal(groupToAdd.RUSettings.RU.Settings.FillRate, group.RUSettings.RU.Settings.FillRate)
+		re.Equal(groupToAdd.RUSettings.RU.Settings.BurstLimit, group.RUSettings.RU.Settings.BurstLimit)
+		// Update the resource group.
+		groupToUpdate := group.Clone(false)
+		groupToUpdate.Priority = 10
+		groupToUpdate.RUSettings.RU.Settings.FillRate = 200
+		groupToUpdateProto := groupToUpdate.IntoProtoResourceGroup()
+		groupToUpdateProto.KeyspaceId = keyspaceID
+		suite.mustUpdateResourceGroup(re, groupToUpdateProto)
+		group = suite.mustGetResourceGroup(re, groupToUpdate.Name, keyspaceName)
+		re.NotNil(group)
 		re.Equal(groupToUpdate.Name, group.Name)
 		re.Equal(groupToUpdate.Mode, group.Mode)
 		re.Equal(groupToUpdate.Priority, group.Priority)
 		re.Equal(groupToUpdate.RUSettings.RU.Settings.FillRate, group.RUSettings.RU.Settings.FillRate)
+		re.Equal(groupToUpdate.RUSettings.RU.Settings.BurstLimit, group.RUSettings.RU.Settings.BurstLimit)
+		// Get the resource group list.
+		groups := suite.mustGetResourceGroupList(re, keyspaceName+"_err")
+		re.Nil(groups)
+		groups = suite.mustGetResourceGroupList(re, keyspaceName)
+		re.NotNil(groups)
+		re.Len(groups, 2) // Include the default resource group.
+		for _, group := range groups {
+			// Skip the default resource group.
+			if group.Name == server.DefaultResourceGroupName {
+				continue
+			}
+			re.Equal(groupToUpdate.Name, group.Name)
+			re.Equal(groupToUpdate.Mode, group.Mode)
+			re.Equal(groupToUpdate.Priority, group.Priority)
+			re.Equal(groupToUpdate.RUSettings.RU.Settings.FillRate, group.RUSettings.RU.Settings.FillRate)
+		}
+		// Delete the resource group.
+		suite.mustDeleteResourceGroup(re, groupToAdd.Name, keyspaceName+"_err")
+		group = suite.mustGetResourceGroup(re, groupToAdd.Name, keyspaceName)
+		re.NotNil(group)
+		suite.mustDeleteResourceGroup(re, groupToAdd.Name, keyspaceName)
+		group = suite.mustGetResourceGroup(re, groupToAdd.Name, keyspaceName)
+		re.Nil(group)
+		groups = suite.mustGetResourceGroupList(re, keyspaceName)
+		re.Len(groups, 1)
+		re.Equal(server.DefaultResourceGroupName, groups[0].Name)
 	}
-	// Delete the resource group.
-	suite.mustDeleteResourceGroup(re, groupToAdd.Name)
-	group = suite.mustGetResourceGroup(re, groupToAdd.Name)
-	re.Nil(group)
-	groups = suite.mustGetResourceGroupList(re)
-	re.Len(groups, 1)
-	re.Equal(server.DefaultResourceGroupName, groups[0].Name)
 }
 
 func (suite *resourceManagerAPITestSuite) mustAddResourceGroup(re *require.Assertions, group *rmpb.ResourceGroup) {
@@ -176,8 +211,10 @@ func (suite *resourceManagerAPITestSuite) mustUpdateResourceGroup(re *require.As
 	re.Equal("Success!", string(bodyBytes))
 }
 
-func (suite *resourceManagerAPITestSuite) mustGetResourceGroup(re *require.Assertions, name string) *server.ResourceGroup {
-	bodyBytes, statusCode := suite.sendRequest(re, http.MethodGet, "/config/group/"+name, nil)
+func (suite *resourceManagerAPITestSuite) mustGetResourceGroup(re *require.Assertions, name string, keyspaceName string) *server.ResourceGroup {
+	queryParams := url.Values{}
+	queryParams.Set("keyspace_name", keyspaceName)
+	bodyBytes, statusCode := suite.sendRequest(re, http.MethodGet, "/config/group/"+name, queryParams, nil)
 	if statusCode != http.StatusOK {
 		re.Equal(http.StatusNotFound, statusCode)
 		return nil
@@ -187,15 +224,27 @@ func (suite *resourceManagerAPITestSuite) mustGetResourceGroup(re *require.Asser
 	return group
 }
 
-func (suite *resourceManagerAPITestSuite) mustGetResourceGroupList(re *require.Assertions) []*server.ResourceGroup {
-	bodyBytes := suite.mustSendRequest(re, http.MethodGet, "/config/groups", nil)
+func (suite *resourceManagerAPITestSuite) mustGetResourceGroupList(re *require.Assertions, keyspaceName string) []*server.ResourceGroup {
+	queryParams := url.Values{}
+	queryParams.Set("keyspace_name", keyspaceName)
+	bodyBytes, statusCode := suite.sendRequest(re, http.MethodGet, "/config/groups", queryParams, nil)
+	if statusCode != http.StatusOK {
+		re.Equal(http.StatusNotFound, statusCode)
+		return nil
+	}
 	groups := []*server.ResourceGroup{}
 	re.NoError(json.NewDecoder(bytes.NewReader(bodyBytes)).Decode(&groups))
 	return groups
 }
 
-func (suite *resourceManagerAPITestSuite) mustDeleteResourceGroup(re *require.Assertions, name string) {
-	bodyBytes := suite.mustSendRequest(re, http.MethodDelete, "/config/group/"+name, nil)
+func (suite *resourceManagerAPITestSuite) mustDeleteResourceGroup(re *require.Assertions, name string, keyspaceName string) {
+	queryParams := url.Values{}
+	queryParams.Set("keyspace_name", keyspaceName)
+	bodyBytes, statusCode := suite.sendRequest(re, http.MethodDelete, "/config/group/"+name, queryParams, nil)
+	if statusCode != http.StatusOK {
+		re.Equal(http.StatusNotFound, statusCode)
+		return
+	}
 	re.Equal("Success!", string(bodyBytes))
 }
 
@@ -273,7 +322,7 @@ func (suite *resourceManagerAPITestSuite) TestKeyspaceServiceLimitAPI() {
 }
 
 func (suite *resourceManagerAPITestSuite) tryToGetKeyspaceServiceLimit(re *require.Assertions, keyspaceName string) (float64, int) {
-	bodyBytes, statusCode := suite.sendRequest(re, http.MethodGet, "/config/keyspace/service-limit/"+keyspaceName, nil)
+	bodyBytes, statusCode := suite.sendRequest(re, http.MethodGet, "/config/keyspace/service-limit/"+keyspaceName, nil, nil)
 	if statusCode != http.StatusOK {
 		return 0.0, statusCode
 	}
@@ -289,6 +338,7 @@ func (suite *resourceManagerAPITestSuite) tryToSetKeyspaceServiceLimit(re *requi
 		re,
 		http.MethodPost,
 		"/config/keyspace/service-limit/"+keyspaceName,
+		nil,
 		apis.KeyspaceServiceLimitRequest{
 			ServiceLimit: limit,
 		},

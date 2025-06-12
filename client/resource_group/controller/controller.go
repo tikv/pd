@@ -38,6 +38,7 @@ import (
 	"github.com/tikv/pd/client/clients/metastorage"
 	"github.com/tikv/pd/client/errs"
 	"github.com/tikv/pd/client/opt"
+	"github.com/tikv/pd/client/resource_group/controller/metrics"
 )
 
 const (
@@ -324,7 +325,7 @@ func (c *ResourceGroupsController) Start(ctx context.Context) {
 				c.executeOnAllGroups((*groupCostController).resetEmergencyTokenAcquisition)
 			/* channels */
 			case <-c.loopCtx.Done():
-				resourceGroupStatusGauge.Reset()
+				metrics.ResourceGroupStatusGauge.Reset()
 				return
 			case <-c.responseDeadlineCh:
 				c.run.inDegradedMode = true
@@ -499,7 +500,7 @@ func (c *ResourceGroupsController) tryGetResourceGroupController(
 	// Check again to prevent initializing the same resource group concurrently.
 	gc, loaded := c.loadOrStoreGroupController(name, gc)
 	if !loaded {
-		resourceGroupStatusGauge.WithLabelValues(name, group.Name).Set(1)
+		metrics.ResourceGroupStatusGauge.WithLabelValues(name, group.Name).Set(1)
 		log.Info("[resource group controller] create resource group cost controller", zap.String("name", name))
 	}
 	return gc, nil
@@ -537,7 +538,7 @@ func (c *ResourceGroupsController) tombstoneGroupCostController(name string) {
 	gc.tombstone.Store(true)
 	c.groupsController.Store(name, gc)
 	// Its metrics will be deleted in the cleanup process.
-	resourceGroupStatusGauge.WithLabelValues(name, name).Set(2)
+	metrics.ResourceGroupStatusGauge.WithLabelValues(name, name).Set(2)
 	log.Info("[resource group controller] default resource group controller cost created for tombstone",
 		zap.String("name", name))
 }
@@ -553,7 +554,7 @@ func (c *ResourceGroupsController) cleanUpResourceGroup() {
 		if equalRU(latestConsumption, *gc.run.consumption) {
 			if gc.inactive || gc.tombstone.Load() {
 				c.groupsController.Delete(resourceGroupName)
-				resourceGroupStatusGauge.DeleteLabelValues(resourceGroupName, resourceGroupName)
+				metrics.ResourceGroupStatusGauge.DeleteLabelValues(resourceGroupName, resourceGroupName)
 				return true
 			}
 			gc.inactive = true
@@ -630,9 +631,9 @@ func (c *ResourceGroupsController) sendTokenBucketRequests(ctx context.Context, 
 				log.Error("[resource group controller] token bucket rpc error", zap.Error(err))
 			}
 			resp = nil
-			failedTokenRequestDuration.Observe(latency.Seconds())
+			metrics.FailedTokenRequestDuration.Observe(latency.Seconds())
 		} else {
-			successfulTokenRequestDuration.Observe(latency.Seconds())
+			metrics.SuccessfulTokenRequestDuration.Observe(latency.Seconds())
 		}
 		if !notifyMsg.startTime.IsZero() && time.Since(notifyMsg.startTime) > slowNotifyFilterDuration {
 			log.Warn("[resource group controller] slow token bucket request", zap.String("source", source), zap.Duration("cost", time.Since(notifyMsg.startTime)))
@@ -802,14 +803,14 @@ func initMetrics(oldName, name string) *groupMetricsCollection {
 		throttledType = "throttled"
 	)
 	return &groupMetricsCollection{
-		successfulRequestDuration:         successfulRequestDuration.WithLabelValues(oldName, name),
-		failedLimitReserveDuration:        failedLimitReserveDuration.WithLabelValues(oldName, name),
-		failedRequestCounterWithOthers:    failedRequestCounter.WithLabelValues(oldName, name, otherType),
-		failedRequestCounterWithThrottled: failedRequestCounter.WithLabelValues(oldName, name, throttledType),
-		requestRetryCounter:               requestRetryCounter.WithLabelValues(oldName, name),
-		tokenRequestCounter:               resourceGroupTokenRequestCounter.WithLabelValues(oldName, name),
-		runningKVRequestCounter:           groupRunningKVRequestCounter.WithLabelValues(name),
-		consumeTokenHistogram:             tokenConsumedHistogram.WithLabelValues(name),
+		successfulRequestDuration:         metrics.SuccessfulRequestDuration.WithLabelValues(oldName, name),
+		failedLimitReserveDuration:        metrics.FailedLimitReserveDuration.WithLabelValues(oldName, name),
+		failedRequestCounterWithOthers:    metrics.FailedRequestCounter.WithLabelValues(oldName, name, otherType),
+		failedRequestCounterWithThrottled: metrics.FailedRequestCounter.WithLabelValues(oldName, name, throttledType),
+		requestRetryCounter:               metrics.RequestRetryCounter.WithLabelValues(oldName, name),
+		tokenRequestCounter:               metrics.ResourceGroupTokenRequestCounter.WithLabelValues(oldName, name),
+		runningKVRequestCounter:           metrics.GroupRunningKVRequestCounter.WithLabelValues(name),
+		consumeTokenHistogram:             metrics.TokenConsumedHistogram.WithLabelValues(name),
 	}
 }
 
