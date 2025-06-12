@@ -32,6 +32,8 @@ import (
 	"go.uber.org/multierr"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/pingcap/errors"
 	"github.com/pingcap/failpoint"
@@ -2111,13 +2113,14 @@ func (s *GrpcServer) ScatterRegion(ctx context.Context, request *pdpb.ScatterReg
 	}
 
 	if len(request.GetRegionsId()) > 0 {
-		percentage, err := scatterRegions(rc, request.GetRegionsId(), request.GetGroup(), int(request.GetRetryLimit()), request.GetSkipStoreLimit())
+		percentage, failedRegionsID, err := scatterRegions(rc, request.GetRegionsId(), request.GetGroup(), int(request.GetRetryLimit()), request.GetSkipStoreLimit())
 		if err != nil {
 			return nil, err
 		}
 		return &pdpb.ScatterRegionResponse{
 			Header:             wrapHeader(),
 			FinishedPercentage: uint64(percentage),
+			FailedRegionsId:    failedRegionsID,
 		}, nil
 	}
 	// TODO: Deprecate it use `request.GetRegionsID`.
@@ -2486,6 +2489,7 @@ func convertScatterResponse(resp *schedulingpb.ScatterRegionsResponse) *pdpb.Sca
 	return &pdpb.ScatterRegionResponse{
 		Header:             convertHeader(resp.GetHeader()),
 		FinishedPercentage: resp.GetFinishedPercentage(),
+		FailedRegionsId:    resp.GetFailedRegionsId(),
 	}
 }
 
@@ -2598,7 +2602,7 @@ func (s *GrpcServer) SplitAndScatterRegions(ctx context.Context, request *pdpb.S
 		return &pdpb.SplitAndScatterRegionsResponse{Header: notBootstrappedHeader()}, nil
 	}
 	splitFinishedPercentage, newRegionIDs := rc.GetRegionSplitter().SplitRegions(ctx, request.GetSplitKeys(), int(request.GetRetryLimit()))
-	scatterFinishedPercentage, err := scatterRegions(rc, newRegionIDs, request.GetGroup(), int(request.GetRetryLimit()), false)
+	scatterFinishedPercentage, _, err := scatterRegions(rc, newRegionIDs, request.GetGroup(), int(request.GetRetryLimit()), false)
 	if err != nil {
 		return nil, err
 	}
@@ -2610,13 +2614,15 @@ func (s *GrpcServer) SplitAndScatterRegions(ctx context.Context, request *pdpb.S
 	}, nil
 }
 
-// scatterRegions add operators to scatter regions and return the processed percentage and error
-func scatterRegions(cluster *cluster.RaftCluster, regionsID []uint64, group string, retryLimit int, skipStoreLimit bool) (int, error) {
+// scatterRegions add operators to scatter regions
+// returns the percentage of successfully scattered regions and the IDs of failed regions
+func scatterRegions(cluster *cluster.RaftCluster, regionsID []uint64, group string, retryLimit int, skipStoreLimit bool) (int, []uint64, error) {
 	opsCount, failures, err := cluster.GetRegionScatterer().ScatterRegionsByID(regionsID, group, retryLimit, skipStoreLimit)
 	if err != nil {
-		return 0, err
+		return 0, nil, err
 	}
 	percentage := 100
+	var failedRegionIDs []uint64
 	if len(failures) > 0 {
 		percentage = 100 - 100*len(failures)/(opsCount+len(failures))
 		log.Debug("scatter regions", zap.Errors("failures", func() []error {
@@ -2626,8 +2632,11 @@ func scatterRegions(cluster *cluster.RaftCluster, regionsID []uint64, group stri
 			}
 			return r
 		}()))
+		for regionID := range failures {
+			failedRegionIDs = append(failedRegionIDs, regionID)
+		}
 	}
-	return percentage, nil
+	return percentage, failedRegionIDs, nil
 }
 
 // GetDCLocationInfo implements gRPC PDServer.
@@ -2943,4 +2952,14 @@ func (s *GrpcServer) rateLimitCheck() (done ratelimit.DoneFunc, err error) {
 		return
 	}
 	return
+}
+
+// SetGlobalGCBarrier implements gRPC PDServer.
+func (*GrpcServer) SetGlobalGCBarrier(context.Context, *pdpb.SetGlobalGCBarrierRequest) (*pdpb.SetGlobalGCBarrierResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "SetGlobalGCBarrier is not implemented yet, waiting for https://github.com/tikv/pd/pull/9361")
+}
+
+// DeleteGlobalGCBarrier implements gRPC PDServer.
+func (*GrpcServer) DeleteGlobalGCBarrier(context.Context, *pdpb.DeleteGlobalGCBarrierRequest) (*pdpb.DeleteGlobalGCBarrierResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "DeleteGlobalGCBarrier is not implemented yet, waiting for https://github.com/tikv/pd/pull/9361")
 }
