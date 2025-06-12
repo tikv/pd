@@ -1086,7 +1086,6 @@ func (c *client) CreateMergeOperator(ctx context.Context, sourceRegionID, target
 		WithBody(inputJSON))
 }
 
-
 // DeleteOperators deletes the running operators.
 func (c *client) DeleteOperators(ctx context.Context) error {
 	return c.request(ctx, newRequestInfo().

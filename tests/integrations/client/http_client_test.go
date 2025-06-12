@@ -1062,5 +1062,4 @@ func TestGetSiblingsRegions(t *testing.T) {
 	re.Len(ops, 2)
 	re.NotZero(ops[0].Kind() & operator.OpMerge)
 	re.NotZero(ops[1].Kind() & operator.OpMerge)
-
 }

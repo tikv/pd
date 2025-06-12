@@ -36,5 +36,5 @@ ignore:
   - "tools/pd-ut"
   - "tools/regions-dump"
   - "tools/stores-dump"
+  - "tools/pd-patroller"
   - "tests"
-  

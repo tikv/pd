@@ -45,10 +45,3 @@ func ModifyURLScheme(url string, tlsCfg *tls.Config) string {
 	}
 	return url
 }
-
-// TrimHTTPPrefix trims the HTTP/HTTPS prefix from the string.
-func TrimHTTPPrefix(str string) string {
-	str = strings.TrimPrefix(str, httpSchemePrefix)
-	str = strings.TrimPrefix(str, httpsSchemePrefix)
-	return str
-}
