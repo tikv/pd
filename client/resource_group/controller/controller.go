@@ -503,14 +503,12 @@ func (c *ResourceGroupsController) tryGetResourceGroupController(
 	// Call gRPC to fetch the resource group info.
 	group, err := c.provider.GetResourceGroup(ctx, name)
 	if err != nil {
-		if c.degradedRUSettings != nil && !isUseDegradedResourceGroup {
+		if c.degradedRUSettings != nil {
 			isUseDegradedResourceGroup = true
 			group = c.getDegradedResourceGroup(name)
 		} else {
 			return nil, err
 		}
-	} else {
-		isUseDegradedResourceGroup = false
 	}
 	if group == nil {
 		return nil, NewResourceGroupNotExistErr(name)
