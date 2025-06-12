@@ -510,7 +510,6 @@ func (c *ResourceGroupsController) tryGetResourceGroupController(
 			return nil, err
 		}
 	} else {
-
 		c.isUseDegradedResourceGroup = false
 	}
 	if group == nil {

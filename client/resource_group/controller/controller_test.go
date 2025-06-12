@@ -447,8 +447,6 @@ func TestGetResourceGroup(t *testing.T) {
 	re.NoError(err)
 	re.Equal(testResourceGroup, gc.getMeta())
 
-	// ----------------
-
 	// case3: when we don't set degradedRUSettings and GetResourceGroup return error, tryGetResourceGroupController will return err.
 	failpoint.Enable("github.com/tikv/pd/client/resource_group/controller/gerResourceGroupError", `return()`)
 	defer failpoint.Disable("github.com/tikv/pd/client/resource_group/controller/gerResourceGroupError")
@@ -459,5 +457,4 @@ func TestGetResourceGroup(t *testing.T) {
 	gc02, err := controller02.tryGetResourceGroupController(ctx, "test-group", false)
 	re.Error(err)
 	re.Nil(gc02)
-
 }
