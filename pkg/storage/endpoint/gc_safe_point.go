@@ -126,7 +126,7 @@ func (se *StorageEndpoint) LoadMinServiceGCSafePoint(now time.Time) (*ServiceSaf
 func (se *StorageEndpoint) initServiceGCSafePointForGCWorker() (*ServiceSafePoint, error) {
 	// Temporary solution:
 	// Use the txn safe point as the initial value of gc_worker.
-	txnSafePoint, err := newGCStateProvider(se).LoadTxnSafePoint(constant.NullKeyspaceID)
+	txnSafePoint, err := se.GetGCStateProvider().LoadTxnSafePoint(constant.NullKeyspaceID)
 	if err != nil {
 		return nil, err
 	}

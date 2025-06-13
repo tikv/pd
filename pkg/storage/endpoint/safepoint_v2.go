@@ -180,7 +180,7 @@ func (se *StorageEndpoint) LoadServiceSafePointV2(keyspaceID uint32, serviceID s
 func (se *StorageEndpoint) initServiceSafePointV2ForGCWorker(keyspaceID uint32) (*ServiceSafePointV2, error) {
 	// Temporary solution:
 	// Use the txn safe point as the initial value of gc_worker.
-	txnSafePoint, err := newGCStateProvider(se).LoadTxnSafePoint(keyspaceID)
+	txnSafePoint, err := se.GetGCStateProvider().LoadTxnSafePoint(keyspaceID)
 	if err != nil {
 		return nil, err
 	}
