@@ -106,11 +106,11 @@ var (
 			Buckets:   prometheus.ExponentialBuckets(1, 2, 30),
 		}, []string{"type", "rw", "dim"})
 
-	storeSlowEvictedStatusGauge = prometheus.NewGaugeVec(
+	evictedSlowStoreStatusGauge = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: "pd",
 			Subsystem: "scheduler",
-			Name:      "store_slow_evicted_status",
+			Name:      "evicted_slow_store_status",
 			Help:      "Store evicted status due to slow",
 		}, []string{"type", "store"})
 
@@ -168,7 +168,7 @@ func init() {
 	prometheus.MustRegister(tolerantResourceStatus)
 	prometheus.MustRegister(hotPendingStatus)
 	prometheus.MustRegister(hotPeerHist)
-	prometheus.MustRegister(storeSlowEvictedStatusGauge)
+	prometheus.MustRegister(evictedSlowStoreStatusGauge)
 	prometheus.MustRegister(storeSlowTrendEvictedStatusGauge)
 	prometheus.MustRegister(storeSlowTrendActionStatusGauge)
 	prometheus.MustRegister(storeSlowTrendMiscGauge)

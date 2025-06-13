@@ -317,7 +317,7 @@ func (s *evictSlowStoreScheduler) Schedule(cluster sche.SchedulerCluster, _ bool
 			// slow node next time.
 			log.Info("slow store has been removed",
 				zap.Uint64("store-id", store.GetID()))
-			storeSlowEvictedStatusGauge.DeleteLabelValues(s.GetName(), storeIDStr)
+			evictedSlowStoreStatusGauge.DeleteLabelValues(s.GetName(), storeIDStr)
 			s.cleanupEvictLeader(cluster)
 			return nil, nil
 		}
@@ -334,7 +334,7 @@ func (s *evictSlowStoreScheduler) Schedule(cluster sche.SchedulerCluster, _ bool
 
 			log.Info("slow store has been recovered",
 				zap.Uint64("store-id", store.GetID()))
-			storeSlowEvictedStatusGauge.DeleteLabelValues(s.GetName(), storeIDStr)
+			evictedSlowStoreStatusGauge.DeleteLabelValues(s.GetName(), storeIDStr)
 			s.cleanupEvictLeader(cluster)
 			return nil, nil
 		}
@@ -376,7 +376,7 @@ func (s *evictSlowStoreScheduler) Schedule(cluster sche.SchedulerCluster, _ bool
 	}
 	// Record the slow store evicted status.
 	storeIDStr := strconv.FormatUint(slowStore.GetID(), 10)
-	storeSlowEvictedStatusGauge.WithLabelValues(s.GetName(), storeIDStr).Set(1)
+	evictedSlowStoreStatusGauge.WithLabelValues(s.GetName(), storeIDStr).Set(1)
 	return s.schedulerEvictLeader(cluster), nil
 }
 
