@@ -75,7 +75,7 @@ func (se *StorageEndpoint) LoadMinServiceGCSafePoint(now time.Time) (*ServiceSaf
 		// There's no service safepoint. It may be a new cluster, or upgraded from an older version where all service
 		// safepoints are missing. For the second case, we have no way to recover it. Store an initial value 0 for
 		// gc_worker.
-		return se.initServiceGCSafePointForGCWorker(0)
+		return se.initServiceGCSafePointForGCWorker()
 	}
 
 	hasGCWorker := false
@@ -111,22 +111,28 @@ func (se *StorageEndpoint) LoadMinServiceGCSafePoint(now time.Time) (*ServiceSaf
 	if min.SafePoint == math.MaxUint64 {
 		// There's no valid safepoints and we have no way to recover it. Just set gc_worker to 0.
 		log.Info("there are no valid service safepoints. init gc_worker's service safepoint to 0")
-		return se.initServiceGCSafePointForGCWorker(0)
+		return se.initServiceGCSafePointForGCWorker()
 	}
 
 	if !hasGCWorker {
 		// If there exists some service safepoints but gc_worker is missing, init it with the min value among all
 		// safepoints (including expired ones)
-		return se.initServiceGCSafePointForGCWorker(min.SafePoint)
+		return se.initServiceGCSafePointForGCWorker()
 	}
 
 	return min, nil
 }
 
-func (se *StorageEndpoint) initServiceGCSafePointForGCWorker(initialValue uint64) (*ServiceSafePoint, error) {
+func (se *StorageEndpoint) initServiceGCSafePointForGCWorker() (*ServiceSafePoint, error) {
+	// Temporary solution:
+	// Use the txn safe point as the initial value of gc_worker.
+	txnSafePoint, err := se.GetGCStateProvider().LoadTxnSafePoint(constant.NullKeyspaceID)
+	if err != nil {
+		return nil, err
+	}
 	ssp := &ServiceSafePoint{
 		ServiceID: keypath.GCWorkerServiceSafePointID,
-		SafePoint: initialValue,
+		SafePoint: txnSafePoint,
 		ExpiredAt: math.MaxInt64,
 	}
 	if err := se.SaveServiceGCSafePoint(ssp); err != nil {

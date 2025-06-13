@@ -65,6 +65,7 @@
 /pd//tso/keyspace_groups/membership/ remove
 /pd//tso/keyspace_groups/membership/ save
 /pd/cluster_id get
+/tidb/store/gcworker/saved_safe_point get
 encryption_keys get
 encryption_keys watch
 resource_group/controller get

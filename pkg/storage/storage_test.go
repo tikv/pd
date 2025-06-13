@@ -192,11 +192,12 @@ func TestLoadMinServiceGCSafePoint(t *testing.T) {
 		re.NoError(storage.SaveServiceGCSafePoint(ssp))
 	}
 
-	// gc_worker's safepoint will be automatically inserted when loading service safepoints. Here the returned
-	// safepoint can be either of "gc_worker" or "2".
+	// gc_worker's service safe point will be automatically inserted with initial value 0. If txn safe point was set,
+	// the initial value of gc_worker's service safe point would be the same value as the txn safe point; however we
+	// didn't.
 	ssp, err := storage.LoadMinServiceGCSafePoint(time.Now())
 	re.NoError(err)
-	re.Equal(uint64(2), ssp.SafePoint)
+	re.Equal(uint64(0), ssp.SafePoint)
 
 	// Advance gc_worker's safepoint
 	re.NoError(storage.SaveServiceGCSafePoint(&endpoint.ServiceSafePoint{
