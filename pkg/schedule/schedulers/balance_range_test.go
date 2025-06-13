@@ -61,6 +61,14 @@ func TestTIKVEngine(t *testing.T) {
 	scheduler, err := CreateScheduler(types.BalanceRangeScheduler, oc, storage.NewStorageWithMemoryBackend(),
 		ConfigSliceDecoder(types.BalanceRangeScheduler,
 			[]string{"leader-scatter", "tikv", "1h", "test", "100", "200"}))
+	re.True(scheduler.IsScheduleAllowed(tc))
+	km := tc.GetKeyRangeManager()
+	kr := keyutil.NewKeyRange("", "")
+	ranges := km.GetNonOverlappingKeyRanges(&kr)
+	re.Len(ranges, 2)
+	re.Equal(ranges[0], keyutil.NewKeyRange("", "100"))
+	re.Equal(ranges[1], keyutil.NewKeyRange("200", ""))
+
 	re.NoError(err)
 	ops, _ := scheduler.Schedule(tc, true)
 	re.Empty(ops)
@@ -172,6 +180,7 @@ func TestFetchAllRegions(t *testing.T) {
 func TestCodecConfig(t *testing.T) {
 	re := require.New(t)
 	job := &balanceRangeSchedulerJob{
+		Alias:  "test.t",
 		Engine: core.EngineTiKV,
 		Rule:   core.LeaderScatter,
 		JobID:  1,
@@ -189,6 +198,7 @@ func TestCodecConfig(t *testing.T) {
 	re.Equal(conf1.jobs, conf.jobs)
 
 	job1 := &balanceRangeSchedulerJob{
+		Alias:  "test.t2",
 		Engine: core.EngineTiKV,
 		Rule:   core.LeaderScatter,
 		Status: running,
@@ -196,6 +206,7 @@ func TestCodecConfig(t *testing.T) {
 		JobID:  2,
 	}
 	re.NoError(conf.addJob(job1))
+	re.Error(conf.addJob(job1))
 	re.NoError(conf.load(&conf1))
 	re.Equal(conf1.jobs, conf.jobs)
 
@@ -271,7 +282,9 @@ func TestPersistFail(t *testing.T) {
 	}
 	conf.init("test", storage.NewStorageWithMemoryBackend(), conf)
 	errMsg := "fail to persist"
-	newJob := &balanceRangeSchedulerJob{}
+	newJob := &balanceRangeSchedulerJob{
+		Alias: "test.t",
+	}
 	re.ErrorContains(conf.addJob(newJob), errMsg)
 	re.Len(conf.jobs, 1)
 
