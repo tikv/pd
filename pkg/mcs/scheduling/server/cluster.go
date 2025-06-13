@@ -224,19 +224,24 @@ func (c *Cluster) GetSchedulerConfig() sc.SchedulerConfigProvider { return c.per
 func (c *Cluster) GetStoreConfig() sc.StoreConfigProvider { return c.persistConfig }
 
 // AllocID allocates a new ID.
-func (c *Cluster) AllocID() (uint64, error) {
+func (c *Cluster) AllocID(count uint32) (uint64, uint32, error) {
 	client, err := c.getAPIServerLeaderClient()
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
 	ctx, cancel := context.WithTimeout(c.ctx, requestTimeout)
 	defer cancel()
-	resp, err := client.AllocID(ctx, &pdpb.AllocIDRequest{Header: &pdpb.RequestHeader{ClusterId: keypath.ClusterID()}})
+	req := &pdpb.AllocIDRequest{Header: &pdpb.RequestHeader{ClusterId: keypath.ClusterID()}, Count: count}
+
+	failpoint.Inject("allocIDNonBatch", func() {
+		req = &pdpb.AllocIDRequest{Header: &pdpb.RequestHeader{ClusterId: keypath.ClusterID()}}
+	})
+	resp, err := client.AllocID(ctx, req)
 	if err != nil {
 		c.triggerMembershipCheck()
-		return 0, err
+		return 0, 0, err
 	}
-	return resp.GetId(), nil
+	return resp.GetId(), resp.GetCount(), nil
 }
 
 func (c *Cluster) getAPIServerLeaderClient() (pdpb.PDClient, error) {

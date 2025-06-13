@@ -61,8 +61,8 @@ type SharedCluster interface {
 	GetBasicCluster() *core.BasicCluster
 	GetSharedConfig() sc.SharedConfigProvider
 	GetRuleManager() *placement.RuleManager
-	AllocID() (uint64, error)
 	IsSchedulingHalted() bool
+	AllocID(uint32) (uint64, uint32, error)
 }
 
 // BasicCluster is an aggregate interface that wraps multiple interfaces

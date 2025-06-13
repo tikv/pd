@@ -1028,8 +1028,7 @@ func (c *client) ScanRegions(ctx context.Context, key, endKey []byte, limit int,
 	if serviceClient == nil {
 		return nil, errs.ErrClientGetProtoClient
 	}
-	//nolint:staticcheck
-	resp, err := pdpb.NewPDClient(serviceClient.GetClientConn()).ScanRegions(cctx, req)
+	resp, err := pdpb.NewPDClient(serviceClient.GetClientConn()).ScanRegions(cctx, req) //nolint:staticcheck
 	failpoint.Inject("responseNil", func() {
 		resp = nil
 	})
@@ -1038,8 +1037,7 @@ func (c *client) ScanRegions(ctx context.Context, key, endKey []byte, limit int,
 		if protoClient == nil {
 			return nil, errs.ErrClientGetProtoClient
 		}
-		//nolint:staticcheck
-		resp, err = protoClient.ScanRegions(cctx, req)
+		resp, err = protoClient.ScanRegions(cctx, req) //nolint:staticcheck
 	}
 
 	if err = c.respForErr(cmdFailedDurationScanRegions, start, err, resp.GetHeader()); err != nil {

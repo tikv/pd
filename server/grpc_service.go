@@ -748,18 +748,30 @@ func (s *GrpcServer) AllocID(ctx context.Context, request *pdpb.AllocIDRequest) 
 		return rsp.(*pdpb.AllocIDResponse), err
 	}
 
+	reqCount := uint32(1)
+	if request.GetCount() != 0 {
+		reqCount = request.GetCount()
+	}
+	failpoint.Inject("handleAllocIDNonBatch", func() {
+		reqCount = 1
+	})
+
 	// We can use an allocator for all types ID allocation.
-	id, err := s.idAllocator.Alloc()
+	id, count, err := s.idAllocator.Alloc(reqCount)
 	if err != nil {
 		return &pdpb.AllocIDResponse{
 			Header: wrapErrorToHeader(pdpb.ErrorType_UNKNOWN, err.Error()),
 		}, nil
 	}
 
-	return &pdpb.AllocIDResponse{
+	resp := &pdpb.AllocIDResponse{
 		Header: wrapHeader(),
 		Id:     id,
-	}, nil
+	}
+	if count > 1 {
+		resp.Count = count
+	}
+	return resp, nil
 }
 
 // IsSnapshotRecovering implements gRPC PDServer.
@@ -1635,6 +1647,12 @@ func (s *GrpcServer) GetRegionByID(ctx context.Context, request *pdpb.GetRegionB
 	}, nil
 }
 
+// QueryRegion provides a stream processing of the region query.
+func (*GrpcServer) QueryRegion(pdpb.PD_QueryRegionServer) error {
+	// TODO: support it in cse.
+	return status.Error(codes.Unimplemented, "QueryRegion is not implemented")
+}
+
 // Deprecated: use BatchScanRegions instead.
 // ScanRegions implements gRPC PDServer.
 func (s *GrpcServer) ScanRegions(ctx context.Context, request *pdpb.ScanRegionsRequest) (*pdpb.ScanRegionsResponse, error) {
@@ -1650,7 +1668,7 @@ func (s *GrpcServer) ScanRegions(ctx context.Context, request *pdpb.ScanRegionsR
 		}
 	}
 	fn := func(ctx context.Context, client *grpc.ClientConn) (any, error) {
-		return pdpb.NewPDClient(client).ScanRegions(ctx, request)
+		return pdpb.NewPDClient(client).ScanRegions(ctx, request) //nolint:staticcheck
 	}
 	followerHandle := new(bool)
 	if rsp, err := s.unaryFollowerMiddleware(ctx, request, fn, followerHandle); err != nil {

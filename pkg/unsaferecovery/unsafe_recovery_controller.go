@@ -108,7 +108,7 @@ type cluster interface {
 	core.StoreSetInformer
 
 	ResetRegionCache()
-	AllocID() (uint64, error)
+	AllocID(uint32) (uint64, uint32, error)
 	BuryStore(storeID uint64, forceBury bool) error
 	GetSchedulerConfig() sc.SchedulerConfigProvider
 }
@@ -1149,11 +1149,11 @@ func (u *Controller) generateCreateEmptyRegionPlan(newestRegionTree *regionTree,
 	hasPlan := false
 
 	createRegion := func(startKey, endKey []byte, storeID uint64) (*metapb.Region, error) {
-		regionID, err := u.cluster.AllocID()
+		regionID, _, err := u.cluster.AllocID(1)
 		if err != nil {
 			return nil, err
 		}
-		peerID, err := u.cluster.AllocID()
+		peerID, _, err := u.cluster.AllocID(1)
 		if err != nil {
 			return nil, err
 		}
