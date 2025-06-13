@@ -30,7 +30,6 @@ import (
 
 	rmserver "github.com/tikv/pd/pkg/mcs/resourcemanager/server"
 	"github.com/tikv/pd/pkg/mcs/utils"
-	"github.com/tikv/pd/pkg/mcs/utils/constant"
 	"github.com/tikv/pd/pkg/utils/apiutil"
 	"github.com/tikv/pd/pkg/utils/apiutil/multiservicesapi"
 	"github.com/tikv/pd/pkg/utils/reflectutil"
@@ -165,10 +164,18 @@ func (s *Service) putResourceGroup(c *gin.Context) {
 //	@Failure	404		    {string}	error
 //	@Param		name	    path		string	true	"groupName"
 //	@Param		with_stats	query		bool	false	"whether to return statistics data."
+//	@Param		keyspace_name		path	string	true	"Keyspace name"
 //	@Router		/config/group/{name} [get]
 func (s *Service) getResourceGroup(c *gin.Context) {
 	withStats := strings.EqualFold(c.Query("with_stats"), "true")
-	group := s.manager.GetResourceGroup(constant.NullKeyspaceID, c.Param("name"), withStats)
+	keyspaceName := c.Query("keyspace_name")
+	keyspaceIDValue, err := s.manager.GetKeyspaceIDByName(c, keyspaceName)
+	if err != nil {
+		c.String(http.StatusNotFound, err.Error())
+		return
+	}
+	keyspaceID := rmserver.ExtractKeyspaceID(keyspaceIDValue)
+	group := s.manager.GetResourceGroup(keyspaceID, c.Param("name"), withStats)
 	if group == nil {
 		c.String(http.StatusNotFound, errors.New("resource group not found").Error())
 	}
@@ -182,11 +189,18 @@ func (s *Service) getResourceGroup(c *gin.Context) {
 //	@Success	200	{string}	json	format	of	[]rmserver.ResourceGroup
 //	@Failure	404	{string}	error
 //	@Param		with_stats		query	bool	false	"whether to return statistics data."
+//	@Param		keyspace_name		path	string	true	"Keyspace name"
 //	@Router		/config/groups [get]
 func (s *Service) getResourceGroupList(c *gin.Context) {
 	withStats := strings.EqualFold(c.Query("with_stats"), "true")
-	// TODO: get the keyspace name from the params.
-	groups := s.manager.GetResourceGroupList(constant.NullKeyspaceID, withStats)
+	keyspaceName := c.Query("keyspace_name")
+	keyspaceIDValue, err := s.manager.GetKeyspaceIDByName(c, keyspaceName)
+	if err != nil {
+		c.String(http.StatusNotFound, err.Error())
+		return
+	}
+	keyspaceID := rmserver.ExtractKeyspaceID(keyspaceIDValue)
+	groups := s.manager.GetResourceGroupList(keyspaceID, withStats)
 	c.IndentedJSON(http.StatusOK, groups)
 }
 
@@ -195,12 +209,19 @@ func (s *Service) getResourceGroupList(c *gin.Context) {
 //	@Tags		ResourceManager
 //	@Summary	delete resource group by name.
 //	@Param		name	path		string	true	"Name of the resource group to be deleted"
+//	@Param		keyspace_name		path	string	true	"Keyspace name"
 //	@Success	200		{string}	string	"Success!"
 //	@Failure	404		{string}	error
 //	@Router		/config/group/{name} [delete]
 func (s *Service) deleteResourceGroup(c *gin.Context) {
-	// TODO: get the keyspace name from the params.
-	if err := s.manager.DeleteResourceGroup(constant.NullKeyspaceID, c.Param("name")); err != nil {
+	keyspaceName := c.Query("keyspace_name")
+	keyspaceIDValue, err := s.manager.GetKeyspaceIDByName(c, keyspaceName)
+	if err != nil {
+		c.String(http.StatusNotFound, err.Error())
+		return
+	}
+	keyspaceID := rmserver.ExtractKeyspaceID(keyspaceIDValue)
+	if err := s.manager.DeleteResourceGroup(keyspaceID, c.Param("name")); err != nil {
 		c.String(http.StatusNotFound, err.Error())
 	}
 	c.String(http.StatusOK, "Success!")
@@ -276,7 +297,8 @@ func (s *Service) setKeyspaceServiceLimit(c *gin.Context) {
 		c.String(http.StatusBadRequest, "service_limit must be non-negative")
 		return
 	}
-	s.manager.SetKeyspaceServiceLimit(keyspaceIDValue.GetValue(), req.ServiceLimit)
+	keyspaceID := rmserver.ExtractKeyspaceID(keyspaceIDValue)
+	s.manager.SetKeyspaceServiceLimit(keyspaceID, req.ServiceLimit)
 	c.String(http.StatusOK, "Success!")
 }
 
@@ -296,7 +318,7 @@ func (s *Service) getKeyspaceServiceLimit(c *gin.Context) {
 		c.String(http.StatusBadRequest, err.Error())
 		return
 	}
-	keyspaceID := keyspaceIDValue.GetValue()
+	keyspaceID := rmserver.ExtractKeyspaceID(keyspaceIDValue)
 	limiter := s.manager.GetKeyspaceServiceLimiter(keyspaceID)
 	if limiter == nil {
 		c.String(http.StatusNotFound, fmt.Sprintf("keyspace manager not found with keyspace name: %s, id: %d", keyspaceName, keyspaceID))

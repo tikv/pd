@@ -19,6 +19,8 @@ import (
 	"sync/atomic"
 
 	"github.com/prometheus/client_golang/prometheus"
+
+	resourcegroupmetrics "github.com/tikv/pd/client/resource_group/controller/metrics"
 )
 
 // make sure register metrics only once
@@ -60,6 +62,7 @@ func InitAndRegisterMetrics(constLabels prometheus.Labels) {
 		initRegisteredConsumers()
 		// register metrics
 		registerMetrics()
+		resourcegroupmetrics.InitAndRegisterMetrics(constLabels)
 	}
 }
 

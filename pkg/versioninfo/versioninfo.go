@@ -34,6 +34,7 @@ type Status struct {
 	Version        string `json:"version"`
 	GitHash        string `json:"git_hash"`
 	StartTimestamp int64  `json:"start_timestamp"`
+	KernelType     string `json:"kernel_type"`
 }
 
 const (
@@ -48,6 +49,7 @@ var (
 	PDGitHash        = "None"
 	PDGitBranch      = "None"
 	PDEdition        = CommunityEdition
+	PDKernelType     = kerneltype.KernelType // KernelType is Next Generation or Classic, see doc.go for more info.
 )
 
 // ParseVersion wraps semver.NewVersion and handles compatibility issues.
@@ -97,14 +99,11 @@ func IsFeatureSupported(clusterVersion *semver.Version, f Feature) bool {
 
 // Log prints the version information of the PD with the specific service mode.
 func Log(serviceMode string) {
-	edition := PDEdition
-	if kerneltype.IsNextGen() {
-		edition += "\nKernel Type: Next Generation"
-	}
 	mode := strings.ToUpper(serviceMode)
 	log.Info(fmt.Sprintf("Welcome to Placement Driver (%s)", mode))
 	log.Info(mode, zap.String("release-version", PDReleaseVersion))
-	log.Info(mode, zap.String("edition", edition))
+	log.Info(mode, zap.String("edition", PDEdition))
+	log.Info(mode, zap.String("kernel-type", PDKernelType))
 	log.Info(mode, zap.String("git-hash", PDGitHash))
 	log.Info(mode, zap.String("git-branch", PDGitBranch))
 	log.Info(mode, zap.String("utc-build-time", PDBuildTS))
@@ -112,12 +111,9 @@ func Log(serviceMode string) {
 
 // Print prints the version information, without log info, of the PD with the specific service mode.
 func Print() {
-	edition := PDEdition
-	if kerneltype.IsNextGen() {
-		edition += "\nKernel Type: Next Generation"
-	}
 	fmt.Println("Release Version:", PDReleaseVersion)
-	fmt.Println("Edition:", edition)
+	fmt.Println("Edition:", PDEdition)
+	fmt.Println("Kernel Type:", PDKernelType)
 	fmt.Println("Git Commit Hash:", PDGitHash)
 	fmt.Println("Git Branch:", PDGitBranch)
 	fmt.Println("UTC Build Time: ", PDBuildTS)

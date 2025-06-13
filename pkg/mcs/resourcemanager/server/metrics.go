@@ -137,9 +137,17 @@ var (
 			Name:      "group_config",
 			Help:      "Config of the resource group.",
 		}, []string{newResourceGroupNameLabel, typeLabel, keyspaceNameLabel})
+
+	sampledRequestUnitPerSec = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: namespace,
+			Subsystem: ruSubsystem,
+			Name:      "sampled_request_unit_per_sec",
+			Help:      "Gauge of the sampled RU/s for all resource groups.",
+		}, []string{newResourceGroupNameLabel, keyspaceNameLabel})
 )
 
-var (
+type metrics struct {
 	// record update time of each resource group
 	consumptionRecordMap map[consumptionRecordKey]time.Time
 	// max per sec trackers for each keyspace and resource group.
@@ -148,7 +156,7 @@ var (
 	counterMetricsMap map[metricsKey]*counterMetrics
 	// cached gauge metrics for each keyspace, resource group and RU type.
 	gaugeMetricsMap map[metricsKey]*gaugeMetrics
-)
+}
 
 type consumptionRecordKey struct {
 	keyspaceID uint32
@@ -180,61 +188,79 @@ func init() {
 	prometheus.MustRegister(readRequestUnitMaxPerSecCost)
 	prometheus.MustRegister(writeRequestUnitMaxPerSecCost)
 	prometheus.MustRegister(resourceGroupConfigGauge)
-
-	initMaps()
+	prometheus.MustRegister(sampledRequestUnitPerSec)
 }
 
-func initMaps() {
-	consumptionRecordMap = make(map[consumptionRecordKey]time.Time)
-	maxPerSecTrackerMap = make(map[trackerKey]*maxPerSecCostTracker)
-	counterMetricsMap = make(map[metricsKey]*counterMetrics)
-	gaugeMetricsMap = make(map[metricsKey]*gaugeMetrics)
+func newMetrics() *metrics {
+	return &metrics{
+		consumptionRecordMap: make(map[consumptionRecordKey]time.Time),
+		maxPerSecTrackerMap:  make(map[trackerKey]*maxPerSecCostTracker),
+		counterMetricsMap:    make(map[metricsKey]*counterMetrics),
+		gaugeMetricsMap:      make(map[metricsKey]*gaugeMetrics),
+	}
 }
 
-func insertConsumptionRecord(keyspaceID uint32, groupName string, ruType string) {
-	consumptionRecordMap[consumptionRecordKey{keyspaceID: keyspaceID, groupName: groupName, ruType: ruType}] = time.Now()
+// insertConsumptionRecord inserts the consumption record and returns the duration since the last record.
+// If the record is not found, it returns 0 as the duration.
+func (m *metrics) insertConsumptionRecord(keyspaceID uint32, groupName string, ruType string, now time.Time) time.Duration {
+	key := consumptionRecordKey{
+		keyspaceID: keyspaceID,
+		groupName:  groupName,
+		ruType:     ruType,
+	}
+	last, ok := m.consumptionRecordMap[key]
+	m.consumptionRecordMap[key] = now
+	if !ok {
+		return 0
+	}
+	return now.Sub(last)
 }
 
-func deleteConsumptionRecord(record consumptionRecordKey) {
-	delete(consumptionRecordMap, record)
+func (m *metrics) deleteConsumptionRecord(record consumptionRecordKey) {
+	delete(m.consumptionRecordMap, record)
 }
 
-func getMaxPerSecTracker(keyspaceID uint32, keyspaceName, groupName string) *maxPerSecCostTracker {
-	tracker := maxPerSecTrackerMap[trackerKey{keyspaceID, groupName}]
+func (m *metrics) getMaxPerSecTracker(keyspaceID uint32, keyspaceName, groupName string) *maxPerSecCostTracker {
+	tracker := m.maxPerSecTrackerMap[trackerKey{keyspaceID, groupName}]
 	if tracker == nil {
 		tracker = newMaxPerSecCostTracker(keyspaceName, groupName, defaultCollectIntervalSec)
-		maxPerSecTrackerMap[trackerKey{keyspaceID, groupName}] = tracker
+		m.maxPerSecTrackerMap[trackerKey{keyspaceID, groupName}] = tracker
 	}
 	return tracker
 }
 
-func deleteMaxPerSecTracker(keyspaceID uint32, groupName string) {
-	delete(maxPerSecTrackerMap, trackerKey{keyspaceID, groupName})
+func (m *metrics) deleteMaxPerSecTracker(keyspaceID uint32, groupName string) {
+	delete(m.maxPerSecTrackerMap, trackerKey{keyspaceID, groupName})
 }
 
-func getCounterMetrics(keyspaceID uint32, keyspaceName, groupName, ruType string) *counterMetrics {
+func (m *metrics) getCounterMetrics(keyspaceID uint32, keyspaceName, groupName, ruType string) *counterMetrics {
 	key := metricsKey{keyspaceID, groupName, ruType}
-	if counterMetricsMap[key] == nil {
-		counterMetricsMap[key] = newCounterMetrics(keyspaceName, groupName, ruType)
+	if m.counterMetricsMap[key] == nil {
+		m.counterMetricsMap[key] = newCounterMetrics(keyspaceName, groupName, ruType)
 	}
-	return counterMetricsMap[key]
+	return m.counterMetricsMap[key]
 }
 
-func getGaugeMetrics(keyspaceID uint32, keyspaceName, groupName string) *gaugeMetrics {
+func (m *metrics) getGaugeMetrics(keyspaceID uint32, keyspaceName, groupName string) *gaugeMetrics {
 	key := metricsKey{keyspaceID, groupName, ""}
-	if gaugeMetricsMap[key] == nil {
-		gaugeMetricsMap[key] = newGaugeMetrics(keyspaceName, groupName)
+	if m.gaugeMetricsMap[key] == nil {
+		m.gaugeMetricsMap[key] = newGaugeMetrics(keyspaceName, groupName)
 	}
-	return gaugeMetricsMap[key]
+	return m.gaugeMetricsMap[key]
 }
 
-func deleteMetrics(keyspaceID uint32, keyspaceName, groupName, ruType string) {
-	delete(counterMetricsMap, metricsKey{keyspaceID, groupName, ruType})
-	delete(gaugeMetricsMap, metricsKey{keyspaceID, groupName, ""})
+func (m *metrics) deleteMetrics(keyspaceID uint32, keyspaceName, groupName, ruType string) {
+	delete(m.counterMetricsMap, metricsKey{keyspaceID, groupName, ruType})
+	delete(m.gaugeMetricsMap, metricsKey{keyspaceID, groupName, ""})
 	deleteLabelValues(keyspaceName, groupName, ruType)
 }
 
-func recordConsumption(consumptionInfo *consumptionItem, keyspaceName string, controllerConfig *ControllerConfig) {
+func (m *metrics) recordConsumption(
+	consumptionInfo *consumptionItem,
+	keyspaceName string,
+	controllerConfig *ControllerConfig,
+	now time.Time,
+) time.Duration {
 	keyspaceID := consumptionInfo.keyspaceID
 	groupName := consumptionInfo.resourceGroupName
 	ruLabelType := defaultTypeLabel
@@ -245,15 +271,15 @@ func recordConsumption(consumptionInfo *consumptionItem, keyspaceName string, co
 		ruLabelType = tiflashTypeLabel
 	}
 	consumption := consumptionInfo.Consumption
-	getMaxPerSecTracker(keyspaceID, keyspaceName, groupName).collect(consumption)
-	getCounterMetrics(keyspaceID, keyspaceName, groupName, ruLabelType).add(consumption, controllerConfig)
-	insertConsumptionRecord(keyspaceID, groupName, ruLabelType)
+	m.getMaxPerSecTracker(keyspaceID, keyspaceName, groupName).collect(consumption)
+	m.getCounterMetrics(keyspaceID, keyspaceName, groupName, ruLabelType).add(consumption, controllerConfig)
+	return m.insertConsumptionRecord(keyspaceID, groupName, ruLabelType, now)
 }
 
-func cleanupAllMetrics(r consumptionRecordKey, keyspaceName string) {
-	deleteConsumptionRecord(r)
-	deleteMetrics(r.keyspaceID, keyspaceName, r.groupName, r.ruType)
-	deleteMaxPerSecTracker(r.keyspaceID, r.groupName)
+func (m *metrics) cleanupAllMetrics(r consumptionRecordKey, keyspaceName string) {
+	m.deleteConsumptionRecord(r)
+	m.deleteMetrics(r.keyspaceID, keyspaceName, r.groupName, r.ruType)
+	m.deleteMaxPerSecTracker(r.keyspaceID, r.groupName)
 }
 
 type counterMetrics struct {
@@ -319,6 +345,7 @@ type gaugeMetrics struct {
 	priorityResourceGroupConfigGauge   prometheus.Gauge
 	ruPerSecResourceGroupConfigGauge   prometheus.Gauge
 	ruCapacityResourceGroupConfigGauge prometheus.Gauge
+	sampledRequestUnitPerSecGauge      prometheus.Gauge
 }
 
 func newGaugeMetrics(keyspaceName, groupName string) *gaugeMetrics {
@@ -327,15 +354,20 @@ func newGaugeMetrics(keyspaceName, groupName string) *gaugeMetrics {
 		priorityResourceGroupConfigGauge:   resourceGroupConfigGauge.WithLabelValues(groupName, priorityLabel, keyspaceName),
 		ruPerSecResourceGroupConfigGauge:   resourceGroupConfigGauge.WithLabelValues(groupName, ruPerSecLabel, keyspaceName),
 		ruCapacityResourceGroupConfigGauge: resourceGroupConfigGauge.WithLabelValues(groupName, ruCapacityLabel, keyspaceName),
+		sampledRequestUnitPerSecGauge:      sampledRequestUnitPerSec.WithLabelValues(groupName, keyspaceName),
 	}
 }
 
-func (m *gaugeMetrics) set(group *ResourceGroup) {
+func (m *gaugeMetrics) setGroup(group *ResourceGroup) {
 	ru := math.Max(group.getRUToken(), 0)
 	m.availableRUCounter.Set(ru)
 	m.priorityResourceGroupConfigGauge.Set(group.getPriority())
 	m.ruPerSecResourceGroupConfigGauge.Set(group.getFillRate())
 	m.ruCapacityResourceGroupConfigGauge.Set(group.getBurstLimit())
+}
+
+func (m *gaugeMetrics) setSampledRUPerSec(ruPerSec float64) {
+	m.sampledRequestUnitPerSecGauge.Set(ruPerSec)
 }
 
 func deleteLabelValues(keyspaceName, groupName, ruLabelType string) {
@@ -353,6 +385,7 @@ func deleteLabelValues(keyspaceName, groupName, ruLabelType string) {
 	writeRequestUnitMaxPerSecCost.DeleteLabelValues(groupName, keyspaceName)
 	readRequestUnitMaxPerSecCost.DeleteLabelValues(groupName, keyspaceName)
 	writeRequestUnitMaxPerSecCost.DeleteLabelValues(groupName, keyspaceName)
+	sampledRequestUnitPerSec.DeleteLabelValues(groupName, keyspaceName)
 	resourceGroupConfigGauge.DeletePartialMatch(prometheus.Labels{newResourceGroupNameLabel: groupName, keyspaceNameLabel: keyspaceName})
 }
 

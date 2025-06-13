@@ -20,8 +20,8 @@ import (
 	"github.com/tikv/pd/pkg/mcs/utils/constant"
 )
 
-// extractKeyspaceID extracts the keyspace ID from the keyspace ID value.
-func extractKeyspaceID(keyspaceIDValue *rmpb.KeyspaceIDValue) uint32 {
+// ExtractKeyspaceID extracts the keyspace ID from the keyspace ID value.
+func ExtractKeyspaceID(keyspaceIDValue *rmpb.KeyspaceIDValue) uint32 {
 	if keyspaceIDValue == nil {
 		return constant.NullKeyspaceID
 	}

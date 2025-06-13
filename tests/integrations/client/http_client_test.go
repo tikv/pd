@@ -786,6 +786,7 @@ func (suite *httpClientTestSuite) TestStatus() {
 	re.Equal(versioninfo.PDGitHash, status.GitHash)
 	re.Equal(versioninfo.PDBuildTS, status.BuildTS)
 	re.GreaterOrEqual(time.Now().Unix(), status.StartTimestamp)
+	re.Equal(versioninfo.PDKernelType, status.KernelType)
 }
 
 func (suite *httpClientTestSuite) TestAdmin() {

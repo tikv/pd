@@ -14,9 +14,9 @@
 
 // Package kerneltype provides the kernel type of TiDB.
 //
-// We have 2 types of kernel: Legacy and NextGen.
+// We have 2 types of kernel: Classic and Next Generation.
 //
-// TiDB Legacy Kernel refers to the original architecture used during the early
+// TiDB Classic Kernel refers to the original architecture used during the early
 // development stages of TiDB. It utilizes a share-nothing architecture, primarily
 // implemented through TiKV, TiDB's distributed transactional key-value storage
 // component. In this setup, each TiKV instance independently manages its own
