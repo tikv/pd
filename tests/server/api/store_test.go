@@ -374,17 +374,23 @@ func (suite *storeTestSuite) checkStoreDelete(cluster *tests.TestCluster) {
 	for id := 1111; id <= 1115; id++ {
 		tests.MustPutStore(re, cluster, &metapb.Store{
 			Id:        uint64(id),
-			Address:   fmt.Sprintf("tikv%d", id),
+			Address:   fmt.Sprintf("mock://tikv-%d:%d", id, id),
 			State:     metapb.StoreState_Up,
 			NodeState: metapb.NodeState_Serving,
 		})
 	}
+
+	// prevent the store from being tombstone
+	tests.MustPutRegion(re, cluster, 1000, 1111, []byte("a"), []byte("b"), core.SetApproximateSize(60))
+	tests.MustPutRegion(re, cluster, 1001, 1111, []byte("c"), []byte("d"), core.SetApproximateSize(30))
+	tests.MustPutRegion(re, cluster, 1002, 1111, []byte("e"), []byte("f"), core.SetApproximateSize(50))
+	tests.MustPutRegion(re, cluster, 1003, 1111, []byte("g"), []byte("h"), core.SetApproximateSize(40))
 	testCases := []struct {
 		id     int
 		status int
 	}{
 		{
-			id:     6,
+			id:     1111,
 			status: http.StatusOK,
 		},
 		{
@@ -399,8 +405,8 @@ func (suite *storeTestSuite) checkStoreDelete(cluster *tests.TestCluster) {
 			return testCase.status == status
 		})
 	}
-	// store 6 origin status:offline
-	url := fmt.Sprintf("%s/store/6", urlPrefix)
+	// store 1111 origin status:offline
+	url := fmt.Sprintf("%s/store/1111", urlPrefix)
 	store := new(response.StoreInfo)
 	err := tu.ReadGetJSON(re, tests.TestDialClient, url, store)
 	re.NoError(err)
